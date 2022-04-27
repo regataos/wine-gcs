@@ -1,0 +1,15 @@
+EXTRADEFS = -DWINE_NO_LONG_TYPES
+MODULE    = cmd.exe
+IMPORTS   = shell32 user32 advapi32
+
+EXTRADLLFLAGS = -mconsole -municode
+
+C_SRCS = \
+	batch.c \
+	builtins.c \
+	directory.c \
+	wcmdmain.c
+
+RC_SRCS = cmd.rc
+
+SVG_SRCS = wcmd.svg

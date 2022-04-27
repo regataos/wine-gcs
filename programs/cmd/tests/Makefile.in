@@ -1,0 +1,7 @@
+EXTRADEFS = -DWINE_NO_LONG_TYPES
+TESTDLL   = cmd.exe
+
+C_SRCS = \
+	batch.c
+
+RC_SRCS   = rsrc.rc

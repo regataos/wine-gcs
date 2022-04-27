@@ -1,0 +1,6 @@
+EXTRADEFS = -DWINE_NO_LONG_TYPES
+MODULE    = msacm32.drv
+IMPORTS   = msacm32 winmm user32
+
+C_SRCS = \
+	wavemap.c

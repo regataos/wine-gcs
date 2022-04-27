@@ -1,0 +1,6 @@
+EXTRADEFS = -DWINE_NO_LONG_TYPES
+TESTDLL   = dxva2.dll
+IMPORTS   = dxva2 user32 d3d9 ole32
+
+C_SRCS = \
+	dxva2.c

@@ -1,0 +1,8 @@
+EXTRADEFS = -DWINE_NO_LONG_TYPES
+MODULE    = url.dll
+IMPORTLIB = url
+IMPORTS   = shell32 shlwapi
+
+EXTRADLLFLAGS = -Wb,--prefer-native
+
+C_SRCS = url_main.c

@@ -1,0 +1,12 @@
+EXTRADEFS = -DWINE_NO_LONG_TYPES
+MODULE    = uianimation.dll
+IMPORTS   = uuid
+
+EXTRADLLFLAGS = -Wb,--prefer-native
+
+C_SRCS = \
+	main.c
+
+IDL_SRCS = \
+	uianimation_reg.idl \
+	uianimation_typelib.idl

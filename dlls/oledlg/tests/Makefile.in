@@ -1,0 +1,6 @@
+EXTRADEFS = -DWINE_NO_LONG_TYPES
+TESTDLL   = oledlg.dll
+IMPORTS   = oledlg ole32 user32
+
+C_SRCS = \
+	main.c

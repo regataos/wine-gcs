@@ -1,0 +1,6 @@
+EXTRADEFS = -DWINE_NO_LONG_TYPES
+TESTDLL = uianimation.dll
+IMPORTS = ole32
+
+C_SRCS = \
+	uianimation.c

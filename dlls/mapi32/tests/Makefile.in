@@ -1,0 +1,8 @@
+EXTRADEFS = -DWINE_NO_LONG_TYPES
+TESTDLL   = mapi32.dll
+IMPORTS   = advapi32
+
+C_SRCS = \
+	imalloc.c \
+	prop.c \
+	util.c

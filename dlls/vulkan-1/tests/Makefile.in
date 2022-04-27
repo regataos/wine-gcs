@@ -1,0 +1,6 @@
+EXTRADEFS = -DWINE_NO_LONG_TYPES
+TESTDLL = vulkan-1.dll
+IMPORTS = vulkan-1
+
+C_SRCS = \
+	vulkan.c

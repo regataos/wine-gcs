@@ -1,0 +1,6 @@
+EXTRADEFS = -DWINE_NO_LONG_TYPES
+MODULE    = nddeapi.dll
+IMPORTLIB = nddeapi
+
+C_SRCS = \
+	nddeapi.c

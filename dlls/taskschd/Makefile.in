@@ -1,0 +1,16 @@
+EXTRADEFS = -DWINE_NO_LONG_TYPES
+MODULE    = taskschd.dll
+IMPORTS   = oleaut32 ole32 advapi32 xmllite rpcrt4
+
+EXTRADLLFLAGS = -Wb,--prefer-native
+
+C_SRCS = \
+	folder.c \
+	folder_collection.c \
+	regtask.c \
+	task.c \
+	taskschd.c
+
+IDL_SRCS = \
+	schrpc.idl \
+	taskschd_tlb.idl

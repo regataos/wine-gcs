@@ -1,0 +1,10 @@
+EXTRADEFS = -DWINE_NO_LONG_TYPES
+MODULE    = prntvpt.dll
+IMPORTLIB = prntvpt
+IMPORTS   = winspool ole32 oleaut32
+
+EXTRADLLFLAGS = -Wb,--prefer-native
+
+C_SRCS = \
+	main.c \
+	ticket.c

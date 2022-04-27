@@ -1,0 +1,12 @@
+EXTRADEFS = -DWINE_NO_LONG_TYPES
+MODULE    = mfreadwrite.dll
+IMPORTLIB = mfreadwrite
+IMPORTS   = mfuuid uuid mfplat ole32
+
+EXTRADLLFLAGS = -Wb,--prefer-native
+
+C_SRCS = \
+	reader.c \
+	writer.c
+
+IDL_SRCS = mf_classes.idl

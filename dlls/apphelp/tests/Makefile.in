@@ -1,0 +1,6 @@
+EXTRADEFS = -DWINE_NO_LONG_TYPES
+TESTDLL   = apphelp.dll
+IMPORTS   = ole32
+
+C_SRCS = \
+	apphelp.c

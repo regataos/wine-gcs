@@ -1,0 +1,10 @@
+EXTRADEFS = -DWINE_NO_LONG_TYPES
+MODULE    = ntprint.dll
+IMPORTS   = winspool
+
+EXTRADLLFLAGS = -Wb,--prefer-native
+
+C_SRCS = \
+	ntprint.c
+
+RC_SRCS = ntprint.rc

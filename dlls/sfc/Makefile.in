@@ -1,0 +1,5 @@
+MODULE    = sfc.dll
+IMPORTLIB = sfc
+IMPORTS   = sfc_os
+
+EXTRADLLFLAGS = -Wb,--prefer-native

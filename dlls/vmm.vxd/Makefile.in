@@ -1,0 +1,5 @@
+EXTRADEFS = -DWINE_NO_LONG_TYPES
+MODULE    = vmm.vxd
+
+C_SRCS = \
+	vmm.c

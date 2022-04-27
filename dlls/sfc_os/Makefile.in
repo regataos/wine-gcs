@@ -1,0 +1,7 @@
+EXTRADEFS = -DWINE_NO_LONG_TYPES
+MODULE    = sfc_os.dll
+IMPORTLIB = sfc_os
+
+EXTRADLLFLAGS = -Wb,--prefer-native
+
+C_SRCS = sfc_os.c

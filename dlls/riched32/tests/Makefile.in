@@ -1,0 +1,6 @@
+EXTRADEFS = -DWINE_NO_LONG_TYPES
+TESTDLL   = riched32.dll
+IMPORTS   = ole32 user32
+
+C_SRCS = \
+	editor.c

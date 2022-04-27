@@ -1,0 +1,5 @@
+EXTRADEFS = -DWINE_NO_LONG_TYPES
+TESTDLL = vcomp110.dll
+
+C_SRCS = \
+	vcomp110.c

@@ -1,0 +1,9 @@
+EXTRADEFS = -DWINE_NO_LONG_TYPES
+MODULE    = ntdsapi.dll
+IMPORTLIB = ntdsapi
+IMPORTS   = user32
+
+EXTRADLLFLAGS = -Wb,--prefer-native
+
+C_SRCS = \
+	ntdsapi.c

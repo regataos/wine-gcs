@@ -1,0 +1,11 @@
+EXTRADEFS = -DWINE_NO_LONG_TYPES
+MODULE = packager.dll
+IMPORTS = uuid shell32 shlwapi user32
+
+EXTRADLLFLAGS = -Wb,--prefer-native
+
+C_SRCS = \
+	packager_main.c
+
+RC_SRCS = packager.rc
+IDL_SRCS = packager_classes.idl

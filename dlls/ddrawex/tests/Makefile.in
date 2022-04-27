@@ -1,0 +1,7 @@
+EXTRADEFS = -DWINE_NO_LONG_TYPES
+TESTDLL   = ddrawex.dll
+IMPORTS   = user32 gdi32
+
+C_SRCS = \
+	ddrawex.c \
+	surface.c

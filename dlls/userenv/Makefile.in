@@ -1,0 +1,9 @@
+EXTRADEFS = -DWINE_NO_LONG_TYPES
+MODULE    = userenv.dll
+IMPORTS   = advapi32
+IMPORTLIB = userenv
+
+EXTRADLLFLAGS = -Wb,--prefer-native
+
+C_SRCS = \
+	userenv_main.c

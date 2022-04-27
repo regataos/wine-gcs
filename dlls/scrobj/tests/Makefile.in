@@ -1,0 +1,9 @@
+EXTRADEFS = -DWINE_NO_LONG_TYPES
+TESTDLL   = scrobj.dll
+IMPORTS   = oleaut32 ole32 advapi32 uuid
+
+C_SRCS = \
+	scrobj.c
+
+RC_SRCS = \
+	rsrc.rc

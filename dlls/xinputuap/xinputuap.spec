@@ -1,0 +1,1 @@
+@ stdcall XInputGetState(long ptr)

@@ -1,0 +1,6 @@
+EXTRADEFS = -DWINE_NO_LONG_TYPES
+TESTDLL   = faultrep.dll
+IMPORTS   = faultrep advapi32
+
+C_SRCS = \
+	faultrep.c

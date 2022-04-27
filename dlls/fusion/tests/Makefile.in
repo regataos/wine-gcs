@@ -1,0 +1,9 @@
+EXTRADEFS = -DWINE_NO_LONG_TYPES
+TESTDLL   = fusion.dll
+IMPORTS   = user32
+
+C_SRCS = \
+	asmcache.c \
+	asmenum.c \
+	asmname.c \
+	fusion.c

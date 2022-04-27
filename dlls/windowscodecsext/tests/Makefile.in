@@ -1,0 +1,6 @@
+EXTRADEFS = -DWINE_NO_LONG_TYPES
+TESTDLL   = windowscodecsext.dll
+IMPORTS   = windowscodecsext ole32
+
+C_SRCS = \
+	transform.c

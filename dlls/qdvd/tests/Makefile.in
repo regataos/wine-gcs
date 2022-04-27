@@ -1,0 +1,7 @@
+EXTRADEFS = -DWINE_NO_LONG_TYPES
+TESTDLL   = qdvd.dll
+IMPORTS   = strmiids uuid ole32
+
+C_SRCS = \
+	graph.c \
+	navigator.c

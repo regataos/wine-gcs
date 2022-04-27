@@ -1,0 +1,6 @@
+EXTRADEFS = -DWINE_NO_LONG_TYPES
+TESTDLL   = localui.dll
+IMPORTS   = winspool
+
+C_SRCS = \
+	localui.c

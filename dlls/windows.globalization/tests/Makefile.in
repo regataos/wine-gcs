@@ -1,0 +1,6 @@
+EXTRADEFS = -DWINE_NO_LONG_TYPES
+TESTDLL = windows.globalization.dll
+IMPORTS = combase uuid
+
+C_SRCS = \
+	globalization.c

@@ -1,0 +1,6 @@
+EXTRADEFS = -DWINE_NO_LONG_TYPES
+TESTDLL   = hnetcfg.dll
+IMPORTS   = ole32 uuid oleaut32 advapi32 mpr
+
+C_SRCS = \
+	policy.c

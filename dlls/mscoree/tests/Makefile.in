@@ -1,0 +1,12 @@
+EXTRADEFS = -DWINE_NO_LONG_TYPES
+TESTDLL   = mscoree.dll
+IMPORTS   = ole32 shlwapi uuid shell32 advapi32
+
+C_SRCS = \
+	comtest.c \
+	debugging.c \
+	metahost.c \
+	mscoree.c
+
+RC_SRCS = resource.rc
+IDL_SRCS = interfaces.idl

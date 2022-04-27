@@ -1,0 +1,9 @@
+EXTRADEFS = -DWINE_NO_LONG_TYPES
+TESTDLL   = wmvcore.dll
+IMPORTS   = ole32 wmvcore
+
+C_SRCS = \
+	wmvcore.c
+
+RC_SRCS = \
+	rsrc.rc

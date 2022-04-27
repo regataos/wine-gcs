@@ -1,0 +1,7 @@
+EXTRADEFS = -DWINE_NO_LONG_TYPES
+TESTDLL   = cabinet.dll
+IMPORTS   = cabinet
+
+C_SRCS = \
+	extract.c \
+	fdi.c

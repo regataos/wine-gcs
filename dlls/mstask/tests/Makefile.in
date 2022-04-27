@@ -1,0 +1,8 @@
+EXTRADEFS = -DWINE_NO_LONG_TYPES
+TESTDLL   = mstask.dll
+IMPORTS   = ole32 user32
+
+C_SRCS = \
+	task.c \
+	task_scheduler.c \
+	task_trigger.c

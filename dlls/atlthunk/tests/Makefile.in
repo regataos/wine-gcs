@@ -1,0 +1,7 @@
+EXTRADEFS = -DWINE_NO_LONG_TYPES
+TESTDLL   = atlthunk.dll
+IMPORTS   = atlthunk
+
+
+C_SRCS = \
+	atlthunk.c

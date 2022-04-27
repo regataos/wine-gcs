@@ -1,0 +1,8 @@
+EXTRADEFS = -DWINE_NO_LONG_TYPES
+MODULE    = mprapi.dll
+IMPORTLIB = mprapi
+
+EXTRADLLFLAGS = -Wb,--prefer-native
+
+C_SRCS = \
+	mprapi.c

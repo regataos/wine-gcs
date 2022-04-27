@@ -1,0 +1,9 @@
+EXTRADEFS = -DWINE_NO_LONG_TYPES
+MODULE    = version.dll
+IMPORTLIB = version
+IMPORTS   = kernelbase
+
+C_SRCS = \
+	version.c
+
+RC_SRCS = version.rc

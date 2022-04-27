@@ -1,0 +1,10 @@
+EXTRADEFS = -DWINE_NO_LONG_TYPES
+TESTDLL   = kernelbase.dll
+
+C_SRCS = \
+	path.c \
+	process.c \
+	sync.c
+
+RC_SRCS = \
+	rsrc.rc

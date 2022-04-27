@@ -1,0 +1,6 @@
+EXTRADEFS = -DWINE_NO_LONG_TYPES
+TESTDLL   = dxgi.dll
+IMPORTS   = d3d10_1 dxgi user32
+
+C_SRCS = \
+	dxgi.c

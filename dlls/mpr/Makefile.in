@@ -1,0 +1,14 @@
+EXTRADEFS = -DWINE_NO_LONG_TYPES
+MODULE    = mpr.dll
+IMPORTLIB = mpr
+IMPORTS   = user32 advapi32
+
+C_SRCS = \
+	auth.c \
+	mpr_main.c \
+	multinet.c \
+	nps.c \
+	pwcache.c \
+	wnet.c
+
+RC_SRCS = mpr.rc

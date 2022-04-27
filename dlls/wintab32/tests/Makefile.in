@@ -1,0 +1,6 @@
+EXTRADEFS = -DWINE_NO_LONG_TYPES
+TESTDLL   = wintab32.dll
+IMPORTS   = user32
+
+C_SRCS = \
+	context.c

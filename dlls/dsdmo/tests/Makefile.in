@@ -1,0 +1,6 @@
+EXTRADEFS = -DWINE_NO_LONG_TYPES
+TESTDLL   = dsdmo.dll
+IMPORTS   = dmoguids uuid msdmo ole32
+
+C_SRCS = \
+	dsdmo.c

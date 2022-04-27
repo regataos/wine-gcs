@@ -1,0 +1,7 @@
+EXTRADEFS = -DWINE_NO_LONG_TYPES
+TESTDLL   = hlink.dll
+IMPORTS   = hlink ole32
+
+C_SRCS = \
+	browse_ctx.c \
+	hlink.c

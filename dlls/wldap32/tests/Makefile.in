@@ -1,0 +1,7 @@
+EXTRADEFS = -DWINE_NO_LONG_TYPES
+TESTDLL   = wldap32.dll
+IMPORTS   = wldap32
+
+C_SRCS = \
+	ber.c \
+	parse.c

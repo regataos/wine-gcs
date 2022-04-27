@@ -1,0 +1,8 @@
+EXTRADEFS = -DWINE_NO_LONG_TYPES
+MODULE    = snmpapi.dll
+IMPORTLIB = snmpapi
+
+EXTRADLLFLAGS = -Wb,--prefer-native
+
+C_SRCS = \
+	main.c

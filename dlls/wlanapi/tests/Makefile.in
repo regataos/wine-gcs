@@ -1,0 +1,6 @@
+EXTRADEFS = -DWINE_NO_LONG_TYPES
+TESTDLL   = wlanapi.dll
+IMPORTS   = wlanapi
+
+C_SRCS = \
+	wlanapi.c

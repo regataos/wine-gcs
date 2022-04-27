@@ -1,0 +1,7 @@
+EXTRADEFS = -DWINE_NO_LONG_TYPES
+MODULE    = odbccp32.dll
+IMPORTLIB = odbccp32
+IMPORTS   = uuid advapi32
+
+C_SRCS = \
+	odbccp32.c

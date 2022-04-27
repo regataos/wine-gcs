@@ -1,0 +1,10 @@
+EXTRADEFS = -DWINE_NO_LONG_TYPES
+MODULE    = printui.dll
+IMPORTS   = shell32
+
+EXTRADLLFLAGS = -Wb,--prefer-native
+
+C_SRCS = \
+	printui.c
+
+RC_SRCS = printui.rc

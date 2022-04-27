@@ -1,0 +1,6 @@
+EXTRADEFS = -DWINE_NO_LONG_TYPES
+TESTDLL   = ntdsapi.dll
+IMPORTS   = ntdsapi
+
+C_SRCS = \
+	ntdsapi.c

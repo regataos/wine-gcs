@@ -1,0 +1,8 @@
+EXTRADEFS = -DWINE_NO_LONG_TYPES
+MODULE    = pdh.dll
+IMPORTLIB = pdh
+
+EXTRADLLFLAGS = -Wb,--prefer-native
+
+C_SRCS = \
+	pdh_main.c

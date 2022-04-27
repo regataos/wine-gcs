@@ -1,0 +1,6 @@
+EXTRADEFS = -DWINE_NO_LONG_TYPES
+TESTDLL   = wbemdisp.dll
+IMPORTS   = oleaut32 ole32
+
+C_SRCS = \
+	wbemdisp.c

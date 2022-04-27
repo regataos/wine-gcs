@@ -1,0 +1,7 @@
+MODULE    = powershell.exe
+IMPORTS   = user32 urlmon
+
+EXTRADLLFLAGS = -mconsole -municode
+
+C_SRCS = \
+	main.c

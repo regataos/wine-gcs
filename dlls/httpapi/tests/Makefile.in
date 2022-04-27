@@ -1,0 +1,6 @@
+EXTRADEFS = -DWINE_NO_LONG_TYPES
+TESTDLL = httpapi.dll
+IMPORTS = httpapi ws2_32
+
+C_SRCS = \
+	httpapi.c

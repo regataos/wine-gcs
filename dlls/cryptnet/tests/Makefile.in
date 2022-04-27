@@ -1,0 +1,6 @@
+EXTRADEFS = -DWINE_NO_LONG_TYPES
+TESTDLL   = cryptnet.dll
+IMPORTS   = cryptnet crypt32
+
+C_SRCS = \
+	cryptnet.c

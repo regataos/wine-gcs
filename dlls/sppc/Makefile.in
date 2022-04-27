@@ -1,0 +1,7 @@
+EXTRADEFS = -DWINE_NO_LONG_TYPES
+MODULE    = sppc.dll
+
+EXTRADLLFLAGS = -Wb,--prefer-native
+
+C_SRCS = \
+	sppc.c

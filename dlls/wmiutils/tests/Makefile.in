@@ -1,0 +1,6 @@
+EXTRADEFS = -DWINE_NO_LONG_TYPES
+TESTDLL   = wmiutils.dll
+IMPORTS   = ole32
+
+C_SRCS = \
+	path.c

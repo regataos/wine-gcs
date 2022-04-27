@@ -1,0 +1,6 @@
+EXTRADEFS = -DWINE_NO_LONG_TYPES
+TESTDLL   = comcat.dll
+IMPORTS   = ole32 advapi32
+
+C_SRCS = \
+	comcat.c

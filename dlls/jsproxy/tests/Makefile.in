@@ -1,0 +1,6 @@
+EXTRADEFS = -DWINE_NO_LONG_TYPES
+TESTDLL   = jsproxy.dll
+IMPORTS   = jsproxy
+
+C_SRCS = \
+	jsproxy.c
