@@ -1710,6 +1710,14 @@ void WINAPI vkCmdSubpassShadingHUAWEI(VkCommandBuffer commandBuffer)
     unix_funcs->p_vk_call(unix_vkCmdSubpassShadingHUAWEI, &params);
 }
 
+void WINAPI vkCmdTraceRaysIndirect2KHR(VkCommandBuffer commandBuffer, VkDeviceAddress indirectDeviceAddress)
+{
+    struct vkCmdTraceRaysIndirect2KHR_params params;
+    params.commandBuffer = commandBuffer;
+    params.indirectDeviceAddress = indirectDeviceAddress;
+    unix_funcs->p_vk_call(unix_vkCmdTraceRaysIndirect2KHR, &params);
+}
+
 void WINAPI vkCmdTraceRaysIndirectKHR(VkCommandBuffer commandBuffer, const VkStridedDeviceAddressRegionKHR *pRaygenShaderBindingTable, const VkStridedDeviceAddressRegionKHR *pMissShaderBindingTable, const VkStridedDeviceAddressRegionKHR *pHitShaderBindingTable, const VkStridedDeviceAddressRegionKHR *pCallableShaderBindingTable, VkDeviceAddress indirectDeviceAddress)
 {
     struct vkCmdTraceRaysIndirectKHR_params params;
@@ -1976,7 +1984,7 @@ VkResult WINAPI vkCreateComputePipelines(VkDevice device, VkPipelineCache pipeli
     params.pCreateInfos = pCreateInfos;
     params.pAllocator = pAllocator;
     params.pPipelines = pPipelines;
-    return vk_unix_call(unix_vkCreateComputePipelines, &params);
+    return unix_funcs->p_vk_call(unix_vkCreateComputePipelines, &params);
 }
 
 VkResult WINAPI vkCreateCuFunctionNVX(VkDevice device, const VkCuFunctionCreateInfoNVX *pCreateInfo, const VkAllocationCallbacks *pAllocator, VkCuFunctionNVX *pFunction)
@@ -2117,7 +2125,7 @@ VkResult WINAPI vkCreateGraphicsPipelines(VkDevice device, VkPipelineCache pipel
     params.pCreateInfos = pCreateInfos;
     params.pAllocator = pAllocator;
     params.pPipelines = pPipelines;
-    return vk_unix_call(unix_vkCreateGraphicsPipelines, &params);
+    return unix_funcs->p_vk_call(unix_vkCreateGraphicsPipelines, &params);
 }
 
 VkResult WINAPI vkCreateImage(VkDevice device, const VkImageCreateInfo *pCreateInfo, const VkAllocationCallbacks *pAllocator, VkImage *pImage)
@@ -2210,7 +2218,7 @@ VkResult WINAPI vkCreateRayTracingPipelinesKHR(VkDevice device, VkDeferredOperat
     params.pCreateInfos = pCreateInfos;
     params.pAllocator = pAllocator;
     params.pPipelines = pPipelines;
-    return vk_unix_call(unix_vkCreateRayTracingPipelinesKHR, &params);
+    return unix_funcs->p_vk_call(unix_vkCreateRayTracingPipelinesKHR, &params);
 }
 
 VkResult WINAPI vkCreateRayTracingPipelinesNV(VkDevice device, VkPipelineCache pipelineCache, uint32_t createInfoCount, const VkRayTracingPipelineCreateInfoNV *pCreateInfos, const VkAllocationCallbacks *pAllocator, VkPipeline *pPipelines)
@@ -2222,7 +2230,7 @@ VkResult WINAPI vkCreateRayTracingPipelinesNV(VkDevice device, VkPipelineCache p
     params.pCreateInfos = pCreateInfos;
     params.pAllocator = pAllocator;
     params.pPipelines = pPipelines;
-    return vk_unix_call(unix_vkCreateRayTracingPipelinesNV, &params);
+    return unix_funcs->p_vk_call(unix_vkCreateRayTracingPipelinesNV, &params);
 }
 
 VkResult WINAPI vkCreateRenderPass(VkDevice device, const VkRenderPassCreateInfo *pCreateInfo, const VkAllocationCallbacks *pAllocator, VkRenderPass *pRenderPass)
@@ -2951,6 +2959,24 @@ VkResult WINAPI vkGetDeferredOperationResultKHR(VkDevice device, VkDeferredOpera
     return vk_unix_call(unix_vkGetDeferredOperationResultKHR, &params);
 }
 
+void WINAPI vkGetDescriptorSetHostMappingVALVE(VkDevice device, VkDescriptorSet descriptorSet, void **ppData)
+{
+    struct vkGetDescriptorSetHostMappingVALVE_params params;
+    params.device = device;
+    params.descriptorSet = descriptorSet;
+    params.ppData = ppData;
+    vk_unix_call(unix_vkGetDescriptorSetHostMappingVALVE, &params);
+}
+
+void WINAPI vkGetDescriptorSetLayoutHostMappingInfoVALVE(VkDevice device, const VkDescriptorSetBindingReferenceVALVE *pBindingReference, VkDescriptorSetLayoutHostMappingInfoVALVE *pHostMapping)
+{
+    struct vkGetDescriptorSetLayoutHostMappingInfoVALVE_params params;
+    params.device = device;
+    params.pBindingReference = pBindingReference;
+    params.pHostMapping = pHostMapping;
+    vk_unix_call(unix_vkGetDescriptorSetLayoutHostMappingInfoVALVE, &params);
+}
+
 void WINAPI vkGetDescriptorSetLayoutSupport(VkDevice device, const VkDescriptorSetLayoutCreateInfo *pCreateInfo, VkDescriptorSetLayoutSupport *pSupport)
 {
     struct vkGetDescriptorSetLayoutSupport_params params;
@@ -3245,6 +3271,25 @@ VkResult WINAPI vkGetMemoryHostPointerPropertiesEXT(VkDevice device, VkExternalM
     params.pHostPointer = pHostPointer;
     params.pMemoryHostPointerProperties = pMemoryHostPointerProperties;
     return vk_unix_call(unix_vkGetMemoryHostPointerPropertiesEXT, &params);
+}
+
+VkResult WINAPI vkGetMemoryWin32HandleKHR(VkDevice device, const VkMemoryGetWin32HandleInfoKHR *pGetWin32HandleInfo, HANDLE *pHandle)
+{
+    struct vkGetMemoryWin32HandleKHR_params params;
+    params.device = device;
+    params.pGetWin32HandleInfo = pGetWin32HandleInfo;
+    params.pHandle = pHandle;
+    return vk_unix_call(unix_vkGetMemoryWin32HandleKHR, &params);
+}
+
+VkResult WINAPI vkGetMemoryWin32HandlePropertiesKHR(VkDevice device, VkExternalMemoryHandleTypeFlagBits handleType, HANDLE handle, VkMemoryWin32HandlePropertiesKHR *pMemoryWin32HandleProperties)
+{
+    struct vkGetMemoryWin32HandlePropertiesKHR_params params;
+    params.device = device;
+    params.handleType = handleType;
+    params.handle = handle;
+    params.pMemoryWin32HandleProperties = pMemoryWin32HandleProperties;
+    return vk_unix_call(unix_vkGetMemoryWin32HandlePropertiesKHR, &params);
 }
 
 VkResult WINAPI vkGetPerformanceParameterINTEL(VkDevice device, VkPerformanceParameterTypeINTEL parameter, VkPerformanceValueINTEL *pValue)
@@ -3663,6 +3708,15 @@ VkResult WINAPI vkGetPipelineExecutableStatisticsKHR(VkDevice device, const VkPi
     params.pStatisticCount = pStatisticCount;
     params.pStatistics = pStatistics;
     return vk_unix_call(unix_vkGetPipelineExecutableStatisticsKHR, &params);
+}
+
+VkResult WINAPI vkGetPipelinePropertiesEXT(VkDevice device, const VkPipelineInfoEXT *pPipelineInfo, VkBaseOutStructure *pPipelineProperties)
+{
+    struct vkGetPipelinePropertiesEXT_params params;
+    params.device = device;
+    params.pPipelineInfo = pPipelineInfo;
+    params.pPipelineProperties = pPipelineProperties;
+    return vk_unix_call(unix_vkGetPipelinePropertiesEXT, &params);
 }
 
 void WINAPI vkGetPrivateData(VkDevice device, VkObjectType objectType, uint64_t objectHandle, VkPrivateDataSlot privateDataSlot, uint64_t *pData)
@@ -4414,6 +4468,7 @@ static const struct vulkan_func vk_device_dispatch_table[] =
     {"vkCmdSetViewportWithCount", vkCmdSetViewportWithCount},
     {"vkCmdSetViewportWithCountEXT", vkCmdSetViewportWithCountEXT},
     {"vkCmdSubpassShadingHUAWEI", vkCmdSubpassShadingHUAWEI},
+    {"vkCmdTraceRaysIndirect2KHR", vkCmdTraceRaysIndirect2KHR},
     {"vkCmdTraceRaysIndirectKHR", vkCmdTraceRaysIndirectKHR},
     {"vkCmdTraceRaysKHR", vkCmdTraceRaysKHR},
     {"vkCmdTraceRaysNV", vkCmdTraceRaysNV},
@@ -4526,6 +4581,8 @@ static const struct vulkan_func vk_device_dispatch_table[] =
     {"vkGetCalibratedTimestampsEXT", vkGetCalibratedTimestampsEXT},
     {"vkGetDeferredOperationMaxConcurrencyKHR", vkGetDeferredOperationMaxConcurrencyKHR},
     {"vkGetDeferredOperationResultKHR", vkGetDeferredOperationResultKHR},
+    {"vkGetDescriptorSetHostMappingVALVE", vkGetDescriptorSetHostMappingVALVE},
+    {"vkGetDescriptorSetLayoutHostMappingInfoVALVE", vkGetDescriptorSetLayoutHostMappingInfoVALVE},
     {"vkGetDescriptorSetLayoutSupport", vkGetDescriptorSetLayoutSupport},
     {"vkGetDescriptorSetLayoutSupportKHR", vkGetDescriptorSetLayoutSupportKHR},
     {"vkGetDeviceAccelerationStructureCompatibilityKHR", vkGetDeviceAccelerationStructureCompatibilityKHR},
@@ -4559,11 +4616,14 @@ static const struct vulkan_func vk_device_dispatch_table[] =
     {"vkGetImageViewAddressNVX", vkGetImageViewAddressNVX},
     {"vkGetImageViewHandleNVX", vkGetImageViewHandleNVX},
     {"vkGetMemoryHostPointerPropertiesEXT", vkGetMemoryHostPointerPropertiesEXT},
+    {"vkGetMemoryWin32HandleKHR", vkGetMemoryWin32HandleKHR},
+    {"vkGetMemoryWin32HandlePropertiesKHR", vkGetMemoryWin32HandlePropertiesKHR},
     {"vkGetPerformanceParameterINTEL", vkGetPerformanceParameterINTEL},
     {"vkGetPipelineCacheData", vkGetPipelineCacheData},
     {"vkGetPipelineExecutableInternalRepresentationsKHR", vkGetPipelineExecutableInternalRepresentationsKHR},
     {"vkGetPipelineExecutablePropertiesKHR", vkGetPipelineExecutablePropertiesKHR},
     {"vkGetPipelineExecutableStatisticsKHR", vkGetPipelineExecutableStatisticsKHR},
+    {"vkGetPipelinePropertiesEXT", vkGetPipelinePropertiesEXT},
     {"vkGetPrivateData", vkGetPrivateData},
     {"vkGetPrivateDataEXT", vkGetPrivateDataEXT},
     {"vkGetQueryPoolResults", vkGetQueryPoolResults},

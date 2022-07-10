@@ -25,6 +25,14 @@
 #include <math.h>
 #include <time.h>
 #include <stdlib.h>
+#include <unistd.h>
+
+#include "ntstatus.h"
+#define WIN32_NO_STATUS
+#include "windef.h"
+#include "winnt.h"
+#include "winioctl.h"
+#include "wine/server.h"
 
 #include "vulkan_private.h"
 #include "winreg.h"
@@ -269,6 +277,15 @@ static struct VkPhysicalDevice_T *wine_vk_physical_device_alloc(struct VkInstanc
      */
     for (i = 0; i < num_host_properties; i++)
     {
+        if (!strcmp(host_properties[i].extensionName, "VK_KHR_external_memory_fd"))
+        {
+            TRACE("Substituting VK_KHR_external_memory_fd for VK_KHR_external_memory_win32\n");
+
+            snprintf(host_properties[i].extensionName, sizeof(host_properties[i].extensionName),
+                    VK_KHR_EXTERNAL_MEMORY_WIN32_EXTENSION_NAME);
+            host_properties[i].specVersion = VK_KHR_EXTERNAL_MEMORY_WIN32_SPEC_VERSION;
+        }
+
         if (wine_vk_device_extension_supported(host_properties[i].extensionName))
         {
             TRACE("Enabling extension '%s' for physical device %p\n", host_properties[i].extensionName, object);
@@ -369,11 +386,69 @@ static void wine_vk_device_free_create_info(VkDeviceCreateInfo *create_info)
     free_VkDeviceCreateInfo_struct_chain(create_info);
 }
 
-static VkResult wine_vk_device_convert_create_info(const VkDeviceCreateInfo *src,
-        VkDeviceCreateInfo *dst)
+static char **parse_xr_extensions(unsigned int *len)
 {
-    unsigned int i;
+    char *xr_str, *iter, *start, **list;
+    unsigned int extension_count = 0, o = 0;
+
+    xr_str = getenv("__WINE_OPENXR_VK_DEVICE_EXTENSIONS");
+    if (!xr_str)
+    {
+        *len = 0;
+        return NULL;
+    }
+    xr_str = strdup(xr_str);
+
+    TRACE("got var: %s\n", xr_str);
+
+    iter = xr_str;
+    while(*iter){
+        if(*iter++ == ' ')
+            extension_count++;
+    }
+    /* count the one ending in NUL */
+    if(iter != xr_str)
+        extension_count++;
+    if(!extension_count){
+        *len = 0;
+        return NULL;
+    }
+
+    TRACE("counted %u extensions\n", extension_count);
+
+    list = malloc(extension_count * sizeof(char *));
+
+    start = iter = xr_str;
+    do{
+        if(*iter == ' '){
+            *iter = 0;
+            list[o++] = strdup(start);
+            TRACE("added %s to list\n", list[o-1]);
+            iter++;
+            start = iter;
+        }else if(*iter == 0){
+            list[o++] = strdup(start);
+            TRACE("added %s to list\n", list[o-1]);
+            break;
+        }else{
+            iter++;
+        }
+    }while(1);
+
+    free(xr_str);
+
+    *len = extension_count;
+
+    return list;
+}
+
+static VkResult wine_vk_device_convert_create_info(const VkDeviceCreateInfo *src,
+        VkDeviceCreateInfo *dst, BOOL *must_free_extensions)
+{
+    unsigned int i, append_xr = 0, replace_win32 = 0, wine_extension_count;
     VkResult res;
+
+    static const char *wine_xr_extension_name = "VK_WINE_openxr_device_extensions";
 
     *dst = *src;
 
@@ -387,21 +462,84 @@ static VkResult wine_vk_device_convert_create_info(const VkDeviceCreateInfo *src
     dst->enabledLayerCount = 0;
     dst->ppEnabledLayerNames = NULL;
 
-    TRACE("Enabled %u extensions.\n", dst->enabledExtensionCount);
     for (i = 0; i < dst->enabledExtensionCount; i++)
     {
         const char *extension_name = dst->ppEnabledExtensionNames[i];
-        TRACE("Extension %u: %s.\n", i, debugstr_a(extension_name));
-        if (!wine_vk_device_extension_supported(extension_name))
+        if (!strcmp(extension_name, wine_xr_extension_name))
         {
-            WARN("Extension %s is not supported.\n", debugstr_a(extension_name));
-            wine_vk_device_free_create_info(dst);
-            return VK_ERROR_EXTENSION_NOT_PRESENT;
+            append_xr = 1;
+            break;
         }
+    }
+    for (i = 0; i < src->enabledExtensionCount; i++)
+    {
+        if (!strcmp(src->ppEnabledExtensionNames[i], "VK_KHR_external_memory_win32"))
+        {
+            replace_win32 = 1;
+            break;
+        }
+    }
+    if (append_xr || replace_win32)
+    {
+        unsigned int xr_extensions_len = 0, o = 0;
+        char **xr_extensions_list = NULL;
+        char **new_extensions_list;
+
+        if (append_xr)
+            xr_extensions_list = parse_xr_extensions(&xr_extensions_len);
+
+        new_extensions_list = malloc(sizeof(char *) * (dst->enabledExtensionCount + xr_extensions_len));
+
+        if(append_xr && !xr_extensions_list)
+            WARN("Requested to use XR extensions, but none are set!\n");
+
+        for (i = 0; i < dst->enabledExtensionCount; i++)
+        {
+            if (append_xr && !strcmp(dst->ppEnabledExtensionNames[i], wine_xr_extension_name))
+                continue;
+
+            if (replace_win32 && !strcmp(src->ppEnabledExtensionNames[i], "VK_KHR_external_memory_win32"))
+                new_extensions_list[o] = strdup("VK_KHR_external_memory_fd");
+            else
+                new_extensions_list[o] = strdup(dst->ppEnabledExtensionNames[i]);
+            ++o;
+        }
+
+        TRACE("appending XR extensions:\n");
+        for (i = 0; i < xr_extensions_len; ++i)
+        {
+            TRACE("\t%s\n", xr_extensions_list[i]);
+            new_extensions_list[o++] = xr_extensions_list[i];
+        }
+        dst->enabledExtensionCount = o;
+        dst->ppEnabledExtensionNames = (const char * const *)new_extensions_list;
+
+        free(xr_extensions_list);
+
+        *must_free_extensions = TRUE;
+        wine_extension_count = dst->enabledExtensionCount - xr_extensions_len;
+    }else{
+        *must_free_extensions = FALSE;
+        wine_extension_count = dst->enabledExtensionCount;
+    }
+
+    TRACE("Enabled %u extensions.\n", dst->enabledExtensionCount);
+    for (i = 0; i < wine_extension_count; i++)
+    {
+        TRACE("Extension %u: %s.\n", i, debugstr_a(dst->ppEnabledExtensionNames[i]));
     }
 
     return VK_SUCCESS;
 }
+
+static void wine_vk_device_free_create_info_extensions(VkDeviceCreateInfo *create_info)
+{
+    unsigned int i;
+    for(i = 0; i < create_info->enabledExtensionCount; ++i)
+        free((void*)create_info->ppEnabledExtensionNames[i]);
+    free((void*)create_info->ppEnabledExtensionNames);
+}
+
 
 /* Helper function used for freeing a device structure. This function supports full
  * and partial object cleanups and can thus be used for vkCreateDevice failures.
@@ -507,17 +645,11 @@ static VkResult wine_vk_instance_convert_create_info(const VkInstanceCreateInfo 
         return VK_ERROR_LAYER_NOT_PRESENT;
     }
 
-    TRACE("Enabled %u instance extensions.\n", dst->enabledExtensionCount);
+    TRACE("Enabled extensions: %u\n", dst->enabledExtensionCount);
     for (i = 0; i < dst->enabledExtensionCount; i++)
     {
         const char *extension_name = dst->ppEnabledExtensionNames[i];
         TRACE("Extension %u: %s.\n", i, debugstr_a(extension_name));
-        if (!wine_vk_instance_extension_supported(extension_name))
-        {
-            WARN("Extension %s is not supported.\n", debugstr_a(extension_name));
-            free_VkInstanceCreateInfo_struct_chain(dst);
-            return VK_ERROR_EXTENSION_NOT_PRESENT;
-        }
         if (!strcmp(extension_name, "VK_EXT_debug_utils") || !strcmp(extension_name, "VK_EXT_debug_report"))
         {
             object->enable_wrapper_list = VK_TRUE;
@@ -694,12 +826,22 @@ NTSTATUS wine_vkCreateDevice(void *args)
     const VkDeviceCreateInfo *create_info = params->pCreateInfo;
     const VkAllocationCallbacks *allocator = params->pAllocator;
     VkDevice *device = params->pDevice;
+    return __wine_create_vk_device_with_callback(phys_dev, create_info, allocator, device, NULL, NULL);
+}
+
+VkResult WINAPI __wine_create_vk_device_with_callback(VkPhysicalDevice phys_dev,
+        const VkDeviceCreateInfo *create_info,
+        const VkAllocationCallbacks *allocator, VkDevice *device,
+        VkResult (WINAPI *native_vkCreateDevice)(VkPhysicalDevice, const VkDeviceCreateInfo *, const VkAllocationCallbacks *,
+        VkDevice *, void * (*)(VkInstance, const char *), void *), void *native_vkCreateDevice_context)
+{
     VkPhysicalDeviceFeatures features = {0};
     VkPhysicalDeviceFeatures2 *features2;
     VkDeviceCreateInfo create_info_host;
     struct VkQueue_T *next_queue;
     struct VkDevice_T *object;
     unsigned int i;
+    BOOL create_info_free_extensions;
     VkResult res;
 
     TRACE("%p, %p, %p, %p\n", phys_dev, create_info, allocator, device);
@@ -724,7 +866,7 @@ NTSTATUS wine_vkCreateDevice(void *args)
     object->base.base.loader_magic = VULKAN_ICD_MAGIC_VALUE;
     object->phys_dev = phys_dev;
 
-    res = wine_vk_device_convert_create_info(create_info, &create_info_host);
+    res = wine_vk_device_convert_create_info(create_info, &create_info_host, &create_info_free_extensions);
     if (res != VK_SUCCESS)
         goto fail;
 
@@ -747,9 +889,17 @@ NTSTATUS wine_vkCreateDevice(void *args)
         create_info_host.pEnabledFeatures = &features;
     }
 
-    res = phys_dev->instance->funcs.p_vkCreateDevice(phys_dev->phys_dev,
-            &create_info_host, NULL /* allocator */, &object->device);
+    if (native_vkCreateDevice)
+        res = native_vkCreateDevice(phys_dev->phys_dev,
+                &create_info_host, NULL /* allocator */, &object->device,
+                vk_funcs->p_vkGetInstanceProcAddr, native_vkCreateDevice_context);
+    else
+        res = phys_dev->instance->funcs.p_vkCreateDevice(phys_dev->phys_dev,
+                &create_info_host, NULL /* allocator */, &object->device);
+
     wine_vk_device_free_create_info(&create_info_host);
+    if(create_info_free_extensions)
+        wine_vk_device_free_create_info_extensions(&create_info_host);
     WINE_VK_ADD_DISPATCHABLE_MAPPING(phys_dev->instance, object, object->device);
     if (res != VK_SUCCESS)
     {
@@ -812,11 +962,22 @@ NTSTATUS wine_vkCreateInstance(void *args)
     const VkInstanceCreateInfo *create_info = params->pCreateInfo;
     const VkAllocationCallbacks *allocator = params->pAllocator;
     VkInstance *instance = params->pInstance;
+    return __wine_create_vk_instance_with_callback(create_info, allocator, instance, NULL, NULL);
+}
+
+VkResult WINAPI __wine_create_vk_instance_with_callback(const VkInstanceCreateInfo *create_info,
+        const VkAllocationCallbacks *allocator, VkInstance *instance,
+        VkResult (WINAPI *native_vkCreateInstance)(const VkInstanceCreateInfo *, const VkAllocationCallbacks *,
+        VkInstance *, void * (*)(VkInstance, const char *), void *), void *native_vkCreateInstance_context)
+{
     VkInstanceCreateInfo create_info_host;
     const VkApplicationInfo *app_info;
     uint32_t new_mxcsr, old_mxcsr;
     struct VkInstance_T *object;
     VkResult res;
+
+    TRACE("create_info %p, allocator %p, instance %p, native_vkCreateInstance %p, context %p.\n",
+            create_info, allocator, instance, native_vkCreateInstance, native_vkCreateInstance_context);
 
     if (allocator)
         FIXME("Support for allocation callbacks not implemented yet\n");
@@ -837,7 +998,14 @@ NTSTATUS wine_vkCreateInstance(void *args)
         return res;
     }
 
-    res = vk_funcs->p_vkCreateInstance(&create_info_host, NULL /* allocator */, &object->instance);
+    if (native_vkCreateInstance && !vk_funcs->create_vk_instance_with_callback)
+        ERR("Driver create_vk_instance_with_callback is not available.\n");
+
+    if (native_vkCreateInstance && vk_funcs->create_vk_instance_with_callback)
+        res = vk_funcs->create_vk_instance_with_callback(&create_info_host, NULL /* allocator */, &object->instance,
+                native_vkCreateInstance, native_vkCreateInstance_context);
+    else
+        res = vk_funcs->p_vkCreateInstance(&create_info_host, NULL /* allocator */, &object->instance);
     free_VkInstanceCreateInfo_struct_chain(&create_info_host);
     if (res != VK_SUCCESS)
     {
@@ -1293,6 +1461,61 @@ NTSTATUS wine_vkGetPhysicalDeviceExternalFencePropertiesKHR(void *args)
     return STATUS_SUCCESS;
 }
 
+static inline void wine_vk_normalize_handle_types_win(VkExternalMemoryHandleTypeFlags *types)
+{
+    *types &=
+        VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT |
+        VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_KMT_BIT |
+        VK_EXTERNAL_MEMORY_HANDLE_TYPE_D3D11_TEXTURE_BIT |
+        VK_EXTERNAL_MEMORY_HANDLE_TYPE_D3D11_TEXTURE_KMT_BIT |
+        VK_EXTERNAL_MEMORY_HANDLE_TYPE_D3D12_HEAP_BIT |
+        VK_EXTERNAL_MEMORY_HANDLE_TYPE_D3D12_RESOURCE_BIT |
+        VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT |
+        VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_MAPPED_FOREIGN_MEMORY_BIT_EXT;
+}
+
+static inline void wine_vk_normalize_handle_types_host(VkExternalMemoryHandleTypeFlags *types)
+{
+    *types &=
+        VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT |
+        VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT |
+/*      predicated on VK_KHR_external_memory_dma_buf
+        VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT | */
+        VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_MAPPED_FOREIGN_MEMORY_BIT_EXT;
+}
+
+static const VkExternalMemoryHandleTypeFlagBits wine_vk_handle_over_fd_types =
+                VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT |
+                VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_KMT_BIT;
+
+static void wine_vk_get_physical_device_external_buffer_properties(VkPhysicalDevice phys_dev,
+        void (*p_vkGetPhysicalDeviceExternalBufferProperties)(VkPhysicalDevice, const VkPhysicalDeviceExternalBufferInfo *, VkExternalBufferProperties *),
+        const VkPhysicalDeviceExternalBufferInfo *buffer_info, VkExternalBufferProperties *properties)
+{
+    VkPhysicalDeviceExternalBufferInfo buffer_info_dup = *buffer_info;
+
+    wine_vk_normalize_handle_types_win(&buffer_info_dup.handleType);
+    if (buffer_info_dup.handleType & wine_vk_handle_over_fd_types)
+        buffer_info_dup.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT;
+    wine_vk_normalize_handle_types_host(&buffer_info_dup.handleType);
+
+    if (buffer_info->handleType && !buffer_info_dup.handleType)
+    {
+        memset(&properties->externalMemoryProperties, 0, sizeof(properties->externalMemoryProperties));
+        return;
+    }
+
+    p_vkGetPhysicalDeviceExternalBufferProperties(phys_dev->phys_dev, &buffer_info_dup, properties);
+
+    if (properties->externalMemoryProperties.exportFromImportedHandleTypes & VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT)
+        properties->externalMemoryProperties.exportFromImportedHandleTypes |= wine_vk_handle_over_fd_types;
+    wine_vk_normalize_handle_types_win(&properties->externalMemoryProperties.exportFromImportedHandleTypes);
+
+    if (properties->externalMemoryProperties.compatibleHandleTypes & VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT)
+        properties->externalMemoryProperties.compatibleHandleTypes |= wine_vk_handle_over_fd_types;
+    wine_vk_normalize_handle_types_win(&properties->externalMemoryProperties.compatibleHandleTypes);
+}
+
 NTSTATUS wine_vkGetPhysicalDeviceExternalBufferProperties(void *args)
 {
     struct vkGetPhysicalDeviceExternalBufferProperties_params *params = args;
@@ -1301,7 +1524,8 @@ NTSTATUS wine_vkGetPhysicalDeviceExternalBufferProperties(void *args)
     VkExternalBufferProperties *properties = params->pExternalBufferProperties;
 
     TRACE("%p, %p, %p\n", phys_dev, buffer_info, properties);
-    memset(&properties->externalMemoryProperties, 0, sizeof(properties->externalMemoryProperties));
+
+    wine_vk_get_physical_device_external_buffer_properties(phys_dev, phys_dev->instance->funcs.p_vkGetPhysicalDeviceExternalBufferProperties, buffer_info, properties);
     return STATUS_SUCCESS;
 }
 
@@ -1313,8 +1537,61 @@ NTSTATUS wine_vkGetPhysicalDeviceExternalBufferPropertiesKHR(void *args)
     VkExternalBufferProperties *properties = params->pExternalBufferProperties;
 
     TRACE("%p, %p, %p\n", phys_dev, buffer_info, properties);
-    memset(&properties->externalMemoryProperties, 0, sizeof(properties->externalMemoryProperties));
+
+    wine_vk_get_physical_device_external_buffer_properties(phys_dev, phys_dev->instance->funcs.p_vkGetPhysicalDeviceExternalBufferPropertiesKHR, buffer_info, properties);
     return STATUS_SUCCESS;
+}
+
+static VkResult wine_vk_get_physical_device_image_format_properties_2(VkPhysicalDevice phys_dev,
+        VkResult (*p_vkGetPhysicalDeviceImageFormatProperties2)(VkPhysicalDevice, const VkPhysicalDeviceImageFormatInfo2 *, VkImageFormatProperties2 *),
+        const VkPhysicalDeviceImageFormatInfo2 *format_info, VkImageFormatProperties2 *properties)
+{
+    VkPhysicalDeviceExternalImageFormatInfo *external_image_info_dup = NULL;
+    const VkPhysicalDeviceExternalImageFormatInfo *external_image_info;
+    VkPhysicalDeviceImageFormatInfo2 format_info_host = *format_info;
+    VkExternalImageFormatProperties *external_image_properties;
+    VkResult res;
+
+    if ((external_image_info = wine_vk_find_struct(format_info, PHYSICAL_DEVICE_EXTERNAL_IMAGE_FORMAT_INFO)) && external_image_info->handleType)
+    {
+        if ((res = convert_VkPhysicalDeviceImageFormatInfo2_struct_chain(format_info->pNext, &format_info_host)) < 0)
+        {
+            WARN("Failed to convert VkPhysicalDeviceImageFormatInfo2 pNext chain, res=%d.\n", res);
+            return res;
+        }
+        external_image_info_dup = wine_vk_find_struct(&format_info_host, PHYSICAL_DEVICE_EXTERNAL_IMAGE_FORMAT_INFO);
+
+        wine_vk_normalize_handle_types_win(&external_image_info_dup->handleType);
+
+        if (external_image_info_dup->handleType & wine_vk_handle_over_fd_types)
+            external_image_info_dup->handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT;
+
+        wine_vk_normalize_handle_types_host(&external_image_info_dup->handleType);
+        if (!external_image_info_dup->handleType)
+        {
+            WARN("Unsupported handle type %#x.\n", external_image_info->handleType);
+            return VK_ERROR_FORMAT_NOT_SUPPORTED;
+        }
+    }
+
+    res = p_vkGetPhysicalDeviceImageFormatProperties2(phys_dev, &format_info_host, properties);
+
+    if (external_image_info_dup)
+        free_VkPhysicalDeviceImageFormatInfo2_struct_chain(&format_info_host);
+
+    if ((external_image_properties = wine_vk_find_struct(properties, EXTERNAL_IMAGE_FORMAT_PROPERTIES)))
+    {
+        VkExternalMemoryProperties *p = &external_image_properties->externalMemoryProperties;
+        if (p->exportFromImportedHandleTypes & VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT)
+            p->exportFromImportedHandleTypes |= wine_vk_handle_over_fd_types;
+        wine_vk_normalize_handle_types_win(&p->exportFromImportedHandleTypes);
+
+        if (p->compatibleHandleTypes & VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT)
+            p->compatibleHandleTypes |= wine_vk_handle_over_fd_types;
+        wine_vk_normalize_handle_types_win(&p->compatibleHandleTypes);
+    }
+
+    return res;
 }
 
 NTSTATUS wine_vkGetPhysicalDeviceImageFormatProperties2(void *args)
@@ -1323,22 +1600,10 @@ NTSTATUS wine_vkGetPhysicalDeviceImageFormatProperties2(void *args)
     VkPhysicalDevice phys_dev = params->physicalDevice;
     const VkPhysicalDeviceImageFormatInfo2 *format_info = params->pImageFormatInfo;
     VkImageFormatProperties2 *properties = params->pImageFormatProperties;
-    VkExternalImageFormatProperties *external_image_properties;
-    VkResult res;
 
     TRACE("%p, %p, %p\n", phys_dev, format_info, properties);
 
-    res = thunk_vkGetPhysicalDeviceImageFormatProperties2(phys_dev, format_info, properties);
-
-    if ((external_image_properties = wine_vk_find_struct(properties, EXTERNAL_IMAGE_FORMAT_PROPERTIES)))
-    {
-        VkExternalMemoryProperties *p = &external_image_properties->externalMemoryProperties;
-        p->externalMemoryFeatures = 0;
-        p->exportFromImportedHandleTypes = 0;
-        p->compatibleHandleTypes = 0;
-    }
-
-    return res;
+    return wine_vk_get_physical_device_image_format_properties_2(phys_dev, thunk_vkGetPhysicalDeviceImageFormatProperties2, format_info, properties);
 }
 
 NTSTATUS wine_vkGetPhysicalDeviceImageFormatProperties2KHR(void *args)
@@ -1347,22 +1612,10 @@ NTSTATUS wine_vkGetPhysicalDeviceImageFormatProperties2KHR(void *args)
     VkPhysicalDevice phys_dev = params->physicalDevice;
     const VkPhysicalDeviceImageFormatInfo2 *format_info = params->pImageFormatInfo;
     VkImageFormatProperties2 *properties = params->pImageFormatProperties;
-    VkExternalImageFormatProperties *external_image_properties;
-    VkResult res;
 
     TRACE("%p, %p, %p\n", phys_dev, format_info, properties);
 
-    res = thunk_vkGetPhysicalDeviceImageFormatProperties2KHR(phys_dev, format_info, properties);
-
-    if ((external_image_properties = wine_vk_find_struct(properties, EXTERNAL_IMAGE_FORMAT_PROPERTIES)))
-    {
-        VkExternalMemoryProperties *p = &external_image_properties->externalMemoryProperties;
-        p->externalMemoryFeatures = 0;
-        p->exportFromImportedHandleTypes = 0;
-        p->compatibleHandleTypes = 0;
-    }
-
-    return res;
+    return wine_vk_get_physical_device_image_format_properties_2(phys_dev, thunk_vkGetPhysicalDeviceImageFormatProperties2KHR, format_info, properties);
 }
 
 /* From ntdll/unix/sync.c */
@@ -4072,7 +4325,113 @@ NTSTATUS wine_vkQueuePresentKHR(void *args)
     free(arr);
 
     return res;
+}
 
+static void fixup_pipeline_feedback(VkPipelineCreationFeedback *feedback, uint32_t count)
+{
+#if defined(USE_STRUCT_CONVERSION)
+    struct host_pipeline_feedback
+    {
+        VkPipelineCreationFeedbackFlags flags;
+        uint64_t duration;
+    } *host_feedback;
+    int64_t i;
+
+    host_feedback = (void *) feedback;
+
+    for (i = count - 1; i >= 0; i--)
+    {
+        memmove(&feedback[i].duration, &host_feedback[i].duration, sizeof(uint64_t));
+        feedback[i].flags = host_feedback[i].flags;
+    }
+#endif
+}
+
+static void fixup_pipeline_feedback_info(const void *pipeline_info)
+{
+    VkPipelineCreationFeedbackCreateInfo *feedback;
+
+    feedback = wine_vk_find_struct(pipeline_info, PIPELINE_CREATION_FEEDBACK_CREATE_INFO);
+
+    if (!feedback)
+        return;
+
+    fixup_pipeline_feedback(feedback->pPipelineCreationFeedback, 1);
+    fixup_pipeline_feedback(feedback->pPipelineStageCreationFeedbacks,
+        feedback->pipelineStageCreationFeedbackCount);
+}
+
+NTSTATUS wine_vkCreateComputePipelines(void *args)
+{
+    struct vkCreateComputePipelines_params *params = args;
+    VkResult res;
+    uint32_t i;
+
+    TRACE("%p, 0x%s, %u, %p, %p, %p\n", params->device, wine_dbgstr_longlong(params->pipelineCache),
+        params->createInfoCount, params->pCreateInfos, params->pAllocator, params->pPipelines);
+
+    res = thunk_vkCreateComputePipelines(params->device, params->pipelineCache,
+        params->createInfoCount, params->pCreateInfos, params->pAllocator, params->pPipelines);
+
+    for (i = 0; i < params->createInfoCount; i++)
+        fixup_pipeline_feedback_info(&params->pCreateInfos[i]);
+
+    return res;
+}
+
+NTSTATUS wine_vkCreateGraphicsPipelines(void *args)
+{
+    struct vkCreateGraphicsPipelines_params *params = args;
+    VkResult res;
+    uint32_t i;
+
+    TRACE("%p, 0x%s, %u, %p, %p, %p\n", params->device, wine_dbgstr_longlong(params->pipelineCache),
+        params->createInfoCount, params->pCreateInfos, params->pAllocator, params->pPipelines);
+
+    res = thunk_vkCreateGraphicsPipelines(params->device, params->pipelineCache,
+        params->createInfoCount, params->pCreateInfos, params->pAllocator, params->pPipelines);
+
+    for (i = 0; i < params->createInfoCount; i++)
+        fixup_pipeline_feedback_info(&params->pCreateInfos[i]);
+
+    return res;
+}
+
+NTSTATUS wine_vkCreateRayTracingPipelinesKHR(void *args)
+{
+    struct vkCreateRayTracingPipelinesKHR_params *params = args;
+    VkResult res;
+    uint32_t i;
+
+    TRACE("%p, 0x%s, 0x%s, %u, %p, %p, %p\n", params->device,
+        wine_dbgstr_longlong(params->deferredOperation), wine_dbgstr_longlong(params->pipelineCache),
+        params->createInfoCount, params->pCreateInfos, params->pAllocator, params->pPipelines);
+
+    res = thunk_vkCreateRayTracingPipelinesKHR(params->device, params->deferredOperation, params->pipelineCache,
+        params->createInfoCount, params->pCreateInfos, params->pAllocator, params->pPipelines);
+
+    for (i = 0; i < params->createInfoCount; i++)
+        fixup_pipeline_feedback_info(&params->pCreateInfos[i]);
+
+    return res;
+}
+
+NTSTATUS wine_vkCreateRayTracingPipelinesNV(void *args)
+{
+    struct vkCreateRayTracingPipelinesNV_params *params = args;
+    VkResult res;
+    uint32_t i;
+
+    TRACE("%p, 0x%s, %u, %p, %p, %p\n", params->device, wine_dbgstr_longlong(params->pipelineCache),
+        params->createInfoCount, params->pCreateInfos, params->pAllocator, params->pPipelines);
+
+    res = thunk_vkCreateRayTracingPipelinesNV(params->device, params->pipelineCache,
+        params->createInfoCount, params->pCreateInfos, params->pAllocator, params->pPipelines);
+
+    for (i = 0; i < params->createInfoCount; i++)
+        fixup_pipeline_feedback_info(&params->pCreateInfos[i]);
+
+    return res;
 }
 
 BOOL WINAPI wine_vk_is_available_instance_function(VkInstance instance, const char *name)
@@ -4082,5 +4441,508 @@ BOOL WINAPI wine_vk_is_available_instance_function(VkInstance instance, const ch
 
 BOOL WINAPI wine_vk_is_available_device_function(VkDevice device, const char *name)
 {
+    if (!strcmp(name, "vkGetMemoryWin32HandleKHR") || !strcmp(name, "vkGetMemoryWin32HandlePropertiesKHR"))
+        name = "vkGetMemoryFdKHR";
     return !!vk_funcs->p_vkGetDeviceProcAddr(device->device, name);
+}
+
+VkDevice WINAPI __wine_get_native_VkDevice(VkDevice device)
+{
+    return device->device;
+}
+
+VkInstance WINAPI __wine_get_native_VkInstance(VkInstance instance)
+{
+    return instance->instance;
+}
+
+VkPhysicalDevice WINAPI __wine_get_native_VkPhysicalDevice(VkPhysicalDevice phys_dev)
+{
+    return phys_dev->phys_dev;
+}
+
+VkQueue WINAPI __wine_get_native_VkQueue(VkQueue queue)
+{
+    return queue->queue;
+}
+
+VkPhysicalDevice WINAPI __wine_get_wrapped_VkPhysicalDevice(VkInstance instance, VkPhysicalDevice native_phys_dev)
+{
+    uint32_t i;
+    for(i = 0; i < instance->phys_dev_count; ++i){
+        if(instance->phys_devs[i]->phys_dev == native_phys_dev)
+            return instance->phys_devs[i];
+    }
+    WARN("Unknown native physical device: %p\n", native_phys_dev);
+    return NULL;
+}
+
+#define IOCTL_SHARED_GPU_RESOURCE_CREATE           CTL_CODE(FILE_DEVICE_VIDEO, 0, METHOD_BUFFERED, FILE_WRITE_ACCESS)
+
+struct shared_resource_create
+{
+    obj_handle_t unix_handle;
+    WCHAR name[1];
+};
+
+static HANDLE create_gpu_resource(int fd, LPCWSTR name)
+{
+    static const WCHAR shared_gpu_resourceW[] = {'\\','?','?','\\','S','h','a','r','e','d','G','p','u','R','e','s','o','u','r','c','e',0};
+    HANDLE unix_resource = INVALID_HANDLE_VALUE;
+    struct shared_resource_create *inbuff;
+    UNICODE_STRING shared_gpu_resource_us;
+    HANDLE shared_resource;
+    OBJECT_ATTRIBUTES attr;
+    IO_STATUS_BLOCK iosb;
+    NTSTATUS status;
+    DWORD in_size;
+
+    TRACE("Creating shared vulkan resource fd %d name %s.\n", fd, debugstr_w(name));
+
+    if (wine_server_fd_to_handle(fd, GENERIC_ALL, 0, &unix_resource) != STATUS_SUCCESS)
+        return INVALID_HANDLE_VALUE;
+
+    init_unicode_string(&shared_gpu_resource_us, shared_gpu_resourceW);
+
+    attr.Length = sizeof(attr);
+    attr.RootDirectory = 0;
+    attr.Attributes = 0;
+    attr.ObjectName = &shared_gpu_resource_us;
+    attr.SecurityDescriptor = NULL;
+    attr.SecurityQualityOfService = NULL;
+
+    if ((status = NtCreateFile(&shared_resource, GENERIC_READ | GENERIC_WRITE, &attr, &iosb, NULL, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_READ | FILE_SHARE_WRITE, FILE_OPEN, 0, NULL, 0)))
+    {
+        ERR("Failed to load open a shared resource handle, status %#x.\n", status);
+        NtClose(unix_resource);
+        return INVALID_HANDLE_VALUE;
+    }
+
+    in_size = sizeof(*inbuff) + (name ? lstrlenW(name) * sizeof(WCHAR) : 0);
+    inbuff = calloc(1, in_size);
+    inbuff->unix_handle = wine_server_obj_handle(unix_resource);
+    if (name)
+        lstrcpyW(&inbuff->name[0], name);
+
+    if ((status = NtDeviceIoControlFile(shared_resource, NULL, NULL, NULL, &iosb, IOCTL_SHARED_GPU_RESOURCE_CREATE,
+            inbuff, in_size, NULL, 0)))
+
+    free(inbuff);
+    NtClose(unix_resource);
+
+    if (status)
+    {
+        ERR("Failed to create video resource, status %#x.\n", status);
+        NtClose(shared_resource);
+        return INVALID_HANDLE_VALUE;
+    }
+
+    return shared_resource;
+}
+
+#define IOCTL_SHARED_GPU_RESOURCE_OPEN             CTL_CODE(FILE_DEVICE_VIDEO, 1, METHOD_BUFFERED, FILE_WRITE_ACCESS)
+
+struct shared_resource_open
+{
+    obj_handle_t kmt_handle;
+    WCHAR name[1];
+};
+
+static HANDLE open_shared_resource(HANDLE kmt_handle, LPCWSTR name)
+{
+    static const WCHAR shared_gpu_resourceW[] = {'\\','?','?','\\','S','h','a','r','e','d','G','p','u','R','e','s','o','u','r','c','e',0};
+    UNICODE_STRING shared_gpu_resource_us;
+    struct shared_resource_open *inbuff;
+    HANDLE shared_resource;
+    OBJECT_ATTRIBUTES attr;
+    IO_STATUS_BLOCK iosb;
+    NTSTATUS status;
+    DWORD in_size;
+
+    init_unicode_string(&shared_gpu_resource_us, shared_gpu_resourceW);
+
+    attr.Length = sizeof(attr);
+    attr.RootDirectory = 0;
+    attr.Attributes = 0;
+    attr.ObjectName = &shared_gpu_resource_us;
+    attr.SecurityDescriptor = NULL;
+    attr.SecurityQualityOfService = NULL;
+
+    if ((status = NtCreateFile(&shared_resource, GENERIC_READ | GENERIC_WRITE, &attr, &iosb, NULL, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_READ | FILE_SHARE_WRITE, FILE_OPEN, 0, NULL, 0)))
+    {
+        ERR("Failed to load open a shared resource handle, status %#x.\n", status);
+        return INVALID_HANDLE_VALUE;
+    }
+
+    in_size = sizeof(*inbuff) + (name ? lstrlenW(name) * sizeof(WCHAR) : 0);
+    inbuff = calloc(1, in_size);
+    inbuff->kmt_handle = wine_server_obj_handle(kmt_handle);
+    if (name)
+        lstrcpyW(&inbuff->name[0], name);
+
+    status = NtDeviceIoControlFile(shared_resource, NULL, NULL, NULL, &iosb, IOCTL_SHARED_GPU_RESOURCE_OPEN,
+            inbuff, in_size, NULL, 0);
+
+    free(inbuff);
+
+    if (status)
+    {
+        ERR("Failed to open video resource, status %#x.\n", status);
+        NtClose(shared_resource);
+        return INVALID_HANDLE_VALUE;
+    }
+
+    return shared_resource;
+}
+
+#define IOCTL_SHARED_GPU_RESOURCE_GET_UNIX_RESOURCE           CTL_CODE(FILE_DEVICE_VIDEO, 3, METHOD_BUFFERED, FILE_READ_ACCESS)
+
+static int get_shared_resource_fd(HANDLE shared_resource)
+{
+    IO_STATUS_BLOCK iosb;
+    obj_handle_t unix_resource;
+    NTSTATUS status;
+    int ret;
+
+    if (NtDeviceIoControlFile(shared_resource, NULL, NULL, NULL, &iosb, IOCTL_SHARED_GPU_RESOURCE_GET_UNIX_RESOURCE,
+            NULL, 0, &unix_resource, sizeof(unix_resource)))
+        return -1;
+
+    status = wine_server_handle_to_fd(wine_server_ptr_handle(unix_resource), FILE_READ_DATA, &ret, NULL);
+    NtClose(wine_server_ptr_handle(unix_resource));
+    return status == STATUS_SUCCESS ? ret : -1;
+}
+
+#define IOCTL_SHARED_GPU_RESOURCE_GETKMT           CTL_CODE(FILE_DEVICE_VIDEO, 2, METHOD_BUFFERED, FILE_READ_ACCESS)
+
+static HANDLE get_shared_resource_kmt_handle(HANDLE shared_resource)
+{
+    IO_STATUS_BLOCK iosb;
+    obj_handle_t kmt_handle;
+
+    if (NtDeviceIoControlFile(shared_resource, NULL, NULL, NULL, &iosb, IOCTL_SHARED_GPU_RESOURCE_GETKMT,
+            NULL, 0, &kmt_handle, sizeof(kmt_handle)))
+        return INVALID_HANDLE_VALUE;
+
+    return wine_server_ptr_handle(kmt_handle);
+}
+
+NTSTATUS wine_vkAllocateMemory(void *args)
+{
+    struct vkAllocateMemory_params *params = args;
+    VkDevice device = params->device;
+    const VkMemoryAllocateInfo *allocate_info = params->pAllocateInfo;
+    const VkAllocationCallbacks *allocator = params->pAllocator;
+    VkDeviceMemory *memory = params->pMemory;
+
+    const VkImportMemoryWin32HandleInfoKHR *handle_import_info;
+    const VkExportMemoryWin32HandleInfoKHR *handle_export_info;
+    VkMemoryAllocateInfo allocate_info_dup = *allocate_info;
+    VkExportMemoryAllocateInfo *export_info;
+    VkImportMemoryFdInfoKHR fd_import_info;
+    struct wine_dev_mem *object;
+    VkResult res;
+    int fd;
+
+#if defined(USE_STRUCT_CONVERSION)
+    VkMemoryAllocateInfo_host allocate_info_host;
+    VkMemoryGetFdInfoKHR_host get_fd_info;
+#else
+    VkMemoryAllocateInfo allocate_info_host;
+    VkMemoryGetFdInfoKHR get_fd_info;
+#endif
+
+    TRACE("%p %p %p %p\n", device, allocate_info, allocator, memory);
+
+    if (allocator)
+        FIXME("Support for allocation callbacks not implemented yet\n");
+
+    if ((res = convert_VkMemoryAllocateInfo_struct_chain(allocate_info->pNext, &allocate_info_dup)) < 0)
+    {
+        WARN("Failed to convert VkMemoryAllocateInfo pNext chain, res=%d.\n", res);
+        return res;
+    }
+
+    if (!(object = calloc(1, sizeof(*object))))
+    {
+        free_VkMemoryAllocateInfo_struct_chain(&allocate_info_dup);
+        return VK_ERROR_OUT_OF_HOST_MEMORY;
+    }
+
+    object->dev_mem = VK_NULL_HANDLE;
+    object->handle = INVALID_HANDLE_VALUE;
+    fd_import_info.fd = -1;
+    fd_import_info.pNext = NULL;
+
+    /* find and process handle import/export info and grab it */
+    handle_import_info = wine_vk_find_struct(allocate_info, IMPORT_MEMORY_WIN32_HANDLE_INFO_KHR);
+    handle_export_info = wine_vk_find_struct(allocate_info, EXPORT_MEMORY_WIN32_HANDLE_INFO_KHR);
+    if (handle_export_info && handle_export_info->pAttributes && handle_export_info->pAttributes->lpSecurityDescriptor)
+        FIXME("Support for custom security descriptor not implemented.\n");
+
+    if ((export_info = wine_vk_find_struct(&allocate_info_dup, EXPORT_MEMORY_ALLOCATE_INFO)))
+    {
+        object->handle_types = export_info->handleTypes;
+        if (export_info->handleTypes & wine_vk_handle_over_fd_types)
+            export_info->handleTypes |= VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT;
+        wine_vk_normalize_handle_types_host(&export_info->handleTypes);
+    }
+
+    /* Vulkan consumes imported FDs, but not imported HANDLEs */
+    if (handle_import_info)
+    {
+        fd_import_info.sType = VK_STRUCTURE_TYPE_IMPORT_MEMORY_FD_INFO_KHR;
+        fd_import_info.pNext = allocate_info_dup.pNext;
+        fd_import_info.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT;
+
+        switch (handle_import_info->handleType)
+        {
+            case VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT:
+                if (handle_import_info->handle)
+                    NtDuplicateObject( NtCurrentProcess(), handle_import_info->handle, NtCurrentProcess(), &object->handle, 0, 0, DUPLICATE_SAME_ACCESS );
+                else if (handle_import_info->name)
+                    object->handle = open_shared_resource( 0, handle_import_info->name );
+                break;
+            case VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_KMT_BIT:
+                /* FIXME: the spec says that device memory imported from a KMT handle doesn't keep a reference to the underyling payload.
+                   This means that in cases where on windows an application leaks VkDeviceMemory objects, we leak the full payload.  To
+                   fix this, we would need wine_dev_mem objects to store no reference to the payload, that means no host VkDeviceMemory
+                   object (as objects imported from FDs hold a reference to the payload), and no win32 handle to the object. We would then
+                   extend make_vulkan to have the thunks converting wine_dev_mem to native handles open the VkDeviceMemory from the KMT
+                   handle, use it in the host function, then close it again. */
+                object->handle = open_shared_resource( handle_import_info->handle, NULL );
+                break;
+            default:
+                WARN("Invalid handle type %08x passed in.\n", handle_import_info->handleType);
+                res = VK_ERROR_INVALID_EXTERNAL_HANDLE;
+                goto done;
+        }
+
+        if (object->handle != INVALID_HANDLE_VALUE)
+            fd_import_info.fd = get_shared_resource_fd(object->handle);
+
+        if (fd_import_info.fd == -1)
+        {
+            TRACE("Couldn't access resource handle or name. type=%08x handle=%p name=%s\n", handle_import_info->handleType, handle_import_info->handle,
+                    handle_import_info->name ? debugstr_w(handle_import_info->name) : "");
+            res = VK_ERROR_INVALID_EXTERNAL_HANDLE;
+            goto done;
+        }
+    }
+
+    allocate_info_host.sType = allocate_info_dup.sType;
+    allocate_info_host.pNext = fd_import_info.fd == -1 ? allocate_info_dup.pNext : &fd_import_info;
+    allocate_info_host.allocationSize = allocate_info_dup.allocationSize;
+    allocate_info_host.memoryTypeIndex = allocate_info_dup.memoryTypeIndex;
+
+    if ((res = device->funcs.p_vkAllocateMemory(device->device, &allocate_info_host, NULL, &object->dev_mem)) == VK_SUCCESS)
+    {
+        if (object->handle == INVALID_HANDLE_VALUE && export_info && export_info->handleTypes & VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT)
+        {
+            get_fd_info.sType = VK_STRUCTURE_TYPE_MEMORY_GET_FD_INFO_KHR;
+            get_fd_info.pNext = NULL;
+            get_fd_info.memory = object->dev_mem;
+            get_fd_info.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT;
+
+            if (device->funcs.p_vkGetMemoryFdKHR(device->device, &get_fd_info, &fd) == VK_SUCCESS)
+            {
+                object->handle = create_gpu_resource(fd, handle_export_info ? handle_export_info->name : NULL);
+                object->access = handle_export_info ? handle_export_info->dwAccess : GENERIC_ALL;
+                if (handle_export_info && handle_export_info->pAttributes)
+                    object->inherit = handle_export_info->pAttributes->bInheritHandle;
+                else
+                    object->inherit = FALSE;
+                close(fd);
+            }
+
+            if (object->handle == INVALID_HANDLE_VALUE)
+            {
+                res = VK_ERROR_OUT_OF_HOST_MEMORY;
+                goto done;
+            }
+        }
+
+        WINE_VK_ADD_NON_DISPATCHABLE_MAPPING(device->phys_dev->instance, object, object->dev_mem);
+        *memory = wine_dev_mem_to_handle(object);
+    }
+
+    done:
+
+    if (res != VK_SUCCESS)
+    {
+        device->funcs.p_vkFreeMemory(device->device, object->dev_mem, NULL);
+        if (fd_import_info.fd != -1)
+            close(fd_import_info.fd);
+        if (object->handle != INVALID_HANDLE_VALUE)
+            NtClose(object->handle);
+        free(object);
+    }
+
+    free_VkMemoryAllocateInfo_struct_chain(&allocate_info_dup);
+
+    return res;
+}
+
+NTSTATUS wine_vkGetMemoryWin32HandleKHR(void *args)
+{
+    struct vkGetMemoryWin32HandleKHR_params *params = args;
+    VkDevice device = params->device;
+    const VkMemoryGetWin32HandleInfoKHR *handle_info = params->pGetWin32HandleInfo;
+    HANDLE *handle = params->pHandle;
+
+    struct wine_dev_mem *dev_mem = wine_dev_mem_from_handle(handle_info->memory);
+    const VkBaseInStructure *chain;
+    HANDLE ret;
+
+    TRACE("%p, %p %p\n", device, handle_info, handle);
+
+    if (!(dev_mem->handle_types & handle_info->handleType))
+        return VK_ERROR_UNKNOWN;
+
+    if ((chain = handle_info->pNext))
+        FIXME("Ignoring a linked structure of type %u.\n", chain->sType);
+
+    switch(handle_info->handleType)
+    {
+        case VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT:
+            return !NtDuplicateObject( NtCurrentProcess(), dev_mem->handle, NtCurrentProcess(), handle, dev_mem->access, dev_mem->inherit ? OBJ_INHERIT : 0, 0) ?
+                VK_SUCCESS : VK_ERROR_OUT_OF_HOST_MEMORY;
+        case VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_KMT_BIT:
+        {
+            if ((ret = get_shared_resource_kmt_handle(dev_mem->handle)) == INVALID_HANDLE_VALUE)
+                return VK_ERROR_OUT_OF_HOST_MEMORY;
+            *handle = ret;
+            return VK_SUCCESS;
+        }
+        default:
+            FIXME("Unable to get handle of type %x, did the application ignore the capabilities?\n", handle_info->handleType);
+            return VK_ERROR_UNKNOWN;
+    }
+}
+
+NTSTATUS wine_vkFreeMemory(void *args)
+{
+    struct vkFreeMemory_params *params = args;
+    VkDevice device = params->device;
+    VkDeviceMemory handle = params->memory;
+    const VkAllocationCallbacks *allocator = params->pAllocator;
+
+    struct wine_dev_mem *dev_mem = wine_dev_mem_from_handle(handle);
+
+    TRACE("%p 0x%s, %p\n", device, wine_dbgstr_longlong(handle), allocator);
+
+    if (allocator)
+        FIXME("Support for allocation callbacks not implemented yet\n");
+
+    if (!handle)
+        return STATUS_SUCCESS;
+
+    WINE_VK_REMOVE_HANDLE_MAPPING(device->phys_dev->instance, dev_mem);
+    device->funcs.p_vkFreeMemory(device->device, dev_mem->dev_mem, NULL);
+    if (dev_mem->handle != INVALID_HANDLE_VALUE)
+        NtClose(dev_mem->handle);
+    free(dev_mem);
+    return STATUS_SUCCESS;
+}
+
+NTSTATUS wine_vkGetMemoryWin32HandlePropertiesKHR(void *args)
+{
+    struct vkGetMemoryWin32HandlePropertiesKHR_params *params = args;
+    VkDevice device = params->device;
+    VkExternalMemoryHandleTypeFlagBits type = params->handleType;
+    HANDLE handle = params->handle;
+    VkMemoryWin32HandlePropertiesKHR *properties = params->pMemoryWin32HandleProperties;
+
+    TRACE("%p %u %p %p\n", device, type, handle, properties);
+
+    /* VUID-vkGetMemoryWin32HandlePropertiesKHR-handleType-00666
+       handleType must not be one of the handle types defined as opaque */
+    return VK_ERROR_INVALID_EXTERNAL_HANDLE;
+}
+
+NTSTATUS wine_vkCreateBuffer(void *args)
+{
+    struct vkCreateBuffer_params *params = args;
+    VkDevice device = params->device;
+    const VkBufferCreateInfo *create_info = params->pCreateInfo;
+    const VkAllocationCallbacks *allocator = params->pAllocator;
+    VkBuffer *buffer = params->pBuffer;
+
+    VkExternalMemoryBufferCreateInfo *external_memory_info;
+    VkResult res;
+
+#if defined(USE_STRUCT_CONVERSION)
+    VkBufferCreateInfo_host create_info_host;
+#else
+    VkBufferCreateInfo create_info_host;
+#endif
+
+    TRACE("%p %p %p %p\n", device, create_info, allocator, buffer);
+
+    if (allocator)
+        FIXME("Support for allocation callbacks not implemented yet\n");
+
+    if ((res = convert_VkBufferCreateInfo_struct_chain(create_info->pNext, (VkBufferCreateInfo *) &create_info_host)))
+    {
+        WARN("Failed to convert VkBufferCreateInfo pNext chain, res=%d.\n", res);
+        return res;
+    }
+
+    if ((external_memory_info = wine_vk_find_struct(&create_info_host, EXTERNAL_MEMORY_BUFFER_CREATE_INFO)))
+    {
+        if (external_memory_info->handleTypes & wine_vk_handle_over_fd_types)
+            external_memory_info->handleTypes |= VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT;
+        wine_vk_normalize_handle_types_host(&external_memory_info->handleTypes);
+    }
+
+    create_info_host.sType = create_info->sType;
+    create_info_host.flags = create_info->flags;
+    create_info_host.size = create_info->size;
+    create_info_host.usage = create_info->usage;
+    create_info_host.sharingMode = create_info->sharingMode;
+    create_info_host.queueFamilyIndexCount = create_info->queueFamilyIndexCount;
+    create_info_host.pQueueFamilyIndices = create_info->pQueueFamilyIndices;
+
+    res = device->funcs.p_vkCreateBuffer(device->device, &create_info_host, NULL, buffer);
+
+    free_VkBufferCreateInfo_struct_chain((VkBufferCreateInfo *) &create_info_host);
+
+    return res;
+}
+
+NTSTATUS wine_vkCreateImage(void *args)
+{
+    struct vkCreateImage_params *params = args;
+    VkDevice device = params->device;
+    const VkImageCreateInfo *create_info = params->pCreateInfo;
+    const VkAllocationCallbacks *allocator = params->pAllocator;
+    VkImage *image = params->pImage;
+
+    VkExternalMemoryImageCreateInfo *external_memory_info;
+    VkImageCreateInfo create_info_host = *create_info;
+    VkResult res;
+
+    TRACE("%p %p %p %p\n", device, create_info, allocator, image);
+
+    if (allocator)
+        FIXME("Support for allocation callbacks not implemented yet\n");
+
+    if ((res = convert_VkImageCreateInfo_struct_chain(create_info->pNext, &create_info_host)))
+    {
+        WARN("Failed to convert VkImageCreateInfo pNext chain, res=%d.\n", res);
+        return res;
+    }
+
+    if ((external_memory_info = wine_vk_find_struct(&create_info_host, EXTERNAL_MEMORY_IMAGE_CREATE_INFO)))
+    {
+        if (external_memory_info->handleTypes & wine_vk_handle_over_fd_types)
+            external_memory_info->handleTypes |= VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT_KHR;
+        wine_vk_normalize_handle_types_host(&external_memory_info->handleTypes);
+    }
+
+    res = device->funcs.p_vkCreateImage(device->device, &create_info_host, NULL, image);
+
+    free_VkImageCreateInfo_struct_chain(&create_info_host);
+
+    return res;
 }
