@@ -5,6 +5,8 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(belauncher);
 
+extern int _write(int, void *, int);
+
 int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE hPrevInst, LPWSTR cmdline, int cmdshow)
 {
     char *configs, *config, *arch_32_exe = NULL, *arch_64_exe = NULL, *game_exe, *be_arg = NULL;
@@ -73,7 +75,8 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE hPrevInst, LPWSTR cmdline, int cm
         *(strchr(game_exe, '\n')) = 0;
     game_exe_len = MultiByteToWideChar(CP_ACP, 0, game_exe, -1, NULL, 0) - 1;
 
-    if (be_arg)
+    if (!be_arg) arg_len = 0;
+    else
     {
         if (strchr(be_arg, '\r'))
             *(strchr(be_arg, '\r')) = 0;

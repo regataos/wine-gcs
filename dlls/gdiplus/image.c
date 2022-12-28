@@ -100,7 +100,7 @@ static ColorPalette *get_palette(IWICBitmapFrameDecode *frame, WICBitmapPaletteT
 
             IWICPalette_GetColorCount(wic_palette, &count);
             palette = heap_alloc(2 * sizeof(UINT) + count * sizeof(ARGB));
-            IWICPalette_GetColors(wic_palette, count, (UINT *)palette->Entries, &palette->Count);
+            IWICPalette_GetColors(wic_palette, count, palette->Entries, &palette->Count);
 
             IWICPalette_GetType(wic_palette, &type);
             switch(type) {
@@ -145,7 +145,7 @@ static HRESULT set_palette(IWICBitmapFrameEncode *frame, ColorPalette *palette)
     IWICImagingFactory_Release(factory);
     if (SUCCEEDED(hr))
     {
-        hr = IWICPalette_InitializeCustom(wic_palette, (UINT *)palette->Entries, palette->Count);
+        hr = IWICPalette_InitializeCustom(wic_palette, palette->Entries, palette->Count);
 
         if (SUCCEEDED(hr))
             hr = IWICBitmapFrameEncode_SetPalette(frame, wic_palette);
@@ -2442,8 +2442,7 @@ GpStatus WINGDIPAPI GdipGetPropertyIdList(GpImage *image, UINT num, PROPID *list
     HRESULT hr;
     IWICMetadataReader *reader;
     IWICEnumMetadataItem *enumerator;
-    UINT prop_count, i;
-    ULONG items_returned;
+    UINT prop_count, i, items_returned;
 
     TRACE("(%p, %u, %p)\n", image, num, list);
 
@@ -2787,8 +2786,7 @@ GpStatus WINGDIPAPI GdipGetPropertySize(GpImage *image, UINT *size, UINT *count)
 
     for (i = 0; i < prop_count; i++)
     {
-        ULONG items_returned;
-        UINT item_size;
+        UINT items_returned, item_size;
 
         hr = IWICEnumMetadataItem_Next(enumerator, 1, NULL, &id, &value, &items_returned);
         if (hr != S_OK) break;
@@ -2866,8 +2864,7 @@ GpStatus WINGDIPAPI GdipGetAllPropertyItems(GpImage *image, UINT size,
     for (i = 0; i < prop_count; i++)
     {
         PropertyItem *item;
-        ULONG items_returned;
-        UINT item_size;
+        UINT items_returned, item_size;
 
         hr = IWICEnumMetadataItem_Next(enumerator, 1, NULL, &id, &value, &items_returned);
         if (hr != S_OK) break;
@@ -4121,7 +4118,7 @@ static GpStatus load_wmf(IStream *stream, GpMetafile **metafile)
     METAHEADER mh;
     HMETAFILE hmf;
     HRESULT hr;
-    ULONG size;
+    UINT size;
     void *buf;
 
     hr = IStream_Read(stream, &mh, sizeof(mh), &size);
@@ -4200,7 +4197,7 @@ static GpStatus load_emf(IStream *stream, GpMetafile **metafile)
     HENHMETAFILE hemf;
     GpStatus status;
     HRESULT hr;
-    ULONG size;
+    UINT size;
     void *buf;
 
     hr = IStream_Read(stream, &emh, sizeof(emh), &size);
@@ -4289,7 +4286,7 @@ static GpStatus get_decoder_info(IStream* stream, const struct image_codec **res
     const BYTE *pattern, *mask;
     LARGE_INTEGER seek;
     HRESULT hr;
-    ULONG bytesread;
+    UINT bytesread;
     int i;
     DWORD j, sig;
 
@@ -4552,7 +4549,6 @@ static GpStatus encode_frame_wic(IWICBitmapEncoder *encoder, GpImage *image)
     GpBitmap *bitmap;
     IWICBitmapFrameEncode *frameencode;
     IPropertyBag2 *encoderoptions;
-    GUID container_format;
     HRESULT hr;
     UINT width, height;
     PixelFormat gdipformat=0;
@@ -4579,20 +4575,7 @@ static GpStatus encode_frame_wic(IWICBitmapEncoder *encoder, GpImage *image)
 
     if (SUCCEEDED(hr)) /* created frame */
     {
-        hr = IWICBitmapEncoder_GetContainerFormat(encoder, &container_format);
-        if (SUCCEEDED(hr) && IsEqualGUID(&container_format, &GUID_ContainerFormatPng))
-        {
-            /* disable PNG filters for faster encoding */
-            PROPBAG2 filter_option = { .pstrName = (LPOLESTR) L"FilterOption" };
-            VARIANT filter_value;
-            VariantInit(&filter_value);
-            V_VT(&filter_value) = VT_UI1;
-            V_UI1(&filter_value) = WICPngFilterNone;
-            hr = IPropertyBag2_Write(encoderoptions, 1, &filter_option, &filter_value);
-        }
-
-        if (SUCCEEDED(hr))
-            hr = IWICBitmapFrameEncode_Initialize(frameencode, encoderoptions);
+        hr = IWICBitmapFrameEncode_Initialize(frameencode, encoderoptions);
 
         if (SUCCEEDED(hr))
             hr = IWICBitmapFrameEncode_SetSize(frameencode, width, height);
@@ -5847,7 +5830,7 @@ static GpStatus create_optimal_palette(ColorPalette *palette, INT desired,
             {
                 palette->Flags = 0;
                 IWICPalette_GetColorCount(wic_palette, &palette->Count);
-                IWICPalette_GetColors(wic_palette, palette->Count, (UINT *)palette->Entries, &palette->Count);
+                IWICPalette_GetColors(wic_palette, palette->Count, palette->Entries, &palette->Count);
             }
 
             IWICBitmap_Release(bitmap);

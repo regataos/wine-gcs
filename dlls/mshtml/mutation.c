@@ -27,6 +27,7 @@
 #include "ole2.h"
 #include "shlguid.h"
 #include "wininet.h"
+#include "winternl.h"
 
 #include "mshtml_private.h"
 #include "htmlscript.h"
@@ -51,6 +52,20 @@ static const IID NS_ICONTENTUTILS_CID =
     {0x762C4AE7,0xB923,0x422F,{0xB9,0x7E,0xB9,0xBF,0xC1,0xEF,0x7B,0xF0}};
 
 static nsIContentUtils *content_utils;
+
+static BOOL is_iexplore(void)
+{
+    static volatile char cache = -1;
+    BOOL ret = cache;
+    if(ret == -1) {
+        const WCHAR *p, *name = NtCurrentTeb()->Peb->ProcessParameters->ImagePathName.Buffer;
+        if((p = wcsrchr(name, '/'))) name = p + 1;
+        if((p = wcsrchr(name, '\\'))) name = p + 1;
+        ret = !wcsicmp(name, L"iexplore.exe");
+        cache = ret;
+    }
+    return ret;
+}
 
 static PRUnichar *handle_insert_comment(HTMLDocumentNode *doc, const PRUnichar *comment)
 {
@@ -180,7 +195,7 @@ static nsresult run_insert_comment(HTMLDocumentNode *doc, nsISupports *comment_i
 
     nsres = nsISupports_QueryInterface(comment_iface, &IID_nsIDOMComment, (void**)&nscomment);
     if(NS_FAILED(nsres)) {
-        ERR("Could not get nsIDOMComment iface:%08x\n", nsres);
+        ERR("Could not get nsIDOMComment iface:%08lx\n", nsres);
         return nsres;
     }
 
@@ -312,14 +327,14 @@ static nsresult run_insert_script(HTMLDocumentNode *doc, nsISupports *script_ifa
 
     nsres = nsISupports_QueryInterface(script_iface, &IID_nsIDOMHTMLScriptElement, (void**)&nsscript);
     if(NS_FAILED(nsres)) {
-        ERR("Could not get nsIDOMHTMLScriptElement: %08x\n", nsres);
+        ERR("Could not get nsIDOMHTMLScriptElement: %08lx\n", nsres);
         return nsres;
     }
 
     if(parser_iface) {
         nsres = nsISupports_QueryInterface(parser_iface, &IID_nsIParser, (void**)&nsparser);
         if(NS_FAILED(nsres)) {
-            ERR("Could not get nsIParser iface: %08x\n", nsres);
+            ERR("Could not get nsIParser iface: %08lx\n", nsres);
             nsparser = NULL;
         }
     }
@@ -374,6 +389,7 @@ compat_mode_t lock_document_mode(HTMLDocumentNode *doc)
 
 static void set_document_mode(HTMLDocumentNode *doc, compat_mode_t document_mode, BOOL lock)
 {
+    dispex_static_data_t *dispex_data = &HTMLDocumentNode_dispex;
     compat_mode_t max_compat_mode;
 
     if(doc->document_mode_locked) {
@@ -395,17 +411,41 @@ static void set_document_mode(HTMLDocumentNode *doc, compat_mode_t document_mode
     doc->document_mode = document_mode;
     if(lock)
         lock_document_mode(doc);
+
+    if(doc->basedoc.doc_type != DOCTYPE_HTML)
+        return;
+
+    /* The prototype and dispex need to be changed since they depend on mode */
+    if(doc->window && doc->window->compat_prototypes[PROTO_ID_HTMLDocument]) {
+        IUnknown_Release(&doc->window->compat_prototypes[PROTO_ID_HTMLDocument]->IUnknown_iface);
+        doc->window->compat_prototypes[PROTO_ID_HTMLDocument] = NULL;
+    }
+
+    if(doc->node.event_target.dispex.prototype) {
+        IUnknown_Release(&doc->node.event_target.dispex.prototype->IUnknown_iface);
+        doc->node.event_target.dispex.prototype = NULL;
+    }
+
+    if(COMPAT_MODE_IE9 <= document_mode && document_mode < COMPAT_MODE_IE11)
+        dispex_data = &DocumentNode_dispex;
+
+    update_dispex(&doc->node.event_target.dispex, dispex_data, doc, document_mode);
 }
 
-BOOL parse_compat_version(const WCHAR *version_string, compat_mode_t *r)
+static BOOL is_ua_compatible_delimiter(WCHAR c)
+{
+    return !c || c == ';' || c == ',' || iswspace(c);
+}
+
+const WCHAR *parse_compat_version(const WCHAR *version_string, compat_mode_t *r)
 {
     DWORD version = 0;
     const WCHAR *p;
 
     for(p = version_string; '0' <= *p && *p <= '9'; p++)
         version = version * 10 + *p-'0';
-    if((*p && *p != ';') || p == version_string)
-        return FALSE;
+    if(!is_ua_compatible_delimiter(*p) || p == version_string)
+        return NULL;
 
     switch(version){
     case 5:
@@ -427,13 +467,14 @@ BOOL parse_compat_version(const WCHAR *version_string, compat_mode_t *r)
     default:
         *r = version < 5 ? COMPAT_MODE_QUIRKS : COMPAT_MODE_IE11;
     }
-    return TRUE;
+    return p;
 }
 
 static BOOL parse_ua_compatible(const WCHAR *p, compat_mode_t *r)
 {
     static const WCHAR ie_eqW[] = {'I','E','='};
     static const WCHAR edgeW[] = {'e','d','g','e'};
+    compat_mode_t mode = COMPAT_MODE_INVALID;
 
     TRACE("%s\n", debugstr_w(p));
 
@@ -441,15 +482,22 @@ static BOOL parse_ua_compatible(const WCHAR *p, compat_mode_t *r)
         return FALSE;
     p += 3;
 
-    if(!wcsnicmp(p, edgeW, ARRAY_SIZE(edgeW))) {
-        p += ARRAY_SIZE(edgeW);
-        if(*p && *p != ';')
-            return FALSE;
-        *r = COMPAT_MODE_IE11;
-        return TRUE;
-    }
+    do {
+        while(iswspace(*p)) p++;
+        if(!wcsnicmp(p, edgeW, ARRAY_SIZE(edgeW))) {
+            p += ARRAY_SIZE(edgeW);
+            if(is_ua_compatible_delimiter(*p))
+                mode = COMPAT_MODE_IE11;
+            break;
+        }else if(!(p = parse_compat_version(p, r)))
+            break;
+        if(mode < *r)
+            mode = *r;
+        while(iswspace(*p)) p++;
+    } while(*p++ == ',');
 
-    return parse_compat_version(p, r);
+    *r = mode;
+    return mode != COMPAT_MODE_INVALID;
 }
 
 void process_document_response_headers(HTMLDocumentNode *doc, IBinding *binding)
@@ -472,7 +520,7 @@ void process_document_response_headers(HTMLDocumentNode *doc, IBinding *binding)
         compat_mode_t document_mode;
         WCHAR *header;
 
-        TRACE("size %u\n", size);
+        TRACE("size %lu\n", size);
 
         header = heap_strdupAtoW(buf);
         if(header && parse_ua_compatible(header, &document_mode)) {
@@ -564,7 +612,7 @@ static nsrefcnt NSAPI nsRunnable_AddRef(nsIRunnable *iface)
     nsRunnable *This = impl_from_nsIRunnable(iface);
     LONG ref = InterlockedIncrement(&This->ref);
 
-    TRACE("(%p) ref=%d\n", This, ref);
+    TRACE("(%p) ref=%ld\n", This, ref);
 
     return ref;
 }
@@ -574,7 +622,7 @@ static nsrefcnt NSAPI nsRunnable_Release(nsIRunnable *iface)
     nsRunnable *This = impl_from_nsIRunnable(iface);
     LONG ref = InterlockedDecrement(&This->ref);
 
-    TRACE("(%p) ref=%d\n", This, ref);
+    TRACE("(%p) ref=%ld\n", This, ref);
 
     if(!ref) {
         htmldoc_release(&This->doc->basedoc);
@@ -823,7 +871,13 @@ static void NSAPI nsDocumentObserver_BindToDocument(nsIDocumentObserver *iface, 
 
             TRACE("doctype node\n");
 
-            if(This->window && This->window->base.outer_window) {
+            /* Native mshtml hardcodes special behavior for iexplore.exe here. The feature control registry
+               keys under HKLM or HKCU\Software\Microsoft\Internet Explorer\Main\FeatureControl are not used
+               in this case (neither in Wow6432Node), although FEATURE_BROWSER_EMULATION does override this,
+               but it is not set by default on native, and the behavior is still different. This was tested
+               by removing all iexplore.exe values from any FeatureControl subkeys, and renaming the test
+               executable to iexplore.exe, which changed its default compat mode in such cases. */
+            if(This->window && This->window->base.outer_window && is_iexplore()) {
                 HTMLOuterWindow *window = This->window->base.outer_window;
                 DWORD zone;
                 HRESULT hres;
@@ -937,9 +991,9 @@ void init_document_mutation(HTMLDocumentNode *doc)
 
     doc->nsIDocumentObserver_iface.lpVtbl = &nsDocumentObserverVtbl;
 
-    nsres = nsIDOMHTMLDocument_QueryInterface(doc->nsdoc, &IID_nsIDocument, (void**)&nsdoc);
+    nsres = nsIDOMDocument_QueryInterface(doc->nsdoc, &IID_nsIDocument, (void**)&nsdoc);
     if(NS_FAILED(nsres)) {
-        ERR("Could not get nsIDocument: %08x\n", nsres);
+        ERR("Could not get nsIDocument: %08lx\n", nsres);
         return;
     }
 
@@ -952,9 +1006,9 @@ void release_document_mutation(HTMLDocumentNode *doc)
     nsIDocument *nsdoc;
     nsresult nsres;
 
-    nsres = nsIDOMHTMLDocument_QueryInterface(doc->nsdoc, &IID_nsIDocument, (void**)&nsdoc);
+    nsres = nsIDOMDocument_QueryInterface(doc->nsdoc, &IID_nsIDocument, (void**)&nsdoc);
     if(NS_FAILED(nsres)) {
-        ERR("Could not get nsIDocument: %08x\n", nsres);
+        ERR("Could not get nsIDocument: %08lx\n", nsres);
         return;
     }
 
@@ -962,13 +1016,13 @@ void release_document_mutation(HTMLDocumentNode *doc)
     nsIDocument_Release(nsdoc);
 }
 
-JSContext *get_context_from_document(nsIDOMHTMLDocument *nsdoc)
+JSContext *get_context_from_document(nsIDOMDocument *nsdoc)
 {
     nsIDocument *doc;
     JSContext *ctx;
     nsresult nsres;
 
-    nsres = nsIDOMHTMLDocument_QueryInterface(nsdoc, &IID_nsIDocument, (void**)&doc);
+    nsres = nsIDOMDocument_QueryInterface(nsdoc, &IID_nsIDocument, (void**)&doc);
     assert(nsres == NS_OK);
 
     ctx = nsIContentUtils_GetContextFromDocument(content_utils, doc);
@@ -994,12 +1048,12 @@ void init_mutation(nsIComponentManager *component_manager)
     nsres = nsIComponentManager_GetClassObject(component_manager, &NS_ICONTENTUTILS_CID,
             &IID_nsIFactory, (void**)&factory);
     if(NS_FAILED(nsres)) {
-        ERR("Could not create nsIContentUtils service: %08x\n", nsres);
+        ERR("Could not create nsIContentUtils service: %08lx\n", nsres);
         return;
     }
 
     nsres = nsIFactory_CreateInstance(factory, NULL, &IID_nsIContentUtils, (void**)&content_utils);
     nsIFactory_Release(factory);
     if(NS_FAILED(nsres))
-        ERR("Could not create nsIContentUtils instance: %08x\n", nsres);
+        ERR("Could not create nsIContentUtils instance: %08lx\n", nsres);
 }

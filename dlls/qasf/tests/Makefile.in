@@ -1,7 +1,8 @@
-EXTRADEFS = -DWINE_NO_LONG_TYPES
 TESTDLL   = qasf.dll
 IMPORTS   = strmbase dmoguids strmiids uuid msdmo ole32
 
 C_SRCS = \
 	asfreader.c \
 	dmowrapper.c
+
+RC_SRCS = resource.rc

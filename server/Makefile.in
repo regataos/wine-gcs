@@ -32,7 +32,6 @@ C_SRCS = \
 	region.c \
 	registry.c \
 	request.c \
-	scheduler.c \
 	semaphore.c \
 	serial.c \
 	signal.c \
@@ -52,7 +51,6 @@ MANPAGES = \
 	wineserver.fr.UTF-8.man.in \
 	wineserver.man.in
 
-EXTRALIBS = $(LDEXECFLAGS) $(RT_LIBS) $(INOTIFY_LIBS) $(PROCSTAT_LIBS) -flto=auto -flto-partition=one -fdevirtualize-at-ltrans
-EXTRADEFS = -flto=auto -flto-partition=one -fdevirtualize-at-ltrans
+EXTRALIBS = $(LDEXECFLAGS) $(RT_LIBS) $(INOTIFY_LIBS) $(PROCSTAT_LIBS)
 
 unicode_EXTRADEFS = -DNLSDIR="\"${nlsdir}\"" -DBIN_TO_NLSDIR=\"`${MAKEDEP} -R ${bindir} ${nlsdir}`\"

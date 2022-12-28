@@ -167,7 +167,7 @@ BOOL WINAPI RegisterClassNameW(const WCHAR *class)
 
 BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
 {
-    TRACE("%p, %#lx, %p\n", hinstDLL, fdwReason, lpvReserved);
+    TRACE("%p,%x,%p\n", hinstDLL, fdwReason, lpvReserved);
 
     switch (fdwReason) {
 	case DLL_PROCESS_ATTACH:
@@ -293,7 +293,8 @@ MenuHelp (UINT uMsg, WPARAM wParam, LPARAM lParam, HMENU hMainMenu,
 
     switch (uMsg) {
 	case WM_MENUSELECT:
-	    TRACE("WM_MENUSELECT wParam %#Ix, lParam %#Ix\n", wParam, lParam);
+	    TRACE("WM_MENUSELECT wParam=0x%lX lParam=0x%lX\n",
+		   wParam, lParam);
 
             if ((HIWORD(wParam) == 0xFFFF) && (lParam == 0)) {
                 /* menu was closed */
@@ -322,7 +323,8 @@ MenuHelp (UINT uMsg, WPARAM wParam, LPARAM lParam, HMENU hMainMenu,
 	    break;
 
         case WM_COMMAND :
-	    TRACE("WM_COMMAND wParam %#Ix, lParam %#Ix\n", wParam, lParam);
+	    TRACE("WM_COMMAND wParam=0x%lX lParam=0x%lX\n",
+		   wParam, lParam);
 	    /* WM_COMMAND is not invalid since it is documented
 	     * in the windows api reference. So don't output
              * any FIXME for WM_COMMAND
@@ -372,7 +374,7 @@ ShowHideMenuCtl (HWND hwnd, UINT_PTR uFlags, LPINT lpInfo)
 {
     LPINT lpMenuId;
 
-    TRACE("%p, %Ix, %p\n", hwnd, uFlags, lpInfo);
+    TRACE("%p, %lx, %p\n", hwnd, uFlags, lpInfo);
 
     if (lpInfo == NULL)
 	return FALSE;
@@ -458,25 +460,39 @@ GetEffectiveClientRect (HWND hwnd, LPRECT lpRect, const INT *lpInfo)
     } while (*lpRun);
 }
 
-void COMCTL32_DrawStatusText(HDC hdc, LPCRECT lprc, LPCWSTR text, UINT style, BOOL draw_background)
+
+/***********************************************************************
+ * DrawStatusTextW [COMCTL32.@]
+ *
+ * Draws text with borders, like in a status bar.
+ *
+ * PARAMS
+ *     hdc   [I] handle to the window's display context
+ *     lprc  [I] pointer to a rectangle
+ *     text  [I] pointer to the text
+ *     style [I] drawing style
+ *
+ * RETURNS
+ *     No return value.
+ *
+ * NOTES
+ *     The style variable can have one of the following values:
+ *     (will be written ...)
+ */
+
+void WINAPI DrawStatusTextW (HDC hdc, LPCRECT lprc, LPCWSTR text, UINT style)
 {
     RECT r = *lprc;
-    UINT border;
+    UINT border = BDR_SUNKENOUTER;
     COLORREF oldbkcolor;
 
-    if (draw_background)
-    {
-        if (style & SBT_POPOUT)
-            border = BDR_RAISEDOUTER;
-        else if (style & SBT_NOBORDERS)
-            border = 0;
-        else
-            border = BDR_SUNKENOUTER;
+    if (style & SBT_POPOUT)
+        border = BDR_RAISEDOUTER;
+    else if (style & SBT_NOBORDERS)
+        border = 0;
 
-        oldbkcolor = SetBkColor (hdc, comctl32_color.clrBtnFace);
-        DrawEdge (hdc, &r, border, BF_MIDDLE|BF_RECT|BF_ADJUST);
-        SetBkColor (hdc, oldbkcolor);
-    }
+    oldbkcolor = SetBkColor (hdc, comctl32_color.clrBtnFace);
+    DrawEdge (hdc, &r, border, BF_MIDDLE|BF_RECT|BF_ADJUST);
 
     /* now draw text */
     if (text) {
@@ -508,31 +524,10 @@ void COMCTL32_DrawStatusText(HDC hdc, LPCRECT lprc, LPCWSTR text, UINT style, BO
         SetBkMode (hdc, oldbkmode);
         SetTextColor (hdc, oldtextcolor);
     }
+
+    SetBkColor (hdc, oldbkcolor);
 }
 
-/***********************************************************************
- * DrawStatusTextW [COMCTL32.@]
- *
- * Draws text with borders, like in a status bar.
- *
- * PARAMS
- *     hdc   [I] handle to the window's display context
- *     lprc  [I] pointer to a rectangle
- *     text  [I] pointer to the text
- *     style [I] drawing style
- *
- * RETURNS
- *     No return value.
- *
- * NOTES
- *     The style variable can have one of the following values:
- *     (will be written ...)
- */
-
-void WINAPI DrawStatusTextW(HDC hdc, LPCRECT lprc, LPCWSTR text, UINT style)
-{
-    COMCTL32_DrawStatusText(hdc, lprc, text, style, TRUE);
-}
 
 /***********************************************************************
  * DrawStatusText  [COMCTL32.@]
@@ -713,7 +708,7 @@ InitCommonControlsEx (const INITCOMMONCONTROLSEX *lpInitCtrls)
     if (!lpInitCtrls || lpInitCtrls->dwSize != sizeof(INITCOMMONCONTROLSEX))
         return FALSE;
 
-    TRACE("%#lx\n", lpInitCtrls->dwICC);
+    TRACE("(0x%08x)\n", lpInitCtrls->dwICC);
     return TRUE;
 }
 
@@ -975,8 +970,9 @@ HRESULT WINAPI DllGetVersion (DLLVERSIONINFO *pdvi)
     pdvi->dwBuildNumber = 2919;
     pdvi->dwPlatformID = 6304;
 
-    TRACE("%lu.%lu.%lu.%lu\n", pdvi->dwMajorVersion, pdvi->dwMinorVersion,
-            pdvi->dwBuildNumber, pdvi->dwPlatformID);
+    TRACE("%u.%u.%u.%u\n",
+	   pdvi->dwMajorVersion, pdvi->dwMinorVersion,
+	   pdvi->dwBuildNumber, pdvi->dwPlatformID);
 
     return S_OK;
 }
@@ -1081,7 +1077,7 @@ BOOL WINAPI SetWindowSubclass (HWND hWnd, SUBCLASSPROC pfnSubclass,
    LPSUBCLASS_INFO stack;
    LPSUBCLASSPROCS proc;
 
-   TRACE("%p, %p, %Ix, %Ix\n", hWnd, pfnSubclass, uIDSubclass, dwRef);
+   TRACE ("(%p, %p, %lx, %lx)\n", hWnd, pfnSubclass, uIDSubclass, dwRef);
 
    if (!hWnd || !pfnSubclass)
        return FALSE;
@@ -1168,7 +1164,7 @@ BOOL WINAPI GetWindowSubclass (HWND hWnd, SUBCLASSPROC pfnSubclass,
    const SUBCLASS_INFO *stack;
    const SUBCLASSPROCS *proc;
 
-   TRACE("%p, %p, %Ix, %p\n", hWnd, pfnSubclass, uID, pdwRef);
+   TRACE ("(%p, %p, %lx, %p)\n", hWnd, pfnSubclass, uID, pdwRef);
 
    /* See if we have been called for this window */
    stack = GetPropW (hWnd, COMCTL32_wSubclass);
@@ -1211,7 +1207,7 @@ BOOL WINAPI RemoveWindowSubclass(HWND hWnd, SUBCLASSPROC pfnSubclass, UINT_PTR u
    LPSUBCLASSPROCS proc;
    BOOL ret = FALSE;
 
-   TRACE("%p, %p, %Ix.\n", hWnd, pfnSubclass, uID);
+   TRACE ("(%p, %p, %lx)\n", hWnd, pfnSubclass, uID);
 
    /* Find the Subclass to remove */
    stack = GetPropW (hWnd, COMCTL32_wSubclass);
@@ -1264,8 +1260,8 @@ static LRESULT WINAPI COMCTL32_SubclassProc (HWND hWnd, UINT uMsg, WPARAM wParam
    LPSUBCLASS_INFO stack;
    LPSUBCLASSPROCS proc;
    LRESULT ret;
-
-   TRACE("%p, %#x, %#Ix, %#Ix\n", hWnd, uMsg, wParam, lParam);
+    
+   TRACE ("(%p, 0x%08x, 0x%08lx, 0x%08lx)\n", hWnd, uMsg, wParam, lParam);
 
    stack = GetPropW (hWnd, COMCTL32_wSubclass);
    if (!stack) {
@@ -1314,8 +1310,8 @@ LRESULT WINAPI DefSubclassProc (HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPar
 {
    LPSUBCLASS_INFO stack;
    LRESULT ret;
-
-   TRACE("%p, %#x, %#Ix, %#Ix\n", hWnd, uMsg, wParam, lParam);
+   
+   TRACE ("(%p, 0x%08x, 0x%08lx, 0x%08lx)\n", hWnd, uMsg, wParam, lParam);
 
    /* retrieve our little stack from the Properties */
    stack = GetPropW (hWnd, COMCTL32_wSubclass);
@@ -1666,7 +1662,7 @@ int WINAPI DrawShadowText(HDC hdc, LPCWSTR text, UINT length, RECT *rect, DWORD 
     COLORREF clr;
     RECT r;
 
-    FIXME("%p, %s, %d, %p, %#lx, %#lx, %#lx, %d, %d: semi-stub\n", hdc, debugstr_w(text),
+    FIXME("(%p, %s, %d, %p, 0x%08x, 0x%08x, 0x%08x, %d, %d): semi-stub\n", hdc, debugstr_w(text),
         length, rect, flags, crText, crShadow, offset_x, offset_y);
 
     bkmode = SetBkMode(hdc, TRANSPARENT);
@@ -1969,7 +1965,7 @@ static void MRU_SaveChanged(WINEMRULIST *mp)
             {
                 ERR("error saving /%s/, err=%d\n", debugstr_w(realname), err);
             }
-            TRACE("saving value for name /%s/ size %ld\n", debugstr_w(realname), witem->size);
+            TRACE("saving value for name /%s/ size=%d\n", debugstr_w(realname), witem->size);
         }
     }
     RegCloseKey(newkey);
@@ -2068,7 +2064,7 @@ INT WINAPI FindMRUData(HANDLE hList, const void *data, DWORD cbData, int *pos)
     if (pos && (ret != -1))
         *pos = 'a' + i;
 
-    TRACE("%p, %p, %ld, %p, returning %d.\n", hList, data, cbData, pos, ret);
+    TRACE("%p, %p, %d, %p, returning %d.\n", hList, data, cbData, pos, ret);
 
     return ret;
 }
@@ -2128,7 +2124,7 @@ INT WINAPI AddMRUData(HANDLE hList, const void *data, DWORD cbData)
     mp->wineFlags |= WMRUF_CHANGED;
     mp->realMRU[0] = replace + 'a';
 
-    TRACE("%p, %p, %ld adding data, /%c/ now most current\n", hList, data, cbData, replace+'a');
+    TRACE("(%p, %p, %d) adding data, /%c/ now most current\n", hList, data, cbData, replace+'a');
 
     if (!(mp->extview.fFlags & MRU_CACHEWRITE))
     {
@@ -2265,7 +2261,7 @@ static HANDLE create_mru_list(WINEMRULIST *mp)
             KEY_READ | KEY_WRITE, 0, &newkey, &dwdisp)))
     {
         /* error - what to do ??? */
-        ERR("%lu, %u, %x, %p, %s, %p: Could not open key, error=%d\n", mp->extview.cbSize, mp->extview.uMax, mp->extview.fFlags,
+        ERR("(%u %u %x %p %s %p): Could not open key, error=%d\n", mp->extview.cbSize, mp->extview.uMax, mp->extview.fFlags,
                 mp->extview.hKey, debugstr_w(mp->extview.lpszSubKey), mp->extview.u.string_cmpfn, err);
         return 0;
     }
@@ -2283,7 +2279,7 @@ static HANDLE create_mru_list(WINEMRULIST *mp)
         else
             datasize /= sizeof(WCHAR);
 
-        TRACE("MRU list = %s, datasize = %ld\n", debugstr_w(mp->realMRU), datasize);
+        TRACE("MRU list = %s, datasize = %d\n", debugstr_w(mp->realMRU), datasize);
 
         mp->cursize = datasize - 1;
         /* datasize now has number of items in the MRUList */
@@ -2311,7 +2307,7 @@ static HANDLE create_mru_list(WINEMRULIST *mp)
     else
         mp->cursize = 0;
 
-    TRACE("%lu, %u, %x, %p, %s, %p: Current Size = %ld\n", mp->extview.cbSize, mp->extview.uMax, mp->extview.fFlags,
+    TRACE("(%u %u %x %p %s %p): Current Size = %d\n", mp->extview.cbSize, mp->extview.uMax, mp->extview.fFlags,
             mp->extview.hKey, debugstr_w(mp->extview.lpszSubKey), mp->extview.u.string_cmpfn, mp->cursize);
     return mp;
 }
@@ -2409,7 +2405,7 @@ INT WINAPI EnumMRUListW(HANDLE hList, INT nItemPos, void *buffer, DWORD nBufferS
     witem = mp->array[desired];
     datasize = min(witem->size, nBufferSize);
     memcpy(buffer, &witem->datastart, datasize);
-    TRACE("(%p, %d, %p, %ld): returning len %d\n", hList, nItemPos, buffer, nBufferSize, datasize);
+    TRACE("(%p, %d, %p, %d): returning len=%d\n", hList, nItemPos, buffer, nBufferSize, datasize);
     return datasize;
 }
 
@@ -2443,7 +2439,7 @@ INT WINAPI EnumMRUListA(HANDLE hList, INT nItemPos, void *buffer, DWORD nBufferS
         ((char *)buffer)[ datasize - 1 ] = '\0';
         datasize = lenA - 1;
     }
-    TRACE("(%p, %d, %p, %ld): returning len=%d\n", hList, nItemPos, buffer, nBufferSize, datasize);
+    TRACE("(%p, %d, %p, %d): returning len=%d\n", hList, nItemPos, buffer, nBufferSize, datasize);
     return datasize;
 }
 
@@ -2603,7 +2599,7 @@ static LRESULT DoNotify(const struct NOTIFYDATA *notify, UINT code, NMHDR *hdr)
     NMHDR *lpNmh = NULL;
     UINT idFrom = 0;
 
-    TRACE("%p, %p, %d, %p, %#lx.\n", notify->hwndFrom, notify->hwndTo, code, hdr, notify->dwParam5);
+    TRACE("%p, %p, %d, %p, %#x.\n", notify->hwndFrom, notify->hwndTo, code, hdr, notify->dwParam5);
 
     if (!notify->hwndTo)
         return 0;
@@ -2673,7 +2669,7 @@ LRESULT WINAPI SendNotifyEx(HWND hwndTo, HWND hwndFrom, UINT code, NMHDR *hdr, D
     struct NOTIFYDATA notify;
     HWND hwndNotify;
 
-    TRACE("%p, %p, %d, %p, %#lx\n", hwndFrom, hwndTo, code, hdr, dwParam5);
+    TRACE("(%p %p %d %p %#x)\n", hwndFrom, hwndTo, code, hdr, dwParam5);
 
     hwndNotify = hwndTo;
     if (!hwndTo)

@@ -142,7 +142,7 @@ static struct d3d10_effect_variable anonymous_gs = {{(const ID3D10EffectVariable
         &null_local_buffer, &anonymous_gs_type, anonymous_name};
 
 static struct d3d10_effect_type *get_fx10_type(struct d3d10_effect *effect,
-        const char *data, size_t data_size, uint32_t offset);
+        const char *data, size_t data_size, DWORD offset);
 
 static inline struct d3d10_effect_variable *impl_from_ID3D10EffectVariable(ID3D10EffectVariable *iface)
 {
@@ -159,20 +159,6 @@ static struct d3d10_effect_variable * d3d10_array_get_element(struct d3d10_effec
 {
     if (!v->type->element_count) return v;
     return &v->elements[index];
-}
-
-static struct d3d10_effect_variable * d3d10_get_state_variable(struct d3d10_effect_variable *v,
-        unsigned int index, const struct d3d10_effect_var_array *array)
-{
-    v = d3d10_array_get_element(v, 0);
-
-    if (v->u.state.index + index >= array->count)
-    {
-        WARN("Invalid index %u.\n", index);
-        return NULL;
-    }
-
-    return array->v[v->u.state.index + index];
 }
 
 enum d3d10_effect_container_type
@@ -778,7 +764,7 @@ static void d3d10_effect_update_dependent_props(struct d3d10_effect_prop_depende
 
                 if (FAILED(hr = d3d10_effect_preshader_eval(&d->index_expr.index)))
                 {
-                    WARN("Failed to evaluate index expression, hr %#lx.\n", hr);
+                    WARN("Failed to evaluate index expression, hr %#x.\n", hr);
                     return;
                 }
 
@@ -837,21 +823,40 @@ static BOOL d3d_array_reserve(void **elements, SIZE_T *capacity, SIZE_T count, S
     return TRUE;
 }
 
+static void read_dword(const char **ptr, DWORD *d)
+{
+    memcpy(d, *ptr, sizeof(*d));
+    *ptr += sizeof(*d);
+}
+
 static BOOL require_space(size_t offset, size_t count, size_t size, size_t data_size)
 {
     return !count || (data_size - offset) / count >= size;
 }
 
+static void skip_dword_unknown(const char *location, const char **ptr, unsigned int count)
+{
+    unsigned int i;
+    DWORD d;
+
+    FIXME("Skipping %u unknown DWORDs (%s):\n", count, location);
+    for (i = 0; i < count; ++i)
+    {
+        read_dword(ptr, &d);
+        FIXME("\t0x%08x\n", d);
+    }
+}
+
 static HRESULT parse_dxbc(const char *data, SIZE_T data_size,
-        HRESULT (*chunk_handler)(const char *data, size_t data_size, uint32_t tag, void *ctx), void *ctx)
+        HRESULT (*chunk_handler)(const char *data, DWORD data_size, DWORD tag, void *ctx), void *ctx)
 {
     const char *ptr = data;
-    uint32_t chunk_count;
-    uint32_t total_size;
     HRESULT hr = S_OK;
-    uint32_t version;
+    DWORD chunk_count;
+    DWORD total_size;
     unsigned int i;
-    uint32_t tag;
+    DWORD version;
+    DWORD tag;
 
     if (!data)
     {
@@ -859,7 +864,7 @@ static HRESULT parse_dxbc(const char *data, SIZE_T data_size,
         return E_FAIL;
     }
 
-    tag = read_u32(&ptr);
+    read_dword(&ptr, &tag);
     TRACE("tag: %s.\n", debugstr_an((const char *)&tag, 4));
 
     if (tag != TAG_DXBC)
@@ -868,10 +873,9 @@ static HRESULT parse_dxbc(const char *data, SIZE_T data_size,
         return E_FAIL;
     }
 
-    FIXME("Skipping DXBC checksum.\n");
-    skip_u32_unknown(&ptr, 4);
+    skip_dword_unknown("DXBC checksum", &ptr, 4);
 
-    version = read_u32(&ptr);
+    read_dword(&ptr, &version);
     TRACE("version: %#x.\n", version);
     if (version != 0x00000001)
     {
@@ -879,8 +883,8 @@ static HRESULT parse_dxbc(const char *data, SIZE_T data_size,
         return E_FAIL;
     }
 
-    total_size = read_u32(&ptr);
-    TRACE("Total size: %#x.\n", total_size);
+    read_dword(&ptr, &total_size);
+    TRACE("total size: %#x\n", total_size);
 
     if (data_size != total_size)
     {
@@ -888,32 +892,32 @@ static HRESULT parse_dxbc(const char *data, SIZE_T data_size,
         return E_FAIL;
     }
 
-    chunk_count = read_u32(&ptr);
-    TRACE("Chunk count: %#x.\n", chunk_count);
+    read_dword(&ptr, &chunk_count);
+    TRACE("chunk count: %#x\n", chunk_count);
 
     for (i = 0; i < chunk_count; ++i)
     {
-        uint32_t chunk_tag, chunk_size;
+        DWORD chunk_tag, chunk_size;
         const char *chunk_ptr;
-        uint32_t chunk_offset;
+        DWORD chunk_offset;
 
-        chunk_offset = read_u32(&ptr);
-        TRACE("Chunk %u at offset %#x.\n", i, chunk_offset);
+        read_dword(&ptr, &chunk_offset);
+        TRACE("chunk %u at offset %#x\n", i, chunk_offset);
 
-        if (chunk_offset >= data_size || !require_space(chunk_offset, 2, sizeof(uint32_t), data_size))
+        if (chunk_offset >= data_size || !require_space(chunk_offset, 2, sizeof(DWORD), data_size))
         {
-            WARN("Invalid chunk offset %#x (data size %#Ix).\n", chunk_offset, data_size);
+            WARN("Invalid chunk offset %#x (data size %#lx).\n", chunk_offset, data_size);
             return E_FAIL;
         }
 
         chunk_ptr = data + chunk_offset;
 
-        chunk_tag = read_u32(&chunk_ptr);
-        chunk_size = read_u32(&chunk_ptr);
+        read_dword(&chunk_ptr, &chunk_tag);
+        read_dword(&chunk_ptr, &chunk_size);
 
         if (!require_space(chunk_ptr - data, 1, chunk_size, data_size))
         {
-            WARN("Invalid chunk size %#x (data size %#Ix, chunk offset %#x).\n",
+            WARN("Invalid chunk size %#x (data size %#lx, chunk offset %#x).\n",
                     chunk_size, data_size, chunk_offset);
             return E_FAIL;
         }
@@ -925,13 +929,13 @@ static HRESULT parse_dxbc(const char *data, SIZE_T data_size,
     return hr;
 }
 
-static BOOL fx10_get_string(const char *data, size_t data_size, uint32_t offset, const char **s, size_t *l)
+static BOOL fx10_get_string(const char *data, size_t data_size, DWORD offset, const char **s, size_t *l)
 {
     size_t len, max_len;
 
     if (offset >= data_size)
     {
-        WARN("Invalid offset %#x (data size %#Ix).\n", offset, data_size);
+        WARN("Invalid offset %#x (data size %#lx).\n", offset, (long)data_size);
         return FALSE;
     }
 
@@ -1224,40 +1228,40 @@ failed:
     return E_FAIL;
 }
 
-static HRESULT parse_fx10_shader(const char *data, size_t data_size, uint32_t offset, struct d3d10_effect_variable *v)
+static HRESULT parse_fx10_shader(const char *data, size_t data_size, DWORD offset, struct d3d10_effect_variable *v)
 {
     ID3D10Device *device = v->effect->device;
-    uint32_t dxbc_size;
+    DWORD dxbc_size;
     const char *ptr;
     HRESULT hr;
 
-    if (v->effect->shaders.current >= v->effect->shaders.count)
+    if (v->effect->used_shader_current >= v->effect->used_shader_count)
     {
-        WARN("Invalid effect? Used shader current(%u) >= used shader count(%u)\n",
-                v->effect->shaders.current, v->effect->shaders.count);
+        WARN("Invalid shader? Used shader current(%u) >= used shader count(%u)\n", v->effect->used_shader_current, v->effect->used_shader_count);
         return E_FAIL;
     }
 
-    v->effect->shaders.v[v->effect->shaders.current++] = v;
+    v->effect->used_shaders[v->effect->used_shader_current] = v;
+    ++v->effect->used_shader_current;
 
     if (offset >= data_size || !require_space(offset, 1, sizeof(dxbc_size), data_size))
     {
-        WARN("Invalid offset %#x (data size %#Ix).\n", offset, data_size);
+        WARN("Invalid offset %#x (data size %#lx).\n", offset, (long)data_size);
         return E_FAIL;
     }
 
     ptr = data + offset;
-    dxbc_size = read_u32(&ptr);
-    TRACE("DXBC size: %#x.\n", dxbc_size);
+    read_dword(&ptr, &dxbc_size);
+    TRACE("dxbc size: %#x\n", dxbc_size);
 
     if (!require_space(ptr - data, 1, dxbc_size, data_size))
     {
-        WARN("Invalid dxbc size %#x (data size %#Ix, offset %#x).\n", offset, data_size, offset);
+        WARN("Invalid dxbc size %#x (data size %#lx, offset %#x).\n", offset, (long)data_size, offset);
         return E_FAIL;
     }
 
-    if (!dxbc_size)
-        return S_OK;
+    /* We got a shader VertexShader vs = NULL, so it is fine to skip this. */
+    if (!dxbc_size) return S_OK;
 
     if (FAILED(hr = D3D10ReflectShader(ptr, dxbc_size, &v->u.shader.reflection)))
         return hr;
@@ -1289,7 +1293,7 @@ static HRESULT parse_fx10_shader(const char *data, size_t data_size, uint32_t of
 
                 if (FAILED(hr = d3d10_effect_parse_stream_output_declaration(v->u.shader.stream_output_declaration, &so_decl)))
                 {
-                    WARN("Failed to parse stream output declaration, hr %#lx.\n", hr);
+                    WARN("Failed to parse stream output declaration, hr %#x.\n", hr);
                     break;
                 }
 
@@ -1310,7 +1314,7 @@ static HRESULT parse_fx10_shader(const char *data, size_t data_size, uint32_t of
     return hr;
 }
 
-static D3D10_SHADER_VARIABLE_CLASS d3d10_variable_class(uint32_t c, BOOL is_column_major)
+static D3D10_SHADER_VARIABLE_CLASS d3d10_variable_class(DWORD c, BOOL is_column_major)
 {
     switch (c)
     {
@@ -1324,8 +1328,8 @@ static D3D10_SHADER_VARIABLE_CLASS d3d10_variable_class(uint32_t c, BOOL is_colu
     }
 }
 
-static D3D10_SHADER_VARIABLE_TYPE d3d10_variable_type(uint32_t t, BOOL is_object,
-        uint32_t *flags)
+static D3D10_SHADER_VARIABLE_TYPE d3d10_variable_type(DWORD t, BOOL is_object,
+        unsigned int *flags)
 {
     *flags = 0;
 
@@ -1378,20 +1382,20 @@ static D3D10_SHADER_VARIABLE_TYPE d3d10_variable_type(uint32_t t, BOOL is_object
     }
 }
 
-static HRESULT parse_fx10_type(const char *data, size_t data_size, uint32_t offset, struct d3d10_effect_type *t)
+static HRESULT parse_fx10_type(const char *data, size_t data_size, DWORD offset, struct d3d10_effect_type *t)
 {
-    uint32_t typeinfo, type_flags, type_kind;
+    DWORD typeinfo, type_flags, type_kind;
     const char *ptr;
     unsigned int i;
 
     if (offset >= data_size || !require_space(offset, 6, sizeof(DWORD), data_size))
     {
-        WARN("Invalid offset %#x (data size %#Ix).\n", offset, data_size);
+        WARN("Invalid offset %#x (data size %#lx).\n", offset, (long)data_size);
         return E_FAIL;
     }
 
     ptr = data + offset;
-    offset = read_u32(&ptr);
+    read_dword(&ptr, &offset);
     TRACE("Type name at offset %#x.\n", offset);
 
     if (!fx10_copy_string(data, data_size, offset, &t->name))
@@ -1401,19 +1405,19 @@ static HRESULT parse_fx10_type(const char *data, size_t data_size, uint32_t offs
     }
     TRACE("Type name: %s.\n", debugstr_a(t->name));
 
-    type_kind = read_u32(&ptr);
+    read_dword(&ptr, &type_kind);
     TRACE("Kind: %u.\n", type_kind);
 
-    t->element_count = read_u32(&ptr);
+    read_dword(&ptr, &t->element_count);
     TRACE("Element count: %u.\n", t->element_count);
 
-    t->size_unpacked = read_u32(&ptr);
+    read_dword(&ptr, &t->size_unpacked);
     TRACE("Unpacked size: %#x.\n", t->size_unpacked);
 
-    t->stride = read_u32(&ptr);
+    read_dword(&ptr, &t->stride);
     TRACE("Stride: %#x.\n", t->stride);
 
-    t->size_packed = read_u32(&ptr);
+    read_dword(&ptr, &t->size_packed);
     TRACE("Packed size %#x.\n", t->size_packed);
 
     switch (type_kind)
@@ -1423,18 +1427,16 @@ static HRESULT parse_fx10_type(const char *data, size_t data_size, uint32_t offs
 
             if (!require_space(ptr - data, 1, sizeof(typeinfo), data_size))
             {
-                WARN("Invalid offset %#x (data size %#Ix).\n", offset, data_size);
+                WARN("Invalid offset %#x (data size %#lx).\n", offset, (long)data_size);
                 return E_FAIL;
             }
 
-            typeinfo = read_u32(&ptr);
+            read_dword(&ptr, &typeinfo);
             t->member_count = 0;
             t->column_count = (typeinfo & D3D10_FX10_TYPE_COLUMN_MASK) >> D3D10_FX10_TYPE_COLUMN_SHIFT;
             t->row_count = (typeinfo & D3D10_FX10_TYPE_ROW_MASK) >> D3D10_FX10_TYPE_ROW_SHIFT;
-            t->basetype = d3d10_variable_type((typeinfo & D3D10_FX10_TYPE_BASETYPE_MASK)
-                    >> D3D10_FX10_TYPE_BASETYPE_SHIFT, FALSE, &type_flags);
-            t->type_class = d3d10_variable_class((typeinfo & D3D10_FX10_TYPE_CLASS_MASK)
-                    >> D3D10_FX10_TYPE_CLASS_SHIFT, typeinfo & D3D10_FX10_TYPE_MATRIX_COLUMN_MAJOR_MASK);
+            t->basetype = d3d10_variable_type((typeinfo & D3D10_FX10_TYPE_BASETYPE_MASK) >> D3D10_FX10_TYPE_BASETYPE_SHIFT, FALSE, &type_flags);
+            t->type_class = d3d10_variable_class((typeinfo & D3D10_FX10_TYPE_CLASS_MASK) >> D3D10_FX10_TYPE_CLASS_SHIFT, typeinfo & D3D10_FX10_TYPE_MATRIX_COLUMN_MAJOR_MASK);
 
             TRACE("Type description: %#x.\n", typeinfo);
             TRACE("\tcolumns: %u.\n", t->column_count);
@@ -1450,11 +1452,11 @@ static HRESULT parse_fx10_type(const char *data, size_t data_size, uint32_t offs
 
             if (!require_space(ptr - data, 1, sizeof(typeinfo), data_size))
             {
-                WARN("Invalid offset %#x (data size %#Ix).\n", offset, data_size);
+                WARN("Invalid offset %#x (data size %#lx).\n", offset, (long)data_size);
                 return E_FAIL;
             }
 
-            typeinfo = read_u32(&ptr);
+            read_dword(&ptr, &typeinfo);
             t->member_count = 0;
             t->column_count = 0;
             t->row_count = 0;
@@ -1473,11 +1475,11 @@ static HRESULT parse_fx10_type(const char *data, size_t data_size, uint32_t offs
 
             if (!require_space(ptr - data, 1, sizeof(t->member_count), data_size))
             {
-                WARN("Invalid offset %#x (data size %#Ix).\n", offset, data_size);
+                WARN("Invalid offset %#x (data size %#lx).\n", offset, (long)data_size);
                 return E_FAIL;
             }
 
-            t->member_count = read_u32(&ptr);
+            read_dword(&ptr, &t->member_count);
             TRACE("Member count: %u.\n", t->member_count);
 
             t->column_count = 0;
@@ -1493,8 +1495,8 @@ static HRESULT parse_fx10_type(const char *data, size_t data_size, uint32_t offs
 
             if (!require_space(ptr - data, t->member_count, 4 * sizeof(DWORD), data_size))
             {
-                WARN("Invalid member count %#x (data size %#Ix, offset %#x).\n",
-                        t->member_count, data_size, offset);
+                WARN("Invalid member count %#x (data size %#lx, offset %#x).\n",
+                        t->member_count, (long)data_size, offset);
                 return E_FAIL;
             }
 
@@ -1502,7 +1504,7 @@ static HRESULT parse_fx10_type(const char *data, size_t data_size, uint32_t offs
             {
                 struct d3d10_effect_type_member *typem = &t->members[i];
 
-                offset = read_u32(&ptr);
+                read_dword(&ptr, &offset);
                 TRACE("Member name at offset %#x.\n", offset);
 
                 if (!fx10_copy_string(data, data_size, offset, &typem->name))
@@ -1512,7 +1514,7 @@ static HRESULT parse_fx10_type(const char *data, size_t data_size, uint32_t offs
                 }
                 TRACE("Member name: %s.\n", debugstr_a(typem->name));
 
-                offset = read_u32(&ptr);
+                read_dword(&ptr, &offset);
                 TRACE("Member semantic at offset %#x.\n", offset);
 
                 if (!fx10_copy_string(data, data_size, offset, &typem->semantic))
@@ -1522,10 +1524,10 @@ static HRESULT parse_fx10_type(const char *data, size_t data_size, uint32_t offs
                 }
                 TRACE("Member semantic: %s.\n", debugstr_a(typem->semantic));
 
-                typem->buffer_offset = read_u32(&ptr);
+                read_dword(&ptr, &typem->buffer_offset);
                 TRACE("Member offset in struct: %#x.\n", typem->buffer_offset);
 
-                offset = read_u32(&ptr);
+                read_dword(&ptr, &offset);
                 TRACE("Member type info at offset %#x.\n", offset);
 
                 if (!(typem->type = get_fx10_type(t->effect, data, data_size, offset)))
@@ -1543,7 +1545,7 @@ static HRESULT parse_fx10_type(const char *data, size_t data_size, uint32_t offs
 
     if (t->element_count)
     {
-        TRACE("Elementtype for type at offset: %#lx\n", t->id);
+        TRACE("Elementtype for type at offset: %#x\n", t->id);
 
         /* allocate elementtype - we need only one, because all elements have the same type */
         if (!(t->elementtype = heap_alloc_zero(sizeof(*t->elementtype))))
@@ -1600,8 +1602,8 @@ static HRESULT parse_fx10_type(const char *data, size_t data_size, uint32_t offs
     return S_OK;
 }
 
-static struct d3d10_effect_type *get_fx10_type(struct d3d10_effect *effect, const char *data,
-        size_t data_size, uint32_t offset)
+static struct d3d10_effect_type *get_fx10_type(struct d3d10_effect *effect,
+        const char *data, size_t data_size, DWORD offset)
 {
     struct d3d10_effect_type *type;
     struct wine_rb_entry *entry;
@@ -1625,7 +1627,7 @@ static struct d3d10_effect_type *get_fx10_type(struct d3d10_effect *effect, cons
     type->effect = effect;
     if (FAILED(hr = parse_fx10_type(data, data_size, offset, type)))
     {
-        ERR("Failed to parse type info, hr %#lx.\n", hr);
+        ERR("Failed to parse type info, hr %#x.\n", hr);
         heap_free(type);
         return NULL;
     }
@@ -1823,9 +1825,9 @@ static HRESULT copy_variableinfo_from_type(struct d3d10_effect_variable *v)
 static HRESULT parse_fx10_variable_head(const char *data, size_t data_size,
         const char **ptr, struct d3d10_effect_variable *v)
 {
-    uint32_t offset;
+    DWORD offset;
 
-    offset = read_u32(ptr);
+    read_dword(ptr, &offset);
     TRACE("Variable name at offset %#x.\n", offset);
 
     if (!fx10_copy_string(data, data_size, offset, &v->name))
@@ -1835,7 +1837,7 @@ static HRESULT parse_fx10_variable_head(const char *data, size_t data_size,
     }
     TRACE("Variable name: %s.\n", debugstr_a(v->name));
 
-    offset = read_u32(ptr);
+    read_dword(ptr, &offset);
     TRACE("Variable type info at offset %#x.\n", offset);
 
     if (!(v->type = get_fx10_type(v->effect, data, data_size, offset)))
@@ -1856,13 +1858,13 @@ static HRESULT parse_fx10_variable_head(const char *data, size_t data_size,
 static HRESULT parse_fx10_annotation(const char *data, size_t data_size,
         const char **ptr, struct d3d10_effect_variable *a)
 {
-    uint32_t offset;
+    DWORD offset;
     HRESULT hr;
 
     if (FAILED(hr = parse_fx10_variable_head(data, data_size, ptr, a)))
         return hr;
 
-    offset = read_u32(ptr);
+    read_dword(ptr, &offset);
     TRACE("Annotation value is at offset %#x.\n", offset);
 
     switch (a->type->basetype)
@@ -1981,25 +1983,25 @@ static BOOL read_value_list(const char *data, size_t data_size, uint32_t offset,
         D3D_SHADER_VARIABLE_TYPE out_type, unsigned int out_base, unsigned int out_size,
         void *out_data)
 {
-    uint32_t t, value, count, type_flags;
     D3D_SHADER_VARIABLE_TYPE in_type;
+    unsigned int i, type_flags;
+    uint32_t t, value, count;
     const char *ptr;
-    unsigned int i;
 
     if (offset >= data_size || !require_space(offset, 1, sizeof(count), data_size))
     {
-        WARN("Invalid offset %#x (data size %#Ix).\n", offset, data_size);
+        WARN("Invalid offset %#x (data size %#lx).\n", offset, (long)data_size);
         return FALSE;
     }
 
     ptr = data + offset;
-    count = read_u32(&ptr);
+    read_dword(&ptr, &count);
     if (count != out_size)
         return FALSE;
 
     if (!require_space(ptr - data, count, 2 * sizeof(DWORD), data_size))
     {
-        WARN("Invalid value count %#x (offset %#x, data size %#Ix).\n", count, offset, data_size);
+        WARN("Invalid value count %#x (offset %#x, data size %#lx).\n", count, offset, (long)data_size);
         return FALSE;
     }
 
@@ -2008,8 +2010,8 @@ static BOOL read_value_list(const char *data, size_t data_size, uint32_t offset,
     {
         unsigned int out_idx = out_base * out_size + i;
 
-        t = read_u32(&ptr);
-        value = read_u32(&ptr);
+        read_dword(&ptr, &t);
+        read_dword(&ptr, &value);
 
         in_type = d3d10_variable_type(t, FALSE, &type_flags);
         TRACE("\t%s: %#x.\n", debug_d3d10_shader_variable_type(in_type), value);
@@ -2113,8 +2115,8 @@ static HRESULT parse_fx10_preshader_instr(struct d3d10_preshader_parse_context *
         return E_FAIL;
     }
 
-    *(uint32_t *)&ins = read_u32(ptr);
-    input_count = read_u32(ptr);
+    read_dword(ptr, (uint32_t *)&ins);
+    read_dword(ptr, &input_count);
     *offset += 2 * sizeof(uint32_t);
 
     if (!(op_info = d3d10_effect_get_op_info(ins.opcode)))
@@ -2139,15 +2141,15 @@ static HRESULT parse_fx10_preshader_instr(struct d3d10_preshader_parse_context *
     {
         uint32_t flags, regt, param_offset;
 
-        flags = read_u32(ptr);
+        read_dword(ptr, &flags);
         if (flags)
         {
-            FIXME("Argument flags are not supported %#x.\n", flags);
+            FIXME("Arguments flags are not supported %#x.\n", flags);
             return E_UNEXPECTED;
         }
 
-        regt = read_u32(ptr);
-        param_offset = read_u32(ptr);
+        read_dword(ptr, &regt);
+        read_dword(ptr, &param_offset);
 
         switch (regt)
         {
@@ -2187,7 +2189,7 @@ static HRESULT parse_fx10_fxlc(void *ctx, const char *data, unsigned int data_si
     memcpy(ID3D10Blob_GetBufferPointer(p->code), data, data_size);
 
     ptr = data;
-    ins_count = read_u32(&ptr);
+    read_dword(&ptr, &ins_count);
     TRACE("%u instructions.\n", ins_count);
 
     for (i = 0; i < ins_count; ++i)
@@ -2222,7 +2224,7 @@ static HRESULT parse_fx10_cli4(void *ctx, const char *data, unsigned int data_si
         return E_FAIL;
     }
 
-    count = read_u32(&ptr);
+    read_dword(&ptr, &count);
 
     TRACE("%u literal constants.\n", count);
 
@@ -2246,23 +2248,23 @@ static HRESULT parse_fx10_ctab(void *ctx, const char *data, unsigned int data_si
     struct d3d10_effect_preshader *p = context->preshader;
     struct ctab_header
     {
-        uint32_t size;
-        uint32_t creator;
-        uint32_t version;
-        uint32_t constants;
-        uint32_t constantinfo;
-        uint32_t flags;
-        uint32_t target;
+        DWORD size;
+        DWORD creator;
+        DWORD version;
+        DWORD constants;
+        DWORD constantinfo;
+        DWORD flags;
+        DWORD target;
     } header;
     struct ctab_const_info
     {
-        uint32_t name;
+        DWORD name;
         WORD register_set;
         WORD register_index;
         WORD register_count;
         WORD reserved;
-        uint32_t typeinfo;
-        uint32_t default_value;
+        DWORD typeinfo;
+        DWORD default_value;
     } *info;
     unsigned int i, cb_reg_count = 0;
     const char *ptr = data;
@@ -2276,13 +2278,13 @@ static HRESULT parse_fx10_ctab(void *ctx, const char *data, unsigned int data_si
         return E_FAIL;
     }
 
-    header.size = read_u32(&ptr);
-    header.creator = read_u32(&ptr);
-    header.version = read_u32(&ptr);
-    header.constants = read_u32(&ptr);
-    header.constantinfo = read_u32(&ptr);
-    header.flags = read_u32(&ptr);
-    header.target = read_u32(&ptr);
+    read_dword(&ptr, &header.size);
+    read_dword(&ptr, &header.creator);
+    read_dword(&ptr, &header.version);
+    read_dword(&ptr, &header.constants);
+    read_dword(&ptr, &header.constantinfo);
+    read_dword(&ptr, &header.flags);
+    read_dword(&ptr, &header.target);
 
     if (!require_space(header.constantinfo, header.constants, sizeof(*info), data_size))
     {
@@ -2326,9 +2328,9 @@ static HRESULT parse_fx10_ctab(void *ctx, const char *data, unsigned int data_si
     return S_OK;
 }
 
-static HRESULT fxlvm_chunk_handler(const char *data, size_t data_size, uint32_t tag, void *ctx)
+static HRESULT fxlvm_chunk_handler(const char *data, DWORD data_size, DWORD tag, void *ctx)
 {
-    TRACE("Chunk tag: %s, size: %Iu.\n", debugstr_an((const char *)&tag, 4), data_size);
+    TRACE("Chunk tag: %s, size: %u.\n", debugstr_an((const char *)&tag, 4), data_size);
 
     switch (tag)
     {
@@ -2358,8 +2360,7 @@ static HRESULT parse_fx10_preshader(const char *data, size_t data_size,
     context.preshader = preshader;
     context.effect = effect;
 
-    if (FAILED(hr = parse_dxbc(data, data_size, fxlvm_chunk_handler, &context)))
-        return hr;
+    if (FAILED(hr = parse_dxbc(data, data_size, fxlvm_chunk_handler, &context))) return hr;
 
     /* Constant buffer and literal constants are preallocated, validate here that expression
        has no invalid accesses for those. */
@@ -2406,10 +2407,10 @@ static HRESULT parse_fx10_property_assignment(const char *data, size_t data_size
     HRESULT hr;
     void *dst;
 
-    id = read_u32(ptr);
-    idx = read_u32(ptr);
-    operation = read_u32(ptr);
-    value_offset = read_u32(ptr);
+    read_dword(ptr, &id);
+    read_dword(ptr, &idx);
+    read_dword(ptr, &operation);
+    read_dword(ptr, &value_offset);
 
     if (id >= ARRAY_SIZE(property_infos))
     {
@@ -2512,12 +2513,12 @@ static HRESULT parse_fx10_property_assignment(const char *data, size_t data_size
             /* Array variable, constant index. */
             if (value_offset >= data_size || !require_space(value_offset, 2, sizeof(DWORD), data_size))
             {
-                WARN("Invalid offset %#x (data size %#Ix).\n", value_offset, data_size);
+                WARN("Invalid offset %#x (data size %#lx).\n", value_offset, (long)data_size);
                 return E_FAIL;
             }
             data_ptr = data + value_offset;
-            value_offset = read_u32(&data_ptr);
-            variable_idx = read_u32(&data_ptr);
+            read_dword(&data_ptr, &value_offset);
+            read_dword(&data_ptr, &variable_idx);
 
             if (!fx10_get_string(data, data_size, value_offset, &name, &name_len))
             {
@@ -2589,13 +2590,13 @@ static HRESULT parse_fx10_property_assignment(const char *data, size_t data_size
             /* Variable, and an expression for its index. */
             if (value_offset >= data_size || !require_space(value_offset, 2, sizeof(DWORD), data_size))
             {
-                WARN("Invalid offset %#x (data size %#Ix).\n", value_offset, data_size);
+                WARN("Invalid offset %#x (data size %#lx).\n", value_offset, (long)data_size);
                 return E_FAIL;
             }
 
             data_ptr = data + value_offset;
-            value_offset = read_u32(&data_ptr);
-            code_offset = read_u32(&data_ptr);
+            read_dword(&data_ptr, &value_offset);
+            read_dword(&data_ptr, &code_offset);
 
             if (!fx10_get_string(data, data_size, value_offset, &name, &name_len))
             {
@@ -2625,16 +2626,16 @@ static HRESULT parse_fx10_property_assignment(const char *data, size_t data_size
 
             if (code_offset >= data_size || !require_space(code_offset, 1, sizeof(DWORD), data_size))
             {
-                WARN("Invalid offset %#x (data size %#Ix).\n", value_offset, data_size);
+                WARN("Invalid offset %#x (data size %#lx).\n", value_offset, (long)data_size);
                 return E_FAIL;
             }
 
             data_ptr = data + code_offset;
-            blob_size = read_u32(&data_ptr);
+            read_dword(&data_ptr, &blob_size);
 
             if (!require_space(code_offset, 1, sizeof(uint32_t) + blob_size, data_size))
             {
-                WARN("Invalid offset %#x (data size %#Ix).\n", code_offset, data_size);
+                WARN("Invalid offset %#x (data size %#lx).\n", code_offset, (long)data_size);
                 return E_FAIL;
             }
 
@@ -2644,7 +2645,7 @@ static HRESULT parse_fx10_property_assignment(const char *data, size_t data_size
             dep.index_expr.v = variable;
             if (FAILED(hr = parse_fx10_preshader(data_ptr, blob_size, effect, &dep.index_expr.index)))
             {
-                WARN("Failed to parse preshader, hr %#lx.\n", hr);
+                WARN("Failed to parse preshader, hr %#x.\n", hr);
                 return hr;
             }
 
@@ -2654,16 +2655,16 @@ static HRESULT parse_fx10_property_assignment(const char *data, size_t data_size
 
             if (value_offset >= data_size || !require_space(value_offset, 1, sizeof(uint32_t), data_size))
             {
-                WARN("Invalid offset %#x (data size %#Ix).\n", value_offset, data_size);
+                WARN("Invalid offset %#x (data size %#lx).\n", value_offset, (long)data_size);
                 return E_FAIL;
             }
 
             data_ptr = data + value_offset;
-            blob_size = read_u32(&data_ptr);
+            read_dword(&data_ptr, &blob_size);
 
             if (!require_space(value_offset, 1, sizeof(uint32_t) + blob_size, data_size))
             {
-                WARN("Invalid offset %#x (data size %#Ix).\n", value_offset, data_size);
+                WARN("Invalid offset %#x (data size %#lx).\n", value_offset, (long)data_size);
                 return E_FAIL;
             }
 
@@ -2672,7 +2673,7 @@ static HRESULT parse_fx10_property_assignment(const char *data, size_t data_size
             dep.operation = operation;
             if (FAILED(hr = parse_fx10_preshader(data_ptr, blob_size, effect, &dep.value_expr.value)))
             {
-                WARN("Failed to parse preshader, hr %#lx.\n", hr);
+                WARN("Failed to parse preshader, hr %#x.\n", hr);
                 return hr;
             }
 
@@ -2689,12 +2690,12 @@ static HRESULT parse_fx10_property_assignment(const char *data, size_t data_size
 
             if (value_offset >= data_size || !require_space(value_offset, 2, sizeof(DWORD), data_size))
             {
-                WARN("Invalid offset %#x (data size %#Ix).\n", value_offset, data_size);
+                WARN("Invalid offset %#x (data size %#lx).\n", value_offset, (long)data_size);
                 return E_FAIL;
             }
             data_ptr = data + value_offset;
-            value_offset = read_u32(&data_ptr);
-            sodecl_offset = read_u32(&data_ptr);
+            read_dword(&data_ptr, &value_offset);
+            read_dword(&data_ptr, &sodecl_offset);
 
             TRACE("Effect object starts at offset %#x.\n", value_offset);
 
@@ -2747,11 +2748,11 @@ static HRESULT parse_fx10_property_assignment(const char *data, size_t data_size
 static HRESULT parse_fx10_pass(const char *data, size_t data_size,
         const char **ptr, struct d3d10_effect_pass *p)
 {
-    uint32_t offset, object_count;
+    DWORD offset, object_count;
     unsigned int i;
     HRESULT hr;
 
-    offset = read_u32(ptr);
+    read_dword(ptr, &offset);
     TRACE("Pass name at offset %#x.\n", offset);
 
     if (!fx10_copy_string(data, data_size, offset, &p->name))
@@ -2761,16 +2762,16 @@ static HRESULT parse_fx10_pass(const char *data, size_t data_size,
     }
     TRACE("Pass name: %s.\n", debugstr_a(p->name));
 
-    object_count = read_u32(ptr);
+    read_dword(ptr, &object_count);
     TRACE("Pass has %u effect objects.\n", object_count);
 
-    p->annotations.count = read_u32(ptr);
+    read_dword(ptr, &p->annotations.count);
     TRACE("Pass has %u annotations.\n", p->annotations.count);
 
     if (FAILED(hr = parse_fx10_annotations(data, data_size, ptr, p->technique->effect,
             &p->annotations)))
     {
-        ERR("Failed to parse pass annotations, hr %#lx.\n", hr);
+        ERR("Failed to parse pass annotations, hr %#x.\n", hr);
         return hr;
     }
 
@@ -2783,7 +2784,7 @@ static HRESULT parse_fx10_pass(const char *data, size_t data_size,
         if (FAILED(hr = parse_fx10_property_assignment(data, data_size, ptr,
                 D3D10_C_PASS, p->technique->effect, p, &p->dependencies)))
         {
-            WARN("Failed to parse pass assignment %u, hr %#lx.\n", i, hr);
+            WARN("Failed to parse pass assignment %u, hr %#x.\n", i, hr);
             return hr;
         }
     }
@@ -2795,10 +2796,10 @@ static HRESULT parse_fx10_technique(const char *data, size_t data_size,
         const char **ptr, struct d3d10_effect_technique *t)
 {
     unsigned int i;
-    uint32_t offset;
+    DWORD offset;
     HRESULT hr;
 
-    offset = read_u32(ptr);
+    read_dword(ptr, &offset);
     TRACE("Technique name at offset %#x.\n", offset);
 
     if (!fx10_copy_string(data, data_size, offset, &t->name))
@@ -2808,16 +2809,16 @@ static HRESULT parse_fx10_technique(const char *data, size_t data_size,
     }
     TRACE("Technique name: %s.\n", debugstr_a(t->name));
 
-    t->pass_count = read_u32(ptr);
-    TRACE("Technique has %u passes.\n", t->pass_count);
+    read_dword(ptr, &t->pass_count);
+    TRACE("Technique has %u passes\n", t->pass_count);
 
-    t->annotations.count = read_u32(ptr);
+    read_dword(ptr, &t->annotations.count);
     TRACE("Technique has %u annotations.\n", t->annotations.count);
 
     if (FAILED(hr = parse_fx10_annotations(data, data_size, ptr, t->effect,
             &t->annotations)))
     {
-        ERR("Failed to parse technique annotations, hr %#lx.\n", hr);
+        ERR("Failed to parse technique annotations, hr %#x.\n", hr);
         return hr;
     }
 
@@ -2924,7 +2925,7 @@ static HRESULT parse_fx10_numeric_variable(const char *data, size_t data_size,
     if (FAILED(hr = parse_fx10_variable_head(data, data_size, ptr, v)))
         return hr;
 
-    offset = read_u32(ptr);
+    read_dword(ptr, &offset);
     TRACE("Variable semantic at offset %#x.\n", offset);
 
     if (!fx10_copy_string(data, data_size, offset, &v->semantic))
@@ -2934,13 +2935,13 @@ static HRESULT parse_fx10_numeric_variable(const char *data, size_t data_size,
     }
     TRACE("Variable semantic: %s.\n", debugstr_a(v->semantic));
 
-    buffer_offset = read_u32(ptr);
+    read_dword(ptr, &buffer_offset);
     TRACE("Variable offset in buffer: %#x.\n", buffer_offset);
 
-    default_value_offset = read_u32(ptr);
+    read_dword(ptr, &default_value_offset);
     TRACE("Variable default value offset: %#x.\n", default_value_offset);
 
-    flags = read_u32(ptr);
+    read_dword(ptr, &flags);
     TRACE("Variable flags: %#x.\n", flags);
 
     v->flag |= flags;
@@ -2964,13 +2965,13 @@ static HRESULT parse_fx10_numeric_variable(const char *data, size_t data_size,
             parse_fx10_default_value(&data_ptr, v);
         }
 
-        v->annotations.count = read_u32(ptr);
+        read_dword(ptr, &v->annotations.count);
         TRACE("Variable has %u annotations.\n", v->annotations.count);
 
         if (FAILED(hr = parse_fx10_annotations(data, data_size, ptr, v->effect,
                 &v->annotations)))
         {
-            ERR("Failed to parse variable annotations, hr %#lx.\n", hr);
+            ERR("Failed to parse variable annotations, hr %#x.\n", hr);
             return hr;
         }
     }
@@ -3023,16 +3024,15 @@ static HRESULT create_state_object(struct d3d10_effect_variable *v)
 static HRESULT parse_fx10_object_variable(const char *data, size_t data_size,
         const char **ptr, BOOL shared_type_desc, struct d3d10_effect_variable *v)
 {
-    struct d3d10_effect_var_array *vars;
     struct d3d10_effect_variable *var;
     unsigned int i, j, element_count;
     HRESULT hr;
-    uint32_t offset;
+    DWORD offset;
 
     if (FAILED(hr = parse_fx10_variable_head(data, data_size, ptr, v)))
         return hr;
 
-    offset = read_u32(ptr);
+    read_dword(ptr, &offset);
     TRACE("Variable semantic at offset %#x.\n", offset);
 
     if (!fx10_copy_string(data, data_size, offset, &v->semantic))
@@ -3042,7 +3042,7 @@ static HRESULT parse_fx10_object_variable(const char *data, size_t data_size,
     }
     TRACE("Variable semantic: %s.\n", debugstr_a(v->semantic));
 
-    v->explicit_bind_point = read_u32(ptr);
+    read_dword(ptr, &v->explicit_bind_point);
     TRACE("Variable explicit bind point %#x.\n", v->explicit_bind_point);
 
     /* Shared variable description contains only type information. */
@@ -3090,16 +3090,16 @@ static HRESULT parse_fx10_object_variable(const char *data, size_t data_size,
             TRACE("Shader type is %s\n", debug_d3d10_shader_variable_type(v->type->basetype));
             for (i = 0; i < element_count; ++i)
             {
-                uint32_t shader_offset, sodecl_offset;
+                DWORD shader_offset, sodecl_offset;
 
                 var = d3d10_array_get_element(v, i);
 
-                shader_offset = read_u32(ptr);
+                read_dword(ptr, &shader_offset);
                 TRACE("Shader offset: %#x.\n", shader_offset);
 
                 if (v->type->flags & D3D10_EOT_FLAG_GS_SO)
                 {
-                    sodecl_offset = read_u32(ptr);
+                    read_dword(ptr, &sodecl_offset);
                     TRACE("Stream output declaration at offset %#x.\n", sodecl_offset);
 
                     if (!fx10_copy_string(data, data_size, sodecl_offset,
@@ -3133,26 +3133,8 @@ static HRESULT parse_fx10_object_variable(const char *data, size_t data_size,
 
                 if (storage_info->size > sizeof(v->u.state.desc))
                 {
-                    ERR("Invalid storage size %#Ix.\n", storage_info->size);
+                    ERR("Invalid storage size %#lx.\n", storage_info->size);
                     return E_FAIL;
-                }
-
-                switch (v->type->basetype)
-                {
-                    case D3D10_SVT_DEPTHSTENCIL:
-                        vars = &v->effect->ds_states;
-                        break;
-                    case D3D10_SVT_BLEND:
-                        vars = &v->effect->blend_states;
-                        break;
-                    case D3D10_SVT_RASTERIZER:
-                        vars = &v->effect->rs_states;
-                        break;
-                    case D3D10_SVT_SAMPLER:
-                        vars = &v->effect->samplers;
-                        break;
-                    default:
-                        ;
                 }
 
                 for (i = 0; i < element_count; ++i)
@@ -3161,15 +3143,7 @@ static HRESULT parse_fx10_object_variable(const char *data, size_t data_size,
 
                     var = d3d10_array_get_element(v, i);
 
-                    if (vars->current >= vars->count)
-                    {
-                         WARN("Wrong variable array size for %#x.\n", v->type->basetype);
-                         return E_FAIL;
-                    }
-                    var->u.state.index = vars->current;
-                    vars->v[vars->current++] = var;
-
-                    prop_count = read_u32(ptr);
+                    read_dword(ptr, &prop_count);
                     TRACE("State object property count: %#x.\n", prop_count);
 
                     memcpy(&var->u.state.desc, storage_info->default_state, storage_info->size);
@@ -3196,13 +3170,13 @@ static HRESULT parse_fx10_object_variable(const char *data, size_t data_size,
             return E_FAIL;
     }
 
-    v->annotations.count = read_u32(ptr);
+    read_dword(ptr, &v->annotations.count);
     TRACE("Variable has %u annotations.\n", v->annotations.count);
 
     if (FAILED(hr = parse_fx10_annotations(data, data_size, ptr, v->effect,
             &v->annotations)))
     {
-        ERR("Failed to parse variable annotations, hr %#lx.\n", hr);
+        ERR("Failed to parse variable annotations, hr %#x.\n", hr);
         return hr;
     }
 
@@ -3257,7 +3231,7 @@ static HRESULT parse_fx10_buffer(const char *data, size_t data_size, const char 
 {
     const char *prefix = local ? "Local" : "Shared";
     unsigned int i;
-    uint32_t offset;
+    DWORD offset;
     D3D10_CBUFFER_TYPE d3d10_cbuffer_type;
     HRESULT hr;
     unsigned int stride = 0;
@@ -3272,7 +3246,7 @@ static HRESULT parse_fx10_buffer(const char *data, size_t data_size, const char 
     l->type->type_class = D3D10_SVC_OBJECT;
     l->type->effect = l->effect;
 
-    offset = read_u32(ptr);
+    read_dword(ptr, &offset);
     TRACE("%s buffer name at offset %#x.\n", prefix, offset);
 
     if (!fx10_copy_string(data, data_size, offset, &l->name))
@@ -3282,10 +3256,10 @@ static HRESULT parse_fx10_buffer(const char *data, size_t data_size, const char 
     }
     TRACE("%s buffer name: %s.\n", prefix, debugstr_a(l->name));
 
-    l->data_size = read_u32(ptr);
+    read_dword(ptr, &l->data_size);
     TRACE("%s buffer data size: %#x.\n", prefix, l->data_size);
 
-    d3d10_cbuffer_type = read_u32(ptr);
+    read_dword(ptr, &d3d10_cbuffer_type);
     TRACE("%s buffer type: %#x.\n", prefix, d3d10_cbuffer_type);
 
     switch(d3d10_cbuffer_type)
@@ -3313,10 +3287,10 @@ static HRESULT parse_fx10_buffer(const char *data, size_t data_size, const char 
             return E_FAIL;
     }
 
-    l->type->member_count = read_u32(ptr);
+    read_dword(ptr, &l->type->member_count);
     TRACE("%s buffer member count: %#x.\n", prefix, l->type->member_count);
 
-    l->explicit_bind_point = read_u32(ptr);
+    read_dword(ptr, &l->explicit_bind_point);
     TRACE("%s buffer explicit bind point: %#x.\n", prefix, l->explicit_bind_point);
 
     if (l->effect->flags & D3D10_EFFECT_IS_POOL)
@@ -3324,13 +3298,13 @@ static HRESULT parse_fx10_buffer(const char *data, size_t data_size, const char 
 
     if (local)
     {
-        l->annotations.count = read_u32(ptr);
+        read_dword(ptr, &l->annotations.count);
         TRACE("Local buffer has %u annotations.\n", l->annotations.count);
 
         if (FAILED(hr = parse_fx10_annotations(data, data_size, ptr, l->effect,
                 &l->annotations)))
         {
-            ERR("Failed to parse buffer annotations, hr %#lx.\n", hr);
+            ERR("Failed to parse buffer annotations, hr %#x.\n", hr);
             return hr;
         }
     }
@@ -3446,7 +3420,7 @@ static HRESULT parse_fx10_buffer(const char *data, size_t data_size, const char 
     {
         if (FAILED(hr = create_buffer_object(l)))
         {
-            WARN("Failed to create a buffer object, hr %#lx.\n", hr);
+            WARN("Failed to create a buffer object, hr %#x.\n", hr);
             return hr;
         }
     }
@@ -3547,7 +3521,7 @@ static HRESULT d3d10_effect_validate_shared_variable(const struct d3d10_effect *
     return S_OK;
 }
 
-static HRESULT parse_fx10_body(struct d3d10_effect *e, const char *data, size_t data_size)
+static HRESULT parse_fx10_body(struct d3d10_effect *e, const char *data, DWORD data_size)
 {
     const char *ptr;
     unsigned int i;
@@ -3555,7 +3529,7 @@ static HRESULT parse_fx10_body(struct d3d10_effect *e, const char *data, size_t 
 
     if (e->index_offset >= data_size)
     {
-        WARN("Invalid index offset %#x (data size %#Ix).\n", e->index_offset, data_size);
+        WARN("Invalid index offset %#x (data size %#x).\n", e->index_offset, data_size);
         return E_FAIL;
     }
     ptr = data + e->index_offset;
@@ -3578,33 +3552,9 @@ static HRESULT parse_fx10_body(struct d3d10_effect *e, const char *data, size_t 
         return E_OUTOFMEMORY;
     }
 
-    if (!(e->shaders.v = heap_calloc(e->shaders.count, sizeof(*e->shaders.v))))
+    if (!(e->used_shaders = heap_calloc(e->used_shader_count, sizeof(*e->used_shaders))))
     {
         ERR("Failed to allocate used shaders memory\n");
-        return E_OUTOFMEMORY;
-    }
-
-    if (!(e->samplers.v = heap_calloc(e->samplers.count, sizeof(*e->samplers.v))))
-    {
-        ERR("Failed to allocate samplers array.\n");
-        return E_OUTOFMEMORY;
-    }
-
-    if (!(e->blend_states.v = heap_calloc(e->blend_states.count, sizeof(*e->blend_states.v))))
-    {
-        ERR("Failed to allocate blend states array.\n");
-        return E_OUTOFMEMORY;
-    }
-
-    if (!(e->ds_states.v = heap_calloc(e->ds_states.count, sizeof(*e->ds_states.v))))
-    {
-        ERR("Failed to allocate depth stencil states array.\n");
-        return E_OUTOFMEMORY;
-    }
-
-    if (!(e->rs_states.v = heap_calloc(e->rs_states.count, sizeof(*e->rs_states.v))))
-    {
-        ERR("Failed to allocate rasterizer states array.\n");
         return E_OUTOFMEMORY;
     }
 
@@ -3685,74 +3635,74 @@ static HRESULT parse_fx10_body(struct d3d10_effect *e, const char *data, size_t 
     return S_OK;
 }
 
-static HRESULT parse_fx10(struct d3d10_effect *e, const char *data, size_t data_size)
+static HRESULT parse_fx10(struct d3d10_effect *e, const char *data, DWORD data_size)
 {
     const char *ptr = data;
-    uint32_t unused;
+    DWORD unused;
 
-    if (!require_space(0, 19, sizeof(uint32_t), data_size))
+    if (!require_space(0, 19, sizeof(DWORD), data_size))
     {
-        WARN("Invalid data size %#Ix.\n", data_size);
+        WARN("Invalid data size %#x.\n", data_size);
         return E_INVALIDARG;
     }
 
     /* Compiled target version (e.g. fx_4_0=0xfeff1001, fx_4_1=0xfeff1011). */
-    e->version = read_u32(&ptr);
-    TRACE("Target: %#x.\n", e->version);
+    read_dword(&ptr, &e->version);
+    TRACE("Target: %#x\n", e->version);
 
-    e->local_buffer_count = read_u32(&ptr);
+    read_dword(&ptr, &e->local_buffer_count);
     TRACE("Local buffer count: %u.\n", e->local_buffer_count);
 
-    e->variable_count = read_u32(&ptr);
-    TRACE("Variable count: %u.\n", e->variable_count);
+    read_dword(&ptr, &e->variable_count);
+    TRACE("Variable count: %u\n", e->variable_count);
 
-    e->local_variable_count = read_u32(&ptr);
-    TRACE("Object count: %u.\n", e->local_variable_count);
+    read_dword(&ptr, &e->local_variable_count);
+    TRACE("Object count: %u\n", e->local_variable_count);
 
-    e->shared_buffer_count = read_u32(&ptr);
-    TRACE("Pool buffer count: %u.\n", e->shared_buffer_count);
+    read_dword(&ptr, &e->shared_buffer_count);
+    TRACE("Pool buffer count: %u\n", e->shared_buffer_count);
 
-    unused = read_u32(&ptr);
-    TRACE("Pool variable count: %u.\n", unused);
+    read_dword(&ptr, &unused);
+    TRACE("Pool variable count: %u\n", unused);
 
-    e->shared_object_count = read_u32(&ptr);
-    TRACE("Pool objects count: %u.\n", e->shared_object_count);
+    read_dword(&ptr, &e->shared_object_count);
+    TRACE("Pool objects count: %u\n", e->shared_object_count);
 
-    e->technique_count = read_u32(&ptr);
-    TRACE("Technique count: %u.\n", e->technique_count);
+    read_dword(&ptr, &e->technique_count);
+    TRACE("Technique count: %u\n", e->technique_count);
 
-    e->index_offset = read_u32(&ptr);
-    TRACE("Index offset: %#x.\n", e->index_offset);
+    read_dword(&ptr, &e->index_offset);
+    TRACE("Index offset: %#x\n", e->index_offset);
 
-    unused = read_u32(&ptr);
-    TRACE("String count: %u.\n", unused);
+    read_dword(&ptr, &unused);
+    TRACE("String count: %u\n", unused);
 
-    e->texture_count = read_u32(&ptr);
-    TRACE("Texture count: %u.\n", e->texture_count);
+    read_dword(&ptr, &e->texture_count);
+    TRACE("Texture count: %u\n", e->texture_count);
 
-    e->ds_states.count = read_u32(&ptr);
-    TRACE("Depthstencilstate count: %u.\n", e->ds_states.count);
+    read_dword(&ptr, &e->depthstencilstate_count);
+    TRACE("Depthstencilstate count: %u\n", e->depthstencilstate_count);
 
-    e->blend_states.count = read_u32(&ptr);
-    TRACE("Blendstate count: %u.\n", e->blend_states.count);
+    read_dword(&ptr, &e->blendstate_count);
+    TRACE("Blendstate count: %u\n", e->blendstate_count);
 
-    e->rs_states.count = read_u32(&ptr);
-    TRACE("Rasterizerstate count: %u.\n", e->rs_states.count);
+    read_dword(&ptr, &e->rasterizerstate_count);
+    TRACE("Rasterizerstate count: %u\n", e->rasterizerstate_count);
 
-    e->samplers.count = read_u32(&ptr);
-    TRACE("Samplerstate count: %u.\n", e->samplers.count);
+    read_dword(&ptr, &e->samplerstate_count);
+    TRACE("Samplerstate count: %u\n", e->samplerstate_count);
 
-    e->rtvs.count = read_u32(&ptr);
-    TRACE("Rendertargetview count: %u.\n", e->rtvs.count);
+    read_dword(&ptr, &e->rendertargetview_count);
+    TRACE("Rendertargetview count: %u\n", e->rendertargetview_count);
 
-    e->dsvs.count = read_u32(&ptr);
-    TRACE("Depthstencilview count: %u.\n", e->dsvs.count);
+    read_dword(&ptr, &e->depthstencilview_count);
+    TRACE("Depthstencilview count: %u\n", e->depthstencilview_count);
 
-    e->shaders.count = read_u32(&ptr);
-    TRACE("Used shader count: %u.\n", e->shaders.count);
+    read_dword(&ptr, &e->used_shader_count);
+    TRACE("Used shader count: %u\n", e->used_shader_count);
 
-    e->anonymous_shader_count = read_u32(&ptr);
-    TRACE("Anonymous shader count: %u.\n", e->anonymous_shader_count);
+    read_dword(&ptr, &e->anonymous_shader_count);
+    TRACE("Anonymous shader count: %u\n", e->anonymous_shader_count);
 
     if (!e->pool && (e->shared_object_count || e->shared_buffer_count))
     {
@@ -3763,13 +3713,13 @@ static HRESULT parse_fx10(struct d3d10_effect *e, const char *data, size_t data_
     return parse_fx10_body(e, ptr, data_size - (ptr - data));
 }
 
-static HRESULT fx10_chunk_handler(const char *data, size_t data_size, uint32_t tag, void *ctx)
+static HRESULT fx10_chunk_handler(const char *data, DWORD data_size, DWORD tag, void *ctx)
 {
     struct d3d10_effect *e = ctx;
 
     TRACE("tag: %s.\n", debugstr_an((const char *)&tag, 4));
 
-    TRACE("Chunk size: %#Ix.\n", data_size);
+    TRACE("chunk size: %#x\n", data_size);
 
     switch(tag)
     {
@@ -3782,9 +3732,9 @@ static HRESULT fx10_chunk_handler(const char *data, size_t data_size, uint32_t t
     }
 }
 
-HRESULT d3d10_effect_parse(struct d3d10_effect *effect, const void *data, SIZE_T data_size)
+HRESULT d3d10_effect_parse(struct d3d10_effect *This, const void *data, SIZE_T data_size)
 {
-    return parse_dxbc(data, data_size, fx10_chunk_handler, effect);
+    return parse_dxbc(data, data_size, fx10_chunk_handler, This);
 }
 
 static void d3d10_effect_shader_variable_destroy(struct d3d10_effect_shader_variable *s,
@@ -3996,73 +3946,67 @@ static ULONG STDMETHODCALLTYPE d3d10_effect_AddRef(ID3D10Effect *iface)
     struct d3d10_effect *This = impl_from_ID3D10Effect(iface);
     ULONG refcount = InterlockedIncrement(&This->refcount);
 
-    TRACE("%p increasing refcount to %lu.\n", This, refcount);
+    TRACE("%p increasing refcount to %u\n", This, refcount);
 
     return refcount;
 }
 
 static ULONG STDMETHODCALLTYPE d3d10_effect_Release(ID3D10Effect *iface)
 {
-    struct d3d10_effect *effect = impl_from_ID3D10Effect(iface);
-    ULONG refcount = InterlockedDecrement(&effect->refcount);
+    struct d3d10_effect *This = impl_from_ID3D10Effect(iface);
+    ULONG refcount = InterlockedDecrement(&This->refcount);
 
-    TRACE("%p decreasing refcount to %lu.\n", iface, refcount);
+    TRACE("%p decreasing refcount to %u\n", This, refcount);
 
     if (!refcount)
     {
         unsigned int i;
 
-        if (effect->techniques)
+        if (This->techniques)
         {
-            for (i = 0; i < effect->technique_count; ++i)
+            for (i = 0; i < This->technique_count; ++i)
             {
-                d3d10_effect_technique_destroy(&effect->techniques[i]);
+                d3d10_effect_technique_destroy(&This->techniques[i]);
             }
-            heap_free(effect->techniques);
+            heap_free(This->techniques);
         }
 
-        if (effect->local_variables)
+        if (This->local_variables)
         {
-            for (i = 0; i < effect->local_variable_count; ++i)
+            for (i = 0; i < This->local_variable_count; ++i)
             {
-                d3d10_effect_variable_destroy(&effect->local_variables[i]);
+                d3d10_effect_variable_destroy(&This->local_variables[i]);
             }
-            heap_free(effect->local_variables);
+            heap_free(This->local_variables);
         }
 
-        if (effect->local_buffers)
+        if (This->local_buffers)
         {
-            for (i = 0; i < effect->local_buffer_count; ++i)
+            for (i = 0; i < This->local_buffer_count; ++i)
             {
-                d3d10_effect_local_buffer_destroy(&effect->local_buffers[i]);
+                d3d10_effect_local_buffer_destroy(&This->local_buffers[i]);
             }
-            heap_free(effect->local_buffers);
+            heap_free(This->local_buffers);
         }
 
-        if (effect->anonymous_shaders)
+        if (This->anonymous_shaders)
         {
-            for (i = 0; i < effect->anonymous_shader_count; ++i)
+            for (i = 0; i < This->anonymous_shader_count; ++i)
             {
-                d3d10_effect_variable_destroy(&effect->anonymous_shaders[i].shader);
-                heap_free(effect->anonymous_shaders[i].type.name);
+                d3d10_effect_variable_destroy(&This->anonymous_shaders[i].shader);
+                heap_free(This->anonymous_shaders[i].type.name);
             }
-            heap_free(effect->anonymous_shaders);
+            heap_free(This->anonymous_shaders);
         }
 
-        heap_free(effect->shaders.v);
-        heap_free(effect->samplers.v);
-        heap_free(effect->rtvs.v);
-        heap_free(effect->dsvs.v);
-        heap_free(effect->blend_states.v);
-        heap_free(effect->ds_states.v);
-        heap_free(effect->rs_states.v);
+        heap_free(This->used_shaders);
 
-        wine_rb_destroy(&effect->types, d3d10_effect_type_destroy, NULL);
+        wine_rb_destroy(&This->types, d3d10_effect_type_destroy, NULL);
 
-        if (effect->pool)
-            IUnknown_Release(&effect->pool->ID3D10Effect_iface);
-        ID3D10Device_Release(effect->device);
-        heap_free(effect);
+        if (This->pool)
+            IUnknown_Release(&This->pool->ID3D10Effect_iface);
+        ID3D10Device_Release(This->device);
+        heap_free(This);
     }
 
     return refcount;
@@ -4368,9 +4312,9 @@ static HRESULT STDMETHODCALLTYPE d3d10_effect_Optimize(ID3D10Effect *iface)
     if (effect->flags & D3D10_EFFECT_OPTIMIZED)
         return S_OK;
 
-    for (i = 0; i < effect->shaders.count; ++i)
+    for (i = 0; i < effect->used_shader_count; ++i)
     {
-        v = effect->shaders.v[i];
+        v = effect->used_shaders[i];
 
         if (v->u.shader.reflection)
         {
@@ -8121,19 +8065,19 @@ static HRESULT d3d10_get_shader_variable(struct d3d10_effect_variable *v, UINT s
 
     /* Index is used as an offset from this variable. */
 
-    for (i = 0; i < v->effect->shaders.count; ++i)
+    for (i = 0; i < v->effect->used_shader_count; ++i)
     {
-        if (v == v->effect->shaders.v[i]) break;
+        if (v == v->effect->used_shaders[i]) break;
     }
 
-    if (i + shader_index >= v->effect->shaders.count)
+    if (i + shader_index >= v->effect->used_shader_count)
     {
         WARN("Invalid shader index %u.\n", shader_index);
         return E_FAIL;
     }
 
-    *s = &v->effect->shaders.v[i + shader_index]->u.shader;
-    if (basetype) *basetype = v->effect->shaders.v[i + shader_index]->type->basetype;
+    *s = &v->effect->used_shaders[i + shader_index]->u.shader;
+    if (basetype) *basetype = v->effect->used_shaders[i + shader_index]->type->basetype;
 
     return S_OK;
 }
@@ -8516,14 +8460,16 @@ static HRESULT STDMETHODCALLTYPE d3d10_effect_blend_variable_GetBlendState(ID3D1
 
     TRACE("iface %p, index %u, blend_state %p.\n", iface, index, blend_state);
 
-    if (!iface->lpVtbl->IsValid(iface))
+    if (v->type->element_count)
+        v = impl_from_ID3D10EffectVariable(iface->lpVtbl->GetElement(iface, index));
+    else if (index)
+        return E_FAIL;
+
+    if (v->type->basetype != D3D10_SVT_BLEND)
     {
-        WARN("Invalid variable.\n");
+        WARN("Variable is not a blend state.\n");
         return E_FAIL;
     }
-
-    if (!(v = d3d10_get_state_variable(v, index, &v->effect->blend_states)))
-        return E_FAIL;
 
     if ((*blend_state = v->u.state.object.blend))
         ID3D10BlendState_AddRef(*blend_state);
@@ -8538,19 +8484,20 @@ static HRESULT STDMETHODCALLTYPE d3d10_effect_blend_variable_GetBackingStore(ID3
 
     TRACE("iface %p, index %u, desc %p.\n", iface, index, desc);
 
-    if (!iface->lpVtbl->IsValid(iface))
+    if (v->type->element_count)
+        v = impl_from_ID3D10EffectVariable(iface->lpVtbl->GetElement(iface, index));
+
+    if (v->type->basetype != D3D10_SVT_BLEND)
     {
-        WARN("Invalid variable.\n");
+        WARN("Variable is not a blend state.\n");
         return E_FAIL;
     }
-
-    if (!(v = d3d10_get_state_variable(v, index, &v->effect->blend_states)))
-        return E_FAIL;
 
     *desc = v->u.state.desc.blend;
 
     return S_OK;
 }
+
 
 static const struct ID3D10EffectBlendVariableVtbl d3d10_effect_blend_variable_vtbl =
 {
@@ -8755,14 +8702,16 @@ static HRESULT STDMETHODCALLTYPE d3d10_effect_depth_stencil_variable_GetDepthSte
 
     TRACE("iface %p, index %u, depth_stencil_state %p.\n", iface, index, depth_stencil_state);
 
-    if (!iface->lpVtbl->IsValid(iface))
+    if (v->type->element_count)
+        v = impl_from_ID3D10EffectVariable(iface->lpVtbl->GetElement(iface, index));
+    else if (index)
+        return E_FAIL;
+
+    if (v->type->basetype != D3D10_SVT_DEPTHSTENCIL)
     {
-        WARN("Invalid variable.\n");
+        WARN("Variable is not a depth stencil state.\n");
         return E_FAIL;
     }
-
-    if (!(v = d3d10_get_state_variable(v, index, &v->effect->ds_states)))
-        return E_FAIL;
 
     if ((*depth_stencil_state = v->u.state.object.depth_stencil))
         ID3D10DepthStencilState_AddRef(*depth_stencil_state);
@@ -8777,19 +8726,20 @@ static HRESULT STDMETHODCALLTYPE d3d10_effect_depth_stencil_variable_GetBackingS
 
     TRACE("iface %p, index %u, desc %p.\n", iface, index, desc);
 
-    if (!iface->lpVtbl->IsValid(iface))
+    if (v->type->element_count)
+        v = impl_from_ID3D10EffectVariable(iface->lpVtbl->GetElement(iface, index));
+
+    if (v->type->basetype != D3D10_SVT_DEPTHSTENCIL)
     {
-        WARN("Invalid variable.\n");
+        WARN("Variable is not a depth stencil state.\n");
         return E_FAIL;
     }
-
-    if (!(v = d3d10_get_state_variable(v, index, &v->effect->ds_states)))
-        return E_FAIL;
 
     *desc = v->u.state.desc.depth_stencil;
 
     return S_OK;
 }
+
 
 static const struct ID3D10EffectDepthStencilVariableVtbl d3d10_effect_depth_stencil_variable_vtbl =
 {
@@ -8994,14 +8944,16 @@ static HRESULT STDMETHODCALLTYPE d3d10_effect_rasterizer_variable_GetRasterizerS
 
     TRACE("iface %p, index %u, rasterizer_state %p.\n", iface, index, rasterizer_state);
 
-    if (!iface->lpVtbl->IsValid(iface))
+    if (v->type->element_count)
+        v = impl_from_ID3D10EffectVariable(iface->lpVtbl->GetElement(iface, index));
+    else if (index)
+        return E_FAIL;
+
+    if (v->type->basetype != D3D10_SVT_RASTERIZER)
     {
-        WARN("Invalid variable.\n");
+        WARN("Variable is not a rasterizer state.\n");
         return E_FAIL;
     }
-
-    if (!(v = d3d10_get_state_variable(v, index, &v->effect->rs_states)))
-        return E_FAIL;
 
     if ((*rasterizer_state = v->u.state.object.rasterizer))
         ID3D10RasterizerState_AddRef(*rasterizer_state);
@@ -9016,19 +8968,20 @@ static HRESULT STDMETHODCALLTYPE d3d10_effect_rasterizer_variable_GetBackingStor
 
     TRACE("iface %p, index %u, desc %p.\n", iface, index, desc);
 
-    if (!iface->lpVtbl->IsValid(iface))
+    if (v->type->element_count)
+        v = impl_from_ID3D10EffectVariable(iface->lpVtbl->GetElement(iface, index));
+
+    if (v->type->basetype != D3D10_SVT_RASTERIZER)
     {
-        WARN("Invalid variable.\n");
+        WARN("Variable is not a rasterizer state.\n");
         return E_FAIL;
     }
-
-    if (!(v = d3d10_get_state_variable(v, index, &v->effect->rs_states)))
-        return E_FAIL;
 
     *desc = v->u.state.desc.rasterizer;
 
     return S_OK;
 }
+
 
 static const struct ID3D10EffectRasterizerVariableVtbl d3d10_effect_rasterizer_variable_vtbl =
 {
@@ -9233,14 +9186,16 @@ static HRESULT STDMETHODCALLTYPE d3d10_effect_sampler_variable_GetSampler(ID3D10
 
     TRACE("iface %p, index %u, sampler %p.\n", iface, index, sampler);
 
-    if (!iface->lpVtbl->IsValid(iface))
+    if (v->type->element_count)
+        v = impl_from_ID3D10EffectVariable(iface->lpVtbl->GetElement(iface, index));
+    else if (index)
+        return E_FAIL;
+
+    if (v->type->basetype != D3D10_SVT_SAMPLER)
     {
-        WARN("Invalid variable.\n");
+        WARN("Variable is not a sampler state.\n");
         return E_FAIL;
     }
-
-    if (!(v = d3d10_get_state_variable(v, index, &v->effect->samplers)))
-        return E_FAIL;
 
     if ((*sampler = v->u.state.object.sampler))
         ID3D10SamplerState_AddRef(*sampler);
@@ -9255,19 +9210,20 @@ static HRESULT STDMETHODCALLTYPE d3d10_effect_sampler_variable_GetBackingStore(I
 
     TRACE("iface %p, index %u, desc %p.\n", iface, index, desc);
 
-    if (!iface->lpVtbl->IsValid(iface))
+    if (v->type->element_count)
+        v = impl_from_ID3D10EffectVariable(iface->lpVtbl->GetElement(iface, index));
+
+    if (v->type->basetype != D3D10_SVT_SAMPLER)
     {
-        WARN("Invalid variable.\n");
+        WARN("Variable is not a sampler state.\n");
         return E_FAIL;
     }
-
-    if (!(v = d3d10_get_state_variable(v, index, &v->effect->samplers)))
-        return E_FAIL;
 
     *desc = v->u.state.desc.sampler.desc;
 
     return S_OK;
 }
+
 
 static const struct ID3D10EffectSamplerVariableVtbl d3d10_effect_sampler_variable_vtbl =
 {
@@ -9581,7 +9537,7 @@ HRESULT WINAPI D3D10CreateEffectFromMemory(void *data, SIZE_T data_size, UINT fl
     struct d3d10_effect *object, *pool = NULL;
     HRESULT hr;
 
-    TRACE("data %p, data_size %Iu, flags %#x, device %p, effect_pool %p, effect %p.\n",
+    TRACE("data %p, data_size %lu, flags %#x, device %p, effect_pool %p, effect %p.\n",
             data, data_size, flags, device, effect_pool, effect);
 
     if (!(flags & D3D10_EFFECT_COMPILE_CHILD_EFFECT) != !effect_pool)
@@ -9595,7 +9551,7 @@ HRESULT WINAPI D3D10CreateEffectFromMemory(void *data, SIZE_T data_size, UINT fl
 
     if (FAILED(hr = d3d10_create_effect(data, data_size, device, pool, 0, &object)))
     {
-        WARN("Failed to create an effect, hr %#lx.\n", hr);
+        WARN("Failed to create an effect, hr %#x.\n", hr);
         return hr;
     }
 
@@ -9644,13 +9600,13 @@ HRESULT WINAPI D3D10CreateEffectPoolFromMemory(void *data, SIZE_T data_size, UIN
     struct d3d10_effect *object;
     HRESULT hr;
 
-    TRACE("data %p, data_size %Iu, fx_flags %#x, device %p, effect_pool %p.\n",
+    TRACE("data %p, data_size %lu, fx_flags %#x, device %p, effect_pool %p.\n",
             data, data_size, fx_flags, device, effect_pool);
 
     if (FAILED(hr = d3d10_create_effect(data, data_size, device, NULL,
             D3D10_EFFECT_IS_POOL, &object)))
     {
-        WARN("Failed to create an effect, hr %#lx.\n", hr);
+        WARN("Failed to create an effect, hr %#x.\n", hr);
         return hr;
     }
 

@@ -1,8 +1,6 @@
+EXTRADEFS = -DWINE_NO_LONG_TYPES
 TESTDLL = xactengine3_7.dll
-IMPORTS = ole32 x3daudio1_7
+IMPORTS = ole32
 
 C_SRCS = \
 	xact3.c
-
-RC_SRCS = \
-	rsrc.rc

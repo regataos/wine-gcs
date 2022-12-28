@@ -44,8 +44,6 @@ WINE_DEFAULT_DEBUG_CHANNEL(globalmem);
 
 static HANDLE systemHeap;   /* globally shared heap */
 
-extern BOOL CDECL __wine_needs_override_large_address_aware(void);
-
 
 /***********************************************************************
  *           HEAP_CreateSystemHeap
@@ -113,8 +111,12 @@ HANDLE WINAPI HeapCreate(
     }
     else
     {
+        ULONG hci = 2;
+
         ret = RtlCreateHeap( flags, NULL, maxSize, initialSize, NULL, NULL );
         if (!ret) SetLastError( ERROR_NOT_ENOUGH_MEMORY );
+        else if (!(flags & HEAP_CREATE_ENABLE_EXECUTE))
+            HeapSetInformation(ret, HeapCompatibilityInformation, &hci, sizeof(hci));
     }
     return ret;
 }
@@ -542,6 +544,13 @@ SIZE_T WINAPI LocalSize(
     return GlobalSize( handle );
 }
 
+static BOOL force_laa(void)
+{
+    WCHAR e[16];
+    e[0] = '\0';
+    GetEnvironmentVariableW(L"WINE_LARGE_ADDRESS_AWARE", e, ARRAY_SIZE(e));
+    return (*e != '\0' && *e != '0');
+}
 
 /***********************************************************************
  *           GlobalMemoryStatus   (KERNEL32.@)
@@ -553,15 +562,15 @@ SIZE_T WINAPI LocalSize(
  */
 VOID WINAPI GlobalMemoryStatus( LPMEMORYSTATUS lpBuffer )
 {
+    static int force_large_address_aware = -1;
     MEMORYSTATUSEX memstatus;
     OSVERSIONINFOW osver;
 #ifndef _WIN64
     IMAGE_NT_HEADERS *nt = RtlImageNtHeader( GetModuleHandleW(0) );
 #endif
-    static int force_large_address_aware = -1;
 
     if (force_large_address_aware == -1)
-        force_large_address_aware = __wine_needs_override_large_address_aware();
+        force_large_address_aware = force_laa() ? 1 : 0;
 
     /* Because GlobalMemoryStatus is identical to GlobalMemoryStatusEX save
        for one extra field in the struct, and the lack of a bug, we simply
@@ -613,20 +622,17 @@ VOID WINAPI GlobalMemoryStatus( LPMEMORYSTATUS lpBuffer )
     if ( lpBuffer->dwAvailPhys +  lpBuffer->dwAvailPageFile >= 2U*1024*1024*1024)
          lpBuffer->dwAvailPageFile = 2U*1024*1024*1024 -  lpBuffer->dwAvailPhys - 1;
 
-    /* limit value for really old binaries */
-    /* use MAXLONG/2, so that dwAvailPhys + dwAvailPageFile < MAXLONG */
+    /* limit page file size for really old binaries */
     if (nt->OptionalHeader.MajorSubsystemVersion < 4 ||
         nt->OptionalHeader.MajorOperatingSystemVersion < 4)
     {
-        lpBuffer->dwTotalPhys = min(lpBuffer->dwTotalPhys, MAXLONG / 2);
-        lpBuffer->dwAvailPhys = min(lpBuffer->dwAvailPhys, MAXLONG / 2);
-        lpBuffer->dwTotalPageFile = min(lpBuffer->dwTotalPageFile, MAXLONG / 2);
-        lpBuffer->dwAvailPageFile = min(lpBuffer->dwAvailPageFile, MAXLONG / 2);
+        if (lpBuffer->dwTotalPageFile > MAXLONG) lpBuffer->dwTotalPageFile = MAXLONG;
+        if (lpBuffer->dwAvailPageFile > MAXLONG) lpBuffer->dwAvailPageFile = MAXLONG;
     }
 #endif
 
-    TRACE("Length %lu, MemoryLoad %lu, TotalPhys %Ix, AvailPhys %Ix,"
-          " TotalPageFile %Ix, AvailPageFile %Ix, TotalVirtual %Ix, AvailVirtual %Ix\n",
+    TRACE("Length %u, MemoryLoad %u, TotalPhys %lx, AvailPhys %lx,"
+          " TotalPageFile %lx, AvailPageFile %lx, TotalVirtual %lx, AvailVirtual %lx\n",
           lpBuffer->dwLength, lpBuffer->dwMemoryLoad, lpBuffer->dwTotalPhys,
           lpBuffer->dwAvailPhys, lpBuffer->dwTotalPageFile, lpBuffer->dwAvailPageFile,
           lpBuffer->dwTotalVirtual, lpBuffer->dwAvailVirtual );

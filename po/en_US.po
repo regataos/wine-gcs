@@ -3984,8 +3984,8 @@ msgid "Cannot modify non-writable property '|'"
 msgstr "Cannot modify non-writable property '|'"
 
 #: dlls/jscript/jscript.rc:77
-msgid "'this' is not a Map object"
-msgstr "'this' is not a Map object"
+msgid "'this' is not a | object"
+msgstr "'this' is not a | object"
 
 #: dlls/jscript/jscript.rc:78
 msgid "Property cannot have both accessors and a value"
@@ -4016,11 +4016,11 @@ msgstr "File not found.\n"
 msgid "Path not found.\n"
 msgstr "Path not found.\n"
 
-#: dlls/kernel32/winerror.mc:48 dlls/kernel32/winerror.mc:3773
+#: dlls/kernel32/winerror.mc:48
 msgid "Too many open files.\n"
 msgstr "Too many open files.\n"
 
-#: dlls/kernel32/winerror.mc:53 dlls/kernel32/winerror.mc:3758
+#: dlls/kernel32/winerror.mc:53
 msgid "Access denied.\n"
 msgstr "Access denied.\n"
 
@@ -4624,7 +4624,7 @@ msgstr "Environment variable not found.\n"
 msgid "No signal sent.\n"
 msgstr "No signal sent.\n"
 
-#: dlls/kernel32/winerror.mc:818 programs/cmd/cmd.rc:410
+#: dlls/kernel32/winerror.mc:818
 msgid "File name is too long.\n"
 msgstr "File name is too long.\n"
 
@@ -5372,7 +5372,7 @@ msgstr "Operation canceled by user.\n"
 msgid "File has a user-mapped section.\n"
 msgstr "File has a user-mapped section.\n"
 
-#: dlls/kernel32/winerror.mc:1758 dlls/kernel32/winerror.mc:3783
+#: dlls/kernel32/winerror.mc:1758 dlls/kernel32/winerror.mc:3753
 msgid "Connection refused.\n"
 msgstr "Connection refused.\n"
 
@@ -6957,58 +6957,26 @@ msgid "This network connection does not exist.\n"
 msgstr "This network connection does not exist.\n"
 
 #: dlls/kernel32/winerror.mc:3748
-msgid "Call interrupted.\n"
-msgstr "Call interrupted.\n"
-
-#: dlls/kernel32/winerror.mc:3753
-msgid "Invalid file handle.\n"
-msgstr "Invalid file handle.\n"
-
-#: dlls/kernel32/winerror.mc:3763
-msgid "Invalid pointer address.\n"
-msgstr "Invalid pointer address.\n"
-
-#: dlls/kernel32/winerror.mc:3768
-msgid "Invalid argument.\n"
-msgstr "Invalid argument.\n"
-
-#: dlls/kernel32/winerror.mc:3778
 msgid "Connection reset by peer.\n"
 msgstr "Connection reset by peer.\n"
 
-#: dlls/kernel32/winerror.mc:3788
-msgid "Host not found.\n"
-msgstr "Host not found.\n"
-
-#: dlls/kernel32/winerror.mc:3793
-msgid "Nonauthoritative host not found.\n"
-msgstr "Nonauthoritative host not found.\n"
-
-#: dlls/kernel32/winerror.mc:3798
-msgid "Nonrecoverable error.\n"
-msgstr "Nonrecoverable error.\n"
-
-#: dlls/kernel32/winerror.mc:3803
-msgid "Name valid, no data record.\n"
-msgstr "Name valid, no data record.\n"
-
-#: dlls/kernel32/winerror.mc:3817
+#: dlls/kernel32/winerror.mc:3767
 msgid "Not implemented.\n"
 msgstr "Not implemented.\n"
 
-#: dlls/kernel32/winerror.mc:3838
+#: dlls/kernel32/winerror.mc:3788
 msgid "Call failed.\n"
 msgstr "Call failed.\n"
 
-#: dlls/kernel32/winerror.mc:3810
+#: dlls/kernel32/winerror.mc:3760
 msgid "No Signature found in file.\n"
 msgstr "No Signature found in file.\n"
 
-#: dlls/kernel32/winerror.mc:3824
+#: dlls/kernel32/winerror.mc:3774
 msgid "Invalid call.\n"
 msgstr "Invalid call.\n"
 
-#: dlls/kernel32/winerror.mc:3831
+#: dlls/kernel32/winerror.mc:3781
 msgid "Resource is not currently available.\n"
 msgstr "Resource is not currently available.\n"
 

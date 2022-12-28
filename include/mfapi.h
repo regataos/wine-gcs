@@ -109,7 +109,6 @@ DEFINE_MEDIATYPE_GUID(MFVideoFormat_MSS1,          MAKEFOURCC('M','S','S','1'));
 DEFINE_MEDIATYPE_GUID(MFVideoFormat_MSS2,          MAKEFOURCC('M','S','S','2'));
 DEFINE_MEDIATYPE_GUID(MFVideoFormat_NV11,          MAKEFOURCC('N','V','1','1'));
 DEFINE_MEDIATYPE_GUID(MFVideoFormat_NV12,          MAKEFOURCC('N','V','1','2'));
-DEFINE_MEDIATYPE_GUID(MFVideoFormat_NV21,          MAKEFOURCC('N','V','2','1'));
 DEFINE_MEDIATYPE_GUID(MFVideoFormat_ORAW,          MAKEFOURCC('O','R','A','W'));
 DEFINE_MEDIATYPE_GUID(MFVideoFormat_P010,          MAKEFOURCC('P','0','1','0'));
 DEFINE_MEDIATYPE_GUID(MFVideoFormat_P016,          MAKEFOURCC('P','0','1','6'));
@@ -221,6 +220,13 @@ typedef enum _EAllocationType
     eAllocationTypePageable,
     eAllocationTypeIgnore
 } EAllocationType;
+
+typedef enum _MFVideoDRMFlags
+{
+    MFVideoDRMFlag_None = 0,
+    MFVideoDRMFlag_AnalogProtected,
+    MFVideoDRMFlag_DigitallyProtected,
+} MFVideoDRMFlags;
 
 #ifdef MF_INIT_GUIDS
 #include <initguid.h>
@@ -385,6 +391,7 @@ DEFINE_GUID(MFMediaType_Subtitle,          0xa6d13581, 0xed50, 0x4e65, 0xae, 0x0
 DEFINE_GUID(MFMediaType_Video,             0x73646976, 0x0000, 0x0010, 0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71);
 
 DEFINE_GUID(MFSampleExtension_DecodeTimestamp,          0x73a954d4, 0x09e2, 0x4861, 0xbe, 0xfc, 0x94, 0xbd, 0x97, 0xc0, 0x8e, 0x6e);
+DEFINE_GUID(MFSampleExtension_CleanPoint,               0x9cdf01d8, 0xa0f0, 0x43ba, 0xb0, 0x77, 0xea, 0xa0, 0x6c, 0xbd, 0x72, 0x8a);
 DEFINE_GUID(MFSampleExtension_Timestamp,                0x1e436999, 0x69be, 0x4c7a, 0x93, 0x69, 0x70, 0x06, 0x8c, 0x02, 0x60, 0xcb);
 DEFINE_GUID(MFSampleExtension_Token,                    0x8294da66, 0xf328, 0x4805, 0xb5, 0x51, 0x00, 0xde, 0xb4, 0xc5, 0x7a, 0x61);
 DEFINE_GUID(MFSampleExtension_3DVideo,                  0xf86f97a4, 0xdd54, 0x4e2e, 0x9a, 0x5e, 0x55, 0xfc, 0x2d, 0x74, 0xa0, 0x05);
@@ -496,6 +503,9 @@ typedef enum
 #define MF_E_DXGI_NEW_VIDEO_DEVICE         ((HRESULT)0x80041001)
 #define MF_E_DXGI_VIDEO_DEVICE_LOCKED      ((HRESULT)0x80041002)
 
+struct tagVIDEOINFOHEADER;
+typedef struct tagVIDEOINFOHEADER VIDEOINFOHEADER;
+
 HRESULT WINAPI MFAddPeriodicCallback(MFPERIODICCALLBACK callback, IUnknown *context, DWORD *key);
 HRESULT WINAPI MFAllocateSerialWorkQueue(DWORD target_queue, DWORD *queue);
 HRESULT WINAPI MFAllocateWorkQueue(DWORD *queue);
@@ -537,6 +547,13 @@ HRESULT WINAPI MFCreateSample(IMFSample **sample);
 HRESULT WINAPI MFCreateTempFile(MF_FILE_ACCESSMODE accessmode, MF_FILE_OPENMODE openmode, MF_FILE_FLAGS flags,
         IMFByteStream **bytestream);
 HRESULT WINAPI MFCreateVideoMediaTypeFromSubtype(const GUID *subtype, IMFVideoMediaType **media_type);
+
+#ifdef _KSMEDIA_
+HRESULT WINAPI MFCreateVideoMediaTypeFromVideoInfoHeader(const KS_VIDEOINFOHEADER *vih, DWORD size, DWORD pixel_aspect_ratio_x,
+        DWORD pixel_aspect_ratio_y, MFVideoInterlaceMode interlace_mode, QWORD video_flags, const GUID *subtype,
+        IMFVideoMediaType **media_type);
+#endif
+
 HRESULT WINAPI MFCreateVideoSampleAllocatorEx(REFIID riid, void **allocator);
 HRESULT WINAPI MFCreateMemoryBuffer(DWORD max_length, IMFMediaBuffer **buffer);
 HRESULT WINAPI MFCreateWaveFormatExFromMFMediaType(IMFMediaType *type, WAVEFORMATEX **format, UINT32 *size, UINT32 flags);
@@ -566,6 +583,9 @@ HRESULT WINAPI MFTGetInfo(CLSID clsid, WCHAR **name, MFT_REGISTER_TYPE_INFO **in
         MFT_REGISTER_TYPE_INFO **output_types, UINT32 *output_types_count, IMFAttributes **attributes);
 BOOL WINAPI MFIsFormatYUV(DWORD format);
 HRESULT WINAPI MFInitAttributesFromBlob(IMFAttributes *attributes, const UINT8 *buffer, UINT size);
+HRESULT WINAPI MFInitMediaTypeFromAMMediaType(IMFMediaType *mediatype, const AM_MEDIA_TYPE *am_type);
+HRESULT WINAPI MFInitMediaTypeFromVideoInfoHeader(IMFMediaType *media_type, const VIDEOINFOHEADER *vih,
+        UINT32 size, const GUID *subtype);
 HRESULT WINAPI MFInitMediaTypeFromWaveFormatEx(IMFMediaType *mediatype, const WAVEFORMATEX *format, UINT32 size);
 HRESULT WINAPI MFInitVideoFormat_RGB(MFVIDEOFORMAT *format, DWORD width, DWORD height, DWORD d3dformat);
 HRESULT WINAPI MFInvokeCallback(IMFAsyncResult *result);

@@ -20,7 +20,12 @@
 
 #include <stdarg.h>
 
+#define COBJMACROS
+
 #include "windef.h"
+#include "initguid.h"
+#include "objbase.h"
+#include "xmllite.h"
 #include "schrpc.h"
 #include "taskschd.h"
 #include "wine/debug.h"
@@ -30,6 +35,11 @@
 WINE_DEFAULT_DEBUG_CHANNEL(schedsvc);
 
 static const char bom_utf8[] = { 0xef,0xbb,0xbf };
+
+struct task_info
+{
+    BOOL enabled;
+};
 
 HRESULT __cdecl SchRpcHighestVersion(DWORD *version)
 {
@@ -170,7 +180,7 @@ HRESULT __cdecl SchRpcRegisterTask(const WCHAR *path, const WCHAR *xml, DWORD fl
     DWORD disposition;
     HRESULT hr;
 
-    TRACE("%s,%s,%#x,%s,%u,%u,%p,%p,%p\n", debugstr_w(path), debugstr_w(xml), flags,
+    TRACE("%s,%s,%#lx,%s,%lu,%lu,%p,%p,%p\n", debugstr_w(path), debugstr_w(xml), flags,
           debugstr_w(sddl), task_logon_type, n_creds, creds, actual_path, xml_error_info);
 
     *actual_path = NULL;
@@ -310,6 +320,212 @@ static HRESULT read_xml(const WCHAR *name, WCHAR **xml)
     return hr;
 }
 
+static HRESULT read_text_value(IXmlReader *reader, WCHAR **value)
+{
+    HRESULT hr;
+    XmlNodeType type;
+
+    while (IXmlReader_Read(reader, &type) == S_OK)
+    {
+        switch (type)
+        {
+            case XmlNodeType_Text:
+                if (FAILED(hr = IXmlReader_GetValue(reader, (const WCHAR **)value, NULL)))
+                    return hr;
+                TRACE("%s\n", debugstr_w(*value));
+                return S_OK;
+
+            case XmlNodeType_Whitespace:
+            case XmlNodeType_Comment:
+                break;
+
+            default:
+                FIXME("unexpected node type %d\n", type);
+                return E_FAIL;
+        }
+    }
+
+    return E_FAIL;
+}
+
+static HRESULT read_variantbool_value(IXmlReader *reader, VARIANT_BOOL *vbool)
+{
+    WCHAR *value;
+    HRESULT hr;
+
+    *vbool = VARIANT_FALSE;
+
+    if (FAILED(hr = read_text_value(reader, &value)))
+        return hr;
+
+    if (!wcscmp(value, L"true"))
+    {
+        *vbool = VARIANT_TRUE;
+    }
+    else if (wcscmp(value, L"false"))
+    {
+        WARN("unexpected bool value %s\n", debugstr_w(value));
+        return SCHED_E_INVALIDVALUE;
+    }
+
+    return S_OK;
+}
+
+static HRESULT read_task_settings(IXmlReader *reader, struct task_info *info)
+{
+    VARIANT_BOOL bool_val;
+    const WCHAR *name;
+    XmlNodeType type;
+    HRESULT hr;
+
+    if (IXmlReader_IsEmptyElement(reader))
+    {
+        TRACE("Settings is empty.\n");
+        return S_OK;
+    }
+
+    while (IXmlReader_Read(reader, &type) == S_OK)
+    {
+        switch (type)
+        {
+            case XmlNodeType_EndElement:
+                hr = IXmlReader_GetLocalName(reader, &name, NULL);
+                if (hr != S_OK) return hr;
+
+                TRACE("/%s\n", debugstr_w(name));
+
+                if (!wcscmp(name, L"Settings"))
+                    return S_OK;
+
+                break;
+
+            case XmlNodeType_Element:
+                hr = IXmlReader_GetLocalName(reader, &name, NULL);
+                if (hr != S_OK) return hr;
+
+                TRACE("Element: %s\n", debugstr_w(name));
+
+                if (!wcscmp(name, L"Enabled"))
+                {
+                    if (FAILED(hr = read_variantbool_value(reader, &bool_val)))
+                        return hr;
+                    info->enabled = !!bool_val;
+                }
+                break;
+            default:
+                break;
+        }
+    }
+
+    WARN("Settings was not terminated\n");
+    return SCHED_E_MALFORMEDXML;
+}
+
+static HRESULT read_task_info(IXmlReader *reader, struct task_info *info)
+{
+    const WCHAR *name;
+    XmlNodeType type;
+    HRESULT hr;
+
+    if (IXmlReader_IsEmptyElement(reader))
+    {
+        TRACE("Task is empty\n");
+        return S_OK;
+    }
+    while (IXmlReader_Read(reader, &type) == S_OK)
+    {
+        switch (type)
+        {
+            case XmlNodeType_EndElement:
+                if (FAILED(hr = IXmlReader_GetLocalName(reader, &name, NULL)))
+                    return hr;
+
+                if (!wcscmp(name, L"Task"))
+                    return S_OK;
+                break;
+
+            case XmlNodeType_Element:
+                if (FAILED(hr = IXmlReader_GetLocalName(reader, &name, NULL)))
+                    return hr;
+
+                TRACE("Element: %s\n", debugstr_w(name));
+
+                if (!wcscmp(name, L"Settings"))
+                {
+                    if (FAILED(hr = read_task_settings(reader, info)))
+                        return hr;
+                }
+                break;
+
+            default:
+                break;
+        }
+    }
+
+    WARN("Task was not terminated\n");
+    return SCHED_E_MALFORMEDXML;
+
+}
+
+static HRESULT read_task_info_from_xml(const WCHAR *xml, struct task_info *info)
+{
+    IXmlReader *reader;
+    const WCHAR *name;
+    XmlNodeType type;
+    IStream *stream;
+    HGLOBAL hmem;
+    HRESULT hr;
+    void *buf;
+
+    memset(info, 0, sizeof(*info));
+
+    if (!(hmem = GlobalAlloc(0, wcslen(xml) * sizeof(WCHAR))))
+        return E_OUTOFMEMORY;
+
+    buf = GlobalLock(hmem);
+    memcpy(buf, xml, lstrlenW(xml) * sizeof(WCHAR));
+    GlobalUnlock(hmem);
+
+    if (FAILED(hr = CreateStreamOnHGlobal(hmem, TRUE, &stream)))
+    {
+        GlobalFree(hmem);
+        return hr;
+    }
+
+    if (FAILED(hr = CreateXmlReader(&IID_IXmlReader, (void **)&reader, NULL)))
+    {
+        IStream_Release(stream);
+        return hr;
+    }
+
+    if (FAILED(hr = IXmlReader_SetInput(reader, (IUnknown *)stream)))
+        goto done;
+
+    while (IXmlReader_Read(reader, &type) == S_OK)
+    {
+        if (type != XmlNodeType_Element) continue;
+        if (FAILED(hr = IXmlReader_GetLocalName(reader, &name, NULL)))
+            goto done;
+
+        TRACE("Element: %s\n", debugstr_w(name));
+        if (wcscmp(name, L"Task"))
+            continue;
+
+        hr = read_task_info(reader, info);
+        break;
+    }
+
+done:
+    IXmlReader_Release(reader);
+    IStream_Release(stream);
+    if (FAILED(hr))
+    {
+        WARN("Failed parsing xml, hr %#lx.\n", hr);
+        return SCHED_E_MALFORMEDXML;
+    }
+    return S_OK;
+}
+
 HRESULT __cdecl SchRpcRetrieveTask(const WCHAR *path, const WCHAR *languages, ULONG *n_languages, WCHAR **xml)
 {
     WCHAR *full_name;
@@ -332,7 +548,7 @@ HRESULT __cdecl SchRpcCreateFolder(const WCHAR *path, const WCHAR *sddl, DWORD f
     WCHAR *full_name;
     HRESULT hr;
 
-    TRACE("%s,%s,%#x\n", debugstr_w(path), debugstr_w(sddl), flags);
+    TRACE("%s,%s,%#lx\n", debugstr_w(path), debugstr_w(sddl), flags);
 
     if (flags) return E_INVALIDARG;
 
@@ -347,13 +563,13 @@ HRESULT __cdecl SchRpcCreateFolder(const WCHAR *path, const WCHAR *sddl, DWORD f
 
 HRESULT __cdecl SchRpcSetSecurity(const WCHAR *path, const WCHAR *sddl, DWORD flags)
 {
-    FIXME("%s,%s,%#x: stub\n", debugstr_w(path), debugstr_w(sddl), flags);
+    FIXME("%s,%s,%#lx: stub\n", debugstr_w(path), debugstr_w(sddl), flags);
     return E_NOTIMPL;
 }
 
 HRESULT __cdecl SchRpcGetSecurity(const WCHAR *path, DWORD flags, WCHAR **sddl)
 {
-    FIXME("%s,%#x,%p: stub\n", debugstr_w(path), flags, sddl);
+    FIXME("%s,%#lx,%p: stub\n", debugstr_w(path), flags, sddl);
     return E_NOTIMPL;
 }
 
@@ -398,7 +614,7 @@ HRESULT __cdecl SchRpcEnumFolders(const WCHAR *path, DWORD flags, DWORD *start_i
     DWORD allocated, count, index;
     TASK_NAMES list;
 
-    TRACE("%s,%#x,%u,%u,%p,%p\n", debugstr_w(path), flags, *start_index, n_requested, n_names, names);
+    TRACE("%s,%#lx,%lu,%lu,%p,%p\n", debugstr_w(path), flags, *start_index, n_requested, n_names, names);
 
     *n_names = 0;
     *names = NULL;
@@ -506,7 +722,7 @@ HRESULT __cdecl SchRpcEnumTasks(const WCHAR *path, DWORD flags, DWORD *start_ind
     DWORD allocated, count, index;
     TASK_NAMES list;
 
-    TRACE("%s,%#x,%u,%u,%p,%p\n", debugstr_w(path), flags, *start_index, n_requested, n_names, names);
+    TRACE("%s,%#lx,%lu,%lu,%p,%p\n", debugstr_w(path), flags, *start_index, n_requested, n_names, names);
 
     *n_names = 0;
     *names = NULL;
@@ -604,7 +820,7 @@ HRESULT __cdecl SchRpcEnumTasks(const WCHAR *path, DWORD flags, DWORD *start_ind
 
 HRESULT __cdecl SchRpcEnumInstances(const WCHAR *path, DWORD flags, DWORD *n_guids, GUID **guids)
 {
-    FIXME("%s,%#x,%p,%p: stub\n", debugstr_w(path), flags, n_guids, guids);
+    FIXME("%s,%#lx,%p,%p: stub\n", debugstr_w(path), flags, n_guids, guids);
     return E_NOTIMPL;
 }
 
@@ -618,20 +834,20 @@ HRESULT __cdecl SchRpcGetInstanceInfo(GUID guid, WCHAR **path, DWORD *task_state
 
 HRESULT __cdecl SchRpcStopInstance(GUID guid, DWORD flags)
 {
-    FIXME("%s,%#x: stub\n", wine_dbgstr_guid(&guid), flags);
+    FIXME("%s,%#lx: stub\n", wine_dbgstr_guid(&guid), flags);
     return E_NOTIMPL;
 }
 
 HRESULT __cdecl SchRpcStop(const WCHAR *path, DWORD flags)
 {
-    FIXME("%s,%#x: stub\n", debugstr_w(path), flags);
+    FIXME("%s,%#lx: stub\n", debugstr_w(path), flags);
     return E_NOTIMPL;
 }
 
 HRESULT __cdecl SchRpcRun(const WCHAR *path, DWORD n_args, const WCHAR **args, DWORD flags,
                           DWORD session_id, const WCHAR *user, GUID *guid)
 {
-    FIXME("%s,%u,%p,%#x,%#x,%s,%p: stub\n", debugstr_w(path), n_args, args, flags,
+    FIXME("%s,%lu,%p,%#lx,%#lx,%s,%p: stub\n", debugstr_w(path), n_args, args, flags,
           session_id, debugstr_w(user), guid);
     return E_NOTIMPL;
 }
@@ -641,7 +857,7 @@ HRESULT __cdecl SchRpcDelete(const WCHAR *path, DWORD flags)
     WCHAR *full_name;
     HRESULT hr = S_OK;
 
-    TRACE("%s,%#x\n", debugstr_w(path), flags);
+    TRACE("%s,%#lx\n", debugstr_w(path), flags);
 
     if (flags) return E_INVALIDARG;
 
@@ -664,14 +880,14 @@ HRESULT __cdecl SchRpcDelete(const WCHAR *path, DWORD flags)
 
 HRESULT __cdecl SchRpcRename(const WCHAR *path, const WCHAR *name, DWORD flags)
 {
-    FIXME("%s,%s,%#x: stub\n", debugstr_w(path), debugstr_w(name), flags);
+    FIXME("%s,%s,%#lx: stub\n", debugstr_w(path), debugstr_w(name), flags);
     return E_NOTIMPL;
 }
 
 HRESULT __cdecl SchRpcScheduledRuntimes(const WCHAR *path, SYSTEMTIME *start, SYSTEMTIME *end, DWORD flags,
                                         DWORD n_requested, DWORD *n_runtimes, SYSTEMTIME **runtimes)
 {
-    FIXME("%s,%p,%p,%#x,%u,%p,%p: stub\n", debugstr_w(path), start, end, flags,
+    FIXME("%s,%p,%p,%#lx,%lu,%p,%p: stub\n", debugstr_w(path), start, end, flags,
           n_requested, n_runtimes, runtimes);
     return E_NOTIMPL;
 }
@@ -685,9 +901,10 @@ HRESULT __cdecl SchRpcGetLastRunInfo(const WCHAR *path, SYSTEMTIME *last_runtime
 HRESULT __cdecl SchRpcGetTaskInfo(const WCHAR *path, DWORD flags, DWORD *enabled, DWORD *task_state)
 {
     WCHAR *full_name, *xml;
+    struct task_info info;
     HRESULT hr;
 
-    FIXME("%s,%#x,%p,%p: stub\n", debugstr_w(path), flags, enabled, task_state);
+    FIXME("%s,%#lx,%p,%p: stub\n", debugstr_w(path), flags, enabled, task_state);
 
     full_name = get_full_name(path, NULL);
     if (!full_name) return E_OUTOFMEMORY;
@@ -695,10 +912,15 @@ HRESULT __cdecl SchRpcGetTaskInfo(const WCHAR *path, DWORD flags, DWORD *enabled
     hr = read_xml(full_name, &xml);
     heap_free(full_name);
     if (hr != S_OK) return hr;
+    hr = read_task_info_from_xml(xml, &info);
     heap_free(xml);
+    if (FAILED(hr)) return hr;
 
-    *enabled = 0;
-    *task_state = (flags & SCH_FLAG_STATE) ? TASK_STATE_DISABLED : TASK_STATE_UNKNOWN;
+    *enabled = info.enabled;
+    if (flags & SCH_FLAG_STATE)
+        *task_state = *enabled ? TASK_STATE_READY : TASK_STATE_DISABLED;
+    else
+        *task_state = TASK_STATE_UNKNOWN;
     return S_OK;
 }
 
@@ -710,6 +932,6 @@ HRESULT __cdecl SchRpcGetNumberOfMissedRuns(const WCHAR *path, DWORD *runs)
 
 HRESULT __cdecl SchRpcEnableTask(const WCHAR *path, DWORD enabled)
 {
-    FIXME("%s,%u: stub\n", debugstr_w(path), enabled);
+    FIXME("%s,%lu: stub\n", debugstr_w(path), enabled);
     return E_NOTIMPL;
 }

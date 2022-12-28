@@ -100,27 +100,28 @@ static HRESULT WINAPI domelem_QueryInterface(
     return S_OK;
 }
 
-static ULONG WINAPI domelem_AddRef(IXMLDOMElement *iface)
+static ULONG WINAPI domelem_AddRef(
+    IXMLDOMElement *iface )
 {
-    domelem *element = impl_from_IXMLDOMElement(iface);
-    LONG ref = InterlockedIncrement(&element->ref);
+    domelem *This = impl_from_IXMLDOMElement( iface );
+    LONG ref = InterlockedIncrement(&This->ref);
 
-    TRACE("%p, refcount %ld.\n", iface, ref);
+    TRACE("(%p)->(%d)\n", This, ref);
 
     return ref;
 }
 
-static ULONG WINAPI domelem_Release(IXMLDOMElement *iface)
+static ULONG WINAPI domelem_Release(
+    IXMLDOMElement *iface )
 {
-    domelem *element = impl_from_IXMLDOMElement(iface);
-    ULONG ref = InterlockedDecrement(&element->ref);
+    domelem *This = impl_from_IXMLDOMElement( iface );
+    ULONG ref = InterlockedDecrement(&This->ref);
 
-    TRACE("%p, refcount %lu.\n", iface, ref);
+    TRACE("(%p)->(%d)\n", This, ref);
 
-    if (!ref)
-    {
-        destroy_xmlnode(&element->node);
-        heap_free(element);
+    if(!ref) {
+        destroy_xmlnode(&This->node);
+        heap_free(This);
     }
 
     return ref;
@@ -454,7 +455,6 @@ static inline HRESULT variant_from_dt(XDR_DT dt, xmlChar* str, VARIANT* v)
 
     switch (dt)
     {
-    case DT_INVALID:
     case DT_STRING:
     case DT_NMTOKEN:
     case DT_NMTOKENS:
@@ -736,6 +736,13 @@ static HRESULT WINAPI domelem_get_nodeTypedValue(
     V_VT(v) = VT_NULL;
 
     dt = element_get_dt(get_element(This));
+
+    if (dt == DT_INVALID)
+    {
+        if (SUCCEEDED(hr = node_get_text(&This->node, &V_BSTR(v))))
+            V_VT(v) = VT_BSTR;
+        return hr;
+    }
     content = xmlNodeGetContent(get_element(This));
     hr = variant_from_dt(dt, content, v);
     xmlFree(content);
@@ -1791,7 +1798,7 @@ static HRESULT domelem_get_item(const xmlNodePtr node, LONG index, IXMLDOMNode *
     IUnknown *unk;
     HRESULT hr;
 
-    TRACE("%p, %ld, %p.\n", node, index, item);
+    TRACE("(%p)->(%d %p)\n", node, index, item);
 
     *item = NULL;
 
@@ -1878,7 +1885,7 @@ static HRESULT domelem_next_node(const xmlNodePtr node, LONG *iter, IXMLDOMNode 
     xmlAttrPtr curr;
     LONG i;
 
-    TRACE("%p, %ld, %p.\n", node, *iter, nextNode);
+    TRACE("(%p)->(%d: %p)\n", node, *iter, nextNode);
 
     *nextNode = NULL;
 

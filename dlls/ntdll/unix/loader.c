@@ -208,6 +208,7 @@ static void * const syscalls[] =
     NtLockVirtualMemory,
     NtMakeTemporaryObject,
     NtMapViewOfSection,
+    NtMapViewOfSectionEx,
     NtNotifyChangeDirectoryFile,
     NtNotifyChangeKey,
     NtNotifyChangeMultipleKeys,
@@ -336,6 +337,7 @@ static void * const syscalls[] =
     NtUnlockFile,
     NtUnlockVirtualMemory,
     NtUnmapViewOfSection,
+    NtUnmapViewOfSectionEx,
     NtWaitForAlertByThreadId,
     NtWaitForDebugEvent,
     NtWaitForKeyedEvent,
@@ -352,7 +354,6 @@ static void * const syscalls[] =
     NtWriteVirtualMemory,
     NtYieldExecution,
     __wine_dbg_write,
-    __wine_needs_override_large_address_aware,
     __wine_unix_call,
     __wine_unix_spawnvp,
     wine_nt_to_unix_file_name,
@@ -1062,21 +1063,6 @@ static ULONG_PTR find_named_export( HMODULE module, const IMAGE_EXPORT_DIRECTORY
     return 0;
 }
 
-static ULONG_PTR find_pe_export( HMODULE module, const IMAGE_EXPORT_DIRECTORY *exports,
-                                 const IMAGE_IMPORT_BY_NAME *name )
-{
-    const WORD *ordinals = (const WORD *)((BYTE *)module + exports->AddressOfNameOrdinals);
-    const DWORD *names = (const DWORD *)((BYTE *)module + exports->AddressOfNames);
-
-    if (name->Hint < exports->NumberOfNames)
-    {
-        char *ename = (char *)module + names[name->Hint];
-        if (!strcmp( ename, (char *)name->Name ))
-            return find_ordinal_export( module, exports, ordinals[name->Hint] );
-    }
-    return find_named_export( module, exports, (char *)name->Name );
-}
-
 static inline void *get_rva( void *module, ULONG_PTR addr )
 {
     return (BYTE *)module + addr;
@@ -1096,49 +1082,6 @@ static const void *get_module_data_dir( HMODULE module, ULONG dir, ULONG *size )
     if (!data->VirtualAddress || !data->Size) return NULL;
     if (size) *size = data->Size;
     return get_rva( module, data->VirtualAddress );
-}
-
-static NTSTATUS fixup_ntdll_imports( const char *name, HMODULE module )
-{
-    const IMAGE_IMPORT_DESCRIPTOR *descr;
-    const IMAGE_THUNK_DATA *import_list;
-    IMAGE_THUNK_DATA *thunk_list;
-
-    if (!(descr = get_module_data_dir( module, IMAGE_FILE_IMPORT_DIRECTORY, NULL ))) return STATUS_SUCCESS;
-    for (; descr->Name && descr->FirstThunk; descr++)
-    {
-        thunk_list = get_rva( module, descr->FirstThunk );
-
-        /* ntdll must be the only import */
-        if (strcmp( get_rva( module, descr->Name ), "ntdll.dll" ))
-        {
-            ERR( "module %s is importing %s\n", debugstr_a(name), (char *)get_rva( module, descr->Name ));
-            return STATUS_PROCEDURE_NOT_FOUND;
-        }
-        if (descr->u.OriginalFirstThunk)
-            import_list = get_rva( module, descr->u.OriginalFirstThunk );
-        else
-            import_list = thunk_list;
-
-        while (import_list->u1.Ordinal)
-        {
-            if (IMAGE_SNAP_BY_ORDINAL( import_list->u1.Ordinal ))
-            {
-                int ordinal = IMAGE_ORDINAL( import_list->u1.Ordinal ) - ntdll_exports->Base;
-                thunk_list->u1.Function = find_ordinal_export( ntdll_module, ntdll_exports, ordinal );
-                if (!thunk_list->u1.Function) ERR( "%s: ntdll.%u not found\n", debugstr_a(name), ordinal );
-            }
-            else  /* import by name */
-            {
-                IMAGE_IMPORT_BY_NAME *pe_name = get_rva( module, import_list->u1.AddressOfData );
-                thunk_list->u1.Function = find_pe_export( ntdll_module, ntdll_exports, pe_name );
-                if (!thunk_list->u1.Function) ERR( "%s: ntdll.%s not found\n", debugstr_a(name), pe_name->Name );
-            }
-            import_list++;
-            thunk_list++;
-        }
-    }
-    return STATUS_SUCCESS;
 }
 
 static void load_ntdll_functions( HMODULE module )
@@ -1373,9 +1316,11 @@ static NTSTATUS dlopen_dll( const char *so_name, UNICODE_STRING *nt_name, void *
 {
     void *module, *handle;
     const IMAGE_NT_HEADERS *nt;
+    BOOL mapped = FALSE;
 
     callback_module = (void *)1;
-    handle = dlopen( so_name, RTLD_NOW );
+    if ((handle = dlopen( so_name, RTLD_NOW | RTLD_NOLOAD ))) mapped = TRUE;
+    else handle = dlopen( so_name, RTLD_NOW );
     if (!handle)
     {
         WARN( "failed to load .so lib %s: %s\n", debugstr_a(so_name), dlerror() );
@@ -1392,7 +1337,7 @@ static NTSTATUS dlopen_dll( const char *so_name, UNICODE_STRING *nt_name, void *
     {
         module = (HMODULE)((nt->OptionalHeader.ImageBase + 0xffff) & ~0xffff);
         if (get_builtin_so_handle( module )) goto already_loaded;
-        if (map_so_dll( nt, module ))
+        if (!mapped && map_so_dll( nt, module ))
         {
             dlclose( handle );
             return STATUS_NO_MEMORY;
@@ -1425,38 +1370,6 @@ already_loaded:
     *ret_module = module;
     dlclose( handle );
     return STATUS_SUCCESS;
-}
-
-
-/***********************************************************************
- *           init_unix_lib
- */
-static NTSTATUS CDECL init_unix_lib( void *module, DWORD reason, const void *ptr_in, void *ptr_out )
-{
-    NTSTATUS (CDECL *init_func)( HMODULE, DWORD, const void *, void * );
-    const IMAGE_NT_HEADERS *nt;
-    const char *name;
-    void *handle, *entry, *unix_module;
-    NTSTATUS status;
-
-    if ((status = get_builtin_unix_info( module, &name, &handle, &entry ))) return status;
-
-    if (!entry)
-    {
-        if (!name || !handle) return STATUS_DLL_NOT_FOUND;
-
-        if (!(nt = dlsym( handle, "__wine_spec_nt_header" )) ||
-            !(entry = dlsym( handle, "__wine_init_unix_lib" )))
-            return STATUS_INVALID_IMAGE_FORMAT;
-
-        TRACE( "loaded %s for %p\n", debugstr_a(name), module );
-        unix_module = (void *)((nt->OptionalHeader.ImageBase + 0xffff) & ~0xffff);
-        map_so_dll( nt, unix_module );
-        fixup_ntdll_imports( name, unix_module );
-        set_builtin_unix_entry( module, entry );
-    }
-    init_func = entry;
-    return init_func( module, reason, ptr_in, ptr_out );
 }
 
 
@@ -1760,13 +1673,8 @@ static NTSTATUS find_builtin_dll( UNICODE_STRING *nt_name, void **module, SIZE_T
 done:
     if (status >= 0 && ext)
     {
-        void *handle;
-
         strcpy( ext, ".so" );
-        if ((handle = dlopen( ptr, RTLD_NOW )))
-        {
-            if (set_builtin_unix_handle( *module, ptr, handle )) dlclose( handle );
-        }
+        load_builtin_unixlib( *module, ptr );
     }
     free( file );
     return status;
@@ -2195,6 +2103,50 @@ static ULONG_PTR get_image_address(void)
 }
 
 
+static BOOL CDECL debugstr_pc( void *pc, char *buffer, unsigned int size )
+{
+    unsigned int len;
+    char *s = buffer;
+    Dl_info info;
+
+    snprintf( s, size, "%p:", pc );
+    if (!dladdr( pc, &info )) return FALSE;
+
+    s += (len = strlen( s ));
+    size -= len;
+    snprintf( s, size, " %s + %#zx", info.dli_fname, (char *)pc - (char *)info.dli_fbase );
+    if (info.dli_sname)
+    {
+        s += (len = strlen( s ));
+        size -= len;
+        snprintf( s, size, " (%s + %#zx)", info.dli_sname, (char *)pc - (char *)info.dli_saddr );
+    }
+    return TRUE;
+}
+
+const char * CDECL wine_debuginfostr_pc( void *pc )
+{
+    char buffer[256];
+
+    debugstr_pc( pc, buffer, sizeof(buffer) );
+    return __wine_dbg_strdup( buffer );
+}
+
+static BOOL report_native_pc_as_ntdll;
+
+static BOOL CDECL is_pc_in_native_so(void *pc)
+{
+    Dl_info info;
+
+    if (!report_native_pc_as_ntdll || !dladdr( pc, &info )) return FALSE;
+
+    TRACE( "pc %p, module %s.\n", pc, debugstr_a(info.dli_fname) );
+
+    if (strstr( info.dli_fname, ".dll.so")) return FALSE;
+
+    return TRUE;
+}
+
 /***********************************************************************
  *           unix_funcs
  */
@@ -2202,36 +2154,90 @@ static struct unix_funcs unix_funcs =
 {
     load_so_dll,
     init_builtin_dll,
-    init_unix_lib,
     unwind_builtin_dll,
     RtlGetSystemTimePrecise,
 #ifdef __aarch64__
     NtCurrentTeb,
 #endif
+    set_unix_env,
+    write_crash_log,
+    is_pc_in_native_so,
+    debugstr_pc,
 };
 
 BOOL ac_odyssey;
+BOOL fsync_simulate_sched_quantum;
+BOOL alert_simulate_sched_quantum;
+BOOL no_priv_elevation;
+BOOL localsystem_sid;
 
 static void hacks_init(void)
 {
-    static const char ac_odyssey_exe[] = "ACOdyssey.exe";
-    char cur_exe[MAX_PATH];
-    DWORD cur_exe_len;
-    int fd;
+    static const char upc_exe[] = "Ubisoft Game Launcher\\upc.exe";
+    const char *env_str, *sgi;
 
-    fd = open("/proc/self/comm", O_RDONLY);
-    cur_exe_len = read(fd, cur_exe, sizeof(cur_exe));
-    close(fd);
-    cur_exe[cur_exe_len - 1] = 0;
 
-    if (!strcasecmp(cur_exe, ac_odyssey_exe))
-    {
-        if (do_esync() || do_fsync())
-            ERR("HACK: AC Odyssey sync tweak on.\n");
-        else
-            ERR("Not enabling AC Odyssey sync tweak as esync and fsync are disabled.\n");
-
+    env_str = getenv("WINE_SIMULATE_ASYNC_READ");
+    if (env_str)
+        ac_odyssey = !!atoi(env_str);
+    else if (main_argc > 1 && (strstr(main_argv[1], "ACOdyssey.exe") || strstr(main_argv[1], "ImmortalsFenyxRising.exe")))
         ac_odyssey = TRUE;
+
+    if (ac_odyssey)
+        ERR("HACK: AC Odyssey sync tweak on.\n");
+
+    env_str = getenv("WINE_FSYNC_SIMULATE_SCHED_QUANTUM");
+    if (env_str)
+        fsync_simulate_sched_quantum = !!atoi(env_str);
+    else if (main_argc > 1)
+    {
+        fsync_simulate_sched_quantum = !!strstr(main_argv[1], upc_exe);
+        fsync_simulate_sched_quantum = fsync_simulate_sched_quantum || !!strstr(main_argv[1], "PlanetZoo.exe");
+        fsync_simulate_sched_quantum = fsync_simulate_sched_quantum || !!strstr(main_argv[1], "GTA5.exe");
+    }
+    if (fsync_simulate_sched_quantum)
+        ERR("HACK: Simulating sched quantum in fsync.\n");
+
+    env_str = getenv("WINE_ALERT_SIMULATE_SCHED_QUANTUM");
+    if (env_str)
+        alert_simulate_sched_quantum = !!atoi(env_str);
+    else if (main_argc > 1)
+    {
+        alert_simulate_sched_quantum = !!strstr(main_argv[1], "GTA5.exe");
+    }
+    if (alert_simulate_sched_quantum)
+        ERR("HACK: Simulating sched quantum in NtWaitForAlertByThreadId.\n");
+
+    sgi = getenv("SteamGameId");
+    if (sgi && (!strcmp(sgi, "50130") || !strcmp(sgi, "202990") || !strcmp(sgi, "212910")))
+        setenv("WINESTEAMNOEXEC", "1", 0);
+
+    env_str = getenv("WINE_NO_PRIV_ELEVATION");
+    if (env_str)  no_priv_elevation = atoi(env_str);
+    else if (sgi) no_priv_elevation = !strcmp(sgi, "1584660");
+
+    env_str = getenv("WINE_UNIX_PC_AS_NTDLL");
+    if (env_str)  report_native_pc_as_ntdll = atoi(env_str);
+    else if (sgi) report_native_pc_as_ntdll = !strcmp(sgi, "700330");
+
+    if (main_argc > 1 && strstr(main_argv[1], "MicrosoftEdgeUpdate.exe"))
+    {
+        ERR("HACK: reporting LocalSystem account SID.\n");
+        localsystem_sid = TRUE;
+        return;
+    }
+
+    if (main_argc > 1 && (strstr(main_argv[1], "\\EADesktop.exe") || strstr(main_argv[1], "\\Link2EA.exe")
+        || strstr(main_argv[1], "EA Desktop\\ErrorReporter.exe") || strstr(main_argv[1], "\\EAConnect_microsoft.exe")
+        || strstr(main_argv[1], "\\EALaunchHelper.exe") || strstr(main_argv[1], "\\EACrashReporter.exe")))
+    {
+        ERR("HACK: setting LIBGL_ALWAYS_SOFTWARE.\n");
+        setenv("LIBGL_ALWAYS_SOFTWARE", "1", 0);
+    }
+    if (sgi && !strcmp(sgi, "292030"))
+    {
+        ERR("HACK: setting LIBGL_ALWAYS_SOFTWARE.\n");
+        setenv("LIBGL_ALWAYS_SOFTWARE", "1", 0);
     }
 }
 
@@ -2253,7 +2259,6 @@ static void start_main_thread(void)
     fsync_init();
     esync_init();
     virtual_map_user_shared_data();
-    virtual_map_hypervisor_shared_data();
     init_cpu_info();
     init_files();
     load_libwine();
@@ -2263,7 +2268,7 @@ static void start_main_thread(void)
     if (p___wine_main_wargv) *p___wine_main_wargv = main_wargv;
     *(ULONG_PTR *)&peb->CloudFileFlags = get_image_address();
     set_load_order_app_name( main_wargv[0] );
-    init_thread_stack( teb, is_win64 ? 0x7fffffff : 0, 0, 0 );
+    init_thread_stack( teb, 0, 0, 0 );
     NtCreateKeyedEvent( &keyed_event, GENERIC_READ | GENERIC_WRITE, NULL, 0 );
     load_ntdll();
     if (main_image_info.Machine != current_machine) load_wow64_ntdll( main_image_info.Machine );
@@ -2592,10 +2597,11 @@ void __wine_main( int argc, char *argv[], char *envp[] )
 #ifdef RLIMIT_AS
     set_max_limit( RLIMIT_AS );
 #endif
+#ifdef RLIMIT_NICE
+    set_max_limit( RLIMIT_NICE );
+#endif
 
     virtual_init();
-    signal_init_early();
-
     init_environment( argc, argv, envp );
 
 #ifdef __APPLE__

@@ -159,12 +159,7 @@ void fatal_error( const char *err, ... )
 void *set_reply_data_size( data_size_t size )
 {
     assert( size <= get_reply_max_size() );
-    if (size > current->rep_data_size)
-    {
-        if (!(current->rep_data = mem_alloc( size ))) size = 0;
-        current->rep_data_size = size;
-    }
-    current->reply_data = current->rep_data;
+    if (size && !(current->reply_data = mem_alloc( size ))) size = 0;
     current->reply_size = size;
     return current->reply_data;
 }
@@ -239,7 +234,7 @@ void write_reply( struct thread *thread )
     {
         if (!(thread->reply_towrite -= ret))
         {
-            if (thread->reply_data != thread->rep_data) free( thread->reply_data );
+            free( thread->reply_data );
             thread->reply_data = NULL;
             /* sent everything, can go back to waiting for requests */
             set_fd_events( thread->request_fd, POLLIN );
@@ -254,28 +249,35 @@ void write_reply( struct thread *thread )
 }
 
 /* send a reply to the current thread */
-void send_reply( union generic_reply *reply )
+static void send_reply( union generic_reply *reply )
 {
     int ret;
 
-    struct iovec vec[2];
-
-    vec[0].iov_base = (void *)reply;
-    vec[0].iov_len  = sizeof(*reply);
-    vec[1].iov_base = current->reply_data;
-    vec[1].iov_len  = current->reply_size;
-
-    if ((ret = writev( get_unix_fd( current->reply_fd ), vec, 2 )) < sizeof(*reply)) goto error;
-
-    if ((current->reply_towrite = current->reply_size - (ret - sizeof(*reply))))
+    if (!current->reply_size)
     {
-        /* couldn't write it all, wait for POLLOUT */
-        set_fd_events( current->reply_fd, POLLOUT );
-        set_fd_events( current->request_fd, 0 );
-        return;
+        if ((ret = write( get_unix_fd( current->reply_fd ),
+                          reply, sizeof(*reply) )) != sizeof(*reply)) goto error;
     }
+    else
+    {
+        struct iovec vec[2];
 
-    if (current->reply_data != current->rep_data) free( current->reply_data );
+        vec[0].iov_base = (void *)reply;
+        vec[0].iov_len  = sizeof(*reply);
+        vec[1].iov_base = current->reply_data;
+        vec[1].iov_len  = current->reply_size;
+
+        if ((ret = writev( get_unix_fd( current->reply_fd ), vec, 2 )) < sizeof(*reply)) goto error;
+
+        if ((current->reply_towrite = current->reply_size - (ret - sizeof(*reply))))
+        {
+            /* couldn't write it all, wait for POLLOUT */
+            set_fd_events( current->reply_fd, POLLOUT );
+            set_fd_events( current->request_fd, 0 );
+            return;
+        }
+    }
+    free( current->reply_data );
     current->reply_data = NULL;
     return;
 
@@ -339,15 +341,11 @@ void read_request( struct thread *thread )
             call_req_handler( thread );
             return;
         }
-        if (thread->req_data_size < thread->req_toread)
+        if (!(thread->req_data = malloc( thread->req_toread )))
         {
-            thread->req_data_size = thread->req_toread;
-            if (!(thread->req_data = realloc( thread->req_data, thread->req_data_size )))
-            {
-                fatal_protocol_error( thread, "no memory for %u bytes request %d\n",
-                                      thread->req_toread, thread->req.request_header.req );
-                return;
-            }
+            fatal_protocol_error( thread, "no memory for %u bytes request %d\n",
+                                  thread->req_toread, thread->req.request_header.req );
+            return;
         }
     }
 
@@ -362,6 +360,8 @@ void read_request( struct thread *thread )
         if (!(thread->req_toread -= ret))
         {
             call_req_handler( thread );
+            free( thread->req_data );
+            thread->req_data = NULL;
             return;
         }
     }
@@ -519,46 +519,6 @@ int send_client_fd( struct process *process, int fd, obj_handle_t handle )
     return -1;
 }
 
-#ifndef __NR_clock_gettime64
-#define __NR_clock_gettime64 403
-#endif
-
-struct timespec64
-{
-    long long tv_sec;
-    long long tv_nsec;
-};
-
-static inline int do_clock_gettime( clockid_t clock_id, ULONGLONG *ticks )
-{
-    static int clock_gettime64_supported = -1;
-    struct timespec64 ts64;
-    struct timespec ts;
-    int ret;
-
-    if (clock_gettime64_supported < 0)
-    {
-        if (!syscall( __NR_clock_gettime64, clock_id, &ts64 ))
-        {
-            clock_gettime64_supported = 1;
-            *ticks = ts64.tv_sec * (ULONGLONG)TICKS_PER_SEC + ts64.tv_nsec / 100;
-            return 0;
-        }
-        clock_gettime64_supported = 0;
-    }
-
-    if (clock_gettime64_supported)
-    {
-        if (!(ret = syscall( __NR_clock_gettime64, clock_id, &ts64 )))
-            *ticks = ts64.tv_sec * (ULONGLONG)TICKS_PER_SEC + ts64.tv_nsec / 100;
-        return ret;
-    }
-
-    if (!(ret = clock_gettime( clock_id, &ts )))
-        *ticks = ts.tv_sec * (ULONGLONG)TICKS_PER_SEC + ts.tv_nsec / 100;
-    return ret;
-}
-
 /* return a monotonic time counter */
 timeout_t monotonic_counter(void)
 {
@@ -572,13 +532,13 @@ timeout_t monotonic_counter(void)
 #endif
     return mach_absolute_time() * timebase.numer / timebase.denom / 100;
 #elif defined(HAVE_CLOCK_GETTIME)
-    ULONGLONG ticks;
+    struct timespec ts;
 #if 0
-    if (!do_clock_gettime( CLOCK_MONOTONIC_RAW, &ticks ))
-        return ticks;
+    if (!clock_gettime( CLOCK_MONOTONIC_RAW, &ts ))
+        return (timeout_t)ts.tv_sec * TICKS_PER_SEC + ts.tv_nsec / 100;
 #endif
-    if (!do_clock_gettime( CLOCK_MONOTONIC, &ticks ))
-        return ticks;
+    if (!clock_gettime( CLOCK_MONOTONIC, &ts ))
+        return (timeout_t)ts.tv_sec * TICKS_PER_SEC + ts.tv_nsec / 100;
 #endif
     return current_time - server_start_time;
 }

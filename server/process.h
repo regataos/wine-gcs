@@ -56,6 +56,7 @@ struct process
     timeout_t            sigkill_delay;   /* delay before final SIGKILL */
     unsigned short       machine;         /* client machine type */
     int                  unix_pid;        /* Unix pid for final SIGKILL */
+    int                  nice_limit;      /* RLIMIT_NICE of the process */
     int                  exit_code;       /* process exit code */
     int                  running_threads; /* number of threads running in this process */
     timeout_t            start_time;      /* absolute time at process start */
@@ -93,6 +94,7 @@ struct process
     int                  esync_fd;        /* esync file descriptor (signaled on exit) */
     unsigned int         fsync_idx;
     struct cpu_topology_override cpu_override; /* Overridden CPUs to host CPUs mapping. */
+    unsigned char   wine_cpu_id_from_host[64]; /* Host to overridden CPU mapping. */
 };
 
 /* process functions */

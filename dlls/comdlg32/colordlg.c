@@ -340,7 +340,7 @@ static BOOL CC_MouseCheckColorGraph( HWND hDlg, int dlgitem, int *hori, int *ver
  HWND hwnd;
  POINT point;
  RECT rect;
- int x,y;
+ long x,y;
 
  CONV_LPARAMTOPOINT(lParam, &point);
  ClientToScreen(hDlg, &point);
@@ -353,8 +353,10 @@ static BOOL CC_MouseCheckColorGraph( HWND hDlg, int dlgitem, int *hori, int *ver
  GetClientRect(hwnd, &rect);
  ScreenToClient(hwnd, &point);
 
- x = (point.x * MAXHORI) / rect.right;
- y = ((rect.bottom - point.y) * MAXVERT) / rect.bottom;
+ x = (long) point.x * MAXHORI;
+ x /= rect.right;
+ y = (long) (rect.bottom - point.y) * MAXVERT;
+ y /= rect.bottom;
 
  if (x < 0) x = 0;
  if (y < 0) y = 0;
@@ -396,6 +398,7 @@ static BOOL CC_MouseCheckResultWindow( HWND hDlg, LPARAM lParam )
 static int CC_CheckDigitsInEdit( HWND hwnd, int maxval )
 {
  int i, k, m, result, value;
+ long editpos;
  char buffer[30];
 
  GetWindowTextA(hwnd, buffer, ARRAY_SIZE(buffer));
@@ -422,7 +425,7 @@ static int CC_CheckDigitsInEdit( HWND hwnd, int maxval )
  }
  if (result)
  {
-  LRESULT editpos = SendMessageA(hwnd, EM_GETSEL, 0, 0);
+  editpos = SendMessageA(hwnd, EM_GETSEL, 0, 0);
   SetWindowTextA(hwnd, buffer );
   SendMessageA(hwnd, EM_SETSEL, 0, editpos);
  }
@@ -462,7 +465,7 @@ static void CC_PaintSelectedColor(const CCPRIV *infoPtr)
 static void CC_PaintTriangle(CCPRIV *infoPtr)
 {
  HDC hDC;
- int temp;
+ long temp;
  int w = LOWORD(GetDialogBaseUnits()) / 2;
  POINT points[3];
  int height;
@@ -482,9 +485,9 @@ static void CC_PaintTriangle(CCPRIV *infoPtr)
    ScreenToClient(infoPtr->hwndSelf, points); /*  |<  |  */
    oben = points[0].y;                        /*  | \ |  */
                                               /*  |  \|  */
-   temp = height * infoPtr->l;
+   temp = (long)height * (long)infoPtr->l;
    points[0].x += 1;
-   points[0].y = oben + height - temp / MAXVERT;
+   points[0].y = oben + height - temp / (long)MAXVERT;
    points[1].y = points[0].y + w;
    points[2].y = points[0].y - w;
    points[2].x = points[1].x = points[0].x + w;
@@ -533,8 +536,8 @@ static void CC_PaintCross(CCPRIV *infoPtr)
    SelectClipRgn(hDC, region);
    DeleteObject(region);
 
-   point.x = (rect.right * x) / MAXHORI;
-   point.y = rect.bottom - (rect.bottom * y) / MAXVERT;
+   point.x = ((long)rect.right * (long)x) / (long)MAXHORI;
+   point.y = rect.bottom - ((long)rect.bottom * (long)y) / (long)MAXVERT;
    if ( infoPtr->oldcross.left != infoPtr->oldcross.right )
      BitBlt(hDC, infoPtr->oldcross.left, infoPtr->oldcross.top,
               infoPtr->oldcross.right - infoPtr->oldcross.left,
@@ -851,7 +854,7 @@ static LRESULT CC_WMInitDialog( HWND hDlg, WPARAM wParam, LPARAM lParam )
    POINT point;
    CCPRIV *lpp;
 
-   TRACE("WM_INITDIALOG lParam=%08IX\n", lParam);
+   TRACE("WM_INITDIALOG lParam=%08lX\n", lParam);
 
    if (cc->lStructSize != sizeof(CHOOSECOLORW))
    {
@@ -958,7 +961,7 @@ static LRESULT CC_WMCommand(CCPRIV *lpp, WPARAM wParam, LPARAM lParam, WORD noti
     HDC hdc;
     COLORREF *cr;
 
-    TRACE("CC_WMCommand wParam=%Ix lParam=%Ix\n", wParam, lParam);
+    TRACE("CC_WMCommand wParam=%lx lParam=%lx\n", wParam, lParam);
     switch (LOWORD(wParam))
     {
         case COLOR_RED:  /* edit notify RGB */

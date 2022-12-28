@@ -77,8 +77,6 @@ typedef struct {
     const char *url_config_key;
     const char *dir_config_key;
     LPCWSTR dialog_template;
-    const char *cache_dir_env_var;
-    const char *control_env_var;
 } addon_info_t;
 
 /* Download addon files over HTTP because Wine depends on an external library
@@ -92,20 +90,16 @@ static const addon_info_t addons_info[] = {
         GECKO_SHA,
         "http://source.winehq.org/winegecko.php",
         "MSHTML", "GeckoUrl", "GeckoCabDir",
-        MAKEINTRESOURCEW(ID_DWL_GECKO_DIALOG),
-        "WINE_GECKO_CACHE_DIR",
-        "WINE_SKIP_GECKO_INSTALLATION"
+        MAKEINTRESOURCEW(ID_DWL_GECKO_DIALOG)
     },
     {
         MONO_VERSION,
         L"wine-mono-" MONO_VERSION "-" MONO_ARCH ".msi",
         L"mono",
         MONO_SHA,
-        "http://source.winehq.org/winemono.php",
+        "https://github.com/madewokherd/wine-mono/releases/download/wine-mono-" MONO_VERSION "/wine-mono-" MONO_VERSION "-" MONO_ARCH ".msi",
         "Dotnet", "MonoUrl", "MonoCabDir",
-        MAKEINTRESOURCEW(ID_DWL_MONO_DIALOG),
-        "WINE_MONO_CACHE_DIR",
-        "WINE_SKIP_MONO_INSTALLATION"
+        MAKEINTRESOURCEW(ID_DWL_MONO_DIALOG)
     }
 };
 
@@ -133,7 +127,7 @@ static BOOL sha_check(const WCHAR *file_name)
 
     file = CreateFileW(file_name, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_READONLY, NULL);
     if(file == INVALID_HANDLE_VALUE) {
-        WARN("Could not open file: %lu\n", GetLastError());
+        WARN("Could not open file: %u\n", GetLastError());
         return FALSE;
     }
 
@@ -195,7 +189,7 @@ static enum install_res install_file(const WCHAR *file_name)
     if(res == ERROR_PRODUCT_VERSION)
         res = MsiInstallProductW(file_name, L"REINSTALL=ALL REINSTALLMODE=vomus");
     if(res != ERROR_SUCCESS) {
-        ERR("MsiInstallProduct failed: %lu\n", res);
+        ERR("MsiInstallProduct failed: %u\n", res);
         return INSTALL_FAILED;
     }
 
@@ -224,7 +218,7 @@ static enum install_res install_from_dos_file(const WCHAR *dir, const WCHAR *sub
     hr = PathAllocCanonicalize( path, PATHCCH_ALLOW_LONG_PATHS, &canonical_path );
     if (FAILED( hr ))
     {
-        ERR( "Failed to canonicalize %s, hr %#lx\n", debugstr_w(path), hr );
+        ERR( "Failed to canonicalize %s, hr %#x\n", debugstr_w(path), hr );
         heap_free( path );
         return INSTALL_NEXT;
     }
@@ -335,17 +329,13 @@ static enum install_res install_from_default_dir(void)
 
 static WCHAR *get_cache_file_name(BOOL ensure_exists)
 {
-    const char *env_var = NULL, *xdg_dir;
+    const char *xdg_dir;
     const WCHAR *home_dir;
     WCHAR *cache_dir, *ret;
     size_t len, size;
 
-    if (addon->cache_dir_env_var && (env_var = getenv( addon->cache_dir_env_var )) && *env_var)
-    {
-        if (!p_wine_get_dos_file_name) return NULL;
-        if (!(cache_dir = p_wine_get_dos_file_name( env_var ))) return NULL;
-    }
-    else if ((xdg_dir = getenv( "XDG_CACHE_HOME" )) && *xdg_dir && p_wine_get_dos_file_name)
+    xdg_dir = getenv( "XDG_CACHE_HOME" );
+    if (xdg_dir && *xdg_dir && p_wine_get_dos_file_name)
     {
         if (!(cache_dir = p_wine_get_dos_file_name( xdg_dir ))) return NULL;
     }
@@ -360,27 +350,24 @@ static WCHAR *get_cache_file_name(BOOL ensure_exists)
 
     if (ensure_exists && !CreateDirectoryW( cache_dir, NULL ) && GetLastError() != ERROR_ALREADY_EXISTS)
     {
-        WARN( "%s does not exist and could not be created (%lu)\n", debugstr_w(cache_dir), GetLastError() );
+        WARN( "%s does not exist and could not be created (%u)\n", debugstr_w(cache_dir), GetLastError() );
         heap_free( cache_dir );
         return NULL;
     }
 
-    size = lstrlenW( cache_dir ) + 1 + lstrlenW( addon->file_name ) + 1;
-    if (!env_var || !*env_var)
-        size += ARRAY_SIZE(L"\\wine") - 1;
+    size = lstrlenW( cache_dir ) + ARRAY_SIZE(L"\\wine") + lstrlenW( addon->file_name ) + 1;
     if (!(ret = heap_alloc( size * sizeof(WCHAR) )))
     {
         heap_free( cache_dir );
         return NULL;
     }
     lstrcpyW( ret, cache_dir );
-    if (!env_var || !*env_var)
-        lstrcatW( ret, L"\\wine" );
+    lstrcatW( ret, L"\\wine" );
     heap_free( cache_dir );
 
     if (ensure_exists && !CreateDirectoryW( ret, NULL ) && GetLastError() != ERROR_ALREADY_EXISTS)
     {
-        WARN( "%s does not exist and could not be created (%lu)\n", debugstr_w(ret), GetLastError() );
+        WARN( "%s does not exist and could not be created (%u)\n", debugstr_w(ret), GetLastError() );
         heap_free( ret );
         return NULL;
     }
@@ -490,7 +477,7 @@ static HRESULT WINAPI InstallCallback_OnStopBinding(IBindStatusCallback *iface,
         if(hresult == E_ABORT)
             TRACE("Binding aborted\n");
         else
-            ERR("Binding failed %08lx\n", hresult);
+            ERR("Binding failed %08x\n", hresult);
         return S_OK;
     }
 
@@ -769,15 +756,10 @@ static INT_PTR CALLBACK installer_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARA
 
 BOOL install_addon(addon_t addon_type)
 {
-    const char *envar_content;
-
     if(!*GECKO_ARCH)
         return FALSE;
 
     addon = addons_info+addon_type;
-
-    if ((envar_content = getenv(addon->control_env_var)) && atoi(envar_content) != 0)
-        return FALSE;
 
     p_wine_get_dos_file_name = (void *)GetProcAddress(GetModuleHandleW(L"kernel32.dll"), "wine_get_dos_file_name");
 

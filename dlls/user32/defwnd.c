@@ -246,7 +246,12 @@ static LRESULT DEFWND_DefWinProc( HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPa
         return NC_HandleNCPaint( hwnd, (HRGN)wParam );
 
     case WM_NCMOUSEMOVE:
-        return NC_HandleNCMouseMove( hwnd, wParam, lParam );
+        {
+            POINT pt;
+            pt.x = (short)LOWORD(lParam);
+            pt.y = (short)HIWORD(lParam);
+            return NC_HandleNCMouseMove( hwnd, pt );
+        }
 
     case WM_NCMOUSELEAVE:
         return NC_HandleNCMouseLeave( hwnd );
@@ -260,8 +265,7 @@ static LRESULT DEFWND_DefWinProc( HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPa
         }
 
     case WM_NCCALCSIZE:
-        NC_HandleNCCalcSize( hwnd, wParam, (RECT *)lParam );
-        break;
+        return NC_HandleNCCalcSize( hwnd, wParam, (RECT *)lParam );
 
     case WM_WINDOWPOSCHANGING:
         return WINPOS_HandleWindowPosChanging( hwnd, (WINDOWPOS *)lParam );
@@ -747,6 +751,36 @@ static LRESULT DEFWND_DefWinProc( HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPa
             HeapFree(GetProcessHeap(),0,win_array);
             break;
         }
+
+    case WM_POINTERDOWN:
+    case WM_POINTERUP:
+    case WM_POINTERUPDATE:
+    {
+        TOUCHINPUT touchinput;
+
+        if (!IsTouchWindow( hwnd, NULL )) return 0;
+        touchinput.x = LOWORD( lParam ) * 100;
+        touchinput.y = HIWORD( lParam ) * 100;
+        touchinput.hSource = WINE_MOUSE_HANDLE;
+        touchinput.dwID = GET_POINTERID_WPARAM( wParam );
+        touchinput.dwFlags = TOUCHEVENTF_NOCOALESCE | TOUCHEVENTF_PALM;
+        if (msg == WM_POINTERDOWN) touchinput.dwFlags |= TOUCHEVENTF_DOWN;
+        if (msg == WM_POINTERUP) touchinput.dwFlags |= TOUCHEVENTF_UP;
+        if (msg == WM_POINTERUPDATE) touchinput.dwFlags |= TOUCHEVENTF_MOVE;
+        if (IS_POINTER_PRIMARY_WPARAM( wParam )) touchinput.dwFlags |= TOUCHEVENTF_PRIMARY;
+        touchinput.dwMask = 0;
+        touchinput.dwTime = GetTickCount();
+        touchinput.dwExtraInfo = 0;
+        touchinput.cxContact = 0;
+        touchinput.cyContact = 0;
+
+        SendMessageW( hwnd, WM_TOUCH, MAKELONG( 1, 0 ), (LPARAM)&touchinput );
+        break;
+    }
+
+    case WM_TOUCH:
+        CloseTouchInputHandle( (HTOUCHINPUT)lParam );
+        return 0;
 
     }
 

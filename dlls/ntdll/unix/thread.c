@@ -57,6 +57,9 @@
 #ifdef HAVE_LIBPROCSTAT_H
 #include <libprocstat.h>
 #endif
+#ifdef HAVE_PRCTL
+#include <sys/prctl.h>
+#endif
 
 #define NONAMELESSUNION
 #define NONAMELESSSTRUCT
@@ -153,6 +156,27 @@ void fpu_to_fpux( XMM_SAVE_AREA32 *fpux, const I386_FLOATING_SAVE_AREA *fpu )
         if (((fpu->TagWord >> (i * 2)) & 3) != 3) fpux->TagWord |= 1 << i;
         memcpy( &fpux->FloatRegisters[i], &fpu->RegisterArea[10 * i], 10 );
     }
+}
+
+
+/***********************************************************************
+ *           validate_context_xstate
+ */
+BOOL validate_context_xstate( CONTEXT *context )
+{
+    CONTEXT_EX *context_ex;
+
+    if (!((context->ContextFlags & 0x40) && (cpu_info.ProcessorFeatureBits & CPU_FEATURE_AVX))) return TRUE;
+
+    context_ex = (CONTEXT_EX *)(context + 1);
+
+    if (context_ex->XState.Length < offsetof(XSTATE, YmmContext)
+        || context_ex->XState.Length > sizeof(XSTATE))
+        return FALSE;
+
+    if (((ULONG_PTR)context_ex + context_ex->XState.Offset) & 63) return FALSE;
+
+    return TRUE;
 }
 
 
@@ -1156,7 +1180,8 @@ NTSTATUS init_thread_stack( TEB *teb, ULONG_PTR zero_bits, SIZE_T reserve_size, 
 
 #ifdef _WIN64
         /* 32-bit stack */
-        if ((status = virtual_alloc_thread_stack( &stack, zero_bits, reserve_size, commit_size, 0 )))
+        if ((status = virtual_alloc_thread_stack( &stack, zero_bits ? zero_bits : 0x7fffffff,
+                                                  reserve_size, commit_size, 0 )))
             return status;
         wow_teb->Tib.StackBase = PtrToUlong( stack.StackBase );
         wow_teb->Tib.StackLimit = PtrToUlong( stack.StackLimit );
@@ -1440,6 +1465,16 @@ void wait_suspend( CONTEXT *context )
 }
 
 
+/* "How to: Set a Thread Name in Native Code"
+ * https://msdn.microsoft.com/en-us/library/xcb2z8hs.aspx */
+typedef struct tagTHREADNAME_INFO
+{
+   DWORD   dwType;     /* Must be 0x1000 */
+   LPCSTR  szName;     /* Pointer to name - limited to 9 bytes (8 characters + terminator) */
+   DWORD   dwThreadID; /* Thread ID (-1 = caller thread) */
+   DWORD   dwFlags;    /* Reserved for future use.  Must be zero. */
+} THREADNAME_INFO;
+
 /**********************************************************************
  *           send_debug_event
  *
@@ -1460,6 +1495,21 @@ NTSTATUS send_debug_event( EXCEPTION_RECORD *rec, CONTEXT *context, BOOL first_c
 
     for (i = 0; i < min( rec->NumberParameters, EXCEPTION_MAXIMUM_PARAMETERS ); i++)
         params[i] = rec->ExceptionInformation[i];
+
+    if (rec->ExceptionCode == 0x406d1388)
+    {
+        const THREADNAME_INFO *threadname = (const THREADNAME_INFO *)rec->ExceptionInformation;
+
+        if (threadname->dwThreadID == -1)
+        {
+#ifdef HAVE_PRCTL
+#ifndef PR_SET_NAME
+# define PR_SET_NAME 15
+#endif
+            prctl( PR_SET_NAME, threadname->szName );
+#endif
+        }
+    }
 
     SERVER_START_REQ( queue_exception_event )
     {
@@ -1552,6 +1602,7 @@ NTSTATUS WINAPI NtOpenThread( HANDLE *handle, ACCESS_MASK access,
  */
 NTSTATUS WINAPI NtSuspendThread( HANDLE handle, ULONG *count )
 {
+    BOOL self = FALSE;
     NTSTATUS ret;
 
     SERVER_START_REQ( suspend_thread )
@@ -1559,10 +1610,12 @@ NTSTATUS WINAPI NtSuspendThread( HANDLE handle, ULONG *count )
         req->handle = wine_server_obj_handle( handle );
         if (!(ret = wine_server_call( req )))
         {
-            if (count) *count = reply->count;
+            self = reply->count & 0x80000000;
+            if (count) *count = reply->count & 0x7fffffff;
         }
     }
     SERVER_END_REQ;
+    if (self) usleep( 0 );
     return ret;
 }
 
@@ -1613,20 +1666,22 @@ NTSTATUS WINAPI NtAlertThread( HANDLE handle )
 NTSTATUS WINAPI NtTerminateThread( HANDLE handle, LONG exit_code )
 {
     NTSTATUS ret;
-    BOOL self = (handle == GetCurrentThread());
+    BOOL self;
 
-    if (!self || exit_code)
+    SERVER_START_REQ( terminate_thread )
     {
-        SERVER_START_REQ( terminate_thread )
-        {
-            req->handle    = wine_server_obj_handle( handle );
-            req->exit_code = exit_code;
-            ret = wine_server_call( req );
-            self = !ret && reply->self;
-        }
-        SERVER_END_REQ;
+        req->handle    = wine_server_obj_handle( handle );
+        req->exit_code = exit_code;
+        ret = wine_server_call( req );
+        self = !ret && reply->self;
     }
-    if (self) exit_thread( exit_code );
+    SERVER_END_REQ;
+
+    if (self)
+    {
+        server_select( NULL, 0, SELECT_INTERRUPTIBLE, 0, NULL, NULL );
+        exit_thread( exit_code );
+    }
     return ret;
 }
 
@@ -2247,6 +2302,50 @@ NTSTATUS WINAPI NtSetInformationThread( HANDLE handle, THREADINFOCLASS class,
             status = wine_server_call( req );
         }
         SERVER_END_REQ;
+
+#ifdef HAVE_PRCTL
+
+#ifndef PR_SET_NAME
+# define PR_SET_NAME 15
+#endif
+
+        if (SUCCEEDED(status))
+        {
+            if (handle == GetCurrentThread())
+            {
+                if (info->ThreadName.Length)
+                {
+                    size_t len = info->ThreadName.Length / sizeof(WCHAR);
+                    char *descA;
+                    int ret;
+
+                    if ((descA = malloc( len * 3 + 1 )))
+                    {
+                        ret = ntdll_wcstoumbs( info->ThreadName.Buffer, len, descA, len * 3, FALSE );
+                        if (ret >= 0)
+                        {
+                            descA[ret] = '\0';
+                            prctl( PR_SET_NAME, descA );
+                        }
+                        else
+                        {
+                            FIXME("Failed to ntdll_wcstoumbs\n");
+                        }
+                        free( descA );
+                    }
+                }
+                else
+                {
+                    prctl( PR_SET_NAME, "" );
+                }
+            }
+            else
+            {
+                FIXME("Can't set other thread's platform description\n");
+            }
+        }
+#endif
+
         return status;
     }
 
@@ -2257,6 +2356,12 @@ NTSTATUS WINAPI NtSetInformationThread( HANDLE handle, THREADINFOCLASS class,
         if (length != sizeof(BOOLEAN)) return STATUS_INFO_LENGTH_MISMATCH;
         if (!data) return STATUS_ACCESS_VIOLATION;
         FIXME( "ThreadEnableAlignmentFaultFixup stub!\n" );
+        return STATUS_SUCCESS;
+
+    case ThreadPowerThrottlingState:
+        if (length != sizeof(THREAD_POWER_THROTTLING_STATE)) return STATUS_INFO_LENGTH_MISMATCH;
+        if (!data) return STATUS_ACCESS_VIOLATION;
+        FIXME( "ThreadPowerThrottling stub!\n" );
         return STATUS_SUCCESS;
 
     case ThreadBasicInformation:

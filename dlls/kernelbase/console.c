@@ -72,7 +72,7 @@ struct ctrl_handler
 
 static BOOL WINAPI default_ctrl_handler( DWORD type )
 {
-    FIXME( "Terminating process %lx on event %lx\n", GetCurrentProcessId(), type );
+    FIXME( "Terminating process %x on event %x\n", GetCurrentProcessId(), type );
     RtlExitUserProcess( 0 );
     return TRUE;
 }
@@ -285,7 +285,7 @@ BOOL WINAPI DECLSPEC_HOTPATCH AttachConsole( DWORD pid )
 {
     BOOL ret;
 
-    TRACE( "(%lx)\n", pid );
+    TRACE( "(%x)\n", pid );
 
     RtlEnterCriticalSection( &console_section );
 
@@ -383,7 +383,7 @@ BOOL WINAPI AllocConsole(void)
     if (!init_console_std_handles( !(app_si.dwFlags & STARTF_USESTDHANDLES) )) goto error;
 
     RtlGetCurrentPeb()->ProcessParameters->ConsoleHandle = console;
-    TRACE( "Started conhost pid=%08lx tid=%08lx\n", pi.dwProcessId, pi.dwThreadId );
+    TRACE( "Started conhost pid=%08x tid=%08x\n", pi.dwProcessId, pi.dwThreadId );
 
     CloseHandle( server );
     RtlLeaveCriticalSection( &console_section );
@@ -413,7 +413,7 @@ HANDLE WINAPI DECLSPEC_HOTPATCH CreateConsoleScreenBuffer( DWORD access, DWORD s
     HANDLE handle;
     NTSTATUS status;
 
-    TRACE( "(%lx,%lx,%p,%lx,%p)\n", access, share, sa, flags, data );
+    TRACE( "(%x,%x,%p,%x,%p)\n", access, share, sa, flags, data );
 
     if (flags != CONSOLE_TEXTMODE_BUFFER || data)
     {
@@ -478,7 +478,7 @@ BOOL WINAPI DECLSPEC_HOTPATCH FillConsoleOutputAttribute( HANDLE handle, WORD at
 {
     struct condrv_fill_output_params params;
 
-    TRACE( "(%p,%d,%ld,(%dx%d),%p)\n", handle, attr, length, coord.X, coord.Y, written );
+    TRACE( "(%p,%d,%d,(%dx%d),%p)\n", handle, attr, length, coord.X, coord.Y, written );
 
     if (!written)
     {
@@ -521,7 +521,7 @@ BOOL WINAPI DECLSPEC_HOTPATCH FillConsoleOutputCharacterW( HANDLE handle, WCHAR 
 {
     struct condrv_fill_output_params params;
 
-    TRACE( "(%p,%s,%ld,(%dx%d),%p)\n", handle, debugstr_wn(&ch, 1), length, coord.X, coord.Y, written );
+    TRACE( "(%p,%s,%d,(%dx%d),%p)\n", handle, debugstr_wn(&ch, 1), length, coord.X, coord.Y, written );
 
     if (!written)
     {
@@ -573,11 +573,11 @@ BOOL WINAPI DECLSPEC_HOTPATCH GenerateConsoleCtrlEvent( DWORD event, DWORD group
 {
     struct condrv_ctrl_event ctrl_event;
 
-    TRACE( "(%ld, %lx)\n", event, group );
+    TRACE( "(%d, %x)\n", event, group );
 
     if (event != CTRL_C_EVENT && event != CTRL_BREAK_EVENT)
     {
-	ERR( "Invalid event %ld for PGID %lx\n", event, group );
+	ERR( "Invalid event %d for PGID %x\n", event, group );
 	return FALSE;
     }
 
@@ -620,7 +620,7 @@ BOOL WINAPI DECLSPEC_HOTPATCH GetConsoleCursorInfo( HANDLE handle, CONSOLE_CURSO
 
     info->dwSize   = condrv_info.cursor_size;
     info->bVisible = condrv_info.cursor_visible;
-    TRACE("(%p) returning (%ld,%d)\n", handle, info->dwSize, info->bVisible);
+    TRACE("(%p) returning (%d,%d)\n", handle, info->dwSize, info->bVisible);
     return TRUE;
 }
 
@@ -742,6 +742,14 @@ BOOL WINAPI DECLSPEC_HOTPATCH GetConsoleScreenBufferInfoEx( HANDLE handle,
 }
 
 
+BOOL WINAPI DECLSPEC_HOTPATCH GetConsoleSelectionInfo(CONSOLE_SELECTION_INFO *info)
+{
+    FIXME("stub (%p)\n", info);
+    info->dwFlags = CONSOLE_NO_SELECTION;
+    return TRUE;
+}
+
+
 /******************************************************************************
  *	GetConsoleTitleW   (kernelbase.@)
  */
@@ -835,7 +843,7 @@ BOOL WINAPI DECLSPEC_HOTPATCH ReadConsoleOutputAttribute( HANDLE handle, WORD *a
     struct condrv_output_params params;
     BOOL ret;
 
-    TRACE( "(%p,%p,%ld,%dx%d,%p)\n", handle, attr, length, coord.X, coord.Y, count );
+    TRACE( "(%p,%p,%d,%dx%d,%p)\n", handle, attr, length, coord.X, coord.Y, count );
 
     if (!count)
     {
@@ -895,7 +903,7 @@ BOOL WINAPI DECLSPEC_HOTPATCH ReadConsoleOutputCharacterW( HANDLE handle, LPWSTR
     struct condrv_output_params params;
     BOOL ret;
 
-    TRACE( "(%p,%p,%ld,%dx%d,%p)\n", handle, buffer, length, coord.X, coord.Y, count );
+    TRACE( "(%p,%p,%d,%dx%d,%p)\n", handle, buffer, length, coord.X, coord.Y, count );
 
     if (!count)
     {
@@ -1117,7 +1125,7 @@ BOOL WINAPI DECLSPEC_HOTPATCH SetConsoleCursorInfo( HANDLE handle, CONSOLE_CURSO
 {
     struct condrv_output_info_params params = { SET_CONSOLE_OUTPUT_INFO_CURSOR_GEOM };
 
-    TRACE( "(%p,%ld,%d)\n", handle, info->dwSize, info->bVisible);
+    TRACE( "(%p,%d,%d)\n", handle, info->dwSize, info->bVisible);
 
     params.info.cursor_size    = info->dwSize;
     params.info.cursor_visible = info->bVisible;
@@ -1180,7 +1188,7 @@ BOOL WINAPI DECLSPEC_HOTPATCH SetConsoleInputExeNameW( LPCWSTR name )
  */
 BOOL WINAPI DECLSPEC_HOTPATCH SetConsoleMode( HANDLE handle, DWORD mode )
 {
-    TRACE( "(%p,%lx)\n", handle, mode );
+    TRACE( "(%p,%x)\n", handle, mode );
     return console_ioctl( handle, IOCTL_CONDRV_SET_MODE, &mode, sizeof(mode), NULL, 0, NULL );
 }
 
@@ -1303,42 +1311,6 @@ BOOL WINAPI DECLSPEC_HOTPATCH SetConsoleWindowInfo( HANDLE handle, BOOL absolute
 }
 
 
-/******************************************************************************
- *	SetCurrentConsoleFontEx   (kernelbase.@)
- */
-BOOL WINAPI SetCurrentConsoleFontEx( HANDLE handle, BOOL maxwindow, CONSOLE_FONT_INFOEX *info )
-{
-    struct
-    {
-        struct condrv_output_info_params params;
-        WCHAR face_name[LF_FACESIZE];
-    } data;
-
-    size_t size;
-
-    TRACE( "(%p %d %p)\n", handle, maxwindow, info );
-
-    if (info->cbSize != sizeof(*info))
-    {
-        SetLastError(ERROR_INVALID_PARAMETER);
-        return FALSE;
-    }
-
-    data.params.mask = SET_CONSOLE_OUTPUT_INFO_FONT;
-
-    data.params.info.font_width  = info->dwFontSize.X;
-    data.params.info.font_height = info->dwFontSize.Y;
-    data.params.info.font_pitch_family = info->FontFamily;
-    data.params.info.font_weight = info->FontWeight;
-
-    size = wcsnlen( info->FaceName, LF_FACESIZE - 1 ) * sizeof(WCHAR);
-    memcpy( data.face_name, info->FaceName, size );
-
-    size += sizeof(struct condrv_output_info_params);
-    return console_ioctl( handle, IOCTL_CONDRV_SET_OUTPUT_INFO, &data, size, NULL, 0, NULL );
-}
-
-
 /***********************************************************************
  *            ReadConsoleInputA   (kernelbase.@)
  */
@@ -1402,7 +1374,7 @@ BOOL WINAPI DECLSPEC_HOTPATCH WriteConsoleInputA( HANDLE handle, const INPUT_REC
 BOOL WINAPI DECLSPEC_HOTPATCH WriteConsoleInputW( HANDLE handle, const INPUT_RECORD *buffer,
                                                   DWORD count, DWORD *written )
 {
-    TRACE( "(%p,%p,%ld,%p)\n", handle, buffer, count, written );
+    TRACE( "(%p,%p,%d,%p)\n", handle, buffer, count, written );
 
     if (count > 0 && !buffer)
     {
@@ -1515,7 +1487,7 @@ BOOL WINAPI DECLSPEC_HOTPATCH WriteConsoleOutputAttribute( HANDLE handle, const 
     size_t size;
     BOOL ret;
 
-    TRACE( "(%p,%p,%ld,%dx%d,%p)\n", handle, attr, length, coord.X, coord.Y, written );
+    TRACE( "(%p,%p,%d,%dx%d,%p)\n", handle, attr, length, coord.X, coord.Y, written );
 
     if ((length > 0 && !attr) || !written)
     {
@@ -1547,7 +1519,7 @@ BOOL WINAPI DECLSPEC_HOTPATCH WriteConsoleOutputCharacterA( HANDLE handle, LPCST
     LPWSTR strW = NULL;
     DWORD lenW = 0;
 
-    TRACE( "(%p,%s,%ld,%dx%d,%p)\n", handle, debugstr_an(str, length), length, coord.X, coord.Y, written );
+    TRACE( "(%p,%s,%d,%dx%d,%p)\n", handle, debugstr_an(str, length), length, coord.X, coord.Y, written );
 
     if (length > 0)
     {
@@ -1582,7 +1554,7 @@ BOOL WINAPI DECLSPEC_HOTPATCH WriteConsoleOutputCharacterW( HANDLE handle, LPCWS
     size_t size;
     BOOL ret;
 
-    TRACE( "(%p,%s,%ld,%dx%d,%p)\n", handle, debugstr_wn(str, length), length, coord.X, coord.Y, written );
+    TRACE( "(%p,%s,%d,%dx%d,%p)\n", handle, debugstr_wn(str, length), length, coord.X, coord.Y, written );
 
     if ((length > 0 && !str) || !written)
     {
@@ -1626,7 +1598,7 @@ BOOL WINAPI ReadConsoleW( HANDLE handle, void *buffer, DWORD length, DWORD *coun
 {
     BOOL ret;
 
-    TRACE( "(%p,%p,%ld,%p,%p)\n", handle, buffer, length, count, reserved );
+    TRACE( "(%p,%p,%d,%p,%p)\n", handle, buffer, length, count, reserved );
 
     if (length > INT_MAX)
     {
@@ -1649,7 +1621,7 @@ BOOL WINAPI DECLSPEC_HOTPATCH WriteConsoleA( HANDLE handle, const void *buffer, 
 {
     BOOL ret;
 
-    TRACE( "(%p,%s,%ld,%p,%p)\n", handle, debugstr_an(buffer, length), length, written, reserved );
+    TRACE( "(%p,%s,%d,%p,%p)\n", handle, debugstr_an(buffer, length), length, written, reserved );
 
     ret = console_ioctl( handle, IOCTL_CONDRV_WRITE_FILE, (void *)buffer, length, NULL, 0, NULL );
     if (written) *written = ret ? length : 0;
@@ -1665,7 +1637,7 @@ BOOL WINAPI DECLSPEC_HOTPATCH WriteConsoleW( HANDLE handle, const void *buffer, 
 {
     BOOL ret;
 
-    TRACE( "(%p,%s,%ld,%p,%p)\n", handle, debugstr_wn(buffer, length), length, written, reserved );
+    TRACE( "(%p,%s,%d,%p,%p)\n", handle, debugstr_wn(buffer, length), length, written, reserved );
 
     ret = console_ioctl( handle, IOCTL_CONDRV_WRITE_CONSOLE, (void *)buffer,
                          length * sizeof(WCHAR), NULL, 0, NULL );
@@ -1760,7 +1732,7 @@ HRESULT WINAPI CreatePseudoConsole( COORD size, HANDLE input, HANDLE output, DWO
     HANDLE signal = NULL;
     WCHAR pipe_name[64];
 
-    TRACE( "(%u,%u) %p %p %lx %p\n", size.X, size.Y, input, output, flags, ret );
+    TRACE( "(%u,%u) %p %p %x %p\n", size.X, size.Y, input, output, flags, ret );
 
     if (!size.X || !size.Y || !ret) return E_INVALIDARG;
 

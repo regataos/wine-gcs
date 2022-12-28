@@ -8,6 +8,7 @@
 #include "wine/heap.h"
 
 #include "wine/vulkan.h"
+#include "wine/asm.h"
 
 #define COBJMACROS
 #include "d3d11.h"
@@ -38,18 +39,19 @@ static const struct
     int minor;
     int patch;
     unsigned int device_size;
+    unsigned int dx11_returned_params_size;
 }
 amd_ags_info[AMD_AGS_VERSION_COUNT] =
 {
-    {5, 1, 1, sizeof(AGSDeviceInfo_511)},
-    {5, 2, 0, sizeof(AGSDeviceInfo_520)},
-    {5, 2, 1, sizeof(AGSDeviceInfo_520)},
-    {5, 3, 0, sizeof(AGSDeviceInfo_520)},
-    {5, 4, 0, sizeof(AGSDeviceInfo_540)},
-    {5, 4, 1, sizeof(AGSDeviceInfo_541)},
-    {5, 4, 2, sizeof(AGSDeviceInfo_542)},
-    {6, 0, 0, sizeof(AGSDeviceInfo_600)},
-    {6, 0, 1, sizeof(AGSDeviceInfo_600)},
+    {5, 1, 1, sizeof(AGSDeviceInfo_511), sizeof(AGSDX11ReturnedParams_511)},
+    {5, 2, 0, sizeof(AGSDeviceInfo_520), sizeof(AGSDX11ReturnedParams_520)},
+    {5, 2, 1, sizeof(AGSDeviceInfo_520), sizeof(AGSDX11ReturnedParams_520)},
+    {5, 3, 0, sizeof(AGSDeviceInfo_520), sizeof(AGSDX11ReturnedParams_520)},
+    {5, 4, 0, sizeof(AGSDeviceInfo_540), sizeof(AGSDX11ReturnedParams_520)},
+    {5, 4, 1, sizeof(AGSDeviceInfo_541), sizeof(AGSDX11ReturnedParams_520)},
+    {5, 4, 2, sizeof(AGSDeviceInfo_542), sizeof(AGSDX11ReturnedParams_520)},
+    {6, 0, 0, sizeof(AGSDeviceInfo_600), sizeof(AGSDX11ReturnedParams_600)},
+    {6, 0, 1, sizeof(AGSDeviceInfo_600), sizeof(AGSDX11ReturnedParams_600)},
 };
 
 #define DEF_FIELD(name) {DEVICE_FIELD_##name, {offsetof(AGSDeviceInfo_511, name), offsetof(AGSDeviceInfo_520, name), \
@@ -117,8 +119,10 @@ struct AGSContext
     VkPhysicalDeviceMemoryProperties *memory_properties;
 };
 
-static HMODULE hd3d12;
+static HMODULE hd3d11, hd3d12;
 static typeof(D3D12CreateDevice) *pD3D12CreateDevice;
+static typeof(D3D11CreateDevice) *pD3D11CreateDevice;
+static typeof(D3D11CreateDeviceAndSwapChain) *pD3D11CreateDeviceAndSwapChain;
 
 static BOOL load_d3d12_functions(void)
 {
@@ -129,6 +133,19 @@ static BOOL load_d3d12_functions(void)
         return FALSE;
 
     pD3D12CreateDevice = (void *)GetProcAddress(hd3d12, "D3D12CreateDevice");
+    return TRUE;
+}
+
+static BOOL load_d3d11_functions(void)
+{
+    if (hd3d11)
+        return TRUE;
+
+    if (!(hd3d11 = LoadLibraryA("d3d11.dll")))
+        return FALSE;
+
+    pD3D11CreateDevice = (void *)GetProcAddress(hd3d11, "D3D11CreateDevice");
+    pD3D11CreateDeviceAndSwapChain = (void *)GetProcAddress(hd3d11, "D3D11CreateDeviceAndSwapChain");
     return TRUE;
 }
 
@@ -293,11 +310,13 @@ static BOOL WINAPI monitor_enum_proc_600(HMONITOR hmonitor, HDC hdc, RECT *rect,
 
     monitor_info.cbSize = sizeof(monitor_info);
     GetMonitorInfoA(hmonitor, (MONITORINFO *)&monitor_info);
+    TRACE("monitor_info.szDevice %s.\n", debugstr_a(monitor_info.szDevice));
 
     device.cb = sizeof(device);
     i = 0;
     while (EnumDisplayDevicesA(NULL, i, &device, 0))
     {
+        TRACE("device.DeviceName %s, device.DeviceString %s.\n", debugstr_a(device.DeviceName), debugstr_a(device.DeviceString));
         ++i;
         if (strcmp(device.DeviceString, c->adapter_name) || strcmp(device.DeviceName, monitor_info.szDevice))
             continue;
@@ -332,6 +351,8 @@ static BOOL WINAPI monitor_enum_proc_600(HMONITOR hmonitor, HDC hdc, RECT *rect,
             info->isPrimaryDisplay = 1;
 
         mode = 0;
+        memset(&dev_mode, 0, sizeof(dev_mode));
+        dev_mode.dmSize = sizeof(dev_mode);
         while (EnumDisplaySettingsExA(monitor_info.szDevice, mode, &dev_mode, EDS_RAWMODE))
         {
             ++mode;
@@ -341,6 +362,8 @@ static BOOL WINAPI monitor_enum_proc_600(HMONITOR hmonitor, HDC hdc, RECT *rect,
                 info->maxResolutionY = dev_mode.dmPelsHeight;
             if (dev_mode.dmDisplayFrequency > info->maxRefreshRate)
                 info->maxRefreshRate = dev_mode.dmDisplayFrequency;
+            memset(&dev_mode, 0, sizeof(dev_mode));
+            dev_mode.dmSize = sizeof(dev_mode);
         }
 
         info->currentResolution.offsetX = monitor_info.rcMonitor.left;
@@ -348,6 +371,9 @@ static BOOL WINAPI monitor_enum_proc_600(HMONITOR hmonitor, HDC hdc, RECT *rect,
         info->currentResolution.width = monitor_info.rcMonitor.right - monitor_info.rcMonitor.left;
         info->currentResolution.height = monitor_info.rcMonitor.bottom - monitor_info.rcMonitor.top;
         info->visibleResolution = info->currentResolution;
+
+        memset(&dev_mode, 0, sizeof(dev_mode));
+        dev_mode.dmSize = sizeof(dev_mode);
 
         if (EnumDisplaySettingsExA(monitor_info.szDevice, ENUM_CURRENT_SETTINGS, &dev_mode, EDS_RAWMODE))
             info->currentRefreshRate = dev_mode.dmDisplayFrequency;
@@ -364,6 +390,8 @@ static BOOL WINAPI monitor_enum_proc_600(HMONITOR hmonitor, HDC hdc, RECT *rect,
 static void init_device_displays_600(const char *adapter_name, AGSDisplayInfo_600 **ret_displays, int *ret_display_count)
 {
     struct monitor_enum_context_600 context;
+
+    TRACE("adapter_name %s.\n", debugstr_a(adapter_name));
 
     context.adapter_name = adapter_name;
     context.ret_displays = ret_displays;
@@ -436,7 +464,8 @@ static AGSReturnCode init_ags_context(AGSContext *context)
                 break;
             }
         }
-        TRACE("reporting local memory size 0x%s bytes\n", wine_dbgstr_longlong(local_memory_size));
+        TRACE("device %s, %04x:%04x, reporting local memory size 0x%s bytes\n", debugstr_a(vk_properties->deviceName),
+                vk_properties->vendorID, vk_properties->deviceID, wine_dbgstr_longlong(local_memory_size));
 
         SET_DEVICE_FIELD(device, adapterString, const char *, context->version, vk_properties->deviceName);
         SET_DEVICE_FIELD(device, vendorId, int, context->version, vk_properties->vendorID);
@@ -458,7 +487,7 @@ static AGSReturnCode init_ags_context(AGSContext *context)
             else
             {
                 SET_DEVICE_FIELD(device, isPrimaryDevice, int, context->version, 1);
-            }
+            }   
         }
 
         if (context->version >= AMD_AGS_VERSION_6_0_0)
@@ -572,7 +601,7 @@ AGSReturnCode WINAPI agsDeInitialize(AGSContext *context)
         device = (BYTE *)context->devices;
         for (i = 0; i < context->device_count; ++i)
         {
-            heap_free(GET_DEVICE_FIELD_ADDR(device, displays, void *, context->version));
+            heap_free(*GET_DEVICE_FIELD_ADDR(device, displays, void *, context->version));
             device += amd_ags_info[context->version].device_size;
         }
         heap_free(context->devices);
@@ -590,6 +619,76 @@ AGSReturnCode WINAPI agsGetCrossfireGPUCount(AGSContext *context, int *gpu_count
         return AGS_INVALID_ARGS;
 
     *gpu_count = 1;
+    return AGS_SUCCESS;
+}
+
+AGSReturnCode WINAPI agsDriverExtensionsDX11_CreateDevice( AGSContext* context,
+        const AGSDX11DeviceCreationParams* creation_params, const AGSDX11ExtensionParams* extension_params,
+        AGSDX11ReturnedParams* returned_params )
+{
+    ID3D11DeviceContext *device_context;
+    IDXGISwapChain *swapchain = NULL;
+    D3D_FEATURE_LEVEL feature_level;
+    ID3D11Device *device;
+    HRESULT hr;
+
+    TRACE("feature levels %u, pSwapChainDesc %p, app %s, engine %s %#x %#x.\n", creation_params->FeatureLevels,
+            creation_params->pSwapChainDesc,
+            debugstr_w(extension_params->agsDX11ExtensionParams511.pAppName),
+            debugstr_w(extension_params->agsDX11ExtensionParams511.pEngineName),
+            extension_params->agsDX11ExtensionParams511.appVersion,
+            extension_params->agsDX11ExtensionParams511.engineVersion);
+
+    if (!load_d3d11_functions())
+    {
+        ERR("Could not load d3d11.dll.\n");
+        return AGS_MISSING_D3D_DLL;
+    }
+    memset( returned_params, 0, amd_ags_info[context->version].dx11_returned_params_size );
+    if (creation_params->pSwapChainDesc)
+    {
+        hr = pD3D11CreateDeviceAndSwapChain(creation_params->pAdapter, creation_params->DriverType,
+                creation_params->Software, creation_params->Flags, creation_params->pFeatureLevels,
+                creation_params->FeatureLevels, creation_params->SDKVersion, creation_params->pSwapChainDesc,
+                &swapchain, &device, &feature_level, &device_context);
+    }
+    else
+    {
+        hr = pD3D11CreateDevice(creation_params->pAdapter, creation_params->DriverType,
+                creation_params->Software, creation_params->Flags, creation_params->pFeatureLevels,
+                creation_params->FeatureLevels, creation_params->SDKVersion,
+                &device, &feature_level, &device_context);
+    }
+    if (FAILED(hr))
+    {
+        ERR("Device creation failed, hr %#x.\n", hr);
+        return AGS_DX_FAILURE;
+    }
+    if (context->version < AMD_AGS_VERSION_5_2_0)
+    {
+        AGSDX11ReturnedParams_511 *r = &returned_params->agsDX11ReturnedParams511;
+        r->pDevice = device;
+        r->pImmediateContext = device_context;
+        r->pSwapChain = swapchain;
+        r->FeatureLevel = feature_level;
+    }
+    else if (context->version < AMD_AGS_VERSION_6_0_0)
+    {
+        AGSDX11ReturnedParams_520 *r = &returned_params->agsDX11ReturnedParams520;
+        r->pDevice = device;
+        r->pImmediateContext = device_context;
+        r->pSwapChain = swapchain;
+        r->FeatureLevel = feature_level;
+    }
+    else
+    {
+        AGSDX11ReturnedParams_600 *r = &returned_params->agsDX11ReturnedParams600;
+        r->pDevice = device;
+        r->pImmediateContext = device_context;
+        r->pSwapChain = swapchain;
+        r->featureLevel = feature_level;
+    }
+
     return AGS_SUCCESS;
 }
 
@@ -672,3 +771,71 @@ BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, void *reserved)
 
     return TRUE;
 }
+
+#ifdef __x86_64__
+AGSReturnCode WINAPI agsDriverExtensionsDX11_SetDepthBounds(AGSContext* context, bool enabled,
+        float minDepth, float maxDepth )
+{
+    static int once;
+
+    if (!once++)
+        FIXME("context %p, enabled %#x, minDepth %f, maxDepth %f stub.\n", context, enabled, minDepth, maxDepth);
+    return AGS_EXTENSION_NOT_SUPPORTED;
+}
+
+AGSReturnCode WINAPI agsDriverExtensionsDX11_SetDepthBounds_530(AGSContext* context,
+        ID3D11DeviceContext* dxContext, bool enabled, float minDepth, float maxDepth )
+{
+    static int once;
+
+    if (!once++)
+        FIXME("context %p, enabled %#x, minDepth %f, maxDepth %f stub.\n", context, enabled, minDepth, maxDepth);
+    return AGS_EXTENSION_NOT_SUPPORTED;
+}
+
+__ASM_GLOBAL_FUNC( DX11_SetDepthBounds_impl,
+                   "mov (%rcx),%eax\n\t" /* version */
+                   "cmp $3,%eax\n\t"
+                   "jge 1f\n\t"
+                   "jmp " __ASM_NAME("agsDriverExtensionsDX11_SetDepthBounds") "\n\t"
+                   "1:\tjmp " __ASM_NAME("agsDriverExtensionsDX11_SetDepthBounds_530") )
+
+AGSReturnCode WINAPI agsDriverExtensionsDX11_DestroyDevice_520(AGSContext *context, ID3D11Device* device,
+        unsigned int *device_ref, ID3D11DeviceContext *device_context,
+        unsigned int *context_ref)
+{
+    ULONG ref;
+
+    TRACE("context %p, device %p, device_ref %p, device_context %p, context_ref %p.\n",
+            context, device, device_ref, device_context, context_ref);
+
+    if (!device)
+        return AGS_SUCCESS;
+
+    ref = ID3D11Device_Release(device);
+    if (device_ref)
+        *device_ref = ref;
+
+    if (!device_context)
+        return AGS_SUCCESS;
+
+    ref = ID3D11DeviceContext_Release(device_context);
+    if (context_ref)
+        *context_ref = ref;
+    return AGS_SUCCESS;
+}
+
+AGSReturnCode WINAPI agsDriverExtensionsDX11_DestroyDevice_511(AGSContext *context, ID3D11Device *device,
+        unsigned int *references )
+{
+    TRACE("context %p, device %p, references %p.\n", context, device, references);
+
+    return agsDriverExtensionsDX11_DestroyDevice_520(context, device, references, NULL, NULL);
+}
+__ASM_GLOBAL_FUNC( agsDriverExtensionsDX11_DestroyDevice,
+                   "mov (%rcx),%eax\n\t" /* version */
+                   "cmp $1,%eax\n\t"
+                   "jge 1f\n\t"
+                   "jmp "     __ASM_NAME("agsDriverExtensionsDX11_DestroyDevice_511") "\n\t"
+                   "1:\tjmp " __ASM_NAME("agsDriverExtensionsDX11_DestroyDevice_520") )
+#endif

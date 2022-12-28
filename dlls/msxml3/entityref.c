@@ -93,7 +93,7 @@ static ULONG WINAPI entityref_AddRef(
 {
     entityref *This = impl_from_IXMLDOMEntityReference( iface );
     ULONG ref = InterlockedIncrement( &This->ref );
-    TRACE("%p, refcount %lu.\n", iface, ref);
+    TRACE("(%p)->(%d)\n", This, ref);
     return ref;
 }
 
@@ -103,9 +103,8 @@ static ULONG WINAPI entityref_Release(
     entityref *This = impl_from_IXMLDOMEntityReference( iface );
     ULONG ref = InterlockedDecrement( &This->ref );
 
-    TRACE("%p, refcount %lu.\n", iface, ref);
-
-    if (!ref)
+    TRACE("(%p)->(%d)\n", This, ref);
+    if ( ref == 0 )
     {
         destroy_xmlnode(&This->node);
         heap_free( This );

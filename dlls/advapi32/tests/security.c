@@ -1028,7 +1028,7 @@ cleanup:
 
     rc = GetFileAttributesA(file);
     rc &= ~(FILE_ATTRIBUTE_NOT_CONTENT_INDEXED|FILE_ATTRIBUTE_COMPRESSED);
-    todo_wine
+todo_wine
     ok(rc == (FILE_ATTRIBUTE_ARCHIVE|FILE_ATTRIBUTE_READONLY),
        "expected FILE_ATTRIBUTE_ARCHIVE|FILE_ATTRIBUTE_READONLY got %#x\n", rc);
 
@@ -1488,10 +1488,10 @@ static void test_AccessCheck(void)
     ret = AccessCheck(SecurityDescriptor, Token, KEY_READ, &Mapping,
                       0, &PrivSetLen, &Access, &AccessStatus);
     err = GetLastError();
-    todo_wine
+todo_wine
     ok(!ret && err == ERROR_INSUFFICIENT_BUFFER, "AccessCheck should have "
        "failed with ERROR_INSUFFICIENT_BUFFER, instead of %d\n", err);
-    todo_wine
+todo_wine
     ok(PrivSetLen == sizeof(PRIVILEGE_SET), "PrivSetLen returns %d\n", PrivSetLen);
     ok(Access == 0x1abe11ed && AccessStatus == 0x1abe11ed,
        "Access and/or AccessStatus were changed!\n");
@@ -1600,7 +1600,7 @@ static void test_AccessCheck(void)
                       PrivSet, &PrivSetLen, &Access, &AccessStatus);
     err = GetLastError();
     ok(ret, "AccessCheck failed with error %d\n", GetLastError());
-    todo_wine
+todo_wine
     ok(PrivSetLen == sizeof(PRIVILEGE_SET) + 1, "PrivSetLen returns %d\n", PrivSetLen);
     ok(AccessStatus && (Access == KEY_READ),
         "AccessCheck failed to grant access with error %d\n", GetLastError());
@@ -1898,6 +1898,9 @@ static void test_token_attr(void)
                 /* S-1-5-5-0-XXXXXX */
                 ret = IsWellKnownSid(Groups->Groups[0].Sid, WinLogonIdsSid);
                 ok(ret, "Unknown SID\n");
+
+                ok(Groups->Groups[0].Attributes == (SE_GROUP_MANDATORY | SE_GROUP_ENABLED_BY_DEFAULT | SE_GROUP_ENABLED | SE_GROUP_LOGON_ID),
+                    "got %lx\n", Groups->Groups[0].Attributes);
             }
         }
 
@@ -3656,7 +3659,7 @@ static void test_CreateDirectoryA(void)
     }
     ok(!error, "GetNamedSecurityInfo failed with error %d\n", error);
     test_inherited_dacl(pDacl, admin_sid, user_sid, OBJECT_INHERIT_ACE|CONTAINER_INHERIT_ACE,
-                        0x1f01ff, FALSE, FALSE, FALSE, __LINE__);
+                        0x1f01ff, FALSE, TRUE, FALSE, __LINE__);
     LocalFree(pSD);
 
     /* Test inheritance of ACLs in CreateFile without security descriptor */
@@ -3702,6 +3705,7 @@ static void test_CreateDirectoryA(void)
     ok(error == ERROR_SUCCESS, "GetNamedSecurityInfo failed with error %d\n", error);
     bret = GetAclInformation(pDacl, &acl_size, sizeof(acl_size), AclSizeInformation);
     ok(bret, "GetAclInformation failed\n");
+    todo_wine
     ok(acl_size.AceCount == 0, "GetAclInformation returned unexpected entry count (%d != 0).\n",
                                acl_size.AceCount);
     LocalFree(pSD);
@@ -3712,6 +3716,7 @@ static void test_CreateDirectoryA(void)
     ok(error == ERROR_SUCCESS, "GetNamedSecurityInfo failed with error %d\n", error);
     bret = GetAclInformation(pDacl, &acl_size, sizeof(acl_size), AclSizeInformation);
     ok(bret, "GetAclInformation failed\n");
+    todo_wine
     ok(acl_size.AceCount == 0, "GetAclInformation returned unexpected entry count (%d != 0).\n",
                                acl_size.AceCount);
     LocalFree(pSD);
@@ -3834,6 +3839,7 @@ static void test_CreateDirectoryA(void)
     ok(error == ERROR_SUCCESS, "GetNamedSecurityInfo failed with error %d\n", error);
     bret = GetAclInformation(pDacl, &acl_size, sizeof(acl_size), AclSizeInformation);
     ok(bret, "GetAclInformation failed\n");
+    todo_wine
     ok(acl_size.AceCount == 0, "GetAclInformation returned unexpected entry count (%d != 0).\n",
                                acl_size.AceCount);
     LocalFree(pSD);
@@ -4110,20 +4116,21 @@ static void test_GetNamedSecurityInfoA(void)
         bret = GetAce(pDacl, 0, (VOID **)&ace);
         ok(bret, "Failed to get Current User ACE.\n");
         bret = EqualSid(&ace->SidStart, user_sid);
-        ok(bret, "Current User ACE (%s) != Current User SID (%s).\n",
-           debugstr_sid(&ace->SidStart), debugstr_sid(user_sid));
+        todo_wine ok(bret, "Current User ACE (%s) != Current User SID (%s).\n",
+                     debugstr_sid(&ace->SidStart), debugstr_sid(user_sid));
         ok(((ACE_HEADER *)ace)->AceFlags == 0,
            "Current User ACE has unexpected flags (0x%x != 0x0)\n", ((ACE_HEADER *)ace)->AceFlags);
-        ok(ace->Mask == 0x1f01ff,
-           "Current User ACE has unexpected mask (0x%x != 0x1f01ff)\n", ace->Mask);
+        ok(ace->Mask == 0x1f01ff, "Current User ACE has unexpected mask (0x%x != 0x1f01ff)\n",
+                                  ace->Mask);
     }
     if (acl_size.AceCount > 1)
     {
         bret = GetAce(pDacl, 1, (VOID **)&ace);
         ok(bret, "Failed to get Administators Group ACE.\n");
         bret = EqualSid(&ace->SidStart, admin_sid);
-        ok(bret || broken(!bret) /* win2k */, "Administators Group ACE (%s) != Administators Group SID (%s).\n",
-           debugstr_sid(&ace->SidStart), debugstr_sid(admin_sid));
+        todo_wine ok(bret || broken(!bret) /* win2k */,
+                     "Administators Group ACE (%s) != Administators Group SID (%s).\n",
+                     debugstr_sid(&ace->SidStart), debugstr_sid(admin_sid));
         ok(((ACE_HEADER *)ace)->AceFlags == 0,
            "Administators Group ACE has unexpected flags (0x%x != 0x0)\n", ((ACE_HEADER *)ace)->AceFlags);
         ok(ace->Mask == 0x1f01ff || broken(ace->Mask == GENERIC_ALL) /* win2k */,
@@ -4150,8 +4157,8 @@ static void test_GetNamedSecurityInfoA(void)
     {
         bret = GetAce(pDacl, 0, (VOID **)&ace);
         ok(bret, "Failed to get ACE.\n");
-        ok(((ACE_HEADER *)ace)->AceFlags & INHERITED_ACE,
-           "ACE has unexpected flags: 0x%x\n", ((ACE_HEADER *)ace)->AceFlags);
+        todo_wine ok(((ACE_HEADER *)ace)->AceFlags & INHERITED_ACE,
+                "ACE has unexpected flags: 0x%x\n", ((ACE_HEADER *)ace)->AceFlags);
     }
     LocalFree(pSD);
 
@@ -4931,22 +4938,23 @@ static void test_GetSecurityInfo(void)
         bret = GetAce(pDacl, 0, (VOID **)&ace);
         ok(bret, "Failed to get Current User ACE.\n");
         bret = EqualSid(&ace->SidStart, user_sid);
-        ok(bret, "Current User ACE (%s) != Current User SID (%s).\n", debugstr_sid(&ace->SidStart), debugstr_sid(user_sid));
+        todo_wine ok(bret, "Current User ACE (%s) != Current User SID (%s).\n",
+                     debugstr_sid(&ace->SidStart), debugstr_sid(user_sid));
         ok(((ACE_HEADER *)ace)->AceFlags == 0,
            "Current User ACE has unexpected flags (0x%x != 0x0)\n", ((ACE_HEADER *)ace)->AceFlags);
         ok(ace->Mask == 0x1f01ff, "Current User ACE has unexpected mask (0x%x != 0x1f01ff)\n",
-                                  ace->Mask);
+                                    ace->Mask);
     }
     if (acl_size.AceCount > 1)
     {
         bret = GetAce(pDacl, 1, (VOID **)&ace);
         ok(bret, "Failed to get Administators Group ACE.\n");
         bret = EqualSid(&ace->SidStart, admin_sid);
-        ok(bret, "Administators Group ACE (%s) != Administators Group SID (%s).\n", debugstr_sid(&ace->SidStart), debugstr_sid(admin_sid));
+        todo_wine ok(bret, "Administators Group ACE (%s) != Administators Group SID (%s).\n", debugstr_sid(&ace->SidStart), debugstr_sid(admin_sid));
         ok(((ACE_HEADER *)ace)->AceFlags == 0,
            "Administators Group ACE has unexpected flags (0x%x != 0x0)\n", ((ACE_HEADER *)ace)->AceFlags);
-        ok(ace->Mask == 0x1f01ff,
-                     "Administators Group ACE has unexpected mask (0x%x != 0x1f01ff)\n", ace->Mask);
+        ok(ace->Mask == 0x1f01ff, "Administators Group ACE has unexpected mask (0x%x != 0x1f01ff)\n",
+                                  ace->Mask);
     }
     LocalFree(pSD);
     CloseHandle(obj);
@@ -5498,9 +5506,9 @@ static void validate_default_security_descriptor(SECURITY_DESCRIPTOR *sd)
     SetLastError(0xdeadbeef);
     ret = GetSecurityDescriptorDacl(sd, &present, &acl, &defaulted);
     ok(ret, "GetSecurityDescriptorDacl error %d\n", GetLastError());
-    todo_wine
+todo_wine
     ok(present == 1, "acl is not present\n");
-    todo_wine
+todo_wine
     ok(acl != (void *)0xdeadbeef && acl != NULL, "acl pointer is not set\n");
     ok(defaulted == 0, "defaulted is set to TRUE\n");
 
@@ -5509,7 +5517,7 @@ static void validate_default_security_descriptor(SECURITY_DESCRIPTOR *sd)
     SetLastError(0xdeadbeef);
     ret = GetSecurityDescriptorOwner(sd, &sid, &defaulted);
     ok(ret, "GetSecurityDescriptorOwner error %d\n", GetLastError());
-    todo_wine
+todo_wine
     ok(sid != (void *)0xdeadbeef && sid != NULL, "sid pointer is not set\n");
     ok(defaulted == 0, "defaulted is set to TRUE\n");
 
@@ -5518,7 +5526,7 @@ static void validate_default_security_descriptor(SECURITY_DESCRIPTOR *sd)
     SetLastError(0xdeadbeef);
     ret = GetSecurityDescriptorGroup(sd, &sid, &defaulted);
     ok(ret, "GetSecurityDescriptorGroup error %d\n", GetLastError());
-    todo_wine
+todo_wine
     ok(sid != (void *)0xdeadbeef && sid != NULL, "sid pointer is not set\n");
     ok(defaulted == 0, "defaulted is set to TRUE\n");
 }

@@ -1185,6 +1185,7 @@ static WND *next_thread_window( HWND *hwnd )
     WND *win;
     WORD index = *hwnd ? USER_HANDLE_TO_INDEX( *hwnd ) + 1 : 0;
 
+    USER_Lock();
     while (index < NB_USER_HANDLES)
     {
         if (!(ptr = user_handles[index++])) continue;
@@ -1194,6 +1195,7 @@ static WND *next_thread_window( HWND *hwnd )
         *hwnd = ptr->handle;
         return win;
     }
+    USER_Unlock();
     return NULL;
 }
 
@@ -1205,42 +1207,39 @@ static WND *next_thread_window( HWND *hwnd )
  */
 void destroy_thread_windows(void)
 {
-    WND *win, *free_list = NULL, **free_list_ptr = &free_list;
-    HWND hwnd = 0;
+    WND *wndPtr;
+    HWND hwnd = 0, *list;
+    HMENU menu, sys_menu;
+    struct window_surface *surface;
+    int i;
 
-    USER_Lock();
-    while ((win = next_thread_window( &hwnd )))
+    while ((wndPtr = next_thread_window( &hwnd )))
     {
-        free_dce( win->dce, win->obj.handle );
-        InterlockedCompareExchangePointer( &user_handles[USER_HANDLE_TO_INDEX(hwnd)], NULL, win );
-        win->obj.handle = *free_list_ptr;
-        free_list_ptr = (WND **)&win->obj.handle;
-    }
-    if (free_list)
-    {
-        SERVER_START_REQ( destroy_window )
+        /* destroy the client-side storage */
+
+        list = WIN_ListChildren( hwnd );
+        menu = ((wndPtr->dwStyle & (WS_CHILD | WS_POPUP)) != WS_CHILD) ? (HMENU)wndPtr->wIDmenu : 0;
+        sys_menu = wndPtr->hSysMenu;
+        free_dce( wndPtr->dce, hwnd );
+        surface = wndPtr->surface;
+        InterlockedCompareExchangePointer( &user_handles[USER_HANDLE_TO_INDEX(hwnd)], NULL, wndPtr );
+        WIN_ReleasePtr( wndPtr );
+        HeapFree( GetProcessHeap(), 0, wndPtr );
+        if (menu) DestroyMenu( menu );
+        if (sys_menu) DestroyMenu( sys_menu );
+        if (surface)
         {
-            req->handle = 0; /* destroy all thread windows */
-            wine_server_call( req );
+            register_window_surface( surface, NULL );
+            window_surface_release( surface );
         }
-        SERVER_END_REQ;
-    }
-    USER_Unlock();
 
-    while ((win = free_list))
-    {
-        free_list = win->obj.handle;
-        TRACE( "destroying %p\n", win );
+        /* free child windows */
 
-        if ((win->dwStyle & (WS_CHILD | WS_POPUP)) != WS_CHILD && win->wIDmenu)
-            DestroyMenu( UlongToHandle(win->wIDmenu) );
-        if (win->hSysMenu) DestroyMenu( win->hSysMenu );
-        if (win->surface)
-        {
-            register_window_surface( win->surface, NULL );
-            window_surface_release( win->surface );
-        }
-        HeapFree( GetProcessHeap(), 0, win );
+        if (!list) continue;
+        for (i = 0; list[i]; i++)
+            if (!WIN_IsCurrentThread( list[i] ))
+                SendNotifyMessageW( list[i], WM_WINE_DESTROYWINDOW, 0, 0 );
+        HeapFree( GetProcessHeap(), 0, list );
     }
 }
 
@@ -2588,6 +2587,7 @@ LONG_PTR WIN_SetWindowLong( HWND hwnd, INT offset, UINT size, LONG_PTR newval, B
     BOOL ok, made_visible = FALSE;
     LONG_PTR retval = 0;
     WND *wndPtr;
+    const char *sgi = getenv("SteamGameId");
 
     TRACE( "%p %d %lx %c\n", hwnd, offset, newval, unicode ? 'W' : 'A' );
 
@@ -2639,6 +2639,10 @@ LONG_PTR WIN_SetWindowLong( HWND hwnd, INT offset, UINT size, LONG_PTR newval, B
         if (wndPtr->dwStyle & WS_MINIMIZE) newval |= WS_MINIMIZE;
         break;
     case GWL_EXSTYLE:
+        /* FIXME: Layered windows don't work well right now, disable them */
+        if (sgi && !strcmp(sgi, "694280")) newval &= ~WS_EX_LAYERED;
+        if (sgi && !strcmp(sgi, "312670")) newval &= ~WS_EX_LAYERED;
+        if (sgi && !strcmp(sgi, "700600")) newval &= ~WS_EX_LAYERED;
         style.styleOld = wndPtr->dwExStyle;
         style.styleNew = newval;
         WIN_ReleasePtr( wndPtr );
@@ -2725,7 +2729,7 @@ LONG_PTR WIN_SetWindowLong( HWND hwnd, INT offset, UINT size, LONG_PTR newval, B
             break;
         case GWLP_ID:
             req->flags = SET_WIN_ID;
-            req->extra_value = newval;
+            req->id = newval;
             break;
         case GWLP_HINSTANCE:
             req->flags = SET_WIN_INSTANCE;
@@ -3395,7 +3399,7 @@ HWND WINAPI SetParent( HWND hwnd, HWND parent )
     {
         req->handle = wine_server_user_handle( hwnd );
         req->parent = wine_server_user_handle( parent );
-        if ((ret = !wine_server_call_err( req )))
+        if ((ret = !wine_server_call( req )))
         {
             old_parent = wine_server_ptr_handle( reply->old_parent );
             wndPtr->parent = parent = wine_server_ptr_handle( reply->full_parent );
@@ -3877,12 +3881,13 @@ BOOL WINAPI FlashWindowEx( PFLASHWINFO pfinfo )
         if (!wndPtr || wndPtr == WND_OTHER_PROCESS || wndPtr == WND_DESKTOP) return FALSE;
         hwnd = wndPtr->obj.handle;  /* make it a full handle */
 
-        wparam = (wndPtr->flags & WIN_NCACTIVATED) != 0;
+        if (pfinfo->dwFlags) wparam = !(wndPtr->flags & WIN_NCACTIVATED);
+        else wparam = (hwnd == GetForegroundWindow());
 
         WIN_ReleasePtr( wndPtr );
-        SendMessageW( hwnd, WM_NCACTIVATE, wparam, 0 );
+        SendNotifyMessageW( hwnd, WM_NCACTIVATE, wparam, 0 );
         USER_Driver->pFlashWindowEx( pfinfo );
-        return (pfinfo->dwFlags & FLASHW_CAPTION) ? TRUE : wparam;
+        return wparam;
     }
 }
 
@@ -4202,8 +4207,7 @@ BOOL WINAPI GetProcessDefaultLayout( DWORD *layout )
     if (process_layout == ~0u)
     {
         WCHAR *str, buffer[MAX_PATH];
-        DWORD i, version_layout = 0;
-        UINT len;
+        DWORD i, len, version_layout = 0;
         DWORD user_lang = GetUserDefaultLangID();
         DWORD *languages;
         void *data = NULL;
@@ -4296,56 +4300,6 @@ LONG_PTR WINAPI SetWindowLongPtrW( HWND hwnd, INT offset, LONG_PTR newval )
 LONG_PTR WINAPI SetWindowLongPtrA( HWND hwnd, INT offset, LONG_PTR newval )
 {
     return WIN_SetWindowLong( hwnd, offset, sizeof(LONG_PTR), newval, FALSE );
-}
-
-/*****************************************************************************
- *              RegisterTouchWindow (USER32.@)
- */
-BOOL WINAPI RegisterTouchWindow(HWND hwnd, ULONG flags)
-{
-    FIXME("(%p %08x): stub\n", hwnd, flags);
-    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
-    return FALSE;
-}
-
-/*****************************************************************************
- *              UnregisterTouchWindow (USER32.@)
- */
-BOOL WINAPI UnregisterTouchWindow(HWND hwnd)
-{
-    FIXME("(%p): stub\n", hwnd);
-    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
-    return FALSE;
-}
-
-/*****************************************************************************
- *              CloseTouchInputHandle (USER32.@)
- */
-BOOL WINAPI CloseTouchInputHandle(HTOUCHINPUT handle)
-{
-    FIXME("(%p): stub\n", handle);
-    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
-    return FALSE;
-}
-
-/*****************************************************************************
- *              GetTouchInputInfo (USER32.@)
- */
-BOOL WINAPI GetTouchInputInfo(HTOUCHINPUT handle, UINT count, TOUCHINPUT *ptr, int size)
-{
-    FIXME("(%p %u %p %u): stub\n", handle, count, ptr, size);
-    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
-    return FALSE;
-}
-
-/*****************************************************************************
- *              GetGestureInfo (USER32.@)
- */
-BOOL WINAPI GetGestureInfo(HGESTUREINFO handle, PGESTUREINFO ptr)
-{
-    FIXME("(%p %p): stub\n", handle, ptr);
-    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
-    return FALSE;
 }
 
 /*****************************************************************************

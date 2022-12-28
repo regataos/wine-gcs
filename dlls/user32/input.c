@@ -49,8 +49,6 @@
 WINE_DEFAULT_DEBUG_CHANNEL(win);
 WINE_DECLARE_DEBUG_CHANNEL(keyboard);
 
-LONG global_key_state_counter = 0;
-
 /***********************************************************************
  *           get_key_state
  */
@@ -306,25 +304,23 @@ void WINAPI mouse_event( DWORD dwFlags, DWORD dx, DWORD dy,
  */
 BOOL WINAPI DECLSPEC_HOTPATCH GetCursorPos( POINT *pt )
 {
-    BOOL ret;
+    BOOL ret = TRUE;
     DWORD last_change;
     UINT dpi;
+    volatile struct desktop_shared_memory *shared = get_desktop_shared_memory();
 
-    if (!pt) return FALSE;
+    if (!pt || !shared) return FALSE;
 
-    SERVER_START_REQ( set_cursor )
+    SHARED_READ_BEGIN( &shared->seq )
     {
-        if ((ret = !wine_server_call( req )))
-        {
-            pt->x = reply->new_x;
-            pt->y = reply->new_y;
-            last_change = reply->last_change;
-        }
+        pt->x = shared->cursor.x;
+        pt->y = shared->cursor.y;
+        last_change = shared->cursor.last_change;
     }
-    SERVER_END_REQ;
+    SHARED_READ_END( &shared->seq );
 
     /* query new position from graphics driver if we haven't updated recently */
-    if (ret && GetTickCount() - last_change > 100) ret = USER_Driver->pGetCursorPos( pt );
+    if (GetTickCount() - last_change > 100) ret = USER_Driver->pGetCursorPos( pt );
     if (ret && (dpi = get_thread_dpi()))
     {
         DPI_AWARENESS_CONTEXT context;
@@ -341,20 +337,19 @@ BOOL WINAPI DECLSPEC_HOTPATCH GetCursorPos( POINT *pt )
  */
 BOOL WINAPI GetCursorInfo( PCURSORINFO pci )
 {
+    volatile struct input_shared_memory *shared = get_foreground_shared_memory();
     BOOL ret;
 
     if (!pci) return FALSE;
 
-    SERVER_START_REQ( get_thread_input )
+    if (!shared) ret = FALSE;
+    else SHARED_READ_BEGIN( &shared->seq )
     {
-        req->tid = 0;
-        if ((ret = !wine_server_call( req )))
-        {
-            pci->hCursor = wine_server_ptr_handle( reply->cursor );
-            pci->flags = (reply->show_count >= 0) ? CURSOR_SHOWING : 0;
-        }
+        pci->hCursor = wine_server_ptr_handle( shared->cursor );
+        pci->flags = (shared->cursor_count >= 0) ? CURSOR_SHOWING : 0;
+        ret = TRUE;
     }
-    SERVER_END_REQ;
+    SHARED_READ_END( &shared->seq );
     GetCursorPos(&pci->ptScreenPos);
     return ret;
 }
@@ -422,14 +417,15 @@ BOOL WINAPI DECLSPEC_HOTPATCH ReleaseCapture(void)
  */
 HWND WINAPI GetCapture(void)
 {
+    volatile struct input_shared_memory *shared = get_input_shared_memory();
     HWND ret = 0;
 
-    SERVER_START_REQ( get_thread_input )
+    if (!shared) return 0;
+    SHARED_READ_BEGIN( &shared->seq )
     {
-        req->tid = GetCurrentThreadId();
-        if (!wine_server_call_err( req )) ret = wine_server_ptr_handle( reply->capture );
+        ret = wine_server_ptr_handle( shared->capture );
     }
-    SERVER_END_REQ;
+    SHARED_READ_END( &shared->seq );
     return ret;
 }
 
@@ -449,57 +445,20 @@ static void check_for_events( UINT flags )
  */
 SHORT WINAPI DECLSPEC_HOTPATCH GetAsyncKeyState( INT key )
 {
-    struct user_key_state_info *key_state_info = get_user_thread_info()->key_state;
-    INT counter = global_key_state_counter;
-    BYTE prev_key_state;
-    SHORT ret;
+    volatile struct desktop_shared_memory *shared = get_desktop_shared_memory();
+    BYTE state;
 
-    if (key < 0 || key >= 256) return 0;
+    if (key < 0 || key >= 256 || !shared) return 0;
 
     check_for_events( QS_INPUT );
 
-    if (key_state_info && !(key_state_info->state[key] & 0xc0) &&
-        key_state_info->counter == counter && GetTickCount() - key_state_info->time < 50)
+    SHARED_READ_BEGIN( &shared->seq )
     {
-        /* use cached value */
-        return 0;
+        state = shared->keystate[key];
     }
-    else if (!key_state_info)
-    {
-        key_state_info = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*key_state_info) );
-        get_user_thread_info()->key_state = key_state_info;
-    }
+    SHARED_READ_END( &shared->seq );
 
-    ret = 0;
-    SERVER_START_REQ( get_key_state )
-    {
-        req->async = 1;
-        req->key = key;
-        if (key_state_info)
-        {
-            prev_key_state = key_state_info->state[key];
-            wine_server_set_reply( req, key_state_info->state, sizeof(key_state_info->state) );
-        }
-        if (!wine_server_call( req ))
-        {
-            if (reply->state & 0x40) ret |= 0x0001;
-            if (reply->state & 0x80) ret |= 0x8000;
-            if (key_state_info)
-            {
-                /* force refreshing the key state cache - some multithreaded programs
-                 * (like Adobe Photoshop CS5) expect that changes to the async key state
-                 * are also immediately available in other threads. */
-                if (prev_key_state != key_state_info->state[key])
-                    counter = InterlockedIncrement( &global_key_state_counter );
-
-                key_state_info->time    = GetTickCount();
-                key_state_info->counter = counter;
-            }
-        }
-    }
-    SERVER_END_REQ;
-
-    return ret;
+    return (state & 0x80) << 8;
 }
 
 
@@ -739,6 +698,57 @@ BOOL WINAPI GetKeyboardLayoutNameA(LPSTR pszKLID)
     if (NtUserGetKeyboardLayoutName( buf ))
         return WideCharToMultiByte( CP_ACP, 0, buf, -1, pszKLID, KL_NAMELENGTH, NULL, NULL ) != 0;
     return FALSE;
+}
+
+/**********************************************************************
+ *       GetKeyState    (USER32.@)
+ *
+ * An application calls the GetKeyState function in response to a
+ * keyboard-input message.  This function retrieves the state of the key
+ * at the time the input message was generated.
+ */
+SHORT WINAPI GetKeyState( INT vkey )
+{
+    volatile struct input_shared_memory *shared = get_input_shared_memory();
+    SHORT retval = 0;
+    BOOL skip = TRUE;
+
+    if (!shared) skip = FALSE;
+    else SHARED_READ_BEGIN( &shared->seq )
+    {
+        if (!shared->created) skip = FALSE; /* server needs to create the queue */
+        else if (!shared->keystate_lock) skip = FALSE; /* server needs to call sync_input_keystate */
+        else retval = (signed char)(shared->keystate[vkey & 0xff] & 0x81);
+    }
+    SHARED_READ_END( &shared->seq );
+
+    if (!skip) retval = NtUserGetKeyState( vkey );
+    TRACE("key (0x%x) -> %x\n", vkey, retval);
+    return retval;
+}
+
+/**********************************************************************
+ *       GetKeyboardState    (USER32.@)
+ */
+BOOL WINAPI GetKeyboardState( BYTE *state )
+{
+    volatile struct input_shared_memory *shared = get_input_shared_memory();
+    BOOL skip = TRUE;
+    int i;
+
+    TRACE("(%p)\n", state);
+
+    if (!shared) skip = FALSE;
+    else SHARED_READ_BEGIN( &shared->seq )
+    {
+        if (!shared->created) skip = FALSE; /* server needs to create the queue */
+        else memcpy( state, (const void *)shared->keystate, 256 );
+    }
+    SHARED_READ_END( &shared->seq );
+
+    if (!skip) return NtUserGetKeyboardState( state );
+    for (i = 0; i < 256; i++) state[i] &= 0x81;
+    return TRUE;
 }
 
 /****************************************************************************
@@ -1166,6 +1176,10 @@ BOOL WINAPI EnableMouseInPointer(BOOL enable)
 
 static DWORD CALLBACK devnotify_window_callback(HANDLE handle, DWORD flags, DEV_BROADCAST_HDR *header)
 {
+    DEV_BROADCAST_DEVICEINTERFACE_W *iface = (DEV_BROADCAST_DEVICEINTERFACE_W *)header;
+    if (flags == DBT_DEVICEARRIVAL) rawinput_add_device(iface->dbcc_name);
+    if (flags == DBT_DEVICEREMOVECOMPLETE) rawinput_remove_device(iface->dbcc_name);
+
     SendMessageTimeoutW(handle, WM_DEVICECHANGE, flags, (LPARAM)header, SMTO_ABORTIFHUNG, 2000, NULL);
     return 0;
 }
@@ -1263,4 +1277,121 @@ BOOL WINAPI UnregisterDeviceNotification( HDEVNOTIFY handle )
     TRACE("%p\n", handle);
 
     return I_ScUnregisterDeviceNotification( handle );
+}
+
+/*****************************************************************************
+ * CloseTouchInputHandle (USER32.@)
+ */
+BOOL WINAPI CloseTouchInputHandle( HTOUCHINPUT handle )
+{
+    TRACE( "handle %p.\n", handle );
+    return TRUE;
+}
+
+/*****************************************************************************
+ * GetTouchInputInfo (USER32.@)
+ */
+BOOL WINAPI GetTouchInputInfo( HTOUCHINPUT handle, UINT count, TOUCHINPUT *ptr, int size )
+{
+    TRACE( "handle %p, count %u, ptr %p, size %u.\n", handle, count, ptr, size );
+    *ptr = *(TOUCHINPUT *)handle;
+    return TRUE;
+}
+
+/**********************************************************************
+ * IsTouchWindow (USER32.@)
+ */
+BOOL WINAPI IsTouchWindow( HWND hwnd, ULONG *flags )
+{
+    DWORD win_flags = win_set_flags( hwnd, 0, 0 );
+    TRACE( "hwnd %p, flags %p.\n", hwnd, flags );
+    return (win_flags & WIN_IS_TOUCH) != 0;
+}
+
+/*****************************************************************************
+ * RegisterTouchWindow (USER32.@)
+ */
+BOOL WINAPI RegisterTouchWindow( HWND hwnd, ULONG flags )
+{
+    DWORD win_flags = win_set_flags( hwnd, WIN_IS_TOUCH, 0 );
+    TRACE( "hwnd %p, flags %#x.\n", hwnd, flags );
+    return (win_flags & WIN_IS_TOUCH) == 0;
+}
+
+/*****************************************************************************
+ * UnregisterTouchWindow (USER32.@)
+ */
+BOOL WINAPI UnregisterTouchWindow( HWND hwnd )
+{
+    DWORD win_flags = win_set_flags( hwnd, 0, WIN_IS_TOUCH );
+    TRACE( "hwnd %p.\n", hwnd );
+    return (win_flags & WIN_IS_TOUCH) != 0;
+}
+
+/*****************************************************************************
+ * GetGestureInfo (USER32.@)
+ */
+BOOL WINAPI CloseGestureInfoHandle( HGESTUREINFO handle )
+{
+    FIXME( "handle %p stub!\n", handle );
+    SetLastError( ERROR_CALL_NOT_IMPLEMENTED );
+    return FALSE;
+}
+
+/*****************************************************************************
+ * GetGestureInfo (USER32.@)
+ */
+BOOL WINAPI GetGestureExtraArgs( HGESTUREINFO handle, UINT count, BYTE *args )
+{
+    FIXME( "handle %p, count %u, args %p stub!\n", handle, count, args );
+    SetLastError( ERROR_CALL_NOT_IMPLEMENTED );
+    return FALSE;
+}
+
+/*****************************************************************************
+ * GetGestureInfo (USER32.@)
+ */
+BOOL WINAPI GetGestureInfo( HGESTUREINFO handle, GESTUREINFO *ptr )
+{
+    FIXME( "handle %p, ptr %p stub!\n", handle, ptr );
+    SetLastError( ERROR_CALL_NOT_IMPLEMENTED );
+    return FALSE;
+}
+
+/*****************************************************************************
+ * GetGestureConfig (USER32.@)
+ */
+BOOL WINAPI GetGestureConfig( HWND hwnd, DWORD reserved, DWORD flags, UINT *count,
+                              GESTURECONFIG *config, UINT size )
+{
+    FIXME( "handle %p, reserved %#x, flags %#x, count %p, config %p, size %u stub!\n",
+           hwnd, reserved, flags, count, config, size );
+    SetLastError( ERROR_CALL_NOT_IMPLEMENTED );
+    return FALSE;
+}
+
+/**********************************************************************
+ * SetGestureConfig (USER32.@)
+ */
+BOOL WINAPI SetGestureConfig( HWND hwnd, DWORD reserved, UINT count,
+                              GESTURECONFIG *config, UINT size )
+{
+    FIXME( "handle %p, reserved %#x, count %u, config %p, size %u stub!\n",
+           hwnd, reserved, count, config, size );
+    SetLastError( ERROR_CALL_NOT_IMPLEMENTED );
+    return FALSE;
+}
+
+BOOL WINAPI GetPointerTouchInfo( UINT32 id, POINTER_TOUCH_INFO *info )
+{
+    FIXME( "id %u, info %p stub!\n", id, info );
+    SetLastError( ERROR_CALL_NOT_IMPLEMENTED );
+    return FALSE;
+}
+
+BOOL WINAPI GetPointerTouchInfoHistory( UINT32 id, UINT32 *count, POINTER_TOUCH_INFO *info )
+{
+    FIXME( "id %u, count %p, info %p stub!\n", id, count, info );
+    SetLastError( ERROR_CALL_NOT_IMPLEMENTED );
+    return FALSE;
 }

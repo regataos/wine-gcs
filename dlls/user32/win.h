@@ -79,7 +79,8 @@ typedef struct tagWND
 #define WIN_NEEDS_SHOW_OWNEDPOPUP 0x0020 /* WM_SHOWWINDOW:SC_SHOW must be sent in the next ShowOwnedPopup call */
 #define WIN_CHILDREN_MOVED        0x0040 /* children may have moved, ignore stored positions */
 #define WIN_HAS_IME_WIN           0x0080 /* the window has been registered with imm32 */
-#define WIN_IS_IN_ACTIVATION      0x0100 /* the window is in an activation process */
+#define WIN_IS_TOUCH              0x0100 /* the window has been registered for touch input */
+#define WIN_IS_ACTIVATING         0x0200 /* the window is being activated */
 
   /* Window functions */
 extern HWND get_hwnd_message_parent(void) DECLSPEC_HIDDEN;

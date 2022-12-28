@@ -93,15 +93,16 @@ AddReg=\
     Misc,\
     Nls,\
     OLE,\
+    Packages,\
     Printing,\
     Services, \
     SessionMgr,\
     Tapi,\
     Timezones,\
     VersionInfo,\
-    LicenseInformation,\
-    LutrisClient, \
-    NVIDIANGX
+    LicenseInformation, \
+    NVIDIANGX, \
+    ProtonOverrides
 
 [DefaultInstall.ntamd64]
 RegisterDlls=RegisterDllsSection
@@ -122,15 +123,16 @@ AddReg=\
     Misc,\
     Nls,\
     OLE,\
+    Packages.ntamd64,\
     Printing,\
     Services, \
     SessionMgr,\
     Tapi,\
     Timezones,\
     VersionInfo.ntamd64,\
-    LicenseInformation,\
-    LutrisClient.ntamd64, \
-    NVIDIANGX
+    LicenseInformation, \
+    NVIDIANGX, \
+    ProtonOverrides
 
 [DefaultInstall.ntarm64]
 RegisterDlls=RegisterDllsSection
@@ -150,6 +152,7 @@ AddReg=\
     Misc,\
     Nls,\
     OLE,\
+    Packages.ntarm64,\
     Printing,\
     Services, \
     SessionMgr,\
@@ -170,25 +173,26 @@ AddReg=\
     KeyboardLayouts,\
     MCI,\
     Misc,\
+    Packages.wow64,\
     Tapi,\
     VersionInfo.ntamd64,\
-    LicenseInformation,\
-    LutrisClient.ntamd64, \
-    NVIDIANGX
+    LicenseInformation, \
+    NVIDIANGX, \
+    ProtonOverrides
 
 [Wow64Install.ntarm64]
 WineFakeDlls=FakeDllsWin32
 
 [DefaultInstall.Services]
 AddService=BITS,0,BITSService
-AddService=EventLog,0x800,EventLogService
+AddService=EventLog,0,EventLogService
 AddService=HTTP,0,HTTPService
 AddService=MSIServer,0,MSIService
 AddService=RpcSs,0,RpcSsService
 AddService=Spooler,0,SpoolerService
 AddService=StiSvc,0,StiService
 AddService=TermService,0,TerminalServices
-AddService=PlugPlay,0x800,PlugPlayService
+AddService=PlugPlay,0,PlugPlayService
 AddService=FontCache3.0.0.0,0,WPFFontCacheService
 AddService=LanmanServer,0,LanmanServerService
 AddService=FontCache,0,FontCacheService
@@ -201,14 +205,14 @@ AddService=SharedGpuResources,0x800,SharedGpuResourcesService
 
 [DefaultInstall.NT.Services]
 AddService=BITS,0,BITSService
-AddService=EventLog,0x800,EventLogService
+AddService=EventLog,0,EventLogService
 AddService=HTTP,0,HTTPService
 AddService=MSIServer,0,MSIService
 AddService=RpcSs,0,RpcSsService
 AddService=Spooler,0,SpoolerService
 AddService=StiSvc,0,StiService
 AddService=TermService,0,TerminalServices
-AddService=PlugPlay,0x800,PlugPlayService
+AddService=PlugPlay,0,PlugPlayService
 AddService=FontCache3.0.0.0,0,WPFFontCacheService
 AddService=LanmanServer,0,LanmanServerService
 AddService=FontCache,0,FontCacheService
@@ -221,14 +225,14 @@ AddService=SharedGpuResources,0x800,SharedGpuResourcesService
 
 [DefaultInstall.ntamd64.Services]
 AddService=BITS,0,BITSService
-AddService=EventLog,0x800,EventLogService
+AddService=EventLog,0,EventLogService
 AddService=HTTP,0,HTTPService
 AddService=MSIServer,0,MSIService
 AddService=RpcSs,0,RpcSsService
 AddService=Spooler,0,SpoolerService
 AddService=StiSvc,0,StiService
 AddService=TermService,0,TerminalServices
-AddService=PlugPlay,0x800,PlugPlayService
+AddService=PlugPlay,0,PlugPlayService
 AddService=FontCache3.0.0.0,0,WPFFontCacheService
 AddService=LanmanServer,0,LanmanServerService
 AddService=FontCache,0,FontCacheService
@@ -241,14 +245,14 @@ AddService=SharedGpuResources,0x800,SharedGpuResourcesService
 
 [DefaultInstall.ntarm64.Services]
 AddService=BITS,0,BITSService
-AddService=EventLog,0x800,EventLogService
+AddService=EventLog,0,EventLogService
 AddService=HTTP,0,HTTPService
 AddService=MSIServer,0,MSIService
 AddService=RpcSs,0,RpcSsService
 AddService=Spooler,0,SpoolerService
 AddService=StiSvc,0,StiService
 AddService=TermService,0,TerminalServices
-AddService=PlugPlay,0x800,PlugPlayService
+AddService=PlugPlay,0,PlugPlayService
 AddService=FontCache3.0.0.0,0,WPFFontCacheService
 AddService=LanmanServer,0,LanmanServerService
 AddService=FontCache,0,FontCacheService
@@ -266,6 +270,8 @@ CurrentVersion="Software\Microsoft\Windows\CurrentVersion"
 CurrentVersionNT="Software\Microsoft\Windows NT\CurrentVersion"
 FontSubStr="Software\Microsoft\Windows NT\CurrentVersion\FontSubstitutes"
 Control="System\CurrentControlSet\Control"
+FontsNT="Software\Microsoft\Windows NT\CurrentVersion\Fonts"
+Packages="Software\Classes\Local Settings\Software\Microsoft\Windows\CurrentVersion\AppModel\PackageRepository\Packages"
 
 [Classes]
 HKCR,.chm,,2,"chm.file"
@@ -291,6 +297,7 @@ HKCR,DirectShow,,16
 HKCR,exefile,,2,"Application"
 HKCR,exefile\DefaultIcon,,2,"%1"
 HKCR,exefile\shell\open\command,,2,"""%1"" %*"
+HKCR,exefile\shell\runas\command,,2,"""%1"" %*"
 HKCR,folder\shell\open\ddeexec,,2,"[ViewFolder("%l", %I, %S)]"
 HKCR,folder\shell\open\ddeexec,"NoActivateHandler",2,""
 HKCR,folder\shell\open\ddeexec\application,,2,"Folders"
@@ -319,7 +326,7 @@ HKCR,Msi.Patch,,2,"Windows Installer Patch"
 HKCR,Msi.Patch\DefaultIcon,,2,"msiexec.exe"
 HKCR,Msi.Patch\shell\Open\command,,2,"%11%\msiexec.exe /p ""%1"""
 HKCR,pdffile,,2,"PDF Document"
-HKCR,pdffile\shell\open\command,,2,"""%11%\winebrowser.exe"" ""%1"""
+HKCR,pdffile\shell\open\command,,,"""%11%\winebrowser.exe"" ""%1"""
 HKCR,rtffile,,2,"Rich Text Document"
 HKCR,rtffile\shell\open\command,,2,"""%16422%\Windows NT\Accessories\wordpad.exe"" ""%1"""
 HKCR,rtffile\shell\print\command,,2,"""%16422%\Windows NT\Accessories\wordpad.exe"" /p ""%1"""
@@ -522,6 +529,16 @@ HKCR,MIME\Database\Charset\us-ascii,"AliasForCharset",,iso-8859-1
 HKCR,MIME\Database\Charset\visual,"AliasForCharset",,iso-8859-8
 HKCR,MIME\Database\Charset\Windows-1254,"AliasForCharset",,iso-8859-9
 
+HKCU,Software\Wine\FileOpenBlacklist\.htm,"winebrowser",,"""%11%\winebrowser.exe"" -nohome"
+HKCU,Software\Wine\FileOpenBlacklist\.html,"winebrowser",,"""%11%\winebrowser.exe"" -nohome"
+HKCU,Software\Wine\FileOpenBlacklist\.ini,"notepad",,"%11%\notepad.exe %1"
+HKCU,Software\Wine\FileOpenBlacklist\.pdf,"winebrowser",,"""%11%\winebrowser.exe"" -nohome"
+HKCU,Software\Wine\FileOpenBlacklist\.rtf,"wordpad",,"""%16422%\Windows NT\Accessories\wordpad.exe"" %1"
+HKCU,Software\Wine\FileOpenBlacklist\.txt,"notepad",,"%11%\notepad.exe %1"
+HKCU,Software\Wine\FileOpenBlacklist\.url,"ieframe",,"rundll32.exe ieframe.dll,OpenURL %l"
+HKCU,Software\Wine\FileOpenBlacklist\.wri,"wordpad",,"""%16422%\Windows NT\Accessories\wordpad.exe"" %1"
+HKCU,Software\Wine\FileOpenBlacklist\.xml,"winebrowser",,"""%11%\winebrowser.exe"" -nohome"
+
 [ContentIndex]
 HKLM,System\CurrentControlSet\Control\ContentIndex\Language\Neutral,"WBreakerClass",,"{369647e0-17b0-11ce-9950-00aa004bbb1f}"
 HKLM,System\CurrentControlSet\Control\ContentIndex\Language\Neutral,"StemmerClass",,""
@@ -548,6 +565,7 @@ HKCU,%CurrentVersion%\Run,,16
 HKCU,%CurrentVersionNT%\Winlogon,,16
 HKLM,%CurrentVersion%,"CommonFilesDir",,"%16427%"
 HKLM,%CurrentVersion%,"FirstInstallDateTime",1,21,81,7c,23
+HKLM,%CurrentVersion%,"ProductId",,"00330-50000-00000-AAOEM"
 HKLM,%CurrentVersion%,"ProgramFilesDir",,"%16422%"
 HKLM,%CurrentVersion%,"ProgramFilesPath",0x20000,"%%ProgramFiles%%"
 HKLM,%CurrentVersion%,"RegisteredOrganization",2,""
@@ -562,7 +580,7 @@ HKLM,%CurrentVersion%\Explorer\DriveIcons,,16
 HKLM,%CurrentVersion%\Explorer\KindMap,,16
 HKLM,%CurrentVersion%\Group Policy,,16
 HKLM,%CurrentVersion%\Installer,"InstallerLocation",,"%11%"
-HKLM,%CurrentVersion%\Policies\System,"EnableLUA",0x10001,1
+HKLM,%CurrentVersion%\Policies\System,"EnableLUA",0x10003,0
 HKLM,%CurrentVersion%\PreviewHandlers,,16
 HKLM,%CurrentVersion%\Run,,16
 HKLM,%CurrentVersion%\Setup,"BootDir",,"%30%"
@@ -571,6 +589,7 @@ HKLM,%CurrentVersion%\Setup\WindowsFeatures\WindowsMediaVersion,,,"12.0.7601.188
 HKLM,%CurrentVersion%\Shell Extensions\Approved,,16
 HKLM,%CurrentVersion%\Uninstall,,16
 HKLM,%CurrentVersionNT%,"InstallDate",0x10003,1273299354
+HKLM,%CurrentVersionNT%,"ProductId",,"00330-50000-00000-AAOEM"
 HKLM,%CurrentVersionNT%,"RegisteredOrganization",2,""
 HKLM,%CurrentVersionNT%,"RegisteredOwner",2,""
 HKLM,%CurrentVersionNT%,"SystemRoot",,"%10%"
@@ -681,6 +700,17 @@ HKLM,%FontSubStr%,"Times New Roman CYR,204",,"Times New Roman,204"
 HKLM,%FontSubStr%,"Times New Roman Greek,161",,"Times New Roman,161"
 HKLM,%FontSubStr%,"Times New Roman TUR,162",,"Times New Roman,162"
 HKLM,System\CurrentControlSet\Hardware Profiles\Current\Software\Fonts,"LogPixels",0x10003,0x00000060
+HKLM,%FontsNT%,"Arial (TrueType)",,"arial.ttf"
+HKLM,%FontsNT%,"Arial Bold (TrueType)",,"arialbd.ttf"
+HKLM,%FontsNT%,"Times New Roman (TrueType)",,"times.ttf"
+HKLM,%FontsNT%,"Courier New (TrueType)",,"cour.ttf"
+HKLM,%FontsNT%,"Malgun Gothic (TrueType)",,"malgun.ttf"
+HKLM,%FontsNT%,"Microsoft Sans Serif (TrueType)",,"micross.ttf"
+HKLM,%FontsNT%,"Microsoft YaHei (TrueType)",,"msyh.ttf"
+HKLM,%FontsNT%,"MS Gothic (TrueType)",,"msgothic.ttc"
+HKLM,%FontsNT%,"Nirmala UI (TrueType)",,"nirmala.ttf"
+HKLM,%FontsNT%,"SimSun (TrueType)",,"simsun.ttc"
+HKCU,Software\Wine\Fonts\Replacements,"Palatino Linotype",,"Times New Roman"
 
 [MCI]
 HKLM,%Mci32Str%,"AVIVideo",,"mciavi32.dll"
@@ -1376,6 +1406,18 @@ HKLM,SYSTEM\CurrentControlSet\Control\Keyboard Layouts\00120c00,,16
 [OLE]
 HKLM,"Software\Microsoft\OLE","EnableDCOM",,"Y"
 HKLM,"Software\Microsoft\OLE","EnableRemoteConnect",,"N"
+
+[Packages]
+HKLM,"%Packages%\Microsoft.VCLibs.140.00_14.0.29231.0_x86__8wekyb3d8bbwe","Path",0x00020002,"%SystemRoot%\system32"
+
+[Packages.ntamd64]
+HKLM,"%Packages%\Microsoft.VCLibs.140.00_14.0.29231.0_x64__8wekyb3d8bbwe","Path",0x00020002,"%SystemRoot%\system32"
+
+[Packages.wow64]
+HKLM,"%Packages%\Microsoft.VCLibs.140.00_14.0.29231.0_x86__8wekyb3d8bbwe","Path",0x00020002,"%SystemRoot%\syswow64"
+
+[Packages.arm64]
+HKLM,"%Packages%\Microsoft.VCLibs.140.00_14.0.29231.0_arm64__8wekyb3d8bbwe","Path",0x00020002,"%SystemRoot%\system32"
 
 [Printing]
 HKLM,%Control%\Print\Monitors\Local Port,"Driver",2,"localspl.dll"
@@ -5874,11 +5916,13 @@ HKLM,"System\CurrentControlSet\Services\Winsock2\Parameters\Protocol_Catalog9\Ca
 
 [VersionInfo]
 HKLM,%CurrentVersionNT%,"CurrentVersion",2,"10.0"
+HKLM,%CurrentVersionNT%,"CurrentMajorVersionNumber",0x10001,10
+HKLM,%CurrentVersionNT%,"CurrentMinorVersionNumber",0x10001,0
 HKLM,%CurrentVersionNT%,"CSDVersion",2,""
 HKLM,%CurrentVersionNT%,"CurrentBuild",2,"19043"
 HKLM,%CurrentVersionNT%,"CurrentBuildNumber",2,"19043"
 HKLM,%CurrentVersionNT%,"CurrentType",2,"Uniprocessor Free"
-HKLM,%CurrentVersionNT%,"DigitalProductId",1,00,00,00,00,00,00,00,00,00,00,00,\
+HKLM,%CurrentVersionNT%,"DigitalProductId",2,00,00,00,00,00,00,00,00,00,00,00,\
 00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,\
 00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,\
 00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,\
@@ -5898,7 +5942,7 @@ HKLM,%CurrentVersionNT%,"CSDVersion",2,""
 HKLM,%CurrentVersionNT%,"CurrentBuild",2,"19043"
 HKLM,%CurrentVersionNT%,"CurrentBuildNumber",2,"19043"
 HKLM,%CurrentVersionNT%,"CurrentType",2,"Uniprocessor Free"
-HKLM,%CurrentVersionNT%,"DigitalProductId",1,00,00,00,00,00,00,00,00,00,00,00,\
+HKLM,%CurrentVersionNT%,"DigitalProductId",2,00,00,00,00,00,00,00,00,00,00,00,\
 00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,\
 00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,\
 00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,\
@@ -6004,9 +6048,6 @@ winehid.inf,"@%12%\winehid.sys,-1"
 wineusb.inf,"@%12%\wineusb.sys,-1"
 winexinput.inf,"@%12%\winexinput.sys,-1"
 
-[ProtonOverrides]
-HKLM,Software\Khronos\OpenXR\1,"ActiveRuntime",,"C:\openxr\wineopenxr64.json"
-
 [NlsFiles]
 c_037.nls
 c_10000.nls
@@ -6097,7 +6138,11 @@ InfFiles  = 17
 NlsFiles  = 11
 SortFiles = 10,globalization\sorting
 
-[LutrisClient]
+[NVIDIANGX]
+HKLM,Software\NVIDIA Corporation\Global\NGXCore,"FullPath",,"C:\Windows\System32"
+
+[ProtonOverrides]
+HKLM,Software\Khronos\OpenXR\1,"ActiveRuntime",,"C:\openxr\wineopenxr64.json"
 ;;Likely want *80 and *90 too, but those require removing Wine's manifest files.
 HKCU,Software\Wine\DllOverrides,"atl100",0x2,"native,builtin"
 HKCU,Software\Wine\DllOverrides,"msvcp100",0x2,"native,builtin"
@@ -6127,20 +6172,19 @@ HKCU,Software\Wine\DllOverrides,"vcomp140",0x2,"native,builtin"
 HKCU,Software\Wine\DllOverrides,"vcruntime140",0x2,"native,builtin"
 HKCU,Software\Wine\DllOverrides,"atiadlxx",,"disabled"
 HKCU,Software\Wine\DllOverrides,"nvcuda",0x2,"disabled"
-HKCU,Software\Wine\DllOverrides,"winemenubuilder.exe",0x2,""
-
-[LutrisClient.ntamd64]
-HKCU,Software\Wine\AppDefaults\LauncherPatcher.exe,"Version",,"win7"
-HKCU,Software\Wine\AppDefaults\tll.exe\DllOverrides,"amd_ags_x64",0x2,"builtin"
-HKCU,Software\Wine\AppDefaults\Deathloop.exe\DllOverrides,"amd_ags_x64",0x2,"builtin,native"
-HKCU,Software\Wine\AppDefaults\ForzaHorizon4.exe\DllOverrides,"amd_ags_x64",0x2,"builtin,native"
+;;App-specific overrides for amd_ags_x64.dll.
 HKCU,Software\Wine\AppDefaults\NewColossus_x64vk.exe\DllOverrides,"amd_ags_x64",0x2,"builtin,native"
-HKCU,Software\Wine\AppDefaults\Youngblood_x64vk.exe\DllOverrides,"amd_ags_x64",0x2,"builtin,native"
 HKCU,Software\Wine\AppDefaults\RDR2.exe\DllOverrides,"amd_ags_x64",0x2,"builtin,native"
-HKCU,Software\Wine\AppDefaults\DarkSoulsIII.exe\X11 Driver,"LimitNumberOfResolutions",0x2,"32"
-HKCU,Software\Wine\AppDefaults\sekiro.exe\X11 Driver,"LimitNumberOfResolutions",0x2,"32"
-HKCU,Software\Wine\AppDefaults\NieRAutomata.exe\X11 Driver,"LimitNumberOfResolutions",0x2,"32"
-HKCU,Software\Wine\AppDefaults\SpellForce.exe\X11 Driver,"LimitNumberOfResolutions",0x2,"16"
+HKCU,Software\Wine\AppDefaults\ShadowOfWar.exe\DllOverrides,"amd_ags_x64",,"disabled"
+HKCU,Software\Wine\AppDefaults\ForzaHorizon4.exe\DllOverrides,"amd_ags_x64",0x2,"builtin,native"
+HKCU,Software\Wine\AppDefaults\Deathloop.exe\DllOverrides,"amd_ags_x64",0x2,"builtin,native"
+HKCU,Software\Wine\AppDefaults\ForzaHorizon5.exe\DllOverrides,"amd_ags_x64",0x2,"builtin"
+HKCU,Software\Wine\AppDefaults\MonsterHunterRise.exe\DllOverrides,"amd_ags_x64",0x2,"builtin"
+HKCU,Software\Wine\AppDefaults\Sam4.exe\DllOverrides,"amd_ags_x64",0x2,"builtin"
+HKCU,Software\Wine\AppDefaults\Sam4_Unrestricted.exe\DllOverrides,"amd_ags_x64",0x2,"builtin"
+HKCU,Software\Wine\AppDefaults\u4.exe\DllOverrides,"amd_ags_x64",0x2,"builtin"
+HKCU,Software\Wine\AppDefaults\tll.exe\DllOverrides,"amd_ags_x64",0x2,"builtin"
+;;App-specific overrides for atiadlxx.dll.
 HKCU,Software\Wine\AppDefaults\s2_sp64_ship.exe\DllOverrides,"atiadlxx",,"builtin"
 HKCU,Software\Wine\AppDefaults\s2_mp64_ship.exe\DllOverrides,"atiadlxx",,"builtin"
 HKCU,Software\Wine\AppDefaults\h1_sp64_ship.exe\DllOverrides,"atiadlxx",,"builtin"
@@ -6149,49 +6193,21 @@ HKCU,Software\Wine\AppDefaults\iw7_ship.exe\DllOverrides,"atiadlxx",,"builtin"
 HKCU,Software\Wine\AppDefaults\BlackOps3.exe\DllOverrides,"atiadlxx",,"builtin"
 HKCU,Software\Wine\AppDefaults\NFS16.exe\DllOverrides,"atiadlxx",,"builtin"
 HKCU,Software\Wine\AppDefaults\ShadowOfWar.exe\DllOverrides,"atiadlxx",,"builtin"
-HKCU,Software\Wine\AppDefaults\ShadowOfWar.exe\DllOverrides,"amd_ags_x64",,""
 HKCU,Software\Wine\AppDefaults\DIRT5.exe\DllOverrides,"atiadlxx",,"builtin"
-HKCU,Software\Wine\AppDefaults\WRC8.exe\DllOverrides,"xinput1_3",,"native"
-HKCU,Software\Wine\AppDefaults\WRC9.exe\DllOverrides,"xinput1_3",,"native"
-HKCU,Software\Wine\AppDefaults\WRC10.exe\DllOverrides,"xinput1_3",,"native"
-HKCU,Software\Wine\AppDefaults\Paradox Launcher.exe\DllOverrides,"libglesv2",,"disabled"
-HKCU,Software\Wine\AppDefaults\Nickelodeon All-Star Brawl.exe\DllOverrides,"winusb",,"disabled"
-HKCU,Software\Wine\AppDefaults\nw.exe\DllOverrides,"libglesv2",,"disabled"
+HKCU,Software\Wine\AppDefaults\Paradox Launcher.exe\DllOverrides,,4,
 HKCU,Software\Wine\AppDefaults\gotg.exe\DllOverrides,"atiadlxx",,"builtin"
 HKCU,Software\Wine\AppDefaults\RelicCardinal.exe\DllOverrides,"atiadlxx",,"builtin"
 HKCU,Software\Wine\AppDefaults\msedgewebview2.exe,"Version",,"win81"
-HKCU,Software\Wine\AppDefaults\ForzaHorizon5.exe\DllOverrides,"amd_ags_x64",0x2,"builtin"
-HKCU,Software\Wine\AppDefaults\Sims3Launcher.exe\MSHTML\MainThreadHack
-HKCU,Software\Wine\AppDefaults\Sims3LauncherW.exe\MSHTML\MainThreadHack
-;;Likely want *80 and *90 too, but those require removing Wine's manifest files.
-HKCU,Software\Wine\DllOverrides,"atl100",0x2,"native,builtin"
-HKCU,Software\Wine\DllOverrides,"msvcp100",0x2,"native,builtin"
-HKCU,Software\Wine\DllOverrides,"msvcr100",0x2,"native,builtin"
-HKCU,Software\Wine\DllOverrides,"vcomp100",0x2,"native,builtin"
-HKCU,Software\Wine\DllOverrides,"atl110",0x2,"native,builtin"
-HKCU,Software\Wine\DllOverrides,"msvcp110",0x2,"native,builtin"
-HKCU,Software\Wine\DllOverrides,"msvcr110",0x2,"native,builtin"
-HKCU,Software\Wine\DllOverrides,"vcomp110",0x2,"native,builtin"
-HKCU,Software\Wine\DllOverrides,"atl120",0x2,"native,builtin"
-HKCU,Software\Wine\DllOverrides,"msvcp120",0x2,"native,builtin"
-HKCU,Software\Wine\DllOverrides,"msvcr120",0x2,"native,builtin"
-HKCU,Software\Wine\DllOverrides,"vcomp120",0x2,"native,builtin"
-HKCU,Software\Wine\DllOverrides,"api-ms-win-crt-conio-l1-1-0",0x2,"native,builtin"
-HKCU,Software\Wine\DllOverrides,"api-ms-win-crt-heap-l1-1-0",0x2,"native,builtin"
-HKCU,Software\Wine\DllOverrides,"api-ms-win-crt-locale-l1-1-0",0x2,"native,builtin"
-HKCU,Software\Wine\DllOverrides,"api-ms-win-crt-math-l1-1-0",0x2,"native,builtin"
-HKCU,Software\Wine\DllOverrides,"api-ms-win-crt-runtime-l1-1-0",0x2,"native,builtin"
-HKCU,Software\Wine\DllOverrides,"api-ms-win-crt-stdio-l1-1-0",0x2,"native,builtin"
-HKCU,Software\Wine\DllOverrides,"api-ms-win-crt-time-l1-1-0",0x2,"native,builtin"
-HKCU,Software\Wine\DllOverrides,"atl140",0x2,"native,builtin"
-HKCU,Software\Wine\DllOverrides,"concrt140",0x2,"native,builtin"
-HKCU,Software\Wine\DllOverrides,"msvcp140",0x2,"native,builtin"
-HKCU,Software\Wine\DllOverrides,"msvcr140",0x2,"native,builtin"
-HKCU,Software\Wine\DllOverrides,"ucrtbase",0x2,"native,builtin"
-HKCU,Software\Wine\DllOverrides,"vcomp140",0x2,"native,builtin"
-HKCU,Software\Wine\DllOverrides,"vcruntime140",0x2,"native,builtin"
-HKCU,Software\Wine\DllOverrides,"atiadlxx",,"disabled"
-HKCU,Software\Wine\DllOverrides,"nvcuda",0x2,"disabled"
-
-[NVIDIANGX]
-HKLM,Software\NVIDIA Corporation\Global\NGXCore,"FullPath",,"C:\Windows\System32"
+HKCU,Software\Wine\AppDefaults\Avengers.exe\DllOverrides,"atiadlxx",,"builtin"
+HKCU,Software\Wine\AppDefaults\starwarssquadrons.exe\DllOverrides,"atiadlxx",,"builtin"
+HKCU,Software\Wine\AppDefaults\GW2.Main_Win64_Retail.exe\DllOverrides,"atiadlxx",,"builtin"
+HKCU,Software\Wine\AppDefaults\Spider-Man.exe\DllOverrides,"atiadlxx",,"builtin"
+;;App-specific overrides to limit the number of resolutions
+HKCU,Software\Wine\AppDefaults\DarkSoulsIII.exe\X11 Driver,"LimitNumberOfResolutions",0x2,"32"
+HKCU,Software\Wine\AppDefaults\sekiro.exe\X11 Driver,"LimitNumberOfResolutions",0x2,"32"
+HKCU,Software\Wine\AppDefaults\NieRAutomata.exe\X11 Driver,"LimitNumberOfResolutions",0x2,"32"
+HKCU,Software\Wine\AppDefaults\SpellForce.exe\X11 Driver,"LimitNumberOfResolutions",0x2,"16"
+;;Other app-specific overrides
+HKCU,Software\Wine\AppDefaults\Nickelodeon All-Star Brawl.exe\DllOverrides,"winusb",,"disabled"
+HKLM,Software\Wow6432Node\lucasarts entertainment company llc\Star Wars: Episode I Racer\v1.0,"Display Height",0x10001,480
+HKLM,Software\Wow6432Node\lucasarts entertainment company llc\Star Wars: Episode I Racer\v1.0,"Display Width",0x10001,640

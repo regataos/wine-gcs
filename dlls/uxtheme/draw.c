@@ -52,33 +52,20 @@ extern ATOM atDialogThemeEnabled;
 /***********************************************************************
  *      EnableThemeDialogTexture                            (UXTHEME.@)
  */
-HRESULT WINAPI EnableThemeDialogTexture(HWND hwnd, DWORD new_flag)
+HRESULT WINAPI EnableThemeDialogTexture(HWND hwnd, DWORD dwFlags)
 {
-    DWORD old_flag = 0;
     BOOL res;
 
-    TRACE("(%p,%#x\n", hwnd, new_flag);
-
-    new_flag &= ETDT_VALIDBITS;
-
-    if (new_flag == 0)
-        return S_OK;
-
-    if (new_flag & ETDT_DISABLE)
-    {
-        new_flag = ETDT_DISABLE;
-        old_flag = 0;
-    }
-
-    if (new_flag & ~ETDT_DISABLE)
-    {
-        old_flag = HandleToUlong(GetPropW(hwnd, (LPCWSTR)MAKEINTATOM(atDialogThemeEnabled)));
-        old_flag &= ~ETDT_DISABLE;
-    }
-
-    new_flag = new_flag | old_flag;
-    res = SetPropW(hwnd, (LPCWSTR)MAKEINTATOM(atDialogThemeEnabled), UlongToHandle(new_flag));
-    return res ? S_OK : HRESULT_FROM_WIN32(GetLastError());
+    TRACE("(%p,0x%08x\n", hwnd, dwFlags);
+    res = SetPropW (hwnd, (LPCWSTR)MAKEINTATOM(atDialogThemeEnabled), 
+                    UlongToHandle(dwFlags|0x80000000));
+        /* 0x80000000 serves as a "flags set" flag */
+    if (!res)
+          return HRESULT_FROM_WIN32(GetLastError());
+    if (dwFlags & ETDT_USETABTEXTURE)
+        return SetWindowTheme (hwnd, NULL, L"Tab");
+    else
+        return SetWindowTheme (hwnd, NULL, NULL);
  }
 
 /***********************************************************************
@@ -87,11 +74,14 @@ HRESULT WINAPI EnableThemeDialogTexture(HWND hwnd, DWORD new_flag)
 BOOL WINAPI IsThemeDialogTextureEnabled(HWND hwnd)
 {
     DWORD dwDialogTextureFlags;
-
     TRACE("(%p)\n", hwnd);
 
     dwDialogTextureFlags = HandleToUlong( GetPropW( hwnd, (LPCWSTR)MAKEINTATOM(atDialogThemeEnabled) ));
-    return dwDialogTextureFlags && !(dwDialogTextureFlags & ETDT_DISABLE);
+    if (dwDialogTextureFlags == 0) 
+        /* Means EnableThemeDialogTexture wasn't called for this dialog */
+        return TRUE;
+
+    return (dwDialogTextureFlags & ETDT_ENABLE) && !(dwDialogTextureFlags & ETDT_DISABLE);
 }
 
 /***********************************************************************
@@ -185,23 +175,20 @@ static int imagefile_index_to_property(int index)
 static PTHEME_PROPERTY UXTHEME_SelectImage(HTHEME hTheme, int iPartId, int iStateId,
                                            const RECT *pRect, BOOL glyph, int *imageDpi)
 {
-    int imageselecttype = IST_NONE, glyphtype = GT_NONE;
-    PTHEME_PROPERTY tp = NULL;
+    PTHEME_PROPERTY tp;
+    int imageselecttype = IST_NONE;
     int i;
+    int image;
+    if(glyph)
+        image = TMT_GLYPHIMAGEFILE;
+    else
+        image = TMT_IMAGEFILE;
 
     if (imageDpi)
         *imageDpi = 96;
 
-    /* Try TMT_IMAGEFILE first when drawing part background and the part contains glyph images.
-     * Otherwise, search TMT_IMAGEFILE1~7 and then TMT_IMAGEFILE or TMT_GLYPHIMAGEFILE */
-    if (!glyph)
-    {
-        GetThemeEnumValue(hTheme, iPartId, iStateId, TMT_GLYPHTYPE, &glyphtype);
-        if (glyphtype == GT_IMAGEGLYPH &&
-            (tp = MSSTYLES_FindProperty(hTheme, iPartId, iStateId, TMT_FILENAME, TMT_IMAGEFILE)))
-                return tp;
-    }
-
+    if((tp=MSSTYLES_FindProperty(hTheme, iPartId, iStateId, TMT_FILENAME, image)))
+        return tp;
     GetThemeEnumValue(hTheme, iPartId, iStateId, TMT_IMAGESELECTTYPE, &imageselecttype);
 
     if(imageselecttype == IST_DPI) {
@@ -226,7 +213,7 @@ static PTHEME_PROPERTY UXTHEME_SelectImage(HTHEME hTheme, int iPartId, int iStat
             }
         }
         /* If an image couldn't be selected, choose the first one */
-        tp = MSSTYLES_FindProperty(hTheme, iPartId, iStateId, TMT_FILENAME, TMT_IMAGEFILE1);
+        return MSSTYLES_FindProperty(hTheme, iPartId, iStateId, TMT_FILENAME, TMT_IMAGEFILE1);
     }
     else if(imageselecttype == IST_SIZE) {
         POINT size = {pRect->right-pRect->left, pRect->bottom-pRect->top};
@@ -273,13 +260,9 @@ static PTHEME_PROPERTY UXTHEME_SelectImage(HTHEME hTheme, int iPartId, int iStat
             }
         }
         /* If an image couldn't be selected, choose the smallest one */
-        tp = MSSTYLES_FindProperty(hTheme, iPartId, iStateId, TMT_FILENAME, TMT_IMAGEFILE1);
+        return MSSTYLES_FindProperty(hTheme, iPartId, iStateId, TMT_FILENAME, TMT_IMAGEFILE1);
     }
-
-    if (!tp)
-        tp = MSSTYLES_FindProperty(hTheme, iPartId, iStateId, TMT_FILENAME,
-                                   glyph ? TMT_GLYPHIMAGEFILE : TMT_IMAGEFILE);
-    return tp;
+    return NULL;
 }
 
 /***********************************************************************
@@ -711,9 +694,9 @@ static HRESULT UXTHEME_DrawImageBackground(HTHEME hTheme, HDC hdc, int iPartId,
                                     const DTBGOPTS *pOptions)
 {
     HRESULT hr = S_OK;
-    HBITMAP bmpSrc;
+    HBITMAP bmpSrc, bmpSrcResized = NULL;
     HGDIOBJ oldSrc;
-    HDC hdcSrc;
+    HDC hdcSrc, hdcOrigSrc = NULL;
     RECT rcSrc;
     RECT rcDst;
     POINT dstSize;
@@ -777,17 +760,33 @@ static HRESULT UXTHEME_DrawImageBackground(HTHEME hTheme, HDC hdc, int iPartId,
 
         GetThemeMargins(hTheme, hdc, iPartId, iStateId, TMT_SIZINGMARGINS, NULL, &sm);
 
-        /* Resize sizing margins if destination is smaller */
+        /* Resize source image if destination smaller than margins */
         if (sm.cyTopHeight + sm.cyBottomHeight > dstSize.y || sm.cxLeftWidth + sm.cxRightWidth > dstSize.x) {
             if (sm.cyTopHeight + sm.cyBottomHeight > dstSize.y) {
                 sm.cyTopHeight = MulDiv(sm.cyTopHeight, dstSize.y, srcSize.y);
                 sm.cyBottomHeight = dstSize.y - sm.cyTopHeight;
+                srcSize.y = dstSize.y;
             }
 
             if (sm.cxLeftWidth + sm.cxRightWidth > dstSize.x) {
                 sm.cxLeftWidth = MulDiv(sm.cxLeftWidth, dstSize.x, srcSize.x);
                 sm.cxRightWidth = dstSize.x - sm.cxLeftWidth;
+                srcSize.x = dstSize.x;
             }
+
+            hdcOrigSrc = hdcSrc;
+            hdcSrc = CreateCompatibleDC(NULL);
+            bmpSrcResized = CreateBitmap(srcSize.x, srcSize.y, 1, 32, NULL);
+            SelectObject(hdcSrc, bmpSrcResized);
+
+            /* Use ALPHABLEND_NONE because the image is getting resized, rather than blended with the target */
+            UXTHEME_StretchBlt(hdcSrc, 0, 0, srcSize.x, srcSize.y, hdcOrigSrc, rcSrc.left, rcSrc.top,
+                               rcSrc.right - rcSrc.left, rcSrc.bottom - rcSrc.top, ALPHABLEND_NONE, 0);
+
+            rcSrc.left = 0;
+            rcSrc.top = 0;
+            rcSrc.right = srcSize.x;
+            rcSrc.bottom = srcSize.y;
         }
 
         hdcDst = hdc;
@@ -894,6 +893,8 @@ draw_error:
     }
     SelectObject(hdcSrc, oldSrc);
     DeleteDC(hdcSrc);
+    if (bmpSrcResized) DeleteObject(bmpSrcResized);
+    if (hdcOrigSrc) DeleteDC(hdcOrigSrc);
     *pRect = rcDst;
     return hr;
 }

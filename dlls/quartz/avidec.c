@@ -342,9 +342,12 @@ static HRESULT avi_decompressor_source_get_media_type(struct strmbase_pin *iface
 
     if (index < ARRAY_SIZE(formats))
     {
-        if (!(format = CoTaskMemAlloc(offsetof(VIDEOINFO, dwBitMasks[3]))))
+        /* In theory we could allocate less than this, but gcc generates
+         * -Warray-bounds warnings if we access the structure through a
+         * VIDEOINFO pointer, even if we only access valid fields. */
+        if (!(format = CoTaskMemAlloc(sizeof(*format))))
             return E_OUTOFMEMORY;
-        memset(format, 0, offsetof(VIDEOINFO, dwBitMasks[3]));
+        memset(format, 0, sizeof(*format));
 
         format->rcSource = sink_format->rcSource;
         format->rcTarget = sink_format->rcTarget;
@@ -599,8 +602,11 @@ HRESULT avi_dec_create(IUnknown *outer, IUnknown **out)
     strmbase_filter_init(&object->filter, outer, &CLSID_AVIDec, &filter_ops);
 
     strmbase_sink_init(&object->sink, &object->filter, L"In", &sink_ops, NULL);
+    wcscpy(object->sink.pin.name, L"XForm In");
 
     strmbase_source_init(&object->source, &object->filter, L"Out", &source_ops);
+    wcscpy(object->source.pin.name, L"XForm Out");
+
     object->source_IQualityControl_iface.lpVtbl = &source_qc_vtbl;
     strmbase_passthrough_init(&object->passthrough, (IUnknown *)&object->source.pin.IPin_iface);
     ISeekingPassThru_Init(&object->passthrough.ISeekingPassThru_iface, FALSE,

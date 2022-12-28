@@ -161,14 +161,15 @@ static size_t append_var_list_signature(char **buf, size_t *len, size_t pos, var
 
 static size_t append_type_signature(char **buf, size_t *len, size_t pos, type_t *type)
 {
-    const struct uuid *uuid;
+    const uuid_t *uuid;
     size_t n = 0;
 
     if (!type) return 0;
     switch (type->type_type)
     {
     case TYPE_INTERFACE:
-        if (type->signature) n += strappend(buf, len, pos + n, "%s", type->signature);
+        if (!strcmp(type->name, "IInspectable")) n += strappend(buf, len, pos + n, "cinterface(IInspectable)");
+        else if (type->signature) n += strappend(buf, len, pos + n, "%s", type->signature);
         else
         {
             if (!(uuid = get_attrp(type->attrs, ATTR_UUID)))
@@ -226,12 +227,14 @@ static size_t append_type_signature(char **buf, size_t *len, size_t pos, type_t 
         case TYPE_BASIC_DOUBLE:
             n += strappend(buf, len, pos + n, "f8");
             return n;
+        case TYPE_BASIC_BYTE:
+            n += strappend(buf, len, pos + n, "u1");
+            return n;
         case TYPE_BASIC_INT16:
         case TYPE_BASIC_INT3264:
         case TYPE_BASIC_LONG:
         case TYPE_BASIC_CHAR:
         case TYPE_BASIC_HYPER:
-        case TYPE_BASIC_BYTE:
         case TYPE_BASIC_WCHAR:
         case TYPE_BASIC_ERROR_STATUS_T:
         case TYPE_BASIC_HANDLE:
@@ -338,7 +341,7 @@ static char *format_parameterized_type_signature(type_t *type, typeref_list_t *p
     size_t len = 0, pos = 0;
     char *buf = NULL;
     typeref_t *ref;
-    const struct uuid *uuid;
+    const uuid_t *uuid;
 
      if (!(uuid = get_attrp(type->attrs, ATTR_UUID)))
         error_loc_info(&type->loc_info, "cannot compute type signature, no uuid found for type %s.\n", type->name);
@@ -578,19 +581,20 @@ type_t *type_new_struct(char *name, struct namespace *namespace, int defined, va
     return t;
 }
 
-type_t *type_new_nonencapsulated_union(const char *name, int defined, var_list_t *fields)
+type_t *type_new_nonencapsulated_union(const char *name, struct namespace *namespace, int defined, var_list_t *fields)
 {
     type_t *t = NULL;
 
     if (name)
-        t = find_type(name, NULL, tsUNION);
+        t = find_type(name, namespace, tsUNION);
 
     if (!t)
     {
         t = make_type(TYPE_UNION);
         t->name = name;
+        t->namespace = namespace;
         if (name)
-            reg_type(t, name, NULL, tsUNION);
+            reg_type(t, name, namespace, tsUNION);
     }
 
     if (!t->defined && defined)
@@ -625,7 +629,7 @@ type_t *type_new_encapsulated_union(char *name, var_t *switch_field, var_t *unio
     {
         if (!union_field)
             union_field = make_var(xstrdup("tagged_union"));
-        union_field->declspec.type = type_new_nonencapsulated_union(gen_name(), TRUE, cases);
+        union_field->declspec.type = type_new_nonencapsulated_union(gen_name(), NULL, TRUE, cases);
 
         t->details.structure = xmalloc(sizeof(*t->details.structure));
         t->details.structure->fields = append_var(NULL, switch_field);
@@ -1155,6 +1159,9 @@ static type_t *replace_type_parameters_in_type(type_t *type, typeref_list_t *ori
     case TYPE_INTERFACE:
     case TYPE_RUNTIMECLASS:
     case TYPE_DELEGATE:
+    case TYPE_STRUCT:
+    case TYPE_ENCAPSULATED_UNION:
+    case TYPE_UNION:
         return type;
     case TYPE_PARAMETER:
         if (!orig || !repl) return NULL;
@@ -1192,9 +1199,6 @@ static type_t *replace_type_parameters_in_type(type_t *type, typeref_list_t *ori
         if (t->type_type != TYPE_PARAMETERIZED_TYPE) return find_parameterized_type(type, repl);
         repl = replace_type_parameters_in_type_list(type->details.parameterized.params, orig, repl);
         return replace_type_parameters_in_type(t, t->details.parameterized.params, repl);
-    case TYPE_STRUCT:
-    case TYPE_ENCAPSULATED_UNION:
-    case TYPE_UNION:
     case TYPE_MODULE:
     case TYPE_COCLASS:
     case TYPE_APICONTRACT:
@@ -1250,7 +1254,7 @@ static void compute_interface_signature_uuid(type_t *iface)
     static const int version = 5;
     struct sha1_context ctx;
     unsigned char hash[20];
-    struct uuid *uuid;
+    uuid_t *uuid;
 
     if (!(uuid = get_attrp(iface->attrs, ATTR_UUID)))
     {
@@ -1279,7 +1283,7 @@ static void compute_interface_signature_uuid(type_t *iface)
     uuid->Data1 = ((unsigned int)hash[0] << 24) | ((unsigned int)hash[1] << 16) | ((unsigned int)hash[2] << 8) | hash[3];
     uuid->Data2 = ((unsigned short)hash[4] << 8) | hash[5];
     uuid->Data3 = ((unsigned short)hash[6] << 8) | hash[7];
-    memcpy(&uuid->Data4, hash + 8, sizeof(*uuid) - offsetof(struct uuid, Data4));
+    memcpy(&uuid->Data4, hash + 8, sizeof(*uuid) - offsetof(uuid_t, Data4));
 }
 
 type_t *type_parameterized_type_specialize_define(type_t *type)

@@ -28,9 +28,10 @@
 #define NONAMELESSUNION
 
 #include "wine/debug.h"
+#include "undocshell.h"
+#include "commoncontrols.h"
 #include "pidl.h"
 #include "shell32_main.h"
-#include "commoncontrols.h"
 #include "shellapi.h"
 #include "shresdef.h"
 #include "shellfolder.h"

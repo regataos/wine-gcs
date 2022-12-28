@@ -1,5 +1,4 @@
 MODULE    = powershell.exe
-IMPORTS   = user32 urlmon
 
 EXTRADLLFLAGS = -mconsole -municode
 

@@ -1171,12 +1171,7 @@ HRESULT WINAPI SHGetViewStatePropertyBag(PCIDLIST_ABSOLUTE pidl, PCWSTR bagname,
 
 BOOL WINAPI SHIsLowMemoryMachine(DWORD type);
 
-#include <poppack.h>
-
-HANDLE WINAPI SHAllocShared(const void *data, DWORD size, DWORD pid);
-BOOL WINAPI SHFreeShared(HANDLE handle, DWORD pid);
-void * WINAPI SHLockShared(HANDLE handle, DWORD pid);
-BOOL WINAPI SHUnlockShared(void *data);
+#include <poppack.h> 
 
 #ifdef __cplusplus
 } /* extern "C" */

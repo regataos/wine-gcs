@@ -38,7 +38,7 @@ typedef struct _parser_param {
     int err;
 } parser_param;
 
-#define XSLPATTERN_STYPE xmlChar*
+#define YYSTYPE xmlChar*
 #define YY_EXTRA_TYPE parser_param*
 
 int  xslpattern_lex(xmlChar**, void*) DECLSPEC_HIDDEN;

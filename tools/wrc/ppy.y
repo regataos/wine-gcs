@@ -115,8 +115,6 @@ static int	nmacro_args;
 
 %}
 
-%define api.prefix {ppy_}
-
 %union{
 	int		sint;
 	unsigned int	uint;

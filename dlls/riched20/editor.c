@@ -1567,8 +1567,7 @@ static LRESULT ME_StreamIn(ME_TextEditor *editor, DWORD format, EDITSTREAM *stre
 {
   RTF_Info parser;
   ME_Style *style;
-  LONG from, to;
-  int nUndoMode;
+  int from, to, nUndoMode;
   int nEventMask = editor->nEventMask;
   ME_InStream inStream;
   BOOL invalidRTF = FALSE;
@@ -2088,7 +2087,7 @@ static int ME_GetTextEx(ME_TextEditor *editor, GETTEXTEX *ex, LPARAM pText)
 
     if (ex->flags & GT_SELECTION)
     {
-      LONG from, to;
+      int from, to;
       int nStartCur = ME_GetSelectionOfs(editor, &from, &to);
       start = editor->pCursors[nStartCur];
       nChars = to - from;
@@ -2367,7 +2366,7 @@ HRESULT editor_copy_or_cut( ME_TextEditor *editor, BOOL cut, ME_Cursor *start, i
 static BOOL copy_or_cut( ME_TextEditor *editor, BOOL cut )
 {
     HRESULT hr;
-    LONG offs, count;
+    int offs, count;
     int start_cursor = ME_GetSelectionOfs( editor, &offs, &count );
     ME_Cursor *sel_start = &editor->pCursors[start_cursor];
 
@@ -2413,7 +2412,7 @@ static BOOL handle_enter(ME_TextEditor *editor)
     {
         ME_Cursor cursor = editor->pCursors[0];
         ME_Paragraph *para = cursor.para;
-        LONG from, to;
+        int from, to;
         ME_Style *style, *eop_style;
 
         if (editor->props & TXTBIT_READONLY)
@@ -2690,7 +2689,7 @@ static LRESULT handle_wm_char( ME_TextEditor *editor, WCHAR wstr, LPARAM flags )
   {
     ME_Cursor cursor = editor->pCursors[0];
     ME_Paragraph *para = cursor.para;
-    LONG from, to;
+    int from, to;
     BOOL ctrl_is_down = GetKeyState(VK_CONTROL) & 0x8000;
     ME_GetSelectionOfs(editor, &from, &to);
     if (wstr == '\t' &&
@@ -2846,8 +2845,7 @@ void editor_set_cursor( ME_TextEditor *editor, int x, int y )
 
         else if (ME_IsSelection( editor ))
         {
-            LONG start, end;
-            int offset = ME_GetCursorOfs( &pos );
+            int start, end, offset = ME_GetCursorOfs( &pos );
 
             ME_GetSelectionOfs( editor, &start, &end );
             if (start <= offset && end >= offset) cursor = cursor_arrow;
@@ -3146,8 +3144,7 @@ void link_notify(ME_TextEditor *editor, UINT msg, WPARAM wParam, LPARAM lParam)
 
 void ME_ReplaceSel(ME_TextEditor *editor, BOOL can_undo, const WCHAR *str, int len)
 {
-  LONG from, to;
-  int nStartCursor;
+  int from, to, nStartCursor;
   ME_Style *style;
 
   nStartCursor = ME_GetSelectionOfs(editor, &from, &to);
@@ -3282,10 +3279,10 @@ LRESULT editor_handle_message( ME_TextEditor *editor, UINT msg, WPARAM wParam,
   case EM_GETSEL:
   {
     /* Note: wParam/lParam can be NULL */
-    LONG from, to;
-    LONG *pfrom = wParam ? (LONG *)wParam : &from;
-    LONG *pto = lParam ? (LONG *)lParam : &to;
-    ME_GetSelectionOfs(editor, pfrom, pto);
+    UINT from, to;
+    PUINT pfrom = wParam ? (PUINT)wParam : &from;
+    PUINT pto = lParam ? (PUINT)lParam : &to;
+    ME_GetSelectionOfs(editor, (int *)pfrom, (int *)pto);
     if ((*pfrom|*pto) & 0xFFFF0000)
       return -1;
     return MAKELONG(*pfrom,*pto);
@@ -3391,8 +3388,7 @@ LRESULT editor_handle_message( ME_TextEditor *editor, UINT msg, WPARAM wParam,
   {
     LPWSTR wszText;
     SETTEXTEX *pStruct = (SETTEXTEX *)wParam;
-    LONG from, to;
-    int len;
+    int from, to, len;
     ME_Style *style;
     BOOL bRtf, bUnicode, bSelection, bUTF8;
     int oldModify = editor->nModifyStep;
@@ -3549,7 +3545,7 @@ LRESULT editor_handle_message( ME_TextEditor *editor, UINT msg, WPARAM wParam,
   }
   case WM_CLEAR:
   {
-    LONG from, to;
+    int from, to;
     int nStartCursor = ME_GetSelectionOfs(editor, &from, &to);
     ME_InternalDeleteText(editor, &editor->pCursors[nStartCursor], to-from, FALSE);
     ME_CommitUndo(editor);
@@ -3574,6 +3570,20 @@ LRESULT editor_handle_message( ME_TextEditor *editor, UINT msg, WPARAM wParam,
     CHARFORMAT2W fmt;
     HDC hDC;
     BOOL bRepaint = LOWORD(lParam);
+    const char *sgi = getenv("STEAM_COMPAT_APP_ID");
+
+    /* Grand Theft Auto V installer tries to set font for license
+     * richedit to Arial, which breaks CJK languages. Given that the
+     * RTF already has reasonable fonts set, we can just ignore the
+     * message. This can be removed once our richedit is able to do
+     * font substitution properly. CW bug #19917.
+     *
+     * It's important that STEAM_COMPAT_APP_ID environment variable is
+     * used instead of the usual SteamGameId, because the latter is
+     * not available during the configuration stage, when the
+     * installer is run. */
+    if (sgi && strcmp(sgi, "271590") == 0)
+        return 0;
 
     if (!wParam)
       wParam = (WPARAM)GetStockObject(SYSTEM_FONT);
@@ -3664,8 +3674,7 @@ LRESULT editor_handle_message( ME_TextEditor *editor, UINT msg, WPARAM wParam,
     return ME_GetTextEx(editor, (GETTEXTEX*)wParam, lParam);
   case EM_GETSELTEXT:
   {
-    LONG nFrom, nTo;
-    int nStartCur = ME_GetSelectionOfs(editor, &nFrom, &nTo);
+    int nFrom, nTo, nStartCur = ME_GetSelectionOfs(editor, &nFrom, &nTo);
     ME_Cursor *from = &editor->pCursors[nStartCur];
     return get_text_range( editor, (WCHAR *)lParam, from, nTo - nFrom );
   }

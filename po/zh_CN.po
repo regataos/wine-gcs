@@ -3930,7 +3930,7 @@ msgid "Cannot modify non-writable property '|'"
 msgstr "无法更改不可写的属性 '|'"
 
 #: dlls/jscript/jscript.rc:77
-msgid "'this' is not a Map object"
+msgid "'this' is not a | object"
 msgstr "'this' 不是 Map 对象"
 
 #: dlls/jscript/jscript.rc:78
@@ -3962,11 +3962,11 @@ msgstr "找不到文件。\n"
 msgid "Path not found.\n"
 msgstr "找不到路径。\n"
 
-#: dlls/kernel32/winerror.mc:48 dlls/kernel32/winerror.mc:3773
+#: dlls/kernel32/winerror.mc:48
 msgid "Too many open files.\n"
 msgstr "太多打开的文件。\n"
 
-#: dlls/kernel32/winerror.mc:53 dlls/kernel32/winerror.mc:3758
+#: dlls/kernel32/winerror.mc:53
 msgid "Access denied.\n"
 msgstr "访问被拒绝。\n"
 
@@ -4570,7 +4570,7 @@ msgstr "未找到环境变量。\n"
 msgid "No signal sent.\n"
 msgstr "未发送任何信号。\n"
 
-#: dlls/kernel32/winerror.mc:818 programs/cmd/cmd.rc:410
+#: dlls/kernel32/winerror.mc:818
 msgid "File name is too long.\n"
 msgstr "文件名过长。\n"
 
@@ -5318,7 +5318,7 @@ msgstr "操作被用户取消。\n"
 msgid "File has a user-mapped section.\n"
 msgstr "文件包含用户映射的区块。\n"
 
-#: dlls/kernel32/winerror.mc:1758 dlls/kernel32/winerror.mc:3783
+#: dlls/kernel32/winerror.mc:1758 dlls/kernel32/winerror.mc:3753
 msgid "Connection refused.\n"
 msgstr "连接被拒绝。\n"
 
@@ -6903,72 +6903,26 @@ msgid "This network connection does not exist.\n"
 msgstr "该网络连接不存在。\n"
 
 #: dlls/kernel32/winerror.mc:3748
-#, fuzzy
-#| msgid "Invalid at interrupt time.\n"
-msgid "Call interrupted.\n"
-msgstr "中断时间无效。\n"
-
-#: dlls/kernel32/winerror.mc:3753
-#, fuzzy
-#| msgid "Invalid handle.\n"
-msgid "Invalid file handle.\n"
-msgstr "无效的句柄。\n"
-
-#: dlls/kernel32/winerror.mc:3763
-#, fuzzy
-#| msgid "Invalid network address.\n"
-msgid "Invalid pointer address.\n"
-msgstr "无效的网络地址。\n"
-
-#: dlls/kernel32/winerror.mc:3768
-#, fuzzy
-#| msgid "Invalid name.\n"
-msgid "Invalid argument.\n"
-msgstr "无效名字。\n"
-
-#: dlls/kernel32/winerror.mc:3778
 msgid "Connection reset by peer.\n"
 msgstr "连接被重置。\n"
 
-#: dlls/kernel32/winerror.mc:3788
-#, fuzzy
-#| msgid "Point not found.\n"
-msgid "Host not found.\n"
-msgstr "未找到点。\n"
-
-#: dlls/kernel32/winerror.mc:3793
-#, fuzzy
-#| msgid "Attribute is not found.\n"
-msgid "Nonauthoritative host not found.\n"
-msgstr "未找到属性。\n"
-
-#: dlls/kernel32/winerror.mc:3798
-#, fuzzy
-#| msgid "Unrecoverable error occurred.\n"
-msgid "Nonrecoverable error.\n"
-msgstr "发生致命错误。\n"
-
-#: dlls/kernel32/winerror.mc:3803
-msgid "Name valid, no data record.\n"
-msgstr ""
-
-#: dlls/kernel32/winerror.mc:3817
+#: dlls/kernel32/winerror.mc:3767
 msgid "Not implemented.\n"
 msgstr "尚未实现。\n"
 
-#: dlls/kernel32/winerror.mc:3838
+#: dlls/kernel32/winerror.mc:3788
 msgid "Call failed.\n"
 msgstr "调用失败。\n"
 
-#: dlls/kernel32/winerror.mc:3810
+#: dlls/kernel32/winerror.mc:3760
 msgid "No Signature found in file.\n"
 msgstr "未在文件内找到签名。\n"
 
-#: dlls/kernel32/winerror.mc:3824
+#: dlls/kernel32/winerror.mc:3774
 msgid "Invalid call.\n"
 msgstr "无效调用。\n"
 
-#: dlls/kernel32/winerror.mc:3831
+#: dlls/kernel32/winerror.mc:3781
 msgid "Resource is not currently available.\n"
 msgstr "资源当前不可用。\n"
 

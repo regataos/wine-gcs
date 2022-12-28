@@ -220,6 +220,7 @@ struct monitor
     unsigned int flags;
     RECT rc_monitor;
     RECT rc_work;
+    BOOL is_clone;
 };
 
 static struct list adapters = LIST_INIT(adapters);
@@ -1093,8 +1094,13 @@ static void add_monitor( const struct gdi_monitor *monitor, void *param )
 
     if ((subkey = reg_create_key( hkey, device_parametersW, sizeof(device_parametersW), 0, NULL )))
     {
+        static const WCHAR bad_edidW[] = {'B','A','D','_','E','D','I','D',0};
         static const WCHAR edidW[] = {'E','D','I','D',0};
-        set_reg_value( subkey, edidW, REG_BINARY, monitor->edid, monitor->edid_len );
+
+        if (monitor->edid_len)
+            set_reg_value( subkey, edidW, REG_BINARY, monitor->edid, monitor->edid_len );
+        else
+            set_reg_value( subkey, bad_edidW, REG_BINARY, NULL, 0 );
         NtClose( subkey );
     }
 
@@ -1215,7 +1221,7 @@ static BOOL update_display_cache_from_registry(void)
     DWORD adapter_id, monitor_id, monitor_count = 0, size;
     KEY_FULL_INFORMATION key;
     struct adapter *adapter;
-    struct monitor *monitor;
+    struct monitor *monitor, *monitor2;
     HANDLE mutex = NULL;
     NTSTATUS status;
     BOOL ret;
@@ -1260,6 +1266,15 @@ static BOOL update_display_cache_from_registry(void)
                 break;
             }
 
+            LIST_FOR_EACH_ENTRY(monitor2, &monitors, struct monitor, entry)
+            {
+                if (EqualRect(&monitor2->rc_monitor, &monitor->rc_monitor))
+                {
+                    monitor->is_clone = TRUE;
+                    break;
+                }
+            }
+
             monitor->handle = UlongToHandle( ++monitor_count );
             list_add_tail( &monitors, &monitor->entry );
         }
@@ -1300,7 +1315,6 @@ static BOOL update_display_cache(void)
         ERR( "failed to read display config\n" );
         return FALSE;
     }
-
     return TRUE;
 }
 
@@ -1867,6 +1881,7 @@ BOOL WINAPI NtUserEnumDisplayMonitors( HDC hdc, RECT *rect, MONITORENUMPROC proc
                                 get_thread_dpi() );
         offset_rect( &monrect, -origin.x, -origin.y );
         if (!intersect_rect( &monrect, &monrect, &limit )) continue;
+        if (monitor->is_clone) continue;
 
         enum_info[count].handle = monitor->handle;
         enum_info[count].rect = monrect;

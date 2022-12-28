@@ -100,11 +100,7 @@ static struct screen_buffer *create_screen_buffer( struct console *console, int 
         if (screen_buffer->font.face_len)
         {
             screen_buffer->font.face_name = malloc( screen_buffer->font.face_len * sizeof(WCHAR) );
-            if (!screen_buffer->font.face_name)
-            {
-                free( screen_buffer );
-                return NULL;
-            }
+            if (!screen_buffer->font.face_name) return NULL;
 
             memcpy( screen_buffer->font.face_name, console->active->font.face_name,
                     screen_buffer->font.face_len * sizeof(WCHAR) );
@@ -162,7 +158,7 @@ static void tty_flush( struct console *console )
     TRACE("%s\n", debugstr_an(console->tty_buffer, console->tty_buffer_count));
     if (!WriteFile( console->tty_output, console->tty_buffer, console->tty_buffer_count,
                     NULL, NULL ))
-        WARN( "write failed: %lu\n", GetLastError() );
+        WARN( "write failed: %u\n", GetLastError() );
     console->tty_buffer_count = 0;
 }
 
@@ -180,7 +176,7 @@ static void tty_write( struct console *console, const char *buffer, size_t size 
     {
         assert( !console->tty_buffer_count );
         if (!WriteFile( console->tty_output, buffer, size, NULL, NULL ))
-            WARN( "write failed: %lu\n", GetLastError() );
+            WARN( "write failed: %u\n", GetLastError() );
     }
 }
 
@@ -461,7 +457,7 @@ static NTSTATUS read_complete( struct console *console, NTSTATUS status, const v
         status = wine_server_call( req );
     }
     SERVER_END_REQ;
-    if (status && (console->read_ioctl || status != STATUS_INVALID_HANDLE)) ERR( "failed: %#lx\n", status );
+    if (status && (console->read_ioctl || status != STATUS_INVALID_HANDLE)) ERR( "failed: %#x\n", status );
     console->signaled = signal;
     console->read_ioctl = 0;
     console->pending_read = 0;
@@ -472,7 +468,7 @@ static NTSTATUS read_console_input( struct console *console, size_t out_size )
 {
     size_t count = min( out_size / sizeof(INPUT_RECORD), console->record_count );
 
-    TRACE("count %Iu\n", count);
+    TRACE("count %u\n", count);
 
     read_complete( console, STATUS_SUCCESS, console->records, count * sizeof(*console->records),
                    console->record_count > count );
@@ -1271,7 +1267,7 @@ static NTSTATUS process_console_input( struct console *console )
 
         if (ir.EventType != KEY_EVENT || !ir.Event.KeyEvent.bKeyDown) continue;
 
-        TRACE( "key code=%02x scan=%02x char=%02x state=%08lx\n",
+        TRACE( "key code=%02x scan=%02x char=%02x state=%08x\n",
                ir.Event.KeyEvent.wVirtualKeyCode, ir.Event.KeyEvent.wVirtualScanCode,
                ir.Event.KeyEvent.uChar.UnicodeChar, ir.Event.KeyEvent.dwControlKeyState );
 
@@ -1638,7 +1634,7 @@ static DWORD WINAPI tty_input( void *param )
         unsigned int h = condrv_handle( console->tty_input );
         status = NtDeviceIoControlFile( console->server, NULL, NULL, NULL, &io, IOCTL_CONDRV_SETUP_INPUT,
                                         &h, sizeof(h), NULL, 0 );
-        if (status) ERR( "input setup failed: %#lx\n", status );
+        if (status) ERR( "input setup failed: %#x\n", status );
     }
 
     event = CreateEventW( NULL, TRUE, FALSE, NULL );
@@ -1695,7 +1691,7 @@ static DWORD WINAPI tty_input( void *param )
         LeaveCriticalSection( &console_section );
     }
 
-    TRACE( "NtReadFile failed: %#lx\n", status );
+    TRACE( "NtReadFile failed: %#x\n", status );
 
 done:
     EnterCriticalSection( &console_section );
@@ -1705,7 +1701,7 @@ done:
         unsigned int h = 0;
         status = NtDeviceIoControlFile( console->server, NULL, NULL, NULL, &io, IOCTL_CONDRV_SETUP_INPUT,
                                         &h, sizeof(h), NULL, 0 );
-        if (status) ERR( "input restore failed: %#lx\n", status );
+        if (status) ERR( "input restore failed: %#x\n", status );
     }
     CloseHandle( console->input_thread );
     console->input_thread = NULL;
@@ -1830,7 +1826,7 @@ NTSTATUS change_screen_buffer_size( struct screen_buffer *screen_buffer, int new
 }
 
 static NTSTATUS set_output_info( struct screen_buffer *screen_buffer,
-                                 const struct condrv_output_info_params *params, size_t in_size )
+                                 const struct condrv_output_info_params *params )
 {
     const struct condrv_output_info *info = &params->info;
     NTSTATUS status;
@@ -1916,24 +1912,6 @@ static NTSTATUS set_output_info( struct screen_buffer *screen_buffer,
     {
         screen_buffer->max_width  = info->max_width;
         screen_buffer->max_height = info->max_height;
-    }
-    if (params->mask & SET_CONSOLE_OUTPUT_INFO_FONT)
-    {
-        WCHAR *face_name = (WCHAR *)(params + 1);
-        size_t face_name_size = in_size - sizeof(*params);
-        unsigned int height = info->font_height;
-        unsigned int weight = FW_NORMAL;
-
-        if (!face_name_size)
-        {
-            face_name = screen_buffer->font.face_name;
-            face_name_size = screen_buffer->font.face_len * sizeof(WCHAR);
-        }
-
-        if (!height) height = 12;
-        if (info->font_weight >= FW_SEMIBOLD) weight = FW_BOLD;
-
-        update_console_font( screen_buffer->console, face_name, face_name_size, height, weight );
     }
 
     if (is_active( screen_buffer ))
@@ -2447,9 +2425,8 @@ static NTSTATUS screen_buffer_ioctl( struct screen_buffer *screen_buffer, unsign
         return get_output_info( screen_buffer, out_size );
 
     case IOCTL_CONDRV_SET_OUTPUT_INFO:
-        if (in_size < sizeof(struct condrv_output_info_params) || *out_size)
-            return STATUS_INVALID_PARAMETER;
-        return set_output_info( screen_buffer, in_data, in_size );
+        if (in_size != sizeof(struct condrv_output_info_params) || *out_size) return STATUS_INVALID_PARAMETER;
+        return set_output_info( screen_buffer, in_data );
 
     case IOCTL_CONDRV_FILL_OUTPUT:
         if (in_size != sizeof(struct condrv_fill_output_params) || *out_size != sizeof(DWORD))
@@ -2651,7 +2628,7 @@ static NTSTATUS process_console_ioctls( struct console *console )
         }
         if (status)
         {
-            TRACE( "failed to get next request: %#lx\n", status );
+            TRACE( "failed to get next request: %#x\n", status );
             return status;
         }
 

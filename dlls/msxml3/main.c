@@ -142,7 +142,7 @@ static int wineXmlReadCallback(void * context, char * buffer, int len)
         return -1;
     }
 
-    TRACE("Read %ld bytes.\n", dwBytesRead);
+    TRACE("Read %d\n", dwBytesRead);
 
     return dwBytesRead;
 }

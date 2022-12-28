@@ -459,7 +459,7 @@ static void draw_run( ME_Context *c, int x, int y, ME_Cursor *cursor )
   ME_Row *row;
   ME_Run *run = cursor->run;
   int runofs = run_char_ofs( run, cursor->nOffset );
-  LONG nSelFrom, nSelTo;
+  int nSelFrom, nSelTo;
 
   if (run->nFlags & MERF_HIDDEN) return;
 
@@ -1248,7 +1248,7 @@ ME_InvalidateSelection(ME_TextEditor *editor)
 {
   ME_Paragraph *sel_start, *sel_end;
   ME_Paragraph *repaint_start = NULL, *repaint_end = NULL;
-  LONG nStart, nEnd;
+  int nStart, nEnd;
   int len = ME_GetTextLength(editor);
 
   ME_GetSelectionOfs(editor, &nStart, &nEnd);

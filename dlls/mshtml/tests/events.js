@@ -198,6 +198,21 @@ sync_test("add_remove_listener", function() {
     calls = "";
     div.click();
     ok(calls === "", "calls = " + calls);
+
+    /* test undefined function argument */
+    div.addEventListener("click", undefined, false);
+
+    calls = "";
+    div.click();
+    ok(calls === "", "calls = " + calls);
+
+    div.addEventListener("click", listener, false);
+    div.removeEventListener("click", undefined);
+
+    calls = "";
+    div.click();
+    ok(calls === "listener,", "calls = " + calls);
+    div.removeEventListener("click", listener);
 });
 
 sync_test("event_phase", function() {
@@ -745,6 +760,7 @@ sync_test("keyboard_event", function() {
     ok(e.location === 0, "location = " + e.location);
     ok(e.detail === 0, "detail = " + e.detail);
     ok(e.which === 0, "which = " + e.which);
+    ok(e.locale === "", "locale = " + e.locale);
 });
 
 sync_test("custom_event", function() {
@@ -795,4 +811,19 @@ async_test("detached_img_error_event", function() {
         next_test();
     }
     img.src = "about:blank";
+});
+
+async_test("message event", function() {
+    var listener_called = false;
+
+    window.addEventListener("message", function(e) {
+        listener_called = true;
+        ok(e.data === "test", "e.data = " + e.data);
+        ok(e.bubbles === false, "bubbles = " + e.bubbles);
+        ok(e.cancelable === false, "cancelable = " + e.cancelable);
+        next_test();
+    });
+
+    window.postMessage("test", "httP://wineTest.example.org");
+    ok(listener_called == false, "listener already called");
 });

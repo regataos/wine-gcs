@@ -102,11 +102,11 @@ void set_dirty(GeckoBrowser *browser, VARIANT_BOOL dirty)
     if(dirty) {
         nsres = nsIEditor_IncrementModificationCount(browser->editor, 1);
         if(NS_FAILED(nsres))
-            ERR("IncrementModificationCount failed: %08x\n", nsres);
+            ERR("IncrementModificationCount failed: %08lx\n", nsres);
     }else {
         nsres = nsIEditor_ResetModificationCount(browser->editor);
         if(NS_FAILED(nsres))
-            ERR("ResetModificationCount failed: %08x\n", nsres);
+            ERR("ResetModificationCount failed: %08lx\n", nsres);
     }
 }
 
@@ -119,7 +119,7 @@ static void do_ns_editor_command(GeckoBrowser *This, const char *cmd)
 
     nsres = nsIController_DoCommand(This->editor_controller, cmd);
     if(NS_FAILED(nsres))
-        ERR("DoCommand(%s) failed: %08x\n", debugstr_a(cmd), nsres);
+        ERR("DoCommand(%s) failed: %08lx\n", debugstr_a(cmd), nsres);
 }
 
 static nsresult get_ns_command_state(GeckoBrowser *This, const char *cmd, nsICommandParams *nsparam)
@@ -129,13 +129,13 @@ static nsresult get_ns_command_state(GeckoBrowser *This, const char *cmd, nsICom
 
     nsres = get_nsinterface((nsISupports*)This->webbrowser, &IID_nsICommandManager, (void**)&cmdmgr);
     if(NS_FAILED(nsres)) {
-        ERR("Could not get nsICommandManager: %08x\n", nsres);
+        ERR("Could not get nsICommandManager: %08lx\n", nsres);
         return nsres;
     }
 
     nsres = nsICommandManager_GetCommandState(cmdmgr, cmd, This->doc->basedoc.window->window_proxy, nsparam);
     if(NS_FAILED(nsres))
-        ERR("GetCommandState(%s) failed: %08x\n", debugstr_a(cmd), nsres);
+        ERR("GetCommandState(%s) failed: %08lx\n", debugstr_a(cmd), nsres);
 
     nsICommandManager_Release(cmdmgr);
     return nsres;
@@ -183,8 +183,13 @@ static DWORD query_align_status(HTMLDocumentNode *doc, const WCHAR *align)
     if(doc->browser->usermode != EDITMODE || doc->basedoc.window->readystate < READYSTATE_INTERACTIVE)
         return OLECMDF_SUPPORTED;
 
+    if(!doc->nshtmldoc) {
+        FIXME("Not implemented for XML document\n");
+        return E_NOTIMPL;
+    }
+
     nsAString_Init(&justify_str, align);
-    nsres = nsIDOMHTMLDocument_QueryCommandState(doc->nsdoc, &justify_str, &b);
+    nsres = nsIDOMHTMLDocument_QueryCommandState(doc->nshtmldoc, &justify_str, &b);
     nsAString_Finish(&justify_str);
     if(NS_SUCCEEDED(nsres) && b)
         ret |= OLECMDF_LATCHED;
@@ -200,7 +205,7 @@ static nsISelection *get_ns_selection(HTMLDocumentNode *doc)
 
     nsres = nsIDOMWindow_GetSelection(doc->basedoc.window->nswindow, &nsselection);
     if(NS_FAILED(nsres))
-        ERR("GetSelection failed %08x\n", nsres);
+        ERR("GetSelection failed %08lx\n", nsres);
 
     return nsselection;
 
@@ -330,7 +335,7 @@ static void set_font_size(HTMLDocumentNode *doc, LPCWSTR size)
 
     nsISelection_GetRangeCount(nsselection, &range_cnt);
     if(range_cnt != 1) {
-        FIXME("range_cnt %d not supprted\n", range_cnt);
+        FIXME("range_cnt %ld not supprted\n", range_cnt);
         if(!range_cnt) {
             nsISelection_Release(nsselection);
             return;
@@ -565,7 +570,7 @@ static HRESULT exec_forecolor(HTMLDocumentNode *doc, DWORD cmdexecopt, VARIANT *
             nsICommandParams *nsparam = create_nscommand_params();
             char color_str[10];
 
-            sprintf(color_str, "#%02x%02x%02x",
+            sprintf(color_str, "#%02lx%02lx%02lx",
                     V_I4(in)&0xff, (V_I4(in)>>8)&0xff, (V_I4(in)>>16)&0xff);
 
             nsICommandParams_SetCStringValue(nsparam, NSSTATE_ATTRIBUTE, color_str);
@@ -792,7 +797,7 @@ static HRESULT exec_composesettings(HTMLDocumentNode *doc, DWORD cmdexecopt, VAR
         return E_INVALIDARG;
     }
 
-    TRACE("(%p)->(%x %s)\n", doc, cmdexecopt, debugstr_w(V_BSTR(in)));
+    TRACE("(%p)->(%lx %s)\n", doc, cmdexecopt, debugstr_w(V_BSTR(in)));
 
     update_doc(doc->browser->doc, UPDATE_UI);
 
@@ -877,7 +882,7 @@ HRESULT editor_exec_paste(HTMLDocumentNode *doc, DWORD cmdexecopt, VARIANT *in, 
 
 static HRESULT exec_setdirty(HTMLDocumentNode *doc, DWORD cmdexecopt, VARIANT *in, VARIANT *out)
 {
-    TRACE("(%p)->(%08x %p %p)\n", doc, cmdexecopt, in, out);
+    TRACE("(%p)->(%08lx %p %p)\n", doc, cmdexecopt, in, out);
 
     if(!in)
         return S_OK;
@@ -1063,7 +1068,7 @@ static HRESULT exec_hyperlink(HTMLDocumentNode *doc, DWORD cmdexecopt, VARIANT *
     INT ret;
     HRESULT hres = E_FAIL;
 
-    TRACE("%p, 0x%x, %p, %p\n", doc, cmdexecopt, in, out);
+    TRACE("%p, 0x%lx, %p, %p\n", doc, cmdexecopt, in, out);
 
     if (cmdexecopt == OLECMDEXECOPT_DONTPROMPTUSER)
     {
@@ -1105,7 +1110,7 @@ static HRESULT exec_hyperlink(HTMLDocumentNode *doc, DWORD cmdexecopt, VARIANT *
         nsIDOMNode *unused_node;
         nsIDOMText *text_node;
 
-        nsIDOMHTMLDocument_CreateTextNode(doc->nsdoc, &ns_url, &text_node);
+        nsIDOMDocument_CreateTextNode(doc->nsdoc, &ns_url, &text_node);
 
         /* wrap the <a> tags around the text element */
         nsIDOMElement_AppendChild(anchor_elem, (nsIDOMNode*)text_node, &unused_node);
@@ -1136,7 +1141,7 @@ static HRESULT exec_hyperlink(HTMLDocumentNode *doc, DWORD cmdexecopt, VARIANT *
     if (cmdexecopt != OLECMDEXECOPT_DONTPROMPTUSER)
         SysFreeString(url);
 
-    TRACE("-- 0x%08x\n", hres);
+    TRACE("-- 0x%08lx\n", hres);
     return hres;
 }
 
@@ -1228,7 +1233,7 @@ HRESULT setup_edit_mode(HTMLDocumentObj *doc)
         hres = IDocHostUIHandler_GetHostInfo(doc->hostui, &hostinfo);
         if(SUCCEEDED(hres))
             /* FIXME: use hostinfo */
-            TRACE("hostinfo = {%u %08x %08x %s %s}\n",
+            TRACE("hostinfo = {%lu %08lx %08lx %s %s}\n",
                     hostinfo.cbSize, hostinfo.dwFlags, hostinfo.dwDoubleClick,
                     debugstr_w(hostinfo.pchHostCss), debugstr_w(hostinfo.pchHostNS));
     }
@@ -1244,7 +1249,7 @@ HRESULT setup_edit_mode(HTMLDocumentObj *doc)
     }else {
         hres = CreateURLMoniker(NULL, L"about:blank", &mon);
         if(FAILED(hres)) {
-            FIXME("CreateURLMoniker failed: %08x\n", hres);
+            FIXME("CreateURLMoniker failed: %08lx\n", hres);
             return hres;
         }
     }

@@ -88,8 +88,9 @@ static const SIZE_T page_size = 0x1000;
 static const SIZE_T teb_size = 0x3800;  /* TEB64 + TEB32 + debug info */
 static const SIZE_T signal_stack_mask = 0xffff;
 static const SIZE_T signal_stack_size = 0x10000 - 0x3800;
-static const SIZE_T kernel_stack_size = 0x20000;
-static const SIZE_T min_kernel_stack  = 0x2000;
+static const SIZE_T kernel_stack_size = 0x60000;
+static const SIZE_T kernel_stack_guard_size = 0x1000;
+static const SIZE_T min_kernel_stack  = 0x3000;
 static const LONG teb_offset = 0x2000;
 
 #define FILE_WRITE_TO_END_OF_FILE      ((LONGLONG)-1)
@@ -138,7 +139,6 @@ extern BOOL process_exiting DECLSPEC_HIDDEN;
 extern HANDLE keyed_event DECLSPEC_HIDDEN;
 extern timeout_t server_start_time DECLSPEC_HIDDEN;
 extern sigset_t server_block_set DECLSPEC_HIDDEN;
-extern void *hypervisor_shared_data DECLSPEC_HIDDEN;
 extern struct _KUSER_SHARED_DATA *user_shared_data DECLSPEC_HIDDEN;
 extern SYSTEM_CPU_INFORMATION cpu_info DECLSPEC_HIDDEN;
 #ifndef _WIN64
@@ -149,6 +149,10 @@ extern struct ldt_copy __wine_ldt_copy DECLSPEC_HIDDEN;
 #endif
 
 extern BOOL ac_odyssey DECLSPEC_HIDDEN;
+extern BOOL fsync_simulate_sched_quantum DECLSPEC_HIDDEN;
+extern BOOL alert_simulate_sched_quantum DECLSPEC_HIDDEN;
+extern BOOL no_priv_elevation DECLSPEC_HIDDEN;
+extern BOOL localsystem_sid DECLSPEC_HIDDEN;
 
 extern void init_environment( int argc, char *argv[], char *envp[] ) DECLSPEC_HIDDEN;
 extern void init_startup_info(void) DECLSPEC_HIDDEN;
@@ -192,6 +196,7 @@ extern void DECLSPEC_NORETURN abort_process( int status ) DECLSPEC_HIDDEN;
 extern void DECLSPEC_NORETURN exit_process( int status ) DECLSPEC_HIDDEN;
 extern void wait_suspend( CONTEXT *context ) DECLSPEC_HIDDEN;
 extern NTSTATUS send_debug_event( EXCEPTION_RECORD *rec, CONTEXT *context, BOOL first_chance ) DECLSPEC_HIDDEN;
+extern BOOL validate_context_xstate( CONTEXT *context ) DECLSPEC_HIDDEN;
 extern NTSTATUS set_thread_context( HANDLE handle, const void *context, BOOL *self, USHORT machine ) DECLSPEC_HIDDEN;
 extern NTSTATUS get_thread_context( HANDLE handle, void *context, BOOL *self, USHORT machine ) DECLSPEC_HIDDEN;
 extern NTSTATUS alloc_object_attributes( const OBJECT_ATTRIBUTES *attr, struct object_attributes **ret,
@@ -199,6 +204,7 @@ extern NTSTATUS alloc_object_attributes( const OBJECT_ATTRIBUTES *attr, struct o
 
 extern void *anon_mmap_fixed( void *start, size_t size, int prot, int flags ) DECLSPEC_HIDDEN;
 extern void *anon_mmap_alloc( size_t size, int prot ) DECLSPEC_HIDDEN;
+
 extern void virtual_init(void) DECLSPEC_HIDDEN;
 extern ULONG_PTR get_system_affinity_mask(void) DECLSPEC_HIDDEN;
 extern void virtual_get_system_info( SYSTEM_BASIC_INFORMATION *info, BOOL wow64 ) DECLSPEC_HIDDEN;
@@ -213,7 +219,6 @@ extern NTSTATUS virtual_clear_tls_index( ULONG index ) DECLSPEC_HIDDEN;
 extern NTSTATUS virtual_alloc_thread_stack( INITIAL_TEB *stack, ULONG_PTR zero_bits, SIZE_T reserve_size,
                                             SIZE_T commit_size, SIZE_T extra_size ) DECLSPEC_HIDDEN;
 extern void virtual_map_user_shared_data(void) DECLSPEC_HIDDEN;
-extern void virtual_map_hypervisor_shared_data(void) DECLSPEC_HIDDEN;
 extern NTSTATUS virtual_handle_fault( void *addr, DWORD err, void *stack ) DECLSPEC_HIDDEN;
 extern unsigned int virtual_locked_server_call( void *req_ptr ) DECLSPEC_HIDDEN;
 extern ssize_t virtual_locked_read( int fd, void *addr, size_t size ) DECLSPEC_HIDDEN;
@@ -222,7 +227,6 @@ extern ssize_t virtual_locked_recvmsg( int fd, struct msghdr *hdr, int flags ) D
 extern BOOL virtual_is_valid_code_address( const void *addr, SIZE_T size ) DECLSPEC_HIDDEN;
 extern void *virtual_setup_exception( void *stack_ptr, size_t size, EXCEPTION_RECORD *rec ) DECLSPEC_HIDDEN;
 extern BOOL virtual_check_buffer_for_read( const void *ptr, SIZE_T size ) DECLSPEC_HIDDEN;
-extern BOOL virtual_check_buffer_write_access( void *ptr, SIZE_T size ) DECLSPEC_HIDDEN;
 extern BOOL virtual_check_buffer_for_write( void *ptr, SIZE_T size ) DECLSPEC_HIDDEN;
 extern SIZE_T virtual_uninterrupted_read_memory( const void *addr, void *buffer, SIZE_T size ) DECLSPEC_HIDDEN;
 extern NTSTATUS virtual_uninterrupted_write_memory( void *addr, const void *buffer, SIZE_T size ) DECLSPEC_HIDDEN;
@@ -232,9 +236,7 @@ extern void virtual_fill_image_information( const pe_image_info_t *pe_info,
                                             SECTION_IMAGE_INFORMATION *info ) DECLSPEC_HIDDEN;
 extern void release_builtin_module( void *module ) DECLSPEC_HIDDEN;
 extern void *get_builtin_so_handle( void *module ) DECLSPEC_HIDDEN;
-extern NTSTATUS get_builtin_unix_info( void *module, const char **name, void **handle, void **entry ) DECLSPEC_HIDDEN;
-extern NTSTATUS set_builtin_unix_handle( void *module, const char *name, void *handle ) DECLSPEC_HIDDEN;
-extern NTSTATUS set_builtin_unix_entry( void *module, void *entry ) DECLSPEC_HIDDEN;
+extern NTSTATUS load_builtin_unixlib( void *module, const char *name ) DECLSPEC_HIDDEN;
 
 extern NTSTATUS get_thread_ldt_entry( HANDLE handle, void *data, ULONG len, ULONG *ret_len ) DECLSPEC_HIDDEN;
 extern void *get_native_context( CONTEXT *context ) DECLSPEC_HIDDEN;
@@ -246,7 +248,6 @@ extern NTSTATUS signal_alloc_thread( TEB *teb ) DECLSPEC_HIDDEN;
 extern void signal_free_thread( TEB *teb ) DECLSPEC_HIDDEN;
 extern void signal_init_thread( TEB *teb ) DECLSPEC_HIDDEN;
 extern void signal_init_process(void) DECLSPEC_HIDDEN;
-extern void signal_init_early(void) DECLSPEC_HIDDEN;
 extern void DECLSPEC_NORETURN signal_start_thread( PRTL_THREAD_START_ROUTINE entry, void *arg,
                                                    BOOL suspend, TEB *teb ) DECLSPEC_HIDDEN;
 extern void DECLSPEC_NORETURN signal_exit_thread( int status, void (*func)(int), TEB *teb ) DECLSPEC_HIDDEN;
@@ -285,9 +286,8 @@ extern NTSTATUS open_unix_file( HANDLE *handle, const char *unix_name, ACCESS_MA
 extern NTSTATUS get_device_info( int fd, struct _FILE_FS_DEVICE_INFORMATION *info ) DECLSPEC_HIDDEN;
 extern void init_files(void) DECLSPEC_HIDDEN;
 extern void init_cpu_info(void) DECLSPEC_HIDDEN;
-extern struct cpu_topology_override *get_cpu_topology_override(void) DECLSPEC_HIDDEN;
 extern void add_completion( HANDLE handle, ULONG_PTR value, NTSTATUS status, ULONG info, BOOL async ) DECLSPEC_HIDDEN;
-extern void set_async_direct_result( HANDLE *optional_handle, NTSTATUS status, ULONG_PTR information );
+extern struct cpu_topology_override *get_cpu_topology_override(void) DECLSPEC_HIDDEN;
 
 extern void dbg_init(void) DECLSPEC_HIDDEN;
 
@@ -297,6 +297,10 @@ extern NTSTATUS call_user_exception_dispatcher( EXCEPTION_RECORD *rec, CONTEXT *
 extern void call_raise_user_exception_dispatcher(void) DECLSPEC_HIDDEN;
 
 #define IMAGE_DLLCHARACTERISTICS_PREFER_NATIVE 0x0010 /* Wine extension */
+
+extern void CDECL set_unix_env(const char *var, const char *val) DECLSPEC_HIDDEN;
+extern void CDECL write_crash_log(const char *log_type, const char *log_msg) DECLSPEC_HIDDEN;
+extern const char * CDECL wine_debuginfostr_pc(void *pc) DECLSPEC_HIDDEN;
 
 #define TICKSPERSEC 10000000
 #define SECS_1601_TO_1970  ((369 * 365 + 89) * (ULONGLONG)86400)
@@ -330,6 +334,13 @@ static inline BOOL is_inside_signal_stack( void *ptr )
 {
     return ((char *)ptr >= (char *)get_signal_stack() &&
             (char *)ptr < (char *)get_signal_stack() + signal_stack_size);
+}
+
+static inline BOOL is_inside_syscall_stack_guard( const char *stack_ptr )
+{
+    const char *kernel_stack = ntdll_get_thread_data()->kernel_stack;
+
+    return (stack_ptr >= kernel_stack && stack_ptr < kernel_stack + kernel_stack_guard_size);
 }
 
 static inline void mutex_lock( pthread_mutex_t *mutex )
@@ -458,7 +469,5 @@ static inline void init_unicode_string( UNICODE_STRING *str, const WCHAR *data )
     str->MaximumLength = str->Length + sizeof(WCHAR);
     str->Buffer = (WCHAR *)data;
 }
-
-BOOL CDECL __wine_needs_override_large_address_aware(void);
 
 #endif /* __NTDLL_UNIX_PRIVATE_H */

@@ -39,19 +39,16 @@ DWORD WINAPI NsiAllocateAndGetTable( DWORD unk, const NPI_MODULEID *module, DWOR
                                      void **rw_data, DWORD rw_size, void **dynamic_data, DWORD dynamic_size,
                                      void **static_data, DWORD static_size, DWORD *count, DWORD unk2 )
 {
-    DWORD err, num = 0;
+    DWORD err, num = 64;
     void *data[4] = { NULL };
     DWORD sizes[4] = { key_size, rw_size, dynamic_size, static_size };
     int i, attempt;
 
-    TRACE( "%d %p %d %p %d %p %d %p %d %p %d %p %d\n", unk, module, table, key_data, key_size,
+    TRACE( "%ld %p %ld %p %ld %p %ld %p %ld %p %ld %p %ld\n", unk, module, table, key_data, key_size,
            rw_data, rw_size, dynamic_data, dynamic_size, static_data, static_size, count, unk2 );
 
     for (attempt = 0; attempt < 5; attempt++)
     {
-        err = NsiEnumerateObjectsAllParameters( unk, 0, module, table, NULL, 0, NULL, 0, NULL, 0, NULL, 0, &num );
-        if (err) return err;
-
         for (i = 0; i < ARRAY_SIZE(data); i++)
         {
             if (sizes[i])
@@ -68,9 +65,11 @@ DWORD WINAPI NsiAllocateAndGetTable( DWORD unk, const NPI_MODULEID *module, DWOR
         err = NsiEnumerateObjectsAllParameters( unk, 0, module, table, data[0], sizes[0], data[1], sizes[1],
                                                 data[2], sizes[2], data[3], sizes[3], &num );
         if (err != ERROR_MORE_DATA) break;
-
+        TRACE( "Short buffer, attempt %d.\n", attempt );
         NsiFreeTable( data[0], data[1], data[2], data[3] );
         memset( data, 0, sizeof(data) );
+        err = NsiEnumerateObjectsAllParameters( unk, 0, module, table, NULL, 0, NULL, 0, NULL, 0, NULL, 0, &num );
+        if (err) return err;
     }
 
     if (!err)
@@ -95,7 +94,7 @@ DWORD WINAPI NsiEnumerateObjectsAllParameters( DWORD unk, DWORD unk2, const NPI_
     struct nsi_enumerate_all_ex params;
     DWORD err;
 
-    TRACE( "%d %d %p %d %p %d %p %d %p %d %p %d %p\n", unk, unk2, module, table, key_data, key_size,
+    TRACE( "%ld %ld %p %ld %p %ld %p %ld %p %ld %p %ld %p\n", unk, unk2, module, table, key_data, key_size,
            rw_data, rw_size, dynamic_data, dynamic_size, static_data, static_size, count );
 
     params.unknown[0] = 0;
@@ -184,7 +183,7 @@ DWORD WINAPI NsiGetAllParameters( DWORD unk, const NPI_MODULEID *module, DWORD t
 {
     struct nsi_get_all_parameters_ex params;
 
-    TRACE( "%d %p %d %p %d %p %d %p %d %p %d\n", unk, module, table, key, key_size,
+    TRACE( "%ld %p %ld %p %ld %p %ld %p %ld %p %ld\n", unk, module, table, key, key_size,
            rw_data, rw_size, dynamic_data, dynamic_size, static_data, static_size );
 
     params.unknown[0] = 0;
@@ -257,7 +256,7 @@ DWORD WINAPI NsiGetParameter( DWORD unk, const NPI_MODULEID *module, DWORD table
 {
     struct nsi_get_parameter_ex params;
 
-    TRACE( "%d %p %d %p %d %d %p %d %d\n", unk, module, table, key, key_size,
+    TRACE( "%ld %p %ld %p %ld %ld %p %ld %ld\n", unk, module, table, key, key_size,
            param_type, data, data_size, data_offset );
 
     params.unknown[0] = 0;

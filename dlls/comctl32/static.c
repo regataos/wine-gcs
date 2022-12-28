@@ -35,7 +35,6 @@
 #include "wingdi.h"
 #include "winuser.h"
 #include "commctrl.h"
-#include "uxtheme.h"
 
 #include "wine/heap.h"
 #include "wine/debug.h"
@@ -433,20 +432,12 @@ static LRESULT CALLBACK STATIC_WindowProc( HWND hwnd, UINT uMsg, WPARAM wParam, 
     switch (uMsg)
     {
     case WM_CREATE:
-    {
-        HWND parent;
-
         if (style < 0L || style > SS_TYPEMASK)
         {
-            ERR("Unknown style %#lx\n", style );
+            ERR("Unknown style 0x%02x\n", style );
             return -1;
         }
-
-        parent = GetParent( hwnd );
-        if (parent)
-            EnableThemeDialogTexture( parent, ETDT_ENABLE );
         break;
-    }
 
     case WM_NCDESTROY:
         if (style == SS_ICON)
@@ -613,7 +604,7 @@ static LRESULT CALLBACK STATIC_WindowProc( HWND hwnd, UINT uMsg, WPARAM wParam, 
             lResult = (LRESULT)STATIC_SetIcon( hwnd, (HICON)lParam, full_style );
             break;
         default:
-            FIXME("STM_SETIMAGE: Unhandled type %Ix\n", wParam);
+            FIXME("STM_SETIMAGE: Unhandled type %lx\n", wParam);
             break;
         }
         STATIC_TryPaintFcn( hwnd, full_style );

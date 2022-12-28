@@ -66,7 +66,6 @@ static void xslpattern_error(parser_param* param, void const* scanner, char cons
 
 %start XSLPattern
 
-%define api.prefix {xslpattern_}
 %define api.pure
 %parse-param {parser_param* p}
 %parse-param {void* scanner}

@@ -77,9 +77,9 @@ HRESULT WINAPI DwmExtendFrameIntoClientArea(HWND hwnd, const MARGINS* margins)
 /**********************************************************************
  *           DwmGetColorizationColor      (DWMAPI.@)
  */
-HRESULT WINAPI DwmGetColorizationColor(DWORD *colorization, BOOL *opaque_blend)
+HRESULT WINAPI DwmGetColorizationColor(DWORD *colorization, BOOL opaque_blend)
 {
-    FIXME("(%p, %p) stub\n", colorization, opaque_blend);
+    FIXME("(%p, %d) stub\n", colorization, opaque_blend);
 
     return E_NOTIMPL;
 }
@@ -115,7 +115,7 @@ HRESULT WINAPI DwmSetWindowAttribute(HWND hwnd, DWORD attributenum, LPCVOID attr
 {
     static BOOL once;
 
-    if (!once++) FIXME("(%p, %lx, %p, %lx) stub\n", hwnd, attributenum, attribute, size);
+    if (!once++) FIXME("(%p, %x, %p, %x) stub\n", hwnd, attributenum, attribute, size);
 
     return S_OK;
 }
@@ -197,9 +197,38 @@ BOOL WINAPI DwmDefWindowProc(HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam, 
  */
 HRESULT WINAPI DwmGetWindowAttribute(HWND hwnd, DWORD attribute, PVOID pv_attribute, DWORD size)
 {
-    FIXME("(%p %ld %p %ld) stub\n", hwnd, attribute, pv_attribute, size);
+    if (!hwnd) return E_HANDLE;
+    if (!pv_attribute) return E_INVALIDARG;
 
-    return E_NOTIMPL;
+    switch (attribute)
+    {
+    case DWMWA_NCRENDERING_ENABLED:
+        if (size < sizeof(BOOL)) return E_INVALIDARG;
+
+        WARN("DWMWA_NCRENDERING_ENABLED: always returning FALSE.\n");
+        *(BOOL*)(pv_attribute) = FALSE;
+        break;
+
+    case DWMWA_EXTENDED_FRAME_BOUNDS:
+        if (size < sizeof(RECT)) return HRESULT_FROM_WIN32(ERROR_INSUFFICIENT_BUFFER);
+
+        WARN("DWMWA_EXTENDED_FRAME_BOUNDS: returning window rect.\n");
+        GetWindowRect(hwnd, pv_attribute);
+        break;
+
+    case DWMWA_CLOAKED:
+        if (size < sizeof(DWORD)) return E_INVALIDARG;
+
+        WARN("DWMWA_CLOAKED: always returning 0.\n");
+        *(DWORD*)(pv_attribute) = 0;
+        break;
+
+    default:
+        FIXME("unimplemented attribute %d, size %u, for hwnd %p.\n", attribute, size, hwnd);
+        return E_INVALIDARG;
+    }
+
+    return S_OK;
 }
 
 /**********************************************************************
@@ -265,7 +294,7 @@ HRESULT WINAPI DwmSetPresentParameters(HWND hwnd, DWM_PRESENT_PARAMETERS *params
  */
 HRESULT WINAPI DwmSetIconicLivePreviewBitmap(HWND hwnd, HBITMAP hbmp, POINT *pos, DWORD flags)
 {
-    FIXME("(%p %p %p %lx) stub\n", hwnd, hbmp, pos, flags);
+    FIXME("(%p %p %p %x) stub\n", hwnd, hbmp, pos, flags);
     return S_OK;
 };
 
@@ -274,7 +303,7 @@ HRESULT WINAPI DwmSetIconicLivePreviewBitmap(HWND hwnd, HBITMAP hbmp, POINT *pos
  */
 HRESULT WINAPI DwmSetIconicThumbnail(HWND hwnd, HBITMAP hbmp, DWORD flags)
 {
-    FIXME("(%p %p %lx) stub\n", hwnd, hbmp, flags);
+    FIXME("(%p %p %x) stub\n", hwnd, hbmp, flags);
     return S_OK;
 };
 

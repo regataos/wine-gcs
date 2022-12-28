@@ -27,7 +27,6 @@
 
 #include "ws2tcpip.h"
 
-#include <limits.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -52,6 +51,10 @@ WINE_DEFAULT_DEBUG_CHANNEL(wininet);
 
 static const char urlcache_ver_prefix[] = "WINE URLCache Ver ";
 static const char urlcache_ver[] = "0.2012001";
+
+#ifndef CHAR_BIT
+#define CHAR_BIT    (8 * sizeof(CHAR))
+#endif
 
 #define ENTRY_START_OFFSET      0x4000
 #define DIR_LENGTH              8

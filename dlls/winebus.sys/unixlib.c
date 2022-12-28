@@ -38,26 +38,27 @@
 
 #include "unix_private.h"
 
-BOOL is_xbox_gamepad(WORD vid, WORD pid)
+BOOL is_wine_blacklisted(WORD vid, WORD pid)
 {
-    if (vid != 0x045e) return FALSE;
-    if (pid == 0x0202) return TRUE; /* Xbox Controller */
-    if (pid == 0x0285) return TRUE; /* Xbox Controller S */
-    if (pid == 0x0289) return TRUE; /* Xbox Controller S */
-    if (pid == 0x028e) return TRUE; /* Xbox360 Controller */
-    if (pid == 0x028f) return TRUE; /* Xbox360 Wireless Controller */
-    if (pid == 0x02d1) return TRUE; /* Xbox One Controller */
-    if (pid == 0x02dd) return TRUE; /* Xbox One Controller (Covert Forces/Firmware 2015) */
-    if (pid == 0x02e0) return TRUE; /* Xbox One X Controller */
-    if (pid == 0x02e3) return TRUE; /* Xbox One Elite Controller */
-    if (pid == 0x02e6) return TRUE; /* Wireless XBox Controller Dongle */
-    if (pid == 0x02ea) return TRUE; /* Xbox One S Controller */
-    if (pid == 0x02fd) return TRUE; /* Xbox One S Controller (Firmware 2017) */
-    if (pid == 0x0b00) return TRUE; /* Xbox Elite 2 */
-    if (pid == 0x0b05) return TRUE; /* Xbox Elite 2 Wireless */
-    if (pid == 0x0b12) return TRUE; /* Xbox Series */
-    if (pid == 0x0b13) return TRUE; /* Xbox Series Wireless */
-    if (pid == 0x0719) return TRUE; /* Xbox 360 Wireless Adapter */
+    if (vid == 0x056a) return TRUE; /* all Wacom devices */
+    return FALSE;
+}
+
+/* logic from SDL2's SDL_ShouldIgnoreGameController */
+BOOL is_sdl_blacklisted(WORD vid, WORD pid)
+{
+    const char *allow_virtual = getenv("SDL_GAMECONTROLLER_ALLOW_STEAM_VIRTUAL_GAMEPAD");
+    const char *whitelist = getenv("SDL_GAMECONTROLLER_IGNORE_DEVICES_EXCEPT");
+    const char *blacklist = getenv("SDL_GAMECONTROLLER_IGNORE_DEVICES");
+    char needle[16];
+
+    if (vid == 0x28de && pid == 0x11ff && allow_virtual && *allow_virtual &&
+        *allow_virtual != '0' && strcasecmp(allow_virtual, "false"))
+        return FALSE;
+
+    sprintf(needle, "0x%04x/0x%04x", vid, pid);
+    if (whitelist) return strcasestr(whitelist, needle) == NULL;
+    if (blacklist) return strcasestr(blacklist, needle) != NULL;
     return FALSE;
 }
 
@@ -76,6 +77,50 @@ BOOL is_dualsense_gamepad(WORD vid, WORD pid)
     return FALSE;
 }
 
+BOOL is_logitech_g920(WORD vid, WORD pid)
+{
+    return vid == 0x046D && pid == 0xC262;
+}
+
+static BOOL is_thrustmaster_hotas(WORD vid, WORD pid)
+{
+    return vid == 0x044F && (pid == 0xB679 || pid == 0xB687 || pid == 0xB10A);
+}
+
+static BOOL is_simucube_wheel(WORD vid, WORD pid)
+{
+    if (vid != 0x16D0) return FALSE;
+    if (pid == 0x0D61) return TRUE; /* Simucube 2 Sport */
+    if (pid == 0x0D60) return TRUE; /* Simucube 2 Pro */
+    if (pid == 0x0D5F) return TRUE; /* Simucube 2 Ultimate */
+    if (pid == 0x0D5A) return TRUE; /* Simucube 1 */
+    return FALSE;
+}
+
+static BOOL is_fanatec_pedals(WORD vid, WORD pid)
+{
+    if (vid != 0x0EB7) return FALSE;
+    if (pid == 0x183B) return TRUE; /* Fanatec ClubSport Pedals v3 */
+    if (pid == 0x1839) return TRUE; /* Fanatec ClubSport Pedals v1/v2 */
+    return FALSE;
+}
+
+BOOL is_hidraw_enabled(WORD vid, WORD pid)
+{
+    const char *enabled = getenv("PROTON_ENABLE_HIDRAW");
+    char needle[16];
+
+    if (is_dualshock4_gamepad(vid, pid)) return TRUE;
+    if (is_dualsense_gamepad(vid, pid)) return TRUE;
+    if (is_thrustmaster_hotas(vid, pid)) return TRUE;
+    if (is_simucube_wheel(vid, pid)) return TRUE;
+    if (is_fanatec_pedals(vid, pid)) return TRUE;
+
+    sprintf(needle, "0x%04x/0x%04x", vid, pid);
+    if (enabled) return strcasestr(enabled, needle) != NULL;
+    return FALSE;
+}
+
 struct mouse_device
 {
     struct unix_device unix_device;
@@ -87,7 +132,8 @@ static void mouse_destroy(struct unix_device *iface)
 
 static NTSTATUS mouse_start(struct unix_device *iface)
 {
-    if (!hid_device_begin_report_descriptor(iface, HID_USAGE_PAGE_GENERIC, HID_USAGE_GENERIC_MOUSE))
+    const USAGE_AND_PAGE device_usage = {.UsagePage = HID_USAGE_PAGE_GENERIC, .Usage = HID_USAGE_GENERIC_MOUSE};
+    if (!hid_device_begin_report_descriptor(iface, &device_usage))
         return STATUS_NO_MEMORY;
     if (!hid_device_add_buttons(iface, HID_USAGE_PAGE_BUTTON, 1, 3))
         return STATUS_NO_MEMORY;
@@ -102,7 +148,13 @@ static void mouse_stop(struct unix_device *iface)
 }
 
 static NTSTATUS mouse_haptics_start(struct unix_device *iface, UINT duration,
-                                    USHORT rumble_intensity, USHORT buzz_intensity)
+                                    USHORT rumble_intensity, USHORT buzz_intensity,
+                                    USHORT left_intensity, USHORT right_intensity)
+{
+    return STATUS_NOT_SUPPORTED;
+}
+
+static NTSTATUS mouse_haptics_stop(struct unix_device *iface)
 {
     return STATUS_NOT_SUPPORTED;
 }
@@ -135,6 +187,7 @@ static const struct hid_device_vtbl mouse_vtbl =
     mouse_start,
     mouse_stop,
     mouse_haptics_start,
+    mouse_haptics_stop,
     mouse_physical_device_control,
     mouse_physical_device_set_gain,
     mouse_physical_effect_control,
@@ -170,7 +223,8 @@ static void keyboard_destroy(struct unix_device *iface)
 
 static NTSTATUS keyboard_start(struct unix_device *iface)
 {
-    if (!hid_device_begin_report_descriptor(iface, HID_USAGE_PAGE_GENERIC, HID_USAGE_GENERIC_KEYBOARD))
+    const USAGE_AND_PAGE device_usage = {.UsagePage = HID_USAGE_PAGE_GENERIC, .Usage = HID_USAGE_GENERIC_KEYBOARD};
+    if (!hid_device_begin_report_descriptor(iface, &device_usage))
         return STATUS_NO_MEMORY;
     if (!hid_device_add_buttons(iface, HID_USAGE_PAGE_KEYBOARD, 0, 101))
         return STATUS_NO_MEMORY;
@@ -185,7 +239,13 @@ static void keyboard_stop(struct unix_device *iface)
 }
 
 static NTSTATUS keyboard_haptics_start(struct unix_device *iface, UINT duration,
-                                       USHORT rumble_intensity, USHORT buzz_intensity)
+                                       USHORT rumble_intensity, USHORT buzz_intensity,
+                                       USHORT left_intensity, USHORT right_intensity)
+{
+    return STATUS_NOT_SUPPORTED;
+}
+
+static NTSTATUS keyboard_haptics_stop(struct unix_device *iface)
 {
     return STATUS_NOT_SUPPORTED;
 }
@@ -218,6 +278,7 @@ static const struct hid_device_vtbl keyboard_vtbl =
     keyboard_start,
     keyboard_stop,
     keyboard_haptics_start,
+    keyboard_haptics_stop,
     keyboard_physical_device_control,
     keyboard_physical_device_set_gain,
     keyboard_physical_effect_control,

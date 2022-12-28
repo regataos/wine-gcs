@@ -64,7 +64,7 @@ static HRESULT get_url_components(HTMLLocation *This, URL_COMPONENTSW *url)
         return hres;
 
     if(!InternetCrackUrlW(doc_url, 0, 0, url)) {
-        FIXME("InternetCrackUrlW failed: 0x%08x\n", GetLastError());
+        FIXME("InternetCrackUrlW failed: 0x%08lx\n", GetLastError());
         SetLastError(0);
         return E_FAIL;
     }
@@ -108,7 +108,7 @@ static ULONG WINAPI HTMLLocation_AddRef(IHTMLLocation *iface)
     HTMLLocation *This = impl_from_IHTMLLocation(iface);
     LONG ref = InterlockedIncrement(&This->ref);
 
-    TRACE("(%p) ref=%d\n", This, ref);
+    TRACE("(%p) ref=%ld\n", This, ref);
 
     return ref;
 }
@@ -118,7 +118,7 @@ static ULONG WINAPI HTMLLocation_Release(IHTMLLocation *iface)
     HTMLLocation *This = impl_from_IHTMLLocation(iface);
     LONG ref = InterlockedDecrement(&This->ref);
 
-    TRACE("(%p) ref=%d\n", This, ref);
+    TRACE("(%p) ref=%ld\n", This, ref);
 
     if(!ref) {
         if(This->window)
@@ -240,7 +240,7 @@ static HRESULT WINAPI HTMLLocation_get_href(IHTMLLocation *iface, BSTR *p)
     }
 
     if(GetLastError() != ERROR_INSUFFICIENT_BUFFER) {
-        FIXME("InternetCreateUrl failed with error: %08x\n", GetLastError());
+        FIXME("InternetCreateUrl failed with error: %08lx\n", GetLastError());
         SetLastError(0);
         ret = E_FAIL;
         goto cleanup;
@@ -254,7 +254,7 @@ static HRESULT WINAPI HTMLLocation_get_href(IHTMLLocation *iface, BSTR *p)
     }
 
     if(!InternetCreateUrlW(&url, ICU_ESCAPE, buf, &len)) {
-        FIXME("InternetCreateUrl failed with error: %08x\n", GetLastError());
+        FIXME("InternetCreateUrl failed with error: %08lx\n", GetLastError());
         SetLastError(0);
         ret = E_FAIL;
         goto cleanup;
@@ -524,6 +524,8 @@ static HRESULT WINAPI HTMLLocation_get_search(IHTMLLocation *iface, BSTR *p)
 static HRESULT WINAPI HTMLLocation_put_hash(IHTMLLocation *iface, BSTR v)
 {
     HTMLLocation *This = impl_from_IHTMLLocation(iface);
+    WCHAR *hash = v;
+    HRESULT hres;
 
     TRACE("(%p)->(%s)\n", This, debugstr_w(v));
 
@@ -532,7 +534,19 @@ static HRESULT WINAPI HTMLLocation_put_hash(IHTMLLocation *iface, BSTR v)
         return E_FAIL;
     }
 
-    return navigate_url(This->window->base.outer_window, v, This->window->base.outer_window->uri, 0);
+    if(hash[0] != '#') {
+        DWORD size = (1 /* # */ + SysStringLen(v) + 1) * sizeof(WCHAR);
+        if(!(hash = heap_alloc(size)))
+            return E_OUTOFMEMORY;
+        hash[0] = '#';
+        memcpy(hash + 1, v, size - sizeof(WCHAR));
+    }
+
+    hres = navigate_url(This->window->base.outer_window, hash, This->window->base.outer_window->uri, BINDING_NAVIGATED);
+
+    if(hash != v)
+        heap_free(hash);
+    return hres;
 }
 
 static HRESULT WINAPI HTMLLocation_get_hash(IHTMLLocation *iface, BSTR *p)
@@ -640,6 +654,14 @@ static const tid_t HTMLLocation_iface_tids[] = {
 static dispex_static_data_t HTMLLocation_dispex = {
     L"Object",
     NULL,
+    PROTO_ID_NULL,
+    DispHTMLLocation_tid,
+    HTMLLocation_iface_tids
+};
+dispex_static_data_t HTMLLocation_compat_dispex = {
+    L"Location",
+    NULL,
+    PROTO_ID_HTMLLocation,
     DispHTMLLocation_tid,
     HTMLLocation_iface_tids
 };
@@ -647,6 +669,7 @@ static dispex_static_data_t HTMLLocation_dispex = {
 
 HRESULT HTMLLocation_Create(HTMLInnerWindow *window, HTMLLocation **ret)
 {
+    compat_mode_t compat_mode = dispex_compat_mode(&window->event_target.dispex);
     HTMLLocation *location;
 
     location = heap_alloc(sizeof(*location));
@@ -657,8 +680,9 @@ HRESULT HTMLLocation_Create(HTMLInnerWindow *window, HTMLLocation **ret)
     location->ref = 1;
     location->window = window;
 
-    init_dispatch(&location->dispex, (IUnknown*)&location->IHTMLLocation_iface, &HTMLLocation_dispex,
-                  dispex_compat_mode(&window->event_target.dispex));
+    init_dispatch(&location->dispex, (IUnknown*)&location->IHTMLLocation_iface,
+                  compat_mode < COMPAT_MODE_IE9 ? &HTMLLocation_compat_dispex : &HTMLLocation_dispex,
+                  NULL, compat_mode);
 
     *ret = location;
     return S_OK;

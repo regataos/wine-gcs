@@ -92,6 +92,7 @@ struct coreaudio_stream
     INT32 getbuf_last;
     WAVEFORMATEX *fmt;
     BYTE *local_buffer, *cap_buffer, *wrap_buffer, *resamp_buffer, *tmp_buffer;
+    SIZE_T local_buffer_size, tmp_buffer_size;
 };
 
 static HRESULT osstatus_to_hresult(OSStatus sc)
@@ -616,7 +617,6 @@ static NTSTATUS create_stream(void *args)
     struct coreaudio_stream *stream = calloc(1, sizeof(*stream));
     AURenderCallbackStruct input;
     OSStatus sc;
-    SIZE_T size;
 
     if(!stream){
         params->result = E_OUTOFMEMORY;
@@ -679,8 +679,8 @@ static NTSTATUS create_stream(void *args)
         goto end;
     }
 
-    size = stream->bufsize_frames * stream->fmt->nBlockAlign;
-    if(NtAllocateVirtualMemory(GetCurrentProcess(), (void **)&stream->local_buffer, 0, &size,
+    stream->local_buffer_size = stream->bufsize_frames * stream->fmt->nBlockAlign;
+    if(NtAllocateVirtualMemory(GetCurrentProcess(), (void **)&stream->local_buffer, 0, &stream->local_buffer_size,
                                MEM_COMMIT, PAGE_READWRITE)){
         params->result = E_OUTOFMEMORY;
         goto end;
@@ -1337,7 +1337,6 @@ static NTSTATUS get_render_buffer(void *args)
 {
     struct get_render_buffer_params *params = args;
     struct coreaudio_stream *stream = params->stream;
-    SIZE_T size;
     UINT32 pad;
 
     OSSpinLockLock(&stream->lock);
@@ -1360,14 +1359,14 @@ static NTSTATUS get_render_buffer(void *args)
     if(stream->wri_offs_frames + params->frames > stream->bufsize_frames){
         if(stream->tmp_buffer_frames < params->frames){
             if(stream->tmp_buffer){
-                size = 0;
+                SIZE_T size = 0;
                 NtFreeVirtualMemory(GetCurrentProcess(), (void **)&stream->tmp_buffer,
                                     &size, MEM_RELEASE);
                 stream->tmp_buffer = NULL;
             }
-            size = params->frames * stream->fmt->nBlockAlign;
+            stream->tmp_buffer_size = params->frames * stream->fmt->nBlockAlign;
             if(NtAllocateVirtualMemory(GetCurrentProcess(), (void **)&stream->tmp_buffer, 0,
-                                       &size, MEM_COMMIT, PAGE_READWRITE)){
+                                       &stream->tmp_buffer_size, MEM_COMMIT, PAGE_READWRITE)){
                 stream->tmp_buffer_frames = 0;
                 params->result = E_OUTOFMEMORY;
                 goto end;
@@ -1440,7 +1439,6 @@ static NTSTATUS get_capture_buffer(void *args)
     struct coreaudio_stream *stream = params->stream;
     UINT32 chunk_bytes, chunk_frames;
     LARGE_INTEGER stamp, freq;
-    SIZE_T size;
 
     OSSpinLockLock(&stream->lock);
 
@@ -1463,9 +1461,9 @@ static NTSTATUS get_capture_buffer(void *args)
     if(chunk_frames < stream->period_frames){
         chunk_bytes = chunk_frames * stream->fmt->nBlockAlign;
         if(!stream->tmp_buffer){
-            size = stream->period_frames * stream->fmt->nBlockAlign;
+            stream->tmp_buffer_size = stream->period_frames * stream->fmt->nBlockAlign;
             NtAllocateVirtualMemory(GetCurrentProcess(), (void **)&stream->tmp_buffer, 0,
-                                    &size, MEM_COMMIT, PAGE_READWRITE);
+                                    &stream->tmp_buffer_size, MEM_COMMIT, PAGE_READWRITE);
         }
         *params->data = stream->tmp_buffer;
         memcpy(*params->data, stream->local_buffer + stream->lcl_offs_frames * stream->fmt->nBlockAlign,

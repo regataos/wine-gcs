@@ -114,6 +114,8 @@ static void send_wm_input_device_change(BASE_DEVICE_EXTENSION *ext, LPARAM param
     RAWINPUT rawinput;
     INPUT input;
 
+    TRACE("ext %p, lparam %p\n", ext, (void *)param);
+
     if (!IsEqualGUID( ext->class_guid, &GUID_DEVINTERFACE_HID )) return;
 
     rawinput.header.dwType = RIM_TYPEHID;
@@ -169,6 +171,9 @@ static NTSTATUS WINAPI driver_add_device(DRIVER_OBJECT *driver, DEVICE_OBJECT *b
     ext->u.fdo.hid_ext.NextDeviceObject = bus_pdo;
     swprintf(ext->device_id, ARRAY_SIZE(ext->device_id), L"HID\\%s", wcsrchr(device_id, '\\') + 1);
     wcscpy(ext->instance_id, instance_id);
+
+    ext->steam_overlay_event = minidriver->steam_overlay_event;
+    ext->steam_keyboard_event = minidriver->steam_keyboard_event;
 
     is_xinput_class = !wcsncmp(device_id, L"WINEXINPUT\\", 7) && wcsstr(device_id, L"&XI_") != NULL;
     if (is_xinput_class) ext->class_guid = &GUID_DEVINTERFACE_WINEXINPUT;
@@ -232,6 +237,9 @@ static void create_child(minidriver *minidriver, DEVICE_OBJECT *fdo)
     pdo_ext->u.pdo.information.ProductID = attr.ProductID;
     pdo_ext->u.pdo.information.VersionNumber = attr.VersionNumber;
     pdo_ext->u.pdo.information.Polled = minidriver->minidriver.DevicesArePolled;
+
+    pdo_ext->steam_overlay_event = minidriver->steam_overlay_event;
+    pdo_ext->steam_keyboard_event = minidriver->steam_keyboard_event;
 
     call_minidriver( IOCTL_HID_GET_DEVICE_DESCRIPTOR, fdo, NULL, 0, &descriptor, sizeof(descriptor), &io );
     if (io.Status != STATUS_SUCCESS)
@@ -300,6 +308,8 @@ static void create_child(minidriver *minidriver, DEVICE_OBJECT *fdo)
     HID_StartDeviceThread(child_pdo);
 
     send_wm_input_device_change(pdo_ext, GIDC_ARRIVAL);
+
+    TRACE( "created device %p, rawinput handle %#x\n", pdo_ext, pdo_ext->u.pdo.rawinput_handle );
 }
 
 static NTSTATUS fdo_pnp(DEVICE_OBJECT *device, IRP *irp)
@@ -578,6 +588,9 @@ static void WINAPI driver_unload(DRIVER_OBJECT *driver)
         if (md->DriverUnload)
             md->DriverUnload(md->minidriver.DriverObject);
         list_remove(&md->entry);
+
+        CloseHandle(md->steam_overlay_event);
+        CloseHandle(md->steam_keyboard_event);
         free(md);
     }
 }
@@ -588,6 +601,9 @@ NTSTATUS WINAPI HidRegisterMinidriver(HID_MINIDRIVER_REGISTRATION *registration)
 
     if (!(driver = calloc(1, sizeof(*driver))))
         return STATUS_NO_MEMORY;
+
+    driver->steam_overlay_event = CreateEventA(NULL, TRUE, FALSE, "__wine_steamclient_GameOverlayActivated");
+    driver->steam_keyboard_event = CreateEventA(NULL, TRUE, FALSE, "__wine_steamclient_KeyboardActivated");
 
     driver->DriverUnload = registration->DriverObject->DriverUnload;
     registration->DriverObject->DriverUnload = driver_unload;

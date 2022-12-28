@@ -722,7 +722,7 @@ struct process *create_process( int fd, struct process *parent, unsigned int fla
     if (!parent)
     {
         process->handles = alloc_handle_table( process, 0 );
-        process->token = token_create_admin( TRUE, -1, TokenElevationTypeLimited, default_session_id );
+        process->token = token_create_admin( TRUE, -1, TokenElevationTypeFull, default_session_id );
         process->affinity = ~0;
     }
     else
@@ -805,6 +805,11 @@ static void process_destroy( struct object *obj )
     free( process->dir_cache );
     free( process->image );
     if (do_esync()) close( process->esync_fd );
+    if (process->fsync_idx)
+    {
+        fsync_cleanup_process_shm_indices( process->id );
+        fsync_free_shm_idx( process->fsync_idx );
+    }
 }
 
 /* dump a process on stdout for debugging purposes */
@@ -1449,11 +1454,29 @@ DECL_HANDLER(get_startup_info)
 DECL_HANDLER(init_process_done)
 {
     struct process *process = current->process;
-    const struct cpu_topology_override *cpu_override = get_req_data();
-    unsigned int have_cpu_override = get_req_data_size() / sizeof(*cpu_override);
     struct memory_view *view;
     client_ptr_t base;
     const pe_image_info_t *image_info;
+    const struct cpu_topology_override *cpu_override = get_req_data();
+    unsigned int have_cpu_override = get_req_data_size() / sizeof(*cpu_override);
+    unsigned int i;
+
+    if (have_cpu_override)
+    {
+        if (cpu_override->cpu_count > ARRAY_SIZE(process->wine_cpu_id_from_host))
+        {
+            set_error( STATUS_INVALID_PARAMETER );
+            return;
+        }
+        for (i = 0; i < cpu_override->cpu_count; ++i)
+        {
+            if (cpu_override->host_cpu_id[i] >= ARRAY_SIZE(process->wine_cpu_id_from_host))
+            {
+                set_error( STATUS_INVALID_PARAMETER );
+                return;
+            }
+        }
+    }
 
     if (is_process_init_done(process))
     {
@@ -1485,7 +1508,12 @@ DECL_HANDLER(init_process_done)
     reply->suspend = (current->suspend || process->suspend);
 
     if (have_cpu_override)
+    {
         process->cpu_override = *cpu_override;
+        memset( process->wine_cpu_id_from_host, 0, sizeof(process->wine_cpu_id_from_host) );
+        for (i = 0; i < process->cpu_override.cpu_count; ++i)
+            process->wine_cpu_id_from_host[process->cpu_override.host_cpu_id[i]] = i;
+    }
 }
 
 /* open a handle to a process */
@@ -1582,6 +1610,7 @@ DECL_HANDLER(get_process_image_name)
         }
         else set_error( STATUS_BUFFER_TOO_SMALL );
     }
+    else set_error( STATUS_INVALID_HANDLE );
     release_object( process );
 }
 
@@ -1645,6 +1674,22 @@ DECL_HANDLER(get_process_vm_counters)
     release_object( process );
 }
 
+static void set_process_priority( struct process *process, int priority )
+{
+    struct thread *thread;
+
+    if (!process->running_threads)
+    {
+        set_error( STATUS_PROCESS_IS_TERMINATING );
+        return;
+    }
+
+    LIST_FOR_EACH_ENTRY( thread, &process->thread_list, struct thread, proc_entry )
+        set_thread_priority( thread, priority, thread->priority );
+
+    process->priority = priority;
+}
+
 static void set_process_affinity( struct process *process, affinity_t affinity )
 {
     struct thread *thread;
@@ -1670,7 +1715,7 @@ DECL_HANDLER(set_process_info)
 
     if ((process = get_process_from_handle( req->handle, PROCESS_SET_INFORMATION )))
     {
-        if (req->mask & SET_PROCESS_INFO_PRIORITY) process->priority = req->priority;
+        if (req->mask & SET_PROCESS_INFO_PRIORITY) set_process_priority( process, req->priority );
         if (req->mask & SET_PROCESS_INFO_AFFINITY) set_process_affinity( process, req->affinity );
         release_object( process );
     }
@@ -1683,6 +1728,8 @@ DECL_HANDLER(read_process_memory)
     data_size_t len = get_reply_max_size();
 
     if (!(process = get_process_from_handle( req->handle, PROCESS_VM_READ ))) return;
+
+    reply->unix_pid = process->unix_pid;
 
     if (len)
     {

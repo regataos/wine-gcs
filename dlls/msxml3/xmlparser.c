@@ -74,7 +74,7 @@ static ULONG WINAPI xmlparser_AddRef(IXMLParser* iface)
 {
     xmlparser *This = impl_from_IXMLParser( iface );
     ULONG ref = InterlockedIncrement( &This->ref );
-    TRACE("%p, refcount %lu.\n", iface, ref);
+    TRACE("(%p)->(%d)\n", This, ref);
     return ref;
 }
 
@@ -83,7 +83,7 @@ static ULONG WINAPI xmlparser_Release(IXMLParser* iface)
     xmlparser *This = impl_from_IXMLParser( iface );
     ULONG ref = InterlockedDecrement( &This->ref );
 
-    TRACE("%p, refcount %lu.\n", iface, ref);
+    TRACE("(%p)->(%d)\n", This, ref);
     if ( ref == 0 )
     {
         if(This->input)
@@ -228,7 +228,9 @@ static HRESULT WINAPI xmlparser_SetURL(IXMLParser *iface,const WCHAR *pszBaseUrl
 static HRESULT WINAPI xmlparser_Load(IXMLParser *iface, BOOL bFullyAvailable,
                 IMoniker *pMon, LPBC pBC, DWORD dwMode)
 {
-    FIXME("%p, %d, %p, %p, %ld.\n", iface, bFullyAvailable, pMon, pBC, dwMode);
+    xmlparser *This = impl_from_IXMLParser( iface );
+
+    FIXME("(%p %d %p %p %d)\n", This, bFullyAvailable, pMon, pBC, dwMode);
 
     return E_NOTIMPL;
 }
@@ -254,7 +256,9 @@ static HRESULT WINAPI xmlparser_SetInput(IXMLParser *iface, IUnknown *pStm)
 static HRESULT WINAPI xmlparser_PushData(IXMLParser *iface, const char *pData,
                 ULONG nChars, BOOL fLastBuffer)
 {
-    FIXME("%p, %s, %lu, %d.\n", iface, debugstr_a(pData), nChars, fLastBuffer);
+    xmlparser *This = impl_from_IXMLParser( iface );
+
+    FIXME("(%p %s %d %d)\n", This, debugstr_a(pData), nChars, fLastBuffer);
 
     return E_NOTIMPL;
 }
@@ -282,7 +286,9 @@ static HRESULT WINAPI xmlparser_LoadEntity(IXMLParser *iface, const WCHAR *baseU
 static HRESULT WINAPI xmlparser_ParseEntity(IXMLParser *iface, const WCHAR *text,
                 ULONG len, BOOL fpe)
 {
-    FIXME("%p, %s, %lu, %d.\n", iface, debugstr_w(text), len, fpe);
+    xmlparser *This = impl_from_IXMLParser( iface );
+
+    FIXME("(%p %s %d %d)\n", This, debugstr_w(text), len, fpe);
 
     return E_NOTIMPL;
 }
@@ -290,7 +296,9 @@ static HRESULT WINAPI xmlparser_ParseEntity(IXMLParser *iface, const WCHAR *text
 static HRESULT WINAPI xmlparser_ExpandEntity(IXMLParser *iface, const WCHAR *text,
                 ULONG len)
 {
-    FIXME("%p, %s, %ld.\n", iface, debugstr_w(text), len);
+    xmlparser *This = impl_from_IXMLParser( iface );
+
+    FIXME("(%p %s %d)\n", This, debugstr_w(text), len);
 
     return E_NOTIMPL;
 }
@@ -315,7 +323,9 @@ static HRESULT WINAPI xmlparser_GetRoot( IXMLParser *iface, PVOID *ppRoot)
 
 static HRESULT WINAPI xmlparser_Run(IXMLParser *iface, LONG chars)
 {
-    FIXME("%p, %ld.\n", iface, chars);
+    xmlparser *This = impl_from_IXMLParser( iface );
+
+    FIXME("(%p %d)\n", This, chars);
 
     return E_NOTIMPL;
 }
@@ -351,7 +361,7 @@ static HRESULT WINAPI xmlparser_SetFlags(IXMLParser *iface, ULONG flags)
 {
     xmlparser *This = impl_from_IXMLParser( iface );
 
-    TRACE("%p, %lx.\n", iface, flags);
+    TRACE("(%p %d)\n", This, flags);
 
     This->flags = flags;
 

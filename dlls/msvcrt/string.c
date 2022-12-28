@@ -377,8 +377,8 @@ int fpnum_double(struct fpnum *fp, double *d)
         return 0;
     }
 
-    TRACE("%c %#I64x *2^%d (round %d)\n", fp->sign == -1 ? '-' : '+',
-            fp->m, fp->exp, fp->mod);
+    TRACE("%c %s *2^%d (round %d)\n", fp->sign == -1 ? '-' : '+',
+            wine_dbgstr_longlong(fp->m), fp->exp, fp->mod);
     if (!fp->m)
     {
         *d = fp->sign * 0.0;
@@ -467,7 +467,7 @@ int fpnum_double(struct fpnum *fp, double *d)
     bits |= (ULONGLONG)fp->exp << (MANT_BITS - 1);
     bits |= fp->m & (((ULONGLONG)1 << (MANT_BITS - 1)) - 1);
 
-    TRACE("returning %#I64x\n", bits);
+    TRACE("returning %s\n", wine_dbgstr_longlong(bits));
     *d = *(double*)&bits;
     return 0;
 }
@@ -496,8 +496,8 @@ int fpnum_ldouble(struct fpnum *fp, MSVCRT__LDOUBLE *d)
         return 0;
     }
 
-    TRACE("%c %#I64x *2^%d (round %d)\n", fp->sign == -1 ? '-' : '+',
-            fp->m, fp->exp, fp->mod);
+    TRACE("%c %s *2^%d (round %d)\n", fp->sign == -1 ? '-' : '+',
+            wine_dbgstr_longlong(fp->m), fp->exp, fp->mod);
     if (!fp->m)
     {
         d->x80[0] = 0;
@@ -2941,6 +2941,11 @@ __ASM_GLOBAL_FUNC( sse2_memmove,
         MEMMOVE_CLEANUP
         "ret" )
 
+#undef DEST_REG
+#undef SRC_REG
+#undef LEN_REG
+#undef TMP_REG
+
 #endif
 
 /*********************************************************************
@@ -3075,6 +3080,71 @@ void * __cdecl _memccpy(void *dst, const void *src, int c, size_t n)
     return NULL;
 }
 
+#if defined(__i386__) || defined(__x86_64__)
+
+#ifdef __i386__
+#define DEST_REG "%edi"
+#define LEN_REG "%ecx"
+#define VAL_REG "%eax"
+
+#define MEMSET_INIT \
+    "movl " DEST_REG ", %edx\n\t" \
+    "movl 4(%esp), " DEST_REG "\n\t" \
+    "movl 8(%esp), " VAL_REG "\n\t" \
+    "movl 12(%esp), " LEN_REG "\n\t"
+
+#define MEMSET_RET \
+    "movl %edx, " DEST_REG "\n\t" \
+    "ret"
+
+#else
+
+#define DEST_REG "%rdi"
+#define LEN_REG "%rcx"
+#define VAL_REG "%eax"
+
+#define MEMSET_INIT \
+    "movq " DEST_REG ", %r9\n\t" \
+    "movq %rcx, " DEST_REG "\n\t" \
+    "movl %edx, " VAL_REG "\n\t" \
+    "movq %r8, " LEN_REG "\n\t"
+
+#define MEMSET_RET \
+    "movq %r9, " DEST_REG "\n\t" \
+    "ret"
+
+#endif
+
+void __cdecl sse2_memset_aligned_32(unsigned char *d, unsigned int c, size_t n);
+__ASM_GLOBAL_FUNC( sse2_memset_aligned_32,
+        MEMSET_INIT
+        "movd " VAL_REG ", %xmm0\n\t"
+        "pshufd $0, %xmm0, %xmm0\n\t"
+        "test $0x20, " LEN_REG "\n\t"
+        "je 1f\n\t"
+        "add $0x20, " DEST_REG "\n\t"
+        "sub $0x20, " LEN_REG "\n\t"
+        "movdqa %xmm0, -0x20(" DEST_REG ")\n\t"
+        "movdqa %xmm0, -0x10(" DEST_REG ")\n\t"
+        "je 2f\n\t"
+        "1:\n\t"
+        "add $0x40, " DEST_REG "\n\t"
+        "sub $0x40, " LEN_REG "\n\t"
+        "movdqa %xmm0, -0x40(" DEST_REG ")\n\t"
+        "movdqa %xmm0, -0x30(" DEST_REG ")\n\t"
+        "movdqa %xmm0, -0x20(" DEST_REG ")\n\t"
+        "movdqa %xmm0, -0x10(" DEST_REG ")\n\t"
+        "ja 1b\n\t"
+        "2:\n\t"
+        MEMSET_RET )
+
+#undef MEMSET_INIT
+#undef MEMSET_RET
+#undef DEST_REG
+#undef LEN_REG
+#undef VAL_REG
+
+#endif
 
 static inline void memset_aligned_32(unsigned char *d, uint64_t v, size_t n)
 {
@@ -3116,8 +3186,22 @@ void *__cdecl memset(void *dst, int c, size_t n)
         if (n <= 64) return dst;
 
         n = (n - a) & ~0x1f;
+
+#ifdef __x86_64__
+        sse2_memset_aligned_32(d + a, v, n);
+        return dst;
+#endif
+#ifdef __i386__
+        if (sse2_supported)
+        {
+            sse2_memset_aligned_32(d + a, v, n);
+            return dst;
+        }
+#endif
+#ifndef __x86_64__
         memset_aligned_32(d + a, v, n);
         return dst;
+#endif
     }
     if (n >= 8)
     {
@@ -3196,7 +3280,14 @@ int __cdecl strncmp(const char *str1, const char *str2, size_t len)
 {
     if (!len) return 0;
     while (--len && *str1 && *str1 == *str2) { str1++; str2++; }
+
+#if defined(_WIN64) || defined(_UCRT) || _MSVCR_VER == 70 || _MSVCR_VER == 71 || _MSVCR_VER >= 110
+    if ((unsigned char)*str1 > (unsigned char)*str2) return 1;
+    if ((unsigned char)*str1 < (unsigned char)*str2) return -1;
+    return 0;
+#else
     return (unsigned char)*str1 - (unsigned char)*str2;
+#endif
 }
 
 /*********************************************************************

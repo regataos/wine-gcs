@@ -92,13 +92,13 @@ static MSIHANDLE alloc_handle_table_entry(void)
         if (msihandletable_size == 0)
         {
             newsize = 256;
-            p = msi_alloc_zero(newsize * sizeof(*p));
+            p = msi_alloc_zero(newsize*sizeof(msi_handle_info));
         }
         else
         {
             newsize = msihandletable_size * 2;
-            p = msi_realloc(msihandletable, newsize * sizeof(*p));
-            if (p) memset(p + msihandletable_size, 0, (newsize - msihandletable_size) * sizeof(*p));
+            p = msi_realloc_zero(msihandletable,
+                            newsize*sizeof(msi_handle_info));
         }
         if (!p)
             return 0;
@@ -127,7 +127,7 @@ MSIHANDLE alloc_msihandle( MSIOBJECTHDR *obj )
 
     LeaveCriticalSection( &MSI_handle_cs );
 
-    TRACE( "%p -> %lu\n", obj, ret );
+    TRACE("%p -> %d\n", obj, ret );
 
     return ret;
 }
@@ -150,7 +150,7 @@ MSIHANDLE alloc_msi_remote_handle(MSIHANDLE remote)
 
     LeaveCriticalSection( &MSI_handle_cs );
 
-    TRACE( "%lu -> %lu\n", remote, ret );
+    TRACE("%d -> %d\n", remote, ret);
 
     return ret;
 }
@@ -271,7 +271,7 @@ UINT WINAPI MsiCloseHandle(MSIHANDLE handle)
     MSIOBJECTHDR *info = NULL;
     UINT ret = ERROR_INVALID_HANDLE;
 
-    TRACE( "%lu\n", handle );
+    TRACE("%x\n",handle);
 
     if (!handle)
         return ERROR_SUCCESS;
@@ -305,7 +305,7 @@ UINT WINAPI MsiCloseHandle(MSIHANDLE handle)
 
     ret = ERROR_SUCCESS;
 
-    TRACE( "handle %lu destroyed\n", handle + 1 );
+    TRACE("handle %x destroyed\n", handle+1);
 out:
     LeaveCriticalSection( &MSI_handle_cs );
     if( info )

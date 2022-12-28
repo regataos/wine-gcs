@@ -101,8 +101,8 @@ static HRESULT ComponentInfo_GetGUIDValue(HKEY classkey, LPCWSTR value,
     return hr;
 }
 
-static HRESULT ComponentInfo_GetUINTValue(HKEY classkey, LPCWSTR value,
-    UINT *result)
+static HRESULT ComponentInfo_GetDWORDValue(HKEY classkey, LPCWSTR value,
+    DWORD *result)
 {
     LONG ret;
     DWORD cbdata = sizeof(DWORD);
@@ -111,7 +111,7 @@ static HRESULT ComponentInfo_GetUINTValue(HKEY classkey, LPCWSTR value,
         return E_INVALIDARG;
 
     ret = RegGetValueW(classkey, NULL, value, RRF_RT_DWORD, NULL,
-        (DWORD *)result, &cbdata);
+        result, &cbdata);
 
     if (ret == ERROR_FILE_NOT_FOUND)
     {
@@ -179,7 +179,7 @@ static HRESULT ComponentInfo_GetGuidList(HKEY classkey, LPCWSTR subkeyname,
     }
     else
     {
-        ret = RegQueryInfoKeyW(subkey, NULL, NULL, NULL, (DWORD *)actual_size, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
+        ret = RegQueryInfoKeyW(subkey, NULL, NULL, NULL, actual_size, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
         if (ret != ERROR_SUCCESS)
             hr = HRESULT_FROM_WIN32(ret);
     }
@@ -552,8 +552,7 @@ static const IWICBitmapDecoderInfoVtbl BitmapDecoderInfo_Vtbl = {
 
 static void read_bitmap_patterns(BitmapDecoderInfo *info)
 {
-    DWORD pattern_count=0;
-    UINT patterns_size=0;
+    UINT pattern_count=0, patterns_size=0;
     WCHAR subkeyname[11];
     LONG res;
     HKEY patternskey, patternkey;
@@ -1354,7 +1353,7 @@ static HRESULT WINAPI PixelFormatInfo_GetBitsPerPixel(IWICPixelFormatInfo2 *ifac
 
     TRACE("(%p,%p)\n", iface, puiBitsPerPixel);
 
-    return ComponentInfo_GetUINTValue(This->classkey, L"BitLength", puiBitsPerPixel);
+    return ComponentInfo_GetDWORDValue(This->classkey, L"BitLength", puiBitsPerPixel);
 }
 
 static HRESULT WINAPI PixelFormatInfo_GetChannelCount(IWICPixelFormatInfo2 *iface,
@@ -1364,7 +1363,7 @@ static HRESULT WINAPI PixelFormatInfo_GetChannelCount(IWICPixelFormatInfo2 *ifac
 
     TRACE("(%p,%p)\n", iface, puiChannelCount);
 
-    return ComponentInfo_GetUINTValue(This->classkey, L"ChannelCount", puiChannelCount);
+    return ComponentInfo_GetDWORDValue(This->classkey, L"ChannelCount", puiChannelCount);
 }
 
 static HRESULT WINAPI PixelFormatInfo_GetChannelMask(IWICPixelFormatInfo2 *iface,
@@ -1414,7 +1413,7 @@ static HRESULT WINAPI PixelFormatInfo_SupportsTransparency(IWICPixelFormatInfo2 
 
     TRACE("(%p,%p)\n", iface, pfSupportsTransparency);
 
-    return ComponentInfo_GetUINTValue(This->classkey, L"SupportsTransparency", (UINT *)pfSupportsTransparency);
+    return ComponentInfo_GetDWORDValue(This->classkey, L"SupportsTransparency", (DWORD*)pfSupportsTransparency);
 }
 
 static HRESULT WINAPI PixelFormatInfo_GetNumericRepresentation(IWICPixelFormatInfo2 *iface,
@@ -1424,7 +1423,7 @@ static HRESULT WINAPI PixelFormatInfo_GetNumericRepresentation(IWICPixelFormatIn
 
     TRACE("(%p,%p)\n", iface, pNumericRepresentation);
 
-    return ComponentInfo_GetUINTValue(This->classkey, L"NumericRepresentation", pNumericRepresentation);
+    return ComponentInfo_GetDWORDValue(This->classkey, L"NumericRepresentation", pNumericRepresentation);
 }
 
 static const IWICPixelFormatInfo2Vtbl PixelFormatInfo_Vtbl = {
@@ -1683,7 +1682,7 @@ static HRESULT WINAPI MetadataReaderInfo_DoesRequireFullStream(IWICMetadataReade
 {
     MetadataReaderInfo *This = impl_from_IWICMetadataReaderInfo(iface);
     TRACE("(%p,%p)\n", iface, param);
-    return ComponentInfo_GetUINTValue(This->classkey, L"RequiresFullStream", (UINT *)param);
+    return ComponentInfo_GetDWORDValue(This->classkey, L"RequiresFullStream", (DWORD *)param);
 }
 
 static HRESULT WINAPI MetadataReaderInfo_DoesSupportPadding(IWICMetadataReaderInfo *iface,
@@ -1691,7 +1690,7 @@ static HRESULT WINAPI MetadataReaderInfo_DoesSupportPadding(IWICMetadataReaderIn
 {
     MetadataReaderInfo *This = impl_from_IWICMetadataReaderInfo(iface);
     TRACE("(%p,%p)\n", iface, param);
-    return ComponentInfo_GetUINTValue(This->classkey, L"SupportsPadding", (UINT *)param);
+    return ComponentInfo_GetDWORDValue(This->classkey, L"SupportsPadding", (DWORD *)param);
 }
 
 static HRESULT WINAPI MetadataReaderInfo_DoesRequireFixedSize(IWICMetadataReaderInfo *iface,
@@ -1827,8 +1826,7 @@ static const IWICMetadataReaderInfoVtbl MetadataReaderInfo_Vtbl = {
 static void read_metadata_patterns(MetadataReaderInfo *info, GUID *container_guid,
                                    struct metadata_container *container)
 {
-    DWORD pattern_count=0;
-    UINT patterns_size=0;
+    UINT pattern_count=0, patterns_size=0;
     WCHAR subkeyname[11], guidkeyname[39];
     LONG res;
     HKEY containers_key, guid_key, patternkey;

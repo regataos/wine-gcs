@@ -25,9 +25,6 @@
 /* Define to 1 if you have the <asm/user.h> header file. */
 #undef HAVE_ASM_USER_H
 
-/* Define to 1 if you have the <attr/xattr.h> header file. */
-#undef HAVE_ATTR_XATTR_H
-
 /* Define to 1 if you have the <capi20.h> header file. */
 #undef HAVE_CAPI20_H
 
@@ -65,22 +62,6 @@
 /* Define to 1 if you have the `epoll_create' function. */
 #undef HAVE_EPOLL_CREATE
 
-/* Define to 1 if you have the `F3DAudioInitialize8' function. */
-#undef HAVE_F3DAUDIOINITIALIZE8
-
-/* Define to 1 if you have the `FAudioCreateReverb9WithCustomAllocatorEXT'
-   function. */
-#undef HAVE_FAUDIOCREATEREVERB9WITHCUSTOMALLOCATOREXT
-
-/* Define to 1 if you have the `FAudioLinkedVersion' function. */
-#undef HAVE_FAUDIOLINKEDVERSION
-
-/* Define to 1 if you have the `FAudio_CommitOperationSet' function. */
-#undef HAVE_FAUDIO_COMMITOPERATIONSET
-
-/* Define to 1 if you have the <FAudio.h> header file. */
-#undef HAVE_FAUDIO_H
-
 /* Define to 1 if you have the <float.h> header file. */
 #undef HAVE_FLOAT_H
 
@@ -107,6 +88,9 @@
 
 /* Define to 1 if you have the `futimesat' function. */
 #undef HAVE_FUTIMESAT
+
+/* Define to 1 if you have the <gcrypt.h> header file. */
+#undef HAVE_GCRYPT_H
 
 /* Define to 1 if you have the `getaddrinfo' function. */
 #undef HAVE_GETADDRINFO
@@ -285,6 +269,9 @@
 /* Define to 1 if you have the <mach-o/loader.h> header file. */
 #undef HAVE_MACH_O_LOADER_H
 
+/* Define to 1 if you have the `memfd_create' function. */
+#undef HAVE_MEMFD_CREATE
+
 /* Define to 1 if you have the <Metal/Metal.h> header file. */
 #undef HAVE_METAL_METAL_H
 
@@ -408,12 +395,6 @@
 /* Define to 1 if you have the <pwd.h> header file. */
 #undef HAVE_PWD_H
 
-/* Define to 1 if you have the `renameat' function. */
-#undef HAVE_RENAMEAT
-
-/* Define to 1 if you have the `renameat2' function. */
-#undef HAVE_RENAMEAT2
-
 /* Define to 1 if the system has the type `request_sense'. */
 #undef HAVE_REQUEST_SENSE
 
@@ -455,6 +436,9 @@
 
 /* Define to 1 if you have the <Security/Security.h> header file. */
 #undef HAVE_SECURITY_SECURITY_H
+
+/* Define to 1 if you have the `setpriority' function. */
+#undef HAVE_SETPRIORITY
 
 /* Define to 1 if you have the `setproctitle' function. */
 #undef HAVE_SETPROCTITLE
@@ -614,9 +598,6 @@
 /* Define to 1 if you have the <sys/event.h> header file. */
 #undef HAVE_SYS_EVENT_H
 
-/* Define to 1 if you have the <sys/extattr.h> header file. */
-#undef HAVE_SYS_EXTATTR_H
-
 /* Define to 1 if you have the <sys/filio.h> header file. */
 #undef HAVE_SYS_FILIO_H
 
@@ -722,9 +703,6 @@
 /* Define to 1 if you have the <sys/vnode.h> header file. */
 #undef HAVE_SYS_VNODE_H
 
-/* Define to 1 if you have the <sys/xattr.h> header file. */
-#undef HAVE_SYS_XATTR_H
-
 /* Define to 1 if you have the `tcdrain' function. */
 #undef HAVE_TCDRAIN
 
@@ -736,9 +714,6 @@
 
 /* Define to 1 if you have the <unistd.h> header file. */
 #undef HAVE_UNISTD_H
-
-/* Define to 1 if you have the `utimensat' function. */
-#undef HAVE_UTIMENSAT
 
 /* Define to 1 if you have the <utime.h> header file. */
 #undef HAVE_UTIME_H
@@ -854,14 +829,14 @@
 /* Define to the soname of the libEGL library. */
 #undef SONAME_LIBEGL
 
-/* Define to the soname of the libFAudio library. */
-#undef SONAME_LIBFAUDIO
-
 /* Define to the soname of the libfontconfig library. */
 #undef SONAME_LIBFONTCONFIG
 
 /* Define to the soname of the libfreetype library. */
 #undef SONAME_LIBFREETYPE
+
+/* Define to the soname of the libgcrypt library. */
+#undef SONAME_LIBGCRYPT
 
 /* Define to the soname of the libGL library. */
 #undef SONAME_LIBGL
@@ -948,9 +923,6 @@
    required in a freestanding environment). This macro is provided for
    backward compatibility; new code need not use it. */
 #undef STDC_HEADERS
-
-/* Define if xattr functions take additional arguments (Mac OS X) */
-#undef XATTR_ADDITIONAL_OPTIONS
 
 /* Define to 1 if the X Window System is missing or not being used. */
 #undef X_DISPLAY_MISSING

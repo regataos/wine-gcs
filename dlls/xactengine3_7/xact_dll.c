@@ -16,21 +16,23 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
-
 #include <stdarg.h>
 #include <FACT.h>
 
 #define NONAMELESSUNION
 #define COBJMACROS
+#include "objbase.h"
 
-#include "initguid.h"
 #if XACT3_VER < 0x0300
+#include "xact2wb.h"
+#include "initguid.h"
 #include "xact.h"
 #else
+#include "xact3wb.h"
+#include "xaudio2.h"
+#include "initguid.h"
 #include "xact3.h"
 #endif
-#include "rpcproxy.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(xact3);
@@ -327,6 +329,8 @@ static HRESULT WINAPI IXACT3SoundBankImpl_Prepare(IXACT3SoundBank *iface,
     cue->fact_cue = fcue;
     *ppCue = &cue->IXACT3Cue_iface;
 
+    FACTCue_SetPrivateContext(fcue, &cue->IXACT3Cue_iface);
+
     TRACE("Created Cue: %p\n", cue);
 
     return S_OK;
@@ -368,6 +372,8 @@ static HRESULT WINAPI IXACT3SoundBankImpl_Play(IXACT3SoundBank *iface,
         cue->IXACT3Cue_iface.lpVtbl = &XACT3Cue_Vtbl;
         cue->fact_cue = fcue;
         *ppCue = &cue->IXACT3Cue_iface;
+
+        FACTCue_SetPrivateContext(fcue, &cue->IXACT3Cue_iface);
     }
 
     return hr;
@@ -625,6 +631,8 @@ static HRESULT WINAPI IXACT3WaveBankImpl_Prepare(IXACT3WaveBank *iface,
     wave->fact_wave = fwave;
     *ppWave = &wave->IXACT3Wave_iface;
 
+    FACTWave_SetPrivateContext(fwave, &wave->IXACT3Wave_iface);
+
     TRACE("Created Wave: %p\n", wave);
 
     return S_OK;
@@ -666,6 +674,8 @@ static HRESULT WINAPI IXACT3WaveBankImpl_Play(IXACT3WaveBank *iface,
         wave->IXACT3Wave_iface.lpVtbl = &XACT3Wave_Vtbl;
         wave->fact_wave = fwave;
         *ppWave = &wave->IXACT3Wave_iface;
+
+        FACTWave_SetPrivateContext(fwave, &wave->IXACT3Wave_iface);
     }
 
     return hr;
@@ -835,6 +845,7 @@ static HRESULT WINAPI IXACT3EngineImpl_GetFinalMixFormat(IXACT3Engine *iface,
 static void FACTCALL fact_notification_cb(const FACTNotification *notification)
 {
     XACT3EngineImpl *engine = (XACT3EngineImpl *)notification->pvContext;
+    XACT_NOTIFICATION note;
 
     /* Older versions of FAudio don't pass through the context */
     if (!engine)
@@ -843,7 +854,48 @@ static void FACTCALL fact_notification_cb(const FACTNotification *notification)
         return;
     }
 
-    FIXME("Unsupported callback type %d\n", notification->type);
+    note.type = notification->type;
+    note.pvContext = engine->contexts[notification->type - 1];
+
+    if (notification->type == XACTNOTIFICATIONTYPE_SOUNDBANKDESTROYED)
+    {
+        note.soundBank.pSoundBank = FACTSoundBank_GetPrivateContext(notification->wave.pSoundBank);
+    }
+    else if (notification->type == XACTNOTIFICATIONTYPE_WAVESTOP
+#if XACT3_VER >= 0x0205
+             || notification->type == XACTNOTIFICATIONTYPE_WAVEDESTROYED
+             || notification->type == XACTNOTIFICATIONTYPE_WAVELOOPED
+             || notification->type == XACTNOTIFICATIONTYPE_WAVEPLAY
+             || notification->type == XACTNOTIFICATIONTYPE_WAVEPREPARED)
+#else
+             )
+#endif
+    {
+        note.wave.cueIndex = notification->wave.cueIndex;
+        note.wave.pCue = FACTCue_GetPrivateContext(notification->wave.pCue);
+        note.wave.pSoundBank = FACTSoundBank_GetPrivateContext(notification->wave.pSoundBank);
+#if XACT3_VER >= 0x0205
+        note.wave.pWave = FACTWave_GetPrivateContext(notification->wave.pWave);
+#endif
+        note.wave.pWaveBank = FACTWaveBank_GetPrivateContext(notification->wave.pWaveBank);
+    }
+    else if (notification->type == XACTNOTIFICATIONTYPE_CUEPLAY ||
+             notification->type == XACTNOTIFICATIONTYPE_CUEPREPARED ||
+             notification->type == XACTNOTIFICATIONTYPE_CUESTOP ||
+             notification->type == XACTNOTIFICATIONTYPE_CUEDESTROYED)
+    {
+        if (notification->type != XACTNOTIFICATIONTYPE_CUEDESTROYED)
+            note.cue.pCue = FACTCue_GetPrivateContext(notification->cue.pCue);
+        note.cue.cueIndex = notification->cue.cueIndex;
+        note.cue.pSoundBank = FACTSoundBank_GetPrivateContext(notification->cue.pSoundBank);
+    }
+    else
+    {
+        FIXME("Unsupported callback type %d\n", notification->type);
+        return;
+    }
+
+    engine->notification_callback(&note);
 }
 
 static HRESULT WINAPI IXACT3EngineImpl_Initialize(IXACT3Engine *iface,
@@ -959,6 +1011,8 @@ static HRESULT WINAPI IXACT3EngineImpl_CreateSoundBank(IXACT3Engine *iface,
     sb->fact_soundbank = fsb;
     *ppSoundBank = &sb->IXACT3SoundBank_iface;
 
+    FACTSoundBank_SetPrivateContext(fsb, &sb->IXACT3SoundBank_iface);
+
     TRACE("Created SoundBank: %p\n", sb);
 
     return S_OK;
@@ -1035,6 +1089,8 @@ static HRESULT WINAPI IXACT3EngineImpl_CreateInMemoryWaveBank(IXACT3Engine *ifac
 
     send_wavebank_notification(This, &wb->IXACT3WaveBank_iface);
 
+    FACTWaveBank_SetPrivateContext(fwb, &wb->IXACT3WaveBank_iface);
+
     TRACE("Created in-memory WaveBank: %p\n", wb);
 
     return S_OK;
@@ -1085,6 +1141,8 @@ static HRESULT WINAPI IXACT3EngineImpl_CreateStreamingWaveBank(IXACT3Engine *ifa
 
     send_wavebank_notification(This, &wb->IXACT3WaveBank_iface);
 
+    FACTWaveBank_SetPrivateContext(fwb, &wb->IXACT3WaveBank_iface);
+
     TRACE("Created streaming WaveBank: %p\n", wb);
 
     return S_OK;
@@ -1103,7 +1161,7 @@ static HRESULT WINAPI IXACT3EngineImpl_PrepareInMemoryWave(IXACT3Engine *iface,
     FACTWaveBankEntry fact_wavebank;
     UINT ret;
 
-    TRACE("(%p)->(0x%08lx, %p, %p, %p, %ld, %d, %p)\n", This, dwFlags, &entry, pdwSeekTable,
+    TRACE("(%p)->(0x%08x, %p, %p, %p, %d, %d, %p)\n", This, dwFlags, &entry, pdwSeekTable,
           pbWaveData, dwPlayOffset, nLoopCount, ppWave);
 
     fact_wavebank.dwFlagsAndDuration = entry.dwFlagsAndDuration;
@@ -1114,7 +1172,7 @@ static HRESULT WINAPI IXACT3EngineImpl_PrepareInMemoryWave(IXACT3Engine *iface,
     fact_wavebank.LoopRegion.dwTotalSamples = entry.LoopRegion.dwTotalSamples;
 
     ret = FACTAudioEngine_PrepareInMemoryWave(This->fact_engine, dwFlags, fact_wavebank,
-            (uint32_t *)pdwSeekTable, pbWaveData, dwPlayOffset, nLoopCount, &fwave);
+            pdwSeekTable, pbWaveData, dwPlayOffset, nLoopCount, &fwave);
     if(ret != 0 || !fwave)
     {
         ERR("Failed to CreateWave: %d (%p)\n", ret, fwave);
@@ -1132,6 +1190,8 @@ static HRESULT WINAPI IXACT3EngineImpl_PrepareInMemoryWave(IXACT3Engine *iface,
     wave->IXACT3Wave_iface.lpVtbl = &XACT3Wave_Vtbl;
     wave->fact_wave = fwave;
     *ppWave = &wave->IXACT3Wave_iface;
+
+    FACTWave_SetPrivateContext(fwave, &wave->IXACT3Wave_iface);
 
     TRACE("Created Wave: %p\n", wave);
 
@@ -1152,7 +1212,7 @@ static HRESULT WINAPI IXACT3EngineImpl_PrepareStreamingWave(IXACT3Engine *iface,
     FACTWaveBankEntry fact_wavebank;
     UINT ret;
 
-    TRACE("(%p)->(0x%08lx, %p, %p, %ld, %p, %ld, %d, %p)\n", This, dwFlags, &entry, &streamingParams,
+    TRACE("(%p)->(0x%08x, %p, %p, %d, %p, %d, %d, %p)\n", This, dwFlags, &entry, &streamingParams,
             dwAlignment, pdwSeekTable, dwPlayOffset, nLoopCount, ppWave);
 
     fake = (wrap_readfile_struct*) CoTaskMemAlloc(
@@ -1175,7 +1235,7 @@ static HRESULT WINAPI IXACT3EngineImpl_PrepareStreamingWave(IXACT3Engine *iface,
      *   passing through NULL to ensure it's not used.
      */
     ret = FACTAudioEngine_PrepareStreamingWave(This->fact_engine, dwFlags, fact_wavebank, fakeParms,
-            dwAlignment, (uint32_t *)pdwSeekTable, NULL, dwPlayOffset, nLoopCount, &fwave);
+            dwAlignment, pdwSeekTable, NULL, dwPlayOffset, nLoopCount, &fwave);
 
     if(ret != 0 || !fwave)
     {
@@ -1194,6 +1254,8 @@ static HRESULT WINAPI IXACT3EngineImpl_PrepareStreamingWave(IXACT3Engine *iface,
     wave->IXACT3Wave_iface.lpVtbl = &XACT3Wave_Vtbl;
     wave->fact_wave = fwave;
     *ppWave = &wave->IXACT3Wave_iface;
+
+    FACTWave_SetPrivateContext(fwave, &wave->IXACT3Wave_iface);
 
     TRACE("Created Wave: %p\n", wave);
 
@@ -1231,6 +1293,8 @@ static HRESULT WINAPI IXACT3EngineImpl_PrepareWave(IXACT3Engine *iface,
     wave->IXACT3Wave_iface.lpVtbl = &XACT3Wave_Vtbl;
     wave->fact_wave = fwave;
     *ppWave = &wave->IXACT3Wave_iface;
+
+    FACTWave_SetPrivateContext(fwave, &wave->IXACT3Wave_iface);
 
     TRACE("Created Wave: %p\n", wave);
 
@@ -1598,11 +1662,7 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD reason, void *pReserved)
     {
     case DLL_PROCESS_ATTACH:
         DisableThreadLibraryCalls( hinstDLL );
-
-#ifdef HAVE_FAUDIOLINKEDVERSION
         TRACE("Using FAudio version %d\n", FAudioLinkedVersion() );
-#endif
-
         break;
     }
     return TRUE;

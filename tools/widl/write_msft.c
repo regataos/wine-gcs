@@ -186,7 +186,7 @@ static void ctl2_init_segdir(
  *
  *  The hash key for the GUID.
  */
-static int ctl2_hash_guid(const struct uuid *guid)
+static int ctl2_hash_guid(const uuid_t *guid)
 {
     int hash;
     int i;
@@ -211,7 +211,7 @@ static int ctl2_hash_guid(const struct uuid *guid)
 static int ctl2_find_guid(
 	msft_typelib_t *typelib,   /* [I] The typelib to operate against. */
 	int hash_key,              /* [I] The hash key for the guid. */
-	const struct uuid *guid)   /* [I] The guid to find. */
+	const uuid_t *guid)        /* [I] The guid to find. */
 {
     int offset;
     MSFT_GuidEntry *guidentry;
@@ -1056,7 +1056,7 @@ static int encode_var(
          var, type, type->name ? type->name : "NULL");
 
     if (is_array(type) && !type_array_is_decl_as_ptr(type)) {
-        int num_dims, elements = 1, arrayoffset;
+        int num_dims, arrayoffset;
         type_t *atype;
         int *arraydata;
 
@@ -1083,7 +1083,6 @@ static int encode_var(
             arraydata[0] = type_array_get_dim(atype);
             arraydata[1] = 0;
             arraydata += 2;
-            elements *= type_array_get_dim(atype);
         }
 
         typeoffset = ctl2_alloc_segment(typelib, MSFT_SEG_TYPEDESC, 8, 0);
@@ -1255,7 +1254,7 @@ static void write_default_value(msft_typelib_t *typelib, type_t *type, expr_t *e
     write_int_value(typelib, out, vt, expr->cval);
 }
 
-static void set_custdata(msft_typelib_t *typelib, const struct uuid *guid,
+static void set_custdata(msft_typelib_t *typelib, const uuid_t *guid,
                          int vt, const void *value, int *offset)
 {
     int guidoffset;
@@ -1994,7 +1993,7 @@ static msft_typeinfo_t *create_msft_typeinfo(msft_typelib_t *typelib, enum type_
             break;
 
         case ATTR_UUID:
-            guidentry.guid = *(struct uuid *)attr->u.pval;
+            guidentry.guid = *(uuid_t *)attr->u.pval;
             guidentry.hreftype = typelib->typelib_typeinfo_offsets[typeinfo->typekind >> 16];
             guidentry.next_hash = -1;
             typeinfo->posguid = ctl2_alloc_guid(typelib, &guidentry);
@@ -2027,8 +2026,8 @@ static void add_dispatch(msft_typelib_t *typelib)
     int guid_offset, impfile_offset, hash_key;
     MSFT_GuidEntry guidentry;
     MSFT_ImpInfo impinfo;
-    static const struct uuid stdole =        {0x00020430,0x0000,0x0000,{0xc0,0x00,0x00,0x00,0x00,0x00,0x00,0x46}};
-    static const struct uuid iid_idispatch = {0x00020400,0x0000,0x0000,{0xc0,0x00,0x00,0x00,0x00,0x00,0x00,0x46}};
+    static const uuid_t stdole =        {0x00020430,0x0000,0x0000,{0xc0,0x00,0x00,0x00,0x00,0x00,0x00,0x46}};
+    static const uuid_t iid_idispatch = {0x00020400,0x0000,0x0000,{0xc0,0x00,0x00,0x00,0x00,0x00,0x00,0x46}};
 
     if(typelib->typelib_header.dispatchpos != -1) return;
 
@@ -2511,7 +2510,7 @@ static void set_guid(msft_typelib_t *typelib)
 {
     MSFT_GuidEntry guidentry = { {0}, -2, -1 };
     int offset;
-    struct uuid *ptr = get_attrp( typelib->typelib->attrs, ATTR_UUID );
+    uuid_t *ptr = get_attrp( typelib->typelib->attrs, ATTR_UUID );
 
     if (ptr) guidentry.guid = *ptr;
 
@@ -2755,9 +2754,9 @@ int create_msft_typelib(typelib_t *typelib)
     time_t cur_time;
     char *time_override;
     unsigned int version = 7 << 24 | 555; /* 7.00.0555 */
-    static const struct uuid midl_time_guid    = {0xde77ba63,0x517c,0x11d1,{0xa2,0xda,0x00,0x00,0xf8,0x77,0x3c,0xe9}};
-    static const struct uuid midl_version_guid = {0xde77ba64,0x517c,0x11d1,{0xa2,0xda,0x00,0x00,0xf8,0x77,0x3c,0xe9}};
-    static const struct uuid midl_info_guid    = {0xde77ba65,0x517c,0x11d1,{0xa2,0xda,0x00,0x00,0xf8,0x77,0x3c,0xe9}};
+    static const uuid_t midl_time_guid    = {0xde77ba63,0x517c,0x11d1,{0xa2,0xda,0x00,0x00,0xf8,0x77,0x3c,0xe9}};
+    static const uuid_t midl_version_guid = {0xde77ba64,0x517c,0x11d1,{0xa2,0xda,0x00,0x00,0xf8,0x77,0x3c,0xe9}};
+    static const uuid_t midl_info_guid = {0xde77ba65,0x517c,0x11d1,{0xa2,0xda,0x00,0x00,0xf8,0x77,0x3c,0xe9}};
     char info_string[128];
 
     msft = xmalloc(sizeof(*msft));

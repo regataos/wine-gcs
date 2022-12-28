@@ -16,14 +16,34 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "wmvcore.h"
+#include <stdarg.h>
+#include <stddef.h>
 
-#include "initguid.h"
+#define COBJMACROS
+#include "windef.h"
+#include "winbase.h"
+
+#include "wmvcore.h"
 #include "wmsdk.h"
+
 #include "wine/debug.h"
 #include "wine/heap.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(wmvcore);
+
+HRESULT WINAPI WMCreateSyncReader(IUnknown *reserved, DWORD rights, IWMSyncReader **reader)
+{
+    TRACE("reserved %p, rights %#lx, reader %p.\n", reserved, rights, reader);
+
+    return winegstreamer_create_wm_sync_reader(NULL, (void **)reader);
+}
+
+HRESULT WINAPI WMCreateSyncReaderPriv(IWMSyncReader **reader)
+{
+    TRACE("reader %p.\n", reader);
+
+    return winegstreamer_create_wm_sync_reader(NULL, (void **)reader);
+}
 
 HRESULT WINAPI WMCheckURLExtension(const WCHAR *url)
 {
@@ -113,7 +133,7 @@ static ULONG WINAPI WMProfileManager_AddRef(IWMProfileManager2 *iface)
     WMProfileManager *This = impl_from_IWMProfileManager2(iface);
     LONG ref = InterlockedIncrement(&This->ref);
 
-    TRACE("(%p) ref=%d\n", This, ref);
+    TRACE("(%p) ref=%ld\n", This, ref);
 
     return ref;
 }
@@ -123,7 +143,7 @@ static ULONG WINAPI WMProfileManager_Release(IWMProfileManager2 *iface)
     WMProfileManager *This = impl_from_IWMProfileManager2(iface);
     LONG ref = InterlockedDecrement(&This->ref);
 
-    TRACE("(%p) ref=%d\n", This, ref);
+    TRACE("(%p) ref=%ld\n", This, ref);
 
     if(!ref)
         heap_free(This);
@@ -169,7 +189,7 @@ static HRESULT WINAPI WMProfileManager_GetSystemProfileCount(IWMProfileManager2 
 static HRESULT WINAPI WMProfileManager_LoadSystemProfile(IWMProfileManager2 *iface, DWORD index, IWMProfile **ret)
 {
     WMProfileManager *This = impl_from_IWMProfileManager2(iface);
-    FIXME("(%p)->(%d %p)\n", This, index, ret);
+    FIXME("(%p)->(%ld %p)\n", This, index, ret);
     return E_NOTIMPL;
 }
 

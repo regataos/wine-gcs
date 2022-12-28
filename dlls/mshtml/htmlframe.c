@@ -138,7 +138,7 @@ static HRESULT WINAPI HTMLFrameBase_put_src(IHTMLFrameBase *iface, BSTR v)
             nsres = nsIDOMHTMLIFrameElement_SetSrc(This->nsiframe, &nsstr);
         nsAString_Finish(&nsstr);
         if(NS_FAILED(nsres)) {
-            ERR("SetSrc failed: %08x\n", nsres);
+            ERR("SetSrc failed: %08lx\n", nsres);
             return E_FAIL;
         }
 
@@ -189,7 +189,7 @@ static HRESULT WINAPI HTMLFrameBase_put_name(IHTMLFrameBase *iface, BSTR v)
         nsres = nsIDOMHTMLIFrameElement_SetName(This->nsiframe, &name_str);
     nsAString_Finish(&name_str);
     if(NS_FAILED(nsres)) {
-        ERR("SetName failed: %08x\n", nsres);
+        ERR("SetName failed: %08lx\n", nsres);
         return E_FAIL;
     }
 
@@ -251,7 +251,7 @@ static HRESULT WINAPI HTMLFrameBase_put_frameBorder(IHTMLFrameBase *iface, BSTR 
         nsres = nsIDOMHTMLIFrameElement_SetFrameBorder(This->nsiframe, &nsstr);
     nsAString_Finish(&nsstr);
     if(NS_FAILED(nsres)) {
-        ERR("SetFrameBorder failed: %08x\n", nsres);
+        ERR("SetFrameBorder failed: %08lx\n", nsres);
         return E_FAIL;
     }
 
@@ -352,7 +352,7 @@ static HRESULT WINAPI HTMLFrameBase_get_marginWidth(IHTMLFrameBase *iface, VARIA
             V_BSTR(p) = NULL;
         }
     }else {
-        ERR("GetMarginWidth failed: %08x\n", nsres);
+        ERR("GetMarginWidth failed: %08lx\n", nsres);
         hres = E_FAIL;
     }
 
@@ -419,7 +419,7 @@ static HRESULT WINAPI HTMLFrameBase_get_marginHeight(IHTMLFrameBase *iface, VARI
             V_BSTR(p) = NULL;
         }
     }else {
-        ERR("SetMarginHeight failed: %08x\n", nsres);
+        ERR("SetMarginHeight failed: %08lx\n", nsres);
         hres = E_FAIL;
     }
 
@@ -465,7 +465,7 @@ static HRESULT WINAPI HTMLFrameBase_put_scrolling(IHTMLFrameBase *iface, BSTR v)
     nsAString_Finish(&nsstr);
 
     if(NS_FAILED(nsres)) {
-        ERR("SetScrolling failed: 0x%08x\n", nsres);
+        ERR("SetScrolling failed: 0x%08lx\n", nsres);
         return E_FAIL;
     }
 
@@ -493,7 +493,7 @@ static HRESULT WINAPI HTMLFrameBase_get_scrolling(IHTMLFrameBase *iface, BSTR *p
     }
 
     if(NS_FAILED(nsres)) {
-        ERR("GetScrolling failed: 0x%08x\n", nsres);
+        ERR("GetScrolling failed: 0x%08lx\n", nsres);
         nsAString_Finish(&nsstr);
         return E_FAIL;
     }
@@ -942,7 +942,7 @@ static HRESULT HTMLFrameElement_get_dispid(HTMLDOMNode *iface, BSTR name,
     return search_window_props(This->framebase.content_window->base.inner_window, name, grfdex, pid);
 }
 
-static HRESULT HTMLFrameElement_invoke(HTMLDOMNode *iface, DISPID id, LCID lcid,
+static HRESULT HTMLFrameElement_invoke(HTMLDOMNode *iface, IDispatch *this_obj, DISPID id, LCID lcid,
         WORD flags, DISPPARAMS *params, VARIANT *res, EXCEPINFO *ei, IServiceProvider *caller)
 {
     HTMLFrameElement *This = frame_from_HTMLDOMNode(iface);
@@ -952,8 +952,8 @@ static HRESULT HTMLFrameElement_invoke(HTMLDOMNode *iface, DISPID id, LCID lcid,
         return E_FAIL;
     }
 
-    return IDispatchEx_InvokeEx(&This->framebase.content_window->base.IDispatchEx_iface, id, lcid,
-            flags, params, res, ei, caller);
+    return dispex_invoke(&This->framebase.content_window->base.inner_window->event_target.dispex,
+                         this_obj, id, lcid, flags, params, res, ei, caller);
 }
 
 static HRESULT HTMLFrameElement_bind_to_tree(HTMLDOMNode *iface)
@@ -965,7 +965,7 @@ static HRESULT HTMLFrameElement_bind_to_tree(HTMLDOMNode *iface)
 
     nsres = nsIDOMHTMLFrameElement_GetContentDocument(This->framebase.nsframe, &nsdoc);
     if(NS_FAILED(nsres) || !nsdoc) {
-        ERR("GetContentDocument failed: %08x\n", nsres);
+        ERR("GetContentDocument failed: %08lx\n", nsres);
         return E_FAIL;
     }
 
@@ -1022,9 +1022,10 @@ static const tid_t HTMLFrameElement_iface_tids[] = {
     0
 };
 
-static dispex_static_data_t HTMLFrameElement_dispex = {
+dispex_static_data_t HTMLFrameElement_dispex = {
     L"HTMLFrameElement",
     NULL,
+    PROTO_ID_HTMLFrameElement,
     DispHTMLFrameElement_tid,
     HTMLFrameElement_iface_tids,
     HTMLElement_init_dispex_info
@@ -1116,7 +1117,7 @@ static HRESULT WINAPI HTMLIFrameElement_Invoke(IHTMLIFrameElement *iface, DISPID
 static HRESULT WINAPI HTMLIFrameElement_put_vspace(IHTMLIFrameElement *iface, LONG v)
 {
     HTMLIFrame *This = impl_from_IHTMLIFrameElement(iface);
-    FIXME("(%p)->(%d)\n", This, v);
+    FIXME("(%p)->(%ld)\n", This, v);
     return E_NOTIMPL;
 }
 
@@ -1130,7 +1131,7 @@ static HRESULT WINAPI HTMLIFrameElement_get_vspace(IHTMLIFrameElement *iface, LO
 static HRESULT WINAPI HTMLIFrameElement_put_hspace(IHTMLIFrameElement *iface, LONG v)
 {
     HTMLIFrame *This = impl_from_IHTMLIFrameElement(iface);
-    FIXME("(%p)->(%d)\n", This, v);
+    FIXME("(%p)->(%ld)\n", This, v);
     return E_NOTIMPL;
 }
 
@@ -1246,7 +1247,7 @@ static HRESULT WINAPI HTMLIFrameElement2_put_height(IHTMLIFrameElement2 *iface, 
     nsres = nsIDOMHTMLIFrameElement_SetHeight(This->framebase.nsiframe, &nsstr);
     nsAString_Finish(&nsstr);
     if(NS_FAILED(nsres)) {
-        ERR("SetHeight failed: %08x\n", nsres);
+        ERR("SetHeight failed: %08lx\n", nsres);
         return E_FAIL;
     }
 
@@ -1284,7 +1285,7 @@ static HRESULT WINAPI HTMLIFrameElement2_put_width(IHTMLIFrameElement2 *iface, V
     nsres = nsIDOMHTMLIFrameElement_SetWidth(This->framebase.nsiframe, &nsstr);
     nsAString_Finish(&nsstr);
     if(NS_FAILED(nsres)) {
-        ERR("SetWidth failed: %08x\n", nsres);
+        ERR("SetWidth failed: %08lx\n", nsres);
         return E_FAIL;
     }
 
@@ -1514,7 +1515,7 @@ static HRESULT HTMLIFrame_get_dispid(HTMLDOMNode *iface, BSTR name,
     return search_window_props(This->framebase.content_window->base.inner_window, name, grfdex, pid);
 }
 
-static HRESULT HTMLIFrame_invoke(HTMLDOMNode *iface, DISPID id, LCID lcid,
+static HRESULT HTMLIFrame_invoke(HTMLDOMNode *iface, IDispatch *this_obj, DISPID id, LCID lcid,
         WORD flags, DISPPARAMS *params, VARIANT *res, EXCEPINFO *ei, IServiceProvider *caller)
 {
     HTMLIFrame *This = iframe_from_HTMLDOMNode(iface);
@@ -1524,8 +1525,8 @@ static HRESULT HTMLIFrame_invoke(HTMLDOMNode *iface, DISPID id, LCID lcid,
         return E_FAIL;
     }
 
-    return IDispatchEx_InvokeEx(&This->framebase.content_window->base.IDispatchEx_iface, id, lcid,
-            flags, params, res, ei, caller);
+    return dispex_invoke(&This->framebase.content_window->base.inner_window->event_target.dispex,
+                         this_obj, id, lcid, flags, params, res, ei, caller);
 }
 
 static HRESULT HTMLIFrame_get_readystate(HTMLDOMNode *iface, BSTR *p)
@@ -1544,7 +1545,7 @@ static HRESULT HTMLIFrame_bind_to_tree(HTMLDOMNode *iface)
 
     nsres = nsIDOMHTMLIFrameElement_GetContentDocument(This->framebase.nsiframe, &nsdoc);
     if(NS_FAILED(nsres) || !nsdoc) {
-        ERR("GetContentDocument failed: %08x\n", nsres);
+        ERR("GetContentDocument failed: %08lx\n", nsres);
         return E_FAIL;
     }
 
@@ -1603,9 +1604,10 @@ static const tid_t HTMLIFrame_iface_tids[] = {
     0
 };
 
-static dispex_static_data_t HTMLIFrame_dispex = {
+dispex_static_data_t HTMLIFrame_dispex = {
     L"HTMLIFrameElement",
     NULL,
+    PROTO_ID_HTMLIFrameElement,
     DispHTMLIFrame_tid,
     HTMLIFrame_iface_tids,
     HTMLElement_init_dispex_info

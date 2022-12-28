@@ -84,7 +84,7 @@ static HRESULT load_typelib(void)
     hres = LoadRegTypeLib(&LIBID_SHDocVw, 1, 0, LOCALE_SYSTEM_DEFAULT, &tl);
     if (FAILED(hres))
     {
-        ERR("LoadRegTypeLib failed: %08lx\n", hres);
+        ERR("LoadRegTypeLib failed: %08x\n", hres);
         return hres;
     }
 
@@ -107,7 +107,7 @@ static HRESULT get_typeinfo(tid_t tid, ITypeInfo **typeinfo)
 
         hres = ITypeLib_GetTypeInfoOfGuid(typelib, tid_ids[tid], &ti);
         if (FAILED(hres)) {
-            ERR("GetTypeInfoOfGuid(%s) failed: %08lx\n", debugstr_guid(tid_ids[tid]), hres);
+            ERR("GetTypeInfoOfGuid(%s) failed: %08x\n", debugstr_guid(tid_ids[tid]), hres);
             return hres;
         }
 
@@ -467,7 +467,7 @@ static BOOL process_changes( const WCHAR *folder, char *buf )
             break;
 
         default:
-            WARN( "unexpected action %lu\n", info->Action );
+            WARN( "unexpected action %u\n", info->Action );
             break;
         }
         if (!info->NextEntryOffset) break;
@@ -623,7 +623,7 @@ static WNDPROC desktop_orig_wndproc;
 /* window procedure for the desktop window */
 static LRESULT WINAPI desktop_wnd_proc( HWND hwnd, UINT message, WPARAM wp, LPARAM lp )
 {
-    WINE_TRACE( "got msg %04x wp %Ix lp %Ix\n", message, wp, lp );
+    WINE_TRACE( "got msg %04x wp %lx lp %lx\n", message, wp, lp );
 
     switch(message)
     {
@@ -857,7 +857,7 @@ static HMODULE load_graphics_driver( const WCHAR *driver, const GUID *guid )
             strcpy( error, "Make sure that your X server is running and that $DISPLAY is set correctly." );
             break;
         default:
-            sprintf( error, "Unknown error (%lu).", GetLastError() );
+            sprintf( error, "Unknown error (%u).", GetLastError() );
             break;
         }
         name = next;
@@ -906,7 +906,7 @@ static void initialize_display_settings(void)
             continue;
         }
 
-        WINE_TRACE( "Device %s current display mode %lux%lu %luBits %luHz at %ld,%ld.\n",
+        WINE_TRACE( "Device %s current display mode %ux%u %uBits %uHz at %d,%d.\n",
                     wine_dbgstr_w( ddW.DeviceName ), dmW.dmPelsWidth, dmW.dmPelsHeight,
                     dmW.dmBitsPerPel, dmW.dmDisplayFrequency, dmW.u1.s2.dmPosition.x,
                     dmW.u1.s2.dmPosition.y );
@@ -954,6 +954,38 @@ static inline BOOL is_whitespace(WCHAR c)
     return c == ' ' || c == '\t';
 }
 
+static HANDLE start_tabtip_process(void)
+{
+    static const WCHAR tabtip_started_event[] = L"TABTIP_STARTED_EVENT";
+    PROCESS_INFORMATION pi;
+    STARTUPINFOW si = { sizeof(si) };
+    HANDLE wait_handles[2];
+
+    if (!CreateProcessW(L"C:\\windows\\system32\\tabtip.exe", NULL,
+                        NULL, NULL, TRUE, DETACHED_PROCESS, NULL, NULL, &si, &pi))
+    {
+        WINE_ERR("Couldn't start tabtip.exe: error %u\n", GetLastError());
+        return FALSE;
+    }
+    CloseHandle(pi.hThread);
+
+    wait_handles[0] = CreateEventW(NULL, TRUE, FALSE, tabtip_started_event);
+    wait_handles[1] = pi.hProcess;
+
+    /* wait for the event to become available or the process to exit */
+    if ((WaitForMultipleObjects(2, wait_handles, FALSE, INFINITE)) == WAIT_OBJECT_0 + 1)
+    {
+        DWORD exit_code;
+        GetExitCodeProcess(pi.hProcess, &exit_code);
+        WINE_ERR("Unexpected termination of tabtip.exe - exit code %d\n", exit_code);
+        CloseHandle(wait_handles[0]);
+        return pi.hProcess;
+    }
+
+    CloseHandle(wait_handles[0]);
+    return pi.hProcess;
+}
+
 /* main desktop management function */
 void manage_desktop( WCHAR *arg )
 {
@@ -962,6 +994,7 @@ void manage_desktop( WCHAR *arg )
     GUID guid;
     MSG msg;
     HWND hwnd;
+    HANDLE taptip;
     HMODULE graphics_driver;
     unsigned int width, height;
     WCHAR *cmdline = NULL, *driver = NULL;
@@ -1006,7 +1039,7 @@ void manage_desktop( WCHAR *arg )
     {
         if (!(desktop = CreateDesktopW( name, NULL, NULL, 0, DESKTOP_ALL_ACCESS, NULL )))
         {
-            WINE_ERR( "failed to create desktop %s error %ld\n", wine_dbgstr_w(name), GetLastError() );
+            WINE_ERR( "failed to create desktop %s error %d\n", wine_dbgstr_w(name), GetLastError() );
             ExitProcess( 1 );
         }
         SetThreadDesktop( desktop );
@@ -1070,6 +1103,9 @@ void manage_desktop( WCHAR *arg )
     desktopshellbrowserwindow_init();
     shellwindows_init();
 
+    /* FIXME: hack, run tabtip.exe on startup. */
+    taptip = start_tabtip_process();
+
     /* run the desktop message loop */
     if (hwnd)
     {
@@ -1079,6 +1115,10 @@ void manage_desktop( WCHAR *arg )
     }
 
     if (pShellDDEInit) pShellDDEInit( FALSE );
+
+    TerminateProcess( taptip, 0 );
+    WaitForSingleObject( taptip, INFINITE );
+    CloseHandle( taptip );
 
     ExitProcess( 0 );
 }
@@ -1131,7 +1171,7 @@ static HRESULT WINAPI shellwindows_GetTypeInfoCount(IShellWindows *iface, UINT *
 static HRESULT WINAPI shellwindows_GetTypeInfo(IShellWindows *iface,
         UINT iTInfo, LCID lcid, ITypeInfo **ppTInfo)
 {
-    TRACE("%d %ld %p\n", iTInfo, lcid, ppTInfo);
+    TRACE("%d %d %p\n", iTInfo, lcid, ppTInfo);
     return get_typeinfo(IShellWindows_tid, ppTInfo);
 }
 
@@ -1142,7 +1182,7 @@ static HRESULT WINAPI shellwindows_GetIDsOfNames(IShellWindows *iface,
     ITypeInfo *typeinfo;
     HRESULT hr;
 
-    TRACE("%s %p %d %ld %p\n", debugstr_guid(riid), rgszNames, cNames,
+    TRACE("%s %p %d %d %p\n", debugstr_guid(riid), rgszNames, cNames,
           lcid, rgDispId);
 
     if (!rgszNames || cNames == 0 || !rgDispId)
@@ -1166,7 +1206,7 @@ static HRESULT WINAPI shellwindows_Invoke(IShellWindows *iface,
     ITypeInfo *typeinfo;
     HRESULT hr;
 
-    TRACE("%ld %s %ld %08x %p %p %p %p\n", dispIdMember, debugstr_guid(riid),
+    TRACE("%d %s %d %08x %p %p %p %p\n", dispIdMember, debugstr_guid(riid),
             lcid, wFlags, pDispParams, pVarResult, pExcepInfo, puArgErr);
 
     hr = get_typeinfo(IShellWindows_tid, &typeinfo);
@@ -1205,7 +1245,7 @@ static HRESULT WINAPI shellwindows_Register(IShellWindows *iface,
     struct shellwindows *sw = impl_from_IShellWindows(iface);
     struct window *window;
 
-    TRACE("iface %p, disp %p, hwnd %#lx, class %u, cookie %p.\n", iface, disp, hwnd, class, cookie);
+    TRACE("iface %p, disp %p, hwnd %#x, class %u, cookie %p.\n", iface, disp, hwnd, class, cookie);
 
     if (!hwnd)
         return E_POINTER;
@@ -1234,7 +1274,7 @@ static HRESULT WINAPI shellwindows_Register(IShellWindows *iface,
 static HRESULT WINAPI shellwindows_RegisterPending(IShellWindows *iface,
     LONG threadid, VARIANT *loc, VARIANT *root, int class, LONG *cookie)
 {
-    FIXME("0x%lx %s %s 0x%x %p\n", threadid, debugstr_variant(loc), debugstr_variant(root),
+    FIXME("0x%x %s %s 0x%x %p\n", threadid, debugstr_variant(loc), debugstr_variant(root),
             class, cookie);
     return E_NOTIMPL;
 }
@@ -1244,7 +1284,7 @@ static HRESULT WINAPI shellwindows_Revoke(IShellWindows *iface, LONG cookie)
     struct shellwindows *sw = impl_from_IShellWindows(iface);
     unsigned int i;
 
-    TRACE("iface %p, cookie %lu.\n", iface, cookie);
+    TRACE("iface %p, cookie %u.\n", iface, cookie);
 
     EnterCriticalSection(&sw->cs);
 
@@ -1268,7 +1308,7 @@ static HRESULT WINAPI shellwindows_OnNavigate(IShellWindows *iface, LONG cookie,
     struct shellwindows *sw = impl_from_IShellWindows(iface);
     unsigned int i;
 
-    TRACE("iface %p, cookie %lu, location %s.\n", iface, cookie, debugstr_variant(location));
+    TRACE("iface %p, cookie %u, location %s.\n", iface, cookie, debugstr_variant(location));
 
     if (V_VT(location) != (VT_ARRAY | VT_UI1))
     {
@@ -1301,7 +1341,7 @@ static HRESULT WINAPI shellwindows_OnNavigate(IShellWindows *iface, LONG cookie,
 
 static HRESULT WINAPI shellwindows_OnActivated(IShellWindows *iface, LONG cookie, VARIANT_BOOL active)
 {
-    FIXME("0x%lx 0x%x\n", cookie, active);
+    FIXME("0x%x 0x%x\n", cookie, active);
     return E_NOTIMPL;
 }
 
@@ -1352,7 +1392,7 @@ static HRESULT WINAPI shellwindows_FindWindowSW(IShellWindows *iface, VARIANT *l
 
 static HRESULT WINAPI shellwindows_OnCreated(IShellWindows *iface, LONG cookie, IUnknown *punk)
 {
-    FIXME("0x%lx %p\n", cookie, punk);
+    FIXME("0x%x %p\n", cookie, punk);
     return E_NOTIMPL;
 }
 
@@ -1506,7 +1546,7 @@ static HRESULT WINAPI webbrowser_GetTypeInfo(IWebBrowser2 *iface, UINT iTInfo, L
                                      LPTYPEINFO *ppTInfo)
 {
     struct shellbrowserwindow *This = impl_from_IWebBrowser2(iface);
-    TRACE("(%p)->(%d %ld %p)\n", This, iTInfo, lcid, ppTInfo);
+    TRACE("(%p)->(%d %d %p)\n", This, iTInfo, lcid, ppTInfo);
     return get_typeinfo(IWebBrowser2_tid, ppTInfo);
 }
 
@@ -1518,7 +1558,7 @@ static HRESULT WINAPI webbrowser_GetIDsOfNames(IWebBrowser2 *iface, REFIID riid,
     ITypeInfo *typeinfo;
     HRESULT hr;
 
-    TRACE("(%p)->(%s %p %d %ld %p)\n", This, debugstr_guid(riid), rgszNames, cNames,
+    TRACE("(%p)->(%s %p %d %d %p)\n", This, debugstr_guid(riid), rgszNames, cNames,
           lcid, rgDispId);
 
     if(!rgszNames || cNames == 0 || !rgDispId)
@@ -1543,7 +1583,7 @@ static HRESULT WINAPI webbrowser_Invoke(IWebBrowser2 *iface, DISPID dispIdMember
     ITypeInfo *typeinfo;
     HRESULT hr;
 
-    TRACE("(%p)->(%ld %s %ld %08x %p %p %p %p)\n", This, dispIdMember, debugstr_guid(riid),
+    TRACE("(%p)->(%d %s %d %08x %p %p %p %p)\n", This, dispIdMember, debugstr_guid(riid),
             lcid, wFlags, pDispParams, pVarResult, pExcepInfo, puArgErr);
 
     hr = get_typeinfo(IWebBrowser2_tid, &typeinfo);
@@ -1675,7 +1715,7 @@ static HRESULT WINAPI webbrowser_get_Left(IWebBrowser2 *iface, LONG *pl)
 static HRESULT WINAPI webbrowser_put_Left(IWebBrowser2 *iface, LONG Left)
 {
     struct shellbrowserwindow *This = impl_from_IWebBrowser2(iface);
-    FIXME("(%p)->(%ld)\n", This, Left);
+    FIXME("(%p)->(%d)\n", This, Left);
     return E_NOTIMPL;
 }
 
@@ -1689,7 +1729,7 @@ static HRESULT WINAPI webbrowser_get_Top(IWebBrowser2 *iface, LONG *pl)
 static HRESULT WINAPI webbrowser_put_Top(IWebBrowser2 *iface, LONG Top)
 {
     struct shellbrowserwindow *This = impl_from_IWebBrowser2(iface);
-    FIXME("(%p)->(%ld)\n", This, Top);
+    FIXME("(%p)->(%d)\n", This, Top);
     return E_NOTIMPL;
 }
 
@@ -1703,7 +1743,7 @@ static HRESULT WINAPI webbrowser_get_Width(IWebBrowser2 *iface, LONG *pl)
 static HRESULT WINAPI webbrowser_put_Width(IWebBrowser2 *iface, LONG Width)
 {
     struct shellbrowserwindow *This = impl_from_IWebBrowser2(iface);
-    FIXME("(%p)->(%ld)\n", This, Width);
+    FIXME("(%p)->(%d)\n", This, Width);
     return E_NOTIMPL;
 }
 
@@ -1717,7 +1757,7 @@ static HRESULT WINAPI webbrowser_get_Height(IWebBrowser2 *iface, LONG *pl)
 static HRESULT WINAPI webbrowser_put_Height(IWebBrowser2 *iface, LONG Height)
 {
     struct shellbrowserwindow *This = impl_from_IWebBrowser2(iface);
-    FIXME("(%p)->(%ld)\n", This, Height);
+    FIXME("(%p)->(%d)\n", This, Height);
     return E_NOTIMPL;
 }
 
@@ -2232,7 +2272,7 @@ static HRESULT WINAPI shellbrowser_BrowseObject(IShellBrowser *iface, LPCITEMIDL
 
 static HRESULT WINAPI shellbrowser_GetViewStateStream(IShellBrowser *iface, DWORD mode, IStream **stream)
 {
-    FIXME("0x%lx %p\n", mode, stream);
+    FIXME("0x%x %p\n", mode, stream);
     return E_NOTIMPL;
 }
 
@@ -2245,7 +2285,7 @@ static HRESULT WINAPI shellbrowser_GetControlWindow(IShellBrowser *iface, UINT i
 static HRESULT WINAPI shellbrowser_SendControlMsg(IShellBrowser *iface, UINT id, UINT uMsg,
     WPARAM wParam, LPARAM lParam, LRESULT *pret)
 {
-    FIXME("%d %d %Ix %Ix %p\n", id, uMsg, wParam, lParam, pret);
+    FIXME("%d %d %lx %lx %p\n", id, uMsg, wParam, lParam, pret);
     return E_NOTIMPL;
 }
 
@@ -2323,5 +2363,5 @@ static void shellwindows_init(void)
         &shellwindows_classfactory.classreg);
 
     if (FAILED(hr))
-        WARN("Failed to register ShellWindows object: %08lx\n", hr);
+        WARN("Failed to register ShellWindows object: %08x\n", hr);
 }

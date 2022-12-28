@@ -26,7 +26,6 @@
 #include "winnt.h"
 #include "winternl.h"
 #include "unixlib.h"
-#include "wine/debug.h"
 #include "wine/asm.h"
 
 #define DECLARE_CRITICAL_SECTION(cs) \
@@ -43,6 +42,8 @@ static const UINT_PTR page_size = 0x1000;
 #else
 extern UINT_PTR page_size DECLSPEC_HIDDEN;
 #endif
+
+extern BOOL delay_heap_free DECLSPEC_HIDDEN;
 
 /* exceptions */
 extern LONG call_vectored_handlers( EXCEPTION_RECORD *rec, CONTEXT *context ) DECLSPEC_HIDDEN;
@@ -85,51 +86,10 @@ extern HMODULE kernel32_handle DECLSPEC_HIDDEN;
 extern void (FASTCALL *pBaseThreadInitThunk)(DWORD,LPTHREAD_START_ROUTINE,void *) DECLSPEC_HIDDEN;
 extern const struct unix_funcs *unix_funcs DECLSPEC_HIDDEN;
 
-struct hypervisor_shared_data
-{
-    UINT64 unknown;
-    UINT64 QpcMultiplier;
-    UINT64 QpcBias;
-};
-
-extern struct hypervisor_shared_data *hypervisor_shared_data DECLSPEC_HIDDEN;
 extern struct _KUSER_SHARED_DATA *user_shared_data DECLSPEC_HIDDEN;
 
 extern int CDECL NTDLL__vsnprintf( char *str, SIZE_T len, const char *format, va_list args ) DECLSPEC_HIDDEN;
 extern int CDECL NTDLL__vsnwprintf( WCHAR *str, SIZE_T len, const WCHAR *format, va_list args ) DECLSPEC_HIDDEN;
-
-/* inline version of RtlEnterCriticalSection */
-static inline void enter_critical_section( RTL_CRITICAL_SECTION *crit )
-{
-    if (InterlockedIncrement( &crit->LockCount ))
-    {
-        if (crit->OwningThread == ULongToHandle(GetCurrentThreadId()))
-        {
-            crit->RecursionCount++;
-            return;
-        }
-        RtlpWaitForCriticalSection( crit );
-    }
-    crit->OwningThread   = ULongToHandle(GetCurrentThreadId());
-    crit->RecursionCount = 1;
-}
-
-/* inline version of RtlLeaveCriticalSection */
-static inline void leave_critical_section( RTL_CRITICAL_SECTION *crit )
-{
-    WINE_DECLARE_DEBUG_CHANNEL(ntdll);
-    if (--crit->RecursionCount)
-    {
-        if (crit->RecursionCount > 0) InterlockedDecrement( &crit->LockCount );
-        else ERR_(ntdll)( "section %p is not acquired\n", crit );
-    }
-    else
-    {
-        crit->OwningThread = 0;
-        if (InterlockedDecrement( &crit->LockCount ) >= 0)
-            RtlpUnWaitCriticalSection( crit );
-    }
-}
 
 struct dllredirect_data
 {

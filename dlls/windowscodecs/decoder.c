@@ -250,7 +250,7 @@ typedef struct {
     DWORD frame;
     struct decoder_frame decoder_frame;
     BOOL metadata_initialized;
-    UINT metadata_count;
+    ULONG metadata_count;
     struct decoder_block* metadata_blocks;
 } CommonDecoderFrame;
 

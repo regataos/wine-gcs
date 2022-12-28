@@ -782,8 +782,7 @@ static void DSOUND_WaveQueue(DirectSoundDevice *device, LPBYTE pos, DWORD bytes)
  */
 static void DSOUND_PerformMix(DirectSoundDevice *device)
 {
-	DWORD block, pad_bytes, frames;
-	UINT32 pad_frames;
+	DWORD block, pad_frames, pad_bytes, frames;
 	HRESULT hr;
 
 	TRACE("(%p)\n", device);

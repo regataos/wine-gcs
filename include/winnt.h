@@ -747,6 +747,13 @@ typedef struct _MEMORY_BASIC_INFORMATION
     DWORD    Type;
 } MEMORY_BASIC_INFORMATION, *PMEMORY_BASIC_INFORMATION;
 
+typedef struct _MEM_ADDRESS_REQUIREMENTS
+{
+  void      *LowestStartingAddress;
+  void      *HighestEndingAddress;
+  SIZE_T     Alignment;
+} MEM_ADDRESS_REQUIREMENTS, *PMEM_ADDRESS_REQUIREMENTS;
+
 #define MEM_EXTENDED_PARAMETER_TYPE_BITS 8
 
 typedef enum MEM_EXTENDED_PARAMETER_TYPE {
@@ -794,18 +801,25 @@ typedef struct _WIN32_MEMORY_RANGE_ENTRY
 #define	PAGE_NOCACHE		0x200
 #define	PAGE_WRITECOMBINE	0x400
 
-#define MEM_COMMIT              0x00001000
-#define MEM_RESERVE             0x00002000
-#define MEM_DECOMMIT            0x00004000
-#define MEM_RELEASE             0x00008000
+#define MEM_COMMIT               0x00001000
+#define MEM_RESERVE              0x00002000
+#define MEM_REPLACE_PLACEHOLDER  0x00004000
+#define MEM_RESERVE_PLACEHOLDER  0x00040000
+#define MEM_RESET                0x00080000
+#define MEM_TOP_DOWN             0x00100000
+#define MEM_PHYSICAL             0x00400000
+#define MEM_RESET_UNDO           0x10000000
+#define MEM_LARGE_PAGES          0x20000000
+
+#define MEM_COALESCE_PLACEHOLDERS 0x00000001
+#define MEM_PRESERVE_PLACEHOLDER  0x00000002
+#define MEM_DECOMMIT              0x00004000
+#define MEM_RELEASE               0x00008000
+
 #define MEM_FREE                0x00010000
 #define MEM_PRIVATE             0x00020000
 #define MEM_MAPPED              0x00040000
-#define MEM_RESET               0x00080000
-#define MEM_TOP_DOWN            0x00100000
 #define MEM_WRITE_WATCH         0x00200000
-#define MEM_PHYSICAL            0x00400000
-#define MEM_LARGE_PAGES         0x20000000
 #define MEM_4MB_PAGES           0x80000000
 
 #define SEC_FILE                0x00800000
@@ -840,14 +854,8 @@ typedef struct _WIN32_MEMORY_RANGE_ENTRY
 #define RTL_FIELD_SIZE(type, field) (sizeof(((type *)0)->field))
 #define RTL_SIZEOF_THROUGH_FIELD(type, field) (FIELD_OFFSET(type, field) + RTL_FIELD_SIZE(type, field))
 
-#ifdef __GNUC__
-# define CONTAINING_RECORD(address, type, field) ({     \
-   const typeof(((type *)0)->field) *__ptr = (address); \
-   (type *)((PCHAR)__ptr - offsetof(type, field)); })
-#else
-# define CONTAINING_RECORD(address, type, field) \
-   ((type *)((PCHAR)(address) - offsetof(type, field)))
-#endif
+#define CONTAINING_RECORD(address, type, field) \
+  ((type *)((PCHAR)(address) - offsetof(type, field)))
 
 #define ARRAYSIZE(x) (sizeof(x) / sizeof((x)[0]))
 #ifdef __WINESRC__
@@ -919,6 +927,122 @@ NTSYSAPI PSLIST_ENTRY WINAPI RtlInterlockedFlushSList(PSLIST_HEADER);
 NTSYSAPI PSLIST_ENTRY WINAPI RtlInterlockedPopEntrySList(PSLIST_HEADER);
 NTSYSAPI PSLIST_ENTRY WINAPI RtlInterlockedPushEntrySList(PSLIST_HEADER, PSLIST_ENTRY);
 NTSYSAPI WORD         WINAPI RtlQueryDepthSList(PSLIST_HEADER);
+
+
+/* Fast fail (__fastfail) codes */
+
+#define FAST_FAIL_LEGACY_GS_VIOLATION               0
+#define FAST_FAIL_VTGUARD_CHECK_FAILURE             1
+#define FAST_FAIL_STACK_COOKIE_CHECK_FAILURE        2
+#define FAST_FAIL_CORRUPT_LIST_ENTRY                3
+#define FAST_FAIL_INCORRECT_STACK                   4
+#define FAST_FAIL_INVALID_ARG                       5
+#define FAST_FAIL_GS_COOKIE_INIT                    6
+#define FAST_FAIL_FATAL_APP_EXIT                    7
+#define FAST_FAIL_RANGE_CHECK_FAILURE               8
+#define FAST_FAIL_UNSAFE_REGISTRY_ACCESS            9
+#define FAST_FAIL_GUARD_ICALL_CHECK_FAILURE         10
+#define FAST_FAIL_GUARD_WRITE_CHECK_FAILURE         11
+#define FAST_FAIL_INVALID_FIBER_SWITCH              12
+#define FAST_FAIL_INVALID_SET_OF_CONTEXT            13
+#define FAST_FAIL_INVALID_REFERENCE_COUNT           14
+#define FAST_FAIL_INVALID_JUMP_BUFFER               18
+#define FAST_FAIL_MRDATA_MODIFIED                   19
+#define FAST_FAIL_CERTIFICATION_FAILURE             20
+#define FAST_FAIL_INVALID_EXCEPTION_CHAIN           21
+#define FAST_FAIL_CRYPTO_LIBRARY                    22
+#define FAST_FAIL_INVALID_CALL_IN_DLL_CALLOUT       23
+#define FAST_FAIL_INVALID_IMAGE_BASE                24
+#define FAST_FAIL_DLOAD_PROTECTION_FAILURE          25
+#define FAST_FAIL_UNSAFE_EXTENSION_CALL             26
+#define FAST_FAIL_DEPRECATED_SERVICE_INVOKED        27
+#define FAST_FAIL_INVALID_BUFFER_ACCESS             28
+#define FAST_FAIL_INVALID_BALANCED_TREE             29
+#define FAST_FAIL_INVALID_NEXT_THREAD               30
+#define FAST_FAIL_GUARD_ICALL_CHECK_SUPPRESSED      31
+#define FAST_FAIL_APCS_DISABLED                     32
+#define FAST_FAIL_INVALID_IDLE_STATE                33
+#define FAST_FAIL_MRDATA_PROTECTION_FAILURE         34
+#define FAST_FAIL_UNEXPECTED_HEAP_EXCEPTION         35
+#define FAST_FAIL_INVALID_LOCK_STATE                36
+#define FAST_FAIL_GUARD_JUMPTABLE                   37
+#define FAST_FAIL_INVALID_LONGJUMP_TARGET           38
+#define FAST_FAIL_INVALID_DISPATCH_CONTEXT          39
+#define FAST_FAIL_INVALID_THREAD                    40
+#define FAST_FAIL_INVALID_SYSCALL_NUMBER            41
+#define FAST_FAIL_INVALID_FILE_OPERATION            42
+#define FAST_FAIL_LPAC_ACCESS_DENIED                43
+#define FAST_FAIL_GUARD_SS_FAILURE                  44
+#define FAST_FAIL_LOADER_CONTINUITY_FAILURE         45
+#define FAST_FAIL_GUARD_EXPORT_SUPPRESSION_FAILURE  46
+#define FAST_FAIL_INVALID_CONTROL_STACK             47
+#define FAST_FAIL_SET_CONTEXT_DENIED                48
+#define FAST_FAIL_INVALID_IAT                       49
+#define FAST_FAIL_HEAP_METADATA_CORRUPTION          50
+#define FAST_FAIL_PAYLOAD_RESTRICTION_VIOLATION     51
+#define FAST_FAIL_LOW_LABEL_ACCESS_DENIED           52
+#define FAST_FAIL_ENCLAVE_CALL_FAILURE              53
+#define FAST_FAIL_UNHANDLED_LSS_EXCEPTON            54
+#define FAST_FAIL_ADMINLESS_ACCESS_DENIED           55
+#define FAST_FAIL_UNEXPECTED_CALL                   56
+#define FAST_FAIL_CONTROL_INVALID_RETURN_ADDRESS    57
+#define FAST_FAIL_UNEXPECTED_HOST_BEHAVIOR          58
+#define FAST_FAIL_FLAGS_CORRUPTION                  59
+#define FAST_FAIL_VEH_CORRUPTION                    60
+#define FAST_FAIL_ETW_CORRUPTION                    61
+#define FAST_FAIL_RIO_ABORT                         62
+#define FAST_FAIL_INVALID_PFN                       63
+#define FAST_FAIL_GUARD_ICALL_CHECK_FAILURE_XFG     64
+#define FAST_FAIL_CAST_GUARD                        65
+#define FAST_FAIL_HOST_VISIBILITY_CHANGE            66
+#define FAST_FAIL_KERNEL_CET_SHADOW_STACK_ASSIST    67
+#define FAST_FAIL_PATCH_CALLBACK_FAILED             68
+#define FAST_FAIL_NTDLL_PATCH_FAILED                69
+#define FAST_FAIL_INVALID_FLS_DATA                  70
+#define FAST_FAIL_INVALID_FAST_FAIL_CODE            0xFFFFFFFF
+
+#if defined(__GNUC__)
+#if defined(__x86_64__)
+static FORCEINLINE DECLSPEC_NORETURN void __fastfail(unsigned int code)
+{
+    register ULONGLONG val __asm__("rcx") = code;
+    __asm__ __volatile__( "int $0x29" :: "r" (val) : "memory" );
+#if defined(__GNUC__) && ((__GNUC__ > 4) || ((__GNUC__ == 4) && (__GNUC_MINOR__ >= 5)))
+    __builtin_unreachable();
+#endif
+}
+#elif defined(__i386__)
+static FORCEINLINE DECLSPEC_NORETURN void __fastfail(unsigned int code)
+{
+    register ULONG val __asm__("ecx") = code;
+    __asm__ __volatile__( "int $0x29" :: "r" (val) : "memory" );
+#if defined(__GNUC__) && ((__GNUC__ > 4) || ((__GNUC__ == 4) && (__GNUC_MINOR__ >= 5)))
+    __builtin_unreachable();
+#endif
+}
+#elif defined(__aarch64__)
+static FORCEINLINE DECLSPEC_NORETURN void __fastfail(unsigned int code)
+{
+    register ULONGLONG val __asm__("x0") = code;
+    __asm__ __volatile__( "brk #0xf003" :: "r" (val) : "memory" );
+#if defined(__GNUC__) && ((__GNUC__ > 4) || ((__GNUC__ == 4) && (__GNUC_MINOR__ >= 5)))
+    __builtin_unreachable();
+#endif
+}
+#elif defined(__arm__)
+static FORCEINLINE DECLSPEC_NORETURN void __fastfail(unsigned int code)
+{
+    register ULONG val __asm__("r0") = code;
+    __asm__ __volatile__( "udf #0xfb" :: "r" (val) : "memory" );
+#if defined(__GNUC__) && ((__GNUC__ > 4) || ((__GNUC__ == 4) && (__GNUC_MINOR__ >= 5)))
+    __builtin_unreachable();
+#endif
+}
+#endif  /* __x86_64__ */
+#elif defined(_MSC_VER) && (_MSC_VER >= 1610)
+DECLSPEC_NORETURN void __fastfail(unsigned int);
+#pragma intrinsic(__fastfail)
+#endif  /* __GNUC__ */
 
 
 /* Heap flags */
@@ -2246,7 +2370,6 @@ extern struct _TEB * WINAPI NtCurrentTeb(void);
 #define IO_REPARSE_TAG_CLOUD_MASK       __MSABI_LONG(0x0000F000)
 #define IO_REPARSE_TAG_APPEXECLINK      __MSABI_LONG(0x8000001B)
 #define IO_REPARSE_TAG_GVFS             __MSABI_LONG(0x9000001C)
-#define IO_REPARSE_TAG_LX_SYMLINK       __MSABI_LONG(0xA000001D)
 #define IO_REPARSE_TAG_STORAGE_SYNC     __MSABI_LONG(0x8000001E)
 #define IO_REPARSE_TAG_WCI_TOMBSTONE    __MSABI_LONG(0xA000001F)
 #define IO_REPARSE_TAG_UNHANDLED        __MSABI_LONG(0x80000020)
@@ -5869,6 +5992,7 @@ typedef enum _ACTIVATION_CONTEXT_INFO_CLASS {
 #define ACTIVATION_CONTEXT_SECTION_CLR_SURROGATES                9
 #define ACTIVATION_CONTEXT_SECTION_APPLICATION_SETTINGS          10
 #define ACTIVATION_CONTEXT_SECTION_COMPATIBILITY_INFO            11
+#define ACTIVATION_CONTEXT_SECTION_WINRT_ACTIVATABLE_CLASSES     12
 
 typedef enum _JOBOBJECTINFOCLASS
 {
@@ -6270,12 +6394,60 @@ typedef enum _PROCESS_MITIGATION_POLICY
     MaxProcessMitigationPolicy
 } PROCESS_MITIGATION_POLICY, *PPROCESS_MITIGATION_POLICY;
 
+#ifdef _MSC_VER
 
-/* Intrinsic functions */
+BOOLEAN _BitScanForward(unsigned long*,unsigned long);
+BOOLEAN _BitScanReverse(unsigned long*,unsigned long);
 
-#define BitScanForward _BitScanForward
-#define BitScanReverse _BitScanReverse
-#define InterlockedAdd _InlineInterlockedAdd
+#pragma intrinsic(_BitScanForward)
+#pragma intrinsic(_BitScanReverse)
+
+static inline BOOLEAN BitScanForward(DWORD *index, DWORD mask)
+{
+    return _BitScanForward((unsigned long*)index, mask);
+}
+
+static inline BOOLEAN BitScanReverse(DWORD *index, DWORD mask)
+{
+    return _BitScanReverse((unsigned long*)index, mask);
+}
+
+#elif defined(__GNUC__) && ((__GNUC__ > 3) || ((__GNUC__ == 3) && (__GNUC_MINOR__ >= 3)))
+
+static inline BOOLEAN BitScanForward(DWORD *index, DWORD mask)
+{
+    *index = __builtin_ctz(mask);
+    return mask != 0;
+}
+
+static inline BOOLEAN BitScanReverse(DWORD *index, DWORD mask)
+{
+    *index = 31 - __builtin_clz(mask);
+    return mask != 0;
+}
+
+#else
+
+static inline BOOLEAN BitScanForward(DWORD *index, DWORD mask)
+{
+    unsigned int r = 0;
+    while (r < 31 && !(mask & (1 << r))) r++;
+    *index = r;
+    return mask != 0;
+}
+
+static inline BOOLEAN BitScanReverse(DWORD *index, DWORD mask)
+{
+    unsigned int r = 31;
+    while (r > 0 && !(mask & (1 << r))) r--;
+    *index = r;
+    return mask != 0;
+}
+
+#endif
+
+/* Interlocked functions */
+
 #define InterlockedAnd _InterlockedAnd
 #define InterlockedCompareExchange _InterlockedCompareExchange
 #define InterlockedCompareExchange64 _InterlockedCompareExchange64
@@ -6284,17 +6456,13 @@ typedef enum _PROCESS_MITIGATION_POLICY
 #define InterlockedDecrement16 _InterlockedDecrement16
 #define InterlockedExchange _InterlockedExchange
 #define InterlockedExchangeAdd _InterlockedExchangeAdd
-#define InterlockedExchangeAdd64 _InterlockedExchangeAdd64
 #define InterlockedExchangePointer _InterlockedExchangePointer
 #define InterlockedIncrement _InterlockedIncrement
 #define InterlockedIncrement16 _InterlockedIncrement16
 #define InterlockedOr _InterlockedOr
-#define InterlockedXor _InterlockedXor
 
 #ifdef _MSC_VER
 
-#pragma intrinsic(_BitScanForward)
-#pragma intrinsic(_BitScanReverse)
 #pragma intrinsic(_InterlockedAnd)
 #pragma intrinsic(_InterlockedCompareExchange)
 #pragma intrinsic(_InterlockedCompareExchange64)
@@ -6305,10 +6473,7 @@ typedef enum _PROCESS_MITIGATION_POLICY
 #pragma intrinsic(_InterlockedDecrement)
 #pragma intrinsic(_InterlockedDecrement16)
 #pragma intrinsic(_InterlockedOr)
-#pragma intrinsic(_InterlockedXor)
 
-BOOLEAN   _BitScanForward(unsigned long*,unsigned long);
-BOOLEAN   _BitScanReverse(unsigned long*,unsigned long);
 long      _InterlockedAnd(long volatile *,long);
 long      _InterlockedCompareExchange(long volatile*,long,long);
 long long _InterlockedCompareExchange64(long long volatile*,long long,long long);
@@ -6319,12 +6484,6 @@ long      _InterlockedExchangeAdd(long volatile*,long);
 long      _InterlockedIncrement(long volatile*);
 short     _InterlockedIncrement16(short volatile*);
 long      _InterlockedOr(long volatile *,long);
-long      _InterlockedXor(long volatile *,long);
-
-static FORCEINLINE long InterlockedAdd( long volatile *dest, long val )
-{
-    return InterlockedExchangeAdd( dest, val ) + val;
-}
 
 #if !defined(__i386__) || _MSC_VER >= 1600
 
@@ -6358,10 +6517,8 @@ static FORCEINLINE void MemoryBarrier(void)
 
 #elif defined(__x86_64__)
 
-#pragma intrinsic(_InterlockedExchangeAdd64)
 #pragma intrinsic(__faststorefence)
 
-long long _InterlockedExchangeAdd64(long long volatile *, long long);
 void __faststorefence(void);
 
 static FORCEINLINE void MemoryBarrier(void)
@@ -6386,23 +6543,6 @@ static FORCEINLINE void MemoryBarrier(void)
 #endif /* __i386__ */
 
 #elif defined(__GNUC__)
-
-static FORCEINLINE BOOLEAN WINAPI BitScanForward(DWORD *index, DWORD mask)
-{
-    *index = __builtin_ctz( mask );
-    return mask != 0;
-}
-
-static FORCEINLINE BOOLEAN WINAPI BitScanReverse(DWORD *index, DWORD mask)
-{
-    *index = 31 - __builtin_clz( mask );
-    return mask != 0;
-}
-
-static FORCEINLINE LONG WINAPI InterlockedAdd( LONG volatile *dest, LONG val )
-{
-    return __sync_add_and_fetch( dest, val );
-}
 
 static FORCEINLINE LONG WINAPI InterlockedAnd( LONG volatile *dest, LONG val )
 {
@@ -6439,11 +6579,6 @@ static FORCEINLINE LONG WINAPI InterlockedExchange( LONG volatile *dest, LONG va
 }
 
 static FORCEINLINE LONG WINAPI InterlockedExchangeAdd( LONG volatile *dest, LONG incr )
-{
-    return __sync_fetch_and_add( dest, incr );
-}
-
-static FORCEINLINE LONGLONG WINAPI InterlockedExchangeAdd64( LONGLONG volatile *dest, LONGLONG incr )
 {
     return __sync_fetch_and_add( dest, incr );
 }
@@ -6488,11 +6623,6 @@ static FORCEINLINE LONG WINAPI InterlockedOr( LONG volatile *dest, LONG val )
     return __sync_fetch_and_or( dest, val );
 }
 
-static FORCEINLINE LONG WINAPI InterlockedXor( LONG volatile *dest, LONG val )
-{
-    return __sync_fetch_and_xor( dest, val );
-}
-
 static FORCEINLINE void MemoryBarrier(void)
 {
     __sync_synchronize();
@@ -6508,6 +6638,10 @@ static FORCEINLINE void MemoryBarrier(void)
 
 #pragma intrinsic(_InterlockedCompareExchange128)
 unsigned char _InterlockedCompareExchange128(volatile __int64 *, __int64, __int64, __int64 *);
+static FORCEINLINE unsigned char WINAPI InterlockedCompareExchange128( volatile __int64 *dest, __int64 xchg_high, __int64 xchg_low, __int64 *compare )
+{
+    return _InterlockedCompareExchange128( dest, xchg_high, xchg_low, compare );
+}
 
 #else
 
@@ -6527,14 +6661,7 @@ static FORCEINLINE unsigned char InterlockedCompareExchange128( volatile __int64
 }
 
 #endif
-
-#define InterlockedExchangeAddSizeT(a, b) InterlockedExchangeAdd64((LONGLONG *)(a), (b))
-
-#else /* _WIN64 */
-
-#define InterlockedExchangeAddSizeT(a, b) InterlockedExchangeAdd((LONG *)(a), (b))
-
-#endif /* _WIN64 */
+#endif
 
 static FORCEINLINE void YieldProcessor(void)
 {

@@ -148,6 +148,25 @@ static int dns_only_query( const char *node, const struct addrinfo *hints, struc
     return 0;
 }
 
+static BOOL eac_download_hack(void)
+{
+    static int eac_download_hack_enabled = -1;
+    char str[64];
+
+    if (eac_download_hack_enabled == -1)
+    {
+        if (GetEnvironmentVariableA("WINE_DISABLE_EAC_ALT_DOWNLOAD", str, sizeof(str)))
+            eac_download_hack_enabled = !!atoi(str);
+        else
+            eac_download_hack_enabled = GetEnvironmentVariableA("SteamGameId", str, sizeof(str))
+                                        && !strcmp(str, "626690");
+
+        if (eac_download_hack_enabled)
+            ERR("HACK: failing download-alt.easyanticheat.net resolution.\n");
+    }
+    return eac_download_hack_enabled;
+}
+
 /***********************************************************************
  *      getaddrinfo   (ws2_32.@)
  */
@@ -169,6 +188,12 @@ int WINAPI getaddrinfo( const char *node, const char *service,
 
     if (node)
     {
+        if (eac_download_hack() && !strcmp(node, "download-alt.easyanticheat.net"))
+        {
+            SetLastError(WSAHOST_NOT_FOUND);
+            return WSAHOST_NOT_FOUND;
+        }
+
         if (!node[0])
         {
             if (!(fqdn = get_fqdn())) return WSA_NOT_ENOUGH_MEMORY;
@@ -806,7 +831,7 @@ static struct hostent *get_local_ips( char *hostname )
     IP_ADAPTER_INFO *adapters = NULL, *k;
     struct hostent *hostlist = NULL;
     MIB_IPFORWARDTABLE *routes = NULL;
-    struct route *route_addrs = NULL, *new_route_addrs;
+    struct route *route_addrs = NULL;
     DWORD adap_size, route_size, n;
 
     /* Obtain the size of the adapter list and routing table, also allocate memory */
@@ -852,10 +877,9 @@ static struct hostent *get_local_ips( char *hostname )
         }
         if (exists)
             continue;
-        new_route_addrs = realloc( route_addrs, (numroutes + 1) * sizeof(struct route) );
-        if (!new_route_addrs)
+        route_addrs = realloc( route_addrs, (numroutes + 1) * sizeof(struct route) );
+        if (!route_addrs)
             goto cleanup;
-        route_addrs = new_route_addrs;
         route_addrs[numroutes].interface = ifindex;
         route_addrs[numroutes].metric = ifmetric;
         route_addrs[numroutes].default_route = ifdefault;
@@ -924,6 +948,12 @@ struct hostent * WINAPI gethostbyname( const char *name )
     if (!num_startup)
     {
         SetLastError( WSANOTINITIALISED );
+        return NULL;
+    }
+
+    if (eac_download_hack() && name && !strcmp(name, "download-alt.easyanticheat.net"))
+    {
+        SetLastError( WSAHOST_NOT_FOUND );
         return NULL;
     }
 
@@ -1834,17 +1864,61 @@ int WINAPI WSAAddressToStringW( struct sockaddr *addr, DWORD addr_len,
     return 0;
 }
 
-
 /***********************************************************************
  *      inet_addr   (ws2_32.11)
  */
 u_long WINAPI inet_addr( const char *str )
 {
+    unsigned long a[4] = { 0 };
+    const char *s = str;
+    unsigned char *d;
+    unsigned int i;
     u_long addr;
+    char *z;
 
-    if (inet_pton( AF_INET, str, &addr ) == 1)
-        return addr;
-    return INADDR_NONE;
+    TRACE( "str %s.\n", debugstr_a(str) );
+
+    if (!s)
+    {
+        SetLastError( WSAEFAULT );
+        return INADDR_NONE;
+    }
+
+    d = (unsigned char *)&addr;
+
+    if (s[0] == ' ' && !s[1]) return 0;
+
+    for (i = 0; i < 4; ++i)
+    {
+        a[i] = strtoul( s, &z, 0 );
+        if (z == s || !isdigit( *s )) return INADDR_NONE;
+        if (!*z || isspace(*z)) break;
+        if (*z != '.') return INADDR_NONE;
+        s = z + 1;
+    }
+
+    if (i == 4) return INADDR_NONE;
+
+    switch (i)
+    {
+        case 0:
+            a[1] = a[0] & 0xffffff;
+            a[0] >>= 24;
+            /* fallthrough */
+        case 1:
+            a[2] = a[1] & 0xffff;
+            a[1] >>= 16;
+            /* fallthrough */
+        case 2:
+            a[3] = a[2] & 0xff;
+            a[2] >>= 8;
+    }
+    for (i = 0; i < 4; ++i)
+    {
+        if (a[i] > 255) return INADDR_NONE;
+        d[i] = a[i];
+    }
+    return addr;
 }
 
 

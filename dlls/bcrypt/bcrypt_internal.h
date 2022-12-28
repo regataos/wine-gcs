@@ -157,7 +157,7 @@ struct algorithm
     struct object hdr;
     enum alg_id   id;
     enum mode_id  mode;
-    unsigned      flags;
+    ULONG         flags;
 };
 
 struct key_symmetric
@@ -167,7 +167,7 @@ struct key_symmetric
     UCHAR       *vector;
     ULONG        vector_len;
     UCHAR       *secret;
-    unsigned     secret_len;
+    ULONG        secret_len;
     CRITICAL_SECTION cs;
 };
 
@@ -178,9 +178,9 @@ struct key_symmetric
 struct key_asymmetric
 {
     ULONG             bitlen;     /* ignored for ECC keys */
-    unsigned          flags;
+    ULONG             flags;
     UCHAR            *pubkey;
-    unsigned          pubkey_len;
+    ULONG             pubkey_len;
     UCHAR            *privkey;    /* Used for DH private key only. */
     DSSSEED           dss_seed;
 };
@@ -215,7 +215,7 @@ struct key_symmetric_encrypt_params
 {
     struct key  *key;
     const UCHAR *input;
-    unsigned     input_len;
+    ULONG        input_len;
     UCHAR       *output;
     ULONG        output_len;
 };
@@ -224,7 +224,7 @@ struct key_symmetric_decrypt_params
 {
     struct key  *key;
     const UCHAR *input;
-    unsigned     input_len;
+    ULONG        input_len;
     UCHAR       *output;
     ULONG        output_len;
 };
@@ -236,26 +236,26 @@ struct key_symmetric_get_tag_params
     ULONG        len;
 };
 
-struct key_asymmetric_encrypt_params
+struct key_asymmetric_decrypt_params
 {
     struct key  *key;
-    void        *padding;
     UCHAR       *input;
     ULONG        input_len;
     UCHAR       *output;
     ULONG        output_len;
     ULONG       *ret_len;
-    ULONG        flags;
 };
 
-struct key_asymmetric_decrypt_params
+struct key_asymmetric_encrypt_params
 {
     struct key  *key;
     UCHAR       *input;
-    unsigned     input_len;
+    ULONG        input_len;
     UCHAR       *output;
     ULONG        output_len;
     ULONG       *ret_len;
+    void        *padding;
+    ULONG        flags;
 };
 
 struct key_asymmetric_duplicate_params
@@ -269,11 +269,11 @@ struct key_asymmetric_sign_params
     struct key  *key;
     void        *padding;
     UCHAR       *input;
-    unsigned     input_len;
+    ULONG        input_len;
     UCHAR       *output;
     ULONG        output_len;
     ULONG       *ret_len;
-    unsigned     flags;
+    ULONG        flags;
 };
 
 struct key_asymmetric_verify_params
@@ -281,10 +281,10 @@ struct key_asymmetric_verify_params
     struct key *key;
     void       *padding;
     UCHAR      *hash;
-    unsigned    hash_len;
+    ULONG       hash_len;
     UCHAR      *signature;
     ULONG       signature_len;
-    unsigned    flags;
+    ULONG       flags;
 };
 
 struct key_export_params

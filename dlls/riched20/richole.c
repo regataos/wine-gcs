@@ -1254,8 +1254,7 @@ IRichEditOle_fnGetClipboardData(IRichEditOle *iface, CHARRANGE *lpchrg,
         return E_INVALIDARG;
     if(!lpchrg)
     {
-        LONG nFrom, nTo;
-        int nStartCur = ME_GetSelectionOfs( services->editor, &nFrom, &nTo );
+        int nFrom, nTo, nStartCur = ME_GetSelectionOfs( services->editor, &nFrom, &nTo );
         start = services->editor->pCursors[nStartCur];
         nChars = nTo - nFrom;
     }
@@ -4866,8 +4865,7 @@ static HRESULT WINAPI ITextSelection_fnSetText(ITextSelection *me, BSTR str)
 {
     struct text_selection *This = impl_from_ITextSelection(me);
     ME_TextEditor *editor;
-    int len;
-    LONG to, from;
+    int len, to, from;
 
     TRACE("(%p)->(%s)\n", This, debugstr_w(str));
 

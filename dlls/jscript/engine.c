@@ -131,8 +131,6 @@ static HRESULT stack_pop_object(script_ctx_t *ctx, IDispatch **r)
 
     v = stack_pop(ctx);
     if(is_object_instance(v)) {
-        if(!get_object(v))
-            return JS_E_OBJECT_REQUIRED;
         *r = get_object(v);
         return S_OK;
     }
@@ -316,9 +314,13 @@ static HRESULT exprval_propget(script_ctx_t *ctx, exprval_t *ref, jsval_t *r)
 
 static HRESULT exprval_call(script_ctx_t *ctx, exprval_t *ref, WORD flags, unsigned argc, jsval_t *argv, jsval_t *r)
 {
+    jsdisp_t *jsdisp;
+    HRESULT hres;
+    jsval_t v;
+
     switch(ref->type) {
     case EXPRVAL_STACK_REF: {
-        jsval_t v = ctx->stack[ref->u.off];
+        v = ctx->stack[ref->u.off];
 
         if(!is_object_instance(v)) {
             FIXME("invoke %s\n", debugstr_jsval(v));
@@ -328,10 +330,24 @@ static HRESULT exprval_call(script_ctx_t *ctx, exprval_t *ref, WORD flags, unsig
         return disp_call_value(ctx, get_object(v), NULL, flags, argc, argv, r);
     }
     case EXPRVAL_IDREF:
+        /* ECMA-262 3rd Edition 11.2.3.7 / ECMA-262 5.1 Edition 11.2.3.6 *
+         * Don't treat scope object props as PropertyReferences.         */
+        if((jsdisp = to_jsdisp(ref->u.idref.disp)) && jsdisp->builtin_info->class == JSCLASS_NONE) {
+            hres = disp_propget(ctx, ref->u.idref.disp, ref->u.idref.id, &v);
+            if(FAILED(hres))
+                return hres;
+            if(!is_object_instance(v)) {
+                FIXME("invoke %s\n", debugstr_jsval(v));
+                hres = E_FAIL;
+            }else {
+                hres = disp_call_value(ctx, get_object(v), NULL, flags, argc, argv, r);
+            }
+            jsval_release(v);
+            return hres;
+        }
         return disp_call(ctx, ref->u.idref.disp, ref->u.idref.id, flags, argc, argv, r);
     case EXPRVAL_JSVAL: {
         IDispatch *obj;
-        HRESULT hres;
 
         hres = to_object(ctx, ref->u.val, &obj);
         if(SUCCEEDED(hres)) {
@@ -491,15 +507,24 @@ static HRESULT disp_cmp(IDispatch *disp1, IDispatch *disp2, BOOL *ret)
 {
     IObjectIdentity *identity;
     IUnknown *unk1, *unk2;
+    jsdisp_t *jsdisp;
     HRESULT hres;
 
-    if(disp1 == disp2) {
-        *ret = TRUE;
+    if(!disp1 || !disp2) {
+        *ret = (disp1 == disp2);
         return S_OK;
     }
 
-    if(!disp1 || !disp2) {
-        *ret = FALSE;
+    jsdisp = to_jsdisp(disp1);
+    if(jsdisp && jsdisp->proxy)
+        disp1 = (IDispatch*)jsdisp->proxy;
+
+    jsdisp = to_jsdisp(disp2);
+    if(jsdisp && jsdisp->proxy)
+        disp2 = (IDispatch*)jsdisp->proxy;
+
+    if(disp1 == disp2) {
+        *ret = TRUE;
         return S_OK;
     }
 
@@ -539,10 +564,7 @@ HRESULT jsval_strict_equal(jsval_t lval, jsval_t rval, BOOL *ret)
     TRACE("\n");
 
     if(type != jsval_type(rval)) {
-        if(is_null_instance(lval))
-            *ret = is_null_instance(rval);
-        else
-            *ret = FALSE;
+        *ret = FALSE;
         return S_OK;
     }
 
@@ -592,7 +614,8 @@ static HRESULT detach_scope(script_ctx_t *ctx, call_frame_t *frame, scope_chain_
         scope->obj = to_disp(scope->jsobj);
     }
 
-    if (scope == frame->base_scope && func->name && ctx->version >= SCRIPTLANGUAGEVERSION_ES5)
+    if (scope == frame->base_scope && func->name && func->local_ref == INVALID_LOCAL_REF &&
+        ctx->version >= SCRIPTLANGUAGEVERSION_ES5)
         jsdisp_propput_name(scope->jsobj, func->name, jsval_obj(jsdisp_addref(frame->function_instance)));
 
     index = scope->scope_index;
@@ -652,7 +675,7 @@ static BOOL lookup_global_members(script_ctx_t *ctx, BSTR identifier, exprval_t 
     HRESULT hres;
 
     LIST_FOR_EACH_ENTRY(item, &ctx->named_items, named_item_t, entry) {
-        if(item->flags & SCRIPTITEM_GLOBALMEMBERS) {
+        if((item->flags & SCRIPTITEM_GLOBALMEMBERS) && item->disp != (IDispatch*)&ctx->global->IDispatchEx_iface) {
             hres = disp_get_id(ctx, item->disp, identifier, identifier, 0, &id);
             if(SUCCEEDED(hres)) {
                 if(ret)
@@ -721,7 +744,8 @@ static HRESULT identifier_eval(script_ctx_t *ctx, BSTR identifier, exprval_t *re
                 }
 
                 /* ECMA-262 5.1 Edition    13 */
-                if(func->name && ctx->version >= SCRIPTLANGUAGEVERSION_ES5 && !wcscmp(identifier, func->name)) {
+                if(func->name && ctx->version >= SCRIPTLANGUAGEVERSION_ES5 &&
+                   func->local_ref == INVALID_LOCAL_REF && !wcscmp(identifier, func->name)) {
                     TRACE("returning a function from scope chain\n");
                     ret->type = EXPRVAL_JSVAL;
                     ret->u.val = jsval_obj(jsdisp_addref(scope->frame->function_instance));
@@ -1034,7 +1058,7 @@ static void set_error_value(script_ctx_t *ctx, jsval_t value)
     ei->valid_value = TRUE;
     ei->value = value;
 
-    if(is_object_instance(value) && get_object(value) && (obj = to_jsdisp(get_object(value)))) {
+    if(is_object_instance(value) && (obj = to_jsdisp(get_object(value)))) {
         UINT32 number;
         jsstr_t *str;
         jsval_t v;
@@ -1360,11 +1384,9 @@ static HRESULT interp_new(script_ctx_t *ctx)
     /* NOTE: Should use to_object here */
 
     if(is_null(constr))
-        return JS_E_OBJECT_EXPECTED;
-    else if(!is_object_instance(constr))
+        return is_null_disp(constr) ? JS_E_INVALID_PROPERTY : JS_E_OBJECT_EXPECTED;
+    if(!is_object_instance(constr))
         return JS_E_INVALID_ACTION;
-    else if(!get_object(constr))
-        return JS_E_INVALID_PROPERTY;
 
     clear_acc(ctx);
     return disp_call_value(ctx, get_object(constr), NULL, DISPATCH_CONSTRUCT | DISPATCH_JSCRIPT_CALLEREXECSSOURCE,
@@ -1807,7 +1829,7 @@ static HRESULT interp_instanceof(script_ctx_t *ctx)
     HRESULT hres;
 
     v = stack_pop(ctx);
-    if(!is_object_instance(v) || !get_object(v)) {
+    if(!is_object_instance(v)) {
         jsval_release(v);
         return JS_E_FUNCTION_EXPECTED;
     }
@@ -1819,7 +1841,7 @@ static HRESULT interp_instanceof(script_ctx_t *ctx)
         return E_FAIL;
     }
 
-    if(is_class(obj, JSCLASS_FUNCTION)) {
+    if(is_class(obj, JSCLASS_FUNCTION) || (obj->proxy && obj->proxy->lpVtbl->IsConstructor(obj->proxy))) {
         hres = jsdisp_propget_name(obj, L"prototype", &prot);
     }else {
         hres = JS_E_FUNCTION_EXPECTED;
@@ -1830,7 +1852,9 @@ static HRESULT interp_instanceof(script_ctx_t *ctx)
 
     v = stack_pop(ctx);
 
-    if(is_object_instance(prot)) {
+    if(is_null_disp(v))
+        hres = JS_E_OBJECT_EXPECTED;
+    else if(is_object_instance(prot)) {
         if(is_object_instance(v))
             tmp = iface_to_jsdisp(get_object(v));
         for(iter = tmp; !ret && iter; iter = iter->prototype) {
@@ -1867,7 +1891,7 @@ static HRESULT interp_in(script_ctx_t *ctx)
     TRACE("\n");
 
     obj = stack_pop(ctx);
-    if(!is_object_instance(obj) || !get_object(obj)) {
+    if(!is_object_instance(obj)) {
         jsval_release(obj);
         return JS_E_OBJECT_EXPECTED;
     }
@@ -2126,7 +2150,7 @@ static HRESULT typeof_string(jsval_t v, const WCHAR **ret)
     case JSV_OBJECT: {
         jsdisp_t *dispex;
 
-        if(get_object(v) && (dispex = iface_to_jsdisp(get_object(v)))) {
+        if((dispex = iface_to_jsdisp(get_object(v)))) {
             *ret = is_class(dispex, JSCLASS_FUNCTION) ? L"function" : L"object";
             jsdisp_release(dispex);
         }else {
@@ -2325,12 +2349,6 @@ static HRESULT equal_values(script_ctx_t *ctx, jsval_t lval, jsval_t rval, BOOL 
 {
     if(jsval_type(lval) == jsval_type(rval) || (is_number(lval) && is_number(rval)))
        return jsval_strict_equal(lval, rval, ret);
-
-    /* FIXME: NULL disps should be handled in more general way */
-    if(is_object_instance(lval) && !get_object(lval))
-        return equal_values(ctx, jsval_null(), rval, ret);
-    if(is_object_instance(rval) && !get_object(rval))
-        return equal_values(ctx, lval, jsval_null(), ret);
 
     if((is_null(lval) && is_undefined(rval)) || (is_undefined(lval) && is_null(rval))) {
         *ret = TRUE;
@@ -3309,16 +3327,11 @@ HRESULT exec_source(script_ctx_t *ctx, DWORD flags, bytecode_t *bytecode, functi
         }
     }
 
-    /* ECMA-262 3rd Edition    11.2.3.7 */
     if(this_obj) {
-        jsdisp_t *jsthis;
+        jsdisp_t *jsthis = to_jsdisp(this_obj);
 
-        jsthis = iface_to_jsdisp(this_obj);
-        if(jsthis) {
-            if(jsthis->builtin_info->class == JSCLASS_GLOBAL || jsthis->builtin_info->class == JSCLASS_NONE)
-                this_obj = NULL;
-            jsdisp_release(jsthis);
-        }
+        if(jsthis && jsthis->builtin_info->class == JSCLASS_GLOBAL)
+            this_obj = NULL;
     }
 
     if(ctx->call_ctx && (flags & EXEC_EVAL)) {

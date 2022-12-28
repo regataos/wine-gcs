@@ -66,7 +66,7 @@ struct make_signature_params
 struct query_context_attributes_params
 {
     LSA_SEC_HANDLE context;
-    unsigned attr;
+    ULONG attr;
     void *buf;
 };
 
@@ -80,7 +80,7 @@ struct seal_message_params
 {
     LSA_SEC_HANDLE context;
     SecBufferDesc *msg;
-    unsigned qop;
+    ULONG qop;
 };
 
 struct unseal_message_params

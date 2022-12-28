@@ -146,7 +146,7 @@ static LPVOID  WINAPI IGetFrame_fnGetFrame(IGetFrame *iface, LONG lPos)
   LONG readBytes;
   LONG readSamples;
 
-  TRACE("(%p,%ld)\n", iface, lPos);
+  TRACE("(%p,%d)\n", iface, lPos);
 
   /* We don't want negative start values! -- marks invalid buffer content */
   if (lPos < 0)
@@ -262,7 +262,7 @@ static HRESULT WINAPI IGetFrame_fnBegin(IGetFrame *iface, LONG lStart,
 {
   IGetFrameImpl *This = impl_from_IGetFrame(iface);
 
-  TRACE("(%p,%ld,%ld,%ld)\n", iface, lStart, lEnd, lRate);
+  TRACE("(%p,%d,%d,%d)\n", iface, lStart, lEnd, lRate);
 
   This->bFixedStream = TRUE;
 

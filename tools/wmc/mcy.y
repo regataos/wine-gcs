@@ -95,8 +95,6 @@ static struct cp_xlat *find_cpxlat(int lan);
 
 %}
 
-%define api.prefix {mcy_}
-
 %union {
 	WCHAR		*str;
 	unsigned	num;

@@ -179,12 +179,46 @@ heap_pool_t *heap_pool_mark(heap_pool_t *heap)
     return heap;
 }
 
+enum { HEAP_STACK_CHUNK_SIZE = 1020 };
+
+HRESULT heap_stack_push(struct heap_stack *heap_stack, void *value)
+{
+    if(!heap_stack->idx) {
+        if(heap_stack->next)
+            heap_stack->chunk = heap_stack->next;
+        else {
+            void **prev, **tmp = heap_alloc((HEAP_STACK_CHUNK_SIZE + 1) * sizeof(void*));
+            if(!tmp)
+                return E_OUTOFMEMORY;
+            prev = heap_stack->chunk;
+            heap_stack->chunk = tmp;
+            heap_stack->chunk[HEAP_STACK_CHUNK_SIZE] = prev;
+        }
+        heap_stack->idx = HEAP_STACK_CHUNK_SIZE;
+        heap_stack->next = NULL;
+    }
+    heap_stack->chunk[--heap_stack->idx] = value;
+    return S_OK;
+}
+
+void *heap_stack_pop(struct heap_stack *heap_stack)
+{
+    void *ret = heap_stack->chunk[heap_stack->idx];
+
+    if(++heap_stack->idx == HEAP_STACK_CHUNK_SIZE) {
+        free(heap_stack->next);
+        heap_stack->next = heap_stack->chunk;
+        heap_stack->chunk = heap_stack->chunk[HEAP_STACK_CHUNK_SIZE];
+        heap_stack->idx = 0;
+    }
+    return ret;
+}
+
 void jsval_release(jsval_t val)
 {
     switch(jsval_type(val)) {
     case JSV_OBJECT:
-        if(get_object(val))
-            IDispatch_Release(get_object(val));
+        IDispatch_Release(get_object(val));
         break;
     case JSV_STRING:
         jsstr_release(get_string(val));
@@ -229,8 +263,7 @@ HRESULT jsval_copy(jsval_t v, jsval_t *r)
         *r = v;
         return S_OK;
     case JSV_OBJECT:
-        if(get_object(v))
-            IDispatch_AddRef(get_object(v));
+        IDispatch_AddRef(get_object(v));
         *r = v;
         return S_OK;
     case JSV_STRING: {
@@ -246,7 +279,7 @@ HRESULT jsval_copy(jsval_t v, jsval_t *r)
     return E_FAIL;
 }
 
-HRESULT variant_to_jsval(VARIANT *var, jsval_t *r)
+HRESULT variant_to_jsval(script_ctx_t *ctx, VARIANT *var, jsval_t *r)
 {
     if(V_VT(var) == (VT_VARIANT|VT_BYREF))
         var = V_VARIANTREF(var);
@@ -282,10 +315,13 @@ HRESULT variant_to_jsval(VARIANT *var, jsval_t *r)
         return S_OK;
     }
     case VT_DISPATCH: {
-        if(V_DISPATCH(var))
-            IDispatch_AddRef(V_DISPATCH(var));
+        if(!V_DISPATCH(var)) {
+            *r = ctx->html_mode ? jsval_null() : jsval_null_disp();
+            return S_OK;
+        }
+        IDispatch_AddRef(V_DISPATCH(var));
         *r = jsval_disp(V_DISPATCH(var));
-        return S_OK;
+        return convert_to_proxy(ctx, r);
     }
     case VT_I1:
         *r = jsval_number(V_I1(var));
@@ -329,10 +365,10 @@ HRESULT variant_to_jsval(VARIANT *var, jsval_t *r)
             hres = IUnknown_QueryInterface(V_UNKNOWN(var), &IID_IDispatch, (void**)&disp);
             if(SUCCEEDED(hres)) {
                 *r = jsval_disp(disp);
-                return S_OK;
+                return convert_to_proxy(ctx, r);
             }
         }else {
-            *r = jsval_disp(NULL);
+            *r = ctx->html_mode ? jsval_null() : jsval_null_disp();
             return S_OK;
         }
         /* fall through */
@@ -343,18 +379,30 @@ HRESULT variant_to_jsval(VARIANT *var, jsval_t *r)
 
 HRESULT jsval_to_variant(jsval_t val, VARIANT *retv)
 {
+    jsdisp_t *jsdisp;
+    IDispatch *disp;
+
     switch(jsval_type(val)) {
     case JSV_UNDEFINED:
         V_VT(retv) = VT_EMPTY;
         return S_OK;
     case JSV_NULL:
+        if(get_bool(val)) {
+            V_VT(retv) = VT_DISPATCH;
+            V_DISPATCH(retv) = NULL;
+            return S_OK;
+        }
         V_VT(retv) = VT_NULL;
         return S_OK;
     case JSV_OBJECT:
+        disp = get_object(val);
+        jsdisp = to_jsdisp(disp);
+        if(jsdisp && jsdisp->proxy)
+            disp = (IDispatch*)jsdisp->proxy;
+
+        IDispatch_AddRef(disp);
         V_VT(retv) = VT_DISPATCH;
-        if(get_object(val))
-            IDispatch_AddRef(get_object(val));
-        V_DISPATCH(retv) = get_object(val);
+        V_DISPATCH(retv) = disp;
         return S_OK;
     case JSV_STRING:
         V_VT(retv) = VT_BSTR;
@@ -385,6 +433,24 @@ HRESULT jsval_to_variant(jsval_t val, VARIANT *retv)
     return E_FAIL;
 }
 
+static HRESULT proxy_tostring(jsdisp_t *jsdisp, jsval_t *ret)
+{
+    jsstr_t *str;
+    HRESULT hres;
+    BSTR bstr;
+
+    /* Proxy prototype with custom toString fails when called on itself */
+    hres = jsdisp->proxy->lpVtbl->ToString(jsdisp->proxy, &bstr);
+    if(FAILED(hres))
+        return hres;
+    str = jsstr_alloc(bstr);
+    SysFreeString(bstr);
+    if(!str)
+        return E_OUTOFMEMORY;
+    *ret = jsval_string(str);
+    return S_OK;
+}
+
 /* ECMA-262 3rd Edition    9.1 */
 HRESULT to_primitive(script_ctx_t *ctx, jsval_t val, jsval_t *ret, hint_t hint)
 {
@@ -393,11 +459,6 @@ HRESULT to_primitive(script_ctx_t *ctx, jsval_t val, jsval_t *ret, hint_t hint)
         jsval_t prim;
         DISPID id;
         HRESULT hres;
-
-        if(!get_object(val)) {
-            *ret = jsval_null();
-            return S_OK;
-        }
 
         jsdisp = iface_to_jsdisp(get_object(val));
         if(!jsdisp)
@@ -412,8 +473,11 @@ HRESULT to_primitive(script_ctx_t *ctx, jsval_t val, jsval_t *ret, hint_t hint)
         if(SUCCEEDED(hres)) {
             hres = jsdisp_call(jsdisp, id, DISPATCH_METHOD, 0, NULL, &prim);
             if(FAILED(hres)) {
-                WARN("call error - forwarding exception\n");
+                if(hres == E_UNEXPECTED && jsdisp->proxy)
+                    hres = proxy_tostring(jsdisp, ret);
                 jsdisp_release(jsdisp);
+                if(FAILED(hres))
+                    WARN("call error - forwarding exception\n");
                 return hres;
             }else if(!is_object_instance(prim)) {
                 jsdisp_release(jsdisp);
@@ -428,8 +492,11 @@ HRESULT to_primitive(script_ctx_t *ctx, jsval_t val, jsval_t *ret, hint_t hint)
         if(SUCCEEDED(hres)) {
             hres = jsdisp_call(jsdisp, id, DISPATCH_METHOD, 0, NULL, &prim);
             if(FAILED(hres)) {
-                WARN("call error - forwarding exception\n");
+                if(hres == E_UNEXPECTED && jsdisp->proxy)
+                    hres = proxy_tostring(jsdisp, ret);
                 jsdisp_release(jsdisp);
+                if(FAILED(hres))
+                    WARN("call error - forwarding exception\n");
                 return hres;
             }else if(!is_object_instance(prim)) {
                 jsdisp_release(jsdisp);
@@ -459,7 +526,7 @@ HRESULT to_boolean(jsval_t val, BOOL *ret)
         *ret = FALSE;
         return S_OK;
     case JSV_OBJECT:
-        *ret = get_object(val) != NULL;
+        *ret = TRUE;
         return S_OK;
     case JSV_STRING:
         *ret = jsstr_length(get_string(val)) != 0;
@@ -839,18 +906,8 @@ HRESULT to_object(script_ctx_t *ctx, jsval_t val, IDispatch **disp)
         *disp = to_disp(dispex);
         break;
     case JSV_OBJECT:
-        if(get_object(val)) {
-            *disp = get_object(val);
-            IDispatch_AddRef(*disp);
-        }else {
-            jsdisp_t *obj;
-
-            hres = create_object(ctx, NULL, &obj);
-            if(FAILED(hres))
-                return hres;
-
-            *disp = to_disp(obj);
-        }
+        *disp = get_object(val);
+        IDispatch_AddRef(*disp);
         break;
     case JSV_BOOL:
         hres = create_bool(ctx, get_bool(val), &dispex);
@@ -859,8 +916,11 @@ HRESULT to_object(script_ctx_t *ctx, jsval_t val, IDispatch **disp)
 
         *disp = to_disp(dispex);
         break;
-    case JSV_UNDEFINED:
     case JSV_NULL:
+        if(is_null_disp(val))
+            return JS_E_OBJECT_REQUIRED;
+        /* fall through */
+    case JSV_UNDEFINED:
         WARN("object expected\n");
         return JS_E_OBJECT_EXPECTED;
     case JSV_VARIANT:
@@ -889,7 +949,7 @@ HRESULT variant_change_type(script_ctx_t *ctx, VARIANT *dst, VARIANT *src, VARTY
     jsval_t val;
     HRESULT hres;
 
-    hres = variant_to_jsval(src, &val);
+    hres = variant_to_jsval(ctx, src, &val);
     if(FAILED(hres))
         return hres;
 
@@ -956,6 +1016,14 @@ HRESULT variant_change_type(script_ctx_t *ctx, VARIANT *dst, VARIANT *src, VARTY
     case VT_NULL:
         hres = V_VT(src) == VT_NULL ? S_OK : E_NOTIMPL;
         break;
+    case VT_UNKNOWN:
+    case VT_DISPATCH:
+        if(V_VT(src) == VT_EMPTY || V_VT(src) == VT_NULL) {
+            V_UNKNOWN(dst) = NULL;
+            hres = S_OK;
+            break;
+        }
+        /* fall through */
     default:
         FIXME("vt %d not implemented\n", vt);
         hres = E_NOTIMPL;

@@ -27,6 +27,7 @@
 #define VK_NO_PROTOTYPES
 
 #include <pthread.h>
+#include <stdbool.h>
 
 #include "wine/list.h"
 
@@ -95,7 +96,6 @@ struct VkSwapchainKHR_T
     BOOL fs_hack_enabled;
     VkExtent2D user_extent;
     VkExtent2D real_extent;
-    VkImageUsageFlags surface_usage;
     VkRect2D blit_dst;
     VkCommandPool *cmd_pools; /* VkCommandPool[device->queue_count] */
     VkDeviceMemory user_image_memory, fsr_image_memory;
@@ -136,6 +136,8 @@ struct VkInstance_T
     struct vulkan_instance_funcs funcs;
     VkInstance instance; /* native instance */
 
+    uint32_t api_version;
+
     /* We cache devices as we need to wrap them as they are
      * dispatchable objects.
      */
@@ -162,8 +164,12 @@ struct VkPhysicalDevice_T
     struct VkInstance_T *instance; /* parent */
     VkPhysicalDevice phys_dev; /* native physical device */
 
+    uint32_t api_version;
+
     VkExtensionProperties *extensions;
     uint32_t extension_count;
+
+    bool fake_memory_priority;
 
     struct wine_vk_mapping mapping;
 };
@@ -177,6 +183,22 @@ struct VkQueue_T
     uint32_t family_index;
     uint32_t queue_index;
     VkDeviceQueueCreateFlags flags;
+
+    bool virtual_queue;
+    bool processing;
+    bool device_lost;
+
+    pthread_t virtual_queue_thread;
+    pthread_mutex_t submissions_mutex;
+    pthread_cond_t submissions_cond;
+    struct list submissions;
+
+    pthread_t signal_thread;
+    pthread_mutex_t signaller_mutex;
+    pthread_cond_t signaller_cond;
+    struct list signal_ops;
+
+    bool stop;
 
     struct wine_vk_mapping mapping;
 };
@@ -278,6 +300,79 @@ static inline VkDeviceMemory wine_dev_mem_to_handle(struct wine_dev_mem *dev_mem
     return (VkDeviceMemory)(uintptr_t)dev_mem;
 }
 
+struct wine_semaphore
+{
+    VkSemaphore semaphore;
+    VkSemaphore fence_timeline_semaphore;
+
+    VkExternalSemaphoreHandleTypeFlagBits export_types;
+
+    struct wine_vk_mapping mapping;
+
+    /* mutable members */
+    VkExternalSemaphoreHandleTypeFlagBits handle_type;
+    HANDLE handle;
+    struct
+    {
+        pthread_mutex_t mutex;
+        uint64_t virtual_value, physical_value, counter;
+
+        struct pending_wait
+        {
+            bool present, satisfied;
+            uint64_t virtual_value;
+            uint64_t physical_value;
+            pthread_cond_t cond;
+        } pending_waits[100];
+
+        struct pending_update
+        {
+            uint64_t virtual_value;
+            uint64_t physical_value;
+            pid_t signalling_pid;
+            struct VkQueue_T *signalling_queue;
+        } pending_updates[100];
+        uint32_t pending_updates_count;
+    } *d3d12_fence_shm;
+};
+
+static inline struct wine_semaphore *wine_semaphore_from_handle(VkSemaphore handle)
+{
+    return (struct wine_semaphore *)(uintptr_t)handle;
+}
+
+static inline VkSemaphore wine_semaphore_to_handle(struct wine_semaphore *semaphore)
+{
+    return (VkSemaphore)(uintptr_t)semaphore;
+}
+
+static inline VkSemaphore wine_semaphore_host_handle(struct wine_semaphore *semaphore)
+{
+    if (semaphore->handle_type == VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_D3D12_FENCE_BIT)
+        return semaphore->fence_timeline_semaphore;
+    return semaphore->semaphore;
+}
+
+struct wine_fence
+{
+    VkFence fence;
+
+    struct VkQueue_T *queue;
+    struct VkSwapchainKHR_T *swapchain;
+    bool wait_assist;
+    int eventfd;
+};
+
+static inline struct wine_fence *wine_fence_from_handle(VkFence handle)
+{
+    return (struct wine_fence *)(uintptr_t)handle;
+}
+
+static inline VkFence wine_fence_to_handle(struct wine_fence *fence)
+{
+    return (VkFence)(uintptr_t)fence;
+}
+
 BOOL wine_vk_device_extension_supported(const char *name) DECLSPEC_HIDDEN;
 BOOL wine_vk_instance_extension_supported(const char *name) DECLSPEC_HIDDEN;
 
@@ -307,6 +402,18 @@ static inline void init_unicode_string( UNICODE_STRING *str, const WCHAR *data )
     str->Length = lstrlenW(data) * sizeof(WCHAR);
     str->MaximumLength = str->Length + sizeof(WCHAR);
     str->Buffer = (WCHAR *)data;
+}
+
+static inline void *memdup(const void *in, size_t number, size_t size)
+{
+    void *out;
+
+    if (!in)
+        return NULL;
+
+    out = malloc(number * size);
+    memcpy(out, in, number * size);
+    return out;
 }
 
 #endif /* __WINE_VULKAN_PRIVATE_H */

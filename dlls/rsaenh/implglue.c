@@ -23,6 +23,7 @@
  */
 
 #include <stdarg.h>
+#include <stdlib.h>
 #include <stdio.h>
 #include "windef.h"
 #include "winbase.h"
@@ -32,8 +33,8 @@
 
 /* Function prototype copied from dlls/advapi32/crypt.c */
 BOOL WINAPI SystemFunction036(PVOID pbBuffer, ULONG dwLen);
-        
-BOOL init_hash_impl(ALG_ID aiAlgid, HASH_CONTEXT *pHashContext) 
+
+BOOL init_hash_impl(ALG_ID aiAlgid, BCRYPT_HASH_HANDLE *hash_handle)
 {
     BCRYPT_ALG_HANDLE provider;
     NTSTATUS status;
@@ -74,27 +75,27 @@ BOOL init_hash_impl(ALG_ID aiAlgid, HASH_CONTEXT *pHashContext)
 
     if (status) return FALSE;
 
-    status = BCryptCreateHash(provider, &pHashContext->bcrypt_hash, NULL, 0, NULL, 0, 0);
+    status = BCryptCreateHash(provider, hash_handle, NULL, 0, NULL, 0, 0);
     BCryptCloseAlgorithmProvider(provider, 0);
     return !status;
 }
 
-BOOL update_hash_impl(HASH_CONTEXT *pHashContext, const BYTE *pbData, DWORD dwDataLen)
+BOOL update_hash_impl(BCRYPT_HASH_HANDLE hash_handle, const BYTE *pbData, DWORD dwDataLen)
 {
-    BCryptHashData(pHashContext->bcrypt_hash, (UCHAR*)pbData, dwDataLen, 0);
+    BCryptHashData(hash_handle, (UCHAR*)pbData, dwDataLen, 0);
     return TRUE;
 }
 
-BOOL finalize_hash_impl(HASH_CONTEXT *pHashContext, BYTE *pbHashValue)
+BOOL finalize_hash_impl(BCRYPT_HASH_HANDLE hash_handle, BYTE *pbHashValue)
 {
-    BCryptFinishHash(pHashContext->bcrypt_hash, pbHashValue, RSAENH_MAX_HASH_SIZE, 0);
-    BCryptDestroyHash(pHashContext->bcrypt_hash);
+    BCryptFinishHash(hash_handle, pbHashValue, RSAENH_MAX_HASH_SIZE, 0);
+    BCryptDestroyHash(hash_handle);
     return TRUE;
 }
 
-BOOL duplicate_hash_impl(const HASH_CONTEXT *pSrcHashContext, HASH_CONTEXT *pDestHashContext)
+BOOL duplicate_hash_impl(BCRYPT_HASH_HANDLE src_hash_handle, BCRYPT_HASH_HANDLE *dest_hash_handle)
 {
-    return !BCryptDuplicateHash(pSrcHashContext->bcrypt_hash, &pDestHashContext->bcrypt_hash, NULL, 0, 0);
+    return !BCryptDuplicateHash(src_hash_handle, dest_hash_handle, NULL, 0, 0);
 }
 
 BOOL new_key_impl(ALG_ID aiAlgid, KEY_CONTEXT *pKeyContext, DWORD dwKeyLen) 
@@ -273,7 +274,7 @@ BOOL encrypt_block_impl(ALG_ID aiAlgid, DWORD dwKeySpec, KEY_CONTEXT *pKeyContex
                 }
                 reverse_bytes(out, outlen);
             } else {
-                in_reversed = HeapAlloc(GetProcessHeap(), 0, inlen);
+                in_reversed = malloc(inlen);
                 if (!in_reversed) {
                     SetLastError(NTE_NO_MEMORY);
                     return FALSE;
@@ -281,11 +282,11 @@ BOOL encrypt_block_impl(ALG_ID aiAlgid, DWORD dwKeySpec, KEY_CONTEXT *pKeyContex
                 memcpy(in_reversed, in, inlen);
                 reverse_bytes(in_reversed, inlen);
                 if (rsa_exptmod(in_reversed, inlen, out, &outlen, dwKeySpec, &pKeyContext->rsa) != CRYPT_OK) {
-                    HeapFree(GetProcessHeap(), 0, in_reversed);
+                    free(in_reversed);
                     SetLastError(NTE_FAIL);
                     return FALSE;
                 }
-                HeapFree(GetProcessHeap(), 0, in_reversed);
+                free(in_reversed);
             }
             break;
 
@@ -341,14 +342,14 @@ BOOL import_public_key_impl(const BYTE *pbSrc, KEY_CONTEXT *pKeyContext, DWORD d
         return FALSE;
     }
 
-    pbTemp = HeapAlloc(GetProcessHeap(), 0, dwKeyLen);
+    pbTemp = malloc(dwKeyLen);
     if (!pbTemp) return FALSE;
     memcpy(pbTemp, pbSrc, dwKeyLen);
     
     pKeyContext->rsa.type = PK_PUBLIC;
     reverse_bytes(pbTemp, dwKeyLen);
     mp_read_unsigned_bin(&pKeyContext->rsa.N, pbTemp, dwKeyLen);
-    HeapFree(GetProcessHeap(), 0, pbTemp);
+    free(pbTemp);
     mp_set_int(&pKeyContext->rsa.e, dwPubExp);
 
     return TRUE;    
@@ -416,7 +417,7 @@ BOOL import_private_key_impl(const BYTE *pbSrc, KEY_CONTEXT *pKeyContext, DWORD 
         return FALSE;
     }
 
-    pbTemp = HeapAlloc(GetProcessHeap(), 0, 2*dwKeyLen+5*((dwKeyLen+1)>>1));
+    pbTemp = malloc(2*dwKeyLen+5*((dwKeyLen+1)>>1));
     if (!pbTemp) return FALSE;
     memcpy(pbTemp, pbSrc, min(dwDataLen, 2*dwKeyLen+5*((dwKeyLen+1)>>1)));
     pbBigNum = pbTemp;
@@ -448,6 +449,6 @@ BOOL import_private_key_impl(const BYTE *pbSrc, KEY_CONTEXT *pKeyContext, DWORD 
     mp_read_unsigned_bin(&pKeyContext->rsa.d, pbBigNum, dwKeyLen);
     mp_set_int(&pKeyContext->rsa.e, dwPubExp);
     
-    HeapFree(GetProcessHeap(), 0, pbTemp);
+    free(pbTemp);
     return TRUE;
 }

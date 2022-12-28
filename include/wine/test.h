@@ -545,7 +545,7 @@ void winetest_wait_child_process( HANDLE process )
         winetest_ok( 0, "Timed out waiting for the child process\n" );
     else if (ret != WAIT_OBJECT_0)
         winetest_ok( 0, "Could not wait for the child process: %d le=%u\n",
-                     (UINT)ret, (UINT)GetLastError() );
+                     ret, GetLastError() );
     else
     {
         DWORD exit_code;
@@ -553,12 +553,12 @@ void winetest_wait_child_process( HANDLE process )
         if (exit_code > 255)
         {
             DWORD pid = GetProcessId( process );
-            winetest_printf( "unhandled exception %08x in child process %04x\n", (UINT)exit_code, (UINT)pid );
+            winetest_printf( "unhandled exception %08x in child process %04x\n", exit_code, pid );
             InterlockedIncrement( &failures );
         }
         else if (exit_code)
         {
-            winetest_printf( "%u failures in child process\n", (UINT)exit_code );
+            winetest_printf( "%u failures in child process\n", exit_code );
             while (exit_code-- > 0)
                 InterlockedIncrement(&failures);
         }
@@ -615,14 +615,14 @@ static int run_test( const char *name )
     {
         if (muted_todo_successes || muted_skipped || muted_traces)
             printf( "%04x:%s:%s Silenced %d todos, %d skips and %d traces.\n",
-                    (UINT)GetCurrentProcessId(), test->name, winetest_elapsed(),
-                    (UINT)muted_todo_successes, (UINT)muted_skipped, (UINT)muted_traces);
+                    GetCurrentProcessId(), test->name, winetest_elapsed(),
+                    muted_todo_successes, muted_skipped, muted_traces);
         printf( "%04x:%s:%s %d tests executed (%d marked as todo, %d %s), %d skipped.\n",
-                (UINT)GetCurrentProcessId(), test->name, winetest_elapsed(),
-                (UINT)(successes + failures + todo_successes + todo_failures),
-                (UINT)todo_successes, (UINT)(failures + todo_failures),
+                GetCurrentProcessId(), test->name, winetest_elapsed(),
+                successes + failures + todo_successes + todo_failures,
+                todo_successes, failures + todo_failures,
                 (failures + todo_failures != 1) ? "failures" : "failure",
-                (UINT)skipped );
+                skipped );
     }
     status = (failures + todo_failures < 255) ? failures + todo_failures : 255;
     return status;
@@ -646,8 +646,8 @@ static LONG CALLBACK exc_filter( EXCEPTION_POINTERS *ptrs )
         printf( "%s:%d: this is the last test seen before the exception\n",
                 data->current_file, data->current_line );
     printf( "%04x:%s:%s unhandled exception %08x at %p\n",
-            (UINT)GetCurrentProcessId(), current_test->name, winetest_elapsed(),
-            (UINT)ptrs->ExceptionRecord->ExceptionCode, ptrs->ExceptionRecord->ExceptionAddress );
+            GetCurrentProcessId(), current_test->name, winetest_elapsed(),
+            ptrs->ExceptionRecord->ExceptionCode, ptrs->ExceptionRecord->ExceptionAddress );
     fflush( stdout );
     return EXCEPTION_EXECUTE_HANDLER;
 }

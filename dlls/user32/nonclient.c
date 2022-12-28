@@ -350,17 +350,22 @@ BOOL WINAPI DECLSPEC_HOTPATCH AdjustWindowRectExForDpi( LPRECT rect, DWORD style
  *
  * Handle a WM_NCCALCSIZE message. Called from DefWindowProc().
  */
-void NC_HandleNCCalcSize( HWND hwnd, WPARAM wparam, RECT *winRect )
+LRESULT NC_HandleNCCalcSize( HWND hwnd, WPARAM wparam, RECT *winRect )
 {
     RECT tmpRect = { 0, 0, 0, 0 };
+    LRESULT result = 0;
+    LONG cls_style = GetClassLongW(hwnd, GCL_STYLE);
     LONG style = GetWindowLongW( hwnd, GWL_STYLE );
     LONG exStyle = GetWindowLongW( hwnd, GWL_EXSTYLE );
 
     if (winRect == NULL)
-        return;
+        return 0;
 
     if (__wine_get_window_manager() == WINE_WM_X11_STEAMCOMPMGR && !((style & WS_POPUP) && (exStyle & WS_EX_TOOLWINDOW)))
         return 0;
+
+    if (cls_style & CS_VREDRAW) result |= WVR_VREDRAW;
+    if (cls_style & CS_HREDRAW) result |= WVR_HREDRAW;
 
     if (!(style & WS_MINIMIZE))
     {
@@ -415,6 +420,7 @@ void NC_HandleNCCalcSize( HWND hwnd, WPARAM wparam, RECT *winRect )
         winRect->right = winRect->left;
         winRect->bottom = winRect->top;
     }
+    return result;
 }
 
 
@@ -636,24 +642,22 @@ LRESULT NC_HandleNCHitTest( HWND hwnd, POINT pt )
     return HTNOWHERE;
 }
 
-LRESULT NC_HandleNCMouseMove(HWND hwnd, WPARAM wParam, LPARAM lParam)
+LRESULT NC_HandleNCMouseMove(HWND hwnd, POINT pt)
 {
+    LONG hittest;
     RECT rect;
-    POINT pt;
 
-    TRACE("hwnd=%p wparam=%#lx lparam=%#lx\n", hwnd, wParam, lParam);
+    TRACE("hwnd=%p pt=%s\n", hwnd, wine_dbgstr_point(&pt));
 
-    if (wParam != HTHSCROLL && wParam != HTVSCROLL)
+    hittest = NC_HandleNCHitTest(hwnd, pt);
+    if (hittest != HTHSCROLL && hittest != HTVSCROLL)
         return 0;
 
     WIN_GetRectangles(hwnd, COORDS_CLIENT, &rect, NULL);
-
-    pt.x = (short)LOWORD(lParam);
-    pt.y = (short)HIWORD(lParam);
     ScreenToClient(hwnd, &pt);
     pt.x -= rect.left;
     pt.y -= rect.top;
-    SCROLL_HandleScrollEvent(hwnd, wParam == HTHSCROLL ? SB_HORZ : SB_VERT, WM_NCMOUSEMOVE, pt);
+    SCROLL_HandleScrollEvent(hwnd, hittest == HTHSCROLL ? SB_HORZ : SB_VERT, WM_NCMOUSEMOVE, pt);
     return 0;
 }
 
@@ -1074,7 +1078,7 @@ static void  NC_DoNCPaint( HWND  hwnd, HRGN  clip )
         else
             r.left = r.right - GetSystemMetrics(SM_CXVSCROLL) + 1;
         r.top  = r.bottom - GetSystemMetrics(SM_CYHSCROLL) + 1;
-        FillRect( hdc, &r, GetSysColorBrush( COLOR_BTNFACE ) );
+        FillRect( hdc, &r,  GetSysColorBrush(COLOR_SCROLLBAR) );
     }
 
     ReleaseDC( hwnd, hdc );

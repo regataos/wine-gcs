@@ -361,6 +361,35 @@ static inline WORD get_error_code( const ucontext_t *sigcontext )
 
 
 /***********************************************************************
+ *           get_udf_immediate
+ *
+ * Get the immediate operand if the PC is at a UDF instruction.
+ */
+static inline int get_udf_immediate( const ucontext_t *sigcontext )
+{
+    if (CPSR_sig(sigcontext) & 0x20)
+    {
+        WORD thumb_insn = *(WORD *)PC_sig(sigcontext);
+        if ((thumb_insn >> 8) == 0xde) return thumb_insn & 0xff;
+        if ((thumb_insn & 0xfff0) == 0xf7f0)  /* udf.w */
+        {
+            WORD ext = *(WORD *)(PC_sig(sigcontext) + 2);
+            if ((ext & 0xf000) == 0xa000) return ((thumb_insn & 0xf) << 12) | (ext & 0x0fff);
+        }
+    }
+    else
+    {
+        DWORD arm_insn = *(DWORD *)PC_sig(sigcontext);
+        if ((arm_insn & 0xfff000f0) == 0xe7f000f0)
+        {
+            return ((arm_insn >> 4) & 0xfff0) | (arm_insn & 0xf);
+        }
+    }
+    return -1;
+}
+
+
+/***********************************************************************
  *           save_context
  *
  * Set the register values from a sigcontext.
@@ -616,6 +645,32 @@ static void setup_exception( ucontext_t *sigcontext, EXCEPTION_RECORD *rec )
 
 
 /***********************************************************************
+ *           raise_second_chance_exception
+ *
+ * Raise a second chance exception.
+ */
+static void raise_second_chance_exception( ucontext_t *sigcontext, EXCEPTION_RECORD *rec )
+{
+    CONTEXT context;
+
+    rec->ExceptionAddress = (void *)PC_sig(sigcontext);
+    if (is_inside_syscall( sigcontext ))
+    {
+        /* Windows would bug check here */
+        ERR("Direct second chance exception code %x flags %x addr %p (inside syscall)\n",
+            rec->ExceptionCode, rec->ExceptionFlags, rec->ExceptionAddress );
+        NtTerminateProcess( NtCurrentProcess(), rec->ExceptionCode );
+    }
+    else
+    {
+        save_context( &context, sigcontext );
+        NtRaiseException( rec, &context, FALSE );
+        restore_context( &context, sigcontext );
+    }
+}
+
+
+/***********************************************************************
  *           call_user_apc_dispatcher
  */
 NTSTATUS call_user_apc_dispatcher( CONTEXT *context, ULONG_PTR arg1, ULONG_PTR arg2, ULONG_PTR arg3,
@@ -780,6 +835,10 @@ static BOOL handle_syscall_fault( ucontext_t *context, EXCEPTION_RECORD *rec )
            (DWORD)IP_sig(context), (DWORD)SP_sig(context), (DWORD)LR_sig(context),
            (DWORD)PC_sig(context), (DWORD)CPSR_sig(context) );
 
+    if (rec->ExceptionCode == STATUS_ACCESS_VIOLATION
+            && is_inside_syscall_stack_guard( (char *)rec->ExceptionInformation[1] ))
+        ERR_(seh)( "Syscall stack overrun.\n ");
+
     if (ntdll_get_thread_data()->jmp_buf)
     {
         TRACE( "returning to handler\n" );
@@ -812,13 +871,23 @@ static void segv_handler( int signal, siginfo_t *siginfo, void *sigcontext )
     switch (get_trap_code(signal, context))
     {
     case TRAP_ARM_PRIVINFLT:   /* Invalid opcode exception */
-        if (*(WORD *)PC_sig(context) == 0xdefe)  /* breakpoint */
+        switch (get_udf_immediate( context ))
         {
+        case 0xfb:  /* __fastfail */
+            rec.ExceptionCode = STATUS_STACK_BUFFER_OVERRUN;
+            rec.ExceptionFlags = EH_NONCONTINUABLE;
+            rec.NumberParameters = 1;
+            rec.ExceptionInformation[0] = REGn_sig( 0, context );
+            raise_second_chance_exception( context, &rec );
+            return;
+        case 0xfe:  /* breakpoint */
             rec.ExceptionCode = EXCEPTION_BREAKPOINT;
             rec.NumberParameters = 1;
             break;
+        default:
+            rec.ExceptionCode = EXCEPTION_ILLEGAL_INSTRUCTION;
+            break;
         }
-        rec.ExceptionCode = EXCEPTION_ILLEGAL_INSTRUCTION;
         break;
     case TRAP_ARM_PAGEFLT:  /* Page fault */
         rec.NumberParameters = 2;
@@ -1083,12 +1152,6 @@ void signal_init_process(void)
     exit(1);
 }
 
-/**********************************************************************
- *    signal_init_early
- */
-void signal_init_early(void)
-{
-}
 
 /***********************************************************************
  *           call_init_thunk

@@ -40,7 +40,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(win);
  *
  * Change the focus window, sending the WM_SETFOCUS and WM_KILLFOCUS messages
  */
-static HWND set_focus_window( HWND hwnd )
+static HWND set_focus_window( HWND hwnd, BOOL from_active, BOOL force )
 {
     HWND previous = 0, ime_default;
     BOOL ret;
@@ -53,10 +53,13 @@ static HWND set_focus_window( HWND hwnd )
     }
     SERVER_END_REQ;
     if (!ret) return 0;
-    if (previous == hwnd) return previous;
+    if (!force && hwnd == previous) return previous;
 
     if (previous)
     {
+        if (!IsWindow(hwnd) && !from_active)
+            NotifyWinEvent( EVENT_OBJECT_FOCUS, previous, OBJID_CLIENT, CHILDID_SELF );
+
         SendMessageW( previous, WM_KILLFOCUS, (WPARAM)hwnd, 0 );
 
         ime_default = ImmGetDefaultIMEWnd( previous );
@@ -68,13 +71,12 @@ static HWND set_focus_window( HWND hwnd )
     if (IsWindow(hwnd))
     {
         USER_Driver->pSetFocus(hwnd);
+        if (!from_active)
+            NotifyWinEvent( EVENT_OBJECT_FOCUS, hwnd, OBJID_CLIENT, CHILDID_SELF );
 
         ime_default = ImmGetDefaultIMEWnd( hwnd );
         if (ime_default)
             SendMessageW( ime_default, WM_IME_INTERNAL, IME_INTERNAL_ACTIVATE, (LPARAM)hwnd );
-
-        if (previous)
-            NotifyWinEvent( EVENT_OBJECT_FOCUS, hwnd, OBJID_CLIENT, 0 );
 
         SendMessageW( hwnd, WM_SETFOCUS, (WPARAM)previous, 0 );
     }
@@ -88,8 +90,8 @@ static HWND set_focus_window( HWND hwnd )
 static BOOL set_active_window( HWND hwnd, HWND *prev, BOOL mouse, BOOL focus )
 {
     HWND previous = GetActiveWindow();
-    BOOL ret;
-    DWORD winflags, old_thread, new_thread;
+    BOOL ret = FALSE;
+    DWORD old_thread, new_thread;
     CBTACTIVATESTRUCT cbt;
 
     if (previous == hwnd)
@@ -98,36 +100,32 @@ static BOOL set_active_window( HWND hwnd, HWND *prev, BOOL mouse, BOOL focus )
         return TRUE;
     }
 
-    /* Prevent a recursive activation loop with the activation messages */
-    winflags = win_set_flags(hwnd, WIN_IS_IN_ACTIVATION, 0);
-    if (!(winflags & WIN_IS_IN_ACTIVATION))
+    if (prev) *prev = previous;
+    if (win_set_flags( hwnd, WIN_IS_ACTIVATING, 0 ) & WIN_IS_ACTIVATING) return TRUE;
+
+    /* call CBT hook chain */
+    cbt.fMouse     = mouse;
+    cbt.hWndActive = previous;
+    if (HOOK_CallHooks( WH_CBT, HCBT_ACTIVATE, (WPARAM)hwnd, (LPARAM)&cbt, TRUE )) goto done;
+
+    if (IsWindow(previous))
     {
-        ret = FALSE;
-
-        /* call CBT hook chain */
-        cbt.fMouse     = mouse;
-        cbt.hWndActive = previous;
-        if (HOOK_CallHooks( WH_CBT, HCBT_ACTIVATE, (WPARAM)hwnd, (LPARAM)&cbt, TRUE ))
-            goto clear_flags;
-
-        if (IsWindow(previous))
-        {
-            SendMessageW( previous, WM_NCACTIVATE, FALSE, (LPARAM)hwnd );
-            SendMessageW( previous, WM_ACTIVATE,
-                          MAKEWPARAM( WA_INACTIVE, IsIconic(previous) ), (LPARAM)hwnd );
-        }
+        SendMessageW( previous, WM_NCACTIVATE, FALSE, (LPARAM)hwnd );
+        SendMessageW( previous, WM_ACTIVATE,
+                      MAKEWPARAM( WA_INACTIVE, IsIconic(previous) ), (LPARAM)hwnd );
     }
 
     SERVER_START_REQ( set_active_window )
     {
         req->handle = wine_server_user_handle( hwnd );
+        req->internal_msg = WM_WINE_SETACTIVEWINDOW;
         if ((ret = !wine_server_call_err( req )))
             previous = wine_server_ptr_handle( reply->previous );
     }
     SERVER_END_REQ;
-    if (!ret) goto clear_flags;
+    if (!ret) goto done;
     if (prev) *prev = previous;
-    if (previous == hwnd) goto clear_flags;
+    if (previous == hwnd) goto done;
 
     if (hwnd)
     {
@@ -135,11 +133,7 @@ static BOOL set_active_window( HWND hwnd, HWND *prev, BOOL mouse, BOOL focus )
         if (SendMessageW( hwnd, WM_QUERYNEWPALETTE, 0, 0 ))
             SendMessageTimeoutW( HWND_BROADCAST, WM_PALETTEISCHANGING, (WPARAM)hwnd, 0,
                                  SMTO_ABORTIFHUNG, 2000, NULL );
-        if (!IsWindow(hwnd))
-        {
-            ret = FALSE;
-            goto clear_flags;
-        }
+        if (!(ret = IsWindow( hwnd ))) goto done;
     }
 
     old_thread = previous ? GetWindowThreadProcessId( previous, NULL ) : 0;
@@ -171,23 +165,16 @@ static BOOL set_active_window( HWND hwnd, HWND *prev, BOOL mouse, BOOL focus )
         }
     }
 
-    if (!(winflags & WIN_IS_IN_ACTIVATION) && IsWindow(hwnd))
+    if (IsWindow(hwnd))
     {
-        SendMessageW( hwnd, WM_NCACTIVATE, (hwnd == GetForegroundWindow()), (LPARAM)previous );
+        SendMessageW( hwnd, WM_NCACTIVATE,
+                      (hwnd == GetForegroundWindow()) && !(win_get_flags(previous) & WIN_IS_ACTIVATING),
+                      (LPARAM)previous );
         SendMessageW( hwnd, WM_ACTIVATE,
                       MAKEWPARAM( mouse ? WA_CLICKACTIVE : WA_ACTIVE, IsIconic(hwnd) ),
                       (LPARAM)previous );
-
-        SendMessageW( hwnd, WM_NCPOINTERUP, 0, 0);
-
         if (GetAncestor( hwnd, GA_PARENT ) == GetDesktopWindow())
             PostMessageW( GetDesktopWindow(), WM_PARENTNOTIFY, WM_NCACTIVATE, (LPARAM)hwnd );
-
-        if (GetPropW( hwnd, L"__WINE_RESTORE_WINDOW" ))
-        {
-            SetPropW( hwnd, L"__WINE_RESTORE_WINDOW", NULL );
-            SendMessageW( hwnd, WM_SYSCOMMAND, SC_RESTORE, 0 );
-        }
     }
 
     /* now change focus if necessary */
@@ -201,12 +188,12 @@ static BOOL set_active_window( HWND hwnd, HWND *prev, BOOL mouse, BOOL focus )
         if (hwnd == info.hwndActive)
         {
             if (!info.hwndFocus || !hwnd || GetAncestor( info.hwndFocus, GA_ROOT ) != hwnd)
-                set_focus_window( hwnd );
+                set_focus_window( hwnd, TRUE, FALSE );
         }
     }
 
-clear_flags:
-    win_set_flags(hwnd, 0, WIN_IS_IN_ACTIVATION);
+done:
+    win_set_flags( hwnd, 0, WIN_IS_ACTIVATING );
     return ret;
 }
 
@@ -234,12 +221,16 @@ static BOOL set_foreground_window( HWND hwnd, BOOL mouse )
     if (ret && previous != hwnd)
     {
         if (send_msg_old)  /* old window belongs to other thread */
-            SendNotifyMessageW( previous, WM_WINE_SETACTIVEWINDOW, 0, 0 );
+            PostMessageW( previous, WM_WINE_SETACTIVEWINDOW, 0, 0 );
         else if (send_msg_new)  /* old window belongs to us but new one to other thread */
             ret = set_active_window( 0, NULL, mouse, TRUE );
 
+        /* already active, set_active_window will do no nothing */
+        if (!send_msg_new && hwnd == GetActiveWindow())
+            SendMessageW( hwnd, WM_NCACTIVATE, TRUE, (LPARAM)hwnd );
+
         if (send_msg_new)  /* new window belongs to other thread */
-            SendNotifyMessageW( hwnd, WM_WINE_SETACTIVEWINDOW, (WPARAM)hwnd, 0 );
+            PostMessageW( hwnd, WM_WINE_SETACTIVEWINDOW, (WPARAM)hwnd, 0 );
         else  /* new window belongs to us */
             ret = set_active_window( hwnd, NULL, mouse, TRUE );
     }
@@ -344,7 +335,7 @@ HWND WINAPI SetFocus( HWND hwnd )
     }
 
     /* change focus and send messages */
-    return set_focus_window( hwnd );
+    return set_focus_window( hwnd, FALSE, hwnd != previous );
 }
 
 
@@ -365,14 +356,15 @@ BOOL WINAPI SetForegroundWindow( HWND hwnd )
  */
 HWND WINAPI GetActiveWindow(void)
 {
+    volatile struct input_shared_memory *shared = get_input_shared_memory();
     HWND ret = 0;
 
-    SERVER_START_REQ( get_thread_input )
+    if (!shared) return 0;
+    SHARED_READ_BEGIN( &shared->seq )
     {
-        req->tid = GetCurrentThreadId();
-        if (!wine_server_call_err( req )) ret = wine_server_ptr_handle( reply->active );
+        ret = wine_server_ptr_handle( shared->active );
     }
-    SERVER_END_REQ;
+    SHARED_READ_END( &shared->seq );
     return ret;
 }
 
@@ -382,14 +374,15 @@ HWND WINAPI GetActiveWindow(void)
  */
 HWND WINAPI GetFocus(void)
 {
+    volatile struct input_shared_memory *shared = get_input_shared_memory();
     HWND ret = 0;
 
-    SERVER_START_REQ( get_thread_input )
+    if (!shared) return 0;
+    SHARED_READ_BEGIN( &shared->seq )
     {
-        req->tid = GetCurrentThreadId();
-        if (!wine_server_call_err( req )) ret = wine_server_ptr_handle( reply->focus );
+        ret = wine_server_ptr_handle( shared->focus );
     }
-    SERVER_END_REQ;
+    SHARED_READ_END( &shared->seq );
     return ret;
 }
 
@@ -399,14 +392,15 @@ HWND WINAPI GetFocus(void)
  */
 HWND WINAPI GetForegroundWindow(void)
 {
+    volatile struct input_shared_memory *shared = get_foreground_shared_memory();
     HWND ret = 0;
 
-    SERVER_START_REQ( get_thread_input )
+    if (!shared) return 0;
+    SHARED_READ_BEGIN( &shared->seq )
     {
-        req->tid = 0;
-        if (!wine_server_call_err( req )) ret = wine_server_ptr_handle( reply->foreground );
+        ret = wine_server_ptr_handle( shared->active );
     }
-    SERVER_END_REQ;
+    SHARED_READ_END( &shared->seq );
     return ret;
 }
 

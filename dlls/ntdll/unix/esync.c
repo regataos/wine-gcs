@@ -22,8 +22,6 @@
 #pragma makedep unix
 #endif
 
-#define _GNU_SOURCE
-
 #include "config.h"
 
 #include <assert.h>
@@ -528,6 +526,9 @@ NTSTATUS esync_set_event( HANDLE handle )
     if ((ret = get_object( handle, &obj ))) return ret;
     event = obj->shm;
 
+    if (obj->type != ESYNC_MANUAL_EVENT && obj->type != ESYNC_AUTO_EVENT)
+        return STATUS_OBJECT_TYPE_MISMATCH;
+
     if (obj->type == ESYNC_MANUAL_EVENT)
     {
         /* Acquire the spinlock. */
@@ -619,7 +620,7 @@ NTSTATUS esync_pulse_event( HANDLE handle )
 
     /* Try to give other threads a chance to wake up. Hopefully erring on this
      * side is the better thing to do... */
-    NtYieldExecution();
+    usleep(0);
 
     read( obj->fd, &value, sizeof(value) );
 
@@ -1161,10 +1162,22 @@ tryagain:
                         {
                             /* We were too slow. Put everything back. */
                             value = 1;
-                            for (j = i; j >= 0; j--)
+                            for (j = i - 1; j >= 0; j--)
                             {
-                                if (write( obj->fd, &value, sizeof(value) ) == -1)
+                                struct esync *obj = objs[j];
+
+                                if (obj->type == ESYNC_MUTEX)
+                                {
+                                    struct mutex *mutex = obj->shm;
+
+                                    if (mutex->tid == GetCurrentThreadId())
+                                        continue;
+                                }
+                                if (write( fds[j].fd, &value, sizeof(value) ) == -1)
+                                {
+                                    ERR("write failed.\n");
                                     return errno_to_status( errno );
+                                }
                             }
 
                             goto tryagain;  /* break out of two loops and a switch */

@@ -52,6 +52,11 @@ static DWORD exiting_thread_id;
 
 extern void WDML_NotifyThreadDetach(void);
 
+#ifdef __MINGW32__
+/* work around a Mingw build issue where _wassert causes a duplicate reference to MessageBoxW */
+void __cdecl _wassert( const WCHAR *msg, const WCHAR *file, unsigned line) { abort(); }
+#endif
+
 /***********************************************************************
  *           USER_Lock
  */
@@ -259,8 +264,35 @@ static void thread_detach(void)
     destroy_thread_windows();
     CloseHandle( thread_info->server_queue );
     HeapFree( GetProcessHeap(), 0, thread_info->wmchar_data );
-    HeapFree( GetProcessHeap(), 0, thread_info->key_state );
     HeapFree( GetProcessHeap(), 0, thread_info->rawinput );
+
+    if (thread_info->desktop_shared_map)
+    {
+        CloseHandle( thread_info->desktop_shared_map );
+        thread_info->desktop_shared_map = NULL;
+        thread_info->desktop_shared_memory = NULL;
+    }
+
+    if (thread_info->queue_shared_map)
+    {
+        CloseHandle( thread_info->queue_shared_map );
+        thread_info->queue_shared_map = NULL;
+        thread_info->queue_shared_memory = NULL;
+    }
+
+    if (thread_info->input_shared_map)
+    {
+        CloseHandle( thread_info->input_shared_map );
+        thread_info->input_shared_map = NULL;
+        thread_info->input_shared_memory = NULL;
+    }
+
+    if (thread_info->foreground_shared_memory)
+    {
+        CloseHandle( thread_info->foreground_shared_map );
+        thread_info->foreground_shared_map = NULL;
+        thread_info->foreground_shared_memory = NULL;
+    }
 
     exiting_thread_id = 0;
 }

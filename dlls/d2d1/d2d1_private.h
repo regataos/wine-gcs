@@ -24,8 +24,6 @@
 
 #include <assert.h>
 #include <limits.h>
-#include <stdint.h>
-#include <stdbool.h>
 #include <math.h>
 #define COBJMACROS
 #include "d2d1_2.h"

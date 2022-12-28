@@ -48,13 +48,13 @@ static DWORD from_bmformat( BMFORMAT format )
     default:
         if (!quietfixme)
         {
-            FIXME( "unhandled bitmap format %#x\n", format );
+            FIXME( "unhandled bitmap format %08x\n", format );
             quietfixme = TRUE;
         }
         ret = TYPE_RGB_8;
         break;
     }
-    TRACE( "color space: %#x -> %#lx\n", format, ret );
+    TRACE( "color space: %08x -> %08x\n", format, ret );
     return ret;
 }
 
@@ -76,7 +76,7 @@ static DWORD from_type( COLORTYPE type )
         break;
     }
 
-    TRACE( "color type: %#x -> %#lx\n", type, ret );
+    TRACE( "color type: %08x -> %08x\n", type, ret );
     return ret;
 }
 
@@ -85,12 +85,13 @@ static DWORD from_type( COLORTYPE type )
  *
  * See CreateColorTransformW.
  */
-HTRANSFORM WINAPI CreateColorTransformA( LPLOGCOLORSPACEA space, HPROFILE dest, HPROFILE target, DWORD flags )
+HTRANSFORM WINAPI CreateColorTransformA( LPLOGCOLORSPACEA space, HPROFILE dest,
+    HPROFILE target, DWORD flags )
 {
     LOGCOLORSPACEW spaceW;
     DWORD len;
 
-    TRACE( "( %p, %p, %p, %#lx )\n", space, dest, target, flags );
+    TRACE( "( %p, %p, %p, 0x%08x )\n", space, dest, target, flags );
 
     if (!space || !dest) return FALSE;
 
@@ -118,7 +119,8 @@ HTRANSFORM WINAPI CreateColorTransformA( LPLOGCOLORSPACEA space, HPROFILE dest, 
  *  Success: Handle to a transform.
  *  Failure: NULL
  */
-HTRANSFORM WINAPI CreateColorTransformW( LPLOGCOLORSPACEW space, HPROFILE dest, HPROFILE target, DWORD flags )
+HTRANSFORM WINAPI CreateColorTransformW( LPLOGCOLORSPACEW space, HPROFILE dest,
+    HPROFILE target, DWORD flags )
 {
     HTRANSFORM ret = NULL;
     cmsHTRANSFORM transform;
@@ -127,7 +129,7 @@ HTRANSFORM WINAPI CreateColorTransformW( LPLOGCOLORSPACEW space, HPROFILE dest, 
     cmsHPROFILE input;
     int intent;
 
-    TRACE( "( %p, %p, %p, %#lx )\n", space, dest, target, flags );
+    TRACE( "( %p, %p, %p, 0x%08x )\n", space, dest, target, flags );
 
     if (!space || !(dst = grab_profile( dest ))) return FALSE;
 
@@ -138,7 +140,7 @@ HTRANSFORM WINAPI CreateColorTransformW( LPLOGCOLORSPACEW space, HPROFILE dest, 
     }
     intent = space->lcsIntent > 3 ? INTENT_PERCEPTUAL : space->lcsIntent;
 
-    TRACE( "lcsIntent:   %#lx\n", space->lcsIntent );
+    TRACE( "lcsIntent:   %x\n", space->lcsIntent );
     TRACE( "lcsCSType:   %s\n", dbgstr_tag( space->lcsCSType ) );
     TRACE( "lcsFilename: %s\n", debugstr_w( space->lcsFilename ) );
 
@@ -184,7 +186,8 @@ HTRANSFORM WINAPI CreateMultiProfileTransform( PHPROFILE profiles, DWORD nprofil
     cmsHTRANSFORM transform;
     struct profile *profile0, *profile1;
 
-    TRACE( "( %p, %#lx, %p, %lu, %#lx, %#lx )\n", profiles, nprofiles, intents, nintents, flags, cmm );
+    TRACE( "( %p, 0x%08x, %p, 0x%08x, 0x%08x, 0x%08x )\n",
+           profiles, nprofiles, intents, nintents, flags, cmm );
 
     if (!profiles || !nprofiles || !intents) return NULL;
 
@@ -262,7 +265,7 @@ BOOL WINAPI TranslateBitmapBits( HTRANSFORM handle, PVOID srcbits, BMFORMAT inpu
     BOOL ret;
     cmsHTRANSFORM transform = grab_transform( handle );
 
-    TRACE( "( %p, %p, %#x, %lu, %lu, %lu, %p, %#x, %lu, %p, %#lx )\n",
+    TRACE( "( %p, %p, 0x%08x, 0x%08x, 0x%08x, 0x%08x, %p, 0x%08x, 0x%08x, %p, 0x%08x )\n",
            handle, srcbits, input, width, height, inputstride, destbits, output,
            outputstride, callback, data );
 
@@ -297,7 +300,7 @@ BOOL WINAPI TranslateColors( HTRANSFORM handle, PCOLOR in, DWORD count,
     unsigned int i;
     cmsHTRANSFORM transform = grab_transform( handle );
 
-    TRACE( "( %p, %p, %lu, %d, %p, %d )\n", handle, in, count, input_type, out, output_type );
+    TRACE( "( %p, %p, %d, %d, %p, %d )\n", handle, in, count, input_type, out, output_type );
 
     if (!transform) return FALSE;
 

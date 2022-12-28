@@ -1217,8 +1217,7 @@ void BmpDecoder_FindIconMask(BmpDecoder *This, ULONG *mask_offset, int *topdown)
     if (This->read_data_func == BmpFrameDecode_ReadUncompressed)
     {
         /* RGB or BITFIELDS data */
-        UINT width, height;
-        ULONG bytesperrow, datasize;
+        ULONG width, height, bytesperrow, datasize;
         IWICBitmapFrameDecode_GetSize(&This->IWICBitmapFrameDecode_iface, &width, &height);
         bytesperrow = (((width * This->bitsperpixel)+31)/32)*4;
         datasize = bytesperrow * height;

@@ -29,17 +29,21 @@
 WINE_DEFAULT_DEBUG_CHANNEL(jscript);
 
 /* ECMA-262 3rd Edition    15.11.4.4 */
-static HRESULT Error_toString(script_ctx_t *ctx, vdisp_t *vthis, WORD flags,
+static HRESULT Error_toString(script_ctx_t *ctx, jsval_t vthis, WORD flags,
         unsigned argc, jsval_t *argv, jsval_t *r)
 {
-    jsdisp_t *jsthis;
     jsstr_t *name = NULL, *msg = NULL, *ret = NULL;
+    jsdisp_t *jsthis = NULL;
     jsval_t v;
     HRESULT hres;
 
     TRACE("\n");
 
-    jsthis = get_jsdisp(vthis);
+    if(is_object_instance(vthis))
+        jsthis = to_jsdisp(get_object(vthis));
+    else if(ctx->version >= SCRIPTLANGUAGEVERSION_ES5)
+        return JS_E_OBJECT_EXPECTED;
+
     if(!jsthis || ctx->version < 2) {
         if(r) {
             jsstr_t *str;
@@ -114,7 +118,7 @@ static HRESULT Error_toString(script_ctx_t *ctx, vdisp_t *vthis, WORD flags,
     return S_OK;
 }
 
-static HRESULT Error_value(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags,
+static HRESULT Error_value(script_ctx_t *ctx, jsval_t vthis, WORD flags,
         unsigned argc, jsval_t *argv, jsval_t *r)
 {
     TRACE("\n");
@@ -260,56 +264,56 @@ static HRESULT error_constr(script_ctx_t *ctx, WORD flags, unsigned argc, jsval_
     }
 }
 
-static HRESULT ErrorConstr_value(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags,
+static HRESULT ErrorConstr_value(script_ctx_t *ctx, jsval_t vthis, WORD flags,
         unsigned argc, jsval_t *argv, jsval_t *r)
 {
     TRACE("\n");
     return error_constr(ctx, flags, argc, argv, r, ctx->error_constr);
 }
 
-static HRESULT EvalErrorConstr_value(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags,
+static HRESULT EvalErrorConstr_value(script_ctx_t *ctx, jsval_t vthis, WORD flags,
         unsigned argc, jsval_t *argv, jsval_t *r)
 {
     TRACE("\n");
     return error_constr(ctx, flags, argc, argv, r, ctx->eval_error_constr);
 }
 
-static HRESULT RangeErrorConstr_value(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags,
+static HRESULT RangeErrorConstr_value(script_ctx_t *ctx, jsval_t vthis, WORD flags,
         unsigned argc, jsval_t *argv, jsval_t *r)
 {
     TRACE("\n");
     return error_constr(ctx, flags, argc, argv, r, ctx->range_error_constr);
 }
 
-static HRESULT ReferenceErrorConstr_value(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags,
+static HRESULT ReferenceErrorConstr_value(script_ctx_t *ctx, jsval_t vthis, WORD flags,
         unsigned argc, jsval_t *argv, jsval_t *r)
 {
     TRACE("\n");
     return error_constr(ctx, flags, argc, argv, r, ctx->reference_error_constr);
 }
 
-static HRESULT RegExpErrorConstr_value(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags,
+static HRESULT RegExpErrorConstr_value(script_ctx_t *ctx, jsval_t vthis, WORD flags,
         unsigned argc, jsval_t *argv, jsval_t *r)
 {
     TRACE("\n");
     return error_constr(ctx, flags, argc, argv, r, ctx->regexp_error_constr);
 }
 
-static HRESULT SyntaxErrorConstr_value(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags,
+static HRESULT SyntaxErrorConstr_value(script_ctx_t *ctx, jsval_t vthis, WORD flags,
         unsigned argc, jsval_t *argv, jsval_t *r)
 {
     TRACE("\n");
     return error_constr(ctx, flags, argc, argv, r, ctx->syntax_error_constr);
 }
 
-static HRESULT TypeErrorConstr_value(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags,
+static HRESULT TypeErrorConstr_value(script_ctx_t *ctx, jsval_t vthis, WORD flags,
         unsigned argc, jsval_t *argv, jsval_t *r)
 {
     TRACE("\n");
     return error_constr(ctx, flags, argc, argv, r, ctx->type_error_constr);
 }
 
-static HRESULT URIErrorConstr_value(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags,
+static HRESULT URIErrorConstr_value(script_ctx_t *ctx, jsval_t vthis, WORD flags,
         unsigned argc, jsval_t *argv, jsval_t *r)
 {
     TRACE("\n");
@@ -461,7 +465,9 @@ jsdisp_t *create_builtin_error(script_ctx_t *ctx)
         case JS_E_INVALID_PROPERTY:
         case JS_E_INVALID_ACTION:
         case JS_E_MISSING_ARG:
+        case JS_E_OBJECT_NOT_COLLECTION:
         case JS_E_FUNCTION_EXPECTED:
+        case JS_E_STRING_EXPECTED:
         case JS_E_DATE_EXPECTED:
         case JS_E_NUMBER_EXPECTED:
         case JS_E_OBJECT_EXPECTED:
@@ -472,10 +478,19 @@ jsdisp_t *create_builtin_error(script_ctx_t *ctx)
         case JS_E_JSCRIPT_EXPECTED:
         case JS_E_ENUMERATOR_EXPECTED:
         case JS_E_REGEXP_EXPECTED:
+        case JS_E_ARRAY_OR_ARGS_EXPECTED:
         case JS_E_ARRAY_EXPECTED:
+        case JS_E_CYCLIC_PROTO_VALUE:
+        case JS_E_CANNOT_CREATE_FOR_NONEXTENSIBLE:
         case JS_E_OBJECT_NONEXTENSIBLE:
         case JS_E_NONCONFIGURABLE_REDEFINED:
         case JS_E_NONWRITABLE_MODIFIED:
+        case JS_E_TYPEDARRAY_BAD_CTOR_ARG:
+        case JS_E_NOT_TYPEDARRAY:
+        case JS_E_TYPEDARRAY_INVALID_SOURCE:
+        case JS_E_NOT_DATAVIEW:
+        case JS_E_DATAVIEW_NO_ARGUMENT:
+        case JS_E_ARRAYBUFFER_EXPECTED:
         case JS_E_PROP_DESC_MISMATCH:
         case JS_E_INVALID_WRITABLE_PROP_DESC:
             constr = ctx->type_error_constr;
@@ -485,6 +500,10 @@ jsdisp_t *create_builtin_error(script_ctx_t *ctx)
         case JS_E_FRACTION_DIGITS_OUT_OF_RANGE:
         case JS_E_PRECISION_OUT_OF_RANGE:
         case JS_E_INVALID_LENGTH:
+        case JS_E_TYPEDARRAY_INVALID_OFFSLEN:
+        case JS_E_TYPEDARRAY_INVALID_SUBARRAY:
+        case JS_E_DATAVIEW_INVALID_ACCESS:
+        case JS_E_DATAVIEW_INVALID_OFFSET:
             constr = ctx->range_error_constr;
             break;
 

@@ -9989,7 +9989,7 @@ static DWORD WMSFT_compile_typeinfo_aux(ITypeInfoImpl *info,
         ++memid;
     }
 
-    name = (DWORD*)memid;
+    name = (UINT*)memid;
     for(i = 0; i < info->typeattr.cFuncs; ++i){
         TLBFuncDesc *desc = &info->funcdescs[i];
         if(desc->Name)

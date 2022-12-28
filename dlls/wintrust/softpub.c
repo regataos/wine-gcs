@@ -40,7 +40,7 @@ HRESULT WINAPI SoftpubDefCertInit(CRYPT_PROVIDER_DATA *data)
     if (data->padwTrustStepErrors &&
      !data->padwTrustStepErrors[TRUSTERROR_STEP_FINAL_WVTINIT])
         ret = S_OK;
-    TRACE("returning %08x\n", ret);
+    TRACE("returning %08lx\n", ret);
     return ret;
 }
 
@@ -53,7 +53,7 @@ HRESULT WINAPI SoftpubInitialize(CRYPT_PROVIDER_DATA *data)
     if (data->padwTrustStepErrors &&
      !data->padwTrustStepErrors[TRUSTERROR_STEP_FINAL_WVTINIT])
         ret = S_OK;
-    TRACE("returning %08x\n", ret);
+    TRACE("returning %08lx\n", ret);
     return ret;
 }
 
@@ -100,7 +100,7 @@ static DWORD SOFTPUB_OpenFile(CRYPT_PROVIDER_DATA *data)
     if (!err)
         GetFileTime(data->pWintrustData->u.pFile->hFile, &data->sftSystemTime,
          NULL, NULL);
-    TRACE("returning %d\n", err);
+    TRACE("returning %ld\n", err);
     return err;
 }
 
@@ -136,7 +136,7 @@ static DWORD SOFTPUB_GetFileSubject(CRYPT_PROVIDER_DATA *data)
     }
     else
         data->u.pPDSip->gSubject = *data->pWintrustData->u.pFile->pgKnownSubject;
-    TRACE("returning %d\n", err);
+    TRACE("returning %ld\n", err);
     return err;
 }
 
@@ -155,7 +155,7 @@ static DWORD SOFTPUB_GetSIP(CRYPT_PROVIDER_DATA *data)
     }
     else
         err = ERROR_OUTOFMEMORY;
-    TRACE("returning %d\n", err);
+    TRACE("returning %ld\n", err);
     return err;
 }
 
@@ -206,7 +206,7 @@ static DWORD SOFTPUB_GetMessageFromFile(CRYPT_PROVIDER_DATA *data, HANDLE file,
         err = GetLastError();
 
     data->psPfns->pfnFree(buf);
-    TRACE("returning %d\n", err);
+    TRACE("returning %ld\n", err);
     return err;
 }
 
@@ -393,7 +393,7 @@ static DWORD SOFTPUB_CreateStoreFromMessage(CRYPT_PROVIDER_DATA *data)
     }
     else
         err = GetLastError();
-    TRACE("returning %d\n", err);
+    TRACE("returning %ld\n", err);
     return err;
 }
 
@@ -460,7 +460,7 @@ static DWORD SOFTPUB_DecodeInnerContent(CRYPT_PROVIDER_DATA *data)
         err = GetLastError();
 
 error:
-    TRACE("returning %d\n", err);
+    TRACE("returning %ld\n", err);
     data->psPfns->pfnFree(oid);
     data->psPfns->pfnFree(buf);
     return err;
@@ -617,13 +617,13 @@ HRESULT WINAPI SoftpubLoadMessage(CRYPT_PROVIDER_DATA *data)
         err = SOFTPUB_LoadCatalogMessage(data);
         break;
     default:
-        FIXME("unimplemented for %d\n", data->pWintrustData->dwUnionChoice);
+        FIXME("unimplemented for %ld\n", data->pWintrustData->dwUnionChoice);
         err = ERROR_INVALID_PARAMETER;
     }
 
     if (err)
         data->padwTrustStepErrors[TRUSTERROR_STEP_FINAL_OBJPROV] = err;
-    TRACE("returning %d (%08x)\n", !err ? S_OK : S_FALSE,
+    TRACE("returning %ld (%08lx)\n", !err ? S_OK : S_FALSE,
      data->padwTrustStepErrors[TRUSTERROR_STEP_FINAL_OBJPROV]);
     return !err ? S_OK : S_FALSE;
 }
@@ -830,16 +830,93 @@ static DWORD WINTRUST_VerifySigner(CRYPT_PROVIDER_DATA *data, DWORD signerIdx)
     return err;
 }
 
+static void load_secondary_signatures(CRYPT_PROVIDER_DATA *data, HCRYPTMSG msg)
+{
+    CRYPT_PROVIDER_SIGSTATE *s = data->pSigState;
+    CRYPT_ATTRIBUTES *attrs;
+    unsigned int i, j;
+    DWORD size;
+
+    if (!CryptMsgGetParam(msg, CMSG_SIGNER_UNAUTH_ATTR_PARAM, 0, NULL, &size))
+        return;
+
+    if (!(attrs = data->psPfns->pfnAlloc(size)))
+    {
+        ERR("No memory.\n");
+        return;
+    }
+    if (!CryptMsgGetParam(msg, CMSG_SIGNER_UNAUTH_ATTR_PARAM, 0, attrs, &size))
+        goto done;
+
+    for (i = 0; i < attrs->cAttr; ++i)
+    {
+        if (strcmp(attrs->rgAttr[i].pszObjId, szOID_NESTED_SIGNATURE))
+            continue;
+
+        if (!(s->rhSecondarySigs = data->psPfns->pfnAlloc(attrs->rgAttr[i].cValue * sizeof(*s->rhSecondarySigs))))
+        {
+            ERR("No memory");
+            goto done;
+        }
+        s->cSecondarySigs = 0;
+        for (j = 0; j < attrs->rgAttr[i].cValue; ++j)
+        {
+            if (!(msg = CryptMsgOpenToDecode(X509_ASN_ENCODING | PKCS_7_ASN_ENCODING, 0, 0, 0, NULL, NULL)))
+            {
+                ERR("Could not create crypt message.\n");
+                goto done;
+            }
+            if (!CryptMsgUpdate(msg, attrs->rgAttr[i].rgValue[j].pbData, attrs->rgAttr[i].rgValue[j].cbData, TRUE))
+            {
+                ERR("Could not update crypt message, err %lu.\n", GetLastError());
+                CryptMsgClose(msg);
+                goto done;
+            }
+            s->rhSecondarySigs[j] = msg;
+            ++s->cSecondarySigs;
+        }
+        break;
+    }
+done:
+    data->psPfns->pfnFree(attrs);
+}
+
 HRESULT WINAPI SoftpubLoadSignature(CRYPT_PROVIDER_DATA *data)
 {
-    DWORD err;
+    DWORD err = ERROR_SUCCESS;
 
     TRACE("(%p)\n", data);
 
     if (!data->padwTrustStepErrors)
         return S_FALSE;
 
-    if (data->hMsg)
+    if (data->pSigState)
+    {
+        /* We did not initialize this, probably an unsupported usage. */
+        FIXME("pSigState %p already initialized.\n", data->pSigState);
+    }
+    if (!(data->pSigState = data->psPfns->pfnAlloc(sizeof(*data->pSigState))))
+    {
+        err = ERROR_OUTOFMEMORY;
+    }
+    else
+    {
+        data->pSigState->cbStruct = sizeof(*data->pSigState);
+        data->pSigState->fSupportMultiSig = TRUE;
+        data->pSigState->dwCryptoPolicySupport = WSS_SIGTRUST_SUPPORT | WSS_OBJTRUST_SUPPORT | WSS_CERTTRUST_SUPPORT;
+        if (data->hMsg)
+        {
+            data->pSigState->hPrimarySig = CryptMsgDuplicate(data->hMsg);
+            load_secondary_signatures(data, data->pSigState->hPrimarySig);
+        }
+        if (data->pSigSettings)
+        {
+            if (data->pSigSettings->dwFlags & WSS_GET_SECONDARY_SIG_COUNT)
+                data->pSigSettings->cSecondarySigs = data->pSigState->cSecondarySigs;
+        }
+    }
+
+    if (!err && data->hMsg)
     {
         DWORD signerCount, size;
 
@@ -859,8 +936,7 @@ HRESULT WINAPI SoftpubLoadSignature(CRYPT_PROVIDER_DATA *data)
         else
             err = TRUST_E_NOSIGNATURE;
     }
-    else
-        err = ERROR_SUCCESS;
+
     if (err)
         data->padwTrustStepErrors[TRUSTERROR_STEP_FINAL_SIGPROV] = err;
     return !err ? S_OK : S_FALSE;
@@ -885,7 +961,7 @@ BOOL WINAPI SoftpubCheckCert(CRYPT_PROVIDER_DATA *data, DWORD idxSigner,
 {
     BOOL ret;
 
-    TRACE("(%p, %d, %d, %d)\n", data, idxSigner, fCounterSignerChain,
+    TRACE("(%p, %ld, %d, %ld)\n", data, idxSigner, fCounterSignerChain,
      idxCounterSigner);
 
     if (fCounterSignerChain)
@@ -958,7 +1034,7 @@ static DWORD WINTRUST_TrustStatusToError(DWORD errorStatus)
         error = CERT_E_INVALID_POLICY;
     else if (errorStatus)
     {
-        FIXME("unknown error status %08x\n", errorStatus);
+        FIXME("unknown error status %08lx\n", errorStatus);
         error = TRUST_E_SYSTEM_ERROR;
     }
     else
@@ -1115,7 +1191,7 @@ HRESULT WINAPI WintrustCertificateTrust(CRYPT_PROVIDER_DATA *data)
     }
     if (err)
         data->padwTrustStepErrors[TRUSTERROR_STEP_FINAL_CERTPROV] = err;
-    TRACE("returning %d (%08x)\n", !err ? S_OK : S_FALSE,
+    TRACE("returning %ld (%08lx)\n", !err ? S_OK : S_FALSE,
      data->padwTrustStepErrors[TRUSTERROR_STEP_FINAL_CERTPROV]);
     return !err ? S_OK : S_FALSE;
 }
@@ -1162,7 +1238,7 @@ HRESULT WINAPI GenericChainCertificateTrust(CRYPT_PROVIDER_DATA *data)
 end:
     if (err)
         data->padwTrustStepErrors[TRUSTERROR_STEP_FINAL_CERTPROV] = err;
-    TRACE("returning %d (%08x)\n", !err ? S_OK : S_FALSE,
+    TRACE("returning %ld (%08lx)\n", !err ? S_OK : S_FALSE,
      data->padwTrustStepErrors[TRUSTERROR_STEP_FINAL_CERTPROV]);
     return !err ? S_OK : S_FALSE;
 }
@@ -1175,7 +1251,7 @@ HRESULT WINAPI SoftpubAuthenticode(CRYPT_PROVIDER_DATA *data)
     TRACE("(%p)\n", data);
 
     if (data->pWintrustData->dwUIChoice != WTD_UI_NONE)
-        FIXME("unimplemented for UI choice %d\n",
+        FIXME("unimplemented for UI choice %ld\n",
          data->pWintrustData->dwUIChoice);
     if (!data->csSigners)
     {
@@ -1248,7 +1324,7 @@ HRESULT WINAPI SoftpubAuthenticode(CRYPT_PROVIDER_DATA *data)
     if (!ret)
         data->padwTrustStepErrors[TRUSTERROR_STEP_FINAL_POLICYPROV] =
          policyStatus.dwError;
-    TRACE("returning %d (%08x)\n", ret ? S_OK : S_FALSE,
+    TRACE("returning %ld (%08lx)\n", ret ? S_OK : S_FALSE,
      data->padwTrustStepErrors[TRUSTERROR_STEP_FINAL_POLICYPROV]);
     return ret ? S_OK : S_FALSE;
 }
@@ -1290,7 +1366,7 @@ HRESULT WINAPI GenericChainFinalProv(CRYPT_PROVIDER_DATA *data)
     TRACE("(%p)\n", data);
 
     if (data->pWintrustData->dwUIChoice != WTD_UI_NONE)
-        FIXME("unimplemented for UI choice %d\n",
+        FIXME("unimplemented for UI choice %ld\n",
          data->pWintrustData->dwUIChoice);
     if (!data->csSigners)
         err = TRUST_E_NOSIGNATURE;
@@ -1343,7 +1419,7 @@ HRESULT WINAPI GenericChainFinalProv(CRYPT_PROVIDER_DATA *data)
     }
     if (err != NO_ERROR)
         data->padwTrustStepErrors[TRUSTERROR_STEP_FINAL_POLICYPROV] = err;
-    TRACE("returning %d (%08x)\n", err == NO_ERROR ? S_OK : S_FALSE,
+    TRACE("returning %ld (%08lx)\n", err == NO_ERROR ? S_OK : S_FALSE,
      data->padwTrustStepErrors[TRUSTERROR_STEP_FINAL_POLICYPROV]);
     return err == NO_ERROR ? S_OK : S_FALSE;
 }
@@ -1375,6 +1451,13 @@ HRESULT WINAPI SoftpubCleanup(CRYPT_PROVIDER_DATA *data)
         data->psPfns->pfnFree(data->u.pPDSip->psIndirectData);
     }
 
+    if (WVT_ISINSTRUCT(CRYPT_PROVIDER_DATA, data->cbStruct, pSigState) && data->pSigState)
+    {
+        CryptMsgClose(data->pSigState->hPrimarySig);
+        for (i = 0; i < data->pSigState->cSecondarySigs; ++i)
+            CryptMsgClose(data->pSigState->rhSecondarySigs[i]);
+        data->psPfns->pfnFree(data->pSigState);
+    }
     CryptMsgClose(data->hMsg);
 
     if (data->fOpenedFile &&

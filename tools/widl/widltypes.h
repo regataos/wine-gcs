@@ -26,13 +26,13 @@
 #include "ndrtypes.h"
 #include "wine/list.h"
 
-struct uuid
+typedef struct
 {
     unsigned int   Data1;
     unsigned short Data2;
     unsigned short Data3;
     unsigned char  Data4[8];
-};
+} uuid_t;
 
 #define TRUE 1
 #define FALSE 0
@@ -360,7 +360,7 @@ struct _expr_t {
 };
 
 struct _attr_custdata_t {
-  struct uuid id;
+  uuid_t id;
   expr_t *pval;
 };
 
@@ -566,7 +566,7 @@ struct _typelib_entry_t {
 
 struct _importinfo_t {
     int offset;
-    struct uuid guid;
+    uuid_t guid;
     int flags;
     int id;
 
@@ -580,7 +580,7 @@ struct _importlib_t {
     char *name;
 
     int version;
-    struct uuid guid;
+    uuid_t guid;
 
     importinfo_t *importinfos;
     int ntypeinfos;

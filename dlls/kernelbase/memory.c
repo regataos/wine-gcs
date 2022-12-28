@@ -233,6 +233,34 @@ LPVOID WINAPI DECLSPEC_HOTPATCH MapViewOfFileEx( HANDLE handle, DWORD access, DW
     return addr;
 }
 
+/***********************************************************************
+ *             MapViewOfFileFromApp   (kernelbase.@)
+ */
+LPVOID WINAPI DECLSPEC_HOTPATCH MapViewOfFileFromApp( HANDLE handle, ULONG access, ULONG64 offset, SIZE_T size )
+{
+    return MapViewOfFile( handle, access, offset << 32, offset, size );
+}
+
+/***********************************************************************
+ *             MapViewOfFile3   (kernelbase.@)
+ */
+LPVOID WINAPI DECLSPEC_HOTPATCH MapViewOfFile3( HANDLE handle, HANDLE process, PVOID baseaddr, ULONG64 offset,
+        SIZE_T size, ULONG alloc_type, ULONG protection, MEM_EXTENDED_PARAMETER *params, ULONG params_count )
+{
+    LARGE_INTEGER off;
+    void *addr;
+
+    if (!process) process = GetCurrentProcess();
+
+    addr = baseaddr;
+    off.QuadPart = offset;
+    if (!set_ntstatus( NtMapViewOfSectionEx( handle, process, &addr, &off, &size, alloc_type, protection,
+            params, params_count )))
+    {
+        return NULL;
+    }
+    return addr;
+}
 
 /***********************************************************************
  *	       ReadProcessMemory   (kernelbase.@)
@@ -260,7 +288,7 @@ UINT WINAPI DECLSPEC_HOTPATCH ResetWriteWatch( void *base, SIZE_T size )
  */
 BOOL WINAPI DECLSPEC_HOTPATCH SetSystemFileCacheSize( SIZE_T mincache, SIZE_T maxcache, DWORD flags )
 {
-    FIXME( "stub: %Id %Id %ld\n", mincache, maxcache, flags );
+    FIXME( "stub: %ld %ld %d\n", mincache, maxcache, flags );
     SetLastError( ERROR_CALL_NOT_IMPLEMENTED );
     return FALSE;
 }
@@ -281,6 +309,24 @@ BOOL WINAPI DECLSPEC_HOTPATCH UnmapViewOfFile( const void *addr )
         }
     }
     return set_ntstatus( NtUnmapViewOfSection( GetCurrentProcess(), (void *)addr ));
+}
+
+
+/***********************************************************************
+ *             UnmapViewOfFile2   (kernelbase.@)
+ */
+BOOL WINAPI DECLSPEC_HOTPATCH UnmapViewOfFile2( HANDLE process, void *addr, ULONG flags )
+{
+    return set_ntstatus( NtUnmapViewOfSectionEx( process, addr, flags ));
+}
+
+
+/***********************************************************************
+ *             UnmapViewOfFileEx   (kernelbase.@)
+ */
+BOOL WINAPI DECLSPEC_HOTPATCH UnmapViewOfFileEx( void *addr, ULONG flags )
+{
+    return set_ntstatus( NtUnmapViewOfSectionEx( GetCurrentProcess(), addr, flags ));
 }
 
 
@@ -315,6 +361,7 @@ LPVOID WINAPI DECLSPEC_HOTPATCH VirtualAlloc2( HANDLE process, void *addr, SIZE_
 {
     LPVOID ret = addr;
 
+    if (!process) process = GetCurrentProcess();
     if (!set_ntstatus( NtAllocateVirtualMemoryEx( process, &ret, &size, type, protect, parameters, count )))
         return NULL;
     return ret;
@@ -329,7 +376,7 @@ LPVOID WINAPI DECLSPEC_HOTPATCH VirtualAllocFromApp( void *addr, SIZE_T size,
 {
     LPVOID ret = addr;
 
-    TRACE_(virtual)( "addr %p, size %p, type %#lx, protect %#lx.\n", addr, (void *)size, type, protect );
+    TRACE_(virtual)( "addr %p, size %p, type %#x, protect %#x.\n", addr, (void *)size, type, protect );
 
     if (protect == PAGE_EXECUTE || protect == PAGE_EXECUTE_READ || protect == PAGE_EXECUTE_READWRITE
             || protect == PAGE_EXECUTE_WRITECOPY)
@@ -349,7 +396,7 @@ LPVOID WINAPI DECLSPEC_HOTPATCH VirtualAllocFromApp( void *addr, SIZE_T size,
 BOOL WINAPI /* DECLSPEC_HOTPATCH */ PrefetchVirtualMemory( HANDLE process, ULONG_PTR count,
                                                            WIN32_MEMORY_RANGE_ENTRY *addresses, ULONG flags )
 {
-    FIXME( "process %p, count %p, addresses %p, flags %#lx stub.\n", process, (void *)count, addresses, flags );
+    FIXME( "process %p, count %p, addresses %p, flags %#x stub.\n", process, (void *)count, addresses, flags );
     return TRUE;
 }
 
@@ -368,6 +415,12 @@ BOOL WINAPI DECLSPEC_HOTPATCH VirtualFree( void *addr, SIZE_T size, DWORD type )
  */
 BOOL WINAPI DECLSPEC_HOTPATCH VirtualFreeEx( HANDLE process, void *addr, SIZE_T size, DWORD type )
 {
+    if (type == MEM_RELEASE && size)
+    {
+        WARN( "Trying to release memory with specified size.\n" );
+        SetLastError( ERROR_INVALID_PARAMETER );
+        return FALSE;
+    }
     return set_ntstatus( NtFreeVirtualMemory( process, &addr, &size, type ));
 }
 
@@ -502,7 +555,11 @@ SIZE_T WINAPI DECLSPEC_HOTPATCH HeapCompact( HANDLE heap, DWORD flags )
 HANDLE WINAPI DECLSPEC_HOTPATCH HeapCreate( DWORD flags, SIZE_T init_size, SIZE_T max_size )
 {
     HANDLE ret = RtlCreateHeap( flags, NULL, max_size, init_size, NULL, NULL );
+    ULONG hci = 2;
+
     if (!ret) SetLastError( ERROR_NOT_ENOUGH_MEMORY );
+    else if (!(flags & HEAP_CREATE_ENABLE_EXECUTE))
+        HeapSetInformation( ret, HeapCompatibilityInformation, &hci, sizeof(hci) );
     return ret;
 }
 
@@ -1048,6 +1105,7 @@ BOOL WINAPI DECLSPEC_HOTPATCH GlobalMemoryStatusEx( MEMORYSTATUSEX *status )
     static DWORD last_check;
     SYSTEM_BASIC_INFORMATION basic_info;
     SYSTEM_PERFORMANCE_INFORMATION perf_info;
+    VM_COUNTERS_EX vmc;
 
     if (status->dwLength != sizeof(*status))
     {
@@ -1064,16 +1122,18 @@ BOOL WINAPI DECLSPEC_HOTPATCH GlobalMemoryStatusEx( MEMORYSTATUSEX *status )
     if (!set_ntstatus( NtQuerySystemInformation( SystemBasicInformation,
                                                  &basic_info, sizeof(basic_info), NULL )) ||
         !set_ntstatus( NtQuerySystemInformation( SystemPerformanceInformation,
-                                                 &perf_info, sizeof(perf_info), NULL)))
+                                                 &perf_info, sizeof(perf_info), NULL)) ||
+        !set_ntstatus( NtQueryInformationProcess( GetCurrentProcess(), ProcessVmCounters,
+                                                  &vmc, sizeof(vmc), NULL )))
         return FALSE;
 
     status->dwMemoryLoad     = 0;
-    status->ullTotalPhys     = perf_info.TotalCommitLimit;
+    status->ullTotalPhys     = basic_info.MmNumberOfPhysicalPages;
     status->ullAvailPhys     = perf_info.AvailablePages;
-    status->ullTotalPageFile = perf_info.TotalCommitLimit + 1; /* Titan Quest refuses to run if TotalPageFile <= TotalPhys */
+    status->ullTotalPageFile = perf_info.TotalCommitLimit;
     status->ullAvailPageFile = status->ullTotalPageFile - perf_info.TotalCommittedPages;
-    status->ullTotalVirtual  = (ULONG_PTR)basic_info.HighestUserAddress - (ULONG_PTR)basic_info.LowestUserAddress;
-    status->ullAvailVirtual  = status->ullTotalVirtual - 64 * 1024;  /* FIXME */
+    status->ullTotalVirtual  = (ULONG_PTR)basic_info.HighestUserAddress - (ULONG_PTR)basic_info.LowestUserAddress + 1;
+    status->ullAvailVirtual  = status->ullTotalVirtual - (ULONGLONG)vmc.WorkingSetSize /* approximate */;
     status->ullAvailExtendedVirtual = 0;
 
     status->ullTotalPhys     *= basic_info.PageSize;
@@ -1084,7 +1144,7 @@ BOOL WINAPI DECLSPEC_HOTPATCH GlobalMemoryStatusEx( MEMORYSTATUSEX *status )
     if (status->ullTotalPhys)
         status->dwMemoryLoad = (status->ullTotalPhys - status->ullAvailPhys) / (status->ullTotalPhys / 100);
 
-    TRACE_(virtual)( "MemoryLoad %ld, TotalPhys %s, AvailPhys %s, TotalPageFile %s,"
+    TRACE_(virtual)( "MemoryLoad %d, TotalPhys %s, AvailPhys %s, TotalPageFile %s,"
                      "AvailPageFile %s, TotalVirtual %s, AvailVirtual %s\n",
                     status->dwMemoryLoad, wine_dbgstr_longlong(status->ullTotalPhys),
                     wine_dbgstr_longlong(status->ullAvailPhys), wine_dbgstr_longlong(status->ullTotalPageFile),
@@ -1101,7 +1161,7 @@ BOOL WINAPI DECLSPEC_HOTPATCH GlobalMemoryStatusEx( MEMORYSTATUSEX *status )
  */
 BOOL WINAPI DECLSPEC_HOTPATCH MapUserPhysicalPages( void *addr, ULONG_PTR page_count, ULONG_PTR *pages )
 {
-    FIXME( "stub: %p %Iu %p\n", addr, page_count, pages );
+    FIXME( "stub: %p %lu %p\n", addr, page_count, pages );
     *pages = 0;
     SetLastError( ERROR_CALL_NOT_IMPLEMENTED );
     return FALSE;
@@ -1119,7 +1179,7 @@ BOOL WINAPI DECLSPEC_HOTPATCH MapUserPhysicalPages( void *addr, ULONG_PTR page_c
 BOOL WINAPI DECLSPEC_HOTPATCH AllocateUserPhysicalPagesNuma( HANDLE process, ULONG_PTR *pages,
                                                              ULONG_PTR *userarray, DWORD node )
 {
-    if (node) FIXME( "Ignoring preferred node %lu\n", node );
+    if (node) FIXME( "Ignoring preferred node %u\n", node );
     return AllocateUserPhysicalPages( process, pages, userarray );
 }
 
@@ -1131,7 +1191,7 @@ HANDLE WINAPI DECLSPEC_HOTPATCH CreateFileMappingNumaW( HANDLE file, LPSECURITY_
                                                         DWORD protect, DWORD size_high, DWORD size_low,
                                                         LPCWSTR name, DWORD node )
 {
-    if (node) FIXME( "Ignoring preferred node %lu\n", node );
+    if (node) FIXME( "Ignoring preferred node %u\n", node );
     return CreateFileMappingW( file, sa, protect, size_high, size_low, name );
 }
 
@@ -1182,7 +1242,7 @@ BOOL WINAPI GetSystemCpuSetInformation(SYSTEM_CPU_SET_INFORMATION *info, ULONG b
                                             HANDLE process, ULONG flags)
 {
     if (flags)
-        FIXME("Unsupported flags %#lx.\n", flags);
+        FIXME("Unsupported flags %#x.\n", flags);
 
     *return_length = 0;
 
@@ -1196,7 +1256,18 @@ BOOL WINAPI GetSystemCpuSetInformation(SYSTEM_CPU_SET_INFORMATION *info, ULONG b
  */
 BOOL WINAPI SetThreadSelectedCpuSets(HANDLE thread, const ULONG *cpu_set_ids, ULONG count)
 {
-    FIXME( "thread %p, cpu_set_ids %p, count %lu stub.\n", thread, cpu_set_ids, count );
+    FIXME( "thread %p, cpu_set_ids %p, count %u stub.\n", thread, cpu_set_ids, count );
+
+    return TRUE;
+}
+
+
+/***********************************************************************
+ *           SetProcessDefaultCpuSets   (kernelbase.@)
+ */
+BOOL WINAPI SetProcessDefaultCpuSets(HANDLE process, const ULONG *cpu_set_ids, ULONG count)
+{
+    FIXME( "process %p, cpu_set_ids %p, count %lu stub.\n", process, cpu_set_ids, count );
 
     return TRUE;
 }
@@ -1241,7 +1312,7 @@ LPVOID WINAPI DECLSPEC_HOTPATCH MapViewOfFileExNuma( HANDLE handle, DWORD access
                                                      DWORD offset_low, SIZE_T count, LPVOID addr,
                                                      DWORD node )
 {
-    if (node) FIXME( "Ignoring preferred node %lu\n", node );
+    if (node) FIXME( "Ignoring preferred node %u\n", node );
     return MapViewOfFileEx( handle, access, offset_high, offset_low, count, addr );
 }
 
@@ -1252,7 +1323,7 @@ LPVOID WINAPI DECLSPEC_HOTPATCH MapViewOfFileExNuma( HANDLE handle, DWORD access
 LPVOID WINAPI DECLSPEC_HOTPATCH VirtualAllocExNuma( HANDLE process, void *addr, SIZE_T size,
                                                     DWORD type, DWORD protect, DWORD node )
 {
-    if (node) FIXME( "Ignoring preferred node %lu\n", node );
+    if (node) FIXME( "Ignoring preferred node %u\n", node );
     return VirtualAllocEx( process, addr, size, type, protect );
 }
 
@@ -1282,7 +1353,7 @@ BOOL WINAPI InitializeContext2( void *buffer, DWORD context_flags, CONTEXT **con
     ULONG orig_length;
     NTSTATUS status;
 
-    TRACE( "buffer %p, context_flags %#lx, context %p, ret_length %p, compaction_mask %s.\n",
+    TRACE( "buffer %p, context_flags %#x, context %p, ret_length %p, compaction_mask %s.\n",
             buffer, context_flags, context, length, wine_dbgstr_longlong(compaction_mask) );
 
     orig_length = *length;
@@ -1465,7 +1536,7 @@ BOOL WINAPI GetXStateFeaturesMask( CONTEXT *context, DWORD64 *feature_mask )
  */
 UINT WINAPI EnumSystemFirmwareTables( DWORD provider, void *buffer, DWORD size )
 {
-    FIXME( "(0x%08lx, %p, %ld)\n", provider, buffer, size );
+    FIXME( "(0x%08x, %p, %d)\n", provider, buffer, size );
     return 0;
 }
 
@@ -1478,7 +1549,7 @@ UINT WINAPI GetSystemFirmwareTable( DWORD provider, DWORD id, void *buffer, DWOR
     SYSTEM_FIRMWARE_TABLE_INFORMATION *info;
     ULONG buffer_size = offsetof( SYSTEM_FIRMWARE_TABLE_INFORMATION, TableBuffer ) + size;
 
-    TRACE( "(0x%08lx, 0x%08lx, %p, %ld)\n", provider, id, buffer, size );
+    TRACE( "(0x%08x, 0x%08x, %p, %d)\n", provider, id, buffer, size );
 
     if (!(info = RtlAllocateHeap( GetProcessHeap(), 0, buffer_size )))
     {

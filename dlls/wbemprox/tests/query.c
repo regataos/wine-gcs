@@ -25,6 +25,7 @@
 #include "initguid.h"
 #include "objidl.h"
 #include "wbemcli.h"
+#include "wine/heap.h"
 #include "wine/test.h"
 
 static HRESULT exec_query( IWbemServices *services, const WCHAR *str, IEnumWbemClassObject **result )
@@ -194,7 +195,7 @@ static void test_IEnumWbemClassObject_Next( IWbemServices *services )
     hr = IEnumWbemClassObject_Reset( result );
     ok( hr == S_OK, "got %08x\n", hr );
 
-    obj = malloc( num_objects * sizeof( IWbemClassObject * ) );
+    obj = heap_alloc( num_objects * sizeof( IWbemClassObject * ) );
 
     count = 0;
     hr = IEnumWbemClassObject_Next( result, 10000, num_objects, obj, &count );
@@ -215,7 +216,7 @@ static void test_IEnumWbemClassObject_Next( IWbemServices *services )
     for (i = 0; i < count; i++)
         IWbemClassObject_Release( obj[i] );
 
-    free( obj );
+    heap_free( obj );
 
     IEnumWbemClassObject_Release( result );
     SysFreeString( query );
@@ -1143,7 +1144,7 @@ static void test_query_semisync( IWbemServices *services )
     count = 1;
     obj = (void *)0xdeadbeef;
     hr = IEnumWbemClassObject_Next( result, -1, 1, &obj, &count );
-    todo_wine
+todo_wine
     ok( hr == WBEM_E_INVALID_CLASS, "Unexpected hr %#x.\n", hr );
     ok( count == 0, "Unexpected count %u.\n", count );
     ok( obj == (void *)0xdeadbeef, "Got object %p\n", obj );
@@ -1834,31 +1835,6 @@ static void test_Win32_WinSAT( IWbemServices *services )
     SysFreeString( wql );
 }
 
-static void test_SoftwareLicensingProduct( IWbemServices *services )
-{
-    BSTR wql = SysAllocString( L"wql" ), query = SysAllocString( L"SELECT * FROM SoftwareLicensingProduct" );
-    IEnumWbemClassObject *result;
-    IWbemClassObject *obj;
-    HRESULT hr;
-    DWORD count;
-
-    hr = IWbemServices_ExecQuery( services, wql, query, 0, NULL, &result );
-    ok( hr == S_OK , "got %08x\n", hr );
-
-    for (;;)
-    {
-        hr = IEnumWbemClassObject_Next( result, 10000, 1, &obj, &count );
-        if (hr != S_OK) break;
-        check_property( obj, L"LicenseIsAddon", VT_BOOL, CIM_BOOLEAN );
-        check_property( obj, L"LicenseStatus", VT_I4, CIM_UINT32 );
-        IWbemClassObject_Release( obj );
-    }
-
-    IEnumWbemClassObject_Release( result );
-    SysFreeString( query );
-    SysFreeString( wql );
-}
-
 static void test_Win32_DesktopMonitor( IWbemServices *services )
 {
     BSTR wql = SysAllocString( L"wql" ), query = SysAllocString( L"SELECT * FROM Win32_DesktopMonitor" );
@@ -2211,7 +2187,6 @@ START_TEST(query)
     test_select( services );
 
     /* classes */
-    test_SoftwareLicensingProduct( services );
     test_StdRegProv( services );
     test_SystemSecurity( services );
     test_Win32_Baseboard( services );

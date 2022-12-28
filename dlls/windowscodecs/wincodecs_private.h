@@ -265,7 +265,7 @@ struct decoder_info
 struct decoder_stat
 {
     DWORD flags;
-    UINT frame_count;
+    DWORD frame_count;
 };
 
 struct decoder_frame
@@ -361,7 +361,7 @@ struct encoder_frame
     UINT bpp;
     BOOL indexed;
     DOUBLE dpix, dpiy;
-    UINT num_colors;
+    DWORD num_colors;
     WICColor palette[256];
     /* encoder options */
     BOOL interlace;
@@ -406,5 +406,10 @@ extern HRESULT CommonDecoder_CreateInstance(struct decoder *decoder,
 
 extern HRESULT CommonEncoder_CreateInstance(struct encoder *encoder,
     const struct encoder_info *encoder_info, REFIID iid, void** ppv) DECLSPEC_HIDDEN;
+
+#ifdef _WIN64
+#undef setjmp
+#define setjmp(buf) _setjmpex(buf, NULL)
+#endif
 
 #endif /* WINCODECS_PRIVATE_H */

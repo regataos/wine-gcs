@@ -143,7 +143,7 @@ BOOL WINAPI CopyFileExA(LPCSTR sourceFilename, LPCSTR destFilename,
  */
 BOOL WINAPI MoveFileTransactedA(const char *source, const char *dest, LPPROGRESS_ROUTINE progress, void *data, DWORD flags, HANDLE handle)
 {
-    FIXME("(%s, %s, %p, %p, %ld, %p)\n", debugstr_a(source), debugstr_a(dest), progress, data, flags, handle);
+    FIXME("(%s, %s, %p, %p, %d, %p)\n", debugstr_a(source), debugstr_a(dest), progress, data, flags, handle);
     SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
     return FALSE;
 }
@@ -153,9 +153,132 @@ BOOL WINAPI MoveFileTransactedA(const char *source, const char *dest, LPPROGRESS
  */
 BOOL WINAPI MoveFileTransactedW(const WCHAR *source, const WCHAR *dest, LPPROGRESS_ROUTINE progress, void *data, DWORD flags, HANDLE handle)
 {
-    FIXME("(%s, %s, %p, %p, %ld, %p)\n", debugstr_w(source), debugstr_w(dest), progress, data, flags, handle);
+    FIXME("(%s, %s, %p, %p, %d, %p)\n", debugstr_w(source), debugstr_w(dest), progress, data, flags, handle);
     SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
     return FALSE;
+}
+
+/*************************************************************************
+ *	CreateFileTransactedA   (KERNEL32.@)
+ */
+HANDLE WINAPI DECLSPEC_HOTPATCH CreateFileTransactedA( LPCSTR name, DWORD access, DWORD sharing,
+                                                       LPSECURITY_ATTRIBUTES sa, DWORD creation,
+                                                       DWORD attributes, HANDLE template,
+                                                       HANDLE transaction, PUSHORT pusMiniVersion,
+                                                       PVOID pExtendedParameter )
+{
+    FIXME( "(%s %lx %lx %p %lx %lx %p %p %p %p), semi-stub\n", debugstr_a(name), access, sharing, sa,
+           creation, attributes, template, transaction, pusMiniVersion, pExtendedParameter );
+
+    return CreateFileA( name, access, sharing, sa, creation, attributes, template );
+}
+
+/*************************************************************************
+ *	CreateFileTransactedW   (KERNEL32.@)
+ */
+HANDLE WINAPI DECLSPEC_HOTPATCH CreateFileTransactedW( LPCWSTR name, DWORD access, DWORD sharing,
+                                                       LPSECURITY_ATTRIBUTES sa, DWORD creation,
+                                                       DWORD attributes, HANDLE template, HANDLE transaction,
+                                                       PUSHORT pusMiniVersion, PVOID pExtendedParameter )
+{
+    FIXME( "(%s %lx %lx %p %lx %lx %p %p %p %p), semi-stub\n", debugstr_w(name), access, sharing, sa,
+           creation, attributes, template, transaction, pusMiniVersion, pExtendedParameter );
+
+    return CreateFileW( name, access, sharing, sa, creation, attributes, template );
+}
+
+/***********************************************************************
+ *	CreateDirectoryTransactedA   (KERNEL32.@)
+ */
+BOOL WINAPI DECLSPEC_HOTPATCH CreateDirectoryTransactedA(LPCSTR template, LPCSTR path, LPSECURITY_ATTRIBUTES sa, HANDLE hTransaction)
+{
+    FIXME("(%s %s %p %p), semi-stub\n", debugstr_a(template), debugstr_a(path), sa, hTransaction);
+    return CreateDirectoryExA(template, path, sa);
+}
+
+/***********************************************************************
+ *	CreateDirectoryTransactedW   (KERNEL32.@)
+ */
+BOOL WINAPI DECLSPEC_HOTPATCH CreateDirectoryTransactedW(LPCWSTR template, LPCWSTR path, LPSECURITY_ATTRIBUTES sa, HANDLE hTransaction)
+{
+    FIXME("(%s %s %p %p), semi-stub\n", debugstr_w(template), debugstr_w(path), sa, hTransaction);
+    return CreateDirectoryExW(template, path, sa);
+}
+
+/***********************************************************************
+ *	DeleteFileTransactedA   (KERNEL32.@)
+ */
+BOOL WINAPI DECLSPEC_HOTPATCH DeleteFileTransactedA(LPCSTR path, HANDLE hTransaction)
+{
+    FIXME("(%s %p): semi-stub\n", debugstr_a(path), hTransaction);
+    return DeleteFileA(path);
+}
+
+/***********************************************************************
+ *	DeleteFileTransactedW   (KERNEL32.@)
+ */
+BOOL WINAPI DECLSPEC_HOTPATCH DeleteFileTransactedW(LPCWSTR path, HANDLE hTransaction)
+{
+    FIXME("(%s %p): semi-stub\n", debugstr_w(path), hTransaction);
+    return DeleteFileW(path);
+}
+
+/******************************************************************************
+ *	FindFirstFileTransactedA   (KERNEL32.@)
+ */
+HANDLE WINAPI DECLSPEC_HOTPATCH FindFirstFileTransactedA(LPCSTR filename, FINDEX_INFO_LEVELS level,
+                                                  LPVOID data, FINDEX_SEARCH_OPS search_op,
+                                                  LPVOID filter, DWORD flags, HANDLE hTransaction)
+{
+    FIXME( "(%s %d %p %d %p %lx %p): semi-stub\n", debugstr_a(filename), level, data, search_op, filter, flags, hTransaction );
+    return FindFirstFileExA(filename, level, data, search_op, filter, flags);
+}
+
+/******************************************************************************
+ *	FindFirstFileTransactedW   (KERNEL32.@)
+ */
+HANDLE WINAPI DECLSPEC_HOTPATCH FindFirstFileTransactedW(LPCWSTR filename, FINDEX_INFO_LEVELS level,
+                                                  LPVOID data, FINDEX_SEARCH_OPS search_op,
+                                                  LPVOID filter, DWORD flags, HANDLE hTransaction)
+{
+    FIXME( "(%s %d %p %d %p %lx %p): semi-stub\n", debugstr_w(filename), level, data, search_op, filter, flags, hTransaction );
+    return FindFirstFileExW(filename, level, data, search_op, filter, flags);
+}
+
+/**************************************************************************
+ *	GetFileAttributesTransactedA   (KERNEL32.@)
+ */
+DWORD WINAPI DECLSPEC_HOTPATCH GetFileAttributesTransactedA(LPCSTR name, GET_FILEEX_INFO_LEVELS level, LPVOID ptr, HANDLE hTransaction)
+{
+    FIXME("(%s %p): semi-stub\n", debugstr_a(name), hTransaction);
+    return GetFileAttributesExA(name, level, ptr);
+}
+
+/**************************************************************************
+ *	GetFileAttributesTransactedW   (KERNEL32.@)
+ */
+DWORD WINAPI DECLSPEC_HOTPATCH GetFileAttributesTransactedW(LPCWSTR name, GET_FILEEX_INFO_LEVELS level, void *ptr, HANDLE hTransaction)
+{
+    FIXME("(%s %p): semi-stub\n", debugstr_w(name), hTransaction);
+    return GetFileAttributesExW(name, level, ptr);
+}
+
+/***********************************************************************
+ *	RemoveDirectoryTransactedA   (KERNEL32.@)
+ */
+BOOL WINAPI DECLSPEC_HOTPATCH RemoveDirectoryTransactedA( LPCSTR path, HANDLE hTransaction )
+{
+    FIXME("(%s %p), semi-stub\n", debugstr_a(path), hTransaction);
+    return RemoveDirectoryA(path);
+}
+
+/***********************************************************************
+ *	RemoveDirectoryTransactedW   (KERNEL32.@)
+ */
+BOOL WINAPI DECLSPEC_HOTPATCH RemoveDirectoryTransactedW( LPCWSTR path, HANDLE hTransaction )
+{
+    FIXME("(%s %p), semi-stub\n", debugstr_w(path), hTransaction);
+    return RemoveDirectoryW(path);
 }
 
 /**************************************************************************
@@ -352,16 +475,8 @@ WCHAR * CDECL wine_get_dos_file_name( LPCSTR str )
  */
 BOOLEAN WINAPI CreateSymbolicLinkA(LPCSTR link, LPCSTR target, DWORD flags)
 {
-    WCHAR *linkW, *targetW;
-    BOOL ret;
-
-    if (!(linkW = FILE_name_AtoW( link, FALSE ))) return FALSE;
-    if (!(targetW = FILE_name_AtoW( target, TRUE ))) return FALSE;
-
-    ret = CreateSymbolicLinkW( linkW, targetW, flags );
-
-    HeapFree( GetProcessHeap(), 0, targetW );
-    return ret;
+    FIXME("(%s %s %d): stub\n", debugstr_a(link), debugstr_a(target), flags);
+    return TRUE;
 }
 
 /*************************************************************************
@@ -392,7 +507,7 @@ BOOL WINAPI CheckNameLegalDOS8Dot3A(const char *name, char *oemname, DWORD oemna
 {
     WCHAR *nameW;
 
-    TRACE("(%s %p %lu %p %p)\n", name, oemname,
+    TRACE("(%s %p %u %p %p)\n", name, oemname,
             oemname_len, contains_spaces, is_legal);
 
     if (!name || !is_legal)
@@ -413,7 +528,7 @@ BOOL WINAPI CheckNameLegalDOS8Dot3W(const WCHAR *name, char *oemname, DWORD oemn
     UNICODE_STRING nameW;
     BOOLEAN contains_spaces;
 
-    TRACE("(%s %p %lu %p %p)\n", wine_dbgstr_w(name), oemname,
+    TRACE("(%s %p %u %p %p)\n", wine_dbgstr_w(name), oemname,
           oemname_len, contains_spaces_ret, is_legal);
 
     if (!name || !is_legal)

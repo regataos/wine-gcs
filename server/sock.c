@@ -162,6 +162,8 @@ enum connection_state
     SOCK_CONNECTIONLESS,
 };
 
+#define MAX_ICMP_HISTORY_LENGTH 8
+
 struct sock
 {
     struct object       obj;         /* object header */
@@ -210,6 +212,13 @@ struct sock
     unsigned int        sndbuf;      /* advisory send buffer size */
     unsigned int        rcvtimeo;    /* receive timeout in ms */
     unsigned int        sndtimeo;    /* send timeout in ms */
+    struct
+    {
+        unsigned short icmp_id;
+        unsigned short icmp_seq;
+    }
+    icmp_fixup_data[MAX_ICMP_HISTORY_LENGTH]; /* Sent ICMP packets history used to fixup reply id. */
+    unsigned int        icmp_fixup_data_len;  /* Sent ICMP packets history length. */
     unsigned int        rd_shutdown : 1; /* is the read end shut down? */
     unsigned int        wr_shutdown : 1; /* is the write end shut down? */
     unsigned int        wr_shutdown_pending : 1; /* is a write shutdown pending? */
@@ -1492,6 +1501,7 @@ static struct sock *create_socket(void)
     sock->sndbuf = 0;
     sock->rcvtimeo = 0;
     sock->sndtimeo = 0;
+    sock->icmp_fixup_data_len = 0;
     init_async_queue( &sock->read_q );
     init_async_queue( &sock->write_q );
     init_async_queue( &sock->ifchange_q );
@@ -1608,6 +1618,23 @@ static int init_socket( struct sock *sock, int family, int type, int protocol, u
     }
 
     sockfd = socket( unix_family, unix_type, unix_protocol );
+
+#ifdef linux
+    if (sockfd == -1 && errno == EPERM && unix_family == AF_INET
+        && unix_type == SOCK_RAW && unix_protocol == IPPROTO_ICMP)
+    {
+        sockfd = socket( unix_family, SOCK_DGRAM, unix_protocol );
+        if (sockfd != -1)
+        {
+            const int val = 1;
+
+            setsockopt( sockfd, IPPROTO_IP, IP_RECVTTL, (const char *)&val, sizeof(val) );
+            setsockopt( sockfd, IPPROTO_IP, IP_RECVTOS, (const char *)&val, sizeof(val) );
+            setsockopt( sockfd, IPPROTO_IP, IP_PKTINFO, (const char *)&val, sizeof(val) );
+        }
+    }
+#endif
+
     if (sockfd == -1)
     {
         if (errno == EINVAL) set_win32_error( WSAESOCKTNOSUPPORT );
@@ -2126,11 +2153,12 @@ static struct accept_req *alloc_accept_req( struct sock *sock, struct sock *acce
 static void sock_ioctl( struct fd *fd, ioctl_code_t code, struct async *async )
 {
     struct sock *sock = get_fd_user( fd );
-    int unix_fd;
+    int unix_fd = -1;
 
     assert( sock->obj.ops == &sock_ops );
 
-    if (code != IOCTL_AFD_WINE_CREATE && (unix_fd = get_unix_fd( fd )) < 0) return;
+    if (code != IOCTL_AFD_WINE_CREATE && code != IOCTL_AFD_POLL && (unix_fd = get_unix_fd( fd )) < 0)
+        return;
 
     switch(code)
     {
@@ -2638,7 +2666,11 @@ static void sock_ioctl( struct fd *fd, ioctl_code_t code, struct async *async )
 
         set_async_pending( async );
 
-        if (bind( unix_fd, &bind_addr.addr, unix_len ) < 0)
+        /* Quake (and similar family) fails if we can't bind to an IPX address. This often
+         * doesn't work on Linux, so just fake success. */
+        if (unix_addr.addr.sa_family == AF_IPX)
+            fprintf( stderr, "wine: HACK: Faking AF_IPX bind success.\n" );
+        else if (bind( unix_fd, &bind_addr.addr, unix_len ) < 0)
         {
             if (errno == EADDRINUSE)
             {
@@ -3402,7 +3434,7 @@ struct object *create_socket_device( struct object *root, const struct unicode_s
 DECL_HANDLER(recv_socket)
 {
     struct sock *sock = (struct sock *)get_handle_obj( current->process, req->async.handle, 0, &sock_ops );
-    unsigned int status = STATUS_PENDING;
+    unsigned int status = req->status;
     timeout_t timeout = 0;
     struct async *async;
     struct fd *fd;
@@ -3410,43 +3442,41 @@ DECL_HANDLER(recv_socket)
     if (!sock) return;
     fd = sock->fd;
 
-    if (!req->force_async && !sock->nonblocking && is_fd_overlapped( fd ))
-        timeout = (timeout_t)sock->rcvtimeo * -10000;
-
-    if (sock->rd_shutdown) status = STATUS_PIPE_DISCONNECTED;
-    else if (!async_queued( &sock->read_q ))
+    /* recv() returned EWOULDBLOCK, i.e. no data available yet */
+    if (status == STATUS_DEVICE_NOT_READY && !sock->nonblocking)
     {
-        /* If read_q is not empty, we cannot really tell if the already queued
-         * asyncs will not consume all available data; if there's no data
-         * available, the current request won't be immediately satiable.
-         */
-        struct pollfd pollfd;
-        pollfd.fd = get_unix_fd( sock->fd );
-        pollfd.events = req->oob ? POLLPRI : POLLIN;
-        pollfd.revents = 0;
-        if (poll(&pollfd, 1, 0) >= 0 && pollfd.revents)
-        {
-            /* Give the client opportunity to complete synchronously.
-             * If it turns out that the I/O request is not actually immediately satiable,
-             * the client may then choose to re-queue the async (with STATUS_PENDING). */
-            status = STATUS_ALERTED;
-        }
+        /* Set a timeout on the async if necessary.
+         *
+         * We want to do this *only* if the client gave us STATUS_DEVICE_NOT_READY.
+         * If the client gave us STATUS_PENDING, it expects the async to always
+         * block (it was triggered by WSARecv*() with a valid OVERLAPPED
+         * structure) and for the timeout not to be respected. */
+        if (is_fd_overlapped( fd ))
+            timeout = (timeout_t)sock->rcvtimeo * -10000;
+
+        status = STATUS_PENDING;
     }
 
-    if (status == STATUS_PENDING && !req->force_async && sock->nonblocking)
-        status = STATUS_DEVICE_NOT_READY;
+    if ((status == STATUS_PENDING || status == STATUS_DEVICE_NOT_READY) && sock->rd_shutdown)
+        status = STATUS_PIPE_DISCONNECTED;
 
     sock->pending_events &= ~(req->oob ? AFD_POLL_OOB : AFD_POLL_READ);
     sock->reported_events &= ~(req->oob ? AFD_POLL_OOB : AFD_POLL_READ);
 
     if ((async = create_request_async( fd, get_fd_comp_flags( fd ), &req->async )))
     {
+        if (status == STATUS_SUCCESS)
+        {
+            struct iosb *iosb = async_get_iosb( async );
+            iosb->result = req->total;
+            release_object( iosb );
+        }
         set_error( status );
 
         if (timeout)
             async_set_timeout( async, timeout, STATUS_IO_TIMEOUT );
 
-        if (status == STATUS_PENDING || status == STATUS_ALERTED)
+        if (status == STATUS_PENDING)
             queue_async( &sock->read_q, async );
 
         /* always reselect; we changed reported_events above */
@@ -3454,7 +3484,6 @@ DECL_HANDLER(recv_socket)
 
         reply->wait = async_handoff( async, NULL, 0 );
         reply->options = get_fd_options( fd );
-        reply->nonblocking = sock->nonblocking;
         release_object( async );
     }
     release_object( sock );
@@ -3537,5 +3566,49 @@ DECL_HANDLER(send_socket)
         reply->options = get_fd_options( fd );
         release_object( async );
     }
+    release_object( sock );
+}
+
+DECL_HANDLER(socket_send_icmp_id)
+{
+    struct sock *sock = (struct sock *)get_handle_obj( current->process, req->handle, 0, &sock_ops );
+
+    if (!sock) return;
+
+    if (sock->icmp_fixup_data_len == MAX_ICMP_HISTORY_LENGTH)
+    {
+        memmove( sock->icmp_fixup_data, sock->icmp_fixup_data + 1,
+                 sizeof(*sock->icmp_fixup_data) * (MAX_ICMP_HISTORY_LENGTH - 1) );
+        --sock->icmp_fixup_data_len;
+    }
+
+    sock->icmp_fixup_data[sock->icmp_fixup_data_len].icmp_id = req->icmp_id;
+    sock->icmp_fixup_data[sock->icmp_fixup_data_len].icmp_seq = req->icmp_seq;
+    ++sock->icmp_fixup_data_len;
+
+    release_object( sock );
+}
+
+DECL_HANDLER(socket_get_icmp_id)
+{
+    struct sock *sock = (struct sock *)get_handle_obj( current->process, req->handle, 0, &sock_ops );
+    unsigned int i;
+
+    if (!sock) return;
+
+    for (i = 0; i < sock->icmp_fixup_data_len; ++i)
+    {
+        if (sock->icmp_fixup_data[i].icmp_seq == req->icmp_seq)
+        {
+            reply->icmp_id = sock->icmp_fixup_data[i].icmp_id;
+            --sock->icmp_fixup_data_len;
+            memmove( &sock->icmp_fixup_data[i], &sock->icmp_fixup_data[i + 1],
+                     (sock->icmp_fixup_data_len - i) * sizeof(*sock->icmp_fixup_data) );
+            release_object( sock );
+            return;
+        }
+    }
+
+    set_error( STATUS_NOT_FOUND );
     release_object( sock );
 }

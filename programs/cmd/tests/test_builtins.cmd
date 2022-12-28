@@ -1957,6 +1957,9 @@ FOR /F "delims=. tokens=1*" %%A IN (testfile) DO @echo 5:%%A,%%B
 FOR /F "delims=. tokens=2*" %%A IN (testfile) DO @echo 6:%%A,%%B
 FOR /F "delims=. tokens=3*" %%A IN (testfile) DO @echo 7:%%A,%%B
 del testfile
+rem file contains NUL, created by the .exe
+for /f %%A in (nul_test_file) DO echo %%A
+for /f "tokens=*" %%A in (nul_test_file) DO echo %%A
 
 echo ------------ Testing del ------------
 echo abc > file
@@ -3342,25 +3345,6 @@ if errorlevel 1 echo Normal+tab+garbage drive change failed
 
 popd
 
-echo ------------ Testing length wrt. MAX_PATH ------------
-rem native cmd limits all path lengths to MAX_PATH=260
-pushd c:\
-set depth=25
-for /L %%d in (0,1,25) do (
-  mkdir abcdefghij > NUL 2>&1
-  if exist abcdefghij (
-     cd abcdefghij
-     set depth=%%d
-  )
-)
-echo %depth%
-rem even relative paths are transformed to absolute, and tested against MAX_PATH
-echo abc > 01234567890123
-if exist 01234567890123 (echo Success) else echo Failure
-echo abc > 012345678901234
-if exist 012345678901234 (echo Failure) else echo Success
-popd
-rmdir /s /q c:\abcdefghij
 echo ------------ Testing combined CALLs/GOTOs ------------
 echo @echo off>foo.cmd
 echo goto :eof>>foot.cmd

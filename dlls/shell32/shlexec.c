@@ -110,8 +110,6 @@ static BOOL SHELL_ArgifyW(WCHAR* out, int len, const WCHAR* fmt, const WCHAR* lp
                     if (*fmt == '*')
                     {
                         used++;
-                        if (used < len)
-                            *res++ = '"';
                         while(*args)
                         {
                             used++;
@@ -121,8 +119,6 @@ static BOOL SHELL_ArgifyW(WCHAR* out, int len, const WCHAR* fmt, const WCHAR* lp
                                 args++;
                         }
                         used++;
-                        if (used < len)
-                            *res++ = '"';
                     }
                     else
                     {
@@ -292,21 +288,6 @@ static HRESULT SHELL_GetPathFromIDListForExecuteW(LPCITEMIDLIST pidl, LPWSTR psz
     return hr;
 }
 
-static HANDLE get_admin_token(void)
-{
-    TOKEN_ELEVATION_TYPE type;
-    TOKEN_LINKED_TOKEN linked;
-    DWORD size;
-
-    if (!GetTokenInformation(GetCurrentThreadEffectiveToken(), TokenElevationType, &type, sizeof(type), &size)
-            || type == TokenElevationTypeFull)
-        return NULL;
-
-    if (!GetTokenInformation(GetCurrentThreadEffectiveToken(), TokenLinkedToken, &linked, sizeof(linked), &size))
-        return NULL;
-    return linked.LinkedToken;
-}
-
 /*************************************************************************
  *	SHELL_ExecuteW [Internal]
  *
@@ -320,7 +301,6 @@ static UINT_PTR SHELL_ExecuteW(const WCHAR *lpCmd, WCHAR *env, BOOL shWait,
     UINT gcdret = 0;
     WCHAR curdir[MAX_PATH];
     DWORD dwCreationFlags;
-    HANDLE token = NULL;
 
     TRACE("Execute %s from directory %s\n", debugstr_w(lpCmd), debugstr_w(psei->lpDirectory));
 
@@ -342,12 +322,8 @@ static UINT_PTR SHELL_ExecuteW(const WCHAR *lpCmd, WCHAR *env, BOOL shWait,
     dwCreationFlags = CREATE_UNICODE_ENVIRONMENT;
     if (!(psei->fMask & SEE_MASK_NO_CONSOLE))
         dwCreationFlags |= CREATE_NEW_CONSOLE;
-
-    if (psei->lpVerb && !wcsicmp(psei->lpVerb, L"runas"))
-        token = get_admin_token();
-
-    if (CreateProcessAsUserW(token, NULL, (LPWSTR)lpCmd, NULL, NULL, FALSE,
-            dwCreationFlags, env, NULL, &startup, &info))
+    if (CreateProcessW(NULL, (LPWSTR)lpCmd, NULL, NULL, FALSE, dwCreationFlags, env,
+                       NULL, &startup, &info))
     {
         /* Give 30 seconds to the app to come up, if desired. Probably only needed
            when starting app immediately before making a DDE connection. */
@@ -366,8 +342,6 @@ static UINT_PTR SHELL_ExecuteW(const WCHAR *lpCmd, WCHAR *env, BOOL shWait,
         TRACE("CreateProcess returned error %ld\n", retval);
         retval = ERROR_BAD_FORMAT;
     }
-
-    CloseHandle(token);
 
     TRACE("returning %lu\n", retval);
 
@@ -501,6 +475,18 @@ static UINT SHELL_FindExecutableByVerb(LPCWSTR lpVerb, LPWSTR key, LPWSTR classn
 {
     HKEY hkeyClass;
     WCHAR verb[MAX_PATH];
+
+    if (*classname == '.')
+    {
+        /* Extension, default key value holds class name. Extension may also have
+         * empty class name and shell\verb\command subkey. */
+        WCHAR class[MAX_PATH];
+        LONG len;
+
+        len = sizeof(class);
+        if (!RegQueryValueW(HKEY_CLASSES_ROOT, classname, class, &len) && *class)
+            wcscpy(classname, class);
+    }
 
     if (RegOpenKeyExW(HKEY_CLASSES_ROOT, classname, 0, 0x02000000, &hkeyClass))
         return SE_ERR_NOASSOC;

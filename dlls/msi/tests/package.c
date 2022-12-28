@@ -133,10 +133,10 @@ static char *get_user_sid(void)
     OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token);
     GetTokenInformation(token, TokenUser, NULL, size, &size);
 
-    user = malloc(size);
+    user = HeapAlloc(GetProcessHeap(), 0, size);
     GetTokenInformation(token, TokenUser, user, size, &size);
     ConvertSidToStringSidA(user->User.Sid, &usersid);
-    free(user);
+    HeapFree(GetProcessHeap(), 0, user);
 
     CloseHandle(token);
     return usersid;
@@ -167,7 +167,7 @@ static LSTATUS package_RegDeleteTreeW(HKEY hKey, LPCWSTR lpszSubKey, REGSAM acce
     if (dwMaxLen > ARRAY_SIZE(szNameBuf))
     {
         /* Name too big: alloc a buffer for it */
-        if (!(lpszName = malloc(dwMaxLen * sizeof(WCHAR))))
+        if (!(lpszName = HeapAlloc( GetProcessHeap(), 0, dwMaxLen*sizeof(WCHAR))))
         {
             ret = ERROR_NOT_ENOUGH_MEMORY;
             goto cleanup;
@@ -204,8 +204,10 @@ static LSTATUS package_RegDeleteTreeW(HKEY hKey, LPCWSTR lpszSubKey, REGSAM acce
         }
 
 cleanup:
-    if (lpszName != szNameBuf) free(lpszName);
-    if (lpszSubKey) RegCloseKey(hSubKey);
+    if (lpszName != szNameBuf)
+        HeapFree(GetProcessHeap(), 0, lpszName);
+    if(lpszSubKey)
+        RegCloseKey(hSubKey);
     return ret;
 }
 
@@ -250,10 +252,10 @@ static void create_test_guid(LPSTR prodcode, LPSTR squashed)
     int size;
 
     hr = CoCreateGuid(&guid);
-    ok(hr == S_OK, "Expected S_OK, got %#lx\n", hr);
+    ok(hr == S_OK, "Expected S_OK, got %d\n", hr);
 
     size = StringFromGUID2(&guid, guidW, MAX_PATH);
-    ok(size == 39, "Expected 39, got %#lx\n", hr);
+    ok(size == 39, "Expected 39, got %d\n", hr);
 
     WideCharToMultiByte(CP_ACP, 0, guidW, size, prodcode, MAX_PATH, NULL, NULL);
     squash_guid(guidW, squashedW);
@@ -748,10 +750,10 @@ static inline UINT add_entry(const char *file, int line, const char *type, MSIHA
     UINT sz, r;
 
     sz = strlen(values) + strlen(insert) + 1;
-    query = malloc(sz);
+    query = HeapAlloc(GetProcessHeap(), 0, sz);
     sprintf(query, insert, values);
     r = run_query(hdb, query);
-    free(query);
+    HeapFree(GetProcessHeap(), 0, query);
     ok_(file, line)(r == ERROR_SUCCESS, "failed to insert into %s table: %u\n", type, r);
     return r;
 }
@@ -865,10 +867,10 @@ static UINT add_reglocator_entry( MSIHANDLE hdb, const char *sig, UINT root, con
     UINT sz, r;
 
     sz = strlen( sig ) + 10 + strlen( path ) + strlen( name ) + 10 + sizeof( insert );
-    query = malloc( sz );
+    query = HeapAlloc( GetProcessHeap(), 0, sz );
     sprintf( query, insert, sig, root, path, name, type );
     r = run_query( hdb, query );
-    free( query );
+    HeapFree( GetProcessHeap(), 0, query );
     ok(r == ERROR_SUCCESS, "failed to insert into reglocator table: %u\n", r); \
     return r;
 }
@@ -954,7 +956,7 @@ static UINT package_from_db(MSIHANDLE hdb, MSIHANDLE *handle)
     CHAR szPackage[12];
     MSIHANDLE hPackage;
 
-    sprintf(szPackage, "#%lu", hdb);
+    sprintf(szPackage, "#%u", hdb);
     res = MsiOpenPackageA(szPackage, &hPackage);
     if (res != ERROR_SUCCESS)
     {
@@ -1026,7 +1028,7 @@ static BOOL create_file_with_version(const CHAR *name, LONG ms, LONG ls)
     CopyFileA(path, name, FALSE);
 
     size = GetFileVersionInfoSizeA(path, &handle);
-    buffer = malloc(size);
+    buffer = HeapAlloc(GetProcessHeap(), 0, size);
 
     GetFileVersionInfoA(path, 0, size, buffer);
 
@@ -1053,7 +1055,7 @@ static BOOL create_file_with_version(const CHAR *name, LONG ms, LONG ls)
     ret = TRUE;
 
 done:
-    free(buffer);
+    HeapFree(GetProcessHeap(), 0, buffer);
     return ret;
 }
 
@@ -1075,7 +1077,7 @@ static void remove_restore_point(DWORD seq_number)
 
     res = pSRRemoveRestorePoint(seq_number);
     if (res != ERROR_SUCCESS)
-        trace("Failed to remove the restore point: %#lx\n", res);
+        trace("Failed to remove the restore point : %08x\n", res);
 }
 
 static BOOL is_root(const char *path)
@@ -2143,7 +2145,7 @@ static void check_prop(MSIHANDLE hpkg, const char *prop, const char *expect, int
     DWORD sz = sizeof(buffer);
     UINT r = MsiGetPropertyA(hpkg, prop, buffer, &sz);
     ok(!r, "'%s': got %u\n", prop, r);
-    ok(sz == lstrlenA(buffer), "'%s': expected %u, got %lu\n", prop, lstrlenA(buffer), sz);
+    ok(sz == lstrlenA(buffer), "'%s': expected %u, got %u\n", prop, lstrlenA(buffer), sz);
     if (match_case)
         ok(!strcmp(buffer, expect), "'%s': expected '%s', got '%s'\n", prop, expect, buffer);
     else
@@ -2189,21 +2191,21 @@ static void test_props(void)
     sz = sizeof buffer;
     r = MsiGetPropertyA( hpkg, "boo", NULL, &sz );
     ok(!r, "got %u\n", r);
-    ok(sz == 0, "got size %lu\n", sz);
+    ok(sz == 0, "got size %d\n", sz);
 
     sz = 0;
     strcpy(buffer,"x");
     r = MsiGetPropertyA( hpkg, "boo", buffer, &sz );
     ok(r == ERROR_MORE_DATA, "got %u\n", r);
     ok(!strcmp(buffer,"x"), "got \"%s\"\n", buffer);
-    ok(sz == 0, "got size %lu\n", sz);
+    ok(sz == 0, "got size %u\n", sz);
 
     sz = 1;
     strcpy(buffer,"x");
     r = MsiGetPropertyA( hpkg, "boo", buffer, &sz );
     ok(!r, "got %u\n", r);
     ok(!buffer[0], "got \"%s\"\n", buffer);
-    ok(sz == 0, "got size %lu\n", sz);
+    ok(sz == 0, "got size %u\n", sz);
 
     /* set the property to something */
     r = MsiSetPropertyA( 0, NULL, NULL );
@@ -2253,68 +2255,68 @@ static void test_props(void)
     sz = 0;
     r = MsiGetPropertyA(hpkg, "boo", NULL, &sz);
     ok(!r, "got %u\n", r);
-    ok(sz == 3, "got size %lu\n", sz);
+    ok(sz == 3, "got size %u\n", sz);
 
     sz = 0;
     strcpy(buffer, "q");
     r = MsiGetPropertyA(hpkg, "boo", buffer, &sz);
     ok(r == ERROR_MORE_DATA, "got %u\n", r);
     ok(!strcmp(buffer, "q"), "got \"%s\"", buffer);
-    ok(sz == 3, "got size %lu\n", sz);
+    ok(sz == 3, "got size %u\n", sz);
 
     sz = 1;
     strcpy(buffer,"x");
     r = MsiGetPropertyA( hpkg, "boo", buffer, &sz );
     ok(r == ERROR_MORE_DATA, "got %u\n", r);
     ok(!buffer[0], "got \"%s\"\n", buffer);
-    ok(sz == 3, "got size %lu\n", sz);
+    ok(sz == 3, "got size %u\n", sz);
 
     sz = 3;
     strcpy(buffer,"x");
     r = MsiGetPropertyA( hpkg, "boo", buffer, &sz );
     ok(r == ERROR_MORE_DATA, "got %u\n", r);
     ok(!strcmp(buffer,"xy"), "got \"%s\"\n", buffer);
-    ok(sz == 3, "got size %lu\n", sz);
+    ok(sz == 3, "got size %u\n", sz);
 
     sz = 4;
     strcpy(buffer,"x");
     r = MsiGetPropertyA( hpkg, "boo", buffer, &sz );
     ok(!r, "got %u\n", r);
     ok(!strcmp(buffer,"xyz"), "got \"%s\"\n", buffer);
-    ok(sz == 3, "got size %lu\n", sz);
+    ok(sz == 3, "got size %u\n", sz);
 
     sz = 0;
     r = MsiGetPropertyW(hpkg, L"boo", NULL, &sz);
     ok(!r, "got %u\n", r);
-    ok(sz == 3, "got size %lu\n", sz);
+    ok(sz == 3, "got size %u\n", sz);
 
     sz = 0;
     lstrcpyW(bufferW, L"boo");
     r = MsiGetPropertyW(hpkg, L"boo", bufferW, &sz);
     ok(r == ERROR_MORE_DATA, "got %u\n", r);
     ok(!lstrcmpW(bufferW, L"boo"), "got %s\n", wine_dbgstr_w(bufferW));
-    ok(sz == 3, "got size %lu\n", sz);
+    ok(sz == 3, "got size %u\n", sz);
 
     sz = 1;
     lstrcpyW(bufferW, L"boo");
     r = MsiGetPropertyW(hpkg, L"boo", bufferW, &sz );
     ok(r == ERROR_MORE_DATA, "got %u\n", r);
     ok(!bufferW[0], "got %s\n", wine_dbgstr_w(bufferW));
-    ok(sz == 3, "got size %lu\n", sz);
+    ok(sz == 3, "got size %u\n", sz);
 
     sz = 3;
     lstrcpyW(bufferW, L"boo");
     r = MsiGetPropertyW(hpkg, L"boo", bufferW, &sz );
     ok(r == ERROR_MORE_DATA, "got %u\n", r);
     ok(!lstrcmpW(bufferW, L"xy"), "got %s\n", wine_dbgstr_w(bufferW));
-    ok(sz == 3, "got size %lu\n", sz);
+    ok(sz == 3, "got size %u\n", sz);
 
     sz = 4;
     lstrcpyW(bufferW, L"boo");
     r = MsiGetPropertyW(hpkg, L"boo", bufferW, &sz );
     ok(!r, "got %u\n", r);
     ok(!lstrcmpW(bufferW, L"xyz"), "got %s\n", wine_dbgstr_w(bufferW));
-    ok(sz == 3, "got size %lu\n", sz);
+    ok(sz == 3, "got size %u\n", sz);
 
     /* properties are case-sensitive */
     check_prop(hpkg, "BOO", "", 1);
@@ -2354,7 +2356,7 @@ static BOOL find_prop_in_property(MSIHANDLE hdb, LPCSTR prop, LPCSTR val, int le
             r = MsiRecordGetStringA(hrec, 2, buffer, &sz);
             if (r == ERROR_SUCCESS && !memcmp(buffer, val, len) && !buffer[len])
             {
-                ok(sz == len, "wrong size %lu\n", sz);
+                ok(sz == len, "wrong size %u\n", sz);
                 found = TRUE;
             }
         }
@@ -2420,7 +2422,7 @@ static void test_property_table(void)
     r = run_query(hdb, query);
     ok(r == ERROR_SUCCESS, "failed to add column\n");
 
-    sprintf(package, "#%lu", hdb);
+    sprintf(package, "#%i", hdb);
     r = MsiOpenPackageA(package, &hpkg);
     ok(r != ERROR_SUCCESS, "MsiOpenPackage succeeded\n");
     if (r == ERROR_SUCCESS)
@@ -2482,7 +2484,7 @@ static void test_property_table(void)
     r = MsiGetPropertyA( hpkg, "prop2", buffer, &sz );
     ok( r == ERROR_SUCCESS, "get property failed: %d\n", r);
     ok( !memcmp( buffer, "\0np", sizeof("\0np") ), "wrong value\n");
-    ok( sz == sizeof("\0np") - 1, "got %lu\n", sz );
+    ok( sz == sizeof("\0np") - 1, "got %u\n", sz );
 
     found = find_prop_in_property(hdb, "prop2", "\0np", 3);
     ok(found == TRUE, "prop2 should be in the _Property table\n");
@@ -2602,7 +2604,7 @@ static void test_msipackage(void)
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
 
     /* database exists, but is empty */
-    sprintf(name, "#%lu", hdb);
+    sprintf(name, "#%d", hdb);
     r = MsiOpenPackageA(name, &hpack);
     ok(r == ERROR_INSTALL_PACKAGE_INVALID,
        "Expected ERROR_INSTALL_PACKAGE_INVALID, got %d\n", r);
@@ -2620,7 +2622,7 @@ static void test_msipackage(void)
     ok(r == ERROR_SUCCESS, "failed to create InstallExecuteSequence table\n");
 
     /* a few key tables exist */
-    sprintf(name, "#%lu", hdb);
+    sprintf(name, "#%d", hdb);
     r = MsiOpenPackageA(name, &hpack);
     ok(r == ERROR_INSTALL_PACKAGE_INVALID,
        "Expected ERROR_INSTALL_PACKAGE_INVALID, got %d\n", r);
@@ -2632,7 +2634,7 @@ static void test_msipackage(void)
     r = MsiOpenDatabaseW(msifileW, MSIDBOPEN_CREATE, &hdb);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
 
-    sprintf(name, "#%lu", hdb);
+    sprintf(name, "#%d", hdb);
 
     /* The following summary information props must exist:
      *  - PID_REVNUMBER
@@ -2959,7 +2961,7 @@ static void test_formatrecord_tables(void)
     r = MsiGetPropertyA( hpkg, "prop", buf, &size );
     ok( r == ERROR_SUCCESS, "get property failed: %d\n", r);
     ok( !memcmp( buf, "\0np", sizeof("\0np") ), "wrong value\n");
-    ok( size == sizeof("\0np") - 1, "got %lu\n", size );
+    ok( size == sizeof("\0np") - 1, "got %u\n", size );
 
     r = MsiSetPropertyA( hpkg, "prop", "[~]np" );
     ok( r == ERROR_SUCCESS, "cannot set property: %d\n", r);
@@ -4397,73 +4399,73 @@ static void test_appsearch_reglocator(void)
         skip("Not enough rights to perform tests\n");
         return;
     }
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     res = RegSetValueExA(classes, "Value1", 0, REG_SZ,
                          (const BYTE *)"regszdata", 10);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     res = RegCreateKeyA(HKEY_CURRENT_USER, "Software\\Wine", &hkcu);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     res = RegSetValueExA(hkcu, "Value1", 0, REG_SZ,
                          (const BYTE *)"regszdata", 10);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     users = 0;
     res = RegCreateKeyA(HKEY_USERS, "S-1-5-18\\Software\\Wine", &users);
     ok(res == ERROR_SUCCESS ||
        broken(res == ERROR_INVALID_PARAMETER),
-       "Expected ERROR_SUCCESS, got %ld\n", res);
+       "Expected ERROR_SUCCESS, got %d\n", res);
 
     if (res == ERROR_SUCCESS)
     {
         res = RegSetValueExA(users, "Value1", 0, REG_SZ,
                              (const BYTE *)"regszdata", 10);
-        ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+        ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
     }
 
     res = RegCreateKeyA(HKEY_LOCAL_MACHINE, "Software\\Wine", &hklm);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     res = RegSetValueA(hklm, NULL, REG_SZ, "defvalue", 8);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     res = RegSetValueExA(hklm, "Value1", 0, REG_SZ,
                          (const BYTE *)"regszdata", 10);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     val = 42;
     res = RegSetValueExA(hklm, "Value2", 0, REG_DWORD,
                          (const BYTE *)&val, sizeof(DWORD));
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     val = -42;
     res = RegSetValueExA(hklm, "Value3", 0, REG_DWORD,
                          (const BYTE *)&val, sizeof(DWORD));
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     res = RegSetValueExA(hklm, "Value4", 0, REG_EXPAND_SZ,
                          (const BYTE *)"%PATH%", 7);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     res = RegSetValueExA(hklm, "Value5", 0, REG_EXPAND_SZ,
                          (const BYTE *)"my%NOVAR%", 10);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     res = RegSetValueExA(hklm, "Value6", 0, REG_MULTI_SZ,
                          (const BYTE *)"one\0two\0", 9);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     binary[0] = 0x1234abcd;
     binary[1] = 0x567890ef;
     res = RegSetValueExA(hklm, "Value7", 0, REG_BINARY,
                          (const BYTE *)binary, sizeof(binary));
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     res = RegSetValueExA(hklm, "Value8", 0, REG_SZ,
                          (const BYTE *)"#regszdata", 11);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     strcpy(expected, CURR_DIR);
     if (is_root(CURR_DIR)) expected[2] = 0;
@@ -4472,50 +4474,50 @@ static void test_appsearch_reglocator(void)
     sprintf(path, "%s\\FileName1", expected);
     res = RegSetValueExA(hklm, "Value9", 0, REG_SZ,
                          (const BYTE *)path, lstrlenA(path) + 1);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     sprintf(path, "%s\\FileName2", expected);
     res = RegSetValueExA(hklm, "Value10", 0, REG_SZ,
                          (const BYTE *)path, lstrlenA(path) + 1);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     lstrcpyA(path, expected);
     res = RegSetValueExA(hklm, "Value11", 0, REG_SZ,
                          (const BYTE *)path, lstrlenA(path) + 1);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     res = RegSetValueExA(hklm, "Value12", 0, REG_SZ,
                          (const BYTE *)"", 1);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     create_file_with_version("FileName3.dll", MAKELONG(2, 1), MAKELONG(4, 3));
     sprintf(path, "%s\\FileName3.dll", expected);
     res = RegSetValueExA(hklm, "Value13", 0, REG_SZ,
                          (const BYTE *)path, lstrlenA(path) + 1);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     create_file_with_version("FileName4.dll", MAKELONG(1, 2), MAKELONG(3, 4));
     sprintf(path, "%s\\FileName4.dll", expected);
     res = RegSetValueExA(hklm, "Value14", 0, REG_SZ,
                          (const BYTE *)path, lstrlenA(path) + 1);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     create_file_with_version("FileName5.dll", MAKELONG(2, 1), MAKELONG(4, 3));
     sprintf(path, "%s\\FileName5.dll", expected);
     res = RegSetValueExA(hklm, "Value15", 0, REG_SZ,
                          (const BYTE *)path, lstrlenA(path) + 1);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     sprintf(path, "\"%s\\FileName1\" -option", expected);
     res = RegSetValueExA(hklm, "value16", 0, REG_SZ,
                          (const BYTE *)path, lstrlenA(path) + 1);
-    ok( res == ERROR_SUCCESS, "Expected ERROR_SUCCESS got %ld\n", res);
+    ok( res == ERROR_SUCCESS, "Expected ERROR_SUCCESS got %d\n", res);
 
     space = strchr(expected, ' ') != NULL;
     sprintf(path, "%s\\FileName1 -option", expected);
     res = RegSetValueExA(hklm, "value17", 0, REG_SZ,
                          (const BYTE *)path, lstrlenA(path) + 1);
-    ok( res == ERROR_SUCCESS, "Expected ERROR_SUCCESS got %ld\n", res);
+    ok( res == ERROR_SUCCESS, "Expected ERROR_SUCCESS got %d\n", res);
 
     hdb = create_package_db();
     ok(hdb, "Expected a valid database handle\n");
@@ -4720,21 +4722,21 @@ static void test_appsearch_reglocator(void)
     if (S(U(si)).wProcessorArchitecture == PROCESSOR_ARCHITECTURE_INTEL)
     {
         size = ExpandEnvironmentStringsA("%PATH%", NULL, 0);
-        pathvar = malloc(size);
+        pathvar = HeapAlloc(GetProcessHeap(), 0, size);
         ExpandEnvironmentStringsA("%PATH%", pathvar, size);
 
         size = 0;
         r = MsiGetPropertyA(hpkg, "SIGPROP4", NULL, &size);
         ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
 
-        pathdata = malloc(++size);
+        pathdata = HeapAlloc(GetProcessHeap(), 0, ++size);
         r = MsiGetPropertyA(hpkg, "SIGPROP4", pathdata, &size);
         ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
         ok(!lstrcmpA(pathdata, pathvar),
             "Expected \"%s\", got \"%s\"\n", pathvar, pathdata);
 
-        free(pathvar);
-        free(pathdata);
+        HeapFree(GetProcessHeap(), 0, pathvar);
+        HeapFree(GetProcessHeap(), 0, pathdata);
     }
 
     size = MAX_PATH;
@@ -6215,7 +6217,7 @@ static void test_MsiGetSourcePath(void)
        "Expected ERROR_INVALID_HANDLE, got %d\n", r);
     ok(!lstrcmpA(path, "kiwi"),
        "Expected path to be unchanged, got \"%s\"\n", path);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     /* NULL szFolder */
     size = MAX_PATH;
@@ -6225,7 +6227,7 @@ static void test_MsiGetSourcePath(void)
        "Expected ERROR_INVALID_PARAMETER, got %d\n", r);
     ok(!lstrcmpA(path, "kiwi"),
        "Expected path to be unchanged, got \"%s\"\n", path);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     /* empty szFolder */
     size = MAX_PATH;
@@ -6234,7 +6236,7 @@ static void test_MsiGetSourcePath(void)
     ok(r == ERROR_DIRECTORY, "Expected ERROR_DIRECTORY, got %d\n", r);
     ok(!lstrcmpA(path, "kiwi"),
        "Expected path to be unchanged, got \"%s\"\n", path);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     /* try TARGETDIR */
     size = MAX_PATH;
@@ -6243,21 +6245,21 @@ static void test_MsiGetSourcePath(void)
     ok(r == ERROR_DIRECTORY, "Expected ERROR_DIRECTORY, got %d\n", r);
     ok(!lstrcmpA(path, "kiwi"),
        "Expected path to be unchanged, got \"%s\"\n", path);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     size = MAX_PATH;
     lstrcpyA(path, "kiwi");
     r = MsiGetPropertyA(hpkg, "SourceDir", path, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(path, ""), "Expected \"\", got \"%s\"\n", path);
-    ok(size == 0, "Expected 0, got %lu\n", size);
+    ok(size == 0, "Expected 0, got %d\n", size);
 
     size = MAX_PATH;
     lstrcpyA(path, "kiwi");
     r = MsiGetPropertyA(hpkg, "SOURCEDIR", path, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(path, ""), "Expected \"\", got \"%s\"\n", path);
-    ok(size == 0, "Expected 0, got %lu\n", size);
+    ok(size == 0, "Expected 0, got %d\n", size);
 
     /* try SourceDir */
     size = MAX_PATH;
@@ -6266,7 +6268,7 @@ static void test_MsiGetSourcePath(void)
     ok(r == ERROR_DIRECTORY, "Expected ERROR_DIRECTORY, got %d\n", r);
     ok(!lstrcmpA(path, "kiwi"),
        "Expected path to be unchanged, got \"%s\"\n", path);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     /* try SOURCEDIR */
     size = MAX_PATH;
@@ -6275,7 +6277,7 @@ static void test_MsiGetSourcePath(void)
     ok(r == ERROR_DIRECTORY, "Expected ERROR_DIRECTORY, got %d\n", r);
     ok(!lstrcmpA(path, "kiwi"),
        "Expected path to be unchanged, got \"%s\"\n", path);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     /* source path does not exist, but the property exists */
     size = MAX_PATH;
@@ -6283,14 +6285,14 @@ static void test_MsiGetSourcePath(void)
     r = MsiGetPropertyA(hpkg, "SourceDir", path, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(path, ""), "Expected \"\", got \"%s\"\n", path);
-    ok(size == 0, "Expected 0, got %lu\n", size);
+    ok(size == 0, "Expected 0, got %d\n", size);
 
     size = MAX_PATH;
     lstrcpyA(path, "kiwi");
     r = MsiGetPropertyA(hpkg, "SOURCEDIR", path, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(path, ""), "Expected \"\", got \"%s\"\n", path);
-    ok(size == 0, "Expected 0, got %lu\n", size);
+    ok(size == 0, "Expected 0, got %d\n", size);
 
     /* try SubDir */
     size = MAX_PATH;
@@ -6299,7 +6301,7 @@ static void test_MsiGetSourcePath(void)
     ok(r == ERROR_DIRECTORY, "Expected ERROR_DIRECTORY, got %d\n", r);
     ok(!lstrcmpA(path, "kiwi"),
        "Expected path to be unchanged, got \"%s\"\n", path);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     /* try SubDir2 */
     size = MAX_PATH;
@@ -6308,7 +6310,7 @@ static void test_MsiGetSourcePath(void)
     ok(r == ERROR_DIRECTORY, "Expected ERROR_DIRECTORY, got %d\n", r);
     ok(!lstrcmpA(path, "kiwi"),
        "Expected path to be unchanged, got \"%s\"\n", path);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     MsiSetInternalUI(INSTALLUILEVEL_NONE, NULL);
 
@@ -6321,7 +6323,7 @@ static void test_MsiGetSourcePath(void)
     r = MsiGetSourcePathA(hpkg, "TARGETDIR", path, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(path, cwd), "Expected \"%s\", got \"%s\"\n", cwd, path);
-    ok(size == lstrlenA(cwd), "Expected %d, got %lu\n", lstrlenA(cwd), size);
+    ok(size == lstrlenA(cwd), "Expected %d, got %d\n", lstrlenA(cwd), size);
 
     /* try SourceDir after CostInitialize */
     size = MAX_PATH;
@@ -6329,7 +6331,7 @@ static void test_MsiGetSourcePath(void)
     r = MsiGetSourcePathA(hpkg, "SourceDir", path, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(path, cwd), "Expected \"%s\", got \"%s\"\n", cwd, path);
-    ok(size == lstrlenA(cwd), "Expected %d, got %lu\n", lstrlenA(cwd), size);
+    ok(size == lstrlenA(cwd), "Expected %d, got %d\n", lstrlenA(cwd), size);
 
     /* try SOURCEDIR after CostInitialize */
     size = MAX_PATH;
@@ -6338,7 +6340,7 @@ static void test_MsiGetSourcePath(void)
     ok(r == ERROR_DIRECTORY, "Expected ERROR_DIRECTORY, got %d\n", r);
     ok(!lstrcmpA(path, "kiwi"),
        "Expected path to be unchanged, got \"%s\"\n", path);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     /* source path does not exist, but the property exists */
     size = MAX_PATH;
@@ -6346,14 +6348,14 @@ static void test_MsiGetSourcePath(void)
     r = MsiGetPropertyA(hpkg, "SourceDir", path, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(path, cwd), "Expected \"%s\", got \"%s\"\n", cwd, path);
-    ok(size == lstrlenA(cwd), "Expected %d, got %lu\n", lstrlenA(cwd), size);
+    ok(size == lstrlenA(cwd), "Expected %d, got %d\n", lstrlenA(cwd), size);
 
     size = MAX_PATH;
     lstrcpyA(path, "kiwi");
     r = MsiGetPropertyA(hpkg, "SOURCEDIR", path, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(path, cwd), "Expected \"%s\", got \"%s\"\n", cwd, path);
-    ok(size == lstrlenA(cwd), "Expected %d, got %lu\n", lstrlenA(cwd), size);
+    ok(size == lstrlenA(cwd), "Expected %d, got %d\n", lstrlenA(cwd), size);
 
     /* try SubDir after CostInitialize */
     size = MAX_PATH;
@@ -6361,7 +6363,7 @@ static void test_MsiGetSourcePath(void)
     r = MsiGetSourcePathA(hpkg, "SubDir", path, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(path, subsrc), "Expected \"%s\", got \"%s\"\n", subsrc, path);
-    ok(size == lstrlenA(subsrc), "Expected %d, got %lu\n", lstrlenA(subsrc), size);
+    ok(size == lstrlenA(subsrc), "Expected %d, got %d\n", lstrlenA(subsrc), size);
 
     /* try SubDir2 after CostInitialize */
     size = MAX_PATH;
@@ -6369,7 +6371,7 @@ static void test_MsiGetSourcePath(void)
     r = MsiGetSourcePathA(hpkg, "SubDir2", path, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(path, sub2), "Expected \"%s\", got \"%s\"\n", sub2, path);
-    ok(size == lstrlenA(sub2), "Expected %d, got %lu\n", lstrlenA(sub2), size);
+    ok(size == lstrlenA(sub2), "Expected %d, got %d\n", lstrlenA(sub2), size);
 
     r = MsiDoActionA(hpkg, "ResolveSource");
     ok(r == ERROR_SUCCESS, "file cost failed\n");
@@ -6380,7 +6382,7 @@ static void test_MsiGetSourcePath(void)
     r = MsiGetSourcePathA(hpkg, "TARGETDIR", path, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(path, cwd), "Expected \"%s\", got \"%s\"\n", cwd, path);
-    ok(size == lstrlenA(cwd), "Expected %d, got %lu\n", lstrlenA(cwd), size);
+    ok(size == lstrlenA(cwd), "Expected %d, got %d\n", lstrlenA(cwd), size);
 
     /* try SourceDir after ResolveSource */
     size = MAX_PATH;
@@ -6388,7 +6390,7 @@ static void test_MsiGetSourcePath(void)
     r = MsiGetSourcePathA(hpkg, "SourceDir", path, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(path, cwd), "Expected \"%s\", got \"%s\"\n", cwd, path);
-    ok(size == lstrlenA(cwd), "Expected %d, got %lu\n", lstrlenA(cwd), size);
+    ok(size == lstrlenA(cwd), "Expected %d, got %d\n", lstrlenA(cwd), size);
 
     /* try SOURCEDIR after ResolveSource */
     size = MAX_PATH;
@@ -6397,7 +6399,7 @@ static void test_MsiGetSourcePath(void)
     ok(r == ERROR_DIRECTORY, "Expected ERROR_DIRECTORY, got %d\n", r);
     ok(!lstrcmpA(path, "kiwi"),
        "Expected path to be unchanged, got \"%s\"\n", path);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     /* source path does not exist, but the property exists */
     size = MAX_PATH;
@@ -6405,14 +6407,14 @@ static void test_MsiGetSourcePath(void)
     r = MsiGetPropertyA(hpkg, "SourceDir", path, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(path, cwd), "Expected \"%s\", got \"%s\"\n", cwd, path);
-    ok(size == lstrlenA(cwd), "Expected %d, got %lu\n", lstrlenA(cwd), size);
+    ok(size == lstrlenA(cwd), "Expected %d, got %d\n", lstrlenA(cwd), size);
 
     size = MAX_PATH;
     lstrcpyA(path, "kiwi");
     r = MsiGetPropertyA(hpkg, "SOURCEDIR", path, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(path, cwd), "Expected \"%s\", got \"%s\"\n", cwd, path);
-    ok(size == lstrlenA(cwd), "Expected %d, got %lu\n", lstrlenA(cwd), size);
+    ok(size == lstrlenA(cwd), "Expected %d, got %d\n", lstrlenA(cwd), size);
 
     /* try SubDir after ResolveSource */
     size = MAX_PATH;
@@ -6420,7 +6422,7 @@ static void test_MsiGetSourcePath(void)
     r = MsiGetSourcePathA(hpkg, "SubDir", path, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(path, subsrc), "Expected \"%s\", got \"%s\"\n", subsrc, path);
-    ok(size == lstrlenA(subsrc), "Expected %d, got %lu\n", lstrlenA(subsrc), size);
+    ok(size == lstrlenA(subsrc), "Expected %d, got %d\n", lstrlenA(subsrc), size);
 
     /* try SubDir2 after ResolveSource */
     size = MAX_PATH;
@@ -6428,7 +6430,7 @@ static void test_MsiGetSourcePath(void)
     r = MsiGetSourcePathA(hpkg, "SubDir2", path, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(path, sub2), "Expected \"%s\", got \"%s\"\n", sub2, path);
-    ok(size == lstrlenA(sub2), "Expected %d, got %lu\n", lstrlenA(sub2), size);
+    ok(size == lstrlenA(sub2), "Expected %d, got %d\n", lstrlenA(sub2), size);
 
     r = MsiDoActionA(hpkg, "FileCost");
     ok(r == ERROR_SUCCESS, "file cost failed\n");
@@ -6439,7 +6441,7 @@ static void test_MsiGetSourcePath(void)
     r = MsiGetSourcePathA(hpkg, "TARGETDIR", path, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(path, cwd), "Expected \"%s\", got \"%s\"\n", cwd, path);
-    ok(size == lstrlenA(cwd), "Expected %d, got %lu\n", lstrlenA(cwd), size);
+    ok(size == lstrlenA(cwd), "Expected %d, got %d\n", lstrlenA(cwd), size);
 
     /* try SourceDir after FileCost */
     size = MAX_PATH;
@@ -6447,7 +6449,7 @@ static void test_MsiGetSourcePath(void)
     r = MsiGetSourcePathA(hpkg, "SourceDir", path, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(path, cwd), "Expected \"%s\", got \"%s\"\n", cwd, path);
-    ok(size == lstrlenA(cwd), "Expected %d, got %lu\n", lstrlenA(cwd), size);
+    ok(size == lstrlenA(cwd), "Expected %d, got %d\n", lstrlenA(cwd), size);
 
     /* try SOURCEDIR after FileCost */
     size = MAX_PATH;
@@ -6456,7 +6458,7 @@ static void test_MsiGetSourcePath(void)
     ok(r == ERROR_DIRECTORY, "Expected ERROR_DIRECTORY, got %d\n", r);
     ok(!lstrcmpA(path, "kiwi"),
        "Expected path to be unchanged, got \"%s\"\n", path);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     /* source path does not exist, but the property exists */
     size = MAX_PATH;
@@ -6464,14 +6466,14 @@ static void test_MsiGetSourcePath(void)
     r = MsiGetPropertyA(hpkg, "SourceDir", path, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(path, cwd), "Expected \"%s\", got \"%s\"\n", cwd, path);
-    ok(size == lstrlenA(cwd), "Expected %d, got %lu\n", lstrlenA(cwd), size);
+    ok(size == lstrlenA(cwd), "Expected %d, got %d\n", lstrlenA(cwd), size);
 
     size = MAX_PATH;
     lstrcpyA(path, "kiwi");
     r = MsiGetPropertyA(hpkg, "SOURCEDIR", path, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(path, cwd), "Expected \"%s\", got \"%s\"\n", cwd, path);
-    ok(size == lstrlenA(cwd), "Expected %d, got %lu\n", lstrlenA(cwd), size);
+    ok(size == lstrlenA(cwd), "Expected %d, got %d\n", lstrlenA(cwd), size);
 
     /* try SubDir after FileCost */
     size = MAX_PATH;
@@ -6479,7 +6481,7 @@ static void test_MsiGetSourcePath(void)
     r = MsiGetSourcePathA(hpkg, "SubDir", path, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(path, subsrc), "Expected \"%s\", got \"%s\"\n", subsrc, path);
-    ok(size == lstrlenA(subsrc), "Expected %d, got %lu\n", lstrlenA(subsrc), size);
+    ok(size == lstrlenA(subsrc), "Expected %d, got %d\n", lstrlenA(subsrc), size);
 
     /* try SubDir2 after FileCost */
     size = MAX_PATH;
@@ -6487,7 +6489,7 @@ static void test_MsiGetSourcePath(void)
     r = MsiGetSourcePathA(hpkg, "SubDir2", path, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(path, sub2), "Expected \"%s\", got \"%s\"\n", sub2, path);
-    ok(size == lstrlenA(sub2), "Expected %d, got %lu\n", lstrlenA(sub2), size);
+    ok(size == lstrlenA(sub2), "Expected %d, got %d\n", lstrlenA(sub2), size);
 
     r = MsiDoActionA(hpkg, "CostFinalize");
     ok(r == ERROR_SUCCESS, "file cost failed\n");
@@ -6498,7 +6500,7 @@ static void test_MsiGetSourcePath(void)
     r = MsiGetSourcePathA(hpkg, "TARGETDIR", path, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(path, cwd), "Expected \"%s\", got \"%s\"\n", cwd, path);
-    ok(size == lstrlenA(cwd), "Expected %d, got %lu\n", lstrlenA(cwd), size);
+    ok(size == lstrlenA(cwd), "Expected %d, got %d\n", lstrlenA(cwd), size);
 
     /* try SourceDir after CostFinalize */
     size = MAX_PATH;
@@ -6506,7 +6508,7 @@ static void test_MsiGetSourcePath(void)
     r = MsiGetSourcePathA(hpkg, "SourceDir", path, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(path, cwd), "Expected \"%s\", got \"%s\"\n", cwd, path);
-    ok(size == lstrlenA(cwd), "Expected %d, got %lu\n", lstrlenA(cwd), size);
+    ok(size == lstrlenA(cwd), "Expected %d, got %d\n", lstrlenA(cwd), size);
 
     /* try SOURCEDIR after CostFinalize */
     size = MAX_PATH;
@@ -6515,7 +6517,7 @@ static void test_MsiGetSourcePath(void)
     ok(r == ERROR_DIRECTORY, "Expected ERROR_DIRECTORY, got %d\n", r);
     ok(!lstrcmpA(path, "kiwi"),
        "Expected path to be unchanged, got \"%s\"\n", path);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     /* source path does not exist, but the property exists */
     size = MAX_PATH;
@@ -6523,14 +6525,14 @@ static void test_MsiGetSourcePath(void)
     r = MsiGetPropertyA(hpkg, "SourceDir", path, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(path, cwd), "Expected \"%s\", got \"%s\"\n", cwd, path);
-    ok(size == lstrlenA(cwd), "Expected %d, got %lu\n", lstrlenA(cwd), size);
+    ok(size == lstrlenA(cwd), "Expected %d, got %d\n", lstrlenA(cwd), size);
 
     size = MAX_PATH;
     lstrcpyA(path, "kiwi");
     r = MsiGetPropertyA(hpkg, "SOURCEDIR", path, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(path, cwd), "Expected \"%s\", got \"%s\"\n", cwd, path);
-    ok(size == lstrlenA(cwd), "Expected %d, got %lu\n", lstrlenA(cwd), size);
+    ok(size == lstrlenA(cwd), "Expected %d, got %d\n", lstrlenA(cwd), size);
 
     /* try SubDir after CostFinalize */
     size = MAX_PATH;
@@ -6538,7 +6540,7 @@ static void test_MsiGetSourcePath(void)
     r = MsiGetSourcePathA(hpkg, "SubDir", path, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(path, subsrc), "Expected \"%s\", got \"%s\"\n", subsrc, path);
-    ok(size == lstrlenA(subsrc), "Expected %d, got %lu\n", lstrlenA(subsrc), size);
+    ok(size == lstrlenA(subsrc), "Expected %d, got %d\n", lstrlenA(subsrc), size);
 
     /* try SubDir2 after CostFinalize */
     size = MAX_PATH;
@@ -6546,7 +6548,7 @@ static void test_MsiGetSourcePath(void)
     r = MsiGetSourcePathA(hpkg, "SubDir2", path, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(path, sub2), "Expected \"%s\", got \"%s\"\n", sub2, path);
-    ok(size == lstrlenA(sub2), "Expected %d, got %lu\n", lstrlenA(sub2), size);
+    ok(size == lstrlenA(sub2), "Expected %d, got %d\n", lstrlenA(sub2), size);
 
     /* nonexistent directory */
     size = MAX_PATH;
@@ -6555,13 +6557,13 @@ static void test_MsiGetSourcePath(void)
     ok(r == ERROR_DIRECTORY, "Expected ERROR_DIRECTORY, got %d\n", r);
     ok(!lstrcmpA(path, "kiwi"),
        "Expected path to be unchanged, got \"%s\"\n", path);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     /* NULL szPathBuf */
     size = MAX_PATH;
     r = MsiGetSourcePathA(hpkg, "SourceDir", NULL, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
-    ok(size == lstrlenA(cwd), "Expected %d, got %lu\n", lstrlenA(cwd), size);
+    ok(size == lstrlenA(cwd), "Expected %d, got %d\n", lstrlenA(cwd), size);
 
     /* NULL pcchPathBuf */
     lstrcpyA(path, "kiwi");
@@ -6578,7 +6580,7 @@ static void test_MsiGetSourcePath(void)
     ok(r == ERROR_MORE_DATA, "Expected ERROR_MORE_DATA, got %d\n", r);
     ok(!lstrcmpA(path, "kiwi"),
        "Expected path to be unchanged, got \"%s\"\n", path);
-    ok(size == lstrlenA(cwd), "Expected %d, got %lu\n", lstrlenA(cwd), size);
+    ok(size == lstrlenA(cwd), "Expected %d, got %d\n", lstrlenA(cwd), size);
 
     /* pcchPathBuf does not have room for NULL terminator */
     size = lstrlenA(cwd);
@@ -6587,7 +6589,7 @@ static void test_MsiGetSourcePath(void)
     ok(r == ERROR_MORE_DATA, "Expected ERROR_MORE_DATA, got %d\n", r);
     ok(!strncmp(path, cwd, lstrlenA(cwd) - 1),
        "Expected path with no backslash, got \"%s\"\n", path);
-    ok(size == lstrlenA(cwd), "Expected %d, got %lu\n", lstrlenA(cwd), size);
+    ok(size == lstrlenA(cwd), "Expected %d, got %d\n", lstrlenA(cwd), size);
 
     /* pcchPathBuf has room for NULL terminator */
     size = lstrlenA(cwd) + 1;
@@ -6595,7 +6597,7 @@ static void test_MsiGetSourcePath(void)
     r = MsiGetSourcePathA(hpkg, "SourceDir", path, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(path, cwd), "Expected \"%s\", got \"%s\"\n", cwd, path);
-    ok(size == lstrlenA(cwd), "Expected %d, got %lu\n", lstrlenA(cwd), size);
+    ok(size == lstrlenA(cwd), "Expected %d, got %d\n", lstrlenA(cwd), size);
 
     /* remove property */
     r = MsiSetPropertyA(hpkg, "SourceDir", NULL);
@@ -6607,7 +6609,7 @@ static void test_MsiGetSourcePath(void)
     r = MsiGetSourcePathA(hpkg, "SourceDir", path, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(path, cwd), "Expected \"%s\", got \"%s\"\n", cwd, path);
-    ok(size == lstrlenA(cwd), "Expected %d, got %lu\n", lstrlenA(cwd), size);
+    ok(size == lstrlenA(cwd), "Expected %d, got %d\n", lstrlenA(cwd), size);
 
     /* set property to a valid directory */
     r = MsiSetPropertyA(hpkg, "SOURCEDIR", cwd);
@@ -6620,7 +6622,7 @@ static void test_MsiGetSourcePath(void)
     ok(r == ERROR_DIRECTORY, "Expected ERROR_DIRECTORY, got %d\n", r);
     ok(!lstrcmpA(path, "kiwi"),
        "Expected path to be unchanged, got \"%s\"\n", path);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     MsiCloseHandle(hpkg);
 
@@ -6641,7 +6643,7 @@ static void test_MsiGetSourcePath(void)
     ok(r == ERROR_DIRECTORY, "Expected ERROR_DIRECTORY, got %d\n", r);
     ok(!lstrcmpA(path, "kiwi"),
        "Expected path to be unchanged, got \"%s\"\n", path);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     /* try SourceDir */
     size = MAX_PATH;
@@ -6650,7 +6652,7 @@ static void test_MsiGetSourcePath(void)
     ok(r == ERROR_DIRECTORY, "Expected ERROR_DIRECTORY, got %d\n", r);
     ok(!lstrcmpA(path, "kiwi"),
        "Expected path to be unchanged, got \"%s\"\n", path);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     /* try SOURCEDIR */
     size = MAX_PATH;
@@ -6659,7 +6661,7 @@ static void test_MsiGetSourcePath(void)
     ok(r == ERROR_DIRECTORY, "Expected ERROR_DIRECTORY, got %d\n", r);
     ok(!lstrcmpA(path, "kiwi"),
        "Expected path to be unchanged, got \"%s\"\n", path);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     /* source path nor the property exist */
     size = MAX_PATH;
@@ -6667,14 +6669,14 @@ static void test_MsiGetSourcePath(void)
     r = MsiGetPropertyA(hpkg, "SourceDir", path, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(path, ""), "Expected \"\", got \"%s\"\n", path);
-    ok(size == 0, "Expected 0, got %lu\n", size);
+    ok(size == 0, "Expected 0, got %d\n", size);
 
     size = MAX_PATH;
     lstrcpyA(path, "kiwi");
     r = MsiGetPropertyA(hpkg, "SOURCEDIR", path, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(path, ""), "Expected \"\", got \"%s\"\n", path);
-    ok(size == 0, "Expected 0, got %lu\n", size);
+    ok(size == 0, "Expected 0, got %d\n", size);
 
     /* try SubDir */
     size = MAX_PATH;
@@ -6683,7 +6685,7 @@ static void test_MsiGetSourcePath(void)
     ok(r == ERROR_DIRECTORY, "Expected ERROR_DIRECTORY, got %d\n", r);
     ok(!lstrcmpA(path, "kiwi"),
        "Expected path to be unchanged, got \"%s\"\n", path);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     /* try SubDir2 */
     size = MAX_PATH;
@@ -6692,7 +6694,7 @@ static void test_MsiGetSourcePath(void)
     ok(r == ERROR_DIRECTORY, "Expected ERROR_DIRECTORY, got %d\n", r);
     ok(!lstrcmpA(path, "kiwi"),
        "Expected path to be unchanged, got \"%s\"\n", path);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     r = MsiDoActionA(hpkg, "CostInitialize");
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
@@ -6703,7 +6705,7 @@ static void test_MsiGetSourcePath(void)
     r = MsiGetSourcePathA(hpkg, "TARGETDIR", path, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(path, cwd), "Expected \"%s\", got \"%s\"\n", cwd, path);
-    ok(size == lstrlenA(cwd), "Expected %d, got %lu\n", lstrlenA(cwd), size);
+    ok(size == lstrlenA(cwd), "Expected %d, got %d\n", lstrlenA(cwd), size);
 
     /* try SourceDir after CostInitialize */
     size = MAX_PATH;
@@ -6711,7 +6713,7 @@ static void test_MsiGetSourcePath(void)
     r = MsiGetSourcePathA(hpkg, "SourceDir", path, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(path, cwd), "Expected \"%s\", got \"%s\"\n", cwd, path);
-    ok(size == lstrlenA(cwd), "Expected %d, got %lu\n", lstrlenA(cwd), size);
+    ok(size == lstrlenA(cwd), "Expected %d, got %d\n", lstrlenA(cwd), size);
 
     /* try SOURCEDIR after CostInitialize */
     size = MAX_PATH;
@@ -6721,7 +6723,7 @@ static void test_MsiGetSourcePath(void)
     {
         ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
         ok(!lstrcmpA(path, cwd), "Expected \"%s\", got \"%s\"\n", cwd, path);
-        ok(size == lstrlenA(cwd), "Expected %d, got %lu\n", lstrlenA(cwd), size);
+        ok(size == lstrlenA(cwd), "Expected %d, got %d\n", lstrlenA(cwd), size);
     }
 
     /* source path does not exist, but the property exists */
@@ -6730,14 +6732,14 @@ static void test_MsiGetSourcePath(void)
     r = MsiGetPropertyA(hpkg, "SourceDir", path, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(path, cwd), "Expected \"%s\", got \"%s\"\n", cwd, path);
-    ok(size == lstrlenA(cwd), "Expected %d, got %lu\n", lstrlenA(cwd), size);
+    ok(size == lstrlenA(cwd), "Expected %d, got %d\n", lstrlenA(cwd), size);
 
     size = MAX_PATH;
     lstrcpyA(path, "kiwi");
     r = MsiGetPropertyA(hpkg, "SOURCEDIR", path, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(path, cwd), "Expected \"%s\", got \"%s\"\n", cwd, path);
-    ok(size == lstrlenA(cwd), "Expected %d, got %lu\n", lstrlenA(cwd), size);
+    ok(size == lstrlenA(cwd), "Expected %d, got %d\n", lstrlenA(cwd), size);
 
     /* try SubDir after CostInitialize */
     size = MAX_PATH;
@@ -6745,7 +6747,7 @@ static void test_MsiGetSourcePath(void)
     r = MsiGetSourcePathA(hpkg, "SubDir", path, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(path, cwd), "Expected \"%s\", got \"%s\"\n", cwd, path);
-    ok(size == lstrlenA(cwd), "Expected %d, got %lu\n", lstrlenA(cwd), size);
+    ok(size == lstrlenA(cwd), "Expected %d, got %d\n", lstrlenA(cwd), size);
 
     /* try SubDir2 after CostInitialize */
     size = MAX_PATH;
@@ -6753,7 +6755,7 @@ static void test_MsiGetSourcePath(void)
     r = MsiGetSourcePathA(hpkg, "SubDir2", path, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(path, cwd), "Expected \"%s\", got \"%s\"\n", cwd, path);
-    ok(size == lstrlenA(cwd), "Expected %d, got %lu\n", lstrlenA(cwd), size);
+    ok(size == lstrlenA(cwd), "Expected %d, got %d\n", lstrlenA(cwd), size);
 
     r = MsiDoActionA(hpkg, "ResolveSource");
     ok(r == ERROR_SUCCESS, "file cost failed\n");
@@ -6764,7 +6766,7 @@ static void test_MsiGetSourcePath(void)
     r = MsiGetSourcePathA(hpkg, "TARGETDIR", path, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(path, cwd), "Expected \"%s\", got \"%s\"\n", cwd, path);
-    ok(size == lstrlenA(cwd), "Expected %d, got %lu\n", lstrlenA(cwd), size);
+    ok(size == lstrlenA(cwd), "Expected %d, got %d\n", lstrlenA(cwd), size);
 
     /* try SourceDir after ResolveSource */
     size = MAX_PATH;
@@ -6772,7 +6774,7 @@ static void test_MsiGetSourcePath(void)
     r = MsiGetSourcePathA(hpkg, "SourceDir", path, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(path, cwd), "Expected \"%s\", got \"%s\"\n", cwd, path);
-    ok(size == lstrlenA(cwd), "Expected %d, got %lu\n", lstrlenA(cwd), size);
+    ok(size == lstrlenA(cwd), "Expected %d, got %d\n", lstrlenA(cwd), size);
 
     /* try SOURCEDIR after ResolveSource */
     size = MAX_PATH;
@@ -6782,7 +6784,7 @@ static void test_MsiGetSourcePath(void)
     {
         ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
         ok(!lstrcmpA(path, cwd), "Expected \"%s\", got \"%s\"\n", cwd, path);
-        ok(size == lstrlenA(cwd), "Expected %d, got %lu\n", lstrlenA(cwd), size);
+        ok(size == lstrlenA(cwd), "Expected %d, got %d\n", lstrlenA(cwd), size);
     }
 
     /* source path and the property exist */
@@ -6791,14 +6793,14 @@ static void test_MsiGetSourcePath(void)
     r = MsiGetPropertyA(hpkg, "SourceDir", path, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(path, cwd), "Expected \"%s\", got \"%s\"\n", cwd, path);
-    ok(size == lstrlenA(cwd), "Expected %d, got %lu\n", lstrlenA(cwd), size);
+    ok(size == lstrlenA(cwd), "Expected %d, got %d\n", lstrlenA(cwd), size);
 
     size = MAX_PATH;
     lstrcpyA(path, "kiwi");
     r = MsiGetPropertyA(hpkg, "SOURCEDIR", path, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(path, cwd), "Expected \"%s\", got \"%s\"\n", cwd, path);
-    ok(size == lstrlenA(cwd), "Expected %d, got %lu\n", lstrlenA(cwd), size);
+    ok(size == lstrlenA(cwd), "Expected %d, got %d\n", lstrlenA(cwd), size);
 
     /* try SubDir after ResolveSource */
     size = MAX_PATH;
@@ -6806,7 +6808,7 @@ static void test_MsiGetSourcePath(void)
     r = MsiGetSourcePathA(hpkg, "SubDir", path, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(path, cwd), "Expected \"%s\", got \"%s\"\n", cwd, path);
-    ok(size == lstrlenA(cwd), "Expected %d, got %lu\n", lstrlenA(cwd), size);
+    ok(size == lstrlenA(cwd), "Expected %d, got %d\n", lstrlenA(cwd), size);
 
     /* try SubDir2 after ResolveSource */
     size = MAX_PATH;
@@ -6814,7 +6816,7 @@ static void test_MsiGetSourcePath(void)
     r = MsiGetSourcePathA(hpkg, "SubDir2", path, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(path, cwd), "Expected \"%s\", got \"%s\"\n", cwd, path);
-    ok(size == lstrlenA(cwd), "Expected %d, got %lu\n", lstrlenA(cwd), size);
+    ok(size == lstrlenA(cwd), "Expected %d, got %d\n", lstrlenA(cwd), size);
 
     r = MsiDoActionA(hpkg, "FileCost");
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
@@ -6825,7 +6827,7 @@ static void test_MsiGetSourcePath(void)
     r = MsiGetSourcePathA(hpkg, "TARGETDIR", path, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(path, cwd), "Expected \"%s\", got \"%s\"\n", cwd, path);
-    ok(size == lstrlenA(cwd), "Expected %d, got %lu\n", lstrlenA(cwd), size);
+    ok(size == lstrlenA(cwd), "Expected %d, got %d\n", lstrlenA(cwd), size);
 
     /* try SourceDir after CostFinalize */
     size = MAX_PATH;
@@ -6833,7 +6835,7 @@ static void test_MsiGetSourcePath(void)
     r = MsiGetSourcePathA(hpkg, "SourceDir", path, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(path, cwd), "Expected \"%s\", got \"%s\"\n", cwd, path);
-    ok(size == lstrlenA(cwd), "Expected %d, got %lu\n", lstrlenA(cwd), size);
+    ok(size == lstrlenA(cwd), "Expected %d, got %d\n", lstrlenA(cwd), size);
 
     /* try SOURCEDIR after CostFinalize */
     size = MAX_PATH;
@@ -6843,7 +6845,7 @@ static void test_MsiGetSourcePath(void)
     {
         ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
         ok(!lstrcmpA(path, cwd), "Expected \"%s\", got \"%s\"\n", cwd, path);
-        ok(size == lstrlenA(cwd), "Expected %d, got %lu\n", lstrlenA(cwd), size);
+        ok(size == lstrlenA(cwd), "Expected %d, got %d\n", lstrlenA(cwd), size);
     }
 
     /* source path and the property exist */
@@ -6852,14 +6854,14 @@ static void test_MsiGetSourcePath(void)
     r = MsiGetPropertyA(hpkg, "SourceDir", path, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(path, cwd), "Expected \"%s\", got \"%s\"\n", cwd, path);
-    ok(size == lstrlenA(cwd), "Expected %d, got %lu\n", lstrlenA(cwd), size);
+    ok(size == lstrlenA(cwd), "Expected %d, got %d\n", lstrlenA(cwd), size);
 
     size = MAX_PATH;
     lstrcpyA(path, "kiwi");
     r = MsiGetPropertyA(hpkg, "SOURCEDIR", path, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(path, cwd), "Expected \"%s\", got \"%s\"\n", cwd, path);
-    ok(size == lstrlenA(cwd), "Expected %d, got %lu\n", lstrlenA(cwd), size);
+    ok(size == lstrlenA(cwd), "Expected %d, got %d\n", lstrlenA(cwd), size);
 
     /* try SubDir after CostFinalize */
     size = MAX_PATH;
@@ -6867,7 +6869,7 @@ static void test_MsiGetSourcePath(void)
     r = MsiGetSourcePathA(hpkg, "SubDir", path, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(path, cwd), "Expected \"%s\", got \"%s\"\n", cwd, path);
-    ok(size == lstrlenA(cwd), "Expected %d, got %lu\n", lstrlenA(cwd), size);
+    ok(size == lstrlenA(cwd), "Expected %d, got %d\n", lstrlenA(cwd), size);
 
     /* try SubDir2 after CostFinalize */
     size = MAX_PATH;
@@ -6875,7 +6877,7 @@ static void test_MsiGetSourcePath(void)
     r = MsiGetSourcePathA(hpkg, "SubDir2", path, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(path, cwd), "Expected \"%s\", got \"%s\"\n", cwd, path);
-    ok(size == lstrlenA(cwd), "Expected %d, got %lu\n", lstrlenA(cwd), size);
+    ok(size == lstrlenA(cwd), "Expected %d, got %d\n", lstrlenA(cwd), size);
 
     r = MsiDoActionA(hpkg, "CostFinalize");
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
@@ -6886,7 +6888,7 @@ static void test_MsiGetSourcePath(void)
     r = MsiGetSourcePathA(hpkg, "TARGETDIR", path, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(path, cwd), "Expected \"%s\", got \"%s\"\n", cwd, path);
-    ok(size == lstrlenA(cwd), "Expected %d, got %lu\n", lstrlenA(cwd), size);
+    ok(size == lstrlenA(cwd), "Expected %d, got %d\n", lstrlenA(cwd), size);
 
     /* try SourceDir after CostFinalize */
     size = MAX_PATH;
@@ -6894,7 +6896,7 @@ static void test_MsiGetSourcePath(void)
     r = MsiGetSourcePathA(hpkg, "SourceDir", path, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(path, cwd), "Expected \"%s\", got \"%s\"\n", cwd, path);
-    ok(size == lstrlenA(cwd), "Expected %d, got %lu\n", lstrlenA(cwd), size);
+    ok(size == lstrlenA(cwd), "Expected %d, got %d\n", lstrlenA(cwd), size);
 
     /* try SOURCEDIR after CostFinalize */
     size = MAX_PATH;
@@ -6904,7 +6906,7 @@ static void test_MsiGetSourcePath(void)
     {
         ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
         ok(!lstrcmpA(path, cwd), "Expected \"%s\", got \"%s\"\n", cwd, path);
-        ok(size == lstrlenA(cwd), "Expected %d, got %lu\n", lstrlenA(cwd), size);
+        ok(size == lstrlenA(cwd), "Expected %d, got %d\n", lstrlenA(cwd), size);
     }
 
     /* source path and the property exist */
@@ -6913,14 +6915,14 @@ static void test_MsiGetSourcePath(void)
     r = MsiGetPropertyA(hpkg, "SourceDir", path, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(path, cwd), "Expected \"%s\", got \"%s\"\n", cwd, path);
-    ok(size == lstrlenA(cwd), "Expected %d, got %lu\n", lstrlenA(cwd), size);
+    ok(size == lstrlenA(cwd), "Expected %d, got %d\n", lstrlenA(cwd), size);
 
     size = MAX_PATH;
     lstrcpyA(path, "kiwi");
     r = MsiGetPropertyA(hpkg, "SOURCEDIR", path, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(path, cwd), "Expected \"%s\", got \"%s\"\n", cwd, path);
-    ok(size == lstrlenA(cwd), "Expected %d, got %lu\n", lstrlenA(cwd), size);
+    ok(size == lstrlenA(cwd), "Expected %d, got %d\n", lstrlenA(cwd), size);
 
     /* try SubDir after CostFinalize */
     size = MAX_PATH;
@@ -6928,7 +6930,7 @@ static void test_MsiGetSourcePath(void)
     r = MsiGetSourcePathA(hpkg, "SubDir", path, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(path, cwd), "Expected \"%s\", got \"%s\"\n", cwd, path);
-    ok(size == lstrlenA(cwd), "Expected %d, got %lu\n", lstrlenA(cwd), size);
+    ok(size == lstrlenA(cwd), "Expected %d, got %d\n", lstrlenA(cwd), size);
 
     /* try SubDir2 after CostFinalize */
     size = MAX_PATH;
@@ -6936,7 +6938,7 @@ static void test_MsiGetSourcePath(void)
     r = MsiGetSourcePathA(hpkg, "SubDir2", path, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(path, cwd), "Expected \"%s\", got \"%s\"\n", cwd, path);
-    ok(size == lstrlenA(cwd), "Expected %d, got %lu\n", lstrlenA(cwd), size);
+    ok(size == lstrlenA(cwd), "Expected %d, got %d\n", lstrlenA(cwd), size);
 
     MsiCloseHandle(hpkg);
     DeleteFileA(msifile);
@@ -7026,7 +7028,7 @@ static void test_shortlongsource(void)
     r = MsiGetSourcePathA(hpkg, "SubDir", path, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(path, subsrc), "Expected \"%s\", got \"%s\"\n", subsrc, path);
-    ok(size == lstrlenA(subsrc), "Expected %d, got %lu\n", lstrlenA(subsrc), size);
+    ok(size == lstrlenA(subsrc), "Expected %d, got %d\n", lstrlenA(subsrc), size);
 
     CreateDirectoryA("short", NULL);
 
@@ -7036,7 +7038,7 @@ static void test_shortlongsource(void)
     r = MsiGetSourcePathA(hpkg, "SubDir", path, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(path, subsrc), "Expected \"%s\", got \"%s\"\n", subsrc, path);
-    ok(size == lstrlenA(subsrc), "Expected %d, got %lu\n", lstrlenA(subsrc), size);
+    ok(size == lstrlenA(subsrc), "Expected %d, got %d\n", lstrlenA(subsrc), size);
 
     CreateDirectoryA("long", NULL);
 
@@ -7046,7 +7048,7 @@ static void test_shortlongsource(void)
     r = MsiGetSourcePathA(hpkg, "SubDir", path, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(path, subsrc), "Expected \"%s\", got \"%s\"\n", subsrc, path);
-    ok(size == lstrlenA(subsrc), "Expected %d, got %lu\n", lstrlenA(subsrc), size);
+    ok(size == lstrlenA(subsrc), "Expected %d, got %d\n", lstrlenA(subsrc), size);
 
     lstrcpyA(subsrc, cwd);
     lstrcatA(subsrc, "two");
@@ -7058,7 +7060,7 @@ static void test_shortlongsource(void)
     r = MsiGetSourcePathA(hpkg, "SubDir2", path, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(path, subsrc), "Expected \"%s\", got \"%s\"\n", subsrc, path);
-    ok(size == lstrlenA(subsrc), "Expected %d, got %lu\n", lstrlenA(subsrc), size);
+    ok(size == lstrlenA(subsrc), "Expected %d, got %d\n", lstrlenA(subsrc), size);
 
     lstrcpyA(subsrc, cwd);
     lstrcatA(subsrc, "four");
@@ -7070,7 +7072,7 @@ static void test_shortlongsource(void)
     r = MsiGetSourcePathA(hpkg, "SubDir3", path, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(path, subsrc), "Expected \"%s\", got \"%s\"\n", subsrc, path);
-    ok(size == lstrlenA(subsrc), "Expected %d, got %lu\n", lstrlenA(subsrc), size);
+    ok(size == lstrlenA(subsrc), "Expected %d, got %d\n", lstrlenA(subsrc), size);
 
     lstrcpyA(subsrc, cwd);
     lstrcatA(subsrc, "six");
@@ -7082,7 +7084,7 @@ static void test_shortlongsource(void)
     r = MsiGetSourcePathA(hpkg, "SubDir4", path, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(path, subsrc), "Expected \"%s\", got \"%s\"\n", subsrc, path);
-    ok(size == lstrlenA(subsrc), "Expected %d, got %lu\n", lstrlenA(subsrc), size);
+    ok(size == lstrlenA(subsrc), "Expected %d, got %d\n", lstrlenA(subsrc), size);
 
     lstrcpyA(subsrc, cwd);
     lstrcatA(subsrc, "eight");
@@ -7094,7 +7096,7 @@ static void test_shortlongsource(void)
     r = MsiGetSourcePathA(hpkg, "SubDir5", path, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(path, subsrc), "Expected \"%s\", got \"%s\"\n", subsrc, path);
-    ok(size == lstrlenA(subsrc), "Expected %d, got %lu\n", lstrlenA(subsrc), size);
+    ok(size == lstrlenA(subsrc), "Expected %d, got %d\n", lstrlenA(subsrc), size);
 
     lstrcpyA(subsrc, cwd);
     lstrcatA(subsrc, "ten");
@@ -7106,7 +7108,7 @@ static void test_shortlongsource(void)
     r = MsiGetSourcePathA(hpkg, "SubDir6", path, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(path, subsrc), "Expected \"%s\", got \"%s\"\n", subsrc, path);
-    ok(size == lstrlenA(subsrc), "Expected %d, got %lu\n", lstrlenA(subsrc), size);
+    ok(size == lstrlenA(subsrc), "Expected %d, got %d\n", lstrlenA(subsrc), size);
 
     lstrcpyA(subsrc, cwd);
     lstrcatA(subsrc, "twelve");
@@ -7118,7 +7120,7 @@ static void test_shortlongsource(void)
     r = MsiGetSourcePathA(hpkg, "SubDir7", path, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(path, subsrc), "Expected \"%s\", got \"%s\"\n", subsrc, path);
-    ok(size == lstrlenA(subsrc), "Expected %d, got %lu\n", lstrlenA(subsrc), size);
+    ok(size == lstrlenA(subsrc), "Expected %d, got %d\n", lstrlenA(subsrc), size);
 
     MsiCloseHandle(hpkg);
     RemoveDirectoryA("short");
@@ -7170,7 +7172,7 @@ static void test_shortlongsource(void)
     r = MsiGetSourcePathA(hpkg, "SubDir", path, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(path, subsrc), "Expected \"%s\", got \"%s\"\n", subsrc, path);
-    ok(size == lstrlenA(subsrc), "Expected %d, got %lu\n", lstrlenA(subsrc), size);
+    ok(size == lstrlenA(subsrc), "Expected %d, got %d\n", lstrlenA(subsrc), size);
 
     CreateDirectoryA("short", NULL);
 
@@ -7180,7 +7182,7 @@ static void test_shortlongsource(void)
     r = MsiGetSourcePathA(hpkg, "SubDir", path, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(path, subsrc), "Expected \"%s\", got \"%s\"\n", subsrc, path);
-    ok(size == lstrlenA(subsrc), "Expected %d, got %lu\n", lstrlenA(subsrc), size);
+    ok(size == lstrlenA(subsrc), "Expected %d, got %d\n", lstrlenA(subsrc), size);
 
     CreateDirectoryA("long", NULL);
 
@@ -7190,7 +7192,7 @@ static void test_shortlongsource(void)
     r = MsiGetSourcePathA(hpkg, "SubDir", path, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(path, subsrc), "Expected \"%s\", got \"%s\"\n", subsrc, path);
-    ok(size == lstrlenA(subsrc), "Expected %d, got %lu\n", lstrlenA(subsrc), size);
+    ok(size == lstrlenA(subsrc), "Expected %d, got %d\n", lstrlenA(subsrc), size);
 
     lstrcpyA(subsrc, cwd);
     lstrcatA(subsrc, "one");
@@ -7202,7 +7204,7 @@ static void test_shortlongsource(void)
     r = MsiGetSourcePathA(hpkg, "SubDir2", path, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(path, subsrc), "Expected \"%s\", got \"%s\"\n", subsrc, path);
-    ok(size == lstrlenA(subsrc), "Expected %d, got %lu\n", lstrlenA(subsrc), size);
+    ok(size == lstrlenA(subsrc), "Expected %d, got %d\n", lstrlenA(subsrc), size);
 
     lstrcpyA(subsrc, cwd);
     lstrcatA(subsrc, "three");
@@ -7214,7 +7216,7 @@ static void test_shortlongsource(void)
     r = MsiGetSourcePathA(hpkg, "SubDir3", path, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(path, subsrc), "Expected \"%s\", got \"%s\"\n", subsrc, path);
-    ok(size == lstrlenA(subsrc), "Expected %d, got %lu\n", lstrlenA(subsrc), size);
+    ok(size == lstrlenA(subsrc), "Expected %d, got %d\n", lstrlenA(subsrc), size);
 
     lstrcpyA(subsrc, cwd);
     lstrcatA(subsrc, "five");
@@ -7226,7 +7228,7 @@ static void test_shortlongsource(void)
     r = MsiGetSourcePathA(hpkg, "SubDir4", path, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(path, subsrc), "Expected \"%s\", got \"%s\"\n", subsrc, path);
-    ok(size == lstrlenA(subsrc), "Expected %d, got %lu\n", lstrlenA(subsrc), size);
+    ok(size == lstrlenA(subsrc), "Expected %d, got %d\n", lstrlenA(subsrc), size);
 
     lstrcpyA(subsrc, cwd);
     lstrcatA(subsrc, "seven");
@@ -7238,7 +7240,7 @@ static void test_shortlongsource(void)
     r = MsiGetSourcePathA(hpkg, "SubDir5", path, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(path, subsrc), "Expected \"%s\", got \"%s\"\n", subsrc, path);
-    ok(size == lstrlenA(subsrc), "Expected %d, got %lu\n", lstrlenA(subsrc), size);
+    ok(size == lstrlenA(subsrc), "Expected %d, got %d\n", lstrlenA(subsrc), size);
 
     lstrcpyA(subsrc, cwd);
     lstrcatA(subsrc, "nine");
@@ -7250,7 +7252,7 @@ static void test_shortlongsource(void)
     r = MsiGetSourcePathA(hpkg, "SubDir6", path, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(path, subsrc), "Expected \"%s\", got \"%s\"\n", subsrc, path);
-    ok(size == lstrlenA(subsrc), "Expected %d, got %lu\n", lstrlenA(subsrc), size);
+    ok(size == lstrlenA(subsrc), "Expected %d, got %d\n", lstrlenA(subsrc), size);
 
     lstrcpyA(subsrc, cwd);
     lstrcatA(subsrc, "eleven");
@@ -7262,7 +7264,7 @@ static void test_shortlongsource(void)
     r = MsiGetSourcePathA(hpkg, "SubDir7", path, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(path, subsrc), "Expected \"%s\", got \"%s\"\n", subsrc, path);
-    ok(size == lstrlenA(subsrc), "Expected %d, got %lu\n", lstrlenA(subsrc), size);
+    ok(size == lstrlenA(subsrc), "Expected %d, got %d\n", lstrlenA(subsrc), size);
 
     MsiCloseHandle(hpkg);
     RemoveDirectoryA("short");
@@ -7298,7 +7300,7 @@ static void test_sourcedir(void)
 
     add_directory_entry(hdb, "'TARGETDIR', '', 'SourceDir'");
 
-    sprintf(package, "#%lu", hdb);
+    sprintf(package, "#%u", hdb);
     r = MsiOpenPackageA(package, &hpkg);
     if (r == ERROR_INSTALL_PACKAGE_REJECTED)
     {
@@ -7315,7 +7317,7 @@ static void test_sourcedir(void)
     r = MsiGetPropertyA(hpkg, "SourceDir", path, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(path, ""), "Expected \"\", got \"%s\"\n", path);
-    ok(size == 0, "Expected 0, got %lu\n", size);
+    ok(size == 0, "Expected 0, got %d\n", size);
 
     /* SOURCEDIR prop */
     size = MAX_PATH;
@@ -7323,7 +7325,7 @@ static void test_sourcedir(void)
     r = MsiGetPropertyA(hpkg, "SOURCEDIR", path, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(path, ""), "Expected \"\", got \"%s\"\n", path);
-    ok(size == 0, "Expected 0, got %lu\n", size);
+    ok(size == 0, "Expected 0, got %d\n", size);
 
     MsiSetInternalUI(INSTALLUILEVEL_NONE, NULL);
 
@@ -7336,7 +7338,7 @@ static void test_sourcedir(void)
     r = MsiGetPropertyA(hpkg, "SourceDir", path, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(path, ""), "Expected \"\", got \"%s\"\n", path);
-    ok(size == 0, "Expected 0, got %lu\n", size);
+    ok(size == 0, "Expected 0, got %d\n", size);
 
     /* SOURCEDIR after CostInitialize */
     size = MAX_PATH;
@@ -7344,7 +7346,7 @@ static void test_sourcedir(void)
     r = MsiGetPropertyA(hpkg, "SOURCEDIR", path, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(path, ""), "Expected \"\", got \"%s\"\n", path);
-    ok(size == 0, "Expected 0, got %lu\n", size);
+    ok(size == 0, "Expected 0, got %d\n", size);
 
     r = MsiDoActionA(hpkg, "FileCost");
     ok(r == ERROR_SUCCESS, "file cost failed\n");
@@ -7355,7 +7357,7 @@ static void test_sourcedir(void)
     r = MsiGetPropertyA(hpkg, "SourceDir", path, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(path, ""), "Expected \"\", got \"%s\"\n", path);
-    ok(size == 0, "Expected 0, got %lu\n", size);
+    ok(size == 0, "Expected 0, got %d\n", size);
 
     /* SOURCEDIR after FileCost */
     size = MAX_PATH;
@@ -7363,7 +7365,7 @@ static void test_sourcedir(void)
     r = MsiGetPropertyA(hpkg, "SOURCEDIR", path, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(path, ""), "Expected \"\", got \"%s\"\n", path);
-    ok(size == 0, "Expected 0, got %lu\n", size);
+    ok(size == 0, "Expected 0, got %d\n", size);
 
     r = MsiDoActionA(hpkg, "CostFinalize");
     ok(r == ERROR_SUCCESS, "file cost failed\n");
@@ -7374,7 +7376,7 @@ static void test_sourcedir(void)
     r = MsiGetPropertyA(hpkg, "SourceDir", path, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(path, ""), "Expected \"\", got \"%s\"\n", path);
-    ok(size == 0, "Expected 0, got %lu\n", size);
+    ok(size == 0, "Expected 0, got %d\n", size);
 
     /* SOURCEDIR after CostFinalize */
     size = MAX_PATH;
@@ -7382,14 +7384,14 @@ static void test_sourcedir(void)
     r = MsiGetPropertyA(hpkg, "SOURCEDIR", path, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(path, ""), "Expected \"\", got \"%s\"\n", path);
-    ok(size == 0, "Expected 0, got %lu\n", size);
+    ok(size == 0, "Expected 0, got %d\n", size);
 
     size = MAX_PATH;
     lstrcpyA(path, "kiwi");
     r = MsiGetSourcePathA(hpkg, "SOURCEDIR", path, &size);
     ok(r == ERROR_DIRECTORY, "Expected ERROR_DIRECTORY, got %d\n", r);
     ok(!lstrcmpA(path, "kiwi"), "Expected \"kiwi\", got \"%s\"\n", path);
-    ok(size == MAX_PATH, "Expected %d, got %lu\n", MAX_PATH, size);
+    ok(size == MAX_PATH, "Expected %d, got %d\n", MAX_PATH, size);
 
     /* SOURCEDIR after calling MsiGetSourcePath */
     size = MAX_PATH;
@@ -7398,7 +7400,7 @@ static void test_sourcedir(void)
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     todo_wine {
     ok(!lstrcmpA(path, cwd), "Expected \"%s\", got \"%s\"\n", cwd, path);
-    ok(size == lstrlenA(cwd), "Expected %d, got %lu\n", lstrlenA(cwd), size);
+    ok(size == lstrlenA(cwd), "Expected %d, got %d\n", lstrlenA(cwd), size);
     }
 
     r = MsiDoActionA(hpkg, "ResolveSource");
@@ -7410,7 +7412,7 @@ static void test_sourcedir(void)
     r = MsiGetPropertyA(hpkg, "SourceDir", path, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(path, cwd), "Expected \"%s\", got \"%s\"\n", cwd, path);
-    ok(size == lstrlenA(cwd), "Expected %d, got %lu\n", lstrlenA(cwd), size);
+    ok(size == lstrlenA(cwd), "Expected %d, got %d\n", lstrlenA(cwd), size);
 
     /* SOURCEDIR after ResolveSource */
     size = MAX_PATH;
@@ -7418,7 +7420,7 @@ static void test_sourcedir(void)
     r = MsiGetPropertyA(hpkg, "SOURCEDIR", path, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(path, cwd), "Expected \"%s\", got \"%s\"\n", cwd, path);
-    ok(size == lstrlenA(cwd), "Expected %d, got %lu\n", lstrlenA(cwd), size);
+    ok(size == lstrlenA(cwd), "Expected %d, got %d\n", lstrlenA(cwd), size);
 
     /* random casing */
     size = MAX_PATH;
@@ -7426,12 +7428,12 @@ static void test_sourcedir(void)
     r = MsiGetPropertyA(hpkg, "SoUrCeDiR", path, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(path, ""), "Expected \"\", got \"%s\"\n", path);
-    ok(size == 0, "Expected 0, got %lu\n", size);
+    ok(size == 0, "Expected 0, got %d\n", size);
 
     MsiCloseHandle(hpkg);
 
     /* reset the package state */
-    sprintf(package, "#%lu", hdb);
+    sprintf(package, "#%i", hdb);
     r = MsiOpenPackageA(package, &hpkg);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
 
@@ -7445,7 +7447,7 @@ static void test_sourcedir(void)
     todo_wine
     {
         ok(!lstrcmpA(path, ""), "Expected \"\", got \"%s\"\n", path);
-        ok(size == 0, "Expected 0, got %lu\n", size);
+        ok(size == 0, "Expected 0, got %d\n", size);
     }
 
     size = MAX_PATH;
@@ -7454,7 +7456,7 @@ static void test_sourcedir(void)
     ok(r == ERROR_DIRECTORY, "Expected ERROR_DIRECTORY, got %d\n", r);
     ok(!lstrcmpA(path, "kiwi"),
        "Expected path to be unchanged, got \"%s\"\n", path);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     /* SourceDir after MsiGetSourcePath */
     size = MAX_PATH;
@@ -7464,7 +7466,7 @@ static void test_sourcedir(void)
     todo_wine
     {
         ok(!lstrcmpA(path, ""), "Expected \"\", got \"%s\"\n", path);
-        ok(size == 0, "Expected 0, got %lu\n", size);
+        ok(size == 0, "Expected 0, got %d\n", size);
     }
 
     /* SOURCEDIR prop */
@@ -7475,7 +7477,7 @@ static void test_sourcedir(void)
     todo_wine
     {
         ok(!lstrcmpA(path, ""), "Expected \"\", got \"%s\"\n", path);
-        ok(size == 0, "Expected 0, got %lu\n", size);
+        ok(size == 0, "Expected 0, got %d\n", size);
     }
 
     size = MAX_PATH;
@@ -7484,7 +7486,7 @@ static void test_sourcedir(void)
     ok(r == ERROR_DIRECTORY, "Expected ERROR_DIRECTORY, got %d\n", r);
     ok(!lstrcmpA(path, "kiwi"),
        "Expected path to be unchanged, got \"%s\"\n", path);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     /* SOURCEDIR prop after MsiGetSourcePath */
     size = MAX_PATH;
@@ -7494,7 +7496,7 @@ static void test_sourcedir(void)
     todo_wine
     {
         ok(!lstrcmpA(path, ""), "Expected \"\", got \"%s\"\n", path);
-        ok(size == 0, "Expected 0, got %lu\n", size);
+        ok(size == 0, "Expected 0, got %d\n", size);
     }
 
     r = MsiDoActionA(hpkg, "CostInitialize");
@@ -7508,7 +7510,7 @@ static void test_sourcedir(void)
     todo_wine
     {
         ok(!lstrcmpA(path, ""), "Expected \"\", got \"%s\"\n", path);
-        ok(size == 0, "Expected 0, got %lu\n", size);
+        ok(size == 0, "Expected 0, got %d\n", size);
     }
 
     size = MAX_PATH;
@@ -7516,7 +7518,7 @@ static void test_sourcedir(void)
     r = MsiGetSourcePathA(hpkg, "SourceDir", path, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(path, cwd), "Expected \"%s\", got \"%s\"\n", cwd, path);
-    ok(size == lstrlenA(cwd), "Expected %d, got %lu\n", lstrlenA(cwd), size);
+    ok(size == lstrlenA(cwd), "Expected %d, got %d\n", lstrlenA(cwd), size);
 
     /* SourceDir after MsiGetSourcePath */
     size = MAX_PATH;
@@ -7524,7 +7526,7 @@ static void test_sourcedir(void)
     r = MsiGetPropertyA(hpkg, "SourceDir", path, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(path, cwd), "Expected \"%s\", got \"%s\"\n", cwd, path);
-    ok(size == lstrlenA(cwd), "Expected %d, got %lu\n", lstrlenA(cwd), size);
+    ok(size == lstrlenA(cwd), "Expected %d, got %d\n", lstrlenA(cwd), size);
 
     /* SOURCEDIR after CostInitialize */
     size = MAX_PATH;
@@ -7532,7 +7534,7 @@ static void test_sourcedir(void)
     r = MsiGetPropertyA(hpkg, "SOURCEDIR", path, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(path, cwd), "Expected \"%s\", got \"%s\"\n", cwd, path);
-    ok(size == lstrlenA(cwd), "Expected %d, got %lu\n", lstrlenA(cwd), size);
+    ok(size == lstrlenA(cwd), "Expected %d, got %d\n", lstrlenA(cwd), size);
 
     /* SOURCEDIR source path still does not exist */
     size = MAX_PATH;
@@ -7541,7 +7543,7 @@ static void test_sourcedir(void)
     ok(r == ERROR_DIRECTORY, "Expected ERROR_DIRECTORY, got %d\n", r);
     ok(!lstrcmpA(path, "kiwi"),
        "Expected path to be unchanged, got \"%s\"\n", path);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     r = MsiDoActionA(hpkg, "FileCost");
     ok(r == ERROR_SUCCESS, "file cost failed\n");
@@ -7552,7 +7554,7 @@ static void test_sourcedir(void)
     r = MsiGetPropertyA(hpkg, "SourceDir", path, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(path, cwd), "Expected \"%s\", got \"%s\"\n", cwd, path);
-    ok(size == lstrlenA(cwd), "Expected %d, got %lu\n", lstrlenA(cwd), size);
+    ok(size == lstrlenA(cwd), "Expected %d, got %d\n", lstrlenA(cwd), size);
 
     /* SOURCEDIR after FileCost */
     size = MAX_PATH;
@@ -7560,7 +7562,7 @@ static void test_sourcedir(void)
     r = MsiGetPropertyA(hpkg, "SOURCEDIR", path, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(path, cwd), "Expected \"%s\", got \"%s\"\n", cwd, path);
-    ok(size == lstrlenA(cwd), "Expected %d, got %lu\n", lstrlenA(cwd), size);
+    ok(size == lstrlenA(cwd), "Expected %d, got %d\n", lstrlenA(cwd), size);
 
     /* SOURCEDIR source path still does not exist */
     size = MAX_PATH;
@@ -7569,7 +7571,7 @@ static void test_sourcedir(void)
     ok(r == ERROR_DIRECTORY, "Expected ERROR_DIRECTORY, got %d\n", r);
     ok(!lstrcmpA(path, "kiwi"),
        "Expected path to be unchanged, got \"%s\"\n", path);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     r = MsiDoActionA(hpkg, "CostFinalize");
     ok(r == ERROR_SUCCESS, "file cost failed\n");
@@ -7580,7 +7582,7 @@ static void test_sourcedir(void)
     r = MsiGetPropertyA(hpkg, "SourceDir", path, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(path, cwd), "Expected \"%s\", got \"%s\"\n", cwd, path);
-    ok(size == lstrlenA(cwd), "Expected %d, got %lu\n", lstrlenA(cwd), size);
+    ok(size == lstrlenA(cwd), "Expected %d, got %d\n", lstrlenA(cwd), size);
 
     /* SOURCEDIR after CostFinalize */
     size = MAX_PATH;
@@ -7588,7 +7590,7 @@ static void test_sourcedir(void)
     r = MsiGetPropertyA(hpkg, "SOURCEDIR", path, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(path, cwd), "Expected \"%s\", got \"%s\"\n", cwd, path);
-    ok(size == lstrlenA(cwd), "Expected %d, got %lu\n", lstrlenA(cwd), size);
+    ok(size == lstrlenA(cwd), "Expected %d, got %d\n", lstrlenA(cwd), size);
 
     /* SOURCEDIR source path still does not exist */
     size = MAX_PATH;
@@ -7597,7 +7599,7 @@ static void test_sourcedir(void)
     ok(r == ERROR_DIRECTORY, "Expected ERROR_DIRECTORY, got %d\n", r);
     ok(!lstrcmpA(path, "kiwi"),
        "Expected path to be unchanged, got \"%s\"\n", path);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     r = MsiDoActionA(hpkg, "ResolveSource");
     ok(r == ERROR_SUCCESS, "file cost failed\n");
@@ -7608,7 +7610,7 @@ static void test_sourcedir(void)
     r = MsiGetPropertyA(hpkg, "SourceDir", path, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(path, cwd), "Expected \"%s\", got \"%s\"\n", cwd, path);
-    ok(size == lstrlenA(cwd), "Expected %d, got %lu\n", lstrlenA(cwd), size);
+    ok(size == lstrlenA(cwd), "Expected %d, got %d\n", lstrlenA(cwd), size);
 
     /* SOURCEDIR after ResolveSource */
     size = MAX_PATH;
@@ -7616,7 +7618,7 @@ static void test_sourcedir(void)
     r = MsiGetPropertyA(hpkg, "SOURCEDIR", path, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(path, cwd), "Expected \"%s\", got \"%s\"\n", cwd, path);
-    ok(size == lstrlenA(cwd), "Expected %d, got %lu\n", lstrlenA(cwd), size);
+    ok(size == lstrlenA(cwd), "Expected %d, got %d\n", lstrlenA(cwd), size);
 
     /* SOURCEDIR source path still does not exist */
     size = MAX_PATH;
@@ -7625,7 +7627,7 @@ static void test_sourcedir(void)
     ok(r == ERROR_DIRECTORY, "Expected ERROR_DIRECTORY, got %d\n", r);
     ok(!lstrcmpA(path, "kiwi"),
        "Expected path to be unchanged, got \"%s\"\n", path);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     MsiCloseHandle(hpkg);
 
@@ -7731,11 +7733,11 @@ static void _test_file_access(LPCSTR file, const struct access_res *ares, DWORD 
             lasterr = GetLastError();
 
             ok((hfile != INVALID_HANDLE_VALUE) == ares[idx].gothandle,
-               "(%lu, handle, %d): Expected %d, got %d\n",
+               "(%d, handle, %d): Expected %d, got %d\n",
                line, idx, ares[idx].gothandle,
                (hfile != INVALID_HANDLE_VALUE));
 
-            ok(lasterr == ares[idx].lasterr, "(%lu, lasterr, %u): Expected %lu, got %lu\n",
+            ok(lasterr == ares[idx].lasterr, "(%d, lasterr, %d): Expected %d, got %d\n",
                line, idx, ares[idx].lasterr, lasterr);
 
             CloseHandle(hfile);
@@ -8010,7 +8012,7 @@ static void test_MsiGetProductProperty(void)
         DeleteFileA(msifile);
         return;
     }
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     lstrcpyA(keypath, "Software\\Microsoft\\Windows\\CurrentVersion\\");
     lstrcatA(keypath, "Installer\\UserData\\S-1-5-18\\Products\\");
@@ -8024,17 +8026,17 @@ static void test_MsiGetProductProperty(void)
         RegCloseKey(prodkey);
         return;
     }
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     res = RegCreateKeyExA(userkey, "InstallProperties", 0, NULL, 0, access, NULL, &props, NULL);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     lstrcpyA(val, path);
     lstrcatA(val, "\\");
     lstrcatA(val, msifile);
     res = RegSetValueExA(props, "LocalPackage", 0, REG_SZ,
                          (const BYTE *)val, lstrlenA(val) + 1);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     hprod = 0xdeadbeef;
     r = MsiOpenProductA(prodcode, &hprod);
@@ -8049,7 +8051,7 @@ static void test_MsiGetProductProperty(void)
        "Expected ERROR_INVALID_HANDLE, got %d\n", r);
     ok(!lstrcmpA(val, "apple"),
        "Expected val to be unchanged, got \"%s\"\n", val);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     size = MAX_PATH;
     lstrcpyW(valW, L"apple");
@@ -8058,7 +8060,7 @@ static void test_MsiGetProductProperty(void)
        "Expected ERROR_INVALID_HANDLE, got %d\n", r);
     ok(!lstrcmpW(valW, L"apple"),
        "Expected val to be unchanged, got %s\n", wine_dbgstr_w(valW));
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     /* szProperty is NULL */
     size = MAX_PATH;
@@ -8068,7 +8070,7 @@ static void test_MsiGetProductProperty(void)
        "Expected ERROR_INVALID_PARAMETER, got %d\n", r);
     ok(!lstrcmpA(val, "apple"),
        "Expected val to be unchanged, got \"%s\"\n", val);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     size = MAX_PATH;
     lstrcpyW(valW, L"apple");
@@ -8077,7 +8079,7 @@ static void test_MsiGetProductProperty(void)
        "Expected ERROR_INVALID_PARAMETER, got %d\n", r);
     ok(!lstrcmpW(valW, L"apple"),
        "Expected val to be unchanged, got %s\n", wine_dbgstr_w(valW));
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     /* szProperty is empty */
     size = MAX_PATH;
@@ -8085,14 +8087,14 @@ static void test_MsiGetProductProperty(void)
     r = MsiGetProductPropertyA(hprod, "", val, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(val, ""), "Expected \"\", got \"%s\"\n", val);
-    ok(size == 0, "Expected 0, got %lu\n", size);
+    ok(size == 0, "Expected 0, got %d\n", size);
 
     size = MAX_PATH;
     lstrcpyW(valW, L"apple");
     r = MsiGetProductPropertyW(hprod, L"", valW, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(*valW == 0, "Expected \"\", got %s\n", wine_dbgstr_w(valW));
-    ok(size == 0, "Expected 0, got %lu\n", size);
+    ok(size == 0, "Expected 0, got %d\n", size);
 
     /* get the property */
     size = MAX_PATH;
@@ -8102,7 +8104,7 @@ static void test_MsiGetProductProperty(void)
     ok(!lstrcmpA(val, prodcode),
        "Expected \"%s\", got \"%s\"\n", prodcode, val);
     ok(size == lstrlenA(prodcode),
-       "Expected %d, got %lu\n", lstrlenA(prodcode), size);
+       "Expected %d, got %d\n", lstrlenA(prodcode), size);
 
     size = MAX_PATH;
     lstrcpyW(valW, L"apple");
@@ -8111,20 +8113,20 @@ static void test_MsiGetProductProperty(void)
     ok(!lstrcmpW(valW, prodcodeW),
        "Expected %s, got %s\n", wine_dbgstr_w(prodcodeW), wine_dbgstr_w(valW));
     ok(size == lstrlenW(prodcodeW),
-       "Expected %d, got %lu\n", lstrlenW(prodcodeW), size);
+       "Expected %d, got %d\n", lstrlenW(prodcodeW), size);
 
     /* lpValueBuf is NULL */
     size = MAX_PATH;
     r = MsiGetProductPropertyA(hprod, "ProductCode", NULL, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(size == lstrlenA(prodcode),
-       "Expected %d, got %lu\n", lstrlenA(prodcode), size);
+       "Expected %d, got %d\n", lstrlenA(prodcode), size);
 
     size = MAX_PATH;
     r = MsiGetProductPropertyW(hprod, L"ProductCode", NULL, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(size == lstrlenW(prodcodeW),
-       "Expected %d, got %lu\n", lstrlenW(prodcodeW), size);
+       "Expected %d, got %d\n", lstrlenW(prodcodeW), size);
 
     /* pcchValueBuf is NULL */
     lstrcpyA(val, "apple");
@@ -8134,7 +8136,7 @@ static void test_MsiGetProductProperty(void)
     ok(!lstrcmpA(val, "apple"),
        "Expected val to be unchanged, got \"%s\"\n", val);
     ok(size == lstrlenA(prodcode),
-       "Expected %d, got %lu\n", lstrlenA(prodcode), size);
+       "Expected %d, got %d\n", lstrlenA(prodcode), size);
 
     lstrcpyW(valW, L"apple");
     r = MsiGetProductPropertyW(hprod, L"ProductCode", valW, NULL);
@@ -8143,7 +8145,7 @@ static void test_MsiGetProductProperty(void)
     ok(!lstrcmpW(valW, L"apple"),
        "Expected val to be unchanged, got %s\n", wine_dbgstr_w(valW));
     ok(size == lstrlenW(prodcodeW),
-       "Expected %d, got %lu\n", lstrlenW(prodcodeW), size);
+       "Expected %d, got %d\n", lstrlenW(prodcodeW), size);
 
     /* pcchValueBuf is too small */
     size = 4;
@@ -8153,7 +8155,7 @@ static void test_MsiGetProductProperty(void)
     ok(!strncmp(val, prodcode, 3),
        "Expected first 3 chars of \"%s\", got \"%s\"\n", prodcode, val);
     ok(size == lstrlenA(prodcode),
-       "Expected %d, got %lu\n", lstrlenA(prodcode), size);
+       "Expected %d, got %d\n", lstrlenA(prodcode), size);
 
     size = 4;
     lstrcpyW(valW, L"apple");
@@ -8162,7 +8164,7 @@ static void test_MsiGetProductProperty(void)
     ok(!memcmp(valW, prodcodeW, 3 * sizeof(WCHAR)),
        "Expected first 3 chars of %s, got %s\n", wine_dbgstr_w(prodcodeW), wine_dbgstr_w(valW));
     ok(size == lstrlenW(prodcodeW),
-       "Expected %d, got %lu\n", lstrlenW(prodcodeW), size);
+       "Expected %d, got %d\n", lstrlenW(prodcodeW), size);
 
     /* pcchValueBuf does not leave room for NULL terminator */
     size = lstrlenA(prodcode);
@@ -8172,7 +8174,7 @@ static void test_MsiGetProductProperty(void)
     ok(!strncmp(val, prodcode, lstrlenA(prodcode) - 1),
        "Expected first 37 chars of \"%s\", got \"%s\"\n", prodcode, val);
     ok(size == lstrlenA(prodcode),
-       "Expected %d, got %lu\n", lstrlenA(prodcode), size);
+       "Expected %d, got %d\n", lstrlenA(prodcode), size);
 
     size = lstrlenW(prodcodeW);
     lstrcpyW(valW, L"apple");
@@ -8181,7 +8183,7 @@ static void test_MsiGetProductProperty(void)
     ok(!memcmp(valW, prodcodeW, lstrlenW(prodcodeW) - 1),
        "Expected first 37 chars of %s, got %s\n", wine_dbgstr_w(prodcodeW), wine_dbgstr_w(valW));
     ok(size == lstrlenW(prodcodeW),
-       "Expected %d, got %lu\n", lstrlenW(prodcodeW), size);
+       "Expected %d, got %d\n", lstrlenW(prodcodeW), size);
 
     /* pcchValueBuf has enough room for NULL terminator */
     size = lstrlenA(prodcode) + 1;
@@ -8191,7 +8193,7 @@ static void test_MsiGetProductProperty(void)
     ok(!lstrcmpA(val, prodcode),
        "Expected \"%s\", got \"%s\"\n", prodcode, val);
     ok(size == lstrlenA(prodcode),
-       "Expected %d, got %lu\n", lstrlenA(prodcode), size);
+       "Expected %d, got %d\n", lstrlenA(prodcode), size);
 
     size = lstrlenW(prodcodeW) + 1;
     lstrcpyW(valW, L"apple");
@@ -8200,7 +8202,7 @@ static void test_MsiGetProductProperty(void)
     ok(!lstrcmpW(valW, prodcodeW),
        "Expected %s, got %s\n", wine_dbgstr_w(prodcodeW), wine_dbgstr_w(valW));
     ok(size == lstrlenW(prodcodeW),
-       "Expected %d, got %lu\n", lstrlenW(prodcodeW), size);
+       "Expected %d, got %d\n", lstrlenW(prodcodeW), size);
 
     /* nonexistent property */
     size = MAX_PATH;
@@ -8208,14 +8210,14 @@ static void test_MsiGetProductProperty(void)
     r = MsiGetProductPropertyA(hprod, "IDontExist", val, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(val, ""), "Expected \"\", got \"%s\"\n", val);
-    ok(size == 0, "Expected 0, got %lu\n", size);
+    ok(size == 0, "Expected 0, got %d\n", size);
 
     size = MAX_PATH;
     lstrcpyW(valW, L"apple");
     r = MsiGetProductPropertyW(hprod, L"IDontExist", valW, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpW(valW, L""), "Expected \"\", got %s\n", wine_dbgstr_w(valW));
-    ok(size == 0, "Expected 0, got %lu\n", size);
+    ok(size == 0, "Expected 0, got %d\n", size);
 
     r = MsiSetPropertyA(hprod, "NewProperty", "value");
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
@@ -8226,14 +8228,14 @@ static void test_MsiGetProductProperty(void)
     r = MsiGetProductPropertyA(hprod, "NewProperty", val, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(val, ""), "Expected \"\", got \"%s\"\n", val);
-    ok(size == 0, "Expected 0, got %lu\n", size);
+    ok(size == 0, "Expected 0, got %d\n", size);
 
     size = MAX_PATH;
     lstrcpyW(valW, L"apple");
     r = MsiGetProductPropertyW(hprod, L"NewProperty", valW, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpW(valW, L""), "Expected \"\", got %s\n", wine_dbgstr_w(valW));
-    ok(size == 0, "Expected 0, got %lu\n", size);
+    ok(size == 0, "Expected 0, got %d\n", size);
 
     r = MsiSetPropertyA(hprod, "ProductCode", "value");
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
@@ -8246,7 +8248,7 @@ static void test_MsiGetProductProperty(void)
     ok(!lstrcmpA(val, prodcode),
        "Expected \"%s\", got \"%s\"\n", prodcode, val);
     ok(size == lstrlenA(prodcode),
-       "Expected %d, got %lu\n", lstrlenA(prodcode), size);
+       "Expected %d, got %d\n", lstrlenA(prodcode), size);
 
     size = MAX_PATH;
     lstrcpyW(valW, L"apple");
@@ -8255,7 +8257,7 @@ static void test_MsiGetProductProperty(void)
     ok(!lstrcmpW(valW, prodcodeW),
        "Expected %s, got %s\n", wine_dbgstr_w(prodcodeW), wine_dbgstr_w(valW));
     ok(size == lstrlenW(prodcodeW),
-       "Expected %d, got %lu\n", lstrlenW(prodcodeW), size);
+       "Expected %d, got %d\n", lstrlenW(prodcodeW), size);
 
     MsiCloseHandle(hprod);
 
@@ -8324,7 +8326,7 @@ static void test_MsiSetProperty(void)
     r = MsiGetPropertyA(hpkg, "Prop", buf, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "Val"), "Expected \"Val\", got \"%s\"\n", buf);
-    ok(size == 3, "Expected 3, got %lu\n", size);
+    ok(size == 3, "Expected 3, got %d\n", size);
 
     /* update the property */
     r = MsiSetPropertyA(hpkg, "Prop", "Nuvo");
@@ -8335,7 +8337,7 @@ static void test_MsiSetProperty(void)
     r = MsiGetPropertyA(hpkg, "Prop", buf, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "Nuvo"), "Expected \"Nuvo\", got \"%s\"\n", buf);
-    ok(size == 4, "Expected 4, got %lu\n", size);
+    ok(size == 4, "Expected 4, got %d\n", size);
 
     hdb = MsiGetActiveDatabase(hpkg);
     ok(hdb != 0, "Expected a valid database handle\n");
@@ -8363,7 +8365,7 @@ static void test_MsiSetProperty(void)
     r = MsiGetPropertyA(hpkg, "Prop", buf, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, ""), "Expected \"\", got \"%s\"\n", buf);
-    ok(size == 0, "Expected 0, got %lu\n", size);
+    ok(size == 0, "Expected 0, got %d\n", size);
 
     /* reset the property */
     r = MsiSetPropertyA(hpkg, "Prop", "BlueTap");
@@ -8378,7 +8380,7 @@ static void test_MsiSetProperty(void)
     r = MsiGetPropertyA(hpkg, "Prop", buf, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, ""), "Expected \"\", got \"%s\"\n", buf);
-    ok(size == 0, "Expected 0, got %lu\n", size);
+    ok(size == 0, "Expected 0, got %d\n", size);
 
     MsiCloseHandle(hpkg);
     DeleteFileA(msifile);
@@ -8482,7 +8484,7 @@ static void test_costs(void)
     r = MsiDatabaseCommit( hdb );
     ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r );
 
-    sprintf( package, "#%lu", hdb );
+    sprintf( package, "#%u", hdb );
     r = MsiOpenPackageA( package, &hpkg );
     if (r == ERROR_INSTALL_PACKAGE_REJECTED)
     {
@@ -8558,17 +8560,17 @@ static void test_costs(void)
     len = 0;
     r = MsiEnumComponentCostsA( hpkg, "one", 0, INSTALLSTATE_LOCAL, drive, &len, &cost, &temp );
     ok( r == ERROR_MORE_DATA, "Expected ERROR_MORE_DATA, got %u\n", r );
-    ok( len == 2, "expected len == 2, got %lu\n", len );
+    ok( len == 2, "expected len == 2, got %u\n", len );
 
     len = 2;
     r = MsiEnumComponentCostsA( hpkg, "one", 0, INSTALLSTATE_LOCAL, drive, &len, &cost, &temp );
     ok( r == ERROR_MORE_DATA, "Expected ERROR_MORE_DATA, got %u\n", r );
-    ok( len == 2, "expected len == 2, got %lu\n", len );
+    ok( len == 2, "expected len == 2, got %u\n", len );
 
     len = 2;
     r = MsiEnumComponentCostsA( hpkg, "one", 0, INSTALLSTATE_UNKNOWN, drive, &len, &cost, &temp );
     ok( r == ERROR_MORE_DATA, "Expected ERROR_MORE_DATA, got %u\n", r );
-    ok( len == 2, "expected len == 2, got %lu\n", len );
+    ok( len == 2, "expected len == 2, got %u\n", len );
 
     /* install state doesn't seem to matter */
     len = sizeof(drive);
@@ -8588,7 +8590,7 @@ static void test_costs(void)
     cost = temp = 0xdead;
     r = MsiEnumComponentCostsA( hpkg, "one", 0, INSTALLSTATE_LOCAL, drive, &len, &cost, &temp );
     ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r );
-    ok( len == 2, "expected len == 2, got %lu\n", len );
+    ok( len == 2, "expected len == 2, got %u\n", len );
     ok( drive[0], "expected a drive\n" );
     ok( cost && cost != 0xdead, "expected cost > 0, got %d\n", cost );
     ok( !temp, "expected temp == 0, got %d\n", temp );
@@ -8598,7 +8600,7 @@ static void test_costs(void)
     cost = temp = 0xdead;
     r = MsiEnumComponentCostsA( hpkg, "two", 0, INSTALLSTATE_LOCAL, drive, &len, &cost, &temp );
     ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r );
-    ok( len == 2, "expected len == 2, got %lu\n", len );
+    ok( len == 2, "expected len == 2, got %u\n", len );
     ok( drive[0], "expected a drive\n" );
     ok( !cost, "expected cost == 0, got %d\n", cost );
     ok( !temp, "expected temp == 0, got %d\n", temp );
@@ -8608,7 +8610,7 @@ static void test_costs(void)
     cost = temp = 0xdead;
     r = MsiEnumComponentCostsA( hpkg, "", 0, INSTALLSTATE_UNKNOWN, drive, &len, &cost, &temp );
     ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r );
-    ok( len == 2, "expected len == 2, got %lu\n", len );
+    ok( len == 2, "expected len == 2, got %u\n", len );
     ok( drive[0], "expected a drive\n" );
     ok( !cost, "expected cost == 0, got %d\n", cost );
     ok( temp && temp != 0xdead, "expected temp > 0, got %d\n", temp );
@@ -8654,7 +8656,7 @@ static void test_MsiDatabaseCommit(void)
 
     create_property_table( hdb );
 
-    sprintf( package, "#%lu", hdb );
+    sprintf( package, "#%u", hdb );
     r = MsiOpenPackageA( package, &hpkg );
     if (r == ERROR_INSTALL_PACKAGE_REJECTED)
     {
@@ -8800,21 +8802,22 @@ static void add_message(const struct externalui_message *msg)
     if (!sequence)
     {
         sequence_size = 10;
-        sequence = malloc(sequence_size * sizeof(*sequence));
+        sequence = HeapAlloc(GetProcessHeap(), 0, sequence_size * sizeof(*sequence));
     }
     if (sequence_count == sequence_size)
     {
         sequence_size *= 2;
-        sequence = realloc(sequence, sequence_size * sizeof(*sequence));
+        sequence = HeapReAlloc(GetProcessHeap(), 0, sequence, sequence_size * sizeof(*sequence));
     }
 
     assert(sequence);
+
     sequence[sequence_count++] = *msg;
 }
 
 static void flush_sequence(void)
 {
-    free(sequence);
+    HeapFree(GetProcessHeap(), 0, sequence);
     sequence = NULL;
     sequence_count = sequence_size = 0;
 }

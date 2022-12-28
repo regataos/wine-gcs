@@ -356,10 +356,11 @@ static void init_nls_info( struct nls_info *info, unsigned short *ptr )
 
 static const struct nls_info *get_nls_info( unsigned int codepage )
 {
+    struct stat st;
     unsigned short *data;
     char *path;
     unsigned int i;
-    size_t size;
+    int fd;
 
     for (i = 0; i < ARRAY_SIZE(nlsinfo) && nlsinfo[i].codepage; i++)
         if (nlsinfo[i].codepage == codepage) return &nlsinfo[i];
@@ -369,15 +370,18 @@ static const struct nls_info *get_nls_info( unsigned int codepage )
     for (i = 0; nlsdirs[i]; i++)
     {
         path = strmake( "%s/c_%03u.nls", nlsdirs[i], codepage );
-        if ((data = read_file( path, &size )))
-        {
-            free( path );
-            init_nls_info( &nlsinfo[i], data );
-            return &nlsinfo[i];
-        }
+        if ((fd = open( path, O_RDONLY )) != -1) break;
         free( path );
     }
-    return NULL;
+    if (!nlsdirs[i]) return NULL;
+
+    fstat( fd, &st );
+    data = xmalloc( st.st_size );
+    if (read( fd, data, st.st_size ) != st.st_size) error( "failed to load %s\n", path );
+    close( fd );
+    free( path );
+    init_nls_info( &nlsinfo[i], data );
+    return &nlsinfo[i];
 }
 
 int is_valid_codepage(int cp)

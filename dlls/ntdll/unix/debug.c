@@ -44,6 +44,7 @@
 
 WINE_DECLARE_DEBUG_CHANNEL(pid);
 WINE_DECLARE_DEBUG_CHANNEL(timestamp);
+WINE_DECLARE_DEBUG_CHANNEL(microsecs);
 WINE_DEFAULT_DEBUG_CHANNEL(ntdll);
 
 struct debug_info
@@ -297,7 +298,14 @@ int __cdecl __wine_dbg_header( enum __wine_debug_class cls, struct __wine_debug_
 
     if (init_done)
     {
-        if (TRACE_ON(timestamp))
+        if (TRACE_ON(microsecs))
+        {
+            LARGE_INTEGER counter, frequency, microsecs;
+            NtQueryPerformanceCounter(&counter, &frequency);
+            microsecs.QuadPart = counter.QuadPart * 1000000 / frequency.QuadPart;
+            pos += sprintf( pos, "%3u.%06u:", (unsigned int)(microsecs.QuadPart / 1000000), (unsigned int)(microsecs.QuadPart % 1000000) );
+        }
+        else if (TRACE_ON(timestamp))
         {
             ULONG ticks = NtGetTickCount();
             pos += sprintf( pos, "%3u.%03u:", ticks / 1000, ticks % 1000 );
@@ -353,4 +361,52 @@ NTSTATUS WINAPI NtSetDebugFilterState( ULONG component_id, ULONG level, BOOLEAN 
     FIXME( "component_id %#x, level %u, state %#x stub.\n", component_id, level, state );
 
     return STATUS_SUCCESS;
+}
+
+void CDECL write_crash_log(const char *log_type, const char *log_msg)
+{
+    const char *dir = getenv("WINE_CRASH_REPORT_DIR");
+    const char *sgi;
+    char timestr[32];
+    char name[MAX_PATH], *c;
+    time_t t;
+    struct tm lt;
+    int f;
+
+    if(!dir || dir[0] == 0)
+        return;
+
+    strcpy(name, dir);
+
+    for(c = name + 1; *c; ++c){
+        if(*c == '/'){
+            *c = 0;
+            mkdir(name, 0700);
+            *c = '/';
+        }
+    }
+    mkdir(name, 0700);
+
+    sgi = getenv("SteamGameId");
+
+    t = time(NULL);
+    localtime_r(&t, &lt);
+    strftime(timestr, ARRAY_SIZE(timestr), "%Y-%m-%d_%H:%M:%S", &lt);
+
+    /* /path/to/crash/reports/2021-05-18_13:21:15_appid-976310_crash.log */
+    snprintf(name, ARRAY_SIZE(name),
+            "%s/%s_appid-%s_%s.log",
+            dir,
+            timestr,
+            sgi ? sgi : "0",
+            log_type
+            );
+
+    f = open(name, O_CREAT | O_WRONLY, 0644);
+    if(f < 0)
+        return;
+
+    write(f, log_msg, strlen(log_msg));
+
+    close(f);
 }

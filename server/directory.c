@@ -37,6 +37,7 @@
 #include "process.h"
 #include "file.h"
 #include "unicode.h"
+#include "user.h"
 
 #define HASH_SIZE 7  /* default hash size */
 
@@ -281,6 +282,37 @@ struct object *get_directory_obj( struct process *process, obj_handle_t handle )
     return get_handle_obj( process, handle, 0, &directory_ops );
 }
 
+struct object *create_desktop_map_directory( struct winstation *winstation )
+{
+    static const WCHAR dir_desktop_mapsW[] = {'_','_','w','i','n','e','_','d','e','s','k','t','o','p','_','m','a','p','p','i','n','g','s'};
+    static const struct unicode_str dir_desktop_maps_str = {dir_desktop_mapsW, sizeof(dir_desktop_mapsW)};
+    struct object *root;
+    struct directory *mapping_root, *ret;
+    const struct unicode_str winsta_name = {winstation->obj.name->name, winstation->obj.name->len};
+
+    root = winstation->obj.name->parent;
+    mapping_root = create_directory( root, &dir_desktop_maps_str, OBJ_OPENIF, HASH_SIZE, NULL );
+    ret = create_directory( &mapping_root->obj, &winsta_name, OBJ_OPENIF, HASH_SIZE, NULL );
+    release_object( &mapping_root->obj );
+
+    return &ret->obj;
+}
+
+struct object *create_thread_map_directory( void )
+{
+    static const WCHAR dir_kernelW[] = {'K','e','r','n','e','l','O','b','j','e','c','t','s'};
+    static const WCHAR dir_thread_mapsW[] = {'_','_','w','i','n','e','_','t','h','r','e','a','d','_','m','a','p','p','i','n','g','s'};
+    static const struct unicode_str dir_kernel_str = {dir_kernelW, sizeof(dir_kernelW)};
+    static const struct unicode_str dir_thread_maps_str = {dir_thread_mapsW, sizeof(dir_thread_mapsW)};
+    struct directory *mapping_root, *ret;
+
+    mapping_root = create_directory( &root_directory->obj, &dir_kernel_str, OBJ_OPENIF, HASH_SIZE, NULL );
+    ret = create_directory( &mapping_root->obj, &dir_thread_maps_str, OBJ_OPENIF, HASH_SIZE, NULL );
+    release_object( &mapping_root->obj );
+
+    return &ret->obj;
+}
+
 /* Global initialization */
 
 static void create_session( unsigned int id )
@@ -443,10 +475,8 @@ void init_directories( struct fd *intl_fd )
     /* mappings */
     static const WCHAR intlW[] = {'N','l','s','S','e','c','t','i','o','n','L','A','N','G','_','I','N','T','L'};
     static const WCHAR user_dataW[] = {'_','_','w','i','n','e','_','u','s','e','r','_','s','h','a','r','e','d','_','d','a','t','a'};
-    static const WCHAR hypervisor_dataW[] = {'_','_','w','i','n','e','_','h','y','p','e','r','v','i','s','o','r','_','s','h','a','r','e','d','_','d','a','t','a'};
     static const struct unicode_str intl_str = {intlW, sizeof(intlW)};
     static const struct unicode_str user_data_str = {user_dataW, sizeof(user_dataW)};
-    static const struct unicode_str hypervisor_data_str = {hypervisor_dataW, sizeof(hypervisor_dataW)};
 
     struct directory *dir_driver, *dir_device, *dir_global, *dir_kernel, *dir_nls;
     struct object *named_pipe_device, *mailslot_device, *null_device;
@@ -495,7 +525,6 @@ void init_directories( struct fd *intl_fd )
     /* mappings */
     release_object( create_fd_mapping( &dir_nls->obj, &intl_str, intl_fd, OBJ_PERMANENT, NULL ));
     release_object( create_user_data_mapping( &dir_kernel->obj, &user_data_str, OBJ_PERMANENT, NULL ));
-    release_object( create_hypervisor_data_mapping( &dir_kernel->obj, &hypervisor_data_str, OBJ_PERMANENT, NULL ));
     release_object( intl_fd );
 
     release_object( named_pipe_device );

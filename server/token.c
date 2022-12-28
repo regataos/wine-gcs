@@ -23,11 +23,15 @@
 #include "config.h"
 
 #include <assert.h>
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdarg.h>
 #include <sys/types.h>
 #include <unistd.h>
+#ifdef HAVE_STDINT_H
+#include <stdint.h>
+#endif
 
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
@@ -73,7 +77,7 @@ struct sid_attrs
 const struct sid world_sid = { SID_REVISION, 1, SECURITY_WORLD_SID_AUTHORITY, { SECURITY_WORLD_RID } };
 const struct sid local_system_sid = { SID_REVISION, 1, SECURITY_NT_AUTHORITY, { SECURITY_LOCAL_SYSTEM_RID } };
 const struct sid high_label_sid = { SID_REVISION, 1, SECURITY_MANDATORY_LABEL_AUTHORITY, { SECURITY_MANDATORY_HIGH_RID } };
-const struct sid local_user_sid = { SID_REVISION, 5, SECURITY_NT_AUTHORITY, { SECURITY_NT_NON_UNIQUE, 0, 0, 0, 1000 } };
+      struct sid local_user_sid = { SID_REVISION, 5, SECURITY_NT_AUTHORITY, { SECURITY_NT_NON_UNIQUE, 0, 0, 0, 1000 } };
 const struct sid builtin_admins_sid = { SID_REVISION, 2, SECURITY_NT_AUTHORITY, { SECURITY_BUILTIN_DOMAIN_RID, DOMAIN_ALIAS_RID_ADMINS } };
 const struct sid builtin_users_sid = { SID_REVISION, 2, SECURITY_NT_AUTHORITY, { SECURITY_BUILTIN_DOMAIN_RID, DOMAIN_ALIAS_RID_USERS } };
 const struct sid domain_users_sid = { SID_REVISION, 5, SECURITY_NT_AUTHORITY, { SECURITY_NT_NON_UNIQUE, 0, 0, 0, DOMAIN_GROUP_RID_USERS } };
@@ -82,7 +86,6 @@ static const struct sid local_sid = { SID_REVISION, 1, SECURITY_LOCAL_SID_AUTHOR
 static const struct sid interactive_sid = { SID_REVISION, 1, SECURITY_NT_AUTHORITY, { SECURITY_INTERACTIVE_RID } };
 static const struct sid anonymous_logon_sid = { SID_REVISION, 1, SECURITY_NT_AUTHORITY, { SECURITY_ANONYMOUS_LOGON_RID } };
 static const struct sid authenticated_user_sid = { SID_REVISION, 1, SECURITY_NT_AUTHORITY, { SECURITY_AUTHENTICATED_USER_RID } };
-static const struct sid builtin_logon_sid = { SID_REVISION, 3, SECURITY_NT_AUTHORITY, { SECURITY_LOGON_IDS_RID, 0, 0 } };
 
 static struct luid prev_luid_value = { 1000, 0 };
 
@@ -128,15 +131,9 @@ struct privilege
 
 struct group
 {
-    struct list entry;
-    unsigned    enabled  : 1; /* is the sid currently enabled? */
-    unsigned    def      : 1; /* is the sid enabled by default? */
-    unsigned    logon    : 1; /* is this a logon sid? */
-    unsigned    mandatory: 1; /* is this sid always enabled? */
-    unsigned    owner    : 1; /* can this sid be an owner of an object? */
-    unsigned    resource : 1; /* is this a domain-local group? */
-    unsigned    deny_only: 1; /* is this a sid that should be use for denying only? */
-    struct sid  sid;
+    struct list    entry;
+    unsigned int   attrs;
+    struct sid     sid;
 };
 
 static void token_dump( struct object *obj, int verbose );
@@ -206,6 +203,35 @@ const struct sid *security_unix_uid_to_sid( uid_t uid )
         return &local_user_sid;
     else
         return &anonymous_logon_sid;
+}
+
+void init_user_sid(void)
+{
+    char machine_id[17];
+    uint64_t id;
+    size_t n;
+    FILE *f;
+
+    f = fopen( "/etc/machine-id", "r" );
+    if (!f)
+    {
+        fprintf( stderr, "Failed to open /etc/machine-id, error %s.\n", strerror( errno ));
+        return;
+    }
+
+    n = fread( machine_id, sizeof(*machine_id), 16, f );
+    fclose(f);
+
+    if (n != 16)
+    {
+        fprintf( stderr, "Failed to read /etc/machine-id, error %s.\n", strerror( errno ));
+        return;
+    }
+    machine_id[n] = 0;
+    id = strtoull( machine_id, NULL, 0x10 );
+    local_user_sid.sub_auth[1] = id >> 32;
+    local_user_sid.sub_auth[2] = id & 0xffffffff;
+    local_user_sid.sub_auth[3] = getuid();
 }
 
 static int acl_is_valid( const struct acl *acl, data_size_t size )
@@ -525,17 +551,11 @@ static struct token *create_token( unsigned int primary, unsigned int session_id
                 release_object( token );
                 return NULL;
             }
+            group->attrs = groups[i].attrs;
             copy_sid( &group->sid, groups[i].sid );
-            group->enabled = TRUE;
-            group->def = TRUE;
-            group->logon = (groups[i].attrs & SE_GROUP_LOGON_ID) != 0;
-            group->mandatory = (groups[i].attrs & SE_GROUP_MANDATORY) != 0;
-            group->owner = (groups[i].attrs & SE_GROUP_OWNER) != 0;
-            group->resource = FALSE;
-            group->deny_only = FALSE;
             list_add_tail( &token->groups, &group->entry );
             /* Use first owner capable group as owner and primary group */
-            if (!token->primary_group && group->owner)
+            if (!token->primary_group && (group->attrs & SE_GROUP_OWNER))
             {
                 token->owner = &group->sid;
                 token->primary_group = &group->sid;
@@ -630,9 +650,8 @@ struct token *token_duplicate( struct token *src_token, unsigned primary,
         memcpy( newgroup, group, size );
         if (filter_group( group, remove_groups, remove_group_count ))
         {
-            newgroup->enabled = 0;
-            newgroup->def = 0;
-            newgroup->deny_only = 1;
+            newgroup->attrs &= ~(SE_GROUP_ENABLED | SE_GROUP_ENABLED_BY_DEFAULT);
+            newgroup->attrs |= SE_GROUP_USE_FOR_DENY_ONLY;
         }
         list_add_tail( &token->groups, &newgroup->entry );
         if (src_token->primary_group == &group->sid)
@@ -746,9 +765,9 @@ struct token *token_create_admin( unsigned primary, int impersonation_level, int
     struct sid alias_admins_sid = { SID_REVISION, 2, SECURITY_NT_AUTHORITY, { SECURITY_BUILTIN_DOMAIN_RID, DOMAIN_ALIAS_RID_ADMINS }};
     struct sid alias_users_sid = { SID_REVISION, 2, SECURITY_NT_AUTHORITY, { SECURITY_BUILTIN_DOMAIN_RID, DOMAIN_ALIAS_RID_USERS }};
     /* on Windows, this value changes every time the user logs on */
-    struct sid logon_sid = { SID_REVISION, 3, SECURITY_NT_AUTHORITY, { SECURITY_LOGON_IDS_RID, 0, 1 /* FIXME: should be randomly generated when tokens are inherited by new processes */ }};
+    struct sid logon_sid = { SID_REVISION, 3, SECURITY_NT_AUTHORITY, { SECURITY_LOGON_IDS_RID, 0, 0 /* FIXME: should be randomly generated when tokens are inherited by new processes */ }};
     const struct sid *user_sid = security_unix_uid_to_sid( getuid() );
-    struct acl *default_dacl = create_default_dacl( user_sid );
+    struct acl *default_dacl = create_default_dacl( &domain_users_sid );
     const struct luid_attr admin_privs[] =
     {
         { SeChangeNotifyPrivilege, SE_PRIVILEGE_ENABLED },
@@ -890,8 +909,8 @@ int token_sid_present( struct token *token, const struct sid *sid, int deny )
 
     LIST_FOR_EACH_ENTRY( group, &token->groups, struct group, entry )
     {
-        if (!group->enabled) continue;
-        if (group->deny_only && !deny) continue;
+        if (!(group->attrs & SE_GROUP_ENABLED)) continue;
+        if (!deny && (group->attrs & SE_GROUP_USE_FOR_DENY_ONLY)) continue;
         if (equal_sid( &group->sid, sid )) return TRUE;
     }
 
@@ -1060,9 +1079,9 @@ const struct acl *token_get_default_dacl( struct token *token )
     return token->default_dacl;
 }
 
-const struct sid *token_get_user( struct token *token )
+const struct sid *token_get_owner( struct token *token )
 {
-    return token->user;
+    return token->owner;
 }
 
 const struct sid *token_get_primary_group( struct token *token )
@@ -1369,9 +1388,6 @@ DECL_HANDLER(get_token_sid)
         case TokenOwner:
             sid = token->owner;
             break;
-        case TokenLogonSid:
-            sid = &builtin_logon_sid;
-            break;
         default:
             set_error( STATUS_INVALID_PARAMETER );
             break;
@@ -1399,6 +1415,7 @@ DECL_HANDLER(get_token_groups)
 
         LIST_FOR_EACH_ENTRY( group, &token->groups, const struct group, entry )
         {
+            if (req->attr_mask && !(group->attrs & req->attr_mask)) continue;
             group_count++;
             reply->sid_len += sid_len( &group->sid );
         }
@@ -1413,16 +1430,9 @@ DECL_HANDLER(get_token_groups)
             {
                 LIST_FOR_EACH_ENTRY( group, &token->groups, const struct group, entry )
                 {
-                    *attr_ptr = 0;
-                    if (group->mandatory) *attr_ptr |= SE_GROUP_MANDATORY;
-                    if (group->def) *attr_ptr |= SE_GROUP_ENABLED_BY_DEFAULT;
-                    if (group->enabled) *attr_ptr |= SE_GROUP_ENABLED;
-                    if (group->owner) *attr_ptr |= SE_GROUP_OWNER;
-                    if (group->deny_only) *attr_ptr |= SE_GROUP_USE_FOR_DENY_ONLY;
-                    if (group->resource) *attr_ptr |= SE_GROUP_RESOURCE;
-                    if (group->logon) *attr_ptr |= SE_GROUP_LOGON_ID;
+                    if (req->attr_mask && !(group->attrs & req->attr_mask)) continue;
                     sid = copy_sid( sid, &group->sid );
-                    attr_ptr++;
+                    *attr_ptr++ = group->attrs;
                 }
             }
         }

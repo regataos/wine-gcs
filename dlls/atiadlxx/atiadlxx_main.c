@@ -9,8 +9,10 @@
 #include "winbase.h"
 #include "winuser.h"
 #include "objbase.h"
+#include "initguid.h"
 #include "wine/debug.h"
-#include "wine/wined3d.h"
+
+#include "dxgi.h"
 
 #define MAX_GPUS 64
 #define VENDOR_AMD 0x1002
@@ -37,7 +39,7 @@ enum ADLPlatForm
 #define GRAPHICS_PLATFORM_UNKNOWN -1
 
 
-static struct wined3d *wined3d;
+static IDXGIFactory *dxgi_factory;
 
 WINE_DEFAULT_DEBUG_CHANNEL(atiadlxx);
 
@@ -47,8 +49,6 @@ BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, void *reserved)
 
     switch (reason)
     {
- 
- 
     case DLL_PROCESS_ATTACH:
         DisableThreadLibraryCalls(instance);
         break;
@@ -137,17 +137,51 @@ typedef struct ADLMemoryInfo
     long long iMemoryBandwidth;
 } ADLMemoryInfo, *LPADLMemoryInfo;
 
+typedef struct ADLDisplayTarget
+{
+    ADLDisplayID displayID;
+    int iDisplayMapIndex;
+    int iDisplayTargetMask;
+    int iDisplayTargetValue;
+} ADLDisplayTarget, *LPADLDisplayTarget;
+
+typedef struct ADLMode
+{
+    int iAdapterIndex;
+    ADLDisplayID displayID;
+    int iXPos;
+    int iYPos;
+    int iXRes;
+    int iYRes;
+    int iColourDepth;
+    float fRefreshRate;
+    int iOrientation;
+    int iModeFlag;
+    int iModeMask;
+    int iModeValue;
+} ADLMode, *LPADLMode;
+
+typedef struct ADLDisplayMap
+{
+    int iDisplayMapIndex;
+    ADLMode displayMode;
+    int iNumDisplayTarget;
+    int iFirstDisplayTargetArrayIndex;
+    int iDisplayMapMask;
+    int iDisplayMapValue;
+} ADLDisplayMap, *LPADLDisplayMap;
+
 static const ADLVersionsInfo version = {
-    "20.11.1",
-    "20.11.1",
+    "22.20.19.16-221003a-384125E-AMD-Software-Adrenalin-Edition",
     "",
+    "http://support.amd.com/drivers/xml/driver_09_us.xml",
 };
 
 static const ADLVersionsInfoX2 version2 = {
-    "20.11.1",
-    "20.11.1",
-    "20.11.1",
+    "22.20.19.16-221003a-384125E-AMD-Software-Adrenalin-Edition",
     "",
+    "22.10.1",
+    "http://support.amd.com/drivers/xml/driver_09_us.xml",
 };
 
 int WINAPI ADL2_Main_Control_Create(ADL_MAIN_MALLOC_CALLBACK cb, int arg, ADL_CONTEXT_HANDLE *ptr)
@@ -161,7 +195,8 @@ int WINAPI ADL_Main_Control_Create(ADL_MAIN_MALLOC_CALLBACK cb, int arg)
     FIXME("cb %p, arg %d stub!\n", cb, arg);
     adl_malloc = cb;
 
-    if ((wined3d = wined3d_create(0)))
+
+    if (SUCCEEDED(CreateDXGIFactory(&IID_IDXGIFactory, (void**) &dxgi_factory)))
         return ADL_OK;
     else
         return ADL_ERR;
@@ -171,8 +206,8 @@ int WINAPI ADL_Main_Control_Destroy(void)
 {
     FIXME("stub!\n");
 
-    if (wined3d != NULL)
-        wined3d_decref(wined3d);
+    if (dxgi_factory != NULL)
+        IUnknown_Release(dxgi_factory);
 
     return ADL_OK;
 }
@@ -202,28 +237,34 @@ int WINAPI ADL_Graphics_Versions_Get(ADLVersionsInfo *ver)
 
 int WINAPI ADL_Adapter_NumberOfAdapters_Get(int *count)
 {
+    IDXGIAdapter *adapter;
+
     FIXME("count %p stub!\n", count);
-    *count = wined3d_get_adapter_count(wined3d);
+
+    *count = 0;
+    while (SUCCEEDED(IDXGIFactory_EnumAdapters(dxgi_factory, *count, &adapter)))
+    {
+        (*count)++;
+        IUnknown_Release(adapter);
+    }
+
     TRACE("*count = %d\n", *count);
     return ADL_OK;
 }
 
-static BOOL get_adapter_identifier(int index, struct wined3d_adapter_identifier *identifier)
+static int get_adapter_desc(int adapter_index, DXGI_ADAPTER_DESC *desc)
 {
-    struct wined3d_adapter *adapter;
+    IDXGIAdapter *adapter;
     HRESULT hr;
 
-    adapter = wined3d_get_adapter(wined3d, index);
-    if (adapter == NULL)
-        return FALSE;
+    if (FAILED(IDXGIFactory_EnumAdapters(dxgi_factory, adapter_index, &adapter)))
+        return ADL_ERR;
 
-    memset(identifier, 0, sizeof(*identifier));
-    hr = wined3d_adapter_get_identifier(adapter, 0, identifier);
+    hr = IDXGIAdapter_GetDesc(adapter, desc);
 
-    if (!SUCCEEDED(hr))
-        return FALSE;
+    IUnknown_Release(adapter);
 
-    return TRUE;
+    return SUCCEEDED(hr) ? ADL_OK : ADL_ERR;
 }
 
 /* yep, seriously */
@@ -237,11 +278,11 @@ static int convert_vendor_id(int id)
 int WINAPI ADL_Adapter_AdapterInfo_Get(ADLAdapterInfo *adapters, int input_size)
 {
     int count, i;
-    struct wined3d_adapter_identifier identifier;
+    DXGI_ADAPTER_DESC adapter_desc;
 
     FIXME("adapters %p, input_size %d, stub!\n", adapters, input_size);
 
-    count = wined3d_get_adapter_count(wined3d);
+    ADL_Adapter_NumberOfAdapters_Get(&count);
 
     if (!adapters) return ADL_ERR_INVALID_PARAM;
     if (input_size != count * sizeof(ADLAdapterInfo)) return ADL_ERR_INVALID_PARAM;
@@ -253,10 +294,10 @@ int WINAPI ADL_Adapter_AdapterInfo_Get(ADLAdapterInfo *adapters, int input_size)
         adapters[i].iSize = sizeof(ADLAdapterInfo);
         adapters[i].iAdapterIndex = i;
 
-        if (!get_adapter_identifier(i, &identifier))
+        if (get_adapter_desc(i, &adapter_desc) != ADL_OK)
             return ADL_ERR;
 
-        adapters[i].iVendorID = convert_vendor_id(identifier.vendor_id);
+        adapters[i].iVendorID = convert_vendor_id(adapter_desc.VendorId);
     }
 
     return ADL_OK;
@@ -264,18 +305,26 @@ int WINAPI ADL_Adapter_AdapterInfo_Get(ADLAdapterInfo *adapters, int input_size)
 
 int WINAPI ADL_Display_DisplayInfo_Get(int adapter_index, int *num_displays, ADLDisplayInfo **info, int force_detect)
 {
-    struct wined3d_adapter *adapter;
-    struct wined3d_output *output;
+    IDXGIAdapter *adapter;
+    IDXGIOutput *output;
     int i;
 
     FIXME("adapter %d, num_displays %p, info %p stub!\n", adapter_index, num_displays, info);
 
     if (info == NULL || num_displays == NULL) return ADL_ERR_NULL_POINTER;
 
-    adapter = wined3d_get_adapter(wined3d, adapter_index);
-    if (adapter == NULL) return ADL_ERR_INVALID_PARAM;
+    if (FAILED(IDXGIFactory_EnumAdapters(dxgi_factory, adapter_index, &adapter)))
+        return ADL_ERR_INVALID_PARAM;
 
-    *num_displays = wined3d_adapter_get_output_count(adapter);
+    *num_displays = 0;
+
+    while (SUCCEEDED(IDXGIAdapter_EnumOutputs(adapter, *num_displays, &output)))
+    {
+        (*num_displays)++;
+        IUnknown_Release(output);
+    }
+
+    IUnknown_Release(adapter);
 
     if (*num_displays == 0)
         return ADL_OK;
@@ -285,10 +334,6 @@ int WINAPI ADL_Display_DisplayInfo_Get(int adapter_index, int *num_displays, ADL
 
     for (i = 0; i < *num_displays; i++)
     {
-        output = wined3d_adapter_get_output(adapter, i);
-        if (output == NULL)
-            return ADL_ERR;
-
         (*info)[i].displayID.iDisplayLogicalIndex = i;
         (*info)[i].iDisplayInfoValue = ADL_DISPLAY_DISPLAYINFO_DISPLAYCONNECTED | ADL_DISPLAY_DISPLAYINFO_DISPLAYMAPPED;
         (*info)[i].iDisplayInfoMask = (*info)[i].iDisplayInfoValue;
@@ -311,17 +356,17 @@ int WINAPI ADL_Adapter_Crossfire_Get(int adapter_index, ADLCrossfireComb *comb, 
 
 int WINAPI ADL_Adapter_ASICFamilyType_Get(int adapter_index, int *asic_type, int *valids)
 {
-    struct wined3d_adapter_identifier identifier;
+    DXGI_ADAPTER_DESC adapter_desc;
 
     FIXME("adapter %d, asic_type %p, valids %p, stub!\n", adapter_index, asic_type, valids);
 
     if (asic_type == NULL || valids == NULL)
         return  ADL_ERR_NULL_POINTER;
 
-    if (!get_adapter_identifier(adapter_index, &identifier))
+    if (get_adapter_desc(adapter_index, &adapter_desc) != ADL_OK)
         return ADL_ERR_INVALID_ADL_IDX;
 
-    if (identifier.vendor_id != VENDOR_AMD)
+    if (adapter_desc.VendorId != VENDOR_AMD)
         return ADL_ERR_NOT_SUPPORTED;
 
     *asic_type = ADL_ASIC_DISCRETE;
@@ -370,13 +415,13 @@ static int get_max_clock(const char *clock, int default_value)
 /* the name and documentation suggests that this returns current freqs, but it's actually max */
 int WINAPI ADL_Adapter_ObservedClockInfo_Get(int adapter_index, int *core_clock, int *memory_clock)
 {
-    struct wined3d_adapter_identifier identifier;
+    DXGI_ADAPTER_DESC adapter_desc;
 
     FIXME("adapter %d, core_clock %p, memory_clock %p, stub!\n", adapter_index, core_clock, memory_clock);
 
     if (core_clock == NULL || memory_clock == NULL) return ADL_ERR;
-    if (!get_adapter_identifier(adapter_index, &identifier)) return ADL_ERR;
-    if (identifier.vendor_id != VENDOR_AMD) return ADL_ERR_INVALID_ADL_IDX;
+    if (get_adapter_desc(adapter_index, &adapter_desc) != ADL_OK) return ADL_ERR;
+    if (adapter_desc.VendorId != VENDOR_AMD) return ADL_ERR_INVALID_ADL_IDX;
 
     /* default values based on RX580 */
     *core_clock = get_max_clock("sclk", 1350);
@@ -390,45 +435,59 @@ int WINAPI ADL_Adapter_ObservedClockInfo_Get(int adapter_index, int *core_clock,
 /* documented in the "Linux Specific APIs" section, present and used on Windows */
 int WINAPI ADL_Adapter_MemoryInfo_Get(int adapter_index, ADLMemoryInfo *mem_info)
 {
-    struct wined3d_adapter_identifier identifier;
+    DXGI_ADAPTER_DESC adapter_desc;
 
     FIXME("adapter %d, mem_info %p stub!\n", adapter_index, mem_info);
 
     if (mem_info == NULL) return ADL_ERR_NULL_POINTER;
-    if (!get_adapter_identifier(adapter_index, &identifier)) return ADL_ERR_INVALID_ADL_IDX;
-    if (identifier.vendor_id != VENDOR_AMD) return ADL_ERR;
+    if (get_adapter_desc(adapter_index, &adapter_desc) != ADL_OK) return ADL_ERR_INVALID_ADL_IDX;
+    if (adapter_desc.VendorId != VENDOR_AMD) return ADL_ERR;
 
-    mem_info->iMemorySize = identifier.video_memory;
+    mem_info->iMemorySize = adapter_desc.DedicatedVideoMemory;
     mem_info->iMemoryBandwidth = 256000; /* not exposed on Linux, probably needs a lookup table */
 
-    TRACE("iMemoryBandwidth %lli, iMemorySize %lli\n", mem_info->iMemoryBandwidth, mem_info->iMemorySize);
+    TRACE("iMemoryBandwidth %s, iMemorySize %s\n",
+            wine_dbgstr_longlong(mem_info->iMemoryBandwidth),
+            wine_dbgstr_longlong(mem_info->iMemorySize));
     return ADL_OK;
 }
 
 int WINAPI ADL_Graphics_Platform_Get(int *platform)
 {
-    struct wined3d_adapter_identifier identifier;
+    DXGI_ADAPTER_DESC adapter_desc;
     int count, i;
 
     FIXME("platform %p, stub!\n", platform);
 
     *platform = GRAPHICS_PLATFORM_UNKNOWN;
 
-    count = wined3d_get_adapter_count(wined3d);
+    ADL_Adapter_NumberOfAdapters_Get(&count);
 
     for (i = 0; i < count; i ++)
     {
-        if (!get_adapter_identifier(i, &identifier))
+        if (get_adapter_desc(i, &adapter_desc) != ADL_OK)
             continue;
 
-        if (identifier.vendor_id == VENDOR_AMD)
+        if (adapter_desc.VendorId == VENDOR_AMD)
             *platform = GRAPHICS_PLATFORM_DESKTOP;
     }
 
     /* NOTE: The real value can be obtained by doing:
      * 1. ioctl(DRM_AMDGPU_INFO) with AMDGPU_INFO_DEV_INFO - dev_info.ids_flags & AMDGPU_IDS_FLAGS_FUSION
-     * 2. VkPhysicalDeviceType() if we ever switch to wined3d vk adapter implementation
+     * 2. VkPhysicalDeviceType() if we ever want to use Vulkan directly
      */
 
     return ADL_OK;
+}
+
+
+int WINAPI ADL_Display_DisplayMapConfig_Get(int adapter_index, int *display_map_count, ADLDisplayMap **display_maps,
+        int *display_target_count, ADLDisplayTarget **display_targets, int options)
+{
+    FIXME("adapter_index %d, display_map_count %p, display_maps %p, "
+            "display_target_count %p, display_targets %p, options %d stub.\n",
+            adapter_index, display_map_count, display_maps, display_target_count,
+            display_targets, options);
+
+    return ADL_ERR;
 }

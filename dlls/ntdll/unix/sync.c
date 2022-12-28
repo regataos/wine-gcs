@@ -77,46 +77,6 @@ static const char *debugstr_timeout( const LARGE_INTEGER *timeout )
     return wine_dbgstr_longlong( timeout->QuadPart );
 }
 
-#ifndef __NR_clock_gettime64
-#define __NR_clock_gettime64 403
-#endif
-
-struct timespec64
-{
-    long long tv_sec;
-    long long tv_nsec;
-};
-
-static inline int do_clock_gettime( clockid_t clock_id, ULONGLONG *ticks )
-{
-    static int clock_gettime64_supported = -1;
-    struct timespec64 ts64;
-    struct timespec ts;
-    int ret;
-
-    if (clock_gettime64_supported < 0)
-    {
-        if (!syscall( __NR_clock_gettime64, clock_id, &ts64 ))
-        {
-            clock_gettime64_supported = 1;
-            *ticks = ts64.tv_sec * (ULONGLONG)TICKSPERSEC + ts64.tv_nsec / 100;
-            return 0;
-        }
-        clock_gettime64_supported = 0;
-    }
-
-    if (clock_gettime64_supported)
-    {
-        if (!(ret = syscall( __NR_clock_gettime64, clock_id, &ts64 )))
-            *ticks = ts64.tv_sec * (ULONGLONG)TICKSPERSEC + ts64.tv_nsec / 100;
-        return ret;
-    }
-
-    if (!(ret = clock_gettime( clock_id, &ts )))
-        *ticks = ts.tv_sec * (ULONGLONG)TICKSPERSEC + ts.tv_nsec / 100;
-    return ret;
-}
-
 /* return a monotonic time counter, in Win32 ticks */
 static inline ULONGLONG monotonic_counter(void)
 {
@@ -131,13 +91,13 @@ static inline ULONGLONG monotonic_counter(void)
 #endif
     return mach_absolute_time() * timebase.numer / timebase.denom / 100;
 #elif defined(HAVE_CLOCK_GETTIME)
-    ULONGLONG ticks;
+    struct timespec ts;
 #if 0
-    if (!do_clock_gettime( CLOCK_MONOTONIC_RAW, &ticks ))
-        return ticks;
+    if (!clock_gettime( CLOCK_MONOTONIC_RAW, &ts ))
+        return ts.tv_sec * (ULONGLONG)TICKSPERSEC + ts.tv_nsec / 100;
 #endif
-    if (!do_clock_gettime( CLOCK_MONOTONIC, &ticks ))
-        return ticks;
+    if (!clock_gettime( CLOCK_MONOTONIC, &ts ))
+        return ts.tv_sec * (ULONGLONG)TICKSPERSEC + ts.tv_nsec / 100;
 #endif
     gettimeofday( &now, 0 );
     return ticks_from_time_t( now.tv_sec ) + now.tv_usec * 10 - server_start_time;
@@ -1644,7 +1604,7 @@ NTSTATUS WINAPI NtDelayExecution( BOOLEAN alertable, const LARGE_INTEGER *timeou
         }
 
         /* Note that we yield after establishing the desired timeout */
-        usleep(0);
+        NtYieldExecution();
         if (!when) return STATUS_SUCCESS;
 
         for (;;)
@@ -1979,6 +1939,7 @@ NTSTATUS WINAPI NtRemoveIoCompletion( HANDLE handle, ULONG_PTR *key, ULONG_PTR *
                                       IO_STATUS_BLOCK *io, LARGE_INTEGER *timeout )
 {
     NTSTATUS status;
+    int waited = 0;
 
     TRACE( "(%p, %p, %p, %p, %p)\n", handle, key, value, io, timeout );
 
@@ -1987,6 +1948,7 @@ NTSTATUS WINAPI NtRemoveIoCompletion( HANDLE handle, ULONG_PTR *key, ULONG_PTR *
         SERVER_START_REQ( remove_completion )
         {
             req->handle = wine_server_obj_handle( handle );
+            req->waited = waited;
             if (!(status = wine_server_call( req )))
             {
                 *key            = reply->ckey;
@@ -1999,6 +1961,7 @@ NTSTATUS WINAPI NtRemoveIoCompletion( HANDLE handle, ULONG_PTR *key, ULONG_PTR *
         if (status != STATUS_PENDING) return status;
         status = NtWaitForSingleObject( handle, FALSE, timeout );
         if (status != WAIT_OBJECT_0) return status;
+        waited = 1;
     }
 }
 
@@ -2010,6 +1973,7 @@ NTSTATUS WINAPI NtRemoveIoCompletionEx( HANDLE handle, FILE_IO_COMPLETION_INFORM
                                         ULONG *written, LARGE_INTEGER *timeout, BOOLEAN alertable )
 {
     NTSTATUS status;
+    int waited = 0;
     ULONG i = 0;
 
     TRACE( "%p %p %u %p %p %u\n", handle, info, count, written, timeout, alertable );
@@ -2021,6 +1985,7 @@ NTSTATUS WINAPI NtRemoveIoCompletionEx( HANDLE handle, FILE_IO_COMPLETION_INFORM
             SERVER_START_REQ( remove_completion )
             {
                 req->handle = wine_server_obj_handle( handle );
+                req->waited = waited;
                 if (!(status = wine_server_call( req )))
                 {
                     info[i].CompletionKey             = reply->ckey;
@@ -2040,6 +2005,7 @@ NTSTATUS WINAPI NtRemoveIoCompletionEx( HANDLE handle, FILE_IO_COMPLETION_INFORM
         }
         status = NtWaitForSingleObject( handle, alertable, timeout );
         if (status != WAIT_OBJECT_0) break;
+        waited = 1;
     }
     *written = i ? i : 1;
     return status;
@@ -2631,6 +2597,7 @@ NTSTATUS WINAPI NtWaitForAlertByThreadId( const void *address, const LARGE_INTEG
 NTSTATUS WINAPI NtWaitForAlertByThreadId( const void *address, const LARGE_INTEGER *timeout )
 {
     union tid_alert_entry *entry = get_tid_alert_entry( NtCurrentTeb()->ClientId.UniqueThread );
+    BOOL waited = FALSE;
     NTSTATUS status;
 
     TRACE( "%p %s\n", address, debugstr_timeout( timeout ) );
@@ -2666,8 +2633,15 @@ NTSTATUS WINAPI NtWaitForAlertByThreadId( const void *address, const LARGE_INTEG
             else
                 ret = futex_wait( futex, 0, NULL );
 
+            if (!timeout || timeout->QuadPart)
+                waited = TRUE;
+
             if (ret == -1 && errno == ETIMEDOUT) return STATUS_TIMEOUT;
         }
+
+        if (alert_simulate_sched_quantum && waited)
+            usleep(0);
+
         return STATUS_ALERTED;
     }
 #endif
@@ -2678,29 +2652,3 @@ NTSTATUS WINAPI NtWaitForAlertByThreadId( const void *address, const LARGE_INTEG
 }
 
 #endif
-
-/* Notify direct completion of async and close the wait handle if it is no longer needed.
- * This function is a no-op (returns status as-is) if the supplied handle is NULL.
- */
-void set_async_direct_result( HANDLE *optional_handle, NTSTATUS status, ULONG_PTR information )
-{
-    NTSTATUS ret;
-
-    if (!*optional_handle) return;
-
-    SERVER_START_REQ( set_async_direct_result )
-    {
-        req->handle      = wine_server_obj_handle( *optional_handle );
-        req->status      = status;
-        req->information = information;
-        ret = wine_server_call( req );
-        if (ret == STATUS_SUCCESS)
-            *optional_handle = wine_server_ptr_handle( reply->handle );
-    }
-    SERVER_END_REQ;
-
-    if (ret != STATUS_SUCCESS)
-        ERR( "cannot report I/O result back to server: %08x\n", ret );
-
-    return;
-}

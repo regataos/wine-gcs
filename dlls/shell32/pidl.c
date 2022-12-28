@@ -37,6 +37,7 @@
 #include "shlguid.h"
 #include "winerror.h"
 #include "winnls.h"
+#include "undocshell.h"
 #include "shell32_main.h"
 #include "shlwapi.h"
 

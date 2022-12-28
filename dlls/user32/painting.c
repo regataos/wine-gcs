@@ -105,7 +105,6 @@ static void update_visible_region( struct dce *dce )
     HRGN vis_rgn = 0;
     HWND top_win = 0;
     DWORD flags = dce->flags;
-    DWORD paint_flags = 0;
     size_t size = 256;
     RECT win_rect, top_rect;
     WND *win;
@@ -142,7 +141,6 @@ static void update_visible_region( struct dce *dce )
                 top_rect.top    = reply->top_rect.top;
                 top_rect.right  = reply->top_rect.right;
                 top_rect.bottom = reply->top_rect.bottom;
-                paint_flags     = reply->paint_flags;
             }
             else size = reply->total_size;
         }
@@ -157,16 +155,12 @@ static void update_visible_region( struct dce *dce )
     if (dce->clip_rgn) CombineRgn( vis_rgn, vis_rgn, dce->clip_rgn,
                                    (flags & DCX_INTERSECTRGN) ? RGN_AND : RGN_DIFF );
 
-    /* don't use a surface to paint the client area of OpenGL windows */
-    if (!(paint_flags & SET_WINPOS_PIXEL_FORMAT) || (flags & DCX_WINDOW))
+    win = WIN_GetPtr( top_win );
+    if (win && win != WND_DESKTOP && win != WND_OTHER_PROCESS)
     {
-        win = WIN_GetPtr( top_win );
-        if (win && win != WND_DESKTOP && win != WND_OTHER_PROCESS)
-        {
-            surface = win->surface;
-            if (surface) window_surface_add_ref( surface );
-            WIN_ReleasePtr( win );
-        }
+        surface = win->surface;
+        if (surface) window_surface_add_ref( surface );
+        WIN_ReleasePtr( win );
     }
 
     if (!surface) SetRectEmpty( &top_rect );
@@ -639,7 +633,6 @@ static HRGN send_ncpaint( HWND hwnd, HWND *child, UINT *flags )
 {
     HRGN whole_rgn = get_update_region( hwnd, flags, child );
     HRGN client_rgn = 0;
-    DWORD style;
 
     if (child) hwnd = *child;
 
@@ -679,17 +672,7 @@ static HRGN send_ncpaint( HWND hwnd, HWND *child, UINT *flags )
 
         if (whole_rgn) /* NOTE: WM_NCPAINT allows wParam to be 1 */
         {
-            if (*flags & UPDATE_NONCLIENT)
-            {
-                /* Mark standard scroll bars as not painted before sending WM_NCPAINT */
-                style = GetWindowLongW( hwnd, GWL_STYLE );
-                if (style & WS_HSCROLL)
-                    SCROLL_SetStandardScrollPainted( hwnd, SB_HORZ, FALSE );
-                if (style & WS_VSCROLL)
-                    SCROLL_SetStandardScrollPainted( hwnd, SB_VERT, FALSE );
-
-                SendMessageW( hwnd, WM_NCPAINT, (WPARAM)whole_rgn, 0 );
-            }
+            if (*flags & UPDATE_NONCLIENT) SendNotifyMessageW( hwnd, WM_NCPAINT, (WPARAM)whole_rgn, 0 );
             if (whole_rgn > (HRGN)1) DeleteObject( whole_rgn );
         }
         SetThreadDpiAwarenessContext( context );
@@ -1160,6 +1143,9 @@ HDC WINAPI GetWindowDC( HWND hwnd )
  */
 INT WINAPI ReleaseDC( HWND hwnd, HDC hdc )
 {
+    if (hwnd && !WIN_IsCurrentProcess( hwnd ))
+        USER_Driver->pMsgWaitForMultipleObjectsEx( 0, NULL, 0, 0, 0 );
+
     return release_dc( hwnd, hdc, FALSE );
 }
 
@@ -1223,6 +1209,22 @@ BOOL WINAPI LockWindowUpdate( HWND hwnd )
 }
 
 
+static void order_rect( RECT *rect )
+{
+    if (rect->left > rect->right)
+    {
+        int tmp = rect->left;
+        rect->left = rect->right;
+        rect->right = tmp;
+    }
+    if (rect->top > rect->bottom)
+    {
+        int tmp = rect->top;
+        rect->top = rect->bottom;
+        rect->bottom = tmp;
+    }
+}
+
 /***********************************************************************
  *		RedrawWindow (USER32.@)
  */
@@ -1252,8 +1254,11 @@ BOOL WINAPI RedrawWindow( HWND hwnd, const RECT *rect, HRGN hrgn, UINT flags )
 
     if (rect && !hrgn)
     {
-        if (IsRectEmpty( rect )) rect = &empty;
-        ret = redraw_window_rects( hwnd, flags, rect, 1 );
+        RECT ordered = *rect;
+
+        order_rect( &ordered );
+        if (IsRectEmpty( &ordered )) ordered = empty;
+        ret = redraw_window_rects( hwnd, flags, &ordered, 1 );
     }
     else if (!hrgn)
     {

@@ -39,14 +39,14 @@ static void ME_SetCursorToEnd(ME_TextEditor *editor, ME_Cursor *cursor, BOOL fin
 }
 
 
-int ME_GetSelectionOfs(ME_TextEditor *editor, LONG *from, LONG *to)
+int ME_GetSelectionOfs(ME_TextEditor *editor, int *from, int *to)
 {
   *from = ME_GetCursorOfs(&editor->pCursors[0]);
   *to =   ME_GetCursorOfs(&editor->pCursors[1]);
 
   if (*from > *to)
   {
-    LONG tmp = *from;
+    int tmp = *from;
     *from = *to;
     *to = tmp;
     return 1;
@@ -160,7 +160,7 @@ int set_selection_cursors(ME_TextEditor *editor, int from, int to)
     /* deselected and caret moved to end of the current selection */
     if (from < 0)
     {
-      LONG start, end;
+      int start, end;
       ME_GetSelectionOfs(editor, &start, &end);
       if (start != end)
       {
@@ -1353,7 +1353,7 @@ BOOL ME_IsSelection(ME_TextEditor *editor)
 
 void ME_DeleteSelection(ME_TextEditor *editor)
 {
-  LONG from, to;
+  int from, to;
   int nStartCursor = ME_GetSelectionOfs(editor, &from, &to);
   int nEndCursor = nStartCursor ^ 1;
   ME_DeleteTextAtCursor(editor, nStartCursor, to - from);

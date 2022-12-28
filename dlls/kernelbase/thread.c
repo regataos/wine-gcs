@@ -512,7 +512,7 @@ BOOL WINAPI DECLSPEC_HOTPATCH SetThreadGroupAffinity( HANDLE thread, const GROUP
  */
 DWORD WINAPI DECLSPEC_HOTPATCH SetThreadIdealProcessor( HANDLE thread, DWORD proc )
 {
-    FIXME( "(%p %lu): stub\n", thread, proc );
+    FIXME( "(%p %u): stub\n", thread, proc );
     if (proc > MAXIMUM_PROCESSORS)
     {
         SetLastError( ERROR_INVALID_PARAMETER );
@@ -616,6 +616,25 @@ LANGID WINAPI DECLSPEC_HOTPATCH SetThreadUILanguage( LANGID langid )
 
     if (!langid) langid = GetThreadUILanguage();
     return langid;
+}
+
+
+/**********************************************************************
+ *            SetThreadInformation   (kernelbase.@)
+ */
+BOOL WINAPI DECLSPEC_HOTPATCH SetThreadInformation( HANDLE thread, THREAD_INFORMATION_CLASS info_class,
+        VOID *info, DWORD size )
+{
+    switch (info_class)
+    {
+        case ThreadMemoryPriority:
+            return set_ntstatus( NtSetInformationThread( thread, ThreadPagePriority, info, size ));
+        case ThreadPowerThrottling:
+            return set_ntstatus( NtSetInformationThread( thread, ThreadPowerThrottlingState, info, size ));
+        default:
+            FIXME("Unsupported class %u.\n", info_class);
+            return FALSE;
+    }
 }
 
 

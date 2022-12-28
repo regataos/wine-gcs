@@ -1,7 +1,6 @@
-EXTRADEFS = -DWINE_NO_LONG_TYPES
 MODULE    = mfplat.dll
 IMPORTLIB = mfplat
-IMPORTS   = advapi32 ole32 mfuuid propsys rtworkq kernelbase wininet
+IMPORTS   = advapi32 ole32 mfuuid propsys rtworkq kernelbase
 DELAYIMPORTS = bcrypt
 
 EXTRADLLFLAGS = -Wb,--prefer-native

@@ -50,7 +50,7 @@ static decl_spec_t *make_decl_spec(type_t *type, decl_spec_t *left, decl_spec_t 
         enum storage_class stgclass, enum type_qualifier qual, enum function_specifier func_specifier);
 static attr_t *make_attr(enum attr_type type);
 static attr_t *make_attrv(enum attr_type type, unsigned int val);
-static attr_t *make_custom_attr(struct uuid *id, expr_t *pval);
+static attr_t *make_custom_attr(uuid_t *id, expr_t *pval);
 static expr_list_t *append_expr(expr_list_t *list, expr_t *expr);
 static var_t *declare_var(attr_list_t *attrs, decl_spec_t *decl_spec, declarator_t *decl, int top);
 static var_list_t *set_var_types(attr_list_t *attrs, decl_spec_t *decl_spec, declarator_list_t *decls);
@@ -70,8 +70,8 @@ static struct namespace *find_namespace_or_error(struct namespace *namespace, co
 
 static var_t *reg_const(var_t *var);
 
-static void push_namespace(const char *name);
-static void pop_namespace(const char *name);
+static void push_namespaces(str_list_t *names);
+static void pop_namespaces(str_list_t *names);
 static void push_parameters_namespace(const char *name);
 static void pop_parameters_namespace(const char *name);
 
@@ -120,9 +120,6 @@ static statement_list_t *parameterized_type_stmts = NULL;
 static typelib_t *current_typelib;
 
 %}
-
-%define api.prefix {parser_}
-
 %union {
 	attr_t *attr;
 	attr_list_t *attr_list;
@@ -141,7 +138,7 @@ static typelib_t *current_typelib;
 	typeref_t *typeref;
 	typeref_list_t *typeref_list;
 	char *str;
-	struct uuid *uuid;
+	uuid_t *uuid;
 	unsigned int num;
 	double dbl;
 	typelib_t *typelib;
@@ -293,7 +290,7 @@ static typelib_t *current_typelib;
 %type <type> dispinterfaceref
 %type <type> dispinterface dispinterfacedef
 %type <type> module moduledef
-%type <str> namespacedef
+%type <str_list> namespacedef
 %type <type> base_type int_std
 %type <type> enumdef structdef uniondef typedecl
 %type <type> type unqualified_type qualified_type
@@ -385,8 +382,8 @@ imp_decl_statements:				{ $$ = NULL; }
 imp_decl_block: tDECLARE '{' imp_decl_statements '}' { $$ = $3; }
 
 gbl_statements:					{ $$ = NULL; }
-	| gbl_statements namespacedef '{' { push_namespace($2); } gbl_statements '}'
-						{ pop_namespace($2); $$ = append_statements($1, $5); }
+	| gbl_statements namespacedef '{' { push_namespaces($2); } gbl_statements '}'
+						{ pop_namespaces($2); $$ = append_statements($1, $5); }
 	| gbl_statements interface ';'		{ $$ = append_statement($1, make_statement_reference($2)); }
 	| gbl_statements dispinterface ';'	{ $$ = append_statement($1, make_statement_reference($2)); }
 	| gbl_statements interfacedef		{ $$ = append_statement($1, make_statement_type_decl($2)); }
@@ -412,8 +409,8 @@ gbl_statements:					{ $$ = NULL; }
 imp_statements:					{ $$ = NULL; }
 	| imp_statements interface ';'		{ $$ = append_statement($1, make_statement_reference($2)); }
 	| imp_statements dispinterface ';'	{ $$ = append_statement($1, make_statement_reference($2)); }
-	| imp_statements namespacedef '{' { push_namespace($2); } imp_statements '}'
-						{ pop_namespace($2); $$ = append_statements($1, $5); }
+	| imp_statements namespacedef '{' { push_namespaces($2); } imp_statements '}'
+						{ pop_namespaces($2); $$ = append_statements($1, $5); }
 	| imp_statements interfacedef		{ $$ = append_statement($1, make_statement_type_decl($2)); }
 	| imp_statements delegatedef		{ $$ = append_statement($1, make_statement_type_decl($2)); }
 	| imp_statements coclass ';'		{ $$ = $1; reg_type($2, $2->name, current_namespace, 0); }
@@ -477,7 +474,7 @@ typedecl:
 	| structdef
 	| tSTRUCT aIDENTIFIER                   { $$ = type_new_struct($2, current_namespace, FALSE, NULL); }
 	| uniondef
-	| tUNION aIDENTIFIER                    { $$ = type_new_nonencapsulated_union($2, FALSE, NULL); }
+	| tUNION aIDENTIFIER                    { $$ = type_new_nonencapsulated_union($2, current_namespace, FALSE, NULL); }
 	| attributes enumdef                    { $$ = $2; $$->attrs = check_enum_attrs($1); }
 	| attributes structdef                  { $$ = $2; $$->attrs = check_struct_attrs($1); }
 	| attributes uniondef                   { $$ = $2; $$->attrs = check_union_attrs($1); }
@@ -485,7 +482,8 @@ typedecl:
 
 cppquote: tCPPQUOTE '(' aSTRING ')'		{ $$ = $3; }
 	;
-import_start: tIMPORT aSTRING ';'		{ $$ = xmalloc(sizeof(struct _import_t));
+import_start: tIMPORT aSTRING ';'		{ assert(yychar == YYEMPTY);
+						  $$ = xmalloc(sizeof(struct _import_t));
 						  $$->name = $2;
 						  $$->import_performed = do_import($2);
 						  if (!$$->import_performed) yychar = aEOF;
@@ -521,7 +519,7 @@ arg_list: arg					{ check_arg_attrs($1); $$ = append_var( NULL, $1 ); }
 	;
 
 args:	  arg_list
-	| arg_list ',' ELLIPSIS			{ $$ = append_var( $1, make_var(xstrdup("...")) ); }
+	| arg_list ',' ELLIPSIS			{ $$ = append_var( $1, make_var(strdup("...")) ); }
 	;
 
 /* split into two rules to get bison to resolve a tVOID conflict */
@@ -992,7 +990,8 @@ apicontract_def: attributes apicontract '{' '}' semicolon_opt
 						{ $$ = type_apicontract_define($2, $1); }
 	;
 
-namespacedef: tNAMESPACE aIDENTIFIER		{ $$ = $2; }
+namespacedef: tNAMESPACE aIDENTIFIER		{ $$ = append_str( NULL, $2 ); }
+	| namespacedef '.' aIDENTIFIER		{ $$ = append_str( $1, $3 ); }
 	;
 
 class_interfaces:				{ $$ = NULL; }
@@ -1085,6 +1084,7 @@ interfacedef: attributes interface		{ if ($2->type_type == TYPE_PARAMETERIZED_TY
 interfaceref:
 	  tINTERFACE typename			{ $$ = get_type(TYPE_INTERFACE, $2, current_namespace, 0); }
 	| tINTERFACE namespace_pfx typename	{ $$ = get_type(TYPE_INTERFACE, $3, $2, 0); }
+	| tINTERFACE parameterized_type		{ if (type_get_type(($$ = $2)) != TYPE_INTERFACE) error_loc("%s is not an interface\n", $$->name); }
 	;
 
 dispinterfaceref:
@@ -1276,7 +1276,7 @@ unqualified_type:
 	| structdef				{ $$ = $1; }
 	| tSTRUCT aIDENTIFIER			{ $$ = type_new_struct($2, current_namespace, FALSE, NULL); }
 	| uniondef				{ $$ = $1; }
-	| tUNION aIDENTIFIER			{ $$ = type_new_nonencapsulated_union($2, FALSE, NULL); }
+	| tUNION aIDENTIFIER			{ $$ = type_new_nonencapsulated_union($2, current_namespace, FALSE, NULL); }
 	| tSAFEARRAY '(' type ')'		{ $$ = make_safearray($3); }
 	| aKNOWNTYPE				{ $$ = find_type_or_error(current_namespace, $1); }
 	;
@@ -1295,7 +1295,7 @@ typedef: m_attributes tTYPEDEF m_attributes decl_spec declarator_list
 	;
 
 uniondef: tUNION m_typename '{' ne_union_fields '}'
-						{ $$ = type_new_nonencapsulated_union($2, TRUE, $4); }
+						{ $$ = type_new_nonencapsulated_union($2, current_namespace, TRUE, $4); }
 	| tUNION m_typename
 	  tSWITCH '(' s_field ')'
 	  m_ident '{' cases '}'			{ $$ = type_new_encapsulated_union($2, $5, $7, $9); }
@@ -1525,7 +1525,7 @@ attr_t *make_attrp(enum attr_type type, void *val)
   return a;
 }
 
-static attr_t *make_custom_attr(struct uuid *id, expr_t *pval)
+static attr_t *make_custom_attr(uuid_t *id, expr_t *pval)
 {
   attr_t *a = xmalloc(sizeof(attr_t));
   attr_custdata_t *cstdata = xmalloc(sizeof(attr_custdata_t));
@@ -2041,6 +2041,20 @@ static void pop_namespace(const char *name)
   current_namespace = current_namespace->parent;
 }
 
+static void push_namespaces(str_list_t *names)
+{
+  const struct str_list_entry_t *name;
+  LIST_FOR_EACH_ENTRY(name, names, const struct str_list_entry_t, entry)
+    push_namespace(name->str);
+}
+
+static void pop_namespaces(str_list_t *names)
+{
+  const struct str_list_entry_t *name;
+  LIST_FOR_EACH_ENTRY_REV(name, names, const struct str_list_entry_t, entry)
+    pop_namespace(name->str);
+}
+
 static void push_parameters_namespace(const char *name)
 {
     struct namespace *namespace;
@@ -2311,7 +2325,7 @@ struct allowed_attr
 struct allowed_attr allowed_attr[] =
 {
     /* attr                        { D ACF M   I Fn ARG T En Enm St Un Fi L  DI M  C AC  R  <display name> } */
-    /* ATTR_ACTIVATABLE */         { 0, 0, 0,  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, "activatable" },
+    /* ATTR_ACTIVATABLE */         { 0, 0, 1,  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, "activatable" },
     /* ATTR_AGGREGATABLE */        { 0, 0, 0,  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, "aggregatable" },
     /* ATTR_ALLOCATE */            { 0, 1, 0,  0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, "allocate" },
     /* ATTR_ANNOTATION */          { 0, 0, 0,  0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, "annotation" },
@@ -3107,9 +3121,9 @@ static void check_async_uuid(type_t *iface)
         if (args) LIST_FOR_EACH_ENTRY(arg, args, var_t, entry)
         {
             if (is_attr(arg->attrs, ATTR_IN) || !is_attr(arg->attrs, ATTR_OUT))
-                begin_args = append_var(begin_args, copy_var(arg, xstrdup(arg->name), arg_in_attrs));
+                begin_args = append_var(begin_args, copy_var(arg, strdup(arg->name), arg_in_attrs));
             if (is_attr(arg->attrs, ATTR_OUT))
-                finish_args = append_var(finish_args, copy_var(arg, xstrdup(arg->name), arg_out_attrs));
+                finish_args = append_var(finish_args, copy_var(arg, strdup(arg->name), arg_out_attrs));
         }
 
         begin_func = copy_var(func, strmake("Begin_%s", func->name), NULL);

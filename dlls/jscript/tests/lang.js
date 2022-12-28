@@ -310,6 +310,9 @@ argumentsTest();
     ok(callAsExprTest.arguments === null, "callAsExprTest.arguments = " + callAsExprTest.arguments);
 })(1,2);
 
+tmp = ((function() { var f = function() {return this}; return (function() { return f(); }); })())();
+ok(tmp === this, "detached scope function call this != global this");
+
 tmp = (function() {1;})();
 ok(tmp === undefined, "tmp = " + tmp);
 tmp = eval("1;");
@@ -1906,6 +1909,8 @@ ok(getVT(true && nullDisp) === "VT_DISPATCH",
    "getVT(0 && nullDisp) = " + getVT(true && nullDisp));
 ok(!nullDisp === true, "!nullDisp = " + !nullDisp);
 ok(String(nullDisp) === "null", "String(nullDisp) = " + String(nullDisp));
+ok(+nullDisp === 0, "+nullDisp !== 0");
+ok(''+nullDisp === "null", "''+nullDisp !== null");
 ok(nullDisp != new Object(), "nullDisp == new Object()");
 ok(new Object() != nullDisp, "new Object() == nullDisp");
 ok((typeof Object(nullDisp)) === "object", "typeof Object(nullDisp) !== 'object'");

@@ -1366,6 +1366,7 @@ static int cmp_link_name( const void *e1, const void *e2 )
     return strcmp( odp1->link_name, odp2->link_name );
 }
 
+
 /* output the functions for system calls */
 void output_syscalls( DLLSPEC *spec )
 {

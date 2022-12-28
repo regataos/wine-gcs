@@ -93,7 +93,7 @@ static ULONG WINAPI SymDocumentWriter_AddRef(ISymUnmanagedDocumentWriter *iface)
     SymDocumentWriter *This = impl_from_ISymUnmanagedDocumentWriter(iface);
     ULONG ref = InterlockedIncrement(&This->ref);
 
-    TRACE("(%p) refcount=%lu\n", iface, ref);
+    TRACE("(%p) refcount=%u\n", iface, ref);
 
     return ref;
 }
@@ -103,7 +103,7 @@ static ULONG WINAPI SymDocumentWriter_Release(ISymUnmanagedDocumentWriter *iface
     SymDocumentWriter *This = impl_from_ISymUnmanagedDocumentWriter(iface);
     ULONG ref = InterlockedDecrement(&This->ref);
 
-    TRACE("(%p) refcount=%lu\n", iface, ref);
+    TRACE("(%p) refcount=%u\n", iface, ref);
 
     if (ref == 0)
     {
@@ -113,7 +113,7 @@ static ULONG WINAPI SymDocumentWriter_Release(ISymUnmanagedDocumentWriter *iface
     return ref;
 }
 
-static HRESULT WINAPI SymDocumentWriter_SetSource(ISymUnmanagedDocumentWriter *iface, ULONG32 sourceSize,
+static HRESULT WINAPI SymDocumentWriter_SetSource(ISymUnmanagedDocumentWriter *iface, ULONG sourceSize,
     BYTE source[])
 {
     FIXME("(%p,%u,%p)\n", iface, sourceSize, source);
@@ -171,7 +171,7 @@ static ULONG WINAPI SymWriter_AddRef(ISymUnmanagedWriter5 *iface)
     SymWriter *This = impl_from_ISymUnmanagedWriter5(iface);
     ULONG ref = InterlockedIncrement(&This->ref);
 
-    TRACE("(%p) refcount=%lu\n", iface, ref);
+    TRACE("(%p) refcount=%u\n", iface, ref);
 
     return ref;
 }
@@ -181,7 +181,7 @@ static ULONG WINAPI SymWriter_Release(ISymUnmanagedWriter5 *iface)
     SymWriter *This = impl_from_ISymUnmanagedWriter5(iface);
     ULONG ref = InterlockedDecrement(&This->ref);
 
-    TRACE("(%p) refcount=%lu\n", iface, ref);
+    TRACE("(%p) refcount=%u\n", iface, ref);
 
     if (ref == 0)
     {
@@ -248,7 +248,7 @@ static HRESULT WINAPI SymWriter_CloseScope(ISymUnmanagedWriter5 *iface, ULONG32 
     return S_OK;
 }
 
-static HRESULT WINAPI SymWriter_SetScopeRange(ISymUnmanagedWriter5 *iface, ULONG32 scopeID, ULONG32 startOffset,
+static HRESULT WINAPI SymWriter_SetScopeRange(ISymUnmanagedWriter5 *iface, ULONG32 scopeID, ULONG32 startOffset, 
     ULONG32 endOffset)
 {
     FIXME("(%p,%u,%u,%u)\n", iface, scopeID, startOffset, endOffset);
@@ -279,7 +279,7 @@ static HRESULT WINAPI SymWriter_DefineField(ISymUnmanagedWriter5 *iface, mdTypeD
     return S_OK;
 }
 
-static HRESULT WINAPI SymWriter_DefineGlobalVariable(ISymUnmanagedWriter5 *iface, const WCHAR *name,
+static HRESULT WINAPI SymWriter_DefineGlobalVariable(ISymUnmanagedWriter5 *iface, const WCHAR *name, 
     ULONG32 attributes, ULONG32 cSig, unsigned char signature[], ULONG32 addrKind,
     ULONG32 addr1, ULONG32 addr2, ULONG32 addr3)
 {
@@ -325,7 +325,7 @@ static HRESULT WINAPI SymWriter_SetMethodSourceRange(ISymUnmanagedWriter5 *iface
     return S_OK;
 }
 
-static HRESULT WINAPI SymWriter_Initialize(ISymUnmanagedWriter5 *iface, IUnknown *emitter, const WCHAR *filename,
+static HRESULT WINAPI SymWriter_Initialize(ISymUnmanagedWriter5 *iface, IUnknown *emitter, const WCHAR *filename, 
     IStream *pIStream, BOOL fFullBuild)
 {
     SymWriter *This = impl_from_ISymUnmanagedWriter5(iface);
@@ -351,7 +351,7 @@ static HRESULT WINAPI SymWriter_GetDebugInfo(ISymUnmanagedWriter5 *iface, IMAGE_
     DWORD name_length, data_size;
     OMFSignatureRSDS *rsds_data = (OMFSignatureRSDS*)data;
 
-    TRACE("(%p,%p,%lu,%p,%p)\n", iface, pIDD, cData, pcData, data);
+    TRACE("(%p,%p,%u,%p,%p)\n", iface, pIDD, cData, pcData, data);
 
     EnterCriticalSection(&This->lock);
 
@@ -457,7 +457,7 @@ static HRESULT WINAPI SymWriter_Commit(ISymUnmanagedWriter5 *iface)
 static HRESULT WINAPI SymWriter_GetDebugInfoWithPadding(ISymUnmanagedWriter5 *iface, IMAGE_DEBUG_DIRECTORY *pIDD, DWORD cbData,
     DWORD* pcData, BYTE data[])
 {
-    FIXME("(%p,%p,%lu,%p,%p)\n", iface, pIDD, cbData, pcData, data);
+    FIXME("(%p,%p,%u,%p,%p)\n", iface, pIDD, cbData, pcData, data);
     return E_NOTIMPL;
 }
 
@@ -558,7 +558,7 @@ static HRESULT WINAPI SymWriter_CloseMod(IPdbWriter *iface)
 
 static HRESULT WINAPI SymWriter_GetPath(IPdbWriter *iface, DWORD ccData, DWORD *pccData, WCHAR *path)
 {
-    FIXME("(%p,%lu,%p,%p)\n", iface, ccData, pccData, path);
+    FIXME("(%p,%u,%p,%p)\n", iface, ccData, pccData, path);
     return E_NOTIMPL;
 }
 
@@ -615,3 +615,4 @@ HRESULT SymWriter_CreateInstance(REFIID iid, void **ppv)
 
     return hr;
 }
+

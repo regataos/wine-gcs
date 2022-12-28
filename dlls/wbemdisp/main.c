@@ -28,6 +28,7 @@
 #include "rpcproxy.h"
 
 #include "wine/debug.h"
+#include "wine/heap.h"
 #include "wbemdisp_private.h"
 #include "wbemdisp_classes.h"
 

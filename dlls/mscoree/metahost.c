@@ -130,10 +130,12 @@ MonoThread* (CDECL *mono_thread_attach)(MonoDomain *domain);
 void (CDECL *mono_thread_manage)(void);
 void (CDECL *mono_trace_set_print_handler)(MonoPrintCallback callback);
 void (CDECL *mono_trace_set_printerr_handler)(MonoPrintCallback callback);
+static void (CDECL *wine_mono_install_assembly_preload_hook)(WineMonoAssemblyPreLoadFunc func, void *user_data);
 
 static BOOL find_mono_dll(LPCWSTR path, LPWSTR dll_path);
 
 static MonoAssembly* CDECL mono_assembly_preload_hook_fn(MonoAssemblyName *aname, char **assemblies_path, void *user_data);
+static MonoAssembly* CDECL wine_mono_assembly_preload_hook_fn(MonoAssemblyName *aname, char **assemblies_path, int *search_path, void *user_data);
 
 static void CDECL mono_shutdown_callback_fn(MonoProfiler *prof);
 
@@ -249,6 +251,7 @@ static HRESULT load_mono(LPCWSTR mono_path)
         LOAD_OPT_MONO_FUNCTION(mono_set_crash_chaining, set_crash_chaining_dummy);
         LOAD_OPT_MONO_FUNCTION(mono_trace_set_print_handler, set_print_handler_dummy);
         LOAD_OPT_MONO_FUNCTION(mono_trace_set_printerr_handler, set_print_handler_dummy);
+        LOAD_OPT_MONO_FUNCTION(wine_mono_install_assembly_preload_hook, NULL);
 
 #undef LOAD_OPT_MONO_FUNCTION
 
@@ -279,7 +282,10 @@ static HRESULT load_mono(LPCWSTR mono_path)
 
         mono_config_parse(NULL);
 
-        mono_install_assembly_preload_hook(mono_assembly_preload_hook_fn, NULL);
+        if (wine_mono_install_assembly_preload_hook)
+            wine_mono_install_assembly_preload_hook(wine_mono_assembly_preload_hook_fn, NULL);
+        else
+            mono_install_assembly_preload_hook(mono_assembly_preload_hook_fn, NULL);
 
         aot_size = GetEnvironmentVariableA("WINE_MONO_AOT", aot_setting, sizeof(aot_setting));
 
@@ -1366,6 +1372,9 @@ HRESULT CLRMetaHostPolicy_CreateInstance(REFIID riid, void **ppobj)
  * WINE_MONO_OVERRIDES=*,Gac=n
  *  Never search the GAC for libraries.
  *
+ * WINE_MONO_OVERRIDES=*,PrivatePath=n
+ *  Never search the AppDomain search path for libraries.
+ *
  * WINE_MONO_OVERRIDES=Microsoft.Xna.Framework,Gac=n
  *  Never search the GAC for Microsoft.Xna.Framework
  *
@@ -1377,7 +1386,8 @@ HRESULT CLRMetaHostPolicy_CreateInstance(REFIID riid, void **ppobj)
 /* assembly search override flags */
 #define ASSEMBLY_SEARCH_GAC 1
 #define ASSEMBLY_SEARCH_UNDEFINED 2
-#define ASSEMBLY_SEARCH_DEFAULT ASSEMBLY_SEARCH_GAC
+#define ASSEMBLY_SEARCH_PRIVATEPATH 4
+#define ASSEMBLY_SEARCH_DEFAULT (ASSEMBLY_SEARCH_GAC|ASSEMBLY_SEARCH_PRIVATEPATH)
 
 typedef struct override_entry {
     char *name;
@@ -1424,6 +1434,14 @@ static void parse_override_entry(override_entry *entry, const char *string, int 
                         entry->flags |= ASSEMBLY_SEARCH_GAC;
                     else if (IS_OPTION_FALSE(*value))
                         entry->flags &= ~ASSEMBLY_SEARCH_GAC;
+                }
+                break;
+            case 11:
+                if (!_strnicmp(string, "privatepath", 11)) {
+                    if (IS_OPTION_TRUE(*value))
+                        entry->flags |= ASSEMBLY_SEARCH_PRIVATEPATH;
+                    else if (IS_OPTION_FALSE(*value))
+                        entry->flags &= ~ASSEMBLY_SEARCH_PRIVATEPATH;
                 }
                 break;
             default:
@@ -1687,7 +1705,51 @@ static MonoAssembly* mono_assembly_try_load(WCHAR *path)
     return result;
 }
 
+static BOOL compile_assembly(const char *source, const char *target, char *target_path, DWORD target_path_len)
+{
+    static const char *csc = "C:\\windows\\Microsoft.NET\\Framework\\v2.0.50727\\csc.exe";
+    char cmdline[2 * MAX_PATH + 74], tmp[MAX_PATH], tmpdir[MAX_PATH], source_path[MAX_PATH];
+    STARTUPINFOA si = {.cb = sizeof(STARTUPINFOA)};
+    PROCESS_INFORMATION pi;
+    HANDLE file;
+    DWORD size;
+    BOOL ret;
+    LUID id;
+
+    if (!PathFileExistsA(csc)) return FALSE;
+    if (!AllocateLocallyUniqueId(&id)) return FALSE;
+
+    GetTempPathA(MAX_PATH, tmp);
+    if (!GetTempFileNameA(tmp, "assembly", id.LowPart, tmpdir)) return FALSE;
+    if (!CreateDirectoryA(tmpdir, NULL) && GetLastError() != ERROR_ALREADY_EXISTS) return FALSE;
+
+    snprintf(source_path, MAX_PATH, "%s\\source.cs", tmpdir);
+    snprintf(target_path, target_path_len, "%s\\%s", tmpdir, target);
+
+    file = CreateFileA(source_path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, 0);
+    if (file == INVALID_HANDLE_VALUE) return FALSE;
+    ret = WriteFile(file, source, strlen(source), &size, NULL);
+    CloseHandle(file);
+    if (!ret) return FALSE;
+
+    snprintf(cmdline, ARRAY_SIZE(cmdline), "%s /t:library /out:\"%s\" \"%s\"", csc, target_path, source_path);
+    ret = CreateProcessA(csc, cmdline, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi);
+    if (!ret) return FALSE;
+
+    WaitForSingleObject(pi.hProcess, INFINITE);
+    CloseHandle(pi.hThread);
+    CloseHandle(pi.hProcess);
+
+    return PathFileExistsA(target_path);
+}
+
 static MonoAssembly* CDECL mono_assembly_preload_hook_fn(MonoAssemblyName *aname, char **assemblies_path, void *user_data)
+{
+    int dummy;
+    return wine_mono_assembly_preload_hook_fn(aname, assemblies_path, &dummy, user_data);
+}
+
+static MonoAssembly* CDECL wine_mono_assembly_preload_hook_fn(MonoAssemblyName *aname, char **assemblies_path, int *halt_search, void *user_data)
 {
     HRESULT hr;
     MonoAssembly *result=NULL;
@@ -1703,6 +1765,8 @@ static MonoAssembly* CDECL mono_assembly_preload_hook_fn(MonoAssemblyName *aname
     int i;
     static const WCHAR dotdllW[] = {'.','d','l','l',0};
     static const WCHAR dotexeW[] = {'.','e','x','e',0};
+
+    const char *sgi = getenv("SteamGameId");
 
     stringname = mono_stringify_assembly_name(aname);
     assemblyname = mono_assembly_name_get_name(aname);
@@ -1720,7 +1784,7 @@ static MonoAssembly* CDECL mono_assembly_preload_hook_fn(MonoAssemblyName *aname
     if (!stringname || !assemblyname) return NULL;
 
     search_flags = get_assembly_search_flags(aname);
-    if (private_path)
+    if (private_path && (search_flags & ASSEMBLY_SEARCH_PRIVATEPATH) != 0)
     {
         stringnameW_size = MultiByteToWideChar(CP_UTF8, 0, assemblyname, -1, NULL, 0);
         stringnameW = HeapAlloc(GetProcessHeap(), 0, stringnameW_size * sizeof(WCHAR));
@@ -1757,6 +1821,86 @@ static MonoAssembly* CDECL mono_assembly_preload_hook_fn(MonoAssemblyName *aname
             }
             HeapFree(GetProcessHeap(), 0, stringnameW);
             if (result) goto done;
+        }
+    }
+
+    if (!strcmp(assemblyname, "ManagedStarter"))
+    {
+        /* HACK for Mount & Blade II: Bannerlord
+         *
+         * The launcher executable uses an AssemblyResolve event handler
+         * to redirect loads of the "ManagedStarter" assembly to
+         * Bannerlord.exe. Due to Mono issue #11319, the runtime attempts
+         * to load ManagedStarter before executing the static constructor
+         * that adds this event handler. We work around this by doing the
+         * same thing in our own assembly load hook. */
+        if (sgi && !strcmp(sgi, "261550"))
+        {
+            FIXME("hack, using Bannerlord.exe\n");
+
+            result = mono_assembly_open("Bannerlord.exe", &stat);
+
+            if (result)
+                goto done;
+            else
+            {
+                ERR("Bannerlord.exe failed to load\n");
+            }
+        }
+    }
+
+    /* HACK for games which reference a type from a non-existing DLL.
+     * Native .NET framework normally gets away with it but Mono cannot
+     * due to some deeply rooted differences. */
+    if (sgi)
+    {
+        size_t i;
+
+        static const struct {
+            const char *assembly_name;
+            const char *module_name;
+            const char *appid;
+            const char *source;
+        } assembly_hacks[] = {
+            {
+                "CameraQuakeViewer",
+                "CameraQuakeViewer.dll",
+                "527280", /* Nights of Azure */
+                "namespace CQViewer { class CQMgr {} }"
+            },
+            {
+                "UnrealEdCSharp",
+                "UnrealEdCSharp.dll",
+                "317940", /* Karmaflow */
+                "namespace ContentBrowser { class IContentBrowserBackendInterface {} class Package {} } "
+            },
+            {
+                "UnrealEdCSharp",
+                "UnrealEdCSharp.dll",
+                "321360", /* Primal Carnage: Extinction */
+                "namespace ContentBrowser { class IContentBrowserBackendInterface {} class Package {} } "
+            },
+        };
+
+        for (i = 0; i < ARRAY_SIZE(assembly_hacks); ++i)
+        {
+            if (!strcmp(assemblyname, assembly_hacks[i].assembly_name) &&
+                    !strcmp(sgi, assembly_hacks[i].appid))
+            {
+                char assembly_path[MAX_PATH];
+
+                FIXME("HACK: Building %s\n", assembly_hacks[i].module_name);
+
+                if (compile_assembly(assembly_hacks[i].source, assembly_hacks[i].module_name, assembly_path, MAX_PATH))
+                    result = mono_assembly_open(assembly_path, &stat);
+                else
+                    ERR("HACK: Failed to build %s\n", assembly_hacks[i].assembly_name);
+
+                if (result)
+                    goto done;
+
+                ERR("HACK: Failed to load %s\n", assembly_hacks[i].assembly_name);
+            }
         }
     }
 
@@ -1797,6 +1941,12 @@ static MonoAssembly* CDECL mono_assembly_preload_hook_fn(MonoAssemblyName *aname
     }
     else
         TRACE("skipping Windows GAC search due to override setting\n");
+
+    if ((search_flags & ASSEMBLY_SEARCH_PRIVATEPATH) == 0)
+    {
+        TRACE("skipping AppDomain search path due to override setting\n");
+        *halt_search = 1;
+    }
 
 done:
     HeapFree(GetProcessHeap(), 0, cultureW);

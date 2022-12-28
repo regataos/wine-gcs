@@ -1716,7 +1716,7 @@ end:
 
 #define CHARS_IN_GUID 39
 
-HRESULT create_monodata(REFCLSID clsid, LPVOID *ppObj)
+HRESULT create_monodata(REFCLSID clsid, LPVOID *ppObj )
 {
     static const WCHAR wszFileSlash[] = L"file:///";
     static const WCHAR wszCLSIDSlash[] = L"CLSID\\";

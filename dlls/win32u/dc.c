@@ -63,25 +63,6 @@ static const struct gdi_obj_funcs dc_funcs =
 };
 
 
-static inline DC *get_dc_obj( HDC hdc )
-{
-    DWORD type;
-    DC *dc = get_any_obj_ptr( hdc, &type );
-    if (!dc) return NULL;
-
-    switch (type)
-    {
-    case NTGDI_OBJ_DC:
-    case NTGDI_OBJ_MEMDC:
-    case NTGDI_OBJ_ENHMETADC:
-        return dc;
-    default:
-        GDI_ReleaseObj( hdc );
-        SetLastError( ERROR_INVALID_HANDLE );
-        return NULL;
-    }
-}
-
 /* alloc DC_ATTR from a pool of memory accessible from client */
 static DC_ATTR *alloc_dc_attr(void)
 {
@@ -299,7 +280,7 @@ DC *get_dc_ptr( HDC hdc )
     }
     else if (dc->thread != GetCurrentThreadId())
     {
-        WARN( "dc %p belongs to thread %04x\n", hdc, dc->thread );
+        WARN( "dc %p belongs to thread %04x, refcount %d\n", hdc, dc->thread, dc->refcount );
         GDI_ReleaseObj( hdc );
         return NULL;
     }
@@ -1026,18 +1007,13 @@ BOOL WINAPI NtGdiGetTransform( HDC hdc, DWORD which, XFORM *xform )
  */
 BOOL WINAPI SetDCHook( HDC hdc, DCHOOKPROC hookProc, DWORD_PTR dwHookData )
 {
-    DC *dc = get_dc_obj( hdc );
+    DC *dc = get_dc_ptr( hdc );
 
     if (!dc) return FALSE;
-    if (dc->attr->disabled)
-    {
-        GDI_ReleaseObj( hdc );
-        return 0;
-    }
 
     dc->dwHookData = dwHookData;
     dc->hookProc = hookProc;
-    GDI_ReleaseObj( hdc );
+    release_dc_ptr( dc );
     return TRUE;
 }
 

@@ -153,19 +153,6 @@ int compare_striW( const WCHAR *str1, const WCHAR *str2 )
     }
 }
 
-int compare_striAW( const char *str1, const WCHAR *str2 )
-{
-    for (;;)
-    {
-        /* only the A-Z range is case-insensitive */
-        WCHAR ch1 = (*str1 >= 'a' && *str1 <= 'z') ? *str1 + 'A' - 'a' : (unsigned char)*str1;
-        WCHAR ch2 = (*str2 >= 'a' && *str2 <= 'z') ? *str2 + 'A' - 'a' : *str2;
-        if (!ch1 || ch1 != ch2) return ch1 - ch2;
-        str1++;
-        str2++;
-    }
-}
-
 /*
  *****************************************************************************
  * Function	: compare_name_id
@@ -178,21 +165,30 @@ int compare_striAW( const char *str1, const WCHAR *str2 )
 */
 int compare_name_id(const name_id_t *n1, const name_id_t *n2)
 {
-    if (n1->type != n2->type) return n1->type == name_ord ? 1 : -1;
-    if (n1->type == name_ord) return n1->name.i_name - n2->name.i_name;
+    switch (n1->type)
+    {
+    case name_ord:
+	if (n2->type == name_ord) return n1->name.i_name - n2->name.i_name;
+	return 1;
 
-    if (n1->name.s_name->type == str_char)
-    {
-        if (n2->name.s_name->type == str_char)
-            return compare_striA(n1->name.s_name->str.cstr, n2->name.s_name->str.cstr);
-        return compare_striAW(n1->name.s_name->str.cstr, n2->name.s_name->str.wstr);
+    case name_str:
+	if (n2->type == name_str)
+	{
+		if(n1->name.s_name->type == str_char
+		&& n2->name.s_name->type == str_char)
+		{
+			return compare_striA(n1->name.s_name->str.cstr, n2->name.s_name->str.cstr);
+		}
+		else
+		{
+			assert( n1->name.s_name->type == str_unicode );
+			assert( n2->name.s_name->type == str_unicode );
+			return compare_striW(n1->name.s_name->str.wstr, n2->name.s_name->str.wstr);
+		}
+	}
+        return -1;
     }
-    else
-    {
-        if (n2->name.s_name->type == str_char)
-            return -compare_striAW(n2->name.s_name->str.cstr, n1->name.s_name->str.wstr);
-        return compare_striW(n1->name.s_name->str.wstr, n2->name.s_name->str.wstr);
-    }
+    return 0; /* Keep the compiler happy */
 }
 
 #ifdef _WIN32
@@ -241,10 +237,11 @@ static void init_nls_info( struct nls_info *info, unsigned short *ptr )
 
 static const struct nls_info *get_nls_info( unsigned int codepage )
 {
+    struct stat st;
     unsigned short *data;
     char *path;
     unsigned int i;
-    size_t size;
+    int fd;
 
     for (i = 0; i < ARRAY_SIZE(nlsinfo) && nlsinfo[i].codepage; i++)
         if (nlsinfo[i].codepage == codepage) return &nlsinfo[i];
@@ -254,15 +251,18 @@ static const struct nls_info *get_nls_info( unsigned int codepage )
     for (i = 0; nlsdirs[i]; i++)
     {
         path = strmake( "%s/c_%03u.nls", nlsdirs[i], codepage );
-        if ((data = read_file( path, &size )))
-        {
-            free( path );
-            init_nls_info( &nlsinfo[i], data );
-            return &nlsinfo[i];
-        }
+        if ((fd = open( path, O_RDONLY )) != -1) break;
         free( path );
     }
-    return NULL;
+    if (!nlsdirs[i]) return NULL;
+
+    fstat( fd, &st );
+    data = xmalloc( st.st_size );
+    if (read( fd, data, st.st_size ) != st.st_size) error( "failed to load %s\n", path );
+    close( fd );
+    free( path );
+    init_nls_info( &nlsinfo[i], data );
+    return &nlsinfo[i];
 }
 
 int is_valid_codepage(int cp)

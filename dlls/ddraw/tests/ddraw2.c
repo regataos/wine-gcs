@@ -148,11 +148,6 @@ static BOOL ddraw_is_vendor(IDirectDraw2 *ddraw, DWORD vendor)
             && identifier.dwVendorId == vendor;
 }
 
-static BOOL ddraw_is_amd(IDirectDraw2 *ddraw)
-{
-    return ddraw_is_vendor(ddraw, 0x1002);
-}
-
 static BOOL ddraw_is_intel(IDirectDraw2 *ddraw)
 {
     return ddraw_is_vendor(ddraw, 0x8086);
@@ -1076,17 +1071,6 @@ static void test_coop_level_d3d_state(void)
     window = create_window();
     ddraw = create_ddraw();
     ok(!!ddraw, "Failed to create a ddraw object.\n");
-
-    if (ddraw_is_warp(ddraw))
-    {
-        /* ddraw2 crashes in EndScene, and if it doesn't crash it fails with
-         * DDERR_SURFACELOST on WARP. */
-        win_skip("Skipping test that crashes WARP occasionally.\n");
-        IDirectDraw2_Release(ddraw);
-        DestroyWindow(window);
-        return;
-    }
-
     if (!(device = create_device(ddraw, window, DDSCL_NORMAL)))
     {
         skip("Failed to create a 3D device, skipping test.\n");
@@ -1170,9 +1154,12 @@ static void test_coop_level_d3d_state(void)
     hr = IDirect3DDevice2_DrawPrimitive(device, D3DPT_TRIANGLESTRIP, D3DVT_LVERTEX, quad, ARRAY_SIZE(quad), 0);
     ok(hr == DD_OK, "Got unexpected hr %#x.\n", hr);
     hr = IDirect3DDevice2_EndScene(device);
-    ok(hr == DD_OK, "Got unexpected hr %#x.\n", hr);
-    color = get_surface_color(rt, 320, 240);
-    ok(compare_color(color, 0x0000ff80, 1), "Got unexpected color 0x%08x.\n", color);
+    ok(hr == DD_OK || broken(ddraw_is_warp(ddraw) && hr == DDERR_SURFACELOST), "Got unexpected hr %#x.\n", hr);
+    if (hr == DD_OK)
+    {
+        color = get_surface_color(rt, 320, 240);
+        ok(compare_color(color, 0x0000ff80, 1), "Got unexpected color 0x%08x.\n", color);
+    }
 
     destroy_viewport(device, viewport);
     destroy_material(background);
@@ -2702,16 +2689,14 @@ static void test_window_style(void)
 {
     LONG style, exstyle, tmp, expected_style;
     RECT fullscreen_rect, r;
-    HWND window, window2;
     IDirectDraw2 *ddraw;
+    HWND window;
     HRESULT hr;
     ULONG ref;
     BOOL ret;
 
     window = CreateWindowA("static", "ddraw_test", WS_OVERLAPPEDWINDOW,
             0, 0, 100, 100, 0, 0, 0, 0);
-    window2 = CreateWindowA("static", "ddraw_test", WS_OVERLAPPEDWINDOW | WS_VISIBLE,
-            0, 0, 50, 50, 0, 0, 0, 0);
     ddraw = create_ddraw();
     ok(!!ddraw, "Failed to create a ddraw object.\n");
 
@@ -2755,133 +2740,6 @@ static void test_window_style(void)
     tmp = GetWindowLongA(window, GWL_EXSTYLE);
     ok(tmp == exstyle, "Expected window extended style %#x, got %#x.\n", exstyle, tmp);
 
-    hr = IDirectDraw2_SetCooperativeLevel(ddraw, window, DDSCL_EXCLUSIVE | DDSCL_FULLSCREEN | DDSCL_NOWINDOWCHANGES);
-    ok(SUCCEEDED(hr), "SetCooperativeLevel failed, hr %#x.\n", hr);
-
-    tmp = GetWindowLongA(window, GWL_STYLE);
-    todo_wine ok(tmp == style, "Expected window style %#x, got %#x.\n", style, tmp);
-    tmp = GetWindowLongA(window, GWL_EXSTYLE);
-    todo_wine ok(tmp == exstyle, "Expected window extended style %#x, got %#x.\n", exstyle, tmp);
-
-    hr = IDirectDraw2_SetCooperativeLevel(ddraw, window, DDSCL_EXCLUSIVE | DDSCL_FULLSCREEN);
-    ok(SUCCEEDED(hr), "SetCooperativeLevel failed, hr %#x.\n", hr);
-
-    tmp = GetWindowLongA(window, GWL_STYLE);
-    expected_style = style | WS_VISIBLE;
-    todo_wine ok(tmp == expected_style, "Expected window style %#x, got %#x.\n", expected_style, tmp);
-    tmp = GetWindowLongA(window, GWL_EXSTYLE);
-    expected_style = exstyle | WS_EX_TOPMOST;
-    todo_wine ok(tmp == expected_style, "Expected window extended style %#x, got %#x.\n", expected_style, tmp);
-
-    ShowWindow(window, SW_HIDE);
-    tmp = GetWindowLongA(window, GWL_STYLE);
-    todo_wine ok(tmp == style, "Expected window style %#x, got %#x.\n", style, tmp);
-    tmp = GetWindowLongA(window, GWL_EXSTYLE);
-    expected_style = exstyle | WS_EX_TOPMOST;
-    todo_wine ok(tmp == expected_style, "Expected window extended style %#x, got %#x.\n", expected_style, tmp);
-
-    hr = IDirectDraw2_SetCooperativeLevel(ddraw, window, DDSCL_NORMAL | DDSCL_NOWINDOWCHANGES);
-    ok(SUCCEEDED(hr), "SetCooperativeLevel failed, hr %#x.\n", hr);
-
-    tmp = GetWindowLongA(window, GWL_STYLE);
-    ok(tmp == style, "Expected window style %#x, got %#x.\n", style, tmp);
-    tmp = GetWindowLongA(window, GWL_EXSTYLE);
-    expected_style = exstyle | WS_EX_TOPMOST;
-    ok(tmp == expected_style, "Expected window extended style %#x, got %#x.\n", expected_style, tmp);
-
-    hr = IDirectDraw2_SetCooperativeLevel(ddraw, window, DDSCL_NORMAL);
-    ok(SUCCEEDED(hr), "SetCooperativeLevel failed, hr %#x.\n", hr);
-
-    tmp = GetWindowLongA(window, GWL_STYLE);
-    ok(tmp == style, "Expected window style %#x, got %#x.\n", style, tmp);
-    tmp = GetWindowLongA(window, GWL_EXSTYLE);
-    expected_style = exstyle | WS_EX_TOPMOST;
-    ok(tmp == expected_style, "Expected window extended style %#x, got %#x.\n", expected_style, tmp);
-
-    ret = SetForegroundWindow(window);
-    ok(ret, "Failed to set foreground window.\n");
-
-    hr = IDirectDraw2_SetCooperativeLevel(ddraw, window, DDSCL_EXCLUSIVE | DDSCL_FULLSCREEN);
-    ok(SUCCEEDED(hr), "SetCooperativeLevel failed, hr %#x.\n", hr);
-
-    tmp = GetWindowLongA(window, GWL_STYLE);
-    expected_style = style | WS_VISIBLE;
-    todo_wine ok(tmp == expected_style, "Expected window style %#x, got %#x.\n", expected_style, tmp);
-    tmp = GetWindowLongA(window, GWL_EXSTYLE);
-    expected_style = exstyle | WS_EX_TOPMOST;
-    todo_wine ok(tmp == expected_style, "Expected window extended style %#x, got %#x.\n", expected_style, tmp);
-
-    ShowWindow(window, SW_HIDE);
-    hr = IDirectDraw2_SetCooperativeLevel(ddraw, window, DDSCL_NORMAL);
-    ok(SUCCEEDED(hr), "SetCooperativeLevel failed, hr %#x.\n", hr);
-
-    tmp = GetWindowLongA(window, GWL_STYLE);
-    ok(tmp == style, "Expected window style %#x, got %#x.\n", style, tmp);
-    tmp = GetWindowLongA(window, GWL_EXSTYLE);
-    ok(tmp == exstyle, "Expected window extended style %#x, got %#x.\n", exstyle, tmp);
-
-    ShowWindow(window, SW_SHOW);
-    ret = SetForegroundWindow(GetDesktopWindow());
-    ok(ret, "Failed to set foreground window.\n");
-    SetActiveWindow(window);
-    ok(GetActiveWindow() == window, "Unexpected active window.\n");
-    hr = IDirectDraw2_SetCooperativeLevel(ddraw, window, DDSCL_EXCLUSIVE | DDSCL_FULLSCREEN);
-    ok(SUCCEEDED(hr), "SetCooperativeLevel failed, hr %#x.\n", hr);
-
-    tmp = GetWindowLongA(window, GWL_STYLE);
-    expected_style = style | WS_VISIBLE;
-    todo_wine ok(tmp == expected_style, "Expected window style %#x, got %#x.\n", expected_style, tmp);
-    tmp = GetWindowLongA(window, GWL_EXSTYLE);
-    todo_wine ok(tmp == exstyle, "Expected window extended style %#x, got %#x.\n", exstyle, tmp);
-
-    GetWindowRect(window, &r);
-    ok(EqualRect(&r, &fullscreen_rect), "Expected %s, got %s.\n",
-            wine_dbgstr_rect(&fullscreen_rect), wine_dbgstr_rect(&r));
-
-    hr = IDirectDraw2_SetCooperativeLevel(ddraw, window, DDSCL_NORMAL);
-    ok(SUCCEEDED(hr), "SetCooperativeLevel failed, hr %#x.\n", hr);
-
-    SetWindowPos(window, NULL, 0, 0, 100, 100, SWP_NOZORDER | SWP_NOACTIVATE);
-    GetWindowRect(window, &r);
-    ok(!EqualRect(&r, &fullscreen_rect), "Window resize failed? got %s.\n",
-            wine_dbgstr_rect(&r));
-
-    ret = SetForegroundWindow(window2);
-    ok(ret, "Failed to set foreground window.\n");
-    hr = IDirectDraw2_SetCooperativeLevel(ddraw, window, DDSCL_EXCLUSIVE | DDSCL_FULLSCREEN);
-    ok(SUCCEEDED(hr), "SetCooperativeLevel failed, hr %#x.\n", hr);
-
-    tmp = GetWindowLongA(window, GWL_STYLE);
-    expected_style = style | WS_VISIBLE;
-    todo_wine ok(tmp == expected_style, "Expected window style %#x, got %#x.\n", expected_style, tmp);
-    tmp = GetWindowLongA(window, GWL_EXSTYLE);
-    todo_wine ok(tmp == exstyle, "Expected window extended style %#x, got %#x.\n", exstyle, tmp);
-
-    GetWindowRect(window, &r);
-    ok(EqualRect(&r, &fullscreen_rect), "Expected %s, got %s.\n",
-            wine_dbgstr_rect(&fullscreen_rect), wine_dbgstr_rect(&r));
-
-    ret = SetForegroundWindow(window);
-    ok(ret, "Failed to set foreground window.\n");
-    hr = IDirectDraw2_SetCooperativeLevel(ddraw, window, DDSCL_EXCLUSIVE | DDSCL_FULLSCREEN);
-    ok(SUCCEEDED(hr), "SetCooperativeLevel failed, hr %#x.\n", hr);
-
-    tmp = GetWindowLongA(window, GWL_STYLE);
-    expected_style = style | WS_VISIBLE;
-    todo_wine ok(tmp == expected_style, "Expected window style %#x, got %#x.\n", expected_style, tmp);
-    tmp = GetWindowLongA(window, GWL_EXSTYLE);
-    expected_style = exstyle | WS_EX_TOPMOST;
-    todo_wine ok(tmp == expected_style, "Expected window extended style %#x, got %#x.\n", expected_style, tmp);
-
-    ShowWindow(window, SW_HIDE);
-    hr = IDirectDraw2_SetCooperativeLevel(ddraw, window, DDSCL_NORMAL);
-    ok(SUCCEEDED(hr), "SetCooperativeLevel failed, hr %#x.\n", hr);
-
-    tmp = GetWindowLongA(window, GWL_STYLE);
-    ok(tmp == style, "Expected window style %#x, got %#x.\n", style, tmp);
-    tmp = GetWindowLongA(window, GWL_EXSTYLE);
-    ok(tmp == exstyle, "Expected window extended style %#x, got %#x.\n", exstyle, tmp);
-
     ShowWindow(window, SW_SHOW);
     hr = IDirectDraw2_SetCooperativeLevel(ddraw, window, DDSCL_EXCLUSIVE | DDSCL_FULLSCREEN);
     ok(SUCCEEDED(hr), "SetCooperativeLevel failed, hr %#x.\n", hr);
@@ -2905,7 +2763,6 @@ static void test_window_style(void)
     ref = IDirectDraw2_Release(ddraw);
     ok(ref == 0, "The ddraw object was not properly freed: refcount %u.\n", ref);
 
-    DestroyWindow(window2);
     DestroyWindow(window);
 }
 
@@ -8900,8 +8757,8 @@ static void test_palette_alpha(void)
 
 static void test_lost_device(void)
 {
+    IDirectDrawSurface *surface, *back_buffer, *back_buffer2, *ds;
     IDirectDrawSurface *sysmem_surface, *vidmem_surface;
-    IDirectDrawSurface *surface, *back_buffer;
     DDSURFACEDESC surface_desc;
     HWND window1, window2;
     IDirectDraw2 *ddraw;
@@ -9102,9 +8959,29 @@ static void test_lost_device(void)
     surface_desc.dwSize = sizeof(surface_desc);
     surface_desc.dwFlags = DDSD_CAPS | DDSD_BACKBUFFERCOUNT;
     surface_desc.ddsCaps.dwCaps = DDSCAPS_PRIMARYSURFACE | DDSCAPS_COMPLEX | DDSCAPS_FLIP;
-    surface_desc.dwBackBufferCount = 1;
+    surface_desc.dwBackBufferCount = 2;
     hr = IDirectDraw2_CreateSurface(ddraw, &surface_desc, &surface, NULL);
     ok(hr == DD_OK, "Got unexpected hr %#x.\n", hr);
+
+    ds = NULL;
+    memset(&surface_desc, 0, sizeof(surface_desc));
+    surface_desc.dwSize = sizeof(surface_desc);
+    hr = IDirectDrawSurface2_GetSurfaceDesc(surface, &surface_desc);
+    ok(hr == D3D_OK, "Got unexpected hr %#lx.\n", hr);
+
+    surface_desc.dwFlags = DDSD_CAPS | DDSD_ZBUFFERBITDEPTH | DDSD_WIDTH | DDSD_HEIGHT;
+    surface_desc.ddsCaps.dwCaps = DDSCAPS_ZBUFFER;
+    U2(surface_desc).dwZBufferBitDepth = 16;
+    hr = IDirectDraw2_CreateSurface(ddraw, &surface_desc, &ds, NULL);
+    if (FAILED(hr))
+    {
+        skip("Could not create Z buffer, skipping Z buffer restore test.\n");
+    }
+    else
+    {
+        hr = IDirectDrawSurface_AddAttachedSurface(surface, ds);
+        ok(hr == DD_OK, "Got unexpected hr %#lx.\n", hr);
+    }
 
     hr = IDirectDraw2_SetCooperativeLevel(ddraw, window1, DDSCL_EXCLUSIVE | DDSCL_FULLSCREEN);
     ok(hr == DD_OK, "Got unexpected hr %#x.\n", hr);
@@ -9195,6 +9072,7 @@ static void test_lost_device(void)
 
     hr = IDirectDrawSurface_GetAttachedSurface(surface, &caps, &back_buffer);
     ok(hr == DDERR_SURFACELOST, "Got unexpected hr %#x.\n", hr);
+    ok(back_buffer != surface, "Got the same surface.\n");
     hr = IDirectDrawSurface_Restore(surface);
     ok(hr == DD_OK, "Got unexpected hr %#x.\n", hr);
     hr = IDirectDrawSurface_GetAttachedSurface(surface, &caps, &back_buffer);
@@ -9202,6 +9080,25 @@ static void test_lost_device(void)
     hr = IDirectDrawSurface_IsLost(back_buffer);
     ok(hr == DD_OK, "Got unexpected hr %#x.\n", hr);
     IDirectDrawSurface_Release(back_buffer);
+
+    hr = IDirectDrawSurface_GetAttachedSurface(back_buffer, &caps, &back_buffer2);
+    ok(hr == DD_OK, "Got unexpected hr %#lx.\n", hr);
+    ok(back_buffer2 != back_buffer, "Got the same surface.\n");
+    ok(back_buffer2 != surface, "Got the same surface.\n");
+    hr = IDirectDrawSurface_IsLost(back_buffer2);
+    ok(hr == DD_OK, "Got unexpected hr %#lx.\n", hr);
+    IDirectDrawSurface_Release(back_buffer2);
+
+    if (ds)
+    {
+        hr = IDirectDrawSurface_IsLost(ds);
+        ok(hr == DDERR_SURFACELOST, "Got unexpected hr %#lx.\n", hr);
+        hr = IDirectDrawSurface_Restore(ds);
+        ok(hr == DD_OK, "Got unexpected hr %#lx.\n", hr);
+        hr = IDirectDrawSurface_IsLost(ds);
+        ok(hr == DD_OK, "Got unexpected hr %#lx.\n", hr);
+        IDirectDrawSurface_Release(ds);
+    }
 
     if (vidmem_surface)
         IDirectDrawSurface_Release(vidmem_surface);
@@ -13679,8 +13576,7 @@ static void test_depth_readback(void)
                 /* The ddraw2 version of this test behaves similarly to the ddraw7 version on Nvidia GPUs,
                  * except that we only have D16 (broken on geforce 9) and D24X8 (broken on geforce 7) available.
                  * Accept all nvidia GPUs as broken here, but still expect one of the formats to pass. */
-                ok(compare_uint(expected_depth, depth, max_diff) || ddraw_is_nvidia(ddraw)
-                        || (ddraw_is_amd(ddraw) && tests[i].z_depth == 24),
+                ok(compare_uint(expected_depth, depth, max_diff) || ddraw_is_nvidia(ddraw),
                         "Test %u: Got depth 0x%08x (diff %d), expected 0x%08x+/-%u, at %u, %u.\n",
                         i, depth, expected_depth - depth, expected_depth, max_diff, x, y);
                 if (!compare_uint(expected_depth, depth, max_diff))
@@ -15148,9 +15044,8 @@ static HRESULT CALLBACK find_different_mode_callback(DDSURFACEDESC *surface_desc
     if (U1(U4(*surface_desc).ddpfPixelFormat).dwRGBBitCount != registry_mode.dmBitsPerPel)
         return DDENUMRET_OK;
 
-    /* See comment in ddraw7 about the frequency. */
     if (surface_desc->dwWidth != param->old_width && surface_desc->dwHeight != param->old_height &&
-            (!compare_uint(surface_desc->dwRefreshRate, param->old_frequency, 1) || !param->old_frequency))
+            surface_desc->dwRefreshRate != param->old_frequency)
     {
         param->new_width = surface_desc->dwWidth;
         param->new_height = surface_desc->dwHeight;
@@ -16052,6 +15947,220 @@ static void test_filling_convention(void)
     DestroyWindow(window);
 }
 
+static HRESULT WINAPI test_enum_devices_caps_callback(GUID *guid, char *device_desc,
+        char *device_name, D3DDEVICEDESC *hal, D3DDEVICEDESC *hel, void *ctx)
+{
+    if(IsEqualGUID(&IID_IDirect3DRGBDevice, guid))
+    {
+        ok((hal->dpcLineCaps.dwTextureCaps & D3DPTEXTURECAPS_POW2) == 0,
+           "RGB Device hal line caps has D3DPTEXTURECAPS_POW2 flag set\n");
+        ok((hal->dpcTriCaps.dwTextureCaps & D3DPTEXTURECAPS_POW2) == 0,
+           "RGB Device hal tri caps has D3DPTEXTURECAPS_POW2 flag set\n");
+        ok(hel->dpcLineCaps.dwTextureCaps & D3DPTEXTURECAPS_POW2,
+           "RGB Device hel line caps does not have D3DPTEXTURECAPS_POW2 flag set\n");
+        ok(hel->dpcTriCaps.dwTextureCaps & D3DPTEXTURECAPS_POW2,
+           "RGB Device hel tri caps does not have D3DPTEXTURECAPS_POW2 flag set\n");
+
+        ok((hal->dpcLineCaps.dwTextureCaps & D3DPTEXTURECAPS_PERSPECTIVE) == 0,
+           "RGB Device hal line caps has D3DPTEXTURECAPS_PERSPECTIVE set\n");
+        ok((hal->dpcTriCaps.dwTextureCaps & D3DPTEXTURECAPS_PERSPECTIVE) == 0,
+           "RGB Device hal tri caps has D3DPTEXTURECAPS_PERSPECTIVE set\n");
+        ok(hel->dpcLineCaps.dwTextureCaps & D3DPTEXTURECAPS_PERSPECTIVE,
+           "RGB Device hel tri caps does not have D3DPTEXTURECAPS_PERSPECTIVE set\n");
+        ok(hel->dpcTriCaps.dwTextureCaps & D3DPTEXTURECAPS_PERSPECTIVE,
+           "RGB Device hel tri caps does not have D3DPTEXTURECAPS_PERSPECTIVE set\n");
+
+        ok(hal->dcmColorModel == 0, "RGB Device hal caps has colormodel %lu\n", hal->dcmColorModel);
+        ok(hel->dcmColorModel == D3DCOLOR_RGB, "RGB Device hel caps has colormodel %lu\n", hel->dcmColorModel);
+
+        ok(hal->dwFlags == 0, "RGB Device hal caps has hardware flags %#lx\n", hal->dwFlags);
+        ok(hel->dwFlags != 0, "RGB Device hel caps has hardware flags %#lx\n", hel->dwFlags);
+
+        todo_wine
+        ok((hal->dwDevCaps & D3DDEVCAPS_HWTRANSFORMANDLIGHT) == 0,
+           "RGB Device hal device caps has D3DDEVCAPS_HWTRANSFORMANDLIGHT set\n");
+        todo_wine
+        ok((hel->dwDevCaps & D3DDEVCAPS_HWTRANSFORMANDLIGHT) == 0,
+           "RGB Device hel device caps has D3DDEVCAPS_HWTRANSFORMANDLIGHT set\n");
+        todo_wine
+        ok((hal->dwDevCaps & D3DDEVCAPS_DRAWPRIMITIVES2EX) == 0,
+           "RGB Device hal device caps has D3DDEVCAPS_DRAWPRIMITIVES2EX set\n");
+        todo_wine
+        ok((hel->dwDevCaps & D3DDEVCAPS_DRAWPRIMITIVES2EX) == 0,
+           "RGB Device hel device caps has D3DDEVCAPS_DRAWPRIMITIVES2EX set\n");
+    }
+    else if(IsEqualGUID(&IID_IDirect3DHALDevice, guid))
+    {
+        ok(hal->dcmColorModel == D3DCOLOR_RGB, "HAL Device hal caps has colormodel %lu\n", hel->dcmColorModel);
+        ok(hel->dcmColorModel == 0, "HAL Device hel caps has colormodel %lu\n", hel->dcmColorModel);
+
+        ok(hal->dwFlags != 0, "HAL Device hal caps has hardware flags %#lx\n", hal->dwFlags);
+        ok(hel->dwFlags != 0, "HAL Device hel caps has hardware flags %#lx\n", hel->dwFlags);
+
+        ok(hal->dwDevCaps & D3DDEVCAPS_HWTRANSFORMANDLIGHT,
+           "HAL Device hal device caps does not have D3DDEVCAPS_HWTRANSFORMANDLIGHT set\n");
+        todo_wine
+        ok((hel->dwDevCaps & D3DDEVCAPS_HWTRANSFORMANDLIGHT) == 0,
+           "RGB Device hel device caps has D3DDEVCAPS_HWTRANSFORMANDLIGHT set\n");
+        ok(hal->dwDevCaps & D3DDEVCAPS_DRAWPRIMITIVES2EX,
+           "HAL Device hal device caps does not have D3DDEVCAPS_DRAWPRIMITIVES2EX set\n");
+        todo_wine
+        ok((hel->dwDevCaps & D3DDEVCAPS_DRAWPRIMITIVES2EX) == 0,
+           "RGB Device hel device caps has D3DDEVCAPS_DRAWPRIMITIVES2EX set\n");
+    }
+    else if(IsEqualGUID(&IID_IDirect3DRefDevice, guid))
+    {
+        ok((hal->dpcLineCaps.dwTextureCaps & D3DPTEXTURECAPS_POW2) == 0,
+           "REF Device hal line caps has D3DPTEXTURECAPS_POW2 flag set\n");
+        ok((hal->dpcTriCaps.dwTextureCaps & D3DPTEXTURECAPS_POW2) == 0,
+           "REF Device hal tri caps has D3DPTEXTURECAPS_POW2 flag set\n");
+        ok(hel->dpcLineCaps.dwTextureCaps & D3DPTEXTURECAPS_POW2,
+           "REF Device hel line caps does not have D3DPTEXTURECAPS_POW2 flag set\n");
+        ok(hel->dpcTriCaps.dwTextureCaps & D3DPTEXTURECAPS_POW2,
+           "REF Device hel tri caps does not have D3DPTEXTURECAPS_POW2 flag set\n");
+
+        ok((hal->dpcLineCaps.dwTextureCaps & D3DPTEXTURECAPS_PERSPECTIVE) == 0,
+           "REF Device hal line caps has D3DPTEXTURECAPS_PERSPECTIVE set\n");
+        ok((hal->dpcTriCaps.dwTextureCaps & D3DPTEXTURECAPS_PERSPECTIVE) == 0,
+           "REF Device hal tri caps has D3DPTEXTURECAPS_PERSPECTIVE set\n");
+        ok(hel->dpcLineCaps.dwTextureCaps & D3DPTEXTURECAPS_PERSPECTIVE,
+           "REF Device hel tri caps does not have D3DPTEXTURECAPS_PERSPECTIVE set\n");
+        ok(hel->dpcTriCaps.dwTextureCaps & D3DPTEXTURECAPS_PERSPECTIVE,
+           "REF Device hel tri caps does not have D3DPTEXTURECAPS_PERSPECTIVE set\n");
+
+        ok((hal->dwDevCaps & D3DDEVCAPS_HWTRANSFORMANDLIGHT) == 0,
+           "REF Device hal device caps has D3DDEVCAPS_HWTRANSFORMANDLIGHT set\n");
+        ok((hel->dwDevCaps & D3DDEVCAPS_HWTRANSFORMANDLIGHT) == 0,
+           "REF Device hel device caps has D3DDEVCAPS_HWTRANSFORMANDLIGHT set\n");
+        ok((hal->dwDevCaps & D3DDEVCAPS_DRAWPRIMITIVES2EX) == 0,
+           "REF Device hal device caps has D3DDEVCAPS_DRAWPRIMITIVES2EX set\n");
+        ok((hel->dwDevCaps & D3DDEVCAPS_DRAWPRIMITIVES2EX) == 0,
+           "REF Device hel device caps has D3DDEVCAPS_DRAWPRIMITIVES2EX set\n");
+    }
+    else if(IsEqualGUID(&IID_IDirect3DRampDevice, guid))
+    {
+        ok((hal->dpcLineCaps.dwTextureCaps & D3DPTEXTURECAPS_POW2) == 0,
+           "Ramp Device hal line caps has D3DPTEXTURECAPS_POW2 flag set\n");
+        ok((hal->dpcTriCaps.dwTextureCaps & D3DPTEXTURECAPS_POW2) == 0,
+           "Ramp Device hal tri caps has D3DPTEXTURECAPS_POW2 flag set\n");
+        ok(hel->dpcLineCaps.dwTextureCaps & D3DPTEXTURECAPS_POW2,
+           "Ramp Device hel line caps does not have D3DPTEXTURECAPS_POW2 flag set\n");
+        ok(hel->dpcTriCaps.dwTextureCaps & D3DPTEXTURECAPS_POW2,
+           "Ramp Device hel tri caps does not have D3DPTEXTURECAPS_POW2 flag set\n");
+
+        ok((hal->dpcLineCaps.dwTextureCaps & D3DPTEXTURECAPS_PERSPECTIVE) == 0,
+           "Ramp Device hal line caps has D3DPTEXTURECAPS_PERSPECTIVE set\n");
+        ok((hal->dpcTriCaps.dwTextureCaps & D3DPTEXTURECAPS_PERSPECTIVE) == 0,
+           "Ramp Device hal tri caps has D3DPTEXTURECAPS_PERSPECTIVE set\n");
+        ok(hel->dpcLineCaps.dwTextureCaps & D3DPTEXTURECAPS_PERSPECTIVE,
+           "Ramp Device hel tri caps does not have D3DPTEXTURECAPS_PERSPECTIVE set\n");
+        ok(hel->dpcTriCaps.dwTextureCaps & D3DPTEXTURECAPS_PERSPECTIVE,
+           "Ramp Device hel tri caps does not have D3DPTEXTURECAPS_PERSPECTIVE set\n");
+
+        ok(hal->dcmColorModel == 0, "Ramp Device hal caps has colormodel %lu\n", hal->dcmColorModel);
+        ok(hel->dcmColorModel == D3DCOLOR_MONO, "Ramp Device hel caps has colormodel %lu\n",
+           hel->dcmColorModel);
+
+        ok(hal->dwFlags == 0, "Ramp Device hal caps has hardware flags %#lx\n", hal->dwFlags);
+        ok(hel->dwFlags != 0, "Ramp Device hel caps has hardware flags %#lx\n", hel->dwFlags);
+
+        ok((hal->dwDevCaps & D3DDEVCAPS_HWTRANSFORMANDLIGHT) == 0,
+           "Ramp Device hal device caps has D3DDEVCAPS_HWTRANSFORMANDLIGHT set\n");
+        ok((hel->dwDevCaps & D3DDEVCAPS_HWTRANSFORMANDLIGHT) == 0,
+           "Ramp Device hel device caps has D3DDEVCAPS_HWTRANSFORMANDLIGHT set\n");
+        ok((hal->dwDevCaps & D3DDEVCAPS_DRAWPRIMITIVES2EX) == 0,
+           "Ramp Device hal device caps has D3DDEVCAPS_DRAWPRIMITIVES2EX set\n");
+        ok((hel->dwDevCaps & D3DDEVCAPS_DRAWPRIMITIVES2EX) == 0,
+           "Ramp Device hel device caps has D3DDEVCAPS_DRAWPRIMITIVES2EX set\n");
+    }
+    else if(IsEqualGUID(&IID_IDirect3DMMXDevice, guid))
+    {
+        ok((hal->dpcLineCaps.dwTextureCaps & D3DPTEXTURECAPS_POW2) == 0,
+           "MMX Device hal line caps has D3DPTEXTURECAPS_POW2 flag set\n");
+        ok((hal->dpcTriCaps.dwTextureCaps & D3DPTEXTURECAPS_POW2) == 0,
+           "MMX Device hal tri caps has D3DPTEXTURECAPS_POW2 flag set\n");
+        ok(hel->dpcLineCaps.dwTextureCaps & D3DPTEXTURECAPS_POW2,
+           "MMX Device hel line caps does not have D3DPTEXTURECAPS_POW2 flag set\n");
+        ok(hel->dpcTriCaps.dwTextureCaps & D3DPTEXTURECAPS_POW2,
+           "MMX Device hel tri caps does not have D3DPTEXTURECAPS_POW2 flag set\n");
+
+        ok((hal->dpcLineCaps.dwTextureCaps & D3DPTEXTURECAPS_PERSPECTIVE) == 0,
+           "MMX Device hal line caps has D3DPTEXTURECAPS_PERSPECTIVE set\n");
+        ok((hal->dpcTriCaps.dwTextureCaps & D3DPTEXTURECAPS_PERSPECTIVE) == 0,
+           "MMX Device hal tri caps has D3DPTEXTURECAPS_PERSPECTIVE set\n");
+        ok(hel->dpcLineCaps.dwTextureCaps & D3DPTEXTURECAPS_PERSPECTIVE,
+           "MMX Device hel tri caps does not have D3DPTEXTURECAPS_PERSPECTIVE set\n");
+        ok(hel->dpcTriCaps.dwTextureCaps & D3DPTEXTURECAPS_PERSPECTIVE,
+           "MMX Device hel tri caps does not have D3DPTEXTURECAPS_PERSPECTIVE set\n");
+
+        ok(hal->dcmColorModel == 0, "MMX Device hal caps has colormodel %lu\n", hal->dcmColorModel);
+        ok(hel->dcmColorModel == D3DCOLOR_RGB, "MMX Device hel caps has colormodel %lu\n", hel->dcmColorModel);
+
+        ok(hal->dwFlags == 0, "MMX Device hal caps has hardware flags %#lx\n", hal->dwFlags);
+        ok(hel->dwFlags != 0, "MMX Device hel caps has hardware flags %#lx\n", hel->dwFlags);
+
+        ok((hal->dwDevCaps & D3DDEVCAPS_HWTRANSFORMANDLIGHT) == 0,
+           "MMX Device hal device caps has D3DDEVCAPS_HWTRANSFORMANDLIGHT set\n");
+        ok((hel->dwDevCaps & D3DDEVCAPS_HWTRANSFORMANDLIGHT) == 0,
+           "MMX Device hel device caps has D3DDEVCAPS_HWTRANSFORMANDLIGHT set\n");
+        ok((hal->dwDevCaps & D3DDEVCAPS_DRAWPRIMITIVES2EX) == 0,
+           "MMX Device hal device caps has D3DDEVCAPS_DRAWPRIMITIVES2EX set\n");
+        ok((hel->dwDevCaps & D3DDEVCAPS_DRAWPRIMITIVES2EX) == 0,
+           "MMX Device hel device caps has D3DDEVCAPS_DRAWPRIMITIVES2EX set\n");
+    }
+    else
+    {
+        ok(FALSE, "Unexpected device enumerated: \"%s\" \"%s\"\n", device_desc, device_name);
+        if (hal->dpcLineCaps.dwTextureCaps & D3DPTEXTURECAPS_POW2)
+            trace("hal line has pow2 set\n");
+        else
+            trace("hal line does NOT have pow2 set\n");
+        if (hal->dpcTriCaps.dwTextureCaps & D3DPTEXTURECAPS_POW2)
+            trace("hal tri has pow2 set\n");
+        else
+            trace("hal tri does NOT have pow2 set\n");
+        if (hel->dpcLineCaps.dwTextureCaps & D3DPTEXTURECAPS_POW2)
+            trace("hel line has pow2 set\n");
+        else
+            trace("hel line does NOT have pow2 set\n");
+        if (hel->dpcTriCaps.dwTextureCaps & D3DPTEXTURECAPS_POW2)
+            trace("hel tri has pow2 set\n");
+        else
+            trace("hel tri does NOT have pow2 set\n");
+    }
+
+    return DDENUMRET_OK;
+}
+
+static void test_enum_devices(void)
+{
+    IDirectDraw2 *ddraw;
+    IDirect3D2 *d3d;
+    ULONG refcount;
+    HRESULT hr;
+
+    ddraw = create_ddraw();
+    ok(!!ddraw, "Failed to create a ddraw object.\n");
+
+    hr = IDirectDraw2_QueryInterface(ddraw, &IID_IDirect3D2, (void **)&d3d);
+    if (FAILED(hr))
+    {
+        skip("D3D interface is not available, skipping test.\n");
+        IDirectDraw2_Release(ddraw);
+        return;
+    }
+
+    hr = IDirect3D2_EnumDevices(d3d, NULL, NULL);
+    ok(hr == DDERR_INVALIDPARAMS, "Got hr %#lx.\n", hr);
+
+    hr = IDirect3D2_EnumDevices(d3d, test_enum_devices_caps_callback, NULL);
+    ok(hr == D3D_OK, "Got hr %#lx.\n", hr);
+
+    IDirect3D2_Release(d3d);
+    refcount = IDirectDraw2_Release(ddraw);
+    ok(!refcount, "Device has %lu references left.\n", refcount);
+}
+
 static void run_for_each_device_type(void (*test_func)(const GUID *))
 {
     test_func(&IID_IDirect3DHALDevice);
@@ -16182,4 +16291,5 @@ START_TEST(ddraw2)
     test_get_display_mode();
     run_for_each_device_type(test_texture_wrong_caps);
     test_filling_convention();
+    test_enum_devices();
 }

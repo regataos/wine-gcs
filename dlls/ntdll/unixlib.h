@@ -26,14 +26,13 @@
 struct _DISPATCHER_CONTEXT;
 
 /* increment this when you change the function table */
-#define NTDLL_UNIXLIB_VERSION 133
+#define NTDLL_UNIXLIB_VERSION 134
 
 struct unix_funcs
 {
     /* loader functions */
     NTSTATUS      (CDECL *load_so_dll)( UNICODE_STRING *nt_name, void **module );
     void          (CDECL *init_builtin_dll)( void *module );
-    NTSTATUS      (CDECL *init_unix_lib)( void *module, DWORD reason, const void *ptr_in, void *ptr_out );
     NTSTATUS      (CDECL *unwind_builtin_dll)( ULONG type, struct _DISPATCHER_CONTEXT *dispatch,
                                                CONTEXT *context );
     /* other Win32 API functions */
@@ -41,6 +40,18 @@ struct unix_funcs
 #ifdef __aarch64__
     TEB *         (WINAPI *NtCurrentTeb)(void);
 #endif
+
+    void          (CDECL *set_unix_env)( const char *var, const char *val );
+    void          (CDECL *write_crash_log)( const char *log_type, const char *log_msg );
+    BOOL          (CDECL *is_pc_in_native_so)( void *pc );
+    BOOL          (CDECL *debugstr_pc)( void *pc, char *buffer, unsigned int size );
 };
+
+
+#define WINE_BACKTRACE_LOG_ON() WARN_ON(seh)
+
+#define WINE_BACKTRACE_LOG(args...) do { \
+        WARN_(seh)("backtrace: " args); \
+    } while (0)
 
 #endif /* __NTDLL_UNIXLIB_H */

@@ -83,7 +83,6 @@ WINE_DECLARE_DEBUG_CHANNEL(relay);
 
 static struct user_api_hook original_user_api =
 {
-    USER_DefDlgProc,
     USER_ScrollBarDraw,
     USER_ScrollBarProc,
 };
@@ -132,6 +131,27 @@ static UINT get_ll_hook_timeout(void)
 {
     /* FIXME: should retrieve LowLevelHooksTimeout in HKEY_CURRENT_USER\Control Panel\Desktop */
     return 2000;
+}
+
+
+/***********************************************************************
+ *      get_active_hooks
+ *
+ */
+static UINT get_active_hooks(void)
+{
+    struct user_thread_info *thread_info = get_user_thread_info();
+
+    if (!thread_info->active_hooks)
+    {
+        SERVER_START_REQ( get_active_hooks )
+        {
+            if (!wine_server_call( req )) thread_info->active_hooks = reply->active_hooks;
+        }
+        SERVER_END_REQ;
+    }
+
+    return thread_info->active_hooks;
 }
 
 
@@ -459,9 +479,6 @@ static LRESULT call_hook( struct hook_info *info, INT code, WPARAM wparam, LPARA
         }
     }
 
-    if (info->id == WH_KEYBOARD_LL || info->id == WH_MOUSE_LL)
-        InterlockedIncrement( &global_key_state_counter );  /* force refreshing the key state cache */
-
     return ret;
 }
 
@@ -471,10 +488,9 @@ static LRESULT call_hook( struct hook_info *info, INT code, WPARAM wparam, LPARA
  */
 static BOOL HOOK_IsHooked( INT id )
 {
-    struct user_thread_info *thread_info = get_user_thread_info();
-
-    if (!thread_info->active_hooks) return TRUE;
-    return (thread_info->active_hooks & (1 << (id - WH_MINHOOK))) != 0;
+    UINT active_hooks = get_active_hooks();
+    if (!active_hooks) return TRUE;
+    return (active_hooks & (1 << (id - WH_MINHOOK))) != 0;
 }
 
 
@@ -491,7 +507,7 @@ LRESULT HOOK_CallHooks( INT id, INT code, WPARAM wparam, LPARAM lparam, BOOL uni
 
     if (!HOOK_IsHooked( id ))
     {
-        TRACE( "skipping hook %s mask %x\n", hook_names[id-WH_MINHOOK], thread_info->active_hooks );
+        TRACE( "skipping hook %s mask %x\n", hook_names[id-WH_MINHOOK], get_active_hooks() );
         return 0;
     }
 
@@ -807,7 +823,7 @@ static inline BOOL find_first_hook(DWORD id, DWORD event, HWND hwnd, LONG object
 
     if (!HOOK_IsHooked( id ))
     {
-        TRACE( "skipping hook %s mask %x\n", hook_names[id-WH_MINHOOK], thread_info->active_hooks );
+        TRACE( "skipping hook %s mask %x\n", hook_names[id-WH_MINHOOK], get_active_hooks() );
         return FALSE;
     }
 
@@ -977,16 +993,16 @@ BOOL WINAPI IsWinEventHookInstalled(DWORD dwEvent)
 }
 
 /* Undocumented RegisterUserApiHook() */
-BOOL WINAPI RegisterUserApiHook(const struct user_api_hook *new, struct user_api_hook *old)
+BOOL WINAPI RegisterUserApiHook(const struct user_api_hook *new_hook, struct user_api_hook *old_hook)
 {
-    if (!new)
+    if (!new_hook)
         return FALSE;
 
     USER_Lock();
-    hooked_user_api = *new;
+    hooked_user_api = *new_hook;
     user_api = &hooked_user_api;
-    if (old)
-        *old = original_user_api;
+    if (old_hook)
+        *old_hook = original_user_api;
     USER_Unlock();
     return TRUE;
 }

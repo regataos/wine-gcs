@@ -157,7 +157,7 @@ static HMODULE load_library( const UNICODE_STRING *libname, DWORD flags )
     HMODULE module;
     WCHAR *load_path, *dummy;
 
-    if (flags & unsupported_flags) FIXME( "unsupported flag(s) used %#08lx\n", flags );
+    if (flags & unsupported_flags) FIXME( "unsupported flag(s) used %#08x\n", flags );
 
     if (!set_ntstatus( LdrGetDllPath( libname->Buffer, flags, &load_path, &dummy ))) return 0;
 
@@ -302,7 +302,7 @@ DWORD WINAPI DECLSPEC_HOTPATCH GetModuleFileNameW( HMODULE module, LPWSTR filena
     UNICODE_STRING name;
     NTSTATUS status;
 
-    if (!module && ((win16_tib = NtCurrentTeb()->Tib.SubSystemTib)) && win16_tib->exe_name)
+    if (!module && (0 && (win16_tib = NtCurrentTeb()->Tib.SubSystemTib)) && win16_tib->exe_name)
     {
         len = min( size, win16_tib->exe_name->Length / sizeof(WCHAR) );
         memcpy( filename, win16_tib->exe_name->Buffer, len * sizeof(WCHAR) );
@@ -510,6 +510,14 @@ HMODULE WINAPI DECLSPEC_HOTPATCH LoadLibraryExW( LPCWSTR name, HANDLE file, DWOR
         SetLastError( ERROR_INVALID_PARAMETER );
         return 0;
     }
+
+    /* HACK: allow webservices.dll to be shipped together with remote debugger tools. */
+    if (flags == LOAD_LIBRARY_SEARCH_SYSTEM32 && !file && !wcscmp( name, L"webservices.dll" ))
+    {
+        FIXME( "HACK: ignoring LOAD_LIBRARY_SEARCH_SYSTEM32 for webservices.dll\n" );
+        flags = 0;
+    }
+
     RtlInitUnicodeString( &str, name );
     if (str.Buffer[str.Length/sizeof(WCHAR) - 1] != ' ') return load_library( &str, flags );
 
@@ -530,7 +538,7 @@ HMODULE WINAPI DECLSPEC_HOTPATCH LoadLibraryExW( LPCWSTR name, HANDLE file, DWOR
  */
 HMODULE WINAPI /* DECLSPEC_HOTPATCH */ LoadPackagedLibrary( LPCWSTR name, DWORD reserved )
 {
-    FIXME( "semi-stub, name %s, reserved %#lx.\n", debugstr_w(name), reserved );
+    FIXME( "semi-stub, name %s, reserved %#x.\n", debugstr_w(name), reserved );
     SetLastError( APPMODEL_ERROR_NO_PACKAGE );
     return NULL;
 }
@@ -629,11 +637,11 @@ BOOL WINAPI DECLSPEC_HOTPATCH EnumResourceLanguagesExA( HMODULE module, LPCSTR t
     const IMAGE_RESOURCE_DIRECTORY *basedir, *resdir;
     const IMAGE_RESOURCE_DIRECTORY_ENTRY *et;
 
-    TRACE( "%p %s %s %p %Ix %lx %d\n", module, debugstr_a(type), debugstr_a(name),
+    TRACE( "%p %s %s %p %lx %x %d\n", module, debugstr_a(type), debugstr_a(name),
            func, param, flags, lang );
 
     if (flags & (RESOURCE_ENUM_MUI | RESOURCE_ENUM_MUI_SYSTEM | RESOURCE_ENUM_VALIDATE))
-        FIXME( "unimplemented flags: %lx\n", flags );
+        FIXME( "unimplemented flags: %x\n", flags );
 
     if (!flags) flags = RESOURCE_ENUM_LN | RESOURCE_ENUM_MUI;
     if (!(flags & RESOURCE_ENUM_LN)) return ret;
@@ -689,11 +697,11 @@ BOOL WINAPI DECLSPEC_HOTPATCH EnumResourceLanguagesExW( HMODULE module, LPCWSTR 
     const IMAGE_RESOURCE_DIRECTORY *basedir, *resdir;
     const IMAGE_RESOURCE_DIRECTORY_ENTRY *et;
 
-    TRACE( "%p %s %s %p %Ix %lx %d\n", module, debugstr_w(type), debugstr_w(name),
+    TRACE( "%p %s %s %p %lx %x %d\n", module, debugstr_w(type), debugstr_w(name),
            func, param, flags, lang );
 
     if (flags & (RESOURCE_ENUM_MUI | RESOURCE_ENUM_MUI_SYSTEM | RESOURCE_ENUM_VALIDATE))
-        FIXME( "unimplemented flags: %lx\n", flags );
+        FIXME( "unimplemented flags: %x\n", flags );
 
     if (!flags) flags = RESOURCE_ENUM_LN | RESOURCE_ENUM_MUI;
     if (!(flags & RESOURCE_ENUM_LN)) return ret;
@@ -751,10 +759,10 @@ BOOL WINAPI DECLSPEC_HOTPATCH EnumResourceNamesExA( HMODULE module, LPCSTR type,
     const IMAGE_RESOURCE_DIRECTORY_ENTRY *et;
     const IMAGE_RESOURCE_DIR_STRING_U *str;
 
-    TRACE( "%p %s %p %Ix\n", module, debugstr_a(type), func, param );
+    TRACE( "%p %s %p %lx\n", module, debugstr_a(type), func, param );
 
     if (flags & (RESOURCE_ENUM_MUI | RESOURCE_ENUM_MUI_SYSTEM | RESOURCE_ENUM_VALIDATE))
-        FIXME( "unimplemented flags: %lx\n", flags );
+        FIXME( "unimplemented flags: %x\n", flags );
 
     if (!flags) flags = RESOURCE_ENUM_LN | RESOURCE_ENUM_MUI;
     if (!(flags & RESOURCE_ENUM_LN)) return ret;
@@ -830,10 +838,10 @@ BOOL WINAPI DECLSPEC_HOTPATCH EnumResourceNamesExW( HMODULE module, LPCWSTR type
     const IMAGE_RESOURCE_DIRECTORY_ENTRY *et;
     const IMAGE_RESOURCE_DIR_STRING_U *str;
 
-    TRACE( "%p %s %p %Ix\n", module, debugstr_w(type), func, param );
+    TRACE( "%p %s %p %lx\n", module, debugstr_w(type), func, param );
 
     if (flags & (RESOURCE_ENUM_MUI | RESOURCE_ENUM_MUI_SYSTEM | RESOURCE_ENUM_VALIDATE))
-        FIXME( "unimplemented flags: %lx\n", flags );
+        FIXME( "unimplemented flags: %x\n", flags );
 
     if (!flags) flags = RESOURCE_ENUM_LN | RESOURCE_ENUM_MUI;
     if (!(flags & RESOURCE_ENUM_LN)) return ret;
@@ -915,10 +923,10 @@ BOOL WINAPI DECLSPEC_HOTPATCH EnumResourceTypesExA( HMODULE module, ENUMRESTYPEP
     const IMAGE_RESOURCE_DIRECTORY_ENTRY *et;
     const IMAGE_RESOURCE_DIR_STRING_U *str;
 
-    TRACE( "%p %p %Ix\n", module, func, param );
+    TRACE( "%p %p %lx\n", module, func, param );
 
     if (flags & (RESOURCE_ENUM_MUI | RESOURCE_ENUM_MUI_SYSTEM | RESOURCE_ENUM_VALIDATE))
-        FIXME( "unimplemented flags: %lx\n", flags );
+        FIXME( "unimplemented flags: %x\n", flags );
 
     if (!flags) flags = RESOURCE_ENUM_LN | RESOURCE_ENUM_MUI;
     if (!(flags & RESOURCE_ENUM_LN)) return ret;
@@ -968,7 +976,7 @@ BOOL WINAPI DECLSPEC_HOTPATCH EnumResourceTypesExW( HMODULE module, ENUMRESTYPEP
     const IMAGE_RESOURCE_DIRECTORY_ENTRY *et;
     const IMAGE_RESOURCE_DIR_STRING_U *str;
 
-    TRACE( "%p %p %Ix\n", module, func, param );
+    TRACE( "%p %p %lx\n", module, func, param );
 
     if (!flags) flags = RESOURCE_ENUM_LN | RESOURCE_ENUM_MUI;
     if (!(flags & RESOURCE_ENUM_LN)) return ret;
@@ -1126,7 +1134,7 @@ HANDLE WINAPI DECLSPEC_HOTPATCH CreateActCtxW( PCACTCTXW ctx )
 {
     HANDLE context;
 
-    TRACE( "%p %08lx\n", ctx, ctx ? ctx->dwFlags : 0 );
+    TRACE( "%p %08x\n", ctx, ctx ? ctx->dwFlags : 0 );
 
     if (!set_ntstatus( RtlCreateActivationContext( &context, ctx ))) return INVALID_HANDLE_VALUE;
     return context;

@@ -26,6 +26,7 @@
 #include <stdio.h>
 #include <stdarg.h>
 #include <sys/mman.h>
+#include <stdint.h>
 #ifdef HAVE_SYS_STAT_H
 # include <sys/stat.h>
 #endif
@@ -81,9 +82,14 @@ static int shm_fd;
 static off_t shm_size;
 static void **shm_addrs;
 static int shm_addrs_size;  /* length of the allocated shm_addrs array */
-static long pagesize;
 
 static int is_fsync_initialized;
+
+static uint64_t *shm_idx_free_map;
+static uint32_t shm_idx_free_map_size; /* uint64_t word count */
+static uint32_t shm_idx_free_search_start_hint;
+
+#define BITS_IN_FREE_MAP_WORD (8 * sizeof(*shm_idx_free_map))
 
 static void shm_cleanup(void)
 {
@@ -111,18 +117,21 @@ void fsync_init(void)
     if (shm_fd == -1)
         perror( "shm_open" );
 
-    pagesize = sysconf( _SC_PAGESIZE );
-
     shm_addrs = calloc( 128, sizeof(shm_addrs[0]) );
     shm_addrs_size = 128;
 
-    shm_size = pagesize;
+    shm_size = FSYNC_SHM_PAGE_SIZE;
     if (ftruncate( shm_fd, shm_size ) == -1)
         perror( "ftruncate" );
 
     is_fsync_initialized = 1;
 
     fprintf( stderr, "fsync: up and running.\n" );
+
+    shm_idx_free_map_size = 256;
+    shm_idx_free_map = malloc( shm_idx_free_map_size * sizeof(*shm_idx_free_map) );
+    memset( shm_idx_free_map, 0xff, shm_idx_free_map_size * sizeof(*shm_idx_free_map) );
+    shm_idx_free_map[0] &= ~(uint64_t)1; /* Avoid allocating shm_index 0. */
 
     atexit( shm_cleanup );
 }
@@ -158,7 +167,7 @@ const struct object_ops fsync_ops =
     fsync_map_access,          /* map_access */
     default_get_sd,            /* get_sd */
     default_set_sd,            /* set_sd */
-    no_get_full_name,          /* get_full_name */
+    default_get_full_name,     /* get_full_name */
     no_lookup_name,            /* lookup_name */
     directory_link_name,       /* link_name */
     default_unlink_name,       /* unlink_name */
@@ -197,12 +206,13 @@ static void fsync_destroy( struct object *obj )
     struct fsync *fsync = (struct fsync *)obj;
     if (fsync->type == FSYNC_MUTEX)
         list_remove( &fsync->mutex_entry );
+    fsync_free_shm_idx( fsync->shm_idx );
 }
 
 static void *get_shm( unsigned int idx )
 {
-    int entry  = (idx * 8) / pagesize;
-    int offset = (idx * 8) % pagesize;
+    int entry  = (idx * 16) / FSYNC_SHM_PAGE_SIZE;
+    int offset = (idx * 16) % FSYNC_SHM_PAGE_SIZE;
 
     if (entry >= shm_addrs_size)
     {
@@ -218,10 +228,12 @@ static void *get_shm( unsigned int idx )
 
     if (!shm_addrs[entry])
     {
-        void *addr = mmap( NULL, pagesize, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, entry * pagesize );
+        void *addr = mmap( NULL, FSYNC_SHM_PAGE_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd,
+                          (off_t)entry * FSYNC_SHM_PAGE_SIZE );
         if (addr == (void *)-1)
         {
-            fprintf( stderr, "fsync: failed to map page %d (offset %#lx): ", entry, entry * pagesize );
+            fprintf( stderr, "fsync: failed to map page %d (offset %#lx): ",
+                     entry, (off_t)entry * FSYNC_SHM_PAGE_SIZE );
             perror( "mmap" );
         }
 
@@ -229,18 +241,28 @@ static void *get_shm( unsigned int idx )
             fprintf( stderr, "fsync: Mapping page %d at %p.\n", entry, addr );
 
         if (__sync_val_compare_and_swap( &shm_addrs[entry], 0, addr ))
-            munmap( addr, pagesize ); /* someone beat us to it */
+            munmap( addr, FSYNC_SHM_PAGE_SIZE ); /* someone beat us to it */
     }
 
     return (void *)((unsigned long)shm_addrs[entry] + offset);
 }
 
-/* FIXME: This is rather inefficient... */
-static unsigned int shm_idx_counter = 1;
+static int alloc_shm_idx_from_word( unsigned int word_index )
+{
+    int ret;
+
+    if (!shm_idx_free_map[word_index]) return 0;
+
+    ret = __builtin_ctzll( shm_idx_free_map[word_index] );
+    shm_idx_free_map[word_index] &= ~((uint64_t)1 << ret);
+    shm_idx_free_search_start_hint = shm_idx_free_map[word_index] ? word_index : word_index + 1;
+    return word_index * BITS_IN_FREE_MAP_WORD + ret;
+}
 
 unsigned int fsync_alloc_shm( int low, int high )
 {
 #ifdef __linux__
+    unsigned int i;
     int shm_idx;
     int *shm;
 
@@ -249,12 +271,34 @@ unsigned int fsync_alloc_shm( int low, int high )
     if (!is_fsync_initialized)
         return 0;
 
-    shm_idx = shm_idx_counter++;
+    /* shm_idx_free_search_start_hint is always at the first word with a free index or before that. */
+    for (i = shm_idx_free_search_start_hint; i < shm_idx_free_map_size; ++i)
+        if ((shm_idx = alloc_shm_idx_from_word( i ))) break;
 
-    while (shm_idx * 8 >= shm_size)
+    if (!shm_idx)
+    {
+        uint32_t old_size, new_size;
+        uint64_t *new_alloc;
+
+        old_size = shm_idx_free_map_size;
+        new_size = old_size + 256;
+        new_alloc = realloc( shm_idx_free_map, new_size * sizeof(*new_alloc) );
+        if (!new_alloc)
+        {
+            fprintf( stderr, "fsync: couldn't expand shm_idx_free_map to size %zd.",
+                new_size * sizeof(*new_alloc) );
+            return 0;
+        }
+        memset( new_alloc + old_size, 0xff, (new_size - old_size) * sizeof(*new_alloc) );
+        shm_idx_free_map = new_alloc;
+        shm_idx_free_map_size = new_size;
+        shm_idx = alloc_shm_idx_from_word( old_size );
+    }
+
+    while (shm_idx * 16 >= shm_size)
     {
         /* Better expand the shm section. */
-        shm_size += pagesize;
+        shm_size += FSYNC_SHM_PAGE_SIZE;
         if (ftruncate( shm_fd, shm_size ) == -1)
         {
             fprintf( stderr, "fsync: couldn't expand %s to size %jd: ",
@@ -267,11 +311,68 @@ unsigned int fsync_alloc_shm( int low, int high )
     assert(shm);
     shm[0] = low;
     shm[1] = high;
+    shm[2] = 1; /* Reference count. */
+    shm[3] = 0; /* Last reference process id. */
 
     return shm_idx;
 #else
     return 0;
 #endif
+}
+
+void fsync_free_shm_idx( int shm_idx )
+{
+    unsigned int idx;
+    uint64_t mask;
+    int *shm;
+
+    assert( shm_idx );
+    assert( shm_idx < shm_idx_free_map_size * BITS_IN_FREE_MAP_WORD );
+
+    shm = get_shm( shm_idx );
+    if (shm[2] <= 0)
+    {
+        fprintf( stderr, "wineserver: fsync err: shm refcount is %d.\n", shm[2] );
+        return;
+    }
+
+    if (__atomic_sub_fetch( &shm[2], 1, __ATOMIC_SEQ_CST ))
+    {
+        /* Sync object is still referenced in a process. */
+        return;
+    }
+
+    idx = shm_idx / BITS_IN_FREE_MAP_WORD;
+    mask = (uint64_t)1 << (shm_idx % BITS_IN_FREE_MAP_WORD);
+    assert( !(shm_idx_free_map[idx] & mask) );
+    shm_idx_free_map[idx] |= mask;
+    if (idx < shm_idx_free_search_start_hint)
+        shm_idx_free_search_start_hint = idx;
+}
+
+/* Try to cleanup the shared mem indices locked by the wait on the killed processes.
+ * This is not fully reliable but should avoid leaking the majority of indices on
+ * process kill. */
+void fsync_cleanup_process_shm_indices( process_id_t id )
+{
+    uint64_t free_word;
+    unsigned int i, j;
+    void *shmbase;
+    int *shm;
+
+    for (i = 0; i < shm_idx_free_map_size; ++i)
+    {
+        free_word = shm_idx_free_map[i];
+        if (free_word == ~(uint64_t)0) continue;
+        shmbase = get_shm( i * BITS_IN_FREE_MAP_WORD );
+        for (j = !i; j < BITS_IN_FREE_MAP_WORD; ++j)
+        {
+            shm = (int *)((char *)shmbase + j * 16);
+            if (!(free_word & ((uint64_t)1 << j)) && shm[3] == id
+                  && __atomic_load_n( &shm[2], __ATOMIC_SEQ_CST ) == 1)
+                fsync_free_shm_idx( i * BITS_IN_FREE_MAP_WORD + j );
+        }
+    }
 }
 
 static int type_matches( enum fsync_type type1, enum fsync_type type2 )
@@ -333,6 +434,8 @@ struct fsync_event
 {
     int signaled;
     int unused;
+    int ref;
+    int last_pid;
 };
 
 void fsync_wake_futex( unsigned int shm_idx )
@@ -500,8 +603,12 @@ DECL_HANDLER(get_fsync_idx)
 
     if (obj->ops->get_fsync_idx)
     {
+        int *shm;
+
         reply->shm_idx = obj->ops->get_fsync_idx( obj, &type );
         reply->type = type;
+        shm = get_shm( reply->shm_idx );
+        __atomic_add_fetch( &shm[2], 1, __ATOMIC_SEQ_CST );
     }
     else
     {
@@ -519,4 +626,14 @@ DECL_HANDLER(get_fsync_idx)
 DECL_HANDLER(get_fsync_apc_idx)
 {
     reply->shm_idx = current->fsync_apc_idx;
+}
+
+DECL_HANDLER(fsync_free_shm_idx)
+{
+    if (!req->shm_idx || req->shm_idx >= shm_idx_free_map_size * BITS_IN_FREE_MAP_WORD)
+    {
+        set_error( STATUS_INVALID_PARAMETER );
+        return;
+    }
+    fsync_free_shm_idx( req->shm_idx );
 }

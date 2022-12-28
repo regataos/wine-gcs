@@ -505,29 +505,13 @@ static const WCHAR *skip_unc_prefix( const WCHAR *ptr )
  * Helper for RtlGetFullPathName_U
  * Note: name and buffer are allowed to point to the same memory spot
  */
-static const WCHAR envvarW[] = {'S','t','e','a','m','G','a','m','e','I','d',0};
-static const WCHAR mwoW[] = {'3','4','2','2','0','0',0};
-
 static ULONG get_full_path_helper(LPCWSTR name, LPWSTR buffer, ULONG size)
 {
     ULONG                       reqsize = 0, mark = 0, dep = 0, deplen;
     LPWSTR                      ins_str = NULL;
     LPCWSTR                     ptr;
     const UNICODE_STRING*       cd;
-    WCHAR                       tmp[4], *value;
-    SIZE_T len = 1024;
-    BOOL mwo = FALSE;
-    value = RtlAllocateHeap( GetProcessHeap(), 0, len * sizeof(WCHAR) );
-
-    if (NT_SUCCESS(RtlQueryEnvironmentVariable( NULL, envvarW, wcslen(envvarW), value, len - 1, &len )))
-    {
-        value[len] = '\0';
-
-        if (wcscmp(value, mwoW) == 0)
-            mwo = TRUE;
-    }
-
-    RtlFreeHeap( GetProcessHeap(), 0, value );
+    WCHAR                       tmp[4];
 
     /* return error if name only consists of spaces */
     for (ptr = name; *ptr; ptr++) if (*ptr != ' ') break;
@@ -535,13 +519,10 @@ static ULONG get_full_path_helper(LPCWSTR name, LPWSTR buffer, ULONG size)
 
     RtlAcquirePebLock();
 
-    cd = &NtCurrentTeb()->Peb->ProcessParameters->CurrentDirectory.DosPath;
-    
-    if (NtCurrentTeb()->Tib.SubSystemTib) {      /* FIXME: hack */
-        if (!mwo) {
-            cd = &((WIN16_SUBSYSTEM_TIB *)NtCurrentTeb()->Tib.SubSystemTib)->curdir.DosPath;
-        }
-    }
+    if (0 && NtCurrentTeb()->Tib.SubSystemTib)  /* FIXME: hack */
+        cd = &((WIN16_SUBSYSTEM_TIB *)NtCurrentTeb()->Tib.SubSystemTib)->curdir.DosPath;
+    else
+        cd = &NtCurrentTeb()->Peb->ProcessParameters->CurrentDirectory.DosPath;
 
     switch (RtlDetermineDosPathNameType_U(name))
     {
@@ -893,7 +874,7 @@ ULONG WINAPI RtlGetCurrentDirectory_U(ULONG buflen, LPWSTR buf)
 
     RtlAcquirePebLock();
 
-    if (NtCurrentTeb()->Tib.SubSystemTib)  /* FIXME: hack */
+    if (0 && NtCurrentTeb()->Tib.SubSystemTib)  /* FIXME: hack */
         us = &((WIN16_SUBSYSTEM_TIB *)NtCurrentTeb()->Tib.SubSystemTib)->curdir.DosPath;
     else
         us = &NtCurrentTeb()->Peb->ProcessParameters->CurrentDirectory.DosPath;
@@ -924,20 +905,20 @@ ULONG WINAPI RtlGetCurrentDirectory_U(ULONG buflen, LPWSTR buf)
 NTSTATUS WINAPI RtlSetCurrentDirectory_U(const UNICODE_STRING* dir)
 {
     FILE_FS_DEVICE_INFORMATION device_info;
+    ULONG size, compare_size;
     OBJECT_ATTRIBUTES attr;
     UNICODE_STRING newdir;
     IO_STATUS_BLOCK io;
     CURDIR *curdir;
     HANDLE handle;
     NTSTATUS nts;
-    ULONG size;
     PWSTR ptr;
 
     newdir.Buffer = NULL;
 
     RtlAcquirePebLock();
 
-    if (NtCurrentTeb()->Tib.SubSystemTib)  /* FIXME: hack */
+    if (0 && NtCurrentTeb()->Tib.SubSystemTib)  /* FIXME: hack */
         curdir = &((WIN16_SUBSYSTEM_TIB *)NtCurrentTeb()->Tib.SubSystemTib)->curdir;
     else
         curdir = &NtCurrentTeb()->Peb->ProcessParameters->CurrentDirectory;
@@ -945,6 +926,22 @@ NTSTATUS WINAPI RtlSetCurrentDirectory_U(const UNICODE_STRING* dir)
     if (!RtlDosPathNameToNtPathName_U( dir->Buffer, &newdir, NULL, NULL ))
     {
         nts = STATUS_OBJECT_NAME_INVALID;
+        goto out;
+    }
+
+    size = newdir.Length / sizeof(WCHAR);
+    ptr = newdir.Buffer;
+    ptr += 4;  /* skip \??\ prefix */
+    size -= 4;
+
+    if (size && ptr[size - 1] == '\\') compare_size = size - 1;
+    else                               compare_size = size;
+
+    if (curdir->DosPath.Length == (compare_size + 1) * sizeof(WCHAR)
+        && !memcmp( curdir->DosPath.Buffer, ptr, compare_size * sizeof(WCHAR) ))
+    {
+        TRACE( "dir %s is the same as current.\n", debugstr_us(dir) );
+        nts = STATUS_SUCCESS;
         goto out;
     }
 
@@ -972,10 +969,6 @@ NTSTATUS WINAPI RtlSetCurrentDirectory_U(const UNICODE_STRING* dir)
     curdir->Handle = handle;
 
     /* append trailing \ if missing */
-    size = newdir.Length / sizeof(WCHAR);
-    ptr = newdir.Buffer;
-    ptr += 4;  /* skip \??\ prefix */
-    size -= 4;
     if (size && ptr[size - 1] != '\\') ptr[size++] = '\\';
 
     /* convert \??\UNC\ path to \\ prefix */

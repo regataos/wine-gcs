@@ -161,8 +161,7 @@ DWORD msi_get_file_version_info( MSIPACKAGE *package, const WCHAR *path, DWORD b
 VS_FIXEDFILEINFO *msi_get_disk_file_version( MSIPACKAGE *package, const WCHAR *filename )
 {
     VS_FIXEDFILEINFO *ptr, *ret;
-    DWORD version_size;
-    UINT size;
+    DWORD version_size, size;
     void *version;
 
     if (!(version_size = msi_get_file_version_info( package, filename, 0, NULL ))) return NULL;
@@ -355,7 +354,7 @@ static msi_file_state calculate_install_state( MSIPACKAGE *package, MSIFILE *fil
     }
     if ((size = msi_get_disk_file_size( package, file->TargetPath )) != file->FileSize)
     {
-        TRACE("overwriting %s (old size %lu new size %d)\n", debugstr_w(file->File), size, file->FileSize);
+        TRACE("overwriting %s (old size %u new size %u)\n", debugstr_w(file->File), size, file->FileSize);
         return msifs_overwrite;
     }
     if (file->hash.dwFileHashInfoSize)
@@ -722,7 +721,7 @@ static UINT patch_file( MSIPACKAGE *package, MSIFILEPATCH *patch )
     }
     else
     {
-        WARN( "failed to patch %s: %#lx\n", debugstr_w(patch->File->TargetPath), GetLastError() );
+        WARN("failed to patch %s: %08x\n", debugstr_w(patch->File->TargetPath), GetLastError());
         r = ERROR_INSTALL_FAILURE;
     }
     DeleteFileW( patch->path );
@@ -743,7 +742,7 @@ static UINT patch_assembly( MSIPACKAGE *package, MSIASSEMBLY *assembly, MSIFILEP
     while ((IAssemblyEnum_GetNextAssembly( iter, NULL, &name, 0 ) == S_OK))
     {
         WCHAR *displayname, *path;
-        DWORD len = 0;
+        UINT len = 0;
         HRESULT hr;
 
         hr = IAssemblyName_GetDisplayName( name, NULL, &len, 0 );
@@ -761,8 +760,8 @@ static UINT patch_assembly( MSIPACKAGE *package, MSIASSEMBLY *assembly, MSIFILEP
         {
             if (!msi_copy_file( package, path, patch->File->TargetPath, FALSE ))
             {
-                ERR( "failed to copy file %s -> %s (%lu)\n", debugstr_w(path),
-                     debugstr_w(patch->File->TargetPath), GetLastError() );
+                ERR("Failed to copy file %s -> %s (%u)\n", debugstr_w(path),
+                    debugstr_w(patch->File->TargetPath), GetLastError() );
                 msi_free( path );
                 msi_free( displayname );
                 IAssemblyName_Release( name );
@@ -898,7 +897,7 @@ static BOOL move_file( MSIPACKAGE *package, const WCHAR *source, const WCHAR *de
         ret = msi_move_file( package, source, dest, MOVEFILE_REPLACE_EXISTING );
         if (!ret)
         {
-            WARN( "msi_move_file failed: %lu\n", GetLastError() );
+            WARN("msi_move_file failed: %u\n", GetLastError());
             return FALSE;
         }
     }
@@ -908,7 +907,7 @@ static BOOL move_file( MSIPACKAGE *package, const WCHAR *source, const WCHAR *de
         ret = msi_copy_file( package, source, dest, FALSE );
         if (!ret)
         {
-            WARN( "msi_copy_file failed: %lu\n", GetLastError() );
+            WARN("msi_copy_file failed: %u\n", GetLastError());
             return FALSE;
         }
     }
@@ -1176,7 +1175,7 @@ static UINT ITERATE_MoveFiles( MSIRECORD *rec, LPVOID param )
     {
         if (!msi_create_full_path( package, destdir ))
         {
-            WARN( "failed to create directory %lu\n", GetLastError() );
+            WARN("failed to create directory %u\n", GetLastError());
             goto done;
         }
     }
@@ -1317,8 +1316,8 @@ static UINT ITERATE_DuplicateFiles(MSIRECORD *row, LPVOID param)
     TRACE("Duplicating file %s to %s\n", debugstr_w(file->TargetPath), debugstr_w(dest));
     if (!msi_copy_file( package, file->TargetPath, dest, TRUE ))
     {
-        WARN( "failed to copy file %s -> %s (%lu)\n",
-              debugstr_w(file->TargetPath), debugstr_w(dest), GetLastError() );
+        WARN("Failed to copy file %s -> %s (%u)\n",
+             debugstr_w(file->TargetPath), debugstr_w(dest), GetLastError());
     }
     FIXME("We should track these duplicate files as well\n");
 
@@ -1395,7 +1394,7 @@ static UINT ITERATE_RemoveDuplicateFiles( MSIRECORD *row, LPVOID param )
     TRACE("Removing duplicate %s of %s\n", debugstr_w(dest), debugstr_w(file->TargetPath));
     if (!msi_delete_file( package, dest ))
     {
-        WARN( "failed to delete duplicate file %s (%lu)\n", debugstr_w(dest), GetLastError() );
+        WARN("Failed to delete duplicate file %s (%u)\n", debugstr_w(dest), GetLastError());
     }
 
     uirow = MSI_CreateRecord( 9 );
@@ -1606,7 +1605,7 @@ UINT ACTION_RemoveFiles( MSIPACKAGE *package )
         msi_set_file_attributes( package, file->TargetPath, FILE_ATTRIBUTE_NORMAL );
         if (!msi_delete_file( package, file->TargetPath ))
         {
-            WARN( "failed to delete %s (%lu)\n",  debugstr_w(file->TargetPath), GetLastError() );
+            WARN("failed to delete %s (%u)\n",  debugstr_w(file->TargetPath), GetLastError());
         }
         file->state = msifs_missing;
 

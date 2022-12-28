@@ -1506,8 +1506,10 @@ AMD_AGS_API AGSReturnCode agsDriverExtensionsDX11_EndUAVOverlap( AGSContext* con
 /// \param [in] minDepth                            The near depth range to clip against.
 /// \param [in] maxDepth                            The far depth range to clip against.
 ///
-AMD_AGS_API AGSReturnCode agsDriverExtensionsDX11_SetDepthBounds_520( AGSContext* context, bool enabled, float minDepth, float maxDepth );
-AMD_AGS_API AGSReturnCode agsDriverExtensionsDX11_SetDepthBounds( AGSContext* context, ID3D11DeviceContext* dxContext, bool enabled, float minDepth, float maxDepth );
+AMD_AGS_API AGSReturnCode agsDriverExtensionsDX11_SetDepthBounds( AGSContext* context, bool enabled, float minDepth, float maxDepth );
+
+/* Since 5.3.0 */
+AMD_AGS_API AGSReturnCode agsDriverExtensionsDX11_SetDepthBounds_530( AGSContext* context, ID3D11DeviceContext* dxContext, bool enabled, float minDepth, float maxDepth );
 
 /// @}
 
@@ -1631,7 +1633,7 @@ AMD_AGS_API AGSReturnCode agsDriverExtensionsDX11_SetMaxAsyncCompileThreadCount(
 
 ///
 /// This method can be used to determine the total number of asynchronous shader compile jobs that are either
-/// queued for waiting for compilation or being compiled by the driverÂ?s asynchronous compilation threads.
+/// queued for waiting for compilation or being compiled by the driverÂ’'s asynchronous compilation threads.
 /// This method can be called at any during the lifetime of the driver.
 ///
 /// \param [in] context                             Pointer to a context.
@@ -1690,7 +1692,7 @@ typedef struct AGSClipRect
 {
     AGSClipRect_Mode mode; ///< Include/exclude rect region
     AGSRect          rect; ///< The rect to include/exclude
-} AGSClipRect;
+} AGSClipRect; 
 
 
 

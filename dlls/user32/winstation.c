@@ -100,6 +100,132 @@ static const WCHAR *get_winstation_default_name( void )
     return ret ? default_name : NULL;
 }
 
+
+static void map_shared_memory_section( const WCHAR *name, SIZE_T size, HANDLE root, HANDLE *handle, void **ptr )
+{
+    OBJECT_ATTRIBUTES attr;
+    UNICODE_STRING section_str;
+    NTSTATUS status;
+
+    RtlInitUnicodeString( &section_str, name );
+    InitializeObjectAttributes( &attr, &section_str, 0, root, NULL );
+    status = NtOpenSection( handle, SECTION_ALL_ACCESS, &attr );
+    if (status)
+    {
+        ERR( "failed to open section %s: %08x\n", debugstr_w(name), status );
+        *ptr = NULL;
+        *handle = NULL;
+        return;
+    }
+
+    *ptr = NULL;
+    status = NtMapViewOfSection( *handle, GetCurrentProcess(), ptr, 0, 0, NULL,
+                                 &size, ViewUnmap, 0, PAGE_READONLY );
+    if (status)
+    {
+        ERR( "failed to map view of section %s: %08x\n", debugstr_w(name), status );
+        CloseHandle( *handle );
+        *ptr = NULL;
+        *handle = NULL;
+    }
+}
+
+
+volatile struct desktop_shared_memory *get_desktop_shared_memory( void )
+{
+    static const WCHAR *dir_desktop_maps = L"__wine_desktop_mappings\\";
+    struct user_thread_info *thread_info = get_user_thread_info();
+    HANDLE root = get_winstations_dir_handle(), handles[2];
+    WCHAR buf[MAX_PATH], *ptr;
+    DWORD i, needed;
+
+    if (thread_info->desktop_shared_memory) return thread_info->desktop_shared_memory;
+
+    handles[0] = NtUserGetProcessWindowStation();
+    handles[1] = NtUserGetThreadDesktop( GetCurrentThreadId() );
+
+    memcpy( buf, dir_desktop_maps, wcslen(dir_desktop_maps) * sizeof(WCHAR) );
+    ptr = buf + wcslen(dir_desktop_maps);
+
+    for (i = 0; i < 2; i++)
+    {
+        NtUserGetObjectInformation( handles[i], UOI_NAME, (void *)ptr, sizeof(buf) - (ptr - buf) * sizeof(WCHAR), &needed );
+        ptr += needed / sizeof(WCHAR);
+        if (i == 0) *(ptr - 1) = '\\';
+    }
+
+    map_shared_memory_section( buf, sizeof(struct desktop_shared_memory), root,
+                               &thread_info->desktop_shared_map, (void **)&thread_info->desktop_shared_memory );
+    return thread_info->desktop_shared_memory;
+}
+
+
+volatile struct queue_shared_memory *get_queue_shared_memory( void )
+{
+    struct user_thread_info *thread_info = get_user_thread_info();
+    WCHAR buf[MAX_PATH];
+
+    if (thread_info->queue_shared_memory) return thread_info->queue_shared_memory;
+
+    swprintf( buf, ARRAY_SIZE(buf), L"\\KernelObjects\\__wine_thread_mappings\\%08x-queue", GetCurrentThreadId() );
+    map_shared_memory_section( buf, sizeof(struct queue_shared_memory), NULL,
+                               &thread_info->queue_shared_map, (void **)&thread_info->queue_shared_memory );
+    return thread_info->queue_shared_memory;
+}
+
+
+static volatile struct input_shared_memory *get_thread_input_shared_memory( DWORD tid, HANDLE *handle,
+                                                                            struct input_shared_memory **ptr )
+{
+    WCHAR buf[MAX_PATH];
+
+    if (*ptr && (*ptr)->tid == tid) return *ptr;
+    if (*ptr) CloseHandle( *handle );
+
+    swprintf( buf, ARRAY_SIZE(buf), L"\\KernelObjects\\__wine_thread_mappings\\%08x-input", tid );
+    map_shared_memory_section( buf, sizeof(struct input_shared_memory), NULL,
+                               handle, (void **)ptr );
+    return *ptr;
+}
+
+
+volatile struct input_shared_memory *get_input_shared_memory( void )
+{
+    volatile struct queue_shared_memory *queue = get_queue_shared_memory();
+    struct user_thread_info *thread_info = get_user_thread_info();
+    DWORD tid;
+
+    if (!queue) return NULL;
+    SHARED_READ_BEGIN( &queue->seq )
+    {
+        tid = queue->input_tid;
+    }
+    SHARED_READ_END( &queue->seq );
+
+    return get_thread_input_shared_memory( tid, &thread_info->input_shared_map,
+                                           &thread_info->input_shared_memory );
+}
+
+
+volatile struct input_shared_memory *get_foreground_shared_memory( void )
+{
+    volatile struct desktop_shared_memory *desktop = get_desktop_shared_memory();
+    struct user_thread_info *thread_info = get_user_thread_info();
+    DWORD tid;
+
+    if (!desktop) return NULL;
+    SHARED_READ_BEGIN( &desktop->seq )
+    {
+        tid = desktop->foreground_tid;
+    }
+    SHARED_READ_END( &desktop->seq );
+
+    if (!tid) return NULL;
+    return get_thread_input_shared_memory( tid, &thread_info->foreground_shared_map,
+                                           &thread_info->foreground_shared_memory );
+}
+
+
 /***********************************************************************
  *              CreateWindowStationA  (USER32.@)
  */
@@ -319,10 +445,14 @@ BOOL WINAPI SetThreadDesktop( HDESK handle )
     if (ret)  /* reset the desktop windows */
     {
         struct user_thread_info *thread_info = get_user_thread_info();
-        struct user_key_state_info *key_state_info = thread_info->key_state;
         thread_info->top_window = 0;
         thread_info->msg_window = 0;
-        if (key_state_info) key_state_info->time = 0;
+        if (thread_info->desktop_shared_map)
+        {
+            CloseHandle( thread_info->desktop_shared_map );
+            thread_info->desktop_shared_map = NULL;
+            thread_info->desktop_shared_memory = NULL;
+        }
     }
     return ret;
 }

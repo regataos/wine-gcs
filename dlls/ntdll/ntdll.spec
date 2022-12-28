@@ -52,7 +52,7 @@
 @ stdcall EtwEventSetInformation(int64 long ptr long)
 @ stdcall EtwEventUnregister(int64)
 @ stdcall EtwEventWrite(int64 ptr long ptr)
-@ stdcall EtwEventWriteString(int64 long int64 wstr)
+@ stdcall EtwEventWriteString(int64 long int64 ptr)
 @ stdcall EtwEventWriteTransfer(int64 ptr ptr ptr long ptr)
 @ stdcall EtwGetTraceEnableFlags(int64)
 @ stdcall EtwGetTraceEnableLevel(int64)
@@ -251,6 +251,7 @@
 # @ stub NtMapUserPhysicalPages
 # @ stub NtMapUserPhysicalPagesScatter
 @ stdcall -syscall NtMapViewOfSection(long long ptr long long ptr ptr long long long)
+@ stdcall -syscall NtMapViewOfSectionEx(long long ptr ptr ptr long long ptr long)
 # @ stub NtModifyBootEntry
 @ stdcall -syscall NtNotifyChangeDirectoryFile(long long ptr ptr ptr ptr long long long)
 @ stdcall -syscall NtNotifyChangeKey(long long ptr ptr ptr long long ptr long long)
@@ -424,6 +425,7 @@
 @ stdcall -syscall NtUnlockFile(long ptr ptr ptr ptr)
 @ stdcall -syscall NtUnlockVirtualMemory(long ptr ptr long)
 @ stdcall -syscall NtUnmapViewOfSection(long ptr)
+@ stdcall -syscall NtUnmapViewOfSectionEx(long ptr long)
 # @ stub NtVdmControl
 # @ stub NtW32Call
 @ stdcall -syscall NtWaitForAlertByThreadId(ptr ptr)
@@ -594,7 +596,7 @@
 @ stub RtlDeleteNoSplay
 @ stub RtlDeleteOwnersRanges
 @ stub RtlDeleteRange
-@ stdcall RtlDeleteRegistryValue(long ptr wstr)
+@ stdcall RtlDeleteRegistryValue(long ptr ptr)
 @ stdcall RtlDeleteResource(ptr)
 @ stdcall RtlDeleteSecurityObject(ptr)
 @ stdcall RtlDeleteTimer(ptr ptr ptr)
@@ -944,7 +946,7 @@
 @ stdcall RtlRemoveVectoredContinueHandler(ptr)
 @ stdcall RtlRemoveVectoredExceptionHandler(ptr)
 @ stdcall RtlResetRtlTranslations(ptr)
-@ cdecl -arch=arm,arm64,x86_64 RtlRestoreContext(ptr ptr)
+@ cdecl RtlRestoreContext(ptr ptr)
 @ stdcall RtlRestoreLastWin32Error(long) RtlSetLastWin32Error
 @ stub RtlRevertMemoryStream
 @ stub RtlRunDecodeUnicodeString
@@ -1089,7 +1091,7 @@
 @ stdcall RtlWow64IsWowGuestMachineSupported(long ptr)
 @ stdcall -arch=win64 RtlWow64SetThreadContext(long ptr)
 @ stub RtlWriteMemoryStream
-@ stdcall RtlWriteRegistryValue(long ptr wstr long ptr long)
+@ stdcall RtlWriteRegistryValue(long ptr ptr long ptr long)
 @ stub RtlZeroHeap
 @ stdcall RtlZeroMemory(ptr long)
 @ stdcall RtlZombifyActivationContext(ptr)
@@ -1273,6 +1275,7 @@
 # @ stub ZwMapUserPhysicalPages
 # @ stub ZwMapUserPhysicalPagesScatter
 @ stdcall -private -syscall ZwMapViewOfSection(long long ptr long long ptr ptr long long long) NtMapViewOfSection
+@ stdcall -private -syscall ZwMapViewOfSectionEx(long long ptr ptr ptr long long ptr long) NtMapViewOfSectionEx
 # @ stub ZwModifyBootEntry
 @ stdcall -private -syscall ZwNotifyChangeDirectoryFile(long long ptr ptr ptr ptr long long long) NtNotifyChangeDirectoryFile
 @ stdcall -private -syscall ZwNotifyChangeKey(long long ptr ptr ptr long long ptr long long) NtNotifyChangeKey
@@ -1446,6 +1449,7 @@
 @ stdcall -private -syscall ZwUnlockFile(long ptr ptr ptr ptr) NtUnlockFile
 @ stdcall -private -syscall ZwUnlockVirtualMemory(long ptr ptr long) NtUnlockVirtualMemory
 @ stdcall -private -syscall ZwUnmapViewOfSection(long ptr) NtUnmapViewOfSection
+@ stdcall -private -syscall ZwUnmapViewOfSectionEx(long ptr long) NtUnmapViewOfSectionEx
 # @ stub ZwVdmControl
 # @ stub ZwW32Call
 @ stdcall -private -syscall ZwWaitForAlertByThreadId(ptr ptr) NtWaitForAlertByThreadId
@@ -1609,7 +1613,6 @@
 @ cdecl wcsncat(wstr wstr long)
 @ cdecl wcsncmp(wstr wstr long)
 @ cdecl wcsncpy(ptr wstr long)
-@ cdecl wcsnlen(ptr long)
 @ cdecl wcspbrk(wstr wstr)
 @ cdecl wcsrchr(wstr long)
 @ cdecl wcsspn(wstr wstr)
@@ -1634,10 +1637,10 @@
 @ stdcall -syscall __wine_unix_call(int64 long ptr)
 @ stdcall -syscall __wine_unix_spawnvp(long ptr)
 @ cdecl __wine_set_unix_funcs(long ptr)
-@ cdecl __wine_init_unix_lib(long long ptr ptr)
 @ stdcall __wine_ctrl_routine(ptr)
 @ extern __wine_syscall_dispatcher
 @ extern -arch=i386 __wine_ldt_copy
+@ cdecl __wine_set_unix_env(ptr ptr)
 
 # Debugging
 @ stdcall -syscall -norelay __wine_dbg_write(ptr long)
@@ -1645,9 +1648,6 @@
 @ cdecl -norelay __wine_dbg_header(long long str)
 @ cdecl -norelay __wine_dbg_output(str)
 @ cdecl -norelay __wine_dbg_strdup(str)
-
-# Virtual memory
-@ cdecl -syscall __wine_needs_override_large_address_aware()
 
 # Version
 @ cdecl wine_get_version()

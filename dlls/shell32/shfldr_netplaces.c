@@ -33,6 +33,7 @@
 #include "winreg.h"
 
 #include "pidl.h"
+#include "undocshell.h"
 #include "shell32_main.h"
 #include "shresdef.h"
 #include "wine/debug.h"

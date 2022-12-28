@@ -85,7 +85,7 @@ static BOOL output_text_field(HANDLE hFile, const char *field_name, DWORD field_
 
     assert(total_len <= sizeof(output_buffer));
 
-    sprintf(sprintf_fmt, "%%%lus: ", field_width);
+    sprintf(sprintf_fmt, "%%%us: ", field_width);
     ptr += sprintf(ptr, sprintf_fmt, field_name);
 
     ptr += WideCharToMultiByte(CP_ACP, 0, value, value_lenW, ptr, value_lenA, NULL, NULL);
@@ -149,11 +149,15 @@ static BOOL output_text_information(struct dxdiag_information *dxdiag_info, cons
 
     fill_system_text_output_table(dxdiag_info, output_table[0].fields);
 
-    hFile = CreateFileW(filename, GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE,
-                        NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (filename && *filename)
+        hFile = CreateFileW(filename, GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                            NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    else
+        hFile = GetStdHandle(STD_OUTPUT_HANDLE);
+
     if (hFile == INVALID_HANDLE_VALUE)
     {
-        WINE_ERR("File creation failed, last error %lu\n", GetLastError());
+        WINE_ERR("File creation failed, last error %u\n", GetLastError());
         return FALSE;
     }
 
@@ -207,7 +211,7 @@ static HRESULT save_xml_document(IXMLDOMDocument *xmldoc, const WCHAR *filename)
     VARIANT destVar;
     HRESULT hr;
 
-    if (!bstr)
+    if (!bstr || !filename || !*filename)
         return E_OUTOFMEMORY;
 
     V_VT(&destVar) = VT_BSTR;
@@ -277,7 +281,7 @@ static BOOL output_xml_information(struct dxdiag_information *dxdiag_info, const
                           &IID_IXMLDOMDocument, (void **)&xmldoc);
     if (FAILED(hr))
     {
-        WINE_ERR("IXMLDOMDocument instance creation failed with 0x%08lx\n", hr);
+        WINE_ERR("IXMLDOMDocument instance creation failed with 0x%08x\n", hr);
         goto error;
     }
 

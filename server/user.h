@@ -52,31 +52,26 @@ struct winstation
     struct namespace  *desktop_names;      /* namespace for desktops of this winstation */
 };
 
-struct global_cursor
-{
-    int                  x;                /* cursor position */
-    int                  y;
-    rectangle_t          clip;             /* cursor clip rectangle */
-    unsigned int         clip_msg;         /* message to post for cursor clip changes */
-    unsigned int         last_change;      /* time of last position change */
-    user_handle_t        win;              /* window that contains the cursor */
-};
-
 struct desktop
 {
-    struct object        obj;              /* object header */
-    unsigned int         flags;            /* desktop flags */
-    struct winstation   *winstation;       /* winstation this desktop belongs to */
-    struct list          entry;            /* entry in winstation list of desktops */
-    struct window       *top_window;       /* desktop window for this desktop */
-    struct window       *msg_window;       /* HWND_MESSAGE top window */
-    struct hook_table   *global_hooks;     /* table of global hooks on this desktop */
-    struct list          hotkeys;          /* list of registered hotkeys */
-    struct timeout_user *close_timeout;    /* timeout before closing the desktop */
-    struct thread_input *foreground_input; /* thread input of foreground thread */
-    unsigned int         users;            /* processes and threads using this desktop */
-    struct global_cursor cursor;           /* global cursor information */
-    unsigned char        keystate[256];    /* asynchronous key state */
+    struct object                          obj;              /* object header */
+    unsigned int                           flags;            /* desktop flags */
+    struct winstation                     *winstation;       /* winstation this desktop belongs to */
+    struct list                            entry;            /* entry in winstation list of desktops */
+    struct window                         *top_window;       /* desktop window for this desktop */
+    struct window                         *msg_window;       /* HWND_MESSAGE top window */
+    struct hook_table                     *global_hooks;     /* table of global hooks on this desktop */
+    struct list                            hotkeys;          /* list of registered hotkeys */
+    struct timeout_user                   *close_timeout;    /* timeout before closing the desktop */
+    timeout_t                              close_timeout_val;/* timeout duration before closing desktop */
+    struct list                            touches;          /* list of active touches */
+    struct thread_input                   *foreground_input; /* thread input of foreground thread */
+    unsigned int                           users;            /* processes and threads using this desktop */
+    unsigned int                           cursor_clip_msg;  /* message to post for cursor clip changes */
+    user_handle_t                          cursor_win;       /* window that contains the cursor */
+    struct object                         *shared_mapping;   /* desktop shared memory mapping */
+    volatile struct desktop_shared_memory *shared;           /* desktop shared memory ptr */
+    unsigned int                           last_press_alt:1; /* last key press was Alt (used to determine msg on Alt release) */
 };
 
 /* user handles functions */
@@ -97,7 +92,6 @@ extern void cleanup_clipboard_thread( struct thread *thread );
 /* hook functions */
 
 extern void remove_thread_hooks( struct thread *thread );
-extern unsigned int get_active_hooks(void);
 extern struct thread *get_first_global_hook( int id );
 
 /* queue functions */
@@ -120,6 +114,8 @@ extern void post_win_event( struct thread *thread, unsigned int event,
                             const WCHAR *module, data_size_t module_size,
                             user_handle_t handle );
 extern void free_hotkeys( struct desktop *desktop, user_handle_t window );
+extern void free_touches( struct desktop *desktop, user_handle_t window );
+extern void set_clip_rectangle( struct desktop *desktop, const rectangle_t *rect, int send_clip_msg );
 
 /* region functions */
 
@@ -154,7 +150,7 @@ extern struct process *get_top_window_owner( struct desktop *desktop );
 extern void get_top_window_rectangle( struct desktop *desktop, rectangle_t *rect );
 extern void post_desktop_message( struct desktop *desktop, unsigned int message,
                                   lparam_t wparam, lparam_t lparam );
-extern void free_window_handle( struct window *win );
+extern void destroy_window( struct window *win );
 extern void destroy_thread_windows( struct thread *thread );
 extern int is_child_window( user_handle_t parent, user_handle_t child );
 extern int is_valid_foreground_window( user_handle_t window );

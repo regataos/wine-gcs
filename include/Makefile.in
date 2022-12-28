@@ -14,6 +14,7 @@ SOURCES = \
 	amaudio.h \
 	amsi.idl \
 	amstream.idl \
+	amva.h \
 	amvideo.idl \
 	apiset.h \
 	appcompatapi.h \
@@ -413,6 +414,7 @@ SOURCES = \
 	mcx.h \
 	mediaerr.h \
 	mediaobj.idl \
+	medparam.idl \
 	metahost.idl \
 	mfapi.h \
 	mfd3d12.idl \
@@ -434,6 +436,7 @@ SOURCES = \
 	mmreg.h \
 	mmstream.idl \
 	mmsystem.h \
+	mpegtype.idl \
 	mprapi.h \
 	mprerror.h \
 	msacm.h \
@@ -557,7 +560,6 @@ SOURCES = \
 	ntdef.h \
 	ntdsapi.h \
 	ntgdi.h \
-	ntifs.h \
 	ntlsa.h \
 	ntquery.h \
 	ntsecapi.h \
@@ -686,6 +688,7 @@ SOURCES = \
 	slerror.h \
 	slpublic.h \
 	snmp.h \
+	socketapi.h \
 	softpub.h \
 	spatialaudioclient.idl \
 	specstrings.h \
@@ -726,8 +729,6 @@ SOURCES = \
 	traffic.h \
 	transact.idl \
 	trnjoi.idl \
-	trnlcl.idl \
-	trnobj.idl \
 	twain.h \
 	txcoord.idl \
 	txdtc.idl \
@@ -751,6 +752,7 @@ SOURCES = \
 	verrsrc.h \
 	vfw.h \
 	vfwmsgs.h \
+	videoacc.idl \
 	virtdisk.h \
 	vmr9.idl \
 	vmrender.idl \
@@ -763,6 +765,7 @@ SOURCES = \
 	wbemdisp.idl \
 	wbemprov.idl \
 	wct.h \
+	weakreference.idl \
 	webservices.h \
 	werapi.h \
 	wfext.h \
@@ -784,21 +787,29 @@ SOURCES = \
 	windns.h \
 	windot11.h \
 	windows.devices.enumeration.idl \
+	windows.devices.haptics.idl \
+	windows.devices.power.idl \
 	windows.foundation.collections.idl \
 	windows.foundation.idl \
+	windows.foundation.metadata.idl \
+	windows.foundation.numerics.idl \
+	windows.gaming.input.custom.idl \
 	windows.gaming.input.forcefeedback.idl \
 	windows.gaming.input.idl \
+	windows.gaming.ui.idl \
 	windows.globalization.idl \
 	windows.h \
 	windows.media.devices.idl \
 	windows.media.idl \
-	windows.media.speechrecognition.idl \
 	windows.media.speechsynthesis.idl \
 	windows.networking.idl \
 	windows.networking.connectivity.idl \
-	windows.storage.streams.idl \
+	windows.security.cryptography.idl \
 	windows.security.exchangeactivesyncprovisioning.idl \
+	windows.storage.streams.idl \
 	windows.system.idl \
+	windows.system.power.idl \
+	windows.system.threading.idl \
 	windows.system.userprofile.idl \
 	windowscontracts.idl \
 	windowsx.h \

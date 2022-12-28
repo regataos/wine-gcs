@@ -107,6 +107,7 @@ static void test_WSAEnumProtocolsA(void)
         for (i = 0; i < ret; i++)
         {
             ok( strlen( buffer[i].szProtocol ), "No protocol name found\n" );
+            ok( !(buffer[i].dwProviderFlags & PFL_HIDDEN), "Found a protocol with PFL_HIDDEN.\n" );
             test_service_flags( buffer[i].iAddressFamily, buffer[i].iVersion,
                                 buffer[i].iSocketType, buffer[i].iProtocol,
                                 buffer[i].dwServiceFlags1);
@@ -174,6 +175,7 @@ static void test_WSAEnumProtocolsW(void)
         for (i = 0; i < ret; i++)
         {
             ok( lstrlenW( buffer[i].szProtocol ), "No protocol name found\n" );
+            ok( !(buffer[i].dwProviderFlags & PFL_HIDDEN), "Found a protocol with PFL_HIDDEN.\n" );
             test_service_flags( buffer[i].iAddressFamily, buffer[i].iVersion,
                                 buffer[i].iSocketType, buffer[i].iProtocol,
                                 buffer[i].dwServiceFlags1);
@@ -393,13 +395,13 @@ static void test_WSALookupService(void)
     ret = WSALookupServiceBeginW(NULL, 0, &handle);
     error = WSAGetLastError();
     ok(ret == SOCKET_ERROR, "WSALookupServiceBeginW should have failed\n");
-    todo_wine
+todo_wine
     ok(error == WSAEFAULT, "expected 10014, got %d\n", error);
 
     ret = WSALookupServiceBeginW(qs, 0, NULL);
     error = WSAGetLastError();
     ok(ret == SOCKET_ERROR, "WSALookupServiceBeginW should have failed\n");
-    todo_wine
+todo_wine
     ok(error == WSAEFAULT, "expected 10014, got %d\n", error);
 
     ret = WSALookupServiceBeginW(qs, 0, &handle);
@@ -410,9 +412,9 @@ static void test_WSALookupService(void)
 
     ret = WSALookupServiceEnd(NULL);
     error = WSAGetLastError();
-    todo_wine
+todo_wine
     ok(ret == SOCKET_ERROR, "WSALookupServiceEnd should have failed\n");
-    todo_wine
+todo_wine
     ok(error == ERROR_INVALID_HANDLE, "expected 6, got %d\n", error);
 
     /* standard network list query */
@@ -426,9 +428,9 @@ static void test_WSALookupService(void)
         return;
     }
 
-    todo_wine
+todo_wine
     ok(!ret, "WSALookupServiceBeginW failed unexpectedly with error %d\n", error);
-    todo_wine
+todo_wine
     ok(handle != (HANDLE)0xdeadbeef, "Handle was not filled\n");
 
     offset = 0;
@@ -672,6 +674,98 @@ static void test_inet_ntoa(void)
     CloseHandle(event[0]);
     CloseHandle(event[1]);
     CloseHandle(thread);
+}
+
+static void test_inet_addr(void)
+{
+    static const struct
+    {
+        const char *input;
+        u_long addr;
+    }
+    tests[] =
+    {
+        {"1.2.3.4",                0x04030201},
+        {"1 2 3 4",                0x01000000},
+        {"1.2.3. 4",               0xffffffff},
+        {"1.2.3 .4",               0x03000201},
+        {"1.2.3 \xfe\xff",         0x03000201},
+        {"3.4.5.6.7",              0xffffffff},
+        {"3.4.5.6. 7",             0xffffffff},
+        {"3.4.5.6  7",             0x06050403},
+        {" 3.4.5.6",               0xffffffff},
+        {"\t3.4.5.6",              0xffffffff},
+        {"3.4.5.6 ",               0x06050403},
+        {"3.4.5.6  ",              0x06050403},
+        {"3. 4.5.6",               0xffffffff},
+        {"3 .4.5.6",               0x03000000},
+        {"1.2.3",                  0x03000201},
+        {".1.2.3",                 0xffffffff},
+        {"0.0.0.0",                0x00000000},
+        {"",                       0xffffffff},
+        {" 0",                     0xffffffff},
+        {"0xa1a2b3b4 ",            0xb4b3a2a1},
+        {".",                      0xffffffff},
+        {" ",                      0x00000000},
+        {"\t",                     0xffffffff},
+        {"  ",                     0xffffffff},
+        {"127.127.127.255",        0xff7f7f7f},
+        {"127.127.127.255:123",    0xffffffff},
+        {"127.127.127.256",        0xffffffff},
+        {"a",                      0xffffffff},
+        {"1.2.3.0xaA",             0xaa030201},
+        {"1.1.1.0x",               0xffffffff},
+        {"1.2.3.010",              0x08030201},
+        {"1.2.3.00",               0x00030201},
+        {"1.2.3.0a",               0xffffffff},
+        {"1.1.1.0o10",             0xffffffff},
+        {"1.1.1.0b10",             0xffffffff},
+        {"1.1.1.-2",               0xffffffff},
+        {"1",                      0x01000000},
+        {"1.2",                    0x02000001},
+        {"1.2.3",                  0x03000201},
+        {"203569230",              0x4e38220c},
+        {"[0.1.2.3]",              0xffffffff},
+        {"0x00010203",             0x03020100},
+        {"0x2134",                 0x34210000},
+        {"1234BEEF",               0xffffffff},
+        {"017700000001",           0x0100007f},
+        {"0777",                   0xff010000},
+        {"2607:f0d0:1002:51::4",   0xffffffff},
+        {"::177.32.45.20",         0xffffffff},
+        {"::1/128",                0xffffffff},
+        {"::1",                    0xffffffff},
+        {":1",                     0xffffffff},
+    };
+    u_long addr, expected;
+    unsigned int i;
+    char str[32];
+
+    WSASetLastError(0xdeadbeef);
+    addr = inet_addr(NULL);
+    ok(WSAGetLastError() == WSAEFAULT, "got error %u\n", WSAGetLastError());
+    ok(addr == 0xffffffff, "got addr %#08x\n", addr);
+    for (i = 0; i < ARRAY_SIZE(tests); ++i)
+    {
+        winetest_push_context( "Address %s, i %u", debugstr_a(tests[i].input), i );
+        WSASetLastError(0xdeadbeef);
+        addr = inet_addr(tests[i].input);
+        ok(WSAGetLastError() == 0xdeadbeef, "got error %u\n", WSAGetLastError());
+        ok(addr == tests[i].addr, "got addr %#08x\n", addr);
+        winetest_pop_context();
+    }
+
+    strcpy(str, "1.2.3");
+    str[6] = 0;
+    for (i = 1; i < 256; ++i)
+    {
+        if (isdigit(i))
+            continue;
+        str[5] = i;
+        expected = isspace(i) ? 0x03000201 : 0xffffffff;
+        addr = inet_addr(str);
+        ok(addr == expected, "got addr %#08x, expected %#08x, i %u\n", addr, expected, i);
+    }
 }
 
 static void test_inet_pton(void)
@@ -942,39 +1036,28 @@ static void test_inet_pton(void)
     ok(ret == -1, "got %d\n", ret);
     ok(WSAGetLastError() == WSAEAFNOSUPPORT, "got error %u\n", WSAGetLastError());
 
-    WSASetLastError(0xdeadbeef);
-    ret = inet_addr(NULL);
-    ok(ret == INADDR_NONE, "got %#x\n", ret);
-    ok(WSAGetLastError() == WSAEFAULT, "got error %u\n", WSAGetLastError());
-
     for (i = 0; i < ARRAY_SIZE(ipv4_tests); ++i)
     {
         WCHAR inputW[32];
         DWORD addr;
 
-        winetest_push_context( "Address %s", debugstr_a(ipv4_tests[i].input) );
-
         WSASetLastError(0xdeadbeef);
         addr = 0xdeadbeef;
         ret = p_inet_pton(AF_INET, ipv4_tests[i].input, &addr);
-        ok(ret == ipv4_tests[i].ret, "got %d\n", ret);
-        ok(WSAGetLastError() == 0xdeadbeef, "got error %u\n", WSAGetLastError());
-        ok(addr == ipv4_tests[i].addr, "got addr %#08x\n", addr);
+        ok(ret == ipv4_tests[i].ret, "%s: got %d\n", debugstr_a(ipv4_tests[i].input), ret);
+        ok(WSAGetLastError() == 0xdeadbeef, "%s: got error %u\n",
+                debugstr_a(ipv4_tests[i].input), WSAGetLastError());
+        ok(addr == ipv4_tests[i].addr, "%s: got addr %#08x\n", debugstr_a(ipv4_tests[i].input), addr);
 
         MultiByteToWideChar(CP_ACP, 0, ipv4_tests[i].input, -1, inputW, ARRAY_SIZE(inputW));
         WSASetLastError(0xdeadbeef);
         addr = 0xdeadbeef;
         ret = pInetPtonW(AF_INET, inputW, &addr);
-        ok(ret == ipv4_tests[i].ret, "got %d\n", ret);
-        ok(WSAGetLastError() == (ret ? 0xdeadbeef : WSAEINVAL), "got error %u\n", WSAGetLastError());
-        ok(addr == ipv4_tests[i].addr, "got addr %#08x\n", addr);
+        ok(ret == ipv4_tests[i].ret, "%s: got %d\n", debugstr_a(ipv4_tests[i].input), ret);
+        ok(WSAGetLastError() == (ret ? 0xdeadbeef : WSAEINVAL), "%s: got error %u\n",
+                debugstr_a(ipv4_tests[i].input), WSAGetLastError());
+        ok(addr == ipv4_tests[i].addr, "%s: got addr %#08x\n", debugstr_a(ipv4_tests[i].input), addr);
 
-        WSASetLastError(0xdeadbeef);
-        addr = inet_addr(ipv4_tests[i].input);
-        ok(addr == ipv4_tests[i].ret ? ipv4_tests[i].addr : INADDR_NONE, "got addr %#08x\n", addr);
-        ok(WSAGetLastError() == 0xdeadbeef, "got error %u\n", WSAGetLastError());
-
-        winetest_pop_context();
     }
 
     for (i = 0; i < ARRAY_SIZE(ipv6_tests); ++i)
@@ -982,24 +1065,24 @@ static void test_inet_pton(void)
         unsigned short addr[8];
         WCHAR inputW[64];
 
-        winetest_push_context( "Address %s", debugstr_a(ipv6_tests[i].input) );
-
         WSASetLastError(0xdeadbeef);
         memset(addr, 0xab, sizeof(addr));
         ret = p_inet_pton(AF_INET6, ipv6_tests[i].input, addr);
-        ok(ret == ipv6_tests[i].ret, "got %d\n", ret);
-        ok(WSAGetLastError() == 0xdeadbeef, "got error %u\n", WSAGetLastError());
-        ok(!memcmp(addr, ipv6_tests[i].addr, sizeof(addr)), "address didn't match\n");
+        ok(ret == ipv6_tests[i].ret, "%s: got %d\n", debugstr_a(ipv6_tests[i].input), ret);
+        ok(WSAGetLastError() == 0xdeadbeef, "%s: got error %u\n",
+                debugstr_a(ipv6_tests[i].input), WSAGetLastError());
+        ok(!memcmp(addr, ipv6_tests[i].addr, sizeof(addr)),
+                "%s: address didn't match\n", debugstr_a(ipv6_tests[i].input));
 
         MultiByteToWideChar(CP_ACP, 0, ipv6_tests[i].input, -1, inputW, ARRAY_SIZE(inputW));
         WSASetLastError(0xdeadbeef);
         memset(addr, 0xab, sizeof(addr));
         ret = pInetPtonW(AF_INET6, inputW, addr);
-        ok(ret == ipv6_tests[i].ret, "got %d\n", ret);
-        ok(WSAGetLastError() == (ret ? 0xdeadbeef : WSAEINVAL), "got error %u\n", WSAGetLastError());
-        ok(!memcmp(addr, ipv6_tests[i].addr, sizeof(addr)), "address didn't match\n");
-
-        winetest_pop_context();
+        ok(ret == ipv6_tests[i].ret, "%s: got %d\n", debugstr_a(ipv6_tests[i].input), ret);
+        ok(WSAGetLastError() == (ret ? 0xdeadbeef : WSAEINVAL), "%s: got error %u\n",
+                debugstr_a(ipv6_tests[i].input), WSAGetLastError());
+        ok(!memcmp(addr, ipv6_tests[i].addr, sizeof(addr)),
+                "%s: address didn't match\n", debugstr_a(ipv6_tests[i].input));
     }
 }
 
@@ -1169,10 +1252,10 @@ static void test_WSAAddressToString(void)
     SOCKADDR_IN6 sockaddr6;
     char output[64];
     WCHAR outputW[64], expected_outputW[64];
-    unsigned int i;
     SOCKET v6;
     INT ret;
     DWORD len;
+    int i, j;
 
     len = 0;
     sockaddr.sin_family = AF_INET;
@@ -1201,65 +1284,87 @@ static void test_WSAAddressToString(void)
     ok( len == 8, "got %u\n", len );
     ok( !wcscmp(outputW, L"0.0.0.0"), "got %s\n", wine_dbgstr_w(outputW) );
 
-    for (i = 0; i < ARRAY_SIZE(ipv4_tests); ++i)
+    for (i = 0; i < 2; i++)
     {
-        winetest_push_context( "Test %u", i );
+        for (j = 0; j < ARRAY_SIZE(ipv4_tests); j++)
+        {
+            sockaddr.sin_family = AF_INET;
+            sockaddr.sin_addr.s_addr = ipv4_tests[j].address;
+            sockaddr.sin_port = ipv4_tests[j].port;
 
-        sockaddr.sin_family = AF_INET;
-        sockaddr.sin_addr.s_addr = ipv4_tests[i].address;
-        sockaddr.sin_port = ipv4_tests[i].port;
+            if (i == 0)
+            {
+                len = sizeof(output);
+                memset(output, 0, len);
+                ret = WSAAddressToStringA( (SOCKADDR *)&sockaddr, sizeof(sockaddr), NULL, output, &len );
+                ok( !ret, "ipv4_tests[%d] failed unexpectedly: %d\n", j, WSAGetLastError() );
+                ok( !strcmp( output, ipv4_tests[j].output ),
+                    "ipv4_tests[%d]: got address %s, expected %s\n",
+                    j, wine_dbgstr_a(output), wine_dbgstr_a(ipv4_tests[j].output) );
+                ok( len == strlen(ipv4_tests[j].output) + 1,
+                    "ipv4_tests[%d]: got length %d, expected %d\n",
+                    j, len, strlen(ipv4_tests[j].output) + 1 );
+            }
+            else
+            {
+                len = sizeof(outputW);
+                memset(outputW, 0, len);
+                ret = WSAAddressToStringW( (SOCKADDR *)&sockaddr, sizeof(sockaddr), NULL, outputW, &len );
+                MultiByteToWideChar( CP_ACP, 0, ipv4_tests[j].output, -1,
+                                     expected_outputW, ARRAY_SIZE(expected_outputW) );
+                ok( !ret, "ipv4_tests[%d] failed unexpectedly: %d\n", j, WSAGetLastError() );
+                ok( !wcscmp( outputW, expected_outputW ),
+                    "ipv4_tests[%d]: got address %s, expected %s\n",
+                    j, wine_dbgstr_w(outputW), wine_dbgstr_w(expected_outputW) );
+                ok( len == wcslen(expected_outputW) + 1,
+                    "ipv4_tests[%d]: got length %d, expected %d\n",
+                    j, len, wcslen(expected_outputW) + 1 );
+            }
+        }
 
-        len = sizeof(output);
-        memset( output, 0, len );
-        ret = WSAAddressToStringA( (SOCKADDR *)&sockaddr, sizeof(sockaddr), NULL, output, &len );
-        ok( !ret, "got error %d\n", WSAGetLastError() );
-        ok( !strcmp( output, ipv4_tests[i].output ), "got string %s\n", debugstr_a(output) );
-        ok( len == strlen(ipv4_tests[i].output) + 1, "got len %u\n", len );
+        /* check to see if IPv6 is available */
+        v6 = socket(AF_INET6, SOCK_STREAM, IPPROTO_TCP);
+        if (v6 == INVALID_SOCKET) {
+            skip("Could not create IPv6 socket (LastError: %d; %d expected if IPv6 not available).\n",
+                WSAGetLastError(), WSAEAFNOSUPPORT);
+            continue;
+        }
+        closesocket(v6);
 
-        len = sizeof(outputW);
-        memset( outputW, 0, len );
-        ret = WSAAddressToStringW( (SOCKADDR *)&sockaddr, sizeof(sockaddr), NULL, outputW, &len );
-        MultiByteToWideChar( CP_ACP, 0, ipv4_tests[i].output, -1,
-                             expected_outputW, ARRAY_SIZE(expected_outputW) );
-        ok( !ret, "got error %d\n", WSAGetLastError() );
-        ok( !wcscmp( outputW, expected_outputW ), "got string %s\n", debugstr_w(outputW) );
-        ok( len == wcslen(expected_outputW) + 1, "got len %u\n", len );
+        for (j = 0; j < ARRAY_SIZE(ipv6_tests); j++)
+        {
+            sockaddr6.sin6_family = AF_INET6;
+            sockaddr6.sin6_scope_id = ipv6_tests[j].scope;
+            sockaddr6.sin6_port = ipv6_tests[j].port;
+            memcpy( sockaddr6.sin6_addr.s6_addr, ipv6_tests[j].address, sizeof(ipv6_tests[j].address) );
 
-        winetest_pop_context();
-    }
-
-    v6 = socket( AF_INET6, SOCK_STREAM, IPPROTO_TCP );
-    if (v6 == -1 && WSAGetLastError() == WSAEAFNOSUPPORT)
-    {
-        skip( "IPv6 is not supported\n" );
-        return;
-    }
-    closesocket( v6 );
-
-    for (i = 0; i < ARRAY_SIZE(ipv6_tests); ++i)
-    {
-        winetest_push_context( "Test %u", i );
-
-        sockaddr6.sin6_family = AF_INET6;
-        sockaddr6.sin6_scope_id = ipv6_tests[i].scope;
-        sockaddr6.sin6_port = ipv6_tests[i].port;
-        memcpy( sockaddr6.sin6_addr.s6_addr, ipv6_tests[i].address, sizeof(ipv6_tests[i].address) );
-
-        len = sizeof(output);
-        ret = WSAAddressToStringA( (SOCKADDR *)&sockaddr6, sizeof(sockaddr6), NULL, output, &len );
-        ok( !ret, "got error %d\n", WSAGetLastError() );
-        ok( !strcmp( output, ipv6_tests[i].output ), "got string %s\n", debugstr_a(output) );
-        ok( len == strlen(ipv6_tests[i].output) + 1, "got len %u\n", len );
-
-        len = sizeof(outputW);
-        ret = WSAAddressToStringW( (SOCKADDR *)&sockaddr6, sizeof(sockaddr6), NULL, outputW, &len );
-        MultiByteToWideChar( CP_ACP, 0, ipv6_tests[i].output, -1,
-                             expected_outputW, ARRAY_SIZE(expected_outputW) );
-        ok( !ret, "got error %d\n", WSAGetLastError() );
-        ok( !wcscmp( outputW, expected_outputW ), "got string %s\n", debugstr_w(outputW) );
-        ok( len == wcslen(expected_outputW) + 1, "got len %u\n", len );
-
-        winetest_pop_context();
+            if (i == 0)
+            {
+                len = sizeof(output);
+                ret = WSAAddressToStringA( (SOCKADDR *)&sockaddr6, sizeof(sockaddr6), NULL, output, &len );
+                ok( !ret, "ipv6_tests[%d] failed unexpectedly: %d\n", j, WSAGetLastError() );
+                ok( !strcmp( output, ipv6_tests[j].output ),
+                    "ipv6_tests[%d]: gave address %s, expected %s\n",
+                    j, wine_dbgstr_a(output), wine_dbgstr_a(ipv6_tests[j].output) );
+                ok( len == strlen(ipv6_tests[j].output) + 1,
+                    "ipv6_tests[%d]: got length %d, expected %d\n",
+                    j, len, strlen(ipv6_tests[j].output) + 1 );
+            }
+            else
+            {
+                len = sizeof(outputW);
+                ret = WSAAddressToStringW( (SOCKADDR *)&sockaddr6, sizeof(sockaddr6), NULL, outputW, &len );
+                MultiByteToWideChar( CP_ACP, 0, ipv6_tests[j].output, -1,
+                                     expected_outputW, ARRAY_SIZE(expected_outputW) );
+                ok( !ret, "ipv6_tests[%d] failed unexpectedly: %d\n", j, WSAGetLastError() );
+                ok( !wcscmp( outputW, expected_outputW ),
+                    "ipv6_tests[%d]: got address %s, expected %s\n",
+                    j, wine_dbgstr_w(outputW), wine_dbgstr_w(expected_outputW) );
+                ok( len == wcslen(expected_outputW) + 1,
+                    "ipv6_tests[%d]: got length %d, expected %d\n",
+                    j, len, wcslen(expected_outputW) + 1 );
+            }
+        }
     }
 }
 
@@ -1381,11 +1486,12 @@ static void test_WSAStringToAddress(void)
         { "", { 0, 0, 0, 0, 0, 0, 0, 0 }, 0, WSAEINVAL },
     };
 
-    int len, ret, expected_len;
     WCHAR inputW[64];
+    INT len, ret, expected_len, expected_ret;
+    short expected_family;
     SOCKADDR_IN sockaddr;
     SOCKADDR_IN6 sockaddr6;
-    unsigned int i, j;
+    int i, j;
 
     len = 0;
     WSASetLastError( 0 );
@@ -1397,15 +1503,11 @@ static void test_WSAStringToAddress(void)
 
     for (i = 0; i < 2; i++)
     {
-        winetest_push_context( i ? "unicode" : "ascii" );
-
         for (j = 0; j < ARRAY_SIZE(ipv4_tests); j++)
         {
             len = sizeof(sockaddr) + 10;
             expected_len = ipv4_tests[j].error ? len : sizeof(sockaddr);
             memset( &sockaddr, 0xab, sizeof(sockaddr) );
-
-            winetest_push_context( "addr %s", debugstr_a(ipv4_tests[j].input) );
 
             WSASetLastError( 0 );
             if (i == 0)
@@ -1417,16 +1519,26 @@ static void test_WSAStringToAddress(void)
                 MultiByteToWideChar( CP_ACP, 0, ipv4_tests[j].input, -1, inputW, ARRAY_SIZE(inputW) );
                 ret = WSAStringToAddressW( inputW, AF_INET, NULL, (SOCKADDR *)&sockaddr, &len );
             }
-            ok( ret == (ipv4_tests[j].error ? SOCKET_ERROR : 0), "got %d\n", ret );
-            ok( WSAGetLastError() == ipv4_tests[j].error, "got error %d\n", WSAGetLastError() );
-            ok( sockaddr.sin_family == (ipv4_tests[j].error ? 0 : AF_INET),
-                "got family %#x\n", sockaddr.sin_family );
+            expected_ret = ipv4_tests[j].error ? SOCKET_ERROR : 0;
+            expected_family = ipv4_tests[j].error ? 0 : AF_INET;
+            ok( ret == expected_ret,
+                "WSAStringToAddress(%s) returned %d, expected %d\n",
+                wine_dbgstr_a( ipv4_tests[j].input ), ret, expected_ret );
+            ok( WSAGetLastError() == ipv4_tests[j].error,
+                "WSAStringToAddress(%s) gave error %d, expected %d\n",
+                wine_dbgstr_a( ipv4_tests[j].input ), WSAGetLastError(), ipv4_tests[j].error );
+            ok( sockaddr.sin_family == expected_family,
+                "WSAStringToAddress(%s) gave family %d, expected %d\n",
+                wine_dbgstr_a( ipv4_tests[j].input ), sockaddr.sin_family, expected_family );
             ok( sockaddr.sin_addr.s_addr == htonl( ipv4_tests[j].address ),
-                "got addr %08x\n", sockaddr.sin_addr.s_addr );
-            ok( sockaddr.sin_port == htons( ipv4_tests[j].port ), "got port %u\n", sockaddr.sin_port );
-            ok( len == expected_len, "got len %d\n", len );
-
-            winetest_pop_context();
+                "WSAStringToAddress(%s) gave address %08x, expected %08x\n",
+                wine_dbgstr_a( ipv4_tests[j].input ), sockaddr.sin_addr.s_addr, htonl( ipv4_tests[j].address) );
+            ok( sockaddr.sin_port == htons( ipv4_tests[j].port ),
+                "WSAStringToAddress(%s) gave port %04x, expected %04x\n",
+                wine_dbgstr_a( ipv4_tests[j].input ), sockaddr.sin_port, htons( ipv4_tests[j].port ) );
+            ok( len == expected_len,
+                "WSAStringToAddress(%s) gave length %d, expected %d\n",
+                wine_dbgstr_a( ipv4_tests[j].input ), len, expected_len );
         }
 
         for (j = 0; j < ARRAY_SIZE(ipv6_tests); j++)
@@ -1450,28 +1562,41 @@ static void test_WSAStringToAddress(void)
                 win_skip("IPv6 not supported\n");
                 break;
             }
-
-            winetest_push_context( "addr %s", debugstr_a(ipv6_tests[j].input) );
-
-            ok( ret == (ipv6_tests[j].error ? SOCKET_ERROR : 0), "got %d\n", ret );
-            ok( WSAGetLastError() == ipv6_tests[j].error, "got error %d\n", WSAGetLastError() );
-            ok( sockaddr6.sin6_family == (ipv6_tests[j].error ? 0 : AF_INET6),
-                "got family %#x\n", sockaddr6.sin6_family );
-            ok( !memcmp( &sockaddr6.sin6_addr, ipv6_tests[j].address, sizeof(sockaddr6.sin6_addr) ),
-                "got addr %x:%x:%x:%x:%x:%x:%x:%x\n",
+            expected_ret = ipv6_tests[j].error ? SOCKET_ERROR : 0;
+            expected_family = ipv6_tests[j].error ? 0 : AF_INET6;
+            ok( ret == expected_ret,
+                "WSAStringToAddress(%s) returned %d, expected %d\n",
+                wine_dbgstr_a( ipv6_tests[j].input ), ret, expected_ret );
+            ok( WSAGetLastError() == ipv6_tests[j].error,
+                "WSAStringToAddress(%s) gave error %d, expected %d\n",
+                wine_dbgstr_a( ipv6_tests[j].input ), WSAGetLastError(), ipv6_tests[j].error );
+            ok( sockaddr6.sin6_family == expected_family,
+                "WSAStringToAddress(%s) gave family %d, expected %d\n",
+                wine_dbgstr_a( ipv4_tests[j].input ), sockaddr6.sin6_family, expected_family );
+            ok( memcmp(&sockaddr6.sin6_addr, ipv6_tests[j].address, sizeof(sockaddr6.sin6_addr)) == 0,
+                "WSAStringToAddress(%s) gave address %x:%x:%x:%x:%x:%x:%x:%x, expected %x:%x:%x:%x:%x:%x:%x:%x\n",
+                wine_dbgstr_a( ipv6_tests[j].input ),
                 sockaddr6.sin6_addr.s6_words[0], sockaddr6.sin6_addr.s6_words[1],
                 sockaddr6.sin6_addr.s6_words[2], sockaddr6.sin6_addr.s6_words[3],
                 sockaddr6.sin6_addr.s6_words[4], sockaddr6.sin6_addr.s6_words[5],
-                sockaddr6.sin6_addr.s6_words[6], sockaddr6.sin6_addr.s6_words[7] );
-            ok( !sockaddr6.sin6_scope_id, "got scope id %u\n", sockaddr6.sin6_scope_id );
-            ok( sockaddr6.sin6_port == ipv6_tests[j].port, "got port %u\n", sockaddr6.sin6_port );
-            ok( !sockaddr6.sin6_flowinfo, "got flowinfo %u\n", sockaddr6.sin6_flowinfo );
-            ok( len == expected_len, "got len %d\n", len );
-
-            winetest_pop_context();
+                sockaddr6.sin6_addr.s6_words[6], sockaddr6.sin6_addr.s6_words[7],
+                ipv6_tests[j].address[0], ipv6_tests[j].address[1],
+                ipv6_tests[j].address[2], ipv6_tests[j].address[3],
+                ipv6_tests[j].address[4], ipv6_tests[j].address[5],
+                ipv6_tests[j].address[6], ipv6_tests[j].address[7] );
+            ok( sockaddr6.sin6_scope_id == 0,
+                "WSAStringToAddress(%s) gave scope %d, expected 0\n",
+                wine_dbgstr_a( ipv6_tests[j].input ), sockaddr6.sin6_scope_id );
+            ok( sockaddr6.sin6_port == ipv6_tests[j].port,
+                "WSAStringToAddress(%s) gave port %04x, expected %04x\n",
+                wine_dbgstr_a( ipv6_tests[j].input ), sockaddr6.sin6_port, ipv6_tests[j].port );
+            ok( sockaddr6.sin6_flowinfo == 0,
+                "WSAStringToAddress(%s) gave flowinfo %d, expected 0\n",
+                wine_dbgstr_a( ipv6_tests[j].input ), sockaddr6.sin6_flowinfo );
+            ok( len == expected_len,
+                "WSAStringToAddress(%s) gave length %d, expected %d\n",
+                wine_dbgstr_a( ipv6_tests[j].input ), len, expected_len );
         }
-
-        winetest_pop_context();
     }
 }
 
@@ -2568,40 +2693,40 @@ static void test_WSAEnumNameSpaceProvidersA(void)
     SetLastError(0xdeadbeef);
     ret = WSAEnumNameSpaceProvidersA(&len, name);
     error = WSAGetLastError();
-    todo_wine
+todo_wine
     ok(ret == SOCKET_ERROR, "Expected failure, got %u\n", ret);
-    todo_wine
+todo_wine
     ok(error == WSAEFAULT, "Expected 10014, got %u\n", error);
 
     /* Invalid parameter tests */
     SetLastError(0xdeadbeef);
     ret = WSAEnumNameSpaceProvidersA(NULL, name);
     error = WSAGetLastError();
-    todo_wine
+todo_wine
     ok(ret == SOCKET_ERROR, "Expected failure, got %u\n", ret);
-    todo_wine
+todo_wine
     ok(error == WSAEFAULT, "Expected 10014, got %u\n", error);
 
     SetLastError(0xdeadbeef);
     ret = WSAEnumNameSpaceProvidersA(NULL, NULL);
     error = WSAGetLastError();
-    todo_wine
+todo_wine
     ok(ret == SOCKET_ERROR, "Expected failure, got %u\n", ret);
-    todo_wine
+todo_wine
     ok(error == WSAEFAULT, "Expected 10014, got %u\n", error);
 
     SetLastError(0xdeadbeef);
     ret = WSAEnumNameSpaceProvidersA(&len, NULL);
     error = WSAGetLastError();
-    todo_wine
+todo_wine
     ok(ret == SOCKET_ERROR, "Expected failure, got %u\n", ret);
-    todo_wine
+todo_wine
     ok(error == WSAEFAULT, "Expected 10014, got %u\n", error);
 
     name = HeapAlloc(GetProcessHeap(), 0, len);
 
     ret = WSAEnumNameSpaceProvidersA(&len, name);
-    todo_wine
+todo_wine
     ok(ret > 0, "Expected more than zero name space providers\n");
 
     HeapFree(GetProcessHeap(), 0, name);
@@ -2615,40 +2740,40 @@ static void test_WSAEnumNameSpaceProvidersW(void)
     SetLastError(0xdeadbeef);
     ret = WSAEnumNameSpaceProvidersW(&len, name);
     error = WSAGetLastError();
-    todo_wine
+todo_wine
     ok(ret == SOCKET_ERROR, "Expected failure, got %u\n", ret);
-    todo_wine
+todo_wine
     ok(error == WSAEFAULT, "Expected 10014, got %u\n", error);
 
     /* Invalid parameter tests */
     SetLastError(0xdeadbeef);
     ret = WSAEnumNameSpaceProvidersW(NULL, name);
     error = WSAGetLastError();
-    todo_wine
+todo_wine
     ok(ret == SOCKET_ERROR, "Expected failure, got %u\n", ret);
-    todo_wine
+todo_wine
     ok(error == WSAEFAULT, "Expected 10014, got %u\n", error);
 
     SetLastError(0xdeadbeef);
     ret = WSAEnumNameSpaceProvidersW(NULL, NULL);
     error = WSAGetLastError();
-    todo_wine
+todo_wine
     ok(ret == SOCKET_ERROR, "Expected failure, got %u\n", ret);
-    todo_wine
+todo_wine
     ok(error == WSAEFAULT, "Expected 10014, got %u\n", error);
 
     SetLastError(0xdeadbeef);
     ret = WSAEnumNameSpaceProvidersW(&len, NULL);
     error = WSAGetLastError();
-    todo_wine
+todo_wine
     ok(ret == SOCKET_ERROR, "Expected failure, got %u\n", ret);
-    todo_wine
+todo_wine
     ok(error == WSAEFAULT, "Expected 10014, got %u\n", error);
 
     name = HeapAlloc(GetProcessHeap(), 0, len);
 
     ret = WSAEnumNameSpaceProvidersW(&len, name);
-    todo_wine
+todo_wine
     ok(ret > 0, "Expected more than zero name space providers\n");
 
     if (winetest_debug > 1)
@@ -2773,81 +2898,10 @@ static void test_WSCGetProviderPath(void)
     ok(len == 256, "Got unexpected len %d.\n", len);
 }
 
-static void test_startup(void)
-{
-    unsigned int i;
-    WSADATA data;
-    int ret;
-
-    static const struct
-    {
-        WORD version;
-        WORD ret_version;
-    }
-    tests[] =
-    {
-        {MAKEWORD(0, 0), MAKEWORD(2, 2)},
-        {MAKEWORD(0, 1), MAKEWORD(2, 2)},
-        {MAKEWORD(1, 0), MAKEWORD(1, 0)},
-        {MAKEWORD(1, 1), MAKEWORD(1, 1)},
-        {MAKEWORD(1, 2), MAKEWORD(1, 1)},
-        {MAKEWORD(1, 0xff), MAKEWORD(1, 1)},
-        {MAKEWORD(2, 0), MAKEWORD(2, 0)},
-        {MAKEWORD(2, 1), MAKEWORD(2, 1)},
-        {MAKEWORD(2, 2), MAKEWORD(2, 2)},
-        {MAKEWORD(2, 3), MAKEWORD(2, 2)},
-        {MAKEWORD(2, 0xff), MAKEWORD(2, 2)},
-        {MAKEWORD(3, 0), MAKEWORD(2, 2)},
-        {MAKEWORD(0xff, 0), MAKEWORD(2, 2)},
-    };
-
-    for (i = 0; i < ARRAY_SIZE(tests); ++i)
-    {
-        winetest_push_context("Version %#x", tests[i].version);
-
-        memset(&data, 0xcc, sizeof(data));
-        data.lpVendorInfo = (void *)0xdeadbeef;
-        ret = WSAStartup(tests[i].version, &data);
-        ok(ret == (LOBYTE(tests[i].version) ? 0 : WSAVERNOTSUPPORTED), "got %d\n", ret);
-        ok(data.wVersion == tests[i].ret_version, "got version %#x\n", data.wVersion);
-        if (!ret)
-        {
-            ret = WSAStartup(tests[i].version, &data);
-            ok(!ret, "got %d\n", ret);
-
-            WSASetLastError(0xdeadbeef);
-            ret = WSACleanup();
-            ok(!ret, "got %d\n", ret);
-            todo_wine ok(!WSAGetLastError(), "got error %u\n", WSAGetLastError());
-
-            WSASetLastError(0xdeadbeef);
-            ret = WSACleanup();
-            ok(!ret, "got %d\n", ret);
-            todo_wine ok(!WSAGetLastError(), "got error %u\n", WSAGetLastError());
-        }
-        ok(data.lpVendorInfo == (void *)0xdeadbeef, "got vendor info %p\n", data.lpVendorInfo);
-        ok(data.wHighVersion == 0x202, "got maximum version %#x\n", data.wHighVersion);
-        ok(!strcmp(data.szDescription, "WinSock 2.0"), "got description %s\n", debugstr_a(data.szDescription));
-        ok(!strcmp(data.szSystemStatus, "Running"), "got status %s\n", debugstr_a(data.szSystemStatus));
-        ok(data.iMaxSockets == (LOBYTE(tests[i].version) == 1 ? 32767 : 0), "got maximum sockets %u\n", data.iMaxSockets);
-        ok(data.iMaxUdpDg == (LOBYTE(tests[i].version) == 1 ? 65467 : 0), "got maximum datagram size %u\n", data.iMaxUdpDg);
-
-        WSASetLastError(0xdeadbeef);
-        ret = WSACleanup();
-        ok(ret == -1, "got %d\n", ret);
-        ok(WSAGetLastError() == WSANOTINITIALISED, "got error %u\n", WSAGetLastError());
-
-        ret = WSAStartup(tests[i].version, NULL);
-        ok(ret == (LOBYTE(tests[i].version) ? WSAEFAULT : WSAVERNOTSUPPORTED), "got %d\n", ret);
-
-        winetest_pop_context();
-    }
-}
-
 START_TEST( protocol )
 {
     WSADATA data;
-    int ret;
+    WORD version = MAKEWORD( 2, 2 );
 
     pFreeAddrInfoExW = (void *)GetProcAddress(GetModuleHandleA("ws2_32"), "FreeAddrInfoExW");
     pGetAddrInfoExOverlappedResult = (void *)GetProcAddress(GetModuleHandleA("ws2_32"), "GetAddrInfoExOverlappedResult");
@@ -2859,8 +2913,7 @@ START_TEST( protocol )
     pInetPtonW = (void *)GetProcAddress(GetModuleHandleA("ws2_32"), "InetPtonW");
     pWSCGetProviderInfo = (void *)GetProcAddress(GetModuleHandleA("ws2_32"), "WSCGetProviderInfo");
 
-    ret = WSAStartup(0x202, &data);
-    ok(!ret, "got %d\n", ret);
+    if (WSAStartup( version, &data )) return;
 
     test_WSAEnumProtocolsA();
     test_WSAEnumProtocolsW();
@@ -2869,8 +2922,11 @@ START_TEST( protocol )
 
     test_getservbyname();
     test_WSALookupService();
+    test_WSAAsyncGetServByPort();
+    test_WSAAsyncGetServByName();
 
     test_inet_ntoa();
+    test_inet_addr();
     test_inet_pton();
     test_addr_to_print();
     test_WSAAddressToString();
@@ -2890,20 +2946,4 @@ START_TEST( protocol )
     test_WSAEnumNameSpaceProvidersW();
     test_WSCGetProviderInfo();
     test_WSCGetProviderPath();
-
-    WSACleanup();
-
-    /* These tests are finnicky. If WSAStartup() is ever called with a
-     * version below 2.2, it causes getaddrinfo() to behave differently. */
-
-    test_startup();
-
-    /* And if WSAAsyncGetServBy*() is ever called, it somehow causes
-     * WSAStartup() to succeed with 0.1 instead of failing. */
-
-    ret = WSAStartup(0x202, &data);
-    ok(!ret, "got %d\n", ret);
-
-    test_WSAAsyncGetServByPort();
-    test_WSAAsyncGetServByName();
 }

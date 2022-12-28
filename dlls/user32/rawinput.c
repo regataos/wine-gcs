@@ -172,6 +172,46 @@ static struct device *add_device(HDEVINFO set, SP_DEVICE_INTERFACE_DATA *iface)
     return device;
 }
 
+void rawinput_add_device(const WCHAR *device_path)
+{
+    ULONG i;
+
+    EnterCriticalSection(&rawinput_devices_cs);
+
+    for (i = 0; i < rawinput_devices_count; ++i)
+        if (!wcsicmp(rawinput_devices[i].detail->DevicePath, device_path))
+            break;
+
+    /* not there yet, force refresh the list, we cannot just add the device
+       here because it may not have its rawinput handle property assigned yet */
+    if (i == rawinput_devices_count) rawinput_devices_count = 0;
+
+    LeaveCriticalSection(&rawinput_devices_cs);
+}
+
+void rawinput_remove_device(const WCHAR *device_path)
+{
+    UINT i;
+
+    EnterCriticalSection(&rawinput_devices_cs);
+
+    for (i = 0; i < rawinput_devices_count; ++i)
+        if (!wcsicmp(rawinput_devices[i].detail->DevicePath, device_path))
+            break;
+
+    if (i < rawinput_devices_count)
+    {
+        HidD_FreePreparsedData(rawinput_devices[i].data);
+        CloseHandle(rawinput_devices[i].file);
+        free(rawinput_devices[i].detail);
+
+        rawinput_devices_count--;
+        memmove(rawinput_devices + i, rawinput_devices + i + 1, rawinput_devices_count - i);
+    }
+
+    LeaveCriticalSection(&rawinput_devices_cs);
+}
+
 void rawinput_update_device_list(void)
 {
     SP_DEVICE_INTERFACE_DATA iface = { sizeof(iface) };
@@ -279,11 +319,25 @@ BOOL rawinput_device_get_usages(HANDLE handle, USAGE *usage_page, USAGE *usage)
 
     *usage_page = *usage = 0;
 
-    if (!(device = find_device_from_handle(handle))) return FALSE;
-    if (device->info.dwType != RIM_TYPEHID) return FALSE;
+    EnterCriticalSection(&rawinput_devices_cs);
+
+    if (!(device = find_device_from_handle(handle)))
+    {
+        WARN("could not find device for handle %p\n", handle);
+        LeaveCriticalSection(&rawinput_devices_cs);
+        return FALSE;
+    }
+    if (device->info.dwType != RIM_TYPEHID)
+    {
+        WARN("found non-hid device for handle %p\n", handle);
+        LeaveCriticalSection(&rawinput_devices_cs);
+        return FALSE;
+    }
 
     *usage_page = device->info.hid.usUsagePage;
     *usage = device->info.hid.usUsage;
+
+    LeaveCriticalSection(&rawinput_devices_cs);
     return TRUE;
 }
 
@@ -425,7 +479,7 @@ BOOL rawinput_from_hardware_message(RAWINPUT *rawinput, const struct hardware_ms
 UINT WINAPI GetRawInputDeviceList(RAWINPUTDEVICELIST *devices, UINT *device_count, UINT size)
 {
     static UINT last_check;
-    UINT i, ticks = GetTickCount();
+    UINT i, count, ticks = GetTickCount();
 
     TRACE("devices %p, device_count %p, size %u.\n", devices, device_count, size);
 
@@ -441,38 +495,42 @@ UINT WINAPI GetRawInputDeviceList(RAWINPUTDEVICELIST *devices, UINT *device_coun
         return ~0U;
     }
 
-    if (ticks - last_check > 2000)
+    EnterCriticalSection(&rawinput_devices_cs);
+    if (ticks - last_check > 2000 || !rawinput_devices_count)
     {
         last_check = ticks;
         rawinput_update_device_list();
     }
 
+    count = rawinput_devices_count;
+    LeaveCriticalSection(&rawinput_devices_cs);
+
     if (!devices)
     {
-        *device_count = rawinput_devices_count;
+        *device_count = count;
         return 0;
     }
 
-    if (*device_count < rawinput_devices_count)
+    if (*device_count < count)
     {
         SetLastError(ERROR_INSUFFICIENT_BUFFER);
-        *device_count = rawinput_devices_count;
+        *device_count = count;
         return ~0U;
     }
 
-    for (i = 0; i < rawinput_devices_count; ++i)
+    for (i = 0; i < count; ++i)
     {
         devices[i].hDevice = rawinput_devices[i].handle;
         devices[i].dwType = rawinput_devices[i].info.dwType;
     }
 
-    return rawinput_devices_count;
+    return count;
 }
 
 /***********************************************************************
  *              RegisterRawInputDevices   (USER32.@)
  */
-BOOL WINAPI DECLSPEC_HOTPATCH RegisterRawInputDevices(RAWINPUTDEVICE *devices, UINT device_count, UINT size)
+BOOL WINAPI DECLSPEC_HOTPATCH RegisterRawInputDevices(const RAWINPUTDEVICE *devices, UINT device_count, UINT size)
 {
     struct rawinput_device *d;
     BOOL ret;
@@ -743,8 +801,12 @@ UINT WINAPI GetRawInputDeviceInfoW(HANDLE handle, UINT command, void *data, UINT
         SetLastError(ERROR_NOACCESS);
         return ~0U;
     }
+
+    EnterCriticalSection(&rawinput_devices_cs);
+
     if (!(device = find_device_from_handle(handle)))
     {
+        LeaveCriticalSection(&rawinput_devices_cs);
         SetLastError(ERROR_INVALID_HANDLE);
         return ~0U;
     }
@@ -776,9 +838,12 @@ UINT WINAPI GetRawInputDeviceInfoW(HANDLE handle, UINT command, void *data, UINT
 
     default:
         FIXME("command %#x not supported\n", command);
+        LeaveCriticalSection(&rawinput_devices_cs);
         SetLastError(ERROR_INVALID_PARAMETER);
         return ~0U;
     }
+
+    LeaveCriticalSection(&rawinput_devices_cs);
 
     if (!data)
         return 0;

@@ -134,15 +134,15 @@ struct console_host_ioctl
 
 struct console_server
 {
-    struct object         obj;         /* object header */
-    struct fd            *fd;          /* pseudo-fd for ioctls */
-    struct console       *console;     /* attached console */
-    struct list           queue;       /* ioctl queue */
-    struct list           read_queue;  /* blocking read queue */
+    struct object         obj;            /* object header */
+    struct fd            *fd;             /* pseudo-fd for ioctls */
+    struct console       *console;        /* attached console */
+    struct list           queue;          /* ioctl queue */
+    struct list           read_queue;     /* blocking read queue */
     unsigned int          busy : 1;       /* flag if server processing an ioctl */
     unsigned int          once_input : 1; /* flag if input thread has already been requested */
-    int                   term_fd;     /* UNIX terminal fd */
-    struct termios        termios;     /* original termios */
+    int                   term_fd;        /* UNIX terminal fd */
+    struct termios        termios;        /* original termios */
     int                   esync_fd;
     unsigned int          fsync_idx;
 };
@@ -610,13 +610,10 @@ static void disconnect_console_server( struct console_server *server )
         list_remove( &call->entry );
         console_host_ioctl_terminate( call, STATUS_CANCELLED );
     }
-
     if (do_fsync())
-        fsync_clear_futex( server->fsync_idx );
-
+        fsync_clear( &server->obj );
     if (do_esync())
         esync_clear( server->esync_fd );
-
     while (!list_empty( &server->read_queue ))
     {
         struct console_host_ioctl *call = LIST_ENTRY( list_head( &server->read_queue ), struct console_host_ioctl, entry );
@@ -851,7 +848,7 @@ static int screen_buffer_add_queue( struct object *obj, struct wait_queue_entry 
         set_error( STATUS_ACCESS_DENIED );
         return 0;
     }
-    return console_add_queue( &screen_buffer->input->obj, entry );
+    return add_queue( &screen_buffer->input->obj, entry );
 }
 
 static struct fd *screen_buffer_get_fd( struct object *obj )
@@ -877,6 +874,7 @@ static void console_server_destroy( struct object *obj )
     disconnect_console_server( server );
     if (server->fd) release_object( server->fd );
     if (do_esync()) close( server->esync_fd );
+    if (server->fsync_idx) fsync_free_shm_idx( server->fsync_idx );
 }
 
 static struct object *console_server_lookup_name( struct object *obj, struct unicode_str *name,
@@ -964,6 +962,7 @@ static struct object *create_console_server( void )
     }
     allow_fd_caching(server->fd);
     server->esync_fd = -1;
+    server->fsync_idx = 0;
 
     if (do_fsync())
         server->fsync_idx = fsync_alloc_shm( 0, 0 );
@@ -1456,7 +1455,7 @@ static int console_output_add_queue( struct object *obj, struct wait_queue_entry
         set_error( STATUS_ACCESS_DENIED );
         return 0;
     }
-    return console_add_queue( &current->process->console->obj, entry );
+    return add_queue( &current->process->console->obj, entry );
 }
 
 static struct fd *console_output_get_fd( struct object *obj )
@@ -1555,10 +1554,8 @@ DECL_HANDLER(get_next_console_request)
         /* set result of previous ioctl */
         ioctl = LIST_ENTRY( list_head( &server->queue ), struct console_host_ioctl, entry );
         list_remove( &ioctl->entry );
-
         if (do_fsync() && list_empty( &server->queue ))
-            fsync_clear_futex( server->fsync_idx );
-
+            fsync_clear( &server->obj );
         if (do_esync() && list_empty( &server->queue ))
             esync_clear( server->esync_fd );
     }
@@ -1646,10 +1643,8 @@ DECL_HANDLER(get_next_console_request)
     {
         set_error( STATUS_PENDING );
     }
-
     if (do_fsync() && list_empty( &server->queue ))
-        fsync_clear_futex( server->fsync_idx );
-
+        fsync_clear( &server->obj );
     if (do_esync() && list_empty( &server->queue ))
         esync_clear( server->esync_fd );
 

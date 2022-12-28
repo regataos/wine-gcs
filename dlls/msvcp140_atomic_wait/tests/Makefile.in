@@ -1,5 +1,0 @@
-EXTRADEFS = -DWINE_NO_LONG_TYPES
-TESTDLL = msvcp140_atomic_wait.dll
-
-C_SRCS = \
-	msvcp140_atomic_wait.c

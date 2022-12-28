@@ -183,7 +183,7 @@ typedef struct _WINMM_QueryInterfaceInfo {
     BOOL is_out;
     UINT index;
     WCHAR *str;
-    ULONG *len_bytes;
+    UINT *len_bytes;
 } WINMM_QueryInterfaceInfo;
 
 static LRESULT WOD_Open(WINMM_OpenInfo *info);
@@ -1771,8 +1771,7 @@ exit:
 
 static void WID_PullACMData(WINMM_Device *device)
 {
-    UINT32 packet;
-    DWORD packet_bytes;
+    UINT32 packet, packet_bytes;
     DWORD flags;
     BYTE *data;
     WAVEHDR *queue;

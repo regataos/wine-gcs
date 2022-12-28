@@ -51,6 +51,24 @@ static int sock_send(int fd, const void *msg, size_t len, WSAOVERLAPPED *ovr)
     return -1;
 }
 
+BOOL netconn_wait_overlapped_result( struct netconn *conn, WSAOVERLAPPED *ovr, DWORD *len )
+{
+    OVERLAPPED *completion_ovr;
+    ULONG_PTR key;
+
+    if (!GetQueuedCompletionStatus( conn->port, len, &key, &completion_ovr, INFINITE ))
+    {
+        WARN( "GetQueuedCompletionStatus failed, err %lu.\n", GetLastError() );
+        return FALSE;
+    }
+    if ((key != conn->socket && conn->socket != -1) || completion_ovr != (OVERLAPPED *)ovr)
+    {
+        ERR( "Unexpected completion key %Ix, overlapped %p.\n", key, completion_ovr );
+        return FALSE;
+    }
+    return TRUE;
+}
+
 static int sock_recv(int fd, void *msg, size_t len, int flags)
 {
     int ret;
@@ -196,6 +214,7 @@ DWORD netconn_create( struct hostdata *host, const struct sockaddr_storage *sock
     winsock_init();
 
     if (!(conn = calloc( 1, sizeof(*conn) ))) return ERROR_OUTOFMEMORY;
+    conn->refs = 1;
     conn->host = host;
     conn->sockaddr = *sockaddr;
     if ((conn->socket = WSASocketW( sockaddr->ss_family, SOCK_STREAM, 0, NULL, 0, WSA_FLAG_OVERLAPPED )) == -1)
@@ -228,13 +247,19 @@ DWORD netconn_create( struct hostdata *host, const struct sockaddr_storage *sock
         ret = WSAGetLastError();
         if (ret == WSAEWOULDBLOCK || ret == WSAEINPROGRESS)
         {
-            FD_SET set;
-            TIMEVAL timeval = { 0, timeout * 1000 };
+            TIMEVAL timeval = { timeout / 1000, (timeout % 1000) * 1000 };
+            FD_SET set_read, set_error;
             int res;
 
-            FD_ZERO( &set );
-            FD_SET( conn->socket, &set );
-            if ((res = select( conn->socket + 1, NULL, &set, NULL, &timeval )) > 0) ret = ERROR_SUCCESS;
+            FD_ZERO( &set_read );
+            FD_SET( conn->socket, &set_read );
+            FD_ZERO( &set_error );
+            FD_SET( conn->socket, &set_error );
+            if ((res = select( conn->socket + 1, NULL, &set_read, &set_error, &timeval )) > 0)
+            {
+                if (FD_ISSET(conn->socket, &set_read)) ret = ERROR_SUCCESS;
+                else                                   assert( FD_ISSET(conn->socket, &set_error) );
+            }
             else if (!res) ret = ERROR_WINHTTP_TIMEOUT;
         }
     }
@@ -246,15 +271,22 @@ DWORD netconn_create( struct hostdata *host, const struct sockaddr_storage *sock
         WARN( "unable to connect to host (%lu)\n", ret );
         closesocket( conn->socket );
         free( conn );
-        return ret;
+        return ret == ERROR_WINHTTP_TIMEOUT ? ERROR_WINHTTP_TIMEOUT : ERROR_WINHTTP_CANNOT_CONNECT;
     }
 
     *ret_conn = conn;
     return ERROR_SUCCESS;
 }
 
-void netconn_close( struct netconn *conn )
+void netconn_addref( struct netconn *conn )
 {
+    InterlockedIncrement( &conn->refs );
+}
+
+void netconn_release( struct netconn *conn )
+{
+    if (InterlockedDecrement( &conn->refs )) return;
+    TRACE( "Closing connection %p.\n", conn );
     if (conn->secure)
     {
         free( conn->peek_msg_mem );
@@ -263,32 +295,30 @@ void netconn_close( struct netconn *conn )
         free(conn->extra_buf);
         DeleteSecurityContext(&conn->ssl_ctx);
     }
-    closesocket( conn->socket );
+    if (conn->socket != -1)
+        closesocket( conn->socket );
     release_host( conn->host );
+    if (conn->port)
+        CloseHandle( conn->port );
     free(conn);
 }
 
-DWORD netconn_secure_connect( struct netconn *conn, WCHAR *hostname, DWORD security_flags, CredHandle *cred_handle,
-                              BOOL check_revocation )
+static DWORD netconn_negotiate(struct netconn *conn, CredHandle *cred_handle, CtxtHandle *ctx_handle, WCHAR *hostname,
+                               DWORD isc_req_flags, SecBufferDesc *init_desc, CtxtHandle *new_ctx_handle)
 {
     SecBuffer out_buf = {0, SECBUFFER_TOKEN, NULL}, in_bufs[2] = {{0, SECBUFFER_TOKEN}, {0, SECBUFFER_EMPTY}};
     SecBufferDesc out_desc = {SECBUFFER_VERSION, 1, &out_buf}, in_desc = {SECBUFFER_VERSION, 2, in_bufs};
     BYTE *read_buf;
     SIZE_T read_buf_size = 2048;
     ULONG attrs = 0;
-    CtxtHandle ctx;
     SSIZE_T size;
-    const CERT_CONTEXT *cert;
     SECURITY_STATUS status;
-    DWORD res = ERROR_SUCCESS;
-
-    const DWORD isc_req_flags = ISC_REQ_ALLOCATE_MEMORY|ISC_REQ_USE_SESSION_KEY|ISC_REQ_CONFIDENTIALITY
-        |ISC_REQ_SEQUENCE_DETECT|ISC_REQ_REPLAY_DETECT|ISC_REQ_MANUAL_CRED_VALIDATION;
 
     if (!(read_buf = malloc( read_buf_size ))) return ERROR_OUTOFMEMORY;
 
-    status = InitializeSecurityContextW(cred_handle, NULL, hostname, isc_req_flags, 0, 0, NULL, 0,
-            &ctx, &out_desc, &attrs, NULL);
+    status = InitializeSecurityContextW(cred_handle, ctx_handle, hostname, isc_req_flags, 0, 0, init_desc,
+            0, new_ctx_handle, &out_desc, &attrs, NULL);
+    if (!ctx_handle) ctx_handle = new_ctx_handle;
 
     assert(status != SEC_E_OK);
 
@@ -301,7 +331,7 @@ DWORD netconn_secure_connect( struct netconn *conn, WCHAR *hostname, DWORD secur
             size = sock_send(conn->socket, out_buf.pvBuffer, out_buf.cbBuffer, NULL);
             if(size != out_buf.cbBuffer) {
                 ERR("send failed\n");
-                res = ERROR_WINHTTP_SECURE_CHANNEL_ERROR;
+                status = ERROR_WINHTTP_SECURE_CHANNEL_ERROR;
                 break;
             }
 
@@ -347,63 +377,77 @@ DWORD netconn_secure_connect( struct netconn *conn, WCHAR *hostname, DWORD secur
 
         in_bufs[0].cbBuffer += size;
         in_bufs[0].pvBuffer = read_buf;
-        status = InitializeSecurityContextW(cred_handle, &ctx, hostname,  isc_req_flags, 0, 0, &in_desc,
+        status = InitializeSecurityContextW(cred_handle, ctx_handle, hostname, isc_req_flags, 0, 0, &in_desc,
                 0, NULL, &out_desc, &attrs, NULL);
         TRACE( "InitializeSecurityContext ret %#lx\n", status );
-
-        if(status == SEC_E_OK) {
-            if(in_bufs[1].BufferType == SECBUFFER_EXTRA)
-                FIXME("SECBUFFER_EXTRA not supported\n");
-
-            status = QueryContextAttributesW(&ctx, SECPKG_ATTR_STREAM_SIZES, &conn->ssl_sizes);
-            if(status != SEC_E_OK) {
-                WARN("Could not get sizes\n");
-                break;
-            }
-
-            status = QueryContextAttributesW(&ctx, SECPKG_ATTR_REMOTE_CERT_CONTEXT, (void*)&cert);
-            if(status == SEC_E_OK) {
-                res = netconn_verify_cert(cert, hostname, security_flags, check_revocation);
-                CertFreeCertificateContext(cert);
-                if(res != ERROR_SUCCESS) {
-                    WARN( "cert verify failed: %lu\n", res );
-                    break;
-                }
-            }else {
-                WARN("Could not get cert\n");
-                break;
-            }
-
-            conn->ssl_read_buf = malloc(conn->ssl_sizes.cbHeader + conn->ssl_sizes.cbMaximumMessage + conn->ssl_sizes.cbTrailer);
-            if(!conn->ssl_read_buf) {
-                res = ERROR_OUTOFMEMORY;
-                break;
-            }
-            conn->ssl_write_buf = malloc(conn->ssl_sizes.cbHeader + conn->ssl_sizes.cbMaximumMessage + conn->ssl_sizes.cbTrailer);
-            if(!conn->ssl_write_buf) {
-                res = ERROR_OUTOFMEMORY;
-                break;
-            }
-        }
+        if(status == SEC_E_OK && in_bufs[1].BufferType == SECBUFFER_EXTRA)
+            FIXME("SECBUFFER_EXTRA not supported\n");
     }
 
     free(read_buf);
 
-    if(status != SEC_E_OK || res != ERROR_SUCCESS) {
-        WARN( "Failed to initialize security context: %#lx\n", status );
-        free(conn->ssl_read_buf);
-        conn->ssl_read_buf = NULL;
-        free(conn->ssl_write_buf);
-        conn->ssl_write_buf = NULL;
-        DeleteSecurityContext(&ctx);
-        return ERROR_WINHTTP_SECURE_CHANNEL_ERROR;
+    return status;
+}
+
+DWORD netconn_secure_connect( struct netconn *conn, WCHAR *hostname, DWORD security_flags, CredHandle *cred_handle,
+                              BOOL check_revocation )
+{
+    CtxtHandle ctx;
+    const CERT_CONTEXT *cert;
+    SECURITY_STATUS status;
+    DWORD res = ERROR_SUCCESS;
+
+    const DWORD isc_req_flags = ISC_REQ_ALLOCATE_MEMORY|ISC_REQ_USE_SESSION_KEY|ISC_REQ_CONFIDENTIALITY
+        |ISC_REQ_SEQUENCE_DETECT|ISC_REQ_REPLAY_DETECT|ISC_REQ_MANUAL_CRED_VALIDATION;
+
+    memset( &ctx, 0, sizeof(ctx) );
+    status = netconn_negotiate(conn, cred_handle, NULL, hostname, isc_req_flags, NULL, &ctx);
+    if(status != SEC_E_OK)
+        goto failed;
+
+    status = QueryContextAttributesW(&ctx, SECPKG_ATTR_STREAM_SIZES, &conn->ssl_sizes);
+    if(status != SEC_E_OK) {
+        WARN("Could not get sizes\n");
+        goto failed;
     }
 
+    status = QueryContextAttributesW(&ctx, SECPKG_ATTR_REMOTE_CERT_CONTEXT, (void*)&cert);
+    if(status != SEC_E_OK) {
+        WARN("Could not get cert\n");
+        goto failed;
+    }
+
+    res = netconn_verify_cert(cert, hostname, security_flags, check_revocation);
+    CertFreeCertificateContext(cert);
+    if(res != ERROR_SUCCESS) {
+        WARN("cert verify failed: %lu\n", res);
+        goto failed;
+    }
+
+    conn->ssl_read_buf = malloc(conn->ssl_sizes.cbHeader + conn->ssl_sizes.cbMaximumMessage + conn->ssl_sizes.cbTrailer);
+    if(!conn->ssl_read_buf) {
+        res = ERROR_OUTOFMEMORY;
+        goto failed;
+    }
+    conn->ssl_write_buf = malloc(conn->ssl_sizes.cbHeader + conn->ssl_sizes.cbMaximumMessage + conn->ssl_sizes.cbTrailer);
+    if(!conn->ssl_write_buf) {
+        res = ERROR_OUTOFMEMORY;
+        goto failed;
+    }
 
     TRACE("established SSL connection\n");
     conn->secure = TRUE;
     conn->ssl_ctx = ctx;
     return ERROR_SUCCESS;
+
+failed:
+    WARN("Failed to initialize security context: %#lx\n", status);
+    free(conn->ssl_read_buf);
+    conn->ssl_read_buf = NULL;
+    free(conn->ssl_write_buf);
+    conn->ssl_write_buf = NULL;
+    DeleteSecurityContext(&ctx);
+    return ERROR_WINHTTP_SECURE_CHANNEL_ERROR;
 }
 
 static DWORD send_ssl_chunk( struct netconn *conn, const void *msg, size_t size, WSAOVERLAPPED *ovr )
@@ -436,6 +480,12 @@ static DWORD send_ssl_chunk( struct netconn *conn, const void *msg, size_t size,
 DWORD netconn_send( struct netconn *conn, const void *msg, size_t len, int *sent, WSAOVERLAPPED *ovr )
 {
     DWORD err;
+
+    if (ovr && !conn->port)
+    {
+        if (!(conn->port = CreateIoCompletionPort( (HANDLE)(SOCKET)conn->socket, NULL, (ULONG_PTR)conn->socket, 0 )))
+            ERR( "Failed to create port.\n" );
+    }
 
     if (conn->secure)
     {
@@ -471,8 +521,10 @@ DWORD netconn_send( struct netconn *conn, const void *msg, size_t len, int *sent
 
 static DWORD read_ssl_chunk( struct netconn *conn, void *buf, SIZE_T buf_size, SIZE_T *ret_size, BOOL *eof )
 {
+    const DWORD isc_req_flags = ISC_REQ_ALLOCATE_MEMORY|ISC_REQ_USE_SESSION_KEY|ISC_REQ_CONFIDENTIALITY
+        |ISC_REQ_SEQUENCE_DETECT|ISC_REQ_REPLAY_DETECT|ISC_REQ_USE_SUPPLIED_CREDS;
     const SIZE_T ssl_buf_size = conn->ssl_sizes.cbHeader+conn->ssl_sizes.cbMaximumMessage+conn->ssl_sizes.cbTrailer;
-    SecBuffer bufs[4];
+    SecBuffer bufs[4], tmp;
     SecBufferDesc buf_desc = {SECBUFFER_VERSION, ARRAY_SIZE(bufs), bufs};
     SSIZE_T size, buf_len;
     unsigned int i;
@@ -513,7 +565,16 @@ static DWORD read_ssl_chunk( struct netconn *conn, void *buf, SIZE_T buf_size, S
 
         case SEC_I_RENEGOTIATE:
             TRACE("renegotiate\n");
-            return ERROR_WINHTTP_CLIENT_AUTH_CERT_NEEDED;
+            memset(&tmp, 0, sizeof(tmp));
+            for(i = 0; i < ARRAY_SIZE(bufs); i++) {
+                if(bufs[i].BufferType == SECBUFFER_EXTRA) tmp = bufs[i];
+            }
+            memset(bufs, 0, sizeof(bufs));
+            bufs[0] = tmp;
+            bufs[0].BufferType = SECBUFFER_TOKEN;
+            res = netconn_negotiate(conn, NULL, &conn->ssl_ctx, conn->host->hostname, isc_req_flags, &buf_desc, NULL);
+            if (res != SEC_E_OK) return res;
+            break;
 
         case SEC_I_CONTEXT_EXPIRED:
             TRACE("context expired\n");
@@ -622,6 +683,13 @@ DWORD netconn_recv( struct netconn *conn, void *buf, size_t len, int flags, int 
     return ERROR_SUCCESS;
 }
 
+void netconn_cancel_io( struct netconn *conn )
+{
+    SOCKET socket = InterlockedExchange( (LONG *)&conn->socket, -1 );
+
+    closesocket( socket );
+}
+
 ULONG netconn_query_data_available( struct netconn *conn )
 {
     return conn->secure ? conn->peek_len : 0;
@@ -713,18 +781,51 @@ static DWORD resolve_hostname( const WCHAR *name, INTERNET_PORT port, struct soc
 
 struct async_resolve
 {
-    const WCHAR             *hostname;
+    LONG                     ref;
+    WCHAR                   *hostname;
     INTERNET_PORT            port;
-    struct sockaddr_storage *addr;
+    struct sockaddr_storage  addr;
     DWORD                    result;
     HANDLE                   done;
 };
 
+static struct async_resolve *create_async_resolve( const WCHAR *hostname, INTERNET_PORT port )
+{
+    struct async_resolve *ret;
+
+    if (!(ret = malloc(sizeof(*ret))))
+    {
+        ERR( "No memory.\n" );
+        return NULL;
+    }
+    ret->ref = 1;
+    ret->hostname = wcsdup( hostname );
+    ret->port     = port;
+    if (!(ret->done = CreateEventW( NULL, FALSE, FALSE, NULL )))
+    {
+        free( ret->hostname );
+        free( ret );
+        return NULL;
+    }
+    return ret;
+}
+
+static void async_resolve_release( struct async_resolve *async )
+{
+    if (InterlockedDecrement( &async->ref )) return;
+
+    free( async->hostname );
+    CloseHandle( async->done );
+    free( async );
+}
+
 static void CALLBACK resolve_proc( TP_CALLBACK_INSTANCE *instance, void *ctx )
 {
     struct async_resolve *async = ctx;
-    async->result = resolve_hostname( async->hostname, async->port, async->addr );
+
+    async->result = resolve_hostname( async->hostname, async->port, &async->addr );
     SetEvent( async->done );
+    async_resolve_release( async );
 }
 
 DWORD netconn_resolve( WCHAR *hostname, INTERNET_PORT port, struct sockaddr_storage *addr, int timeout )
@@ -734,20 +835,25 @@ DWORD netconn_resolve( WCHAR *hostname, INTERNET_PORT port, struct sockaddr_stor
     if (!timeout) ret = resolve_hostname( hostname, port, addr );
     else
     {
-        struct async_resolve async;
+        struct async_resolve *async;
 
-        async.hostname = hostname;
-        async.port     = port;
-        async.addr     = addr;
-        if (!(async.done = CreateEventW( NULL, FALSE, FALSE, NULL ))) return GetLastError();
-        if (!TrySubmitThreadpoolCallback( resolve_proc, &async, NULL ))
+        if (!(async = create_async_resolve( hostname, port )))
+            return ERROR_OUTOFMEMORY;
+
+        InterlockedIncrement( &async->ref );
+        if (!TrySubmitThreadpoolCallback( resolve_proc, async, NULL ))
         {
-            CloseHandle( async.done );
+            InterlockedDecrement( &async->ref );
+            async_resolve_release( async );
             return GetLastError();
         }
-        if (WaitForSingleObject( async.done, timeout ) != WAIT_OBJECT_0) ret = ERROR_WINHTTP_TIMEOUT;
-        else ret = async.result;
-        CloseHandle( async.done );
+        if (WaitForSingleObject( async->done, timeout ) != WAIT_OBJECT_0) ret = ERROR_WINHTTP_TIMEOUT;
+        else
+        {
+            *addr = async->addr;
+            ret = async->result;
+        }
+        async_resolve_release( async );
     }
 
     return ret;

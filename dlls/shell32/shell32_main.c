@@ -40,6 +40,7 @@
 #include "propsys.h"
 #include "commoncontrols.h"
 
+#include "undocshell.h"
 #include "pidl.h"
 #include "shell32_main.h"
 #include "version.h"

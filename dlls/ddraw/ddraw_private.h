@@ -19,6 +19,10 @@
 #ifndef __WINE_DLLS_DDRAW_DDRAW_PRIVATE_H
 #define __WINE_DLLS_DDRAW_DDRAW_PRIVATE_H
 
+#ifdef __i386__
+#pragma GCC target ("fpmath=387")
+#endif
+
 #include <assert.h>
 #include <limits.h>
 #include <math.h>
@@ -324,6 +328,7 @@ struct d3d_device
     LONG ref;
     UINT version;
     BOOL hardware_device;
+    BOOL have_draw_textures;
 
     IUnknown *outer_unknown;
     struct wined3d_device *wined3d_device;
@@ -343,10 +348,6 @@ struct d3d_device
     struct list viewport_list;
     struct d3d_viewport *current_viewport;
     D3DVIEWPORT7 active_viewport;
-
-    /* Pick data */
-    D3DPICKRECORD* pick_records;
-    DWORD pick_record_count;
 
     /* Required to keep track which of two available texture blending modes in d3ddevice3 is used */
     BOOL legacyTextureBlending;
@@ -581,7 +582,7 @@ struct d3d_execute_buffer *unsafe_impl_from_IDirect3DExecuteBuffer(IDirect3DExec
 
 /* The execute function */
 HRESULT d3d_execute_buffer_execute(struct d3d_execute_buffer *execute_buffer,
-        struct d3d_device *device, D3DRECT* pick_rect) DECLSPEC_HIDDEN;
+        struct d3d_device *device) DECLSPEC_HIDDEN;
 
 /*****************************************************************************
  * IDirect3DVertexBuffer

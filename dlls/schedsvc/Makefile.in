@@ -1,6 +1,5 @@
-EXTRADEFS = -DWINE_NO_LONG_TYPES
 MODULE    = schedsvc.dll
-IMPORTS   = rpcrt4 advapi32 ole32
+IMPORTS   = rpcrt4 advapi32 ole32 xmllite
 
 C_SRCS = \
 	atsvc.c \

@@ -81,14 +81,13 @@ static statement_t *link_statements(statement_t*,statement_t*);
 
 #define CHECK_ERROR if(((parser_ctx_t*)ctx)->hres != S_OK) YYABORT
 
-#define PARSER_LTYPE unsigned
+#define YYLTYPE unsigned
 #define YYLLOC_DEFAULT(Cur, Rhs, N) Cur = YYRHSLOC((Rhs), (N) ? 1 : 0)
 
 %}
 
 %lex-param { parser_ctx_t *ctx }
 %parse-param { parser_ctx_t *ctx }
-%define api.prefix {parser_}
 %define api.pure
 %start Program
 

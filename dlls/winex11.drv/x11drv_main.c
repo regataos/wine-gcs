@@ -89,6 +89,10 @@ int xrender_error_base = 0;
 int xfixes_event_base = 0;
 HMODULE x11drv_module = 0;
 char *process_name = NULL;
+HANDLE steam_overlay_event;
+HANDLE steam_keyboard_event;
+BOOL layered_window_client_hack = FALSE;
+BOOL vulkan_gdi_blit_source_hack = FALSE;
 
 static x11drv_error_callback err_callback;   /* current callback for error */
 static Display *err_callback_display;        /* display callback is set for */
@@ -170,6 +174,7 @@ static const char * const atom_names[NB_XATOMS - FIRST_XATOM] =
     "_NET_SYSTEM_TRAY_S0",
     "_NET_SYSTEM_TRAY_VISUAL",
     "_NET_WM_BYPASS_COMPOSITOR",
+    "_NET_WM_FULLSCREEN_MONITORS",
     "_NET_WM_ICON",
     "_NET_WM_MOVERESIZE",
     "_NET_WM_NAME",
@@ -194,6 +199,8 @@ static const char * const atom_names[NB_XATOMS - FIRST_XATOM] =
     "_GTK_WORKAREAS_D0",
     "_XEMBED",
     "_XEMBED_INFO",
+    "_WINE_HWND_STYLE",
+    "_WINE_HWND_EXSTYLE",
     "XdndAware",
     "XdndEnter",
     "XdndPosition",
@@ -226,7 +233,8 @@ static const char * const atom_names[NB_XATOMS - FIRST_XATOM] =
     "text/plain",
     "text/rtf",
     "text/richtext",
-    "text/uri-list"
+    "text/uri-list",
+    "GAMESCOPE_FOCUSED_APP"
 };
 
 /***********************************************************************
@@ -272,6 +280,7 @@ static inline BOOL ignore_error( Display *display, XErrorEvent *event )
 void X11DRV_expect_error( Display *display, x11drv_error_callback callback, void *arg )
 {
     EnterCriticalSection( &x11drv_error_section );
+    XLockDisplay( display );
     err_callback         = callback;
     err_callback_display = display;
     err_callback_arg     = arg;
@@ -286,10 +295,11 @@ void X11DRV_expect_error( Display *display, x11drv_error_callback callback, void
  * Check if an expected X11 error occurred; return non-zero if yes.
  * The caller is responsible for calling XSync first if necessary.
  */
-int X11DRV_check_error(void)
+int X11DRV_check_error( Display *display )
 {
     int res = err_callback_result;
     err_callback = NULL;
+    XUnlockDisplay( display );
     LeaveCriticalSection( &x11drv_error_section );
     return res;
 }
@@ -301,7 +311,7 @@ int X11DRV_check_error(void)
 static int error_handler( Display *display, XErrorEvent *error_evt )
 {
     if (err_callback && display == err_callback_display &&
-        (long)(error_evt->serial - err_serial) >= 0)
+        (!error_evt->serial || error_evt->serial >= err_serial))
     {
         if ((err_callback_result = err_callback( display, error_evt, err_callback_arg )))
         {
@@ -701,7 +711,7 @@ static BOOL process_attach(void)
 #ifdef SONAME_LIBXCOMPOSITE
     X11DRV_XComposite_Init();
 #endif
-    x11drv_xinput_load();
+    X11DRV_XInput2_Load();
 
 #ifdef HAVE_XKB
     if (use_xkb) use_xkb = XkbUseExtension( gdi_display, NULL, NULL );
@@ -713,6 +723,24 @@ static BOOL process_attach(void)
     {
         const char *e = getenv("WINE_DISABLE_FULLSCREEN_HACK");
         if (!e || *e == '\0' || *e == '0') fs_hack_init();
+    }
+
+    {
+        const char *sgi = getenv("SteamGameId");
+        const char *e = getenv("WINE_LAYERED_WINDOW_CLIENT_HACK");
+        layered_window_client_hack =
+            (sgi && (
+                strcmp(sgi, "435150") == 0 || /* Divinity: Original Sin 2 launcher */
+                strcmp(sgi, "227020") == 0 /* Rise of Venice launcher */
+            )) ||
+            (e && *e != '\0' && *e != '0');
+
+        e = getenv("WINE_VK_GDI_BLIT_SOURCE_HACK");
+        vulkan_gdi_blit_source_hack =
+            (sgi && (
+                !strcmp(sgi, "803600") /* Disgaea 5 Complete     */
+            )) ||
+            (e && *e != '\0' && *e != '0');
     }
 
     init_user_driver();
@@ -731,8 +759,6 @@ void CDECL X11DRV_ThreadDetach(void)
     if (data)
     {
         vulkan_thread_detach();
-        if (GetWindowThreadProcessId( GetDesktopWindow(), NULL ) == GetCurrentThreadId())
-            x11drv_xinput_disable( data->display, DefaultRootWindow( data->display ), PointerMotionMask );
         if (data->xim) XCloseIM( data->xim );
         if (data->font_set) XFreeFontSet( data->display, data->font_set );
         XCloseDisplay( data->display );
@@ -803,9 +829,9 @@ struct x11drv_thread_data *x11drv_init_thread_data(void)
 
     if (use_xim) X11DRV_SetupXIM();
 
-    x11drv_xinput_init();
+    X11DRV_XInput2_Init();
     if (GetWindowThreadProcessId( GetDesktopWindow(), NULL ) == GetCurrentThreadId())
-        x11drv_xinput_enable( data->display, DefaultRootWindow( data->display ), PointerMotionMask );
+        X11DRV_XInput2_Enable( data->display, None, PointerMotionMask|ButtonPressMask|ButtonReleaseMask );
 
     return data;
 }
@@ -824,6 +850,12 @@ BOOL WINAPI DllMain( HINSTANCE hinst, DWORD reason, LPVOID reserved )
         DisableThreadLibraryCalls( hinst );
         x11drv_module = hinst;
         ret = process_attach();
+        steam_overlay_event = CreateEventA(NULL, TRUE, FALSE, "__wine_steamclient_GameOverlayActivated");
+        steam_keyboard_event = CreateEventA(NULL, TRUE, FALSE, "__wine_steamclient_KeyboardActivated");
+        break;
+    case DLL_PROCESS_DETACH:
+        CloseHandle(steam_overlay_event);
+        CloseHandle(steam_keyboard_event);
         break;
     }
     return ret;

@@ -66,7 +66,7 @@ static ULONG WINAPI IDirectMusicSynthSinkImpl_AddRef(IDirectMusicSynthSink *ifac
     IDirectMusicSynthSinkImpl *This = impl_from_IDirectMusicSynthSink(iface);
     ULONG ref = InterlockedIncrement(&This->ref);
 
-    TRACE("(%p): new ref = %lu\n", This, ref);
+    TRACE("(%p)->(): new ref = %u\n", This, ref);
 
     return ref;
 }
@@ -76,13 +76,11 @@ static ULONG WINAPI IDirectMusicSynthSinkImpl_Release(IDirectMusicSynthSink *ifa
     IDirectMusicSynthSinkImpl *This = impl_from_IDirectMusicSynthSink(iface);
     ULONG ref = InterlockedDecrement(&This->ref);
 
-    TRACE("(%p): new ref = %lu\n", This, ref);
+    TRACE("(%p)->(): new ref = %u\n", This, ref);
 
     if (!ref) {
         if (This->latency_clock)
             IReferenceClock_Release(This->latency_clock);
-        if (This->master_clock)
-            IReferenceClock_Release(This->master_clock);
         HeapFree(GetProcessHeap(), 0, This);
         DMSYNTH_UnlockModule();
     }
@@ -96,11 +94,7 @@ static HRESULT WINAPI IDirectMusicSynthSinkImpl_Init(IDirectMusicSynthSink *ifac
 {
     IDirectMusicSynthSinkImpl *This = impl_from_IDirectMusicSynthSink(iface);
 
-    TRACE("(%p)->(%p)\n", This, synth);
-
-    /* Not holding a reference to avoid circular dependencies.
-       The synth will release the sink during the synth's destruction. */
-    This->synth = synth;
+    FIXME("(%p)->(%p): stub\n", This, synth);
 
     return S_OK;
 }
@@ -110,15 +104,7 @@ static HRESULT WINAPI IDirectMusicSynthSinkImpl_SetMasterClock(IDirectMusicSynth
 {
     IDirectMusicSynthSinkImpl *This = impl_from_IDirectMusicSynthSink(iface);
 
-    TRACE("(%p)->(%p)\n", This, clock);
-
-    if (!clock)
-        return E_POINTER;
-    if (This->active)
-        return E_FAIL;
-
-    IReferenceClock_AddRef(clock);
-    This->master_clock = clock;
+    FIXME("(%p)->(%p): stub\n", This, clock);
 
     return S_OK;
 }
@@ -232,13 +218,13 @@ static ULONG WINAPI DMSynthSinkImpl_IKsControl_Release(IKsControl* iface)
 static HRESULT WINAPI DMSynthSinkImpl_IKsControl_KsProperty(IKsControl* iface, PKSPROPERTY Property, ULONG PropertyLength, LPVOID PropertyData,
                                                             ULONG DataLength, ULONG* BytesReturned)
 {
-    TRACE("(%p, %p, %lu, %p, %lu, %p)\n", iface, Property, PropertyLength, PropertyData, DataLength, BytesReturned);
+    TRACE("(%p)->(%p, %u, %p, %u, %p)\n", iface, Property, PropertyLength, PropertyData, DataLength, BytesReturned);
 
-    TRACE("Property = %s - %lu - %lu\n", debugstr_guid(&Property->u.s.Set), Property->u.s.Id, Property->u.s.Flags);
+    TRACE("Property = %s - %u - %u\n", debugstr_guid(&Property->u.s.Set), Property->u.s.Id, Property->u.s.Flags);
 
     if (Property->u.s.Flags != KSPROPERTY_TYPE_GET)
     {
-        FIXME("Property flags %lu not yet supported\n", Property->u.s.Flags);
+        FIXME("Property flags %u not yet supported\n", Property->u.s.Flags);
         return S_FALSE;
     }
 
@@ -263,7 +249,7 @@ static HRESULT WINAPI DMSynthSinkImpl_IKsControl_KsProperty(IKsControl* iface, P
 static HRESULT WINAPI DMSynthSinkImpl_IKsControl_KsMethod(IKsControl* iface, PKSMETHOD Method, ULONG MethodLength, LPVOID MethodData,
                                                           ULONG DataLength, ULONG* BytesReturned)
 {
-    FIXME("(%p, %p, %lu, %p, %lu, %p): stub\n", iface, Method, MethodLength, MethodData, DataLength, BytesReturned);
+    FIXME("(%p)->(%p, %u, %p, %u, %p): stub\n", iface, Method, MethodLength, MethodData, DataLength, BytesReturned);
 
     return E_NOTIMPL;
 }
@@ -271,7 +257,7 @@ static HRESULT WINAPI DMSynthSinkImpl_IKsControl_KsMethod(IKsControl* iface, PKS
 static HRESULT WINAPI DMSynthSinkImpl_IKsControl_KsEvent(IKsControl* iface, PKSEVENT Event, ULONG EventLength, LPVOID EventData,
                                                          ULONG DataLength, ULONG* BytesReturned)
 {
-    FIXME("(%p, %p, %lu, %p, %lu, %p): stub\n", iface, Event, EventLength, EventData, DataLength, BytesReturned);
+    FIXME("(%p)->(%p, %u, %p, %u, %p): stub\n", iface, Event, EventLength, EventData, DataLength, BytesReturned);
 
     return E_NOTIMPL;
 }

@@ -71,6 +71,23 @@ static const WSAPROTOCOL_INFOW supported_protocols[] =
         .szProtocol = L"UDP/IP",
     },
     {
+        .dwServiceFlags1 = XP1_IFS_HANDLES | XP1_SUPPORT_BROADCAST
+                | XP1_SUPPORT_MULTIPOINT | XP1_MESSAGE_ORIENTED | XP1_CONNECTIONLESS,
+        .dwProviderFlags = PFL_MATCHES_PROTOCOL_ZERO | PFL_HIDDEN,
+        .ProviderId = {0xe70f1aa0, 0xab8b, 0x11cf, {0x8c, 0xa3, 0x00, 0x80, 0x5f, 0x48, 0xa1, 0x92}},
+        .dwCatalogEntryId = 1003,
+        .ProtocolChain.ChainLen = 1,
+        .iVersion = 2,
+        .iAddressFamily = AF_INET,
+        .iMaxSockAddr = sizeof(struct sockaddr_in),
+        .iMinSockAddr = sizeof(struct sockaddr_in),
+        .iSocketType = SOCK_RAW,
+        .iProtocol = 0,
+        .iProtocolMaxOffset = 255,
+        .dwMessageSize = 0x8000,
+        .szProtocol = L"MSAFD Tcpip [RAW/IP]",
+    },
+    {
         .dwServiceFlags1 = XP1_IFS_HANDLES | XP1_EXPEDITED_DATA | XP1_GRACEFUL_CLOSE
                 | XP1_GUARANTEED_ORDER | XP1_GUARANTEED_DELIVERY,
         .dwProviderFlags = PFL_MATCHES_PROTOCOL_ZERO,
@@ -156,6 +173,57 @@ DECLARE_CRITICAL_SECTION(cs_socket_list);
 
 static SOCKET *socket_list;
 static unsigned int socket_list_size;
+
+struct io_buf
+{
+    struct io_buf *next;
+    IO_STATUS_BLOCK io;
+};
+static struct io_buf *io_freelist;
+
+static IO_STATUS_BLOCK *alloc_io(void)
+{
+    struct io_buf *io, *ret, *next;
+
+    if (!(io = InterlockedExchangePointer( (void **)&io_freelist, NULL )))
+    {
+        if (!(io = malloc(sizeof(*io))))
+        {
+            ERR( "No memory.\n" );
+            return NULL;
+        }
+        return &io->io;
+    }
+
+    ret = io;
+    next = io->next;
+    if (next && InterlockedCompareExchangePointer( (void **)&io_freelist, next, NULL ))
+    {
+        while ((io = next))
+        {
+            next = io->next;
+            free( io );
+        }
+    }
+    return &ret->io;
+}
+
+static void free_io(IO_STATUS_BLOCK *io_data)
+{
+    struct io_buf *io, *next;
+
+    if (!io_data) return;
+
+    io = CONTAINING_RECORD(io_data, struct io_buf, io);
+
+    while (1)
+    {
+        next = io_freelist;
+        io->next = next;
+        if (InterlockedCompareExchangePointer( (void **)&io_freelist, io, next ) == next)
+            return;
+    }
+}
 
 const char *debugstr_sockaddr( const struct sockaddr *a )
 {
@@ -419,6 +487,8 @@ static BOOL socket_list_remove( SOCKET socket )
     return FALSE;
 }
 
+#define MAX_SOCKETS_PER_PROCESS      128     /* reasonable guess */
+#define MAX_UDP_DATAGRAM             1024
 static INT WINAPI WSA_DefaultBlockingHook( FARPROC x );
 
 int num_startup;
@@ -551,6 +621,14 @@ static HANDLE get_sync_event(void)
     return data->sync_event;
 }
 
+static DWORD wait_event_alertable( HANDLE event )
+{
+    DWORD ret;
+
+    while ((ret = WaitForSingleObjectEx( event, INFINITE, TRUE )) == WAIT_IO_COMPLETION)
+        ;
+    return ret;
+}
 
 BOOL WINAPI DllMain( HINSTANCE instance, DWORD reason, void *reserved )
 {
@@ -570,34 +648,29 @@ BOOL WINAPI DllMain( HINSTANCE instance, DWORD reason, void *reserved )
 /***********************************************************************
  *      WSAStartup		(WS2_32.115)
  */
-int WINAPI WSAStartup( WORD version, WSADATA *data )
+int WINAPI WSAStartup(WORD wVersionRequested, LPWSADATA lpWSAData)
 {
-    TRACE( "version %#x\n", version );
+    TRACE("verReq=%x\n", wVersionRequested);
 
-    if (data)
-    {
-        if (!LOBYTE(version) || LOBYTE(version) > 2
-                || (LOBYTE(version) == 2 && HIBYTE(version) > 2))
-            data->wVersion = MAKEWORD(2, 2);
-        else if (LOBYTE(version) == 1 && HIBYTE(version) > 1)
-            data->wVersion = MAKEWORD(1, 1);
-        else
-            data->wVersion = version;
-        data->wHighVersion = MAKEWORD(2, 2);
-        strcpy( data->szDescription, "WinSock 2.0" );
-        strcpy( data->szSystemStatus, "Running" );
-        data->iMaxSockets = (LOBYTE(version) == 1 ? 32767 : 0);
-        data->iMaxUdpDg = (LOBYTE(version) == 1 ? 65467 : 0);
-        /* don't fill lpVendorInfo */
-    }
-
-    if (!LOBYTE(version))
+    if (LOBYTE(wVersionRequested) < 1)
         return WSAVERNOTSUPPORTED;
 
-    if (!data) return WSAEFAULT;
+    if (!lpWSAData) return WSAEINVAL;
 
     num_startup++;
-    TRACE( "increasing startup count to %d\n", num_startup );
+
+    /* that's the whole of the negotiation for now */
+    lpWSAData->wVersion = wVersionRequested;
+    /* return winsock information */
+    lpWSAData->wHighVersion = 0x0202;
+    strcpy(lpWSAData->szDescription, "WinSock 2.0" );
+    strcpy(lpWSAData->szSystemStatus, "Running" );
+    lpWSAData->iMaxSockets = MAX_SOCKETS_PER_PROCESS;
+    lpWSAData->iMaxUdpDg = MAX_UDP_DATAGRAM;
+    /* don't do anything with lpWSAData->lpVendorInfo */
+    /* (some apps don't allocate the space for this field) */
+
+    TRACE("succeeded starts: %d\n", num_startup);
     return 0;
 }
 
@@ -909,9 +982,9 @@ static int WS2_recv_base( SOCKET s, WSABUF *buffers, DWORD buffer_count, DWORD *
                           struct sockaddr *addr, int *addr_len, OVERLAPPED *overlapped,
                           LPWSAOVERLAPPED_COMPLETION_ROUTINE completion, WSABUF *control )
 {
-    IO_STATUS_BLOCK iosb, *piosb = &iosb;
     struct afd_recvmsg_params params;
     PIO_APC_ROUTINE apc = NULL;
+    IO_STATUS_BLOCK *piosb;
     HANDLE event = NULL;
     void *cvalue = NULL;
     NTSTATUS status;
@@ -928,6 +1001,7 @@ static int WS2_recv_base( SOCKET s, WSABUF *buffers, DWORD buffer_count, DWORD *
     }
     else
     {
+        piosb = alloc_io();
         if (!(event = get_sync_event())) return -1;
     }
     piosb->u.Status = STATUS_PENDING;
@@ -951,11 +1025,17 @@ static int WS2_recv_base( SOCKET s, WSABUF *buffers, DWORD buffer_count, DWORD *
                                     IOCTL_AFD_WINE_RECVMSG, &params, sizeof(params), NULL, 0 );
     if (status == STATUS_PENDING && !overlapped)
     {
-        if (WaitForSingleObject( event, INFINITE ) == WAIT_FAILED)
+        if (wait_event_alertable( event ) == WAIT_FAILED)
+        {
+            if (piosb != (IO_STATUS_BLOCK *)overlapped)
+                free_io( piosb );
             return -1;
+        }
         status = piosb->u.Status;
     }
     if (!status && ret_size) *ret_size = piosb->Information;
+    if (piosb != (IO_STATUS_BLOCK *)overlapped)
+        free_io( piosb );
     SetLastError( NtStatusToWSAError( status ) );
     TRACE( "status %#lx.\n", status );
     return status ? -1 : 0;
@@ -1395,11 +1475,18 @@ int WINAPI getsockopt( SOCKET s, int level, int optname, char *optval, int *optl
     TRACE( "socket %#Ix, %s, optval %p, optlen %p (%d)\n",
            s, debugstr_sockopt(level, optname), optval, optlen, optlen ? *optlen : 0 );
 
-    if ((level != SOL_SOCKET || optname != SO_OPENTYPE) &&
-        !socket_list_find( s ))
+    if ((level != SOL_SOCKET || optname != SO_OPENTYPE))
     {
-        SetLastError( WSAENOTSOCK );
-        return SOCKET_ERROR;
+        if (!socket_list_find( s ))
+        {
+            SetLastError( WSAENOTSOCK );
+            return SOCKET_ERROR;
+        }
+        if (!optlen || *optlen <= 0)
+        {
+            SetLastError( WSAEFAULT );
+            return -1;
+        }
     }
 
     switch(level)
@@ -1412,7 +1499,9 @@ int WINAPI getsockopt( SOCKET s, int level, int optname, char *optval, int *optl
             return server_getsockopt( s, IOCTL_AFD_WINE_GET_SO_ACCEPTCONN, optval, optlen );
 
         case SO_BROADCAST:
-            return server_getsockopt( s, IOCTL_AFD_WINE_GET_SO_BROADCAST, optval, optlen );
+            ret = server_getsockopt( s, IOCTL_AFD_WINE_GET_SO_BROADCAST, optval, optlen );
+            if (!ret && *optlen < sizeof(DWORD)) *optlen = 1;
+            return ret;
 
         case SO_BSP_STATE:
         {
@@ -1464,7 +1553,7 @@ int WINAPI getsockopt( SOCKET s, int level, int optname, char *optval, int *optl
         }
 
         case SO_CONNECT_TIME:
-            if (!optlen || !optval)
+            if (!optval)
             {
                 SetLastError( WSAEFAULT );
                 return -1;
@@ -1479,11 +1568,12 @@ int WINAPI getsockopt( SOCKET s, int level, int optname, char *optval, int *optl
 
         case SO_DONTLINGER:
         {
-            struct linger linger;
+            LINGER linger;
             int len = sizeof(linger);
+            BOOL value;
             int ret;
 
-            if (!optlen || *optlen < sizeof(BOOL)|| !optval)
+            if (*optlen < 1 || !optval)
             {
                 SetLastError(WSAEFAULT);
                 return SOCKET_ERROR;
@@ -1491,8 +1581,9 @@ int WINAPI getsockopt( SOCKET s, int level, int optname, char *optval, int *optl
 
             if (!(ret = getsockopt( s, SOL_SOCKET, SO_LINGER, (char *)&linger, &len )))
             {
-                *(BOOL *)optval = !linger.l_onoff;
-                *optlen = sizeof(BOOL);
+                value = !linger.l_onoff;
+                memcpy( optval, &value, min( sizeof(BOOL), *optlen ));
+                *optlen = *optlen >= sizeof(BOOL) ? sizeof(BOOL) : 1;
             }
             return ret;
         }
@@ -1500,19 +1591,26 @@ int WINAPI getsockopt( SOCKET s, int level, int optname, char *optval, int *optl
         /* As mentioned in setsockopt, Windows ignores this, so we
          * always return true here */
         case SO_DONTROUTE:
-            if (!optlen || *optlen < sizeof(BOOL) || !optval)
+            if (*optlen < 1 || !optval)
             {
-                SetLastError(WSAEFAULT);
+                SetLastError( WSAEFAULT );
                 return SOCKET_ERROR;
             }
-            *(BOOL *)optval = TRUE;
-            *optlen = sizeof(BOOL);
+            *optval = TRUE;
+            *optlen = 1;
+            SetLastError( ERROR_SUCCESS );
             return 0;
 
         case SO_ERROR:
             return server_getsockopt( s, IOCTL_AFD_WINE_GET_SO_ERROR, optval, optlen );
 
         case SO_KEEPALIVE:
+            if (*optlen < 1 || !optval)
+            {
+                SetLastError( WSAEFAULT );
+                return SOCKET_ERROR;
+            }
+            *optlen = 1;
             return server_getsockopt( s, IOCTL_AFD_WINE_GET_SO_KEEPALIVE, optval, optlen );
 
         case SO_LINGER:
@@ -1521,9 +1619,10 @@ int WINAPI getsockopt( SOCKET s, int level, int optname, char *optval, int *optl
             int size;
 
             /* struct linger and LINGER have different sizes */
-            if (!optlen || *optlen < sizeof(LINGER) || !optval)
+            if (*optlen < sizeof(LINGER) || !optval)
             {
-                SetLastError(WSAEFAULT);
+                if (optval) memset( optval, 0, *optlen );
+                SetLastError( WSAEFAULT );
                 return SOCKET_ERROR;
             }
 
@@ -1540,7 +1639,7 @@ int WINAPI getsockopt( SOCKET s, int level, int optname, char *optval, int *optl
         }
 
         case SO_MAX_MSG_SIZE:
-            if (!optlen || *optlen < sizeof(int) || !optval)
+            if (*optlen < sizeof(int) || !optval)
             {
                 SetLastError(WSAEFAULT);
                 return SOCKET_ERROR;
@@ -1551,18 +1650,21 @@ int WINAPI getsockopt( SOCKET s, int level, int optname, char *optval, int *optl
             return 0;
 
         case SO_OOBINLINE:
-            return server_getsockopt( s, IOCTL_AFD_WINE_GET_SO_OOBINLINE, optval, optlen );
+            ret = server_getsockopt( s, IOCTL_AFD_WINE_GET_SO_OOBINLINE, optval, optlen );
+            if (!ret && *optlen < sizeof(DWORD)) *optlen = 1;
+            return ret;
 
         /* SO_OPENTYPE does not require a valid socket handle. */
         case SO_OPENTYPE:
             if (!optlen || *optlen < sizeof(int) || !optval)
             {
-                SetLastError(WSAEFAULT);
+                SetLastError( WSAEFAULT );
                 return SOCKET_ERROR;
             }
             *(int *)optval = get_per_thread_data()->opentype;
             *optlen = sizeof(int);
             TRACE("getting global SO_OPENTYPE = 0x%x\n", *((int*)optval) );
+            SetLastError( ERROR_SUCCESS );
             return 0;
 
         case SO_PROTOCOL_INFOA:
@@ -1574,9 +1676,9 @@ int WINAPI getsockopt( SOCKET s, int level, int optname, char *optval, int *optl
             ret = ws_protocol_info(s, optname == SO_PROTOCOL_INFOW, &infow, &size);
             if (ret)
             {
-                if (!optlen || !optval || *optlen < size)
+                if (!optval || *optlen < size)
                 {
-                    if(optlen) *optlen = size;
+                    *optlen = size;
                     ret = 0;
                     SetLastError(WSAEFAULT);
                 }
@@ -1587,15 +1689,29 @@ int WINAPI getsockopt( SOCKET s, int level, int optname, char *optval, int *optl
         }
 
         case SO_RCVBUF:
+            if (*optlen < sizeof(DWORD) || !optval)
+            {
+                if (optval) memset( optval, 0, *optlen );
+                SetLastError( WSAEFAULT );
+                return SOCKET_ERROR;
+            }
             return server_getsockopt( s, IOCTL_AFD_WINE_GET_SO_RCVBUF, optval, optlen );
 
         case SO_RCVTIMEO:
             return server_getsockopt( s, IOCTL_AFD_WINE_GET_SO_RCVTIMEO, optval, optlen );
 
         case SO_REUSEADDR:
-            return server_getsockopt( s, IOCTL_AFD_WINE_GET_SO_REUSEADDR, optval, optlen );
+            ret = server_getsockopt( s, IOCTL_AFD_WINE_GET_SO_REUSEADDR, optval, optlen );
+            if (!ret && *optlen < sizeof(DWORD)) *optlen = 1;
+            return ret;
 
         case SO_SNDBUF:
+            if (*optlen < sizeof(DWORD) || !optval)
+            {
+                if (optval) memset( optval, 0, *optlen );
+                SetLastError( WSAEFAULT );
+                return SOCKET_ERROR;
+            }
             return server_getsockopt( s, IOCTL_AFD_WINE_GET_SO_SNDBUF, optval, optlen );
 
         case SO_SNDTIMEO:
@@ -1606,7 +1722,7 @@ int WINAPI getsockopt( SOCKET s, int level, int optname, char *optval, int *optl
             WSAPROTOCOL_INFOW info;
             int size;
 
-            if (!optlen || *optlen < sizeof(int) || !optval)
+            if (*optlen < sizeof(int) || !optval)
             {
                 SetLastError(WSAEFAULT);
                 return SOCKET_ERROR;
@@ -1689,6 +1805,12 @@ int WINAPI getsockopt( SOCKET s, int level, int optname, char *optval, int *optl
         switch(optname)
         {
         case TCP_NODELAY:
+            if (*optlen < 1 || !optval)
+            {
+                SetLastError( WSAEFAULT );
+                return SOCKET_ERROR;
+            }
+            *optlen = 1;
             return server_getsockopt( s, IOCTL_AFD_WINE_GET_TCP_NODELAY, optval, optlen );
 
         default:
@@ -1719,12 +1841,30 @@ int WINAPI getsockopt( SOCKET s, int level, int optname, char *optval, int *optl
             return server_getsockopt( s, IOCTL_AFD_WINE_GET_IP_OPTIONS, optval, optlen );
 
         case IP_PKTINFO:
+            if (*optlen < sizeof(DWORD) || !optval)
+            {
+                *optlen = 0;
+                SetLastError( WSAEFAULT );
+                return SOCKET_ERROR;
+            }
             return server_getsockopt( s, IOCTL_AFD_WINE_GET_IP_PKTINFO, optval, optlen );
 
         case IP_RECVTOS:
+            if (*optlen < sizeof(DWORD) || !optval)
+            {
+                *optlen = 0;
+                SetLastError( WSAEFAULT );
+                return SOCKET_ERROR;
+            }
             return server_getsockopt( s, IOCTL_AFD_WINE_GET_IP_RECVTOS, optval, optlen );
 
         case IP_RECVTTL:
+            if (*optlen < sizeof(DWORD) || !optval)
+            {
+                *optlen = 0;
+                SetLastError( WSAEFAULT );
+                return SOCKET_ERROR;
+            }
             return server_getsockopt( s, IOCTL_AFD_WINE_GET_IP_RECVTTL, optval, optlen );
 
         case IP_TOS:
@@ -1750,22 +1890,46 @@ int WINAPI getsockopt( SOCKET s, int level, int optname, char *optval, int *optl
         switch(optname)
         {
         case IPV6_DONTFRAG:
+            if (*optlen < 1 || !optval)
+            {
+                SetLastError( WSAEFAULT );
+                return SOCKET_ERROR;
+            }
+            if (*optlen < sizeof(DWORD)) *optlen = 1;
             return server_getsockopt( s, IOCTL_AFD_WINE_GET_IPV6_DONTFRAG, optval, optlen );
 
         case IPV6_HOPLIMIT:
+            if (*optlen < sizeof(DWORD) || !optval)
+            {
+                *optlen = 0;
+                SetLastError( WSAEFAULT );
+                return SOCKET_ERROR;
+            }
             return server_getsockopt( s, IOCTL_AFD_WINE_GET_IPV6_RECVHOPLIMIT, optval, optlen );
 
         case IPV6_MULTICAST_HOPS:
+            if (*optlen < 1 || !optval)
+            {
+                SetLastError( WSAEFAULT );
+                return SOCKET_ERROR;
+            }
+            if (*optlen < sizeof(DWORD)) *optlen = 1;
             return server_getsockopt( s, IOCTL_AFD_WINE_GET_IPV6_MULTICAST_HOPS, optval, optlen );
 
         case IPV6_MULTICAST_IF:
             return server_getsockopt( s, IOCTL_AFD_WINE_GET_IPV6_MULTICAST_IF, optval, optlen );
 
         case IPV6_MULTICAST_LOOP:
+            if (*optlen < 1 || !optval)
+            {
+                SetLastError( WSAEFAULT );
+                return SOCKET_ERROR;
+            }
+            if (*optlen < sizeof(DWORD)) *optlen = 1;
             return server_getsockopt( s, IOCTL_AFD_WINE_GET_IPV6_MULTICAST_LOOP, optval, optlen );
 
         case IPV6_PROTECTION_LEVEL:
-            if (!optlen || *optlen < sizeof(UINT) || !optval)
+            if (*optlen < sizeof(UINT) || !optval)
             {
                 SetLastError( WSAEFAULT );
                 return -1;
@@ -1776,18 +1940,42 @@ int WINAPI getsockopt( SOCKET s, int level, int optname, char *optval, int *optl
             return 0;
 
         case IPV6_PKTINFO:
+            if (*optlen < sizeof(DWORD) || !optval)
+            {
+                *optlen = 0;
+                SetLastError( WSAEFAULT );
+                return SOCKET_ERROR;
+            }
             return server_getsockopt( s, IOCTL_AFD_WINE_GET_IPV6_RECVPKTINFO, optval, optlen );
 
         case IPV6_RECVTCLASS:
+            if (*optlen < sizeof(DWORD) || !optval)
+            {
+                if (optlen) *optlen = 0;
+                SetLastError( WSAEFAULT );
+                return SOCKET_ERROR;
+            }
             return server_getsockopt( s, IOCTL_AFD_WINE_GET_IPV6_RECVTCLASS, optval, optlen );
 
         case IPV6_UNICAST_HOPS:
+            if (*optlen < 1 || !optval)
+            {
+                SetLastError( WSAEFAULT );
+                return SOCKET_ERROR;
+            }
+            if (*optlen < sizeof(DWORD)) *optlen = 1;
             return server_getsockopt( s, IOCTL_AFD_WINE_GET_IPV6_UNICAST_HOPS, optval, optlen );
 
         case IPV6_UNICAST_IF:
             return server_getsockopt( s, IOCTL_AFD_WINE_GET_IPV6_UNICAST_IF, optval, optlen );
 
         case IPV6_V6ONLY:
+            if (*optlen < 1 || !optval)
+            {
+                SetLastError( WSAEFAULT );
+                return SOCKET_ERROR;
+            }
+            *optlen = 1;
             return server_getsockopt( s, IOCTL_AFD_WINE_GET_IPV6_V6ONLY, optval, optlen );
 
         default:
@@ -2020,23 +2208,6 @@ INT WINAPI WSAIoctl(SOCKET s, DWORD code, LPVOID in_buff, DWORD in_size, LPVOID 
         DWORD ret;
 
         ret = server_ioctl_sock( s, IOCTL_AFD_WINE_FIONREAD, in_buff, in_size,
-                                 out_buff, out_size, ret_size, overlapped, completion );
-        SetLastError( ret );
-        if (!ret) *ret_size = sizeof(u_long);
-        return ret ? -1 : 0;
-    }
-
-    case SIO_IDEAL_SEND_BACKLOG_QUERY:
-    {
-        DWORD ret;
-
-        if (!out_buff)
-        {
-            SetLastError(WSAEFAULT);
-            return SOCKET_ERROR;
-        }
-
-        ret = server_ioctl_sock( s, IOCTL_AFD_WINE_SEND_BACKLOG_QUERY, in_buff, in_size,
                                  out_buff, out_size, ret_size, overlapped, completion );
         SetLastError( ret );
         if (!ret) *ret_size = sizeof(u_long);
@@ -2418,7 +2589,7 @@ int WINAPI select( int count, fd_set *read_ptr, fd_set *write_ptr,
     unsigned int poll_count = 0;
     ULONG params_size, i, j;
     SOCKET poll_socket = 0;
-    IO_STATUS_BLOCK io;
+    IO_STATUS_BLOCK *io;
     HANDLE sync_event;
     int ret_count = 0;
     NTSTATUS status;
@@ -2494,18 +2665,22 @@ int WINAPI select( int count, fd_set *read_ptr, fd_set *write_ptr,
 
     assert( params->count == poll_count );
 
-    status = NtDeviceIoControlFile( (HANDLE)poll_socket, sync_event, NULL, NULL, &io,
+    io = alloc_io();
+    status = NtDeviceIoControlFile( (HANDLE)poll_socket, sync_event, NULL, NULL, io,
                                     IOCTL_AFD_POLL, params, params_size, params, params_size );
     if (status == STATUS_PENDING)
     {
-        if (WaitForSingleObject( sync_event, INFINITE ) == WAIT_FAILED)
+        if (wait_event_alertable( sync_event ) == WAIT_FAILED)
         {
             free( read_input );
             free( params );
+            free_io( io );
             return -1;
         }
-        status = io.u.Status;
+        status = io->u.Status;
     }
+    free_io( io );
+
     if (status == STATUS_TIMEOUT) status = STATUS_SUCCESS;
     if (!status)
     {
@@ -2786,6 +2961,8 @@ static int server_setsockopt( SOCKET s, ULONG code, const char *optval, int optl
  */
 int WINAPI setsockopt( SOCKET s, int level, int optname, const char *optval, int optlen )
 {
+    DWORD value = 0;
+
     TRACE( "socket %#Ix, %s, optval %s, optlen %d\n",
            s, debugstr_sockopt(level, optname), debugstr_optval(optval, optlen), optlen );
 
@@ -2802,11 +2979,16 @@ int WINAPI setsockopt( SOCKET s, int level, int optname, const char *optval, int
         switch(optname)
         {
         case SO_BROADCAST:
-            return server_setsockopt( s, IOCTL_AFD_WINE_SET_SO_BROADCAST, optval, optlen );
-
+            if (!optval)
+            {
+                SetLastError( WSAEFAULT );
+                return SOCKET_ERROR;
+            }
+            memcpy( &value, optval, min( optlen, sizeof(value) ));
+            return server_setsockopt( s, IOCTL_AFD_WINE_SET_SO_BROADCAST, (char *)&value, sizeof(value) );
         case SO_DONTLINGER:
         {
-            struct linger linger;
+            LINGER linger;
 
             if (!optval)
             {
@@ -2820,32 +3002,59 @@ int WINAPI setsockopt( SOCKET s, int level, int optname, const char *optval, int
         }
 
         case SO_ERROR:
-            FIXME( "SO_ERROR, stub!\n" );
-            SetLastError( WSAENOPROTOOPT );
-            return -1;
+            FIXME( "SO_ERROR, stub.\n" );
+            SetLastError( ERROR_SUCCESS );
+            return 0;
 
         case SO_KEEPALIVE:
-            return server_setsockopt( s, IOCTL_AFD_WINE_SET_SO_KEEPALIVE, optval, optlen );
+            if (optlen <= 0 || !optval)
+            {
+                SetLastError( optlen ? WSAENOBUFS : WSAEFAULT );
+                return SOCKET_ERROR;
+            }
+            value = *optval;
+            return server_setsockopt( s, IOCTL_AFD_WINE_SET_SO_KEEPALIVE, (char *)&value, sizeof(value) );
 
         case SO_LINGER:
+            if (optlen < sizeof(LINGER) || !optval)
+            {
+                SetLastError( WSAEFAULT );
+                return SOCKET_ERROR;
+            }
             return server_setsockopt( s, IOCTL_AFD_WINE_SET_SO_LINGER, optval, optlen );
 
         case SO_OOBINLINE:
-            return server_setsockopt( s, IOCTL_AFD_WINE_SET_SO_OOBINLINE, optval, optlen );
+            if (!optval)
+            {
+                SetLastError( WSAEFAULT );
+                return SOCKET_ERROR;
+            }
+            memcpy( &value, optval, min( optlen, sizeof(value) ));
+            return server_setsockopt( s, IOCTL_AFD_WINE_SET_SO_OOBINLINE, (char *)&value, sizeof(value) );
 
         case SO_RCVBUF:
+            if (optlen < 0) optlen = 4;
             return server_setsockopt( s, IOCTL_AFD_WINE_SET_SO_RCVBUF, optval, optlen );
 
         case SO_RCVTIMEO:
+            if (optlen < 0) optlen = 4;
             return server_setsockopt( s, IOCTL_AFD_WINE_SET_SO_RCVTIMEO, optval, optlen );
 
         case SO_REUSEADDR:
-            return server_setsockopt( s, IOCTL_AFD_WINE_SET_SO_REUSEADDR, optval, optlen );
+            if (!optval)
+            {
+                SetLastError( WSAEFAULT );
+                return SOCKET_ERROR;
+            }
+            memcpy( &value, optval, min( optlen, sizeof(value) ));
+            return server_setsockopt( s, IOCTL_AFD_WINE_SET_SO_REUSEADDR, (char *)&value, sizeof(value) );
 
         case SO_SNDBUF:
+            if (optlen < 0) optlen = 4;
             return server_setsockopt( s, IOCTL_AFD_WINE_SET_SO_SNDBUF, optval, optlen );
 
         case SO_SNDTIMEO:
+            if (optlen < 0) optlen = 4;
             return server_setsockopt( s, IOCTL_AFD_WINE_SET_SO_SNDTIMEO, optval, optlen );
 
         /* SO_DEBUG is a privileged operation, ignore it. */
@@ -2856,7 +3065,13 @@ int WINAPI setsockopt( SOCKET s, int level, int optname, const char *optval, int
         /* For some reason the game GrandPrixLegends does set SO_DONTROUTE on its
          * socket. According to MSDN, this option is silently ignored.*/
         case SO_DONTROUTE:
-            TRACE("Ignoring SO_DONTROUTE\n");
+            TRACE( "Ignoring SO_DONTROUTE.\n" );
+            if (optlen <= 0)
+            {
+                SetLastError( optlen ? WSAENOBUFS : WSAEFAULT );
+                return -1;
+            }
+            SetLastError( ERROR_SUCCESS );
             return 0;
 
         /* Stops two sockets from being bound to the same port. Always happens
@@ -2881,11 +3096,12 @@ int WINAPI setsockopt( SOCKET s, int level, int optname, const char *optval, int
         case SO_OPENTYPE:
             if (!optlen || optlen < sizeof(int) || !optval)
             {
-                SetLastError(WSAEFAULT);
+                SetLastError( WSAEFAULT );
                 return SOCKET_ERROR;
             }
             get_per_thread_data()->opentype = *(const int *)optval;
             TRACE("setting global SO_OPENTYPE = 0x%x\n", *((const int*)optval) );
+            SetLastError( ERROR_SUCCESS );
             return 0;
 
         case SO_RANDOMIZE_PORT:
@@ -2938,14 +3154,14 @@ int WINAPI setsockopt( SOCKET s, int level, int optname, const char *optval, int
         switch(optname)
         {
         case TCP_NODELAY:
-        {
-            INT nodelay = *optval;
-            if (optlen <= 0) {
-                SetLastError(WSAEFAULT);
+            if (optlen <= 0 || !optval)
+            {
+                SetLastError( optlen && optval ? WSAENOBUFS : WSAEFAULT );
                 return SOCKET_ERROR;
             }
-            return server_setsockopt( s, IOCTL_AFD_WINE_SET_TCP_NODELAY, (char*)&nodelay, sizeof(nodelay) );
-        }
+            value = *optval;
+            return server_setsockopt( s, IOCTL_AFD_WINE_SET_TCP_NODELAY, (char*)&value, sizeof(value) );
+
         default:
             FIXME("Unknown IPPROTO_TCP optname 0x%08x\n", optname);
             SetLastError(WSAENOPROTOOPT);
@@ -2954,6 +3170,12 @@ int WINAPI setsockopt( SOCKET s, int level, int optname, const char *optval, int
         break;
 
     case IPPROTO_IP:
+        if (optlen < 0)
+        {
+            SetLastError(WSAENOBUFS);
+            return SOCKET_ERROR;
+        }
+
         switch(optname)
         {
         case IP_ADD_MEMBERSHIP:
@@ -2981,27 +3203,68 @@ int WINAPI setsockopt( SOCKET s, int level, int optname, const char *optval, int
             return server_setsockopt( s, IOCTL_AFD_WINE_SET_IP_MULTICAST_IF, optval, optlen );
 
         case IP_MULTICAST_LOOP:
+            if (!optlen)
+            {
+                SetLastError( WSAEFAULT );
+                return -1;
+            }
             return server_setsockopt( s, IOCTL_AFD_WINE_SET_IP_MULTICAST_LOOP, optval, optlen );
 
         case IP_MULTICAST_TTL:
+            if (!optlen)
+            {
+                SetLastError( WSAEFAULT );
+                return -1;
+            }
             return server_setsockopt( s, IOCTL_AFD_WINE_SET_IP_MULTICAST_TTL, optval, optlen );
 
         case IP_OPTIONS:
             return server_setsockopt( s, IOCTL_AFD_WINE_SET_IP_OPTIONS, optval, optlen );
 
         case IP_PKTINFO:
+            if (optlen < sizeof(DWORD) || !optval)
+            {
+                SetLastError( WSAEFAULT );
+                return SOCKET_ERROR;
+            }
             return server_setsockopt( s, IOCTL_AFD_WINE_SET_IP_PKTINFO, optval, optlen );
 
         case IP_RECVTOS:
+            if (optlen < sizeof(DWORD) || !optval)
+            {
+                SetLastError( WSAEFAULT );
+                return SOCKET_ERROR;
+            }
             return server_setsockopt( s, IOCTL_AFD_WINE_SET_IP_RECVTOS, optval, optlen );
 
         case IP_RECVTTL:
+            if (optlen < sizeof(DWORD) || !optval)
+            {
+                SetLastError( WSAEFAULT );
+                return SOCKET_ERROR;
+            }
             return server_setsockopt( s, IOCTL_AFD_WINE_SET_IP_RECVTTL, optval, optlen );
 
         case IP_TOS:
+            if (!optlen || !optval)
+            {
+                SetLastError(WSAEFAULT);
+                return SOCKET_ERROR;
+            }
+            memcpy( &value, optval, min( optlen, sizeof(value) ));
+            if (value > 0xff)
+            {
+                SetLastError(WSAEINVAL);
+                return SOCKET_ERROR;
+            }
             return server_setsockopt( s, IOCTL_AFD_WINE_SET_IP_TOS, optval, optlen );
 
         case IP_TTL:
+            if (!optlen)
+            {
+                SetLastError( WSAEFAULT );
+                return -1;
+            }
             return server_setsockopt( s, IOCTL_AFD_WINE_SET_IP_TTL, optval, optlen );
 
         case IP_UNBLOCK_SOURCE:
@@ -3018,30 +3281,65 @@ int WINAPI setsockopt( SOCKET s, int level, int optname, const char *optval, int
         break;
 
     case IPPROTO_IPV6:
+        if (optlen < 0)
+        {
+            SetLastError( WSAENOBUFS );
+            return SOCKET_ERROR;
+        }
+
         switch(optname)
         {
         case IPV6_ADD_MEMBERSHIP:
             return server_setsockopt( s, IOCTL_AFD_WINE_SET_IPV6_ADD_MEMBERSHIP, optval, optlen );
 
         case IPV6_DONTFRAG:
-            return server_setsockopt( s, IOCTL_AFD_WINE_SET_IPV6_DONTFRAG, optval, optlen );
+            if (!optlen || !optval)
+            {
+                SetLastError( WSAEFAULT );
+                return SOCKET_ERROR;
+            }
+            memcpy( &value, optval, min( optlen, sizeof(value) ));
+            return server_setsockopt( s, IOCTL_AFD_WINE_SET_IPV6_DONTFRAG, (char *)&value, sizeof(value) );
 
         case IPV6_DROP_MEMBERSHIP:
             return server_setsockopt( s, IOCTL_AFD_WINE_SET_IPV6_DROP_MEMBERSHIP, optval, optlen );
 
         case IPV6_HOPLIMIT:
+            if (optlen < sizeof(DWORD) || !optval)
+            {
+                SetLastError( WSAEFAULT );
+                return SOCKET_ERROR;
+            }
             return server_setsockopt( s, IOCTL_AFD_WINE_SET_IPV6_RECVHOPLIMIT, optval, optlen );
 
         case IPV6_MULTICAST_HOPS:
-            return server_setsockopt( s, IOCTL_AFD_WINE_SET_IPV6_MULTICAST_HOPS, optval, optlen );
+            if (!optlen || !optval)
+            {
+                SetLastError( WSAEFAULT );
+                return SOCKET_ERROR;
+            }
+            memcpy( &value, optval, min( optlen, sizeof(value) ));
+            return server_setsockopt( s, IOCTL_AFD_WINE_SET_IPV6_MULTICAST_HOPS, (char *)&value, sizeof(value) );
 
         case IPV6_MULTICAST_IF:
             return server_setsockopt( s, IOCTL_AFD_WINE_SET_IPV6_MULTICAST_IF, optval, optlen );
 
         case IPV6_MULTICAST_LOOP:
-            return server_setsockopt( s, IOCTL_AFD_WINE_SET_IPV6_MULTICAST_LOOP, optval, optlen );
+            if (!optlen || !optval)
+            {
+                SetLastError( WSAEFAULT );
+                return SOCKET_ERROR;
+            }
+            memcpy( &value, optval, min( optlen, sizeof(value) ));
+            value = !!value;
+            return server_setsockopt( s, IOCTL_AFD_WINE_SET_IPV6_MULTICAST_LOOP, (char *)&value, sizeof(value) );
 
         case IPV6_PKTINFO:
+            if (optlen < sizeof(DWORD) || !optval)
+            {
+                SetLastError( WSAEFAULT );
+                return SOCKET_ERROR;
+            }
             return server_setsockopt( s, IOCTL_AFD_WINE_SET_IPV6_RECVPKTINFO, optval, optlen );
 
         case IPV6_PROTECTION_LEVEL:
@@ -3049,16 +3347,33 @@ int WINAPI setsockopt( SOCKET s, int level, int optname, const char *optval, int
             return 0;
 
         case IPV6_RECVTCLASS:
+            if (optlen < sizeof(DWORD) || !optval)
+            {
+                SetLastError( WSAEFAULT );
+                return SOCKET_ERROR;
+            }
             return server_setsockopt( s, IOCTL_AFD_WINE_SET_IPV6_RECVTCLASS, optval, optlen );
 
         case IPV6_UNICAST_HOPS:
-            return server_setsockopt( s, IOCTL_AFD_WINE_SET_IPV6_UNICAST_HOPS, optval, optlen );
+            if (!optlen || !optval)
+            {
+                SetLastError( WSAEFAULT );
+                return SOCKET_ERROR;
+            }
+            memcpy( &value, optval, min( optlen, sizeof(value) ));
+            return server_setsockopt( s, IOCTL_AFD_WINE_SET_IPV6_UNICAST_HOPS, (char *)&value, sizeof(value) );
 
         case IPV6_UNICAST_IF:
             return server_setsockopt( s, IOCTL_AFD_WINE_SET_IPV6_UNICAST_IF, optval, optlen );
 
         case IPV6_V6ONLY:
-            return server_setsockopt( s, IOCTL_AFD_WINE_SET_IPV6_V6ONLY, optval, optlen );
+            if (!optlen || !optval)
+            {
+                SetLastError( WSAEFAULT );
+                return SOCKET_ERROR;
+            }
+            value = *optval;
+            return server_setsockopt( s, IOCTL_AFD_WINE_SET_IPV6_V6ONLY, (char *)&value, sizeof(value) );
 
         default:
             FIXME("Unknown IPPROTO_IPV6 optname 0x%08x\n", optname);
@@ -3212,6 +3527,12 @@ BOOL WINAPI WSAGetOverlappedResult( SOCKET s, LPWSAOVERLAPPED lpOverlapped,
     {
         ERR( "Invalid pointer\n" );
         SetLastError(WSA_INVALID_PARAMETER);
+        return FALSE;
+    }
+
+    if (!socket_list_find( s ))
+    {
+        SetLastError( WSAENOTSOCK );
         return FALSE;
     }
 
@@ -3436,6 +3757,33 @@ SOCKET WINAPI WSASocketW(int af, int type, int protocol,
 
     ret = HANDLE2SOCKET(handle);
     TRACE( "created %#Ix\n", ret );
+
+    /*
+     * msvcmon spawns new server instances for each connection, which conflicts
+     * with previous instance (which is no longer listening, but client connection
+     * is still active). This is allowed on Windows, but Linux handles it differently.
+     */
+    if (af == AF_INET || af == AF_INET6)
+    {
+        static int once, msvsmon;
+        if (!once++)
+        {
+            WCHAR name[MAX_PATH], *p;
+            GetModuleFileNameW(GetModuleHandleW(NULL), name, ARRAY_SIZE(name));
+            p = wcsrchr(name, '\\');
+            p = p ? p+1 : name;
+            if (!wcsicmp(p, L"msvsmon.exe"))
+            {
+                FIXME("Using REUSESOCKET hack.\n");
+                msvsmon = 1;
+            }
+        }
+        if (msvsmon)
+        {
+            const int enable = 1;
+            setsockopt(ret, SOL_SOCKET, SO_REUSEADDR, (char *)&enable, sizeof(enable));
+        }
+    }
 
     if (!socket_list_add(ret))
     {
@@ -3672,12 +4020,13 @@ int WINAPI WSARecvDisconnect( SOCKET s, WSABUF *data )
 }
 
 
-static BOOL protocol_matches_filter( const int *filter, int protocol )
+static BOOL protocol_matches_filter( const int *filter, unsigned int index )
 {
+    if (supported_protocols[index].dwProviderFlags & PFL_HIDDEN) return FALSE;
     if (!filter) return TRUE;
     while (*filter)
     {
-        if (protocol == *filter++) return TRUE;
+        if (supported_protocols[index].iProtocol == *filter++) return TRUE;
     }
     return FALSE;
 }
@@ -3695,7 +4044,7 @@ int WINAPI WSAEnumProtocolsA( int *filter, WSAPROTOCOL_INFOA *protocols, DWORD *
 
     for (i = 0; i < ARRAY_SIZE(supported_protocols); ++i)
     {
-        if (protocol_matches_filter( filter, supported_protocols[i].iProtocol ))
+        if (protocol_matches_filter( filter, i ))
             ++count;
     }
 
@@ -3709,7 +4058,7 @@ int WINAPI WSAEnumProtocolsA( int *filter, WSAPROTOCOL_INFOA *protocols, DWORD *
     count = 0;
     for (i = 0; i < ARRAY_SIZE(supported_protocols); ++i)
     {
-        if (protocol_matches_filter( filter, supported_protocols[i].iProtocol ))
+        if (protocol_matches_filter( filter, i ))
         {
             memcpy( &protocols[count], &supported_protocols[i], offsetof( WSAPROTOCOL_INFOW, szProtocol ) );
             WideCharToMultiByte( CP_ACP, 0, supported_protocols[i].szProtocol, -1,
@@ -3765,7 +4114,7 @@ int WINAPI WSAEnumProtocolsW( int *filter, WSAPROTOCOL_INFOW *protocols, DWORD *
 
     for (i = 0; i < ARRAY_SIZE(supported_protocols); ++i)
     {
-        if (protocol_matches_filter( filter, supported_protocols[i].iProtocol ))
+        if (protocol_matches_filter( filter, i ))
             ++count;
     }
 
@@ -3779,7 +4128,7 @@ int WINAPI WSAEnumProtocolsW( int *filter, WSAPROTOCOL_INFOW *protocols, DWORD *
     count = 0;
     for (i = 0; i < ARRAY_SIZE(supported_protocols); ++i)
     {
-        if (protocol_matches_filter( filter, supported_protocols[i].iProtocol ))
+        if (protocol_matches_filter( filter, i ))
             protocols[count++] = supported_protocols[i];
     }
     return count;

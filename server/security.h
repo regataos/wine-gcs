@@ -45,7 +45,7 @@ extern const struct luid SeImpersonatePrivilege;
 extern const struct luid SeCreateGlobalPrivilege;
 
 extern const struct sid world_sid;
-extern const struct sid local_user_sid;
+extern       struct sid local_user_sid;
 extern const struct sid local_system_sid;
 extern const struct sid builtin_users_sid;
 extern const struct sid builtin_admins_sid;
@@ -60,6 +60,7 @@ struct ace
     unsigned int   mask;
 };
 
+
 /* token functions */
 
 extern struct token *get_token_obj( struct process *process, obj_handle_t handle, unsigned int access );
@@ -73,7 +74,7 @@ extern int token_check_privileges( struct token *token, int all_required,
                                    const struct luid_attr *reqprivs,
                                    unsigned int count, struct luid_attr *usedprivs );
 extern const struct acl *token_get_default_dacl( struct token *token );
-extern const struct sid *token_get_user( struct token *token );
+extern const struct sid *token_get_owner( struct token *token );
 extern const struct sid *token_get_primary_group( struct token *token );
 extern unsigned int token_get_session_id( struct token *token );
 extern int token_sid_present( struct token *token, const struct sid *sid, int deny );
@@ -122,6 +123,7 @@ static inline struct ace *set_ace( struct ace *ace, const struct sid *sid, unsig
 
 extern void security_set_thread_token( struct thread *thread, obj_handle_t handle );
 extern const struct sid *security_unix_uid_to_sid( uid_t uid );
+extern void init_user_sid(void);
 extern int check_object_access( struct token *token, struct object *obj, unsigned int *access );
 
 static inline int thread_single_check_privilege( struct thread *thread, struct luid priv )

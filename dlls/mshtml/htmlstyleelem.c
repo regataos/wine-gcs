@@ -113,7 +113,7 @@ static HRESULT WINAPI HTMLStyleElement_put_type(IHTMLStyleElement *iface, BSTR v
     nsres = nsIDOMHTMLStyleElement_SetType(This->nsstyle, &type_str);
     nsAString_Finish(&type_str);
     if(NS_FAILED(nsres)) {
-        ERR("SetType failed: %08x\n", nsres);
+        ERR("SetType failed: %08lx\n", nsres);
         return E_FAIL;
     }
 
@@ -199,8 +199,7 @@ static HRESULT WINAPI HTMLStyleElement_get_styleSheet(IHTMLStyleElement *iface, 
         assert(nsres == NS_OK);
 
         if(ss) {
-            HRESULT hres = create_style_sheet(ss, dispex_compat_mode(&This->element.node.event_target.dispex),
-                                              &This->style_sheet);
+            HRESULT hres = create_style_sheet(ss, This->element.node.doc, &This->style_sheet);
             nsIDOMStyleSheet_Release(ss);
             if(FAILED(hres))
                 return hres;
@@ -239,7 +238,7 @@ static HRESULT WINAPI HTMLStyleElement_put_media(IHTMLStyleElement *iface, BSTR 
     nsres = nsIDOMHTMLStyleElement_SetMedia(This->nsstyle, &media_str);
     nsAString_Finish(&media_str);
     if(NS_FAILED(nsres)) {
-        ERR("SetMedia failed: %08x\n", nsres);
+        ERR("SetMedia failed: %08lx\n", nsres);
         return E_FAIL;
     }
 
@@ -461,9 +460,10 @@ static const tid_t HTMLStyleElement_iface_tids[] = {
     HTMLELEMENT_TIDS,
     0
 };
-static dispex_static_data_t HTMLStyleElement_dispex = {
+dispex_static_data_t HTMLStyleElement_dispex = {
     L"HTMLStyleElement",
     NULL,
+    PROTO_ID_HTMLStyleElement,
     DispHTMLStyleElement_tid,
     HTMLStyleElement_iface_tids,
     HTMLStyleElement_init_dispex_info

@@ -76,6 +76,7 @@
 @ stdcall CloseClipboard()
 @ stdcall CloseDesktop(long) NtUserCloseDesktop
 @ stdcall CloseTouchInputHandle(long)
+@ stdcall CloseGestureInfoHandle(long)
 @ stdcall CloseWindow(long)
 @ stdcall CloseWindowStation(long) NtUserCloseWindowStation
 @ stdcall CopyAcceleratorTableA(long ptr long)
@@ -304,6 +305,7 @@
 @ stdcall GetFocus()
 @ stdcall GetForegroundWindow()
 @ stdcall GetGestureConfig(long long long ptr ptr long)
+@ stdcall GetGestureExtraArgs(long long ptr)
 @ stdcall GetGestureInfo(long ptr)
 @ stdcall GetGUIThreadInfo(long ptr)
 @ stdcall GetGuiResources(long long)
@@ -316,12 +318,12 @@
 @ stdcall GetKBCodePage()
 @ stdcall GetKeyNameTextA(long ptr long)
 @ stdcall GetKeyNameTextW(long ptr long) NtUserGetKeyNameText
-@ stdcall -import GetKeyState(long) NtUserGetKeyState
+@ stdcall GetKeyState(long)
 @ stdcall GetKeyboardLayout(long) NtUserGetKeyboardLayout
 @ stdcall GetKeyboardLayoutList(long ptr) NtUserGetKeyboardLayoutList
 @ stdcall GetKeyboardLayoutNameA(ptr)
 @ stdcall GetKeyboardLayoutNameW(ptr) NtUserGetKeyboardLayoutName
-@ stdcall -import GetKeyboardState(ptr) NtUserGetKeyboardState
+@ stdcall GetKeyboardState(ptr)
 @ stdcall GetKeyboardType(long)
 @ stdcall GetLastActivePopup(long)
 @ stdcall GetLastInputInfo(ptr)
@@ -357,7 +359,10 @@
 @ stdcall GetParent(long)
 @ stdcall GetPhysicalCursorPos(ptr)
 @ stdcall GetPointerDevices(ptr ptr)
+@ stdcall GetPointerInfo(long ptr)
 @ stdcall GetPointerType(long ptr)
+@ stdcall GetPointerTouchInfo(long ptr)
+@ stdcall GetPointerTouchInfoHistory(long ptr ptr)
 @ stdcall GetPriorityClipboardFormat(ptr long) NtUserGetPriorityClipboardFormat
 @ stdcall GetProcessDefaultLayout(ptr)
 @ stdcall GetProcessDpiAwarenessInternal(long ptr)
@@ -608,6 +613,7 @@
 @ stdcall RegisterRawInputDevices(ptr long long)
 @ stdcall RegisterServicesProcess(long)
 @ stdcall RegisterShellHookWindow (long)
+@ stdcall RegisterSuspendResumeNotification(long long)
 @ stdcall RegisterSystemThread(long long)
 @ stdcall RegisterTasklist (long)
 @ stdcall RegisterTouchHitTestingWindow(long long)
@@ -783,6 +789,7 @@
 @ stdcall UnregisterHotKey(long long) NtUserUnregisterHotKey
 # @ stub UnregisterMessagePumpHook
 @ stdcall UnregisterPowerSettingNotification(ptr)
+@ stdcall UnregisterSuspendResumeNotification(ptr)
 @ stdcall UnregisterTouchWindow(long)
 @ stdcall UnregisterUserApiHook()
 @ stdcall UpdateLayeredWindow(long long ptr ptr long ptr long ptr long)

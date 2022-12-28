@@ -68,10 +68,10 @@
 #include <winternl.h>
 #include <ddk/wdm.h>
 #include <sddl.h>
+#include <ntsecapi.h>
 #include <wine/svcctl.h>
 #include <wine/asm.h>
 #include <wine/debug.h>
-#include <bcrypt.h>
 
 #include <shlobj.h>
 #include <shobjidl.h>
@@ -245,7 +245,7 @@ static void initialize_xstate_features(struct _KUSER_SHARED_DATA *data)
     TRACE("XSAVE feature 2 %#x, %#x, %#x, %#x.\n", regs[0], regs[1], regs[2], regs[3]);
 }
 
-static UINT64 read_tsc_frequency(BOOL use_rdtscp)
+static UINT64 read_tsc_frequency( BOOL has_rdtscp )
 {
     UINT64 freq = 0;
 
@@ -256,31 +256,31 @@ static UINT64 read_tsc_frequency(BOOL use_rdtscp)
     int regs[4], cpuid_level, tmp;
     UINT64 denom, numer;
 
-    __cpuid(regs, 0);
+    __cpuid( regs, 0 );
     tmp = regs[2];
     regs[2] = regs[3];
     regs[3] = tmp;
 
     /* only available on some intel CPUs */
-    if (memcmp(regs + 1, "GenuineIntel", 12)) freq = 0;
+    if (memcmp( regs + 1, "GenuineIntel", 12 )) freq = 0;
     else if ((cpuid_level = regs[0]) < 0x15) freq = 0;
     else
     {
-        __cpuid(regs, 0x15);
+        __cpuid( regs, 0x15 );
         if (!(denom = regs[0]) || !(numer = regs[1])) freq = 0;
         else
         {
             if ((freq = regs[2])) freq = freq * numer / denom;
             else if (cpuid_level >= 0x16)
             {
-                __cpuid(regs, 0x16); /* eax is base freq in MHz */
+                __cpuid( regs, 0x16 ); /* eax is base freq in MHz */
                 freq = regs[0] * (UINT64)1000000;
             }
             else freq = 0;
         }
 
-        if (!freq) WARN("Failed to read TSC frequency from CPUID, falling back to calibration.\n");
-        else TRACE("TSC frequency read from CPUID, found %I64u Hz\n", freq);
+        if (!freq) WARN( "Failed to read TSC frequency from CPUID, falling back to calibration.\n" );
+        else TRACE( "TSC frequency read from CPUID, found %I64u Hz\n", freq );
     }
 #endif
 
@@ -293,38 +293,44 @@ static UINT64 read_tsc_frequency(BOOL use_rdtscp)
 
         do
         {
-            if (use_rdtscp)
+            if (has_rdtscp)
             {
-                tsc0 = __rdtscp(&aux);
+                tsc0 = __rdtscp( &aux );
                 time0 = RtlGetSystemTimePrecise();
-                tsc1 = __rdtscp(&aux);
-                Sleep(1);
-                tsc2 = __rdtscp(&aux);
+                tsc1 = __rdtscp( &aux );
+                Sleep( 1 );
+                tsc2 = __rdtscp( &aux );
                 time1 = RtlGetSystemTimePrecise();
-                tsc3 = __rdtscp(&aux);
+                tsc3 = __rdtscp( &aux );
             }
             else
             {
-                tsc0 = __rdtsc(); __cpuid(regs, 0);
+                tsc0 = __rdtsc(); __cpuid( regs, 0 );
                 time0 = RtlGetSystemTimePrecise();
-                tsc1 = __rdtsc(); __cpuid(regs, 0);
+                tsc1 = __rdtsc(); __cpuid( regs, 0 );
                 Sleep(1);
-                tsc2 = __rdtsc(); __cpuid(regs, 0);
+                tsc2 = __rdtsc(); __cpuid( regs, 0 );
                 time1 = RtlGetSystemTimePrecise();
-                tsc3 = __rdtsc(); __cpuid(regs, 0);
+                tsc3 = __rdtsc(); __cpuid( regs, 0 );
             }
 
             freq0 = (tsc2 - tsc0) * 10000000 / (time1 - time0);
             freq1 = (tsc3 - tsc1) * 10000000 / (time1 - time0);
-            error = llabs((freq1 - freq0) * 1000000 / min(freq1, freq0));
+            error = llabs( (freq1 - freq0) * 1000000 / min( freq1, freq0 ) );
         }
-        while (error > 100 && retries--);
+        while (error > 500 && --retries);
 
-        if (!retries) WARN("TSC frequency calibration failed, unstable TSC?\n");
+        if (!retries)
+        {
+            FIXME( "TSC frequency calibration failed, unstable TSC?");
+            FIXME( "time0 %I64u ns, time1 %I64u ns\n", time0 * 100, time1 * 100 );
+            FIXME( "tsc2 - tsc0 %I64u, tsc3 - tsc1 %I64u\n", tsc2 - tsc0, tsc3 - tsc1 );
+            FIXME( "freq0 %I64u Hz, freq2 %I64u Hz, error %I64u ppm\n", freq0, freq1, error );
+        }
         else
         {
             freq = (freq0 + freq1) / 2;
-            TRACE("TSC frequency calibration complete, found %I64u Hz\n", freq);
+            TRACE( "TSC frequency calibration complete, found %I64u Hz\n", freq );
         }
     }
 
@@ -340,86 +346,58 @@ static BOOL is_tsc_trusted_by_the_kernel(void)
 
     handle = CreateFileA( "\\??\\unix\\sys\\bus\\clocksource\\devices\\clocksource0\\current_clocksource",
                           GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, 0 );
+    if (handle == INVALID_HANDLE_VALUE) return TRUE;
 
-    if (handle == INVALID_HANDLE_VALUE)
-        return TRUE;
-
-    if (ReadFile( handle, buf, sizeof(buf)-1, &num_read, NULL ))
-    {
-        if (!!strcmp( "tsc", buf ))
-            ret = FALSE;
-    }
+    if (ReadFile( handle, buf, sizeof(buf) - 1, &num_read, NULL ) && strcmp( "tsc", buf ))
+        ret = FALSE;
 
     CloseHandle( handle );
-
     return ret;
 }
 
-static void initialize_qpc_features(struct _KUSER_SHARED_DATA *data, UINT64 *tsc_frequency)
+static void initialize_qpc_features( struct _KUSER_SHARED_DATA *data, UINT64 *tsc_frequency )
 {
+    BOOL has_rdtscp = FALSE;
     int regs[4];
-
-    if (data->QpcBypassEnabled) return;
 
     data->QpcBypassEnabled = 0;
     data->QpcFrequency = TICKSPERSEC;
     data->QpcShift = 0;
     data->QpcBias = 0;
+    *tsc_frequency = 0;
 
-    if (!data->ProcessorFeatures[PF_RDTSC_INSTRUCTION_AVAILABLE])
+    if (!is_tsc_trusted_by_the_kernel())
     {
-        WARN("No RDTSC support, disabling QpcBypass\n");
+        WARN( "Failed to compute TSC frequency, not trusted by the kernel.\n" );
         return;
     }
 
-    __cpuid(regs, 0x80000000);
+    if (!data->ProcessorFeatures[PF_RDTSC_INSTRUCTION_AVAILABLE])
+    {
+        WARN( "Failed to compute TSC frequency, RDTSC instruction not supported.\n" );
+        return;
+    }
+
+    __cpuid( regs, 0x80000000 );
     if (regs[0] < 0x80000007)
     {
-        WARN("Unable to check invariant TSC, disabling QpcBypass\n");
+        WARN( "Failed to compute TSC frequency, unable to check invariant TSC.\n" );
         return;
     }
 
     /* check for invariant tsc bit */
-    __cpuid(regs, 0x80000007);
+    __cpuid( regs, 0x80000007 );
     if (!(regs[3] & (1 << 8)))
     {
-        WARN("No invariant TSC, disabling QpcBypass\n");
+        WARN( "Failed to compute TSC frequency, no invariant TSC.\n" );
         return;
     }
-
-    if (!is_tsc_trusted_by_the_kernel())
-    {
-        WARN("TSC is not trusted by the kernel, disabling QpcBypass.\n");
-        return;
-    }
-
-    data->QpcBypassEnabled |= SHARED_GLOBAL_FLAGS_QPC_BYPASS_ENABLED;
 
     /* check for rdtscp support bit */
-    __cpuid(regs, 0x80000001);
-    if ((regs[3] & (1 << 27)))
-        data->QpcBypassEnabled |= SHARED_GLOBAL_FLAGS_QPC_BYPASS_USE_RDTSCP;
-    else if (data->ProcessorFeatures[PF_XMMI64_INSTRUCTIONS_AVAILABLE])
-        data->QpcBypassEnabled |= SHARED_GLOBAL_FLAGS_QPC_BYPASS_USE_LFENCE;
-    else
-        data->QpcBypassEnabled |= SHARED_GLOBAL_FLAGS_QPC_BYPASS_USE_MFENCE;
+    __cpuid( regs, 0x80000001 );
+    if ((regs[3] & (1 << 27))) has_rdtscp = TRUE;
 
-    *tsc_frequency = read_tsc_frequency((regs[3] & (1 << 27)) != 0);
-
-    if ((data->QpcFrequency = (*tsc_frequency >> 10)))
-    {
-        data->QpcShift = 10;
-        data->QpcBias = 0;
-    }
-
-    if (!data->QpcFrequency)
-    {
-        WARN("Unable to calibrate TSC frequency, disabling QpcBypass.\n");
-        data->QpcBypassEnabled = 0;
-        data->QpcFrequency = TICKSPERSEC;
-        data->QpcShift = 0;
-        data->QpcBias = 0;
-    }
+    *tsc_frequency = read_tsc_frequency( has_rdtscp );
 }
 
 #else
@@ -428,7 +406,7 @@ static void initialize_xstate_features(struct _KUSER_SHARED_DATA *data)
 {
 }
 
-static void initialize_qpc_features(struct _KUSER_SHARED_DATA *data, UINT64 *tsc_frequency)
+static void initialize_qpc_features( struct _KUSER_SHARED_DATA *data, UINT64 *tsc_frequency )
 {
     data->QpcBypassEnabled = 0;
     data->QpcFrequency = TICKSPERSEC;
@@ -439,82 +417,7 @@ static void initialize_qpc_features(struct _KUSER_SHARED_DATA *data, UINT64 *tsc
 
 #endif
 
-struct hypervisor_shared_data
-{
-    UINT64 unknown;
-    UINT64 QpcMultiplier;
-    UINT64 QpcBias;
-};
-
-static UINT64 muldiv_tsc(UINT64 a, UINT64 b, UINT64 c)
-{
-    UINT64 ka = a / c, ra = a % c, kb = b / c, rb = b % c;
-    return ka * kb * c + kb * ra + ka * rb + (ra * rb + c / 2) / c;
-}
-
-static void create_hypervisor_shared_data(UINT64 tsc_frequency)
-{
-    struct _KUSER_SHARED_DATA *user_shared_data = (void *)0x7ffe0000;
-    struct hypervisor_shared_data *hypervisor_shared_data;
-    OBJECT_ATTRIBUTES attr = {sizeof(attr)};
-    UNICODE_STRING name;
-    NTSTATUS status;
-    HANDLE handle;
-
-    RtlInitUnicodeString( &name, L"\\KernelObjects\\__wine_hypervisor_shared_data" );
-    InitializeObjectAttributes( &attr, &name, OBJ_OPENIF, NULL, NULL );
-    if ((status = NtOpenSection( &handle, SECTION_ALL_ACCESS, &attr )))
-    {
-        ERR( "cannot open __wine_hypervisor_shared_data: %x\n", status );
-        return;
-    }
-    hypervisor_shared_data = MapViewOfFile( handle, FILE_MAP_WRITE, 0, 0, sizeof(*hypervisor_shared_data) );
-    CloseHandle( handle );
-    if (!hypervisor_shared_data)
-    {
-        ERR( "cannot map __wine_hypervisor_shared_data\n" );
-        return;
-    }
-
-    RtlInitUnicodeString( &name, L"\\KernelObjects\\__wine_user_shared_data" );
-    InitializeObjectAttributes( &attr, &name, OBJ_OPENIF, NULL, NULL );
-    if ((status = NtOpenSection( &handle, SECTION_ALL_ACCESS, &attr )))
-    {
-        ERR( "cannot open __wine_user_shared_data: %x\n", status );
-        UnmapViewOfFile( hypervisor_shared_data );
-        return;
-    }
-    user_shared_data = MapViewOfFile( handle, FILE_MAP_WRITE, 0, 0, sizeof(*user_shared_data) );
-    CloseHandle( handle );
-    if (!user_shared_data)
-    {
-        ERR( "cannot map __wine_user_shared_data\n" );
-        UnmapViewOfFile( hypervisor_shared_data );
-        return;
-    }
-
-    hypervisor_shared_data->unknown = 0;
-    hypervisor_shared_data->QpcMultiplier = 0;
-    hypervisor_shared_data->QpcBias = 0;
-
-    if ((user_shared_data->QpcBypassEnabled & SHARED_GLOBAL_FLAGS_QPC_BYPASS_ENABLED) && tsc_frequency)
-    {
-        hypervisor_shared_data->QpcMultiplier = muldiv_tsc((UINT64)5000 << 32, (UINT64)2000 << 32, tsc_frequency);
-        user_shared_data->QpcBypassEnabled |= SHARED_GLOBAL_FLAGS_QPC_BYPASS_USE_HV_PAGE;
-        user_shared_data->QpcInterruptTimeIncrement = (ULONGLONG)1 << 63;
-        user_shared_data->QpcInterruptTimeIncrementShift = 1;
-        user_shared_data->QpcSystemTimeIncrement = (ULONGLONG)1 << 63;
-        user_shared_data->QpcSystemTimeIncrementShift = 1;
-        user_shared_data->QpcFrequency = 10000000;
-        user_shared_data->QpcShift = 0;
-        user_shared_data->QpcBias = 0;
-    }
-
-    UnmapViewOfFile( user_shared_data );
-    UnmapViewOfFile( hypervisor_shared_data );
-}
-
-static void create_user_shared_data(UINT64 *tsc_frequency)
+static void create_user_shared_data( UINT64 *tsc_frequency )
 {
     struct _KUSER_SHARED_DATA *data;
     RTL_OSVERSIONINFOEXW version;
@@ -530,7 +433,7 @@ static void create_user_shared_data(UINT64 *tsc_frequency)
     InitializeObjectAttributes( &attr, &name, OBJ_OPENIF, NULL, NULL );
     if ((status = NtOpenSection( &handle, SECTION_ALL_ACCESS, &attr )))
     {
-        ERR( "cannot open __wine_user_shared_data: %lx\n", status );
+        ERR( "cannot open __wine_user_shared_data: %x\n", status );
         return;
     }
     data = MapViewOfFile( handle, FILE_MAP_WRITE, 0, 0, sizeof(*data) );
@@ -913,7 +816,7 @@ done:
 }
 
 /* create the volatile hardware registry keys */
-static void create_hardware_registry_keys(UINT64 tsc_frequency)
+static void create_hardware_registry_keys( UINT64 tsc_frequency )
 {
     unsigned int i;
     HKEY hkey, system_key, cpu_key, fpu_key;
@@ -1110,164 +1013,6 @@ static void add_dynamic_enum_keys(HKEY key, struct dyndata_enum_key *entry)
     RegSetValueExW( subkey, ParentW,     0, REG_BINARY, (const BYTE *)entry->parent,     sizeof(entry->parent) );
 
     RegCloseKey( subkey );
-}
-
-static unsigned char decodehex( char c )
-{
-    if (c >= '0' && c <= '9')
-        return c - '0';
-    else if (c >= 'A' && c <= 'F')
-        return c - 'A' + 10;
-    else if (c >= 'a' && c <= 'f')
-        return c - 'a' + 10;
-    return 0xFF;
-}
-
-static void get_machineid( BYTE *buf )
-{
-    static const char sd_machineid_path[] = "\\??\\unix\\/etc/machine-id";
-    static const char dbus_machineid_path[] = "\\??\\unix\\/var/lib/dbus/machine-id";
-    HANDLE file;
-    char buffer[34];
-    BOOL status;
-    DWORD bytes_read;
-    int i;
-
-    file = CreateFileA( sd_machineid_path, GENERIC_READ, 0, NULL, OPEN_EXISTING, 0, NULL );
-    if (file == INVALID_HANDLE_VALUE)
-        file = CreateFileA( dbus_machineid_path, GENERIC_READ, 0, NULL, OPEN_EXISTING, 0, NULL );
-    if (file == INVALID_HANDLE_VALUE)
-    {
-        WARN( "Could not open machine id file: error %d\n", GetLastError() );
-        goto error;
-    }
-
-    status = ReadFile( file, buffer, 34, &bytes_read, NULL );
-    CloseHandle( file );
-    if (!status)
-    {
-        WARN( "Could not read machine id file: error %d\n", GetLastError() );
-        goto error;
-    }
-
-    if (!(bytes_read == 32 || (bytes_read == 33 && buffer[32] == '\n')))
-    {
-        WARN( "Wrong machine id file size: %d != 32 or 33\n", bytes_read );
-        goto error;
-    }
-
-    for (i = 0; i < 16; i++)
-    {
-        unsigned char high_nibble, low_nibble;
-
-        high_nibble = decodehex( buffer[i * 2] );
-        low_nibble = decodehex( buffer[i * 2 + 1] );
-        if (high_nibble == 0xFF || low_nibble == 0xFF)
-        {
-            WARN( "Failed to decode machine id byte %d\n", i );
-            goto error;
-        }
-        buf[i] = (high_nibble << 4) | low_nibble;
-    }
-
-    return;
-error:
-    RtlZeroMemory( buf, 16 );
-}
-
-#define MACHINEID_HASH_SALT "WINESALT"
-#define MACHINEID_HASH_SALT_SIZE (sizeof(MACHINEID_HASH_SALT) - 1)
-#define MACHINEID_HASH_ALG BCRYPT_SHA1_ALGORITHM
-#define MACHINEID_HASH_ALG_SIZE 20
-
-static void get_hashed_machineid( BYTE *buf )
-{
-    BYTE input[16 + MACHINEID_HASH_SALT_SIZE];
-    BCRYPT_ALG_HANDLE alg;
-    NTSTATUS status;
-    BYTE hash[MACHINEID_HASH_ALG_SIZE];
-    int i;
-
-    get_machineid( input );
-    RtlCopyMemory( &input[sizeof(input) - MACHINEID_HASH_SALT_SIZE], MACHINEID_HASH_SALT, MACHINEID_HASH_SALT_SIZE );
-
-    if (!NT_SUCCESS(status = BCryptOpenAlgorithmProvider( &alg, MACHINEID_HASH_ALG, NULL, 0 )))
-    {
-        WARN( "Couldn't open crypto provider for machine id hashing: error %u\n", status );
-        goto error;
-    }
-
-    status = BCryptHash( alg, NULL, 0, input, sizeof(input), hash, sizeof(hash) );
-    BCryptCloseAlgorithmProvider( alg, 0 );
-    if (!NT_SUCCESS(status))
-    {
-        WARN( "Couldn't hash machine id: error %u\n", status );
-        goto error;
-    }
-
-    for (i = 8; i < ARRAY_SIZE(hash); i++)
-        hash[i % 8] ^= hash[i];
-
-    RtlCopyMemory( buf, hash, 8 );
-    return;
-error:
-    RtlZeroMemory( buf, 8 );
-}
-
-static void get_productid( WCHAR *buf )
-{
-    BYTE machineid[8];
-    DWORD mid_lodword, mid_hidword;
-    unsigned int c, e;
-    unsigned int tmp, check_digit;
-
-    /* get hashed machine id */
-    get_hashed_machineid( machineid );
-
-    /* compute C and E values from hashed machine id */
-    mid_lodword = (machineid[3] << 24U) | (machineid[2] << 16U) | (machineid[1] << 8U) | machineid[0];
-    mid_hidword = (machineid[7] << 24U) | (machineid[6] << 16U) | (machineid[5] << 8U) | machineid[4];
-    c = (unsigned int)(mid_lodword * 999999ULL / 0xFFFFFFFF);
-    e = (unsigned int)(mid_hidword *    999ULL / 0xFFFFFFFF);
-
-    /* compute check digit for C value */
-    tmp = c;
-    check_digit = tmp % 10;
-    tmp = tmp / 10;
-    check_digit += tmp % 10;
-    tmp = tmp / 10;
-    check_digit += tmp % 10;
-    tmp = tmp / 10;
-    check_digit += tmp % 10;
-    tmp = tmp / 10;
-    check_digit += tmp % 10;
-    tmp = tmp / 10;
-    check_digit += tmp;
-    check_digit = 7 - check_digit % 7;
-
-    /* create product id from parts */
-    swprintf( buf, 24, L"12345-OEM-%06u%u-00%03u", c, check_digit, e );
-}
-
-/* create the volatile software registry keys */
-static void create_software_registry_keys(void)
-{
-    WCHAR productid[24];
-    HKEY cv_key;
-
-    get_productid( productid );
-
-    if (!RegCreateKeyW( HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\Windows NT\\CurrentVersion", &cv_key ))
-    {
-        set_reg_value( cv_key, L"ProductId", productid );
-        RegCloseKey( cv_key );
-    }
-
-    if (!RegCreateKeyW( HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\Windows\\CurrentVersion", &cv_key ))
-    {
-        set_reg_value( cv_key, L"ProductId", productid );
-        RegCloseKey( cv_key );
-    }
 }
 
 /* create the DynData registry keys */
@@ -1485,7 +1230,7 @@ static BOOL wininit(void)
 
     if( !MoveFileExW( L"wininit.ini", L"wininit.bak", MOVEFILE_REPLACE_EXISTING) )
     {
-        WINE_ERR("Couldn't rename wininit.ini, error %ld\n", GetLastError() );
+        WINE_ERR("Couldn't rename wininit.ini, error %d\n", GetLastError() );
 
         return FALSE;
     }
@@ -1588,7 +1333,7 @@ static DWORD runCmd(LPWSTR cmdline, LPCWSTR dir, BOOL wait, BOOL minimized)
 
     if( !CreateProcessW(NULL, cmdline, NULL, NULL, FALSE, 0, NULL, dir, &si, &info) )
     {
-        WINE_WARN("Failed to run command %s (%ld)\n", wine_dbgstr_w(cmdline), GetLastError() );
+        WINE_WARN("Failed to run command %s (%d)\n", wine_dbgstr_w(cmdline), GetLastError() );
         return INVALID_RUNCMD_RETURN;
     }
 
@@ -1645,23 +1390,23 @@ static void process_run_key( HKEY key, const WCHAR *keyname, BOOL delete, BOOL s
 
         if ((res = RegEnumValueW( runkey, --i, value, &len, 0, &type, (BYTE *)cmdline, &len_data )))
         {
-            WINE_ERR( "Couldn't read value %lu (%ld).\n", i, res );
+            WINE_ERR( "Couldn't read value %u (%d).\n", i, res );
             continue;
         }
         if (delete && (res = RegDeleteValueW( runkey, value )))
         {
-            WINE_ERR( "Couldn't delete value %lu (%ld). Running command anyways.\n", i, res );
+            WINE_ERR( "Couldn't delete value %u (%d). Running command anyways.\n", i, res );
         }
         if (type != REG_SZ)
         {
-            WINE_ERR( "Incorrect type of value %lu (%lu).\n", i, type );
+            WINE_ERR( "Incorrect type of value %u (%u).\n", i, type );
             continue;
         }
         if (runCmd( cmdline, NULL, synchronous, FALSE ) == INVALID_RUNCMD_RETURN)
         {
-            WINE_ERR( "Error running cmd %s (%lu).\n", wine_dbgstr_w(cmdline), GetLastError() );
+            WINE_ERR( "Error running cmd %s (%u).\n", wine_dbgstr_w(cmdline), GetLastError() );
         }
-        WINE_TRACE( "Done processing cmd %lu.\n", i );
+        WINE_TRACE( "Done processing cmd %u.\n", i );
     }
 
 end:
@@ -1777,7 +1522,7 @@ static int ProcessWindowsFileProtection(void)
                              dllcache, targetpath, currentpath, tempfile, &sz);
         if (rc != ERROR_SUCCESS)
         {
-            WINE_WARN("WFP: %s error 0x%lx\n",wine_dbgstr_w(finddata.cFileName),rc);
+            WINE_WARN("WFP: %s error 0x%x\n",wine_dbgstr_w(finddata.cFileName),rc);
             DeleteFileW(tempfile);
         }
 
@@ -1787,7 +1532,7 @@ static int ProcessWindowsFileProtection(void)
         targetpath[sz++] = '\\';
         lstrcpynW( targetpath + sz, finddata.cFileName, MAX_PATH - sz );
         if (!DeleteFileW( targetpath ))
-            WINE_WARN( "failed to delete %s: error %lu\n", wine_dbgstr_w(targetpath), GetLastError() );
+            WINE_WARN( "failed to delete %s: error %u\n", wine_dbgstr_w(targetpath), GetLastError() );
 
         find_rc = FindNextFileW(find_handle,&finddata);
     }
@@ -1806,7 +1551,7 @@ static BOOL start_services_process(void)
     if (!CreateProcessW(L"C:\\windows\\system32\\services.exe", NULL,
                         NULL, NULL, TRUE, DETACHED_PROCESS, NULL, NULL, &si, &pi))
     {
-        WINE_ERR("Couldn't start services.exe: error %lu\n", GetLastError());
+        WINE_ERR("Couldn't start services.exe: error %u\n", GetLastError());
         return FALSE;
     }
     CloseHandle(pi.hThread);
@@ -1819,7 +1564,7 @@ static BOOL start_services_process(void)
     {
         DWORD exit_code;
         GetExitCodeProcess(pi.hProcess, &exit_code);
-        WINE_ERR("Unexpected termination of services.exe - exit code %ld\n", exit_code);
+        WINE_ERR("Unexpected termination of services.exe - exit code %d\n", exit_code);
         CloseHandle(pi.hProcess);
         CloseHandle(wait_handles[0]);
         return FALSE;
@@ -1862,40 +1607,6 @@ static HWND show_wait_window(void)
     return hwnd;
 }
 */
-
-static BOOL start_tabtip_process(void)
-{
-    static const WCHAR tabtip_started_event[] = L"TABTIP_STARTED_EVENT";
-    PROCESS_INFORMATION pi;
-    STARTUPINFOW si = { sizeof(si) };
-    HANDLE wait_handles[2];
-
-    if (!CreateProcessW(L"C:\\windows\\system32\\tabtip.exe", NULL,
-                        NULL, NULL, TRUE, DETACHED_PROCESS, NULL, NULL, &si, &pi))
-    {
-        WINE_ERR("Couldn't start tabtip.exe: error %u\n", GetLastError());
-        return FALSE;
-    }
-    CloseHandle(pi.hThread);
-
-    wait_handles[0] = CreateEventW(NULL, TRUE, FALSE, tabtip_started_event);
-    wait_handles[1] = pi.hProcess;
-
-    /* wait for the event to become available or the process to exit */
-    if ((WaitForMultipleObjects(2, wait_handles, FALSE, INFINITE)) == WAIT_OBJECT_0 + 1)
-    {
-        DWORD exit_code;
-        GetExitCodeProcess(pi.hProcess, &exit_code);
-        WINE_ERR("Unexpected termination of tabtip.exe - exit code %d\n", exit_code);
-        CloseHandle(pi.hProcess);
-        CloseHandle(wait_handles[0]);
-        return FALSE;
-    }
-
-    CloseHandle(pi.hProcess);
-    CloseHandle(wait_handles[0]);
-    return TRUE;
-}
 
 static HANDLE start_rundll32( const WCHAR *inf_path, const WCHAR *install, WORD machine )
 {
@@ -1945,7 +1656,7 @@ static void install_root_pnp_devices(void)
 
     if ((set = SetupDiCreateDeviceInfoList( NULL, NULL )) == INVALID_HANDLE_VALUE)
     {
-        WINE_ERR("Failed to create device info list, error %#lx.\n", GetLastError());
+        WINE_ERR("Failed to create device info list, error %#x.\n", GetLastError());
         return;
     }
 
@@ -1954,25 +1665,25 @@ static void install_root_pnp_devices(void)
         if (!SetupDiCreateDeviceInfoA( set, root_devices[i].name, &GUID_NULL, NULL, NULL, 0, &device))
         {
             if (GetLastError() != ERROR_DEVINST_ALREADY_EXISTS)
-                WINE_ERR("Failed to create device %s, error %#lx.\n", debugstr_a(root_devices[i].name), GetLastError());
+                WINE_ERR("Failed to create device %s, error %#x.\n", debugstr_a(root_devices[i].name), GetLastError());
             continue;
         }
 
         if (!SetupDiSetDeviceRegistryPropertyA(set, &device, SPDRP_HARDWAREID,
                 (const BYTE *)root_devices[i].hardware_id, (strlen(root_devices[i].hardware_id) + 2) * sizeof(WCHAR)))
         {
-            WINE_ERR("Failed to set hardware id for %s, error %#lx.\n", debugstr_a(root_devices[i].name), GetLastError());
+            WINE_ERR("Failed to set hardware id for %s, error %#x.\n", debugstr_a(root_devices[i].name), GetLastError());
             continue;
         }
 
         if (!SetupDiCallClassInstaller(DIF_REGISTERDEVICE, set, &device))
         {
-            WINE_ERR("Failed to register device %s, error %#lx.\n", debugstr_a(root_devices[i].name), GetLastError());
+            WINE_ERR("Failed to register device %s, error %#x.\n", debugstr_a(root_devices[i].name), GetLastError());
             continue;
         }
 
         if (!UpdateDriverForPlugAndPlayDevicesA(NULL, root_devices[i].hardware_id, root_devices[i].infpath, 0, NULL))
-            WINE_ERR("Failed to install drivers for %s, error %#lx.\n", debugstr_a(root_devices[i].name), GetLastError());
+            WINE_ERR("Failed to install drivers for %s, error %#x.\n", debugstr_a(root_devices[i].name), GetLastError());
     }
 
     SetupDiDestroyDeviceInfoList(set);
@@ -2084,7 +1795,7 @@ static void update_wineprefix( BOOL force )
 
         if ((process = start_rundll32( inf_path, L"PreInstall", IMAGE_FILE_MACHINE_TARGET_HOST )))
         {
-/*            HWND hwnd = show_wait_window();*/
+/*            HWND hwnd = show_wait_window(); */
             for (;;)
             {
                 MSG msg;
@@ -2102,7 +1813,7 @@ static void update_wineprefix( BOOL force )
                 }
                 else while (PeekMessageW( &msg, 0, 0, 0, PM_REMOVE )) DispatchMessageW( &msg );
             }
-/*            DestroyWindow( hwnd );*/
+/*            DestroyWindow( hwnd ); */
         }
         install_root_pnp_devices();
         update_user_profile();
@@ -2208,6 +1919,52 @@ static void usage( int status )
     exit( status );
 }
 
+static void create_digitalproductid(void)
+{
+    BYTE digital_product_id[0xa4];
+    char product_id[256];
+    LSTATUS status;
+    unsigned int i;
+    DWORD size;
+    DWORD type;
+    HKEY key;
+
+    if ((status = RegOpenKeyExW( HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\Windows NT\\CurrentVersion",
+                       0, KEY_ALL_ACCESS, &key )))
+        return;
+    size = sizeof(product_id);
+    status = RegQueryValueExA( key, "ProductId", NULL, &type, (BYTE *)product_id, &size );
+    if (status) goto done;
+    if (!size) goto done;
+    if (product_id[size - 1])
+    {
+        if (size == sizeof(product_id)) goto done;
+        product_id[size++] = 0;
+    }
+
+    if (!RegQueryValueExA( key, "DigitalProductId", NULL, &type, NULL, &size ) && size == sizeof(digital_product_id))
+    {
+        if (RegQueryValueExA( key, "DigitalProductId", NULL, &type, digital_product_id, &size ))
+            goto done;
+        for (i = 0; i < size; ++i)
+            if (digital_product_id[i]) break;
+        if (i < size) goto done;
+    }
+
+    memset( digital_product_id, 0, sizeof(digital_product_id) );
+    *(DWORD *)digital_product_id = sizeof(digital_product_id);
+    digital_product_id[4] = 3;
+    strcpy( (char *)digital_product_id + 8, product_id );
+    *(DWORD *)(digital_product_id + 0x20) = 0x0cec;
+    *(DWORD *)(digital_product_id + 0x34) = 0x0cec;
+    strcpy( (char *)digital_product_id + 0x24, "[TH] X19-99481" );
+    digital_product_id[0x42] = 8;
+    RtlGenRandom( digital_product_id + 0x38, 0x18 );
+    RegSetValueExA( key, "DigitalProductId", 0, REG_BINARY, digital_product_id, sizeof(digital_product_id) );
+done:
+    RegCloseKey( key );
+}
+
 int __cdecl main( int argc, char *argv[] )
 {
     /* First, set the current directory to SystemRoot */
@@ -2222,7 +1979,7 @@ int __cdecl main( int argc, char *argv[] )
     end_session = force = init = kill = restart = shutdown = update = FALSE;
     GetWindowsDirectoryW( windowsdir, MAX_PATH );
     if( !SetCurrentDirectoryW( windowsdir ) )
-        WINE_ERR("Cannot set the dir to %s (%ld)\n", wine_dbgstr_w(windowsdir), GetLastError() );
+        WINE_ERR("Cannot set the dir to %s (%d)\n", wine_dbgstr_w(windowsdir), GetLastError() );
 
     if (IsWow64Process( GetCurrentProcess(), &is_wow64 ) && is_wow64)
     {
@@ -2245,7 +2002,7 @@ int __cdecl main( int argc, char *argv[] )
             GetExitCodeProcess( pi.hProcess, &exit_code );
             ExitProcess( exit_code );
         }
-        else WINE_ERR( "failed to restart 64-bit %s, err %ld\n", wine_dbgstr_w(filename), GetLastError() );
+        else WINE_ERR( "failed to restart 64-bit %s, err %d\n", wine_dbgstr_w(filename), GetLastError() );
         Wow64RevertWow64FsRedirection( redir );
     }
 
@@ -2302,10 +2059,8 @@ int __cdecl main( int argc, char *argv[] )
 
     ResetEvent( event );  /* in case this is a restart */
 
-    create_user_shared_data(&tsc_frequency);
-    create_hypervisor_shared_data(tsc_frequency);
-    create_hardware_registry_keys(tsc_frequency);
-    create_software_registry_keys();
+    create_user_shared_data( &tsc_frequency );
+    create_hardware_registry_keys( tsc_frequency );
     create_dynamic_registry_keys();
     create_environment_registry_keys();
     create_computer_name_keys();
@@ -2319,12 +2074,10 @@ int __cdecl main( int argc, char *argv[] )
     {
         ProcessRunKeys( HKEY_LOCAL_MACHINE, L"RunServices", FALSE, FALSE );
         start_services_process();
-
-        /* FIXME: hack, run tabtip.exe on startup. */
-        start_tabtip_process();
     }
     if (init || update) update_wineprefix( update );
 
+    create_digitalproductid();
     create_volatile_environment_registry_key();
     create_proxy_settings();
 

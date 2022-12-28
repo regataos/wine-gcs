@@ -401,7 +401,7 @@ typedef struct tagME_TextEditor
   int nUndoLimit;
   ME_UndoMode nUndoMode;
   int nParagraphs;
-  LONG nLastSelStart, nLastSelEnd;
+  int nLastSelStart, nLastSelEnd;
   ME_Paragraph *last_sel_start_para, *last_sel_end_para;
   ME_FontCacheItem pFontCache[HFONT_CACHE_SIZE];
   int nZoomNumerator, nZoomDenominator;

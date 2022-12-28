@@ -70,7 +70,7 @@ static const struct object_ops irp_call_ops =
     NULL,                             /* remove_queue */
     NULL,                             /* signaled */
     NULL,                             /* get_esync_fd */
-    NULL,                             /* get_fsync_idx */
+    NULL,                             /* satisfied */
     NULL,                             /* satisfied */
     no_signal,                        /* signal */
     no_get_fd,                        /* get_fd */
@@ -854,6 +854,7 @@ static void device_manager_destroy( struct object *obj )
 
     if (do_esync())
         close( manager->esync_fd );
+    if (manager->fsync_idx) fsync_free_shm_idx( manager->fsync_idx );
 }
 
 static struct device_manager *create_device_manager(void)
@@ -866,6 +867,7 @@ static struct device_manager *create_device_manager(void)
         list_init( &manager->devices );
         list_init( &manager->requests );
         wine_rb_init( &manager->kernel_objects, compare_kernel_object );
+        manager->fsync_idx = 0;
 
         if (do_fsync())
             manager->fsync_idx = fsync_alloc_shm( 0, 0 );
@@ -1003,7 +1005,6 @@ DECL_HANDLER(get_next_device_request)
             if (req->prev)
             {
                 set_irp_result( irp, req->iosb_status, get_req_data(), get_req_data_size(), req->result );
-                close_handle( current->process, req->prev );  /* avoid an extra round-trip for close */
             }
             else
             {
@@ -1020,6 +1021,9 @@ DECL_HANDLER(get_next_device_request)
         {
             set_irp_result( irp, req->status, NULL, 0, 0 );
         }
+
+        if (req->prev)
+            close_handle( current->process, req->prev );  /* avoid an extra round-trip for close */
 
         free_irp_params( irp );
         release_object( irp );

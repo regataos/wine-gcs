@@ -188,7 +188,7 @@
 @ stdcall CreateFiberEx(long long long ptr ptr)
 @ stdcall CreateFile2(wstr long long long ptr)
 @ stdcall CreateFileA(str long long ptr long long long)
-# @ stub CreateFileMappingFromApp
+@ stdcall CreateFileMappingFromApp(long ptr long int64 wstr)
 @ stdcall CreateFileMappingNumaW(long ptr long long long wstr long)
 @ stdcall CreateFileMappingW(long ptr long long long wstr)
 @ stdcall CreateFileW(wstr long long ptr long long long)
@@ -449,6 +449,7 @@
 @ stdcall GetConsoleOutputCP()
 @ stdcall GetConsoleScreenBufferInfo(long ptr)
 @ stdcall GetConsoleScreenBufferInfoEx(long ptr)
+@ stdcall GetConsoleSelectionInfo(ptr)
 @ stdcall GetConsoleTitleW(ptr long)
 @ stdcall GetCurrencyFormatEx(wstr long wstr ptr ptr long) kernel32.GetCurrencyFormatEx
 @ stdcall GetCurrencyFormatW(long long wstr ptr ptr long) kernel32.GetCurrencyFormatW
@@ -533,6 +534,7 @@
 # @ stub GetGPOListInternalA
 # @ stub GetGPOListInternalW
 @ stdcall GetGeoInfoW(long long ptr long long)
+@ stdcall GetGeoInfoEx(ptr long ptr long)
 @ stdcall GetHandleInformation(long ptr)
 # @ stub GetHivePath
 # @ stub GetIntegratedDisplaySize
@@ -601,7 +603,7 @@
 # @ stub GetPackageInfo
 # @ stub GetPackageInstallTime
 # @ stub GetPackageOSMaxVersionTested
-# @ stub GetPackagePath
+@ stdcall GetPackagePath(ptr long ptr ptr)
 # @ stub GetPackagePathByFullName
 # @ stub GetPackagePathOnVolume
 # @ stub GetPackageProperty
@@ -614,7 +616,7 @@
 # @ stub GetPackageStatusForUser
 # @ stub GetPackageTargetPlatformProperty
 # @ stub GetPackageVolumeSisPath
-# @ stub GetPackagesByPackageFamily
+@ stdcall GetPackagesByPackageFamily(wstr ptr ptr ptr ptr)
 @ stdcall GetPerformanceInfo(ptr long)
 @ stdcall GetPhysicallyInstalledSystemMemory(ptr)
 # @ stub GetPreviousFgPolicyRefreshInfoInternal
@@ -954,9 +956,10 @@
 # @ stub MapPredefinedHandleInternal
 @ stdcall MapUserPhysicalPages(ptr long ptr)
 @ stdcall MapViewOfFile(long long long long long)
+@ stdcall MapViewOfFile3(long long ptr int64 long long long ptr long)
 @ stdcall MapViewOfFileEx(long long long long long ptr)
 @ stdcall MapViewOfFileExNuma(long long long long long ptr long)
-# @ stub MapViewOfFileFromApp
+@ stdcall MapViewOfFileFromApp(long long int64 long)
 @ stdcall MoveFileExW(wstr wstr long)
 # @ stub MoveFileWithProgressTransactedW
 @ stdcall MoveFileWithProgressW(wstr wstr ptr ptr long)
@@ -987,7 +990,7 @@
 @ stdcall OpenEventA(long long str)
 @ stdcall OpenEventW(long long wstr)
 @ stdcall OpenFileById(long ptr long long ptr long)
-# @ stub OpenFileMappingFromApp
+@ stdcall OpenFileMappingFromApp(long long wstr)
 @ stdcall OpenFileMappingW(long long wstr)
 # @ stub OpenGlobalizationUserSettingsKey
 @ stdcall OpenMutexW(long long wstr)
@@ -1012,7 +1015,7 @@
 # @ stub PackageFamilyNameFromFullName
 # @ stub PackageFamilyNameFromId
 # @ stub PackageFamilyNameFromProductId
-# @ stub PackageFullNameFromId
+@ stdcall PackageFullNameFromId(ptr ptr ptr)
 # @ stub PackageFullNameFromProductId
 @ stdcall PackageIdFromFullName(wstr long ptr ptr)
 # @ stub PackageIdFromProductId
@@ -1422,7 +1425,6 @@
 @ stdcall SetConsoleTitleW(wstr)
 @ stdcall SetConsoleWindowInfo(long long ptr)
 @ stdcall SetCriticalSectionSpinCount(ptr long) ntdll.RtlSetCriticalSectionSpinCount
-@ stdcall SetCurrentConsoleFontEx(long long ptr)
 @ stdcall SetCurrentDirectoryA(str)
 @ stdcall SetCurrentDirectoryW(wstr)
 @ stdcall SetDefaultDllDirectories(long)
@@ -1460,7 +1462,7 @@
 @ stdcall SetPrivateObjectSecurity(long ptr ptr ptr long)
 @ stdcall SetPrivateObjectSecurityEx(long ptr ptr long ptr long)
 @ stdcall SetProcessAffinityUpdateMode(long long)
-# @ stub SetProcessDefaultCpuSets
+@ stdcall SetProcessDefaultCpuSets(ptr ptr long)
 @ stdcall SetProcessGroupAffinity(long ptr ptr)
 # @ stub SetProcessInformation
 @ stdcall SetProcessMitigationPolicy(long ptr long)
@@ -1490,7 +1492,7 @@
 @ stdcall SetThreadGroupAffinity(long ptr ptr)
 @ stdcall SetThreadIdealProcessor(long long)
 @ stdcall SetThreadIdealProcessorEx(long ptr ptr)
-# @ stub SetThreadInformation
+@ stdcall SetThreadInformation(long long ptr long)
 @ stdcall SetThreadLocale(long)
 @ stdcall SetThreadPreferredUILanguages(long ptr ptr)
 @ stdcall SetThreadPriority(long long)
@@ -1623,7 +1625,8 @@
 @ stdcall UnlockFile(long long long long long)
 @ stdcall UnlockFileEx(long long long long ptr)
 @ stdcall UnmapViewOfFile(ptr)
-# @ stub UnmapViewOfFileEx
+@ stdcall UnmapViewOfFile2(long ptr long)
+@ stdcall UnmapViewOfFileEx(ptr long)
 # @ stub UnregisterBadMemoryNotification
 # @ stub UnregisterGPNotificationInternal
 # @ stub UnregisterStateChangeNotification

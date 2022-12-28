@@ -899,8 +899,15 @@ static void test_CopyFileW(void)
     ok(!ret && GetLastError() == ERROR_FILE_EXISTS,
        "CopyFileW: unexpected error %d\n", GetLastError());
 
+    SetLastError(0xdeadbeef);
     ret = CopyFileW(source, dest, FALSE);
     ok(ret, "CopyFileW: error %d\n", GetLastError());
+    ok(GetLastError() == ERROR_SUCCESS, "Unexpected error %lu.\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    ret = CopyFileExW(source, dest, NULL, NULL, NULL,  0 );
+    ok(ret, "CopyFileExW: error %ld\n", GetLastError());
+    ok(GetLastError() == ERROR_SUCCESS, "Unexpected error %lu.\n", GetLastError());
 
     ret = DeleteFileW(source);
     ok(ret, "DeleteFileW: error %d\n", GetLastError());
@@ -1169,17 +1176,23 @@ static void test_CopyFileEx(void)
     ok(hfile != INVALID_HANDLE_VALUE, "failed to open destination file, error %d\n", GetLastError());
     SetLastError(0xdeadbeef);
     retok = CopyFileExA(source, dest, copy_progress_cb, hfile, NULL, 0);
+    todo_wine
     ok(!retok, "CopyFileExA unexpectedly succeeded\n");
+    todo_wine
     ok(GetLastError() == ERROR_REQUEST_ABORTED, "expected ERROR_REQUEST_ABORTED, got %d\n", GetLastError());
     ok(GetFileAttributesA(dest) != INVALID_FILE_ATTRIBUTES, "file was deleted\n");
 
     hfile = CreateFileA(dest, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_WRITE | FILE_SHARE_DELETE,
                         NULL, OPEN_EXISTING, 0, 0);
+    todo_wine
     ok(hfile != INVALID_HANDLE_VALUE, "failed to open destination file, error %d\n", GetLastError());
     SetLastError(0xdeadbeef);
     retok = CopyFileExA(source, dest, copy_progress_cb, hfile, NULL, 0);
+    todo_wine
     ok(!retok, "CopyFileExA unexpectedly succeeded\n");
+    todo_wine
     ok(GetLastError() == ERROR_REQUEST_ABORTED, "expected ERROR_REQUEST_ABORTED, got %d\n", GetLastError());
+    todo_wine
     ok(GetFileAttributesA(dest) == INVALID_FILE_ATTRIBUTES, "file was not deleted\n");
 
     retok = CopyFileExA(source, NULL, copy_progress_cb, hfile, NULL, 0);
@@ -5307,12 +5320,12 @@ static void test_SetFileInformationByHandle(void)
     /* test FileDispositionInfo, additional details already covered by ntdll tests */
     SetLastError(0xdeadbeef);
     ret = pSetFileInformationByHandle(file, FileDispositionInfo, &dispinfo, 0);
-    todo_wine
+todo_wine
     ok(!ret && GetLastError() == ERROR_BAD_LENGTH, "got %d, error %d\n", ret, GetLastError());
 
     SetLastError(0xdeadbeef);
     ret = pSetFileInformationByHandle(file, FileBasicInfo, &basicinfo, 0);
-    todo_wine
+todo_wine
     ok(!ret && GetLastError() == ERROR_BAD_LENGTH, "got %d, error %d\n", ret, GetLastError());
 
     memset(&basicinfo, 0, sizeof(basicinfo));
@@ -5403,7 +5416,7 @@ static void test_SetFileRenameInfo(void)
     fri->FileNameLength = wcslen(tempFileTo1) * sizeof(WCHAR);
     memcpy(fri->FileName, tempFileTo1, fri->FileNameLength + sizeof(WCHAR));
     ret = pSetFileInformationByHandle(file, FileRenameInfo, fri, size);
-    todo_wine
+todo_wine
     ok(!ret && GetLastError() == ERROR_ACCESS_DENIED, "FileRenameInfo unexpected result %d\n", GetLastError());
     CloseHandle(file);
 

@@ -16,6 +16,15 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+var JS_E_NUMBER_EXPECTED = 0x800a1389;
+var JS_E_FUNCTION_EXPECTED = 0x800a138a;
+var JS_E_DATE_EXPECTED = 0x800a138e;
+var JS_E_OBJECT_EXPECTED = 0x800a138f;
+var JS_E_BOOLEAN_EXPECTED = 0x800a1392;
+var JS_E_VBARRAY_EXPECTED = 0x800a1395;
+var JS_E_ENUMERATOR_EXPECTED = 0x800a1397;
+var JS_E_REGEXP_EXPECTED = 0x800a1398;
+
 var tmp, i;
 
 var bigInt = Math.pow(2,40);
@@ -278,6 +287,8 @@ ok(Object.prototype.hasOwnProperty('toString'), "Object.prototype.hasOwnProperty
 ok(Object.prototype.hasOwnProperty('isPrototypeOf'), "Object.prototype.hasOwnProperty('isPrototypeOf') is false");
 ok(Function.prototype.hasOwnProperty('call'), "Function.prototype.hasOwnProperty('call') is false");
 
+Object();
+new Object();
 obj = new Object();
 
 ok(!obj.hasOwnProperty('toString'), "obj.hasOwnProperty('toString') is true");
@@ -287,28 +298,37 @@ ok(!Object.hasOwnProperty('isPrototypeOf'), "Object.hasOwnProperty('isPrototypeO
 ok(!parseFloat.hasOwnProperty('call'), "parseFloat.hasOwnProperty('call') is true");
 ok(!Function.hasOwnProperty('call'), "Function.hasOwnProperty('call') is true");
 
+Array();
+new Array();
 obj = new Array();
 ok(Array.prototype.hasOwnProperty('sort'), "Array.prototype.hasOwnProperty('sort') is false");
 ok(Array.prototype.hasOwnProperty('length'), "Array.prototype.hasOwnProperty('length') is false");
 ok(!obj.hasOwnProperty('sort'), "obj.hasOwnProperty('sort') is true");
 ok(obj.hasOwnProperty('length'), "obj.hasOwnProperty('length') is true");
 
+Boolean();
+new Boolean();
 obj = new Boolean(false);
 ok(!obj.hasOwnProperty('toString'), "obj.hasOwnProperty('toString') is true");
 ok(!Boolean.hasOwnProperty('toString'), "Boolean.hasOwnProperty('toString') is true");
 ok(Boolean.prototype.hasOwnProperty('toString'), "Boolean.prototype.hasOwnProperty('toString') is false");
 
+Date();
+new Date();
 obj = new Date();
 ok(!obj.hasOwnProperty('getTime'), "obj.hasOwnProperty('getTime') is true");
 ok(!Date.hasOwnProperty('getTime'), "Date.hasOwnProperty('getTime') is true");
 ok(Date.prototype.hasOwnProperty('getTime'), "Date.prototype.hasOwnProperty('getTime') is false");
 ok(!("now" in Date), "now found in Date");
 
+Number();
+new Number();
 obj = new Number();
 ok(!obj.hasOwnProperty('toFixed'), "obj.hasOwnProperty('toFixed') is true");
 ok(!Number.hasOwnProperty('toFixed'), "Number.hasOwnProperty('toFixed') is true");
 ok(Number.prototype.hasOwnProperty('toFixed'), "Number.prototype.hasOwnProperty('toFixed') is false");
 
+/x/;
 obj = /x/;
 ok(!obj.hasOwnProperty('exec'), "obj.hasOwnProperty('exec') is true");
 ok(obj.hasOwnProperty('source'), "obj.hasOwnProperty('source') is false");
@@ -316,6 +336,8 @@ ok(!RegExp.hasOwnProperty('exec'), "RegExp.hasOwnProperty('exec') is true");
 ok(!RegExp.hasOwnProperty('source'), "RegExp.hasOwnProperty('source') is true");
 ok(RegExp.prototype.hasOwnProperty('source'), "RegExp.prototype.hasOwnProperty('source') is false");
 
+String();
+new String();
 obj = new String();
 ok(!obj.hasOwnProperty('charAt'), "obj.hasOwnProperty('charAt') is true");
 ok(obj.hasOwnProperty('length'), "obj.hasOwnProperty('length') is false");
@@ -1343,6 +1365,11 @@ ok(tmp === "0", "num().toString = " + tmp);
 tmp = (new Number(5.5)).toString(2);
 ok(tmp === "101.1", "num(5.5).toString(2) = " + tmp);
 
+tmp = (new Number(12)).toLocaleString();
+ok(tmp.indexOf(String.fromCharCode(0)) == -1, "invalid null byte");
+tmp = Number.prototype.toLocaleString.call(NaN);
+ok(tmp.indexOf(String.fromCharCode(0)) == -1, "invalid null byte");
+
 tmp = (new Number(3)).toFixed(3);
 ok(tmp === "3.000", "num(3).toFixed(3) = " + tmp);
 tmp = (new Number(3)).toFixed();
@@ -1917,6 +1944,7 @@ ok(isNaN(tmp), "Math.tan(-Infinity) is not NaN");
         [[true], "true"],
         [[false], "false"],
         [[null], "null"],
+        [[nullDisp], undefined],
         [[1], "1"],
         [["test"], "\"test\""],
         [["test\"\\\b\f\n\r\t\u0002 !"], "\"test\\\"\\\\\\b\\f\\n\\r\\t\\u0002 !\""],
@@ -1932,7 +1960,7 @@ ok(isNaN(tmp), "Math.tan(-Infinity) is not NaN");
         [[[,2,undefined,3,{prop:0},],undefined,"  "],"[\n  null,\n  2,\n  null,\n  3,\n  {\n    \"prop\": 0\n  },\n  null\n]"]
     ];
 
-    var i, s, v;
+    var i, s, v, t;
 
     for(i=0; i < stringify_tests.length; i++) {
         s = JSON.stringify.apply(null, stringify_tests[i][0]);
@@ -1997,7 +2025,7 @@ ok(isNaN(tmp), "Math.tan(-Infinity) is not NaN");
         for(var prop in x) {
             if(!x.hasOwnProperty(prop))
                 continue;
-            if(!x.hasOwnProperty(prop))
+            if(!y.hasOwnProperty(prop))
                 return false;
             if(!json_cmp(x[prop], y[prop]))
                 return false;
@@ -2015,6 +2043,61 @@ ok(isNaN(tmp), "Math.tan(-Infinity) is not NaN");
         v = JSON.parse(parse_tests[i][0]);
         ok(json_cmp(v, parse_tests[i][1]), "parse[" + i + "] returned " + v + ", expected " + parse_tests[i][1]);
     }
+
+    v = [ [-1, "b"], {"length": -2, "0": -4, "1": -5}, [{}], [{"x": [null]}] ];
+    s =
+    '{' +
+        '"foo": true,' +
+        '"bar": [],' +
+        '"baz": "remove_me",' +
+        '"obj": {' +
+        '    "arr": [ [1, "b"], {"length": 2, "0": 4, "1": 5}, [{}], [{"x": [null]}] ],' +
+        '    "": "empty"' +
+        '},' +
+        '"last": false' +
+    '}';
+    o = JSON.parse(s), t = JSON.parse(s), i = new Object();
+    i[""] = t;
+    delete t.baz;   /* baz gets removed */
+    t.obj.arr = v;  /* has negative values */
+
+    var walk_expect = [
+        [ o, "foo", true ],
+        [ o, "bar", [] ],
+        [ o, "baz", "remove_me" ],
+        [ [1, "b"], "0", 1 ],
+        [ [-1, "b"], "1", "b" ],
+        [ [ [-1, "b"], {"length": 2, "0": 4, "1": 5}, [{}], [{"x": [null]}] ], "0", [-1, "b"] ],
+        [ {"length": 2, "0": 4, "1": 5}, "length", 2 ],
+        [ {"length": -2, "0": 4, "1": 5}, "0", 4 ],
+        [ {"length": -2, "0": -4, "1": 5}, "1", 5 ],
+        [ v, "1", {"length": -2, "0": -4, "1": -5} ],
+        [ [{}], "0", {} ],
+        [ v, "2", [{}] ],
+        [ [null], "0", null ],
+        [ {"x": [null]}, "x", [null] ],
+        [ [{"x": [null]}], "0", {"x": [null]} ],
+        [ v, "3", [{"x": [null]}] ],
+        [ { "arr": v, "": "empty" }, "arr", v ],
+        [ { "arr": v, "": "empty" }, "", "empty" ],
+        [ t, "obj", { "arr": v, "": "empty" } ],
+        [ t, "last", false ],
+        [ i, "", t ]
+    ];
+    i = 0;
+    v = JSON.parse(s, function(prop, value) {
+        var a = [this, prop, value];
+        ok(json_cmp(a, walk_expect[i]), "[walk step " + i + "] got [" + a + "], expected [" + walk_expect[i] + "]");
+        i++;
+        return (typeof value === 'number') ? -value : (value === "remove_me" ? undefined : value);
+    });
+    ok(i === walk_expect.length, "parse with reviver walked " + i + " steps, expected " + walk_expect.length);
+    ok(json_cmp(v, t), "parse with reviver returned wrong object");
+
+    v = JSON.parse('true', function(prop, value) { return prop === "" ? undefined : value; });
+    ok(v === undefined, "parse with reviver removing last prop returned " + v);
+    v = JSON.parse('true', function(prop, value) { return prop === "" ? false : value; });
+    ok(v === false, "parse with reviver setting last prop to false returned " + v);
 })();
 
 var func = function  (a) {
@@ -2358,6 +2441,9 @@ ok(bool.toString() === "true", "bool.toString() = " + bool.toString());
 ok(bool.valueOf() === Boolean(1), "bool.valueOf() = " + bool.valueOf());
 ok(bool.toLocaleString() === bool.toString(), "bool.toLocaleString() = " + bool.toLocaleString());
 
+tmp = Object.prototype.valueOf.call(nullDisp);
+ok(tmp === nullDisp, "nullDisp.valueOf != nullDisp");
+
 ok(ActiveXObject instanceof Function, "ActiveXObject is not instance of Function");
 ok(ActiveXObject.prototype instanceof Object, "ActiveXObject.prototype is not instance of Object");
 
@@ -2496,6 +2582,7 @@ var exception_array = {
     E_INVALID_LENGTH:  { type: "RangeError",  number: -2146823259 },
 
     E_NOT_DATE:            { type: "TypeError",   number: -2146823282 },
+    E_NOT_STRING:          { type: "TypeError",   number: -2146823283 },
     E_NOT_BOOL:            { type: "TypeError",   number: -2146823278 },
     E_ARG_NOT_OPT:         { type: "TypeError",   number: -2146827839 },
     E_NO_PROPERTY:         { type: "TypeError",   number: -2146827850 },
@@ -2565,8 +2652,13 @@ testException(function() {createArray().getItem(3);}, "E_SUBSCRIPT_OUT_OF_RANGE"
 testException(function() {date.setTime();}, "E_ARG_NOT_OPT");
 testException(function() {date.setYear();}, "E_ARG_NOT_OPT");
 testException(function() {arr.test();}, "E_NO_PROPERTY");
+testException(function() {[1,2,3].sort(nullDisp);}, "E_JSCRIPT_EXPECTED");
+testException(function() {var o = new Object(); o.length = 1; o[0] = "a"; Array.prototype.toString.call(o);}, "E_NOT_ARRAY");
+testException(function() {var o = new Object(); o.length = 1; o[0] = "a"; Array.prototype.toLocaleString.call(o);}, "E_NOT_ARRAY");
 testException(function() {Number.prototype.toString.call(arr);}, "E_NOT_NUM");
 testException(function() {Number.prototype.toFixed.call(arr);}, "E_NOT_NUM");
+testException(function() {Number.prototype.toLocaleString.call(arr);}, "E_NOT_NUM");
+testException(function() {Number.prototype.toLocaleString.call(null);}, "E_NOT_NUM");
 testException(function() {(new Number(3)).toString(1);}, "E_INVALID_CALL_ARG");
 testException(function() {(new Number(3)).toFixed(21);}, "E_FRACTION_DIGITS_OUT_OF_RANGE");
 testException(function() {(new Number(1)).toPrecision(0);}, "E_PRECISION_OUT_OF_RANGE");
@@ -2574,10 +2666,16 @@ testException(function() {not_existing_variable.something();}, "E_UNDEFINED");
 testException(function() {date();}, "E_NOT_FUNC");
 testException(function() {arr();}, "E_NOT_FUNC");
 testException(function() {(new Object) instanceof (new Object);}, "E_NOT_FUNC");
+testException(function() {var o = new Object(); o.prototype = new Object(); (new Object) instanceof o;}, "E_NOT_FUNC");
 testException(function() {eval("nonexistingfunc()")}, "E_OBJECT_EXPECTED");
 testException(function() {(new Object()) instanceof 3;}, "E_NOT_FUNC");
 testException(function() {(new Object()) instanceof null;}, "E_NOT_FUNC");
 testException(function() {(new Object()) instanceof nullDisp;}, "E_NOT_FUNC");
+testException(function() {nullDisp instanceof Object;}, "E_OBJECT_EXPECTED");
+testException(function() {Function.prototype.apply.call(nullDisp, Object, []);}, "E_OBJECT_REQUIRED");
+testException(function() {Function.prototype.call.call(nullDisp, Object);}, "E_OBJECT_REQUIRED");
+testException(function() {String.prototype.toString.call(null);}, "E_NOT_STRING");
+testException(function() {String.prototype.toString.call([]);}, "E_NOT_STRING");
 testException(function() {"test" in 3;}, "E_OBJECT_EXPECTED");
 testException(function() {"test" in null;}, "E_OBJECT_EXPECTED");
 testException(function() {"test" in nullDisp;}, "E_OBJECT_EXPECTED");
@@ -2594,6 +2692,10 @@ testException(function() {delete false;}, "E_INVALID_DELETE");
 testException(function() {undefined.toString();}, "E_OBJECT_EXPECTED");
 testException(function() {null.toString();}, "E_OBJECT_EXPECTED");
 testException(function() {RegExp.prototype.toString.call(new Object());}, "E_REGEXP_EXPECTED");
+testException(function() {/a/.lastIndex();}, "E_NOT_FUNC");
+testException(function() {"a".length();}, "E_NOT_FUNC");
+testException(function() {((function() { var f = Number.prototype.toString; return (function() { return f(); }); })())();}, "E_NOT_NUM");
+testException(function() {((function() { var f = Object.prototype.hasOwnProperty; return (function() { return f("f"); }); })())();}, "E_OBJECT_EXPECTED");
 
 testException(function() { return arguments.callee(); }, "E_STACK_OVERFLOW");
 
@@ -2763,6 +2865,8 @@ function testFunctionThis(func) {
 testFunctionThis("toString");
 testFunctionThis("call");
 testFunctionThis("apply");
+
+testException(function() {(function (a, b) {}).apply(null, testObj)}, "E_JSCRIPT_EXPECTED");
 
 function testArrayHostThis(func) {
     testException(function() { Array.prototype[func].call(testObj); }, "E_JSCRIPT_EXPECTED");
@@ -3061,9 +3165,55 @@ ok(unescape.length == 1, "unescape.length = " + unescape.length);
 String.length = 3;
 ok(String.length == 1, "String.length = " + String.length);
 
+(function() {
+    var tests = [
+        [ "Array.sort",             JS_E_OBJECT_EXPECTED,        function(ctx) { Array.prototype.sort.call(ctx); } ],
+        [ "Boolean.valueOf",        JS_E_BOOLEAN_EXPECTED,       function(ctx) { Boolean.prototype.valueOf.call(ctx); } ],
+        [ "Date.getYear",           JS_E_DATE_EXPECTED,          function(ctx) { Date.prototype.getYear.call(ctx); } ],
+        [ "Enumerator.atEnd",       JS_E_ENUMERATOR_EXPECTED,    function(ctx) { Enumerator.prototype.atEnd.call(ctx); } ],
+        [ "Function.apply",         JS_E_FUNCTION_EXPECTED,      function(ctx) { Function.prototype.apply.call(ctx, [ function() {} ]); } ],
+        [ "Number.toExponential",   JS_E_NUMBER_EXPECTED,        function(ctx) { Number.prototype.toExponential.call(ctx); } ],
+        [ "Object.hasOwnProperty",  JS_E_OBJECT_EXPECTED,        function(ctx) { Object.prototype.hasOwnProperty.call(ctx, "toString"); } ],
+        [ "RegExp.test",            JS_E_REGEXP_EXPECTED,        function(ctx) { RegExp.prototype.test.call(ctx, "foobar"); } ],
+        [ "VBArray.lbound",         JS_E_VBARRAY_EXPECTED,       function(ctx) { VBArray.prototype.lbound.call(ctx); } ]
+    ];
+
+    for(var i = 0; i < tests.length; i++) {
+        try {
+            tests[i][2](null);
+            ok(false, "expected exception calling " + tests[i][0] + " with null context");
+        }catch(ex) {
+            var n = ex.number >>> 0; /* make it unsigned like HRESULT */
+            ok(n === tests[i][1], tests[i][0] + " with null context exception code = " + n);
+        }
+        try {
+            tests[i][2](undefined);
+            ok(false, "expected exception calling " + tests[i][0] + " with undefined context");
+        }catch(ex) {
+            var n = ex.number >>> 0;
+            ok(n === tests[i][1], tests[i][0] + " with undefined context exception code = " + n);
+        }
+    }
+
+    var r = Error.prototype.toString.call(undefined);
+    ok(r === "[object Error]", "Error.toString with undefined context returned " + r);
+    r = String.prototype.slice.call(null, 1, 3);
+    ok(r === "ul", "String.slice with null context returned " + r);
+    r = String.prototype.slice.call(undefined, 2, 5);
+    ok(r === "def", "String.slice with undefined context returned " + r);
+    r = (function() { return this; }).call(null);
+    ok(r === test, "wrong 'this' of function with null context");
+    r = (function() { return this; }).call(undefined);
+    ok(r === test, "wrong 'this' of function with undefined context");
+    r = (function() { return this; }).call(42);
+    ok(r.valueOf() === 42, "'this' of function with 42 context = " + r);
+})();
+
 var tmp = createArray();
 ok(getVT(tmp) == "VT_ARRAY|VT_VARIANT", "getVT(createArray()) = " + getVT(tmp));
 ok(getVT(VBArray(tmp)) == "VT_ARRAY|VT_VARIANT", "getVT(VBArray(tmp)) = " + getVT(VBArray(tmp)));
+VBArray(tmp);
+new VBArray(tmp);
 tmp = new VBArray(tmp);
 tmp = new VBArray(VBArray(createArray()));
 ok(tmp.dimensions() == 2, "tmp.dimensions() = " + tmp.dimensions());

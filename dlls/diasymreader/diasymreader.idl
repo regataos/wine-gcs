@@ -37,3 +37,4 @@ interface IPdbWriter : IUnknown
     HRESULT GetPath([in] DWORD ccData, [out] DWORD *pccData, [out, size_is(ccData), length_is(*pccData)] WCHAR *path);
     HRESULT GetSignatureAge([out] DWORD *timestamp, [out] DWORD *age);
 }
+

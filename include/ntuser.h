@@ -79,6 +79,8 @@ struct user_thread_info
     HANDLE                        server_queue;           /* Handle to server-side queue */
     DWORD                         wake_mask;              /* Current queue wake mask */
     DWORD                         changed_mask;           /* Current queue changed mask */
+    DWORD                         last_driver_time;       /* Get/PeekMessage driver event time */
+    DWORD                         last_getmsg_time;       /* Get/PeekMessage last request time */
     WORD                          recursion_count;        /* SendMessage recursion counter */
     WORD                          message_count;          /* Get/PeekMessage loop counter */
     WORD                          hook_call_depth;        /* Number of recursively called hook procs */
@@ -98,28 +100,17 @@ struct user_thread_info
     HWND                          top_window;             /* Desktop window */
     HWND                          msg_window;             /* HWND_MESSAGE parent window */
     struct rawinput_thread_data  *rawinput;               /* RawInput thread local data / buffer */
+    HANDLE                        desktop_shared_map;     /* HANDLE to server's desktop shared memory */
+    struct desktop_shared_memory *desktop_shared_memory;  /* Ptr to server's desktop shared memory */
+    HANDLE                        queue_shared_map;       /* HANDLE to server's thread queue shared memory */
+    struct queue_shared_memory   *queue_shared_memory;     /* Ptr to server's thread queue shared memory */
+    HANDLE                        input_shared_map;       /* HANDLE to server's thread input shared memory */
+    struct input_shared_memory   *input_shared_memory;    /* Ptr to server's thread input shared memory */
+    HANDLE                        foreground_shared_map;    /* HANDLE to server's thread input shared memory */
+    struct input_shared_memory   *foreground_shared_memory; /* Ptr to server's thread input shared memory */
 };
 
 C_ASSERT( sizeof(struct user_thread_info) <= sizeof(((TEB *)0)->Win32ClientInfo) );
-
-/* internal messages codes */
-enum wine_internal_message
-{
-    WM_WINE_DESTROYWINDOW = 0x80000000,
-    WM_WINE_SETWINDOWPOS,
-    WM_WINE_SHOWWINDOW,
-    WM_WINE_SETPARENT,
-    WM_WINE_SETWINDOWLONG,
-    WM_WINE_SETSTYLE,
-    WM_WINE_SETACTIVEWINDOW,
-    WM_WINE_KEYBOARD_LL_HOOK,
-    WM_WINE_MOUSE_LL_HOOK,
-    WM_WINE_CLIPCURSOR,
-    WM_WINE_UPDATEWINDOWSTATE,
-    WM_WINE_FIRST_DRIVER_MSG = 0x80001000,  /* range of messages reserved for the USER driver */
-    WM_WINE_LAST_DRIVER_MSG = 0x80001fff
-};
-
 
 HKL     WINAPI NtUserActivateKeyboardLayout( HKL layout, UINT flags );
 BOOL    WINAPI NtUserAddClipboardFormatListener( HWND hwnd );

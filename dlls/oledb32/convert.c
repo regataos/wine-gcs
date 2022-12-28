@@ -313,7 +313,7 @@ static HRESULT WINAPI convert_DataConvert(IDataConvert* iface,
 
     case DBTYPE_I4:
     {
-        LONG *d = dst;
+        signed int *d = dst;
         switch(src_type)
         {
         case DBTYPE_EMPTY:       *d = 0; hr = S_OK;                              break;

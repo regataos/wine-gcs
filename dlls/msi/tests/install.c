@@ -2125,12 +2125,12 @@ static const msi_table sr_tables[] =
 
 static void * CDECL mem_alloc(ULONG cb)
 {
-    return malloc(cb);
+    return HeapAlloc(GetProcessHeap(), 0, cb);
 }
 
 static void CDECL mem_free(void *memory)
 {
-    free(memory);
+    HeapFree(GetProcessHeap(), 0, memory);
 }
 
 static BOOL CDECL get_next_cabinet(PCCAB pccab, ULONG  cbPrevCab, void *pv)
@@ -2302,17 +2302,18 @@ static BOOL CDECL get_temp_file(char *pszTempName, int cbTempName, void *pv)
 {
     LPSTR tempname;
 
-    tempname = malloc(MAX_PATH);
+    tempname = HeapAlloc(GetProcessHeap(), 0, MAX_PATH);
     GetTempFileNameA(".", "xx", 0, tempname);
 
     if (tempname && (strlen(tempname) < (unsigned)cbTempName))
     {
         lstrcpyA(pszTempName, tempname);
-        free(tempname);
+        HeapFree(GetProcessHeap(), 0, tempname);
         return TRUE;
     }
 
-    free(tempname);
+    HeapFree(GetProcessHeap(), 0, tempname);
+
     return FALSE;
 }
 
@@ -2550,11 +2551,12 @@ static BOOL compare_pf_data(const char *filename, const char *data, DWORD size)
     lstrcatA(path, filename);
 
     handle = CreateFileA(path, GENERIC_READ, 0, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
-    if ((buffer = malloc(size)))
+    buffer = HeapAlloc(GetProcessHeap(), 0, size);
+    if (buffer)
     {
         ReadFile(handle, buffer, size, &read, NULL);
         if (read == size && !memcmp(data, buffer, size)) ret = TRUE;
-        free(buffer);
+        HeapFree(GetProcessHeap(), 0, buffer);
     }
     CloseHandle(handle);
     return ret;
@@ -2640,7 +2642,7 @@ static char *load_resource(const char *name)
     GetTempFileNameA(".", name, 0, path);
 
     file = CreateFileA(path, GENERIC_READ|GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, 0, 0);
-    ok(file != INVALID_HANDLE_VALUE, "file creation failed, at %s, error %lu\n", path, GetLastError());
+    ok(file != INVALID_HANDLE_VALUE, "file creation failed, at %s, error %d\n", path, GetLastError());
 
     res = FindResourceA(NULL, name, "TESTDLL");
     ok( res != 0, "couldn't find resource\n" );
@@ -2705,7 +2707,7 @@ void create_database_wordcount(const CHAR *name, const msi_table *tables, int nu
     int j, len;
 
     len = MultiByteToWideChar( CP_ACP, 0, name, -1, NULL, 0 );
-    if (!(nameW = malloc( len * sizeof(WCHAR) ))) return;
+    if (!(nameW = HeapAlloc( GetProcessHeap(), 0, len * sizeof(WCHAR) ))) return;
     MultiByteToWideChar( CP_ACP, 0, name, -1, nameW, len );
 
     r = MsiOpenDatabaseW(nameW, MSIDBOPEN_CREATE, &db);
@@ -2731,7 +2733,7 @@ void create_database_wordcount(const CHAR *name, const msi_table *tables, int nu
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r);
 
     MsiCloseHandle(db);
-    free( nameW );
+    HeapFree( GetProcessHeap(), 0, nameW );
 }
 
 static BOOL notify_system_change(DWORD event_type, STATEMGRSTATUS *status)
@@ -2752,7 +2754,7 @@ static void remove_restore_point(DWORD seq_number)
 
     res = pSRRemoveRestorePoint(seq_number);
     if (res != ERROR_SUCCESS)
-        trace("Failed to remove the restore point: %#lx\n", res);
+        trace("Failed to remove the restore point : %08x\n", res);
 }
 
 static LONG delete_key( HKEY key, LPCSTR subkey, REGSAM access )
@@ -2811,29 +2813,29 @@ static void test_MsiInstallProduct(void)
     delete_pf_files();
 
     res = RegOpenKeyExA(HKEY_CURRENT_USER, "SOFTWARE\\Wine\\msitest", 0, access, &hkey);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     size = MAX_PATH;
     type = REG_SZ;
     res = RegQueryValueExA(hkey, "Name", NULL, &type, (LPBYTE)path, &size);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
     ok(!lstrcmpA(path, "imaname"), "Expected imaname, got %s\n", path);
 
     size = MAX_PATH;
     type = REG_SZ;
     res = RegQueryValueExA(hkey, "blah", NULL, &type, (LPBYTE)path, &size);
-    ok(res == ERROR_FILE_NOT_FOUND, "Expected ERROR_FILE_NOT_FOUND, got %ld\n", res);
+    ok(res == ERROR_FILE_NOT_FOUND, "Expected ERROR_FILE_NOT_FOUND, got %d\n", res);
 
     size = sizeof(num);
     type = REG_DWORD;
     res = RegQueryValueExA(hkey, "number", NULL, &type, (LPBYTE)&num, &size);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
-    ok(num == 314, "Expected 314, got %lu\n", num);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
+    ok(num == 314, "Expected 314, got %d\n", num);
 
     size = MAX_PATH;
     type = REG_SZ;
     res = RegQueryValueExA(hkey, "OrderTestName", NULL, &type, (LPBYTE)path, &size);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
     ok(!lstrcmpA(path, "OrderTestValue"), "Expected OrderTestValue, got %s\n", path);
 
     delete_key(HKEY_CURRENT_USER, "SOFTWARE\\Wine\\msitest", access);
@@ -2845,7 +2847,7 @@ static void test_MsiInstallProduct(void)
     delete_pf_files();
 
     res = RegOpenKeyA(HKEY_CURRENT_USER, "SOFTWARE\\Wine\\msitest", &hkey);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
     RegDeleteKeyA(HKEY_CURRENT_USER, "SOFTWARE\\Wine\\msitest");
 
     create_database(msifile, up_tables, ARRAY_SIZE(up_tables));
@@ -2857,7 +2859,7 @@ static void test_MsiInstallProduct(void)
     delete_pf_files();
 
     res = RegOpenKeyA(HKEY_CURRENT_USER, "SOFTWARE\\Wine\\msitest", &hkey);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
     RegDeleteKeyA(HKEY_CURRENT_USER, "SOFTWARE\\Wine\\msitest");
 
     create_database(msifile, up2_tables, ARRAY_SIZE(up2_tables));
@@ -2869,7 +2871,7 @@ static void test_MsiInstallProduct(void)
     delete_pf_files();
 
     res = RegOpenKeyA(HKEY_CURRENT_USER, "SOFTWARE\\Wine\\msitest", &hkey);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
     RegDeleteKeyA(HKEY_CURRENT_USER, "SOFTWARE\\Wine\\msitest");
 
     create_database(msifile, up3_tables, ARRAY_SIZE(up3_tables));
@@ -2881,7 +2883,7 @@ static void test_MsiInstallProduct(void)
     delete_pf_files();
 
     res = RegOpenKeyA(HKEY_CURRENT_USER, "SOFTWARE\\Wine\\msitest", &hkey);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
     RegDeleteKeyA(HKEY_CURRENT_USER, "SOFTWARE\\Wine\\msitest");
 
     create_database(msifile, up4_tables, ARRAY_SIZE(up4_tables));
@@ -2893,7 +2895,7 @@ static void test_MsiInstallProduct(void)
     delete_pf_files();
 
     res = RegOpenKeyA(HKEY_CURRENT_USER, "SOFTWARE\\Wine\\msitest", &hkey);
-    ok(res == ERROR_FILE_NOT_FOUND, "Expected ERROR_FILE_NOT_FOUND, got %ld\n", res);
+    ok(res == ERROR_FILE_NOT_FOUND, "Expected ERROR_FILE_NOT_FOUND, got %d\n", res);
 
     create_database(msifile, up4_tables, ARRAY_SIZE(up4_tables));
 
@@ -2904,7 +2906,7 @@ static void test_MsiInstallProduct(void)
     delete_pf_files();
 
     res = RegOpenKeyA(HKEY_CURRENT_USER, "SOFTWARE\\Wine\\msitest", &hkey);
-    ok(res == ERROR_FILE_NOT_FOUND, "Expected ERROR_FILE_NOT_FOUND, got %ld\n", res);
+    ok(res == ERROR_FILE_NOT_FOUND, "Expected ERROR_FILE_NOT_FOUND, got %d\n", res);
 
     create_database(msifile, up5_tables, ARRAY_SIZE(up5_tables));
 
@@ -2915,7 +2917,7 @@ static void test_MsiInstallProduct(void)
     delete_pf_files();
 
     res = RegOpenKeyA(HKEY_CURRENT_USER, "SOFTWARE\\Wine\\msitest", &hkey);
-    ok(res == ERROR_FILE_NOT_FOUND, "Expected ERROR_FILE_NOT_FOUND, got %ld\n", res);
+    ok(res == ERROR_FILE_NOT_FOUND, "Expected ERROR_FILE_NOT_FOUND, got %d\n", res);
 
     create_database(msifile, up6_tables, ARRAY_SIZE(up6_tables));
 
@@ -2926,7 +2928,7 @@ static void test_MsiInstallProduct(void)
     delete_pf_files();
 
     res = RegOpenKeyA(HKEY_CURRENT_USER, "SOFTWARE\\Wine\\msitest", &hkey);
-    ok(res == ERROR_FILE_NOT_FOUND, "Expected ERROR_FILE_NOT_FOUND, got %ld\n", res);
+    ok(res == ERROR_FILE_NOT_FOUND, "Expected ERROR_FILE_NOT_FOUND, got %d\n", res);
 
     create_database(msifile, up7_tables, ARRAY_SIZE(up7_tables));
 
@@ -2937,7 +2939,7 @@ static void test_MsiInstallProduct(void)
     delete_pf_files();
 
     res = RegOpenKeyA(HKEY_CURRENT_USER, "SOFTWARE\\Wine\\msitest", &hkey);
-    ok(res == ERROR_FILE_NOT_FOUND, "Expected ERROR_FILE_NOT_FOUND, got %ld\n", res);
+    ok(res == ERROR_FILE_NOT_FOUND, "Expected ERROR_FILE_NOT_FOUND, got %d\n", res);
 
     r = MsiInstallProductA(msifile, "REMOVE=ALL FULL=1");
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r);
@@ -3789,7 +3791,7 @@ static void generate_transform_manual(void)
                             STGM_WRITE | STGM_SHARE_EXCLUSIVE, 0, 0, &stm);
         if (FAILED(r))
         {
-            ok(0, "failed to create stream %#lx\n", r);
+            ok(0, "failed to create stream %08x\n", r);
             continue;
         }
 
@@ -3996,16 +3998,16 @@ static void set_admin_property_stream(LPCSTR file)
     MultiByteToWideChar(CP_ACP, 0, file, -1, fileW, MAX_PATH);
 
     hr = StgOpenStorage(fileW, NULL, mode, NULL, 0, &stg);
-    ok(hr == S_OK, "Expected S_OK, got %#lx\n", hr);
+    ok(hr == S_OK, "Expected S_OK, got %d\n", hr);
     if (!stg)
         return;
 
     hr = IStorage_CreateStream(stg, L"\x41ca\x4330\x3e71\x44b5\x4233\x45f5\x422c\x4836",
                                STGM_WRITE | STGM_SHARE_EXCLUSIVE, 0, 0, &stm);
-    ok(hr == S_OK, "Expected S_OK, got %#lx\n", hr);
+    ok(hr == S_OK, "Expected S_OK, got %d\n", hr);
 
     hr = IStream_Write(stm, L"MYPROP=2718 MyProp=42", sizeof(L"MYPROP=2718 MyProp=42"), &count);
-    ok(hr == S_OK, "Expected S_OK, got %#lx\n", hr);
+    ok(hr == S_OK, "Expected S_OK, got %d\n", hr);
 
     IStream_Release(stm);
     IStorage_Release(stg);
@@ -4725,7 +4727,7 @@ static void test_sourcepath(void)
         r = MsiInstallProductA(msifile, NULL);
         ok(r == spmap[i].err, "%d: Expected %d, got %d\n", i, spmap[i].err, r);
         ok(get_pf_file_size("msitest\\augustus") == spmap[i].size,
-           "%u: Expected %lu, got %lu\n", i, spmap[i].size,
+           "%d: Expected %d, got %d\n", i, spmap[i].size,
            get_pf_file_size("msitest\\augustus"));
 
         if (r == ERROR_SUCCESS)
@@ -5062,7 +5064,7 @@ static void test_shortcut(void)
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r);
 
     hr = CoInitializeEx(NULL, COINIT_MULTITHREADED);
-    ok(SUCCEEDED(hr), "CoInitialize failed %#lx\n", hr);
+    ok(SUCCEEDED(hr), "CoInitialize failed 0x%08x\n", hr);
 
     r = MsiInstallProductA(msifile, NULL);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r);
@@ -5070,7 +5072,7 @@ static void test_shortcut(void)
     CoUninitialize();
 
     hr = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
-    ok(SUCCEEDED(hr), "CoInitialize failed %#lx\n", hr);
+    ok(SUCCEEDED(hr), "CoInitialize failed 0x%08x\n", hr);
 
     r = MsiInstallProductA(msifile, NULL);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r);
@@ -5262,14 +5264,14 @@ static void process_pending_renames(HKEY hkey)
     BOOL found = FALSE;
 
     ret = RegQueryValueExA(hkey, rename_ops, NULL, NULL, NULL, &size);
-    ok(!ret, "RegQueryValueExA failed %ld\n", ret);
+    ok(!ret, "RegQueryValueExA failed %d\n", ret);
 
-    buf = malloc(size + 1);
-    buf2ptr = buf2 = calloc(1, size + 1);
+    buf = HeapAlloc(GetProcessHeap(), 0, size + 1);
+    buf2ptr = buf2 = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, size + 1);
 
     ret = RegQueryValueExA(hkey, rename_ops, NULL, NULL, (LPBYTE)buf, &size);
     buf[size] = 0;
-    ok(!ret, "RegQueryValueExA failed %ld\n", ret);
+    ok(!ret, "RegQueryValueExA failed %d\n", ret);
     if (ret) return;
 
     for (src = buf; *src; src = dst + strlen(dst) + 1)
@@ -5300,12 +5302,12 @@ static void process_pending_renames(HKEY hkey)
         {
             if (dst[0] == '\\' && dst[1] == '?' && dst[2] == '?' && dst[3] == '\\') dst += 4;
             fileret = MoveFileExA(src, dst, flags);
-            ok(fileret, "Failed to move file %s -> %s (%lu)\n", src, dst, GetLastError());
+            ok(fileret, "Failed to move file %s -> %s (%u)\n", src, dst, GetLastError());
         }
         else
         {
             fileret = DeleteFileA(src);
-            ok(fileret || broken(!fileret) /* win2k3 */, "Failed to delete file %s (%lu)\n", src, GetLastError());
+            ok(fileret || broken(!fileret) /* win2k3 */, "Failed to delete file %s (%u)\n", src, GetLastError());
         }
     }
 
@@ -5316,8 +5318,8 @@ static void process_pending_renames(HKEY hkey)
     else
         RegDeleteValueA(hkey, rename_ops);
 
-    free(buf);
-    free(buf2);
+    HeapFree(GetProcessHeap(), 0, buf);
+    HeapFree(GetProcessHeap(), 0, buf2);
 }
 
 static BOOL file_matches_data(LPCSTR file, LPCSTR data)
@@ -5327,7 +5329,7 @@ static BOOL file_matches_data(LPCSTR file, LPCSTR data)
     char buf[128];
 
     handle = CreateFileA(file, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
-    ok(handle != INVALID_HANDLE_VALUE, "failed to open %s (%lu)\n", file, GetLastError());
+    ok(handle != INVALID_HANDLE_VALUE, "failed to open %s (%u)\n", file, GetLastError());
 
     if (ReadFile(handle, buf, sizeof(buf), &len, NULL) && len >= data_len)
     {
@@ -5872,25 +5874,25 @@ static void test_mixed_package(void)
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r);
 
     res = RegOpenKeyExA(HKEY_LOCAL_MACHINE, "Software\\Wine\\msitest", 0, KEY_ALL_ACCESS|KEY_WOW64_32KEY, &hkey);
-    ok(!res, "can't open 32-bit component key, got %ld\n", res);
+    ok(!res, "can't open 32-bit component key, got %d\n", res);
     res = RegQueryValueExA(hkey, "test1", NULL, NULL, NULL, NULL);
-    ok(!res, "expected RegQueryValueEx to succeed, got %ld\n", res);
+    ok(!res, "expected RegQueryValueEx to succeed, got %d\n", res);
     res = RegQueryValueExA(hkey, "test2", NULL, NULL, NULL, NULL);
-    ok(res, "expected RegQueryValueEx to fail, got %ld\n", res);
+    ok(res, "expected RegQueryValueEx to fail, got %d\n", res);
     RegCloseKey(hkey);
 
     res = RegOpenKeyExA(HKEY_LOCAL_MACHINE, "Software\\Wine\\msitest", 0, KEY_ALL_ACCESS|KEY_WOW64_64KEY, &hkey);
-    ok(!res, "can't open 64-bit component key, got %ld\n", res);
+    ok(!res, "can't open 64-bit component key, got %d\n", res);
     res = RegQueryValueExA(hkey, "test1", NULL, NULL, NULL, NULL);
-    ok(res, "expected RegQueryValueEx to fail, got %ld\n", res);
+    ok(res, "expected RegQueryValueEx to fail, got %d\n", res);
     res = RegQueryValueExA(hkey, "test2", NULL, NULL, NULL, NULL);
-    ok(!res, "expected RegQueryValueEx to succeed, got %ld\n", res);
+    ok(!res, "expected RegQueryValueEx to succeed, got %d\n", res);
     RegCloseKey(hkey);
 
     res = RegOpenKeyExA(HKEY_CLASSES_ROOT,
                         "CLSID\\{8dfef911-6885-41eb-b280-8f0304728e8b}\\InProcServer32",
                         0, KEY_ALL_ACCESS|KEY_WOW64_32KEY, &hkey);
-    ok(res == ERROR_SUCCESS, "can't open 32-bit CLSID key, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "can't open 32-bit CLSID key, got %d\n", res);
     if (res == ERROR_SUCCESS) {
         size = sizeof(value);
         res = RegQueryValueExA(hkey, "", NULL, NULL, (LPBYTE)value, &size);
@@ -5901,7 +5903,7 @@ static void test_mixed_package(void)
     res = RegOpenKeyExA(HKEY_CLASSES_ROOT,
                         "CLSID\\{8dfef911-6885-41eb-b280-8f0304728e8b}\\InProcServer32",
                         0, KEY_ALL_ACCESS|KEY_WOW64_64KEY, &hkey);
-    ok(res == ERROR_SUCCESS, "can't open 64-bit CLSID key, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "can't open 64-bit CLSID key, got %d\n", res);
     if (res == ERROR_SUCCESS) {
         size = sizeof(value);
         res = RegQueryValueExA(hkey, "", NULL, NULL, (LPBYTE)value, &size);
@@ -5935,25 +5937,25 @@ static void test_mixed_package(void)
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r);
 
     res = RegOpenKeyExA(HKEY_LOCAL_MACHINE, "Software\\Wine\\msitest", 0, KEY_ALL_ACCESS|KEY_WOW64_32KEY, &hkey);
-    ok(!res, "can't open 32-bit component key, got %ld\n", res);
+    ok(!res, "can't open 32-bit component key, got %d\n", res);
     res = RegQueryValueExA(hkey, "test1", NULL, NULL, NULL, NULL);
-    ok(!res, "expected RegQueryValueEx to succeed, got %ld\n", res);
+    ok(!res, "expected RegQueryValueEx to succeed, got %d\n", res);
     res = RegQueryValueExA(hkey, "test2", NULL, NULL, NULL, NULL);
-    ok(res, "expected RegQueryValueEx to fail, got %ld\n", res);
+    ok(res, "expected RegQueryValueEx to fail, got %d\n", res);
     RegCloseKey(hkey);
 
     res = RegOpenKeyExA(HKEY_LOCAL_MACHINE, "Software\\Wine\\msitest", 0, KEY_ALL_ACCESS|KEY_WOW64_64KEY, &hkey);
-    ok(!res, "can't open 64-bit component key, got %ld\n", res);
+    ok(!res, "can't open 64-bit component key, got %d\n", res);
     res = RegQueryValueExA(hkey, "test1", NULL, NULL, NULL, NULL);
-    ok(res, "expected RegQueryValueEx to fail, got %ld\n", res);
+    ok(res, "expected RegQueryValueEx to fail, got %d\n", res);
     res = RegQueryValueExA(hkey, "test2", NULL, NULL, NULL, NULL);
-    ok(!res, "expected RegQueryValueEx to succeed, got %ld\n", res);
+    ok(!res, "expected RegQueryValueEx to succeed, got %d\n", res);
     RegCloseKey(hkey);
 
     res = RegOpenKeyExA(HKEY_CLASSES_ROOT,
                         "CLSID\\{8dfef911-6885-41eb-b280-8f0304728e8b}\\InProcServer32",
                         0, KEY_ALL_ACCESS|KEY_WOW64_32KEY, &hkey);
-    ok(res == ERROR_SUCCESS, "can't open 32-bit CLSID key, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "can't open 32-bit CLSID key, got %d\n", res);
     if (res == ERROR_SUCCESS) {
         size = sizeof(value);
         res = RegQueryValueExA(hkey, "", NULL, NULL, (LPBYTE)value, &size);
@@ -5964,7 +5966,7 @@ static void test_mixed_package(void)
     res = RegOpenKeyExA(HKEY_CLASSES_ROOT,
                         "CLSID\\{8dfef911-6885-41eb-b280-8f0304728e8b}\\InProcServer32",
                         0, KEY_ALL_ACCESS|KEY_WOW64_64KEY, &hkey);
-    ok(res == ERROR_SUCCESS, "can't open 64-bit CLSID key, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "can't open 64-bit CLSID key, got %d\n", res);
     if (res == ERROR_SUCCESS) {
         size = sizeof(value);
         res = RegQueryValueExA(hkey, "", NULL, NULL, (LPBYTE)value, &size);
@@ -6092,15 +6094,15 @@ static void test_remove_upgrade_code(void)
     res = RegOpenKeyExA( HKEY_LOCAL_MACHINE,
         "Software\\Microsoft\\Windows\\CurrentVersion\\Installer\\UpgradeCodes\\51AAE0C44620A5E4788506E91F249BD2",
         0, access, &hkey );
-    ok( res == ERROR_SUCCESS, "got %ld\n", res );
+    ok( res == ERROR_SUCCESS, "got %d\n", res );
 
     type = 0xdeadbeef;
     buf[0] = 0x55;
     size = sizeof(buf);
     res = RegQueryValueExA( hkey, "94A88FD7F6998CE40A22FB59F6B9C2BB", NULL, &type, (BYTE *)buf, &size );
-    ok( res == ERROR_SUCCESS, "got %ld\n", res );
-    ok( type == REG_SZ, "got %lu\n", type );
-    ok( size == 1, "got %lu\n", size );
+    ok( res == ERROR_SUCCESS, "got %d\n", res );
+    ok( type == REG_SZ, "got %u\n", type );
+    ok( size == 1, "got %u\n", size );
     ok( !buf[0], "wrong data\n" );
     RegCloseKey( hkey );
 
@@ -6110,7 +6112,7 @@ static void test_remove_upgrade_code(void)
     res = RegOpenKeyExA( HKEY_LOCAL_MACHINE,
         "Software\\Microsoft\\Windows\\CurrentVersion\\Installer\\UpgradeCodes\\51AAE0C44620A5E4788506E91F249BD2",
         0, access, &hkey );
-    ok( res == ERROR_FILE_NOT_FOUND, "got %ld\n", res );
+    ok( res == ERROR_FILE_NOT_FOUND, "got %d\n", res );
 
     RemoveDirectoryA( "msitest" );
     DeleteFileA( msifile );
@@ -6153,7 +6155,7 @@ static void check_file_matches(const char *filename, const char *text)
 
     file = CreateFileA(filename, GENERIC_READ, 0, NULL, OPEN_EXISTING, 0, NULL);
     ReadFile(file, buffer, sizeof(buffer), &size, NULL);
-    ok(size == strlen(text) && !memcmp(buffer, text, size), "got %.*s\n", (int)size, buffer);
+    ok(size == strlen(text) && !memcmp(buffer, text, size), "got %.*s\n", size, buffer);
     CloseHandle(file);
 }
 

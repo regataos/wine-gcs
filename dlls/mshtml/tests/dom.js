@@ -89,14 +89,29 @@ sync_test("textContent", function() {
 
 sync_test("ElementTraversal", function() {
     var div = document.createElement("div");
-    div.innerHTML = "abc<b>bold</b><script>/* */<script><div>text</div>def";
+    div.innerHTML = "abc<b>bold</b><script>/* */</script><div>text</div>def";
+    ok(div.childElementCount === 3, "div.childElementCount = " + div.childElementCount);
     ok(div.firstElementChild.outerHTML === "<b>bold</b>",
             "div.firstElementChild.outerHTML = " + div.firstElementChild.outerHTML);
+    ok(div.lastElementChild.outerHTML === "<div>text</div>",
+            "div.lastElementChild.outerHTML = " + div.lastElementChild.outerHTML);
+    ok(div.firstElementChild.nextElementSibling.outerHTML === "<script>/* */</script>",
+            "div.firstElementChild.nextElementSibling.outerHTML = " + div.firstElementChild.nextElementSibling.outerHTML);
+    ok(div.lastElementChild.nextElementSibling === null,
+            "div.lastElementChild.nextElementSibling = " + div.lastElementChild.nextElementSibling);
+    ok(div.lastElementChild.previousElementSibling.outerHTML === "<script>/* */</script>",
+            "div.lastElementChild.previousElementSibling.outerHTML = " + div.lastElementChild.previousElementSibling.outerHTML);
+    ok(div.firstElementChild.previousElementSibling === null,
+            "div.firstElementChild.previousElementSibling = " + div.firstElementChild.previousElementSibling);
 
     div.innerHTML = "abc";
+    ok(div.childElementCount === 0, "div.childElementCount = " + div.childElementCount);
     ok(div.firstElementChild === null, "div.firstElementChild = " + div.firstElementChild);
+    ok(div.lastElementChild === null, "div.lastElementChild = " + div.lastElementChild);
 
+    ok(!("childElementCount" in document), "childElementCount found in document");
     ok(!("firstElementChild" in document), "firstElementChild found in document");
+    ok(!("nextElementSibling" in document), "nextElementSibling found in document");
 });
 
 sync_test("head", function() {
@@ -127,9 +142,18 @@ async_test("iframe_location", function() {
     iframe.onload = function() {
         ok(iframe.contentWindow.location.pathname === "/emptyfile",
            "path = " + iframe.contentWindow.location.pathname);
+        ok(iframe.contentWindow.Image !== undefined, "Image is undefined");
+        ok(iframe.contentWindow.VBArray !== undefined, "VBArray is undefined");
+        iframe.contentWindow.Image = undefined;
+        iframe.contentWindow.VBArray = undefined;
+        iframe.contentWindow.foobar = 1234;
         iframe.onload = function () {
             ok(iframe.contentWindow.location.pathname === "/empty/file",
                "path = " + iframe.contentWindow.location.pathname);
+            ok(iframe.contentWindow.Image !== undefined, "Image is undefined (2)");
+            ok(iframe.contentWindow.VBArray !== undefined, "VBArray is undefined (2)");
+            ok(!Object.prototype.hasOwnProperty.call(iframe.contentWindow, "foobar"),
+               "contentWindow has foobar");
             next_test();
         }
         iframe.src = "empty/file";
@@ -494,13 +518,21 @@ sync_test("elem_props", function() {
 });
 
 async_test("animation_frame", function() {
-    var id = requestAnimationFrame(function(x) {
+    var id = requestAnimationFrame(function(x) { ok(false, "request was supposed to be cancelled"); });
+    id = cancelAnimationFrame(id);
+    ok(id === undefined, "cancelAnimationFrame returned " + id);
+
+    id = requestAnimationFrame(function(x) {
         ok(this === window, "this != window");
         ok(typeof(x) === "number", "x = " + x);
         ok(arguments.length === 1, "arguments.length = " + arguments.length);
         next_test();
     });
+    cancelAnimationFrame(0);
+    clearInterval(id);
+    clearTimeout(id);
     ok(typeof(id) === "number", "id = " + id);
+    ok(id !== 0, "id = 0");
 });
 
 sync_test("title", function() {
@@ -510,6 +542,24 @@ sync_test("title", function() {
     elem.title = "test";
     ok(elem.title === "test", "div.title = " + elem.title);
     ok(elem.getAttribute("title") === "test", "title attribute = " + elem.getAttribute("title"));
+
+    var orig = document.title;
+    document.title = "w i n e test";
+    var title = document.getElementsByTagName("title")[0];
+    ok(title.text === "w i n e test", "<title> element text = " + title.text);
+    title.text = "winetest";
+    ok(title.text === "winetest", "<title> element text after change = " + title.text);
+    ok(document.title === "winetest", "document.title after <title> change = " + document.title);
+
+    elem = document.createElement("title");
+    ok(elem.text === "", "detached <title> element text = " + elem.text);
+    elem.text = "foobar";
+    ok(elem.text === "foobar", "detached <title> element text after change = " + elem.text);
+    ok(document.title === "winetest", "document.title after detached <title> change = " + document.title);
+
+    title.parentNode.replaceChild(elem, title);
+    ok(document.title === "foobar", "document.title after <title> replaced = " + document.title);
+    document.title = orig;
 });
 
 sync_test("disabled", function() {

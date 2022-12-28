@@ -209,12 +209,33 @@ HRESULT clear_task_timer(HTMLInnerWindow *window, DWORD id)
 
     LIST_FOR_EACH_ENTRY(iter, &thread_data->timer_list, task_timer_t, entry) {
         if(iter->id == id && iter->window == window) {
-            release_task_timer(thread_data->thread_hwnd, iter);
+            if(iter->type != TIMER_ANIMATION_FRAME)
+                release_task_timer(thread_data->thread_hwnd, iter);
             return S_OK;
         }
     }
 
     WARN("timet not found\n");
+    return S_OK;
+}
+
+HRESULT clear_animation_timer(HTMLInnerWindow *window, DWORD id)
+{
+    thread_data_t *thread_data = get_thread_data(FALSE);
+    task_timer_t *iter;
+
+    if(!thread_data)
+        return S_OK;
+
+    LIST_FOR_EACH_ENTRY(iter, &thread_data->timer_list, task_timer_t, entry) {
+        if(iter->id == id && iter->window == window) {
+            if(iter->type == TIMER_ANIMATION_FRAME)
+                release_task_timer(thread_data->thread_hwnd, iter);
+            return S_OK;
+        }
+    }
+
+    WARN("timer not found\n");
     return S_OK;
 }
 
@@ -251,7 +272,7 @@ static void call_timer_disp(IDispatch *disp, enum timer_type timer_type)
     if(hres == S_OK)
         TRACE("%p %s <<<\n", disp, debugstr_timer_type(timer_type));
     else
-        WARN("%p %s <<< %08x\n", disp, debugstr_timer_type(timer_type), hres);
+        WARN("%p %s <<< %08lx\n", disp, debugstr_timer_type(timer_type), hres);
 
     VariantClear(&res);
 }
@@ -350,7 +371,7 @@ static LRESULT WINAPI hidden_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPa
     }
 
     if(msg > WM_USER)
-        FIXME("(%p %d %lx %lx)\n", hwnd, msg, wParam, lParam);
+        FIXME("(%p %d %Ix %Ix)\n", hwnd, msg, wParam, lParam);
 
     return DefWindowProcW(hwnd, msg, wParam, lParam);
 }
@@ -403,7 +424,7 @@ HRESULT create_marshaled_doc(HWND main_thread_hwnd, REFIID riid, void **ppv)
     res = SendMessageW(main_thread_hwnd, WM_CREATEDOC, 0, (LPARAM)&params);
     TRACE("SendMessage ret %x\n", res);
     if(FAILED(params.hres)) {
-        WARN("EM_CREATEDOC failed: %08x\n", params.hres);
+        WARN("EM_CREATEDOC failed: %08lx\n", params.hres);
         IStream_Release(params.stream);
         return hres;
     }
@@ -414,7 +435,7 @@ HRESULT create_marshaled_doc(HWND main_thread_hwnd, REFIID riid, void **ppv)
         hres = CoUnmarshalInterface(params.stream, riid, ppv);
     IStream_Release(params.stream);
     if(FAILED(hres))
-        WARN("CoUnmarshalInterface failed: %08x\n", hres);
+        WARN("CoUnmarshalInterface failed: %08lx\n", hres);
     return hres;
 }
 

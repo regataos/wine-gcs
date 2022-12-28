@@ -443,33 +443,22 @@ BOOL WINAPI UnregisterPowerSettingNotification(HPOWERNOTIFY handle)
     return TRUE;
 }
 
-/*****************************************************************************
- * GetGestureConfig (USER32.@)
+/**********************************************************************
+ * RegisterSuspendResumeNotification (USER32.@)
  */
-BOOL WINAPI GetGestureConfig( HWND hwnd, DWORD reserved, DWORD flags, UINT *count, GESTURECONFIG *config, UINT size )
+HPOWERNOTIFY WINAPI RegisterSuspendResumeNotification(HANDLE recipient, DWORD flags)
 {
-    FIXME("(%p %08x %08x %p %p %u): stub\n", hwnd, reserved, flags, count, config, size);
-    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
-    return FALSE;
+    FIXME("%p, %#x: stub.\n", recipient, flags);
+    return (HPOWERNOTIFY)0xdeadbeef;
 }
 
 /**********************************************************************
- * SetGestureConfig [USER32.@]
+ * UnregisterSuspendResumeNotification (USER32.@)
  */
-BOOL WINAPI SetGestureConfig( HWND hwnd, DWORD reserved, UINT id, PGESTURECONFIG config, UINT size )
+BOOL WINAPI UnregisterSuspendResumeNotification(HPOWERNOTIFY handle)
 {
-    FIXME("(%p %08x %u %p %u): stub\n", hwnd, reserved, id, config, size);
-    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
-    return FALSE;
-}
-
-/**********************************************************************
- * IsTouchWindow [USER32.@]
- */
-BOOL WINAPI IsTouchWindow( HWND hwnd, PULONG flags )
-{
-    FIXME("(%p %p): stub\n", hwnd, flags);
-    return FALSE;
+    FIXME("%p: stub.\n", handle);
+    return TRUE;
 }
 
 /**********************************************************************
@@ -529,8 +518,17 @@ BOOL WINAPI GetPointerType(UINT32 id, POINTER_INPUT_TYPE *type)
         return FALSE;
     }
 
-    *type = PT_MOUSE;
+    if (id == 1) *type = PT_MOUSE;
+    else *type = PT_TOUCH;
     return TRUE;
+}
+
+BOOL WINAPI GetPointerInfo(UINT32 id, POINTER_INFO *info)
+{
+    FIXME("(%d %p): stub\n", id, info);
+
+    SetLastError(ERROR_INVALID_PARAMETER);
+    return FALSE;
 }
 
 const struct builtin_class_descr IME_builtin_class =

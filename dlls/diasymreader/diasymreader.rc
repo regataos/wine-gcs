@@ -20,3 +20,4 @@
 
 /* @makedep: diasymreader.rgs */
 2 WINE_REGISTRY diasymreader.rgs
+

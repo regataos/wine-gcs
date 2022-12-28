@@ -72,6 +72,16 @@ void msvcrt_init_math( void *module )
     sse2_supported = IsProcessorFeaturePresent( PF_XMMI64_INSTRUCTIONS_AVAILABLE );
 #if _MSVCR_VER <=71
     sse2_enabled = FALSE;
+    {
+        char sgi[64];
+
+        if (GetEnvironmentVariableA("SteamGameId", sgi, sizeof(sgi))
+                && (!strcmp(sgi, "560430") || !strcmp(sgi, "12330")))
+        {
+            sse2_supported = FALSE;
+            FIXME("HACK: disabling sse2 support in msvcrt.\n");
+        }
+    }
 #else
     sse2_enabled = sse2_supported;
 #endif
@@ -798,7 +808,6 @@ static float asinf_R(float z)
 float CDECL acosf( float x )
 {
     static const double pio2_lo = 6.12323399573676603587e-17;
-    static const double pio2_hi = 1.57079632679489655800e+00;
 
     float z, w, s, c, df;
     unsigned int hx, ix;
@@ -819,13 +828,13 @@ float CDECL acosf( float x )
     if (ix < 0x3f000000) {
         if (ix <= 0x32800000) /* |x| < 2**-26 */
             return M_PI_2;
-        return pio2_hi - (x - (pio2_lo - x * asinf_R(x * x)));
+        return M_PI_2 - (x - (pio2_lo - x * asinf_R(x * x)));
     }
     /* x < -0.5 */
     if (hx >> 31) {
         z = (1 + x) * 0.5f;
         s = sqrtf(z);
-        return 2*(pio2_hi - (s + (asinf_R(z) * s - pio2_lo)));
+        return M_PI - 2 * (s + ((double)s * asinf_R(z)));
     }
     /* x > 0.5 */
     z = (1 - x) * 0.5f;
@@ -5058,8 +5067,8 @@ double CDECL fma( double x, double y, double z )
 float CDECL fmaf( float x, float y, float z )
 {
     union { double f; UINT64 i; } u;
-    double xy, err;
-    int e, neg;
+    double xy, adjust;
+    int e;
 
     xy = (double)x * y;
     u.f = xy + z;
@@ -5083,15 +5092,11 @@ float CDECL fmaf( float x, float y, float z )
      * If result is inexact, and exactly halfway between two float values,
      * we need to adjust the low-order bit in the direction of the error.
      */
-    neg = u.i >> 63;
-    if (neg == (z > xy))
-        err = xy - u.f + z;
-    else
-        err = z - u.f + xy;
-    if (neg == (err < 0))
+    _controlfp(_RC_CHOP, _MCW_RC);
+    adjust = fp_barrier(xy + z);
+    _controlfp(_RC_NEAR, _MCW_RC);
+    if (u.f == adjust)
         u.i++;
-    else
-        u.i--;
     return u.f;
 }
 
@@ -6844,25 +6849,13 @@ double CDECL _yn(int n, double x)
  */
 double CDECL nearbyint(double x)
 {
-    BOOL update_cw, update_sw;
-    unsigned int cw, sw;
+    fenv_t env;
 
-    _setfp(&cw, 0, &sw, 0);
-    update_cw = !(cw & _EM_INEXACT);
-    update_sw = !(sw & _SW_INEXACT);
-    if (update_cw)
-    {
-        cw |= _EM_INEXACT;
-        _setfp(&cw, _EM_INEXACT, NULL, 0);
-    }
+    fegetenv(&env);
+    _control87(_MCW_EM, _MCW_EM);
     x = rint(x);
-    if (update_cw || update_sw)
-    {
-        sw = 0;
-        cw &= ~_EM_INEXACT;
-        _setfp(update_cw ? &cw : NULL, _EM_INEXACT,
-                update_sw ? &sw : NULL, _SW_INEXACT);
-    }
+    feclearexcept(FE_INEXACT);
+    feupdateenv(&env);
     return x;
 }
 
@@ -6873,25 +6866,13 @@ double CDECL nearbyint(double x)
  */
 float CDECL nearbyintf(float x)
 {
-    BOOL update_cw, update_sw;
-    unsigned int cw, sw;
+    fenv_t env;
 
-    _setfp(&cw, 0, &sw, 0);
-    update_cw = !(cw & _EM_INEXACT);
-    update_sw = !(sw & _SW_INEXACT);
-    if (update_cw)
-    {
-        cw |= _EM_INEXACT;
-        _setfp(&cw, _EM_INEXACT, NULL, 0);
-    }
+    fegetenv(&env);
+    _control87(_MCW_EM, _MCW_EM);
     x = rintf(x);
-    if (update_cw || update_sw)
-    {
-        sw = 0;
-        cw &= ~_EM_INEXACT;
-        _setfp(update_cw ? &cw : NULL, _EM_INEXACT,
-                update_sw ? &sw : NULL, _SW_INEXACT);
-    }
+    feclearexcept(FE_INEXACT);
+    feupdateenv(&env);
     return x;
 }
 
@@ -10314,11 +10295,11 @@ double CDECL _except1(DWORD fpe, _FP_OPERATION_CODE op, double arg, double res, 
 {
     ULONG_PTR exception_arg;
     DWORD exception = 0;
-    unsigned int fpword = 0;
+    DWORD fpword = 0;
     WORD operation;
     int raise = 0;
 
-    TRACE("(%lx %x %lf %lf %lx %p)\n", fpe, op, arg, res, cw, unk);
+    TRACE("(%x %x %lf %lf %x %p)\n", fpe, op, arg, res, cw, unk);
 
 #ifdef _WIN64
     cw = ((cw >> 7) & 0x3f) | ((cw >> 3) & 0xc00);
@@ -10389,7 +10370,7 @@ double CDECL _except1(DWORD fpe, _FP_OPERATION_CODE op, double arg, double res, 
         case 0x300: fpword |= _PC_64; break;
     }
     if (cw & 0x1000) fpword |= _IC_AFFINE;
-    _setfp(&fpword, _MCW_EM | _MCW_RC | _MCW_PC | _MCW_IC, NULL, 0);
+    _control87(fpword, 0xffffffff);
 
     return res;
 }

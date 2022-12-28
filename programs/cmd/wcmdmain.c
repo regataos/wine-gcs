@@ -452,18 +452,6 @@ void WCMD_strsubstW(WCHAR *start, const WCHAR *next, const WCHAR *insert, int le
        memcpy(start, insert, len * sizeof(*insert));
 }
 
-BOOL WCMD_get_fullpath(const WCHAR* in, SIZE_T outsize, WCHAR* out, WCHAR** start)
-{
-    DWORD ret = GetFullPathNameW(in, outsize, out, start);
-    if (!ret) return FALSE;
-    if (ret > outsize)
-    {
-        WCMD_output_asis_stderr(WCMD_LoadMessage(WCMD_FILENAMETOOLONG));
-        return FALSE;
-    }
-    return TRUE;
-}
-
 /***************************************************************************
  * WCMD_skip_leading_spaces
  *
@@ -1069,7 +1057,7 @@ void WCMD_run_program (WCHAR *command, BOOL called)
   } else {
 
     /* Convert eg. ..\fred to include a directory by removing file part */
-    if (!WCMD_get_fullpath(firstParam, ARRAY_SIZE(pathtosearch), pathtosearch, NULL)) return;
+    GetFullPathNameW(firstParam, ARRAY_SIZE(pathtosearch), pathtosearch, NULL);
     lastSlash = wcsrchr(pathtosearch, '\\');
     if (lastSlash && wcschr(lastSlash, '.') != NULL) extensionsupplied = TRUE;
     lstrcpyW(stemofsearch, lastSlash+1);
@@ -1137,7 +1125,7 @@ void WCMD_run_program (WCHAR *command, BOOL called)
 
         /* Since you can have eg. ..\.. on the path, need to expand
            to full information                                      */
-        if (!WCMD_get_fullpath(temp, ARRAY_SIZE(thisDir), thisDir, NULL)) return;
+        GetFullPathNameW(temp, MAX_PATH, thisDir, NULL);
     }
 
     /* 1. If extension supplied, see if that file exists */
@@ -2642,7 +2630,7 @@ int __cdecl wmain (int argc, WCHAR *argvW[])
         WINE_TRACE("First parameter is '%s'\n", wine_dbgstr_w(thisArg));
         if (wcschr(thisArg, '\\') != NULL) {
 
-          if (!WCMD_get_fullpath(thisArg, ARRAY_SIZE(string), string, NULL)) return FALSE;
+          GetFullPathNameW(thisArg, ARRAY_SIZE(string), string, NULL);
           WINE_TRACE("Full path name '%s'\n", wine_dbgstr_w(string));
           p = string + lstrlenW(string);
 

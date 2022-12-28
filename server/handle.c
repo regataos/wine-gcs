@@ -808,142 +808,18 @@ done:
     free( label_acl );
 }
 
-static int count_handles( struct process *process, void *user )
-{
-    unsigned int *count = user;
-    struct handle_table *table = process->handles;
-    struct handle_entry *entry;
-    unsigned int i;
-
-    if (!table)
-        return 0;
-
-    for (i = 0, entry = table->entries; i <= table->last; i++, entry++)
-        if (entry->ptr)
-            (*count)++;
-
-    return 0;
-}
-
-struct system_handle_entry_32
-{
-    unsigned int    owner_pid;
-    unsigned char   object_type;
-    unsigned char   handle_flags;
-    unsigned short  handle_value;
-    unsigned int    object_pointer;
-    unsigned int    access_mask;
-};
-
-struct system_handle_entry_64
-{
-    unsigned int        owner_pid;
-    unsigned char       object_type;
-    unsigned char       handle_flags;
-    unsigned short      handle_value;
-    unsigned __int64    object_pointer;
-    unsigned int        access_mask;
-};
-
-struct system_handle_entry_ex_32
-{
-    unsigned int    object;
-    unsigned int    unique_process_id;
-    unsigned int    handle_value;
-    unsigned int    granted_access;
-    unsigned short  creator_back_trace_index;
-    unsigned short  object_type_index;
-    unsigned int    handle_attributes;
-    unsigned int    reserved;
-};
-
-struct system_handle_entry_ex_64
-{
-    unsigned __int64    object;
-    unsigned __int64    unique_process_id;
-    unsigned __int64    handle_value;
-    unsigned int        granted_access;
-    unsigned short      creator_back_trace_index;
-    unsigned short      object_type_index;
-    unsigned int        handle_attributes;
-    unsigned int        reserved;
-};
-
 struct enum_handle_info
 {
-    int is_64bit;
-    int ex;
     unsigned int count;
-    union {
-        void *handle;
-        struct system_handle_entry_32 *handle_32;
-        struct system_handle_entry_64 *handle_64;
-        struct system_handle_entry_ex_32 *handle_ex_32;
-        struct system_handle_entry_ex_64 *handle_ex_64;
-    } u;
+    struct handle_info *handle;
 };
-
-static void enum_handle_ex_64( struct process *process, unsigned int i, struct system_handle_entry_ex_64 *handle,
-                               struct handle_entry *entry )
-{
-    handle->object                      = 0; /* FIXME: Fill out object */
-    handle->unique_process_id           = process->id;
-    handle->handle_value                = index_to_handle(i);
-    handle->granted_access              = entry->access & ~RESERVED_ALL;
-    handle->creator_back_trace_index    = 0;
-    handle->object_type_index           = entry->ptr->ops->type->index;
-    handle->handle_attributes           = 0;
-    handle->reserved                    = 0;
-    if (entry->access & RESERVED_INHERIT) handle->handle_attributes |= OBJ_INHERIT;
-    if (entry->access & RESERVED_CLOSE_PROTECT) handle->handle_attributes |= OBJ_PROTECT_CLOSE;
-}
-
-static void enum_handle_ex_32( struct process *process, unsigned int i, struct system_handle_entry_ex_32 *handle,
-                               struct handle_entry *entry )
-{
-    handle->object                      = 0; /* FIXME: Fill out object */
-    handle->unique_process_id           = process->id;
-    handle->handle_value                = index_to_handle(i);
-    handle->granted_access              = entry->access & ~RESERVED_ALL;
-    handle->creator_back_trace_index    = 0;
-    handle->object_type_index           = entry->ptr->ops->type->index;
-    handle->handle_attributes           = 0;
-    handle->reserved                    = 0;
-    if (entry->access & RESERVED_INHERIT) handle->handle_attributes |= OBJ_INHERIT;
-    if (entry->access & RESERVED_CLOSE_PROTECT) handle->handle_attributes |= OBJ_PROTECT_CLOSE;
-}
-
-static void enum_handle_64( struct process *process, unsigned int i, struct system_handle_entry_64 *handle,
-                            struct handle_entry *entry )
-{
-    handle->owner_pid       = process->id;
-    handle->object_type     = entry->ptr->ops->type->index;
-    handle->handle_flags    = 0;
-    handle->handle_value    = index_to_handle(i);
-    handle->object_pointer  = 0; /* FIXME: Fill out object_pointer */
-    handle->access_mask     = entry->access & ~RESERVED_ALL;
-    if (entry->access & RESERVED_INHERIT) handle->handle_flags |= OBJ_INHERIT;
-    if (entry->access & RESERVED_CLOSE_PROTECT) handle->handle_flags |= OBJ_PROTECT_CLOSE;
-}
-
-static void enum_handle_32( struct process *process, unsigned int i, struct system_handle_entry_32 *handle,
-                            struct handle_entry *entry )
-{
-    handle->owner_pid       = process->id;
-    handle->object_type     = entry->ptr->ops->type->index;
-    handle->handle_flags    = 0;
-    handle->handle_value    = index_to_handle(i);
-    handle->object_pointer  = 0; /* FIXME: Fill out object_pointer */
-    handle->access_mask     = entry->access & ~RESERVED_ALL;
-    if (entry->access & RESERVED_INHERIT) handle->handle_flags |= OBJ_INHERIT;
-    if (entry->access & RESERVED_CLOSE_PROTECT) handle->handle_flags |= OBJ_PROTECT_CLOSE;
-}
 
 static int enum_handles( struct process *process, void *user )
 {
     struct enum_handle_info *info = user;
     struct handle_table *table = process->handles;
     struct handle_entry *entry;
+    struct handle_info *handle;
     unsigned int i;
 
     if (!table)
@@ -952,21 +828,20 @@ static int enum_handles( struct process *process, void *user )
     for (i = 0, entry = table->entries; i <= table->last; i++, entry++)
     {
         if (!entry->ptr) continue;
+        if (!info->handle)
+        {
+            info->count++;
+            continue;
+        }
         assert( info->count );
-        if (info->ex)
-        {
-            if (info->is_64bit)
-                enum_handle_ex_64( process, i, info->u.handle_ex_64++, entry );
-            else
-                enum_handle_ex_32( process, i, info->u.handle_ex_32++, entry );
-        }
-        else
-        {
-            if (info->is_64bit)
-                enum_handle_64( process, i, info->u.handle_64++, entry );
-            else
-                enum_handle_32( process, i, info->u.handle_32++, entry );
-        }
+        handle = info->handle++;
+        handle->owner      = process->id;
+        handle->handle     = index_to_handle(i);
+        handle->access     = entry->access & ~RESERVED_ALL;
+        handle->type       = entry->ptr->ops->type->index;
+        handle->attributes = 0;
+        if (entry->access & RESERVED_INHERIT) handle->attributes |= OBJ_INHERIT;
+        if (entry->access & RESERVED_CLOSE_PROTECT) handle->attributes |= OBJ_PROTECT_CLOSE;
         info->count--;
     }
 
@@ -976,25 +851,21 @@ static int enum_handles( struct process *process, void *user )
 DECL_HANDLER(get_system_handles)
 {
     struct enum_handle_info info;
-    size_t handle_size;
-    data_size_t max_handles;
+    struct handle_info *handle;
+    data_size_t max_handles = get_reply_max_size() / sizeof(*handle);
 
-    info.is_64bit = is_machine_64bit( current->process->machine );
-    if (req->ex)
-        handle_size = info.is_64bit ? sizeof(*info.u.handle_ex_64) : sizeof(*info.u.handle_ex_32);
-    else
-        handle_size = info.is_64bit ? sizeof(*info.u.handle_64) : sizeof(*info.u.handle_32);
-
-    info.ex = req->ex;
+    info.handle = NULL;
     info.count  = 0;
-    enum_processes( count_handles, &info.count );
+    enum_processes( enum_handles, &info );
     reply->count = info.count;
 
-    max_handles = get_reply_max_size() / handle_size;
     if (max_handles < info.count)
         set_error( STATUS_BUFFER_TOO_SMALL );
-    else if ((info.u.handle = set_reply_data_size( info.count * handle_size )))
+    else if ((handle = set_reply_data_size( info.count * sizeof(*handle) )))
+    {
+        info.handle = handle;
         enum_processes( enum_handles, &info );
+    }
 }
 
 DECL_HANDLER(make_temporary)

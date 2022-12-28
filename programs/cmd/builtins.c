@@ -31,9 +31,6 @@
 #include "wcmd.h"
 #include <shellapi.h>
 #include "wine/debug.h"
-#include "winternl.h"
-#include "winioctl.h"
-#include "ntifs.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(cmd);
 
@@ -808,7 +805,7 @@ void WCMD_copy(WCHAR * args) {
     WINE_TRACE("Destination supplied, processing to see if file or directory\n");
 
     /* Convert to fully qualified path/filename */
-    if (!WCMD_get_fullpath(destination->name, ARRAY_SIZE(destname), destname, &filenamepart)) return;
+    GetFullPathNameW(destination->name, ARRAY_SIZE(destname), destname, &filenamepart);
     WINE_TRACE("Full dest name is '%s'\n", wine_dbgstr_w(destname));
 
     /* If parameter is a directory, ensure it ends in \ */
@@ -890,7 +887,7 @@ void WCMD_copy(WCHAR * args) {
 
     /* Convert to fully qualified path/filename in srcpath, file filenamepart pointing
        to where the filename portion begins (used for wildcard expansion).             */
-    if (!WCMD_get_fullpath(thiscopy->name, ARRAY_SIZE(srcpath), srcpath, &filenamepart)) return;
+    GetFullPathNameW(thiscopy->name, ARRAY_SIZE(srcpath), srcpath, &filenamepart);
     WINE_TRACE("Full src name is '%s'\n", wine_dbgstr_w(srcpath));
 
     /* If parameter is a directory, ensure it ends in \* */
@@ -900,7 +897,7 @@ void WCMD_copy(WCHAR * args) {
       /* We need to know where the filename part starts, so append * and
          recalculate the full resulting path                              */
       lstrcatW(thiscopy->name, L"*");
-      if (!WCMD_get_fullpath(thiscopy->name, ARRAY_SIZE(srcpath), srcpath, &filenamepart)) return;
+      GetFullPathNameW(thiscopy->name, ARRAY_SIZE(srcpath), srcpath, &filenamepart);
       WINE_TRACE("Directory, so full name is now '%s'\n", wine_dbgstr_w(srcpath));
 
     } else if ((wcspbrk(srcpath, L"*?") == NULL) &&
@@ -910,7 +907,7 @@ void WCMD_copy(WCHAR * args) {
       /* We need to know where the filename part starts, so append \* and
          recalculate the full resulting path                              */
       lstrcatW(thiscopy->name, L"\\*");
-      if (!WCMD_get_fullpath(thiscopy->name, ARRAY_SIZE(srcpath), srcpath, &filenamepart)) return;
+      GetFullPathNameW(thiscopy->name, ARRAY_SIZE(srcpath), srcpath, &filenamepart);
       WINE_TRACE("Directory, so full name is now '%s'\n", wine_dbgstr_w(srcpath));
     }
 
@@ -1194,7 +1191,7 @@ static BOOL WCMD_delete_confirm_wildcard(const WCHAR *filename, BOOL *pPrompted)
         WCHAR fpath[MAX_PATH];
 
         /* Convert path into actual directory spec */
-        if (!WCMD_get_fullpath(filename, ARRAY_SIZE(fpath), fpath, NULL)) return FALSE;
+        GetFullPathNameW(filename, ARRAY_SIZE(fpath), fpath, NULL);
         _wsplitpath(fpath, drive, dir, fname, ext);
 
         /* Only prompt for * and *.*, not *a, a*, *.a* etc */
@@ -1322,8 +1319,7 @@ static BOOL WCMD_delete_one (const WCHAR *thisArg) {
       WCHAR ext[MAX_PATH];
 
       /* Convert path into actual directory spec */
-      if (!WCMD_get_fullpath(argCopy, ARRAY_SIZE(thisDir), thisDir, NULL)) return FALSE;
-
+      GetFullPathNameW(argCopy, ARRAY_SIZE(thisDir), thisDir, NULL);
       _wsplitpath(thisDir, drive, dir, fname, ext);
 
       lstrcpyW(thisDir, drive);
@@ -2031,9 +2027,9 @@ static void WCMD_parse_line(CMD_LIST    *cmdStart,
 }
 
 /**************************************************************************
- * WCMD_forf_getinputhandle
+ * WCMD_forf_getinput
  *
- * Return a file handle which can be used for reading the input lines,
+ * Return a FILE* which can be used for reading the input lines,
  * either to a specific file (which may be quote delimited as we have to
  * read the parameters in raw mode) or to a command which we need to
  * execute. The command being executed runs in its own shell and stores
@@ -2047,12 +2043,12 @@ static void WCMD_parse_line(CMD_LIST    *cmdStart,
  *
  * Returns a file handle which can be used to read the input lines from.
  */
-static HANDLE WCMD_forf_getinputhandle(BOOL usebackq, WCHAR *itemstr, BOOL iscmd) {
+static FILE* WCMD_forf_getinput(BOOL usebackq, WCHAR *itemstr, BOOL iscmd) {
   WCHAR  temp_str[MAX_PATH];
   WCHAR  temp_file[MAX_PATH];
   WCHAR  temp_cmd[MAXSTRING];
   WCHAR *trimmed = NULL;
-  HANDLE hinput = INVALID_HANDLE_VALUE;
+  FILE*  ret;
 
   /* Remove leading and trailing character (but there may be trailing whitespace too) */
   if ((iscmd && (itemstr[0] == '`' && usebackq)) ||
@@ -2080,17 +2076,14 @@ static HANDLE WCMD_forf_getinputhandle(BOOL usebackq, WCHAR *itemstr, BOOL iscmd
     WCMD_execute (temp_cmd, temp_str, NULL, FALSE);
 
     /* Open the file, read line by line and process */
-    hinput = CreateFileW(temp_file, GENERIC_READ, FILE_SHARE_READ,
-                        NULL, OPEN_EXISTING, FILE_FLAG_DELETE_ON_CLOSE, NULL);
-
+    ret = _wfopen(temp_file, L"rt,ccs=unicode");
   } else {
     /* Open the file, read line by line and process */
     WINE_TRACE("Reading input to parse from '%s'\n", wine_dbgstr_w(itemstr));
-    hinput = CreateFileW(itemstr, GENERIC_READ, FILE_SHARE_READ,
-                        NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    ret = _wfopen(itemstr, L"rt,ccs=unicode");
   }
   heap_free(trimmed);
-  return hinput;
+  return ret;
 }
 
 /**************************************************************************
@@ -2366,7 +2359,7 @@ void WCMD_for (WCHAR *p, CMD_LIST **cmdList) {
         } else if (doFileset && ((!forf_usebackq && *itemStart != '"') ||
                                  (forf_usebackq && *itemStart != '\''))) {
 
-            HANDLE input;
+            FILE *input;
             WCHAR *itemparm;
 
             WINE_TRACE("Processing for filespec from item %d '%s'\n", itemNum,
@@ -2384,10 +2377,10 @@ void WCMD_for (WCHAR *p, CMD_LIST **cmdList) {
               /* Use item because the file to process is just the first item in the set */
               itemparm = item;
             }
-            input = WCMD_forf_getinputhandle(forf_usebackq, itemparm, (itemparm==itemStart));
+            input = WCMD_forf_getinput(forf_usebackq, itemparm, (itemparm==itemStart));
 
             /* Process the input file */
-            if (input == INVALID_HANDLE_VALUE) {
+            if (!input) {
               WCMD_print_error ();
               WCMD_output_stderr(WCMD_LoadMessage(WCMD_READFAIL), item);
               errorlevel = 1;
@@ -2396,12 +2389,20 @@ void WCMD_for (WCHAR *p, CMD_LIST **cmdList) {
             } else {
 
               /* Read line by line until end of file */
-              while (WCMD_fgets(buffer, ARRAY_SIZE(buffer), input)) {
+              while (fgetws(buffer, ARRAY_SIZE(buffer), input)) {
+                size_t len = wcslen(buffer);
+                /* Either our buffer isn't large enough to fit a full line, or there's a stray
+                 * '\0' in the buffer.
+                 */
+                if (!feof(input) && (len == 0 || (buffer[len - 1] != '\n' && buffer[len - 1] != '\r')))
+                    break;
+                while (len && (buffer[len - 1] == '\n' || buffer[len - 1] == '\r'))
+                    buffer[--len] = L'\0';
                 WCMD_parse_line(cmdStart, firstCmd, &cmdEnd, variable[1], buffer, &doExecuted,
                                 &forf_skip, forf_eol, forf_delims, forf_tokens);
                 buffer[0] = 0;
               }
-              CloseHandle (input);
+              fclose (input);
             }
 
             /* When we have processed the item as a whole command, abort future set processing */
@@ -2937,8 +2938,8 @@ void WCMD_move (void)
 
   /* If 2nd parm is directory, then use original filename */
   /* Convert partial path to full path */
-  if (!WCMD_get_fullpath(param1, ARRAY_SIZE(input), input, NULL) ||
-      !WCMD_get_fullpath(param2, ARRAY_SIZE(output), output, NULL)) return;
+  GetFullPathNameW(param1, ARRAY_SIZE(input), input, NULL);
+  GetFullPathNameW(param2, ARRAY_SIZE(output), output, NULL);
   WINE_TRACE("Move from '%s'('%s') to '%s'\n", wine_dbgstr_w(input),
              wine_dbgstr_w(param1), wine_dbgstr_w(output));
 
@@ -3162,7 +3163,7 @@ void WCMD_rename (void)
   }
 
   /* Convert partial path to full path */
-  if (!WCMD_get_fullpath(param1, ARRAY_SIZE(input), input, NULL)) return;
+  GetFullPathNameW(param1, ARRAY_SIZE(input), input, NULL);
   WINE_TRACE("Rename from '%s'('%s') to '%s'\n", wine_dbgstr_w(input),
              wine_dbgstr_w(param1), wine_dbgstr_w(param2));
   dotDst = wcschr(param2, '.');
@@ -3443,7 +3444,7 @@ void WCMD_setshow_default (const WCHAR *args) {
           WCHAR ext[MAX_PATH];
 
           /* Convert path into actual directory spec */
-          if (!WCMD_get_fullpath(string, ARRAY_SIZE(fpath), fpath, NULL)) return;
+          GetFullPathNameW(string, ARRAY_SIZE(fpath), fpath, NULL);
           _wsplitpath(fpath, drive, dir, fname, ext);
 
           /* Rebuild path */
@@ -4975,49 +4976,6 @@ void WCMD_color (void) {
   }
 }
 
-BOOL WCMD_create_junction(WCHAR *link, WCHAR *target) {
-    static INT struct_size = offsetof(REPARSE_DATA_BUFFER, SymbolicLinkReparseBuffer.PathBuffer[0]);
-    static INT header_size = offsetof(REPARSE_DATA_BUFFER, GenericReparseBuffer);
-    INT buffer_size, data_size, string_len, prefix_len;
-    WCHAR *subst_dest, *print_dest, *string;
-    REPARSE_DATA_BUFFER *buffer;
-    UNICODE_STRING nt_name;
-    NTSTATUS status;
-    HANDLE hlink;
-    DWORD dwret;
-    BOOL ret;
-
-    if (!CreateDirectoryW(link, NULL ))
-        return FALSE;
-    hlink = CreateFileW(link, GENERIC_READ | GENERIC_WRITE, 0, 0, OPEN_EXISTING,
-                        FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, 0);
-    if (hlink == INVALID_HANDLE_VALUE)
-        return FALSE;
-    status = RtlDosPathNameToNtPathName_U_WithStatus(target, &nt_name, NULL, NULL);
-    if (status)
-        return FALSE;
-    prefix_len = strlen("\\??\\");
-    string = nt_name.Buffer;
-    string_len = lstrlenW( &string[prefix_len] );
-    data_size = (prefix_len + 2 * string_len + 2) * sizeof(WCHAR);
-    buffer_size = struct_size + data_size;
-    buffer = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, buffer_size );
-    buffer->ReparseTag = IO_REPARSE_TAG_MOUNT_POINT;
-    buffer->ReparseDataLength = struct_size - header_size + data_size;
-    buffer->MountPointReparseBuffer.SubstituteNameLength = (prefix_len + string_len) * sizeof(WCHAR);
-    buffer->MountPointReparseBuffer.PrintNameOffset = (prefix_len + string_len + 1) * sizeof(WCHAR);
-    buffer->MountPointReparseBuffer.PrintNameLength = string_len * sizeof(WCHAR);
-    subst_dest = &buffer->MountPointReparseBuffer.PathBuffer[0];
-    print_dest = &buffer->MountPointReparseBuffer.PathBuffer[prefix_len + string_len + 1];
-    lstrcpyW(subst_dest, string);
-    lstrcpyW(print_dest, &string[prefix_len]);
-    RtlFreeUnicodeString(&nt_name );
-    ret = DeviceIoControl(hlink, FSCTL_SET_REPARSE_POINT, (LPVOID)buffer, buffer_size, NULL, 0,
-                          &dwret, 0 );
-    HeapFree(GetProcessHeap(), 0, buffer);
-    return ret;
-}
-
 /****************************************************************************
  * WCMD_mklink
  */
@@ -5066,7 +5024,7 @@ void WCMD_mklink(WCHAR *args)
     else if(!junction)
         ret = CreateSymbolicLinkW(file1, file2, isdir);
     else
-        ret = WCMD_create_junction(file1, file2);
+        WINE_TRACE("Juction links currently not supported.\n");
 
     if(!ret)
         WCMD_output_stderr(WCMD_LoadMessage(WCMD_READFAIL), file1);

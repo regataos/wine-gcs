@@ -64,11 +64,14 @@
 # include <mach/mach_vm.h>
 #endif
 
+#include <sys/uio.h>
+
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
 #include "windef.h"
 #include "winnt.h"
 #include "winternl.h"
+#include "ddk/wdm.h"
 #include "wine/list.h"
 #include "wine/rbtree.h"
 #include "unix_private.h"
@@ -76,6 +79,7 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(virtual);
 WINE_DECLARE_DEBUG_CHANNEL(module);
+WINE_DECLARE_DEBUG_CHANNEL(virtual_ranges);
 
 struct preload_info
 {
@@ -98,9 +102,7 @@ struct builtin_module
     unsigned int refcount;
     void        *handle;
     void        *module;
-    char        *unix_name;
     void        *unix_handle;
-    void        *unix_entry;
 };
 
 static struct list builtin_modules = LIST_INIT( builtin_modules );
@@ -121,10 +123,12 @@ struct file_view
 #define VPROT_GUARD      0x10
 #define VPROT_COMMITTED  0x20
 #define VPROT_WRITEWATCH 0x40
-#define VPROT_WRITTEN    0x80
+#define VPROT_COPIED     0x80
 /* per-mapping protection flags */
 #define VPROT_SYSTEM     0x0200  /* system view (underlying mmap not under our control) */
-#define VPROT_NATIVE     0x0400
+#define VPROT_PLACEHOLDER 0x0400
+#define VPROT_FROMPLACEHOLDER 0x0800
+#define VPROT_NATIVE     0x1000
 
 /* Conversion from VPROT_* to Win32 flags */
 static const BYTE VIRTUAL_Win32Flags[16] =
@@ -177,7 +181,6 @@ static void *user_space_limit    = (void *)0x7fff0000;
 static void *working_set_limit   = (void *)0x7fff0000;
 #endif
 
-void *hypervisor_shared_data = (void *)0x7ffd0000;
 struct _KUSER_SHARED_DATA *user_shared_data = (void *)0x7ffe0000;
 
 /* TEB allocation blocks */
@@ -190,6 +193,7 @@ static struct list teb_list = LIST_INIT( teb_list );
 #define ROUND_SIZE(addr,size) (((SIZE_T)(size) + ((UINT_PTR)(addr) & page_mask) + page_mask) & ~page_mask)
 
 #define VIRTUAL_DEBUG_DUMP_VIEW(view) do { if (TRACE_ON(virtual)) dump_view(view); } while (0)
+#define VIRTUAL_DEBUG_DUMP_RANGES() do { if (TRACE_ON(virtual_ranges)) dump_free_ranges(); } while (0)
 
 #ifndef MAP_NORESERVE
 #define MAP_NORESERVE 0
@@ -203,6 +207,13 @@ static BYTE **pages_vprot;
 #else  /* on 32-bit we use a simple array with one byte per page */
 static BYTE *pages_vprot;
 #endif
+
+static BOOL use_kernel_writewatch;
+static int pagemap_fd, pagemap_reset_fd, clear_refs_fd;
+#define PAGE_FLAGS_BUFFER_LENGTH 1024
+#define PM_SOFT_DIRTY_PAGE (1ull << 57)
+
+static void reset_write_watches( void *base, SIZE_T size );
 
 static struct file_view *view_block_start, *view_block_end, *next_free_view;
 #ifdef _WIN64
@@ -510,21 +521,6 @@ static void reserve_area( void *addr, void *end )
 #endif /* __APPLE__ */
 }
 
-/* This might look like a hack, but it actually isn't - the 'experimental' version
- * is correct, but it already has revealed a couple of additional Wine bugs, which
- * were not triggered before, and there are probably some more.
- * To avoid breaking Wine for everyone, the new correct implementation has to be
- * manually enabled, until it is tested a bit more. */
-static inline BOOL experimental_WRITECOPY( void )
-{
-    static int enabled = -1;
-    if (enabled == -1)
-    {
-        const char *str = getenv("STAGING_WRITECOPY");
-        enabled = str && (atoi(str) != 0);
-    }
-    return enabled;
-}
 
 static void mmap_init( const struct preload_info *preload_info )
 {
@@ -607,9 +603,7 @@ static void add_builtin_module( void *module, void *handle )
     builtin->handle      = handle;
     builtin->module      = module;
     builtin->refcount    = 1;
-    builtin->unix_name   = NULL;
     builtin->unix_handle = NULL;
-    builtin->unix_entry  = NULL;
     list_add_tail( &builtin_modules, &builtin->entry );
 }
 
@@ -629,7 +623,6 @@ void release_builtin_module( void *module )
             list_remove( &builtin->entry );
             if (builtin->handle) dlclose( builtin->handle );
             if (builtin->unix_handle) dlclose( builtin->unix_handle );
-            free( builtin->unix_name );
             free( builtin );
         }
         break;
@@ -686,45 +679,22 @@ static NTSTATUS get_builtin_unix_funcs( void *module, BOOL wow, void **funcs )
 
 
 /***********************************************************************
- *           get_builtin_unix_info
+ *           load_builtin_unixlib
  */
-NTSTATUS get_builtin_unix_info( void *module, const char **name, void **handle, void **entry )
+NTSTATUS load_builtin_unixlib( void *module, const char *name )
 {
+    void *handle;
     sigset_t sigset;
     NTSTATUS status = STATUS_DLL_NOT_FOUND;
     struct builtin_module *builtin;
 
-    server_enter_uninterrupted_section( &virtual_mutex, &sigset );
-    LIST_FOR_EACH_ENTRY( builtin, &builtin_modules, struct builtin_module, entry )
-    {
-        if (builtin->module != module) continue;
-        *name   = builtin->unix_name;
-        *handle = builtin->unix_handle;
-        *entry  = builtin->unix_entry;
-        status = STATUS_SUCCESS;
-        break;
-    }
-    server_leave_uninterrupted_section( &virtual_mutex, &sigset );
-    return status;
-}
-
-
-/***********************************************************************
- *           set_builtin_unix_handle
- */
-NTSTATUS set_builtin_unix_handle( void *module, const char *name, void *handle )
-{
-    sigset_t sigset;
-    NTSTATUS status = STATUS_DLL_NOT_FOUND;
-    struct builtin_module *builtin;
-
+    if (!(handle = dlopen( name, RTLD_NOW ))) return status;
     server_enter_uninterrupted_section( &virtual_mutex, &sigset );
     LIST_FOR_EACH_ENTRY( builtin, &builtin_modules, struct builtin_module, entry )
     {
         if (builtin->module != module) continue;
         if (!builtin->unix_handle)
         {
-            builtin->unix_name = strdup( name );
             builtin->unix_handle = handle;
             status = STATUS_SUCCESS;
         }
@@ -732,31 +702,7 @@ NTSTATUS set_builtin_unix_handle( void *module, const char *name, void *handle )
         break;
     }
     server_leave_uninterrupted_section( &virtual_mutex, &sigset );
-    return status;
-}
-
-
-/***********************************************************************
- *           set_builtin_unix_entry
- */
-NTSTATUS set_builtin_unix_entry( void *module, void *entry )
-{
-    sigset_t sigset;
-    NTSTATUS status = STATUS_DLL_NOT_FOUND;
-    struct builtin_module *builtin;
-
-    server_enter_uninterrupted_section( &virtual_mutex, &sigset );
-    LIST_FOR_EACH_ENTRY( builtin, &builtin_modules, struct builtin_module, entry )
-    {
-        if (builtin->module != module) continue;
-        if (builtin->unix_handle)
-        {
-            builtin->unix_entry = entry;
-            status = STATUS_SUCCESS;
-        }
-        break;
-    }
-    server_leave_uninterrupted_section( &virtual_mutex, &sigset );
+    if (status) dlclose( handle );
     return status;
 }
 
@@ -784,6 +730,12 @@ static struct range_entry *free_ranges_lower_bound( void *addr )
     return begin;
 }
 
+static void dump_free_ranges(void)
+{
+    struct range_entry *r;
+    for (r = free_ranges; r != free_ranges_end; ++r)
+        TRACE_(virtual_ranges)("%p - %p.\n", r->base, r->end);
+}
 
 /***********************************************************************
  *           free_ranges_insert_view
@@ -803,14 +755,19 @@ static void free_ranges_insert_view( struct file_view *view )
 
     /* this happens because virtual_alloc_thread_stack shrinks a view, then creates another one on top,
      * or because AT_ROUND_TO_PAGE was used with NtMapViewOfSection to force 4kB aligned mapping. */
-    if ((range->end > view_base && range->base >= view_end) ||
-        (range->end == view_base && next->base >= view_end))
+
+    if (range->base > view_base)
+        view_base = range->base;
+    if (range->end < view_end)
+        view_end = range->end;
+    if (range->end == view_base && next->base >= view_end)
+        view_end = view_base;
+
+    TRACE( "%p-%p, aligned %p->%p.\n", view->base, (char *)view->base + view->size, view_base, view_end );
+
+    if (view_end <= view_base)
     {
-        /* on Win64, assert that it's correctly aligned so we're not going to be in trouble later */
-#ifdef _WIN64
-        assert( view->base == view_base );
-#endif
-        WARN( "range %p - %p is already mapped\n", view_base, view_end );
+        VIRTUAL_DEBUG_DUMP_RANGES();
         return;
     }
 
@@ -840,15 +797,18 @@ static void free_ranges_insert_view( struct file_view *view )
         else
             range->base = view_end;
 
-        if (range->base < range->end) return;
-
+        if (range->base < range->end)
+        {
+            VIRTUAL_DEBUG_DUMP_RANGES();
+            return;
+        }
         /* and possibly remove it if it's now empty */
         memmove( range, next, (free_ranges_end - next) * sizeof(struct range_entry) );
         free_ranges_end -= 1;
         assert( free_ranges_end - free_ranges > 0 );
     }
+    VIRTUAL_DEBUG_DUMP_RANGES();
 }
-
 
 /***********************************************************************
  *           free_ranges_remove_view
@@ -862,24 +822,25 @@ static void free_ranges_remove_view( struct file_view *view )
     struct range_entry *range = free_ranges_lower_bound( view_base );
     struct range_entry *next = range + 1;
 
-    /* It's possible to use AT_ROUND_TO_PAGE on 32bit with NtMapViewOfSection to force 4kB alignment,
-     * and this breaks our assumptions. Look at the views around to check if the range is still in use. */
-#ifndef _WIN64
-    struct file_view *prev_view = RB_ENTRY_VALUE( rb_prev( &view->entry ), struct file_view, entry );
-    struct file_view *next_view = RB_ENTRY_VALUE( rb_next( &view->entry ), struct file_view, entry );
+    struct file_view *prev_view = WINE_RB_ENTRY_VALUE( wine_rb_prev( &view->entry ), struct file_view, entry );
+    struct file_view *next_view = WINE_RB_ENTRY_VALUE( wine_rb_next( &view->entry ), struct file_view, entry );
     void *prev_view_base = prev_view ? ROUND_ADDR( prev_view->base, granularity_mask ) : NULL;
     void *prev_view_end = prev_view ? ROUND_ADDR( (char *)prev_view->base + prev_view->size + granularity_mask, granularity_mask ) : NULL;
     void *next_view_base = next_view ? ROUND_ADDR( next_view->base, granularity_mask ) : NULL;
     void *next_view_end = next_view ? ROUND_ADDR( (char *)next_view->base + next_view->size + granularity_mask, granularity_mask ) : NULL;
 
-    if ((prev_view_base < view_end && prev_view_end > view_base) ||
-        (next_view_base < view_end && next_view_end > view_base))
+    if (prev_view_end && prev_view_end > view_base && prev_view_base < view_end)
+        view_base = prev_view_end;
+    if (next_view_base && next_view_base < view_end && next_view_end > view_base)
+        view_end = next_view_base;
+
+    TRACE( "%p-%p, aligned %p->%p.\n", view->base, (char *)view->base + view->size, view_base, view_end );
+
+    if (view_end <= view_base)
     {
-        WARN( "range %p - %p is still mapped\n", view_base, view_end );
+        VIRTUAL_DEBUG_DUMP_RANGES();
         return;
     }
-#endif
-
     /* free_ranges initial value is such that the view is either inside range or before another one. */
     assert( range != free_ranges_end );
     assert( range->end > view_base || next != free_ranges_end );
@@ -921,6 +882,7 @@ static void free_ranges_remove_view( struct file_view *view )
         range->base = view_base;
         range->end = view_end;
     }
+    VIRTUAL_DEBUG_DUMP_RANGES();
 }
 
 
@@ -1098,7 +1060,8 @@ static const char *get_prot_str( BYTE prot )
     buffer[0] = (prot & VPROT_COMMITTED) ? 'c' : '-';
     buffer[1] = (prot & VPROT_GUARD) ? 'g' : ((prot & VPROT_WRITEWATCH) ? 'H' : '-');
     buffer[2] = (prot & VPROT_READ) ? 'r' : '-';
-    buffer[3] = (prot & VPROT_WRITECOPY) ? 'W' : ((prot & VPROT_WRITE) ? 'w' : '-');
+    buffer[3] = (prot & VPROT_WRITECOPY) ? (prot & VPROT_COPIED ? 'w' : 'W')
+        : ((prot & VPROT_WRITE) ? 'w' : '-');
     buffer[4] = (prot & VPROT_EXEC) ? 'x' : '-';
     buffer[5] = 0;
     return buffer;
@@ -1117,20 +1080,9 @@ static int get_unix_prot( BYTE vprot )
     {
         if (vprot & VPROT_READ) prot |= PROT_READ;
         if (vprot & VPROT_WRITE) prot |= PROT_WRITE | PROT_READ;
-        if (vprot & VPROT_EXEC) prot |= PROT_EXEC | PROT_READ;
-#if defined(__i386__) || defined(__x86_64__)
-        if (vprot & VPROT_WRITECOPY)
-        {
-            if (experimental_WRITECOPY() && !(vprot & VPROT_WRITTEN))
-                prot = (prot & ~PROT_WRITE) | PROT_READ;
-            else
-                prot |= PROT_WRITE | PROT_READ;
-        }
-#else
-        /* FIXME: Architecture needs implementation of signal_init_early. */
         if (vprot & VPROT_WRITECOPY) prot |= PROT_WRITE | PROT_READ;
-#endif
-        if (vprot & VPROT_WRITEWATCH) prot &= ~PROT_WRITE;
+        if (vprot & VPROT_EXEC) prot |= PROT_EXEC | PROT_READ;
+        if (vprot & VPROT_WRITEWATCH && !use_kernel_writewatch) prot &= ~PROT_WRITE;
     }
     if (!prot) prot = PROT_NONE;
     return prot;
@@ -1151,6 +1103,8 @@ static void dump_view( struct file_view *view )
         TRACE(" (native)\n");
     else if (view->protect & VPROT_SYSTEM)
         TRACE( " (builtin image)\n" );
+    else if (view->protect & VPROT_PLACEHOLDER)
+        TRACE( " (placeholder)\n" );
     else if (view->protect & SEC_IMAGE)
         TRACE( " (image)\n" );
     else if (view->protect & SEC_FILE)
@@ -1234,7 +1188,7 @@ static inline UINT_PTR get_zero_bits_mask( ULONG_PTR zero_bits )
 {
     unsigned int shift;
 
-    if (zero_bits == 0) return ~(UINT_PTR)0;
+    if (zero_bits == 0) return 0;
 
     if (zero_bits < 32) shift = 32 + zero_bits;
     else
@@ -1260,16 +1214,6 @@ static inline BOOL is_write_watch_range( const void *addr, size_t size )
 {
     struct file_view *view = find_view( addr, size );
     return view && (view->protect & VPROT_WRITEWATCH);
-}
-
-
-/***********************************************************************
- *           is_system_range
- */
-static inline BOOL is_system_range( const void *addr, size_t size )
-{
-    struct file_view *view = find_view( addr, size );
-    return view && (view->protect & VPROT_SYSTEM);
 }
 
 
@@ -1301,6 +1245,7 @@ struct alloc_area
     ptrdiff_t step;
     int unix_prot;
     BOOL top_down;
+    UINT_PTR align_mask;
     char *native_mapped;
     size_t native_mapped_size;
 };
@@ -1314,6 +1259,7 @@ struct alloc_area
 static void* try_map_free_area( struct alloc_area *area, void *base, void *end, void *start )
 {
     ptrdiff_t step = area->step;
+    UINT_PTR abs_step = step > 0 ? step : -step;
     void *ptr;
 
     while (start && base <= start && (char*)start + area->size <= (char*)end)
@@ -1326,10 +1272,10 @@ static void* try_map_free_area( struct alloc_area *area, void *base, void *end, 
                  strerror(errno), start, (char *)start + area->size, area->unix_prot );
             return NULL;
         }
-        if (!area->native_mapped && step)
+        if (!area->native_mapped && step && abs_step < (granularity_mask + 1) * 2)
         {
             area->native_mapped = start;
-            area->native_mapped_size = step > 0 ? step : -step;
+            area->native_mapped_size = abs_step;
             area->native_mapped_size = min(area->native_mapped_size, (char *)end - (char *)start);
         }
         if ((step > 0 && (char *)end - (char *)start < step) ||
@@ -1491,6 +1437,18 @@ static struct file_view *alloc_view(void)
 }
 
 
+static void free_view( struct file_view *view )
+{
+    *(struct file_view **)view = next_free_view;
+    next_free_view = view;
+}
+
+static void unregister_view( struct file_view *view )
+{
+    free_ranges_remove_view( view );
+    wine_rb_remove( &views_tree, &view->entry );
+}
+
 /***********************************************************************
  *           delete_view
  *
@@ -1500,12 +1458,15 @@ static void delete_view( struct file_view *view ) /* [in] View */
 {
     if (!(view->protect & VPROT_SYSTEM)) unmap_area( view->base, view->size );
     set_page_vprot( view->base, view->size, 0 );
-    free_ranges_remove_view( view );
-    wine_rb_remove( &views_tree, &view->entry );
-    *(struct file_view **)view = next_free_view;
-    next_free_view = view;
+    unregister_view( view );
+    free_view( view );
 }
 
+static void register_view( struct file_view *view )
+{
+    wine_rb_put( &views_tree, view->base, &view->entry );
+    free_ranges_insert_view( view );
+}
 
 /***********************************************************************
  *           create_view
@@ -1547,8 +1508,7 @@ static NTSTATUS create_view( struct file_view **view_ret, void *base, size_t siz
     view->protect = vprot;
     set_page_vprot( base, size, vprot );
 
-    wine_rb_put( &views_tree, view->base, &view->entry );
-    free_ranges_insert_view( view );
+    register_view( view );
 
     *view_ret = view;
 
@@ -1557,6 +1517,10 @@ static NTSTATUS create_view( struct file_view **view_ret, void *base, size_t siz
         TRACE( "forcing exec permission on %p-%p\n", base, (char *)base + size - 1 );
         mprotect( base, size, unix_prot | PROT_EXEC );
     }
+
+    if (vprot & VPROT_WRITEWATCH && use_kernel_writewatch)
+        reset_write_watches( view->base, view->size );
+
     return STATUS_SUCCESS;
 }
 
@@ -1570,7 +1534,7 @@ static DWORD get_win32_prot( BYTE vprot, unsigned int map_prot )
 {
     DWORD ret;
 
-    if ((vprot & VPROT_WRITECOPY) && (vprot & VPROT_WRITTEN))
+    if ((vprot & (VPROT_COPIED | VPROT_WRITECOPY)) == (VPROT_COPIED | VPROT_WRITECOPY))
         vprot = (vprot & ~VPROT_WRITECOPY) | VPROT_WRITE;
     ret = VIRTUAL_Win32Flags[vprot & 0x0f];
     if (vprot & VPROT_GUARD) ret |= PAGE_GUARD;
@@ -1680,25 +1644,15 @@ static BOOL set_vprot( struct file_view *view, void *base, size_t size, BYTE vpr
 {
     int unix_prot = get_unix_prot(vprot);
 
-    if (view->protect & VPROT_WRITEWATCH)
+    if (!use_kernel_writewatch && view->protect & VPROT_WRITEWATCH)
     {
         /* each page may need different protections depending on write watch flag */
-        set_page_vprot_bits( base, size, vprot & ~VPROT_WRITEWATCH, ~vprot & ~(VPROT_WRITEWATCH|VPROT_WRITTEN) );
+        set_page_vprot_bits( base, size, vprot & ~VPROT_WRITEWATCH, ~vprot & ~VPROT_WRITEWATCH );
         mprotect_range( base, size, 0, 0 );
         return TRUE;
     }
-
-    /* check that we can map this memory with PROT_WRITE since we cannot fail later,
-     * but we fallback to copying pages for read-only mappings in virtual_handle_fault */
-    if ((vprot & VPROT_WRITECOPY) && (view->protect & VPROT_WRITECOPY))
-        unix_prot |= PROT_WRITE;
-
     if (mprotect_exec( base, size, unix_prot )) return FALSE;
-    /* each page may need different protections depending on writecopy */
-    set_page_vprot_bits( base, size, vprot, ~vprot & ~VPROT_WRITTEN );
-    if (vprot & VPROT_WRITECOPY)
-        mprotect_range( base, size, 0, 0 );
-
+    set_page_vprot( base, size, vprot );
     return TRUE;
 }
 
@@ -1736,7 +1690,7 @@ static void update_write_watches( void *base, size_t size, size_t accessed_size 
 {
     TRACE( "updating watch %p-%p-%p\n", base, (char *)base + accessed_size, (char *)base + size );
     /* clear write watch flag on accessed pages */
-    set_page_vprot_bits( base, accessed_size, VPROT_WRITE, VPROT_WRITEWATCH | VPROT_WRITECOPY );
+    set_page_vprot_bits( base, accessed_size, 0, VPROT_WRITEWATCH );
     /* restore page protections on the entire range */
     mprotect_range( base, size, 0, 0 );
 }
@@ -1749,21 +1703,37 @@ static void update_write_watches( void *base, size_t size, size_t accessed_size 
  */
 static void reset_write_watches( void *base, SIZE_T size )
 {
-    set_page_vprot_bits( base, size, VPROT_WRITEWATCH, 0 );
-    mprotect_range( base, size, 0, 0 );
+    if (use_kernel_writewatch)
+    {
+        char buffer[17];
+        ssize_t ret;
+
+        memset(buffer, 0, sizeof(buffer));
+        buffer[0] = '6';
+        *(void **)&buffer[1] = base;
+        *(void **)&buffer[1 + 8] = (char *)base + size;
+
+        if ((ret = write(clear_refs_fd, buffer, sizeof(buffer))) != sizeof(buffer))
+            ERR("Could not clear soft dirty bits, ret %zd, error %s.\n", ret, strerror(errno));
+    }
+    else
+    {
+        set_page_vprot_bits( base, size, VPROT_WRITEWATCH, 0 );
+        mprotect_range( base, size, 0, 0 );
+    }
 }
 
 
 /***********************************************************************
  *           unmap_extra_space
  *
- * Release the extra memory while keeping the range starting on the granularity boundary.
+ * Release the extra memory while keeping the range starting on the alignment boundary.
  */
-static inline void *unmap_extra_space( void *ptr, size_t total_size, size_t wanted_size )
+static inline void *unmap_extra_space( void *ptr, size_t total_size, size_t wanted_size, size_t align_mask )
 {
-    if ((ULONG_PTR)ptr & granularity_mask)
+    if ((ULONG_PTR)ptr & align_mask)
     {
-        size_t extra = granularity_mask + 1 - ((ULONG_PTR)ptr & granularity_mask);
+        size_t extra = align_mask + 1 - ((ULONG_PTR)ptr & align_mask);
         munmap( ptr, extra );
         ptr = (char *)ptr + extra;
         total_size -= extra;
@@ -1773,13 +1743,15 @@ static inline void *unmap_extra_space( void *ptr, size_t total_size, size_t want
     return ptr;
 }
 
-
 static int alloc_area_in_reserved_or_between_callback( void *start, SIZE_T size, void *arg )
 {
     char *intersect_start, *intersect_end;
     char *end = (char *)start + size;
     struct alloc_area *area = arg;
+    UINT_PTR align_mask;
     char *alloc_start;
+
+    align_mask = area->align_mask;
 
     if (area->top_down)
     {
@@ -1789,16 +1761,15 @@ static int alloc_area_in_reserved_or_between_callback( void *start, SIZE_T size,
         if (area->map_area_end <= (char *)start)
             return 0;
 
+        if ((ULONG_PTR)area->map_area_end < area->size)
+            return 1;
+
         intersect_start = max((char *)start, area->map_area_start);
         intersect_end = min((char *)end, area->map_area_end);
-
-        assert(ROUND_ADDR(intersect_start, granularity_mask) == intersect_start);
-        assert(ROUND_ADDR(intersect_end + granularity_mask, granularity_mask) == intersect_end);
-        assert(ROUND_ADDR(area->map_area_end, granularity_mask) == area->map_area_end);
-
+        assert(intersect_start <= intersect_end);
         if (area->map_area_end - intersect_end >= area->size)
         {
-            alloc_start = ROUND_ADDR( (char *)area->map_area_end - size, granularity_mask );
+            alloc_start = ROUND_ADDR( (char *)area->map_area_end - area->size, align_mask );
             if ((area->result = try_map_free_area( area, intersect_end,
                     alloc_start + size, alloc_start )))
                 return 1;
@@ -1806,12 +1777,15 @@ static int alloc_area_in_reserved_or_between_callback( void *start, SIZE_T size,
 
         if (intersect_end - intersect_start >= area->size)
         {
-            alloc_start = ROUND_ADDR( intersect_end - area->size, granularity_mask );
-            if ((area->result = anon_mmap_fixed( alloc_start, area->size,
-                    area->unix_prot, 0 )) != alloc_start)
-                ERR("Could not map in reserved area, alloc_start %p, size %p.\n",
-                        alloc_start, (void *)area->size);
-            return 1;
+            alloc_start = ROUND_ADDR( intersect_end - area->size, align_mask );
+            if (alloc_start >= intersect_start)
+            {
+                if ((area->result = anon_mmap_fixed( alloc_start, area->size,
+                        area->unix_prot, 0 )) != alloc_start)
+                    ERR("Could not map in reserved area, alloc_start %p, size %p.\n",
+                            alloc_start, (void *)area->size);
+                return 1;
+            }
         }
 
         area->map_area_end = intersect_start;
@@ -1826,26 +1800,30 @@ static int alloc_area_in_reserved_or_between_callback( void *start, SIZE_T size,
         if (area->map_area_start >= (char *)end)
             return 0;
 
+        if (area->map_area_start + align_mask < area->map_area_start)
+            return 1;
+
         intersect_start = max((char *)start, area->map_area_start);
         intersect_end = min((char *)end, area->map_area_end);
-
-        assert(ROUND_ADDR(intersect_start, granularity_mask) == intersect_start);
-        assert(ROUND_ADDR(intersect_end + granularity_mask, granularity_mask) == intersect_end);
-        assert(ROUND_ADDR(area->map_area_start, granularity_mask) == area->map_area_start);
+        assert(intersect_start <= intersect_end);
 
         if (intersect_start - area->map_area_start >= area->size)
         {
+            alloc_start = ROUND_ADDR( area->map_area_start + align_mask, align_mask );
             if ((area->result = try_map_free_area( area, area->map_area_start,
-                    intersect_start, area->map_area_start )))
+                    intersect_start, alloc_start )))
                 return 1;
         }
 
         if (intersect_end - intersect_start >= area->size)
         {
-            if ((area->result = anon_mmap_fixed( intersect_start, area->size, area->unix_prot, 0 ))
-                    != intersect_start)
-                ERR("Could not map in reserved area.\n");
-            return 1;
+            alloc_start = ROUND_ADDR( intersect_start + align_mask, align_mask );
+            if (alloc_start + area->size <= intersect_end)
+            {
+                if ((area->result = anon_mmap_fixed( alloc_start, area->size, area->unix_prot, 0 )) != alloc_start)
+                    ERR("Could not map in reserved area, alloc_start %p, size %p.\n", alloc_start, (void *)area->size);
+                return 1;
+            }
         }
         area->map_area_start = intersect_end;
         if (area->map_area_end - area->map_area_start < area->size)
@@ -1857,6 +1835,7 @@ static int alloc_area_in_reserved_or_between_callback( void *start, SIZE_T size,
 
 static void *alloc_free_area_in_range( struct alloc_area *area, char *base, char *end )
 {
+    UINT_PTR align_mask = area->align_mask;
     char *start;
 
     TRACE("range %p-%p.\n", base, end);
@@ -1869,13 +1848,14 @@ static void *alloc_free_area_in_range( struct alloc_area *area, char *base, char
 
     if (area->top_down)
     {
-        start = ROUND_ADDR( end - area->size, granularity_mask );
-        if (start >= end || start < base)
-            return NULL;
+        if ((ULONG_PTR)end < area->size) return NULL;
+        start = ROUND_ADDR( end - area->size, align_mask );
+        if (start >= end || start < base) return NULL;
     }
     else
     {
-        start = ROUND_ADDR( base + granularity_mask, granularity_mask );
+        if (base + align_mask < base) return NULL;
+        start = ROUND_ADDR( base + align_mask, align_mask );
         if (!start || start >= end || (char *)end - (char *)start < area->size)
             return NULL;
     }
@@ -1887,7 +1867,8 @@ static void *alloc_free_area_in_range( struct alloc_area *area, char *base, char
 
     if (area->top_down)
     {
-        start = ROUND_ADDR( area->map_area_end - area->size, granularity_mask );
+        if ((ULONG_PTR)area->map_area_end < area->size) return NULL;
+        start = ROUND_ADDR( area->map_area_end - area->size, align_mask );
         if (start >= area->map_area_end || start < area->map_area_start)
             return NULL;
 
@@ -1895,7 +1876,8 @@ static void *alloc_free_area_in_range( struct alloc_area *area, char *base, char
     }
     else
     {
-        start = ROUND_ADDR( area->map_area_start + granularity_mask, granularity_mask );
+        if (area->map_area_start + align_mask < area->map_area_start) return NULL;
+        start = ROUND_ADDR( area->map_area_start + align_mask, align_mask );
         if (!start || start >= area->map_area_end
                 || area->map_area_end - start < area->size)
             return NULL;
@@ -1904,7 +1886,7 @@ static void *alloc_free_area_in_range( struct alloc_area *area, char *base, char
     }
 }
 
-static void *alloc_free_area( void *limit, size_t size, BOOL top_down, int unix_prot )
+static void *alloc_free_area( void *limit, size_t size, BOOL top_down, int unix_prot, UINT_PTR align_mask )
 {
     struct range_entry *range, *ranges_start, *ranges_end;
     char *reserve_start, *reserve_end;
@@ -1929,13 +1911,14 @@ static void *alloc_free_area( void *limit, size_t size, BOOL top_down, int unix_
     }
 
     memset( &area, 0, sizeof(area) );
-    area.step = top_down ? -(granularity_mask + 1) : (granularity_mask + 1);
+    area.step = top_down ? -(align_mask + 1) : (align_mask + 1);
     area.size = size;
     area.top_down = top_down;
     area.unix_prot = unix_prot;
+    area.align_mask = align_mask;
 
-    reserve_start = ROUND_ADDR( (char *)preload_reserve_start, granularity_mask );
-    reserve_end = ROUND_ADDR( (char *)preload_reserve_end + granularity_mask, granularity_mask );
+    reserve_start = preload_reserve_start;
+    reserve_end = preload_reserve_end;
 
     for (range = ranges_start; range != ranges_end; range += ranges_inc)
     {
@@ -1944,10 +1927,13 @@ static void *alloc_free_area( void *limit, size_t size, BOOL top_down, int unix_
 
         TRACE("range %p-%p.\n", base, end);
 
+        if (base >= (char *)limit)
+            continue;
+
         if (base < (char *)address_space_start)
             base = (char *)address_space_start;
-        if (end > (char *)ROUND_ADDR( limit, granularity_mask ))
-            end = ROUND_ADDR( limit, granularity_mask );
+        if (end > (char *)limit)
+            end = (char *)limit;
 
         if (reserve_end >= base)
         {
@@ -1955,6 +1941,7 @@ static void *alloc_free_area( void *limit, size_t size, BOOL top_down, int unix_
             {
                 if (reserve_start <= base)
                     continue;  /* no space in that area */
+
                 if (reserve_start < end)
                     end = reserve_start;
             }
@@ -1997,11 +1984,11 @@ static void *alloc_free_area( void *limit, size_t size, BOOL top_down, int unix_
             if (prev && (char *)prev->base >= native_mapped_end)
             {
                 next = prev;
-                prev = WINE_RB_ENTRY_VALUE( rb_prev( &next->entry ), struct file_view, entry );
+                prev = WINE_RB_ENTRY_VALUE( wine_rb_prev( &next->entry ), struct file_view, entry );
             }
             else if (prev)
             {
-                next = WINE_RB_ENTRY_VALUE( rb_next( &prev->entry ), struct file_view, entry );
+                next = WINE_RB_ENTRY_VALUE( wine_rb_next( &prev->entry ), struct file_view, entry );
             }
             else
             {
@@ -2098,10 +2085,42 @@ static void clear_native_views(void)
  * virtual_mutex must be held by caller.
  */
 static NTSTATUS map_view( struct file_view **view_ret, void *base, size_t size,
-                          int top_down, unsigned int vprot, ULONG_PTR zero_bits )
+                          unsigned int alloc_type, unsigned int vprot, ULONG_PTR limit, size_t align_mask )
 {
+    int top_down = alloc_type & MEM_TOP_DOWN;
     void *ptr;
     NTSTATUS status;
+
+    TRACE("align_mask %#zx.\n", align_mask);
+
+    limit = limit ? min( limit + 1, (UINT_PTR)user_space_limit) : (UINT_PTR)user_space_limit;
+
+    if (alloc_type & MEM_REPLACE_PLACEHOLDER)
+    {
+        if ((*view_ret = find_view( base, 0 )))
+        {
+            TRACE( "found view %p, size %p, protect %#x.\n",
+                  (*view_ret)->base, (void *)(*view_ret)->size, (*view_ret)->protect );
+            if ((*view_ret)->base != base || (*view_ret)->size != size)
+                return STATUS_CONFLICTING_ADDRESSES;
+            if (!((*view_ret)->protect & VPROT_PLACEHOLDER))
+            {
+                TRACE("Wrong protect %#x for MEM_REPLACE_PLACEHOLDER.\n", (*view_ret)->protect);
+                return STATUS_INVALID_PARAMETER;
+            }
+            (*view_ret)->protect = vprot | VPROT_FROMPLACEHOLDER;
+
+            if (vprot & VPROT_WRITEWATCH)
+                set_page_vprot( base, size, vprot );
+            if (!set_vprot( *view_ret, base, size, vprot | VPROT_COMMITTED ))
+                ERR("set_protection failed.\n");
+            return STATUS_SUCCESS;
+        }
+        TRACE("MEM_REPLACE_PLACEHOLDER view not found.\n");
+        return STATUS_INVALID_PARAMETER;
+    }
+
+    if (!align_mask) align_mask = granularity_mask;
 
     if (base)
     {
@@ -2111,14 +2130,12 @@ static NTSTATUS map_view( struct file_view **view_ret, void *base, size_t size,
         if (status != STATUS_SUCCESS) return status;
         ptr = base;
     }
-    else if (!(ptr = alloc_free_area( (void*)(get_zero_bits_mask( zero_bits )
-            & (UINT_PTR)user_space_limit), size, top_down, get_unix_prot( vprot ) )))
+    else if (!(ptr = alloc_free_area( (void *)limit, size, top_down, get_unix_prot( vprot ), align_mask )))
     {
         WARN("Allocation failed, clearing native views.\n");
 
         clear_native_views();
-        if (!(ptr = alloc_free_area( (void*)(get_zero_bits_mask( zero_bits )
-                & (UINT_PTR)user_space_limit), size, top_down, get_unix_prot( vprot ) )))
+        if (!(ptr = alloc_free_area( (void *)limit, size, top_down, get_unix_prot( vprot ), align_mask )))
             return STATUS_NO_MEMORY;
     }
     status = create_view( view_ret, ptr, size, vprot );
@@ -2278,7 +2295,7 @@ static NTSTATUS allocate_dos_memory( struct file_view **view, unsigned int vprot
     if (mmap_is_in_reserved_area( low_64k, dosmem_size - 0x10000 ) != 1)
     {
         addr = anon_mmap_tryfixed( low_64k, dosmem_size - 0x10000, unix_prot, 0 );
-        if (addr == MAP_FAILED) return map_view( view, NULL, dosmem_size, FALSE, vprot, 0 );
+        if (addr == MAP_FAILED) return map_view( view, NULL, dosmem_size, 0, vprot, 0, 0 );
     }
 
     /* now try to allocate the low 64K too */
@@ -2505,8 +2522,6 @@ static NTSTATUS map_image_into_view( struct file_view *view, const WCHAR *filena
                            ptr + sec->VirtualAddress + file_size,
                            ptr + sec->VirtualAddress + end );
             memset( ptr + sec->VirtualAddress + file_size, 0, end - file_size );
-            /* clear WRITTEN mark so QueryVirtualMemory returns correct values */
-            set_page_vprot_bits( ptr + sec->VirtualAddress + file_size, 1, 0, VPROT_WRITTEN );
         }
     }
 
@@ -2624,9 +2639,9 @@ static NTSTATUS virtual_map_image( HANDLE mapping, ACCESS_MASK access, void **ad
     if ((ULONG_PTR)base != image_info->base) base = NULL;
 
     if ((char *)base >= (char *)address_space_start)  /* make sure the DOS area remains free */
-        status = map_view( &view, base, size, alloc_type & MEM_TOP_DOWN, vprot, zero_bits );
+        status = map_view( &view, base, size, alloc_type & MEM_TOP_DOWN, vprot, get_zero_bits_mask( zero_bits ), 0 );
 
-    if (status) status = map_view( &view, NULL, size, alloc_type & MEM_TOP_DOWN, vprot, zero_bits );
+    if (status) status = map_view( &view, NULL, size, alloc_type & MEM_TOP_DOWN, vprot, get_zero_bits_mask( zero_bits ), 0 );
     if (status) goto done;
 
     status = map_image_into_view( view, filename, unix_fd, base, image_info->header_size,
@@ -2749,7 +2764,8 @@ static NTSTATUS virtual_map_section( HANDLE handle, PVOID *addr_ptr, ULONG_PTR z
 
     server_enter_uninterrupted_section( &virtual_mutex, &sigset );
 
-    res = map_view( &view, base, size, alloc_type & MEM_TOP_DOWN, vprot, zero_bits );
+    res = map_view( &view, base, size, alloc_type & (MEM_TOP_DOWN | MEM_REPLACE_PLACEHOLDER),
+                    vprot, get_zero_bits_mask( zero_bits ), 0 );
     if (res) goto done;
 
     TRACE( "handle=%p size=%lx offset=%x%08x\n", handle, size, offset.u.HighPart, offset.u.LowPart );
@@ -2780,6 +2796,7 @@ static NTSTATUS virtual_map_section( HANDLE handle, PVOID *addr_ptr, ULONG_PTR z
 done:
     server_leave_uninterrupted_section( &virtual_mutex, &sigset );
     if (needs_close) close( unix_handle );
+    TRACE("status %#x.\n", res);
     return res;
 }
 
@@ -2825,11 +2842,30 @@ void virtual_init(void)
     size_t size;
     int i;
     pthread_mutexattr_t attr;
+    const char *env_var;
 
     pthread_mutexattr_init( &attr );
     pthread_mutexattr_settype( &attr, PTHREAD_MUTEX_RECURSIVE );
     pthread_mutex_init( &virtual_mutex, &attr );
     pthread_mutexattr_destroy( &attr );
+
+    if (!((env_var = getenv("WINE_DISABLE_KERNEL_WRITEWATCH")) && atoi(env_var))
+            && (pagemap_reset_fd = open("/proc/self/pagemap_reset", O_RDONLY)) != -1)
+    {
+        use_kernel_writewatch = TRUE;
+        if ((pagemap_fd = open("/proc/self/pagemap", O_RDONLY)) == -1)
+        {
+            ERR("Could not open pagemap file, error %s.\n", strerror(errno));
+            exit(-1);
+        }
+        if ((clear_refs_fd = open("/proc/self/clear_refs", O_WRONLY)) == -1)
+        {
+            ERR("Could not open clear_refs file, error %s.\n", strerror(errno));
+            exit(-1);
+        }
+        if (ERR_ON(virtual))
+            MESSAGE("wine: using kernel write watches (experimental).\n");
+    }
 
     if (preload_info && *preload_info)
         for (i = 0; (*preload_info)[i].size; i++)
@@ -3119,14 +3155,6 @@ TEB *virtual_alloc_first_teb(void)
         exit(1);
     }
 
-    status = NtAllocateVirtualMemory( NtCurrentProcess(), (void **)&hypervisor_shared_data, 0, &data_size,
-                                      MEM_RESERVE | MEM_COMMIT, PAGE_READONLY );
-    if (status)
-    {
-        ERR( "wine: failed to map the shared user data: %08x\n", status );
-        exit(1);
-    }
-
     NtAllocateVirtualMemory( NtCurrentProcess(), &teb_block, is_win64 ? 0x7fffffff : 0, &total,
                              MEM_RESERVE | MEM_TOP_DOWN, PAGE_READWRITE );
     teb_block_pos = 30;
@@ -3284,6 +3312,7 @@ NTSTATUS virtual_alloc_thread_stack( INITIAL_TEB *stack, ULONG_PTR zero_bits, SI
                                      SIZE_T commit_size, SIZE_T extra_size )
 {
     struct file_view *view;
+    char *kernel_stack;
     NTSTATUS status;
     sigset_t sigset;
     SIZE_T size;
@@ -3297,8 +3326,9 @@ NTSTATUS virtual_alloc_thread_stack( INITIAL_TEB *stack, ULONG_PTR zero_bits, SI
 
     server_enter_uninterrupted_section( &virtual_mutex, &sigset );
 
-    if ((status = map_view( &view, NULL, size + extra_size, FALSE,
-                            VPROT_READ | VPROT_WRITE | VPROT_COMMITTED, zero_bits )) != STATUS_SUCCESS)
+    if ((status = map_view( &view, NULL, size + extra_size, 0,
+                            VPROT_READ | VPROT_WRITE | VPROT_COMMITTED, get_zero_bits_mask( zero_bits ), 0 ))
+                            != STATUS_SUCCESS)
         goto done;
 
 #ifdef VALGRIND_STACK_REGISTER
@@ -3327,6 +3357,10 @@ NTSTATUS virtual_alloc_thread_stack( INITIAL_TEB *stack, ULONG_PTR zero_bits, SI
             delete_view( view );
             goto done;
         }
+        /* setup kernel stack no access guard page */
+        kernel_stack = (char *)view->base + view->size;
+        set_page_vprot( kernel_stack, kernel_stack_guard_size, VPROT_COMMITTED | VPROT_READ );
+        mprotect_range( kernel_stack, kernel_stack_guard_size, 0, 0 );
     }
 
     /* note: limit is lower than base since the stack grows down */
@@ -3405,35 +3439,6 @@ static BOOL is_inside_thread_stack( void *ptr, struct thread_stack_info *stack )
 
 
 /***********************************************************************
- *           virtual_map_hypervisor_shared_data
- */
-void virtual_map_hypervisor_shared_data(void)
-{
-    static const WCHAR nameW[] = {'\\','K','e','r','n','e','l','O','b','j','e','c','t','s',
-                                  '\\','_','_','w','i','n','e','_','h','y','p','e','r','v','i','s','o','r','_','s','h','a','r','e','d','_','d','a','t','a',0};
-    UNICODE_STRING name_str = { sizeof(nameW) - sizeof(WCHAR), sizeof(nameW), (WCHAR *)nameW };
-    OBJECT_ATTRIBUTES attr = { sizeof(attr), 0, &name_str };
-    NTSTATUS status;
-    HANDLE section;
-    int res, fd, needs_close;
-
-    if ((status = NtOpenSection( &section, SECTION_ALL_ACCESS, &attr )))
-    {
-        ERR( "failed to open the hypervisor shared data section: %08x\n", status );
-        exit(1);
-    }
-    if ((res = server_get_unix_fd( section, 0, &fd, &needs_close, NULL, NULL )) ||
-        (hypervisor_shared_data != mmap( hypervisor_shared_data, page_size, PROT_READ, MAP_SHARED|MAP_FIXED, fd, 0 )))
-    {
-        ERR( "failed to remap the process hypervisor shared data: %d\n", res );
-        exit(1);
-    }
-    if (needs_close) close( fd );
-    NtClose( section );
-}
-
-
-/***********************************************************************
  *           grow_thread_stack
  */
 static NTSTATUS grow_thread_stack( char *page, struct thread_stack_info *stack_info )
@@ -3463,17 +3468,14 @@ static NTSTATUS grow_thread_stack( char *page, struct thread_stack_info *stack_i
     return ret;
 }
 
-BOOL CDECL __wine_needs_override_large_address_aware(void)
+
+/***********************************************************************
+ *           is_system_range
+ */
+static inline BOOL is_system_range( const void *addr, size_t size )
 {
-    static int needs_override = -1;
-
-    if (needs_override == -1)
-    {
-        const char *str = getenv( "WINE_LARGE_ADDRESS_AWARE" );
-
-        needs_override = !str || atoi(str) == 1;
-    }
-    return needs_override;
+    struct file_view *view = find_view( addr, size );
+    return view && (view->protect & VPROT_SYSTEM);
 }
 
 
@@ -3488,7 +3490,7 @@ NTSTATUS virtual_handle_fault( void *addr, DWORD err, void *stack )
 
     mutex_lock( &virtual_mutex );  /* no need for signal masking inside signal handler */
     vprot = get_page_vprot( page );
-    if (stack && !is_inside_signal_stack( stack ) && (vprot & VPROT_GUARD))
+    if (!is_inside_signal_stack( stack ) && (vprot & VPROT_GUARD))
     {
         struct thread_stack_info stack_info;
         if (!is_inside_thread_stack( page, &stack_info ))
@@ -3499,41 +3501,26 @@ NTSTATUS virtual_handle_fault( void *addr, DWORD err, void *stack )
         }
         else ret = grow_thread_stack( page, &stack_info );
     }
-    else if (err & EXCEPTION_WRITE_FAULT)
+    else if (!use_kernel_writewatch && err & EXCEPTION_WRITE_FAULT)
     {
         if (vprot & VPROT_WRITEWATCH)
         {
             set_page_vprot_bits( page, page_size, 0, VPROT_WRITEWATCH );
             mprotect_range( page, page_size, 0, 0 );
         }
-        if ((vprot & VPROT_WRITECOPY) && (vprot & VPROT_COMMITTED))
-        {
-            struct file_view *view = find_view( page, 0 );
-
-            set_page_vprot_bits( page, page_size, VPROT_WRITE | VPROT_WRITTEN, VPROT_WRITECOPY );
-            if (view->protect & VPROT_WRITECOPY)
-            {
-                mprotect_range( page, page_size, 0, 0 );
-            }
-            else
-            {
-                static BYTE *temp_page = NULL;
-                if (!temp_page)
-                    temp_page = anon_mmap_alloc( page_size, PROT_READ | PROT_WRITE );
-
-                /* original mapping is shared, replace with a private page */
-                memcpy( temp_page, page, page_size );
-                anon_mmap_fixed( page, page_size, get_unix_prot( vprot | VPROT_WRITE | VPROT_WRITTEN ), 0 );
-                memcpy( page, temp_page, page_size );
-            }
-        }
         /* ignore fault if page is writable now */
-        if (get_unix_prot( get_page_vprot( page ) ) & PROT_WRITE) ret = STATUS_SUCCESS;
+        if (get_unix_prot( get_page_vprot( page )) & PROT_WRITE)
+        {
+            if ((vprot & VPROT_WRITEWATCH) || is_write_watch_range( page, page_size ))
+                ret = STATUS_SUCCESS;
+        }
     }
     else if (!err && (get_unix_prot( vprot ) & PROT_READ) && is_system_range( page, page_size ))
     {
         int unix_prot = get_unix_prot( vprot );
         unsigned char vec;
+
+        TRACE("yolo\n");
 
         mprotect_range( page, page_size, 0, 0 );
         if (!mincore( page, page_size, &vec ) && (vec & 1))
@@ -3615,17 +3602,12 @@ static NTSTATUS check_write_access( void *base, size_t size, BOOL *has_write_wat
     for (i = 0; i < size; i += page_size)
     {
         BYTE vprot = get_page_vprot( addr + i );
-        if (vprot & VPROT_WRITEWATCH) *has_write_watch = TRUE;
-        if (vprot & VPROT_WRITECOPY)
-        {
-            vprot = (vprot & ~VPROT_WRITECOPY) | VPROT_WRITE;
-            *has_write_watch = TRUE;
-        }
+        if (!use_kernel_writewatch && vprot & VPROT_WRITEWATCH) *has_write_watch = TRUE;
         if (!(get_unix_prot( vprot & ~VPROT_WRITEWATCH ) & PROT_WRITE))
             return STATUS_INVALID_USER_BUFFER;
     }
-    if (*has_write_watch)
-        mprotect_range( addr, size, VPROT_WRITE, VPROT_WRITEWATCH | VPROT_WRITECOPY );  /* temporarily enable write access */
+    if (!use_kernel_writewatch && *has_write_watch)
+        mprotect_range( addr, size, 0, VPROT_WRITEWATCH );  /* temporarily enable write access */
     return STATUS_SUCCESS;
 }
 
@@ -3785,32 +3767,6 @@ BOOL virtual_check_buffer_for_read( const void *ptr, SIZE_T size )
     }
     __ENDTRY
     return TRUE;
-}
-
-
-/***********************************************************************
- *           virtual_check_buffer_write_access
- * Check if a memory buffer is writable, temporarily disabling write watches if necessary.
- */
-BOOL virtual_check_buffer_write_access( void *ptr, SIZE_T size )
-{
-    size_t i;
-    char *addr;
-    BOOL ret = TRUE;
-
-    if (!size) return TRUE;
-    if (!ptr) return FALSE;
-
-    addr = ROUND_ADDR( ptr, page_mask );
-    size = ROUND_SIZE( ptr, size );
-    for (i = 0; i < size; i += page_size)
-    {
-        BYTE vprot = get_page_vprot( addr + i );
-        if (vprot & VPROT_WRITECOPY) vprot |= VPROT_WRITE;
-        if (!(get_unix_prot( vprot & ~VPROT_WRITEWATCH ) & PROT_WRITE))
-            ret = FALSE;
-    }
-    return ret;
 }
 
 
@@ -4009,11 +3965,12 @@ void virtual_set_large_address_space(void)
 
 
 /***********************************************************************
- *             NtAllocateVirtualMemory   (NTDLL.@)
- *             ZwAllocateVirtualMemory   (NTDLL.@)
+ *             allocate_virtual_memory
+ *
+ * NtAllocateVirtualMemory[Ex] implementation.
  */
-NTSTATUS WINAPI NtAllocateVirtualMemory( HANDLE process, PVOID *ret, ULONG_PTR zero_bits,
-                                         SIZE_T *size_ptr, ULONG type, ULONG protect )
+static NTSTATUS allocate_virtual_memory( void **ret, SIZE_T *size_ptr, ULONG type, ULONG protect,
+                                         ULONG_PTR limit, ULONG_PTR align )
 {
     void *base;
     unsigned int vprot;
@@ -4023,37 +3980,20 @@ NTSTATUS WINAPI NtAllocateVirtualMemory( HANDLE process, PVOID *ret, ULONG_PTR z
     SIZE_T size = *size_ptr;
     NTSTATUS status = STATUS_SUCCESS;
 
-    TRACE("%p %p %08lx %x %08x\n", process, *ret, size, type, protect );
-
-    if (!size) return STATUS_INVALID_PARAMETER;
-    if (zero_bits > 21 && zero_bits < 32) return STATUS_INVALID_PARAMETER_3;
-    if (zero_bits > 32 && zero_bits < granularity_mask) return STATUS_INVALID_PARAMETER_3;
-#ifndef _WIN64
-    if (!is_wow64 && zero_bits >= 32) return STATUS_INVALID_PARAMETER_3;
-#endif
-
-    if (process != NtCurrentProcess())
+    if (type & MEM_WRITE_WATCH)
     {
-        apc_call_t call;
-        apc_result_t result;
+        static int disable = -1;
 
-        memset( &call, 0, sizeof(call) );
-
-        call.virtual_alloc.type         = APC_VIRTUAL_ALLOC;
-        call.virtual_alloc.addr         = wine_server_client_ptr( *ret );
-        call.virtual_alloc.size         = *size_ptr;
-        call.virtual_alloc.zero_bits    = zero_bits;
-        call.virtual_alloc.op_type      = type;
-        call.virtual_alloc.prot         = protect;
-        status = server_queue_process_apc( process, &call, &result );
-        if (status != STATUS_SUCCESS) return status;
-
-        if (result.virtual_alloc.status == STATUS_SUCCESS)
+        if (disable == -1)
         {
-            *ret      = wine_server_get_ptr( result.virtual_alloc.addr );
-            *size_ptr = result.virtual_alloc.size;
+            const char *env_var;
+
+            if ((disable = (env_var = getenv("WINE_DISABLE_WRITE_WATCH")) && atoi(env_var)))
+                FIXME("Disabling write watch support.\n");
         }
-        return result.virtual_alloc.status;
+
+        if (disable)
+            return STATUS_NOT_SUPPORTED;
     }
 
     /* Round parameters to a page boundary */
@@ -4062,7 +4002,7 @@ NTSTATUS WINAPI NtAllocateVirtualMemory( HANDLE process, PVOID *ret, ULONG_PTR z
 
     if (*ret)
     {
-        if (type & MEM_RESERVE) /* Round down to 64k boundary */
+        if (type & MEM_RESERVE && !(type & MEM_REPLACE_PLACEHOLDER)) /* Round down to 64k boundary */
             base = ROUND_ADDR( *ret, granularity_mask );
         else
             base = ROUND_ADDR( *ret, page_mask );
@@ -4086,13 +4026,18 @@ NTSTATUS WINAPI NtAllocateVirtualMemory( HANDLE process, PVOID *ret, ULONG_PTR z
 
     /* Compute the alloc type flags */
 
-    if (!(type & (MEM_COMMIT | MEM_RESERVE | MEM_RESET)) ||
-        (type & ~(MEM_COMMIT | MEM_RESERVE | MEM_TOP_DOWN | MEM_WRITE_WATCH | MEM_RESET)))
+    if (!(type & (MEM_COMMIT | MEM_RESERVE | MEM_RESET))
+        || (type & MEM_REPLACE_PLACEHOLDER && !(type & MEM_RESERVE)))
     {
         WARN("called with wrong alloc type flags (%08x) !\n", type);
         return STATUS_INVALID_PARAMETER;
     }
 
+    if (type & MEM_RESERVE_PLACEHOLDER && (protect != PAGE_NOACCESS))
+    {
+        WARN("Wrong protect %#x for placeholder.\n", protect);
+        return STATUS_INVALID_PARAMETER;
+    }
     /* Reserve the memory */
 
     server_enter_uninterrupted_section( &virtual_mutex, &sigset );
@@ -4103,11 +4048,13 @@ NTSTATUS WINAPI NtAllocateVirtualMemory( HANDLE process, PVOID *ret, ULONG_PTR z
         {
             if (type & MEM_COMMIT) vprot |= VPROT_COMMITTED;
             if (type & MEM_WRITE_WATCH) vprot |= VPROT_WRITEWATCH;
+            if (type & MEM_RESERVE_PLACEHOLDER) vprot |= VPROT_PLACEHOLDER;
             if (protect & PAGE_NOCACHE) vprot |= SEC_NOCACHE;
 
             if (vprot & VPROT_WRITECOPY) status = STATUS_INVALID_PAGE_PROTECTION;
             else if (is_dos_memory) status = allocate_dos_memory( &view, vprot );
-            else status = map_view( &view, base, size, type & MEM_TOP_DOWN, vprot, zero_bits );
+            else status = map_view( &view, base, size, type & (MEM_TOP_DOWN | MEM_REPLACE_PLACEHOLDER), vprot, limit,
+                                    align ? align - 1 : granularity_mask );
 
             if (status == STATUS_SUCCESS) base = view->base;
         }
@@ -4121,6 +4068,7 @@ NTSTATUS WINAPI NtAllocateVirtualMemory( HANDLE process, PVOID *ret, ULONG_PTR z
     {
         if (!(view = find_view( base, size ))) status = STATUS_NOT_MAPPED_VIEW;
         else if (view->protect & SEC_FILE) status = STATUS_ALREADY_COMMITTED;
+        else if (view->protect & VPROT_PLACEHOLDER) status = STATUS_CONFLICTING_ADDRESSES;
         else if (!(status = set_protection( view, base, size, protect )) && (view->protect & SEC_RESERVE))
         {
             SERVER_START_REQ( add_mapping_committed_range )
@@ -4146,6 +4094,66 @@ NTSTATUS WINAPI NtAllocateVirtualMemory( HANDLE process, PVOID *ret, ULONG_PTR z
     return status;
 }
 
+
+/***********************************************************************
+ *             NtAllocateVirtualMemory   (NTDLL.@)
+ *             ZwAllocateVirtualMemory   (NTDLL.@)
+ */
+NTSTATUS WINAPI NtAllocateVirtualMemory( HANDLE process, PVOID *ret, ULONG_PTR zero_bits,
+                                         SIZE_T *size_ptr, ULONG type, ULONG protect )
+{
+    static const ULONG type_mask = MEM_COMMIT | MEM_RESERVE | MEM_TOP_DOWN | MEM_WRITE_WATCH | MEM_RESET;
+    ULONG_PTR limit;
+
+    TRACE("%p %p %08lx %x %08x\n", process, *ret, *size_ptr, type, protect );
+
+    if (!*size_ptr) return STATUS_INVALID_PARAMETER;
+    if (zero_bits > 21 && zero_bits < 32) return STATUS_INVALID_PARAMETER_3;
+    if (zero_bits > 32 && zero_bits < granularity_mask) return STATUS_INVALID_PARAMETER_3;
+#ifndef _WIN64
+    if (!is_wow64 && zero_bits >= 32) return STATUS_INVALID_PARAMETER_3;
+#endif
+
+    if (type & ~type_mask)
+    {
+        WARN("Called with wrong alloc type flags %08x.\n", type);
+        return STATUS_INVALID_PARAMETER;
+    }
+
+    if (process != NtCurrentProcess())
+    {
+        apc_call_t call;
+        apc_result_t result;
+        NTSTATUS status;
+
+        memset( &call, 0, sizeof(call) );
+
+        call.virtual_alloc.type         = APC_VIRTUAL_ALLOC;
+        call.virtual_alloc.addr         = wine_server_client_ptr( *ret );
+        call.virtual_alloc.size         = *size_ptr;
+        call.virtual_alloc.zero_bits    = zero_bits;
+        call.virtual_alloc.op_type      = type;
+        call.virtual_alloc.prot         = protect;
+        status = server_queue_process_apc( process, &call, &result );
+        if (status != STATUS_SUCCESS) return status;
+
+        if (result.virtual_alloc.status == STATUS_SUCCESS)
+        {
+            *ret      = wine_server_get_ptr( result.virtual_alloc.addr );
+            *size_ptr = result.virtual_alloc.size;
+        }
+        return result.virtual_alloc.status;
+    }
+
+    if (!*ret)
+        limit = get_zero_bits_mask( zero_bits );
+    else
+        limit = 0;
+
+    return allocate_virtual_memory( ret, size_ptr, type, protect, limit, 0 );
+}
+
+
 /***********************************************************************
  *             NtAllocateVirtualMemoryEx   (NTDLL.@)
  *             ZwAllocateVirtualMemoryEx   (NTDLL.@)
@@ -4154,11 +4162,98 @@ NTSTATUS WINAPI NtAllocateVirtualMemoryEx( HANDLE process, PVOID *ret, SIZE_T *s
                                            ULONG protect, MEM_EXTENDED_PARAMETER *parameters,
                                            ULONG count )
 {
+    static const ULONG type_mask = MEM_COMMIT | MEM_RESERVE | MEM_TOP_DOWN | MEM_WRITE_WATCH
+                                   | MEM_RESET | MEM_RESERVE_PLACEHOLDER | MEM_REPLACE_PLACEHOLDER;
+    ULONG_PTR limit = 0;
+    ULONG_PTR align = 0;
+
+    TRACE("%p %p %08lx %x %08x %p %u\n", process, *ret, *size_ptr, type, protect, parameters, count );
+
     if (count && !parameters) return STATUS_INVALID_PARAMETER;
 
-    if (count) FIXME( "Ignoring %d extended parameters %p\n", count, parameters );
+    if (type & ~type_mask)
+    {
+        WARN("Called with wrong alloc type flags %08x.\n", type);
+        return STATUS_INVALID_PARAMETER;
+    }
 
-    return NtAllocateVirtualMemory( process, ret, 0, size_ptr, type, protect );
+    if (count)
+    {
+        MEM_ADDRESS_REQUIREMENTS *r = NULL;
+        unsigned int i;
+
+        for (i = 0; i < count; ++i)
+        {
+            if (parameters[i].Type == MemExtendedParameterInvalidType || parameters[i].Type >= MemExtendedParameterMax)
+            {
+                WARN( "Invalid parameter type %d.\n", parameters[i].Type );
+                return STATUS_INVALID_PARAMETER;
+            }
+            if (parameters[i].Type != MemExtendedParameterAddressRequirements)
+            {
+                FIXME( "Parameter type %d is not supported.\n", parameters[i].Type );
+                continue;
+            }
+            if (r)
+            {
+                WARN( "Duplicate parameter.\n" );
+                return STATUS_INVALID_PARAMETER;
+            }
+            r = (MEM_ADDRESS_REQUIREMENTS *)parameters[i].Pointer;
+
+            if (r->LowestStartingAddress)
+                FIXME( "Not supported requirements LowestStartingAddress %p, Alignment %p.\n",
+                       r->LowestStartingAddress, (void *)r->Alignment );
+
+            if (r->Alignment)
+            {
+                if (*ret || (r->Alignment & (r->Alignment - 1)) || r->Alignment - 1 < granularity_mask)
+                {
+                    WARN( "Invalid alignment %lu.\n", r->Alignment );
+                    return STATUS_INVALID_PARAMETER;
+                }
+                align = r->Alignment;
+            }
+
+            limit = (ULONG_PTR)r->HighestEndingAddress;
+            if (limit && (*ret || limit > (ULONG_PTR)user_space_limit || ((limit + 1) & (page_mask - 1))))
+            {
+                WARN( "Invalid limit %p.\n", r->HighestEndingAddress);
+                return STATUS_INVALID_PARAMETER;
+            }
+            TRACE( "limit %p, align %p.\n", (void *)limit, (void *)align );
+        }
+    }
+
+    if (!*size_ptr) return STATUS_INVALID_PARAMETER;
+
+    if (process != NtCurrentProcess())
+    {
+        apc_call_t call;
+        apc_result_t result;
+        NTSTATUS status;
+
+        memset( &call, 0, sizeof(call) );
+
+        call.virtual_alloc_ex.type         = APC_VIRTUAL_ALLOC_EX;
+        call.virtual_alloc_ex.addr         = wine_server_client_ptr( *ret );
+        call.virtual_alloc_ex.size         = *size_ptr;
+        call.virtual_alloc_ex.limit        = limit;
+        call.virtual_alloc_ex.align        = align;
+        call.virtual_alloc_ex.op_type      = type;
+        call.virtual_alloc_ex.prot         = protect;
+        status = server_queue_process_apc( process, &call, &result );
+        if (status != STATUS_SUCCESS) return status;
+
+        if (result.virtual_alloc_ex.status == STATUS_SUCCESS)
+        {
+            *ret      = wine_server_get_ptr( result.virtual_alloc_ex.addr );
+            *size_ptr = result.virtual_alloc_ex.size;
+        }
+        return result.virtual_alloc_ex.status;
+    }
+
+    return allocate_virtual_memory( ret, size_ptr, type, protect, limit, align );
 }
 
 
@@ -4213,31 +4308,139 @@ NTSTATUS WINAPI NtFreeVirtualMemory( HANDLE process, PVOID *addr_ptr, SIZE_T *si
         if (addr == (void *)1 && !size && type == MEM_RELEASE) virtual_release_address_space();
         else status = STATUS_INVALID_PARAMETER;
     }
-    else if (!(view = find_view( base, size )) || !is_view_valloc( view ))
+    else if (!(view = find_view( base, 0 )) || !is_view_valloc( view ))
     {
-        status = STATUS_INVALID_PARAMETER;
+        TRACE("Bad view %p.\n", view);
+        status = view ? STATUS_INVALID_PARAMETER : STATUS_MEMORY_NOT_ALLOCATED;
     }
-    else if (type == MEM_RELEASE)
+    else if (type == MEM_RELEASE || (type == (MEM_RELEASE | MEM_PRESERVE_PLACEHOLDER)))
     {
         /* Free the pages */
 
-        if (size) status = STATUS_INVALID_PARAMETER;
-        else if (base != view->base) status = STATUS_FREE_VM_NOT_AT_BASE;
+        if (size && (char *)view->base + view->size - base < size) status = STATUS_UNABLE_TO_FREE_VM;
+        else if (!size && base != view->base) status = STATUS_FREE_VM_NOT_AT_BASE;
+        else if (type == (MEM_RELEASE | MEM_PRESERVE_PLACEHOLDER) && !size) status = STATUS_INVALID_PARAMETER_3;
+        else if (type == (MEM_RELEASE | MEM_PRESERVE_PLACEHOLDER) && !((view->protect & VPROT_FROMPLACEHOLDER)
+                 || (view->protect & VPROT_PLACEHOLDER && size != view->size)))
+        {
+            status = STATUS_CONFLICTING_ADDRESSES;
+        }
         else
         {
+            if (!size) size = view->size;
+
+            if (type == MEM_RELEASE && size == view->size)
+            {
+                assert( base == view->base );
+                delete_view( view );
+            }
+            else
+            {
+                struct file_view *new_view = NULL, *preserve_view = NULL;
+                int preserve_whole;
+
+                if (view->base != base && base + size != (char *)view->base + view->size
+                    && !(new_view = alloc_view()))
+                {
+                    ERR( "out of memory for %p-%p\n", base, (char *)base + size );
+                    return STATUS_NO_MEMORY;
+                }
+                preserve_whole = (size == view->size);
+                if (!preserve_whole) unregister_view( view );
+
+                if (new_view)
+                {
+                    new_view->base    = base + size;
+                    new_view->size    = (char *)view->base + view->size - (char *)new_view->base;
+                    new_view->protect = view->protect;
+
+                    view->size = base - (char *)view->base;
+                    register_view( view );
+                    register_view( new_view );
+
+                    VIRTUAL_DEBUG_DUMP_VIEW( view );
+                    VIRTUAL_DEBUG_DUMP_VIEW( new_view );
+                }
+                else if (!preserve_whole)
+                {
+                    if (view->base == base)
+                    {
+                        view->base = base + size;
+                        view->size -= size;
+                    }
+                    else
+                    {
+                        view->size = base - (char *)view->base;
+                    }
+                    register_view( view );
+                    VIRTUAL_DEBUG_DUMP_VIEW( view );
+                }
+
+                if (type & MEM_PRESERVE_PLACEHOLDER)
+                {
+                    if (preserve_whole)
+                    {
+                        view->protect = VPROT_PLACEHOLDER;
+                        preserve_view = view;
+                    }
+                    else
+                    {
+                        if (!(preserve_view = alloc_view()))
+                        {
+                            ERR( "out of memory for %p-%p\n", base, (char *)base + size );
+                            return STATUS_NO_MEMORY;
+                        }
+                        preserve_view->base = base;
+                        preserve_view->size = size;
+                        preserve_view->protect = VPROT_PLACEHOLDER;
+                        set_vprot( preserve_view, base, size, 0 );
+                        register_view( preserve_view );
+                    }
+                    VIRTUAL_DEBUG_DUMP_VIEW( preserve_view );
+                }
+                else
+                {
+                    set_page_vprot( base, size, 0 );
+                    unmap_area( base, size );
+                }
+            }
             *addr_ptr = base;
-            *size_ptr = view->size;
-            delete_view( view );
+            *size_ptr = size;
         }
     }
     else if (type == MEM_DECOMMIT)
     {
         if (!size && base != view->base) status = STATUS_FREE_VM_NOT_AT_BASE;
+        else if (base - (char *)view->base + size > view->size) status = STATUS_UNABLE_TO_FREE_VM;
         else status = decommit_pages( view, base - (char *)view->base, size );
         if (status == STATUS_SUCCESS)
         {
             *addr_ptr = base;
             *size_ptr = size;
+        }
+    }
+    else if (type & MEM_COALESCE_PLACEHOLDERS)
+    {
+        struct file_view *next_view = WINE_RB_ENTRY_VALUE( wine_rb_next( &view->entry ), struct file_view, entry );
+
+        if (type != (MEM_RELEASE | MEM_COALESCE_PLACEHOLDERS)) status = STATUS_INVALID_PARAMETER_4;
+        else if (!size) status = STATUS_INVALID_PARAMETER_3;
+        else if (!next_view || (char *)view->base + view->size != next_view->base
+            || base != view->base || size != view->size + next_view->size
+            || !(view->protect & VPROT_PLACEHOLDER) || !(next_view->protect & VPROT_PLACEHOLDER))
+        {
+            status = STATUS_CONFLICTING_ADDRESSES;
+        }
+        else
+        {
+            unregister_view( view );
+            unregister_view( next_view );
+
+            view->size += next_view->size;
+            free_view( next_view );
+
+            register_view( view );
+            VIRTUAL_DEBUG_DUMP_VIEW( view );
         }
     }
     else
@@ -4247,6 +4450,7 @@ NTSTATUS WINAPI NtFreeVirtualMemory( HANDLE process, PVOID *addr_ptr, SIZE_T *si
     }
 
     server_leave_uninterrupted_section( &virtual_mutex, &sigset );
+    TRACE( "status %#x.\n", status );
     return status;
 }
 
@@ -4309,6 +4513,24 @@ NTSTATUS WINAPI NtProtectVirtualMemory( HANDLE process, PVOID *addr_ptr, SIZE_T 
         {
             old = get_win32_prot( vprot, view->protect );
             status = set_protection( view, base, size, new_prot );
+
+            /* GTA5 HACK: Mark first page as copied. */
+            if (status == STATUS_SUCCESS && (view->protect & SEC_IMAGE) &&
+                    base == (void*)NtCurrentTeb()->Peb->ImageBaseAddress)
+            {
+                const WCHAR gta5W[] = { 'g','t','a','5','.','e','x','e',0 };
+                WCHAR *name, *p;
+
+                name = NtCurrentTeb()->Peb->ProcessParameters->ImagePathName.Buffer;
+                p = wcsrchr(name, '\\');
+                p = p ? p+1 : name;
+
+                if(!wcsicmp(p, gta5W))
+                {
+                    FIXME("HACK: changing GTA5.exe vprot\n");
+                    set_page_vprot_bits(base, page_size, VPROT_COPIED, 0);
+                }
+            }
         }
         else status = STATUS_NOT_COMMITTED;
     }
@@ -4585,7 +4807,7 @@ static NTSTATUS get_working_set_ex( HANDLE process, LPCVOID addr,
             (vprot & VPROT_COMMITTED))
         {
             p->VirtualAttributes.Valid = !(vprot & VPROT_GUARD) && (vprot & 0x0f) && (pagemap >> 63);
-            p->VirtualAttributes.Shared = (!is_view_valloc( view ) && ((pagemap >> 61) & 1)) || ((view->protect & VPROT_WRITECOPY) && !(vprot & VPROT_WRITTEN));
+            p->VirtualAttributes.Shared = !is_view_valloc( view ) && ((pagemap >> 61) & 1);
             if (p->VirtualAttributes.Shared && p->VirtualAttributes.Valid)
                 p->VirtualAttributes.ShareCount = 1; /* FIXME */
             if (p->VirtualAttributes.Valid)
@@ -4599,6 +4821,86 @@ static NTSTATUS get_working_set_ex( HANDLE process, LPCVOID addr,
         fclose( f );
     if (res_len)
         *res_len = (UINT_PTR)p - (UINT_PTR)info;
+    return STATUS_SUCCESS;
+}
+
+static NTSTATUS read_nt_symlink( UNICODE_STRING *name, WCHAR *target, DWORD size )
+{
+    NTSTATUS status;
+    OBJECT_ATTRIBUTES attr;
+    HANDLE handle;
+
+    attr.Length = sizeof(attr);
+    attr.RootDirectory = 0;
+    attr.Attributes = OBJ_CASE_INSENSITIVE;
+    attr.ObjectName = name;
+    attr.SecurityDescriptor = NULL;
+    attr.SecurityQualityOfService = NULL;
+
+    if (!(status = NtOpenSymbolicLinkObject( &handle, SYMBOLIC_LINK_QUERY, &attr )))
+    {
+        UNICODE_STRING targetW;
+        targetW.Buffer = target;
+        targetW.MaximumLength = (size - 1) * sizeof(WCHAR);
+        status = NtQuerySymbolicLinkObject( handle, &targetW, NULL );
+        if (!status) target[targetW.Length / sizeof(WCHAR)] = 0;
+        NtClose( handle );
+    }
+    return status;
+}
+
+static NTSTATUS resolve_drive_symlink( UNICODE_STRING *name, SIZE_T max_name_len, SIZE_T *ret_len, NTSTATUS status )
+{
+    static int enabled = -1;
+
+    static const WCHAR dosprefixW[] = {'\\','?','?','\\'};
+    UNICODE_STRING device_name;
+    SIZE_T required_length, symlink_len;
+    WCHAR symlink[256];
+    size_t offset = 0;
+
+    if (enabled == -1)
+    {
+        const char *sgi = getenv("SteamGameId");
+
+        enabled = sgi && !strcmp(sgi, "284160");
+    }
+    if (!enabled) return status;
+    if (status == STATUS_INFO_LENGTH_MISMATCH)
+    {
+        /* FIXME */
+        *ret_len += 64;
+        return status;
+    }
+    if (status) return status;
+
+    if (name->Length < sizeof(dosprefixW) ||
+            memcmp( name->Buffer, dosprefixW, sizeof(dosprefixW) ))
+        return STATUS_SUCCESS;
+
+    offset = ARRAY_SIZE(dosprefixW);
+    while (offset * sizeof(WCHAR) < name->Length && name->Buffer[ offset ] != '\\') offset++;
+
+    device_name = *name;
+    device_name.Length = offset * sizeof(WCHAR);
+    if ((status = read_nt_symlink( &device_name, symlink, ARRAY_SIZE( symlink ))))
+    {
+        ERR("read_nt_symlink failed, status %#x.\n", status);
+        return status;
+    }
+    symlink_len = wcslen( symlink );
+    required_length = symlink_len * sizeof(WCHAR) +
+           name->Length - offset * sizeof(WCHAR) + sizeof(WCHAR);
+    if (ret_len)
+        *ret_len = sizeof(MEMORY_SECTION_NAME) + required_length;
+    if (required_length > max_name_len)
+        return STATUS_INFO_LENGTH_MISMATCH;
+
+    memmove( name->Buffer + symlink_len, name->Buffer + offset, name->Length - offset * sizeof(WCHAR) );
+    memcpy( name->Buffer, symlink, symlink_len * sizeof(WCHAR) );
+    name->MaximumLength = required_length;
+    name->Length = required_length - sizeof(WCHAR);
+    name->Buffer[name->Length / sizeof(WCHAR)] = 0;
     return STATUS_SUCCESS;
 }
 
@@ -4630,7 +4932,8 @@ static NTSTATUS get_memory_section_name( HANDLE process, LPCVOID addr,
         }
     }
     SERVER_END_REQ;
-    return status;
+
+    return resolve_drive_symlink( &info->SectionFileName, len - sizeof(*info), ret_len, status );
 }
 
 
@@ -4828,12 +5131,20 @@ NTSTATUS WINAPI NtMapViewOfSection( HANDLE handle, HANDLE process, PVOID *addr_p
                                 offset_ptr, size_ptr, alloc_type, protect );
 }
 
-
 /***********************************************************************
- *             NtUnmapViewOfSection   (NTDLL.@)
- *             ZwUnmapViewOfSection   (NTDLL.@)
+ *             NtMapViewOfSectionEx   (NTDLL.@)
+ *             ZwMapViewOfSectionEx   (NTDLL.@)
  */
-NTSTATUS WINAPI NtUnmapViewOfSection( HANDLE process, PVOID addr )
+NTSTATUS WINAPI NtMapViewOfSectionEx( HANDLE handle, HANDLE process, PVOID *addr_ptr, const LARGE_INTEGER *offset_ptr,
+        SIZE_T *size_ptr, ULONG alloc_type, ULONG protect, MEM_EXTENDED_PARAMETER *params, ULONG params_count )
+{
+    if (params)
+        FIXME("Ignoring extended parameters.\n");
+
+    return NtMapViewOfSection( handle, process, addr_ptr, 0, 0, offset_ptr, size_ptr, ViewShare, alloc_type, protect );
+}
+
+static NTSTATUS unmap_view_of_section( HANDLE process, PVOID addr, ULONG flags )
 {
     struct file_view *view;
     NTSTATUS status = STATUS_NOT_MAPPED_VIEW;
@@ -4848,6 +5159,7 @@ NTSTATUS WINAPI NtUnmapViewOfSection( HANDLE process, PVOID addr )
 
         call.unmap_view.type = APC_UNMAP_VIEW;
         call.unmap_view.addr = wine_server_client_ptr( addr );
+        call.unmap_view.flags = flags;
         status = server_queue_process_apc( process, &call, &result );
         if (status == STATUS_SUCCESS) status = result.unmap_view.status;
         return status;
@@ -4856,6 +5168,11 @@ NTSTATUS WINAPI NtUnmapViewOfSection( HANDLE process, PVOID addr )
     server_enter_uninterrupted_section( &virtual_mutex, &sigset );
     if ((view = find_view( addr, 0 )) && !is_view_valloc( view ))
     {
+        if (flags & MEM_PRESERVE_PLACEHOLDER && !(view->protect & VPROT_FROMPLACEHOLDER))
+        {
+            status = STATUS_CONFLICTING_ADDRESSES;
+            goto done;
+        }
         if (view->protect & VPROT_SYSTEM)
         {
             struct builtin_module *builtin;
@@ -4882,14 +5199,41 @@ NTSTATUS WINAPI NtUnmapViewOfSection( HANDLE process, PVOID addr )
         if (!status)
         {
             if (view->protect & SEC_IMAGE) release_builtin_module( view->base );
-            delete_view( view );
+            if (flags & MEM_PRESERVE_PLACEHOLDER)
+            {
+                view->protect = VPROT_PLACEHOLDER;
+                set_vprot( view, view->base, view->size, 0 );
+            }
+            else
+            {
+                delete_view( view );
+            }
         }
         else FIXME( "failed to unmap %p %x\n", view->base, status );
     }
+done:
     server_leave_uninterrupted_section( &virtual_mutex, &sigset );
     return status;
 }
 
+/***********************************************************************
+ *             NtUnmapViewOfSection   (NTDLL.@)
+ *             ZwUnmapViewOfSection   (NTDLL.@)
+ */
+NTSTATUS WINAPI NtUnmapViewOfSection( HANDLE process, PVOID addr )
+{
+    return unmap_view_of_section( process, addr, 0 );
+}
+
+/***********************************************************************
+ *             NtUnmapViewOfSectionEx   (NTDLL.@)
+ *             ZwUnmapViewOfSectionEx   (NTDLL.@)
+ */
+NTSTATUS WINAPI NtUnmapViewOfSectionEx( HANDLE process, PVOID addr, ULONG flags )
+{
+    if (flags) FIXME("Ignoring flags %#x.\n", flags);
+    return unmap_view_of_section( process, addr, flags );
+}
 
 /******************************************************************************
  *             virtual_fill_image_information
@@ -5057,17 +5401,90 @@ NTSTATUS WINAPI NtGetWriteWatch( HANDLE process, ULONG flags, PVOID base, SIZE_T
         char *addr = base;
         char *end = addr + size;
 
-        while (pos < *count && addr < end)
+        if (use_kernel_writewatch)
         {
-            if (!(get_page_vprot( addr ) & VPROT_WRITEWATCH)) addresses[pos++] = addr;
-            addr += page_size;
+            static UINT64 buffer[PAGE_FLAGS_BUFFER_LENGTH];
+            unsigned int i, length;
+            ssize_t read_length;
+
+            if (flags & WRITE_WATCH_FLAG_RESET)
+            {
+                if (is_win64)
+                {
+                    addresses[0] = end;
+                    if ((read_length = pread(pagemap_reset_fd, addresses, *count * sizeof(*addresses),
+                            ((ULONG_PTR)addr >> page_shift) * sizeof(*addresses))) == -1)
+                    {
+                        ERR("Error reading page flags, read_length %zd, error %s.\n", read_length, strerror(errno));
+                        status = STATUS_INVALID_ADDRESS;
+                        goto done;
+                    }
+                    *count = read_length / sizeof(*addresses);
+                    *granularity = page_size;
+                    goto done;
+                }
+
+                while (pos < *count && addr < end)
+                {
+                    length = min(PAGE_FLAGS_BUFFER_LENGTH, *count - pos);
+
+                    buffer[0] = (ULONG_PTR)end;
+                    if ((read_length = pread(pagemap_reset_fd, buffer, length * sizeof(*buffer),
+                            ((ULONG_PTR)addr >> page_shift) * sizeof(*buffer))) == -1)
+                    {
+                        ERR("Error reading page flags, read_length %zd, error %s.\n", read_length, strerror(errno));
+                        status = STATUS_INVALID_ADDRESS;
+                        goto done;
+                    }
+                    read_length /= sizeof(*buffer);
+                    for (i = 0; i < read_length; ++i)
+                    {
+                        assert(pos < *count);
+                        addresses[pos++] = (void *)(ULONG_PTR)buffer[i];
+                    }
+                    if (read_length < length)
+                        break;
+                    addr = (char *)(ULONG_PTR)buffer[read_length - 1] + page_size;
+                }
+            }
+            else
+            {
+                while (pos < *count && addr < end)
+                {
+                    length = min(PAGE_FLAGS_BUFFER_LENGTH, (end - addr) >> page_shift);
+
+                    if ((read_length = pread(pagemap_fd, buffer, length * sizeof(*buffer),
+                            ((ULONG_PTR)addr >> page_shift) * sizeof(*buffer))) != length * sizeof(*buffer))
+                    {
+                        ERR("Error reading page flags, read_length %zd, error %s.\n", read_length, strerror(errno));
+                        status = STATUS_INVALID_ADDRESS;
+                        goto done;
+                    }
+                    for (i = 0; i < length && pos < *count; ++i)
+                    {
+                        if (buffer[i] & PM_SOFT_DIRTY_PAGE)
+                            addresses[pos++] = addr;
+
+                        addr += page_size;
+                    }
+                }
+            }
         }
-        if (flags & WRITE_WATCH_FLAG_RESET) reset_write_watches( base, addr - (char *)base );
+        else
+        {
+            while (pos < *count && addr < end)
+            {
+                if (!(get_page_vprot( addr ) & VPROT_WRITEWATCH)) addresses[pos++] = addr;
+                addr += page_size;
+            }
+            if (flags & WRITE_WATCH_FLAG_RESET) reset_write_watches( base, addr - (char *)base );
+        }
         *count = pos;
         *granularity = page_size;
     }
     else status = STATUS_INVALID_PARAMETER;
 
+done:
     server_leave_uninterrupted_section( &virtual_mutex, &sigset );
     return status;
 }
@@ -5109,7 +5526,50 @@ NTSTATUS WINAPI NtReadVirtualMemory( HANDLE process, const void *addr, void *buf
                                      SIZE_T size, SIZE_T *bytes_read )
 {
     NTSTATUS status;
+#ifdef linux
+    struct iovec local, remote;
+    int unix_pid;
+    ssize_t ret;
 
+    SERVER_START_REQ( read_process_memory )
+    {
+        req->handle = wine_server_obj_handle( process );
+        status = wine_server_call( req );
+        unix_pid = reply->unix_pid;
+    }
+    SERVER_END_REQ;
+
+    if (status)
+    {
+        WARN( "Could not get unix_pid for process %p, status %#x.\n", process, status );
+        size = 0;
+        goto done;
+    }
+
+    local.iov_base = buffer;
+    local.iov_len = size;
+
+    remote.iov_base = (void *)addr;
+    remote.iov_len = size;
+
+    if ((ret = process_vm_readv( unix_pid, &local, 1, &remote, 1, 0 )) != size)
+    {
+        WARN( "Error reading memory from process %p, addr %p, size %p, buffer %p, ret %p, errno %d.\n",
+              process, addr, (void *)size, buffer, (void *)ret, errno );
+
+        if (ret == -1)
+        {
+            status = errno == ESRCH ? STATUS_PARTIAL_COPY : errno_to_status( errno );
+            size = 0;
+        }
+        else
+        {
+            status = STATUS_PARTIAL_COPY;
+            size = ret;
+        }
+    }
+done:
+#else
     if (virtual_check_buffer_for_write( buffer, size ))
     {
         SERVER_START_REQ( read_process_memory )
@@ -5126,6 +5586,7 @@ NTSTATUS WINAPI NtReadVirtualMemory( HANDLE process, const void *addr, void *buf
         status = STATUS_ACCESS_VIOLATION;
         size = 0;
     }
+#endif
     if (bytes_read) *bytes_read = size;
     return status;
 }
@@ -5301,6 +5762,7 @@ NTSTATUS WINAPI NtWow64AllocateVirtualMemory64( HANDLE process, ULONG64 *ret, UL
         *ret = (ULONG_PTR)base;
         *size_ptr = size;
     }
+    TRACE("status %#x.\n", status);
     return status;
 }
 

@@ -3,14 +3,14 @@
 @ stdcall agsCheckDriverVersion(ptr long)
 @ stub agsDriverExtensionsDX11_BeginUAVOverlap
 @ stub agsDriverExtensionsDX11_CreateBuffer
-@ stub agsDriverExtensionsDX11_CreateDevice
+@ stdcall agsDriverExtensionsDX11_CreateDevice(ptr ptr ptr ptr)
 @ stub agsDriverExtensionsDX11_CreateFromDevice
 @ stub agsDriverExtensionsDX11_CreateTexture1D
 @ stub agsDriverExtensionsDX11_CreateTexture2D
 @ stub agsDriverExtensionsDX11_CreateTexture3D
 @ stub agsDriverExtensionsDX11_DeInit
 @ stub agsDriverExtensionsDX11_Destroy
-@ stub agsDriverExtensionsDX11_DestroyDevice
+@ stdcall -norelay -arch=win64 agsDriverExtensionsDX11_DestroyDevice()
 @ stub agsDriverExtensionsDX11_EndUAVOverlap
 @ stub agsDriverExtensionsDX11_GetMaxClipRects
 @ stub agsDriverExtensionsDX11_IASetPrimitiveTopology
@@ -24,7 +24,7 @@
 @ stub agsDriverExtensionsDX11_NotifyResourceEndWrites
 @ stub agsDriverExtensionsDX11_NumPendingAsyncCompileJobs
 @ stub agsDriverExtensionsDX11_SetClipRects
-@ stub agsDriverExtensionsDX11_SetDepthBounds
+@ stdcall -norelay -arch=win64 agsDriverExtensionsDX11_SetDepthBounds() DX11_SetDepthBounds_impl
 @ stub agsDriverExtensionsDX11_SetDiskShaderCacheEnabled
 @ stub agsDriverExtensionsDX11_SetMaxAsyncCompileThreadCount
 @ stub agsDriverExtensionsDX11_SetViewBroadcastMasks

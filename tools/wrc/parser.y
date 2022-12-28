@@ -199,13 +199,7 @@ static resource_t *build_fontdirs(resource_t *tail);
 static resource_t *build_fontdir(resource_t **fnt, int nfnt);
 static int rsrcid_to_token(int lookahead);
 
-/* bison >= 3.6 applies api.prefix also to YYEMPTY */
-#define YYEMPTY (-2)
-
 %}
-
-%define api.prefix {parser_}
-
 %union{
 	string_t	*str;
 	int		num;

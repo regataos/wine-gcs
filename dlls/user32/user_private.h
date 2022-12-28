@@ -44,6 +44,24 @@
 
 struct window_surface;
 
+/* internal messages codes */
+enum wine_internal_message
+{
+    WM_WINE_DESTROYWINDOW = 0x80000000,
+    WM_WINE_SETWINDOWPOS,
+    WM_WINE_SHOWWINDOW,
+    WM_WINE_SETPARENT,
+    WM_WINE_SETWINDOWLONG,
+    WM_WINE_SETSTYLE,
+    WM_WINE_SETACTIVEWINDOW,
+    WM_WINE_KEYBOARD_LL_HOOK,
+    WM_WINE_MOUSE_LL_HOOK,
+    WM_WINE_CLIPCURSOR,
+    WM_WINE_UPDATEWINDOWSTATE,
+    WM_WINE_FIRST_DRIVER_MSG = 0x80001000,  /* range of messages reserved for the USER driver */
+    WM_WINE_LAST_DRIVER_MSG = 0x80001fff
+};
+
 extern const struct user_driver_funcs *USER_Driver DECLSPEC_HIDDEN;
 
 extern void USER_unload_driver(void) DECLSPEC_HIDDEN;
@@ -102,19 +120,11 @@ struct rawinput_thread_data
     RAWINPUT buffer[1]; /* rawinput message data buffer */
 };
 
-extern LONG global_key_state_counter DECLSPEC_HIDDEN;
 extern BOOL (WINAPI *imm_register_window)(HWND) DECLSPEC_HIDDEN;
 extern void (WINAPI *imm_unregister_window)(HWND) DECLSPEC_HIDDEN;
 #define WM_IME_INTERNAL 0x287
 #define IME_INTERNAL_ACTIVATE 0x17
 #define IME_INTERNAL_DEACTIVATE 0x18
-
-struct user_key_state_info
-{
-    UINT                          time;                   /* Time of last key state refresh */
-    INT                           counter;                /* Counter to invalidate the key state */
-    BYTE                          state[256];             /* State for each key */
-};
 
 struct hook_extra_info
 {
@@ -144,6 +154,8 @@ extern BOOL rawinput_from_hardware_message(RAWINPUT *rawinput, const struct hard
 extern BOOL rawinput_device_get_usages(HANDLE handle, USAGE *usage_page, USAGE *usage);
 extern struct rawinput_thread_data *rawinput_thread_data(void);
 extern void rawinput_update_device_list(void);
+extern void rawinput_add_device(const WCHAR *device_path);
+extern void rawinput_remove_device(const WCHAR *device_path);
 
 extern void create_offscreen_window_surface( const RECT *visible_rect, struct window_surface **surface ) DECLSPEC_HIDDEN;
 
@@ -199,6 +211,10 @@ extern BOOL WINPROC_call_window( HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
 
 extern const WCHAR *CLASS_GetVersionedName(const WCHAR *classname, UINT *basename_offset,
         WCHAR *combined, BOOL register_class) DECLSPEC_HIDDEN;
+extern volatile struct desktop_shared_memory *get_desktop_shared_memory( void ) DECLSPEC_HIDDEN;
+extern volatile struct queue_shared_memory *get_queue_shared_memory( void ) DECLSPEC_HIDDEN;
+extern volatile struct input_shared_memory *get_input_shared_memory( void ) DECLSPEC_HIDDEN;
+extern volatile struct input_shared_memory *get_foreground_shared_memory( void ) DECLSPEC_HIDDEN;
 
 /* kernel callbacks */
 
@@ -279,12 +295,36 @@ typedef struct
 extern int bitmap_info_size( const BITMAPINFO * info, WORD coloruse ) DECLSPEC_HIDDEN;
 extern BOOL get_icon_size( HICON handle, SIZE *size ) DECLSPEC_HIDDEN;
 
+/* Mingw's assert() imports MessageBoxA and gets confused by user32 exporting it */
+#ifdef __MINGW32__
+#undef assert
+#define assert(expr) ((void)0)
+#endif
+
 extern struct user_api_hook *user_api DECLSPEC_HIDDEN;
-LRESULT WINAPI USER_DefDlgProc(HWND, UINT, WPARAM, LPARAM, BOOL) DECLSPEC_HIDDEN;
 LRESULT WINAPI USER_ScrollBarProc(HWND, UINT, WPARAM, LPARAM, BOOL) DECLSPEC_HIDDEN;
 void WINAPI USER_ScrollBarDraw(HWND, HDC, INT, enum SCROLL_HITTEST,
                                const struct SCROLL_TRACKING_INFO *, BOOL, BOOL, RECT *, INT, INT,
                                INT, BOOL) DECLSPEC_HIDDEN;
-void SCROLL_SetStandardScrollPainted(HWND hwnd, INT bar, BOOL visible);
+
+#if defined(__i386__) || defined(__x86_64__)
+#define __SHARED_READ_SEQ( x ) (*(x))
+#define __SHARED_READ_FENCE do {} while(0)
+#else
+#define __SHARED_READ_SEQ( x ) __atomic_load_n( x, __ATOMIC_RELAXED )
+#define __SHARED_READ_FENCE __atomic_thread_fence( __ATOMIC_ACQUIRE )
+#endif
+
+#define SHARED_READ_BEGIN( x )                                          \
+    do {                                                                \
+        unsigned int __seq;                                             \
+        do {                                                            \
+            while ((__seq = __SHARED_READ_SEQ( x )) & SEQUENCE_MASK) NtYieldExecution(); \
+            __SHARED_READ_FENCE;
+
+#define SHARED_READ_END( x )                       \
+            __SHARED_READ_FENCE;                   \
+        } while (__SHARED_READ_SEQ( x ) != __seq); \
+    } while(0)
 
 #endif /* __WINE_USER_PRIVATE_H */

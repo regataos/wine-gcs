@@ -209,6 +209,28 @@ NTSTATUS WINAPI NtQueryInformationToken( HANDLE token, TOKEN_INFORMATION_CLASS c
     switch (class)
     {
     case TokenUser:
+        if (localsystem_sid)
+        {
+            static const struct sid local_system_sid = { SID_REVISION, 1, SECURITY_NT_AUTHORITY, { SECURITY_LOCAL_SYSTEM_RID } };
+            DWORD sid_len = offsetof( struct sid, sub_auth[local_system_sid.sub_count] );
+            TOKEN_USER *tuser;
+            PSID sid;
+
+            if (retlen) *retlen = sid_len + sizeof(TOKEN_USER);
+            if (sid_len + sizeof(TOKEN_USER) > length)
+            {
+                status = STATUS_BUFFER_TOO_SMALL;
+            }
+            else
+            {
+                tuser = info;
+                sid = tuser + 1;
+                tuser->User.Sid = sid;
+                tuser->User.Attributes = 0;
+                memcpy( sid, &local_system_sid, sid_len );
+            }
+            break;
+        }
         SERVER_START_REQ( get_token_sid )
         {
             TOKEN_USER *tuser = info;
@@ -230,6 +252,7 @@ NTSTATUS WINAPI NtQueryInformationToken( HANDLE token, TOKEN_INFORMATION_CLASS c
         break;
 
     case TokenGroups:
+    case TokenLogonSid:
     {
         /* reply buffer is always shorter than output one */
         void *buffer = malloc( length );
@@ -239,6 +262,7 @@ NTSTATUS WINAPI NtQueryInformationToken( HANDLE token, TOKEN_INFORMATION_CLASS c
         SERVER_START_REQ( get_token_groups )
         {
             req->handle = wine_server_obj_handle( token );
+            req->attr_mask = (class == TokenLogonSid) ? SE_GROUP_LOGON_ID : 0;
             wine_server_set_reply( req, buffer, length );
             status = wine_server_call( req );
 
@@ -403,6 +427,8 @@ NTSTATUS WINAPI NtQueryInformationToken( HANDLE token, TOKEN_INFORMATION_CLASS c
             if (!status) *type = reply->elevation;
         }
         SERVER_END_REQ;
+        if (!status && no_priv_elevation)
+            *(TOKEN_ELEVATION_TYPE *)info = TokenElevationTypeLimited;
         break;
 
     case TokenElevation:
@@ -413,6 +439,7 @@ NTSTATUS WINAPI NtQueryInformationToken( HANDLE token, TOKEN_INFORMATION_CLASS c
             req->handle = wine_server_obj_handle( token );
             status = wine_server_call( req );
             if (!status) elevation->TokenIsElevated = (reply->elevation == TokenElevationTypeFull);
+            if (!status && no_priv_elevation) elevation->TokenIsElevated = 0;
         }
         SERVER_END_REQ;
         break;
@@ -463,28 +490,6 @@ NTSTATUS WINAPI NtQueryInformationToken( HANDLE token, TOKEN_INFORMATION_CLASS c
             *(DWORD *)info = 0;
             break;
         }
-
-    case TokenLogonSid:
-        SERVER_START_REQ( get_token_sid )
-        {
-            TOKEN_GROUPS * groups = info;
-            PSID sid = groups + 1;
-            DWORD sid_len = length < sizeof(TOKEN_GROUPS) ? 0 : length - sizeof(TOKEN_GROUPS);
-
-            req->handle = wine_server_obj_handle( token );
-            req->which_sid = class;
-            wine_server_set_reply( req, sid, sid_len );
-            status = wine_server_call( req );
-            if (retlen) *retlen = reply->sid_len + sizeof(TOKEN_GROUPS);
-            if (status == STATUS_SUCCESS)
-            {
-                groups->GroupCount = 1;
-                groups->Groups[0].Sid = sid;
-                groups->Groups[0].Attributes = 0;
-            }
-        }
-        SERVER_END_REQ;
-        break;
 
     case TokenLinkedToken:
         SERVER_START_REQ( create_linked_token )

@@ -1556,12 +1556,12 @@ static INT_PTR CALLBACK test_aw_conversion_dlgproc(HWND hdlg, UINT msg, WPARAM w
 
         SetPropA(hdlg, "test_mode", ULongToHandle(DLGPROCTEXT_SETTEXTA));
         ret = SetWindowTextA(hdlg, testtext);
-        todo_wine
+    todo_wine
         ok(ret, "Failed to set window text.\n");
 
         SetPropA(hdlg, "test_mode", ULongToHandle(DLGPROCTEXT_SETTEXTW));
         ret = SetWindowTextW(hdlg, testtextW);
-        todo_wine
+    todo_wine
         ok(ret, "Failed to set window text.\n");
 
         memset(buff, 'A', sizeof(buff));
@@ -1592,12 +1592,12 @@ static INT_PTR CALLBACK test_aw_conversion_dlgproc(HWND hdlg, UINT msg, WPARAM w
 
         SetPropA(hdlg, "test_mode", ULongToHandle(DLGPROCTEXT_SETTEXTA));
         ret = SetWindowTextA(hdlg, testtext);
-        todo_wine
+    todo_wine
         ok(ret, "Failed to set window text.\n");
 
         SetPropA(hdlg, "test_mode", ULongToHandle(DLGPROCTEXT_SETTEXTW));
         ret = SetWindowTextW(hdlg, testtextW);
-        todo_wine
+    todo_wine
         ok(ret, "Failed to set window text.\n");
 
         memset(buff, 'A', sizeof(buff));
@@ -1663,12 +1663,12 @@ static INT_PTR CALLBACK test_aw_conversion_dlgproc2(HWND hdlg, UINT msg, WPARAM 
 
         SetPropA(hdlg, "test_mode", ULongToHandle(DLGPROCTEXT_SETTEXTA));
         ret = SetWindowTextA(hdlg, testtext);
-        todo_wine
+    todo_wine
         ok(ret, "Failed to set window text.\n");
 
         SetPropA(hdlg, "test_mode", ULongToHandle(DLGPROCTEXT_SETTEXTW));
         ret = SetWindowTextW(hdlg, testtextW);
-        todo_wine
+    todo_wine
         ok(ret, "Failed to set window text.\n");
 
         memset(buff, 'A', sizeof(buff));
@@ -1699,12 +1699,12 @@ static INT_PTR CALLBACK test_aw_conversion_dlgproc2(HWND hdlg, UINT msg, WPARAM 
 
         SetPropA(hdlg, "test_mode", ULongToHandle(DLGPROCTEXT_SETTEXTA));
         ret = SetWindowTextA(hdlg, testtext);
-        todo_wine
+    todo_wine
         ok(ret, "Failed to set window text.\n");
 
         SetPropA(hdlg, "test_mode", ULongToHandle(DLGPROCTEXT_SETTEXTW));
         ret = SetWindowTextW(hdlg, testtextW);
-        todo_wine
+    todo_wine
         ok(ret, "Failed to set window text.\n");
 
         memset(buff, 'A', sizeof(buff));
@@ -1852,10 +1852,7 @@ static void test_DialogBoxParam(void)
     SetLastError(0xdeadbeef);
     ret = DialogBoxParamA(GetModuleHandleA(NULL), "TEST_DIALOG_INVALID_CLASS", 0, DestroyDlgWinProc, 0);
     ok(ret == -1, "DialogBoxParamA returned %ld, expected -1\n", ret);
-    todo_wine
-    ok(GetLastError() == ERROR_CANNOT_FIND_WND_CLASS ||
-       broken(GetLastError() == ERROR_SUCCESS) /* < win10 21H1 */,
-       "got %u, expected ERROR_CANNOT_FIND_WND_CLASS\n", GetLastError());
+    ok(GetLastError() == 0, "got %d\n", GetLastError());
 
     SetLastError(0xdeadbeef);
     ret = DefDlgProcA(0, WM_ERASEBKGND, 0, 0);
@@ -2333,70 +2330,35 @@ static LRESULT CALLBACK msgbox_hook_proc(INT code, WPARAM wParam, LPARAM lParam)
     return CallNextHookEx(NULL, code, wParam, lParam);
 }
 
-struct create_window_params
+static LRESULT CALLBACK msgbox_sysmodal_hook_proc(INT code, WPARAM wParam, LPARAM lParam)
 {
-    BOOL owner;
-    char caption[64];
-    DWORD style;
-};
-
-static DWORD WINAPI create_window_thread(void *param)
-{
-    struct create_window_params *p = param;
-    HWND owner = 0;
-
-    if (p->owner)
+    if (code == HCBT_ACTIVATE)
     {
-        owner = CreateWindowExA(0, "Static", NULL, WS_POPUP, 10, 10, 10, 10, 0, 0, 0, NULL);
-        ok(owner != 0, "failed to create owner window\n");
-    }
+        HWND msgbox = (HWND)wParam;
+        char text[64];
+        LONG exstyles = GetWindowLongA(msgbox, GWL_EXSTYLE);
 
-    MessageBoxA(owner, NULL, p->caption, p->style);
-
-    if (owner) DestroyWindow(owner);
-
-    return 0;
-}
-
-static HWND wait_for_window(const char *caption)
-{
-    HWND hwnd;
-    DWORD timeout = 0;
-
-    for (;;)
-    {
-        hwnd = FindWindowA(NULL, caption);
-        if (hwnd) break;
-
-        Sleep(50);
-        timeout += 50;
-        if (timeout > 3000)
+        if (msgbox)
         {
-            ok(0, "failed to wait for a window %s\n", caption);
-            break;
+            text[0] = 0;
+            GetWindowTextA(msgbox, text, sizeof(text));
+            if (strcmp(text, "parent") != 0)
+            {
+                ok(exstyles & WS_EX_TOPMOST, "expected message box to have topmost exstyle set in %s\n", text);
+
+                SendDlgItemMessageA(msgbox, IDCANCEL, WM_LBUTTONDOWN, 0, 0);
+                SendDlgItemMessageA(msgbox, IDCANCEL, WM_LBUTTONUP, 0, 0);
+            }
         }
     }
 
-    Sleep(50);
-    return hwnd;
+    return CallNextHookEx(NULL, code, wParam, lParam);
 }
 
 static void test_MessageBox(void)
 {
-    static const struct
-    {
-        DWORD mb_style;
-        DWORD ex_style;
-    } test[] =
-    {
-        { MB_OK, 0 },
-        { MB_OK | MB_TASKMODAL, 0 },
-        { MB_OK | MB_SYSTEMMODAL, WS_EX_TOPMOST },
-    };
-    struct create_window_params params;
-    HANDLE thread;
-    DWORD tid, i;
     HHOOK hook;
+    HWND hwnd;
     int ret;
 
     hook = SetWindowsHookExA(WH_CBT, msgbox_hook_proc, NULL, GetCurrentThreadId());
@@ -2406,50 +2368,23 @@ static void test_MessageBox(void)
 
     UnhookWindowsHookEx(hook);
 
-    sprintf(params.caption, "pid %08x, tid %08x, time %08x",
-            GetCurrentProcessId(), GetCurrentThreadId(), GetCurrentTime());
+    /* Test for MB_SYSTEMMODAL */
+    hook = SetWindowsHookExA(WH_CBT, msgbox_sysmodal_hook_proc, NULL, GetCurrentThreadId());
 
-    params.owner = FALSE;
+    MessageBoxA(NULL, NULL, "system modal", MB_OKCANCEL | MB_SYSTEMMODAL);
 
-    for (i = 0; i < sizeof(test)/sizeof(test[0]); i++)
-    {
-        HWND hwnd;
-        DWORD ex_style;
+    UnhookWindowsHookEx(hook);
 
-        params.style = test[i].mb_style;
+    hwnd = CreateWindowExA(0, "IsDialogMessageWindowClass", "parent", 0,
+                           200, 200, 200, 200, NULL, NULL, NULL, NULL);
+    ok(hwnd != NULL, "failed to create window %ld\n", GetLastError());
 
-        thread = CreateThread(NULL, 0, create_window_thread, &params, 0, &tid);
+    hook = SetWindowsHookExA(WH_CBT, msgbox_sysmodal_hook_proc, NULL, GetCurrentThreadId());
 
-        hwnd = wait_for_window(params.caption);
-        ex_style = GetWindowLongA(hwnd, GWL_EXSTYLE);
-        ok((ex_style & WS_EX_TOPMOST) == test[i].ex_style, "%d: got window ex_style %#x\n", i, ex_style);
+    MessageBoxA(hwnd, NULL, "system modal with parent", MB_OKCANCEL | MB_SYSTEMMODAL);
 
-        PostMessageA(hwnd, WM_COMMAND, IDCANCEL, 0);
-
-        ok(WaitForSingleObject(thread, 5000) != WAIT_TIMEOUT, "thread failed to terminate\n");
-        CloseHandle(thread);
-    }
-
-    params.owner = TRUE;
-
-    for (i = 0; i < sizeof(test)/sizeof(test[0]); i++)
-    {
-        HWND hwnd;
-        DWORD ex_style;
-
-        params.style = test[i].mb_style;
-
-        thread = CreateThread(NULL, 0, create_window_thread, &params, 0, &tid);
-
-        hwnd = wait_for_window(params.caption);
-        ex_style = GetWindowLongA(hwnd, GWL_EXSTYLE);
-        ok((ex_style & WS_EX_TOPMOST) == test[i].ex_style, "%d: got window ex_style %#x\n", i, ex_style);
-
-        PostMessageA(hwnd, WM_COMMAND, IDCANCEL, 0);
-
-        ok(WaitForSingleObject(thread, 5000) != WAIT_TIMEOUT, "thread failed to terminate\n");
-        CloseHandle(thread);
-    }
+    UnhookWindowsHookEx(hook);
+    DestroyWindow(hwnd);
 }
 
 static INT_PTR CALLBACK custom_test_dialog_proc(HWND hdlg, UINT msg, WPARAM wparam, LPARAM lparam)

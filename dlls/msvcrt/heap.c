@@ -46,7 +46,7 @@ static HANDLE heap, sb_heap;
 typedef int (CDECL *MSVCRT_new_handler_func)(size_t size);
 
 static MSVCRT_new_handler_func MSVCRT_new_handler;
-static LONG MSVCRT_new_mode;
+static int MSVCRT_new_mode;
 
 /* FIXME - According to documentation it should be 8*1024, at runtime it returns 16 */ 
 static unsigned int MSVCRT_amblksiz = 16;
@@ -530,9 +530,7 @@ int CDECL _set_sbh_threshold(size_t threshold)
 
   if(!sb_heap)
   {
-      ULONG hci = 2;
       sb_heap = HeapCreate(0, 0, 0);
-      HeapSetInformation(sb_heap, HeapCompatibilityInformation, &hci, sizeof(hci));
       if(!sb_heap)
           return 0;
   }
@@ -869,9 +867,7 @@ int CDECL strncpy_s(char *dest, size_t numberOfElements,
 
 BOOL msvcrt_init_heap(void)
 {
-    ULONG hci = 2;
     heap = HeapCreate(0, 0, 0);
-    HeapSetInformation(heap, HeapCompatibilityInformation, &hci, sizeof(hci));
     return heap != NULL;
 }
 

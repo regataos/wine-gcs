@@ -94,8 +94,8 @@ static BOOL is_prefix_bootstrap;  /* are we bootstrapping the prefix? */
 static BOOL imports_fixup_done = FALSE;  /* set once the imports have been fixed up, before attaching them */
 static BOOL process_detaching = FALSE;  /* set on process detach to avoid deadlocks with thread detach */
 static int free_lib_count;   /* recursion depth of LdrUnloadDll calls */
-static LONG path_safe_mode;  /* path mode set by RtlSetSearchPathMode */
-static LONG dll_safe_mode = 1;  /* dll search mode */
+static ULONG path_safe_mode;  /* path mode set by RtlSetSearchPathMode */
+static ULONG dll_safe_mode = 1;  /* dll search mode */
 static UNICODE_STRING dll_directory;  /* extra path for LdrSetDllDirectory */
 static UNICODE_STRING system_dll_path; /* path to search for system dependency dlls */
 static DWORD default_search_flags;  /* default flags set by LdrSetDefaultDllDirectories */
@@ -213,6 +213,35 @@ static inline BOOL contains_path( LPCWSTR name )
     return ((*name && (name[1] == ':')) || wcschr(name, '/') || wcschr(name, '\\'));
 }
 
+static char *crash_log;
+static size_t crash_log_len;
+
+static void append_to_crash_log(const char *fmt, ...)
+{
+    char buf[1024];
+    size_t len;
+    va_list ap;
+
+    va_start(ap, fmt);
+
+    vsnprintf(buf, sizeof(buf), fmt, ap);
+
+    va_end(ap);
+
+    len = (crash_log ? strlen(crash_log) : 0) + strlen(buf) + 1;
+
+    if(len > crash_log_len){
+        if(crash_log){
+            crash_log = RtlReAllocateHeap( GetProcessHeap(), HEAP_ZERO_MEMORY, crash_log, len );
+        }else{
+            crash_log = RtlAllocateHeap( GetProcessHeap(), HEAP_ZERO_MEMORY, len );
+        }
+        crash_log_len = len;
+    }
+
+    strcat(crash_log, buf);
+}
+
 #define RTL_UNLOAD_EVENT_TRACE_NUMBER 64
 
 typedef struct _RTL_UNLOAD_EVENT_TRACE
@@ -260,8 +289,8 @@ RTL_UNLOAD_EVENT_TRACE * WINAPI RtlGetUnloadEventTrace(void)
  */
 void WINAPI RtlGetUnloadEventTraceEx(ULONG **size, ULONG **count, void **trace)
 {
-    static ULONG element_size = sizeof(*unload_traces);
-    static ULONG element_count = ARRAY_SIZE(unload_traces);
+    static unsigned int element_size = sizeof(*unload_traces);
+    static unsigned int element_count = ARRAY_SIZE(unload_traces);
 
     *size = &element_size;
     *count = &element_count;
@@ -276,7 +305,7 @@ void WINAPI RtlGetUnloadEventTraceEx(ULONG **size, ULONG **count, void **trace)
  * that only modifying esi leads to a crash, so use this one to backup
  * ebp while running the dll entry proc.
  */
-#ifdef __i386__
+#if defined(__i386__)
 extern BOOL call_dll_entry_point( DLLENTRYPROC proc, void *module, UINT reason, void *reserved );
 __ASM_GLOBAL_FUNC(call_dll_entry_point,
                   "pushl %ebp\n\t"
@@ -310,13 +339,36 @@ __ASM_GLOBAL_FUNC(call_dll_entry_point,
                   __ASM_CFI(".cfi_def_cfa %esp,4\n\t")
                   __ASM_CFI(".cfi_same_value %ebp\n\t")
                   "ret" )
-#else /* __i386__ */
+#elif defined(__x86_64__)
+extern BOOL CDECL call_dll_entry_point( DLLENTRYPROC proc, void *module, UINT reason, void *reserved );
+/* Some apps modify rbx in TLS entry point. */
+__ASM_GLOBAL_FUNC(call_dll_entry_point,
+                  "pushq %rbx\n\t"
+                  __ASM_SEH(".seh_pushreg %rbx\n\t")
+                  __ASM_CFI(".cfi_adjust_cfa_offset 8\n\t")
+                  __ASM_CFI(".cfi_rel_offset %rbx,0\n\t")
+                  "subq $48,%rsp\n\t"
+                  __ASM_SEH(".seh_stackalloc 48\n\t")
+                  __ASM_SEH(".seh_endprologue\n\t")
+                  __ASM_CFI(".cfi_adjust_cfa_offset 48\n\t")
+                  "mov %rcx,%r10\n\t"
+                  "mov %rdx,%rcx\n\t"
+                  "mov %r8d,%edx\n\t"
+                  "mov %r9,%r8\n\t"
+                  "call *%r10\n\t"
+                  "addq $48,%rsp\n\t"
+                  __ASM_CFI(".cfi_adjust_cfa_offset -48\n\t")
+                  "popq %rbx\n\t"
+                   __ASM_CFI(".cfi_adjust_cfa_offset -8\n\t")
+                   __ASM_CFI(".cfi_same_value %rbx\n\t")
+                  "ret" )
+#else
 static inline BOOL call_dll_entry_point( DLLENTRYPROC proc, void *module,
                                          UINT reason, void *reserved )
 {
     return proc( module, reason, reserved );
 }
-#endif /* __i386__ */
+#endif
 
 
 #if defined(__i386__) || defined(__x86_64__) || defined(__arm__) || defined(__aarch64__)
@@ -665,7 +717,7 @@ static BOOL is_import_dll_system( LDR_DATA_TABLE_ENTRY *mod, const IMAGE_IMPORT_
 {
     const char *name = get_rva( mod->DllBase, import->Name );
 
-    return !_stricmp( name, "ntdll.dll" ) || !_stricmp( name, "kernel32.dll" );
+    return !strcmp( name, "ntdll.dll" ) || !strcmp( name, "kernel32.dll" );
 }
 
 /**********************************************************************
@@ -997,11 +1049,19 @@ static BOOL import_dll( HMODULE module, const IMAGE_IMPORT_DESCRIPTOR *descr, LP
     if (status)
     {
         if (status == STATUS_DLL_NOT_FOUND)
+        {
             ERR("Library %s (which is needed by %s) not found\n",
                 name, debugstr_w(current_modref->ldr.FullDllName.Buffer));
+            append_to_crash_log("Library %s (which is needed by %s) not found\n",
+                name, debugstr_w(current_modref->ldr.FullDllName.Buffer));
+        }
         else
+        {
             ERR("Loading library %s (which is needed by %s) failed (error %x).\n",
                 name, debugstr_w(current_modref->ldr.FullDllName.Buffer), status);
+            append_to_crash_log("Loading library %s (which is needed by %s) failed (error %x).\n",
+                name, debugstr_w(current_modref->ldr.FullDllName.Buffer), status);
+        }
         return FALSE;
     }
 
@@ -1738,10 +1798,10 @@ NTSTATUS WINAPI LdrFindEntryForAddress( const void *addr, PLDR_DATA_TABLE_ENTRY 
     PLIST_ENTRY mark, entry;
     PLDR_DATA_TABLE_ENTRY mod;
 
-    mark = &NtCurrentTeb()->Peb->LdrData->InMemoryOrderModuleList;
-    for (entry = mark->Flink; entry != mark; entry = entry->Flink)
+    mark = &NtCurrentTeb()->Peb->LdrData->InLoadOrderModuleList;
+    for (entry = mark->Blink; entry != mark; entry = entry->Blink)
     {
-        mod = CONTAINING_RECORD(entry, LDR_DATA_TABLE_ENTRY, InMemoryOrderLinks);
+        mod = CONTAINING_RECORD(entry, LDR_DATA_TABLE_ENTRY, InLoadOrderLinks);
         if (mod->DllBase <= addr &&
             (const char *)addr < (char*)mod->DllBase + mod->SizeOfImage)
         {
@@ -1994,6 +2054,7 @@ NTSTATUS WINAPI LdrGetProcedureAddress(HMODULE module, const ANSI_STRING *name,
     }
 
     RtlLeaveCriticalSection( &loader_section );
+
     return ret;
 }
 
@@ -3051,6 +3112,33 @@ static BOOL is_apiset_dll_name( const WCHAR *name )
     return !wcsnicmp( name, name_prefix, ARRAY_SIZE(name_prefix) - 1 );
 }
 
+static WCHAR *strstriW( const WCHAR *str, const WCHAR *sub )
+{
+    while (*str)
+    {
+        const WCHAR *p1 = str, *p2 = sub;
+        while (*p1 && *p2 && tolower(*p1) == tolower(*p2)) { p1++; p2++; }
+        if (!*p2) return (WCHAR *)str;
+        str++;
+    }
+    return NULL;
+}
+
+static BOOL get_env( const WCHAR *var, WCHAR *val, unsigned int len )
+{
+    UNICODE_STRING name, value;
+
+    name.Length = wcslen( var ) * sizeof(WCHAR);
+    name.MaximumLength = name.Length + sizeof(WCHAR);
+    name.Buffer = (WCHAR *)var;
+
+    value.Length = 0;
+    value.MaximumLength = len;
+    value.Buffer = val;
+
+    return !RtlQueryEnvironmentVariable_U( NULL, &name, &value );
+}
+
 /***********************************************************************
  *	find_dll_file
  *
@@ -3106,6 +3194,26 @@ static NTSTATUS find_dll_file( const WCHAR *load_path, const WCHAR *libname, UNI
 done:
     RtlFreeHeap( GetProcessHeap(), 0, fullname );
     if (wow64_old_value) RtlWow64EnableFsRedirectionEx( 1, &wow64_old_value );
+
+    if (status != STATUS_SUCCESS)
+    {
+        /* HACK for Proton issue #17
+         *
+         * Some games try to load mfc42.dll, but then proceed to not use it.
+         * Just return a handle to kernel32 in that case.
+         */
+        WCHAR sgi[32];
+
+        if (get_env( L"SteamGameId", sgi, sizeof(sgi) ))
+        {
+            if (!wcscmp( sgi, L"105450") &&
+                    strstriW( libname, L"mfc42" ))
+            {
+                WARN_(loaddll)( "Using a fake mfc42 handle\n" );
+                status = find_dll_file( load_path, L"kernel32.dll", nt_name, pwm, mapping, image_info, id );
+            }
+        }
+    }
     return status;
 }
 
@@ -3185,24 +3293,6 @@ done:
     if (mapping) NtClose( mapping );
     RtlFreeUnicodeString( &nt_name );
     return nts;
-}
-
-
-/***********************************************************************
- *              __wine_init_unix_lib
- */
-NTSTATUS __cdecl __wine_init_unix_lib( HMODULE module, DWORD reason, const void *ptr_in, void *ptr_out )
-{
-    WINE_MODREF *wm;
-    NTSTATUS ret;
-
-    RtlEnterCriticalSection( &loader_section );
-
-    if ((wm = get_modref( module ))) ret = unix_funcs->init_unix_lib( module, reason, ptr_in, ptr_out );
-    else ret = STATUS_INVALID_HANDLE;
-
-    RtlLeaveCriticalSection( &loader_section );
-    return ret;
 }
 
 
@@ -3487,7 +3577,7 @@ NTSTATUS WINAPI LdrQueryProcessModuleInformation(RTL_PROCESS_MODULES *smi,
 }
 
 
-static NTSTATUS query_dword_option( HANDLE hkey, LPCWSTR name, LONG *value )
+static NTSTATUS query_dword_option( HANDLE hkey, LPCWSTR name, ULONG *value )
 {
     NTSTATUS status;
     UNICODE_STRING str;
@@ -4145,6 +4235,7 @@ void WINAPI LdrInitializeThunk( CONTEXT *context, ULONG_PTR unknown2, ULONG_PTR 
         ANSI_STRING func_name;
         WINE_MODREF *kernel32;
         PEB *peb = NtCurrentTeb()->Peb;
+        WCHAR env_str[16];
         DWORD hci = 2;
 
         peb->LdrData            = &ldr;
@@ -4153,6 +4244,16 @@ void WINAPI LdrInitializeThunk( CONTEXT *context, ULONG_PTR unknown2, ULONG_PTR 
         peb->TlsBitmap          = &tls_bitmap;
         peb->TlsExpansionBitmap = &tls_expansion_bitmap;
         peb->LoaderLock         = &loader_section;
+
+        if (get_env( L"WINE_HEAP_DELAY_FREE", env_str, sizeof(env_str)) )
+        {
+            if (env_str[0] == L'1')
+            {
+                ERR( "Enabling heap free delay hack.\n" );
+                delay_heap_free = TRUE;
+            }
+        }
+
         peb->ProcessHeap        = RtlCreateHeap( HEAP_GROWABLE, NULL, 0, 0, NULL, NULL );
 
         RtlInitializeBitMap( &tls_bitmap, peb->TlsBitmapBits, sizeof(peb->TlsBitmapBits) * 8 );
@@ -4205,6 +4306,9 @@ void WINAPI LdrInitializeThunk( CONTEXT *context, ULONG_PTR unknown2, ULONG_PTR 
         {
             ERR( "Importing dlls for %s failed, status %x\n",
                  debugstr_w(NtCurrentTeb()->Peb->ProcessParameters->ImagePathName.Buffer), status );
+            append_to_crash_log( "Importing dlls for %s failed, status %x\n",
+                 debugstr_w(NtCurrentTeb()->Peb->ProcessParameters->ImagePathName.Buffer), status );
+            unix_funcs->write_crash_log("missingmodule", crash_log);
             NtTerminateProcess( GetCurrentProcess(), status );
         }
         imports_fixup_done = TRUE;
@@ -4219,11 +4323,11 @@ void WINAPI LdrInitializeThunk( CONTEXT *context, ULONG_PTR unknown2, ULONG_PTR 
     InitializeObjectAttributes( &staging_event_attr, &staging_event_string, OBJ_OPENIF, NULL, NULL );
     if (NtCreateEvent( &staging_event, EVENT_ALL_ACCESS, &staging_event_attr, NotificationEvent, FALSE ) == STATUS_SUCCESS)
     {
-        FIXME_(winediag)("Wine for Regata OS Game Access %s is a testing version containing experimental patches.\n", wine_get_version());
+        FIXME_(winediag)("Wine for Regata OS Game Access %s is a customized version containing experimental patches.\n", wine_get_version());
         FIXME_(winediag)("Please don't report bugs about it on winehq.org and use https://www.reddit.com/r/regata_os/ instead.\n");
     }
     else
-        WARN_(winediag)("Wine for Regata OS Game Access %s is a testing version containing experimental patches.\n", wine_get_version());
+        WARN_(winediag)("Wine for Regata OS Game Access %s is a customized version containing experimental patches.\n", wine_get_version());
 
     RtlAcquirePebLock();
     InsertHeadList( &tls_links, &NtCurrentTeb()->TlsLinks );
@@ -4368,6 +4472,15 @@ PVOID WINAPI RtlPcToFileHeader( PVOID pc, PVOID *address )
     RtlEnterCriticalSection( &loader_section );
     if (!LdrFindEntryForAddress( pc, &module )) ret = module->DllBase;
     RtlLeaveCriticalSection( &loader_section );
+
+    if (!ret && unix_funcs->is_pc_in_native_so( pc ))
+    {
+        LDR_DATA_TABLE_ENTRY *mod;
+
+        mod = CONTAINING_RECORD( node_ntdll->Modules.Flink, LDR_DATA_TABLE_ENTRY, NodeModuleLink );
+        ret = mod->DllBase;
+    }
+
     *address = ret;
     return ret;
 }
@@ -4546,7 +4659,7 @@ NTSTATUS WINAPI RtlSetSearchPathMode( ULONG flags )
         val = 0;
         break;
     case BASE_SEARCH_PATH_ENABLE_SAFE_SEARCHMODE | BASE_SEARCH_PATH_PERMANENT:
-        InterlockedExchange( &path_safe_mode, 2 );
+        InterlockedExchange( (int *)&path_safe_mode, 2 );
         return STATUS_SUCCESS;
     default:
         return STATUS_INVALID_PARAMETER;
@@ -4554,9 +4667,9 @@ NTSTATUS WINAPI RtlSetSearchPathMode( ULONG flags )
 
     for (;;)
     {
-        LONG prev = path_safe_mode;
+        int prev = path_safe_mode;
         if (prev == 2) break;  /* permanently set */
-        if (InterlockedCompareExchange( &path_safe_mode, val, prev ) == prev) return STATUS_SUCCESS;
+        if (InterlockedCompareExchange( (int *)&path_safe_mode, val, prev ) == prev) return STATUS_SUCCESS;
     }
     return STATUS_ACCESS_DENIED;
 }
@@ -4621,11 +4734,6 @@ static void CDECL init_builtin_dll_fallback( void *module )
 {
 }
 
-static NTSTATUS CDECL init_unix_lib_fallback( void *module, DWORD reason, const void *ptr_in, void *ptr_out )
-{
-    return STATUS_DLL_NOT_FOUND;
-}
-
 static NTSTATUS CDECL unwind_builtin_dll_fallback( ULONG type, struct _DISPATCHER_CONTEXT *dispatch,
                                                    CONTEXT *context )
 {
@@ -4643,7 +4751,6 @@ static const struct unix_funcs unix_fallbacks =
 {
     load_so_dll_fallback,
     init_builtin_dll_fallback,
-    init_unix_lib_fallback,
     unwind_builtin_dll_fallback,
     RtlGetSystemTimePrecise_fallback,
 };

@@ -42,7 +42,7 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
 {
     static IMimeInternational *international;
 
-    TRACE("(%p, %ld, %p)\n", hinstDLL, fdwReason, lpvReserved);
+    TRACE("(%p, %d, %p)\n", hinstDLL, fdwReason, lpvReserved);
 
     switch (fdwReason)
     {

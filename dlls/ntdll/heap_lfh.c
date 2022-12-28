@@ -26,14 +26,6 @@
 
 #include "ntdll_misc.h"
 
-#if defined(__GNUC__) || defined(__clang__)
-#define likely(x) __builtin_expect(!!(x), 1)
-#define unlikely(x) __builtin_expect(!!(x), 0)
-#else
-#define likely(x) x
-#define unlikely(x) x
-#endif
-
 WINE_DEFAULT_DEBUG_CHANNEL(heap);
 
 typedef struct LFH_ptr LFH_ptr;
@@ -694,26 +686,26 @@ static inline BOOLEAN LFH_validate_block(ULONG flags, const LFH_block *block)
     const LFH_arena *arena_arena = LFH_large_arena_from_block((LFH_block *)arena);
     const char *err = NULL;
 
-    if (unlikely(flags & HEAP_VALIDATE))
+    if (flags & HEAP_VALIDATE)
         return LFH_validate_arena(flags, arena);
 
-    if (unlikely(!arena))
+    if (!arena)
         err = "invalid arena";
-    else if (unlikely(arena != arena_arena && arena != (arena_arena + 1)))
+    else if (arena != arena_arena && arena != (arena_arena + 1))
         err = "invalid arena alignment";
-    else if (likely(arena == block_arena))
+    else if (arena == block_arena)
     {
-        if (unlikely((UINT_PTR)block < (UINT_PTR)block_arena + ARENA_HEADER_SIZE))
+        if ((UINT_PTR)block < (UINT_PTR)block_arena + ARENA_HEADER_SIZE)
             err = "invalid block alignment";
-        if (unlikely(((UINT_PTR)block & (sizeof(*block) - 1))))
+        if (((UINT_PTR)block & (sizeof(*block) - 1)))
             err = "invalid block alignment";
     }
-    else if (unlikely(arena != large_arena))
+    else if (arena != large_arena)
         err = "large/huge arena mismatch";
-    else if (unlikely((UINT_PTR)block != (UINT_PTR)block_arena))
+    else if ((UINT_PTR)block != (UINT_PTR)block_arena)
         err = "invalid block for large/huge arena";
 
-    if (unlikely(err)) WARN("%08x %p: %s\n", flags, block, err);
+    if (err) WARN("%08x %p: %s\n", flags, block, err);
     return err == NULL;
 }
 
@@ -721,12 +713,12 @@ static BOOLEAN LFH_validate_free_block(ULONG flags, const LFH_block *block)
 {
     const char *err = NULL;
 
-    if (unlikely(!LFH_validate_block(flags, block)))
+    if (!LFH_validate_block(flags, block))
         return FALSE;
-    if (unlikely(block->type != LFH_block_type_free))
+    if (block->type != LFH_block_type_free)
         err = "invalid free block type";
 
-    if (unlikely(err)) WARN("%08x %p: %s\n", flags, block, err);
+    if (err) WARN("%08x %p: %s\n", flags, block, err);
     return err == NULL;
 }
 
@@ -734,19 +726,19 @@ static BOOLEAN LFH_validate_defer_block(ULONG flags, const LFH_block *block)
 {
     const char *err = NULL;
 
-    if (unlikely(!LFH_validate_block(flags, block)))
+    if (!LFH_validate_block(flags, block))
         return FALSE;
-    if (unlikely(block->type != LFH_block_type_free))
+    if (block->type != LFH_block_type_free)
         err = "invalid defer block type";
-    else if (unlikely(flags & HEAP_FREE_CHECKING_ENABLED))
+    else if (flags & HEAP_FREE_CHECKING_ENABLED)
     {
         const unsigned int *data = (const unsigned int *)LFH_ptr_from_block(block);
         size_t class_size = LFH_block_get_class_size(block);
         for (size_t i = 0; i < class_size / 4 - (data - (const unsigned int *)block) && !err; ++i)
-            if (unlikely(data[i] != 0xfeeefeee)) err = "invalid free filler";
+            if (data[i] != 0xfeeefeee) err = "invalid free filler";
     }
 
-    if (unlikely(err)) WARN("%08x %p: %s\n", flags, block, err);
+    if (err) WARN("%08x %p: %s\n", flags, block, err);
     return err == NULL;
 }
 
@@ -754,11 +746,11 @@ static inline BOOLEAN LFH_validate_used_block(ULONG flags, const LFH_block *bloc
 {
     const char *err = NULL;
 
-    if (unlikely(!LFH_validate_block(flags, block)))
+    if (!LFH_validate_block(flags, block))
         return FALSE;
-    if (unlikely(block->type != LFH_block_type_used))
+    if (block->type != LFH_block_type_used)
         err = "invalid used block type";
-    else if (unlikely(flags & HEAP_TAIL_CHECKING_ENABLED))
+    else if (flags & HEAP_TAIL_CHECKING_ENABLED)
     {
         const unsigned char *data = (const unsigned char *)LFH_ptr_from_block(block);
         size_t alloc_size = LFH_block_get_alloc_size(block, flags);
@@ -767,7 +759,7 @@ static inline BOOLEAN LFH_validate_used_block(ULONG flags, const LFH_block *bloc
             if (data[i] != 0xab) err = "invalid tail filler";
     }
 
-    if (unlikely(err)) WARN("%08x %p: %s\n", flags, block, err);
+    if (err) WARN("%08x %p: %s\n", flags, block, err);
     return err == NULL;
 }
 
@@ -792,35 +784,35 @@ static BOOLEAN LFH_validate_arena(ULONG flags, const LFH_arena *arena)
     const LFH_arena *block_arena = LFH_block_arena_from_block((LFH_block *)arena);
     const LFH_arena *large_arena = LFH_large_arena_from_block((LFH_block *)arena);
 
-    if (unlikely(flags & HEAP_VALIDATE))
+    if (flags & HEAP_VALIDATE)
         return LFH_validate_heap(flags, LFH_heap_from_arena(arena));
 
-    if (unlikely(arena != large_arena && arena != block_arena))
+    if (arena != large_arena && arena != block_arena)
         err = "invalid arena alignment";
-    else if (unlikely(arena == block_arena))
+    else if (arena == block_arena)
     {
-        if (unlikely(!LFH_validate_block(flags, (LFH_block *)arena)))
+        if (!LFH_validate_block(flags, (LFH_block *)arena))
             err = "invalid block arena";
-        else if (unlikely(!LFH_validate_arena_free_blocks(flags, arena)))
+        else if (!LFH_validate_arena_free_blocks(flags, arena))
             err = "invalid block arena free list";
     }
-    else if (unlikely(arena == large_arena && !LFH_class_from_arena(arena)))
+    else if (arena == large_arena && !LFH_class_from_arena(arena))
     {
-        if (unlikely(arena->huge_size <= LARGE_CLASS_MAX_SIZE))
+        if (arena->huge_size <= LARGE_CLASS_MAX_SIZE)
             err = "invalid huge arena size";
     }
-    else if (unlikely(arena == large_arena && (parent = LFH_parent_from_arena(arena)) != arena))
+    else if (arena == large_arena && (parent = LFH_parent_from_arena(arena)) != arena)
     {
-        if (unlikely(arena > parent || LFH_large_arena_from_block((LFH_block *)parent) != parent))
+        if (arena > parent || LFH_large_arena_from_block((LFH_block *)parent) != parent)
             err = "invalid child arena parent";
     }
     else
     {
-        if (unlikely(!LFH_validate_arena_free_blocks(flags, arena)))
+        if (!LFH_validate_arena_free_blocks(flags, arena))
             err = "invalid large arena free list";
     }
 
-    if (unlikely(err)) WARN("%08x %p: %s\n", flags, arena, err);
+    if (err) WARN("%08x %p: %s\n", flags, arena, err);
     return err == NULL;
 }
 
@@ -879,7 +871,7 @@ static BOOLEAN LFH_validate_heap(ULONG flags, const LFH_heap *heap)
         }
     }
 
-    if (unlikely(err)) WARN("%08x %p: %s\n", flags, heap, err);
+    if (err) WARN("%08x %p: %s\n", flags, heap, err);
     return err == NULL;
 }
 
@@ -925,7 +917,7 @@ static FORCEINLINE LFH_ptr *LFH_allocate(ULONG flags, size_t size)
     {
         arena = LFH_allocate_huge_arena(heap, class_size);
         if (arena) block = LFH_arena_get_block(arena, ARENA_HEADER_SIZE);
-        if (block) LFH_block_initialize(block, flags, 0, size, LFH_block_get_class_size(block));
+        if (block) LFH_block_initialize(block, flags & ~HEAP_ZERO_MEMORY, 0, size, LFH_block_get_class_size(block));
     }
 
     LFH_deallocated_cached_arenas(heap);
@@ -1017,7 +1009,7 @@ static inline BOOLEAN LFH_validate(ULONG flags, const LFH_ptr *ptr)
     const LFH_heap *heap;
 
     /* clear HEAP_VALIDATE so we only validate block */
-    if (likely(ptr))
+    if (ptr)
         return LFH_validate_used_block(flags & ~HEAP_VALIDATE, block);
 
     if (!(heap = LFH_thread_heap(FALSE)))
@@ -1028,10 +1020,10 @@ static inline BOOLEAN LFH_validate(ULONG flags, const LFH_ptr *ptr)
 
 static inline BOOLEAN LFH_try_validate_all(ULONG flags)
 {
-    if (likely(!(flags & HEAP_VALIDATE_ALL)))
+    if (!(flags & HEAP_VALIDATE_ALL))
         return TRUE;
 
-    if (likely(LFH_validate(flags, NULL)))
+    if (LFH_validate(flags, NULL))
         return TRUE;
 
     LFH_dump_heap(LFH_thread_heap(FALSE));
@@ -1042,10 +1034,10 @@ NTSTATUS HEAP_lfh_allocate(HANDLE heap, ULONG flags, SIZE_T size, void **out)
 {
     TRACE("heap %p, flags %08x, size %lx, out %p.\n", heap, flags, size, out);
 
-    if (unlikely(!LFH_try_validate_all(flags)))
+    if (!LFH_try_validate_all(flags))
         return STATUS_INVALID_PARAMETER;
 
-    if (unlikely(!(*out = LFH_allocate(flags, size))))
+    if (!(*out = LFH_allocate(flags, size)))
         return STATUS_NO_MEMORY;
 
     return STATUS_SUCCESS;
@@ -1055,13 +1047,13 @@ NTSTATUS HEAP_lfh_free(HANDLE heap, ULONG flags, void *ptr)
 {
     TRACE("heap %p, flags %08x, ptr %p.\n", heap, flags, ptr);
 
-    if (unlikely(!LFH_try_validate_all(flags)))
+    if (!LFH_try_validate_all(flags))
         return STATUS_INVALID_PARAMETER;
 
-    if (unlikely(!LFH_validate(flags, ptr)))
+    if (!LFH_validate(flags, ptr))
         return STATUS_INVALID_PARAMETER;
 
-    if (unlikely(!LFH_free(flags, ptr)))
+    if (!LFH_free(flags, ptr))
         return STATUS_INVALID_PARAMETER;
 
     return STATUS_SUCCESS;
@@ -1071,13 +1063,13 @@ NTSTATUS HEAP_lfh_reallocate(HANDLE heap, ULONG flags, void *ptr, SIZE_T size, v
 {
     TRACE("heap %p, flags %08x, ptr %p, size %lx, out %p.\n", heap, flags, ptr, size, out);
 
-    if (unlikely(!LFH_try_validate_all(flags)))
+    if (!LFH_try_validate_all(flags))
         return STATUS_INVALID_PARAMETER;
 
-    if (unlikely(!LFH_validate(flags, ptr)))
+    if (!LFH_validate(flags, ptr))
         return STATUS_INVALID_PARAMETER;
 
-    if (unlikely(!(*out = LFH_reallocate(flags, ptr, size))))
+    if (!(*out = LFH_reallocate(flags, ptr, size)))
         return STATUS_NO_MEMORY;
 
     return STATUS_SUCCESS;
@@ -1087,10 +1079,10 @@ NTSTATUS HEAP_lfh_get_allocated_size(HANDLE heap, ULONG flags, const void *ptr, 
 {
     TRACE("heap %p, flags %08x, ptr %p, out %p.\n", heap, flags, ptr, out);
 
-    if (unlikely(!LFH_try_validate_all(flags)))
+    if (!LFH_try_validate_all(flags))
         return STATUS_INVALID_PARAMETER;
 
-    if (unlikely(!LFH_validate(flags, ptr)))
+    if (!LFH_validate(flags, ptr))
         return STATUS_INVALID_PARAMETER;
 
     *out = LFH_get_allocated_size(flags, ptr);
@@ -1101,10 +1093,10 @@ NTSTATUS HEAP_lfh_validate(HANDLE heap, ULONG flags, const void *ptr)
 {
     TRACE("heap %p, flags %08x, ptr %p.\n", heap, flags, ptr);
 
-    if (unlikely(!LFH_try_validate_all(flags)))
+    if (!LFH_try_validate_all(flags))
         return STATUS_INVALID_PARAMETER;
 
-    if (unlikely(!LFH_validate(flags, ptr)))
+    if (!LFH_validate(flags, ptr))
         return STATUS_INVALID_PARAMETER;
 
     return STATUS_SUCCESS;

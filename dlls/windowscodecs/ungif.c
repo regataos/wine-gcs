@@ -460,7 +460,8 @@ DGifGetImageDesc(GifFileType * GifFile) {
 
     GifFile->ImageCount++;
 
-    Private->PixelCount = GifFile->Image.Width * GifFile->Image.Height;
+    Private->PixelCount = (long)GifFile->Image.Width *
+       (long)GifFile->Image.Height;
 
     DGifSetupDecompress(GifFile);  /* Reset decompress algorithm parameters. */
 

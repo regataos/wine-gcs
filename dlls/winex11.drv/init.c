@@ -222,6 +222,14 @@ static INT CDECL X11DRV_ExtEscape( PHYSDEV dev, INT escape, INT in_count, LPCVOI
                     return TRUE;
                 }
                 break;
+            case X11DRV_GET_DRAWABLE:
+                if (out_count >= sizeof(struct x11drv_escape_get_drawable))
+                {
+                    struct x11drv_escape_get_drawable *data = out_data;
+                    data->drawable = physDev->drawable;
+                    return TRUE;
+                }
+                break;
             case X11DRV_PRESENT_DRAWABLE:
                 if (in_count >= sizeof(struct x11drv_escape_present_drawable))
                 {
@@ -294,9 +302,6 @@ static INT CDECL X11DRV_ExtEscape( PHYSDEV dev, INT escape, INT in_count, LPCVOI
                     return TRUE;
                 }
                 break;
-            case X11DRV_FLUSH_GDI_DISPLAY:
-                XFlush( gdi_display );
-                return TRUE;
             default:
                 break;
             }

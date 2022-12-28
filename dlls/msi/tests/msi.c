@@ -966,7 +966,9 @@ static void test_null(void)
     ok ( r == ERROR_SUCCESS || r == ERROR_FILE_NOT_FOUND, "wrong error %d\n", r);
     if ( r == ERROR_SUCCESS )
     {
-        if (!(lpData = malloc(cbData))) skip("Out of memory\n");
+        lpData = HeapAlloc(GetProcessHeap(), 0, cbData);
+        if (!lpData)
+            skip("Out of memory\n");
         else
         {
             r = RegQueryValueExA(hkey, NULL, 0, &dwType, lpData, &cbData);
@@ -978,7 +980,7 @@ static void test_null(void)
     if (r == ERROR_ACCESS_DENIED)
     {
         skip("Not enough rights to perform tests\n");
-        free(lpData);
+        HeapFree(GetProcessHeap(), 0, lpData);
         RegCloseKey(hkey);
         return;
     }
@@ -991,7 +993,8 @@ static void test_null(void)
     {
         r = RegSetValueExA(hkey, NULL, 0, dwType, lpData, cbData);
         ok ( r == ERROR_SUCCESS, "wrong error %d\n", r);
-        free(lpData);
+
+        HeapFree(GetProcessHeap(), 0, lpData);
     }
     else
     {
@@ -1231,7 +1234,7 @@ static void create_test_guid(LPSTR prodcode, LPSTR squashed)
     int size;
 
     hr = CoCreateGuid(&guid);
-    ok(hr == S_OK, "Expected S_OK, got %#lx\n", hr);
+    ok(hr == S_OK, "Expected S_OK, got %d\n", hr);
 
     size = StringFromGUID2(&guid, guidW, ARRAY_SIZE(guidW));
     ok(size == GUID_SIZE, "Expected %d, got %d.\n", GUID_SIZE, size);
@@ -1254,10 +1257,10 @@ static char *get_user_sid(void)
     OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token);
     GetTokenInformation(token, TokenUser, NULL, size, &size);
 
-    user = malloc(size);
+    user = HeapAlloc(GetProcessHeap(), 0, size);
     GetTokenInformation(token, TokenUser, user, size, &size);
     ConvertSidToStringSidA(user->User.Sid, &usersid);
-    free(user);
+    HeapFree(GetProcessHeap(), 0, user);
 
     CloseHandle(token);
     return usersid;
@@ -1287,42 +1290,42 @@ static void test_MsiQueryProductState(void)
     state = MsiQueryProductStateA(NULL);
     error = GetLastError();
     ok(state == INSTALLSTATE_INVALIDARG, "Expected INSTALLSTATE_INVALIDARG, got %d\n", state);
-    ok(error == 0xdeadbeef, "expected 0xdeadbeef, got %lu\n", error);
+    ok(error == 0xdeadbeef, "expected 0xdeadbeef, got %u\n", error);
 
     /* empty prodcode */
     SetLastError(0xdeadbeef);
     state = MsiQueryProductStateA("");
     error = GetLastError();
     ok(state == INSTALLSTATE_INVALIDARG, "Expected INSTALLSTATE_INVALIDARG, got %d\n", state);
-    ok(error == 0xdeadbeef, "expected 0xdeadbeef, got %lu\n", error);
+    ok(error == 0xdeadbeef, "expected 0xdeadbeef, got %u\n", error);
 
     /* garbage prodcode */
     SetLastError(0xdeadbeef);
     state = MsiQueryProductStateA("garbage");
     error = GetLastError();
     ok(state == INSTALLSTATE_INVALIDARG, "Expected INSTALLSTATE_INVALIDARG, got %d\n", state);
-    ok(error == 0xdeadbeef, "expected 0xdeadbeef, got %lu\n", error);
+    ok(error == 0xdeadbeef, "expected 0xdeadbeef, got %u\n", error);
 
     /* guid without brackets */
     SetLastError(0xdeadbeef);
     state = MsiQueryProductStateA("6700E8CF-95AB-4D9C-BC2C-15840DEA7A5D");
     error = GetLastError();
     ok(state == INSTALLSTATE_INVALIDARG, "Expected INSTALLSTATE_INVALIDARG, got %d\n", state);
-    ok(error == 0xdeadbeef, "expected 0xdeadbeef, got %lu\n", error);
+    ok(error == 0xdeadbeef, "expected 0xdeadbeef, got %u\n", error);
 
     /* guid with brackets */
     SetLastError(0xdeadbeef);
     state = MsiQueryProductStateA("{6700E8CF-95AB-4D9C-BC2C-15840DEA7A5D}");
     error = GetLastError();
     ok(state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
-    ok(error == ERROR_SUCCESS, "expected ERROR_SUCCESS, got %lu\n", error);
+    ok(error == ERROR_SUCCESS, "expected ERROR_SUCCESS, got %u\n", error);
 
     /* same length as guid, but random */
     SetLastError(0xdeadbeef);
     state = MsiQueryProductStateA("A938G02JF-2NF3N93-VN3-2NNF-3KGKALDNF93");
     error = GetLastError();
     ok(state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
-    ok(error == 0xdeadbeef, "expected 0xdeadbeef, got %lu\n", error);
+    ok(error == 0xdeadbeef, "expected 0xdeadbeef, got %u\n", error);
 
     /* MSIINSTALLCONTEXT_USERUNMANAGED */
 
@@ -1330,20 +1333,20 @@ static void test_MsiQueryProductState(void)
     state = MsiQueryProductStateA(prodcode);
     error = GetLastError();
     ok(state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
-    ok(error == ERROR_SUCCESS, "expected ERROR_SUCCESS, got %lu\n", error);
+    ok(error == ERROR_SUCCESS, "expected ERROR_SUCCESS, got %u\n", error);
 
     lstrcpyA(keypath, "Software\\Microsoft\\Installer\\Products\\");
     lstrcatA(keypath, prod_squashed);
 
     res = RegCreateKeyA(HKEY_CURRENT_USER, keypath, &userkey);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* user product key exists */
     SetLastError(0xdeadbeef);
     state = MsiQueryProductStateA(prodcode);
     error = GetLastError();
     ok(state == INSTALLSTATE_ADVERTISED, "Expected INSTALLSTATE_ADVERTISED, got %d\n", state);
-    ok(error == ERROR_SUCCESS, "expected ERROR_SUCCESS, got %lu\n", error);
+    ok(error == ERROR_SUCCESS, "expected ERROR_SUCCESS, got %u\n", error);
 
     lstrcpyA(keypath, "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\");
     lstrcatA(keypath, prodcode);
@@ -1357,25 +1360,25 @@ static void test_MsiQueryProductState(void)
         LocalFree(usersid);
         return;
     }
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* local uninstall key exists */
     SetLastError(0xdeadbeef);
     state = MsiQueryProductStateA(prodcode);
     error = GetLastError();
     ok(state == INSTALLSTATE_ADVERTISED, "Expected INSTALLSTATE_ADVERTISED, got %d\n", state);
-    ok(error == ERROR_SUCCESS, "expected ERROR_SUCCESS, got %lu\n", error);
+    ok(error == ERROR_SUCCESS, "expected ERROR_SUCCESS, got %u\n", error);
 
     data = 1;
     res = RegSetValueExA(localkey, "WindowsInstaller", 0, REG_DWORD, (const BYTE *)&data, sizeof(DWORD));
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* WindowsInstaller value exists */
     SetLastError(0xdeadbeef);
     state = MsiQueryProductStateA(prodcode);
     error = GetLastError();
     ok(state == INSTALLSTATE_ADVERTISED, "Expected INSTALLSTATE_ADVERTISED, got %d\n", state);
-    ok(error == ERROR_SUCCESS, "expected ERROR_SUCCESS, got %lu\n", error);
+    ok(error == ERROR_SUCCESS, "expected ERROR_SUCCESS, got %u\n", error);
 
     RegDeleteValueA(localkey, "WindowsInstaller");
     delete_key(localkey, "", access & KEY_WOW64_64KEY);
@@ -1394,28 +1397,28 @@ static void test_MsiQueryProductState(void)
         LocalFree(usersid);
         return;
     }
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* local product key exists */
     SetLastError(0xdeadbeef);
     state = MsiQueryProductStateA(prodcode);
     error = GetLastError();
     ok(state == INSTALLSTATE_ADVERTISED, "Expected INSTALLSTATE_ADVERTISED, got %d\n", state);
-    ok(error == ERROR_SUCCESS, "expected ERROR_SUCCESS, got %lu\n", error);
+    ok(error == ERROR_SUCCESS, "expected ERROR_SUCCESS, got %u\n", error);
 
     res = RegCreateKeyExA(localkey, "InstallProperties", 0, NULL, 0, access, NULL, &props, NULL);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* install properties key exists */
     SetLastError(0xdeadbeef);
     state = MsiQueryProductStateA(prodcode);
     error = GetLastError();
     ok(state == INSTALLSTATE_ADVERTISED, "Expected INSTALLSTATE_ADVERTISED, got %d\n", state);
-    ok(error == ERROR_SUCCESS, "expected ERROR_SUCCESS, got %lu\n", error);
+    ok(error == ERROR_SUCCESS, "expected ERROR_SUCCESS, got %u\n", error);
 
     data = 1;
     res = RegSetValueExA(props, "WindowsInstaller", 0, REG_DWORD, (const BYTE *)&data, sizeof(DWORD));
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* WindowsInstaller value exists */
     SetLastError(0xdeadbeef);
@@ -1435,18 +1438,18 @@ static void test_MsiQueryProductState(void)
         return;
     }
     ok(state == INSTALLSTATE_DEFAULT, "Expected INSTALLSTATE_DEFAULT, got %d\n", state);
-    ok(error == ERROR_SUCCESS, "expected ERROR_SUCCESS, got %lu\n", error);
+    ok(error == ERROR_SUCCESS, "expected ERROR_SUCCESS, got %u\n", error);
 
     data = 2;
     res = RegSetValueExA(props, "WindowsInstaller", 0, REG_DWORD, (const BYTE *)&data, sizeof(DWORD));
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* WindowsInstaller value is not 1 */
     SetLastError(0xdeadbeef);
     state = MsiQueryProductStateA(prodcode);
     error = GetLastError();
     ok(state == INSTALLSTATE_DEFAULT, "Expected INSTALLSTATE_DEFAULT, got %d\n", state);
-    ok(error == ERROR_SUCCESS, "expected ERROR_SUCCESS, got %lu\n", error);
+    ok(error == ERROR_SUCCESS, "expected ERROR_SUCCESS, got %u\n", error);
 
     RegDeleteKeyA(userkey, "");
 
@@ -1455,7 +1458,7 @@ static void test_MsiQueryProductState(void)
     state = MsiQueryProductStateA(prodcode);
     error = GetLastError();
     ok(state == INSTALLSTATE_ABSENT, "Expected INSTALLSTATE_ABSENT, got %d\n", state);
-    ok(error == ERROR_SUCCESS, "expected ERROR_SUCCESS, got %lu\n", error);
+    ok(error == ERROR_SUCCESS, "expected ERROR_SUCCESS, got %u\n", error);
 
     RegDeleteValueA(props, "WindowsInstaller");
     delete_key(props, "", access & KEY_WOW64_64KEY);
@@ -1473,7 +1476,7 @@ static void test_MsiQueryProductState(void)
     lstrcatA(keypath, prod_squashed);
 
     res = RegCreateKeyExA(HKEY_LOCAL_MACHINE, keypath, 0, NULL, 0, access, NULL, &prodkey, NULL);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     state = MsiQueryProductStateA(prodcode);
     ok(state == INSTALLSTATE_ADVERTISED,
@@ -1485,14 +1488,14 @@ static void test_MsiQueryProductState(void)
     lstrcatA(keypath, prod_squashed);
 
     res = RegCreateKeyExA(HKEY_LOCAL_MACHINE, keypath, 0, NULL, 0, access, NULL, &localkey, NULL);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     state = MsiQueryProductStateA(prodcode);
     ok(state == INSTALLSTATE_ADVERTISED,
        "Expected INSTALLSTATE_ADVERTISED, got %d\n", state);
 
     res = RegCreateKeyExA(localkey, "InstallProperties", 0, NULL, 0, access, NULL, &props, NULL);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     state = MsiQueryProductStateA(prodcode);
     ok(state == INSTALLSTATE_ADVERTISED,
@@ -1500,7 +1503,7 @@ static void test_MsiQueryProductState(void)
 
     data = 1;
     res = RegSetValueExA(props, "WindowsInstaller", 0, REG_DWORD, (const BYTE *)&data, sizeof(DWORD));
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* WindowsInstaller value exists */
     state = MsiQueryProductStateA(prodcode);
@@ -1526,7 +1529,7 @@ static void test_MsiQueryProductState(void)
         LocalFree( usersid );
         return;
     }
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     state = MsiQueryProductStateA(prodcode);
     ok(state == INSTALLSTATE_ADVERTISED, "Expected INSTALLSTATE_ADVERTISED, got %d\n", state);
@@ -1536,14 +1539,14 @@ static void test_MsiQueryProductState(void)
     lstrcatA(keypath, prod_squashed);
 
     res = RegCreateKeyExA(HKEY_LOCAL_MACHINE, keypath, 0, NULL, 0, access, NULL, &localkey, NULL);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     state = MsiQueryProductStateA(prodcode);
     ok(state == INSTALLSTATE_ADVERTISED,
        "Expected INSTALLSTATE_ADVERTISED, got %d\n", state);
 
     res = RegCreateKeyExA(localkey, "InstallProperties", 0, NULL, 0, access, NULL, &props, NULL);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     state = MsiQueryProductStateA(prodcode);
     ok(state == INSTALLSTATE_ADVERTISED,
@@ -1551,7 +1554,7 @@ static void test_MsiQueryProductState(void)
 
     data = 1;
     res = RegSetValueExA(props, "WindowsInstaller", 0, REG_DWORD, (const BYTE *)&data, sizeof(DWORD));
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* WindowsInstaller value exists */
     state = MsiQueryProductStateA(prodcode);
@@ -1608,10 +1611,10 @@ static void compose_base85_guid(LPSTR component, LPSTR comp_base85, LPSTR squash
     int size;
 
     hr = CoCreateGuid(&guid);
-    ok(hr == S_OK, "Expected S_OK, got %#lx\n", hr);
+    ok(hr == S_OK, "Expected S_OK, got %d\n", hr);
 
     size = StringFromGUID2(&guid, guidW, MAX_PATH);
-    ok(size == 39, "Expected 39, got %d\n", size);
+    ok(size == 39, "Expected 39, got %d\n", hr);
 
     WideCharToMultiByte(CP_ACP, 0, guidW, size, component, MAX_PATH, NULL, NULL);
     encode_base85_guid(&guid, base85W);
@@ -1648,63 +1651,63 @@ static void test_MsiQueryFeatureState(void)
     state = MsiQueryFeatureStateA(NULL, "feature");
     error = GetLastError();
     ok(state == INSTALLSTATE_INVALIDARG, "Expected INSTALLSTATE_INVALIDARG, got %d\n", state);
-    ok(error == 0xdeadbeef, "expected 0xdeadbeef, got %lu\n", error);
+    ok(error == 0xdeadbeef, "expected 0xdeadbeef, got %u\n", error);
 
     /* empty prodcode */
     SetLastError(0xdeadbeef);
     state = MsiQueryFeatureStateA("", "feature");
     error = GetLastError();
     ok(state == INSTALLSTATE_INVALIDARG, "Expected INSTALLSTATE_INVALIDARG, got %d\n", state);
-    ok(error == 0xdeadbeef, "expected 0xdeadbeef, got %lu\n", error);
+    ok(error == 0xdeadbeef, "expected 0xdeadbeef, got %u\n", error);
 
     /* garbage prodcode */
     SetLastError(0xdeadbeef);
     state = MsiQueryFeatureStateA("garbage", "feature");
     error = GetLastError();
     ok(state == INSTALLSTATE_INVALIDARG, "Expected INSTALLSTATE_INVALIDARG, got %d\n", state);
-    ok(error == 0xdeadbeef, "expected 0xdeadbeef, got %lu\n", error);
+    ok(error == 0xdeadbeef, "expected 0xdeadbeef, got %u\n", error);
 
     /* guid without brackets */
     SetLastError(0xdeadbeef);
     state = MsiQueryFeatureStateA("6700E8CF-95AB-4D9C-BC2C-15840DEA7A5D", "feature");
     error = GetLastError();
     ok(state == INSTALLSTATE_INVALIDARG, "Expected INSTALLSTATE_INVALIDARG, got %d\n", state);
-    ok(error == 0xdeadbeef, "expected 0xdeadbeef, got %lu\n", error);
+    ok(error == 0xdeadbeef, "expected 0xdeadbeef, got %u\n", error);
 
     /* guid with brackets */
     SetLastError(0xdeadbeef);
     state = MsiQueryFeatureStateA("{6700E8CF-95AB-4D9C-BC2C-15840DEA7A5D}", "feature");
     error = GetLastError();
     ok(state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
-    ok(error == ERROR_SUCCESS, "expected ERROR_SUCCESS, got %lu\n", error);
+    ok(error == ERROR_SUCCESS, "expected ERROR_SUCCESS, got %u\n", error);
 
     /* same length as guid, but random */
     SetLastError(0xdeadbeef);
     state = MsiQueryFeatureStateA("A938G02JF-2NF3N93-VN3-2NNF-3KGKALDNF93", "feature");
     error = GetLastError();
     ok(state == INSTALLSTATE_INVALIDARG, "Expected INSTALLSTATE_INVALIDARG, got %d\n", state);
-    ok(error == 0xdeadbeef, "expected 0xdeadbeef, got %lu\n", error);
+    ok(error == 0xdeadbeef, "expected 0xdeadbeef, got %u\n", error);
 
     /* NULL szFeature */
     SetLastError(0xdeadbeef);
     state = MsiQueryFeatureStateA(prodcode, NULL);
     error = GetLastError();
     ok(state == INSTALLSTATE_INVALIDARG, "Expected INSTALLSTATE_INVALIDARG, got %d\n", state);
-    ok(error == 0xdeadbeef, "expected 0xdeadbeef, got %lu\n", error);
+    ok(error == 0xdeadbeef, "expected 0xdeadbeef, got %u\n", error);
 
     /* empty szFeature */
     SetLastError(0xdeadbeef);
     state = MsiQueryFeatureStateA(prodcode, "");
     error = GetLastError();
     ok(state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
-    ok(error == ERROR_SUCCESS, "expected ERROR_SUCCESS, got %lu\n", error);
+    ok(error == ERROR_SUCCESS, "expected ERROR_SUCCESS, got %u\n", error);
 
     /* feature key does not exist yet */
     SetLastError(0xdeadbeef);
     state = MsiQueryFeatureStateA(prodcode, "feature");
     error = GetLastError();
     ok(state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
-    ok(error == ERROR_SUCCESS, "expected ERROR_SUCCESS, got %lu\n", error);
+    ok(error == ERROR_SUCCESS, "expected ERROR_SUCCESS, got %u\n", error);
 
     /* MSIINSTALLCONTEXT_USERUNMANAGED */
 
@@ -1712,24 +1715,24 @@ static void test_MsiQueryFeatureState(void)
     lstrcatA(keypath, prod_squashed);
 
     res = RegCreateKeyA(HKEY_CURRENT_USER, keypath, &userkey);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* feature key exists */
     SetLastError(0xdeadbeef);
     state = MsiQueryFeatureStateA(prodcode, "feature");
     error = GetLastError();
     ok(state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
-    ok(error == ERROR_SUCCESS, "expected ERROR_SUCCESS, got %lu\n", error);
+    ok(error == ERROR_SUCCESS, "expected ERROR_SUCCESS, got %u\n", error);
 
     res = RegSetValueExA(userkey, "feature", 0, REG_SZ, (const BYTE *)"", 2);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* feature value exists */
     SetLastError(0xdeadbeef);
     state = MsiQueryFeatureStateA(prodcode, "feature");
     error = GetLastError();
     ok(state == INSTALLSTATE_ADVERTISED, "Expected INSTALLSTATE_ADVERTISED, got %d\n", state);
-    ok(error == ERROR_SUCCESS, "expected ERROR_SUCCESS, got %lu\n", error);
+    ok(error == ERROR_SUCCESS, "expected ERROR_SUCCESS, got %u\n", error);
 
     lstrcpyA(keypath, "Software\\Microsoft\\Windows\\CurrentVersion\\Installer\\UserData\\");
     lstrcatA(keypath, usersid);
@@ -1746,50 +1749,50 @@ static void test_MsiQueryFeatureState(void)
         LocalFree(usersid);
         return;
     }
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* userdata features key exists */
     SetLastError(0xdeadbeef);
     state = MsiQueryFeatureStateA(prodcode, "feature");
     error = GetLastError();
     ok(state == INSTALLSTATE_ADVERTISED, "Expected INSTALLSTATE_ADVERTISED, got %d\n", state);
-    ok(error == ERROR_SUCCESS, "expected ERROR_SUCCESS, got %lu\n", error);
+    ok(error == ERROR_SUCCESS, "expected ERROR_SUCCESS, got %u\n", error);
 
     res = RegSetValueExA(localkey, "feature", 0, REG_SZ, (const BYTE *)"aaaaaaaaaaaaaaaaaaa", 20);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     SetLastError(0xdeadbeef);
     state = MsiQueryFeatureStateA(prodcode, "feature");
     error = GetLastError();
     ok(state == INSTALLSTATE_BADCONFIG, "Expected INSTALLSTATE_BADCONFIG, got %d\n", state);
-    ok(error == ERROR_SUCCESS, "expected ERROR_SUCCESS, got %lu\n", error);
+    ok(error == ERROR_SUCCESS, "expected ERROR_SUCCESS, got %u\n", error);
 
     res = RegSetValueExA(localkey, "feature", 0, REG_SZ, (const BYTE *)"aaaaaaaaaaaaaaaaaaaa", 21);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     SetLastError(0xdeadbeef);
     state = MsiQueryFeatureStateA(prodcode, "feature");
     error = GetLastError();
     ok(state == INSTALLSTATE_ADVERTISED, "Expected INSTALLSTATE_ADVERTISED, got %d\n", state);
-    ok(error == ERROR_SUCCESS, "expected ERROR_SUCCESS, got %lu\n", error);
+    ok(error == ERROR_SUCCESS, "expected ERROR_SUCCESS, got %u\n", error);
 
     res = RegSetValueExA(localkey, "feature", 0, REG_SZ, (const BYTE *)"aaaaaaaaaaaaaaaaaaaaa", 22);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     SetLastError(0xdeadbeef);
     state = MsiQueryFeatureStateA(prodcode, "feature");
     error = GetLastError();
     ok(state == INSTALLSTATE_ADVERTISED, "Expected INSTALLSTATE_ADVERTISED, got %d\n", state);
-    ok(error == ERROR_SUCCESS, "expected ERROR_SUCCESS, got %lu\n", error);
+    ok(error == ERROR_SUCCESS, "expected ERROR_SUCCESS, got %u\n", error);
 
     res = RegSetValueExA(localkey, "feature", 0, REG_SZ, (const BYTE *)comp_base85, 41);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     SetLastError(0xdeadbeef);
     state = MsiQueryFeatureStateA(prodcode, "feature");
     error = GetLastError();
     ok(state == INSTALLSTATE_ADVERTISED, "Expected INSTALLSTATE_ADVERTISED, got %d\n", state);
-    ok(error == ERROR_SUCCESS, "expected ERROR_SUCCESS, got %lu\n", error);
+    ok(error == ERROR_SUCCESS, "expected ERROR_SUCCESS, got %u\n", error);
 
     lstrcpyA(keypath, "Software\\Microsoft\\Windows\\CurrentVersion\\Installer\\UserData\\");
     lstrcatA(keypath, usersid);
@@ -1797,7 +1800,7 @@ static void test_MsiQueryFeatureState(void)
     lstrcatA(keypath, comp_squashed);
 
     res = RegCreateKeyExA(HKEY_LOCAL_MACHINE, keypath, 0, NULL, 0, access, NULL, &compkey, NULL);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     lstrcpyA(keypath, "Software\\Microsoft\\Windows\\CurrentVersion\\Installer\\UserData\\");
     lstrcatA(keypath, usersid);
@@ -1805,81 +1808,81 @@ static void test_MsiQueryFeatureState(void)
     lstrcatA(keypath, comp_squashed2);
 
     res = RegCreateKeyExA(HKEY_LOCAL_MACHINE, keypath, 0, NULL, 0, access, NULL, &compkey2, NULL);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     SetLastError(0xdeadbeef);
     state = MsiQueryFeatureStateA(prodcode, "feature");
     error = GetLastError();
     ok(state == INSTALLSTATE_ADVERTISED, "Expected INSTALLSTATE_ADVERTISED, got %d\n", state);
-    ok(error == ERROR_SUCCESS, "expected ERROR_SUCCESS, got %lu\n", error);
+    ok(error == ERROR_SUCCESS, "expected ERROR_SUCCESS, got %u\n", error);
 
     res = RegSetValueExA(compkey, prod_squashed, 0, REG_SZ, (const BYTE *)"", 1);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     SetLastError(0xdeadbeef);
     state = MsiQueryFeatureStateA(prodcode, "feature");
     error = GetLastError();
     ok(state == INSTALLSTATE_ADVERTISED, "Expected INSTALLSTATE_ADVERTISED, got %d\n", state);
-    ok(error == ERROR_SUCCESS, "expected ERROR_SUCCESS, got %lu\n", error);
+    ok(error == ERROR_SUCCESS, "expected ERROR_SUCCESS, got %u\n", error);
 
     res = RegSetValueExA(compkey, prod_squashed, 0, REG_SZ, (const BYTE *)"apple", 6);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     SetLastError(0xdeadbeef);
     state = MsiQueryFeatureStateA(prodcode, "feature");
     error = GetLastError();
     ok(state == INSTALLSTATE_ADVERTISED, "Expected INSTALLSTATE_ADVERTISED, got %d\n", state);
-    ok(error == ERROR_SUCCESS, "expected ERROR_SUCCESS, got %lu\n", error);
+    ok(error == ERROR_SUCCESS, "expected ERROR_SUCCESS, got %u\n", error);
 
     res = RegSetValueExA(compkey2, prod_squashed, 0, REG_SZ, (const BYTE *)"orange", 7);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* INSTALLSTATE_LOCAL */
     SetLastError(0xdeadbeef);
     state = MsiQueryFeatureStateA(prodcode, "feature");
     error = GetLastError();
     ok(state == INSTALLSTATE_LOCAL, "Expected INSTALLSTATE_LOCAL, got %d\n", state);
-    ok(error == ERROR_SUCCESS, "expected ERROR_SUCCESS, got %lu\n", error);
+    ok(error == ERROR_SUCCESS, "expected ERROR_SUCCESS, got %u\n", error);
 
     res = RegSetValueExA(compkey, prod_squashed, 0, REG_SZ, (const BYTE *)"01\\", 4);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* INSTALLSTATE_SOURCE */
     SetLastError(0xdeadbeef);
     state = MsiQueryFeatureStateA(prodcode, "feature");
     error = GetLastError();
     ok(state == INSTALLSTATE_SOURCE, "Expected INSTALLSTATE_SOURCE, got %d\n", state);
-    ok(error == ERROR_SUCCESS, "expected ERROR_SUCCESS, got %lu\n", error);
+    ok(error == ERROR_SUCCESS, "expected ERROR_SUCCESS, got %u\n", error);
 
     res = RegSetValueExA(compkey, prod_squashed, 0, REG_SZ, (const BYTE *)"01", 3);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* bad INSTALLSTATE_SOURCE */
     SetLastError(0xdeadbeef);
     state = MsiQueryFeatureStateA(prodcode, "feature");
     error = GetLastError();
     ok(state == INSTALLSTATE_LOCAL, "Expected INSTALLSTATE_LOCAL, got %d\n", state);
-    ok(error == ERROR_SUCCESS, "expected ERROR_SUCCESS, got %lu\n", error);
+    ok(error == ERROR_SUCCESS, "expected ERROR_SUCCESS, got %u\n", error);
 
     res = RegSetValueExA(compkey, prod_squashed, 0, REG_SZ, (const BYTE *)"01a", 4);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* INSTALLSTATE_SOURCE */
     SetLastError(0xdeadbeef);
     state = MsiQueryFeatureStateA(prodcode, "feature");
     error = GetLastError();
     ok(state == INSTALLSTATE_SOURCE, "Expected INSTALLSTATE_SOURCE, got %d\n", state);
-    ok(error == ERROR_SUCCESS, "expected ERROR_SUCCESS, got %lu\n", error);
+    ok(error == ERROR_SUCCESS, "expected ERROR_SUCCESS, got %u\n", error);
 
     res = RegSetValueExA(compkey, prod_squashed, 0, REG_SZ, (const BYTE *)"01", 3);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* bad INSTALLSTATE_SOURCE */
     SetLastError(0xdeadbeef);
     state = MsiQueryFeatureStateA(prodcode, "feature");
     error = GetLastError();
     ok(state == INSTALLSTATE_LOCAL, "Expected INSTALLSTATE_LOCAL, got %d\n", state);
-    ok(error == ERROR_SUCCESS, "expected ERROR_SUCCESS, got %lu\n", error);
+    ok(error == ERROR_SUCCESS, "expected ERROR_SUCCESS, got %u\n", error);
 
     RegDeleteValueA(compkey, prod_squashed);
     RegDeleteValueA(compkey2, prod_squashed);
@@ -1901,14 +1904,14 @@ static void test_MsiQueryFeatureState(void)
     lstrcatA(keypath, prod_squashed);
 
     res = RegCreateKeyExA(HKEY_LOCAL_MACHINE, keypath, 0, NULL, 0, access, NULL, &userkey, NULL);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* feature key exists */
     state = MsiQueryFeatureStateA(prodcode, "feature");
     ok(state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
 
     res = RegSetValueExA(userkey, "feature", 0, REG_SZ, (const BYTE *)"", 1);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* feature value exists */
     state = MsiQueryFeatureStateA(prodcode, "feature");
@@ -1921,32 +1924,32 @@ static void test_MsiQueryFeatureState(void)
     lstrcatA(keypath, "\\Features");
 
     res = RegCreateKeyExA(HKEY_LOCAL_MACHINE, keypath, 0, NULL, 0, access, NULL, &localkey, NULL);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* userdata features key exists */
     state = MsiQueryFeatureStateA(prodcode, "feature");
     ok(state == INSTALLSTATE_ADVERTISED, "Expected INSTALLSTATE_ADVERTISED, got %d\n", state);
 
     res = RegSetValueExA(localkey, "feature", 0, REG_SZ, (const BYTE *)"aaaaaaaaaaaaaaaaaaa", 20);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     state = MsiQueryFeatureStateA(prodcode, "feature");
     ok(state == INSTALLSTATE_BADCONFIG, "Expected INSTALLSTATE_BADCONFIG, got %d\n", state);
 
     res = RegSetValueExA(localkey, "feature", 0, REG_SZ, (const BYTE *)"aaaaaaaaaaaaaaaaaaaa", 21);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     state = MsiQueryFeatureStateA(prodcode, "feature");
     ok(state == INSTALLSTATE_ADVERTISED, "Expected INSTALLSTATE_ADVERTISED, got %d\n", state);
 
     res = RegSetValueExA(localkey, "feature", 0, REG_SZ, (const BYTE *)"aaaaaaaaaaaaaaaaaaaaa", 22);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     state = MsiQueryFeatureStateA(prodcode, "feature");
     ok(state == INSTALLSTATE_ADVERTISED, "Expected INSTALLSTATE_ADVERTISED, got %d\n", state);
 
     res = RegSetValueExA(localkey, "feature", 0, REG_SZ, (const BYTE *)comp_base85, 41);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     state = MsiQueryFeatureStateA(prodcode, "feature");
     ok(state == INSTALLSTATE_ADVERTISED, "Expected INSTALLSTATE_ADVERTISED, got %d\n", state);
@@ -1957,7 +1960,7 @@ static void test_MsiQueryFeatureState(void)
     lstrcatA(keypath, comp_squashed);
 
     res = RegCreateKeyExA(HKEY_LOCAL_MACHINE, keypath, 0, NULL, 0, access, NULL, &compkey, NULL);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     lstrcpyA(keypath, "Software\\Microsoft\\Windows\\CurrentVersion\\Installer\\UserData\\");
     lstrcatA(keypath, usersid);
@@ -1965,25 +1968,25 @@ static void test_MsiQueryFeatureState(void)
     lstrcatA(keypath, comp_squashed2);
 
     res = RegCreateKeyExA(HKEY_LOCAL_MACHINE, keypath, 0, NULL, 0, access, NULL, &compkey2, NULL);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     state = MsiQueryFeatureStateA(prodcode, "feature");
     ok(state == INSTALLSTATE_ADVERTISED, "Expected INSTALLSTATE_ADVERTISED, got %d\n", state);
 
     res = RegSetValueExA(compkey, prod_squashed, 0, REG_SZ, (const BYTE *)"", 1);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     state = MsiQueryFeatureStateA(prodcode, "feature");
     ok(state == INSTALLSTATE_ADVERTISED, "Expected INSTALLSTATE_ADVERTISED, got %d\n", state);
 
     res = RegSetValueExA(compkey, prod_squashed, 0, REG_SZ, (const BYTE *)"apple", 6);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     state = MsiQueryFeatureStateA(prodcode, "feature");
     ok(state == INSTALLSTATE_ADVERTISED, "Expected INSTALLSTATE_ADVERTISED, got %d\n", state);
 
     res = RegSetValueExA(compkey2, prod_squashed, 0, REG_SZ, (const BYTE *)"orange", 7);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     state = MsiQueryFeatureStateA(prodcode, "feature");
     ok(state == INSTALLSTATE_LOCAL, "Expected INSTALLSTATE_LOCAL, got %d\n", state);
@@ -2012,14 +2015,14 @@ static void test_MsiQueryFeatureState(void)
         LocalFree( usersid );
         return;
     }
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* feature key exists */
     state = MsiQueryFeatureStateA(prodcode, "feature");
     ok(state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
 
     res = RegSetValueExA(userkey, "feature", 0, REG_SZ, (const BYTE *)"", 1);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* feature value exists */
     state = MsiQueryFeatureStateA(prodcode, "feature");
@@ -2031,32 +2034,32 @@ static void test_MsiQueryFeatureState(void)
     lstrcatA(keypath, "\\Features");
 
     res = RegCreateKeyExA(HKEY_LOCAL_MACHINE, keypath, 0, NULL, 0, access, NULL, &localkey, NULL);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* userdata features key exists */
     state = MsiQueryFeatureStateA(prodcode, "feature");
     ok(state == INSTALLSTATE_ADVERTISED, "Expected INSTALLSTATE_ADVERTISED, got %d\n", state);
 
     res = RegSetValueExA(localkey, "feature", 0, REG_SZ, (const BYTE *)"aaaaaaaaaaaaaaaaaaa", 20);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     state = MsiQueryFeatureStateA(prodcode, "feature");
     ok(state == INSTALLSTATE_BADCONFIG, "Expected INSTALLSTATE_BADCONFIG, got %d\n", state);
 
     res = RegSetValueExA(localkey, "feature", 0, REG_SZ, (const BYTE *)"aaaaaaaaaaaaaaaaaaaa", 21);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     state = MsiQueryFeatureStateA(prodcode, "feature");
     ok(state == INSTALLSTATE_ADVERTISED, "Expected INSTALLSTATE_ADVERTISED, got %d\n", state);
 
     res = RegSetValueExA(localkey, "feature", 0, REG_SZ, (const BYTE *)"aaaaaaaaaaaaaaaaaaaaa", 22);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     state = MsiQueryFeatureStateA(prodcode, "feature");
     ok(state == INSTALLSTATE_ADVERTISED, "Expected INSTALLSTATE_ADVERTISED, got %d\n", state);
 
     res = RegSetValueExA(localkey, "feature", 0, REG_SZ, (const BYTE *)comp_base85, 41);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     state = MsiQueryFeatureStateA(prodcode, "feature");
     ok(state == INSTALLSTATE_ADVERTISED, "Expected INSTALLSTATE_ADVERTISED, got %d\n", state);
@@ -2066,32 +2069,32 @@ static void test_MsiQueryFeatureState(void)
     lstrcatA(keypath, comp_squashed);
 
     res = RegCreateKeyExA(HKEY_LOCAL_MACHINE, keypath, 0, NULL, 0, access, NULL, &compkey, NULL);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     lstrcpyA(keypath, "Software\\Microsoft\\Windows\\CurrentVersion\\Installer\\UserData\\");
     lstrcatA(keypath, "S-1-5-18\\Components\\");
     lstrcatA(keypath, comp_squashed2);
 
     res = RegCreateKeyExA(HKEY_LOCAL_MACHINE, keypath, 0, NULL, 0, access, NULL, &compkey2, NULL);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     state = MsiQueryFeatureStateA(prodcode, "feature");
     ok(state == INSTALLSTATE_ADVERTISED, "Expected INSTALLSTATE_ADVERTISED, got %d\n", state);
 
     res = RegSetValueExA(compkey, prod_squashed, 0, REG_SZ, (const BYTE *)"", 1);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     state = MsiQueryFeatureStateA(prodcode, "feature");
     ok(state == INSTALLSTATE_ADVERTISED, "Expected INSTALLSTATE_ADVERTISED, got %d\n", state);
 
     res = RegSetValueExA(compkey, prod_squashed, 0, REG_SZ, (const BYTE *)"apple", 6);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     state = MsiQueryFeatureStateA(prodcode, "feature");
     ok(state == INSTALLSTATE_ADVERTISED, "Expected INSTALLSTATE_ADVERTISED, got %d\n", state);
 
     res = RegSetValueExA(compkey2, prod_squashed, 0, REG_SZ, (const BYTE *)"orange", 7);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     state = MsiQueryFeatureStateA(prodcode, "feature");
     ok(state == INSTALLSTATE_LOCAL, "Expected INSTALLSTATE_LOCAL, got %d\n", state);
@@ -2148,7 +2151,7 @@ static void test_MsiQueryComponentState(void)
     error = GetLastError();
     ok(r == ERROR_INVALID_PARAMETER, "Expected ERROR_INVALID_PARAMETER, got %d\n", r);
     ok(state == MAGIC_ERROR, "Expected 0xdeadbeef, got %d\n", state);
-    ok(error == 0xdeadbeef, "expected 0xdeadbeef, got %lu\n", error);
+    ok(error == 0xdeadbeef, "expected 0xdeadbeef, got %u\n", error);
 
     /* empty szProductCode */
     state = MAGIC_ERROR;
@@ -2157,7 +2160,7 @@ static void test_MsiQueryComponentState(void)
     error = GetLastError();
     ok(r == ERROR_INVALID_PARAMETER, "Expected ERROR_INVALID_PARAMETER, got %d\n", r);
     ok(state == MAGIC_ERROR, "Expected 0xdeadbeef, got %d\n", state);
-    ok(error == 0xdeadbeef, "expected 0xdeadbeef, got %lu\n", error);
+    ok(error == 0xdeadbeef, "expected 0xdeadbeef, got %u\n", error);
 
     /* random szProductCode */
     state = MAGIC_ERROR;
@@ -2166,7 +2169,7 @@ static void test_MsiQueryComponentState(void)
     error = GetLastError();
     ok(r == ERROR_INVALID_PARAMETER, "Expected ERROR_INVALID_PARAMETER, got %d\n", r);
     ok(state == MAGIC_ERROR, "Expected 0xdeadbeef, got %d\n", state);
-    ok(error == 0xdeadbeef, "expected 0xdeadbeef, got %lu\n", error);
+    ok(error == 0xdeadbeef, "expected 0xdeadbeef, got %u\n", error);
 
     /* GUID-length szProductCode */
     state = MAGIC_ERROR;
@@ -2175,7 +2178,7 @@ static void test_MsiQueryComponentState(void)
     error = GetLastError();
     ok(r == ERROR_INVALID_PARAMETER, "Expected ERROR_INVALID_PARAMETER, got %d\n", r);
     ok(state == MAGIC_ERROR, "Expected 0xdeadbeef, got %d\n", state);
-    ok(error == 0xdeadbeef, "expected 0xdeadbeef, got %lu\n", error);
+    ok(error == 0xdeadbeef, "expected 0xdeadbeef, got %u\n", error);
 
     /* GUID-length with brackets */
     state = MAGIC_ERROR;
@@ -2184,7 +2187,7 @@ static void test_MsiQueryComponentState(void)
     error = GetLastError();
     ok(r == ERROR_INVALID_PARAMETER, "Expected ERROR_INVALID_PARAMETER, got %d\n", r);
     ok(state == MAGIC_ERROR, "Expected 0xdeadbeef, got %d\n", state);
-    ok(error == 0xdeadbeef, "expected 0xdeadbeef, got %lu\n", error);
+    ok(error == 0xdeadbeef, "expected 0xdeadbeef, got %u\n", error);
 
     /* actual GUID */
     state = MAGIC_ERROR;
@@ -2193,7 +2196,7 @@ static void test_MsiQueryComponentState(void)
     error = GetLastError();
     ok(r == ERROR_UNKNOWN_PRODUCT, "Expected ERROR_UNKNOWN_PRODUCT, got %d\n", r);
     ok(state == MAGIC_ERROR, "Expected 0xdeadbeef, got %d\n", state);
-    ok(error == 0xdeadbeef, "expected 0xdeadbeef, got %lu\n", error);
+    ok(error == 0xdeadbeef, "expected 0xdeadbeef, got %u\n", error);
 
     state = MAGIC_ERROR;
     SetLastError(0xdeadbeef);
@@ -2201,7 +2204,7 @@ static void test_MsiQueryComponentState(void)
     error = GetLastError();
     ok(r == ERROR_UNKNOWN_PRODUCT, "Expected ERROR_UNKNOWN_PRODUCT, got %d\n", r);
     ok(state == MAGIC_ERROR, "Expected 0xdeadbeef, got %d\n", state);
-    ok(error == 0xdeadbeef, "expected 0xdeadbeef, got %lu\n", error);
+    ok(error == 0xdeadbeef, "expected 0xdeadbeef, got %u\n", error);
 
     lstrcpyA(keypath, "Software\\Classes\\Installer\\Products\\");
     lstrcatA(keypath, prod_squashed);
@@ -2213,7 +2216,7 @@ static void test_MsiQueryComponentState(void)
         LocalFree(usersid);
         return;
     }
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     state = MAGIC_ERROR;
     SetLastError(0xdeadbeef);
@@ -2221,7 +2224,7 @@ static void test_MsiQueryComponentState(void)
     error = GetLastError();
     ok(r == ERROR_UNKNOWN_COMPONENT, "Expected ERROR_UNKNOWN_COMPONENT, got %d\n", r);
     ok(state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
-    ok(error == 0xdeadbeef, "expected 0xdeadbeef, got %lu\n", error);
+    ok(error == 0xdeadbeef, "expected 0xdeadbeef, got %u\n", error);
 
     delete_key(prodkey, "", access & KEY_WOW64_64KEY);
     RegCloseKey(prodkey);
@@ -2238,7 +2241,7 @@ static void test_MsiQueryComponentState(void)
         LocalFree(usersid);
         return;
     }
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* local system product key exists */
     state = MAGIC_ERROR;
@@ -2246,10 +2249,10 @@ static void test_MsiQueryComponentState(void)
     error = GetLastError();
     ok(r == ERROR_UNKNOWN_PRODUCT, "Expected ERROR_UNKNOWN_PRODUCT, got %d\n", r);
     ok(state == MAGIC_ERROR, "Expected 0xdeadbeef, got %d\n", state);
-    ok(error == 0xdeadbeef, "expected 0xdeadbeef, got %lu\n", error);
+    ok(error == 0xdeadbeef, "expected 0xdeadbeef, got %u\n", error);
 
     res = RegSetValueExA(prodkey, "LocalPackage", 0, REG_SZ, (const BYTE *)"msitest.msi", 11);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* LocalPackage value exists */
     state = MAGIC_ERROR;
@@ -2258,13 +2261,13 @@ static void test_MsiQueryComponentState(void)
     error = GetLastError();
     ok(r == ERROR_UNKNOWN_COMPONENT, "Expected ERROR_UNKNOWN_COMPONENT, got %d\n", r);
     ok(state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
-    ok(error == 0xdeadbeef, "expected 0xdeadbeef, got %lu\n", error);
+    ok(error == 0xdeadbeef, "expected 0xdeadbeef, got %u\n", error);
 
     lstrcpyA(keypath, "Software\\Microsoft\\Windows\\CurrentVersion\\Installer\\UserData\\S-1-5-18\\Components\\");
     lstrcatA(keypath, comp_squashed);
 
     res = RegCreateKeyExA(HKEY_LOCAL_MACHINE, keypath, 0, NULL, 0, access, NULL, &compkey, NULL);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* component key exists */
     state = MAGIC_ERROR;
@@ -2273,10 +2276,10 @@ static void test_MsiQueryComponentState(void)
     error = GetLastError();
     ok(r == ERROR_UNKNOWN_COMPONENT, "Expected ERROR_UNKNOWN_COMPONENT, got %d\n", r);
     ok(state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
-    ok(error == 0xdeadbeef, "expected 0xdeadbeef, got %lu\n", error);
+    ok(error == 0xdeadbeef, "expected 0xdeadbeef, got %u\n", error);
 
     res = RegSetValueExA(compkey, prod_squashed, 0, REG_SZ, (const BYTE *)"", 0);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* component\product exists */
     state = MAGIC_ERROR;
@@ -2286,7 +2289,7 @@ static void test_MsiQueryComponentState(void)
     error = GetLastError();
     ok(state == INSTALLSTATE_NOTUSED || state == INSTALLSTATE_LOCAL,
        "Expected INSTALLSTATE_NOTUSED or INSTALLSTATE_LOCAL, got %d\n", state);
-    ok(error == 0xdeadbeef, "expected 0xdeadbeef, got %lu\n", error);
+    ok(error == 0xdeadbeef, "expected 0xdeadbeef, got %u\n", error);
 
     /* NULL component, product exists */
     state = MAGIC_ERROR;
@@ -2295,10 +2298,10 @@ static void test_MsiQueryComponentState(void)
     error = GetLastError();
     ok(r == ERROR_INVALID_PARAMETER, "Expected ERROR_INVALID_PARAMETER, got %d\n", r);
     ok(state == MAGIC_ERROR, "Expected state not changed, got %d\n", state);
-    ok(error == 0xdeadbeef, "expected 0xdeadbeef, got %lu\n", error);
+    ok(error == 0xdeadbeef, "expected 0xdeadbeef, got %u\n", error);
 
     res = RegSetValueExA(compkey, prod_squashed, 0, REG_SZ, (const BYTE *)"hi", 2);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* INSTALLSTATE_LOCAL */
     state = MAGIC_ERROR;
@@ -2307,10 +2310,10 @@ static void test_MsiQueryComponentState(void)
     error = GetLastError();
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(state == INSTALLSTATE_LOCAL, "Expected INSTALLSTATE_LOCAL, got %d\n", state);
-    ok(error == 0xdeadbeef, "expected 0xdeadbeef, got %lu\n", error);
+    ok(error == 0xdeadbeef, "expected 0xdeadbeef, got %u\n", error);
 
     res = RegSetValueExA(compkey, prod_squashed, 0, REG_SZ, (const BYTE *)"01\\", 4);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* INSTALLSTATE_SOURCE */
     state = MAGIC_ERROR;
@@ -2319,10 +2322,10 @@ static void test_MsiQueryComponentState(void)
     error = GetLastError();
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(state == INSTALLSTATE_SOURCE, "Expected INSTALLSTATE_SOURCE, got %d\n", state);
-    ok(error == 0xdeadbeef, "expected 0xdeadbeef, got %lu\n", error);
+    ok(error == 0xdeadbeef, "expected 0xdeadbeef, got %u\n", error);
 
     res = RegSetValueExA(compkey, prod_squashed, 0, REG_SZ, (const BYTE *)"01", 3);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* bad INSTALLSTATE_SOURCE */
     state = MAGIC_ERROR;
@@ -2331,10 +2334,10 @@ static void test_MsiQueryComponentState(void)
     error = GetLastError();
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(state == INSTALLSTATE_LOCAL, "Expected INSTALLSTATE_LOCAL, got %d\n", state);
-    ok(error == 0xdeadbeef, "expected 0xdeadbeef, got %lu\n", error);
+    ok(error == 0xdeadbeef, "expected 0xdeadbeef, got %u\n", error);
 
     res = RegSetValueExA(compkey, prod_squashed, 0, REG_SZ, (const BYTE *)"01a", 4);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* INSTALLSTATE_SOURCE */
     state = MAGIC_ERROR;
@@ -2343,10 +2346,10 @@ static void test_MsiQueryComponentState(void)
     error = GetLastError();
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(state == INSTALLSTATE_SOURCE, "Expected INSTALLSTATE_SOURCE, got %d\n", state);
-    ok(error == 0xdeadbeef, "expected 0xdeadbeef, got %lu\n", error);
+    ok(error == 0xdeadbeef, "expected 0xdeadbeef, got %u\n", error);
 
     res = RegSetValueExA(compkey, prod_squashed, 0, REG_SZ, (const BYTE *)"01:", 4);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* registry component */
     state = MAGIC_ERROR;
@@ -2355,7 +2358,7 @@ static void test_MsiQueryComponentState(void)
     error = GetLastError();
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(state == INSTALLSTATE_LOCAL, "Expected INSTALLSTATE_LOCAL, got %d\n", state);
-    ok(error == 0xdeadbeef, "expected 0xdeadbeef, got %lu\n", error);
+    ok(error == 0xdeadbeef, "expected 0xdeadbeef, got %u\n", error);
 
     RegDeleteValueA(prodkey, "LocalPackage");
     delete_key(prodkey, "", access & KEY_WOW64_64KEY);
@@ -2375,7 +2378,7 @@ static void test_MsiQueryComponentState(void)
     lstrcatA(keypath, prod_squashed);
 
     res = RegCreateKeyA(HKEY_CURRENT_USER, keypath, &prodkey);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     state = MAGIC_ERROR;
     r = pMsiQueryComponentStateA(prodcode, NULL, MSIINSTALLCONTEXT_USERUNMANAGED, component, &state);
@@ -2392,10 +2395,10 @@ static void test_MsiQueryComponentState(void)
     lstrcatA(keypath, "\\InstallProperties");
 
     res = RegCreateKeyExA(HKEY_LOCAL_MACHINE, keypath, 0, NULL, 0, access, NULL, &prodkey, NULL);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     res = RegSetValueExA(prodkey, "LocalPackage", 0, REG_SZ, (const BYTE *)"msitest.msi", 11);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     RegCloseKey(prodkey);
 
@@ -2410,7 +2413,7 @@ static void test_MsiQueryComponentState(void)
     lstrcatA(keypath, comp_squashed);
 
     res = RegCreateKeyExA(HKEY_LOCAL_MACHINE, keypath, 0, NULL, 0, access, NULL, &compkey, NULL);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* component key exists */
     state = MAGIC_ERROR;
@@ -2419,7 +2422,7 @@ static void test_MsiQueryComponentState(void)
     ok(state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
 
     res = RegSetValueExA(compkey, prod_squashed, 0, REG_SZ, (const BYTE *)"", 0);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* component\product exists */
     state = MAGIC_ERROR;
@@ -2429,7 +2432,7 @@ static void test_MsiQueryComponentState(void)
        "Expected INSTALLSTATE_NOTUSED or INSTALLSTATE_LOCAL, got %d\n", state);
 
     res = RegSetValueExA(compkey, prod_squashed, 0, REG_SZ, (const BYTE *)"hi", 2);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     state = MAGIC_ERROR;
     r = pMsiQueryComponentStateA(prodcode, NULL, MSIINSTALLCONTEXT_USERUNMANAGED, component, &state);
@@ -2447,7 +2450,7 @@ static void test_MsiQueryComponentState(void)
     lstrcatA(keypath, prod_squashed);
 
     res = RegCreateKeyA(HKEY_CURRENT_USER, keypath, &prodkey);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     state = MAGIC_ERROR;
     r = pMsiQueryComponentStateA(prodcode, NULL, MSIINSTALLCONTEXT_USERMANAGED, component, &state);
@@ -2463,7 +2466,7 @@ static void test_MsiQueryComponentState(void)
     lstrcatA(keypath, prod_squashed);
 
     res = RegCreateKeyExA(HKEY_LOCAL_MACHINE, keypath, 0, NULL, 0, access, NULL, &prodkey, NULL);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     state = MAGIC_ERROR;
     r = pMsiQueryComponentStateA(prodcode, NULL, MSIINSTALLCONTEXT_USERMANAGED, component, &state);
@@ -2480,10 +2483,10 @@ static void test_MsiQueryComponentState(void)
     lstrcatA(keypath, "\\InstallProperties");
 
     res = RegCreateKeyExA(HKEY_LOCAL_MACHINE, keypath, 0, NULL, 0, access, NULL, &prodkey, NULL);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     res = RegSetValueExA(prodkey, "ManagedLocalPackage", 0, REG_SZ, (const BYTE *)"msitest.msi", 11);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     state = MAGIC_ERROR;
     r = pMsiQueryComponentStateA(prodcode, NULL, MSIINSTALLCONTEXT_USERMANAGED, component, &state);
@@ -2527,51 +2530,51 @@ static void test_MsiGetComponentPath(void)
     size = MAX_PATH;
     state = MsiGetComponentPathA(NULL, component, path, &size);
     ok(state == INSTALLSTATE_INVALIDARG, "Expected INSTALLSTATE_INVALIDARG, got %d\n", state);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     /* NULL szComponent */
     size = MAX_PATH;
     state = MsiGetComponentPathA(prodcode, NULL, path, &size);
     ok(state == INSTALLSTATE_INVALIDARG, "Expected INSTALLSTATE_INVALIDARG, got %d\n", state);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     size = MAX_PATH;
     state = MsiLocateComponentA(NULL, path, &size);
     ok(state == INSTALLSTATE_INVALIDARG, "Expected INSTALLSTATE_INVALIDARG, got %d\n", state);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     /* NULL lpPathBuf */
     size = MAX_PATH;
     state = MsiGetComponentPathA(prodcode, component, NULL, &size);
     ok(state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     size = MAX_PATH;
     state = MsiLocateComponentA(component, NULL, &size);
     ok(state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     /* NULL pcchBuf */
     size = MAX_PATH;
     state = MsiGetComponentPathA(prodcode, component, path, NULL);
     ok(state == INSTALLSTATE_INVALIDARG, "Expected INSTALLSTATE_INVALIDARG, got %d\n", state);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     size = MAX_PATH;
     state = MsiLocateComponentA(component, path, NULL);
     ok(state == INSTALLSTATE_INVALIDARG, "Expected INSTALLSTATE_INVALIDARG, got %d\n", state);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     /* all params valid */
     size = MAX_PATH;
     state = MsiGetComponentPathA(prodcode, component, path, &size);
     ok(state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     size = MAX_PATH;
     state = MsiLocateComponentA(component, path, &size);
     ok(state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     lstrcpyA(keypath, "Software\\Microsoft\\Windows\\CurrentVersion\\");
     lstrcatA(keypath, "Installer\\UserData\\S-1-5-18\\Components\\");
@@ -2584,21 +2587,21 @@ static void test_MsiGetComponentPath(void)
         LocalFree(usersid);
         return;
     }
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* local system component key exists */
     size = MAX_PATH;
     state = MsiGetComponentPathA(prodcode, component, path, &size);
     ok(state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     size = MAX_PATH;
     state = MsiLocateComponentA(component, path, &size);
     ok(state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     res = RegSetValueExA(compkey, prod_squashed, 0, REG_SZ, (const BYTE *)"C:\\imapath", 10);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* product value exists */
     path[0] = 0;
@@ -2606,14 +2609,14 @@ static void test_MsiGetComponentPath(void)
     state = MsiGetComponentPathA(prodcode, component, path, &size);
     ok(state == INSTALLSTATE_ABSENT, "Expected INSTALLSTATE_ABSENT, got %d\n", state);
     ok(!lstrcmpA(path, "C:\\imapath"), "Expected C:\\imapath, got %s\n", path);
-    ok(size == 10, "Expected 10, got %lu\n", size);
+    ok(size == 10, "Expected 10, got %d\n", size);
 
     path[0] = 0;
     size = MAX_PATH;
     state = MsiLocateComponentA(component, path, &size);
     ok(state == INSTALLSTATE_ABSENT, "Expected INSTALLSTATE_ABSENT, got %d\n", state);
     ok(!lstrcmpA(path, "C:\\imapath"), "Expected C:\\imapath, got %s\n", path);
-    ok(size == 10, "Expected 10, got %lu\n", size);
+    ok(size == 10, "Expected 10, got %d\n", size);
 
     lstrcpyA(keypath, "Software\\Microsoft\\Windows\\CurrentVersion\\");
     lstrcatA(keypath, "Installer\\UserData\\S-1-5-18\\Products\\");
@@ -2621,11 +2624,11 @@ static void test_MsiGetComponentPath(void)
     lstrcatA(keypath, "\\InstallProperties");
 
     res = RegCreateKeyExA(HKEY_LOCAL_MACHINE, keypath, 0, NULL, 0, access, NULL, &installprop, NULL);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     val = 1;
     res = RegSetValueExA(installprop, "WindowsInstaller", 0, REG_DWORD, (const BYTE *)&val, sizeof(DWORD));
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* install properties key exists */
     path[0] = 0;
@@ -2633,14 +2636,14 @@ static void test_MsiGetComponentPath(void)
     state = MsiGetComponentPathA(prodcode, component, path, &size);
     ok(state == INSTALLSTATE_ABSENT, "Expected INSTALLSTATE_ABSENT, got %d\n", state);
     ok(!lstrcmpA(path, "C:\\imapath"), "Expected C:\\imapath, got %s\n", path);
-    ok(size == 10, "Expected 10, got %lu\n", size);
+    ok(size == 10, "Expected 10, got %d\n", size);
 
     path[0] = 0;
     size = MAX_PATH;
     state = MsiLocateComponentA(component, path, &size);
     ok(state == INSTALLSTATE_ABSENT, "Expected INSTALLSTATE_ABSENT, got %d\n", state);
     ok(!lstrcmpA(path, "C:\\imapath"), "Expected C:\\imapath, got %s\n", path);
-    ok(size == 10, "Expected 10, got %lu\n", size);
+    ok(size == 10, "Expected 10, got %d\n", size);
 
     create_file("C:\\imapath", 11);
 
@@ -2650,28 +2653,28 @@ static void test_MsiGetComponentPath(void)
     state = MsiGetComponentPathA(prodcode, component, path, &size);
     ok(state == INSTALLSTATE_MOREDATA, "Expected INSTALLSTATE_MOREDATA, got %d\n", state);
     ok(path[0] == 'a', "got %s\n", path);
-    ok(size == 10, "Expected 10, got %lu\n", size);
+    ok(size == 10, "Expected 10, got %d\n", size);
 
     path[0] = 0;
     size = MAX_PATH;
     state = MsiGetComponentPathA(prodcode, component, path, &size);
     ok(state == INSTALLSTATE_LOCAL, "Expected INSTALLSTATE_LOCAL, got %d\n", state);
     ok(!lstrcmpA(path, "C:\\imapath"), "Expected C:\\imapath, got %s\n", path);
-    ok(size == 10, "Expected 10, got %lu\n", size);
+    ok(size == 10, "Expected 10, got %d\n", size);
 
     size = 0;
     path[0] = 'a';
     state = MsiLocateComponentA(component, path, &size);
     ok(state == INSTALLSTATE_MOREDATA, "Expected INSTALLSTATE_MOREDATA, got %d\n", state);
     ok(path[0] == 'a', "got %s\n", path);
-    ok(size == 10, "Expected 10, got %lu\n", size);
+    ok(size == 10, "Expected 10, got %d\n", size);
 
     path[0] = 0;
     size = MAX_PATH;
     state = MsiLocateComponentA(component, path, &size);
     ok(state == INSTALLSTATE_LOCAL, "Expected INSTALLSTATE_LOCAL, got %d\n", state);
     ok(!lstrcmpA(path, "C:\\imapath"), "Expected C:\\imapath, got %s\n", path);
-    ok(size == 10, "Expected 10, got %lu\n", size);
+    ok(size == 10, "Expected 10, got %d\n", size);
 
     RegDeleteValueA(compkey, prod_squashed);
     delete_key(compkey, "", access & KEY_WOW64_64KEY);
@@ -2688,21 +2691,21 @@ static void test_MsiGetComponentPath(void)
     lstrcatA(keypath, comp_squashed);
 
     res = RegCreateKeyExA(HKEY_LOCAL_MACHINE, keypath, 0, NULL, 0, access, NULL, &compkey, NULL);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* user managed component key exists */
     size = MAX_PATH;
     state = MsiGetComponentPathA(prodcode, component, path, &size);
     ok(state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %ld\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     size = MAX_PATH;
     state = MsiLocateComponentA(component, path, &size);
     ok(state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %ld\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     res = RegSetValueExA(compkey, prod_squashed, 0, REG_SZ, (const BYTE *)"C:\\imapath", 10);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* product value exists */
     path[0] = 0;
@@ -2710,14 +2713,14 @@ static void test_MsiGetComponentPath(void)
     state = MsiGetComponentPathA(prodcode, component, path, &size);
     ok(state == INSTALLSTATE_ABSENT, "Expected INSTALLSTATE_ABSENT, got %d\n", state);
     ok(!lstrcmpA(path, "C:\\imapath"), "Expected C:\\imapath, got %s\n", path);
-    ok(size == 10, "Expected 10, got %lu\n", size);
+    ok(size == 10, "Expected 10, got %d\n", size);
 
     path[0] = 0;
     size = MAX_PATH;
     state = MsiLocateComponentA(component, path, &size);
     ok(state == INSTALLSTATE_ABSENT, "Expected INSTALLSTATE_ABSENT, got %d\n", state);
     ok(!lstrcmpA(path, "C:\\imapath"), "Expected C:\\imapath, got %s\n", path);
-    ok(size == 10, "Expected 10, got %lu\n", size);
+    ok(size == 10, "Expected 10, got %d\n", size);
 
     lstrcpyA(keypath, "Software\\Microsoft\\Windows\\CurrentVersion\\");
     lstrcatA(keypath, "Installer\\UserData\\S-1-5-18\\Products\\");
@@ -2725,11 +2728,11 @@ static void test_MsiGetComponentPath(void)
     lstrcatA(keypath, "\\InstallProperties");
 
     res = RegCreateKeyExA(HKEY_LOCAL_MACHINE, keypath, 0, NULL, 0, access, NULL, &installprop, NULL);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     val = 1;
     res = RegSetValueExA(installprop, "WindowsInstaller", 0, REG_DWORD, (const BYTE *)&val, sizeof(DWORD));
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* install properties key exists */
     path[0] = 0;
@@ -2737,14 +2740,14 @@ static void test_MsiGetComponentPath(void)
     state = MsiGetComponentPathA(prodcode, component, path, &size);
     ok(state == INSTALLSTATE_ABSENT, "Expected INSTALLSTATE_ABSENT, got %d\n", state);
     ok(!lstrcmpA(path, "C:\\imapath"), "Expected C:\\imapath, got %s\n", path);
-    ok(size == 10, "Expected 10, got %lu\n", size);
+    ok(size == 10, "Expected 10, got %d\n", size);
 
     path[0] = 0;
     size = MAX_PATH;
     state = MsiLocateComponentA(component, path, &size);
     ok(state == INSTALLSTATE_ABSENT, "Expected INSTALLSTATE_ABSENT, got %d\n", state);
     ok(!lstrcmpA(path, "C:\\imapath"), "Expected C:\\imapath, got %s\n", path);
-    ok(size == 10, "Expected 10, got %lu\n", size);
+    ok(size == 10, "Expected 10, got %d\n", size);
 
     create_file("C:\\imapath", 11);
 
@@ -2754,14 +2757,14 @@ static void test_MsiGetComponentPath(void)
     state = MsiGetComponentPathA(prodcode, component, path, &size);
     ok(state == INSTALLSTATE_LOCAL, "Expected INSTALLSTATE_LOCAL, got %d\n", state);
     ok(!lstrcmpA(path, "C:\\imapath"), "Expected C:\\imapath, got %s\n", path);
-    ok(size == 10, "Expected 10, got %lu\n", size);
+    ok(size == 10, "Expected 10, got %d\n", size);
 
     path[0] = 0;
     size = MAX_PATH;
     state = MsiLocateComponentA(component, path, &size);
     ok(state == INSTALLSTATE_LOCAL, "Expected INSTALLSTATE_LOCAL, got %d\n", state);
     ok(!lstrcmpA(path, "C:\\imapath"), "Expected C:\\imapath, got %s\n", path);
-    ok(size == 10, "Expected 10, got %lu\n", size);
+    ok(size == 10, "Expected 10, got %d\n", size);
 
     RegDeleteValueA(compkey, prod_squashed);
     delete_key(compkey, "", access & KEY_WOW64_64KEY);
@@ -2778,18 +2781,18 @@ static void test_MsiGetComponentPath(void)
     lstrcatA(keypath, prod_squashed);
 
     res = RegCreateKeyExA(HKEY_LOCAL_MACHINE, keypath, 0, NULL, 0, access, NULL, &prodkey, NULL);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* user managed product key exists */
     size = MAX_PATH;
     state = MsiGetComponentPathA(prodcode, component, path, &size);
     ok(state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     size = MAX_PATH;
     state = MsiLocateComponentA(component, path, &size);
     ok(state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     lstrcpyA(keypath, "Software\\Microsoft\\Windows\\CurrentVersion\\");
     lstrcatA(keypath, "Installer\\UserData\\");
@@ -2798,21 +2801,21 @@ static void test_MsiGetComponentPath(void)
     lstrcatA(keypath, comp_squashed);
 
     res = RegCreateKeyExA(HKEY_LOCAL_MACHINE, keypath, 0, NULL, 0, access, NULL, &compkey, NULL);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* user managed component key exists */
     size = MAX_PATH;
     state = MsiGetComponentPathA(prodcode, component, path, &size);
     ok(state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     size = MAX_PATH;
     state = MsiLocateComponentA(component, path, &size);
     ok(state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     res = RegSetValueExA(compkey, prod_squashed, 0, REG_SZ, (const BYTE *)"C:\\imapath", 10);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* product value exists */
     path[0] = 0;
@@ -2820,14 +2823,14 @@ static void test_MsiGetComponentPath(void)
     state = MsiGetComponentPathA(prodcode, component, path, &size);
     ok(state == INSTALLSTATE_ABSENT, "Expected INSTALLSTATE_ABSENT, got %d\n", state);
     ok(!lstrcmpA(path, "C:\\imapath"), "Expected C:\\imapath, got %s\n", path);
-    ok(size == 10, "Expected 10, got %lu\n", size);
+    ok(size == 10, "Expected 10, got %d\n", size);
 
     path[0] = 0;
     size = MAX_PATH;
     state = MsiLocateComponentA(component, path, &size);
     ok(state == INSTALLSTATE_ABSENT, "Expected INSTALLSTATE_ABSENT, got %d\n", state);
     ok(!lstrcmpA(path, "C:\\imapath"), "Expected C:\\imapath, got %s\n", path);
-    ok(size == 10, "Expected 10, got %lu\n", size);
+    ok(size == 10, "Expected 10, got %d\n", size);
 
     lstrcpyA(keypath, "Software\\Microsoft\\Windows\\CurrentVersion\\");
     lstrcatA(keypath, "Installer\\UserData\\S-1-5-18\\Products\\");
@@ -2835,11 +2838,11 @@ static void test_MsiGetComponentPath(void)
     lstrcatA(keypath, "\\InstallProperties");
 
     res = RegCreateKeyExA(HKEY_LOCAL_MACHINE, keypath, 0, NULL, 0, access, NULL, &installprop, NULL);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     val = 1;
     res = RegSetValueExA(installprop, "WindowsInstaller", 0, REG_DWORD, (const BYTE *)&val, sizeof(DWORD));
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* install properties key exists */
     path[0] = 0;
@@ -2847,14 +2850,14 @@ static void test_MsiGetComponentPath(void)
     state = MsiGetComponentPathA(prodcode, component, path, &size);
     ok(state == INSTALLSTATE_ABSENT, "Expected INSTALLSTATE_ABSENT, got %d\n", state);
     ok(!lstrcmpA(path, "C:\\imapath"), "Expected C:\\imapath, got %s\n", path);
-    ok(size == 10, "Expected 10, got %lu\n", size);
+    ok(size == 10, "Expected 10, got %d\n", size);
 
     path[0] = 0;
     size = MAX_PATH;
     state = MsiLocateComponentA(component, path, &size);
     ok(state == INSTALLSTATE_ABSENT, "Expected INSTALLSTATE_ABSENT, got %d\n", state);
     ok(!lstrcmpA(path, "C:\\imapath"), "Expected C:\\imapath, got %s\n", path);
-    ok(size == 10, "Expected 10, got %lu\n", size);
+    ok(size == 10, "Expected 10, got %d\n", size);
 
     create_file("C:\\imapath", 11);
 
@@ -2864,14 +2867,14 @@ static void test_MsiGetComponentPath(void)
     state = MsiGetComponentPathA(prodcode, component, path, &size);
     ok(state == INSTALLSTATE_LOCAL, "Expected INSTALLSTATE_LOCAL, got %d\n", state);
     ok(!lstrcmpA(path, "C:\\imapath"), "Expected C:\\imapath, got %s\n", path);
-    ok(size == 10, "Expected 10, got %lu\n", size);
+    ok(size == 10, "Expected 10, got %d\n", size);
 
     path[0] = 0;
     size = MAX_PATH;
     state = MsiLocateComponentA(component, path, &size);
     ok(state == INSTALLSTATE_LOCAL, "Expected INSTALLSTATE_LOCAL, got %d\n", state);
     ok(!lstrcmpA(path, "C:\\imapath"), "Expected C:\\imapath, got %s\n", path);
-    ok(size == 10, "Expected 10, got %lu\n", size);
+    ok(size == 10, "Expected 10, got %d\n", size);
 
     RegDeleteValueA(compkey, prod_squashed);
     delete_key(prodkey, "", access & KEY_WOW64_64KEY);
@@ -2887,18 +2890,18 @@ static void test_MsiGetComponentPath(void)
     lstrcatA(keypath, prod_squashed);
 
     res = RegCreateKeyA(HKEY_CURRENT_USER, keypath, &prodkey);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* user unmanaged product key exists */
     size = MAX_PATH;
     state = MsiGetComponentPathA(prodcode, component, path, &size);
     ok(state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     size = MAX_PATH;
     state = MsiLocateComponentA(component, path, &size);
     ok(state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     lstrcpyA(keypath, "Software\\Microsoft\\Windows\\CurrentVersion\\");
     lstrcatA(keypath, "Installer\\UserData\\");
@@ -2907,21 +2910,21 @@ static void test_MsiGetComponentPath(void)
     lstrcatA(keypath, comp_squashed);
 
     res = RegCreateKeyExA(HKEY_LOCAL_MACHINE, keypath, 0, NULL, 0, access, NULL, &compkey, NULL);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* user unmanaged component key exists */
     size = MAX_PATH;
     state = MsiGetComponentPathA(prodcode, component, path, &size);
     ok(state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %ld\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     size = MAX_PATH;
     state = MsiLocateComponentA(component, path, &size);
     ok(state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %ld\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     res = RegSetValueExA(compkey, prod_squashed, 0, REG_SZ, (const BYTE *)"C:\\imapath", 10);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* product value exists */
     path[0] = 0;
@@ -2929,14 +2932,14 @@ static void test_MsiGetComponentPath(void)
     state = MsiGetComponentPathA(prodcode, component, path, &size);
     ok(state == INSTALLSTATE_ABSENT, "Expected INSTALLSTATE_ABSENT, got %d\n", state);
     ok(!lstrcmpA(path, "C:\\imapath"), "Expected C:\\imapath, got %s\n", path);
-    ok(size == 10, "Expected 10, got %lu\n", size);
+    ok(size == 10, "Expected 10, got %d\n", size);
 
     path[0] = 0;
     size = MAX_PATH;
     state = MsiLocateComponentA(component, path, &size);
     ok(state == INSTALLSTATE_ABSENT, "Expected INSTALLSTATE_ABSENT, got %d\n", state);
     ok(!lstrcmpA(path, "C:\\imapath"), "Expected C:\\imapath, got %s\n", path);
-    ok(size == 10, "Expected 10, got %lu\n", size);
+    ok(size == 10, "Expected 10, got %d\n", size);
 
     create_file("C:\\imapath", 11);
 
@@ -2946,14 +2949,14 @@ static void test_MsiGetComponentPath(void)
     state = MsiGetComponentPathA(prodcode, component, path, &size);
     ok(state == INSTALLSTATE_LOCAL, "Expected INSTALLSTATE_LOCAL, got %d\n", state);
     ok(!lstrcmpA(path, "C:\\imapath"), "Expected C:\\imapath, got %s\n", path);
-    ok(size == 10, "Expected 10, got %lu\n", size);
+    ok(size == 10, "Expected 10, got %d\n", size);
 
     path[0] = 0;
     size = MAX_PATH;
     state = MsiLocateComponentA(component, path, &size);
     ok(state == INSTALLSTATE_LOCAL, "Expected INSTALLSTATE_LOCAL, got %d\n", state);
     ok(!lstrcmpA(path, "C:\\imapath"), "Expected C:\\imapath, got %s\n", path);
-    ok(size == 10, "Expected 10, got %lu\n", size);
+    ok(size == 10, "Expected 10, got %d\n", size);
 
     RegDeleteValueA(compkey, prod_squashed);
     RegDeleteKeyA(prodkey, "");
@@ -2972,39 +2975,39 @@ static void test_MsiGetComponentPath(void)
         LocalFree( usersid );
         return;
     }
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* local classes product key exists */
     size = MAX_PATH;
     state = MsiGetComponentPathA(prodcode, component, path, &size);
     ok(state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     size = MAX_PATH;
     state = MsiLocateComponentA(component, path, &size);
     ok(state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     lstrcpyA(keypath, "Software\\Microsoft\\Windows\\CurrentVersion\\");
     lstrcatA(keypath, "Installer\\UserData\\S-1-5-18\\Components\\");
     lstrcatA(keypath, comp_squashed);
 
     res = RegCreateKeyExA(HKEY_LOCAL_MACHINE, keypath, 0, NULL, 0, access, NULL, &compkey, NULL);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* local user component key exists */
     size = MAX_PATH;
     state = MsiGetComponentPathA(prodcode, component, path, &size);
     ok(state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %ld\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     size = MAX_PATH;
     state = MsiLocateComponentA(component, path, &size);
     ok(state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %ld\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     res = RegSetValueExA(compkey, prod_squashed, 0, REG_SZ, (const BYTE *)"C:\\imapath", 10);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* product value exists */
     path[0] = 0;
@@ -3012,14 +3015,14 @@ static void test_MsiGetComponentPath(void)
     state = MsiGetComponentPathA(prodcode, component, path, &size);
     ok(state == INSTALLSTATE_ABSENT, "Expected INSTALLSTATE_ABSENT, got %d\n", state);
     ok(!lstrcmpA(path, "C:\\imapath"), "Expected C:\\imapath, got %s\n", path);
-    ok(size == 10, "Expected 10, got %lu\n", size);
+    ok(size == 10, "Expected 10, got %d\n", size);
 
     path[0] = 0;
     size = MAX_PATH;
     state = MsiLocateComponentA(component, path, &size);
     ok(state == INSTALLSTATE_ABSENT, "Expected INSTALLSTATE_ABSENT, got %d\n", state);
     ok(!lstrcmpA(path, "C:\\imapath"), "Expected C:\\imapath, got %s\n", path);
-    ok(size == 10, "Expected 10, got %lu\n", size);
+    ok(size == 10, "Expected 10, got %d\n", size);
 
     create_file("C:\\imapath", 11);
 
@@ -3029,14 +3032,14 @@ static void test_MsiGetComponentPath(void)
     state = MsiGetComponentPathA(prodcode, component, path, &size);
     ok(state == INSTALLSTATE_LOCAL, "Expected INSTALLSTATE_LOCAL, got %d\n", state);
     ok(!lstrcmpA(path, "C:\\imapath"), "Expected C:\\imapath, got %s\n", path);
-    ok(size == 10, "Expected 10, got %lu\n", size);
+    ok(size == 10, "Expected 10, got %d\n", size);
 
     path[0] = 0;
     size = MAX_PATH;
     state = MsiLocateComponentA(component, path, &size);
     ok(state == INSTALLSTATE_LOCAL, "Expected INSTALLSTATE_LOCAL, got %d\n", state);
     ok(!lstrcmpA(path, "C:\\imapath"), "Expected C:\\imapath, got %s\n", path);
-    ok(size == 10, "Expected 10, got %lu\n", size);
+    ok(size == 10, "Expected 10, got %d\n", size);
 
     RegDeleteValueA(compkey, prod_squashed);
     delete_key(prodkey, "", access & KEY_WOW64_64KEY);
@@ -3074,37 +3077,37 @@ static void test_MsiGetComponentPathEx(void)
     size = MAX_PATH;
     state = pMsiGetComponentPathExA( NULL, comp, NULL, MSIINSTALLCONTEXT_USERMANAGED, path, &size );
     ok( state == INSTALLSTATE_INVALIDARG, "got %d\n", state );
-    todo_wine ok( !size, "got %lu\n", size );
+    todo_wine ok( !size, "got %u\n", size );
 
     /* NULL component */
     size = MAX_PATH;
     state = pMsiGetComponentPathExA( prod, NULL, NULL, MSIINSTALLCONTEXT_USERMANAGED, path, &size );
     ok( state == INSTALLSTATE_INVALIDARG, "got %d\n", state );
-    todo_wine ok( !size, "got %lu\n", size );
+    todo_wine ok( !size, "got %u\n", size );
 
     /* non-NULL usersid, MSIINSTALLCONTEXT_MACHINE */
     size = MAX_PATH;
     state = pMsiGetComponentPathExA( prod, comp, usersid, MSIINSTALLCONTEXT_MACHINE, path, &size);
     ok( state == INSTALLSTATE_INVALIDARG, "got %d\n", state );
-    todo_wine ok( !size, "got %lu\n", size );
+    todo_wine ok( !size, "got %u\n", size );
 
     /* NULL buf */
     size = MAX_PATH;
     state = pMsiGetComponentPathExA( prod, comp, NULL, MSIINSTALLCONTEXT_MACHINE, NULL, &size );
     ok( state == INSTALLSTATE_UNKNOWN, "got %d\n", state );
-    todo_wine ok( size == MAX_PATH * 2, "got %lu\n", size );
+    todo_wine ok( size == MAX_PATH * 2, "got %u\n", size );
 
     /* NULL buflen */
     size = MAX_PATH;
     state = pMsiGetComponentPathExA( prod, comp, NULL, MSIINSTALLCONTEXT_MACHINE, path, NULL );
     ok( state == INSTALLSTATE_INVALIDARG, "got %d\n", state );
-    ok( size == MAX_PATH, "got %lu\n", size );
+    ok( size == MAX_PATH, "got %u\n", size );
 
     /* all params valid */
     size = MAX_PATH;
     state = pMsiGetComponentPathExA( prod, comp, NULL, MSIINSTALLCONTEXT_MACHINE, path, &size );
     ok( state == INSTALLSTATE_UNKNOWN, "got %d\n", state );
-    todo_wine ok( !size, "got %lu\n", size );
+    todo_wine ok( !size, "got %u\n", size );
 
     lstrcpyA( path_key, "Software\\Microsoft\\Windows\\CurrentVersion\\" );
     lstrcatA( path_key, "Installer\\UserData\\S-1-5-18\\Components\\" );
@@ -3117,7 +3120,7 @@ static void test_MsiGetComponentPathEx(void)
         LocalFree( usersid );
         return;
     }
-    ok( res == ERROR_SUCCESS, "got %ld\n", res );
+    ok( res == ERROR_SUCCESS, "got %d\n", res );
 
     /* local system component key exists */
     size = MAX_PATH;
@@ -3125,7 +3128,7 @@ static void test_MsiGetComponentPathEx(void)
     ok( state == INSTALLSTATE_UNKNOWN, "got %d\n", state );
 
     res = RegSetValueExA( key_comp, prod_squashed, 0, REG_SZ, (const BYTE *)"c:\\testcomponentpath", 20 );
-    ok( res == ERROR_SUCCESS, "got %ld\n", res );
+    ok( res == ERROR_SUCCESS, "got %d\n", res );
 
     /* product value exists */
     path[0] = 0;
@@ -3133,7 +3136,7 @@ static void test_MsiGetComponentPathEx(void)
     state = pMsiGetComponentPathExA( prod, comp, NULL, MSIINSTALLCONTEXT_MACHINE, path, &size );
     ok( state == INSTALLSTATE_ABSENT, "got %d\n", state );
     ok( !lstrcmpA( path, "c:\\testcomponentpath" ), "got %s\n", path );
-    ok( size == 20, "got %lu\n", size );
+    ok( size == 20, "got %u\n", size );
 
     lstrcpyA( path_key, "Software\\Microsoft\\Windows\\CurrentVersion\\" );
     lstrcatA( path_key, "Installer\\UserData\\S-1-5-18\\Products\\" );
@@ -3141,11 +3144,11 @@ static void test_MsiGetComponentPathEx(void)
     lstrcatA( path_key, "\\InstallProperties" );
 
     res = RegCreateKeyExA( HKEY_LOCAL_MACHINE, path_key, 0, NULL, 0, access, NULL, &key_installprop, NULL );
-    ok( res == ERROR_SUCCESS, "got %ld\n", res );
+    ok( res == ERROR_SUCCESS, "got %d\n", res );
 
     val = 1;
     res = RegSetValueExA( key_installprop, "WindowsInstaller", 0, REG_DWORD, (const BYTE *)&val, sizeof(val) );
-    ok( res == ERROR_SUCCESS, "got %ld\n", res );
+    ok( res == ERROR_SUCCESS, "got %d\n", res );
 
     /* install properties key exists */
     path[0] = 0;
@@ -3153,7 +3156,7 @@ static void test_MsiGetComponentPathEx(void)
     state = pMsiGetComponentPathExA( prod, comp, NULL, MSIINSTALLCONTEXT_MACHINE, path, &size );
     ok( state == INSTALLSTATE_ABSENT, "got %d\n", state );
     ok( !lstrcmpA( path, "c:\\testcomponentpath"), "got %s\n", path );
-    ok( size == 20, "got %lu\n", size );
+    ok( size == 20, "got %u\n", size );
 
     create_file( "c:\\testcomponentpath", 21 );
 
@@ -3163,14 +3166,14 @@ static void test_MsiGetComponentPathEx(void)
     state = pMsiGetComponentPathExA( prod, comp, NULL, MSIINSTALLCONTEXT_MACHINE, path, &size );
     ok( state == INSTALLSTATE_MOREDATA, "got %d\n", state );
     ok( !path[0], "got %s\n", path );
-    todo_wine ok( size == 40, "got %lu\n", size );
+    todo_wine ok( size == 40, "got %u\n", size );
 
     path[0] = 0;
     size = MAX_PATH;
     state = pMsiGetComponentPathExA( prod, comp, NULL, MSIINSTALLCONTEXT_MACHINE, path, &size );
     ok( state == INSTALLSTATE_LOCAL, "got %d\n", state );
     ok( !lstrcmpA( path, "c:\\testcomponentpath" ), "got %s\n", path );
-    ok( size == 20, "got %lu\n", size );
+    ok( size == 20, "got %d\n", size );
 
     RegDeleteValueA( key_comp, prod_squashed );
     delete_key( key_comp, "", access & KEY_WOW64_64KEY );
@@ -3184,13 +3187,13 @@ static void test_MsiGetComponentPathEx(void)
     lstrcatA( path_key, prod_squashed );
 
     res = RegCreateKeyA( HKEY_CURRENT_USER, path_key, &key_prod );
-    ok( res == ERROR_SUCCESS, "got %ld\n", res );
+    ok( res == ERROR_SUCCESS, "got %d\n", res );
 
     /* user unmanaged product key exists */
     size = MAX_PATH;
     state = pMsiGetComponentPathExA( prod, comp, NULL, MSIINSTALLCONTEXT_USERUNMANAGED, path, &size );
     ok( state == INSTALLSTATE_UNKNOWN, "got %d\n", state );
-    todo_wine ok(!size, "got %lu\n", size);
+    todo_wine ok(!size, "got %u\n", size);
 
     lstrcpyA( path_key, "Software\\Microsoft\\Windows\\CurrentVersion\\" );
     lstrcatA( path_key, "Installer\\UserData\\" );
@@ -3199,16 +3202,16 @@ static void test_MsiGetComponentPathEx(void)
     lstrcatA( path_key, comp_squashed );
 
     res = RegCreateKeyExA( HKEY_LOCAL_MACHINE, path_key, 0, NULL, 0, access, NULL, &key_comp, NULL );
-    ok( res == ERROR_SUCCESS, "got %ld\n", res );
+    ok( res == ERROR_SUCCESS, "got %d\n", res );
 
     /* user unmanaged component key exists */
     size = MAX_PATH;
     state = pMsiGetComponentPathExA( prod, comp, NULL, MSIINSTALLCONTEXT_USERUNMANAGED, path, &size );
     ok( state == INSTALLSTATE_UNKNOWN, "got %d\n", state );
-    todo_wine ok(!size, "got %lu\n", size);
+    todo_wine ok(!size, "got %u\n", size);
 
     res = RegSetValueExA( key_comp, prod_squashed, 0, REG_SZ, (const BYTE *)"c:\\testcomponentpath", 20 );
-    ok( res == ERROR_SUCCESS, "got %ld\n", res );
+    ok( res == ERROR_SUCCESS, "got %d\n", res );
 
     /* product value exists */
     path[0] = 0;
@@ -3216,7 +3219,7 @@ static void test_MsiGetComponentPathEx(void)
     state = pMsiGetComponentPathExA( prod, comp, NULL, MSIINSTALLCONTEXT_USERUNMANAGED, path, &size );
     ok( state == INSTALLSTATE_ABSENT, "got %d\n", state );
     ok( !lstrcmpA( path, "c:\\testcomponentpath"), "got %s\n", path );
-    ok( size == 20, "got %lu\n", size );
+    ok( size == 20, "got %u\n", size );
 
     create_file( "c:\\testcomponentpath", 21 );
 
@@ -3226,7 +3229,7 @@ static void test_MsiGetComponentPathEx(void)
     state = pMsiGetComponentPathExA( prod, comp, NULL, MSIINSTALLCONTEXT_USERUNMANAGED, path, &size );
     ok( state == INSTALLSTATE_LOCAL, "got %d\n", state );
     ok( !lstrcmpA( path, "c:\\testcomponentpath"), "got %s\n", path );
-    ok( size == 20, "got %lu\n", size );
+    ok( size == 20, "got %u\n", size );
 
     RegDeleteValueA( key_comp, prod_squashed );
     RegDeleteKeyA( key_prod, "" );
@@ -3242,7 +3245,7 @@ static void test_MsiGetComponentPathEx(void)
     lstrcatA( path_key, prod_squashed );
 
     res = RegCreateKeyExA( HKEY_LOCAL_MACHINE, path_key, 0, NULL, 0, access, NULL, &key_prod, NULL );
-    ok( res == ERROR_SUCCESS, "got %ld\n", res );
+    ok( res == ERROR_SUCCESS, "got %d\n", res );
 
     /* user managed product key exists */
     size = MAX_PATH;
@@ -3256,7 +3259,7 @@ static void test_MsiGetComponentPathEx(void)
     lstrcatA( path_key, comp_squashed );
 
     res = RegCreateKeyExA( HKEY_LOCAL_MACHINE, path_key, 0, NULL, 0, access, NULL, &key_comp, NULL );
-    ok( res == ERROR_SUCCESS, "got %ld\n", res );
+    ok( res == ERROR_SUCCESS, "got %d\n", res );
 
     /* user managed component key exists */
     size = MAX_PATH;
@@ -3264,7 +3267,7 @@ static void test_MsiGetComponentPathEx(void)
     ok( state == INSTALLSTATE_UNKNOWN, "got %d\n", state );
 
     res = RegSetValueExA( key_comp, prod_squashed, 0, REG_SZ, (const BYTE *)"c:\\testcomponentpath", 20 );
-    ok( res == ERROR_SUCCESS, "got %ld\n", res );
+    ok( res == ERROR_SUCCESS, "got %d\n", res );
 
     /* product value exists */
     path[0] = 0;
@@ -3272,7 +3275,7 @@ static void test_MsiGetComponentPathEx(void)
     state = pMsiGetComponentPathExA( prod, comp, NULL, MSIINSTALLCONTEXT_USERMANAGED, path, &size );
     ok( state == INSTALLSTATE_ABSENT, "got %d\n", state );
     ok( !lstrcmpA( path, "c:\\testcomponentpath" ), "got %s\n", path );
-    ok( size == 20, "got %lu\n", size );
+    ok( size == 20, "got %u\n", size );
 
     lstrcpyA( path_key, "Software\\Microsoft\\Windows\\CurrentVersion\\" );
     lstrcatA( path_key, "Installer\\UserData\\S-1-5-18\\Products\\" );
@@ -3280,11 +3283,11 @@ static void test_MsiGetComponentPathEx(void)
     lstrcatA( path_key, "\\InstallProperties" );
 
     res = RegCreateKeyExA( HKEY_LOCAL_MACHINE, path_key, 0, NULL, 0, access, NULL, &key_installprop, NULL );
-    ok( res == ERROR_SUCCESS, "got %ld\n", res );
+    ok( res == ERROR_SUCCESS, "got %d\n", res );
 
     val = 1;
     res = RegSetValueExA( key_installprop, "WindowsInstaller", 0, REG_DWORD, (const BYTE *)&val, sizeof(val) );
-    ok( res == ERROR_SUCCESS, "got %ld\n", res );
+    ok( res == ERROR_SUCCESS, "got %d\n", res );
 
     /* install properties key exists */
     path[0] = 0;
@@ -3292,7 +3295,7 @@ static void test_MsiGetComponentPathEx(void)
     state = pMsiGetComponentPathExA( prod, comp, NULL, MSIINSTALLCONTEXT_USERMANAGED, path, &size );
     ok( state == INSTALLSTATE_ABSENT, "got %d\n", state );
     ok( !lstrcmpA( path, "c:\\testcomponentpath" ), "got %s\n", path );
-    ok( size == 20, "got %lu\n", size );
+    ok( size == 20, "got %u\n", size );
 
     create_file( "c:\\testcomponentpath", 21 );
 
@@ -3302,7 +3305,7 @@ static void test_MsiGetComponentPathEx(void)
     state = pMsiGetComponentPathExA( prod, comp, NULL, MSIINSTALLCONTEXT_USERMANAGED, path, &size );
     ok( state == INSTALLSTATE_LOCAL, "got %d\n", state );
     ok( !lstrcmpA( path, "c:\\testcomponentpath" ), "got %s\n", path );
-    ok( size == 20, "got %lu\n", size );
+    ok( size == 20, "got %u\n", size );
 
     RegDeleteValueA( key_comp, prod_squashed );
     delete_key( key_prod, "", access & KEY_WOW64_64KEY );
@@ -3323,29 +3326,29 @@ static void test_MsiGetComponentPathEx(void)
         LocalFree( usersid );
         return;
     }
-    ok( res == ERROR_SUCCESS, "got %ld\n", res );
+    ok( res == ERROR_SUCCESS, "got %d\n", res );
 
     /* local classes product key exists */
     size = MAX_PATH;
     state = pMsiGetComponentPathExA( prod, comp, NULL, MSIINSTALLCONTEXT_MACHINE, path, &size );
     ok( state == INSTALLSTATE_UNKNOWN, "got %d\n", state );
-    todo_wine ok(!size, "got %lu\n", size);
+    todo_wine ok(!size, "got %u\n", size);
 
     lstrcpyA( path_key, "Software\\Microsoft\\Windows\\CurrentVersion\\" );
     lstrcatA( path_key, "Installer\\UserData\\S-1-5-18\\Components\\" );
     lstrcatA( path_key, comp_squashed );
 
     res = RegCreateKeyExA( HKEY_LOCAL_MACHINE,  path_key, 0, NULL, 0, access, NULL, &key_comp, NULL );
-    ok( res == ERROR_SUCCESS, "got %ld\n", res );
+    ok( res == ERROR_SUCCESS, "got %d\n", res );
 
     /* local user component key exists */
     size = MAX_PATH;
     state = pMsiGetComponentPathExA( prod, comp, NULL, MSIINSTALLCONTEXT_MACHINE, path, &size );
     ok( state == INSTALLSTATE_UNKNOWN, "got %d\n", state );
-    todo_wine ok(!size, "got %lu\n", size);
+    todo_wine ok(!size, "got %u\n", size);
 
     res = RegSetValueExA( key_comp, prod_squashed, 0, REG_SZ, (const BYTE *)"c:\\testcomponentpath", 20 );
-    ok( res == ERROR_SUCCESS, "got %ld\n", res );
+    ok( res == ERROR_SUCCESS, "got %d\n", res );
 
     /* product value exists */
     path[0] = 0;
@@ -3353,7 +3356,7 @@ static void test_MsiGetComponentPathEx(void)
     state = pMsiGetComponentPathExA( prod, comp, NULL, MSIINSTALLCONTEXT_MACHINE, path, &size );
     ok( state == INSTALLSTATE_ABSENT, "got %d\n", state );
     ok( !lstrcmpA( path, "c:\\testcomponentpath" ), "got %s\n", path );
-    ok( size == 20, "got %lu\n", size );
+    ok( size == 20, "got %u\n", size );
 
     create_file( "c:\\testcomponentpath", 21 );
 
@@ -3363,7 +3366,7 @@ static void test_MsiGetComponentPathEx(void)
     state = pMsiGetComponentPathExA( prod, comp, NULL, MSIINSTALLCONTEXT_MACHINE, path, &size );
     ok( state == INSTALLSTATE_LOCAL, "got %d\n", state );
     ok( !lstrcmpA( path, "c:\\testcomponentpath" ), "got %s\n", path );
-    ok( size == 20, "got %lu\n", size );
+    ok( size == 20, "got %u\n", size );
 
     RegDeleteValueA( key_comp, prod_squashed );
     delete_key( key_prod, "", access & KEY_WOW64_64KEY );
@@ -3414,21 +3417,21 @@ static void test_MsiProvideComponent(void)
                               INSTALLMODE_NODETECTION, buf, &len);
     ok(r == ERROR_SUCCESS, "got %u\n", r);
     ok(buf[0], "empty path\n");
-    ok(len == lstrlenA(buf), "got %lu\n", len);
+    ok(len == lstrlenA(buf), "got %u\n", len);
 
     len2 = 0;
     r = pMsiProvideComponentA("{38847338-1BBC-4104-81AC-2FAAC7ECDDCD}", "sourcedir",
                               "{DD422F92-3ED8-49B5-A0B7-F266F98357DF}",
                               INSTALLMODE_NODETECTION, NULL, &len2);
     ok(r == ERROR_SUCCESS, "got %u\n", r);
-    ok(len2 == len, "got %lu\n", len2);
+    ok(len2 == len, "got %u\n", len2);
 
     len2 = 0;
     r = pMsiProvideComponentA("{38847338-1BBC-4104-81AC-2FAAC7ECDDCD}", "sourcedir",
                               "{DD422F92-3ED8-49B5-A0B7-F266F98357DF}",
                               INSTALLMODE_NODETECTION, buf, &len2);
     ok(r == ERROR_MORE_DATA, "got %u\n", r);
-    ok(len2 == len, "got %lu\n", len2);
+    ok(len2 == len, "got %u\n", len2);
 
     /* wide version */
 
@@ -3438,19 +3441,19 @@ static void test_MsiProvideComponent(void)
                               L"{DD422F92-3ED8-49B5-A0B7-F266F98357DF}", INSTALLMODE_NODETECTION, bufW, &len);
     ok(r == ERROR_SUCCESS, "got %u\n", r);
     ok(bufW[0], "empty path\n");
-    ok(len == lstrlenW(bufW), "got %lu\n", len);
+    ok(len == lstrlenW(bufW), "got %u\n", len);
 
     len2 = 0;
     r = pMsiProvideComponentW(L"{38847338-1BBC-4104-81AC-2FAAC7ECDDCD}", L"sourcedir",
                               L"{DD422F92-3ED8-49B5-A0B7-F266F98357DF}", INSTALLMODE_NODETECTION, NULL, &len2);
     ok(r == ERROR_SUCCESS, "got %u\n", r);
-    ok(len2 == len, "got %lu\n", len2);
+    ok(len2 == len, "got %u\n", len2);
 
     len2 = 0;
     r = pMsiProvideComponentW(L"{38847338-1BBC-4104-81AC-2FAAC7ECDDCD}", L"sourcedir",
                               L"{DD422F92-3ED8-49B5-A0B7-F266F98357DF}", INSTALLMODE_NODETECTION, bufW, &len2);
     ok(r == ERROR_MORE_DATA, "got %u\n", r);
-    ok(len2 == len, "got %lu\n", len2);
+    ok(len2 == len, "got %u\n", len2);
 
     r = MsiInstallProductA(msifile, "REMOVE=ALL");
     ok(r == ERROR_SUCCESS, "got %u\n", r);
@@ -3490,13 +3493,13 @@ static void test_MsiProvideQualifiedComponentEx(void)
 
     if (is_wow64) access |= KEY_WOW64_64KEY;
     res = RegCreateKeyExA( HKEY_LOCAL_MACHINE, keypath, 0, NULL, 0, access, NULL, &hkey, NULL );
-    ok( res == ERROR_SUCCESS, "got %ld\n", res );
+    ok( res == ERROR_SUCCESS, "got %d\n", res );
 
     lstrcpyA( desc, prod_base85 );
     memcpy( desc + lstrlenA(desc), "feature<\0", sizeof("feature<\0") );
     res = RegSetValueExA( hkey, "qualifier", 0, REG_MULTI_SZ, (const BYTE *)desc,
                           lstrlenA(prod_base85) + sizeof("feature<\0") );
-    ok( res == ERROR_SUCCESS, "got %ld\n", res );
+    ok( res == ERROR_SUCCESS, "got %d\n", res );
 
     r = MsiProvideQualifiedComponentExA( comp, "qualifier", INSTALLMODE_EXISTING, prod, 0, 0, buf, &len );
     ok( r == ERROR_UNKNOWN_PRODUCT, "got %u\n", r );
@@ -3511,7 +3514,7 @@ static void test_MsiProvideQualifiedComponentEx(void)
     lstrcatA( keypath, prod_squashed );
 
     res = RegCreateKeyExA( HKEY_LOCAL_MACHINE, keypath, 0, NULL, 0, access, NULL, &hkey2, NULL );
-    ok( res == ERROR_SUCCESS, "got %ld\n", res );
+    ok( res == ERROR_SUCCESS, "got %d\n", res );
 
     state = MsiQueryProductStateA( prod );
     ok( state == INSTALLSTATE_ADVERTISED, "got %d\n", state );
@@ -3523,13 +3526,13 @@ static void test_MsiProvideQualifiedComponentEx(void)
     lstrcatA( keypath, prod_squashed );
 
     res = RegCreateKeyExA( HKEY_LOCAL_MACHINE, keypath, 0, NULL, 0, access, NULL, &hkey3, NULL );
-    ok( res == ERROR_SUCCESS, "got %ld\n", res );
+    ok( res == ERROR_SUCCESS, "got %d\n", res );
 
     state = MsiQueryFeatureStateA( prod, "feature" );
     ok( state == INSTALLSTATE_UNKNOWN, "got %d\n", state );
 
     res = RegSetValueExA( hkey3, "feature", 0, REG_SZ, (const BYTE *)"", 1 );
-    ok( res == ERROR_SUCCESS, "got %ld\n", res );
+    ok( res == ERROR_SUCCESS, "got %d\n", res );
 
     state = MsiQueryFeatureStateA( prod, "feature" );
     ok( state == INSTALLSTATE_ADVERTISED, "got %d\n", state );
@@ -3546,10 +3549,10 @@ static void test_MsiProvideQualifiedComponentEx(void)
     lstrcatA( keypath, "\\Features" );
 
     res = RegCreateKeyExA( HKEY_LOCAL_MACHINE, keypath, 0, NULL, 0, access, NULL, &hkey4, NULL );
-    ok( res == ERROR_SUCCESS, "got %ld\n", res );
+    ok( res == ERROR_SUCCESS, "got %d\n", res );
 
     res = RegSetValueExA( hkey4, "feature", 0, REG_SZ, (const BYTE *)comp2_base85, sizeof(comp2_base85) );
-    ok( res == ERROR_SUCCESS, "got %ld\n", res );
+    ok( res == ERROR_SUCCESS, "got %d\n", res );
 
     state = MsiQueryFeatureStateA( prod, "feature" );
     ok( state == INSTALLSTATE_ADVERTISED, "got %d\n", state );
@@ -3558,10 +3561,10 @@ static void test_MsiProvideQualifiedComponentEx(void)
     lstrcatA( keypath, comp2_squashed );
 
     res = RegCreateKeyExA( HKEY_LOCAL_MACHINE, keypath, 0, NULL, 0, access, NULL, &hkey5, NULL );
-    ok( res == ERROR_SUCCESS, "got %ld\n", res );
+    ok( res == ERROR_SUCCESS, "got %d\n", res );
 
     res = RegSetValueExA( hkey5, prod_squashed, 0, REG_SZ, (const BYTE *)"c:\\nosuchfile", sizeof("c:\\nosuchfile") );
-    ok( res == ERROR_SUCCESS, "got %ld\n", res );
+    ok( res == ERROR_SUCCESS, "got %d\n", res );
 
     state = MsiQueryFeatureStateA( prod, "feature" );
     ok( state == INSTALLSTATE_LOCAL, "got %d\n", state );
@@ -3576,13 +3579,13 @@ static void test_MsiProvideQualifiedComponentEx(void)
     create_file_data( path, "test", 100 );
 
     res = RegSetValueExA( hkey5, prod_squashed, 0, REG_SZ, (const BYTE *)path, lstrlenA(path) + 1 );
-    ok( res == ERROR_SUCCESS, "got %ld\n", res );
+    ok( res == ERROR_SUCCESS, "got %d\n", res );
 
     buf[0] = 0;
     len = sizeof(buf);
     r = MsiProvideQualifiedComponentExA( comp, "qualifier", INSTALLMODE_EXISTING, prod, 0, 0, buf, &len );
     ok( r == ERROR_SUCCESS, "got %u\n", r );
-    ok( len == lstrlenA(path), "got %lu\n", len );
+    ok( len == lstrlenA(path), "got %u\n", len );
     ok( !lstrcmpA( path, buf ), "got '%s'\n", buf );
 
     DeleteFileA( "msitest\\text.txt" );
@@ -3680,7 +3683,7 @@ static void test_MsiGetProductCode(void)
         LocalFree(usersid);
         return;
     }
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* user unmanaged component key exists */
     lstrcpyA(product, "prod");
@@ -3689,7 +3692,7 @@ static void test_MsiGetProductCode(void)
     ok(!lstrcmpA(product, "prod"), "Expected product to be unchanged, got %s\n", product);
 
     res = RegSetValueExA(compkey, prod_squashed, 0, REG_SZ, (const BYTE *)"C:\\imapath", 10);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* product value exists */
     lstrcpyA(product, "prod");
@@ -3698,7 +3701,7 @@ static void test_MsiGetProductCode(void)
     ok(!lstrcmpA(product, prodcode), "Expected %s, got %s\n", prodcode, product);
 
     res = RegSetValueExA(compkey, prod2_squashed, 0, REG_SZ, (const BYTE *)"C:\\another", 10);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     lstrcpyA(keypath, "Software\\Microsoft\\Windows\\CurrentVersion\\");
     lstrcatA(keypath, "Installer\\Managed\\");
@@ -3707,7 +3710,7 @@ static void test_MsiGetProductCode(void)
     lstrcatA(keypath, prod_squashed);
 
     res = RegCreateKeyExA(HKEY_LOCAL_MACHINE, keypath, 0, NULL, 0, access, NULL, &prodkey, NULL);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* user managed product key of first product exists */
     lstrcpyA(product, "prod");
@@ -3722,7 +3725,7 @@ static void test_MsiGetProductCode(void)
     lstrcatA(keypath, prod_squashed);
 
     res = RegCreateKeyA(HKEY_CURRENT_USER, keypath, &prodkey);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* user unmanaged product key exists */
     lstrcpyA(product, "prod");
@@ -3743,7 +3746,7 @@ static void test_MsiGetProductCode(void)
         LocalFree( usersid );
         return;
     }
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* local classes product key exists */
     lstrcpyA(product, "prod");
@@ -3761,7 +3764,7 @@ static void test_MsiGetProductCode(void)
     lstrcatA(keypath, prod2_squashed);
 
     res = RegCreateKeyExA(HKEY_LOCAL_MACHINE, keypath, 0, NULL, 0, access, NULL, &prodkey, NULL);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* user managed product key of second product exists */
     lstrcpyA(product, "prod");
@@ -3781,7 +3784,7 @@ static void test_MsiGetProductCode(void)
     lstrcatA(keypath, comp_squashed);
 
     res = RegCreateKeyExA(HKEY_LOCAL_MACHINE, keypath, 0, NULL, 0, access, NULL, &compkey, NULL);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* local user component key exists */
     lstrcpyA(product, "prod");
@@ -3790,7 +3793,7 @@ static void test_MsiGetProductCode(void)
     ok(!lstrcmpA(product, "prod"), "Expected product to be unchanged, got %s\n", product);
 
     res = RegSetValueExA(compkey, prod_squashed, 0, REG_SZ, (const BYTE *)"C:\\imapath", 10);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* product value exists */
     lstrcpyA(product, "prod");
@@ -3799,7 +3802,7 @@ static void test_MsiGetProductCode(void)
     ok(!lstrcmpA(product, prodcode), "Expected %s, got %s\n", prodcode, product);
 
     res = RegSetValueExA(compkey, prod2_squashed, 0, REG_SZ, (const BYTE *)"C:\\another", 10);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     lstrcpyA(keypath, "Software\\Microsoft\\Windows\\CurrentVersion\\");
     lstrcatA(keypath, "Installer\\Managed\\");
@@ -3808,7 +3811,7 @@ static void test_MsiGetProductCode(void)
     lstrcatA(keypath, prod_squashed);
 
     res = RegCreateKeyExA(HKEY_LOCAL_MACHINE, keypath, 0, NULL, 0, access, NULL, &prodkey, NULL);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* user managed product key of first product exists */
     lstrcpyA(product, "prod");
@@ -3823,7 +3826,7 @@ static void test_MsiGetProductCode(void)
     lstrcatA(keypath, prod_squashed);
 
     res = RegCreateKeyA(HKEY_CURRENT_USER, keypath, &prodkey);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* user unmanaged product key exists */
     lstrcpyA(product, "prod");
@@ -3844,7 +3847,7 @@ static void test_MsiGetProductCode(void)
         LocalFree( usersid );
         return;
     }
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* local classes product key exists */
     lstrcpyA(product, "prod");
@@ -3862,7 +3865,7 @@ static void test_MsiGetProductCode(void)
     lstrcatA(keypath, prod2_squashed);
 
     res = RegCreateKeyExA(HKEY_LOCAL_MACHINE, keypath, 0, NULL, 0, access, NULL, &prodkey, NULL);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* user managed product key of second product exists */
     lstrcpyA(product, "prod");
@@ -3939,7 +3942,7 @@ static void test_MsiEnumClients(void)
         LocalFree(usersid);
         return;
     }
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* user unmanaged component key exists */
     product[0] = '\0';
@@ -3954,7 +3957,7 @@ static void test_MsiEnumClients(void)
     ok(!lstrcmpA(product, ""), "Expected product to be unchanged, got %s\n", product);
 
     res = RegSetValueExA(compkey, prod_squashed, 0, REG_SZ, (const BYTE *)"C:\\imapath", 10);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* product value exists */
     r = MsiEnumClientsA(component, 0, product);
@@ -3974,7 +3977,7 @@ static void test_MsiEnumClients(void)
     ok(!lstrcmpA(product, ""), "Expected product to be unchanged, got %s\n", product);
 
     res = RegSetValueExA(compkey, prod2_squashed, 0, REG_SZ, (const BYTE *)"C:\\another", 10);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* try index 1, second product value does exist */
     product[0] = '\0';
@@ -4009,7 +4012,7 @@ static void test_MsiEnumClients(void)
     lstrcatA(keypath, comp_squashed);
 
     res = RegCreateKeyExA(HKEY_LOCAL_MACHINE, keypath, 0, NULL, 0, access, NULL, &compkey, NULL);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* user local component key exists */
     product[0] = '\0';
@@ -4024,7 +4027,7 @@ static void test_MsiEnumClients(void)
     ok(!lstrcmpA(product, ""), "Expected product to be unchanged, got %s\n", product);
 
     res = RegSetValueExA(compkey, prod_squashed, 0, REG_SZ, (const BYTE *)"C:\\imapath", 10);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* product value exists */
     product[0] = '\0';
@@ -4044,7 +4047,7 @@ static void test_MsiEnumClients(void)
     ok(!lstrcmpA(product, ""), "Expected product to be unchanged, got %s\n", product);
 
     res = RegSetValueExA(compkey, prod2_squashed, 0, REG_SZ, (const BYTE *)"C:\\another", 10);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* try index 1, second product value does exist */
     product[0] = '\0';
@@ -4082,25 +4085,24 @@ static void get_version_info(LPSTR path, LPSTR *vercheck, LPDWORD verchecksz,
     LPSTR version;
     VS_FIXEDFILEINFO *ffi;
     DWORD size = GetFileVersionInfoSizeA(path, NULL);
-    UINT len;
     USHORT *lang;
 
-    version = malloc(size);
+    version = HeapAlloc(GetProcessHeap(), 0, size);
     GetFileVersionInfoA(path, 0, size, version);
 
-    VerQueryValueA(version, "\\", (LPVOID *)&ffi, &len);
-    *vercheck = malloc(MAX_PATH);
+    VerQueryValueA(version, "\\", (LPVOID *)&ffi, &size);
+    *vercheck = HeapAlloc(GetProcessHeap(), 0, MAX_PATH);
     sprintf(*vercheck, "%d.%d.%d.%d", HIWORD(ffi->dwFileVersionMS),
             LOWORD(ffi->dwFileVersionMS), HIWORD(ffi->dwFileVersionLS),
             LOWORD(ffi->dwFileVersionLS));
     *verchecksz = lstrlenA(*vercheck);
 
-    VerQueryValueA(version, "\\VarFileInfo\\Translation", (void **)&lang, &len);
-    *langcheck = malloc(MAX_PATH);
+    VerQueryValueA(version, "\\VarFileInfo\\Translation", (void **)&lang, &size);
+    *langcheck = HeapAlloc(GetProcessHeap(), 0, MAX_PATH);
     sprintf(*langcheck, "%d", *lang);
     *langchecksz = lstrlenA(*langcheck);
 
-    free(version);
+    HeapFree(GetProcessHeap(), 0, version);
 }
 
 static void test_MsiGetFileVersion(void)
@@ -4126,10 +4128,10 @@ static void test_MsiGetFileVersion(void)
        "Expected ERROR_INVALID_PARAMETER, got %d\n", r);
     ok(!lstrcmpA(version, "version"),
        "Expected version to be unchanged, got %s\n", version);
-    ok(versz == MAX_PATH, "got %lu\n", versz);
+    ok(versz == MAX_PATH, "Expected %d, got %d\n", MAX_PATH, versz);
     ok(!lstrcmpA(lang, "lang"),
        "Expected lang to be unchanged, got %s\n", lang);
-    ok(langsz == MAX_PATH, "got %lu\n", langsz);
+    ok(langsz == MAX_PATH, "Expected %d, got %d\n", MAX_PATH, langsz);
 
     /* empty szFilePath */
     r = MsiGetFileVersionA("", NULL, NULL, NULL, NULL);
@@ -4144,10 +4146,10 @@ static void test_MsiGetFileVersion(void)
        "Expected ERROR_FILE_NOT_FOUND, got %d\n", r);
     ok(!lstrcmpA(version, "version"),
        "Expected version to be unchanged, got %s\n", version);
-    ok(versz == MAX_PATH, "got %lu\n", versz);
+    ok(versz == MAX_PATH, "Expected %d, got %d\n", MAX_PATH, versz);
     ok(!lstrcmpA(lang, "lang"),
        "Expected lang to be unchanged, got %s\n", lang);
-    ok(langsz == MAX_PATH, "got %lu\n", langsz);
+    ok(langsz == MAX_PATH, "Expected %d, got %d\n", MAX_PATH, langsz);
 
     /* nonexistent szFilePath */
     versz = MAX_PATH;
@@ -4159,10 +4161,10 @@ static void test_MsiGetFileVersion(void)
        "Expected ERROR_FILE_NOT_FOUND, got %d\n", r);
     ok(!lstrcmpA(version, "version"),
        "Expected version to be unchanged, got %s\n", version);
-    ok(versz == MAX_PATH, "got %lu\n", versz);
+    ok(versz == MAX_PATH, "Expected %d, got %d\n", MAX_PATH, versz);
     ok(!lstrcmpA(lang, "lang"),
        "Expected lang to be unchanged, got %s\n", lang);
-    ok(langsz == MAX_PATH, "got %lu\n", langsz);
+    ok(langsz == MAX_PATH, "Expected %d, got %d\n", MAX_PATH, langsz);
 
     /* nonexistent szFilePath, valid lpVersionBuf, NULL pcchVersionBuf */
     versz = MAX_PATH;
@@ -4174,10 +4176,10 @@ static void test_MsiGetFileVersion(void)
        "Expected ERROR_INVALID_PARAMETER, got %d\n", r);
     ok(!lstrcmpA(version, "version"),
        "Expected version to be unchanged, got %s\n", version);
-    ok(versz == MAX_PATH, "got %lu\n", versz);
+    ok(versz == MAX_PATH, "Expected %d, got %d\n", MAX_PATH, versz);
     ok(!lstrcmpA(lang, "lang"),
        "Expected lang to be unchanged, got %s\n", lang);
-    ok(langsz == MAX_PATH, "got %lu\n", langsz);
+    ok(langsz == MAX_PATH, "Expected %d, got %d\n", MAX_PATH, langsz);
 
     /* nonexistent szFilePath, valid lpLangBuf, NULL pcchLangBuf */
     versz = MAX_PATH;
@@ -4189,10 +4191,10 @@ static void test_MsiGetFileVersion(void)
        "Expected ERROR_INVALID_PARAMETER, got %d\n", r);
     ok(!lstrcmpA(version, "version"),
        "Expected version to be unchanged, got %s\n", version);
-    ok(versz == MAX_PATH, "got %lu\n", versz);
+    ok(versz == MAX_PATH, "Expected %d, got %d\n", MAX_PATH, versz);
     ok(!lstrcmpA(lang, "lang"),
        "Expected lang to be unchanged, got %s\n", lang);
-    ok(langsz == MAX_PATH, "got %lu\n", langsz);
+    ok(langsz == MAX_PATH, "Expected %d, got %d\n", MAX_PATH, langsz);
 
     /* nonexistent szFilePath, valid lpVersionBuf, pcchVersionBuf is zero */
     versz = 0;
@@ -4204,10 +4206,10 @@ static void test_MsiGetFileVersion(void)
        "Expected ERROR_FILE_NOT_FOUND, got %d\n", r);
     ok(!lstrcmpA(version, "version"),
        "Expected version to be unchanged, got %s\n", version);
-    ok(versz == 0, "Expected 0, got %lu\n", versz);
+    ok(versz == 0, "Expected 0, got %d\n", versz);
     ok(!lstrcmpA(lang, "lang"),
        "Expected lang to be unchanged, got %s\n", lang);
-    ok(langsz == MAX_PATH, "got %lu\n", langsz);
+    ok(langsz == MAX_PATH, "Expected %d, got %d\n", MAX_PATH, langsz);
 
     /* nonexistent szFilePath, valid lpLangBuf, pcchLangBuf is zero */
     versz = MAX_PATH;
@@ -4219,10 +4221,10 @@ static void test_MsiGetFileVersion(void)
        "Expected ERROR_FILE_NOT_FOUND, got %d\n", r);
     ok(!lstrcmpA(version, "version"),
        "Expected version to be unchanged, got %s\n", version);
-    ok(versz == MAX_PATH, "got %lu\n", versz);
+    ok(versz == MAX_PATH, "Expected %d, got %d\n", MAX_PATH, versz);
     ok(!lstrcmpA(lang, "lang"),
        "Expected lang to be unchanged, got %s\n", lang);
-    ok(langsz == 0, "Expected 0, got %lu\n", langsz);
+    ok(langsz == 0, "Expected 0, got %d\n", langsz);
 
     /* nonexistent szFilePath, rest NULL */
     r = MsiGetFileVersionA("nonexistent", NULL, NULL, NULL, NULL);
@@ -4240,10 +4242,10 @@ static void test_MsiGetFileVersion(void)
     lstrcpyA(version, "version");
     lstrcpyA(lang, "lang");
     r = MsiGetFileVersionA("ver.txt", version, &versz, lang, &langsz);
-    ok(versz == MAX_PATH, "got %lu\n", versz);
+    ok(versz == MAX_PATH, "Expected %d, got %d\n", MAX_PATH, versz);
     ok(!lstrcmpA(version, "version"),
        "Expected version to be unchanged, got %s\n", version);
-    ok(langsz == MAX_PATH, "got %lu\n", langsz);
+    ok(langsz == MAX_PATH, "Expected %d, got %d\n", MAX_PATH, langsz);
     ok(!lstrcmpA(lang, "lang"),
        "Expected lang to be unchanged, got %s\n", lang);
     ok(r == ERROR_FILE_INVALID,
@@ -4263,10 +4265,10 @@ static void test_MsiGetFileVersion(void)
            "Expected ERROR_FILE_NOT_FOUND, got %d\n", r);
         ok(!lstrcmpA(version, "version"),
            "Expected version to be unchanged, got %s\n", version);
-        ok(versz == MAX_PATH, "got %lu\n", versz);
+        ok(versz == MAX_PATH, "Expected %d, got %d\n", MAX_PATH, versz);
         ok(!lstrcmpA(lang, "lang"),
            "Expected lang to be unchanged, got %s\n", lang);
-        ok(langsz == MAX_PATH, "got %lu\n", langsz);
+        ok(langsz == MAX_PATH, "Expected %d, got %d\n", MAX_PATH, langsz);
     }
 
     GetSystemDirectoryA(path, MAX_PATH);
@@ -4284,11 +4286,11 @@ static void test_MsiGetFileVersion(void)
     if (langchecksz && !langsz)
     {
         win_skip("broken MsiGetFileVersionA detected\n");
-        free(vercheck);
-        free(langcheck);
+        HeapFree(GetProcessHeap(), 0, vercheck);
+        HeapFree(GetProcessHeap(), 0, langcheck);
         return;
     }
-    ok(versz == verchecksz, "Expected %lu, got %lu\n", verchecksz, versz);
+    ok(versz == verchecksz, "Expected %d, got %d\n", verchecksz, versz);
     ok(strstr(lang, langcheck) != NULL, "Expected \"%s\" in \"%s\"\n", langcheck, lang);
     ok(!lstrcmpA(version, vercheck),
         "Expected %s, got %s\n", vercheck, version);
@@ -4298,8 +4300,9 @@ static void test_MsiGetFileVersion(void)
     lstrcpyA(version, "version");
     r = MsiGetFileVersionA(path, version, &versz, NULL, NULL);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
-    ok(versz == verchecksz, "Expected %lu, got %lu\n", verchecksz, versz);
-    ok(!lstrcmpA(version, vercheck), "Expected %s, got %s\n", vercheck, version);
+    ok(versz == verchecksz, "Expected %d, got %d\n", verchecksz, versz);
+    ok(!lstrcmpA(version, vercheck),
+       "Expected %s, got %s\n", vercheck, version);
 
     /* only check language */
     langsz = MAX_PATH;
@@ -4316,13 +4319,13 @@ static void test_MsiGetFileVersion(void)
     versz = MAX_PATH;
     r = MsiGetFileVersionA(path, NULL, &versz, NULL, NULL);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
-    ok(versz == verchecksz, "Expected %lu, got %lu\n", verchecksz, versz);
+    ok(versz == verchecksz, "Expected %d, got %d\n", verchecksz, versz);
 
     /* get pcchLangBuf */
     langsz = MAX_PATH;
     r = MsiGetFileVersionA(path, NULL, NULL, NULL, &langsz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
-    ok(langsz >= langchecksz, "Expected %lu >= %lu\n", langsz, langchecksz);
+    ok(langsz >= langchecksz, "Expected %d >= %d\n", langsz, langchecksz);
 
     /* pcchVersionBuf not big enough */
     versz = 5;
@@ -4331,7 +4334,7 @@ static void test_MsiGetFileVersion(void)
     ok(r == ERROR_MORE_DATA, "Expected ERROR_MORE_DATA, got %d\n", r);
     ok(!strncmp(version, vercheck, 4),
        "Expected first 4 characters of \"%s\", got \"%s\"\n", vercheck, version);
-    ok(versz == verchecksz, "Expected %lu, got %lu\n", verchecksz, versz);
+    ok(versz == verchecksz, "Expected %d, got %d\n", verchecksz, versz);
 
     /* pcchLangBuf not big enough */
     langsz = 4;
@@ -4339,7 +4342,7 @@ static void test_MsiGetFileVersion(void)
     r = MsiGetFileVersionA(path, NULL, NULL, lang, &langsz);
     ok(r == ERROR_MORE_DATA, "Expected ERROR_MORE_DATA, got %d\n", r);
     ok(lstrcmpA(lang, "lang"), "lang not set\n");
-    ok(langsz >= langchecksz, "Expected %lu >= %lu\n", langsz, langchecksz);
+    ok(langsz >= langchecksz, "Expected %d >= %d\n", langsz, langchecksz);
 
     /* pcchVersionBuf big enough, pcchLangBuf not big enough */
     versz = MAX_PATH;
@@ -4347,9 +4350,9 @@ static void test_MsiGetFileVersion(void)
     lstrcpyA(version, "version");
     r = MsiGetFileVersionA(path, version, &versz, NULL, &langsz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
-    ok(versz == verchecksz, "Expected %lu, got %lu\n", verchecksz, versz);
+    ok(versz == verchecksz, "Expected %d, got %d\n", verchecksz, versz);
     ok(!lstrcmpA(version, vercheck), "Expected \"%s\", got \"%s\"\n", vercheck, version);
-    ok(langsz >= langchecksz && langsz < MAX_PATH, "Expected %lu >= %lu\n", langsz, langchecksz);
+    ok(langsz >= langchecksz && langsz < MAX_PATH, "Expected %d >= %d\n", langsz, langchecksz);
 
     /* pcchVersionBuf not big enough, pcchLangBuf big enough */
     versz = 5;
@@ -4357,8 +4360,8 @@ static void test_MsiGetFileVersion(void)
     lstrcpyA(lang, "lang");
     r = MsiGetFileVersionA(path, NULL, &versz, lang, &langsz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
-    ok(versz == verchecksz, "Expected %lu, got %lu\n", verchecksz, versz);
-    ok(langsz >= langchecksz && langsz < MAX_PATH, "Expected %lu >= %lu\n", langsz, langchecksz);
+    ok(versz == verchecksz, "Expected %d, got %d\n", verchecksz, versz);
+    ok(langsz >= langchecksz && langsz < MAX_PATH, "Expected %d >= %d\n", langsz, langchecksz);
     ok(strstr(lang, langcheck) != NULL, "expected %s in %s\n", langcheck, lang);
 
     /* NULL pcchVersionBuf and pcchLangBuf */
@@ -4369,8 +4372,8 @@ static void test_MsiGetFileVersion(void)
     r = MsiGetFileVersionA(path, NULL, NULL, NULL, NULL);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
 
-    free(vercheck);
-    free(langcheck);
+    HeapFree(GetProcessHeap(), 0, vercheck);
+    HeapFree(GetProcessHeap(), 0, langcheck);
 }
 
 static void test_MsiGetProductInfo(void)
@@ -4403,7 +4406,7 @@ static void test_MsiGetProductInfo(void)
     ok(r == ERROR_INVALID_PARAMETER,
        "Expected ERROR_INVALID_PARAMETER, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     /* empty szProduct */
     sz = MAX_PATH;
@@ -4412,7 +4415,7 @@ static void test_MsiGetProductInfo(void)
     ok(r == ERROR_INVALID_PARAMETER,
        "Expected ERROR_INVALID_PARAMETER, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     /* garbage szProduct */
     sz = MAX_PATH;
@@ -4421,7 +4424,7 @@ static void test_MsiGetProductInfo(void)
     ok(r == ERROR_INVALID_PARAMETER,
        "Expected ERROR_INVALID_PARAMETER, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     /* guid without brackets */
     sz = MAX_PATH;
@@ -4431,7 +4434,7 @@ static void test_MsiGetProductInfo(void)
     ok(r == ERROR_INVALID_PARAMETER,
        "Expected ERROR_INVALID_PARAMETER, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     /* guid with brackets */
     sz = MAX_PATH;
@@ -4441,7 +4444,7 @@ static void test_MsiGetProductInfo(void)
     ok(r == ERROR_UNKNOWN_PRODUCT,
        "Expected ERROR_UNKNOWN_PRODUCT, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     /* same length as guid, but random */
     sz = MAX_PATH;
@@ -4451,7 +4454,7 @@ static void test_MsiGetProductInfo(void)
     ok(r == ERROR_INVALID_PARAMETER,
        "Expected ERROR_INVALID_PARAMETER, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     /* not installed, NULL szAttribute */
     sz = MAX_PATH;
@@ -4460,7 +4463,7 @@ static void test_MsiGetProductInfo(void)
     ok(r == ERROR_INVALID_PARAMETER,
        "Expected ERROR_INVALID_PARAMETER, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     /* not installed, NULL lpValueBuf */
     sz = MAX_PATH;
@@ -4469,7 +4472,7 @@ static void test_MsiGetProductInfo(void)
     ok(r == ERROR_UNKNOWN_PRODUCT,
        "Expected ERROR_UNKNOWN_PRODUCT, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     /* not installed, NULL pcchValueBuf */
     sz = MAX_PATH;
@@ -4478,7 +4481,7 @@ static void test_MsiGetProductInfo(void)
     ok(r == ERROR_INVALID_PARAMETER,
        "Expected ERROR_INVALID_PARAMETER, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     /* created guid cannot possibly be an installed product code */
     sz = MAX_PATH;
@@ -4487,7 +4490,7 @@ static void test_MsiGetProductInfo(void)
     ok(r == ERROR_UNKNOWN_PRODUCT,
        "Expected ERROR_UNKNOWN_PRODUCT, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     lstrcpyA(keypath, "Software\\Microsoft\\Windows\\CurrentVersion\\Installer\\Managed\\");
     lstrcatA(keypath, usersid);
@@ -4501,7 +4504,7 @@ static void test_MsiGetProductInfo(void)
         LocalFree(usersid);
         return;
     }
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* managed product code exists */
     sz = MAX_PATH;
@@ -4510,7 +4513,7 @@ static void test_MsiGetProductInfo(void)
     ok(r == ERROR_UNKNOWN_PROPERTY,
        "Expected ERROR_UNKNOWN_PROPERTY, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     delete_key(prodkey, "", access & KEY_WOW64_64KEY);
     RegCloseKey(prodkey);
@@ -4527,7 +4530,7 @@ static void test_MsiGetProductInfo(void)
         LocalFree(usersid);
         return;
     }
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* local user product code exists */
     sz = MAX_PATH;
@@ -4536,7 +4539,7 @@ static void test_MsiGetProductInfo(void)
     ok(r == ERROR_UNKNOWN_PRODUCT,
        "Expected ERROR_UNKNOWN_PRODUCT, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     lstrcpyA(keypath, "Software\\Microsoft\\Windows\\CurrentVersion\\Installer\\Managed\\");
     lstrcatA(keypath, usersid);
@@ -4544,7 +4547,7 @@ static void test_MsiGetProductInfo(void)
     lstrcatA(keypath, prod_squashed);
 
     res = RegCreateKeyExA(HKEY_LOCAL_MACHINE, keypath, 0, NULL, 0, access, NULL, &prodkey, NULL);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* both local and managed product code exist */
     sz = MAX_PATH;
@@ -4553,10 +4556,10 @@ static void test_MsiGetProductInfo(void)
     ok(r == ERROR_UNKNOWN_PROPERTY,
        "Expected ERROR_UNKNOWN_PROPERTY, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "%lun", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     res = RegCreateKeyExA(localkey, "InstallProperties", 0, NULL, 0, access, NULL, &propkey, NULL);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* InstallProperties key exists */
     sz = MAX_PATH;
@@ -4564,10 +4567,10 @@ static void test_MsiGetProductInfo(void)
     r = MsiGetProductInfoA(prodcode, INSTALLPROPERTY_HELPLINKA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, ""), "Expected \"\", got \"%s\"\n", buf);
-    ok(sz == 0, "Expected 0, got %lu\n", sz);
+    ok(sz == 0, "Expected 0, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "HelpLink", 0, REG_SZ, (LPBYTE)"link", 5);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* HelpLink value exists */
     sz = MAX_PATH;
@@ -4575,7 +4578,7 @@ static void test_MsiGetProductInfo(void)
     r = MsiGetProductInfoA(prodcode, INSTALLPROPERTY_HELPLINKA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "link"), "Expected \"link\", got \"%s\"\n", buf);
-    ok(sz == 4, "Expected 4, got %lu\n", sz);
+    ok(sz == 4, "Expected 4, got %d\n", sz);
 
     /* pcchBuf is NULL */
     r = MsiGetProductInfoA(prodcode, INSTALLPROPERTY_HELPLINKA, NULL, NULL);
@@ -4585,13 +4588,13 @@ static void test_MsiGetProductInfo(void)
     sz = MAX_PATH;
     r = MsiGetProductInfoA(prodcode, INSTALLPROPERTY_HELPLINKA, NULL, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
-    ok(sz == 4, "Expected 4, got %lu\n", sz);
+    ok(sz == 4, "Expected 4, got %d\n", sz);
 
     /* lpValueBuf is NULL, pcchValueBuf is too small */
     sz = 2;
     r = MsiGetProductInfoA(prodcode, INSTALLPROPERTY_HELPLINKA, NULL, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
-    ok(sz == 4, "Expected 4, got %lu\n", sz);
+    ok(sz == 4, "Expected 4, got %d\n", sz);
 
     /* lpValueBuf is non-NULL, pcchValueBuf is too small */
     sz = 2;
@@ -4599,7 +4602,7 @@ static void test_MsiGetProductInfo(void)
     r = MsiGetProductInfoA(prodcode, INSTALLPROPERTY_HELPLINKA, buf, &sz);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to remain unchanged, got \"%s\"\n", buf);
     ok(r == ERROR_MORE_DATA, "Expected ERROR_MORE_DATA, got %d\n", r);
-    ok(sz == 4, "Expected 4, got %lu\n", sz);
+    ok(sz == 4, "Expected 4, got %d\n", sz);
 
     /* lpValueBuf is non-NULL, pcchValueBuf is exactly 4 */
     sz = 4;
@@ -4608,10 +4611,10 @@ static void test_MsiGetProductInfo(void)
     ok(r == ERROR_MORE_DATA, "Expected ERROR_MORE_DATA, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"),
        "Expected buf to remain unchanged, got \"%s\"\n", buf);
-    ok(sz == 4, "Expected 4, got %lu\n", sz);
+    ok(sz == 4, "Expected 4, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "IMadeThis", 0, REG_SZ, (LPBYTE)"random", 7);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* random property not supported by MSI, value exists */
     sz = MAX_PATH;
@@ -4620,7 +4623,7 @@ static void test_MsiGetProductInfo(void)
     ok(r == ERROR_UNKNOWN_PROPERTY,
        "Expected ERROR_UNKNOWN_PROPERTY, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected \"apple\", got \"%s\"\n", buf);
-    ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     RegDeleteValueA(propkey, "IMadeThis");
     RegDeleteValueA(propkey, "HelpLink");
@@ -4635,7 +4638,7 @@ static void test_MsiGetProductInfo(void)
     lstrcatA(keypath, prod_squashed);
 
     res = RegCreateKeyA(HKEY_CURRENT_USER, keypath, &prodkey);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* user product key exists */
     sz = MAX_PATH;
@@ -4644,7 +4647,7 @@ static void test_MsiGetProductInfo(void)
     ok(r == ERROR_UNKNOWN_PROPERTY,
        "Expected ERROR_UNKNOWN_PROPERTY, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected \"apple\", got \"%s\"\n", buf);
-    ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     lstrcpyA(keypath, "Software\\Microsoft\\Windows\\CurrentVersion\\Installer\\UserData\\");
     lstrcatA(keypath, usersid);
@@ -4652,7 +4655,7 @@ static void test_MsiGetProductInfo(void)
     lstrcatA(keypath, prod_squashed);
 
     res = RegCreateKeyExA(HKEY_LOCAL_MACHINE, keypath, 0, NULL, 0, access, NULL, &localkey, NULL);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* local user product key exists */
     sz = MAX_PATH;
@@ -4661,10 +4664,10 @@ static void test_MsiGetProductInfo(void)
     ok(r == ERROR_UNKNOWN_PROPERTY,
        "Expected ERROR_UNKNOWN_PROPERTY, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected \"apple\", got \"%s\"\n", buf);
-    ok(sz == MAX_PATH, "got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     res = RegCreateKeyExA(localkey, "InstallProperties", 0, NULL, 0, access, NULL, &propkey, NULL);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* InstallProperties key exists */
     sz = MAX_PATH;
@@ -4672,10 +4675,10 @@ static void test_MsiGetProductInfo(void)
     r = MsiGetProductInfoA(prodcode, INSTALLPROPERTY_HELPLINKA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, ""), "Expected \"\", got \"%s\"\n", buf);
-    ok(sz == 0, "Expected 0, got %lu\n", sz);
+    ok(sz == 0, "Expected 0, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "HelpLink", 0, REG_SZ, (LPBYTE)"link", 5);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* HelpLink value exists */
     sz = MAX_PATH;
@@ -4683,7 +4686,7 @@ static void test_MsiGetProductInfo(void)
     r = MsiGetProductInfoA(prodcode, INSTALLPROPERTY_HELPLINKA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "link"), "Expected \"link\", got \"%s\"\n", buf);
-    ok(sz == 4, "Expected 4, got %lu\n", sz);
+    ok(sz == 4, "Expected 4, got %d\n", sz);
 
     RegDeleteValueA(propkey, "HelpLink");
     delete_key(propkey, "", access & KEY_WOW64_64KEY);
@@ -4703,7 +4706,7 @@ static void test_MsiGetProductInfo(void)
         LocalFree( usersid );
         return;
     }
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* classes product key exists */
     sz = MAX_PATH;
@@ -4712,7 +4715,7 @@ static void test_MsiGetProductInfo(void)
     ok(r == ERROR_UNKNOWN_PROPERTY,
        "Expected ERROR_UNKNOWN_PROPERTY, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected \"apple\", got \"%s\"\n", buf);
-    ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     lstrcpyA(keypath, "Software\\Microsoft\\Windows\\CurrentVersion\\Installer\\UserData\\");
     lstrcatA(keypath, usersid);
@@ -4720,7 +4723,7 @@ static void test_MsiGetProductInfo(void)
     lstrcatA(keypath, prod_squashed);
 
     res = RegCreateKeyExA(HKEY_LOCAL_MACHINE, keypath, 0, NULL, 0, access, NULL, &localkey, NULL);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* local user product key exists */
     sz = MAX_PATH;
@@ -4729,10 +4732,10 @@ static void test_MsiGetProductInfo(void)
     ok(r == ERROR_UNKNOWN_PROPERTY,
        "Expected ERROR_UNKNOWN_PROPERTY, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected \"apple\", got \"%s\"\n", buf);
-    ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     res = RegCreateKeyExA(localkey, "InstallProperties", 0, NULL, 0, access, NULL, &propkey, NULL);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* InstallProperties key exists */
     sz = MAX_PATH;
@@ -4741,7 +4744,7 @@ static void test_MsiGetProductInfo(void)
     ok(r == ERROR_UNKNOWN_PROPERTY,
        "Expected ERROR_UNKNOWN_PROPERTY, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected \"apple\", got \"%s\"\n", buf);
-    ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     delete_key(propkey, "", access & KEY_WOW64_64KEY);
     delete_key(localkey, "", access & KEY_WOW64_64KEY);
@@ -4753,7 +4756,7 @@ static void test_MsiGetProductInfo(void)
     lstrcatA(keypath, prod_squashed);
 
     res = RegCreateKeyExA(HKEY_LOCAL_MACHINE, keypath, 0, NULL, 0, access, NULL, &localkey, NULL);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* Local System product key exists */
     sz = MAX_PATH;
@@ -4762,10 +4765,10 @@ static void test_MsiGetProductInfo(void)
     ok(r == ERROR_UNKNOWN_PROPERTY,
         "Expected ERROR_UNKNOWN_PROPERTY, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected \"apple\", got \"%s\"\n", buf);
-    ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     res = RegCreateKeyExA(localkey, "InstallProperties", 0, NULL, 0, access, NULL, &propkey, NULL);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* InstallProperties key exists */
     sz = MAX_PATH;
@@ -4773,10 +4776,10 @@ static void test_MsiGetProductInfo(void)
     r = MsiGetProductInfoA(prodcode, INSTALLPROPERTY_HELPLINKA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, ""), "Expected \"\", got \"%s\"\n", buf);
-    ok(sz == 0, "Expected 0, got %lu\n", sz);
+    ok(sz == 0, "Expected 0, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "HelpLink", 0, REG_SZ, (LPBYTE)"link", 5);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* HelpLink value exists */
     sz = MAX_PATH;
@@ -4784,11 +4787,11 @@ static void test_MsiGetProductInfo(void)
     r = MsiGetProductInfoA(prodcode, INSTALLPROPERTY_HELPLINKA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "link"), "Expected \"link\", got \"%s\"\n", buf);
-    ok(sz == 4, "Expected 4, got %lu\n", sz);
+    ok(sz == 4, "Expected 4, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "HelpLink", 0, REG_DWORD,
                          (const BYTE *)&val, sizeof(DWORD));
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* HelpLink type is REG_DWORD */
     sz = MAX_PATH;
@@ -4796,10 +4799,10 @@ static void test_MsiGetProductInfo(void)
     r = MsiGetProductInfoA(prodcode, INSTALLPROPERTY_HELPLINKA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "42"), "Expected \"42\", got \"%s\"\n", buf);
-    ok(sz == 2, "Expected 2, got %lu\n", sz);
+    ok(sz == 2, "Expected 2, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "DisplayName", 0, REG_SZ, (LPBYTE)"name", 5);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* DisplayName value exists */
     sz = MAX_PATH;
@@ -4807,10 +4810,11 @@ static void test_MsiGetProductInfo(void)
     r = MsiGetProductInfoA(prodcode, INSTALLPROPERTY_INSTALLEDPRODUCTNAMEA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "name"), "Expected \"name\", got \"%s\"\n", buf);
-    ok(sz == 4, "Expected 4, got %lu\n", sz);
+    ok(sz == 4, "Expected 4, got %d\n", sz);
 
-    res = RegSetValueExA(propkey, "DisplayName", 0, REG_DWORD, (const BYTE *)&val, sizeof(DWORD));
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    res = RegSetValueExA(propkey, "DisplayName", 0, REG_DWORD,
+                         (const BYTE *)&val, sizeof(DWORD));
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* DisplayName type is REG_DWORD */
     sz = MAX_PATH;
@@ -4818,10 +4822,10 @@ static void test_MsiGetProductInfo(void)
     r = MsiGetProductInfoA(prodcode, INSTALLPROPERTY_INSTALLEDPRODUCTNAMEA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "42"), "Expected \"42\", got \"%s\"\n", buf);
-    ok(sz == 2, "Expected 2, got %lu\n", sz);
+    ok(sz == 2, "Expected 2, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "DisplayVersion", 0, REG_SZ, (LPBYTE)"1.1.1", 6);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* DisplayVersion value exists */
     sz = MAX_PATH;
@@ -4829,11 +4833,11 @@ static void test_MsiGetProductInfo(void)
     r = MsiGetProductInfoA(prodcode, INSTALLPROPERTY_VERSIONSTRINGA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "1.1.1"), "Expected \"1.1.1\", got \"%s\"\n", buf);
-    ok(sz == 5, "Expected 5, got %lu\n", sz);
+    ok(sz == 5, "Expected 5, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "DisplayVersion", 0,
                          REG_DWORD, (const BYTE *)&val, sizeof(DWORD));
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* DisplayVersion type is REG_DWORD */
     sz = MAX_PATH;
@@ -4841,10 +4845,10 @@ static void test_MsiGetProductInfo(void)
     r = MsiGetProductInfoA(prodcode, INSTALLPROPERTY_VERSIONSTRINGA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "42"), "Expected \"42\", got \"%s\"\n", buf);
-    ok(sz == 2, "Expected 2, got %lu\n", sz);
+    ok(sz == 2, "Expected 2, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "HelpTelephone", 0, REG_SZ, (LPBYTE)"tele", 5);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* HelpTelephone value exists */
     sz = MAX_PATH;
@@ -4852,11 +4856,11 @@ static void test_MsiGetProductInfo(void)
     r = MsiGetProductInfoA(prodcode, INSTALLPROPERTY_HELPTELEPHONEA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "tele"), "Expected \"tele\", got \"%s\"\n", buf);
-    ok(sz == 4, "Expected 4, got %lu\n", sz);
+    ok(sz == 4, "Expected 4, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "HelpTelephone", 0, REG_DWORD,
                          (const BYTE *)&val, sizeof(DWORD));
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* HelpTelephone type is REG_DWORD */
     sz = MAX_PATH;
@@ -4864,10 +4868,10 @@ static void test_MsiGetProductInfo(void)
     r = MsiGetProductInfoA(prodcode, INSTALLPROPERTY_HELPTELEPHONEA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "42"), "Expected \"42\", got \"%s\"\n", buf);
-    ok(sz == 2, "Expected 2, got %lu\n", sz);
+    ok(sz == 2, "Expected 2, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "InstallLocation", 0, REG_SZ, (LPBYTE)"loc", 4);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* InstallLocation value exists */
     sz = MAX_PATH;
@@ -4875,11 +4879,11 @@ static void test_MsiGetProductInfo(void)
     r = MsiGetProductInfoA(prodcode, INSTALLPROPERTY_INSTALLLOCATIONA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "loc"), "Expected \"loc\", got \"%s\"\n", buf);
-    ok(sz == 3, "Expected 3, got %lu\n", sz);
+    ok(sz == 3, "Expected 3, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "InstallLocation", 0, REG_DWORD,
                          (const BYTE *)&val, sizeof(DWORD));
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* InstallLocation type is REG_DWORD */
     sz = MAX_PATH;
@@ -4887,10 +4891,10 @@ static void test_MsiGetProductInfo(void)
     r = MsiGetProductInfoA(prodcode, INSTALLPROPERTY_INSTALLLOCATIONA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "42"), "Expected \"42\", got \"%s\"\n", buf);
-    ok(sz == 2, "Expected 2, got %lu\n", sz);
+    ok(sz == 2, "Expected 2, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "InstallSource", 0, REG_SZ, (LPBYTE)"source", 7);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* InstallSource value exists */
     sz = MAX_PATH;
@@ -4898,11 +4902,11 @@ static void test_MsiGetProductInfo(void)
     r = MsiGetProductInfoA(prodcode, INSTALLPROPERTY_INSTALLSOURCEA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "source"), "Expected \"source\", got \"%s\"\n", buf);
-    ok(sz == 6, "Expected 6, got %lu\n", sz);
+    ok(sz == 6, "Expected 6, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "InstallSource", 0, REG_DWORD,
                          (const BYTE *)&val, sizeof(DWORD));
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* InstallSource type is REG_DWORD */
     sz = MAX_PATH;
@@ -4910,10 +4914,10 @@ static void test_MsiGetProductInfo(void)
     r = MsiGetProductInfoA(prodcode, INSTALLPROPERTY_INSTALLSOURCEA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "42"), "Expected \"42\", got \"%s\"\n", buf);
-    ok(sz == 2, "Expected 2, got %lu\n", sz);
+    ok(sz == 2, "Expected 2, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "InstallDate", 0, REG_SZ, (LPBYTE)"date", 5);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* InstallDate value exists */
     sz = MAX_PATH;
@@ -4921,11 +4925,11 @@ static void test_MsiGetProductInfo(void)
     r = MsiGetProductInfoA(prodcode, INSTALLPROPERTY_INSTALLDATEA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "date"), "Expected \"date\", got \"%s\"\n", buf);
-    ok(sz == 4, "Expected 4, got %lu\n", sz);
+    ok(sz == 4, "Expected 4, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "InstallDate", 0, REG_DWORD,
                          (const BYTE *)&val, sizeof(DWORD));
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* InstallDate type is REG_DWORD */
     sz = MAX_PATH;
@@ -4933,10 +4937,10 @@ static void test_MsiGetProductInfo(void)
     r = MsiGetProductInfoA(prodcode, INSTALLPROPERTY_INSTALLDATEA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "42"), "Expected \"42\", got \"%s\"\n", buf);
-    ok(sz == 2, "Expected 2, got %lu\n", sz);
+    ok(sz == 2, "Expected 2, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "Publisher", 0, REG_SZ, (LPBYTE)"pub", 4);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* Publisher value exists */
     sz = MAX_PATH;
@@ -4944,11 +4948,11 @@ static void test_MsiGetProductInfo(void)
     r = MsiGetProductInfoA(prodcode, INSTALLPROPERTY_PUBLISHERA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "pub"), "Expected \"pub\", got \"%s\"\n", buf);
-    ok(sz == 3, "Expected 3, got %lu\n", sz);
+    ok(sz == 3, "Expected 3, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "Publisher", 0, REG_DWORD,
                          (const BYTE *)&val, sizeof(DWORD));
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* Publisher type is REG_DWORD */
     sz = MAX_PATH;
@@ -4956,10 +4960,10 @@ static void test_MsiGetProductInfo(void)
     r = MsiGetProductInfoA(prodcode, INSTALLPROPERTY_PUBLISHERA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "42"), "Expected \"42\", got \"%s\"\n", buf);
-    ok(sz == 2, "Expected 2, got %lu\n", sz);
+    ok(sz == 2, "Expected 2, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "LocalPackage", 0, REG_SZ, (LPBYTE)"pack", 5);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* LocalPackage value exists */
     sz = MAX_PATH;
@@ -4967,11 +4971,11 @@ static void test_MsiGetProductInfo(void)
     r = MsiGetProductInfoA(prodcode, INSTALLPROPERTY_LOCALPACKAGEA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "pack"), "Expected \"pack\", got \"%s\"\n", buf);
-    ok(sz == 4, "Expected 4, got %lu\n", sz);
+    ok(sz == 4, "Expected 4, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "LocalPackage", 0, REG_DWORD,
                          (const BYTE *)&val, sizeof(DWORD));
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* LocalPackage type is REG_DWORD */
     sz = MAX_PATH;
@@ -4979,10 +4983,10 @@ static void test_MsiGetProductInfo(void)
     r = MsiGetProductInfoA(prodcode, INSTALLPROPERTY_LOCALPACKAGEA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "42"), "Expected \"42\", got \"%s\"\n", buf);
-    ok(sz == 2, "Expected 2, got %lu\n", sz);
+    ok(sz == 2, "Expected 2, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "UrlInfoAbout", 0, REG_SZ, (LPBYTE)"about", 6);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* UrlInfoAbout value exists */
     sz = MAX_PATH;
@@ -4990,11 +4994,11 @@ static void test_MsiGetProductInfo(void)
     r = MsiGetProductInfoA(prodcode, INSTALLPROPERTY_URLINFOABOUTA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "about"), "Expected \"about\", got \"%s\"\n", buf);
-    ok(sz == 5, "Expected 5, got %lu\n", sz);
+    ok(sz == 5, "Expected 5, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "UrlInfoAbout", 0, REG_DWORD,
                          (const BYTE *)&val, sizeof(DWORD));
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* UrlInfoAbout type is REG_DWORD */
     sz = MAX_PATH;
@@ -5002,10 +5006,10 @@ static void test_MsiGetProductInfo(void)
     r = MsiGetProductInfoA(prodcode, INSTALLPROPERTY_URLINFOABOUTA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "42"), "Expected \"42\", got \"%s\"\n", buf);
-    ok(sz == 2, "Expected 2, got %lu\n", sz);
+    ok(sz == 2, "Expected 2, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "UrlUpdateInfo", 0, REG_SZ, (LPBYTE)"info", 5);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* UrlUpdateInfo value exists */
     sz = MAX_PATH;
@@ -5013,11 +5017,11 @@ static void test_MsiGetProductInfo(void)
     r = MsiGetProductInfoA(prodcode, INSTALLPROPERTY_URLUPDATEINFOA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "info"), "Expected \"info\", got \"%s\"\n", buf);
-    ok(sz == 4, "Expected 4, got %lu\n", sz);
+    ok(sz == 4, "Expected 4, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "UrlUpdateInfo", 0, REG_DWORD,
                          (const BYTE *)&val, sizeof(DWORD));
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* UrlUpdateInfo type is REG_DWORD */
     sz = MAX_PATH;
@@ -5025,10 +5029,10 @@ static void test_MsiGetProductInfo(void)
     r = MsiGetProductInfoA(prodcode, INSTALLPROPERTY_URLUPDATEINFOA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "42"), "Expected \"42\", got \"%s\"\n", buf);
-    ok(sz == 2, "Expected 2, got %lu\n", sz);
+    ok(sz == 2, "Expected 2, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "VersionMinor", 0, REG_SZ, (LPBYTE)"1", 2);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* VersionMinor value exists */
     sz = MAX_PATH;
@@ -5036,11 +5040,11 @@ static void test_MsiGetProductInfo(void)
     r = MsiGetProductInfoA(prodcode, INSTALLPROPERTY_VERSIONMINORA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "1"), "Expected \"1\", got \"%s\"\n", buf);
-    ok(sz == 1, "Expected 1, got %lu\n", sz);
+    ok(sz == 1, "Expected 1, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "VersionMinor", 0, REG_DWORD,
                          (const BYTE *)&val, sizeof(DWORD));
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* VersionMinor type is REG_DWORD */
     sz = MAX_PATH;
@@ -5048,10 +5052,10 @@ static void test_MsiGetProductInfo(void)
     r = MsiGetProductInfoA(prodcode, INSTALLPROPERTY_VERSIONMINORA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "42"), "Expected \"42\", got \"%s\"\n", buf);
-    ok(sz == 2, "Expected 2, got %lu\n", sz);
+    ok(sz == 2, "Expected 2, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "VersionMajor", 0, REG_SZ, (LPBYTE)"1", 2);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* VersionMajor value exists */
     sz = MAX_PATH;
@@ -5059,11 +5063,11 @@ static void test_MsiGetProductInfo(void)
     r = MsiGetProductInfoA(prodcode, INSTALLPROPERTY_VERSIONMAJORA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "1"), "Expected \"1\", got \"%s\"\n", buf);
-    ok(sz == 1, "Expected 1, got %lu\n", sz);
+    ok(sz == 1, "Expected 1, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "VersionMajor", 0, REG_DWORD,
                          (const BYTE *)&val, sizeof(DWORD));
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* VersionMajor type is REG_DWORD */
     sz = MAX_PATH;
@@ -5071,10 +5075,10 @@ static void test_MsiGetProductInfo(void)
     r = MsiGetProductInfoA(prodcode, INSTALLPROPERTY_VERSIONMAJORA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "42"), "Expected \"42\", got \"%s\"\n", buf);
-    ok(sz == 2, "Expected 2, got %lu\n", sz);
+    ok(sz == 2, "Expected 2, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "ProductID", 0, REG_SZ, (LPBYTE)"id", 3);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* ProductID value exists */
     sz = MAX_PATH;
@@ -5082,11 +5086,11 @@ static void test_MsiGetProductInfo(void)
     r = MsiGetProductInfoA(prodcode, INSTALLPROPERTY_PRODUCTIDA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "id"), "Expected \"id\", got \"%s\"\n", buf);
-    ok(sz == 2, "Expected 2, got %lu\n", sz);
+    ok(sz == 2, "Expected 2, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "ProductID", 0, REG_DWORD,
                          (const BYTE *)&val, sizeof(DWORD));
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* ProductID type is REG_DWORD */
     sz = MAX_PATH;
@@ -5094,10 +5098,10 @@ static void test_MsiGetProductInfo(void)
     r = MsiGetProductInfoA(prodcode, INSTALLPROPERTY_PRODUCTIDA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "42"), "Expected \"42\", got \"%s\"\n", buf);
-    ok(sz == 2, "Expected 2, got %lu\n", sz);
+    ok(sz == 2, "Expected 2, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "RegCompany", 0, REG_SZ, (LPBYTE)"comp", 5);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* RegCompany value exists */
     sz = MAX_PATH;
@@ -5105,11 +5109,11 @@ static void test_MsiGetProductInfo(void)
     r = MsiGetProductInfoA(prodcode, INSTALLPROPERTY_REGCOMPANYA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "comp"), "Expected \"comp\", got \"%s\"\n", buf);
-    ok(sz == 4, "Expected 4, got %lu\n", sz);
+    ok(sz == 4, "Expected 4, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "RegCompany", 0, REG_DWORD,
                          (const BYTE *)&val, sizeof(DWORD));
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* RegCompany type is REG_DWORD */
     sz = MAX_PATH;
@@ -5117,10 +5121,10 @@ static void test_MsiGetProductInfo(void)
     r = MsiGetProductInfoA(prodcode, INSTALLPROPERTY_REGCOMPANYA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "42"), "Expected \"42\", got \"%s\"\n", buf);
-    ok(sz == 2, "Expected 2, got %lu\n", sz);
+    ok(sz == 2, "Expected 2, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "RegOwner", 0, REG_SZ, (LPBYTE)"own", 4);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* RegOwner value exists */
     sz = MAX_PATH;
@@ -5128,11 +5132,11 @@ static void test_MsiGetProductInfo(void)
     r = MsiGetProductInfoA(prodcode, INSTALLPROPERTY_REGOWNERA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "own"), "Expected \"own\", got \"%s\"\n", buf);
-    ok(sz == 3, "Expected 3, got %lu\n", sz);
+    ok(sz == 3, "Expected 3, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "RegOwner", 0, REG_DWORD,
                          (const BYTE *)&val, sizeof(DWORD));
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* RegOwner type is REG_DWORD */
     sz = MAX_PATH;
@@ -5140,10 +5144,10 @@ static void test_MsiGetProductInfo(void)
     r = MsiGetProductInfoA(prodcode, INSTALLPROPERTY_REGOWNERA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "42"), "Expected \"42\", got \"%s\"\n", buf);
-    ok(sz == 2, "Expected 2, got %lu\n", sz);
+    ok(sz == 2, "Expected 2, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "InstanceType", 0, REG_SZ, (LPBYTE)"type", 5);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* InstanceType value exists */
     sz = MAX_PATH;
@@ -5151,11 +5155,11 @@ static void test_MsiGetProductInfo(void)
     r = MsiGetProductInfoA(prodcode, INSTALLPROPERTY_INSTANCETYPEA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, ""), "Expected \"\", got \"%s\"\n", buf);
-    ok(sz == 0, "Expected 0, got %lu\n", sz);
+    ok(sz == 0, "Expected 0, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "InstanceType", 0, REG_DWORD,
                          (const BYTE *)&val, sizeof(DWORD));
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* InstanceType type is REG_DWORD */
     sz = MAX_PATH;
@@ -5163,10 +5167,10 @@ static void test_MsiGetProductInfo(void)
     r = MsiGetProductInfoA(prodcode, INSTALLPROPERTY_INSTANCETYPEA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, ""), "Expected \"\", got \"%s\"\n", buf);
-    ok(sz == 0, "Expected 0, got %lu\n", sz);
+    ok(sz == 0, "Expected 0, got %d\n", sz);
 
     res = RegSetValueExA(prodkey, "InstanceType", 0, REG_SZ, (LPBYTE)"type", 5);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* InstanceType value exists */
     sz = MAX_PATH;
@@ -5174,11 +5178,11 @@ static void test_MsiGetProductInfo(void)
     r = MsiGetProductInfoA(prodcode, INSTALLPROPERTY_INSTANCETYPEA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "type"), "Expected \"type\", got \"%s\"\n", buf);
-    ok(sz == 4, "Expected 4, got %lu\n", sz);
+    ok(sz == 4, "Expected 4, got %d\n", sz);
 
     res = RegSetValueExA(prodkey, "InstanceType", 0, REG_DWORD,
                          (const BYTE *)&val, sizeof(DWORD));
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* InstanceType type is REG_DWORD */
     sz = MAX_PATH;
@@ -5186,10 +5190,10 @@ static void test_MsiGetProductInfo(void)
     r = MsiGetProductInfoA(prodcode, INSTALLPROPERTY_INSTANCETYPEA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "42"), "Expected \"42\", got \"%s\"\n", buf);
-    ok(sz == 2, "Expected 2, got %lu\n", sz);
+    ok(sz == 2, "Expected 2, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "Transforms", 0, REG_SZ, (LPBYTE)"tforms", 7);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* Transforms value exists */
     sz = MAX_PATH;
@@ -5197,11 +5201,11 @@ static void test_MsiGetProductInfo(void)
     r = MsiGetProductInfoA(prodcode, INSTALLPROPERTY_TRANSFORMSA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, ""), "Expected \"\", got \"%s\"\n", buf);
-    ok(sz == 0, "Expected 0, got %lu\n", sz);
+    ok(sz == 0, "Expected 0, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "Transforms", 0, REG_DWORD,
                          (const BYTE *)&val, sizeof(DWORD));
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* Transforms type is REG_DWORD */
     sz = MAX_PATH;
@@ -5209,10 +5213,10 @@ static void test_MsiGetProductInfo(void)
     r = MsiGetProductInfoA(prodcode, INSTALLPROPERTY_TRANSFORMSA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, ""), "Expected \"\", got \"%s\"\n", buf);
-    ok(sz == 0, "Expected 0, got %lu\n", sz);
+    ok(sz == 0, "Expected 0, got %d\n", sz);
 
     res = RegSetValueExA(prodkey, "Transforms", 0, REG_SZ, (LPBYTE)"tforms", 7);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* Transforms value exists */
     sz = MAX_PATH;
@@ -5220,11 +5224,11 @@ static void test_MsiGetProductInfo(void)
     r = MsiGetProductInfoA(prodcode, INSTALLPROPERTY_TRANSFORMSA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "tforms"), "Expected \"tforms\", got \"%s\"\n", buf);
-    ok(sz == 6, "Expected 6, got %lu\n", sz);
+    ok(sz == 6, "Expected 6, got %d\n", sz);
 
     res = RegSetValueExA(prodkey, "Transforms", 0, REG_DWORD,
                          (const BYTE *)&val, sizeof(DWORD));
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* Transforms type is REG_DWORD */
     sz = MAX_PATH;
@@ -5232,10 +5236,10 @@ static void test_MsiGetProductInfo(void)
     r = MsiGetProductInfoA(prodcode, INSTALLPROPERTY_TRANSFORMSA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "42"), "Expected \"42\", got \"%s\"\n", buf);
-    ok(sz == 2, "Expected 2, got %lu\n", sz);
+    ok(sz == 2, "Expected 2, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "Language", 0, REG_SZ, (LPBYTE)"lang", 5);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* Language value exists */
     sz = MAX_PATH;
@@ -5243,11 +5247,11 @@ static void test_MsiGetProductInfo(void)
     r = MsiGetProductInfoA(prodcode, INSTALLPROPERTY_LANGUAGEA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, ""), "Expected \"\", got \"%s\"\n", buf);
-    ok(sz == 0, "Expected 0, got %lu\n", sz);
+    ok(sz == 0, "Expected 0, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "Language", 0, REG_DWORD,
                          (const BYTE *)&val, sizeof(DWORD));
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* Language type is REG_DWORD */
     sz = MAX_PATH;
@@ -5255,10 +5259,10 @@ static void test_MsiGetProductInfo(void)
     r = MsiGetProductInfoA(prodcode, INSTALLPROPERTY_LANGUAGEA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, ""), "Expected \"\", got \"%s\"\n", buf);
-    ok(sz == 0, "Expected 0, got %lu\n", sz);
+    ok(sz == 0, "Expected 0, got %d\n", sz);
 
     res = RegSetValueExA(prodkey, "Language", 0, REG_SZ, (LPBYTE)"lang", 5);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* Language value exists */
     sz = MAX_PATH;
@@ -5266,11 +5270,11 @@ static void test_MsiGetProductInfo(void)
     r = MsiGetProductInfoA(prodcode, INSTALLPROPERTY_LANGUAGEA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "lang"), "Expected \"lang\", got \"%s\"\n", buf);
-    ok(sz == 4, "Expected 4, got %lu\n", sz);
+    ok(sz == 4, "Expected 4, got %d\n", sz);
 
     res = RegSetValueExA(prodkey, "Language", 0, REG_DWORD,
                          (const BYTE *)&val, sizeof(DWORD));
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* Language type is REG_DWORD */
     sz = MAX_PATH;
@@ -5278,10 +5282,10 @@ static void test_MsiGetProductInfo(void)
     r = MsiGetProductInfoA(prodcode, INSTALLPROPERTY_LANGUAGEA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "42"), "Expected \"42\", got \"%s\"\n", buf);
-    ok(sz == 2, "Expected 2, got %lu\n", sz);
+    ok(sz == 2, "Expected 2, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "ProductName", 0, REG_SZ, (LPBYTE)"name", 5);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* ProductName value exists */
     sz = MAX_PATH;
@@ -5289,11 +5293,11 @@ static void test_MsiGetProductInfo(void)
     r = MsiGetProductInfoA(prodcode, INSTALLPROPERTY_PRODUCTNAMEA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, ""), "Expected \"\", got \"%s\"\n", buf);
-    ok(sz == 0, "Expected 0, got %lu\n", sz);
+    ok(sz == 0, "Expected 0, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "ProductName", 0, REG_DWORD,
                          (const BYTE *)&val, sizeof(DWORD));
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* ProductName type is REG_DWORD */
     sz = MAX_PATH;
@@ -5301,10 +5305,10 @@ static void test_MsiGetProductInfo(void)
     r = MsiGetProductInfoA(prodcode, INSTALLPROPERTY_PRODUCTNAMEA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, ""), "Expected \"\", got \"%s\"\n", buf);
-    ok(sz == 0, "Expected 0, got %lu\n", sz);
+    ok(sz == 0, "Expected 0, got %d\n", sz);
 
     res = RegSetValueExA(prodkey, "ProductName", 0, REG_SZ, (LPBYTE)"name", 5);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* ProductName value exists */
     sz = MAX_PATH;
@@ -5312,11 +5316,11 @@ static void test_MsiGetProductInfo(void)
     r = MsiGetProductInfoA(prodcode, INSTALLPROPERTY_PRODUCTNAMEA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "name"), "Expected \"name\", got \"%s\"\n", buf);
-    ok(sz == 4, "Expected 4, got %lu\n", sz);
+    ok(sz == 4, "Expected 4, got %d\n", sz);
 
     res = RegSetValueExA(prodkey, "ProductName", 0, REG_DWORD,
                          (const BYTE *)&val, sizeof(DWORD));
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* ProductName type is REG_DWORD */
     sz = MAX_PATH;
@@ -5324,10 +5328,10 @@ static void test_MsiGetProductInfo(void)
     r = MsiGetProductInfoA(prodcode, INSTALLPROPERTY_PRODUCTNAMEA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "42"), "Expected \"42\", got \"%s\"\n", buf);
-    ok(sz == 2, "Expected 2, got %lu\n", sz);
+    ok(sz == 2, "Expected 2, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "Assignment", 0, REG_SZ, (LPBYTE)"at", 3);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* Assignment value exists */
     sz = MAX_PATH;
@@ -5335,11 +5339,11 @@ static void test_MsiGetProductInfo(void)
     r = MsiGetProductInfoA(prodcode, INSTALLPROPERTY_ASSIGNMENTTYPEA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, ""), "Expected \"\", got \"%s\"\n", buf);
-    ok(sz == 0, "Expected 0, got %lu\n", sz);
+    ok(sz == 0, "Expected 0, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "Assignment", 0, REG_DWORD,
                          (const BYTE *)&val, sizeof(DWORD));
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* Assignment type is REG_DWORD */
     sz = MAX_PATH;
@@ -5347,10 +5351,10 @@ static void test_MsiGetProductInfo(void)
     r = MsiGetProductInfoA(prodcode, INSTALLPROPERTY_ASSIGNMENTTYPEA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, ""), "Expected \"\", got \"%s\"\n", buf);
-    ok(sz == 0, "Expected 0, got %lu\n", sz);
+    ok(sz == 0, "Expected 0, got %d\n", sz);
 
     res = RegSetValueExA(prodkey, "Assignment", 0, REG_SZ, (LPBYTE)"at", 3);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* Assignment value exists */
     sz = MAX_PATH;
@@ -5358,11 +5362,11 @@ static void test_MsiGetProductInfo(void)
     r = MsiGetProductInfoA(prodcode, INSTALLPROPERTY_ASSIGNMENTTYPEA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "at"), "Expected \"at\", got \"%s\"\n", buf);
-    ok(sz == 2, "Expected 2, got %lu\n", sz);
+    ok(sz == 2, "Expected 2, got %d\n", sz);
 
     res = RegSetValueExA(prodkey, "Assignment", 0, REG_DWORD,
                          (const BYTE *)&val, sizeof(DWORD));
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* Assignment type is REG_DWORD */
     sz = MAX_PATH;
@@ -5370,10 +5374,10 @@ static void test_MsiGetProductInfo(void)
     r = MsiGetProductInfoA(prodcode, INSTALLPROPERTY_ASSIGNMENTTYPEA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "42"), "Expected \"42\", got \"%s\"\n", buf);
-    ok(sz == 2, "Expected 2, got %lu\n", sz);
+    ok(sz == 2, "Expected 2, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "PackageCode", 0, REG_SZ, (LPBYTE)"code", 5);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* PackageCode value exists */
     sz = MAX_PATH;
@@ -5381,11 +5385,11 @@ static void test_MsiGetProductInfo(void)
     r = MsiGetProductInfoA(prodcode, INSTALLPROPERTY_PACKAGECODEA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, ""), "Expected \"\", got \"%s\"\n", buf);
-    ok(sz == 0, "Expected 0, got %lu\n", sz);
+    ok(sz == 0, "Expected 0, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "PackageCode", 0, REG_DWORD,
                          (const BYTE *)&val, sizeof(DWORD));
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* PackageCode type is REG_DWORD */
     sz = MAX_PATH;
@@ -5393,10 +5397,10 @@ static void test_MsiGetProductInfo(void)
     r = MsiGetProductInfoA(prodcode, INSTALLPROPERTY_PACKAGECODEA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, ""), "Expected \"\", got \"%s\"\n", buf);
-    ok(sz == 0, "Expected 0, got %lu\n", sz);
+    ok(sz == 0, "Expected 0, got %d\n", sz);
 
     res = RegSetValueExA(prodkey, "PackageCode", 0, REG_SZ, (LPBYTE)"code", 5);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* PackageCode value exists */
     sz = MAX_PATH;
@@ -5405,11 +5409,11 @@ static void test_MsiGetProductInfo(void)
     ok(r == ERROR_BAD_CONFIGURATION,
        "Expected ERROR_BAD_CONFIGURATION, got %d\n", r);
     ok(!lstrcmpA(buf, "code"), "Expected \"code\", got \"%s\"\n", buf);
-    ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     res = RegSetValueExA(prodkey, "PackageCode", 0, REG_DWORD,
                          (const BYTE *)&val, sizeof(DWORD));
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* PackageCode type is REG_DWORD */
     sz = MAX_PATH;
@@ -5417,10 +5421,10 @@ static void test_MsiGetProductInfo(void)
     r = MsiGetProductInfoA(prodcode, INSTALLPROPERTY_PACKAGECODEA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "42"), "Expected \"42\", got \"%s\"\n", buf);
-    ok(sz == 2, "Expected 2, got %lu\n", sz);
+    ok(sz == 2, "Expected 2, got %d\n", sz);
 
     res = RegSetValueExA(prodkey, "PackageCode", 0, REG_SZ, (LPBYTE)pack_squashed, 33);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* PackageCode value exists */
     sz = MAX_PATH;
@@ -5428,10 +5432,10 @@ static void test_MsiGetProductInfo(void)
     r = MsiGetProductInfoA(prodcode, INSTALLPROPERTY_PACKAGECODEA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, packcode), "Expected \"%s\", got \"%s\"\n", packcode, buf);
-    ok(sz == 38, "Expected 38, got %lu\n", sz);
+    ok(sz == 38, "Expected 38, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "Version", 0, REG_SZ, (LPBYTE)"ver", 4);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* Version value exists */
     sz = MAX_PATH;
@@ -5439,11 +5443,11 @@ static void test_MsiGetProductInfo(void)
     r = MsiGetProductInfoA(prodcode, INSTALLPROPERTY_VERSIONA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, ""), "Expected \"\", got \"%s\"\n", buf);
-    ok(sz == 0, "Expected 0, got %lu\n", sz);
+    ok(sz == 0, "Expected 0, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "Version", 0, REG_DWORD,
                          (const BYTE *)&val, sizeof(DWORD));
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* Version type is REG_DWORD */
     sz = MAX_PATH;
@@ -5451,10 +5455,10 @@ static void test_MsiGetProductInfo(void)
     r = MsiGetProductInfoA(prodcode, INSTALLPROPERTY_VERSIONA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, ""), "Expected \"\", got \"%s\"\n", buf);
-    ok(sz == 0, "Expected 0, got %lu\n", sz);
+    ok(sz == 0, "Expected 0, got %d\n", sz);
 
     res = RegSetValueExA(prodkey, "Version", 0, REG_SZ, (LPBYTE)"ver", 4);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* Version value exists */
     sz = MAX_PATH;
@@ -5462,11 +5466,11 @@ static void test_MsiGetProductInfo(void)
     r = MsiGetProductInfoA(prodcode, INSTALLPROPERTY_VERSIONA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "ver"), "Expected \"ver\", got \"%s\"\n", buf);
-    ok(sz == 3, "Expected 3, got %lu\n", sz);
+    ok(sz == 3, "Expected 3, got %d\n", sz);
 
     res = RegSetValueExA(prodkey, "Version", 0, REG_DWORD,
                          (const BYTE *)&val, sizeof(DWORD));
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* Version type is REG_DWORD */
     sz = MAX_PATH;
@@ -5474,10 +5478,10 @@ static void test_MsiGetProductInfo(void)
     r = MsiGetProductInfoA(prodcode, INSTALLPROPERTY_VERSIONA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "42"), "Expected \"42\", got \"%s\"\n", buf);
-    ok(sz == 2, "Expected 2, got %lu\n", sz);
+    ok(sz == 2, "Expected 2, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "ProductIcon", 0, REG_SZ, (LPBYTE)"ico", 4);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* ProductIcon value exists */
     sz = MAX_PATH;
@@ -5485,11 +5489,11 @@ static void test_MsiGetProductInfo(void)
     r = MsiGetProductInfoA(prodcode, INSTALLPROPERTY_PRODUCTICONA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, ""), "Expected \"\", got \"%s\"\n", buf);
-    ok(sz == 0, "Expected 0, got %lu\n", sz);
+    ok(sz == 0, "Expected 0, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "ProductIcon", 0, REG_DWORD,
                          (const BYTE *)&val, sizeof(DWORD));
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* ProductIcon type is REG_DWORD */
     sz = MAX_PATH;
@@ -5497,10 +5501,10 @@ static void test_MsiGetProductInfo(void)
     r = MsiGetProductInfoA(prodcode, INSTALLPROPERTY_PRODUCTICONA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, ""), "Expected \"\", got \"%s\"\n", buf);
-    ok(sz == 0, "Expected 0, got %lu\n", sz);
+    ok(sz == 0, "Expected 0, got %d\n", sz);
 
     res = RegSetValueExA(prodkey, "ProductIcon", 0, REG_SZ, (LPBYTE)"ico", 4);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* ProductIcon value exists */
     sz = MAX_PATH;
@@ -5508,11 +5512,11 @@ static void test_MsiGetProductInfo(void)
     r = MsiGetProductInfoA(prodcode, INSTALLPROPERTY_PRODUCTICONA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "ico"), "Expected \"ico\", got \"%s\"\n", buf);
-    ok(sz == 3, "Expected 3, got %lu\n", sz);
+    ok(sz == 3, "Expected 3, got %d\n", sz);
 
     res = RegSetValueExA(prodkey, "ProductIcon", 0, REG_DWORD,
                          (const BYTE *)&val, sizeof(DWORD));
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* ProductIcon type is REG_DWORD */
     sz = MAX_PATH;
@@ -5520,7 +5524,7 @@ static void test_MsiGetProductInfo(void)
     r = MsiGetProductInfoA(prodcode, INSTALLPROPERTY_PRODUCTICONA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "42"), "Expected \"42\", got \"%s\"\n", buf);
-    ok(sz == 2, "Expected 2, got %lu\n", sz);
+    ok(sz == 2, "Expected 2, got %d\n", sz);
 
     /* SourceList key does not exist */
     sz = MAX_PATH;
@@ -5530,10 +5534,10 @@ static void test_MsiGetProductInfo(void)
        "Expected ERROR_UNKNOWN_PRODUCT, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"),
        "Expected buf to be unchanged, got \"%s\"\n", buf);
-    ok(sz == MAX_PATH, "Expected sz to be unchanged, got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected sz to be unchanged, got %d\n", sz);
 
     res = RegCreateKeyExA(prodkey, "SourceList", 0, NULL, 0, access, NULL, &source, NULL);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* SourceList key exists, but PackageName val does not exist */
     sz = MAX_PATH;
@@ -5541,10 +5545,10 @@ static void test_MsiGetProductInfo(void)
     r = MsiGetProductInfoA(prodcode, INSTALLPROPERTY_PACKAGENAMEA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, ""), "Expected \"\", got \"%s\"\n", buf);
-    ok(sz == 0, "Expected 0, got %lu\n", sz);
+    ok(sz == 0, "Expected 0, got %d\n", sz);
 
     res = RegSetValueExA(source, "PackageName", 0, REG_SZ, (LPBYTE)"packname", 9);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* PackageName val exists */
     sz = MAX_PATH;
@@ -5552,11 +5556,11 @@ static void test_MsiGetProductInfo(void)
     r = MsiGetProductInfoA(prodcode, INSTALLPROPERTY_PACKAGENAMEA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "packname"), "Expected \"packname\", got \"%s\"\n", buf);
-    ok(sz == 8, "Expected 8, got %lu\n", sz);
+    ok(sz == 8, "Expected 8, got %d\n", sz);
 
     res = RegSetValueExA(source, "PackageName", 0, REG_DWORD,
                          (const BYTE *)&val, sizeof(DWORD));
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* PackageName type is REG_DWORD */
     sz = MAX_PATH;
@@ -5564,10 +5568,10 @@ static void test_MsiGetProductInfo(void)
     r = MsiGetProductInfoA(prodcode, INSTALLPROPERTY_PACKAGENAMEA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "42"), "Expected \"42\", got \"%s\"\n", buf);
-    ok(sz == 2, "Expected 2, got %lu\n", sz);
+    ok(sz == 2, "Expected 2, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "AuthorizedLUAApp", 0, REG_SZ, (LPBYTE)"auth", 5);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* Authorized value exists */
     sz = MAX_PATH;
@@ -5577,12 +5581,12 @@ static void test_MsiGetProductInfo(void)
     {
         ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
         ok(!lstrcmpA(buf, ""), "Expected \"\", got \"%s\"\n", buf);
-        ok(sz == 0, "Expected 0, got %lu\n", sz);
+        ok(sz == 0, "Expected 0, got %d\n", sz);
     }
 
     res = RegSetValueExA(propkey, "AuthorizedLUAApp", 0, REG_DWORD,
                          (const BYTE *)&val, sizeof(DWORD));
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* AuthorizedLUAApp type is REG_DWORD */
     sz = MAX_PATH;
@@ -5592,11 +5596,11 @@ static void test_MsiGetProductInfo(void)
     {
         ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
         ok(!lstrcmpA(buf, ""), "Expected \"\", got \"%s\"\n", buf);
-        ok(sz == 0, "Expected 0, got %lu\n", sz);
+        ok(sz == 0, "Expected 0, got %d\n", sz);
     }
 
     res = RegSetValueExA(prodkey, "AuthorizedLUAApp", 0, REG_SZ, (LPBYTE)"auth", 5);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* Authorized value exists */
     sz = MAX_PATH;
@@ -5606,12 +5610,12 @@ static void test_MsiGetProductInfo(void)
     {
         ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
         ok(!lstrcmpA(buf, "auth"), "Expected \"auth\", got \"%s\"\n", buf);
-        ok(sz == 4, "Expected 4, got %lu\n", sz);
+        ok(sz == 4, "Expected 4, got %d\n", sz);
     }
 
     res = RegSetValueExA(prodkey, "AuthorizedLUAApp", 0, REG_DWORD,
                          (const BYTE *)&val, sizeof(DWORD));
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* AuthorizedLUAApp type is REG_DWORD */
     sz = MAX_PATH;
@@ -5621,7 +5625,7 @@ static void test_MsiGetProductInfo(void)
     {
         ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
         ok(!lstrcmpA(buf, "42"), "Expected \"42\", got \"%s\"\n", buf);
-        ok(sz == 2, "Expected 2, got %lu\n", sz);
+        ok(sz == 2, "Expected 2, got %d\n", sz);
     }
 
     RegDeleteValueA(propkey, "HelpLink");
@@ -5707,7 +5711,7 @@ static void test_MsiGetProductInfoEx(void)
     ok(r == ERROR_INVALID_PARAMETER,
        "Expected ERROR_INVALID_PARAMETER, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     /* empty szProductCode */
     sz = MAX_PATH;
@@ -5717,7 +5721,7 @@ static void test_MsiGetProductInfoEx(void)
     ok(r == ERROR_INVALID_PARAMETER,
        "Expected ERROR_INVALID_PARAMETER, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     /* garbage szProductCode */
     sz = MAX_PATH;
@@ -5727,7 +5731,7 @@ static void test_MsiGetProductInfoEx(void)
     ok(r == ERROR_INVALID_PARAMETER,
        "Expected ERROR_INVALID_PARAMETER, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     /* guid without brackets */
     sz = MAX_PATH;
@@ -5738,7 +5742,7 @@ static void test_MsiGetProductInfoEx(void)
     ok(r == ERROR_INVALID_PARAMETER,
        "Expected ERROR_INVALID_PARAMETER, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     /* guid with brackets */
     sz = MAX_PATH;
@@ -5749,7 +5753,7 @@ static void test_MsiGetProductInfoEx(void)
     ok(r == ERROR_UNKNOWN_PRODUCT,
        "Expected ERROR_UNKNOWN_PRODUCT, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     /* szValue is non-NULL while pcchValue is NULL */
     lstrcpyA(buf, "apple");
@@ -5768,7 +5772,7 @@ static void test_MsiGetProductInfoEx(void)
     ok(r == ERROR_INVALID_PARAMETER,
        "Expected ERROR_INVALID_PARAMETER, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     /* szProperty is NULL */
     sz = MAX_PATH;
@@ -5779,7 +5783,7 @@ static void test_MsiGetProductInfoEx(void)
     ok(r == ERROR_INVALID_PARAMETER,
        "Expected ERROR_INVALID_PARAMETER, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     /* szProperty is empty */
     sz = MAX_PATH;
@@ -5790,7 +5794,7 @@ static void test_MsiGetProductInfoEx(void)
     ok(r == ERROR_INVALID_PARAMETER,
        "Expected ERROR_INVALID_PARAMETER, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     /* szProperty is not a valid property */
     sz = MAX_PATH;
@@ -5801,7 +5805,7 @@ static void test_MsiGetProductInfoEx(void)
     ok(r == ERROR_UNKNOWN_PRODUCT,
        "Expected ERROR_UNKNOWN_PRODUCT, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     /* same length as guid, but random */
     sz = MAX_PATH;
@@ -5812,7 +5816,7 @@ static void test_MsiGetProductInfoEx(void)
     ok(r == ERROR_INVALID_PARAMETER,
        "Expected ERROR_INVALID_PARAMETER, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     /* MSIINSTALLCONTEXT_USERUNMANAGED */
 
@@ -5828,7 +5832,7 @@ static void test_MsiGetProductInfoEx(void)
         LocalFree(usersid);
         return;
     }
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* local user product key exists */
     sz = MAX_PATH;
@@ -5839,10 +5843,10 @@ static void test_MsiGetProductInfoEx(void)
     ok(r == ERROR_UNKNOWN_PRODUCT,
        "Expected ERROR_UNKNOWN_PRODUCT, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     res = RegCreateKeyExA(localkey, "InstallProperties", 0, NULL, 0, access, NULL, &propkey, NULL);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* InstallProperties key exists */
     sz = MAX_PATH;
@@ -5853,10 +5857,10 @@ static void test_MsiGetProductInfoEx(void)
     ok(r == ERROR_UNKNOWN_PRODUCT,
        "Expected ERROR_UNKNOWN_PRODUCT, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "LocalPackage", 0, REG_SZ, (LPBYTE)"local", 6);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* LocalPackage value exists */
     sz = MAX_PATH;
@@ -5866,7 +5870,7 @@ static void test_MsiGetProductInfoEx(void)
                               INSTALLPROPERTY_PRODUCTSTATEA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "5"), "Expected \"5\", got \"%s\"\n", buf);
-    ok(sz == 1, "Expected 1, got %lu\n", sz);
+    ok(sz == 1, "Expected 1, got %d\n", sz);
 
     RegDeleteValueA(propkey, "LocalPackage");
 
@@ -5879,10 +5883,10 @@ static void test_MsiGetProductInfoEx(void)
     ok(r == ERROR_UNKNOWN_PRODUCT,
        "Expected ERROR_UNKNOWN_PRODUCT, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "LocalPackage", 0, REG_SZ, (LPBYTE)"local", 6);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* LocalPackage exists, but HelpLink does not exist */
     sz = MAX_PATH;
@@ -5892,10 +5896,10 @@ static void test_MsiGetProductInfoEx(void)
                               INSTALLPROPERTY_HELPLINKA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, ""), "Expected \"\", got \"%s\"\n", buf);
-    ok(sz == 0, "Expected 0, got %lu\n", sz);
+    ok(sz == 0, "Expected 0, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "HelpLink", 0, REG_SZ, (LPBYTE)"link", 5);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* HelpLink value exists */
     sz = MAX_PATH;
@@ -5905,10 +5909,10 @@ static void test_MsiGetProductInfoEx(void)
                               INSTALLPROPERTY_HELPLINKA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "link"), "Expected \"link\", got \"%s\"\n", buf);
-    ok(sz == 4, "Expected 4, got %lu\n", sz);
+    ok(sz == 4, "Expected 4, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "HelpTelephone", 0, REG_SZ, (LPBYTE)"phone", 6);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* HelpTelephone value exists */
     sz = MAX_PATH;
@@ -5918,7 +5922,7 @@ static void test_MsiGetProductInfoEx(void)
                               INSTALLPROPERTY_HELPTELEPHONEA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "phone"), "Expected \"phone\", got \"%s\"\n", buf);
-    ok(sz == 5, "Expected 5, got %lu\n", sz);
+    ok(sz == 5, "Expected 5, got %d\n", sz);
 
     /* szValue and pcchValue are NULL */
     r = pMsiGetProductInfoExA(prodcode, usersid,
@@ -5934,7 +5938,7 @@ static void test_MsiGetProductInfoEx(void)
                               INSTALLPROPERTY_HELPTELEPHONEA, buf, &sz);
     ok(r == ERROR_MORE_DATA,
        "Expected ERROR_MORE_DATA, got %d\n", r);
-    ok(sz == 10, "Expected 10, got %lu\n", sz);
+    ok(sz == 10, "Expected 10, got %d\n", sz);
 
     /* szValue is NULL, pcchValue is exactly 5 */
     sz = 5;
@@ -5942,7 +5946,7 @@ static void test_MsiGetProductInfoEx(void)
                               MSIINSTALLCONTEXT_USERUNMANAGED,
                               INSTALLPROPERTY_HELPTELEPHONEA, NULL, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
-    ok(sz == 10, "Expected 10, got %lu\n", sz);
+    ok(sz == 10, "Expected 10, got %d\n", sz);
 
     /* szValue is NULL, pcchValue is MAX_PATH */
     sz = MAX_PATH;
@@ -5950,7 +5954,7 @@ static void test_MsiGetProductInfoEx(void)
                               MSIINSTALLCONTEXT_USERUNMANAGED,
                               INSTALLPROPERTY_HELPTELEPHONEA, NULL, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
-    ok(sz == 10, "Expected 10, got %lu\n", sz);
+    ok(sz == 10, "Expected 10, got %d\n", sz);
 
     /* pcchValue is exactly 0 */
     sz = 0;
@@ -5961,10 +5965,10 @@ static void test_MsiGetProductInfoEx(void)
     ok(r == ERROR_MORE_DATA,
        "Expected ERROR_MORE_DATA, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected \"apple\", got \"%s\"\n", buf);
-    ok(sz == 10, "Expected 10, got %lu\n", sz);
+    ok(sz == 10, "Expected 10, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "notvalid", 0, REG_SZ, (LPBYTE)"invalid", 8);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* szProperty is not a valid property */
     sz = MAX_PATH;
@@ -5975,10 +5979,10 @@ static void test_MsiGetProductInfoEx(void)
     ok(r == ERROR_UNKNOWN_PROPERTY,
        "Expected ERROR_UNKNOWN_PROPERTY, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "InstallDate", 0, REG_SZ, (LPBYTE)"date", 5);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* InstallDate value exists */
     sz = MAX_PATH;
@@ -5988,10 +5992,10 @@ static void test_MsiGetProductInfoEx(void)
                               INSTALLPROPERTY_INSTALLDATEA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "date"), "Expected \"date\", got \"%s\"\n", buf);
-    ok(sz == 4, "Expected 4, got %lu\n", sz);
+    ok(sz == 4, "Expected 4, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "DisplayName", 0, REG_SZ, (LPBYTE)"name", 5);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* DisplayName value exists */
     sz = MAX_PATH;
@@ -6001,10 +6005,10 @@ static void test_MsiGetProductInfoEx(void)
                               INSTALLPROPERTY_INSTALLEDPRODUCTNAMEA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "name"), "Expected \"name\", got \"%s\"\n", buf);
-    ok(sz == 4, "Expected 4, got %lu\n", sz);
+    ok(sz == 4, "Expected 4, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "InstallLocation", 0, REG_SZ, (LPBYTE)"loc", 4);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* InstallLocation value exists */
     sz = MAX_PATH;
@@ -6014,10 +6018,10 @@ static void test_MsiGetProductInfoEx(void)
                               INSTALLPROPERTY_INSTALLLOCATIONA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "loc"), "Expected \"loc\", got \"%s\"\n", buf);
-    ok(sz == 3, "Expected 3, got %lu\n", sz);
+    ok(sz == 3, "Expected 3, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "InstallSource", 0, REG_SZ, (LPBYTE)"source", 7);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* InstallSource value exists */
     sz = MAX_PATH;
@@ -6027,10 +6031,10 @@ static void test_MsiGetProductInfoEx(void)
                               INSTALLPROPERTY_INSTALLSOURCEA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "source"), "Expected \"source\", got \"%s\"\n", buf);
-    ok(sz == 6, "Expected 6, got %lu\n", sz);
+    ok(sz == 6, "Expected 6, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "LocalPackage", 0, REG_SZ, (LPBYTE)"local", 6);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* LocalPackage value exists */
     sz = MAX_PATH;
@@ -6040,10 +6044,10 @@ static void test_MsiGetProductInfoEx(void)
                               INSTALLPROPERTY_LOCALPACKAGEA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "local"), "Expected \"local\", got \"%s\"\n", buf);
-    ok(sz == 5, "Expected 5, got %lu\n", sz);
+    ok(sz == 5, "Expected 5, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "Publisher", 0, REG_SZ, (LPBYTE)"pub", 4);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* Publisher value exists */
     sz = MAX_PATH;
@@ -6053,10 +6057,10 @@ static void test_MsiGetProductInfoEx(void)
                               INSTALLPROPERTY_PUBLISHERA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "pub"), "Expected \"pub\", got \"%s\"\n", buf);
-    ok(sz == 3, "Expected 3, got %lu\n", sz);
+    ok(sz == 3, "Expected 3, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "URLInfoAbout", 0, REG_SZ, (LPBYTE)"about", 6);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* URLInfoAbout value exists */
     sz = MAX_PATH;
@@ -6066,10 +6070,10 @@ static void test_MsiGetProductInfoEx(void)
                               INSTALLPROPERTY_URLINFOABOUTA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "about"), "Expected \"about\", got \"%s\"\n", buf);
-    ok(sz == 5, "Expected 5, got %lu\n", sz);
+    ok(sz == 5, "Expected 5, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "URLUpdateInfo", 0, REG_SZ, (LPBYTE)"update", 7);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* URLUpdateInfo value exists */
     sz = MAX_PATH;
@@ -6079,10 +6083,10 @@ static void test_MsiGetProductInfoEx(void)
                               INSTALLPROPERTY_URLUPDATEINFOA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "update"), "Expected \"update\", got \"%s\"\n", buf);
-    ok(sz == 6, "Expected 6, got %lu\n", sz);
+    ok(sz == 6, "Expected 6, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "VersionMinor", 0, REG_SZ, (LPBYTE)"2", 2);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* VersionMinor value exists */
     sz = MAX_PATH;
@@ -6092,10 +6096,10 @@ static void test_MsiGetProductInfoEx(void)
                               INSTALLPROPERTY_VERSIONMINORA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "2"), "Expected \"2\", got \"%s\"\n", buf);
-    ok(sz == 1, "Expected 1, got %lu\n", sz);
+    ok(sz == 1, "Expected 1, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "VersionMajor", 0, REG_SZ, (LPBYTE)"3", 2);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* VersionMajor value exists */
     sz = MAX_PATH;
@@ -6105,10 +6109,10 @@ static void test_MsiGetProductInfoEx(void)
                               INSTALLPROPERTY_VERSIONMAJORA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "3"), "Expected \"3\", got \"%s\"\n", buf);
-    ok(sz == 1, "Expected 1, got %lu\n", sz);
+    ok(sz == 1, "Expected 1, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "DisplayVersion", 0, REG_SZ, (LPBYTE)"3.2.1", 6);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* DisplayVersion value exists */
     sz = MAX_PATH;
@@ -6118,10 +6122,10 @@ static void test_MsiGetProductInfoEx(void)
                               INSTALLPROPERTY_VERSIONSTRINGA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "3.2.1"), "Expected \"3.2.1\", got \"%s\"\n", buf);
-    ok(sz == 5, "Expected 5, got %lu\n", sz);
+    ok(sz == 5, "Expected 5, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "ProductID", 0, REG_SZ, (LPBYTE)"id", 3);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* ProductID value exists */
     sz = MAX_PATH;
@@ -6131,10 +6135,10 @@ static void test_MsiGetProductInfoEx(void)
                               INSTALLPROPERTY_PRODUCTIDA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "id"), "Expected \"id\", got \"%s\"\n", buf);
-    ok(sz == 2, "Expected 2, got %lu\n", sz);
+    ok(sz == 2, "Expected 2, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "RegCompany", 0, REG_SZ, (LPBYTE)"comp", 5);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* RegCompany value exists */
     sz = MAX_PATH;
@@ -6144,10 +6148,10 @@ static void test_MsiGetProductInfoEx(void)
                               INSTALLPROPERTY_REGCOMPANYA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "comp"), "Expected \"comp\", got \"%s\"\n", buf);
-    ok(sz == 4, "Expected 4, got %lu\n", sz);
+    ok(sz == 4, "Expected 4, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "RegOwner", 0, REG_SZ, (LPBYTE)"owner", 6);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* RegOwner value exists */
     sz = MAX_PATH;
@@ -6157,10 +6161,10 @@ static void test_MsiGetProductInfoEx(void)
                               INSTALLPROPERTY_REGOWNERA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "owner"), "Expected \"owner\", got \"%s\"\n", buf);
-    ok(sz == 5, "Expected 5, got %lu\n", sz);
+    ok(sz == 5, "Expected 5, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "Transforms", 0, REG_SZ, (LPBYTE)"trans", 6);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* Transforms value exists */
     sz = MAX_PATH;
@@ -6171,10 +6175,10 @@ static void test_MsiGetProductInfoEx(void)
     ok(r == ERROR_UNKNOWN_PRODUCT,
        "Expected ERROR_UNKNOWN_PRODUCT, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "Language", 0, REG_SZ, (LPBYTE)"lang", 5);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* Language value exists */
     sz = MAX_PATH;
@@ -6185,10 +6189,10 @@ static void test_MsiGetProductInfoEx(void)
     ok(r == ERROR_UNKNOWN_PRODUCT,
        "Expected ERROR_UNKNOWN_PRODUCT, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "ProductName", 0, REG_SZ, (LPBYTE)"name", 5);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* ProductName value exists */
     sz = MAX_PATH;
@@ -6199,10 +6203,10 @@ static void test_MsiGetProductInfoEx(void)
     ok(r == ERROR_UNKNOWN_PRODUCT,
        "Expected ERROR_UNKNOWN_PRODUCT, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "AssignmentType", 0, REG_SZ, (LPBYTE)"type", 5);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* FIXME */
 
@@ -6215,10 +6219,10 @@ static void test_MsiGetProductInfoEx(void)
     ok(r == ERROR_UNKNOWN_PRODUCT,
        "Expected ERROR_UNKNOWN_PRODUCT, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "PackageCode", 0, REG_SZ, (LPBYTE)"code", 5);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* PackageCode value exists */
     sz = MAX_PATH;
@@ -6229,10 +6233,10 @@ static void test_MsiGetProductInfoEx(void)
     ok(r == ERROR_UNKNOWN_PRODUCT,
        "Expected ERROR_UNKNOWN_PRODUCT, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "Version", 0, REG_SZ, (LPBYTE)"ver", 4);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* Version value exists */
     sz = MAX_PATH;
@@ -6243,10 +6247,10 @@ static void test_MsiGetProductInfoEx(void)
     ok(r == ERROR_UNKNOWN_PRODUCT,
        "Expected ERROR_UNKNOWN_PRODUCT, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "ProductIcon", 0, REG_SZ, (LPBYTE)"icon", 5);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* ProductIcon value exists */
     sz = MAX_PATH;
@@ -6257,10 +6261,10 @@ static void test_MsiGetProductInfoEx(void)
     ok(r == ERROR_UNKNOWN_PRODUCT,
        "Expected ERROR_UNKNOWN_PRODUCT, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "PackageName", 0, REG_SZ, (LPBYTE)"name", 5);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* PackageName value exists */
     sz = MAX_PATH;
@@ -6271,10 +6275,10 @@ static void test_MsiGetProductInfoEx(void)
     ok(r == ERROR_UNKNOWN_PRODUCT,
        "Expected ERROR_UNKNOWN_PRODUCT, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "AuthorizedLUAApp", 0, REG_SZ, (LPBYTE)"auth", 5);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* AuthorizedLUAApp value exists */
     sz = MAX_PATH;
@@ -6285,7 +6289,7 @@ static void test_MsiGetProductInfoEx(void)
     ok(r == ERROR_UNKNOWN_PRODUCT,
        "Expected ERROR_UNKNOWN_PRODUCT, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     RegDeleteValueA(propkey, "AuthorizedLUAApp");
     RegDeleteValueA(propkey, "PackageName");
@@ -6324,7 +6328,7 @@ static void test_MsiGetProductInfoEx(void)
     lstrcatA(keypath, prod_squashed);
 
     res = RegCreateKeyExA(HKEY_LOCAL_MACHINE, keypath, 0, NULL, 0, access, NULL, &userkey, NULL);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* user product key exists */
     sz = MAX_PATH;
@@ -6335,7 +6339,7 @@ static void test_MsiGetProductInfoEx(void)
     ok(r == ERROR_UNKNOWN_PRODUCT,
        "Expected ERROR_UNKNOWN_PRODUCT, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     RegDeleteKeyA(userkey, "");
     RegCloseKey(userkey);
@@ -6344,7 +6348,7 @@ static void test_MsiGetProductInfoEx(void)
     lstrcatA(keypath, prod_squashed);
 
     res = RegCreateKeyExA(HKEY_CURRENT_USER, keypath, 0, NULL, 0, access, NULL, &prodkey, NULL);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     sz = MAX_PATH;
     lstrcpyA(buf, "apple");
@@ -6360,10 +6364,10 @@ static void test_MsiGetProductInfoEx(void)
         return;
     }
     ok(!lstrcmpA(buf, "1"), "Expected \"1\", got \"%s\"\n", buf);
-    ok(sz == 1, "Expected 1, got %lu\n", sz);
+    ok(sz == 1, "Expected 1, got %d\n", sz);
 
     res = RegSetValueExA(prodkey, "HelpLink", 0, REG_SZ, (LPBYTE)"link", 5);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* HelpLink value exists */
     sz = MAX_PATH;
@@ -6374,10 +6378,10 @@ static void test_MsiGetProductInfoEx(void)
     ok(r == ERROR_UNKNOWN_PROPERTY,
        "Expected ERROR_UNKNOWN_PROPERTY, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     res = RegSetValueExA(prodkey, "HelpTelephone", 0, REG_SZ, (LPBYTE)"phone", 6);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* HelpTelephone value exists */
     sz = MAX_PATH;
@@ -6388,10 +6392,10 @@ static void test_MsiGetProductInfoEx(void)
     ok(r == ERROR_UNKNOWN_PROPERTY,
        "Expected ERROR_UNKNOWN_PROPERTY, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     res = RegSetValueExA(prodkey, "InstallDate", 0, REG_SZ, (LPBYTE)"date", 5);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* InstallDate value exists */
     sz = MAX_PATH;
@@ -6402,10 +6406,10 @@ static void test_MsiGetProductInfoEx(void)
     ok(r == ERROR_UNKNOWN_PROPERTY,
        "Expected ERROR_UNKNOWN_PROPERTY, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     res = RegSetValueExA(prodkey, "DisplayName", 0, REG_SZ, (LPBYTE)"name", 5);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* DisplayName value exists */
     sz = MAX_PATH;
@@ -6416,10 +6420,10 @@ static void test_MsiGetProductInfoEx(void)
     ok(r == ERROR_UNKNOWN_PROPERTY,
        "Expected ERROR_UNKNOWN_PROPERTY, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     res = RegSetValueExA(prodkey, "InstallLocation", 0, REG_SZ, (LPBYTE)"loc", 4);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* InstallLocation value exists */
     sz = MAX_PATH;
@@ -6430,10 +6434,10 @@ static void test_MsiGetProductInfoEx(void)
     ok(r == ERROR_UNKNOWN_PROPERTY,
        "Expected ERROR_UNKNOWN_PROPERTY, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     res = RegSetValueExA(prodkey, "InstallSource", 0, REG_SZ, (LPBYTE)"source", 7);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* InstallSource value exists */
     sz = MAX_PATH;
@@ -6444,10 +6448,10 @@ static void test_MsiGetProductInfoEx(void)
     ok(r == ERROR_UNKNOWN_PROPERTY,
        "Expected ERROR_UNKNOWN_PROPERTY, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     res = RegSetValueExA(prodkey, "LocalPackage", 0, REG_SZ, (LPBYTE)"local", 6);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* LocalPackage value exists */
     sz = MAX_PATH;
@@ -6458,10 +6462,10 @@ static void test_MsiGetProductInfoEx(void)
     ok(r == ERROR_UNKNOWN_PROPERTY,
        "Expected ERROR_UNKNOWN_PROPERTY, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     res = RegSetValueExA(prodkey, "Publisher", 0, REG_SZ, (LPBYTE)"pub", 4);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* Publisher value exists */
     sz = MAX_PATH;
@@ -6472,10 +6476,10 @@ static void test_MsiGetProductInfoEx(void)
     ok(r == ERROR_UNKNOWN_PROPERTY,
        "Expected ERROR_UNKNOWN_PROPERTY, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     res = RegSetValueExA(prodkey, "URLInfoAbout", 0, REG_SZ, (LPBYTE)"about", 6);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* URLInfoAbout value exists */
     sz = MAX_PATH;
@@ -6486,10 +6490,10 @@ static void test_MsiGetProductInfoEx(void)
     ok(r == ERROR_UNKNOWN_PROPERTY,
        "Expected ERROR_UNKNOWN_PROPERTY, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     res = RegSetValueExA(prodkey, "URLUpdateInfo", 0, REG_SZ, (LPBYTE)"update", 7);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* URLUpdateInfo value exists */
     sz = MAX_PATH;
@@ -6500,10 +6504,10 @@ static void test_MsiGetProductInfoEx(void)
     ok(r == ERROR_UNKNOWN_PROPERTY,
        "Expected ERROR_UNKNOWN_PROPERTY, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     res = RegSetValueExA(prodkey, "VersionMinor", 0, REG_SZ, (LPBYTE)"2", 2);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* VersionMinor value exists */
     sz = MAX_PATH;
@@ -6514,10 +6518,10 @@ static void test_MsiGetProductInfoEx(void)
     ok(r == ERROR_UNKNOWN_PROPERTY,
        "Expected ERROR_UNKNOWN_PROPERTY, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     res = RegSetValueExA(prodkey, "VersionMajor", 0, REG_SZ, (LPBYTE)"3", 2);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* VersionMajor value exists */
     sz = MAX_PATH;
@@ -6528,10 +6532,10 @@ static void test_MsiGetProductInfoEx(void)
     ok(r == ERROR_UNKNOWN_PROPERTY,
        "Expected ERROR_UNKNOWN_PROPERTY, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     res = RegSetValueExA(prodkey, "DisplayVersion", 0, REG_SZ, (LPBYTE)"3.2.1", 6);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* DisplayVersion value exists */
     sz = MAX_PATH;
@@ -6542,10 +6546,10 @@ static void test_MsiGetProductInfoEx(void)
     ok(r == ERROR_UNKNOWN_PROPERTY,
        "Expected ERROR_UNKNOWN_PROPERTY, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     res = RegSetValueExA(prodkey, "ProductID", 0, REG_SZ, (LPBYTE)"id", 3);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* ProductID value exists */
     sz = MAX_PATH;
@@ -6556,10 +6560,10 @@ static void test_MsiGetProductInfoEx(void)
     ok(r == ERROR_UNKNOWN_PROPERTY,
        "Expected ERROR_UNKNOWN_PROPERTY, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     res = RegSetValueExA(prodkey, "RegCompany", 0, REG_SZ, (LPBYTE)"comp", 5);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* RegCompany value exists */
     sz = MAX_PATH;
@@ -6570,10 +6574,10 @@ static void test_MsiGetProductInfoEx(void)
     ok(r == ERROR_UNKNOWN_PROPERTY,
        "Expected ERROR_UNKNOWN_PROPERTY, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     res = RegSetValueExA(prodkey, "RegOwner", 0, REG_SZ, (LPBYTE)"owner", 6);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* RegOwner value exists */
     sz = MAX_PATH;
@@ -6584,10 +6588,10 @@ static void test_MsiGetProductInfoEx(void)
     ok(r == ERROR_UNKNOWN_PROPERTY,
        "Expected ERROR_UNKNOWN_PROPERTY, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     res = RegSetValueExA(prodkey, "Transforms", 0, REG_SZ, (LPBYTE)"trans", 6);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* Transforms value exists */
     sz = MAX_PATH;
@@ -6597,10 +6601,10 @@ static void test_MsiGetProductInfoEx(void)
                               INSTALLPROPERTY_TRANSFORMSA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "trans"), "Expected \"trans\", got \"%s\"\n", buf);
-    ok(sz == 5, "Expected 5, got %lu\n", sz);
+    ok(sz == 5, "Expected 5, got %d\n", sz);
 
     res = RegSetValueExA(prodkey, "Language", 0, REG_SZ, (LPBYTE)"lang", 5);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* Language value exists */
     sz = MAX_PATH;
@@ -6610,10 +6614,10 @@ static void test_MsiGetProductInfoEx(void)
                               INSTALLPROPERTY_LANGUAGEA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "lang"), "Expected \"lang\", got \"%s\"\n", buf);
-    ok(sz == 4, "Expected 4, got %lu\n", sz);
+    ok(sz == 4, "Expected 4, got %d\n", sz);
 
     res = RegSetValueExA(prodkey, "ProductName", 0, REG_SZ, (LPBYTE)"name", 5);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* ProductName value exists */
     sz = MAX_PATH;
@@ -6623,10 +6627,10 @@ static void test_MsiGetProductInfoEx(void)
                               INSTALLPROPERTY_PRODUCTNAMEA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "name"), "Expected \"name\", got \"%s\"\n", buf);
-    ok(sz == 4, "Expected 4, got %lu\n", sz);
+    ok(sz == 4, "Expected 4, got %d\n", sz);
 
     res = RegSetValueExA(prodkey, "AssignmentType", 0, REG_SZ, (LPBYTE)"type", 5);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* FIXME */
 
@@ -6638,10 +6642,10 @@ static void test_MsiGetProductInfoEx(void)
                               INSTALLPROPERTY_ASSIGNMENTTYPEA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, ""), "Expected \"\", got \"%s\"\n", buf);
-    ok(sz == 0, "Expected 0, got %lu\n", sz);
+    ok(sz == 0, "Expected 0, got %d\n", sz);
 
     res = RegSetValueExA(prodkey, "PackageCode", 0, REG_SZ, (LPBYTE)"code", 5);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* FIXME */
 
@@ -6656,11 +6660,11 @@ static void test_MsiGetProductInfoEx(void)
         ok(r == ERROR_BAD_CONFIGURATION,
            "Expected ERROR_BAD_CONFIGURATION, got %d\n", r);
         ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-        ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+        ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
     }
 
     res = RegSetValueExA(prodkey, "Version", 0, REG_SZ, (LPBYTE)"ver", 4);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* Version value exists */
     sz = MAX_PATH;
@@ -6670,10 +6674,10 @@ static void test_MsiGetProductInfoEx(void)
                               INSTALLPROPERTY_VERSIONA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "ver"), "Expected \"ver\", got \"%s\"\n", buf);
-    ok(sz == 3, "Expected 3, got %lu\n", sz);
+    ok(sz == 3, "Expected 3, got %d\n", sz);
 
     res = RegSetValueExA(prodkey, "ProductIcon", 0, REG_SZ, (LPBYTE)"icon", 5);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* ProductIcon value exists */
     sz = MAX_PATH;
@@ -6683,10 +6687,10 @@ static void test_MsiGetProductInfoEx(void)
                               INSTALLPROPERTY_PRODUCTICONA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "icon"), "Expected \"icon\", got \"%s\"\n", buf);
-    ok(sz == 4, "Expected 4, got %lu\n", sz);
+    ok(sz == 4, "Expected 4, got %d\n", sz);
 
     res = RegSetValueExA(prodkey, "PackageName", 0, REG_SZ, (LPBYTE)"name", 5);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* PackageName value exists */
     sz = MAX_PATH;
@@ -6699,11 +6703,11 @@ static void test_MsiGetProductInfoEx(void)
         ok(r == ERROR_UNKNOWN_PRODUCT,
            "Expected ERROR_UNKNOWN_PRODUCT, got %d\n", r);
         ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-        ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+        ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
     }
 
     res = RegSetValueExA(prodkey, "AuthorizedLUAApp", 0, REG_SZ, (LPBYTE)"auth", 5);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* AuthorizedLUAApp value exists */
     sz = MAX_PATH;
@@ -6713,7 +6717,7 @@ static void test_MsiGetProductInfoEx(void)
                               INSTALLPROPERTY_AUTHORIZED_LUA_APPA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "auth"), "Expected \"auth\", got \"%s\"\n", buf);
-    ok(sz == 4, "Expected 4, got %lu\n", sz);
+    ok(sz == 4, "Expected 4, got %d\n", sz);
 
     RegDeleteValueA(prodkey, "AuthorizedLUAApp");
     RegDeleteValueA(prodkey, "PackageName");
@@ -6752,7 +6756,7 @@ static void test_MsiGetProductInfoEx(void)
     lstrcatA(keypath, prod_squashed);
 
     res = RegCreateKeyExA(HKEY_LOCAL_MACHINE, keypath, 0, NULL, 0, access, NULL, &localkey, NULL);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* local user product key exists */
     sz = MAX_PATH;
@@ -6763,10 +6767,10 @@ static void test_MsiGetProductInfoEx(void)
     ok(r == ERROR_UNKNOWN_PRODUCT,
        "Expected ERROR_UNKNOWN_PRODUCT, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     res = RegCreateKeyExA(localkey, "InstallProperties", 0, NULL, 0, access, NULL, &propkey, NULL);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* InstallProperties key exists */
     sz = MAX_PATH;
@@ -6777,10 +6781,10 @@ static void test_MsiGetProductInfoEx(void)
     ok(r == ERROR_UNKNOWN_PRODUCT,
        "Expected ERROR_UNKNOWN_PRODUCT, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "ManagedLocalPackage", 0, REG_SZ, (LPBYTE)"local", 6);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* ManagedLocalPackage value exists */
     sz = MAX_PATH;
@@ -6790,10 +6794,10 @@ static void test_MsiGetProductInfoEx(void)
                               INSTALLPROPERTY_PRODUCTSTATEA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "5"), "Expected \"5\", got \"%s\"\n", buf);
-    ok(sz == 1, "Expected 1, got %lu\n", sz);
+    ok(sz == 1, "Expected 1, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "HelpLink", 0, REG_SZ, (LPBYTE)"link", 5);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* HelpLink value exists */
     sz = MAX_PATH;
@@ -6803,10 +6807,10 @@ static void test_MsiGetProductInfoEx(void)
                               INSTALLPROPERTY_HELPLINKA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "link"), "Expected \"link\", got \"%s\"\n", buf);
-    ok(sz == 4, "Expected 4, got %lu\n", sz);
+    ok(sz == 4, "Expected 4, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "HelpTelephone", 0, REG_SZ, (LPBYTE)"phone", 6);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* HelpTelephone value exists */
     sz = MAX_PATH;
@@ -6816,10 +6820,10 @@ static void test_MsiGetProductInfoEx(void)
                               INSTALLPROPERTY_HELPTELEPHONEA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "phone"), "Expected \"phone\", got \"%s\"\n", buf);
-    ok(sz == 5, "Expected 5, got %lu\n", sz);
+    ok(sz == 5, "Expected 5, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "InstallDate", 0, REG_SZ, (LPBYTE)"date", 5);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* InstallDate value exists */
     sz = MAX_PATH;
@@ -6829,10 +6833,10 @@ static void test_MsiGetProductInfoEx(void)
                               INSTALLPROPERTY_INSTALLDATEA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "date"), "Expected \"date\", got \"%s\"\n", buf);
-    ok(sz == 4, "Expected 4, got %lu\n", sz);
+    ok(sz == 4, "Expected 4, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "DisplayName", 0, REG_SZ, (LPBYTE)"name", 5);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* DisplayName value exists */
     sz = MAX_PATH;
@@ -6842,10 +6846,10 @@ static void test_MsiGetProductInfoEx(void)
                               INSTALLPROPERTY_INSTALLEDPRODUCTNAMEA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "name"), "Expected \"name\", got \"%s\"\n", buf);
-    ok(sz == 4, "Expected 4, got %lu\n", sz);
+    ok(sz == 4, "Expected 4, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "InstallLocation", 0, REG_SZ, (LPBYTE)"loc", 4);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* InstallLocation value exists */
     sz = MAX_PATH;
@@ -6855,10 +6859,10 @@ static void test_MsiGetProductInfoEx(void)
                               INSTALLPROPERTY_INSTALLLOCATIONA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "loc"), "Expected \"loc\", got \"%s\"\n", buf);
-    ok(sz == 3, "Expected 3, got %lu\n", sz);
+    ok(sz == 3, "Expected 3, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "InstallSource", 0, REG_SZ, (LPBYTE)"source", 7);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* InstallSource value exists */
     sz = MAX_PATH;
@@ -6868,10 +6872,10 @@ static void test_MsiGetProductInfoEx(void)
                               INSTALLPROPERTY_INSTALLSOURCEA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "source"), "Expected \"source\", got \"%s\"\n", buf);
-    ok(sz == 6, "Expected 6, got %lu\n", sz);
+    ok(sz == 6, "Expected 6, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "LocalPackage", 0, REG_SZ, (LPBYTE)"local", 6);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* LocalPackage value exists */
     sz = MAX_PATH;
@@ -6881,10 +6885,10 @@ static void test_MsiGetProductInfoEx(void)
                               INSTALLPROPERTY_LOCALPACKAGEA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "local"), "Expected \"local\", got \"%s\"\n", buf);
-    ok(sz == 5, "Expected 5, got %lu\n", sz);
+    ok(sz == 5, "Expected 5, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "Publisher", 0, REG_SZ, (LPBYTE)"pub", 4);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* Publisher value exists */
     sz = MAX_PATH;
@@ -6894,10 +6898,10 @@ static void test_MsiGetProductInfoEx(void)
                               INSTALLPROPERTY_PUBLISHERA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "pub"), "Expected \"pub\", got \"%s\"\n", buf);
-    ok(sz == 3, "Expected 3, got %lu\n", sz);
+    ok(sz == 3, "Expected 3, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "URLInfoAbout", 0, REG_SZ, (LPBYTE)"about", 6);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* URLInfoAbout value exists */
     sz = MAX_PATH;
@@ -6907,10 +6911,10 @@ static void test_MsiGetProductInfoEx(void)
                               INSTALLPROPERTY_URLINFOABOUTA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "about"), "Expected \"about\", got \"%s\"\n", buf);
-    ok(sz == 5, "Expected 5, got %lu\n", sz);
+    ok(sz == 5, "Expected 5, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "URLUpdateInfo", 0, REG_SZ, (LPBYTE)"update", 7);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* URLUpdateInfo value exists */
     sz = MAX_PATH;
@@ -6920,10 +6924,10 @@ static void test_MsiGetProductInfoEx(void)
                               INSTALLPROPERTY_URLUPDATEINFOA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "update"), "Expected \"update\", got \"%s\"\n", buf);
-    ok(sz == 6, "Expected 6, got %lu\n", sz);
+    ok(sz == 6, "Expected 6, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "VersionMinor", 0, REG_SZ, (LPBYTE)"2", 2);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* VersionMinor value exists */
     sz = MAX_PATH;
@@ -6933,10 +6937,10 @@ static void test_MsiGetProductInfoEx(void)
                               INSTALLPROPERTY_VERSIONMINORA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "2"), "Expected \"2\", got \"%s\"\n", buf);
-    ok(sz == 1, "Expected 1, got %lu\n", sz);
+    ok(sz == 1, "Expected 1, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "VersionMajor", 0, REG_SZ, (LPBYTE)"3", 2);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* VersionMajor value exists */
     sz = MAX_PATH;
@@ -6946,10 +6950,10 @@ static void test_MsiGetProductInfoEx(void)
                               INSTALLPROPERTY_VERSIONMAJORA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "3"), "Expected \"3\", got \"%s\"\n", buf);
-    ok(sz == 1, "Expected 1, got %lu\n", sz);
+    ok(sz == 1, "Expected 1, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "DisplayVersion", 0, REG_SZ, (LPBYTE)"3.2.1", 6);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* DisplayVersion value exists */
     sz = MAX_PATH;
@@ -6959,10 +6963,10 @@ static void test_MsiGetProductInfoEx(void)
                               INSTALLPROPERTY_VERSIONSTRINGA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "3.2.1"), "Expected \"3.2.1\", got \"%s\"\n", buf);
-    ok(sz == 5, "Expected 5, got %lu\n", sz);
+    ok(sz == 5, "Expected 5, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "ProductID", 0, REG_SZ, (LPBYTE)"id", 3);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* ProductID value exists */
     sz = MAX_PATH;
@@ -6972,10 +6976,10 @@ static void test_MsiGetProductInfoEx(void)
                               INSTALLPROPERTY_PRODUCTIDA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "id"), "Expected \"id\", got \"%s\"\n", buf);
-    ok(sz == 2, "Expected 2, got %lu\n", sz);
+    ok(sz == 2, "Expected 2, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "RegCompany", 0, REG_SZ, (LPBYTE)"comp", 5);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* RegCompany value exists */
     sz = MAX_PATH;
@@ -6985,10 +6989,10 @@ static void test_MsiGetProductInfoEx(void)
                               INSTALLPROPERTY_REGCOMPANYA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "comp"), "Expected \"comp\", got \"%s\"\n", buf);
-    ok(sz == 4, "Expected 4, got %lu\n", sz);
+    ok(sz == 4, "Expected 4, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "RegOwner", 0, REG_SZ, (LPBYTE)"owner", 6);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* RegOwner value exists */
     sz = MAX_PATH;
@@ -6998,10 +7002,10 @@ static void test_MsiGetProductInfoEx(void)
                               INSTALLPROPERTY_REGOWNERA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "owner"), "Expected \"owner\", got \"%s\"\n", buf);
-    ok(sz == 5, "Expected 5, got %lu\n", sz);
+    ok(sz == 5, "Expected 5, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "Transforms", 0, REG_SZ, (LPBYTE)"trans", 6);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* Transforms value exists */
     sz = MAX_PATH;
@@ -7012,10 +7016,10 @@ static void test_MsiGetProductInfoEx(void)
     ok(r == ERROR_UNKNOWN_PRODUCT,
        "Expected ERROR_UNKNOWN_PRODUCT, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "Language", 0, REG_SZ, (LPBYTE)"lang", 5);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* Language value exists */
     sz = MAX_PATH;
@@ -7026,10 +7030,10 @@ static void test_MsiGetProductInfoEx(void)
     ok(r == ERROR_UNKNOWN_PRODUCT,
        "Expected ERROR_UNKNOWN_PRODUCT, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "ProductName", 0, REG_SZ, (LPBYTE)"name", 5);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* ProductName value exists */
     sz = MAX_PATH;
@@ -7040,10 +7044,10 @@ static void test_MsiGetProductInfoEx(void)
     ok(r == ERROR_UNKNOWN_PRODUCT,
        "Expected ERROR_UNKNOWN_PRODUCT, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "AssignmentType", 0, REG_SZ, (LPBYTE)"type", 5);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* FIXME */
 
@@ -7056,10 +7060,10 @@ static void test_MsiGetProductInfoEx(void)
     ok(r == ERROR_UNKNOWN_PRODUCT,
        "Expected ERROR_UNKNOWN_PRODUCT, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "PackageCode", 0, REG_SZ, (LPBYTE)"code", 5);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* PackageCode value exists */
     sz = MAX_PATH;
@@ -7070,10 +7074,10 @@ static void test_MsiGetProductInfoEx(void)
     ok(r == ERROR_UNKNOWN_PRODUCT,
        "Expected ERROR_UNKNOWN_PRODUCT, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "Version", 0, REG_SZ, (LPBYTE)"ver", 4);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* Version value exists */
     sz = MAX_PATH;
@@ -7084,10 +7088,10 @@ static void test_MsiGetProductInfoEx(void)
     ok(r == ERROR_UNKNOWN_PRODUCT,
        "Expected ERROR_UNKNOWN_PRODUCT, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "ProductIcon", 0, REG_SZ, (LPBYTE)"icon", 5);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* ProductIcon value exists */
     sz = MAX_PATH;
@@ -7098,10 +7102,10 @@ static void test_MsiGetProductInfoEx(void)
     ok(r == ERROR_UNKNOWN_PRODUCT,
        "Expected ERROR_UNKNOWN_PRODUCT, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "PackageName", 0, REG_SZ, (LPBYTE)"name", 5);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* PackageName value exists */
     sz = MAX_PATH;
@@ -7112,10 +7116,10 @@ static void test_MsiGetProductInfoEx(void)
     ok(r == ERROR_UNKNOWN_PRODUCT,
        "Expected ERROR_UNKNOWN_PRODUCT, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "AuthorizedLUAApp", 0, REG_SZ, (LPBYTE)"auth", 5);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* AuthorizedLUAApp value exists */
     sz = MAX_PATH;
@@ -7126,7 +7130,7 @@ static void test_MsiGetProductInfoEx(void)
     ok(r == ERROR_UNKNOWN_PRODUCT,
        "Expected ERROR_UNKNOWN_PRODUCT, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     RegDeleteValueA(propkey, "AuthorizedLUAApp");
     RegDeleteValueA(propkey, "PackageName");
@@ -7165,7 +7169,7 @@ static void test_MsiGetProductInfoEx(void)
     lstrcatA(keypath, prod_squashed);
 
     res = RegCreateKeyExA(HKEY_LOCAL_MACHINE, keypath, 0, NULL, 0, access, NULL, &userkey, NULL);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* user product key exists */
     sz = MAX_PATH;
@@ -7175,7 +7179,7 @@ static void test_MsiGetProductInfoEx(void)
                               INSTALLPROPERTY_PRODUCTSTATEA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "1"), "Expected \"1\", got \"%s\"\n", buf);
-    ok(sz == 1, "Expected 1, got %lu\n", sz);
+    ok(sz == 1, "Expected 1, got %d\n", sz);
 
     delete_key(userkey, "", access & KEY_WOW64_64KEY);
     RegCloseKey(userkey);
@@ -7184,7 +7188,7 @@ static void test_MsiGetProductInfoEx(void)
     lstrcatA(keypath, prod_squashed);
 
     res = RegCreateKeyA(HKEY_CURRENT_USER, keypath, &prodkey);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* current user product key exists */
     sz = MAX_PATH;
@@ -7195,10 +7199,10 @@ static void test_MsiGetProductInfoEx(void)
     ok(r == ERROR_UNKNOWN_PRODUCT,
        "Expected ERROR_UNKNOWN_PRODUCT, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     res = RegSetValueExA(prodkey, "HelpLink", 0, REG_SZ, (LPBYTE)"link", 5);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* HelpLink value exists, user product key does not exist */
     sz = MAX_PATH;
@@ -7209,7 +7213,7 @@ static void test_MsiGetProductInfoEx(void)
     ok(r == ERROR_UNKNOWN_PRODUCT,
        "Expected ERROR_UNKNOWN_PRODUCT, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     lstrcpyA(keypath, "Software\\Microsoft\\Windows\\CurrentVersion\\Installer\\Managed\\");
     lstrcatA(keypath, usersid);
@@ -7217,10 +7221,10 @@ static void test_MsiGetProductInfoEx(void)
     lstrcatA(keypath, prod_squashed);
 
     res = RegCreateKeyExA(HKEY_LOCAL_MACHINE, keypath, 0, NULL, 0, access, NULL, &userkey, NULL);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     res = RegSetValueExA(userkey, "HelpLink", 0, REG_SZ, (LPBYTE)"link", 5);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* HelpLink value exists, user product key does exist */
     sz = MAX_PATH;
@@ -7231,10 +7235,10 @@ static void test_MsiGetProductInfoEx(void)
     ok(r == ERROR_UNKNOWN_PROPERTY,
        "Expected ERROR_UNKNOWN_PROPERTY, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     res = RegSetValueExA(userkey, "HelpTelephone", 0, REG_SZ, (LPBYTE)"phone", 6);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* HelpTelephone value exists */
     sz = MAX_PATH;
@@ -7245,10 +7249,10 @@ static void test_MsiGetProductInfoEx(void)
     ok(r == ERROR_UNKNOWN_PROPERTY,
        "Expected ERROR_UNKNOWN_PROPERTY, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     res = RegSetValueExA(userkey, "InstallDate", 0, REG_SZ, (LPBYTE)"date", 5);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* InstallDate value exists */
     sz = MAX_PATH;
@@ -7259,10 +7263,10 @@ static void test_MsiGetProductInfoEx(void)
     ok(r == ERROR_UNKNOWN_PROPERTY,
        "Expected ERROR_UNKNOWN_PROPERTY, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     res = RegSetValueExA(userkey, "DisplayName", 0, REG_SZ, (LPBYTE)"name", 5);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* DisplayName value exists */
     sz = MAX_PATH;
@@ -7273,10 +7277,10 @@ static void test_MsiGetProductInfoEx(void)
     ok(r == ERROR_UNKNOWN_PROPERTY,
        "Expected ERROR_UNKNOWN_PROPERTY, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     res = RegSetValueExA(userkey, "InstallLocation", 0, REG_SZ, (LPBYTE)"loc", 4);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* InstallLocation value exists */
     sz = MAX_PATH;
@@ -7287,10 +7291,10 @@ static void test_MsiGetProductInfoEx(void)
     ok(r == ERROR_UNKNOWN_PROPERTY,
        "Expected ERROR_UNKNOWN_PROPERTY, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     res = RegSetValueExA(userkey, "InstallSource", 0, REG_SZ, (LPBYTE)"source", 7);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* InstallSource value exists */
     sz = MAX_PATH;
@@ -7301,10 +7305,10 @@ static void test_MsiGetProductInfoEx(void)
     ok(r == ERROR_UNKNOWN_PROPERTY,
        "Expected ERROR_UNKNOWN_PROPERTY, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     res = RegSetValueExA(userkey, "LocalPackage", 0, REG_SZ, (LPBYTE)"local", 6);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* LocalPackage value exists */
     sz = MAX_PATH;
@@ -7315,10 +7319,10 @@ static void test_MsiGetProductInfoEx(void)
     ok(r == ERROR_UNKNOWN_PROPERTY,
        "Expected ERROR_UNKNOWN_PROPERTY, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     res = RegSetValueExA(userkey, "Publisher", 0, REG_SZ, (LPBYTE)"pub", 4);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* Publisher value exists */
     sz = MAX_PATH;
@@ -7329,10 +7333,10 @@ static void test_MsiGetProductInfoEx(void)
     ok(r == ERROR_UNKNOWN_PROPERTY,
        "Expected ERROR_UNKNOWN_PROPERTY, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     res = RegSetValueExA(userkey, "URLInfoAbout", 0, REG_SZ, (LPBYTE)"about", 6);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* URLInfoAbout value exists */
     sz = MAX_PATH;
@@ -7343,10 +7347,10 @@ static void test_MsiGetProductInfoEx(void)
     ok(r == ERROR_UNKNOWN_PROPERTY,
        "Expected ERROR_UNKNOWN_PROPERTY, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     res = RegSetValueExA(userkey, "URLUpdateInfo", 0, REG_SZ, (LPBYTE)"update", 7);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* URLUpdateInfo value exists */
     sz = MAX_PATH;
@@ -7357,10 +7361,10 @@ static void test_MsiGetProductInfoEx(void)
     ok(r == ERROR_UNKNOWN_PROPERTY,
        "Expected ERROR_UNKNOWN_PROPERTY, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     res = RegSetValueExA(userkey, "VersionMinor", 0, REG_SZ, (LPBYTE)"2", 2);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* VersionMinor value exists */
     sz = MAX_PATH;
@@ -7371,10 +7375,10 @@ static void test_MsiGetProductInfoEx(void)
     ok(r == ERROR_UNKNOWN_PROPERTY,
        "Expected ERROR_UNKNOWN_PROPERTY, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     res = RegSetValueExA(userkey, "VersionMajor", 0, REG_SZ, (LPBYTE)"3", 2);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* VersionMajor value exists */
     sz = MAX_PATH;
@@ -7385,10 +7389,10 @@ static void test_MsiGetProductInfoEx(void)
     ok(r == ERROR_UNKNOWN_PROPERTY,
        "Expected ERROR_UNKNOWN_PROPERTY, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     res = RegSetValueExA(userkey, "DisplayVersion", 0, REG_SZ, (LPBYTE)"3.2.1", 6);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* DisplayVersion value exists */
     sz = MAX_PATH;
@@ -7399,10 +7403,10 @@ static void test_MsiGetProductInfoEx(void)
     ok(r == ERROR_UNKNOWN_PROPERTY,
        "Expected ERROR_UNKNOWN_PROPERTY, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     res = RegSetValueExA(userkey, "ProductID", 0, REG_SZ, (LPBYTE)"id", 3);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* ProductID value exists */
     sz = MAX_PATH;
@@ -7413,10 +7417,10 @@ static void test_MsiGetProductInfoEx(void)
     ok(r == ERROR_UNKNOWN_PROPERTY,
        "Expected ERROR_UNKNOWN_PROPERTY, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     res = RegSetValueExA(userkey, "RegCompany", 0, REG_SZ, (LPBYTE)"comp", 5);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* RegCompany value exists */
     sz = MAX_PATH;
@@ -7427,10 +7431,10 @@ static void test_MsiGetProductInfoEx(void)
     ok(r == ERROR_UNKNOWN_PROPERTY,
        "Expected ERROR_UNKNOWN_PROPERTY, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     res = RegSetValueExA(userkey, "RegOwner", 0, REG_SZ, (LPBYTE)"owner", 6);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* RegOwner value exists */
     sz = MAX_PATH;
@@ -7441,10 +7445,10 @@ static void test_MsiGetProductInfoEx(void)
     ok(r == ERROR_UNKNOWN_PROPERTY,
        "Expected ERROR_UNKNOWN_PROPERTY, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     res = RegSetValueExA(userkey, "Transforms", 0, REG_SZ, (LPBYTE)"trans", 6);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* Transforms value exists */
     sz = MAX_PATH;
@@ -7454,10 +7458,10 @@ static void test_MsiGetProductInfoEx(void)
                               INSTALLPROPERTY_TRANSFORMSA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "trans"), "Expected \"trans\", got \"%s\"\n", buf);
-    ok(sz == 5, "Expected 5, got %lu\n", sz);
+    ok(sz == 5, "Expected 5, got %d\n", sz);
 
     res = RegSetValueExA(userkey, "Language", 0, REG_SZ, (LPBYTE)"lang", 5);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* Language value exists */
     sz = MAX_PATH;
@@ -7467,10 +7471,10 @@ static void test_MsiGetProductInfoEx(void)
                               INSTALLPROPERTY_LANGUAGEA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "lang"), "Expected \"lang\", got \"%s\"\n", buf);
-    ok(sz == 4, "Expected 4, got %lu\n", sz);
+    ok(sz == 4, "Expected 4, got %d\n", sz);
 
     res = RegSetValueExA(userkey, "ProductName", 0, REG_SZ, (LPBYTE)"name", 5);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* ProductName value exists */
     sz = MAX_PATH;
@@ -7480,10 +7484,10 @@ static void test_MsiGetProductInfoEx(void)
                               INSTALLPROPERTY_PRODUCTNAMEA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "name"), "Expected \"name\", got \"%s\"\n", buf);
-    ok(sz == 4, "Expected 4, got %lu\n", sz);
+    ok(sz == 4, "Expected 4, got %d\n", sz);
 
     res = RegSetValueExA(userkey, "AssignmentType", 0, REG_SZ, (LPBYTE)"type", 5);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* FIXME */
 
@@ -7495,10 +7499,10 @@ static void test_MsiGetProductInfoEx(void)
                               INSTALLPROPERTY_ASSIGNMENTTYPEA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, ""), "Expected \"\", got \"%s\"\n", buf);
-    ok(sz == 0, "Expected 0, got %lu\n", sz);
+    ok(sz == 0, "Expected 0, got %d\n", sz);
 
     res = RegSetValueExA(userkey, "PackageCode", 0, REG_SZ, (LPBYTE)"code", 5);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* FIXME */
 
@@ -7513,11 +7517,11 @@ static void test_MsiGetProductInfoEx(void)
         ok(r == ERROR_BAD_CONFIGURATION,
            "Expected ERROR_BAD_CONFIGURATION, got %d\n", r);
         ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-        ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+        ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
     }
 
     res = RegSetValueExA(userkey, "Version", 0, REG_SZ, (LPBYTE)"ver", 4);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* Version value exists */
     sz = MAX_PATH;
@@ -7527,10 +7531,10 @@ static void test_MsiGetProductInfoEx(void)
                               INSTALLPROPERTY_VERSIONA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "ver"), "Expected \"ver\", got \"%s\"\n", buf);
-    ok(sz == 3, "Expected 3, got %lu\n", sz);
+    ok(sz == 3, "Expected 3, got %d\n", sz);
 
     res = RegSetValueExA(userkey, "ProductIcon", 0, REG_SZ, (LPBYTE)"icon", 5);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* ProductIcon value exists */
     sz = MAX_PATH;
@@ -7540,10 +7544,10 @@ static void test_MsiGetProductInfoEx(void)
                               INSTALLPROPERTY_PRODUCTICONA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "icon"), "Expected \"icon\", got \"%s\"\n", buf);
-    ok(sz == 4, "Expected 4, got %lu\n", sz);
+    ok(sz == 4, "Expected 4, got %d\n", sz);
 
     res = RegSetValueExA(userkey, "PackageName", 0, REG_SZ, (LPBYTE)"name", 5);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* PackageName value exists */
     sz = MAX_PATH;
@@ -7556,11 +7560,11 @@ static void test_MsiGetProductInfoEx(void)
         ok(r == ERROR_UNKNOWN_PRODUCT,
            "Expected ERROR_UNKNOWN_PRODUCT, got %d\n", r);
         ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-        ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+        ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
     }
 
     res = RegSetValueExA(userkey, "AuthorizedLUAApp", 0, REG_SZ, (LPBYTE)"auth", 5);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* AuthorizedLUAApp value exists */
     sz = MAX_PATH;
@@ -7570,7 +7574,7 @@ static void test_MsiGetProductInfoEx(void)
                               INSTALLPROPERTY_AUTHORIZED_LUA_APPA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "auth"), "Expected \"auth\", got \"%s\"\n", buf);
-    ok(sz == 4, "Expected 4, got %lu\n", sz);
+    ok(sz == 4, "Expected 4, got %d\n", sz);
 
     RegDeleteValueA(userkey, "AuthorizedLUAApp");
     RegDeleteValueA(userkey, "PackageName");
@@ -7613,13 +7617,13 @@ static void test_MsiGetProductInfoEx(void)
     ok(r == ERROR_INVALID_PARAMETER,
        "Expected ERROR_INVALID_PARAMETER, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     lstrcpyA(keypath, "Software\\Microsoft\\Windows\\CurrentVersion\\Installer\\UserData\\S-1-5-18\\Products\\");
     lstrcatA(keypath, prod_squashed);
 
     res = RegCreateKeyExA(HKEY_LOCAL_MACHINE, keypath, 0, NULL, 0, access, NULL, &localkey, NULL);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* local system product key exists */
     sz = MAX_PATH;
@@ -7630,10 +7634,10 @@ static void test_MsiGetProductInfoEx(void)
     ok(r == ERROR_UNKNOWN_PRODUCT,
        "Expected ERROR_UNKNOWN_PRODUCT, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     res = RegCreateKeyExA(localkey, "InstallProperties", 0, NULL, 0, access, NULL, &propkey, NULL);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* InstallProperties key exists */
     sz = MAX_PATH;
@@ -7644,10 +7648,10 @@ static void test_MsiGetProductInfoEx(void)
     ok(r == ERROR_UNKNOWN_PRODUCT,
        "Expected ERROR_UNKNOWN_PRODUCT, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "LocalPackage", 0, REG_SZ, (LPBYTE)"local", 6);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* LocalPackage value exists */
     sz = MAX_PATH;
@@ -7657,10 +7661,10 @@ static void test_MsiGetProductInfoEx(void)
                               INSTALLPROPERTY_PRODUCTSTATEA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "5"), "Expected \"5\", got \"%s\"\n", buf);
-    ok(sz == 1, "Expected 1, got %lu\n", sz);
+    ok(sz == 1, "Expected 1, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "HelpLink", 0, REG_SZ, (LPBYTE)"link", 5);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* HelpLink value exists */
     sz = MAX_PATH;
@@ -7670,10 +7674,10 @@ static void test_MsiGetProductInfoEx(void)
                               INSTALLPROPERTY_HELPLINKA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "link"), "Expected \"link\", got \"%s\"\n", buf);
-    ok(sz == 4, "Expected 4, got %lu\n", sz);
+    ok(sz == 4, "Expected 4, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "HelpTelephone", 0, REG_SZ, (LPBYTE)"phone", 6);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* HelpTelephone value exists */
     sz = MAX_PATH;
@@ -7683,10 +7687,10 @@ static void test_MsiGetProductInfoEx(void)
                               INSTALLPROPERTY_HELPTELEPHONEA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "phone"), "Expected \"phone\", got \"%s\"\n", buf);
-    ok(sz == 5, "Expected 5, got %lu\n", sz);
+    ok(sz == 5, "Expected 5, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "InstallDate", 0, REG_SZ, (LPBYTE)"date", 5);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* InstallDate value exists */
     sz = MAX_PATH;
@@ -7696,10 +7700,10 @@ static void test_MsiGetProductInfoEx(void)
                               INSTALLPROPERTY_INSTALLDATEA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "date"), "Expected \"date\", got \"%s\"\n", buf);
-    ok(sz == 4, "Expected 4, got %lu\n", sz);
+    ok(sz == 4, "Expected 4, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "DisplayName", 0, REG_SZ, (LPBYTE)"name", 5);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* DisplayName value exists */
     sz = MAX_PATH;
@@ -7709,10 +7713,10 @@ static void test_MsiGetProductInfoEx(void)
                               INSTALLPROPERTY_INSTALLEDPRODUCTNAMEA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "name"), "Expected \"name\", got \"%s\"\n", buf);
-    ok(sz == 4, "Expected 4, got %lu\n", sz);
+    ok(sz == 4, "Expected 4, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "InstallLocation", 0, REG_SZ, (LPBYTE)"loc", 4);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* InstallLocation value exists */
     sz = MAX_PATH;
@@ -7722,10 +7726,10 @@ static void test_MsiGetProductInfoEx(void)
                               INSTALLPROPERTY_INSTALLLOCATIONA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "loc"), "Expected \"loc\", got \"%s\"\n", buf);
-    ok(sz == 3, "Expected 3, got %lu\n", sz);
+    ok(sz == 3, "Expected 3, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "InstallSource", 0, REG_SZ, (LPBYTE)"source", 7);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* InstallSource value exists */
     sz = MAX_PATH;
@@ -7735,10 +7739,10 @@ static void test_MsiGetProductInfoEx(void)
                               INSTALLPROPERTY_INSTALLSOURCEA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "source"), "Expected \"source\", got \"%s\"\n", buf);
-    ok(sz == 6, "Expected 6, got %lu\n", sz);
+    ok(sz == 6, "Expected 6, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "LocalPackage", 0, REG_SZ, (LPBYTE)"local", 6);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* LocalPackage value exists */
     sz = MAX_PATH;
@@ -7748,10 +7752,10 @@ static void test_MsiGetProductInfoEx(void)
                               INSTALLPROPERTY_LOCALPACKAGEA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "local"), "Expected \"local\", got \"%s\"\n", buf);
-    ok(sz == 5, "Expected 5, got %lu\n", sz);
+    ok(sz == 5, "Expected 5, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "Publisher", 0, REG_SZ, (LPBYTE)"pub", 4);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* Publisher value exists */
     sz = MAX_PATH;
@@ -7761,10 +7765,10 @@ static void test_MsiGetProductInfoEx(void)
                               INSTALLPROPERTY_PUBLISHERA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "pub"), "Expected \"pub\", got \"%s\"\n", buf);
-    ok(sz == 3, "Expected 3, got %lu\n", sz);
+    ok(sz == 3, "Expected 3, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "URLInfoAbout", 0, REG_SZ, (LPBYTE)"about", 6);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* URLInfoAbout value exists */
     sz = MAX_PATH;
@@ -7774,10 +7778,10 @@ static void test_MsiGetProductInfoEx(void)
                               INSTALLPROPERTY_URLINFOABOUTA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "about"), "Expected \"about\", got \"%s\"\n", buf);
-    ok(sz == 5, "Expected 5, got %lu\n", sz);
+    ok(sz == 5, "Expected 5, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "URLUpdateInfo", 0, REG_SZ, (LPBYTE)"update", 7);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* URLUpdateInfo value exists */
     sz = MAX_PATH;
@@ -7787,10 +7791,10 @@ static void test_MsiGetProductInfoEx(void)
                               INSTALLPROPERTY_URLUPDATEINFOA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "update"), "Expected \"update\", got \"%s\"\n", buf);
-    ok(sz == 6, "Expected 6, got %lu\n", sz);
+    ok(sz == 6, "Expected 6, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "VersionMinor", 0, REG_SZ, (LPBYTE)"2", 2);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* VersionMinor value exists */
     sz = MAX_PATH;
@@ -7800,10 +7804,10 @@ static void test_MsiGetProductInfoEx(void)
                               INSTALLPROPERTY_VERSIONMINORA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "2"), "Expected \"2\", got \"%s\"\n", buf);
-    ok(sz == 1, "Expected 1, got %lu\n", sz);
+    ok(sz == 1, "Expected 1, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "VersionMajor", 0, REG_SZ, (LPBYTE)"3", 2);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* VersionMajor value exists */
     sz = MAX_PATH;
@@ -7813,10 +7817,10 @@ static void test_MsiGetProductInfoEx(void)
                               INSTALLPROPERTY_VERSIONMAJORA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "3"), "Expected \"3\", got \"%s\"\n", buf);
-    ok(sz == 1, "Expected 1, got %lu\n", sz);
+    ok(sz == 1, "Expected 1, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "DisplayVersion", 0, REG_SZ, (LPBYTE)"3.2.1", 6);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* DisplayVersion value exists */
     sz = MAX_PATH;
@@ -7826,10 +7830,10 @@ static void test_MsiGetProductInfoEx(void)
                               INSTALLPROPERTY_VERSIONSTRINGA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "3.2.1"), "Expected \"3.2.1\", got \"%s\"\n", buf);
-    ok(sz == 5, "Expected 5, got %lu\n", sz);
+    ok(sz == 5, "Expected 5, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "ProductID", 0, REG_SZ, (LPBYTE)"id", 3);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* ProductID value exists */
     sz = MAX_PATH;
@@ -7839,10 +7843,10 @@ static void test_MsiGetProductInfoEx(void)
                               INSTALLPROPERTY_PRODUCTIDA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "id"), "Expected \"id\", got \"%s\"\n", buf);
-    ok(sz == 2, "Expected 2, got %lu\n", sz);
+    ok(sz == 2, "Expected 2, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "RegCompany", 0, REG_SZ, (LPBYTE)"comp", 5);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* RegCompany value exists */
     sz = MAX_PATH;
@@ -7852,10 +7856,10 @@ static void test_MsiGetProductInfoEx(void)
                               INSTALLPROPERTY_REGCOMPANYA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "comp"), "Expected \"comp\", got \"%s\"\n", buf);
-    ok(sz == 4, "Expected 4, got %lu\n", sz);
+    ok(sz == 4, "Expected 4, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "RegOwner", 0, REG_SZ, (LPBYTE)"owner", 6);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* RegOwner value exists */
     sz = MAX_PATH;
@@ -7865,10 +7869,10 @@ static void test_MsiGetProductInfoEx(void)
                               INSTALLPROPERTY_REGOWNERA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "owner"), "Expected \"owner\", got \"%s\"\n", buf);
-    ok(sz == 5, "Expected 5, got %lu\n", sz);
+    ok(sz == 5, "Expected 5, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "Transforms", 0, REG_SZ, (LPBYTE)"trans", 6);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* Transforms value exists */
     sz = MAX_PATH;
@@ -7879,10 +7883,10 @@ static void test_MsiGetProductInfoEx(void)
     ok(r == ERROR_UNKNOWN_PRODUCT,
        "Expected ERROR_UNKNOWN_PRODUCT, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "Language", 0, REG_SZ, (LPBYTE)"lang", 5);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* Language value exists */
     sz = MAX_PATH;
@@ -7893,10 +7897,10 @@ static void test_MsiGetProductInfoEx(void)
     ok(r == ERROR_UNKNOWN_PRODUCT,
        "Expected ERROR_UNKNOWN_PRODUCT, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "ProductName", 0, REG_SZ, (LPBYTE)"name", 5);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* ProductName value exists */
     sz = MAX_PATH;
@@ -7907,10 +7911,10 @@ static void test_MsiGetProductInfoEx(void)
     ok(r == ERROR_UNKNOWN_PRODUCT,
        "Expected ERROR_UNKNOWN_PRODUCT, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "AssignmentType", 0, REG_SZ, (LPBYTE)"type", 5);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* FIXME */
 
@@ -7923,10 +7927,10 @@ static void test_MsiGetProductInfoEx(void)
     ok(r == ERROR_UNKNOWN_PRODUCT,
        "Expected ERROR_UNKNOWN_PRODUCT, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "PackageCode", 0, REG_SZ, (LPBYTE)"code", 5);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* PackageCode value exists */
     sz = MAX_PATH;
@@ -7937,10 +7941,10 @@ static void test_MsiGetProductInfoEx(void)
     ok(r == ERROR_UNKNOWN_PRODUCT,
        "Expected ERROR_UNKNOWN_PRODUCT, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "Version", 0, REG_SZ, (LPBYTE)"ver", 4);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* Version value exists */
     sz = MAX_PATH;
@@ -7951,10 +7955,10 @@ static void test_MsiGetProductInfoEx(void)
     ok(r == ERROR_UNKNOWN_PRODUCT,
        "Expected ERROR_UNKNOWN_PRODUCT, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "ProductIcon", 0, REG_SZ, (LPBYTE)"icon", 5);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* ProductIcon value exists */
     sz = MAX_PATH;
@@ -7965,10 +7969,10 @@ static void test_MsiGetProductInfoEx(void)
     ok(r == ERROR_UNKNOWN_PRODUCT,
        "Expected ERROR_UNKNOWN_PRODUCT, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "PackageName", 0, REG_SZ, (LPBYTE)"name", 5);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* PackageName value exists */
     sz = MAX_PATH;
@@ -7979,10 +7983,10 @@ static void test_MsiGetProductInfoEx(void)
     ok(r == ERROR_UNKNOWN_PRODUCT,
        "Expected ERROR_UNKNOWN_PRODUCT, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     res = RegSetValueExA(propkey, "AuthorizedLUAApp", 0, REG_SZ, (LPBYTE)"auth", 5);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* AuthorizedLUAApp value exists */
     sz = MAX_PATH;
@@ -7993,7 +7997,7 @@ static void test_MsiGetProductInfoEx(void)
     ok(r == ERROR_UNKNOWN_PRODUCT,
        "Expected ERROR_UNKNOWN_PRODUCT, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     RegDeleteValueA(propkey, "AuthorizedLUAApp");
     RegDeleteValueA(propkey, "PackageName");
@@ -8036,7 +8040,7 @@ static void test_MsiGetProductInfoEx(void)
         LocalFree( usersid );
         return;
     }
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* local classes product key exists */
     sz = MAX_PATH;
@@ -8046,10 +8050,10 @@ static void test_MsiGetProductInfoEx(void)
                               INSTALLPROPERTY_PRODUCTSTATEA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "1"), "Expected \"1\", got \"%s\"\n", buf);
-    ok(sz == 1, "Expected 1, got %lu\n", sz);
+    ok(sz == 1, "Expected 1, got %d\n", sz);
 
     res = RegSetValueExA(prodkey, "HelpLink", 0, REG_SZ, (LPBYTE)"link", 5);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* HelpLink value exists */
     sz = MAX_PATH;
@@ -8060,10 +8064,10 @@ static void test_MsiGetProductInfoEx(void)
     ok(r == ERROR_UNKNOWN_PROPERTY,
        "Expected ERROR_UNKNOWN_PROPERTY, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     res = RegSetValueExA(prodkey, "HelpTelephone", 0, REG_SZ, (LPBYTE)"phone", 6);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* HelpTelephone value exists */
     sz = MAX_PATH;
@@ -8074,10 +8078,10 @@ static void test_MsiGetProductInfoEx(void)
     ok(r == ERROR_UNKNOWN_PROPERTY,
        "Expected ERROR_UNKNOWN_PROPERTY, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     res = RegSetValueExA(prodkey, "InstallDate", 0, REG_SZ, (LPBYTE)"date", 5);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* InstallDate value exists */
     sz = MAX_PATH;
@@ -8088,10 +8092,10 @@ static void test_MsiGetProductInfoEx(void)
     ok(r == ERROR_UNKNOWN_PROPERTY,
        "Expected ERROR_UNKNOWN_PROPERTY, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     res = RegSetValueExA(prodkey, "DisplayName", 0, REG_SZ, (LPBYTE)"name", 5);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* DisplayName value exists */
     sz = MAX_PATH;
@@ -8102,10 +8106,10 @@ static void test_MsiGetProductInfoEx(void)
     ok(r == ERROR_UNKNOWN_PROPERTY,
        "Expected ERROR_UNKNOWN_PROPERTY, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     res = RegSetValueExA(prodkey, "InstallLocation", 0, REG_SZ, (LPBYTE)"loc", 4);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* InstallLocation value exists */
     sz = MAX_PATH;
@@ -8116,10 +8120,10 @@ static void test_MsiGetProductInfoEx(void)
     ok(r == ERROR_UNKNOWN_PROPERTY,
        "Expected ERROR_UNKNOWN_PROPERTY, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     res = RegSetValueExA(prodkey, "InstallSource", 0, REG_SZ, (LPBYTE)"source", 7);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* InstallSource value exists */
     sz = MAX_PATH;
@@ -8130,10 +8134,10 @@ static void test_MsiGetProductInfoEx(void)
     ok(r == ERROR_UNKNOWN_PROPERTY,
        "Expected ERROR_UNKNOWN_PROPERTY, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     res = RegSetValueExA(prodkey, "LocalPackage", 0, REG_SZ, (LPBYTE)"local", 6);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* LocalPackage value exists */
     sz = MAX_PATH;
@@ -8144,10 +8148,10 @@ static void test_MsiGetProductInfoEx(void)
     ok(r == ERROR_UNKNOWN_PROPERTY,
        "Expected ERROR_UNKNOWN_PROPERTY, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     res = RegSetValueExA(prodkey, "Publisher", 0, REG_SZ, (LPBYTE)"pub", 4);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* Publisher value exists */
     sz = MAX_PATH;
@@ -8158,10 +8162,10 @@ static void test_MsiGetProductInfoEx(void)
     ok(r == ERROR_UNKNOWN_PROPERTY,
        "Expected ERROR_UNKNOWN_PROPERTY, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     res = RegSetValueExA(prodkey, "URLInfoAbout", 0, REG_SZ, (LPBYTE)"about", 6);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* URLInfoAbout value exists */
     sz = MAX_PATH;
@@ -8172,10 +8176,10 @@ static void test_MsiGetProductInfoEx(void)
     ok(r == ERROR_UNKNOWN_PROPERTY,
        "Expected ERROR_UNKNOWN_PROPERTY, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     res = RegSetValueExA(prodkey, "URLUpdateInfo", 0, REG_SZ, (LPBYTE)"update", 7);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* URLUpdateInfo value exists */
     sz = MAX_PATH;
@@ -8186,10 +8190,10 @@ static void test_MsiGetProductInfoEx(void)
     ok(r == ERROR_UNKNOWN_PROPERTY,
        "Expected ERROR_UNKNOWN_PROPERTY, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     res = RegSetValueExA(prodkey, "VersionMinor", 0, REG_SZ, (LPBYTE)"2", 2);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* VersionMinor value exists */
     sz = MAX_PATH;
@@ -8200,10 +8204,10 @@ static void test_MsiGetProductInfoEx(void)
     ok(r == ERROR_UNKNOWN_PROPERTY,
        "Expected ERROR_UNKNOWN_PROPERTY, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     res = RegSetValueExA(prodkey, "VersionMajor", 0, REG_SZ, (LPBYTE)"3", 2);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* VersionMajor value exists */
     sz = MAX_PATH;
@@ -8214,10 +8218,10 @@ static void test_MsiGetProductInfoEx(void)
     ok(r == ERROR_UNKNOWN_PROPERTY,
        "Expected ERROR_UNKNOWN_PROPERTY, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     res = RegSetValueExA(prodkey, "DisplayVersion", 0, REG_SZ, (LPBYTE)"3.2.1", 6);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* DisplayVersion value exists */
     sz = MAX_PATH;
@@ -8228,10 +8232,10 @@ static void test_MsiGetProductInfoEx(void)
     ok(r == ERROR_UNKNOWN_PROPERTY,
        "Expected ERROR_UNKNOWN_PROPERTY, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     res = RegSetValueExA(prodkey, "ProductID", 0, REG_SZ, (LPBYTE)"id", 3);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* ProductID value exists */
     sz = MAX_PATH;
@@ -8242,10 +8246,10 @@ static void test_MsiGetProductInfoEx(void)
     ok(r == ERROR_UNKNOWN_PROPERTY,
        "Expected ERROR_UNKNOWN_PROPERTY, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     res = RegSetValueExA(prodkey, "RegCompany", 0, REG_SZ, (LPBYTE)"comp", 5);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* RegCompany value exists */
     sz = MAX_PATH;
@@ -8256,10 +8260,10 @@ static void test_MsiGetProductInfoEx(void)
     ok(r == ERROR_UNKNOWN_PROPERTY,
        "Expected ERROR_UNKNOWN_PROPERTY, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     res = RegSetValueExA(prodkey, "RegOwner", 0, REG_SZ, (LPBYTE)"owner", 6);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* RegOwner value exists */
     sz = MAX_PATH;
@@ -8270,10 +8274,10 @@ static void test_MsiGetProductInfoEx(void)
     ok(r == ERROR_UNKNOWN_PROPERTY,
        "Expected ERROR_UNKNOWN_PROPERTY, got %d\n", r);
     ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-    ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+    ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
 
     res = RegSetValueExA(prodkey, "Transforms", 0, REG_SZ, (LPBYTE)"trans", 6);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* Transforms value exists */
     sz = MAX_PATH;
@@ -8283,10 +8287,10 @@ static void test_MsiGetProductInfoEx(void)
                               INSTALLPROPERTY_TRANSFORMSA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "trans"), "Expected \"trans\", got \"%s\"\n", buf);
-    ok(sz == 5, "Expected 5, got %lu\n", sz);
+    ok(sz == 5, "Expected 5, got %d\n", sz);
 
     res = RegSetValueExA(prodkey, "Language", 0, REG_SZ, (LPBYTE)"lang", 5);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* Language value exists */
     sz = MAX_PATH;
@@ -8296,10 +8300,10 @@ static void test_MsiGetProductInfoEx(void)
                               INSTALLPROPERTY_LANGUAGEA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "lang"), "Expected \"lang\", got \"%s\"\n", buf);
-    ok(sz == 4, "Expected 4, got %lu\n", sz);
+    ok(sz == 4, "Expected 4, got %d\n", sz);
 
     res = RegSetValueExA(prodkey, "ProductName", 0, REG_SZ, (LPBYTE)"name", 5);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* ProductName value exists */
     sz = MAX_PATH;
@@ -8309,10 +8313,10 @@ static void test_MsiGetProductInfoEx(void)
                               INSTALLPROPERTY_PRODUCTNAMEA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "name"), "Expected \"name\", got \"%s\"\n", buf);
-    ok(sz == 4, "Expected 4, got %lu\n", sz);
+    ok(sz == 4, "Expected 4, got %d\n", sz);
 
     res = RegSetValueExA(prodkey, "AssignmentType", 0, REG_SZ, (LPBYTE)"type", 5);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* FIXME */
 
@@ -8324,10 +8328,10 @@ static void test_MsiGetProductInfoEx(void)
                               INSTALLPROPERTY_ASSIGNMENTTYPEA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, ""), "Expected \"\", got \"%s\"\n", buf);
-    ok(sz == 0, "Expected 0, got %lu\n", sz);
+    ok(sz == 0, "Expected 0, got %d\n", sz);
 
     res = RegSetValueExA(prodkey, "PackageCode", 0, REG_SZ, (LPBYTE)"code", 5);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* FIXME */
 
@@ -8342,11 +8346,11 @@ static void test_MsiGetProductInfoEx(void)
         ok(r == ERROR_BAD_CONFIGURATION,
            "Expected ERROR_BAD_CONFIGURATION, got %d\n", r);
         ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-        ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+        ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
     }
 
     res = RegSetValueExA(prodkey, "Version", 0, REG_SZ, (LPBYTE)"ver", 4);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* Version value exists */
     sz = MAX_PATH;
@@ -8356,10 +8360,10 @@ static void test_MsiGetProductInfoEx(void)
                               INSTALLPROPERTY_VERSIONA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "ver"), "Expected \"ver\", got \"%s\"\n", buf);
-    ok(sz == 3, "Expected 3, got %lu\n", sz);
+    ok(sz == 3, "Expected 3, got %d\n", sz);
 
     res = RegSetValueExA(prodkey, "ProductIcon", 0, REG_SZ, (LPBYTE)"icon", 5);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* ProductIcon value exists */
     sz = MAX_PATH;
@@ -8369,10 +8373,10 @@ static void test_MsiGetProductInfoEx(void)
                               INSTALLPROPERTY_PRODUCTICONA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "icon"), "Expected \"icon\", got \"%s\"\n", buf);
-    ok(sz == 4, "Expected 4, got %lu\n", sz);
+    ok(sz == 4, "Expected 4, got %d\n", sz);
 
     res = RegSetValueExA(prodkey, "PackageName", 0, REG_SZ, (LPBYTE)"name", 5);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* PackageName value exists */
     sz = MAX_PATH;
@@ -8385,11 +8389,11 @@ static void test_MsiGetProductInfoEx(void)
         ok(r == ERROR_UNKNOWN_PRODUCT,
            "Expected ERROR_UNKNOWN_PRODUCT, got %d\n", r);
         ok(!lstrcmpA(buf, "apple"), "Expected buf to be unchanged, got %s\n", buf);
-        ok(sz == MAX_PATH, "Expected MAX_PATH, got %lu\n", sz);
+        ok(sz == MAX_PATH, "Expected MAX_PATH, got %d\n", sz);
     }
 
     res = RegSetValueExA(prodkey, "AuthorizedLUAApp", 0, REG_SZ, (LPBYTE)"auth", 5);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* AuthorizedLUAApp value exists */
     sz = MAX_PATH;
@@ -8399,7 +8403,7 @@ static void test_MsiGetProductInfoEx(void)
                               INSTALLPROPERTY_AUTHORIZED_LUA_APPA, buf, &sz);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(buf, "auth"), "Expected \"auth\", got \"%s\"\n", buf);
-    ok(sz == 4, "Expected 4, got %lu\n", sz);
+    ok(sz == 4, "Expected 4, got %d\n", sz);
 
     RegDeleteValueA(prodkey, "AuthorizedLUAApp");
     RegDeleteValueA(prodkey, "PackageName");
@@ -8466,9 +8470,9 @@ static void test_MsiGetUserInfo(void)
     ok(!lstrcmpA(user, "apple"), "Expected user to be unchanged, got \"%s\"\n", user);
     ok(!lstrcmpA(org, "orange"), "Expected org to be unchanged, got \"%s\"\n", org);
     ok(!lstrcmpA(serial, "banana"), "Expected serial to be unchanged, got \"%s\"\n", serial);
-    ok(usersz == MAX_PATH, "Expected MAX_PATH, got %lu\n", usersz);
-    ok(orgsz == MAX_PATH, "Expected MAX_PATH, got %lu\n", orgsz);
-    ok(serialsz == MAX_PATH, "Expected MAX_PATH, got %lu\n", serialsz);
+    ok(usersz == MAX_PATH, "Expected MAX_PATH, got %d\n", usersz);
+    ok(orgsz == MAX_PATH, "Expected MAX_PATH, got %d\n", orgsz);
+    ok(serialsz == MAX_PATH, "Expected MAX_PATH, got %d\n", serialsz);
 
     /* empty szProductCode */
     INIT_USERINFO();
@@ -8478,9 +8482,9 @@ static void test_MsiGetUserInfo(void)
     ok(!lstrcmpA(user, "apple"), "Expected user to be unchanged, got \"%s\"\n", user);
     ok(!lstrcmpA(org, "orange"), "Expected org to be unchanged, got \"%s\"\n", org);
     ok(!lstrcmpA(serial, "banana"), "Expected serial to be unchanged, got \"%s\"\n", serial);
-    ok(usersz == MAX_PATH, "Expected MAX_PATH, got %lu\n", usersz);
-    ok(orgsz == MAX_PATH, "Expected MAX_PATH, got %lu\n", orgsz);
-    ok(serialsz == MAX_PATH, "Expected MAX_PATH, got %lu\n", serialsz);
+    ok(usersz == MAX_PATH, "Expected MAX_PATH, got %d\n", usersz);
+    ok(orgsz == MAX_PATH, "Expected MAX_PATH, got %d\n", orgsz);
+    ok(serialsz == MAX_PATH, "Expected MAX_PATH, got %d\n", serialsz);
 
     /* garbage szProductCode */
     INIT_USERINFO();
@@ -8490,9 +8494,9 @@ static void test_MsiGetUserInfo(void)
     ok(!lstrcmpA(user, "apple"), "Expected user to be unchanged, got \"%s\"\n", user);
     ok(!lstrcmpA(org, "orange"), "Expected org to be unchanged, got \"%s\"\n", org);
     ok(!lstrcmpA(serial, "banana"), "Expected serial to be unchanged, got \"%s\"\n", serial);
-    ok(usersz == MAX_PATH, "Expected MAX_PATH, got %lu\n", usersz);
-    ok(orgsz == MAX_PATH, "Expected MAX_PATH, got %lu\n", orgsz);
-    ok(serialsz == MAX_PATH, "Expected MAX_PATH, got %lu\n", serialsz);
+    ok(usersz == MAX_PATH, "Expected MAX_PATH, got %d\n", usersz);
+    ok(orgsz == MAX_PATH, "Expected MAX_PATH, got %d\n", orgsz);
+    ok(serialsz == MAX_PATH, "Expected MAX_PATH, got %d\n", serialsz);
 
     /* guid without brackets */
     INIT_USERINFO();
@@ -8503,9 +8507,9 @@ static void test_MsiGetUserInfo(void)
     ok(!lstrcmpA(user, "apple"), "Expected user to be unchanged, got \"%s\"\n", user);
     ok(!lstrcmpA(org, "orange"), "Expected org to be unchanged, got \"%s\"\n", org);
     ok(!lstrcmpA(serial, "banana"), "Expected serial to be unchanged, got \"%s\"\n", serial);
-    ok(usersz == MAX_PATH, "Expected MAX_PATH, got %lu\n", usersz);
-    ok(orgsz == MAX_PATH, "Expected MAX_PATH, got %lu\n", orgsz);
-    ok(serialsz == MAX_PATH, "Expected MAX_PATH, got %lu\n", serialsz);
+    ok(usersz == MAX_PATH, "Expected MAX_PATH, got %d\n", usersz);
+    ok(orgsz == MAX_PATH, "Expected MAX_PATH, got %d\n", orgsz);
+    ok(serialsz == MAX_PATH, "Expected MAX_PATH, got %d\n", serialsz);
 
     /* guid with brackets */
     INIT_USERINFO();
@@ -8516,9 +8520,9 @@ static void test_MsiGetUserInfo(void)
     ok(!lstrcmpA(user, "apple"), "Expected user to be unchanged, got \"%s\"\n", user);
     ok(!lstrcmpA(org, "orange"), "Expected org to be unchanged, got \"%s\"\n", org);
     ok(!lstrcmpA(serial, "banana"), "Expected serial to be unchanged, got \"%s\"\n", serial);
-    ok(usersz == MAX_PATH, "Expected MAX_PATH, got %lu\n", usersz);
-    ok(orgsz == MAX_PATH, "Expected MAX_PATH, got %lu\n", orgsz);
-    ok(serialsz == MAX_PATH, "Expected MAX_PATH, got %lu\n", serialsz);
+    ok(usersz == MAX_PATH, "Expected MAX_PATH, got %d\n", usersz);
+    ok(orgsz == MAX_PATH, "Expected MAX_PATH, got %d\n", orgsz);
+    ok(serialsz == MAX_PATH, "Expected MAX_PATH, got %d\n", serialsz);
 
     /* NULL lpUserNameBuf */
     INIT_USERINFO();
@@ -8527,9 +8531,9 @@ static void test_MsiGetUserInfo(void)
        "Expected USERINFOSTATE_UNKNOWN, got %d\n", state);
     ok(!lstrcmpA(org, "orange"), "Expected org to be unchanged, got \"%s\"\n", org);
     ok(!lstrcmpA(serial, "banana"), "Expected serial to be unchanged, got \"%s\"\n", serial);
-    ok(usersz == MAX_PATH, "Expected MAX_PATH, got %lu\n", usersz);
-    ok(orgsz == MAX_PATH, "Expected MAX_PATH, got %lu\n", orgsz);
-    ok(serialsz == MAX_PATH, "Expected MAX_PATH, got %lu\n", serialsz);
+    ok(usersz == MAX_PATH, "Expected MAX_PATH, got %d\n", usersz);
+    ok(orgsz == MAX_PATH, "Expected MAX_PATH, got %d\n", orgsz);
+    ok(serialsz == MAX_PATH, "Expected MAX_PATH, got %d\n", serialsz);
 
     /* NULL pcchUserNameBuf */
     INIT_USERINFO();
@@ -8539,8 +8543,8 @@ static void test_MsiGetUserInfo(void)
     ok(!lstrcmpA(user, "apple"), "Expected user to be unchanged, got \"%s\"\n", user);
     ok(!lstrcmpA(org, "orange"), "Expected org to be unchanged, got \"%s\"\n", org);
     ok(!lstrcmpA(serial, "banana"), "Expected serial to be unchanged, got \"%s\"\n", serial);
-    ok(orgsz == MAX_PATH, "Expected MAX_PATH, got %lu\n", orgsz);
-    ok(serialsz == MAX_PATH, "Expected MAX_PATH, got %lu\n", serialsz);
+    ok(orgsz == MAX_PATH, "Expected MAX_PATH, got %d\n", orgsz);
+    ok(serialsz == MAX_PATH, "Expected MAX_PATH, got %d\n", serialsz);
 
     /* both lpUserNameBuf and pcchUserNameBuf NULL */
     INIT_USERINFO();
@@ -8549,8 +8553,8 @@ static void test_MsiGetUserInfo(void)
        "Expected USERINFOSTATE_UNKNOWN, got %d\n", state);
     ok(!lstrcmpA(org, "orange"), "Expected org to be unchanged, got \"%s\"\n", org);
     ok(!lstrcmpA(serial, "banana"), "Expected serial to be unchanged, got \"%s\"\n", serial);
-    ok(orgsz == MAX_PATH, "Expected MAX_PATH, got %lu\n", orgsz);
-    ok(serialsz == MAX_PATH, "Expected MAX_PATH, got %lu\n", serialsz);
+    ok(orgsz == MAX_PATH, "Expected MAX_PATH, got %d\n", orgsz);
+    ok(serialsz == MAX_PATH, "Expected MAX_PATH, got %d\n", serialsz);
 
     /* NULL lpOrgNameBuf */
     INIT_USERINFO();
@@ -8559,9 +8563,9 @@ static void test_MsiGetUserInfo(void)
        "Expected USERINFOSTATE_UNKNOWN, got %d\n", state);
     ok(!lstrcmpA(user, "apple"), "Expected user to be unchanged, got \"%s\"\n", user);
     ok(!lstrcmpA(serial, "banana"), "Expected serial to be unchanged, got \"%s\"\n", serial);
-    ok(usersz == MAX_PATH, "Expected MAX_PATH, got %lu\n", usersz);
-    ok(orgsz == MAX_PATH, "Expected MAX_PATH, got %lu\n", orgsz);
-    ok(serialsz == MAX_PATH, "Expected MAX_PATH, got %lu\n", serialsz);
+    ok(usersz == MAX_PATH, "Expected MAX_PATH, got %d\n", usersz);
+    ok(orgsz == MAX_PATH, "Expected MAX_PATH, got %d\n", orgsz);
+    ok(serialsz == MAX_PATH, "Expected MAX_PATH, got %d\n", serialsz);
 
     /* NULL pcchOrgNameBuf */
     INIT_USERINFO();
@@ -8571,8 +8575,8 @@ static void test_MsiGetUserInfo(void)
     ok(!lstrcmpA(user, "apple"), "Expected user to be unchanged, got \"%s\"\n", user);
     ok(!lstrcmpA(org, "orange"), "Expected org to be unchanged, got \"%s\"\n", org);
     ok(!lstrcmpA(serial, "banana"), "Expected serial to be unchanged, got \"%s\"\n", serial);
-    ok(usersz == MAX_PATH, "Expected MAX_PATH, got %lu\n", usersz);
-    ok(serialsz == MAX_PATH, "Expected MAX_PATH, got %lu\n", serialsz);
+    ok(usersz == MAX_PATH, "Expected MAX_PATH, got %d\n", usersz);
+    ok(serialsz == MAX_PATH, "Expected MAX_PATH, got %d\n", serialsz);
 
     /* both lpOrgNameBuf and pcchOrgNameBuf NULL */
     INIT_USERINFO();
@@ -8581,8 +8585,8 @@ static void test_MsiGetUserInfo(void)
        "Expected USERINFOSTATE_UNKNOWN, got %d\n", state);
     ok(!lstrcmpA(user, "apple"), "Expected user to be unchanged, got \"%s\"\n", user);
     ok(!lstrcmpA(serial, "banana"), "Expected serial to be unchanged, got \"%s\"\n", serial);
-    ok(usersz == MAX_PATH, "Expected MAX_PATH, got %lu\n", usersz);
-    ok(serialsz == MAX_PATH, "Expected MAX_PATH, got %lu\n", serialsz);
+    ok(usersz == MAX_PATH, "Expected MAX_PATH, got %d\n", usersz);
+    ok(serialsz == MAX_PATH, "Expected MAX_PATH, got %d\n", serialsz);
 
     /* NULL lpSerialBuf */
     INIT_USERINFO();
@@ -8591,9 +8595,9 @@ static void test_MsiGetUserInfo(void)
        "Expected USERINFOSTATE_UNKNOWN, got %d\n", state);
     ok(!lstrcmpA(user, "apple"), "Expected user to be unchanged, got \"%s\"\n", user);
     ok(!lstrcmpA(org, "orange"), "Expected org to be unchanged, got \"%s\"\n", org);
-    ok(usersz == MAX_PATH, "Expected MAX_PATH, got %lu\n", usersz);
-    ok(orgsz == MAX_PATH, "Expected MAX_PATH, got %lu\n", orgsz);
-    ok(serialsz == MAX_PATH, "Expected MAX_PATH, got %lu\n", serialsz);
+    ok(usersz == MAX_PATH, "Expected MAX_PATH, got %d\n", usersz);
+    ok(orgsz == MAX_PATH, "Expected MAX_PATH, got %d\n", orgsz);
+    ok(serialsz == MAX_PATH, "Expected MAX_PATH, got %d\n", serialsz);
 
     /* NULL pcchSerialBuf */
     INIT_USERINFO();
@@ -8603,8 +8607,8 @@ static void test_MsiGetUserInfo(void)
     ok(!lstrcmpA(user, "apple"), "Expected user to be unchanged, got \"%s\"\n", user);
     ok(!lstrcmpA(org, "orange"), "Expected org to be unchanged, got \"%s\"\n", org);
     ok(!lstrcmpA(serial, "banana"), "Expected serial to be unchanged, got \"%s\"\n", serial);
-    ok(usersz == MAX_PATH, "Expected MAX_PATH, got %lu\n", usersz);
-    ok(orgsz == MAX_PATH, "Expected MAX_PATH, got %lu\n", orgsz);
+    ok(usersz == MAX_PATH, "Expected MAX_PATH, got %d\n", usersz);
+    ok(orgsz == MAX_PATH, "Expected MAX_PATH, got %d\n", orgsz);
 
     /* both lpSerialBuf and pcchSerialBuf NULL */
     INIT_USERINFO();
@@ -8613,8 +8617,8 @@ static void test_MsiGetUserInfo(void)
        "Expected USERINFOSTATE_UNKNOWN, got %d\n", state);
     ok(!lstrcmpA(user, "apple"), "Expected user to be unchanged, got \"%s\"\n", user);
     ok(!lstrcmpA(org, "orange"), "Expected org to be unchanged, got \"%s\"\n", org);
-    ok(usersz == MAX_PATH, "Expected MAX_PATH, got %lu\n", usersz);
-    ok(orgsz == MAX_PATH, "Expected MAX_PATH, got %lu\n", orgsz);
+    ok(usersz == MAX_PATH, "Expected MAX_PATH, got %d\n", usersz);
+    ok(orgsz == MAX_PATH, "Expected MAX_PATH, got %d\n", orgsz);
 
     /* MSIINSTALLCONTEXT_USERMANAGED */
 
@@ -8631,7 +8635,7 @@ static void test_MsiGetUserInfo(void)
         LocalFree(usersid);
         return;
     }
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* managed product key exists */
     INIT_USERINFO();
@@ -8641,9 +8645,9 @@ static void test_MsiGetUserInfo(void)
     ok(!lstrcmpA(user, "apple"), "Expected user to be unchanged, got \"%s\"\n", user);
     ok(!lstrcmpA(org, "orange"), "Expected org to be unchanged, got \"%s\"\n", org);
     ok(!lstrcmpA(serial, "banana"), "Expected serial to be unchanged, got \"%s\"\n", serial);
-    ok(usersz == MAX_PATH, "Expected MAX_PATH, got %lu\n", usersz);
-    ok(orgsz == MAX_PATH, "Expected MAX_PATH, got %lu\n", orgsz);
-    ok(serialsz == MAX_PATH, "Expected MAX_PATH, got %lu\n", serialsz);
+    ok(usersz == MAX_PATH, "Expected MAX_PATH, got %d\n", usersz);
+    ok(orgsz == MAX_PATH, "Expected MAX_PATH, got %d\n", orgsz);
+    ok(serialsz == MAX_PATH, "Expected MAX_PATH, got %d\n", serialsz);
 
     lstrcpyA(keypath, "Software\\Microsoft\\Windows\\CurrentVersion\\");
     lstrcatA(keypath, "Installer\\UserData\\");
@@ -8658,10 +8662,10 @@ static void test_MsiGetUserInfo(void)
         LocalFree(usersid);
         return;
     }
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     res = RegCreateKeyExA(userprod, "InstallProperties", 0, NULL, 0, access, NULL, &props, NULL);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* InstallProperties key exists */
     INIT_USERINFO();
@@ -8671,9 +8675,9 @@ static void test_MsiGetUserInfo(void)
     ok(!lstrcmpA(user, "apple"), "Expected user to be unchanged, got \"%s\"\n", user);
     ok(!lstrcmpA(org, "orange"), "Expected org to be unchanged, got \"%s\"\n", org);
     ok(!lstrcmpA(serial, "banana"), "Expected serial to be unchanged, got \"%s\"\n", serial);
-    ok(usersz == MAX_PATH - 1, "Expected MAX_PATH - 1, got %lu\n", usersz);
-    ok(orgsz == MAX_PATH, "Expected MAX_PATH, got %lu\n", orgsz);
-    ok(serialsz == MAX_PATH, "Expected MAX_PATH, got %lu\n", serialsz);
+    ok(usersz == MAX_PATH - 1, "Expected MAX_PATH - 1, got %d\n", usersz);
+    ok(orgsz == MAX_PATH, "Expected MAX_PATH, got %d\n", orgsz);
+    ok(serialsz == MAX_PATH, "Expected MAX_PATH, got %d\n", serialsz);
 
     /* RegOwner doesn't exist, lpUserNameBuf and pcchUserNameBuf are NULL */
     INIT_USERINFO();
@@ -8682,8 +8686,8 @@ static void test_MsiGetUserInfo(void)
        "Expected USERINFOSTATE_ABSENT, got %d\n", state);
     ok(!lstrcmpA(org, ""), "Expected empty string, got \"%s\"\n", org);
     ok(!lstrcmpA(serial, "banana"), "Expected serial to be unchanged, got \"%s\"\n", serial);
-    ok(orgsz == 0, "Expected 0, got %lu\n", orgsz);
-    ok(serialsz == MAX_PATH - 1, "Expected MAX_PATH - 1, got %lu\n", serialsz);
+    ok(orgsz == 0, "Expected 0, got %d\n", orgsz);
+    ok(serialsz == MAX_PATH - 1, "Expected MAX_PATH - 1, got %d\n", serialsz);
 
     /* RegOwner, RegCompany don't exist, out params are NULL */
     INIT_USERINFO();
@@ -8691,10 +8695,10 @@ static void test_MsiGetUserInfo(void)
     ok(state == USERINFOSTATE_ABSENT,
        "Expected USERINFOSTATE_ABSENT, got %d\n", state);
     ok(!lstrcmpA(serial, "banana"), "Expected serial to be unchanged, got \"%s\"\n", serial);
-    ok(serialsz == MAX_PATH - 1, "Expected MAX_PATH - 1, got %lu\n", serialsz);
+    ok(serialsz == MAX_PATH - 1, "Expected MAX_PATH - 1, got %d\n", serialsz);
 
     res = RegSetValueExA(props, "RegOwner", 0, REG_SZ, (LPBYTE)"owner", 6);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* RegOwner value exists */
     INIT_USERINFO();
@@ -8704,12 +8708,12 @@ static void test_MsiGetUserInfo(void)
     ok(!lstrcmpA(user, "owner"), "Expected \"owner\", got \"%s\"\n", user);
     ok(!lstrcmpA(org, ""), "Expected empty string, got \"%s\"\n", org);
     ok(!lstrcmpA(serial, "banana"), "Expected serial to be unchanged, got \"%s\"\n", serial);
-    ok(usersz == 5, "Expected 5, got %lu\n", usersz);
-    ok(orgsz == 0, "Expected 0, got %lu\n", orgsz);
-    ok(serialsz == MAX_PATH - 1, "Expected MAX_PATH - 1, got %lu\n", serialsz);
+    ok(usersz == 5, "Expected 5, got %d\n", usersz);
+    ok(orgsz == 0, "Expected 0, got %d\n", orgsz);
+    ok(serialsz == MAX_PATH - 1, "Expected MAX_PATH - 1, got %d\n", serialsz);
 
     res = RegSetValueExA(props, "RegCompany", 0, REG_SZ, (LPBYTE)"company", 8);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* RegCompany value exists */
     INIT_USERINFO();
@@ -8719,12 +8723,12 @@ static void test_MsiGetUserInfo(void)
     ok(!lstrcmpA(user, "owner"), "Expected \"owner\", got \"%s\"\n", user);
     ok(!lstrcmpA(org, "company"), "Expected \"company\", got \"%s\"\n", org);
     ok(!lstrcmpA(serial, "banana"), "Expected serial to be unchanged, got \"%s\"\n", serial);
-    ok(usersz == 5, "Expected 5, got %lu\n", usersz);
-    ok(orgsz == 7, "Expected 7, got %lu\n", orgsz);
-    ok(serialsz == MAX_PATH - 1, "Expected MAX_PATH - 1, got %lu\n", serialsz);
+    ok(usersz == 5, "Expected 5, got %d\n", usersz);
+    ok(orgsz == 7, "Expected 7, got %d\n", orgsz);
+    ok(serialsz == MAX_PATH - 1, "Expected MAX_PATH - 1, got %d\n", serialsz);
 
     res = RegSetValueExA(props, "ProductID", 0, REG_SZ, (LPBYTE)"ID", 3);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* ProductID value exists */
     INIT_USERINFO();
@@ -8734,9 +8738,9 @@ static void test_MsiGetUserInfo(void)
     ok(!lstrcmpA(user, "owner"), "Expected \"owner\", got \"%s\"\n", user);
     ok(!lstrcmpA(org, "company"), "Expected \"company\", got \"%s\"\n", org);
     ok(!lstrcmpA(serial, "ID"), "Expected \"ID\", got \"%s\"\n", serial);
-    ok(usersz == 5, "Expected 5, got %lu\n", usersz);
-    ok(orgsz == 7, "Expected 7, got %lu\n", orgsz);
-    ok(serialsz == 2, "Expected 2, got %lu\n", serialsz);
+    ok(usersz == 5, "Expected 5, got %d\n", usersz);
+    ok(orgsz == 7, "Expected 7, got %d\n", orgsz);
+    ok(serialsz == 2, "Expected 2, got %d\n", serialsz);
 
     /* pcchUserNameBuf is too small */
     INIT_USERINFO();
@@ -8747,9 +8751,9 @@ static void test_MsiGetUserInfo(void)
     ok(!lstrcmpA(user, "apple"), "Expected user to be unchanged, got \"%s\"\n", user);
     ok(!lstrcmpA(org, "orange"), "Expected org to be unchanged, got \"%s\"\n", org);
     ok(!lstrcmpA(serial, "banana"), "Expected serial to be unchanged, got \"%s\"\n", serial);
-    ok(usersz == 5, "Expected 5, got %lu\n", usersz);
-    ok(orgsz == MAX_PATH, "Expected MAX_PATH, got %lu\n", orgsz);
-    ok(serialsz == MAX_PATH, "Expected MAX_PATH, got %lu\n", serialsz);
+    ok(usersz == 5, "Expected 5, got %d\n", usersz);
+    ok(orgsz == MAX_PATH, "Expected MAX_PATH, got %d\n", orgsz);
+    ok(serialsz == MAX_PATH, "Expected MAX_PATH, got %d\n", serialsz);
 
     /* pcchUserNameBuf has no room for NULL terminator */
     INIT_USERINFO();
@@ -8763,9 +8767,9 @@ static void test_MsiGetUserInfo(void)
     }
     ok(!lstrcmpA(org, "orange"), "Expected org to be unchanged, got \"%s\"\n", org);
     ok(!lstrcmpA(serial, "banana"), "Expected serial to be unchanged, got \"%s\"\n", serial);
-    ok(usersz == 5, "Expected 5, got %lu\n", usersz);
-    ok(orgsz == MAX_PATH, "Expected MAX_PATH, got %lu\n", orgsz);
-    ok(serialsz == MAX_PATH, "Expected MAX_PATH, got %lu\n", serialsz);
+    ok(usersz == 5, "Expected 5, got %d\n", usersz);
+    ok(orgsz == MAX_PATH, "Expected MAX_PATH, got %d\n", orgsz);
+    ok(serialsz == MAX_PATH, "Expected MAX_PATH, got %d\n", serialsz);
 
     /* pcchUserNameBuf is too small, lpUserNameBuf is NULL */
     INIT_USERINFO();
@@ -8776,9 +8780,9 @@ static void test_MsiGetUserInfo(void)
     ok(!lstrcmpA(user, "apple"), "Expected user to be unchanged, got \"%s\"\n", user);
     ok(!lstrcmpA(org, "company"), "Expected \"company\", got \"%s\"\n", org);
     ok(!lstrcmpA(serial, "ID"), "Expected \"ID\", got \"%s\"\n", serial);
-    ok(usersz == 5, "Expected 5, got %lu\n", usersz);
-    ok(orgsz == 7, "Expected 7, got %lu\n", orgsz);
-    ok(serialsz == 2, "Expected 2, got %lu\n", serialsz);
+    ok(usersz == 5, "Expected 5, got %d\n", usersz);
+    ok(orgsz == 7, "Expected 7, got %d\n", orgsz);
+    ok(serialsz == 2, "Expected 2, got %d\n", serialsz);
 
     RegDeleteValueA(props, "ProductID");
     RegDeleteValueA(props, "RegCompany");
@@ -8797,7 +8801,7 @@ static void test_MsiGetUserInfo(void)
     lstrcatA(keypath, prod_squashed);
 
     res = RegCreateKeyA(HKEY_CURRENT_USER, keypath, &prodkey);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* product key exists */
     INIT_USERINFO();
@@ -8807,9 +8811,9 @@ static void test_MsiGetUserInfo(void)
     ok(!lstrcmpA(user, "apple"), "Expected user to be unchanged, got \"%s\"\n", user);
     ok(!lstrcmpA(org, "orange"), "Expected org to be unchanged, got \"%s\"\n", org);
     ok(!lstrcmpA(serial, "banana"), "Expected serial to be unchanged, got \"%s\"\n", serial);
-    ok(usersz == MAX_PATH, "Expected MAX_PATH, got %lu\n", usersz);
-    ok(orgsz == MAX_PATH, "Expected MAX_PATH, got %lu\n", orgsz);
-    ok(serialsz == MAX_PATH, "Expected MAX_PATH, got %lu\n", serialsz);
+    ok(usersz == MAX_PATH, "Expected MAX_PATH, got %d\n", usersz);
+    ok(orgsz == MAX_PATH, "Expected MAX_PATH, got %d\n", orgsz);
+    ok(serialsz == MAX_PATH, "Expected MAX_PATH, got %d\n", serialsz);
 
     lstrcpyA(keypath, "Software\\Microsoft\\Windows\\CurrentVersion\\");
     lstrcatA(keypath, "Installer\\UserData\\");
@@ -8818,10 +8822,10 @@ static void test_MsiGetUserInfo(void)
     lstrcatA(keypath, prod_squashed);
 
     res = RegCreateKeyExA(HKEY_LOCAL_MACHINE, keypath, 0, NULL, 0, access, NULL, &userprod, NULL);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     res = RegCreateKeyExA(userprod, "InstallProperties", 0, NULL, 0, access, NULL, &props, NULL);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* InstallProperties key exists */
     INIT_USERINFO();
@@ -8831,9 +8835,9 @@ static void test_MsiGetUserInfo(void)
     ok(!lstrcmpA(user, "apple"), "Expected user to be unchanged, got \"%s\"\n", user);
     ok(!lstrcmpA(org, "orange"), "Expected org to be unchanged, got \"%s\"\n", org);
     ok(!lstrcmpA(serial, "banana"), "Expected serial to be unchanged, got \"%s\"\n", serial);
-    ok(usersz == MAX_PATH - 1, "Expected MAX_PATH - 1, got %lu\n", usersz);
-    ok(orgsz == MAX_PATH, "Expected MAX_PATH, got %lu\n", orgsz);
-    ok(serialsz == MAX_PATH, "Expected MAX_PATH, got %lu\n", serialsz);
+    ok(usersz == MAX_PATH - 1, "Expected MAX_PATH - 1, got %d\n", usersz);
+    ok(orgsz == MAX_PATH, "Expected MAX_PATH, got %d\n", orgsz);
+    ok(serialsz == MAX_PATH, "Expected MAX_PATH, got %d\n", serialsz);
 
     /* RegOwner doesn't exist, lpUserNameBuf and pcchUserNameBuf are NULL */
     INIT_USERINFO();
@@ -8842,8 +8846,8 @@ static void test_MsiGetUserInfo(void)
        "Expected USERINFOSTATE_ABSENT, got %d\n", state);
     ok(!lstrcmpA(org, ""), "Expected empty string, got \"%s\"\n", org);
     ok(!lstrcmpA(serial, "banana"), "Expected serial to be unchanged, got \"%s\"\n", serial);
-    ok(orgsz == 0, "Expected 0, got %lu\n", orgsz);
-    ok(serialsz == MAX_PATH - 1, "Expected MAX_PATH - 1, got %lu\n", serialsz);
+    ok(orgsz == 0, "Expected 0, got %d\n", orgsz);
+    ok(serialsz == MAX_PATH - 1, "Expected MAX_PATH - 1, got %d\n", serialsz);
 
     /* RegOwner, RegCompany don't exist, out params are NULL */
     INIT_USERINFO();
@@ -8851,10 +8855,10 @@ static void test_MsiGetUserInfo(void)
     ok(state == USERINFOSTATE_ABSENT,
        "Expected USERINFOSTATE_ABSENT, got %d\n", state);
     ok(!lstrcmpA(serial, "banana"), "Expected serial to be unchanged, got \"%s\"\n", serial);
-    ok(serialsz == MAX_PATH - 1, "Expected MAX_PATH - 1, got %lu\n", serialsz);
+    ok(serialsz == MAX_PATH - 1, "Expected MAX_PATH - 1, got %d\n", serialsz);
 
     res = RegSetValueExA(props, "RegOwner", 0, REG_SZ, (LPBYTE)"owner", 6);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* RegOwner value exists */
     INIT_USERINFO();
@@ -8864,12 +8868,12 @@ static void test_MsiGetUserInfo(void)
     ok(!lstrcmpA(user, "owner"), "Expected \"owner\", got \"%s\"\n", user);
     ok(!lstrcmpA(org, ""), "Expected empty string, got \"%s\"\n", org);
     ok(!lstrcmpA(serial, "banana"), "Expected serial to be unchanged, got \"%s\"\n", serial);
-    ok(usersz == 5, "Expected 5, got %lu\n", usersz);
-    ok(orgsz == 0, "Expected 0, got %lu\n", orgsz);
-    ok(serialsz == MAX_PATH - 1, "Expected MAX_PATH - 1, got %lu\n", serialsz);
+    ok(usersz == 5, "Expected 5, got %d\n", usersz);
+    ok(orgsz == 0, "Expected 0, got %d\n", orgsz);
+    ok(serialsz == MAX_PATH - 1, "Expected MAX_PATH - 1, got %d\n", serialsz);
 
     res = RegSetValueExA(props, "RegCompany", 0, REG_SZ, (LPBYTE)"company", 8);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* RegCompany value exists */
     INIT_USERINFO();
@@ -8879,12 +8883,12 @@ static void test_MsiGetUserInfo(void)
     ok(!lstrcmpA(user, "owner"), "Expected \"owner\", got \"%s\"\n", user);
     ok(!lstrcmpA(org, "company"), "Expected \"company\", got \"%s\"\n", org);
     ok(!lstrcmpA(serial, "banana"), "Expected serial to be unchanged, got \"%s\"\n", serial);
-    ok(usersz == 5, "Expected 5, got %lu\n", usersz);
-    ok(orgsz == 7, "Expected 7, got %lu\n", orgsz);
-    ok(serialsz == MAX_PATH - 1, "Expected MAX_PATH - 1, got %lu\n", serialsz);
+    ok(usersz == 5, "Expected 5, got %d\n", usersz);
+    ok(orgsz == 7, "Expected 7, got %d\n", orgsz);
+    ok(serialsz == MAX_PATH - 1, "Expected MAX_PATH - 1, got %d\n", serialsz);
 
     res = RegSetValueExA(props, "ProductID", 0, REG_SZ, (LPBYTE)"ID", 3);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* ProductID value exists */
     INIT_USERINFO();
@@ -8894,9 +8898,9 @@ static void test_MsiGetUserInfo(void)
     ok(!lstrcmpA(user, "owner"), "Expected \"owner\", got \"%s\"\n", user);
     ok(!lstrcmpA(org, "company"), "Expected \"company\", got \"%s\"\n", org);
     ok(!lstrcmpA(serial, "ID"), "Expected \"ID\", got \"%s\"\n", serial);
-    ok(usersz == 5, "Expected 5, got %lu\n", usersz);
-    ok(orgsz == 7, "Expected 7, got %lu\n", orgsz);
-    ok(serialsz == 2, "Expected 2, got %lu\n", serialsz);
+    ok(usersz == 5, "Expected 5, got %d\n", usersz);
+    ok(orgsz == 7, "Expected 7, got %d\n", orgsz);
+    ok(serialsz == 2, "Expected 2, got %d\n", serialsz);
 
     RegDeleteValueA(props, "ProductID");
     RegDeleteValueA(props, "RegCompany");
@@ -8921,7 +8925,7 @@ static void test_MsiGetUserInfo(void)
         LocalFree( usersid );
         return;
     }
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* product key exists */
     INIT_USERINFO();
@@ -8931,9 +8935,9 @@ static void test_MsiGetUserInfo(void)
     ok(!lstrcmpA(user, "apple"), "Expected user to be unchanged, got \"%s\"\n", user);
     ok(!lstrcmpA(org, "orange"), "Expected org to be unchanged, got \"%s\"\n", org);
     ok(!lstrcmpA(serial, "banana"), "Expected serial to be unchanged, got \"%s\"\n", serial);
-    ok(usersz == MAX_PATH, "Expected MAX_PATH, got %lu\n", usersz);
-    ok(orgsz == MAX_PATH, "Expected MAX_PATH, got %lu\n", orgsz);
-    ok(serialsz == MAX_PATH, "Expected MAX_PATH, got %lu\n", serialsz);
+    ok(usersz == MAX_PATH, "Expected MAX_PATH, got %d\n", usersz);
+    ok(orgsz == MAX_PATH, "Expected MAX_PATH, got %d\n", orgsz);
+    ok(serialsz == MAX_PATH, "Expected MAX_PATH, got %d\n", serialsz);
 
     lstrcpyA(keypath, "Software\\Microsoft\\Windows\\CurrentVersion\\");
     lstrcatA(keypath, "Installer\\UserData\\S-1-5-18");
@@ -8941,10 +8945,10 @@ static void test_MsiGetUserInfo(void)
     lstrcatA(keypath, prod_squashed);
 
     res = RegCreateKeyExA(HKEY_LOCAL_MACHINE, keypath, 0, NULL, 0, access, NULL, &userprod, NULL);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     res = RegCreateKeyExA(userprod, "InstallProperties", 0, NULL, 0, access, NULL, &props, NULL);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* InstallProperties key exists */
     INIT_USERINFO();
@@ -8954,9 +8958,9 @@ static void test_MsiGetUserInfo(void)
     ok(!lstrcmpA(user, "apple"), "Expected user to be unchanged, got \"%s\"\n", user);
     ok(!lstrcmpA(org, "orange"), "Expected org to be unchanged, got \"%s\"\n", org);
     ok(!lstrcmpA(serial, "banana"), "Expected serial to be unchanged, got \"%s\"\n", serial);
-    ok(usersz == MAX_PATH - 1, "Expected MAX_PATH - 1, got %lu\n", usersz);
-    ok(orgsz == MAX_PATH, "Expected MAX_PATH, got %lu\n", orgsz);
-    ok(serialsz == MAX_PATH, "Expected MAX_PATH, got %lu\n", serialsz);
+    ok(usersz == MAX_PATH - 1, "Expected MAX_PATH - 1, got %d\n", usersz);
+    ok(orgsz == MAX_PATH, "Expected MAX_PATH, got %d\n", orgsz);
+    ok(serialsz == MAX_PATH, "Expected MAX_PATH, got %d\n", serialsz);
 
     /* RegOwner doesn't exist, lpUserNameBuf and pcchUserNameBuf are NULL */
     INIT_USERINFO();
@@ -8965,8 +8969,8 @@ static void test_MsiGetUserInfo(void)
        "Expected USERINFOSTATE_ABSENT, got %d\n", state);
     ok(!lstrcmpA(org, ""), "Expected empty string, got \"%s\"\n", org);
     ok(!lstrcmpA(serial, "banana"), "Expected serial to be unchanged, got \"%s\"\n", serial);
-    ok(orgsz == 0, "Expected 0, got %lu\n", orgsz);
-    ok(serialsz == MAX_PATH - 1, "Expected MAX_PATH - 1, got %lu\n", serialsz);
+    ok(orgsz == 0, "Expected 0, got %d\n", orgsz);
+    ok(serialsz == MAX_PATH - 1, "Expected MAX_PATH - 1, got %d\n", serialsz);
 
     /* RegOwner, RegCompany don't exist, out params are NULL */
     INIT_USERINFO();
@@ -8974,10 +8978,10 @@ static void test_MsiGetUserInfo(void)
     ok(state == USERINFOSTATE_ABSENT,
        "Expected USERINFOSTATE_ABSENT, got %d\n", state);
     ok(!lstrcmpA(serial, "banana"), "Expected serial to be unchanged, got \"%s\"\n", serial);
-    ok(serialsz == MAX_PATH - 1, "Expected MAX_PATH - 1, got %lu\n", serialsz);
+    ok(serialsz == MAX_PATH - 1, "Expected MAX_PATH - 1, got %d\n", serialsz);
 
     res = RegSetValueExA(props, "RegOwner", 0, REG_SZ, (LPBYTE)"owner", 6);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* RegOwner value exists */
     INIT_USERINFO();
@@ -8987,12 +8991,12 @@ static void test_MsiGetUserInfo(void)
     ok(!lstrcmpA(user, "owner"), "Expected \"owner\", got \"%s\"\n", user);
     ok(!lstrcmpA(org, ""), "Expected empty string, got \"%s\"\n", org);
     ok(!lstrcmpA(serial, "banana"), "Expected serial to be unchanged, got \"%s\"\n", serial);
-    ok(usersz == 5, "Expected 5, got %lu\n", usersz);
-    ok(orgsz == 0, "Expected 0, got %lu\n", orgsz);
-    ok(serialsz == MAX_PATH - 1, "Expected MAX_PATH - 1, got %lu\n", serialsz);
+    ok(usersz == 5, "Expected 5, got %d\n", usersz);
+    ok(orgsz == 0, "Expected 0, got %d\n", orgsz);
+    ok(serialsz == MAX_PATH - 1, "Expected MAX_PATH - 1, got %d\n", serialsz);
 
     res = RegSetValueExA(props, "RegCompany", 0, REG_SZ, (LPBYTE)"company", 8);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* RegCompany value exists */
     INIT_USERINFO();
@@ -9002,12 +9006,12 @@ static void test_MsiGetUserInfo(void)
     ok(!lstrcmpA(user, "owner"), "Expected \"owner\", got \"%s\"\n", user);
     ok(!lstrcmpA(org, "company"), "Expected \"company\", got \"%s\"\n", org);
     ok(!lstrcmpA(serial, "banana"), "Expected serial to be unchanged, got \"%s\"\n", serial);
-    ok(usersz == 5, "Expected 5, got %lu\n", usersz);
-    ok(orgsz == 7, "Expected 7, got %lu\n", orgsz);
-    ok(serialsz == MAX_PATH - 1, "Expected MAX_PATH - 1, got %lu\n", serialsz);
+    ok(usersz == 5, "Expected 5, got %d\n", usersz);
+    ok(orgsz == 7, "Expected 7, got %d\n", orgsz);
+    ok(serialsz == MAX_PATH - 1, "Expected MAX_PATH - 1, got %d\n", serialsz);
 
     res = RegSetValueExA(props, "ProductID", 0, REG_SZ, (LPBYTE)"ID", 3);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* ProductID value exists */
     INIT_USERINFO();
@@ -9017,9 +9021,9 @@ static void test_MsiGetUserInfo(void)
     ok(!lstrcmpA(user, "owner"), "Expected \"owner\", got \"%s\"\n", user);
     ok(!lstrcmpA(org, "company"), "Expected \"company\", got \"%s\"\n", org);
     ok(!lstrcmpA(serial, "ID"), "Expected \"ID\", got \"%s\"\n", serial);
-    ok(usersz == 5, "Expected 5, got %lu\n", usersz);
-    ok(orgsz == 7, "Expected 7, got %lu\n", orgsz);
-    ok(serialsz == 2, "Expected 2, got %lu\n", serialsz);
+    ok(usersz == 5, "Expected 5, got %d\n", usersz);
+    ok(orgsz == 7, "Expected 7, got %d\n", orgsz);
+    ok(serialsz == 2, "Expected 2, got %d\n", serialsz);
 
     RegDeleteValueA(props, "ProductID");
     RegDeleteValueA(props, "RegCompany");
@@ -9126,7 +9130,7 @@ static void test_MsiOpenProduct(void)
         LocalFree(usersid);
         return;
     }
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* managed product key exists */
     hprod = 0xdeadbeef;
@@ -9148,7 +9152,7 @@ static void test_MsiOpenProduct(void)
         LocalFree(usersid);
         return;
     }
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* user product key exists */
     hprod = 0xdeadbeef;
@@ -9158,7 +9162,7 @@ static void test_MsiOpenProduct(void)
     ok(hprod == 0xdeadbeef, "Expected hprod to be unchanged\n");
 
     res = RegCreateKeyExA(userkey, "InstallProperties", 0, NULL, 0, access, NULL, &props, NULL);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* InstallProperties key exists */
     hprod = 0xdeadbeef;
@@ -9171,7 +9175,7 @@ static void test_MsiOpenProduct(void)
     lstrcatA(val, "\\winetest.msi");
     res = RegSetValueExA(props, "ManagedLocalPackage", 0, REG_SZ,
                          (const BYTE *)val, lstrlenA(val) + 1);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* ManagedLocalPackage value exists */
     hprod = 0xdeadbeef;
@@ -9183,7 +9187,7 @@ static void test_MsiOpenProduct(void)
     r = MsiGetPropertyA(hprod, "ProductCode", val, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(val, prodcode), "Expected \"%s\", got \"%s\"\n", prodcode, val);
-    ok(size == lstrlenA(prodcode), "Expected %d, got %lu\n", lstrlenA(prodcode), size);
+    ok(size == lstrlenA(prodcode), "Expected %d, got %d\n", lstrlenA(prodcode), size);
 
     MsiCloseHandle(hprod);
 
@@ -9201,7 +9205,7 @@ static void test_MsiOpenProduct(void)
     lstrcatA(keypath, prod_squashed);
 
     res = RegCreateKeyA(HKEY_CURRENT_USER, keypath, &prodkey);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* unmanaged product key exists */
     hprod = 0xdeadbeef;
@@ -9217,7 +9221,7 @@ static void test_MsiOpenProduct(void)
     lstrcatA(keypath, prod_squashed);
 
     res = RegCreateKeyExA(HKEY_LOCAL_MACHINE, keypath, 0, NULL, 0, access, NULL, &userkey, NULL);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* user product key exists */
     hprod = 0xdeadbeef;
@@ -9227,7 +9231,7 @@ static void test_MsiOpenProduct(void)
     ok(hprod == 0xdeadbeef, "Expected hprod to be unchanged\n");
 
     res = RegCreateKeyExA(userkey, "InstallProperties", 0, NULL, 0, access, NULL, &props, NULL);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* InstallProperties key exists */
     hprod = 0xdeadbeef;
@@ -9240,7 +9244,7 @@ static void test_MsiOpenProduct(void)
     lstrcatA(val, "\\winetest.msi");
     res = RegSetValueExA(props, "LocalPackage", 0, REG_SZ,
                          (const BYTE *)val, lstrlenA(val) + 1);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* LocalPackage value exists */
     hprod = 0xdeadbeef;
@@ -9252,7 +9256,7 @@ static void test_MsiOpenProduct(void)
     r = MsiGetPropertyA(hprod, "ProductCode", val, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(val, prodcode), "Expected \"%s\", got \"%s\"\n", prodcode, val);
-    ok(size == lstrlenA(prodcode), "Expected %d, got %lu\n", lstrlenA(prodcode), size);
+    ok(size == lstrlenA(prodcode), "Expected %d, got %d\n", lstrlenA(prodcode), size);
 
     MsiCloseHandle(hprod);
 
@@ -9276,7 +9280,7 @@ static void test_MsiOpenProduct(void)
         LocalFree( usersid );
         return;
     }
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* managed product key exists */
     hprod = 0xdeadbeef;
@@ -9290,7 +9294,7 @@ static void test_MsiOpenProduct(void)
     lstrcatA(keypath, prod_squashed);
 
     res = RegCreateKeyExA(HKEY_LOCAL_MACHINE, keypath, 0, NULL, 0, access, NULL, &userkey, NULL);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* user product key exists */
     hprod = 0xdeadbeef;
@@ -9300,7 +9304,7 @@ static void test_MsiOpenProduct(void)
     ok(hprod == 0xdeadbeef, "Expected hprod to be unchanged\n");
 
     res = RegCreateKeyExA(userkey, "InstallProperties", 0, NULL, 0, access, NULL, &props, NULL);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* InstallProperties key exists */
     hprod = 0xdeadbeef;
@@ -9313,7 +9317,7 @@ static void test_MsiOpenProduct(void)
     lstrcatA(val, "\\winetest.msi");
     res = RegSetValueExA(props, "LocalPackage", 0, REG_SZ,
                          (const BYTE *)val, lstrlenA(val) + 1);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* LocalPackage value exists */
     hprod = 0xdeadbeef;
@@ -9325,19 +9329,19 @@ static void test_MsiOpenProduct(void)
     r = MsiGetPropertyA(hprod, "ProductCode", val, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(val, prodcode), "Expected \"%s\", got \"%s\"\n", prodcode, val);
-    ok(size == lstrlenA(prodcode), "Expected %d, got %lu\n", lstrlenA(prodcode), size);
+    ok(size == lstrlenA(prodcode), "Expected %d, got %d\n", lstrlenA(prodcode), size);
 
     MsiCloseHandle(hprod);
 
     res = RegSetValueExA(props, "LocalPackage", 0, REG_SZ,
                          (const BYTE *)"winetest.msi", 13);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     lstrcpyA(val, path);
     lstrcatA(val, "\\winetest.msi");
     res = RegSetValueExA(props, "LocalPackage", 0, REG_SZ,
                          (const BYTE *)val, lstrlenA(val) + 1);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     DeleteFileA(msifile);
 
@@ -9403,7 +9407,7 @@ static void test_MsiEnumPatchesEx_usermanaged(LPCSTR usersid, LPCSTR expectedsid
        "Expected context to be unchanged, got %d\n", context);
     ok(!lstrcmpA(targetsid, "kiwi"),
        "Expected targetsid to be unchanged, got %s\n", targetsid);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     lstrcpyA(keypath, "Software\\Microsoft\\Windows\\CurrentVersion\\Installer\\Managed\\");
     lstrcatA(keypath, expectedsid);
@@ -9416,7 +9420,7 @@ static void test_MsiEnumPatchesEx_usermanaged(LPCSTR usersid, LPCSTR expectedsid
         skip("Not enough rights to perform tests\n");
         return;
     }
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* managed product key exists */
     lstrcpyA(patchcode, "apple");
@@ -9436,10 +9440,10 @@ static void test_MsiEnumPatchesEx_usermanaged(LPCSTR usersid, LPCSTR expectedsid
        "Expected context to be unchanged, got %d\n", context);
     ok(!lstrcmpA(targetsid, "kiwi"),
        "Expected targetsid to be unchanged, got %s\n", targetsid);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     res = RegCreateKeyExA(prodkey, "Patches", 0, NULL, 0, access, NULL, &patches, NULL);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* patches key exists */
     lstrcpyA(patchcode, "apple");
@@ -9459,12 +9463,12 @@ static void test_MsiEnumPatchesEx_usermanaged(LPCSTR usersid, LPCSTR expectedsid
        "Expected context to be unchanged, got %d\n", context);
     ok(!lstrcmpA(targetsid, "kiwi"),
        "Expected targetsid to be unchanged, got %s\n", targetsid);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     res = RegSetValueExA(patches, "Patches", 0, REG_SZ,
                          (const BYTE *)patch_squashed,
                          lstrlenA(patch_squashed) + 1);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* Patches value exists, is not REG_MULTI_SZ */
     lstrcpyA(patchcode, "apple");
@@ -9485,11 +9489,11 @@ static void test_MsiEnumPatchesEx_usermanaged(LPCSTR usersid, LPCSTR expectedsid
        "Expected context to be unchanged, got %d\n", context);
     ok(!lstrcmpA(targetsid, "kiwi"),
        "Expected targetsid to be unchanged, got %s\n", targetsid);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     res = RegSetValueExA(patches, "Patches", 0, REG_MULTI_SZ,
                          (const BYTE *)"a\0b\0c\0\0", 7);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* Patches value exists, is not a squashed guid */
     lstrcpyA(patchcode, "apple");
@@ -9510,13 +9514,13 @@ static void test_MsiEnumPatchesEx_usermanaged(LPCSTR usersid, LPCSTR expectedsid
        "Expected context to be unchanged, got %d\n", context);
     ok(!lstrcmpA(targetsid, "kiwi"),
        "Expected targetsid to be unchanged, got %s\n", targetsid);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     patch_squashed[lstrlenA(patch_squashed) + 1] = '\0';
     res = RegSetValueExA(patches, "Patches", 0, REG_MULTI_SZ,
                          (const BYTE *)patch_squashed,
                          lstrlenA(patch_squashed) + 2);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* Patches value exists */
     lstrcpyA(patchcode, "apple");
@@ -9536,11 +9540,11 @@ static void test_MsiEnumPatchesEx_usermanaged(LPCSTR usersid, LPCSTR expectedsid
        "Expected context to be unchanged, got %d\n", context);
     ok(!lstrcmpA(targetsid, "kiwi"),
        "Expected targetsid to be unchanged, got %s\n", targetsid);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     res = RegSetValueExA(patches, patch_squashed, 0, REG_SZ,
                          (const BYTE *)"whatever", 9);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* patch squashed value exists */
     lstrcpyA(patchcode, "apple");
@@ -9561,7 +9565,7 @@ static void test_MsiEnumPatchesEx_usermanaged(LPCSTR usersid, LPCSTR expectedsid
     ok(!lstrcmpA(targetsid, expectedsid),
        "Expected \"%s\", got \"%s\"\n", expectedsid, targetsid);
     ok(size == lstrlenA(expectedsid),
-       "Expected %d, got %lu\n", lstrlenA(expectedsid), size);
+       "Expected %d, got %d\n", lstrlenA(expectedsid), size);
 
     /* increase the index */
     lstrcpyA(patchcode, "apple");
@@ -9581,7 +9585,7 @@ static void test_MsiEnumPatchesEx_usermanaged(LPCSTR usersid, LPCSTR expectedsid
        "Expected context to be unchanged, got %d\n", context);
     ok(!lstrcmpA(targetsid, "kiwi"),
        "Expected targetsid to be unchanged, got %s\n", targetsid);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     /* increase again */
     lstrcpyA(patchcode, "apple");
@@ -9602,7 +9606,7 @@ static void test_MsiEnumPatchesEx_usermanaged(LPCSTR usersid, LPCSTR expectedsid
        "Expected context to be unchanged, got %d\n", context);
     ok(!lstrcmpA(targetsid, "kiwi"),
        "Expected targetsid to be unchanged, got %s\n", targetsid);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     /* szPatchCode is NULL */
     lstrcpyA(targetprod, "banana");
@@ -9620,7 +9624,7 @@ static void test_MsiEnumPatchesEx_usermanaged(LPCSTR usersid, LPCSTR expectedsid
     ok(!lstrcmpA(targetsid, expectedsid),
        "Expected \"%s\", got \"%s\"\n", expectedsid, targetsid);
     ok(size == lstrlenA(expectedsid),
-       "Expected %d, got %lu\n", lstrlenA(expectedsid), size);
+       "Expected %d, got %d\n", lstrlenA(expectedsid), size);
 
     /* szTargetProductCode is NULL */
     lstrcpyA(patchcode, "apple");
@@ -9638,7 +9642,7 @@ static void test_MsiEnumPatchesEx_usermanaged(LPCSTR usersid, LPCSTR expectedsid
     ok(!lstrcmpA(targetsid, expectedsid),
        "Expected \"%s\", got \"%s\"\n", expectedsid, targetsid);
     ok(size == lstrlenA(expectedsid),
-       "Expected %d, got %lu\n", lstrlenA(expectedsid), size);
+       "Expected %d, got %d\n", lstrlenA(expectedsid), size);
 
     /* pdwTargetProductContext is NULL */
     lstrcpyA(patchcode, "apple");
@@ -9656,7 +9660,7 @@ static void test_MsiEnumPatchesEx_usermanaged(LPCSTR usersid, LPCSTR expectedsid
     ok(!lstrcmpA(targetsid, expectedsid),
        "Expected \"%s\", got \"%s\"\n", expectedsid, targetsid);
     ok(size == lstrlenA(expectedsid),
-       "Expected %d, got %lu\n", lstrlenA(expectedsid), size);
+       "Expected %d, got %d\n", lstrlenA(expectedsid), size);
 
     /* szTargetUserSid is NULL */
     lstrcpyA(patchcode, "apple");
@@ -9674,7 +9678,7 @@ static void test_MsiEnumPatchesEx_usermanaged(LPCSTR usersid, LPCSTR expectedsid
     ok(context == MSIINSTALLCONTEXT_USERMANAGED,
        "Expected MSIINSTALLCONTEXT_USERMANAGED, got %d\n", context);
     ok(size == lstrlenA(expectedsid) * sizeof(WCHAR),
-       "Expected %d*sizeof(WCHAR), got %lu\n", lstrlenA(expectedsid), size);
+       "Expected %d*sizeof(WCHAR), got %d\n", lstrlenA(expectedsid), size);
 
     /* pcchTargetUserSid is exactly the length of szTargetUserSid */
     lstrcpyA(patchcode, "apple");
@@ -9695,7 +9699,7 @@ static void test_MsiEnumPatchesEx_usermanaged(LPCSTR usersid, LPCSTR expectedsid
     ok(!strncmp(targetsid, expectedsid, lstrlenA(expectedsid) - 1),
        "Expected \"%s\", got \"%s\"\n", expectedsid, targetsid);
     ok(size == lstrlenA(expectedsid) * sizeof(WCHAR),
-       "Expected %d*sizeof(WCHAR), got %lu\n", lstrlenA(expectedsid), size);
+       "Expected %d*sizeof(WCHAR), got %d\n", lstrlenA(expectedsid), size);
 
     /* pcchTargetUserSid has enough room for NULL terminator */
     lstrcpyA(patchcode, "apple");
@@ -9716,7 +9720,7 @@ static void test_MsiEnumPatchesEx_usermanaged(LPCSTR usersid, LPCSTR expectedsid
     ok(!lstrcmpA(targetsid, expectedsid),
        "Expected \"%s\", got \"%s\"\n", expectedsid, targetsid);
     ok(size == lstrlenA(expectedsid),
-       "Expected %d, got %lu\n", lstrlenA(expectedsid), size);
+       "Expected %d, got %d\n", lstrlenA(expectedsid), size);
 
     /* both szTargetuserSid and pcchTargetUserSid are NULL */
     lstrcpyA(patchcode, "apple");
@@ -9752,7 +9756,7 @@ static void test_MsiEnumPatchesEx_usermanaged(LPCSTR usersid, LPCSTR expectedsid
        "Expected context to be unchanged, got %d\n", context);
     ok(!lstrcmpA(targetsid, "kiwi"),
        "Expected targetsid to be unchanged, got %s\n", targetsid);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     lstrcpyA(keypath, "Software\\Microsoft\\Windows\\CurrentVersion\\Installer\\UserData\\");
     lstrcatA(keypath, expectedsid);
@@ -9765,7 +9769,7 @@ static void test_MsiEnumPatchesEx_usermanaged(LPCSTR usersid, LPCSTR expectedsid
         skip("Not enough rights to perform tests\n");
         return;
     }
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* UserData product key exists */
     lstrcpyA(patchcode, "apple");
@@ -9785,10 +9789,10 @@ static void test_MsiEnumPatchesEx_usermanaged(LPCSTR usersid, LPCSTR expectedsid
        "Expected context to be unchanged, got %d\n", context);
     ok(!lstrcmpA(targetsid, "kiwi"),
        "Expected targetsid to be unchanged, got %s\n", targetsid);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     res = RegCreateKeyExA(udprod, "Patches", 0, NULL, 0, access, NULL, &udpatch, NULL);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* UserData patches key exists */
     lstrcpyA(patchcode, "apple");
@@ -9808,10 +9812,10 @@ static void test_MsiEnumPatchesEx_usermanaged(LPCSTR usersid, LPCSTR expectedsid
        "Expected context to be unchanged, got %d\n", context);
     ok(!lstrcmpA(targetsid, "kiwi"),
        "Expected targetsid to be unchanged, got %s\n", targetsid);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     res = RegCreateKeyExA(udpatch, patch_squashed, 0, NULL, 0, access, NULL, &hpatch, NULL);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* specific UserData patch key exists */
     lstrcpyA(patchcode, "apple");
@@ -9832,12 +9836,12 @@ static void test_MsiEnumPatchesEx_usermanaged(LPCSTR usersid, LPCSTR expectedsid
        "Expected context to be unchanged, got %d\n", context);
     ok(!lstrcmpA(targetsid, "kiwi"),
        "Expected targetsid to be unchanged, got %s\n", targetsid);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     data = MSIPATCHSTATE_SUPERSEDED;
     res = RegSetValueExA(hpatch, "State", 0, REG_DWORD,
                          (const BYTE *)&data, sizeof(DWORD));
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* State value exists */
     lstrcpyA(patchcode, "apple");
@@ -9858,7 +9862,7 @@ static void test_MsiEnumPatchesEx_usermanaged(LPCSTR usersid, LPCSTR expectedsid
     ok(!lstrcmpA(targetsid, expectedsid),
        "Expected \"%s\", got \"%s\"\n", expectedsid, targetsid);
     ok(size == lstrlenA(expectedsid),
-       "Expected %d, got %lu\n", lstrlenA(expectedsid), size);
+       "Expected %d, got %d\n", lstrlenA(expectedsid), size);
 
     /* MSIPATCHSTATE_OBSOLETED */
 
@@ -9879,12 +9883,12 @@ static void test_MsiEnumPatchesEx_usermanaged(LPCSTR usersid, LPCSTR expectedsid
        "Expected context to be unchanged, got %d\n", context);
     ok(!lstrcmpA(targetsid, "kiwi"),
        "Expected targetsid to be unchanged, got %s\n", targetsid);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     data = MSIPATCHSTATE_OBSOLETED;
     res = RegSetValueExA(hpatch, "State", 0, REG_DWORD,
                          (const BYTE *)&data, sizeof(DWORD));
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* State value is obsoleted */
     lstrcpyA(patchcode, "apple");
@@ -9905,7 +9909,7 @@ static void test_MsiEnumPatchesEx_usermanaged(LPCSTR usersid, LPCSTR expectedsid
     ok(!lstrcmpA(targetsid, expectedsid),
        "Expected \"%s\", got \"%s\"\n", expectedsid, targetsid);
     ok(size == lstrlenA(expectedsid),
-       "Expected %d, got %lu\n", lstrlenA(expectedsid), size);
+       "Expected %d, got %d\n", lstrlenA(expectedsid), size);
 
     /* MSIPATCHSTATE_REGISTERED */
     /* FIXME */
@@ -9931,7 +9935,7 @@ static void test_MsiEnumPatchesEx_usermanaged(LPCSTR usersid, LPCSTR expectedsid
     ok(!lstrcmpA(targetsid, expectedsid),
        "Expected \"%s\", got \"%s\"\n", expectedsid, targetsid);
     ok(size == lstrlenA(expectedsid),
-       "Expected %d, got %lu\n", lstrlenA(expectedsid), size);
+       "Expected %d, got %d\n", lstrlenA(expectedsid), size);
 
     /* same patch in multiple places, only one is enumerated */
     lstrcpyA(patchcode, "apple");
@@ -9951,7 +9955,7 @@ static void test_MsiEnumPatchesEx_usermanaged(LPCSTR usersid, LPCSTR expectedsid
        "Expected context to be unchanged, got %d\n", context);
     ok(!lstrcmpA(targetsid, "kiwi"),
        "Expected targetsid to be unchanged, got %s\n", targetsid);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     RegDeleteValueA(hpatch, "State");
     delete_key(hpatch, "", access & KEY_WOW64_64KEY);
@@ -10006,13 +10010,13 @@ static void test_MsiEnumPatchesEx_userunmanaged(LPCSTR usersid, LPCSTR expecteds
        "Expected context to be unchanged, got %d\n", context);
     ok(!lstrcmpA(targetsid, "kiwi"),
        "Expected targetsid to be unchanged, got %s\n", targetsid);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     lstrcpyA(keypath, "Software\\Microsoft\\Installer\\Products\\");
     lstrcatA(keypath, prod_squashed);
 
     res = RegCreateKeyA(HKEY_CURRENT_USER, keypath, &prodkey);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* current user product key exists */
     lstrcpyA(patchcode, "apple");
@@ -10032,10 +10036,10 @@ static void test_MsiEnumPatchesEx_userunmanaged(LPCSTR usersid, LPCSTR expecteds
        "Expected context to be unchanged, got %d\n", context);
     ok(!lstrcmpA(targetsid, "kiwi"),
        "Expected targetsid to be unchanged, got %s\n", targetsid);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     res = RegCreateKeyA(prodkey, "Patches", &patches);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* Patches key exists */
     lstrcpyA(patchcode, "apple");
@@ -10055,12 +10059,12 @@ static void test_MsiEnumPatchesEx_userunmanaged(LPCSTR usersid, LPCSTR expecteds
        "Expected context to be unchanged, got %d\n", context);
     ok(!lstrcmpA(targetsid, "kiwi"),
        "Expected targetsid to be unchanged, got %s\n", targetsid);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     res = RegSetValueExA(patches, "Patches", 0, REG_SZ,
                          (const BYTE *)patch_squashed,
                          lstrlenA(patch_squashed) + 1);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* Patches value exists, is not REG_MULTI_SZ */
     lstrcpyA(patchcode, "apple");
@@ -10081,11 +10085,11 @@ static void test_MsiEnumPatchesEx_userunmanaged(LPCSTR usersid, LPCSTR expecteds
        "Expected context to be unchanged, got %d\n", context);
     ok(!lstrcmpA(targetsid, "kiwi"),
        "Expected targetsid to be unchanged, got %s\n", targetsid);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     res = RegSetValueExA(patches, "Patches", 0, REG_MULTI_SZ,
                          (const BYTE *)"a\0b\0c\0\0", 7);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* Patches value exists, is not a squashed guid */
     lstrcpyA(patchcode, "apple");
@@ -10106,13 +10110,13 @@ static void test_MsiEnumPatchesEx_userunmanaged(LPCSTR usersid, LPCSTR expecteds
        "Expected context to be unchanged, got %d\n", context);
     ok(!lstrcmpA(targetsid, "kiwi"),
        "Expected targetsid to be unchanged, got %s\n", targetsid);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     patch_squashed[lstrlenA(patch_squashed) + 1] = 0;
     res = RegSetValueExA(patches, "Patches", 0, REG_MULTI_SZ,
                          (const BYTE *)patch_squashed,
                          lstrlenA(patch_squashed) + 2);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* Patches value exists */
     lstrcpyA(patchcode, "apple");
@@ -10134,11 +10138,11 @@ static void test_MsiEnumPatchesEx_userunmanaged(LPCSTR usersid, LPCSTR expecteds
        "Expected context to be unchanged, got %d\n", context);
     ok(!lstrcmpA(targetsid, "kiwi"),
        "Expected targetsid to be unchanged, got %s\n", targetsid);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     res = RegSetValueExA(patches, patch_squashed, 0, REG_SZ,
                          (const BYTE *)"whatever", 9);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* patch code value exists */
     lstrcpyA(patchcode, "apple");
@@ -10160,7 +10164,7 @@ static void test_MsiEnumPatchesEx_userunmanaged(LPCSTR usersid, LPCSTR expecteds
        "Expected context to be unchanged, got %d\n", context);
     ok(!lstrcmpA(targetsid, "kiwi"),
        "Expected targetsid to be unchanged, got %s\n", targetsid);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     lstrcpyA(keypath, "Software\\Microsoft\\Windows\\CurrentVersion\\Installer\\UserData\\");
     lstrcatA(keypath, expectedsid);
@@ -10173,7 +10177,7 @@ static void test_MsiEnumPatchesEx_userunmanaged(LPCSTR usersid, LPCSTR expecteds
         skip("Not enough rights to perform tests\n");
         goto error;
     }
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* userdata patch key exists */
     lstrcpyA(patchcode, "apple");
@@ -10194,7 +10198,7 @@ static void test_MsiEnumPatchesEx_userunmanaged(LPCSTR usersid, LPCSTR expecteds
     ok(!lstrcmpA(targetsid, expectedsid),
        "Expected \"%s\", got \"%s\"\n", expectedsid, targetsid);
     ok(size == lstrlenA(expectedsid),
-       "Expected %d, got %lu\n", lstrlenA(expectedsid), size);
+       "Expected %d, got %d\n", lstrlenA(expectedsid), size);
 
     /* MSIPATCHSTATE_SUPERSEDED */
 
@@ -10215,7 +10219,7 @@ static void test_MsiEnumPatchesEx_userunmanaged(LPCSTR usersid, LPCSTR expecteds
        "Expected context to be unchanged, got %d\n", context);
     ok(!lstrcmpA(targetsid, "kiwi"),
        "Expected targetsid to be unchanged, got %s\n", targetsid);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     lstrcpyA(keypath, "Software\\Microsoft\\Windows\\CurrentVersion\\Installer\\UserData\\");
     lstrcatA(keypath, expectedsid);
@@ -10228,7 +10232,7 @@ static void test_MsiEnumPatchesEx_userunmanaged(LPCSTR usersid, LPCSTR expecteds
         skip("Not enough rights to perform tests\n");
         goto error;
     }
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* UserData product key exists */
     lstrcpyA(patchcode, "apple");
@@ -10248,10 +10252,10 @@ static void test_MsiEnumPatchesEx_userunmanaged(LPCSTR usersid, LPCSTR expecteds
        "Expected context to be unchanged, got %d\n", context);
     ok(!lstrcmpA(targetsid, "kiwi"),
        "Expected targetsid to be unchanged, got %s\n", targetsid);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     res = RegCreateKeyExA(udprod, "Patches", 0, NULL, 0, access, NULL, &udpatch, NULL);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* UserData patches key exists */
     lstrcpyA(patchcode, "apple");
@@ -10271,10 +10275,10 @@ static void test_MsiEnumPatchesEx_userunmanaged(LPCSTR usersid, LPCSTR expecteds
        "Expected context to be unchanged, got %d\n", context);
     ok(!lstrcmpA(targetsid, "kiwi"),
        "Expected targetsid to be unchanged, got %s\n", targetsid);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     res = RegCreateKeyExA(udpatch, patch_squashed, 0, NULL, 0, access, NULL, &hpatch, NULL);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* specific UserData patch key exists */
     lstrcpyA(patchcode, "apple");
@@ -10295,12 +10299,12 @@ static void test_MsiEnumPatchesEx_userunmanaged(LPCSTR usersid, LPCSTR expecteds
        "Expected context to be unchanged, got %d\n", context);
     ok(!lstrcmpA(targetsid, "kiwi"),
        "Expected targetsid to be unchanged, got %s\n", targetsid);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     data = MSIPATCHSTATE_SUPERSEDED;
     res = RegSetValueExA(hpatch, "State", 0, REG_DWORD,
                          (const BYTE *)&data, sizeof(DWORD));
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* State value exists */
     lstrcpyA(patchcode, "apple");
@@ -10321,7 +10325,7 @@ static void test_MsiEnumPatchesEx_userunmanaged(LPCSTR usersid, LPCSTR expecteds
     ok(!lstrcmpA(targetsid, expectedsid),
        "Expected \"%s\", got \"%s\"\n", expectedsid, targetsid);
     ok(size == lstrlenA(expectedsid),
-       "Expected %d, got %lu\n", lstrlenA(expectedsid), size);
+       "Expected %d, got %d\n", lstrlenA(expectedsid), size);
 
     /* MSIPATCHSTATE_OBSOLETED */
 
@@ -10342,12 +10346,12 @@ static void test_MsiEnumPatchesEx_userunmanaged(LPCSTR usersid, LPCSTR expecteds
        "Expected context to be unchanged, got %d\n", context);
     ok(!lstrcmpA(targetsid, "kiwi"),
        "Expected targetsid to be unchanged, got %s\n", targetsid);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     data = MSIPATCHSTATE_OBSOLETED;
     res = RegSetValueExA(hpatch, "State", 0, REG_DWORD,
                          (const BYTE *)&data, sizeof(DWORD));
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* State value is obsoleted */
     lstrcpyA(patchcode, "apple");
@@ -10368,7 +10372,7 @@ static void test_MsiEnumPatchesEx_userunmanaged(LPCSTR usersid, LPCSTR expecteds
     ok(!lstrcmpA(targetsid, expectedsid),
        "Expected \"%s\", got \"%s\"\n", expectedsid, targetsid);
     ok(size == lstrlenA(expectedsid),
-       "Expected %d, got %lu\n", lstrlenA(expectedsid), size);
+       "Expected %d, got %d\n", lstrlenA(expectedsid), size);
 
     /* MSIPATCHSTATE_REGISTERED */
     /* FIXME */
@@ -10394,7 +10398,7 @@ static void test_MsiEnumPatchesEx_userunmanaged(LPCSTR usersid, LPCSTR expecteds
     ok(!lstrcmpA(targetsid, expectedsid),
        "Expected \"%s\", got \"%s\"\n", expectedsid, targetsid);
     ok(size == lstrlenA(expectedsid),
-       "Expected %d, got %lu\n", lstrlenA(expectedsid), size);
+       "Expected %d, got %d\n", lstrlenA(expectedsid), size);
 
     /* same patch in multiple places, only one is enumerated */
     lstrcpyA(patchcode, "apple");
@@ -10414,7 +10418,7 @@ static void test_MsiEnumPatchesEx_userunmanaged(LPCSTR usersid, LPCSTR expecteds
        "Expected context to be unchanged, got %d\n", context);
     ok(!lstrcmpA(targetsid, "kiwi"),
        "Expected targetsid to be unchanged, got %s\n", targetsid);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     RegDeleteValueA(hpatch, "State");
     delete_key(hpatch, "", access & KEY_WOW64_64KEY);
@@ -10474,7 +10478,7 @@ static void test_MsiEnumPatchesEx_machine(void)
        "Expected context to be unchanged, got %d\n", context);
     ok(!lstrcmpA(targetsid, "kiwi"),
        "Expected targetsid to be unchanged, got %s\n", targetsid);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     lstrcpyA(keypath, "Software\\Classes\\Installer\\Products\\");
     lstrcatA(keypath, prod_squashed);
@@ -10485,7 +10489,7 @@ static void test_MsiEnumPatchesEx_machine(void)
         skip("Not enough rights to perform tests\n");
         return;
     }
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* local product key exists */
     lstrcpyA(patchcode, "apple");
@@ -10505,10 +10509,10 @@ static void test_MsiEnumPatchesEx_machine(void)
        "Expected context to be unchanged, got %d\n", context);
     ok(!lstrcmpA(targetsid, "kiwi"),
        "Expected targetsid to be unchanged, got %s\n", targetsid);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     res = RegCreateKeyExA(prodkey, "Patches", 0, NULL, 0, access, NULL, &patches, NULL);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* Patches key exists */
     lstrcpyA(patchcode, "apple");
@@ -10528,12 +10532,12 @@ static void test_MsiEnumPatchesEx_machine(void)
        "Expected context to be unchanged, got %d\n", context);
     ok(!lstrcmpA(targetsid, "kiwi"),
        "Expected targetsid to be unchanged, got %s\n", targetsid);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     res = RegSetValueExA(patches, "Patches", 0, REG_SZ,
                          (const BYTE *)patch_squashed,
                          lstrlenA(patch_squashed) + 1);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* Patches value exists, is not REG_MULTI_SZ */
     lstrcpyA(patchcode, "apple");
@@ -10554,11 +10558,11 @@ static void test_MsiEnumPatchesEx_machine(void)
        "Expected context to be unchanged, got %d\n", context);
     ok(!lstrcmpA(targetsid, "kiwi"),
        "Expected targetsid to be unchanged, got %s\n", targetsid);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     res = RegSetValueExA(patches, "Patches", 0, REG_MULTI_SZ,
                          (const BYTE *)"a\0b\0c\0\0", 7);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* Patches value exists, is not a squashed guid */
     lstrcpyA(patchcode, "apple");
@@ -10579,13 +10583,13 @@ static void test_MsiEnumPatchesEx_machine(void)
        "Expected context to be unchanged, got %d\n", context);
     ok(!lstrcmpA(targetsid, "kiwi"),
        "Expected targetsid to be unchanged, got %s\n", targetsid);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     patch_squashed[lstrlenA(patch_squashed) + 1] = '\0';
     res = RegSetValueExA(patches, "Patches", 0, REG_MULTI_SZ,
                          (const BYTE *)patch_squashed,
                          lstrlenA(patch_squashed) + 2);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* Patches value exists */
     lstrcpyA(patchcode, "apple");
@@ -10605,11 +10609,11 @@ static void test_MsiEnumPatchesEx_machine(void)
        "Expected context to be unchanged, got %d\n", context);
     ok(!lstrcmpA(targetsid, "kiwi"),
        "Expected targetsid to be unchanged, got %s\n", targetsid);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     res = RegSetValueExA(patches, patch_squashed, 0, REG_SZ,
                          (const BYTE *)"whatever", 9);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* patch code value exists */
     lstrcpyA(patchcode, "apple");
@@ -10628,7 +10632,7 @@ static void test_MsiEnumPatchesEx_machine(void)
     ok(context == MSIINSTALLCONTEXT_MACHINE,
        "Expected MSIINSTALLCONTEXT_MACHINE, got %d\n", context);
     ok(!lstrcmpA(targetsid, ""), "Expected \"\", got \"%s\"\n", targetsid);
-    ok(size == 0, "Expected 0, got %lu\n", size);
+    ok(size == 0, "Expected 0, got %d\n", size);
 
     lstrcpyA(keypath, "Software\\Microsoft\\Windows\\CurrentVersion\\");
     lstrcatA(keypath, "Installer\\UserData\\S-1-5-18\\Products\\");
@@ -10640,7 +10644,7 @@ static void test_MsiEnumPatchesEx_machine(void)
         skip("Not enough rights to perform tests\n");
         goto done;
     }
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* local UserData product key exists */
     lstrcpyA(patchcode, "apple");
@@ -10660,10 +10664,10 @@ static void test_MsiEnumPatchesEx_machine(void)
        "Expected MSIINSTALLCONTEXT_MACHINE, got %d\n", context);
     ok(!lstrcmpA(targetsid, ""),
        "Expected \"\", got \"%s\"\n", targetsid);
-    ok(size == 0, "Expected 0, got %lu\n", size);
+    ok(size == 0, "Expected 0, got %d\n", size);
 
     res = RegCreateKeyExA(udprod, "Patches", 0, NULL, 0, access, NULL, &udpatch, NULL);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* local UserData Patches key exists */
     lstrcpyA(patchcode, "apple");
@@ -10683,10 +10687,10 @@ static void test_MsiEnumPatchesEx_machine(void)
        "Expected MSIINSTALLCONTEXT_MACHINE, got %d\n", context);
     ok(!lstrcmpA(targetsid, ""),
        "Expected \"\", got \"%s\"\n", targetsid);
-    ok(size == 0, "Expected 0, got %lu\n", size);
+    ok(size == 0, "Expected 0, got %d\n", size);
 
     res = RegCreateKeyExA(udpatch, patch_squashed, 0, NULL, 0, access, NULL, &hpatch, NULL);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* local UserData Product patch key exists */
     lstrcpyA(patchcode, "apple");
@@ -10706,12 +10710,12 @@ static void test_MsiEnumPatchesEx_machine(void)
        "Expected context to be unchanged, got %d\n", context);
     ok(!lstrcmpA(targetsid, "kiwi"),
        "Expected targetsid to be unchanged, got %s\n", targetsid);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     data = MSIPATCHSTATE_APPLIED;
     res = RegSetValueExA(hpatch, "State", 0, REG_DWORD,
                          (const BYTE *)&data, sizeof(DWORD));
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* State value exists */
     lstrcpyA(patchcode, "apple");
@@ -10731,7 +10735,7 @@ static void test_MsiEnumPatchesEx_machine(void)
        "Expected MSIINSTALLCONTEXT_MACHINE, got %d\n", context);
     ok(!lstrcmpA(targetsid, ""),
        "Expected \"\", got \"%s\"\n", targetsid);
-    ok(size == 0, "Expected 0, got %lu\n", size);
+    ok(size == 0, "Expected 0, got %d\n", size);
 
     /* MSIPATCHSTATE_SUPERSEDED */
 
@@ -10752,12 +10756,12 @@ static void test_MsiEnumPatchesEx_machine(void)
        "Expected context to be unchanged, got %d\n", context);
     ok(!lstrcmpA(targetsid, "kiwi"),
        "Expected targetsid to be unchanged, got %s\n", targetsid);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     data = MSIPATCHSTATE_SUPERSEDED;
     res = RegSetValueExA(hpatch, "State", 0, REG_DWORD,
                          (const BYTE *)&data, sizeof(DWORD));
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* State value is MSIPATCHSTATE_SUPERSEDED */
     lstrcpyA(patchcode, "apple");
@@ -10776,7 +10780,7 @@ static void test_MsiEnumPatchesEx_machine(void)
     ok(context == MSIINSTALLCONTEXT_MACHINE,
        "Expected MSIINSTALLCONTEXT_MACHINE, got %d\n", context);
     ok(!lstrcmpA(targetsid, ""), "Expected \"\", got \"%s\"\n", targetsid);
-    ok(size == 0, "Expected 0, got %lu\n", size);
+    ok(size == 0, "Expected 0, got %d\n", size);
 
     /* MSIPATCHSTATE_OBSOLETED */
 
@@ -10797,12 +10801,12 @@ static void test_MsiEnumPatchesEx_machine(void)
        "Expected context to be unchanged, got %d\n", context);
     ok(!lstrcmpA(targetsid, "kiwi"),
        "Expected targetsid to be unchanged, got %s\n", targetsid);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     data = MSIPATCHSTATE_OBSOLETED;
     res = RegSetValueExA(hpatch, "State", 0, REG_DWORD,
                          (const BYTE *)&data, sizeof(DWORD));
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* State value is obsoleted */
     lstrcpyA(patchcode, "apple");
@@ -10821,7 +10825,7 @@ static void test_MsiEnumPatchesEx_machine(void)
     ok(context == MSIINSTALLCONTEXT_MACHINE,
        "Expected MSIINSTALLCONTEXT_MACHINE, got %d\n", context);
     ok(!lstrcmpA(targetsid, ""), "Expected \"\", got \"%s\"\n", targetsid);
-    ok(size == 0, "Expected 0, got %lu\n", size);
+    ok(size == 0, "Expected 0, got %d\n", size);
 
     /* MSIPATCHSTATE_REGISTERED */
     /* FIXME */
@@ -10845,7 +10849,7 @@ static void test_MsiEnumPatchesEx_machine(void)
     ok(context == MSIINSTALLCONTEXT_MACHINE,
        "Expected MSIINSTALLCONTEXT_MACHINE, got %d\n", context);
     ok(!lstrcmpA(targetsid, ""), "Expected \"\", got \"%s\"\n", targetsid);
-    ok(size == 0, "Expected 0, got %lu\n", size);
+    ok(size == 0, "Expected 0, got %d\n", size);
 
     /* same patch in multiple places, only one is enumerated */
     lstrcpyA(patchcode, "apple");
@@ -10865,7 +10869,7 @@ static void test_MsiEnumPatchesEx_machine(void)
        "Expected context to be unchanged, got %d\n", context);
     ok(!lstrcmpA(targetsid, "kiwi"),
        "Expected targetsid to be unchanged, got %s\n", targetsid);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     delete_key(hpatch, "", access & KEY_WOW64_64KEY);
     RegDeleteValueA(hpatch, "State");
@@ -10922,7 +10926,7 @@ static void test_MsiEnumPatchesEx(void)
        "Expected context to be unchanged, got %d\n", context);
     ok(!lstrcmpA(targetsid, "kiwi"),
        "Expected targetsid to be unchanged, got %s\n", targetsid);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     /* garbage szProductCode */
     lstrcpyA(patchcode, "apple");
@@ -10943,7 +10947,7 @@ static void test_MsiEnumPatchesEx(void)
        "Expected context to be unchanged, got %d\n", context);
     ok(!lstrcmpA(targetsid, "kiwi"),
        "Expected targetsid to be unchanged, got %s\n", targetsid);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     /* guid without brackets */
     lstrcpyA(patchcode, "apple");
@@ -10965,7 +10969,7 @@ static void test_MsiEnumPatchesEx(void)
        "Expected context to be unchanged, got %d\n", context);
     ok(!lstrcmpA(targetsid, "kiwi"),
        "Expected targetsid to be unchanged, got %s\n", targetsid);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     /* guid with brackets */
     lstrcpyA(patchcode, "apple");
@@ -10987,7 +10991,7 @@ static void test_MsiEnumPatchesEx(void)
        "Expected context to be unchanged, got %d\n", context);
     ok(!lstrcmpA(targetsid, "kiwi"),
        "Expected targetsid to be unchanged, got %s\n", targetsid);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     /* szUserSid is S-1-5-18 */
     lstrcpyA(patchcode, "apple");
@@ -11009,7 +11013,7 @@ static void test_MsiEnumPatchesEx(void)
        "Expected context to be unchanged, got %d\n", context);
     ok(!lstrcmpA(targetsid, "kiwi"),
        "Expected targetsid to be unchanged, got %s\n", targetsid);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     /* dwContext is MSIINSTALLCONTEXT_MACHINE, but szUserSid is non-NULL */
     lstrcpyA(patchcode, "apple");
@@ -11030,7 +11034,7 @@ static void test_MsiEnumPatchesEx(void)
        "Expected context to be unchanged, got %d\n", context);
     ok(!lstrcmpA(targetsid, "kiwi"),
        "Expected targetsid to be unchanged, got %s\n", targetsid);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     /* dwContext is out of bounds */
     lstrcpyA(patchcode, "apple");
@@ -11051,7 +11055,7 @@ static void test_MsiEnumPatchesEx(void)
        "Expected context to be unchanged, got %d\n", context);
     ok(!lstrcmpA(targetsid, "kiwi"),
        "Expected targetsid to be unchanged, got %s\n", targetsid);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     /* dwContext is out of bounds */
     lstrcpyA(patchcode, "apple");
@@ -11072,7 +11076,7 @@ static void test_MsiEnumPatchesEx(void)
        "Expected context to be unchanged, got %d\n", context);
     ok(!lstrcmpA(targetsid, "kiwi"),
        "Expected targetsid to be unchanged, got %s\n", targetsid);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     /* dwFilter is out of bounds */
     lstrcpyA(patchcode, "apple");
@@ -11093,7 +11097,7 @@ static void test_MsiEnumPatchesEx(void)
        "Expected context to be unchanged, got %d\n", context);
     ok(!lstrcmpA(targetsid, "kiwi"),
        "Expected targetsid to be unchanged, got %s\n", targetsid);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     /* dwFilter is out of bounds */
     lstrcpyA(patchcode, "apple");
@@ -11114,7 +11118,7 @@ static void test_MsiEnumPatchesEx(void)
        "Expected context to be unchanged, got %d\n", context);
     ok(!lstrcmpA(targetsid, "kiwi"),
        "Expected targetsid to be unchanged, got %s\n", targetsid);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     /* pcchTargetUserSid is NULL while szTargetUserSid is non-NULL */
     lstrcpyA(patchcode, "apple");
@@ -11178,7 +11182,7 @@ static void test_MsiEnumPatches(void)
        "Expected lpPatchBuf to be unchanged, got \"%s\"\n", patch);
     ok(!lstrcmpA(transforms, "banana"),
        "Expected lpTransformsBuf to be unchanged, got \"%s\"\n", transforms);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     /* empty szProduct */
     size = MAX_PATH;
@@ -11191,7 +11195,7 @@ static void test_MsiEnumPatches(void)
        "Expected lpPatchBuf to be unchanged, got \"%s\"\n", patch);
     ok(!lstrcmpA(transforms, "banana"),
        "Expected lpTransformsBuf to be unchanged, got \"%s\"\n", transforms);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     /* garbage szProduct */
     size = MAX_PATH;
@@ -11204,7 +11208,7 @@ static void test_MsiEnumPatches(void)
        "Expected lpPatchBuf to be unchanged, got \"%s\"\n", patch);
     ok(!lstrcmpA(transforms, "banana"),
        "Expected lpTransformsBuf to be unchanged, got \"%s\"\n", transforms);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     /* guid without brackets */
     size = MAX_PATH;
@@ -11218,7 +11222,7 @@ static void test_MsiEnumPatches(void)
        "Expected lpPatchBuf to be unchanged, got \"%s\"\n", patch);
     ok(!lstrcmpA(transforms, "banana"),
        "Expected lpTransformsBuf to be unchanged, got \"%s\"\n", transforms);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     /* guid with brackets */
     size = MAX_PATH;
@@ -11232,7 +11236,7 @@ static void test_MsiEnumPatches(void)
        "Expected lpPatchBuf to be unchanged, got \"%s\"\n", patch);
     ok(!lstrcmpA(transforms, "banana"),
        "Expected lpTransformsBuf to be unchanged, got \"%s\"\n", transforms);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     /* same length as guid, but random */
     size = MAX_PATH;
@@ -11246,7 +11250,7 @@ static void test_MsiEnumPatches(void)
        "Expected lpPatchBuf to be unchanged, got \"%s\"\n", patch);
     ok(!lstrcmpA(transforms, "banana"),
        "Expected lpTransformsBuf to be unchanged, got \"%s\"\n", transforms);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     /* MSIINSTALLCONTEXT_USERMANAGED */
 
@@ -11260,7 +11264,7 @@ static void test_MsiEnumPatches(void)
        "Expected lpPatchBuf to be unchanged, got \"%s\"\n", patch);
     ok(!lstrcmpA(transforms, "banana"),
        "Expected lpTransformsBuf to be unchanged, got \"%s\"\n", transforms);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     lstrcpyA(keypath, "Software\\Microsoft\\Windows\\CurrentVersion\\Installer\\Managed\\");
     lstrcatA(keypath, usersid);
@@ -11274,7 +11278,7 @@ static void test_MsiEnumPatches(void)
         LocalFree(usersid);
         return;
     }
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* managed product key exists */
     size = MAX_PATH;
@@ -11286,10 +11290,10 @@ static void test_MsiEnumPatches(void)
        "Expected lpPatchBuf to be unchanged, got \"%s\"\n", patch);
     ok(!lstrcmpA(transforms, "banana"),
        "Expected lpTransformsBuf to be unchanged, got \"%s\"\n", transforms);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     res = RegCreateKeyExA(prodkey, "Patches", 0, NULL, 0, access, NULL, &patches, NULL);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* patches key exists */
     size = MAX_PATH;
@@ -11303,12 +11307,12 @@ static void test_MsiEnumPatches(void)
        "Expected lpPatchBuf to be unchanged, got \"%s\"\n", patch);
     ok(!lstrcmpA(transforms, "banana"),
        "Expected lpTransformsBuf to be unchanged, got \"%s\"\n", transforms);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     res = RegSetValueExA(patches, "Patches", 0, REG_SZ,
                          (const BYTE *)patch_squashed,
                          lstrlenA(patch_squashed) + 1);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* Patches value exists, is not REG_MULTI_SZ */
     size = MAX_PATH;
@@ -11322,11 +11326,11 @@ static void test_MsiEnumPatches(void)
        "Expected lpPatchBuf to be unchanged, got \"%s\"\n", patch);
     ok(!lstrcmpA(transforms, "banana"),
        "Expected lpTransformsBuf to be unchanged, got \"%s\"\n", transforms);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     res = RegSetValueExA(patches, "Patches", 0, REG_MULTI_SZ,
                          (const BYTE *)"a\0b\0c\0\0", 7);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* Patches value exists, is not a squashed guid */
     size = MAX_PATH;
@@ -11339,13 +11343,13 @@ static void test_MsiEnumPatches(void)
        "Expected lpPatchBuf to be unchanged, got \"%s\"\n", patch);
     ok(!lstrcmpA(transforms, "banana"),
        "Expected lpTransformsBuf to be unchanged, got \"%s\"\n", transforms);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     patch_squashed[lstrlenA(patch_squashed) + 1] = '\0';
     res = RegSetValueExA(patches, "Patches", 0, REG_MULTI_SZ,
                          (const BYTE *)patch_squashed,
                          lstrlenA(patch_squashed) + 2);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* Patches value exists */
     size = MAX_PATH;
@@ -11360,11 +11364,11 @@ static void test_MsiEnumPatches(void)
        "Expected lpPatchBuf to be unchanged, got \"%s\"\n", patch);
     ok(!lstrcmpA(transforms, "banana"),
        "Expected lpTransformsBuf to be unchanged, got \"%s\"\n", transforms);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     res = RegSetValueExA(patches, patch_squashed, 0, REG_SZ,
                          (const BYTE *)"whatever", 9);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* patch squashed value exists */
     size = MAX_PATH;
@@ -11376,7 +11380,7 @@ static void test_MsiEnumPatches(void)
        "Expected \"%s\", got \"%s\"\n", patchcode, patch);
     ok(!lstrcmpA(transforms, "whatever"),
        "Expected \"whatever\", got \"%s\"\n", transforms);
-    ok(size == 8 || size == MAX_PATH, "Expected 8 or MAX_PATH, got %lu\n", size);
+    ok(size == 8 || size == MAX_PATH, "Expected 8 or MAX_PATH, got %d\n", size);
 
     /* lpPatchBuf is NULL */
     size = MAX_PATH;
@@ -11386,7 +11390,7 @@ static void test_MsiEnumPatches(void)
        "Expected ERROR_INVALID_PARAMETER, got %d\n", r);
     ok(!lstrcmpA(transforms, "banana"),
        "Expected lpTransformsBuf to be unchanged, got \"%s\"\n", transforms);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     /* lpTransformsBuf is NULL, pcchTransformsBuf is not */
     size = MAX_PATH;
@@ -11396,7 +11400,7 @@ static void test_MsiEnumPatches(void)
        "Expected ERROR_INVALID_PARAMETER, got %d\n", r);
     ok(!lstrcmpA(patch, "apple"),
        "Expected lpPatchBuf to be unchanged, got \"%s\"\n", patch);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     /* pcchTransformsBuf is NULL, lpTransformsBuf is not */
     lstrcpyA(patch, "apple");
@@ -11420,7 +11424,7 @@ static void test_MsiEnumPatches(void)
     ok(!lstrcmpA(transforms, "whate") ||
        broken(!lstrcmpA(transforms, "banana")), /* Windows Installer < 3.0 */
        "Expected \"whate\", got \"%s\"\n", transforms);
-    ok(size == 8 || size == 16, "Expected 8 or 16, got %lu\n", size);
+    ok(size == 8 || size == 16, "Expected 8 or 16, got %d\n", size);
 
     /* increase the index */
     size = MAX_PATH;
@@ -11432,7 +11436,7 @@ static void test_MsiEnumPatches(void)
        "Expected lpPatchBuf to be unchanged, got \"%s\"\n", patch);
     ok(!lstrcmpA(transforms, "banana"),
        "Expected lpTransformsBuf to be unchanged, got \"%s\"\n", transforms);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     /* increase again */
     size = MAX_PATH;
@@ -11444,7 +11448,7 @@ static void test_MsiEnumPatches(void)
        "Expected lpPatchBuf to be unchanged, got \"%s\"\n", patch);
     ok(!lstrcmpA(transforms, "banana"),
        "Expected lpTransformsBuf to be unchanged, got \"%s\"\n", transforms);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     RegDeleteValueA(patches, "Patches");
     delete_key(patches, "", access & KEY_WOW64_64KEY);
@@ -11464,13 +11468,13 @@ static void test_MsiEnumPatches(void)
        "Expected lpPatchBuf to be unchanged, got \"%s\"\n", patch);
     ok(!lstrcmpA(transforms, "banana"),
        "Expected lpTransformsBuf to be unchanged, got \"%s\"\n", transforms);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     lstrcpyA(keypath, "Software\\Microsoft\\Installer\\Products\\");
     lstrcatA(keypath, prod_squashed);
 
     res = RegCreateKeyA(HKEY_CURRENT_USER, keypath, &prodkey);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* current user product key exists */
     size = MAX_PATH;
@@ -11482,10 +11486,10 @@ static void test_MsiEnumPatches(void)
        "Expected lpPatchBuf to be unchanged, got \"%s\"\n", patch);
     ok(!lstrcmpA(transforms, "banana"),
        "Expected lpTransformsBuf to be unchanged, got \"%s\"\n", transforms);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     res = RegCreateKeyA(prodkey, "Patches", &patches);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* Patches key exists */
     size = MAX_PATH;
@@ -11499,12 +11503,12 @@ static void test_MsiEnumPatches(void)
        "Expected lpPatchBuf to be unchanged, got \"%s\"\n", patch);
     ok(!lstrcmpA(transforms, "banana"),
        "Expected lpTransformsBuf to be unchanged, got \"%s\"\n", transforms);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     res = RegSetValueExA(patches, "Patches", 0, REG_SZ,
                          (const BYTE *)patch_squashed,
                          lstrlenA(patch_squashed) + 1);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* Patches value exists, is not REG_MULTI_SZ */
     size = MAX_PATH;
@@ -11518,11 +11522,11 @@ static void test_MsiEnumPatches(void)
        "Expected lpPatchBuf to be unchanged, got \"%s\"\n", patch);
     ok(!lstrcmpA(transforms, "banana"),
        "Expected lpTransformsBuf to be unchanged, got \"%s\"\n", transforms);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     res = RegSetValueExA(patches, "Patches", 0, REG_MULTI_SZ,
                          (const BYTE *)"a\0b\0c\0\0", 7);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* Patches value exists, is not a squashed guid */
     size = MAX_PATH;
@@ -11535,13 +11539,13 @@ static void test_MsiEnumPatches(void)
        "Expected lpPatchBuf to be unchanged, got \"%s\"\n", patch);
     ok(!lstrcmpA(transforms, "banana"),
        "Expected lpTransformsBuf to be unchanged, got \"%s\"\n", transforms);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     patch_squashed[lstrlenA(patch_squashed) + 1] = '\0';
     res = RegSetValueExA(patches, "Patches", 0, REG_MULTI_SZ,
                          (const BYTE *)patch_squashed,
                          lstrlenA(patch_squashed) + 2);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* Patches value exists */
     size = MAX_PATH;
@@ -11556,11 +11560,11 @@ static void test_MsiEnumPatches(void)
        "Expected lpPatchBuf to be unchanged, got \"%s\"\n", patch);
     ok(!lstrcmpA(transforms, "banana"),
        "Expected lpTransformsBuf to be unchanged, got \"%s\"\n", transforms);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     res = RegSetValueExA(patches, patch_squashed, 0, REG_SZ,
                          (const BYTE *)"whatever", 9);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* patch code value exists */
     size = MAX_PATH;
@@ -11576,7 +11580,7 @@ static void test_MsiEnumPatches(void)
     ok(!lstrcmpA(transforms, "banana") ||
        broken(!lstrcmpA(transforms, "whatever")), /* Windows Installer < 3.0 */
        "Expected lpTransformsBuf to be unchanged, got \"%s\"\n", transforms);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     lstrcpyA(keypath, "Software\\Microsoft\\Windows\\CurrentVersion\\Installer\\UserData\\");
     lstrcatA(keypath, usersid);
@@ -11584,7 +11588,7 @@ static void test_MsiEnumPatches(void)
     lstrcatA(keypath, patch_squashed);
 
     res = RegCreateKeyExA(HKEY_LOCAL_MACHINE, keypath, 0, NULL, 0, access, NULL, &userkey, NULL);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* userdata patch key exists */
     size = MAX_PATH;
@@ -11596,7 +11600,7 @@ static void test_MsiEnumPatches(void)
        "Expected \"%s\", got \"%s\"\n", patchcode, patch);
     ok(!lstrcmpA(transforms, "whatever"),
        "Expected \"whatever\", got \"%s\"\n", transforms);
-    ok(size == 8 || size == MAX_PATH, "Expected 8 or MAX_PATH, got %lu\n", size);
+    ok(size == 8 || size == MAX_PATH, "Expected 8 or MAX_PATH, got %d\n", size);
 
     delete_key(userkey, "", access & KEY_WOW64_64KEY);
     RegCloseKey(userkey);
@@ -11619,7 +11623,7 @@ static void test_MsiEnumPatches(void)
        "Expected lpPatchBuf to be unchanged, got \"%s\"\n", patch);
     ok(!lstrcmpA(transforms, "banana"),
        "Expected lpTransformsBuf to be unchanged, got \"%s\"\n", transforms);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     lstrcpyA(keypath, "Software\\Classes\\Installer\\Products\\");
     lstrcatA(keypath, prod_squashed);
@@ -11631,7 +11635,7 @@ static void test_MsiEnumPatches(void)
         LocalFree(usersid);
         return;
     }
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* local product key exists */
     size = MAX_PATH;
@@ -11643,10 +11647,10 @@ static void test_MsiEnumPatches(void)
        "Expected lpPatchBuf to be unchanged, got \"%s\"\n", patch);
     ok(!lstrcmpA(transforms, "banana"),
        "Expected lpTransformsBuf to be unchanged, got \"%s\"\n", transforms);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     res = RegCreateKeyExA(prodkey, "Patches", 0, NULL, 0, access, NULL, &patches, NULL);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* Patches key exists */
     size = MAX_PATH;
@@ -11660,12 +11664,12 @@ static void test_MsiEnumPatches(void)
        "Expected lpPatchBuf to be unchanged, got \"%s\"\n", patch);
     ok(!lstrcmpA(transforms, "banana"),
        "Expected lpTransformsBuf to be unchanged, got \"%s\"\n", transforms);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     res = RegSetValueExA(patches, "Patches", 0, REG_SZ,
                          (const BYTE *)patch_squashed,
                          lstrlenA(patch_squashed) + 1);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* Patches value exists, is not REG_MULTI_SZ */
     size = MAX_PATH;
@@ -11679,11 +11683,11 @@ static void test_MsiEnumPatches(void)
        "Expected lpPatchBuf to be unchanged, got \"%s\"\n", patch);
     ok(!lstrcmpA(transforms, "banana"),
        "Expected lpTransformsBuf to be unchanged, got \"%s\"\n", transforms);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     res = RegSetValueExA(patches, "Patches", 0, REG_MULTI_SZ,
                          (const BYTE *)"a\0b\0c\0\0", 7);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* Patches value exists, is not a squashed guid */
     size = MAX_PATH;
@@ -11696,13 +11700,13 @@ static void test_MsiEnumPatches(void)
        "Expected lpPatchBuf to be unchanged, got \"%s\"\n", patch);
     ok(!lstrcmpA(transforms, "banana"),
        "Expected lpTransformsBuf to be unchanged, got \"%s\"\n", transforms);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     patch_squashed[lstrlenA(patch_squashed) + 1] = '\0';
     res = RegSetValueExA(patches, "Patches", 0, REG_MULTI_SZ,
                          (const BYTE *)patch_squashed,
                          lstrlenA(patch_squashed) + 2);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* Patches value exists */
     size = MAX_PATH;
@@ -11717,11 +11721,11 @@ static void test_MsiEnumPatches(void)
        "Expected lpPatchBuf to be unchanged, got \"%s\"\n", patch);
     ok(!lstrcmpA(transforms, "banana"),
        "Expected lpTransformsBuf to be unchanged, got \"%s\"\n", transforms);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     res = RegSetValueExA(patches, patch_squashed, 0, REG_SZ,
                          (const BYTE *)"whatever", 9);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* patch code value exists */
     size = MAX_PATH;
@@ -11733,14 +11737,14 @@ static void test_MsiEnumPatches(void)
        "Expected \"%s\", got \"%s\"\n", patchcode, patch);
     ok(!lstrcmpA(transforms, "whatever"),
        "Expected \"whatever\", got \"%s\"\n", transforms);
-    ok(size == 8 || size == MAX_PATH, "Expected 8 or MAX_PATH, got %lu\n", size);
+    ok(size == 8 || size == MAX_PATH, "Expected 8 or MAX_PATH, got %d\n", size);
 
     lstrcpyA(keypath, "Software\\Microsoft\\Windows\\CurrentVersion\\");
     lstrcatA(keypath, "Installer\\UserData\\S-1-5-18\\Products\\");
     lstrcatA(keypath, prod_squashed);
 
     res = RegCreateKeyExA(HKEY_LOCAL_MACHINE, keypath, 0, NULL, 0, access, NULL, &udprod, NULL);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* local UserData product key exists */
     size = MAX_PATH;
@@ -11752,10 +11756,10 @@ static void test_MsiEnumPatches(void)
        "Expected \"%s\", got \"%s\"\n", patchcode, patch);
     ok(!lstrcmpA(transforms, "whatever"),
        "Expected \"whatever\", got \"%s\"\n", transforms);
-    ok(size == 8 || size == MAX_PATH, "Expected 8 or MAX_PATH, got %lu\n", size);
+    ok(size == 8 || size == MAX_PATH, "Expected 8 or MAX_PATH, got %d\n", size);
 
     res = RegCreateKeyExA(udprod, "Patches", 0, NULL, 0, access, NULL, &udpatch, NULL);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* local UserData Patches key exists */
     size = MAX_PATH;
@@ -11767,10 +11771,10 @@ static void test_MsiEnumPatches(void)
        "Expected \"%s\", got \"%s\"\n", patchcode, patch);
     ok(!lstrcmpA(transforms, "whatever"),
        "Expected \"whatever\", got \"%s\"\n", transforms);
-    ok(size == 8 || size == MAX_PATH, "Expected 8 or MAX_PATH, got %lu\n", size);
+    ok(size == 8 || size == MAX_PATH, "Expected 8 or MAX_PATH, got %d\n", size);
 
     res = RegCreateKeyExA(udpatch, patch_squashed, 0, NULL, 0, access, NULL, &hpatch, NULL);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* local UserData Product patch key exists */
     size = MAX_PATH;
@@ -11786,12 +11790,12 @@ static void test_MsiEnumPatches(void)
     ok(!lstrcmpA(transforms, "banana") ||
        broken(!lstrcmpA(transforms, "whatever")), /* Windows Installer < 3.0 */
        "Expected lpTransformsBuf to be unchanged, got \"%s\"\n", transforms);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     data = MSIPATCHSTATE_APPLIED;
     res = RegSetValueExA(hpatch, "State", 0, REG_DWORD,
                          (const BYTE *)&data, sizeof(DWORD));
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* State value exists */
     size = MAX_PATH;
@@ -11803,7 +11807,7 @@ static void test_MsiEnumPatches(void)
        "Expected \"%s\", got \"%s\"\n", patchcode, patch);
     ok(!lstrcmpA(transforms, "whatever"),
        "Expected \"whatever\", got \"%s\"\n", transforms);
-    ok(size == 8 || size == MAX_PATH, "Expected 8 or MAX_PATH, got %lu\n", size);
+    ok(size == 8 || size == MAX_PATH, "Expected 8 or MAX_PATH, got %d\n", size);
 
     /* now duplicate some of the tests for the W version */
 
@@ -11821,7 +11825,7 @@ static void test_MsiEnumPatches(void)
     ok(!lstrcmpA(transforms, "whate") ||
        broken(!lstrcmpA(transforms, "banana")), /* Windows Installer < 3.0 */
        "Expected \"whate\", got \"%s\"\n", transforms);
-    ok(size == 8, "Expected 8, got %lu\n", size);
+    ok(size == 8, "Expected 8, got %d\n", size);
 
     /* patch code value exists */
     size = MAX_PATH;
@@ -11835,7 +11839,7 @@ static void test_MsiEnumPatches(void)
        "Expected \"%s\", got \"%s\"\n", patchcode, patch);
     ok(!lstrcmpA(transforms, "whatever"),
        "Expected \"whatever\", got \"%s\"\n", transforms);
-    ok(size == 8 || size == MAX_PATH, "Expected 8 or MAX_PATH, got %lu\n", size);
+    ok(size == 8 || size == MAX_PATH, "Expected 8 or MAX_PATH, got %d\n", size);
 
     RegDeleteValueA(patches, patch_squashed);
     RegDeleteValueA(patches, "Patches");
@@ -11888,7 +11892,7 @@ static void test_MsiGetPatchInfoEx(void)
        "Expected ERROR_INVALID_PARAMETER, got %d\n", r);
     ok(!lstrcmpA(val, "apple"),
        "Expected val to be unchanged, got \"%s\"\n", val);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     /* empty szPatchCode */
     size = MAX_PATH;
@@ -11899,7 +11903,7 @@ static void test_MsiGetPatchInfoEx(void)
        "Expected ERROR_INVALID_PARAMETER, got %d\n", r);
     ok(!lstrcmpA(val, "apple"),
        "Expected val to be unchanged, got \"%s\"\n", val);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     /* garbage szPatchCode */
     size = MAX_PATH;
@@ -11911,7 +11915,7 @@ static void test_MsiGetPatchInfoEx(void)
        "Expected ERROR_INVALID_PARAMETER, got %d\n", r);
     ok(!lstrcmpA(val, "apple"),
        "Expected val to be unchanged, got \"%s\"\n", val);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     /* guid without brackets */
     size = MAX_PATH;
@@ -11923,7 +11927,7 @@ static void test_MsiGetPatchInfoEx(void)
        "Expected ERROR_INVALID_PARAMETER, got %d\n", r);
     ok(!lstrcmpA(val, "apple"),
        "Expected val to be unchanged, got \"%s\"\n", val);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     /* guid with brackets */
     size = MAX_PATH;
@@ -11935,7 +11939,7 @@ static void test_MsiGetPatchInfoEx(void)
        "Expected ERROR_UNKNOWN_PRODUCT, got %d\n", r);
     ok(!lstrcmpA(val, "apple"),
        "Expected val to be unchanged, got \"%s\"\n", val);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     /* same length as guid, but random */
     size = MAX_PATH;
@@ -11947,7 +11951,7 @@ static void test_MsiGetPatchInfoEx(void)
        "Expected ERROR_INVALID_PARAMETER, got %d\n", r);
     ok(!lstrcmpA(val, "apple"),
        "Expected val to be unchanged, got \"%s\"\n", val);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     /* NULL szProductCode */
     lstrcpyA(val, "apple");
@@ -11958,7 +11962,7 @@ static void test_MsiGetPatchInfoEx(void)
        "Expected ERROR_INVALID_PARAMETER, got %d\n", r);
     ok(!lstrcmpA(val, "apple"),
        "Expected val to be unchanged, got \"%s\"\n", val);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     /* empty szProductCode */
     size = MAX_PATH;
@@ -11969,7 +11973,7 @@ static void test_MsiGetPatchInfoEx(void)
        "Expected ERROR_INVALID_PARAMETER, got %d\n", r);
     ok(!lstrcmpA(val, "apple"),
        "Expected val to be unchanged, got \"%s\"\n", val);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     /* garbage szProductCode */
     size = MAX_PATH;
@@ -11981,7 +11985,7 @@ static void test_MsiGetPatchInfoEx(void)
        "Expected ERROR_INVALID_PARAMETER, got %d\n", r);
     ok(!lstrcmpA(val, "apple"),
        "Expected val to be unchanged, got \"%s\"\n", val);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     /* guid without brackets */
     size = MAX_PATH;
@@ -11993,7 +11997,7 @@ static void test_MsiGetPatchInfoEx(void)
        "Expected ERROR_INVALID_PARAMETER, got %d\n", r);
     ok(!lstrcmpA(val, "apple"),
        "Expected val to be unchanged, got \"%s\"\n", val);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     /* guid with brackets */
     size = MAX_PATH;
@@ -12005,7 +12009,7 @@ static void test_MsiGetPatchInfoEx(void)
        "Expected ERROR_UNKNOWN_PRODUCT, got %d\n", r);
     ok(!lstrcmpA(val, "apple"),
        "Expected val to be unchanged, got \"%s\"\n", val);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     /* same length as guid, but random */
     size = MAX_PATH;
@@ -12017,7 +12021,7 @@ static void test_MsiGetPatchInfoEx(void)
        "Expected ERROR_INVALID_PARAMETER, got %d\n", r);
     ok(!lstrcmpA(val, "apple"),
        "Expected val to be unchanged, got \"%s\"\n", val);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     /* szUserSid cannot be S-1-5-18 for MSIINSTALLCONTEXT_USERMANAGED */
     size = MAX_PATH;
@@ -12029,7 +12033,7 @@ static void test_MsiGetPatchInfoEx(void)
        "Expected ERROR_INVALID_PARAMETER, got %d\n", r);
     ok(!lstrcmpA(val, "apple"),
        "Expected val to be unchanged, got \"%s\"\n", val);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     /* szUserSid cannot be S-1-5-18 for MSIINSTALLCONTEXT_USERUNMANAGED */
     size = MAX_PATH;
@@ -12041,7 +12045,7 @@ static void test_MsiGetPatchInfoEx(void)
        "Expected ERROR_INVALID_PARAMETER, got %d\n", r);
     ok(!lstrcmpA(val, "apple"),
        "Expected val to be unchanged, got \"%s\"\n", val);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     /* szUserSid cannot be S-1-5-18 for MSIINSTALLCONTEXT_MACHINE */
     size = MAX_PATH;
@@ -12053,7 +12057,7 @@ static void test_MsiGetPatchInfoEx(void)
        "Expected ERROR_INVALID_PARAMETER, got %d\n", r);
     ok(!lstrcmpA(val, "apple"),
        "Expected val to be unchanged, got \"%s\"\n", val);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     /* szUserSid must be NULL for MSIINSTALLCONTEXT_MACHINE */
     size = MAX_PATH;
@@ -12065,7 +12069,7 @@ static void test_MsiGetPatchInfoEx(void)
        "Expected ERROR_INVALID_PARAMETER, got %d\n", r);
     ok(!lstrcmpA(val, "apple"),
        "Expected val to be unchanged, got \"%s\"\n", val);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     /* dwContext is out of range */
     size = MAX_PATH;
@@ -12077,7 +12081,7 @@ static void test_MsiGetPatchInfoEx(void)
        "Expected ERROR_INVALID_PARAMETER, got %d\n", r);
     ok(!lstrcmpA(val, "apple"),
        "Expected val to be unchanged, got \"%s\"\n", val);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     /* dwContext is out of range */
     size = MAX_PATH;
@@ -12089,7 +12093,7 @@ static void test_MsiGetPatchInfoEx(void)
        "Expected ERROR_INVALID_PARAMETER, got %d\n", r);
     ok(!lstrcmpA(val, "apple"),
        "Expected val to be unchanged, got \"%s\"\n", val);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     /* dwContext is invalid */
     size = MAX_PATH;
@@ -12100,7 +12104,7 @@ static void test_MsiGetPatchInfoEx(void)
        "Expected ERROR_INVALID_PARAMETER, got %d\n", r);
     ok(!lstrcmpA(val, "apple"),
        "Expected val to be unchanged, got \"%s\"\n", val);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     /* MSIINSTALLCONTEXT_USERMANAGED */
 
@@ -12113,7 +12117,7 @@ static void test_MsiGetPatchInfoEx(void)
        "Expected ERROR_UNKNOWN_PRODUCT, got %d\n", r);
     ok(!lstrcmpA(val, "apple"),
        "Expected val to be unchanged, got \"%s\"\n", val);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     lstrcpyA(keypath, "Software\\Microsoft\\Windows\\CurrentVersion\\Installer\\UserData\\");
     lstrcatA(keypath, usersid);
@@ -12127,7 +12131,7 @@ static void test_MsiGetPatchInfoEx(void)
         LocalFree(usersid);
         return;
     }
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* local UserData product key exists */
     size = MAX_PATH;
@@ -12139,10 +12143,10 @@ static void test_MsiGetPatchInfoEx(void)
        "Expected ERROR_UNKNOWN_PRODUCT, got %d\n", r);
     ok(!lstrcmpA(val, "apple"),
        "Expected val to be unchanged, got \"%s\"\n", val);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     res = RegCreateKeyExA(udprod, "InstallProperties", 0, NULL, 0, access, NULL, &props, NULL);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* InstallProperties key exists */
     size = MAX_PATH;
@@ -12153,10 +12157,10 @@ static void test_MsiGetPatchInfoEx(void)
     ok(r == ERROR_UNKNOWN_PATCH, "Expected ERROR_UNKNOWN_PATCH, got %d\n", r);
     ok(!lstrcmpA(val, "apple"),
        "Expected val to be unchanged, got \"%s\"\n", val);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     res = RegCreateKeyExA(udprod, "Patches", 0, NULL, 0, access, NULL, &patches, NULL);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* Patches key exists */
     size = MAX_PATH;
@@ -12167,10 +12171,10 @@ static void test_MsiGetPatchInfoEx(void)
     ok(r == ERROR_UNKNOWN_PATCH, "Expected ERROR_UNKNOWN_PATCHA, got %d\n", r);
     ok(!lstrcmpA(val, "apple"),
        "Expected val to be unchanged, got \"%s\"\n", val);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     res = RegCreateKeyExA(patches, patch_squashed, 0, NULL, 0, access, NULL, &hpatch, NULL);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* Patches key exists */
     size = MAX_PATH;
@@ -12181,7 +12185,7 @@ static void test_MsiGetPatchInfoEx(void)
     ok(r == ERROR_UNKNOWN_PATCH, "Expected ERROR_UNKNOWN_PATCH, got %d\n", r);
     ok(!lstrcmpA(val, "apple"),
        "Expected val to be unchanged, got \"%s\"\n", val);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     lstrcpyA(keypath, "Software\\Microsoft\\Windows\\CurrentVersion\\Installer\\Managed\\");
     lstrcatA(keypath, usersid);
@@ -12189,7 +12193,7 @@ static void test_MsiGetPatchInfoEx(void)
     lstrcatA(keypath, prod_squashed);
 
     res = RegCreateKeyExA(HKEY_LOCAL_MACHINE, keypath, 0, NULL, 0, access, NULL, &prodkey, NULL);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* managed product key exists */
     size = MAX_PATH;
@@ -12200,10 +12204,10 @@ static void test_MsiGetPatchInfoEx(void)
     ok(r == ERROR_UNKNOWN_PATCH, "Expected ERROR_UNKNOWN_PATCH, got %d\n", r);
     ok(!lstrcmpA(val, "apple"),
        "Expected val to be unchanged, got \"%s\"\n", val);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     res = RegCreateKeyExA(prodkey, "Patches", 0, NULL, 0, access, NULL, &prodpatches, NULL);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* Patches key exists */
     size = MAX_PATH;
@@ -12214,11 +12218,11 @@ static void test_MsiGetPatchInfoEx(void)
     ok(r == ERROR_UNKNOWN_PATCH, "Expected ERROR_UNKNOWN_PATCH, got %d\n", r);
     ok(!lstrcmpA(val, "apple"),
        "Expected val to be unchanged, got \"%s\"\n", val);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     res = RegSetValueExA(prodpatches, patch_squashed, 0, REG_SZ,
                          (const BYTE *)"transforms", 11);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* specific patch value exists */
     size = MAX_PATH;
@@ -12229,7 +12233,7 @@ static void test_MsiGetPatchInfoEx(void)
     ok(r == ERROR_UNKNOWN_PATCH, "Expected ERROR_UNKNOWN_PATCH, got %d\n", r);
     ok(!lstrcmpA(val, "apple"),
        "Expected val to be unchanged, got \"%s\"\n", val);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     lstrcpyA(keypath, "Software\\Microsoft\\Windows\\CurrentVersion\\Installer\\UserData\\");
     lstrcatA(keypath, usersid);
@@ -12237,7 +12241,7 @@ static void test_MsiGetPatchInfoEx(void)
     lstrcatA(keypath, patch_squashed);
 
     res = RegCreateKeyExA(HKEY_LOCAL_MACHINE, keypath, 0, NULL, 0, access, NULL, &udpatch, NULL);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* UserData Patches key exists */
     size = MAX_PATH;
@@ -12247,11 +12251,11 @@ static void test_MsiGetPatchInfoEx(void)
                             INSTALLPROPERTY_LOCALPACKAGEA, val, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(val, ""), "Expected \"\", got \"%s\"\n", val);
-    ok(size == 0, "Expected 0, got %lu\n", size);
+    ok(size == 0, "Expected 0, got %d\n", size);
 
     res = RegSetValueExA(udpatch, "ManagedLocalPackage", 0, REG_SZ,
                          (const BYTE *)"pack", 5);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* ManagedLocalPatch value exists */
     size = MAX_PATH;
@@ -12261,7 +12265,7 @@ static void test_MsiGetPatchInfoEx(void)
                             INSTALLPROPERTY_LOCALPACKAGEA, val, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(val, "pack"), "Expected \"pack\", got \"%s\"\n", val);
-    ok(size == 4, "Expected 4, got %lu\n", size);
+    ok(size == 4, "Expected 4, got %d\n", size);
 
     size = MAX_PATH;
     lstrcpyA(val, "apple");
@@ -12270,11 +12274,11 @@ static void test_MsiGetPatchInfoEx(void)
                             INSTALLPROPERTY_TRANSFORMSA, val, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(val, "transforms"), "Expected \"transforms\", got \"%s\"\n", val);
-    ok(size == 10, "Expected 10, got %lu\n", size);
+    ok(size == 10, "Expected 10, got %d\n", size);
 
     res = RegSetValueExA(hpatch, "Installed", 0, REG_SZ,
                          (const BYTE *)"mydate", 7);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* Installed value exists */
     size = MAX_PATH;
@@ -12284,11 +12288,11 @@ static void test_MsiGetPatchInfoEx(void)
                             INSTALLPROPERTY_INSTALLDATEA, val, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(val, "mydate"), "Expected \"mydate\", got \"%s\"\n", val);
-    ok(size == 6, "Expected 6, got %lu\n", size);
+    ok(size == 6, "Expected 6, got %d\n", size);
 
     res = RegSetValueExA(hpatch, "Uninstallable", 0, REG_SZ,
                          (const BYTE *)"yes", 4);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* Uninstallable value exists */
     size = MAX_PATH;
@@ -12298,11 +12302,11 @@ static void test_MsiGetPatchInfoEx(void)
                             INSTALLPROPERTY_UNINSTALLABLEA, val, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(val, "yes"), "Expected \"yes\", got \"%s\"\n", val);
-    ok(size == 3, "Expected 3, got %lu\n", size);
+    ok(size == 3, "Expected 3, got %d\n", size);
 
     res = RegSetValueExA(hpatch, "State", 0, REG_SZ,
                          (const BYTE *)"good", 5);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* State value exists */
     size = MAX_PATH;
@@ -12312,12 +12316,12 @@ static void test_MsiGetPatchInfoEx(void)
                             INSTALLPROPERTY_PATCHSTATEA, val, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(val, "good"), "Expected \"good\", got \"%s\"\n", val);
-    ok(size == 4, "Expected 4, got %lu\n", size);
+    ok(size == 4, "Expected 4, got %d\n", size);
 
     size = 1;
     res = RegSetValueExA(hpatch, "State", 0, REG_DWORD,
                          (const BYTE *)&size, sizeof(DWORD));
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* State value exists */
     size = MAX_PATH;
@@ -12327,12 +12331,12 @@ static void test_MsiGetPatchInfoEx(void)
                             INSTALLPROPERTY_PATCHSTATEA, val, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(val, "1"), "Expected \"1\", got \"%s\"\n", val);
-    ok(size == 1, "Expected 1, got %lu\n", size);
+    ok(size == 1, "Expected 1, got %d\n", size);
 
     size = 1;
     res = RegSetValueExA(hpatch, "Uninstallable", 0, REG_DWORD,
                          (const BYTE *)&size, sizeof(DWORD));
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* Uninstallable value exists */
     size = MAX_PATH;
@@ -12342,11 +12346,11 @@ static void test_MsiGetPatchInfoEx(void)
                             INSTALLPROPERTY_UNINSTALLABLEA, val, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(val, "1"), "Expected \"1\", got \"%s\"\n", val);
-    ok(size == 1, "Expected 1, got %lu\n", size);
+    ok(size == 1, "Expected 1, got %d\n", size);
 
     res = RegSetValueExA(hpatch, "DisplayName", 0, REG_SZ,
                          (const BYTE *)"display", 8);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* DisplayName value exists */
     size = MAX_PATH;
@@ -12356,11 +12360,11 @@ static void test_MsiGetPatchInfoEx(void)
                             INSTALLPROPERTY_DISPLAYNAMEA, val, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(val, "display"), "Expected \"display\", got \"%s\"\n", val);
-    ok(size == 7, "Expected 7, got %lu\n", size);
+    ok(size == 7, "Expected 7, got %d\n", size);
 
     res = RegSetValueExA(hpatch, "MoreInfoURL", 0, REG_SZ,
                          (const BYTE *)"moreinfo", 9);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* MoreInfoURL value exists */
     size = MAX_PATH;
@@ -12370,7 +12374,7 @@ static void test_MsiGetPatchInfoEx(void)
                             INSTALLPROPERTY_MOREINFOURLA, val, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(val, "moreinfo"), "Expected \"moreinfo\", got \"%s\"\n", val);
-    ok(size == 8, "Expected 8, got %lu\n", size);
+    ok(size == 8, "Expected 8, got %d\n", size);
 
     /* szProperty is invalid */
     size = MAX_PATH;
@@ -12381,7 +12385,7 @@ static void test_MsiGetPatchInfoEx(void)
     ok(r == ERROR_UNKNOWN_PROPERTY,
        "Expected ERROR_UNKNOWN_PROPERTY, got %d\n", r);
     ok(!lstrcmpA(val, "apple"), "Expected \"apple\", got \"%s\"\n", val);
-    ok(size == MAX_PATH, "Expected MAX_PATH, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected MAX_PATH, got %d\n", size);
 
     /* lpValue is NULL, while pcchValue is non-NULL */
     size = MAX_PATH;
@@ -12389,7 +12393,7 @@ static void test_MsiGetPatchInfoEx(void)
                             MSIINSTALLCONTEXT_USERMANAGED,
                             INSTALLPROPERTY_MOREINFOURLA, NULL, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
-    ok(size == 16, "Expected 16, got %lu\n", size);
+    ok(size == 16, "Expected 16, got %d\n", size);
 
     /* pcchValue is NULL, while lpValue is non-NULL */
     lstrcpyA(val, "apple");
@@ -12415,7 +12419,7 @@ static void test_MsiGetPatchInfoEx(void)
     ok(r == ERROR_MORE_DATA, "Expected ERROR_MORE_DATA, got %d\n", r);
     ok(!lstrcmpA(val, "moreinf"),
        "Expected \"moreinf\", got \"%s\"\n", val);
-    ok(size == 16, "Expected 16, got %lu\n", size);
+    ok(size == 16, "Expected 16, got %d\n", size);
 
     /* pcchValue has exactly enough room for NULL terminator */
     size = 9;
@@ -12426,7 +12430,7 @@ static void test_MsiGetPatchInfoEx(void)
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(val, "moreinfo"),
        "Expected \"moreinfo\", got \"%s\"\n", val);
-    ok(size == 8, "Expected 8, got %lu\n", size);
+    ok(size == 8, "Expected 8, got %d\n", size);
 
     /* pcchValue is too small, lpValue is NULL */
     size = 0;
@@ -12434,7 +12438,7 @@ static void test_MsiGetPatchInfoEx(void)
                             MSIINSTALLCONTEXT_USERMANAGED,
                             INSTALLPROPERTY_MOREINFOURLA, NULL, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
-    ok(size == 16, "Expected 16, got %lu\n", size);
+    ok(size == 16, "Expected 16, got %d\n", size);
 
     RegDeleteValueA(prodpatches, patch_squashed);
     delete_key(prodpatches, "", access & KEY_WOW64_64KEY);
@@ -12452,7 +12456,7 @@ static void test_MsiGetPatchInfoEx(void)
                             INSTALLPROPERTY_LOCALPACKAGEA, val, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(val, "pack"), "Expected \"pack\", got \"%s\"\n", val);
-    ok(size == 4, "Expected 4, got %lu\n", size);
+    ok(size == 4, "Expected 4, got %d\n", size);
 
     /* UserData is sufficient for all properties
      * except INSTALLPROPERTY_TRANSFORMS
@@ -12464,7 +12468,7 @@ static void test_MsiGetPatchInfoEx(void)
                             INSTALLPROPERTY_TRANSFORMSA, val, &size);
     ok(r == ERROR_UNKNOWN_PATCH, "Expected ERROR_UNKNOWN_PATCH, got %d\n", r);
     ok(!lstrcmpA(val, "apple"), "Expected \"apple\", got \"%s\"\n", val);
-    ok(size == MAX_PATH, "Expected MAX_PATH, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected MAX_PATH, got %d\n", size);
 
     RegDeleteValueA(hpatch, "MoreInfoURL");
     RegDeleteValueA(hpatch, "Display");
@@ -12494,7 +12498,7 @@ static void test_MsiGetPatchInfoEx(void)
        "Expected ERROR_UNKNOWN_PRODUCT, got %d\n", r);
     ok(!lstrcmpA(val, "apple"),
        "Expected val to be unchanged, got \"%s\"\n", val);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     lstrcpyA(keypath, "Software\\Microsoft\\Windows\\CurrentVersion\\Installer\\UserData\\");
     lstrcatA(keypath, usersid);
@@ -12502,7 +12506,7 @@ static void test_MsiGetPatchInfoEx(void)
     lstrcatA(keypath, prod_squashed);
 
     res = RegCreateKeyExA(HKEY_LOCAL_MACHINE, keypath, 0, NULL, 0, access, NULL, &udprod, NULL);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* local UserData product key exists */
     size = MAX_PATH;
@@ -12514,10 +12518,10 @@ static void test_MsiGetPatchInfoEx(void)
        "Expected ERROR_UNKNOWN_PRODUCT, got %d\n", r);
     ok(!lstrcmpA(val, "apple"),
        "Expected val to be unchanged, got \"%s\"\n", val);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     res = RegCreateKeyExA(udprod, "InstallProperties", 0, NULL, 0, access, NULL, &props, NULL);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* InstallProperties key exists */
     size = MAX_PATH;
@@ -12528,10 +12532,10 @@ static void test_MsiGetPatchInfoEx(void)
     ok(r == ERROR_UNKNOWN_PATCH, "Expected ERROR_UNKNOWN_PATCH, got %d\n", r);
     ok(!lstrcmpA(val, "apple"),
        "Expected val to be unchanged, got \"%s\"\n", val);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     res = RegCreateKeyExA(udprod, "Patches", 0, NULL, 0, access, NULL, &patches, NULL);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* Patches key exists */
     size = MAX_PATH;
@@ -12542,10 +12546,10 @@ static void test_MsiGetPatchInfoEx(void)
     ok(r == ERROR_UNKNOWN_PATCH, "Expected ERROR_UNKNOWN_PATCH, got %d\n", r);
     ok(!lstrcmpA(val, "apple"),
        "Expected val to be unchanged, got \"%s\"\n", val);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     res = RegCreateKeyExA(patches, patch_squashed, 0, NULL, 0, access, NULL, &hpatch, NULL);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* Patches key exists */
     size = MAX_PATH;
@@ -12556,13 +12560,13 @@ static void test_MsiGetPatchInfoEx(void)
     ok(r == ERROR_UNKNOWN_PATCH, "Expected ERROR_UNKNOWN_PATCH, got %d\n", r);
     ok(!lstrcmpA(val, "apple"),
        "Expected val to be unchanged, got \"%s\"\n", val);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     lstrcpyA(keypath, "Software\\Microsoft\\Installer\\Products\\");
     lstrcatA(keypath, prod_squashed);
 
     res = RegCreateKeyA(HKEY_CURRENT_USER, keypath, &prodkey);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* current user product key exists */
     size = MAX_PATH;
@@ -12573,10 +12577,10 @@ static void test_MsiGetPatchInfoEx(void)
     ok(r == ERROR_UNKNOWN_PATCH, "Expected ERROR_UNKNOWN_PATCH, got %d\n", r);
     ok(!lstrcmpA(val, "apple"),
        "Expected val to be unchanged, got \"%s\"\n", val);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     res = RegCreateKeyA(prodkey, "Patches", &prodpatches);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* Patches key exists */
     size = MAX_PATH;
@@ -12587,11 +12591,11 @@ static void test_MsiGetPatchInfoEx(void)
     ok(r == ERROR_UNKNOWN_PATCH, "Expected ERROR_UNKNOWN_PATCH, got %d\n", r);
     ok(!lstrcmpA(val, "apple"),
        "Expected val to be unchanged, got \"%s\"\n", val);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     res = RegSetValueExA(prodpatches, patch_squashed, 0, REG_SZ,
                          (const BYTE *)"transforms", 11);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* specific patch value exists */
     size = MAX_PATH;
@@ -12602,7 +12606,7 @@ static void test_MsiGetPatchInfoEx(void)
     ok(r == ERROR_UNKNOWN_PATCH, "Expected ERROR_UNKNOWN_PATCH, got %d\n", r);
     ok(!lstrcmpA(val, "apple"),
        "Expected val to be unchanged, got \"%s\"\n", val);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     lstrcpyA(keypath, "Software\\Microsoft\\Windows\\CurrentVersion\\Installer\\UserData\\");
     lstrcatA(keypath, usersid);
@@ -12610,7 +12614,7 @@ static void test_MsiGetPatchInfoEx(void)
     lstrcatA(keypath, patch_squashed);
 
     res = RegCreateKeyExA(HKEY_LOCAL_MACHINE, keypath, 0, NULL, 0, access, NULL, &udpatch, NULL);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* UserData Patches key exists */
     size = MAX_PATH;
@@ -12620,11 +12624,11 @@ static void test_MsiGetPatchInfoEx(void)
                             INSTALLPROPERTY_LOCALPACKAGEA, val, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(val, ""), "Expected \"\", got \"%s\"\n", val);
-    ok(size == 0, "Expected 0, got %lu\n", size);
+    ok(size == 0, "Expected 0, got %d\n", size);
 
     res = RegSetValueExA(udpatch, "LocalPackage", 0, REG_SZ,
                          (const BYTE *)"pack", 5);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* LocalPatch value exists */
     size = MAX_PATH;
@@ -12634,7 +12638,7 @@ static void test_MsiGetPatchInfoEx(void)
                             INSTALLPROPERTY_LOCALPACKAGEA, val, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(val, "pack"), "Expected \"pack\", got \"%s\"\n", val);
-    ok(size == 4, "Expected 4, got %lu\n", size);
+    ok(size == 4, "Expected 4, got %d\n", size);
 
     size = MAX_PATH;
     lstrcpyA(val, "apple");
@@ -12643,7 +12647,7 @@ static void test_MsiGetPatchInfoEx(void)
                             INSTALLPROPERTY_TRANSFORMSA, val, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(val, "transforms"), "Expected \"transforms\", got \"%s\"\n", val);
-    ok(size == 10, "Expected 10, got %lu\n", size);
+    ok(size == 10, "Expected 10, got %d\n", size);
 
     RegDeleteValueA(prodpatches, patch_squashed);
     delete_key(prodpatches, "", access & KEY_WOW64_64KEY);
@@ -12661,7 +12665,7 @@ static void test_MsiGetPatchInfoEx(void)
                             INSTALLPROPERTY_LOCALPACKAGEA, val, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(val, "pack"), "Expected \"pack\", got \"%s\"\n", val);
-    ok(size == 4, "Expected 4, got %lu\n", size);
+    ok(size == 4, "Expected 4, got %d\n", size);
 
     /* UserData is sufficient for all properties
      * except INSTALLPROPERTY_TRANSFORMS
@@ -12673,7 +12677,7 @@ static void test_MsiGetPatchInfoEx(void)
                             INSTALLPROPERTY_TRANSFORMSA, val, &size);
     ok(r == ERROR_UNKNOWN_PATCH, "Expected ERROR_UNKNOWN_PATCH, got %d\n", r);
     ok(!lstrcmpA(val, "apple"), "Expected \"apple\", got \"%s\"\n", val);
-    ok(size == MAX_PATH, "Expected MAX_PATH, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected MAX_PATH, got %d\n", size);
 
     RegDeleteValueA(udpatch, "LocalPackage");
     delete_key(udpatch, "", access & KEY_WOW64_64KEY);
@@ -12698,14 +12702,14 @@ static void test_MsiGetPatchInfoEx(void)
        "Expected ERROR_UNKNOWN_PRODUCT, got %d\n", r);
     ok(!lstrcmpA(val, "apple"),
        "Expected val to be unchanged, got \"%s\"\n", val);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     lstrcpyA(keypath, "Software\\Microsoft\\Windows\\CurrentVersion\\Installer");
     lstrcatA(keypath, "\\UserData\\S-1-5-18\\Products\\");
     lstrcatA(keypath, prod_squashed);
 
     res = RegCreateKeyExA(HKEY_LOCAL_MACHINE, keypath, 0, NULL, 0, access, NULL, &udprod, NULL);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* local UserData product key exists */
     size = MAX_PATH;
@@ -12717,10 +12721,10 @@ static void test_MsiGetPatchInfoEx(void)
        "Expected ERROR_UNKNOWN_PRODUCT, got %d\n", r);
     ok(!lstrcmpA(val, "apple"),
        "Expected val to be unchanged, got \"%s\"\n", val);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     res = RegCreateKeyExA(udprod, "InstallProperties", 0, NULL, 0, access, NULL, &props, NULL);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* InstallProperties key exists */
     size = MAX_PATH;
@@ -12731,10 +12735,10 @@ static void test_MsiGetPatchInfoEx(void)
     ok(r == ERROR_UNKNOWN_PATCH, "Expected ERROR_UNKNOWN_PATCH, got %d\n", r);
     ok(!lstrcmpA(val, "apple"),
        "Expected val to be unchanged, got \"%s\"\n", val);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     res = RegCreateKeyExA(udprod, "Patches", 0, NULL, 0, access, NULL, &patches, NULL);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* Patches key exists */
     size = MAX_PATH;
@@ -12745,10 +12749,10 @@ static void test_MsiGetPatchInfoEx(void)
     ok(r == ERROR_UNKNOWN_PATCH, "Expected ERROR_UNKNOWN_PATCH, got %d\n", r);
     ok(!lstrcmpA(val, "apple"),
        "Expected val to be unchanged, got \"%s\"\n", val);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     res = RegCreateKeyExA(patches, patch_squashed, 0, NULL, 0, access, NULL, &hpatch, NULL);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* Patches key exists */
     size = MAX_PATH;
@@ -12759,7 +12763,7 @@ static void test_MsiGetPatchInfoEx(void)
     ok(r == ERROR_UNKNOWN_PATCH, "Expected ERROR_UNKNOWN_PATCH, got %d\n", r);
     ok(!lstrcmpA(val, "apple"),
        "Expected val to be unchanged, got \"%s\"\n", val);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     lstrcpyA(keypath, "Software\\Classes\\Installer\\Products\\");
     lstrcatA(keypath, prod_squashed);
@@ -12771,7 +12775,7 @@ static void test_MsiGetPatchInfoEx(void)
         LocalFree( usersid );
         return;
     }
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* local product key exists */
     size = MAX_PATH;
@@ -12782,10 +12786,10 @@ static void test_MsiGetPatchInfoEx(void)
     ok(r == ERROR_UNKNOWN_PATCH, "Expected ERROR_UNKNOWN_PATCH, got %d\n", r);
     ok(!lstrcmpA(val, "apple"),
        "Expected val to be unchanged, got \"%s\"\n", val);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     res = RegCreateKeyExA(prodkey, "Patches", 0, NULL, 0, access, NULL, &prodpatches, NULL);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* Patches key exists */
     size = MAX_PATH;
@@ -12796,11 +12800,11 @@ static void test_MsiGetPatchInfoEx(void)
     ok(r == ERROR_UNKNOWN_PATCH, "Expected ERROR_UNKNOWN_PATCH, got %d\n", r);
     ok(!lstrcmpA(val, "apple"),
        "Expected val to be unchanged, got \"%s\"\n", val);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     res = RegSetValueExA(prodpatches, patch_squashed, 0, REG_SZ,
                          (const BYTE *)"transforms", 11);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* specific patch value exists */
     size = MAX_PATH;
@@ -12811,14 +12815,14 @@ static void test_MsiGetPatchInfoEx(void)
     ok(r == ERROR_UNKNOWN_PATCH, "Expected ERROR_UNKNOWN_PATCH, got %d\n", r);
     ok(!lstrcmpA(val, "apple"),
        "Expected val to be unchanged, got \"%s\"\n", val);
-    ok(size == MAX_PATH, "Expected size to be unchanged, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     lstrcpyA(keypath, "Software\\Microsoft\\Windows\\CurrentVersion\\Installer");
     lstrcatA(keypath, "\\UserData\\S-1-5-18\\Patches\\");
     lstrcatA(keypath, patch_squashed);
 
     res = RegCreateKeyExA(HKEY_LOCAL_MACHINE, keypath, 0, NULL, 0, access, NULL, &udpatch, NULL);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* UserData Patches key exists */
     size = MAX_PATH;
@@ -12828,11 +12832,11 @@ static void test_MsiGetPatchInfoEx(void)
                             INSTALLPROPERTY_LOCALPACKAGEA, val, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(val, ""), "Expected \"\", got \"%s\"\n", val);
-    ok(size == 0, "Expected 0, got %lu\n", size);
+    ok(size == 0, "Expected 0, got %d\n", size);
 
     res = RegSetValueExA(udpatch, "LocalPackage", 0, REG_SZ,
                          (const BYTE *)"pack", 5);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* LocalPatch value exists */
     size = MAX_PATH;
@@ -12842,7 +12846,7 @@ static void test_MsiGetPatchInfoEx(void)
                             INSTALLPROPERTY_LOCALPACKAGEA, val, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(val, "pack"), "Expected \"pack\", got \"%s\"\n", val);
-    ok(size == 4, "Expected 4, got %lu\n", size);
+    ok(size == 4, "Expected 4, got %d\n", size);
 
     size = MAX_PATH;
     lstrcpyA(val, "apple");
@@ -12851,7 +12855,7 @@ static void test_MsiGetPatchInfoEx(void)
                             INSTALLPROPERTY_TRANSFORMSA, val, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(val, "transforms"), "Expected \"transforms\", got \"%s\"\n", val);
-    ok(size == 10, "Expected 10, got %lu\n", size);
+    ok(size == 10, "Expected 10, got %d\n", size);
 
     RegDeleteValueA(prodpatches, patch_squashed);
     delete_key(prodpatches, "", access & KEY_WOW64_64KEY);
@@ -12869,7 +12873,7 @@ static void test_MsiGetPatchInfoEx(void)
                             INSTALLPROPERTY_LOCALPACKAGEA, val, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(val, "pack"), "Expected \"pack\", got \"%s\"\n", val);
-    ok(size == 4, "Expected 4, got %lu\n", size);
+    ok(size == 4, "Expected 4, got %d\n", size);
 
     /* UserData is sufficient for all properties
      * except INSTALLPROPERTY_TRANSFORMS
@@ -12881,7 +12885,7 @@ static void test_MsiGetPatchInfoEx(void)
                             INSTALLPROPERTY_TRANSFORMSA, val, &size);
     ok(r == ERROR_UNKNOWN_PATCH, "Expected ERROR_UNKNOWN_PATCH, got %d\n", r);
     ok(!lstrcmpA(val, "apple"), "Expected \"apple\", got \"%s\"\n", val);
-    ok(size == MAX_PATH, "Expected MAX_PATH, got %lu\n", size);
+    ok(size == MAX_PATH, "Expected MAX_PATH, got %d\n", size);
 
     RegDeleteValueA(udpatch, "LocalPackage");
     delete_key(udpatch, "", access & KEY_WOW64_64KEY);
@@ -12941,7 +12945,7 @@ static void test_MsiGetPatchInfo(void)
         skip("Not enough rights to perform tests\n");
         return;
     }
-    ok(res == ERROR_SUCCESS, "expected ERROR_SUCCESS got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "expected ERROR_SUCCESS got %d\n", res);
 
     /* product key exists */
     size = MAX_PATH;
@@ -12949,10 +12953,10 @@ static void test_MsiGetPatchInfo(void)
     r = MsiGetPatchInfoA(patch_code, INSTALLPROPERTY_LOCALPACKAGEA, val, &size);
     ok(r == ERROR_UNKNOWN_PRODUCT, "expected ERROR_UNKNOWN_PRODUCT got %u\n", r);
     ok(!lstrcmpA(val, "apple"), "expected val to be unchanged, got \"%s\"\n", val);
-    ok(size == MAX_PATH, "expected size to be unchanged got %lu\n", size);
+    ok(size == MAX_PATH, "expected size to be unchanged got %u\n", size);
 
     res = RegCreateKeyExA(hkey_product, "Patches", 0, NULL, 0, access, NULL, &hkey_patches, NULL);
-    ok(res == ERROR_SUCCESS, "expected ERROR_SUCCESS got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "expected ERROR_SUCCESS got %d\n", res);
 
     /* patches key exists */
     size = MAX_PATH;
@@ -12960,10 +12964,10 @@ static void test_MsiGetPatchInfo(void)
     r = MsiGetPatchInfoA(patch_code, INSTALLPROPERTY_LOCALPACKAGEA, val, &size);
     ok(r == ERROR_UNKNOWN_PRODUCT, "expected ERROR_UNKNOWN_PRODUCT got %u\n", r);
     ok(!lstrcmpA(val, "apple"), "expected val to be unchanged got \"%s\"\n", val);
-    ok(size == MAX_PATH, "expected size to be unchanged got %lu\n", size);
+    ok(size == MAX_PATH, "expected size to be unchanged got %u\n", size);
 
     res = RegCreateKeyExA(hkey_patches, patch_squashed, 0, NULL, 0, access, NULL, &hkey_patch, NULL);
-    ok(res == ERROR_SUCCESS, "expected ERROR_SUCCESS got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "expected ERROR_SUCCESS got %d\n", res);
 
     /* patch key exists */
     size = MAX_PATH;
@@ -12971,7 +12975,7 @@ static void test_MsiGetPatchInfo(void)
     r = MsiGetPatchInfoA(patch_code, INSTALLPROPERTY_LOCALPACKAGEA, val, &size);
     ok(r == ERROR_UNKNOWN_PRODUCT, "expected ERROR_UNKNOWN_PRODUCT got %u\n", r);
     ok(!lstrcmpA(val, "apple"), "expected val to be unchanged got \"%s\"\n", val);
-    ok(size == MAX_PATH, "expected size to be unchanged got %lu\n", size);
+    ok(size == MAX_PATH, "expected size to be unchanged got %u\n", size);
 
     lstrcpyA(keypath, "Software\\Microsoft\\Windows\\CurrentVersion\\Installer");
     lstrcatA(keypath, "\\UserData\\S-1-5-18\\Products\\");
@@ -12983,7 +12987,7 @@ static void test_MsiGetPatchInfo(void)
         skip("Not enough rights to perform tests\n");
         goto done;
     }
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS got %d\n", res);
 
     /* UserData product key exists */
     size = MAX_PATH;
@@ -12991,10 +12995,10 @@ static void test_MsiGetPatchInfo(void)
     r = MsiGetPatchInfoA(patch_code, INSTALLPROPERTY_LOCALPACKAGEA, val, &size);
     ok(r == ERROR_UNKNOWN_PRODUCT, "expected ERROR_UNKNOWN_PRODUCT got %u\n", r);
     ok(!lstrcmpA(val, "apple"), "expected val to be unchanged got \"%s\"\n", val);
-    ok(size == MAX_PATH, "expected size to be unchanged got %lu\n", size);
+    ok(size == MAX_PATH, "expected size to be unchanged got %u\n", size);
 
     res = RegCreateKeyExA(hkey_udproduct, "InstallProperties", 0, NULL, 0, access, NULL, &hkey_udprops, NULL);
-    ok(res == ERROR_SUCCESS, "expected ERROR_SUCCESS got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "expected ERROR_SUCCESS got %d\n", res);
 
     /* InstallProperties key exists */
     size = MAX_PATH;
@@ -13002,10 +13006,10 @@ static void test_MsiGetPatchInfo(void)
     r = MsiGetPatchInfoA(patch_code, INSTALLPROPERTY_LOCALPACKAGEA, val, &size);
     ok(r == ERROR_UNKNOWN_PRODUCT, "expected ERROR_UNKNOWN_PRODUCT got %u\n", r);
     ok(!lstrcmpA(val, "apple"), "expected val to be unchanged, got \"%s\"\n", val);
-    ok(size == MAX_PATH, "expected size to be unchanged got %lu\n", size);
+    ok(size == MAX_PATH, "expected size to be unchanged got %u\n", size);
 
     res = RegCreateKeyExA(hkey_udproduct, "Patches", 0, NULL, 0, access, NULL, &hkey_udpatches, NULL);
-    ok(res == ERROR_SUCCESS, "expected ERROR_SUCCESS got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "expected ERROR_SUCCESS got %d\n", res);
 
     /* UserData Patches key exists */
     size = MAX_PATH;
@@ -13013,13 +13017,13 @@ static void test_MsiGetPatchInfo(void)
     r = MsiGetPatchInfoA(patch_code, INSTALLPROPERTY_LOCALPACKAGEA, val, &size);
     ok(r == ERROR_UNKNOWN_PRODUCT, "expected ERROR_UNKNOWN_PRODUCT got %u\n", r);
     ok(!lstrcmpA(val, "apple"), "expected val to be unchanged got \"%s\"\n", val);
-    ok(size == MAX_PATH, "expected size to be unchanged got %lu\n", size);
+    ok(size == MAX_PATH, "expected size to be unchanged got %u\n", size);
 
     res = RegCreateKeyExA(hkey_udproduct, "Patches", 0, NULL, 0, access, NULL, &hkey_udproductpatches, NULL);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     res = RegCreateKeyExA(hkey_udproductpatches, patch_squashed, 0, NULL, 0, access, NULL, &hkey_udproductpatch, NULL);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* UserData product patch key exists */
     size = MAX_PATH;
@@ -13027,17 +13031,17 @@ static void test_MsiGetPatchInfo(void)
     r = MsiGetPatchInfoA(patch_code, INSTALLPROPERTY_LOCALPACKAGEA, val, &size);
     ok(r == ERROR_UNKNOWN_PRODUCT, "expected ERROR_UNKNOWN_PRODUCT got %u\n", r);
     ok(!lstrcmpA(val, "apple"), "expected val to be unchanged got \"%s\"\n", val);
-    ok(size == MAX_PATH, "expected size to be unchanged got %lu\n", size);
+    ok(size == MAX_PATH, "expected size to be unchanged got %u\n", size);
 
     lstrcpyA(keypath, "Software\\Microsoft\\Windows\\CurrentVersion\\Installer");
     lstrcatA(keypath, "\\UserData\\S-1-5-18\\Patches\\");
     lstrcatA(keypath, patch_squashed);
 
     res = RegCreateKeyExA(HKEY_LOCAL_MACHINE, keypath, 0, NULL, 0, access, NULL, &hkey_udpatch, NULL);
-    ok(res == ERROR_SUCCESS, "expected ERROR_SUCCESS got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "expected ERROR_SUCCESS got %d\n", res);
 
     res = RegSetValueExA(hkey_udpatch, "LocalPackage", 0, REG_SZ, (const BYTE *)"c:\\test.msp", 12);
-    ok(res == ERROR_SUCCESS, "expected ERROR_SUCCESS got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "expected ERROR_SUCCESS got %d\n", res);
 
     /* UserData Patch key exists */
     size = 0;
@@ -13045,28 +13049,28 @@ static void test_MsiGetPatchInfo(void)
     r = MsiGetPatchInfoA(patch_code, INSTALLPROPERTY_LOCALPACKAGEA, val, &size);
     ok(r == ERROR_MORE_DATA, "expected ERROR_MORE_DATA got %u\n", r);
     ok(!lstrcmpA(val, "apple"), "expected \"apple\", got \"%s\"\n", val);
-    ok(size == 11, "expected 11 got %lu\n", size);
+    ok(size == 11, "expected 11 got %u\n", size);
 
     size = MAX_PATH;
     lstrcpyA(val, "apple");
     r = MsiGetPatchInfoA(patch_code, INSTALLPROPERTY_LOCALPACKAGEA, val, &size);
     ok(r == ERROR_SUCCESS, "expected ERROR_SUCCESS got %u\n", r);
     ok(!lstrcmpA(val, "c:\\test.msp"), "expected \"c:\\test.msp\", got \"%s\"\n", val);
-    ok(size == 11, "expected 11 got %lu\n", size);
+    ok(size == 11, "expected 11 got %u\n", size);
 
     size = 0;
     valW[0] = 0;
     r = MsiGetPatchInfoW(patch_codeW, INSTALLPROPERTY_LOCALPACKAGEW, valW, &size);
     ok(r == ERROR_MORE_DATA, "expected ERROR_MORE_DATA got %u\n", r);
     ok(!valW[0], "expected 0 got %u\n", valW[0]);
-    ok(size == 11, "expected 11 got %lu\n", size);
+    ok(size == 11, "expected 11 got %u\n", size);
 
     size = MAX_PATH;
     valW[0] = 0;
     r = MsiGetPatchInfoW(patch_codeW, INSTALLPROPERTY_LOCALPACKAGEW, valW, &size);
     ok(r == ERROR_SUCCESS, "expected ERROR_SUCCESS got %u\n", r);
     ok(valW[0], "expected > 0 got %u\n", valW[0]);
-    ok(size == 11, "expected 11 got %lu\n", size);
+    ok(size == 11, "expected 11 got %u\n", size);
 
     delete_key(hkey_udproductpatch, "", access & KEY_WOW64_64KEY);
     RegCloseKey(hkey_udproductpatch);
@@ -13192,37 +13196,37 @@ static void test_MsiGetFileSignatureInformation(void)
     DWORD len;
 
     hr = MsiGetFileSignatureInformationA( NULL, 0, NULL, NULL, NULL );
-    ok(hr == E_INVALIDARG, "expected E_INVALIDARG got %#lx\n", hr);
+    ok(hr == E_INVALIDARG, "expected E_INVALIDARG got 0x%08x\n", hr);
 
     hr = MsiGetFileSignatureInformationA( NULL, 0, NULL, NULL, &len );
-    ok(hr == E_INVALIDARG, "expected E_INVALIDARG got %#lx\n", hr);
+    ok(hr == E_INVALIDARG, "expected E_INVALIDARG got 0x%08x\n", hr);
 
     hr = MsiGetFileSignatureInformationA( NULL, 0, &cert, NULL, &len );
-    ok(hr == E_INVALIDARG, "expected E_INVALIDARG got %#lx\n", hr);
+    ok(hr == E_INVALIDARG, "expected E_INVALIDARG got 0x%08x\n", hr);
 
     hr = MsiGetFileSignatureInformationA( "", 0, NULL, NULL, NULL );
-    ok(hr == E_INVALIDARG, "expected E_INVALIDARG got %#lx\n", hr);
+    ok(hr == E_INVALIDARG, "expected E_INVALIDARG got 0x%08x\n", hr);
 
     hr = MsiGetFileSignatureInformationA( "signature.bin", 0, NULL, NULL, NULL );
-    ok(hr == E_INVALIDARG, "expected E_INVALIDARG got %#lx\n", hr);
+    ok(hr == E_INVALIDARG, "expected E_INVALIDARG got 0x%08x\n", hr);
 
     hr = MsiGetFileSignatureInformationA( "signature.bin", 0, NULL, NULL, &len );
-    ok(hr == E_INVALIDARG, "expected E_INVALIDARG got %#lx\n", hr);
+    ok(hr == E_INVALIDARG, "expected E_INVALIDARG got 0x%08x\n", hr);
 
     hr = MsiGetFileSignatureInformationA( "signature.bin", 0, &cert, NULL, &len );
-    todo_wine ok(hr == CRYPT_E_FILE_ERROR, "expected CRYPT_E_FILE_ERROR got %#lx\n", hr);
+    todo_wine ok(hr == CRYPT_E_FILE_ERROR, "expected CRYPT_E_FILE_ERROR got 0x%08x\n", hr);
 
     create_file_data( "signature.bin", "signature", sizeof("signature") );
 
     hr = MsiGetFileSignatureInformationA( "signature.bin", 0, NULL, NULL, NULL );
-    ok(hr == E_INVALIDARG, "expected E_INVALIDARG got %#lx\n", hr);
+    ok(hr == E_INVALIDARG, "expected E_INVALIDARG got 0x%08x\n", hr);
 
     hr = MsiGetFileSignatureInformationA( "signature.bin", 0, NULL, NULL, &len );
-    ok(hr == E_INVALIDARG, "expected E_INVALIDARG got %#lx\n", hr);
+    ok(hr == E_INVALIDARG, "expected E_INVALIDARG got 0x%08x\n", hr);
 
     cert = (const CERT_CONTEXT *)0xdeadbeef;
     hr = MsiGetFileSignatureInformationA( "signature.bin", 0, &cert, NULL, &len );
-    todo_wine ok(hr == HRESULT_FROM_WIN32(ERROR_FUNCTION_FAILED), "got %#lx\n", hr);
+    todo_wine ok(hr == HRESULT_FROM_WIN32(ERROR_FUNCTION_FAILED), "got 0x%08x\n", hr);
     ok(cert == NULL, "got %p\n", cert);
 
     DeleteFileA( "signature.bin" );
@@ -13291,7 +13295,7 @@ static void test_MsiEnumProductsEx(void)
     len = sizeof(sid);
     r = pMsiEnumProductsExA( NULL, NULL, 0, 0, NULL, NULL, NULL, &len );
     ok( r == ERROR_INVALID_PARAMETER, "got %u\n", r );
-    ok( len == sizeof(sid), "got %lu\n", len );
+    ok( len == sizeof(sid), "got %u\n", len );
 
     r = pMsiEnumProductsExA( NULL, NULL, MSIINSTALLCONTEXT_ALL, 0, NULL, NULL, NULL, NULL );
     ok( r == ERROR_SUCCESS, "got %u\n", r );
@@ -13300,14 +13304,14 @@ static void test_MsiEnumProductsEx(void)
     len = sizeof(sid);
     r = pMsiEnumProductsExA( product0, NULL, MSIINSTALLCONTEXT_ALL, 0, NULL, NULL, sid, &len );
     ok( r == ERROR_NO_MORE_ITEMS, "got %u\n", r );
-    ok( len == sizeof(sid), "got %lu\n", len );
+    ok( len == sizeof(sid), "got %u\n", len );
     ok( !sid[0], "got %s\n", sid );
 
     sid[0] = 0;
     len = sizeof(sid);
     r = pMsiEnumProductsExA( product0, usersid, MSIINSTALLCONTEXT_ALL, 0, NULL, NULL, sid, &len );
     ok( r == ERROR_NO_MORE_ITEMS, "got %u\n", r );
-    ok( len == sizeof(sid), "got %lu\n", len );
+    ok( len == sizeof(sid), "got %u\n", len );
     ok( !sid[0], "got %s\n", sid );
 
     sid[0] = 0;
@@ -13325,7 +13329,7 @@ static void test_MsiEnumProductsEx(void)
     ok( r == ERROR_SUCCESS, "got %u\n", r );
     ok( guid[0], "empty guid\n" );
     ok( context != 0xdeadbeef, "context unchanged\n" );
-    ok( !len, "got %lu\n", len );
+    ok( !len, "got %u\n", len );
     ok( !sid[0], "got %s\n", sid );
 
     guid[0] = 0;
@@ -13336,7 +13340,7 @@ static void test_MsiEnumProductsEx(void)
     ok( r == ERROR_SUCCESS, "got %u\n", r );
     ok( guid[0], "empty guid\n" );
     ok( context != 0xdeadbeef, "context unchanged\n" );
-    ok( !len, "got %lu\n", len );
+    ok( !len, "got %u\n", len );
     ok( !sid[0], "got %s\n", sid );
 
     guid[0] = 0;
@@ -13352,7 +13356,7 @@ static void test_MsiEnumProductsEx(void)
     ok( r == ERROR_SUCCESS, "got %u\n", r );
     ok( guid[0], "empty guid\n" );
     ok( context != 0xdeadbeef, "context unchanged\n" );
-    ok( !len, "got %lu\n", len );
+    ok( !len, "got %u\n", len );
     ok( !sid[0], "got %s\n", sid );
 
     index = 0;
@@ -13367,21 +13371,21 @@ static void test_MsiEnumProductsEx(void)
         {
             ok( context == MSIINSTALLCONTEXT_MACHINE, "got %u\n", context );
             ok( !sid[0], "got \"%s\"\n", sid );
-            ok( !len, "unexpected length %lu\n", len );
+            ok( !len, "unexpected length %u\n", len );
             found1 = TRUE;
         }
         if (!strcmp( product2, guid ))
         {
             ok( context == MSIINSTALLCONTEXT_USERMANAGED, "got %u\n", context );
             ok( sid[0], "empty sid\n" );
-            ok( len == strlen(sid), "unexpected length %lu\n", len );
+            ok( len == strlen(sid), "unexpected length %u\n", len );
             found2 = TRUE;
         }
         if (!strcmp( product3, guid ))
         {
             ok( context == MSIINSTALLCONTEXT_USERUNMANAGED, "got %u\n", context );
             ok( sid[0], "empty sid\n" );
-            ok( len == strlen(sid), "unexpected length %lu\n", len );
+            ok( len == strlen(sid), "unexpected length %u\n", len );
             found3 = TRUE;
         }
         if (found1 && found2 && found3) break;
@@ -13547,7 +13551,7 @@ static void test_MsiEnumComponentsEx(void)
         {
             ok( context == MSIINSTALLCONTEXT_MACHINE, "got %u\n", context );
             ok( !sid[0], "got \"%s\"\n", sid );
-            ok( !len, "unexpected length %lu\n", len );
+            ok( !len, "unexpected length %u\n", len );
             found1 = TRUE;
             if (found2) break;
         }
@@ -13555,7 +13559,7 @@ static void test_MsiEnumComponentsEx(void)
         {
             ok( context == MSIINSTALLCONTEXT_USERUNMANAGED, "got %u\n", context );
             ok( sid[0], "empty sid\n" );
-            ok( len == strlen(sid), "unexpected length %lu\n", len );
+            ok( len == strlen(sid), "unexpected length %u\n", len );
             found2 = TRUE;
             if (found1) break;
         }
@@ -13748,17 +13752,17 @@ static void test_MsiConfigureProductEx(void)
     lstrcatA(keypath, "83374883CBB1401418CAF2AA7CCEDDDC\\InstallProperties");
 
     res = RegOpenKeyExA(HKEY_LOCAL_MACHINE, keypath, 0, access, &props);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     type = REG_SZ;
     size = MAX_PATH;
     res = RegQueryValueExA(props, "LocalPackage", NULL, &type,
                            (LPBYTE)localpackage, &size);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     res = RegSetValueExA(props, "LocalPackage", 0, REG_SZ,
                          (const BYTE *)"C:\\idontexist.msi", 18);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* LocalPackage is used to find the cached msi package */
     r = MsiConfigureProductExA("{38847338-1BBC-4104-81AC-2FAAC7ECDDCD}",
@@ -13798,33 +13802,33 @@ static void test_MsiConfigureProductEx(void)
     lstrcatA(keypath, "83374883CBB1401418CAF2AA7CCEDDDC\\InstallProperties");
 
     res = RegOpenKeyExA(HKEY_LOCAL_MACHINE, keypath, 0, access, &props);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     type = REG_SZ;
     size = MAX_PATH;
     res = RegQueryValueExA(props, "LocalPackage", NULL, &type,
                            (LPBYTE)localpackage, &size);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     res = RegSetValueExA(props, "LocalPackage", 0, REG_SZ,
                          (const BYTE *)"C:\\idontexist.msi", 18);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     lstrcpyA(keypath, "SOFTWARE\\Classes\\Installer\\Products\\");
     lstrcatA(keypath, "83374883CBB1401418CAF2AA7CCEDDDC\\SourceList");
 
     res = RegOpenKeyExA(HKEY_LOCAL_MACHINE, keypath, 0, access, &source);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     type = REG_SZ;
     size = MAX_PATH;
     res = RegQueryValueExA(source, "PackageName", NULL, &type,
                            (LPBYTE)packagename, &size);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     res = RegSetValueExA(source, "PackageName", 0, REG_SZ,
                          (const BYTE *)"idontexist.msi", 15);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* SourceList is altered */
     r = MsiConfigureProductExA("{38847338-1BBC-4104-81AC-2FAAC7ECDDCD}",
@@ -13840,12 +13844,12 @@ static void test_MsiConfigureProductEx(void)
     /* restore PackageName */
     res = RegSetValueExA(source, "PackageName", 0, REG_SZ,
                          (const BYTE *)packagename, lstrlenA(packagename) + 1);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* restore LocalPackage */
     res = RegSetValueExA(props, "LocalPackage", 0, REG_SZ,
                          (const BYTE *)localpackage, lstrlenA(localpackage) + 1);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
+    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     /* finally remove the product */
     r = MsiConfigureProductExA("{38847338-1BBC-4104-81AC-2FAAC7ECDDCD}",
@@ -13917,7 +13921,7 @@ static void test_MsiSetFeatureAttributes(void)
     r = MsiGetFeatureInfoA( package, "One", &attrs, NULL, NULL, NULL, NULL );
     ok(r == ERROR_SUCCESS, "expected ERROR_SUCCESS, got %u\n", r);
     ok(attrs == INSTALLFEATUREATTRIBUTE_FAVORLOCAL,
-       "expected INSTALLFEATUREATTRIBUTE_FAVORLOCAL, got %#lx\n", attrs);
+       "expected INSTALLFEATUREATTRIBUTE_FAVORLOCAL, got 0x%08x\n", attrs);
 
     r = MsiSetFeatureAttributesA( package, "One", INSTALLFEATUREATTRIBUTE_FAVORLOCAL );
     ok(r == ERROR_SUCCESS, "expected ERROR_SUCCESS, got %u\n", r);
@@ -13926,7 +13930,7 @@ static void test_MsiSetFeatureAttributes(void)
     r = MsiGetFeatureInfoA( package, "One", &attrs, NULL, NULL, NULL, NULL );
     ok(r == ERROR_SUCCESS, "expected ERROR_SUCCESS, got %u\n", r);
     ok(attrs == INSTALLFEATUREATTRIBUTE_FAVORLOCAL,
-       "expected INSTALLFEATUREATTRIBUTE_FAVORLOCAL, got %#lx\n", attrs);
+       "expected INSTALLFEATUREATTRIBUTE_FAVORLOCAL, got 0x%08x\n", attrs);
 
     r = MsiDoActionA( package, "FileCost" );
     ok(r == ERROR_SUCCESS, "expected ERROR_SUCCESS, got %u\n", r);
@@ -13938,7 +13942,7 @@ static void test_MsiSetFeatureAttributes(void)
     r = MsiGetFeatureInfoA( package, "One", &attrs, NULL, NULL, NULL, NULL );
     ok(r == ERROR_SUCCESS, "expected ERROR_SUCCESS, got %u\n", r);
     ok(attrs == INSTALLFEATUREATTRIBUTE_FAVORSOURCE,
-       "expected INSTALLFEATUREATTRIBUTE_FAVORSOURCE, got %#lx\n", attrs);
+       "expected INSTALLFEATUREATTRIBUTE_FAVORSOURCE, got 0x%08x\n", attrs);
 
     r = MsiDoActionA( package, "CostFinalize" );
     ok(r == ERROR_SUCCESS, "expected ERROR_SUCCESS, got %u\n", r);
@@ -13995,15 +13999,15 @@ static void test_MsiGetFeatureInfo(void)
     title_len = help_len = 0;
     r = MsiGetFeatureInfoA( package, "One", NULL, NULL, &title_len, NULL, &help_len );
     ok(r == ERROR_SUCCESS, "expected ERROR_SUCCESS, got %u\n", r);
-    ok(title_len == 3, "expected 3, got %lu\n", title_len);
-    ok(help_len == 3, "expected 3, got %lu\n", help_len);
+    ok(title_len == 3, "expected 3, got %u\n", title_len);
+    ok(help_len == 3, "expected 3, got %u\n", help_len);
 
     title[0] = help[0] = 0;
     title_len = help_len = 0;
     r = MsiGetFeatureInfoA( package, "One", NULL, title, &title_len, help, &help_len );
     ok(r == ERROR_MORE_DATA, "expected ERROR_MORE_DATA, got %u\n", r);
-    ok(title_len == 3, "expected 3, got %lu\n", title_len);
-    ok(help_len == 3, "expected 3, got %lu\n", help_len);
+    ok(title_len == 3, "expected 3, got %u\n", title_len);
+    ok(help_len == 3, "expected 3, got %u\n", help_len);
 
     attrs = 0;
     title[0] = help[0] = 0;
@@ -14011,9 +14015,9 @@ static void test_MsiGetFeatureInfo(void)
     help_len = sizeof(help);
     r = MsiGetFeatureInfoA( package, "One", &attrs, title, &title_len, help, &help_len );
     ok(r == ERROR_SUCCESS, "expected ERROR_SUCCESS, got %u\n", r);
-    ok(attrs == INSTALLFEATUREATTRIBUTE_FAVORLOCAL, "expected INSTALLFEATUREATTRIBUTE_FAVORLOCAL, got %lu\n", attrs);
-    ok(title_len == 3, "expected 3, got %lu\n", title_len);
-    ok(help_len == 3, "expected 3, got %lu\n", help_len);
+    ok(attrs == INSTALLFEATUREATTRIBUTE_FAVORLOCAL, "expected INSTALLFEATUREATTRIBUTE_FAVORLOCAL, got %u\n", attrs);
+    ok(title_len == 3, "expected 3, got %u\n", title_len);
+    ok(help_len == 3, "expected 3, got %u\n", help_len);
     ok(!strcmp(title, "One"), "expected \"One\", got \"%s\"\n", title);
     ok(!strcmp(help, "One"), "expected \"One\", got \"%s\"\n", help);
 
@@ -14023,9 +14027,9 @@ static void test_MsiGetFeatureInfo(void)
     help_len = sizeof(help);
     r = MsiGetFeatureInfoA( package, "Two", &attrs, title, &title_len, help, &help_len );
     ok(r == ERROR_SUCCESS, "expected ERROR_SUCCESS, got %u\n", r);
-    ok(attrs == INSTALLFEATUREATTRIBUTE_FAVORLOCAL, "expected INSTALLFEATUREATTRIBUTE_FAVORLOCAL, got %lu\n", attrs);
-    ok(!title_len, "expected 0, got %lu\n", title_len);
-    ok(!help_len, "expected 0, got %lu\n", help_len);
+    ok(attrs == INSTALLFEATUREATTRIBUTE_FAVORLOCAL, "expected INSTALLFEATUREATTRIBUTE_FAVORLOCAL, got %u\n", attrs);
+    ok(!title_len, "expected 0, got %u\n", title_len);
+    ok(!help_len, "expected 0, got %u\n", help_len);
     ok(!title[0], "expected \"\", got \"%s\"\n", title);
     ok(!help[0], "expected \"\", got \"%s\"\n", help);
 
@@ -14178,7 +14182,7 @@ static void test_lastusedsource(void)
                                MSICODE_PRODUCT, INSTALLPROPERTY_LASTUSEDSOURCEA, value, &size);
     ok(r == ERROR_SUCCESS, "expected ERROR_SUCCESS, got %u\n", r);
     ok(!lstrcmpA(value, path), "expected \"%s\", got \"%s\"\n", path, value);
-    ok(size == lstrlenA(path), "expected %d, got %lu\n", lstrlenA(path), size);
+    ok(size == lstrlenA(path), "expected %d, got %d\n", lstrlenA(path), size);
 
     r = MsiInstallProductA("msifile0.msi", "REMOVE=ALL FULL=1");
     ok(r == ERROR_SUCCESS, "expected ERROR_SUCCESS, got %u\n", r);
@@ -14204,7 +14208,7 @@ static void test_lastusedsource(void)
                                MSICODE_PRODUCT, INSTALLPROPERTY_LASTUSEDSOURCEA, value, &size);
     ok(r == ERROR_SUCCESS, "expected ERROR_SUCCESS, got %u\n", r);
     ok(!lstrcmpA(value, path), "expected \"%s\", got \"%s\"\n", path, value);
-    ok(size == lstrlenA(path), "expected %d, got %lu\n", lstrlenA(path), size);
+    ok(size == lstrlenA(path), "expected %d, got %d\n", lstrlenA(path), size);
 
     r = MsiInstallProductA("msifile1.msi", "REMOVE=ALL FULL=1");
     ok(r == ERROR_SUCCESS, "expected ERROR_SUCCESS, got %u\n", r);
@@ -14229,7 +14233,7 @@ static void test_lastusedsource(void)
                                MSICODE_PRODUCT, INSTALLPROPERTY_LASTUSEDSOURCEA, value, &size);
     ok(r == ERROR_SUCCESS, "expected ERROR_SUCCESS, got %u\n", r);
     ok(!lstrcmpA(value, path), "expected \"%s\", got \"%s\"\n", path, value);
-    ok(size == lstrlenA(path), "expected %d, got %lu\n", lstrlenA(path), size);
+    ok(size == lstrlenA(path), "expected %d, got %d\n", lstrlenA(path), size);
 
     r = MsiInstallProductA("msifile2.msi", "REMOVE=ALL FULL=1");
     ok(r == ERROR_SUCCESS, "expected ERROR_SUCCESS, got %u\n", r);

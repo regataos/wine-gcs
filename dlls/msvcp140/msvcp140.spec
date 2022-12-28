@@ -1689,26 +1689,26 @@
 @ stub ?_Xregex_error@std@@YAXW4error_type@regex_constants@1@@Z
 @ cdecl -arch=win32 ?_Xruntime_error@std@@YAXPBD@Z(str) _Xruntime_error
 @ cdecl -arch=win64 ?_Xruntime_error@std@@YAXPEBD@Z(str) _Xruntime_error
-@ cdecl -arch=win32 ?__ExceptionPtrAssign@@YAXPAXPBX@Z(ptr ptr) msvcr120.?__ExceptionPtrAssign@@YAXPAXPBX@Z
-@ cdecl -arch=win64 ?__ExceptionPtrAssign@@YAXPEAXPEBX@Z(ptr ptr) msvcr120.?__ExceptionPtrAssign@@YAXPEAXPEBX@Z
-@ cdecl -arch=win32 ?__ExceptionPtrCompare@@YA_NPBX0@Z(ptr ptr) msvcr120.?__ExceptionPtrCompare@@YA_NPBX0@Z
-@ cdecl -arch=win64 ?__ExceptionPtrCompare@@YA_NPEBX0@Z(ptr ptr) msvcr120.?__ExceptionPtrCompare@@YA_NPEBX0@Z
-@ cdecl -arch=win32 ?__ExceptionPtrCopy@@YAXPAXPBX@Z(ptr ptr) msvcr120.?__ExceptionPtrCopy@@YAXPAXPBX@Z
-@ cdecl -arch=win64 ?__ExceptionPtrCopy@@YAXPEAXPEBX@Z(ptr ptr) msvcr120.?__ExceptionPtrCopy@@YAXPEAXPEBX@Z
-@ cdecl -arch=win32 ?__ExceptionPtrCopyException@@YAXPAXPBX1@Z(ptr ptr ptr) msvcr120.?__ExceptionPtrCopyException@@YAXPAXPBX1@Z
-@ cdecl -arch=win64 ?__ExceptionPtrCopyException@@YAXPEAXPEBX1@Z(ptr ptr ptr) msvcr120.?__ExceptionPtrCopyException@@YAXPEAXPEBX1@Z
+@ cdecl -arch=win32 ?__ExceptionPtrAssign@@YAXPAXPBX@Z(ptr ptr) __ExceptionPtrAssign
+@ cdecl -arch=win64 ?__ExceptionPtrAssign@@YAXPEAXPEBX@Z(ptr ptr) __ExceptionPtrAssign
+@ cdecl -arch=win32 ?__ExceptionPtrCompare@@YA_NPBX0@Z(ptr ptr) __ExceptionPtrCompare
+@ cdecl -arch=win64 ?__ExceptionPtrCompare@@YA_NPEBX0@Z(ptr ptr) __ExceptionPtrCompare
+@ cdecl -arch=win32 ?__ExceptionPtrCopy@@YAXPAXPBX@Z(ptr ptr) __ExceptionPtrCopy
+@ cdecl -arch=win64 ?__ExceptionPtrCopy@@YAXPEAXPEBX@Z(ptr ptr) __ExceptionPtrCopy
+@ cdecl -arch=win32 ?__ExceptionPtrCopyException@@YAXPAXPBX1@Z(ptr ptr ptr) __ExceptionPtrCopyException
+@ cdecl -arch=win64 ?__ExceptionPtrCopyException@@YAXPEAXPEBX1@Z(ptr ptr ptr) __ExceptionPtrCopyException
 @ cdecl -arch=win32 ?__ExceptionPtrCreate@@YAXPAX@Z(ptr) __ExceptionPtrCreate
 @ cdecl -arch=win64 ?__ExceptionPtrCreate@@YAXPEAX@Z(ptr) __ExceptionPtrCreate
-@ cdecl -arch=win32 ?__ExceptionPtrCurrentException@@YAXPAX@Z(ptr) msvcr120.?__ExceptionPtrCurrentException@@YAXPAX@Z
-@ cdecl -arch=win64 ?__ExceptionPtrCurrentException@@YAXPEAX@Z(ptr) msvcr120.?__ExceptionPtrCurrentException@@YAXPEAX@Z
+@ cdecl -arch=win32 ?__ExceptionPtrCurrentException@@YAXPAX@Z(ptr) __ExceptionPtrCurrentException
+@ cdecl -arch=win64 ?__ExceptionPtrCurrentException@@YAXPEAX@Z(ptr) __ExceptionPtrCurrentException
 @ cdecl -arch=win32 ?__ExceptionPtrDestroy@@YAXPAX@Z(ptr) __ExceptionPtrDestroy
 @ cdecl -arch=win64 ?__ExceptionPtrDestroy@@YAXPEAX@Z(ptr) __ExceptionPtrDestroy
-@ cdecl -arch=win32 ?__ExceptionPtrRethrow@@YAXPBX@Z(ptr) msvcr120.?__ExceptionPtrRethrow@@YAXPBX@Z
-@ cdecl -arch=win64 ?__ExceptionPtrRethrow@@YAXPEBX@Z(ptr) msvcr120.?__ExceptionPtrRethrow@@YAXPEBX@Z
+@ cdecl -arch=win32 ?__ExceptionPtrRethrow@@YAXPBX@Z(ptr) __ExceptionPtrRethrow
+@ cdecl -arch=win64 ?__ExceptionPtrRethrow@@YAXPEBX@Z(ptr) __ExceptionPtrRethrow
 @ stub -arch=win32 ?__ExceptionPtrSwap@@YAXPAX0@Z
 @ stub -arch=win64 ?__ExceptionPtrSwap@@YAXPEAX0@Z
-@ cdecl -arch=win32 ?__ExceptionPtrToBool@@YA_NPBX@Z(ptr) msvcr120.?__ExceptionPtrToBool@@YA_NPBX@Z
-@ cdecl -arch=win64 ?__ExceptionPtrToBool@@YA_NPEBX@Z(ptr) msvcr120.?__ExceptionPtrToBool@@YA_NPEBX@Z
+@ cdecl -arch=win32 ?__ExceptionPtrToBool@@YA_NPBX@Z(ptr) __ExceptionPtrToBool
+@ cdecl -arch=win64 ?__ExceptionPtrToBool@@YA_NPEBX@Z(ptr) __ExceptionPtrToBool
 @ cdecl -arch=arm ?always_noconv@codecvt_base@std@@QBA_NXZ(ptr) codecvt_base_always_noconv
 @ thiscall -arch=i386 ?always_noconv@codecvt_base@std@@QBE_NXZ(ptr) codecvt_base_always_noconv
 @ cdecl -arch=win64 ?always_noconv@codecvt_base@std@@QEBA_NXZ(ptr) codecvt_base_always_noconv
@@ -3632,7 +3632,7 @@
 @ cdecl _Cnd_timedwait(ptr ptr ptr)
 @ cdecl _Cnd_unregister_at_thread_exit(ptr)
 @ cdecl _Cnd_wait(ptr ptr)
-@ stub _Copy_file
+@ cdecl _Copy_file(wstr wstr)
 @ stub _Cosh
 @ cdecl _Current_get(ptr)
 @ cdecl _Current_set(wstr) tr2_sys__Current_set_wchar
@@ -3672,18 +3672,18 @@
 @ cdecl _Lstat(wstr ptr)
 @ cdecl _Make_dir(wstr) tr2_sys__Make_dir_wchar
 @ cdecl _Mbrtowc(ptr ptr long ptr ptr)
-@ stub _Mtx_clear_owner
-@ cdecl _Mtx_current_owns(ptr) _Mtx_current_owns
-@ cdecl _Mtx_destroy(ptr) _Mtx_destroy
-@ cdecl _Mtx_destroy_in_situ(ptr) _Mtx_destroy_in_situ
-@ cdecl _Mtx_getconcrtcs(ptr) _Mtx_getconcrtcs
-@ cdecl _Mtx_init(ptr long) _Mtx_init
-@ cdecl _Mtx_init_in_situ(ptr long) _Mtx_init_in_situ
-@ cdecl _Mtx_lock(ptr) _Mtx_lock
-@ stub _Mtx_reset_owner
+@ cdecl _Mtx_clear_owner(ptr)
+@ cdecl _Mtx_current_owns(ptr)
+@ cdecl _Mtx_destroy(ptr)
+@ cdecl _Mtx_destroy_in_situ(ptr)
+@ cdecl _Mtx_getconcrtcs(ptr)
+@ cdecl _Mtx_init(ptr long)
+@ cdecl _Mtx_init_in_situ(ptr long)
+@ cdecl _Mtx_lock(ptr)
+@ cdecl _Mtx_reset_owner(ptr)
 @ stub _Mtx_timedlock
-@ cdecl _Mtx_trylock(ptr) _Mtx_trylock
-@ cdecl _Mtx_unlock(ptr) _Mtx_unlock
+@ cdecl _Mtx_trylock(ptr)
+@ cdecl _Mtx_unlock(ptr)
 @ stub _Mtxdst
 @ stub _Mtxinit
 @ stub _Mtxlock

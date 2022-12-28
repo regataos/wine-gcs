@@ -69,7 +69,7 @@ static ULONG WINAPI HTMLStorage_AddRef(IHTMLStorage *iface)
     HTMLStorage *This = impl_from_IHTMLStorage(iface);
     LONG ref = InterlockedIncrement(&This->ref);
 
-    TRACE("(%p) ref=%d\n", This, ref);
+    TRACE("(%p) ref=%ld\n", This, ref);
 
     return ref;
 }
@@ -79,7 +79,7 @@ static ULONG WINAPI HTMLStorage_Release(IHTMLStorage *iface)
     HTMLStorage *This = impl_from_IHTMLStorage(iface);
     LONG ref = InterlockedDecrement(&This->ref);
 
-    TRACE("(%p) ref=%d\n", This, ref);
+    TRACE("(%p) ref=%ld\n", This, ref);
 
     if(!ref) {
         release_dispex(&This->dispex);
@@ -138,7 +138,7 @@ static HRESULT WINAPI HTMLStorage_get_remainingSpace(IHTMLStorage *iface, LONG *
 static HRESULT WINAPI HTMLStorage_key(IHTMLStorage *iface, LONG lIndex, BSTR *p)
 {
     HTMLStorage *This = impl_from_IHTMLStorage(iface);
-    FIXME("(%p)->(%d %p)\n", This, lIndex, p);
+    FIXME("(%p)->(%ld %p)\n", This, lIndex, p);
     return E_NOTIMPL;
 }
 
@@ -194,14 +194,15 @@ static const tid_t HTMLStorage_iface_tids[] = {
     IHTMLStorage_tid,
     0
 };
-static dispex_static_data_t HTMLStorage_dispex = {
+dispex_static_data_t HTMLStorage_dispex = {
     L"Storage",
     NULL,
+    PROTO_ID_HTMLStorage,
     IHTMLStorage_tid,
     HTMLStorage_iface_tids
 };
 
-HRESULT create_html_storage(compat_mode_t compat_mode, IHTMLStorage **p)
+HRESULT create_html_storage(compat_mode_t compat_mode, HTMLDocumentNode *doc, IHTMLStorage **p)
 {
     HTMLStorage *storage;
 
@@ -211,7 +212,7 @@ HRESULT create_html_storage(compat_mode_t compat_mode, IHTMLStorage **p)
 
     storage->IHTMLStorage_iface.lpVtbl = &HTMLStorageVtbl;
     storage->ref = 1;
-    init_dispatch(&storage->dispex, (IUnknown*)&storage->IHTMLStorage_iface, &HTMLStorage_dispex, compat_mode);
+    init_dispatch(&storage->dispex, (IUnknown*)&storage->IHTMLStorage_iface, &HTMLStorage_dispex, doc, compat_mode);
 
     *p = &storage->IHTMLStorage_iface;
     return S_OK;

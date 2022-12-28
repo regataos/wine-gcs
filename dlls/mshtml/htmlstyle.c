@@ -109,6 +109,7 @@ static const WCHAR *overflow_values[] = {
 #define ATTR_REMOVE_COMMA   0x0010
 #define ATTR_NO_NULL        0x0020
 #define ATTR_COMPAT_IE10    0x0040
+#define ATTR_IN_CSSPROPERTIES 0x0080
 
 typedef struct {
     const WCHAR *name;
@@ -167,19 +168,24 @@ static const style_tbl_entry_t style_tbl[] = {
         L"background-position-x",
         DISPID_IHTMLCSSSTYLEDECLARATION_BACKGROUNDPOSITIONX,
         DISPID_A_BACKGROUNDPOSX,
-        ATTR_FIX_PX
+        ATTR_FIX_PX | ATTR_IN_CSSPROPERTIES
     },
     {
         L"background-position-y",
         DISPID_IHTMLCSSSTYLEDECLARATION_BACKGROUNDPOSITIONY,
         DISPID_A_BACKGROUNDPOSY,
-        ATTR_FIX_PX
+        ATTR_FIX_PX | ATTR_IN_CSSPROPERTIES
     },
     {
         L"background-repeat",
         DISPID_IHTMLCSSSTYLEDECLARATION_BACKGROUNDREPEAT,
         DISPID_A_BACKGROUNDREPEAT,
         0, background_repeat_values
+    },
+    {
+        L"background-size",
+        DISPID_IHTMLCSSSTYLEDECLARATION_BACKGROUNDSIZE,
+        DISPID_A_IE9_BACKGROUNDSIZE,
     },
     {
         L"border",
@@ -697,7 +703,7 @@ static const style_tbl_entry_t style_tbl[] = {
 
 C_ASSERT(ARRAY_SIZE(style_tbl) == STYLEID_MAX_VALUE);
 
-static const style_tbl_entry_t *lookup_style_tbl(CSSStyle *style, const WCHAR *name)
+static const style_tbl_entry_t *lookup_style_tbl_compat_mode(compat_mode_t compat_mode, const WCHAR *name)
 {
     int c, i, min = 0, max = ARRAY_SIZE(style_tbl)-1;
 
@@ -706,7 +712,7 @@ static const style_tbl_entry_t *lookup_style_tbl(CSSStyle *style, const WCHAR *n
 
         c = wcscmp(style_tbl[i].name, name);
         if(!c) {
-            if((style_tbl[i].flags & ATTR_COMPAT_IE10) && dispex_compat_mode(&style->dispex) < COMPAT_MODE_IE10)
+            if((style_tbl[i].flags & ATTR_COMPAT_IE10) && compat_mode < COMPAT_MODE_IE10)
                 return NULL;
             return style_tbl+i;
         }
@@ -718,6 +724,11 @@ static const style_tbl_entry_t *lookup_style_tbl(CSSStyle *style, const WCHAR *n
     }
 
     return NULL;
+}
+
+static const style_tbl_entry_t *lookup_style_tbl(CSSStyle *style, const WCHAR *name)
+{
+    return lookup_style_tbl_compat_mode(dispex_compat_mode(&style->dispex), name);
 }
 
 static void fix_px_value(nsAString *nsstr)
@@ -789,7 +800,7 @@ static HRESULT set_nsstyle_property(nsIDOMCSSStyleDeclaration *nsstyle, styleid_
     nsAString_Finish(&str_name);
     nsAString_Finish(&str_empty);
     if(NS_FAILED(nsres))
-        WARN("SetProperty failed: %08x\n", nsres);
+        WARN("SetProperty failed: %08lx\n", nsres);
     return map_nsresult(nsres);
 }
 
@@ -866,7 +877,7 @@ static HRESULT get_nsstyle_attr_nsval(nsIDOMCSSStyleDeclaration *nsstyle, stylei
     nsres = nsIDOMCSSStyleDeclaration_GetPropertyValue(nsstyle, &str_name, value);
     nsAString_Finish(&str_name);
     if(NS_FAILED(nsres))
-        WARN("GetPropertyValue failed: %08x\n", nsres);
+        WARN("GetPropertyValue failed: %08lx\n", nsres);
     return map_nsresult(nsres);
 }
 
@@ -2540,7 +2551,7 @@ static HRESULT WINAPI HTMLStyle_put_pixelTop(IHTMLStyle *iface, LONG v)
 {
     HTMLStyle *This = impl_from_IHTMLStyle(iface);
 
-    TRACE("(%p)->(%d)\n", This, v);
+    TRACE("(%p)->(%ld)\n", This, v);
 
     return set_style_pxattr(This, STYLEID_TOP, v);
 }
@@ -2558,7 +2569,7 @@ static HRESULT WINAPI HTMLStyle_put_pixelLeft(IHTMLStyle *iface, LONG v)
 {
     HTMLStyle *This = impl_from_IHTMLStyle(iface);
 
-    TRACE("(%p)->(%d)\n", This, v);
+    TRACE("(%p)->(%ld)\n", This, v);
 
     return set_style_pxattr(This, STYLEID_LEFT, v);
 }
@@ -2594,7 +2605,7 @@ static HRESULT WINAPI HTMLStyle_put_pixelHeight(IHTMLStyle *iface, LONG v)
 {
     HTMLStyle *This = impl_from_IHTMLStyle(iface);
 
-    TRACE("(%p)->(%d)\n", This, v);
+    TRACE("(%p)->(%ld)\n", This, v);
 
     return set_style_pxattr(This, STYLEID_HEIGHT, v);
 }
@@ -2747,7 +2758,7 @@ static void set_opacity(HTMLStyle *This, const WCHAR *val)
 
     nsres = nsIDOMCSSStyleDeclaration_SetProperty(This->css_style.nsstyle, &name_str, &val_str, &empty_str);
     if(NS_FAILED(nsres))
-        ERR("SetProperty failed: %08x\n", nsres);
+        ERR("SetProperty failed: %08lx\n", nsres);
 
     nsAString_Finish(&name_str);
     nsAString_Finish(&val_str);
@@ -2893,7 +2904,7 @@ static HRESULT WINAPI HTMLStyle_setAttribute(IHTMLStyle *iface, BSTR strAttribut
     HRESULT hres;
     DISPID dispid;
 
-    TRACE("(%p)->(%s %s %08x)\n", This, debugstr_w(strAttributeName),
+    TRACE("(%p)->(%s %s %08lx)\n", This, debugstr_w(strAttributeName),
           debugstr_variant(&AttributeValue), lFlags);
 
     if(!strAttributeName)
@@ -2923,7 +2934,7 @@ static HRESULT WINAPI HTMLStyle_setAttribute(IHTMLStyle *iface, BSTR strAttribut
         FIXME("Custom attributes not supported.\n");
     }
 
-    TRACE("ret: %08x\n", hres);
+    TRACE("ret: %08lx\n", hres);
 
     return hres;
 }
@@ -2935,7 +2946,7 @@ static HRESULT WINAPI HTMLStyle_getAttribute(IHTMLStyle *iface, BSTR strAttribut
     HRESULT hres;
     DISPID dispid;
 
-    TRACE("(%p)->(%s v%p %08x)\n", This, debugstr_w(strAttributeName),
+    TRACE("(%p)->(%s v%p %08lx)\n", This, debugstr_w(strAttributeName),
           AttributeValue, lFlags);
 
     if(!AttributeValue || !strAttributeName)
@@ -2970,11 +2981,12 @@ static HRESULT WINAPI HTMLStyle_removeAttribute(IHTMLStyle *iface, BSTR strAttri
     nsresult nsres;
     HRESULT hres;
 
-    TRACE("(%p)->(%s %08x %p)\n", This, debugstr_w(strAttributeName), lFlags, pfSuccess);
+    TRACE("(%p)->(%s %08lx %p)\n", This, debugstr_w(strAttributeName), lFlags, pfSuccess);
 
     style_entry = lookup_style_tbl(&This->css_style, strAttributeName);
     if(!style_entry) {
         compat_mode_t compat_mode = dispex_compat_mode(&This->css_style.dispex);
+        IWineDispatchProxyCbPrivate *proxy = This->css_style.dispex.proxy;
         DISPID dispid;
         unsigned i;
 
@@ -2983,6 +2995,18 @@ static HRESULT WINAPI HTMLStyle_removeAttribute(IHTMLStyle *iface, BSTR strAttri
         if(hres != S_OK) {
             *pfSuccess = VARIANT_FALSE;
             return S_OK;
+        }
+
+        if(proxy) {
+            DISPID underlying = proxy->lpVtbl->GetUnderlyingDispID(proxy, dispid);
+            hres = IDispatchEx_DeleteMemberByDispID((IDispatchEx*)proxy, dispid);
+            if(underlying == DISPID_UNKNOWN) {
+                if(FAILED(hres))
+                    return hres;
+                *pfSuccess = (hres == S_OK);
+                return S_OK;
+            }
+            dispid = underlying;
         }
 
         for(i=0; i < ARRAY_SIZE(style_tbl); i++) {
@@ -3015,7 +3039,7 @@ static HRESULT WINAPI HTMLStyle_removeAttribute(IHTMLStyle *iface, BSTR strAttri
         nsAString_GetData(&ret_str, &ret);
         *pfSuccess = variant_bool(*ret);
     }else {
-        WARN("RemoveProperty failed: %08x\n", nsres);
+        WARN("RemoveProperty failed: %08lx\n", nsres);
     }
     nsAString_Finish(&name_str);
     nsAString_Finish(&ret_str);
@@ -3437,7 +3461,7 @@ static HRESULT WINAPI HTMLStyle2_get_right(IHTMLStyle2 *iface, VARIANT *p)
 static HRESULT WINAPI HTMLStyle2_put_pixelBottom(IHTMLStyle2 *iface, LONG v)
 {
     HTMLStyle *This = impl_from_IHTMLStyle2(iface);
-    FIXME("(%p)->(%d)\n", This, v);
+    FIXME("(%p)->(%ld)\n", This, v);
     return E_NOTIMPL;
 }
 
@@ -3451,7 +3475,7 @@ static HRESULT WINAPI HTMLStyle2_get_pixelBottom(IHTMLStyle2 *iface, LONG *p)
 static HRESULT WINAPI HTMLStyle2_put_pixelRight(IHTMLStyle2 *iface, LONG v)
 {
     HTMLStyle *This = impl_from_IHTMLStyle2(iface);
-    FIXME("(%p)->(%d)\n", This, v);
+    FIXME("(%p)->(%ld)\n", This, v);
     return E_NOTIMPL;
 }
 
@@ -4755,7 +4779,7 @@ static ULONG WINAPI HTMLCSSStyleDeclaration_AddRef(IHTMLCSSStyleDeclaration *ifa
     CSSStyle *This = impl_from_IHTMLCSSStyleDeclaration(iface);
     LONG ref = InterlockedIncrement(&This->ref);
 
-    TRACE("(%p) ref=%d\n", This, ref);
+    TRACE("(%p) ref=%ld\n", This, ref);
 
     return ref;
 }
@@ -4765,7 +4789,7 @@ static ULONG WINAPI HTMLCSSStyleDeclaration_Release(IHTMLCSSStyleDeclaration *if
     CSSStyle *This = impl_from_IHTMLCSSStyleDeclaration(iface);
     LONG ref = InterlockedDecrement(&This->ref);
 
-    TRACE("(%p) ref=%d\n", This, ref);
+    TRACE("(%p) ref=%ld\n", This, ref);
 
     if(!ref) {
         if(This->nsstyle)
@@ -4789,7 +4813,7 @@ static HRESULT WINAPI HTMLCSSStyleDeclaration_GetTypeInfo(IHTMLCSSStyleDeclarati
         UINT iTInfo, LCID lcid, ITypeInfo **ppTInfo)
 {
     CSSStyle *This = impl_from_IHTMLCSSStyleDeclaration(iface);
-    TRACE("(%p)->(%u %u %p)\n", This, iTInfo, lcid, ppTInfo);
+    TRACE("(%p)->(%u %lu %p)\n", This, iTInfo, lcid, ppTInfo);
     return IDispatchEx_GetTypeInfo(&This->dispex.IDispatchEx_iface, iTInfo, lcid, ppTInfo);
 }
 
@@ -4797,7 +4821,7 @@ static HRESULT WINAPI HTMLCSSStyleDeclaration_GetIDsOfNames(IHTMLCSSStyleDeclara
         REFIID riid, LPOLESTR *rgszNames, UINT cNames, LCID lcid, DISPID *rgDispId)
 {
     CSSStyle *This = impl_from_IHTMLCSSStyleDeclaration(iface);
-    TRACE("(%p)->(%p %p %u %u %p)\n", This, riid, rgszNames, cNames, lcid, rgDispId);
+    TRACE("(%p)->(%p %p %u %lu %p)\n", This, riid, rgszNames, cNames, lcid, rgDispId);
     return IDispatchEx_GetIDsOfNames(&This->dispex.IDispatchEx_iface, riid, rgszNames,
                                      cNames, lcid, rgDispId);
 }
@@ -4807,7 +4831,7 @@ static HRESULT WINAPI HTMLCSSStyleDeclaration_Invoke(IHTMLCSSStyleDeclaration *i
         VARIANT *pVarResult, EXCEPINFO *pExcepInfo, UINT *puArgErr)
 {
     CSSStyle *This = impl_from_IHTMLCSSStyleDeclaration(iface);
-    TRACE("(%p)->(%d %p %u %u %p %p %p %p)\n", This, dispIdMember, riid, lcid, wFlags,
+    TRACE("(%p)->(%ld %p %lu %u %p %p %p %p)\n", This, dispIdMember, riid, lcid, wFlags,
           pDispParams, pVarResult, pExcepInfo, puArgErr);
     return IDispatchEx_Invoke(&This->dispex.IDispatchEx_iface, dispIdMember, riid, lcid,
                               wFlags, pDispParams, pVarResult, pExcepInfo, puArgErr);
@@ -4900,14 +4924,14 @@ static HRESULT WINAPI HTMLCSSStyleDeclaration_setProperty(IHTMLCSSStyleDeclarati
     nsAString_Finish(&value_str);
     nsAString_Finish(&priority_str);
     if(NS_FAILED(nsres))
-        WARN("SetProperty failed: %08x\n", nsres);
+        WARN("SetProperty failed: %08lx\n", nsres);
     return map_nsresult(nsres);
 }
 
 static HRESULT WINAPI HTMLCSSStyleDeclaration_item(IHTMLCSSStyleDeclaration *iface, LONG index, BSTR *pbstrPropertyName)
 {
     CSSStyle *This = impl_from_IHTMLCSSStyleDeclaration(iface);
-    FIXME("(%p)->(%d %p)\n", This, index, pbstrPropertyName);
+    FIXME("(%p)->(%ld %p)\n", This, index, pbstrPropertyName);
     return E_NOTIMPL;
 }
 
@@ -6059,7 +6083,7 @@ static HRESULT WINAPI HTMLCSSStyleDeclaration_put_cssText(IHTMLCSSStyleDeclarati
     nsres = nsIDOMCSSStyleDeclaration_SetCssText(This->nsstyle, &text_str);
     nsAString_Finish(&text_str);
     if(NS_FAILED(nsres)) {
-        FIXME("SetCssStyle failed: %08x\n", nsres);
+        FIXME("SetCssStyle failed: %08lx\n", nsres);
         return E_FAIL;
     }
 
@@ -7628,15 +7652,15 @@ static HRESULT WINAPI HTMLCSSStyleDeclaration_get_backgroundOrigin(IHTMLCSSStyle
 static HRESULT WINAPI HTMLCSSStyleDeclaration_put_backgroundSize(IHTMLCSSStyleDeclaration *iface, BSTR v)
 {
     CSSStyle *This = impl_from_IHTMLCSSStyleDeclaration(iface);
-    FIXME("(%p)->(%s)\n", This, debugstr_w(v));
-    return E_NOTIMPL;
+    TRACE("(%p)->(%s)\n", This, debugstr_w(v));
+    return set_style_property(This, STYLEID_BACKGROUND_SIZE, v);
 }
 
 static HRESULT WINAPI HTMLCSSStyleDeclaration_get_backgroundSize(IHTMLCSSStyleDeclaration *iface, BSTR *p)
 {
     CSSStyle *This = impl_from_IHTMLCSSStyleDeclaration(iface);
-    FIXME("(%p)->(%p)\n", This, p);
-    return E_NOTIMPL;
+    TRACE("(%p)->(%p)\n", This, p);
+    return get_style_property(This, STYLEID_BACKGROUND_SIZE, p);
 }
 
 static HRESULT WINAPI HTMLCSSStyleDeclaration_put_boxShadow(IHTMLCSSStyleDeclaration *iface, BSTR v)
@@ -8101,7 +8125,7 @@ static HRESULT WINAPI HTMLCSSStyleDeclaration2_GetTypeInfo(IHTMLCSSStyleDeclarat
         UINT iTInfo, LCID lcid, ITypeInfo **ppTInfo)
 {
     CSSStyle *This = impl_from_IHTMLCSSStyleDeclaration2(iface);
-    TRACE("(%p)->(%u %u %p)\n", This, iTInfo, lcid, ppTInfo);
+    TRACE("(%p)->(%u %lu %p)\n", This, iTInfo, lcid, ppTInfo);
     return IDispatchEx_GetTypeInfo(&This->dispex.IDispatchEx_iface, iTInfo, lcid, ppTInfo);
 }
 
@@ -8109,7 +8133,7 @@ static HRESULT WINAPI HTMLCSSStyleDeclaration2_GetIDsOfNames(IHTMLCSSStyleDeclar
         REFIID riid, LPOLESTR *rgszNames, UINT cNames, LCID lcid, DISPID *rgDispId)
 {
     CSSStyle *This = impl_from_IHTMLCSSStyleDeclaration2(iface);
-    TRACE("(%p)->(%p %p %u %u %p)\n", This, riid, rgszNames, cNames, lcid, rgDispId);
+    TRACE("(%p)->(%p %p %u %lu %p)\n", This, riid, rgszNames, cNames, lcid, rgDispId);
     return IDispatchEx_GetIDsOfNames(&This->dispex.IDispatchEx_iface, riid, rgszNames,
                                      cNames, lcid, rgDispId);
 }
@@ -8119,7 +8143,7 @@ static HRESULT WINAPI HTMLCSSStyleDeclaration2_Invoke(IHTMLCSSStyleDeclaration2 
         VARIANT *pVarResult, EXCEPINFO *pExcepInfo, UINT *puArgErr)
 {
     CSSStyle *This = impl_from_IHTMLCSSStyleDeclaration2(iface);
-    TRACE("(%p)->(%d %p %u %u %p %p %p %p)\n", This, dispIdMember, riid, lcid, wFlags,
+    TRACE("(%p)->(%ld %p %lu %u %p %p %p %p)\n", This, dispIdMember, riid, lcid, wFlags,
           pDispParams, pVarResult, pExcepInfo, puArgErr);
     return IDispatchEx_Invoke(&This->dispex.IDispatchEx_iface, dispIdMember, riid, lcid,
                               wFlags, pDispParams, pVarResult, pExcepInfo, puArgErr);
@@ -9964,19 +9988,20 @@ static inline CSSStyle *impl_from_DispatchEx(DispatchEx *dispex)
     return CONTAINING_RECORD(dispex, CSSStyle, dispex);
 }
 
-static HRESULT CSSStyle_get_dispid(DispatchEx *dispex, BSTR name, DWORD flags, DISPID *dispid)
+static HRESULT CSSStyle_get_static_dispid(compat_mode_t compat_mode, BSTR name, DWORD flags, DISPID *dispid)
 {
-    CSSStyle *This = impl_from_DispatchEx(dispex);
     const style_tbl_entry_t *style_entry;
 
-    style_entry = lookup_style_tbl(This, name);
+    /* Found in prototypes */
+    if(compat_mode >= COMPAT_MODE_IE9)
+        return DISP_E_UNKNOWNNAME;
+
+    style_entry = lookup_style_tbl_compat_mode(compat_mode, name);
     if(style_entry) {
-        DISPID id = dispex_compat_mode(dispex) >= COMPAT_MODE_IE9
-            ? style_entry->dispid : style_entry->compat_dispid;
-        if(id == DISPID_UNKNOWN)
+        if(style_entry->compat_dispid == DISPID_UNKNOWN)
             return DISP_E_UNKNOWNNAME;
 
-        *dispid = id;
+        *dispid = style_entry->compat_dispid;
         return S_OK;
     }
 
@@ -9993,9 +10018,10 @@ void CSSStyle_init_dispex_info(dispex_data_t *info, compat_mode_t mode)
 
 const dispex_static_data_vtbl_t CSSStyle_dispex_vtbl = {
     NULL,
-    CSSStyle_get_dispid,
     NULL,
-    NULL
+    NULL,
+    NULL,
+    CSSStyle_get_static_dispid
 };
 
 static const tid_t HTMLStyle_iface_tids[] = {
@@ -10007,9 +10033,10 @@ static const tid_t HTMLStyle_iface_tids[] = {
     IHTMLStyle_tid,
     0
 };
-static dispex_static_data_t HTMLStyle_dispex = {
+dispex_static_data_t HTMLStyle_dispex = {
     L"MSStyleCSSProperties",
     &CSSStyle_dispex_vtbl,
+    PROTO_ID_HTMLStyle,
     DispHTMLStyle_tid,
     HTMLStyle_iface_tids,
     CSSStyle_init_dispex_info
@@ -10032,7 +10059,7 @@ static HRESULT get_style_from_elem(HTMLElement *elem, nsIDOMCSSStyleDeclaration 
         nsres = nsIDOMElementCSSInlineStyle_GetStyle(nselemstyle, ret);
         nsIDOMElementCSSInlineStyle_Release(nselemstyle);
         if(NS_FAILED(nsres)) {
-            ERR("GetStyle failed: %08x\n", nsres);
+            ERR("GetStyle failed: %08lx\n", nsres);
             return E_FAIL;
         }
         return S_OK;
@@ -10043,7 +10070,7 @@ static HRESULT get_style_from_elem(HTMLElement *elem, nsIDOMCSSStyleDeclaration 
         nsres = nsIDOMSVGElement_GetStyle(svg_element, ret);
         nsIDOMSVGElement_Release(svg_element);
         if(NS_FAILED(nsres)) {
-            ERR("GetStyle failed: %08x\n", nsres);
+            ERR("GetStyle failed: %08lx\n", nsres);
             return E_FAIL;
         }
         return S_OK;
@@ -10054,7 +10081,7 @@ static HRESULT get_style_from_elem(HTMLElement *elem, nsIDOMCSSStyleDeclaration 
 }
 
 void init_css_style(CSSStyle *style, nsIDOMCSSStyleDeclaration *nsstyle, style_qi_t qi,
-                    dispex_static_data_t *dispex_info, compat_mode_t compat_mode)
+                    dispex_static_data_t *dispex_info, HTMLDocumentNode *doc, compat_mode_t compat_mode)
 {
     style->IHTMLCSSStyleDeclaration_iface.lpVtbl = &HTMLCSSStyleDeclarationVtbl;
     style->IHTMLCSSStyleDeclaration2_iface.lpVtbl = &HTMLCSSStyleDeclaration2Vtbl;
@@ -10064,7 +10091,7 @@ void init_css_style(CSSStyle *style, nsIDOMCSSStyleDeclaration *nsstyle, style_q
     nsIDOMCSSStyleDeclaration_AddRef(nsstyle);
 
     init_dispatch(&style->dispex, (IUnknown*)&style->IHTMLCSSStyleDeclaration_iface,
-                  dispex_info, compat_mode);
+                  dispex_info, doc, compat_mode);
 }
 
 HRESULT HTMLStyle_Create(HTMLElement *elem, HTMLStyle **ret)
@@ -10093,31 +10120,180 @@ HRESULT HTMLStyle_Create(HTMLElement *elem, HTMLStyle **ret)
     style->elem = elem;
 
     init_css_style(&style->css_style, nsstyle, HTMLStyle_QI, &HTMLStyle_dispex,
-                   dispex_compat_mode(&elem->node.event_target.dispex));
+                   elem->node.doc, dispex_compat_mode(&elem->node.event_target.dispex));
 
     *ret = style;
     return S_OK;
 }
 
+/* dummy dispex used only for MSCSSPropertiesPrototype in prototype chain */
+static HRESULT HTMLCSSProperties_get_static_dispid(compat_mode_t compat_mode, BSTR name, DWORD flags, DISPID *dispid)
+{
+    const style_tbl_entry_t *style_entry;
+
+    style_entry = lookup_style_tbl_compat_mode(compat_mode, name);
+    if(style_entry) {
+        if(style_entry->dispid == DISPID_UNKNOWN || !(style_entry->flags & ATTR_IN_CSSPROPERTIES))
+            return DISP_E_UNKNOWNNAME;
+
+        *dispid = style_entry->dispid;
+        return S_OK;
+    }
+
+    return DISP_E_UNKNOWNNAME;
+}
+
+static void HTMLCSSProperties_init_dispex_info(dispex_data_t *info, compat_mode_t mode)
+{
+    static const dispex_hook_t style_hooks[] = {
+        {DISPID_IHTMLSTYLE_TEXTDECORATIONNONE},
+        {DISPID_IHTMLSTYLE_TEXTDECORATIONUNDERLINE},
+        {DISPID_IHTMLSTYLE_TEXTDECORATIONOVERLINE},
+        {DISPID_IHTMLSTYLE_TEXTDECORATIONLINETHROUGH},
+        {DISPID_IHTMLSTYLE_TEXTDECORATIONBLINK},
+        {DISPID_IHTMLSTYLE_PIXELTOP},
+        {DISPID_IHTMLSTYLE_PIXELLEFT},
+        {DISPID_IHTMLSTYLE_PIXELWIDTH},
+        {DISPID_IHTMLSTYLE_PIXELHEIGHT},
+        {DISPID_IHTMLSTYLE_POSTOP},
+        {DISPID_IHTMLSTYLE_POSLEFT},
+        {DISPID_IHTMLSTYLE_POSWIDTH},
+        {DISPID_IHTMLSTYLE_POSHEIGHT},
+        {DISPID_IHTMLSTYLE_TOSTRING},
+        {DISPID_UNKNOWN}
+    };
+    static const dispex_hook_t style2_hooks[] = {
+        {DISPID_IHTMLSTYLE2_SETEXPRESSION},
+        {DISPID_IHTMLSTYLE2_GETEXPRESSION},
+        {DISPID_IHTMLSTYLE2_REMOVEEXPRESSION},
+        {DISPID_IHTMLSTYLE2_PIXELBOTTOM},
+        {DISPID_IHTMLSTYLE2_PIXELRIGHT},
+        {DISPID_IHTMLSTYLE2_POSBOTTOM},
+        {DISPID_IHTMLSTYLE2_POSRIGHT},
+        {DISPID_UNKNOWN}
+    };
+
+    dispex_info_add_interface(info, IHTMLStyle6_tid, NULL);
+    dispex_info_add_interface(info, IHTMLStyle5_tid, NULL);
+    dispex_info_add_interface(info, IHTMLStyle3_tid, NULL);
+    dispex_info_add_interface(info, IHTMLStyle2_tid, style2_hooks);
+    dispex_info_add_interface(info, IHTMLStyle_tid, style_hooks);
+}
+
+const dispex_static_data_vtbl_t HTMLCSSProperties_dispex_vtbl = {
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    HTMLCSSProperties_get_static_dispid
+};
+
+dispex_static_data_t HTMLCSSProperties_dispex = {
+    L"MSCSSProperties",
+    &HTMLCSSProperties_dispex_vtbl,
+    PROTO_ID_HTMLCSSProperties,
+    NULL_tid,
+    no_iface_tids,
+    HTMLCSSProperties_init_dispex_info
+};
+
+static HRESULT HTMLW3CComputedStyle_get_static_dispid(compat_mode_t compat_mode, BSTR name, DWORD flags, DISPID *dispid)
+{
+    const style_tbl_entry_t *style_entry;
+    DISPID id;
+
+    style_entry = lookup_style_tbl_compat_mode(compat_mode, name);
+    if(style_entry) {
+        if(compat_mode < COMPAT_MODE_IE9)
+            id = style_entry->compat_dispid;
+        else {
+            if(style_entry->flags & ATTR_IN_CSSPROPERTIES)
+                return DISP_E_UNKNOWNNAME;
+            id = style_entry->dispid;
+        }
+        if(id == DISPID_UNKNOWN)
+            return DISP_E_UNKNOWNNAME;
+
+        *dispid = id;
+        return S_OK;
+    }
+
+    return DISP_E_UNKNOWNNAME;
+}
+
+void HTMLW3CComputedStyle_init_dispex_info(dispex_data_t *info, compat_mode_t mode)
+{
+    /* don't expose props shared with children prototypes */
+    static const dispex_hook_t styledecl_hooks[] = {
+        {DISPID_IHTMLCSSSTYLEDECLARATION_BACKGROUNDPOSITIONX},
+        {DISPID_IHTMLCSSSTYLEDECLARATION_BACKGROUNDPOSITIONY},
+        {DISPID_IHTMLCSSSTYLEDECLARATION_STYLEFLOAT},
+        {DISPID_IHTMLCSSSTYLEDECLARATION_IMEMODE},
+        {DISPID_IHTMLCSSSTYLEDECLARATION_LAYOUTGRIDCHAR},
+        {DISPID_IHTMLCSSSTYLEDECLARATION_LAYOUTGRIDLINE},
+        {DISPID_IHTMLCSSSTYLEDECLARATION_LAYOUTGRIDMODE},
+        {DISPID_IHTMLCSSSTYLEDECLARATION_LAYOUTGRIDTYPE},
+        {DISPID_IHTMLCSSSTYLEDECLARATION_LAYOUTGRID},
+        {DISPID_IHTMLCSSSTYLEDECLARATION_TEXTAUTOSPACE},
+        {DISPID_IHTMLCSSSTYLEDECLARATION_LINEBREAK},
+        {DISPID_IHTMLCSSSTYLEDECLARATION_TEXTJUSTIFYTRIM},
+        {DISPID_IHTMLCSSSTYLEDECLARATION_TEXTKASHIDA},
+        {DISPID_IHTMLCSSSTYLEDECLARATION_ACCELERATOR},
+        {DISPID_IHTMLCSSSTYLEDECLARATION_LAYOUTFLOW},
+        {DISPID_IHTMLCSSSTYLEDECLARATION_ZOOM},
+        {DISPID_IHTMLCSSSTYLEDECLARATION_SCROLLBARBASECOLOR},
+        {DISPID_IHTMLCSSSTYLEDECLARATION_SCROLLBARFACECOLOR},
+        {DISPID_IHTMLCSSSTYLEDECLARATION_SCROLLBAR3DLIGHTCOLOR},
+        {DISPID_IHTMLCSSSTYLEDECLARATION_SCROLLBARSHADOWCOLOR},
+        {DISPID_IHTMLCSSSTYLEDECLARATION_SCROLLBARHIGHLIGHTCOLOR},
+        {DISPID_IHTMLCSSSTYLEDECLARATION_SCROLLBARDARKSHADOWCOLOR},
+        {DISPID_IHTMLCSSSTYLEDECLARATION_SCROLLBARARROWCOLOR},
+        {DISPID_IHTMLCSSSTYLEDECLARATION_SCROLLBARTRACKCOLOR},
+        {DISPID_IHTMLCSSSTYLEDECLARATION_WRITINGMODE},
+        {DISPID_IHTMLCSSSTYLEDECLARATION_TEXTKASHIDASPACE},
+        {DISPID_IHTMLCSSSTYLEDECLARATION_MSINTERPOLATIONMODE},
+        {DISPID_IHTMLCSSSTYLEDECLARATION_MSBLOCKPROGRESSION},
+        {DISPID_IHTMLCSSSTYLEDECLARATION_CLIPTOP},
+        {DISPID_IHTMLCSSSTYLEDECLARATION_CLIPRIGHT},
+        {DISPID_IHTMLCSSSTYLEDECLARATION_CLIPBOTTOM},
+        {DISPID_IHTMLCSSSTYLEDECLARATION_CLIPLEFT},
+        {DISPID_UNKNOWN}
+    };
+    if(mode >= COMPAT_MODE_IE9)
+        dispex_info_add_interface(info, IHTMLCSSStyleDeclaration_tid, styledecl_hooks);
+    if(mode >= COMPAT_MODE_IE10)
+        dispex_info_add_interface(info, IHTMLCSSStyleDeclaration2_tid, NULL);
+}
+
+const dispex_static_data_vtbl_t HTMLW3CComputedStyle_dispex_vtbl = {
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    HTMLW3CComputedStyle_get_static_dispid
+};
+
 static const tid_t HTMLW3CComputedStyle_iface_tids[] = {
     0
 };
-static dispex_static_data_t HTMLW3CComputedStyle_dispex = {
+dispex_static_data_t HTMLW3CComputedStyle_dispex = {
     L"CSSStyleDeclaration",
-    &CSSStyle_dispex_vtbl,
+    &HTMLW3CComputedStyle_dispex_vtbl,
+    PROTO_ID_HTMLW3CComputedStyle,
     DispHTMLW3CComputedStyle_tid,
     HTMLW3CComputedStyle_iface_tids,
-    CSSStyle_init_dispex_info
+    HTMLW3CComputedStyle_init_dispex_info
 };
 
-HRESULT create_computed_style(nsIDOMCSSStyleDeclaration *nsstyle, compat_mode_t compat_mode, IHTMLCSSStyleDeclaration **p)
+HRESULT create_computed_style(nsIDOMCSSStyleDeclaration *nsstyle, HTMLDocumentNode *doc,
+        compat_mode_t compat_mode, IHTMLCSSStyleDeclaration **p)
 {
     CSSStyle *style;
 
     if(!(style = heap_alloc_zero(sizeof(*style))))
         return E_OUTOFMEMORY;
 
-    init_css_style(style, nsstyle, NULL, &HTMLW3CComputedStyle_dispex, compat_mode);
+    init_css_style(style, nsstyle, NULL, &HTMLW3CComputedStyle_dispex, doc, compat_mode);
     *p = &style->IHTMLCSSStyleDeclaration_iface;
     return S_OK;
 }

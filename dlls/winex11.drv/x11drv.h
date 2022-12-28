@@ -250,10 +250,9 @@ extern void CDECL X11DRV_ThreadDetach(void) DECLSPEC_HIDDEN;
 /* X11 driver internal functions */
 
 extern void X11DRV_Xcursor_Init(void) DECLSPEC_HIDDEN;
-extern void x11drv_xinput_load(void) DECLSPEC_HIDDEN;
-extern void x11drv_xinput_init(void) DECLSPEC_HIDDEN;
-extern void x11drv_xinput_enable( Display *display, Window window, long event_mask ) DECLSPEC_HIDDEN;
-extern void x11drv_xinput_disable( Display *display, Window window, long event_mask ) DECLSPEC_HIDDEN;
+extern void X11DRV_XInput2_Load(void) DECLSPEC_HIDDEN;
+extern void X11DRV_XInput2_Init(void) DECLSPEC_HIDDEN;
+extern void X11DRV_XInput2_Enable( Display *display, Window window, long event_mask ) DECLSPEC_HIDDEN;
 
 extern DWORD copy_image_bits( BITMAPINFO *info, BOOL is_r8g8b8, XImage *image,
                               const struct gdi_image_bits *src_bits, struct gdi_image_bits *dst_bits,
@@ -341,10 +340,10 @@ extern int *get_window_surface_mapping( int bpp, int *mapping ) DECLSPEC_HIDDEN;
 enum x11drv_escape_codes
 {
     X11DRV_SET_DRAWABLE,     /* set current drawable for a DC */
+    X11DRV_GET_DRAWABLE,     /* get current drawable for a DC */
     X11DRV_START_EXPOSURES,  /* start graphics exposures */
     X11DRV_END_EXPOSURES,    /* end graphics exposures */
     X11DRV_PRESENT_DRAWABLE, /* present the drawable on screen */
-    X11DRV_FLUSH_GDI_DISPLAY /* flush the gdi display */
 };
 
 struct x11drv_escape_set_drawable
@@ -353,6 +352,14 @@ struct x11drv_escape_set_drawable
     Drawable                 drawable;     /* X drawable */
     int                      mode;         /* ClipByChildren or IncludeInferiors */
     RECT                     dc_rect;      /* DC rectangle relative to drawable */
+};
+
+struct x11drv_escape_get_drawable
+{
+    enum x11drv_escape_codes code;         /* escape code (X11DRV_GET_DRAWABLE) */
+    Drawable                 drawable;     /* X drawable */
+    Drawable                 gl_drawable;  /* GL drawable */
+    int                      pixel_format; /* internal GL pixel format */
 };
 
 struct x11drv_escape_present_drawable
@@ -365,14 +372,6 @@ struct x11drv_escape_present_drawable
 /**************************************************************************
  * X11 USER driver
  */
-
-enum xi2_state
-{
-    xi_unavailable = -1,
-    xi_unknown,
-    xi_disabled,
-    xi_enabled
-};
 
 struct x11drv_thread_data
 {
@@ -390,11 +389,12 @@ struct x11drv_thread_data
     HWND     clip_hwnd;            /* message window stored in desktop while clipping is active */
     DWORD    clip_reset;           /* time when clipping was last reset */
 #ifdef HAVE_X11_EXTENSIONS_XINPUT2_H
-    enum xi2_state xi2_state;      /* XInput2 state */
     XIValuatorClassInfo x_valuator;
     XIValuatorClassInfo y_valuator;
     int      xi2_core_pointer;     /* XInput2 core pointer id */
     int      xi2_rawinput_only;
+    int      xi2_active_touches;
+    int      xi2_primary_touchid;
 #endif /* HAVE_X11_EXTENSIONS_XINPUT2_H */
 };
 
@@ -461,6 +461,8 @@ extern int xfixes_event_base DECLSPEC_HIDDEN;
 extern HMODULE x11drv_module DECLSPEC_HIDDEN;
 extern char *process_name DECLSPEC_HIDDEN;
 extern Display *clipboard_display DECLSPEC_HIDDEN;
+extern HANDLE steam_overlay_event DECLSPEC_HIDDEN;
+extern HANDLE steam_keyboard_event DECLSPEC_HIDDEN;
 
 /* atoms */
 
@@ -501,6 +503,7 @@ enum x11drv_atoms
     XATOM__NET_SYSTEM_TRAY_S0,
     XATOM__NET_SYSTEM_TRAY_VISUAL,
     XATOM__NET_WM_BYPASS_COMPOSITOR,
+    XATOM__NET_WM_FULLSCREEN_MONITORS,
     XATOM__NET_WM_ICON,
     XATOM__NET_WM_MOVERESIZE,
     XATOM__NET_WM_NAME,
@@ -525,6 +528,8 @@ enum x11drv_atoms
     XATOM__GTK_WORKAREAS_D0,
     XATOM__XEMBED,
     XATOM__XEMBED_INFO,
+    XATOM__WINE_HWND_STYLE,
+    XATOM__WINE_HWND_EXSTYLE,
     XATOM_XdndAware,
     XATOM_XdndEnter,
     XATOM_XdndPosition,
@@ -558,6 +563,7 @@ enum x11drv_atoms
     XATOM_text_rtf,
     XATOM_text_richtext,
     XATOM_text_uri_list,
+    XATOM_GAMESCOPE_FOCUSED_APP,
     NB_XATOMS
 };
 
@@ -588,7 +594,7 @@ extern int xinput2_opcode DECLSPEC_HIDDEN;
 extern Bool (*pXGetEventData)( Display *display, XEvent /*XGenericEventCookie*/ *event ) DECLSPEC_HIDDEN;
 extern void (*pXFreeEventData)( Display *display, XEvent /*XGenericEventCookie*/ *event ) DECLSPEC_HIDDEN;
 
-extern DWORD EVENT_x11_time_to_win32_time(Time time) DECLSPEC_HIDDEN;
+extern DWORD x11drv_time_to_ticks(Time time) DECLSPEC_HIDDEN;
 
 /* X11 driver private messages, must be in the range 0x80001000..0x80001fff */
 enum x11drv_window_messages
@@ -635,6 +641,8 @@ struct x11drv_win_data
     BOOL        embedded : 1;   /* is window an XEMBED client? */
     BOOL        shaped : 1;     /* is window using a custom region shape? */
     BOOL        layered : 1;    /* is window layered and with valid attributes? */
+    BOOL        layered_attributes : 1;
+                                /* is layered window has leyered attributes set (or otherwise managed with UpdateLayeredWindow()? */
     BOOL        use_alpha : 1;  /* does window use an alpha channel? */
     BOOL        skip_taskbar : 1; /* does window should be deleted from taskbar */
     BOOL        add_taskbar : 1; /* does window should be added to taskbar regardless of style */
@@ -663,8 +671,11 @@ extern Window get_dummy_parent(void) DECLSPEC_HIDDEN;
 extern void sync_gl_drawable( HWND hwnd, BOOL known_child ) DECLSPEC_HIDDEN;
 extern void set_gl_drawable_parent( HWND hwnd, HWND parent ) DECLSPEC_HIDDEN;
 extern void destroy_gl_drawable( HWND hwnd ) DECLSPEC_HIDDEN;
-extern void wine_vk_surface_destroy( HWND hwnd ) DECLSPEC_HIDDEN;
+extern void destroy_vk_surface( HWND hwnd ) DECLSPEC_HIDDEN;
 extern void sync_vk_surface( HWND hwnd, BOOL known_child ) DECLSPEC_HIDDEN;
+extern void resize_vk_surfaces( HWND hwnd, Window active, int mask, XWindowChanges *changes ) DECLSPEC_HIDDEN;
+extern Window wine_vk_active_surface( HWND hwnd ) DECLSPEC_HIDDEN;
+extern BOOL wine_vk_direct_window_draw( HWND hwnd ) DECLSPEC_HIDDEN;
 extern void vulkan_thread_detach(void) DECLSPEC_HIDDEN;
 
 extern void wait_for_withdrawn_state( HWND hwnd, BOOL set ) DECLSPEC_HIDDEN;
@@ -675,6 +686,8 @@ extern void update_net_wm_states( struct x11drv_win_data *data ) DECLSPEC_HIDDEN
 extern void make_window_embedded( struct x11drv_win_data *data ) DECLSPEC_HIDDEN;
 extern Window create_dummy_client_window(void) DECLSPEC_HIDDEN;
 extern Window create_client_window( HWND hwnd, const XVisualInfo *visual ) DECLSPEC_HIDDEN;
+extern void update_client_window( HWND hwnd ) DECLSPEC_HIDDEN;
+extern void detach_client_window( HWND hwnd ) DECLSPEC_HIDDEN;
 extern void set_window_visual( struct x11drv_win_data *data, const XVisualInfo *vis, BOOL use_alpha ) DECLSPEC_HIDDEN;
 extern void change_systray_owner( Display *display, Window systray_window ) DECLSPEC_HIDDEN;
 extern void update_systray_balloon_position(void) DECLSPEC_HIDDEN;
@@ -739,16 +752,18 @@ extern DWORD CDECL X11DRV_MsgWaitForMultipleObjectsEx( DWORD count, const HANDLE
 typedef int (*x11drv_error_callback)( Display *display, XErrorEvent *event, void *arg );
 
 extern void X11DRV_expect_error( Display *display, x11drv_error_callback callback, void *arg ) DECLSPEC_HIDDEN;
-extern int X11DRV_check_error(void) DECLSPEC_HIDDEN;
+extern int X11DRV_check_error( Display *display ) DECLSPEC_HIDDEN;
 extern void X11DRV_X_to_window_rect( struct x11drv_win_data *data, RECT *rect, int x, int y, int cx, int cy ) DECLSPEC_HIDDEN;
 extern BOOL is_window_rect_full_screen( const RECT *rect ) DECLSPEC_HIDDEN;
 extern BOOL is_window_rect_full_virtual_screen( const RECT *rect ) DECLSPEC_HIDDEN;
 extern POINT virtual_screen_to_root( INT x, INT y ) DECLSPEC_HIDDEN;
 extern POINT root_to_virtual_screen( INT x, INT y ) DECLSPEC_HIDDEN;
+extern RECT get_native_screen_rect(void) DECLSPEC_HIDDEN;
 extern RECT get_virtual_screen_rect(void) DECLSPEC_HIDDEN;
 extern RECT get_primary_monitor_rect(void) DECLSPEC_HIDDEN;
 extern RECT get_host_primary_monitor_rect(void) DECLSPEC_HIDDEN;
 extern RECT get_work_area( const RECT *monitor_rect ) DECLSPEC_HIDDEN;
+extern void xinerama_get_fullscreen_monitors( const RECT *rect, long *indices ) DECLSPEC_HIDDEN;
 extern void xinerama_init( unsigned int width, unsigned int height ) DECLSPEC_HIDDEN;
 
 #define DEPTH_COUNT 3
@@ -901,5 +916,8 @@ static inline BOOL is_window_rect_mapped( const RECT *rect )
             max( rect->right, rect->left + 1 ) > virtual_rect.left &&
             max( rect->bottom, rect->top + 1 ) > virtual_rect.top);
 }
+
+extern BOOL layered_window_client_hack;
+extern BOOL vulkan_gdi_blit_source_hack;
 
 #endif  /* __WINE_X11DRV_H */

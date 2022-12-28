@@ -103,15 +103,29 @@ static HRESULT WINAPI HTMLTitleElement_Invoke(IHTMLTitleElement *iface, DISPID d
 static HRESULT WINAPI HTMLTitleElement_put_text(IHTMLTitleElement *iface, BSTR v)
 {
     HTMLTitleElement *This = impl_from_IHTMLTitleElement(iface);
-    FIXME("(%p)->(%s)\n", This, debugstr_w(v));
-    return E_NOTIMPL;
+    nsAString text;
+    nsresult nsres;
+
+    TRACE("(%p)->(%s)\n", This, debugstr_w(v));
+
+    nsAString_InitDepend(&text, v);
+    nsres = nsIDOMNode_SetTextContent(This->element.node.nsnode, &text);
+    nsAString_Finish(&text);
+
+    return map_nsresult(nsres);
 }
 
 static HRESULT WINAPI HTMLTitleElement_get_text(IHTMLTitleElement *iface, BSTR *p)
 {
     HTMLTitleElement *This = impl_from_IHTMLTitleElement(iface);
-    FIXME("(%p)->(%p)\n", This, p);
-    return E_NOTIMPL;
+    nsAString text;
+    nsresult nsres;
+
+    TRACE("(%p)->(%p)\n", This, p);
+
+    nsAString_Init(&text, NULL);
+    nsres = nsIDOMNode_GetTextContent(This->element.node.nsnode, &text);
+    return return_nsstr(nsres, &text, p);
 }
 
 static const IHTMLTitleElementVtbl HTMLTitleElementVtbl = {
@@ -168,9 +182,10 @@ static const tid_t HTMLTitleElement_iface_tids[] = {
     IHTMLTitleElement_tid,
     0
 };
-static dispex_static_data_t HTMLTitleElement_dispex = {
+dispex_static_data_t HTMLTitleElement_dispex = {
     L"HTMLTitleElement",
     NULL,
+    PROTO_ID_HTMLTitleElement,
     DispHTMLTitleElement_tid,
     HTMLTitleElement_iface_tids,
     HTMLElement_init_dispex_info
@@ -352,9 +367,10 @@ static const tid_t HTMLHtmlElement_iface_tids[] = {
     IHTMLHtmlElement_tid,
     0
 };
-static dispex_static_data_t HTMLHtmlElement_dispex = {
+dispex_static_data_t HTMLHtmlElement_dispex = {
     L"HTMLHtmlElement",
     NULL,
+    PROTO_ID_HTMLHtmlElement,
     DispHTMLHtmlElement_tid,
     HTMLHtmlElement_iface_tids,
     HTMLElement_init_dispex_info
@@ -589,9 +605,10 @@ static const tid_t HTMLMetaElement_iface_tids[] = {
     0
 };
 
-static dispex_static_data_t HTMLMetaElement_dispex = {
+dispex_static_data_t HTMLMetaElement_dispex = {
     L"HTMLMetaElement",
     NULL,
+    PROTO_ID_HTMLMetaElement,
     DispHTMLMetaElement_tid,
     HTMLMetaElement_iface_tids,
     HTMLElement_init_dispex_info
@@ -753,9 +770,10 @@ static const tid_t HTMLHeadElement_iface_tids[] = {
     IHTMLHeadElement_tid,
     0
 };
-static dispex_static_data_t HTMLHeadElement_dispex = {
+dispex_static_data_t HTMLHeadElement_dispex = {
     L"HTMLHeadElement",
     NULL,
+    PROTO_ID_HTMLHeadElement,
     DispHTMLHeadElement_tid,
     HTMLHeadElement_iface_tids,
     HTMLElement_init_dispex_info

@@ -32,32 +32,6 @@
 
 #include "wine/test.h"
 
-static PCCERT_CONTEXT (WINAPI *pCertCreateSelfSignCertificate)(HCRYPTPROV_OR_NCRYPT_KEY_HANDLE,PCERT_NAME_BLOB,DWORD,PCRYPT_KEY_PROV_INFO,PCRYPT_ALGORITHM_IDENTIFIER,PSYSTEMTIME,PSYSTEMTIME,PCERT_EXTENSIONS);
-static BOOL (WINAPI *pCertGetValidUsages)(DWORD,PCCERT_CONTEXT*,int*,LPSTR*,DWORD*);
-static BOOL (WINAPI *pCryptAcquireCertificatePrivateKey)(PCCERT_CONTEXT,DWORD,void*,HCRYPTPROV_OR_NCRYPT_KEY_HANDLE*,DWORD*,BOOL*);
-static BOOL (WINAPI *pCryptEncodeObjectEx)(DWORD,LPCSTR,const void*,DWORD,PCRYPT_ENCODE_PARA,void*,DWORD*);
-static BOOL (WINAPI *pCryptHashCertificate2)(LPCWSTR, DWORD, void*, const BYTE*, DWORD, BYTE*, DWORD*);
-static BOOL (WINAPI * pCryptVerifyCertificateSignatureEx)
-                        (HCRYPTPROV, DWORD, DWORD, void *, DWORD, void *, DWORD, void *);
-
-static void init_function_pointers(void)
-{
-    HMODULE hCrypt32 = GetModuleHandleA("crypt32.dll");
-
-#define GET_PROC(dll, func) \
-    p ## func = (void *)GetProcAddress(dll, #func); \
-    if(!p ## func) \
-      trace("GetProcAddress(%s) failed\n", #func);
-
-    GET_PROC(hCrypt32, CertCreateSelfSignCertificate)
-    GET_PROC(hCrypt32, CertGetValidUsages)
-    GET_PROC(hCrypt32, CryptAcquireCertificatePrivateKey)
-    GET_PROC(hCrypt32, CryptEncodeObjectEx)
-    GET_PROC(hCrypt32, CryptHashCertificate2)
-    GET_PROC(hCrypt32, CryptVerifyCertificateSignatureEx)
-#undef GET_PROC
-}
-
 static BYTE subjectName[] = { 0x30, 0x15, 0x31, 0x13, 0x30, 0x11, 0x06,
  0x03, 0x55, 0x04, 0x03, 0x13, 0x0a, 0x4a, 0x75, 0x61, 0x6e, 0x20, 0x4c, 0x61,
  0x6e, 0x67, 0x00 };
@@ -148,28 +122,22 @@ static void testAddCert(void)
 
     store = CertOpenStore(CERT_STORE_PROV_MEMORY, 0, 0,
      CERT_STORE_CREATE_NEW_FLAG, NULL);
-    ok(store != NULL, "CertOpenStore failed: %d\n", GetLastError());
+    ok(store != NULL, "CertOpenStore failed: %ld\n", GetLastError());
     if (!store)
         return;
 
-    /* Weird--bad add disposition leads to an access violation in Windows.
-     * Both tests crash on some win9x boxes.
-     */
-    if (0)
-    {
-        ret = CertAddEncodedCertificateToStore(0, X509_ASN_ENCODING, bigCert,
-         sizeof(bigCert), 0, NULL);
-        ok(!ret && (GetLastError() == STATUS_ACCESS_VIOLATION ||
-         GetLastError() == E_INVALIDARG),
-         "Expected STATUS_ACCESS_VIOLATION or E_INVALIDARG, got %08x\n",
-         GetLastError());
-        ret = CertAddEncodedCertificateToStore(store, X509_ASN_ENCODING,
-         bigCert, sizeof(bigCert), 0, NULL);
-        ok(!ret && (GetLastError() == STATUS_ACCESS_VIOLATION ||
-         GetLastError() == E_INVALIDARG),
-         "Expected STATUS_ACCESS_VIOLATION or E_INVALIDARG, got %08x\n",
-         GetLastError());
-    }
+    ret = CertAddEncodedCertificateToStore(0, X509_ASN_ENCODING, bigCert,
+     sizeof(bigCert), 0, NULL);
+    ok(!ret && (GetLastError() == STATUS_ACCESS_VIOLATION ||
+     GetLastError() == E_INVALIDARG),
+     "Expected STATUS_ACCESS_VIOLATION or E_INVALIDARG, got %08lx\n",
+     GetLastError());
+    ret = CertAddEncodedCertificateToStore(store, X509_ASN_ENCODING,
+     bigCert, sizeof(bigCert), 0, NULL);
+    ok(!ret && (GetLastError() == STATUS_ACCESS_VIOLATION ||
+     GetLastError() == E_INVALIDARG),
+     "Expected STATUS_ACCESS_VIOLATION or E_INVALIDARG, got %08lx\n",
+     GetLastError());
 
     /* Weird--can add a cert to the NULL store (does this have special
      * meaning?)
@@ -177,28 +145,21 @@ static void testAddCert(void)
     context = NULL;
     ret = CertAddEncodedCertificateToStore(0, X509_ASN_ENCODING, bigCert,
      sizeof(bigCert), CERT_STORE_ADD_ALWAYS, &context);
-    ok(ret || broken(GetLastError() == OSS_DATA_ERROR /* win98 */),
-     "CertAddEncodedCertificateToStore failed: %08x\n", GetLastError());
-    if (context)
-        CertFreeCertificateContext(context);
-    if (!ret && GetLastError() == OSS_DATA_ERROR)
-    {
-        skip("bigCert can't be decoded, skipping tests\n");
-        return;
-    }
+    ok(ret, "CertAddEncodedCertificateToStore failed: %08lx\n", GetLastError());
+    CertFreeCertificateContext(context);
 
     ret = CertAddEncodedCertificateToStore(store, X509_ASN_ENCODING,
      bigCert, sizeof(bigCert), CERT_STORE_ADD_ALWAYS, NULL);
-    ok(ret, "CertAddEncodedCertificateToStore failed: %08x\n",
+    ok(ret, "CertAddEncodedCertificateToStore failed: %08lx\n",
      GetLastError());
     ret = CertAddEncodedCertificateToStore(store, X509_ASN_ENCODING,
      bigCert2, sizeof(bigCert2), CERT_STORE_ADD_NEW, NULL);
-    ok(ret, "CertAddEncodedCertificateToStore failed: %08x\n",
+    ok(ret, "CertAddEncodedCertificateToStore failed: %08lx\n",
      GetLastError());
     /* This has the same name as bigCert, so finding isn't done by name */
     ret = CertAddEncodedCertificateToStore(store, X509_ASN_ENCODING,
      certWithUsage, sizeof(certWithUsage), CERT_STORE_ADD_NEW, &context);
-    ok(ret, "CertAddEncodedCertificateToStore failed: %08x\n",
+    ok(ret, "CertAddEncodedCertificateToStore failed: %08lx\n",
      GetLastError());
     ok(context != NULL, "Expected a context\n");
     if (context)
@@ -213,7 +174,7 @@ static void testAddCert(void)
         /* Set the same hash as bigCert2, and try to readd it */
         ret = CertSetCertificateContextProperty(context, CERT_HASH_PROP_ID,
          0, &hash);
-        ok(ret, "CertSetCertificateContextProperty failed: %08x\n",
+        ok(ret, "CertSetCertificateContextProperty failed: %08lx\n",
          GetLastError());
         ret = CertAddCertificateContextToStore(store, context,
          CERT_STORE_ADD_NEW, NULL);
@@ -232,7 +193,7 @@ static void testAddCert(void)
         ret = CertAddCertificateContextToStore(store, context,
          CERT_STORE_ADD_NEW, NULL);
         ok(!ret && GetLastError() == CRYPT_E_EXISTS,
-         "Expected CRYPT_E_EXISTS, got %08x\n", GetLastError());
+         "Expected CRYPT_E_EXISTS, got %08lx\n", GetLastError());
         CertFreeCertificateContext(context);
     }
 
@@ -243,7 +204,7 @@ static void testAddCert(void)
     ret = CertAddEncodedCertificateToStore(store, X509_ASN_ENCODING,
      bigCert2WithDifferentSerial, sizeof(bigCert2WithDifferentSerial),
      CERT_STORE_ADD_NEW, &context);
-    ok(ret, "CertAddEncodedCertificateToStore failed: %08x\n",
+    ok(ret, "CertAddEncodedCertificateToStore failed: %08lx\n",
      GetLastError());
     if (context)
         CertDeleteCertificateFromStore(context);
@@ -255,7 +216,7 @@ static void testAddCert(void)
     ret = CertAddEncodedCertificateToStore(store, X509_ASN_ENCODING,
      bigCertWithDifferentSubject, sizeof(bigCertWithDifferentSubject),
      CERT_STORE_ADD_NEW, &context);
-    ok(ret, "CertAddEncodedCertificateToStore failed: %08x\n",
+    ok(ret, "CertAddEncodedCertificateToStore failed: %08lx\n",
      GetLastError());
     if (context)
         CertDeleteCertificateFromStore(context);
@@ -267,14 +228,14 @@ static void testAddCert(void)
     ret = CertAddEncodedCertificateToStore(store, X509_ASN_ENCODING,
      bigCertWithDifferentIssuer, sizeof(bigCertWithDifferentIssuer),
      CERT_STORE_ADD_NEW, &context);
-    ok(ret, "CertAddEncodedCertificateToStore failed: %08x\n",
+    ok(ret, "CertAddEncodedCertificateToStore failed: %08lx\n",
      GetLastError());
     if (context)
         CertDeleteCertificateFromStore(context);
 
     collection = CertOpenStore(CERT_STORE_PROV_COLLECTION, 0, 0,
      CERT_STORE_CREATE_NEW_FLAG, NULL);
-    ok(collection != NULL, "CertOpenStore failed: %08x\n", GetLastError());
+    ok(collection != NULL, "CertOpenStore failed: %08lx\n", GetLastError());
     if (collection)
     {
         /* Add store to the collection, but disable updates */
@@ -289,19 +250,19 @@ static void testAddCert(void)
             ret = CertAddCertificateContextToStore(collection, context,
              CERT_STORE_ADD_NEW, NULL);
             ok(!ret && GetLastError() == CRYPT_E_EXISTS,
-             "Expected CRYPT_E_EXISTS, got %08x\n", GetLastError());
+             "Expected CRYPT_E_EXISTS, got %08lx\n", GetLastError());
             /* Replacing an existing certificate context is allowed, even
              * though updates to the collection aren't..
              */
             ret = CertAddCertificateContextToStore(collection, context,
              CERT_STORE_ADD_REPLACE_EXISTING, NULL);
-            ok(ret, "CertAddCertificateContextToStore failed: %08x\n",
+            ok(ret, "CertAddCertificateContextToStore failed: %08lx\n",
              GetLastError());
             /* use the existing certificate and ask for a copy of the context*/
             copyContext = NULL;
             ret = CertAddCertificateContextToStore(collection, context,
              CERT_STORE_ADD_USE_EXISTING, &copyContext);
-            ok(ret, "CertAddCertificateContextToStore failed: %08x\n",
+            ok(ret, "CertAddCertificateContextToStore failed: %08lx\n",
              GetLastError());
             ok(copyContext != NULL, "Expected on output a non NULL copyContext\n");
             if (copyContext)
@@ -310,7 +271,7 @@ static void testAddCert(void)
             ret = CertAddCertificateContextToStore(collection, context,
              CERT_STORE_ADD_ALWAYS, NULL);
             ok(!ret && GetLastError() == E_ACCESSDENIED,
-             "Expected E_ACCESSDENIED, got %08x\n", GetLastError());
+             "Expected E_ACCESSDENIED, got %08lx\n", GetLastError());
             CertFreeCertificateContext(context);
         }
 
@@ -332,23 +293,22 @@ static void checkHash(const BYTE *data, DWORD dataLen, ALG_ID algID,
     memset(hashProperty, 0, sizeof(hashProperty));
     size = sizeof(hash);
     ret = CryptHashCertificate(0, algID, 0, data, dataLen, hash, &size);
-    ok(ret, "CryptHashCertificate failed: %08x\n", GetLastError());
+    ok(ret, "CryptHashCertificate failed: %08lx\n", GetLastError());
     ret = CertGetCertificateContextProperty(context, propID, NULL,
      &dwSizeWithNull);
-    ok(ret, "algID %08x, propID %d: CertGetCertificateContextProperty failed: %08x\n",
+    ok(ret, "algID %08x, propID %ld: CertGetCertificateContextProperty failed: %08lx\n",
      algID, propID, GetLastError());
     ret = CertGetCertificateContextProperty(context, propID, hashProperty,
      &size);
-    ok(ret, "CertGetCertificateContextProperty failed: %08x\n",
+    ok(ret, "CertGetCertificateContextProperty failed: %08lx\n",
      GetLastError());
-    ok(!memcmp(hash, hashProperty, size), "Unexpected hash for property %d\n",
+    ok(!memcmp(hash, hashProperty, size), "Unexpected hash for property %ld\n",
      propID);
-    ok(size == dwSizeWithNull, "Unexpected length of hash for property: received %d instead of %d\n",
+    ok(size == dwSizeWithNull, "Unexpected length of hash for property: received %ld instead of %ld\n",
      dwSizeWithNull,size);
 }
 
 static const CHAR cspNameA[] = "WineCryptTemp";
-static WCHAR cspNameW[] = { 'W','i','n','e','C','r','y','p','t','T','e','m','p',0 };
 static const BYTE v1CertWithPubKey[] = {
 0x30,0x81,0x95,0x02,0x01,0x01,0x30,0x02,0x06,0x00,0x30,0x15,0x31,0x13,0x30,
 0x11,0x06,0x03,0x55,0x04,0x03,0x13,0x0a,0x4a,0x75,0x61,0x6e,0x20,0x4c,0x61,
@@ -410,14 +370,11 @@ static void testCertProperties(void)
     CRYPT_DATA_BLOB blob;
     CERT_KEY_CONTEXT keyContext;
 
-    ok(context != NULL || broken(GetLastError() == OSS_DATA_ERROR /* win98 */),
-     "CertCreateCertificateContext failed: %08x\n", GetLastError());
-    if (!context)
-        return;
+    ok(context != NULL, "CertCreateCertificateContext failed: %08lx\n", GetLastError());
 
     /* This crashes
     propID = CertEnumCertificateContextProperties(NULL, 0);
-     */
+    */
 
     propID = 0;
     numProps = 0;
@@ -426,12 +383,12 @@ static void testCertProperties(void)
         if (propID)
             numProps++;
     } while (propID != 0);
-    ok(numProps == 0, "Expected 0 properties, got %d\n", numProps);
+    ok(numProps == 0, "Expected 0 properties, got %ld\n", numProps);
 
     /* Tests with a NULL cert context.  Prop ID 0 fails.. */
     ret = CertSetCertificateContextProperty(NULL, 0, 0, NULL);
     ok(!ret && GetLastError() == E_INVALIDARG,
-     "Expected E_INVALIDARG, got %08x\n", GetLastError());
+     "Expected E_INVALIDARG, got %08lx\n", GetLastError());
     /* while this just crashes.
     ret = CertSetCertificateContextProperty(NULL,
      CERT_KEY_PROV_HANDLE_PROP_ID, 0, NULL);
@@ -439,7 +396,7 @@ static void testCertProperties(void)
 
     ret = CertSetCertificateContextProperty(context, 0, 0, NULL);
     ok(!ret && GetLastError() == E_INVALIDARG,
-     "Expected E_INVALIDARG, got %08x\n", GetLastError());
+     "Expected E_INVALIDARG, got %08lx\n", GetLastError());
     /* Can't set the cert property directly, this crashes.
     ret = CertSetCertificateContextProperty(context,
      CERT_CERT_PROP_ID, 0, bigCert2);
@@ -458,12 +415,12 @@ static void testCertProperties(void)
     ret = CertGetCertificateContextProperty(context,
      CERT_KEY_PROV_INFO_PROP_ID, NULL, &size);
     ok(!ret && GetLastError() == CRYPT_E_NOT_FOUND,
-     "Expected CRYPT_E_NOT_FOUND, got %08x\n", GetLastError());
+     "Expected CRYPT_E_NOT_FOUND, got %08lx\n", GetLastError());
     /* And, an implicit property */
     size = sizeof(access);
     ret = CertGetCertificateContextProperty(context,
      CERT_ACCESS_STATE_PROP_ID, &access, &size);
-    ok(ret, "CertGetCertificateContextProperty failed: %08x\n",
+    ok(ret, "CertGetCertificateContextProperty failed: %08lx\n",
      GetLastError());
     ok(!(access & CERT_ACCESS_STATE_WRITE_PERSIST_FLAG),
      "Didn't expect a persisted cert\n");
@@ -478,18 +435,18 @@ static void testCertProperties(void)
     blob.cbData = sizeof(hash);
     ret = CertSetCertificateContextProperty(context, CERT_HASH_PROP_ID, 0,
      &blob);
-    ok(ret, "CertSetCertificateContextProperty failed: %08x\n",
+    ok(ret, "CertSetCertificateContextProperty failed: %08lx\n",
      GetLastError());
     size = sizeof(hashProperty);
     ret = CertGetCertificateContextProperty(context, CERT_HASH_PROP_ID,
      hashProperty, &size);
-    ok(ret, "CertGetCertificateContextProperty failed: %08x\n",
+    ok(ret, "CertGetCertificateContextProperty failed: %08lx\n",
      GetLastError());
     ok(!memcmp(hashProperty, hash, sizeof(hash)), "Unexpected hash\n");
     /* Delete the (bogus) hash, and get the real one */
     ret = CertSetCertificateContextProperty(context, CERT_HASH_PROP_ID, 0,
      NULL);
-    ok(ret, "CertSetCertificateContextProperty failed: %08x\n",
+    ok(ret, "CertSetCertificateContextProperty failed: %08lx\n",
      GetLastError());
     checkHash(bigCert, sizeof(bigCert), CALG_SHA1, context,
      CERT_HASH_PROP_ID);
@@ -504,7 +461,7 @@ static void testCertProperties(void)
         if (propID)
             numProps++;
     } while (propID != 0);
-    ok(numProps == 1, "Expected 1 properties, got %d\n", numProps);
+    ok(numProps == 1, "Expected 1 properties, got %ld\n", numProps);
 
     /* Check a few other implicit properties */
     checkHash(bigCert, sizeof(bigCert), CALG_MD5, context,
@@ -514,61 +471,58 @@ static void testCertProperties(void)
     size = 0;
     ret = CertGetCertificateContextProperty(context,
      CERT_SIGNATURE_HASH_PROP_ID, NULL, &size);
-    ok(!ret &&
-       (GetLastError() == CRYPT_E_ASN1_BADTAG ||
-        GetLastError() == CRYPT_E_NOT_FOUND ||
-        GetLastError() == OSS_DATA_ERROR), /* win9x */
-       "Expected CRYPT_E_ASN1_BADTAG, got %08x\n", GetLastError());
+    ok(!ret && GetLastError() == CRYPT_E_ASN1_BADTAG,
+       "Expected CRYPT_E_ASN1_BADTAG, got %08lx\n", GetLastError());
 
     /* Test key contexts and handles and such */
     size = 0;
     ret = CertGetCertificateContextProperty(context, CERT_KEY_CONTEXT_PROP_ID,
      NULL, &size);
     ok(!ret && GetLastError() == CRYPT_E_NOT_FOUND,
-     "Expected CRYPT_E_NOT_FOUND, got %08x\n", GetLastError());
+     "Expected CRYPT_E_NOT_FOUND, got %08lx\n", GetLastError());
     size = sizeof(CERT_KEY_CONTEXT);
     ret = CertGetCertificateContextProperty(context, CERT_KEY_CONTEXT_PROP_ID,
      NULL, &size);
     ok(!ret && GetLastError() == CRYPT_E_NOT_FOUND,
-     "Expected CRYPT_E_NOT_FOUND, got %08x\n", GetLastError());
+     "Expected CRYPT_E_NOT_FOUND, got %08lx\n", GetLastError());
     ret = CertGetCertificateContextProperty(context, CERT_KEY_CONTEXT_PROP_ID,
      &keyContext, &size);
     ok(!ret && GetLastError() == CRYPT_E_NOT_FOUND,
-     "Expected CRYPT_E_NOT_FOUND, got %08x\n", GetLastError());
+     "Expected CRYPT_E_NOT_FOUND, got %08lx\n", GetLastError());
     /* Key context with an invalid size */
     keyContext.cbSize = 0;
     ret = CertSetCertificateContextProperty(context, CERT_KEY_CONTEXT_PROP_ID,
      0, &keyContext);
     ok(!ret && GetLastError() == E_INVALIDARG,
-     "Expected E_INVALIDARG, got %08x\n", GetLastError());
+     "Expected E_INVALIDARG, got %08lx\n", GetLastError());
     size = sizeof(keyContext);
     ret = CertGetCertificateContextProperty(context, CERT_KEY_CONTEXT_PROP_ID,
      &keyContext, &size);
     ok(!ret && GetLastError() == CRYPT_E_NOT_FOUND,
-     "Expected CRYPT_E_NOT_FOUND, got %08x\n", GetLastError());
+     "Expected CRYPT_E_NOT_FOUND, got %08lx\n", GetLastError());
     keyContext.cbSize = sizeof(keyContext);
     keyContext.hCryptProv = 0;
     keyContext.dwKeySpec = AT_SIGNATURE;
     ret = CertSetCertificateContextProperty(context, CERT_KEY_CONTEXT_PROP_ID,
      0, &keyContext);
-    ok(ret, "CertSetCertificateContextProperty failed: %08x\n", GetLastError());
+    ok(ret, "CertSetCertificateContextProperty failed: %08lx\n", GetLastError());
     /* Now that that's set, the key prov handle property is also gettable.
      */
     size = sizeof(keyContext.hCryptProv);
     ret = CertGetCertificateContextProperty(context,
      CERT_KEY_PROV_HANDLE_PROP_ID, &keyContext.hCryptProv, &size);
-    ok(ret, "Expected to get the CERT_KEY_PROV_HANDLE_PROP_ID, got %08x\n",
+    ok(ret, "Expected to get the CERT_KEY_PROV_HANDLE_PROP_ID, got %08lx\n",
      GetLastError());
     /* Remove the key prov handle property.. */
     ret = CertSetCertificateContextProperty(context,
      CERT_KEY_PROV_HANDLE_PROP_ID, 0, NULL);
-    ok(ret, "CertSetCertificateContextProperty failed: %08x\n",
+    ok(ret, "CertSetCertificateContextProperty failed: %08lx\n",
      GetLastError());
     /* and the key context's CSP is set to NULL. */
     size = sizeof(keyContext);
     ret = CertGetCertificateContextProperty(context,
      CERT_KEY_CONTEXT_PROP_ID, &keyContext, &size);
-    ok(ret, "CertGetCertificateContextProperty failed: %08x\n",
+    ok(ret, "CertGetCertificateContextProperty failed: %08lx\n",
      GetLastError());
     ok(keyContext.hCryptProv == 0, "Expected no hCryptProv\n");
 
@@ -579,7 +533,7 @@ static void testCertProperties(void)
     ret = CertGetCertificateContextProperty(context,
      CERT_KEY_IDENTIFIER_PROP_ID, NULL, &size);
     ok(!ret && GetLastError() == ERROR_INVALID_DATA,
-     "Expected ERROR_INVALID_DATA, got %08x\n", GetLastError());
+     "Expected ERROR_INVALID_DATA, got %08lx\n", GetLastError());
     CertFreeCertificateContext(context);
     /* This cert does have a public key, but its subject key identifier still
      * isn't available: */
@@ -588,7 +542,7 @@ static void testCertProperties(void)
     ret = CertGetCertificateContextProperty(context,
      CERT_KEY_IDENTIFIER_PROP_ID, NULL, &size);
     ok(!ret && GetLastError() == ERROR_INVALID_DATA,
-     "Expected ERROR_INVALID_DATA, got %08x\n", GetLastError());
+     "Expected ERROR_INVALID_DATA, got %08lx\n", GetLastError());
     CertFreeCertificateContext(context);
     /* This cert with a subject key extension can have its key identifier
      * property retrieved:
@@ -597,19 +551,19 @@ static void testCertProperties(void)
      v1CertWithSubjectKeyId, sizeof(v1CertWithSubjectKeyId));
     ret = CertGetCertificateContextProperty(context,
      CERT_KEY_IDENTIFIER_PROP_ID, NULL, &size);
-    ok(ret, "CertGetCertificateContextProperty failed: %08x\n", GetLastError());
+    ok(ret, "CertGetCertificateContextProperty failed: %08lx\n", GetLastError());
     if (ret)
     {
-        LPBYTE buf = HeapAlloc(GetProcessHeap(), 0, size);
+        LPBYTE buf = malloc(size);
 
         if (buf)
         {
             ret = CertGetCertificateContextProperty(context,
              CERT_KEY_IDENTIFIER_PROP_ID, buf, &size);
-            ok(ret, "CertGetCertificateContextProperty failed: %08x\n",
+            ok(ret, "CertGetCertificateContextProperty failed: %08lx\n",
              GetLastError());
             ok(!memcmp(buf, subjectKeyId, size), "Unexpected subject key id\n");
-            HeapFree(GetProcessHeap(), 0, buf);
+            free(buf);
         }
     }
     CertFreeCertificateContext(context);
@@ -620,8 +574,8 @@ static void testCertProperties(void)
     size = 0;
     ret = CertGetCertificateContextProperty(context,
      CERT_SIGNATURE_HASH_PROP_ID, NULL, &size);
-    ok(ret, "CertGetCertificateContextProperty failed: %08x\n", GetLastError());
-    ok(size == sizeof(selfSignedSignatureHash), "unexpected size %d\n", size);
+    ok(ret, "CertGetCertificateContextProperty failed: %08lx\n", GetLastError());
+    ok(size == sizeof(selfSignedSignatureHash), "unexpected size %ld\n", size);
     ret = CertGetCertificateContextProperty(context,
      CERT_SIGNATURE_HASH_PROP_ID, hashProperty, &size);
     if (ret)
@@ -639,22 +593,20 @@ static void testCreateCert(void)
     SetLastError(0xdeadbeef);
     cert = CertCreateCertificateContext(0, NULL, 0);
     ok(!cert && GetLastError() == E_INVALIDARG,
-     "expected E_INVALIDARG, got %08x\n", GetLastError());
+     "expected E_INVALIDARG, got %08lx\n", GetLastError());
     SetLastError(0xdeadbeef);
     cert = CertCreateCertificateContext(0, selfSignedCert,
      sizeof(selfSignedCert));
     ok(!cert && GetLastError() == E_INVALIDARG,
-     "expected E_INVALIDARG, got %08x\n", GetLastError());
+     "expected E_INVALIDARG, got %08lx\n", GetLastError());
     SetLastError(0xdeadbeef);
     cert = CertCreateCertificateContext(X509_ASN_ENCODING, NULL, 0);
-    ok(!cert &&
-     (GetLastError() == CRYPT_E_ASN1_EOD ||
-     broken(GetLastError() == OSS_MORE_INPUT /* NT4 */)),
-     "expected CRYPT_E_ASN1_EOD, got %08x\n", GetLastError());
+    ok(!cert && GetLastError() == CRYPT_E_ASN1_EOD,
+     "expected CRYPT_E_ASN1_EOD, got %08lx\n", GetLastError());
 
     cert = CertCreateCertificateContext(X509_ASN_ENCODING,
      selfSignedCert, sizeof(selfSignedCert));
-    ok(cert != NULL, "creating cert failed: %08x\n", GetLastError());
+    ok(cert != NULL, "creating cert failed: %08lx\n", GetLastError());
     /* Even in-memory certs are expected to have a store associated with them */
     ok(cert->hCertStore != NULL, "expected created cert to have a store\n");
     /* The cert doesn't have the archived property set (which would imply it
@@ -664,13 +616,13 @@ static void testCreateCert(void)
     ret = CertGetCertificateContextProperty(cert, CERT_ARCHIVED_PROP_ID,
      NULL, &size);
     ok(!ret && GetLastError() == CRYPT_E_NOT_FOUND,
-       "expected CRYPT_E_NOT_FOUND, got %08x\n", GetLastError());
+       "expected CRYPT_E_NOT_FOUND, got %08lx\n", GetLastError());
     /* Strangely, enumerating the certs in the store finds none. */
     enumCert = NULL;
     count = 0;
     while ((enumCert = CertEnumCertificatesInStore(cert->hCertStore, enumCert)))
         count++;
-    ok(!count, "expected 0, got %d\n", count);
+    ok(!count, "expected 0, got %ld\n", count);
     CertFreeCertificateContext(cert);
 }
 
@@ -682,24 +634,18 @@ static void testDupCert(void)
 
     store = CertOpenStore(CERT_STORE_PROV_MEMORY, 0, 0,
      CERT_STORE_CREATE_NEW_FLAG, NULL);
-    ok(store != NULL, "CertOpenStore failed: %d\n", GetLastError());
+    ok(store != NULL, "CertOpenStore failed: %ld\n", GetLastError());
     if (!store)
         return;
 
     ret = CertAddEncodedCertificateToStore(store, X509_ASN_ENCODING,
      bigCert, sizeof(bigCert), CERT_STORE_ADD_ALWAYS, &context);
-    ok(ret || broken(GetLastError() == OSS_DATA_ERROR /* win98 */),
-     "CertAddEncodedCertificateToStore failed: %08x\n", GetLastError());
-    if (!ret && GetLastError() == OSS_DATA_ERROR)
-    {
-        skip("bigCert can't be decoded, skipping tests\n");
-        return;
-    }
+    ok(ret, "CertAddEncodedCertificateToStore failed: %08lx\n", GetLastError());
     ok(context != NULL, "Expected a valid cert context\n");
     if (context)
     {
         ok(context->cbCertEncoded == sizeof(bigCert),
-         "Wrong cert size %d\n", context->cbCertEncoded);
+         "Wrong cert size %ld\n", context->cbCertEncoded);
         ok(!memcmp(context->pbCertEncoded, bigCert, sizeof(bigCert)),
          "Unexpected encoded cert in context\n");
         ok(context->hCertStore == store, "Unexpected store\n");
@@ -725,7 +671,7 @@ static void testDupCert(void)
     ok(ret, "CertFreeCertificateContext failed\n");
 
     store = CertOpenStore(CERT_STORE_PROV_MEMORY, 0, 0, CERT_STORE_CREATE_NEW_FLAG, NULL);
-    ok(store != NULL, "CertOpenStore failed: %d\n", GetLastError());
+    ok(store != NULL, "CertOpenStore failed: %ld\n", GetLastError());
 
     ret = CertAddCertificateContextToStore(store, context, CERT_STORE_ADD_NEW, &storeContext);
     ok(ret, "CertAddCertificateContextToStore failed\n");
@@ -737,7 +683,7 @@ static void testDupCert(void)
     ok(storeContext->pCertInfo != context->pCertInfo, "unexpected pCertInfo\n");
 
     store2 = CertOpenStore(CERT_STORE_PROV_MEMORY, 0, 0, CERT_STORE_CREATE_NEW_FLAG, NULL);
-    ok(store2 != NULL, "CertOpenStore failed: %d\n", GetLastError());
+    ok(store2 != NULL, "CertOpenStore failed: %ld\n", GetLastError());
 
     ret = CertAddCertificateContextToStore(store2, storeContext, CERT_STORE_ADD_NEW, &storeContext2);
     ok(ret, "CertAddCertificateContextToStore failed\n");
@@ -781,7 +727,7 @@ static void testLinkCert(void)
     ok(context != NULL, "CertCreateCertificateContext failed\n");
 
     store = CertOpenStore(CERT_STORE_PROV_MEMORY, 0, 0, CERT_STORE_CREATE_NEW_FLAG, NULL);
-    ok(store != NULL, "CertOpenStore failed: %d\n", GetLastError());
+    ok(store != NULL, "CertOpenStore failed: %ld\n", GetLastError());
 
     ret = CertAddCertificateLinkToStore(store, context, CERT_STORE_ADD_NEW, &link);
     ok(ret, "CertAddCertificateContextToStore failed\n");
@@ -1135,33 +1081,25 @@ static void testFindCert(void)
     CRYPT_HASH_BLOB blob;
     BYTE otherSerialNumber[] = { 2 };
     DWORD count;
-    static const WCHAR juan[] = { 'j','u','a','n',0 };
-    static const WCHAR lang[] = { 'L','A','N','G',0 };
-    static const WCHAR malcolm[] = { 'm','a','l','c','o','l','m',0 };
 
     store = CertOpenStore(CERT_STORE_PROV_MEMORY, 0, 0,
      CERT_STORE_CREATE_NEW_FLAG, NULL);
-    ok(store != NULL, "CertOpenStore failed: %d\n", GetLastError());
+    ok(store != NULL, "CertOpenStore failed: %ld\n", GetLastError());
     if (!store)
         return;
 
     ret = CertAddEncodedCertificateToStore(store, X509_ASN_ENCODING,
      bigCert, sizeof(bigCert), CERT_STORE_ADD_NEW, NULL);
-    ok(ret || broken(GetLastError() == OSS_DATA_ERROR /* win98 */),
-     "CertAddEncodedCertificateToStore failed: %08x\n", GetLastError());
-    if (!ret && GetLastError() == OSS_DATA_ERROR)
-    {
-        skip("bigCert can't be decoded, skipping tests\n");
-        return;
-    }
+    ok(ret, "CertAddEncodedCertificateToStore failed: %08lx\n", GetLastError());
+
     ret = CertAddEncodedCertificateToStore(store, X509_ASN_ENCODING,
      bigCert2, sizeof(bigCert2), CERT_STORE_ADD_NEW, NULL);
-    ok(ret, "CertAddEncodedCertificateToStore failed: %08x\n",
+    ok(ret, "CertAddEncodedCertificateToStore failed: %08lx\n",
      GetLastError());
     /* This has the same name as bigCert */
     ret = CertAddEncodedCertificateToStore(store, X509_ASN_ENCODING,
      certWithUsage, sizeof(certWithUsage), CERT_STORE_ADD_NEW, NULL);
-    ok(ret, "CertAddEncodedCertificateToStore failed: %08x\n",
+    ok(ret, "CertAddEncodedCertificateToStore failed: %08lx\n",
      GetLastError());
 
     /* Crashes
@@ -1175,7 +1113,7 @@ static void testFindCert(void)
     certInfo.SerialNumber.cbData = sizeof(serialNum);
     context = CertFindCertificateInStore(store, X509_ASN_ENCODING, 0,
      CERT_FIND_ISSUER_NAME, &certInfo.Subject, NULL);
-    ok(context != NULL, "CertFindCertificateInStore failed: %08x\n",
+    ok(context != NULL, "CertFindCertificateInStore failed: %08lx\n",
      GetLastError());
     if (context)
     {
@@ -1195,7 +1133,7 @@ static void testFindCert(void)
     certInfo.Subject.cbData = sizeof(subjectName2);
     context = CertFindCertificateInStore(store, X509_ASN_ENCODING, 0,
      CERT_FIND_SUBJECT_NAME, &certInfo.Subject, NULL);
-    ok(context != NULL, "CertFindCertificateInStore failed: %08x\n",
+    ok(context != NULL, "CertFindCertificateInStore failed: %08lx\n",
      GetLastError());
     if (context)
     {
@@ -1216,7 +1154,7 @@ static void testFindCert(void)
     certInfo.Issuer.cbData = sizeof(subjectName2);
     context = CertFindCertificateInStore(store, X509_ASN_ENCODING, 0,
      CERT_FIND_SUBJECT_CERT, &certInfo, NULL);
-    ok(context != NULL, "CertFindCertificateInStore failed: %08x\n",
+    ok(context != NULL, "CertFindCertificateInStore failed: %08lx\n",
      GetLastError());
     if (context)
     {
@@ -1249,7 +1187,7 @@ static void testFindCert(void)
     blob.cbData = sizeof(bigCertHash);
     context = CertFindCertificateInStore(store, X509_ASN_ENCODING, 0,
      CERT_FIND_SHA1_HASH, &blob, NULL);
-    ok(context != NULL, "CertFindCertificateInStore failed: %08x\n",
+    ok(context != NULL, "CertFindCertificateInStore failed: %08lx\n",
      GetLastError());
     if (context)
     {
@@ -1272,7 +1210,7 @@ static void testFindCert(void)
     context = NULL;
     do {
         context = CertFindCertificateInStore(store, X509_ASN_ENCODING, 0,
-         CERT_FIND_ISSUER_STR, juan, context);
+         CERT_FIND_ISSUER_STR, L"juan", context);
         if (context)
             count++;
     } while (context);
@@ -1281,17 +1219,17 @@ static void testFindCert(void)
     context = NULL;
     do {
         context = CertFindCertificateInStore(store, X509_ASN_ENCODING, 0,
-         CERT_FIND_ISSUER_STR, lang, context);
+         CERT_FIND_ISSUER_STR, L"LANG", context);
         if (context)
             count++;
     } while (context);
     ok(count == 3, "expected 3 contexts\n");
     SetLastError(0xdeadbeef);
     context = CertFindCertificateInStore(store, X509_ASN_ENCODING, 0,
-     CERT_FIND_ISSUER_STR, malcolm, NULL);
+     CERT_FIND_ISSUER_STR, L"malcolm", NULL);
     ok(!context, "expected no certs\n");
     ok(GetLastError() == CRYPT_E_NOT_FOUND,
-     "expected CRYPT_E_NOT_FOUND, got %08x\n", GetLastError());
+     "expected CRYPT_E_NOT_FOUND, got %08lx\n", GetLastError());
 
     CertCloseStore(store, 0);
 
@@ -1300,19 +1238,19 @@ static void testFindCert(void)
      CERT_STORE_CREATE_NEW_FLAG, NULL);
     ret = CertAddEncodedCertificateToStore(store, X509_ASN_ENCODING,
      iTunesCert0, sizeof(iTunesCert0), CERT_STORE_ADD_NEW, NULL);
-    ok(ret, "CertAddEncodedCertificateToStore failed: %08x\n",
+    ok(ret, "CertAddEncodedCertificateToStore failed: %08lx\n",
      GetLastError());
     ret = CertAddEncodedCertificateToStore(store, X509_ASN_ENCODING,
      iTunesCert1, sizeof(iTunesCert1), CERT_STORE_ADD_NEW, NULL);
-    ok(ret, "CertAddEncodedCertificateToStore failed: %08x\n",
+    ok(ret, "CertAddEncodedCertificateToStore failed: %08lx\n",
      GetLastError());
     ret = CertAddEncodedCertificateToStore(store, X509_ASN_ENCODING,
      iTunesCert2, sizeof(iTunesCert2), CERT_STORE_ADD_NEW, NULL);
-    ok(ret, "CertAddEncodedCertificateToStore failed: %08x\n",
+    ok(ret, "CertAddEncodedCertificateToStore failed: %08lx\n",
      GetLastError());
     ret = CertAddEncodedCertificateToStore(store, X509_ASN_ENCODING,
      iTunesCert3, sizeof(iTunesCert3), CERT_STORE_ADD_NEW, &subject);
-    ok(ret, "CertAddEncodedCertificateToStore failed: %08x\n",
+    ok(ret, "CertAddEncodedCertificateToStore failed: %08lx\n",
      GetLastError());
 
     /* The certInfo's issuer does not match any subject, but the serial
@@ -1366,49 +1304,44 @@ static void testGetSubjectCert(void)
 
     store = CertOpenStore(CERT_STORE_PROV_MEMORY, 0, 0,
      CERT_STORE_CREATE_NEW_FLAG, NULL);
-    ok(store != NULL, "CertOpenStore failed: %d\n", GetLastError());
+    ok(store != NULL, "CertOpenStore failed: %ld\n", GetLastError());
     if (!store)
         return;
 
     ret = CertAddEncodedCertificateToStore(store, X509_ASN_ENCODING,
      bigCert, sizeof(bigCert), CERT_STORE_ADD_ALWAYS, NULL);
-    ok(ret || broken(GetLastError() == OSS_DATA_ERROR /* win98 */),
-     "CertAddEncodedCertificateToStore failed: %08x\n", GetLastError());
-    if (!ret && GetLastError() == OSS_DATA_ERROR)
-    {
-        skip("bigCert can't be decoded, skipping tests\n");
-        return;
-    }
+    ok(ret, "CertAddEncodedCertificateToStore failed: %08lx\n", GetLastError());
+
     ret = CertAddEncodedCertificateToStore(store, X509_ASN_ENCODING,
      bigCert2, sizeof(bigCert2), CERT_STORE_ADD_NEW, &context1);
-    ok(ret, "CertAddEncodedCertificateToStore failed: %08x\n",
+    ok(ret, "CertAddEncodedCertificateToStore failed: %08lx\n",
      GetLastError());
     ok(context1 != NULL, "Expected a context\n");
     ret = CertAddEncodedCertificateToStore(store, X509_ASN_ENCODING,
      certWithUsage, sizeof(certWithUsage), CERT_STORE_ADD_NEW, NULL);
-    ok(ret, "CertAddEncodedCertificateToStore failed: %08x\n",
+    ok(ret, "CertAddEncodedCertificateToStore failed: %08lx\n",
      GetLastError());
 
     context2 = CertGetSubjectCertificateFromStore(store, X509_ASN_ENCODING,
      NULL);
     ok(!context2 && GetLastError() == E_INVALIDARG,
-     "Expected E_INVALIDARG, got %08x\n", GetLastError());
+     "Expected E_INVALIDARG, got %08lx\n", GetLastError());
     context2 = CertGetSubjectCertificateFromStore(store, X509_ASN_ENCODING,
      &info);
     ok(!context2 && GetLastError() == CRYPT_E_NOT_FOUND,
-     "Expected CRYPT_E_NOT_FOUND, got %08x\n", GetLastError());
+     "Expected CRYPT_E_NOT_FOUND, got %08lx\n", GetLastError());
     info.SerialNumber.cbData = sizeof(serialNum);
     info.SerialNumber.pbData = serialNum;
     context2 = CertGetSubjectCertificateFromStore(store, X509_ASN_ENCODING,
      &info);
     ok(!context2 && GetLastError() == CRYPT_E_NOT_FOUND,
-     "Expected CRYPT_E_NOT_FOUND, got %08x\n", GetLastError());
+     "Expected CRYPT_E_NOT_FOUND, got %08lx\n", GetLastError());
     info.Issuer.cbData = sizeof(subjectName2);
     info.Issuer.pbData = subjectName2;
     context2 = CertGetSubjectCertificateFromStore(store, X509_ASN_ENCODING,
      &info);
     ok(context2 != NULL,
-     "CertGetSubjectCertificateFromStore failed: %08x\n", GetLastError());
+     "CertGetSubjectCertificateFromStore failed: %08lx\n", GetLastError());
     /* Not only should this find a context, but it should be the same
      * (same address) as context1.
      */
@@ -1564,21 +1497,19 @@ static void testGetIssuerCert(void)
     DWORD flags = 0xffffffff, size;
     CERT_NAME_BLOB certsubject;
     BYTE *certencoded;
-    WCHAR rootW[] = {'R', 'O', 'O', 'T', '\0'},
-          certname[] = {'C', 'N', '=', 'd', 'u', 'm', 'm', 'y', ',', ' ', 'T', '=', 'T', 'e', 's', 't', '\0'};
     HCERTSTORE store = CertOpenStore(CERT_STORE_PROV_MEMORY, 0, 0,
      CERT_STORE_CREATE_NEW_FLAG, NULL);
 
-    ok(store != NULL, "CertOpenStore failed: %08x\n", GetLastError());
+    ok(store != NULL, "CertOpenStore failed: %08lx\n", GetLastError());
 
     ret = CertAddEncodedCertificateToStore(store, X509_ASN_ENCODING,
      expiredCert, sizeof(expiredCert), CERT_STORE_ADD_ALWAYS, NULL);
-    ok(ret, "CertAddEncodedCertificateToStore failed: %08x\n",
+    ok(ret, "CertAddEncodedCertificateToStore failed: %08lx\n",
      GetLastError());
 
     ret = CertAddEncodedCertificateToStore(store, X509_ASN_ENCODING,
      childOfExpired, sizeof(childOfExpired), CERT_STORE_ADD_ALWAYS, &child);
-    ok(ret, "CertAddEncodedCertificateToStore failed: %08x\n",
+    ok(ret, "CertAddEncodedCertificateToStore failed: %08lx\n",
      GetLastError());
 
     /* These crash:
@@ -1587,13 +1518,13 @@ static void testGetIssuerCert(void)
      */
     parent = CertGetIssuerCertificateFromStore(NULL, NULL, NULL, &flags);
     ok(!parent && GetLastError() == E_INVALIDARG,
-     "Expected E_INVALIDARG, got %08x\n", GetLastError());
+     "Expected E_INVALIDARG, got %08lx\n", GetLastError());
     parent = CertGetIssuerCertificateFromStore(store, NULL, NULL, &flags);
     ok(!parent && GetLastError() == E_INVALIDARG,
-     "Expected E_INVALIDARG, got %08x\n", GetLastError());
+     "Expected E_INVALIDARG, got %08lx\n", GetLastError());
     parent = CertGetIssuerCertificateFromStore(store, child, NULL, &flags);
     ok(!parent && GetLastError() == E_INVALIDARG,
-     "Expected E_INVALIDARG, got %08x\n", GetLastError());
+     "Expected E_INVALIDARG, got %08lx\n", GetLastError());
     /* Confusing: the caller cannot set either of the
      * CERT_STORE_NO_*_FLAGs, as these are not checks,
      * they're results:
@@ -1601,24 +1532,24 @@ static void testGetIssuerCert(void)
     flags = CERT_STORE_NO_CRL_FLAG | CERT_STORE_NO_ISSUER_FLAG;
     parent = CertGetIssuerCertificateFromStore(store, child, NULL, &flags);
     ok(!parent && GetLastError() == E_INVALIDARG,
-     "Expected E_INVALIDARG, got %08x\n", GetLastError());
+     "Expected E_INVALIDARG, got %08lx\n", GetLastError());
     /* Perform no checks */
     flags = 0;
     parent = CertGetIssuerCertificateFromStore(store, child, NULL, &flags);
-    ok(parent != NULL, "CertGetIssuerCertificateFromStore failed: %08x\n",
+    ok(parent != NULL, "CertGetIssuerCertificateFromStore failed: %08lx\n",
      GetLastError());
     if (parent)
         CertFreeCertificateContext(parent);
     /* Check revocation and signature only */
     flags = CERT_STORE_REVOCATION_FLAG | CERT_STORE_SIGNATURE_FLAG;
     parent = CertGetIssuerCertificateFromStore(store, child, NULL, &flags);
-    ok(parent != NULL, "CertGetIssuerCertificateFromStore failed: %08x\n",
+    ok(parent != NULL, "CertGetIssuerCertificateFromStore failed: %08lx\n",
      GetLastError());
     /* Confusing: CERT_STORE_REVOCATION_FLAG succeeds when there is no CRL by
      * setting CERT_STORE_NO_CRL_FLAG.
      */
     ok(flags == (CERT_STORE_REVOCATION_FLAG | CERT_STORE_NO_CRL_FLAG),
-     "Expected CERT_STORE_REVOCATION_FLAG | CERT_STORE_NO_CRL_FLAG, got %08x\n",
+     "Expected CERT_STORE_REVOCATION_FLAG | CERT_STORE_NO_CRL_FLAG, got %08lx\n",
      flags);
     if (parent)
         CertFreeCertificateContext(parent);
@@ -1637,33 +1568,33 @@ static void testGetIssuerCert(void)
     /* With only the child certificate, no issuer will be found */
     ret = CertAddEncodedCertificateToStore(store, X509_ASN_ENCODING,
      chain7_1, sizeof(chain7_1), CERT_STORE_ADD_ALWAYS, &child);
-    ok(ret, "CertAddEncodedCertificateToStore failed: %08x\n", GetLastError());
+    ok(ret, "CertAddEncodedCertificateToStore failed: %08lx\n", GetLastError());
     parent = CertGetIssuerCertificateFromStore(store, child, NULL, &flags);
     ok(parent == NULL, "Expected no issuer\n");
-    ok(GetLastError() == CRYPT_E_NOT_FOUND, "Expected CRYPT_E_NOT_FOUND, got %08X\n", GetLastError());
+    ok(GetLastError() == CRYPT_E_NOT_FOUND, "Expected CRYPT_E_NOT_FOUND, got %08lX\n", GetLastError());
     /* Adding an issuer allows one (and only one) issuer to be found */
     ret = CertAddEncodedCertificateToStore(store, X509_ASN_ENCODING,
      chain10_1, sizeof(chain10_1), CERT_STORE_ADD_ALWAYS, &cert1);
-    ok(ret, "CertAddEncodedCertificateToStore failed: %08x\n", GetLastError());
+    ok(ret, "CertAddEncodedCertificateToStore failed: %08lx\n", GetLastError());
     parent = CertGetIssuerCertificateFromStore(store, child, NULL, &flags);
     ok(parent == cert1, "Expected cert1 to be the issuer\n");
     parent = CertGetIssuerCertificateFromStore(store, child, parent, &flags);
     ok(parent == NULL, "Expected only one issuer\n");
-    ok(GetLastError() == CRYPT_E_NOT_FOUND, "Expected CRYPT_E_NOT_FOUND, got %08X\n", GetLastError());
+    ok(GetLastError() == CRYPT_E_NOT_FOUND, "Expected CRYPT_E_NOT_FOUND, got %08lX\n", GetLastError());
     /* Adding a second issuer allows two issuers to be found - and the second
      * issuer is found before the first, implying certs are added to the head
      * of a list.
      */
     ret = CertAddEncodedCertificateToStore(store, X509_ASN_ENCODING,
      chain10_0, sizeof(chain10_0), CERT_STORE_ADD_ALWAYS, &cert2);
-    ok(ret, "CertAddEncodedCertificateToStore failed: %08x\n", GetLastError());
+    ok(ret, "CertAddEncodedCertificateToStore failed: %08lx\n", GetLastError());
     parent = CertGetIssuerCertificateFromStore(store, child, NULL, &flags);
     ok(parent == cert2, "Expected cert2 to be the first issuer\n");
     parent = CertGetIssuerCertificateFromStore(store, child, parent, &flags);
     ok(parent == cert1, "Expected cert1 to be the second issuer\n");
     parent = CertGetIssuerCertificateFromStore(store, child, parent, &flags);
     ok(parent == NULL, "Expected no more than two issuers\n");
-    ok(GetLastError() == CRYPT_E_NOT_FOUND, "Expected CRYPT_E_NOT_FOUND, got %08X\n", GetLastError());
+    ok(GetLastError() == CRYPT_E_NOT_FOUND, "Expected CRYPT_E_NOT_FOUND, got %08lX\n", GetLastError());
     CertFreeCertificateContext(child);
     CertFreeCertificateContext(cert1);
     CertFreeCertificateContext(cert2);
@@ -1677,47 +1608,47 @@ static void testGetIssuerCert(void)
     /* With only the child certificate, no issuer will be found */
     ret = CertAddEncodedCertificateToStore(store, X509_ASN_ENCODING,
      chain7_1, sizeof(chain7_1), CERT_STORE_ADD_ALWAYS, &child);
-    ok(ret, "CertAddEncodedCertificateToStore failed: %08x\n", GetLastError());
+    ok(ret, "CertAddEncodedCertificateToStore failed: %08lx\n", GetLastError());
     parent = CertGetIssuerCertificateFromStore(store, child, NULL, &flags);
     ok(parent == NULL, "Expected no issuer\n");
-    ok(GetLastError() == CRYPT_E_NOT_FOUND, "Expected CRYPT_E_NOT_FOUND, got %08X\n", GetLastError());
+    ok(GetLastError() == CRYPT_E_NOT_FOUND, "Expected CRYPT_E_NOT_FOUND, got %08lX\n", GetLastError());
     /* Adding an issuer allows one (and only one) issuer to be found */
     ret = CertAddEncodedCertificateToStore(store, X509_ASN_ENCODING,
      chain10_0, sizeof(chain10_0), CERT_STORE_ADD_ALWAYS, &cert1);
-    ok(ret, "CertAddEncodedCertificateToStore failed: %08x\n", GetLastError());
+    ok(ret, "CertAddEncodedCertificateToStore failed: %08lx\n", GetLastError());
     parent = CertGetIssuerCertificateFromStore(store, child, NULL, &flags);
     ok(parent == cert1, "Expected cert1 to be the issuer\n");
     parent = CertGetIssuerCertificateFromStore(store, child, parent, &flags);
     ok(parent == NULL, "Expected only one issuer\n");
-    ok(GetLastError() == CRYPT_E_NOT_FOUND, "Expected CRYPT_E_NOT_FOUND, got %08X\n", GetLastError());
+    ok(GetLastError() == CRYPT_E_NOT_FOUND, "Expected CRYPT_E_NOT_FOUND, got %08lX\n", GetLastError());
     /* Adding a second issuer allows two issuers to be found - and the second
      * issuer is found before the first, implying certs are added to the head
      * of a list.
      */
     ret = CertAddEncodedCertificateToStore(store, X509_ASN_ENCODING,
      chain10_1, sizeof(chain10_1), CERT_STORE_ADD_ALWAYS, &cert2);
-    ok(ret, "CertAddEncodedCertificateToStore failed: %08x\n", GetLastError());
+    ok(ret, "CertAddEncodedCertificateToStore failed: %08lx\n", GetLastError());
     parent = CertGetIssuerCertificateFromStore(store, child, NULL, &flags);
     ok(parent == cert2, "Expected cert2 to be the first issuer\n");
     parent = CertGetIssuerCertificateFromStore(store, child, parent, &flags);
     ok(parent == cert1, "Expected cert1 to be the second issuer\n");
     parent = CertGetIssuerCertificateFromStore(store, child, parent, &flags);
     ok(parent == NULL, "Expected no more than two issuers\n");
-    ok(GetLastError() == CRYPT_E_NOT_FOUND, "Expected CRYPT_E_NOT_FOUND, got %08X\n", GetLastError());
+    ok(GetLastError() == CRYPT_E_NOT_FOUND, "Expected CRYPT_E_NOT_FOUND, got %08lX\n", GetLastError());
 
     /* Self-sign a certificate, add to the store and test getting the issuer */
     size = 0;
-    ok(CertStrToNameW(X509_ASN_ENCODING, certname, CERT_X500_NAME_STR, NULL, NULL, &size, NULL),
+    ok(CertStrToNameW(X509_ASN_ENCODING, L"CN=dummy, T=Test", CERT_X500_NAME_STR, NULL, NULL, &size, NULL),
        "CertStrToName should have worked\n");
-    certencoded = HeapAlloc(GetProcessHeap(), 0, size);
-    ok(CertStrToNameW(X509_ASN_ENCODING, certname, CERT_X500_NAME_STR, NULL, certencoded, &size, NULL),
+    certencoded = malloc(size);
+    ok(CertStrToNameW(X509_ASN_ENCODING, L"CN=dummy, T=Test", CERT_X500_NAME_STR, NULL, certencoded, &size, NULL),
        "CertStrToName should have worked\n");
     certsubject.pbData = certencoded;
     certsubject.cbData = size;
     cert3 = CertCreateSelfSignCertificate(0, &certsubject, 0, NULL, NULL, NULL, NULL, NULL);
     ok(cert3 != NULL, "CertCreateSelfSignCertificate should have worked\n");
     ret = CertAddCertificateContextToStore(store, cert3, CERT_STORE_ADD_REPLACE_EXISTING, 0);
-    ok(ret, "CertAddEncodedCertificateToStore failed: %08x\n", GetLastError());
+    ok(ret, "CertAddEncodedCertificateToStore failed: %08lx\n", GetLastError());
     CertFreeCertificateContext(cert3);
     cert3 = CertEnumCertificatesInStore(store, NULL);
     ok(cert3 != NULL, "CertEnumCertificatesInStore should have worked\n");
@@ -1726,17 +1657,17 @@ static void testGetIssuerCert(void)
     parent = CertGetIssuerCertificateFromStore(store, cert3, NULL, &flags);
     ok(!parent, "Expected NULL\n");
     ok(GetLastError() == CRYPT_E_SELF_SIGNED,
-       "Expected CRYPT_E_SELF_SIGNED, got %08X\n", GetLastError());
+       "Expected CRYPT_E_SELF_SIGNED, got %08lX\n", GetLastError());
     CertFreeCertificateContext(child);
     CertFreeCertificateContext(cert1);
     CertFreeCertificateContext(cert2);
     CertFreeCertificateContext(cert3);
     CertCloseStore(store, 0);
-    HeapFree(GetProcessHeap(), 0, certencoded);
+    free(certencoded);
 
     /* Test root storage self-signed certificate */
-    store = CertOpenStore(CERT_STORE_PROV_SYSTEM, 0, 0, CERT_SYSTEM_STORE_CURRENT_USER, rootW);
-    ok(store != NULL, "CertOpenStore failed: %08x\n", GetLastError());
+    store = CertOpenStore(CERT_STORE_PROV_SYSTEM, 0, 0, CERT_SYSTEM_STORE_CURRENT_USER, L"ROOT");
+    ok(store != NULL, "CertOpenStore failed: %08lx\n", GetLastError());
     flags = 0;
     cert1 = CertEnumCertificatesInStore(store, NULL);
     ok(cert1 != NULL, "CertEnumCertificatesInStore should have worked\n");
@@ -1744,7 +1675,7 @@ static void testGetIssuerCert(void)
     parent = CertGetIssuerCertificateFromStore(store, cert1, NULL, &flags);
     ok(!parent, "Expected NULL\n");
     ok(GetLastError() == CRYPT_E_SELF_SIGNED,
-       "Expected CRYPT_E_SELF_SIGNED, got %08X\n", GetLastError());
+       "Expected CRYPT_E_SELF_SIGNED, got %08lX\n", GetLastError());
     CertFreeCertificateContext(cert1);
     CertCloseStore(store, 0);
 }
@@ -1770,17 +1701,17 @@ static void testCryptHashCert(void)
     /* Test empty hash */
     ret = CryptHashCertificate(0, 0, 0, toHash, sizeof(toHash), NULL,
      &hashLen);
-    ok(ret, "CryptHashCertificate failed: %08x\n", GetLastError());
-    ok(hashLen == sizeof(hash), "Got unexpected size of hash %d\n", hashLen);
+    ok(ret, "CryptHashCertificate failed: %08lx\n", GetLastError());
+    ok(hashLen == sizeof(hash), "Got unexpected size of hash %ld\n", hashLen);
     /* Test with empty buffer */
     ret = CryptHashCertificate(0, 0, 0, NULL, 0, hash, &hashLen);
-    ok(ret, "CryptHashCertificate failed: %08x\n", GetLastError());
+    ok(ret, "CryptHashCertificate failed: %08lx\n", GetLastError());
     ok(!memcmp(hash, emptyHash, sizeof(emptyHash)),
      "Unexpected hash of nothing\n");
     /* Test a known value */
     ret = CryptHashCertificate(0, 0, 0, toHash, sizeof(toHash), hash,
      &hashLen);
-    ok(ret, "CryptHashCertificate failed: %08x\n", GetLastError());
+    ok(ret, "CryptHashCertificate failed: %08lx\n", GetLastError());
     ok(!memcmp(hash, knownHash, sizeof(knownHash)), "Unexpected hash\n");
 }
 
@@ -1796,65 +1727,55 @@ static void testCryptHashCert2(void)
     BOOL ret;
     BYTE hash[20];
     DWORD hashLen;
-    const WCHAR SHA1[] = { 'S', 'H', 'A', '1', '\0' };
-    const WCHAR invalidAlgorithm[] = { '_', 'S', 'H', 'O', 'U', 'L', 'D',
-                                       'N', 'O', 'T',
-                                       'E', 'X', 'I', 'S', 'T', '_', '\0' };
-
-    if (!pCryptHashCertificate2)
-    {
-        win_skip("CryptHashCertificate2() is not available\n");
-        return;
-    }
 
     /* Test empty hash */
     hashLen = sizeof(hash);
-    ret = pCryptHashCertificate2(SHA1, 0, NULL, NULL, 0, hash, &hashLen);
-    ok(ret, "CryptHashCertificate2 failed: %08x\n", GetLastError());
-    ok(hashLen == sizeof(hash), "Got unexpected size of hash %d\n", hashLen);
+    ret = CryptHashCertificate2(L"SHA1", 0, NULL, NULL, 0, hash, &hashLen);
+    ok(ret, "CryptHashCertificate2 failed: %08lx\n", GetLastError());
+    ok(hashLen == sizeof(hash), "Got unexpected size of hash %ld\n", hashLen);
     ok(!memcmp(hash, emptyHash, sizeof(emptyHash)), "Unexpected hash of nothing\n");
 
     /* Test known hash */
     hashLen = sizeof(hash);
-    ret = pCryptHashCertificate2(SHA1, 0, NULL, toHash, sizeof(toHash), hash, &hashLen);
-    ok(ret, "CryptHashCertificate2 failed: %08x\n", GetLastError());
-    ok(hashLen == sizeof(hash), "Got unexpected size of hash %d\n", hashLen);
+    ret = CryptHashCertificate2(L"SHA1", 0, NULL, toHash, sizeof(toHash), hash, &hashLen);
+    ok(ret, "CryptHashCertificate2 failed: %08lx\n", GetLastError());
+    ok(hashLen == sizeof(hash), "Got unexpected size of hash %ld\n", hashLen);
     ok(!memcmp(hash, knownHash, sizeof(knownHash)), "Unexpected hash\n");
 
     /* Test null hash size pointer just sets hash size */
     hashLen = 0;
-    ret = pCryptHashCertificate2(SHA1, 0, NULL, toHash, sizeof(toHash), NULL, &hashLen);
-    ok(ret, "CryptHashCertificate2 failed: %08x\n", GetLastError());
-    ok(hashLen == sizeof(hash), "Hash size not set correctly (%d)\n", hashLen);
+    ret = CryptHashCertificate2(L"SHA1", 0, NULL, toHash, sizeof(toHash), NULL, &hashLen);
+    ok(ret, "CryptHashCertificate2 failed: %08lx\n", GetLastError());
+    ok(hashLen == sizeof(hash), "Hash size not set correctly (%ld)\n", hashLen);
 
     /* Null algorithm ID crashes Windows implementations */
     if (0) {
         /* Test null algorithm ID */
         hashLen = sizeof(hash);
-        ret = pCryptHashCertificate2(NULL, 0, NULL, toHash, sizeof(toHash), hash, &hashLen);
+        ret = CryptHashCertificate2(NULL, 0, NULL, toHash, sizeof(toHash), hash, &hashLen);
     }
 
     /* Test invalid algorithm */
     hashLen = sizeof(hash);
     SetLastError(0xdeadbeef);
-    ret = pCryptHashCertificate2(invalidAlgorithm, 0, NULL, toHash, sizeof(toHash), hash, &hashLen);
+    ret = CryptHashCertificate2(L"_SHOULDNOTEXIST_", 0, NULL, toHash, sizeof(toHash), hash, &hashLen);
     ok(!ret && GetLastError() == STATUS_NOT_FOUND,
-     "Expected STATUS_NOT_FOUND (0x%08x), got 0x%08x\n", STATUS_NOT_FOUND, GetLastError());
+     "Expected STATUS_NOT_FOUND (0x%08lx), got 0x%08lx\n", STATUS_NOT_FOUND, GetLastError());
 
     /* Test hash buffer too small */
     hashLen = sizeof(hash) / 2;
     SetLastError(0xdeadbeef);
-    ret = pCryptHashCertificate2(SHA1, 0, NULL, toHash, sizeof(toHash), hash, &hashLen);
+    ret = CryptHashCertificate2(L"SHA1", 0, NULL, toHash, sizeof(toHash), hash, &hashLen);
     ok(!ret && GetLastError() == ERROR_MORE_DATA,
-     "Expected ERROR_MORE_DATA (%d), got %d\n", ERROR_MORE_DATA, GetLastError());
+     "Expected ERROR_MORE_DATA (%d), got %ld\n", ERROR_MORE_DATA, GetLastError());
 
     /* Null hash length crashes Windows implementations */
     if (0) {
         /* Test hashLen null with hash */
-        ret = pCryptHashCertificate2(SHA1, 0, NULL, toHash, sizeof(toHash), hash, NULL);
+        ret = CryptHashCertificate2(L"SHA1", 0, NULL, toHash, sizeof(toHash), hash, NULL);
 
         /* Test hashLen null with no hash */
-        ret = pCryptHashCertificate2(SHA1, 0, NULL, toHash, sizeof(toHash), NULL, NULL);
+        ret = CryptHashCertificate2(L"SHA1", 0, NULL, toHash, sizeof(toHash), NULL, NULL);
     }
 }
 
@@ -1864,20 +1785,19 @@ static void verifySig(HCRYPTPROV csp, const BYTE *toSign, size_t toSignLen,
     HCRYPTHASH hash;
     BOOL ret = CryptCreateHash(csp, CALG_SHA1, 0, 0, &hash);
 
-    ok(ret, "CryptCreateHash failed: %08x\n", GetLastError());
+    ok(ret, "CryptCreateHash failed: %08lx\n", GetLastError());
     if (ret)
     {
         BYTE mySig[64];
         DWORD mySigSize = sizeof(mySig);
 
         ret = CryptHashData(hash, toSign, toSignLen, 0);
-        ok(ret, "CryptHashData failed: %08x\n", GetLastError());
-        /* use the A variant so the test can run on Win9x */
+        ok(ret, "CryptHashData failed: %08lx\n", GetLastError());
         ret = CryptSignHashA(hash, AT_SIGNATURE, NULL, 0, mySig, &mySigSize);
-        ok(ret, "CryptSignHash failed: %08x\n", GetLastError());
+        ok(ret, "CryptSignHash failed: %08lx\n", GetLastError());
         if (ret)
         {
-            ok(mySigSize == sigLen, "Expected sig length %d, got %d\n",
+            ok(mySigSize == sigLen, "Expected sig length %d, got %ld\n",
              sigLen, mySigSize);
             ok(!memcmp(mySig, sig, sigLen), "Unexpected signature\n");
         }
@@ -1907,40 +1827,40 @@ static void testSignCert(HCRYPTPROV csp, const CRYPT_DATA_BLOB *toBeSigned,
     ret = CryptSignCertificate(0, 0, 0, toBeSigned->pbData, toBeSigned->cbData,
      &algoID, NULL, NULL, &size);
     ok(!ret && GetLastError() == NTE_BAD_ALGID, 
-     "Expected NTE_BAD_ALGID, got %08x\n", GetLastError());
+     "Expected NTE_BAD_ALGID, got %08lx\n", GetLastError());
     algoID.pszObjId = (LPSTR)sigOID;
     ret = CryptSignCertificate(0, 0, 0, toBeSigned->pbData, toBeSigned->cbData,
      &algoID, NULL, NULL, &size);
     ok(!ret &&
      (GetLastError() == ERROR_INVALID_PARAMETER || GetLastError() == NTE_BAD_ALGID),
-     "Expected ERROR_INVALID_PARAMETER or NTE_BAD_ALGID, got %08x\n",
+     "Expected ERROR_INVALID_PARAMETER or NTE_BAD_ALGID, got %08lx\n",
      GetLastError());
     ret = CryptSignCertificate(0, AT_SIGNATURE, 0, toBeSigned->pbData,
      toBeSigned->cbData, &algoID, NULL, NULL, &size);
     ok(!ret &&
      (GetLastError() == ERROR_INVALID_PARAMETER || GetLastError() == NTE_BAD_ALGID),
-     "Expected ERROR_INVALID_PARAMETER or NTE_BAD_ALGID, got %08x\n",
+     "Expected ERROR_INVALID_PARAMETER or NTE_BAD_ALGID, got %08lx\n",
      GetLastError());
 
     /* No keys exist in the new CSP yet.. */
     ret = CryptSignCertificate(csp, AT_SIGNATURE, 0, toBeSigned->pbData,
      toBeSigned->cbData, &algoID, NULL, NULL, &size);
     ok(!ret && (GetLastError() == NTE_BAD_KEYSET || GetLastError() ==
-     NTE_NO_KEY), "Expected NTE_BAD_KEYSET or NTE_NO_KEY, got %08x\n",
+     NTE_NO_KEY), "Expected NTE_BAD_KEYSET or NTE_NO_KEY, got %08lx\n",
      GetLastError());
     ret = CryptGenKey(csp, AT_SIGNATURE, 0, &key);
-    ok(ret, "CryptGenKey failed: %08x\n", GetLastError());
+    ok(ret, "CryptGenKey failed: %08lx\n", GetLastError());
     if (ret)
     {
         ret = CryptSignCertificate(csp, AT_SIGNATURE, 0, toBeSigned->pbData,
          toBeSigned->cbData, &algoID, NULL, NULL, &size);
-        ok(ret, "CryptSignCertificate failed: %08x\n", GetLastError());
-        ok(size <= *sigLen, "Expected size <= %d, got %d\n", *sigLen, size);
+        ok(ret, "CryptSignCertificate failed: %08lx\n", GetLastError());
+        ok(size <= *sigLen, "Expected size <= %ld, got %ld\n", *sigLen, size);
         if (ret)
         {
             ret = CryptSignCertificate(csp, AT_SIGNATURE, 0, toBeSigned->pbData,
              toBeSigned->cbData, &algoID, NULL, sig, &size);
-            ok(ret, "CryptSignCertificate failed: %08x\n", GetLastError());
+            ok(ret, "CryptSignCertificate failed: %08lx\n", GetLastError());
             if (ret)
             {
                 *sigLen = size;
@@ -1960,22 +1880,16 @@ static void testVerifyCertSig(HCRYPTPROV csp, const CRYPT_DATA_BLOB *toBeSigned,
     DWORD size = 0;
     BOOL ret;
 
-    if (!pCryptEncodeObjectEx)
-    {
-        win_skip("no CryptEncodeObjectEx support\n");
-        return;
-    }
     ret = CryptVerifyCertificateSignature(0, 0, NULL, 0, NULL);
     ok(!ret && GetLastError() == ERROR_FILE_NOT_FOUND,
-     "Expected ERROR_FILE_NOT_FOUND, got %08x\n", GetLastError());
+     "Expected ERROR_FILE_NOT_FOUND, got %08lx\n", GetLastError());
     ret = CryptVerifyCertificateSignature(csp, 0, NULL, 0, NULL);
     ok(!ret && GetLastError() == ERROR_FILE_NOT_FOUND,
-     "Expected ERROR_FILE_NOT_FOUND, got %08x\n", GetLastError());
+     "Expected ERROR_FILE_NOT_FOUND, got %08lx\n", GetLastError());
     ret = CryptVerifyCertificateSignature(csp, X509_ASN_ENCODING, NULL, 0,
      NULL);
-    ok(!ret && (GetLastError() == CRYPT_E_ASN1_EOD ||
-     GetLastError() == OSS_BAD_ARG),
-     "Expected CRYPT_E_ASN1_EOD or OSS_BAD_ARG, got %08x\n", GetLastError());
+    ok(!ret && GetLastError() == CRYPT_E_ASN1_EOD,
+     "Expected CRYPT_E_ASN1_EOD, got %08lx\n", GetLastError());
     info.ToBeSigned.cbData = toBeSigned->cbData;
     info.ToBeSigned.pbData = toBeSigned->pbData;
     info.SignatureAlgorithm.pszObjId = (LPSTR)sigOID;
@@ -1983,9 +1897,9 @@ static void testVerifyCertSig(HCRYPTPROV csp, const CRYPT_DATA_BLOB *toBeSigned,
     info.Signature.cbData = sigLen;
     info.Signature.pbData = (BYTE *)sig;
     info.Signature.cUnusedBits = 0;
-    ret = pCryptEncodeObjectEx(X509_ASN_ENCODING, X509_CERT, &info,
+    ret = CryptEncodeObjectEx(X509_ASN_ENCODING, X509_CERT, &info,
      CRYPT_ENCODE_ALLOC_FLAG, NULL, &cert, &size);
-    ok(ret, "CryptEncodeObjectEx failed: %08x\n", GetLastError());
+    ok(ret, "CryptEncodeObjectEx failed: %08lx\n", GetLastError());
     if (cert)
     {
         PCERT_PUBLIC_KEY_INFO pubKeyInfo = NULL;
@@ -1999,21 +1913,21 @@ static void testVerifyCertSig(HCRYPTPROV csp, const CRYPT_DATA_BLOB *toBeSigned,
         }
         CryptExportPublicKeyInfoEx(csp, AT_SIGNATURE, X509_ASN_ENCODING,
          (LPSTR)sigOID, 0, NULL, NULL, &pubKeySize);
-        pubKeyInfo = HeapAlloc(GetProcessHeap(), 0, pubKeySize);
+        pubKeyInfo = malloc(pubKeySize);
         if (pubKeyInfo)
         {
             ret = CryptExportPublicKeyInfoEx(csp, AT_SIGNATURE,
              X509_ASN_ENCODING, (LPSTR)sigOID, 0, NULL, pubKeyInfo,
              &pubKeySize);
-            ok(ret, "CryptExportKey failed: %08x\n", GetLastError());
+            ok(ret, "CryptExportKey failed: %08lx\n", GetLastError());
             if (ret)
             {
                 ret = CryptVerifyCertificateSignature(csp, X509_ASN_ENCODING,
                  cert, size, pubKeyInfo);
-                ok(ret, "CryptVerifyCertificateSignature failed: %08x\n",
+                ok(ret, "CryptVerifyCertificateSignature failed: %08lx\n",
                  GetLastError());
             }
-            HeapFree(GetProcessHeap(), 0, pubKeyInfo);
+            free(pubKeyInfo);
         }
         LocalFree(cert);
     }
@@ -2027,28 +1941,18 @@ static void testVerifyCertSigEx(HCRYPTPROV csp, const CRYPT_DATA_BLOB *toBeSigne
     DWORD size = 0;
     BOOL ret;
 
-    if (!pCryptVerifyCertificateSignatureEx)
-    {
-        win_skip("no CryptVerifyCertificateSignatureEx support\n");
-        return;
-    }
-    if (!pCryptEncodeObjectEx)
-    {
-        win_skip("no CryptEncodeObjectEx support\n");
-        return;
-    }
-    ret = pCryptVerifyCertificateSignatureEx(0, 0, 0, NULL, 0, NULL, 0, NULL);
+    ret = CryptVerifyCertificateSignatureEx(0, 0, 0, NULL, 0, NULL, 0, NULL);
     ok(!ret && GetLastError() == E_INVALIDARG,
-     "Expected E_INVALIDARG, got %08x\n", GetLastError());
-    ret = pCryptVerifyCertificateSignatureEx(csp, 0, 0, NULL, 0, NULL, 0, NULL);
+     "Expected E_INVALIDARG, got %08lx\n", GetLastError());
+    ret = CryptVerifyCertificateSignatureEx(csp, 0, 0, NULL, 0, NULL, 0, NULL);
     ok(!ret && GetLastError() == E_INVALIDARG,
-     "Expected E_INVALIDARG, got %08x\n", GetLastError());
-    ret = pCryptVerifyCertificateSignatureEx(csp, X509_ASN_ENCODING, 0, NULL, 0,
+     "Expected E_INVALIDARG, got %08lx\n", GetLastError());
+    ret = CryptVerifyCertificateSignatureEx(csp, X509_ASN_ENCODING, 0, NULL, 0,
      NULL, 0, NULL);
     ok(!ret && GetLastError() == E_INVALIDARG,
-     "Expected E_INVALIDARG, got %08x\n", GetLastError());
+     "Expected E_INVALIDARG, got %08lx\n", GetLastError());
     /* This crashes
-    ret = pCryptVerifyCertificateSignatureEx(csp, X509_ASN_ENCODING,
+    ret = CryptVerifyCertificateSignatureEx(csp, X509_ASN_ENCODING,
      CRYPT_VERIFY_CERT_SIGN_SUBJECT_BLOB, NULL, 0, NULL, 0, NULL);
      */
     info.ToBeSigned.cbData = toBeSigned->cbData;
@@ -2058,61 +1962,59 @@ static void testVerifyCertSigEx(HCRYPTPROV csp, const CRYPT_DATA_BLOB *toBeSigne
     info.Signature.cbData = sigLen;
     info.Signature.pbData = (BYTE *)sig;
     info.Signature.cUnusedBits = 0;
-    ret = pCryptEncodeObjectEx(X509_ASN_ENCODING, X509_CERT, &info,
+    ret = CryptEncodeObjectEx(X509_ASN_ENCODING, X509_CERT, &info,
      CRYPT_ENCODE_ALLOC_FLAG, NULL, &cert, &size);
-    ok(ret, "CryptEncodeObjectEx failed: %08x\n", GetLastError());
+    ok(ret, "CryptEncodeObjectEx failed: %08lx\n", GetLastError());
     if (cert)
     {
         CRYPT_DATA_BLOB certBlob = { 0, NULL };
         PCERT_PUBLIC_KEY_INFO pubKeyInfo = NULL;
 
-        ret = pCryptVerifyCertificateSignatureEx(csp, X509_ASN_ENCODING,
+        ret = CryptVerifyCertificateSignatureEx(csp, X509_ASN_ENCODING,
          CRYPT_VERIFY_CERT_SIGN_SUBJECT_BLOB, &certBlob, 0, NULL, 0, NULL);
         ok(!ret && GetLastError() == CRYPT_E_ASN1_EOD,
-         "Expected CRYPT_E_ASN1_EOD, got %08x\n", GetLastError());
+         "Expected CRYPT_E_ASN1_EOD, got %08lx\n", GetLastError());
         certBlob.cbData = 1;
         certBlob.pbData = (void *)0xdeadbeef;
-        ret = pCryptVerifyCertificateSignatureEx(csp, X509_ASN_ENCODING,
+        ret = CryptVerifyCertificateSignatureEx(csp, X509_ASN_ENCODING,
          CRYPT_VERIFY_CERT_SIGN_SUBJECT_BLOB, &certBlob, 0, NULL, 0, NULL);
-        ok(!ret && (GetLastError() == STATUS_ACCESS_VIOLATION ||
-                    GetLastError() == CRYPT_E_ASN1_EOD /* Win9x */ ||
-                    GetLastError() == CRYPT_E_ASN1_BADTAG /* Win98 */),
-         "Expected STATUS_ACCESS_VIOLATION, CRYPT_E_ASN1_EOD, OR CRYPT_E_ASN1_BADTAG, got %08x\n",
+        ok(!ret && GetLastError() == STATUS_ACCESS_VIOLATION,
+         "Expected STATUS_ACCESS_VIOLATION, CRYPT_E_ASN1_EOD, OR CRYPT_E_ASN1_BADTAG, got %08lx\n",
          GetLastError());
 
         certBlob.cbData = size;
         certBlob.pbData = cert;
-        ret = pCryptVerifyCertificateSignatureEx(csp, X509_ASN_ENCODING,
+        ret = CryptVerifyCertificateSignatureEx(csp, X509_ASN_ENCODING,
          CRYPT_VERIFY_CERT_SIGN_SUBJECT_BLOB, &certBlob, 0, NULL, 0, NULL);
         ok(!ret && GetLastError() == E_INVALIDARG,
-         "Expected E_INVALIDARG, got %08x\n", GetLastError());
-        ret = pCryptVerifyCertificateSignatureEx(csp, X509_ASN_ENCODING,
+         "Expected E_INVALIDARG, got %08lx\n", GetLastError());
+        ret = CryptVerifyCertificateSignatureEx(csp, X509_ASN_ENCODING,
          CRYPT_VERIFY_CERT_SIGN_SUBJECT_BLOB, &certBlob,
          CRYPT_VERIFY_CERT_SIGN_ISSUER_NULL, NULL, 0, NULL);
         ok(!ret && GetLastError() == E_INVALIDARG,
-         "Expected E_INVALIDARG, got %08x\n", GetLastError());
+         "Expected E_INVALIDARG, got %08lx\n", GetLastError());
         /* This crashes
-        ret = pCryptVerifyCertificateSignatureEx(csp, X509_ASN_ENCODING,
+        ret = CryptVerifyCertificateSignatureEx(csp, X509_ASN_ENCODING,
          CRYPT_VERIFY_CERT_SIGN_SUBJECT_BLOB, &certBlob,
          CRYPT_VERIFY_CERT_SIGN_ISSUER_PUBKEY, NULL, 0, NULL);
          */
         CryptExportPublicKeyInfoEx(csp, AT_SIGNATURE, X509_ASN_ENCODING,
          (LPSTR)sigOID, 0, NULL, NULL, &size);
-        pubKeyInfo = HeapAlloc(GetProcessHeap(), 0, size);
+        pubKeyInfo = malloc(size);
         if (pubKeyInfo)
         {
             ret = CryptExportPublicKeyInfoEx(csp, AT_SIGNATURE,
              X509_ASN_ENCODING, (LPSTR)sigOID, 0, NULL, pubKeyInfo, &size);
-            ok(ret, "CryptExportKey failed: %08x\n", GetLastError());
+            ok(ret, "CryptExportKey failed: %08lx\n", GetLastError());
             if (ret)
             {
-                ret = pCryptVerifyCertificateSignatureEx(csp, X509_ASN_ENCODING,
+                ret = CryptVerifyCertificateSignatureEx(csp, X509_ASN_ENCODING,
                  CRYPT_VERIFY_CERT_SIGN_SUBJECT_BLOB, &certBlob,
                  CRYPT_VERIFY_CERT_SIGN_ISSUER_PUBKEY, pubKeyInfo, 0, NULL);
-                ok(ret, "CryptVerifyCertificateSignatureEx failed: %08x\n",
+                ok(ret, "CryptVerifyCertificateSignatureEx failed: %08lx\n",
                  GetLastError());
             }
-            HeapFree(GetProcessHeap(), 0, pubKeyInfo);
+            free(pubKeyInfo);
         }
         LocalFree(cert);
     }
@@ -2133,7 +2035,7 @@ static void testCertSigs(void)
      CRYPT_DELETEKEYSET);
     ret = CryptAcquireContextA(&csp, cspNameA, MS_DEF_PROV_A, PROV_RSA_FULL,
      CRYPT_NEWKEYSET);
-    ok(ret, "CryptAcquireContext failed: %08x\n", GetLastError());
+    ok(ret, "CryptAcquireContext failed: %08lx\n", GetLastError());
 
     testSignCert(csp, &toBeSigned, szOID_RSA_SHA1RSA, sig, &sigSize);
     testVerifyCertSig(csp, &toBeSigned, szOID_RSA_SHA1RSA, sig, sigSize);
@@ -2142,7 +2044,7 @@ static void testCertSigs(void)
     CryptReleaseContext(csp, 0);
     ret = CryptAcquireContextA(&csp, cspNameA, MS_DEF_PROV_A, PROV_RSA_FULL,
      CRYPT_DELETEKEYSET);
-    ok(ret, "CryptAcquireContext failed: %08x\n", GetLastError());
+    ok(ret, "CryptAcquireContext failed: %08lx\n", GetLastError());
 }
 
 static const BYTE md5SignedEmptyCert[] = {
@@ -2178,41 +2080,33 @@ static void testSignAndEncodeCert(void)
     ret = CryptSignAndEncodeCertificate(0, 0, 0, NULL, NULL, &algID, NULL, NULL,
      &size);
     ok(!ret && GetLastError() == ERROR_FILE_NOT_FOUND,
-     "Expected ERROR_FILE_NOT_FOUND, got %08x\n", GetLastError());
+     "Expected ERROR_FILE_NOT_FOUND, got %08lx\n", GetLastError());
     ret = CryptSignAndEncodeCertificate(0, 0, X509_ASN_ENCODING, NULL, NULL,
      &algID, NULL, NULL, &size);
     ok(!ret && GetLastError() == ERROR_FILE_NOT_FOUND,
-     "Expected ERROR_FILE_NOT_FOUND, got %08x\n", GetLastError());
+     "Expected ERROR_FILE_NOT_FOUND, got %08lx\n", GetLastError());
     ret = CryptSignAndEncodeCertificate(0, 0, 0, X509_CERT_TO_BE_SIGNED, NULL,
      &algID, NULL, NULL, &size);
     ok(!ret && GetLastError() == ERROR_FILE_NOT_FOUND,
-     "Expected ERROR_FILE_NOT_FOUND, got %08x\n", GetLastError());
-    /* Crashes on some win9x boxes */
-    if (0)
-    {
-        ret = CryptSignAndEncodeCertificate(0, 0, X509_ASN_ENCODING,
-         X509_CERT_TO_BE_SIGNED, NULL, &algID, NULL, NULL, &size);
-        ok(!ret && GetLastError() == STATUS_ACCESS_VIOLATION,
-         "Expected STATUS_ACCESS_VIOLATION, got %08x\n", GetLastError());
-    }
+     "Expected ERROR_FILE_NOT_FOUND, got %08lx\n", GetLastError());
+    ret = CryptSignAndEncodeCertificate(0, 0, X509_ASN_ENCODING,
+     X509_CERT_TO_BE_SIGNED, NULL, &algID, NULL, NULL, &size);
+    ok(!ret && GetLastError() == STATUS_ACCESS_VIOLATION,
+     "Expected STATUS_ACCESS_VIOLATION, got %08lx\n", GetLastError());
+
     /* Crashes
     ret = CryptSignAndEncodeCertificate(0, 0, X509_ASN_ENCODING,
      X509_CERT_TO_BE_SIGNED, &info, NULL, NULL, NULL, &size);
      */
     ret = CryptSignAndEncodeCertificate(0, 0, X509_ASN_ENCODING,
      X509_CERT_TO_BE_SIGNED, &info, &algID, NULL, NULL, &size);
-    ok(!ret &&
-     (GetLastError() == NTE_BAD_ALGID ||
-      GetLastError() == OSS_BAD_PTR), /* win9x */
-     "Expected NTE_BAD_ALGID, got %08x\n", GetLastError());
+    ok(!ret && GetLastError() == NTE_BAD_ALGID,
+     "Expected NTE_BAD_ALGID, got %08lx\n", GetLastError());
     algID.pszObjId = oid_rsa_md5rsa;
     ret = CryptSignAndEncodeCertificate(0, 0, X509_ASN_ENCODING,
      X509_CERT_TO_BE_SIGNED, &info, &algID, NULL, NULL, &size);
-    ok(!ret &&
-     (GetLastError() == ERROR_INVALID_PARAMETER ||
-      GetLastError() == NTE_BAD_ALGID ||
-      GetLastError() == OSS_BAD_PTR), /* Win9x */
-     "Expected ERROR_INVALID_PARAMETER or NTE_BAD_ALGID, got %08x\n",
+    ok(!ret && (GetLastError() == ERROR_INVALID_PARAMETER || GetLastError() == NTE_BAD_ALGID),
+     "Expected ERROR_INVALID_PARAMETER or NTE_BAD_ALGID, got %08lx\n",
      GetLastError());
     algID.pszObjId = oid_rsa_md5;
     ret = CryptSignAndEncodeCertificate(0, 0, X509_ASN_ENCODING,
@@ -2220,20 +2114,20 @@ static void testSignAndEncodeCert(void)
     /* oid_rsa_md5 not present in some win2k */
     if (ret)
     {
-        LPBYTE buf = HeapAlloc(GetProcessHeap(), 0, size);
+        LPBYTE buf = malloc(size);
 
         if (buf)
         {
             ret = CryptSignAndEncodeCertificate(0, 0, X509_ASN_ENCODING,
              X509_CERT_TO_BE_SIGNED, &info, &algID, NULL, buf, &size);
-            ok(ret, "CryptSignAndEncodeCertificate failed: %08x\n",
+            ok(ret, "CryptSignAndEncodeCertificate failed: %08lx\n",
              GetLastError());
             /* Tricky: because the NULL parameters may either be omitted or
              * included as an asn.1-encoded NULL (0x05,0x00), two different
              * values are allowed.
              */
             ok(size == sizeof(md5SignedEmptyCert) ||
-             size == sizeof(md5SignedEmptyCertNoNull), "Unexpected size %d\n",
+             size == sizeof(md5SignedEmptyCertNoNull), "Unexpected size %ld\n",
              size);
             if (size == sizeof(md5SignedEmptyCert))
                 ok(!memcmp(buf, md5SignedEmptyCert, size),
@@ -2241,7 +2135,7 @@ static void testSignAndEncodeCert(void)
             else if (size == sizeof(md5SignedEmptyCertNoNull))
                 ok(!memcmp(buf, md5SignedEmptyCertNoNull, size),
                  "Unexpected value\n");
-            HeapFree(GetProcessHeap(), 0, buf);
+            free(buf);
         }
     }
 }
@@ -2255,19 +2149,13 @@ static void testCreateSelfSignCert(void)
     HCRYPTKEY key;
     CRYPT_KEY_PROV_INFO info;
 
-    if (!pCertCreateSelfSignCertificate)
-    {
-        win_skip("CertCreateSelfSignCertificate() is not available\n");
-        return;
-    }
-
     /* This crashes:
-    context = pCertCreateSelfSignCertificate(0, NULL, 0, NULL, NULL, NULL, NULL,
+    context = CertCreateSelfSignCertificate(0, NULL, 0, NULL, NULL, NULL, NULL,
      NULL);
      * Calling this with no first parameter creates a new key container, which
      * lasts beyond the test, so I don't test that.  Nb: the generated key
      * name is a GUID.
-    context = pCertCreateSelfSignCertificate(0, &name, 0, NULL, NULL, NULL, NULL,
+    context = CertCreateSelfSignCertificate(0, &name, 0, NULL, NULL, NULL, NULL,
      NULL);
      */
 
@@ -2276,19 +2164,19 @@ static void testCreateSelfSignCert(void)
      CRYPT_DELETEKEYSET);
     ret = CryptAcquireContextA(&csp, cspNameA, MS_DEF_PROV_A, PROV_RSA_FULL,
      CRYPT_NEWKEYSET);
-    ok(ret, "CryptAcquireContext failed: %08x\n", GetLastError());
+    ok(ret, "CryptAcquireContext failed: %08lx\n", GetLastError());
 
-    context = pCertCreateSelfSignCertificate(csp, &name, 0, NULL, NULL, NULL,
+    context = CertCreateSelfSignCertificate(csp, &name, 0, NULL, NULL, NULL,
      NULL, NULL);
     ok(!context && GetLastError() == NTE_NO_KEY,
-     "Expected NTE_NO_KEY, got %08x\n", GetLastError());
+     "Expected NTE_NO_KEY, got %08lx\n", GetLastError());
     ret = CryptGenKey(csp, AT_SIGNATURE, 0, &key);
-    ok(ret, "CryptGenKey failed: %08x\n", GetLastError());
+    ok(ret, "CryptGenKey failed: %08lx\n", GetLastError());
     if (ret)
     {
-        context = pCertCreateSelfSignCertificate(csp, &name, 0, NULL, NULL, NULL,
+        context = CertCreateSelfSignCertificate(csp, &name, 0, NULL, NULL, NULL,
          NULL, NULL);
-        ok(context != NULL, "CertCreateSelfSignCertificate failed: %08x\n",
+        ok(context != NULL, "CertCreateSelfSignCertificate failed: %08lx\n",
          GetLastError());
         if (context)
         {
@@ -2300,25 +2188,25 @@ static void testCreateSelfSignCert(void)
             ok(ret && size, "Expected non-zero key provider info\n");
             if (size)
             {
-                PCRYPT_KEY_PROV_INFO pInfo = HeapAlloc(GetProcessHeap(), 0, size);
+                PCRYPT_KEY_PROV_INFO pInfo = malloc(size);
 
                 if (pInfo)
                 {
                     ret = CertGetCertificateContextProperty(context,
                      CERT_KEY_PROV_INFO_PROP_ID, pInfo, &size);
-                    ok(ret, "CertGetCertificateContextProperty failed: %08x\n",
+                    ok(ret, "CertGetCertificateContextProperty failed: %08lx\n",
                      GetLastError());
                     if (ret)
                     {
                         /* Sanity-check the key provider */
-                        ok(!lstrcmpW(pInfo->pwszContainerName, cspNameW),
+                        ok(!lstrcmpW(pInfo->pwszContainerName, L"WineCryptTemp"),
                          "Unexpected key container\n");
                         ok(!lstrcmpW(pInfo->pwszProvName, MS_DEF_PROV_W),
                          "Unexpected provider\n");
                         ok(pInfo->dwKeySpec == AT_SIGNATURE,
-                         "Expected AT_SIGNATURE, got %d\n", pInfo->dwKeySpec);
+                         "Expected AT_SIGNATURE, got %ld\n", pInfo->dwKeySpec);
                     }
-                    HeapFree(GetProcessHeap(), 0, pInfo);
+                    free(pInfo);
                 }
             }
 
@@ -2331,39 +2219,39 @@ static void testCreateSelfSignCert(void)
     CryptReleaseContext(csp, 0);
     ret = CryptAcquireContextA(&csp, cspNameA, MS_DEF_PROV_A, PROV_RSA_FULL,
      CRYPT_DELETEKEYSET);
-    ok(ret, "CryptAcquireContext failed: %08x\n", GetLastError());
+    ok(ret, "CryptAcquireContext failed: %08lx\n", GetLastError());
 
     /* Do the same test with a CSP, AT_KEYEXCHANGE and key info */
     CryptAcquireContextA(&csp, cspNameA, MS_DEF_PROV_A, PROV_RSA_FULL,
      CRYPT_DELETEKEYSET);
     ret = CryptAcquireContextA(&csp, cspNameA, MS_DEF_PROV_A, PROV_RSA_FULL,
      CRYPT_NEWKEYSET);
-    ok(ret, "CryptAcquireContext failed: %08x\n", GetLastError());
+    ok(ret, "CryptAcquireContext failed: %08lx\n", GetLastError());
     ret = CryptGenKey(csp, AT_SIGNATURE, 0, &key);
-    ok(ret, "CryptGenKey failed: %08x\n", GetLastError());
+    ok(ret, "CryptGenKey failed: %08lx\n", GetLastError());
 
     memset(&info,0,sizeof(info));
     info.dwProvType = PROV_RSA_FULL;
     info.dwKeySpec = AT_KEYEXCHANGE;
     info.pwszProvName = (LPWSTR) MS_DEF_PROV_W;
-    info.pwszContainerName = cspNameW;
+    info.pwszContainerName = (WCHAR *)L"WineCryptTemp";
     /* This should fail because the CSP doesn't have the specified key. */
     SetLastError(0xdeadbeef);
-    context = pCertCreateSelfSignCertificate(csp, &name, 0, &info, NULL, NULL,
+    context = CertCreateSelfSignCertificate(csp, &name, 0, &info, NULL, NULL,
         NULL, NULL);
     ok(context == NULL, "expected failure\n");
     if (context != NULL)
         CertFreeCertificateContext(context);
     else
-        ok(GetLastError() == NTE_NO_KEY, "expected NTE_NO_KEY, got %08x\n",
+        ok(GetLastError() == NTE_NO_KEY, "expected NTE_NO_KEY, got %08lx\n",
             GetLastError());
     /* Again, with a CSP, AT_SIGNATURE and key info */
     info.dwKeySpec = AT_SIGNATURE;
     SetLastError(0xdeadbeef);
-    context = pCertCreateSelfSignCertificate(csp, &name, 0, &info, NULL, NULL,
+    context = CertCreateSelfSignCertificate(csp, &name, 0, &info, NULL, NULL,
         NULL, NULL);
     ok(context != NULL,
-        "CertCreateSelfSignCertificate failed: %08x\n", GetLastError());
+        "CertCreateSelfSignCertificate failed: %08lx\n", GetLastError());
     if (context)
     {
         DWORD size = 0;
@@ -2374,25 +2262,25 @@ static void testCreateSelfSignCert(void)
         ok(ret && size, "Expected non-zero key provider info\n");
         if (size)
         {
-            PCRYPT_KEY_PROV_INFO pInfo = HeapAlloc(GetProcessHeap(), 0, size);
+            PCRYPT_KEY_PROV_INFO pInfo = malloc(size);
 
             if (pInfo)
             {
                 ret = CertGetCertificateContextProperty(context,
                     CERT_KEY_PROV_INFO_PROP_ID, pInfo, &size);
-                ok(ret, "CertGetCertificateContextProperty failed: %08x\n",
+                ok(ret, "CertGetCertificateContextProperty failed: %08lx\n",
                     GetLastError());
                 if (ret)
                 {
                     /* Sanity-check the key provider */
-                    ok(!lstrcmpW(pInfo->pwszContainerName, cspNameW),
+                    ok(!lstrcmpW(pInfo->pwszContainerName, L"WineCryptTemp"),
                         "Unexpected key container\n");
                     ok(!lstrcmpW(pInfo->pwszProvName, MS_DEF_PROV_W),
                         "Unexpected provider\n");
                     ok(pInfo->dwKeySpec == AT_SIGNATURE,
-                        "Expected AT_SIGNATURE, got %d\n", pInfo->dwKeySpec);
+                        "Expected AT_SIGNATURE, got %ld\n", pInfo->dwKeySpec);
                 }
-                HeapFree(GetProcessHeap(), 0, pInfo);
+                free(pInfo);
             }
         }
 
@@ -2403,13 +2291,13 @@ static void testCreateSelfSignCert(void)
     CryptReleaseContext(csp, 0);
     ret = CryptAcquireContextA(&csp, cspNameA, MS_DEF_PROV_A, PROV_RSA_FULL,
      CRYPT_DELETEKEYSET);
-    ok(ret, "CryptAcquireContext failed: %08x\n", GetLastError());
+    ok(ret, "CryptAcquireContext failed: %08lx\n", GetLastError());
 
     /* Do the same test with no CSP, AT_KEYEXCHANGE and key info */
     info.dwKeySpec = AT_KEYEXCHANGE;
-    context = pCertCreateSelfSignCertificate(0, &name, 0, &info, NULL, NULL,
+    context = CertCreateSelfSignCertificate(0, &name, 0, &info, NULL, NULL,
         NULL, NULL);
-    ok(context != NULL, "CertCreateSelfSignCertificate failed: %08x\n",
+    ok(context != NULL, "CertCreateSelfSignCertificate failed: %08lx\n",
         GetLastError());
     if (context)
     {
@@ -2421,25 +2309,25 @@ static void testCreateSelfSignCert(void)
         ok(ret && size, "Expected non-zero key provider info\n");
         if (size)
         {
-            PCRYPT_KEY_PROV_INFO pInfo = HeapAlloc(GetProcessHeap(), 0, size);
+            PCRYPT_KEY_PROV_INFO pInfo = malloc(size);
 
             if (pInfo)
             {
                 ret = CertGetCertificateContextProperty(context,
                     CERT_KEY_PROV_INFO_PROP_ID, pInfo, &size);
-                ok(ret, "CertGetCertificateContextProperty failed: %08x\n",
+                ok(ret, "CertGetCertificateContextProperty failed: %08lx\n",
                     GetLastError());
                 if (ret)
                 {
                     /* Sanity-check the key provider */
-                    ok(!lstrcmpW(pInfo->pwszContainerName, cspNameW),
+                    ok(!lstrcmpW(pInfo->pwszContainerName, L"WineCryptTemp"),
                         "Unexpected key container\n");
                     ok(!lstrcmpW(pInfo->pwszProvName, MS_DEF_PROV_W),
                         "Unexpected provider\n");
                     ok(pInfo->dwKeySpec == AT_KEYEXCHANGE,
-                        "Expected AT_KEYEXCHANGE, got %d\n", pInfo->dwKeySpec);
+                        "Expected AT_KEYEXCHANGE, got %ld\n", pInfo->dwKeySpec);
                 }
-                HeapFree(GetProcessHeap(), 0, pInfo);
+                free(pInfo);
             }
         }
 
@@ -2454,40 +2342,40 @@ static void testCreateSelfSignCert(void)
      CRYPT_DELETEKEYSET);
     ret = CryptAcquireContextA(&csp, cspNameA, MS_DEF_PROV_A, PROV_RSA_FULL,
      CRYPT_NEWKEYSET);
-    ok(ret, "CryptAcquireContext failed: %08x\n", GetLastError());
+    ok(ret, "CryptAcquireContext failed: %08lx\n", GetLastError());
 
-    context = pCertCreateSelfSignCertificate(csp, &name, 0, NULL, NULL, NULL,
+    context = CertCreateSelfSignCertificate(csp, &name, 0, NULL, NULL, NULL,
      NULL, NULL);
     ok(!context && GetLastError() == NTE_NO_KEY,
-     "Expected NTE_NO_KEY, got %08x\n", GetLastError());
+     "Expected NTE_NO_KEY, got %08lx\n", GetLastError());
     ret = CryptGenKey(csp, AT_KEYEXCHANGE, 0, &key);
-    ok(ret, "CryptGenKey failed: %08x\n", GetLastError());
+    ok(ret, "CryptGenKey failed: %08lx\n", GetLastError());
     CryptDestroyKey(key);
 
     memset(&info,0,sizeof(info));
     info.dwProvType = PROV_RSA_FULL;
     info.dwKeySpec = AT_SIGNATURE;
     info.pwszProvName = (LPWSTR) MS_DEF_PROV_W;
-    info.pwszContainerName = cspNameW;
+    info.pwszContainerName = (WCHAR *)L"WineCryptTemp";
     /* This should fail because the CSP doesn't have the specified key. */
     SetLastError(0xdeadbeef);
-    context = pCertCreateSelfSignCertificate(csp, &name, 0, &info, NULL, NULL,
+    context = CertCreateSelfSignCertificate(csp, &name, 0, &info, NULL, NULL,
         NULL, NULL);
     ok(context == NULL, "expected failure\n");
     if (context != NULL)
         CertFreeCertificateContext(context);
     else
-        ok(GetLastError() == NTE_NO_KEY, "expected NTE_NO_KEY, got %08x\n",
+        ok(GetLastError() == NTE_NO_KEY, "expected NTE_NO_KEY, got %08lx\n",
             GetLastError());
     /* Again, with a CSP, AT_KEYEXCHANGE and key info. This succeeds because the
      * CSP has an AT_KEYEXCHANGE key in it.
      */
     info.dwKeySpec = AT_KEYEXCHANGE;
     SetLastError(0xdeadbeef);
-    context = pCertCreateSelfSignCertificate(csp, &name, 0, &info, NULL, NULL,
+    context = CertCreateSelfSignCertificate(csp, &name, 0, &info, NULL, NULL,
         NULL, NULL);
     ok(context != NULL,
-        "CertCreateSelfSignCertificate failed: %08x\n", GetLastError());
+        "CertCreateSelfSignCertificate failed: %08lx\n", GetLastError());
     if (context)
     {
         DWORD size = 0;
@@ -2498,25 +2386,25 @@ static void testCreateSelfSignCert(void)
         ok(ret && size, "Expected non-zero key provider info\n");
         if (size)
         {
-            PCRYPT_KEY_PROV_INFO pInfo = HeapAlloc(GetProcessHeap(), 0, size);
+            PCRYPT_KEY_PROV_INFO pInfo = malloc(size);
 
             if (pInfo)
             {
                 ret = CertGetCertificateContextProperty(context,
                     CERT_KEY_PROV_INFO_PROP_ID, pInfo, &size);
-                ok(ret, "CertGetCertificateContextProperty failed: %08x\n",
+                ok(ret, "CertGetCertificateContextProperty failed: %08lx\n",
                     GetLastError());
                 if (ret)
                 {
                     /* Sanity-check the key provider */
-                    ok(!lstrcmpW(pInfo->pwszContainerName, cspNameW),
+                    ok(!lstrcmpW(pInfo->pwszContainerName, L"WineCryptTemp"),
                         "Unexpected key container\n");
                     ok(!lstrcmpW(pInfo->pwszProvName, MS_DEF_PROV_W),
                         "Unexpected provider\n");
                     ok(pInfo->dwKeySpec == AT_KEYEXCHANGE,
-                        "Expected AT_KEYEXCHANGE, got %d\n", pInfo->dwKeySpec);
+                        "Expected AT_KEYEXCHANGE, got %ld\n", pInfo->dwKeySpec);
                 }
-                HeapFree(GetProcessHeap(), 0, pInfo);
+                free(pInfo);
             }
         }
 
@@ -2526,7 +2414,7 @@ static void testCreateSelfSignCert(void)
     CryptReleaseContext(csp, 0);
     ret = CryptAcquireContextA(&csp, cspNameA, MS_DEF_PROV_A, PROV_RSA_FULL,
      CRYPT_DELETEKEYSET);
-    ok(ret, "CryptAcquireContext failed: %08x\n", GetLastError());
+    ok(ret, "CryptAcquireContext failed: %08lx\n", GetLastError());
 
 }
 
@@ -2566,7 +2454,7 @@ static void testIntendedKeyUsage(void)
     /* The unused bytes are filled with 0. */
     ret = CertGetIntendedKeyUsage(X509_ASN_ENCODING, &info, usage_bytes,
      sizeof(usage_bytes));
-    ok(ret, "CertGetIntendedKeyUsage failed: %08x\n", GetLastError());
+    ok(ret, "CertGetIntendedKeyUsage failed: %08lx\n", GetLastError());
     ok(!memcmp(usage_bytes, expected_usage1, sizeof(expected_usage1)),
      "unexpected value\n");
     /* The usage bytes are copied in big-endian order. */
@@ -2574,7 +2462,7 @@ static void testIntendedKeyUsage(void)
     ext.Value.pbData = usage2;
     ret = CertGetIntendedKeyUsage(X509_ASN_ENCODING, &info, usage_bytes,
      sizeof(usage_bytes));
-    ok(ret, "CertGetIntendedKeyUsage failed: %08x\n", GetLastError());
+    ok(ret, "CertGetIntendedKeyUsage failed: %08lx\n", GetLastError());
     ok(!memcmp(usage_bytes, expected_usage2, sizeof(expected_usage2)),
      "unexpected value\n");
 }
@@ -2591,15 +2479,15 @@ static void testKeyUsage(void)
     /* Test base cases */
     ret = CertGetEnhancedKeyUsage(NULL, 0, NULL, NULL);
     ok(!ret && GetLastError() == ERROR_INVALID_PARAMETER,
-     "Expected ERROR_INVALID_PARAMETER, got %08x\n", GetLastError());
+     "Expected ERROR_INVALID_PARAMETER, got %08lx\n", GetLastError());
     size = 1;
     ret = CertGetEnhancedKeyUsage(NULL, 0, NULL, &size);
     ok(!ret && GetLastError() == ERROR_INVALID_PARAMETER,
-     "Expected ERROR_INVALID_PARAMETER, got %08x\n", GetLastError());
+     "Expected ERROR_INVALID_PARAMETER, got %08lx\n", GetLastError());
     size = 0;
     ret = CertGetEnhancedKeyUsage(NULL, 0, NULL, &size);
     ok(!ret && GetLastError() == ERROR_INVALID_PARAMETER,
-     "Expected ERROR_INVALID_PARAMETER, got %08x\n", GetLastError());
+     "Expected ERROR_INVALID_PARAMETER, got %08lx\n", GetLastError());
     /* These crash
     ret = CertSetEnhancedKeyUsage(NULL, NULL);
     usage.cUsageIdentifier = 0;
@@ -2608,7 +2496,7 @@ static void testKeyUsage(void)
     /* Test with a cert with no enhanced key usage extension */
     context = CertCreateCertificateContext(X509_ASN_ENCODING, bigCert,
      sizeof(bigCert));
-    ok(context != NULL, "CertCreateCertificateContext failed: %08x\n",
+    ok(context != NULL, "CertCreateCertificateContext failed: %08lx\n",
      GetLastError());
     if (context)
     {
@@ -2618,7 +2506,7 @@ static void testKeyUsage(void)
 
         ret = CertGetEnhancedKeyUsage(context, 0, NULL, NULL);
         ok(!ret && GetLastError() == ERROR_INVALID_PARAMETER,
-         "Expected ERROR_INVALID_PARAMETER, got %08x\n", GetLastError());
+         "Expected ERROR_INVALID_PARAMETER, got %08lx\n", GetLastError());
         size = 1;
         ret = CertGetEnhancedKeyUsage(context, 0, NULL, &size);
         if (ret)
@@ -2628,11 +2516,11 @@ static void testKeyUsage(void)
              * usage set for this cert (which implies it's valid for all uses.)
              */
             ok(GetLastError() == CRYPT_E_NOT_FOUND,
-             "Expected CRYPT_E_NOT_FOUND, got %08x\n", GetLastError());
-            ok(size == sizeof(CERT_ENHKEY_USAGE), "Wrong size %d\n", size);
+             "Expected CRYPT_E_NOT_FOUND, got %08lx\n", GetLastError());
+            ok(size == sizeof(CERT_ENHKEY_USAGE), "Wrong size %ld\n", size);
             ret = CertGetEnhancedKeyUsage(context, 0, pUsage, &size);
-            ok(ret, "CertGetEnhancedKeyUsage failed: %08x\n", GetLastError());
-            ok(pUsage->cUsageIdentifier == 0, "Expected 0 usages, got %d\n",
+            ok(ret, "CertGetEnhancedKeyUsage failed: %08lx\n", GetLastError());
+            ok(pUsage->cUsageIdentifier == 0, "Expected 0 usages, got %ld\n",
              pUsage->cUsageIdentifier);
         }
         else
@@ -2641,18 +2529,18 @@ static void testKeyUsage(void)
              * CRYPT_E_NOT_FOUND.
              */
             ok(GetLastError() == CRYPT_E_NOT_FOUND,
-             "Expected CRYPT_E_NOT_FOUND, got %08x\n", GetLastError());
+             "Expected CRYPT_E_NOT_FOUND, got %08lx\n", GetLastError());
         }
         /* I can add a usage identifier when no key usage has been set */
         ret = CertAddEnhancedKeyUsageIdentifier(context, oid);
-        ok(ret, "CertAddEnhancedKeyUsageIdentifier failed: %08x\n",
+        ok(ret, "CertAddEnhancedKeyUsageIdentifier failed: %08lx\n",
          GetLastError());
         size = sizeof(buf);
         ret = CertGetEnhancedKeyUsage(context,
          CERT_FIND_PROP_ONLY_ENHKEY_USAGE_FLAG, pUsage, &size);
         ok(ret && GetLastError() == 0,
-         "CertGetEnhancedKeyUsage failed: %08x\n", GetLastError());
-        ok(pUsage->cUsageIdentifier == 1, "Expected 1 usage, got %d\n",
+         "CertGetEnhancedKeyUsage failed: %08lx\n", GetLastError());
+        ok(pUsage->cUsageIdentifier == 1, "Expected 1 usage, got %ld\n",
          pUsage->cUsageIdentifier);
         if (pUsage->cUsageIdentifier)
             ok(!strcmp(pUsage->rgpszUsageIdentifier[0], oid),
@@ -2660,35 +2548,35 @@ static void testKeyUsage(void)
         /* Now set an empty key usage */
         pUsage->cUsageIdentifier = 0;
         ret = CertSetEnhancedKeyUsage(context, pUsage);
-        ok(ret, "CertSetEnhancedKeyUsage failed: %08x\n", GetLastError());
+        ok(ret, "CertSetEnhancedKeyUsage failed: %08lx\n", GetLastError());
         /* Shouldn't find it in the cert */
         size = sizeof(buf);
         ret = CertGetEnhancedKeyUsage(context,
          CERT_FIND_EXT_ONLY_ENHKEY_USAGE_FLAG, pUsage, &size);
         ok(!ret && GetLastError() == CRYPT_E_NOT_FOUND,
-         "Expected CRYPT_E_NOT_FOUND, got %08x\n", GetLastError());
+         "Expected CRYPT_E_NOT_FOUND, got %08lx\n", GetLastError());
         /* Should find it as an extended property */
         ret = CertGetEnhancedKeyUsage(context,
          CERT_FIND_PROP_ONLY_ENHKEY_USAGE_FLAG, pUsage, &size);
         ok(ret && GetLastError() == 0,
-         "CertGetEnhancedKeyUsage failed: %08x\n", GetLastError());
-        ok(pUsage->cUsageIdentifier == 0, "Expected 0 usages, got %d\n",
+         "CertGetEnhancedKeyUsage failed: %08lx\n", GetLastError());
+        ok(pUsage->cUsageIdentifier == 0, "Expected 0 usages, got %ld\n",
          pUsage->cUsageIdentifier);
         /* Should find it as either */
         ret = CertGetEnhancedKeyUsage(context, 0, pUsage, &size);
         ok(ret && GetLastError() == 0,
-         "CertGetEnhancedKeyUsage failed: %08x\n", GetLastError());
-        ok(pUsage->cUsageIdentifier == 0, "Expected 0 usages, got %d\n",
+         "CertGetEnhancedKeyUsage failed: %08lx\n", GetLastError());
+        ok(pUsage->cUsageIdentifier == 0, "Expected 0 usages, got %ld\n",
          pUsage->cUsageIdentifier);
         /* Add a usage identifier */
         ret = CertAddEnhancedKeyUsageIdentifier(context, oid);
-        ok(ret, "CertAddEnhancedKeyUsageIdentifier failed: %08x\n",
+        ok(ret, "CertAddEnhancedKeyUsageIdentifier failed: %08lx\n",
          GetLastError());
         size = sizeof(buf);
         ret = CertGetEnhancedKeyUsage(context, 0, pUsage, &size);
         ok(ret && GetLastError() == 0,
-         "CertGetEnhancedKeyUsage failed: %08x\n", GetLastError());
-        ok(pUsage->cUsageIdentifier == 1, "Expected 1 identifier, got %d\n",
+         "CertGetEnhancedKeyUsage failed: %08lx\n", GetLastError());
+        ok(pUsage->cUsageIdentifier == 1, "Expected 1 identifier, got %ld\n",
          pUsage->cUsageIdentifier);
         if (pUsage->cUsageIdentifier)
             ok(!strcmp(pUsage->rgpszUsageIdentifier[0], oid),
@@ -2697,14 +2585,14 @@ static void testKeyUsage(void)
          * a duplicate usage identifier on versions prior to Vista
          */
         ret = CertAddEnhancedKeyUsageIdentifier(context, oid);
-        ok(ret, "CertAddEnhancedKeyUsageIdentifier failed: %08x\n",
+        ok(ret, "CertAddEnhancedKeyUsageIdentifier failed: %08lx\n",
          GetLastError());
         size = sizeof(buf);
         ret = CertGetEnhancedKeyUsage(context, 0, pUsage, &size);
         ok(ret && GetLastError() == 0,
-         "CertGetEnhancedKeyUsage failed: %08x\n", GetLastError());
+         "CertGetEnhancedKeyUsage failed: %08lx\n", GetLastError());
         ok(pUsage->cUsageIdentifier == 1 || pUsage->cUsageIdentifier == 2,
-         "Expected 1 or 2 identifiers, got %d\n", pUsage->cUsageIdentifier);
+         "Expected 1 or 2 identifiers, got %ld\n", pUsage->cUsageIdentifier);
         if (pUsage->cUsageIdentifier)
             ok(!strcmp(pUsage->rgpszUsageIdentifier[0], oid),
              "Expected %s, got %s\n", oid, pUsage->rgpszUsageIdentifier[0]);
@@ -2713,21 +2601,20 @@ static void testKeyUsage(void)
              "Expected %s, got %s\n", oid, pUsage->rgpszUsageIdentifier[1]);
         /* Now set a NULL extended property--this deletes the property. */
         ret = CertSetEnhancedKeyUsage(context, NULL);
-        ok(ret, "CertSetEnhancedKeyUsage failed: %08x\n", GetLastError());
+        ok(ret, "CertSetEnhancedKeyUsage failed: %08lx\n", GetLastError());
         SetLastError(0xbaadcafe);
         size = sizeof(buf);
         ret = CertGetEnhancedKeyUsage(context, 0, pUsage, &size);
-        ok(ret || broken(!ret && GetLastError() == CRYPT_E_NOT_FOUND /* NT4 */),
-	 "CertGetEnhancedKeyUsage failed: %08x\n", GetLastError());
+        ok(ret, "CertGetEnhancedKeyUsage failed: %08lx\n", GetLastError());
         ok(GetLastError() == CRYPT_E_NOT_FOUND,
-         "Expected CRYPT_E_NOT_FOUND, got %08x\n", GetLastError());
+         "Expected CRYPT_E_NOT_FOUND, got %08lx\n", GetLastError());
 
         CertFreeCertificateContext(context);
     }
     /* Now test with a cert with an enhanced key usage extension */
     context = CertCreateCertificateContext(X509_ASN_ENCODING, certWithUsage,
      sizeof(certWithUsage));
-    ok(context != NULL, "CertCreateCertificateContext failed: %08x\n",
+    ok(context != NULL, "CertCreateCertificateContext failed: %08lx\n",
      GetLastError());
     if (context)
     {
@@ -2739,8 +2626,8 @@ static void testKeyUsage(void)
          */
         ret = CertGetEnhancedKeyUsage(context,
          CERT_FIND_EXT_ONLY_ENHKEY_USAGE_FLAG, NULL, &bufSize);
-        ok(ret, "CertGetEnhancedKeyUsage failed: %08x\n", GetLastError());
-        buf = HeapAlloc(GetProcessHeap(), 0, bufSize);
+        ok(ret, "CertGetEnhancedKeyUsage failed: %08lx\n", GetLastError());
+        buf = malloc(bufSize);
         if (buf)
         {
             PCERT_ENHKEY_USAGE pUsage = (PCERT_ENHKEY_USAGE)buf;
@@ -2750,18 +2637,18 @@ static void testKeyUsage(void)
             ret = CertGetEnhancedKeyUsage(context,
              CERT_FIND_EXT_ONLY_ENHKEY_USAGE_FLAG, pUsage, &size);
             ok(ret && GetLastError() == 0,
-             "CertGetEnhancedKeyUsage failed: %08x\n", GetLastError());
-            ok(pUsage->cUsageIdentifier == 3, "Expected 3 usages, got %d\n",
+             "CertGetEnhancedKeyUsage failed: %08lx\n", GetLastError());
+            ok(pUsage->cUsageIdentifier == 3, "Expected 3 usages, got %ld\n",
              pUsage->cUsageIdentifier);
             for (i = 0; i < pUsage->cUsageIdentifier; i++)
                 ok(!strcmp(pUsage->rgpszUsageIdentifier[i], keyUsages[i]),
                  "Expected %s, got %s\n", keyUsages[i],
                  pUsage->rgpszUsageIdentifier[i]);
-            HeapFree(GetProcessHeap(), 0, buf);
+            free(buf);
         }
         ret = CertGetEnhancedKeyUsage(context, 0, NULL, &bufSize);
-        ok(ret, "CertGetEnhancedKeyUsage failed: %08x\n", GetLastError());
-        buf = HeapAlloc(GetProcessHeap(), 0, bufSize);
+        ok(ret, "CertGetEnhancedKeyUsage failed: %08lx\n", GetLastError());
+        buf = malloc(bufSize);
         if (buf)
         {
             PCERT_ENHKEY_USAGE pUsage = (PCERT_ENHKEY_USAGE)buf;
@@ -2774,27 +2661,27 @@ static void testKeyUsage(void)
              * count is positive.  I don't enforce that here.
              */
             ok(ret,
-             "CertGetEnhancedKeyUsage failed: %08x\n", GetLastError());
-            ok(pUsage->cUsageIdentifier == 3, "Expected 3 usages, got %d\n",
+             "CertGetEnhancedKeyUsage failed: %08lx\n", GetLastError());
+            ok(pUsage->cUsageIdentifier == 3, "Expected 3 usages, got %ld\n",
              pUsage->cUsageIdentifier);
             for (i = 0; i < pUsage->cUsageIdentifier; i++)
                 ok(!strcmp(pUsage->rgpszUsageIdentifier[i], keyUsages[i]),
                  "Expected %s, got %s\n", keyUsages[i],
                  pUsage->rgpszUsageIdentifier[i]);
-            HeapFree(GetProcessHeap(), 0, buf);
+            free(buf);
         }
         /* Shouldn't find it as an extended property */
         ret = CertGetEnhancedKeyUsage(context,
          CERT_FIND_PROP_ONLY_ENHKEY_USAGE_FLAG, NULL, &size);
         ok(!ret && GetLastError() == CRYPT_E_NOT_FOUND,
-         "Expected CRYPT_E_NOT_FOUND, got %08x\n", GetLastError());
+         "Expected CRYPT_E_NOT_FOUND, got %08lx\n", GetLastError());
         /* Adding a usage identifier overrides the cert's usage!? */
         ret = CertAddEnhancedKeyUsageIdentifier(context, szOID_RSA_RSA);
-        ok(ret, "CertAddEnhancedKeyUsageIdentifier failed: %08x\n",
+        ok(ret, "CertAddEnhancedKeyUsageIdentifier failed: %08lx\n",
          GetLastError());
         ret = CertGetEnhancedKeyUsage(context, 0, NULL, &bufSize);
-        ok(ret, "CertGetEnhancedKeyUsage failed: %08x\n", GetLastError());
-        buf = HeapAlloc(GetProcessHeap(), 0, bufSize);
+        ok(ret, "CertGetEnhancedKeyUsage failed: %08lx\n", GetLastError());
+        buf = malloc(bufSize);
         if (buf)
         {
             PCERT_ENHKEY_USAGE pUsage = (PCERT_ENHKEY_USAGE)buf;
@@ -2803,19 +2690,19 @@ static void testKeyUsage(void)
             size = bufSize;
             ret = CertGetEnhancedKeyUsage(context, 0, pUsage, &size);
             ok(ret,
-             "CertGetEnhancedKeyUsage failed: %08x\n", GetLastError());
-            ok(pUsage->cUsageIdentifier == 1, "Expected 1 usage, got %d\n",
+             "CertGetEnhancedKeyUsage failed: %08lx\n", GetLastError());
+            ok(pUsage->cUsageIdentifier == 1, "Expected 1 usage, got %ld\n",
              pUsage->cUsageIdentifier);
             ok(!strcmp(pUsage->rgpszUsageIdentifier[0], szOID_RSA_RSA),
              "Expected %s, got %s\n", szOID_RSA_RSA,
              pUsage->rgpszUsageIdentifier[0]);
-            HeapFree(GetProcessHeap(), 0, buf);
+            free(buf);
         }
         /* But querying the cert directly returns its usage */
         ret = CertGetEnhancedKeyUsage(context,
          CERT_FIND_EXT_ONLY_ENHKEY_USAGE_FLAG, NULL, &bufSize);
-        ok(ret, "CertGetEnhancedKeyUsage failed: %08x\n", GetLastError());
-        buf = HeapAlloc(GetProcessHeap(), 0, bufSize);
+        ok(ret, "CertGetEnhancedKeyUsage failed: %08lx\n", GetLastError());
+        buf = malloc(bufSize);
         if (buf)
         {
             PCERT_ENHKEY_USAGE pUsage = (PCERT_ENHKEY_USAGE)buf;
@@ -2824,23 +2711,23 @@ static void testKeyUsage(void)
             ret = CertGetEnhancedKeyUsage(context,
              CERT_FIND_EXT_ONLY_ENHKEY_USAGE_FLAG, pUsage, &size);
             ok(ret,
-             "CertGetEnhancedKeyUsage failed: %08x\n", GetLastError());
-            ok(pUsage->cUsageIdentifier == 3, "Expected 3 usages, got %d\n",
+             "CertGetEnhancedKeyUsage failed: %08lx\n", GetLastError());
+            ok(pUsage->cUsageIdentifier == 3, "Expected 3 usages, got %ld\n",
              pUsage->cUsageIdentifier);
             for (i = 0; i < pUsage->cUsageIdentifier; i++)
                 ok(!strcmp(pUsage->rgpszUsageIdentifier[i], keyUsages[i]),
                  "Expected %s, got %s\n", keyUsages[i],
                  pUsage->rgpszUsageIdentifier[i]);
-            HeapFree(GetProcessHeap(), 0, buf);
+            free(buf);
         }
         /* And removing the only usage identifier in the extended property
          * results in the cert's key usage being found.
          */
         ret = CertRemoveEnhancedKeyUsageIdentifier(context, szOID_RSA_RSA);
-        ok(ret, "CertRemoveEnhancedKeyUsage failed: %08x\n", GetLastError());
+        ok(ret, "CertRemoveEnhancedKeyUsage failed: %08lx\n", GetLastError());
         ret = CertGetEnhancedKeyUsage(context, 0, NULL, &bufSize);
-        ok(ret, "CertGetEnhancedKeyUsage failed: %08x\n", GetLastError());
-        buf = HeapAlloc(GetProcessHeap(), 0, bufSize);
+        ok(ret, "CertGetEnhancedKeyUsage failed: %08lx\n", GetLastError());
+        buf = malloc(bufSize);
         if (buf)
         {
             PCERT_ENHKEY_USAGE pUsage = (PCERT_ENHKEY_USAGE)buf;
@@ -2849,14 +2736,14 @@ static void testKeyUsage(void)
             size = bufSize;
             ret = CertGetEnhancedKeyUsage(context, 0, pUsage, &size);
             ok(ret,
-             "CertGetEnhancedKeyUsage failed: %08x\n", GetLastError());
-            ok(pUsage->cUsageIdentifier == 3, "Expected 3 usages, got %d\n",
+             "CertGetEnhancedKeyUsage failed: %08lx\n", GetLastError());
+            ok(pUsage->cUsageIdentifier == 3, "Expected 3 usages, got %ld\n",
              pUsage->cUsageIdentifier);
             for (i = 0; i < pUsage->cUsageIdentifier; i++)
                 ok(!strcmp(pUsage->rgpszUsageIdentifier[i], keyUsages[i]),
                  "Expected %s, got %s\n", keyUsages[i],
                  pUsage->rgpszUsageIdentifier[i]);
-            HeapFree(GetProcessHeap(), 0, buf);
+            free(buf);
         }
 
         CertFreeCertificateContext(context);
@@ -2892,23 +2779,17 @@ static void testGetValidUsages(void)
     LPSTR *oids = NULL;
     PCCERT_CONTEXT contexts[3];
 
-    if (!pCertGetValidUsages)
-    {
-        win_skip("CertGetValidUsages() is not available\n");
-        return;
-    }
-
     /* Crash
-    ret = pCertGetValidUsages(0, NULL, NULL, NULL, NULL);
-    ret = pCertGetValidUsages(0, NULL, NULL, NULL, &size);
+    ret = CertGetValidUsages(0, NULL, NULL, NULL, NULL);
+    ret = CertGetValidUsages(0, NULL, NULL, NULL, &size);
      */
     contexts[0] = NULL;
     size = numOIDs = 0xdeadbeef;
     SetLastError(0xdeadbeef);
-    ret = pCertGetValidUsages(1, &contexts[0], &numOIDs, NULL, &size);
-    ok(ret, "CertGetValidUsages failed: %d\n", GetLastError());
+    ret = CertGetValidUsages(1, &contexts[0], &numOIDs, NULL, &size);
+    ok(ret, "CertGetValidUsages failed: %ld\n", GetLastError());
     ok(numOIDs == -1, "Expected -1, got %d\n", numOIDs);
-    ok(size == 0, "Expected size 0, got %d\n", size);
+    ok(size == 0, "Expected size 0, got %ld\n", size);
     contexts[0] = CertCreateCertificateContext(X509_ASN_ENCODING, bigCert,
      sizeof(bigCert));
     contexts[1] = CertCreateCertificateContext(X509_ASN_ENCODING, certWithUsage,
@@ -2916,93 +2797,93 @@ static void testGetValidUsages(void)
     contexts[2] = CertCreateCertificateContext(X509_ASN_ENCODING,
      cert2WithUsage, sizeof(cert2WithUsage));
     size = numOIDs = 0xdeadbeef;
-    ret = pCertGetValidUsages(0, NULL, &numOIDs, NULL, &size);
-    ok(ret, "CertGetValidUsages failed: %08x\n", GetLastError());
+    ret = CertGetValidUsages(0, NULL, &numOIDs, NULL, &size);
+    ok(ret, "CertGetValidUsages failed: %08lx\n", GetLastError());
     ok(numOIDs == -1, "Expected -1, got %d\n", numOIDs);
-    ok(size == 0, "Expected size 0, got %d\n", size);
+    ok(size == 0, "Expected size 0, got %ld\n", size);
     size = numOIDs = 0xdeadbeef;
-    ret = pCertGetValidUsages(1, contexts, &numOIDs, NULL, &size);
-    ok(ret, "CertGetValidUsages failed: %08x\n", GetLastError());
+    ret = CertGetValidUsages(1, contexts, &numOIDs, NULL, &size);
+    ok(ret, "CertGetValidUsages failed: %08lx\n", GetLastError());
     ok(numOIDs == -1, "Expected -1, got %d\n", numOIDs);
-    ok(size == 0, "Expected size 0, got %d\n", size);
-    ret = pCertGetValidUsages(1, &contexts[1], &numOIDs, NULL, &size);
-    ok(ret, "CertGetValidUsages failed: %08x\n", GetLastError());
+    ok(size == 0, "Expected size 0, got %ld\n", size);
+    ret = CertGetValidUsages(1, &contexts[1], &numOIDs, NULL, &size);
+    ok(ret, "CertGetValidUsages failed: %08lx\n", GetLastError());
     ok(numOIDs == 3, "Expected 3, got %d\n", numOIDs);
     ok(size, "Expected non-zero size\n");
-    oids = HeapAlloc(GetProcessHeap(), 0, size);
+    oids = malloc(size);
     if (oids)
     {
         int i;
         DWORD smallSize = 1;
 
         SetLastError(0xdeadbeef);
-        ret = pCertGetValidUsages(1, &contexts[1], &numOIDs, oids, &smallSize);
+        ret = CertGetValidUsages(1, &contexts[1], &numOIDs, oids, &smallSize);
         ok(!ret && GetLastError() == ERROR_MORE_DATA,
-         "Expected ERROR_MORE_DATA, got %d\n", GetLastError());
-        ret = pCertGetValidUsages(1, &contexts[1], &numOIDs, oids, &size);
-        ok(ret, "CertGetValidUsages failed: %08x\n", GetLastError());
+         "Expected ERROR_MORE_DATA, got %ld\n", GetLastError());
+        ret = CertGetValidUsages(1, &contexts[1], &numOIDs, oids, &size);
+        ok(ret, "CertGetValidUsages failed: %08lx\n", GetLastError());
         for (i = 0; i < numOIDs; i++)
             ok(!lstrcmpA(oids[i], expectedOIDs[i]), "unexpected OID %s\n",
              oids[i]);
-        HeapFree(GetProcessHeap(), 0, oids);
+        free(oids);
     }
     numOIDs = 0xdeadbeef;
     /* Oddly enough, this crashes when the number of contexts is not 1:
-    ret = pCertGetValidUsages(2, contexts, &numOIDs, NULL, &size);
+    ret = CertGetValidUsages(2, contexts, &numOIDs, NULL, &size);
      * but setting size to 0 allows it to succeed:
      */
     size = 0;
-    ret = pCertGetValidUsages(2, contexts, &numOIDs, NULL, &size);
-    ok(ret, "CertGetValidUsages failed: %08x\n", GetLastError());
+    ret = CertGetValidUsages(2, contexts, &numOIDs, NULL, &size);
+    ok(ret, "CertGetValidUsages failed: %08lx\n", GetLastError());
     ok(numOIDs == 3, "Expected 3, got %d\n", numOIDs);
     ok(size, "Expected non-zero size\n");
-    oids = HeapAlloc(GetProcessHeap(), 0, size);
+    oids = malloc(size);
     if (oids)
     {
         int i;
 
-        ret = pCertGetValidUsages(1, &contexts[1], &numOIDs, oids, &size);
-        ok(ret, "CertGetValidUsages failed: %08x\n", GetLastError());
+        ret = CertGetValidUsages(1, &contexts[1], &numOIDs, oids, &size);
+        ok(ret, "CertGetValidUsages failed: %08lx\n", GetLastError());
         for (i = 0; i < numOIDs; i++)
             ok(!lstrcmpA(oids[i], expectedOIDs[i]), "unexpected OID %s\n",
              oids[i]);
-        HeapFree(GetProcessHeap(), 0, oids);
+        free(oids);
     }
     numOIDs = 0xdeadbeef;
     size = 0;
-    ret = pCertGetValidUsages(1, &contexts[2], &numOIDs, NULL, &size);
-    ok(ret, "CertGetValidUsages failed: %08x\n", GetLastError());
+    ret = CertGetValidUsages(1, &contexts[2], &numOIDs, NULL, &size);
+    ok(ret, "CertGetValidUsages failed: %08lx\n", GetLastError());
     ok(numOIDs == 2, "Expected 2, got %d\n", numOIDs);
     ok(size, "Expected non-zero size\n");
-    oids = HeapAlloc(GetProcessHeap(), 0, size);
+    oids = malloc(size);
     if (oids)
     {
         int i;
 
-        ret = pCertGetValidUsages(1, &contexts[2], &numOIDs, oids, &size);
-        ok(ret, "CertGetValidUsages failed: %08x\n", GetLastError());
+        ret = CertGetValidUsages(1, &contexts[2], &numOIDs, oids, &size);
+        ok(ret, "CertGetValidUsages failed: %08lx\n", GetLastError());
         for (i = 0; i < numOIDs; i++)
             ok(!lstrcmpA(oids[i], expectedOIDs2[i]), "unexpected OID %s\n",
              oids[i]);
-        HeapFree(GetProcessHeap(), 0, oids);
+        free(oids);
     }
     numOIDs = 0xdeadbeef;
     size = 0;
-    ret = pCertGetValidUsages(3, contexts, &numOIDs, NULL, &size);
-    ok(ret, "CertGetValidUsages failed: %08x\n", GetLastError());
+    ret = CertGetValidUsages(3, contexts, &numOIDs, NULL, &size);
+    ok(ret, "CertGetValidUsages failed: %08lx\n", GetLastError());
     ok(numOIDs == 2, "Expected 2, got %d\n", numOIDs);
     ok(size, "Expected non-zero size\n");
-    oids = HeapAlloc(GetProcessHeap(), 0, size);
+    oids = malloc(size);
     if (oids)
     {
         int i;
 
-        ret = pCertGetValidUsages(3, contexts, &numOIDs, oids, &size);
-        ok(ret, "CertGetValidUsages failed: %08x\n", GetLastError());
+        ret = CertGetValidUsages(3, contexts, &numOIDs, oids, &size);
+        ok(ret, "CertGetValidUsages failed: %08lx\n", GetLastError());
         for (i = 0; i < numOIDs; i++)
             ok(!lstrcmpA(oids[i], expectedOIDs2[i]), "unexpected OID %s\n",
              oids[i]);
-        HeapFree(GetProcessHeap(), 0, oids);
+        free(oids);
     }
     CertFreeCertificateContext(contexts[0]);
     CertFreeCertificateContext(contexts[1]);
@@ -3047,12 +2928,12 @@ static void testCompareCertName(void)
     blob1.pbData = emptyCert;
     blob1.cbData = sizeof(emptyCert);
     ret = CertCompareCertificateName(0, &blob1, &blob1);
-    ok(ret, "CertCompareCertificateName failed: %08x\n", GetLastError());
+    ok(ret, "CertCompareCertificateName failed: %08lx\n", GetLastError());
     /* It doesn't have to be a valid encoded name.. */
     blob1.pbData = bogus;
     blob1.cbData = sizeof(bogus);
     ret = CertCompareCertificateName(0, &blob1, &blob1);
-    ok(ret, "CertCompareCertificateName failed: %08x\n", GetLastError());
+    ok(ret, "CertCompareCertificateName failed: %08lx\n", GetLastError());
     /* Leading zeroes matter.. */
     blob2.pbData = bogusPrime;
     blob2.cbData = sizeof(bogusPrime);
@@ -3112,7 +2993,7 @@ static void testIsRDNAttrsInCertificateName(void)
     static char juan_with_intermediate_space[] = "Juan  Lang";
     static char juan_with_trailing_space[] = "Juan Lang ";
     static char juan_lower_case[] = "juan lang";
-    static WCHAR juanW[] = { 'J','u','a','n',' ','L','a','n','g',0 };
+    static WCHAR juanW[] = L"Juan Lang";
     static char the_wine_project[] = "The Wine Project";
     BOOL ret;
     CERT_NAME_BLOB name;
@@ -3130,41 +3011,41 @@ static void testIsRDNAttrsInCertificateName(void)
     SetLastError(0xdeadbeef);
     ret = CertIsRDNAttrsInCertificateName(0, 0, &name, NULL);
     ok(!ret && GetLastError() == ERROR_FILE_NOT_FOUND,
-     "expected ERROR_FILE_NOT_FOUND, got %08x\n", GetLastError());
+     "expected ERROR_FILE_NOT_FOUND, got %08lx\n", GetLastError());
     ret = CertIsRDNAttrsInCertificateName(X509_ASN_ENCODING, 0, &name, &rdn);
-    ok(ret, "CertIsRDNAttrsInCertificateName failed: %08x\n", GetLastError());
+    ok(ret, "CertIsRDNAttrsInCertificateName failed: %08lx\n", GetLastError());
     attr[0].pszObjId = oid_1_2_3;
     rdn.rgRDNAttr = attr;
     rdn.cRDNAttr = 1;
     SetLastError(0xdeadbeef);
     ret = CertIsRDNAttrsInCertificateName(X509_ASN_ENCODING, 0, &name, &rdn);
     ok(!ret && GetLastError() == CRYPT_E_NO_MATCH,
-     "expected CRYPT_E_NO_MATCH, got %08x\n", GetLastError());
+     "expected CRYPT_E_NO_MATCH, got %08lx\n", GetLastError());
     attr[0].pszObjId = oid_common_name;
     attr[0].dwValueType = CERT_RDN_PRINTABLE_STRING;
     attr[0].Value.cbData = strlen(juan);
     attr[0].Value.pbData = (BYTE *)juan;
     ret = CertIsRDNAttrsInCertificateName(X509_ASN_ENCODING, 0, &name, &rdn);
-    ok(ret, "CertIsRDNAttrsInCertificateName failed: %08x\n", GetLastError());
+    ok(ret, "CertIsRDNAttrsInCertificateName failed: %08lx\n", GetLastError());
     /* Again, spaces are not removed for name comparison. */
     attr[0].Value.cbData = strlen(juan_with_leading_space);
     attr[0].Value.pbData = (BYTE *)juan_with_leading_space;
     SetLastError(0xdeadbeef);
     ret = CertIsRDNAttrsInCertificateName(X509_ASN_ENCODING, 0, &name, &rdn);
     ok(!ret && GetLastError() == CRYPT_E_NO_MATCH,
-     "expected CRYPT_E_NO_MATCH, got %08x\n", GetLastError());
+     "expected CRYPT_E_NO_MATCH, got %08lx\n", GetLastError());
     attr[0].Value.cbData = strlen(juan_with_intermediate_space);
     attr[0].Value.pbData = (BYTE *)juan_with_intermediate_space;
     SetLastError(0xdeadbeef);
     ret = CertIsRDNAttrsInCertificateName(X509_ASN_ENCODING, 0, &name, &rdn);
     ok(!ret && GetLastError() == CRYPT_E_NO_MATCH,
-     "expected CRYPT_E_NO_MATCH, got %08x\n", GetLastError());
+     "expected CRYPT_E_NO_MATCH, got %08lx\n", GetLastError());
     attr[0].Value.cbData = strlen(juan_with_trailing_space);
     attr[0].Value.pbData = (BYTE *)juan_with_trailing_space;
     SetLastError(0xdeadbeef);
     ret = CertIsRDNAttrsInCertificateName(X509_ASN_ENCODING, 0, &name, &rdn);
     ok(!ret && GetLastError() == CRYPT_E_NO_MATCH,
-     "expected CRYPT_E_NO_MATCH, got %08x\n", GetLastError());
+     "expected CRYPT_E_NO_MATCH, got %08lx\n", GetLastError());
     /* The lower case name isn't matched unless a case insensitive match is
      * specified.
      */
@@ -3173,12 +3054,12 @@ static void testIsRDNAttrsInCertificateName(void)
     SetLastError(0xdeadbeef);
     ret = CertIsRDNAttrsInCertificateName(X509_ASN_ENCODING, 0, &name, &rdn);
     ok(!ret && GetLastError() == CRYPT_E_NO_MATCH,
-     "expected CRYPT_E_NO_MATCH, got %08x\n", GetLastError());
+     "expected CRYPT_E_NO_MATCH, got %08lx\n", GetLastError());
     ret = CertIsRDNAttrsInCertificateName(X509_ASN_ENCODING,
      CERT_CASE_INSENSITIVE_IS_RDN_ATTRS_FLAG, &name, &rdn);
     ok(ret ||
      broken(!ret && GetLastError() == CRYPT_E_NO_MATCH), /* Older crypt32 */
-     "CertIsRDNAttrsInCertificateName failed: %08x\n", GetLastError());
+     "CertIsRDNAttrsInCertificateName failed: %08lx\n", GetLastError());
     /* The values don't match unless they have the same RDN type */
     attr[0].dwValueType = CERT_RDN_UNICODE_STRING;
     attr[0].Value.cbData = lstrlenW(juanW) * sizeof(WCHAR);
@@ -3186,19 +3067,19 @@ static void testIsRDNAttrsInCertificateName(void)
     SetLastError(0xdeadbeef);
     ret = CertIsRDNAttrsInCertificateName(X509_ASN_ENCODING, 0, &name, &rdn);
     ok(!ret && GetLastError() == CRYPT_E_NO_MATCH,
-     "expected CRYPT_E_NO_MATCH, got %08x\n", GetLastError());
+     "expected CRYPT_E_NO_MATCH, got %08lx\n", GetLastError());
     SetLastError(0xdeadbeef);
     ret = CertIsRDNAttrsInCertificateName(X509_ASN_ENCODING,
      CERT_UNICODE_IS_RDN_ATTRS_FLAG, &name, &rdn);
     ok(!ret && GetLastError() == CRYPT_E_NO_MATCH,
-     "expected CRYPT_E_NO_MATCH, got %08x\n", GetLastError());
+     "expected CRYPT_E_NO_MATCH, got %08lx\n", GetLastError());
     attr[0].dwValueType = CERT_RDN_IA5_STRING;
     attr[0].Value.cbData = strlen(juan);
     attr[0].Value.pbData = (BYTE *)juan;
     SetLastError(0xdeadbeef);
     ret = CertIsRDNAttrsInCertificateName(X509_ASN_ENCODING, 0, &name, &rdn);
     ok(!ret && GetLastError() == CRYPT_E_NO_MATCH,
-     "expected CRYPT_E_NO_MATCH, got %08x\n", GetLastError());
+     "expected CRYPT_E_NO_MATCH, got %08lx\n", GetLastError());
     /* All attributes must be present */
     attr[0].dwValueType = CERT_RDN_PRINTABLE_STRING;
     attr[0].Value.cbData = strlen(juan);
@@ -3211,18 +3092,18 @@ static void testIsRDNAttrsInCertificateName(void)
     SetLastError(0xdeadbeef);
     ret = CertIsRDNAttrsInCertificateName(X509_ASN_ENCODING, 0, &name, &rdn);
     ok(!ret && GetLastError() == CRYPT_E_NO_MATCH,
-     "expected CRYPT_E_NO_MATCH, got %08x\n", GetLastError());
+     "expected CRYPT_E_NO_MATCH, got %08lx\n", GetLastError());
     /* Order also matters */
     name.pbData = cnThenO;
     name.cbData = sizeof(cnThenO);
     ret = CertIsRDNAttrsInCertificateName(X509_ASN_ENCODING, 0, &name, &rdn);
-    ok(ret, "CertIsRDNAttrsInCertificateName failed: %08x\n", GetLastError());
+    ok(ret, "CertIsRDNAttrsInCertificateName failed: %08lx\n", GetLastError());
     name.pbData = oThenCN;
     name.cbData = sizeof(oThenCN);
     SetLastError(0xdeadbeef);
     ret = CertIsRDNAttrsInCertificateName(X509_ASN_ENCODING, 0, &name, &rdn);
     ok(!ret && GetLastError() == CRYPT_E_NO_MATCH,
-     "expected CRYPT_E_NO_MATCH, got %08x\n", GetLastError());
+     "expected CRYPT_E_NO_MATCH, got %08lx\n", GetLastError());
 }
 
 static BYTE int1[] = { 0x88, 0xff, 0xff, 0xff };
@@ -3255,7 +3136,7 @@ static void testCompareIntegerBlob(void)
     {
         ret = CertCompareIntegerBlob(&intBlobs[i].blob1, &intBlobs[i].blob2);
         ok(ret == intBlobs[i].areEqual,
-         "%d: expected blobs %s compare\n", i, intBlobs[i].areEqual ?
+         "%ld: expected blobs %s compare\n", i, intBlobs[i].areEqual ?
          "to" : "not to");
     }
 }
@@ -3282,23 +3163,23 @@ static void testComparePublicKeyInfo(void)
      */
     /* Empty public keys compare */
     ret = CertComparePublicKeyInfo(0, &info1, &info2);
-    ok(ret, "CertComparePublicKeyInfo failed: %08x\n", GetLastError());
+    ok(ret, "CertComparePublicKeyInfo failed: %08lx\n", GetLastError());
     ret = CertComparePublicKeyInfo(X509_ASN_ENCODING, &info1, &info2);
-    ok(ret, "CertComparePublicKeyInfo failed: %08x\n", GetLastError());
+    ok(ret, "CertComparePublicKeyInfo failed: %08lx\n", GetLastError());
 
     /* Different OIDs appear to compare */
     info1.Algorithm.pszObjId = oid_rsa_rsa;
     info2.Algorithm.pszObjId = oid_rsa_sha1rsa;
     ret = CertComparePublicKeyInfo(0, &info1, &info2);
-    ok(ret, "CertComparePublicKeyInfo failed: %08x\n", GetLastError());
+    ok(ret, "CertComparePublicKeyInfo failed: %08lx\n", GetLastError());
     ret = CertComparePublicKeyInfo(X509_ASN_ENCODING, &info1, &info2);
-    ok(ret, "CertComparePublicKeyInfo failed: %08x\n", GetLastError());
+    ok(ret, "CertComparePublicKeyInfo failed: %08lx\n", GetLastError());
 
     info2.Algorithm.pszObjId = oid_x957_dsa;
     ret = CertComparePublicKeyInfo(0, &info1, &info2);
-    ok(ret, "CertComparePublicKeyInfo failed: %08x\n", GetLastError());
+    ok(ret, "CertComparePublicKeyInfo failed: %08lx\n", GetLastError());
     ret = CertComparePublicKeyInfo(X509_ASN_ENCODING, &info1, &info2);
-    ok(ret, "CertComparePublicKeyInfo failed: %08x\n", GetLastError());
+    ok(ret, "CertComparePublicKeyInfo failed: %08lx\n", GetLastError());
 
     info1.PublicKey.cbData = sizeof(bits1);
     info1.PublicKey.pbData = bits1;
@@ -3307,9 +3188,9 @@ static void testComparePublicKeyInfo(void)
     info2.PublicKey.pbData = bits1;
     info2.PublicKey.cUnusedBits = 0;
     ret = CertComparePublicKeyInfo(0, &info1, &info2);
-    ok(ret, "CertComparePublicKeyInfo failed: %08x\n", GetLastError());
+    ok(ret, "CertComparePublicKeyInfo failed: %08lx\n", GetLastError());
     ret = CertComparePublicKeyInfo(X509_ASN_ENCODING, &info1, &info2);
-    ok(ret, "CertComparePublicKeyInfo failed: %08x\n", GetLastError());
+    ok(ret, "CertComparePublicKeyInfo failed: %08lx\n", GetLastError());
 
     info2.Algorithm.pszObjId = oid_rsa_rsa;
     info1.PublicKey.cbData = sizeof(bits4);
@@ -3405,21 +3286,19 @@ static void testHashPublicKeyInfo(void)
      */
     ret = CryptHashPublicKeyInfo(0, 0, 0, 0, NULL, NULL, &len);
     ok(!ret && GetLastError() == ERROR_FILE_NOT_FOUND,
-     "Expected ERROR_FILE_NOT_FOUND, got %08x\n", GetLastError());
-    /* Crashes on some win9x boxes */
-    if (0)
+     "Expected ERROR_FILE_NOT_FOUND, got %08lx\n", GetLastError());
+
+    if (0) /* crash */
     {
         ret = CryptHashPublicKeyInfo(0, 0, 0, X509_ASN_ENCODING, NULL, NULL, &len);
         ok(!ret && GetLastError() == STATUS_ACCESS_VIOLATION,
-         "Expected STATUS_ACCESS_VIOLATION, got %08x\n", GetLastError());
+         "Expected STATUS_ACCESS_VIOLATION, got %08lx\n", GetLastError());
     }
     ret = CryptHashPublicKeyInfo(0, 0, 0, X509_ASN_ENCODING, &info, NULL, &len);
-    ok(ret ||
-     broken(!ret), /* win9x */
-     "CryptHashPublicKeyInfo failed: %08x\n", GetLastError());
+    ok(ret, "CryptHashPublicKeyInfo failed: %08lx\n", GetLastError());
     if (ret)
     {
-        ok(len == 16, "Expected hash size 16, got %d\n", len);
+        ok(len == 16, "Expected hash size 16, got %ld\n", len);
         if (len == 16)
         {
             static const BYTE emptyHash[] = { 0xb8,0x51,0x3a,0x31,0x0e,0x9f,0x40,
@@ -3428,7 +3307,7 @@ static void testHashPublicKeyInfo(void)
 
             ret = CryptHashPublicKeyInfo(0, 0, 0, X509_ASN_ENCODING, &info, buf,
              &len);
-            ok(ret, "CryptHashPublicKeyInfo failed: %08x\n", GetLastError());
+            ok(ret, "CryptHashPublicKeyInfo failed: %08lx\n", GetLastError());
             ok(!memcmp(buf, emptyHash, len), "Unexpected hash\n");
         }
     }
@@ -3451,45 +3330,35 @@ static void testHashToBeSigned(void)
     SetLastError(0xdeadbeef);
     ret = CryptHashToBeSigned(0, 0, NULL, 0, NULL, &size);
     ok(!ret && GetLastError() == ERROR_FILE_NOT_FOUND,
-     "expected ERROR_FILE_NOT_FOUND, got %d\n", GetLastError());
+     "expected ERROR_FILE_NOT_FOUND, got %ld\n", GetLastError());
     SetLastError(0xdeadbeef);
     ret = CryptHashToBeSigned(0, X509_ASN_ENCODING, NULL, 0, NULL, &size);
-    ok(!ret &&
-     (GetLastError() == CRYPT_E_ASN1_EOD ||
-      GetLastError() == OSS_BAD_ARG), /* win9x */
-     "expected CRYPT_E_ASN1_EOD, got %08x\n", GetLastError());
+    ok(!ret && GetLastError() == CRYPT_E_ASN1_EOD,
+     "expected CRYPT_E_ASN1_EOD, got %08lx\n", GetLastError());
     /* Can't sign anything:  has to be asn.1 encoded, at least */
     SetLastError(0xdeadbeef);
     ret = CryptHashToBeSigned(0, X509_ASN_ENCODING, int1, sizeof(int1),
      NULL, &size);
-    ok(!ret &&
-     (GetLastError() == CRYPT_E_ASN1_BADTAG ||
-      GetLastError() == OSS_MORE_INPUT), /* win9x */
-     "expected CRYPT_E_ASN1_BADTAG, got %08x\n", GetLastError());
+    ok(!ret && GetLastError() == CRYPT_E_ASN1_BADTAG,
+     "expected CRYPT_E_ASN1_BADTAG, got %08lx\n", GetLastError());
     /* Can't be empty, either */
     SetLastError(0xdeadbeef);
     ret = CryptHashToBeSigned(0, X509_ASN_ENCODING, emptyCert,
      sizeof(emptyCert), NULL, &size);
-    ok(!ret &&
-     (GetLastError() == CRYPT_E_ASN1_CORRUPT ||
-      GetLastError() == OSS_DATA_ERROR), /* win9x */
-     "expected CRYPT_E_ASN1_CORRUPT, got %08x\n", GetLastError());
+    ok(!ret && GetLastError() == CRYPT_E_ASN1_CORRUPT,
+     "expected CRYPT_E_ASN1_CORRUPT, got %08lx\n", GetLastError());
     /* Signing a cert works */
     ret = CryptHashToBeSigned(0, X509_ASN_ENCODING, md5SignedEmptyCert,
      sizeof(md5SignedEmptyCert), NULL, &size);
-    ok(ret ||
-     broken(!ret), /* win9x */
-     "CryptHashToBeSigned failed: %08x\n", GetLastError());
+    ok(ret, "CryptHashToBeSigned failed: %08lx\n", GetLastError());
     if (ret)
     {
-        ok(size == sizeof(md5SignedEmptyCertHash), "unexpected size %d\n", size);
+        ok(size == sizeof(md5SignedEmptyCertHash), "unexpected size %ld\n", size);
     }
 
     ret = CryptHashToBeSigned(0, X509_ASN_ENCODING, md5SignedEmptyCert,
      sizeof(md5SignedEmptyCert), hash, &size);
-    ok(ret || broken(!ret && GetLastError() == NTE_BAD_ALGID) /* NT4 */,
-     "CryptHashToBeSigned failed: %08x\n", GetLastError());
-
+    ok(ret, "CryptHashToBeSigned failed: %08lx\n", GetLastError());
     ok(!memcmp(hash, md5SignedEmptyCertHash, size), "unexpected value\n");
 }
 
@@ -3537,45 +3406,45 @@ static void testVerifySubjectCert(void)
      */
     flags = 0;
     ret = CertVerifySubjectCertificateContext(NULL, NULL, &flags);
-    ok(ret, "CertVerifySubjectCertificateContext failed; %08x\n",
+    ok(ret, "CertVerifySubjectCertificateContext failed; %08lx\n",
      GetLastError());
     flags = CERT_STORE_NO_CRL_FLAG;
     ret = CertVerifySubjectCertificateContext(NULL, NULL, &flags);
     ok(!ret && GetLastError() == E_INVALIDARG,
-     "Expected E_INVALIDARG, got %08x\n", GetLastError());
+     "Expected E_INVALIDARG, got %08lx\n", GetLastError());
 
     flags = 0;
     context1 = CertCreateCertificateContext(X509_ASN_ENCODING, bigCert,
      sizeof(bigCert));
     ret = CertVerifySubjectCertificateContext(NULL, context1, &flags);
-    ok(ret, "CertVerifySubjectCertificateContext failed; %08x\n",
+    ok(ret, "CertVerifySubjectCertificateContext failed; %08lx\n",
      GetLastError());
     ret = CertVerifySubjectCertificateContext(context1, NULL, &flags);
-    ok(ret, "CertVerifySubjectCertificateContext failed; %08x\n",
+    ok(ret, "CertVerifySubjectCertificateContext failed; %08lx\n",
      GetLastError());
     ret = CertVerifySubjectCertificateContext(context1, context1, &flags);
-    ok(ret, "CertVerifySubjectCertificateContext failed; %08x\n",
+    ok(ret, "CertVerifySubjectCertificateContext failed; %08lx\n",
      GetLastError());
 
     context2 = CertCreateCertificateContext(X509_ASN_ENCODING,
      bigCertWithDifferentSubject, sizeof(bigCertWithDifferentSubject));
     SetLastError(0xdeadbeef);
     ret = CertVerifySubjectCertificateContext(context1, context2, &flags);
-    ok(ret, "CertVerifySubjectCertificateContext failed; %08x\n",
+    ok(ret, "CertVerifySubjectCertificateContext failed; %08lx\n",
      GetLastError());
     flags = CERT_STORE_REVOCATION_FLAG;
     ret = CertVerifySubjectCertificateContext(context1, context2, &flags);
-    ok(ret, "CertVerifySubjectCertificateContext failed; %08x\n",
+    ok(ret, "CertVerifySubjectCertificateContext failed; %08lx\n",
      GetLastError());
     ok(flags == (CERT_STORE_REVOCATION_FLAG | CERT_STORE_NO_CRL_FLAG),
-     "Expected CERT_STORE_REVOCATION_FLAG | CERT_STORE_NO_CRL_FLAG, got %08x\n",
+     "Expected CERT_STORE_REVOCATION_FLAG | CERT_STORE_NO_CRL_FLAG, got %08lx\n",
      flags);
     flags = CERT_STORE_SIGNATURE_FLAG;
     ret = CertVerifySubjectCertificateContext(context1, context2, &flags);
-    ok(ret, "CertVerifySubjectCertificateContext failed; %08x\n",
+    ok(ret, "CertVerifySubjectCertificateContext failed; %08lx\n",
      GetLastError());
     ok(flags == CERT_STORE_SIGNATURE_FLAG,
-     "Expected CERT_STORE_SIGNATURE_FLAG, got %08x\n", flags);
+     "Expected CERT_STORE_SIGNATURE_FLAG, got %08lx\n", flags);
     CertFreeCertificateContext(context2);
 
     CertFreeCertificateContext(context1);
@@ -3668,6 +3537,520 @@ static const BYTE rootSignedCRL[] = {
 0xd5,0xbc,0xb0,0xd5,0xa5,0x9c,0x1b,0x72,0xc3,0x0f,0xa3,0xe3,0x3c,0xf0,0xc3,
 0x91,0xe8,0x93,0x4f,0xd4,0x2f };
 
+static const BYTE ocsp_cert[] = {
+  0x30, 0x82, 0x06, 0xcd, 0x30, 0x82, 0x05, 0xb5, 0xa0, 0x03, 0x02, 0x01,
+  0x02, 0x02, 0x10, 0x08, 0x49, 0x8f, 0x6d, 0xd9, 0xef, 0xfb, 0x40, 0x55,
+  0x1e, 0xac, 0x54, 0x54, 0x87, 0xc1, 0xb1, 0x30, 0x0d, 0x06, 0x09, 0x2a,
+  0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x0b, 0x05, 0x00, 0x30, 0x4f,
+  0x31, 0x0b, 0x30, 0x09, 0x06, 0x03, 0x55, 0x04, 0x06, 0x13, 0x02, 0x55,
+  0x53, 0x31, 0x15, 0x30, 0x13, 0x06, 0x03, 0x55, 0x04, 0x0a, 0x13, 0x0c,
+  0x44, 0x69, 0x67, 0x69, 0x43, 0x65, 0x72, 0x74, 0x20, 0x49, 0x6e, 0x63,
+  0x31, 0x29, 0x30, 0x27, 0x06, 0x03, 0x55, 0x04, 0x03, 0x13, 0x20, 0x44,
+  0x69, 0x67, 0x69, 0x43, 0x65, 0x72, 0x74, 0x20, 0x54, 0x4c, 0x53, 0x20,
+  0x52, 0x53, 0x41, 0x20, 0x53, 0x48, 0x41, 0x32, 0x35, 0x36, 0x20, 0x32,
+  0x30, 0x32, 0x30, 0x20, 0x43, 0x41, 0x31, 0x30, 0x1e, 0x17, 0x0d, 0x32,
+  0x31, 0x30, 0x34, 0x32, 0x38, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x5a,
+  0x17, 0x0d, 0x32, 0x32, 0x30, 0x35, 0x32, 0x39, 0x32, 0x33, 0x35, 0x39,
+  0x35, 0x39, 0x5a, 0x30, 0x6b, 0x31, 0x0b, 0x30, 0x09, 0x06, 0x03, 0x55,
+  0x04, 0x06, 0x13, 0x02, 0x55, 0x53, 0x31, 0x13, 0x30, 0x11, 0x06, 0x03,
+  0x55, 0x04, 0x08, 0x13, 0x0a, 0x57, 0x61, 0x73, 0x68, 0x69, 0x6e, 0x67,
+  0x74, 0x6f, 0x6e, 0x31, 0x11, 0x30, 0x0f, 0x06, 0x03, 0x55, 0x04, 0x07,
+  0x13, 0x08, 0x42, 0x65, 0x6c, 0x6c, 0x65, 0x76, 0x75, 0x65, 0x31, 0x14,
+  0x30, 0x12, 0x06, 0x03, 0x55, 0x04, 0x0a, 0x13, 0x0b, 0x56, 0x61, 0x6c,
+  0x76, 0x65, 0x20, 0x43, 0x6f, 0x72, 0x70, 0x2e, 0x31, 0x1e, 0x30, 0x1c,
+  0x06, 0x03, 0x55, 0x04, 0x03, 0x0c, 0x15, 0x2a, 0x2e, 0x63, 0x6d, 0x2e,
+  0x73, 0x74, 0x65, 0x61, 0x6d, 0x70, 0x6f, 0x77, 0x65, 0x72, 0x65, 0x64,
+  0x2e, 0x63, 0x6f, 0x6d, 0x30, 0x82, 0x01, 0x22, 0x30, 0x0d, 0x06, 0x09,
+  0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x01, 0x05, 0x00, 0x03,
+  0x82, 0x01, 0x0f, 0x00, 0x30, 0x82, 0x01, 0x0a, 0x02, 0x82, 0x01, 0x01,
+  0x00, 0xcd, 0x98, 0x0c, 0x13, 0xb2, 0xb9, 0xf2, 0xa5, 0xc6, 0x52, 0xad,
+  0xf9, 0x4d, 0xcf, 0x1e, 0x2b, 0x74, 0x05, 0xd1, 0x2e, 0x95, 0xc3, 0x9d,
+  0x9b, 0x03, 0x2a, 0xc6, 0x65, 0x1e, 0xda, 0x5d, 0x57, 0x3c, 0x61, 0xa1,
+  0x3d, 0xa3, 0xe7, 0x0c, 0xdd, 0xb1, 0x6b, 0x30, 0x97, 0x99, 0xc7, 0x77,
+  0xab, 0xc2, 0xb0, 0x0a, 0x5b, 0x1c, 0x86, 0x55, 0x42, 0x25, 0xa8, 0x4e,
+  0xe2, 0x61, 0xfe, 0x88, 0x10, 0x25, 0xf5, 0x8e, 0x9c, 0x0f, 0xc7, 0xa5,
+  0xef, 0x9d, 0xd5, 0xf0, 0x2a, 0xf2, 0x31, 0x59, 0x59, 0xfc, 0xe0, 0x1f,
+  0x8f, 0xb4, 0xa1, 0x06, 0x32, 0x04, 0x37, 0x3d, 0x9d, 0xad, 0xc1, 0xe0,
+  0x00, 0x3d, 0x8d, 0x60, 0x4c, 0x9e, 0x6a, 0x1f, 0xd2, 0xf6, 0xf8, 0x86,
+  0x0b, 0x11, 0x7b, 0xfd, 0x75, 0xae, 0x20, 0x9b, 0xca, 0x52, 0x5f, 0x4e,
+  0xad, 0x2e, 0xa2, 0xce, 0xed, 0x35, 0x08, 0x23, 0xa8, 0x6e, 0x61, 0x7e,
+  0x18, 0x1a, 0x6a, 0xd9, 0xe0, 0x3b, 0x52, 0x64, 0xe9, 0x2c, 0x81, 0x8f,
+  0xbc, 0x4b, 0x48, 0xd1, 0x7a, 0x3e, 0x02, 0x9c, 0xad, 0x87, 0x73, 0xae,
+  0xaa, 0xea, 0x32, 0xfb, 0x07, 0x4e, 0xcb, 0xe9, 0xac, 0xac, 0x50, 0x0f,
+  0x49, 0xb7, 0x23, 0x3b, 0x1f, 0xb2, 0x24, 0x46, 0x78, 0x32, 0x11, 0x9e,
+  0xa2, 0xeb, 0xd8, 0x8b, 0x7e, 0x56, 0x92, 0xaa, 0x29, 0xbd, 0x55, 0xc8,
+  0x3e, 0x69, 0xe2, 0x56, 0xf4, 0x24, 0x58, 0x7b, 0xf8, 0xb0, 0xbb, 0x72,
+  0xb7, 0x38, 0x34, 0xe3, 0x0f, 0x30, 0xf4, 0xfd, 0x44, 0xf1, 0x53, 0x0f,
+  0xc5, 0x31, 0xd6, 0xad, 0x45, 0xbf, 0x57, 0x2c, 0x4c, 0xe5, 0x1a, 0xc0,
+  0x08, 0x25, 0x88, 0x2f, 0xca, 0x07, 0x2e, 0x35, 0x31, 0xa7, 0x40, 0x3a,
+  0x71, 0x1d, 0xba, 0x09, 0xf8, 0x76, 0x6c, 0x69, 0xb2, 0x89, 0xd7, 0xbe,
+  0xca, 0x9d, 0xf5, 0xd4, 0x7d, 0x02, 0x03, 0x01, 0x00, 0x01, 0xa3, 0x82,
+  0x03, 0x87, 0x30, 0x82, 0x03, 0x83, 0x30, 0x1f, 0x06, 0x03, 0x55, 0x1d,
+  0x23, 0x04, 0x18, 0x30, 0x16, 0x80, 0x14, 0xb7, 0x6b, 0xa2, 0xea, 0xa8,
+  0xaa, 0x84, 0x8c, 0x79, 0xea, 0xb4, 0xda, 0x0f, 0x98, 0xb2, 0xc5, 0x95,
+  0x76, 0xb9, 0xf4, 0x30, 0x1d, 0x06, 0x03, 0x55, 0x1d, 0x0e, 0x04, 0x16,
+  0x04, 0x14, 0x22, 0x68, 0x57, 0xb9, 0xc0, 0x1f, 0xce, 0xa6, 0xbf, 0xb6,
+  0x55, 0xcb, 0x2a, 0x1b, 0xe6, 0xe0, 0x76, 0x94, 0x07, 0x06, 0x30, 0x35,
+  0x06, 0x03, 0x55, 0x1d, 0x11, 0x04, 0x2e, 0x30, 0x2c, 0x82, 0x15, 0x2a,
+  0x2e, 0x63, 0x6d, 0x2e, 0x73, 0x74, 0x65, 0x61, 0x6d, 0x70, 0x6f, 0x77,
+  0x65, 0x72, 0x65, 0x64, 0x2e, 0x63, 0x6f, 0x6d, 0x82, 0x13, 0x63, 0x6d,
+  0x2e, 0x73, 0x74, 0x65, 0x61, 0x6d, 0x70, 0x6f, 0x77, 0x65, 0x72, 0x65,
+  0x64, 0x2e, 0x63, 0x6f, 0x6d, 0x30, 0x0e, 0x06, 0x03, 0x55, 0x1d, 0x0f,
+  0x01, 0x01, 0xff, 0x04, 0x04, 0x03, 0x02, 0x05, 0xa0, 0x30, 0x1d, 0x06,
+  0x03, 0x55, 0x1d, 0x25, 0x04, 0x16, 0x30, 0x14, 0x06, 0x08, 0x2b, 0x06,
+  0x01, 0x05, 0x05, 0x07, 0x03, 0x01, 0x06, 0x08, 0x2b, 0x06, 0x01, 0x05,
+  0x05, 0x07, 0x03, 0x02, 0x30, 0x81, 0x8b, 0x06, 0x03, 0x55, 0x1d, 0x1f,
+  0x04, 0x81, 0x83, 0x30, 0x81, 0x80, 0x30, 0x3e, 0xa0, 0x3c, 0xa0, 0x3a,
+  0x86, 0x38, 0x68, 0x74, 0x74, 0x70, 0x3a, 0x2f, 0x2f, 0x63, 0x72, 0x6c,
+  0x33, 0x2e, 0x64, 0x69, 0x67, 0x69, 0x63, 0x65, 0x72, 0x74, 0x2e, 0x63,
+  0x6f, 0x6d, 0x2f, 0x44, 0x69, 0x67, 0x69, 0x43, 0x65, 0x72, 0x74, 0x54,
+  0x4c, 0x53, 0x52, 0x53, 0x41, 0x53, 0x48, 0x41, 0x32, 0x35, 0x36, 0x32,
+  0x30, 0x32, 0x30, 0x43, 0x41, 0x31, 0x2e, 0x63, 0x72, 0x6c, 0x30, 0x3e,
+  0xa0, 0x3c, 0xa0, 0x3a, 0x86, 0x38, 0x68, 0x74, 0x74, 0x70, 0x3a, 0x2f,
+  0x2f, 0x63, 0x72, 0x6c, 0x34, 0x2e, 0x64, 0x69, 0x67, 0x69, 0x63, 0x65,
+  0x72, 0x74, 0x2e, 0x63, 0x6f, 0x6d, 0x2f, 0x44, 0x69, 0x67, 0x69, 0x43,
+  0x65, 0x72, 0x74, 0x54, 0x4c, 0x53, 0x52, 0x53, 0x41, 0x53, 0x48, 0x41,
+  0x32, 0x35, 0x36, 0x32, 0x30, 0x32, 0x30, 0x43, 0x41, 0x31, 0x2e, 0x63,
+  0x72, 0x6c, 0x30, 0x3e, 0x06, 0x03, 0x55, 0x1d, 0x20, 0x04, 0x37, 0x30,
+  0x35, 0x30, 0x33, 0x06, 0x06, 0x67, 0x81, 0x0c, 0x01, 0x02, 0x02, 0x30,
+  0x29, 0x30, 0x27, 0x06, 0x08, 0x2b, 0x06, 0x01, 0x05, 0x05, 0x07, 0x02,
+  0x01, 0x16, 0x1b, 0x68, 0x74, 0x74, 0x70, 0x3a, 0x2f, 0x2f, 0x77, 0x77,
+  0x77, 0x2e, 0x64, 0x69, 0x67, 0x69, 0x63, 0x65, 0x72, 0x74, 0x2e, 0x63,
+  0x6f, 0x6d, 0x2f, 0x43, 0x50, 0x53, 0x30, 0x7d, 0x06, 0x08, 0x2b, 0x06,
+  0x01, 0x05, 0x05, 0x07, 0x01, 0x01, 0x04, 0x71, 0x30, 0x6f, 0x30, 0x24,
+  0x06, 0x08, 0x2b, 0x06, 0x01, 0x05, 0x05, 0x07, 0x30, 0x01, 0x86, 0x18,
+  0x68, 0x74, 0x74, 0x70, 0x3a, 0x2f, 0x2f, 0x6f, 0x63, 0x73, 0x70, 0x2e,
+  0x64, 0x69, 0x67, 0x69, 0x63, 0x65, 0x72, 0x74, 0x2e, 0x63, 0x6f, 0x6d,
+  0x30, 0x47, 0x06, 0x08, 0x2b, 0x06, 0x01, 0x05, 0x05, 0x07, 0x30, 0x02,
+  0x86, 0x3b, 0x68, 0x74, 0x74, 0x70, 0x3a, 0x2f, 0x2f, 0x63, 0x61, 0x63,
+  0x65, 0x72, 0x74, 0x73, 0x2e, 0x64, 0x69, 0x67, 0x69, 0x63, 0x65, 0x72,
+  0x74, 0x2e, 0x63, 0x6f, 0x6d, 0x2f, 0x44, 0x69, 0x67, 0x69, 0x43, 0x65,
+  0x72, 0x74, 0x54, 0x4c, 0x53, 0x52, 0x53, 0x41, 0x53, 0x48, 0x41, 0x32,
+  0x35, 0x36, 0x32, 0x30, 0x32, 0x30, 0x43, 0x41, 0x31, 0x2e, 0x63, 0x72,
+  0x74, 0x30, 0x0c, 0x06, 0x03, 0x55, 0x1d, 0x13, 0x01, 0x01, 0xff, 0x04,
+  0x02, 0x30, 0x00, 0x30, 0x82, 0x01, 0x7e, 0x06, 0x0a, 0x2b, 0x06, 0x01,
+  0x04, 0x01, 0xd6, 0x79, 0x02, 0x04, 0x02, 0x04, 0x82, 0x01, 0x6e, 0x04,
+  0x82, 0x01, 0x6a, 0x01, 0x68, 0x00, 0x76, 0x00, 0x29, 0x79, 0xbe, 0xf0,
+  0x9e, 0x39, 0x39, 0x21, 0xf0, 0x56, 0x73, 0x9f, 0x63, 0xa5, 0x77, 0xe5,
+  0xbe, 0x57, 0x7d, 0x9c, 0x60, 0x0a, 0xf8, 0xf9, 0x4d, 0x5d, 0x26, 0x5c,
+  0x25, 0x5d, 0xc7, 0x84, 0x00, 0x00, 0x01, 0x79, 0x19, 0x43, 0x10, 0x65,
+  0x00, 0x00, 0x04, 0x03, 0x00, 0x47, 0x30, 0x45, 0x02, 0x21, 0x00, 0x93,
+  0x5f, 0x66, 0xe4, 0xfe, 0x76, 0x25, 0xe6, 0x07, 0x74, 0xa1, 0x8b, 0x7f,
+  0x37, 0xad, 0xb1, 0x40, 0x8f, 0x20, 0x66, 0x71, 0x57, 0x14, 0x2c, 0x2e,
+  0x28, 0xe0, 0xb2, 0x95, 0xd5, 0x19, 0xd0, 0x02, 0x20, 0x32, 0xd1, 0xa8,
+  0x59, 0xfd, 0x69, 0x24, 0x8a, 0x27, 0x7e, 0x56, 0x06, 0xce, 0x6d, 0xeb,
+  0xa1, 0xc6, 0x2a, 0xce, 0x4b, 0x37, 0xb1, 0x25, 0xca, 0x6d, 0xd3, 0x43,
+  0xf3, 0xdb, 0xb8, 0xa5, 0x5e, 0x00, 0x76, 0x00, 0x22, 0x45, 0x45, 0x07,
+  0x59, 0x55, 0x24, 0x56, 0x96, 0x3f, 0xa1, 0x2f, 0xf1, 0xf7, 0x6d, 0x86,
+  0xe0, 0x23, 0x26, 0x63, 0xad, 0xc0, 0x4b, 0x7f, 0x5d, 0xc6, 0x83, 0x5c,
+  0x6e, 0xe2, 0x0f, 0x02, 0x00, 0x00, 0x01, 0x79, 0x19, 0x43, 0x10, 0xa4,
+  0x00, 0x00, 0x04, 0x03, 0x00, 0x47, 0x30, 0x45, 0x02, 0x20, 0x3a, 0x73,
+  0x53, 0xfb, 0xbb, 0x42, 0xdf, 0x2e, 0xa2, 0xc0, 0xc5, 0x29, 0x57, 0xda,
+  0xb9, 0x0b, 0x76, 0x58, 0xb6, 0xeb, 0xd3, 0x4d, 0x10, 0x95, 0x1b, 0x58,
+  0x3e, 0x58, 0x86, 0xea, 0xec, 0xe5, 0x02, 0x21, 0x00, 0xeb, 0xb2, 0xfe,
+  0x83, 0x74, 0xdf, 0xb5, 0xfd, 0x8f, 0x74, 0x82, 0xd3, 0x8f, 0x6b, 0xce,
+  0x63, 0x8b, 0x93, 0x94, 0x08, 0x7b, 0x1c, 0x6b, 0x48, 0xae, 0x59, 0xa1,
+  0x7e, 0xec, 0x59, 0xdf, 0x56, 0x00, 0x76, 0x00, 0x51, 0xa3, 0xb0, 0xf5,
+  0xfd, 0x01, 0x79, 0x9c, 0x56, 0x6d, 0xb8, 0x37, 0x78, 0x8f, 0x0c, 0xa4,
+  0x7a, 0xcc, 0x1b, 0x27, 0xcb, 0xf7, 0x9e, 0x88, 0x42, 0x9a, 0x0d, 0xfe,
+  0xd4, 0x8b, 0x05, 0xe5, 0x00, 0x00, 0x01, 0x79, 0x19, 0x43, 0x10, 0xea,
+  0x00, 0x00, 0x04, 0x03, 0x00, 0x47, 0x30, 0x45, 0x02, 0x20, 0x68, 0x89,
+  0x8b, 0xab, 0x98, 0xd3, 0x4f, 0x41, 0x4f, 0x7d, 0x1c, 0x52, 0xbe, 0x1b,
+  0xf1, 0xbe, 0xb3, 0x68, 0x49, 0x5a, 0x91, 0x93, 0xdc, 0xac, 0xba, 0x6e,
+  0x58, 0x8d, 0xcd, 0x3c, 0x5a, 0x26, 0x02, 0x21, 0x00, 0x85, 0x09, 0xf7,
+  0x21, 0x4a, 0x66, 0x45, 0x77, 0xfe, 0xd5, 0x77, 0x25, 0xd5, 0xc5, 0x1a,
+  0xb3, 0x33, 0xd8, 0x86, 0x52, 0xcc, 0xe1, 0x26, 0x21, 0x03, 0xcf, 0x1b,
+  0x34, 0x24, 0xab, 0xc0, 0x1f, 0x30, 0x0d, 0x06, 0x09, 0x2a, 0x86, 0x48,
+  0x86, 0xf7, 0x0d, 0x01, 0x01, 0x0b, 0x05, 0x00, 0x03, 0x82, 0x01, 0x01,
+  0x00, 0xbd, 0x22, 0x40, 0xf1, 0x6d, 0xe7, 0x68, 0x89, 0x82, 0x53, 0xcd,
+  0x64, 0xed, 0x21, 0x17, 0x90, 0x3a, 0xd0, 0xa3, 0x21, 0x42, 0x40, 0x60,
+  0xf2, 0x2c, 0xf7, 0x40, 0xef, 0xc3, 0xf0, 0x22, 0x24, 0xc2, 0x51, 0x17,
+  0x9d, 0x4b, 0x10, 0x9f, 0x86, 0x1a, 0x05, 0x4c, 0x6a, 0xe0, 0x13, 0xbb,
+  0x29, 0xad, 0xf7, 0x18, 0x5f, 0x76, 0x01, 0x10, 0x8b, 0x1c, 0x29, 0x79,
+  0x23, 0x94, 0x58, 0x1a, 0xa6, 0xf8, 0xac, 0x9b, 0x2e, 0xe0, 0x70, 0x1d,
+  0x06, 0x1a, 0xe9, 0x5d, 0x24, 0x9f, 0x03, 0xff, 0x40, 0xe5, 0xc1, 0xb0,
+  0xb9, 0xa7, 0x7e, 0x19, 0x3d, 0x0c, 0x99, 0x89, 0x81, 0xe4, 0x53, 0x9b,
+  0xbd, 0x66, 0x1b, 0xba, 0x2e, 0xcd, 0xff, 0x24, 0x16, 0xd2, 0x89, 0xc9,
+  0x75, 0xdd, 0xc9, 0x78, 0x25, 0x1e, 0x11, 0x43, 0x25, 0x06, 0x15, 0xe5,
+  0xe3, 0x6b, 0xf9, 0x33, 0xee, 0x06, 0x16, 0x92, 0x8e, 0xe1, 0x8a, 0x93,
+  0x41, 0x15, 0x8b, 0xf1, 0x06, 0xf7, 0x52, 0x07, 0x25, 0xb8, 0x6a, 0xae,
+  0x46, 0x70, 0xa6, 0x81, 0x74, 0x70, 0x3c, 0x50, 0x42, 0x85, 0x65, 0x41,
+  0xdb, 0x25, 0xb3, 0x4f, 0xce, 0x25, 0xb5, 0x2b, 0x62, 0xb7, 0x2b, 0xbf,
+  0x66, 0xc4, 0xb4, 0x8a, 0x10, 0xb0, 0x50, 0x8e, 0x84, 0xf8, 0xe5, 0x28,
+  0x86, 0xda, 0x7d, 0xe6, 0x65, 0xbf, 0xb1, 0xd5, 0x7d, 0x09, 0x28, 0x61,
+  0xa3, 0x14, 0x89, 0x23, 0x35, 0x6e, 0x9c, 0x70, 0x06, 0x8b, 0xcb, 0x84,
+  0xe8, 0x70, 0x8d, 0xb9, 0xfb, 0x74, 0xcf, 0x77, 0x63, 0x00, 0x5d, 0x8c,
+  0xbb, 0x62, 0x4a, 0x2b, 0xc2, 0x8b, 0x2c, 0xd9, 0x9a, 0xa8, 0x83, 0x6f,
+  0x06, 0x2a, 0x2a, 0x30, 0x4c, 0x39, 0xb4, 0xf8, 0x7d, 0x8c, 0x5e, 0xa7,
+  0xcb, 0xce, 0x64, 0xe0, 0x27, 0xfa, 0x24, 0x42, 0xdd, 0xd1, 0x1d, 0xf8,
+  0xa9, 0xd7, 0xc4, 0x0c, 0x92
+};
+
+static const BYTE ocsp_cert_issuer[] = {
+  0x30, 0x82, 0x04, 0xbe, 0x30, 0x82, 0x03, 0xa6, 0xa0, 0x03, 0x02, 0x01,
+  0x02, 0x02, 0x10, 0x06, 0xd8, 0xd9, 0x04, 0xd5, 0x58, 0x43, 0x46, 0xf6,
+  0x8a, 0x2f, 0xa7, 0x54, 0x22, 0x7e, 0xc4, 0x30, 0x0d, 0x06, 0x09, 0x2a,
+  0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x0b, 0x05, 0x00, 0x30, 0x61,
+  0x31, 0x0b, 0x30, 0x09, 0x06, 0x03, 0x55, 0x04, 0x06, 0x13, 0x02, 0x55,
+  0x53, 0x31, 0x15, 0x30, 0x13, 0x06, 0x03, 0x55, 0x04, 0x0a, 0x13, 0x0c,
+  0x44, 0x69, 0x67, 0x69, 0x43, 0x65, 0x72, 0x74, 0x20, 0x49, 0x6e, 0x63,
+  0x31, 0x19, 0x30, 0x17, 0x06, 0x03, 0x55, 0x04, 0x0b, 0x13, 0x10, 0x77,
+  0x77, 0x77, 0x2e, 0x64, 0x69, 0x67, 0x69, 0x63, 0x65, 0x72, 0x74, 0x2e,
+  0x63, 0x6f, 0x6d, 0x31, 0x20, 0x30, 0x1e, 0x06, 0x03, 0x55, 0x04, 0x03,
+  0x13, 0x17, 0x44, 0x69, 0x67, 0x69, 0x43, 0x65, 0x72, 0x74, 0x20, 0x47,
+  0x6c, 0x6f, 0x62, 0x61, 0x6c, 0x20, 0x52, 0x6f, 0x6f, 0x74, 0x20, 0x43,
+  0x41, 0x30, 0x1e, 0x17, 0x0d, 0x32, 0x31, 0x30, 0x34, 0x31, 0x34, 0x30,
+  0x30, 0x30, 0x30, 0x30, 0x30, 0x5a, 0x17, 0x0d, 0x33, 0x31, 0x30, 0x34,
+  0x31, 0x33, 0x32, 0x33, 0x35, 0x39, 0x35, 0x39, 0x5a, 0x30, 0x4f, 0x31,
+  0x0b, 0x30, 0x09, 0x06, 0x03, 0x55, 0x04, 0x06, 0x13, 0x02, 0x55, 0x53,
+  0x31, 0x15, 0x30, 0x13, 0x06, 0x03, 0x55, 0x04, 0x0a, 0x13, 0x0c, 0x44,
+  0x69, 0x67, 0x69, 0x43, 0x65, 0x72, 0x74, 0x20, 0x49, 0x6e, 0x63, 0x31,
+  0x29, 0x30, 0x27, 0x06, 0x03, 0x55, 0x04, 0x03, 0x13, 0x20, 0x44, 0x69,
+  0x67, 0x69, 0x43, 0x65, 0x72, 0x74, 0x20, 0x54, 0x4c, 0x53, 0x20, 0x52,
+  0x53, 0x41, 0x20, 0x53, 0x48, 0x41, 0x32, 0x35, 0x36, 0x20, 0x32, 0x30,
+  0x32, 0x30, 0x20, 0x43, 0x41, 0x31, 0x30, 0x82, 0x01, 0x22, 0x30, 0x0d,
+  0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x01, 0x05,
+  0x00, 0x03, 0x82, 0x01, 0x0f, 0x00, 0x30, 0x82, 0x01, 0x0a, 0x02, 0x82,
+  0x01, 0x01, 0x00, 0xc1, 0x4b, 0xb3, 0x65, 0x47, 0x70, 0xbc, 0xdd, 0x4f,
+  0x58, 0xdb, 0xec, 0x9c, 0xed, 0xc3, 0x66, 0xe5, 0x1f, 0x31, 0x13, 0x54,
+  0xad, 0x4a, 0x66, 0x46, 0x1f, 0x2c, 0x0a, 0xec, 0x64, 0x07, 0xe5, 0x2e,
+  0xdc, 0xdc, 0xb9, 0x0a, 0x20, 0xed, 0xdf, 0xe3, 0xc4, 0xd0, 0x9e, 0x9a,
+  0xa9, 0x7a, 0x1d, 0x82, 0x88, 0xe5, 0x11, 0x56, 0xdb, 0x1e, 0x9f, 0x58,
+  0xc2, 0x51, 0xe7, 0x2c, 0x34, 0x0d, 0x2e, 0xd2, 0x92, 0xe1, 0x56, 0xcb,
+  0xf1, 0x79, 0x5f, 0xb3, 0xbb, 0x87, 0xca, 0x25, 0x03, 0x7b, 0x9a, 0x52,
+  0x41, 0x66, 0x10, 0x60, 0x4f, 0x57, 0x13, 0x49, 0xf0, 0xe8, 0x37, 0x67,
+  0x83, 0xdf, 0xe7, 0xd3, 0x4b, 0x67, 0x4c, 0x22, 0x51, 0xa6, 0xdf, 0x0e,
+  0x99, 0x10, 0xed, 0x57, 0x51, 0x74, 0x26, 0xe2, 0x7d, 0xc7, 0xca, 0x62,
+  0x2e, 0x13, 0x1b, 0x7f, 0x23, 0x88, 0x25, 0x53, 0x6f, 0xc1, 0x34, 0x58,
+  0x00, 0x8b, 0x84, 0xff, 0xf8, 0xbe, 0xa7, 0x58, 0x49, 0x22, 0x7b, 0x96,
+  0xad, 0xa2, 0x88, 0x9b, 0x15, 0xbc, 0xa0, 0x7c, 0xdf, 0xe9, 0x51, 0xa8,
+  0xd5, 0xb0, 0xed, 0x37, 0xe2, 0x36, 0xb4, 0x82, 0x4b, 0x62, 0xb5, 0x49,
+  0x9a, 0xec, 0xc7, 0x67, 0xd6, 0xe3, 0x3e, 0xf5, 0xe3, 0xd6, 0x12, 0x5e,
+  0x44, 0xf1, 0xbf, 0x71, 0x42, 0x7d, 0x58, 0x84, 0x03, 0x80, 0xb1, 0x81,
+  0x01, 0xfa, 0xf9, 0xca, 0x32, 0xbb, 0xb4, 0x8e, 0x27, 0x87, 0x27, 0xc5,
+  0x2b, 0x74, 0xd4, 0xa8, 0xd6, 0x97, 0xde, 0xc3, 0x64, 0xf9, 0xca, 0xce,
+  0x53, 0xa2, 0x56, 0xbc, 0x78, 0x17, 0x8e, 0x49, 0x03, 0x29, 0xae, 0xfb,
+  0x49, 0x4f, 0xa4, 0x15, 0xb9, 0xce, 0xf2, 0x5c, 0x19, 0x57, 0x6d, 0x6b,
+  0x79, 0xa7, 0x2b, 0xa2, 0x27, 0x20, 0x13, 0xb5, 0xd0, 0x3d, 0x40, 0xd3,
+  0x21, 0x30, 0x07, 0x93, 0xea, 0x99, 0xf5, 0x02, 0x03, 0x01, 0x00, 0x01,
+  0xa3, 0x82, 0x01, 0x82, 0x30, 0x82, 0x01, 0x7e, 0x30, 0x12, 0x06, 0x03,
+  0x55, 0x1d, 0x13, 0x01, 0x01, 0xff, 0x04, 0x08, 0x30, 0x06, 0x01, 0x01,
+  0xff, 0x02, 0x01, 0x00, 0x30, 0x1d, 0x06, 0x03, 0x55, 0x1d, 0x0e, 0x04,
+  0x16, 0x04, 0x14, 0xb7, 0x6b, 0xa2, 0xea, 0xa8, 0xaa, 0x84, 0x8c, 0x79,
+  0xea, 0xb4, 0xda, 0x0f, 0x98, 0xb2, 0xc5, 0x95, 0x76, 0xb9, 0xf4, 0x30,
+  0x1f, 0x06, 0x03, 0x55, 0x1d, 0x23, 0x04, 0x18, 0x30, 0x16, 0x80, 0x14,
+  0x03, 0xde, 0x50, 0x35, 0x56, 0xd1, 0x4c, 0xbb, 0x66, 0xf0, 0xa3, 0xe2,
+  0x1b, 0x1b, 0xc3, 0x97, 0xb2, 0x3d, 0xd1, 0x55, 0x30, 0x0e, 0x06, 0x03,
+  0x55, 0x1d, 0x0f, 0x01, 0x01, 0xff, 0x04, 0x04, 0x03, 0x02, 0x01, 0x86,
+  0x30, 0x1d, 0x06, 0x03, 0x55, 0x1d, 0x25, 0x04, 0x16, 0x30, 0x14, 0x06,
+  0x08, 0x2b, 0x06, 0x01, 0x05, 0x05, 0x07, 0x03, 0x01, 0x06, 0x08, 0x2b,
+  0x06, 0x01, 0x05, 0x05, 0x07, 0x03, 0x02, 0x30, 0x76, 0x06, 0x08, 0x2b,
+  0x06, 0x01, 0x05, 0x05, 0x07, 0x01, 0x01, 0x04, 0x6a, 0x30, 0x68, 0x30,
+  0x24, 0x06, 0x08, 0x2b, 0x06, 0x01, 0x05, 0x05, 0x07, 0x30, 0x01, 0x86,
+  0x18, 0x68, 0x74, 0x74, 0x70, 0x3a, 0x2f, 0x2f, 0x6f, 0x63, 0x73, 0x70,
+  0x2e, 0x64, 0x69, 0x67, 0x69, 0x63, 0x65, 0x72, 0x74, 0x2e, 0x63, 0x6f,
+  0x6d, 0x30, 0x40, 0x06, 0x08, 0x2b, 0x06, 0x01, 0x05, 0x05, 0x07, 0x30,
+  0x02, 0x86, 0x34, 0x68, 0x74, 0x74, 0x70, 0x3a, 0x2f, 0x2f, 0x63, 0x61,
+  0x63, 0x65, 0x72, 0x74, 0x73, 0x2e, 0x64, 0x69, 0x67, 0x69, 0x63, 0x65,
+  0x72, 0x74, 0x2e, 0x63, 0x6f, 0x6d, 0x2f, 0x44, 0x69, 0x67, 0x69, 0x43,
+  0x65, 0x72, 0x74, 0x47, 0x6c, 0x6f, 0x62, 0x61, 0x6c, 0x52, 0x6f, 0x6f,
+  0x74, 0x43, 0x41, 0x2e, 0x63, 0x72, 0x74, 0x30, 0x42, 0x06, 0x03, 0x55,
+  0x1d, 0x1f, 0x04, 0x3b, 0x30, 0x39, 0x30, 0x37, 0xa0, 0x35, 0xa0, 0x33,
+  0x86, 0x31, 0x68, 0x74, 0x74, 0x70, 0x3a, 0x2f, 0x2f, 0x63, 0x72, 0x6c,
+  0x33, 0x2e, 0x64, 0x69, 0x67, 0x69, 0x63, 0x65, 0x72, 0x74, 0x2e, 0x63,
+  0x6f, 0x6d, 0x2f, 0x44, 0x69, 0x67, 0x69, 0x43, 0x65, 0x72, 0x74, 0x47,
+  0x6c, 0x6f, 0x62, 0x61, 0x6c, 0x52, 0x6f, 0x6f, 0x74, 0x43, 0x41, 0x2e,
+  0x63, 0x72, 0x6c, 0x30, 0x3d, 0x06, 0x03, 0x55, 0x1d, 0x20, 0x04, 0x36,
+  0x30, 0x34, 0x30, 0x0b, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x86, 0xfd,
+  0x6c, 0x02, 0x01, 0x30, 0x07, 0x06, 0x05, 0x67, 0x81, 0x0c, 0x01, 0x01,
+  0x30, 0x08, 0x06, 0x06, 0x67, 0x81, 0x0c, 0x01, 0x02, 0x01, 0x30, 0x08,
+  0x06, 0x06, 0x67, 0x81, 0x0c, 0x01, 0x02, 0x02, 0x30, 0x08, 0x06, 0x06,
+  0x67, 0x81, 0x0c, 0x01, 0x02, 0x03, 0x30, 0x0d, 0x06, 0x09, 0x2a, 0x86,
+  0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x0b, 0x05, 0x00, 0x03, 0x82, 0x01,
+  0x01, 0x00, 0x80, 0x32, 0xce, 0x5e, 0x0b, 0xdd, 0x6e, 0x5a, 0x0d, 0x0a,
+  0xaf, 0xe1, 0xd6, 0x84, 0xcb, 0xc0, 0x8e, 0xfa, 0x85, 0x70, 0xed, 0xda,
+  0x5d, 0xb3, 0x0c, 0xf7, 0x2b, 0x75, 0x40, 0xfe, 0x85, 0x0a, 0xfa, 0xf3,
+  0x31, 0x78, 0xb7, 0x70, 0x4b, 0x1a, 0x89, 0x58, 0xba, 0x80, 0xbd, 0xf3,
+  0x6b, 0x1d, 0xe9, 0x7e, 0xcf, 0x0b, 0xba, 0x58, 0x9c, 0x59, 0xd4, 0x90,
+  0xd3, 0xfd, 0x6c, 0xfd, 0xd0, 0x98, 0x6d, 0xb7, 0x71, 0x82, 0x5b, 0xcf,
+  0x6d, 0x0b, 0x5a, 0x09, 0xd0, 0x7b, 0xde, 0xc4, 0x43, 0xd8, 0x2a, 0xa4,
+  0xde, 0x9e, 0x41, 0x26, 0x5f, 0xbb, 0x8f, 0x99, 0xcb, 0xdd, 0xae, 0xe1,
+  0xa8, 0x6f, 0x9f, 0x87, 0xfe, 0x74, 0xb7, 0x1f, 0x1b, 0x20, 0xab, 0xb1,
+  0x4f, 0xc6, 0xf5, 0x67, 0x5d, 0x5d, 0x9b, 0x3c, 0xe9, 0xff, 0x69, 0xf7,
+  0x61, 0x6c, 0xd6, 0xd9, 0xf3, 0xfd, 0x36, 0xc6, 0xab, 0x03, 0x88, 0x76,
+  0xd2, 0x4b, 0x2e, 0x75, 0x86, 0xe3, 0xfc, 0xd8, 0x55, 0x7d, 0x26, 0xc2,
+  0x11, 0x77, 0xdf, 0x3e, 0x02, 0xb6, 0x7c, 0xf3, 0xab, 0x7b, 0x7a, 0x86,
+  0x36, 0x6f, 0xb8, 0xf7, 0xd8, 0x93, 0x71, 0xcf, 0x86, 0xdf, 0x73, 0x30,
+  0xfa, 0x7b, 0xab, 0xed, 0x2a, 0x59, 0xc8, 0x42, 0x84, 0x3b, 0x11, 0x17,
+  0x1a, 0x52, 0xf3, 0xc9, 0x0e, 0x14, 0x7d, 0xa2, 0x5b, 0x72, 0x67, 0xba,
+  0x71, 0xed, 0x57, 0x47, 0x66, 0xc5, 0xb8, 0x02, 0x4a, 0x65, 0x34, 0x5e,
+  0x8b, 0xd0, 0x2a, 0x3c, 0x20, 0x9c, 0x51, 0x99, 0x4c, 0xe7, 0x52, 0x9e,
+  0xf7, 0x6b, 0x11, 0x2b, 0x0d, 0x92, 0x7e, 0x1d, 0xe8, 0x8a, 0xeb, 0x36,
+  0x16, 0x43, 0x87, 0xea, 0x2a, 0x63, 0xbf, 0x75, 0x3f, 0xeb, 0xde, 0xc4,
+  0x03, 0xbb, 0x0a, 0x3c, 0xf7, 0x30, 0xef, 0xeb, 0xaf, 0x4c, 0xfc, 0x8b,
+  0x36, 0x10, 0x73, 0x3e, 0xf3, 0xa4
+};
+
+static const BYTE ocsp_cert_revoked[] = {
+  0x30, 0x82, 0x06, 0x86, 0x30, 0x82, 0x05, 0x6e, 0xa0, 0x03, 0x02, 0x01,
+  0x02, 0x02, 0x10, 0x0d, 0x2e, 0x67, 0xa2, 0x98, 0x85, 0x3b, 0x9a, 0x54,
+  0x52, 0xe3, 0xa2, 0x85, 0xa4, 0x57, 0x2f, 0x30, 0x0d, 0x06, 0x09, 0x2a,
+  0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x0b, 0x05, 0x00, 0x30, 0x59,
+  0x31, 0x0b, 0x30, 0x09, 0x06, 0x03, 0x55, 0x04, 0x06, 0x13, 0x02, 0x55,
+  0x53, 0x31, 0x15, 0x30, 0x13, 0x06, 0x03, 0x55, 0x04, 0x0a, 0x13, 0x0c,
+  0x44, 0x69, 0x67, 0x69, 0x43, 0x65, 0x72, 0x74, 0x20, 0x49, 0x6e, 0x63,
+  0x31, 0x33, 0x30, 0x31, 0x06, 0x03, 0x55, 0x04, 0x03, 0x13, 0x2a, 0x52,
+  0x61, 0x70, 0x69, 0x64, 0x53, 0x53, 0x4c, 0x20, 0x54, 0x4c, 0x53, 0x20,
+  0x44, 0x56, 0x20, 0x52, 0x53, 0x41, 0x20, 0x4d, 0x69, 0x78, 0x65, 0x64,
+  0x20, 0x53, 0x48, 0x41, 0x32, 0x35, 0x36, 0x20, 0x32, 0x30, 0x32, 0x30,
+  0x20, 0x43, 0x41, 0x2d, 0x31, 0x30, 0x1e, 0x17, 0x0d, 0x32, 0x31, 0x31,
+  0x30, 0x32, 0x37, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x5a, 0x17, 0x0d,
+  0x32, 0x32, 0x31, 0x30, 0x32, 0x37, 0x32, 0x33, 0x35, 0x39, 0x35, 0x39,
+  0x5a, 0x30, 0x1d, 0x31, 0x1b, 0x30, 0x19, 0x06, 0x03, 0x55, 0x04, 0x03,
+  0x13, 0x12, 0x72, 0x65, 0x76, 0x6f, 0x6b, 0x65, 0x64, 0x2e, 0x62, 0x61,
+  0x64, 0x73, 0x73, 0x6c, 0x2e, 0x63, 0x6f, 0x6d, 0x30, 0x82, 0x01, 0x22,
+  0x30, 0x0d, 0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01,
+  0x01, 0x05, 0x00, 0x03, 0x82, 0x01, 0x0f, 0x00, 0x30, 0x82, 0x01, 0x0a,
+  0x02, 0x82, 0x01, 0x01, 0x00, 0xb0, 0x76, 0x2d, 0x55, 0x66, 0xdc, 0x72,
+  0x8a, 0xa0, 0x9e, 0x85, 0x92, 0x38, 0x7f, 0x5b, 0xe1, 0x93, 0x8d, 0xad,
+  0x06, 0xc8, 0xad, 0xe9, 0x89, 0xb4, 0xef, 0x1e, 0x77, 0x5b, 0x33, 0x45,
+  0x16, 0x60, 0x7d, 0x33, 0x38, 0x68, 0x04, 0xd7, 0xc9, 0x83, 0x42, 0x83,
+  0xd9, 0x30, 0x4b, 0x54, 0x49, 0x14, 0xca, 0xed, 0xbe, 0x0c, 0x76, 0xba,
+  0x5f, 0xa6, 0x5c, 0x33, 0x78, 0x3f, 0x39, 0xf2, 0x49, 0xa8, 0x88, 0x32,
+  0xee, 0x53, 0x21, 0x14, 0xd3, 0xaa, 0x5c, 0x58, 0x3c, 0x39, 0xcc, 0xf7,
+  0x80, 0xb1, 0x27, 0x1f, 0x54, 0x79, 0x7b, 0x6c, 0x8b, 0xff, 0x41, 0xaa,
+  0x39, 0x24, 0x95, 0x5f, 0x71, 0xbc, 0x49, 0xbf, 0x39, 0x3b, 0xa5, 0xd5,
+  0xe1, 0xa5, 0xde, 0x1d, 0x40, 0x81, 0x25, 0xdc, 0x8a, 0x47, 0x82, 0xfe,
+  0xcd, 0x7c, 0x4b, 0x2c, 0x04, 0xbb, 0xd3, 0x27, 0x56, 0x51, 0xa0, 0x61,
+  0xf2, 0xd2, 0xcb, 0x55, 0x08, 0x25, 0x2a, 0x85, 0xdb, 0x2c, 0x06, 0x8d,
+  0x0d, 0x61, 0xc2, 0x5b, 0x3e, 0x9b, 0x46, 0xdc, 0x58, 0xff, 0x13, 0x27,
+  0xbe, 0x0a, 0x44, 0x1e, 0x68, 0xfe, 0xe1, 0xf6, 0xb7, 0xde, 0x9f, 0x8e,
+  0x6c, 0xc4, 0xb5, 0x19, 0xfa, 0xd7, 0xd3, 0x4f, 0x55, 0xa8, 0x61, 0x79,
+  0xdb, 0x61, 0x2f, 0x6a, 0x9c, 0x2c, 0xf1, 0xc4, 0x81, 0xbb, 0x9e, 0xd2,
+  0x02, 0x05, 0xba, 0x9c, 0x14, 0xa0, 0xf9, 0xf3, 0x54, 0x79, 0x7d, 0x69,
+  0xd9, 0xba, 0x66, 0x1c, 0x87, 0x95, 0x41, 0x50, 0x0e, 0xf9, 0x5e, 0xe1,
+  0xb7, 0xbd, 0xf5, 0x31, 0x24, 0xc5, 0x21, 0x21, 0x03, 0x8a, 0xcf, 0x6d,
+  0x78, 0x58, 0xde, 0xd9, 0x30, 0x7d, 0x03, 0x42, 0x52, 0xd6, 0xb0, 0x1b,
+  0xb9, 0xc9, 0x54, 0x1b, 0x5a, 0xe8, 0xc8, 0x53, 0xf0, 0xac, 0x2b, 0x82,
+  0x10, 0x27, 0xa6, 0xa9, 0x70, 0x25, 0xae, 0xf8, 0xa7, 0x02, 0x03, 0x01,
+  0x00, 0x01, 0xa3, 0x82, 0x03, 0x84, 0x30, 0x82, 0x03, 0x80, 0x30, 0x1f,
+  0x06, 0x03, 0x55, 0x1d, 0x23, 0x04, 0x18, 0x30, 0x16, 0x80, 0x14, 0xa4,
+  0x8d, 0xe5, 0xbe, 0x7c, 0x79, 0xe4, 0x70, 0x23, 0x6d, 0x2e, 0x29, 0x34,
+  0xad, 0x23, 0x58, 0xdc, 0xf5, 0x31, 0x7f, 0x30, 0x1d, 0x06, 0x03, 0x55,
+  0x1d, 0x0e, 0x04, 0x16, 0x04, 0x14, 0xb0, 0xc8, 0xce, 0x20, 0xb2, 0x78,
+  0xcc, 0x1d, 0x23, 0xef, 0xf0, 0xfe, 0xd6, 0x0e, 0x29, 0x4b, 0xac, 0x15,
+  0x72, 0x3c, 0x30, 0x1d, 0x06, 0x03, 0x55, 0x1d, 0x11, 0x04, 0x16, 0x30,
+  0x14, 0x82, 0x12, 0x72, 0x65, 0x76, 0x6f, 0x6b, 0x65, 0x64, 0x2e, 0x62,
+  0x61, 0x64, 0x73, 0x73, 0x6c, 0x2e, 0x63, 0x6f, 0x6d, 0x30, 0x0e, 0x06,
+  0x03, 0x55, 0x1d, 0x0f, 0x01, 0x01, 0xff, 0x04, 0x04, 0x03, 0x02, 0x05,
+  0xa0, 0x30, 0x1d, 0x06, 0x03, 0x55, 0x1d, 0x25, 0x04, 0x16, 0x30, 0x14,
+  0x06, 0x08, 0x2b, 0x06, 0x01, 0x05, 0x05, 0x07, 0x03, 0x01, 0x06, 0x08,
+  0x2b, 0x06, 0x01, 0x05, 0x05, 0x07, 0x03, 0x02, 0x30, 0x81, 0x9b, 0x06,
+  0x03, 0x55, 0x1d, 0x1f, 0x04, 0x81, 0x93, 0x30, 0x81, 0x90, 0x30, 0x46,
+  0xa0, 0x44, 0xa0, 0x42, 0x86, 0x40, 0x68, 0x74, 0x74, 0x70, 0x3a, 0x2f,
+  0x2f, 0x63, 0x72, 0x6c, 0x33, 0x2e, 0x64, 0x69, 0x67, 0x69, 0x63, 0x65,
+  0x72, 0x74, 0x2e, 0x63, 0x6f, 0x6d, 0x2f, 0x52, 0x61, 0x70, 0x69, 0x64,
+  0x53, 0x53, 0x4c, 0x54, 0x4c, 0x53, 0x44, 0x56, 0x52, 0x53, 0x41, 0x4d,
+  0x69, 0x78, 0x65, 0x64, 0x53, 0x48, 0x41, 0x32, 0x35, 0x36, 0x32, 0x30,
+  0x32, 0x30, 0x43, 0x41, 0x2d, 0x31, 0x2e, 0x63, 0x72, 0x6c, 0x30, 0x46,
+  0xa0, 0x44, 0xa0, 0x42, 0x86, 0x40, 0x68, 0x74, 0x74, 0x70, 0x3a, 0x2f,
+  0x2f, 0x63, 0x72, 0x6c, 0x34, 0x2e, 0x64, 0x69, 0x67, 0x69, 0x63, 0x65,
+  0x72, 0x74, 0x2e, 0x63, 0x6f, 0x6d, 0x2f, 0x52, 0x61, 0x70, 0x69, 0x64,
+  0x53, 0x53, 0x4c, 0x54, 0x4c, 0x53, 0x44, 0x56, 0x52, 0x53, 0x41, 0x4d,
+  0x69, 0x78, 0x65, 0x64, 0x53, 0x48, 0x41, 0x32, 0x35, 0x36, 0x32, 0x30,
+  0x32, 0x30, 0x43, 0x41, 0x2d, 0x31, 0x2e, 0x63, 0x72, 0x6c, 0x30, 0x3e,
+  0x06, 0x03, 0x55, 0x1d, 0x20, 0x04, 0x37, 0x30, 0x35, 0x30, 0x33, 0x06,
+  0x06, 0x67, 0x81, 0x0c, 0x01, 0x02, 0x01, 0x30, 0x29, 0x30, 0x27, 0x06,
+  0x08, 0x2b, 0x06, 0x01, 0x05, 0x05, 0x07, 0x02, 0x01, 0x16, 0x1b, 0x68,
+  0x74, 0x74, 0x70, 0x3a, 0x2f, 0x2f, 0x77, 0x77, 0x77, 0x2e, 0x64, 0x69,
+  0x67, 0x69, 0x63, 0x65, 0x72, 0x74, 0x2e, 0x63, 0x6f, 0x6d, 0x2f, 0x43,
+  0x50, 0x53, 0x30, 0x81, 0x85, 0x06, 0x08, 0x2b, 0x06, 0x01, 0x05, 0x05,
+  0x07, 0x01, 0x01, 0x04, 0x79, 0x30, 0x77, 0x30, 0x24, 0x06, 0x08, 0x2b,
+  0x06, 0x01, 0x05, 0x05, 0x07, 0x30, 0x01, 0x86, 0x18, 0x68, 0x74, 0x74,
+  0x70, 0x3a, 0x2f, 0x2f, 0x6f, 0x63, 0x73, 0x70, 0x2e, 0x64, 0x69, 0x67,
+  0x69, 0x63, 0x65, 0x72, 0x74, 0x2e, 0x63, 0x6f, 0x6d, 0x30, 0x4f, 0x06,
+  0x08, 0x2b, 0x06, 0x01, 0x05, 0x05, 0x07, 0x30, 0x02, 0x86, 0x43, 0x68,
+  0x74, 0x74, 0x70, 0x3a, 0x2f, 0x2f, 0x63, 0x61, 0x63, 0x65, 0x72, 0x74,
+  0x73, 0x2e, 0x64, 0x69, 0x67, 0x69, 0x63, 0x65, 0x72, 0x74, 0x2e, 0x63,
+  0x6f, 0x6d, 0x2f, 0x52, 0x61, 0x70, 0x69, 0x64, 0x53, 0x53, 0x4c, 0x54,
+  0x4c, 0x53, 0x44, 0x56, 0x52, 0x53, 0x41, 0x4d, 0x69, 0x78, 0x65, 0x64,
+  0x53, 0x48, 0x41, 0x32, 0x35, 0x36, 0x32, 0x30, 0x32, 0x30, 0x43, 0x41,
+  0x2d, 0x31, 0x2e, 0x63, 0x72, 0x74, 0x30, 0x09, 0x06, 0x03, 0x55, 0x1d,
+  0x13, 0x04, 0x02, 0x30, 0x00, 0x30, 0x82, 0x01, 0x7d, 0x06, 0x0a, 0x2b,
+  0x06, 0x01, 0x04, 0x01, 0xd6, 0x79, 0x02, 0x04, 0x02, 0x04, 0x82, 0x01,
+  0x6d, 0x04, 0x82, 0x01, 0x69, 0x01, 0x67, 0x00, 0x76, 0x00, 0x29, 0x79,
+  0xbe, 0xf0, 0x9e, 0x39, 0x39, 0x21, 0xf0, 0x56, 0x73, 0x9f, 0x63, 0xa5,
+  0x77, 0xe5, 0xbe, 0x57, 0x7d, 0x9c, 0x60, 0x0a, 0xf8, 0xf9, 0x4d, 0x5d,
+  0x26, 0x5c, 0x25, 0x5d, 0xc7, 0x84, 0x00, 0x00, 0x01, 0x7c, 0xc3, 0xa4,
+  0xf7, 0x37, 0x00, 0x00, 0x04, 0x03, 0x00, 0x47, 0x30, 0x45, 0x02, 0x20,
+  0x77, 0xb0, 0x79, 0x18, 0xf3, 0xde, 0x34, 0x70, 0xfa, 0xf2, 0x1b, 0xc2,
+  0x32, 0x39, 0xc8, 0xc8, 0x95, 0xb0, 0xc8, 0x7a, 0x8f, 0x62, 0x23, 0x58,
+  0xdd, 0xad, 0xf9, 0x1b, 0xbe, 0x84, 0x95, 0xed, 0x02, 0x21, 0x00, 0xdd,
+  0x25, 0x68, 0x47, 0xa3, 0x84, 0x5f, 0x95, 0xb1, 0xea, 0xe7, 0xbc, 0x0a,
+  0x09, 0x92, 0xf9, 0x5a, 0x56, 0x72, 0x31, 0xec, 0x07, 0xd6, 0xc6, 0x97,
+  0x4d, 0x4c, 0x7b, 0x90, 0x75, 0x64, 0xae, 0x00, 0x76, 0x00, 0x51, 0xa3,
+  0xb0, 0xf5, 0xfd, 0x01, 0x79, 0x9c, 0x56, 0x6d, 0xb8, 0x37, 0x78, 0x8f,
+  0x0c, 0xa4, 0x7a, 0xcc, 0x1b, 0x27, 0xcb, 0xf7, 0x9e, 0x88, 0x42, 0x9a,
+  0x0d, 0xfe, 0xd4, 0x8b, 0x05, 0xe5, 0x00, 0x00, 0x01, 0x7c, 0xc3, 0xa4,
+  0xf7, 0x64, 0x00, 0x00, 0x04, 0x03, 0x00, 0x47, 0x30, 0x45, 0x02, 0x20,
+  0x4c, 0x22, 0xff, 0x65, 0x39, 0x6b, 0x7e, 0x7b, 0x15, 0x21, 0x79, 0x44,
+  0xc2, 0xeb, 0xb8, 0x4c, 0x2a, 0xc9, 0xa5, 0xc7, 0xac, 0xce, 0x5f, 0x6a,
+  0x5d, 0xe8, 0xb7, 0x24, 0xc5, 0x76, 0xec, 0x19, 0x02, 0x21, 0x00, 0x94,
+  0x5e, 0x02, 0xee, 0x14, 0x60, 0x80, 0x96, 0xbc, 0x0e, 0x39, 0x16, 0x01,
+  0xa8, 0x37, 0x9f, 0x15, 0xb9, 0xb9, 0xba, 0x0f, 0xa2, 0x0c, 0x5a, 0x17,
+  0x90, 0xa5, 0xe1, 0x33, 0x36, 0x45, 0xf2, 0x00, 0x75, 0x00, 0x41, 0xc8,
+  0xca, 0xb1, 0xdf, 0x22, 0x46, 0x4a, 0x10, 0xc6, 0xa1, 0x3a, 0x09, 0x42,
+  0x87, 0x5e, 0x4e, 0x31, 0x8b, 0x1b, 0x03, 0xeb, 0xeb, 0x4b, 0xc7, 0x68,
+  0xf0, 0x90, 0x62, 0x96, 0x06, 0xf6, 0x00, 0x00, 0x01, 0x7c, 0xc3, 0xa4,
+  0xf6, 0xdf, 0x00, 0x00, 0x04, 0x03, 0x00, 0x46, 0x30, 0x44, 0x02, 0x20,
+  0x68, 0x8a, 0x5f, 0x50, 0xb7, 0x76, 0xda, 0x7e, 0x34, 0x32, 0xa5, 0x77,
+  0x02, 0xa6, 0xfa, 0xa7, 0x87, 0xbb, 0xdb, 0x41, 0x5c, 0x80, 0x40, 0x2c,
+  0x05, 0xe5, 0x09, 0xdd, 0x3f, 0xcc, 0x6d, 0x9f, 0x02, 0x20, 0x7b, 0x1d,
+  0x64, 0x48, 0x61, 0x19, 0x75, 0xb6, 0x37, 0xd1, 0x3c, 0x1e, 0x38, 0x78,
+  0x86, 0x7a, 0xf2, 0x79, 0x14, 0x08, 0x42, 0xe8, 0xdd, 0x0f, 0xff, 0x38,
+  0x3a, 0x3c, 0x36, 0xd9, 0xbf, 0xd9, 0x30, 0x0d, 0x06, 0x09, 0x2a, 0x86,
+  0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x0b, 0x05, 0x00, 0x03, 0x82, 0x01,
+  0x01, 0x00, 0xd5, 0x8c, 0xbd, 0xbe, 0xe4, 0xdc, 0x94, 0xa4, 0xb7, 0xf3,
+  0x49, 0xaf, 0xc4, 0x99, 0x26, 0xda, 0x27, 0x68, 0xda, 0xe8, 0xb8, 0xc1,
+  0xba, 0xc6, 0x30, 0xb6, 0x16, 0xaa, 0x50, 0xfe, 0xf4, 0x77, 0x07, 0xeb,
+  0x99, 0xf2, 0xda, 0xdd, 0x77, 0x1d, 0x19, 0x82, 0xf7, 0x24, 0x2a, 0x3b,
+  0xa0, 0x63, 0xe0, 0xdb, 0x09, 0xbe, 0x10, 0x7f, 0xc5, 0x1f, 0x81, 0xba,
+  0xaf, 0x9e, 0x49, 0xce, 0x32, 0x30, 0x49, 0x17, 0x8f, 0x74, 0xc6, 0xd6,
+  0xcd, 0x6a, 0xd8, 0x3b, 0x47, 0x7b, 0xf0, 0xe0, 0x0c, 0xbb, 0xc0, 0x8e,
+  0x3a, 0x1d, 0xa3, 0x7f, 0x92, 0xac, 0x7e, 0x8d, 0xdc, 0xa4, 0xb5, 0x30,
+  0x2a, 0x57, 0x13, 0x23, 0xa7, 0xee, 0x25, 0xc6, 0x37, 0xed, 0x48, 0xb2,
+  0x4a, 0xd0, 0x01, 0xfc, 0x85, 0xe5, 0xc1, 0xe2, 0xe0, 0xdc, 0x8c, 0x61,
+  0x74, 0xaa, 0xaf, 0x68, 0x28, 0x26, 0x45, 0x94, 0xa3, 0xb1, 0x4c, 0xc9,
+  0x5c, 0xc7, 0x92, 0xa2, 0x6c, 0x4a, 0x80, 0x6f, 0xdd, 0x48, 0xfa, 0x4f,
+  0x04, 0xb2, 0x4a, 0x73, 0x17, 0xf2, 0xf9, 0x1e, 0x8e, 0x5c, 0xe9, 0x23,
+  0xec, 0x53, 0xff, 0x3e, 0xc7, 0x8a, 0xb6, 0x18, 0x89, 0xbc, 0x77, 0x45,
+  0x67, 0x4b, 0x9a, 0x73, 0x75, 0x6b, 0x57, 0xc8, 0xc0, 0x6a, 0xcb, 0x84,
+  0x1d, 0xf4, 0xed, 0xef, 0x70, 0x16, 0x77, 0x8e, 0xf3, 0x1a, 0x8e, 0xbb,
+  0x95, 0xf3, 0xeb, 0xf8, 0x5a, 0xe4, 0xa9, 0xb1, 0xdf, 0x1d, 0x36, 0xab,
+  0x0a, 0xdd, 0x91, 0xaf, 0x2d, 0x71, 0x3c, 0xab, 0x97, 0x18, 0x03, 0xdc,
+  0x5c, 0x1a, 0xa9, 0xb1, 0xdb, 0xb6, 0x48, 0x40, 0xc7, 0x19, 0xa7, 0x81,
+  0x14, 0x0b, 0x0d, 0xce, 0x38, 0x6f, 0xda, 0xcf, 0xce, 0x0f, 0x64, 0x13,
+  0x28, 0xf3, 0x4d, 0x67, 0x1b, 0x2c, 0xd1, 0x16, 0x54, 0x19, 0x6f, 0xaa,
+  0x08, 0x54, 0xa3, 0x4d, 0x67, 0x64
+};
+
+static const BYTE ocsp_cert_revoked_issuer[] = {
+  0x30, 0x82, 0x05, 0x51, 0x30, 0x82, 0x04, 0x39, 0xa0, 0x03, 0x02, 0x01,
+  0x02, 0x02, 0x10, 0x07, 0x98, 0x36, 0x03, 0xad, 0xe3, 0x99, 0x08, 0x21,
+  0x9c, 0xa0, 0x0c, 0x27, 0xbc, 0x8a, 0x6c, 0x30, 0x0d, 0x06, 0x09, 0x2a,
+  0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x0b, 0x05, 0x00, 0x30, 0x61,
+  0x31, 0x0b, 0x30, 0x09, 0x06, 0x03, 0x55, 0x04, 0x06, 0x13, 0x02, 0x55,
+  0x53, 0x31, 0x15, 0x30, 0x13, 0x06, 0x03, 0x55, 0x04, 0x0a, 0x13, 0x0c,
+  0x44, 0x69, 0x67, 0x69, 0x43, 0x65, 0x72, 0x74, 0x20, 0x49, 0x6e, 0x63,
+  0x31, 0x19, 0x30, 0x17, 0x06, 0x03, 0x55, 0x04, 0x0b, 0x13, 0x10, 0x77,
+  0x77, 0x77, 0x2e, 0x64, 0x69, 0x67, 0x69, 0x63, 0x65, 0x72, 0x74, 0x2e,
+  0x63, 0x6f, 0x6d, 0x31, 0x20, 0x30, 0x1e, 0x06, 0x03, 0x55, 0x04, 0x03,
+  0x13, 0x17, 0x44, 0x69, 0x67, 0x69, 0x43, 0x65, 0x72, 0x74, 0x20, 0x47,
+  0x6c, 0x6f, 0x62, 0x61, 0x6c, 0x20, 0x52, 0x6f, 0x6f, 0x74, 0x20, 0x43,
+  0x41, 0x30, 0x1e, 0x17, 0x0d, 0x32, 0x30, 0x30, 0x37, 0x31, 0x36, 0x31,
+  0x32, 0x32, 0x35, 0x32, 0x37, 0x5a, 0x17, 0x0d, 0x32, 0x33, 0x30, 0x35,
+  0x33, 0x31, 0x32, 0x33, 0x35, 0x39, 0x35, 0x39, 0x5a, 0x30, 0x59, 0x31,
+  0x0b, 0x30, 0x09, 0x06, 0x03, 0x55, 0x04, 0x06, 0x13, 0x02, 0x55, 0x53,
+  0x31, 0x15, 0x30, 0x13, 0x06, 0x03, 0x55, 0x04, 0x0a, 0x13, 0x0c, 0x44,
+  0x69, 0x67, 0x69, 0x43, 0x65, 0x72, 0x74, 0x20, 0x49, 0x6e, 0x63, 0x31,
+  0x33, 0x30, 0x31, 0x06, 0x03, 0x55, 0x04, 0x03, 0x13, 0x2a, 0x52, 0x61,
+  0x70, 0x69, 0x64, 0x53, 0x53, 0x4c, 0x20, 0x54, 0x4c, 0x53, 0x20, 0x44,
+  0x56, 0x20, 0x52, 0x53, 0x41, 0x20, 0x4d, 0x69, 0x78, 0x65, 0x64, 0x20,
+  0x53, 0x48, 0x41, 0x32, 0x35, 0x36, 0x20, 0x32, 0x30, 0x32, 0x30, 0x20,
+  0x43, 0x41, 0x2d, 0x31, 0x30, 0x82, 0x01, 0x22, 0x30, 0x0d, 0x06, 0x09,
+  0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x01, 0x05, 0x00, 0x03,
+  0x82, 0x01, 0x0f, 0x00, 0x30, 0x82, 0x01, 0x0a, 0x02, 0x82, 0x01, 0x01,
+  0x00, 0xda, 0x6e, 0x43, 0x55, 0x55, 0x99, 0x7b, 0xd9, 0x95, 0xa2, 0x66,
+  0xc4, 0x65, 0x58, 0xa2, 0xd0, 0x0c, 0x17, 0x3a, 0x00, 0xa6, 0x88, 0x5b,
+  0x24, 0x07, 0x8d, 0xa7, 0x33, 0x7e, 0xe3, 0xd2, 0xdb, 0x82, 0x4a, 0xcc,
+  0x2e, 0xfd, 0xad, 0x6e, 0x52, 0x08, 0xf0, 0x7e, 0x37, 0xbc, 0xde, 0xd4,
+  0x16, 0xe9, 0xb1, 0x57, 0xb9, 0x49, 0x74, 0xfc, 0x0b, 0x3f, 0x6d, 0xaa,
+  0x6b, 0x4b, 0x15, 0xf5, 0xcc, 0x02, 0xaf, 0xa4, 0x19, 0xa0, 0x61, 0x28,
+  0x6d, 0xd6, 0xbe, 0xe2, 0x9b, 0x9f, 0x1b, 0x46, 0x92, 0x7c, 0x74, 0x02,
+  0x42, 0x1b, 0xa5, 0x6a, 0xa2, 0xa9, 0x3d, 0xc6, 0x18, 0x38, 0xf8, 0xd3,
+  0xc2, 0x0a, 0x89, 0x03, 0xce, 0x00, 0x15, 0x88, 0xfc, 0x97, 0xf2, 0x1e,
+  0x43, 0xc9, 0xf4, 0xd5, 0x5c, 0x82, 0xba, 0xb3, 0x08, 0x1c, 0x0e, 0x3b,
+  0xf2, 0xdb, 0x36, 0x1b, 0xa1, 0x86, 0xb4, 0x4c, 0x74, 0xb9, 0xc9, 0xc4,
+  0x7d, 0x5d, 0x90, 0x1d, 0x42, 0xfa, 0xe0, 0x40, 0xb6, 0xca, 0x1e, 0xf2,
+  0x6d, 0xba, 0x28, 0xe6, 0xff, 0x27, 0x15, 0x65, 0x78, 0x97, 0x1f, 0xf1,
+  0x71, 0xfc, 0x68, 0xc6, 0x41, 0x53, 0x56, 0x70, 0x08, 0x46, 0x01, 0xeb,
+  0x1f, 0x6b, 0xd4, 0x74, 0xe8, 0x95, 0xf6, 0xc9, 0x4e, 0x8b, 0x1d, 0xf3,
+  0xe4, 0xa3, 0xec, 0xda, 0xb2, 0xb6, 0x6d, 0xb6, 0x9c, 0x87, 0xc4, 0xa1,
+  0xe4, 0x64, 0xa4, 0x82, 0x9d, 0x87, 0x46, 0x84, 0xbf, 0x9b, 0x2d, 0x2d,
+  0x0a, 0xad, 0x6f, 0x8f, 0x22, 0xc9, 0x78, 0xfd, 0x1a, 0x37, 0x03, 0xdd,
+  0xde, 0xb9, 0x39, 0x3b, 0xc2, 0xe2, 0x7d, 0xf2, 0xde, 0xbf, 0xd8, 0xfe,
+  0x50, 0xa6, 0x68, 0xd2, 0xdb, 0x74, 0x56, 0xf4, 0xcb, 0x91, 0xd1, 0xa6,
+  0x48, 0xde, 0x21, 0xd6, 0x65, 0x58, 0xe8, 0x39, 0xc6, 0x7c, 0xec, 0x29,
+  0xd4, 0x2e, 0x52, 0x2b, 0x43, 0x02, 0x03, 0x01, 0x00, 0x01, 0xa3, 0x82,
+  0x02, 0x0b, 0x30, 0x82, 0x02, 0x07, 0x30, 0x1d, 0x06, 0x03, 0x55, 0x1d,
+  0x0e, 0x04, 0x16, 0x04, 0x14, 0xa4, 0x8d, 0xe5, 0xbe, 0x7c, 0x79, 0xe4,
+  0x70, 0x23, 0x6d, 0x2e, 0x29, 0x34, 0xad, 0x23, 0x58, 0xdc, 0xf5, 0x31,
+  0x7f, 0x30, 0x1f, 0x06, 0x03, 0x55, 0x1d, 0x23, 0x04, 0x18, 0x30, 0x16,
+  0x80, 0x14, 0x03, 0xde, 0x50, 0x35, 0x56, 0xd1, 0x4c, 0xbb, 0x66, 0xf0,
+  0xa3, 0xe2, 0x1b, 0x1b, 0xc3, 0x97, 0xb2, 0x3d, 0xd1, 0x55, 0x30, 0x0e,
+  0x06, 0x03, 0x55, 0x1d, 0x0f, 0x01, 0x01, 0xff, 0x04, 0x04, 0x03, 0x02,
+  0x01, 0x86, 0x30, 0x1d, 0x06, 0x03, 0x55, 0x1d, 0x25, 0x04, 0x16, 0x30,
+  0x14, 0x06, 0x08, 0x2b, 0x06, 0x01, 0x05, 0x05, 0x07, 0x03, 0x01, 0x06,
+  0x08, 0x2b, 0x06, 0x01, 0x05, 0x05, 0x07, 0x03, 0x02, 0x30, 0x12, 0x06,
+  0x03, 0x55, 0x1d, 0x13, 0x01, 0x01, 0xff, 0x04, 0x08, 0x30, 0x06, 0x01,
+  0x01, 0xff, 0x02, 0x01, 0x00, 0x30, 0x34, 0x06, 0x08, 0x2b, 0x06, 0x01,
+  0x05, 0x05, 0x07, 0x01, 0x01, 0x04, 0x28, 0x30, 0x26, 0x30, 0x24, 0x06,
+  0x08, 0x2b, 0x06, 0x01, 0x05, 0x05, 0x07, 0x30, 0x01, 0x86, 0x18, 0x68,
+  0x74, 0x74, 0x70, 0x3a, 0x2f, 0x2f, 0x6f, 0x63, 0x73, 0x70, 0x2e, 0x64,
+  0x69, 0x67, 0x69, 0x63, 0x65, 0x72, 0x74, 0x2e, 0x63, 0x6f, 0x6d, 0x30,
+  0x7b, 0x06, 0x03, 0x55, 0x1d, 0x1f, 0x04, 0x74, 0x30, 0x72, 0x30, 0x37,
+  0xa0, 0x35, 0xa0, 0x33, 0x86, 0x31, 0x68, 0x74, 0x74, 0x70, 0x3a, 0x2f,
+  0x2f, 0x63, 0x72, 0x6c, 0x33, 0x2e, 0x64, 0x69, 0x67, 0x69, 0x63, 0x65,
+  0x72, 0x74, 0x2e, 0x63, 0x6f, 0x6d, 0x2f, 0x44, 0x69, 0x67, 0x69, 0x43,
+  0x65, 0x72, 0x74, 0x47, 0x6c, 0x6f, 0x62, 0x61, 0x6c, 0x52, 0x6f, 0x6f,
+  0x74, 0x43, 0x41, 0x2e, 0x63, 0x72, 0x6c, 0x30, 0x37, 0xa0, 0x35, 0xa0,
+  0x33, 0x86, 0x31, 0x68, 0x74, 0x74, 0x70, 0x3a, 0x2f, 0x2f, 0x63, 0x72,
+  0x6c, 0x34, 0x2e, 0x64, 0x69, 0x67, 0x69, 0x63, 0x65, 0x72, 0x74, 0x2e,
+  0x63, 0x6f, 0x6d, 0x2f, 0x44, 0x69, 0x67, 0x69, 0x43, 0x65, 0x72, 0x74,
+  0x47, 0x6c, 0x6f, 0x62, 0x61, 0x6c, 0x52, 0x6f, 0x6f, 0x74, 0x43, 0x41,
+  0x2e, 0x63, 0x72, 0x6c, 0x30, 0x81, 0xce, 0x06, 0x03, 0x55, 0x1d, 0x20,
+  0x04, 0x81, 0xc6, 0x30, 0x81, 0xc3, 0x30, 0x81, 0xc0, 0x06, 0x04, 0x55,
+  0x1d, 0x20, 0x00, 0x30, 0x81, 0xb7, 0x30, 0x28, 0x06, 0x08, 0x2b, 0x06,
+  0x01, 0x05, 0x05, 0x07, 0x02, 0x01, 0x16, 0x1c, 0x68, 0x74, 0x74, 0x70,
+  0x73, 0x3a, 0x2f, 0x2f, 0x77, 0x77, 0x77, 0x2e, 0x64, 0x69, 0x67, 0x69,
+  0x63, 0x65, 0x72, 0x74, 0x2e, 0x63, 0x6f, 0x6d, 0x2f, 0x43, 0x50, 0x53,
+  0x30, 0x81, 0x8a, 0x06, 0x08, 0x2b, 0x06, 0x01, 0x05, 0x05, 0x07, 0x02,
+  0x02, 0x30, 0x7e, 0x0c, 0x7c, 0x41, 0x6e, 0x79, 0x20, 0x75, 0x73, 0x65,
+  0x20, 0x6f, 0x66, 0x20, 0x74, 0x68, 0x69, 0x73, 0x20, 0x43, 0x65, 0x72,
+  0x74, 0x69, 0x66, 0x69, 0x63, 0x61, 0x74, 0x65, 0x20, 0x63, 0x6f, 0x6e,
+  0x73, 0x74, 0x69, 0x74, 0x75, 0x74, 0x65, 0x73, 0x20, 0x61, 0x63, 0x63,
+  0x65, 0x70, 0x74, 0x61, 0x6e, 0x63, 0x65, 0x20, 0x6f, 0x66, 0x20, 0x74,
+  0x68, 0x65, 0x20, 0x52, 0x65, 0x6c, 0x79, 0x69, 0x6e, 0x67, 0x20, 0x50,
+  0x61, 0x72, 0x74, 0x79, 0x20, 0x41, 0x67, 0x72, 0x65, 0x65, 0x6d, 0x65,
+  0x6e, 0x74, 0x20, 0x6c, 0x6f, 0x63, 0x61, 0x74, 0x65, 0x64, 0x20, 0x61,
+  0x74, 0x20, 0x68, 0x74, 0x74, 0x70, 0x73, 0x3a, 0x2f, 0x2f, 0x77, 0x77,
+  0x77, 0x2e, 0x64, 0x69, 0x67, 0x69, 0x63, 0x65, 0x72, 0x74, 0x2e, 0x63,
+  0x6f, 0x6d, 0x2f, 0x72, 0x70, 0x61, 0x2d, 0x75, 0x61, 0x30, 0x0d, 0x06,
+  0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x0b, 0x05, 0x00,
+  0x03, 0x82, 0x01, 0x01, 0x00, 0x22, 0xe3, 0xdc, 0x6d, 0x48, 0xeb, 0x8e,
+  0xca, 0x00, 0x72, 0x73, 0x2e, 0x74, 0xaa, 0xe0, 0x93, 0x84, 0x6e, 0x39,
+  0xc4, 0x87, 0x54, 0x02, 0xc4, 0x02, 0x69, 0x71, 0x55, 0x45, 0xaf, 0x5a,
+  0xb0, 0xf6, 0x81, 0xfe, 0x32, 0xc8, 0x35, 0x72, 0x4b, 0xde, 0xa5, 0x7d,
+  0x27, 0x41, 0xa1, 0xd9, 0xb6, 0x4c, 0xd2, 0x4e, 0x32, 0x38, 0xc7, 0x80,
+  0x31, 0x9e, 0x7b, 0xb2, 0x63, 0xfa, 0x26, 0x47, 0x09, 0x8a, 0x18, 0x4e,
+  0x16, 0x57, 0xd0, 0x6b, 0x5f, 0x1a, 0x96, 0x37, 0x7e, 0xc4, 0xd7, 0x3a,
+  0x6f, 0xe1, 0x97, 0xea, 0x81, 0x5c, 0x08, 0x71, 0xab, 0xfa, 0x0b, 0x04,
+  0xc8, 0xf3, 0x3c, 0xaa, 0xf9, 0x4a, 0x1b, 0x17, 0x39, 0x4f, 0x97, 0x87,
+  0x57, 0x35, 0x7a, 0x8e, 0x98, 0xe9, 0xcb, 0x39, 0x7a, 0x54, 0x42, 0xa9,
+  0x6b, 0x11, 0xfa, 0x81, 0xd1, 0x95, 0xa5, 0x05, 0x60, 0x8e, 0x43, 0x91,
+  0xf7, 0x26, 0x3d, 0x5c, 0x05, 0x25, 0x16, 0x7c, 0xe5, 0x38, 0x2a, 0x6a,
+  0xb2, 0x6e, 0xeb, 0xd9, 0x95, 0x0a, 0xa4, 0x37, 0xeb, 0x85, 0x49, 0xd5,
+  0xcd, 0x7d, 0xa7, 0x48, 0xcd, 0x79, 0x5d, 0x28, 0xf8, 0xf2, 0xb5, 0x41,
+  0x04, 0x09, 0xc6, 0x25, 0x69, 0x0b, 0x3e, 0x28, 0xe5, 0x00, 0x27, 0x77,
+  0xb1, 0x61, 0x4c, 0x55, 0x48, 0x8a, 0x47, 0x3d, 0x42, 0xe4, 0xf6, 0x72,
+  0x7a, 0x5d, 0xa5, 0xec, 0x9f, 0xd6, 0xe1, 0xdf, 0x7d, 0x28, 0x52, 0xd2,
+  0x62, 0x0a, 0x32, 0xe4, 0x60, 0xe6, 0x01, 0x1a, 0x70, 0x2d, 0xcf, 0xff,
+  0x7d, 0x77, 0xe4, 0xaf, 0x8d, 0x27, 0x31, 0x8f, 0x22, 0x6c, 0x29, 0xb1,
+  0x0a, 0xc8, 0xd7, 0x41, 0x37, 0xb4, 0x7c, 0x96, 0xed, 0xae, 0xb2, 0xcb,
+  0xc9, 0x64, 0x25, 0x93, 0xd5, 0x43, 0x57, 0x6f, 0x7a, 0x10, 0x8f, 0xe4,
+  0x40, 0xe2, 0x4d, 0x2d, 0x51, 0x24, 0x27, 0x9e, 0x0f
+};
+
 static void testVerifyRevocation(void)
 {
     BOOL ret;
@@ -3681,24 +4064,24 @@ static void testVerifyRevocation(void)
     SetLastError(0xdeadbeef);
     ret = CertVerifyRevocation(0, 0, 0, NULL, 0, NULL, &status);
     ok(!ret && GetLastError() == E_INVALIDARG,
-     "Expected E_INVALIDARG, got %08x\n", GetLastError());
+     "Expected E_INVALIDARG, got %08lx\n", GetLastError());
     status.cbSize = sizeof(status);
     ret = CertVerifyRevocation(0, 0, 0, NULL, 0, NULL, &status);
-    ok(ret, "CertVerifyRevocation failed: %08x\n", GetLastError());
+    ok(ret, "CertVerifyRevocation failed: %08lx\n", GetLastError());
     ret = CertVerifyRevocation(0, 2, 0, NULL, 0, NULL, &status);
-    ok(ret, "CertVerifyRevocation failed: %08x\n", GetLastError());
+    ok(ret, "CertVerifyRevocation failed: %08lx\n", GetLastError());
     ret = CertVerifyRevocation(2, 0, 0, NULL, 0, NULL, &status);
-    ok(ret, "CertVerifyRevocation failed: %08x\n", GetLastError());
+    ok(ret, "CertVerifyRevocation failed: %08lx\n", GetLastError());
     certs[0] = CertCreateCertificateContext(X509_ASN_ENCODING, bigCert,
      sizeof(bigCert));
     SetLastError(0xdeadbeef);
     ret = CertVerifyRevocation(0, 0, 1, (void **)certs, 0, NULL, &status);
     ok(!ret && GetLastError() == CRYPT_E_NO_REVOCATION_DLL,
-     "Expected CRYPT_E_NO_REVOCATION_DLL, got %08x\n", GetLastError());
+     "Expected CRYPT_E_NO_REVOCATION_DLL, got %08lx\n", GetLastError());
     SetLastError(0xdeadbeef);
     ret = CertVerifyRevocation(0, 2, 1, (void **)certs, 0, NULL, &status);
     ok(!ret && GetLastError() == CRYPT_E_NO_REVOCATION_DLL,
-     "Expected CRYPT_E_NO_REVOCATION_DLL, got %08x\n", GetLastError());
+     "Expected CRYPT_E_NO_REVOCATION_DLL, got %08lx\n", GetLastError());
 
     CertFreeCertificateContext(certs[0]);
 
@@ -3710,42 +4093,33 @@ static void testVerifyRevocation(void)
     SetLastError(0xdeadbeef);
     ret = CertVerifyRevocation(X509_ASN_ENCODING, CERT_CONTEXT_REVOCATION_TYPE,
      1, (void **)certs, 0, NULL, &status);
-    if (!ret && GetLastError() == ERROR_FILE_NOT_FOUND)
-    {
-        win_skip("CERT_CONTEXT_REVOCATION_TYPE unsupported, skipping\n");
-        return;
-    }
     ok(!ret && GetLastError() == CRYPT_E_NO_REVOCATION_CHECK,
-     "expected CRYPT_E_NO_REVOCATION_CHECK, got %08x\n", GetLastError());
+     "expected CRYPT_E_NO_REVOCATION_CHECK, got %08lx\n", GetLastError());
     ok(status.dwError == CRYPT_E_NO_REVOCATION_CHECK,
-     "expected CRYPT_E_NO_REVOCATION_CHECK, got %08x\n", status.dwError);
-    ok(status.dwIndex == 0, "expected index 0, got %d\n", status.dwIndex);
+     "expected CRYPT_E_NO_REVOCATION_CHECK, got %08lx\n", status.dwError);
+    ok(status.dwIndex == 0, "expected index 0, got %ld\n", status.dwIndex);
     /* Neither can the end cert */
     SetLastError(0xdeadbeef);
     ret = CertVerifyRevocation(X509_ASN_ENCODING, CERT_CONTEXT_REVOCATION_TYPE,
      1, (void **)&certs[1], 0, NULL, &status);
-    ok(!ret && (GetLastError() == CRYPT_E_NO_REVOCATION_CHECK /* Win9x */ ||
-     GetLastError() == CRYPT_E_REVOCATION_OFFLINE),
-     "expected CRYPT_E_NO_REVOCATION_CHECK or CRYPT_E_REVOCATION_OFFLINE, got %08x\n",
+    ok(!ret && (GetLastError() == CRYPT_E_REVOCATION_OFFLINE || GetLastError() == CRYPT_E_NO_REVOCATION_CHECK),
+     "expected CRYPT_E_NO_REVOCATION_CHECK or CRYPT_E_REVOCATION_OFFLINE, got %08lx\n",
      GetLastError());
-    ok(status.dwError == CRYPT_E_NO_REVOCATION_CHECK /* Win9x */ ||
-     status.dwError == CRYPT_E_REVOCATION_OFFLINE,
-     "expected CRYPT_E_NO_REVOCATION_CHECK or CRYPT_E_REVOCATION_OFFLINE, got %08x\n",
+    ok(status.dwError == CRYPT_E_REVOCATION_OFFLINE || status.dwError == CRYPT_E_NO_REVOCATION_CHECK,
+     "expected CRYPT_E_NO_REVOCATION_CHECK or CRYPT_E_REVOCATION_OFFLINE, got %08lx\n",
      status.dwError);
-    ok(status.dwIndex == 0, "expected index 0, got %d\n", status.dwIndex);
+    ok(status.dwIndex == 0, "expected index 0, got %ld\n", status.dwIndex);
     /* Both certs together can't, either (they're not CRLs) */
     SetLastError(0xdeadbeef);
     ret = CertVerifyRevocation(X509_ASN_ENCODING, CERT_CONTEXT_REVOCATION_TYPE,
      2, (void **)certs, 0, NULL, &status);
-    ok(!ret && (GetLastError() == CRYPT_E_NO_REVOCATION_CHECK ||
-     GetLastError() == CRYPT_E_REVOCATION_OFFLINE /* WinME */),
-     "expected CRYPT_E_NO_REVOCATION_CHECK or CRYPT_E_REVOCATION_OFFLINE, got %08x\n",
+    ok(!ret && GetLastError() == CRYPT_E_NO_REVOCATION_CHECK,
+     "expected CRYPT_E_NO_REVOCATION_CHECK or CRYPT_E_REVOCATION_OFFLINE, got %08lx\n",
      GetLastError());
-    ok(status.dwError == CRYPT_E_NO_REVOCATION_CHECK ||
-     status.dwError == CRYPT_E_REVOCATION_OFFLINE /* WinME */,
-     "expected CRYPT_E_NO_REVOCATION_CHECK or CRYPT_E_REVOCATION_OFFLINE, got %08x\n",
+    ok(status.dwError == CRYPT_E_NO_REVOCATION_CHECK,
+     "expected CRYPT_E_NO_REVOCATION_CHECK or CRYPT_E_REVOCATION_OFFLINE, got %08lx\n",
      status.dwError);
-    ok(status.dwIndex == 0, "expected index 0, got %d\n", status.dwIndex);
+    ok(status.dwIndex == 0, "expected index 0, got %ld\n", status.dwIndex);
     /* Now add a CRL to the hCrlStore */
     revPara.hCrlStore = CertOpenStore(CERT_STORE_PROV_MEMORY, 0, 0,
      CERT_STORE_CREATE_NEW_FLAG, NULL);
@@ -3754,41 +4128,72 @@ static void testVerifyRevocation(void)
     SetLastError(0xdeadbeef);
     ret = CertVerifyRevocation(X509_ASN_ENCODING, CERT_CONTEXT_REVOCATION_TYPE,
      2, (void **)certs, 0, &revPara, &status);
-    ok(!ret && (GetLastError() == CRYPT_E_NO_REVOCATION_CHECK ||
-     GetLastError() == CRYPT_E_REVOCATION_OFFLINE /* WinME */),
-     "expected CRYPT_E_NO_REVOCATION_CHECK or CRYPT_E_REVOCATION_OFFLINE, got %08x\n",
+    ok(!ret && GetLastError() == CRYPT_E_NO_REVOCATION_CHECK,
+     "expected CRYPT_E_NO_REVOCATION_CHECK or CRYPT_E_REVOCATION_OFFLINE, got %08lx\n",
      GetLastError());
-    ok(status.dwError == CRYPT_E_NO_REVOCATION_CHECK ||
-     status.dwError == CRYPT_E_REVOCATION_OFFLINE /* WinME */,
-     "expected CRYPT_E_NO_REVOCATION_CHECK or CRYPT_E_REVOCATION_OFFLINE, got %08x\n",
+    ok(status.dwError == CRYPT_E_NO_REVOCATION_CHECK,
+     "expected CRYPT_E_NO_REVOCATION_CHECK or CRYPT_E_REVOCATION_OFFLINE, got %08lx\n",
      status.dwError);
-    ok(status.dwIndex == 0, "expected index 0, got %d\n", status.dwIndex);
+    ok(status.dwIndex == 0, "expected index 0, got %ld\n", status.dwIndex);
     /* Specifying CERT_VERIFY_REV_CHAIN_FLAG doesn't change things either */
     SetLastError(0xdeadbeef);
     ret = CertVerifyRevocation(X509_ASN_ENCODING, CERT_CONTEXT_REVOCATION_TYPE,
      2, (void **)certs, CERT_VERIFY_REV_CHAIN_FLAG, &revPara, &status);
     ok(!ret && GetLastError() == CRYPT_E_NO_REVOCATION_CHECK,
-     "expected CRYPT_E_NO_REVOCATION_CHECK, got %08x\n", GetLastError());
+     "expected CRYPT_E_NO_REVOCATION_CHECK, got %08lx\n", GetLastError());
     ok(status.dwError == CRYPT_E_NO_REVOCATION_CHECK,
-     "expected CRYPT_E_NO_REVOCATION_CHECK, got %08x\n", status.dwError);
-    ok(status.dwIndex == 0, "expected index 0, got %d\n", status.dwIndex);
+     "expected CRYPT_E_NO_REVOCATION_CHECK, got %08lx\n", status.dwError);
+    ok(status.dwIndex == 0, "expected index 0, got %ld\n", status.dwIndex);
     /* Again, specifying the issuer cert: no change */
     revPara.pIssuerCert = certs[0];
     SetLastError(0xdeadbeef);
     ret = CertVerifyRevocation(X509_ASN_ENCODING, CERT_CONTEXT_REVOCATION_TYPE,
      1, (void **)&certs[1], 0, &revPara, &status);
-    /* Win2k thinks the cert is revoked, and it is, except the CRL is out of
-     * date, hence the revocation status should be unknown.
-     */
-    ok(!ret && (GetLastError() == CRYPT_E_NO_REVOCATION_CHECK ||
-     broken(GetLastError() == CRYPT_E_REVOKED /* Win2k */)),
-     "expected CRYPT_E_NO_REVOCATION_CHECK, got %08x\n", GetLastError());
-    ok(status.dwError == CRYPT_E_NO_REVOCATION_CHECK ||
-     broken(status.dwError == CRYPT_E_REVOKED /* Win2k */),
-     "expected CRYPT_E_NO_REVOCATION_CHECK, got %08x\n", status.dwError);
-    ok(status.dwIndex == 0, "expected index 0, got %d\n", status.dwIndex);
+    ok(!ret && GetLastError() == CRYPT_E_NO_REVOCATION_CHECK,
+     "expected CRYPT_E_NO_REVOCATION_CHECK, got %08lx\n", GetLastError());
+    ok(status.dwError == CRYPT_E_NO_REVOCATION_CHECK,
+     "expected CRYPT_E_NO_REVOCATION_CHECK, got %08lx\n", status.dwError);
+    ok(status.dwIndex == 0, "expected index 0, got %ld\n", status.dwIndex);
     CertCloseStore(revPara.hCrlStore, 0);
     CertFreeCertificateContext(certs[1]);
+    CertFreeCertificateContext(certs[0]);
+
+    /* OCSP */
+    certs[0] = CertCreateCertificateContext(X509_ASN_ENCODING, ocsp_cert, sizeof(ocsp_cert));
+    memset(&revPara, 0, sizeof(revPara));
+    revPara.cbSize = sizeof(revPara);
+    memset(&status, 0x55, sizeof(status));
+    status.cbSize = sizeof(status);
+    SetLastError(0xdeadbeef);
+    ret = CertVerifyRevocation(X509_ASN_ENCODING, CERT_CONTEXT_REVOCATION_TYPE, 1, (void **)&certs[0],
+                               0, &revPara, &status);
+    ok(!ret, "success\n");
+    ok(GetLastError() == CRYPT_E_REVOCATION_OFFLINE, "got %08lx\n", GetLastError());
+
+    revPara.pIssuerCert = CertCreateCertificateContext(X509_ASN_ENCODING, ocsp_cert_issuer,
+                                                       sizeof(ocsp_cert_issuer));
+    ret = CertVerifyRevocation(X509_ASN_ENCODING, CERT_CONTEXT_REVOCATION_TYPE, 1, (void **)&certs[0],
+                               0, &revPara, &status);
+    ok(ret, "got %08lx\n", GetLastError());
+    ok(!status.dwError, "got %08lx\n", status.dwError);
+    ok(!status.dwIndex, "got %ld\n", status.dwIndex);
+    CertFreeCertificateContext(revPara.pIssuerCert);
+    CertFreeCertificateContext(certs[0]);
+
+    certs[0] = CertCreateCertificateContext(X509_ASN_ENCODING, ocsp_cert_revoked, sizeof(ocsp_cert_revoked));
+    revPara.pIssuerCert = CertCreateCertificateContext(X509_ASN_ENCODING, ocsp_cert_revoked_issuer,
+                                                       sizeof(ocsp_cert_revoked_issuer));
+    memset(&status, 0x55, sizeof(status));
+    status.cbSize = sizeof(status);
+    SetLastError(0xdeadbeef);
+    ret = CertVerifyRevocation(X509_ASN_ENCODING, CERT_CONTEXT_REVOCATION_TYPE, 1, (void **)&certs[0],
+                               0, &revPara, &status);
+    ok(!ret, "success\n");
+    ok(GetLastError() == CRYPT_E_REVOKED, "got %08lx\n", GetLastError());
+    ok(status.dwError == CRYPT_E_REVOKED, "got %08lx\n", status.dwError);
+    ok(!status.dwIndex, "got %ld\n", status.dwIndex);
+    ok(!status.dwReason, "got %lu\n", status.dwReason);
+    CertFreeCertificateContext(revPara.pIssuerCert);
     CertFreeCertificateContext(certs[0]);
 }
 
@@ -3844,15 +4249,9 @@ static void testAcquireCertPrivateKey(void)
     HCRYPTKEY key;
     WCHAR ms_def_prov_w[MAX_PATH];
 
-    if (!pCryptAcquireCertificatePrivateKey)
-    {
-        win_skip("CryptAcquireCertificatePrivateKey() is not available\n");
-        return;
-    }
-
     lstrcpyW(ms_def_prov_w, MS_DEF_PROV_W);
 
-    keyProvInfo.pwszContainerName = cspNameW;
+    keyProvInfo.pwszContainerName = (WCHAR *)L"WineCryptTemp";
     keyProvInfo.pwszProvName = ms_def_prov_w;
     keyProvInfo.dwProvType = PROV_RSA_FULL;
     keyProvInfo.dwFlags = 0;
@@ -3867,38 +4266,38 @@ static void testAcquireCertPrivateKey(void)
      sizeof(selfSignedCert));
 
     /* Crash
-    ret = pCryptAcquireCertificatePrivateKey(NULL, 0, NULL, NULL, NULL, NULL);
-    ret = pCryptAcquireCertificatePrivateKey(NULL, 0, NULL, NULL, NULL,
+    ret = CryptAcquireCertificatePrivateKey(NULL, 0, NULL, NULL, NULL, NULL);
+    ret = CryptAcquireCertificatePrivateKey(NULL, 0, NULL, NULL, NULL,
      &callerFree);
-    ret = pCryptAcquireCertificatePrivateKey(NULL, 0, NULL, NULL, &keySpec,
+    ret = CryptAcquireCertificatePrivateKey(NULL, 0, NULL, NULL, &keySpec,
      NULL);
-    ret = pCryptAcquireCertificatePrivateKey(NULL, 0, NULL, &csp, NULL, NULL);
-    ret = pCryptAcquireCertificatePrivateKey(NULL, 0, NULL, &csp, &keySpec,
+    ret = CryptAcquireCertificatePrivateKey(NULL, 0, NULL, &csp, NULL, NULL);
+    ret = CryptAcquireCertificatePrivateKey(NULL, 0, NULL, &csp, &keySpec,
      &callerFree);
-    ret = pCryptAcquireCertificatePrivateKey(cert, 0, NULL, NULL, NULL, NULL);
+    ret = CryptAcquireCertificatePrivateKey(cert, 0, NULL, NULL, NULL, NULL);
      */
 
     /* Missing private key */
-    ret = pCryptAcquireCertificatePrivateKey(cert, 0, NULL, &csp, NULL, NULL);
+    ret = CryptAcquireCertificatePrivateKey(cert, 0, NULL, &csp, NULL, NULL);
     ok(!ret && (GetLastError() == CRYPT_E_NO_KEY_PROPERTY || GetLastError() == NTE_BAD_PROV_TYPE /* win10 */),
-     "Expected CRYPT_E_NO_KEY_PROPERTY, got %08x\n", GetLastError());
-    ret = pCryptAcquireCertificatePrivateKey(cert, 0, NULL, &csp, &keySpec,
+     "Expected CRYPT_E_NO_KEY_PROPERTY, got %08lx\n", GetLastError());
+    ret = CryptAcquireCertificatePrivateKey(cert, 0, NULL, &csp, &keySpec,
      &callerFree);
     ok(!ret && (GetLastError() == CRYPT_E_NO_KEY_PROPERTY || GetLastError() == NTE_BAD_PROV_TYPE /* win10 */),
-     "Expected CRYPT_E_NO_KEY_PROPERTY, got %08x\n", GetLastError());
+     "Expected CRYPT_E_NO_KEY_PROPERTY, got %08lx\n", GetLastError());
     CertSetCertificateContextProperty(cert, CERT_KEY_PROV_INFO_PROP_ID, 0,
      &keyProvInfo);
-    ret = pCryptAcquireCertificatePrivateKey(cert, 0, NULL, &csp, &keySpec,
+    ret = CryptAcquireCertificatePrivateKey(cert, 0, NULL, &csp, &keySpec,
      &callerFree);
     ok(!ret && (GetLastError() == CRYPT_E_NO_KEY_PROPERTY ||
        GetLastError() == NTE_BAD_KEYSET /* win8 */ ||
        GetLastError() == NTE_BAD_PROV_TYPE /* win10 */),
-     "Expected CRYPT_E_NO_KEY_PROPERTY, got %08x\n", GetLastError());
+     "Expected CRYPT_E_NO_KEY_PROPERTY, got %08lx\n", GetLastError());
 
     CryptAcquireContextA(&csp, cspNameA, MS_DEF_PROV_A, PROV_RSA_FULL,
      CRYPT_NEWKEYSET);
     ret = CryptImportKey(csp, privKey, sizeof(privKey), 0, 0, &key);
-    ok(ret, "CryptImportKey failed: %08x\n", GetLastError());
+    ok(ret, "CryptImportKey failed: %08lx\n", GetLastError());
     if (ret)
     {
         HCRYPTPROV certCSP;
@@ -3906,55 +4305,42 @@ static void testAcquireCertPrivateKey(void)
         CERT_KEY_CONTEXT keyContext;
 
         /* Don't cache provider */
-        ret = pCryptAcquireCertificatePrivateKey(cert, 0, NULL, &certCSP,
+        SetLastError(0xdeadbeef);
+        ret = CryptAcquireCertificatePrivateKey(cert, 0, NULL, &certCSP,
          &keySpec, &callerFree);
-        ok(ret ||
-         broken(!ret), /* win95 */
-         "CryptAcquireCertificatePrivateKey failed: %08x\n",
-         GetLastError());
-        if (ret)
-        {
-            ok(callerFree, "Expected callerFree to be TRUE\n");
-            CryptReleaseContext(certCSP, 0);
-        }
+        ok(ret, "CryptAcquireCertificatePrivateKey failed: %08lx\n", GetLastError());
+        ok(GetLastError() == ERROR_SUCCESS, "got %08lx\n", GetLastError());
+        ok(callerFree, "Expected callerFree to be TRUE\n");
+        CryptReleaseContext(certCSP, 0);
 
-        ret = pCryptAcquireCertificatePrivateKey(cert, 0, NULL, &certCSP,
+        SetLastError(0xdeadbeef);
+        ret = CryptAcquireCertificatePrivateKey(cert, 0, NULL, &certCSP,
          NULL, NULL);
-        ok(ret ||
-         broken(!ret), /* win95 */
-         "CryptAcquireCertificatePrivateKey failed: %08x\n",
-         GetLastError());
+        ok(ret, "CryptAcquireCertificatePrivateKey failed: %08lx\n", GetLastError());
+        ok(GetLastError() == ERROR_SUCCESS, "got %08lx\n", GetLastError());
         CryptReleaseContext(certCSP, 0);
 
         /* Use the key prov info's caching (there shouldn't be any) */
-        ret = pCryptAcquireCertificatePrivateKey(cert,
+        SetLastError(0xdeadbeef);
+        ret = CryptAcquireCertificatePrivateKey(cert,
          CRYPT_ACQUIRE_USE_PROV_INFO_FLAG, NULL, &certCSP, &keySpec,
          &callerFree);
-        ok(ret ||
-         broken(!ret), /* win95 */
-         "CryptAcquireCertificatePrivateKey failed: %08x\n",
-         GetLastError());
-        if (ret)
-        {
-            ok(callerFree, "Expected callerFree to be TRUE\n");
-            CryptReleaseContext(certCSP, 0);
-        }
+        ok(ret, "CryptAcquireCertificatePrivateKey failed: %08lx\n", GetLastError());
+        ok(GetLastError() == ERROR_SUCCESS, "got %08lx\n", GetLastError());
+        ok(callerFree, "Expected callerFree to be TRUE\n");
+        CryptReleaseContext(certCSP, 0);
 
         /* Cache it (and check that it's cached) */
-        ret = pCryptAcquireCertificatePrivateKey(cert,
+        SetLastError(0xdeadbeef);
+        ret = CryptAcquireCertificatePrivateKey(cert,
          CRYPT_ACQUIRE_CACHE_FLAG, NULL, &certCSP, &keySpec, &callerFree);
-        ok(ret ||
-         broken(!ret), /* win95 */
-         "CryptAcquireCertificatePrivateKey failed: %08x\n",
-         GetLastError());
+        ok(ret, "CryptAcquireCertificatePrivateKey failed: %08lx\n", GetLastError());
+        ok(GetLastError() == ERROR_SUCCESS, "got %08lx\n", GetLastError());
         ok(!callerFree, "Expected callerFree to be FALSE\n");
         size = sizeof(keyContext);
         ret = CertGetCertificateContextProperty(cert, CERT_KEY_CONTEXT_PROP_ID,
          &keyContext, &size);
-        ok(ret ||
-         broken(!ret), /* win95 */
-         "CertGetCertificateContextProperty failed: %08x\n",
-         GetLastError());
+        ok(ret, "CertGetCertificateContextProperty failed: %08lx\n", GetLastError());
 
         /* Remove the cached provider */
         CryptReleaseContext(keyContext.hCryptProv, 0);
@@ -3965,21 +4351,17 @@ static void testAcquireCertPrivateKey(void)
         CertSetCertificateContextProperty(cert, CERT_KEY_PROV_INFO_PROP_ID, 0,
          &keyProvInfo);
         /* Now use the key prov info's caching */
-        ret = pCryptAcquireCertificatePrivateKey(cert,
+        SetLastError(0xdeadbeef);
+        ret = CryptAcquireCertificatePrivateKey(cert,
          CRYPT_ACQUIRE_USE_PROV_INFO_FLAG, NULL, &certCSP, &keySpec,
          &callerFree);
-        ok(ret ||
-         broken(!ret), /* win95 */
-         "CryptAcquireCertificatePrivateKey failed: %08x\n",
-         GetLastError());
+        ok(ret, "CryptAcquireCertificatePrivateKey failed: %08lx\n", GetLastError());
+        ok(GetLastError() == ERROR_SUCCESS, "got %08lx\n", GetLastError());
         ok(!callerFree, "Expected callerFree to be FALSE\n");
         size = sizeof(keyContext);
         ret = CertGetCertificateContextProperty(cert, CERT_KEY_CONTEXT_PROP_ID,
          &keyContext, &size);
-        ok(ret ||
-         broken(!ret), /* win95 */
-         "CertGetCertificateContextProperty failed: %08x\n",
-         GetLastError());
+        ok(ret, "CertGetCertificateContextProperty failed: %08lx\n", GetLastError());
         CryptReleaseContext(certCSP, 0);
 
         CryptDestroyKey(key);
@@ -3988,53 +4370,53 @@ static void testAcquireCertPrivateKey(void)
     /* Some sanity-checking on public key exporting */
     ret = CryptImportPublicKeyInfo(csp, X509_ASN_ENCODING,
      &cert->pCertInfo->SubjectPublicKeyInfo, &key);
-    ok(ret, "CryptImportPublicKeyInfo failed: %08x\n", GetLastError());
+    ok(ret, "CryptImportPublicKeyInfo failed: %08lx\n", GetLastError());
     if (ret)
     {
         ret = CryptExportKey(key, 0, PUBLICKEYBLOB, 0, NULL, &size);
-        ok(ret, "CryptExportKey failed: %08x\n", GetLastError());
+        ok(ret, "CryptExportKey failed: %08lx\n", GetLastError());
         if (ret)
         {
-            LPBYTE buf = HeapAlloc(GetProcessHeap(), 0, size), encodedKey;
+            LPBYTE buf = malloc(size), encodedKey;
 
             ret = CryptExportKey(key, 0, PUBLICKEYBLOB, 0, buf, &size);
-            ok(ret, "CryptExportKey failed: %08x\n", GetLastError());
-            ok(size == sizeof(exportedPublicKeyBlob), "Unexpected size %d\n",
+            ok(ret, "CryptExportKey failed: %08lx\n", GetLastError());
+            ok(size == sizeof(exportedPublicKeyBlob), "Unexpected size %ld\n",
              size);
             ok(!memcmp(buf, exportedPublicKeyBlob, size), "Unexpected value\n");
-            ret = pCryptEncodeObjectEx(X509_ASN_ENCODING, RSA_CSP_PUBLICKEYBLOB,
+            ret = CryptEncodeObjectEx(X509_ASN_ENCODING, RSA_CSP_PUBLICKEYBLOB,
              buf, CRYPT_ENCODE_ALLOC_FLAG, NULL, &encodedKey, &size);
-            ok(ret, "CryptEncodeObjectEx failed: %08x\n", GetLastError());
+            ok(ret, "CryptEncodeObjectEx failed: %08lx\n", GetLastError());
             if (ret)
             {
-                ok(size == sizeof(asnEncodedPublicKey), "Unexpected size %d\n",
+                ok(size == sizeof(asnEncodedPublicKey), "Unexpected size %ld\n",
                  size);
                 ok(!memcmp(encodedKey, asnEncodedPublicKey, size),
                  "Unexpected value\n");
                 LocalFree(encodedKey);
             }
-            HeapFree(GetProcessHeap(), 0, buf);
+            free(buf);
         }
         CryptDestroyKey(key);
     }
     ret = CryptExportPublicKeyInfoEx(csp, AT_SIGNATURE, X509_ASN_ENCODING,
      NULL, 0, NULL, NULL, &size);
-    ok(ret, "CryptExportPublicKeyInfoEx failed: %08x\n", GetLastError());
+    ok(ret, "CryptExportPublicKeyInfoEx failed: %08lx\n", GetLastError());
     if (ret)
     {
-        PCERT_PUBLIC_KEY_INFO info = HeapAlloc(GetProcessHeap(), 0, size);
+        PCERT_PUBLIC_KEY_INFO info = malloc(size);
 
         ret = CryptExportPublicKeyInfoEx(csp, AT_SIGNATURE, X509_ASN_ENCODING,
          NULL, 0, NULL, info, &size);
-        ok(ret, "CryptExportPublicKeyInfoEx failed: %08x\n", GetLastError());
+        ok(ret, "CryptExportPublicKeyInfoEx failed: %08lx\n", GetLastError());
         if (ret)
         {
             ok(info->PublicKey.cbData == sizeof(asnEncodedPublicKey),
-             "Unexpected size %d\n", info->PublicKey.cbData);
+             "Unexpected size %ld\n", info->PublicKey.cbData);
             ok(!memcmp(info->PublicKey.pbData, asnEncodedPublicKey,
              info->PublicKey.cbData), "Unexpected value\n");
         }
-        HeapFree(GetProcessHeap(), 0, info);
+        free(info);
     }
 
     CryptReleaseContext(csp, 0);
@@ -4062,28 +4444,24 @@ static void testGetPublicKeyLength(void)
     SetLastError(0xdeadbeef);
     ret = CertGetPublicKeyLength(0, &info);
     ok(ret == 0 && GetLastError() == ERROR_FILE_NOT_FOUND,
-     "Expected length 0 and ERROR_FILE_NOT_FOUND, got length %d, %08x\n",
+     "Expected length 0 and ERROR_FILE_NOT_FOUND, got length %ld, %08lx\n",
      ret, GetLastError());
     SetLastError(0xdeadbeef);
     ret = CertGetPublicKeyLength(X509_ASN_ENCODING, &info);
-    ok(ret == 0 &&
-     (GetLastError() == CRYPT_E_ASN1_EOD ||
-      GetLastError() == OSS_BAD_ARG), /* win9x */
-     "Expected length 0 and CRYPT_E_ASN1_EOD, got length %d, %08x\n",
+    ok(ret == 0 && GetLastError() == CRYPT_E_ASN1_EOD,
+     "Expected length 0 and CRYPT_E_ASN1_EOD, got length %ld, %08lx\n",
      ret, GetLastError());
     /* With a nearly-empty public key info */
     info.Algorithm.pszObjId = oid_rsa_rsa;
     SetLastError(0xdeadbeef);
     ret = CertGetPublicKeyLength(0, &info);
     ok(ret == 0 && GetLastError() == ERROR_FILE_NOT_FOUND,
-     "Expected length 0 and ERROR_FILE_NOT_FOUND, got length %d, %08x\n",
+     "Expected length 0 and ERROR_FILE_NOT_FOUND, got length %ld, %08lx\n",
      ret, GetLastError());
     SetLastError(0xdeadbeef);
     ret = CertGetPublicKeyLength(X509_ASN_ENCODING, &info);
-    ok(ret == 0 &&
-     (GetLastError() == CRYPT_E_ASN1_EOD ||
-      GetLastError() == OSS_BAD_ARG), /* win9x */
-     "Expected length 0 and CRYPT_E_ASN1_EOD, got length %d, %08x\n",
+    ok(ret == 0 && GetLastError() == CRYPT_E_ASN1_EOD,
+     "Expected length 0 and CRYPT_E_ASN1_EOD, got length %ld, %08lx\n",
      ret, GetLastError());
     /* With a bogus key */
     info.PublicKey.cbData = sizeof(bogusKey);
@@ -4091,14 +4469,12 @@ static void testGetPublicKeyLength(void)
     SetLastError(0xdeadbeef);
     ret = CertGetPublicKeyLength(0, &info);
     ok(ret == 0 && GetLastError() == ERROR_FILE_NOT_FOUND,
-     "Expected length 0 and ERROR_FILE_NOT_FOUND, got length %d, %08x\n",
+     "Expected length 0 and ERROR_FILE_NOT_FOUND, got length %ld, %08lx\n",
      ret, GetLastError());
     SetLastError(0xdeadbeef);
     ret = CertGetPublicKeyLength(X509_ASN_ENCODING, &info);
-    ok(ret == 0 &&
-     (GetLastError() == CRYPT_E_ASN1_BADTAG ||
-      GetLastError() == OSS_PDU_MISMATCH), /* win9x */
-     "Expected length 0 and CRYPT_E_ASN1_BADTAGTAG, got length %d, %08x\n",
+    ok(ret == 0 && GetLastError() == CRYPT_E_ASN1_BADTAG,
+     "Expected length 0 and CRYPT_E_ASN1_BADTAGTAG, got length %ld, %08lx\n",
      ret, GetLastError());
     /* With a believable RSA key but a bogus OID */
     info.Algorithm.pszObjId = bogusOID;
@@ -4107,33 +4483,31 @@ static void testGetPublicKeyLength(void)
     SetLastError(0xdeadbeef);
     ret = CertGetPublicKeyLength(0, &info);
     ok(ret == 0 && GetLastError() == ERROR_FILE_NOT_FOUND,
-     "Expected length 0 and ERROR_FILE_NOT_FOUND, got length %d, %08x\n",
+     "Expected length 0 and ERROR_FILE_NOT_FOUND, got length %ld, %08lx\n",
      ret, GetLastError());
     SetLastError(0xdeadbeef);
     ret = CertGetPublicKeyLength(X509_ASN_ENCODING, &info);
     ok(ret == 56 || broken(ret == 0 && GetLastError() == NTE_BAD_LEN) /* Win7 */,
-       "Expected length 56, got %d\n", ret);
+       "Expected length 56, got %ld\n", ret);
     /* An RSA key with the DH OID */
     info.Algorithm.pszObjId = oid_rsa_dh;
     SetLastError(0xdeadbeef);
     ret = CertGetPublicKeyLength(X509_ASN_ENCODING, &info);
-    ok(ret == 0 &&
-     (GetLastError() == CRYPT_E_ASN1_BADTAG ||
-      GetLastError() == E_INVALIDARG), /* win9x */
-     "Expected length 0 and CRYPT_E_ASN1_BADTAG, got length %d, %08x\n",
+    ok(ret == 0 && GetLastError() == CRYPT_E_ASN1_BADTAG,
+     "Expected length 0 and CRYPT_E_ASN1_BADTAG, got length %ld, %08lx\n",
      ret, GetLastError());
     /* With the RSA OID */
     info.Algorithm.pszObjId = oid_rsa_rsa;
     SetLastError(0xdeadbeef);
     ret = CertGetPublicKeyLength(X509_ASN_ENCODING, &info);
     ok(ret == 56 || broken(ret == 0 && GetLastError() == NTE_BAD_LEN) /* Win7 */,
-       "Expected length 56, got %d\n", ret);
+       "Expected length 56, got %ld\n", ret);
     /* With the RSA OID and a message encoding */
     info.Algorithm.pszObjId = oid_rsa_rsa;
     SetLastError(0xdeadbeef);
     ret = CertGetPublicKeyLength(X509_ASN_ENCODING | PKCS_7_ASN_ENCODING, &info);
     ok(ret == 56 || broken(ret == 0 && GetLastError() == NTE_BAD_LEN) /* Win7 */,
-       "Expected length 56, got %d\n", ret);
+       "Expected length 56, got %ld\n", ret);
 }
 
 static void testKeyProvInfo(void)
@@ -4150,10 +4524,10 @@ static void testKeyProvInfo(void)
 
     store = CertOpenStore(CERT_STORE_PROV_SYSTEM_A, 0, 0,
                           CERT_SYSTEM_STORE_CURRENT_USER, "My");
-    ok(store != NULL, "CertOpenStore error %u\n", GetLastError());
+    ok(store != NULL, "CertOpenStore error %lu\n", GetLastError());
 
     cert = CertCreateCertificateContext(X509_ASN_ENCODING, selfSignedCert, sizeof(selfSignedCert));
-    ok(cert != NULL, "CertCreateCertificateContext error %#x\n", GetLastError());
+    ok(cert != NULL, "CertCreateCertificateContext error %#lx\n", GetLastError());
 
     info2.pwszContainerName = containerW;
     info2.pwszProvName = providerW;
@@ -4163,39 +4537,39 @@ static void testKeyProvInfo(void)
     info2.rgProvParam = param;
     info2.dwKeySpec = 0x11223344;
     ret = CertSetCertificateContextProperty(cert, CERT_KEY_PROV_INFO_PROP_ID, 0, &info2);
-    ok(ret, "CertSetCertificateContextProperty error %#x\n", GetLastError());
+    ok(ret, "CertSetCertificateContextProperty error %#lx\n", GetLastError());
 
     ret = CertGetCertificateContextProperty(cert, CERT_KEY_PROV_INFO_PROP_ID, NULL, &size);
-    ok(ret, "CertGetCertificateContextProperty error %#x\n", GetLastError());
-    info = HeapAlloc(GetProcessHeap(), 0, size);
+    ok(ret, "CertGetCertificateContextProperty error %#lx\n", GetLastError());
+    info = malloc(size);
     ret = CertGetCertificateContextProperty(cert, CERT_KEY_PROV_INFO_PROP_ID, info, &size);
-    ok(ret, "CertGetCertificateContextProperty error %#x\n", GetLastError());
+    ok(ret, "CertGetCertificateContextProperty error %#lx\n", GetLastError());
     ok(!lstrcmpW(info->pwszContainerName, containerW), "got %s\n", wine_dbgstr_w(info->pwszContainerName));
     ok(!lstrcmpW(info->pwszProvName, providerW), "got %s\n", wine_dbgstr_w(info->pwszProvName));
-    ok(info->dwProvType == 0x12345678, "got %#x\n", info->dwProvType);
-    ok(info->dwFlags == 0x87654321, "got %#x\n", info->dwFlags);
-    ok(info->dwKeySpec == 0x11223344, "got %#x\n", info->dwKeySpec);
-    ok(info->cProvParam == 2, "got %#x\n", info->cProvParam);
+    ok(info->dwProvType == 0x12345678, "got %#lx\n", info->dwProvType);
+    ok(info->dwFlags == 0x87654321, "got %#lx\n", info->dwFlags);
+    ok(info->dwKeySpec == 0x11223344, "got %#lx\n", info->dwKeySpec);
+    ok(info->cProvParam == 2, "got %#lx\n", info->cProvParam);
     ok(info->rgProvParam != NULL, "got %p\n", info->rgProvParam);
-    ok(info->rgProvParam[0].dwParam == param[0].dwParam, "got %#x\n", info->rgProvParam[0].dwParam);
-    ok(info->rgProvParam[0].cbData == param[0].cbData, "got %#x\n", info->rgProvParam[0].cbData);
+    ok(info->rgProvParam[0].dwParam == param[0].dwParam, "got %#lx\n", info->rgProvParam[0].dwParam);
+    ok(info->rgProvParam[0].cbData == param[0].cbData, "got %#lx\n", info->rgProvParam[0].cbData);
     ok(!memcmp(info->rgProvParam[0].pbData, param[0].pbData, param[0].cbData), "param1 mismatch\n");
-    ok(info->rgProvParam[0].dwFlags == param[0].dwFlags, "got %#x\n", info->rgProvParam[1].dwFlags);
-    ok(info->rgProvParam[1].dwParam == param[1].dwParam, "got %#x\n", info->rgProvParam[1].dwParam);
-    ok(info->rgProvParam[1].cbData == param[1].cbData, "got %#x\n", info->rgProvParam[1].cbData);
+    ok(info->rgProvParam[0].dwFlags == param[0].dwFlags, "got %#lx\n", info->rgProvParam[1].dwFlags);
+    ok(info->rgProvParam[1].dwParam == param[1].dwParam, "got %#lx\n", info->rgProvParam[1].dwParam);
+    ok(info->rgProvParam[1].cbData == param[1].cbData, "got %#lx\n", info->rgProvParam[1].cbData);
     ok(!memcmp(info->rgProvParam[1].pbData, param[1].pbData, param[1].cbData), "param2 mismatch\n");
-    ok(info->rgProvParam[1].dwFlags == param[1].dwFlags, "got %#x\n", info->rgProvParam[1].dwFlags);
-    HeapFree(GetProcessHeap(), 0, info);
+    ok(info->rgProvParam[1].dwFlags == param[1].dwFlags, "got %#lx\n", info->rgProvParam[1].dwFlags);
+    free(info);
 
     ret = CertAddCertificateContextToStore(store, cert, CERT_STORE_ADD_NEW, NULL);
-    ok(ret, "CertAddCertificateContextToStore error %#x\n", GetLastError());
+    ok(ret, "CertAddCertificateContextToStore error %#lx\n", GetLastError());
 
     CertFreeCertificateContext(cert);
     CertCloseStore(store, 0);
 
     store = CertOpenStore(CERT_STORE_PROV_SYSTEM_A, 0, 0,
                           CERT_SYSTEM_STORE_CURRENT_USER | CERT_STORE_OPEN_EXISTING_FLAG, "My");
-    ok(store != NULL, "CertOpenStore error %u\n", GetLastError());
+    ok(store != NULL, "CertOpenStore error %lu\n", GetLastError());
 
     name.pbData = subjectName;
     name.cbData = sizeof(subjectName);
@@ -4203,29 +4577,29 @@ static void testKeyProvInfo(void)
     ok(cert != NULL, "certificate should exist in My store\n");
 
     ret = CertGetCertificateContextProperty(cert, CERT_KEY_PROV_INFO_PROP_ID, NULL, &size);
-    ok(ret, "CertGetCertificateContextProperty error %#x\n", GetLastError());
-    info = HeapAlloc(GetProcessHeap(), 0, size);
+    ok(ret, "CertGetCertificateContextProperty error %#lx\n", GetLastError());
+    info = malloc(size);
     ret = CertGetCertificateContextProperty(cert, CERT_KEY_PROV_INFO_PROP_ID, info, &size);
-    ok(ret, "CertGetCertificateContextProperty error %#x\n", GetLastError());
+    ok(ret, "CertGetCertificateContextProperty error %#lx\n", GetLastError());
     ok(!lstrcmpW(info->pwszContainerName, containerW), "got %s\n", wine_dbgstr_w(info->pwszContainerName));
     ok(!lstrcmpW(info->pwszProvName, providerW), "got %s\n", wine_dbgstr_w(info->pwszProvName));
-    ok(info->dwProvType == 0x12345678, "got %#x\n", info->dwProvType);
-    ok(info->dwFlags == 0x87654321, "got %#x\n", info->dwFlags);
-    ok(info->dwKeySpec == 0x11223344, "got %#x\n", info->dwKeySpec);
-    ok(info->cProvParam == 2, "got %#x\n", info->cProvParam);
+    ok(info->dwProvType == 0x12345678, "got %#lx\n", info->dwProvType);
+    ok(info->dwFlags == 0x87654321, "got %#lx\n", info->dwFlags);
+    ok(info->dwKeySpec == 0x11223344, "got %#lx\n", info->dwKeySpec);
+    ok(info->cProvParam == 2, "got %#lx\n", info->cProvParam);
     ok(info->rgProvParam != NULL, "got %p\n", info->rgProvParam);
-    ok(info->rgProvParam[0].dwParam == param[0].dwParam, "got %#x\n", info->rgProvParam[0].dwParam);
-    ok(info->rgProvParam[0].cbData == param[0].cbData, "got %#x\n", info->rgProvParam[0].cbData);
+    ok(info->rgProvParam[0].dwParam == param[0].dwParam, "got %#lx\n", info->rgProvParam[0].dwParam);
+    ok(info->rgProvParam[0].cbData == param[0].cbData, "got %#lx\n", info->rgProvParam[0].cbData);
     ok(!memcmp(info->rgProvParam[0].pbData, param[0].pbData, param[0].cbData), "param1 mismatch\n");
-    ok(info->rgProvParam[0].dwFlags == param[0].dwFlags, "got %#x\n", info->rgProvParam[1].dwFlags);
-    ok(info->rgProvParam[1].dwParam == param[1].dwParam, "got %#x\n", info->rgProvParam[1].dwParam);
-    ok(info->rgProvParam[1].cbData == param[1].cbData, "got %#x\n", info->rgProvParam[1].cbData);
+    ok(info->rgProvParam[0].dwFlags == param[0].dwFlags, "got %#lx\n", info->rgProvParam[1].dwFlags);
+    ok(info->rgProvParam[1].dwParam == param[1].dwParam, "got %#lx\n", info->rgProvParam[1].dwParam);
+    ok(info->rgProvParam[1].cbData == param[1].cbData, "got %#lx\n", info->rgProvParam[1].cbData);
     ok(!memcmp(info->rgProvParam[1].pbData, param[1].pbData, param[1].cbData), "param2 mismatch\n");
-    ok(info->rgProvParam[1].dwFlags == param[1].dwFlags, "got %#x\n", info->rgProvParam[1].dwFlags);
-    HeapFree(GetProcessHeap(), 0, info);
+    ok(info->rgProvParam[1].dwFlags == param[1].dwFlags, "got %#lx\n", info->rgProvParam[1].dwFlags);
+    free(info);
 
     ret = CertDeleteCertificateFromStore(cert);
-    ok(ret, "CertDeleteCertificateFromStore error %#x\n", GetLastError());
+    ok(ret, "CertDeleteCertificateFromStore error %#lx\n", GetLastError());
 
     CertFreeCertificateContext(cert);
     CertCloseStore(store, 0);
@@ -4249,32 +4623,32 @@ static void test_VerifySignature(void)
     NTSTATUS status;
 
     cert = CertCreateCertificateContext(X509_ASN_ENCODING, selfSignedCert, sizeof(selfSignedCert));
-    ok(cert != NULL, "CertCreateCertificateContext error %#x\n", GetLastError());
+    ok(cert != NULL, "CertCreateCertificateContext error %#lx\n", GetLastError());
 
     /* 1. Verify certificate signature with Crypto API */
     ret = CryptVerifyCertificateSignature(0, cert->dwCertEncodingType,
             cert->pbCertEncoded, cert->cbCertEncoded, &cert->pCertInfo->SubjectPublicKeyInfo);
-    ok(ret, "CryptVerifyCertificateSignature error %#x\n", GetLastError());
+    ok(ret, "CryptVerifyCertificateSignature error %#lx\n", GetLastError());
 
     /* 2. Verify certificate signature with Crypto API manually */
     ret = CryptAcquireContextA(&prov, NULL, NULL, PROV_RSA_FULL, CRYPT_VERIFYCONTEXT);
-    ok(ret, "CryptAcquireContext error %#x\n", GetLastError());
+    ok(ret, "CryptAcquireContext error %#lx\n", GetLastError());
 
     ret = CryptImportPublicKeyInfoEx(prov, cert->dwCertEncodingType, &cert->pCertInfo->SubjectPublicKeyInfo, 0, 0, NULL, &key);
-    ok(ret, "CryptImportPublicKeyInfoEx error %#x\n", GetLastError());
+    ok(ret, "CryptImportPublicKeyInfoEx error %#lx\n", GetLastError());
 
     ret = CryptDecodeObjectEx(cert->dwCertEncodingType, X509_CERT,
             cert->pbCertEncoded, cert->cbCertEncoded, CRYPT_DECODE_ALLOC_FLAG, NULL, &info, &size);
-    ok(ret, "CryptDecodeObjectEx error %#x\n", GetLastError());
+    ok(ret, "CryptDecodeObjectEx error %#lx\n", GetLastError());
 
     ret = CryptCreateHash(prov, CALG_SHA1, 0, 0, &hash);
-    ok(ret, "CryptCreateHash error %#x\n", GetLastError());
+    ok(ret, "CryptCreateHash error %#lx\n", GetLastError());
 
     ret = CryptHashData(hash, info->ToBeSigned.pbData, info->ToBeSigned.cbData, 0);
-    ok(ret, "CryptHashData error %#x\n", GetLastError());
+    ok(ret, "CryptHashData error %#lx\n", GetLastError());
 
     ret = CryptVerifySignatureW(hash, info->Signature.pbData, info->Signature.cbData, key, NULL, 0);
-    ok(ret, "CryptVerifySignature error %#x\n", GetLastError());
+    ok(ret, "CryptVerifySignature error %#lx\n", GetLastError());
 
     CryptDestroyHash(hash);
     CryptDestroyKey(key);
@@ -4282,51 +4656,43 @@ static void test_VerifySignature(void)
 
     /* 3. Verify certificate signature with CNG */
     ret = CryptImportPublicKeyInfoEx2(cert->dwCertEncodingType, &cert->pCertInfo->SubjectPublicKeyInfo, 0, NULL, &bkey);
-    ok(ret, "CryptImportPublicKeyInfoEx error %#x\n", GetLastError());
+    ok(ret, "CryptImportPublicKeyInfoEx error %#lx\n", GetLastError());
 
     status = BCryptOpenAlgorithmProvider(&alg, BCRYPT_SHA1_ALGORITHM, MS_PRIMITIVE_PROVIDER, 0);
-    ok(!status, "got %#x\n", status);
+    ok(!status, "got %#lx\n", status);
 
     status = BCryptCreateHash(alg, &bhash, NULL, 0, NULL, 0, 0);
-    ok(!status || broken(status == STATUS_INVALID_PARAMETER) /* Vista */, "got %#x\n", status);
-    if (status == STATUS_INVALID_PARAMETER)
-    {
-        win_skip("broken BCryptCreateHash\n");
-        goto done;
-    }
+    ok(!status, "got %#lx\n", status);
 
     status = BCryptHashData(bhash, info->ToBeSigned.pbData, info->ToBeSigned.cbData, 0);
-    ok(!status, "got %#x\n", status);
+    ok(!status, "got %#lx\n", status);
 
     status = BCryptFinishHash(bhash, hash_value, sizeof(hash_value), 0);
-    ok(!status, "got %#x\n", status);
+    ok(!status, "got %#lx\n", status);
     ok(!memcmp(hash_value, selfSignedSignatureHash, sizeof(hash_value)), "got wrong hash value\n");
 
     status = BCryptGetProperty(bhash, BCRYPT_HASH_LENGTH, (BYTE *)&hash_len, sizeof(hash_len), &size, 0);
-    ok(!status, "got %#x\n", status);
-    ok(hash_len == sizeof(hash_value), "got %u\n", hash_len);
+    ok(!status, "got %#lx\n", status);
+    ok(hash_len == sizeof(hash_value), "got %lu\n", hash_len);
 
-    sig_value = HeapAlloc(GetProcessHeap(), 0, info->Signature.cbData);
+    sig_value = malloc(info->Signature.cbData);
     for (i = 0; i < info->Signature.cbData; i++)
         sig_value[i] = info->Signature.pbData[info->Signature.cbData - i - 1];
 
     pad.pszAlgId = BCRYPT_SHA1_ALGORITHM;
     status = BCryptVerifySignature(bkey, &pad, hash_value, sizeof(hash_value), sig_value, info->Signature.cbData, BCRYPT_PAD_PKCS1);
-    ok(!status, "got %#x\n", status);
+    ok(!status, "got %#lx\n", status);
 
-    HeapFree(GetProcessHeap(), 0, sig_value);
+    free(sig_value);
     BCryptDestroyHash(bhash);
-done:
     BCryptCloseAlgorithmProvider(alg, 0);
-
+    BCryptDestroyKey(bkey);
     LocalFree(info);
     CertFreeCertificateContext(cert);
 }
 
 START_TEST(cert)
 {
-    init_function_pointers();
-
     testAddCert();
     testCertProperties();
     testCreateCert();

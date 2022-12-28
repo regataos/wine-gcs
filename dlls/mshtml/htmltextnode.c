@@ -25,6 +25,7 @@
 #include "winbase.h"
 #include "winuser.h"
 #include "ole2.h"
+#include "mshtmdid.h"
 
 #include "mshtml_private.h"
 
@@ -38,6 +39,27 @@ struct HTMLDOMTextNode {
     IHTMLDOMTextNode2 IHTMLDOMTextNode2_iface;
 
     nsIDOMText *nstext;
+};
+
+/* dummy dispex used only for CharacterDataPrototype in prototype chain */
+static void DOMCharacterData_init_dispex_info(dispex_data_t *info, compat_mode_t mode)
+{
+    static const dispex_hook_t textnode_hooks[] = {
+        {DISPID_IHTMLDOMTEXTNODE_TOSTRING},
+        {DISPID_IHTMLDOMTEXTNODE_SPLITTEXT},
+        {DISPID_UNKNOWN}
+    };
+    dispex_info_add_interface(info, IHTMLDOMTextNode_tid, textnode_hooks);
+    dispex_info_add_interface(info, IHTMLDOMTextNode2_tid, NULL);
+}
+
+dispex_static_data_t DOMCharacterData_dispex = {
+    L"CharacterData",
+    NULL,
+    PROTO_ID_DOMCharacterData,
+    NULL_tid,
+    no_iface_tids,
+    DOMCharacterData_init_dispex_info
 };
 
 static inline HTMLDOMTextNode *impl_from_IHTMLDOMTextNode(IHTMLDOMTextNode *iface)
@@ -150,7 +172,7 @@ static HRESULT WINAPI HTMLDOMTextNode_get_length(IHTMLDOMTextNode *iface, LONG *
 
     nsres = nsIDOMText_GetLength(This->nstext, &length);
     if(NS_FAILED(nsres))
-        ERR("GetLength failed: %08x\n", nsres);
+        ERR("GetLength failed: %08lx\n", nsres);
 
     *p = length;
     return S_OK;
@@ -164,11 +186,11 @@ static HRESULT WINAPI HTMLDOMTextNode_splitText(IHTMLDOMTextNode *iface, LONG of
     nsresult nsres;
     HRESULT hres;
 
-    TRACE("(%p)->(%d %p)\n", This, offset, pRetNode);
+    TRACE("(%p)->(%ld %p)\n", This, offset, pRetNode);
 
     nsres = nsIDOMText_SplitText(This->nstext, offset, &text);
     if(NS_FAILED(nsres)) {
-        ERR("SplitText failed: %x08x\n", nsres);
+        ERR("SplitText failed: %lx08x\n", nsres);
         return E_FAIL;
     }
 
@@ -260,7 +282,7 @@ static HRESULT WINAPI HTMLDOMTextNode2_Invoke(IHTMLDOMTextNode2 *iface, DISPID d
 static HRESULT WINAPI HTMLDOMTextNode2_substringData(IHTMLDOMTextNode2 *iface, LONG offset, LONG count, BSTR *string)
 {
     HTMLDOMTextNode *This = impl_from_IHTMLDOMTextNode2(iface);
-    FIXME("(%p)->(%d %d %p)\n", This, offset, count, string);
+    FIXME("(%p)->(%ld %ld %p)\n", This, offset, count, string);
     return E_NOTIMPL;
 }
 
@@ -276,7 +298,7 @@ static HRESULT WINAPI HTMLDOMTextNode2_appendData(IHTMLDOMTextNode2 *iface, BSTR
     nsres = nsIDOMText_AppendData(This->nstext, &nsstr);
     nsAString_Finish(&nsstr);
     if(NS_FAILED(nsres)) {
-        ERR("AppendData failed: %08x\n", nsres);
+        ERR("AppendData failed: %08lx\n", nsres);
         return E_FAIL;
     }
 
@@ -286,21 +308,21 @@ static HRESULT WINAPI HTMLDOMTextNode2_appendData(IHTMLDOMTextNode2 *iface, BSTR
 static HRESULT WINAPI HTMLDOMTextNode2_insertData(IHTMLDOMTextNode2 *iface, LONG offset, BSTR string)
 {
     HTMLDOMTextNode *This = impl_from_IHTMLDOMTextNode2(iface);
-    FIXME("(%p)->(%d %s)\n", This, offset, debugstr_w(string));
+    FIXME("(%p)->(%ld %s)\n", This, offset, debugstr_w(string));
     return E_NOTIMPL;
 }
 
 static HRESULT WINAPI HTMLDOMTextNode2_deleteData(IHTMLDOMTextNode2 *iface, LONG offset, LONG count)
 {
     HTMLDOMTextNode *This = impl_from_IHTMLDOMTextNode2(iface);
-    FIXME("(%p)->(%d %d)\n", This, offset, count);
+    FIXME("(%p)->(%ld %ld)\n", This, offset, count);
     return E_NOTIMPL;
 }
 
 static HRESULT WINAPI HTMLDOMTextNode2_replaceData(IHTMLDOMTextNode2 *iface, LONG offset, LONG count, BSTR string)
 {
     HTMLDOMTextNode *This = impl_from_IHTMLDOMTextNode2(iface);
-    FIXME("(%p)->(%d %d %s)\n", This, offset, count, debugstr_w(string));
+    FIXME("(%p)->(%ld %ld %s)\n", This, offset, count, debugstr_w(string));
     return E_NOTIMPL;
 }
 
@@ -365,9 +387,10 @@ static const tid_t HTMLDOMTextNode_iface_tids[] = {
     IHTMLDOMTextNode2_tid,
     0
 };
-static dispex_static_data_t HTMLDOMTextNode_dispex = {
+dispex_static_data_t HTMLDOMTextNode_dispex = {
     L"Text",
     NULL,
+    PROTO_ID_HTMLDOMTextNode,
     DispHTMLDOMTextNode_tid,
     HTMLDOMTextNode_iface_tids,
     HTMLDOMNode_init_dispex_info

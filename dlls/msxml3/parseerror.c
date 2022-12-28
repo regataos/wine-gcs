@@ -83,7 +83,7 @@ static ULONG WINAPI parseError_AddRef(
 {
     parse_error_t *This = impl_from_IXMLDOMParseError2( iface );
     ULONG ref = InterlockedIncrement( &This->ref );
-    TRACE("%p, refcount %lu.\n", iface, ref);
+    TRACE("(%p)->(%d)\n", This, ref);
     return ref;
 }
 
@@ -93,9 +93,8 @@ static ULONG WINAPI parseError_Release(
     parse_error_t *This = impl_from_IXMLDOMParseError2( iface );
     ULONG ref = InterlockedDecrement( &This->ref );
 
-    TRACE("%p, refcount %lu.\n", iface, ref);
-
-    if (!ref)
+    TRACE("(%p)->(%d)\n", This, ref);
+    if ( ref == 0 )
     {
         SysFreeString(This->url);
         SysFreeString(This->reason);

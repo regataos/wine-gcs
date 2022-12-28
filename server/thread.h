@@ -67,10 +67,7 @@ struct thread
     unsigned int           error;         /* current error code */
     union generic_request  req;           /* current request */
     void                  *req_data;      /* variable-size data for request */
-    unsigned int           req_data_size;
     unsigned int           req_toread;    /* amount of data still to read in request */
-    void                  *rep_data;      /* variable-size data for reply */
-    unsigned int           rep_data_size; /* size of reply data */
     void                  *reply_data;    /* variable-size data for reply */
     unsigned int           reply_size;    /* size of reply data */
     unsigned int           reply_towrite; /* amount of data still to write in reply */
@@ -87,6 +84,7 @@ struct thread
     client_ptr_t           entry_point;   /* entry point (in client address space) */
     affinity_t             affinity;      /* affinity mask */
     int                    priority;      /* priority level */
+    struct timeout_user   *delay_priority;/* delayed set_thread_priority */
     int                    suspend;       /* suspend count */
     int                    dbg_hidden;    /* hidden from debugger */
     obj_handle_t           desktop;       /* desktop handle */
@@ -97,7 +95,11 @@ struct thread
     struct list            kernel_object; /* list of kernel object pointers */
     data_size_t            desc_len;      /* thread description length in bytes */
     WCHAR                 *desc;          /* thread description string */
-    struct timeout_user   *exit_poll;     /* poll if the thread/process has exited already */
+    struct object         *locked_completion; /* completion port wait object successfully waited by the thread */
+    struct object         *queue_shared_mapping; /* thread queue shared memory mapping */
+    volatile struct queue_shared_memory *queue_shared;  /* thread queue shared memory ptr */
+    struct object         *input_shared_mapping; /* thread input shared memory mapping */
+    volatile struct input_shared_memory *input_shared;  /* thread input shared memory ptr */
 };
 
 extern struct thread *current;
@@ -127,6 +129,7 @@ extern void thread_cancel_apc( struct thread *thread, struct object *owner, enum
 extern int thread_add_inflight_fd( struct thread *thread, int client, int server );
 extern int thread_get_inflight_fd( struct thread *thread, int client );
 extern struct token *thread_get_impersonation_token( struct thread *thread );
+extern int set_thread_priority( struct thread *thread, int priority_class, int priority );
 extern int set_thread_affinity( struct thread *thread, affinity_t affinity );
 extern int suspend_thread( struct thread *thread );
 extern int resume_thread( struct thread *thread );
@@ -149,10 +152,5 @@ static inline void clear_error(void)             { set_error(0); }
 static inline void set_win32_error( unsigned int err ) { set_error( 0xc0010000 | err ); }
 
 static inline thread_id_t get_thread_id( struct thread *thread ) { return thread->id; }
-
-/* scheduler functions */
-
-extern void init_scheduler( void );
-extern void set_scheduler_priority( struct thread *thread );
 
 #endif  /* __WINE_SERVER_THREAD_H */

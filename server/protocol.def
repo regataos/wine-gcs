@@ -493,6 +493,7 @@ enum apc_type
     APC_USER,
     APC_ASYNC_IO,
     APC_VIRTUAL_ALLOC,
+    APC_VIRTUAL_ALLOC_EX,
     APC_VIRTUAL_FREE,
     APC_VIRTUAL_QUERY,
     APC_VIRTUAL_PROTECT,
@@ -534,6 +535,16 @@ typedef union
         mem_size_t       zero_bits;    /* number of zero high bits */
         unsigned int     prot;         /* memory protection flags */
     } virtual_alloc;
+    struct
+    {
+        enum apc_type    type;         /* APC_VIRTUAL_ALLOC */
+        unsigned int     op_type;      /* type of operation */
+        client_ptr_t     addr;         /* requested address */
+        mem_size_t       size;         /* allocation size */
+        mem_size_t       limit;        /* allocation address limit */
+        mem_size_t       align;        /* allocation alignment */
+        unsigned int     prot;         /* memory protection flags */
+    } virtual_alloc_ex;
     struct
     {
         enum apc_type    type;      /* APC_VIRTUAL_FREE */
@@ -591,6 +602,7 @@ typedef union
         enum apc_type    type;      /* APC_UNMAP_VIEW */
         int              __pad;
         client_ptr_t     addr;      /* view address */
+        unsigned int     flags;     /* unmap flags */
     } unmap_view;
     struct
     {
@@ -629,6 +641,13 @@ typedef union
         client_ptr_t     addr;      /* resulting address */
         mem_size_t       size;      /* resulting size */
     } virtual_alloc;
+    struct
+    {
+        enum apc_type    type;      /* APC_VIRTUAL_ALLOC */
+        unsigned int     status;    /* status returned by call */
+        client_ptr_t     addr;      /* resulting address */
+        mem_size_t       size;      /* resulting size */
+    } virtual_alloc_ex;
     struct
     {
         enum apc_type    type;      /* APC_VIRTUAL_FREE */
@@ -853,6 +872,55 @@ struct cpu_topology_override
     unsigned char host_cpu_id[64];
 };
 
+struct shared_cursor
+{
+    int                  x;                /* cursor position */
+    int                  y;
+    unsigned int         last_change;      /* time of last position change */
+    rectangle_t          clip;             /* cursor clip rectangle */
+};
+
+struct desktop_shared_memory
+{
+    unsigned int         seq;              /* sequence number - server updating if (seq_no & SEQUENCE_MASK) != 0 */
+    struct shared_cursor cursor;           /* global cursor information */
+    unsigned char        keystate[256];    /* asynchronous key state */
+    thread_id_t          foreground_tid;   /* tid of the foreground thread */
+};
+
+struct queue_shared_memory
+{
+    unsigned int         seq;              /* sequence number - server updating if (seq_no & SEQUENCE_MASK) != 0 */
+    int                  created;          /* queue has been created */
+    unsigned int         wake_bits;
+    unsigned int         changed_bits;
+    unsigned int         wake_mask;
+    unsigned int         changed_mask;
+    thread_id_t          input_tid;
+};
+
+struct input_shared_memory
+{
+    unsigned int         seq;              /* sequence number - server updating if (seq_no & SEQUENCE_MASK) != 0 */
+    int                  created;
+    thread_id_t          tid;
+    user_handle_t        focus;            /* handle to the focus window */
+    user_handle_t        capture;          /* handle to the capture window */
+    user_handle_t        active;           /* handle to the active window */
+    user_handle_t        menu_owner;       /* handle to the menu owner */
+    user_handle_t        move_size;        /* handle to the moving/resizing window */
+    user_handle_t        caret;            /* handle to the caret window */
+    user_handle_t        cursor;           /* handle to the cursor */
+    rectangle_t          caret_rect;       /* caret rectangle */
+    int                  cursor_count;     /* cursor show count */
+    unsigned char        keystate[256];    /* key state */
+    int                  keystate_lock;    /* keystate is locked */
+};
+
+/* Bits that must be clear for client to read */
+#define SEQUENCE_MASK_BITS  4
+#define SEQUENCE_MASK ((1UL << SEQUENCE_MASK_BITS) - 1)
+
 /****************************************************************/
 /* Request declarations */
 
@@ -913,12 +981,12 @@ struct cpu_topology_override
 
 /* Signal the end of the process initialization */
 @REQ(init_process_done)
-    VARARG(cpu_override,cpu_topology_override); /* Overridden CPUs to host CPUs mapping. */
     client_ptr_t teb;          /* TEB of new thread (in process address space) */
     client_ptr_t peb;          /* PEB of new process (in process address space) */
     client_ptr_t ldt_copy;     /* address of LDT copy (in process address space) */
 @REPLY
     client_ptr_t entry;        /* process entry point */
+    VARARG(cpu_override,cpu_topology_override); /* Overridden CPUs to host CPUs mapping. */
     int          suspend;      /* is process suspended? */
 @END
 
@@ -930,6 +998,7 @@ struct cpu_topology_override
     int          debug_level;  /* new debug level */
     int          reply_fd;     /* fd for reply pipe */
     int          wait_fd;      /* fd for blocking calls pipe */
+    char         nice_limit;   /* RLIMIT_NICE of new thread */
 @REPLY
     process_id_t pid;          /* process id of the new thread's process */
     thread_id_t  tid;          /* thread id of the new thread */
@@ -1369,7 +1438,6 @@ enum event_op { PULSE_EVENT, SET_EVENT, RESET_EVENT };
 /* Get the Unix name from a file handle */
 @REQ(get_handle_unix_name)
     obj_handle_t   handle;      /* file handle */
-    int            nofollow;    /* do not follow symlinks (return the link) */
 @REPLY
     data_size_t    name_len;    /* unix name length */
     VARARG(name,string);        /* unix name */
@@ -1389,7 +1457,6 @@ enum server_fd_type
 {
     FD_TYPE_INVALID,  /* invalid file (no associated fd) */
     FD_TYPE_FILE,     /* regular file */
-    FD_TYPE_SYMLINK,  /* symbolic link */
     FD_TYPE_DIR,      /* directory */
     FD_TYPE_SOCKET,   /* socket */
     FD_TYPE_SERIAL,   /* serial port */
@@ -1460,11 +1527,11 @@ enum server_fd_type
 @REQ(recv_socket)
     int          oob;           /* are we receiving OOB data? */
     async_data_t async;         /* async I/O parameters */
-    int          force_async;   /* Force asynchronous mode? */
+    unsigned int status;        /* status of initial call */
+    unsigned int total;         /* number of bytes already read */
 @REPLY
     obj_handle_t wait;          /* handle to wait on for blocking recv */
     unsigned int options;       /* device open options */
-    int          nonblocking;   /* is socket non-blocking? */
 @END
 
 
@@ -1476,6 +1543,24 @@ enum server_fd_type
 @REPLY
     obj_handle_t wait;          /* handle to wait on for blocking send */
     unsigned int options;       /* device open options */
+@END
+
+
+/* Store ICMP id for ICMP over datagram fixup */
+@REQ(socket_send_icmp_id)
+    obj_handle_t   handle;        /* socket handle */
+    unsigned short icmp_id;       /* ICMP packet id */
+    unsigned short icmp_seq;      /* ICMP packed sequence */
+@REPLY
+@END
+
+
+/* Get ICMP id for ICMP over datagram fixup */
+@REQ(socket_get_icmp_id)
+    obj_handle_t   handle;        /* socket handle */
+    unsigned short icmp_seq;      /* ICMP packed sequence */
+@REPLY
+    unsigned short icmp_id;       /* ICMP packet id */
 @END
 
 
@@ -1707,6 +1792,7 @@ struct process_info
     obj_handle_t handle;       /* process handle */
     client_ptr_t addr;         /* addr to read from */
 @REPLY
+    int unix_pid;              /* Unix pid of new process */
     VARARG(data,bytes);        /* result data */
 @END
 
@@ -2045,7 +2131,6 @@ enum message_type
     int             prev_y;
     int             new_x;     /* new cursor position */
     int             new_y;
-    VARARG(keystate,bytes);    /* global state array for all the keys */
 @END
 #define SEND_HWMSG_INJECTED    0x01
 #define SEND_HWMSG_RAWINPUT    0x02
@@ -2069,7 +2154,6 @@ enum message_type
     int             x;         /* message x position */
     int             y;         /* message y position */
     unsigned int    time;      /* message time */
-    unsigned int    active_hooks; /* active hooks bitmap */
     data_size_t     total;     /* total size of extra data */
     VARARG(data,message_data); /* message data for sent messages */
 @END
@@ -2170,16 +2254,6 @@ enum message_type
     client_ptr_t   user_arg;      /* user arg used to identify async */
 @REPLY
     VARARG(out_data,bytes);       /* iosb output data */
-@END
-
-
-/* Notify direct completion of async and close the wait handle if not blocking */
-@REQ(set_async_direct_result)
-    obj_handle_t   handle;        /* wait handle */
-    apc_param_t    information;   /* IO_STATUS_BLOCK Information */
-    unsigned int   status;        /* completion status */
-@REPLY
-    obj_handle_t   handle;        /* wait handle, or NULL if closed */
 @END
 
 
@@ -2323,18 +2397,19 @@ enum message_type
     user_handle_t  handle;        /* handle to the window */
     unsigned int   style;         /* window style */
     unsigned int   ex_style;      /* window extended style */
-    data_size_t    extra_size;    /* size to set in extra bytes */
+    unsigned int   id;            /* window id */
     mod_handle_t   instance;      /* creator instance */
     lparam_t       user_data;     /* user-specific data */
-    lparam_t       extra_value;   /* value to set in extra bytes or window id */
     int            extra_offset;  /* offset to set in extra bytes */
+    data_size_t    extra_size;    /* size to set in extra bytes */
+    lparam_t       extra_value;   /* value to set in extra bytes */
 @REPLY
     unsigned int   old_style;     /* old window style */
     unsigned int   old_ex_style;  /* old window extended style */
     mod_handle_t   old_instance;  /* old creator instance */
     lparam_t       old_user_data; /* old user-specific data */
     lparam_t       old_extra_value; /* old value in extra bytes */
-    lparam_t       old_id;        /* old window id */
+    unsigned int   old_id;        /* old window id */
 @END
 #define SET_WIN_STYLE     0x01
 #define SET_WIN_EXSTYLE   0x02
@@ -2711,6 +2786,7 @@ enum coords_relative
     obj_handle_t handle;          /* handle to the object */
     unsigned int flags;           /* information to set/get */
     unsigned int obj_flags;       /* new object flags */
+    timeout_t    close_timeout;   /* desktop close timeout */
 @REPLY
     int          is_desktop;      /* is object a desktop? */
     unsigned int old_obj_flags;   /* old object flags */
@@ -2718,6 +2794,7 @@ enum coords_relative
 @END
 #define SET_USER_OBJECT_SET_FLAGS       1
 #define SET_USER_OBJECT_GET_FULL_NAME   2
+#define SET_USER_OBJECT_SET_CLOSE_TIMEOUT 4
 
 
 /* Register a hotkey */
@@ -2758,12 +2835,9 @@ enum coords_relative
     user_handle_t  focus;         /* handle to the focus window */
     user_handle_t  capture;       /* handle to the capture window */
     user_handle_t  active;        /* handle to the active window */
-    user_handle_t  foreground;    /* handle to the global foreground window */
     user_handle_t  menu_owner;    /* handle to the menu owner */
     user_handle_t  move_size;     /* handle to the moving/resizing window */
     user_handle_t  caret;         /* handle to the caret window */
-    user_handle_t  cursor;        /* handle to the cursor */
-    int            show_count;    /* cursor show count */
     rectangle_t    rect;          /* caret rectangle */
 @END
 
@@ -2809,6 +2883,7 @@ enum coords_relative
 /* Set the current thread active window */
 @REQ(set_active_window)
     user_handle_t  handle;        /* handle to the active window */
+    unsigned int   internal_msg;  /* set active window internal message */
 @REPLY
     user_handle_t  previous;      /* handle to the previous active window */
 @END
@@ -2862,6 +2937,13 @@ enum caret_state
     CARET_STATE_TOGGLE,     /* toggle current state */
     CARET_STATE_ON_IF_MOVED /* on if the position differs, unchanged otherwise */
 };
+
+
+/* get thread active hooks */
+@REQ(get_active_hooks)
+@REPLY
+    unsigned int   active_hooks;   /* active hooks bitmap */
+@END
 
 
 /* Set a window hook */
@@ -3192,6 +3274,7 @@ enum caret_state
 
 @REQ(get_token_groups)
     obj_handle_t    handle;       /* handle to the token */
+    unsigned int    attr_mask;    /* mask for wanted attributes */
 @REPLY
     data_size_t     attr_len;     /* length needed to store attrs */
     data_size_t     sid_len;      /* length needed to store sids */
@@ -3226,12 +3309,20 @@ enum caret_state
 @END
 
 
+struct handle_info
+{
+    process_id_t owner;
+    obj_handle_t handle;
+    unsigned int access;
+    unsigned int attributes;
+    unsigned int type;
+};
+
 /* Return a list of all opened handles */
 @REQ(get_system_handles)
-    unsigned int    ex;           /* return extended handle information */
 @REPLY
     unsigned int    count;        /* number of handles */
-    VARARG(data,handle_infos);    /* array of handle information */
+    VARARG(data,handle_infos);    /* array of handle_infos */
 @END
 
 
@@ -3450,6 +3541,7 @@ enum caret_state
 /* Make the current process a system process */
 @REQ(make_process_system)
     obj_handle_t handle;          /* handle to the process */
+    timeout_t    desktop_close_timeout; /* set timeout for desktop close */
 @REPLY
     obj_handle_t event;           /* event signaled when all user processes have exited */
 @END
@@ -3512,6 +3604,7 @@ enum caret_state
 /* get completion from completion port queue */
 @REQ(remove_completion)
     obj_handle_t handle;          /* port handle */
+    int          waited;          /* port was just successfully waited on */
 @REPLY
     apc_param_t   ckey;           /* completion key */
     apc_param_t   cvalue;         /* completion value */
@@ -3806,6 +3899,8 @@ enum esync_type
 @REQ(get_esync_apc_fd)
 @END
 
+#define FSYNC_SHM_PAGE_SIZE 0x10000
+
 enum fsync_type
 {
     FSYNC_SEMAPHORE = 1,
@@ -3858,4 +3953,9 @@ enum fsync_type
 @REQ(get_fsync_apc_idx)
 @REPLY
     unsigned int shm_idx;
+@END
+
+@REQ(fsync_free_shm_idx)
+    unsigned int shm_idx;
+@REPLY
 @END

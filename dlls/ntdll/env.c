@@ -541,7 +541,7 @@ NTSTATUS WINAPI RtlCreateProcessParametersEx( RTL_USER_PROCESS_PARAMETERS **resu
     if (!DllPath) DllPath = &null_str;
     if (!CurrentDirectoryName)
     {
-        if (NtCurrentTeb()->Tib.SubSystemTib)  /* FIXME: hack */
+        if (0 && NtCurrentTeb()->Tib.SubSystemTib)  /* FIXME: hack */
             curdir = ((WIN16_SUBSYSTEM_TIB *)NtCurrentTeb()->Tib.SubSystemTib)->curdir.DosPath;
         else
             curdir = cur_params->CurrentDirectory.DosPath;
@@ -683,4 +683,9 @@ void init_user_process_params(void)
     }
     set_wow64_environment( &new_params->Environment );
     new_params->EnvironmentSize = RtlSizeHeap( GetProcessHeap(), 0, new_params->Environment );
+}
+
+void __cdecl __wine_set_unix_env( const char *var, const char *val)
+{
+    unix_funcs->set_unix_env( var, val );
 }

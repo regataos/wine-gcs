@@ -266,19 +266,20 @@ void context_update_stream_info(struct wined3d_context *context, const struct wi
     const struct wined3d_d3d_info *d3d_info = context->d3d_info;
     DWORD prev_all_vbo = stream_info->all_vbo;
     unsigned int i;
-    uint32_t map;
+    WORD map;
 
     wined3d_stream_info_from_declaration(stream_info, state, d3d_info);
 
     stream_info->all_vbo = 1;
-    map = stream_info->use_map;
-    while (map)
+    for (i = 0, map = stream_info->use_map; map; map >>= 1, ++i)
     {
         struct wined3d_stream_info_element *element;
         struct wined3d_bo_address data;
         struct wined3d_buffer *buffer;
 
-        i = wined3d_bit_scan(&map);
+        if (!(map & 1))
+            continue;
+
         element = &stream_info->elements[i];
         buffer = state->streams[element->stream_idx].buffer;
 
@@ -390,12 +391,12 @@ void context_preload_textures(struct wined3d_context *context, const struct wine
     }
     else
     {
-        uint32_t ffu_map = context->fixed_function_usage_map;
+        WORD ffu_map = context->fixed_function_usage_map;
 
-        while (ffu_map)
+        for (i = 0; ffu_map; ffu_map >>= 1, ++i)
         {
-            i = wined3d_bit_scan(&ffu_map);
-            context_preload_texture(context, state, i);
+            if (ffu_map & 1)
+                context_preload_texture(context, state, i);
         }
     }
 }

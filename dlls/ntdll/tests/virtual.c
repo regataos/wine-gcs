@@ -39,6 +39,9 @@ static void * (WINAPI *pRtlFindExportedRoutineByName)(HMODULE,const char*);
 static BOOL (WINAPI *pIsWow64Process)(HANDLE, PBOOL);
 static NTSTATUS (WINAPI *pNtAllocateVirtualMemoryEx)(HANDLE, PVOID *, SIZE_T *, ULONG, ULONG,
                                                      MEM_EXTENDED_PARAMETER *, ULONG);
+static NTSTATUS (WINAPI *pNtMapViewOfSectionEx)(HANDLE, HANDLE, PVOID *, const LARGE_INTEGER *, SIZE_T *,
+        ULONG, ULONG, MEM_EXTENDED_PARAMETER *, ULONG);
+
 static const BOOL is_win64 = sizeof(void*) != sizeof(int);
 static BOOL is_wow64;
 
@@ -262,23 +265,464 @@ static void test_NtAllocateVirtualMemory(void)
     ok( size == 0x10000, "wrong size %lx\n", size );
     ok( addr2 == addr1, "wrong addr %p\n", addr2 );
 
+    /* Placeholder functionality */
+    size = 0x10000;
+    addr1 = NULL;
+    status = NtAllocateVirtualMemory(NtCurrentProcess(), &addr1, 0, &size, MEM_RESERVE | MEM_RESERVE_PLACEHOLDER, PAGE_NOACCESS);
+    ok(!!status, "Unexpected status %08lx.\n", status);
+}
+
+static void test_NtAllocateVirtualMemoryEx(void)
+{
+    void *addr1, *addr2;
+    NTSTATUS status;
+    SIZE_T size;
+
+    memset(&mbi, 0, sizeof(mbi));
+    status = NtQueryVirtualMemory( NtCurrentProcess(), p, MemoryBasicInformation, &mbi, sizeof(mbi), &size );
+    ok_(__FILE__,line)( !status, "Unexpected return value %08lx\n", status );
+    ok_(__FILE__,line)( size == sizeof(mbi), "Unexpected return value.\n");
+    ok_(__FILE__,line)( mbi.RegionSize == s, "Unexpected size %Iu, expected %Iu.\n", mbi.RegionSize, s);
+}
+
+static void test_NtAllocateVirtualMemoryEx(void)
+{
+    MEMORY_BASIC_INFORMATION mbi;
+    void *addresses[16];
+    SIZE_T size, size2;
+    char *p, *p1, *p2;
+    ULONG granularity;
+    NTSTATUS status;
+    ULONG_PTR count;
+    void *addr1;
+
     if (!pNtAllocateVirtualMemoryEx)
     {
         win_skip("NtAllocateVirtualMemoryEx() is missing\n");
         return;
     }
 
-    /* simple allocation should succeed */
     size = 0x1000;
     addr1 = NULL;
     status = pNtAllocateVirtualMemoryEx(NtCurrentProcess(), &addr1, &size, MEM_RESERVE | MEM_COMMIT,
                                         PAGE_EXECUTE_READWRITE, NULL, 0);
-    ok(status == STATUS_SUCCESS, "NtAllocateVirtualMemoryEx returned %08x\n", status);
+    ok(status == STATUS_SUCCESS, "Unexpected status %08lx.\n", status);
+
+    size = 0;
+    status = NtFreeVirtualMemory(NtCurrentProcess(), &addr1, &size, MEM_RELEASE);
+    ok(status == STATUS_SUCCESS, "Unexpected status %08lx.\n", status);
 
     /* specifying a count of >0 with NULL parameters should fail */
     status = pNtAllocateVirtualMemoryEx(NtCurrentProcess(), &addr1, &size, MEM_RESERVE | MEM_COMMIT,
                                         PAGE_EXECUTE_READWRITE, NULL, 1);
-    ok(status == STATUS_INVALID_PARAMETER, "NtAllocateVirtualMemoryEx returned %08x\n", status);
+    ok(status == STATUS_INVALID_PARAMETER, "Unexpected status %08lx.\n", status);
+
+    /* NULL process handle */
+    size = 0x1000;
+    addr1 = NULL;
+    status = pNtAllocateVirtualMemoryEx(NULL, &addr1, &size, MEM_RESERVE | MEM_COMMIT, PAGE_EXECUTE_READWRITE, NULL, 0);
+    ok(status == STATUS_INVALID_HANDLE, "Unexpected status %08lx.\n", status);
+
+    /* Placeholder functionality */
+    size = 0x10000;
+    addr1 = NULL;
+    status = NtAllocateVirtualMemory(NtCurrentProcess(), &addr1, 0, &size, MEM_RESERVE | MEM_RESERVE_PLACEHOLDER, PAGE_NOACCESS);
+    ok(status == STATUS_INVALID_PARAMETER, "Unexpected status %08lx.\n", status);
+
+    status = pNtAllocateVirtualMemoryEx(NtCurrentProcess(), &addr1, &size, MEM_RESERVE | MEM_RESERVE_PLACEHOLDER,
+            PAGE_READWRITE, NULL, 0);
+    ok(status == STATUS_INVALID_PARAMETER, "Unexpected status %08lx.\n", status);
+
+    status = pNtAllocateVirtualMemoryEx(NtCurrentProcess(), &addr1, &size, MEM_RESERVE | MEM_RESERVE_PLACEHOLDER,
+            PAGE_NOACCESS, NULL, 0);
+    ok(status == STATUS_SUCCESS, "Unexpected status %08lx.\n", status);
+
+    status = pNtAllocateVirtualMemoryEx(NtCurrentProcess(), &addr1, &size, MEM_RESERVE | MEM_RESERVE_PLACEHOLDER,
+            PAGE_NOACCESS, NULL, 0);
+    ok(status == STATUS_CONFLICTING_ADDRESSES, "Unexpected status %08lx.\n", status);
+
+    status = pNtAllocateVirtualMemoryEx(NtCurrentProcess(), &addr1, &size, MEM_RESERVE,
+            PAGE_NOACCESS, NULL, 0);
+    ok(status == STATUS_CONFLICTING_ADDRESSES, "Unexpected status %08lx.\n", status);
+
+    size = 0x1000;
+    status = pNtAllocateVirtualMemoryEx(NtCurrentProcess(), &addr1, &size, MEM_RESERVE | MEM_REPLACE_PLACEHOLDER,
+            PAGE_NOACCESS, NULL, 0);
+    ok(status == STATUS_CONFLICTING_ADDRESSES, "Unexpected status %08lx.\n", status);
+
+    size = 0x10000;
+    status = pNtAllocateVirtualMemoryEx(NtCurrentProcess(), &addr1, &size, MEM_COMMIT, PAGE_READWRITE, NULL, 0);
+    ok(status == STATUS_CONFLICTING_ADDRESSES, "Unexpected status %08lx.\n", status);
+
+    size = 0x10000;
+    status = pNtAllocateVirtualMemoryEx(NtCurrentProcess(), &addr1, &size, MEM_REPLACE_PLACEHOLDER, PAGE_READWRITE, NULL, 0);
+    ok(status == STATUS_INVALID_PARAMETER, "Unexpected status %08lx.\n", status);
+
+    size = 0x10000;
+    status = pNtAllocateVirtualMemoryEx(NtCurrentProcess(), &addr1, &size, MEM_COMMIT | MEM_REPLACE_PLACEHOLDER,
+            PAGE_READWRITE, NULL, 0);
+    ok(status == STATUS_INVALID_PARAMETER, "Unexpected status %08lx.\n", status);
+
+    size = 0x10000;
+    status = pNtAllocateVirtualMemoryEx(NtCurrentProcess(), &addr1, &size,
+            MEM_WRITE_WATCH | MEM_RESERVE | MEM_REPLACE_PLACEHOLDER,
+            PAGE_READONLY, NULL, 0);
+    ok(!status, "Unexpected status %08lx.\n", status);
+
+    size = 0x10000;
+    status = pNtAllocateVirtualMemoryEx(NtCurrentProcess(), &addr1, &size, MEM_COMMIT, PAGE_READWRITE, NULL, 0);
+    ok(!status, "Unexpected status %08lx.\n", status);
+
+    status = NtQueryVirtualMemory( NtCurrentProcess(), addr1, MemoryBasicInformation, &mbi, sizeof(mbi), &size );
+    ok(!status, "Unexpected status %08lx.\n", status);
+    ok(mbi.AllocationProtect == PAGE_READONLY, "Unexpected protection %#lx.\n", mbi.AllocationProtect);
+    ok(mbi.State == MEM_COMMIT, "Unexpected state %#lx.\n", mbi.State);
+    ok(mbi.Type == MEM_PRIVATE, "Unexpected type %#lx.\n", mbi.Type);
+    ok(mbi.RegionSize == 0x10000, "Unexpected size.\n");
+
+    size = 0x10000;
+    count = ARRAY_SIZE(addresses);
+    status = NtGetWriteWatch( NtCurrentProcess(), WRITE_WATCH_FLAG_RESET, addr1, size,
+                              addresses, &count, &granularity );
+    ok(!status, "Unexpected status %08lx.\n", status);
+    ok(!count, "Unexpected count %u.\n", (unsigned int)count);
+    trace("addr1 %p, addresses[0] %p.\n", addr1, addresses[0]);
+    *((char *)addr1 + 0x1000) = 1;
+    count = ARRAY_SIZE(addresses);
+    status = NtGetWriteWatch( NtCurrentProcess(), WRITE_WATCH_FLAG_RESET, addr1, size,
+                              addresses, &count, &granularity );
+    ok(!status, "Unexpected status %08lx.\n", status);
+    ok(count == 1, "Unexpected count %u.\n", (unsigned int)count);
+    ok(addresses[0] == (char *)addr1 + 0x1000, "Unexpected address %p.\n", addresses[0]);
+
+    size = 0;
+    status = NtFreeVirtualMemory(NtCurrentProcess(), &addr1, &size, MEM_RELEASE);
+    ok(status == STATUS_SUCCESS, "Unexpected status %08lx.\n", status);
+
+    /* Placeholder region splitting. */
+
+    /* Split in three regions. */
+    addr1 = NULL;
+    size = 0x10000;
+    status = pNtAllocateVirtualMemoryEx(NtCurrentProcess(), &addr1, &size, MEM_RESERVE | MEM_RESERVE_PLACEHOLDER,
+            PAGE_NOACCESS, NULL, 0);
+    ok(status == STATUS_SUCCESS, "Unexpected status %08lx.\n", status);
+
+    p = addr1;
+    p1 = p + size / 2;
+    p2 = p1 + size / 4;
+    size2 = size / 4;
+    status = NtFreeVirtualMemory(NtCurrentProcess(), (void **)&p1, &size2, MEM_RELEASE | MEM_PRESERVE_PLACEHOLDER);
+    ok(status == STATUS_SUCCESS, "Unexpected status %08lx.\n", status);
+
+    check_region_size(p, size / 2);
+    check_region_size(p1, size / 4);
+    check_region_size(p2, size - size / 2 - size / 4);
+
+    status = NtFreeVirtualMemory(NtCurrentProcess(), (void **)&p, &size2, MEM_RELEASE);
+    ok(status == STATUS_SUCCESS, "Unexpected status %08lx.\n", status);
+    status = NtFreeVirtualMemory(NtCurrentProcess(), (void **)&p1, &size2, MEM_RELEASE);
+    ok(status == STATUS_SUCCESS, "Unexpected status %08lx.\n", status);
+    status = NtFreeVirtualMemory(NtCurrentProcess(), (void **)&p2, &size2, MEM_RELEASE);
+    ok(status == STATUS_SUCCESS, "Unexpected status %08lx.\n", status);
+
+    /* Split in two regions, specifying lower part. */
+    addr1 = NULL;
+    size = 0x10000;
+    status = pNtAllocateVirtualMemoryEx(NtCurrentProcess(), &addr1, &size, MEM_RESERVE | MEM_RESERVE_PLACEHOLDER,
+            PAGE_NOACCESS, NULL, 0);
+    ok(status == STATUS_SUCCESS, "Unexpected status %08lx.\n", status);
+
+    p1 = addr1;
+    p2 = p1 + size / 4;
+    size2 = size / 4;
+    status = NtFreeVirtualMemory(NtCurrentProcess(), (void **)&p1, &size2, MEM_RELEASE | MEM_PRESERVE_PLACEHOLDER);
+    ok(status == STATUS_SUCCESS, "Unexpected status %08lx.\n", status);
+    ok(p1 == addr1, "Unexpected address.\n");
+
+    check_region_size(p1, size / 4);
+    check_region_size(p2, size - size / 4);
+
+    status = NtFreeVirtualMemory(NtCurrentProcess(), (void **)&p1, &size2, MEM_RELEASE | MEM_COALESCE_PLACEHOLDERS);
+    ok(status == STATUS_CONFLICTING_ADDRESSES, "Unexpected status %08lx.\n", status);
+
+    status = NtFreeVirtualMemory(NtCurrentProcess(), (void **)&p1, &size, MEM_COALESCE_PLACEHOLDERS);
+    ok(status == STATUS_INVALID_PARAMETER_4, "Unexpected status %08lx.\n", status);
+
+    size2 = size + 0x1000;
+    status = NtFreeVirtualMemory(NtCurrentProcess(), (void **)&p1, &size2, MEM_RELEASE | MEM_COALESCE_PLACEHOLDERS);
+    ok(status == STATUS_CONFLICTING_ADDRESSES, "Unexpected status %08lx.\n", status);
+
+    size2 = size - 0x1000;
+    status = NtFreeVirtualMemory(NtCurrentProcess(), (void **)&p1, &size2, MEM_RELEASE | MEM_COALESCE_PLACEHOLDERS);
+    ok(status == STATUS_CONFLICTING_ADDRESSES, "Unexpected status %08lx.\n", status);
+
+    p1 = (char *)addr1 + 0x1000;
+    status = NtFreeVirtualMemory(NtCurrentProcess(), (void **)&p1, &size2, MEM_RELEASE | MEM_COALESCE_PLACEHOLDERS);
+    ok(status == STATUS_CONFLICTING_ADDRESSES, "Unexpected status %08lx.\n", status);
+    p1 = addr1;
+
+    size2 = 0;
+    status = NtFreeVirtualMemory(NtCurrentProcess(), (void **)&p1, &size2, MEM_RELEASE | MEM_COALESCE_PLACEHOLDERS);
+    ok(status == STATUS_INVALID_PARAMETER_3, "Unexpected status %08lx.\n", status);
+
+    status = NtFreeVirtualMemory(NtCurrentProcess(), (void **)&p1, &size, MEM_RELEASE);
+    ok(status == STATUS_UNABLE_TO_FREE_VM, "Unexpected status %08lx.\n", status);
+
+    status = NtFreeVirtualMemory(NtCurrentProcess(), (void **)&p1, &size, MEM_RELEASE | MEM_COALESCE_PLACEHOLDERS);
+    ok(status == STATUS_SUCCESS, "Unexpected status %08lx.\n", status);
+    check_region_size(p1, size);
+
+    size2 = size / 4;
+    status = NtFreeVirtualMemory(NtCurrentProcess(), (void **)&p1, &size2, MEM_RELEASE | MEM_PRESERVE_PLACEHOLDER);
+    ok(status == STATUS_SUCCESS, "Unexpected status %08lx.\n", status);
+    check_region_size(p1, size / 4);
+    check_region_size(p2, size - size / 4);
+
+    size2 = size - size / 4;
+    status = pNtAllocateVirtualMemoryEx(NtCurrentProcess(), (void **)&p2, &size2, MEM_RESERVE | MEM_REPLACE_PLACEHOLDER,
+            PAGE_READWRITE, NULL, 0);
+    ok(status == STATUS_SUCCESS, "Unexpected status %08lx.\n", status);
+
+    status = NtFreeVirtualMemory(NtCurrentProcess(), (void **)&p1, &size, MEM_RELEASE | MEM_COALESCE_PLACEHOLDERS);
+    ok(status == STATUS_CONFLICTING_ADDRESSES, "Unexpected status %08lx.\n", status);
+
+    size2 = size - size / 4;
+    status = NtFreeVirtualMemory(NtCurrentProcess(), (void **)&p2, &size2, MEM_RELEASE);
+    ok(status == STATUS_SUCCESS, "Unexpected status %08lx.\n", status);
+
+    status = NtFreeVirtualMemory(NtCurrentProcess(), (void **)&p1, &size, MEM_RELEASE | MEM_COALESCE_PLACEHOLDERS);
+    ok(status == STATUS_CONFLICTING_ADDRESSES, "Unexpected status %08lx.\n", status);
+
+    size2 = size / 4;
+    status = NtFreeVirtualMemory(NtCurrentProcess(), (void **)&p1, &size2, MEM_RELEASE);
+    ok(status == STATUS_SUCCESS, "Unexpected status %08lx.\n", status);
+
+    /* Split in two regions, specifying second half. */
+    addr1 = NULL;
+    size = 0x10000;
+    status = pNtAllocateVirtualMemoryEx(NtCurrentProcess(), &addr1, &size, MEM_RESERVE | MEM_RESERVE_PLACEHOLDER,
+            PAGE_NOACCESS, NULL, 0);
+    ok(status == STATUS_SUCCESS, "Unexpected status %08lx.\n", status);
+
+    p1 = addr1;
+    p2 = p1 + size / 2;
+
+    size2 = size / 2;
+    status = NtFreeVirtualMemory(NtCurrentProcess(), (void **)&p2, &size2, MEM_RELEASE | MEM_PRESERVE_PLACEHOLDER);
+    ok(status == STATUS_SUCCESS, "Unexpected status %08lx.\n", status);
+    ok(p2 == p1 + size / 2, "Unexpected address.\n");
+    check_region_size(p1, size / 2);
+    check_region_size(p2, size / 2);
+    status = NtFreeVirtualMemory(NtCurrentProcess(), (void **)&p1, &size2, MEM_RELEASE);
+    ok(status == STATUS_SUCCESS, "Unexpected status %08lx.\n", status);
+    status = NtFreeVirtualMemory(NtCurrentProcess(), (void **)&p2, &size2, MEM_RELEASE);
+    ok(status == STATUS_SUCCESS, "Unexpected status %08lx.\n", status);
+}
+
+static void test_NtAllocateVirtualMemoryEx_address_requirements(void)
+{
+    MEM_EXTENDED_PARAMETER ext[2];
+    MEM_ADDRESS_REQUIREMENTS a;
+    NTSTATUS status;
+    SYSTEM_INFO si;
+    SIZE_T size;
+    void *addr;
+
+    if (!pNtAllocateVirtualMemoryEx)
+    {
+        win_skip("NtAllocateVirtualMemoryEx() is missing\n");
+        return;
+    }
+
+    GetSystemInfo(&si);
+
+    memset(&ext, 0, sizeof(ext));
+    ext[0].Type = 0;
+    size = 0x1000;
+    addr = NULL;
+    status = pNtAllocateVirtualMemoryEx(NtCurrentProcess(), &addr, &size, MEM_RESERVE | MEM_COMMIT,
+                                        PAGE_EXECUTE_READWRITE, ext, 1);
+    ok(status == STATUS_INVALID_PARAMETER, "Unexpected status %08lx.\n", status);
+
+    memset(&ext, 0, sizeof(ext));
+    ext[0].Type = MemExtendedParameterMax;
+    size = 0x1000;
+    addr = NULL;
+    status = pNtAllocateVirtualMemoryEx(NtCurrentProcess(), &addr, &size, MEM_RESERVE | MEM_COMMIT,
+                                        PAGE_EXECUTE_READWRITE, ext, 1);
+    ok(status == STATUS_INVALID_PARAMETER, "Unexpected status %08lx.\n", status);
+
+    memset(&a, 0, sizeof(a));
+    ext[0].Type = MemExtendedParameterAddressRequirements;
+    ext[0].Pointer = &a;
+    size = 0x1000;
+    addr = NULL;
+    status = pNtAllocateVirtualMemoryEx(NtCurrentProcess(), &addr, &size, MEM_RESERVE | MEM_COMMIT,
+                                        PAGE_EXECUTE_READWRITE, ext, 1);
+    ok(!status, "Unexpected status %08lx.\n", status);
+    size = 0;
+    status = NtFreeVirtualMemory(NtCurrentProcess(), &addr, &size, MEM_RELEASE);
+    ok(!status, "Unexpected status %08lx.\n", status);
+
+    ext[1] = ext[0];
+    size = 0x1000;
+    addr = NULL;
+    status = pNtAllocateVirtualMemoryEx(NtCurrentProcess(), &addr, &size, MEM_RESERVE | MEM_COMMIT,
+                                        PAGE_EXECUTE_READWRITE, ext, 2);
+    ok(status == STATUS_INVALID_PARAMETER, "Unexpected status %08lx.\n", status);
+
+    a.LowestStartingAddress = NULL;
+    a.Alignment = 0;
+
+    a.HighestEndingAddress = (void *)(0x20001000 + 1);
+    size = 0x10000;
+    addr = NULL;
+    status = pNtAllocateVirtualMemoryEx(NtCurrentProcess(), &addr, &size, MEM_RESERVE,
+                                        PAGE_EXECUTE_READWRITE, ext, 1);
+    ok(status == STATUS_INVALID_PARAMETER, "Unexpected status %08lx.\n", status);
+
+    a.HighestEndingAddress = (void *)(0x20001000 - 2);
+    size = 0x10000;
+    addr = NULL;
+    status = pNtAllocateVirtualMemoryEx(NtCurrentProcess(), &addr, &size, MEM_RESERVE,
+                                        PAGE_EXECUTE_READWRITE, ext, 1);
+    ok(status == STATUS_INVALID_PARAMETER, "Unexpected status %08lx.\n", status);
+
+    a.HighestEndingAddress = (void *)(0x20000800 - 1);
+    size = 0x10000;
+    addr = NULL;
+    status = pNtAllocateVirtualMemoryEx(NtCurrentProcess(), &addr, &size, MEM_RESERVE,
+                                        PAGE_EXECUTE_READWRITE, ext, 1);
+    ok(status == STATUS_INVALID_PARAMETER, "Unexpected status %08lx.\n", status);
+
+    a.HighestEndingAddress = (char *)si.lpMaximumApplicationAddress + 0x1000;
+    size = 0x10000;
+    addr = NULL;
+    status = pNtAllocateVirtualMemoryEx(NtCurrentProcess(), &addr, &size, MEM_RESERVE,
+                                        PAGE_EXECUTE_READWRITE, ext, 1);
+    ok(status == STATUS_INVALID_PARAMETER, "Unexpected status %08lx.\n", status);
+
+    a.HighestEndingAddress = (char *)si.lpMaximumApplicationAddress;
+    size = 0x10000;
+    addr = NULL;
+    status = pNtAllocateVirtualMemoryEx(NtCurrentProcess(), &addr, &size, MEM_RESERVE,
+                                        PAGE_EXECUTE_READWRITE, ext, 1);
+    ok(!status, "Unexpected status %08lx.\n", status);
+    size = 0;
+    status = NtFreeVirtualMemory(NtCurrentProcess(), &addr, &size, MEM_RELEASE);
+    ok(!status, "Unexpected status %08lx.\n", status);
+
+    a.HighestEndingAddress = (void *)(0x20001000 - 1);
+    size = 0x40000;
+    addr = NULL;
+    status = pNtAllocateVirtualMemoryEx(NtCurrentProcess(), &addr, &size, MEM_RESERVE,
+                                        PAGE_EXECUTE_READWRITE, ext, 1);
+    ok(!status, "Unexpected status %08lx.\n", status);
+    ok(!((ULONG_PTR)addr & 0xffff), "Unexpected addr %p.\n", addr);
+    ok((ULONG_PTR)addr + size <= 0x20001000, "Unexpected addr %p.\n", addr);
+
+    status = pNtAllocateVirtualMemoryEx(NtCurrentProcess(), &addr, &size, MEM_COMMIT,
+                                        PAGE_EXECUTE_READWRITE, ext, 1);
+    ok(status == STATUS_INVALID_PARAMETER, "Unexpected status %08lx.\n", status);
+
+    size = 0;
+    status = NtFreeVirtualMemory(NtCurrentProcess(), &addr, &size, MEM_RELEASE);
+    ok(!status, "Unexpected status %08lx.\n", status);
+
+
+    size = 0x40000;
+    a.HighestEndingAddress = (void *)(0x20001000 - 1);
+    status = pNtAllocateVirtualMemoryEx(NtCurrentProcess(), &addr, &size, MEM_RESERVE,
+                                        PAGE_EXECUTE_READWRITE, ext, 1);
+    ok(status == STATUS_INVALID_PARAMETER, "Unexpected status %08lx.\n", status);
+
+    status = NtAllocateVirtualMemory(NtCurrentProcess(), &addr, 24, &size, MEM_RESERVE,
+                                        PAGE_EXECUTE_READWRITE);
+    ok(status == STATUS_INVALID_PARAMETER_3 || status == STATUS_INVALID_PARAMETER,
+            "Unexpected status %08lx.\n", status);
+
+    status = NtAllocateVirtualMemory(NtCurrentProcess(), &addr, 0xffffffff, &size, MEM_RESERVE,
+                                        PAGE_EXECUTE_READWRITE);
+    if (is_win64 || is_wow64)
+        ok(!status || status == STATUS_CONFLICTING_ADDRESSES, "Unexpected status %08lx.\n", status);
+    else
+        ok(status == STATUS_INVALID_PARAMETER_3 || status == STATUS_INVALID_PARAMETER,
+                "Unexpected status %08lx.\n", status);
+
+    if (!status)
+    {
+        size = 0;
+        status = NtFreeVirtualMemory(NtCurrentProcess(), &addr, &size, MEM_RELEASE);
+        ok(!status, "Unexpected status %08lx.\n", status);
+    }
+
+    a.HighestEndingAddress = NULL;
+    status = pNtAllocateVirtualMemoryEx(NtCurrentProcess(), &addr, &size, MEM_RESERVE,
+                                        PAGE_EXECUTE_READWRITE, ext, 1);
+    ok(!status || status == STATUS_CONFLICTING_ADDRESSES, "Unexpected status %08lx.\n", status);
+    if (!status)
+    {
+        size = 0;
+        status = NtFreeVirtualMemory(NtCurrentProcess(), &addr, &size, MEM_RELEASE);
+        ok(!status, "Unexpected status %08lx.\n", status);
+    }
+
+
+    a.HighestEndingAddress = (void *)(0x20001000 - 1);
+    a.Alignment = 0x10000;
+    size = 0x1000;
+    addr = NULL;
+    status = pNtAllocateVirtualMemoryEx(NtCurrentProcess(), &addr, &size, MEM_RESERVE,
+                                        PAGE_EXECUTE_READWRITE, ext, 1);
+    ok(!status, "Unexpected status %08lx.\n", status);
+    ok(!((ULONG_PTR)addr & 0xffff), "Unexpected addr %p.\n", addr);
+    ok((ULONG_PTR)addr + size < 0x20001000, "Unexpected addr %p.\n", addr);
+    size = 0;
+    status = NtFreeVirtualMemory(NtCurrentProcess(), &addr, &size, MEM_RELEASE);
+    ok(!status, "Unexpected status %08lx.\n", status);
+
+    a.HighestEndingAddress = (void *)(0x20001000 - 1);
+    a.Alignment = 0x20000000;
+    size = 0x2000;
+    addr = NULL;
+    status = pNtAllocateVirtualMemoryEx(NtCurrentProcess(), &addr, &size, MEM_RESERVE,
+                                        PAGE_EXECUTE_READWRITE, ext, 1);
+    ok(status == STATUS_NO_MEMORY, "Unexpected status %08lx.\n", status);
+
+    a.HighestEndingAddress = NULL;
+    a.Alignment = 0x8000;
+    size = 0x1000;
+    addr = NULL;
+    status = pNtAllocateVirtualMemoryEx(NtCurrentProcess(), &addr, &size, MEM_RESERVE,
+                                        PAGE_EXECUTE_READWRITE, ext, 1);
+    ok(status == STATUS_INVALID_PARAMETER, "Unexpected status %08lx.\n", status);
+
+    a.Alignment = 0x30000;
+    size = 0x1000;
+    addr = NULL;
+    status = pNtAllocateVirtualMemoryEx(NtCurrentProcess(), &addr, &size, MEM_RESERVE,
+                                        PAGE_EXECUTE_READWRITE, ext, 1);
+    ok(status == STATUS_INVALID_PARAMETER, "Unexpected status %08lx.\n", status);
+
+    a.Alignment = 0x40000;
+    size = 0x1000;
+    addr = NULL;
+    status = pNtAllocateVirtualMemoryEx(NtCurrentProcess(), &addr, &size, MEM_RESERVE,
+                                        PAGE_EXECUTE_READWRITE, ext, 1);
+    ok(!status, "Unexpected status %08lx.\n", status);
+    ok(!((ULONG_PTR)addr & 0x3ffff), "Unexpected addr %p.\n", addr);
+    status = pNtAllocateVirtualMemoryEx(NtCurrentProcess(), &addr, &size, MEM_COMMIT,
+                                        PAGE_EXECUTE_READWRITE, ext, 1);
+    ok(status == STATUS_INVALID_PARAMETER, "Unexpected status %08lx.\n", status);
+
+    size = 0;
+    status = NtFreeVirtualMemory(NtCurrentProcess(), &addr, &size, MEM_RELEASE);
+    ok(!status, "Unexpected status %08lx.\n", status);
+
+    status = pNtAllocateVirtualMemoryEx(NtCurrentProcess(), &addr, &size, MEM_RESERVE,
+                                        PAGE_EXECUTE_READWRITE, ext, 1);
+    ok(status == STATUS_INVALID_PARAMETER, "Unexpected status %08lx.\n", status);
 }
 
 struct test_stack_size_thread_args
@@ -702,6 +1146,13 @@ static void test_NtMapViewOfSection(void)
     ptr = NULL;
     size = 0;
     offset.QuadPart = 0;
+    status = NtMapViewOfSection(mapping, NULL, &ptr, 0, 0, &offset, &size, 1, 0, PAGE_READWRITE);
+    ok(status == STATUS_INVALID_HANDLE, "NtMapViewOfSection returned %08lx\n", status);
+    ok(!((ULONG_PTR)ptr & 0xffff), "returned memory %p is not aligned to 64k\n", ptr);
+
+    ptr = NULL;
+    size = 0;
+    offset.QuadPart = 0;
     status = NtMapViewOfSection(mapping, process, &ptr, 0, 0, &offset, &size, 1, 0, PAGE_READWRITE);
     ok(status == STATUS_SUCCESS, "NtMapViewOfSection returned %08x\n", status);
     ok(!((ULONG_PTR)ptr & 0xffff), "returned memory %p is not aligned to 64k\n", ptr);
@@ -898,6 +1349,156 @@ static void test_NtMapViewOfSection(void)
 
     status = NtUnmapViewOfSection(process, ptr);
     ok(status == STATUS_SUCCESS, "NtUnmapViewOfSection returned %08x\n", status);
+
+    NtClose(mapping);
+
+    CloseHandle(file);
+    DeleteFileA(testfile);
+
+    TerminateProcess(process, 0);
+    CloseHandle(process);
+}
+
+static void test_NtMapViewOfSectionEx(void)
+{
+    static const char testfile[] = "testfile.xxx";
+    static const char data[] = "test data for NtMapViewOfSectionEx";
+    char buffer[sizeof(data)];
+    HANDLE file, mapping, process;
+    DWORD status, written;
+    SIZE_T size, result;
+    LARGE_INTEGER offset;
+    void *ptr, *ptr2;
+    BOOL ret;
+
+    if (!pNtMapViewOfSectionEx)
+    {
+        win_skip("NtMapViewOfSectionEx() is not supported.\n");
+        return;
+    }
+
+    if (!pIsWow64Process || !pIsWow64Process(NtCurrentProcess(), &is_wow64)) is_wow64 = FALSE;
+
+    file = CreateFileA(testfile, GENERIC_READ|GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, 0, 0);
+    ok(file != INVALID_HANDLE_VALUE, "Failed to create test file\n");
+    WriteFile(file, data, sizeof(data), &written, NULL);
+    SetFilePointer(file, 4096, NULL, FILE_BEGIN);
+    SetEndOfFile(file);
+
+    /* read/write mapping */
+
+    mapping = CreateFileMappingA(file, NULL, PAGE_READWRITE, 0, 4096, NULL);
+    ok(mapping != 0, "CreateFileMapping failed\n");
+
+    process = create_target_process("sleep");
+    ok(process != NULL, "Can't start process\n");
+
+    ptr = NULL;
+    size = 0;
+    offset.QuadPart = 0;
+    status = pNtMapViewOfSectionEx(mapping, NULL, &ptr, &offset, &size, 0, PAGE_READWRITE, NULL, 0);
+    ok(status == STATUS_INVALID_HANDLE, "Unexpected status %08lx\n", status);
+
+    ptr = NULL;
+    size = 0;
+    offset.QuadPart = 0;
+    status = pNtMapViewOfSectionEx(mapping, process, &ptr, &offset, &size, 0, PAGE_READWRITE, NULL, 0);
+    ok(status == STATUS_SUCCESS, "Unexpected status %08lx\n", status);
+    ok(!((ULONG_PTR)ptr & 0xffff), "returned memory %p is not aligned to 64k\n", ptr);
+
+    ret = ReadProcessMemory(process, ptr, buffer, sizeof(buffer), &result);
+    ok(ret, "ReadProcessMemory failed\n");
+    ok(result == sizeof(buffer), "ReadProcessMemory didn't read all data (%Ix)\n", result);
+    ok(!memcmp(buffer, data, sizeof(buffer)), "Wrong data read\n");
+
+    /* mapping at the same page conflicts */
+    ptr2 = ptr;
+    size = 0;
+    offset.QuadPart = 0;
+    status = pNtMapViewOfSectionEx(mapping, process, &ptr2, &offset, &size, 0, PAGE_READWRITE, NULL, 0);
+    ok(status == STATUS_CONFLICTING_ADDRESSES, "Unexpected status %08lx\n", status);
+
+    /* offset has to be aligned */
+    ptr2 = ptr;
+    size = 0;
+    offset.QuadPart = 1;
+    status = pNtMapViewOfSectionEx(mapping, process, &ptr2, &offset, &size, 0, PAGE_READWRITE, NULL, 0);
+    ok(status == STATUS_MAPPED_ALIGNMENT, "Unexpected status %08lx\n", status);
+
+    /* ptr has to be aligned */
+    ptr2 = (char *)ptr + 42;
+    size = 0;
+    offset.QuadPart = 0;
+    status = pNtMapViewOfSectionEx(mapping, process, &ptr2, &offset, &size, 0, PAGE_READWRITE, NULL, 0);
+    ok(status == STATUS_MAPPED_ALIGNMENT, "Unexpected status %08lx\n", status);
+
+    /* still not 64k aligned */
+    ptr2 = (char *)ptr + 0x1000;
+    size = 0;
+    offset.QuadPart = 0;
+    status = pNtMapViewOfSectionEx(mapping, process, &ptr2, &offset, &size, 0, PAGE_READWRITE, NULL, 0);
+    ok(status == STATUS_MAPPED_ALIGNMENT, "Unexpected status %08lx\n", status);
+
+    if (!is_win64 && !is_wow64)
+    {
+        /* new memory region conflicts with previous mapping */
+        ptr2 = ptr;
+        size = 0;
+        offset.QuadPart = 0;
+        status = pNtMapViewOfSectionEx(mapping, process, &ptr2, &offset, &size, AT_ROUND_TO_PAGE, PAGE_READWRITE, NULL, 0);
+        ok(status == STATUS_CONFLICTING_ADDRESSES, "Unexpected status %08lx\n", status);
+
+        ptr2 = (char *)ptr + 42;
+        size = 0;
+        offset.QuadPart = 0;
+        status = pNtMapViewOfSectionEx(mapping, process, &ptr2, &offset, &size, AT_ROUND_TO_PAGE, PAGE_READWRITE, NULL, 0);
+        ok(status == STATUS_CONFLICTING_ADDRESSES, "Unexpected status %08lx\n", status);
+
+        /* in contrary to regular NtMapViewOfSection, only 4kb align is enforced */
+        ptr2 = (char *)ptr + 0x1000;
+        size = 0;
+        offset.QuadPart = 0;
+        status = pNtMapViewOfSectionEx(mapping, process, &ptr2, &offset, &size, AT_ROUND_TO_PAGE, PAGE_READWRITE, NULL, 0);
+        ok(status == STATUS_SUCCESS, "Unexpected status %08lx\n", status);
+        ok((char *)ptr2 == (char *)ptr + 0x1000,
+           "expected address %p, got %p\n", (char *)ptr + 0x1000, ptr2);
+        status = NtUnmapViewOfSection(process, ptr2);
+        ok(status == STATUS_SUCCESS, "NtUnmapViewOfSection returned %08lx\n", status);
+
+        /* the address is rounded down if not on a page boundary */
+        ptr2 = (char *)ptr + 0x1001;
+        size = 0;
+        offset.QuadPart = 0;
+        status = pNtMapViewOfSectionEx(mapping, process, &ptr2, &offset, &size, AT_ROUND_TO_PAGE, PAGE_READWRITE, NULL, 0);
+        ok(status == STATUS_SUCCESS, "Unexpected status %08lx\n", status);
+        ok((char *)ptr2 == (char *)ptr + 0x1000,
+           "expected address %p, got %p\n", (char *)ptr + 0x1000, ptr2);
+        status = NtUnmapViewOfSection(process, ptr2);
+        ok(status == STATUS_SUCCESS, "NtUnmapViewOfSection returned %08lx\n", status);
+
+        ptr2 = (char *)ptr + 0x2000;
+        size = 0;
+        offset.QuadPart = 0;
+        status = pNtMapViewOfSectionEx(mapping, process, &ptr2, &offset, &size, AT_ROUND_TO_PAGE, PAGE_READWRITE, NULL, 0);
+        ok(status == STATUS_SUCCESS, "Unexpected status %08lx\n", status);
+        ok((char *)ptr2 == (char *)ptr + 0x2000,
+           "expected address %p, got %p\n", (char *)ptr + 0x2000, ptr2);
+        status = NtUnmapViewOfSection(process, ptr2);
+        ok(status == STATUS_SUCCESS, "NtUnmapViewOfSection returned %08lx\n", status);
+    }
+    else
+    {
+        ptr2 = (char *)ptr + 0x1000;
+        size = 0;
+        offset.QuadPart = 0;
+        status = pNtMapViewOfSectionEx(mapping, process, &ptr2, &offset, &size, AT_ROUND_TO_PAGE, PAGE_READWRITE, NULL, 0);
+        todo_wine
+        ok(status == STATUS_INVALID_PARAMETER_9 || status == STATUS_INVALID_PARAMETER,
+           "NtMapViewOfSection returned %08lx\n", status);
+    }
+
+    status = NtUnmapViewOfSection(process, ptr);
+    ok(status == STATUS_SUCCESS, "NtUnmapViewOfSection returned %08lx\n", status);
 
     NtClose(mapping);
 
@@ -1132,6 +1733,88 @@ static void test_syscalls(void)
     UnmapViewOfFile( ptr );
 }
 
+static void test_NtFreeVirtualMemory(void)
+{
+    void *addr1, *addr;
+    NTSTATUS status;
+    SIZE_T size;
+
+    size = 0x10000;
+    addr1 = NULL;
+    status = NtAllocateVirtualMemory(NtCurrentProcess(), &addr1, 0, &size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+    ok(status == STATUS_SUCCESS, "Unexpected status %08lx.\n", status);
+    trace("addr1 %p, size %p.\n", addr1, (void *)size);
+
+    size = 0;
+    status = NtFreeVirtualMemory(NULL, &addr1, &size, MEM_RELEASE);
+    ok(status == STATUS_INVALID_HANDLE, "Unexpected status %08lx.\n", status);
+
+    addr = (char *)addr1 + 0x1000;
+    size = 0;
+    status = NtFreeVirtualMemory(NtCurrentProcess(), &addr, &size, MEM_RELEASE);
+    ok(status == STATUS_FREE_VM_NOT_AT_BASE, "Unexpected status %08lx.\n", status);
+
+    size = 0x11000;
+    status = NtFreeVirtualMemory(NtCurrentProcess(), &addr1, &size, MEM_RELEASE);
+    ok(status == STATUS_UNABLE_TO_FREE_VM, "Unexpected status %08lx.\n", status);
+
+    addr = (char *)addr1 + 0x1001;
+    size = 0xffff;
+    status = NtFreeVirtualMemory(NtCurrentProcess(), &addr, &size, MEM_RELEASE);
+    ok(status == STATUS_UNABLE_TO_FREE_VM, "Unexpected status %08lx.\n", status);
+    ok(size == 0xffff, "Unexpected size %p.\n", (void *)size);
+    ok(addr == (char *)addr1 + 0x1001, "Got addr %p, addr1 %p.\n", addr, addr1);
+
+    size = 0xfff;
+    addr = (char *)addr1 + 0x1001;
+    status = NtFreeVirtualMemory(NtCurrentProcess(), &addr, &size, MEM_RELEASE);
+    ok(status == STATUS_SUCCESS, "Unexpected status %08lx.\n", status);
+    *(volatile char *)addr1 = 1;
+    *((volatile char *)addr1 + 0x2000) = 1;
+    ok(size == 0x1000, "Unexpected size %p.\n", (void *)size);
+    ok(addr == (char *)addr1 + 0x1000, "Got addr %p, addr1 %p.\n", addr, addr1);
+
+    size = 0xfff;
+    addr = (char *)addr1 + 1;
+    status = NtFreeVirtualMemory(NtCurrentProcess(), &addr, &size, MEM_RELEASE);
+    ok(status == STATUS_SUCCESS, "Unexpected status %08lx.\n", status);
+    *((volatile char *)addr1 + 0x2000) = 1;
+    ok(size == 0x1000, "Unexpected size %p.\n", (void *)size);
+    ok(addr == addr1, "Got addr %p, addr1 %p.\n", addr, addr1);
+
+    trace("addr1 %p.\n", addr1);
+
+    size = 0x1000;
+    addr = addr1;
+    status = NtAllocateVirtualMemory(NtCurrentProcess(), &addr, 0, &size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+    ok(status == STATUS_SUCCESS, "Unexpected status %08lx.\n", status);
+    ok(addr == addr1, "Unexpected addr %p, addr1 %p.\n", addr, addr1);
+    ok(size == 0x1000, "Unexpected size %p.\n", (void *)size);
+
+    size = 0x10000;
+    status = NtFreeVirtualMemory(NtCurrentProcess(), &addr1, &size, MEM_RELEASE);
+    ok(status == STATUS_UNABLE_TO_FREE_VM, "Unexpected status %08lx.\n", status);
+
+    size = 0;
+    addr = (char *)addr1 + 0x1000;
+    status = NtFreeVirtualMemory(NtCurrentProcess(), &addr, &size, MEM_RELEASE);
+    ok(status == STATUS_MEMORY_NOT_ALLOCATED, "Unexpected status %08lx.\n", status);
+
+    size = 0x1000;
+    addr = (char *)addr1 + 0x1000;
+    status = NtFreeVirtualMemory(NtCurrentProcess(), &addr, &size, MEM_DECOMMIT);
+    ok(status == STATUS_MEMORY_NOT_ALLOCATED, "Unexpected status %08lx.\n", status);
+
+    size = 0;
+    addr = (char *)addr1 + 0x2000;
+    status = NtFreeVirtualMemory(NtCurrentProcess(), &addr, &size, MEM_RELEASE);
+    ok(status == STATUS_SUCCESS, "Unexpected status %08lx.\n", status);
+
+    size = 0x1000;
+    status = NtFreeVirtualMemory(NtCurrentProcess(), &addr1, &size, MEM_RELEASE);
+    ok(status == STATUS_SUCCESS, "Unexpected status %08lx.\n", status);
+}
+
 START_TEST(virtual)
 {
     HMODULE mod;
@@ -1160,6 +1843,7 @@ START_TEST(virtual)
     pRtlFindExportedRoutineByName = (void *)GetProcAddress(mod, "RtlFindExportedRoutineByName");
     pRtlGetEnabledExtendedFeatures = (void *)GetProcAddress(mod, "RtlGetEnabledExtendedFeatures");
     pNtAllocateVirtualMemoryEx = (void *)GetProcAddress(mod, "NtAllocateVirtualMemoryEx");
+    pNtMapViewOfSectionEx = (void *)GetProcAddress(mod, "NtMapViewOfSectionEx");
 
     NtQuerySystemInformation(SystemBasicInformation, &sbi, sizeof(sbi), NULL);
     trace("system page size %#x\n", sbi.PageSize);
@@ -1167,8 +1851,12 @@ START_TEST(virtual)
     if (!pIsWow64Process || !pIsWow64Process(NtCurrentProcess(), &is_wow64)) is_wow64 = FALSE;
 
     test_NtAllocateVirtualMemory();
+    test_NtAllocateVirtualMemoryEx();
+    test_NtAllocateVirtualMemoryEx_address_requirements();
+    test_NtFreeVirtualMemory();
     test_RtlCreateUserStack();
     test_NtMapViewOfSection();
+    test_NtMapViewOfSectionEx();
     test_user_shared_data();
     test_syscalls();
 }

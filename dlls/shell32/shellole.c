@@ -39,6 +39,7 @@
 #include "winreg.h"
 #include "winerror.h"
 
+#include "undocshell.h"
 #include "shell32_main.h"
 
 #include "wine/debug.h"
@@ -88,6 +89,7 @@ static const struct {
 	{&CLSID_DestinationList, CustomDestinationList_Constructor},
 	{&CLSID_ShellImageDataFactory, ShellImageDataFactory_Constructor},
 	{&CLSID_FileOperation, IFileOperation_Constructor},
+	{&CLSID_ActiveDesktop, ActiveDesktop_Constructor},
 	{NULL, NULL}
 };
 

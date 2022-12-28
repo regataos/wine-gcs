@@ -18,44 +18,170 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#define NONAMELESSUNION
-#define NONAMELESSSTRUCT
-
 #include "qasf_private.h"
 
-#include "wine/debug.h"
-#include "wine/heap.h"
-#include "uuids.h"
-#include "vfwmsgs.h"
-#include "winbase.h"
-#include "winreg.h"
-#include "shlwapi.h"
-#include <assert.h>
+#include "mediaobj.h"
+#include "propsys.h"
+#include "initguid.h"
+#include "wmsdkidl.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(quartz);
 
-/* see IAsyncReader::Request on MSDN for the explanation of this */
-#define MEDIATIME_FROM_BYTES(x) ((LONGLONG)(x) * 10000000)
-#define BYTES_FROM_MEDIATIME(time) ((time) / 10000000)
-
-static const AM_MEDIA_TYPE default_mt =
+static inline const char *debugstr_time(REFERENCE_TIME time)
 {
-    {0xe436eb83,0x524f,0x11ce,{0x9f,0x53,0x00,0x20,0xaf,0x0b,0xa7,0x70}},   /* MEDIATYPE_Stream */
-    {0,0,0,{0,0,0,0,0,0,0,0}},
-    TRUE,
-    FALSE,
-    1,
-    {0,0,0,{0,0,0,0,0,0,0,0}},
-    NULL,
-    0,
-    NULL
+    ULONGLONG abstime = time >= 0 ? time : -time;
+    unsigned int i = 0, j = 0;
+    char buffer[23], rev[23];
+
+    while (abstime || i <= 8)
+    {
+        buffer[i++] = '0' + (abstime % 10);
+        abstime /= 10;
+        if (i == 7) buffer[i++] = '.';
+    }
+    if (time < 0) buffer[i++] = '-';
+
+    while (i--) rev[j++] = buffer[i];
+    while (rev[j-1] == '0' && rev[j-2] != '.') --j;
+    rev[j] = 0;
+
+    return wine_dbg_sprintf("%s", rev);
+}
+
+struct buffer
+{
+    INSSBuffer INSSBuffer_iface;
+    LONG refcount;
+    IMediaSample *sample;
 };
 
-struct request
+static struct buffer *impl_from_INSSBuffer(INSSBuffer *iface)
 {
-    IMediaSample *sample;
-    DWORD_PTR cookie;
-    OVERLAPPED ovl;
+    return CONTAINING_RECORD(iface, struct buffer, INSSBuffer_iface);
+}
+
+static HRESULT WINAPI buffer_QueryInterface(INSSBuffer *iface, REFIID iid, void **out)
+{
+    struct buffer *impl = impl_from_INSSBuffer(iface);
+
+    TRACE("iface %p, iid %s, out %p.\n", iface, debugstr_guid(iid), out);
+
+    if (IsEqualGUID(iid, &IID_IUnknown)
+            || IsEqualGUID(iid, &IID_INSSBuffer))
+        *out = &impl->INSSBuffer_iface;
+    else
+    {
+        *out = NULL;
+        WARN("%s not implemented, returning E_NOINTERFACE.\n", debugstr_guid(iid));
+        return E_NOINTERFACE;
+    }
+
+    IUnknown_AddRef((IUnknown *)*out);
+    return S_OK;
+}
+
+static ULONG WINAPI buffer_AddRef(INSSBuffer *iface)
+{
+    struct buffer *impl = impl_from_INSSBuffer(iface);
+    ULONG ref = InterlockedIncrement(&impl->refcount);
+    TRACE("iface %p increasing refcount to %lu.\n", iface, ref);
+    return ref;
+}
+
+static ULONG WINAPI buffer_Release(INSSBuffer *iface)
+{
+    struct buffer *impl = impl_from_INSSBuffer(iface);
+    ULONG ref = InterlockedDecrement(&impl->refcount);
+
+    TRACE("iface %p decreasing refcount to %lu.\n", iface, ref);
+
+    if (!ref)
+    {
+        IMediaSample_Release(impl->sample);
+        free(impl);
+    }
+
+    return ref;
+}
+
+static HRESULT WINAPI buffer_GetLength(INSSBuffer *iface, DWORD *size)
+{
+    struct buffer *impl = impl_from_INSSBuffer(iface);
+    TRACE("iface %p, size %p.\n", iface, size);
+    *size = IMediaSample_GetActualDataLength(impl->sample);
+    return S_OK;
+}
+
+static HRESULT WINAPI buffer_SetLength(INSSBuffer *iface, DWORD size)
+{
+    struct buffer *impl = impl_from_INSSBuffer(iface);
+    TRACE("iface %p, size %lu.\n", iface, size);
+    return IMediaSample_SetActualDataLength(impl->sample, size);
+}
+
+static HRESULT WINAPI buffer_GetMaxLength(INSSBuffer *iface, DWORD *size)
+{
+    struct buffer *impl = impl_from_INSSBuffer(iface);
+    TRACE("iface %p, size %p.\n", iface, size);
+    *size = IMediaSample_GetSize(impl->sample);
+    return S_OK;
+}
+
+static HRESULT WINAPI buffer_GetBuffer(INSSBuffer *iface, BYTE **data)
+{
+    struct buffer *impl = impl_from_INSSBuffer(iface);
+    TRACE("iface %p, data %p.\n", iface, data);
+    return IMediaSample_GetPointer(impl->sample, data);
+}
+
+static HRESULT WINAPI buffer_GetBufferAndLength(INSSBuffer *iface, BYTE **data, DWORD *size)
+{
+    struct buffer *impl = impl_from_INSSBuffer(iface);
+    TRACE("iface %p, data %p, size %p.\n", iface, data, size);
+    *size = IMediaSample_GetSize(impl->sample);
+    return IMediaSample_GetPointer(impl->sample, data);
+}
+
+static const INSSBufferVtbl buffer_vtbl =
+{
+    buffer_QueryInterface,
+    buffer_AddRef,
+    buffer_Release,
+    buffer_GetLength,
+    buffer_SetLength,
+    buffer_GetMaxLength,
+    buffer_GetBuffer,
+    buffer_GetBufferAndLength,
+};
+
+static HRESULT buffer_create(IMediaSample *sample, INSSBuffer **out)
+{
+    struct buffer *buffer;
+
+    if (!(buffer = calloc(1, sizeof(struct buffer))))
+        return E_OUTOFMEMORY;
+
+    buffer->INSSBuffer_iface.lpVtbl = &buffer_vtbl;
+    buffer->refcount = 1;
+    buffer->sample = sample;
+
+    *out = &buffer->INSSBuffer_iface;
+    TRACE("Created buffer %p for sample %p\n", *out, sample);
+
+    return S_OK;
+}
+
+static struct buffer *unsafe_impl_from_INSSBuffer(INSSBuffer *iface)
+{
+    if (iface->lpVtbl != &buffer_vtbl) return NULL;
+    return impl_from_INSSBuffer(iface);
+}
+
+struct asf_stream
+{
+    struct strmbase_source source;
+    struct SourceSeeking seek;
+    DWORD index;
 };
 
 struct asf_reader
@@ -63,298 +189,235 @@ struct asf_reader
     struct strmbase_filter filter;
     IFileSourceFilter IFileSourceFilter_iface;
 
-    struct strmbase_source source;
-    IAsyncReader IAsyncReader_iface;
+    AM_MEDIA_TYPE media_type;
+    WCHAR *file_name;
 
-    LPOLESTR pszFileName;
-    AM_MEDIA_TYPE mt;
-    HANDLE file, port, io_thread;
-    LARGE_INTEGER file_size;
-    CRITICAL_SECTION sample_cs;
-    BOOL flushing;
-    struct request *requests;
-    unsigned int max_requests;
-    CONDITION_VARIABLE sample_cv;
+    HRESULT result;
+    WMT_STATUS status;
+    CRITICAL_SECTION status_cs;
+    CONDITION_VARIABLE status_cv;
+
+    IWMReaderCallback *callback;
+    IWMReader *reader;
+
+    UINT stream_count;
+    struct asf_stream streams[16];
 };
 
-static const struct strmbase_source_ops source_ops;
+static inline struct asf_stream *impl_from_strmbase_pin(struct strmbase_pin *iface)
+{
+    return CONTAINING_RECORD(iface, struct asf_stream, source.pin);
+}
+
+static inline struct asf_reader *asf_reader_from_asf_stream(struct asf_stream *stream)
+{
+    return CONTAINING_RECORD(stream, struct asf_reader, streams[stream->index]);
+}
+
+static HRESULT asf_stream_query_accept(struct strmbase_pin *iface, const AM_MEDIA_TYPE *media_type)
+{
+    struct asf_stream *stream = impl_from_strmbase_pin(iface);
+    struct asf_reader *filter = asf_reader_from_asf_stream(stream);
+    IWMOutputMediaProps *props;
+    WM_MEDIA_TYPE *mt;
+    DWORD size, i = 0;
+    HRESULT hr;
+
+    TRACE("iface %p, media_type %p.\n", iface, media_type);
+
+    if (FAILED(hr = IWMReader_GetOutputFormat(filter->reader, stream->index, i, &props)))
+        return hr;
+    if (FAILED(hr = IWMOutputMediaProps_GetMediaType(props, NULL, &size)))
+    {
+        IWMOutputMediaProps_Release(props);
+        return hr;
+    }
+    if (!(mt = malloc(size)))
+    {
+        IWMOutputMediaProps_Release(props);
+        return E_OUTOFMEMORY;
+    }
+
+    do
+    {
+        if (SUCCEEDED(hr = IWMOutputMediaProps_GetMediaType(props, mt, &size))
+                && IsEqualGUID(&mt->majortype, &media_type->majortype)
+                && IsEqualGUID(&mt->subtype, &media_type->subtype))
+        {
+            IWMOutputMediaProps_Release(props);
+            break;
+        }
+
+        IWMOutputMediaProps_Release(props);
+    } while (SUCCEEDED(hr = IWMReader_GetOutputFormat(filter->reader, stream->index, ++i, &props)));
+
+    free(mt);
+    return hr;
+}
+
+static HRESULT asf_stream_get_media_type(struct strmbase_pin *iface, unsigned int index, AM_MEDIA_TYPE *media_type)
+{
+    struct asf_stream *stream = impl_from_strmbase_pin(iface);
+    struct asf_reader *filter = asf_reader_from_asf_stream(stream);
+    IWMOutputMediaProps *props;
+    WM_MEDIA_TYPE *mt;
+    DWORD size;
+    HRESULT hr;
+
+    TRACE("iface %p, index %u, media_type %p.\n", iface, index, media_type);
+
+    if (FAILED(IWMReader_GetOutputFormat(filter->reader, stream->index, index, &props)))
+        return VFW_S_NO_MORE_ITEMS;
+    if (FAILED(hr = IWMOutputMediaProps_GetMediaType(props, NULL, &size)))
+    {
+        IWMOutputMediaProps_Release(props);
+        return hr;
+    }
+    if (!(mt = malloc(size)))
+    {
+        IWMOutputMediaProps_Release(props);
+        return E_OUTOFMEMORY;
+    }
+
+    hr = IWMOutputMediaProps_GetMediaType(props, mt, &size);
+    if (SUCCEEDED(hr))
+        hr = CopyMediaType(media_type, (AM_MEDIA_TYPE *)mt);
+
+    free(mt);
+    IWMOutputMediaProps_Release(props);
+    return hr;
+}
+
+static HRESULT asf_stream_query_interface(struct strmbase_pin *iface, REFIID iid, void **out)
+{
+    struct asf_stream *stream = impl_from_strmbase_pin(iface);
+
+    if (IsEqualGUID(iid, &IID_IMediaSeeking))
+        *out = &stream->seek.IMediaSeeking_iface;
+    else
+        return E_NOINTERFACE;
+
+    IUnknown_AddRef((IUnknown *)*out);
+    return S_OK;
+}
+
+static inline struct asf_stream *impl_from_IMediaSeeking(IMediaSeeking *iface)
+{
+    return CONTAINING_RECORD(iface, struct asf_stream, seek.IMediaSeeking_iface);
+}
+
+static HRESULT WINAPI media_seeking_ChangeCurrent(IMediaSeeking *iface)
+{
+    FIXME("iface %p stub!\n", iface);
+    return S_OK;
+}
+
+static HRESULT WINAPI media_seeking_ChangeStop(IMediaSeeking *iface)
+{
+    FIXME("iface %p stub!\n", iface);
+    return S_OK;
+}
+
+static HRESULT WINAPI media_seeking_ChangeRate(IMediaSeeking *iface)
+{
+    FIXME("iface %p stub!\n", iface);
+    return S_OK;
+}
+
+static HRESULT WINAPI media_seeking_QueryInterface(IMediaSeeking *iface, REFIID riid, void **ppv)
+{
+    struct asf_stream *impl = impl_from_IMediaSeeking(iface);
+    return IUnknown_QueryInterface(&impl->source.pin.IPin_iface, riid, ppv);
+}
+
+static ULONG WINAPI media_seeking_AddRef(IMediaSeeking *iface)
+{
+    struct asf_stream *impl = impl_from_IMediaSeeking(iface);
+    return IUnknown_AddRef(&impl->source.pin.IPin_iface);
+}
+
+static ULONG WINAPI media_seeking_Release(IMediaSeeking *iface)
+{
+    struct asf_stream *impl = impl_from_IMediaSeeking(iface);
+    return IUnknown_Release(&impl->source.pin.IPin_iface);
+}
+
+static HRESULT WINAPI media_seeking_SetPositions(IMediaSeeking *iface,
+        LONGLONG *current, DWORD current_flags, LONGLONG *stop, DWORD stop_flags)
+{
+    FIXME("iface %p, current %s, current_flags %#lx, stop %s, stop_flags %#lx stub!\n",
+            iface, current ? debugstr_time(*current) : "<null>", current_flags,
+            stop ? debugstr_time(*stop) : "<null>", stop_flags);
+    return SourceSeekingImpl_SetPositions(iface, current, current_flags, stop, stop_flags);
+}
+
+static const IMediaSeekingVtbl media_seeking_vtbl =
+{
+    media_seeking_QueryInterface,
+    media_seeking_AddRef,
+    media_seeking_Release,
+    SourceSeekingImpl_GetCapabilities,
+    SourceSeekingImpl_CheckCapabilities,
+    SourceSeekingImpl_IsFormatSupported,
+    SourceSeekingImpl_QueryPreferredFormat,
+    SourceSeekingImpl_GetTimeFormat,
+    SourceSeekingImpl_IsUsingTimeFormat,
+    SourceSeekingImpl_SetTimeFormat,
+    SourceSeekingImpl_GetDuration,
+    SourceSeekingImpl_GetStopPosition,
+    SourceSeekingImpl_GetCurrentPosition,
+    SourceSeekingImpl_ConvertTimeFormat,
+    media_seeking_SetPositions,
+    SourceSeekingImpl_GetPositions,
+    SourceSeekingImpl_GetAvailable,
+    SourceSeekingImpl_SetRate,
+    SourceSeekingImpl_GetRate,
+    SourceSeekingImpl_GetPreroll,
+};
 
 static inline struct asf_reader *impl_from_strmbase_filter(struct strmbase_filter *iface)
 {
     return CONTAINING_RECORD(iface, struct asf_reader, filter);
 }
 
-static inline struct asf_reader *impl_from_IFileSourceFilter(IFileSourceFilter *iface)
-{
-    return CONTAINING_RECORD(iface, struct asf_reader, IFileSourceFilter_iface);
-}
-
-static const IFileSourceFilterVtbl FileSource_Vtbl;
-static const IAsyncReaderVtbl FileAsyncReader_Vtbl;
-
-static int byte_from_hex_char(WCHAR c)
-{
-    if ('0' <= c && c <= '9') return c - '0';
-    if ('a' <= c && c <= 'f') return c - 'a' + 10;
-    if ('A' <= c && c <= 'F') return c - 'A' + 10;
-    return -1;
-}
-
-static BOOL process_pattern_string(const WCHAR *pattern, HANDLE file)
-{
-    ULONG size, offset, i, ret_size;
-    BYTE *mask, *expect, *actual;
-    int d;
-    BOOL ret = TRUE;
-
-    /* format: "offset, size, mask, value" */
-
-    offset = wcstol(pattern, NULL, 10);
-
-    if (!(pattern = wcschr(pattern, ',')))
-        return FALSE;
-    pattern++;
-
-    size = wcstol(pattern, NULL, 10);
-    mask = heap_alloc(size);
-    expect = heap_alloc(size);
-    memset(mask, 0xff, size);
-
-    if (!(pattern = wcschr(pattern, ',')))
-    {
-        heap_free(mask);
-        heap_free(expect);
-        return FALSE;
-    }
-    pattern++;
-    while (byte_from_hex_char(*pattern) == -1 && (*pattern != ','))
-        pattern++;
-
-    for (i = 0; (d = byte_from_hex_char(*pattern)) != -1 && (i/2 < size); pattern++, i++)
-    {
-        if (i % 2)
-            mask[i / 2] |= d;
-        else
-            mask[i / 2] = d << 4;
-    }
-
-    if (!(pattern = wcschr(pattern, ',')))
-    {
-        heap_free(mask);
-        heap_free(expect);
-        return FALSE;
-    }
-    pattern++;
-    while (byte_from_hex_char(*pattern) == -1 && (*pattern != ','))
-        pattern++;
-
-    for (i = 0; (d = byte_from_hex_char(*pattern)) != -1 && (i/2 < size); pattern++, i++)
-    {
-        if (i % 2)
-            expect[i / 2] |= d;
-        else
-            expect[i / 2] = d << 4;
-    }
-
-    actual = heap_alloc(size);
-    SetFilePointer(file, offset, NULL, FILE_BEGIN);
-    if (!ReadFile(file, actual, size, &ret_size, NULL) || ret_size != size)
-    {
-        heap_free(actual);
-        heap_free(expect);
-        heap_free(mask);
-        return FALSE;
-    }
-
-    for (i = 0; i < size; ++i)
-    {
-        if ((actual[i] & mask[i]) != expect[i])
-        {
-            ret = FALSE;
-            break;
-        }
-    }
-
-    heap_free(actual);
-    heap_free(expect);
-    heap_free(mask);
-
-    /* If there is a following tuple, then we must match that as well. */
-    if (ret && (pattern = wcschr(pattern, ',')))
-        return process_pattern_string(pattern + 1, file);
-
-    return ret;
-}
-
-BOOL get_media_type(const WCHAR *filename, GUID *majortype, GUID *subtype, GUID *source_clsid)
-{
-    WCHAR extensions_path[278] = L"Media Type\\Extensions\\";
-    DWORD majortype_idx, size;
-    const WCHAR *ext;
-    HKEY parent_key;
-    HANDLE file;
-
-    if ((ext = wcsrchr(filename, '.')))
-    {
-        WCHAR guidstr[39];
-        HKEY key;
-
-        wcscat(extensions_path, ext);
-        if (!RegOpenKeyExW(HKEY_CLASSES_ROOT, extensions_path, 0, KEY_READ, &key))
-        {
-            size = sizeof(guidstr);
-            if (majortype && !RegQueryValueExW(key, L"Media Type", NULL, NULL, (BYTE *)guidstr, &size))
-                CLSIDFromString(guidstr, majortype);
-
-            size = sizeof(guidstr);
-            if (subtype && !RegQueryValueExW(key, L"Subtype", NULL, NULL, (BYTE *)guidstr, &size))
-                CLSIDFromString(guidstr, subtype);
-
-            size = sizeof(guidstr);
-            if (source_clsid && !RegQueryValueExW(key, L"Source Filter", NULL, NULL, (BYTE *)guidstr, &size))
-                CLSIDFromString(guidstr, source_clsid);
-
-            RegCloseKey(key);
-            return FALSE;
-        }
-    }
-
-    if ((file = CreateFileW(filename, GENERIC_READ, FILE_SHARE_READ, NULL,
-            OPEN_EXISTING, 0, NULL)) == INVALID_HANDLE_VALUE)
-    {
-        WARN("Failed to open file %s, error %u.\n", debugstr_w(filename), GetLastError());
-        return FALSE;
-    }
-
-    if (RegOpenKeyExW(HKEY_CLASSES_ROOT, L"Media Type", 0, KEY_READ, &parent_key))
-    {
-        CloseHandle(file);
-        return FALSE;
-    }
-
-    for (majortype_idx = 0; ; ++majortype_idx)
-    {
-        WCHAR majortype_str[39];
-        HKEY majortype_key;
-        DWORD subtype_idx;
-
-        size = ARRAY_SIZE(majortype_str);
-        if (RegEnumKeyExW(parent_key, majortype_idx, majortype_str, &size, NULL, NULL, NULL, NULL))
-            break;
-
-        if (!wcscmp(majortype_str, L"Extensions"))
-            continue;
-
-        if (RegOpenKeyExW(parent_key, majortype_str, 0, KEY_READ, &majortype_key))
-            continue;
-
-        for (subtype_idx = 0; ; ++subtype_idx)
-        {
-            WCHAR subtype_str[39], *pattern;
-            DWORD value_idx, max_size;
-            HKEY subtype_key;
-
-            size = ARRAY_SIZE(subtype_str);
-            if (RegEnumKeyExW(majortype_key, subtype_idx, subtype_str, &size, NULL, NULL, NULL, NULL))
-                break;
-
-            if (RegOpenKeyExW(majortype_key, subtype_str, 0, KEY_READ, &subtype_key))
-                continue;
-
-            if (RegQueryInfoKeyW(subtype_key, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, &max_size, NULL, NULL))
-                continue;
-
-            pattern = heap_alloc(max_size);
-
-            for (value_idx = 0; ; ++value_idx)
-            {
-                /* The longest name we should encounter is "Source Filter". */
-                WCHAR value_name[14], source_clsid_str[39];
-                DWORD value_len = ARRAY_SIZE(value_name);
-
-                size = max_size;
-                if (RegEnumValueW(subtype_key, value_idx, value_name, &value_len,
-                        NULL, NULL, (BYTE *)pattern, &max_size))
-                    break;
-
-                if (!wcscmp(value_name, L"Source Filter"))
-                    continue;
-
-                if (!process_pattern_string(pattern, file))
-                    continue;
-
-                if (majortype)
-                    CLSIDFromString(majortype_str, majortype);
-                if (subtype)
-                    CLSIDFromString(subtype_str, subtype);
-                size = sizeof(source_clsid_str);
-                if (source_clsid && !RegQueryValueExW(subtype_key, L"Source Filter",
-                        NULL, NULL, (BYTE *)source_clsid_str, &size))
-                    CLSIDFromString(source_clsid_str, source_clsid);
-
-                heap_free(pattern);
-                RegCloseKey(subtype_key);
-                RegCloseKey(majortype_key);
-                RegCloseKey(parent_key);
-                CloseHandle(file);
-                return TRUE;
-            }
-
-            heap_free(pattern);
-            RegCloseKey(subtype_key);
-        }
-
-        RegCloseKey(majortype_key);
-    }
-
-    RegCloseKey(parent_key);
-    CloseHandle(file);
-    return FALSE;
-}
-
 static struct strmbase_pin *asf_reader_get_pin(struct strmbase_filter *iface, unsigned int index)
 {
     struct asf_reader *filter = impl_from_strmbase_filter(iface);
+    struct strmbase_pin *pin = NULL;
 
-    if (!index && filter->pszFileName)
-        return &filter->source.pin;
-    return NULL;
+    TRACE("iface %p, index %u.\n", iface, index);
+
+    EnterCriticalSection(&filter->filter.filter_cs);
+    if (index < filter->stream_count)
+        pin = &filter->streams[index].source.pin;
+    LeaveCriticalSection(&filter->filter.filter_cs);
+
+    return pin;
 }
 
 static void asf_reader_destroy(struct strmbase_filter *iface)
 {
     struct asf_reader *filter = impl_from_strmbase_filter(iface);
+    struct strmbase_source *source;
 
-    if (filter->pszFileName)
+    while (filter->stream_count--)
     {
-        unsigned int i;
-
-        if (filter->source.pin.peer)
-            IPin_Disconnect(filter->source.pin.peer);
-
-        IPin_Disconnect(&filter->source.pin.IPin_iface);
-
-        if (filter->requests)
-        {
-            for (i = 0; i < filter->max_requests; ++i)
-                CloseHandle(filter->requests[i].ovl.hEvent);
-            free(filter->requests);
-        }
-        CloseHandle(filter->file);
-        filter->sample_cs.DebugInfo->Spare[0] = 0;
-        DeleteCriticalSection(&filter->sample_cs);
-        strmbase_source_cleanup(&filter->source);
-
-        free(filter->pszFileName);
-        FreeMediaType(&filter->mt);
+        source = &filter->streams[filter->stream_count].source;
+        if (source->pin.peer) IPin_Disconnect(source->pin.peer);
+        IPin_Disconnect(&source->pin.IPin_iface);
+        strmbase_source_cleanup(source);
     }
 
-    PostQueuedCompletionStatus(filter->port, 0, 1, NULL);
-    WaitForSingleObject(filter->io_thread, INFINITE);
-    CloseHandle(filter->io_thread);
-    CloseHandle(filter->port);
+    free(filter->file_name);
+    FreeMediaType(&filter->media_type);
+    IWMReaderCallback_Release(filter->callback);
+    IWMReader_Release(filter->reader);
 
     strmbase_filter_cleanup(&filter->filter);
+
+    filter->status_cs.DebugInfo->Spare[0] = 0;
+    DeleteCriticalSection(&filter->status_cs);
+
     free(filter);
 }
 
@@ -372,583 +435,664 @@ static HRESULT asf_reader_query_interface(struct strmbase_filter *iface, REFIID 
     return E_NOINTERFACE;
 }
 
+static HRESULT asf_reader_init_stream(struct strmbase_filter *iface)
+{
+    struct asf_reader *filter = impl_from_strmbase_filter(iface);
+    WMT_STREAM_SELECTION selections[ARRAY_SIZE(filter->streams)];
+    WORD stream_numbers[ARRAY_SIZE(filter->streams)];
+    IWMReaderAdvanced2 *reader_advanced;
+    HRESULT hr = S_OK;
+    BOOL value;
+    int i;
+
+    TRACE("iface %p\n", iface);
+
+    if (FAILED(hr = IWMReader_QueryInterface(filter->reader, &IID_IWMReaderAdvanced2, (void **)&reader_advanced)))
+        return hr;
+
+    for (i = 0; i < filter->stream_count; ++i)
+    {
+        struct asf_stream *stream = filter->streams + i;
+        IWMOutputMediaProps *props;
+
+        stream_numbers[i] = i + 1;
+        selections[i] = WMT_OFF;
+
+        if (!stream->source.pin.peer)
+            continue;
+
+        if (FAILED(hr = IMemAllocator_Commit(stream->source.pAllocator)))
+        {
+            WARN("Failed to commit stream %u allocator, hr %#lx\n", i, hr);
+            break;
+        }
+
+        if (FAILED(hr = IWMReaderAdvanced2_SetAllocateForOutput(reader_advanced, i, TRUE)))
+        {
+            WARN("Failed to enable allocation for stream %u, hr %#lx\n", i, hr);
+            break;
+        }
+
+        if (FAILED(hr = IWMReader_GetOutputFormat(filter->reader, stream->index, 0, &props)))
+        {
+            WARN("Failed to get stream %u output format, hr %#lx\n", i, hr);
+            break;
+        }
+
+        hr = IWMOutputMediaProps_SetMediaType(props, (WM_MEDIA_TYPE *)&stream->source.pin.mt);
+        if (SUCCEEDED(hr))
+            hr = IWMReader_SetOutputProps(filter->reader, stream->index, props);
+        IWMOutputMediaProps_Release(props);
+        if (FAILED(hr))
+        {
+            WARN("Failed to set stream %u output format, hr %#lx\n", i, hr);
+            break;
+        }
+
+        if (FAILED(hr = IPin_NewSegment(stream->source.pin.peer, stream->seek.llCurrent, stream->seek.llStop, stream->seek.dRate)))
+        {
+            WARN("Failed to start stream %u new segment, hr %#lx\n", i, hr);
+            break;
+        }
+
+        value = IMemInputPin_ReceiveCanBlock(stream->source.pMemInputPin) == S_OK;
+        if (FAILED(hr = IWMReaderAdvanced2_SetOutputSetting(reader_advanced, i, L"DedicatedDeliveryThread",
+                WMT_TYPE_BOOL, (BYTE *)&value, sizeof(value))))
+        {
+            WARN("Failed to set DedicatedDeliveryThread for stream %u, hr %#lx\n", i, hr);
+            break;
+        }
+
+        selections[i] = WMT_ON;
+    }
+
+    if (SUCCEEDED(hr) && FAILED(hr = IWMReaderAdvanced2_SetStreamsSelected(reader_advanced,
+            filter->stream_count, stream_numbers, selections)))
+        WARN("Failed to set reader %p stream selection, hr %#lx\n", filter->reader, hr);
+
+    if (SUCCEEDED(hr) && FAILED(hr = IWMReaderAdvanced2_SetUserProvidedClock(reader_advanced, !filter->filter.clock)))
+        WARN("Failed to set user provided clock, hr %#lx\n", hr);
+    else if (!filter->filter.clock)
+    {
+        if (SUCCEEDED(hr) && FAILED(hr = IWMReaderAdvanced2_DeliverTime(reader_advanced, -1)))
+            WARN("Failed to set user time, hr %#lx\n", hr);
+    }
+
+    IWMReaderAdvanced2_Release(reader_advanced);
+
+    if (FAILED(hr))
+        return hr;
+
+    EnterCriticalSection(&filter->status_cs);
+    if (SUCCEEDED(hr = IWMReader_Start(filter->reader, 0, 0, 1, NULL)))
+    {
+        filter->status = -1;
+        while (filter->status != WMT_STARTED)
+            SleepConditionVariableCS(&filter->status_cv, &filter->status_cs, INFINITE);
+        hr = filter->result;
+    }
+    LeaveCriticalSection(&filter->status_cs);
+
+    if (FAILED(hr))
+        WARN("Failed to start WMReader %p, hr %#lx\n", filter->reader, hr);
+
+    return hr;
+}
+
+static HRESULT asf_reader_cleanup_stream(struct strmbase_filter *iface)
+{
+    struct asf_reader *filter = impl_from_strmbase_filter(iface);
+    HRESULT hr = S_OK;
+    int i;
+
+    TRACE("iface %p\n", iface);
+
+    EnterCriticalSection(&filter->status_cs);
+    if (SUCCEEDED(hr = IWMReader_Stop(filter->reader)))
+    {
+        filter->status = -1;
+        while (filter->status != WMT_STOPPED)
+            SleepConditionVariableCS(&filter->status_cv, &filter->status_cs, INFINITE);
+        hr = filter->result;
+    }
+    LeaveCriticalSection(&filter->status_cs);
+
+    if (FAILED(hr))
+        WARN("Failed to stop WMReader %p, hr %#lx\n", filter->reader, hr);
+
+    for (i = 0; i < filter->stream_count; ++i)
+    {
+        struct asf_stream *stream = filter->streams + i;
+
+        if (!stream->source.pin.peer)
+            continue;
+
+        if (FAILED(hr = IMemAllocator_Decommit(stream->source.pAllocator)))
+        {
+            WARN("Failed to decommit stream %u allocator, hr %#lx\n", i, hr);
+            break;
+        }
+    }
+
+    return hr;
+}
+
 static const struct strmbase_filter_ops filter_ops =
 {
     .filter_get_pin = asf_reader_get_pin,
     .filter_destroy = asf_reader_destroy,
     .filter_query_interface = asf_reader_query_interface,
+    .filter_init_stream = asf_reader_init_stream,
+    .filter_cleanup_stream = asf_reader_cleanup_stream,
 };
 
-static DWORD CALLBACK io_thread(void *arg)
+static HRESULT WINAPI asf_reader_DecideBufferSize(struct strmbase_source *iface,
+        IMemAllocator *allocator, ALLOCATOR_PROPERTIES *req_props)
 {
-    struct asf_reader *filter = arg;
-    struct request *req;
-    OVERLAPPED *ovl;
-    ULONG_PTR key;
-    DWORD size;
-    BOOL ret;
+    struct asf_stream *stream = impl_from_strmbase_pin(&iface->pin);
+    unsigned int buffer_size = 16384;
+    ALLOCATOR_PROPERTIES ret_props;
 
-    for (;;)
+    TRACE("iface %p, allocator %p, req_props %p.\n", iface, allocator, req_props);
+
+    if (IsEqualGUID(&stream->source.pin.mt.formattype, &FORMAT_VideoInfo))
     {
-        ret = GetQueuedCompletionStatus(filter->port, &size, &key, &ovl, INFINITE);
-
-        if (ret && key)
-            break;
-
-        EnterCriticalSection(&filter->sample_cs);
-
-        req = CONTAINING_RECORD(ovl, struct request, ovl);
-        TRACE("Got sample %u.\n", req - filter->requests);
-        assert(req >= filter->requests && req < filter->requests + filter->max_requests);
-
-        if (ret)
-            WakeConditionVariable(&filter->sample_cv);
-        else
-        {
-            ERR("GetQueuedCompletionStatus() returned failure, error %u.\n", GetLastError());
-            req->sample = NULL;
-        }
-
-        LeaveCriticalSection(&filter->sample_cs);
+        VIDEOINFOHEADER *format = (VIDEOINFOHEADER *)stream->source.pin.mt.pbFormat;
+        buffer_size = format->bmiHeader.biSizeImage;
+    }
+    else if (IsEqualGUID(&stream->source.pin.mt.formattype, &FORMAT_WaveFormatEx)
+            && (IsEqualGUID(&stream->source.pin.mt.subtype, &MEDIASUBTYPE_PCM)
+            || IsEqualGUID(&stream->source.pin.mt.subtype, &MEDIASUBTYPE_IEEE_FLOAT)))
+    {
+        WAVEFORMATEX *format = (WAVEFORMATEX *)stream->source.pin.mt.pbFormat;
+        buffer_size = format->nAvgBytesPerSec;
     }
 
-    return 0;
+    if (IsEqualGUID(&stream->source.pin.mt.majortype, &MEDIATYPE_Audio))
+        req_props->cBuffers = max(req_props->cBuffers, 50);
+    else
+        req_props->cBuffers = max(req_props->cBuffers, 10);
+
+    req_props->cbBuffer = max(req_props->cbBuffer, buffer_size);
+    req_props->cbAlign = max(req_props->cbAlign, 1);
+    return IMemAllocator_SetProperties(allocator, req_props, &ret_props);
 }
 
-HRESULT asf_reader_create(IUnknown *outer, IUnknown **out)
+static const struct strmbase_source_ops source_ops =
 {
-    struct asf_reader *object;
+    .base.pin_query_accept = asf_stream_query_accept,
+    .base.pin_get_media_type = asf_stream_get_media_type,
+    .base.pin_query_interface = asf_stream_query_interface,
+    .pfnDecideAllocator = BaseOutputPinImpl_DecideAllocator,
+    .pfnAttemptConnection = BaseOutputPinImpl_AttemptConnection,
+    .pfnDecideBufferSize = asf_reader_DecideBufferSize,
+};
 
-    if (!(object = calloc(1, sizeof(*object))))
-        return E_OUTOFMEMORY;
-
-    strmbase_filter_init(&object->filter, outer, &CLSID_AsyncReader, &filter_ops);
-
-    object->IFileSourceFilter_iface.lpVtbl = &FileSource_Vtbl;
-    object->IAsyncReader_iface.lpVtbl = &FileAsyncReader_Vtbl;
-
-    InitializeCriticalSection(&object->sample_cs);
-    object->sample_cs.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": FileAsyncReader.sample_cs");
-    InitializeConditionVariable(&object->sample_cv);
-    object->port = CreateIoCompletionPort(INVALID_HANDLE_VALUE, NULL, 0, 0);
-    object->io_thread = CreateThread(NULL, 0, io_thread, object, 0, NULL);
-
-    TRACE("Created file source %p.\n", object);
-    *out = &object->filter.IUnknown_inner;
-    return S_OK;
-}
-
-static HRESULT WINAPI FileSource_QueryInterface(IFileSourceFilter * iface, REFIID riid, LPVOID * ppv)
+static inline struct asf_reader *impl_from_IFileSourceFilter(IFileSourceFilter *iface)
 {
-    struct asf_reader *filter = impl_from_IFileSourceFilter(iface);
-    return IBaseFilter_QueryInterface(&filter->filter.IBaseFilter_iface, riid, ppv);
+    return CONTAINING_RECORD(iface, struct asf_reader, IFileSourceFilter_iface);
 }
 
-static ULONG WINAPI FileSource_AddRef(IFileSourceFilter * iface)
+static HRESULT WINAPI file_source_QueryInterface(IFileSourceFilter *iface, REFIID iid, void **out)
 {
     struct asf_reader *filter = impl_from_IFileSourceFilter(iface);
+
+    return IBaseFilter_QueryInterface(&filter->filter.IBaseFilter_iface, iid, out);
+}
+
+static ULONG WINAPI file_source_AddRef(IFileSourceFilter *iface)
+{
+    struct asf_reader *filter = impl_from_IFileSourceFilter(iface);
+
     return IBaseFilter_AddRef(&filter->filter.IBaseFilter_iface);
 }
 
-static ULONG WINAPI FileSource_Release(IFileSourceFilter * iface)
+static ULONG WINAPI file_source_Release(IFileSourceFilter *iface)
 {
     struct asf_reader *filter = impl_from_IFileSourceFilter(iface);
+
     return IBaseFilter_Release(&filter->filter.IBaseFilter_iface);
 }
 
-static HRESULT WINAPI FileSource_Load(IFileSourceFilter * iface, LPCOLESTR pszFileName, const AM_MEDIA_TYPE * pmt)
+static HRESULT WINAPI file_source_Load(IFileSourceFilter *iface, LPCOLESTR file_name, const AM_MEDIA_TYPE *media_type)
 {
-    struct asf_reader *This = impl_from_IFileSourceFilter(iface);
-    HANDLE hFile;
+    struct asf_reader *filter = impl_from_IFileSourceFilter(iface);
+    HRESULT hr;
 
-    TRACE("%p->(%s, %p)\n", This, debugstr_w(pszFileName), pmt);
-    strmbase_dump_media_type(pmt);
+    TRACE("filter %p, file_name %s, media_type %p.\n", filter, debugstr_w(file_name), media_type);
+    strmbase_dump_media_type(media_type);
 
-    if (!pszFileName)
+    if (!file_name)
         return E_POINTER;
 
-    /* open file */
-    /* FIXME: check the sharing values that native uses */
-    hFile = CreateFileW(pszFileName, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_FLAG_OVERLAPPED, NULL);
+    EnterCriticalSection(&filter->filter.filter_cs);
 
-    if (hFile == INVALID_HANDLE_VALUE)
+    if (filter->file_name || !(filter->file_name = wcsdup(file_name)))
     {
-        return HRESULT_FROM_WIN32(GetLastError());
+        LeaveCriticalSection(&filter->filter.filter_cs);
+        return E_FAIL;
     }
 
-    if (!GetFileSizeEx(hFile, &This->file_size))
+    if (media_type && FAILED(hr = CopyMediaType(&filter->media_type, media_type)))
     {
-        WARN("Could not get file size.\n");
-        CloseHandle(hFile);
-        return HRESULT_FROM_WIN32(GetLastError());
+        LeaveCriticalSection(&filter->filter.filter_cs);
+        return hr;
     }
 
-    if (This->pszFileName)
+    EnterCriticalSection(&filter->status_cs);
+    if (SUCCEEDED(hr = IWMReader_Open(filter->reader, filter->file_name, filter->callback, NULL)))
     {
-        free(This->pszFileName);
-        FreeMediaType(&This->mt);
+        filter->status = -1;
+        while (filter->status != WMT_OPENED)
+            SleepConditionVariableCS(&filter->status_cv, &filter->status_cs, INFINITE);
+        hr = filter->result;
     }
+    LeaveCriticalSection(&filter->status_cs);
 
-    if (!(This->pszFileName = wcsdup(pszFileName)))
-    {
-        CloseHandle(hFile);
-        return E_OUTOFMEMORY;
-    }
+    if (FAILED(hr))
+        WARN("Failed to open WM reader, hr %#lx.\n", hr);
 
-    strmbase_source_init(&This->source, &This->filter, L"Output", &source_ops);
-    BaseFilterImpl_IncrementPinVersion(&This->filter);
-
-    This->file = hFile;
-    This->flushing = FALSE;
-    This->requests = NULL;
-
-    if (!pmt)
-    {
-        CopyMediaType(&This->mt, &default_mt);
-        if (get_media_type(pszFileName, &This->mt.majortype, &This->mt.subtype, NULL))
-        {
-            TRACE("Found major type %s, subtype %s.\n",
-                    debugstr_guid(&This->mt.majortype), debugstr_guid(&This->mt.subtype));
-        }
-    }
-    else
-        CopyMediaType(&This->mt, pmt);
+    LeaveCriticalSection(&filter->filter.filter_cs);
 
     return S_OK;
 }
 
-static HRESULT WINAPI FileSource_GetCurFile(IFileSourceFilter *iface, LPOLESTR *ppszFileName, AM_MEDIA_TYPE *mt)
+static HRESULT WINAPI file_source_GetCurFile(IFileSourceFilter *iface, LPOLESTR *file_name, AM_MEDIA_TYPE *media_type)
 {
-    struct asf_reader *This = impl_from_IFileSourceFilter(iface);
+    struct asf_reader *filter = impl_from_IFileSourceFilter(iface);
 
-    TRACE("filter %p, filename %p, mt %p.\n", This, ppszFileName, mt);
+    TRACE("filter %p, file_name %p, media_type %p.\n", filter, file_name, media_type);
 
-    if (!ppszFileName)
+    if (!file_name)
         return E_POINTER;
+    *file_name = NULL;
 
-    /* copy file name & media type if available, otherwise clear the outputs */
-    if (This->pszFileName)
+    if (media_type)
     {
-        *ppszFileName = CoTaskMemAlloc((wcslen(This->pszFileName) + 1) * sizeof(WCHAR));
-        wcscpy(*ppszFileName, This->pszFileName);
-        if (mt)
-            CopyMediaType(mt, &This->mt);
+        media_type->majortype = filter->media_type.majortype;
+        media_type->subtype = filter->media_type.subtype;
+        media_type->lSampleSize = filter->media_type.lSampleSize;
+        media_type->pUnk = filter->media_type.pUnk;
+        media_type->cbFormat = filter->media_type.cbFormat;
     }
-    else
+
+    if (filter->file_name)
     {
-        *ppszFileName = NULL;
-        if (mt)
-            memset(mt, 0, sizeof(AM_MEDIA_TYPE));
+        *file_name = CoTaskMemAlloc((wcslen(filter->file_name) + 1) * sizeof(WCHAR));
+        wcscpy(*file_name, filter->file_name);
     }
 
     return S_OK;
 }
 
-static const IFileSourceFilterVtbl FileSource_Vtbl =
+static const IFileSourceFilterVtbl file_source_vtbl =
 {
-    FileSource_QueryInterface,
-    FileSource_AddRef,
-    FileSource_Release,
-    FileSource_Load,
-    FileSource_GetCurFile
+    file_source_QueryInterface,
+    file_source_AddRef,
+    file_source_Release,
+    file_source_Load,
+    file_source_GetCurFile,
 };
 
-static inline struct asf_reader *impl_from_strmbase_pin(struct strmbase_pin *iface)
+struct asf_callback
 {
-    return CONTAINING_RECORD(iface, struct asf_reader, source.pin);
+    IWMReaderCallback IWMReaderCallback_iface;
+    IWMReaderCallbackAdvanced IWMReaderCallbackAdvanced_iface;
+    LONG ref;
+
+    struct asf_reader *filter;
+};
+
+static inline struct asf_callback *impl_from_IWMReaderCallback(IWMReaderCallback *iface)
+{
+    return CONTAINING_RECORD(iface, struct asf_callback, IWMReaderCallback_iface);
 }
 
-static inline struct asf_reader *impl_from_IAsyncReader(IAsyncReader *iface)
+static HRESULT WINAPI reader_callback_QueryInterface(IWMReaderCallback *iface, const IID *iid, void **out)
 {
-    return CONTAINING_RECORD(iface, struct asf_reader, IAsyncReader_iface);
-}
+    struct asf_callback *callback = impl_from_IWMReaderCallback(iface);
 
-static HRESULT source_query_accept(struct strmbase_pin *iface, const AM_MEDIA_TYPE *mt)
-{
-    struct asf_reader *filter = impl_from_strmbase_pin(iface);
+    TRACE("iface %p, iid %s, out %p.\n", iface, debugstr_guid(iid), out);
 
-    if (IsEqualGUID(&mt->majortype, &filter->mt.majortype)
-            && (!IsEqualGUID(&mt->subtype, &GUID_NULL)
-            || IsEqualGUID(&filter->mt.subtype, &GUID_NULL)))
-        return S_OK;
-
-    return S_FALSE;
-}
-
-static HRESULT source_get_media_type(struct strmbase_pin *iface, unsigned int index, AM_MEDIA_TYPE *mt)
-{
-    struct asf_reader *filter = impl_from_strmbase_pin(iface);
-
-    if (index > 1)
-        return VFW_S_NO_MORE_ITEMS;
-
-    if (index == 0)
-        CopyMediaType(mt, &filter->mt);
-    else if (index == 1)
-        CopyMediaType(mt, &default_mt);
-    return S_OK;
-}
-
-static HRESULT source_query_interface(struct strmbase_pin *iface, REFIID iid, void **out)
-{
-    struct asf_reader *filter = impl_from_strmbase_pin(iface);
-
-    if (IsEqualGUID(iid, &IID_IAsyncReader))
-        *out = &filter->IAsyncReader_iface;
+    if (IsEqualGUID(iid, &IID_IUnknown)
+            || IsEqualGUID(iid, &IID_IWMStatusCallback)
+            || IsEqualGUID(iid, &IID_IWMReaderCallback))
+        *out = &callback->IWMReaderCallback_iface;
+    else if (IsEqualGUID(iid, &IID_IWMReaderCallbackAdvanced))
+        *out = &callback->IWMReaderCallbackAdvanced_iface;
     else
+    {
+        *out = NULL;
+        WARN("%s not implemented, returning E_NOINTERFACE.\n", debugstr_guid(iid));
         return E_NOINTERFACE;
+    }
 
     IUnknown_AddRef((IUnknown *)*out);
     return S_OK;
 }
 
-/* Function called as a helper to IPin_Connect */
-/* specific AM_MEDIA_TYPE - it cannot be NULL */
-/* this differs from standard OutputPin_AttemptConnection only in that it
- * doesn't need the IMemInputPin interface on the receiving pin */
-static HRESULT WINAPI FileAsyncReaderPin_AttemptConnection(struct strmbase_source *This,
-        IPin *pReceivePin, const AM_MEDIA_TYPE *pmt)
+static ULONG WINAPI reader_callback_AddRef(IWMReaderCallback *iface)
 {
+    struct asf_callback *callback = impl_from_IWMReaderCallback(iface);
+    ULONG ref = InterlockedIncrement(&callback->ref);
+
+    TRACE("%p increasing ref to %lu.\n", callback, ref);
+
+    return ref;
+}
+
+static ULONG WINAPI reader_callback_Release(IWMReaderCallback *iface)
+{
+    struct asf_callback *callback = impl_from_IWMReaderCallback(iface);
+    ULONG ref = InterlockedDecrement(&callback->ref);
+
+    TRACE("%p decreasing ref to %lu.\n", callback, ref);
+
+    if (!ref)
+        free(callback);
+
+    return ref;
+}
+
+static HRESULT WINAPI reader_callback_OnStatus(IWMReaderCallback *iface, WMT_STATUS status, HRESULT result,
+        WMT_ATTR_DATATYPE type, BYTE *value, void *context)
+{
+    struct asf_reader *filter = impl_from_IWMReaderCallback(iface)->filter;
+    AM_MEDIA_TYPE stream_media_type = {{0}};
+    IWMHeaderInfo *header_info;
+    DWORD i, stream_count;
+    WCHAR name[MAX_PATH];
+    QWORD duration;
     HRESULT hr;
 
-    TRACE("%p->(%p, %p)\n", This, pReceivePin, pmt);
+    TRACE("iface %p, status %d, result %#lx, type %d, value %p, context %p.\n",
+            iface, status, result, type, value, context);
 
-    if (This->pin.ops->pin_query_accept(&This->pin, pmt) != S_OK)
-        return VFW_E_TYPE_NOT_ACCEPTED;
-
-    This->pin.peer = pReceivePin;
-    IPin_AddRef(pReceivePin);
-    CopyMediaType(&This->pin.mt, pmt);
-
-    hr = IPin_ReceiveConnection(pReceivePin, &This->pin.IPin_iface, pmt);
-
-    if (FAILED(hr))
+    switch (status)
     {
-        IPin_Release(This->pin.peer);
-        This->pin.peer = NULL;
-        FreeMediaType(&This->pin.mt);
-    }
+        case WMT_OPENED:
+            if (FAILED(hr = IWMReader_GetOutputCount(filter->reader, &stream_count)))
+            {
+                ERR("Failed to get WMReader output count, hr %#lx.\n", hr);
+                stream_count = 0;
+            }
+            if (stream_count > ARRAY_SIZE(filter->streams))
+            {
+                FIXME("Found %lu streams, not supported!\n", stream_count);
+                stream_count = ARRAY_SIZE(filter->streams);
+            }
 
-    TRACE(" -- %x\n", hr);
-    return hr;
-}
+            if (FAILED(hr = IWMReader_QueryInterface(filter->reader, &IID_IWMHeaderInfo,
+                    (void **)&header_info)))
+                duration = 0;
+            else
+            {
+                WMT_ATTR_DATATYPE type = WMT_TYPE_QWORD;
+                WORD index = 0, size = sizeof(duration);
 
-static const struct strmbase_source_ops source_ops =
-{
-    .base.pin_query_accept = source_query_accept,
-    .base.pin_get_media_type = source_get_media_type,
-    .base.pin_query_interface = source_query_interface,
-    .pfnAttemptConnection = FileAsyncReaderPin_AttemptConnection,
-};
+                if (FAILED(IWMHeaderInfo_GetAttributeByName(header_info, &index, L"Duration",
+                        &type, (BYTE *)&duration, &size )))
+                    duration = 0;
+                IWMHeaderInfo_Release(header_info);
+            }
 
-static HRESULT WINAPI FileAsyncReader_QueryInterface(IAsyncReader *iface, REFIID iid, void **out)
-{
-    struct asf_reader *filter = impl_from_IAsyncReader(iface);
-    return IPin_QueryInterface(&filter->source.pin.IPin_iface, iid, out);
-}
+            for (i = 0; i < stream_count; ++i)
+            {
+                struct asf_stream *stream = filter->streams + i;
 
-static ULONG WINAPI FileAsyncReader_AddRef(IAsyncReader * iface)
-{
-    struct asf_reader *filter = impl_from_IAsyncReader(iface);
-    return IPin_AddRef(&filter->source.pin.IPin_iface);
-}
+                if (FAILED(hr = asf_stream_get_media_type(&stream->source.pin, 0, &stream_media_type)))
+                    WARN("Failed to get stream media type, hr %#lx.\n", hr);
+                if (IsEqualGUID(&stream_media_type.majortype, &MEDIATYPE_Video))
+                    swprintf(name, ARRAY_SIZE(name), L"Raw Video %u", stream->index);
+                else
+                    swprintf(name, ARRAY_SIZE(name), L"Raw Audio %u", stream->index);
+                FreeMediaType(&stream_media_type);
 
-static ULONG WINAPI FileAsyncReader_Release(IAsyncReader * iface)
-{
-    struct asf_reader *filter = impl_from_IAsyncReader(iface);
-    return IPin_Release(&filter->source.pin.IPin_iface);
-}
+                strmbase_source_init(&stream->source, &filter->filter, name, &source_ops);
+                strmbase_seeking_init(&stream->seek, &media_seeking_vtbl, media_seeking_ChangeStop,
+                        media_seeking_ChangeCurrent, media_seeking_ChangeRate);
+                stream->seek.llCurrent = 0;
+                stream->seek.llDuration = duration;
+                stream->seek.llStop = duration;
+            }
+            filter->stream_count = stream_count;
+            BaseFilterImpl_IncrementPinVersion(&filter->filter);
 
-static HRESULT WINAPI FileAsyncReader_RequestAllocator(IAsyncReader *iface,
-        IMemAllocator *preferred, ALLOCATOR_PROPERTIES *props, IMemAllocator **ret_allocator)
-{
-    struct asf_reader *filter = impl_from_IAsyncReader(iface);
-    IMemAllocator *allocator;
-    unsigned int i;
-    HRESULT hr;
+            EnterCriticalSection(&filter->status_cs);
+            filter->result = result;
+            filter->status = WMT_OPENED;
+            LeaveCriticalSection(&filter->status_cs);
+            WakeConditionVariable(&filter->status_cv);
+            break;
 
-    TRACE("filter %p, preferred %p, props %p, ret_allocator %p.\n", filter, preferred, props, ret_allocator);
+        case WMT_END_OF_STREAMING:
+            for (i = 0; i < filter->stream_count; ++i)
+            {
+                struct asf_stream *stream = filter->streams + i;
 
-    if (!props->cbAlign)
-        props->cbAlign = 1;
+                if (!stream->source.pin.peer)
+                    continue;
 
-    *ret_allocator = NULL;
+                IPin_EndOfStream(stream->source.pin.peer);
+            }
+            break;
 
-    if (preferred)
-        IMemAllocator_AddRef(allocator = preferred);
-    else if (FAILED(hr = CoCreateInstance(&CLSID_MemoryAllocator, NULL,
-            CLSCTX_INPROC, &IID_IMemAllocator, (void **)&allocator)))
-        return hr;
+        case WMT_STARTED:
+            EnterCriticalSection(&filter->status_cs);
+            filter->result = result;
+            filter->status = WMT_STARTED;
+            LeaveCriticalSection(&filter->status_cs);
+            WakeConditionVariable(&filter->status_cv);
+            break;
 
-    if (FAILED(hr = IMemAllocator_SetProperties(allocator, props, props)))
-    {
-        IMemAllocator_Release(allocator);
-        return hr;
-    }
+        case WMT_STOPPED:
+            EnterCriticalSection(&filter->status_cs);
+            filter->result = result;
+            filter->status = WMT_STOPPED;
+            LeaveCriticalSection(&filter->status_cs);
+            WakeConditionVariable(&filter->status_cv);
+            break;
 
-    if (filter->requests)
-    {
-        for (i = 0; i < filter->max_requests; ++i)
-            CloseHandle(filter->requests[i].ovl.hEvent);
-        free(filter->requests);
-    }
-
-    filter->max_requests = props->cBuffers;
-    TRACE("Maximum request count: %u.\n", filter->max_requests);
-    if (!(filter->requests = calloc(filter->max_requests, sizeof(filter->requests[0]))))
-    {
-        IMemAllocator_Release(allocator);
-        return E_OUTOFMEMORY;
-    }
-
-    for (i = 0; i < filter->max_requests; ++i)
-        filter->requests[i].ovl.hEvent = CreateEventW(NULL, TRUE, FALSE, NULL);
-
-    *ret_allocator = allocator;
-    return S_OK;
-}
-
-static HRESULT WINAPI FileAsyncReader_Request(IAsyncReader *iface, IMediaSample *sample, DWORD_PTR cookie)
-{
-    struct asf_reader *filter = impl_from_IAsyncReader(iface);
-    REFERENCE_TIME start, end;
-    struct request *req;
-    unsigned int i;
-    HRESULT hr;
-    BYTE *data;
-
-    TRACE("filter %p, sample %p, cookie %#lx.\n", filter, sample, cookie);
-
-    if (!sample)
-        return E_POINTER;
-
-    if (FAILED(hr = IMediaSample_GetTime(sample, &start, &end)))
-        return hr;
-
-    if (BYTES_FROM_MEDIATIME(start) >= filter->file_size.QuadPart)
-        return HRESULT_FROM_WIN32(ERROR_HANDLE_EOF);
-
-    if (FAILED(hr = IMediaSample_GetPointer(sample, &data)))
-        return hr;
-
-    EnterCriticalSection(&filter->sample_cs);
-    if (filter->flushing)
-    {
-        LeaveCriticalSection(&filter->sample_cs);
-        return VFW_E_WRONG_STATE;
-    }
-
-    for (i = 0; i < filter->max_requests; ++i)
-    {
-        if (!filter->requests[i].sample)
+        default:
+            WARN("Ignoring status %#x.\n", status);
             break;
     }
-    assert(i < filter->max_requests);
-    req = &filter->requests[i];
 
-    req->ovl.u.s.Offset = BYTES_FROM_MEDIATIME(start);
-    req->ovl.u.s.OffsetHigh = BYTES_FROM_MEDIATIME(start) >> 32;
-    /* No reference is taken. */
-
-    if (ReadFile(filter->file, data, BYTES_FROM_MEDIATIME(end - start), NULL, &req->ovl)
-            || GetLastError() == ERROR_IO_PENDING)
-    {
-        hr = S_OK;
-        req->sample = sample;
-        req->cookie = cookie;
-    }
-    else
-        hr = HRESULT_FROM_WIN32(GetLastError());
-
-    LeaveCriticalSection(&filter->sample_cs);
-    return hr;
+    return S_OK;
 }
 
-static HRESULT WINAPI FileAsyncReader_WaitForNext(IAsyncReader *iface,
-        DWORD timeout, IMediaSample **sample, DWORD_PTR *cookie)
+static HRESULT WINAPI reader_callback_OnSample(IWMReaderCallback *iface, DWORD output, QWORD time,
+        QWORD duration, DWORD flags, INSSBuffer *sample, void *context)
 {
-    struct asf_reader *filter = impl_from_IAsyncReader(iface);
-    unsigned int i;
+    struct asf_reader *filter = impl_from_IWMReaderCallback(iface)->filter;
+    REFERENCE_TIME start_time = time, end_time = time + duration;
+    struct asf_stream *stream = filter->streams + output;
+    struct buffer *buffer;
+    HRESULT hr = S_OK;
 
-    TRACE("filter %p, timeout %u, sample %p, cookie %p.\n", filter, timeout, sample, cookie);
+    TRACE("iface %p, output %lu, time %I64u, duration %I64u, flags %#lx, sample %p, context %p.\n",
+            iface, output, time, duration, flags, sample, context);
 
-    *sample = NULL;
-    *cookie = 0;
-
-    EnterCriticalSection(&filter->sample_cs);
-
-    do
+    if (!stream->source.pin.peer)
     {
-        if (filter->flushing)
-        {
-            LeaveCriticalSection(&filter->sample_cs);
-            return VFW_E_WRONG_STATE;
-        }
-
-        for (i = 0; i < filter->max_requests; ++i)
-        {
-            struct request *req = &filter->requests[i];
-            DWORD size;
-
-            if (req->sample && GetOverlappedResult(filter->file, &req->ovl, &size, FALSE))
-            {
-                REFERENCE_TIME start, end;
-
-                IMediaSample_SetActualDataLength(req->sample, size);
-                start = MEDIATIME_FROM_BYTES(((ULONGLONG)req->ovl.u.s.OffsetHigh << 32) + req->ovl.u.s.Offset);
-                end = start + MEDIATIME_FROM_BYTES(size);
-                IMediaSample_SetTime(req->sample, &start, &end);
-
-                *sample = req->sample;
-                *cookie = req->cookie;
-                req->sample = NULL;
-
-                LeaveCriticalSection(&filter->sample_cs);
-                TRACE("Returning sample %u.\n", i);
-                return S_OK;
-            }
-        }
-    } while (SleepConditionVariableCS(&filter->sample_cv, &filter->sample_cs, timeout));
-
-    LeaveCriticalSection(&filter->sample_cs);
-    return VFW_E_TIMEOUT;
-}
-
-static BOOL sync_read(HANDLE file, LONGLONG offset, LONG length, BYTE *buffer, DWORD *read_len)
-{
-    OVERLAPPED ovl = {0};
-    BOOL ret;
-
-    ovl.hEvent = (HANDLE)((ULONG_PTR)CreateEventW(NULL, TRUE, FALSE, NULL) | 1);
-    ovl.u.s.Offset = (DWORD)offset;
-    ovl.u.s.OffsetHigh = offset >> 32;
-
-    *read_len = 0;
-
-    ret = ReadFile(file, buffer, length, NULL, &ovl);
-    if (ret || GetLastError() == ERROR_IO_PENDING)
-        ret = GetOverlappedResult(file, &ovl, read_len, TRUE);
-
-    TRACE("Returning %u bytes.\n", *read_len);
-
-    CloseHandle(ovl.hEvent);
-    return ret;
-}
-
-static HRESULT WINAPI FileAsyncReader_SyncReadAligned(IAsyncReader *iface, IMediaSample *sample)
-{
-    struct asf_reader *filter = impl_from_IAsyncReader(iface);
-    REFERENCE_TIME start_time, end_time;
-    DWORD read_len;
-    BYTE *buffer;
-    LONG length;
-    HRESULT hr;
-    BOOL ret;
-
-    TRACE("filter %p, sample %p.\n", filter, sample);
-
-    hr = IMediaSample_GetTime(sample, &start_time, &end_time);
-
-    if (SUCCEEDED(hr))
-        hr = IMediaSample_GetPointer(sample, &buffer);
-
-    if (SUCCEEDED(hr))
-    {
-        length = BYTES_FROM_MEDIATIME(end_time - start_time);
-        ret = sync_read(filter->file, BYTES_FROM_MEDIATIME(start_time), length, buffer, &read_len);
-        if (ret)
-            hr = (read_len == length) ? S_OK : S_FALSE;
-        else if (GetLastError() == ERROR_HANDLE_EOF)
-            hr = S_OK;
-        else
-            hr = HRESULT_FROM_WIN32(GetLastError());
+        WARN("Output %lu pin is not connected, discarding %p.\n", output, sample);
+        return S_OK;
     }
 
-    if (SUCCEEDED(hr))
-        IMediaSample_SetActualDataLength(sample, read_len);
-
-    return hr;
-}
-
-static HRESULT WINAPI FileAsyncReader_SyncRead(IAsyncReader *iface,
-        LONGLONG offset, LONG length, BYTE *buffer)
-{
-    struct asf_reader *filter = impl_from_IAsyncReader(iface);
-    DWORD read_len;
-    HRESULT hr;
-    BOOL ret;
-
-    TRACE("filter %p, offset %s, length %d, buffer %p.\n",
-            filter, wine_dbgstr_longlong(offset), length, buffer);
-
-    ret = sync_read(filter->file, offset, length, buffer, &read_len);
-    if (ret)
-        hr = (read_len == length) ? S_OK : S_FALSE;
-    else if (GetLastError() == ERROR_HANDLE_EOF)
-        hr = S_FALSE;
+    if (!(buffer = unsafe_impl_from_INSSBuffer(sample)))
+        WARN("Unexpected buffer iface %p, discarding.\n", sample);
     else
-        hr = HRESULT_FROM_WIN32(GetLastError());
+    {
+        IMediaSample_SetTime(buffer->sample, &start_time, &end_time);
+        IMediaSample_SetDiscontinuity(buffer->sample, !!(flags & WM_SF_DISCONTINUITY));
+        IMediaSample_SetSyncPoint(buffer->sample, !!(flags & WM_SF_CLEANPOINT));
+
+        hr = IMemInputPin_Receive(stream->source.pMemInputPin, buffer->sample);
+
+        TRACE("Receive returned hr %#lx.\n", hr);
+    }
 
     return hr;
 }
 
-static HRESULT WINAPI FileAsyncReader_Length(IAsyncReader *iface, LONGLONG *total, LONGLONG *available)
+static const IWMReaderCallbackVtbl reader_callback_vtbl =
 {
-    struct asf_reader *filter = impl_from_IAsyncReader(iface);
-
-    TRACE("iface %p, total %p, available %p.\n", iface, total, available);
-
-    *available = *total = filter->file_size.QuadPart;
-
-    return S_OK;
-}
-
-static HRESULT WINAPI FileAsyncReader_BeginFlush(IAsyncReader * iface)
-{
-    struct asf_reader *filter = impl_from_IAsyncReader(iface);
-    unsigned int i;
-
-    TRACE("iface %p.\n", iface);
-
-    EnterCriticalSection(&filter->sample_cs);
-
-    filter->flushing = TRUE;
-    for (i = 0; i < filter->max_requests; ++i)
-        filter->requests[i].sample = NULL;
-    CancelIoEx(filter->file, NULL);
-    WakeAllConditionVariable(&filter->sample_cv);
-
-    LeaveCriticalSection(&filter->sample_cs);
-
-    return S_OK;
-}
-
-static HRESULT WINAPI FileAsyncReader_EndFlush(IAsyncReader * iface)
-{
-    struct asf_reader *filter = impl_from_IAsyncReader(iface);
-
-    TRACE("iface %p.\n", iface);
-
-    EnterCriticalSection(&filter->sample_cs);
-
-    filter->flushing = FALSE;
-
-    LeaveCriticalSection(&filter->sample_cs);
-
-    return S_OK;
-}
-
-static const IAsyncReaderVtbl FileAsyncReader_Vtbl =
-{
-    FileAsyncReader_QueryInterface,
-    FileAsyncReader_AddRef,
-    FileAsyncReader_Release,
-    FileAsyncReader_RequestAllocator,
-    FileAsyncReader_Request,
-    FileAsyncReader_WaitForNext,
-    FileAsyncReader_SyncReadAligned,
-    FileAsyncReader_SyncRead,
-    FileAsyncReader_Length,
-    FileAsyncReader_BeginFlush,
-    FileAsyncReader_EndFlush,
+    reader_callback_QueryInterface,
+    reader_callback_AddRef,
+    reader_callback_Release,
+    reader_callback_OnStatus,
+    reader_callback_OnSample,
 };
+
+static inline struct asf_callback *impl_from_IWMReaderCallbackAdvanced(IWMReaderCallbackAdvanced *iface)
+{
+    return CONTAINING_RECORD(iface, struct asf_callback, IWMReaderCallbackAdvanced_iface);
+}
+
+static HRESULT WINAPI reader_callback_advanced_QueryInterface(IWMReaderCallbackAdvanced *iface, REFIID riid, LPVOID * ppv)
+{
+    struct asf_callback *impl = impl_from_IWMReaderCallbackAdvanced(iface);
+    return IUnknown_QueryInterface(&impl->IWMReaderCallback_iface, riid, ppv);
+}
+
+static ULONG WINAPI reader_callback_advanced_AddRef(IWMReaderCallbackAdvanced *iface)
+{
+    struct asf_callback *impl = impl_from_IWMReaderCallbackAdvanced(iface);
+    return IUnknown_AddRef(&impl->IWMReaderCallback_iface);
+}
+
+static ULONG WINAPI reader_callback_advanced_Release(IWMReaderCallbackAdvanced *iface)
+{
+    struct asf_callback *impl = impl_from_IWMReaderCallbackAdvanced(iface);
+    return IUnknown_Release(&impl->IWMReaderCallback_iface);
+}
+
+static HRESULT WINAPI reader_callback_advanced_OnStreamSample(IWMReaderCallbackAdvanced *iface,
+        WORD stream, QWORD time, QWORD duration, DWORD flags, INSSBuffer *sample, void *context)
+{
+    FIXME("iface %p, stream %u, time %I64u, duration %I64u, flags %#lx, sample %p, context %p stub!\n",
+            iface, stream, time, duration, flags, sample, context);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI reader_callback_advanced_OnTime(IWMReaderCallbackAdvanced *iface,
+        QWORD time, void *context)
+{
+    FIXME("iface %p stub!\n", iface);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI reader_callback_advanced_OnStreamSelection(IWMReaderCallbackAdvanced *iface,
+        WORD count, WORD *stream_numbers, WMT_STREAM_SELECTION *selections, void *context)
+{
+    FIXME("iface %p stub!\n", iface);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI reader_callback_advanced_OnOutputPropsChanged(IWMReaderCallbackAdvanced *iface,
+        DWORD output, WM_MEDIA_TYPE *mt, void *context)
+{
+    FIXME("iface %p stub!\n", iface);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI reader_callback_advanced_AllocateForStream(IWMReaderCallbackAdvanced *iface,
+        WORD stream, DWORD size, INSSBuffer **out, void *context)
+{
+    FIXME("iface %p stub!\n", iface);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI reader_callback_advanced_AllocateForOutput(IWMReaderCallbackAdvanced *iface,
+        DWORD output, DWORD size, INSSBuffer **out, void *context)
+{
+    struct asf_reader *filter = impl_from_IWMReaderCallbackAdvanced(iface)->filter;
+    struct asf_stream *stream = filter->streams + output;
+    IMediaSample *sample;
+    HRESULT hr;
+
+    TRACE("iface %p, output %lu, size %lu, out %p, context %p.\n", iface, output, size, out, context);
+
+    *out = NULL;
+
+    if (!stream->source.pin.peer)
+        return VFW_E_NOT_CONNECTED;
+
+    if (FAILED(hr = IMemAllocator_GetBuffer(stream->source.pAllocator, &sample, NULL, NULL, 0)))
+    {
+        WARN("Failed to get a sample, hr %#lx.\n", hr);
+        return hr;
+    }
+
+    if (size > IMediaSample_GetSize(sample))
+    {
+        WARN("Allocated media sample is too small, size %lu.\n", size);
+        IMediaSample_Release(sample);
+        return VFW_E_BUFFER_OVERFLOW;
+    }
+
+    return buffer_create(sample, out);
+}
+
+static const IWMReaderCallbackAdvancedVtbl reader_callback_advanced_vtbl =
+{
+    reader_callback_advanced_QueryInterface,
+    reader_callback_advanced_AddRef,
+    reader_callback_advanced_Release,
+    reader_callback_advanced_OnStreamSample,
+    reader_callback_advanced_OnTime,
+    reader_callback_advanced_OnStreamSelection,
+    reader_callback_advanced_OnOutputPropsChanged,
+    reader_callback_advanced_AllocateForStream,
+    reader_callback_advanced_AllocateForOutput,
+};
+
+static HRESULT asf_callback_create(struct asf_reader *filter, IWMReaderCallback **out)
+{
+    struct asf_callback *callback;
+
+    if (!(callback = calloc(1, sizeof(*callback))))
+        return E_OUTOFMEMORY;
+
+    callback->IWMReaderCallback_iface.lpVtbl = &reader_callback_vtbl;
+    callback->IWMReaderCallbackAdvanced_iface.lpVtbl = &reader_callback_advanced_vtbl;
+    callback->filter = filter;
+    callback->ref = 1;
+
+    *out = &callback->IWMReaderCallback_iface;
+    return S_OK;
+}
+
+HRESULT asf_reader_create(IUnknown *outer, IUnknown **out)
+{
+    struct asf_reader *object;
+    HRESULT hr;
+    int i;
+
+    if (!(object = calloc(1, sizeof(*object))))
+        return E_OUTOFMEMORY;
+
+    if (FAILED(hr = WMCreateReader(NULL, 0, &object->reader)))
+    {
+        free(object);
+        return hr;
+    }
+    if (FAILED(hr = asf_callback_create(object, &object->callback)))
+    {
+        IWMReader_Release(object->reader);
+        free(object);
+        return hr;
+    }
+
+    for (i = 0; i < ARRAY_SIZE(object->streams); ++i) object->streams[i].index = i;
+    strmbase_filter_init(&object->filter, outer, &CLSID_WMAsfReader, &filter_ops);
+    object->IFileSourceFilter_iface.lpVtbl = &file_source_vtbl;
+
+    InitializeCriticalSection(&object->status_cs);
+    object->status_cs.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": status_cs");
+
+    TRACE("Created WM ASF reader %p.\n", object);
+    *out = &object->filter.IUnknown_inner;
+
+    return S_OK;
+}

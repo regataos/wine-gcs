@@ -219,7 +219,7 @@ PAGER_GetBorder(const PAGER_INFO *infoPtr)
 static inline COLORREF
 PAGER_GetBkColor(const PAGER_INFO *infoPtr)
 {
-    TRACE("[%p] returns %#lx\n", infoPtr->hwndSelf, infoPtr->clrBk);
+    TRACE("[%p] returns %06x\n", infoPtr->hwndSelf, infoPtr->clrBk);
     return infoPtr->clrBk;
 }
 
@@ -446,7 +446,7 @@ PAGER_SetBkColor (PAGER_INFO* infoPtr, COLORREF clrBk)
     COLORREF clrTemp = infoPtr->clrBk;
 
     infoPtr->clrBk = clrBk;
-    TRACE("[%p] %#lx\n", infoPtr->hwndSelf, infoPtr->clrBk);
+    TRACE("[%p] %06x\n", infoPtr->hwndSelf, infoPtr->clrBk);
 
     /* the native control seems to do things this way */
     SetWindowPos(infoPtr->hwndSelf, 0, 0, 0, 0, 0,
@@ -776,7 +776,7 @@ PAGER_MouseMove (PAGER_INFO* infoPtr, INT keys, INT x, INT y)
 	/* If in one of the buttons the capture and draw buttons */
 	if (rect)
 	{
-            TRACE("[%p] draw btn (%s), Capture %s, style %#lx\n",
+            TRACE("[%p] draw btn (%s), Capture %s, style %08x\n",
                   infoPtr->hwndSelf, wine_dbgstr_rect(rect),
 		  (infoPtr->bCapture) ? "TRUE" : "FALSE",
 		  infoPtr->dwStyle);
@@ -943,7 +943,7 @@ PAGER_Timer (PAGER_INFO* infoPtr, INT nTimerId)
 	else
 	    dir = (infoPtr->dwStyle & PGS_HORZ) ?
 		PGF_SCROLLRIGHT : PGF_SCROLLDOWN;
-	TRACE("[%p] TIMERID1: style=%#lx, dir=%d\n",
+	TRACE("[%p] TIMERID1: style=%08x, dir=%d\n",
               infoPtr->hwndSelf, infoPtr->dwStyle, dir);
 	KillTimer(infoPtr->hwndSelf, TIMERID1);
 	SetTimer(infoPtr->hwndSelf, TIMERID1, REPEAT_DELAY, 0);
@@ -1012,7 +1012,8 @@ PAGER_StyleChanged(PAGER_INFO *infoPtr, WPARAM wStyleType, const STYLESTRUCT *lp
 {
     DWORD oldStyle = infoPtr->dwStyle;
 
-    TRACE("styletype %Ix, styleOld %#lx, styleNew %#lx\n", wStyleType, lpss->styleOld, lpss->styleNew);
+    TRACE("(styletype=%lx, styleOld=0x%08x, styleNew=0x%08x)\n",
+          wStyleType, lpss->styleOld, lpss->styleNew);
 
     if (wStyleType != GWL_STYLE) return 0;
   
@@ -1463,7 +1464,7 @@ PAGER_WindowProc (HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
     PAGER_INFO *infoPtr = (PAGER_INFO *)GetWindowLongPtrW(hwnd, 0);
 
-    TRACE("%p, %#x, %#Ix, %#Ix\n", hwnd, uMsg, wParam, lParam);
+    TRACE("(%p, %#x, %#lx, %#lx)\n", hwnd, uMsg, wParam, lParam);
 
     if (!infoPtr && (uMsg != WM_CREATE))
 	return DefWindowProcW (hwnd, uMsg, wParam, lParam);

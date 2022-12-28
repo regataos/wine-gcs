@@ -961,6 +961,130 @@ static BOOL add_family_replacement( const WCHAR *new_name, const WCHAR *replace 
     return TRUE;
 }
 
+/* Simplified Chinese fonts */
+static const WCHAR SimSun[] = {'S','i','m','S','u','n',0};
+static const WCHAR atSimSun[] = {'@','S','i','m','S','u','n',0};
+static const WCHAR Microsoft_YaHei[] = {'M','i','c','r','o','s','o','f','t',' ','Y','a','H','e','i',0};
+static const WCHAR LiSu[] = {'L','i','S','u',0};
+/* Traditional Chinese fonts */
+static const WCHAR PMingLiU[] = {'P','M','i','n','g','L','i','U',0};
+static const WCHAR atPMingLiU[] = {'@','P','M','i','n','g','L','i','U',0};
+/* Korean fonts */
+static const WCHAR Gulim[] = {'G','u','l','i','m',0};
+static const WCHAR atGulim[] = {'@','G','u','l','i','m',0};
+/* Japanese fonts */
+static const WCHAR MS_UI_Gothic[] = {'M','S',' ','U','I',' ','G','o','t','h','i','c',0};
+static const WCHAR atMS_UI_Gothic[] = {'@','M','S',' ','U','I',' ','G','o','t','h','i','c',0};
+
+static const WCHAR new_sc_fonts[] = {
+    /* Ubuntu 16.04 or later, Mint 19, Fedora 29 */
+    'N','o','t','o',' ','S','a','n','s',' ','C','J','K',' ','S','C',' ','R','e','g','u','l','a','r',0,
+    /* Manjaro 18 */
+    'N','o','t','o',' ','S','a','n','s',' ','C','J','K',' ','S','C',0,
+    /* Popular open source Chinese font */
+    'W','e','n','Q','u','a','n','Y','i',' ','M','i','c','r','o',' ','H','e','i',0,
+    0
+};
+
+static const WCHAR vertical_new_sc_fonts[] = {
+    /* Ubuntu 16.04 or later, Mint 19, Fedora 29 */
+    '@','N','o','t','o',' ','S','a','n','s',' ','C','J','K',' ','S','C',' ','R','e','g','u','l','a','r',0,
+    /* Manjaro 18 */
+    '@','N','o','t','o',' ','S','a','n','s',' ','C','J','K',' ','S','C',0,
+    /* popular open source Chinese font */
+    '@','W','e','n','Q','u','a','n','Y','i',' ','M','i','c','r','o',' ','H','e','i',0,
+    0
+};
+
+static const WCHAR new_tc_fonts[] = {
+    /* Ubuntu 16.04 or later, Mint 19, Fedora 29 */
+    'N','o','t','o',' ','S','a','n','s',' ','C','J','K',' ','T','C',' ','R','e','g','u','l','a','r',0,
+    /* Manjaro 18 */
+    'N','o','t','o',' ','S','a','n','s',' ','C','J','K',' ','T','C',0,
+    /* popular open source Chinese font */
+    'W','e','n','Q','u','a','n','Y','i',' ','M','i','c','r','o',' ','H','e','i',0,
+    0
+};
+
+static const WCHAR vertical_new_tc_fonts[] = {
+    /* Ubuntu 16.04 or later */
+    '@','N','o','t','o',' ','S','a','n','s',' ','C','J','K',' ','T','C',' ','R','e','g','u','l','a','r',0,
+    /* Manjaro 18 */
+    '@','N','o','t','o',' ','S','a','n','s',' ','C','J','K',' ','T','C',0,
+    /* popular open source Chinese font */
+    '@','W','e','n','Q','u','a','n','Y','i',' ','M','i','c','r','o',' ','H','e','i',0,
+    0
+};
+
+static const WCHAR new_jp_fonts[] = {
+    /* Ubuntu 16.04 or later */
+    'N','o','t','o',' ','S','a','n','s',' ','C','J','K',' ','J','P',' ','R','e','g','u','l','a','r',0,
+    /* Manjaro 18 */
+    'N','o','t','o',' ','S','a','n','s',' ','C','J','K',' ','J','P',0,
+    0
+};
+
+static const WCHAR vertical_new_jp_fonts[] = {
+    /* Ubuntu 16.04 or later */
+    '@','N','o','t','o',' ','S','a','n','s',' ','C','J','K',' ','J','P',' ','R','e','g','u','l','a','r',0,
+    /* Manjaro 18 */
+    '@','N','o','t','o',' ','S','a','n','s',' ','C','J','K',' ','J','P',0,
+    0
+};
+
+static const WCHAR new_kr_fonts[] = {
+    /* Ubuntu 16.04 or later */
+    'N','o','t','o',' ','S','a','n','s',' ','C','J','K',' ','K','R',' ','R','e','g','u','l','a','r',0,
+    /* Manjaro 18 */
+    'N','o','t','o',' ','S','a','n','s',' ','C','J','K',' ','K','R',0,
+    0
+};
+
+static const WCHAR vertical_new_kr_fonts[] = {
+    /* Ubuntu 16.04 or later */
+    '@','N','o','t','o',' ','S','a','n','s',' ','C','J','K',' ','K','R',' ','R','e','g','u','l','a','r',0,
+    /* Manjaro 18 */
+    '@','N','o','t','o',' ','S','a','n','s',' ','C','J','K',' ','K','R',0,
+    0
+};
+
+static const WCHAR MS_PGothic_cp932[]= {0x30fb,0xff6d,0x30fb,0xff73,' ',0x30fb,0xff70,0x7e67,0xff74,0x7e67,0xff77,0x7e5d,0x30fb,0x3051,0};
+
+static struct font_replacements
+{
+    const WCHAR *replacements[4];
+    const int count;
+    const WCHAR *new_fonts;
+    const WCHAR *vertical_new_fonts;
+    BOOL *font_seen;
+} font_replacements_list[] =
+{
+    /* Simplified Chinese */
+    {
+        {
+            SimSun, atSimSun, Microsoft_YaHei, LiSu
+        }, 4, new_sc_fonts, vertical_new_sc_fonts, NULL
+    },
+    /* Traditional Chinese */
+    {
+        {
+            PMingLiU, atPMingLiU
+        }, 2, new_tc_fonts, vertical_new_tc_fonts, NULL
+    },
+    /* Japanese */
+    {
+        {
+            MS_UI_Gothic, atMS_UI_Gothic, MS_PGothic_cp932
+        }, 3, new_jp_fonts, vertical_new_jp_fonts, NULL
+    },
+    /* Korean */
+    {
+        {
+            Gulim, atGulim
+        }, 2, new_kr_fonts, vertical_new_kr_fonts, NULL
+    }
+};
+
 /*
  * The replacement list is a way to map an entire font
  * family onto another family.  For example adding
@@ -991,6 +1115,25 @@ static void load_gdi_font_replacements(void)
         /* "NewName"="Oldname" */
         if (!find_family_from_any_name( value ))
         {
+            int j;
+
+            for (j = 0; j < ARRAY_SIZE(font_replacements_list); j++)
+            {
+                int k;
+
+                struct font_replacements *replacement = &font_replacements_list[j];
+
+                replacement->font_seen = calloc(1, replacement->count * sizeof(BOOL));
+                for (k = 0; k < replacement->count; k++)
+                {
+                    if (!replacement->font_seen[k] && !memcmp(value, replacement->replacements[k], sizeof(value)))
+                    {
+                        replacement->font_seen[k] = TRUE;
+                        break;
+                    }
+                }
+            }
+
             if (info->Type == REG_MULTI_SZ)
             {
                 WCHAR *replace = data;
@@ -1541,6 +1684,14 @@ static const WCHAR p_ming_li_uW[] =
     {'P','M','i','n','g','L','i','U',0};
 static const WCHAR batangW[] =
     {'B','a','t','a','n','g',0};
+static const WCHAR arialW[] =
+    {'A','r','i','a','l',0};
+static const WCHAR arial_boldW[] =
+    {'A','r','i','a','l',' ','B','o','l','d',0};
+static const WCHAR courier_newW[] =
+    {'C','o','u','r','i','e','r',' ','N','e','w',0};
+static const WCHAR courier_new_boldW[] =
+    {'C','o','u','r','i','e','r',' ','N','e','w',' ','B','o','l','d',0};
 
 static const WCHAR * const font_links_list[] =
 {
@@ -1580,6 +1731,147 @@ static const struct font_links_defaults_list
     { p_ming_li_uW,
       { p_ming_li_uW, sim_sunW, ms_ui_gothicW, batangW, NULL }
     }
+};
+
+static const char system_link_tahoma_sc[] =
+    "SIMSUN.TTC,SimSun\0"
+    "MINGLIU.TTC,PMingLiu\0"
+    "MSGOTHIC.TTC,MS UI Gothic\0"
+    "BATANG.TTC,Batang\0"
+    "MSYH.TTC,Microsoft YaHei UI\0"
+    "MSJH.TTC,Microsoft JhengHei UI\0"
+    "YUGOTHM.TTC,Yu Gothic UI\0"
+    "MALGUN.TTF,Malgun Gothic\0"
+    "SEGUISYM.TTF,Segoe UI Symbol\0";
+
+static const char system_link_tahoma_tc[] =
+    "MINGLIU.TTC,PMingLiu\0"
+    "SIMSUN.TTC,SimSun\0"
+    "MSGOTHIC.TTC,MS UI Gothic\0"
+    "BATANG.TTC,Batang\0"
+    "MSJH.TTC,Microsoft JhengHei UI\0"
+    "MSYH.TTC,Microsoft YaHei UI\0"
+    "YUGOTHM.TTC,Yu Gothic UI\0"
+    "MALGUN.TTF,Malgun Gothic\0"
+    "SEGUISYM.TTF,Segoe UI Symbol\0";
+
+static const char system_link_tahoma_jp[] =
+    "MSGOTHIC.TTC,MS UI Gothic\0"
+    "MINGLIU.TTC,PMingLiU\0"
+    "SIMSUN.TTC,SimSun\0"
+    "GULIM.TTC,Gulim\0"
+    "YUGOTHM.TTC,Yu Gothic UI\0"
+    "MSJH.TTC,Microsoft JhengHei UI\0"
+    "MSYH.TTC,Microsoft YaHei UI\0"
+    "MALGUN.TTF,Malgun Gothic\0"
+    "SEGUISYM.TTF,Segoe UI Symbol\0";
+
+static const char system_link_tahoma_kr[] =
+    "GULIM.TTC,Gulim\0"
+    "MSGOTHIC.TTC,MS UI Gothic\0"
+    "MINGLIU.TTC,PMingLiU\0"
+    "SIMSUN.TTC,SimSun\0"
+    "MALGUN.TTF,Malgun Gothic\0"
+    "YUGOTHM.TTC,Yu Gothic UI\0"
+    "MSJH.TTC,Microsoft JhengHei UI\0"
+    "MSYH.TTC,Microsoft YaHei UI\0"
+    "SEGUISYM.TTF,Segoe UI Symbol\0";
+
+static const char system_link_tahoma_non_cjk[] =
+    "MSGOTHIC.TTC,MS UI Gothic\0"
+    "MINGLIU.TTC,PMingLiU\0"
+    "SIMSUN.TTC,SimSun\0"
+    "GULIM.TTC,Gulim\0"
+    "YUGOTHM.TTC,Yu Gothic UI\0"
+    "MSJH.TTC,Microsoft JhengHei UI\0"
+    "MSYH.TTC,Microsoft YaHei UI\0"
+    "MALGUN.TTF,Malgun Gothic\0"
+    "SEGUISYM.TTF,Segoe UI Symbol\0";
+
+static const char system_link_ms_ui_gothic[] =
+    "MICROSS.TTF,Microsoft Sans Serif\0"
+    "MINGLIU.TTC,PMingLiU\0""SIMSUN.TTC,SimSun\0"
+    "GULIM.TTC,Gulim\0"
+    "YUGOTHM.TTC,Yu Gothic UI\0"
+    "MSJH.TTC,Microsoft JhengHei UI\0"
+    "MSYH.TTC,Microsoft YaHei UI\0"
+    "MALGUN.TTF,Malgun Gothic\0"
+    "SEGUISYM.TTF,Segoe UI Symbol\0";
+
+static const struct system_link_reg
+{
+    const WCHAR *font_name;
+    BOOL locale_dependent;
+    const char *link_non_cjk;
+    DWORD link_non_cjk_len;
+    const char *link_sc;
+    DWORD link_sc_len;
+    const char *link_tc;
+    DWORD link_tc_len;
+    const char *link_jp;
+    DWORD link_jp_len;
+    const char *link_kr;
+    DWORD link_kr_len;
+}
+default_system_link[] =
+{
+    {
+        tahomaW, TRUE,
+        system_link_tahoma_non_cjk, sizeof(system_link_tahoma_non_cjk),
+        system_link_tahoma_sc,      sizeof(system_link_tahoma_sc),
+        system_link_tahoma_tc,      sizeof(system_link_tahoma_tc),
+        system_link_tahoma_jp,      sizeof(system_link_tahoma_jp),
+        system_link_tahoma_kr,      sizeof(system_link_tahoma_kr),
+    },
+    {
+        microsoft_sans_serifW, TRUE,
+        system_link_tahoma_non_cjk, sizeof(system_link_tahoma_non_cjk),
+        system_link_tahoma_sc,      sizeof(system_link_tahoma_sc),
+        system_link_tahoma_tc,      sizeof(system_link_tahoma_tc),
+        system_link_tahoma_jp,      sizeof(system_link_tahoma_jp),
+        system_link_tahoma_kr,      sizeof(system_link_tahoma_kr),
+    },
+    {
+        lucida_sans_unicodeW, TRUE,
+        system_link_tahoma_non_cjk, sizeof(system_link_tahoma_non_cjk),
+        system_link_tahoma_sc,      sizeof(system_link_tahoma_sc),
+        system_link_tahoma_tc,      sizeof(system_link_tahoma_tc),
+        system_link_tahoma_jp,      sizeof(system_link_tahoma_jp),
+        system_link_tahoma_kr,      sizeof(system_link_tahoma_kr),
+    },
+    {
+        arialW, TRUE,
+        system_link_tahoma_non_cjk, sizeof(system_link_tahoma_non_cjk),
+        system_link_tahoma_sc,      sizeof(system_link_tahoma_sc),
+        system_link_tahoma_tc,      sizeof(system_link_tahoma_tc),
+        system_link_tahoma_jp,      sizeof(system_link_tahoma_jp),
+        system_link_tahoma_kr,      sizeof(system_link_tahoma_kr),
+    },
+    {
+        arial_boldW, TRUE,
+        system_link_tahoma_non_cjk, sizeof(system_link_tahoma_non_cjk),
+        system_link_tahoma_sc,      sizeof(system_link_tahoma_sc),
+        system_link_tahoma_tc,      sizeof(system_link_tahoma_tc),
+        system_link_tahoma_jp,      sizeof(system_link_tahoma_jp),
+        system_link_tahoma_kr,      sizeof(system_link_tahoma_kr),
+    },
+    {
+        courier_newW, TRUE,
+        system_link_tahoma_non_cjk, sizeof(system_link_tahoma_non_cjk),
+        system_link_tahoma_sc,      sizeof(system_link_tahoma_sc),
+        system_link_tahoma_tc,      sizeof(system_link_tahoma_tc),
+        system_link_tahoma_jp,      sizeof(system_link_tahoma_jp),
+        system_link_tahoma_kr,      sizeof(system_link_tahoma_kr),
+    },
+    {
+        courier_new_boldW, TRUE,
+        system_link_tahoma_non_cjk, sizeof(system_link_tahoma_non_cjk),
+        system_link_tahoma_sc,      sizeof(system_link_tahoma_sc),
+        system_link_tahoma_tc,      sizeof(system_link_tahoma_tc),
+        system_link_tahoma_jp,      sizeof(system_link_tahoma_jp),
+        system_link_tahoma_kr,      sizeof(system_link_tahoma_kr),
+    },
+    { ms_ui_gothicW, FALSE, system_link_ms_ui_gothic, sizeof(system_link_ms_ui_gothic) },
 };
 
 static void populate_system_links( const WCHAR *name, const WCHAR * const *values )
@@ -2679,63 +2971,44 @@ static void set_multi_value_key( HKEY hkey, const WCHAR *name, const char *value
 
 static void update_font_system_link_info(UINT current_ansi_codepage)
 {
-    static const char system_link_simplified_chinese[] =
-        "SIMSUN.TTC,SimSun\0"
-        "MINGLIU.TTC,PMingLiu\0"
-        "MSGOTHIC.TTC,MS UI Gothic\0"
-        "BATANG.TTC,Batang\0";
-    static const char system_link_traditional_chinese[] =
-        "MINGLIU.TTC,PMingLiu\0"
-        "SIMSUN.TTC,SimSun\0"
-        "MSGOTHIC.TTC,MS UI Gothic\0"
-        "BATANG.TTC,Batang\0";
-    static const char system_link_japanese[] =
-        "MSGOTHIC.TTC,MS UI Gothic\0"
-        "MINGLIU.TTC,PMingLiU\0"
-        "SIMSUN.TTC,SimSun\0"
-        "GULIM.TTC,Gulim\0";
-    static const char system_link_korean[] =
-        "GULIM.TTC,Gulim\0"
-        "MSGOTHIC.TTC,MS UI Gothic\0"
-        "MINGLIU.TTC,PMingLiU\0"
-        "SIMSUN.TTC,SimSun\0";
-    static const char system_link_non_cjk[] =
-        "MSGOTHIC.TTC,MS UI Gothic\0"
-        "MINGLIU.TTC,PMingLiU\0"
-        "SIMSUN.TTC,SimSun\0"
-        "GULIM.TTC,Gulim\0";
     HKEY hkey;
 
     if ((hkey = reg_create_key( NULL, system_link_keyW, sizeof(system_link_keyW), 0, NULL )))
     {
         const char *link;
-        DWORD len;
+        DWORD len, i;
 
-        switch (current_ansi_codepage)
+        for (i = 0; i < ARRAY_SIZE(default_system_link); ++i)
         {
-        case 932:
-            link = system_link_japanese;
-            len = sizeof(system_link_japanese);
-            break;
-        case 936:
-            link = system_link_simplified_chinese;
-            len = sizeof(system_link_simplified_chinese);
-            break;
-        case 949:
-            link = system_link_korean;
-            len = sizeof(system_link_korean);
-            break;
-        case 950:
-            link = system_link_traditional_chinese;
-            len = sizeof(system_link_traditional_chinese);
-            break;
-        default:
-            link = system_link_non_cjk;
-            len = sizeof(system_link_non_cjk);
+            const struct system_link_reg *link_reg = &default_system_link[i];
+
+            link = link_reg->link_non_cjk;
+            len = link_reg->link_non_cjk_len;
+
+            if (link_reg->locale_dependent)
+            {
+                switch (current_ansi_codepage)
+                {
+                case 932:
+                    link = link_reg->link_jp;
+                    len = link_reg->link_jp_len;
+                    break;
+                case 936:
+                    link = link_reg->link_sc;
+                    len = link_reg->link_sc_len;
+                    break;
+                case 949:
+                    link = link_reg->link_kr;
+                    len = link_reg->link_kr_len;
+                    break;
+                case 950:
+                    link = link_reg->link_tc;
+                    len = link_reg->link_tc_len;
+                    break;
+                }
+            }
+            set_multi_value_key(hkey, link_reg->font_name, link, len);
         }
-        set_multi_value_key(hkey, lucida_sans_unicodeW, link, len);
-        set_multi_value_key(hkey, microsoft_sans_serifW, link, len);
-        set_multi_value_key(hkey, tahomaW, link, len);
         NtClose( hkey );
     }
 }
@@ -2766,7 +3039,13 @@ static void update_codepage( UINT screen_dpi )
     if (query_reg_ascii_value( wine_fonts_key, "Codepages", info, sizeof(value_buffer) ))
     {
         cp_match = !wcscmp( (const WCHAR *)info->Data, cpbufW );
-        if (cp_match && screen_dpi == font_dpi) return;  /* already set correctly */
+        if (cp_match && screen_dpi == font_dpi)
+        {
+            /* already set correctly, but, as a HACK, update font link
+               info anyway, so that old Proton prefixes are fixed */
+            update_font_system_link_info(ansi_cp);
+            return;
+        }
         TRACE( "updating registry, codepages/logpixels changed %s/%u -> %u,%u/%u\n",
                debugstr_w((const WCHAR *)info->Data), font_dpi, ansi_cp, oem_cp, screen_dpi );
     }
@@ -5248,7 +5527,7 @@ static void draw_glyph( DC *dc, INT origin_x, INT origin_y, const GLYPHMETRICS *
     dp_to_lp( dc, pts, count );
     for (i = 0; i < count; i += 2)
     {
-        const ULONG pts_count = 2;
+        const UINT pts_count = 2;
         NtGdiPolyPolyDraw( dc->hSelf, pts + i, &pts_count, 1, NtGdiPolyPolyline );
     }
     free( pts );
@@ -5745,7 +6024,7 @@ done:
 
         if (lf.lfUnderline)
         {
-            const ULONG cnt = 5;
+            const UINT cnt = 5;
             pts[0].x = x - (underlinePos + underlineWidth / 2) * sinEsc;
             pts[0].y = y - (underlinePos + underlineWidth / 2) * cosEsc;
             pts[1].x = x + width.x - (underlinePos + underlineWidth / 2) * sinEsc;
@@ -5762,7 +6041,7 @@ done:
 
         if (lf.lfStrikeOut)
         {
-            const ULONG cnt = 5;
+            const UINT cnt = 5;
             pts[0].x = x - (strikeoutPos + strikeoutWidth / 2) * sinEsc;
             pts[0].y = y - (strikeoutPos + strikeoutWidth / 2) * cosEsc;
             pts[1].x = x + width.x - (strikeoutPos + strikeoutWidth / 2) * sinEsc;

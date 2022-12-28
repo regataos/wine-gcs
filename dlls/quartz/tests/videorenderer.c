@@ -347,7 +347,7 @@ static void test_pin_info(void)
     ok(hr == S_OK, "Got hr %#x.\n", hr);
     ok(info.pFilter == filter, "Expected filter %p, got %p.\n", filter, info.pFilter);
     ok(info.dir == PINDIR_INPUT, "Got direction %d.\n", info.dir);
-    todo_wine ok(!wcscmp(info.achName, L"Input"), "Got name %s.\n", debugstr_w(info.achName));
+    ok(!wcscmp(info.achName, L"Input"), "Got name %s.\n", debugstr_w(info.achName));
     ref = get_refcount(filter);
     ok(ref == 3, "Got unexpected refcount %d.\n", ref);
     ref = get_refcount(pin);
@@ -1147,7 +1147,7 @@ static void test_eos(IPin *pin, IMemInputPin *input, IMediaControl *control)
     hr = IMediaControl_GetState(control, 1000, &state);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
     ret = check_ec_complete(eventsrc, 0);
-    todo_wine ok(!ret, "Got unexpected EC_COMPLETE.\n");
+    ok(!ret, "Got unexpected EC_COMPLETE.\n");
 
     hr = join_thread(send_frame(input));
     todo_wine ok(hr == E_UNEXPECTED, "Got hr %#x.\n", hr);
