@@ -811,6 +811,8 @@ extern void         copy_symbolW(SYMBOL_INFOW* siw, const SYMBOL_INFO* si) DECLS
 extern void         symbol_setname(SYMBOL_INFO* si, const char* name) DECLSPEC_HIDDEN;
 extern struct symt_ht*
                     symt_find_nearest(struct module* module, DWORD_PTR addr) DECLSPEC_HIDDEN;
+extern struct symt_ht*
+                    symt_find_symbol_at(struct module* module, DWORD_PTR addr) DECLSPEC_HIDDEN;
 extern struct symt_module*
                     symt_new_module(struct module* module) DECLSPEC_HIDDEN;
 extern struct symt_compiland*
@@ -948,7 +950,6 @@ static inline struct symt_function*
 extern struct symt_inlinesite*
                     symt_find_inlined_site(struct module* module,
                                            DWORD64 addr, DWORD inline_ctx) DECLSPEC_HIDDEN;
-extern DWORD        symt_get_inlinesite_depth(HANDLE hProcess, DWORD64 addr) DECLSPEC_HIDDEN;
 
 /* Inline context encoding (different from what native does):
  * bits 31:30: 3 ignore (includes INLINE_FRAME_CONTEXT_IGNORE=0xFFFFFFFF)

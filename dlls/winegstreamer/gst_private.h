@@ -106,6 +106,7 @@ struct wg_transform *wg_transform_create(const struct wg_format *input_format,
         const struct wg_format *output_format);
 void wg_transform_destroy(struct wg_transform *transform);
 bool wg_transform_set_output_format(struct wg_transform *transform, struct wg_format *format);
+HRESULT wg_transform_drain(struct wg_transform *transform);
 
 unsigned int wg_format_get_max_size(const struct wg_format *format);
 
@@ -154,5 +155,7 @@ HRESULT aac_decoder_create(REFIID riid, void **ret);
 HRESULT h264_decoder_create(REFIID riid, void **ret);
 HRESULT video_processor_create(REFIID riid, void **ret);
 HRESULT gstreamer_scheme_handler_construct(REFIID riid, void **ret) DECLSPEC_HIDDEN;
+
+extern const GUID MFAudioFormat_RAW_AAC;
 
 #endif /* __GST_PRIVATE_INCLUDED__ */

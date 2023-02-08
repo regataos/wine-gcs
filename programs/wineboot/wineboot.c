@@ -1795,7 +1795,7 @@ static void update_wineprefix( BOOL force )
 
         if ((process = start_rundll32( inf_path, L"PreInstall", IMAGE_FILE_MACHINE_TARGET_HOST )))
         {
-/*            HWND hwnd = show_wait_window(); */
+            /* HWND hwnd = show_wait_window(); */
             for (;;)
             {
                 MSG msg;
@@ -1813,7 +1813,7 @@ static void update_wineprefix( BOOL force )
                 }
                 else while (PeekMessageW( &msg, 0, 0, 0, PM_REMOVE )) DispatchMessageW( &msg );
             }
-/*            DestroyWindow( hwnd ); */
+            /* DestroyWindow( hwnd ); */
         }
         install_root_pnp_devices();
         update_user_profile();

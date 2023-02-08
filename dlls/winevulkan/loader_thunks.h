@@ -527,6 +527,7 @@ enum unix_call
     unix_vkSetDebugUtilsObjectTagEXT,
     unix_vkSetDeviceMemoryPriorityEXT,
     unix_vkSetEvent,
+    unix_vkSetHdrMetadataEXT,
     unix_vkSetPrivateData,
     unix_vkSetPrivateDataEXT,
     unix_vkSignalSemaphore,
@@ -4368,6 +4369,14 @@ struct vkSetEvent_params
 {
     VkDevice device;
     VkEvent event;
+};
+
+struct vkSetHdrMetadataEXT_params
+{
+    VkDevice device;
+    uint32_t swapchainCount;
+    const VkSwapchainKHR *pSwapchains;
+    const VkHdrMetadataEXT *pMetadata;
 };
 
 struct vkSetPrivateData_params

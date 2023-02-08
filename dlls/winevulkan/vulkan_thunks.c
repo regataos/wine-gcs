@@ -12192,6 +12192,19 @@ static NTSTATUS wine_vkSetEvent(void *args)
     return params->device->funcs.p_vkSetEvent(params->device->device, params->event);
 }
 
+static NTSTATUS wine_vkSetHdrMetadataEXT(void *args)
+{
+    struct vkSetHdrMetadataEXT_params *params = args;
+    VkSwapchainKHR *pSwapchains_host;
+    TRACE("%p, %u, %p, %p\n", params->device, params->swapchainCount, params->pSwapchains, params->pMetadata);
+
+    pSwapchains_host = convert_VkSwapchainKHR_array_win_to_host(params->pSwapchains, params->swapchainCount);
+    params->device->funcs.p_vkSetHdrMetadataEXT(params->device->device, params->swapchainCount, pSwapchains_host, params->pMetadata);
+
+    free_VkSwapchainKHR_array(pSwapchains_host, params->swapchainCount);
+    return STATUS_SUCCESS;
+}
+
 static NTSTATUS wine_vkSetPrivateData(void *args)
 {
     struct vkSetPrivateData_params *params = args;
@@ -12451,6 +12464,7 @@ static const char * const vk_device_extensions[] =
     "VK_EXT_global_priority",
     "VK_EXT_global_priority_query",
     "VK_EXT_graphics_pipeline_library",
+    "VK_EXT_hdr_metadata",
     "VK_EXT_host_query_reset",
     "VK_EXT_image_2d_view_of_3d",
     "VK_EXT_image_compression_control",
@@ -13244,6 +13258,7 @@ const unixlib_entry_t __wine_unix_call_funcs[] =
     wine_vkSetDebugUtilsObjectTagEXT,
     wine_vkSetDeviceMemoryPriorityEXT,
     wine_vkSetEvent,
+    wine_vkSetHdrMetadataEXT,
     wine_vkSetPrivateData,
     wine_vkSetPrivateDataEXT,
     wine_vkSignalSemaphore,

@@ -111,6 +111,9 @@ struct wg_format
         } wma;
         struct
         {
+            bool is_raw;
+            uint32_t rate;
+            uint32_t channels;
             uint32_t payload_type;
             uint32_t profile_level_indication;
             uint32_t codec_data_len;
@@ -306,6 +309,11 @@ struct wg_transform_set_output_format_params
     const struct wg_format *format;
 };
 
+struct wg_transform_drain_params
+{
+    struct wg_transform *transform;
+};
+
 enum unix_funcs
 {
     unix_wg_parser_create,
@@ -339,6 +347,7 @@ enum unix_funcs
 
     unix_wg_transform_push_data,
     unix_wg_transform_read_data,
+    unix_wg_transform_drain,
 };
 
 #endif /* __WINE_WINEGSTREAMER_UNIXLIB_H */

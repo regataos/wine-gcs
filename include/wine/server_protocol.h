@@ -870,6 +870,7 @@ struct desktop_shared_memory
     struct shared_cursor cursor;
     unsigned char        keystate[256];
     thread_id_t          foreground_tid;
+    __int64              update_serial;
 };
 
 struct queue_shared_memory
@@ -899,6 +900,7 @@ struct input_shared_memory
     int                  cursor_count;
     unsigned char        keystate[256];
     int                  keystate_lock;
+    __int64              sync_serial;
 };
 
 

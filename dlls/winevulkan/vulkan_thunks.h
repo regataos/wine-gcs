@@ -2645,6 +2645,7 @@ struct vulkan_device_funcs
     VkResult (*p_vkSetDebugUtilsObjectTagEXT)(VkDevice, const VkDebugUtilsObjectTagInfoEXT_host *);
     void (*p_vkSetDeviceMemoryPriorityEXT)(VkDevice, VkDeviceMemory, float);
     VkResult (*p_vkSetEvent)(VkDevice, VkEvent);
+    void (*p_vkSetHdrMetadataEXT)(VkDevice, uint32_t, const VkSwapchainKHR *, const VkHdrMetadataEXT *);
     VkResult (*p_vkSetPrivateData)(VkDevice, VkObjectType, uint64_t, VkPrivateDataSlot, uint64_t);
     VkResult (*p_vkSetPrivateDataEXT)(VkDevice, VkObjectType, uint64_t, VkPrivateDataSlot, uint64_t);
     VkResult (*p_vkSignalSemaphore)(VkDevice, const VkSemaphoreSignalInfo_host *);
@@ -3181,6 +3182,7 @@ struct vulkan_instance_funcs
     USE_VK_FUNC(vkSetDebugUtilsObjectTagEXT) \
     USE_VK_FUNC(vkSetDeviceMemoryPriorityEXT) \
     USE_VK_FUNC(vkSetEvent) \
+    USE_VK_FUNC(vkSetHdrMetadataEXT) \
     USE_VK_FUNC(vkSetPrivateData) \
     USE_VK_FUNC(vkSetPrivateDataEXT) \
     USE_VK_FUNC(vkSignalSemaphore) \

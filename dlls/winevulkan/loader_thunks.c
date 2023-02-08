@@ -4797,6 +4797,16 @@ VkResult WINAPI vkSetEvent(VkDevice device, VkEvent event)
     return vk_unix_call(unix_vkSetEvent, &params);
 }
 
+void WINAPI vkSetHdrMetadataEXT(VkDevice device, uint32_t swapchainCount, const VkSwapchainKHR *pSwapchains, const VkHdrMetadataEXT *pMetadata)
+{
+    struct vkSetHdrMetadataEXT_params params;
+    params.device = device;
+    params.swapchainCount = swapchainCount;
+    params.pSwapchains = pSwapchains;
+    params.pMetadata = pMetadata;
+    vk_unix_call(unix_vkSetHdrMetadataEXT, &params);
+}
+
 VkResult WINAPI vkSetPrivateData(VkDevice device, VkObjectType objectType, uint64_t objectHandle, VkPrivateDataSlot privateDataSlot, uint64_t data)
 {
     struct vkSetPrivateData_params params;
@@ -5427,6 +5437,7 @@ static const struct vulkan_func vk_device_dispatch_table[] =
     {"vkSetDebugUtilsObjectTagEXT", vkSetDebugUtilsObjectTagEXT},
     {"vkSetDeviceMemoryPriorityEXT", vkSetDeviceMemoryPriorityEXT},
     {"vkSetEvent", vkSetEvent},
+    {"vkSetHdrMetadataEXT", vkSetHdrMetadataEXT},
     {"vkSetPrivateData", vkSetPrivateData},
     {"vkSetPrivateDataEXT", vkSetPrivateDataEXT},
     {"vkSignalSemaphore", vkSignalSemaphore},

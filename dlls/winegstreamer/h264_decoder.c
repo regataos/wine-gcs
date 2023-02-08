@@ -267,7 +267,8 @@ static HRESULT WINAPI transform_GetStreamLimits(IMFTransform *iface, DWORD *inpu
 static HRESULT WINAPI transform_GetStreamCount(IMFTransform *iface, DWORD *inputs, DWORD *outputs)
 {
     FIXME("iface %p, inputs %p, outputs %p stub!\n", iface, inputs, outputs);
-    return E_NOTIMPL;
+    *inputs = *outputs = 1;
+    return S_OK;
 }
 
 static HRESULT WINAPI transform_GetStreamIDs(IMFTransform *iface, DWORD input_size,
@@ -558,7 +559,8 @@ static HRESULT WINAPI transform_GetOutputCurrentType(IMFTransform *iface, DWORD 
 static HRESULT WINAPI transform_GetInputStatus(IMFTransform *iface, DWORD id, DWORD *flags)
 {
     FIXME("iface %p, id %#lx, flags %p stub!\n", iface, id, flags);
-    return E_NOTIMPL;
+    *flags = MFT_INPUT_STATUS_ACCEPT_DATA;
+    return S_OK;
 }
 
 static HRESULT WINAPI transform_GetOutputStatus(IMFTransform *iface, DWORD *flags)
@@ -581,7 +583,18 @@ static HRESULT WINAPI transform_ProcessEvent(IMFTransform *iface, DWORD id, IMFM
 
 static HRESULT WINAPI transform_ProcessMessage(IMFTransform *iface, MFT_MESSAGE_TYPE message, ULONG_PTR param)
 {
-    FIXME("iface %p, message %#x, param %Ix stub!\n", iface, message, param);
+    struct h264_decoder *decoder = impl_from_IMFTransform(iface);
+
+    TRACE("iface %p, message %#x, param %Ix.\n", iface, message, param);
+
+    if (!decoder->wg_transform)
+        return MF_E_TRANSFORM_TYPE_NOT_SET;
+
+    if (message == MFT_MESSAGE_COMMAND_DRAIN)
+        return wg_transform_drain(decoder->wg_transform);
+
+    FIXME("Ignoring message %#x.\n", message);
+
     return S_OK;
 }
 
@@ -739,6 +752,8 @@ HRESULT h264_decoder_create(REFIID riid, void **ret)
     if (FAILED(hr = MFCreateAttributes(&decoder->attributes, 16)))
         goto failed;
     if (FAILED(hr = IMFAttributes_SetUINT32(decoder->attributes, &MF_LOW_LATENCY, 0)))
+        goto failed;
+    if (FAILED(hr = IMFAttributes_SetUINT32(decoder->attributes, &MF_SA_D3D11_AWARE, FALSE)))
         goto failed;
     if (FAILED(hr = MFCreateAttributes(&decoder->output_attributes, 0)))
         goto failed;

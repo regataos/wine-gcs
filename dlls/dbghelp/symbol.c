@@ -1026,7 +1026,7 @@ static void symt_get_length(struct module* module, const struct symt* symt, ULON
 
     if (symt_get_info(module, symt, TI_GET_TYPE, &type_index) &&
         symt_get_info(module, symt_index2ptr(module, type_index), TI_GET_LENGTH, size)) return;
-    *size = 0x1000; /* arbitrary value */
+    *size = 1; /* no size info */
 }
 
 /* needed by symt_find_nearest */
@@ -1101,6 +1101,20 @@ struct symt_ht* symt_find_nearest(struct module* module, DWORD_PTR addr)
     low = symt_get_best_at(module, low);
 
     return module->addr_sorttab[low];
+}
+
+struct symt_ht* symt_find_symbol_at(struct module* module, DWORD_PTR addr)
+{
+    struct symt_ht* nearest = symt_find_nearest(module, addr);
+    if (nearest)
+    {
+        ULONG64     symaddr, symsize;
+        symt_get_address(&nearest->symt, &symaddr);
+        symt_get_length(module, &nearest->symt, &symsize);
+        if (addr < symaddr || addr >= symaddr + symsize)
+            nearest = NULL;
+    }
+    return nearest;
 }
 
 static BOOL symt_enum_locals_helper(struct module_pair* pair,
@@ -1261,7 +1275,7 @@ struct symt* symt_get_upper_inlined(struct symt_inlinesite* inlined)
 /* lookup in module for an inline site (from addr and inline_ctx) */
 struct symt_inlinesite* symt_find_inlined_site(struct module* module, DWORD64 addr, DWORD inline_ctx)
 {
-    struct symt_ht* symt = symt_find_nearest(module, addr);
+    struct symt_ht* symt = symt_find_symbol_at(module, addr);
 
     if (symt_check_tag(&symt->symt, SymTagFunction))
     {
@@ -1274,27 +1288,6 @@ struct symt_inlinesite* symt_find_inlined_site(struct module* module, DWORD64 ad
                 if (depth-- == 0) return curr;
     }
     return NULL;
-}
-
-DWORD symt_get_inlinesite_depth(HANDLE hProcess, DWORD64 addr)
-{
-    struct module_pair pair;
-    DWORD depth = 0;
-
-    if (module_init_pair(&pair, hProcess, addr))
-    {
-        struct symt_ht* symt = symt_find_nearest(pair.effective, addr);
-        if (symt_check_tag(&symt->symt, SymTagFunction))
-        {
-            struct symt_inlinesite* inlined = symt_find_lowest_inlined((struct symt_function*)symt, addr);
-            if (inlined)
-            {
-                for ( ; &inlined->func.symt != &symt->symt; inlined = (struct symt_inlinesite*)symt_get_upper_inlined(inlined))
-                    ++depth;
-            }
-        }
-    }
-    return depth;
 }
 
 /******************************************************************
@@ -1517,7 +1510,7 @@ BOOL WINAPI SymFromAddr(HANDLE hProcess, DWORD64 Address,
     struct symt_ht*     sym;
 
     if (!module_init_pair(&pair, hProcess, Address)) return FALSE;
-    if ((sym = symt_find_nearest(pair.effective, Address)) == NULL) return FALSE;
+    if ((sym = symt_find_symbol_at(pair.effective, Address)) == NULL) return FALSE;
 
     symt_fill_sym_info(&pair, NULL, &sym->symt, Symbol);
     if (Displacement)
@@ -1904,7 +1897,7 @@ static BOOL get_line_from_addr(HANDLE hProcess, DWORD64 addr,
     struct symt_ht*             symt;
 
     if (!module_init_pair(&pair, hProcess, addr)) return FALSE;
-    if ((symt = symt_find_nearest(pair.effective, addr)) == NULL) return FALSE;
+    if ((symt = symt_find_symbol_at(pair.effective, addr)) == NULL) return FALSE;
 
     if (symt->symt.tag != SymTagFunction && symt->symt.tag != SymTagInlineSite) return FALSE;
     return get_line_from_function(&pair, (struct symt_function*)symt, addr, pdwDisplacement, intl);
@@ -2765,4 +2758,34 @@ BOOL WINAPI SymGetLineFromInlineContextW(HANDLE hProcess, DWORD64 addr, ULONG in
 
     if (!get_line_from_inline_context(hProcess, addr, inline_ctx, mod_addr, disp, &intl)) return FALSE;
     return internal_line_copy_toW64(&intl, line);
+}
+
+/******************************************************************
+ *		SymAddrIncludeInlineTrace (DBGHELP.@)
+ *
+ * MSDN doesn't state that the maximum depth (of embedded inline sites) at <addr>
+ * is actually returned. (It just says non zero means that there are some inline site(s)).
+ * But this is what native actually returns.
+ */
+DWORD WINAPI SymAddrIncludeInlineTrace(HANDLE hProcess, DWORD64 addr)
+{
+    struct module_pair pair;
+    DWORD depth = 0;
+
+    TRACE("(%p, %#I64x)\n", hProcess, addr);
+
+    if (module_init_pair(&pair, hProcess, addr))
+    {
+        struct symt_ht* symt = symt_find_symbol_at(pair.effective, addr);
+        if (symt_check_tag(&symt->symt, SymTagFunction))
+        {
+            struct symt_function* inlined = symt_find_lowest_inlined((struct symt_function*)symt, addr);
+            if (inlined)
+            {
+                for ( ; &inlined->symt != &symt->symt; inlined = (struct symt_function*)symt_get_upper_inlined(inlined))
+                    ++depth;
+            }
+        }
+    }
+    return depth;
 }

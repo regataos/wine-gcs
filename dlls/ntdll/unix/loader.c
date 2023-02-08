@@ -1483,6 +1483,30 @@ static inline char *prepend( char *buffer, const char *str, size_t len )
     return memcpy( buffer - len, str, len );
 }
 
+static void notify_gdb_dll_loaded( void *module, const char *unix_path )
+{
+    static void (*wine_gdb_dll_loaded)( const void *module, const char *unix_path );
+    if (!wine_gdb_dll_loaded) wine_gdb_dll_loaded = dlsym( RTLD_DEFAULT, "wine_gdb_dll_loaded" );
+    if (wine_gdb_dll_loaded) wine_gdb_dll_loaded( module, unix_path );
+}
+
+void notify_gdb_native_dll_loaded( void *module, UNICODE_STRING *nt_name )
+{
+    OBJECT_ATTRIBUTES attr;
+    UNICODE_STRING redir;
+    char *unix_path;
+
+    InitializeObjectAttributes( &attr, nt_name, OBJ_CASE_INSENSITIVE, 0, 0 );
+    get_redirect( &attr, &redir );
+
+    if (!nt_to_unix_file_name( &attr, &unix_path, FILE_OPEN ))
+        notify_gdb_dll_loaded( module, unix_path );
+
+    free( redir.Buffer );
+    free( unix_path );
+}
+
+
 /***********************************************************************
  *	open_dll_file
  *
@@ -1533,6 +1557,7 @@ static NTSTATUS open_builtin_pe_file( const char *name, OBJECT_ATTRIBUTES *attr,
     {
         status = virtual_map_builtin_module( mapping, module, size, image_info, machine, prefer_native );
         NtClose( mapping );
+        if (!status) notify_gdb_dll_loaded( *module, name );
     }
     return status;
 }
@@ -1670,6 +1695,7 @@ static NTSTATUS find_builtin_dll( UNICODE_STRING *nt_name, void **module, SIZE_T
 
     if (found_image) status = STATUS_IMAGE_MACHINE_TYPE_MISMATCH;
     WARN( "cannot find builtin library for %s\n", debugstr_us(nt_name) );
+    if (!status) notify_gdb_native_dll_loaded( *module, nt_name );
 done:
     if (status >= 0 && ext)
     {
@@ -1687,17 +1713,15 @@ done:
  * Load the builtin dll if specified by load order configuration.
  * Return STATUS_IMAGE_ALREADY_LOADED if we should keep the native one that we have found.
  */
-NTSTATUS load_builtin( const pe_image_info_t *image_info, WCHAR *filename,
+NTSTATUS load_builtin( const pe_image_info_t *image_info, UNICODE_STRING *nt_name,
                        void **module, SIZE_T *size )
 {
     WORD machine = image_info->machine;  /* request same machine as the native one */
     NTSTATUS status;
-    UNICODE_STRING nt_name;
     SECTION_IMAGE_INFORMATION info;
     enum loadorder loadorder;
 
-    init_unicode_string( &nt_name, filename );
-    loadorder = get_load_order( &nt_name );
+    loadorder = get_load_order( nt_name );
 
     if (loadorder == LO_DISABLED) return STATUS_DLL_NOT_FOUND;
 
@@ -1708,7 +1732,7 @@ NTSTATUS load_builtin( const pe_image_info_t *image_info, WCHAR *filename,
     }
     else if (image_info->image_flags & IMAGE_FLAGS_WineFakeDll)
     {
-        TRACE( "%s is a fake Wine dll\n", debugstr_w(filename) );
+        TRACE( "%s is a fake Wine dll\n", debugstr_us(nt_name) );
         if (loadorder == LO_NATIVE) return STATUS_DLL_NOT_FOUND;
         loadorder = LO_BUILTIN;  /* builtin with no fallback since mapping a fake dll is not useful */
     }
@@ -1719,9 +1743,9 @@ NTSTATUS load_builtin( const pe_image_info_t *image_info, WCHAR *filename,
     case LO_NATIVE_BUILTIN:
         return STATUS_IMAGE_ALREADY_LOADED;
     case LO_BUILTIN:
-        return find_builtin_dll( &nt_name, module, size, &info, machine, FALSE );
+        return find_builtin_dll( nt_name, module, size, &info, machine, FALSE );
     default:
-        status = find_builtin_dll( &nt_name, module, size, &info, machine, (loadorder == LO_DEFAULT) );
+        status = find_builtin_dll( nt_name, module, size, &info, machine, (loadorder == LO_DEFAULT) );
         if (status == STATUS_DLL_NOT_FOUND || status == STATUS_IMAGE_MACHINE_TYPE_MISMATCH)
             return STATUS_IMAGE_ALREADY_LOADED;
         return status;
@@ -2170,6 +2194,7 @@ BOOL fsync_simulate_sched_quantum;
 BOOL alert_simulate_sched_quantum;
 BOOL no_priv_elevation;
 BOOL localsystem_sid;
+BOOL high_dll_addresses;
 
 static void hacks_init(void)
 {
@@ -2219,6 +2244,14 @@ static void hacks_init(void)
     env_str = getenv("WINE_UNIX_PC_AS_NTDLL");
     if (env_str)  report_native_pc_as_ntdll = atoi(env_str);
     else if (sgi) report_native_pc_as_ntdll = !strcmp(sgi, "700330");
+
+#ifdef _WIN64
+    env_str = getenv("WINE_HIGH_DLL_ADDRESSES");
+    if (env_str)  high_dll_addresses = atoi(env_str);
+    else if (sgi) high_dll_addresses = !strcmp(sgi, "1938010");
+    if (high_dll_addresses)
+        ERR("HACK: moving dlls to high addresses.\n");
+#endif
 
     if (main_argc > 1 && strstr(main_argv[1], "MicrosoftEdgeUpdate.exe"))
     {

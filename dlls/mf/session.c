@@ -2355,6 +2355,13 @@ static HRESULT WINAPI session_commands_callback_Invoke(IMFAsyncCallback *iface, 
 
     EnterCriticalSection(&session->cs);
 
+    if ((session->presentation.flags & SESSION_FLAG_END_OF_PRESENTATION) && op->command != SESSION_CMD_STOP)
+    {
+        WARN("session %p command is ending, waiting for it to complete.\n", session);
+        LeaveCriticalSection(&session->cs);
+        return S_OK;
+    }
+
     if (session->presentation.flags & SESSION_FLAG_PENDING_COMMAND)
     {
         WARN("session %p command is in progress, waiting for it to complete.\n", session);
@@ -2381,6 +2388,9 @@ static HRESULT WINAPI session_commands_callback_Invoke(IMFAsyncCallback *iface, 
             session_pause(session);
             break;
         case SESSION_CMD_STOP:
+            if (session->presentation.flags & SESSION_FLAG_END_OF_PRESENTATION)
+                session_set_topo_status(session, S_OK, MF_TOPOSTATUS_ENDED);
+            session_clear_end_of_presentation(session);
             session_stop(session);
             break;
         case SESSION_CMD_CLOSE:
@@ -2993,17 +3003,16 @@ static void session_deliver_sample_to_node(struct media_session *session, IMFTop
     switch (node_type)
     {
         case MF_TOPOLOGY_OUTPUT_NODE:
+            if (!sample && FAILED(hr = IMFStreamSink_PlaceMarker(topo_node->object.sink_stream, MFSTREAMSINK_MARKER_ENDOFSEGMENT,
+                    NULL, NULL)))
+                WARN("Failed to place sink marker, hr %#lx.\n", hr);
+
             if (topo_node->u.sink.requests)
             {
                 if (sample)
                 {
                     if (FAILED(hr = IMFStreamSink_ProcessSample(topo_node->object.sink_stream, sample)))
                         WARN("Stream sink failed to process sample, hr %#lx.\n", hr);
-                }
-                else if (FAILED(hr = IMFStreamSink_PlaceMarker(topo_node->object.sink_stream, MFSTREAMSINK_MARKER_ENDOFSEGMENT,
-                        NULL, NULL)))
-                {
-                    WARN("Failed to place sink marker, hr %#lx.\n", hr);
                 }
                 topo_node->u.sink.requests--;
             }
@@ -3219,8 +3228,9 @@ static void session_request_sample(struct media_session *session, IMFStreamSink 
         return;
     }
 
-    if (SUCCEEDED(session_request_sample_from_node(session, upstream_node, upstream_output)))
-        sink_node->u.sink.requests++;
+    sink_node->u.sink.requests++;
+    if (FAILED(session_request_sample_from_node(session, upstream_node, upstream_output)))
+        sink_node->u.sink.requests--;
     IMFTopologyNode_Release(upstream_node);
 }
 
@@ -3328,7 +3338,7 @@ static void session_raise_end_of_presentation(struct media_session *session)
     {
         if (session_nodes_is_mask_set(session, MF_TOPOLOGY_MAX, SOURCE_FLAG_END_OF_PRESENTATION))
         {
-            session->presentation.flags |= SESSION_FLAG_END_OF_PRESENTATION | SESSION_FLAG_PENDING_COMMAND;
+            session->presentation.flags |= SESSION_FLAG_END_OF_PRESENTATION;
             IMFMediaEventQueue_QueueEventParamVar(session->event_queue, MEEndOfPresentation, &GUID_NULL, S_OK, NULL);
         }
     }
