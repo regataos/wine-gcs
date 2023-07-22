@@ -3,7 +3,7 @@
  * This file is generated from Vulkan vk.xml file covered
  * by the following copyright and permission notice:
  *
- * Copyright 2015-2022 The Khronos Group Inc.
+ * Copyright 2015-2023 The Khronos Group Inc.
  *
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  *
@@ -13,7 +13,7 @@
 #define __WINE_VULKAN_DRIVER_H
 
 /* Wine internal vulkan driver version, needs to be bumped upon vulkan_funcs changes. */
-#define WINE_VULKAN_DRIVER_VERSION 10
+#define WINE_VULKAN_DRIVER_VERSION 11
 
 struct vulkan_funcs
 {
@@ -46,10 +46,6 @@ struct vulkan_funcs
 
     /* winevulkan specific functions */
     VkSurfaceKHR (*p_wine_get_native_surface)(VkSurfaceKHR);
-    VkResult (*create_vk_instance_with_callback)(const VkInstanceCreateInfo *create_info,
-            const VkAllocationCallbacks *allocator, VkInstance *instance,
-            VkResult (WINAPI *native_vkCreateInstance)(const VkInstanceCreateInfo *, const VkAllocationCallbacks *,
-            VkInstance *, void * (*)(VkInstance, const char *), void *), void *native_vkCreateInstance_context);
     /* Optional. Returns TRUE if FS hack is active, otherwise returns FALSE. If
      * it returns TRUE, then real_sz will contain the actual display
      * resolution; user_sz will contain the app's requested mode; and dst_blit
@@ -58,7 +54,7 @@ struct vulkan_funcs
     VkBool32 (*query_fs_hack)(VkSurfaceKHR surface, VkExtent2D *real_sz, VkExtent2D *user_sz, VkRect2D *dst_blit, VkFilter *filter, BOOL *fsr, float *sharpness);
 };
 
-extern const struct vulkan_funcs * CDECL __wine_get_vulkan_driver(UINT version);
+extern const struct vulkan_funcs * __wine_get_vulkan_driver(UINT version);
 
 static inline void *get_vulkan_driver_device_proc_addr(
         const struct vulkan_funcs *vulkan_funcs, const char *name)
@@ -131,4 +127,23 @@ static inline void *get_vulkan_driver_instance_proc_addr(
     return get_vulkan_driver_device_proc_addr(vulkan_funcs, name);
 }
 
+typedef VkResult (WINAPI *PFN_native_vkCreateInstance)(const VkInstanceCreateInfo *, const VkAllocationCallbacks *, VkInstance *,
+                                                       void * (*)(VkInstance, const char *), void *);
+typedef VkResult (WINAPI *PFN_native_vkCreateDevice)(VkPhysicalDevice, const VkDeviceCreateInfo *, const VkAllocationCallbacks *, VkDevice *,
+                                                     void * (*)(VkInstance, const char *), void *);
+
+typedef struct VkCreateInfoWineDeviceCallback {
+    VkStructureType             sType;
+    const void*                 pNext;
+    PFN_native_vkCreateDevice   native_create_callback;
+    void*                       context;
+} VkCreateInfoWineDeviceCallback;
+#define VK_STRUCTURE_TYPE_CREATE_INFO_WINE_DEVICE_CALLBACK 2125312001
+typedef struct VkCreateInfoWineInstanceCallback {
+    VkStructureType             sType;
+    const void*                 pNext;
+    PFN_native_vkCreateInstance native_create_callback;
+    void*                       context;
+} VkCreateInfoWineInstanceCallback;
+#define VK_STRUCTURE_TYPE_CREATE_INFO_WINE_INSTANCE_CALLBACK 2125312002
 #endif /* __WINE_VULKAN_DRIVER_H */

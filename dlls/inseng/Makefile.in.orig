@@ -1,9 +1,0 @@
-EXTRADEFS = -DWINE_NO_LONG_TYPES
-MODULE    = inseng.dll
-IMPORTS   = uuid ole32 advapi32
-
-EXTRADLLFLAGS = -Wb,--prefer-native
-
-C_SRCS = inseng_main.c
-
-IDL_SRCS = inseng_classes.idl

@@ -1,6 +1,5 @@
-EXTRADEFS = -DWINE_NO_LONG_TYPES
 TESTDLL = uiautomationcore.dll
-IMPORTS = uiautomationcore user32 ole32 oleaut32
+IMPORTS = uiautomationcore user32 ole32 oleaut32 oleacc
 
 C_SRCS = \
 	uiautomation.c

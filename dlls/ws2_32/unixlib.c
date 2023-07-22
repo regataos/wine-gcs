@@ -172,9 +172,10 @@ static BYTE byte_hash[256];
 
 static void init_hash(void)
 {
-    unsigned int i, index, buf_len, offset;
+    unsigned i, index;
     NTSTATUS status;
     BYTE *buf, tmp;
+    ULONG buf_len;
 
     for (i = 0; i < sizeof(byte_hash); ++i)
         byte_hash[i] = i;
@@ -182,30 +183,24 @@ static void init_hash(void)
     buf_len = sizeof(SYSTEM_INTERRUPT_INFORMATION) * NtCurrentTeb()->Peb->NumberOfProcessors;
     if (!(buf = malloc( buf_len )))
     {
-        ERR( "Failed to get random bytes.\n" );
+        ERR( "No memory.\n" );
         return;
     }
 
-    offset = sizeof(byte_hash) - 1;
-    do
+    for (i = 0; i < sizeof(byte_hash) - 1; ++i)
     {
-        if ((status = NtQuerySystemInformation( SystemInterruptInformation, buf,
-                                                buf_len, NULL )))
+        if (!(i % buf_len) && (status = NtQuerySystemInformation( SystemInterruptInformation, buf,
+                                                                  buf_len, &buf_len )))
         {
             ERR( "Failed to get random bytes.\n" );
-            free(buf);
+            free( buf );
             return;
         }
-        buf_len = min( buf_len, offset - 1 );
-        for (i = 0; i < buf_len; ++i)
-        {
-            index = buf[i] % (offset + 1);
-            tmp = byte_hash[index];
-            byte_hash[index] = byte_hash[offset];
-            byte_hash[offset] = tmp;
-            --offset;
-        }
-    } while (offset != 1);
+        index = i + buf[i % buf_len] % (sizeof(byte_hash) - i);
+        tmp = byte_hash[index];
+        byte_hash[index] = byte_hash[i];
+        byte_hash[i] = tmp;
+    }
     free( buf );
 }
 
@@ -915,9 +910,9 @@ static NTSTATUS unix_gethostbyaddr( void *args )
         }
 
         if (!unix_host)
-            return (locerr < 0 ? errno_from_unix( errno ) : host_errno_from_unix( locerr ));
-
-        ret = hostent_from_unix( unix_host, params->host, params->size );
+            ret = (locerr < 0 ? errno_from_unix( errno ) : host_errno_from_unix( locerr ));
+        else
+            ret = hostent_from_unix( unix_host, params->host, params->size );
 
         free( unix_buffer );
         return ret;
@@ -939,27 +934,43 @@ static NTSTATUS unix_gethostbyaddr( void *args )
 #endif
 }
 
-static int compare_addrs_hashed(const void *a1, const void *a2, void *length)
+static int compare_addrs_hashed( const void *a1, const void *a2, int addr_len )
 {
-    unsigned int addr_len = (uintptr_t)length;
     char a1_hashed[16], a2_hashed[16];
 
     assert( addr_len <= sizeof(a1_hashed) );
-    hash_random( (BYTE *)a1_hashed, *(void **)a1, addr_len );
-    hash_random( (BYTE *)a2_hashed, *(void **)a2, addr_len );
+    hash_random( (BYTE *)a1_hashed, a1, addr_len );
+    hash_random( (BYTE *)a2_hashed, a2, addr_len );
     return memcmp( a1_hashed, a2_hashed, addr_len );
 }
 
 static void sort_addrs_hashed( struct hostent *host )
 {
-    unsigned int count;
+    /* On Unix gethostbyname() may return IP addresses in random order on each call. On Windows the order of
+     * IP addresses is not determined as well but it is the same on consequent calls (changes after network
+     * resets and probably DNS timeout expiration).
+     * Life is Strange Remastered depends on gethostbyname() returning IP addresses in the same order to reuse
+     * the established TLS connection and avoid timeouts that happen in game when establishing multiple extra TLS
+     * connections.
+     * Just sorting the addresses would break server load balancing provided by gethostbyname(), so randomize the
+     * sort once per process. */
+    unsigned int i, j;
+    char *tmp;
 
-    pthread_once(&hash_init_once, init_hash);
+    pthread_once( &hash_init_once, init_hash );
 
-    for (count = 0; host->h_addr_list[count]; ++count)
-        ;
-    qsort_r( host->h_addr_list, count, sizeof(*host->h_addr_list), compare_addrs_hashed,
-            (void *)(uintptr_t)host->h_length );
+    for (i = 0; host->h_addr_list[i]; ++i)
+    {
+        for (j = i + 1; host->h_addr_list[j]; ++j)
+        {
+            if (compare_addrs_hashed( host->h_addr_list[j], host->h_addr_list[i], host->h_length ) < 0)
+            {
+                tmp = host->h_addr_list[j];
+                host->h_addr_list[j] = host->h_addr_list[i];
+                host->h_addr_list[i] = tmp;
+            }
+        }
+    }
 }
 
 #ifdef HAVE_LINUX_GETHOSTBYNAME_R_6
@@ -987,10 +998,14 @@ static NTSTATUS unix_gethostbyname( void *args )
     }
 
     if (!unix_host)
-        return (locerr < 0 ? errno_from_unix( errno ) : host_errno_from_unix( locerr ));
-
-    sort_addrs_hashed( unix_host );
-    ret = hostent_from_unix( unix_host, params->host, params->size );
+    {
+        ret = (locerr < 0 ? errno_from_unix( errno ) : host_errno_from_unix( locerr ));
+    }
+    else
+    {
+        sort_addrs_hashed( unix_host );
+        ret = hostent_from_unix( unix_host, params->host, params->size );
+    }
 
     free( unix_buffer );
     return ret;

@@ -382,7 +382,7 @@ static HRESULT evr_copy_sample_buffer(struct evr *filter, IMediaSample *input_sa
         {
             if (SUCCEEDED(hr = IDirect3DSurface9_LockRect(surface, &locked_rect, NULL, D3DLOCK_DISCARD)))
             {
-                if (src_stride < 0) src -= src_stride * (lines - 1);
+                if (src_stride < 0) src += (-src_stride) * (lines - 1);
                 MFCopyImage(locked_rect.pBits, locked_rect.Pitch, src, src_stride, width * 4, lines);
                 IDirect3DSurface9_UnlockRect(surface);
             }
@@ -522,7 +522,7 @@ static HRESULT WINAPI filter_config_SetNumberOfStreams(IEVRFilterConfig *iface, 
 {
     struct evr *filter = impl_from_IEVRFilterConfig(iface);
 
-    FIXME("filter %p, count %u, stub!\n", filter, count);
+    FIXME("filter %p, count %lu, stub!\n", filter, count);
 
     return E_NOTIMPL;
 }

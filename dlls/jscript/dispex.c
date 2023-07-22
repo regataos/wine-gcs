@@ -56,15 +56,14 @@ struct _dispex_prop_t {
             jsdisp_t *getter;
             jsdisp_t *setter;
         } accessor;
-        struct {
-            DISPID id;
-            DWORD flags;
-        } proxy;
+        DISPID proxy_id;
     } u;
 
     int bucket_head;
     int bucket_next;
 };
+
+static HRESULT fix_overridden_prop(jsdisp_t *This, dispex_prop_t *prop);
 
 static void fix_protref_prop(jsdisp_t *jsdisp, dispex_prop_t *prop)
 {
@@ -92,20 +91,16 @@ static inline DISPID prop_to_id(jsdisp_t *This, dispex_prop_t *prop)
 
 static inline dispex_prop_t *get_prop(jsdisp_t *This, DISPID id)
 {
+    dispex_prop_t *prop;
     DWORD idx = id - 1;
 
     if(idx >= This->prop_cnt)
         return NULL;
-    fix_protref_prop(This, &This->props[idx]);
+    prop = &This->props[idx];
 
-    return This->props[idx].type == PROP_DELETED ? NULL : &This->props[idx];
-}
-
-static inline BOOL is_accessor_prop(dispex_prop_t *prop)
-{
-    if(prop->type == PROP_PROXY)
-        return (prop->u.proxy.flags & PROPF_PROXY_ACCESSOR);
-    return prop->type == PROP_ACCESSOR;
+    fix_overridden_prop(This, prop);
+    fix_protref_prop(This, prop);
+    return prop->type == PROP_DELETED ? NULL : prop;
 }
 
 static inline BOOL is_function_prop(dispex_prop_t *prop)
@@ -164,28 +159,24 @@ static DWORD get_flags(jsdisp_t *This, dispex_prop_t *prop)
     return prop->flags;
 }
 
-static const builtin_prop_t *find_builtin_prop(jsdisp_t *This, const WCHAR *name)
+static const builtin_prop_t *find_builtin_prop(jsdisp_t *This, const WCHAR *name, BOOL case_insens)
 {
-    int min = 0, max, i, r;
+    int min = 0, max = This->builtin_info->props_cnt-1, i, r;
+    unsigned version;
 
-    max = This->builtin_info->props_cnt-1;
+    if(case_insens) {
+        for(i = min; i <= max; i++)
+            if(!wcsicmp(name, This->builtin_info->props[i].name))
+                goto found;
+        return NULL;
+    }
+
     while(min <= max) {
         i = (min+max)/2;
 
         r = wcscmp(name, This->builtin_info->props[i].name);
-        if(!r) {
-            /* Skip prop if it's available only in higher compatibility mode. */
-            unsigned version = (This->builtin_info->props[i].flags & PROPF_VERSION_MASK)
-                >> PROPF_VERSION_SHIFT;
-            if(version && version > This->ctx->version)
-                return NULL;
-
-            /* Skip prop if it's available only in HTML mode and we're not running in HTML mode. */
-            if((This->builtin_info->props[i].flags & PROPF_HTML) && !This->ctx->html_mode)
-                return NULL;
-
-            return This->builtin_info->props + i;
-        }
+        if(!r)
+            goto found;
 
         if(r < 0)
             max = i-1;
@@ -194,6 +185,18 @@ static const builtin_prop_t *find_builtin_prop(jsdisp_t *This, const WCHAR *name
     }
 
     return NULL;
+
+found:
+    /* Skip prop if it's available only in higher compatibility mode. */
+    version = (This->builtin_info->props[i].flags & PROPF_VERSION_MASK) >> PROPF_VERSION_SHIFT;
+    if(version && version > This->ctx->version)
+        return NULL;
+
+    /* Skip prop if it's available only in HTML mode and we're not running in HTML mode. */
+    if((This->builtin_info->props[i].flags & PROPF_HTML) && !This->ctx->html_mode)
+        return NULL;
+
+    return This->builtin_info->props + i;
 }
 
 static inline unsigned string_hash(const WCHAR *name)
@@ -217,7 +220,7 @@ static inline HRESULT resize_props(jsdisp_t *This)
     if(This->buf_size != This->prop_cnt)
         return S_FALSE;
 
-    props = heap_realloc(This->props, sizeof(dispex_prop_t)*This->buf_size*2);
+    props = realloc(This->props, sizeof(dispex_prop_t) * This->buf_size * 2);
     if(!props)
         return E_OUTOFMEMORY;
     This->buf_size *= 2;
@@ -248,7 +251,7 @@ static inline dispex_prop_t* alloc_prop(jsdisp_t *This, const WCHAR *name, prop_
         return NULL;
 
     prop = &This->props[This->prop_cnt];
-    prop->name = heap_strdupW(name);
+    prop->name = wcsdup(name);
     if(!prop->name)
         return NULL;
     prop->type = type;
@@ -261,24 +264,48 @@ static inline dispex_prop_t* alloc_prop(jsdisp_t *This, const WCHAR *name, prop_
     return prop;
 }
 
-static inline dispex_prop_t *alloc_proxy_prop(jsdisp_t *This, dispex_prop_t *prop, const WCHAR *name, DISPID id)
+static HRESULT alloc_proxy_prop(jsdisp_t *This, struct proxy_prop_info *info, dispex_prop_t **ret)
 {
-    unsigned flags, prop_flags = This->proxy->lpVtbl->PropFlags(This->proxy, id);
+    dispex_prop_t *prop;
+    jsdisp_t *funcs[2];
+    prop_type_t type;
+    HRESULT hres;
 
-    flags = prop_flags & PROPF_ALL;
-
-    if(prop) {
-        prop->type = PROP_PROXY;
-        prop->flags = flags;
-    }else {
-        prop = alloc_prop(This, name, PROP_PROXY, flags);
-        if(!prop)
-            return NULL;
+    if(!info->func[0].invoke)
+        type = PROP_PROXY;
+    else {
+        hres = create_proxy_functions(This, info, funcs);
+        if(FAILED(hres))
+            return hres;
+        type = (info->flags & PROPF_METHOD) ? PROP_JSVAL : PROP_ACCESSOR;
     }
 
-    prop->u.proxy.id = id;
-    prop->u.proxy.flags = prop_flags;
-    return prop;
+    if((prop = *ret)) {
+        prop->type = type;
+        prop->flags = info->flags & PROPF_ALL;
+    }else {
+        prop = alloc_prop(This, info->name, type, info->flags & PROPF_ALL);
+        if(!prop) {
+            if(type != PROP_PROXY) {
+                jsdisp_release(funcs[0]);
+                if(funcs[1])
+                    jsdisp_release(funcs[1]);
+            }
+            return E_OUTOFMEMORY;
+        }
+        *ret = prop;
+    }
+
+    if(type == PROP_PROXY)
+        prop->u.proxy_id = info->dispid;
+    else if(type == PROP_JSVAL)
+        prop->u.val = jsval_obj(funcs[0]);
+    else {
+        prop->u.accessor.getter = funcs[0];
+        prop->u.accessor.setter = funcs[1];
+    }
+
+    return S_OK;
 }
 
 static dispex_prop_t *alloc_protref(jsdisp_t *This, const WCHAR *name, DWORD ref)
@@ -293,14 +320,14 @@ static dispex_prop_t *alloc_protref(jsdisp_t *This, const WCHAR *name, DWORD ref
     return ret;
 }
 
-static dispex_prop_t *find_prop_name_raw(jsdisp_t *This, unsigned hash, const WCHAR *name)
+static dispex_prop_t *find_prop_name_raw(jsdisp_t *This, unsigned hash, const WCHAR *name, BOOL case_insens)
 {
     unsigned bucket, pos, prev = ~0;
 
     bucket = get_props_idx(This, hash);
     pos = This->props[bucket].bucket_head;
     while(pos != ~0) {
-        if(!wcscmp(name, This->props[pos].name)) {
+        if(case_insens ? !wcsicmp(name, This->props[pos].name) : !wcscmp(name, This->props[pos].name)) {
             if(prev != ~0) {
                 This->props[prev].bucket_next = This->props[pos].bucket_next;
                 This->props[pos].bucket_next = This->props[bucket].bucket_head;
@@ -316,47 +343,53 @@ static dispex_prop_t *find_prop_name_raw(jsdisp_t *This, unsigned hash, const WC
     return NULL;
 }
 
-static HRESULT find_prop_name(jsdisp_t *This, unsigned hash, const WCHAR *name, dispex_prop_t **ret)
+static HRESULT find_prop_name(jsdisp_t *This, unsigned hash, const WCHAR *name, BOOL case_insens, dispex_prop_t **ret)
 {
-    dispex_prop_t *prop = find_prop_name_raw(This, hash, name);
+    dispex_prop_t *prop = find_prop_name_raw(This, hash, name, case_insens);
     const builtin_prop_t *builtin;
+    HRESULT hres;
 
     if(prop) {
+        hres = fix_overridden_prop(This, prop);
         *ret = prop;
-        return S_OK;
+        return hres;
     }
 
     if(This->proxy) {
-        HRESULT hres;
-        WCHAR *str;
-        DISPID id;
-
-        if(!(str = heap_strdupW(name)))
-            return E_OUTOFMEMORY;
-        hres = This->proxy->lpVtbl->PropGetID(This->proxy, str, &id);
-        heap_free(str);
-
-        if(hres != DISP_E_UNKNOWNNAME) {
-            if(FAILED(hres))
-                return hres;
-            prop = alloc_proxy_prop(This, NULL, name, id);
-            if(!prop)
-                return E_OUTOFMEMORY;
-
-            *ret = prop;
-            return S_OK;
+        struct proxy_prop_info info;
+        hres = This->proxy->lpVtbl->PropGetInfo(This->proxy, name, case_insens, &info);
+        if(hres == S_OK) {
+            *ret = NULL;
+            return alloc_proxy_prop(This, &info, ret);
         }
+        if(hres != DISP_E_UNKNOWNNAME)
+            return hres;
     }
 
-    builtin = find_builtin_prop(This, name);
+    builtin = find_builtin_prop(This, name, case_insens);
     if(builtin) {
         unsigned flags = builtin->flags;
-        if(flags & PROPF_METHOD)
-            flags |= PROPF_WRITABLE | PROPF_CONFIGURABLE;
-        else if(builtin->setter)
+        if(flags & PROPF_METHOD) {
+            jsdisp_t *obj;
+
+            hres = create_builtin_function(This->ctx, builtin->invoke, builtin->name, NULL, flags, NULL, &obj);
+            if(FAILED(hres))
+                return hres;
+
+            prop = alloc_prop(This, builtin->name, PROP_JSVAL, (flags & PROPF_ALL) | PROPF_WRITABLE | PROPF_CONFIGURABLE);
+            if(!prop) {
+                jsdisp_release(obj);
+                return E_OUTOFMEMORY;
+            }
+
+            prop->type = PROP_JSVAL;
+            prop->u.val = jsval_obj(obj);
+            *ret = prop;
+            return S_OK;
+        }else if(builtin->setter)
             flags |= PROPF_WRITABLE;
         flags &= PROPF_ENUMERABLE | PROPF_WRITABLE | PROPF_CONFIGURABLE;
-        prop = alloc_prop(This, name, PROP_BUILTIN, flags);
+        prop = alloc_prop(This, builtin->name, PROP_BUILTIN, flags);
         if(!prop)
             return E_OUTOFMEMORY;
 
@@ -389,12 +422,12 @@ static HRESULT find_prop_name(jsdisp_t *This, unsigned hash, const WCHAR *name, 
     return S_OK;
 }
 
-static HRESULT find_prop_name_prot(jsdisp_t *This, unsigned hash, const WCHAR *name, dispex_prop_t **ret)
+static HRESULT find_prop_name_prot(jsdisp_t *This, unsigned hash, const WCHAR *name, BOOL case_insens, dispex_prop_t **ret)
 {
     dispex_prop_t *prop, *del=NULL;
     HRESULT hres;
 
-    hres = find_prop_name(This, hash, name, &prop);
+    hres = find_prop_name(This, hash, name, case_insens, &prop);
     if(FAILED(hres))
         return hres;
     if(prop && prop->type==PROP_DELETED) {
@@ -406,7 +439,7 @@ static HRESULT find_prop_name_prot(jsdisp_t *This, unsigned hash, const WCHAR *n
     }
 
     if(This->prototype) {
-        hres = find_prop_name_prot(This->prototype, hash, name, &prop);
+        hres = find_prop_name_prot(This->prototype, hash, name, case_insens, &prop);
         if(FAILED(hres))
             return hres;
         if(prop && prop->type != PROP_DELETED) {
@@ -429,12 +462,12 @@ static HRESULT find_prop_name_prot(jsdisp_t *This, unsigned hash, const WCHAR *n
     return S_OK;
 }
 
-static HRESULT ensure_prop_name(jsdisp_t *This, const WCHAR *name, DWORD create_flags, dispex_prop_t **ret)
+static HRESULT ensure_prop_name(jsdisp_t *This, const WCHAR *name, DWORD create_flags, BOOL case_insens, dispex_prop_t **ret)
 {
     dispex_prop_t *prop;
     HRESULT hres;
 
-    hres = find_prop_name_prot(This, string_hash(name), name, &prop);
+    hres = find_prop_name_prot(This, string_hash(name), name, case_insens, &prop);
     if(SUCCEEDED(hres) && (!prop || prop->type == PROP_DELETED)) {
         TRACE("creating prop %s flags %lx\n", debugstr_w(name), create_flags);
 
@@ -449,9 +482,69 @@ static HRESULT ensure_prop_name(jsdisp_t *This, const WCHAR *name, DWORD create_
         }
 
         prop->u.val = jsval_undefined();
+
+        if(This->proxy) {
+            struct proxy_prop_info info;
+
+            info.name = name;
+            hres = This->proxy->lpVtbl->PropDefineOverride(This->proxy, &info);
+            if(hres == S_FALSE)
+                hres = S_OK;
+            else if(SUCCEEDED(hres))
+                hres = alloc_proxy_prop(This, &info, &prop);
+        }
     }
 
     *ret = prop;
+    return hres;
+}
+
+static HRESULT fix_overridden_prop(jsdisp_t *This, dispex_prop_t *prop)
+{
+    struct proxy_prop_info info;
+    HRESULT hres;
+
+    if(!This->proxy)
+        return S_OK;
+
+    info.name = prop->name;
+    info.dispid = DISPID_UNKNOWN;
+
+    switch(prop->type) {
+    case PROP_PROXY:
+        info.dispid = prop->u.proxy_id;
+        break;
+    case PROP_PROTREF:
+    case PROP_DELETED:
+        break;
+    default:
+        return S_OK;
+    }
+
+    hres = This->proxy->lpVtbl->PropFixOverride(This->proxy, &info);
+    if(hres != S_OK)
+        return FAILED(hres) ? hres : S_OK;
+
+    /* Either the prop was restored (to PROP_PROXY), or it was removed */
+    if(info.dispid == DISPID_UNKNOWN) {
+        if(This->prototype) {
+            dispex_prop_t *prot_prop;
+
+            hres = find_prop_name_prot(This->prototype, prop->hash, prop->name, FALSE, &prot_prop);
+            if(FAILED(hres))
+                return hres;
+            if(prot_prop && prot_prop->type != PROP_DELETED) {
+                prop->type = PROP_PROTREF;
+                prop->u.ref = prot_prop - This->prototype->props;
+                return hres;
+            }
+        }
+        prop->type = PROP_DELETED;
+    }else {
+        info.func[0].invoke = NULL;
+        hres = alloc_proxy_prop(This, &info, &prop);
+    }
+
     return hres;
 }
 
@@ -483,7 +576,7 @@ static HRESULT convert_params(script_ctx_t *ctx, const DISPPARAMS *dp, jsval_t *
     cnt = dp->cArgs - dp->cNamedArgs;
 
     if(cnt > 6) {
-        argv = heap_alloc(cnt * sizeof(*argv));
+        argv = malloc(cnt * sizeof(*argv));
         if(!argv)
             return E_OUTOFMEMORY;
     }else {
@@ -496,7 +589,7 @@ static HRESULT convert_params(script_ctx_t *ctx, const DISPPARAMS *dp, jsval_t *
             while(i--)
                 jsval_release(argv[i]);
             if(argv != buf)
-                heap_free(argv);
+                free(argv);
             return hres;
         }
     }
@@ -506,18 +599,24 @@ static HRESULT convert_params(script_ctx_t *ctx, const DISPPARAMS *dp, jsval_t *
     return S_OK;
 }
 
-static HRESULT proxy_disp_call(jsdisp_t *This, IDispatch *jsthis, DISPID id, unsigned flags, unsigned argc,
-        jsval_t *argv, jsval_t *ret)
+static HRESULT proxy_disp_call(jsdisp_t *This, jsval_t vthis, DISPID id, unsigned flags, unsigned argc,
+        jsval_t *argv, jsval_t *ret, IServiceProvider *caller)
 {
     DISPPARAMS dp = { NULL, NULL, argc, 0 };
+    IDispatch *this_obj, *converted = NULL;
+    script_ctx_t *ctx = This->ctx;
     EXCEPINFO ei = { 0 };
     VARIANT buf[6], retv;
+    jsdisp_t *jsdisp;
     HRESULT hres;
     unsigned i;
 
+    if(!ctx->global)
+        return E_UNEXPECTED;
+
     if(dp.cArgs <= ARRAY_SIZE(buf))
         dp.rgvarg = buf;
-    else if(!(dp.rgvarg = heap_alloc(dp.cArgs * sizeof(*dp.rgvarg))))
+    else if(!(dp.rgvarg = malloc(dp.cArgs * sizeof(*dp.rgvarg))))
         return E_OUTOFMEMORY;
 
     for(i = 0; i < dp.cArgs; i++) {
@@ -526,25 +625,29 @@ static HRESULT proxy_disp_call(jsdisp_t *This, IDispatch *jsthis, DISPID id, uns
             goto cleanup;
     }
 
-    if(!jsthis)
-        jsthis = (IDispatch*)This->proxy;
+    if(is_undefined(vthis) || is_null(vthis))
+        this_obj = lookup_global_host(ctx);
     else {
-        jsdisp_t *jsdisp = to_jsdisp(jsthis);
-        if(jsdisp && jsdisp->proxy)
-            jsthis = (IDispatch*)jsdisp->proxy;
+        hres = to_object(ctx, vthis, &converted);
+        if(FAILED(hres))
+            goto cleanup;
+        this_obj = converted;
     }
 
+    jsdisp = to_jsdisp(this_obj);
+    if(jsdisp && jsdisp->proxy)
+        this_obj = (IDispatch*)jsdisp->proxy;
+
     V_VT(&retv) = VT_EMPTY;
-    IDispatch_AddRef(jsthis);
     flags &= ~DISPATCH_JSCRIPT_INTERNAL_MASK;
-    hres = This->proxy->lpVtbl->PropInvoke(This->proxy, jsthis, id, This->ctx->lcid, flags, &dp, ret ? &retv : NULL,
-                                           &ei, &This->ctx->jscaller->IServiceProvider_iface);
-    IDispatch_Release(jsthis);
+    hres = This->proxy->lpVtbl->PropInvoke(This->proxy, this_obj, id, ctx->lcid, flags, &dp, ret ? &retv : NULL, &ei, caller);
+    if(converted)
+        IDispatch_Release(converted);
 
     if(hres == DISP_E_EXCEPTION)
-        disp_fill_exception(This->ctx, &ei);
+        disp_fill_exception(ctx, &ei);
     else if(SUCCEEDED(hres) && ret) {
-        hres = variant_to_jsval(This->ctx, &retv, ret);
+        hres = variant_to_jsval(ctx, &retv, ret);
         VariantClear(&retv);
     }
 
@@ -552,82 +655,62 @@ cleanup:
     while(i--)
         VariantClear(&dp.rgvarg[i]);
     if(dp.rgvarg != buf)
-        heap_free(dp.rgvarg);
+        free(dp.rgvarg);
     return hres;
 }
 
-static HRESULT prop_get(jsdisp_t *This, dispex_prop_t *prop,  jsval_t *r)
+static HRESULT prop_get(jsdisp_t *This, dispex_prop_t *prop, jsval_t *r, IServiceProvider *caller)
 {
     jsdisp_t *prop_obj = This;
     HRESULT hres;
+    VARIANT var;
 
     while(prop->type == PROP_PROTREF) {
         prop_obj = prop_obj->prototype;
         prop = prop_obj->props + prop->u.ref;
     }
 
+    if(prop_obj->proxy) {
+        hres = prop_obj->proxy->lpVtbl->PropOverride(prop_obj->proxy, prop->name, &var);
+        if(hres != S_FALSE) {
+            if(SUCCEEDED(hres)) {
+                hres = variant_to_jsval(This->ctx, &var, r);
+                VariantClear(&var);
+            }
+            goto done;
+        }
+    }
+
     switch(prop->type) {
     case PROP_BUILTIN:
-        if(prop->u.p->getter) {
-            hres = prop->u.p->getter(This->ctx, This, r);
-        }else {
-            jsdisp_t *obj;
-
-            assert(prop->u.p->invoke != NULL);
-            hres = create_builtin_function(This->ctx, prop->u.p->invoke, prop->u.p->name, NULL,
-                    prop->u.p->flags, NULL, &obj);
-            if(FAILED(hres))
-                break;
-
-            prop->type = PROP_JSVAL;
-            prop->u.val = jsval_obj(obj);
-
-            jsdisp_addref(obj);
-            *r = jsval_obj(obj);
-        }
+        hres = prop->u.p->getter(This->ctx, This, r);
         break;
     case PROP_JSVAL:
         hres = jsval_copy(prop->u.val, r);
         break;
     case PROP_ACCESSOR:
         if(prop->u.accessor.getter) {
-            hres = jsdisp_call_value(prop->u.accessor.getter, to_disp(This),
-                                     DISPATCH_METHOD, 0, NULL, r);
+            hres = jsdisp_call_value(prop->u.accessor.getter, jsval_obj(This), DISPATCH_METHOD, 0, NULL, r, caller);
         }else {
             *r = jsval_undefined();
             hres = S_OK;
         }
         break;
-    case PROP_PROXY:
-        if(!(prop->u.proxy.flags & PROPF_METHOD)) {
-            DISPPARAMS dp = { 0 };
-            EXCEPINFO ei = { 0 };
-            VARIANT var;
+    case PROP_PROXY: {
+        DISPPARAMS dp = { 0 };
+        EXCEPINFO ei = { 0 };
 
-            V_VT(&var) = VT_EMPTY;
-            hres = prop_obj->proxy->lpVtbl->PropInvoke(prop_obj->proxy, This->proxy ? (IDispatch*)This->proxy : to_disp(This),
-                                                       prop->u.proxy.id, This->ctx->lcid, DISPATCH_PROPERTYGET, &dp, &var,
-                                                       &ei, &This->ctx->jscaller->IServiceProvider_iface);
-            if(hres == DISP_E_EXCEPTION)
-                disp_fill_exception(This->ctx, &ei);
-            else if(SUCCEEDED(hres)) {
-                hres = variant_to_jsval(This->ctx, &var, r);
-                VariantClear(&var);
-            }
-        }else {
-            jsdisp_t *obj;
-
-            hres = create_proxy_function(prop_obj, prop->u.proxy.id, prop->u.proxy.flags, &obj);
-            if(FAILED(hres))
-                break;
-
-            prop->type = PROP_JSVAL;
-            prop->u.val = jsval_obj(obj);
-
-            jsdisp_addref(obj);
-            *r = jsval_obj(obj);
+        V_VT(&var) = VT_EMPTY;
+        hres = prop_obj->proxy->lpVtbl->PropInvoke(prop_obj->proxy, This->proxy ? (IDispatch*)This->proxy : to_disp(This),
+                                                   prop->u.proxy_id, This->ctx->lcid, DISPATCH_PROPERTYGET, &dp, &var, &ei, caller);
+        if(hres == DISP_E_EXCEPTION)
+            disp_fill_exception(This->ctx, &ei);
+        else if(SUCCEEDED(hres)) {
+            hres = variant_to_jsval(This->ctx, &var, r);
+            VariantClear(&var);
         }
         break;
+    }
     case PROP_IDX:
         hres = prop_obj->builtin_info->idx_get(prop_obj, prop->u.idx, r);
         break;
@@ -638,6 +721,7 @@ static HRESULT prop_get(jsdisp_t *This, dispex_prop_t *prop,  jsval_t *r)
     if(SUCCEEDED(hres))
         hres = convert_to_proxy(This->ctx, r);
 
+done:
     if(FAILED(hres)) {
         TRACE("fail %08lx\n", hres);
         return hres;
@@ -647,7 +731,7 @@ static HRESULT prop_get(jsdisp_t *This, dispex_prop_t *prop,  jsval_t *r)
     return hres;
 }
 
-static HRESULT prop_put(jsdisp_t *This, dispex_prop_t *prop, jsval_t val)
+static HRESULT prop_put(jsdisp_t *This, dispex_prop_t *prop, jsval_t val, IServiceProvider *caller)
 {
     jsdisp_t *prop_obj = This;
     HRESULT hres;
@@ -661,7 +745,7 @@ static HRESULT prop_put(jsdisp_t *This, dispex_prop_t *prop, jsval_t val)
             prop_iter = prototype_iter->props + prop_iter->u.ref;
         } while(prop_iter->type == PROP_PROTREF);
 
-        if(is_accessor_prop(prop_iter)) {
+        if(prop_iter->type == PROP_ACCESSOR) {
             prop_obj = prototype_iter;
             prop = prop_iter;
         }
@@ -669,12 +753,6 @@ static HRESULT prop_put(jsdisp_t *This, dispex_prop_t *prop, jsval_t val)
 
     switch(prop->type) {
     case PROP_BUILTIN:
-        if(prop->u.p->invoke) {
-            prop->type = PROP_JSVAL;
-            prop->flags = PROPF_CONFIGURABLE | PROPF_WRITABLE;
-            prop->u.val = jsval_undefined();
-            break;
-        }
         if(!prop->u.p->setter) {
             TRACE("getter with no setter\n");
             return S_OK;
@@ -699,23 +777,28 @@ static HRESULT prop_put(jsdisp_t *This, dispex_prop_t *prop, jsval_t val)
             TRACE("no setter\n");
             return S_OK;
         }
-        return jsdisp_call_value(prop->u.accessor.setter, to_disp(This), DISPATCH_METHOD, 1, &val, NULL);
+        return jsdisp_call_value(prop->u.accessor.setter, jsval_obj(This), DISPATCH_METHOD, 1, &val, NULL, caller);
     case PROP_PROXY: {
         static DISPID propput_dispid = DISPID_PROPERTYPUT;
         EXCEPINFO ei = { 0 };
         VARIANT var;
         DISPPARAMS dp = { &var, &propput_dispid, 1, 1 };
 
-        if(!is_accessor_prop(prop) && !(prop->flags & PROPF_WRITABLE))
+        if(!(prop->flags & PROPF_WRITABLE))
             return S_OK;
         hres = jsval_to_variant(val, &var);
         if(FAILED(hres))
             return hres;
 
         hres = prop_obj->proxy->lpVtbl->PropInvoke(prop_obj->proxy, This->proxy ? (IDispatch*)This->proxy : to_disp(This),
-                                                   prop->u.proxy.id, This->ctx->lcid, DISPATCH_PROPERTYPUT, &dp, NULL,
-                                                   &ei, &This->ctx->jscaller->IServiceProvider_iface);
+                                                   prop->u.proxy_id, This->ctx->lcid, DISPATCH_PROPERTYPUT, &dp, NULL, &ei, caller);
         VariantClear(&var);
+        if(hres == S_FALSE) {
+            prop->type = PROP_JSVAL;
+            prop->flags = PROPF_ENUMERABLE | PROPF_CONFIGURABLE | PROPF_WRITABLE;
+            prop->u.val = jsval_undefined();
+            break;
+        }
         if(hres == DISP_E_EXCEPTION)
             disp_fill_exception(This->ctx, &ei);
         return hres;
@@ -749,29 +832,8 @@ static HRESULT invoke_prop_func(jsdisp_t *This, IDispatch *jsthis, dispex_prop_t
     HRESULT hres;
 
     switch(prop->type) {
-    case PROP_BUILTIN: {
-        jsval_t vthis;
-
-        if(!prop->u.p->invoke)
-            return JS_E_FUNCTION_EXPECTED;
-
-        if(flags == DISPATCH_CONSTRUCT && (prop->flags & PROPF_METHOD)) {
-            WARN("%s is not a constructor\n", debugstr_w(prop->name));
-            return E_INVALIDARG;
-        }
-
-        if(This->builtin_info->class != JSCLASS_FUNCTION && prop->u.p->invoke != JSGlobal_eval)
-            flags &= ~DISPATCH_JSCRIPT_INTERNAL_MASK;
-        if(jsthis)
-            vthis = jsval_disp(jsthis);
-        else
-            vthis = jsval_obj(This);
-        hres = prop->u.p->invoke(This->ctx, vthis, flags, argc, argv, r);
-
-        if(SUCCEEDED(hres))
-            hres = convert_to_proxy(This->ctx, r);
-        return hres;
-    }
+    case PROP_BUILTIN:
+        return JS_E_FUNCTION_EXPECTED;
     case PROP_PROTREF:
         return invoke_prop_func(This->prototype, jsthis ? jsthis : (IDispatch *)&This->IDispatchEx_iface,
                                 This->prototype->props+prop->u.ref, flags, argc, argv, r, caller);
@@ -784,21 +846,21 @@ static HRESULT invoke_prop_func(jsdisp_t *This, IDispatch *jsthis, dispex_prop_t
         TRACE("call %s %p\n", debugstr_w(prop->name), get_object(prop->u.val));
 
         return disp_call_value(This->ctx, get_object(prop->u.val),
-                               jsthis ? jsthis : (IDispatch*)&This->IDispatchEx_iface,
-                               flags, argc, argv, r);
+                               jsval_disp(jsthis ? jsthis : (IDispatch*)&This->IDispatchEx_iface),
+                               flags, argc, argv, r, caller);
     }
     case PROP_ACCESSOR:
     case PROP_IDX: {
         jsval_t val;
 
-        hres = prop_get(This, prop, &val);
+        hres = prop_get(This, prop, &val, caller);
         if(FAILED(hres))
             return hres;
 
         if(is_object_instance(val)) {
             hres = disp_call_value(This->ctx, get_object(val),
-                                   jsthis ? jsthis : (IDispatch*)&This->IDispatchEx_iface,
-                                   flags, argc, argv, r);
+                                   jsval_disp(jsthis ? jsthis : (IDispatch*)&This->IDispatchEx_iface),
+                                   flags, argc, argv, r, caller);
         }else {
             FIXME("invoke %s\n", debugstr_jsval(val));
             hres = E_NOTIMPL;
@@ -808,7 +870,8 @@ static HRESULT invoke_prop_func(jsdisp_t *This, IDispatch *jsthis, dispex_prop_t
         return hres;
     }
     case PROP_PROXY:
-        return proxy_disp_call(This, jsthis, prop->u.proxy.id, flags, argc, argv, r);
+        return proxy_disp_call(This, jsval_disp(jsthis ? jsthis : (IDispatch*)&This->IDispatchEx_iface),
+                               prop->u.proxy_id, flags, argc, argv, r, caller);
     case PROP_DELETED:
         assert(0);
         break;
@@ -823,21 +886,53 @@ HRESULT builtin_set_const(script_ctx_t *ctx, jsdisp_t *jsthis, jsval_t value)
     return S_OK;
 }
 
+static HRESULT fill_props(jsdisp_t *obj)
+{
+    dispex_prop_t *prop;
+    HRESULT hres;
+
+    if(obj->proxy) {
+        hres = obj->proxy->lpVtbl->PropEnum(obj->proxy);
+        if(FAILED(hres))
+            return hres;
+    }
+
+    if(obj->builtin_info->idx_length) {
+        unsigned i = 0, len = obj->builtin_info->idx_length(obj);
+        WCHAR name[12];
+
+        for(i = 0; i < len; i++) {
+            swprintf(name, ARRAY_SIZE(name), L"%u", i);
+            hres = find_prop_name(obj, string_hash(name), name, FALSE, &prop);
+            if(FAILED(hres))
+                return hres;
+        }
+    }
+
+    return S_OK;
+}
+
 static HRESULT fill_protrefs(jsdisp_t *This)
 {
     dispex_prop_t *iter, *prop;
     unsigned idx;
     HRESULT hres;
 
+    hres = fill_props(This);
+    if(FAILED(hres))
+        return hres;
+
     if(!This->prototype)
         return S_OK;
 
-    fill_protrefs(This->prototype);
+    hres = fill_protrefs(This->prototype);
+    if(FAILED(hres))
+        return hres;
 
     for(iter = This->prototype->props; iter < This->prototype->props+This->prototype->prop_cnt; iter++) {
         if(override_idx(This, iter->name, &idx))
             continue;
-        hres = find_prop_name(This, iter->hash, iter->name, &prop);
+        hres = find_prop_name(This, iter->hash, iter->name, FALSE, &prop);
         if(FAILED(hres))
             return hres;
         if(!prop || prop->type==PROP_DELETED) {
@@ -877,10 +972,7 @@ static void unlink_props(jsdisp_t *jsdisp)
         default:
             break;
         }
-        prop->type = PROP_JSVAL;
-        prop->flags &= PROPF_ALL;
-        prop->flags |= PROPF_CONFIGURABLE | PROPF_WRITABLE;
-        prop->u.val = jsval_undefined();
+        prop->type = PROP_DELETED;
     }
 }
 
@@ -895,7 +987,7 @@ static void unlink_props(jsdisp_t *jsdisp)
  * An "external ref" is a ref to the object that's not from any other object. Example of such
  * refs can be local variables, the script ctx (which keeps a ref to the global object), etc.
  *
- * Broadly, there are 3 passes done on the entire list of objects:
+ * At a high level, there are 3 logical passes done on the entire list of objects:
  *
  * 1. Speculatively decrease refcounts of each linked-to-object from each object. This ensures
  *    that the only remaining refcount on each object is the number of "external refs" to it.
@@ -904,45 +996,98 @@ static void unlink_props(jsdisp_t *jsdisp)
  * 2. For each object with a non-zero "external refcount", clear the mark from step 1, and
  *    recursively traverse all linked objects from it, clearing their marks as well (regardless
  *    of their refcount), stopping a given path when the object is unmarked (and then going back
- *    up the heap stack). This basically unmarks all of the objects with "external refcounts"
+ *    up the GC stack). This basically unmarks all of the objects with "external refcounts"
  *    and those accessible from them, and only the leaked dangling objects will still be marked.
  *
  * 3. For each object that is marked, unlink all of the objects linked from it, because they
  *    are dangling in a circular refcount and not accessible. This should release them.
  *
+ * During unlinking (GC_TRAVERSE_UNLINK), it is important that we unlink *all* linked objects
+ * from the object, to be certain that releasing the object later will not delete any other
+ * objects. Otherwise calculating the "next" object in the list becomes impossible.
+ *
  * This collection process has to be done periodically, but can be pretty expensive so there
  * has to be a balance between reclaiming dangling objects and performance.
+ *
  */
-static void gc_run(script_ctx_t *ctx)
+struct gc_stack_chunk {
+    jsdisp_t *objects[1020];
+    struct gc_stack_chunk *prev;
+};
+
+struct gc_ctx {
+    struct gc_stack_chunk *chunk;
+    struct gc_stack_chunk *next;
+    unsigned idx;
+};
+
+static HRESULT gc_stack_push(struct gc_ctx *gc_ctx, jsdisp_t *obj)
 {
-    /* Save original refcounts in a linked list of chunks,
-       so we don't bloat object size unnecessarily. */
+    if(!gc_ctx->idx) {
+        if(gc_ctx->next)
+            gc_ctx->chunk = gc_ctx->next;
+        else {
+            struct gc_stack_chunk *prev, *tmp = malloc(sizeof(*tmp));
+            if(!tmp)
+                return E_OUTOFMEMORY;
+            prev = gc_ctx->chunk;
+            gc_ctx->chunk = tmp;
+            gc_ctx->chunk->prev = prev;
+        }
+        gc_ctx->idx = ARRAY_SIZE(gc_ctx->chunk->objects);
+        gc_ctx->next = NULL;
+    }
+    gc_ctx->chunk->objects[--gc_ctx->idx] = obj;
+    return S_OK;
+}
+
+static jsdisp_t *gc_stack_pop(struct gc_ctx *gc_ctx)
+{
+    jsdisp_t *obj = gc_ctx->chunk->objects[gc_ctx->idx];
+
+    if(++gc_ctx->idx == ARRAY_SIZE(gc_ctx->chunk->objects)) {
+        free(gc_ctx->next);
+        gc_ctx->next = gc_ctx->chunk;
+        gc_ctx->chunk = gc_ctx->chunk->prev;
+        gc_ctx->idx = 0;
+    }
+    return obj;
+}
+
+HRESULT gc_run(script_ctx_t *ctx)
+{
+    /* Save original refcounts in a linked list of chunks */
     struct chunk
     {
         struct chunk *next;
         LONG ref[1020];
     } *head, *chunk;
     jsdisp_t *obj, *obj2, *link, *link2;
-    struct heap_stack heap_stack = { 0 };
     dispex_prop_t *prop, *props_end;
+    struct gc_ctx gc_ctx = { 0 };
     unsigned chunk_idx = 0;
-    HRESULT hres;
+    HRESULT hres = S_OK;
+    struct list *iter;
 
-    if(!(head = heap_alloc(sizeof(*head))))
-        return;
+    /* Prevent recursive calls from side-effects during unlinking (e.g. CollectGarbage from host object's Release) */
+    if(ctx->gc_is_unlinking)
+        return S_OK;
+
+    if(!(head = malloc(sizeof(*head))))
+        return E_OUTOFMEMORY;
     head->next = NULL;
     chunk = head;
 
     /* 1. Save actual refcounts and decrease them speculatively as-if we unlinked the objects */
     LIST_FOR_EACH_ENTRY(obj, &ctx->objects, jsdisp_t, entry) {
         if(chunk_idx == ARRAY_SIZE(chunk->ref)) {
-            if(!(chunk->next = heap_alloc(sizeof(*chunk)))) {
+            if(!(chunk->next = malloc(sizeof(*chunk)))) {
                 do {
                     chunk = head->next;
                     free(head);
                     head = chunk;
                 } while(head);
-                return;
+                return E_OUTOFMEMORY;
             }
             chunk = chunk->next, chunk_idx = 0;
             chunk->next = NULL;
@@ -970,27 +1115,18 @@ static void gc_run(script_ctx_t *ctx)
         if(obj->prototype && obj->prototype->ctx == ctx)
             obj->prototype->ref--;
         if(obj->builtin_info->gc_traverse)
-            obj->builtin_info->gc_traverse(obj, GC_TRAVERSE_SPECULATIVELY);
+            obj->builtin_info->gc_traverse(&gc_ctx, GC_TRAVERSE_SPECULATIVELY, obj);
         obj->gc_marked = TRUE;
     }
 
     /* 2. Clear mark on objects with non-zero "external refcount" and all objects accessible from them */
-    chunk = head, chunk_idx = 0;
     LIST_FOR_EACH_ENTRY(obj, &ctx->objects, jsdisp_t, entry) {
-        LONG external_ref = obj->ref;
-
-        obj->ref = chunk->ref[chunk_idx++];  /* restore */
-        if(chunk_idx == ARRAY_SIZE(chunk->ref)) {
-            struct chunk *next = chunk->next;
-            free(chunk);
-            chunk = next, chunk_idx = 0;
-        }
-        if(!obj->gc_marked || (!external_ref && (!obj->proxy || obj->proxy->lpVtbl->CanGC(obj->proxy))))
+        if(!obj->gc_marked || (!obj->ref && (!obj->proxy || obj->proxy->lpVtbl->CanGC(obj->proxy))))
             continue;
 
-        hres = heap_stack_push(&heap_stack, NULL);
+        hres = gc_stack_push(&gc_ctx, NULL);
         if(FAILED(hres))
-            goto unwind;
+            break;
 
         obj2 = obj;
         do
@@ -1013,39 +1149,67 @@ static void gc_run(script_ctx_t *ctx)
                     continue;
                 }
                 if(link && link->gc_marked && link->ctx == ctx) {
-                    hres = heap_stack_push(&heap_stack, link);
+                    hres = gc_stack_push(&gc_ctx, link);
                     if(FAILED(hres))
-                        goto unwind2;
+                        break;
                 }
                 if(link2 && link2->gc_marked && link2->ctx == ctx) {
-                    hres = heap_stack_push(&heap_stack, link2);
+                    hres = gc_stack_push(&gc_ctx, link2);
                     if(FAILED(hres))
-                        goto unwind2;
+                        break;
                 }
             }
 
+            if(FAILED(hres))
+                break;
+
             if(obj2->prototype && obj2->prototype->gc_marked && obj2->prototype->ctx == ctx) {
-                hres = heap_stack_push(&heap_stack, obj2->prototype);
+                hres = gc_stack_push(&gc_ctx, obj2->prototype);
                 if(FAILED(hres))
-                    goto unwind2;
+                    break;
             }
 
             if(obj2->builtin_info->gc_traverse) {
-                hres = obj2->builtin_info->gc_traverse(obj2, &heap_stack);
+                hres = obj2->builtin_info->gc_traverse(&gc_ctx, GC_TRAVERSE, obj2);
                 if(FAILED(hres))
-                    goto unwind2;
+                    break;
             }
 
-            do obj2 = heap_stack_pop(&heap_stack); while(obj2 && !obj2->gc_marked);
+            do obj2 = gc_stack_pop(&gc_ctx); while(obj2 && !obj2->gc_marked);
         } while(obj2);
+
+        if(FAILED(hres)) {
+            do obj2 = gc_stack_pop(&gc_ctx); while(obj2);
+            break;
+        }
     }
-    heap_stack_free(&heap_stack);
+    free(gc_ctx.next);
+
+    /* Restore */
+    chunk = head, chunk_idx = 0;
+    LIST_FOR_EACH_ENTRY(obj, &ctx->objects, jsdisp_t, entry) {
+        obj->ref = chunk->ref[chunk_idx++];
+        if(chunk_idx == ARRAY_SIZE(chunk->ref)) {
+            struct chunk *next = chunk->next;
+            free(chunk);
+            chunk = next, chunk_idx = 0;
+        }
+    }
     free(chunk);
 
+    if(FAILED(hres))
+        return hres;
+
     /* 3. Remove all the links from the marked objects, since they are dangling */
-    LIST_FOR_EACH_ENTRY_SAFE(obj, obj2, &ctx->objects, jsdisp_t, entry) {
-        if(!obj->gc_marked)
+    ctx->gc_is_unlinking = TRUE;
+
+    iter = list_head(&ctx->objects);
+    while(iter) {
+        obj = LIST_ENTRY(iter, jsdisp_t, entry);
+        if(!obj->gc_marked) {
+            iter = list_next(&ctx->objects, iter);
             continue;
+        }
 
         /* Grab it since it gets removed when unlinked */
         jsdisp_addref(obj);
@@ -1057,32 +1221,54 @@ static void gc_run(script_ctx_t *ctx)
         }
 
         if(obj->builtin_info->gc_traverse)
-            obj->builtin_info->gc_traverse(obj, GC_TRAVERSE_UNLINK);
+            obj->builtin_info->gc_traverse(&gc_ctx, GC_TRAVERSE_UNLINK, obj);
 
-        /* Unlinking possibly removed the next object from the list, so grab it here */
-        obj2 = LIST_ENTRY(obj->entry.next, jsdisp_t, entry);
+        /* Releasing unlinked object should not delete any other object,
+           so we can safely obtain the next pointer now */
+        iter = list_next(&ctx->objects, iter);
         jsdisp_release(obj);
     }
 
+    ctx->gc_is_unlinking = FALSE;
     ctx->gc_last_tick = GetTickCount();
-    return;
+    return S_OK;
+}
 
-unwind2:
-    do obj2 = heap_stack_pop(&heap_stack); while(obj2);
-unwind:
-    heap_stack_free(&heap_stack);
-
-    while(&(obj = LIST_ENTRY(obj->entry.next, jsdisp_t, entry))->entry != &ctx->objects) {
-        obj->ref = chunk->ref[chunk_idx++];
-        if(chunk_idx == ARRAY_SIZE(chunk->ref)) {
-            struct chunk *next = chunk->next;
-            free(chunk);
-            chunk = next, chunk_idx = 0;
-        }
+HRESULT gc_process_linked_obj(struct gc_ctx *gc_ctx, enum gc_traverse_op op, jsdisp_t *obj, jsdisp_t *link, void **unlink_ref)
+{
+    if(op == GC_TRAVERSE_UNLINK) {
+        *unlink_ref = NULL;
+        jsdisp_release(link);
+        return S_OK;
     }
-    free(chunk);
-    LIST_FOR_EACH_ENTRY(obj, &ctx->objects, jsdisp_t, entry)
-        obj->gc_marked = FALSE;
+
+    if(link->ctx != obj->ctx)
+        return S_OK;
+    if(op == GC_TRAVERSE_SPECULATIVELY)
+        link->ref--;
+    else if(link->gc_marked)
+        return gc_stack_push(gc_ctx, link);
+    return S_OK;
+}
+
+HRESULT gc_process_linked_val(struct gc_ctx *gc_ctx, enum gc_traverse_op op, jsdisp_t *obj, jsval_t *link)
+{
+    jsdisp_t *jsdisp;
+
+    if(op == GC_TRAVERSE_UNLINK) {
+        jsval_t val = *link;
+        *link = jsval_undefined();
+        jsval_release(val);
+        return S_OK;
+    }
+
+    if(!is_object_instance(*link) || !(jsdisp = to_jsdisp(get_object(*link))) || jsdisp->ctx != obj->ctx)
+        return S_OK;
+    if(op == GC_TRAVERSE_SPECULATIVELY)
+        jsdisp->ref--;
+    else if(jsdisp->gc_marked)
+        return gc_stack_push(gc_ctx, jsdisp);
+    return S_OK;
 }
 
 
@@ -1196,9 +1382,9 @@ static ULONG WINAPI ScriptTypeInfo_Release(ITypeInfo *iface)
         for (i = This->num_funcs; i--;)
             release_bytecode(This->funcs[i].code->bytecode);
         IDispatchEx_Release(&This->jsdisp->IDispatchEx_iface);
-        heap_free(This->funcs);
-        heap_free(This->vars);
-        heap_free(This);
+        free(This->funcs);
+        free(This->vars);
+        free(This);
     }
     return ref;
 }
@@ -1212,7 +1398,7 @@ static HRESULT WINAPI ScriptTypeInfo_GetTypeAttr(ITypeInfo *iface, TYPEATTR **pp
 
     if (!ppTypeAttr) return E_INVALIDARG;
 
-    attr = heap_alloc_zero(sizeof(*attr));
+    attr = calloc(1, sizeof(*attr));
     if (!attr) return E_OUTOFMEMORY;
 
     attr->guid = GUID_JScriptTypeInfo;
@@ -1261,7 +1447,7 @@ static HRESULT WINAPI ScriptTypeInfo_GetFuncDesc(ITypeInfo *iface, UINT index, F
     func = &This->funcs[index];
 
     /* Store the parameter array after the FUNCDESC structure */
-    desc = heap_alloc_zero(sizeof(*desc) + sizeof(ELEMDESC) * func->code->param_cnt);
+    desc = calloc(1, sizeof(*desc) + sizeof(ELEMDESC) * func->code->param_cnt);
     if (!desc) return E_OUTOFMEMORY;
 
     desc->memid = prop_to_id(This->jsdisp, func->prop);
@@ -1289,7 +1475,7 @@ static HRESULT WINAPI ScriptTypeInfo_GetVarDesc(ITypeInfo *iface, UINT index, VA
     if (!ppVarDesc) return E_INVALIDARG;
     if (index >= This->num_vars) return TYPE_E_ELEMENTNOTFOUND;
 
-    desc = heap_alloc_zero(sizeof(*desc));
+    desc = calloc(1, sizeof(*desc));
     if (!desc) return E_OUTOFMEMORY;
 
     desc->memid = prop_to_id(This->jsdisp, This->vars[index]);
@@ -1634,7 +1820,7 @@ static void WINAPI ScriptTypeInfo_ReleaseTypeAttr(ITypeInfo *iface, TYPEATTR *pT
 
     TRACE("(%p)->(%p)\n", This, pTypeAttr);
 
-    heap_free(pTypeAttr);
+    free(pTypeAttr);
 }
 
 static void WINAPI ScriptTypeInfo_ReleaseFuncDesc(ITypeInfo *iface, FUNCDESC *pFuncDesc)
@@ -1643,7 +1829,7 @@ static void WINAPI ScriptTypeInfo_ReleaseFuncDesc(ITypeInfo *iface, FUNCDESC *pF
 
     TRACE("(%p)->(%p)\n", This, pFuncDesc);
 
-    heap_free(pFuncDesc);
+    free(pFuncDesc);
 }
 
 static void WINAPI ScriptTypeInfo_ReleaseVarDesc(ITypeInfo *iface, VARDESC *pVarDesc)
@@ -1652,7 +1838,7 @@ static void WINAPI ScriptTypeInfo_ReleaseVarDesc(ITypeInfo *iface, VARDESC *pVar
 
     TRACE("(%p)->(%p)\n", This, pVarDesc);
 
-    heap_free(pVarDesc);
+    free(pVarDesc);
 }
 
 static const ITypeInfoVtbl ScriptTypeInfoVtbl = {
@@ -1885,7 +2071,7 @@ static HRESULT WINAPI DispatchEx_GetTypeInfo(IDispatchEx *iface, UINT iTInfo, LC
         else num_vars++;
     }
 
-    if (!(typeinfo = heap_alloc(sizeof(*typeinfo))))
+    if (!(typeinfo = malloc(sizeof(*typeinfo))))
         return E_OUTOFMEMORY;
 
     typeinfo->ITypeInfo_iface.lpVtbl = &ScriptTypeInfoVtbl;
@@ -1895,18 +2081,18 @@ static HRESULT WINAPI DispatchEx_GetTypeInfo(IDispatchEx *iface, UINT iTInfo, LC
     typeinfo->num_funcs = num_funcs;
     typeinfo->jsdisp = This;
 
-    typeinfo->funcs = heap_alloc(sizeof(*typeinfo->funcs) * num_funcs);
+    typeinfo->funcs = malloc(sizeof(*typeinfo->funcs) * num_funcs);
     if (!typeinfo->funcs)
     {
-        heap_free(typeinfo);
+        free(typeinfo);
         return E_OUTOFMEMORY;
     }
 
-    typeinfo->vars = heap_alloc(sizeof(*typeinfo->vars) * num_vars);
+    typeinfo->vars = malloc(sizeof(*typeinfo->vars) * num_vars);
     if (!typeinfo->vars)
     {
-        heap_free(typeinfo->funcs);
-        heap_free(typeinfo);
+        free(typeinfo->funcs);
+        free(typeinfo);
         return E_OUTOFMEMORY;
     }
 
@@ -1954,7 +2140,7 @@ static HRESULT WINAPI DispatchEx_GetIDsOfNames(IDispatchEx *iface, REFIID riid,
     if(cNames == 0)
         return S_OK;
 
-    hres = jsdisp_get_id(This, rgszNames[0], 0, rgDispId);
+    hres = jsdisp_get_id(This, rgszNames[0], This->proxy ? fdexNameCaseInsensitive : 0, rgDispId);
     if(FAILED(hres))
         return hres;
 
@@ -1987,7 +2173,7 @@ static HRESULT WINAPI DispatchEx_GetDispID(IDispatchEx *iface, BSTR bstrName, DW
 
     TRACE("(%p)->(%s %lx %p)\n", This, debugstr_w(bstrName), grfdex, pid);
 
-    if(grfdex & ~(fdexNameCaseSensitive|fdexNameEnsure|fdexNameImplicit|FDEX_VERSION_MASK)) {
+    if(grfdex & ~(fdexNameCaseSensitive|fdexNameCaseInsensitive|fdexNameEnsure|fdexNameImplicit|FDEX_VERSION_MASK)) {
         FIXME("Unsupported grfdex %lx\n", grfdex);
         return E_NOTIMPL;
     }
@@ -1999,6 +2185,7 @@ static HRESULT WINAPI DispatchEx_InvokeEx(IDispatchEx *iface, DISPID id, LCID lc
         VARIANT *pvarRes, EXCEPINFO *pei, IServiceProvider *pspCaller)
 {
     jsdisp_t *This = impl_from_IDispatchEx(iface);
+    IServiceProvider *prev_caller;
     dispex_prop_t *prop;
     jsexcept_t ei;
     HRESULT hres;
@@ -2016,6 +2203,11 @@ static HRESULT WINAPI DispatchEx_InvokeEx(IDispatchEx *iface, DISPID id, LCID lc
 
     enter_script(This->ctx, &ei);
 
+    prev_caller = This->ctx->jscaller->caller;
+    This->ctx->jscaller->caller = pspCaller;
+    if(pspCaller)
+        IServiceProvider_AddRef(pspCaller);
+
     switch(wFlags) {
     case DISPATCH_METHOD|DISPATCH_PROPERTYGET:
         wFlags = DISPATCH_METHOD;
@@ -2023,19 +2215,24 @@ static HRESULT WINAPI DispatchEx_InvokeEx(IDispatchEx *iface, DISPID id, LCID lc
     case DISPATCH_METHOD:
     case DISPATCH_CONSTRUCT: {
         jsval_t *argv, buf[6], r;
+        IDispatch *passed_this;
         unsigned argc;
 
         hres = convert_params(This->ctx, pdp, buf, &argc, &argv);
         if(FAILED(hres))
             break;
 
+        passed_this = get_this(pdp);
         if(prop)
-            hres = invoke_prop_func(This, get_this(pdp), prop, wFlags, argc, argv, pvarRes ? &r : NULL, pspCaller);
+            hres = invoke_prop_func(This, passed_this, prop, wFlags, argc, argv, pvarRes ? &r : NULL, pspCaller);
         else
-            hres = jsdisp_call_value(This, get_this(pdp), wFlags, argc, argv, pvarRes ? &r : NULL);
+            hres = jsdisp_call_value(This, passed_this ? jsval_disp(passed_this) : jsval_undefined(),
+                                     wFlags, argc, argv, pvarRes ? &r : NULL, pspCaller);
 
+        while(argc--)
+            jsval_release(argv[argc]);
         if(argv != buf)
-            heap_free(argv);
+            free(argv);
         if(SUCCEEDED(hres) && pvarRes) {
             hres = jsval_to_variant(r, pvarRes);
             jsval_release(r);
@@ -2046,7 +2243,7 @@ static HRESULT WINAPI DispatchEx_InvokeEx(IDispatchEx *iface, DISPID id, LCID lc
         jsval_t r;
 
         if(prop)
-            hres = prop_get(This, prop, &r);
+            hres = prop_get(This, prop, &r, pspCaller);
         else {
             hres = to_primitive(This->ctx, jsval_obj(This), &r, NO_HINT);
             if(hres == JS_E_TO_PRIMITIVE)
@@ -2085,7 +2282,7 @@ static HRESULT WINAPI DispatchEx_InvokeEx(IDispatchEx *iface, DISPID id, LCID lc
         if(FAILED(hres))
             break;
 
-        hres = prop_put(This, prop, val);
+        hres = prop_put(This, prop, val, pspCaller);
         jsval_release(val);
         break;
     }
@@ -2095,6 +2292,9 @@ static HRESULT WINAPI DispatchEx_InvokeEx(IDispatchEx *iface, DISPID id, LCID lc
         break;
     }
 
+    This->ctx->jscaller->caller = prev_caller;
+    if(pspCaller)
+        IServiceProvider_Release(pspCaller);
     return leave_script(This->ctx, hres);
 }
 
@@ -2105,6 +2305,14 @@ static HRESULT delete_prop(jsdisp_t *prop_obj, dispex_prop_t *prop, BOOL *ret)
         return S_OK;
     }
 
+    if(prop_obj->proxy) {
+        HRESULT hres = prop_obj->proxy->lpVtbl->PropOverride(prop_obj->proxy, prop->name, NULL);
+        if(hres != S_FALSE) {
+            *ret = TRUE;
+            return hres;
+        }
+    }
+
     if(!(prop->flags & PROPF_CONFIGURABLE)) {
         *ret = FALSE;
         return S_OK;
@@ -2113,11 +2321,10 @@ static HRESULT delete_prop(jsdisp_t *prop_obj, dispex_prop_t *prop, BOOL *ret)
     *ret = TRUE;
 
     if(prop->type == PROP_PROXY) {
-        HRESULT hres = prop_obj->proxy->lpVtbl->PropDelete(prop_obj->proxy, prop->u.proxy.id);
-        if(FAILED(hres))
-            return hres;
-        prop->type = PROP_DELETED;
-        return S_OK;
+        HRESULT hres = prop_obj->proxy->lpVtbl->PropDelete(prop_obj->proxy, prop->u.proxy_id);
+        if(SUCCEEDED(hres))
+            prop->type = PROP_DELETED;
+        return hres;
     }
     if(prop->type == PROP_JSVAL)
         jsval_release(prop->u.val);
@@ -2141,13 +2348,13 @@ static HRESULT WINAPI DispatchEx_DeleteMemberByName(IDispatchEx *iface, BSTR bst
 
     TRACE("(%p)->(%s %lx)\n", This, debugstr_w(bstrName), grfdex);
 
-    if(grfdex & ~(fdexNameCaseSensitive|fdexNameEnsure|fdexNameImplicit|FDEX_VERSION_MASK))
+    if(grfdex & ~(fdexNameCaseSensitive|fdexNameCaseInsensitive|fdexNameEnsure|fdexNameImplicit|FDEX_VERSION_MASK))
         FIXME("Unsupported grfdex %lx\n", grfdex);
 
     if(override_idx(This, bstrName, &idx))
         return S_OK;
 
-    hres = find_prop_name(This, string_hash(bstrName), bstrName, &prop);
+    hres = find_prop_name(This, string_hash(bstrName), bstrName, grfdex & fdexNameCaseInsensitive, &prop);
     if(FAILED(hres))
         return hres;
     if(!prop) {
@@ -2233,13 +2440,21 @@ static HRESULT set_js_globals(jsdisp_t *obj)
     /* Reset builtins first */
     obj->builtin_info = js_global->builtin_info;
     for(bprop = obj->builtin_info->props, bend = bprop + obj->builtin_info->props_cnt; bprop != bend; bprop++) {
-        if(!(prop = find_prop_name_raw(obj, string_hash(bprop->name), bprop->name)) || prop->type == PROP_BUILTIN)
+        unsigned hash = string_hash(bprop->name);
+        if(!(prop = find_prop_name_raw(obj, hash, bprop->name, FALSE)) || prop->type == PROP_BUILTIN)
             continue;
-        prop->flags |= PROPF_CONFIGURABLE;
-        delete_prop(obj, prop, &b);
-        prop->flags = PROPF_WRITABLE | PROPF_CONFIGURABLE;
-        prop->type = PROP_BUILTIN;
-        prop->u.p = bprop;
+        if(bprop->flags & PROPF_METHOD) {
+            /* Make sure the builtin method is created as a function so it gets copied later */
+            hres = find_prop_name(js_global, hash, bprop->name, FALSE, &prop);
+            if(FAILED(hres))
+                return hres;
+        }else {
+            prop->flags |= PROPF_CONFIGURABLE;
+            delete_prop(obj, prop, &b);
+            prop->flags = (bprop->flags & PROPF_ALL) | (bprop->setter ? PROPF_WRITABLE : 0);
+            prop->type = PROP_BUILTIN;
+            prop->u.p = bprop;
+        }
     }
 
     /* Copy the rest of the props */
@@ -2248,9 +2463,9 @@ static HRESULT set_js_globals(jsdisp_t *obj)
             continue;
 
         /* Alloc it ourselves so we don't look into proxy props when defining it */
-        if(!(dst = find_prop_name_raw(obj, prop->hash, prop->name))) {
+        if(!(dst = find_prop_name_raw(obj, prop->hash, prop->name, FALSE))) {
             if(!(dst = alloc_prop(obj, prop->name, PROP_DELETED, 0)))
-               return E_OUTOFMEMORY;
+                return E_OUTOFMEMORY;
         }else {
             dst->flags |= PROPF_CONFIGURABLE;
             delete_prop(obj, dst, &b);
@@ -2295,7 +2510,7 @@ static HRESULT get_proxy_default_prototype(script_ctx_t *ctx, IWineDispatchProxy
 
 static HRESULT get_proxy_default_constructor(script_ctx_t *ctx, jsdisp_t *prot, jsdisp_t **ctor)
 {
-    IDispatch *disp = prot->proxy->lpVtbl->GetDefaultConstructor(prot->proxy, ctx->proxy_prototypes);
+    IDispatch *disp = prot->proxy->lpVtbl->GetDefaultConstructor(prot->proxy, ctx->global->proxy, ctx->proxy_prototypes);
     HRESULT hres;
     jsval_t tmp;
 
@@ -2337,45 +2552,49 @@ static inline jsdisp_t *impl_from_IWineDispatchProxyCbPrivate(IWineDispatchProxy
     return impl_from_IDispatchEx((IDispatchEx*)iface);
 }
 
-static void WINAPI WineDispatchProxyCbPrivate_Unlinked(IWineDispatchProxyCbPrivate *iface)
+static HRESULT WINAPI WineDispatchProxyCbPrivate_InitProxy(IWineDispatchProxyCbPrivate *iface, IDispatch *obj)
 {
     jsdisp_t *This = impl_from_IWineDispatchProxyCbPrivate(iface);
+    script_ctx_t *ctx = This->ctx;
+    jsval_t val = jsval_disp(obj);
+    HRESULT hres;
 
-    if(This->ref)
-        iface->lpVtbl->Relinked(iface, NULL);
-    else {
-        This->proxy = NULL;
-        jsdisp_free(This);
-    }
+    if(!ctx->global)
+        return E_UNEXPECTED;  /* Let caller know it has to initialize the host */
+
+    IDispatch_AddRef(obj);
+    hres = convert_to_proxy(ctx, &val);
+    if(SUCCEEDED(hres))
+        jsval_release(val);
+    return hres;
 }
 
-static void WINAPI WineDispatchProxyCbPrivate_Relinked(IWineDispatchProxyCbPrivate *iface, IWineDispatchProxyPrivate *proxy)
+static void WINAPI WineDispatchProxyCbPrivate_Unlinked(IWineDispatchProxyCbPrivate *iface, BOOL persist)
 {
     jsdisp_t *This = impl_from_IWineDispatchProxyCbPrivate(iface);
 
-    /* We hold a ref to the proxy only when we're not dangling */
-    if(This->ref && This->proxy)
-        IDispatchEx_Release((IDispatchEx*)This->proxy);
+    if(!persist) {
+        IWineDispatchProxyPrivate *proxy = This->proxy;
 
-    This->proxy = proxy;
-    if(!proxy)
-        unlink_props(This);
-    else {
-        if(This->ref)
-            IDispatchEx_AddRef((IDispatchEx*)proxy);
-        /* Defer repopulating the proxy props to HostUpdated since we can't query the props
-           while the mode is not known yet, which could cause premature document mode lock. */
+        This->proxy = NULL;
+        if(!This->ref) {
+            jsdisp_free(This);
+            return;
+        }
+
+        /* We hold a ref only when we're not dangling */
+        IDispatchEx_Release((IDispatchEx*)proxy);
     }
+    unlink_props(This);
 }
 
 static HRESULT WINAPI WineDispatchProxyCbPrivate_HostUpdated(IWineDispatchProxyCbPrivate *iface, IActiveScript *script)
 {
     jsdisp_t *This = impl_from_IWineDispatchProxyCbPrivate(iface);
-    script_ctx_t *ctx = script ? get_script_ctx(script) : This->ctx;
+    script_ctx_t *ctx = get_script_ctx(script);
     dispex_prop_t *prop, *end;
     jsdisp_t *prot;
     HRESULT hres;
-    DISPID id;
     BOOL b;
 
     if(!ctx || !ctx->global)
@@ -2385,7 +2604,7 @@ static HRESULT WINAPI WineDispatchProxyCbPrivate_HostUpdated(IWineDispatchProxyC
         if(ctx->version < SCRIPTLANGUAGEVERSION_ES5) {
             /* Incompatible compat mode, so unlink the proxy */
             *This->proxy->lpVtbl->GetProxyFieldRef(This->proxy) = NULL;
-            iface->lpVtbl->Unlinked(iface);
+            iface->lpVtbl->Unlinked(iface, FALSE);
             return S_OK;
         }
 
@@ -2408,53 +2627,42 @@ static HRESULT WINAPI WineDispatchProxyCbPrivate_HostUpdated(IWineDispatchProxyC
             return hres;
     }
 
+    /* It's safe to repopulate the builtin proxy props now, since the mode is already locked */
     for(prop = This->props, end = prop + This->prop_cnt; prop < end; prop++) {
+        struct proxy_prop_info info;
+
         if(prop->type == PROP_PROXY)
             prop->type = PROP_DELETED;
         else {
             prop->flags |= PROPF_CONFIGURABLE;
             delete_prop(This, prop, &b);
         }
-        hres = This->proxy->lpVtbl->PropGetID(This->proxy, prop->name, &id);
-        if(SUCCEEDED(hres))
-            alloc_proxy_prop(This, prop, prop->name, id);
+
+        hres = This->proxy->lpVtbl->PropGetInfo(This->proxy, prop->name, FALSE, &info);
+        if(hres == S_OK)
+            alloc_proxy_prop(This, &info, &prop);
     }
 
     return maybe_init_global_proxy(This);
 }
 
-static DISPID WINAPI WineDispatchProxyCbPrivate_GetUnderlyingDispID(IWineDispatchProxyCbPrivate *iface, DISPID id)
-{
-    jsdisp_t *prop_obj = impl_from_IWineDispatchProxyCbPrivate(iface);
-    dispex_prop_t *prop = get_prop(prop_obj, id);
-
-    if(prop) {
-        while(prop->type == PROP_PROTREF) {
-            prop_obj = prop_obj->prototype;
-            prop = prop_obj->props + prop->u.ref;
-        }
-        if(prop->type == PROP_PROXY)
-            return prop->u.proxy.id;
-    }
-    return DISPID_UNKNOWN;
-}
-
 static IDispatch* WINAPI WineDispatchProxyCbPrivate_CreateConstructor(IWineDispatchProxyCbPrivate *iface,
-        DISPID id, const WCHAR *name)
+        IDispatch *disp, const WCHAR *name)
 {
     jsdisp_t *This = impl_from_IWineDispatchProxyCbPrivate(iface);
     jsdisp_t *ctor;
     HRESULT hres;
 
-    hres = create_proxy_constructor(id, name, This, &ctor);
+    hres = create_proxy_constructor(disp, name, This, &ctor);
     return SUCCEEDED(hres) ? (IDispatch*)&ctor->IDispatchEx_iface : NULL;
 }
 
 static HRESULT WINAPI WineDispatchProxyCbPrivate_DefineConstructor(IWineDispatchProxyCbPrivate *iface,
-        const WCHAR *name, IDispatch *prot_disp, DISPID id)
+        const WCHAR *name, IDispatch *prot_disp, IDispatch *ctor_disp)
 {
     jsdisp_t *This = impl_from_IWineDispatchProxyCbPrivate(iface);
     jsval_t val = jsval_disp(prot_disp);
+    unsigned hash = string_hash(name);
     jsdisp_t *prot, *ctor;
     dispex_prop_t *prop;
     HRESULT hres;
@@ -2465,32 +2673,30 @@ static HRESULT WINAPI WineDispatchProxyCbPrivate_DefineConstructor(IWineDispatch
         return hres;
     prot = as_jsdisp(get_object(val));
 
-    if(id == DISPID_UNKNOWN) {
+    if(ctor_disp)
+        hres = create_proxy_constructor(ctor_disp, name, prot, &ctor);
+    else {
         /* The prototype's proxy should have already set up the constructor, so it can't fail */
-        val = jsval_disp(prot->proxy->lpVtbl->GetDefaultConstructor(prot->proxy, This->ctx->proxy_prototypes));
+        val = jsval_disp(prot->proxy->lpVtbl->GetDefaultConstructor(prot->proxy, This->proxy, This->ctx->proxy_prototypes));
         convert_to_proxy(This->ctx, &val);
         ctor = as_jsdisp(get_object(val));
-    }else {
-        hres = create_proxy_constructor(id, name, prot, &ctor);
     }
     jsdisp_release(prot);
     if(FAILED(hres))
         return hres;
 
-    /* Remove the builtin proxy prop from the prototype, since it's part of the object itself */
-    if(find_prop_name(This->prototype, string_hash(name), name, &prop) == S_OK && prop && prop->type == PROP_PROXY)
-        delete_prop(This->prototype, prop, &b);
+    /* Remove the builtin proxy prop from the prototype (first time only), since it's part of the object itself */
+    if(!find_prop_name_raw(This->prototype, hash, name, FALSE) && !alloc_prop(This->prototype, name, PROP_DELETED, 0)) {
+        hres = E_OUTOFMEMORY;
+        goto end;
+    }
 
     /* Define the constructor forcefully, so make sure to not look into the underlying proxy dispids,
        otherwise it might pick up elements by this id. And if any found, force it to be configurable. */
-    prop = find_prop_name_raw(This, string_hash(name), name);
+    prop = find_prop_name_raw(This, hash, name, FALSE);
     if(prop) {
-        if(prop->type == PROP_PROXY)
-            prop->type = PROP_DELETED;
-        else {
-            prop->flags |= PROPF_CONFIGURABLE;
-            delete_prop(This, prop, &b);
-        }
+        prop->flags |= PROPF_CONFIGURABLE;
+        delete_prop(This, prop, &b);
     }else if(!(prop = alloc_prop(This, name, PROP_DELETED, 0))) {
         hres = E_OUTOFMEMORY;
         goto end;
@@ -2507,37 +2713,24 @@ end:
     return hres;
 }
 
-static void WINAPI WineDispatchProxyCbPrivate_Traverse(IWineDispatchProxyCbPrivate *iface,
-        void (STDMETHODCALLTYPE *note_cc_edge)(IDispatch*,void*), void *cb)
+static HRESULT WINAPI WineDispatchProxyCbPrivate_CreateObject(IWineDispatchProxyCbPrivate *iface, IDispatchEx **obj)
 {
     jsdisp_t *This = impl_from_IWineDispatchProxyCbPrivate(iface);
-    dispex_prop_t *prop, *end = This->props + This->prop_cnt;
+    jsdisp_t *jsdisp;
+    HRESULT hres;
 
-    for(prop = This->props; prop < end; prop++) {
-        switch(prop->type) {
-        case PROP_JSVAL:
-            switch(jsval_type(prop->u.val)) {
-            case JSV_OBJECT:
-                note_cc_edge(get_object(prop->u.val), cb);
-                break;
-            case JSV_VARIANT:
-                if(V_VT(get_variant(prop->u.val)) == VT_DISPATCH)
-                    note_cc_edge(V_DISPATCH(get_variant(prop->u.val)), cb);
-                break;
-            default:
-                break;
-            }
-            break;
-        case PROP_ACCESSOR:
-            if(prop->u.accessor.getter)
-                note_cc_edge(to_disp(prop->u.accessor.getter), cb);
-            if(prop->u.accessor.setter)
-                note_cc_edge(to_disp(prop->u.accessor.setter), cb);
-            break;
-        default:
-            break;
-        }
-    }
+    hres = create_object(This->ctx, NULL, &jsdisp);
+    if(SUCCEEDED(hres))
+        *obj = &jsdisp->IDispatchEx_iface;
+    return hres;
+}
+
+static HRESULT WINAPI WineDispatchProxyCbPrivate_PropEnum(IWineDispatchProxyCbPrivate *iface, const WCHAR *name)
+{
+    jsdisp_t *This = impl_from_IWineDispatchProxyCbPrivate(iface);
+    dispex_prop_t *prop;
+
+    return find_prop_name(This, string_hash(name), name, FALSE, &prop);
 }
 
 static IWineDispatchProxyCbPrivateVtbl WineDispatchProxyCbPrivateVtbl = {
@@ -2560,14 +2753,15 @@ static IWineDispatchProxyCbPrivateVtbl WineDispatchProxyCbPrivateVtbl = {
     },
 
     /* IWineDispatchProxyCbPrivate extension */
+    WineDispatchProxyCbPrivate_InitProxy,
     WineDispatchProxyCbPrivate_Unlinked,
-    WineDispatchProxyCbPrivate_Relinked,
     WineDispatchProxyCbPrivate_HostUpdated,
-    WineDispatchProxyCbPrivate_GetUnderlyingDispID,
     WineDispatchProxyCbPrivate_CreateConstructor,
     WineDispatchProxyCbPrivate_DefineConstructor,
+    WineDispatchProxyCbPrivate_CreateObject,
+    WineDispatchProxyCbPrivate_CreateArrayBuffer,
     WineDispatchProxyCbPrivate_GetRandomValues,
-    WineDispatchProxyCbPrivate_Traverse
+    WineDispatchProxyCbPrivate_PropEnum
 };
 
 jsdisp_t *as_jsdisp(IDispatch *disp)
@@ -2597,7 +2791,7 @@ HRESULT init_dispex(jsdisp_t *dispex, script_ctx_t *ctx, const builtin_info_t *b
     dispex->extensible = TRUE;
     dispex->prop_cnt = 0;
 
-    dispex->props = heap_alloc_zero(sizeof(dispex_prop_t)*(dispex->buf_size=4));
+    dispex->props = calloc(1, sizeof(dispex_prop_t)*(dispex->buf_size=4));
     if(!dispex->props)
         return E_OUTOFMEMORY;
 
@@ -2630,13 +2824,14 @@ HRESULT create_dispex(script_ctx_t *ctx, const builtin_info_t *builtin_info, jsd
     jsdisp_t *ret;
     HRESULT hres;
 
-    ret = heap_alloc_zero(sizeof(jsdisp_t));
+    *dispex = NULL;
+    ret = calloc(1, sizeof(jsdisp_t));
     if(!ret)
         return E_OUTOFMEMORY;
 
     hres = init_dispex(ret, ctx, builtin_info ? builtin_info : &dispex_info, prototype);
     if(FAILED(hres)) {
-        heap_free(ret);
+        free(ret);
         return hres;
     }
 
@@ -2674,11 +2869,12 @@ HRESULT convert_to_proxy(script_ctx_t *ctx, jsval_t *val)
     if(*proxy_ref) {
         /* Re-acquire the proxy if it's an old dangling proxy */
         jsdisp = impl_from_IWineDispatchProxyCbPrivate(*proxy_ref);
+        assert(jsdisp->proxy == proxy);
+
         if(!jsdisp->ref++)
-            list_add_tail(&ctx->objects, &jsdisp->entry);
-        else if(jsdisp->proxy)
-            IDispatchEx_Release((IDispatchEx*)jsdisp->proxy);
-        jsdisp->proxy = proxy;
+            list_add_tail(&jsdisp->ctx->objects, &jsdisp->entry);
+        else
+            IDispatchEx_Release((IDispatchEx*)proxy);  /* already held by jsdisp */
 
         TRACE("re-acquired %p\n", jsdisp);
         *val = jsval_obj(jsdisp);
@@ -2686,18 +2882,19 @@ HRESULT convert_to_proxy(script_ctx_t *ctx, jsval_t *val)
     }
 
     if(!ctx->global) {
-        FIXME("Script is not initialized?\n");
-        IDispatchEx_Release((IDispatchEx*)proxy);
-        return E_UNEXPECTED;
+        FIXME("Script is uninitialized?\n");
+        hres = E_UNEXPECTED;
+        goto fail;
     }
 
     hres = get_proxy_default_prototype(ctx, proxy, &prot);
     if(FAILED(hres))
         goto fail;
+    if(!prot)
+        return hres;  /* not a JS object */
 
     hres = create_dispex(ctx, &proxy_dispex_info, prot, &jsdisp);
-    if(prot)
-        jsdisp_release(prot);
+    jsdisp_release(prot);
     if(FAILED(hres))
         goto fail;
 
@@ -2759,9 +2956,9 @@ void jsdisp_free(jsdisp_t *obj)
         default:
             break;
         };
-        heap_free(prop->name);
+        free(prop->name);
     }
-    heap_free(obj->props);
+    free(obj->props);
     script_release(obj->ctx);
     if(obj->prototype)
         jsdisp_release(obj->prototype);
@@ -2769,7 +2966,7 @@ void jsdisp_free(jsdisp_t *obj)
     if(obj->builtin_info->destructor)
         obj->builtin_info->destructor(obj);
     else
-        heap_free(obj);
+        free(obj);
 }
 
 void jsdisp_reacquire(jsdisp_t *jsdisp)
@@ -2784,7 +2981,7 @@ void jsdisp_reacquire(jsdisp_t *jsdisp)
 jsdisp_t *jsdisp_addref(jsdisp_t *jsdisp)
 {
     ULONG ref = ++jsdisp->ref;
-    TRACE("(%p) ref=%d\n", jsdisp, ref);
+    TRACE("(%p) ref=%ld\n", jsdisp, ref);
     if(ref == 1)
         jsdisp_reacquire(jsdisp);
     return jsdisp;
@@ -2794,7 +2991,7 @@ void jsdisp_release(jsdisp_t *jsdisp)
 {
     ULONG ref = --jsdisp->ref;
 
-    TRACE("(%p) ref=%d\n", jsdisp, ref);
+    TRACE("(%p) ref=%ld\n", jsdisp, ref);
 
     if(!ref)
         jsdisp_free(jsdisp);
@@ -2808,11 +3005,11 @@ HRESULT init_dispex_from_constr(jsdisp_t *dispex, script_ctx_t *ctx, const built
     dispex_prop_t *prop;
     HRESULT hres;
 
-    hres = find_prop_name_prot(constr, string_hash(L"prototype"), L"prototype", &prop);
+    hres = find_prop_name_prot(constr, string_hash(L"prototype"), L"prototype", FALSE, &prop);
     if(SUCCEEDED(hres) && prop && prop->type!=PROP_DELETED) {
         jsval_t val;
 
-        hres = prop_get(constr, prop, &val);
+        hres = prop_get(constr, prop, &val, &ctx->jscaller->IServiceProvider_iface);
         if(FAILED(hres)) {
             ERR("Could not get prototype\n");
             return hres;
@@ -2851,13 +3048,13 @@ HRESULT jsdisp_get_id(jsdisp_t *jsdisp, const WCHAR *name, DWORD flags, DISPID *
             *id = DISPID_UNKNOWN;
             return DISP_E_UNKNOWNNAME;
         }
-        hres = find_prop_name(jsdisp, string_hash(name), name, &prop);
+        hres = find_prop_name(jsdisp, string_hash(name), name, FALSE, &prop);
     }
     else if(jsdisp->extensible && (flags & fdexNameEnsure))
         hres = ensure_prop_name(jsdisp, name, PROPF_ENUMERABLE | PROPF_CONFIGURABLE | PROPF_WRITABLE,
-                                &prop);
+                                flags & fdexNameCaseInsensitive, &prop);
     else
-        hres = find_prop_name_prot(jsdisp, string_hash(name), name, &prop);
+        hres = find_prop_name_prot(jsdisp, string_hash(name), name, flags & fdexNameCaseInsensitive, &prop);
     if(FAILED(hres))
         return hres;
 
@@ -2871,26 +3068,28 @@ HRESULT jsdisp_get_id(jsdisp_t *jsdisp, const WCHAR *name, DWORD flags, DISPID *
     return DISP_E_UNKNOWNNAME;
 }
 
-HRESULT jsdisp_call_value(jsdisp_t *jsfunc, IDispatch *jsthis, WORD flags, unsigned argc, jsval_t *argv, jsval_t *r)
+HRESULT jsdisp_call_value(jsdisp_t *jsfunc, jsval_t vthis, WORD flags, unsigned argc, jsval_t *argv,
+        jsval_t *r, IServiceProvider *caller)
 {
     HRESULT hres;
 
     assert(!(flags & ~(DISPATCH_METHOD|DISPATCH_CONSTRUCT|DISPATCH_JSCRIPT_INTERNAL_MASK)));
 
     if(is_class(jsfunc, JSCLASS_FUNCTION)) {
-        hres = Function_invoke(jsfunc, jsthis, flags, argc, argv, r);
+        hres = Function_invoke(jsfunc, vthis, flags, argc, argv, r, caller);
     }else if(jsfunc->proxy) {
-        /* We have to distinguish default value of prototypes from a builtin with DISPID_VALUE */
-        DISPID id = jsfunc->proxy->lpVtbl->IsPrototype(jsfunc->proxy) ? DISPID_UNKNOWN : DISPID_VALUE;
-        hres = proxy_disp_call(jsfunc, jsthis, id, flags, argc, argv, r);
+        hres = proxy_disp_call(jsfunc, vthis, DISPID_VALUE, flags, argc, argv, r, caller);
     }else {
         if(!jsfunc->builtin_info->call) {
             WARN("Not a function\n");
             return JS_E_FUNCTION_EXPECTED;
         }
 
+        if(jsfunc->ctx->state == SCRIPTSTATE_UNINITIALIZED || jsfunc->ctx->state == SCRIPTSTATE_CLOSED)
+            return E_UNEXPECTED;
+
         flags &= ~DISPATCH_JSCRIPT_INTERNAL_MASK;
-        hres = jsfunc->builtin_info->call(jsfunc->ctx, jsthis ? jsval_disp(jsthis) : jsval_null(), flags, argc, argv, r);
+        hres = jsfunc->builtin_info->call(jsfunc->ctx, vthis, flags, argc, argv, r);
     }
     if(SUCCEEDED(hres))
         hres = convert_to_proxy(jsfunc->ctx, r);
@@ -2905,7 +3104,7 @@ HRESULT jsdisp_call(jsdisp_t *disp, DISPID id, WORD flags, unsigned argc, jsval_
     if(!prop)
         return DISP_E_MEMBERNOTFOUND;
 
-    return invoke_prop_func(disp, to_disp(disp), prop, flags, argc, argv, r, NULL);
+    return invoke_prop_func(disp, to_disp(disp), prop, flags, argc, argv, r, &disp->ctx->jscaller->IServiceProvider_iface);
 }
 
 HRESULT jsdisp_call_name(jsdisp_t *disp, const WCHAR *name, WORD flags, unsigned argc, jsval_t *argv, jsval_t *r)
@@ -2913,17 +3112,19 @@ HRESULT jsdisp_call_name(jsdisp_t *disp, const WCHAR *name, WORD flags, unsigned
     dispex_prop_t *prop;
     HRESULT hres;
 
-    hres = find_prop_name_prot(disp, string_hash(name), name, &prop);
+    hres = find_prop_name_prot(disp, string_hash(name), name, FALSE, &prop);
     if(FAILED(hres))
         return hres;
 
     if(!prop || prop->type == PROP_DELETED)
         return JS_E_INVALID_PROPERTY;
 
-    return invoke_prop_func(disp, to_disp(disp), prop, flags, argc, argv, r, NULL);
+    hres = invoke_prop_func(disp, to_disp(disp), prop, flags, argc, argv, r, &disp->ctx->jscaller->IServiceProvider_iface);
+    return (hres == DISP_E_MEMBERNOTFOUND) ? JS_E_INVALID_PROPERTY : hres;
 }
 
-static HRESULT disp_invoke(script_ctx_t *ctx, IDispatch *disp, DISPID id, WORD flags, DISPPARAMS *params, VARIANT *r)
+static HRESULT disp_invoke(script_ctx_t *ctx, IDispatch *disp, DISPID id, WORD flags, DISPPARAMS *params, VARIANT *r,
+        IServiceProvider *caller)
 {
     IDispatchEx *dispex;
     EXCEPINFO ei;
@@ -2932,7 +3133,7 @@ static HRESULT disp_invoke(script_ctx_t *ctx, IDispatch *disp, DISPID id, WORD f
     memset(&ei, 0, sizeof(ei));
     hres = IDispatch_QueryInterface(disp, &IID_IDispatchEx, (void**)&dispex);
     if(SUCCEEDED(hres)) {
-        hres = IDispatchEx_InvokeEx(dispex, id, ctx->lcid, flags, params, r, &ei, &ctx->jscaller->IServiceProvider_iface);
+        hres = IDispatchEx_InvokeEx(dispex, id, ctx->lcid, flags, params, r, &ei, caller);
         IDispatchEx_Release(dispex);
     }else {
         UINT err = 0;
@@ -3017,7 +3218,7 @@ HRESULT disp_call(script_ctx_t *ctx, IDispatch *disp, DISPID id, WORD flags, uns
     }
 
     if(dp.cArgs > ARRAY_SIZE(buf)) {
-        dp.rgvarg = heap_alloc(argc*sizeof(VARIANT));
+        dp.rgvarg = malloc(argc * sizeof(VARIANT));
         if(!dp.rgvarg)
             return E_OUTOFMEMORY;
     }else {
@@ -3030,18 +3231,18 @@ HRESULT disp_call(script_ctx_t *ctx, IDispatch *disp, DISPID id, WORD flags, uns
             while(i--)
                 VariantClear(dp.rgvarg+argc-i-1);
             if(dp.rgvarg != buf)
-                heap_free(dp.rgvarg);
+                free(dp.rgvarg);
             return hres;
         }
     }
 
     V_VT(&retv) = VT_EMPTY;
-    hres = disp_invoke(ctx, disp, id, flags, &dp, ret ? &retv : NULL);
+    hres = disp_invoke(ctx, disp, id, flags, &dp, ret ? &retv : NULL, &ctx->jscaller->IServiceProvider_iface);
 
     for(i=0; i<argc; i++)
         VariantClear(dp.rgvarg+argc-i-1);
     if(dp.rgvarg != buf)
-        heap_free(dp.rgvarg);
+        free(dp.rgvarg);
 
     if(SUCCEEDED(hres) && ret)
         hres = variant_to_jsval(ctx, &retv, ret);
@@ -3076,10 +3277,11 @@ HRESULT disp_call_name(script_ctx_t *ctx, IDispatch *disp, const WCHAR *name, WO
     return disp_call(ctx, disp, id, flags, argc, argv, ret);
 }
 
-HRESULT disp_call_value(script_ctx_t *ctx, IDispatch *disp, IDispatch *jsthis, WORD flags, unsigned argc, jsval_t *argv,
-        jsval_t *r)
+HRESULT disp_call_value(script_ctx_t *ctx, IDispatch *disp, jsval_t vthis, WORD flags, unsigned argc, jsval_t *argv,
+        jsval_t *r, IServiceProvider *caller)
 {
     VARIANT buf[6], retv, *args = buf;
+    IDispatch *jsthis;
     jsdisp_t *jsdisp;
     DISPPARAMS dp;
     unsigned i;
@@ -3091,12 +3293,18 @@ HRESULT disp_call_value(script_ctx_t *ctx, IDispatch *disp, IDispatch *jsthis, W
 
     jsdisp = iface_to_jsdisp(disp);
     if(jsdisp && jsdisp->ctx == ctx) {
-        hres = jsdisp_call_value(jsdisp, jsthis, flags, argc, argv, r);
+        hres = jsdisp_call_value(jsdisp, vthis, flags, argc, argv, r, caller);
         jsdisp_release(jsdisp);
         return hres;
     }
     if(jsdisp)
         jsdisp_release(jsdisp);
+
+    if(is_object_instance(vthis) && (ctx->version < SCRIPTLANGUAGEVERSION_ES5 ||
+       ((jsdisp = to_jsdisp(get_object(vthis))) && is_class(jsdisp, JSCLASS_OBJECT) && !jsdisp->proxy)))
+        jsthis = get_object(vthis);
+    else
+        jsthis = NULL;
 
     flags &= ~DISPATCH_JSCRIPT_INTERNAL_MASK;
     if(r && argc && flags == DISPATCH_METHOD)
@@ -3112,7 +3320,7 @@ HRESULT disp_call_value(script_ctx_t *ctx, IDispatch *disp, IDispatch *jsthis, W
         dp.rgdispidNamedArgs = NULL;
     }
 
-    if(dp.cArgs > ARRAY_SIZE(buf) && !(args = heap_alloc(dp.cArgs * sizeof(VARIANT))))
+    if(dp.cArgs > ARRAY_SIZE(buf) && !(args = malloc(dp.cArgs * sizeof(VARIANT))))
         return E_OUTOFMEMORY;
     dp.rgvarg = args;
 
@@ -3126,13 +3334,13 @@ HRESULT disp_call_value(script_ctx_t *ctx, IDispatch *disp, IDispatch *jsthis, W
 
     if(SUCCEEDED(hres)) {
         V_VT(&retv) = VT_EMPTY;
-        hres = disp_invoke(ctx, disp, DISPID_VALUE, flags, &dp, r ? &retv : NULL);
+        hres = disp_invoke(ctx, disp, DISPID_VALUE, flags, &dp, r ? &retv : NULL, caller);
     }
 
     for(i = 0; i < argc; i++)
         VariantClear(dp.rgvarg + dp.cArgs - i - 1);
     if(args != buf)
-        heap_free(args);
+        free(args);
 
     if(FAILED(hres))
         return hres;
@@ -3154,15 +3362,15 @@ HRESULT jsdisp_propput(jsdisp_t *obj, const WCHAR *name, DWORD flags, BOOL throw
         return obj->builtin_info->idx_put(obj, idx, val);
 
     if(obj->extensible)
-        hres = ensure_prop_name(obj, name, flags, &prop);
+        hres = ensure_prop_name(obj, name, flags, FALSE, &prop);
     else
-        hres = find_prop_name(obj, string_hash(name), name, &prop);
+        hres = find_prop_name(obj, string_hash(name), name, FALSE, &prop);
     if(FAILED(hres))
         return hres;
     if(!prop || (prop->type == PROP_DELETED && !obj->extensible))
         return throw ? JS_E_INVALID_ACTION : S_OK;
 
-    return prop_put(obj, prop, val);
+    return prop_put(obj, prop, val, &obj->ctx->jscaller->IServiceProvider_iface);
 }
 
 HRESULT jsdisp_propput_name(jsdisp_t *obj, const WCHAR *name, jsval_t val)
@@ -3189,7 +3397,7 @@ HRESULT disp_propput(script_ctx_t *ctx, IDispatch *disp, DISPID id, jsval_t val)
 
         prop = get_prop(jsdisp, id);
         if(prop)
-            hres = prop_put(jsdisp, prop, val);
+            hres = prop_put(jsdisp, prop, val, &ctx->jscaller->IServiceProvider_iface);
         else
             hres = DISP_E_MEMBERNOTFOUND;
 
@@ -3209,7 +3417,7 @@ HRESULT disp_propput(script_ctx_t *ctx, IDispatch *disp, DISPID id, jsval_t val)
         if(V_VT(&var) == VT_DISPATCH)
             flags |= DISPATCH_PROPERTYPUTREF;
 
-        hres = disp_invoke(ctx, disp, id, flags, &dp, NULL);
+        hres = disp_invoke(ctx, disp, id, flags, &dp, NULL, &ctx->jscaller->IServiceProvider_iface);
         VariantClear(&var);
     }
 
@@ -3261,7 +3469,7 @@ HRESULT jsdisp_propget_name(jsdisp_t *obj, const WCHAR *name, jsval_t *val)
     if(override_idx(obj, name, &idx))
         return obj->builtin_info->idx_get(obj, idx, val);
 
-    hres = find_prop_name_prot(obj, string_hash(name), name, &prop);
+    hres = find_prop_name_prot(obj, string_hash(name), name, FALSE, &prop);
     if(FAILED(hres))
         return hres;
 
@@ -3270,7 +3478,12 @@ HRESULT jsdisp_propget_name(jsdisp_t *obj, const WCHAR *name, jsval_t *val)
         return S_OK;
     }
 
-    return prop_get(obj, prop, val);
+    hres = prop_get(obj, prop, val, &obj->ctx->jscaller->IServiceProvider_iface);
+    if(hres == DISP_E_MEMBERNOTFOUND) {
+        *val = jsval_undefined();
+        return S_OK;
+    }
+    return hres;
 }
 
 HRESULT jsdisp_get_idx(jsdisp_t *obj, DWORD idx, jsval_t *r)
@@ -3284,7 +3497,7 @@ HRESULT jsdisp_get_idx(jsdisp_t *obj, DWORD idx, jsval_t *r)
 
     swprintf(name, ARRAY_SIZE(name), L"%d", idx);
 
-    hres = find_prop_name_prot(obj, string_hash(name), name, &prop);
+    hres = find_prop_name_prot(obj, string_hash(name), name, FALSE, &prop);
     if(FAILED(hres))
         return hres;
 
@@ -3293,7 +3506,12 @@ HRESULT jsdisp_get_idx(jsdisp_t *obj, DWORD idx, jsval_t *r)
         return DISP_E_UNKNOWNNAME;
     }
 
-    return prop_get(obj, prop, r);
+    hres = prop_get(obj, prop, r, &obj->ctx->jscaller->IServiceProvider_iface);
+    if(hres == DISP_E_MEMBERNOTFOUND) {
+        *r = jsval_undefined();
+        return DISP_E_UNKNOWNNAME;
+    }
+    return hres;
 }
 
 HRESULT jsdisp_propget(jsdisp_t *jsdisp, DISPID id, jsval_t *val)
@@ -3304,7 +3522,7 @@ HRESULT jsdisp_propget(jsdisp_t *jsdisp, DISPID id, jsval_t *val)
     if(!prop)
         return DISP_E_MEMBERNOTFOUND;
 
-    return prop_get(jsdisp, prop, val);
+    return prop_get(jsdisp, prop, val, &jsdisp->ctx->jscaller->IServiceProvider_iface);
 }
 
 HRESULT disp_propget(script_ctx_t *ctx, IDispatch *disp, DISPID id, jsval_t *val)
@@ -3324,7 +3542,7 @@ HRESULT disp_propget(script_ctx_t *ctx, IDispatch *disp, DISPID id, jsval_t *val
         jsdisp_release(jsdisp);
 
     V_VT(&var) = VT_EMPTY;
-    hres = disp_invoke(ctx, disp, id, INVOKE_PROPERTYGET, &dp, &var);
+    hres = disp_invoke(ctx, disp, id, INVOKE_PROPERTYGET, &dp, &var, &ctx->jscaller->IServiceProvider_iface);
     if(SUCCEEDED(hres)) {
         hres = variant_to_jsval(ctx, &var, val);
         VariantClear(&var);
@@ -3344,7 +3562,7 @@ HRESULT jsdisp_delete_idx(jsdisp_t *obj, DWORD idx)
 
     swprintf(buf, ARRAY_SIZE(buf), L"%d", idx);
 
-    hres = find_prop_name(obj, string_hash(buf), buf, &prop);
+    hres = find_prop_name(obj, string_hash(buf), buf, FALSE, &prop);
     if(FAILED(hres) || !prop)
         return hres;
 
@@ -3395,31 +3613,20 @@ HRESULT jsdisp_next_prop(jsdisp_t *obj, DISPID id, enum jsdisp_enum_type enum_ty
     DWORD idx = id;
     HRESULT hres;
 
-    if(id == DISPID_STARTENUM) {
-        if(obj->builtin_info->idx_length) {
-            unsigned i = 0, len = obj->builtin_info->idx_length(obj);
-            WCHAR name[12];
-
-            for(i = 0; i < len; i++) {
-                swprintf(name, ARRAY_SIZE(name), L"%d", i);
-                hres = find_prop_name(obj, string_hash(name), name, &iter);
-                if(FAILED(hres))
-                    return hres;
-            }
-        }
-
-        if (enum_type == JSDISP_ENUM_ALL) {
-            hres = fill_protrefs(obj);
-            if(FAILED(hres))
-                return hres;
-        }
-        idx = 0;
+    if(id == DISPID_STARTENUM || idx >= obj->prop_cnt) {
+        hres = (enum_type == JSDISP_ENUM_ALL) ? fill_protrefs(obj) : fill_props(obj);
+        if(FAILED(hres))
+            return hres;
+        if(id == DISPID_STARTENUM)
+            idx = 0;
+        if(idx >= obj->prop_cnt)
+            return S_FALSE;
     }
 
-    if(idx >= obj->prop_cnt)
-        return S_FALSE;
-
     for(iter = &obj->props[idx]; iter < obj->props + obj->prop_cnt; iter++) {
+        hres = fix_overridden_prop(obj, iter);
+        if(FAILED(hres))
+            return hres;
         if(iter->type == PROP_DELETED)
             continue;
         if(enum_type != JSDISP_ENUM_ALL && iter->type == PROP_PROTREF)
@@ -3429,6 +3636,9 @@ HRESULT jsdisp_next_prop(jsdisp_t *obj, DISPID id, enum jsdisp_enum_type enum_ty
         *ret = prop_to_id(obj, iter);
         return S_OK;
     }
+
+    if(obj->ctx->html_mode)
+        return jsdisp_next_prop(obj, prop_to_id(obj, iter - 1), enum_type, ret);
 
     return S_FALSE;
 }
@@ -3456,7 +3666,7 @@ HRESULT disp_delete_name(script_ctx_t *ctx, IDispatch *disp, jsstr_t *name, BOOL
             *ret = FALSE;
             hres = S_OK;
         }else {
-            hres = find_prop_name(jsdisp, string_hash(ptr), ptr, &prop);
+            hres = find_prop_name(jsdisp, string_hash(ptr), ptr, FALSE, &prop);
             if(prop) {
                 hres = delete_prop(jsdisp, prop, ret);
             }else {
@@ -3521,7 +3731,7 @@ HRESULT jsdisp_get_own_property(jsdisp_t *obj, const WCHAR *name, BOOL flags_onl
         return S_OK;
     }
 
-    hres = find_prop_name(obj, string_hash(name), name, &prop);
+    hres = find_prop_name(obj, string_hash(name), name, FALSE, &prop);
     if(FAILED(hres))
         return hres;
 
@@ -3535,24 +3745,12 @@ HRESULT jsdisp_get_own_property(jsdisp_t *obj, const WCHAR *name, BOOL flags_onl
     case PROP_JSVAL:
     case PROP_IDX:
     case PROP_PROXY:
-        if(is_accessor_prop(prop)) {
-            desc->explicit_getter = desc->explicit_setter = TRUE;
-            if(!flags_only) {
-                hres = create_proxy_accessor(obj, prop->u.proxy.id, desc);
-                if(FAILED(hres))
-                    return hres;
-                prop->type = PROP_ACCESSOR;
-                prop->u.accessor.getter = desc->getter ? jsdisp_addref(desc->getter) : NULL;
-                prop->u.accessor.setter = desc->setter ? jsdisp_addref(desc->setter) : NULL;
-            }
-            break;
-        }
         desc->mask |= PROPF_WRITABLE;
         desc->explicit_value = TRUE;
         if(!flags_only) {
-            hres = prop_get(obj, prop, &desc->value);
+            hres = prop_get(obj, prop, &desc->value, &obj->ctx->jscaller->IServiceProvider_iface);
             if(FAILED(hres))
-                return hres;
+                return (hres == DISP_E_MEMBERNOTFOUND) ? DISP_E_UNKNOWNNAME : hres;
         }
         break;
     case PROP_ACCESSOR:
@@ -3589,7 +3787,7 @@ HRESULT jsdisp_define_property(jsdisp_t *obj, const WCHAR *name, property_desc_t
         return obj->builtin_info->idx_put(obj, idx, jsval_undefined());
     }
 
-    hres = find_prop_name(obj, string_hash(name), name, &prop);
+    hres = find_prop_name(obj, string_hash(name), name, FALSE, &prop);
     if(FAILED(hres))
         return hres;
 
@@ -3598,6 +3796,38 @@ HRESULT jsdisp_define_property(jsdisp_t *obj, const WCHAR *name, property_desc_t
 
     if(!prop && !(prop = alloc_prop(obj, name, PROP_DELETED, 0)))
        return E_OUTOFMEMORY;
+
+    if(obj->proxy && desc->explicit_value) {
+        struct proxy_prop_info info;
+
+        info.name = name;
+        hres = obj->proxy->lpVtbl->PropDefineOverride(obj->proxy, &info);
+        if(hres != S_FALSE) {
+            dispex_prop_t bak = *prop;
+            if(FAILED(hres))
+                return hres;
+            hres = alloc_proxy_prop(obj, &info, &prop);
+            if(SUCCEEDED(hres)) {
+                hres = prop_put(obj, prop, desc->value, &obj->ctx->jscaller->IServiceProvider_iface);
+                if(SUCCEEDED(hres)) {
+                    switch(bak.type) {
+                    case PROP_JSVAL:
+                        jsval_release(bak.u.val);
+                        break;
+                    case PROP_ACCESSOR:
+                        if(bak.u.accessor.getter) jsdisp_release(bak.u.accessor.getter);
+                        if(bak.u.accessor.setter) jsdisp_release(bak.u.accessor.setter);
+                        break;
+                    default:
+                        break;
+                    }
+                    return S_OK;
+                }
+            }
+            *prop = bak;
+            return hres;
+        }
+    }
 
     if(prop->type == PROP_DELETED || prop->type == PROP_PROTREF) {
         prop->flags = desc->flags;
@@ -3632,15 +3862,13 @@ HRESULT jsdisp_define_property(jsdisp_t *obj, const WCHAR *name, property_desc_t
     }
 
     if(desc->explicit_value || (desc->mask & PROPF_WRITABLE)) {
-        if(is_accessor_prop(prop)) {
+        if(prop->type == PROP_ACCESSOR) {
             if(!(prop->flags & PROPF_CONFIGURABLE))
                 return throw_error(obj->ctx, JS_E_NONCONFIGURABLE_REDEFINED, name);
-            if(prop->type == PROP_ACCESSOR) {
-                if(prop->u.accessor.getter)
-                    jsdisp_release(prop->u.accessor.getter);
-                if(prop->u.accessor.setter)
-                    jsdisp_release(prop->u.accessor.setter);
-            }
+            if(prop->u.accessor.getter)
+                jsdisp_release(prop->u.accessor.getter);
+            if(prop->u.accessor.setter)
+                jsdisp_release(prop->u.accessor.setter);
 
             prop->type = PROP_JSVAL;
             hres = jsval_copy(desc->value, &prop->u.val);
@@ -3678,20 +3906,17 @@ HRESULT jsdisp_define_property(jsdisp_t *obj, const WCHAR *name, property_desc_t
             }
         }
     }else if(desc->explicit_getter || desc->explicit_setter) {
-        if(!is_accessor_prop(prop)) {
+        if(prop->type != PROP_ACCESSOR) {
             if(!(prop->flags & PROPF_CONFIGURABLE))
                 return throw_error(obj->ctx, JS_E_NONCONFIGURABLE_REDEFINED, name);
             if(prop->type == PROP_JSVAL)
                 jsval_release(prop->u.val);
-        }else if(!(prop->flags & PROPF_CONFIGURABLE)) {
-            if(prop->type != PROP_ACCESSOR
-               || (desc->explicit_getter && desc->getter != prop->u.accessor.getter)
-               || (desc->explicit_setter && desc->setter != prop->u.accessor.setter))
-                return throw_error(obj->ctx, JS_E_NONCONFIGURABLE_REDEFINED, name);
-        }
-        if(prop->type != PROP_ACCESSOR) {
             prop->type = PROP_ACCESSOR;
             prop->u.accessor.getter = prop->u.accessor.setter = NULL;
+        }else if(!(prop->flags & PROPF_CONFIGURABLE)) {
+            if((desc->explicit_getter && desc->getter != prop->u.accessor.getter)
+               || (desc->explicit_setter && desc->setter != prop->u.accessor.setter))
+                return throw_error(obj->ctx, JS_E_NONCONFIGURABLE_REDEFINED, name);
         }
 
         if(desc->explicit_getter) {
@@ -3771,12 +3996,11 @@ BOOL jsdisp_is_frozen(jsdisp_t *obj, BOOL sealed)
         return FALSE;
 
     for(i = 0; i < obj->prop_cnt; i++) {
-        if(!is_accessor_prop(&obj->props[i])) {
-            if(obj->props[i].type != PROP_JSVAL && obj->props[i].type != PROP_PROXY)
-                continue;
+        if(obj->props[i].type == PROP_JSVAL) {
             if(!sealed && (obj->props[i].flags & PROPF_WRITABLE))
                 return FALSE;
-        }
+        }else if(obj->props[i].type != PROP_ACCESSOR)
+            continue;
         if(obj->props[i].flags & PROPF_CONFIGURABLE)
             return FALSE;
     }

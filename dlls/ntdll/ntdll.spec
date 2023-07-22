@@ -7,6 +7,7 @@
 @ stdcall A_SHAInit(ptr)
 @ stdcall A_SHAUpdate(ptr ptr long)
 @ stdcall ApiSetQueryApiSetPresence(ptr ptr)
+@ stdcall ApiSetQueryApiSetPresenceEx(ptr ptr ptr)
 @ stub CsrAllocateCaptureBuffer
 @ stub CsrAllocateCapturePointer
 @ stub CsrAllocateMessagePointer
@@ -52,7 +53,7 @@
 @ stdcall EtwEventSetInformation(int64 long ptr long)
 @ stdcall EtwEventUnregister(int64)
 @ stdcall EtwEventWrite(int64 ptr long ptr)
-@ stdcall EtwEventWriteString(int64 long int64 ptr)
+@ stdcall EtwEventWriteString(int64 long int64 wstr)
 @ stdcall EtwEventWriteTransfer(int64 ptr ptr ptr long ptr)
 @ stdcall EtwGetTraceEnableFlags(int64)
 @ stdcall EtwGetTraceEnableLevel(int64)
@@ -152,6 +153,7 @@
 # @ stub NtCancelDeviceWakeupRequest
 @ stdcall -syscall NtCancelIoFile(long ptr)
 @ stdcall -syscall NtCancelIoFileEx(long ptr ptr)
+@ stdcall -syscall NtCancelSynchronousIoFile(long ptr ptr)
 @ stdcall -syscall NtCancelTimer(long ptr)
 @ stdcall -syscall NtClearEvent(long)
 @ stdcall -syscall NtClose(long)
@@ -234,6 +236,7 @@
 @ stdcall -syscall NtImpersonateAnonymousToken(long)
 # @ stub NtImpersonateClientOfPort
 # @ stub NtImpersonateThread
+@ stdcall -syscall NtInitializeNlsFiles(ptr ptr ptr)
 # @ stub NtInitializeRegistry
 @ stdcall -syscall NtInitiatePowerAction (long long long long)
 @ stdcall -syscall NtIsProcessInJob(long long)
@@ -242,6 +245,7 @@
 @ stdcall -syscall NtLoadDriver(ptr)
 @ stdcall -syscall NtLoadKey2(ptr ptr long)
 @ stdcall -syscall NtLoadKey(ptr ptr)
+@ stdcall -syscall NtLoadKeyEx(ptr ptr long long long long ptr ptr)
 @ stdcall -syscall NtLockFile(long long ptr ptr ptr ptr ptr ptr long long)
 # @ stub NtLockProductActivationKeys
 # @ stub NtLockRegistryKey
@@ -386,6 +390,7 @@
 @ stdcall -syscall NtSetInformationProcess(long long ptr long)
 @ stdcall -syscall NtSetInformationThread(long long ptr long)
 @ stdcall -syscall NtSetInformationToken(long long ptr long)
+@ stdcall -syscall NtSetInformationVirtualMemory(long long ptr ptr ptr long)
 @ stdcall -syscall NtSetIntervalProfile(long long)
 @ stdcall -syscall NtSetIoCompletion(ptr long long long long)
 @ stdcall -syscall NtSetLdtEntries(long int64 long int64)
@@ -596,7 +601,7 @@
 @ stub RtlDeleteNoSplay
 @ stub RtlDeleteOwnersRanges
 @ stub RtlDeleteRange
-@ stdcall RtlDeleteRegistryValue(long ptr ptr)
+@ stdcall RtlDeleteRegistryValue(long ptr wstr)
 @ stdcall RtlDeleteResource(ptr)
 @ stdcall RtlDeleteSecurityObject(ptr)
 @ stdcall RtlDeleteTimer(ptr ptr ptr)
@@ -617,6 +622,7 @@
 # @ stub RtlDosApplyFileIsolationRedirection_Ustr
 @ stdcall RtlDosPathNameToNtPathName_U(wstr ptr ptr ptr)
 @ stdcall RtlDosPathNameToNtPathName_U_WithStatus(wstr ptr ptr ptr)
+@ stdcall RtlDosPathNameToRelativeNtPathName_U(wstr ptr ptr ptr)
 @ stdcall RtlDosPathNameToRelativeNtPathName_U_WithStatus(wstr ptr ptr ptr)
 @ stdcall RtlDosSearchPath_U(wstr wstr wstr long ptr ptr)
 # @ stub RtlDosSearchPath_Ustr
@@ -726,6 +732,7 @@
 # @ stub RtlGetLengthWithoutLastFullDosOrNtPathElement
 # Yes, Microsoft really misspelled this one!
 # @ stub RtlGetLengthWithoutTrailingPathSeperators
+@ stdcall RtlGetLocaleFileMappingAddress(ptr ptr ptr)
 @ stdcall RtlGetLongestNtPathLength()
 @ stdcall -syscall -arch=win32 RtlGetNativeSystemInformation(long ptr long ptr) NtWow64GetNativeSystemInformation
 @ stdcall -syscall -arch=win64 RtlGetNativeSystemInformation(long ptr long ptr) NtQuerySystemInformation
@@ -747,7 +754,7 @@
 @ stdcall RtlGetThreadPreferredUILanguages(long ptr ptr ptr)
 @ stdcall RtlGetUnloadEventTrace()
 @ stdcall RtlGetUnloadEventTraceEx(ptr ptr ptr)
-@ stub RtlGetUserInfoHeap
+@ stdcall RtlGetUserInfoHeap(ptr long ptr ptr ptr)
 @ stdcall RtlGetUserPreferredUILanguages(long long ptr ptr ptr)
 @ stdcall RtlGetVersion(ptr)
 @ stdcall -arch=arm,arm64,x86_64 RtlGrowFunctionTable(ptr long)
@@ -833,6 +840,7 @@
 # @ stub RtlIsThreadWithinLoaderCallout
 @ stdcall RtlIsValidHandle(ptr ptr)
 @ stdcall RtlIsValidIndexHandle(ptr long ptr)
+@ stdcall RtlIsValidLocaleName(wstr long)
 @ stdcall -arch=win32 -ret64 RtlLargeIntegerAdd(int64 int64)
 @ stdcall -arch=win32 -ret64 RtlLargeIntegerArithmeticShift(int64 long)
 @ stdcall -arch=win32 -ret64 RtlLargeIntegerDivide(int64 int64 ptr)
@@ -841,6 +849,7 @@
 @ stdcall -arch=win32 -ret64 RtlLargeIntegerShiftRight(int64 long)
 @ stdcall -arch=win32 -ret64 RtlLargeIntegerSubtract(int64 int64)
 @ stdcall RtlLargeIntegerToChar(ptr long long ptr)
+@ stdcall RtlLcidToLocaleName(long ptr long long)
 @ stdcall RtlLeaveCriticalSection(ptr)
 @ stdcall RtlLengthRequiredSid(long)
 @ stdcall RtlLengthSecurityDescriptor(ptr)
@@ -869,8 +878,8 @@
 @ stub RtlNewInstanceSecurityObject
 @ stub RtlNewSecurityGrantedAccess
 @ stdcall RtlNewSecurityObject(ptr ptr ptr long ptr ptr)
-# @ stub RtlNewSecurityObjectEx
-# @ stub RtlNewSecurityObjectWithMultipleInheritance
+@ stdcall RtlNewSecurityObjectEx(ptr ptr ptr ptr long long long ptr)
+@ stdcall RtlNewSecurityObjectWithMultipleInheritance(ptr ptr ptr ptr long long long long ptr)
 @ stdcall RtlNormalizeProcessParams(ptr)
 @ stdcall RtlNormalizeString(long wstr long ptr ptr)
 # @ stub RtlNtPathNameToDosPathName
@@ -998,8 +1007,8 @@
 # @ stub RtlSetTimer
 @ stdcall RtlSetUnhandledExceptionFilter(ptr)
 @ stub RtlSetUnicodeCallouts
-@ stub RtlSetUserFlagsHeap
-@ stub RtlSetUserValueHeap
+@ stdcall RtlSetUserFlagsHeap(ptr long ptr long long)
+@ stdcall RtlSetUserValueHeap(ptr long ptr ptr)
 @ stdcall RtlSizeHeap(long long ptr)
 @ stdcall RtlSleepConditionVariableCS(ptr ptr ptr)
 @ stdcall RtlSleepConditionVariableSRW(ptr ptr ptr long)
@@ -1029,8 +1038,8 @@
 @ stdcall RtlTryAcquireSRWLockShared(ptr)
 @ stdcall RtlTryEnterCriticalSection(ptr)
 @ stdcall RtlUTF8ToUnicodeN(ptr long ptr ptr long)
-@ cdecl -i386 -norelay RtlUlongByteSwap() NTDLL_RtlUlongByteSwap
-@ cdecl -ret64 RtlUlonglongByteSwap(int64)
+@ stdcall -fastcall -arch=i386 -norelay RtlUlongByteSwap(long)
+@ stdcall -fastcall -arch=i386 -norelay RtlUlonglongByteSwap(int64)
 # @ stub RtlUnhandledExceptionFilter2
 # @ stub RtlUnhandledExceptionFilter
 @ stdcall RtlUnicodeStringToAnsiSize(ptr)
@@ -1063,7 +1072,7 @@
 @ stdcall RtlUpperString(ptr ptr)
 @ stub RtlUsageHeap
 @ stdcall -norelay RtlUserThreadStart(ptr ptr)
-@ cdecl -i386 -norelay RtlUshortByteSwap() NTDLL_RtlUshortByteSwap
+@ stdcall -fastcall -arch=i386 -norelay RtlUshortByteSwap(long)
 @ stdcall RtlValidAcl(ptr)
 @ stdcall RtlValidRelativeSecurityDescriptor(ptr long long)
 @ stdcall RtlValidSecurityDescriptor(ptr)
@@ -1091,7 +1100,7 @@
 @ stdcall RtlWow64IsWowGuestMachineSupported(long ptr)
 @ stdcall -arch=win64 RtlWow64SetThreadContext(long ptr)
 @ stub RtlWriteMemoryStream
-@ stdcall RtlWriteRegistryValue(long ptr ptr long ptr long)
+@ stdcall RtlWriteRegistryValue(long ptr wstr long ptr long)
 @ stub RtlZeroHeap
 @ stdcall RtlZeroMemory(ptr long)
 @ stdcall RtlZombifyActivationContext(ptr)
@@ -1178,6 +1187,7 @@
 # @ stub ZwCancelDeviceWakeupRequest
 @ stdcall -private -syscall ZwCancelIoFile(long ptr) NtCancelIoFile
 @ stdcall -private -syscall ZwCancelIoFileEx(long ptr ptr) NtCancelIoFileEx
+@ stdcall -private -syscall ZwCancelSynchronousIoFile(long ptr ptr) NtCancelSynchronousIoFile
 @ stdcall -private -syscall ZwCancelTimer(long ptr) NtCancelTimer
 @ stdcall -private -syscall ZwClearEvent(long) NtClearEvent
 @ stdcall -private -syscall ZwClose(long) NtClose
@@ -1258,6 +1268,7 @@
 @ stdcall -private -syscall ZwImpersonateAnonymousToken(long) NtImpersonateAnonymousToken
 # @ stub ZwImpersonateClientOfPort
 # @ stub ZwImpersonateThread
+@ stdcall -private -syscall ZwInitializeNlsFiles(ptr ptr ptr) NtInitializeNlsFiles
 # @ stub ZwInitializeRegistry
 @ stdcall -private -syscall ZwInitiatePowerAction(long long long long) NtInitiatePowerAction
 @ stdcall -private -syscall ZwIsProcessInJob(long long) NtIsProcessInJob
@@ -1410,6 +1421,7 @@
 @ stdcall -private -syscall ZwSetInformationProcess(long long ptr long) NtSetInformationProcess
 @ stdcall -private -syscall ZwSetInformationThread(long long ptr long) NtSetInformationThread
 @ stdcall -private -syscall ZwSetInformationToken(long long ptr long) NtSetInformationToken
+@ stdcall -private -syscall ZwSetInformationVirtualMemory(long long ptr ptr ptr long) NtSetInformationVirtualMemory
 @ stdcall -private -syscall ZwSetIntervalProfile(long long) NtSetIntervalProfile
 @ stdcall -private -syscall ZwSetIoCompletion(ptr long long long long) NtSetIoCompletion
 @ stdcall -private -syscall ZwSetLdtEntries(long int64 long int64) NtSetLdtEntries
@@ -1486,43 +1498,61 @@
 @ cdecl -norelay -arch=i386 -ret64 _allmul(int64 int64)
 @ cdecl -arch=i386 -norelay _alloca_probe()
 @ cdecl -norelay -arch=i386 -ret64 _allrem(int64 int64)
-@ stdcall -arch=i386 -ret64 _allshl(int64 long)
-@ stdcall -arch=i386 -ret64 _allshr(int64 long)
+@ cdecl -norelay -arch=i386 -ret64 _allshl(int64 long)
+@ cdecl -norelay -arch=i386 -ret64 _allshr(int64 long)
 @ cdecl -ret64 _atoi64(str)
 @ cdecl -norelay -arch=i386 -ret64 _aulldiv(int64 int64)
 @ cdecl -arch=i386 -norelay _aulldvrm(int64 int64)
 @ cdecl -norelay -arch=i386 -ret64 _aullrem(int64 int64)
-@ stdcall -arch=i386 -ret64 _aullshr(int64 long)
+@ cdecl -norelay -arch=i386 -ret64 _aullshr(int64 long)
 @ cdecl -arch=i386 -norelay _chkstk()
 @ stub _fltused
 @ cdecl -arch=i386 -ret64 _ftol()
+@ cdecl -arch=i386 -ret64 _ftol2() _ftol
+@ cdecl -arch=i386 -ret64 _ftol2_sse() _ftol # FIXME
 @ cdecl _i64toa(int64 ptr long)
+@ cdecl _i64toa_s(int64 ptr long long)
 @ cdecl _i64tow(int64 ptr long)
+@ cdecl _i64tow_s(int64 ptr long long)
 @ cdecl _itoa(long ptr long)
+@ cdecl _itoa_s(long ptr long long)
 @ cdecl _itow(long ptr long)
+@ cdecl _itow_s(long ptr long long)
 @ cdecl _lfind(ptr ptr ptr long ptr)
 @ stdcall -arch=x86_64,arm64 _local_unwind(ptr ptr)
 @ cdecl _ltoa(long ptr long)
+@ cdecl _ltoa_s(long ptr long long)
 @ cdecl _ltow(long ptr long)
+@ cdecl _ltow_s(long ptr long long)
+@ cdecl _makepath_s(ptr long str str str str)
 @ cdecl _memccpy(ptr ptr long long)
 @ cdecl _memicmp(str str long)
 @ varargs _snprintf(ptr long str) NTDLL__snprintf
 @ varargs _snprintf_s(ptr long long str)
 @ varargs _snwprintf(ptr long wstr)
 @ varargs _snwprintf_s(ptr long long wstr)
-@ varargs _swprintf(ptr wstr) NTDLL_swprintf
 @ cdecl _splitpath(str ptr ptr ptr ptr)
+@ cdecl _splitpath_s(str ptr long ptr long ptr long ptr long)
 @ cdecl _strcmpi(str str) _stricmp
 @ cdecl _stricmp(str str)
 @ cdecl _strlwr(str)
+@ cdecl _strlwr_s(str long)
 @ cdecl _strnicmp(str str long)
 @ cdecl _strupr(str)
+@ cdecl _strupr_s(str long)
+@ varargs _swprintf(ptr wstr) NTDLL_swprintf
 @ cdecl _tolower(long)
 @ cdecl _toupper(long)
 @ cdecl _ui64toa(int64 ptr long)
+@ cdecl _ui64toa_s(int64 ptr long long)
 @ cdecl _ui64tow(int64 ptr long)
+@ cdecl _ui64tow_s(int64 ptr long long)
 @ cdecl _ultoa(long ptr long)
+@ cdecl _ultoa_s(long ptr long long)
 @ cdecl _ultow(long ptr long)
+@ cdecl _ultow_s(long ptr long long)
+@ cdecl _vscprintf(str ptr)
+@ cdecl _vscwprintf(wstr ptr)
 @ cdecl -norelay _vsnprintf(ptr long str ptr)
 @ cdecl _vsnprintf_s(ptr long str ptr)
 @ cdecl _vsnwprintf(ptr long wstr ptr)
@@ -1530,16 +1560,24 @@
 @ cdecl _vswprintf(ptr wstr ptr)
 @ cdecl _wcsicmp(wstr wstr)
 @ cdecl _wcslwr(wstr)
+@ cdecl _wcslwr_s(wstr long)
 @ cdecl _wcsnicmp(wstr wstr long)
+@ cdecl -ret64 _wcstoi64(wstr ptr long)
+@ cdecl -ret64 _wcstoui64(wstr ptr long)
 @ cdecl _wcsupr(wstr)
+@ cdecl _wcsupr_s(wstr long)
+@ cdecl _wmakepath_s(ptr long wstr wstr wstr wstr)
+@ cdecl _wsplitpath_s(wstr ptr long ptr long ptr long ptr long)
 @ cdecl _wtoi(wstr)
 @ cdecl -ret64 _wtoi64(wstr)
 @ cdecl _wtol(wstr)
 @ cdecl abs(long)
 @ cdecl atan(double)
+@ cdecl atan2(double double)
 @ cdecl atoi(str)
 @ cdecl atol(str)
 @ cdecl bsearch(ptr ptr long long ptr)
+@ cdecl bsearch_s(ptr ptr long long ptr ptr)
 @ cdecl ceil(double)
 @ cdecl cos(double)
 @ cdecl fabs(double)
@@ -1554,10 +1592,14 @@
 @ cdecl ispunct(long)
 @ cdecl isspace(long)
 @ cdecl isupper(long)
+@ cdecl iswalnum(long)
 @ cdecl iswalpha(long)
+@ cdecl iswascii(long)
 @ cdecl iswctype(long long)
 @ cdecl iswdigit(long)
+@ cdecl iswgraph(long)
 @ cdecl iswlower(long)
+@ cdecl iswprint(long)
 @ cdecl iswspace(long)
 @ cdecl iswxdigit(long)
 @ cdecl isxdigit(long)
@@ -1567,29 +1609,37 @@
 @ cdecl memchr(ptr long long)
 @ cdecl memcmp(ptr ptr long)
 @ cdecl memcpy(ptr ptr long)
+@ cdecl memcpy_s(ptr long ptr long)
 @ cdecl memmove(ptr ptr long)
+@ cdecl memmove_s(ptr long ptr long)
 @ cdecl memset(ptr long long)
 @ cdecl pow(double double)
 @ cdecl qsort(ptr long long ptr)
+@ cdecl qsort_s(ptr long long ptr ptr)
 @ cdecl sin(double)
 @ varargs sprintf(ptr str) NTDLL_sprintf
 @ varargs sprintf_s(ptr long str)
 @ cdecl sqrt(double)
 @ varargs sscanf(str str)
 @ cdecl strcat(str str)
+@ cdecl strcat_s(str long str)
 @ cdecl strchr(str long)
 @ cdecl strcmp(str str)
 @ cdecl strcpy(ptr str)
+@ cdecl strcpy_s(ptr long str)
 @ cdecl strcspn(str str)
 @ cdecl strlen(str)
 @ cdecl strncat(str str long)
+@ cdecl strncat_s(str long str long)
 @ cdecl strncmp(str str long)
 @ cdecl strncpy(ptr str long)
+@ cdecl strncpy_s(ptr long str long)
 @ cdecl strnlen(ptr long)
 @ cdecl strpbrk(str str)
 @ cdecl strrchr(str long)
 @ cdecl strspn(str str)
 @ cdecl strstr(str str)
+@ cdecl strtok_s(str str ptr)
 @ cdecl strtol(str ptr long)
 @ cdecl strtoul(str ptr long)
 @ varargs swprintf(ptr wstr) NTDLL_swprintf
@@ -1605,19 +1655,25 @@
 @ cdecl vsprintf_s(ptr long str ptr)
 @ cdecl vswprintf_s(ptr long wstr ptr)
 @ cdecl wcscat(wstr wstr)
+@ cdecl wcscat_s(wstr long wstr)
 @ cdecl wcschr(wstr long)
 @ cdecl wcscmp(wstr wstr)
 @ cdecl wcscpy(ptr wstr)
+@ cdecl wcscpy_s(ptr long wstr)
 @ cdecl wcscspn(wstr wstr)
 @ cdecl wcslen(wstr)
 @ cdecl wcsncat(wstr wstr long)
+@ cdecl wcsncat_s(wstr long wstr long)
 @ cdecl wcsncmp(wstr wstr long)
 @ cdecl wcsncpy(ptr wstr long)
+@ cdecl wcsncpy_s(ptr long wstr long)
+@ cdecl wcsnlen(ptr long)
 @ cdecl wcspbrk(wstr wstr)
 @ cdecl wcsrchr(wstr long)
 @ cdecl wcsspn(wstr wstr)
 @ cdecl wcsstr(wstr wstr)
 @ cdecl wcstok(wstr wstr)
+@ cdecl wcstok_s(wstr wstr ptr)
 @ cdecl wcstol(wstr ptr long)
 @ cdecl wcstombs(ptr ptr long)
 @ cdecl wcstoul(wstr ptr long)
@@ -1634,13 +1690,13 @@
 @ cdecl -syscall wine_server_handle_to_fd(long long ptr ptr)
 
 # Unix interface
-@ stdcall -syscall __wine_unix_call(int64 long ptr)
+@ stdcall __wine_unix_call(int64 long ptr)
 @ stdcall -syscall __wine_unix_spawnvp(long ptr)
-@ cdecl __wine_set_unix_funcs(long ptr)
 @ stdcall __wine_ctrl_routine(ptr)
-@ extern __wine_syscall_dispatcher
-@ extern -arch=i386 __wine_ldt_copy
-@ cdecl __wine_set_unix_env(ptr ptr)
+@ extern -private __wine_syscall_dispatcher
+@ extern -private __wine_unix_call_dispatcher
+@ extern -arch=arm64 __wine_current_teb
+@ stdcall -syscall __wine_set_unix_env(ptr ptr)
 
 # Debugging
 @ stdcall -syscall -norelay __wine_dbg_write(ptr long)
@@ -1657,3 +1713,4 @@
 # Filesystem
 @ stdcall -syscall wine_nt_to_unix_file_name(ptr ptr ptr long)
 @ stdcall -syscall wine_unix_to_nt_file_name(str ptr ptr)
+@ cdecl -syscall __wine_needs_override_large_address_aware()

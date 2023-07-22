@@ -167,7 +167,7 @@ static NTSTATUS complete_irp(struct connection *conn, IRP *irp)
 
     irp_size += unk_headers_count * sizeof(struct http_unknown_header);
 
-    TRACE("Need %u bytes, have %u.\n", irp_size, output_len);
+    TRACE("Need %lu bytes, have %lu.\n", irp_size, output_len);
     irp->IoStatus.Information = irp_size;
 
     memset(irp->AssociatedIrp.SystemBuffer, 0, output_len);
@@ -181,9 +181,9 @@ static NTSTATUS complete_irp(struct connection *conn, IRP *irp)
 
     offset = sizeof(*req);
 
+    req->UrlContext = conn->context;
     req->ConnectionId = (ULONG_PTR)conn;
     req->RequestId = conn->req_id;
-    req->UrlContext = conn->queue->context;
     req->Version = conn->version;
     req->Verb = conn->verb;
     req->UnknownVerbLength = conn->unk_verb_len;

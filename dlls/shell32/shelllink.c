@@ -45,7 +45,6 @@
 #include "winuser.h"
 #include "wingdi.h"
 #include "shlobj.h"
-#include "undocshell.h"
 
 #include "pidl.h"
 #include "shell32_main.h"
@@ -209,7 +208,7 @@ static HRESULT ShellLink_UpdatePath(LPCWSTR sPathRel, LPCWSTR path, LPCWSTR sWor
 static inline LPWSTR heap_strdupAtoW( LPCSTR str)
 {
     INT len = MultiByteToWideChar( CP_ACP, 0, str, -1, NULL, 0 );
-    LPWSTR p = heap_alloc( len*sizeof (WCHAR) );
+    WCHAR *p = malloc( len * sizeof(WCHAR) );
     if( !p )
         return p;
     MultiByteToWideChar( CP_ACP, 0, str, -1, p, len );
@@ -276,10 +275,9 @@ static HRESULT WINAPI IPersistFile_fnLoad(IPersistFile* iface, LPCOLESTR pszFile
         HRESULT r;
         IStream *stm;
 
-        TRACE("(%p, %s, %x)\n",This, debugstr_w(pszFileName), dwMode);
+        TRACE("(%p, %s, %lx)\n",This, debugstr_w(pszFileName), dwMode);
 
-        if( dwMode == 0 )
- 		dwMode = STGM_READ | STGM_SHARE_DENY_WRITE;
+        if( dwMode == 0 ) dwMode = STGM_READ;
         r = SHCreateStreamOnFileW(pszFileName, dwMode, &stm);
         if( SUCCEEDED( r ) )
         {
@@ -288,12 +286,12 @@ static HRESULT WINAPI IPersistFile_fnLoad(IPersistFile* iface, LPCOLESTR pszFile
             IStream_Release( stm );
 
             /* update file path */
-            heap_free(This->filepath);
-            This->filepath = strdupW(pszFileName);
+            free(This->filepath);
+            This->filepath = wcsdup(pszFileName);
 
             This->bDirty = FALSE;
         }
-        TRACE("-- returning hr %08x\n", r);
+        TRACE("-- returning hr %08lx\n", r);
         return r;
 }
 
@@ -311,7 +309,7 @@ BOOL run_winemenubuilder( const WCHAR *args )
     lstrcatW( app, L"\\winemenubuilder.exe" );
 
     len = (lstrlenW( app ) + lstrlenW( args ) + 1) * sizeof(WCHAR);
-    buffer = heap_alloc( len );
+    buffer = malloc( len );
     if( !buffer )
         return FALSE;
 
@@ -327,7 +325,7 @@ BOOL run_winemenubuilder( const WCHAR *args )
     ret = CreateProcessW( app, buffer, NULL, NULL, FALSE, DETACHED_PROCESS, NULL, NULL, &si, &pi );
     Wow64RevertWow64FsRedirection( redir );
 
-    heap_free( buffer );
+    free( buffer );
 
     if (ret)
     {
@@ -345,13 +343,13 @@ static BOOL StartLinkProcessor( LPCOLESTR szLink )
     BOOL ret;
 
     len = (lstrlenW( szLink ) + 7) * sizeof(WCHAR);
-    buffer = heap_alloc( len );
+    buffer = malloc( len );
     if( !buffer )
         return FALSE;
 
     swprintf( buffer, len, L" -w \"%s\"", szLink );
     ret = run_winemenubuilder( buffer );
-    heap_free( buffer );
+    free( buffer );
     return ret;
 }
 
@@ -372,7 +370,7 @@ static HRESULT WINAPI IPersistFile_fnSave(IPersistFile* iface, LPCOLESTR pszFile
         fRemember = FALSE;
     }
 
-    r = SHCreateStreamOnFileW( pszFileName, STGM_READWRITE | STGM_CREATE | STGM_SHARE_EXCLUSIVE, &stm );
+    r = SHCreateStreamOnFileW( pszFileName, STGM_READWRITE | STGM_CREATE | STGM_SHARE_DENY_WRITE, &stm );
     if( SUCCEEDED( r ) )
     {
         r = IPersistStream_Save(StreamThis, stm, FALSE);
@@ -385,8 +383,8 @@ static HRESULT WINAPI IPersistFile_fnSave(IPersistFile* iface, LPCOLESTR pszFile
             if (fRemember)
             {
                 /* update file path */
-                heap_free(This->filepath);
-                This->filepath = strdupW(pszFileName);
+                free(This->filepath);
+                This->filepath = wcsdup(pszFileName);
             }
 
             This->bDirty = FALSE;
@@ -518,14 +516,14 @@ static HRESULT Stream_LoadString( IStream* stm, BOOL unicode, LPWSTR *pstr )
         len *= sizeof (WCHAR);
 
     TRACE("reading %d\n", len);
-    temp = heap_alloc(len + sizeof(WCHAR));
+    temp = malloc(len + sizeof(WCHAR));
     if( !temp )
         return E_OUTOFMEMORY;
     count = 0;
     r = IStream_Read(stm, temp, len, &count);
     if( FAILED (r) || ( count != len ) )
     {
-        heap_free( temp );
+        free( temp );
         return E_FAIL;
     }
 
@@ -535,14 +533,14 @@ static HRESULT Stream_LoadString( IStream* stm, BOOL unicode, LPWSTR *pstr )
     if( !unicode )
     {
         count = MultiByteToWideChar( CP_ACP, 0, temp, len, NULL, 0 );
-        str = heap_alloc( (count+1)*sizeof (WCHAR) );
+        str = malloc( (count + 1) * sizeof(WCHAR) );
         if( !str )
         {
-            heap_free( temp );
+            free( temp );
             return E_OUTOFMEMORY;
         }
         MultiByteToWideChar( CP_ACP, 0, temp, len, str, count );
-        heap_free( temp );
+        free( temp );
     }
     else
     {
@@ -572,7 +570,7 @@ static HRESULT Stream_ReadChunk( IStream* stm, LPVOID *data )
     if( FAILED( r )  || count != sizeof(size) )
         return E_FAIL;
 
-    chunk = heap_alloc( size );
+    chunk = malloc( size );
     if( !chunk )
         return E_OUTOFMEMORY;
 
@@ -580,11 +578,11 @@ static HRESULT Stream_ReadChunk( IStream* stm, LPVOID *data )
     r = IStream_Read( stm, chunk->data, size - sizeof(size), &count );
     if( FAILED( r ) || count != (size - sizeof(size)) )
     {
-        heap_free( chunk );
+        free( chunk );
         return E_FAIL;
     }
 
-    TRACE("Read %d bytes\n",chunk->size);
+    TRACE("Read %ld bytes\n",chunk->size);
 
     *data = chunk;
 
@@ -622,7 +620,7 @@ static LPWSTR Stream_LoadPath( LPCSTR p, DWORD maxlen )
         len++;
 
     wlen = MultiByteToWideChar(CP_ACP, 0, p, len, NULL, 0);
-    path = heap_alloc((wlen + 1) * sizeof(WCHAR));
+    path = malloc((wlen + 1) * sizeof(WCHAR));
     MultiByteToWideChar(CP_ACP, 0, p, len, path, wlen);
     path[wlen] = 0;
 
@@ -644,7 +642,7 @@ static HRESULT Stream_LoadLocation( IStream *stm,
     loc = (LOCATION_INFO*) p;
     if (loc->dwTotalSize < sizeof(LOCATION_INFO))
     {
-        heap_free( p );
+        free( p );
         return E_FAIL;
     }
 
@@ -663,10 +661,10 @@ static HRESULT Stream_LoadLocation( IStream *stm,
     if( n && (n < loc->dwTotalSize) )
         *path = Stream_LoadPath( &p[n], loc->dwTotalSize - n );
 
-    TRACE("type %d serial %08x name %s path %s\n", volume->type,
+    TRACE("type %ld serial %08lx name %s path %s\n", volume->type,
           volume->serial, debugstr_w(volume->label), debugstr_w(*path));
 
-    heap_free( p );
+    free( p );
     return S_OK;
 }
 
@@ -712,15 +710,15 @@ static HRESULT Stream_LoadAdvertiseInfo( IStream* stm, LPWSTR *str )
     if( count != size )
         return E_FAIL;
 
-    TRACE("magic %08x  string = %s\n", buffer.dbh.dwSignature, debugstr_w(buffer.szwDarwinID));
+    TRACE("magic %08lx  string = %s\n", buffer.dbh.dwSignature, debugstr_w(buffer.szwDarwinID));
 
     if( (buffer.dbh.dwSignature&0xffff0000) != 0xa0000000 )
     {
-        ERR("Unknown magic number %08x in advertised shortcut\n", buffer.dbh.dwSignature);
+        ERR("Unknown magic number %08lx in advertised shortcut\n", buffer.dbh.dwSignature);
         return E_FAIL;
     }
 
-    *str = heap_alloc((lstrlenW(buffer.szwDarwinID) + 1) * sizeof(WCHAR) );
+    *str = malloc( (lstrlenW(buffer.szwDarwinID) + 1) * sizeof(WCHAR) );
     lstrcpyW( *str, buffer.szwDarwinID );
 
     return S_OK;
@@ -762,21 +760,21 @@ static HRESULT WINAPI IPersistStream_fnLoad(
     ILFree(This->pPidl);
     This->pPidl = NULL;
     memset( &This->volume, 0, sizeof This->volume );
-    heap_free(This->sPath);
+    free(This->sPath);
     This->sPath = NULL;
-    heap_free(This->sDescription);
+    free(This->sDescription);
     This->sDescription = NULL;
-    heap_free(This->sPathRel);
+    free(This->sPathRel);
     This->sPathRel = NULL;
-    heap_free(This->sWorkDir);
+    free(This->sWorkDir);
     This->sWorkDir = NULL;
-    heap_free(This->sArgs);
+    free(This->sArgs);
     This->sArgs = NULL;
-    heap_free(This->sIcoPath);
+    free(This->sIcoPath);
     This->sIcoPath = NULL;
-    heap_free(This->sProduct);
+    free(This->sProduct);
     This->sProduct = NULL;
-    heap_free(This->sComponent);
+    free(This->sComponent);
     This->sComponent = NULL;
         
     This->wHotKey = hdr.wHotKey;
@@ -943,7 +941,7 @@ static HRESULT Stream_WriteLocationInfo( IStream* stm, LPCWSTR path,
     total_size = sizeof *loc + volume_info_size + path_size + final_path_size;
 
     /* create pointers to everything */
-    loc = heap_alloc_zero(total_size);
+    loc = calloc(1, total_size);
     vol = (LOCAL_VOLUME_INFO*) &loc[1];
     szLabel = (LPSTR) &vol[1];
     szPath = &szLabel[label_size];
@@ -972,7 +970,7 @@ static HRESULT Stream_WriteLocationInfo( IStream* stm, LPCWSTR path,
     szFinalPath[0] = 0;
 
     hr = IStream_Write( stm, loc, total_size, &count );
-    heap_free(loc);
+    free(loc);
 
     return hr;
 }
@@ -1176,7 +1174,7 @@ static HRESULT ShellLink_UpdatePath(LPCWSTR sPathRel, LPCWSTR path, LPCWSTR sWor
 	if (!*abs_path)
 	    lstrcpyW(abs_path, sPathRel);
 
-	*psPath = heap_alloc((lstrlenW(abs_path) + 1) * sizeof(WCHAR));
+	*psPath = malloc((lstrlenW(abs_path) + 1) * sizeof(WCHAR));
 	if (!*psPath)
 	    return E_OUTOFMEMORY;
 
@@ -1257,7 +1255,7 @@ static HRESULT WINAPI IShellLinkA_fnGetPath(IShellLinkA *iface, LPSTR pszFile, I
     IShellLinkImpl *This = impl_from_IShellLinkA(iface);
     HRESULT res = S_OK;
 
-    TRACE("(%p)->(pfile=%p len=%u find_data=%p flags=%u)(%s)\n",
+    TRACE("(%p)->(pfile=%p len=%u find_data=%p flags=%lu)(%s)\n",
           This, pszFile, cchMaxPath, pfd, fFlags, debugstr_w(This->sPath));
 
     if (This->sComponent || This->sProduct)
@@ -1300,7 +1298,7 @@ static HRESULT WINAPI IShellLinkA_fnGetPath(IShellLinkA *iface, LPSTR pszFile, I
             }
         }
 
-        TRACE("attr 0x%08x size 0x%08x%08x name %s shortname %s\n", pfd->dwFileAttributes,
+        TRACE("attr 0x%08lx size 0x%08lx%08lx name %s shortname %s\n", pfd->dwFileAttributes,
             pfd->nFileSizeHigh, pfd->nFileSizeLow, wine_dbgstr_a(pfd->cFileName),
             wine_dbgstr_a(pfd->cAlternateFileName));
     }
@@ -1353,7 +1351,7 @@ static HRESULT WINAPI IShellLinkA_fnSetDescription(IShellLinkA *iface, LPCSTR ps
         descrW = NULL;
 
     hr = IShellLinkW_SetDescription(&This->IShellLinkW_iface, descrW);
-    heap_free(descrW);
+    free(descrW);
 
     return hr;
 }
@@ -1386,7 +1384,7 @@ static HRESULT WINAPI IShellLinkA_fnSetWorkingDirectory(IShellLinkA *iface, LPCS
     if (!dirW) return E_OUTOFMEMORY;
 
     hr = IShellLinkW_SetWorkingDirectory(&This->IShellLinkW_iface, dirW);
-    heap_free(dirW);
+    free(dirW);
 
     return hr;
 }
@@ -1423,7 +1421,7 @@ static HRESULT WINAPI IShellLinkA_fnSetArguments(IShellLinkA *iface, LPCSTR pszA
         argsW = NULL;
 
     hr = IShellLinkW_SetArguments(&This->IShellLinkW_iface, argsW);
-    heap_free(argsW);
+    free(argsW);
 
     return hr;
 }
@@ -1485,7 +1483,7 @@ static HRESULT WINAPI IShellLinkA_fnSetIconLocation(IShellLinkA *iface, LPCSTR p
     }
 
     hr = IShellLinkW_SetIconLocation(&This->IShellLinkW_iface, path ? pathW : NULL, icon);
-    heap_free(pathW);
+    free(pathW);
 
     return hr;
 }
@@ -1497,13 +1495,13 @@ static HRESULT WINAPI IShellLinkA_fnSetRelativePath(IShellLinkA *iface, LPCSTR p
     WCHAR *pathW;
     HRESULT hr;
 
-    TRACE("(%p)->(path=%s %x)\n",This, pszPathRel, dwReserved);
+    TRACE("(%p)->(path=%s %lx)\n",This, pszPathRel, dwReserved);
 
     pathW = heap_strdupAtoW(pszPathRel);
     if (!pathW) return E_OUTOFMEMORY;
 
     hr = IShellLinkW_SetRelativePath(&This->IShellLinkW_iface, pathW, dwReserved);
-    heap_free(pathW);
+    free(pathW);
 
     return hr;
 }
@@ -1512,7 +1510,7 @@ static HRESULT WINAPI IShellLinkA_fnResolve(IShellLinkA *iface, HWND hwnd, DWORD
 {
     IShellLinkImpl *This = impl_from_IShellLinkA(iface);
 
-    TRACE("(%p)->(hwnd=%p flags=%x)\n",This, hwnd, fFlags);
+    TRACE("(%p)->(hwnd=%p flags=%lx)\n",This, hwnd, fFlags);
 
     return IShellLinkW_Resolve(&This->IShellLinkW_iface, hwnd, fFlags);
 }
@@ -1532,7 +1530,7 @@ static HRESULT WINAPI IShellLinkA_fnSetPath(IShellLinkA *iface, LPCSTR pszFile)
         return E_OUTOFMEMORY;
 
     r = IShellLinkW_SetPath(&This->IShellLinkW_iface, str);
-    heap_free( str );
+    free( str );
 
     return r;
 }
@@ -1634,7 +1632,7 @@ static ULONG WINAPI IShellLinkW_fnAddRef(IShellLinkW * iface)
     IShellLinkImpl *This = impl_from_IShellLinkW(iface);
     ULONG ref = InterlockedIncrement(&This->ref);
 
-    TRACE("(%p)->(count=%u)\n", This, ref - 1);
+    TRACE("(%p)->(count=%lu)\n", This, ref - 1);
 
     return ref;
 }
@@ -1647,22 +1645,22 @@ static ULONG WINAPI IShellLinkW_fnRelease(IShellLinkW * iface)
     IShellLinkImpl *This = impl_from_IShellLinkW(iface);
     ULONG refCount = InterlockedDecrement(&This->ref);
 
-    TRACE("(%p)->(count=%u)\n", This, refCount + 1);
+    TRACE("(%p)->(count=%lu)\n", This, refCount + 1);
 
     if (refCount)
         return refCount;
 
     TRACE("-- destroying IShellLink(%p)\n",This);
 
-    heap_free(This->sIcoPath);
-    heap_free(This->sArgs);
-    heap_free(This->sWorkDir);
-    heap_free(This->sDescription);
-    heap_free(This->sPath);
-    heap_free(This->sPathRel);
-    heap_free(This->sProduct);
-    heap_free(This->sComponent);
-    heap_free(This->filepath);
+    free(This->sIcoPath);
+    free(This->sArgs);
+    free(This->sWorkDir);
+    free(This->sDescription);
+    free(This->sPath);
+    free(This->sPathRel);
+    free(This->sProduct);
+    free(This->sComponent);
+    free(This->filepath);
 
     if (This->site)
         IUnknown_Release( This->site );
@@ -1680,7 +1678,7 @@ static HRESULT WINAPI IShellLinkW_fnGetPath(IShellLinkW * iface, LPWSTR pszFile,
     IShellLinkImpl *This = impl_from_IShellLinkW(iface);
     HRESULT res = S_OK;
 
-    TRACE("(%p)->(pfile=%p len=%u find_data=%p flags=%u)(%s)\n",
+    TRACE("(%p)->(pfile=%p len=%u find_data=%p flags=%lu)(%s)\n",
           This, pszFile, cchMaxPath, pfd, fFlags, debugstr_w(This->sPath));
 
     if (This->sComponent || This->sProduct)
@@ -1720,7 +1718,7 @@ static HRESULT WINAPI IShellLinkW_fnGetPath(IShellLinkW * iface, LPWSTR pszFile,
             }
         }
 
-        TRACE("attr 0x%08x size 0x%08x%08x name %s shortname %s\n", pfd->dwFileAttributes,
+        TRACE("attr 0x%08lx size 0x%08lx%08lx name %s shortname %s\n", pfd->dwFileAttributes,
             pfd->nFileSizeHigh, pfd->nFileSizeLow, wine_dbgstr_w(pfd->cFileName),
             wine_dbgstr_w(pfd->cAlternateFileName));
     }
@@ -1756,12 +1754,12 @@ static HRESULT WINAPI IShellLinkW_fnSetIDList(IShellLinkW * iface, LPCITEMIDLIST
     if( !This->pPidl )
         return E_FAIL;
 
-    heap_free( This->sPath );
+    free( This->sPath );
     This->sPath = NULL;
 
     if ( SHGetPathFromIDListW( pidl, path ) )
     {
-        This->sPath = heap_alloc((lstrlenW(path) + 1) * sizeof(WCHAR));
+        This->sPath = malloc((lstrlenW(path) + 1) * sizeof(WCHAR));
         if (!This->sPath)
             return E_OUTOFMEMORY;
 
@@ -1792,10 +1790,10 @@ static HRESULT WINAPI IShellLinkW_fnSetDescription(IShellLinkW * iface, LPCWSTR 
 
     TRACE("(%p)->(desc=%s)\n",This, debugstr_w(pszName));
 
-    heap_free(This->sDescription);
+    free(This->sDescription);
     if (pszName)
     {
-        This->sDescription = heap_alloc((lstrlenW( pszName )+1)*sizeof(WCHAR) );
+        This->sDescription = malloc( (lstrlenW( pszName ) + 1) * sizeof(WCHAR) );
         if ( !This->sDescription )
             return E_OUTOFMEMORY;
 
@@ -1828,8 +1826,8 @@ static HRESULT WINAPI IShellLinkW_fnSetWorkingDirectory(IShellLinkW * iface, LPC
 
     TRACE("(%p)->(dir=%s)\n",This, debugstr_w(pszDir));
 
-    heap_free(This->sWorkDir);
-    This->sWorkDir = heap_alloc((lstrlenW( pszDir ) + 1) * sizeof (WCHAR) );
+    free(This->sWorkDir);
+    This->sWorkDir = malloc( (lstrlenW( pszDir ) + 1) * sizeof(WCHAR) );
     if ( !This->sWorkDir )
         return E_OUTOFMEMORY;
     lstrcpyW( This->sWorkDir, pszDir );
@@ -1858,10 +1856,10 @@ static HRESULT WINAPI IShellLinkW_fnSetArguments(IShellLinkW * iface, LPCWSTR ps
 
     TRACE("(%p)->(args=%s)\n",This, debugstr_w(pszArgs));
 
-    heap_free(This->sArgs);
+    free(This->sArgs);
     if (pszArgs)
     {
-        This->sArgs = heap_alloc((lstrlenW( pszArgs )+1)*sizeof (WCHAR) );
+        This->sArgs = malloc( (lstrlenW( pszArgs ) + 1) * sizeof(WCHAR) );
         if ( !This->sArgs )
             return E_OUTOFMEMORY;
         lstrcpyW( This->sArgs, pszArgs );
@@ -1941,11 +1939,11 @@ static HRESULT WINAPI IShellLinkW_fnSetIconLocation(IShellLinkW * iface, const W
 
     TRACE("(%p)->(path=%s icon=%u)\n", This, debugstr_w(path), icon);
 
-    heap_free(This->sIcoPath);
+    free(This->sIcoPath);
     if (path)
     {
         size_t len = (lstrlenW(path) + 1) * sizeof(WCHAR);
-        This->sIcoPath = heap_alloc(len);
+        This->sIcoPath = malloc(len);
         if (!This->sIcoPath)
             return E_OUTOFMEMORY;
         memcpy(This->sIcoPath, path, len);
@@ -1962,10 +1960,10 @@ static HRESULT WINAPI IShellLinkW_fnSetRelativePath(IShellLinkW * iface, LPCWSTR
 {
     IShellLinkImpl *This = impl_from_IShellLinkW(iface);
 
-    TRACE("(%p)->(path=%s %x)\n",This, debugstr_w(pszPathRel), dwReserved);
+    TRACE("(%p)->(path=%s %lx)\n",This, debugstr_w(pszPathRel), dwReserved);
 
-    heap_free(This->sPathRel);
-    This->sPathRel = heap_alloc((lstrlenW( pszPathRel )+1) * sizeof (WCHAR) );
+    free(This->sPathRel);
+    This->sPathRel = malloc( (lstrlenW( pszPathRel ) + 1) * sizeof(WCHAR) );
     if ( !This->sPathRel )
         return E_OUTOFMEMORY;
     lstrcpyW( This->sPathRel, pszPathRel );
@@ -1981,7 +1979,7 @@ static HRESULT WINAPI IShellLinkW_fnResolve(IShellLinkW * iface, HWND hwnd, DWOR
 
     IShellLinkImpl *This = impl_from_IShellLinkW(iface);
 
-    TRACE("(%p)->(hwnd=%p flags=%x)\n",This, hwnd, fFlags);
+    TRACE("(%p)->(hwnd=%p flags=%lx)\n",This, hwnd, fFlags);
 
     /*FIXME: use IResolveShellLink interface */
 
@@ -1991,7 +1989,7 @@ static HRESULT WINAPI IShellLinkW_fnResolve(IShellLinkW * iface, HWND hwnd, DWOR
 	bSuccess = SHGetPathFromIDListW(This->pPidl, buffer);
 
 	if (bSuccess && *buffer) {
-	    This->sPath = heap_alloc((lstrlenW(buffer)+1)*sizeof(WCHAR));
+	    This->sPath = malloc((lstrlenW(buffer) + 1) * sizeof(WCHAR));
 	    if (!This->sPath)
 		return E_OUTOFMEMORY;
 
@@ -2003,7 +2001,7 @@ static HRESULT WINAPI IShellLinkW_fnResolve(IShellLinkW * iface, HWND hwnd, DWOR
     }
 
     if (!This->sIcoPath && This->sPath) {
-	This->sIcoPath = heap_alloc((lstrlenW(This->sPath)+1)*sizeof(WCHAR));
+	This->sIcoPath = malloc((lstrlenW(This->sPath) + 1) * sizeof(WCHAR));
 	if (!This->sIcoPath)
 	    return E_OUTOFMEMORY;
 
@@ -2029,7 +2027,7 @@ static LPWSTR ShellLink_GetAdvertisedArg(LPCWSTR str)
     if( !p )
         return NULL;
     len = p - str;
-    ret = heap_alloc(sizeof(WCHAR)*(len+1));
+    ret = malloc(sizeof(WCHAR) * (len + 1));
     if( !ret )
         return ret;
     memcpy( ret, str, sizeof(WCHAR)*len );
@@ -2108,7 +2106,7 @@ static BOOL ShellLink_GetVolumeInfo(LPCWSTR path, volume_info *volume)
     volume->type = GetDriveTypeW(drive);
     r = GetVolumeInformationW(drive, volume->label, label_sz,
                               &volume->serial, NULL, NULL, NULL, 0);
-    TRACE("r = %d type %d serial %08x name %s\n", r,
+    TRACE("r = %d type %ld serial %08lx name %s\n", r,
           volume->type, volume->serial, debugstr_w(volume->label));
     return r;
 }
@@ -2129,7 +2127,7 @@ static HRESULT WINAPI IShellLinkW_fnSetPath(IShellLinkW * iface, LPCWSTR pszFile
     len = lstrlenW(pszFile);
     if (pszFile[0] == '"' && pszFile[len-1] == '"')
     {
-        unquoted = strdupW(pszFile);
+        unquoted = wcsdup(pszFile);
         PathUnquoteSpacesW(unquoted);
         pszFile = unquoted;
     }
@@ -2137,14 +2135,14 @@ static HRESULT WINAPI IShellLinkW_fnSetPath(IShellLinkW * iface, LPCWSTR pszFile
     /* any other quote marks are invalid */
     if (wcschr(pszFile, '"'))
     {
-        heap_free(unquoted);
+        free(unquoted);
         return S_FALSE;
     }
 
-    heap_free(This->sPath);
+    free(This->sPath);
     This->sPath = NULL;
 
-    heap_free(This->sComponent);
+    free(This->sComponent);
     This->sComponent = NULL;
 
     if (This->pPidl)
@@ -2157,7 +2155,7 @@ static HRESULT WINAPI IShellLinkW_fnSetPath(IShellLinkW * iface, LPCWSTR pszFile
             *buffer = '\0';
         else if (!GetFullPathNameW(pszFile, MAX_PATH, buffer, &fname))
         {
-            heap_free(unquoted);
+            free(unquoted);
             return E_FAIL;
         }
         else if(!PathFileExistsW(buffer) &&
@@ -2167,17 +2165,17 @@ static HRESULT WINAPI IShellLinkW_fnSetPath(IShellLinkW * iface, LPCWSTR pszFile
         This->pPidl = SHSimpleIDListFromPathW(pszFile);
         ShellLink_GetVolumeInfo(buffer, &This->volume);
 
-        This->sPath = heap_alloc( (lstrlenW( buffer )+1) * sizeof (WCHAR) );
+        This->sPath = malloc( (lstrlenW( buffer ) + 1) * sizeof(WCHAR) );
         if (!This->sPath)
         {
-            heap_free(unquoted);
+            free(unquoted);
             return E_OUTOFMEMORY;
         }
 
         lstrcpyW(This->sPath, buffer);
     }
     This->bDirty = TRUE;
-    heap_free(unquoted);
+    free(unquoted);
 
     return hr;
 }
@@ -2246,7 +2244,7 @@ ShellLink_CopyDataBlock( IShellLinkDataList* iface, DWORD dwSig, void** ppDataBl
     LPVOID block = NULL;
     HRESULT r = E_FAIL;
 
-    TRACE("%p %08x %p\n", iface, dwSig, ppDataBlock );
+    TRACE("%p %08lx %p\n", iface, dwSig, ppDataBlock );
 
     switch (dwSig)
     {
@@ -2261,10 +2259,10 @@ ShellLink_CopyDataBlock( IShellLinkDataList* iface, DWORD dwSig, void** ppDataBl
     case NT_FE_CONSOLE_PROPS_SIG:
     case EXP_SPECIAL_FOLDER_SIG:
     case EXP_SZ_ICON_SIG:
-        FIXME("valid but unhandled datablock %08x\n", dwSig);
+        FIXME("valid but unhandled datablock %08lx\n", dwSig);
         break;
     default:
-        ERR("unknown datablock %08x\n", dwSig);
+        ERR("unknown datablock %08lx\n", dwSig);
     }
     *ppDataBlock = block;
     return r;
@@ -2273,7 +2271,7 @@ ShellLink_CopyDataBlock( IShellLinkDataList* iface, DWORD dwSig, void** ppDataBl
 static HRESULT WINAPI
 ShellLink_RemoveDataBlock( IShellLinkDataList* iface, DWORD dwSig )
 {
-    FIXME("(%p)->(%u): stub\n", iface, dwSig);
+    FIXME("(%p)->(%lu): stub\n", iface, dwSig);
     return E_NOTIMPL;
 }
 
@@ -2305,7 +2303,7 @@ ShellLink_GetFlags( IShellLinkDataList* iface, DWORD* pdwFlags )
 static HRESULT WINAPI
 ShellLink_SetFlags( IShellLinkDataList* iface, DWORD dwFlags )
 {
-    FIXME("(%p)->(%u): stub\n", iface, dwFlags);
+    FIXME("(%p)->(%lu): stub\n", iface, dwFlags);
     return S_OK;
 }
 
@@ -2378,14 +2376,14 @@ ShellLink_ExtInit_Initialize( IShellExtInit* iface, LPCITEMIDLIST pidlFolder,
 
         count = DragQueryFileW( stgm.u.hGlobal, 0, NULL, 0 );
         count++;
-        path = heap_alloc(count*sizeof(WCHAR) );
+        path = malloc( count * sizeof(WCHAR) );
         if( path )
         {
             IPersistFile *pf = &This->IPersistFile_iface;
 
             count = DragQueryFileW( stgm.u.hGlobal, 0, path, count );
             r = IPersistFile_Load( pf, path, 0 );
-            heap_free( path );
+            free( path );
         }
     }
     ReleaseStgMedium( &stgm );
@@ -2462,11 +2460,11 @@ shelllink_get_msi_component_path( LPWSTR component )
          return NULL;
 
     sz++;
-    path = heap_alloc( sz*sizeof(WCHAR) );
+    path = malloc( sz * sizeof(WCHAR) );
     r = CommandLineFromMsiDescriptor( component, path, &sz );
     if (r != ERROR_SUCCESS)
     {
-        heap_free( path );
+        free( path );
         path = NULL;
     }
 
@@ -2507,7 +2505,7 @@ ShellLink_InvokeCommand( IContextMenu* iface, LPCMINVOKECOMMANDINFO lpici )
             return E_FAIL;
     }
     else
-        path = strdupW( This->sPath );
+        path = wcsdup( This->sPath );
 
     if ( lpici->cbSize == sizeof (CMINVOKECOMMANDINFOEX) &&
          ( lpici->fMask & CMIC_MASK_UNICODE ) )
@@ -2520,7 +2518,7 @@ ShellLink_InvokeCommand( IContextMenu* iface, LPCMINVOKECOMMANDINFO lpici )
         if ( iciex->lpParametersW )
             len += lstrlenW( iciex->lpParametersW );
 
-        args = heap_alloc( len*sizeof(WCHAR) );
+        args = malloc( len * sizeof(WCHAR) );
         args[0] = 0;
         if ( This->sArgs )
             lstrcatW( args, This->sArgs );
@@ -2546,8 +2544,8 @@ ShellLink_InvokeCommand( IContextMenu* iface, LPCMINVOKECOMMANDINFO lpici )
     else
         r = E_FAIL;
 
-    heap_free( args );
-    heap_free( path );
+    free( args );
+    free( path );
 
     return r;
 }
@@ -2558,7 +2556,7 @@ ShellLink_GetCommandString( IContextMenu* iface, UINT_PTR idCmd, UINT uType,
 {
     IShellLinkImpl *This = impl_from_IContextMenu(iface);
 
-    FIXME("(%p)->(%lu %u %p %p %u): stub\n", This,
+    FIXME("(%p)->(%Iu %u %p %p %u): stub\n", This,
           idCmd, uType, pwReserved, pszName, cchMax );
 
     return E_NOTIMPL;
@@ -2662,7 +2660,7 @@ static HRESULT WINAPI propertystore_GetCount(IPropertyStore *iface, DWORD *props
 static HRESULT WINAPI propertystore_GetAt(IPropertyStore *iface, DWORD propid, PROPERTYKEY *key)
 {
     IShellLinkImpl *This = impl_from_IPropertyStore(iface);
-    FIXME("(%p)->(%d %p): stub\n", This, propid, key);
+    FIXME("(%p)->(%ld %p): stub\n", This, propid, key);
     return E_NOTIMPL;
 }
 

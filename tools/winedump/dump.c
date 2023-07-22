@@ -31,7 +31,7 @@
 #include "winedump.h"
 
 void *dump_base = NULL;
-unsigned long dump_total_len = 0;
+size_t dump_total_len = 0;
 
 void dump_data( const unsigned char *ptr, unsigned int size, const char *prefix )
 {
@@ -202,6 +202,7 @@ const char *get_unicode_str( const WCHAR *str, int len )
     char *buffer;
     int i = 0;
 
+    if (!str) return "(null)";
     if (len == -1) len = strlenW( str );
     buffer = dump_want_n( len * 6 + 3);
     buffer[i++] = '"';
@@ -255,6 +256,7 @@ dumpers[] =
     {SIG_MDMP,          get_kind_mdmp,  mdmp_dump},
     {SIG_LNK,           get_kind_lnk,   lnk_dump},
     {SIG_EMF,           get_kind_emf,   emf_dump},
+    {SIG_EMFSPOOL,      get_kind_emfspool, emfspool_dump},
     {SIG_MF,            get_kind_mf,    mf_dump},
     {SIG_FNT,           get_kind_fnt,   fnt_dump},
     {SIG_TLB,           get_kind_tlb,   tlb_dump},
@@ -264,23 +266,14 @@ dumpers[] =
 
 BOOL dump_analysis(const char *name, file_dumper fn, enum FileSig wanted_sig)
 {
-    int			fd;
     BOOL                ret = TRUE;
-    struct stat		s;
     const struct dumper *dpr;
 
     setbuf(stdout, NULL);
 
-    fd = open(name, O_RDONLY | O_BINARY);
-    if (fd == -1) fatal("Can't open file");
+    if (!(dump_base = read_file( name, &dump_total_len ))) fatal( "Cannot read file" );
 
-    if (fstat(fd, &s) < 0) fatal("Can't get size");
-    dump_total_len = s.st_size;
-
-    dump_base = xmalloc( dump_total_len );
-    if ((unsigned long)read( fd, dump_base, dump_total_len ) != dump_total_len) fatal( "Cannot read file" );
-
-    printf("Contents of %s: %ld bytes\n\n", name, dump_total_len);
+    printf("Contents of %s: %zu bytes\n\n", name, dump_total_len);
 
     for (dpr = dumpers; dpr->kind != SIG_UNKNOWN; dpr++)
     {
@@ -299,7 +292,6 @@ BOOL dump_analysis(const char *name, file_dumper fn, enum FileSig wanted_sig)
 
     if (ret) printf("Done dumping %s\n", name);
     free( dump_base );
-    close(fd);
 
     return ret;
 }

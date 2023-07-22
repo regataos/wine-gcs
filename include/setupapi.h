@@ -1315,7 +1315,8 @@ DECL_WINELIB_SETUPAPI_TYPE_AW(PSP_INF_SIGNER_INFO)
 #define SPDRP_REMOVAL_POLICY_HW_DEFAULT   0x00000020
 #define SPDRP_REMOVAL_POLICY_OVERRIDE     0x00000021
 #define SPDRP_INSTALL_STATE               0x00000022
-#define SPDRP_MAXIMUM_PROPERTY            0x00000023
+#define SPDRP_BASE_CONTAINERID            0x00000024
+#define SPDRP_MAXIMUM_PROPERTY            0x00000025
 
 #define DPROMPT_SUCCESS        0
 #define DPROMPT_CANCEL         1
@@ -1416,14 +1417,6 @@ typedef enum {
 /* SetupUninstallOEMInf Flags values */
 #define SUOI_FORCEDELETE 0x00000001
 
-LONG     WINAPI AddTagToGroupOrderList(PCWSTR lpGroupName, DWORD dwUnknown2, DWORD dwUnknown3);
-DWORD    WINAPI CaptureAndConvertAnsiArg(PCSTR lpSrc, PWSTR *lpDst);
-DWORD    WINAPI CaptureStringArg(PCWSTR lpSrc, PWSTR *lpDst);
-BOOL     WINAPI DelayedMove(PCWSTR lpExistingFileName, PCWSTR lpNewFileName);
-BOOL     WINAPI DoesUserHavePrivilege(PCWSTR lpPrivilegeName);
-PWSTR    WINAPI DuplicateString(PCWSTR lpSrc);
-BOOL     WINAPI EnablePrivilege(PCWSTR lpPrivilegeName, BOOL bEnable);
-BOOL     WINAPI FileExists(PCWSTR lpFileName, PWIN32_FIND_DATAW lpFileFindData);
 void     WINAPI InstallHinfSectionA( HWND hwnd, HINSTANCE handle, PCSTR cmdline, INT show );
 void     WINAPI InstallHinfSectionW( HWND hwnd, HINSTANCE handle, PCWSTR cmdline, INT show );
 #define         InstallHinfSection WINELIB_NAME_AW(InstallHinfSection)
@@ -1877,11 +1870,6 @@ BOOL     WINAPI SetupUninstallNewlyCopiedInfs(HSPFILEQ, DWORD, PVOID);
 BOOL     WINAPI SetupVerifyInfFileA(PCSTR, PSP_ALTPLATFORM_INFO, PSP_INF_SIGNER_INFO_A);
 BOOL     WINAPI SetupVerifyInfFileW(PCWSTR, PSP_ALTPLATFORM_INFO, PSP_INF_SIGNER_INFO_W);
 #define         SetupVerifyInfFile WINELIB_NAME_AW(SetupVerifyInfFile)
-DWORD    WINAPI StampFileSecurity(PCWSTR, PSECURITY_DESCRIPTOR);
-DWORD    WINAPI TakeOwnershipOfFile(PCWSTR);
-PSTR     WINAPI UnicodeToMultiByte(PCWSTR lpUnicodeStr, UINT uCodePage);
-BOOL     WINAPI UnmapAndCloseFile(HANDLE, HANDLE, PVOID);
-
 
 #ifdef __cplusplus
 }

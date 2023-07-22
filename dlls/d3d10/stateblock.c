@@ -294,7 +294,7 @@ static ULONG STDMETHODCALLTYPE d3d10_stateblock_AddRef(ID3D10StateBlock *iface)
     struct d3d10_stateblock *stateblock = impl_from_ID3D10StateBlock(iface);
     ULONG refcount = InterlockedIncrement(&stateblock->refcount);
 
-    TRACE("%p increasing refcount to %u.\n", stateblock, refcount);
+    TRACE("%p increasing refcount to %lu.\n", stateblock, refcount);
 
     return refcount;
 }
@@ -304,13 +304,13 @@ static ULONG STDMETHODCALLTYPE d3d10_stateblock_Release(ID3D10StateBlock *iface)
     struct d3d10_stateblock *stateblock = impl_from_ID3D10StateBlock(iface);
     ULONG refcount = InterlockedDecrement(&stateblock->refcount);
 
-    TRACE("%p decreasing refcount to %u.\n", stateblock, refcount);
+    TRACE("%p decreasing refcount to %lu.\n", stateblock, refcount);
 
     if (!refcount)
     {
         stateblock_cleanup(stateblock);
         ID3D10Device_Release(stateblock->device);
-        heap_free(stateblock);
+        free(stateblock);
     }
 
     return refcount;
@@ -557,7 +557,7 @@ HRESULT WINAPI D3D10CreateStateBlock(ID3D10Device *device,
 
     TRACE("device %p, mask %p, stateblock %p.\n", device, mask, stateblock);
 
-    if (!(object = heap_alloc_zero(sizeof(*object))))
+    if (!(object = calloc(1, sizeof(*object))))
     {
         ERR("Failed to allocate D3D10 stateblock object memory.\n");
         return E_OUTOFMEMORY;

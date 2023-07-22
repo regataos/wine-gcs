@@ -153,7 +153,7 @@
 @ stub SymNextW
 @ stub SymPrev
 @ stub SymPrevW
-@ stub SymQueryInlineTrace
+@ stdcall SymQueryInlineTrace(long int64 long int64 int64 ptr ptr)
 @ stdcall SymRefreshModuleList(long)
 @ stdcall SymRegisterCallback(long ptr ptr)
 @ stdcall SymRegisterCallback64(long ptr int64)
@@ -175,7 +175,7 @@
 @ stdcall SymSetSearchPathW(long wstr)
 @ stub SymSrvDeltaName
 @ stub SymSrvDeltaNameW
-@ stub SymSrvGetFileIndexInfo
+@ stdcall SymSrvGetFileIndexInfo(str ptr long)
 @ stub SymSrvGetFileIndexInfoW
 @ stub SymSrvGetFileIndexString
 @ stub SymSrvGetFileIndexStringW

@@ -1,6 +1,5 @@
-EXTRADEFS = -DWINE_NO_LONG_TYPES
 TESTDLL   = user32.dll
-IMPORTS   = user32 gdi32 advapi32 hid
+IMPORTS   = user32 gdi32 advapi32 hid imm32 setupapi
 
 C_SRCS = \
 	broadcast.c \

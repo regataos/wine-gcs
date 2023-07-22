@@ -137,6 +137,7 @@ char *regscript_name;
 char *regscript_token;
 static char *idfile_name;
 char *temp_name;
+const char *temp_dir = NULL;
 const char *prefix_client = "";
 const char *prefix_server = "";
 static const char *includedir;
@@ -188,7 +189,7 @@ static const struct long_option long_options[] = {
     { "nostdinc", 0, NOSTDINC_OPTION },
     { "ns_prefix", 0, RT_NS_PREFIX },
     { "oldnames", 0, OLDNAMES_OPTION },
-    { "oldtlb", 0, NULL, OLD_TYPELIB_OPTION },
+    { "oldtlb", 0, OLD_TYPELIB_OPTION },
     { "output", 0, 'o' },
     { "prefix-all", 1, PREFIX_ALL_OPTION },
     { "prefix-client", 1, PREFIX_CLIENT_OPTION },
@@ -387,7 +388,7 @@ void write_dlldata(const statement_list_t *stmts)
   write_dlldata_list(filenames, define_proxy_delegation);
 }
 
-static void write_id_guid(FILE *f, const char *type, const char *guid_prefix, const char *name, const uuid_t *uuid)
+static void write_id_guid(FILE *f, const char *type, const char *guid_prefix, const char *name, const struct uuid *uuid)
 {
   if (!uuid) return;
   fprintf(f, "MIDL_DEFINE_GUID(%s, %s_%s, 0x%08x, 0x%04x, 0x%04x, 0x%02x,0x%02x, 0x%02x,"
@@ -407,7 +408,7 @@ static void write_id_data_stmts(const statement_list_t *stmts)
       const type_t *type = stmt->u.type;
       if (type_get_type(type) == TYPE_INTERFACE)
       {
-        const uuid_t *uuid;
+        const struct uuid *uuid;
         if (!is_object(type) && !is_attr(type->attrs, ATTR_DISPINTERFACE))
           continue;
         uuid = get_attrp(type->attrs, ATTR_UUID);
@@ -421,13 +422,13 @@ static void write_id_data_stmts(const statement_list_t *stmts)
       }
       else if (type_get_type(type) == TYPE_COCLASS)
       {
-        const uuid_t *uuid = get_attrp(type->attrs, ATTR_UUID);
+        const struct uuid *uuid = get_attrp(type->attrs, ATTR_UUID);
         write_id_guid(idfile, "CLSID", "CLSID", type->name, uuid);
       }
     }
     else if (stmt->type == STMT_LIBRARY)
     {
-      const uuid_t *uuid = get_attrp(stmt->u.lib->attrs, ATTR_UUID);
+      const struct uuid *uuid = get_attrp(stmt->u.lib->attrs, ATTR_UUID);
       write_id_guid(idfile, "IID", "LIBID", stmt->u.lib->name, uuid);
       write_id_data_stmts(stmt->u.lib->stmts);
     }
@@ -487,21 +488,19 @@ void write_id_data(const statement_list_t *stmts)
 static void init_argv0_dir( const char *argv0 )
 {
 #ifndef _WIN32
-    char *dir;
+    char *dir = NULL;
 
 #if defined(__linux__) || defined(__FreeBSD_kernel__) || defined(__NetBSD__)
     dir = realpath( "/proc/self/exe", NULL );
 #elif defined (__FreeBSD__) || defined(__DragonFly__)
     static int pathname[] = { CTL_KERN, KERN_PROC, KERN_PROC_PATHNAME, -1 };
     size_t path_size = PATH_MAX;
-    char *path = malloc( path_size );
-    if (path && !sysctl( pathname, sizeof(pathname)/sizeof(pathname[0]), path, &path_size, NULL, 0 ))
+    char *path = xmalloc( path_size );
+    if (!sysctl( pathname, ARRAY_SIZE(pathname), path, &path_size, NULL, 0 ))
         dir = realpath( path, NULL );
     free( path );
-#else
-    dir = realpath( argv0, NULL );
 #endif
-    if (!dir) return;
+    if (!dir && !(dir = realpath( argv0, NULL ))) return;
     includedir = strmake( "%s/%s", get_dirname( dir ), BIN_TO_INCLUDEDIR );
     dlldir = strmake( "%s/%s", get_dirname( dir ), BIN_TO_DLLDIR );
 #endif
@@ -694,8 +693,8 @@ int open_typelib( const char *name )
         {
             int namelen = strlen( name );
             if (strendswith( name, ".dll" )) namelen -= 4;
-            TRYOPEN( strmake( "%.*s/%.*s/%s", (int)strlen(dlldirs.str[i]) - 2, dlldirs.str[i],
-                              namelen, name, name ));
+            TRYOPEN( strmake( "%.*s/%.*s%s/%s", (int)strlen(dlldirs.str[i]) - 2, dlldirs.str[i],
+                              namelen, name, pe_dir, name ));
         }
         else
         {
@@ -939,4 +938,6 @@ static void rm_tempfile(void)
     unlink(proxy_name);
   if (do_typelib)
     unlink(typelib_name);
+  if (temp_dir)
+    rmdir(temp_dir);
 }

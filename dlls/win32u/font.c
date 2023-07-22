@@ -84,9 +84,9 @@ struct gdi_font_face
     SIZE_T        data_size;
     UINT          face_index;
     FONTSIGNATURE fs;
-    DWORD         ntmFlags;
-    DWORD         version;
-    DWORD         flags;                 /* ADDFONT flags */
+    UINT          ntmFlags;
+    UINT          version;
+    UINT          flags;                 /* ADDFONT flags */
     BOOL          scalable;
     struct bitmap_font_size    size;     /* set if face is a bitmap */
     struct gdi_font_family    *family;
@@ -199,15 +199,9 @@ static struct font_gamma_ramp font_gamma_ramp;
 static void add_face_to_cache( struct gdi_font_face *face );
 static void remove_face_from_cache( struct gdi_font_face *face );
 
-UINT get_acp(void)
-{
-    return ((const WORD *)NtCurrentTeb()->Peb->AnsiCodePageData)[1];
-}
-
-static UINT get_oemcp(void)
-{
-    return ((const WORD *)NtCurrentTeb()->Peb->OemCodePageData)[1];
-}
+static CPTABLEINFO utf8_cp;
+static CPTABLEINFO oem_cp;
+CPTABLEINFO ansi_cp = { 0 };
 
 static inline WCHAR facename_tolower( WCHAR c )
 {
@@ -277,15 +271,6 @@ static inline INT INTERNAL_YWSTODS(DC *dc, INT height)
     return pt[1].y - pt[0].y;
 }
 
-static inline WCHAR *strdupW( const WCHAR *p )
-{
-    WCHAR *ret;
-    DWORD len = (lstrlenW(p) + 1) * sizeof(WCHAR);
-    ret = malloc( len );
-    memcpy(ret, p, len);
-    return ret;
-}
-
 static INT FONT_GetObjectW( HGDIOBJ handle, INT count, LPVOID buffer );
 static BOOL FONT_DeleteObject( HGDIOBJ handle );
 
@@ -303,44 +288,25 @@ typedef struct
 } FONTOBJ;
 
 /* for translate_charset_info */
-static const CHARSETINFO charset_info[] = {
-  /* ANSI */
-  { ANSI_CHARSET, 1252, {{0,0,0,0},{FS_LATIN1,0}} },
-  { EASTEUROPE_CHARSET, 1250, {{0,0,0,0},{FS_LATIN2,0}} },
-  { RUSSIAN_CHARSET, 1251, {{0,0,0,0},{FS_CYRILLIC,0}} },
-  { GREEK_CHARSET, 1253, {{0,0,0,0},{FS_GREEK,0}} },
-  { TURKISH_CHARSET, 1254, {{0,0,0,0},{FS_TURKISH,0}} },
-  { HEBREW_CHARSET, 1255, {{0,0,0,0},{FS_HEBREW,0}} },
-  { ARABIC_CHARSET, 1256, {{0,0,0,0},{FS_ARABIC,0}} },
-  { BALTIC_CHARSET, 1257, {{0,0,0,0},{FS_BALTIC,0}} },
-  { VIETNAMESE_CHARSET, 1258, {{0,0,0,0},{FS_VIETNAMESE,0}} },
-  /* reserved by ANSI */
-  { DEFAULT_CHARSET, 0, {{0,0,0,0},{FS_LATIN1,0}} },
-  { DEFAULT_CHARSET, 0, {{0,0,0,0},{FS_LATIN1,0}} },
-  { DEFAULT_CHARSET, 0, {{0,0,0,0},{FS_LATIN1,0}} },
-  { DEFAULT_CHARSET, 0, {{0,0,0,0},{FS_LATIN1,0}} },
-  { DEFAULT_CHARSET, 0, {{0,0,0,0},{FS_LATIN1,0}} },
-  { DEFAULT_CHARSET, 0, {{0,0,0,0},{FS_LATIN1,0}} },
-  { DEFAULT_CHARSET, 0, {{0,0,0,0},{FS_LATIN1,0}} },
-  /* ANSI and OEM */
-  { THAI_CHARSET, 874, {{0,0,0,0},{FS_THAI,0}} },
-  { SHIFTJIS_CHARSET, 932, {{0,0,0,0},{FS_JISJAPAN,0}} },
-  { GB2312_CHARSET, 936, {{0,0,0,0},{FS_CHINESESIMP,0}} },
-  { HANGEUL_CHARSET, 949, {{0,0,0,0},{FS_WANSUNG,0}} },
-  { CHINESEBIG5_CHARSET, 950, {{0,0,0,0},{FS_CHINESETRAD,0}} },
-  { JOHAB_CHARSET, 1361, {{0,0,0,0},{FS_JOHAB,0}} },
-  /* reserved for alternate ANSI and OEM */
-  { DEFAULT_CHARSET, 0, {{0,0,0,0},{FS_LATIN1,0}} },
-  { DEFAULT_CHARSET, 0, {{0,0,0,0},{FS_LATIN1,0}} },
-  { DEFAULT_CHARSET, 0, {{0,0,0,0},{FS_LATIN1,0}} },
-  { DEFAULT_CHARSET, 0, {{0,0,0,0},{FS_LATIN1,0}} },
-  { DEFAULT_CHARSET, 0, {{0,0,0,0},{FS_LATIN1,0}} },
-  { DEFAULT_CHARSET, 0, {{0,0,0,0},{FS_LATIN1,0}} },
-  { DEFAULT_CHARSET, 0, {{0,0,0,0},{FS_LATIN1,0}} },
-  { DEFAULT_CHARSET, 0, {{0,0,0,0},{FS_LATIN1,0}} },
-  /* reserved for system */
-  { DEFAULT_CHARSET, 0, {{0,0,0,0},{FS_LATIN1,0}} },
-  { SYMBOL_CHARSET, CP_SYMBOL, {{0,0,0,0},{FS_SYMBOL,0}} }
+static const CHARSETINFO charset_info[] =
+{
+    { ANSI_CHARSET,        1252,      { {0}, { FS_LATIN1 }}},
+    { EASTEUROPE_CHARSET,  1250,      { {0}, { FS_LATIN2 }}},
+    { RUSSIAN_CHARSET,     1251,      { {0}, { FS_CYRILLIC }}},
+    { GREEK_CHARSET,       1253,      { {0}, { FS_GREEK }}},
+    { TURKISH_CHARSET,     1254,      { {0}, { FS_TURKISH }}},
+    { HEBREW_CHARSET,      1255,      { {0}, { FS_HEBREW }}},
+    { ARABIC_CHARSET,      1256,      { {0}, { FS_ARABIC }}},
+    { BALTIC_CHARSET,      1257,      { {0}, { FS_BALTIC }}},
+    { VIETNAMESE_CHARSET,  1258,      { {0}, { FS_VIETNAMESE }}},
+    { THAI_CHARSET,        874,       { {0}, { FS_THAI }}},
+    { SHIFTJIS_CHARSET,    932,       { {0}, { FS_JISJAPAN }}},
+    { GB2312_CHARSET,      936,       { {0}, { FS_CHINESESIMP }}},
+    { HANGEUL_CHARSET,     949,       { {0}, { FS_WANSUNG }}},
+    { CHINESEBIG5_CHARSET, 950,       { {0}, { FS_CHINESETRAD }}},
+    { JOHAB_CHARSET,       1361,      { {0}, { FS_JOHAB }}},
+    { 254,                 CP_UTF8,   { {0}, { 0x04000000 }}},
+    { SYMBOL_CHARSET,      CP_SYMBOL, { {0}, { FS_SYMBOL }}}
 };
 
 static const char * const default_serif_list[3] =
@@ -385,6 +351,11 @@ static const struct nls_update_font_list
     { 1252, 850, "vga850.fon", "vgafix.fon", "vgasys.fon",
       "coure.fon", "serife.fon", "smalle.fon", "sserife.fon", "sseriff.fon",
       "Tahoma","Times New Roman"  /* FIXME unverified */
+    },
+    /* UTF-8 */
+    { CP_UTF8, CP_UTF8, "vga850.fon", "vgafix.fon", "vgasys.fon",
+      "coure.fon", "serife.fon", "smalle.fon", "sserife.fon", "sseriff.fon",
+      "Tahoma", "Times New Roman"  /* FIXME unverified */
     },
     /* Eastern Europe */
     { 1250, 852, "vga852.fon", "vgafixe.fon", "vgasyse.fon",
@@ -488,14 +459,6 @@ static const struct nls_update_font_list
       "PMingLiU",  "MingLiU"
     }
 };
-
-static inline BOOL is_dbcs_ansi_cp(UINT ansi_cp)
-{
-    return ( ansi_cp == 932       /* CP932 for Japanese */
-            || ansi_cp == 936     /* CP936 for Chinese Simplified */
-            || ansi_cp == 949     /* CP949 for Korean */
-            || ansi_cp == 950 );  /* CP950 for Chinese Traditional */
-}
 
 static pthread_mutex_t font_lock = PTHREAD_MUTEX_INITIALIZER;
 
@@ -940,6 +903,12 @@ static BOOL add_family_replacement( const WCHAR *new_name, const WCHAR *replace 
         return FALSE;
     }
 
+    if (family->replacement)
+    {
+        TRACE( "%s is replaced by another font, skipping.\n", debugstr_w(replace) );
+        return FALSE;
+    }
+
     if (!(new_family = create_family( new_name, NULL ))) return FALSE;
     new_family->replacement = family;
     family->refcount++;
@@ -960,130 +929,6 @@ static BOOL add_family_replacement( const WCHAR *new_name, const WCHAR *replace 
     add_family_replacement( new_name_vert, replace_vert );
     return TRUE;
 }
-
-/* Simplified Chinese fonts */
-static const WCHAR SimSun[] = {'S','i','m','S','u','n',0};
-static const WCHAR atSimSun[] = {'@','S','i','m','S','u','n',0};
-static const WCHAR Microsoft_YaHei[] = {'M','i','c','r','o','s','o','f','t',' ','Y','a','H','e','i',0};
-static const WCHAR LiSu[] = {'L','i','S','u',0};
-/* Traditional Chinese fonts */
-static const WCHAR PMingLiU[] = {'P','M','i','n','g','L','i','U',0};
-static const WCHAR atPMingLiU[] = {'@','P','M','i','n','g','L','i','U',0};
-/* Korean fonts */
-static const WCHAR Gulim[] = {'G','u','l','i','m',0};
-static const WCHAR atGulim[] = {'@','G','u','l','i','m',0};
-/* Japanese fonts */
-static const WCHAR MS_UI_Gothic[] = {'M','S',' ','U','I',' ','G','o','t','h','i','c',0};
-static const WCHAR atMS_UI_Gothic[] = {'@','M','S',' ','U','I',' ','G','o','t','h','i','c',0};
-
-static const WCHAR new_sc_fonts[] = {
-    /* Ubuntu 16.04 or later, Mint 19, Fedora 29 */
-    'N','o','t','o',' ','S','a','n','s',' ','C','J','K',' ','S','C',' ','R','e','g','u','l','a','r',0,
-    /* Manjaro 18 */
-    'N','o','t','o',' ','S','a','n','s',' ','C','J','K',' ','S','C',0,
-    /* Popular open source Chinese font */
-    'W','e','n','Q','u','a','n','Y','i',' ','M','i','c','r','o',' ','H','e','i',0,
-    0
-};
-
-static const WCHAR vertical_new_sc_fonts[] = {
-    /* Ubuntu 16.04 or later, Mint 19, Fedora 29 */
-    '@','N','o','t','o',' ','S','a','n','s',' ','C','J','K',' ','S','C',' ','R','e','g','u','l','a','r',0,
-    /* Manjaro 18 */
-    '@','N','o','t','o',' ','S','a','n','s',' ','C','J','K',' ','S','C',0,
-    /* popular open source Chinese font */
-    '@','W','e','n','Q','u','a','n','Y','i',' ','M','i','c','r','o',' ','H','e','i',0,
-    0
-};
-
-static const WCHAR new_tc_fonts[] = {
-    /* Ubuntu 16.04 or later, Mint 19, Fedora 29 */
-    'N','o','t','o',' ','S','a','n','s',' ','C','J','K',' ','T','C',' ','R','e','g','u','l','a','r',0,
-    /* Manjaro 18 */
-    'N','o','t','o',' ','S','a','n','s',' ','C','J','K',' ','T','C',0,
-    /* popular open source Chinese font */
-    'W','e','n','Q','u','a','n','Y','i',' ','M','i','c','r','o',' ','H','e','i',0,
-    0
-};
-
-static const WCHAR vertical_new_tc_fonts[] = {
-    /* Ubuntu 16.04 or later */
-    '@','N','o','t','o',' ','S','a','n','s',' ','C','J','K',' ','T','C',' ','R','e','g','u','l','a','r',0,
-    /* Manjaro 18 */
-    '@','N','o','t','o',' ','S','a','n','s',' ','C','J','K',' ','T','C',0,
-    /* popular open source Chinese font */
-    '@','W','e','n','Q','u','a','n','Y','i',' ','M','i','c','r','o',' ','H','e','i',0,
-    0
-};
-
-static const WCHAR new_jp_fonts[] = {
-    /* Ubuntu 16.04 or later */
-    'N','o','t','o',' ','S','a','n','s',' ','C','J','K',' ','J','P',' ','R','e','g','u','l','a','r',0,
-    /* Manjaro 18 */
-    'N','o','t','o',' ','S','a','n','s',' ','C','J','K',' ','J','P',0,
-    0
-};
-
-static const WCHAR vertical_new_jp_fonts[] = {
-    /* Ubuntu 16.04 or later */
-    '@','N','o','t','o',' ','S','a','n','s',' ','C','J','K',' ','J','P',' ','R','e','g','u','l','a','r',0,
-    /* Manjaro 18 */
-    '@','N','o','t','o',' ','S','a','n','s',' ','C','J','K',' ','J','P',0,
-    0
-};
-
-static const WCHAR new_kr_fonts[] = {
-    /* Ubuntu 16.04 or later */
-    'N','o','t','o',' ','S','a','n','s',' ','C','J','K',' ','K','R',' ','R','e','g','u','l','a','r',0,
-    /* Manjaro 18 */
-    'N','o','t','o',' ','S','a','n','s',' ','C','J','K',' ','K','R',0,
-    0
-};
-
-static const WCHAR vertical_new_kr_fonts[] = {
-    /* Ubuntu 16.04 or later */
-    '@','N','o','t','o',' ','S','a','n','s',' ','C','J','K',' ','K','R',' ','R','e','g','u','l','a','r',0,
-    /* Manjaro 18 */
-    '@','N','o','t','o',' ','S','a','n','s',' ','C','J','K',' ','K','R',0,
-    0
-};
-
-static const WCHAR MS_PGothic_cp932[]= {0x30fb,0xff6d,0x30fb,0xff73,' ',0x30fb,0xff70,0x7e67,0xff74,0x7e67,0xff77,0x7e5d,0x30fb,0x3051,0};
-
-static struct font_replacements
-{
-    const WCHAR *replacements[4];
-    const int count;
-    const WCHAR *new_fonts;
-    const WCHAR *vertical_new_fonts;
-    BOOL *font_seen;
-} font_replacements_list[] =
-{
-    /* Simplified Chinese */
-    {
-        {
-            SimSun, atSimSun, Microsoft_YaHei, LiSu
-        }, 4, new_sc_fonts, vertical_new_sc_fonts, NULL
-    },
-    /* Traditional Chinese */
-    {
-        {
-            PMingLiU, atPMingLiU
-        }, 2, new_tc_fonts, vertical_new_tc_fonts, NULL
-    },
-    /* Japanese */
-    {
-        {
-            MS_UI_Gothic, atMS_UI_Gothic, MS_PGothic_cp932
-        }, 3, new_jp_fonts, vertical_new_jp_fonts, NULL
-    },
-    /* Korean */
-    {
-        {
-            Gulim, atGulim
-        }, 2, new_kr_fonts, vertical_new_kr_fonts, NULL
-    }
-};
 
 /*
  * The replacement list is a way to map an entire font
@@ -1115,25 +960,6 @@ static void load_gdi_font_replacements(void)
         /* "NewName"="Oldname" */
         if (!find_family_from_any_name( value ))
         {
-            int j;
-
-            for (j = 0; j < ARRAY_SIZE(font_replacements_list); j++)
-            {
-                int k;
-
-                struct font_replacements *replacement = &font_replacements_list[j];
-
-                replacement->font_seen = calloc(1, replacement->count * sizeof(BOOL));
-                for (k = 0; k < replacement->count; k++)
-                {
-                    if (!replacement->font_seen[k] && !memcmp(value, replacement->replacements[k], sizeof(value)))
-                    {
-                        replacement->font_seen[k] = TRUE;
-                        break;
-                    }
-                }
-            }
-
             if (info->Type == REG_MULTI_SZ)
             {
                 WCHAR *replace = data;
@@ -1161,7 +987,7 @@ static void dump_gdi_font_list(void)
         LIST_FOR_EACH_ENTRY( face, &family->faces, struct gdi_font_face, entry )
         {
             TRACE( "\t%s\t%s\t%08x", debugstr_w(face->style_name), debugstr_w(face->full_name),
-                   face->fs.fsCsb[0] );
+                   (int)face->fs.fsCsb[0] );
             if (!face->scalable) TRACE(" %d", face->size.height );
             TRACE("\n");
 	}
@@ -1344,8 +1170,8 @@ static struct gdi_font_face *create_face( struct gdi_font_family *family, const 
     struct gdi_font_face *face = calloc( 1, sizeof(*face) );
 
     face->refcount   = 1;
-    face->style_name = strdupW( style );
-    face->full_name  = strdupW( fullname );
+    face->style_name = wcsdup( style );
+    face->full_name  = wcsdup( fullname );
     face->face_index = index;
     face->fs         = fs;
     face->ntmFlags   = ntmflags;
@@ -1353,7 +1179,7 @@ static struct gdi_font_face *create_face( struct gdi_font_family *family, const 
     face->flags      = flags;
     face->data_ptr   = data_ptr;
     face->data_size  = data_size;
-    if (file) face->file = strdupW( file );
+    if (file) face->file = wcsdup( file );
     if (size) face->size = *size;
     else face->scalable = TRUE;
     if (insert_face_in_family_list( face, family )) return face;
@@ -1462,9 +1288,9 @@ static void load_face_from_cache( HKEY hkey_family, struct gdi_font_family *fami
                           face->size.x_ppem >> 6, face->size.y_ppem >> 6);
 
                 TRACE("fsCsb = %08x %08x/%08x %08x %08x %08x\n",
-                      face->fs.fsCsb[0], face->fs.fsCsb[1],
-                      face->fs.fsUsb[0], face->fs.fsUsb[1],
-                      face->fs.fsUsb[2], face->fs.fsUsb[3]);
+                      (int)face->fs.fsCsb[0], (int)face->fs.fsCsb[1],
+                      (int)face->fs.fsUsb[0], (int)face->fs.fsUsb[1],
+                      (int)face->fs.fsUsb[2], (int)face->fs.fsUsb[3]);
 
                 release_face( face );
             }
@@ -1674,24 +1500,62 @@ static const WCHAR microsoft_sans_serifW[] =
     {'M','i','c','r','o','s','o','f','t',' ','S','a','n','s',' ','S','e','r','i','f',0};
 static const WCHAR tahomaW[] =
     {'T','a','h','o','m','a',0};
+static const WCHAR ms_gothicW[] =
+    {'M','S',' ','G','o','t','h','i','c',0};
+static const WCHAR ms_p_gothicW[] =
+    {'M','S',' ','P','G','o','t','h','i','c',0};
 static const WCHAR ms_ui_gothicW[] =
     {'M','S',' ','U','I',' ','G','o','t','h','i','c',0};
 static const WCHAR sim_sunW[] =
     {'S','i','m','S','u','n',0};
 static const WCHAR gulimW[] =
     {'G','u','l','i','m',0};
+static const WCHAR ming_li_uW[] =
+    {'M','i','n','g','L','i','U',0};
 static const WCHAR p_ming_li_uW[] =
     {'P','M','i','n','g','L','i','U',0};
+static const WCHAR ming_li_u_hkscsW[] =
+    {'M','i','n','g','L','i','U','_','H','K','S','C','S',0};
+static const WCHAR ming_li_u_ext_bW[] =
+    {'M','i','n','g','L','i','U','-','E','x','t','B',0};
+static const WCHAR p_ming_li_u_ext_bW[] =
+    {'P','M','i','n','g','L','i','U','-','E','x','t','B',0};
+static const WCHAR ming_li_u_hkscs_ext_bW[] =
+    {'M','i','n','g','L','i','U','_','H','K','S','C','S','-','E','x','t','B',0};
 static const WCHAR batangW[] =
     {'B','a','t','a','n','g',0};
-static const WCHAR arialW[] =
-    {'A','r','i','a','l',0};
-static const WCHAR arial_boldW[] =
-    {'A','r','i','a','l',' ','B','o','l','d',0};
-static const WCHAR courier_newW[] =
-    {'C','o','u','r','i','e','r',' ','N','e','w',0};
-static const WCHAR courier_new_boldW[] =
-    {'C','o','u','r','i','e','r',' ','N','e','w',' ','B','o','l','d',0};
+static const WCHAR microsoft_jheng_heiW[] =
+    {'M','i','c','r','o','s','o','f','t',' ','J','h','e','n','g','H','e','i',0};
+static const WCHAR microsoft_jheng_hei_boldW[] =
+    {'M','i','c','r','o','s','o','f','t',' ','J','h','e','n','g','H','e','i',' ','B','o','l','d',0};
+static const WCHAR microsoft_jheng_hei_uiW[] =
+    {'M','i','c','r','o','s','o','f','t',' ','J','h','e','n','g','H','e','i',' ','U','I',0};
+static const WCHAR microsoft_jheng_hei_ui_boldW[] =
+    {'M','i','c','r','o','s','o','f','t',' ','J','h','e','n','g','H','e','i',' ','U','I',' ','B','o','l','d',0};
+static const WCHAR microsoft_jheng_hei_ui_lightW[] =
+    {'M','i','c','r','o','s','o','f','t',' ','J','h','e','n','g','H','e','i',' ','U','I',' ','L','i','g','h','t',0};
+static const WCHAR yu_gothic_uiW[] =
+    {'Y','u',' ','G','o','t','h','i','c',' ','U','I',0};
+static const WCHAR yu_gothic_ui_boldW[] =
+    {'Y','u',' ','G','o','t','h','i','c',' ','U','I',' ','B','o','l','d',0};
+static const WCHAR yu_gothic_ui_lightW[] =
+    {'Y','u',' ','G','o','t','h','i','c',' ','U','I',' ','L','i','g','h','t',0};
+static const WCHAR yu_gothic_ui_semilightW[] =
+    {'Y','u',' ','G','o','t','h','i','c',' ','U','I',' ','S','e','m','i','l','i','g','h','t',0};
+static const WCHAR yu_gothic_ui_semiboldW[] =
+    {'Y','u',' ','G','o','t','h','i','c',' ','U','I',' ','S','e','m','i','b','o','l','d',0};
+static const WCHAR meiryoW[] =
+    {'M','e','i','r','y','o',0};
+static const WCHAR meiryo_boldW[] =
+    {'M','e','i','r','y','o',' ','B','o','l','d',0};
+static const WCHAR meiryo_uiW[] =
+    {'M','e','i','r','y','o',' ','U','I',0};
+static const WCHAR meiryo_ui_boldW[] =
+    {'M','e','i','r','y','o',' ','U','I',' ','B','o','l','d',0};
+static const WCHAR ms_minchoW[] =
+    {'M','S',' ','M','i','n','c','h','o',0};
+static const WCHAR ms_p_minchoW[] =
+    {'M','S',' ','P','M','i','n','c','h','o',0};
 
 static const WCHAR * const font_links_list[] =
 {
@@ -1788,10 +1652,238 @@ static const char system_link_tahoma_non_cjk[] =
     "MALGUN.TTF,Malgun Gothic\0"
     "SEGUISYM.TTF,Segoe UI Symbol\0";
 
+static const char system_link_ms_gothic[] =
+    "MINGLIU.TTC,MingLiU\0"
+    "SIMSUN.TTC,SimSun\0"
+    "GULIM.TTC,GulimChe\0"
+    "YUGOTHM.TTC,Yu Gothic UI\0"
+    "MSJH.TTC,Microsoft JhengHei UI\0"
+    "MSYH.TTC,Microsoft YaHei UI\0"
+    "MALGUN.TTF,Malgun Gothic\0"
+    "SEGUISYM.TTF,Segoe UI Symbol\0";
+
+static const char system_link_ms_p_gothic[] =
+    "MINGLIU.TTC,PMingLiU\0"
+    "SIMSUN.TTC,SimSun\0"
+    "GULIM.TTC,Gulim\0"
+    "YUGOTHM.TTC,Yu Gothic UI\0"
+    "MSJH.TTC,Microsoft JhengHei UI\0"
+    "MSYH.TTC,Microsoft YaHei UI\0"
+    "MALGUN.TTF,Malgun Gothic\0"
+    "SEGUISYM.TTF,Segoe UI Symbol\0";
+
 static const char system_link_ms_ui_gothic[] =
     "MICROSS.TTF,Microsoft Sans Serif\0"
-    "MINGLIU.TTC,PMingLiU\0""SIMSUN.TTC,SimSun\0"
+    "MINGLIU.TTC,PMingLiU\0"
+    "SIMSUN.TTC,SimSun\0"
     "GULIM.TTC,Gulim\0"
+    "YUGOTHM.TTC,Yu Gothic UI\0"
+    "MSJH.TTC,Microsoft JhengHei UI\0"
+    "MSYH.TTC,Microsoft YaHei UI\0"
+    "MALGUN.TTF,Malgun Gothic\0"
+    "SEGUISYM.TTF,Segoe UI Symbol\0";
+
+static const char system_link_microsoft_jheng_hei[] =
+    "SEGOEUI.TTF,Segoe UI\0"
+    "MINGLIU.TTC,MingLiU\0"
+    "MSYH.TTC,Microsoft YaHei\0"
+    "MEIRYO.TTC,Meiryo\0"
+    "MALGUN.TTF,Malgun Gothic\0"
+    "YUGOTHM.TTC,Yu Gothic UI\0"
+    "SEGUISYM.TTF,Segoe UI Symbol\0";
+
+static const char system_link_microsoft_jheng_hei_bold[] =
+    "SEGOEUIB.TTF,Segoe UI Bold\0"
+    "MINGLIU.TTC,MingLiU\0"
+    "MSYHBD.TTC,Microsoft YaHei Bold\0"
+    "MEIRYOB.TTC,Meiryo Bold\0"
+    "MALGUNBD.TTF,Malgun Gothic Bold\0"
+    "YUGOTHB.TTC,Yu Gothic UI Bold\0"
+    "SEGUISYM.TTF,Segoe UI Symbol\0";
+
+static const char system_link_microsoft_jheng_hei_ui[] =
+    "SEGOEUI.TTF,Segoe UI\0"
+    "MINGLIU.TTC,MingLiU\0"
+    "MSYH.TTC,Microsoft YaHei UI\0"
+    "MEIRYO.TTC,Meiryo UI\0"
+    "MALGUN.TTF,Malgun Gothic\0"
+    "YUGOTHM.TTC,Yu Gothic UI\0"
+    "SEGUISYM.TTF,Segoe UI Symbol\0";
+
+static const char system_link_microsoft_jheng_hei_ui_bold[] =
+    "SEGOEUIB.TTF,Segoe UI Bold\0"
+    "MINGLIU.TTC,MingLiU\0"
+    "MSYHBD.TTC,Microsoft YaHei UI Bold\0"
+    "MEIRYOB.TTC,Meiryo UI Bold\0"
+    "MALGUNBD.TTF,Malgun Gothic Bold\0"
+    "YUGOTHB.TTC,Yu Gothic UI Bold\0"
+    "SEGUISYM.TTF,Segoe UI Symbol\0";
+
+static const char system_link_microsoft_jheng_hei_ui_light[] =
+    "SEGOEUIL.TTF,Segoe UI Light\0"
+    "MINGLIU.TTC,MingLiU\0"
+    "MSYHL.TTC,Microsoft YaHei UI Light\0"
+    "MEIRYO.TTC,Meiryo UI\0"
+    "MALGUNSL.TTF,Malgun Gothic Semilight\0"
+    "YUGOTHL.TTC,Yu Gothic UI Light\0"
+    "SEGUISYM.TTF,Segoe UI Symbol\0";
+
+static const char system_link_ming_li_u[] =
+    "MICROSS.TTF,Microsoft Sans Serif\0"
+    "SIMSUN.TTC,SimSun\0"
+    "MSMINCHO.TTC,MS Mincho\0"
+    "BATANG.TTC,BatangChe\0"
+    "MSJH.TTC,Microsoft JhengHei UI\0"
+    "MSYH.TTC,Microsoft YaHei UI\0"
+    "YUGOTHM.TTC,Yu Gothic UI\0"
+    "MALGUN.TTF,Malgun Gothic\0"
+    "SEGUISYM.TTF,Segoe UI Symbol\0";
+
+static const char system_link_p_ming_li_u[] =
+    "MICROSS.TTF,Microsoft Sans Serif\0"
+    "SIMSUN.TTC,SimSun\0"
+    "MSMINCHO.TTC,MS PMincho\0"
+    "BATANG.TTC,Batang\0"
+    "MSJH.TTC,Microsoft JhengHei UI\0"
+    "MSYH.TTC,Microsoft YaHei UI\0"
+    "YUGOTHM.TTC,Yu Gothic UI\0"
+    "MALGUN.TTF,Malgun Gothic\0"
+    "SEGUISYM.TTF,Segoe UI Symbol\0";
+
+static const char system_link_ming_li_u_hkscs[] =
+    "MICROSS.TTF,Microsoft Sans Serif\0"
+    "MINGLIU.TTC,MingLiU\0"
+    "SIMSUN.TTC,SimSun\0"
+    "MSMINCHO.TTC,MS Mincho\0"
+    "BATANG.TTC,BatangChe\0"
+    "MSJH.TTC,Microsoft JhengHei UI\0"
+    "MSYH.TTC,Microsoft YaHei UI\0"
+    "YUGOTHM.TTC,Yu Gothic UI\0"
+    "MALGUN.TTF,Malgun Gothic\0"
+    "SEGUISYM.TTF,Segoe UI Symbol\0";
+
+static const char system_link_ming_li_u_ext_b[] =
+    "MICROSS.TTF,Microsoft Sans Serif\0"
+    "MINGLIU.TTC,MingLiU\0"
+    "SIMSUN.TTC,SimSun\0"
+    "MSMINCHO.TTC,MS Mincho\0"
+    "BATANG.TTC,BatangChe\0"
+    "MSJH.TTC,Microsoft JhengHei UI\0"
+    "MSYH.TTC,Microsoft YaHei UI\0"
+    "YUGOTHM.TTC,Yu Gothic UI\0"
+    "MALGUN.TTF,Malgun Gothic\0"
+    "SEGUISYM.TTF,Segoe UI Symbol\0";
+
+static const char system_link_p_ming_li_u_ext_b[] =
+    "MICROSS.TTF,Microsoft Sans Serif\0"
+    "MINGLIU.TTC,PMingLiU\0"
+    "SIMSUN.TTC,SimSun\0"
+    "MSMINCHO.TTC,MS PMincho\0"
+    "BATANG.TTC,Batang\0"
+    "MSJH.TTC,Microsoft JhengHei UI\0"
+    "MSYH.TTC,Microsoft YaHei UI\0"
+    "YUGOTHM.TTC,Yu Gothic UI\0"
+    "MALGUN.TTF,Malgun Gothic\0"
+    "SEGUISYM.TTF,Segoe UI Symbol\0";
+
+static const char system_link_ming_li_u_hkscs_ext_b[] =
+    "MICROSS.TTF,Microsoft Sans Serif\0"
+    "MINGLIU.TTC,MingLiU_HKSCS\0"
+    "MINGLIU.TTC,MingLiU\0"
+    "SIMSUN.TTC,SimSun\0"
+    "MSMINCHO.TTC,MS Mincho\0"
+    "BATANG.TTC,BatangChe\0"
+    "MSJH.TTC,Microsoft JhengHei UI\0"
+    "MSYH.TTC,Microsoft YaHei UI\0"
+    "YUGOTHM.TTC,Yu Gothic UI\0"
+    "MALGUN.TTF,Malgun Gothic\0"
+    "SEGUISYM.TTF,Segoe UI Symbol\0";
+
+static const char system_link_yu_gothic_ui[] =
+    "SEGOEUI.TTF,Segoe UI\0"
+    "MSJH.TTC,Microsoft JhengHei\0"
+    "MSYH.TTC,Microsoft YaHei\0"
+    "MALGUN.TTF,Malgun Gothic\0"
+    "SEGUISYM.TTF,Segoe UI Symbol\0";
+
+static const char system_link_yu_gothic_ui_bold[] =
+    "SEGOEUIB.TTF,Segoe UI Bold\0"
+    "MSJHBD.TTC,Microsoft Jhenghei UI Bold\0"
+    "MSYHBD.TTC,Microsoft YaHei Bold\0"
+    "MALGUNBD.TTF,Malgun Gothic Bold\0"
+    "SEGUISYM.TTF,Segoe UI Symbol\0";
+
+static const char system_link_yu_gothic_ui_light[] =
+    "SEGOEUIL.TTF,Segoe UI Light\0"
+    "MSJHL.TTC,Microsoft Jhenghei UI Light\0"
+    "MSYHL.TTC,Microsoft YaHei Light\0"
+    "MALGUNSL.TTF,Malgun Gothic Semilight\0"
+    "SEGUISYM.TTF,Segoe UI Symbol\0";
+
+static const char system_link_yu_gothic_ui_semilight[] =
+    "SEGOEUISL.TTF,Segoe UI Semilight\0"
+    "MSJH.TTC,Microsoft Jhenghei UI\0"
+    "MSYH.TTC,Microsoft YaHei\0"
+    "MALGUNSL.TTF,Malgun Gothic Semilight\0"
+    "SEGUISYM.TTF,Segoe UI Symbol\0";
+
+static const char system_link_yu_gothic_ui_semibold[] =
+    "SEGUISB.TTF,Segoe UI Semibold\0"
+    "MSJH.TTC,Microsoft Jhenghei UI\0"
+    "MSYH.TTC,Microsoft YaHei\0"
+    "MALGUN.TTF,Malgun Gothic\0"
+    "SEGUISYM.TTF,Segoe UI Symbol\0";
+
+static const char system_link_meiryo[] =
+    "SEGOEUI.TTF,Segoe UI\0"
+    "YUGOTHM.TTC,Yu Gothic UI\0"
+    "MSGOTHIC.TTC,MS UI Gothic\0"
+    "MSJH.TTC,Microsoft JhengHei\0"
+    "MSYH.TTC,Microsoft YaHei\0"
+    "MALGUN.TTF,Malgun Gothic\0"
+    "SEGUISYM.TTF,Segoe UI Symbol\0";
+
+static const char system_link_meiryo_bold[] =
+    "SEGOEUIB.TTF,Segoe UI Bold\0"
+    "YUGOTHB.TTC,Yu Gothic UI Bold\0"
+    "MSGOTHIC.TTC,MS UI Gothic\0"
+    "MSJHBD.TTC,Microsoft Jhenghei Bold\0"
+    "MSYHBD.TTC,Microsoft YaHei Bold\0"
+    "MALGUNBD.TTF,Malgun Gothic Bold\0"
+    "SEGUISYM.TTF,Segoe UI Symbol\0";
+
+static const char system_link_meiryo_ui[] =
+    "SEGOEUI.TTF,Segoe UI\0"
+    "YUGOTHM.TTC,Yu Gothic UI\0"
+    "MSGOTHIC.TTC,MS UI Gothic\0"
+    "MSJH.TTC,Microsoft Jhenghei UI\0"
+    "MSYH.TTC,Microsoft YaHei UI\0"
+    "MALGUN.TTF,Malgun Gothic\0"
+    "SEGUISYM.TTF,Segoe UI Symbol\0";
+
+static const char system_link_meiryo_ui_bold[] =
+    "SEGOEUIB.TTF,Segoe UI Bold\0"
+    "YUGOTHB.TTC,Yu Gothic UI Bold\0"
+    "MSGOTHIC.TTC,MS UI Gothic\0"
+    "MSJHBD.TTC,Microsoft Jhenghei UI Bold\0"
+    "MSYHBD.TTC,Microsoft YaHei UI Bold\0"
+    "MALGUNBD.TTF,Malgun Gothic Bold\0"
+    "SEGUISYM.TTF,Segoe UI Symbol\0";
+
+static const char system_link_ms_mincho[] =
+    "MINGLIU.TTC,MingLiU\0"
+    "SIMSUN.TTC,SimSun\0"
+    "BATANG.TTC,Batang\0"
+    "YUGOTHM.TTC,Yu Gothic UI\0"
+    "MSJH.TTC,Microsoft JhengHei UI\0"
+    "MSYH.TTC,Microsoft YaHei UI\0"
+    "MALGUN.TTF,Malgun Gothic\0"
+    "SEGUISYM.TTF,Segoe UI Symbol\0";
+
+static const char system_link_ms_p_mincho[] =
+    "MINGLIU.TTC,PMingLiU\0"
+    "SIMSUN.TTC,SimSun\0"
+    "BATANG.TTC,Batang\0"
     "YUGOTHM.TTC,Yu Gothic UI\0"
     "MSJH.TTC,Microsoft JhengHei UI\0"
     "MSYH.TTC,Microsoft YaHei UI\0"
@@ -1839,39 +1931,31 @@ default_system_link[] =
         system_link_tahoma_jp,      sizeof(system_link_tahoma_jp),
         system_link_tahoma_kr,      sizeof(system_link_tahoma_kr),
     },
-    {
-        arialW, TRUE,
-        system_link_tahoma_non_cjk, sizeof(system_link_tahoma_non_cjk),
-        system_link_tahoma_sc,      sizeof(system_link_tahoma_sc),
-        system_link_tahoma_tc,      sizeof(system_link_tahoma_tc),
-        system_link_tahoma_jp,      sizeof(system_link_tahoma_jp),
-        system_link_tahoma_kr,      sizeof(system_link_tahoma_kr),
-    },
-    {
-        arial_boldW, TRUE,
-        system_link_tahoma_non_cjk, sizeof(system_link_tahoma_non_cjk),
-        system_link_tahoma_sc,      sizeof(system_link_tahoma_sc),
-        system_link_tahoma_tc,      sizeof(system_link_tahoma_tc),
-        system_link_tahoma_jp,      sizeof(system_link_tahoma_jp),
-        system_link_tahoma_kr,      sizeof(system_link_tahoma_kr),
-    },
-    {
-        courier_newW, TRUE,
-        system_link_tahoma_non_cjk, sizeof(system_link_tahoma_non_cjk),
-        system_link_tahoma_sc,      sizeof(system_link_tahoma_sc),
-        system_link_tahoma_tc,      sizeof(system_link_tahoma_tc),
-        system_link_tahoma_jp,      sizeof(system_link_tahoma_jp),
-        system_link_tahoma_kr,      sizeof(system_link_tahoma_kr),
-    },
-    {
-        courier_new_boldW, TRUE,
-        system_link_tahoma_non_cjk, sizeof(system_link_tahoma_non_cjk),
-        system_link_tahoma_sc,      sizeof(system_link_tahoma_sc),
-        system_link_tahoma_tc,      sizeof(system_link_tahoma_tc),
-        system_link_tahoma_jp,      sizeof(system_link_tahoma_jp),
-        system_link_tahoma_kr,      sizeof(system_link_tahoma_kr),
-    },
-    { ms_ui_gothicW, FALSE, system_link_ms_ui_gothic, sizeof(system_link_ms_ui_gothic) },
+    { ms_gothicW,                    FALSE, system_link_ms_gothic,                    sizeof(system_link_ms_gothic) },
+    { ms_p_gothicW,                  FALSE, system_link_ms_p_gothic,                  sizeof(system_link_ms_p_gothic) },
+    { ms_ui_gothicW,                 FALSE, system_link_ms_ui_gothic,                 sizeof(system_link_ms_ui_gothic) },
+    { microsoft_jheng_heiW,          FALSE, system_link_microsoft_jheng_hei,          sizeof(system_link_microsoft_jheng_hei) },
+    { microsoft_jheng_hei_boldW,     FALSE, system_link_microsoft_jheng_hei_bold,     sizeof(system_link_microsoft_jheng_hei_bold) },
+    { microsoft_jheng_hei_uiW,       FALSE, system_link_microsoft_jheng_hei_ui,       sizeof(system_link_microsoft_jheng_hei_ui) },
+    { microsoft_jheng_hei_ui_boldW,  FALSE, system_link_microsoft_jheng_hei_ui_bold,  sizeof(system_link_microsoft_jheng_hei_ui_bold) },
+    { microsoft_jheng_hei_ui_lightW, FALSE, system_link_microsoft_jheng_hei_ui_light, sizeof(system_link_microsoft_jheng_hei_ui_light) },
+    { ming_li_uW,                    FALSE, system_link_ming_li_u,                    sizeof(system_link_ming_li_u) },
+    { p_ming_li_uW,                  FALSE, system_link_p_ming_li_u,                  sizeof(system_link_p_ming_li_u) },
+    { ming_li_u_hkscsW,              FALSE, system_link_ming_li_u_hkscs,              sizeof(system_link_ming_li_u_hkscs) },
+    { ming_li_u_ext_bW,              FALSE, system_link_ming_li_u_ext_b,              sizeof(system_link_ming_li_u_ext_b) },
+    { p_ming_li_u_ext_bW,            FALSE, system_link_p_ming_li_u_ext_b,            sizeof(system_link_p_ming_li_u_ext_b) },
+    { ming_li_u_hkscs_ext_bW,        FALSE, system_link_ming_li_u_hkscs_ext_b,        sizeof(system_link_ming_li_u_hkscs_ext_b) },
+    { yu_gothic_uiW,                 FALSE, system_link_yu_gothic_ui,                 sizeof(system_link_yu_gothic_ui) },
+    { yu_gothic_ui_boldW,            FALSE, system_link_yu_gothic_ui_bold,            sizeof(system_link_yu_gothic_ui_bold) },
+    { yu_gothic_ui_lightW,           FALSE, system_link_yu_gothic_ui_light,           sizeof(system_link_yu_gothic_ui_light) },
+    { yu_gothic_ui_semiboldW,        FALSE, system_link_yu_gothic_ui_semibold,        sizeof(system_link_yu_gothic_ui_semibold) },
+    { yu_gothic_ui_semilightW,       FALSE, system_link_yu_gothic_ui_semilight,       sizeof(system_link_yu_gothic_ui_semilight) },
+    { meiryoW,                       FALSE, system_link_meiryo,                       sizeof(system_link_meiryo) },
+    { meiryo_boldW,                  FALSE, system_link_meiryo_bold,                  sizeof(system_link_meiryo_bold) },
+    { meiryo_uiW,                    FALSE, system_link_meiryo_ui,                    sizeof(system_link_meiryo_ui) },
+    { meiryo_ui_boldW,               FALSE, system_link_meiryo_ui_bold,               sizeof(system_link_meiryo_ui_bold) },
+    { ms_minchoW,                    FALSE, system_link_ms_mincho,                    sizeof(system_link_ms_mincho) },
+    { ms_p_minchoW,                  FALSE, system_link_ms_p_mincho,                  sizeof(system_link_ms_p_mincho) },
 };
 
 static void populate_system_links( const WCHAR *name, const WCHAR * const *values )
@@ -2005,28 +2089,27 @@ static void load_system_links(void)
 /* see TranslateCharsetInfo */
 BOOL translate_charset_info( DWORD *src, CHARSETINFO *cs, DWORD flags )
 {
-    int index = 0;
+    unsigned int i;
 
     switch (flags)
     {
     case TCI_SRCFONTSIG:
-        while (index < ARRAY_SIZE(charset_info) && !(*src>>index & 0x0001)) index++;
-        break;
+        for (i = 0; i < ARRAY_SIZE(charset_info); i++)
+            if (charset_info[i].fs.fsCsb[0] & src[0]) goto found;
+        return FALSE;
     case TCI_SRCCODEPAGE:
-        while (index < ARRAY_SIZE(charset_info) && PtrToUlong(src) != charset_info[index].ciACP)
-            index++;
-        break;
+        for (i = 0; i < ARRAY_SIZE(charset_info); i++)
+            if (PtrToUlong(src) == charset_info[i].ciACP) goto found;
+        return FALSE;
     case TCI_SRCCHARSET:
-        while (index < ARRAY_SIZE(charset_info) &&
-               PtrToUlong(src) != charset_info[index].ciCharset)
-            index++;
-        break;
+        for (i = 0; i < ARRAY_SIZE(charset_info); i++)
+            if (PtrToUlong(src) == charset_info[i].ciCharset) goto found;
+        return FALSE;
     default:
         return FALSE;
     }
-
-    if (index >= ARRAY_SIZE(charset_info) || charset_info[index].ciCharset == DEFAULT_CHARSET) return FALSE;
-    *cs = charset_info[index];
+found:
+    *cs = charset_info[i];
     return TRUE;
 }
 
@@ -2194,10 +2277,9 @@ static struct gdi_font_face *find_matching_face( const LOGFONTW *lf, CHARSETINFO
        corresponding to the current ansi codepage */
     if (!csi->fs.fsCsb[0])
     {
-        INT acp = get_acp();
-        if (!translate_charset_info( (DWORD *)(INT_PTR)acp, csi, TCI_SRCCODEPAGE ))
+        if (!translate_charset_info( (DWORD *)(INT_PTR)ansi_cp.CodePage, csi, TCI_SRCCODEPAGE ))
         {
-            FIXME( "TCI failed on codepage %d\n", acp );
+            FIXME( "TCI failed on codepage %d\n", ansi_cp.CodePage );
             csi->fs.fsCsb[0] = 0;
         }
     }
@@ -2227,7 +2309,7 @@ static struct font_handle_entry font_handles[MAX_FONT_HANDLES];
 static struct font_handle_entry *next_free;
 static struct font_handle_entry *next_unused = font_handles;
 
-static struct font_handle_entry *handle_entry( DWORD handle )
+static struct font_handle_entry *handle_entry( unsigned int handle )
 {
     unsigned int idx = LOWORD(handle) - FIRST_FONT_HANDLE;
 
@@ -2240,12 +2322,12 @@ static struct font_handle_entry *handle_entry( DWORD handle )
     return NULL;
 }
 
-static struct gdi_font *get_font_from_handle( DWORD handle )
+static struct gdi_font *get_font_from_handle( unsigned int handle )
 {
     struct font_handle_entry *entry = handle_entry( handle );
 
     if (entry) return entry->font;
-    SetLastError( ERROR_INVALID_PARAMETER );
+    RtlSetLastWin32Error( ERROR_INVALID_PARAMETER );
     return NULL;
 }
 
@@ -2367,9 +2449,9 @@ static struct gdi_font *create_gdi_font( const struct gdi_font_face *face, const
     font->ntmFlags = face->ntmFlags;
     font->aa_flags = HIWORD( face->flags );
     if (!family_name) family_name = face->family->family_name;
-    font->otm.otmpFamilyName = (char *)strdupW( family_name );
-    font->otm.otmpStyleName = (char *)strdupW( face->style_name );
-    font->otm.otmpFaceName = (char *)strdupW( face->full_name );
+    font->otm.otmpFamilyName = (char *)wcsdup( family_name );
+    font->otm.otmpStyleName = (char *)wcsdup( face->style_name );
+    font->otm.otmpFaceName = (char *)wcsdup( face->full_name );
     return font;
 }
 
@@ -2624,7 +2706,7 @@ static void *get_GSUB_vert_feature( struct gdi_font *font )
     GSUB_Script *script;
     GSUB_LangSys *language;
     GSUB_Feature *feature;
-    DWORD length = font_funcs->get_font_data( font, MS_GSUB_TAG, 0, NULL, 0 );
+    UINT length = font_funcs->get_font_data( font, MS_GSUB_TAG, 0, NULL, 0 );
 
     if (length == GDI_ERROR) return NULL;
 
@@ -2787,7 +2869,7 @@ static void create_child_font_list( struct gdi_font *font )
      * if not SYMBOL or OEM then we also get all the fonts for Microsoft
      * Sans Serif.  This is how asian windows get default fallbacks for fonts
      */
-    if (is_dbcs_ansi_cp(get_acp()) && font->charset != SYMBOL_CHARSET && font->charset != OEM_CHARSET &&
+    if (ansi_cp.MaximumCharacterSize == 2 && font->charset != SYMBOL_CHARSET && font->charset != OEM_CHARSET &&
         facename_compare( font_name, microsoft_sans_serifW, -1 ) != 0)
     {
         if ((font_link = find_gdi_font_link( microsoft_sans_serifW )))
@@ -2918,12 +3000,12 @@ static void set_value_key(HKEY hkey, const char *name, const char *value)
     }
 }
 
-static void update_font_association_info(UINT current_ansi_codepage)
+static void update_font_association_info(void)
 {
     static const WCHAR associated_charsetW[] =
         { 'A','s','s','o','c','i','a','t','e','d',' ','C','h','a','r','s','e','t' };
 
-    if (is_dbcs_ansi_cp(current_ansi_codepage))
+    if (ansi_cp.MaximumCharacterSize == 2)
     {
         HKEY hkey;
         if ((hkey = reg_create_key( NULL, font_assoc_keyW, sizeof(font_assoc_keyW), 0, NULL )))
@@ -2932,7 +3014,7 @@ static void update_font_association_info(UINT current_ansi_codepage)
             if ((hsubkey = reg_create_key( hkey, associated_charsetW, sizeof(associated_charsetW),
                                            0, NULL )))
             {
-                switch (current_ansi_codepage)
+                switch (ansi_cp.CodePage)
                 {
                 case 932:
                     set_value_key(hsubkey, "ANSI(00)", "NO");
@@ -2959,17 +3041,24 @@ static void update_font_association_info(UINT current_ansi_codepage)
         reg_delete_tree( NULL, font_assoc_keyW, sizeof(font_assoc_keyW) );
 }
 
-static void set_multi_value_key( HKEY hkey, const WCHAR *name, const char *value, DWORD len )
+static void set_multi_value_key( HKEY hkey, const WCHAR *name, const char *value, UINT len )
 {
-    WCHAR valueW[256];
+    WCHAR *valueW;
+
+    if (!(valueW = malloc( len * sizeof(WCHAR) )))
+    {
+        ERR( "malloc of %d * WCHAR failed\n", len );
+        return;
+    }
     ascii_to_unicode( valueW, value, len );
     if (value)
         set_reg_value( hkey, name, REG_MULTI_SZ, valueW, len * sizeof(WCHAR) );
     else if (name)
         reg_delete_value( hkey, name );
+    free( valueW );
 }
 
-static void update_font_system_link_info(UINT current_ansi_codepage)
+static void update_font_system_link_info(void)
 {
     HKEY hkey;
 
@@ -2987,7 +3076,7 @@ static void update_font_system_link_info(UINT current_ansi_codepage)
 
             if (link_reg->locale_dependent)
             {
-                switch (current_ansi_codepage)
+                switch (ansi_cp.CodePage)
                 {
                 case 932:
                     link = link_reg->link_jp;
@@ -3015,14 +3104,15 @@ static void update_font_system_link_info(UINT current_ansi_codepage)
 
 static void update_codepage( UINT screen_dpi )
 {
+    USHORT utf8_hdr[2] = { 0, CP_UTF8 };
     char value_buffer[FIELD_OFFSET(KEY_VALUE_PARTIAL_INFORMATION, Data[40 * sizeof(WCHAR)])];
     KEY_VALUE_PARTIAL_INFORMATION *info = (void *)value_buffer;
     char cpbuf[40];
     WCHAR cpbufW[40];
     HKEY hkey;
     DWORD size;
-    UINT i, ansi_cp, oem_cp;
-    DWORD font_dpi = 0;
+    UINT i;
+    UINT font_dpi = 0;
     BOOL done = FALSE, cp_match = FALSE;
 
     static const WCHAR log_pixelsW[] = {'L','o','g','P','i','x','e','l','s',0};
@@ -3031,33 +3121,35 @@ static void update_codepage( UINT screen_dpi )
     if (size == sizeof(DWORD) && info->Type == REG_DWORD)
         font_dpi = *(DWORD *)info->Data;
 
-    ansi_cp = get_acp();
-    oem_cp = get_oemcp();
-    sprintf( cpbuf, "%u,%u", ansi_cp, oem_cp );
+    RtlInitCodePageTable( utf8_hdr, &utf8_cp );
+    if (NtCurrentTeb()->Peb->AnsiCodePageData)
+        RtlInitCodePageTable( NtCurrentTeb()->Peb->AnsiCodePageData, &ansi_cp );
+    else
+        ansi_cp = utf8_cp;
+    if (NtCurrentTeb()->Peb->OemCodePageData)
+        RtlInitCodePageTable( NtCurrentTeb()->Peb->OemCodePageData, &oem_cp );
+    else
+        oem_cp = utf8_cp;
+    sprintf( cpbuf, "%u,%u", ansi_cp.CodePage, oem_cp.CodePage );
     asciiz_to_unicode( cpbufW, cpbuf );
 
     if (query_reg_ascii_value( wine_fonts_key, "Codepages", info, sizeof(value_buffer) ))
     {
         cp_match = !wcscmp( (const WCHAR *)info->Data, cpbufW );
-        if (cp_match && screen_dpi == font_dpi)
-        {
-            /* already set correctly, but, as a HACK, update font link
-               info anyway, so that old Proton prefixes are fixed */
-            update_font_system_link_info(ansi_cp);
-            return;
-        }
+        if (cp_match && screen_dpi == font_dpi) return;  /* already set correctly */
         TRACE( "updating registry, codepages/logpixels changed %s/%u -> %u,%u/%u\n",
-               debugstr_w((const WCHAR *)info->Data), font_dpi, ansi_cp, oem_cp, screen_dpi );
+               debugstr_w((const WCHAR *)info->Data), font_dpi, ansi_cp.CodePage, oem_cp.CodePage, screen_dpi );
     }
     else TRACE("updating registry, codepages/logpixels changed none -> %u,%u/%u\n",
-               ansi_cp, oem_cp, screen_dpi);
+               ansi_cp.CodePage, oem_cp.CodePage, screen_dpi);
 
     set_reg_ascii_value( wine_fonts_key, "Codepages", cpbuf );
     set_reg_value( wine_fonts_key, log_pixelsW, REG_DWORD, &screen_dpi, sizeof(screen_dpi) );
 
     for (i = 0; i < ARRAY_SIZE(nls_update_font_list); i++)
     {
-        if (nls_update_font_list[i].ansi_cp == ansi_cp && nls_update_font_list[i].oem_cp == oem_cp)
+        if (nls_update_font_list[i].ansi_cp == ansi_cp.CodePage &&
+            nls_update_font_list[i].oem_cp == oem_cp.CodePage)
         {
             HKEY software_hkey;
             if ((software_hkey = reg_create_key( NULL, software_config_keyW,
@@ -3125,14 +3217,14 @@ static void update_codepage( UINT screen_dpi )
         }
     }
     if (!done)
-        FIXME("there is no font defaults for codepages %u,%u\n", ansi_cp, oem_cp);
+        FIXME("there is no font defaults for codepages %u,%u\n", ansi_cp.CodePage, oem_cp.CodePage);
 
     /* update locale dependent font association info and font system link info in registry.
        update only when codepages changed, not logpixels. */
     if (!cp_match)
     {
-        update_font_association_info(ansi_cp);
-        update_font_system_link_info(ansi_cp);
+        update_font_association_info();
+        update_font_system_link_info();
     }
 }
 
@@ -3178,11 +3270,11 @@ struct enum_charset
     DWORD script;
 };
 
-static BOOL is_complex_script_ansi_cp( UINT ansi_cp )
+static BOOL is_complex_script_ansi_cp(void)
 {
-    return (ansi_cp == 874 /* Thai */
-            || ansi_cp == 1255 /* Hebrew */
-            || ansi_cp == 1256 /* Arabic */
+    return (ansi_cp.CodePage == 874 /* Thai */
+            || ansi_cp.CodePage == 1255 /* Hebrew */
+            || ansi_cp.CodePage == 1256 /* Arabic */
         );
 }
 
@@ -3209,12 +3301,11 @@ static DWORD create_enum_charset_list(DWORD charset, struct enum_charset *list)
     }
     else /* charset is DEFAULT_CHARSET or invalid. */
     {
-        int acp = get_acp();
         DWORD mask = 0;
 
         /* Set the current codepage's charset as the first element. */
-        if (!is_complex_script_ansi_cp(acp) &&
-            translate_charset_info( (DWORD *)(INT_PTR)acp, &csi, TCI_SRCCODEPAGE ) &&
+        if (!is_complex_script_ansi_cp() &&
+            translate_charset_info( (DWORD *)(INT_PTR)ansi_cp.CodePage, &csi, TCI_SRCCODEPAGE ) &&
             csi.fs.fsCsb[0] != 0)
         {
             list->mask    = csi.fs.fsCsb[0];
@@ -3368,7 +3459,7 @@ static BOOL enum_face_charsets( const struct gdi_font_family *family, struct gdi
 {
     ENUMLOGFONTEXW elf;
     NEWTEXTMETRICEXW ntm;
-    DWORD type, i;
+    UINT type, i;
 
     if (!face->cached_enum_data)
     {
@@ -3415,7 +3506,7 @@ static BOOL enum_face_charsets( const struct gdi_font_family *family, struct gdi
         TRACE( "face %s full %s style %s charset = %d type %d script %s it %d weight %d ntmflags %08x\n",
                debugstr_w(elf.elfLogFont.lfFaceName), debugstr_w(elf.elfFullName), debugstr_w(elf.elfStyle),
                elf.elfLogFont.lfCharSet, type, debugstr_w(elf.elfScript),
-               elf.elfLogFont.lfItalic, elf.elfLogFont.lfWeight, ntm.ntmTm.ntmFlags );
+               elf.elfLogFont.lfItalic, (int)elf.elfLogFont.lfWeight, (int)ntm.ntmTm.ntmFlags );
         /* release section before callback (FIXME) */
         pthread_mutex_unlock( &font_lock );
         if (!proc( &elf.elfLogFont, (TEXTMETRICW *)&ntm, type, lparam )) return FALSE;
@@ -3432,7 +3523,7 @@ static BOOL CDECL font_EnumFonts( PHYSDEV dev, LOGFONTW *lf, FONTENUMPROCW proc,
     struct gdi_font_family *family;
     struct gdi_font_face *face;
     struct enum_charset enum_charsets[32];
-    DWORD count, charset;
+    UINT count, charset;
 
     charset = lf ? lf->lfCharSet : DEFAULT_CHARSET;
 
@@ -3460,7 +3551,7 @@ static BOOL CDECL font_EnumFonts( PHYSDEV dev, LOGFONTW *lf, FONTENUMPROCW proc,
             {
                 if (!face_matches( family->family_name, face, face_name )) continue;
                 if (!enum_face_charsets( family, face, enum_charsets, count, proc, lparam, orig_name ))
-                    return FALSE;
+                    return FALSE; /* enum_face_charsets() unlocked font_lock */
 	    }
 	}
     }
@@ -3471,7 +3562,7 @@ static BOOL CDECL font_EnumFonts( PHYSDEV dev, LOGFONTW *lf, FONTENUMPROCW proc,
         {
             face = LIST_ENTRY( list_head(get_family_face_list(family)), struct gdi_font_face, entry );
             if (!enum_face_charsets( family, face, enum_charsets, count, proc, lparam, NULL ))
-                return FALSE;
+                return FALSE; /* enum_face_charsets() unlocked font_lock */
 	}
     }
     pthread_mutex_unlock( &font_lock );
@@ -3509,10 +3600,12 @@ static UINT get_glyph_index_symbol( struct gdi_font *font, UINT glyph )
 CPTABLEINFO *get_cptable( WORD cp )
 {
     static CPTABLEINFO tables[100];
-    CPTABLEINFO *info;
     unsigned int i;
     USHORT *ptr;
     SIZE_T size;
+
+    if (cp == CP_ACP) return &ansi_cp;
+    if (cp == CP_UTF8) return &utf8_cp;
 
     for (i = 0; i < ARRAY_SIZE(tables) && tables[i].CodePage; i++)
         if (tables[i].CodePage == cp) return &tables[i];
@@ -3522,96 +3615,136 @@ CPTABLEINFO *get_cptable( WORD cp )
         ERR( "too many code pages\n" );
         return NULL;
     }
+    RtlInitCodePageTable( ptr, &tables[i] );
+    return &tables[i];
+}
 
-    info = &tables[i];
-    info->CodePage             = ptr[1];
-    info->MaximumCharacterSize = ptr[2];
-    info->DefaultChar          = ptr[3];
-    info->UniDefaultChar       = ptr[4];
-    info->TransDefaultChar     = ptr[5];
-    info->TransUniDefaultChar  = ptr[6];
-    memcpy( info->LeadByte, ptr + 7, sizeof(info->LeadByte) );
-    ptr += ptr[0];
+/* Based on NlsValidateLocale */
+const NLS_LOCALE_DATA *get_locale_data( LCID lcid )
+{
+    static const NLS_LOCALE_HEADER *locale_table;
+    static const NLS_LOCALE_LCID_INDEX *lcids_index;
+    int min = 0, max;
 
-    info->WideCharTable = ptr + ptr[0] + 1;
-    info->MultiByteTable = ++ptr;
-    ptr += 256;
-    if (*ptr++) ptr += 256;  /* glyph table */
-    info->DBCSRanges = ptr;
-    if (*ptr)  /* dbcs ranges */
+    if (!locale_table)
     {
-        info->DBCSCodePage = 1;
-        info->DBCSOffsets  = ptr + 1;
-    }
-    else
-    {
-        info->DBCSCodePage = 0;
-        info->DBCSOffsets  = NULL;
+        LARGE_INTEGER size;
+        void *addr;
+        LCID lcid;
+        NTSTATUS status;
+        static struct
+        {
+            UINT ctypes;
+            UINT unknown1;
+            UINT unknown2;
+            UINT unknown3;
+            UINT locales;
+            UINT charmaps;
+            UINT geoids;
+            UINT scripts;
+        } *header;
+
+        status = NtInitializeNlsFiles( &addr, &lcid, &size );
+        if (status)
+        {
+            ERR( "Failed to load nls file\n" );
+            return NULL;
+        }
+
+        if (InterlockedCompareExchangePointer( (void **)&header, addr, NULL ))
+            NtUnmapViewOfSection( GetCurrentProcess(), addr );
+
+        locale_table = (const NLS_LOCALE_HEADER *)((char *)header + header->locales);
+        lcids_index = (const NLS_LOCALE_LCID_INDEX *)((char *)locale_table + locale_table->lcids_offset);
     }
 
-    return info;
+    max = locale_table->nb_lcids - 1;
+    while (min <= max)
+    {
+        int pos = (min + max) / 2;
+        if (lcid < lcids_index[pos].id) max = pos - 1;
+        else if (lcid > lcids_index[pos].id) min = pos + 1;
+        else
+        {
+            ULONG offset = locale_table->locales_offset + pos * locale_table->locale_size;
+            return (const NLS_LOCALE_DATA *)((const char *)locale_table + offset);
+        }
+    }
+    return NULL;
 }
 
 DWORD win32u_wctomb( CPTABLEINFO *info, char *dst, DWORD dstlen, const WCHAR *src, DWORD srclen )
 {
-    DWORD i, ret;
+    DWORD ret;
 
-    if (!info && !(info = get_cptable( get_acp() ))) return 0;
+    if (info->CodePage == CP_UTF8)
+        RtlUnicodeToUTF8N( dst, dstlen, &ret, src, srclen * sizeof(WCHAR) );
+    else
+        RtlUnicodeToCustomCPN( info, dst, dstlen, &ret, src, srclen * sizeof(WCHAR) );
 
-    srclen /= sizeof(WCHAR);
-    if (info->DBCSCodePage)
+    return ret;
+}
+
+DWORD win32u_wctomb_size( CPTABLEINFO *info, const WCHAR *src, DWORD srclen )
+{
+    DWORD ret;
+
+    if (info->CodePage == CP_UTF8)
+    {
+        RtlUnicodeToUTF8N( NULL, 0, &ret, src, srclen * sizeof(WCHAR) );
+    }
+    else if(info->DBCSCodePage)
     {
         WCHAR *uni2cp = info->WideCharTable;
-
-        for (i = dstlen; srclen && i; i--, srclen--, src++)
-        {
-            if (uni2cp[*src] & 0xff00)
-            {
-                if (i == 1) break;  /* do not output a partial char */
-                i--;
-                *dst++ = uni2cp[*src] >> 8;
-            }
-            *dst++ = (char)uni2cp[*src];
-        }
-        ret = dstlen - i;
+        for (ret = srclen; srclen; srclen--, src++)
+            if (uni2cp[*src] & 0xff00) ret++;
     }
     else
     {
-        char *uni2cp = info->WideCharTable;
-        ret = min( srclen, dstlen );
-        for (i = 0; i < ret; i++) dst[i] = uni2cp[src[i]];
+        ret = srclen;
     }
+
     return ret;
 }
 
 DWORD win32u_mbtowc( CPTABLEINFO *info, WCHAR *dst, DWORD dstlen, const char *src, DWORD srclen )
 {
-    DWORD i, ret;
+    DWORD ret;
 
-    if (!info && !(info = get_cptable( get_acp() ))) return 0;
+    if (info->CodePage == CP_UTF8)
+        RtlUTF8ToUnicodeN( dst, dstlen * sizeof(WCHAR), &ret, src, srclen );
+    else
+        RtlCustomCPToUnicodeN( info, dst, dstlen * sizeof(WCHAR), &ret, src, srclen );
 
-    dstlen /= sizeof(WCHAR);
-    if (info->DBCSOffsets)
+    return ret / sizeof(WCHAR);
+}
+
+DWORD win32u_mbtowc_size( CPTABLEINFO *info, const char *src, DWORD srclen )
+{
+    DWORD ret;
+
+    if (info->CodePage == CP_UTF8)
     {
-        for (i = dstlen; srclen && i; i--, srclen--, src++, dst++)
+        RtlUTF8ToUnicodeN( NULL, 0, &ret, src, srclen );
+        ret /= sizeof(WCHAR);
+    }
+    else if (info->DBCSCodePage)
+    {
+        for (ret = 0; srclen; srclen--, src++, ret++)
         {
-            USHORT off = info->DBCSOffsets[(unsigned char)*src];
-            if (off && srclen > 1)
+            if (info->DBCSOffsets[(unsigned char)*src] && srclen > 1)
             {
                 src++;
                 srclen--;
-                *dst = info->DBCSOffsets[off + (unsigned char)*src];
             }
-            else *dst = info->MultiByteTable[(unsigned char)*src];
         }
-        ret = dstlen - i;
     }
     else
     {
-        ret = min( srclen, dstlen );
-        for (i = 0; i < ret; i++) dst[i] = info->MultiByteTable[(unsigned char)src[i]];
+        ret = srclen;
     }
-    return ret * sizeof(WCHAR);
+
+    return ret;
 }
 
 static BOOL wc_to_index( UINT cp, WCHAR wc, unsigned char *dst, BOOL allow_default )
@@ -3620,7 +3753,18 @@ static BOOL wc_to_index( UINT cp, WCHAR wc, unsigned char *dst, BOOL allow_defau
 
     if (!(info = get_cptable( cp ))) return FALSE;
 
-    if (info->DBCSCodePage)
+    if (info->CodePage == CP_UTF8)
+    {
+        if (wc < 0x80)
+        {
+            *dst = wc;
+            return TRUE;
+        }
+        if (!allow_default) return FALSE;
+        *dst = info->DefaultChar;
+        return TRUE;
+    }
+    else if (info->DBCSCodePage)
     {
         WCHAR *uni2cp = info->WideCharTable;
         if (uni2cp[wc] & 0xff00) return FALSE;
@@ -3726,7 +3870,7 @@ static DWORD get_glyph_outline( struct gdi_font *font, UINT glyph, UINT format,
     ret = font_funcs->get_glyph_outline( font, index, format, &gm, &abc, buflen, buf, mat, tategaki );
     if (ret == GDI_ERROR) return ret;
 
-    if ((format == GGO_METRICS || format == GGO_BITMAP || format ==  WINE_GGO_GRAY16_BITMAP) && !mat)
+    if (format == GGO_METRICS && !mat)
         set_gdi_font_glyph_metrics( font, index, &gm, &abc );
 
 done:
@@ -4331,7 +4475,7 @@ static void get_nearest_charset( const WCHAR *family_name, struct gdi_font_face 
 
     int i;
 
-    if (translate_charset_info( (DWORD*)(INT_PTR)get_acp(), csi, TCI_SRCCODEPAGE ))
+    if (translate_charset_info( (DWORD*)(INT_PTR)ansi_cp.CodePage, csi, TCI_SRCCODEPAGE ))
     {
         const struct gdi_font_link *font_link;
 
@@ -4345,13 +4489,13 @@ static void get_nearest_charset( const WCHAR *family_name, struct gdi_font_face 
         if (face->fs.fsCsb[0] & fs0)
         {
 	    if (translate_charset_info(&fs0, csi, TCI_SRCFONTSIG)) return;
-            FIXME("TCI failing on %x\n", fs0);
+            FIXME("TCI failing on %x\n", (int)fs0);
 	}
     }
 
     FIXME("returning DEFAULT_CHARSET face->fs.fsCsb[0] = %08x file = %s\n",
-	  face->fs.fsCsb[0], debugstr_w(face->file));
-    csi->ciACP = get_acp();
+	  (int)face->fs.fsCsb[0], debugstr_w(face->file));
+    csi->ciACP = ansi_cp.CodePage;
     csi->ciCharset = DEFAULT_CHARSET;
 }
 
@@ -4481,9 +4625,9 @@ static HFONT CDECL font_SelectFont( PHYSDEV dev, HFONT hfont, UINT *aa_flags )
         lf.lfWidth = abs(lf.lfWidth);
 
         TRACE( "%s, h=%d, it=%d, weight=%d, PandF=%02x, charset=%d orient %d escapement %d\n",
-               debugstr_w(lf.lfFaceName), lf.lfHeight, lf.lfItalic,
-               lf.lfWeight, lf.lfPitchAndFamily, lf.lfCharSet, lf.lfOrientation,
-               lf.lfEscapement );
+               debugstr_w(lf.lfFaceName), (int)lf.lfHeight, lf.lfItalic,
+               (int)lf.lfWeight, lf.lfPitchAndFamily, lf.lfCharSet, (int)lf.lfOrientation,
+               (int)lf.lfEscapement );
 
         if (dc->attr->graphics_mode == GM_ADVANCED)
         {
@@ -4528,7 +4672,7 @@ static HFONT CDECL font_SelectFont( PHYSDEV dev, HFONT hfont, UINT *aa_flags )
             }
             *aa_flags = font_funcs->get_aa_flags( font, *aa_flags, antialias_fakes );
         }
-        TRACE( "%p %s %d aa %x\n", hfont, debugstr_w(lf.lfFaceName), lf.lfHeight, *aa_flags );
+        TRACE( "%p %s %d aa %x\n", hfont, debugstr_w(lf.lfFaceName), (int)lf.lfHeight, *aa_flags );
         pthread_mutex_unlock( &font_lock );
     }
     physdev->font = font;
@@ -4629,8 +4773,10 @@ const struct gdi_dc_funcs font_driver =
     NULL,                           /* pStrokePath */
     NULL,                           /* pUnrealizePalette */
     NULL,                           /* pD3DKMTCheckVidPnExclusiveOwnership */
+    NULL,                           /* pD3DKMTCloseAdapter */
+    NULL,                           /* pD3DKMTOpenAdapterFromLuid */
+    NULL,                           /* pD3DKMTQueryVideoMemoryInfo */
     NULL,                           /* pD3DKMTSetVidPnSourceOwner */
-    NULL,                           /* wine_get_wgl_driver */
     GDI_PRIORITY_FONT_DRV           /* priority */
 };
 
@@ -4837,26 +4983,35 @@ UINT WINAPI NtGdiGetTextCharsetInfo( HDC hdc, FONTSIGNATURE *fs, DWORD flags )
 /***********************************************************************
  *           NtGdiHfontCreate   (win32u.@)
  */
-HFONT WINAPI NtGdiHfontCreate( const ENUMLOGFONTEXDVW *penumex, ULONG size, ULONG type,
+HFONT WINAPI NtGdiHfontCreate( const void *logfont, ULONG size, ULONG type,
                                ULONG flags, void *data )
 {
     HFONT hFont;
     FONTOBJ *fontPtr;
     const LOGFONTW *plf;
 
-    if (!penumex) return 0;
+    if (!logfont) return 0;
 
-    if (penumex->elfEnumLogfontEx.elfFullName[0] ||
-        penumex->elfEnumLogfontEx.elfStyle[0] ||
-        penumex->elfEnumLogfontEx.elfScript[0])
+    if (size == sizeof(ENUMLOGFONTEXDVW) || size == sizeof(ENUMLOGFONTEXW))
     {
-        FIXME("some fields ignored. fullname=%s, style=%s, script=%s\n",
-            debugstr_w(penumex->elfEnumLogfontEx.elfFullName),
-            debugstr_w(penumex->elfEnumLogfontEx.elfStyle),
-            debugstr_w(penumex->elfEnumLogfontEx.elfScript));
-    }
+        const ENUMLOGFONTEXW *lfex = logfont;
 
-    plf = &penumex->elfEnumLogfontEx.elfLogFont;
+        if (lfex->elfFullName[0] || lfex->elfStyle[0] || lfex->elfScript[0])
+        {
+            FIXME( "some fields ignored. fullname=%s, style=%s, script=%s\n",
+                   debugstr_w( lfex->elfFullName ), debugstr_w( lfex->elfStyle ),
+                   debugstr_w( lfex->elfScript ));
+        }
+
+        plf = &lfex->elfLogFont;
+    }
+    else if (size != sizeof(LOGFONTW))
+    {
+        RtlSetLastWin32Error( ERROR_INVALID_PARAMETER );
+        return 0;
+    }
+    else plf = logfont;
+
     if (!(fontPtr = malloc( sizeof(*fontPtr) ))) return 0;
 
     fontPtr->logfont = *plf;
@@ -4868,8 +5023,8 @@ HFONT WINAPI NtGdiHfontCreate( const ENUMLOGFONTEXDVW *penumex, ULONG size, ULON
     }
 
     TRACE("(%d %d %d %d %x %d %x %d %d) %s %s %s %s => %p\n",
-          plf->lfHeight, plf->lfWidth,
-          plf->lfEscapement, plf->lfOrientation,
+          (int)plf->lfHeight, (int)plf->lfWidth,
+          (int)plf->lfEscapement, (int)plf->lfOrientation,
           plf->lfPitchAndFamily,
           plf->lfOutPrecision, plf->lfClipPrecision,
           plf->lfQuality, plf->lfCharSet,
@@ -4887,7 +5042,7 @@ HFONT WINAPI NtGdiHfontCreate( const ENUMLOGFONTEXDVW *penumex, ULONG size, ULON
 
 static DWORD get_associated_charset_info(void)
 {
-    static DWORD associated_charset = -1;
+    static int associated_charset = -1;
 
     if (associated_charset == -1)
     {
@@ -4942,10 +5097,10 @@ static void update_font_code_page( DC *dc, HANDLE font )
     else {
         switch(charset) {
         case OEM_CHARSET:
-            dc->attr->font_code_page = get_oemcp();
+            dc->attr->font_code_page = oem_cp.CodePage;
             break;
         case DEFAULT_CHARSET:
-            dc->attr->font_code_page = get_acp();
+            dc->attr->font_code_page = ansi_cp.CodePage;
             break;
 
         case VISCII_CHARSET:
@@ -5206,7 +5361,8 @@ BOOL WINAPI NtGdiGetTextExtentExW( HDC hdc, const WCHAR *str, INT count, INT max
     if (pos != buffer && pos != dxs) free( pos );
     release_dc_ptr( dc );
 
-    TRACE("(%p, %s, %d) returning %dx%d\n", hdc, debugstr_wn(str,count), max_ext, size->cx, size->cy );
+    TRACE("(%p, %s, %d) returning %dx%d\n", hdc, debugstr_wn(str,count),
+          max_ext, (int)size->cx, (int)size->cy );
     return ret;
 }
 
@@ -5251,15 +5407,15 @@ BOOL WINAPI NtGdiGetTextMetricsW( HDC hdc, TEXTMETRICW *metrics, ULONG flags )
           "    Ascent = %i\n"
           "    Descent = %i\n"
           "    Height = %i\n",
-          metrics->tmWeight, metrics->tmFirstChar, metrics->tmAveCharWidth,
-          metrics->tmItalic, metrics->tmLastChar, metrics->tmMaxCharWidth,
-          metrics->tmUnderlined, metrics->tmDefaultChar, metrics->tmOverhang,
+          (int)metrics->tmWeight, metrics->tmFirstChar, (int)metrics->tmAveCharWidth,
+          metrics->tmItalic, metrics->tmLastChar, (int)metrics->tmMaxCharWidth,
+          metrics->tmUnderlined, metrics->tmDefaultChar, (int)metrics->tmOverhang,
           metrics->tmStruckOut, metrics->tmBreakChar, metrics->tmCharSet,
           metrics->tmPitchAndFamily,
-          metrics->tmInternalLeading,
-          metrics->tmAscent,
-          metrics->tmDescent,
-          metrics->tmHeight );
+          (int)metrics->tmInternalLeading,
+          (int)metrics->tmAscent,
+          (int)metrics->tmDescent,
+          (int)metrics->tmHeight );
     }
     release_dc_ptr( dc );
     return ret;
@@ -5527,7 +5683,7 @@ static void draw_glyph( DC *dc, INT origin_x, INT origin_y, const GLYPHMETRICS *
     dp_to_lp( dc, pts, count );
     for (i = 0; i < count; i += 2)
     {
-        const UINT pts_count = 2;
+        const ULONG pts_count = 2;
         NtGdiPolyPolyDraw( dc->hSelf, pts + i, &pts_count, 1, NtGdiPolyPolyline );
     }
     free( pts );
@@ -5977,7 +6133,7 @@ BOOL WINAPI NtGdiExtTextOutW( HDC hdc, INT x, INT y, UINT flags, const RECT *lpr
                 text_box.bottom = y + tm.tmDescent;
 
                 if (flags & ETO_CLIPPED) intersect_rect( &text_box, &text_box, &rc );
-                if (!is_rect_empty( &text_box ))
+                if (!IsRectEmpty( &text_box ))
                     physdev->funcs->pExtTextOut( physdev, 0, 0, ETO_OPAQUE, &text_box, NULL, 0, NULL );
             }
         }
@@ -5996,7 +6152,7 @@ done:
         UINT size = NtGdiGetOutlineTextMetricsInternalW( hdc, 0, NULL, 0 );
         OUTLINETEXTMETRICW* otm = NULL;
         POINT pts[5];
-        HPEN hpen = NtGdiSelectPen( hdc, get_stock_object(NULL_PEN) );
+        HPEN hpen = NtGdiSelectPen( hdc, GetStockObject(NULL_PEN) );
         HBRUSH hbrush = NtGdiCreateSolidBrush( dc->attr->text_color, NULL );
 
         hbrush = NtGdiSelectBrush(hdc, hbrush);
@@ -6024,7 +6180,7 @@ done:
 
         if (lf.lfUnderline)
         {
-            const UINT cnt = 5;
+            const ULONG cnt = 5;
             pts[0].x = x - (underlinePos + underlineWidth / 2) * sinEsc;
             pts[0].y = y - (underlinePos + underlineWidth / 2) * cosEsc;
             pts[1].x = x + width.x - (underlinePos + underlineWidth / 2) * sinEsc;
@@ -6041,7 +6197,7 @@ done:
 
         if (lf.lfStrikeOut)
         {
-            const UINT cnt = 5;
+            const ULONG cnt = 5;
             pts[0].x = x - (strikeoutPos + strikeoutWidth / 2) * sinEsc;
             pts[0].y = y - (strikeoutPos + strikeoutWidth / 2) * cosEsc;
             pts[1].x = x + width.x - (strikeoutPos + strikeoutWidth / 2) * sinEsc;
@@ -6165,7 +6321,7 @@ DWORD WINAPI NtGdiGetGlyphOutline( HDC hdc, UINT ch, UINT format, GLYPHMETRICS *
     DWORD ret;
     PHYSDEV dev;
 
-    TRACE( "(%p, %04x, %04x, %p, %d, %p, %p)\n", hdc, ch, format, metrics, size, buffer, mat2 );
+    TRACE( "(%p, %04x, %04x, %p, %d, %p, %p)\n", hdc, ch, format, metrics, (int)size, buffer, mat2 );
 
     if (!mat2) return GDI_ERROR;
 
@@ -6198,7 +6354,7 @@ BOOL CDECL __wine_get_file_outline_text_metric( const WCHAR *path, OUTLINETEXTME
 
 done:
     if (font) free_gdi_font( font );
-    SetLastError( ERROR_INVALID_PARAMETER );
+    RtlSetLastWin32Error( ERROR_INVALID_PARAMETER );
     return FALSE;
 }
 
@@ -6211,11 +6367,11 @@ DWORD WINAPI NtGdiGetKerningPairs( HDC hdc, DWORD count, KERNINGPAIR *kern_pair 
     DWORD ret;
     PHYSDEV dev;
 
-    TRACE( "(%p,%d,%p)\n", hdc, count, kern_pair );
+    TRACE( "(%p,%d,%p)\n", hdc, (int)count, kern_pair );
 
     if (!count && kern_pair)
     {
-        SetLastError( ERROR_INVALID_PARAMETER );
+        RtlSetLastWin32Error( ERROR_INVALID_PARAMETER );
         return 0;
     }
 
@@ -6240,7 +6396,7 @@ DWORD WINAPI NtGdiGetKerningPairs( HDC hdc, DWORD count, KERNINGPAIR *kern_pair 
  *
  * NOTES
  *
- * Calls SetLastError()
+ * Calls RtlSetLastWin32Error()
  *
  */
 DWORD WINAPI NtGdiGetFontData( HDC hdc, DWORD table, DWORD offset, void *buffer, DWORD length )
@@ -6267,7 +6423,7 @@ DWORD WINAPI NtGdiGetGlyphIndicesW( HDC hdc, const WCHAR *str, INT count,
     PHYSDEV dev;
     DWORD ret;
 
-    TRACE( "(%p, %s, %d, %p, 0x%x)\n", hdc, debugstr_wn(str, count), count, indices, flags );
+    TRACE( "(%p, %s, %d, %p, 0x%x)\n", hdc, debugstr_wn(str, count), count, indices, (int)flags );
 
     if(!dc) return GDI_ERROR;
 
@@ -6374,9 +6530,9 @@ static void load_system_bitmap_fonts(void)
 
 static void load_directory_fonts( WCHAR *path, UINT flags )
 {
+    IO_STATUS_BLOCK io = {{0}};
     OBJECT_ATTRIBUTES attr;
     UNICODE_STRING nt_name;
-    IO_STATUS_BLOCK io;
     HANDLE handle;
     char buf[8192];
     size_t len;
@@ -6613,11 +6769,11 @@ static HKEY open_hkcu(void)
         return 0;
 
     sid = ((TOKEN_USER *)sid_data)->User.Sid;
-    len = sprintf( buffer, "\\Registry\\User\\S-%u-%u", sid->Revision,
-                 MAKELONG( MAKEWORD( sid->IdentifierAuthority.Value[5], sid->IdentifierAuthority.Value[4] ),
+    len = sprintf( buffer, "\\Registry\\User\\S-%u-%u", (int)sid->Revision,
+            (int)MAKELONG( MAKEWORD( sid->IdentifierAuthority.Value[5], sid->IdentifierAuthority.Value[4] ),
                            MAKEWORD( sid->IdentifierAuthority.Value[3], sid->IdentifierAuthority.Value[2] )));
     for (i = 0; i < sid->SubAuthorityCount; i++)
-        len += sprintf( buffer + len, "-%u", sid->SubAuthority[i] );
+        len += sprintf( buffer + len, "-%u", (int)sid->SubAuthority[i] );
     ascii_to_unicode( bufferW, buffer, len + 1 );
 
     return reg_open_key( NULL, bufferW, len * sizeof(WCHAR) );
@@ -6710,7 +6866,7 @@ HANDLE WINAPI NtGdiAddFontMemResourceEx( void *ptr, DWORD size, void *dv, ULONG 
 
     if (!ptr || !size || !count)
     {
-        SetLastError(ERROR_INVALID_PARAMETER);
+        RtlSetLastWin32Error(ERROR_INVALID_PARAMETER);
         return NULL;
     }
     if (!font_funcs) return NULL;
@@ -6865,7 +7021,7 @@ BOOL WINAPI NtGdiGetFontFileData( DWORD instance_id, DWORD file_index, UINT64 *o
         if (size != GDI_ERROR && size >= buff_size && *offset <= size - buff_size)
             ret = font_funcs->get_font_data( font, tag, *offset, buff, buff_size ) != GDI_ERROR;
         else
-            SetLastError( ERROR_INVALID_PARAMETER );
+            RtlSetLastWin32Error( ERROR_INVALID_PARAMETER );
     }
     pthread_mutex_unlock( &font_lock );
     return ret;
@@ -6893,7 +7049,7 @@ BOOL WINAPI NtGdiGetFontFileInfo( DWORD instance_id, DWORD file_index, struct fo
             lstrcpyW( info->path, font->file );
             ret = TRUE;
         }
-        else SetLastError( ERROR_INSUFFICIENT_BUFFER );
+        else RtlSetLastWin32Error( ERROR_INSUFFICIENT_BUFFER );
     }
 
     pthread_mutex_unlock( &font_lock );
@@ -6921,5 +7077,29 @@ BOOL WINAPI NtGdiGetCharWidthInfo( HDC hdc, struct char_width_info *info )
         info->rsb = width_to_LP( dc, info->rsb );
     }
     release_dc_ptr(dc);
+    return ret;
+}
+
+/***********************************************************************
+ *           DrawTextW    (win32u.so)
+ */
+INT WINAPI DECLSPEC_HIDDEN DrawTextW( HDC hdc, const WCHAR *str, INT count, RECT *rect, UINT flags )
+{
+    struct draw_text_params *params;
+    ULONG ret_len, size;
+    void *ret_ptr;
+    int ret;
+
+    if (count == -1) count = wcslen( str );
+    size = FIELD_OFFSET( struct draw_text_params, str[count] );
+    if (!(params = malloc( size ))) return 0;
+    params->hdc = hdc;
+    params->rect = *rect;
+    params->ret_rect = rect;
+    params->flags = flags;
+    if (count) memcpy( params->str, str, count * sizeof(WCHAR) );
+    ret = KeUserModeCallback( NtUserDrawText, params, size, &ret_ptr, &ret_len );
+    if (ret_len == sizeof(*rect)) *rect = *(const RECT *)ret_ptr;
+    free( params );
     return ret;
 }

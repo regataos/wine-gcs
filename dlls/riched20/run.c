@@ -199,7 +199,7 @@ void ME_CheckCharOffsets(ME_TextEditor *editor)
         ofs = 0;
         break;
       case diRun:
-        TRACE_(richedit_check)("run, real ofs = %d (+ofsp = %d), counted = %d, len = %d, txt = %s, flags=%08x, fx&mask = %08x\n",
+        TRACE_(richedit_check)("run, real ofs = %d (+ofsp = %d), counted = %d, len = %d, txt = %s, flags=%08x, fx&mask = %08lx\n",
           p->member.run.nCharOfs, p->member.run.nCharOfs+ofsp, ofsp+ofs,
           p->member.run.len, debugstr_run( &p->member.run ),
           p->member.run.nFlags,
@@ -902,9 +902,8 @@ void ME_GetCharFormat( ME_TextEditor *editor, const ME_Cursor *from,
     run_copy_char_fmt( run, &tmp );
 
     assert((tmp.dwMask & dwAttribs) == dwAttribs);
-    /* reset flags that differ */
 
-    if (fmt->yHeight != tmp.yHeight) fmt->dwMask &= ~CFM_SIZE;
+    /* reset flags that differ */
     if (fmt->dwMask & CFM_FACE)
     {
       if (!(tmp.dwMask & CFM_FACE))

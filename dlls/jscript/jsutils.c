@@ -72,12 +72,12 @@ void *heap_pool_alloc(heap_pool_t *heap, DWORD size)
 
     if(!heap->block_cnt) {
         if(!heap->blocks) {
-            heap->blocks = heap_alloc(sizeof(void*));
+            heap->blocks = malloc(sizeof(void*));
             if(!heap->blocks)
                 return NULL;
         }
 
-        tmp = heap_alloc(block_size(0));
+        tmp = malloc(block_size(0));
         if(!tmp)
             return NULL;
 
@@ -93,12 +93,12 @@ void *heap_pool_alloc(heap_pool_t *heap, DWORD size)
 
     if(size <= block_size(heap->last_block+1)) {
         if(heap->last_block+1 == heap->block_cnt) {
-            tmp = heap_realloc(heap->blocks, (heap->block_cnt+1)*sizeof(void*));
+            tmp = realloc(heap->blocks, (heap->block_cnt+1)*sizeof(void*));
             if(!tmp)
                 return NULL;
 
             heap->blocks = tmp;
-            heap->blocks[heap->block_cnt] = heap_alloc(block_size(heap->block_cnt));
+            heap->blocks[heap->block_cnt] = malloc(block_size(heap->block_cnt));
             if(!heap->blocks[heap->block_cnt])
                 return NULL;
 
@@ -110,7 +110,7 @@ void *heap_pool_alloc(heap_pool_t *heap, DWORD size)
         return heap->blocks[heap->last_block];
     }
 
-    list = heap_alloc(size + sizeof(struct list));
+    list = malloc(size + sizeof(struct list));
     if(!list)
         return NULL;
 
@@ -143,7 +143,7 @@ void heap_pool_clear(heap_pool_t *heap)
 
     while((tmp = list_head(&heap->custom_blocks))) {
         list_remove(tmp);
-        heap_free(tmp);
+        free(tmp);
     }
 
     if(WARN_ON(heap)) {
@@ -164,8 +164,8 @@ void heap_pool_free(heap_pool_t *heap)
     heap_pool_clear(heap);
 
     for(i=0; i < heap->block_cnt; i++)
-        heap_free(heap->blocks[i]);
-    heap_free(heap->blocks);
+        free(heap->blocks[i]);
+    free(heap->blocks);
 
     heap_pool_init(heap);
 }
@@ -179,41 +179,6 @@ heap_pool_t *heap_pool_mark(heap_pool_t *heap)
     return heap;
 }
 
-enum { HEAP_STACK_CHUNK_SIZE = 1020 };
-
-HRESULT heap_stack_push(struct heap_stack *heap_stack, void *value)
-{
-    if(!heap_stack->idx) {
-        if(heap_stack->next)
-            heap_stack->chunk = heap_stack->next;
-        else {
-            void **prev, **tmp = heap_alloc((HEAP_STACK_CHUNK_SIZE + 1) * sizeof(void*));
-            if(!tmp)
-                return E_OUTOFMEMORY;
-            prev = heap_stack->chunk;
-            heap_stack->chunk = tmp;
-            heap_stack->chunk[HEAP_STACK_CHUNK_SIZE] = prev;
-        }
-        heap_stack->idx = HEAP_STACK_CHUNK_SIZE;
-        heap_stack->next = NULL;
-    }
-    heap_stack->chunk[--heap_stack->idx] = value;
-    return S_OK;
-}
-
-void *heap_stack_pop(struct heap_stack *heap_stack)
-{
-    void *ret = heap_stack->chunk[heap_stack->idx];
-
-    if(++heap_stack->idx == HEAP_STACK_CHUNK_SIZE) {
-        free(heap_stack->next);
-        heap_stack->next = heap_stack->chunk;
-        heap_stack->chunk = heap_stack->chunk[HEAP_STACK_CHUNK_SIZE];
-        heap_stack->idx = 0;
-    }
-    return ret;
-}
-
 void jsval_release(jsval_t val)
 {
     switch(jsval_type(val)) {
@@ -225,7 +190,7 @@ void jsval_release(jsval_t val)
         break;
     case JSV_VARIANT:
         VariantClear(get_variant(val));
-        heap_free(get_variant(val));
+        free(get_variant(val));
         break;
     default:
         break;
@@ -238,7 +203,7 @@ static HRESULT jsval_variant(jsval_t *val, VARIANT *var)
     HRESULT hres;
 
     __JSVAL_TYPE(*val) = JSV_VARIANT;
-    __JSVAL_VAR(*val) = v = heap_alloc(sizeof(VARIANT));
+    __JSVAL_VAR(*val) = v = malloc(sizeof(VARIANT));
     if(!v) {
         *val = jsval_undefined();
         return E_OUTOFMEMORY;
@@ -248,7 +213,7 @@ static HRESULT jsval_variant(jsval_t *val, VARIANT *var)
     hres = VariantCopy(v, var);
     if(FAILED(hres)) {
         *val = jsval_undefined();
-        heap_free(v);
+        free(v);
     }
     return hres;
 }
@@ -486,6 +451,9 @@ HRESULT to_primitive(script_ctx_t *ctx, jsval_t val, jsval_t *ret, hint_t hint)
             }else {
                 IDispatch_Release(get_object(prim));
             }
+        }else if(hres != DISP_E_UNKNOWNNAME) {
+            jsdisp_release(jsdisp);
+            return hres;
         }
 
         hres = jsdisp_get_id(jsdisp, hint == HINT_STRING ? L"valueOf" : L"toString", 0, &id);
@@ -505,6 +473,9 @@ HRESULT to_primitive(script_ctx_t *ctx, jsval_t val, jsval_t *ret, hint_t hint)
             }else {
                 IDispatch_Release(get_object(prim));
             }
+        }else if(hres != DISP_E_UNKNOWNNAME) {
+            jsdisp_release(jsdisp);
+            return hres;
         }
 
         jsdisp_release(jsdisp);
@@ -1018,12 +989,14 @@ HRESULT variant_change_type(script_ctx_t *ctx, VARIANT *dst, VARIANT *src, VARTY
         break;
     case VT_UNKNOWN:
     case VT_DISPATCH:
-        if(V_VT(src) == VT_EMPTY || V_VT(src) == VT_NULL) {
-            V_UNKNOWN(dst) = NULL;
+        if(V_VT(src) != vt)
+            hres = E_NOTIMPL;
+        else {
+            IUnknown_AddRef(V_UNKNOWN(src));
+            V_UNKNOWN(dst) = V_UNKNOWN(src);
             hres = S_OK;
-            break;
         }
-        /* fall through */
+        break;
     default:
         FIXME("vt %d not implemented\n", vt);
         hres = E_NOTIMPL;
@@ -1076,13 +1049,13 @@ static ULONG WINAPI JSCaller_AddRef(IServiceProvider *iface)
 static ULONG WINAPI JSCaller_Release(IServiceProvider *iface)
 {
     JSCaller *This = impl_from_IServiceProvider(iface);
-    LONG ref = InterlockedIncrement(&This->ref);
+    LONG ref = InterlockedDecrement(&This->ref);
 
     TRACE("(%p) ref=%ld\n", This, ref);
 
     if(!ref) {
         assert(!This->ctx);
-        heap_free(This);
+        free(This);
     }
 
     return ref;
@@ -1092,6 +1065,22 @@ static HRESULT WINAPI JSCaller_QueryService(IServiceProvider *iface, REFGUID gui
         REFIID riid, void **ppv)
 {
     JSCaller *This = impl_from_IServiceProvider(iface);
+
+    if(IsEqualGUID(guidService, &IID_IActiveScriptSite)) {
+        TRACE("(%p)->(IID_IActiveScriptSite)\n", This);
+        if(This->ctx && This->ctx->site)
+            return IActiveScriptSite_QueryInterface(This->ctx->site, riid, ppv);
+        *ppv = NULL;
+        return E_NOINTERFACE;
+    }
+
+    if(IsEqualGUID(guidService, &SID_GetCaller)) {
+        TRACE("(%p)->(SID_GetCaller)\n", This);
+        *ppv = NULL;
+        if(!This->caller)
+            return S_OK;
+        return (This->caller == SP_CALLER_UNINITIALIZED) ? E_NOINTERFACE : IServiceProvider_QueryInterface(This->caller, riid, ppv);
+    }
 
     if(IsEqualGUID(guidService, &SID_VariantConversion) && This->ctx && This->ctx->active_script) {
         TRACE("(%p)->(SID_VariantConversion)\n", This);
@@ -1115,13 +1104,14 @@ HRESULT create_jscaller(script_ctx_t *ctx)
 {
     JSCaller *ret;
 
-    ret = heap_alloc(sizeof(*ret));
+    ret = malloc(sizeof(*ret));
     if(!ret)
         return E_OUTOFMEMORY;
 
     ret->IServiceProvider_iface.lpVtbl = &ServiceProviderVtbl;
     ret->ref = 1;
     ret->ctx = ctx;
+    ret->caller = SP_CALLER_UNINITIALIZED;
 
     ctx->jscaller = ret;
     return S_OK;

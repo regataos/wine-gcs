@@ -1,4 +1,3 @@
-EXTRADEFS = -DWINE_NO_LONG_TYPES
 MODULE    = uxtheme.dll
 IMPORTLIB = uxtheme
 IMPORTS   = user32 gdi32 advapi32
@@ -6,6 +5,7 @@ DELAYIMPORTS = msimg32
 
 C_SRCS = \
 	buffer.c \
+	dialog.c \
 	draw.c \
 	main.c \
 	metric.c \
@@ -14,6 +14,7 @@ C_SRCS = \
 	scrollbar.c \
 	stylemap.c \
 	system.c \
-	uxini.c
+	uxini.c \
+	window.c
 
 RC_SRCS = version.rc

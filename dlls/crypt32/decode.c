@@ -6894,7 +6894,7 @@ static CryptDecodeObjectExFunc CRYPT_GetBuiltinDecoder(DWORD dwCertEncodingType,
             decodeFunc = CRYPT_AsnDecodeOCSPBasicResponse;
             break;
         default:
-            FIXME("Unimplemented decoder for lpszStructType OID %d\n", LOWORD(lpszStructType));
+            break;
         }
     }
     else if (!strcmp(lpszStructType, szOID_CERT_EXTENSIONS))
@@ -6951,8 +6951,6 @@ static CryptDecodeObjectExFunc CRYPT_GetBuiltinDecoder(DWORD dwCertEncodingType,
         decodeFunc = CRYPT_AsnDecodeCTL;
     else if (!strcmp(lpszStructType, szOID_ECC_PUBLIC_KEY))
         decodeFunc = CRYPT_AsnDecodeObjectIdentifier;
-    else
-        FIXME("Unsupported decoder for lpszStructType %s\n", lpszStructType);
     return decodeFunc;
 }
 
@@ -7031,6 +7029,13 @@ BOOL WINAPI CryptDecodeObjectEx(DWORD dwCertEncodingType, LPCSTR lpszStructType,
          debugstr_a(lpszStructType));
         decodeFunc = CRYPT_LoadDecoderExFunc(dwCertEncodingType, lpszStructType,
          &hFunc);
+        if (!decodeFunc)
+        {
+            if (IS_INTOID(lpszStructType))
+                FIXME("Unimplemented decoder for lpszStructType OID %d\n", LOWORD(lpszStructType));
+            else
+                FIXME("Unsupported decoder for lpszStructType %s\n", lpszStructType);
+        }
     }
     if (decodeFunc)
         ret = decodeFunc(dwCertEncodingType, lpszStructType, pbEncoded,

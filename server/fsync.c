@@ -58,15 +58,6 @@ int do_fsync(void)
 
     if (do_fsync_cached == -1)
     {
-        FILE *f;
-        if ((f = fopen( "/sys/kernel/futex2/wait", "r" )))
-        {
-            fclose(f);
-            do_fsync_cached = 0;
-            fprintf( stderr, "fsync: old futex2 patches detected, disabling.\n" );
-            return do_fsync_cached;
-        }
-
         syscall( __NR_futex_waitv, 0, 0, 0, 0, 0);
         do_fsync_cached = getenv("WINEFSYNC") && atoi(getenv("WINEFSYNC")) && errno != ENOSYS;
     }
@@ -232,8 +223,8 @@ static void *get_shm( unsigned int idx )
                           (off_t)entry * FSYNC_SHM_PAGE_SIZE );
         if (addr == (void *)-1)
         {
-            fprintf( stderr, "fsync: failed to map page %d (offset %#lx): ",
-                     entry, (off_t)entry * FSYNC_SHM_PAGE_SIZE );
+            fprintf( stderr, "fsync: failed to map page %d (offset %#zx): ",
+                     entry, (size_t)entry * FSYNC_SHM_PAGE_SIZE );
             perror( "mmap" );
         }
 

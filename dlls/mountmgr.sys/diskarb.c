@@ -31,10 +31,8 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <sys/ioctl.h>
-#ifdef HAVE_DISKARBITRATION_DISKARBITRATION_H
+#ifdef __APPLE__
 #include <DiskArbitration/DiskArbitration.h>
-#endif
-#if defined(HAVE_SYSTEMCONFIGURATION_SCDYNAMICSTORECOPYDHCPINFO_H) && defined(HAVE_SYSTEMCONFIGURATION_SCNETWORKCONFIGURATION_H)
 #include <SystemConfiguration/SCDynamicStoreCopyDHCPInfo.h>
 #include <SystemConfiguration/SCNetworkConfiguration.h>
 #endif
@@ -50,7 +48,7 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(mountmgr);
 
-#ifdef HAVE_DISKARBITRATION_DISKARBITRATION_H
+#ifdef __APPLE__
 
 typedef struct
 {
@@ -218,18 +216,18 @@ void run_diskarbitration_loop(void)
     CFRelease( session );
 }
 
-#else  /*  HAVE_DISKARBITRATION_DISKARBITRATION_H */
+#else  /* __APPLE__ */
 
 void run_diskarbitration_loop(void)
 {
     TRACE( "Skipping, Disk Arbitration support not compiled in\n" );
 }
 
-#endif  /* HAVE_DISKARBITRATION_DISKARBITRATION_H */
+#endif  /* __APPLE__ */
 
-#if defined(HAVE_SYSTEMCONFIGURATION_SCDYNAMICSTORECOPYDHCPINFO_H) && defined(HAVE_SYSTEMCONFIGURATION_SCNETWORKCONFIGURATION_H)
+#if defined(__APPLE__)
 
-static UInt8 map_option( ULONG option )
+static UInt8 map_option( unsigned int option )
 {
     switch (option)
     {
@@ -293,18 +291,19 @@ NTSTATUS dhcp_request( void *args )
 
     params->req->offset = 0;
     params->req->size   = 0;
+    *params->ret_size = 0;
 
     if (!service_id) return 0;
     if (!(dict = SCDynamicStoreCopyDHCPInfo( NULL, service_id )))
     {
         CFRelease( service_id );
-        return 0;
+        return STATUS_SUCCESS;
     }
     CFRelease( service_id );
     if (!(value = DHCPInfoGetOptionData( dict, map_option(params->req->id) )))
     {
         CFRelease( dict );
-        return 0;
+        return STATUS_SUCCESS;
     }
     len = CFDataGetLength( value );
 
@@ -314,7 +313,7 @@ NTSTATUS dhcp_request( void *args )
     case OPTION_ROUTER_ADDRESS:
     case OPTION_BROADCAST_ADDRESS:
     {
-        DWORD *ptr = (DWORD *)(params->buffer + params->offset);
+        unsigned int *ptr = (unsigned int *)(params->buffer + params->offset);
         if (len == sizeof(*ptr) && params->size >= sizeof(*ptr))
         {
             CFDataGetBytes( value, CFRangeMake(0, len), (UInt8 *)ptr );
@@ -341,7 +340,7 @@ NTSTATUS dhcp_request( void *args )
         break;
     }
     default:
-        FIXME( "option %u not supported\n", params->req->id );
+        FIXME( "option %u not supported\n", (unsigned int)params->req->id );
         break;
     }
 

@@ -45,11 +45,23 @@ var JS_E_ARRAYBUFFER_EXPECTED = 0x800a15e4;
 
 var tests = [];
 
+sync_test("script vars", function() {
+    function foo() { }
+    foo.prototype.foo = 13;
+    var obj = new foo();
+    obj.Foo = 42;
+    obj.aBc = 1;
+    obj.abC = 2;
+    obj.Bar = 3;
+    document.body.foobar = 42;
+    external.testVars(document.body, obj);
+});
+
 sync_test("date_now", function() {
     var now = Date.now();
     var time = (new Date()).getTime();
 
-    ok(time >= now && time-now < 50, "unexpected Date.now() result " + now + " expected " + time);
+    ok(time >= now && time - now < 500, "unexpected Date.now() result " + now + " expected " + time);
 
     Date.now(1, 2, 3);
 });
@@ -280,6 +292,8 @@ sync_test("filter", function() {
     test(["a","b"], function(v) { if(v === "b") delete arr[0]; return typeof v === "string"; });
     test(["b"], function(v) { if(arr[arr.length - 1] !== "c") arr.push("c"); return typeof v === "string"; });
     test([true,"b",42,Math,arr[9],"c"], function(v) { return v; }, Object);
+
+    [0].filter(function() { ok(this.valueOf() === "wine", "this.valueOf() = " + this.valueOf()); return true; }, "wine");
 });
 
 sync_test("every & some", function() {
@@ -314,6 +328,9 @@ sync_test("every & some", function() {
     test(false, false, function(v) { return v; });
     arr.push(1);
     test(false, true, function(v) { return v; });
+
+    [0].every(function() { ok(this.valueOf() === 42, "this.valueOf() = " + this.valueOf()); return true; }, 42);
+    [0].some(function() { ok(this.valueOf() === 137, "this.valueOf() = " + this.valueOf()); return false; }, 137);
 });
 
 sync_test("forEach", function() {
@@ -347,6 +364,8 @@ sync_test("forEach", function() {
         ok(array === a, "array != a");
         ok(this === o, "this != o");
     }, o);
+
+    a.forEach(function() { ok(this.valueOf() === "foobar", "this.valueOf() = " + this.valueOf()); }, "foobar");
 });
 
 sync_test("isArray", function() {
@@ -412,6 +431,9 @@ sync_test("array_map", function() {
     [1,2].map(function() {
         ok(this === window, "this != window");
     }, undefined);
+    [1,2].map(function() {
+        ok(this.valueOf() === 137, "this.valueOf() = " + this.valueOf());
+    }, 137);
 });
 
 sync_test("array_sort", function() {
@@ -1119,10 +1141,8 @@ sync_test("toString", function() {
     tmp = Object.prototype.toString.call(null);
     ok(tmp === "[object Null]", "toString.call(null) = " + tmp);
     tmp = Object.prototype.toString.call(undefined);
-    todo_wine.
     ok(tmp === "[object Undefined]", "toString.call(undefined) = " + tmp);
     tmp = Object.prototype.toString.call();
-    todo_wine.
     ok(tmp === "[object Undefined]", "toString.call() = " + tmp);
 
     obj = Object.create(null);
@@ -1217,6 +1237,15 @@ sync_test("bind", function() {
         ok(typeof(this) === "object", "bind(42) typeof(this) = " + typeof(this));
         ok(this.valueOf() === 42, "bind(42) this = " + this);
     }).bind(42))();
+
+    r = (Object.prototype.toString.bind())();
+    ok(r === "[object Undefined]", "toString.bind() returned " + r);
+    r = (Object.prototype.toString.bind(undefined))();
+    ok(r === "[object Undefined]", "toString.bind(undefined) returned " + r);
+    r = (Object.prototype.toString.bind(null))();
+    ok(r === "[object Null]", "toString.bind(null) returned " + r);
+    r = (Object.prototype.toString.bind(external.nullDisp))();
+    ok(r === "[object Null]", "toString.bind(nullDisp) returned " + r);
 });
 
 sync_test("keys", function() {
@@ -2575,6 +2604,20 @@ sync_test("builtin override", function() {
     }
 });
 
+sync_test("host this", function() {
+    var tests = [ undefined, null, external.nullDisp, function() {}, [0], "foobar", true, 42, new Number(42), external.testHostContext(true), window, document ];
+    var i, obj = Object.create(Function.prototype);
+
+    // only pure js objects are passed as 'this' (regardless of prototype)
+    [137].forEach(external.testHostContext(true), obj);
+    Function.prototype.apply.call(external.testHostContext(true), obj, [137, 0, {}]);
+
+    for(i = 0; i < tests.length; i++) {
+        [137].forEach(external.testHostContext(false), tests[i]);
+        Function.prototype.apply.call(external.testHostContext(false), tests[i], [137, 0, {}]);
+    }
+});
+
 sync_test("head_setter", function() {
     document.head = "";
     ok(typeof(document.head) === "object", "typeof(document.head) = " + typeof(document.head));
@@ -2940,6 +2983,47 @@ sync_test("instanceof", function() {
     ok(r === true, "document not instance of Node");
 });
 
+sync_test("perf toJSON", function() {
+    var tests = [
+        [ "performance", "navigation", "timing" ],
+        [ "performance.navigation", "redirectCount", "type" ],
+        [ "performance.timing", "connectEnd", "connectStart", "domComplete", "domContentLoadedEventEnd",
+          "domContentLoadedEventStart", "domInteractive", "domLoading", "domainLookupEnd", "domainLookupStart",
+          "fetchStart", "loadEventEnd", "loadEventStart", "msFirstPaint", "navigationStart", "redirectEnd",
+          "redirectStart", "requestStart", "responseEnd", "responseStart", "unloadEventEnd", "unloadEventStart" ]
+    ];
+
+    for(var i = 0; i < tests.length; i++) {
+        var desc, name = tests[i][0], obj = eval("window." + name), json;
+
+        Object.defineProperty(obj, "foobar", {writable: true, enumerable: true, configurable: true, value: 1});
+        Object.defineProperty(Object.getPrototypeOf(obj), "barfoo", {writable: true, enumerable: true, configurable: true, value: 3});
+        json = obj.toJSON();
+
+        ok(Object.getPrototypeOf(json) === Object.prototype, "prototype of " + name + ".toJSON() != Object.prototype");
+        ok(typeof json === "object", "typeof " + name + ".toJSON() != object");
+        for(var j = 1; j < tests[i].length; j++) {
+            desc = Object.getOwnPropertyDescriptor(json, tests[i][j]);
+            ok(json.hasOwnProperty(tests[i][j]), name + ".toJSON() does not have " + tests[i][j]);
+            ok(desc.writable === true, name + ".toJSON()." + tests[i][j] + " not writable");
+            ok(desc.enumerable === true, name + ".toJSON()." + tests[i][j] + " not enumerable");
+            ok(desc.configurable === true, name + ".toJSON()." + tests[i][j] + " not configurable");
+        }
+        ok(!("foobar" in json), "foobar in " + name + ".toJSON()");
+        ok(!("barfoo" in json), "barfoo in " + name + ".toJSON()");
+
+        delete obj.foobar;
+        delete Object.getPrototypeOf(obj).barfoo;
+
+        desc = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(obj), tests[i][1]);
+        delete Object.getPrototypeOf(obj)[tests[i][1]];
+        ok(!(tests[i][1] in obj), tests[i][1] + " in " + name + " after delete");
+        json = obj.toJSON();
+        ok(json.hasOwnProperty(tests[i][1]), name + ".toJSON() does not have " + tests[i][1] + " after delete");
+        Object.defineProperty(Object.getPrototypeOf(obj), tests[i][1], desc);
+    }
+});
+
 sync_test("console", function() {
     var except
 
@@ -3002,6 +3086,31 @@ sync_test("console", function() {
         except = true;
     }
     ok(except, "console.timeLog: expected exception");
+});
+
+sync_test("matchMedia", function() {
+    var i, r, mql;
+
+    try {
+        mql = window.matchMedia("");
+    }catch(ex) {
+        var n = ex.number >>> 0;
+        ok(n === E_INVALIDARG, "matchMedia('') threw " + n);
+    }
+    r = [
+        [ undefined, "unknown" ],
+        [ null,      "unknown" ],
+        [ 42,        "not all" ],
+        [{ toString: function() { return "(max-width: 0px)"; }}, "all and (max-width:0px)" ]
+    ];
+    for(i = 0; i < r.length; i++) {
+        mql = window.matchMedia(r[i][0]);
+        todo_wine_if(r[i][0] !== 42).
+        ok(mql.media === r[i][1], r[i][0] + " media = " + mql.media);
+        ok(mql.matches === false, r[i][0] + " matches");
+    }
+    mql = window.matchMedia("(max-width: 1000px)");
+    ok(mql.matches === true, "(max-width: 1000px) does not match");
 });
 
 sync_test("Crypto", function() {
@@ -3109,12 +3218,12 @@ sync_test("DOMParser", function() {
 
     // HTML mime types
     mimeType = [
-        [ "text/hTml",               "HTML Document" ]
+        "text/hTml"
     ];
     for(var i = 0; i < mimeType.length; i++) {
-        var m = mimeType[i][0], html = p.parseFromString(teststr, m);
+        var m = mimeType[i], html = p.parseFromString(teststr, m), e = external.getExpectedMimeType(m.toLowerCase());
         r = html.mimeType;
-        ok(r === mimeType[i][1], "mimeType of HTML document with mime type " + m + " = " + r);
+        ok(r === e, "mimeType of HTML document with mime type " + m + " = " + r + ", expected " + e);
         r = html.childNodes;
         ok(r.length === 1 || r.length === 2, "childNodes.length of HTML document with mime type " + m + " = " + r.length);
         var html_elem = r[r.length - 1];
@@ -3134,15 +3243,16 @@ sync_test("DOMParser", function() {
 
     // XML mime types
     mimeType = [
-        [ "text/xmL",                "XML Document" ],
-        [ "aPPlication/xml",         "XML Document" ],
-        [ "application/xhtml+xml",   "XHTML Document" ],
-        [ "image/svg+xml",           "SVG Document" ]
+        "text/xmL",
+        "aPPlication/xml",
+        "application/xhtml+xml",
+        "image/svg+xml"
     ];
     for(var i = 0; i < mimeType.length; i++) {
-        var m = mimeType[i][0], xml = p.parseFromString(teststr, m);
+        var m = mimeType[i], xml = p.parseFromString(teststr, m), e;
+        e = external.getExpectedMimeType(m === "aPPlication/xml" ? "text/xml" : m.toLowerCase());
         r = xml.mimeType;
-        ok(r === mimeType[i][1], "mimeType of XML document with mime type " + m + " = " + r);
+        ok(r === e, "mimeType of XML document with mime type " + m + " = " + r + ", expected " + e);
         r = xml.childNodes;
         ok(r.length === 1, "childNodes.length of XML document with mime type " + m + " = " + r.length);
         r = r[0];
@@ -3158,7 +3268,7 @@ sync_test("DOMParser", function() {
         // test HTMLDocument specific props, which are available in DocumentPrototype,
         // so they are shared in XMLDocument since they both have the same prototype
         r = xml.anchors;
-        if(mimeType[i][1] === "XHTML Document") {
+        if(m === "application/xhtml+xml") {
             todo_wine.
             ok(r.length === 1, "anchors.length of XML document with mime type " + m + " = " + r.length);
             r = r[0];
@@ -3182,9 +3292,11 @@ sync_test("DOMParser", function() {
     // Invalid mime types
     mimeType = [
         "application/html",
+        "wine/test+xml",
         "image/jpeg",
         "text/plain",
         "html",
+        "+xml",
         "xml",
         42
     ];

@@ -30,10 +30,6 @@ import "windows.foundation.idl";
 namespace Windows.Gaming.UI {
     runtimeclass GameBar;
 
-    declare {
-        interface Windows.Foundation.EventHandler<IInspectable *>;
-    }
-
     [
         contract(Windows.Foundation.UniversalApiContract, 2.0),
         exclusiveto(Windows.Gaming.UI.GameBar),
@@ -45,8 +41,8 @@ namespace Windows.Gaming.UI {
         [eventremove] HRESULT VisibilityChanged([in] EventRegistrationToken token);
         [eventadd] HRESULT IsInputRedirectedChanged([in] Windows.Foundation.EventHandler<IInspectable *> *handler, [out, retval] EventRegistrationToken *token);
         [eventremove] HRESULT IsInputRedirectedChanged([in] EventRegistrationToken token);
-        [propget] HRESULT Visible([out] [retval] boolean* value);
-        [propget] HRESULT IsInputRedirected([out] [retval] boolean* value);
+        [propget] HRESULT Visible([out, retval] boolean *value);
+        [propget] HRESULT IsInputRedirected([out, retval] boolean *value);
     }
 
     [

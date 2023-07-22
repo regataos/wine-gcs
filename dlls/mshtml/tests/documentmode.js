@@ -19,6 +19,92 @@
 var compat_version;
 var tests = [];
 
+ok(performance.timing.navigationStart > 0, "navigationStart <= 0");
+ok(performance.timing.fetchStart == performance.timing.navigationStart, "fetchStart != navigationStart");
+ok(performance.timing.domainLookupStart >= performance.timing.fetchStart, "domainLookupStart < fetchStart");
+ok(performance.timing.domainLookupEnd >= performance.timing.domainLookupStart, "domainLookupEnd < domainLookupStart");
+ok(performance.timing.connectStart >= performance.timing.domainLookupEnd, "connectStart < domainLookupEnd");
+ok(performance.timing.connectEnd >= performance.timing.connectStart, "connectEnd < connectStart");
+ok(performance.timing.requestStart >= performance.timing.connectEnd, "requestStart < connectEnd");
+ok(performance.timing.responseStart >= performance.timing.requestStart, "responseStart < requestStart");
+ok(performance.timing.responseEnd >= performance.timing.responseStart, "responseEnd < responseStart");
+ok(performance.timing.domLoading >= performance.timing.responseEnd, "domLoading < responseEnd");
+ok(performance.timing.domInteractive === 0, "domInteractive != 0");
+ok(performance.timing.domComplete === 0, "domComplete != 0");
+ok(performance.timing.domContentLoadedEventStart === 0, "domContentLoadedEventStart != 0");
+ok(performance.timing.domContentLoadedEventEnd === 0, "domContentLoadedEventEnd != 0");
+ok(performance.timing.loadEventStart === 0, "loadEventStart != 0");
+ok(performance.timing.loadEventEnd === 0, "loadEventEnd != 0");
+ok(performance.timing.unloadEventStart === 0, "unloadEventStart != 0");
+ok(performance.timing.unloadEventEnd === 0, "unloadEventEnd != 0");
+ok(performance.timing.redirectStart === 0, "redirectStart != 0");
+ok(performance.timing.redirectEnd === 0, "redirectEnd != 0");
+ok(performance.timing.msFirstPaint === 0, "msFirstPaint != 0");
+
+var pageshow_fired = false, pagehide_fired = false;
+document.doc_unload_events_called = false;
+window.onbeforeunload = function() { ok(false, "beforeunload fired"); };
+window.onunload = function() {
+    document.doc_unload_events_called = true;
+    ok(document.readyState === "complete", "unload readyState = " + document.readyState);
+    if(document.documentMode < 11)
+        ok(pagehide_fired === false, "pagehide fired before unload");
+    else
+        ok(pagehide_fired === true, "pagehide not fired before unload");
+};
+
+if(window.addEventListener) {
+    window.addEventListener("pageshow", function(e) {
+        pageshow_fired = true;
+
+        var r = Object.prototype.toString.call(e);
+        ok(r === "[object PageTransitionEvent]", "pageshow toString = " + r);
+        ok("persisted" in e, "'persisted' not in pageshow event");
+        ok(document.readyState === "complete", "pageshow readyState = " + document.readyState);
+        ok(performance.timing.loadEventEnd > 0, "loadEventEnd <= 0 in pageshow handler");
+    }, true);
+
+    window.addEventListener("pagehide", function(e) {
+        pagehide_fired = true;
+        ok(document.documentMode >= 11, "pagehide fired");
+
+        var r = Object.prototype.toString.call(e);
+        ok(r === "[object PageTransitionEvent]", "pagehide toString = " + r);
+        ok("persisted" in e, "'persisted' not in pagehide event");
+    }, true);
+
+    document.addEventListener("visibilitychange", function() { ok(false, "visibilitychange fired"); });
+    document.addEventListener("beforeunload", function() { ok(false, "beforeunload fired on document"); });
+    document.addEventListener("unload", function() { ok(false, "unload fired on document"); });
+}else {
+    document.attachEvent("onbeforeunload", function() { ok(false, "beforeunload fired on document"); });
+    document.attachEvent("onunload", function() { ok(false, "unload fired on document"); });
+}
+
+sync_test("performance timing", function() {
+    ok(performance.timing.domInteractive >= performance.timing.domLoading, "domInteractive < domLoading");
+    ok(performance.timing.domContentLoadedEventStart >= performance.timing.domInteractive, "domContentLoadedEventStart < domInteractive");
+    ok(performance.timing.domContentLoadedEventEnd >= performance.timing.domContentLoadedEventStart, "domContentLoadedEventEnd < domContentLoadedEventStart");
+    ok(performance.timing.domComplete >= performance.timing.domContentLoadedEventEnd, "domComplete < domContentLoadedEventEnd");
+    ok(performance.timing.loadEventStart >= performance.timing.domComplete, "loadEventStart < domComplete");
+    ok(performance.timing.loadEventEnd >= performance.timing.loadEventStart, "loadEventEnd < loadEventStart");
+    ok(performance.navigation.type === 0, "navigation type = " + performance.navigation.type);
+    ok(performance.navigation.redirectCount === 0, "redirectCount = " + performance.navigation.redirectCount);
+});
+
+sync_test("page transition events", function() {
+    if(document.documentMode < 11)
+        ok(pageshow_fired === false, "pageshow fired");
+    else
+        ok(pageshow_fired === true, "pageshow not fired");
+    ok(pagehide_fired === false, "pagehide fired");
+
+    if(document.body.addEventListener)
+        document.body.addEventListener("unload", function() { ok(false, "unload fired on document.body"); });
+    else
+        document.body.attachEvent("onunload", function() { ok(false, "unload fired on document.body"); });
+});
+
 sync_test("builtin_toString", function() {
     var tags = [
         [ "abbr",            "Phrase" ],
@@ -265,10 +351,12 @@ sync_test("builtin_toString", function() {
     if(v < 11) {
         test("eventObject", document.createEventObject(), "MSEventObj");
         test("selection", document.selection, "MSSelection");
+        test("XDomainRequest", new XDomainRequest(), "XDomainRequest", null, "Function");
     }
     if(v >= 9) {
         var xml = new DOMParser().parseFromString("<tag>foobar</tag>", "text/xml");
         test("computedStyle", window.getComputedStyle(e), "CSSStyleDeclaration");
+        test("doctype", document.doctype, "DocumentType");
         test("domParser", new DOMParser(), "DOMParser", null, "Function");
         test("svgDocument", new DOMParser().parseFromString("<tag>foobar</tag>", "image/svg+xml"), v < 11 ? "Document" : "XMLDocument");
         test("xhtmlDocument", new DOMParser().parseFromString("<tag>foobar</tag>", "application/xhtml+xml"), v < 11 ? "Document" : "XMLDocument");
@@ -284,6 +372,7 @@ sync_test("builtin_toString", function() {
     if(v >= 10) {
         test("classList", e.classList, "DOMTokenList", "testclass    another ");
         test("console", window.console, "Console");
+        test("mediaQueryList", window.matchMedia("(hover:hover)"), "MediaQueryList");
     }
     if(v >= 11) {
         test("crypto", window.msCrypto, "Crypto");
@@ -560,10 +649,12 @@ sync_test("builtin_prototypes", function() {
         [ "DOMParser",          [ "prototype", "arguments" ], [ "create", "length" ], 9 ],
         [ "Image",              [ "prototype", "arguments" ], [ "create", "length" ] ],
         [ "Option",             [ "prototype", "arguments" ], [ "create", "length" ] ],
+        [ "XDomainRequest",     [ "prototype", "arguments", "create" ], [ "length" ], 0, 10 ],
         [ "XMLHttpRequest",     [ "prototype", "arguments", "create" ], [ "length" ] ]
     ];
     for(var i = 0; i < special_ctors.length; i++) {
-        if(special_ctors[i].length > 3 && v < special_ctors[i][3])
+        if((special_ctors[i].length > 3 && v < special_ctors[i][3]) ||
+           (special_ctors[i].length > 4 && v > special_ctors[i][4]))
             continue;
         name = special_ctors[i][0];
         ok(Object.prototype.hasOwnProperty.call(window, name), name + " not a property of window.");
@@ -630,7 +721,7 @@ sync_test("builtin_prototypes", function() {
             ok(!Object.prototype.hasOwnProperty.call(obj, prop), prop + " is a property of " + name + ".");
         ok(Object.prototype.hasOwnProperty.call(proto, prop), prop + " not a property of " + name + ".prototype.");
     }
-    function test_compat_ctor(methods, props, non_props, set_prop, set_prop_val) {
+    function test_legacy_ctor(methods, props, non_props, set_prop, set_prop_val) {
         if(v >= 9)
             return;
         ok(""+proto === "[Interface prototype object]", name + ".prototype = " + proto);
@@ -711,7 +802,7 @@ sync_test("builtin_prototypes", function() {
     test_prop("open");
     test_prop("status");
     test_prop("onreadystatechange");
-    test_compat_ctor(["abort", "send"], ["readyState", "status"], ["selected", "src", "getAttribute"], "onreadystatechange", function(){});
+    test_legacy_ctor(["abort", "send"], ["readyState", "status"], ["selected", "src", "getAttribute"], "onreadystatechange", function(){});
     if(v < 9) {
         r = obj.abort();
         ok(r === "foobar", "(new XMLHttpRequest).abort() returned " + r);
@@ -725,10 +816,30 @@ sync_test("builtin_prototypes", function() {
     }else
         ok(proto.constructor === window.XMLHttpRequest, "XMLHttpRequest.prototype.constructor = " + proto.constructor);
 
+    if(v < 11) {
+        set_obj("XDomainRequest", true);
+        test_prop("open");
+        test_prop("send");
+        test_prop("timeout");
+        test_legacy_ctor(["abort"], ["contentType", "responseText"], ["status", "onreadystatechange"], "onerror", function(){});
+        if(v < 9) {
+            r = obj.abort();
+            ok(r === "foobar", "(new XDomainRequest).abort() returned " + r);
+            r = obj.winetestprop;
+            ok(r === "test", "(new XDomainRequest).winetestprop = " + r);
+            obj.winetestprop = "prop";
+            r = obj.winetestprop;
+            ok(r === "prop", "(new XDomainRequest).winetestprop after set = " + r);
+            r = XDomainRequest.prototype.winetestprop;
+            ok(r === "test", "XDomainRequest.prototype.winetestprop after obj = " + r);
+        }else
+            ok(proto.constructor === window.XDomainRequest, "XDomainRequest.prototype.constructor = " + proto.constructor);
+    }
+
     set_obj("Image", true);
     test_prop("src");
     test_prop("border");
-    test_compat_ctor(["getAttribute", "toString"], ["isMap", "alt"], ["selected", "send"], "src", "about:blank");
+    test_legacy_ctor(["getAttribute", "toString"], ["isMap", "alt"], ["selected", "send"], "src", "about:blank");
     if(v < 9) {
         r = obj.toString();
         ok(r === "foobar", "(new Image).toString() returned " + r);
@@ -760,7 +871,7 @@ sync_test("builtin_prototypes", function() {
     set_obj("Option", true);
     test_prop("text");
     test_prop("selected");
-    test_compat_ctor(["setAttribute", "contains"], ["index", "value"], ["src", "send"], "text", "foo");
+    test_legacy_ctor(["setAttribute", "contains"], ["index", "value"], ["src", "send"], "text", "foo");
     if(v < 9) {
         r = obj.setAttribute("a", "b");
         ok(r === "foobar", "(new Option).setAttribute() returned " + r);
@@ -1135,7 +1246,7 @@ sync_test("builtin_prototypes", function() {
             [ "XMLHttpRequest", 0 ]
         ];
         for(var i = 0; i < ctors.length; i++) {
-            if(!(ctors[i][0] in window) && (v >= 8 || ctors[i][0] === "XDomainRequest")) {
+            if(!(ctors[i][0] in window) && v >= 8) {
                 todo_wine.ok(false, ctors[i][0] + " not implemented");
                 continue;
             }
@@ -1146,8 +1257,6 @@ sync_test("builtin_prototypes", function() {
             }catch(ex) {
                 r = ex.number;
             }
-            if(r === 0x4001 - 0x80000000)  /* todo_wine XDomainRequest */
-                continue;
             if(v < 8 && (ctors[i].length < 2 || v < ctors[i][1]))
                 ok(r === 0xa1391 - 0x80000000, ctors[i][0] + " not undefined: " + r);
             else {
@@ -1201,6 +1310,7 @@ sync_test("builtin_prototypes", function() {
             [ "CSSStyleSheet",                  "StyleSheet" ],
             [ "CustomEvent",                    "Event" ],
             [ "Document",                       "Node" ],
+            [ "DocumentType",                   "Node" ],
             [ "DOMImplementation",              "Object" ],
             [ "DOMParser",                      "Object" ],
             [ "DOMTokenList",                   "Object" ],
@@ -1239,6 +1349,7 @@ sync_test("builtin_prototypes", function() {
             [ "HTMLUnknownElement",             "HTMLElement" ],
             [ "Image",                          "HTMLElement" ],
             [ "KeyboardEvent",                  "UIEvent" ],
+            [ "MediaQueryList",                 "Object" ],
             [ "MessageEvent",                   "Event" ],
             [ "MimeTypeArray",                  "Object" ],
             [ "MouseEvent",                     "UIEvent" ],
@@ -1256,12 +1367,15 @@ sync_test("builtin_prototypes", function() {
             [ "Node",                           "Object" ],
             [ "NodeList",                       "Object" ],
             [ "Option",                         "HTMLElement" ],
+            [ "PageTransitionEvent",            "Event" ],
             [ "Performance",                    "Object" ],
             [ "PerformanceNavigation",          "Object" ],
             [ "PerformanceTiming",              "Object" ],
             [ "PluginArray",                    "Object" ],
+            [ "ProgressEvent",                  "Event" ],
             [ "Screen",                         "Object" ],
             [ "Storage",                        "Object" ],
+            [ "StorageEvent",                   "Event" ],
             [ "StyleSheet",                     "Object" ],
             [ "StyleSheetList",                 "Object" ],
             [ "SubtleCrypto",                   "Object" ],
@@ -1269,6 +1383,7 @@ sync_test("builtin_prototypes", function() {
             [ "TextRange",                      "Object" ],
             [ "UIEvent",                        "Event" ],
             [ "Window",                         "Object" ],
+            [ "XDomainRequest",                 "Object" ],
             [ "XMLDocument",                    "Document" ],
             [ "XMLHttpRequest",                 "Object" ]
         ];
@@ -1322,6 +1437,7 @@ sync_test("builtin_prototypes", function() {
             [ "CSSStyleSheet", ["addRule","cssRules","ownerRule","rules"], ["disabled","media","ownerNode","parentStyleSheet","title","type"] ],
             [ "CustomEvent", ["detail","initCustomEvent"], Event_props ],
             [ "Document", ["body","doctype","documentMode","onactivate","parentWindow","styleSheets","title"], Node_props ],
+            [ "DocumentType", ["entities","internalSubset","name","notations","publicId","systemId"], Node_props ],
             [ "Element", Elem_props, Node_props ],
             [ "HTMLElement", HtmlElem_props, Elem_props ],
             [ "HTMLTableCellElement", TableCell_props, HtmlElem_props ],
@@ -1333,11 +1449,15 @@ sync_test("builtin_prototypes", function() {
             [ "MSCSSProperties", CSS_props, ["background","border","clip","fontWeight","listStyle","quotes","setProperty","zIndex"] ],
             [ "MSCurrentStyleCSSProperties", ["blockDirection","clipBottom","clipLeft","clipRight","clipTop","hasLayout"], CSS_props ],
             [ "MSStyleCSSProperties", ["pixelTop","pixelWidth","posHeight","posLeft","textDecorationBlink","textDecorationNone"], CSS_props ],
+            [ "ProgressEvent", ["initProgressEvent","lengthComputable","loaded","total"], Event_props ],
+            [ "StorageEvent", ["initStorageEvent","key","newValue","oldValue","storageArea"], Event_props ],
             [ "Text", ["splitText"], ["data","length","appendData","deleteData","insertData","replaceData","substringData"] ],
             [ "UIEvent", ["detail","initUIEvent","view"], Event_props ]
         ];
 
         for(var i = 0; i < protos.length; i++) {
+            if(!(protos[i][0] in window))
+                continue;
             eval("r = " + protos[i][0] + ".prototype");
             for(var j = 0; j < protos[i][1].length; j++)
                 ok(Object.prototype.hasOwnProperty.call(r, protos[i][1][j]), protos[i][1][j] + " not a property of " + protos[i][0] + ".prototype");
@@ -1352,15 +1472,18 @@ sync_test("builtin_prototypes", function() {
 sync_test("elem_props", function() {
     var elem = document.documentElement;
 
-    function test_exposed(prop, expect) {
+    function test_exposed(prop, expect, is_todo) {
+        var ok_ = is_todo ? todo_wine.ok : ok;
         if(expect)
-            ok(prop in elem, prop + " not found in element.");
+            ok_(prop in elem, prop + " not found in element.");
         else
-            ok(!(prop in elem), prop + " found in element.");
+            ok_(!(prop in elem), prop + " found in element.");
     }
 
     var v = document.documentMode;
 
+    test_exposed("attachEvent", v < 11);
+    test_exposed("detachEvent", v < 11);
     test_exposed("doScroll", v < 11);
     test_exposed("readyState", v < 11);
     test_exposed("clientTop", true);
@@ -1373,7 +1496,7 @@ sync_test("elem_props", function() {
     test_exposed("getElementsByClassName", v >= 9);
     test_exposed("removeAttributeNS", v >= 9);
     test_exposed("addEventListener", v >= 9);
-    if (v != 8 /* todo_wine */) test_exposed("hasAttribute", v >= 8);
+    test_exposed("hasAttribute", v >= 8, v === 8);
     test_exposed("removeEventListener", v >= 9);
     test_exposed("dispatchEvent", v >= 9);
     test_exposed("msSetPointerCapture", v >= 10);
@@ -1388,6 +1511,9 @@ sync_test("elem_props", function() {
     test_exposed("readyState", v < 11);
     test_exposed("styleSheet", v < 11);
     test_exposed("classList", v >= 10);
+
+    elem = document.createElement("img");
+    test_exposed("fileSize", v < 11);
 });
 
 sync_test("attr_props", function() {
@@ -1468,16 +1594,23 @@ sync_test("attr_props", function() {
 });
 
 sync_test("doc_props", function() {
-    function test_exposed(prop, expect) {
+    function test_exposed(prop, expect, is_todo) {
+        var ok_ = is_todo ? todo_wine.ok : ok;
         if(expect)
-            ok(prop in document, prop + " not found in document.");
+            ok_(prop in document, prop + " not found in document.");
         else
-            ok(!(prop in document), prop + " found in document.");
+            ok_(!(prop in document), prop + " found in document.");
     }
 
     var v = document.documentMode;
-    ok(document.mimeType === "HTML Document", "mimeType = " + document.mimeType);
+    ok(document.mimeType === external.getExpectedMimeType("text/html"), "mimeType = " + document.mimeType);
 
+    test_exposed("attachEvent", v < 11);
+    test_exposed("detachEvent", v < 11);
+    test_exposed("createStyleSheet",v < 11);
+    test_exposed("fileSize", v < 11);
+    test_exposed("selection", v < 11);
+    test_exposed("onstorage", v < 9);
     test_exposed("textContent", v >= 9);
     test_exposed("prefix", v >= 9);
     test_exposed("defaultView", v >= 9);
@@ -1507,15 +1640,20 @@ sync_test("docfrag_props", function() {
 });
 
 sync_test("window_props", function() {
-    function test_exposed(prop, expect) {
+    function test_exposed(prop, expect, is_todo) {
+        var ok_ = is_todo ? todo_wine.ok : ok;
         if(expect)
-            ok(prop in window, prop + " not found in window.");
+            ok_(prop in window, prop + " not found in window.");
         else
-            ok(!(prop in window), prop + " found in window.");
+            ok_(!(prop in window), prop + " found in window.");
     }
 
     var v = document.documentMode;
 
+    test_exposed("attachEvent", v < 11);
+    test_exposed("detachEvent", v < 11);
+    test_exposed("execScript", v < 11);
+    test_exposed("createPopup", v < 11);
     test_exposed("postMessage", true);
     test_exposed("sessionStorage", true);
     test_exposed("localStorage", true);
@@ -1531,8 +1669,10 @@ sync_test("window_props", function() {
     test_exposed("Set", v >= 11);
     test_exposed("performance", true);
     test_exposed("console", v >= 10);
-    test_exposed("msCrypto", v >= 11);
     test_exposed("DOMParser", v >= 9);
+    test_exposed("matchMedia", v >= 10);
+    test_exposed("msCrypto", v >= 11);
+    test_exposed("XDomainRequest", v < 11);
 });
 
 sync_test("domimpl_props", function() {
@@ -1552,6 +1692,56 @@ sync_test("domimpl_props", function() {
     test_exposed("createHTMLDocument", v >= 9);
 });
 
+sync_test("perf_props", function() {
+    var obj = window.performance, name = "Performance";
+    var v = document.documentMode;
+
+    function test_exposed(prop, expect) {
+        if(expect)
+            ok(prop in obj, prop + " not found in " + name + ".");
+        else
+            ok(!(prop in obj), prop + " found in " + name + ".");
+    }
+
+    test_exposed("navigation", true);
+    test_exposed("timing", true);
+    test_exposed("toJSON", v >= 9);
+    test_exposed("toString", true);
+
+    obj = window.performance.navigation, name = "PerformanceNavigation";
+
+    test_exposed("redirectCount", true);
+    test_exposed("type", true);
+    test_exposed("toJSON", v >= 9);
+    test_exposed("toString", true);
+
+    obj = window.performance.timing, name = "PerformanceTiming";
+
+    test_exposed("connectEnd", true);
+    test_exposed("connectStart", true);
+    test_exposed("domComplete", true);
+    test_exposed("domContentLoadedEventEnd", true);
+    test_exposed("domContentLoadedEventStart", true);
+    test_exposed("domInteractive", true);
+    test_exposed("domLoading", true);
+    test_exposed("domainLookupEnd", true);
+    test_exposed("domainLookupStart", true);
+    test_exposed("fetchStart", true);
+    test_exposed("loadEventEnd", true);
+    test_exposed("loadEventStart", true);
+    test_exposed("msFirstPaint", true);
+    test_exposed("navigationStart", true);
+    test_exposed("redirectEnd", true);
+    test_exposed("redirectStart", true);
+    test_exposed("requestStart", true);
+    test_exposed("responseEnd", true);
+    test_exposed("responseStart", true);
+    test_exposed("unloadEventEnd", true);
+    test_exposed("unloadEventStart", true);
+    test_exposed("toJSON", v >= 9);
+    test_exposed("toString", true);
+});
+
 sync_test("xhr_props", function() {
     var xhr = new XMLHttpRequest();
 
@@ -1567,6 +1757,18 @@ sync_test("xhr_props", function() {
     test_exposed("addEventListener", v >= 9);
     test_exposed("removeEventListener", v >= 9);
     test_exposed("dispatchEvent", v >= 9);
+    test_exposed("onabort", v >= 10);
+    test_exposed("onerror", v >= 10);
+    test_exposed("onloadend", v >= 10);
+    test_exposed("onloadstart", v >= 10);
+    test_exposed("onprogress", v >= 10);
+    test_exposed("ontimeout", true);
+    test_exposed("overrideMimeType", v >= 11);
+    test_exposed("response", v >= 10);
+    test_exposed("responseType", v >= 10);
+    test_exposed("timeout", true);
+    test_exposed("upload", v >= 10);
+    test_exposed("withCredentials", v >= 10);
 });
 
 sync_test("stylesheet_props", function() {
@@ -1603,6 +1805,23 @@ sync_test("stylesheet_props", function() {
     test_exposed("removeRule", true);
     test_exposed("cssText", true);
     test_exposed("rules", true);
+});
+
+sync_test("rect_props", function() {
+    document.body.innerHTML = '<div>test</div>';
+    var elem = document.body.firstChild;
+    var rect = elem.getBoundingClientRect();
+    function test_exposed(prop, expect) {
+        if(expect)
+            ok(prop in rect, prop + " not found in rect object.");
+        else
+            ok(!(prop in rect), prop + " found in rect object.");
+    }
+
+    var v = document.documentMode;
+
+    test_exposed("width", v >= 9);
+    test_exposed("height", v >= 9);
 });
 
 sync_test("xhr open", function() {
@@ -1831,11 +2050,12 @@ sync_test("createElement_inline_attr", function() {
 sync_test("JS objs", function() {
     var g = window;
 
-    function test_exposed(func, obj, expect) {
+    function test_exposed(func, obj, expect, is_todo) {
+        var ok_ = is_todo ? todo_wine.ok : ok;
         if(expect)
-            ok(func in obj, func + " not found in " + obj);
+            ok_(func in obj, func + " not found in " + obj);
         else
-            ok(!(func in obj), func + " found in " + obj);
+            ok_(!(func in obj), func + " found in " + obj);
     }
 
     function test_parses(code, expect) {
@@ -1866,11 +2086,9 @@ sync_test("JS objs", function() {
     test_exposed("map", Array.prototype, v >= 9);
 
     /* FIXME: IE8 implements weird semi-functional property descriptors. */
-    if(v != 8) {
-        test_exposed("getOwnPropertyDescriptor", Object, v >= 8);
-        test_exposed("defineProperty", Object, v >= 8);
-        test_exposed("defineProperties", Object, v >= 8);
-    }
+    test_exposed("getOwnPropertyDescriptor", Object, v >= 8, v === 8);
+    test_exposed("defineProperty", Object, v >= 8, v === 8);
+    test_exposed("defineProperties", Object, v >= 9);
 
     test_exposed("getPrototypeOf", Object, v >= 9);
 
@@ -1879,17 +2097,149 @@ sync_test("JS objs", function() {
     test_parses("if(false) { o.if; }", v >= 9);
 });
 
+sync_test("for..in", function() {
+    var v = document.documentMode, found = 0, r;
+
+    function ctor() {}
+    ctor.prototype.test2 = true;
+
+    var arr = new Array(), obj = new ctor(), i, r;
+    obj.test1 = true;
+
+    i = 0;
+    for(r in obj) {
+        ctor.prototype.test3 = true;
+        arr[r] = true;
+        i++;
+    }
+
+    ok(i === 3, "enum did " + i + " iterations");
+    ok(arr["test1"] === true, "arr[test1] !== true");
+    ok(arr["test2"] === true, "arr[test2] !== true");
+    ok(arr["test3"] === true, "arr[test3] !== true");
+
+    for(r in document)
+        if(r === "ondragstart")
+            found++;
+    ok(found === 1, "ondragstart enumerated " + found + " times in document");
+    document.ondragstart = "";
+    found = 0;
+    for(r in document)
+        if(r === "ondragstart")
+            found++;
+    ok(found === 1, "ondragstart enumerated " + found + " times in document after set to empty string");
+});
+
 sync_test("elem_by_id", function() {
     document.body.innerHTML = '<form id="testid" name="testname"></form>';
+    var v = document.documentMode, found, i;
 
     var id_elem = document.getElementById("testid");
     ok(id_elem.tagName === "FORM", "id_elem.tagName = " + id_elem.tagName);
 
     var name_elem = document.getElementById("testname");
-    if(document.documentMode < 8)
+    if(v < 8)
         ok(id_elem === name_elem, "id_elem != id_elem");
     else
         ok(name_elem === null, "name_elem != null");
+
+    id_elem = window.testid;
+    ok(id_elem.tagName === "FORM", "window.testid = " + id_elem);
+
+    name_elem = document.testname;
+    ok(name_elem.tagName === "FORM", "document.testname = " + name_elem);
+
+    for(id_elem in window)
+        ok(id_elem !== "testid" && id_elem != "testname", id_elem + " was enumerated in window");
+    window.testid = 137;
+    found = false;
+    for(id_elem in window) {
+        ok(id_elem != "testname", id_elem + " was enumerated in window after set to 137");
+        if(id_elem === "testid")
+            found = true;
+    }
+    ok(found, "testid was not enumerated in window after set to 137");
+
+    found = false;
+    for(id_elem in document) {
+        ok(id_elem !== "testid", "testid was enumerated in document");
+        if(id_elem === "testname")
+            found = true;
+    }
+    ok(found, "testname was not enumerated in document");
+
+    try {
+        document.testname();
+        ok(false, "document.testname() did not throw exception");
+    }catch(e) {
+        ok(e.number === 0xa01b6 - 0x80000000, "document.testname() threw = " + e.number);
+    }
+
+    try {
+        document.testname = "foo";
+        ok(v >= 9, "Setting document.testname did not throw exception");
+
+        id_elem = document.testid;
+        ok(id_elem.tagName === "FORM", "document.testid after set = " + id_elem);
+        name_elem = document.testname;
+        ok(name_elem === "foo", "document.testname after set = " + name_elem);
+    }catch(e) {
+        ok(v < 9 && e.number === 0xa01b6 - 0x80000000, "Setting document.testname threw = " + e.number);
+    }
+
+    try {
+        document.testid = "bar";
+        ok(v >= 9, "Setting document.testid did not throw exception");
+
+        id_elem = document.testid;
+        ok(id_elem === "bar", "document.testid after both set = " + id_elem);
+        name_elem = document.testname;
+        ok(name_elem === "foo", "document.testname after both set = " + name_elem);
+
+        found = false, name_elem = false;
+        for(id_elem in document) {
+            if(id_elem === "testid")
+                found = true;
+            if(id_elem === "testname")
+                name_elem = true;
+        }
+        ok(found, "testid was not enumerated in document after both set");
+        ok(name_elem, "testname was not enumerated in document after both set");
+        delete document.testid;
+        delete document.testname;
+    }catch(e) {
+        ok(v < 9 && e.number === 0xa01b6 - 0x80000000, "Setting document.testid threw = " + e.number);
+    }
+
+    // these tags expose name as props, and id only if they have a name
+    var tags = [ "embed", "form", "iframe", "img" ];
+    for(i in tags) {
+        var tag = tags[i];
+        document.body.innerHTML = '<' + tag + ' id="testid" name="testname"></' + tag + '><' + tag + ' id="foobar"></' + tag + '>';
+        ok("testname" in document, tag + " did not expose testname");
+        ok("testid" in document, tag + " did not expose testid");
+        ok(!("foobar" in document), tag + " exposed foobar");
+    }
+
+    // these tags always expose their id as well as name (we don't test applet because it makes Windows pop up a dialog box)
+    tags = [ "object" ];
+    for(i in tags) {
+        var tag = tags[i];
+        document.body.innerHTML = '<' + tag + ' id="testid" name="testname"></' + tag + '><' + tag + ' id="foobar"></' + tag + '>';
+        ok("testname" in document, tag + " did not expose testname");
+        ok("testid" in document, tag + " did not expose testid");
+        ok("foobar" in document, tag + " did not expose foobar");
+    }
+
+    // all other tags don't expose props for either id or name, test a few of them here
+    tags = [ "a", "b", "body", "center", "div", "frame", "h2", "head", "html", "input", "meta", "p", "span", "style", "table", "winetest" ];
+    for(i in tags) {
+        var tag = tags[i];
+        document.body.innerHTML = '<' + tag + ' id="testid" name="testname"></' + tag + '><' + tag + ' id="foobar"></' + tag + '>';
+        ok(!("testname" in document), tag + " exposed testname");
+        ok(!("testid" in document), tag + " exposed testid");
+        ok(!("foobar" in document), tag + " exposed foobar");
+    }
 });
 
 sync_test("doc_mode", function() {
@@ -1909,6 +2259,17 @@ sync_test("doc_mode", function() {
         ok(document.compatMode === "CSS1Compat", "document.compatMode = " + document.compatMode);
     else
         ok(document.compatMode === "BackCompat", "document.compatMode = " + document.compatMode);
+});
+
+sync_test("doctype", function() {
+    var doctype = document.doctype;
+
+    if(document.documentMode < 9) {
+        ok(doctype === null, "doctype = " + document.doctype);
+        return;
+    }
+
+    ok(doctype.name === "html", "doctype.name = " + doctype.name);
 });
 
 async_test("iframe_doc_mode", function() {
@@ -1992,6 +2353,18 @@ async_test("script_load", function() {
     document.body.appendChild(elem);
     elem.src = "jsstream.php?simple";
     external.writeStream("simple", "ready_states += 'exec,';");
+});
+
+sync_test("location", function() {
+    document.body.innerHTML = '<a name="testanchor">test</a>';
+
+    ok(location.hash === "", "initial location.hash = " + location.hash);
+    location.hash = "TestAnchor";
+    ok(location.hash === "#TestAnchor", "location.hash after set to TestAnchor = " + location.hash);
+    location.hash = "##foo";
+    ok(location.hash === "##foo", "location.hash after set to ##foo = " + location.hash);
+    location.hash = "#testanchor";
+    ok(location.hash === "#testanchor", "location.hash after set to #testanchor = " + location.hash);
 });
 
 sync_test("navigator", function() {
@@ -2212,6 +2585,13 @@ sync_test("func_scope", function() {
 sync_test("set_obj", function() {
     if(!("Set" in window)) return;
 
+    try {
+        var s = Set();
+        ok(false, "expected exception calling constructor as method");
+    }catch(e) {
+        ok(e.number === 0xa13fc - 0x80000000, "calling constructor as method threw " + e.number);
+    }
+
     var s = new Set, r;
     ok(Object.getPrototypeOf(s) === Set.prototype, "unexpected Set prototype");
 
@@ -2304,12 +2684,20 @@ sync_test("set_obj", function() {
         r++;
         s.clear();
         ok(s.size === 0, "size = " + s.size);
-    });
+        ok(this.valueOf() === 42, "this.valueOf() = " + this.valueOf());
+    }, 42);
     ok(r === 1, "r = " + r);
 });
 
 sync_test("map_obj", function() {
     if(!("Map" in window)) return;
+
+    try {
+        var s = Map();
+        ok(false, "expected exception calling constructor as method");
+    }catch(e) {
+        ok(e.number === 0xa13fc - 0x80000000, "calling constructor as method threw " + e.number);
+    }
 
     var s = new Map, r, i;
     ok(Object.getPrototypeOf(s) === Map.prototype, "unexpected Map prototype");
@@ -2458,8 +2846,185 @@ sync_test("map_obj", function() {
         r++;
         s.clear();
         ok(s.size === 0, "size = " + s.size);
-    });
+        ok(this.valueOf() === 42, "this.valueOf() = " + this.valueOf());
+    }, 42);
     ok(r === 1, "r = " + r);
+});
+
+sync_test("storage", function() {
+    var v = document.documentMode, i, r, list;
+
+    sessionStorage["add-at-end"] = 0;
+    sessionStorage.removeItem("add-at-end");
+
+    sessionStorage.setItem("foobar", "1234");
+    ok("foobar" in sessionStorage, "foobar not in sessionStorage");
+    r = sessionStorage.foobar;
+    ok(r === "1234", "sessionStorage.foobar = " + r);
+    sessionStorage.barfoo = 4321;
+    r = sessionStorage.getItem("barfoo");
+    ok(r === "4321", "sessionStorage.barfoo = " + r);
+    sessionStorage.setItem("abcd", "blah");
+    sessionStorage.dcba = "test";
+
+    // Order isn't consistent, but changes are reflected during the enumeration.
+    // Elements that were already traversed in DISPID (even if removed before
+    // the enumeration) are not enumerated, even if re-added during the enum.
+    i = 0; list = [ "foobar", "barfoo", "abcd", "dcba" ];
+    for(r in sessionStorage) {
+        for(var j = 0; j < list.length; j++)
+            if(r === list[j])
+                break;
+        ok(j < list.length, "got '" + r + "' enumerating");
+        list.splice(j, 1);
+        if(i === 1) {
+            sessionStorage.removeItem(list[0]);
+            sessionStorage.setItem("new", "new");
+            list.splice(0, 1, "new");
+        }
+        if(!list.length)
+            sessionStorage.setItem("add-at-end", "0");
+        i++;
+    }
+    ok(i === 4, "enum did " + i + " iterations");
+
+    try {
+        delete sessionStorage.foobar;
+        ok(v >= 8, "expected exception deleting sessionStorage.foobar");
+        ok(!("foobar" in sessionStorage), "foobar in sessionStorage after deletion");
+        r = sessionStorage.getItem("foobar");
+        ok(r === null, "sessionStorage.foobar after deletion = " + r);
+    }catch(e) {
+        ok(v < 8, "did not expect exception deleting sessionStorage.foobar");
+        ok(e.number === 0xa01bd - 0x80000000, "deleting sessionStorage.foobar threw = " + e.number);
+    }
+
+    sessionStorage.clear();
+});
+
+async_test("storage events", function() {
+    var iframe = document.createElement("iframe"), iframe2 = document.createElement("iframe");
+    var local = false, storage, storage2, v = document.documentMode, i = 0;
+
+    var tests = [
+        function() {
+            expect();
+            storage.removeItem("foobar");
+        },
+        function() {
+            expect(0, "foobar", "", "test");
+            storage.setItem("foobar", "test");
+        },
+        function() {
+            expect(1, "foobar", "test", "TEST", true);
+            storage2.setItem("foobar", "TEST");
+        },
+        function() {
+            expect(0, "foobar", "TEST", "");
+            storage.removeItem("foobar");
+        },
+        function() {
+            expect(1, "winetest", "", "WineTest");
+            storage2.setItem("winetest", "WineTest");
+        },
+        function() {
+            expect(0, "", "", "");
+            storage.clear();
+        }
+    ];
+
+    function next() {
+        if(++i < tests.length)
+            tests[i]();
+        else if(local)
+            next_test();
+        else {
+            // w10pro64 testbot VM throws WININET_E_INTERNAL_ERROR for some reason
+            storage = null, storage2 = null;
+            try {
+                storage = window.localStorage, storage2 = iframe.contentWindow.localStorage;
+            }catch(e) {
+                ok(e.number === 0x72ee4 - 0x80000000, "localStorage threw " + e.number + ": " + e);
+            }
+            if(!storage || !storage2) {
+                win_skip("localStorage is buggy and not available, skipping");
+                next_test();
+                return;
+            }
+            i = 0, local = true;
+
+            if(!storage.length)
+                setTimeout(function() { tests[0](); });
+            else {
+                // Get rid of any entries first, since native doesn't update immediately
+                var w = [ window, iframe.contentWindow ];
+                for(var j = 0; j < w.length; j++)
+                    w[j].onstorage = w[j].document.onstorage = w[j].document.onstoragecommit = null;
+                document.onstoragecommit = function() {
+                    if(!storage.length)
+                        setTimeout(function() { tests[0](); });
+                    else
+                        storage.clear();
+                };
+                storage.clear();
+            }
+        }
+    }
+
+    function test_event(e, idx, key, oldValue, newValue) {
+        if(v < 9) {
+            ok(e === undefined, "event not undefined in legacy mode: " + e);
+            return;
+        }
+        var s = Object.prototype.toString.call(e);
+        ok(s === "[object StorageEvent]", "Object.toString = " + s);
+        ok(e.key === key, "key = " + e.key + ", expected " + key);
+        ok(e.oldValue === oldValue, "oldValue = " + e.oldValue + ", expected " + oldValue);
+        ok(e.newValue === newValue, "newValue = " + e.newValue + ", expected " + newValue);
+        s = (idx ? iframe.contentWindow : window)["location"]["href"].split('#', 1)[0];
+        ok(e.url === s, "url = " + e.url + ", expected " + s);
+    }
+
+    function expect(idx, key, oldValue, newValue, quirk) {
+        var window2 = iframe.contentWindow, document2 = window2.document;
+        window.onstorage = function() { ok(false, "window.onstorage called"); };
+        document.onstorage = function() { ok(false, "doc.onstorage called"); };
+        document.onstoragecommit = function() { ok(false, "doc.onstoragecommit called"); };
+        window2.onstorage = function() { ok(false, "iframe window.onstorage called"); };
+        document2.onstorage = function() { ok(false, "iframe doc.onstorage called"); };
+        document2.onstoragecommit = function() { ok(false, "iframe doc.onstoragecommit called"); };
+
+        if(idx === undefined) {
+            setTimeout(function() { next(); });
+        }else {
+            // Native sometimes calls this for some reason
+            if(local && quirk) document.onstoragecommit = null;
+
+            (v < 9 ? document2 : window2)["onstorage"] = function(e) {
+                (local && idx ? document2 : (local || v < 9 ? document : window))[local ? "onstoragecommit" : "onstorage"] = function(e) {
+                    test_event(e, idx, local ? "" : key, local ? "" : oldValue, local ? "" : newValue);
+                    next();
+                }
+                test_event(e, idx, key, oldValue, newValue);
+            }
+        }
+    }
+
+    iframe.onload = function() {
+        iframe2.onload = function() {
+            var w = iframe2.contentWindow;
+            w.onstorage = function() { ok(false, "about:blank window.onstorage called"); };
+            w.document.onstorage = function() { ok(false, "about:blank document.onstorage called"); };
+            w.document.onstoragecommit = function() { ok(false, "about:blank document.onstoragecommit called"); };
+
+            storage = window.sessionStorage, storage2 = iframe.contentWindow.sessionStorage;
+            tests[0]();
+        };
+        iframe2.src = "about:blank";
+        document.body.appendChild(iframe2);
+    };
+    iframe.src = "blank.html";
+    document.body.appendChild(iframe);
 });
 
 sync_test("elem_attr", function() {
@@ -3015,6 +3580,64 @@ sync_test("nullDisp", function() {
     }
 });
 
+sync_test("invalid selectors", function() {
+    var v = document.documentMode, body = document.body, i;
+    if(v < 8)
+        return;
+
+    var selectors = [
+        "[s!='']",
+        "*,:x",
+        "*,##",
+        ":x",
+        "##",
+        "*,",
+        ","
+    ];
+
+    for(i = 0; i < selectors.length; i++) {
+        try {
+            body.querySelector(selectors[i]);
+            ok(false, "body.querySelector(\"" + selectors[i] + "\" did not throw exception");
+        }catch(e) {
+            if(v < 9)
+                ok(e.number === 0x70057 - 0x80000000, "body.querySelector(\"" + selectors[i] + "\" threw " + e.number);
+            else {
+                todo_wine.
+                ok(e.name === (v < 10 ? undefined : "SyntaxError"), "body.querySelector(\"" + selectors[i] + "\" threw " + e.name);
+            }
+        }
+        try {
+            body.querySelectorAll(selectors[i]);
+            ok(false, "body.querySelectorAll(\"" + selectors[i] + "\" did not throw exception");
+        }catch(e) {
+            if(v < 9)
+                ok(e.number === 0x70057 - 0x80000000, "body.querySelectorAll(\"" + selectors[i] + "\" threw " + e.number);
+            else {
+                todo_wine.
+                ok(e.name === (v < 10 ? undefined : "SyntaxError"), "body.querySelectorAll(\"" + selectors[i] + "\" threw " + e.name);
+            }
+        }
+    }
+
+    if(!body.msMatchesSelector)
+        return;
+
+    for(i = 0; i < selectors.length; i++) {
+        try {
+            body.msMatchesSelector(selectors[i]);
+            ok(false, "body.msMatchesSelector(\"" + selectors[i] + "\" did not throw exception");
+        }catch(e) {
+            if(v < 9)
+                ok(e.number === 0x70057 - 0x80000000, "body.msMatchesSelector(\"" + selectors[i] + "\" threw " + e.number);
+            else {
+                todo_wine.
+                ok(e.name === (v < 10 ? undefined : "SyntaxError"), "body.msMatchesSelector(\"" + selectors[i] + "\" threw " + e.name);
+            }
+        }
+    }
+});
+
 sync_test("__proto__", function() {
     var v = document.documentMode;
     var r, x = 42;
@@ -3342,6 +3965,32 @@ sync_test("__defineSetter__", function() {
     ok(x.setterVal === 9, "x.setterVal after setting bar = " + x.setterVal);
 });
 
+sync_test("initMessageEvent", function() {
+    var e, v = document.documentMode;
+    if(!document.createEvent)
+        return;
+    e = document.createEvent("MessageEvent");
+    ok(e.data === (v < 10 ? "" : undefined), "e.data = " + e.data);
+    ok(e.bubbles === false, "bubbles = " + e.bubbles);
+    ok(e.cancelable === false, "cancelable = " + e.cancelable);
+    ok(e.source === null, "e.source = " + e.source);
+    ok(e.origin === "", "e.origin = " + e.origin);
+
+    e.initMessageEvent("blah", true, true, 137, "wine", 1234, window);
+    ok(e.data === "137", "e.data = " + e.data);
+    ok(e.bubbles === true, "bubbles = " + e.bubbles);
+    ok(e.cancelable === true, "cancelable = " + e.cancelable);
+    ok(e.source === window, "e.source = " + e.source);
+    ok(e.origin === "wine", "e.origin = " + e.origin);
+
+    e.initMessageEvent("abcd", false, false, "testdata", "origin", 42, null);
+    ok(e.data === "testdata", "e.data = " + e.data);
+    ok(e.bubbles === false, "bubbles = " + e.bubbles);
+    ok(e.cancelable === false, "cancelable = " + e.cancelable);
+    ok(e.source === null, "e.source = " + e.source);
+    ok(e.origin === "origin", "e.origin = " + e.origin);
+});
+
 async_test("postMessage", function() {
     var v = document.documentMode;
     var onmessage_called = false;
@@ -3351,6 +4000,11 @@ async_test("postMessage", function() {
             ok(e === undefined, "e = " + e);
         else {
             ok(e.data === (v < 10 ? "10" : 10), "e.data = " + e.data);
+            ok(e.source === window, "e.source = " + e.source);
+            ok(e.origin === "http://winetest.example.org", "e.origin = " + e.origin);
+
+            e = document.createEvent("MessageEvent");
+            ok(e.data === (v < 10 ? "" : undefined), "created e.data = " + e.data);
             next_test();
         }
     }

@@ -21,32 +21,42 @@
 #ifndef __NTDLL_UNIXLIB_H
 #define __NTDLL_UNIXLIB_H
 
-#include "wine/debug.h"
+#include "wine/unixlib.h"
 
 struct _DISPATCHER_CONTEXT;
 
-/* increment this when you change the function table */
-#define NTDLL_UNIXLIB_VERSION 134
-
-struct unix_funcs
+struct load_so_dll_params
 {
-    /* loader functions */
-    NTSTATUS      (CDECL *load_so_dll)( UNICODE_STRING *nt_name, void **module );
-    void          (CDECL *init_builtin_dll)( void *module );
-    NTSTATUS      (CDECL *unwind_builtin_dll)( ULONG type, struct _DISPATCHER_CONTEXT *dispatch,
-                                               CONTEXT *context );
-    /* other Win32 API functions */
-    LONGLONG      (WINAPI *RtlGetSystemTimePrecise)(void);
-#ifdef __aarch64__
-    TEB *         (WINAPI *NtCurrentTeb)(void);
-#endif
-
-    void          (CDECL *set_unix_env)( const char *var, const char *val );
-    void          (CDECL *write_crash_log)( const char *log_type, const char *log_msg );
-    BOOL          (CDECL *is_pc_in_native_so)( void *pc );
-    BOOL          (CDECL *debugstr_pc)( void *pc, char *buffer, unsigned int size );
+    UNICODE_STRING              nt_name;
+    void                      **module;
 };
 
+struct unwind_builtin_dll_params
+{
+    ULONG                       type;
+    struct _DISPATCHER_CONTEXT *dispatch;
+    CONTEXT                    *context;
+};
+
+struct debugstr_pc_args
+{
+    void *pc;
+    char *buffer;
+    unsigned int size;
+};
+
+enum ntdll_unix_funcs
+{
+    unix_load_so_dll,
+    unix_unwind_builtin_dll,
+    unix_system_time_precise,
+    unix_is_pc_in_native_so,
+    unix_debugstr_pc,
+};
+
+extern unixlib_handle_t ntdll_unix_handle;
+
+#define NTDLL_UNIX_CALL( func, params ) __wine_unix_call_dispatcher( ntdll_unix_handle, unix_ ## func, params )
 
 #define WINE_BACKTRACE_LOG_ON() WARN_ON(seh)
 

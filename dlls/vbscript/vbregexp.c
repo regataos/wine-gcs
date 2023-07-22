@@ -56,7 +56,7 @@ static HRESULT init_regexp_typeinfo(regexp_tid_t tid)
 
         hres = LoadTypeLib(L"vbscript.dll\\3", &tl);
         if(FAILED(hres)) {
-            ERR("LoadRegTypeLib failed: %08x\n", hres);
+            ERR("LoadRegTypeLib failed: %08lx\n", hres);
             return hres;
         }
 
@@ -69,7 +69,7 @@ static HRESULT init_regexp_typeinfo(regexp_tid_t tid)
 
         hres = ITypeLib_GetTypeInfoOfGuid(typelib, tid_ids[tid], &ti);
         if(FAILED(hres)) {
-            ERR("GetTypeInfoOfGuid(%s) failed: %08x\n", debugstr_guid(tid_ids[tid]), hres);
+            ERR("GetTypeInfoOfGuid(%s) failed: %08lx\n", debugstr_guid(tid_ids[tid]), hres);
             return hres;
         }
 
@@ -170,7 +170,7 @@ static ULONG WINAPI SubMatches_AddRef(ISubMatches *iface)
     SubMatches *This = impl_from_ISubMatches(iface);
     LONG ref = InterlockedIncrement(&This->ref);
 
-    TRACE("(%p) ref=%d\n", This, ref);
+    TRACE("(%p) ref=%ld\n", This, ref);
 
     return ref;
 }
@@ -180,12 +180,12 @@ static ULONG WINAPI SubMatches_Release(ISubMatches *iface)
     SubMatches *This = impl_from_ISubMatches(iface);
     LONG ref = InterlockedDecrement(&This->ref);
 
-    TRACE("(%p) ref=%d\n", This, ref);
+    TRACE("(%p) ref=%ld\n", This, ref);
 
     if(!ref) {
-        heap_free(This->match);
-        heap_free(This->result);
-        heap_free(This);
+        free(This->match);
+        free(This->result);
+        free(This);
     }
 
     return ref;
@@ -205,7 +205,7 @@ static HRESULT WINAPI SubMatches_GetTypeInfo(ISubMatches *iface,
         UINT iTInfo, LCID lcid, ITypeInfo **ppTInfo)
 {
     SubMatches *This = impl_from_ISubMatches(iface);
-    FIXME("(%p)->(%u %u %p)\n", This, iTInfo, lcid, ppTInfo);
+    FIXME("(%p)->(%u %lu %p)\n", This, iTInfo, lcid, ppTInfo);
     return E_NOTIMPL;
 }
 
@@ -214,7 +214,7 @@ static HRESULT WINAPI SubMatches_GetIDsOfNames(ISubMatches *iface,
 {
     SubMatches *This = impl_from_ISubMatches(iface);
 
-    TRACE("(%p)->(%s %p %u %u %p)\n", This, debugstr_guid(riid),
+    TRACE("(%p)->(%s %p %u %lu %p)\n", This, debugstr_guid(riid),
             rgszNames, cNames, lcid, rgDispId);
 
     return ITypeInfo_GetIDsOfNames(typeinfos[SubMatches_tid], rgszNames, cNames, rgDispId);
@@ -226,7 +226,7 @@ static HRESULT WINAPI SubMatches_Invoke(ISubMatches *iface, DISPID dispIdMember,
 {
     SubMatches *This = impl_from_ISubMatches(iface);
 
-    TRACE("(%p)->(%d %s %d %d %p %p %p %p)\n", This, dispIdMember, debugstr_guid(riid),
+    TRACE("(%p)->(%ld %s %ld %d %p %p %p %p)\n", This, dispIdMember, debugstr_guid(riid),
             lcid, wFlags, pDispParams, pVarResult, pExcepInfo, puArgErr);
 
     return ITypeInfo_Invoke(typeinfos[SubMatches_tid], iface, dispIdMember, wFlags,
@@ -238,7 +238,7 @@ static HRESULT WINAPI SubMatches_get_Item(ISubMatches *iface,
 {
     SubMatches *This = impl_from_ISubMatches(iface);
 
-    TRACE("(%p)->(%d %p)\n", This, index, pSubMatch);
+    TRACE("(%p)->(%ld %p)\n", This, index, pSubMatch);
 
     if(!pSubMatch)
         return E_POINTER;
@@ -307,7 +307,7 @@ static HRESULT create_sub_matches(DWORD pos, match_state_t *result, SubMatches *
     if(FAILED(hres))
         return hres;
 
-    ret = heap_alloc_zero(sizeof(*ret));
+    ret = calloc(1, sizeof(*ret));
     if(!ret)
         return E_OUTOFMEMORY;
 
@@ -315,9 +315,9 @@ static HRESULT create_sub_matches(DWORD pos, match_state_t *result, SubMatches *
 
     ret->result = result;
     if(result) {
-        ret->match = heap_alloc((result->match_len+1) * sizeof(WCHAR));
+        ret->match = malloc((result->match_len+1) * sizeof(WCHAR));
         if(!ret->match) {
-            heap_free(ret);
+            free(ret);
             return E_OUTOFMEMORY;
         }
         memcpy(ret->match, result->cp-result->match_len, result->match_len*sizeof(WCHAR));
@@ -377,7 +377,7 @@ static ULONG WINAPI Match2_AddRef(IMatch2 *iface)
     Match2 *This = impl_from_IMatch2(iface);
     LONG ref = InterlockedIncrement(&This->ref);
 
-    TRACE("(%p) ref=%d\n", This, ref);
+    TRACE("(%p) ref=%ld\n", This, ref);
 
     return ref;
 }
@@ -387,11 +387,11 @@ static ULONG WINAPI Match2_Release(IMatch2 *iface)
     Match2 *This = impl_from_IMatch2(iface);
     LONG ref = InterlockedDecrement(&This->ref);
 
-    TRACE("(%p) ref=%d\n", This, ref);
+    TRACE("(%p) ref=%ld\n", This, ref);
 
     if(!ref) {
         ISubMatches_Release(&This->sub_matches->ISubMatches_iface);
-        heap_free(This);
+        free(This);
     }
 
     return ref;
@@ -411,7 +411,7 @@ static HRESULT WINAPI Match2_GetTypeInfo(IMatch2 *iface,
         UINT iTInfo, LCID lcid, ITypeInfo **ppTInfo)
 {
     Match2 *This = impl_from_IMatch2(iface);
-    FIXME("(%p)->(%u %u %p)\n", This, iTInfo, lcid, ppTInfo);
+    FIXME("(%p)->(%u %lu %p)\n", This, iTInfo, lcid, ppTInfo);
     return E_NOTIMPL;
 }
 
@@ -420,7 +420,7 @@ static HRESULT WINAPI Match2_GetIDsOfNames(IMatch2 *iface,
 {
     Match2 *This = impl_from_IMatch2(iface);
 
-    TRACE("(%p)->(%s %p %u %u %p)\n", This, debugstr_guid(riid),
+    TRACE("(%p)->(%s %p %u %lu %p)\n", This, debugstr_guid(riid),
             rgszNames, cNames, lcid, rgDispId);
 
     return ITypeInfo_GetIDsOfNames(typeinfos[Match2_tid], rgszNames, cNames, rgDispId);
@@ -432,7 +432,7 @@ static HRESULT WINAPI Match2_Invoke(IMatch2 *iface, DISPID dispIdMember,
 {
     Match2 *This = impl_from_IMatch2(iface);
 
-    TRACE("(%p)->(%d %s %d %d %p %p %p %p)\n", This, dispIdMember, debugstr_guid(riid),
+    TRACE("(%p)->(%ld %s %ld %d %p %p %p %p)\n", This, dispIdMember, debugstr_guid(riid),
             lcid, wFlags, pDispParams, pVarResult, pExcepInfo, puArgErr);
 
     return ITypeInfo_Invoke(typeinfos[Match2_tid], iface, dispIdMember, wFlags,
@@ -605,14 +605,14 @@ static HRESULT create_match2(DWORD pos, match_state_t **result, IMatch2 **match)
     if(FAILED(hres))
         return hres;
 
-    ret = heap_alloc_zero(sizeof(*ret));
+    ret = calloc(1, sizeof(*ret));
     if(!ret)
         return E_OUTOFMEMORY;
 
     ret->index = pos;
     hres = create_sub_matches(pos, result ? *result : NULL, &ret->sub_matches);
     if(FAILED(hres)) {
-        heap_free(ret);
+        free(ret);
         return hres;
     }
     if(result)
@@ -657,7 +657,7 @@ static ULONG WINAPI MatchCollectionEnum_AddRef(IEnumVARIANT *iface)
     MatchCollectionEnum *This = impl_from_IMatchCollectionEnum(iface);
     LONG ref = InterlockedIncrement(&This->ref);
 
-    TRACE("(%p) ref=%d\n", This, ref);
+    TRACE("(%p) ref=%ld\n", This, ref);
 
     return ref;
 }
@@ -667,11 +667,11 @@ static ULONG WINAPI MatchCollectionEnum_Release(IEnumVARIANT *iface)
     MatchCollectionEnum *This = impl_from_IMatchCollectionEnum(iface);
     LONG ref = InterlockedDecrement(&This->ref);
 
-    TRACE("(%p) ref=%d\n", This, ref);
+    TRACE("(%p) ref=%ld\n", This, ref);
 
     if(!ref) {
         IMatchCollection2_Release(This->mc);
-        heap_free(This);
+        free(This);
     }
 
     return ref;
@@ -684,7 +684,7 @@ static HRESULT WINAPI MatchCollectionEnum_Next(IEnumVARIANT *iface,
     DWORD i;
     HRESULT hres = S_OK;
 
-    TRACE("(%p)->(%u %p %p)\n", This, celt, rgVar, pCeltFetched);
+    TRACE("(%p)->(%lu %p %p)\n", This, celt, rgVar, pCeltFetched);
 
     if(This->pos>=This->count) {
         if(pCeltFetched)
@@ -714,7 +714,7 @@ static HRESULT WINAPI MatchCollectionEnum_Skip(IEnumVARIANT *iface, ULONG celt)
 {
     MatchCollectionEnum *This = impl_from_IMatchCollectionEnum(iface);
 
-    TRACE("(%p)->(%u)\n", This, celt);
+    TRACE("(%p)->(%lu)\n", This, celt);
 
     if(This->pos+celt <= This->count)
         This->pos += celt;
@@ -754,7 +754,7 @@ static HRESULT create_enum_variant_mc2(IMatchCollection2 *mc, ULONG pos, IEnumVA
 {
     MatchCollectionEnum *ret;
 
-    ret = heap_alloc_zero(sizeof(*ret));
+    ret = calloc(1, sizeof(*ret));
     if(!ret)
         return E_OUTOFMEMORY;
 
@@ -810,7 +810,7 @@ static ULONG WINAPI MatchCollection2_AddRef(IMatchCollection2 *iface)
     MatchCollection2 *This = impl_from_IMatchCollection2(iface);
     LONG ref = InterlockedIncrement(&This->ref);
 
-    TRACE("(%p) ref=%d\n", This, ref);
+    TRACE("(%p) ref=%ld\n", This, ref);
 
     return ref;
 }
@@ -820,16 +820,16 @@ static ULONG WINAPI MatchCollection2_Release(IMatchCollection2 *iface)
     MatchCollection2 *This = impl_from_IMatchCollection2(iface);
     LONG ref = InterlockedDecrement(&This->ref);
 
-    TRACE("(%p) ref=%d\n", This, ref);
+    TRACE("(%p) ref=%ld\n", This, ref);
 
     if(!ref) {
         DWORD i;
 
         for(i=0; i<This->count; i++)
             IMatch2_Release(This->matches[i]);
-        heap_free(This->matches);
+        free(This->matches);
 
-        heap_free(This);
+        free(This);
     }
 
     return ref;
@@ -849,7 +849,7 @@ static HRESULT WINAPI MatchCollection2_GetTypeInfo(IMatchCollection2 *iface,
         UINT iTInfo, LCID lcid, ITypeInfo **ppTInfo)
 {
     MatchCollection2 *This = impl_from_IMatchCollection2(iface);
-    FIXME("(%p)->(%u %u %p)\n", This, iTInfo, lcid, ppTInfo);
+    FIXME("(%p)->(%u %lu %p)\n", This, iTInfo, lcid, ppTInfo);
     return E_NOTIMPL;
 }
 
@@ -858,7 +858,7 @@ static HRESULT WINAPI MatchCollection2_GetIDsOfNames(IMatchCollection2 *iface,
 {
     MatchCollection2 *This = impl_from_IMatchCollection2(iface);
 
-    TRACE("(%p)->(%s %p %u %u %p)\n", This, debugstr_guid(riid),
+    TRACE("(%p)->(%s %p %u %lu %p)\n", This, debugstr_guid(riid),
             rgszNames, cNames, lcid, rgDispId);
 
     return ITypeInfo_GetIDsOfNames(typeinfos[MatchCollection2_tid], rgszNames, cNames, rgDispId);
@@ -870,7 +870,7 @@ static HRESULT WINAPI MatchCollection2_Invoke(IMatchCollection2 *iface, DISPID d
 {
     MatchCollection2 *This = impl_from_IMatchCollection2(iface);
 
-    TRACE("(%p)->(%d %s %d %d %p %p %p %p)\n", This, dispIdMember, debugstr_guid(riid),
+    TRACE("(%p)->(%ld %s %ld %d %p %p %p %p)\n", This, dispIdMember, debugstr_guid(riid),
             lcid, wFlags, pDispParams, pVarResult, pExcepInfo, puArgErr);
 
     return ITypeInfo_Invoke(typeinfos[MatchCollection2_tid], iface, dispIdMember, wFlags,
@@ -1024,12 +1024,12 @@ static HRESULT add_match(IMatchCollection2 *iface, IMatch2 *add)
     TRACE("(%p)->(%p)\n", This, add);
 
     if(!This->size) {
-        This->matches = heap_alloc(8*sizeof(IMatch*));
+        This->matches = malloc(8*sizeof(IMatch*));
         if(!This->matches)
             return E_OUTOFMEMORY;
         This->size = 8;
     }else if(This->size == This->count) {
-        IMatch2 **new_matches = heap_realloc(This->matches, 2*This->size*sizeof(IMatch*));
+        IMatch2 **new_matches = realloc(This->matches, 2*This->size*sizeof(IMatch*));
         if(!new_matches)
             return E_OUTOFMEMORY;
 
@@ -1051,7 +1051,7 @@ static HRESULT create_match_collection2(IMatchCollection2 **match_collection)
     if(FAILED(hres))
         return hres;
 
-    ret = heap_alloc_zero(sizeof(*ret));
+    ret = calloc(1, sizeof(*ret));
     if(!ret)
         return E_OUTOFMEMORY;
 
@@ -1103,7 +1103,7 @@ static ULONG WINAPI RegExp2_AddRef(IRegExp2 *iface)
     RegExp2 *This = impl_from_IRegExp2(iface);
     LONG ref = InterlockedIncrement(&This->ref);
 
-    TRACE("(%p) ref=%d\n", This, ref);
+    TRACE("(%p) ref=%ld\n", This, ref);
 
     return ref;
 }
@@ -1113,14 +1113,14 @@ static ULONG WINAPI RegExp2_Release(IRegExp2 *iface)
     RegExp2 *This = impl_from_IRegExp2(iface);
     LONG ref = InterlockedDecrement(&This->ref);
 
-    TRACE("(%p) ref=%d\n", This, ref);
+    TRACE("(%p) ref=%ld\n", This, ref);
 
     if(!ref) {
-        heap_free(This->pattern);
+        free(This->pattern);
         if(This->regexp)
             regexp_destroy(This->regexp);
         heap_pool_free(&This->pool);
-        heap_free(This);
+        free(This);
     }
 
     return ref;
@@ -1140,8 +1140,12 @@ static HRESULT WINAPI RegExp2_GetTypeInfo(IRegExp2 *iface,
         UINT iTInfo, LCID lcid, ITypeInfo **ppTInfo)
 {
     RegExp2 *This = impl_from_IRegExp2(iface);
-    FIXME("(%p)->(%u %u %p)\n", This, iTInfo, lcid, ppTInfo);
-    return E_NOTIMPL;
+
+    TRACE("(%p)->(%u %lu %p)\n", This, iTInfo, lcid, ppTInfo);
+
+    *ppTInfo = typeinfos[RegExp2_tid];
+    ITypeInfo_AddRef(*ppTInfo);
+    return S_OK;
 }
 
 static HRESULT WINAPI RegExp2_GetIDsOfNames(IRegExp2 *iface, REFIID riid,
@@ -1149,7 +1153,7 @@ static HRESULT WINAPI RegExp2_GetIDsOfNames(IRegExp2 *iface, REFIID riid,
 {
     RegExp2 *This = impl_from_IRegExp2(iface);
 
-    TRACE("(%p)->(%s %p %u %u %p)\n", This, debugstr_guid(riid),
+    TRACE("(%p)->(%s %p %u %lu %p)\n", This, debugstr_guid(riid),
             rgszNames, cNames, lcid, rgDispId);
 
     return ITypeInfo_GetIDsOfNames(typeinfos[RegExp2_tid], rgszNames, cNames, rgDispId);
@@ -1161,7 +1165,7 @@ static HRESULT WINAPI RegExp2_Invoke(IRegExp2 *iface, DISPID dispIdMember,
 {
     RegExp2 *This = impl_from_IRegExp2(iface);
 
-    TRACE("(%p)->(%d %s %d %d %p %p %p %p)\n", This, dispIdMember, debugstr_guid(riid),
+    TRACE("(%p)->(%ld %s %ld %d %p %p %p %p)\n", This, dispIdMember, debugstr_guid(riid),
             lcid, wFlags, pDispParams, pVarResult, pExcepInfo, puArgErr);
 
     return ITypeInfo_Invoke(typeinfos[RegExp2_tid], iface, dispIdMember, wFlags,
@@ -1195,7 +1199,7 @@ static HRESULT WINAPI RegExp2_put_Pattern(IRegExp2 *iface, BSTR pattern)
 
     if(pattern && *pattern) {
         SIZE_T size = (SysStringLen(pattern)+1) * sizeof(WCHAR);
-        new_pattern = heap_alloc(size);
+        new_pattern = malloc(size);
         if(!new_pattern)
             return E_OUTOFMEMORY;
         memcpy(new_pattern, pattern, size);
@@ -1203,7 +1207,7 @@ static HRESULT WINAPI RegExp2_put_Pattern(IRegExp2 *iface, BSTR pattern)
         new_pattern = NULL;
     }
 
-    heap_free(This->pattern);
+    free(This->pattern);
     This->pattern = new_pattern;
 
     if(This->regexp) {
@@ -1359,13 +1363,13 @@ static HRESULT WINAPI RegExp2_Execute(IRegExp2 *iface,
         hres = regexp_execute(This->regexp, NULL, &This->pool,
                 sourceString, SysStringLen(sourceString), result);
         if(hres != S_OK) {
-            heap_free(result);
+            free(result);
             break;
         }
         pos = result->cp;
 
         hres = create_match2(result->cp-result->match_len-sourceString, &result, &add);
-        heap_free(result);
+        free(result);
         if(FAILED(hres))
             break;
         hres = add_match(match_collection, add);
@@ -1450,9 +1454,9 @@ static BOOL strbuf_ensure_size(strbuf_t *buf, unsigned len)
     if(new_size < len)
         new_size = len;
     if(buf->buf)
-        new_buf = heap_realloc(buf->buf, new_size*sizeof(WCHAR));
+        new_buf = realloc(buf->buf, new_size*sizeof(WCHAR));
     else
-        new_buf = heap_alloc(new_size*sizeof(WCHAR));
+        new_buf = malloc(new_size*sizeof(WCHAR));
     if(!new_buf)
         return FALSE;
 
@@ -1602,7 +1606,7 @@ static HRESULT WINAPI RegExp2_Replace(IRegExp2 *iface, BSTR source, VARIANT repl
     }
 
     heap_pool_clear(mark);
-    heap_free(buf.buf);
+    free(buf.buf);
     SysFreeString(replace);
     return hres;
 }
@@ -1669,7 +1673,7 @@ BSTR string_replace(BSTR string, BSTR find, BSTR replace, int from, int cnt, int
             ret = SysAllocStringLen(buf.buf, buf.len);
     }
 
-    heap_free(buf.buf);
+    free(buf.buf);
     return ret;
 }
 
@@ -1813,7 +1817,7 @@ HRESULT create_regexp(IDispatch **ret)
     if(FAILED(hres))
         return hres;
 
-    regexp = heap_alloc_zero(sizeof(*regexp));
+    regexp = calloc(1, sizeof(*regexp));
     if(!regexp)
         return E_OUTOFMEMORY;
 

@@ -29,7 +29,7 @@
 #include <unistd.h>
 #include <dlfcn.h>
 #include <sys/stat.h>
-#ifdef HAVE_SECURITY_SECURITY_H
+#ifdef __APPLE__
 #include <Security/Security.h>
 #endif
 #ifdef SONAME_LIBGNUTLS
@@ -623,9 +623,10 @@ static const char * const CRYPT_knownLocations[] = {
 
 static void load_root_certs(void)
 {
+    const char *additional_dir;
     unsigned int i;
 
-#ifdef HAVE_SECURITY_SECURITY_H
+#ifdef __APPLE__
     const SecTrustSettingsDomain domains[] = {
         kSecTrustSettingsDomainSystem,
         kSecTrustSettingsDomainAdmin,
@@ -660,6 +661,9 @@ static void load_root_certs(void)
 
     for (i = 0; i < ARRAY_SIZE(CRYPT_knownLocations) && list_empty(&root_cert_list); i++)
         import_certs_from_path( CRYPT_knownLocations[i], TRUE );
+
+    if ((additional_dir = getenv( "WINE_ADDITIONAL_CERTS_DIR" )))
+        import_certs_from_path( additional_dir, TRUE );
 }
 
 static NTSTATUS enum_root_certs( void *args )

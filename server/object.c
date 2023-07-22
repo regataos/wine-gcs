@@ -233,6 +233,7 @@ static void free_object( struct object *obj )
 struct object *lookup_named_object( struct object *root, const struct unicode_str *name,
                                     unsigned int attr, struct unicode_str *name_left )
 {
+    static int recursion_count;
     struct object *obj, *parent;
     struct unicode_str name_tmp = *name, *ptr = &name_tmp;
 
@@ -261,6 +262,13 @@ struct object *lookup_named_object( struct object *root, const struct unicode_st
 
     if (!name_tmp.len) ptr = NULL;  /* special case for empty path */
 
+    if (recursion_count > 32)
+    {
+        set_error( STATUS_INVALID_PARAMETER );
+        release_object( parent );
+        return NULL;
+    }
+    recursion_count++;
     clear_error();
 
     while ((obj = parent->ops->lookup_name( parent, ptr, attr, root )))
@@ -269,6 +277,8 @@ struct object *lookup_named_object( struct object *root, const struct unicode_st
         release_object ( parent );
         parent = obj;
     }
+
+    recursion_count--;
     if (get_error())
     {
         release_object( parent );
@@ -331,31 +341,31 @@ void *create_named_object( struct object *parent, const struct object_ops *ops,
             free_object( new_obj );
             return NULL;
         }
-        goto done;
     }
-
-    if (!(obj = lookup_named_object( parent, name, attributes, &new_name ))) return NULL;
-
-    if (!new_name.len)
+    else
     {
-        if (attributes & OBJ_OPENIF && obj->ops == ops)
-            set_error( STATUS_OBJECT_NAME_EXISTS );
-        else
+        if (!(obj = lookup_named_object( parent, name, attributes, &new_name ))) return NULL;
+
+        if (!new_name.len)
         {
+            if (attributes & OBJ_OPENIF && obj->ops == ops)
+            {
+                set_error( STATUS_OBJECT_NAME_EXISTS );
+                return obj;
+            }
             release_object( obj );
-            obj = NULL;
             if (attributes & OBJ_OPENIF)
                 set_error( STATUS_OBJECT_TYPE_MISMATCH );
             else
                 set_error( STATUS_OBJECT_NAME_COLLISION );
+            return NULL;
         }
-        return obj;
+
+        new_obj = create_object( obj, ops, &new_name, attributes, sd );
+        release_object( obj );
+        if (!new_obj) return NULL;
     }
 
-    new_obj = create_object( obj, ops, &new_name, attributes, sd );
-    release_object( obj );
-
-done:
     if (attributes & OBJ_PERMANENT)
     {
         make_object_permanent( new_obj );
@@ -538,8 +548,9 @@ struct security_descriptor *default_get_sd( struct object *obj )
     return obj->sd;
 }
 
-int set_sd_defaults_from_token( struct object *obj, const struct security_descriptor *sd,
-                                unsigned int set_info, struct token *token )
+struct security_descriptor *set_sd_from_token_internal( const struct security_descriptor *sd,
+                                                        const struct security_descriptor *old_sd,
+                                                        unsigned int set_info, struct token *token )
 {
     struct security_descriptor new_sd, *new_sd_ptr;
     int present;
@@ -548,8 +559,6 @@ int set_sd_defaults_from_token( struct object *obj, const struct security_descri
     struct acl *replaced_sacl = NULL;
     char *ptr;
 
-    if (!set_info) return 1;
-
     new_sd.control = sd->control & ~SE_SELF_RELATIVE;
 
     if (set_info & OWNER_SECURITY_INFORMATION && sd->owner_len)
@@ -557,10 +566,10 @@ int set_sd_defaults_from_token( struct object *obj, const struct security_descri
         owner = sd_get_owner( sd );
         new_sd.owner_len = sd->owner_len;
     }
-    else if (obj->sd && obj->sd->owner_len)
+    else if (old_sd && old_sd->owner_len)
     {
-        owner = sd_get_owner( obj->sd );
-        new_sd.owner_len = obj->sd->owner_len;
+        owner = sd_get_owner( old_sd );
+        new_sd.owner_len = old_sd->owner_len;
     }
     else if (token)
     {
@@ -574,10 +583,10 @@ int set_sd_defaults_from_token( struct object *obj, const struct security_descri
         group = sd_get_group( sd );
         new_sd.group_len = sd->group_len;
     }
-    else if (obj->sd && obj->sd->group_len)
+    else if (old_sd && old_sd->group_len)
     {
-        group = sd_get_group( obj->sd );
-        new_sd.group_len = obj->sd->group_len;
+        group = sd_get_group( old_sd );
+        new_sd.group_len = old_sd->group_len;
     }
     else if (token)
     {
@@ -595,20 +604,20 @@ int set_sd_defaults_from_token( struct object *obj, const struct security_descri
     else if (set_info & LABEL_SECURITY_INFORMATION && present)
     {
         const struct acl *old_sacl = NULL;
-        if (obj->sd && obj->sd->control & SE_SACL_PRESENT) old_sacl = sd_get_sacl( obj->sd, &present );
-        if (!(replaced_sacl = replace_security_labels( old_sacl, sacl ))) return 0;
+        if (old_sd && old_sd->control & SE_SACL_PRESENT) old_sacl = sd_get_sacl( old_sd, &present );
+        if (!(replaced_sacl = replace_security_labels( old_sacl, sacl ))) return NULL;
         new_sd.control |= SE_SACL_PRESENT;
         new_sd.sacl_len = replaced_sacl->size;
         sacl = replaced_sacl;
     }
     else
     {
-        if (obj->sd) sacl = sd_get_sacl( obj->sd, &present );
+        if (old_sd) sacl = sd_get_sacl( old_sd, &present );
 
-        if (obj->sd && present)
+        if (old_sd && present)
         {
             new_sd.control |= SE_SACL_PRESENT;
-            new_sd.sacl_len = obj->sd->sacl_len;
+            new_sd.sacl_len = old_sd->sacl_len;
         }
         else
             new_sd.sacl_len = 0;
@@ -622,12 +631,12 @@ int set_sd_defaults_from_token( struct object *obj, const struct security_descri
     }
     else
     {
-        if (obj->sd) dacl = sd_get_dacl( obj->sd, &present );
+        if (old_sd) dacl = sd_get_dacl( old_sd, &present );
 
-        if (obj->sd && present)
+        if (old_sd && present)
         {
             new_sd.control |= SE_DACL_PRESENT;
-            new_sd.dacl_len = obj->sd->dacl_len;
+            new_sd.dacl_len = old_sd->dacl_len;
         }
         else if (token)
         {
@@ -643,7 +652,7 @@ int set_sd_defaults_from_token( struct object *obj, const struct security_descri
     if (!ptr)
     {
         free( replaced_sacl );
-        return 0;
+        return NULL;
     }
     new_sd_ptr = (struct security_descriptor*)ptr;
 
@@ -658,9 +667,25 @@ int set_sd_defaults_from_token( struct object *obj, const struct security_descri
     memcpy( ptr, dacl, new_sd.dacl_len );
 
     free( replaced_sacl );
-    free( obj->sd );
-    obj->sd = new_sd_ptr;
-    return 1;
+    return new_sd_ptr;
+}
+
+int set_sd_defaults_from_token( struct object *obj, const struct security_descriptor *sd,
+                                unsigned int set_info, struct token *token )
+{
+    struct security_descriptor *new_sd;
+
+    if (!set_info) return 1;
+
+    new_sd = set_sd_from_token_internal( sd, obj->sd, set_info, token );
+    if (new_sd)
+    {
+        free( obj->sd );
+        obj->sd = new_sd;
+        return 1;
+    }
+
+    return 0;
 }
 
 /** Set the security descriptor using the current primary token for defaults. */

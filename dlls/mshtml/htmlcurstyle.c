@@ -4151,12 +4151,12 @@ HRESULT HTMLCurrentStyle_Create(HTMLElement *elem, IHTMLCurrentStyle **p)
     HTMLCurrentStyle *ret;
     nsresult nsres;
 
-    if(!elem->node.doc->nsdoc)  {
-        WARN("NULL nsdoc\n");
+    if(!elem->node.doc->dom_document)  {
+        WARN("NULL dom_document\n");
         return E_UNEXPECTED;
     }
 
-    nsres = nsIDOMDocument_GetDefaultView(elem->node.doc->nsdoc, &nsview);
+    nsres = nsIDOMDocument_GetDefaultView(elem->node.doc->dom_document, &nsview);
     if(NS_FAILED(nsres)) {
         ERR("GetDefaultView failed: %08lx\n", nsres);
         return E_FAIL;
@@ -4180,7 +4180,7 @@ HRESULT HTMLCurrentStyle_Create(HTMLElement *elem, IHTMLCurrentStyle **p)
         return E_FAIL;
     }
 
-    ret = heap_alloc_zero(sizeof(HTMLCurrentStyle));
+    ret = calloc(1, sizeof(HTMLCurrentStyle));
     if(!ret) {
         nsIDOMCSSStyleDeclaration_Release(nsstyle);
         return E_OUTOFMEMORY;
@@ -4197,7 +4197,7 @@ HRESULT HTMLCurrentStyle_Create(HTMLElement *elem, IHTMLCurrentStyle **p)
     ret->IHTMLStyle6_iface.lpVtbl        = &HTMLStyle6Vtbl;
 
     init_css_style(&ret->css_style, nsstyle, HTMLCurrentStyle_QI, &HTMLCurrentStyle_dispex,
-                   elem->node.doc, dispex_compat_mode(&elem->node.event_target.dispex));
+                   get_inner_window(elem->node.doc), dispex_compat_mode(&elem->node.event_target.dispex));
     nsIDOMCSSStyleDeclaration_Release(nsstyle);
 
     IHTMLElement_AddRef(&elem->IHTMLElement_iface);

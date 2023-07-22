@@ -43,13 +43,14 @@ WINE_DEFAULT_DEBUG_CHANNEL(uxtheme);
  */
 
 static BOOL MSSTYLES_GetNextInteger(LPCWSTR lpStringStart, LPCWSTR lpStringEnd, LPCWSTR *lpValEnd, int *value);
+static BOOL MSSTYLES_GetNextLong(LPCWSTR lpStringStart, LPCWSTR lpStringEnd, LPCWSTR *lpValEnd, LONG *value);
 static BOOL MSSTYLES_GetNextToken(LPCWSTR lpStringStart, LPCWSTR lpStringEnd, LPCWSTR *lpValEnd, LPWSTR lpBuff, DWORD buffSize);
 static void MSSTYLES_ParseThemeIni(PTHEME_FILE tf, BOOL setMetrics);
 static HRESULT MSSTYLES_GetFont (LPCWSTR lpStringStart, LPCWSTR lpStringEnd, LPCWSTR *lpValEnd, LOGFONTW* logfont);
 
 #define MSSTYLES_VERSION 0x0003
 
-#define THEME_CLASS_SIGNATURE (('T' << 24) | ('H' << 16) | ('E' << 8) | 'M')
+#define THEME_CLASS_SIGNATURE 0x12bc6d83
 
 static PTHEME_FILE tfActiveTheme;
 
@@ -100,7 +101,7 @@ HRESULT MSSTYLES_OpenThemeFile(LPCWSTR lpThemeFile, LPCWSTR pszColorName, LPCWST
     }
     if((versize = SizeofResource(hTheme, hrsc)) != 2)
     {
-        TRACE("Version resource found, but wrong size: %d\n", versize);
+        TRACE("Version resource found, but wrong size: %ld\n", versize);
         hr = HRESULT_FROM_WIN32(ERROR_BAD_FORMAT);
         goto invalid_theme;
     }
@@ -170,7 +171,7 @@ HRESULT MSSTYLES_OpenThemeFile(LPCWSTR lpThemeFile, LPCWSTR pszColorName, LPCWST
     (*tf)->pszAvailSizes = pszSizes;
     (*tf)->pszSelectedColor = pszSelectedColor;
     (*tf)->pszSelectedSize = pszSelectedSize;
-    (*tf)->dwRefCount = 1;
+    (*tf)->refcount = 1;
     return S_OK;
 
 invalid_theme:
@@ -186,9 +187,12 @@ invalid_theme:
  */
 void MSSTYLES_CloseThemeFile(PTHEME_FILE tf)
 {
+    LONG refcount;
+
     if(tf) {
-        tf->dwRefCount--;
-        if(!tf->dwRefCount) {
+        refcount = InterlockedDecrement(&tf->refcount);
+        if (!refcount)
+        {
             if(tf->hTheme) FreeLibrary(tf->hTheme);
             if(tf->classes) {
                 while(tf->classes) {
@@ -234,7 +238,7 @@ HRESULT MSSTYLES_SetActiveTheme(PTHEME_FILE tf, BOOL setMetrics)
     tfActiveTheme = tf;
     if (tfActiveTheme)
     {
-	tfActiveTheme->dwRefCount++;
+        InterlockedIncrement(&tfActiveTheme->refcount);
 	if(!tfActiveTheme->classes)
 	    MSSTYLES_ParseThemeIni(tfActiveTheme, setMetrics);
     }
@@ -446,6 +450,7 @@ static PTHEME_CLASS MSSTYLES_AddClass(PTHEME_FILE tf, LPCWSTR pszAppName, LPCWST
 
     cur = heap_alloc(sizeof(*cur));
     cur->signature = THEME_CLASS_SIGNATURE;
+    cur->refcount = 0;
     cur->hTheme = tf->hTheme;
     lstrcpyW(cur->szAppName, pszAppName);
     lstrcpyW(cur->szClassName, pszClassName);
@@ -454,6 +459,36 @@ static PTHEME_CLASS MSSTYLES_AddClass(PTHEME_FILE tf, LPCWSTR pszAppName, LPCWST
     cur->overrides = NULL;
     tf->classes = cur;
     return cur;
+}
+
+/***********************************************************************
+ *      MSSTYLES_FindPart
+ *
+ * Find a part
+ *
+ * PARAMS
+ *     tc                  Class to search
+ *     iPartId             Part ID to find
+ *
+ * RETURNS
+ *  The part found, or NULL
+ */
+PTHEME_PARTSTATE MSSTYLES_FindPart(PTHEME_CLASS tc, int iPartId)
+{
+    PTHEME_PARTSTATE cur = tc->partstate;
+
+    while (cur)
+    {
+        if (cur->iPartId == iPartId)
+            return cur;
+
+        cur = cur->next;
+    }
+
+    if (tc->overrides)
+        return MSSTYLES_FindPart(tc->overrides, iPartId);
+
+    return NULL;
 }
 
 /***********************************************************************
@@ -1029,7 +1064,8 @@ PTHEME_CLASS MSSTYLES_OpenThemeClass(LPCWSTR pszAppName, LPCWSTR pszClassList, U
     if(cls) {
         TRACE("Opened app %s, class %s from list %s\n", debugstr_w(cls->szAppName), debugstr_w(cls->szClassName), debugstr_w(pszClassList));
 	cls->tf = tfActiveTheme;
-	cls->tf->dwRefCount++;
+        InterlockedIncrement(&cls->tf->refcount);
+        InterlockedIncrement(&cls->refcount);
         cls->dpi = dpi;
     }
     return cls;
@@ -1049,6 +1085,8 @@ PTHEME_CLASS MSSTYLES_OpenThemeClass(LPCWSTR pszAppName, LPCWSTR pszClassList, U
  */
 HRESULT MSSTYLES_CloseThemeClass(PTHEME_CLASS tc)
 {
+    LONG refcount;
+
     __TRY
     {
         if (tc->signature != THEME_CLASS_SIGNATURE)
@@ -1066,7 +1104,10 @@ HRESULT MSSTYLES_CloseThemeClass(PTHEME_CLASS tc)
         return E_HANDLE;
     }
 
-    MSSTYLES_CloseThemeFile (tc->tf);
+    refcount = InterlockedDecrement(&tc->refcount);
+    /* Some buggy apps may double free HTHEME handles */
+    if (refcount >= 0)
+        MSSTYLES_CloseThemeFile(tc->tf);
     return S_OK;
 }
 
@@ -1181,10 +1222,10 @@ HBITMAP MSSTYLES_LoadBitmap (PTHEME_CLASS tc, LPCWSTR lpFilename, BOOL* hasAlpha
     return img->image;
 }
 
-static BOOL MSSTYLES_GetNextInteger(LPCWSTR lpStringStart, LPCWSTR lpStringEnd, LPCWSTR *lpValEnd, int *value)
+static BOOL MSSTYLES_GetNextLong(LPCWSTR lpStringStart, LPCWSTR lpStringEnd, LPCWSTR *lpValEnd, LONG *value)
 {
     LPCWSTR cur = lpStringStart;
-    int total = 0;
+    LONG total = 0;
     BOOL gotNeg = FALSE;
 
     while(cur < lpStringEnd && (*cur < '0' || *cur > '9' || *cur == '-')) cur++;
@@ -1203,6 +1244,11 @@ static BOOL MSSTYLES_GetNextInteger(LPCWSTR lpStringStart, LPCWSTR lpStringEnd, 
     *value = total;
     if(lpValEnd) *lpValEnd = cur;
     return TRUE;
+}
+
+static BOOL MSSTYLES_GetNextInteger(LPCWSTR lpStringStart, LPCWSTR lpStringEnd, LPCWSTR *lpValEnd, int *value)
+{
+    return MSSTYLES_GetNextLong(lpStringStart, lpStringEnd, lpValEnd, (LONG *)value);
 }
 
 static inline BOOL isSpace(WCHAR c)
@@ -1399,10 +1445,10 @@ HRESULT MSSTYLES_GetPropertyRect(PTHEME_PROPERTY tp, RECT *pRect)
     LPCWSTR lpCur = tp->lpValue;
     LPCWSTR lpEnd = tp->lpValue + tp->dwValueLen;
 
-    MSSTYLES_GetNextInteger(lpCur, lpEnd, &lpCur, &pRect->left);
-    MSSTYLES_GetNextInteger(lpCur, lpEnd, &lpCur, &pRect->top);
-    MSSTYLES_GetNextInteger(lpCur, lpEnd, &lpCur, &pRect->right);
-    if(!MSSTYLES_GetNextInteger(lpCur, lpEnd, &lpCur, &pRect->bottom)) {
+    MSSTYLES_GetNextLong(lpCur, lpEnd, &lpCur, &pRect->left);
+    MSSTYLES_GetNextLong(lpCur, lpEnd, &lpCur, &pRect->top);
+    MSSTYLES_GetNextLong(lpCur, lpEnd, &lpCur, &pRect->right);
+    if(!MSSTYLES_GetNextLong(lpCur, lpEnd, &lpCur, &pRect->bottom)) {
         TRACE("Could not parse rect property\n");
         return E_PROP_ID_UNSUPPORTED;
     }

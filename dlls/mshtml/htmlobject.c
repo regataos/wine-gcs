@@ -834,6 +834,15 @@ static HRESULT HTMLObjectElement_get_dispid(HTMLDOMNode *iface, BSTR name,
     return get_plugin_dispid(&This->plugin_container, name, pid);
 }
 
+static HRESULT HTMLObjectElement_dispex_get_name(HTMLDOMNode *iface, DISPID id, BSTR *name)
+{
+    HTMLObjectElement *This = impl_from_HTMLDOMNode(iface);
+
+    FIXME("(%p)->(%lx %p)\n", This, id, name);
+
+    return E_NOTIMPL;
+}
+
 static HRESULT HTMLObjectElement_invoke(HTMLDOMNode *iface, IDispatch *this_obj, DISPID id, LCID lcid,
         WORD flags, DISPPARAMS *params, VARIANT *res, EXCEPINFO *ei, IServiceProvider *caller)
 {
@@ -870,6 +879,7 @@ static const NodeImplVtbl HTMLObjectElementImplVtbl = {
     HTMLObjectElement_destructor,
     HTMLElement_cpc,
     HTMLElement_clone,
+    HTMLElement_dispatch_nsevent_hook,
     HTMLElement_handle_event,
     HTMLElement_get_attr_col,
     NULL,
@@ -878,6 +888,7 @@ static const NodeImplVtbl HTMLObjectElementImplVtbl = {
     NULL,
     HTMLObjectElement_get_readystate,
     HTMLObjectElement_get_dispid,
+    HTMLObjectElement_dispex_get_name,
     HTMLObjectElement_invoke,
     NULL,
     HTMLObjectElement_traverse,
@@ -916,7 +927,7 @@ HRESULT HTMLObjectElement_Create(HTMLDocumentNode *doc, nsIDOMElement *nselem, H
     HTMLObjectElement *ret;
     nsresult nsres;
 
-    ret = heap_alloc_zero(sizeof(*ret));
+    ret = calloc(1, sizeof(*ret));
     if(!ret)
         return E_OUTOFMEMORY;
 
@@ -1158,6 +1169,7 @@ static const NodeImplVtbl HTMLEmbedElementImplVtbl = {
     HTMLEmbedElement_destructor,
     HTMLElement_cpc,
     HTMLElement_clone,
+    HTMLElement_dispatch_nsevent_hook,
     HTMLElement_handle_event,
     HTMLElement_get_attr_col
 };
@@ -1180,7 +1192,7 @@ HRESULT HTMLEmbedElement_Create(HTMLDocumentNode *doc, nsIDOMElement *nselem, HT
 {
     HTMLEmbed *ret;
 
-    ret = heap_alloc_zero(sizeof(*ret));
+    ret = calloc(1, sizeof(*ret));
     if(!ret)
         return E_OUTOFMEMORY;
 

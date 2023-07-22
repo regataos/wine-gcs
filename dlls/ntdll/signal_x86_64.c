@@ -36,6 +36,7 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(unwind);
 WINE_DECLARE_DEBUG_CHANNEL(seh);
+WINE_DECLARE_DEBUG_CHANNEL(threadname);
 
 typedef struct _SCOPE_TABLE
 {
@@ -129,7 +130,7 @@ static void dump_unwind_info( ULONG64 base, RUNTIME_FUNCTION *function )
     struct UNWIND_INFO *info;
     unsigned int i, count;
 
-    TRACE( "**** func %x-%x\n", function->BeginAddress, function->EndAddress );
+    TRACE( "**** func %lx-%lx\n", function->BeginAddress, function->EndAddress );
     for (;;)
     {
         if (function->UnwindData & 1)
@@ -266,7 +267,7 @@ static BOOL need_backtrace( DWORD exc_code )
 static NTSTATUS virtual_unwind( ULONG type, DISPATCHER_CONTEXT *dispatch, CONTEXT *context, BOOL dump_backtrace )
 {
     LDR_DATA_TABLE_ENTRY *module;
-    NTSTATUS status;
+    NTSTATUS status = STATUS_SUCCESS;
 
     dispatch->ImageBase = 0;
     dispatch->ScopeIndex = 0;
@@ -295,8 +296,9 @@ static NTSTATUS virtual_unwind( ULONG type, DISPATCHER_CONTEXT *dispatch, CONTEX
 
     if (!module || (module->Flags & LDR_WINE_INTERNAL))
     {
-        status = unix_funcs->unwind_builtin_dll( type, dispatch, context );
+        struct unwind_builtin_dll_params params = { type, dispatch, context };
 
+        status = NTDLL_UNIX_CALL( unwind_builtin_dll, &params );
         if (!status && dispatch->LanguageHandler && !module)
         {
             FIXME( "calling personality routine in system library not supported yet\n" );
@@ -304,7 +306,11 @@ static NTSTATUS virtual_unwind( ULONG type, DISPATCHER_CONTEXT *dispatch, CONTEX
         }
         if (status != STATUS_UNSUCCESSFUL) return status;
     }
-    else WARN( "exception data not found in %s\n", debugstr_w(module->BaseDllName.Buffer) );
+    else
+    {
+        WARN( "exception data not found in %s\n", debugstr_w(module->BaseDllName.Buffer) );
+        status = STATUS_UNSUCCESSFUL;
+    }
 
     /* no exception information, treat as a leaf function */
 
@@ -312,7 +318,7 @@ static NTSTATUS virtual_unwind( ULONG type, DISPATCHER_CONTEXT *dispatch, CONTEX
     dispatch->LanguageHandler = NULL;
     context->Rip = *(ULONG64 *)context->Rsp;
     context->Rsp = context->Rsp + sizeof(ULONG64);
-    return STATUS_SUCCESS;
+    return status ? STATUS_NOT_FOUND : STATUS_SUCCESS;
 }
 
 
@@ -365,7 +371,7 @@ __ASM_GLOBAL_FUNC( RtlCaptureContext,
 DWORD __cdecl nested_exception_handler( EXCEPTION_RECORD *rec, EXCEPTION_REGISTRATION_RECORD *frame,
                                                CONTEXT *context, EXCEPTION_REGISTRATION_RECORD **dispatcher )
 {
-    TRACE( "exception flags %#x.\n", rec->ExceptionFlags );
+    TRACE( "exception flags %#lx.\n", rec->ExceptionFlags );
 
     if (!(rec->ExceptionFlags & (EH_UNWINDING | EH_EXIT_UNWIND)))
         return ExceptionNestedException;
@@ -401,7 +407,7 @@ static DWORD call_handler( EXCEPTION_RECORD *rec, CONTEXT *context, DISPATCHER_C
     TRACE_(seh)( "calling handler %p (rec=%p, frame=%p context=%p, dispatch=%p)\n",
                  dispatch->LanguageHandler, rec, (void *)dispatch->EstablisherFrame, dispatch->ContextRecord, dispatch );
     res = exception_handler_call_wrapper( rec, (void *)dispatch->EstablisherFrame, context, dispatch );
-    TRACE_(seh)( "handler at %p returned %u\n", dispatch->LanguageHandler, res );
+    TRACE_(seh)( "handler at %p returned %lu\n", dispatch->LanguageHandler, res );
 
     rec->ExceptionFlags &= EH_NONCONTINUABLE;
     if (res == ExceptionNestedException)
@@ -427,7 +433,7 @@ static DWORD call_teb_handler( EXCEPTION_RECORD *rec, CONTEXT *context, DISPATCH
     TRACE_(seh)( "calling TEB handler %p (rec=%p, frame=%p context=%p, dispatch=%p)\n",
                  teb_frame->Handler, rec, teb_frame, dispatch->ContextRecord, dispatch );
     res = teb_frame->Handler( rec, teb_frame, context, (EXCEPTION_REGISTRATION_RECORD**)dispatch );
-    TRACE_(seh)( "handler at %p returned %u\n", teb_frame->Handler, res );
+    TRACE_(seh)( "handler at %p returned %lu\n", teb_frame->Handler, res );
     return res;
 }
 
@@ -454,7 +460,7 @@ static NTSTATUS call_stack_handlers( EXCEPTION_RECORD *rec, CONTEXT *orig_contex
     for (;;)
     {
         status = virtual_unwind( UNW_FLAG_EHANDLER, &dispatch, &context, need_backtrace( rec->ExceptionCode ));
-        if (status != STATUS_SUCCESS) return status;
+        if (status != STATUS_SUCCESS && status != STATUS_NOT_FOUND) return status;
 
     unwind_done:
         if (!dispatch.EstablisherFrame) break;
@@ -540,13 +546,12 @@ NTSTATUS WINAPI dispatch_exception( EXCEPTION_RECORD *rec, CONTEXT *context )
     DWORD c;
 
     if (need_backtrace( rec->ExceptionCode ))
-        WINE_BACKTRACE_LOG( "--- Exception %#x.\n", rec->ExceptionCode );
+        WINE_BACKTRACE_LOG( "--- Exception %#x.\n", (int)rec->ExceptionCode );
 
-    TRACE_(seh)( "code=%x flags=%x addr=%p ip=%p tid=%04x\n",
-                 rec->ExceptionCode, rec->ExceptionFlags, rec->ExceptionAddress,
-                 (void *)context->Rip, GetCurrentThreadId() );
+    TRACE_(seh)( "code=%lx flags=%lx addr=%p ip=%Ix\n",
+                 rec->ExceptionCode, rec->ExceptionFlags, rec->ExceptionAddress, context->Rip );
     for (c = 0; c < min( EXCEPTION_MAXIMUM_PARAMETERS, rec->NumberParameters ); c++)
-        TRACE( " info[%d]=%016I64x\n", c, rec->ExceptionInformation[c] );
+        TRACE_(seh)( " info[%ld]=%016I64x\n", c, rec->ExceptionInformation[c] );
 
     if (rec->ExceptionCode == EXCEPTION_WINE_STUB)
     {
@@ -561,8 +566,13 @@ NTSTATUS WINAPI dispatch_exception( EXCEPTION_RECORD *rec, CONTEXT *context )
     }
     else if (rec->ExceptionCode == EXCEPTION_WINE_NAME_THREAD && rec->ExceptionInformation[0] == 0x1000)
     {
-        WARN_(seh)( "Thread %04x renamed to %s\n", (DWORD)rec->ExceptionInformation[2],
-                    debugstr_a((char *)rec->ExceptionInformation[1]) );
+        if ((DWORD)rec->ExceptionInformation[2] == -1)
+            WARN_(threadname)( "Thread renamed to %s\n", debugstr_a((char *)rec->ExceptionInformation[1]) );
+        else
+            WARN_(threadname)( "Thread ID %04lx renamed to %s\n", (DWORD)rec->ExceptionInformation[2],
+                               debugstr_a((char *)rec->ExceptionInformation[1]) );
+
+        set_native_thread_name((DWORD)rec->ExceptionInformation[2], (char *)rec->ExceptionInformation[1]);
     }
     else if (rec->ExceptionCode == DBG_PRINTEXCEPTION_C)
     {
@@ -575,9 +585,9 @@ NTSTATUS WINAPI dispatch_exception( EXCEPTION_RECORD *rec, CONTEXT *context )
     else
     {
         if (rec->ExceptionCode == STATUS_ASSERTION_FAILURE)
-            ERR_(seh)( "%s exception (code=%x) raised\n", debugstr_exception_code(rec->ExceptionCode), rec->ExceptionCode );
+            ERR_(seh)( "%s exception (code=%lx) raised\n", debugstr_exception_code(rec->ExceptionCode), rec->ExceptionCode );
         else
-            WARN_(seh)( "%s exception (code=%x) raised\n", debugstr_exception_code(rec->ExceptionCode), rec->ExceptionCode );
+            WARN_(seh)( "%s exception (code=%lx) raised\n", debugstr_exception_code(rec->ExceptionCode), rec->ExceptionCode );
 
         TRACE_(seh)( " rax=%016I64x rbx=%016I64x rcx=%016I64x rdx=%016I64x\n",
                      context->Rax, context->Rbx, context->Rcx, context->Rdx );
@@ -686,37 +696,29 @@ __ASM_GLOBAL_FUNC( KiUserApcDispatcher,
                    "int3")
 
 
-void WINAPI user_callback_dispatcher( ULONG id, void *args, ULONG len )
-{
-    NTSTATUS (WINAPI *func)(void *, ULONG) = ((void **)NtCurrentTeb()->Peb->KernelCallbackTable)[id];
-
-    RtlRaiseStatus( NtCallbackReturn( NULL, 0, func( args, len )));
-}
-
 /*******************************************************************
  *		KiUserCallbackDispatcher (NTDLL.@)
  *
  * FIXME: not binary compatible
  */
-#ifdef __x86_64__
-__ASM_GLOBAL_FUNC( KiUserCallbackDispatcher,
-                  ".byte 0x0f, 0x1f, 0x44, 0x00, 0x00\n\t" /* Overwatch 2 replaces the first 5 bytes with a jump */
-                  "movq %rsp,%rbp\n\t"
-                  __ASM_SEH(".seh_setframe %rbp, 0\n\t")
-                  __ASM_CFI(".cfi_def_cfa rbp, 8\n\t")
-                  "andq $0xFFFFFFFFFFFFFFF0, %rsp\n\t"
-                  __ASM_SEH(".seh_endprologue\n\t")
-                  "movq 0x28(%rbp), %rdx\n\t"
-                  "movl 0x30(%rbp), %ecx\n\t"
-                  "movl 0x34(%rbp), %r8d\n\t"
-                  "call " __ASM_NAME("user_callback_dispatcher") "\n\t"
-                  "int3")
-#else
-void WINAPI DECLSPEC_HOTPATCH KiUserCallbackDispatcher( ULONG id, void *args, ULONG len )
+void WINAPI KiUserCallbackDispatcher( ULONG id, void *args, ULONG len )
 {
-    return user_callback_dispatcher( id, args, len );
+    NTSTATUS status;
+
+    __TRY
+    {
+        NTSTATUS (WINAPI *func)(void *, ULONG) = ((void **)NtCurrentTeb()->Peb->KernelCallbackTable)[id];
+        status = NtCallbackReturn( NULL, 0, func( args, len ));
+    }
+    __EXCEPT_ALL
+    {
+        ERR_(seh)( "ignoring exception\n" );
+        status = NtCallbackReturn( 0, 0, 0 );
+    }
+    __ENDTRY
+
+    RtlRaiseStatus( status );
 }
-#endif
 
 
 static ULONG64 get_int_reg( CONTEXT *context, int reg )
@@ -909,7 +911,7 @@ PVOID WINAPI RtlVirtualUnwind( ULONG type, ULONG64 base, ULONG64 pc,
     unsigned int i, prolog_offset;
     BOOL mach_frame = FALSE;
 
-    TRACE( "type %x rip %p rsp %p\n", type, (void *)pc, (void *)context->Rsp );
+    TRACE( "type %lx rip %I64x rsp %I64x\n", type, pc, context->Rsp );
     if (TRACE_ON(seh)) dump_unwind_info( base, function );
 
     frame = *frame_ret = context->Rsp;
@@ -1088,7 +1090,7 @@ DWORD call_unwind_handler( EXCEPTION_RECORD *rec, DISPATCHER_CONTEXT *dispatch )
     TRACE( "calling handler %p (rec=%p, frame=%p context=%p, dispatch=%p)\n",
            dispatch->LanguageHandler, rec, (void *)dispatch->EstablisherFrame, dispatch->ContextRecord, dispatch );
     res = unwind_handler_call_wrapper( rec, (void *)dispatch->EstablisherFrame, dispatch->ContextRecord, dispatch );
-    TRACE( "handler %p returned %x\n", dispatch->LanguageHandler, res );
+    TRACE( "handler %p returned %lx\n", dispatch->LanguageHandler, res );
 
     switch (res)
     {
@@ -1117,7 +1119,7 @@ static DWORD call_teb_unwind_handler( EXCEPTION_RECORD *rec, DISPATCHER_CONTEXT 
     TRACE( "calling TEB handler %p (rec=%p, frame=%p context=%p, dispatch=%p)\n",
            teb_frame->Handler, rec, teb_frame, dispatch->ContextRecord, dispatch );
     res = teb_frame->Handler( rec, teb_frame, dispatch->ContextRecord, (EXCEPTION_REGISTRATION_RECORD**)dispatch );
-    TRACE( "handler at %p returned %u\n", teb_frame->Handler, res );
+    TRACE( "handler at %p returned %lu\n", teb_frame->Handler, res );
 
     switch (res)
     {
@@ -1338,10 +1340,10 @@ void WINAPI RtlUnwindEx( PVOID end_frame, PVOID target_ip, EXCEPTION_RECORD *rec
 
     rec->ExceptionFlags |= EH_UNWINDING | (end_frame ? 0 : EH_EXIT_UNWIND);
 
-    TRACE( "code=%x flags=%x end_frame=%p target_ip=%p rip=%016I64x\n",
+    TRACE( "code=%lx flags=%lx end_frame=%p target_ip=%p rip=%016I64x\n",
            rec->ExceptionCode, rec->ExceptionFlags, end_frame, target_ip, context->Rip );
     for (i = 0; i < min( EXCEPTION_MAXIMUM_PARAMETERS, rec->NumberParameters ); i++)
-        TRACE( " info[%d]=%016I64x\n", i, rec->ExceptionInformation[i] );
+        TRACE( " info[%ld]=%016I64x\n", i, rec->ExceptionInformation[i] );
     TRACE(" rax=%016I64x rbx=%016I64x rcx=%016I64x rdx=%016I64x\n",
           context->Rax, context->Rbx, context->Rcx, context->Rdx );
     TRACE(" rsi=%016I64x rdi=%016I64x rbp=%016I64x rsp=%016I64x\n",
@@ -1359,7 +1361,7 @@ void WINAPI RtlUnwindEx( PVOID end_frame, PVOID target_ip, EXCEPTION_RECORD *rec
     for (;;)
     {
         status = virtual_unwind( UNW_FLAG_UHANDLER, &dispatch, &new_context, FALSE );
-        if (status != STATUS_SUCCESS) raise_status( status, rec );
+        if (status != STATUS_SUCCESS && status != STATUS_NOT_FOUND) raise_status( status, rec );
 
     unwind_done:
         if (!dispatch.EstablisherFrame) break;
@@ -1595,7 +1597,7 @@ USHORT WINAPI RtlCaptureStackBackTrace( ULONG skip, ULONG count, PVOID *buffer, 
     ULONG i;
     USHORT num_entries = 0;
 
-    TRACE( "(%u, %u, %p, %p)\n", skip, count, buffer, hash );
+    TRACE( "(%lu, %lu, %p, %p)\n", skip, count, buffer, hash );
 
     RtlCaptureContext( &context );
     dispatch.TargetIp      = 0;

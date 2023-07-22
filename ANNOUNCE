@@ -1,19 +1,14 @@
-The Wine team is proud to announce that the stable release Wine 7.0
+The Wine team is proud to announce that the stable release Wine 8.0
 is now available.
 
-This release represents a year of development effort and over 9,100
+This release represents a year of development effort and over 8,600
 individual changes. It contains a large number of improvements that
-are listed in the release notes below. The areas of major changes are:
+are listed in the release notes below. The main achievement is the
+completion of the conversion to PE format.
 
-  - Most modules converted to PE format.
-  - Better theming support, with a bundled theme for a more modern look.
-  - Vastly improved HID stack and joystick support.
-  - New WoW64 architecture.
+The source is available at:
 
-The source is available from the following locations:
-
-  https://dl.winehq.org/wine/source/7.0/wine-7.0.tar.xz
-  http://mirrors.ibiblio.org/wine/source/7.0/wine-7.0.tar.xz
+  https://dl.winehq.org/wine/source/8.0/wine-8.0.tar.xz
 
 Binary packages for various distributions will be available from:
 
@@ -29,414 +24,336 @@ AUTHORS in the distribution for the complete list.
 
 ----------------------------------------------------------------
 
-What's new in Wine 7.0
+What's new in Wine 8.0
 ======================
 
 *** PE modules
 
-- With a few exceptions, all modules can be built in PE format. The goal is to
-  convert the remaining modules after 7.0.
+- After 4 years of work, the PE conversion is finally complete: all modules can
+  be built in PE format. This is an important milestone on the road to supporting
+  various features such as copy protection, 32-bit applications on 64-bit hosts,
+  Windows debuggers, x86 applications on ARM, etc.
+  However, some modules still perform direct calls between the PE and the Unix
+  part, instead of going through the NT system call interface. The remaining
+  direct calls will be removed during the Wine 8.x development phase.
 
-- For PE modules with an associated Unix library, the interface between the PE
-  part and the Unix part goes through a standard NT system call. This enables
-  hiding the Unix code from Windows debuggers, and switching the thread
-  register on platforms that require it.
+- A special syscall dispatcher is used for PE -> Unix transitions, to avoid the
+  overhead of a full NT system call. This minimizes the performance impact of the
+  new architecture, in particular for the OpenGL and Vulkan libraries.
 
-- Builtin dlls are only loaded if there is a corresponding PE file on disk,
-  either a real binary or a fake PE module. This ensures that the application
-  always sees a valid PE file mapping. It can be disabled through the
-  WINEBOOTSTRAPMODE environment variable, used at prefix creation time.
+- Building mixed Windows/Unix libraries in ELF format (.dll.so libraries) is
+  still supported for use in Winelib applications. However, such applications
+  won't support features enabled by the NT syscall interface, such as WoW64
+  without 32-bit libraries.
 
 
 *** WoW64
 
-- The 64-bit Windows-on-Windows (WoW64) architecture is implemented, and
-  supports running a 32-bit Windows application inside a 64-bit Unix host
-  process, using thunks to map 32-bit NT system calls to the 64-bit NTDLL.
+- WoW64 thunks are implemented for essentially all Unix libraries, enabling a
+  32-bit PE module to call a 64-bit Unix library. Once the remaining direct
+  PE/Unix calls have been removed, this will make it fully possible to run
+  32-bit Windows applications without any 32-bit Unix library.
 
-- WoW64 thunks are implemented for most Unix libraries, enabling a 32-bit PE
-  module to call a 64-bit Unix library. Once the remaining modules are
-  converted to PE, this will make it possible to run 32-bit applications
-  without installing 32-bit Unix libraries.
+- When the 32-bit Wine loader isn't found, 32-bit applications are started in
+  the new experimental "Windows-like" WoW64 mode (where 32-bit code runs inside
+  a 64-bit host process). This mode can be enabled by building with the
+  '--enable-archs' configure option. This is still under development and not yet
+  recommended for general use. Since in case of configuration errors it is
+  possible for it to be triggered inadvertently, applications started in this
+  mode print the warning "starting in experimental wow64 mode".
 
 
-*** Theming
-
-- A "Light" theme is included in Wine, with the color variants "Blue" and
-  "Classic Blue". It can be enabled through WineCfg.
-
-- All the Common Controls support theming, and automatically refresh on theme
-  changes.
-
-- All the builtin applications support theming, as well as High DPI rendering.
-
- 
 *** Graphics
 
-- There's a new Win32u library implementing the kernel side of graphics and
-  window management support. Large portions of the GDI32 and USER32 libraries
-  are converted to use this new library. This work will continue after 7.0, and
-  the graphics drivers (winex11.drv, winemac.drv, etc.) will be migrated to
-  Win32u as well.
+- The "Light" theme is enabled in the default configuration, for a more modern
+  look. Other themes can still be configured through WineCfg.
 
-- The Vulkan driver supports up to version 1.2.201 of the Vulkan spec.
+- The graphics drivers (winex11.drv, winemac.drv, wineandroid.drv) are converted
+  to run on the Unix side of the syscall boundary, and interface with the Unix
+  side of the Win32u library.
 
-- Hit-testing stroked geometries using the Direct2D API is implemented.
+- The Print Processor architecture is implemented. This will be used to avoid
+  direct PE<->Unix calls in the printer driver.
 
-- Some initial support for Direct2D effects (using the ID2D1Effect interface)
-  is implemented.
+- Effects are supported in Direct2D, including description parsing and a number
+  of core objects.
 
-- The Direct2D API supports the ID2D1MultiThread interface.
+- Command lists recording and playback are implemented in Direct2D.
 
-- WindowsCodecs supports decoding images in WMP (Windows Media Photo) format,
-  as well as encoding images to the DDS (DirectDraw Surface) format.
-
-- WindowsCodecs no longer supports encoding images to macOS ICNS format. This
-  is not supported on Windows, and was no longer used by Wine either.
+- The Vulkan driver supports up to version 1.3.237 of the Vulkan spec.
 
 
 *** Direct3D
 
-- Various improvements have been made to the Vulkan renderer for the Wine
-  Direct3D implementation. In most cases, for Direct3D 10 and 11 applications
-  the Vulkan renderer should be about on-par with the older OpenGL renderer in
-  Wine 7.0. Like in Wine 6.0, the Vulkan renderer can be enabled by setting the
-  Direct3D "renderer" registry setting to "vulkan".
+- Many optimizations related to streaming map acceleration are implemented, in
+  common code as well as in the GL renderer. Depending on the application, this
+  may result in major performance improvements.
 
-- The following Direct3D 10 and 11 features are implemented:
-  - Deferred device contexts.
-  - Device context state objects, and switching between them.
-  - Constant buffer offsetting.
-  - Resolving typeless multi-sample resources.
-  - Clearing unordered-access views of texture resources. When using the OpenGL
-    renderer, this requires the GL_ARB_clear_texture OpenGL extension.
-  - Resource copies between resources with "block-compatible" formats, like for
-    example DXGI_FORMAT_BC3_TYPELESS and DXGI_FORMAT_R32G32B32A32_TYPELESS.
-  - Clearing layered render-target views.
+- Adapter video memory budget change notifications are implemented.
 
-- Support for multiple displays ("multi-head") is implemented. In practice,
-  this tends to mean the ability to choose which monitor a Direct3D application
-  will use for full-screen mode. Note that this depends on the underlying
-  display drivers to accurately report the attached displays. For Wine's X11
-  driver, that requires proper support for version 1.4 or later of the X RandR
-  extension.
+- The Vulkan renderer supports setting multiple viewports and scissor rectangles.
 
-- Display gamma adjustment using the DXGI API is implemented. This is sometimes
-  used by Direct3D 10 and 11 applications to adjust screen "brightness".
+- Several Direct3D 10 and 11 features, which were already implemented, are
+  accurately reported through capability flags:
+  - Per-format support for vertex and index buffers.
+  - Per-format support for all capabilities via D3D11_FEATURE_FORMAT_SUPPORT.
+  - No-overwrite maps on shader resources and constant buffers.
+  - Partial range binding of constant buffers.
 
-- Direct3D 12 supports version 1.1 root signatures.
+- For convenience, a new WINE_D3D_CONFIG environment variable may be used instead
+  of modifying the HKEY_CURRENT_USER\Software\Wine\Direct3D registry key. The
+  value is a comma- or semicolon-separated list of key-value pairs, e.g.:
 
-- When the VK_EXT_host_query_reset Vulkan extension is available, query
-  handling in the Vulkan renderer is slightly more efficient.
+      WINE_D3D_CONFIG="renderer=vulkan;VideoPciVendorID=0xc0de"
 
-- Retrieving swapchain present counts using the DXGI API is implemented.
+  If an individual setting is specified in both the environment variable and the
+  registry, the former takes precedence.
 
-- A fallback path using GDI is added for swapchain presentation. This is used
-  in cases where OpenGL or Vulkan can't be used to present the swapchain, for
-  example when presenting to a window of a different process. This path is much
-  slower, but is often sufficient for some common use cases, like for example
-  applications using the Chromium Embedded Framework ("CEF") with cross-process
-  rendering.
+- The Direct3D graphics card database recognizes more graphics cards.
 
-- The "precise" shader instruction modifier is respected when using the GLSL
-  shader backend.
-
-- The DirectDraw API supports 3D rendering to system memory surfaces when using
-  software device types like the "RGB", "MMX", and "Ramp" devices.
-
-- The following additional graphics cards are recognized by the Direct3D
-  graphics card database:
-  - AMD Radeon RX 5500M
-  - AMD Radeon RX 6800/6800 XT/6900 XT
-  - AMD Van Gogh
-  - Intel UHD Graphics 630
-  - NVIDIA GT 1030
-
-- The following HKEY_CURRENT_USER\Software\Wine\Direct3D key is removed:
-  - "UseGLSL"
-    This setting was deprecated in favor of the "shader_backend" setting in
-    Wine 5.0, and has been removed in this release.
+- The Vulkan renderer limits the maximum Direct3D feature level based on
+  available Vulkan features.
 
 
-*** D3DX
+*** Direct3D helper libraries
 
-- The support for version 10 of the D3DX effects framework is much improved.
+- A new HLSL compiler is implemented using the vkd3d-shader library.
 
-- D3DX 10 supports the Windows Media Photo (JPEG XR) image file format.
+- A new HLSL disassembler is implemented using the vkd3d-shader library.
 
-- Various D3DX10 texture creation functions (D3DX10CreateTextureFromMemory()
-  and variants) are implemented.
+- The HLSL preprocessor is reimplemented using the vkd3d-shader HLSL
+  preprocessor.
 
-- A partial implementation of the ID3DX10Sprite interface is added.
+- The D3DX 10 Thread Pump is implemented.
 
-- A partial implementation of the ID3DX10Font interface is added.
+- Many more expressions are supported in Direct3D 10 effects.
+
+- Cubemap projection is implemented in the D3DX 9 helper library.
 
 
-*** Audio / video
+*** Audio / Video
 
-- The DirectShow and Media Foundation GStreamer glue is unified into a single
-  backend, making it easier to implement new media decoding APIs.
+- The MPEG-1 audio decoder filter for layers 1 and 2, and the separate filter for
+  layer 3, are both implemented on top of GStreamer.
 
-- The Windows Media asynchronous and synchronous reader objects are implemented
-  based on the WineGStreamer backend. Like other multimedia decoding libraries,
-  they require a functioning GStreamer installation.
+- The ASF reader filter is implemented.
 
-- The Media Foundation support is more complete, with notably:
-  - Basic functionality of IMFPMediaPlayer, media item properties, support for
-    audio and video tracks.
-  - Support for sample allocator in the Source Reader.
-  - Improved EVR sink integration with presenter and mixer.
-  - Improved SAR rendering buffer behavior.
-  - Video sample allocator, with support for d3d9, d3d11, and system memory
-    buffers.
-  - Further improvements to EVR's presenter and mixer implementation.
-  - D3D11 frame output for IMFMediaEngine.
-  - Improvements to generic media source implementation in WineGStreamer to
-    support stopped and paused states, refined output type configuration.
+- The OpenAL32.dll wrapper library is removed, in favor of the native
+  OpenAL32.dll library shipped by Windows applications.
 
-- The QuickTime decoder library (wineqtdecoder) is removed. GStreamer is
-  required for all built-in multimedia codecs also on macOS.
+
+*** Media Foundation
+
+- Content type resolution is improved in the Media Foundation Player.
+
+- Rate control is implemented.
+
+- The Enhanced Video Renderer default mixer and presenter are better supported.
+
+- The DirectShow filter is implemented in the Enhanced Video Renderer.
+
+- An initial framework is implemented for the Writer encoding API.
+
+- The topology loader is better supported.
 
 
 *** Input devices
 
-- The HID (Human Interface Device) stack implementation is more complete. This
-  includes HID descriptor and report parsers, report processing, as well as HID
-  mini-driver support.
+- Controller hotplug support is greatly improved, and controller removal and
+  insertion are correctly dispatched to applications.
 
-- The winebus.sys driver backends are improved, to better describe the devices
-  into HID reports when pass-through is not possible, and to add standard
-  Physical Interface Device reports to expose force-feedback capabilities over
-  HID.
+- Driving wheel device detection and reporting is better implemented, using the
+  SDL library and HID usages as hints for the device types.
 
-- There's a new DirectInput joystick backend using the improved HID stack to
-  communicate with winebus.sys and host devices. This backend supports
-  force-feedback effects using the standard HID Physical Interface Device
-  reports, and is also compatible with pass-through HID device which implement
-  it. The SDL and evdev winebus.sys Linux backends are also supported as they
-  implement it too. This replaces and deprecates the legacy Linux js and evdev,
-  and macOS IOHID backends.
+- Force feedback effect support is improved, specifically with driving wheel
+  controllers.
 
-- The joystick control panel is improved, as well as the interaction with
-  XInput-compatible devices. For such devices the joystick control panel can be
-  used to force DInput as the primary interface instead of XInput. This
-  translates to the "<joystick name>"="override" (REG_SZ) registry value in
-  HKCU\Software\Wine\AppDefaults\<app.exe>\DirectInput (or
-  HKCU\Software\Wine\DirectInput for prefix-wide setting).
+- The HID Haptics specification is used for left / right motor rumble and trigger
+  rumble. It makes it possible for device drivers to expose haptics support over
+  HidRaw, and overcome EvDev limitations.
 
-- The WinMM joystick support is implemented using DInput instead of Linux evdev
-  or macOS IOHID, and the old joystick driver (winejoystick.drv) is removed.
+- The Joystick Control Panel is redesigned, with new graphics and a dedicated
+  view for XInput gamepads.
 
-- Many tests are added to the DInput module, using a virtual HID device to not
-  require a physical device anymore. The code is extensively and automatically
-  tested, including force-feedback effects with HID input / output report
-  validation.
+- Sony DualShock and DualSense controllers are supported when the hidraw backend
+  is used, and exposed to applications in the same way as they are on Windows.
 
-
-*** Text and fonts
-
-- Arabic shaping is implemented in DirectWrite, currently enabled for Arabic
-  and Syriac.
-
-- The Font Set object is implemented in DirectWrite.
-
-- The TextHost interface is properly implemented in RichEdit.
-
-
-*** Mono / .NET
-
-- The Mono engine is updated to version 7.0.0, with the following changes:
-  - IDispatch interface supported on COM Callable Wrappers.
-  - Improved support for SafeArray marshaling.
-  - Many other marshaling and COM interop improvements.
-  - Code imports from .NET Core: System.Drawing.Printing,
-    System.Security.Principal, WindowsFormsApplicationBase, parts of
-    Microsoft.VisualBasic.Interaction
-  - WMA and WMV support in FNA using mfplat.
-  - Debug symbols available separately in PDB form.
-  - Old VBNC compiler for Visual Basic .NET replaced with the VBC compiler from
-    .NET Core.
-  - Mono's JIT compiler generates code compatible with 64-bit macOS.
-  - WPF built with support for media controls.
-  - A replacement for the Managed DirectX API is included.
-  - Fixes for various bugs that prevented most WPF applications from working.
+- The Windows.Gaming.Input module is introduced, one of the first WinRT modules
+  in Wine, implementing a new programming interface to access gamepads, joysticks
+  and driving wheel devices.  For this new input API, hotplug notifications are
+  also implemented, as well as force feedback effects and haptics. This API is
+  the first one to support trigger rumble.
 
 
 *** Internationalization
 
-- Unicode character tables are based on version 14.0.0 of the Unicode Standard.
+- A proper locale database, in Windows locale.nls format, is generated from the
+  Unicode CLDR database. The list of supported locales is essentially identical
+  to that of the latest Windows version.
 
-- The timezone data is updated, based on the information from the Olson and
-  Unicode CLDR databases.
+- Unicode string comparison is based on the Windows Sortkey database and
+  algorithms instead of the Unicode Collation Algorithm, yielding more compatible
+  results.
 
-- Codepages 720 (Arabic, Farsi and Urdu) and 20949 (Korean Wansung) are
-  supported.
+- Characters from high Unicode planes (in UTF-16 encoding) are supported in most
+  functions, in particular for case mappings, BiDi formatting, and character
+  shaping.
 
-- The sr-Latn-RS locale is supported.
+- The UTF-8 encoding is supported as Ansi codepage. It is enabled when requested
+  by the application's manifest.
 
-  
+- Unicode character tables are based on version 15.0.0 of the Unicode Standard.
+
+- The timezone data is generated from the IANA timezone database version 2022g.
+
+
+*** Text and fonts
+
+- Font linking is enabled for most system fonts, which should fix missing glyphs
+  in CJK locales.
+
+- Font fallback in DirectWrite is reworked, with additional support for an large
+  number of scripts.
+
+
 *** Kernel
 
-- Launching applications with the 'wine' executable invokes start.exe for any
-  unrecognized binary. This means that file associations work also from the
-  Unix command line, e.g. 'wine foo.msi'.
+- The ApiSetSchema database is implemented, replacing all the api-ms-* forwarding
+  modules. This reduces both disk space and address space usage.
 
-- The low-level NtAlertThreadByThreadId / NtWaitForAlertByThreadId
-  synchronization mechanism (roughly equivalent to Linux futexes) is supported,
-  and used to implement the higher-level synchronization primitives.
-
-- NT debug objects are implemented and used by the kernel debugger functions.
-
-- The dynamic registry keys for performance data are implemented.
-
-
-*** C runtime
-
-- There's a full math library implementation in the C runtime, mostly imported
-  from the Musl C library. The Unix math library is no longer used.
-
-- The floating point environment functions are supported properly on all CPU
-  platforms.
+- DOS file attributes are persistent, and stored on disk using the filesystem's
+  extended attributes, in a format compatible with Samba.
 
 
 *** Internet and networking
 
-- IE11 compatibility mode is improved and used by default for
-  standard-compliant HTML documents.
+- The Online Certificate Status Protocol (OCSP) is implemented.
 
-- JScript EcmaScript compliant mode supports 'let' statements, Map object,
-  object freezing, object sealing and mutable prototype chains.
+- More EcmaScript features are supported in JScript standard-compliant mode.
 
-- Gecko add-on MSI packages are installed into the prefix on demand, instead of
-  during prefix update, to make updates faster and reduce disk space usage.
+- The JScript garbage collector is implemented.
 
-- The DTLS communication protocol is supported.
+- Accessibility support is enabled in Wine Gecko package.
 
-- The NSI device (Network Store Interface) is implemented, and used to provide
-  higher-level network services in IpHlpAPI.
-
-- The Windows Sockets support is reimplemented to go through NTDLL and the Afd
-  device, following the Windows architecture.
-
-- The various network database files (/etc/protocols, /etc/networks, etc.)  are
-  provided and installed in the prefix. The equivalent Unix databases are no
-  longer used for network queries.
+- Web Storage, Performance object and more event objects are implemented in
+  MSHTML.
 
 
-*** Alternative platforms
+*** Mono / .NET
 
-- The new Apple Silicon Macs are supported, including running x86-64 binaries
-  under Rosetta 2.
-
-- GnuTLS is required on macOS for BCrypt and Secur32 support; the
-  macOS-specific backend implementations have been removed.
-
-- 32-bit ARM binaries are built in Thumb-2 mode, like on Windows.
-
-- The preloader is also used on 32-bit ARM, for a more compatible address space
-  layout.
-
-- Stack unwinding is implemented on 32-bit ARM.
-
-- More low-level system information queries like memory and battery status are
-  supported on FreeBSD.
+- The Mono engine is updated to version 7.4.0. The list of changes can be viewed
+  at https://github.com/madewokherd/wine-mono/releases/tag/wine-mono-7.4.0
 
 
 *** Builtin applications
 
-- The REG registry tool supports operating on either the 32- or 64-bit view of
-  the registry.
+- All the builtin applications use Common Controls version 6, which enables
+  theming and high-DPI rendering by default.
 
-- The REG registry tool supports copying registry keys.
+- The Wine Debugger (winedbg) prints thread names in the 'info thread' listing,
+  for applications that set the names of their threads. All internal Wine threads
+  also set their own name.
 
-- The WineDump tool supports dumping Windows Metafiles, and shows more detailed
-  information for CodeView records.
+- The QWORD type is supported in the REGEDIT and REG registry tools.
 
-- The Wine Debugger (winedbg) supports debugging a 32-bit target process from
-  the 64-bit debugger.
+- Notepad has a status bar displaying the current cursor position. The Goto Line
+  functionality is also implemented.
+
+- The builtin console programs print data in the OEM codepage, for better
+  compatibility with applications reading their output.
+
+- The Service Control tool (sc.exe) supports the 'query' command.
 
 
 *** Development tools
 
-- The IDL compiler (widl) supports loading type libraries embedded inside PE
-  files.
+- The PE conversion has made it necessary to implement a new mechanism to run
+  static C++ constructors in Winelib ELF applications. Unfortunately, this
+  requires the corresponding modules to be rebuilt with Wine 8.0.  The rebuilt
+  modules will still run correctly on older Wine versions, but older modules will
+  no longer execute static constructors when run on Wine 8.0.
 
-- The IDL compiler searches for type libraries in the per-platform library
-  search path instead of the include search path.
+- In regression tests, individual checks can be marked as "flaky". This is useful
+  for checks that depend on external factors such as network timings. The errors
+  are still reported but not counted as failures.
 
-- The IDL compiler supports many more WinRT-specific constructs and attributes.
+- Test failure messages can be printed in color by setting the WINETEST_COLOR
+  environment variable, to make them easier to spot in the test log.
+
+- The Resource Compiler (WRC) and Message Compiler (WMC) use the locale.nls
+  database to detect languages and codepages, and thus support all the Windows
+  locales.
+
+- The WineDump tool supports printing the contents of Enhanced Metafile spool
+  files, as well as more contents from PDB files.
 
 
 *** Build infrastructure
 
-- All libraries are installed in architecture-specific directories, using names
-  like 'i386-windows' for PE binaries, and 'x86_64-unix' for the Unix
-  libraries. This enables supporting multiple architectures with a single Wine
-  installation, as well as Winelib cross-compilation.
+- PE binaries can be built for multiple architectures from the same build tree,
+  using the '--enable-archs' option to configure, for example
+  '--enable-archs=i386,x86_64'. This can be used to enable the experimental
+  WoW64 mode, where 32-bit applications can run without any 32-bit host
+  libraries. Note that this mode is still under development and not yet
+  recommended for general use.
 
-- Static (.a) import libraries are used on all platforms. Wine no longer
-  generates the old-style .def libraries, though they are still supported for
-  backwards compatibility.
+- Data types that are defined as 'long' on Windows are defined as 'long' instead
+  of 'int' on all platforms with a 32-bit long type. This is more compatible, but
+  it can cause printf format warnings with Unix compilers. In Winelib code, it
+  can be disabled by defining WINE_NO_LONG_TYPES.
 
-- The option to prefer a native DLL by default is specified through a flag in
-  the PE header, which can be set by passing the '--prefer-native option' to
-  winebuild. The previous method, handling DLL_WINE_PREATTACH in DllMain, is no
-  longer supported.
+- Import libraries can be generated without using dlltool, by passing the
+  '--without-dlltool' option to winebuild. This is used to avoid dlltool bugs
+  with delay import libraries.
 
-- The Dwarf debugging format is supported up to version 4. The Wine libraries
-  are built with version 4 by default.
+- Libraries that contain only resources and no code can be built with the
+  '--data-only' option to winegcc, which makes them smaller and more efficient to
+  load.
 
-- Unique build identifiers can be stored in the binaries by passing the
-  '--enable-build-id' option to configure.
 
-- The Clang compiler in MSVC mode is supported.
+*** Bundled libraries
+
+- Faudio is updated to the upstream release 22.11.
+
+- LCMS2 is updated to the upstream release 2.14.
+
+- LibJPEG is updated to the upstream release 9e.
+
+- LibMPG123 is updated to the upstream release 1.31.1.
+
+- LibPng is updated to the upstream release 1.6.39.
+
+- LibTiff is updated to the upstream release 4.4.0.
+
+- LibXml2 is updated to the upstream release 2.10.3.
+
+- LibXslt is updated to the upstream release 1.1.37.
+
+- Zlib is updated to the upstream release 1.2.13.
+
+
+*** Platform-specific features
+
+- The experimental WoW64 architecture is supported on macOS versions from 10.15.
+
+- 64-bit time_t is supported on 32-bit Linux with recent Glibc versions.
+
+- Exception unwinding on ARM platforms is extended with EHABI support on ARM32
+  and Dwarf support on ARM64.
 
 
 *** Miscellaneous
 
-- The Shell Folder naming is converted to use the Windows Vista+ scheme; for
-  instance 'My Documents' becomes 'Documents', and most things are saved under
-  the 'AppData' directory.
+- RSA encryption and the RSA-PSS signing algorithm are implemented.
 
-- The OpenCL library wrapper supports versions up to OpenCL 1.2.
+- An initial version of the UI Automation API is implemented.
 
-- Paper forms are supported in various sizes in the WinSpool printer driver.
-
-- There is initial support for MSDASQL, a Microsoft OLE DB provider for ODBC
-  drivers.
+- Function name demangling supports various C++11 features.
 
 
 *** External dependencies
 
-- The following libraries are bundled in the source tree and built as PE
-  libraries, so they are no longer required at the Unix level:
-   - Faudio
-   - GSM
-   - LCMS2
-   - LibJPEG
-   - LibJXR
-   - LibMPG123
-   - LibPng
-   - LibTiff
-   - LibXml2
-   - LibXslt
-   - Zlib
+- The vkd3d and LDAP libraries are bundled in the source tree and built as
+  PE. The corresponding Unix libraries are no longer needed.
 
-- The libraries above can still be imported as external libraries instead of
-  using the bundled copy, provided that they are available in PE format. This
-  behavior is requested with the '--with-system-dllpath' configure option,
-  which specifies the Unix search path for such dependencies.
-
-- Direct3D 12 support now requires version 1.2 or later of the vkd3d library.
-  Version 1.2 or later of the related vkd3d-shader library was already required
-  by Wine 6.0 for translation of Direct3D shader to SPIR-V in the Vulkan
-  renderer for the Direct3D implementation.
-
-- The deprecated HAL library is no longer supported or needed.
-
-- The macOS QuickTime library is no longer used.
-
-
---
-Alexandre Julliard
-julliard@winehq.org
+- The OpenAL library is no longer used.

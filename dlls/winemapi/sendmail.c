@@ -92,7 +92,7 @@ static ULONG BrowserSendMail(LHANDLE session, ULONG_PTR uiparam,
     HRESULT res;
     DWORD size;
 
-    TRACE("(0x%08lx 0x%08lx %p 0x%08x 0x%08x)\n", session, uiparam,
+    TRACE("(0x%08Ix 0x%08Ix %p 0x%08lx 0x%08lx)\n", session, uiparam,
            message, flags, reserved);
 
     if (!message)
@@ -135,7 +135,7 @@ static ULONG BrowserSendMail(LHANDLE session, ULONG_PTR uiparam,
                     break;
 
                 default:
-                    TRACE("Unknown recipient class: %d\n",
+                    TRACE("Unknown recipient class: %ld\n",
                            message->lpRecips[i].ulRecipClass);
             }
         }
@@ -145,7 +145,7 @@ static ULONG BrowserSendMail(LHANDLE session, ULONG_PTR uiparam,
 
     if (message->nFileCount)
     {
-        FIXME("Ignoring %u attachments:\n", message->nFileCount);
+        FIXME("Ignoring %lu attachments:\n", message->nFileCount);
         for (i = 0; i < message->nFileCount; i++)
             FIXME("\t%s (%s)\n", debugstr_a(message->lpFiles[i].lpszPathName),
                   debugstr_a(message->lpFiles[i].lpszFileName));
@@ -300,7 +300,7 @@ exit:
 ULONG WINAPI MAPISendMail(LHANDLE session, ULONG_PTR uiparam,
     lpMapiMessage message, FLAGS flags, ULONG reserved)
 {
-    TRACE("(0x%08lx 0x%08lx %p 0x%08x 0x%08x)\n", session, uiparam,
+    TRACE("(0x%I64xx 0x%I64xx %p 0x%08x 0x%08lx)\n", session, uiparam,
            message, flags, reserved);
 
     if (XDGMailAvailable())

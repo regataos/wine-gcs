@@ -24,12 +24,11 @@
 #include "config.h"
 #include <math.h>
 #include <time.h>
-#include <stdlib.h>
 #include <unistd.h>
 #include <stdbool.h>
+#include <errno.h>
 #include <stdio.h>
 #include <assert.h>
-#include <errno.h>
 #include <limits.h>
 #include <poll.h>
 #include <sys/eventfd.h>
@@ -43,23 +42,25 @@
 #include "wine/list.h"
 
 #include "vulkan_private.h"
-#include "winreg.h"
+#include "wine/vulkan_driver.h"
 #include "ntuser.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(vulkan);
 
-#define wine_vk_find_struct(s, t) wine_vk_find_struct_((void *)s, VK_STRUCTURE_TYPE_##t)
-static void *wine_vk_find_struct_(void *s, VkStructureType t)
+
+static BOOL is_wow64(void)
 {
-    VkBaseOutStructure *header;
+    return sizeof(void *) == sizeof(UINT64) && NtCurrentTeb()->WowTebOffset;
+}
 
-    for (header = s; header; header = header->pNext)
-    {
-        if (header->sType == t)
-            return header;
-    }
+static BOOL use_external_memory(void)
+{
+    return is_wow64();
+}
 
-    return NULL;
+static ULONG_PTR zero_bits(void)
+{
+    return is_wow64() ? 0x7fffffff : 0;
 }
 
 #define wine_vk_count_struct(s, t) wine_vk_count_struct_((void *)s, VK_STRUCTURE_TYPE_##t)
@@ -79,11 +80,11 @@ static uint32_t wine_vk_count_struct_(void *s, VkStructureType t)
 
 static const struct vulkan_funcs *vk_funcs;
 
-#define WINE_VK_ADD_DISPATCHABLE_MAPPING(instance, object, native_handle) \
-    wine_vk_add_handle_mapping((instance), (uint64_t) (uintptr_t) (object), (uint64_t) (uintptr_t) (native_handle), &(object)->mapping)
-#define WINE_VK_ADD_NON_DISPATCHABLE_MAPPING(instance, object, native_handle) \
-    wine_vk_add_handle_mapping((instance), (uint64_t) (uintptr_t) (object), (uint64_t) (native_handle), &(object)->mapping)
-static void  wine_vk_add_handle_mapping(struct VkInstance_T *instance, uint64_t wrapped_handle,
+#define WINE_VK_ADD_DISPATCHABLE_MAPPING(instance, client_handle, native_handle, object) \
+    wine_vk_add_handle_mapping((instance), (uintptr_t)(client_handle), (uintptr_t)(native_handle), &(object)->mapping)
+#define WINE_VK_ADD_NON_DISPATCHABLE_MAPPING(instance, client_handle, native_handle, object) \
+    wine_vk_add_handle_mapping((instance), (uintptr_t)(client_handle), (native_handle), &(object)->mapping)
+static void  wine_vk_add_handle_mapping(struct wine_instance *instance, uint64_t wrapped_handle,
         uint64_t native_handle, struct wine_vk_mapping *mapping)
 {
     if (instance->enable_wrapper_list)
@@ -98,7 +99,7 @@ static void  wine_vk_add_handle_mapping(struct VkInstance_T *instance, uint64_t 
 
 #define WINE_VK_REMOVE_HANDLE_MAPPING(instance, object) \
     wine_vk_remove_handle_mapping((instance), &(object)->mapping)
-static void wine_vk_remove_handle_mapping(struct VkInstance_T *instance, struct wine_vk_mapping *mapping)
+static void wine_vk_remove_handle_mapping(struct wine_instance *instance, struct wine_vk_mapping *mapping)
 {
     if (instance->enable_wrapper_list)
     {
@@ -108,7 +109,7 @@ static void wine_vk_remove_handle_mapping(struct VkInstance_T *instance, struct 
     }
 }
 
-static uint64_t wine_vk_get_wrapper(struct VkInstance_T *instance, uint64_t native_handle)
+static uint64_t wine_vk_get_wrapper(struct wine_instance *instance, uint64_t native_handle)
 {
     struct wine_vk_mapping *mapping;
     uint64_t result = 0;
@@ -128,7 +129,7 @@ static uint64_t wine_vk_get_wrapper(struct VkInstance_T *instance, uint64_t nati
 
 static VkBool32 debug_utils_callback_conversion(VkDebugUtilsMessageSeverityFlagBitsEXT severity,
     VkDebugUtilsMessageTypeFlagsEXT message_types,
-    const VkDebugUtilsMessengerCallbackDataEXT_host *callback_data,
+    const VkDebugUtilsMessengerCallbackDataEXT *callback_data,
     void *user_data)
 {
     struct wine_vk_debug_utils_params params;
@@ -229,7 +230,7 @@ static VkBool32 debug_report_callback_conversion(VkDebugReportFlagsEXT flags, Vk
                                &ret_ptr, &ret_len );
 }
 
-static void wine_vk_physical_device_free(struct VkPhysicalDevice_T *phys_dev)
+static void wine_vk_physical_device_free(struct wine_phys_dev *phys_dev)
 {
     if (!phys_dev)
         return;
@@ -239,32 +240,31 @@ static void wine_vk_physical_device_free(struct VkPhysicalDevice_T *phys_dev)
     free(phys_dev);
 }
 
-static struct VkPhysicalDevice_T *wine_vk_physical_device_alloc(struct VkInstance_T *instance,
-        VkPhysicalDevice phys_dev)
+static struct wine_phys_dev *wine_vk_physical_device_alloc(struct wine_instance *instance,
+        VkPhysicalDevice phys_dev, VkPhysicalDevice handle)
 {
-    struct VkPhysicalDevice_T *object;
+    struct wine_phys_dev *object;
     uint32_t num_host_properties, num_properties = 0;
     VkExtensionProperties *host_properties = NULL;
-#if defined(USE_STRUCT_CONVERSION)
-    VkPhysicalDeviceProperties_host physdev_properties;
-#else
     VkPhysicalDeviceProperties physdev_properties;
-#endif
+    BOOL have_external_memory_host = FALSE;
     VkResult res;
     unsigned int i, j;
-    bool has_memory_priority = false;
 
     if (!(object = calloc(1, sizeof(*object))))
         return NULL;
 
-    object->base.loader_magic = VULKAN_ICD_MAGIC_VALUE;
     object->instance = instance;
+    object->handle = handle;
     object->phys_dev = phys_dev;
 
     instance->funcs.p_vkGetPhysicalDeviceProperties(phys_dev, &physdev_properties);
     object->api_version = physdev_properties.apiVersion;
 
-    WINE_VK_ADD_DISPATCHABLE_MAPPING(instance, object, phys_dev);
+    handle->base.unix_handle = (uintptr_t)object;
+    WINE_VK_ADD_DISPATCHABLE_MAPPING(instance, handle, phys_dev, object);
+
+    instance->funcs.p_vkGetPhysicalDeviceMemoryProperties(phys_dev, &object->memory_properties);
 
     res = instance->funcs.p_vkEnumerateDeviceExtensionProperties(phys_dev,
             NULL, &num_host_properties, NULL);
@@ -310,10 +310,6 @@ static struct VkPhysicalDevice_T *wine_vk_physical_device_alloc(struct VkInstanc
                     VK_KHR_EXTERNAL_SEMAPHORE_WIN32_EXTENSION_NAME);
             host_properties[i].specVersion = VK_KHR_EXTERNAL_SEMAPHORE_WIN32_SPEC_VERSION;
         }
-        if (!strcmp(host_properties[i].extensionName, "VK_EXT_memory_priority"))
-        {
-            has_memory_priority = true;
-        }
 
         if (wine_vk_device_extension_supported(host_properties[i].extensionName))
         {
@@ -324,13 +320,9 @@ static struct VkPhysicalDevice_T *wine_vk_physical_device_alloc(struct VkInstanc
         {
             TRACE("Skipping extension '%s', no implementation found in winevulkan.\n", host_properties[i].extensionName);
         }
+        if (!strcmp(host_properties[i].extensionName, "VK_EXT_external_memory_host"))
+            have_external_memory_host = TRUE;
     }
-
-    if (instance->quirks & WINEVULKAN_QUIRK_EXPOSE_KEYED_MUTEX)
-        num_properties++;
-
-    if (!has_memory_priority && (instance->quirks & WINEVULKAN_QUIRK_EXPOSE_MEM_PRIORITY))
-        num_properties++;
 
     TRACE("Host supported extensions %u, Wine supported extensions %u\n", num_host_properties, num_properties);
 
@@ -348,28 +340,25 @@ static struct VkPhysicalDevice_T *wine_vk_physical_device_alloc(struct VkInstanc
             j++;
         }
     }
-
-    if (instance->quirks & WINEVULKAN_QUIRK_EXPOSE_KEYED_MUTEX)
-    {
-        TRACE("Faking VK_KHR_win32_keyed_mutex extension.\n");
-        snprintf(object->extensions[j].extensionName, sizeof(object->extensions[j].extensionName),
-                VK_KHR_WIN32_KEYED_MUTEX_EXTENSION_NAME);
-        object->extensions[j].specVersion = VK_KHR_WIN32_KEYED_MUTEX_SPEC_VERSION;
-        j++;
-    }
-
-    if (!has_memory_priority && (instance->quirks & WINEVULKAN_QUIRK_EXPOSE_MEM_PRIORITY))
-    {
-        TRACE("Faking VK_EXT_memory_priority extension.\n");
-        snprintf(object->extensions[j].extensionName, sizeof(object->extensions[j].extensionName),
-                VK_EXT_MEMORY_PRIORITY_EXTENSION_NAME);
-        object->extensions[j].specVersion = VK_EXT_MEMORY_PRIORITY_SPEC_VERSION;
-        j++;
-
-        object->fake_memory_priority = true;
-    }
-
     object->extension_count = num_properties;
+
+    if (use_external_memory() && have_external_memory_host)
+    {
+        VkPhysicalDeviceExternalMemoryHostPropertiesEXT host_mem_props =
+        {
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTERNAL_MEMORY_HOST_PROPERTIES_EXT,
+        };
+        VkPhysicalDeviceProperties2 props =
+        {
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
+            .pNext = &host_mem_props,
+        };
+        instance->funcs.p_vkGetPhysicalDeviceProperties2KHR(phys_dev, &props);
+        object->external_memory_align = host_mem_props.minImportedHostPointerAlignment;
+        if (object->external_memory_align)
+            TRACE("Using VK_EXT_external_memory_host for memory mapping with alignment: %u\n",
+                  object->external_memory_align);
+    }
 
     free(host_properties);
     return object;
@@ -380,36 +369,38 @@ err:
     return NULL;
 }
 
-static void wine_vk_free_command_buffers(struct VkDevice_T *device,
+static void wine_vk_free_command_buffers(struct wine_device *device,
         struct wine_cmd_pool *pool, uint32_t count, const VkCommandBuffer *buffers)
 {
     unsigned int i;
 
     for (i = 0; i < count; i++)
     {
-        if (!buffers[i])
+        struct wine_cmd_buffer *buffer = wine_cmd_buffer_from_handle(buffers[i]);
+
+        if (!buffer)
             continue;
 
-        device->funcs.p_vkFreeCommandBuffers(device->device, pool->command_pool, 1, &buffers[i]->command_buffer);
-        list_remove(&buffers[i]->pool_link);
-        WINE_VK_REMOVE_HANDLE_MAPPING(device->phys_dev->instance, buffers[i]);
-        free(buffers[i]);
+        device->funcs.p_vkFreeCommandBuffers(device->device, pool->command_pool, 1, &buffer->command_buffer);
+        WINE_VK_REMOVE_HANDLE_MAPPING(device->phys_dev->instance, buffer);
+        buffer->handle->base.unix_handle = 0;
+        free(buffer);
     }
 }
 
-static void wine_vk_device_get_queues(struct VkDevice_T *device,
+static void wine_vk_device_get_queues(struct wine_device *device,
         uint32_t family_index, uint32_t queue_count, VkDeviceQueueCreateFlags flags,
-        struct VkQueue_T* queues)
+        struct wine_queue *queues, VkQueue *handles)
 {
     VkDeviceQueueInfo2 queue_info;
     unsigned int i;
 
     for (i = 0; i < queue_count; i++)
     {
-        struct VkQueue_T *queue = &queues[i];
+        struct wine_queue *queue = &queues[i];
 
-        queue->base.loader_magic = VULKAN_ICD_MAGIC_VALUE;
         queue->device = device;
+        queue->handle = (*handles)++;
         queue->family_index = family_index;
         queue->queue_index = i;
         queue->flags = flags;
@@ -441,13 +432,9 @@ static void wine_vk_device_get_queues(struct VkDevice_T *device,
             device->funcs.p_vkGetDeviceQueue(device->device, family_index, i, &queue->queue);
         }
 
-        WINE_VK_ADD_DISPATCHABLE_MAPPING(device->phys_dev->instance, queue, queue->queue);
+        queue->handle->base.unix_handle = (uintptr_t)queue;
+        WINE_VK_ADD_DISPATCHABLE_MAPPING(device->phys_dev->instance, queue->handle, queue->queue, queue);
     }
-}
-
-static void wine_vk_device_free_create_info(VkDeviceCreateInfo *create_info)
-{
-    free_VkDeviceCreateInfo_struct_chain(create_info);
 }
 
 static char **parse_xr_extensions(unsigned int *len)
@@ -506,143 +493,98 @@ static char **parse_xr_extensions(unsigned int *len)
     return list;
 }
 
-static VkResult wine_vk_device_convert_create_info(VkPhysicalDevice phys_dev, const VkDeviceCreateInfo *src,
-        VkDeviceCreateInfo *dst, BOOL *must_free_extensions)
+static VkResult wine_vk_device_convert_create_info(struct wine_phys_dev *phys_dev,
+        struct conversion_context *ctx, const VkDeviceCreateInfo *src, VkDeviceCreateInfo *dst)
 {
-    unsigned int i, append_xr = 0, replace_win32 = 0, timeline_enabled = 0, drop_extension = 0, wine_extension_count;
-    VkResult res;
-
     static const char *wine_xr_extension_name = "VK_WINE_openxr_device_extensions";
+    unsigned int i, append_xr = 0, replace_win32 = 0, append_timeline = 1;
+    VkBaseOutStructure *header;
+    char **xr_extensions_list;
 
     *dst = *src;
-
-    if ((res = convert_VkDeviceCreateInfo_struct_chain(src->pNext, dst)) < 0)
-    {
-        WARN("Failed to convert VkDeviceCreateInfo pNext chain, res=%d.\n", res);
-        return res;
-    }
-
-    if (phys_dev->fake_memory_priority)
-    {
-        VkBaseOutStructure *header;
-
-        for (header = (void *) dst; header; header = header->pNext)
-        {
-            if (header->pNext && header->pNext->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_PRIORITY_FEATURES_EXT)
-            {
-                VkBaseOutStructure *memory_priority = header->pNext;
-
-                header->pNext = memory_priority->pNext;
-                free(memory_priority);
-                break;
-            }
-        }
-    }
+    if ((header = (VkBaseOutStructure *)dst->pNext) && header->sType == VK_STRUCTURE_TYPE_CREATE_INFO_WINE_DEVICE_CALLBACK)
+        dst->pNext = header->pNext;
 
     /* Should be filtered out by loader as ICDs don't support layers. */
     dst->enabledLayerCount = 0;
     dst->ppEnabledLayerNames = NULL;
 
+    TRACE("Enabled %u extensions.\n", dst->enabledExtensionCount);
     for (i = 0; i < dst->enabledExtensionCount; i++)
     {
         const char *extension_name = dst->ppEnabledExtensionNames[i];
+        TRACE("Extension %u: %s.\n", i, debugstr_a(extension_name));
+
         if (!strcmp(extension_name, wine_xr_extension_name))
             append_xr = 1;
-        else if (!strcmp(extension_name, "VK_KHR_external_memory_win32") || !strcmp(extension_name, "VK_KHR_external_semaphore_win32"))
+        else if (!strcmp(src->ppEnabledExtensionNames[i], "VK_KHR_external_memory_win32") || !strcmp(src->ppEnabledExtensionNames[i], "VK_KHR_external_semaphore_win32"))
             replace_win32 = 1;
-        else if (!strcmp(extension_name, "VK_KHR_win32_keyed_mutex") || (phys_dev->fake_memory_priority && !strcmp(extension_name, "VK_EXT_memory_priority")))
-            drop_extension = 1;
         else if (!strcmp(extension_name, "VK_KHR_timeline_semaphore"))
-            timeline_enabled = 1;
+            append_timeline = 0;
+    }
+    if (append_timeline)
+         append_timeline = phys_dev->api_version < VK_API_VERSION_1_2 || phys_dev->instance->api_version < VK_API_VERSION_1_2;
+    if (append_timeline)
+    {
+        append_timeline = 0;
+        for (i = 0; i < phys_dev->extension_count; ++i)
+        {
+            if (!strcmp(phys_dev->extensions[i].extensionName, "VK_KHR_timeline_semaphore"))
+            {
+                append_timeline = 1;
+                break;
+            }
+        }
     }
 
-    if (append_xr || replace_win32 || drop_extension)
+    if (append_xr)
+        xr_extensions_list = parse_xr_extensions(&append_xr);
+
+    if (phys_dev->external_memory_align || append_xr || replace_win32 || append_timeline)
     {
-        unsigned int xr_extensions_len = 0, o = 0, j;
-        char **xr_extensions_list = NULL;
-        char **new_extensions_list;
+        const char **new_extensions;
+        unsigned int o = 0, count;
 
+        count = dst->enabledExtensionCount;
+        if (phys_dev->external_memory_align)
+            count += 2;
         if (append_xr)
-            xr_extensions_list = parse_xr_extensions(&xr_extensions_len);
+            count += append_xr - 1;
+        if (append_timeline)
+            ++count;
 
-        new_extensions_list = malloc(sizeof(char *) * (dst->enabledExtensionCount + xr_extensions_len + replace_win32));
-
-        if(append_xr && !xr_extensions_list)
-            WARN("Requested to use XR extensions, but none are set!\n");
-
-        for (i = 0; i < dst->enabledExtensionCount; i++)
+        new_extensions = conversion_context_alloc(ctx, count * sizeof(*dst->ppEnabledExtensionNames));
+        for (i = 0; i < dst->enabledExtensionCount; ++i)
         {
-            if (append_xr && !strcmp(dst->ppEnabledExtensionNames[i], wine_xr_extension_name))
+            if (append_xr && !strcmp(src->ppEnabledExtensionNames[i], wine_xr_extension_name))
                 continue;
-
-            if (drop_extension && (!strcmp(src->ppEnabledExtensionNames[i], "VK_KHR_win32_keyed_mutex") ||
-                (phys_dev->fake_memory_priority && !strcmp(src->ppEnabledExtensionNames[i], "VK_EXT_memory_priority"))))
-            {
-                TRACE("Ignoring active extension %s.\n", src->ppEnabledExtensionNames[i]);
-                continue;
-            }
-
             if (replace_win32 && !strcmp(src->ppEnabledExtensionNames[i], "VK_KHR_external_memory_win32"))
-                new_extensions_list[o] = strdup("VK_KHR_external_memory_fd");
+                new_extensions[o++] = "VK_KHR_external_memory_fd";
             else if (replace_win32 && !strcmp(src->ppEnabledExtensionNames[i], "VK_KHR_external_semaphore_win32"))
-            {
-                new_extensions_list[o] = strdup("VK_KHR_external_semaphore_fd");
-
-                /* D3D12-Fence interoperable semaphores are implemented using timeline semaphores */
-                if (!timeline_enabled && (phys_dev->api_version < VK_API_VERSION_1_2 || phys_dev->instance->api_version < VK_API_VERSION_1_2))
-                {
-                    for (j = 0; j < phys_dev->extension_count; j++)
-                    {
-                        if (!strcmp(phys_dev->extensions[j].extensionName, "VK_KHR_timeline_semaphore"))
-                        {
-                            new_extensions_list[++o] = strdup("VK_KHR_timeline_semaphore");
-                            break;
-                        }
-                    }
-                }
-
-            }
+                new_extensions[o++] = "VK_KHR_external_semaphore_fd";
             else
-                new_extensions_list[o] = strdup(dst->ppEnabledExtensionNames[i]);
-            ++o;
+                new_extensions[o++] = src->ppEnabledExtensionNames[i];
         }
-
-        TRACE("appending XR extensions:\n");
-        for (i = 0; i < xr_extensions_len; ++i)
+        if (phys_dev->external_memory_align)
+        {
+            new_extensions[o++] = "VK_KHR_external_memory";
+            new_extensions[o++] = "VK_EXT_external_memory_host";
+        }
+        for (i = 0; i < append_xr; ++i)
         {
             TRACE("\t%s\n", xr_extensions_list[i]);
-            new_extensions_list[o++] = xr_extensions_list[i];
+            new_extensions[o++] = xr_extensions_list[i];
         }
-        dst->enabledExtensionCount = o;
-        dst->ppEnabledExtensionNames = (const char * const *)new_extensions_list;
-
-        free(xr_extensions_list);
-
-        *must_free_extensions = TRUE;
-        wine_extension_count = dst->enabledExtensionCount - xr_extensions_len;
-    }else{
-        *must_free_extensions = FALSE;
-        wine_extension_count = dst->enabledExtensionCount;
-    }
-
-    TRACE("Enabled %u extensions.\n", dst->enabledExtensionCount);
-    for (i = 0; i < wine_extension_count; i++)
-    {
-        TRACE("Extension %u: %s.\n", i, debugstr_a(dst->ppEnabledExtensionNames[i]));
+        if (append_timeline)
+            new_extensions[o++] = "VK_KHR_timeline_semaphore";
+        dst->enabledExtensionCount = count;
+        dst->ppEnabledExtensionNames = new_extensions;
     }
 
     return VK_SUCCESS;
 }
 
-static void wine_vk_device_free_create_info_extensions(VkDeviceCreateInfo *create_info)
-{
-    unsigned int i;
-    for(i = 0; i < create_info->enabledExtensionCount; ++i)
-        free((void*)create_info->ppEnabledExtensionNames[i]);
-    free((void*)create_info->ppEnabledExtensionNames);
-}
-
-static bool is_virtual_queue(struct VkQueue_T *queue)
+static bool is_virtual_queue(struct wine_queue *queue)
 {
     return __atomic_load_n(&queue->virtual_queue, __ATOMIC_ACQUIRE);
 }
@@ -650,9 +592,9 @@ static bool is_virtual_queue(struct VkQueue_T *queue)
 /* Helper function used for freeing a device structure. This function supports full
  * and partial object cleanups and can thus be used for vkCreateDevice failures.
  */
-static void wine_vk_device_free(struct VkDevice_T *device)
+static void wine_vk_device_free(struct wine_device *device)
 {
-    struct VkQueue_T *queue;
+    struct wine_queue *queue;
 
     if (!device)
         return;
@@ -703,8 +645,13 @@ static void wine_vk_device_free(struct VkDevice_T *device)
 
 NTSTATUS init_vulkan(void *args)
 {
-    vk_funcs = *(const struct vulkan_funcs **)args;
-    *(const struct unix_funcs **)args = &loader_funcs;
+    vk_funcs = __wine_get_vulkan_driver(WINE_VULKAN_DRIVER_VERSION);
+    if (!vk_funcs)
+    {
+        ERR("Failed to load Wine graphics driver supporting Vulkan.\n");
+        return STATUS_UNSUCCESSFUL;
+    }
+
     return STATUS_SUCCESS;
 }
 
@@ -712,29 +659,22 @@ NTSTATUS init_vulkan(void *args)
  * This function takes care of extensions handled at winevulkan layer, a Wine graphics
  * driver is responsible for handling e.g. surface extensions.
  */
-static VkResult wine_vk_instance_convert_create_info(const VkInstanceCreateInfo *src,
-        VkInstanceCreateInfo *dst, struct VkInstance_T *object)
+static VkResult wine_vk_instance_convert_create_info(struct conversion_context *ctx,
+        const VkInstanceCreateInfo *src, VkInstanceCreateInfo *dst, struct wine_instance *object)
 {
     VkDebugUtilsMessengerCreateInfoEXT *debug_utils_messenger;
     VkDebugReportCallbackCreateInfoEXT *debug_report_callback;
     VkBaseInStructure *header;
     unsigned int i;
-    VkResult res;
 
     *dst = *src;
-
-    if ((res = convert_VkInstanceCreateInfo_struct_chain(src->pNext, dst)) < 0)
-    {
-        WARN("Failed to convert VkInstanceCreateInfo pNext chain, res=%d.\n", res);
-        return res;
-    }
 
     object->utils_messenger_count = wine_vk_count_struct(dst, DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT);
     object->utils_messengers =  calloc(object->utils_messenger_count, sizeof(*object->utils_messengers));
     header = (VkBaseInStructure *) dst;
     for (i = 0; i < object->utils_messenger_count; i++)
     {
-        header = wine_vk_find_struct(header->pNext, DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT);
+        header = find_next_struct(header->pNext, VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT);
         debug_utils_messenger = (VkDebugUtilsMessengerCreateInfoEXT *) header;
 
         object->utils_messengers[i].instance = object;
@@ -742,14 +682,13 @@ static VkResult wine_vk_instance_convert_create_info(const VkInstanceCreateInfo 
         object->utils_messengers[i].user_callback = debug_utils_messenger->pfnUserCallback;
         object->utils_messengers[i].user_data = debug_utils_messenger->pUserData;
 
-        /* convert_VkInstanceCreateInfo_struct_chain already copied the chain,
-         * so we can modify it in-place.
-         */
+        /* convert_VkInstanceCreateInfo_* already copied the chain, so we can modify it in-place. */
         debug_utils_messenger->pfnUserCallback = (void *) &debug_utils_callback_conversion;
         debug_utils_messenger->pUserData = &object->utils_messengers[i];
     }
 
-    debug_report_callback = wine_vk_find_struct(header->pNext, DEBUG_REPORT_CALLBACK_CREATE_INFO_EXT);
+    debug_report_callback = find_next_struct(header->pNext,
+                                             VK_STRUCTURE_TYPE_DEBUG_REPORT_CALLBACK_CREATE_INFO_EXT);
     if (debug_report_callback)
     {
         object->default_callback.instance = object;
@@ -773,7 +712,7 @@ static VkResult wine_vk_instance_convert_create_info(const VkInstanceCreateInfo 
         return VK_ERROR_LAYER_NOT_PRESENT;
     }
 
-    TRACE("Enabled extensions: %u\n", dst->enabledExtensionCount);
+    TRACE("Enabled %u instance extensions.\n", dst->enabledExtensionCount);
     for (i = 0; i < dst->enabledExtensionCount; i++)
     {
         const char *extension_name = dst->ppEnabledExtensionNames[i];
@@ -784,11 +723,24 @@ static VkResult wine_vk_instance_convert_create_info(const VkInstanceCreateInfo 
         }
     }
 
+    if (use_external_memory())
+    {
+        const char **new_extensions;
+
+        new_extensions = conversion_context_alloc(ctx, (dst->enabledExtensionCount + 2) *
+                                                  sizeof(*dst->ppEnabledExtensionNames));
+        memcpy(new_extensions, src->ppEnabledExtensionNames,
+               dst->enabledExtensionCount * sizeof(*dst->ppEnabledExtensionNames));
+        new_extensions[dst->enabledExtensionCount++] = "VK_KHR_get_physical_device_properties2";
+        new_extensions[dst->enabledExtensionCount++] = "VK_KHR_external_memory_capabilities";
+        dst->ppEnabledExtensionNames = new_extensions;
+    }
+
     return VK_SUCCESS;
 }
 
 /* Helper function which stores wrapped physical devices in the instance object. */
-static VkResult wine_vk_instance_load_physical_devices(struct VkInstance_T *instance)
+static VkResult wine_vk_instance_load_physical_devices(struct wine_instance *instance)
 {
     VkPhysicalDevice *tmp_phys_devs;
     uint32_t phys_dev_count;
@@ -803,6 +755,13 @@ static VkResult wine_vk_instance_load_physical_devices(struct VkInstance_T *inst
     }
     if (!phys_dev_count)
         return res;
+
+    if (phys_dev_count > instance->handle->phys_dev_count)
+    {
+        instance->handle->phys_dev_count = phys_dev_count;
+        return VK_ERROR_OUT_OF_POOL_MEMORY;
+    }
+    instance->handle->phys_dev_count = phys_dev_count;
 
     if (!(tmp_phys_devs = calloc(phys_dev_count, sizeof(*tmp_phys_devs))))
         return VK_ERROR_OUT_OF_HOST_MEMORY;
@@ -824,7 +783,8 @@ static VkResult wine_vk_instance_load_physical_devices(struct VkInstance_T *inst
     /* Wrap each native physical device handle into a dispatchable object for the ICD loader. */
     for (i = 0; i < phys_dev_count; i++)
     {
-        struct VkPhysicalDevice_T *phys_dev = wine_vk_physical_device_alloc(instance, tmp_phys_devs[i]);
+        struct wine_phys_dev *phys_dev = wine_vk_physical_device_alloc(instance, tmp_phys_devs[i],
+                                                                       &instance->handle->phys_devs[i]);
         if (!phys_dev)
         {
             ERR("Unable to allocate memory for physical device!\n");
@@ -841,14 +801,14 @@ static VkResult wine_vk_instance_load_physical_devices(struct VkInstance_T *inst
     return VK_SUCCESS;
 }
 
-static struct VkPhysicalDevice_T *wine_vk_instance_wrap_physical_device(struct VkInstance_T *instance,
+static struct wine_phys_dev *wine_vk_instance_wrap_physical_device(struct wine_instance *instance,
         VkPhysicalDevice physical_device)
 {
     unsigned int i;
 
     for (i = 0; i < instance->phys_dev_count; ++i)
     {
-        struct VkPhysicalDevice_T *current = instance->phys_devs[i];
+        struct wine_phys_dev *current = instance->phys_devs[i];
         if (current->phys_dev == physical_device)
             return current;
     }
@@ -860,7 +820,7 @@ static struct VkPhysicalDevice_T *wine_vk_instance_wrap_physical_device(struct V
 /* Helper function used for freeing an instance structure. This function supports full
  * and partial object cleanups and can thus be used for vkCreateInstance failures.
  */
-static void wine_vk_instance_free(struct VkInstance_T *instance)
+static void wine_vk_instance_free(struct wine_instance *instance)
 {
     if (!instance)
         return;
@@ -888,25 +848,20 @@ static void wine_vk_instance_free(struct VkInstance_T *instance)
     free(instance);
 }
 
-NTSTATUS wine_vkAllocateCommandBuffers(void *args)
+VkResult wine_vkAllocateCommandBuffers(VkDevice handle, const VkCommandBufferAllocateInfo *allocate_info,
+                                       VkCommandBuffer *buffers )
 {
-    struct vkAllocateCommandBuffers_params *params = args;
-    VkDevice device = params->device;
-    const VkCommandBufferAllocateInfo *allocate_info = params->pAllocateInfo;
-    VkCommandBuffer *buffers = params->pCommandBuffers;
+    struct wine_device *device = wine_device_from_handle(handle);
+    struct wine_cmd_buffer *buffer;
     struct wine_cmd_pool *pool;
     VkResult res = VK_SUCCESS;
     unsigned int i;
 
-    TRACE("%p, %p, %p\n", device, allocate_info, buffers);
-
     pool = wine_cmd_pool_from_handle(allocate_info->commandPool);
-
-    memset(buffers, 0, allocate_info->commandBufferCount * sizeof(*buffers));
 
     for (i = 0; i < allocate_info->commandBufferCount; i++)
     {
-        VkCommandBufferAllocateInfo_host allocate_info_host;
+        VkCommandBufferAllocateInfo allocate_info_host;
 
         /* TODO: future extensions (none yet) may require pNext conversion. */
         allocate_info_host.pNext = allocate_info->pNext;
@@ -918,68 +873,56 @@ NTSTATUS wine_vkAllocateCommandBuffers(void *args)
         TRACE("Allocating command buffer %u from pool 0x%s.\n",
                 i, wine_dbgstr_longlong(allocate_info_host.commandPool));
 
-        if (!(buffers[i] = calloc(1, sizeof(**buffers))))
+        if (!(buffer = calloc(1, sizeof(*buffer))))
         {
             res = VK_ERROR_OUT_OF_HOST_MEMORY;
             break;
         }
 
-        buffers[i]->base.loader_magic = VULKAN_ICD_MAGIC_VALUE;
-        buffers[i]->device = device;
-        list_add_tail(&pool->command_buffers, &buffers[i]->pool_link);
+        buffer->handle = buffers[i];
+        buffer->device = device;
         res = device->funcs.p_vkAllocateCommandBuffers(device->device,
-                &allocate_info_host, &buffers[i]->command_buffer);
-        WINE_VK_ADD_DISPATCHABLE_MAPPING(device->phys_dev->instance, buffers[i], buffers[i]->command_buffer);
+                &allocate_info_host, &buffer->command_buffer);
+        buffer->handle->base.unix_handle = (uintptr_t)buffer;
+        WINE_VK_ADD_DISPATCHABLE_MAPPING(device->phys_dev->instance, buffer->handle,
+                                         buffer->command_buffer, buffer);
         if (res != VK_SUCCESS)
         {
             ERR("Failed to allocate command buffer, res=%d.\n", res);
-            buffers[i]->command_buffer = VK_NULL_HANDLE;
+            buffer->command_buffer = VK_NULL_HANDLE;
             break;
         }
     }
 
     if (res != VK_SUCCESS)
-    {
         wine_vk_free_command_buffers(device, pool, i + 1, buffers);
-        memset(buffers, 0, allocate_info->commandBufferCount * sizeof(*buffers));
-    }
 
     return res;
 }
 
-NTSTATUS wine_vkCreateDevice(void *args)
+VkResult wine_vkCreateDevice(VkPhysicalDevice phys_dev_handle, const VkDeviceCreateInfo *create_info,
+                             const VkAllocationCallbacks *allocator, VkDevice *ret_device,
+                             void *client_ptr)
 {
-    struct vkCreateDevice_params *params = args;
-    VkPhysicalDevice phys_dev = params->physicalDevice;
-    const VkDeviceCreateInfo *create_info = params->pCreateInfo;
-    const VkAllocationCallbacks *allocator = params->pAllocator;
-    VkDevice *device = params->pDevice;
-    return __wine_create_vk_device_with_callback(phys_dev, create_info, allocator, device, NULL, NULL);
-}
-
-VkResult WINAPI __wine_create_vk_device_with_callback(VkPhysicalDevice phys_dev,
-        const VkDeviceCreateInfo *create_info,
-        const VkAllocationCallbacks *allocator, VkDevice *device,
-        VkResult (WINAPI *native_vkCreateDevice)(VkPhysicalDevice, const VkDeviceCreateInfo *, const VkAllocationCallbacks *,
-        VkDevice *, void * (*)(VkInstance, const char *), void *), void *native_vkCreateDevice_context)
-{
-    VkPhysicalDeviceFeatures features = {0};
-    VkPhysicalDeviceFeatures2 *features2;
+    struct wine_phys_dev *phys_dev = wine_phys_dev_from_handle(phys_dev_handle);
+    PFN_native_vkCreateDevice native_create_device = NULL;
+    void *native_create_device_context = NULL;
+    VkCreateInfoWineDeviceCallback *callback;
+    VkDevice device_handle = client_ptr;
     VkDeviceCreateInfo create_info_host;
-    struct VkQueue_T *next_queue;
-    struct VkDevice_T *object;
+    struct VkQueue_T *queue_handles;
+    struct wine_queue *next_queue;
+    struct conversion_context ctx;
+    struct wine_device *object;
     unsigned int i;
-    BOOL create_info_free_extensions;
     VkResult res;
-
-    TRACE("%p, %p, %p, %p\n", phys_dev, create_info, allocator, device);
 
     if (allocator)
         FIXME("Support for allocation callbacks not implemented yet\n");
 
     if (TRACE_ON(vulkan))
     {
-        VkPhysicalDeviceProperties_host properties;
+        VkPhysicalDeviceProperties properties;
 
         phys_dev->instance->funcs.p_vkGetPhysicalDeviceProperties(phys_dev->phys_dev, &properties);
 
@@ -991,44 +934,51 @@ VkResult WINAPI __wine_create_vk_device_with_callback(VkPhysicalDevice phys_dev,
     if (!(object = calloc(1, sizeof(*object))))
         return VK_ERROR_OUT_OF_HOST_MEMORY;
 
-    object->base.base.loader_magic = VULKAN_ICD_MAGIC_VALUE;
     object->phys_dev = phys_dev;
 
-    res = wine_vk_device_convert_create_info(phys_dev, create_info, &create_info_host, &create_info_free_extensions);
-    if (res != VK_SUCCESS)
-        goto fail;
-
-    /* Enable shaderStorageImageWriteWithoutFormat for fshack
-     * This is available on all hardware and driver combinations we care about.
-     */
-    if (create_info_host.pEnabledFeatures)
+    if ((callback = (VkCreateInfoWineDeviceCallback *)create_info->pNext)
+            && callback->sType == VK_STRUCTURE_TYPE_CREATE_INFO_WINE_DEVICE_CALLBACK)
     {
-        features = *create_info_host.pEnabledFeatures;
-        features.shaderStorageImageWriteWithoutFormat = VK_TRUE;
-        create_info_host.pEnabledFeatures = &features;
-    }
-    if ((features2 = wine_vk_find_struct(&create_info_host, PHYSICAL_DEVICE_FEATURES_2)))
-    {
-        features2->features.shaderStorageImageWriteWithoutFormat = VK_TRUE;
-    }
-    else if (!create_info_host.pEnabledFeatures)
-    {
-        features.shaderStorageImageWriteWithoutFormat = VK_TRUE;
-        create_info_host.pEnabledFeatures = &features;
+        native_create_device = callback->native_create_callback;
+        native_create_device_context = callback->context;
     }
 
-    if (native_vkCreateDevice)
-        res = native_vkCreateDevice(phys_dev->phys_dev,
-                &create_info_host, NULL /* allocator */, &object->device,
-                vk_funcs->p_vkGetInstanceProcAddr, native_vkCreateDevice_context);
-    else
-        res = phys_dev->instance->funcs.p_vkCreateDevice(phys_dev->phys_dev,
-                &create_info_host, NULL /* allocator */, &object->device);
+    init_conversion_context(&ctx);
+    res = wine_vk_device_convert_create_info(phys_dev, &ctx, create_info, &create_info_host);
+    if (res == VK_SUCCESS)
+    {
+        VkPhysicalDeviceFeatures features = {0};
+        VkPhysicalDeviceFeatures2 *features2;
 
-    wine_vk_device_free_create_info(&create_info_host);
-    if (create_info_free_extensions)
-        wine_vk_device_free_create_info_extensions(&create_info_host);
-    WINE_VK_ADD_DISPATCHABLE_MAPPING(phys_dev->instance, object, object->device);
+        /* Enable shaderStorageImageWriteWithoutFormat for fshack
+         * This is available on all hardware and driver combinations we care about.
+         */
+        if (create_info_host.pEnabledFeatures)
+        {
+            features = *create_info_host.pEnabledFeatures;
+            features.shaderStorageImageWriteWithoutFormat = VK_TRUE;
+            create_info_host.pEnabledFeatures = &features;
+        }
+        if ((features2 = wine_vk_find_struct(&create_info_host, PHYSICAL_DEVICE_FEATURES_2)))
+        {
+            features2->features.shaderStorageImageWriteWithoutFormat = VK_TRUE;
+        }
+        else if (!create_info_host.pEnabledFeatures)
+        {
+            features.shaderStorageImageWriteWithoutFormat = VK_TRUE;
+            create_info_host.pEnabledFeatures = &features;
+        }
+
+        if (native_create_device)
+            res = native_create_device(phys_dev->phys_dev,
+                    &create_info_host, NULL /* allocator */, &object->device,
+                    vk_funcs->p_vkGetInstanceProcAddr, native_create_device_context);
+        else
+            res = phys_dev->instance->funcs.p_vkCreateDevice(phys_dev->phys_dev,
+                    &create_info_host, NULL /* allocator */, &object->device);
+    }
+    free_conversion_context(&ctx);
+    WINE_VK_ADD_DISPATCHABLE_MAPPING(phys_dev->instance, device_handle, object->device, object);
     if (res != VK_SUCCESS)
     {
         WARN("Failed to create device, res=%d.\n", res);
@@ -1061,6 +1011,7 @@ VkResult WINAPI __wine_create_vk_device_with_callback(VkPhysicalDevice phys_dev,
     }
 
     next_queue = object->queues;
+    queue_handles = device_handle->queues;
     for (i = 0; i < create_info_host.queueCreateInfoCount; i++)
     {
         uint32_t flags = create_info_host.pQueueCreateInfos[i].flags;
@@ -1069,13 +1020,13 @@ VkResult WINAPI __wine_create_vk_device_with_callback(VkPhysicalDevice phys_dev,
 
         TRACE("Queue family index %u, queue count %u.\n", family_index, queue_count);
 
-        wine_vk_device_get_queues(object, family_index, queue_count, flags, next_queue);
+        wine_vk_device_get_queues(object, family_index, queue_count, flags, next_queue, &queue_handles);
         next_queue += queue_count;
     }
 
-    object->base.quirks = phys_dev->instance->quirks;
-
-    *device = object;
+    device_handle->quirks = phys_dev->instance->quirks;
+    device_handle->base.unix_handle = (uintptr_t)object;
+    *ret_device = device_handle;
     TRACE("Created device %p (native device %p).\n", object, object->device);
     return VK_SUCCESS;
 
@@ -1084,28 +1035,17 @@ fail:
     return res;
 }
 
-NTSTATUS wine_vkCreateInstance(void *args)
+VkResult wine_vkCreateInstance(const VkInstanceCreateInfo *create_info,
+                               const VkAllocationCallbacks *allocator, VkInstance *instance,
+                               void *client_ptr)
 {
-    struct vkCreateInstance_params *params = args;
-    const VkInstanceCreateInfo *create_info = params->pCreateInfo;
-    const VkAllocationCallbacks *allocator = params->pAllocator;
-    VkInstance *instance = params->pInstance;
-    return __wine_create_vk_instance_with_callback(create_info, allocator, instance, NULL, NULL);
-}
-
-VkResult WINAPI __wine_create_vk_instance_with_callback(const VkInstanceCreateInfo *create_info,
-        const VkAllocationCallbacks *allocator, VkInstance *instance,
-        VkResult (WINAPI *native_vkCreateInstance)(const VkInstanceCreateInfo *, const VkAllocationCallbacks *,
-        VkInstance *, void * (*)(VkInstance, const char *), void *), void *native_vkCreateInstance_context)
-{
+    VkInstance client_instance = client_ptr;
     VkInstanceCreateInfo create_info_host;
     const VkApplicationInfo *app_info;
     uint32_t new_mxcsr, old_mxcsr;
-    struct VkInstance_T *object;
+    struct conversion_context ctx;
+    struct wine_instance *object;
     VkResult res;
-
-    TRACE("create_info %p, allocator %p, instance %p, native_vkCreateInstance %p, context %p.\n",
-            create_info, allocator, instance, native_vkCreateInstance, native_vkCreateInstance_context);
 
     if (allocator)
         FIXME("Support for allocation callbacks not implemented yet\n");
@@ -1115,26 +1055,14 @@ VkResult WINAPI __wine_create_vk_instance_with_callback(const VkInstanceCreateIn
         ERR("Failed to allocate memory for instance\n");
         return VK_ERROR_OUT_OF_HOST_MEMORY;
     }
-    object->base.loader_magic = VULKAN_ICD_MAGIC_VALUE;
     list_init(&object->wrappers);
     pthread_rwlock_init(&object->wrapper_lock, NULL);
 
-    res = wine_vk_instance_convert_create_info(create_info, &create_info_host, object);
-    if (res != VK_SUCCESS)
-    {
-        wine_vk_instance_free(object);
-        return res;
-    }
-
-    if (native_vkCreateInstance && !vk_funcs->create_vk_instance_with_callback)
-        ERR("Driver create_vk_instance_with_callback is not available.\n");
-
-    if (native_vkCreateInstance && vk_funcs->create_vk_instance_with_callback)
-        res = vk_funcs->create_vk_instance_with_callback(&create_info_host, NULL /* allocator */, &object->instance,
-                native_vkCreateInstance, native_vkCreateInstance_context);
-    else
+    init_conversion_context(&ctx);
+    res = wine_vk_instance_convert_create_info(&ctx, create_info, &create_info_host, object);
+    if (res == VK_SUCCESS)
         res = vk_funcs->p_vkCreateInstance(&create_info_host, NULL /* allocator */, &object->instance);
-    free_VkInstanceCreateInfo_struct_chain(&create_info_host);
+    free_conversion_context(&ctx);
     if (res != VK_SUCCESS)
     {
         ERR("Failed to create instance, res=%d\n", res);
@@ -1142,7 +1070,8 @@ VkResult WINAPI __wine_create_vk_instance_with_callback(const VkInstanceCreateIn
         return res;
     }
 
-    WINE_VK_ADD_DISPATCHABLE_MAPPING(object, object, object->instance);
+    object->handle = client_instance;
+    WINE_VK_ADD_DISPATCHABLE_MAPPING(object, object->handle, object->instance, object);
 
     /* Load all instance functions we are aware of. Note the loader takes care
      * of any filtering for extensions which were not requested, but which the
@@ -1152,23 +1081,6 @@ VkResult WINAPI __wine_create_vk_instance_with_callback(const VkInstanceCreateIn
     object->funcs.p_##name = (void *)vk_funcs->p_vkGetInstanceProcAddr(object->instance, #name);
     ALL_VK_INSTANCE_FUNCS()
 #undef USE_VK_FUNC
-
-    if ((app_info = create_info->pApplicationInfo))
-    {
-        TRACE("Application name %s, application version %#x.\n",
-                debugstr_a(app_info->pApplicationName), app_info->applicationVersion);
-        TRACE("Engine name %s, engine version %#x.\n", debugstr_a(app_info->pEngineName),
-                app_info->engineVersion);
-        TRACE("API version %#x.\n", app_info->apiVersion);
-
-        object->api_version = app_info->apiVersion;
-
-        if (app_info->pEngineName && !strcmp(app_info->pEngineName, "idTech"))
-            object->quirks |= WINEVULKAN_QUIRK_GET_DEVICE_PROC_ADDR;
-
-        if (app_info->pEngineName && !strcmp(app_info->pEngineName, "nvpro-sample"))
-            object->quirks |= (WINEVULKAN_QUIRK_EXPOSE_MEM_PRIORITY | WINEVULKAN_QUIRK_EXPOSE_KEYED_MUTEX);
-    }
 
     /* Cache physical devices for vkEnumeratePhysicalDevices within the instance as
      * each vkPhysicalDevice is a dispatchable object, which means we need to wrap
@@ -1188,52 +1100,52 @@ VkResult WINAPI __wine_create_vk_instance_with_callback(const VkInstanceCreateIn
         return res;
     }
 
+    if ((app_info = create_info->pApplicationInfo))
+    {
+        TRACE("Application name %s, application version %#x.\n",
+                debugstr_a(app_info->pApplicationName), app_info->applicationVersion);
+        TRACE("Engine name %s, engine version %#x.\n", debugstr_a(app_info->pEngineName),
+                app_info->engineVersion);
+        TRACE("API version %#x.\n", app_info->apiVersion);
+
+        object->api_version = app_info->apiVersion;
+
+        if (app_info->pEngineName && !strcmp(app_info->pEngineName, "idTech"))
+            object->quirks |= WINEVULKAN_QUIRK_GET_DEVICE_PROC_ADDR;
+    }
+
     object->quirks |= WINEVULKAN_QUIRK_ADJUST_MAX_IMAGE_COUNT;
 
-    *instance = object;
+    client_instance->base.unix_handle = (uintptr_t)object;
+    *instance = client_instance;
     TRACE("Created instance %p (native instance %p).\n", object, object->instance);
     return VK_SUCCESS;
 }
 
-NTSTATUS wine_vkDestroyDevice(void *args)
+void wine_vkDestroyDevice(VkDevice handle, const VkAllocationCallbacks *allocator)
 {
-    struct vkDestroyDevice_params *params = args;
-    VkDevice device = params->device;
-    const VkAllocationCallbacks *allocator = params->pAllocator;
-
-    TRACE("%p %p\n", device, allocator);
+    struct wine_device *device = wine_device_from_handle(handle);
 
     if (allocator)
         FIXME("Support for allocation callbacks not implemented yet\n");
 
     wine_vk_device_free(device);
-    return STATUS_SUCCESS;
 }
 
-NTSTATUS wine_vkDestroyInstance(void *args)
+void wine_vkDestroyInstance(VkInstance handle, const VkAllocationCallbacks *allocator)
 {
-    struct vkDestroyInstance_params *params = args;
-    VkInstance instance = params->instance;
-    const VkAllocationCallbacks *allocator = params->pAllocator;
-
-    TRACE("%p, %p\n", instance, allocator);
+    struct wine_instance *instance = wine_instance_from_handle(handle);
 
     if (allocator)
         FIXME("Support allocation allocators\n");
 
     wine_vk_instance_free(instance);
-    return STATUS_SUCCESS;
 }
 
-NTSTATUS wine_vkEnumerateDeviceExtensionProperties(void *args)
+VkResult wine_vkEnumerateDeviceExtensionProperties(VkPhysicalDevice phys_dev_handle, const char *layer_name,
+                                                   uint32_t *count, VkExtensionProperties *properties)
 {
-    struct vkEnumerateDeviceExtensionProperties_params *params = args;
-    VkPhysicalDevice phys_dev = params->physicalDevice;
-    const char *layer_name = params->pLayerName;
-    uint32_t *count = params->pPropertyCount;
-    VkExtensionProperties *properties = params->pProperties;
-
-    TRACE("%p, %p, %p, %p\n", phys_dev, layer_name, count, properties);
+    struct wine_phys_dev *phys_dev = wine_phys_dev_from_handle(phys_dev_handle);
 
     /* This shouldn't get called with layer_name set, the ICD loader prevents it. */
     if (layer_name)
@@ -1255,11 +1167,9 @@ NTSTATUS wine_vkEnumerateDeviceExtensionProperties(void *args)
     return *count < phys_dev->extension_count ? VK_INCOMPLETE : VK_SUCCESS;
 }
 
-NTSTATUS wine_vkEnumerateInstanceExtensionProperties(void *args)
+VkResult wine_vkEnumerateInstanceExtensionProperties(const char *name, uint32_t *count,
+                                                     VkExtensionProperties *properties)
 {
-    struct vkEnumerateInstanceExtensionProperties_params *params = args;
-    uint32_t *count = params->pPropertyCount;
-    VkExtensionProperties *properties = params->pProperties;
     uint32_t num_properties = 0, num_host_properties;
     VkExtensionProperties *host_properties;
     unsigned int i, j;
@@ -1314,21 +1224,15 @@ NTSTATUS wine_vkEnumerateInstanceExtensionProperties(void *args)
     return *count < num_properties ? VK_INCOMPLETE : VK_SUCCESS;
 }
 
-NTSTATUS wine_vkEnumerateDeviceLayerProperties(void *args)
+VkResult wine_vkEnumerateDeviceLayerProperties(VkPhysicalDevice phys_dev, uint32_t *count,
+                                               VkLayerProperties *properties)
 {
-    struct vkEnumerateDeviceLayerProperties_params *params = args;
-    uint32_t *count = params->pPropertyCount;
-
-    TRACE("%p, %p, %p\n", params->physicalDevice, count, params->pProperties);
-
     *count = 0;
     return VK_SUCCESS;
 }
 
-NTSTATUS wine_vkEnumerateInstanceVersion(void *args)
+VkResult wine_vkEnumerateInstanceVersion(uint32_t *version)
 {
-    struct vkEnumerateInstanceVersion_params *params = args;
-    uint32_t *version = params->pApiVersion;
     VkResult res;
 
     static VkResult (*p_vkEnumerateInstanceVersion)(uint32_t *version);
@@ -1351,15 +1255,10 @@ NTSTATUS wine_vkEnumerateInstanceVersion(void *args)
     return res;
 }
 
-NTSTATUS wine_vkEnumeratePhysicalDevices(void *args)
+VkResult wine_vkEnumeratePhysicalDevices(VkInstance handle, uint32_t *count, VkPhysicalDevice *devices)
 {
-    struct vkEnumeratePhysicalDevices_params *params = args;
-    VkInstance instance = params->instance;
-    uint32_t *count = params->pPhysicalDeviceCount;
-    VkPhysicalDevice *devices = params->pPhysicalDevices;
+    struct wine_instance *instance = wine_instance_from_handle(handle);
     unsigned int i;
-
-    TRACE("%p %p %p\n", instance, count, devices);
 
     if (!devices)
     {
@@ -1370,30 +1269,26 @@ NTSTATUS wine_vkEnumeratePhysicalDevices(void *args)
     *count = min(*count, instance->phys_dev_count);
     for (i = 0; i < *count; i++)
     {
-        devices[i] = instance->phys_devs[i];
+        devices[i] = instance->phys_devs[i]->handle;
     }
 
     TRACE("Returning %u devices.\n", *count);
     return *count < instance->phys_dev_count ? VK_INCOMPLETE : VK_SUCCESS;
 }
 
-NTSTATUS wine_vkFreeCommandBuffers(void *args)
+void wine_vkFreeCommandBuffers(VkDevice handle, VkCommandPool command_pool, uint32_t count,
+                               const VkCommandBuffer *buffers)
 {
-    struct vkFreeCommandBuffers_params *params = args;
-    VkDevice device = params->device;
-    struct wine_cmd_pool *pool = wine_cmd_pool_from_handle(params->commandPool);
-    uint32_t count = params->commandBufferCount;
-    const VkCommandBuffer *buffers = params->pCommandBuffers;
-
-    TRACE("%p, 0x%s, %u, %p\n", device, wine_dbgstr_longlong(params->commandPool), count, buffers);
+    struct wine_device *device = wine_device_from_handle(handle);
+    struct wine_cmd_pool *pool = wine_cmd_pool_from_handle(command_pool);
 
     wine_vk_free_command_buffers(device, pool, count, buffers);
-    return STATUS_SUCCESS;
 }
 
-static VkQueue wine_vk_device_find_queue(VkDevice device, const VkDeviceQueueInfo2 *info)
+static VkQueue wine_vk_device_find_queue(VkDevice handle, const VkDeviceQueueInfo2 *info)
 {
-    struct VkQueue_T* queue;
+    struct wine_device *device = wine_device_from_handle(handle);
+    struct wine_queue *queue;
     uint32_t i;
 
     for (i = 0; i < device->queue_count; i++)
@@ -1403,23 +1298,16 @@ static VkQueue wine_vk_device_find_queue(VkDevice device, const VkDeviceQueueInf
                 && queue->queue_index == info->queueIndex
                 && queue->flags == info->flags)
         {
-            return queue;
+            return queue->handle;
         }
     }
 
     return VK_NULL_HANDLE;
 }
 
-NTSTATUS wine_vkGetDeviceQueue(void *args)
+void wine_vkGetDeviceQueue(VkDevice device, uint32_t family_index, uint32_t queue_index, VkQueue *queue)
 {
-    struct vkGetDeviceQueue_params *params = args;
-    VkDevice device = params->device;
-    uint32_t family_index = params->queueFamilyIndex;
-    uint32_t queue_index = params->queueIndex;
-    VkQueue *queue = params->pQueue;
     VkDeviceQueueInfo2 queue_info;
-
-    TRACE("%p, %u, %u, %p\n", device, family_index, queue_index, queue);
 
     queue_info.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_INFO_2;
     queue_info.pNext = NULL;
@@ -1428,37 +1316,26 @@ NTSTATUS wine_vkGetDeviceQueue(void *args)
     queue_info.queueIndex = queue_index;
 
     *queue = wine_vk_device_find_queue(device, &queue_info);
-    return STATUS_SUCCESS;
 }
 
-NTSTATUS wine_vkGetDeviceQueue2(void *args)
+void wine_vkGetDeviceQueue2(VkDevice device, const VkDeviceQueueInfo2 *info, VkQueue *queue)
 {
-    struct vkGetDeviceQueue2_params *params = args;
-    VkDevice device = params->device;
-    const VkDeviceQueueInfo2 *info = params->pQueueInfo;
-    VkQueue *queue = params->pQueue;
     const VkBaseInStructure *chain;
-
-    TRACE("%p, %p, %p\n", device, info, queue);
 
     if ((chain = info->pNext))
         FIXME("Ignoring a linked structure of type %u.\n", chain->sType);
 
     *queue = wine_vk_device_find_queue(device, info);
-    return STATUS_SUCCESS;
 }
 
-NTSTATUS wine_vkCreateCommandPool(void *args)
+VkResult wine_vkCreateCommandPool(VkDevice device_handle, const VkCommandPoolCreateInfo *info,
+                                  const VkAllocationCallbacks *allocator, VkCommandPool *command_pool,
+                                  void *client_ptr)
 {
-    struct vkCreateCommandPool_params *params = args;
-    VkDevice device = params->device;
-    const VkCommandPoolCreateInfo *info = params->pCreateInfo;
-    const VkAllocationCallbacks *allocator = params->pAllocator;
-    VkCommandPool *command_pool = params->pCommandPool;
+    struct wine_device *device = wine_device_from_handle(device_handle);
+    struct vk_command_pool *handle = client_ptr;
     struct wine_cmd_pool *object;
     VkResult res;
-
-    TRACE("%p, %p, %p, %p\n", device, info, allocator, command_pool);
 
     if (allocator)
         FIXME("Support for allocation callbacks not implemented yet\n");
@@ -1466,14 +1343,15 @@ NTSTATUS wine_vkCreateCommandPool(void *args)
     if (!(object = calloc(1, sizeof(*object))))
         return VK_ERROR_OUT_OF_HOST_MEMORY;
 
-    list_init(&object->command_buffers);
-
     res = device->funcs.p_vkCreateCommandPool(device->device, info, NULL, &object->command_pool);
 
     if (res == VK_SUCCESS)
     {
-        WINE_VK_ADD_NON_DISPATCHABLE_MAPPING(device->phys_dev->instance, object, object->command_pool);
-        *command_pool = wine_cmd_pool_to_handle(object);
+        object->handle = (uintptr_t)handle;
+        handle->unix_handle = (uintptr_t)object;
+        WINE_VK_ADD_NON_DISPATCHABLE_MAPPING(device->phys_dev->instance, object->handle,
+                                             object->command_pool, object);
+        *command_pool = object->handle;
     }
     else
     {
@@ -1483,41 +1361,22 @@ NTSTATUS wine_vkCreateCommandPool(void *args)
     return res;
 }
 
-NTSTATUS wine_vkDestroyCommandPool(void *args)
+void wine_vkDestroyCommandPool(VkDevice device_handle, VkCommandPool handle,
+                               const VkAllocationCallbacks *allocator)
 {
-    struct vkDestroyCommandPool_params *params = args;
-    VkDevice device = params->device;
-    VkCommandPool handle = params->commandPool;
-    const VkAllocationCallbacks *allocator = params->pAllocator;
+    struct wine_device *device = wine_device_from_handle(device_handle);
     struct wine_cmd_pool *pool = wine_cmd_pool_from_handle(handle);
-    struct VkCommandBuffer_T *buffer, *cursor;
-
-    TRACE("%p, 0x%s, %p\n", device, wine_dbgstr_longlong(handle), allocator);
-
-    if (!handle)
-        return STATUS_SUCCESS;
 
     if (allocator)
         FIXME("Support for allocation callbacks not implemented yet\n");
-
-    /* The Vulkan spec says:
-     *
-     * "When a pool is destroyed, all command buffers allocated from the pool are freed."
-     */
-    LIST_FOR_EACH_ENTRY_SAFE(buffer, cursor, &pool->command_buffers, struct VkCommandBuffer_T, pool_link)
-    {
-        WINE_VK_REMOVE_HANDLE_MAPPING(device->phys_dev->instance, buffer);
-        free(buffer);
-    }
 
     WINE_VK_REMOVE_HANDLE_MAPPING(device->phys_dev->instance, pool);
 
     device->funcs.p_vkDestroyCommandPool(device->device, pool->command_pool, NULL);
     free(pool);
-    return STATUS_SUCCESS;
 }
 
-static VkResult wine_vk_enumerate_physical_device_groups(struct VkInstance_T *instance,
+static VkResult wine_vk_enumerate_physical_device_groups(struct wine_instance *instance,
         VkResult (*p_vkEnumeratePhysicalDeviceGroups)(VkInstance, uint32_t *, VkPhysicalDeviceGroupProperties *),
         uint32_t *count, VkPhysicalDeviceGroupProperties *properties)
 {
@@ -1534,64 +1393,50 @@ static VkResult wine_vk_enumerate_physical_device_groups(struct VkInstance_T *in
         for (j = 0; j < current->physicalDeviceCount; ++j)
         {
             VkPhysicalDevice dev = current->physicalDevices[j];
-            if (!(current->physicalDevices[j] = wine_vk_instance_wrap_physical_device(instance, dev)))
+            struct wine_phys_dev *phys_dev = wine_vk_instance_wrap_physical_device(instance, dev);
+            if (!phys_dev)
                 return VK_ERROR_INITIALIZATION_FAILED;
+            current->physicalDevices[j] = phys_dev->handle;
         }
     }
 
     return res;
 }
 
-NTSTATUS wine_vkEnumeratePhysicalDeviceGroups(void *args)
+VkResult wine_vkEnumeratePhysicalDeviceGroups(VkInstance handle, uint32_t *count,
+                                              VkPhysicalDeviceGroupProperties *properties)
 {
-    struct vkEnumeratePhysicalDeviceGroups_params *params = args;
-    VkInstance instance = params->instance;
-    uint32_t *count = params->pPhysicalDeviceGroupCount;
-    VkPhysicalDeviceGroupProperties *properties = params->pPhysicalDeviceGroupProperties;
+    struct wine_instance *instance = wine_instance_from_handle(handle);
 
-    TRACE("%p, %p, %p\n", instance, count, properties);
     return wine_vk_enumerate_physical_device_groups(instance,
             instance->funcs.p_vkEnumeratePhysicalDeviceGroups, count, properties);
 }
 
-NTSTATUS wine_vkEnumeratePhysicalDeviceGroupsKHR(void *args)
+VkResult wine_vkEnumeratePhysicalDeviceGroupsKHR(VkInstance handle, uint32_t *count,
+                                                 VkPhysicalDeviceGroupProperties *properties)
 {
-    struct vkEnumeratePhysicalDeviceGroupsKHR_params *params = args;
-    VkInstance instance = params->instance;
-    uint32_t *count = params->pPhysicalDeviceGroupCount;
-    VkPhysicalDeviceGroupProperties *properties = params->pPhysicalDeviceGroupProperties;
+    struct wine_instance *instance = wine_instance_from_handle(handle);
 
-    TRACE("%p, %p, %p\n", instance, count, properties);
     return wine_vk_enumerate_physical_device_groups(instance,
             instance->funcs.p_vkEnumeratePhysicalDeviceGroupsKHR, count, properties);
 }
 
-NTSTATUS wine_vkGetPhysicalDeviceExternalFenceProperties(void *args)
+void wine_vkGetPhysicalDeviceExternalFenceProperties(VkPhysicalDevice phys_dev,
+                                                     const VkPhysicalDeviceExternalFenceInfo *fence_info,
+                                                     VkExternalFenceProperties *properties)
 {
-    struct vkGetPhysicalDeviceExternalFenceProperties_params *params = args;
-    VkPhysicalDevice phys_dev = params->physicalDevice;
-    const VkPhysicalDeviceExternalFenceInfo *fence_info = params->pExternalFenceInfo;
-    VkExternalFenceProperties *properties = params->pExternalFenceProperties;
-
-    TRACE("%p, %p, %p\n", phys_dev, fence_info, properties);
     properties->exportFromImportedHandleTypes = 0;
     properties->compatibleHandleTypes = 0;
     properties->externalFenceFeatures = 0;
-    return STATUS_SUCCESS;
 }
 
-NTSTATUS wine_vkGetPhysicalDeviceExternalFencePropertiesKHR(void *args)
+void wine_vkGetPhysicalDeviceExternalFencePropertiesKHR(VkPhysicalDevice phys_dev,
+                                                        const VkPhysicalDeviceExternalFenceInfo *fence_info,
+                                                        VkExternalFenceProperties *properties)
 {
-    struct vkGetPhysicalDeviceExternalFencePropertiesKHR_params *params = args;
-    VkPhysicalDevice phys_dev = params->physicalDevice;
-    const VkPhysicalDeviceExternalFenceInfo *fence_info = params->pExternalFenceInfo;
-    VkExternalFenceProperties *properties = params->pExternalFenceProperties;
-
-    TRACE("%p, %p, %p\n", phys_dev, fence_info, properties);
     properties->exportFromImportedHandleTypes = 0;
     properties->compatibleHandleTypes = 0;
     properties->externalFenceFeatures = 0;
-    return STATUS_SUCCESS;
 }
 
 static inline void wine_vk_normalize_handle_types_win(VkExternalMemoryHandleTypeFlags *types)
@@ -1623,7 +1468,7 @@ static const VkExternalMemoryHandleTypeFlagBits wine_vk_handle_over_fd_types =
                 VK_EXTERNAL_MEMORY_HANDLE_TYPE_D3D11_TEXTURE_BIT |
                 VK_EXTERNAL_MEMORY_HANDLE_TYPE_D3D11_TEXTURE_KMT_BIT;
 
-static void wine_vk_get_physical_device_external_buffer_properties(VkPhysicalDevice phys_dev,
+static void wine_vk_get_physical_device_external_buffer_properties(struct wine_phys_dev *phys_dev,
         void (*p_vkGetPhysicalDeviceExternalBufferProperties)(VkPhysicalDevice, const VkPhysicalDeviceExternalBufferInfo *, VkExternalBufferProperties *),
         const VkPhysicalDeviceExternalBufferInfo *buffer_info, VkExternalBufferProperties *properties)
 {
@@ -1651,72 +1496,54 @@ static void wine_vk_get_physical_device_external_buffer_properties(VkPhysicalDev
     wine_vk_normalize_handle_types_win(&properties->externalMemoryProperties.compatibleHandleTypes);
 }
 
-NTSTATUS wine_vkGetPhysicalDeviceExternalBufferProperties(void *args)
+void wine_vkGetPhysicalDeviceExternalBufferProperties(VkPhysicalDevice phys_dev_handle,
+                                                      const VkPhysicalDeviceExternalBufferInfo *buffer_info,
+                                                      VkExternalBufferProperties *properties)
 {
-    struct vkGetPhysicalDeviceExternalBufferProperties_params *params = args;
-    VkPhysicalDevice phys_dev = params->physicalDevice;
-    const VkPhysicalDeviceExternalBufferInfo *buffer_info = params->pExternalBufferInfo;
-    VkExternalBufferProperties *properties = params->pExternalBufferProperties;
-
-    TRACE("%p, %p, %p\n", phys_dev, buffer_info, properties);
-
+    struct wine_phys_dev *phys_dev = wine_phys_dev_from_handle(phys_dev_handle);
     wine_vk_get_physical_device_external_buffer_properties(phys_dev, phys_dev->instance->funcs.p_vkGetPhysicalDeviceExternalBufferProperties, buffer_info, properties);
-    return STATUS_SUCCESS;
 }
 
-NTSTATUS wine_vkGetPhysicalDeviceExternalBufferPropertiesKHR(void *args)
+void wine_vkGetPhysicalDeviceExternalBufferPropertiesKHR(VkPhysicalDevice phys_dev_handle,
+                                                         const VkPhysicalDeviceExternalBufferInfo *buffer_info,
+                                                         VkExternalBufferProperties *properties)
 {
-    struct vkGetPhysicalDeviceExternalBufferPropertiesKHR_params *params = args;
-    VkPhysicalDevice phys_dev = params->physicalDevice;
-    const VkPhysicalDeviceExternalBufferInfo *buffer_info = params->pExternalBufferInfo;
-    VkExternalBufferProperties *properties = params->pExternalBufferProperties;
-
-    TRACE("%p, %p, %p\n", phys_dev, buffer_info, properties);
-
+    struct wine_phys_dev *phys_dev = wine_phys_dev_from_handle(phys_dev_handle);
     wine_vk_get_physical_device_external_buffer_properties(phys_dev, phys_dev->instance->funcs.p_vkGetPhysicalDeviceExternalBufferPropertiesKHR, buffer_info, properties);
-    return STATUS_SUCCESS;
 }
 
-static VkResult wine_vk_get_physical_device_image_format_properties_2(VkPhysicalDevice phys_dev,
+static VkResult wine_vk_get_physical_device_image_format_properties_2(struct wine_phys_dev *phys_dev,
         VkResult (*p_vkGetPhysicalDeviceImageFormatProperties2)(VkPhysicalDevice, const VkPhysicalDeviceImageFormatInfo2 *, VkImageFormatProperties2 *),
         const VkPhysicalDeviceImageFormatInfo2 *format_info, VkImageFormatProperties2 *properties)
 {
-    VkPhysicalDeviceExternalImageFormatInfo *external_image_info_dup = NULL;
-    const VkPhysicalDeviceExternalImageFormatInfo *external_image_info;
-    VkPhysicalDeviceImageFormatInfo2 format_info_host = *format_info;
+    VkPhysicalDeviceExternalImageFormatInfo *external_image_info;
     VkExternalImageFormatProperties *external_image_properties;
     VkResult res;
 
-    if ((external_image_info = wine_vk_find_struct(format_info, PHYSICAL_DEVICE_EXTERNAL_IMAGE_FORMAT_INFO)) && external_image_info->handleType)
+    if ((external_image_info = find_next_struct(format_info, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTERNAL_IMAGE_FORMAT_INFO))
+            && external_image_info->handleType)
     {
-        if ((res = convert_VkPhysicalDeviceImageFormatInfo2_struct_chain(format_info->pNext, &format_info_host)) < 0)
+        wine_vk_normalize_handle_types_win(&external_image_info->handleType);
+
+        if (external_image_info->handleType & wine_vk_handle_over_fd_types)
+            external_image_info->handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT;
+
+        wine_vk_normalize_handle_types_host(&external_image_info->handleType);
+        if (!external_image_info->handleType)
         {
-            WARN("Failed to convert VkPhysicalDeviceImageFormatInfo2 pNext chain, res=%d.\n", res);
-            return res;
-        }
-        external_image_info_dup = wine_vk_find_struct(&format_info_host, PHYSICAL_DEVICE_EXTERNAL_IMAGE_FORMAT_INFO);
-
-        wine_vk_normalize_handle_types_win(&external_image_info_dup->handleType);
-
-        if (external_image_info_dup->handleType & wine_vk_handle_over_fd_types)
-            external_image_info_dup->handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT;
-
-        wine_vk_normalize_handle_types_host(&external_image_info_dup->handleType);
-        if (!external_image_info_dup->handleType)
-        {
-            WARN("Unsupported handle type %#x.\n", external_image_info->handleType);
+            FIXME("Unsupported handle type %#x.\n", external_image_info->handleType);
             return VK_ERROR_FORMAT_NOT_SUPPORTED;
         }
     }
 
-    res = p_vkGetPhysicalDeviceImageFormatProperties2(phys_dev, &format_info_host, properties);
+    res = p_vkGetPhysicalDeviceImageFormatProperties2(phys_dev->phys_dev,
+            format_info, properties);
 
-    if (external_image_info_dup)
-        free_VkPhysicalDeviceImageFormatInfo2_struct_chain(&format_info_host);
-
-    if ((external_image_properties = wine_vk_find_struct(properties, EXTERNAL_IMAGE_FORMAT_PROPERTIES)))
+    if ((external_image_properties = find_next_struct(properties,
+                                                      VK_STRUCTURE_TYPE_EXTERNAL_IMAGE_FORMAT_PROPERTIES)))
     {
         VkExternalMemoryProperties *p = &external_image_properties->externalMemoryProperties;
+
         if (p->exportFromImportedHandleTypes & VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT)
             p->exportFromImportedHandleTypes |= wine_vk_handle_over_fd_types;
         wine_vk_normalize_handle_types_win(&p->exportFromImportedHandleTypes);
@@ -1725,32 +1552,29 @@ static VkResult wine_vk_get_physical_device_image_format_properties_2(VkPhysical
             p->compatibleHandleTypes |= wine_vk_handle_over_fd_types;
         wine_vk_normalize_handle_types_win(&p->compatibleHandleTypes);
     }
-
     return res;
 }
 
-NTSTATUS wine_vkGetPhysicalDeviceImageFormatProperties2(void *args)
+VkResult wine_vkGetPhysicalDeviceImageFormatProperties2(VkPhysicalDevice phys_dev_handle,
+                                                        const VkPhysicalDeviceImageFormatInfo2 *format_info,
+                                                        VkImageFormatProperties2 *properties)
 {
-    struct vkGetPhysicalDeviceImageFormatProperties2_params *params = args;
-    VkPhysicalDevice phys_dev = params->physicalDevice;
-    const VkPhysicalDeviceImageFormatInfo2 *format_info = params->pImageFormatInfo;
-    VkImageFormatProperties2 *properties = params->pImageFormatProperties;
+    struct wine_phys_dev *phys_dev = wine_phys_dev_from_handle(phys_dev_handle);
 
-    TRACE("%p, %p, %p\n", phys_dev, format_info, properties);
-
-    return wine_vk_get_physical_device_image_format_properties_2(phys_dev, thunk_vkGetPhysicalDeviceImageFormatProperties2, format_info, properties);
+    return wine_vk_get_physical_device_image_format_properties_2(phys_dev,
+            phys_dev->instance->funcs.p_vkGetPhysicalDeviceImageFormatProperties2,
+            format_info, properties);
 }
 
-NTSTATUS wine_vkGetPhysicalDeviceImageFormatProperties2KHR(void *args)
+VkResult wine_vkGetPhysicalDeviceImageFormatProperties2KHR(VkPhysicalDevice phys_dev_handle,
+                                                           const VkPhysicalDeviceImageFormatInfo2 *format_info,
+                                                           VkImageFormatProperties2 *properties)
 {
-    struct vkGetPhysicalDeviceImageFormatProperties2KHR_params *params = args;
-    VkPhysicalDevice phys_dev = params->physicalDevice;
-    const VkPhysicalDeviceImageFormatInfo2 *format_info = params->pImageFormatInfo;
-    VkImageFormatProperties2 *properties = params->pImageFormatProperties;
+    struct wine_phys_dev *phys_dev = wine_phys_dev_from_handle(phys_dev_handle);
 
-    TRACE("%p, %p, %p\n", phys_dev, format_info, properties);
-
-    return wine_vk_get_physical_device_image_format_properties_2(phys_dev, thunk_vkGetPhysicalDeviceImageFormatProperties2KHR, format_info, properties);
+    return wine_vk_get_physical_device_image_format_properties_2(phys_dev,
+            phys_dev->instance->funcs.p_vkGetPhysicalDeviceImageFormatProperties2KHR,
+            format_info, properties);
 }
 
 /* From ntdll/unix/sync.c */
@@ -1799,14 +1623,11 @@ static inline uint64_t convert_timestamp(VkTimeDomainEXT host_domain, VkTimeDoma
     return value;
 }
 
-NTSTATUS wine_vkGetCalibratedTimestampsEXT(void *args)
+VkResult wine_vkGetCalibratedTimestampsEXT(VkDevice handle, uint32_t timestamp_count,
+                                           const VkCalibratedTimestampInfoEXT *timestamp_infos,
+                                           uint64_t *timestamps, uint64_t *max_deviation)
 {
-    struct vkGetCalibratedTimestampsEXT_params *params = args;
-    VkDevice device = params->device;
-    uint32_t timestamp_count = params->timestampCount;
-    const VkCalibratedTimestampInfoEXT *timestamp_infos = params->pTimestampInfos;
-    uint64_t *timestamps = params->pTimestamps;
-    uint64_t *max_deviation = params->pMaxDeviation;
+    struct wine_device *device = wine_device_from_handle(handle);
     VkCalibratedTimestampInfoEXT* host_timestamp_infos;
     unsigned int i;
     VkResult res;
@@ -1834,12 +1655,11 @@ NTSTATUS wine_vkGetCalibratedTimestampsEXT(void *args)
     return res;
 }
 
-NTSTATUS wine_vkGetPhysicalDeviceCalibrateableTimeDomainsEXT(void *args)
+VkResult wine_vkGetPhysicalDeviceCalibrateableTimeDomainsEXT(VkPhysicalDevice handle,
+                                                             uint32_t *time_domain_count,
+                                                             VkTimeDomainEXT *time_domains)
 {
-    struct vkGetPhysicalDeviceCalibrateableTimeDomainsEXT_params *params = args;
-    VkPhysicalDevice phys_dev = params->physicalDevice;
-    uint32_t *time_domain_count = params->pTimeDomainCount;
-    VkTimeDomainEXT *time_domains = params->pTimeDomains;
+    struct wine_phys_dev *phys_dev = wine_phys_dev_from_handle(handle);
     BOOL supports_device = FALSE, supports_monotonic = FALSE, supports_monotonic_raw = FALSE;
     const VkTimeDomainEXT performance_counter_domain = get_performance_counter_time_domain();
     VkTimeDomainEXT *host_time_domains;
@@ -1848,8 +1668,6 @@ NTSTATUS wine_vkGetPhysicalDeviceCalibrateableTimeDomainsEXT(void *args)
     uint32_t out_time_domain_count;
     unsigned int i;
     VkResult res;
-
-    TRACE("%p, %p, %p\n", phys_dev, time_domain_count, time_domains);
 
     /* Find out the time domains supported on the host */
     res = phys_dev->instance->funcs.p_vkGetPhysicalDeviceCalibrateableTimeDomainsEXT(phys_dev->phys_dev, &host_time_domain_count, NULL);
@@ -1924,34 +1742,22 @@ static inline void wine_vk_normalize_semaphore_handle_types_host(VkExternalSemap
         VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_SYNC_FD_BIT;
 }
 
-static void wine_vk_get_physical_device_external_semaphore_properties(VkPhysicalDevice phys_dev,
+static void wine_vk_get_physical_device_external_semaphore_properties(struct wine_phys_dev *phys_dev,
     void (*p_vkGetPhysicalDeviceExternalSemaphoreProperties)(VkPhysicalDevice, const VkPhysicalDeviceExternalSemaphoreInfo *, VkExternalSemaphoreProperties *),
     const VkPhysicalDeviceExternalSemaphoreInfo *semaphore_info, VkExternalSemaphoreProperties *properties)
 {
-    VkPhysicalDeviceExternalSemaphoreInfo semaphore_info_dup = *semaphore_info, semaphore_info_host;
+    VkPhysicalDeviceExternalSemaphoreInfo semaphore_info_dup = *semaphore_info;
     VkSemaphoreTypeCreateInfo semaphore_type_info, *p_semaphore_type_info;
-    unsigned int i;
-    VkResult res;
-
-    if ((res = convert_VkPhysicalDeviceExternalSemaphoreInfo_struct_chain(semaphore_info->pNext, &semaphore_info_dup)) < 0)
-    {
-        WARN("Failed to convert VkPhysicalDeviceExternalSemaphoreInfo pNext chain, res=%d.\n", res);
-
-        properties->exportFromImportedHandleTypes = 0;
-        properties->compatibleHandleTypes = 0;
-        properties->externalSemaphoreFeatures = 0;
-        return;
-    }
-
-    semaphore_info_host = semaphore_info_dup;
 
     switch(semaphore_info->handleType)
     {
         case VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_WIN32_BIT:
-            semaphore_info_host.handleType = VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_FD_BIT;
+            semaphore_info_dup.handleType = VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_FD_BIT;
             break;
         case VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_D3D12_FENCE_BIT:
         {
+            unsigned int i;
+
             if (phys_dev->api_version < VK_API_VERSION_1_2 ||
                 phys_dev->instance->api_version < VK_API_VERSION_1_2)
             {
@@ -1962,7 +1768,6 @@ static void wine_vk_get_physical_device_external_semaphore_properties(VkPhysical
                 }
                 if (i == phys_dev->extension_count)
                 {
-                    free_VkPhysicalDeviceExternalSemaphoreInfo_struct_chain(&semaphore_info_dup);
                     properties->exportFromImportedHandleTypes = 0;
                     properties->compatibleHandleTypes = 0;
                     properties->externalSemaphoreFeatures = 0;
@@ -1970,7 +1775,7 @@ static void wine_vk_get_physical_device_external_semaphore_properties(VkPhysical
                 }
             }
 
-            if ((p_semaphore_type_info = wine_vk_find_struct(&semaphore_info_host, SEMAPHORE_TYPE_CREATE_INFO)))
+            if ((p_semaphore_type_info = wine_vk_find_struct(&semaphore_info_dup, SEMAPHORE_TYPE_CREATE_INFO)))
             {
                 p_semaphore_type_info->semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE;
                 p_semaphore_type_info->initialValue = 0;
@@ -1978,33 +1783,30 @@ static void wine_vk_get_physical_device_external_semaphore_properties(VkPhysical
             else
             {
                 semaphore_type_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO;
-                semaphore_type_info.pNext = semaphore_info_host.pNext;
+                semaphore_type_info.pNext = semaphore_info_dup.pNext;
                 semaphore_type_info.semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE;
                 semaphore_type_info.initialValue = 0;
 
-                semaphore_info_host.pNext = &semaphore_type_info;
+                semaphore_info_dup.pNext = &semaphore_type_info;
             }
 
-            semaphore_info_host.handleType = VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_FD_BIT;
+            semaphore_info_dup.handleType = VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_FD_BIT;
             break;
         }
         default:
-            semaphore_info_host.handleType = 0;
+            semaphore_info_dup.handleType = 0;
+            break;
     }
 
-    if (semaphore_info->handleType && !semaphore_info_host.handleType)
+    if (semaphore_info->handleType && !semaphore_info_dup.handleType)
     {
-        free_VkPhysicalDeviceExternalSemaphoreInfo_struct_chain(&semaphore_info_dup);
-
         properties->exportFromImportedHandleTypes = 0;
         properties->compatibleHandleTypes = 0;
         properties->externalSemaphoreFeatures = 0;
         return;
     }
 
-    p_vkGetPhysicalDeviceExternalSemaphoreProperties(phys_dev->phys_dev, &semaphore_info_host, properties);
-
-    free_VkPhysicalDeviceExternalSemaphoreInfo_struct_chain(&semaphore_info_dup);
+    p_vkGetPhysicalDeviceExternalSemaphoreProperties(phys_dev->phys_dev, &semaphore_info_dup, properties);
 
     if (properties->exportFromImportedHandleTypes & VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_FD_BIT)
         properties->exportFromImportedHandleTypes = semaphore_info->handleType;
@@ -2015,50 +1817,24 @@ static void wine_vk_get_physical_device_external_semaphore_properties(VkPhysical
     wine_vk_normalize_semaphore_handle_types_win(&properties->compatibleHandleTypes);
 }
 
-NTSTATUS wine_vkGetPhysicalDeviceExternalSemaphoreProperties(void *args)
+void wine_vkGetPhysicalDeviceExternalSemaphoreProperties(VkPhysicalDevice phys_dev_handle,
+                                                         const VkPhysicalDeviceExternalSemaphoreInfo *info,
+                                                         VkExternalSemaphoreProperties *properties)
 {
-    struct vkGetPhysicalDeviceExternalSemaphoreProperties_params *params = args;
-    VkPhysicalDevice phys_dev = params->physicalDevice;
-    const VkPhysicalDeviceExternalSemaphoreInfo *semaphore_info = params->pExternalSemaphoreInfo;
-    VkExternalSemaphoreProperties *properties = params->pExternalSemaphoreProperties;
+    struct wine_phys_dev *phys_dev = wine_phys_dev_from_handle(phys_dev_handle);
 
-    TRACE("%p, %p, %p\n", phys_dev, semaphore_info, properties);
-    wine_vk_get_physical_device_external_semaphore_properties(phys_dev, phys_dev->instance->funcs.p_vkGetPhysicalDeviceExternalSemaphoreProperties, semaphore_info, properties);
-
-    return STATUS_SUCCESS;
+    TRACE("%p, %p, %p\n", phys_dev, info, properties);
+    wine_vk_get_physical_device_external_semaphore_properties(phys_dev, phys_dev->instance->funcs.p_vkGetPhysicalDeviceExternalSemaphoreProperties, info, properties);
 }
 
-NTSTATUS wine_vkGetPhysicalDeviceExternalSemaphorePropertiesKHR(void *args)
+void wine_vkGetPhysicalDeviceExternalSemaphorePropertiesKHR(VkPhysicalDevice phys_dev_handle,
+                                                            const VkPhysicalDeviceExternalSemaphoreInfo *info,
+                                                            VkExternalSemaphoreProperties *properties)
 {
-    struct vkGetPhysicalDeviceExternalSemaphorePropertiesKHR_params *params = args;
-    VkPhysicalDevice phys_dev = params->physicalDevice;
-    const VkPhysicalDeviceExternalSemaphoreInfo *semaphore_info = params->pExternalSemaphoreInfo;
-    VkExternalSemaphoreProperties *properties = params->pExternalSemaphoreProperties;
+    struct wine_phys_dev *phys_dev = wine_phys_dev_from_handle(phys_dev_handle);
 
-    TRACE("%p, %p, %p\n", phys_dev, semaphore_info, properties);
-    wine_vk_get_physical_device_external_semaphore_properties(phys_dev, phys_dev->instance->funcs.p_vkGetPhysicalDeviceExternalSemaphorePropertiesKHR, semaphore_info, properties);
-
-    return STATUS_SUCCESS;
-}
-
-VkResult WINAPI wine_vkSetPrivateDataEXT(VkDevice device, VkObjectType object_type, uint64_t object_handle,
-        VkPrivateDataSlotEXT private_data_slot, uint64_t data)
-{
-    TRACE("%p, %#x, 0x%s, 0x%s, 0x%s\n", device, object_type, wine_dbgstr_longlong(object_handle),
-            wine_dbgstr_longlong(private_data_slot), wine_dbgstr_longlong(data));
-
-    object_handle = wine_vk_unwrap_handle(object_type, object_handle);
-    return device->funcs.p_vkSetPrivateDataEXT(device->device, object_type, object_handle, private_data_slot, data);
-}
-
-void WINAPI wine_vkGetPrivateDataEXT(VkDevice device, VkObjectType object_type, uint64_t object_handle,
-        VkPrivateDataSlotEXT private_data_slot, uint64_t *data)
-{
-    TRACE("%p, %#x, 0x%s, 0x%s, %p\n", device, object_type, wine_dbgstr_longlong(object_handle),
-            wine_dbgstr_longlong(private_data_slot), data);
-
-    object_handle = wine_vk_unwrap_handle(object_type, object_handle);
-    device->funcs.p_vkGetPrivateDataEXT(device->device, object_type, object_handle, private_data_slot, data);
+    TRACE("%p, %p, %p\n", phys_dev, info, properties);
+    wine_vk_get_physical_device_external_semaphore_properties(phys_dev, phys_dev->instance->funcs.p_vkGetPhysicalDeviceExternalSemaphorePropertiesKHR, info, properties);
 }
 
 /*
@@ -2903,7 +2679,7 @@ const uint32_t fsr_rcas_comp_spv[] = {
     0x00040063,0x000002c1,0x000002c4,0x000002c9,0x000100fd,0x00010038
 };
 
-static void destroy_pipeline(VkDevice device, struct fs_comp_pipeline *pipeline)
+static void destroy_pipeline(struct wine_device *device, struct fs_comp_pipeline *pipeline)
 {
     device->funcs.p_vkDestroyPipeline(device->device, pipeline->pipeline, NULL);
     pipeline->pipeline = VK_NULL_HANDLE;
@@ -2912,14 +2688,13 @@ static void destroy_pipeline(VkDevice device, struct fs_comp_pipeline *pipeline)
     pipeline->pipeline_layout = VK_NULL_HANDLE;
 }
 
-static VkResult create_pipeline(VkDevice device, struct VkSwapchainKHR_T *swapchain,
-    const uint32_t *code, uint32_t code_size, uint32_t push_size, struct fs_comp_pipeline *pipeline)
+static VkResult create_pipeline(struct wine_device *device, struct wine_swapchain *swapchain, const uint32_t *code, uint32_t code_size, uint32_t push_size, struct fs_comp_pipeline *pipeline)
 {
 #if defined(USE_STRUCT_CONVERSION)
-    VkComputePipelineCreateInfo_host pipelineInfo = {0};
-#else
-    VkComputePipelineCreateInfo pipelineInfo = {0};
-#endif
+     VkComputePipelineCreateInfo_host pipelineInfo = {0};
+ #else
+     VkComputePipelineCreateInfo pipelineInfo = {0};
+ #endif
     VkPipelineLayoutCreateInfo pipelineLayoutInfo = {0};
     VkShaderModuleCreateInfo shaderInfo = {0};
     VkPushConstantRange pushConstants;
@@ -2965,7 +2740,8 @@ static VkResult create_pipeline(VkDevice device, struct VkSwapchainKHR_T *swapch
     pipelineInfo.basePipelineHandle = VK_NULL_HANDLE;
     pipelineInfo.basePipelineIndex = -1;
 
-    res = device->funcs.p_vkCreateComputePipelines(device->device, VK_NULL_HANDLE, 1, &pipelineInfo, NULL, &pipeline->pipeline);
+    res = device->funcs.p_vkCreateComputePipelines(device->device, VK_NULL_HANDLE, 1, &pipelineInfo,
+                                                   NULL, &pipeline->pipeline);
     if(res == VK_SUCCESS)
         goto out;
 
@@ -2980,18 +2756,13 @@ out:
     return res;
 }
 
-static VkResult create_descriptor_set(VkDevice device, struct VkSwapchainKHR_T *swapchain, struct fs_hack_image *hack)
+static VkResult create_descriptor_set(struct wine_device *device, struct wine_swapchain *swapchain,
+                                      struct fs_hack_image *hack)
 {
-    VkResult res;
-#if defined(USE_STRUCT_CONVERSION)
-    VkDescriptorSetAllocateInfo_host descriptorAllocInfo = {0};
-    VkWriteDescriptorSet_host descriptorWrites[2] = {{0}, {0}};
-    VkDescriptorImageInfo_host userDescriptorImageInfo = {0}, realDescriptorImageInfo = {0};
-#else
+    VkDescriptorImageInfo userDescriptorImageInfo = {0}, realDescriptorImageInfo = {0};
     VkDescriptorSetAllocateInfo descriptorAllocInfo = {0};
     VkWriteDescriptorSet descriptorWrites[2] = {{0}, {0}};
-    VkDescriptorImageInfo userDescriptorImageInfo = {0}, realDescriptorImageInfo = {0};
-#endif
+    VkResult res;
 
     descriptorAllocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
     descriptorAllocInfo.descriptorPool = swapchain->descriptor_pool;
@@ -3070,7 +2841,7 @@ static BOOL is_srgb(VkFormat format)
     return format != srgb_to_unorm(format);
 }
 
-static VkResult init_compute_state(VkDevice device, struct VkSwapchainKHR_T *swapchain)
+static VkResult init_compute_state(struct wine_device *device, struct wine_swapchain *swapchain)
 {
     VkResult res;
     VkSamplerCreateInfo samplerInfo = {0};
@@ -3157,7 +2928,8 @@ static VkResult init_compute_state(VkDevice device, struct VkSwapchainKHR_T *swa
     descriptorLayoutInfo.bindingCount = 2;
     descriptorLayoutInfo.pBindings = layoutBindings;
 
-    res = device->funcs.p_vkCreateDescriptorSetLayout(device->device, &descriptorLayoutInfo, NULL, &swapchain->descriptor_set_layout);
+    res = device->funcs.p_vkCreateDescriptorSetLayout(device->device, &descriptorLayoutInfo, NULL,
+                                                      &swapchain->descriptor_set_layout);
     if (res != VK_SUCCESS)
     {
         ERR("vkCreateDescriptorSetLayout: %d\n", res);
@@ -3290,9 +3062,9 @@ static VkResult init_compute_state(VkDevice device, struct VkSwapchainKHR_T *swa
         }
     }
 
-
     /* create imageviews */
-    for(i = 0; i < swapchain->n_images; ++i){
+    for (i = 0; i < swapchain->n_images; ++i)
+    {
         struct fs_hack_image *hack = &swapchain->fs_hack_images[i];
 
         viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
@@ -3306,20 +3078,22 @@ static VkResult init_compute_state(VkDevice device, struct VkSwapchainKHR_T *swa
         viewInfo.subresourceRange.layerCount = 1;
 
         res = device->funcs.p_vkCreateImageView(device->device, &viewInfo, NULL, &hack->swapchain_view);
-        if(res != VK_SUCCESS){
+        if (res != VK_SUCCESS)
+        {
             ERR("vkCreateImageView(blit): %d\n", res);
             goto fail;
         }
 
         res = create_descriptor_set(device, swapchain, hack);
-        if(res != VK_SUCCESS)
+        if (res != VK_SUCCESS)
             goto fail;
     }
 
     return VK_SUCCESS;
 
 fail:
-    for(i = 0; i < swapchain->n_images; ++i){
+    for (i = 0; i < swapchain->n_images; ++i)
+    {
         struct fs_hack_image *hack = &swapchain->fs_hack_images[i];
 
         device->funcs.p_vkDestroyImageView(device->device, hack->fsr_view, NULL);
@@ -3351,43 +3125,36 @@ fail:
     return res;
 }
 
-static void destroy_fs_hack_image(VkDevice device, struct VkSwapchainKHR_T *swapchain, struct fs_hack_image *hack)
+static void destroy_fs_hack_image(struct wine_device *device, struct wine_swapchain *swapchain,
+                                  struct fs_hack_image *hack)
 {
     device->funcs.p_vkDestroyImageView(device->device, hack->user_view, NULL);
     device->funcs.p_vkDestroyImageView(device->device, hack->swapchain_view, NULL);
     device->funcs.p_vkDestroyImageView(device->device, hack->fsr_view, NULL);
     device->funcs.p_vkDestroyImage(device->device, hack->user_image, NULL);
     device->funcs.p_vkDestroyImage(device->device, hack->fsr_image, NULL);
-    if(hack->cmd)
-        device->funcs.p_vkFreeCommandBuffers(device->device,
-                swapchain->cmd_pools[hack->cmd_queue_idx],
-                    1, &hack->cmd);
+    if (hack->cmd)
+        device->funcs.p_vkFreeCommandBuffers(device->device, swapchain->cmd_pools[hack->cmd_queue_idx],
+                                             1, &hack->cmd);
     device->funcs.p_vkDestroySemaphore(device->device, hack->blit_finished, NULL);
 }
 
-
-static VkResult init_fs_hack_images(VkDevice device, struct VkSwapchainKHR_T *swapchain, const VkSwapchainCreateInfoKHR *createinfo)
+static VkResult init_fs_hack_images(struct wine_device *device, struct wine_swapchain *swapchain,
+                                    const VkSwapchainCreateInfoKHR *createinfo)
 {
     VkResult res;
     VkImage *real_images = NULL;
     VkDeviceSize userMemTotal = 0, offs;
     VkImageCreateInfo imageInfo = {0};
     VkSemaphoreCreateInfo semaphoreInfo = {0};
-#if defined(USE_STRUCT_CONVERSION)
-    VkMemoryRequirements_host userMemReq;
-    VkMemoryAllocateInfo_host allocInfo = {0};
-    VkPhysicalDeviceMemoryProperties_host memProperties;
-    VkImageViewCreateInfo_host viewInfo = {0};
-#else
     VkMemoryRequirements userMemReq;
     VkMemoryAllocateInfo allocInfo = {0};
     VkPhysicalDeviceMemoryProperties memProperties;
     VkImageViewCreateInfo viewInfo = {0};
-#endif
     uint32_t count, i = 0, user_memory_type = -1;
 
     res = device->funcs.p_vkGetSwapchainImagesKHR(device->device, swapchain->swapchain, &count, NULL);
-    if(res != VK_SUCCESS)
+    if (res != VK_SUCCESS)
     {
         WARN("vkGetSwapchainImagesKHR failed, res=%d\n", res);
         return res;
@@ -3396,25 +3163,26 @@ static VkResult init_fs_hack_images(VkDevice device, struct VkSwapchainKHR_T *sw
     real_images = malloc(count * sizeof(VkImage));
     swapchain->cmd_pools = calloc(device->queue_count, sizeof(VkCommandPool));
     swapchain->fs_hack_images = calloc(count, sizeof(struct fs_hack_image));
-    if(!real_images || !swapchain->cmd_pools || !swapchain->fs_hack_images)
+    if (!real_images || !swapchain->cmd_pools || !swapchain->fs_hack_images)
         goto fail;
 
     res = device->funcs.p_vkGetSwapchainImagesKHR(device->device, swapchain->swapchain, &count, real_images);
-    if(res != VK_SUCCESS)
+    if (res != VK_SUCCESS)
     {
         WARN("vkGetSwapchainImagesKHR failed, res=%d\n", res);
         goto fail;
     }
 
     /* create user images */
-    for(i = 0; i < count; ++i){
+    for (i = 0; i < count; ++i)
+    {
         struct fs_hack_image *hack = &swapchain->fs_hack_images[i];
 
         hack->swapchain_image = real_images[i];
 
         semaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
         res = device->funcs.p_vkCreateSemaphore(device->device, &semaphoreInfo, NULL, &hack->blit_finished);
-        if(res != VK_SUCCESS)
+        if (res != VK_SUCCESS)
         {
             WARN("vkCreateSemaphore failed, res=%d\n", res);
             goto fail;
@@ -3443,7 +3211,8 @@ static VkResult init_fs_hack_images(VkDevice device, struct VkSwapchainKHR_T *sw
             imageInfo.flags = VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT | VK_IMAGE_CREATE_EXTENDED_USAGE_BIT;
 
         res = device->funcs.p_vkCreateImage(device->device, &imageInfo, NULL, &hack->user_image);
-        if(res != VK_SUCCESS){
+        if (res != VK_SUCCESS)
+        {
             ERR("vkCreateImage failed: %d\n", res);
             goto fail;
         }
@@ -3451,7 +3220,7 @@ static VkResult init_fs_hack_images(VkDevice device, struct VkSwapchainKHR_T *sw
         device->funcs.p_vkGetImageMemoryRequirements(device->device, hack->user_image, &userMemReq);
 
         offs = userMemTotal % userMemReq.alignment;
-        if(offs)
+        if (offs)
             userMemTotal += userMemReq.alignment - offs;
 
         userMemTotal += userMemReq.size;
@@ -3462,16 +3231,21 @@ static VkResult init_fs_hack_images(VkDevice device, struct VkSwapchainKHR_T *sw
     /* allocate backing memory */
     device->phys_dev->instance->funcs.p_vkGetPhysicalDeviceMemoryProperties(device->phys_dev->phys_dev, &memProperties);
 
-    for (i = 0; i < memProperties.memoryTypeCount; i++){
-        if((memProperties.memoryTypes[i].propertyFlags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) == VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT){
-            if(userMemReq.memoryTypeBits & (1 << i)){
+    for (i = 0; i < memProperties.memoryTypeCount; i++)
+    {
+        UINT flag = memProperties.memoryTypes[i].propertyFlags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+        if (flag == VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)
+        {
+            if (userMemReq.memoryTypeBits & (1 << i))
+            {
                 user_memory_type = i;
                 break;
             }
         }
     }
 
-    if(user_memory_type == -1){
+    if (user_memory_type == -1)
+    {
         ERR("unable to find suitable memory type\n");
         res = VK_ERROR_OUT_OF_HOST_MEMORY;
         goto fail;
@@ -3482,22 +3256,26 @@ static VkResult init_fs_hack_images(VkDevice device, struct VkSwapchainKHR_T *sw
     allocInfo.memoryTypeIndex = user_memory_type;
 
     res = device->funcs.p_vkAllocateMemory(device->device, &allocInfo, NULL, &swapchain->user_image_memory);
-    if(res != VK_SUCCESS){
+    if (res != VK_SUCCESS)
+    {
         ERR("vkAllocateMemory: %d\n", res);
         goto fail;
     }
 
     /* bind backing memory and create imageviews */
     userMemTotal = 0;
-    for(i = 0; i < count; ++i){
+    for (i = 0; i < count; ++i)
+    {
         device->funcs.p_vkGetImageMemoryRequirements(device->device, swapchain->fs_hack_images[i].user_image, &userMemReq);
 
         offs = userMemTotal % userMemReq.alignment;
-        if(offs)
+        if (offs)
             userMemTotal += userMemReq.alignment - offs;
 
-        res = device->funcs.p_vkBindImageMemory(device->device, swapchain->fs_hack_images[i].user_image, swapchain->user_image_memory, userMemTotal);
-        if(res != VK_SUCCESS){
+        res = device->funcs.p_vkBindImageMemory(device->device, swapchain->fs_hack_images[i].user_image,
+                                                swapchain->user_image_memory, userMemTotal);
+        if (res != VK_SUCCESS)
+        {
             ERR("vkBindImageMemory: %d\n", res);
             goto fail;
         }
@@ -3514,8 +3292,10 @@ static VkResult init_fs_hack_images(VkDevice device, struct VkSwapchainKHR_T *sw
         viewInfo.subresourceRange.baseArrayLayer = 0;
         viewInfo.subresourceRange.layerCount = 1;
 
-        res = device->funcs.p_vkCreateImageView(device->device, &viewInfo, NULL, &swapchain->fs_hack_images[i].user_view);
-        if(res != VK_SUCCESS){
+        res = device->funcs.p_vkCreateImageView(device->device, &viewInfo, NULL,
+                                                &swapchain->fs_hack_images[i].user_view);
+        if (res != VK_SUCCESS)
+        {
             ERR("vkCreateImageView(user): %d\n", res);
             goto fail;
         }
@@ -3526,59 +3306,22 @@ static VkResult init_fs_hack_images(VkDevice device, struct VkSwapchainKHR_T *sw
     return VK_SUCCESS;
 
 fail:
-    for(i = 0; i < swapchain->n_images; ++i)
-        destroy_fs_hack_image(device, swapchain, &swapchain->fs_hack_images[i]);
+    for (i = 0; i < swapchain->n_images; ++i) destroy_fs_hack_image(device, swapchain, &swapchain->fs_hack_images[i]);
     free(real_images);
     free(swapchain->cmd_pools);
     free(swapchain->fs_hack_images);
     return res;
 }
 
-#if defined(USE_STRUCT_CONVERSION)
-static inline void convert_VkSwapchainCreateInfoKHR_win_to_host(const VkSwapchainCreateInfoKHR *in, VkSwapchainCreateInfoKHR_host *out)
-#else
-static inline void convert_VkSwapchainCreateInfoKHR_win_to_host(const VkSwapchainCreateInfoKHR *in, VkSwapchainCreateInfoKHR *out)
-#endif
+VkResult wine_vkCreateSwapchainKHR(VkDevice device_handle, const VkSwapchainCreateInfoKHR *info, const VkAllocationCallbacks *allocator,
+                                   VkSwapchainKHR *swapchain, void *client_ptr)
 {
-    if (!in) return;
-
-    out->sType = in->sType;
-    out->pNext = in->pNext;
-    out->flags = in->flags;
-    out->surface = wine_surface_from_handle(in->surface)->driver_surface;
-    out->minImageCount = in->minImageCount;
-    out->imageFormat = in->imageFormat;
-    out->imageColorSpace = in->imageColorSpace;
-    out->imageExtent = in->imageExtent;
-    out->imageArrayLayers = in->imageArrayLayers;
-    out->imageUsage = in->imageUsage;
-    out->imageSharingMode = in->imageSharingMode;
-    out->queueFamilyIndexCount = in->queueFamilyIndexCount;
-    out->pQueueFamilyIndices = in->pQueueFamilyIndices;
-    out->preTransform = in->preTransform;
-    out->compositeAlpha = in->compositeAlpha;
-    out->presentMode = in->presentMode;
-    out->clipped = in->clipped;
-    out->oldSwapchain = in->oldSwapchain;
-}
-
-NTSTATUS wine_vkCreateSwapchainKHR(void *args)
-{
-    struct vkCreateSwapchainKHR_params *params = args;
-    VkDevice device = params->device;
-    const VkSwapchainCreateInfoKHR *create_info = params->pCreateInfo;
-    const VkAllocationCallbacks *allocator = params->pAllocator;
-    VkSwapchainKHR *swapchain = params->pSwapchain;
-#if defined(USE_STRUCT_CONVERSION)
-    VkSwapchainCreateInfoKHR_host native_info;
-#else
-    VkSwapchainCreateInfoKHR native_info;
-#endif
-    VkResult result;
+    struct wine_device *device = wine_device_from_handle(device_handle);
+    VkSwapchainCreateInfoKHR create_info_host = *info;
+    struct vk_swapchain *handle = client_ptr;
+    struct wine_swapchain *object;
     VkExtent2D user_sz;
-    struct VkSwapchainKHR_T *object;
-
-    TRACE("%p, %p, %p, %p\n", device, create_info, allocator, swapchain);
+    VkResult res;
 
     if (!(object = calloc(1, sizeof(*object))))
     {
@@ -3586,15 +3329,16 @@ NTSTATUS wine_vkCreateSwapchainKHR(void *args)
         return VK_ERROR_OUT_OF_HOST_MEMORY;
     }
 
-    convert_VkSwapchainCreateInfoKHR_win_to_host(create_info, &native_info);
+    if (create_info_host.surface)
+        create_info_host.surface = wine_surface_from_handle(create_info_host.surface)->driver_surface;
+    if (create_info_host.oldSwapchain)
+        create_info_host.oldSwapchain = wine_swapchain_from_handle(create_info_host.oldSwapchain)->swapchain;
 
-    if(native_info.oldSwapchain)
-        native_info.oldSwapchain = ((struct VkSwapchainKHR_T *)(UINT_PTR)native_info.oldSwapchain)->swapchain;
-
-    if(vk_funcs->query_fs_hack &&
-            vk_funcs->query_fs_hack(native_info.surface, &object->real_extent, &user_sz, &object->blit_dst, &object->fs_hack_filter, &object->fsr, &object->sharpness) &&
-            native_info.imageExtent.width == user_sz.width &&
-            native_info.imageExtent.height == user_sz.height)
+    if (vk_funcs->query_fs_hack &&
+            vk_funcs->query_fs_hack(create_info_host.surface, &object->real_extent, &user_sz,
+            &object->blit_dst, &object->fs_hack_filter, &object->fsr, &object->sharpness) &&
+            create_info_host.imageExtent.width == user_sz.width &&
+            create_info_host.imageExtent.height == user_sz.height)
     {
         uint32_t count;
         VkSurfaceCapabilitiesKHR caps = {0};
@@ -3605,81 +3349,82 @@ NTSTATUS wine_vkCreateSwapchainKHR(void *args)
 
         device->phys_dev->instance->funcs.p_vkGetPhysicalDeviceQueueFamilyProperties(device->phys_dev->phys_dev, &count, device->queue_props);
 
-        result = device->phys_dev->instance->funcs.p_vkGetPhysicalDeviceSurfaceCapabilitiesKHR(device->phys_dev->phys_dev, native_info.surface, &caps);
-        if(result != VK_SUCCESS)
+        res = device->phys_dev->instance->funcs.p_vkGetPhysicalDeviceSurfaceCapabilitiesKHR(device->phys_dev->phys_dev, create_info_host.surface, &caps);
+        if (res != VK_SUCCESS)
         {
-            TRACE("vkGetPhysicalDeviceSurfaceCapabilities failed, res=%d\n", result);
+            TRACE("vkGetPhysicalDeviceSurfaceCapabilities failed, res=%d\n", res);
             free(object);
-            return result;
+            return res;
         }
 
         if (!(caps.supportedUsageFlags & VK_IMAGE_USAGE_STORAGE_BIT))
             FIXME("Swapchain does not support required VK_IMAGE_USAGE_STORAGE_BIT\n");
 
-        native_info.imageExtent = object->real_extent;
-        native_info.imageUsage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_STORAGE_BIT; /* XXX: check if supported by surface */
+        create_info_host.imageExtent = object->real_extent;
+		create_info_host.imageFormat = VK_FORMAT_B8G8R8A8_SRGB;
+		create_info_host.imageUsage = VK_IMAGE_USAGE_STORAGE_BIT;
 
-        object->format = native_info.imageFormat;
+		object->format = create_info_host.imageFormat;
 
-        if (object->fsr)
-            native_info.imageFormat = srgb_to_unorm(native_info.imageFormat);
-
-        if(create_info->imageFormat != VK_FORMAT_B8G8R8A8_UNORM &&
-                create_info->imageFormat != VK_FORMAT_B8G8R8A8_SRGB){
-            FIXME("swapchain image format is not BGRA8 UNORM/SRGB. Things may go badly. %d\n", native_info.imageFormat);
+        if (object->fsr) {
+            object->format = srgb_to_unorm(object->format);
+            create_info_host.imageFormat = srgb_to_unorm(create_info_host.imageFormat);
+            create_info_host.imageUsage |= VK_IMAGE_USAGE_TRANSFER_DST_BIT; /* XXX: check if supported by surface */
         }
+
+        if (info->imageFormat != VK_FORMAT_B8G8R8A8_UNORM && info->imageFormat != VK_FORMAT_B8G8R8A8_SRGB)
+            FIXME("swapchain image format is not BGRA8 UNORM/SRGB. Things may go badly. %d\n", create_info_host.imageFormat);
 
         object->fs_hack_enabled = TRUE;
     }
 
-    result = device->funcs.p_vkCreateSwapchainKHR(device->device, &native_info, NULL, &object->swapchain);
-    if(result != VK_SUCCESS)
+    res = device->funcs.p_vkCreateSwapchainKHR(device->device, &create_info_host, NULL, &object->swapchain);
+
+    if (res != VK_SUCCESS)
     {
-        TRACE("vkCreateSwapchainKHR failed, res=%d\n", result);
         free(object);
-        return result;
+        return res;
     }
 
-    WINE_VK_ADD_NON_DISPATCHABLE_MAPPING(device->phys_dev->instance, object, object->swapchain);
+    if (object->fs_hack_enabled)
+    {
+        object->user_extent = info->imageExtent;
 
-    if(object->fs_hack_enabled){
-        object->user_extent = create_info->imageExtent;
-
-        result = init_fs_hack_images(device, object, create_info);
-        if(result != VK_SUCCESS){
-            ERR("creating fs hack images failed: %d\n", result);
+        res = init_fs_hack_images(device, object, info);
+        if (res != VK_SUCCESS)
+        {
+            ERR("creating fs hack images failed: %d\n", res);
             device->funcs.p_vkDestroySwapchainKHR(device->device, object->swapchain, NULL);
             WINE_VK_REMOVE_HANDLE_MAPPING(device->phys_dev->instance, object);
             free(object);
-            return result;
+            return res;
         }
 
-        result = init_compute_state(device, object);
-        if(result != VK_SUCCESS){
-            ERR("creating blit images failed: %d\n", result);
+        res = init_compute_state(device, object);
+        if (res != VK_SUCCESS)
+        {
+            ERR("creating blit images failed: %d\n", res);
             device->funcs.p_vkDestroySwapchainKHR(device->device, object->swapchain, NULL);
             WINE_VK_REMOVE_HANDLE_MAPPING(device->phys_dev->instance, object);
             free(object);
-            return result;
+            return res;
         }
     }
 
-    *swapchain = (uint64_t)(UINT_PTR)object;
+    object->handle = (uintptr_t)handle;
+    handle->unix_handle = (uintptr_t)object;
+    WINE_VK_ADD_NON_DISPATCHABLE_MAPPING(device->phys_dev->instance, object->handle, object->swapchain, object);
+    *swapchain = object->handle;
 
-    return result;
+    return res;
 }
 
-NTSTATUS wine_vkCreateWin32SurfaceKHR(void *args)
+VkResult wine_vkCreateWin32SurfaceKHR(VkInstance handle, const VkWin32SurfaceCreateInfoKHR *createInfo,
+                                      const VkAllocationCallbacks *allocator, VkSurfaceKHR *surface)
 {
-    struct vkCreateWin32SurfaceKHR_params *params = args;
-    VkInstance instance = params->instance;
-    const VkWin32SurfaceCreateInfoKHR *createInfo = params->pCreateInfo;
-    const VkAllocationCallbacks *allocator = params->pAllocator;
-    VkSurfaceKHR *surface = params->pSurface;
+    struct wine_instance *instance = wine_instance_from_handle(handle);
     struct wine_surface *object;
     VkResult res;
-
-    TRACE("%p, %p, %p, %p\n", instance, createInfo, allocator, surface);
 
     if (allocator)
         FIXME("Support for allocation callbacks not implemented yet\n");
@@ -3699,1061 +3444,26 @@ NTSTATUS wine_vkCreateWin32SurfaceKHR(void *args)
 
     object->surface = vk_funcs->p_wine_get_native_surface(object->driver_surface);
 
-    WINE_VK_ADD_NON_DISPATCHABLE_MAPPING(instance, object, object->surface);
+    WINE_VK_ADD_NON_DISPATCHABLE_MAPPING(instance, object, object->surface, object);
 
     *surface = wine_surface_to_handle(object);
 
     return VK_SUCCESS;
 }
 
-NTSTATUS wine_vkDestroySurfaceKHR(void *args)
+void wine_vkDestroySurfaceKHR(VkInstance handle, VkSurfaceKHR surface,
+                              const VkAllocationCallbacks *allocator)
 {
-    struct vkDestroySurfaceKHR_params *params = args;
-    VkInstance instance = params->instance;
-    VkSurfaceKHR surface = params->surface;
-    const VkAllocationCallbacks *allocator = params->pAllocator;
+    struct wine_instance *instance = wine_instance_from_handle(handle);
     struct wine_surface *object = wine_surface_from_handle(surface);
 
-    TRACE("%p, 0x%s, %p\n", instance, wine_dbgstr_longlong(surface), allocator);
-
     if (!object)
-        return STATUS_SUCCESS;
+        return;
 
     instance->funcs.p_vkDestroySurfaceKHR(instance->instance, object->driver_surface, NULL);
 
     WINE_VK_REMOVE_HANDLE_MAPPING(instance, object);
     free(object);
-    return STATUS_SUCCESS;
-}
-
-static inline void adjust_max_image_count(VkPhysicalDevice phys_dev, VkSurfaceCapabilitiesKHR* capabilities)
-{
-    /* Many Windows games, for example Strange Brigade, No Man's Sky, Path of Exile
-     * and World War Z, do not expect that maxImageCount can be set to 0.
-     * A value of 0 means that there is no limit on the number of images.
-     * Nvidia reports 8 on Windows, AMD 16.
-     * https://vulkan.gpuinfo.org/displayreport.php?id=9122#surface
-     * https://vulkan.gpuinfo.org/displayreport.php?id=9121#surface
-     */
-    if ((phys_dev->instance->quirks & WINEVULKAN_QUIRK_ADJUST_MAX_IMAGE_COUNT) && !capabilities->maxImageCount)
-    {
-        capabilities->maxImageCount = max(capabilities->minImageCount, 16);
-    }
-}
-
-NTSTATUS wine_vkGetPhysicalDeviceSurfaceCapabilitiesKHR(void *args)
-{
-    struct vkGetPhysicalDeviceSurfaceCapabilitiesKHR_params *params = args;
-    VkPhysicalDevice phys_dev = params->physicalDevice;
-    VkSurfaceKHR surface = params->surface;
-    VkSurfaceCapabilitiesKHR *capabilities = params->pSurfaceCapabilities;
-    VkResult res;
-    VkExtent2D user_res;
-
-    TRACE("%p, 0x%s, %p\n", phys_dev, wine_dbgstr_longlong(surface), capabilities);
-
-    res = thunk_vkGetPhysicalDeviceSurfaceCapabilitiesKHR(phys_dev, surface, capabilities);
-
-    if (res == VK_SUCCESS)
-        adjust_max_image_count(phys_dev, capabilities);
-
-    if (res == VK_SUCCESS && vk_funcs->query_fs_hack &&
-            vk_funcs->query_fs_hack(wine_surface_from_handle(surface)->driver_surface, NULL, &user_res, NULL, NULL, NULL, NULL)){
-        capabilities->currentExtent = user_res;
-        capabilities->minImageExtent = user_res;
-        capabilities->maxImageExtent = user_res;
-    }
-
-    return res;
-}
-
-NTSTATUS wine_vkGetPhysicalDeviceSurfaceCapabilities2KHR(void *args)
-{
-    struct vkGetPhysicalDeviceSurfaceCapabilities2KHR_params *params = args;
-    VkPhysicalDevice phys_dev = params->physicalDevice;
-    const VkPhysicalDeviceSurfaceInfo2KHR *surface_info = params->pSurfaceInfo;
-    VkSurfaceCapabilities2KHR *capabilities = params->pSurfaceCapabilities;
-    VkResult res;
-    VkExtent2D user_res;
-
-    TRACE("%p, %p, %p\n", phys_dev, surface_info, capabilities);
-
-    res = thunk_vkGetPhysicalDeviceSurfaceCapabilities2KHR(phys_dev, surface_info, capabilities);
-
-    if (res == VK_SUCCESS)
-        adjust_max_image_count(phys_dev, &capabilities->surfaceCapabilities);
-
-    if (res == VK_SUCCESS && vk_funcs->query_fs_hack &&
-            vk_funcs->query_fs_hack(wine_surface_from_handle(surface_info->surface)->driver_surface, NULL, &user_res, NULL, NULL, NULL, NULL)){
-        capabilities->surfaceCapabilities.currentExtent = user_res;
-        capabilities->surfaceCapabilities.minImageExtent = user_res;
-        capabilities->surfaceCapabilities.maxImageExtent = user_res;
-    }
-
-    return res;
-}
-
-NTSTATUS wine_vkCreateDebugUtilsMessengerEXT(void *args)
-{
-    struct vkCreateDebugUtilsMessengerEXT_params *params = args;
-    VkInstance instance = params->instance;
-    const VkDebugUtilsMessengerCreateInfoEXT *create_info = params->pCreateInfo;
-    const VkAllocationCallbacks *allocator = params->pAllocator;
-    VkDebugUtilsMessengerEXT *messenger = params->pMessenger;
-    VkDebugUtilsMessengerCreateInfoEXT wine_create_info;
-    struct wine_debug_utils_messenger *object;
-    VkResult res;
-
-    TRACE("%p, %p, %p, %p\n", instance, create_info, allocator, messenger);
-
-    if (allocator)
-        FIXME("Support for allocation callbacks not implemented yet\n");
-
-    if (!(object = calloc(1, sizeof(*object))))
-        return VK_ERROR_OUT_OF_HOST_MEMORY;
-
-    object->instance = instance;
-    object->user_callback = create_info->pfnUserCallback;
-    object->user_data = create_info->pUserData;
-
-    wine_create_info = *create_info;
-
-    wine_create_info.pfnUserCallback = (void *) &debug_utils_callback_conversion;
-    wine_create_info.pUserData = object;
-
-    res = instance->funcs.p_vkCreateDebugUtilsMessengerEXT(instance->instance, &wine_create_info, NULL,  &object->debug_messenger);
-
-    if (res != VK_SUCCESS)
-    {
-        free(object);
-        return res;
-    }
-
-    WINE_VK_ADD_NON_DISPATCHABLE_MAPPING(instance, object, object->debug_messenger);
-    *messenger = wine_debug_utils_messenger_to_handle(object);
-
-    return VK_SUCCESS;
-}
-
-NTSTATUS wine_vkDestroyDebugUtilsMessengerEXT(void *args)
-{
-    struct vkDestroyDebugUtilsMessengerEXT_params *params = args;
-    VkInstance instance = params->instance;
-    VkDebugUtilsMessengerEXT messenger = params->messenger;
-    const VkAllocationCallbacks *allocator = params->pAllocator;
-    struct wine_debug_utils_messenger *object;
-
-    TRACE("%p, 0x%s, %p\n", instance, wine_dbgstr_longlong(messenger), allocator);
-
-    object = wine_debug_utils_messenger_from_handle(messenger);
-
-    if (!object)
-        return STATUS_SUCCESS;
-
-    instance->funcs.p_vkDestroyDebugUtilsMessengerEXT(instance->instance, object->debug_messenger, NULL);
-    WINE_VK_REMOVE_HANDLE_MAPPING(instance, object);
-
-    free(object);
-    return STATUS_SUCCESS;
-}
-
-NTSTATUS wine_vkCreateDebugReportCallbackEXT(void *args)
-{
-    struct vkCreateDebugReportCallbackEXT_params *params = args;
-    VkInstance instance = params->instance;
-    const VkDebugReportCallbackCreateInfoEXT *create_info = params->pCreateInfo;
-    const VkAllocationCallbacks *allocator = params->pAllocator;
-    VkDebugReportCallbackEXT *callback = params->pCallback;
-    VkDebugReportCallbackCreateInfoEXT wine_create_info;
-    struct wine_debug_report_callback *object;
-    VkResult res;
-
-    TRACE("%p, %p, %p, %p\n", instance, create_info, allocator, callback);
-
-    if (allocator)
-        FIXME("Support for allocation callbacks not implemented yet\n");
-
-    if (!(object = calloc(1, sizeof(*object))))
-        return VK_ERROR_OUT_OF_HOST_MEMORY;
-
-    object->instance = instance;
-    object->user_callback = create_info->pfnCallback;
-    object->user_data = create_info->pUserData;
-
-    wine_create_info = *create_info;
-
-    wine_create_info.pfnCallback = (void *) debug_report_callback_conversion;
-    wine_create_info.pUserData = object;
-
-    res = instance->funcs.p_vkCreateDebugReportCallbackEXT(instance->instance, &wine_create_info, NULL, &object->debug_callback);
-
-    if (res != VK_SUCCESS)
-    {
-        free(object);
-        return res;
-    }
-
-    WINE_VK_ADD_NON_DISPATCHABLE_MAPPING(instance, object, object->debug_callback);
-    *callback = wine_debug_report_callback_to_handle(object);
-
-    return VK_SUCCESS;
-}
-
-NTSTATUS wine_vkDestroyDebugReportCallbackEXT(void *args)
-{
-    struct vkDestroyDebugReportCallbackEXT_params *params = args;
-    VkInstance instance = params->instance;
-    VkDebugReportCallbackEXT callback = params->callback;
-    const VkAllocationCallbacks *allocator = params->pAllocator;
-    struct wine_debug_report_callback *object;
-
-    TRACE("%p, 0x%s, %p\n", instance, wine_dbgstr_longlong(callback), allocator);
-
-    object = wine_debug_report_callback_from_handle(callback);
-
-    if (!object)
-        return STATUS_SUCCESS;
-
-    instance->funcs.p_vkDestroyDebugReportCallbackEXT(instance->instance, object->debug_callback, NULL);
-
-    WINE_VK_REMOVE_HANDLE_MAPPING(instance, object);
-
-    free(object);
-    return STATUS_SUCCESS;
-}
-
-NTSTATUS wine_vkAcquireNextImage2KHR(void *args)
-{
-    struct vkAcquireNextImage2KHR_params *params = args;
-    VkDevice device = params->device;
-    const VkAcquireNextImageInfoKHR *pAcquireInfo = params->pAcquireInfo;
-    uint32_t *pImageIndex = params->pImageIndex;
-#if defined(USE_STRUCT_CONVERSION)
-    VkAcquireNextImageInfoKHR_host image_info_host = {0};
-#else
-    VkAcquireNextImageInfoKHR image_info_host = {0};
-#endif
-    struct VkSwapchainKHR_T *object = (struct VkSwapchainKHR_T *)(UINT_PTR)pAcquireInfo->swapchain;
-    TRACE("%p, %p, %p\n", device, pAcquireInfo, pImageIndex);
-
-    image_info_host.sType = pAcquireInfo->sType;
-    image_info_host.pNext = pAcquireInfo->pNext;
-    image_info_host.swapchain = object->swapchain;
-    image_info_host.timeout = pAcquireInfo->timeout;
-    image_info_host.semaphore = wine_semaphore_from_handle(pAcquireInfo->semaphore)->semaphore;
-    image_info_host.fence = pAcquireInfo->fence;
-    image_info_host.deviceMask = pAcquireInfo->deviceMask;
-
-    return device->funcs.p_vkAcquireNextImage2KHR(device->device, &image_info_host, pImageIndex);
-}
-
-NTSTATUS wine_vkDestroySwapchainKHR(void *args)
-{
-    struct vkDestroySwapchainKHR_params *params = args;
-    VkDevice device = params->device;
-    VkSwapchainKHR swapchain = params->swapchain;
-    const VkAllocationCallbacks *pAllocator = params->pAllocator;
-    struct VkSwapchainKHR_T *object = (struct VkSwapchainKHR_T *)(UINT_PTR)swapchain;
-    uint32_t i;
-
-    TRACE("%p, 0x%s, %p\n", device, wine_dbgstr_longlong(swapchain), pAllocator);
-
-    if(!object)
-        return STATUS_SUCCESS;
-
-    if(object->fs_hack_enabled){
-        for(i = 0; i < object->n_images; ++i)
-            destroy_fs_hack_image(device, object, &object->fs_hack_images[i]);
-
-        for(i = 0; i < device->queue_count; ++i)
-            if(object->cmd_pools[i])
-                device->funcs.p_vkDestroyCommandPool(device->device, object->cmd_pools[i], NULL);
-
-        destroy_pipeline(device, &object->blit_pipeline);
-        destroy_pipeline(device, &object->fsr_easu_pipeline);
-        destroy_pipeline(device, &object->fsr_rcas_pipeline);
-        device->funcs.p_vkDestroyDescriptorSetLayout(device->device, object->descriptor_set_layout, NULL);
-        device->funcs.p_vkDestroyDescriptorPool(device->device, object->descriptor_pool, NULL);
-        device->funcs.p_vkDestroySampler(device->device, object->sampler, NULL);
-        device->funcs.p_vkFreeMemory(device->device, object->user_image_memory, NULL);
-        device->funcs.p_vkFreeMemory(device->device, object->fsr_image_memory, NULL);
-        free(object->cmd_pools);
-        free(object->fs_hack_images);
-    }
-
-    device->funcs.p_vkDestroySwapchainKHR(device->device, object->swapchain, NULL);
-
-    WINE_VK_REMOVE_HANDLE_MAPPING(device->phys_dev->instance, object);
-    free(object);
-    return STATUS_SUCCESS;
-}
-
-NTSTATUS wine_vkGetSwapchainImagesKHR(void *args)
-{
-    struct vkGetSwapchainImagesKHR_params *params = args;
-    VkDevice device = params->device;
-    VkSwapchainKHR swapchain = params->swapchain;
-    uint32_t *pSwapchainImageCount = params->pSwapchainImageCount;
-    VkImage *pSwapchainImages = params->pSwapchainImages;
-    struct VkSwapchainKHR_T *object = (struct VkSwapchainKHR_T *)(UINT_PTR)swapchain;
-    uint32_t i;
-
-    TRACE("%p, 0x%s, %p, %p\n", device, wine_dbgstr_longlong(swapchain), pSwapchainImageCount, pSwapchainImages);
-
-    if(pSwapchainImages && object->fs_hack_enabled){
-        if(*pSwapchainImageCount > object->n_images)
-            *pSwapchainImageCount = object->n_images;
-        for(i = 0; i < *pSwapchainImageCount ; ++i)
-            pSwapchainImages[i] = object->fs_hack_images[i].user_image;
-        return *pSwapchainImageCount == object->n_images ? VK_SUCCESS : VK_INCOMPLETE;
-    }
-
-    return device->funcs.p_vkGetSwapchainImagesKHR(device->device, object->swapchain, pSwapchainImageCount, pSwapchainImages);
-}
-
-static VkCommandBuffer create_hack_cmd(VkQueue queue, struct VkSwapchainKHR_T *swapchain, uint32_t queue_idx)
-{
-#if defined(USE_STRUCT_CONVERSION)
-    VkCommandBufferAllocateInfo_host allocInfo = {0};
-#else
-    VkCommandBufferAllocateInfo allocInfo = {0};
-#endif
-    VkCommandBuffer cmd;
-    VkResult result;
-
-    if(!swapchain->cmd_pools[queue_idx]){
-        VkCommandPoolCreateInfo poolInfo = {0};
-
-        poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-        poolInfo.queueFamilyIndex = queue_idx;
-
-        result = queue->device->funcs.p_vkCreateCommandPool(queue->device->device, &poolInfo, NULL, &swapchain->cmd_pools[queue_idx]);
-        if(result != VK_SUCCESS){
-            ERR("vkCreateCommandPool failed, res=%d\n", result);
-            return NULL;
-        }
-    }
-
-    allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-    allocInfo.commandPool = swapchain->cmd_pools[queue_idx];
-    allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    allocInfo.commandBufferCount = 1;
-
-    result = queue->device->funcs.p_vkAllocateCommandBuffers(queue->device->device, &allocInfo, &cmd);
-    if(result != VK_SUCCESS){
-        ERR("vkAllocateCommandBuffers failed, res=%d\n", result);
-        return NULL;
-    }
-
-    return cmd;
-}
-
-static void bind_pipeline(VkDevice device, VkCommandBuffer cmd, struct fs_comp_pipeline *pipeline, VkDescriptorSet set, void *push_data)
-{
-    device->funcs.p_vkCmdBindPipeline(cmd,
-            VK_PIPELINE_BIND_POINT_COMPUTE, pipeline->pipeline);
-
-    device->funcs.p_vkCmdBindDescriptorSets(cmd,
-            VK_PIPELINE_BIND_POINT_COMPUTE, pipeline->pipeline_layout,
-            0, 1, &set, 0, NULL);
-
-    device->funcs.p_vkCmdPushConstants(cmd,
-            pipeline->pipeline_layout, VK_SHADER_STAGE_COMPUTE_BIT,
-            0, pipeline->push_size, push_data);
-}
-
-#if defined(USE_STRUCT_CONVERSION)
-static void init_barrier(VkImageMemoryBarrier_host *barrier)
-#else
-static void init_barrier(VkImageMemoryBarrier *barrier)
-#endif
-{
-    barrier->sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-    barrier->pNext = NULL;
-    barrier->srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    barrier->dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    barrier->subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    barrier->subresourceRange.baseMipLevel = 0;
-    barrier->subresourceRange.levelCount = 1;
-    barrier->subresourceRange.baseArrayLayer = 0;
-    barrier->subresourceRange.layerCount = 1;
-}
-
-
-static VkResult record_compute_cmd(VkDevice device, struct VkSwapchainKHR_T *swapchain, struct fs_hack_image *hack)
-{
-#if defined(USE_STRUCT_CONVERSION)
-    VkImageMemoryBarrier_host barriers[2] = {{0}};
-    VkCommandBufferBeginInfo_host beginInfo = {0};
-#else
-    VkImageMemoryBarrier barriers[2] = {{0}};
-    VkCommandBufferBeginInfo beginInfo = {0};
-#endif
-    float constants[4];
-    VkResult result;
-
-    TRACE("recording compute command\n");
-
-    init_barrier(&barriers[0]);
-    init_barrier(&barriers[1]);
-
-    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT;
-
-    device->funcs.p_vkBeginCommandBuffer(hack->cmd, &beginInfo);
-
-    /* for the cs we run... */
-    /* transition user image from PRESENT_SRC to SHADER_READ */
-    barriers[0].oldLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-    barriers[0].newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-    barriers[0].image = hack->user_image;
-    barriers[0].srcAccessMask = 0;
-    barriers[0].dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-
-    /* storage image... */
-    /* transition swapchain image from whatever to GENERAL */
-    barriers[1].oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    barriers[1].newLayout = VK_IMAGE_LAYOUT_GENERAL;
-    barriers[1].image = hack->swapchain_image;
-    barriers[1].srcAccessMask = 0;
-    barriers[1].dstAccessMask = 0;
-
-    device->funcs.p_vkCmdPipelineBarrier(
-            hack->cmd,
-            VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-            0,
-            0, NULL,
-            0, NULL,
-            2, barriers
-    );
-
-    /* perform blit shader */
-
-    /* vec2: blit dst offset in real coords */
-    constants[0] = swapchain->blit_dst.offset.x;
-    constants[1] = swapchain->blit_dst.offset.y;
-    constants[2] = swapchain->blit_dst.extent.width;
-    constants[3] = swapchain->blit_dst.extent.height;
-
-    bind_pipeline(device, hack->cmd, &swapchain->blit_pipeline, hack->descriptor_set, constants);
-
-    /* local sizes in shader are 8 */
-    device->funcs.p_vkCmdDispatch(hack->cmd, ceil(swapchain->real_extent.width / 8.),
-            ceil(swapchain->real_extent.height / 8.), 1);
-
-    /* transition user image from SHADER_READ back to PRESENT_SRC */
-    barriers[0].oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-    barriers[0].newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-    barriers[0].image = hack->user_image;
-    barriers[0].srcAccessMask = 0;
-    barriers[0].dstAccessMask = 0;
-
-    /* transition swapchain image from GENERAL to PRESENT_SRC */
-    barriers[1].oldLayout = VK_IMAGE_LAYOUT_GENERAL;
-    barriers[1].newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-    barriers[1].image = hack->swapchain_image;
-    barriers[1].srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-    barriers[1].dstAccessMask = 0;
-
-    device->funcs.p_vkCmdPipelineBarrier(
-            hack->cmd,
-            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-            VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
-            0,
-            0, NULL,
-            0, NULL,
-            2, barriers
-    );
-
-
-    result = device->funcs.p_vkEndCommandBuffer(hack->cmd);
-    if(result != VK_SUCCESS){
-        ERR("vkEndCommandBuffer: %d\n", result);
-        return result;
-    }
-
-    return VK_SUCCESS;
-}
-
-static VkResult record_graphics_cmd(VkDevice device, struct VkSwapchainKHR_T *swapchain, struct fs_hack_image *hack)
-{
-    VkResult result;
-    VkImageBlit blitregion = {0};
-    VkImageSubresourceRange range = {0};
-    VkClearColorValue black = {{0.f, 0.f, 0.f}};
-#if defined(USE_STRUCT_CONVERSION)
-    VkImageMemoryBarrier_host barriers[2] = {{0}};
-    VkCommandBufferBeginInfo_host beginInfo = {0};
-#else
-    VkImageMemoryBarrier barriers[2] = {{0}};
-    VkCommandBufferBeginInfo beginInfo = {0};
-#endif
-
-    TRACE("recording graphics command\n");
-
-    init_barrier(&barriers[0]);
-    init_barrier(&barriers[1]);
-
-    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT;
-
-    device->funcs.p_vkBeginCommandBuffer(hack->cmd, &beginInfo);
-
-    /* transition real image from whatever to TRANSFER_DST_OPTIMAL */
-    barriers[0].oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    barriers[0].newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-    barriers[0].image = hack->swapchain_image;
-    barriers[0].srcAccessMask = 0;
-    barriers[0].dstAccessMask = 0;
-
-    /* transition user image from PRESENT_SRC to TRANSFER_SRC_OPTIMAL */
-    barriers[1].oldLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-    barriers[1].newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-    barriers[1].image = hack->user_image;
-    barriers[1].srcAccessMask = 0;
-    barriers[1].dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-
-    device->funcs.p_vkCmdPipelineBarrier(
-            hack->cmd,
-            VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-            VK_PIPELINE_STAGE_TRANSFER_BIT,
-            0,
-            0, NULL,
-            0, NULL,
-            2, barriers
-    );
-
-    /* clear the image */
-    range.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    range.baseMipLevel = 0;
-    range.levelCount = 1;
-    range.baseArrayLayer = 0;
-    range.layerCount = 1;
-
-    device->funcs.p_vkCmdClearColorImage(
-            hack->cmd, hack->swapchain_image,
-            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-            &black, 1, &range);
-
-    /* perform blit */
-    blitregion.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    blitregion.srcSubresource.layerCount = 1;
-    blitregion.srcOffsets[0].x = 0;
-    blitregion.srcOffsets[0].y = 0;
-    blitregion.srcOffsets[0].z = 0;
-    blitregion.srcOffsets[1].x = swapchain->user_extent.width;
-    blitregion.srcOffsets[1].y = swapchain->user_extent.height;
-    blitregion.srcOffsets[1].z = 1;
-    blitregion.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    blitregion.dstSubresource.layerCount = 1;
-    blitregion.dstOffsets[0].x = swapchain->blit_dst.offset.x;
-    blitregion.dstOffsets[0].y = swapchain->blit_dst.offset.y;
-    blitregion.dstOffsets[0].z = 0;
-    blitregion.dstOffsets[1].x = swapchain->blit_dst.offset.x + swapchain->blit_dst.extent.width;
-    blitregion.dstOffsets[1].y = swapchain->blit_dst.offset.y + swapchain->blit_dst.extent.height;
-    blitregion.dstOffsets[1].z = 1;
-
-    device->funcs.p_vkCmdBlitImage(hack->cmd,
-            hack->user_image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-            hack->swapchain_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-            1, &blitregion, swapchain->fs_hack_filter);
-
-    /* transition real image from TRANSFER_DST to PRESENT_SRC */
-    barriers[0].oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-    barriers[0].newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-    barriers[0].image = hack->swapchain_image;
-    barriers[0].srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-    barriers[0].dstAccessMask = 0;
-
-    /* transition user image from TRANSFER_SRC_OPTIMAL to back to PRESENT_SRC */
-    barriers[1].oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-    barriers[1].newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-    barriers[1].image = hack->user_image;
-    barriers[1].srcAccessMask = 0;
-    barriers[1].dstAccessMask = 0;
-
-    device->funcs.p_vkCmdPipelineBarrier(
-            hack->cmd,
-            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-            VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
-            0,
-            0, NULL,
-            0, NULL,
-            2, barriers
-    );
-
-    result = device->funcs.p_vkEndCommandBuffer(hack->cmd);
-    if(result != VK_SUCCESS){
-        ERR("vkEndCommandBuffer: %d\n", result);
-        return result;
-    }
-
-    return VK_SUCCESS;
-}
-
-static VkResult record_fsr_cmd(VkDevice device, struct VkSwapchainKHR_T *swapchain, struct fs_hack_image *hack)
-{
-#if defined(USE_STRUCT_CONVERSION)
-    VkImageMemoryBarrier_host barriers[3] = {{0}};
-    VkCommandBufferBeginInfo_host beginInfo = {0};
-#else
-    VkImageMemoryBarrier barriers[3] = {{0}};
-    VkCommandBufferBeginInfo beginInfo = {0};
-#endif
-    union
-    {
-        uint32_t uint[16];
-        float    fp[16];
-    } c;
-    VkResult result;
-
-    TRACE("recording compute command\n");
-
-    init_barrier(&barriers[0]);
-    init_barrier(&barriers[1]);
-    init_barrier(&barriers[2]);
-
-    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT;
-
-    device->funcs.p_vkBeginCommandBuffer(hack->cmd, &beginInfo);
-
-    /* 1st pass (easu) */
-    /* transition user image from PRESENT_SRC to SHADER_READ */
-    barriers[0].oldLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-    barriers[0].newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-    barriers[0].image = hack->user_image;
-    barriers[0].srcAccessMask = 0;
-    barriers[0].dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-
-    /* storage image... */
-    /* transition fsr image from whatever to GENERAL */
-    barriers[1].oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    barriers[1].newLayout = VK_IMAGE_LAYOUT_GENERAL;
-    barriers[1].image = hack->swapchain_image;
-    barriers[1].srcAccessMask = 0;
-    barriers[1].dstAccessMask = 0;
-
-    device->funcs.p_vkCmdPipelineBarrier(
-            hack->cmd,
-            VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-            0,
-            0, NULL,
-            0, NULL,
-            2, barriers
-    );
-
-    /* perform easu shader */
-
-    c.fp[0] = swapchain->user_extent.width * (1.0f / swapchain->blit_dst.extent.width);
-    c.fp[1] = swapchain->user_extent.height * (1.0f / swapchain->blit_dst.extent.height);
-    c.fp[2] = 0.5f * c.fp[0] - 0.5f;
-    c.fp[3] = 0.5f * c.fp[1] - 0.5f;
-    // Viewport pixel position to normalized image space.
-    // This is used to get upper-left of 'F' tap.
-    c.fp[4] = 1.0f / swapchain->user_extent.width;
-    c.fp[5] = 1.0f / swapchain->user_extent.height;
-    // Centers of gather4, first offset from upper-left of 'F'.
-    //      +---+---+
-    //      |   |   |
-    //      +--(0)--+
-    //      | b | c |
-    //  +---F---+---+---+
-    //  | e | f | g | h |
-    //  +--(1)--+--(2)--+
-    //  | i | j | k | l |
-    //  +---+---+---+---+
-    //      | n | o |
-    //      +--(3)--+
-    //      |   |   |
-    //      +---+---+
-    c.fp[6] =  1.0f * c.fp[4];
-    c.fp[7] = -1.0f * c.fp[5];
-    // These are from (0) instead of 'F'.
-    c.fp[8] = -1.0f * c.fp[4];
-    c.fp[9] =  2.0f * c.fp[5];
-    c.fp[10] =  1.0f * c.fp[4];
-    c.fp[11] =  2.0f * c.fp[5];
-    c.fp[12] =  0.0f * c.fp[4];
-    c.fp[13] =  4.0f * c.fp[5];
-    c.uint[14] = swapchain->blit_dst.extent.width;
-    c.uint[15] = swapchain->blit_dst.extent.height;
-
-    bind_pipeline(device, hack->cmd, &swapchain->fsr_easu_pipeline, hack->descriptor_set, c.uint);
-
-    /* local sizes in shader are 8 */
-    device->funcs.p_vkCmdDispatch(hack->cmd, ceil(swapchain->blit_dst.extent.width / 8.),
-            ceil(swapchain->blit_dst.extent.height / 8.), 1);
-
-    /* transition user image from SHADER_READ back to PRESENT_SRC */
-    barriers[0].oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-    barriers[0].newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-    barriers[0].image = hack->user_image;
-    barriers[0].srcAccessMask = 0;
-    barriers[0].dstAccessMask = 0;
-
-    /* transition fsr image from GENERAL to SHADER_READ */
-    barriers[1].oldLayout = VK_IMAGE_LAYOUT_GENERAL;
-    barriers[1].newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-    barriers[1].image = hack->swapchain_image;
-    barriers[1].srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-    barriers[1].dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-
-    /* transition swapchain image from whatever to GENERAL */
-    barriers[2].oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    barriers[2].newLayout = VK_IMAGE_LAYOUT_GENERAL;
-    barriers[2].image = hack->swapchain_image;
-    barriers[2].srcAccessMask = 0;
-    barriers[2].dstAccessMask = 0;
-
-    device->funcs.p_vkCmdPipelineBarrier(
-            hack->cmd,
-            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-            VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
-            0,
-            0, NULL,
-            0, NULL,
-            3, barriers
-    );
-
-    /* 2nd pass (rcas) */
-
-    c.fp[0] = exp2f(-swapchain->sharpness);
-    c.uint[2] = swapchain->blit_dst.extent.width;
-    c.uint[3] = swapchain->blit_dst.extent.height;
-    c.uint[4] = swapchain->blit_dst.offset.x;
-    c.uint[5] = swapchain->blit_dst.offset.y;
-    c.uint[6] = swapchain->blit_dst.offset.x + swapchain->blit_dst.extent.width;
-    c.uint[7] = swapchain->blit_dst.offset.y + swapchain->blit_dst.extent.height;
-
-    bind_pipeline(device, hack->cmd, &swapchain->fsr_rcas_pipeline, hack->fsr_set, c.uint);
-
-    /* local sizes in shader are 8 */
-    device->funcs.p_vkCmdDispatch(hack->cmd, ceil(swapchain->real_extent.width / 8.),
-            ceil(swapchain->real_extent.height / 8.), 1);
-
-    /* transition swapchain image from GENERAL to PRESENT_SRC */
-    barriers[0].oldLayout = VK_IMAGE_LAYOUT_GENERAL;
-    barriers[0].newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-    barriers[0].image = hack->swapchain_image;
-    barriers[0].srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-    barriers[0].dstAccessMask = 0;
-
-    device->funcs.p_vkCmdPipelineBarrier(
-            hack->cmd,
-            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-            VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
-            0,
-            0, NULL,
-            0, NULL,
-            1, barriers
-    );
-
-    result = device->funcs.p_vkEndCommandBuffer(hack->cmd);
-    if (result != VK_SUCCESS)
-    {
-        ERR("vkEndCommandBuffer: %d\n", result);
-        return result;
-    }
-
-    return VK_SUCCESS;
-}
-
-static VkResult fshack_vk_queue_present(VkQueue queue, const VkPresentInfoKHR *pPresentInfo)
-{
-    VkResult res;
-    VkPresentInfoKHR our_presentInfo;
-    VkSwapchainKHR *arr;
-    VkCommandBuffer *blit_cmds = NULL;
-    VkSubmitInfo submitInfo = {0};
-    VkSemaphore blit_sema;
-    struct VkSwapchainKHR_T *swapchain;
-    uint32_t i, n_hacks = 0;
-    uint32_t queue_idx;
-
-    TRACE("%p, %p\n", queue, pPresentInfo);
-
-    our_presentInfo = *pPresentInfo;
-
-    for(i = 0; i < our_presentInfo.swapchainCount; ++i){
-        swapchain = (struct VkSwapchainKHR_T *)(UINT_PTR)our_presentInfo.pSwapchains[i];
-
-        if(swapchain->fs_hack_enabled){
-            struct fs_hack_image *hack = &swapchain->fs_hack_images[our_presentInfo.pImageIndices[i]];
-
-            if(!blit_cmds){
-                queue_idx = queue->family_index;
-                blit_cmds = malloc(our_presentInfo.swapchainCount * sizeof(VkCommandBuffer));
-                blit_sema = hack->blit_finished;
-            }
-
-            if(!hack->cmd || hack->cmd_queue_idx != queue_idx){
-                if(hack->cmd)
-                    queue->device->funcs.p_vkFreeCommandBuffers(queue->device->device,
-                            swapchain->cmd_pools[hack->cmd_queue_idx],
-                            1, &hack->cmd);
-
-                hack->cmd_queue_idx = queue_idx;
-                hack->cmd = create_hack_cmd(queue, swapchain, queue_idx);
-
-                if(!hack->cmd){
-                    free(blit_cmds);
-                    return VK_ERROR_DEVICE_LOST;
-                }
-
-                if (swapchain->fsr)
-                {
-                    if(queue->device->queue_props[queue_idx].queueFlags & VK_QUEUE_COMPUTE_BIT)
-                        res = record_fsr_cmd(queue->device, swapchain, hack);
-                    else
-                    {
-                        ERR("Present queue is not a compute queue!\n");
-                        res = VK_ERROR_DEVICE_LOST;
-                    }
-                }
-                else
-                {
-                    if(queue->device->queue_props[queue_idx].queueFlags & VK_QUEUE_GRAPHICS_BIT)
-                        res = record_graphics_cmd(queue->device, swapchain, hack);
-                    if(queue->device->queue_props[queue_idx].queueFlags & VK_QUEUE_COMPUTE_BIT && !is_srgb(swapchain->format))
-                        res = record_compute_cmd(queue->device, swapchain, hack);
-                    else{
-                        ERR("Present queue is neither graphics nor compute queue with unorm format!\n");
-                        res = VK_ERROR_DEVICE_LOST;
-                    }
-                }
-
-                if(res != VK_SUCCESS){
-                    queue->device->funcs.p_vkFreeCommandBuffers(queue->device->device,
-                            swapchain->cmd_pools[hack->cmd_queue_idx],
-                            1, &hack->cmd);
-                    hack->cmd = NULL;
-                    free(blit_cmds);
-                    return res;
-                }
-            }
-
-            blit_cmds[n_hacks] = hack->cmd;
-
-            ++n_hacks;
-        }
-    }
-
-    if(n_hacks > 0){
-        VkPipelineStageFlags waitStage, *waitStages, *waitStages_arr = NULL;
-
-        if(pPresentInfo->waitSemaphoreCount > 1){
-            waitStages_arr = malloc(sizeof(VkPipelineStageFlags) * pPresentInfo->waitSemaphoreCount);
-            for(i = 0; i < pPresentInfo->waitSemaphoreCount; ++i)
-                waitStages_arr[i] = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
-            waitStages = waitStages_arr;
-        }else{
-            waitStage = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
-            waitStages = &waitStage;
-        }
-
-        /* blit user image to real image */
-        submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-        submitInfo.waitSemaphoreCount = pPresentInfo->waitSemaphoreCount;
-        submitInfo.pWaitSemaphores = pPresentInfo->pWaitSemaphores;
-        submitInfo.pWaitDstStageMask = waitStages;
-        submitInfo.commandBufferCount = n_hacks;
-        submitInfo.pCommandBuffers = blit_cmds;
-        submitInfo.signalSemaphoreCount = 1;
-        submitInfo.pSignalSemaphores = &blit_sema;
-
-        res = queue->device->funcs.p_vkQueueSubmit(queue->queue, 1, &submitInfo, VK_NULL_HANDLE);
-        if(res != VK_SUCCESS)
-            ERR("vkQueueSubmit: %d\n", res);
-
-        free(waitStages_arr);
-        free(blit_cmds);
-
-        our_presentInfo.waitSemaphoreCount = 1;
-        our_presentInfo.pWaitSemaphores = &blit_sema;
-    }
-
-    arr = malloc(our_presentInfo.swapchainCount * sizeof(VkSwapchainKHR));
-    if(!arr){
-        ERR("Failed to allocate memory for swapchain array\n");
-        return VK_ERROR_OUT_OF_HOST_MEMORY;
-    }
-
-    for(i = 0; i < our_presentInfo.swapchainCount; ++i)
-        arr[i] = ((struct VkSwapchainKHR_T *)(UINT_PTR)our_presentInfo.pSwapchains[i])->swapchain;
-
-    our_presentInfo.pSwapchains = arr;
-
-    res = queue->device->funcs.p_vkQueuePresentKHR(queue->queue, &our_presentInfo);
-
-    free(arr);
-
-    return res;
-}
-
-static void fixup_pipeline_feedback(VkPipelineCreationFeedback *feedback, uint32_t count)
-{
-#if defined(USE_STRUCT_CONVERSION)
-    struct host_pipeline_feedback
-    {
-        VkPipelineCreationFeedbackFlags flags;
-        uint64_t duration;
-    } *host_feedback;
-    int64_t i;
-
-    host_feedback = (void *) feedback;
-
-    for (i = count - 1; i >= 0; i--)
-    {
-        memmove(&feedback[i].duration, &host_feedback[i].duration, sizeof(uint64_t));
-        feedback[i].flags = host_feedback[i].flags;
-    }
-#endif
-}
-
-static void fixup_pipeline_feedback_info(const void *pipeline_info)
-{
-    VkPipelineCreationFeedbackCreateInfo *feedback;
-
-    feedback = wine_vk_find_struct(pipeline_info, PIPELINE_CREATION_FEEDBACK_CREATE_INFO);
-
-    if (!feedback)
-        return;
-
-    fixup_pipeline_feedback(feedback->pPipelineCreationFeedback, 1);
-    fixup_pipeline_feedback(feedback->pPipelineStageCreationFeedbacks,
-        feedback->pipelineStageCreationFeedbackCount);
-}
-
-NTSTATUS wine_vkCreateComputePipelines(void *args)
-{
-    struct vkCreateComputePipelines_params *params = args;
-    VkResult res;
-    uint32_t i;
-
-    TRACE("%p, 0x%s, %u, %p, %p, %p\n", params->device, wine_dbgstr_longlong(params->pipelineCache),
-        params->createInfoCount, params->pCreateInfos, params->pAllocator, params->pPipelines);
-
-    res = thunk_vkCreateComputePipelines(params->device, params->pipelineCache,
-        params->createInfoCount, params->pCreateInfos, params->pAllocator, params->pPipelines);
-
-    for (i = 0; i < params->createInfoCount; i++)
-        fixup_pipeline_feedback_info(&params->pCreateInfos[i]);
-
-    return res;
-}
-
-NTSTATUS wine_vkCreateGraphicsPipelines(void *args)
-{
-    struct vkCreateGraphicsPipelines_params *params = args;
-    VkResult res;
-    uint32_t i;
-
-    TRACE("%p, 0x%s, %u, %p, %p, %p\n", params->device, wine_dbgstr_longlong(params->pipelineCache),
-        params->createInfoCount, params->pCreateInfos, params->pAllocator, params->pPipelines);
-
-    res = thunk_vkCreateGraphicsPipelines(params->device, params->pipelineCache,
-        params->createInfoCount, params->pCreateInfos, params->pAllocator, params->pPipelines);
-
-    for (i = 0; i < params->createInfoCount; i++)
-        fixup_pipeline_feedback_info(&params->pCreateInfos[i]);
-
-    return res;
-}
-
-NTSTATUS wine_vkCreateRayTracingPipelinesKHR(void *args)
-{
-    struct vkCreateRayTracingPipelinesKHR_params *params = args;
-    VkResult res;
-    uint32_t i;
-
-    TRACE("%p, 0x%s, 0x%s, %u, %p, %p, %p\n", params->device,
-        wine_dbgstr_longlong(params->deferredOperation), wine_dbgstr_longlong(params->pipelineCache),
-        params->createInfoCount, params->pCreateInfos, params->pAllocator, params->pPipelines);
-
-    res = thunk_vkCreateRayTracingPipelinesKHR(params->device, params->deferredOperation, params->pipelineCache,
-        params->createInfoCount, params->pCreateInfos, params->pAllocator, params->pPipelines);
-
-    for (i = 0; i < params->createInfoCount; i++)
-        fixup_pipeline_feedback_info(&params->pCreateInfos[i]);
-
-    return res;
-}
-
-NTSTATUS wine_vkCreateRayTracingPipelinesNV(void *args)
-{
-    struct vkCreateRayTracingPipelinesNV_params *params = args;
-    VkResult res;
-    uint32_t i;
-
-    TRACE("%p, 0x%s, %u, %p, %p, %p\n", params->device, wine_dbgstr_longlong(params->pipelineCache),
-        params->createInfoCount, params->pCreateInfos, params->pAllocator, params->pPipelines);
-
-    res = thunk_vkCreateRayTracingPipelinesNV(params->device, params->pipelineCache,
-        params->createInfoCount, params->pCreateInfos, params->pAllocator, params->pPipelines);
-
-    for (i = 0; i < params->createInfoCount; i++)
-        fixup_pipeline_feedback_info(&params->pCreateInfos[i]);
-
-    return res;
-}
-
-BOOL WINAPI wine_vk_is_available_instance_function(VkInstance instance, const char *name)
-{
-    return !!vk_funcs->p_vkGetInstanceProcAddr(instance->instance, name);
-}
-
-BOOL WINAPI wine_vk_is_available_device_function(VkDevice device, const char *name)
-{
-    if (!strcmp(name, "vkGetMemoryWin32HandleKHR") || !strcmp(name, "vkGetMemoryWin32HandlePropertiesKHR"))
-        name = "vkGetMemoryFdKHR";
-    if (!strcmp(name, "vkGetSemaphoreWin32HandleKHR"))
-        name = "vkGetSemaphoreFdKHR";
-    if (!strcmp(name, "vkImportSemaphoreWin32HandleKHR"))
-        name = "vkImportSemaphoreFdKHR";
-    return !!vk_funcs->p_vkGetDeviceProcAddr(device->device, name);
-}
-
-VkDevice WINAPI __wine_get_native_VkDevice(VkDevice device)
-{
-    return device->device;
-}
-
-VkInstance WINAPI __wine_get_native_VkInstance(VkInstance instance)
-{
-    return instance->instance;
-}
-
-VkPhysicalDevice WINAPI __wine_get_native_VkPhysicalDevice(VkPhysicalDevice phys_dev)
-{
-    return phys_dev->phys_dev;
-}
-
-VkQueue WINAPI __wine_get_native_VkQueue(VkQueue queue)
-{
-    if (is_virtual_queue(queue))
-    {
-        FIXME("STEAMVR IS USING NATIVE HANDLE OF VIRTUALIZED QUEUE, THIS IS UNTESTED.\n");
-        pthread_mutex_lock(&queue->submissions_mutex);
-        while (queue->processing)
-            pthread_cond_wait(&queue->submissions_cond, &queue->submissions_mutex);
-        pthread_mutex_unlock(&queue->submissions_mutex);
-    }
-
-    return queue->queue;
-}
-
-VkPhysicalDevice WINAPI __wine_get_wrapped_VkPhysicalDevice(VkInstance instance, VkPhysicalDevice native_phys_dev)
-{
-    uint32_t i;
-    for(i = 0; i < instance->phys_dev_count; ++i){
-        if(instance->phys_devs[i]->phys_dev == native_phys_dev)
-            return instance->phys_devs[i];
-    }
-    WARN("Unknown native physical device: %p\n", native_phys_dev);
-    return NULL;
 }
 
 #define IOCTL_SHARED_GPU_RESOURCE_CREATE           CTL_CODE(FILE_DEVICE_VIDEO, 0, METHOD_BUFFERED, FILE_WRITE_ACCESS)
@@ -4906,99 +3616,65 @@ static HANDLE get_shared_resource_kmt_handle(HANDLE shared_resource)
     return wine_server_ptr_handle(kmt_handle);
 }
 
-NTSTATUS wine_vkAllocateMemory(void *args)
+VkResult wine_vkAllocateMemory(VkDevice handle, const VkMemoryAllocateInfo *alloc_info,
+                               const VkAllocationCallbacks *allocator, VkDeviceMemory *ret,
+                               void *win_pAllocateInfo)
 {
-    struct vkAllocateMemory_params *params = args;
-    VkDevice device = params->device;
-    const VkMemoryAllocateInfo *allocate_info = params->pAllocateInfo;
-    const VkAllocationCallbacks *allocator = params->pAllocator;
-    VkDeviceMemory *memory = params->pMemory;
+    struct wine_device *device = wine_device_from_handle(handle);
+    const VkMemoryAllocateInfo *win_alloc_info = win_pAllocateInfo;
+    struct wine_device_memory *memory;
+    VkMemoryAllocateInfo info = *alloc_info;
+    VkImportMemoryHostPointerInfoEXT host_pointer_info;
+    uint32_t mem_flags;
+    void *mapping = NULL;
+    VkResult result;
 
     const VkImportMemoryWin32HandleInfoKHR *handle_import_info;
     const VkExportMemoryWin32HandleInfoKHR *handle_export_info;
-    VkMemoryAllocateInfo allocate_info_dup = *allocate_info;
     VkExportMemoryAllocateInfo *export_info;
     VkImportMemoryFdInfoKHR fd_import_info;
-    struct wine_dev_mem *object;
-    VkResult res;
+    VkMemoryGetFdInfoKHR get_fd_info;
     int fd;
 
-#if defined(USE_STRUCT_CONVERSION)
-    VkMemoryAllocateInfo_host allocate_info_host;
-    VkMemoryGetFdInfoKHR_host get_fd_info;
-#else
-    VkMemoryAllocateInfo allocate_info_host;
-    VkMemoryGetFdInfoKHR get_fd_info;
-#endif
-
-    TRACE("%p %p %p %p\n", device, allocate_info, allocator, memory);
-
-    if (allocator)
-        FIXME("Support for allocation callbacks not implemented yet\n");
-
-    if ((res = convert_VkMemoryAllocateInfo_struct_chain(allocate_info->pNext, &allocate_info_dup)) < 0)
-    {
-        WARN("Failed to convert VkMemoryAllocateInfo pNext chain, res=%d.\n", res);
-        return res;
-    }
-
-    if (device->phys_dev->fake_memory_priority)
-    {
-        VkBaseOutStructure *header;
-
-        for (header = (void *) &allocate_info_dup; header; header = header->pNext)
-        {
-            if (header->pNext && header->pNext->sType == VK_STRUCTURE_TYPE_MEMORY_PRIORITY_ALLOCATE_INFO_EXT)
-            {
-                VkBaseOutStructure *memory_priority = header->pNext;
-
-                header->pNext = memory_priority->pNext;
-                free(memory_priority);
-                break;
-            }
-        }
-    }
-
-    if (!(object = calloc(1, sizeof(*object))))
-    {
-        free_VkMemoryAllocateInfo_struct_chain(&allocate_info_dup);
+    if (!(memory = calloc(sizeof(*memory), 1)))
         return VK_ERROR_OUT_OF_HOST_MEMORY;
-    }
 
-    object->dev_mem = VK_NULL_HANDLE;
-    object->handle = INVALID_HANDLE_VALUE;
+    memory->handle = INVALID_HANDLE_VALUE;
     fd_import_info.fd = -1;
     fd_import_info.pNext = NULL;
 
     /* find and process handle import/export info and grab it */
-    handle_import_info = wine_vk_find_struct(allocate_info, IMPORT_MEMORY_WIN32_HANDLE_INFO_KHR);
-    handle_export_info = wine_vk_find_struct(allocate_info, EXPORT_MEMORY_WIN32_HANDLE_INFO_KHR);
+    handle_import_info = wine_vk_find_struct(win_alloc_info, IMPORT_MEMORY_WIN32_HANDLE_INFO_KHR);
+    handle_export_info = wine_vk_find_struct(win_alloc_info, EXPORT_MEMORY_WIN32_HANDLE_INFO_KHR);
     if (handle_export_info && handle_export_info->pAttributes && handle_export_info->pAttributes->lpSecurityDescriptor)
         FIXME("Support for custom security descriptor not implemented.\n");
 
-    if ((export_info = wine_vk_find_struct(&allocate_info_dup, EXPORT_MEMORY_ALLOCATE_INFO)))
+    if ((export_info = wine_vk_find_struct(alloc_info, EXPORT_MEMORY_ALLOCATE_INFO)))
     {
-        object->handle_types = export_info->handleTypes;
+        memory->handle_types = export_info->handleTypes;
         if (export_info->handleTypes & wine_vk_handle_over_fd_types)
             export_info->handleTypes |= VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT;
         wine_vk_normalize_handle_types_host(&export_info->handleTypes);
     }
 
+    mem_flags = device->phys_dev->memory_properties.memoryTypes[alloc_info->memoryTypeIndex].propertyFlags;
+
     /* Vulkan consumes imported FDs, but not imported HANDLEs */
     if (handle_import_info)
     {
         fd_import_info.sType = VK_STRUCTURE_TYPE_IMPORT_MEMORY_FD_INFO_KHR;
-        fd_import_info.pNext = allocate_info_dup.pNext;
+        fd_import_info.pNext = info.pNext;
         fd_import_info.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT;
+        info.pNext = &fd_import_info;
 
         switch (handle_import_info->handleType)
         {
             case VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT:
             case VK_EXTERNAL_MEMORY_HANDLE_TYPE_D3D11_TEXTURE_BIT:
                 if (handle_import_info->handle)
-                    NtDuplicateObject( NtCurrentProcess(), handle_import_info->handle, NtCurrentProcess(), &object->handle, 0, 0, DUPLICATE_SAME_ACCESS );
+                    NtDuplicateObject( NtCurrentProcess(), handle_import_info->handle, NtCurrentProcess(), &memory->handle, 0, 0, DUPLICATE_SAME_ACCESS );
                 else if (handle_import_info->name)
-                    object->handle = open_shared_resource( 0, handle_import_info->name );
+                    memory->handle = open_shared_resource( 0, handle_import_info->name );
                 break;
             case VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_KMT_BIT:
             case VK_EXTERNAL_MEMORY_HANDLE_TYPE_D3D11_TEXTURE_KMT_BIT:
@@ -5008,87 +3684,1269 @@ NTSTATUS wine_vkAllocateMemory(void *args)
                    object (as objects imported from FDs hold a reference to the payload), and no win32 handle to the object. We would then
                    extend make_vulkan to have the thunks converting wine_dev_mem to native handles open the VkDeviceMemory from the KMT
                    handle, use it in the host function, then close it again. */
-                object->handle = open_shared_resource( handle_import_info->handle, NULL );
+                memory->handle = open_shared_resource( handle_import_info->handle, NULL );
                 break;
             default:
                 WARN("Invalid handle type %08x passed in.\n", handle_import_info->handleType);
-                res = VK_ERROR_INVALID_EXTERNAL_HANDLE;
+                result = VK_ERROR_INVALID_EXTERNAL_HANDLE;
                 goto done;
         }
 
-        if (object->handle != INVALID_HANDLE_VALUE)
-            fd_import_info.fd = get_shared_resource_fd(object->handle);
+        if (memory->handle != INVALID_HANDLE_VALUE)
+            fd_import_info.fd = get_shared_resource_fd(memory->handle);
 
         if (fd_import_info.fd == -1)
         {
             TRACE("Couldn't access resource handle or name. type=%08x handle=%p name=%s\n", handle_import_info->handleType, handle_import_info->handle,
                     handle_import_info->name ? debugstr_w(handle_import_info->name) : "");
-            res = VK_ERROR_INVALID_EXTERNAL_HANDLE;
+            result = VK_ERROR_INVALID_EXTERNAL_HANDLE;
             goto done;
         }
     }
-
-    allocate_info_host.sType = allocate_info_dup.sType;
-    allocate_info_host.pNext = fd_import_info.fd == -1 ? allocate_info_dup.pNext : &fd_import_info;
-    allocate_info_host.allocationSize = allocate_info_dup.allocationSize;
-    allocate_info_host.memoryTypeIndex = allocate_info_dup.memoryTypeIndex;
-
-    if ((res = device->funcs.p_vkAllocateMemory(device->device, &allocate_info_host, NULL, &object->dev_mem)) == VK_SUCCESS)
+    else if (device->phys_dev->external_memory_align && (mem_flags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) &&
+        !find_next_struct(alloc_info->pNext, VK_STRUCTURE_TYPE_IMPORT_MEMORY_HOST_POINTER_INFO_EXT))
     {
-        if (object->handle == INVALID_HANDLE_VALUE && export_info && export_info->handleTypes & VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT)
+        /* For host visible memory, we try to use VK_EXT_external_memory_host on wow64
+         * to ensure that mapped pointer is 32-bit. */
+        VkMemoryHostPointerPropertiesEXT props =
         {
-            get_fd_info.sType = VK_STRUCTURE_TYPE_MEMORY_GET_FD_INFO_KHR;
-            get_fd_info.pNext = NULL;
-            get_fd_info.memory = object->dev_mem;
-            get_fd_info.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT;
+            .sType = VK_STRUCTURE_TYPE_MEMORY_HOST_POINTER_PROPERTIES_EXT,
+        };
+        uint32_t i, align = device->phys_dev->external_memory_align - 1;
+        SIZE_T alloc_size = info.allocationSize;
+        static int once;
 
-            if (device->funcs.p_vkGetMemoryFdKHR(device->device, &get_fd_info, &fd) == VK_SUCCESS)
+        if (!once++)
+            FIXME("Using VK_EXT_external_memory_host\n");
+
+        if (NtAllocateVirtualMemory(GetCurrentProcess(), &mapping, zero_bits(), &alloc_size,
+                                    MEM_COMMIT, PAGE_READWRITE))
+        {
+            ERR("NtAllocateVirtualMemory failed\n");
+            free(memory);
+            return VK_ERROR_OUT_OF_HOST_MEMORY;
+        }
+
+        result = device->funcs.p_vkGetMemoryHostPointerPropertiesEXT(device->device,
+                VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT, mapping, &props);
+        if (result != VK_SUCCESS)
+        {
+            ERR("vkGetMemoryHostPointerPropertiesEXT failed: %d\n", result);
+            free(memory);
+            return result;
+        }
+
+        if (!(props.memoryTypeBits & (1u << info.memoryTypeIndex)))
+        {
+            /* If requested memory type is not allowed to use external memory,
+             * try to find a supported compatible type. */
+            uint32_t mask = mem_flags & ~VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+            for (i = 0; i < device->phys_dev->memory_properties.memoryTypeCount; i++)
             {
-                object->handle = create_gpu_resource(fd, handle_export_info ? handle_export_info->name : NULL);
-                object->access = handle_export_info ? handle_export_info->dwAccess : GENERIC_ALL;
-                if (handle_export_info && handle_export_info->pAttributes)
-                    object->inherit = handle_export_info->pAttributes->bInheritHandle;
-                else
-                    object->inherit = FALSE;
-                close(fd);
+                if (!(props.memoryTypeBits & (1u << i)))
+                    continue;
+                if ((device->phys_dev->memory_properties.memoryTypes[i].propertyFlags & mask) != mask)
+                    continue;
+
+                TRACE("Memory type not compatible with host memory, using %u instead\n", i);
+                info.memoryTypeIndex = i;
+                break;
             }
-
-            if (object->handle == INVALID_HANDLE_VALUE)
+            if (i == device->phys_dev->memory_properties.memoryTypeCount)
             {
-                res = VK_ERROR_OUT_OF_HOST_MEMORY;
-                goto done;
+                FIXME("Not found compatible memory type\n");
+                alloc_size = 0;
+                NtFreeVirtualMemory(GetCurrentProcess(), &mapping, &alloc_size, MEM_RELEASE);
             }
         }
 
-        WINE_VK_ADD_NON_DISPATCHABLE_MAPPING(device->phys_dev->instance, object, object->dev_mem);
-        *memory = wine_dev_mem_to_handle(object);
+        if (props.memoryTypeBits & (1u << info.memoryTypeIndex))
+        {
+            host_pointer_info.sType = VK_STRUCTURE_TYPE_IMPORT_MEMORY_HOST_POINTER_INFO_EXT;
+            host_pointer_info.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT;
+            host_pointer_info.pHostPointer = mapping;
+            host_pointer_info.pNext = info.pNext;
+            info.pNext = &host_pointer_info;
+
+            info.allocationSize = (info.allocationSize + align) & ~align;
+        }
     }
 
-    done:
-
-    if (res != VK_SUCCESS)
+    result = device->funcs.p_vkAllocateMemory(device->device, &info, NULL, &memory->memory);
+    if (result == VK_SUCCESS && memory->handle == INVALID_HANDLE_VALUE && export_info && export_info->handleTypes & VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT)
     {
-        device->funcs.p_vkFreeMemory(device->device, object->dev_mem, NULL);
+        get_fd_info.sType = VK_STRUCTURE_TYPE_MEMORY_GET_FD_INFO_KHR;
+        get_fd_info.pNext = NULL;
+        get_fd_info.memory = memory->memory;
+        get_fd_info.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT;
+
+        if (device->funcs.p_vkGetMemoryFdKHR(device->device, &get_fd_info, &fd) == VK_SUCCESS)
+        {
+            memory->handle = create_gpu_resource(fd, handle_export_info ? handle_export_info->name : NULL);
+            memory->access = handle_export_info ? handle_export_info->dwAccess : GENERIC_ALL;
+            if (handle_export_info && handle_export_info->pAttributes)
+                memory->inherit = handle_export_info->pAttributes->bInheritHandle;
+            else
+                memory->inherit = FALSE;
+            close(fd);
+        }
+
+        if (memory->handle == INVALID_HANDLE_VALUE)
+        {
+            device->funcs.p_vkFreeMemory(device->device, memory->memory, NULL);
+            result = VK_ERROR_OUT_OF_HOST_MEMORY;
+            goto done;
+        }
+    }
+done:
+    if (result != VK_SUCCESS)
+    {
         if (fd_import_info.fd != -1)
             close(fd_import_info.fd);
-        if (object->handle != INVALID_HANDLE_VALUE)
-            NtClose(object->handle);
-        free(object);
+        if (memory->handle != INVALID_HANDLE_VALUE)
+            NtClose(memory->handle);
+        free(memory);
+        return result;
     }
 
-    free_VkMemoryAllocateInfo_struct_chain(&allocate_info_dup);
+    memory->mapping = mapping;
+    *ret = wine_device_memory_to_handle(memory);
+    return VK_SUCCESS;
+}
+
+void wine_vkFreeMemory(VkDevice handle, VkDeviceMemory memory_handle, const VkAllocationCallbacks *allocator)
+{
+    struct wine_device *device = wine_device_from_handle(handle);
+    struct wine_device_memory *memory;
+
+    if (!memory_handle)
+        return;
+    memory = wine_device_memory_from_handle(memory_handle);
+
+    device->funcs.p_vkFreeMemory(device->device, memory->memory, NULL);
+
+    if (memory->mapping)
+    {
+        SIZE_T alloc_size = 0;
+        NtFreeVirtualMemory(GetCurrentProcess(), &memory->mapping, &alloc_size, MEM_RELEASE);
+    }
+
+    if (memory->handle != INVALID_HANDLE_VALUE)
+        NtClose(memory->handle);
+
+    free(memory);
+}
+
+VkResult wine_vkMapMemory(VkDevice device, VkDeviceMemory memory, VkDeviceSize offset,
+                          VkDeviceSize size, VkMemoryMapFlags flags, void **data)
+{
+    const VkMemoryMapInfoKHR info =
+    {
+      .sType = VK_STRUCTURE_TYPE_MEMORY_MAP_INFO_KHR,
+      .flags = flags,
+      .memory = memory,
+      .offset = offset,
+      .size = size,
+   };
+
+   return wine_vkMapMemory2KHR(device, &info, data);
+}
+
+VkResult wine_vkMapMemory2KHR(VkDevice handle, const VkMemoryMapInfoKHR *map_info, void **data)
+{
+    struct wine_device *device = wine_device_from_handle(handle);
+    struct wine_device_memory *memory = wine_device_memory_from_handle(map_info->memory);
+    VkMemoryMapInfoKHR info = *map_info;
+    VkResult result;
+
+    info.memory = memory->memory;
+    if (memory->mapping)
+    {
+        *data = (char *)memory->mapping + info.offset;
+        TRACE("returning %p\n", *data);
+        return VK_SUCCESS;
+    }
+
+    if (device->funcs.p_vkMapMemory2KHR)
+    {
+        result = device->funcs.p_vkMapMemory2KHR(device->device, &info, data);
+    }
+    else
+    {
+        assert(!info.pNext);
+        result = device->funcs.p_vkMapMemory(device->device, info.memory, info.offset,
+                                             info.size, info.flags, data);
+    }
+
+#ifdef _WIN64
+    if (NtCurrentTeb()->WowTebOffset && result == VK_SUCCESS && (UINT_PTR)*data >> 32)
+    {
+        FIXME("returned mapping %p does not fit 32-bit pointer\n", *data);
+        device->funcs.p_vkUnmapMemory(device->device, memory->memory);
+        *data = NULL;
+        result = VK_ERROR_OUT_OF_HOST_MEMORY;
+    }
+#endif
+
+    return result;
+}
+
+void wine_vkUnmapMemory(VkDevice device, VkDeviceMemory memory)
+{
+    const VkMemoryUnmapInfoKHR info =
+    {
+        .sType = VK_STRUCTURE_TYPE_MEMORY_UNMAP_INFO_KHR,
+        .memory = memory,
+    };
+
+    wine_vkUnmapMemory2KHR(device, &info);
+}
+
+VkResult wine_vkUnmapMemory2KHR(VkDevice handle, const VkMemoryUnmapInfoKHR *unmap_info)
+{
+    struct wine_device *device = wine_device_from_handle(handle);
+    struct wine_device_memory *memory = wine_device_memory_from_handle(unmap_info->memory);
+    VkMemoryUnmapInfoKHR info;
+
+    if (memory->mapping)
+        return VK_SUCCESS;
+
+    if (!device->funcs.p_vkUnmapMemory2KHR)
+    {
+        assert(!unmap_info->pNext);
+        device->funcs.p_vkUnmapMemory(device->device, memory->memory);
+        return VK_SUCCESS;
+    }
+
+    info = *unmap_info;
+    info.memory = memory->memory;
+    return device->funcs.p_vkUnmapMemory2KHR(device->device, &info);
+}
+
+VkResult wine_vkCreateBuffer(VkDevice handle, const VkBufferCreateInfo *create_info,
+                             const VkAllocationCallbacks *allocator, VkBuffer *buffer)
+{
+    struct wine_device *device = wine_device_from_handle(handle);
+    VkExternalMemoryBufferCreateInfo external_memory_info, *ext_info;
+    VkBufferCreateInfo info = *create_info;
+
+    if ((ext_info = wine_vk_find_struct(create_info, EXTERNAL_MEMORY_BUFFER_CREATE_INFO)))
+    {
+        if (ext_info->handleTypes & wine_vk_handle_over_fd_types)
+            ext_info->handleTypes |= VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT;
+        wine_vk_normalize_handle_types_host(&ext_info->handleTypes);
+    }
+    else if (device->phys_dev->external_memory_align &&
+        !find_next_struct(info.pNext, VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_BUFFER_CREATE_INFO))
+    {
+        external_memory_info.sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_BUFFER_CREATE_INFO;
+        external_memory_info.pNext = info.pNext;
+        external_memory_info.handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT;
+        info.pNext = &external_memory_info;
+    }
+
+    return device->funcs.p_vkCreateBuffer(device->device, &info, NULL, buffer);
+}
+
+VkResult wine_vkCreateImage(VkDevice handle, const VkImageCreateInfo *create_info,
+                            const VkAllocationCallbacks *allocator, VkImage *image)
+{
+    struct wine_device *device = wine_device_from_handle(handle);
+    VkExternalMemoryImageCreateInfo external_memory_info, *update_info;
+    VkImageCreateInfo info = *create_info;
+
+    if ((update_info = find_next_struct(info.pNext, VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO)))
+    {
+        if (update_info->handleTypes & wine_vk_handle_over_fd_types)
+            update_info->handleTypes |= VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT_KHR;
+        wine_vk_normalize_handle_types_host(&update_info->handleTypes);
+    }
+    else if (device->phys_dev->external_memory_align)
+    {
+        external_memory_info.sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO;
+        external_memory_info.pNext = info.pNext;
+        external_memory_info.handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT;
+        info.pNext = &external_memory_info;
+    }
+
+    return device->funcs.p_vkCreateImage(device->device, &info, NULL, image);
+}
+
+static inline void adjust_max_image_count(struct wine_phys_dev *phys_dev, VkSurfaceCapabilitiesKHR* capabilities)
+{
+    /* Many Windows games, for example Strange Brigade, No Man's Sky, Path of Exile
+     * and World War Z, do not expect that maxImageCount can be set to 0.
+     * A value of 0 means that there is no limit on the number of images.
+     * Nvidia reports 8 on Windows, AMD 16.
+     * https://vulkan.gpuinfo.org/displayreport.php?id=9122#surface
+     * https://vulkan.gpuinfo.org/displayreport.php?id=9121#surface
+     */
+    if ((phys_dev->instance->quirks & WINEVULKAN_QUIRK_ADJUST_MAX_IMAGE_COUNT) && !capabilities->maxImageCount)
+    {
+        capabilities->maxImageCount = max(capabilities->minImageCount, 16);
+    }
+}
+
+VkResult wine_vkGetPhysicalDeviceSurfaceCapabilitiesKHR(VkPhysicalDevice handle, VkSurfaceKHR surface_handle,
+                                                        VkSurfaceCapabilitiesKHR *capabilities)
+{
+    struct wine_phys_dev *phys_dev = wine_phys_dev_from_handle(handle);
+    struct wine_surface *surface = wine_surface_from_handle(surface_handle);
+    VkResult res;
+    VkExtent2D user_res;
+
+    res = phys_dev->instance->funcs.p_vkGetPhysicalDeviceSurfaceCapabilitiesKHR(phys_dev->phys_dev,
+            surface->driver_surface, capabilities);
+
+    if (res == VK_SUCCESS)
+        adjust_max_image_count(phys_dev, capabilities);
+
+    if (res == VK_SUCCESS && vk_funcs->query_fs_hack &&
+        vk_funcs->query_fs_hack(surface->driver_surface, NULL, &user_res, NULL, NULL, NULL, NULL))
+    {
+        capabilities->currentExtent = user_res;
+        capabilities->minImageExtent = user_res;
+        capabilities->maxImageExtent = user_res;
+    }
 
     return res;
 }
 
-NTSTATUS wine_vkGetMemoryWin32HandleKHR(void *args)
+VkResult wine_vkGetPhysicalDeviceSurfaceCapabilities2KHR(VkPhysicalDevice handle,
+                                                         const VkPhysicalDeviceSurfaceInfo2KHR *surface_info,
+                                                         VkSurfaceCapabilities2KHR *capabilities)
 {
-    struct vkGetMemoryWin32HandleKHR_params *params = args;
-    VkDevice device = params->device;
-    const VkMemoryGetWin32HandleInfoKHR *handle_info = params->pGetWin32HandleInfo;
-    HANDLE *handle = params->pHandle;
+    struct wine_phys_dev *phys_dev = wine_phys_dev_from_handle(handle);
+    struct wine_surface *surface = wine_surface_from_handle(surface_info->surface);
+    VkPhysicalDeviceSurfaceInfo2KHR host_info;
+    VkResult res;
+    VkExtent2D user_res;
 
-    struct wine_dev_mem *dev_mem = wine_dev_mem_from_handle(handle_info->memory);
+    host_info.sType = surface_info->sType;
+    host_info.pNext = surface_info->pNext;
+    host_info.surface = surface->driver_surface;
+    res = phys_dev->instance->funcs.p_vkGetPhysicalDeviceSurfaceCapabilities2KHR(phys_dev->phys_dev,
+            &host_info, capabilities);
+
+    if (res == VK_SUCCESS)
+        adjust_max_image_count(phys_dev, &capabilities->surfaceCapabilities);
+
+    if (res == VK_SUCCESS && vk_funcs->query_fs_hack &&
+        vk_funcs->query_fs_hack(wine_surface_from_handle(surface_info->surface)->driver_surface, NULL, &user_res, NULL, NULL, NULL, NULL))
+    {
+        capabilities->surfaceCapabilities.currentExtent = user_res;
+        capabilities->surfaceCapabilities.minImageExtent = user_res;
+        capabilities->surfaceCapabilities.maxImageExtent = user_res;
+    }
+
+    return res;
+}
+
+VkResult wine_vkCreateDebugUtilsMessengerEXT(VkInstance handle,
+                                             const VkDebugUtilsMessengerCreateInfoEXT *create_info,
+                                             const VkAllocationCallbacks *allocator,
+                                             VkDebugUtilsMessengerEXT *messenger)
+{
+    struct wine_instance *instance = wine_instance_from_handle(handle);
+    VkDebugUtilsMessengerCreateInfoEXT wine_create_info;
+    struct wine_debug_utils_messenger *object;
+    VkResult res;
+
+    if (allocator)
+        FIXME("Support for allocation callbacks not implemented yet\n");
+
+    if (!(object = calloc(1, sizeof(*object))))
+        return VK_ERROR_OUT_OF_HOST_MEMORY;
+
+    object->instance = instance;
+    object->user_callback = create_info->pfnUserCallback;
+    object->user_data = create_info->pUserData;
+
+    wine_create_info = *create_info;
+
+    wine_create_info.pfnUserCallback = (void *) &debug_utils_callback_conversion;
+    wine_create_info.pUserData = object;
+
+    res = instance->funcs.p_vkCreateDebugUtilsMessengerEXT(instance->instance, &wine_create_info, NULL,  &object->debug_messenger);
+
+    if (res != VK_SUCCESS)
+    {
+        free(object);
+        return res;
+    }
+
+    WINE_VK_ADD_NON_DISPATCHABLE_MAPPING(instance, object, object->debug_messenger, object);
+    *messenger = wine_debug_utils_messenger_to_handle(object);
+
+    return VK_SUCCESS;
+}
+
+void wine_vkDestroyDebugUtilsMessengerEXT(VkInstance handle, VkDebugUtilsMessengerEXT messenger,
+                                          const VkAllocationCallbacks *allocator)
+{
+    struct wine_instance *instance = wine_instance_from_handle(handle);
+    struct wine_debug_utils_messenger *object;
+
+    object = wine_debug_utils_messenger_from_handle(messenger);
+
+    if (!object)
+        return;
+
+    instance->funcs.p_vkDestroyDebugUtilsMessengerEXT(instance->instance, object->debug_messenger, NULL);
+    WINE_VK_REMOVE_HANDLE_MAPPING(instance, object);
+
+    free(object);
+}
+
+VkResult wine_vkCreateDebugReportCallbackEXT(VkInstance handle,
+                                             const VkDebugReportCallbackCreateInfoEXT *create_info,
+                                             const VkAllocationCallbacks *allocator,
+                                             VkDebugReportCallbackEXT *callback)
+{
+    struct wine_instance *instance = wine_instance_from_handle(handle);
+    VkDebugReportCallbackCreateInfoEXT wine_create_info;
+    struct wine_debug_report_callback *object;
+    VkResult res;
+
+    if (allocator)
+        FIXME("Support for allocation callbacks not implemented yet\n");
+
+    if (!(object = calloc(1, sizeof(*object))))
+        return VK_ERROR_OUT_OF_HOST_MEMORY;
+
+    object->instance = instance;
+    object->user_callback = create_info->pfnCallback;
+    object->user_data = create_info->pUserData;
+
+    wine_create_info = *create_info;
+
+    wine_create_info.pfnCallback = (void *) debug_report_callback_conversion;
+    wine_create_info.pUserData = object;
+
+    res = instance->funcs.p_vkCreateDebugReportCallbackEXT(instance->instance, &wine_create_info, NULL, &object->debug_callback);
+
+    if (res != VK_SUCCESS)
+    {
+        free(object);
+        return res;
+    }
+
+    WINE_VK_ADD_NON_DISPATCHABLE_MAPPING(instance, object, object->debug_callback, object);
+    *callback = wine_debug_report_callback_to_handle(object);
+
+    return VK_SUCCESS;
+}
+
+void wine_vkDestroyDebugReportCallbackEXT(VkInstance handle, VkDebugReportCallbackEXT callback,
+                                          const VkAllocationCallbacks *allocator)
+{
+    struct wine_instance *instance = wine_instance_from_handle(handle);
+    struct wine_debug_report_callback *object;
+
+    object = wine_debug_report_callback_from_handle(callback);
+
+    if (!object)
+        return;
+
+    instance->funcs.p_vkDestroyDebugReportCallbackEXT(instance->instance, object->debug_callback, NULL);
+
+    WINE_VK_REMOVE_HANDLE_MAPPING(instance, object);
+
+    free(object);
+}
+
+VkResult wine_vkCreateDeferredOperationKHR(VkDevice                     handle,
+                                           const VkAllocationCallbacks* allocator,
+                                           VkDeferredOperationKHR*      deferredOperation)
+{
+    struct wine_device *device = wine_device_from_handle(handle);
+    struct wine_deferred_operation *object;
+    VkResult res;
+
+    if (allocator)
+        FIXME("Support for allocation callbacks not implemented yet\n");
+
+    if (!(object = calloc(1, sizeof(*object))))
+        return VK_ERROR_OUT_OF_HOST_MEMORY;
+
+    res = device->funcs.p_vkCreateDeferredOperationKHR(device->device, NULL, &object->deferred_operation);
+
+    if (res != VK_SUCCESS)
+    {
+        free(object);
+        return res;
+    }
+
+    init_conversion_context(&object->ctx);
+
+    WINE_VK_ADD_NON_DISPATCHABLE_MAPPING(device->phys_dev->instance, object, object->deferred_operation, object);
+    *deferredOperation = wine_deferred_operation_to_handle(object);
+
+    return VK_SUCCESS;
+}
+
+void wine_vkDestroyDeferredOperationKHR(VkDevice                     handle,
+                                        VkDeferredOperationKHR       operation,
+                                        const VkAllocationCallbacks* allocator)
+{
+    struct wine_device *device = wine_device_from_handle(handle);
+    struct wine_deferred_operation *object;
+
+    object = wine_deferred_operation_from_handle(operation);
+
+    if (!object)
+        return;
+
+    device->funcs.p_vkDestroyDeferredOperationKHR(device->device, object->deferred_operation, NULL);
+
+    WINE_VK_REMOVE_HANDLE_MAPPING(device->phys_dev->instance, object);
+
+    free_conversion_context(&object->ctx);
+    free(object);
+}
+
+void wine_vkDestroySwapchainKHR(VkDevice device_handle, VkSwapchainKHR handle, const VkAllocationCallbacks *allocator)
+{
+    struct wine_device *device = wine_device_from_handle(device_handle);
+    struct wine_swapchain *swapchain = wine_swapchain_from_handle(handle);
+    uint32_t i;
+
+    if (allocator)
+        FIXME("Support for allocation callbacks not implemented yet\n");
+
+    if (swapchain->fs_hack_enabled)
+    {
+        for (i = 0; i < swapchain->n_images; ++i) destroy_fs_hack_image(device, swapchain, &swapchain->fs_hack_images[i]);
+
+        for (i = 0; i < device->queue_count; ++i)
+            if (swapchain->cmd_pools[i])
+                device->funcs.p_vkDestroyCommandPool(device->device, swapchain->cmd_pools[i], NULL);
+
+        destroy_pipeline(device, &swapchain->blit_pipeline);
+        destroy_pipeline(device, &swapchain->fsr_easu_pipeline);
+        destroy_pipeline(device, &swapchain->fsr_rcas_pipeline);
+        device->funcs.p_vkDestroyDescriptorSetLayout(device->device, swapchain->descriptor_set_layout, NULL);
+        device->funcs.p_vkDestroyDescriptorPool(device->device, swapchain->descriptor_pool, NULL);
+        device->funcs.p_vkDestroySampler(device->device, swapchain->sampler, NULL);
+        device->funcs.p_vkFreeMemory(device->device, swapchain->user_image_memory, NULL);
+        device->funcs.p_vkFreeMemory(device->device, swapchain->fsr_image_memory, NULL);
+        free(swapchain->cmd_pools);
+        free(swapchain->fs_hack_images);
+    }
+
+    WINE_VK_REMOVE_HANDLE_MAPPING(device->phys_dev->instance, swapchain);
+
+    device->funcs.p_vkDestroySwapchainKHR(device->device, swapchain->swapchain, NULL);
+    free(swapchain);
+}
+
+VkResult wine_vkGetSwapchainImagesKHR(VkDevice device_handle, VkSwapchainKHR handle,
+                                      uint32_t *pSwapchainImageCount, VkImage *pSwapchainImages)
+{
+    struct wine_device *device = wine_device_from_handle(device_handle);
+    struct wine_swapchain *swapchain = wine_swapchain_from_handle(handle);
+    uint32_t i;
+
+    if (pSwapchainImages && swapchain->fs_hack_enabled)
+    {
+        if (*pSwapchainImageCount > swapchain->n_images)
+            *pSwapchainImageCount = swapchain->n_images;
+        for (i = 0; i < *pSwapchainImageCount; ++i) pSwapchainImages[i] = swapchain->fs_hack_images[i].user_image;
+        return *pSwapchainImageCount == swapchain->n_images ? VK_SUCCESS : VK_INCOMPLETE;
+    }
+
+    return device->funcs.p_vkGetSwapchainImagesKHR(device->device, swapchain->swapchain,
+                                                   pSwapchainImageCount, pSwapchainImages);
+}
+
+static VkCommandBuffer create_hack_cmd(struct wine_queue *queue, struct wine_swapchain *swapchain, uint32_t queue_idx)
+{
+    VkCommandBufferAllocateInfo allocInfo = {0};
+    VkCommandBuffer cmd;
+    VkResult result;
+
+    if (!swapchain->cmd_pools[queue_idx])
+    {
+        VkCommandPoolCreateInfo poolInfo = {0};
+
+        poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+        poolInfo.queueFamilyIndex = queue_idx;
+
+        result = queue->device->funcs.p_vkCreateCommandPool(queue->device->device, &poolInfo, NULL,
+                                                            &swapchain->cmd_pools[queue_idx]);
+        if (result != VK_SUCCESS)
+        {
+            ERR("vkCreateCommandPool failed, res=%d\n", result);
+            return NULL;
+        }
+    }
+
+    allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    allocInfo.commandPool = swapchain->cmd_pools[queue_idx];
+    allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    allocInfo.commandBufferCount = 1;
+
+    result = queue->device->funcs.p_vkAllocateCommandBuffers(queue->device->device, &allocInfo, &cmd);
+    if (result != VK_SUCCESS)
+    {
+        ERR("vkAllocateCommandBuffers failed, res=%d\n", result);
+        return NULL;
+    }
+
+    return cmd;
+}
+
+static void bind_pipeline(struct wine_device *device, VkCommandBuffer cmd, struct fs_comp_pipeline *pipeline, VkDescriptorSet set, void *push_data)
+{
+    device->funcs.p_vkCmdBindPipeline(cmd,
+            VK_PIPELINE_BIND_POINT_COMPUTE, pipeline->pipeline);
+
+    device->funcs.p_vkCmdBindDescriptorSets(cmd,
+            VK_PIPELINE_BIND_POINT_COMPUTE, pipeline->pipeline_layout,
+            0, 1, &set, 0, NULL);
+
+    device->funcs.p_vkCmdPushConstants(cmd,
+            pipeline->pipeline_layout, VK_SHADER_STAGE_COMPUTE_BIT,
+            0, pipeline->push_size, push_data);
+}
+
+#if defined(USE_STRUCT_CONVERSION)
+static void init_barrier(VkImageMemoryBarrier_host *barrier)
+#else
+static void init_barrier(VkImageMemoryBarrier *barrier)
+#endif
+{
+    barrier->sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    barrier->pNext = NULL;
+    barrier->srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier->dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier->subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    barrier->subresourceRange.baseMipLevel = 0;
+    barrier->subresourceRange.levelCount = 1;
+    barrier->subresourceRange.baseArrayLayer = 0;
+    barrier->subresourceRange.layerCount = 1;
+}
+
+static VkResult record_compute_cmd(struct wine_device *device, struct wine_swapchain *swapchain,
+                                   struct fs_hack_image *hack)
+{
+#if defined(USE_STRUCT_CONVERSION)
+    VkImageMemoryBarrier_host barriers[2] = {{0}};
+    VkCommandBufferBeginInfo_host beginInfo = {0};
+#else
+    VkImageMemoryBarrier barriers[2] = {{0}};
+    VkCommandBufferBeginInfo beginInfo = {0};
+#endif
+    float constants[4];
+    VkResult result;
+
+    TRACE("recording compute command\n");
+
+    init_barrier(&barriers[0]);
+    init_barrier(&barriers[1]);
+
+    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT;
+
+    device->funcs.p_vkBeginCommandBuffer(hack->cmd, &beginInfo);
+
+    /* for the cs we run... */
+    /* transition user image from PRESENT_SRC to SHADER_READ */
+    barriers[0].oldLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+    barriers[0].newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    barriers[0].image = hack->user_image;
+    barriers[0].srcAccessMask = 0;
+    barriers[0].dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+
+    /* storage image... */
+    /* transition swapchain image from whatever to GENERAL */
+    barriers[1].oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    barriers[1].newLayout = VK_IMAGE_LAYOUT_GENERAL;
+    barriers[1].image = hack->swapchain_image;
+    barriers[1].srcAccessMask = 0;
+    barriers[1].dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+
+    device->funcs.p_vkCmdPipelineBarrier(hack->cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, NULL, 0, NULL, 2, barriers);
+
+    /* perform blit shader */
+
+    /* vec2: blit dst offset in real coords */
+    constants[0] = swapchain->blit_dst.offset.x;
+    constants[1] = swapchain->blit_dst.offset.y;
+
+    /* offset by 0.5f because sampling is relative to pixel center */
+    constants[0] -= 0.5f * swapchain->blit_dst.extent.width / swapchain->user_extent.width;
+    constants[1] -= 0.5f * swapchain->blit_dst.extent.height / swapchain->user_extent.height;
+
+    /* vec2: blit dst extents in real coords */
+    constants[2] = swapchain->blit_dst.extent.width;
+    constants[3] = swapchain->blit_dst.extent.height;
+    
+    bind_pipeline(device, hack->cmd, &swapchain->blit_pipeline, hack->descriptor_set, constants);
+
+    /* local sizes in shader are 8 */
+    device->funcs.p_vkCmdDispatch(hack->cmd, ceil(swapchain->real_extent.width / 8.),
+            ceil(swapchain->real_extent.height / 8.), 1);
+
+    /* transition user image from SHADER_READ back to PRESENT_SRC */
+    barriers[0].oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    barriers[0].newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+    barriers[0].image = hack->user_image;
+    barriers[0].srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    barriers[0].dstAccessMask = 0;
+
+    /* transition swapchain image from GENERAL to PRESENT_SRC */
+    barriers[1].oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+    barriers[1].newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+    barriers[1].image = hack->swapchain_image;
+    barriers[1].srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+    barriers[1].dstAccessMask = 0;
+
+    device->funcs.p_vkCmdPipelineBarrier(hack->cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                                         VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, NULL, 0, NULL, 2, barriers);
+
+    result = device->funcs.p_vkEndCommandBuffer(hack->cmd);
+    if (result != VK_SUCCESS)
+    {
+        ERR("vkEndCommandBuffer: %d\n", result);
+        return result;
+    }
+
+    return VK_SUCCESS;
+}
+
+static VkResult record_graphics_cmd(struct wine_device *device, struct wine_swapchain *swapchain, struct fs_hack_image *hack)
+{
+    VkResult result;
+    VkImageBlit blitregion = {0};
+    VkImageSubresourceRange range = {0};
+    VkClearColorValue black = {{0.f, 0.f, 0.f}};
+#if defined(USE_STRUCT_CONVERSION)
+    VkImageMemoryBarrier_host barriers[2] = {{0}};
+    VkCommandBufferBeginInfo_host beginInfo = {0};
+#else
+    VkImageMemoryBarrier barriers[2] = {{0}};
+    VkCommandBufferBeginInfo beginInfo = {0};
+#endif
+
+    TRACE("recording graphics command\n");
+
+    init_barrier(&barriers[0]);
+    init_barrier(&barriers[1]);
+
+    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT;
+
+    device->funcs.p_vkBeginCommandBuffer(hack->cmd, &beginInfo);
+
+    /* transition real image from whatever to TRANSFER_DST_OPTIMAL */
+    barriers[0].oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    barriers[0].newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    barriers[0].image = hack->swapchain_image;
+    barriers[0].srcAccessMask = 0;
+    barriers[0].dstAccessMask = 0;
+
+    /* transition user image from PRESENT_SRC to TRANSFER_SRC_OPTIMAL */
+    barriers[1].oldLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+    barriers[1].newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    barriers[1].image = hack->user_image;
+    barriers[1].srcAccessMask = 0;
+    barriers[1].dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+
+    device->funcs.p_vkCmdPipelineBarrier(
+            hack->cmd,
+            VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+            VK_PIPELINE_STAGE_TRANSFER_BIT,
+            0,
+            0, NULL,
+            0, NULL,
+            2, barriers
+    );
+
+    /* clear the image */
+    range.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    range.baseMipLevel = 0;
+    range.levelCount = 1;
+    range.baseArrayLayer = 0;
+    range.layerCount = 1;
+
+    device->funcs.p_vkCmdClearColorImage(
+            hack->cmd, hack->swapchain_image,
+            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            &black, 1, &range);
+
+    /* perform blit */
+    blitregion.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    blitregion.srcSubresource.layerCount = 1;
+    blitregion.srcOffsets[0].x = 0;
+    blitregion.srcOffsets[0].y = 0;
+    blitregion.srcOffsets[0].z = 0;
+    blitregion.srcOffsets[1].x = swapchain->user_extent.width;
+    blitregion.srcOffsets[1].y = swapchain->user_extent.height;
+    blitregion.srcOffsets[1].z = 1;
+    blitregion.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    blitregion.dstSubresource.layerCount = 1;
+    blitregion.dstOffsets[0].x = 0; //swapchain->blit_dst.offset.x;
+	blitregion.dstOffsets[0].y = 0; //swapchain->blit_dst.offset.y;
+	blitregion.dstOffsets[0].z = 0;
+    blitregion.dstOffsets[1].x = swapchain->blit_dst.offset.x + swapchain->blit_dst.extent.width;
+    blitregion.dstOffsets[1].y = swapchain->blit_dst.offset.y + swapchain->blit_dst.extent.height;
+    blitregion.dstOffsets[1].z = 1;
+
+    device->funcs.p_vkCmdBlitImage(hack->cmd,
+            hack->user_image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+            hack->swapchain_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            1, &blitregion, swapchain->fs_hack_filter);
+
+    /* transition real image from TRANSFER_DST to PRESENT_SRC */
+    barriers[0].oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    barriers[0].newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+    barriers[0].image = hack->swapchain_image;
+    barriers[0].srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    barriers[0].dstAccessMask = 0;
+
+    /* transition user image from TRANSFER_SRC_OPTIMAL to back to PRESENT_SRC */
+    barriers[1].oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    barriers[1].newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+    barriers[1].image = hack->user_image;
+    barriers[1].srcAccessMask = 0;
+    barriers[1].dstAccessMask = 0;
+
+    device->funcs.p_vkCmdPipelineBarrier(
+            hack->cmd,
+            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+            VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+            0,
+            0, NULL,
+            0, NULL,
+            2, barriers
+    );
+
+    result = device->funcs.p_vkEndCommandBuffer(hack->cmd);
+    if(result != VK_SUCCESS){
+        ERR("vkEndCommandBuffer: %d\n", result);
+        return result;
+    }
+
+    return VK_SUCCESS;
+}
+
+static VkResult record_fsr_cmd(struct wine_device *device, struct wine_swapchain *swapchain, struct fs_hack_image *hack)
+{
+#if defined(USE_STRUCT_CONVERSION)
+    VkImageMemoryBarrier_host barriers[3] = {{0}};
+    VkCommandBufferBeginInfo_host beginInfo = {0};
+#else
+    VkImageMemoryBarrier barriers[3] = {{0}};
+    VkCommandBufferBeginInfo beginInfo = {0};
+#endif
+    union
+    {
+        uint32_t uint[16];
+        float    fp[16];
+    } c;
+    VkResult result;
+
+    TRACE("recording compute command\n");
+
+    init_barrier(&barriers[0]);
+    init_barrier(&barriers[1]);
+    init_barrier(&barriers[2]);
+
+    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT;
+
+    device->funcs.p_vkBeginCommandBuffer(hack->cmd, &beginInfo);
+
+    /* 1st pass (easu) */
+    /* transition user image from PRESENT_SRC to SHADER_READ */
+    barriers[0].oldLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+    barriers[0].newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    barriers[0].image = hack->user_image;
+    barriers[0].srcAccessMask = 0;
+    barriers[0].dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+
+    /* storage image... */
+    /* transition fsr image from whatever to GENERAL */
+    barriers[1].oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    barriers[1].newLayout = VK_IMAGE_LAYOUT_GENERAL;
+    barriers[1].image = hack->swapchain_image;
+    barriers[1].srcAccessMask = 0;
+    barriers[1].dstAccessMask = 0;
+
+    device->funcs.p_vkCmdPipelineBarrier(
+            hack->cmd,
+            VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+            0,
+            0, NULL,
+            0, NULL,
+            2, barriers
+    );
+
+    /* perform easu shader */
+
+    c.fp[0] = swapchain->user_extent.width * (1.0f / swapchain->blit_dst.extent.width);
+    c.fp[1] = swapchain->user_extent.height * (1.0f / swapchain->blit_dst.extent.height);
+    c.fp[2] = 0.5f * c.fp[0] - 0.5f;
+    c.fp[3] = 0.5f * c.fp[1] - 0.5f;
+    // Viewport pixel position to normalized image space.
+    // This is used to get upper-left of 'F' tap.
+    c.fp[4] = 1.0f / swapchain->user_extent.width;
+    c.fp[5] = 1.0f / swapchain->user_extent.height;
+    // Centers of gather4, first offset from upper-left of 'F'.
+    //      +---+---+
+    //      |   |   |
+    //      +--(0)--+
+    //      | b | c |
+    //  +---F---+---+---+
+    //  | e | f | g | h |
+    //  +--(1)--+--(2)--+
+    //  | i | j | k | l |
+    //  +---+---+---+---+
+    //      | n | o |
+    //      +--(3)--+
+    //      |   |   |
+    //      +---+---+
+    c.fp[6] =  1.0f * c.fp[4];
+    c.fp[7] = -1.0f * c.fp[5];
+    // These are from (0) instead of 'F'.
+    c.fp[8] = -1.0f * c.fp[4];
+    c.fp[9] =  2.0f * c.fp[5];
+    c.fp[10] =  1.0f * c.fp[4];
+    c.fp[11] =  2.0f * c.fp[5];
+    c.fp[12] =  0.0f * c.fp[4];
+    c.fp[13] =  4.0f * c.fp[5];
+    c.uint[14] = swapchain->blit_dst.extent.width;
+    c.uint[15] = swapchain->blit_dst.extent.height;
+
+    bind_pipeline(device, hack->cmd, &swapchain->fsr_easu_pipeline, hack->descriptor_set, c.uint);
+
+    /* local sizes in shader are 8 */
+    device->funcs.p_vkCmdDispatch(hack->cmd, ceil(swapchain->blit_dst.extent.width / 8.),
+            ceil(swapchain->blit_dst.extent.height / 8.), 1);
+
+    /* transition user image from SHADER_READ back to PRESENT_SRC */
+    barriers[0].oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    barriers[0].newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+    barriers[0].image = hack->user_image;
+    barriers[0].srcAccessMask = 0;
+    barriers[0].dstAccessMask = 0;
+
+    /* transition fsr image from GENERAL to SHADER_READ */
+    barriers[1].oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+    barriers[1].newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    barriers[1].image = hack->swapchain_image;
+    barriers[1].srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+    barriers[1].dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+
+    /* transition swapchain image from whatever to GENERAL */
+    barriers[2].oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    barriers[2].newLayout = VK_IMAGE_LAYOUT_GENERAL;
+    barriers[2].image = hack->swapchain_image;
+    barriers[2].srcAccessMask = 0;
+    barriers[2].dstAccessMask = 0;
+
+    device->funcs.p_vkCmdPipelineBarrier(
+            hack->cmd,
+            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+            VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+            0,
+           0, NULL,
+           0, NULL,
+           3, barriers
+   );
+
+    /* 2nd pass (rcas) */
+
+    c.fp[0] = exp2f(-swapchain->sharpness);
+    c.uint[2] = swapchain->blit_dst.extent.width;
+    c.uint[3] = swapchain->blit_dst.extent.height;
+    c.uint[4] = swapchain->blit_dst.offset.x;
+    c.uint[5] = swapchain->blit_dst.offset.y;
+    c.uint[6] = swapchain->blit_dst.offset.x + swapchain->blit_dst.extent.width;
+    c.uint[7] = swapchain->blit_dst.offset.y + swapchain->blit_dst.extent.height;
+
+    bind_pipeline(device, hack->cmd, &swapchain->fsr_rcas_pipeline, hack->fsr_set, c.uint);
+
+    /* local sizes in shader are 8 */
+    device->funcs.p_vkCmdDispatch(hack->cmd, ceil(swapchain->real_extent.width / 8.),
+            ceil(swapchain->real_extent.height / 8.), 1);
+
+    /* transition swapchain image from GENERAL to PRESENT_SRC */
+    barriers[0].oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+    barriers[0].newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    barriers[0].image = hack->swapchain_image;
+    barriers[0].srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+    barriers[0].dstAccessMask = 0;
+
+    device->funcs.p_vkCmdPipelineBarrier(
+            hack->cmd,
+            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+            VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+            0,
+            0, NULL,
+            0, NULL,
+            1, barriers
+    );
+
+    result = device->funcs.p_vkEndCommandBuffer(hack->cmd);
+    if (result != VK_SUCCESS)
+    {
+        ERR("vkEndCommandBuffer: %d\n", result);
+        return result;
+    }
+
+    return VK_SUCCESS;
+}
+
+VkResult fshack_vk_queue_present(VkQueue queue_handle, const VkPresentInfoKHR *pPresentInfo)
+{
+    struct wine_queue *queue = wine_queue_from_handle(queue_handle);
+    VkCommandBuffer *blit_cmds = NULL;
+    struct wine_swapchain *swapchain;
+    VkPresentInfoKHR our_presentInfo;
+    VkSubmitInfo submitInfo = {0};
+    uint32_t i, n_hacks = 0;
+    VkSemaphore blit_sema;
+    VkSwapchainKHR *arr;
+    uint32_t queue_idx;
+    VkResult res;
+
+    TRACE("%p, %p\n", queue, pPresentInfo);
+
+    our_presentInfo = *pPresentInfo;
+
+    for (i = 0; i < our_presentInfo.swapchainCount; ++i)
+    {
+        swapchain = wine_swapchain_from_handle(our_presentInfo.pSwapchains[i]);
+
+        if (swapchain->fs_hack_enabled)
+        {
+            struct fs_hack_image *hack = &swapchain->fs_hack_images[our_presentInfo.pImageIndices[i]];
+
+            if (!blit_cmds)
+            {
+                queue_idx = queue->family_index;
+                blit_cmds = malloc(our_presentInfo.swapchainCount * sizeof(VkCommandBuffer));
+                blit_sema = hack->blit_finished;
+            }
+
+            if (!hack->cmd || hack->cmd_queue_idx != queue_idx)
+            {
+                if (hack->cmd)
+                    queue->device->funcs.p_vkFreeCommandBuffers(queue->device->device,
+                                                                swapchain->cmd_pools[hack->cmd_queue_idx], 1, &hack->cmd);
+
+                hack->cmd_queue_idx = queue_idx;
+                hack->cmd = create_hack_cmd(queue, swapchain, queue_idx);
+
+                if (!hack->cmd)
+                {
+                    free(blit_cmds);
+                    return VK_ERROR_DEVICE_LOST;
+                }
+
+                if (swapchain->fsr)
+                {
+                    if(queue->device->queue_props[queue_idx].queueFlags & VK_QUEUE_COMPUTE_BIT)
+                        res = record_fsr_cmd(queue->device, swapchain, hack);
+                    else
+                    {
+                        ERR("Present queue is not a compute queue!\n");
+                        res = VK_ERROR_DEVICE_LOST;
+                    }
+                }
+                else
+                {
+                    if(queue->device->queue_props[queue_idx].queueFlags & VK_QUEUE_GRAPHICS_BIT)
+                        res = record_graphics_cmd(queue->device, swapchain, hack);
+                    else if(queue->device->queue_props[queue_idx].queueFlags & VK_QUEUE_COMPUTE_BIT && !is_srgb(swapchain->format))
+                        res = record_compute_cmd(queue->device, swapchain, hack);
+                    else{
+                        ERR("Present queue is neither graphics nor compute queue with unorm format!\n");
+                        res = VK_ERROR_DEVICE_LOST;
+                    }
+                }
+
+                if (res != VK_SUCCESS)
+                {
+                    queue->device->funcs.p_vkFreeCommandBuffers(queue->device->device,
+                                                                swapchain->cmd_pools[hack->cmd_queue_idx], 1, &hack->cmd);
+                    hack->cmd = NULL;
+                    free(blit_cmds);
+                    return res;
+                }
+            }
+
+            blit_cmds[n_hacks] = hack->cmd;
+
+            ++n_hacks;
+        }
+    }
+
+    if (n_hacks > 0)
+    {
+        VkPipelineStageFlags waitStage, *waitStages, *waitStages_arr = NULL;
+
+        if (pPresentInfo->waitSemaphoreCount > 1)
+        {
+            waitStages_arr = malloc(sizeof(VkPipelineStageFlags) * pPresentInfo->waitSemaphoreCount);
+            for (i = 0; i < pPresentInfo->waitSemaphoreCount; ++i) waitStages_arr[i] = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+            waitStages = waitStages_arr;
+        }
+        else
+        {
+            waitStage = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+            waitStages = &waitStage;
+        }
+
+        /* blit user image to real image */
+        submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+        submitInfo.waitSemaphoreCount = pPresentInfo->waitSemaphoreCount;
+        submitInfo.pWaitSemaphores = pPresentInfo->pWaitSemaphores;
+        submitInfo.pWaitDstStageMask = waitStages;
+        submitInfo.commandBufferCount = n_hacks;
+        submitInfo.pCommandBuffers = blit_cmds;
+        submitInfo.signalSemaphoreCount = 1;
+        submitInfo.pSignalSemaphores = &blit_sema;
+
+        res = queue->device->funcs.p_vkQueueSubmit(queue->queue, 1, &submitInfo, VK_NULL_HANDLE);
+        if (res != VK_SUCCESS)
+            ERR("vkQueueSubmit: %d\n", res);
+
+        free(waitStages_arr);
+        free(blit_cmds);
+
+        our_presentInfo.waitSemaphoreCount = 1;
+        our_presentInfo.pWaitSemaphores = &blit_sema;
+    }
+
+    arr = malloc(our_presentInfo.swapchainCount * sizeof(VkSwapchainKHR));
+    if (!arr)
+    {
+        ERR("Failed to allocate memory for swapchain array\n");
+        return VK_ERROR_OUT_OF_HOST_MEMORY;
+    }
+
+    for (i = 0; i < our_presentInfo.swapchainCount; ++i)
+        arr[i] = wine_swapchain_from_handle(our_presentInfo.pSwapchains[i])->swapchain;
+
+    our_presentInfo.pSwapchains = arr;
+
+    res = queue->device->funcs.p_vkQueuePresentKHR(queue->queue, &our_presentInfo);
+
+    free(arr);
+
+    return res;
+}
+
+#ifdef _WIN64
+
+NTSTATUS vk_is_available_instance_function(void *arg)
+{
+    struct is_available_instance_function_params *params = arg;
+    struct wine_instance *instance = wine_instance_from_handle(params->instance);
+    return !!vk_funcs->p_vkGetInstanceProcAddr(instance->instance, params->name);
+}
+
+NTSTATUS vk_is_available_device_function(void *arg)
+{
+    struct is_available_device_function_params *params = arg;
+    struct wine_device *device = wine_device_from_handle(params->device);
+    if (!strcmp(params->name, "vkGetMemoryWin32HandleKHR") || !strcmp(params->name, "vkGetMemoryWin32HandlePropertiesKHR"))
+        params->name = "vkGetMemoryFdKHR";
+    else if (!strcmp(params->name, "vkGetSemaphoreWin32HandleKHR"))
+        params->name = "vkGetSemaphoreFdKHR";
+    else if (!strcmp(params->name, "vkImportSemaphoreWin32HandleKHR"))
+        params->name = "vkImportSemaphoreFdKHR";
+    return !!vk_funcs->p_vkGetDeviceProcAddr(device->device, params->name);
+}
+
+#endif /* _WIN64 */
+
+NTSTATUS vk_is_available_instance_function32(void *arg)
+{
+    struct
+    {
+        UINT32 instance;
+        UINT32 name;
+    } *params = arg;
+    struct wine_instance *instance = wine_instance_from_handle(UlongToPtr(params->instance));
+    return !!vk_funcs->p_vkGetInstanceProcAddr(instance->instance, UlongToPtr(params->name));
+}
+
+NTSTATUS vk_is_available_device_function32(void *arg)
+{
+    struct
+    {
+        UINT32 device;
+        UINT32 name;
+    } *params = arg;
+    struct wine_device *device = wine_device_from_handle(UlongToPtr(params->device));
+    char *name = UlongToPtr(params->name);
+    if (!strcmp(name, "vkGetMemoryWin32HandleKHR") || !strcmp(name, "vkGetMemoryWin32HandlePropertiesKHR"))
+        return !!vk_funcs->p_vkGetDeviceProcAddr(device->device, "vkGetMemoryFdKHR");
+    if (!strcmp(name, "vkGetSemaphoreWin32HandleKHR"))
+        return !!vk_funcs->p_vkGetDeviceProcAddr(device->device, "vkGetSemaphoreFdKHR");
+    if (!strcmp(name, "vkImportSemaphoreWin32HandleKHR"))
+        return !!vk_funcs->p_vkGetDeviceProcAddr(device->device, "vkImportSemaphoreFdKHR");
+    return !!vk_funcs->p_vkGetDeviceProcAddr(device->device, UlongToPtr(params->name));
+}
+
+VkDevice WINAPI __wine_get_native_VkDevice(VkDevice handle)
+{
+    struct wine_device *device = wine_device_from_handle(handle);
+
+    return device->device;
+}
+
+VkInstance WINAPI __wine_get_native_VkInstance(VkInstance handle)
+{
+    struct wine_instance *instance = wine_instance_from_handle(handle);;
+
+    return instance->instance;
+}
+
+VkPhysicalDevice WINAPI __wine_get_native_VkPhysicalDevice(VkPhysicalDevice handle)
+{
+    struct wine_phys_dev *phys_dev = wine_phys_dev_from_handle(handle);
+
+    return phys_dev->phys_dev;
+}
+
+VkQueue WINAPI __wine_get_native_VkQueue(VkQueue handle)
+{
+    struct wine_queue *queue = wine_queue_from_handle(handle);
+
+    if (is_virtual_queue(queue))
+    {
+        FIXME("VR is using native handle of virtualized queue, this is untested.\n");
+        pthread_mutex_lock(&queue->submissions_mutex);
+        while (queue->processing)
+            pthread_cond_wait(&queue->submissions_cond, &queue->submissions_mutex);
+        pthread_mutex_unlock(&queue->submissions_mutex);
+    }
+
+    return queue->queue;
+}
+
+VkPhysicalDevice WINAPI __wine_get_wrapped_VkPhysicalDevice(VkInstance handle, VkPhysicalDevice native_phys_dev)
+{
+    struct wine_instance *instance = wine_instance_from_handle(handle);
+    uint32_t i;
+    for(i = 0; i < instance->phys_dev_count; ++i){
+        if(instance->phys_devs[i]->phys_dev == native_phys_dev)
+            return instance->phys_devs[i]->handle;
+    }
+    WARN("Unknown native physical device: %p\n", native_phys_dev);
+    return NULL;
+}
+
+VkResult wine_vkGetMemoryWin32HandleKHR(VkDevice device, const VkMemoryGetWin32HandleInfoKHR *handle_info, HANDLE *handle)
+{
+    struct wine_device_memory *dev_mem = wine_device_memory_from_handle(handle_info->memory);
     const VkBaseInStructure *chain;
     HANDLE ret;
 
@@ -5120,131 +4978,13 @@ NTSTATUS wine_vkGetMemoryWin32HandleKHR(void *args)
     }
 }
 
-NTSTATUS wine_vkFreeMemory(void *args)
+VkResult wine_vkGetMemoryWin32HandlePropertiesKHR(VkDevice device, VkExternalMemoryHandleTypeFlagBits type, HANDLE handle, VkMemoryWin32HandlePropertiesKHR *properties)
 {
-    struct vkFreeMemory_params *params = args;
-    VkDevice device = params->device;
-    VkDeviceMemory handle = params->memory;
-    const VkAllocationCallbacks *allocator = params->pAllocator;
-
-    struct wine_dev_mem *dev_mem = wine_dev_mem_from_handle(handle);
-
-    TRACE("%p 0x%s, %p\n", device, wine_dbgstr_longlong(handle), allocator);
-
-    if (allocator)
-        FIXME("Support for allocation callbacks not implemented yet\n");
-
-    if (!handle)
-        return STATUS_SUCCESS;
-
-    WINE_VK_REMOVE_HANDLE_MAPPING(device->phys_dev->instance, dev_mem);
-    device->funcs.p_vkFreeMemory(device->device, dev_mem->dev_mem, NULL);
-    if (dev_mem->handle != INVALID_HANDLE_VALUE)
-        NtClose(dev_mem->handle);
-    free(dev_mem);
-    return STATUS_SUCCESS;
-}
-
-NTSTATUS wine_vkGetMemoryWin32HandlePropertiesKHR(void *args)
-{
-    struct vkGetMemoryWin32HandlePropertiesKHR_params *params = args;
-    VkDevice device = params->device;
-    VkExternalMemoryHandleTypeFlagBits type = params->handleType;
-    HANDLE handle = params->handle;
-    VkMemoryWin32HandlePropertiesKHR *properties = params->pMemoryWin32HandleProperties;
-
     TRACE("%p %u %p %p\n", device, type, handle, properties);
 
     /* VUID-vkGetMemoryWin32HandlePropertiesKHR-handleType-00666
        handleType must not be one of the handle types defined as opaque */
     return VK_ERROR_INVALID_EXTERNAL_HANDLE;
-}
-
-NTSTATUS wine_vkCreateBuffer(void *args)
-{
-    struct vkCreateBuffer_params *params = args;
-    VkDevice device = params->device;
-    const VkBufferCreateInfo *create_info = params->pCreateInfo;
-    const VkAllocationCallbacks *allocator = params->pAllocator;
-    VkBuffer *buffer = params->pBuffer;
-
-    VkExternalMemoryBufferCreateInfo *external_memory_info;
-    VkResult res;
-
-#if defined(USE_STRUCT_CONVERSION)
-    VkBufferCreateInfo_host create_info_host;
-#else
-    VkBufferCreateInfo create_info_host;
-#endif
-
-    TRACE("%p %p %p %p\n", device, create_info, allocator, buffer);
-
-    if (allocator)
-        FIXME("Support for allocation callbacks not implemented yet\n");
-
-    if ((res = convert_VkBufferCreateInfo_struct_chain(create_info->pNext, (VkBufferCreateInfo *) &create_info_host)))
-    {
-        WARN("Failed to convert VkBufferCreateInfo pNext chain, res=%d.\n", res);
-        return res;
-    }
-
-    if ((external_memory_info = wine_vk_find_struct(&create_info_host, EXTERNAL_MEMORY_BUFFER_CREATE_INFO)))
-    {
-        if (external_memory_info->handleTypes & wine_vk_handle_over_fd_types)
-            external_memory_info->handleTypes |= VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT;
-        wine_vk_normalize_handle_types_host(&external_memory_info->handleTypes);
-    }
-
-    create_info_host.sType = create_info->sType;
-    create_info_host.flags = create_info->flags;
-    create_info_host.size = create_info->size;
-    create_info_host.usage = create_info->usage;
-    create_info_host.sharingMode = create_info->sharingMode;
-    create_info_host.queueFamilyIndexCount = create_info->queueFamilyIndexCount;
-    create_info_host.pQueueFamilyIndices = create_info->pQueueFamilyIndices;
-
-    res = device->funcs.p_vkCreateBuffer(device->device, &create_info_host, NULL, buffer);
-
-    free_VkBufferCreateInfo_struct_chain((VkBufferCreateInfo *) &create_info_host);
-
-    return res;
-}
-
-NTSTATUS wine_vkCreateImage(void *args)
-{
-    struct vkCreateImage_params *params = args;
-    VkDevice device = params->device;
-    const VkImageCreateInfo *create_info = params->pCreateInfo;
-    const VkAllocationCallbacks *allocator = params->pAllocator;
-    VkImage *image = params->pImage;
-
-    VkExternalMemoryImageCreateInfo *external_memory_info;
-    VkImageCreateInfo create_info_host = *create_info;
-    VkResult res;
-
-    TRACE("%p %p %p %p\n", device, create_info, allocator, image);
-
-    if (allocator)
-        FIXME("Support for allocation callbacks not implemented yet\n");
-
-    if ((res = convert_VkImageCreateInfo_struct_chain(create_info->pNext, &create_info_host)))
-    {
-        WARN("Failed to convert VkImageCreateInfo pNext chain, res=%d.\n", res);
-        return res;
-    }
-
-    if ((external_memory_info = wine_vk_find_struct(&create_info_host, EXTERNAL_MEMORY_IMAGE_CREATE_INFO)))
-    {
-        if (external_memory_info->handleTypes & wine_vk_handle_over_fd_types)
-            external_memory_info->handleTypes |= VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT_KHR;
-        wine_vk_normalize_handle_types_host(&external_memory_info->handleTypes);
-    }
-
-    res = device->funcs.p_vkCreateImage(device->device, &create_info_host, NULL, image);
-
-    free_VkImageCreateInfo_struct_chain(&create_info_host);
-
-    return res;
 }
 
 #define IOCTL_SHARED_GPU_RESOURCE_SET_OBJECT           CTL_CODE(FILE_DEVICE_VIDEO, 6, METHOD_BUFFERED, FILE_WRITE_ACCESS)
@@ -5293,7 +5033,7 @@ static void d3d12_semaphore_unlock(struct wine_semaphore *semaphore)
 
 /* returns -1 when there is no queued update that would satisfy the wait */
 static uint64_t d3d12_semaphore_try_get_wait_value_locked(struct wine_semaphore *semaphore, uint64_t virtual_value,
-        struct VkQueue_T *waiting_queue)
+        struct wine_queue *waiting_queue)
 {
     struct pending_update *update;
     uint64_t ret = -1;
@@ -5372,13 +5112,14 @@ static void d3d12_semaphore_satisfy_waits_locked(struct wine_semaphore *semaphor
 }
 
 static uint64_t d3d12_semaphore_add_pending_signal_locked(struct wine_semaphore *semaphore, uint64_t virtual_value,
-        struct VkQueue_T *signalling_queue)
+        struct wine_queue *signalling_queue)
 {
     struct pending_update *update;
 
     if (semaphore->d3d12_fence_shm->pending_updates_count == ARRAY_SIZE(semaphore->d3d12_fence_shm->pending_updates))
     {
-        FIXME("Failed to queue signal on d3d12 semaphore, maximum concurrent signals exceeded.\n");
+        /* Called from Unix thread, can't use Wine traces. */
+        fprintf(stderr, "winevulkan/d3d12_semaphore_add_pending_signal_locked: maximum concurrent signals exceeded.\n");
         return 0;
     }
 
@@ -5433,19 +5174,16 @@ static void d3d12_semaphore_update_phys_val_locked(struct wine_semaphore *sem, u
     }
 }
 
-NTSTATUS wine_vkCreateSemaphore(void *args)
+VkResult wine_vkCreateSemaphore(VkDevice device_handle, const VkSemaphoreCreateInfo *create_info,
+        const VkAllocationCallbacks *allocator, VkSemaphore *semaphore, void *win_create_info)
 {
-    struct vkCreateSemaphore_params *params = args;
-    VkDevice device = params->device;
-    const VkSemaphoreCreateInfo *create_info = params->pCreateInfo;
-    const VkAllocationCallbacks *allocator = params->pAllocator;
-    VkSemaphore *semaphore = params->pSemaphore;
+    struct wine_device *device = wine_device_from_handle(device_handle);
 
-    VkExportSemaphoreWin32HandleInfoKHR *export_handle_info = wine_vk_find_struct(create_info, EXPORT_SEMAPHORE_WIN32_HANDLE_INFO_KHR);
+    VkExportSemaphoreWin32HandleInfoKHR *export_handle_info = wine_vk_find_struct(win_create_info, EXPORT_SEMAPHORE_WIN32_HANDLE_INFO_KHR);
     VkExportSemaphoreCreateInfo *export_semaphore_info, timeline_export_info;
-    VkSemaphoreCreateInfo create_info_dup = *create_info, create_info_host;
+    VkSemaphoreCreateInfo create_info_dup = *create_info;
     VkSemaphoreTypeCreateInfo *found_type_info, type_info;
-    VkSemaphoreGetFdInfoKHR_host fd_info;
+    VkSemaphoreGetFdInfoKHR fd_info;
     pthread_mutexattr_t mutex_attr;
     struct wine_semaphore *object;
     pthread_condattr_t cond_attr;
@@ -5462,22 +5200,12 @@ NTSTATUS wine_vkCreateSemaphore(void *args)
     if (allocator)
         FIXME("Support for allocation callbacks not implemented yet\n");
 
-    if ((res = convert_VkSemaphoreCreateInfo_struct_chain(create_info->pNext, &create_info_dup)))
-    {
-        WARN("Failed to convert VkSemaphoreCreateInfo pNext chain, res=%d.\n", res);
-        return res;
-    }
-
     if (!(object = calloc(1, sizeof(*object))))
-    {
-        free_VkSemaphoreCreateInfo_struct_chain(&create_info_dup);
         return VK_ERROR_OUT_OF_HOST_MEMORY;
-    }
+
     object->handle = INVALID_HANDLE_VALUE;
 
-    create_info_host = create_info_dup;
-
-    if ((export_semaphore_info = wine_vk_find_struct(&create_info_host, EXPORT_SEMAPHORE_CREATE_INFO)))
+    if ((export_semaphore_info = wine_vk_find_struct(&create_info_dup, EXPORT_SEMAPHORE_CREATE_INFO)))
     {
         object->export_types = export_semaphore_info->handleTypes;
         if (export_semaphore_info->handleTypes & VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_WIN32_BIT)
@@ -5485,7 +5213,7 @@ NTSTATUS wine_vkCreateSemaphore(void *args)
         wine_vk_normalize_semaphore_handle_types_host(&export_semaphore_info->handleTypes);
     }
 
-    if ((res = device->funcs.p_vkCreateSemaphore(device->device, &create_info_host, NULL, &object->semaphore)) != VK_SUCCESS)
+    if ((res = device->funcs.p_vkCreateSemaphore(device->device, &create_info_dup, NULL, &object->semaphore)) != VK_SUCCESS)
         goto done;
 
     if (export_semaphore_info && export_semaphore_info->handleTypes == VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_FD_BIT)
@@ -5522,11 +5250,11 @@ NTSTATUS wine_vkCreateSemaphore(void *args)
         type_info.semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE;
         type_info.initialValue = 0;
 
-        create_info_host.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
-        create_info_host.pNext = &type_info;
-        create_info_host.flags = 0;
+        create_info_dup.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+        create_info_dup.pNext = &type_info;
+        create_info_dup.flags = 0;
 
-        if ((res = device->funcs.p_vkCreateSemaphore(device->device, &create_info_host, NULL, &object->fence_timeline_semaphore)) != VK_SUCCESS)
+        if ((res = device->funcs.p_vkCreateSemaphore(device->device, &create_info_dup, NULL, &object->fence_timeline_semaphore)) != VK_SUCCESS)
             goto done;
 
         fd_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_GET_FD_INFO_KHR;
@@ -5592,19 +5320,21 @@ NTSTATUS wine_vkCreateSemaphore(void *args)
             pthread_condattr_destroy(&cond_attr);
         }
 
-        WINE_VK_ADD_NON_DISPATCHABLE_MAPPING(device->phys_dev->instance, object, object->fence_timeline_semaphore);
+        WINE_VK_ADD_NON_DISPATCHABLE_MAPPING(device->phys_dev->instance, object, object->fence_timeline_semaphore, object);
     }
-
-    WINE_VK_ADD_NON_DISPATCHABLE_MAPPING(device->phys_dev->instance, object, object->semaphore);
+    if (object->fence_timeline_semaphore == VK_NULL_HANDLE)
+        WINE_VK_ADD_NON_DISPATCHABLE_MAPPING(device->phys_dev->instance, object, object->semaphore, object);
     *semaphore = wine_semaphore_to_handle(object);
 
     done:
 
     if (res != VK_SUCCESS)
     {
-        pthread_mutex_destroy(&object->d3d12_fence_shm->mutex);
         if (object->d3d12_fence_shm)
+        {
+            pthread_mutex_destroy(&object->d3d12_fence_shm->mutex);
             NtUnmapViewOfSection(GetCurrentProcess(), object->d3d12_fence_shm);
+        }
         if (object->handle != INVALID_HANDLE_VALUE)
             NtClose(object->handle);
         if (object->semaphore != VK_NULL_HANDLE)
@@ -5614,17 +5344,12 @@ NTSTATUS wine_vkCreateSemaphore(void *args)
         free(object);
     }
 
-    free_VkSemaphoreCreateInfo_struct_chain(&create_info_dup);
-
     return res;
 }
 
-NTSTATUS wine_vkGetSemaphoreWin32HandleKHR(void *args)
+VkResult wine_vkGetSemaphoreWin32HandleKHR(VkDevice device_handle, const VkSemaphoreGetWin32HandleInfoKHR *handle_info,
+        HANDLE *handle)
 {
-    struct vkGetSemaphoreWin32HandleKHR_params *params = args;
-    const VkSemaphoreGetWin32HandleInfoKHR *handle_info = params->pGetWin32HandleInfo;
-    HANDLE *handle = params->pHandle;
-
     struct wine_semaphore *semaphore = wine_semaphore_from_handle(handle_info->semaphore);
 
     if (!(semaphore->export_types & handle_info->handleType))
@@ -5636,22 +5361,18 @@ NTSTATUS wine_vkGetSemaphoreWin32HandleKHR(void *args)
     return VK_SUCCESS;
 }
 
-NTSTATUS wine_vkDestroySemaphore(void *args)
+void wine_vkDestroySemaphore(VkDevice device_handle, VkSemaphore semaphore_handle, const VkAllocationCallbacks *allocator)
 {
-    struct vkDestroySemaphore_params *params = args;
-    VkDevice device = params->device;
-    VkSemaphore handle = params->semaphore;
-    const VkAllocationCallbacks *allocator = params->pAllocator;
+    struct wine_device *device = wine_device_from_handle(device_handle);
+    struct wine_semaphore *semaphore = wine_semaphore_from_handle(semaphore_handle);
 
-    struct wine_semaphore *semaphore = wine_semaphore_from_handle(handle);
-
-    TRACE("%p 0x%s, %p\n", device, wine_dbgstr_longlong(handle), allocator);
+    TRACE("%p, %p, %p\n", device, semaphore, allocator);
 
     if (allocator)
         FIXME("Support for allocation callbacks not implemented yet\n");
 
-    if (!handle)
-        return VK_SUCCESS;
+    if (!semaphore)
+        return;
 
     if (semaphore->handle != INVALID_HANDLE_VALUE)
         NtClose(semaphore->handle);
@@ -5666,26 +5387,23 @@ NTSTATUS wine_vkDestroySemaphore(void *args)
         device->funcs.p_vkDestroySemaphore(device->device, semaphore->fence_timeline_semaphore, NULL);
 
     free(semaphore);
-    return VK_SUCCESS;
 }
 
-NTSTATUS wine_vkImportSemaphoreWin32HandleKHR(void *args)
+VkResult wine_vkImportSemaphoreWin32HandleKHR(VkDevice device_handle,
+        const VkImportSemaphoreWin32HandleInfoKHR *handle_info)
 {
-    struct vkImportSemaphoreWin32HandleKHR_params *params = args;
-    VkDevice device = params->device;
-    const VkImportSemaphoreWin32HandleInfoKHR *handle_info = params->pImportSemaphoreWin32HandleInfo;
-
+    struct wine_device *device = wine_device_from_handle(device_handle);
     struct wine_semaphore *semaphore = wine_semaphore_from_handle(handle_info->semaphore);
-    VkImportSemaphoreFdInfoKHR_host fd_info;
     struct wine_semaphore output_semaphore;
     VkSemaphoreTypeCreateInfo type_info;
+    VkImportSemaphoreFdInfoKHR fd_info;
     VkSemaphoreCreateInfo create_info;
     HANDLE d3d12_fence_shm;
     NTSTATUS stat;
     VkResult res;
     SIZE_T size;
 
-    TRACE("(%p, %p). semaphore = %p handle = %p\n", device, handle_info, handle_info->semaphore, handle_info->handle);
+    TRACE("(%p, %p). semaphore = %p handle = %p\n", device, handle_info, semaphore, handle_info->handle);
 
     if (handle_info->handleType == VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_D3D12_FENCE_BIT && !semaphore->fence_timeline_semaphore)
     {
@@ -5704,7 +5422,8 @@ NTSTATUS wine_vkImportSemaphoreWin32HandleKHR(void *args)
             return res;
         };
 
-        WINE_VK_ADD_NON_DISPATCHABLE_MAPPING(device->phys_dev->instance, semaphore, semaphore->fence_timeline_semaphore);
+        WINE_VK_REMOVE_HANDLE_MAPPING(device->phys_dev->instance, semaphore);
+        WINE_VK_ADD_NON_DISPATCHABLE_MAPPING(device->phys_dev->instance, semaphore, semaphore->fence_timeline_semaphore, semaphore);
     }
 
     output_semaphore = *semaphore;
@@ -5759,7 +5478,7 @@ NTSTATUS wine_vkImportSemaphoreWin32HandleKHR(void *args)
             size = sizeof(*output_semaphore.d3d12_fence_shm);
             if ((stat = NtMapViewOfSection(d3d12_fence_shm, GetCurrentProcess(), (void**) &output_semaphore.d3d12_fence_shm, 0, 0, NULL, &size, ViewShare, 0, PAGE_READWRITE)))
             {
-                ERR("Failed to map D3D12 semaphore memory. stat %#x.\n", stat);
+                ERR("Failed to map D3D12 semaphore memory. stat %#x.\n", (int)stat);
                 close(fd_info.fd);
                 NtClose(d3d12_fence_shm);
                 NtClose(output_semaphore.handle);
@@ -5801,11 +5520,20 @@ NTSTATUS wine_vkImportSemaphoreWin32HandleKHR(void *args)
     return res;
 }
 
-
-static NTSTATUS vk_get_semaphore_counter_value(VkDevice device, VkSemaphore semaphore, uint64_t *value, bool khr);
-static NTSTATUS wine_vk_get_semaphore_counter_value(VkDevice device, VkSemaphore handle, uint64_t *value, bool khr)
+static VkResult vk_get_semaphore_counter_value(VkDevice device_handle, VkSemaphore semaphore_handle, uint64_t *value, bool khr)
 {
-    struct wine_semaphore *semaphore = wine_semaphore_from_handle(handle);
+    struct wine_semaphore *semaphore = wine_semaphore_from_handle(semaphore_handle);
+    struct wine_device *device = wine_device_from_handle(device_handle);
+
+    if (khr)
+        return device->funcs.p_vkGetSemaphoreCounterValueKHR(device->device, wine_semaphore_host_handle(semaphore), value);
+    else
+        return device->funcs.p_vkGetSemaphoreCounterValue(device->device, wine_semaphore_host_handle(semaphore), value);
+}
+
+static VkResult wine_vk_get_semaphore_counter_value(VkDevice device_handle, VkSemaphore semaphore_handle, uint64_t *value, bool khr)
+{
+    struct wine_semaphore *semaphore = wine_semaphore_from_handle(semaphore_handle);
 
     if (semaphore->handle_type == VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_D3D12_FENCE_BIT)
     {
@@ -5815,38 +5543,32 @@ static NTSTATUS wine_vk_get_semaphore_counter_value(VkDevice device, VkSemaphore
         return VK_SUCCESS;
     }
 
-    return vk_get_semaphore_counter_value(device, handle, value, khr);
+    return vk_get_semaphore_counter_value(device_handle, semaphore_handle, value, khr);
 }
 
-static NTSTATUS vk_get_semaphore_counter_value(VkDevice device, VkSemaphore semaphore, uint64_t *value, bool khr)
+VkResult wine_vkGetSemaphoreCounterValue(VkDevice device_handle, VkSemaphore semaphore_handle, uint64_t *value)
 {
+    return wine_vk_get_semaphore_counter_value(device_handle, semaphore_handle, value, false);
+}
+
+VkResult wine_vkGetSemaphoreCounterValueKHR(VkDevice device_handle, VkSemaphore semaphore_handle, uint64_t *value)
+{
+    return wine_vk_get_semaphore_counter_value(device_handle, semaphore_handle, value, true);
+}
+
+static VkResult vk_signal_semaphore(VkDevice device_handle, const VkSemaphoreSignalInfo *signal_info, bool khr)
+{
+    struct wine_semaphore *semaphore = wine_semaphore_from_handle(signal_info->semaphore);
+    struct wine_device *device = wine_device_from_handle(device_handle);
+    VkSemaphoreSignalInfo dup_signal_info = *signal_info;
+
+    dup_signal_info.semaphore = wine_semaphore_host_handle(semaphore);
     if (khr)
-        return thunk_vkGetSemaphoreCounterValueKHR(device, semaphore, value);
+        return device->funcs.p_vkSignalSemaphoreKHR(device->device, &dup_signal_info);
     else
-        return thunk_vkGetSemaphoreCounterValue(device, semaphore, value);
+        return device->funcs.p_vkSignalSemaphore(device->device, &dup_signal_info);
 }
 
-NTSTATUS wine_vkGetSemaphoreCounterValue(void *args)
-{
-    struct vkGetSemaphoreCounterValue_params *params = args;
-    VkDevice device = params->device;
-    VkSemaphore semaphore = params->semaphore;
-    uint64_t *value = params->pValue;
-
-    return wine_vk_get_semaphore_counter_value(device, semaphore, value, false);
-}
-
-NTSTATUS wine_vkGetSemaphoreCounterValueKHR(void *args)
-{
-    struct vkGetSemaphoreCounterValue_params *params = args;
-    VkDevice device = params->device;
-    VkSemaphore semaphore = params->semaphore;
-    uint64_t *value = params->pValue;
-
-    return wine_vk_get_semaphore_counter_value(device, semaphore, value, true);
-}
-
-static NTSTATUS vk_signal_semaphore(VkDevice device, const VkSemaphoreSignalInfo *signal_info, bool khr);
 static NTSTATUS wine_vk_signal_semaphore(VkDevice device, const VkSemaphoreSignalInfo *signal_info, bool khr)
 {
     uint64_t phys_val;
@@ -5903,34 +5625,47 @@ static NTSTATUS wine_vk_signal_semaphore(VkDevice device, const VkSemaphoreSigna
     return vk_signal_semaphore(device, signal_info, khr);
 }
 
-static NTSTATUS vk_signal_semaphore(VkDevice device, const VkSemaphoreSignalInfo *signal_info, bool khr)
+VkResult wine_vkSignalSemaphore(VkDevice device, const VkSemaphoreSignalInfo *signal_info)
 {
-    if (khr)
-        return thunk_vkSignalSemaphoreKHR(device, signal_info);
-    else
-        return thunk_vkSignalSemaphore(device, signal_info);
-}
-
-NTSTATUS wine_vkSignalSemaphore(void *args)
-{
-    struct vkSignalSemaphore_params *params = args;
-    VkDevice device = params->device;
-    const VkSemaphoreSignalInfo *signal_info = params->pSignalInfo;
-
     return wine_vk_signal_semaphore(device, signal_info, false);
 }
 
-NTSTATUS wine_vkSignalSemaphoreKHR(void *args)
+VkResult wine_vkSignalSemaphoreKHR(VkDevice device, const VkSemaphoreSignalInfo *signal_info)
 {
-    struct vkSignalSemaphore_params *params = args;
-    VkDevice device = params->device;
-    const VkSemaphoreSignalInfo *signal_info = params->pSignalInfo;
-
     return wine_vk_signal_semaphore(device, signal_info, true);
 }
 
-static NTSTATUS vk_wait_semaphores(VkDevice device, const VkSemaphoreWaitInfo *wait_info, uint64_t timeout, bool khr);
-static NTSTATUS wine_vk_wait_semaphores(VkDevice device, const VkSemaphoreWaitInfo *wait_info, uint64_t timeout, bool khr)
+static VkSemaphore *unwrap_semaphore_array(const VkSemaphore *in, uint32_t count, struct conversion_context *ctx)
+{
+    VkSemaphore *out;
+    unsigned int i;
+
+    if (!in || !count) return NULL;
+
+    out = conversion_context_alloc(ctx, count * sizeof(*out));
+    for (i = 0; i < count; ++i)
+        out[i] = in[i] ? wine_semaphore_host_handle(wine_semaphore_from_handle(in[i])) : VK_NULL_HANDLE;
+
+    return out;
+}
+
+static VkResult vk_wait_semaphores(struct wine_device *device, const VkSemaphoreWaitInfo *wait_info, uint64_t timeout, bool khr)
+{
+    VkSemaphoreWaitInfo wait_info_dup = *wait_info;
+    struct conversion_context ctx;
+    VkResult ret;
+
+    init_conversion_context(&ctx);
+    wait_info_dup.pSemaphores = unwrap_semaphore_array(wait_info->pSemaphores, wait_info->semaphoreCount, &ctx);
+    if (khr)
+        ret = device->funcs.p_vkWaitSemaphoresKHR(device->device, &wait_info_dup, timeout);
+    else
+        ret = device->funcs.p_vkWaitSemaphores(device->device, &wait_info_dup, timeout);
+    free_conversion_context(&ctx);
+    return ret;
+}
+
+static VkResult wine_vk_wait_semaphores(VkDevice device_handle, const VkSemaphoreWaitInfo *wait_info, uint64_t timeout, bool khr)
 {
     VkSemaphoreWaitInfo wait_info_dup = *wait_info;
     struct timespec abs_timeout, start_time;
@@ -5944,7 +5679,7 @@ static NTSTATUS wine_vk_wait_semaphores(VkDevice device, const VkSemaphoreWaitIn
     int wait_stat;
     VkResult res;
 
-    TRACE("(%p, %p, 0x%s)\n", device, wait_info, wine_dbgstr_longlong(timeout));
+    TRACE("(%p, %p, 0x%s)\n", device_handle, wait_info, wine_dbgstr_longlong(timeout));
 
     if (timeout)
     {
@@ -6014,7 +5749,6 @@ static NTSTATUS wine_vk_wait_semaphores(VkDevice device, const VkSemaphoreWaitIn
             d3d12_semaphore_unlock(semaphore);
         }
     }
-
     do
     {
         if (timeout)
@@ -6030,7 +5764,7 @@ static NTSTATUS wine_vk_wait_semaphores(VkDevice device, const VkSemaphoreWaitIn
         }
 
         remaining_waits = 0;
-        res = vk_wait_semaphores(device, &wait_info_dup, timeout, khr);
+        res = vk_wait_semaphores(wine_device_from_handle(device_handle), &wait_info_dup, timeout, khr);
 
         for (i = 0; i < wait_info->semaphoreCount; i++)
         {
@@ -6063,7 +5797,7 @@ static NTSTATUS wine_vk_wait_semaphores(VkDevice device, const VkSemaphoreWaitIn
             d3d12_semaphore_lock(semaphore);
             if (wait_info->flags & VK_SEMAPHORE_WAIT_ANY_BIT)
             {
-                if (!vk_get_semaphore_counter_value(device, semaphores_dup[i], &phys_val, khr))
+                if (!vk_get_semaphore_counter_value(device_handle, semaphores_dup[i], &phys_val, khr))
                     d3d12_semaphore_update_phys_val_locked(semaphore, phys_val);
             }
             else
@@ -6078,32 +5812,48 @@ static NTSTATUS wine_vk_wait_semaphores(VkDevice device, const VkSemaphoreWaitIn
     return res;
 }
 
-static NTSTATUS vk_wait_semaphores(VkDevice device, const VkSemaphoreWaitInfo *wait_info, uint64_t timeout, bool khr)
+VkResult wine_vkWaitSemaphores(VkDevice device, const VkSemaphoreWaitInfo *wait_info, uint64_t timeout)
 {
-    if (khr)
-        return thunk_vkWaitSemaphoresKHR(device, wait_info, timeout);
-    else
-        return thunk_vkWaitSemaphores(device, wait_info, timeout);
-}
-
-NTSTATUS wine_vkWaitSemaphores(void *args)
-{
-    struct vkWaitSemaphores_params *params = args;
-    VkDevice device = params->device;
-    const VkSemaphoreWaitInfo *wait_info = params->pWaitInfo;
-    uint64_t timeout = params->timeout;
-
     return wine_vk_wait_semaphores(device, wait_info, timeout, false);
 }
 
-NTSTATUS wine_vkWaitSemaphoresKHR(void *args)
+VkResult wine_vkWaitSemaphoresKHR(VkDevice device, const VkSemaphoreWaitInfo *wait_info, uint64_t timeout)
 {
-    struct vkWaitSemaphores_params *params = args;
-    VkDevice device = params->device;
-    const VkSemaphoreWaitInfo *wait_info = params->pWaitInfo;
-    uint64_t timeout = params->timeout;
-
     return wine_vk_wait_semaphores(device, wait_info, timeout, true);
+}
+
+VkResult vk_queue_submit_unwrap(struct wine_queue *queue, uint32_t submit_count, const VkSubmitInfo *submits_orig, VkFence fence_handle)
+{
+    struct wine_fence *fence = fence_handle ? wine_fence_from_handle(fence_handle) : NULL;
+    struct conversion_context ctx;
+    VkSubmitInfo *submits;
+    unsigned int i, j;
+    VkResult ret;
+
+    init_conversion_context(&ctx);
+    MEMDUP(&ctx, submits, submits_orig, submit_count);
+    for (i = 0; i < submit_count; ++i)
+    {
+        submits[i].pWaitSemaphores = unwrap_semaphore_array(submits[i].pWaitSemaphores, submits[i].waitSemaphoreCount, &ctx);
+        submits[i].pSignalSemaphores = unwrap_semaphore_array(submits[i].pSignalSemaphores, submits[i].signalSemaphoreCount, &ctx);
+        if (submits[i].pCommandBuffers && submits[i].commandBufferCount)
+        {
+            VkCommandBuffer *out;
+
+            out = conversion_context_alloc(&ctx, submits[i].commandBufferCount * sizeof(*out));
+            for (j = 0; j < submits[i].commandBufferCount; ++j)
+                out[j] = wine_cmd_buffer_from_handle(submits[i].pCommandBuffers[j])->command_buffer;
+            submits[i].pCommandBuffers = out;
+        }
+    }
+
+
+    if (fence)
+        fence->queue = queue;
+
+    ret = queue->device->funcs.p_vkQueueSubmit(queue->queue, submit_count, submits, fence ? fence->fence : VK_NULL_HANDLE);
+    free_conversion_context(&ctx);
+    return ret;
 }
 
 struct signal_op
@@ -6132,12 +5882,11 @@ struct signal_op
 
 static void *queue_signaller_worker(void *arg)
 {
-    struct VkQueue_T *queue = (struct VkQueue_T *)arg;
+    struct wine_queue *queue = arg;
     VkSemaphoreWaitInfo wait_info;
     struct signal_op *signal_op;
     VkSemaphore sem_handle;
     bool device_lost;
-    VkFence fence;
     uint64_t buf;
     VkResult vr;
 
@@ -6184,9 +5933,8 @@ static void *queue_signaller_worker(void *arg)
         }
         else
         {
-            fence = wine_fence_to_handle(signal_op->fence);
-
-            if (!device_lost && (vr = thunk_vkWaitForFences(queue->device, 1, &fence, VK_TRUE, -1)) < 0)
+            if (!device_lost && (vr = queue->device->funcs.p_vkWaitForFences
+                    (queue->device->device, 1, &signal_op->fence->fence, VK_TRUE, -1)) < 0)
             {
                 /* likely GPU hang */
                 fprintf(stderr, "winevulkan/queue_signaller_worker: Fence wait failed, vr %d.\n", vr);
@@ -6203,116 +5951,32 @@ static void *queue_signaller_worker(void *arg)
     return NULL;
 }
 
-static VkSubmitInfo *copy_VkSubmitInfo(const VkSubmitInfo *in, uint32_t submit_count)
+struct struct_chain_def
 {
-    VkSubmitInfo *out = malloc(sizeof(*out) * submit_count);
+    VkStructureType sType;
+    unsigned int size;
+};
+
+void copy_VkSubmitInfo(struct conversion_context *ctx, const VkSubmitInfo *in, VkSubmitInfo *out);
+static VkSubmitInfo *copy_VkSubmitInfo_array(struct conversion_context *ctx, const VkSubmitInfo *in, uint32_t submit_count)
+{
+    VkSubmitInfo *out = conversion_context_alloc(ctx, sizeof(*out) * submit_count);
     unsigned int i;
 
     for (i = 0; i < submit_count; i++)
-    {
-        out[i].sType = in[i].sType;
-        out[i].waitSemaphoreCount = in[i].waitSemaphoreCount;
-        out[i].pWaitSemaphores = memdup(in[i].pWaitSemaphores, in[i].waitSemaphoreCount, sizeof(out[i].pWaitSemaphores[0]));
-        out[i].pWaitDstStageMask = memdup(in[i].pWaitDstStageMask, in[i].waitSemaphoreCount, sizeof(out[i].pWaitDstStageMask[0]));
-        out[i].commandBufferCount = in[i].commandBufferCount;
-        out[i].pCommandBuffers = memdup(in[i].pCommandBuffers, in[i].commandBufferCount, sizeof(out[i].pCommandBuffers[0]));
-        out[i].signalSemaphoreCount = in[i].signalSemaphoreCount;
-        out[i].pSignalSemaphores = memdup(in[i].pSignalSemaphores, in[i].signalSemaphoreCount, sizeof(out[i].pSignalSemaphores[0]));
-
-        convert_VkSubmitInfo_struct_chain(in[i].pNext, &out[i]);
-    }
-
+        copy_VkSubmitInfo(ctx, &in[i], &out[i]);
     return out;
 }
 
-static void free_copied_VkSubmitInfo(VkSubmitInfo *info, uint32_t submit_count)
+void copy_VkSubmitInfo2(struct conversion_context *ctx, const VkSubmitInfo2 *in, VkSubmitInfo2 *out);
+static VkSubmitInfo2 *copy_VkSubmitInfo2_array(struct conversion_context *ctx, const VkSubmitInfo2 *in, uint32_t submit_count)
 {
+    VkSubmitInfo2 *out = conversion_context_alloc(ctx, sizeof(*out) * submit_count);
     unsigned int i;
 
     for (i = 0; i < submit_count; i++)
-    {
-        free_VkSubmitInfo_struct_chain(&info[i]);
-
-        free((VkSemaphore *)         info[i].pWaitSemaphores);
-        free((VkPipelineStageFlags*) info[i].pWaitDstStageMask);
-        free((VkCommandBuffer*)      info[i].pCommandBuffers);
-        free((VkSemaphore*)          info[i].pSignalSemaphores);
-    }
-
-    free(info);
-}
-
-static VkSubmitInfo2 *copy_VkSubmitInfo2(const VkSubmitInfo2 *in, uint32_t submit_count)
-{
-    VkSubmitInfo2 *out = malloc(sizeof(*out) * submit_count);
-    VkCommandBufferSubmitInfo *cmdbuf_submit_info;
-    VkSemaphoreSubmitInfo *sem_submit_info;
-    unsigned int i, k;
-
-    for (i = 0; i < submit_count; i++)
-    {
-        out[i].sType = in[i].sType;
-        out[i].flags = in[i].flags;
-
-        out[i].waitSemaphoreInfoCount = in[i].waitSemaphoreInfoCount;
-        out[i].pWaitSemaphoreInfos = sem_submit_info = memdup(in[i].pWaitSemaphoreInfos,
-                                            in[i].waitSemaphoreInfoCount,
-                                            sizeof(out[i].pWaitSemaphoreInfos[0]));
-        for (k = 0; k < out[i].waitSemaphoreInfoCount; k++)
-        {
-            if (sem_submit_info[k].pNext)
-            {
-                FIXME("pNext chain conversion for VkSemaphoreSubmitInfo not supported.\n");
-                sem_submit_info[k].pNext = NULL;
-            }
-        }
-
-        out[i].commandBufferInfoCount = in[i].commandBufferInfoCount;
-        out[i].pCommandBufferInfos = cmdbuf_submit_info = memdup(in[i].pCommandBufferInfos,
-                                            in[i].commandBufferInfoCount,
-                                            sizeof(out[i].pCommandBufferInfos[0]));
-        for (k = 0; k < out[i].commandBufferInfoCount; k++)
-        {
-            if (cmdbuf_submit_info[k].pNext)
-            {
-                FIXME("pNext chain conversion for VkCommandBufferSubmitInfo not supported.\n");
-                cmdbuf_submit_info[k].pNext = NULL;
-            }
-        }
-
-        out[i].signalSemaphoreInfoCount = in[i].signalSemaphoreInfoCount;
-        out[i].pSignalSemaphoreInfos = sem_submit_info =memdup(in[i].pSignalSemaphoreInfos,
-                                              in[i].signalSemaphoreInfoCount,
-                                              sizeof(out[i].pSignalSemaphoreInfos[0]));
-        for (k = 0; k < out[i].signalSemaphoreInfoCount; k++)
-        {
-            if (sem_submit_info[k].pNext)
-            {
-                FIXME("pNext chain conversion for VkSemaphoreSubmitInfo not supported.\n");
-                sem_submit_info[k].pNext = NULL;
-            }
-        }
-
-        convert_VkSubmitInfo2_struct_chain(in[i].pNext, &out[i]);
-    }
-
+        copy_VkSubmitInfo2(ctx, &in[i], &out[i]);
     return out;
-}
-
-static void free_copied_VkSubmitInfo2(VkSubmitInfo2 *info, uint32_t submit_count)
-{
-    unsigned int i;
-
-    for (i = 0; i < submit_count; i++)
-    {
-        free_VkSubmitInfo2_struct_chain(&info[i]);
-
-        free((VkSemaphoreSubmitInfo  *)    info[i].pWaitSemaphoreInfos);
-        free((VkCommandBufferSubmitInfo *) info[i].pCommandBufferInfos);
-        free((VkSemaphoreSubmitInfo *)     info[i].pSignalSemaphoreInfos);
-    }
-
-    free(info);
 }
 
 struct queue_submit_unit
@@ -6326,10 +5990,11 @@ struct queue_submit_unit
     struct pending_wait **waits;
 
     struct list entry;
+    struct conversion_context ctx;
 };
 
 /* Abstracts away the differences between VkSubmitInfo and VkSubmitInfo2. */
-static bool for_each_d3d12_semaphore(struct queue_submit_unit *unit, bool signal,
+static bool get_semaphore_by_index(struct queue_submit_unit *unit, bool signal,
                                      struct wine_semaphore **semaphore_out, uint64_t **value_out, uint32_t counter)
 {
     VkTimelineSemaphoreSubmitInfo *timeline_values;
@@ -6402,9 +6067,11 @@ static bool for_each_d3d12_semaphore(struct queue_submit_unit *unit, bool signal
     return false;
 }
 
+VkResult vk_queue_submit_2_unwrap(struct wine_queue *queue, uint32_t submit_count, const VkSubmitInfo2 *submits, VkFence fence, bool khr);
+
 static void *virtual_queue_worker(void *arg)
 {
-    struct VkQueue_T *queue = (struct VkQueue_T *)arg;
+    struct wine_queue *queue = (struct wine_queue *)arg;
     struct queue_submit_unit *submit_unit;
     struct signal_op *signal_op;
     struct wine_semaphore *sem;
@@ -6438,11 +6105,10 @@ static void *virtual_queue_worker(void *arg)
             goto free_submit_unit;
 
         /* Wait for all fences to have a pending signal */
-        for (i = 0; for_each_d3d12_semaphore(submit_unit, false, &sem, &timeline_value, i); i++)
+        for (i = 0; get_semaphore_by_index(submit_unit, false, &sem, &timeline_value, i); i++)
         {
-            if ((wait = submit_unit->waits[i++]))
+            if ((wait = submit_unit->waits[i]))
             {
-                assert(wait);
                 d3d12_semaphore_lock(sem);
 
                 while (!wait->satisfied)
@@ -6454,7 +6120,7 @@ static void *virtual_queue_worker(void *arg)
             }
         }
 
-        for (i = 0; for_each_d3d12_semaphore(submit_unit, true, &sem, &timeline_value, i); i++)
+        for (i = 0; get_semaphore_by_index(submit_unit, true, &sem, &timeline_value, i); i++)
         {
             d3d12_semaphore_lock(sem);
 
@@ -6462,18 +6128,14 @@ static void *virtual_queue_worker(void *arg)
         }
 
         if (submit_unit->submits)
-            vr = thunk_vkQueueSubmit(queue, submit_unit->submit_count, submit_unit->submits, submit_unit->fence);
+            vr = vk_queue_submit_unwrap(queue, submit_unit->submit_count, submit_unit->submits, submit_unit->fence);
         else
-        {
-            if (submit_unit->khr)
-                vr = thunk_vkQueueSubmit2KHR(queue, submit_unit->submit_count, submit_unit->submits2, submit_unit->fence);
-            else
-                vr = thunk_vkQueueSubmit2(queue, submit_unit->submit_count, submit_unit->submits2, submit_unit->fence);
-        }
+            vr = vk_queue_submit_2_unwrap(queue, submit_unit->submit_count, submit_unit->submits2,
+                    submit_unit->fence, submit_unit->khr);
 
         pthread_mutex_lock(&queue->signaller_mutex);
 
-        for (i = 0; for_each_d3d12_semaphore(submit_unit, true, &sem, &timeline_value, i); i++)
+        for (i = 0; get_semaphore_by_index(submit_unit, true, &sem, &timeline_value, i); i++)
         {
             if (vr == VK_SUCCESS)
             {
@@ -6523,10 +6185,7 @@ static void *virtual_queue_worker(void *arg)
         }
 
 free_submit_unit:
-        if (submit_unit->submits)
-            free_copied_VkSubmitInfo(submit_unit->submits, submit_unit->submit_count);
-        else
-            free_copied_VkSubmitInfo2(submit_unit->submits2, submit_unit->submit_count);
+        free_conversion_context(&submit_unit->ctx);
         free(submit_unit->waits);
         free(submit_unit);
 
@@ -6542,7 +6201,7 @@ free_submit_unit:
     return NULL;
 }
 
-static void init_virtual_queue(struct VkQueue_T *queue)
+static void init_virtual_queue(struct wine_queue *queue)
 {
     if (is_virtual_queue(queue))
         return;
@@ -6565,9 +6224,11 @@ static void init_virtual_queue(struct VkQueue_T *queue)
     pthread_mutex_unlock(&queue->submissions_mutex);
 }
 
-static NTSTATUS virtual_queue_submit(struct VkQueue_T *queue, uint32_t submit_count, const VkSubmitInfo *submits, VkFence fence)
+static NTSTATUS virtual_queue_submit(struct wine_queue *queue, uint32_t submit_count, const VkSubmitInfo *submits,
+        VkFence fence, void *submits_win_ptr)
 {
     VkTimelineSemaphoreSubmitInfo *timeline_submit_info, *host_timeline_values;
+    const VkSubmitInfo *submits_win = submits_win_ptr;
     VkD3D12FenceSubmitInfoKHR *d3d12_submit_info;
     struct queue_submit_unit *submit_unit;
     struct wine_semaphore *sem;
@@ -6584,8 +6245,9 @@ static NTSTATUS virtual_queue_submit(struct VkQueue_T *queue, uint32_t submit_co
         return VK_ERROR_DEVICE_LOST;
 
     submit_unit = malloc(sizeof(*submit_unit));
+    init_conversion_context(&submit_unit->ctx);
     submit_unit->submit_count = submit_count;
-    submit_unit->submits = copy_VkSubmitInfo(submits, submit_count);
+    submit_unit->submits = copy_VkSubmitInfo_array(&submit_unit->ctx, submits, submit_count);
     submit_unit->submits2 = NULL;
     submit_unit->fence = fence;
     submit_unit->waits = NULL;
@@ -6597,25 +6259,21 @@ static NTSTATUS virtual_queue_submit(struct VkQueue_T *queue, uint32_t submit_co
     for (i = 0, k = 0; i < submit_count; i++)
     {
         timeline_submit_info = wine_vk_find_struct(&submits[i], TIMELINE_SEMAPHORE_SUBMIT_INFO);
-        d3d12_submit_info = wine_vk_find_struct(&submits[i], D3D12_FENCE_SUBMIT_INFO_KHR);
+        d3d12_submit_info = wine_vk_find_struct(&submits_win[i], D3D12_FENCE_SUBMIT_INFO_KHR);
 
         host_timeline_values = wine_vk_find_struct(&submit_unit->submits[i], TIMELINE_SEMAPHORE_SUBMIT_INFO);
 
         if (d3d12_submit_info && !host_timeline_values)
         {
-            host_timeline_values = malloc(sizeof(*host_timeline_values));
-
+            host_timeline_values = conversion_context_alloc(&submit_unit->ctx, sizeof(*host_timeline_values));
             host_timeline_values->sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
             host_timeline_values->pNext = submit_unit->submits[i].pNext;
             host_timeline_values->waitSemaphoreValueCount = d3d12_submit_info->waitSemaphoreValuesCount;
-            host_timeline_values->pWaitSemaphoreValues =
-                    memdup(d3d12_submit_info->pWaitSemaphoreValues, d3d12_submit_info->waitSemaphoreValuesCount,
-                        sizeof(host_timeline_values->pWaitSemaphoreValues[0]));
+            MEMDUP(&submit_unit->ctx, host_timeline_values->pWaitSemaphoreValues, d3d12_submit_info->pWaitSemaphoreValues,
+                    d3d12_submit_info->waitSemaphoreValuesCount);
             host_timeline_values->signalSemaphoreValueCount = d3d12_submit_info->signalSemaphoreValuesCount;
-            host_timeline_values->pSignalSemaphoreValues =
-                    memdup(d3d12_submit_info->pSignalSemaphoreValues, d3d12_submit_info->signalSemaphoreValuesCount,
-                        sizeof(host_timeline_values->pSignalSemaphoreValues[0]));
-
+            MEMDUP(&submit_unit->ctx, host_timeline_values->pSignalSemaphoreValues, d3d12_submit_info->pSignalSemaphoreValues,
+                    d3d12_submit_info->signalSemaphoreValuesCount);
             submit_unit->submits[i].pNext = host_timeline_values;
         }
 
@@ -6659,48 +6317,49 @@ static NTSTATUS virtual_queue_submit(struct VkQueue_T *queue, uint32_t submit_co
     return VK_SUCCESS;
 }
 
-NTSTATUS wine_vkQueueSubmit(void *args)
+VkResult wine_vkQueueSubmit(VkQueue queue_handle, uint32_t submit_count, const VkSubmitInfo *submits, VkFence fence,
+        void *submits_win)
 {
-    struct vkQueueSubmit_params *params = args;
-    VkQueue queue = params->queue;
-    uint32_t submit_count = params->submitCount;
-    const VkSubmitInfo *submits = params->pSubmits;
-    VkFence fence = params->fence;
-
+    struct wine_queue *queue = wine_queue_from_handle(queue_handle);
     unsigned int i, k;
 
-    TRACE("(%p %u %p 0x%s)\n", queue, submit_count, submits, wine_dbgstr_longlong(fence));
+    TRACE("(%p %u %p 0x%s)\n", queue_handle, submit_count, submits, wine_dbgstr_longlong(fence));
 
     if (is_virtual_queue(queue))
-        return virtual_queue_submit(queue, submit_count, submits, fence);
+        return virtual_queue_submit(queue, submit_count, submits, fence, submits_win);
 
     for (i = 0; i < submit_count; i++)
     {
-        if (wine_vk_find_struct(&submits[i], WIN32_KEYED_MUTEX_ACQUIRE_RELEASE_INFO_KHR))
-            FIXME("VkWin32KeyedMutexAcquireReleaseInfoKHR structure unhandled.\n");
-
         for (k = 0; k < submits[i].waitSemaphoreCount; k++)
         {
             if (wine_semaphore_from_handle(submits[i].pWaitSemaphores[k])->handle_type ==
                     VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_D3D12_FENCE_BIT)
-                return virtual_queue_submit(queue, submit_count, submits, fence);
+                return virtual_queue_submit(queue, submit_count, submits, fence, submits_win);
         }
 
         for (k = 0; k < submits[i].signalSemaphoreCount; k++)
         {
             if (wine_semaphore_from_handle(submits[i].pSignalSemaphores[k])->handle_type ==
                     VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_D3D12_FENCE_BIT)
-                return virtual_queue_submit(queue, submit_count, submits, fence);
+                return virtual_queue_submit(queue, submit_count, submits, fence, submits_win);
         }
     }
-
-    if (fence)
-        wine_fence_from_handle(fence)->queue = queue;
-
-    return thunk_vkQueueSubmit(queue, submit_count, submits, fence);
+    return vk_queue_submit_unwrap(queue, submit_count, submits, fence);
 }
 
-static NTSTATUS virtual_queue_submit2(struct VkQueue_T *queue, uint32_t submit_count, const VkSubmitInfo2 *submits, VkFence fence, bool khr)
+static void duplicate_array_for_unwrapping(struct conversion_context *ctx, void **ptr, unsigned int size)
+{
+    void *out;
+
+    if (!*ptr || !size)
+        return;
+
+    out = conversion_context_alloc(ctx, size);
+    memcpy(out, *ptr, size);
+    *ptr = out;
+}
+
+static NTSTATUS virtual_queue_submit2(struct wine_queue *queue, uint32_t submit_count, const VkSubmitInfo2 *submits, VkFence fence, bool khr)
 {
     VkSemaphoreSubmitInfo *sem_submit_info;
     struct queue_submit_unit *submit_unit;
@@ -6719,9 +6378,10 @@ static NTSTATUS virtual_queue_submit2(struct VkQueue_T *queue, uint32_t submit_c
         return VK_ERROR_DEVICE_LOST;
 
     submit_unit = malloc(sizeof(*submit_unit));
+    init_conversion_context(&submit_unit->ctx);
     submit_unit->submit_count = submit_count;
     submit_unit->submits = NULL;
-    submit_unit->submits2 = copy_VkSubmitInfo2(submits, submit_count);
+    submit_unit->submits2 = copy_VkSubmitInfo2_array(&submit_unit->ctx, submits, submit_count);
     submit_unit->fence = fence;
     submit_unit->waits = NULL;
     submit_unit->khr = khr;
@@ -6770,104 +6430,106 @@ static NTSTATUS virtual_queue_submit2(struct VkQueue_T *queue, uint32_t submit_c
     return VK_SUCCESS;
 }
 
-static NTSTATUS vk_queue_submit_2(VkQueue queue, uint32_t submit_count, const VkSubmitInfo2 *submits, VkFence fence, bool khr)
+VkResult vk_queue_submit_2_unwrap(struct wine_queue *queue, uint32_t submit_count, const VkSubmitInfo2 *submits_orig,
+        VkFence fence_handle, bool khr)
 {
+    struct wine_fence *fence = fence_handle ? wine_fence_from_handle(fence_handle) : NULL;
+    struct conversion_context ctx;
+    VkSubmitInfo2 *submits;
+    unsigned int i, j;
+    VkResult ret;
+
+    init_conversion_context(&ctx);
+    MEMDUP(&ctx, submits, submits_orig, submit_count);
+    for (i = 0; i < submit_count; ++i)
+    {
+        duplicate_array_for_unwrapping(&ctx, (void **)&submits[i].pWaitSemaphoreInfos,
+                submits[i].waitSemaphoreInfoCount * sizeof(*submits[i].pWaitSemaphoreInfos));
+        for (j = 0; j < submits[i].waitSemaphoreInfoCount; ++j)
+            if (submits[i].pWaitSemaphoreInfos[j].semaphore)
+                ((VkSemaphoreSubmitInfo *)submits[i].pWaitSemaphoreInfos)[j].semaphore
+                        = wine_semaphore_host_handle(wine_semaphore_from_handle(submits[i].pWaitSemaphoreInfos[j].semaphore));
+
+        duplicate_array_for_unwrapping(&ctx, (void **)&submits[i].pSignalSemaphoreInfos,
+                submits[i].signalSemaphoreInfoCount * sizeof(*submits[i].pSignalSemaphoreInfos));
+        for (j = 0; j < submits[i].signalSemaphoreInfoCount; ++j)
+            if (submits[i].pSignalSemaphoreInfos[j].semaphore)
+                ((VkSemaphoreSubmitInfo *)submits[i].pSignalSemaphoreInfos)[j].semaphore
+                        = wine_semaphore_host_handle(wine_semaphore_from_handle(submits[i].pSignalSemaphoreInfos[j].semaphore));
+
+        if (submits[i].pCommandBufferInfos && submits[i].commandBufferInfoCount)
+        {
+            duplicate_array_for_unwrapping(&ctx, (void **)&submits[i].pCommandBufferInfos,
+                    submits[i].commandBufferInfoCount * sizeof(*submits[i].pCommandBufferInfos));
+            for (j = 0; j < submits[i].commandBufferInfoCount; ++j)
+                ((VkCommandBufferSubmitInfo *)submits[i].pCommandBufferInfos)[j].commandBuffer
+                        = wine_cmd_buffer_from_handle(submits[i].pCommandBufferInfos[j].commandBuffer)->command_buffer;
+        }
+    }
+    if (fence)
+        fence->queue = queue;
+
+    if (khr)
+        ret = queue->device->funcs.p_vkQueueSubmit2KHR(queue->queue, submit_count, submits, fence ? fence->fence : VK_NULL_HANDLE);
+    else
+        ret = queue->device->funcs.p_vkQueueSubmit2(queue->queue, submit_count, submits, fence ? fence->fence : VK_NULL_HANDLE);
+
+    free_conversion_context(&ctx);
+    return ret;
+}
+
+static VkResult vk_queue_submit_2(VkQueue queue_handle, uint32_t submit_count, const VkSubmitInfo2 *submits, VkFence fence_handle, bool khr)
+{
+    struct wine_queue *queue = wine_queue_from_handle(queue_handle);
     unsigned int i, k;
 
-    TRACE("(%p, %u, %p, %s)\n", queue, submit_count, submits, wine_dbgstr_longlong(fence));
+    TRACE("(%p, %u, %p, %s)\n", queue_handle, submit_count, submits, wine_dbgstr_longlong(fence_handle));
 
     if (is_virtual_queue(queue))
-        return virtual_queue_submit2(queue, submit_count, submits, fence, khr);
+        return virtual_queue_submit2(queue, submit_count, submits, fence_handle, khr);
 
     for (i = 0; i < submit_count; i++)
     {
-        if (wine_vk_find_struct(&submits[i], WIN32_KEYED_MUTEX_ACQUIRE_RELEASE_INFO_KHR))
-            FIXME("VkWin32KeyedMutexAcquireReleaseInfoKHR structure unhandled.\n");
-
         for (k = 0; k < submits[i].waitSemaphoreInfoCount; k++)
         {
             if (wine_semaphore_from_handle(submits[i].pWaitSemaphoreInfos[k].semaphore)->handle_type ==
                     VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_D3D12_FENCE_BIT)
-                return virtual_queue_submit2(queue, submit_count, submits, fence, khr);
+                return virtual_queue_submit2(queue, submit_count, submits, fence_handle, khr);
         }
 
         for (k = 0; k < submits[i].signalSemaphoreInfoCount; k++)
         {
             if (wine_semaphore_from_handle(submits[i].pSignalSemaphoreInfos[k].semaphore)->handle_type ==
                     VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_D3D12_FENCE_BIT)
-                return virtual_queue_submit2(queue, submit_count, submits, fence, khr);
+                return virtual_queue_submit2(queue, submit_count, submits, fence_handle, khr);
         }
     }
 
-    if (fence)
-        wine_fence_from_handle(fence)->queue = queue;
-
-    if (khr)
-        return thunk_vkQueueSubmit2KHR(queue, submit_count, submits, fence);
-    else
-        return thunk_vkQueueSubmit2(queue, submit_count, submits, fence);
+    return vk_queue_submit_2_unwrap(queue, submit_count, submits, fence_handle, khr);
 }
 
-NTSTATUS wine_vkQueueSubmit2(void *args)
+VkResult wine_vkQueueSubmit2(VkQueue queue, uint32_t submit_count, const VkSubmitInfo2 *submits, VkFence fence)
 {
-    struct vkQueueSubmit2_params *params = args;
-    VkQueue queue = params->queue;
-    uint32_t submit_count = params->submitCount;
-    const VkSubmitInfo2 *submits = params->pSubmits;
-    VkFence fence = params->fence;
-
     return vk_queue_submit_2(queue, submit_count, submits, fence, false);
 }
 
-NTSTATUS wine_vkQueueSubmit2KHR(void *args)
+VkResult wine_vkQueueSubmit2KHR(VkQueue queue, uint32_t submit_count, const VkSubmitInfo2 *submits, VkFence fence)
 {
-    struct vkQueueSubmit2_params *params = args;
-    VkQueue queue = params->queue;
-    uint32_t submit_count = params->submitCount;
-    const VkSubmitInfo2 *submits = params->pSubmits;
-    VkFence fence = params->fence;
-
     return vk_queue_submit_2(queue, submit_count, submits, fence, true);
 }
 
-static inline VkSemaphore *convert_VkSemaphore_array_win_to_host(const VkSemaphore *in, uint32_t count)
+VkResult wine_vkQueuePresentKHR(VkQueue queue_handle, const VkPresentInfoKHR *present_info)
 {
-    VkSemaphore *out;
-    unsigned int i;
-
-    if (!in || !count) return NULL;
-
-    out = malloc(count * sizeof(*out));
-    for (i = 0; i < count; i++)
-    {
-        out[i] = in[i] ? wine_semaphore_from_handle(in[i])->semaphore : VK_NULL_HANDLE;
-    }
-
-    return out;
-}
-
-static inline void free_VkSemaphore_array(VkSemaphore *in, uint32_t count)
-{
-    if (!in) return;
-
-    free(in);
-}
-
-NTSTATUS wine_vkQueuePresentKHR(void *args)
-{
-    struct vkQueuePresentKHR_params *params = args;
-    VkQueue queue = params->queue;
-    const VkPresentInfoKHR *present_info = params->pPresentInfo;
-
+    struct wine_queue *queue = wine_queue_from_handle(queue_handle);
     VkPresentInfoKHR host_present_info = *present_info;
     struct wine_semaphore *semaphore;
-    VkSemaphore *host_semaphores;
+    struct conversion_context ctx;
     unsigned int i;
-    VkResult vr;
+    VkResult ret;
 
-    TRACE("%p %p\n", queue, present_info);
+    TRACE("%p %p\n", queue_handle, present_info);
 
-    for (i = 0; i < present_info->waitSemaphoreCount; i++)
+    for (i = 0; i < present_info->waitSemaphoreCount; ++i)
     {
         semaphore = wine_semaphore_from_handle(present_info->pWaitSemaphores[i]);
 
@@ -6886,23 +6548,21 @@ NTSTATUS wine_vkQueuePresentKHR(void *args)
         pthread_mutex_unlock(&queue->submissions_mutex);
     }
 
-    host_present_info.pWaitSemaphores = host_semaphores = convert_VkSemaphore_array_win_to_host(present_info->pWaitSemaphores, present_info->waitSemaphoreCount);
-    vr = fshack_vk_queue_present(queue, &host_present_info);
-    free_VkSemaphore_array(host_semaphores, present_info->waitSemaphoreCount);
-    return vr;
+    init_conversion_context(&ctx);
+    host_present_info.pWaitSemaphores = unwrap_semaphore_array(present_info->pWaitSemaphores, present_info->waitSemaphoreCount, &ctx);
+    ret = fshack_vk_queue_present(queue_handle, &host_present_info);
+    free_conversion_context(&ctx);
+    return ret;
 }
 
-NTSTATUS wine_vkQueueBindSparse(void *args)
+VkResult wine_vkQueueBindSparse(VkQueue queue_handle, uint32_t bind_info_count, const VkBindSparseInfo *bind_info, VkFence fence)
 {
-    struct vkQueueBindSparse_params *params = args;
-    VkQueue queue = params->queue;
-    uint32_t bind_info_count = params->bindInfoCount;
-    const VkBindSparseInfo *bind_info = params->pBindInfo;
-    VkFence fence = params->fence;
-
+    struct wine_queue *queue = wine_queue_from_handle(queue_handle);
     struct wine_semaphore *semaphore;
-    const VkBindSparseInfo *batch;
-    unsigned int i, k;
+    struct conversion_context ctx;
+    VkBindSparseInfo *batch;
+    unsigned int i, j, k;
+    VkResult ret;
 
     TRACE("(%p, %u, %p, 0x%s)\n", queue, bind_info_count, bind_info, wine_dbgstr_longlong(fence));
 
@@ -6917,7 +6577,7 @@ NTSTATUS wine_vkQueueBindSparse(void *args)
 
     for (i = 0; i < bind_info_count; i++)
     {
-        batch = &bind_info[i];
+        batch = (VkBindSparseInfo *)&bind_info[i];
 
         for (k = 0; k < batch->waitSemaphoreCount; k++)
         {
@@ -6942,17 +6602,51 @@ NTSTATUS wine_vkQueueBindSparse(void *args)
         }
     }
 
-    return thunk_vkQueueBindSparse(queue, bind_info_count, bind_info, fence);
+    init_conversion_context(&ctx);
+    for (i = 0; i < bind_info_count; ++i)
+    {
+        batch = (VkBindSparseInfo *)&bind_info[i];
+        batch->pWaitSemaphores = unwrap_semaphore_array(batch->pWaitSemaphores, batch->waitSemaphoreCount, &ctx);
+        batch->pSignalSemaphores = unwrap_semaphore_array(batch->pSignalSemaphores, batch->signalSemaphoreCount, &ctx);
+
+        duplicate_array_for_unwrapping(&ctx, (void **)&batch->pBufferBinds, batch->bufferBindCount * sizeof(*batch->pBufferBinds));
+        for (j = 0; j < batch->bufferBindCount; ++j)
+        {
+            VkSparseBufferMemoryBindInfo *bind = (VkSparseBufferMemoryBindInfo *)&batch->pBufferBinds[j];
+            duplicate_array_for_unwrapping(&ctx, (void **)&bind->pBinds, bind->bindCount * sizeof(*bind->pBinds));
+            for (k = 0; k < bind->bindCount; ++k)
+                if (bind->pBinds[k].memory)
+                    ((VkSparseMemoryBind *)bind->pBinds)[k].memory = wine_device_memory_from_handle(bind->pBinds[k].memory)->memory;
+        }
+
+        duplicate_array_for_unwrapping(&ctx, (void **)&batch->pImageOpaqueBinds, batch->imageOpaqueBindCount * sizeof(*batch->pImageOpaqueBinds));
+        for (j = 0; j < batch->imageOpaqueBindCount; ++j)
+        {
+            VkSparseImageOpaqueMemoryBindInfo *bind = (VkSparseImageOpaqueMemoryBindInfo *)&batch->pImageOpaqueBinds[j];
+            duplicate_array_for_unwrapping(&ctx, (void **)&bind->pBinds, bind->bindCount * sizeof(*bind->pBinds));
+            for (k = 0; k < bind->bindCount; ++k)
+                if (bind->pBinds[k].memory)
+                    ((VkSparseMemoryBind *)bind->pBinds)[k].memory = wine_device_memory_from_handle(bind->pBinds[k].memory)->memory;
+        }
+
+        duplicate_array_for_unwrapping(&ctx, (void **)&batch->pImageBinds, batch->imageBindCount * sizeof(*batch->pImageBinds));
+        for (j = 0; j < batch->imageBindCount; ++j)
+        {
+            VkSparseImageMemoryBindInfo *bind = (VkSparseImageMemoryBindInfo *)&batch->pImageBinds[j];
+            duplicate_array_for_unwrapping(&ctx, (void **)&bind->pBinds, bind->bindCount * sizeof(*bind->pBinds));
+            for (k = 0; k < bind->bindCount; ++k)
+                if (bind->pBinds[k].memory)
+                    ((VkSparseImageMemoryBind *)bind->pBinds)[k].memory = wine_device_memory_from_handle(bind->pBinds[k].memory)->memory;
+        }
+    }
+    ret = queue->device->funcs.p_vkQueueBindSparse(queue->queue, bind_info_count, bind_info, fence);
+    free_conversion_context(&ctx);
+    return ret;
 }
 
-NTSTATUS wine_vkCreateFence(void *args)
+VkResult wine_vkCreateFence(VkDevice device_handle, const VkFenceCreateInfo *create_info, const VkAllocationCallbacks *allocator, VkFence *fence)
 {
-    struct vkCreateFence_params *params = args;
-    VkDevice device = params->device;
-    const VkFenceCreateInfo *create_info = params->pCreateInfo;
-    const VkAllocationCallbacks *allocator = params->pAllocator;
-    VkFence *fence = params->pFence;
-
+    struct wine_device *device = wine_device_from_handle(device_handle);
     struct wine_fence *object;
     VkResult vr;
 
@@ -6975,47 +6669,57 @@ NTSTATUS wine_vkCreateFence(void *args)
     return vr;
 }
 
-NTSTATUS wine_vkDestroyFence(void *args)
+void wine_vkDestroyFence(VkDevice device_handle, VkFence fence_handle, const VkAllocationCallbacks *allocator)
 {
-    struct vkDestroyFence_params *params = args;
-    VkDevice device = params->device;
-    VkFence handle = params->fence;
-    const VkAllocationCallbacks *allocator = params->pAllocator;
-
-    struct wine_fence *fence = wine_fence_from_handle(handle);
+    struct wine_device *device = wine_device_from_handle(device_handle);
+    struct wine_fence *fence = wine_fence_from_handle(fence_handle);
 
     TRACE("(%p, %p, %p)\n", device, fence, allocator);
 
     if (allocator)
         FIXME("Support for allocation callbacks not implemented yet\n");
 
-    if (!handle)
-        return VK_SUCCESS;
+    if (!fence_handle)
+        return;
 
     if (fence->eventfd != -1)
         close(fence->eventfd);
 
-    device->funcs.p_vkDestroyFence(device->device, fence->fence, allocator);
+    device->funcs.p_vkDestroyFence(device->device, fence->fence, NULL);
     free(fence);
-
-    return STATUS_SUCCESS;
 }
 
-NTSTATUS wine_vkResetFences(void *args)
+static VkFence *unwrap_fence_array(const VkFence *in, uint32_t count, struct conversion_context *ctx)
 {
-    struct vkResetFences_params *params = args;
-    VkDevice device = params->device;
-    uint32_t fence_count = params->fenceCount;
-    const VkFence *fences = params->pFences;
+    VkFence *out;
+    unsigned int i;
 
+    if (!in || !count) return NULL;
+
+    out = conversion_context_alloc(ctx, count * sizeof(*out));
+    for (i = 0; i < count; ++i)
+        out[i] = in[i] ? wine_fence_from_handle(in[i])->fence : VK_NULL_HANDLE;
+
+    return out;
+}
+
+VkResult wine_vkResetFences(VkDevice device_handle, uint32_t fence_count, const VkFence *fences)
+{
+    struct wine_device *device = wine_device_from_handle(device_handle);
+    struct conversion_context ctx;
     struct wine_fence *fence;
+    VkFence *fences_unwrap;
     unsigned int i;
     uint64_t buf;
     VkResult vr;
 
     TRACE("(%p, %u, %p)\n", device, fence_count, fences);
 
-    if ((vr = thunk_vkResetFences(device, fence_count, fences)) != VK_SUCCESS)
+    init_conversion_context(&ctx);
+    fences_unwrap = unwrap_fence_array(fences, fence_count, &ctx);
+    vr = device->funcs.p_vkResetFences(device->device, fence_count, fences_unwrap);
+    free_conversion_context(&ctx);
+    if (vr)
         return vr;
 
     for (i = 0; i < fence_count; i++)
@@ -7035,15 +6739,10 @@ NTSTATUS wine_vkResetFences(void *args)
     return VK_SUCCESS;
 }
 
-NTSTATUS wine_vkWaitForFences(void *args)
+VkResult wine_vkWaitForFences(VkDevice device_handle, uint32_t fence_count, const VkFence *fences,
+        VkBool32 wait_all, uint64_t timeout)
 {
-    struct vkWaitForFences_params *params = args;
-    VkDevice device = params->device;
-    uint32_t fence_count = params->fenceCount;
-    const VkFence *fences = params->pFences;
-    VkBool32 wait_all = params->waitAll;
-    uint64_t timeout = params->timeout;
-
+    struct wine_device *device = wine_device_from_handle(device_handle);
     struct signal_op *signal_op;
     bool assisted_wait = false;
     struct wine_fence *fence;
@@ -7134,16 +6833,21 @@ NTSTATUS wine_vkWaitForFences(void *args)
     }
     else
     {
-        vr = thunk_vkWaitForFences(device, fence_count, fences, wait_all, timeout);
+        struct conversion_context ctx;
+        VkFence *fences_unwrap;
+
+        init_conversion_context(&ctx);
+        fences_unwrap = unwrap_fence_array(fences, fence_count, &ctx);
+        vr = device->funcs.p_vkWaitForFences(device->device, fence_count, fences_unwrap, wait_all, timeout);
+        free_conversion_context(&ctx);
     }
 
     return vr;
 }
 
-NTSTATUS wine_vkQueueWaitIdle(void *args)
+VkResult wine_vkQueueWaitIdle(VkQueue queue_handle)
 {
-    struct vkQueueWaitIdle_params *params = args;
-    VkQueue queue = params->queue;
+    struct wine_queue *queue = wine_queue_from_handle(queue_handle);
 
     TRACE("(%p)\n", queue);
 

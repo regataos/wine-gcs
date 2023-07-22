@@ -30,7 +30,6 @@
 #include "prntvpt.h"
 #include "initguid.h"
 #include "msxml2.h"
-#include "wine/heap.h"
 #include "wine/debug.h"
 
 #include "prntvpt_private.h"
@@ -574,7 +573,7 @@ static void set_SelectionNamespaces(IXMLDOMDocument2 *doc)
                 {
                     if (!wcscmp(str, L"xmlns") || !wcsncmp(str, L"xmlns:", 6))
                     {
-                        TRACE("ns[%d]: %s=%s\n", i, wine_dbgstr_w(str), wine_dbgstr_w(V_BSTR(&var)));
+                        TRACE("ns[%ld]: %s=%s\n", i, wine_dbgstr_w(str), wine_dbgstr_w(V_BSTR(&var)));
                         IStream_Write(stream, str, wcslen(str) * sizeof(WCHAR), NULL);
                         IStream_Write(stream, L"=\"", 2 * sizeof(WCHAR), NULL);
                         IStream_Write(stream, V_BSTR(&var), wcslen(V_BSTR(&var)) * sizeof(WCHAR), NULL);
@@ -709,7 +708,7 @@ static HRESULT initialize_ticket(struct prn_provider *prov, struct ticket *ticke
     if (GetLastError() != ERROR_INSUFFICIENT_BUFFER)
         return HRESULT_FROM_WIN32(GetLastError());
 
-    pi2 = heap_alloc(size);
+    pi2 = malloc(size);
     if (!pi2) return E_OUTOFMEMORY;
 
     if (!GetPrinterW(prov->hprn, 2, (LPBYTE)pi2, size, NULL))
@@ -717,7 +716,7 @@ static HRESULT initialize_ticket(struct prn_provider *prov, struct ticket *ticke
     else
         devmode_to_ticket(pi2->pDevMode, ticket);
 
-    heap_free(pi2);
+    free(pi2);
     return hr;
 }
 
@@ -739,7 +738,7 @@ HRESULT WINAPI PTConvertPrintTicketToDevMode(HPTPROVIDER provider, IStream *stre
     hr = parse_ticket(stream, scope, &ticket);
     if (hr != S_OK) return hr;
 
-    *dm = heap_alloc(sizeof(**dm));
+    *dm = malloc(sizeof(**dm));
     if (!*dm) return E_OUTOFMEMORY;
 
     ticket_to_devmode(&ticket, *dm);
@@ -1174,7 +1173,7 @@ while (0)
     CHECK_FIELD(DM_DITHERTYPE);
     CHECK_FIELD(DM_PANNINGWIDTH);
     CHECK_FIELD(DM_PANNINGHEIGHT);
-    if (fields) TRACE(" %#x", fields);
+    if (fields) TRACE(" %#lx", fields);
     TRACE("\n");
 #undef CHECK_FIELD
 }
@@ -1192,7 +1191,7 @@ static void dump_devmode(const DEVMODEW *dm)
     TRACE("dmDriverVersion: 0x%04x\n", dm->dmDriverVersion);
     TRACE("dmSize: 0x%04x\n", dm->dmSize);
     TRACE("dmDriverExtra: 0x%04x\n", dm->dmDriverExtra);
-    TRACE("dmFields: 0x%04x\n", dm->dmFields);
+    TRACE("dmFields: 0x%04lx\n", dm->dmFields);
     dump_fields(dm->dmFields);
     TRACE("dmOrientation: %d\n", dm->u1.s1.dmOrientation);
     TRACE("dmPaperSize: %d\n", dm->u1.s1.dmPaperSize);
@@ -1209,9 +1208,9 @@ static void dump_devmode(const DEVMODEW *dm)
     TRACE("dmCollate: %d\n", dm->dmCollate);
     TRACE("dmFormName: %s\n", debugstr_w(dm->dmFormName));
     TRACE("dmLogPixels %u\n", dm->dmLogPixels);
-    TRACE("dmBitsPerPel %u\n", dm->dmBitsPerPel);
-    TRACE("dmPelsWidth %u\n", dm->dmPelsWidth);
-    TRACE("dmPelsHeight %u\n", dm->dmPelsHeight);
+    TRACE("dmBitsPerPel %lu\n", dm->dmBitsPerPel);
+    TRACE("dmPelsWidth %lu\n", dm->dmPelsWidth);
+    TRACE("dmPelsHeight %lu\n", dm->dmPelsHeight);
 }
 
 HRESULT WINAPI PTConvertDevModeToPrintTicket(HPTPROVIDER provider, ULONG size, PDEVMODEW dm,
@@ -1221,7 +1220,7 @@ HRESULT WINAPI PTConvertDevModeToPrintTicket(HPTPROVIDER provider, ULONG size, P
     struct ticket ticket;
     HRESULT hr;
 
-    TRACE("%p,%u,%p,%d,%p\n", provider, size, dm, scope, stream);
+    TRACE("%p,%lu,%p,%d,%p\n", provider, size, dm, scope, stream);
 
     if (!is_valid_provider(provider) || !dm || !stream)
         return E_INVALIDARG;
@@ -1279,7 +1278,7 @@ static HRESULT write_PageMediaSize_caps(const WCHAR *device, IXMLDOMElement *roo
     if (count <= 0)
         return HRESULT_FROM_WIN32(GetLastError());
 
-    pt = heap_alloc(count * sizeof(*pt));
+    pt = calloc(count, sizeof(*pt));
     if (!pt) return E_OUTOFMEMORY;
 
     count = DeviceCapabilitiesW(device, NULL, DC_PAPERSIZE, (LPWSTR)pt, NULL);
@@ -1298,7 +1297,7 @@ static HRESULT write_PageMediaSize_caps(const WCHAR *device, IXMLDOMElement *roo
 
 fail:
     if (feature) IXMLDOMElement_Release(feature);
-    heap_free(pt);
+    free(pt);
     return hr;
 }
 
@@ -1353,7 +1352,7 @@ static HRESULT write_PageResolution_caps(const WCHAR *device, IXMLDOMElement *ro
     if (count <= 0)
         return HRESULT_FROM_WIN32(GetLastError());
 
-    res = heap_alloc(count * sizeof(*res));
+    res = calloc(count, sizeof(*res));
     if (!res) return E_OUTOFMEMORY;
 
     count = DeviceCapabilitiesW(device, NULL, DC_ENUMRESOLUTIONS, (LPWSTR)res, NULL);
@@ -1372,7 +1371,7 @@ static HRESULT write_PageResolution_caps(const WCHAR *device, IXMLDOMElement *ro
 
 fail:
     if (feature) IXMLDOMElement_Release(feature);
-    heap_free(res);
+    free(res);
     return hr;
 }
 
@@ -1427,7 +1426,7 @@ static HRESULT write_JobInputBin_caps(const WCHAR *device, IXMLDOMElement *root)
     if (count <= 0)
         return HRESULT_FROM_WIN32(GetLastError());
 
-    bin = heap_alloc(count * sizeof(*bin));
+    bin = calloc(count, sizeof(*bin));
     if (!bin) return E_OUTOFMEMORY;
 
     count = DeviceCapabilitiesW(device, NULL, DC_BINS, (LPWSTR)bin, NULL);
@@ -1446,7 +1445,7 @@ static HRESULT write_JobInputBin_caps(const WCHAR *device, IXMLDOMElement *root)
 
 fail:
     if (feature) IXMLDOMElement_Release(feature);
-    heap_free(bin);
+    free(bin);
     return hr;
 }
 

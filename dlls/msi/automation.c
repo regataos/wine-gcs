@@ -239,7 +239,7 @@ static ULONG WINAPI AutomationObject_Release(IDispatch* iface)
     {
         if (tid_ids[This->tid].fn_free) tid_ids[This->tid].fn_free(This);
         MsiCloseHandle(This->msiHandle);
-        msi_free(This);
+        free(This);
     }
 
     return ref;
@@ -265,7 +265,7 @@ static HRESULT WINAPI AutomationObject_GetTypeInfo(
     AutomationObject *This = impl_from_IDispatch(iface);
     HRESULT hr;
 
-    TRACE("(%p/%p)->(%d,%d,%p)\n", iface, This, iTInfo, lcid, ppTInfo);
+    TRACE( "(%p/%p)->(%u, %ld, %p)\n", iface, This, iTInfo, lcid, ppTInfo );
 
     hr = get_typeinfo(This->tid, ppTInfo);
     if (FAILED(hr))
@@ -287,7 +287,7 @@ static HRESULT WINAPI AutomationObject_GetIDsOfNames(
     ITypeInfo *ti;
     HRESULT hr;
 
-    TRACE("(%p/%p)->(%s, %p, %d, %d, %p)\n", iface, This,
+    TRACE("(%p/%p)->(%s, %p, %u, %ld, %p)\n", iface, This,
             debugstr_guid(riid), rgszNames, cNames, lcid, rgDispId);
 
     if (!IsEqualGUID(riid, &IID_NULL)) return E_INVALIDARG;
@@ -331,7 +331,7 @@ static HRESULT WINAPI AutomationObject_Invoke(
     BSTR bstrName = NULL;
     ITypeInfo *ti;
 
-    TRACE("(%p/%p)->(%d, %s, %d, %d, %p, %p, %p, %p)\n", iface, This,
+    TRACE("(%p/%p)->(%ld, %s, %ld, %d, %p, %p, %p, %p)\n", iface, This,
             dispIdMember, debugstr_guid(riid), lcid, wFlags,
             pDispParams, pVarResult, pExcepInfo, puArgErr);
 
@@ -362,14 +362,14 @@ static HRESULT WINAPI AutomationObject_Invoke(
     if (TRACE_ON(msi))
     {
         ITypeInfo_GetDocumentation(ti, dispIdMember, &bstrName, NULL, NULL, NULL);
-        TRACE("Method %d, %s\n", dispIdMember, debugstr_w(bstrName));
+        TRACE("method %ld, %s\n", dispIdMember, debugstr_w(bstrName));
     }
 
     hr = tid_ids[This->tid].fn_invoke(This,dispIdMember,riid,lcid,wFlags,pDispParams,pVarResult,pExcepInfo,puArgErr);
 
     if (hr == DISP_E_MEMBERNOTFOUND) {
         if (bstrName == NULL) ITypeInfo_GetDocumentation(ti, dispIdMember, &bstrName, NULL, NULL, NULL);
-        FIXME("Method %d, %s wflags %d not implemented, clsid %s\n", dispIdMember, debugstr_w(bstrName), wFlags,
+        FIXME("method %ld, %s wflags %d not implemented, clsid %s\n", dispIdMember, debugstr_w(bstrName), wFlags,
             debugstr_guid(get_riid_from_tid(This->tid)));
     }
     else if (pExcepInfo &&
@@ -383,7 +383,7 @@ static HRESULT WINAPI AutomationObject_Invoke(
         if (FAILED(ITypeInfo_GetNames(ti, dispIdMember, bstrParamNames,
                                       MAX_FUNC_PARAMS, &namesNo)))
         {
-            TRACE("Failed to retrieve names for dispIdMember %d\n", dispIdMember);
+            TRACE("failed to retrieve names for dispIdMember %ld\n", dispIdMember);
         }
         else
         {
@@ -412,7 +412,7 @@ static HRESULT WINAPI AutomationObject_Invoke(
     /* Free function name if we retrieved it */
     SysFreeString(bstrName);
 
-    TRACE("Returning 0x%08x, %s\n", hr, SUCCEEDED(hr) ? "ok" : "not ok");
+    TRACE("returning %#lx, %s\n", hr, SUCCEEDED(hr) ? "ok" : "not ok");
 
     return hr;
 }
@@ -470,7 +470,7 @@ static HRESULT WINAPI ProvideMultipleClassInfo_GetClassInfo(IProvideMultipleClas
 static HRESULT WINAPI ProvideMultipleClassInfo_GetGUID(IProvideMultipleClassInfo* iface, DWORD dwGuidKind, GUID* pGUID)
 {
     AutomationObject *This = impl_from_IProvideMultipleClassInfo(iface);
-    TRACE("(%p/%p)->(%d,%s)\n", iface, This, dwGuidKind, debugstr_guid(pGUID));
+    TRACE("(%p/%p)->(%lu, %s)\n", iface, This, dwGuidKind, debugstr_guid(pGUID));
 
     if (dwGuidKind != GUIDKIND_DEFAULT_SOURCE_DISP_IID)
         return E_INVALIDARG;
@@ -500,7 +500,8 @@ static HRESULT WINAPI ProvideMultipleClassInfo_GetInfoOfIndex(IProvideMultipleCl
 {
     AutomationObject *This = impl_from_IProvideMultipleClassInfo(iface);
 
-    TRACE("(%p/%p)->(%d,%d,%p,%p,%p,%p,%p)\n", iface, This, iti, dwFlags, ti, pdwTIFlags, pcdispidReserved, piidPrimary, piidSource);
+    TRACE("(%p/%p)->(%lu, %#lx, %p, %p, %p, %p, %p)\n", iface, This, iti, dwFlags, ti, pdwTIFlags, pcdispidReserved,
+          piidPrimary, piidSource);
 
     if (iti != 0)
         return E_INVALIDARG;
@@ -542,7 +543,7 @@ static const IProvideMultipleClassInfoVtbl ProvideMultipleClassInfoVtbl =
 
 static void init_automation_object(AutomationObject *This, MSIHANDLE msiHandle, tid_t tid)
 {
-    TRACE("(%p, %d, %s)\n", This, msiHandle, debugstr_guid(get_riid_from_tid(tid)));
+    TRACE("%p, %lu, %s\n", This, msiHandle, debugstr_guid(get_riid_from_tid(tid)));
 
     This->IDispatch_iface.lpVtbl = &AutomationObjectVtbl;
     This->IProvideMultipleClassInfo_iface.lpVtbl = &ProvideMultipleClassInfoVtbl;
@@ -606,7 +607,7 @@ static ULONG WINAPI ListEnumerator_Release(IEnumVARIANT* iface)
     if (!ref)
     {
         if (This->list) IDispatch_Release(&This->list->autoobj.IDispatch_iface);
-        msi_free(This);
+        free(This);
     }
 
     return ref;
@@ -618,7 +619,7 @@ static HRESULT WINAPI ListEnumerator_Next(IEnumVARIANT* iface, ULONG celt, VARIA
     ListEnumerator *This = impl_from_IEnumVARIANT(iface);
     ULONG i, local;
 
-    TRACE("(%p, %uld, %p, %p)\n", iface, celt, rgVar, fetched);
+    TRACE("%p, %lu, %p, %p\n", iface, celt, rgVar, fetched);
 
     if (fetched) *fetched = 0;
 
@@ -641,7 +642,7 @@ static HRESULT WINAPI ListEnumerator_Skip(IEnumVARIANT* iface, ULONG celt)
 {
     ListEnumerator *This = impl_from_IEnumVARIANT(iface);
 
-    TRACE("(%p,%uld)\n", iface, celt);
+    TRACE("%p, %lu\n", iface, celt);
 
     This->pos += celt;
     if (This->pos >= This->list->count)
@@ -702,7 +703,7 @@ static HRESULT create_list_enumerator(ListObject *list, void **ppObj)
 
     TRACE("(%p, %p)\n", list, ppObj);
 
-    object = msi_alloc(sizeof(ListEnumerator));
+    object = malloc(sizeof(ListEnumerator));
 
     /* Set all the VTable references */
     object->IEnumVARIANT_iface.lpVtbl = &ListEnumerator_Vtbl;
@@ -806,7 +807,7 @@ static HRESULT summaryinfo_invoke(
                         break;
 
                     case VT_LPSTR:
-                        if (!(str = msi_alloc(++size * sizeof(WCHAR))))
+                        if (!(str = malloc(++size * sizeof(WCHAR))))
                             ERR("Out of memory\n");
                         else if ((ret = MsiSummaryInfoGetPropertyW(This->msiHandle, V_I4(&varg0), &type, NULL,
                                                                    NULL, str, &size)) != ERROR_SUCCESS)
@@ -816,7 +817,7 @@ static HRESULT summaryinfo_invoke(
                             V_VT(pVarResult) = VT_BSTR;
                             V_BSTR(pVarResult) = SysAllocString(str);
                         }
-                        msi_free(str);
+                        free(str);
                         break;
 
                     case VT_FILETIME:
@@ -940,11 +941,11 @@ static HRESULT record_invoke(
                 V_BSTR(pVarResult) = NULL;
                 if ((ret = MsiRecordGetStringW(This->msiHandle, V_I4(&varg0), NULL, &dwLen)) == ERROR_SUCCESS)
                 {
-                    if (!(szString = msi_alloc((++dwLen)*sizeof(WCHAR))))
+                    if (!(szString = malloc((++dwLen) * sizeof(WCHAR))))
                         ERR("Out of memory\n");
                     else if ((ret = MsiRecordGetStringW(This->msiHandle, V_I4(&varg0), szString, &dwLen)) == ERROR_SUCCESS)
                         V_BSTR(pVarResult) = SysAllocString(szString);
-                    msi_free(szString);
+                    free(szString);
                 }
                 if (ret != ERROR_SUCCESS)
                     ERR("MsiRecordGetString returned %d\n", ret);
@@ -997,7 +998,7 @@ static HRESULT create_record(MSIHANDLE msiHandle, IDispatch **disp)
 {
     AutomationObject *record;
 
-    record = msi_alloc(sizeof(*record));
+    record = malloc(sizeof(*record));
     if (!record) return E_OUTOFMEMORY;
 
     init_automation_object(record, msiHandle, Record_tid);
@@ -1030,7 +1031,7 @@ static HRESULT list_invoke(
                  if (SUCCEEDED(hr = create_list_enumerator(list, (LPVOID *)&pUnk)))
                      V_UNKNOWN(pVarResult) = pUnk;
                  else
-                     ERR("Failed to create IEnumVARIANT object, hresult 0x%08x\n", hr);
+                     ERR("failed to create IEnumVARIANT object, hresult %#lx\n", hr);
              }
              else return DISP_E_MEMBERNOTFOUND;
              break;
@@ -1071,7 +1072,7 @@ static void list_free(AutomationObject *This)
 
     for (i = 0; i < list->count; i++)
         VariantClear(&list->data[i]);
-    msi_free(list->data);
+    free(list->data);
 }
 
 static HRESULT get_products_count(const WCHAR *product, int *len)
@@ -1108,7 +1109,7 @@ static HRESULT create_list(const WCHAR *product, IDispatch **dispatch)
     HRESULT hr;
     int i;
 
-    list = msi_alloc_zero(sizeof(ListObject));
+    list = calloc(1, sizeof(ListObject));
     if (!list) return E_OUTOFMEMORY;
 
     init_automation_object(&list->autoobj, 0, StringList_tid);
@@ -1122,7 +1123,7 @@ static HRESULT create_list(const WCHAR *product, IDispatch **dispatch)
         return hr;
     }
 
-    list->data = msi_alloc(list->count*sizeof(VARIANT));
+    list->data = malloc(list->count * sizeof(VARIANT));
     if (!list->data)
     {
         IDispatch_Release(*dispatch);
@@ -1189,7 +1190,7 @@ static HRESULT view_invoke(
                 if ((ret = MsiViewFetch(This->msiHandle, &msiHandle)) == ERROR_SUCCESS)
                 {
                     if (FAILED(hr = create_record(msiHandle, &V_DISPATCH(pVarResult))))
-                        ERR("Failed to create Record object, hresult 0x%08x\n", hr);
+                        ERR("failed to create Record object, hresult %#lx\n", hr);
                 }
                 else if (ret == ERROR_NO_MORE_ITEMS)
                     V_DISPATCH(pVarResult) = NULL;
@@ -1289,7 +1290,7 @@ HRESULT database_invoke(
                     if (SUCCEEDED(hr))
                         V_DISPATCH(pVarResult) = dispatch;
                     else
-                        ERR("Failed to create SummaryInfo object: 0x%08x\n", hr);
+                        ERR("failed to create SummaryInfo object: %#lx\n", hr);
                 }
                 else
                 {
@@ -1311,7 +1312,7 @@ HRESULT database_invoke(
                     if (SUCCEEDED(hr = create_view(msiHandle, &dispatch)))
                         V_DISPATCH(pVarResult) = dispatch;
                     else
-                        ERR("Failed to create View object, hresult 0x%08x\n", hr);
+                        ERR("failed to create View object, hresult %#lx\n", hr);
                 }
                 else
                 {
@@ -1381,11 +1382,11 @@ static HRESULT session_invoke(
                 V_BSTR(pVarResult) = NULL;
                 if ((ret = MsiGetPropertyW(This->msiHandle, V_BSTR(&varg0), NULL, &dwLen)) == ERROR_SUCCESS)
                 {
-                    if (!(szString = msi_alloc((++dwLen)*sizeof(WCHAR))))
+                    if (!(szString = malloc((++dwLen) * sizeof(WCHAR))))
                         ERR("Out of memory\n");
                     else if ((ret = MsiGetPropertyW(This->msiHandle, V_BSTR(&varg0), szString, &dwLen)) == ERROR_SUCCESS)
                         V_BSTR(pVarResult) = SysAllocString(szString);
-                    msi_free(szString);
+                    free(szString);
                 }
                 if (ret != ERROR_SUCCESS)
                     ERR("MsiGetProperty returned %d\n", ret);
@@ -1447,7 +1448,7 @@ static HRESULT session_invoke(
                     if (SUCCEEDED(hr = create_database(msiHandle, &dispatch)))
                         V_DISPATCH(pVarResult) = dispatch;
                     else
-                        ERR("Failed to create Database object, hresult 0x%08x\n", hr);
+                        ERR("failed to create Database object, hresult %#lx\n", hr);
                 }
                 else
                 {
@@ -1617,17 +1618,17 @@ static void variant_from_registry_value(VARIANT *pVarResult, DWORD dwType, LPBYT
 
         case REG_EXPAND_SZ:
             if (!(dwNewSize = ExpandEnvironmentStringsW(szString, szNewString, dwNewSize)))
-                ERR("ExpandEnvironmentStrings returned error %d\n", GetLastError());
-            else if (!(szNewString = msi_alloc(dwNewSize * sizeof(WCHAR))))
+                ERR("ExpandEnvironmentStrings returned error %lu\n", GetLastError());
+            else if (!(szNewString = malloc(dwNewSize * sizeof(WCHAR))))
                 ERR("Out of memory\n");
             else if (!(dwNewSize = ExpandEnvironmentStringsW(szString, szNewString, dwNewSize)))
-                ERR("ExpandEnvironmentStrings returned error %d\n", GetLastError());
+                ERR("ExpandEnvironmentStrings returned error %lu\n", GetLastError());
             else
             {
                 V_VT(pVarResult) = VT_BSTR;
                 V_BSTR(pVarResult) = SysAllocStringLen(szNewString, dwNewSize);
             }
-            msi_free(szNewString);
+            free(szNewString);
             break;
 
         case REG_DWORD:
@@ -1650,7 +1651,7 @@ static void variant_from_registry_value(VARIANT *pVarResult, DWORD dwType, LPBYT
             break;
 
         default:
-            FIXME("Unhandled registry value type %d\n", dwType);
+            FIXME("Unhandled registry value type %lu\n", dwType);
     }
 }
 
@@ -2046,7 +2047,7 @@ static HRESULT InstallerImpl_RegistryValue(WORD wFlags,
                 goto done;
             }
 
-            szString = msi_alloc(size);
+            szString = malloc(size);
             if (!szString)
             {
                 hr = E_OUTOFMEMORY;
@@ -2057,14 +2058,14 @@ static HRESULT InstallerImpl_RegistryValue(WORD wFlags,
                                    &type, (LPBYTE)szString, &size);
             if (ret != ERROR_SUCCESS)
             {
-                msi_free(szString);
+                free(szString);
                 hr = DISP_E_BADINDEX;
                 goto done;
             }
 
             variant_from_registry_value(pVarResult, type,
                                         (LPBYTE)szString, size);
-            msi_free(szString);
+            free(szString);
             break;
 
         /* Try to make it into VT_I4, can use VariantChangeType for this. */
@@ -2092,7 +2093,7 @@ static HRESULT InstallerImpl_RegistryValue(WORD wFlags,
             if (ret != ERROR_SUCCESS)
                 goto done;
 
-            szString = msi_alloc(++size * sizeof(WCHAR));
+            szString = malloc(++size * sizeof(WCHAR));
             if (!szString)
             {
                 hr = E_OUTOFMEMORY;
@@ -2114,7 +2115,7 @@ static HRESULT InstallerImpl_RegistryValue(WORD wFlags,
                 V_BSTR(pVarResult) = SysAllocString(szString);
             }
 
-            msi_free(szString);
+            free(szString);
     }
 
 done:
@@ -2244,7 +2245,7 @@ static HRESULT InstallerImpl_ProductInfo(WORD wFlags,
         goto done;
     }
 
-    str = msi_alloc(++size * sizeof(WCHAR));
+    str = malloc(++size * sizeof(WCHAR));
     if (!str)
     {
         hr = E_OUTOFMEMORY;
@@ -2262,7 +2263,7 @@ static HRESULT InstallerImpl_ProductInfo(WORD wFlags,
     hr = S_OK;
 
 done:
-    msi_free(str);
+    free(str);
     VariantClear(&varg0);
     VariantClear(&varg1);
     return hr;
@@ -2426,7 +2427,7 @@ HRESULT create_msiserver(IUnknown *outer, void **ppObj)
     if (outer)
         return CLASS_E_NOAGGREGATION;
 
-    installer = msi_alloc(sizeof(AutomationObject));
+    installer = malloc(sizeof(AutomationObject));
     if (!installer) return E_OUTOFMEMORY;
 
     init_automation_object(installer, 0, Installer_tid);
@@ -2440,7 +2441,7 @@ HRESULT create_session(MSIHANDLE msiHandle, IDispatch *installer, IDispatch **di
 {
     SessionObject *session;
 
-    session = msi_alloc(sizeof(SessionObject));
+    session = malloc(sizeof(SessionObject));
     if (!session) return E_OUTOFMEMORY;
 
     init_automation_object(&session->autoobj, msiHandle, Session_tid);
@@ -2455,9 +2456,9 @@ static HRESULT create_database(MSIHANDLE msiHandle, IDispatch **dispatch)
 {
     AutomationObject *database;
 
-    TRACE("(%d %p)\n", msiHandle, dispatch);
+    TRACE("%lu %p\n", msiHandle, dispatch);
 
-    database = msi_alloc(sizeof(AutomationObject));
+    database = malloc(sizeof(AutomationObject));
     if (!database) return E_OUTOFMEMORY;
 
     init_automation_object(database, msiHandle, Database_tid);
@@ -2471,9 +2472,9 @@ static HRESULT create_view(MSIHANDLE msiHandle, IDispatch **dispatch)
 {
     AutomationObject *view;
 
-    TRACE("(%d %p)\n", msiHandle, dispatch);
+    TRACE("%lu %p\n", msiHandle, dispatch);
 
-    view = msi_alloc(sizeof(AutomationObject));
+    view = malloc(sizeof(AutomationObject));
     if (!view) return E_OUTOFMEMORY;
 
     init_automation_object(view, msiHandle, View_tid);
@@ -2487,7 +2488,7 @@ static HRESULT create_summaryinfo(MSIHANDLE msiHandle, IDispatch **disp)
 {
     AutomationObject *info;
 
-    info = msi_alloc(sizeof(*info));
+    info = malloc(sizeof(*info));
     if (!info) return E_OUTOFMEMORY;
 
     init_automation_object(info, msiHandle, SummaryInfo_tid);

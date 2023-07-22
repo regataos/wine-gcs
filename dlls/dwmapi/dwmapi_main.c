@@ -21,6 +21,7 @@
 
 #include <stdarg.h>
 
+#include "winternl.h"
 #define COBJMACROS
 #include "windef.h"
 #include "winbase.h"
@@ -37,18 +38,16 @@ WINE_DEFAULT_DEBUG_CHANNEL(dwmapi);
  */
 HRESULT WINAPI DwmIsCompositionEnabled(BOOL *enabled)
 {
-    OSVERSIONINFOW version;
+    RTL_OSVERSIONINFOEXW version;
 
     TRACE("%p\n", enabled);
 
     if (!enabled)
         return E_INVALIDARG;
 
-    version.dwOSVersionInfoSize = sizeof(OSVERSIONINFOW);
-
-    if (!GetVersionExW(&version))
-        *enabled = FALSE;
-    else
+    *enabled = FALSE;
+    version.dwOSVersionInfoSize = sizeof(version);
+    if (!RtlGetVersion(&version))
         *enabled = (version.dwMajorVersion > 6 || (version.dwMajorVersion == 6 && version.dwMinorVersion >= 3));
 
     return S_OK;
@@ -77,21 +76,9 @@ HRESULT WINAPI DwmExtendFrameIntoClientArea(HWND hwnd, const MARGINS* margins)
 /**********************************************************************
  *           DwmGetColorizationColor      (DWMAPI.@)
  */
-HRESULT WINAPI DwmGetColorizationColor(DWORD *colorization, BOOL opaque_blend)
+HRESULT WINAPI DwmGetColorizationColor(DWORD *colorization, BOOL *opaque_blend)
 {
-    FIXME("(%p, %d) stub\n", colorization, opaque_blend);
-
-    return E_NOTIMPL;
-}
-
-/**********************************************************************
- *                  DwmFlush              (DWMAPI.@)
- */
-HRESULT WINAPI DwmFlush(void)
-{
-    static BOOL once;
-
-    if (!once++) FIXME("() stub\n");
+    FIXME("(%p, %p) stub\n", colorization, opaque_blend);
 
     return E_NOTIMPL;
 }
@@ -115,7 +102,7 @@ HRESULT WINAPI DwmSetWindowAttribute(HWND hwnd, DWORD attributenum, LPCVOID attr
 {
     static BOOL once;
 
-    if (!once++) FIXME("(%p, %x, %p, %x) stub\n", hwnd, attributenum, attribute, size);
+    if (!once++) FIXME("(%p, %lx, %p, %lx) stub\n", hwnd, attributenum, attribute, size);
 
     return S_OK;
 }
@@ -197,6 +184,8 @@ BOOL WINAPI DwmDefWindowProc(HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam, 
  */
 HRESULT WINAPI DwmGetWindowAttribute(HWND hwnd, DWORD attribute, PVOID pv_attribute, DWORD size)
 {
+    FIXME("(%p %ld %p %ld) stub\n", hwnd, attribute, pv_attribute, size);
+
     if (!hwnd) return E_HANDLE;
     if (!pv_attribute) return E_INVALIDARG;
 
@@ -224,7 +213,7 @@ HRESULT WINAPI DwmGetWindowAttribute(HWND hwnd, DWORD attribute, PVOID pv_attrib
         break;
 
     default:
-        FIXME("unimplemented attribute %d, size %u, for hwnd %p.\n", attribute, size, hwnd);
+        FIXME("unimplemented attribute %ld, size %lu, for hwnd %p.\n", attribute, size, hwnd);
         return E_INVALIDARG;
     }
 
@@ -241,16 +230,82 @@ HRESULT WINAPI DwmRegisterThumbnail(HWND dest, HWND src, PHTHUMBNAIL thumbnail_i
     return E_NOTIMPL;
 }
 
+static int get_display_frequency(void)
+{
+    DEVMODEW mode;
+    BOOL ret;
+
+    memset(&mode, 0, sizeof(mode));
+    mode.dmSize = sizeof(mode);
+    ret = EnumDisplaySettingsExW(NULL, ENUM_CURRENT_SETTINGS, &mode, 0);
+    if (ret && mode.dmFields & DM_DISPLAYFREQUENCY && mode.dmDisplayFrequency)
+    {
+        return mode.dmDisplayFrequency;
+    }
+    else
+    {
+        WARN("Failed to query display frequency, returning a fallback value.\n");
+        return 60;
+    }
+}
+
 /**********************************************************************
  *           DwmGetCompositionTimingInfo         (DWMAPI.@)
  */
 HRESULT WINAPI DwmGetCompositionTimingInfo(HWND hwnd, DWM_TIMING_INFO *info)
 {
-    static int i;
+    LARGE_INTEGER performance_frequency, qpc;
+    static int i, display_frequency;
+
+    if (!info)
+        return E_INVALIDARG;
+
+    if (info->cbSize != sizeof(DWM_TIMING_INFO))
+        return MILERR_MISMATCHED_SIZE;
 
     if(!i++) FIXME("(%p %p)\n", hwnd, info);
 
-    return E_NOTIMPL;
+    memset(info, 0, info->cbSize);
+    info->cbSize = sizeof(DWM_TIMING_INFO);
+
+    display_frequency = get_display_frequency();
+    info->rateRefresh.uiNumerator = display_frequency;
+    info->rateRefresh.uiDenominator = 1;
+    info->rateCompose.uiNumerator = display_frequency;
+    info->rateCompose.uiDenominator = 1;
+
+    QueryPerformanceFrequency(&performance_frequency);
+    info->qpcRefreshPeriod = performance_frequency.QuadPart / display_frequency;
+
+    QueryPerformanceCounter(&qpc);
+    info->qpcVBlank = (qpc.QuadPart / info->qpcRefreshPeriod) * info->qpcRefreshPeriod;
+
+    return S_OK;
+}
+
+/**********************************************************************
+ *                  DwmFlush              (DWMAPI.@)
+ */
+HRESULT WINAPI DwmFlush(void)
+{
+    LARGE_INTEGER qpf, qpc, delay;
+    LONG64 qpc_refresh_period;
+    int display_frequency;
+    static BOOL once;
+
+    if (!once++)
+        FIXME("() stub\n");
+    else
+        TRACE(".\n");
+
+    display_frequency = get_display_frequency();
+    NtQueryPerformanceCounter(&qpc, &qpf);
+    qpc_refresh_period = qpf.QuadPart / display_frequency;
+    delay.QuadPart = (qpc.QuadPart - ((qpc.QuadPart + qpc_refresh_period - 1) / qpc_refresh_period) * qpc_refresh_period)
+            * 10000000 / qpf.QuadPart;
+    NtDelayExecution(FALSE, &delay);
+
+    return S_OK;
 }
 
 /**********************************************************************
@@ -294,7 +349,7 @@ HRESULT WINAPI DwmSetPresentParameters(HWND hwnd, DWM_PRESENT_PARAMETERS *params
  */
 HRESULT WINAPI DwmSetIconicLivePreviewBitmap(HWND hwnd, HBITMAP hbmp, POINT *pos, DWORD flags)
 {
-    FIXME("(%p %p %p %x) stub\n", hwnd, hbmp, pos, flags);
+    FIXME("(%p %p %p %lx) stub\n", hwnd, hbmp, pos, flags);
     return S_OK;
 };
 
@@ -303,7 +358,7 @@ HRESULT WINAPI DwmSetIconicLivePreviewBitmap(HWND hwnd, HBITMAP hbmp, POINT *pos
  */
 HRESULT WINAPI DwmSetIconicThumbnail(HWND hwnd, HBITMAP hbmp, DWORD flags)
 {
-    FIXME("(%p %p %x) stub\n", hwnd, hbmp, flags);
+    FIXME("(%p %p %lx) stub\n", hwnd, hbmp, flags);
     return S_OK;
 };
 

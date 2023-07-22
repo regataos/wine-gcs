@@ -149,7 +149,7 @@ static HRESULT load_typelib(void)
 
     hr = LoadRegTypeLib(&LIBID_Shell32, 1, 0, LOCALE_SYSTEM_DEFAULT, &tl);
     if (FAILED(hr)) {
-        ERR("LoadRegTypeLib failed: %08x\n", hr);
+        ERR("LoadRegTypeLib failed: %08lx\n", hr);
         return hr;
     }
 
@@ -188,7 +188,7 @@ HRESULT get_typeinfo(enum tid_t tid, ITypeInfo **typeinfo)
         hr = ITypeLib_GetTypeInfoOfGuid(typelib, tid_ids[tid], &ti);
         if (FAILED(hr))
         {
-            ERR("GetTypeInfoOfGuid(%s) failed: %08x\n", debugstr_guid(tid_ids[tid]), hr);
+            ERR("GetTypeInfoOfGuid(%s) failed: %08lx\n", debugstr_guid(tid_ids[tid]), hr);
             return hr;
         }
 
@@ -228,7 +228,7 @@ static ULONG WINAPI FolderItemVerbImpl_AddRef(FolderItemVerb *iface)
     FolderItemVerbImpl *This = impl_from_FolderItemVerb(iface);
     ULONG ref = InterlockedIncrement(&This->ref);
 
-    TRACE("(%p), new refcount=%i\n", iface, ref);
+    TRACE("(%p), new refcount=%li\n", iface, ref);
 
     return ref;
 }
@@ -238,13 +238,13 @@ static ULONG WINAPI FolderItemVerbImpl_Release(FolderItemVerb *iface)
     FolderItemVerbImpl *This = impl_from_FolderItemVerb(iface);
     ULONG ref = InterlockedDecrement(&This->ref);
 
-    TRACE("(%p), new refcount=%i\n", iface, ref);
+    TRACE("(%p), new refcount=%li\n", iface, ref);
 
     if (!ref)
     {
         IContextMenu_Release(This->contextmenu);
         SysFreeString(This->name);
-        heap_free(This);
+        free(This);
     }
 
     return ref;
@@ -262,7 +262,7 @@ static HRESULT WINAPI FolderItemVerbImpl_GetTypeInfo(FolderItemVerb *iface, UINT
 {
     HRESULT hr;
 
-    TRACE("(%p,%u,%d,%p)\n", iface, iTInfo, lcid, ppTInfo);
+    TRACE("(%p,%u,%ld,%p)\n", iface, iTInfo, lcid, ppTInfo);
 
     hr = get_typeinfo(FolderItemVerb_tid, ppTInfo);
     if (SUCCEEDED(hr))
@@ -276,7 +276,7 @@ static HRESULT WINAPI FolderItemVerbImpl_GetIDsOfNames(FolderItemVerb *iface,
     ITypeInfo *ti;
     HRESULT hr;
 
-    TRACE("(%p,%s,%p,%u,%d,%p)\n", iface, shdebugstr_guid(riid), rgszNames, cNames, lcid,
+    TRACE("(%p,%s,%p,%u,%ld,%p)\n", iface, shdebugstr_guid(riid), rgszNames, cNames, lcid,
             rgDispId);
 
     hr = get_typeinfo(FolderItemVerb_tid, &ti);
@@ -293,7 +293,7 @@ static HRESULT WINAPI FolderItemVerbImpl_Invoke(FolderItemVerb *iface,
     ITypeInfo *ti;
     HRESULT hr;
 
-    TRACE("(%p,%d,%s,%d,%u,%p,%p,%p,%p)\n", iface, dispIdMember, shdebugstr_guid(riid), lcid,
+    TRACE("(%p,%ld,%s,%ld,%u,%p,%p,%p,%p)\n", iface, dispIdMember, shdebugstr_guid(riid), lcid,
             wFlags, pDispParams, pVarResult, pExcepInfo, puArgErr);
 
     hr = get_typeinfo(FolderItemVerb_tid, &ti);
@@ -356,7 +356,7 @@ static HRESULT FolderItemVerb_Constructor(IContextMenu *contextmenu, BSTR name, 
 
     TRACE("%p, %s\n", contextmenu, debugstr_w(name));
 
-    This = heap_alloc(sizeof(*This));
+    This = malloc(sizeof(*This));
     if (!This)
         return E_OUTOFMEMORY;
 
@@ -398,7 +398,7 @@ static ULONG WINAPI FolderItemVerbsImpl_AddRef(FolderItemVerbs *iface)
     FolderItemVerbsImpl *This = impl_from_FolderItemVerbs(iface);
     ULONG ref = InterlockedIncrement(&This->ref);
 
-    TRACE("(%p), new refcount=%i\n", iface, ref);
+    TRACE("(%p), new refcount=%li\n", iface, ref);
 
     return ref;
 }
@@ -408,13 +408,13 @@ static ULONG WINAPI FolderItemVerbsImpl_Release(FolderItemVerbs *iface)
     FolderItemVerbsImpl *This = impl_from_FolderItemVerbs(iface);
     ULONG ref = InterlockedDecrement(&This->ref);
 
-    TRACE("(%p), new refcount=%i\n", iface, ref);
+    TRACE("(%p), new refcount=%li\n", iface, ref);
 
     if (!ref)
     {
         IContextMenu_Release(This->contextmenu);
         DestroyMenu(This->hMenu);
-        heap_free(This);
+        free(This);
     }
 
     return ref;
@@ -432,7 +432,7 @@ static HRESULT WINAPI FolderItemVerbsImpl_GetTypeInfo(FolderItemVerbs *iface, UI
 {
     HRESULT hr;
 
-    TRACE("(%p,%u,%d,%p)\n", iface, iTInfo, lcid, ppTInfo);
+    TRACE("(%p,%u,%ld,%p)\n", iface, iTInfo, lcid, ppTInfo);
 
     hr = get_typeinfo(FolderItemVerbs_tid, ppTInfo);
     if (SUCCEEDED(hr))
@@ -446,7 +446,7 @@ static HRESULT WINAPI FolderItemVerbsImpl_GetIDsOfNames(FolderItemVerbs *iface,
     ITypeInfo *ti;
     HRESULT hr;
 
-    TRACE("(%p,%s,%p,%u,%d,%p)\n", iface, shdebugstr_guid(riid), rgszNames, cNames, lcid,
+    TRACE("(%p,%s,%p,%u,%ld,%p)\n", iface, shdebugstr_guid(riid), rgszNames, cNames, lcid,
             rgDispId);
 
     hr = get_typeinfo(FolderItemVerbs_tid, &ti);
@@ -463,7 +463,7 @@ static HRESULT WINAPI FolderItemVerbsImpl_Invoke(FolderItemVerbs *iface,
     ITypeInfo *ti;
     HRESULT hr;
 
-    TRACE("(%p,%d,%s,%d,%u,%p,%p,%p,%p)\n", iface, dispIdMember, shdebugstr_guid(riid), lcid,
+    TRACE("(%p,%ld,%s,%ld,%u,%p,%p,%p,%p)\n", iface, dispIdMember, shdebugstr_guid(riid), lcid,
             wFlags, pDispParams, pVarResult, pExcepInfo, puArgErr);
 
     hr = get_typeinfo(FolderItemVerbs_tid, &ti);
@@ -588,7 +588,7 @@ static HRESULT FolderItemVerbs_Constructor(BSTR path, FolderItemVerbs **verbs)
 
     *verbs = NULL;
 
-    This = heap_alloc(sizeof(*This));
+    This = malloc(sizeof(*This));
     if (!This)
         return E_OUTOFMEMORY;
 
@@ -623,7 +623,7 @@ static HRESULT FolderItemVerbs_Constructor(BSTR path, FolderItemVerbs **verbs)
     return S_OK;
 
 failed:
-    heap_free(This);
+    free(This);
     return hr;
 }
 
@@ -656,7 +656,7 @@ static ULONG WINAPI ShellLinkObject_AddRef(IShellLinkDual2 *iface)
     ShellLinkObjectImpl *This = impl_from_IShellLinkDual(iface);
     ULONG ref = InterlockedIncrement(&This->ref);
 
-    TRACE("(%p), new refcount=%i\n", iface, ref);
+    TRACE("(%p), new refcount=%li\n", iface, ref);
 
     return ref;
 }
@@ -666,12 +666,12 @@ static ULONG WINAPI ShellLinkObject_Release(IShellLinkDual2 *iface)
     ShellLinkObjectImpl *This = impl_from_IShellLinkDual(iface);
     ULONG ref = InterlockedDecrement(&This->ref);
 
-    TRACE("(%p), new refcount=%i\n", iface, ref);
+    TRACE("(%p), new refcount=%li\n", iface, ref);
 
     if (!ref)
     {
         if (This->shell_link) IShellLinkW_Release(This->shell_link);
-        heap_free(This);
+        free(This);
     }
     return ref;
 }
@@ -689,7 +689,7 @@ static HRESULT WINAPI ShellLinkObject_GetTypeInfo(IShellLinkDual2 *iface, UINT i
 {
     HRESULT hr;
 
-    TRACE("(%p,%u,%d,%p)\n", iface, iTInfo, lcid, ppTInfo);
+    TRACE("(%p,%u,%ld,%p)\n", iface, iTInfo, lcid, ppTInfo);
 
     hr = get_typeinfo(IShellLinkDual2_tid, ppTInfo);
     if (SUCCEEDED(hr))
@@ -704,7 +704,7 @@ static HRESULT WINAPI ShellLinkObject_GetIDsOfNames(IShellLinkDual2 *iface, REFI
     ITypeInfo *ti;
     HRESULT hr;
 
-    TRACE("(%p,%s,%p,%u,%d,%p)\n", iface, shdebugstr_guid(riid), rgszNames, cNames, lcid,
+    TRACE("(%p,%s,%p,%u,%ld,%p)\n", iface, shdebugstr_guid(riid), rgszNames, cNames, lcid,
             rgDispId);
 
     hr = get_typeinfo(IShellLinkDual2_tid, &ti);
@@ -721,7 +721,7 @@ static HRESULT WINAPI ShellLinkObject_Invoke(IShellLinkDual2 *iface, DISPID disp
     ITypeInfo *ti;
     HRESULT hr;
 
-    TRACE("(%p,%d,%s,%d,%u,%p,%p,%p,%p)\n", iface, dispIdMember, shdebugstr_guid(riid), lcid,
+    TRACE("(%p,%ld,%s,%ld,%u,%p,%p,%p,%p)\n", iface, dispIdMember, shdebugstr_guid(riid), lcid,
             wFlags, pDispParams, pVarResult, pExcepInfo, puArgErr);
 
     hr = get_typeinfo(IShellLinkDual2_tid, &ti);
@@ -899,7 +899,7 @@ static HRESULT ShellLinkObject_Constructor(FolderItemImpl *item, IShellLinkDual2
 
     *link = NULL;
 
-    This = heap_alloc(sizeof(*This));
+    This = malloc(sizeof(*This));
     if (!This) return E_OUTOFMEMORY;
     This->IShellLinkDual2_iface.lpVtbl = &ShellLinkObjectVtbl;
     This->ref = 1;
@@ -909,7 +909,7 @@ static HRESULT ShellLinkObject_Constructor(FolderItemImpl *item, IShellLinkDual2
                           &IID_IShellLinkW, (LPVOID*)&This->shell_link);
     if (FAILED(hr))
     {
-        heap_free(This);
+        free(This);
         return hr;
     }
 
@@ -918,7 +918,7 @@ static HRESULT ShellLinkObject_Constructor(FolderItemImpl *item, IShellLinkDual2
     if (FAILED(hr))
     {
         IShellLinkW_Release(This->shell_link);
-        heap_free(This);
+        free(This);
         return hr;
     }
 
@@ -927,7 +927,7 @@ static HRESULT ShellLinkObject_Constructor(FolderItemImpl *item, IShellLinkDual2
     if (FAILED(hr))
     {
         IShellLinkW_Release(This->shell_link);
-        heap_free(This);
+        free(This);
         return hr;
     }
 
@@ -964,7 +964,7 @@ static ULONG WINAPI FolderItemImpl_AddRef(FolderItem2 *iface)
     FolderItemImpl *This = impl_from_FolderItem(iface);
     ULONG ref = InterlockedIncrement(&This->ref);
 
-    TRACE("(%p), new refcount=%i\n", iface, ref);
+    TRACE("(%p), new refcount=%li\n", iface, ref);
 
     return ref;
 }
@@ -974,13 +974,13 @@ static ULONG WINAPI FolderItemImpl_Release(FolderItem2 *iface)
     FolderItemImpl *This = impl_from_FolderItem(iface);
     ULONG ref = InterlockedDecrement(&This->ref);
 
-    TRACE("(%p), new refcount=%i\n", iface, ref);
+    TRACE("(%p), new refcount=%li\n", iface, ref);
 
     if (!ref)
     {
         Folder3_Release(&This->folder->Folder3_iface);
-        heap_free(This->path);
-        heap_free(This);
+        free(This->path);
+        free(This);
     }
     return ref;
 }
@@ -999,7 +999,7 @@ static HRESULT WINAPI FolderItemImpl_GetTypeInfo(FolderItem2 *iface, UINT iTInfo
 {
     HRESULT hr;
 
-    TRACE("(%p,%u,%d,%p)\n", iface, iTInfo, lcid, ppTInfo);
+    TRACE("(%p,%u,%ld,%p)\n", iface, iTInfo, lcid, ppTInfo);
 
     hr = get_typeinfo(FolderItem2_tid, ppTInfo);
     if (SUCCEEDED(hr))
@@ -1014,7 +1014,7 @@ static HRESULT WINAPI FolderItemImpl_GetIDsOfNames(FolderItem2 *iface,
     ITypeInfo *ti;
     HRESULT hr;
 
-    TRACE("(%p,%s,%p,%u,%d,%p)\n", iface, shdebugstr_guid(riid), rgszNames, cNames, lcid,
+    TRACE("(%p,%s,%p,%u,%ld,%p)\n", iface, shdebugstr_guid(riid), rgszNames, cNames, lcid,
             rgDispId);
 
     hr = get_typeinfo(FolderItem2_tid, &ti);
@@ -1032,7 +1032,7 @@ static HRESULT WINAPI FolderItemImpl_Invoke(FolderItem2 *iface,
     ITypeInfo *ti;
     HRESULT hr;
 
-    TRACE("(%p,%d,%s,%d,%u,%p,%p,%p,%p)\n", iface, dispIdMember, shdebugstr_guid(riid), lcid,
+    TRACE("(%p,%ld,%s,%ld,%u,%p,%p,%p,%p)\n", iface, dispIdMember, shdebugstr_guid(riid), lcid,
             wFlags, pDispParams, pVarResult, pExcepInfo, puArgErr);
 
     hr = get_typeinfo(FolderItem2_tid, &ti);
@@ -1295,14 +1295,14 @@ static HRESULT FolderItem_Constructor(FolderImpl *folder, const WCHAR *path, Fol
 
     *item = NULL;
 
-    This = heap_alloc_zero(sizeof(*This));
+    This = calloc(1, sizeof(*This));
     if (!This)
         return E_OUTOFMEMORY;
 
     This->FolderItem2_iface.lpVtbl = &FolderItemImpl_Vtbl;
     This->ref = 1;
     if (path)
-        This->path = strdupW(path);
+        This->path = wcsdup(path);
 
     This->folder = folder;
     Folder3_AddRef(&folder->Folder3_iface);
@@ -1344,7 +1344,7 @@ static ULONG WINAPI FolderItemsImpl_AddRef(FolderItems3 *iface)
     FolderItemsImpl *This = impl_from_FolderItems(iface);
     ULONG ref = InterlockedIncrement(&This->ref);
 
-    TRACE("(%p), new refcount=%i\n", iface, ref);
+    TRACE("(%p), new refcount=%li\n", iface, ref);
 
     return ref;
 }
@@ -1355,15 +1355,15 @@ static ULONG WINAPI FolderItemsImpl_Release(FolderItems3 *iface)
     ULONG ref = InterlockedDecrement(&This->ref);
     LONG i;
 
-    TRACE("(%p), new refcount=%i\n", iface, ref);
+    TRACE("(%p), new refcount=%li\n", iface, ref);
 
     if (!ref)
     {
         Folder3_Release(&This->folder->Folder3_iface);
         for (i = 0; i < This->item_count; i++)
             SysFreeString(This->item_names[i]);
-        heap_free(This->item_names);
-        heap_free(This);
+        free(This->item_names);
+        free(This);
     }
     return ref;
 }
@@ -1382,7 +1382,7 @@ static HRESULT WINAPI FolderItemsImpl_GetTypeInfo(FolderItems3 *iface,
 {
     HRESULT hr;
 
-    TRACE("(%p,%u,%d,%p)\n", iface, type, lcid, ppti);
+    TRACE("(%p,%u,%ld,%p)\n", iface, type, lcid, ppti);
 
     hr = get_typeinfo(FolderItems3_tid, ppti);
     if (SUCCEEDED(hr))
@@ -1396,7 +1396,7 @@ static HRESULT WINAPI FolderItemsImpl_GetIDsOfNames(FolderItems3 *iface,
     ITypeInfo *ti;
     HRESULT hr;
 
-    TRACE("(%p,%s,%p,%u,%d,%p)\n", iface, shdebugstr_guid(riid), names, count, lcid, dispid);
+    TRACE("(%p,%s,%p,%u,%ld,%p)\n", iface, shdebugstr_guid(riid), names, count, lcid, dispid);
 
     hr = get_typeinfo(FolderItems3_tid, &ti);
     if (SUCCEEDED(hr))
@@ -1412,7 +1412,7 @@ static HRESULT WINAPI FolderItemsImpl_Invoke(FolderItems3 *iface,
     ITypeInfo *ti;
     HRESULT hr;
 
-    TRACE("(%p,%d,%s,%d,%u,%p,%p,%p,%p)\n", iface, dispid, shdebugstr_guid(riid), lcid, flags, params, result, ei, err);
+    TRACE("(%p,%ld,%s,%ld,%u,%p,%p,%p,%p)\n", iface, dispid, shdebugstr_guid(riid), lcid, flags, params, result, ei, err);
 
     hr = get_typeinfo(FolderItems3_tid, &ti);
     if (SUCCEEDED(hr))
@@ -1545,7 +1545,7 @@ static HRESULT WINAPI FolderItemsImpl_InvokeVerbEx(FolderItems3 *iface, VARIANT 
 
 static HRESULT WINAPI FolderItemsImpl_Filter(FolderItems3 *iface, LONG flags, BSTR spec)
 {
-    FIXME("(%p,%d,%s)\n", iface, flags, wine_dbgstr_w(spec));
+    FIXME("(%p,%ld,%s)\n", iface, flags, wine_dbgstr_w(spec));
 
     return E_NOTIMPL;
 }
@@ -1623,7 +1623,7 @@ static HRESULT FolderItems_Constructor(FolderImpl *folder, FolderItems **ret)
 
     *ret = NULL;
 
-    This = heap_alloc_zero(sizeof(*This));
+    This = calloc(1, sizeof(*This));
     if (!This)
         return E_OUTOFMEMORY;
 
@@ -1650,13 +1650,13 @@ static HRESULT FolderItems_Constructor(FolderImpl *folder, FolderItems **ret)
         LPITEMIDLIST *pidls;
         ULONG fetched;
 
-        pidls = heap_alloc(This->item_count * sizeof(*pidls));
-        This->item_names = heap_alloc_zero(This->item_count * sizeof(*This->item_names));
+        pidls = malloc(This->item_count * sizeof(*pidls));
+        This->item_names = calloc(This->item_count, sizeof(*This->item_names));
 
         if (!pidls || !This->item_names)
         {
-            heap_free(pidls);
-            heap_free(This->item_names);
+            free(pidls);
+            free(This->item_names);
             hr = E_OUTOFMEMORY;
             goto failed;
         }
@@ -1674,7 +1674,7 @@ static HRESULT FolderItems_Constructor(FolderImpl *folder, FolderItems **ret)
 
             ILFree(pidls[i]);
         }
-        heap_free(pidls);
+        free(pidls);
     }
     IEnumIDList_Release(enumidlist);
 
@@ -1717,7 +1717,7 @@ static ULONG WINAPI FolderImpl_AddRef(Folder3 *iface)
     FolderImpl *This = impl_from_Folder(iface);
     ULONG ref = InterlockedIncrement(&This->ref);
 
-    TRACE("(%p), new refcount=%i\n", iface, ref);
+    TRACE("(%p), new refcount=%li\n", iface, ref);
 
     return ref;
 }
@@ -1727,7 +1727,7 @@ static ULONG WINAPI FolderImpl_Release(Folder3 *iface)
     FolderImpl *This = impl_from_Folder(iface);
     ULONG ref = InterlockedDecrement(&This->ref);
 
-    TRACE("(%p), new refcount=%i\n", iface, ref);
+    TRACE("(%p), new refcount=%li\n", iface, ref);
 
     if (!ref)
     {
@@ -1735,7 +1735,7 @@ static ULONG WINAPI FolderImpl_Release(Folder3 *iface)
         SysFreeString(This->path);
         IShellFolder2_Release(This->folder);
         IDispatch_Release(This->application);
-        heap_free(This);
+        free(This);
     }
     return ref;
 }
@@ -1753,7 +1753,7 @@ static HRESULT WINAPI FolderImpl_GetTypeInfo(Folder3 *iface, UINT iTInfo,
 {
     HRESULT hr;
 
-    TRACE("(%p,%u,%d,%p)\n", iface, iTInfo, lcid, ppTInfo);
+    TRACE("(%p,%u,%ld,%p)\n", iface, iTInfo, lcid, ppTInfo);
 
     hr = get_typeinfo(Folder3_tid, ppTInfo);
     if (SUCCEEDED(hr))
@@ -1768,7 +1768,7 @@ static HRESULT WINAPI FolderImpl_GetIDsOfNames(Folder3 *iface, REFIID riid,
     ITypeInfo *ti;
     HRESULT hr;
 
-    TRACE("(%p,%s,%p,%u,%d,%p)\n", iface, shdebugstr_guid(riid), rgszNames, cNames, lcid,
+    TRACE("(%p,%s,%p,%u,%ld,%p)\n", iface, shdebugstr_guid(riid), rgszNames, cNames, lcid,
             rgDispId);
 
     hr = get_typeinfo(Folder3_tid, &ti);
@@ -1785,7 +1785,7 @@ static HRESULT WINAPI FolderImpl_Invoke(Folder3 *iface, DISPID dispIdMember,
     ITypeInfo *ti;
     HRESULT hr;
 
-    TRACE("(%p,%d,%s,%d,%u,%p,%p,%p,%p)\n", iface, dispIdMember, shdebugstr_guid(riid), lcid,
+    TRACE("(%p,%ld,%s,%ld,%u,%p,%p,%p,%p)\n", iface, dispIdMember, shdebugstr_guid(riid), lcid,
             wFlags, pDispParams, pVarResult, pExcepInfo, puArgErr);
 
     hr = get_typeinfo(Folder3_tid, &ti);
@@ -2005,7 +2005,7 @@ static HRESULT Folder_Constructor(IShellFolder2 *folder, LPITEMIDLIST pidl, Fold
 
     *ret = NULL;
 
-    This = heap_alloc(sizeof(*This));
+    This = malloc(sizeof(*This));
     if (!This)
         return E_OUTOFMEMORY;
 
@@ -2059,7 +2059,7 @@ static ULONG WINAPI ShellDispatch_AddRef(IShellDispatch6 *iface)
     ShellDispatch *This = impl_from_IShellDispatch6(iface);
     ULONG ref = InterlockedIncrement(&This->ref);
 
-    TRACE("(%p), new refcount=%i\n", iface, ref);
+    TRACE("(%p), new refcount=%li\n", iface, ref);
 
     return ref;
 }
@@ -2069,10 +2069,10 @@ static ULONG WINAPI ShellDispatch_Release(IShellDispatch6 *iface)
     ShellDispatch *This = impl_from_IShellDispatch6(iface);
     ULONG ref = InterlockedDecrement(&This->ref);
 
-    TRACE("(%p), new refcount=%i\n", iface, ref);
+    TRACE("(%p), new refcount=%li\n", iface, ref);
 
     if (!ref)
-        heap_free(This);
+        free(This);
 
     return ref;
 }
@@ -2091,7 +2091,7 @@ static HRESULT WINAPI ShellDispatch_GetTypeInfo(IShellDispatch6 *iface,
 {
     HRESULT hr;
 
-    TRACE("(%p,%u,%d,%p)\n", iface, iTInfo, lcid, ppTInfo);
+    TRACE("(%p,%u,%ld,%p)\n", iface, iTInfo, lcid, ppTInfo);
 
     hr = get_typeinfo(IShellDispatch6_tid, ppTInfo);
     if (SUCCEEDED(hr))
@@ -2105,7 +2105,7 @@ static HRESULT WINAPI ShellDispatch_GetIDsOfNames(IShellDispatch6 *iface,
     ITypeInfo *ti;
     HRESULT hr;
 
-    TRACE("(%p,%s,%p,%u,%d,%p)\n", iface, shdebugstr_guid(riid), rgszNames, cNames, lcid,
+    TRACE("(%p,%s,%p,%u,%ld,%p)\n", iface, shdebugstr_guid(riid), rgszNames, cNames, lcid,
             rgDispId);
 
     hr = get_typeinfo(IShellDispatch6_tid, &ti);
@@ -2123,7 +2123,7 @@ static HRESULT WINAPI ShellDispatch_Invoke(IShellDispatch6 *iface,
     ITypeInfo *ti;
     HRESULT hr;
 
-    TRACE("(%p,%d,%s,%d,%u,%p,%p,%p,%p)\n", iface, dispIdMember, shdebugstr_guid(riid), lcid,
+    TRACE("(%p,%ld,%s,%ld,%u,%p,%p,%p,%p)\n", iface, dispIdMember, shdebugstr_guid(riid), lcid,
             wFlags, pDispParams, pVarResult, pExcepInfo, puArgErr);
 
     hr = get_typeinfo(IShellDispatch6_tid, &ti);
@@ -2232,7 +2232,7 @@ static HRESULT WINAPI ShellDispatch_BrowseForFolder(IShellDispatch6 *iface,
     BROWSEINFOW bi = { 0 };
     HRESULT hr;
 
-    TRACE("(%p,%x,%s,%x,%s,%p)\n", iface, hwnd, debugstr_w(title), options, debugstr_variant(&rootfolder), folder);
+    TRACE("(%p,%lx,%s,%lx,%s,%p)\n", iface, hwnd, debugstr_w(title), options, debugstr_variant(&rootfolder), folder);
 
     *folder = NULL;
 
@@ -2483,7 +2483,7 @@ static HRESULT WINAPI ShellDispatch_IsServiceRunning(IShellDispatch6 *iface, BST
     service = OpenServiceW(scm, name, SERVICE_QUERY_STATUS);
     if (!service)
     {
-        ERR("Failed to open service %s (%u)\n", debugstr_w(name), GetLastError());
+        ERR("Failed to open service %s (%lu)\n", debugstr_w(name), GetLastError());
         CloseServiceHandle(scm);
         return S_OK;
     }
@@ -2491,7 +2491,7 @@ static HRESULT WINAPI ShellDispatch_IsServiceRunning(IShellDispatch6 *iface, BST
     if (!QueryServiceStatusEx(service, SC_STATUS_PROCESS_INFO, (BYTE *)&status,
              sizeof(SERVICE_STATUS_PROCESS), &dummy))
     {
-        TRACE("failed to query service status (%u)\n", GetLastError());
+        TRACE("failed to query service status (%lu)\n", GetLastError());
         CloseServiceHandle(service);
         CloseServiceHandle(scm);
         return S_OK;
@@ -2544,7 +2544,7 @@ static HRESULT WINAPI ShellDispatch_ExplorerPolicy(IShellDispatch6 *iface, BSTR 
 
 static HRESULT WINAPI ShellDispatch_GetSetting(IShellDispatch6 *iface, LONG setting, VARIANT_BOOL *result)
 {
-    FIXME("(%d %p): stub\n", setting, result);
+    FIXME("(%ld %p): stub\n", setting, result);
     return E_NOTIMPL;
 }
 
@@ -2620,7 +2620,7 @@ HRESULT WINAPI IShellDispatch_Constructor(IUnknown *outer, REFIID riid, void **p
 
     if (outer) return CLASS_E_NOAGGREGATION;
 
-    This = heap_alloc(sizeof(*This));
+    This = malloc(sizeof(*This));
     if (!This) return E_OUTOFMEMORY;
     This->IShellDispatch6_iface.lpVtbl = &ShellDispatchVtbl;
     This->ref = 1;

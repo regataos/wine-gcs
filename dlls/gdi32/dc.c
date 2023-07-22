@@ -199,8 +199,11 @@ HDC WINAPI CreateDCW( LPCWSTR driver, LPCWSTR device, LPCWSTR output,
     UNICODE_STRING device_str, output_str;
     driver_entry_point entry_point = NULL;
     const WCHAR *display = NULL, *p;
+    WCHAR buf[300], *port = NULL;
     BOOL is_display = FALSE;
-    WCHAR buf[300];
+    HANDLE hspool = NULL;
+    DC_ATTR *dc_attr;
+    HDC ret;
 
     if (!device || !get_driver_name( device, buf, 300 ))
     {
@@ -210,6 +213,12 @@ HDC WINAPI CreateDCW( LPCWSTR driver, LPCWSTR device, LPCWSTR output,
             return 0;
         }
         lstrcpyW(buf, driver);
+    }
+
+    if (output)
+    {
+        output_str.Length = output_str.MaximumLength = lstrlenW(output) * sizeof(WCHAR);
+        output_str.Buffer = (WCHAR *)output;
     }
 
     if (is_display_device( driver ))
@@ -231,6 +240,15 @@ HDC WINAPI CreateDCW( LPCWSTR driver, LPCWSTR device, LPCWSTR output,
         ERR( "no driver found for %s\n", debugstr_w(buf) );
         return 0;
     }
+    else if (!OpenPrinterW( (WCHAR *)device, &hspool, NULL ))
+    {
+        return 0;
+    }
+    else if (output && !(port = HeapAlloc( GetProcessHeap(), 0, output_str.Length + sizeof(WCHAR) )))
+    {
+        ClosePrinter( hspool );
+        return 0;
+    }
 
     if (display)
     {
@@ -247,14 +265,26 @@ HDC WINAPI CreateDCW( LPCWSTR driver, LPCWSTR device, LPCWSTR output,
         device_str.Buffer = (WCHAR *)device;
     }
 
-    if (output)
+    ret = NtGdiOpenDCW( device || display ? &device_str : NULL, devmode, output ? &output_str : NULL,
+                        0, is_display, entry_point, NULL, NULL );
+
+    if (ret && hspool && (dc_attr = get_dc_attr( ret )))
     {
-        output_str.Length = output_str.MaximumLength = lstrlenW(output) * sizeof(WCHAR);
-        output_str.Buffer = (WCHAR *)output;
+        if (port)
+        {
+            memcpy( port, output, output_str.Length );
+            port[output_str.Length / sizeof(WCHAR)] = 0;
+        }
+        dc_attr->hspool = HandleToULong( hspool );
+        dc_attr->output = (ULONG_PTR)port;
+    }
+    else if (hspool)
+    {
+        ClosePrinter( hspool );
+        HeapFree( GetProcessHeap(), 0, port );
     }
 
-    return NtGdiOpenDCW( device || display ? &device_str : NULL, devmode, output ? &output_str : NULL,
-                         0, is_display, entry_point, NULL, NULL );
+    return ret;
 }
 
 /***********************************************************************
@@ -371,6 +401,10 @@ BOOL WINAPI DeleteDC( HDC hdc )
 
     if (is_meta_dc( hdc )) return METADC_DeleteDC( hdc );
     if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    HeapFree( GetProcessHeap(), 0, (WCHAR *)(ULONG_PTR)dc_attr->output );
+    dc_attr->output = 0;
+    if (dc_attr->hspool) ClosePrinter( ULongToHandle(dc_attr->hspool) );
+    dc_attr->hspool = 0;
     if (dc_attr->emf) EMFDC_DeleteDC( dc_attr );
     return NtGdiDeleteObjectApp( hdc );
 }
@@ -1366,7 +1400,7 @@ BOOL WINAPI AngleArc( HDC hdc, INT x, INT y, DWORD radius, FLOAT start_angle, FL
 {
     DC_ATTR *dc_attr;
 
-    TRACE( "%p, (%d, %d), %u, %f, %f\n", hdc, x, y, radius, start_angle, sweep_angle );
+    TRACE( "%p, (%d, %d), %lu, %f, %f\n", hdc, x, y, radius, start_angle, sweep_angle );
 
     if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
     if (dc_attr->emf && !EMFDC_AngleArc( dc_attr, x, y, radius, start_angle, sweep_angle ))
@@ -1438,7 +1472,7 @@ BOOL WINAPI Polygon( HDC hdc, const POINT *points, INT count )
     if (is_meta_dc( hdc )) return METADC_Polygon( hdc, points, count );
     if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
     if (dc_attr->emf && !EMFDC_Polygon( dc_attr, points, count )) return FALSE;
-    return NtGdiPolyPolyDraw( hdc, points, (const UINT *)&count, 1, NtGdiPolyPolygon );
+    return NtGdiPolyPolyDraw( hdc, points, (const ULONG *)&count, 1, NtGdiPolyPolygon );
 }
 
 /**********************************************************************
@@ -1453,7 +1487,7 @@ BOOL WINAPI PolyPolygon( HDC hdc, const POINT *points, const INT *counts, UINT p
     if (is_meta_dc( hdc )) return METADC_PolyPolygon( hdc, points, counts, polygons );
     if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
     if (dc_attr->emf && !EMFDC_PolyPolygon( dc_attr, points, counts, polygons )) return FALSE;
-    return NtGdiPolyPolyDraw( hdc, points, (const UINT *)counts, polygons, NtGdiPolyPolygon );
+    return NtGdiPolyPolyDraw( hdc, points, (const ULONG *)counts, polygons, NtGdiPolyPolygon );
 }
 
 /**********************************************************************
@@ -1468,7 +1502,7 @@ BOOL WINAPI Polyline( HDC hdc, const POINT *points, INT count )
     if (is_meta_dc( hdc )) return METADC_Polyline( hdc, points, count );
     if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
     if (dc_attr->emf && !EMFDC_Polyline( dc_attr, points, count )) return FALSE;
-    return NtGdiPolyPolyDraw( hdc, points, (const UINT *)&count, 1, NtGdiPolyPolyline );
+    return NtGdiPolyPolyDraw( hdc, points, (const ULONG *)&count, 1, NtGdiPolyPolyline );
 }
 
 /**********************************************************************
@@ -1478,7 +1512,7 @@ BOOL WINAPI PolyPolyline( HDC hdc, const POINT *points, const DWORD *counts, DWO
 {
     DC_ATTR *dc_attr;
 
-    TRACE( "%p, %p, %p, %u\n", hdc, points, counts, polylines );
+    TRACE( "%p, %p, %p, %lu\n", hdc, points, counts, polylines );
 
     if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
     if (dc_attr->emf && !EMFDC_PolyPolyline( dc_attr, points, counts, polylines )) return FALSE;
@@ -1492,7 +1526,7 @@ BOOL WINAPI PolyBezier( HDC hdc, const POINT *points, DWORD count )
 {
     DC_ATTR *dc_attr;
 
-    TRACE( "%p, %p, %u\n", hdc, points, count );
+    TRACE( "%p, %p, %lu\n", hdc, points, count );
 
     if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
     if (dc_attr->emf && !EMFDC_PolyBezier( dc_attr, points, count )) return FALSE;
@@ -1506,7 +1540,7 @@ BOOL WINAPI PolyBezierTo( HDC hdc, const POINT *points, DWORD count )
 {
     DC_ATTR *dc_attr;
 
-    TRACE( "%p, %p, %u\n", hdc, points, count );
+    TRACE( "%p, %p, %lu\n", hdc, points, count );
 
     if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
     if (dc_attr->emf && !EMFDC_PolyBezierTo( dc_attr, points, count )) return FALSE;
@@ -1520,7 +1554,7 @@ BOOL WINAPI PolylineTo( HDC hdc, const POINT *points, DWORD count )
 {
     DC_ATTR *dc_attr;
 
-    TRACE( "%p, %p, %u\n", hdc, points, count );
+    TRACE( "%p, %p, %lu\n", hdc, points, count );
 
     if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
     if (dc_attr->emf && !EMFDC_PolylineTo( dc_attr, points, count )) return FALSE;
@@ -1534,7 +1568,7 @@ BOOL WINAPI PolyDraw( HDC hdc, const POINT *points, const BYTE *types, DWORD cou
 {
     DC_ATTR *dc_attr;
 
-    TRACE( "%p, %p, %p, %u\n", hdc, points, types, count );
+    TRACE( "%p, %p, %p, %lu\n", hdc, points, types, count );
 
     if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
     if (dc_attr->emf && !EMFDC_PolyDraw( dc_attr, points, types, count )) return FALSE;
@@ -1609,7 +1643,7 @@ BOOL WINAPI ExtFloodFill( HDC hdc, INT x, INT y, COLORREF color, UINT fill_type 
 {
     DC_ATTR *dc_attr;
 
-    TRACE( "%p, (%d, %d), %08x, %x\n", hdc, x, y, color, fill_type );
+    TRACE( "%p, (%d, %d), %08lx, %x\n", hdc, x, y, color, fill_type );
 
     if (is_meta_dc( hdc )) return METADC_ExtFloodFill( hdc, x, y, color, fill_type );
     if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
@@ -1633,7 +1667,7 @@ BOOL WINAPI GdiGradientFill( HDC hdc, TRIVERTEX *vert_array, ULONG nvert,
 {
     DC_ATTR *dc_attr;
 
-    TRACE( "%p vert_array:%p nvert:%d grad_array:%p ngrad:%d\n", hdc, vert_array,
+    TRACE( "%p vert_array:%p nvert:%ld grad_array:%p ngrad:%ld\n", hdc, vert_array,
            nvert, grad_array, ngrad );
 
     if (!(dc_attr = get_dc_attr( hdc )))
@@ -2092,7 +2126,7 @@ BOOL WINAPI ScaleWindowExtEx( HDC hdc, INT x_num, INT x_denom,
 
 static UINT WINAPI realize_palette( HDC hdc )
 {
-    return NtUserCallOneParam( HandleToUlong(hdc), NtUserRealizePalette );
+    return NtUserRealizePalette( hdc );
 }
 
 /* Pointers to USER implementation of SelectPalette/RealizePalette */
@@ -2153,16 +2187,43 @@ BOOL WINAPI CancelDC(HDC hdc)
  */
 INT WINAPI StartDocW( HDC hdc, const DOCINFOW *doc )
 {
+    WCHAR *output = NULL;
     DC_ATTR *dc_attr;
+    ABORTPROC proc;
+    DOCINFOW info;
+    INT ret;
 
-    TRACE("DocName %s, Output %s, Datatype %s, fwType %#x\n",
-          debugstr_w(doc->lpszDocName), debugstr_w(doc->lpszOutput),
-          debugstr_w(doc->lpszDatatype), doc->fwType);
+    TRACE("%p %p\n", hdc, doc);
+
+    if (doc)
+    {
+        info = *doc;
+    }
+    else
+    {
+        memset( &info, 0, sizeof(info) );
+        info.cbSize = sizeof(info);
+    }
+
+    TRACE("DocName %s, Output %s, Datatype %s, fwType %#lx\n",
+          debugstr_w(info.lpszDocName), debugstr_w(info.lpszOutput),
+          debugstr_w(info.lpszDatatype), info.fwType);
 
     if (!(dc_attr = get_dc_attr( hdc ))) return SP_ERROR;
 
-    if (dc_attr->abort_proc && !dc_attr->abort_proc( hdc, 0 )) return 0;
-    return NtGdiStartDoc( hdc, doc, NULL, 0 );
+    proc = (ABORTPROC)(UINT_PTR)dc_attr->abort_proc;
+    if (proc && !proc( hdc, 0 )) return 0;
+
+    if (dc_attr->hspool)
+    {
+        if (!info.lpszOutput) info.lpszOutput = (const WCHAR *)(ULONG_PTR)dc_attr->output;
+        output = StartDocDlgW( ULongToHandle( dc_attr->hspool ), &info );
+        if (output) info.lpszOutput = output;
+    }
+
+    ret = NtGdiStartDoc( hdc, &info, NULL, 0 );
+    HeapFree( GetProcessHeap(), 0, output );
+    return ret;
 }
 
 /***********************************************************************
@@ -2173,6 +2234,8 @@ INT WINAPI StartDocA( HDC hdc, const DOCINFOA *doc )
     WCHAR *doc_name = NULL, *output = NULL, *data_type = NULL;
     DOCINFOW docW;
     INT ret, len;
+
+    if (!doc) return StartDocW(hdc, NULL);
 
     docW.cbSize = doc->cbSize;
     if (doc->lpszDocName)
@@ -2247,7 +2310,7 @@ INT WINAPI SetAbortProc( HDC hdc, ABORTPROC abrtprc )
     DC_ATTR *dc_attr;
 
     if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
-    dc_attr->abort_proc = abrtprc;
+    dc_attr->abort_proc = (UINT_PTR)abrtprc;
     return TRUE;
 }
 

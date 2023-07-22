@@ -48,18 +48,18 @@ BOOL intersect_vis_rectangles( struct bitblt_coords *dst, struct bitblt_coords *
 
     if ((src->width == dst->width) && (src->height == dst->height)) /* no stretching */
     {
-        offset_rect( &src->visrect, dst->x - src->x, dst->y - src->y );
+        OffsetRect( &src->visrect, dst->x - src->x, dst->y - src->y );
         if (!intersect_rect( &rect, &src->visrect, &dst->visrect )) return FALSE;
         src->visrect = dst->visrect = rect;
-        offset_rect( &src->visrect, src->x - dst->x, src->y - dst->y );
+        OffsetRect( &src->visrect, src->x - dst->x, src->y - dst->y );
     }
     else  /* stretching */
     {
         /* map source rectangle into destination coordinates */
         rect = src->visrect;
-        offset_rect( &rect,
-                     -src->x - (src->width < 0 ? 1 : 0),
-                     -src->y - (src->height < 0 ? 1 : 0));
+        OffsetRect( &rect,
+                    -src->x - (src->width < 0 ? 1 : 0),
+                    -src->y - (src->height < 0 ? 1 : 0) );
         rect.left   = rect.left * dst->width / src->width;
         rect.top    = rect.top * dst->height / src->height;
         rect.right  = rect.right * dst->width / src->width;
@@ -82,7 +82,7 @@ BOOL intersect_vis_rectangles( struct bitblt_coords *dst, struct bitblt_coords *
                  (src->y < src->visrect.top || src->y + src->height > src->visrect.bottom))
             dst->y -= rect.bottom - (dst->height - rect.top);
 
-        offset_rect( &rect, dst->x, dst->y );
+        OffsetRect( &rect, dst->x, dst->y );
 
         /* avoid rounding errors */
         rect.left--;
@@ -93,9 +93,9 @@ BOOL intersect_vis_rectangles( struct bitblt_coords *dst, struct bitblt_coords *
 
         /* map destination rectangle back to source coordinates */
         rect = dst->visrect;
-        offset_rect( &rect,
-                     -dst->x - (dst->width < 0 ? 1 : 0),
-                     -dst->y - (dst->height < 0 ? 1 : 0));
+        OffsetRect( &rect,
+                    -dst->x - (dst->width < 0 ? 1 : 0),
+                    -dst->y - (dst->height < 0 ? 1 : 0) );
         rect.left   = src->x + rect.left * src->width / dst->width;
         rect.top    = src->y + rect.top * src->height / dst->height;
         rect.right  = src->x + rect.right * src->width / dst->width;
@@ -139,7 +139,7 @@ static BOOL get_vis_rectangles( DC *dc_dst, struct bitblt_coords *dst,
 
     /* get the source visible rectangle */
 
-    if (!src) return !is_rect_empty( &dst->visrect );
+    if (!src) return !IsRectEmpty( &dst->visrect );
 
     rect.left   = src->log_x;
     rect.top    = src->log_y;
@@ -158,7 +158,7 @@ static BOOL get_vis_rectangles( DC *dc_dst, struct bitblt_coords *dst,
     get_bounding_rect( &rect, src->x, src->y, src->width, src->height );
 
     if (!clip_device_rect( dc_src, &src->visrect, &rect )) return FALSE;
-    if (is_rect_empty( &dst->visrect )) return FALSE;
+    if (IsRectEmpty( &dst->visrect )) return FALSE;
 
     return intersect_vis_rectangles( dst, src );
 }
@@ -360,7 +360,7 @@ BOOL CDECL nulldrv_AlphaBlend( PHYSDEV dst_dev, struct bitblt_coords *dst,
 
     if (bits.free) bits.free( &bits );
 done:
-    if (err) SetLastError( err );
+    if (err) RtlSetLastWin32Error( err );
     return !err;
 }
 
@@ -479,7 +479,7 @@ BOOL CDECL nulldrv_GradientFill( PHYSDEV dev, TRIVERTEX *vert_array, ULONG nvert
     src = dst;
     src.x -= dst.visrect.left;
     src.y -= dst.visrect.top;
-    offset_rect( &src.visrect, -dst.visrect.left, -dst.visrect.top );
+    OffsetRect( &src.visrect, -dst.visrect.left, -dst.visrect.top );
     for (i = 0; i < nvert; i++)
     {
         pts[i].x -= dst.visrect.left;
@@ -557,7 +557,7 @@ BOOL WINAPI NtGdiPatBlt( HDC hdc, INT left, INT top, INT width, INT height, DWOR
 
         TRACE("dst %p log=%d,%d %dx%d phys=%d,%d %dx%d vis=%s  rop=%06x\n",
               hdc, dst.log_x, dst.log_y, dst.log_width, dst.log_height,
-              dst.x, dst.y, dst.width, dst.height, wine_dbgstr_rect(&dst.visrect), rop );
+              dst.x, dst.y, dst.width, dst.height, wine_dbgstr_rect(&dst.visrect), (int)rop );
 
         if (!ret)
         {
@@ -624,7 +624,7 @@ BOOL WINAPI NtGdiStretchBlt( HDC hdcDst, INT xDst, INT yDst, INT widthDst, INT h
               hdcSrc, src.log_x, src.log_y, src.log_width, src.log_height,
               src.x, src.y, src.width, src.height, wine_dbgstr_rect(&src.visrect),
               hdcDst, dst.log_x, dst.log_y, dst.log_width, dst.log_height,
-              dst.x, dst.y, dst.width, dst.height, wine_dbgstr_rect(&dst.visrect), rop );
+              dst.x, dst.y, dst.width, dst.height, wine_dbgstr_rect(&dst.visrect), (int)rop );
 
         if (!ret)
         {
@@ -789,7 +789,7 @@ BOOL WINAPI NtGdiMaskBlt( HDC hdcDest, INT nXDest, INT nYDest, INT nWidth, INT n
                             nXSrc, nYSrc, FRGND_ROP3(dwRop), bk_color, 0 );
 
     hbrMask = NtGdiCreatePatternBrushInternal( hbmMask, FALSE, FALSE );
-    hbrDst = NtGdiSelectBrush( hdcDest, get_stock_object(NULL_BRUSH) );
+    hbrDst = NtGdiSelectBrush( hdcDest, GetStockObject(NULL_BRUSH) );
 
     /* make bitmap */
     hDC1 = NtGdiCreateCompatibleDC( hdcDest );
@@ -992,19 +992,19 @@ BOOL WINAPI NtGdiAlphaBlend( HDC hdcDst, int xDst, int yDst, int widthDst, int h
 
         if (src.x < 0 || src.y < 0 || src.width < 0 || src.height < 0 ||
             src.log_width < 0 || src.log_height < 0 ||
-            (!is_rect_empty( &dcSrc->device_rect ) &&
+            (!IsRectEmpty( &dcSrc->device_rect ) &&
              (src.width > dcSrc->device_rect.right - dcSrc->attr->vis_rect.left - src.x ||
               src.height > dcSrc->device_rect.bottom - dcSrc->attr->vis_rect.top - src.y)))
         {
             WARN( "Invalid src coords: (%d,%d), size %dx%d\n", src.x, src.y, src.width, src.height );
-            SetLastError( ERROR_INVALID_PARAMETER );
+            RtlSetLastWin32Error( ERROR_INVALID_PARAMETER );
             ret = FALSE;
         }
         else if (dst.log_width < 0 || dst.log_height < 0)
         {
             WARN( "Invalid dst coords: (%d,%d), size %dx%d\n",
                   dst.log_x, dst.log_y, dst.log_width, dst.log_height );
-            SetLastError( ERROR_INVALID_PARAMETER );
+            RtlSetLastWin32Error( ERROR_INVALID_PARAMETER );
             ret = FALSE;
         }
         else if (dcSrc == dcDst && src.x + src.width > dst.x && src.x < dst.x + dst.width &&
@@ -1012,7 +1012,7 @@ BOOL WINAPI NtGdiAlphaBlend( HDC hdcDst, int xDst, int yDst, int widthDst, int h
         {
             WARN( "Overlapping coords: (%d,%d), %dx%d and (%d,%d), %dx%d\n",
                   src.x, src.y, src.width, src.height, dst.x, dst.y, dst.width, dst.height );
-            SetLastError( ERROR_INVALID_PARAMETER );
+            RtlSetLastWin32Error( ERROR_INVALID_PARAMETER );
             ret = FALSE;
         }
         else if (!ret)
@@ -1066,7 +1066,8 @@ BOOL WINAPI NtGdiPlgBlt( HDC hdcDest, const POINT *lpPoint, HDC hdcSrc, INT nXSr
     }
 
     TRACE("hdcSrc=%p %d,%d,%dx%d -> hdcDest=%p %d,%d,%d,%d,%d,%d\n",
-        hdcSrc, nXSrc, nYSrc, nWidth, nHeight, hdcDest, plg[0].x, plg[0].y, plg[1].x, plg[1].y, plg[2].x, plg[2].y);
+          hdcSrc, nXSrc, nYSrc, nWidth, nHeight, hdcDest,
+          (int)plg[0].x, (int)plg[0].y, (int)plg[1].x, (int)plg[1].y, (int)plg[2].x, (int)plg[2].y);
 
     /* X components */
     xf.eM11 = (plg[1].x*(rect[2].y - rect[0].y) - plg[2].x*(rect[1].y - rect[0].y) - plg[0].x*(rect[2].y - rect[1].y)) / det;

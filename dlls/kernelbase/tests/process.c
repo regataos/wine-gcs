@@ -33,12 +33,14 @@
 static NTSTATUS (WINAPI *pNtQueryObject)(HANDLE,OBJECT_INFORMATION_CLASS,PVOID,ULONG,PULONG);
 
 static BOOL (WINAPI *pCompareObjectHandles)(HANDLE, HANDLE);
-static HANDLE (WINAPI *pOpenFileMappingFromApp)( ULONG, BOOL, LPCWSTR);
-static HANDLE (WINAPI *pCreateFileMappingFromApp)(HANDLE, PSECURITY_ATTRIBUTES, ULONG, ULONG64, PCWSTR);
-static LPVOID (WINAPI *pMapViewOfFileFromApp)(HANDLE, ULONG, ULONG64, SIZE_T);
 static LPVOID (WINAPI *pMapViewOfFile3)(HANDLE, HANDLE, PVOID, ULONG64 offset, SIZE_T size,
         ULONG, ULONG, MEM_EXTENDED_PARAMETER *, ULONG);
 static LPVOID (WINAPI *pVirtualAlloc2)(HANDLE, void *, SIZE_T, DWORD, DWORD, MEM_EXTENDED_PARAMETER *, ULONG);
+static LPVOID (WINAPI *pVirtualAlloc2FromApp)(HANDLE, void *, SIZE_T, DWORD, DWORD, MEM_EXTENDED_PARAMETER *, ULONG);
+static PVOID (WINAPI *pVirtualAllocFromApp)(PVOID, SIZE_T, DWORD, DWORD);
+static HANDLE (WINAPI *pOpenFileMappingFromApp)( ULONG, BOOL, LPCWSTR);
+static HANDLE (WINAPI *pCreateFileMappingFromApp)(HANDLE, PSECURITY_ATTRIBUTES, ULONG, ULONG64, PCWSTR);
+static LPVOID (WINAPI *pMapViewOfFileFromApp)(HANDLE, ULONG, ULONG64, SIZE_T);
 static BOOL (WINAPI *pUnmapViewOfFile2)(HANDLE, void *, ULONG);
 
 static void test_CompareObjectHandles(void)
@@ -53,46 +55,46 @@ static void test_CompareObjectHandles(void)
     }
 
     ret = pCompareObjectHandles( GetCurrentProcess(), GetCurrentProcess() );
-    ok( ret, "comparing GetCurrentProcess() to self failed with %u\n", GetLastError() );
+    ok( ret, "comparing GetCurrentProcess() to self failed with %lu\n", GetLastError() );
 
     ret = pCompareObjectHandles( GetCurrentThread(), GetCurrentThread() );
-    ok( ret, "comparing GetCurrentThread() to self failed with %u\n", GetLastError() );
+    ok( ret, "comparing GetCurrentThread() to self failed with %lu\n", GetLastError() );
 
     SetLastError(0);
     ret = pCompareObjectHandles( GetCurrentProcess(), GetCurrentThread() );
     ok( !ret && GetLastError() == ERROR_NOT_SAME_OBJECT,
-        "comparing GetCurrentProcess() to GetCurrentThread() returned %u\n", GetLastError() );
+        "comparing GetCurrentProcess() to GetCurrentThread() returned %lu\n", GetLastError() );
 
     h1 = NULL;
     ret = DuplicateHandle( GetCurrentProcess(), GetCurrentProcess(), GetCurrentProcess(),
                            &h1, 0, FALSE, DUPLICATE_SAME_ACCESS );
-    ok( ret, "failed to duplicate current process handle: %u\n", GetLastError() );
+    ok( ret, "failed to duplicate current process handle: %lu\n", GetLastError() );
 
     ret = pCompareObjectHandles( GetCurrentProcess(), h1 );
-    ok( ret, "comparing GetCurrentProcess() with %p failed with %u\n", h1, GetLastError() );
+    ok( ret, "comparing GetCurrentProcess() with %p failed with %lu\n", h1, GetLastError() );
 
     CloseHandle( h1 );
 
     h1 = CreateFileA( "\\\\.\\NUL", GENERIC_WRITE, 0, NULL, OPEN_EXISTING, 0, 0 );
-    ok( h1 != INVALID_HANDLE_VALUE, "CreateFile failed (%d)\n", GetLastError() );
+    ok( h1 != INVALID_HANDLE_VALUE, "CreateFile failed (%ld)\n", GetLastError() );
 
     h2 = NULL;
     ret = DuplicateHandle( GetCurrentProcess(), h1, GetCurrentProcess(),
                            &h2, 0, FALSE, DUPLICATE_SAME_ACCESS );
-    ok( ret, "failed to duplicate handle %p: %u\n", h1, GetLastError() );
+    ok( ret, "failed to duplicate handle %p: %lu\n", h1, GetLastError() );
 
     ret = pCompareObjectHandles( h1, h2 );
-    ok( ret, "comparing %p with %p failed with %u\n", h1, h2, GetLastError() );
+    ok( ret, "comparing %p with %p failed with %lu\n", h1, h2, GetLastError() );
 
     CloseHandle( h2 );
 
     h2 = CreateFileA( "\\\\.\\NUL", GENERIC_WRITE, 0, NULL, OPEN_EXISTING, 0, 0 );
-    ok( h2 != INVALID_HANDLE_VALUE, "CreateFile failed (%d)\n", GetLastError() );
+    ok( h2 != INVALID_HANDLE_VALUE, "CreateFile failed (%ld)\n", GetLastError() );
 
     SetLastError(0);
     ret = pCompareObjectHandles( h1, h2 );
     ok( !ret && GetLastError() == ERROR_NOT_SAME_OBJECT,
-        "comparing %p with %p returned %u\n", h1, h2, GetLastError() );
+        "comparing %p with %p returned %lu\n", h1, h2, GetLastError() );
 
     CloseHandle( h2 );
     CloseHandle( h1 );
@@ -132,10 +134,23 @@ static void test_MapViewOfFile3(void)
     ok(ret, "Failed to delete a test file.\n");
 }
 
+#define check_region_size(p, s) check_region_size_(p, s, __LINE__)
+static void check_region_size_(void *p, SIZE_T s, unsigned int line)
+{
+    MEMORY_BASIC_INFORMATION info;
+    SIZE_T ret;
+
+    memset(&info, 0, sizeof(info));
+    ret = VirtualQuery(p, &info, sizeof(info));
+    ok_(__FILE__,line)(ret == sizeof(info), "Unexpected return value.\n");
+    ok_(__FILE__,line)(info.RegionSize == s, "Unexpected size %Iu, expected %Iu.\n", info.RegionSize, s);
+}
+
 static void test_VirtualAlloc2(void)
 {
     void *placeholder1, *placeholder2, *view1, *view2, *addr;
     MEMORY_BASIC_INFORMATION info;
+    char *p, *p1, *p2;
     HANDLE section;
     SIZE_T size;
     BOOL ret;
@@ -393,7 +408,7 @@ static void test_OpenFileMappingFromApp(void)
     ok(!!mapping, "Failed to open a mapping.\n");
     status = pNtQueryObject(mapping, ObjectBasicInformation, &info, sizeof(info), &length);
     ok(!status, "Failed to get object information.\n");
-    ok(info.GrantedAccess == SECTION_MAP_READ, "Unexpected access mask %#x.\n", info.GrantedAccess);
+    ok(info.GrantedAccess == SECTION_MAP_READ, "Unexpected access mask %#lx.\n", info.GrantedAccess);
     CloseHandle(mapping);
 
     mapping = pOpenFileMappingFromApp(FILE_MAP_EXECUTE, FALSE, L"foo");
@@ -401,7 +416,7 @@ static void test_OpenFileMappingFromApp(void)
     status = pNtQueryObject(mapping, ObjectBasicInformation, &info, sizeof(info), &length);
     ok(!status, "Failed to get object information.\n");
     todo_wine
-    ok(info.GrantedAccess == SECTION_MAP_EXECUTE, "Unexpected access mask %#x.\n", info.GrantedAccess);
+    ok(info.GrantedAccess == SECTION_MAP_EXECUTE, "Unexpected access mask %#lx.\n", info.GrantedAccess);
     CloseHandle(mapping);
 
     CloseHandle(file);
@@ -421,12 +436,12 @@ static void test_CreateFileMappingFromApp(void)
     }
 
     file = pCreateFileMappingFromApp(INVALID_HANDLE_VALUE, NULL, PAGE_EXECUTE_READWRITE, 1024, L"foo");
-    ok(!!file || broken(!file) /* Win8 */, "Failed to create a mapping, error %u.\n", GetLastError());
+    ok(!!file || broken(!file) /* Win8 */, "Failed to create a mapping, error %lu.\n", GetLastError());
     if (!file) return;
 
     status = pNtQueryObject(file, ObjectBasicInformation, &info, sizeof(info), &length);
     ok(!status, "Failed to get object information.\n");
-    ok(info.GrantedAccess & SECTION_MAP_EXECUTE, "Unexpected access mask %#x.\n", info.GrantedAccess);
+    ok(info.GrantedAccess & SECTION_MAP_EXECUTE, "Unexpected access mask %#lx.\n", info.GrantedAccess);
 
     CloseHandle(file);
 }
@@ -446,17 +461,17 @@ static void test_MapViewOfFileFromApp(void)
 
     SetLastError(0xdeadbeef);
     file = CreateFileA( testfile, GENERIC_READ|GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, 0, 0 );
-    ok( file != INVALID_HANDLE_VALUE, "Failed to create a file, error %u.\n", GetLastError() );
+    ok( file != INVALID_HANDLE_VALUE, "Failed to create a file, error %lu.\n", GetLastError() );
     SetFilePointer( file, 12288, NULL, FILE_BEGIN );
     SetEndOfFile( file );
 
     SetLastError(0xdeadbeef);
     mapping = CreateFileMappingA( file, NULL, PAGE_READWRITE, 0, 4096, NULL );
-    ok( mapping != 0, "Failed to create file mapping, error %u.\n", GetLastError() );
+    ok( mapping != 0, "Failed to create file mapping, error %lu.\n", GetLastError() );
 
     SetLastError(0xdeadbeef);
     ptr = pMapViewOfFileFromApp( mapping, PAGE_EXECUTE_READWRITE, 0, 4096 );
-    ok( ptr != NULL, "Mapping failed, error %u.\n", GetLastError() );
+    ok( ptr != NULL, "Mapping failed, error %lu.\n", GetLastError() );
     UnmapViewOfFile( ptr );
 
     CloseHandle( mapping );
@@ -472,8 +487,12 @@ static void init_funcs(void)
 #define X(f) { p##f = (void*)GetProcAddress(hmod, #f); }
     X(CompareObjectHandles);
     X(CreateFileMappingFromApp);
+    X(MapViewOfFile3);
     X(MapViewOfFileFromApp);
     X(OpenFileMappingFromApp);
+    X(VirtualAlloc2);
+    X(VirtualAlloc2FromApp);
+    X(VirtualAllocFromApp);
     X(UnmapViewOfFile2);
 
     hmod = GetModuleHandleA("ntdll.dll");
@@ -485,13 +504,13 @@ static void init_funcs(void)
 START_TEST(process)
 {
     init_funcs();
-    pMapViewOfFile3 = (void *)GetProcAddress(hmod, "MapViewOfFile3");
-    pVirtualAlloc2 = (void *)GetProcAddress(hmod, "VirtualAlloc2");
 
     test_CompareObjectHandles();
+    test_MapViewOfFile3();
+    test_VirtualAlloc2();
+    test_VirtualAllocFromApp();
+    test_VirtualAlloc2FromApp();
     test_OpenFileMappingFromApp();
     test_CreateFileMappingFromApp();
     test_MapViewOfFileFromApp();
-    test_MapViewOfFile3();
-    test_VirtualAlloc2();
 }

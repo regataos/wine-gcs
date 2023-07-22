@@ -499,8 +499,10 @@ static const NodeImplVtbl HTMLTableCellImplVtbl = {
     HTMLTableCell_destructor,
     HTMLElement_cpc,
     HTMLElement_clone,
+    HTMLElement_dispatch_nsevent_hook,
     HTMLElement_handle_event,
     HTMLElement_get_attr_col,
+    NULL,
     NULL,
     NULL,
     NULL,
@@ -533,7 +535,7 @@ HRESULT HTMLTableCell_Create(HTMLDocumentNode *doc, nsIDOMElement *nselem, HTMLE
     HTMLTableCell *ret;
     nsresult nsres;
 
-    ret = heap_alloc_zero(sizeof(*ret));
+    ret = calloc(1, sizeof(*ret));
     if(!ret)
         return E_OUTOFMEMORY;
 
@@ -831,7 +833,7 @@ static HRESULT WINAPI HTMLTableRow_get_cells(IHTMLTableRow *iface, IHTMLElementC
         return E_FAIL;
     }
 
-    *p = create_collection_from_htmlcol(nscol, This->element.node.doc);
+    *p = create_collection_from_htmlcol(nscol, This->element.node.doc, dispex_compat_mode(&This->element.node.event_target.dispex));
 
     nsIDOMHTMLCollection_Release(nscol);
     return S_OK;
@@ -960,8 +962,10 @@ static const NodeImplVtbl HTMLTableRowImplVtbl = {
     HTMLElement_destructor,
     HTMLElement_cpc,
     HTMLElement_clone,
+    HTMLElement_dispatch_nsevent_hook,
     HTMLElement_handle_event,
     HTMLElement_get_attr_col,
+    NULL,
     NULL,
     NULL,
     NULL,
@@ -994,7 +998,7 @@ HRESULT HTMLTableRow_Create(HTMLDocumentNode *doc, nsIDOMElement *nselem, HTMLEl
     HTMLTableRow *ret;
     nsresult nsres;
 
-    ret = heap_alloc_zero(sizeof(HTMLTableRow));
+    ret = calloc(1, sizeof(HTMLTableRow));
     if(!ret)
         return E_OUTOFMEMORY;
 
@@ -1435,7 +1439,7 @@ static HRESULT WINAPI HTMLTable_get_rows(IHTMLTable *iface, IHTMLElementCollecti
         return E_FAIL;
     }
 
-    *p = create_collection_from_htmlcol(nscol, This->element.node.doc);
+    *p = create_collection_from_htmlcol(nscol, This->element.node.doc, dispex_compat_mode(&This->element.node.event_target.dispex));
 
     nsIDOMHTMLCollection_Release(nscol);
     return S_OK;
@@ -1550,7 +1554,7 @@ static HRESULT WINAPI HTMLTable_get_tBodies(IHTMLTable *iface, IHTMLElementColle
         return E_FAIL;
     }
 
-    *p = create_collection_from_htmlcol(nscol, This->element.node.doc);
+    *p = create_collection_from_htmlcol(nscol, This->element.node.doc, dispex_compat_mode(&This->element.node.event_target.dispex));
 
     nsIDOMHTMLCollection_Release(nscol);
     return S_OK;
@@ -1992,8 +1996,10 @@ static const NodeImplVtbl HTMLTableImplVtbl = {
     HTMLElement_destructor,
     HTMLTable_cpc,
     HTMLElement_clone,
+    HTMLElement_dispatch_nsevent_hook,
     HTMLElement_handle_event,
     HTMLElement_get_attr_col,
+    NULL,
     NULL,
     NULL,
     NULL,
@@ -2028,7 +2034,7 @@ HRESULT HTMLTable_Create(HTMLDocumentNode *doc, nsIDOMElement *nselem, HTMLEleme
     HTMLTable *ret;
     nsresult nsres;
 
-    ret = heap_alloc_zero(sizeof(HTMLTable));
+    ret = calloc(1, sizeof(HTMLTable));
     if(!ret)
         return E_OUTOFMEMORY;
 

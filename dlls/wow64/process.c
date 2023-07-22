@@ -365,7 +365,7 @@ static void call_user_exception_dispatcher( EXCEPTION_RECORD32 *rec, void *ctx32
             ctx.EFlags &= ~(0x100|0x400|0x40000);
             NtSetInformationThread( GetCurrentThread(), ThreadWow64Context, &ctx, sizeof(ctx) );
 
-            TRACE( "exception %08x dispatcher %08x stack %08x eip %08x\n",
+            TRACE( "exception %08lx dispatcher %08lx stack %08lx eip %08lx\n",
                    rec->ExceptionCode, ctx.Eip, ctx.Esp, stack->context.Eip );
         }
         break;
@@ -392,7 +392,7 @@ static void call_user_exception_dispatcher( EXCEPTION_RECORD32 *rec, void *ctx32
             else ctx.Cpsr &= ~0x20;
             NtSetInformationThread( GetCurrentThread(), ThreadWow64Context, &ctx, sizeof(ctx) );
 
-            TRACE( "exception %08x dispatcher %08x stack %08x pc %08x\n",
+            TRACE( "exception %08lx dispatcher %08lx stack %08lx pc %08lx\n",
                    rec->ExceptionCode, ctx.Pc, ctx.Sp, stack->context.Sp );
         }
         break;
@@ -421,8 +421,7 @@ __ASM_GLOBAL_FUNC( raise_exception,
 #elif defined(__aarch64__)
 __ASM_GLOBAL_FUNC( raise_exception,
                    "stp x29, x30, [sp, #-32]!\n\t"
-                   __ASM_SEH(".seh_stackalloc 32\n\t")
-                   __ASM_SEH(".seh_save_fplr 0\n\t")
+                   __ASM_SEH(".seh_save_fplr_x 32\n\t")
                    __ASM_SEH(".seh_endprologue\n\t")
                    __ASM_CFI(".cfi_def_cfa x29, 32\n\t")
                    __ASM_CFI(".cfi_offset x30, -24\n\t")
@@ -516,7 +515,7 @@ NTSTATUS WINAPI wow64_NtCreateThread( UINT *args )
     void *initial_teb = get_ptr( &args );
     BOOLEAN suspended = get_ulong( &args );
 
-    FIXME( "%p %x %p %p %p %p %p %u: stub\n", handle_ptr, access, attr32, process,
+    FIXME( "%p %lx %p %p %p %p %p %u: stub\n", handle_ptr, access, attr32, process,
            id32, context, initial_teb, suspended );
     return STATUS_NOT_IMPLEMENTED;
 }
@@ -847,6 +846,9 @@ NTSTATUS WINAPI wow64_NtQueryInformationProcess( UINT *args )
         if (retlen) *retlen = sizeof(SECTION_IMAGE_INFORMATION32);
         return STATUS_INFO_LENGTH_MISMATCH;
 
+    case ProcessWineLdtCopy:
+        return STATUS_NOT_IMPLEMENTED;
+
     default:
         FIXME( "unsupported class %u\n", class );
         return STATUS_INVALID_INFO_CLASS;
@@ -897,6 +899,7 @@ NTSTATUS WINAPI wow64_NtQueryInformationThread( UINT *args )
     case ThreadIsIoPending:  /* ULONG */
     case ThreadHideFromDebugger:  /* BOOLEAN */
     case ThreadSuspendCount:  /* ULONG */
+    case ThreadPriorityBoost:   /* ULONG */
         /* FIXME: check buffer alignment */
         return NtQueryInformationThread( handle, class, ptr, len, retlen );
 
@@ -1075,6 +1078,10 @@ NTSTATUS WINAPI wow64_NtSetInformationProcess( UINT *args )
     {
     case ProcessDefaultHardErrorMode:   /* ULONG */
     case ProcessPriorityClass:   /* PROCESS_PRIORITY_CLASS */
+    case ProcessExecuteFlags:   /* ULONG */
+    case ProcessPagePriority:   /* MEMORY_PRIORITY_INFORMATION */
+    case ProcessPowerThrottlingState:   /* PROCESS_POWER_THROTTLING_STATE */
+    case ProcessLeapSecondInformation:   /* PROCESS_LEAP_SECOND_INFO */
         return NtSetInformationProcess( handle, class, ptr, len );
 
     case ProcessAffinityMask:   /* ULONG_PTR */
@@ -1084,9 +1091,6 @@ NTSTATUS WINAPI wow64_NtSetInformationProcess( UINT *args )
             return NtSetInformationProcess( handle, class, &mask, sizeof(mask) );
         }
         else return STATUS_INVALID_PARAMETER;
-
-    case ProcessExecuteFlags:   /* ULONG */
-        return STATUS_ACCESS_DENIED;
 
     case ProcessInstrumentationCallback:   /* PROCESS_INSTRUMENTATION_CALLBACK_INFORMATION */
         if (len == sizeof(PROCESS_INSTRUMENTATION_CALLBACK_INFORMATION32))
@@ -1118,7 +1122,7 @@ NTSTATUS WINAPI wow64_NtSetInformationProcess( UINT *args )
             PROCESS_STACK_ALLOCATION_INFORMATION info;
 
             info.ReserveSize = stack->ReserveSize;
-            info.ZeroBits = stack->ZeroBits ? stack->ZeroBits : 0x7fffffff;
+            info.ZeroBits = get_zero_bits( stack->ZeroBits );
             if (!(status = NtSetInformationProcess( handle, class, &info, sizeof(info) )))
                 stack->StackBase = PtrToUlong( info.StackBase );
             return status;
@@ -1158,6 +1162,9 @@ NTSTATUS WINAPI wow64_NtSetInformationThread( UINT *args )
     case ThreadBasePriority:   /* ULONG */
     case ThreadHideFromDebugger:   /* void */
     case ThreadEnableAlignmentFaultFixup:   /* BOOLEAN */
+    case ThreadPowerThrottlingState:  /* THREAD_POWER_THROTTLING_STATE */
+    case ThreadIdealProcessor:   /* ULONG */
+    case ThreadPriorityBoost:   /* ULONG */
         return NtSetInformationThread( handle, class, ptr, len );
 
     case ThreadImpersonationToken:   /* HANDLE */

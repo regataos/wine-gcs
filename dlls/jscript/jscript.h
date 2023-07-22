@@ -31,7 +31,6 @@
 
 #include "resource.h"
 
-#include "wine/heap.h"
 #include "wine/list.h"
 
 /*
@@ -70,39 +69,47 @@ struct proxy_func_invoker
 {
     HRESULT (STDMETHODCALLTYPE *invoke)(IDispatch*,void*,DISPPARAMS*,VARIANT*,EXCEPINFO*,IServiceProvider*);
     void *context;
+};
+
+struct proxy_prop_info
+{
+    struct proxy_func_invoker func[2];
     const WCHAR *name;
+    DISPID dispid;
+    unsigned flags;
 };
 
 typedef struct {
     IDispatchExVtbl dispex;
     IWineDispatchProxyCbPrivate** (STDMETHODCALLTYPE *GetProxyFieldRef)(IWineDispatchProxyPrivate *This);
     IDispatch* (STDMETHODCALLTYPE *GetDefaultPrototype)(IWineDispatchProxyPrivate *This, struct proxy_prototypes **prots_ref);
-    IDispatch* (STDMETHODCALLTYPE *GetDefaultConstructor)(IWineDispatchProxyPrivate *This, struct proxy_prototypes *prots);
+    IDispatch* (STDMETHODCALLTYPE *GetDefaultConstructor)(IWineDispatchProxyPrivate *This, IWineDispatchProxyPrivate *window, struct proxy_prototypes *prots);
     HRESULT (STDMETHODCALLTYPE *DefineConstructors)(IWineDispatchProxyPrivate *This, struct proxy_prototypes **prots_ref);
-    BOOL (STDMETHODCALLTYPE *IsPrototype)(IWineDispatchProxyPrivate *This);
-    BOOL (STDMETHODCALLTYPE *IsConstructor)(IWineDispatchProxyPrivate *This);
-    DWORD (STDMETHODCALLTYPE *PropFlags)(IWineDispatchProxyPrivate *This, DISPID id);
-    HRESULT (STDMETHODCALLTYPE *PropGetID)(IWineDispatchProxyPrivate *This, WCHAR *name, DISPID *id);
+    BOOL    (STDMETHODCALLTYPE *IsPrototype)(IWineDispatchProxyPrivate *This);
+    BOOL    (STDMETHODCALLTYPE *IsConstructor)(IWineDispatchProxyPrivate *This);
+    HRESULT (STDMETHODCALLTYPE *PropFixOverride)(IWineDispatchProxyPrivate *This, struct proxy_prop_info *info);
+    HRESULT (STDMETHODCALLTYPE *PropOverride)(IWineDispatchProxyPrivate *This, const WCHAR *name, VARIANT *value);
+    HRESULT (STDMETHODCALLTYPE *PropDefineOverride)(IWineDispatchProxyPrivate *This, struct proxy_prop_info *info);
+    HRESULT (STDMETHODCALLTYPE *PropGetInfo)(IWineDispatchProxyPrivate *This, const WCHAR *name, BOOL case_insens, struct proxy_prop_info *info);
     HRESULT (STDMETHODCALLTYPE *PropInvoke)(IWineDispatchProxyPrivate *This, IDispatch *this_obj, DISPID id, LCID lcid,
                                             DWORD flags, DISPPARAMS *dp, VARIANT *ret, EXCEPINFO *ei, IServiceProvider *caller);
     HRESULT (STDMETHODCALLTYPE *PropDelete)(IWineDispatchProxyPrivate *This, DISPID id);
-    HRESULT (STDMETHODCALLTYPE *FuncInfo)(IWineDispatchProxyPrivate *This, DISPID id, struct proxy_func_invoker *ret);
-    HRESULT (STDMETHODCALLTYPE *AccessorInfo)(IWineDispatchProxyPrivate *This, DISPID id, struct proxy_func_invoker *ret);
+    HRESULT (STDMETHODCALLTYPE *PropEnum)(IWineDispatchProxyPrivate *This);
     HRESULT (STDMETHODCALLTYPE *ToString)(IWineDispatchProxyPrivate *This, BSTR *string);
-    BOOL (STDMETHODCALLTYPE *CanGC)(IWineDispatchProxyPrivate *This);
+    BOOL    (STDMETHODCALLTYPE *CanGC)(IWineDispatchProxyPrivate *This);
 } IWineDispatchProxyPrivateVtbl;
 
 typedef struct {
     IDispatchExVtbl dispex;
-    void (STDMETHODCALLTYPE *Unlinked)(IWineDispatchProxyCbPrivate *This);
-    void (STDMETHODCALLTYPE *Relinked)(IWineDispatchProxyCbPrivate *This, IWineDispatchProxyPrivate *proxy);
+    HRESULT (STDMETHODCALLTYPE *InitProxy)(IWineDispatchProxyCbPrivate *This, IDispatch *obj);
+    void    (STDMETHODCALLTYPE *Unlinked)(IWineDispatchProxyCbPrivate *This, BOOL persist);
     HRESULT (STDMETHODCALLTYPE *HostUpdated)(IWineDispatchProxyCbPrivate *This, IActiveScript *script);
-    DISPID (STDMETHODCALLTYPE *GetUnderlyingDispID)(IWineDispatchProxyCbPrivate *This, DISPID id);
-    IDispatch* (STDMETHODCALLTYPE *CreateConstructor)(IWineDispatchProxyCbPrivate *This, DISPID id, const WCHAR *name);
-    HRESULT (STDMETHODCALLTYPE *DefineConstructor)(IWineDispatchProxyCbPrivate *This, const WCHAR *name, IDispatch *prot, DISPID);
+    IDispatch* (STDMETHODCALLTYPE *CreateConstructor)(IWineDispatchProxyCbPrivate *This, IDispatch *disp, const WCHAR *name);
+    HRESULT (STDMETHODCALLTYPE *DefineConstructor)(IWineDispatchProxyCbPrivate *This, const WCHAR *name, IDispatch *prot, IDispatch *ctor);
+    HRESULT (STDMETHODCALLTYPE *CreateObject)(IWineDispatchProxyCbPrivate *This, IDispatchEx **obj);
+    HRESULT (STDMETHODCALLTYPE *CreateArrayBuffer)(IWineDispatchProxyCbPrivate *This, DWORD size, IDispatch **arraybuf, void **data);
     HRESULT (STDMETHODCALLTYPE *GetRandomValues)(IDispatch *typedarr);
-    void (STDMETHODCALLTYPE *Traverse)(IWineDispatchProxyCbPrivate *This,
-                                       void (STDMETHODCALLTYPE *note_cc_edge)(IDispatch*,void*), void *cb);
+    HRESULT (STDMETHODCALLTYPE *PropEnum)(IWineDispatchProxyCbPrivate *This, const WCHAR *name);
 } IWineDispatchProxyCbPrivateVtbl;
 
 struct _IWineDispatchProxyPrivate {
@@ -113,8 +120,8 @@ struct _IWineDispatchProxyCbPrivate {
     const IWineDispatchProxyCbPrivateVtbl *lpVtbl;
 };
 
-#define WINE_DISP_PROXY_NULL_PROTOTYPE ((IDispatch*)(INT_PTR)-2)
-#define WINE_DISP_PROXY_OBJECT_PROTOTYPE ((IDispatch*)(INT_PTR)-1)
+#define WINE_DISP_PROXY_NULL_PROTOTYPE ((IDispatch*)IntToPtr(-2))
+#define WINE_DISP_PROXY_OBJECT_PROTOTYPE ((IDispatch*)IntToPtr(-1))
 
 
 
@@ -141,38 +148,6 @@ void heap_pool_clear(heap_pool_t*) DECLSPEC_HIDDEN;
 void heap_pool_free(heap_pool_t*) DECLSPEC_HIDDEN;
 heap_pool_t *heap_pool_mark(heap_pool_t*) DECLSPEC_HIDDEN;
 
-/* Initialize to zero before use */
-struct heap_stack {
-    void **chunk;
-    void **next;
-    unsigned idx;
-};
-
-HRESULT heap_stack_push(struct heap_stack*,void*) DECLSPEC_HIDDEN;
-void *heap_stack_pop(struct heap_stack*) DECLSPEC_HIDDEN;
-
-/* Make sure the stack is completely popped before calling this */
-static inline void heap_stack_free(struct heap_stack *heap_stack)
-{
-    free(heap_stack->next);
-}
-
-static inline LPWSTR heap_strdupW(LPCWSTR str)
-{
-    LPWSTR ret = NULL;
-
-    if(str) {
-        DWORD size;
-
-        size = (lstrlenW(str)+1)*sizeof(WCHAR);
-        ret = heap_alloc(size);
-        if(ret)
-            memcpy(ret, str, size);
-    }
-
-    return ret;
-}
-
 typedef struct jsdisp_t jsdisp_t;
 
 extern HINSTANCE jscript_hinstance DECLSPEC_HIDDEN;
@@ -187,8 +162,6 @@ HRESULT get_dispatch_typeinfo(ITypeInfo**) DECLSPEC_HIDDEN;
 #define PROPF_WRITABLE      0x0800
 #define PROPF_CONFIGURABLE  0x1000
 #define PROPF_ALL           (PROPF_ENUMERABLE | PROPF_WRITABLE | PROPF_CONFIGURABLE)
-
-#define PROPF_PROXY_ACCESSOR 0x8000
 
 #define PROPF_VERSION_MASK  0x01ff0000
 #define PROPF_VERSION_SHIFT 16
@@ -242,6 +215,8 @@ typedef enum {
     LAST_VIEW_JSCLASS = JSCLASS_FLOAT64ARRAY,
 } jsclass_t;
 
+enum { NUM_TYPEDARRAY_TYPES = LAST_TYPEDARRAY_JSCLASS - FIRST_TYPEDARRAY_JSCLASS + 1 };
+
 jsdisp_t *iface_to_jsdisp(IDispatch*) DECLSPEC_HIDDEN;
 
 typedef HRESULT (*builtin_invoke_t)(script_ctx_t*,jsval_t,WORD,unsigned,jsval_t*,jsval_t*);
@@ -260,9 +235,20 @@ typedef struct named_item_t {
     struct list entry;
 } named_item_t;
 
+struct gc_ctx;
+
+enum gc_traverse_op {
+    GC_TRAVERSE_UNLINK,
+    GC_TRAVERSE_SPECULATIVELY,
+    GC_TRAVERSE
+};
+
 HRESULT create_named_item_script_obj(script_ctx_t*,named_item_t*) DECLSPEC_HIDDEN;
 named_item_t *lookup_named_item(script_ctx_t*,const WCHAR*,unsigned) DECLSPEC_HIDDEN;
 void release_named_item(named_item_t*) DECLSPEC_HIDDEN;
+HRESULT gc_run(script_ctx_t*) DECLSPEC_HIDDEN;
+HRESULT gc_process_linked_obj(struct gc_ctx*,enum gc_traverse_op,jsdisp_t*,jsdisp_t*,void**) DECLSPEC_HIDDEN;
+HRESULT gc_process_linked_val(struct gc_ctx*,enum gc_traverse_op,jsdisp_t*,jsval_t*) DECLSPEC_HIDDEN;
 
 typedef struct {
     const WCHAR *name;
@@ -282,7 +268,7 @@ typedef struct {
     unsigned (*idx_length)(jsdisp_t*);
     HRESULT (*idx_get)(jsdisp_t*,unsigned,jsval_t*);
     HRESULT (*idx_put)(jsdisp_t*,unsigned,jsval_t);
-    HRESULT (*gc_traverse)(jsdisp_t*,void*);
+    HRESULT (*gc_traverse)(struct gc_ctx*,enum gc_traverse_op,jsdisp_t*);
 } builtin_info_t;
 
 struct jsdisp_t {
@@ -357,8 +343,8 @@ HRESULT convert_to_proxy(script_ctx_t*,jsval_t*) DECLSPEC_HIDDEN;
 void disp_fill_exception(script_ctx_t*,EXCEPINFO*) DECLSPEC_HIDDEN;
 HRESULT disp_call(script_ctx_t*,IDispatch*,DISPID,WORD,unsigned,jsval_t*,jsval_t*) DECLSPEC_HIDDEN;
 HRESULT disp_call_name(script_ctx_t*,IDispatch*,const WCHAR*,WORD,unsigned,jsval_t*,jsval_t*) DECLSPEC_HIDDEN;
-HRESULT disp_call_value(script_ctx_t*,IDispatch*,IDispatch*,WORD,unsigned,jsval_t*,jsval_t*) DECLSPEC_HIDDEN;
-HRESULT jsdisp_call_value(jsdisp_t*,IDispatch*,WORD,unsigned,jsval_t*,jsval_t*) DECLSPEC_HIDDEN;
+HRESULT disp_call_value(script_ctx_t*,IDispatch*,jsval_t,WORD,unsigned,jsval_t*,jsval_t*,IServiceProvider*) DECLSPEC_HIDDEN;
+HRESULT jsdisp_call_value(jsdisp_t*,jsval_t,WORD,unsigned,jsval_t*,jsval_t*,IServiceProvider*) DECLSPEC_HIDDEN;
 HRESULT jsdisp_call(jsdisp_t*,DISPID,WORD,unsigned,jsval_t*,jsval_t*) DECLSPEC_HIDDEN;
 HRESULT jsdisp_call_name(jsdisp_t*,const WCHAR*,WORD,unsigned,jsval_t*,jsval_t*) DECLSPEC_HIDDEN;
 HRESULT disp_propget(script_ctx_t*,IDispatch*,DISPID,jsval_t*) DECLSPEC_HIDDEN;
@@ -387,10 +373,9 @@ HRESULT create_builtin_function(script_ctx_t*,builtin_invoke_t,const WCHAR*,cons
         jsdisp_t*,jsdisp_t**) DECLSPEC_HIDDEN;
 HRESULT create_builtin_constructor(script_ctx_t*,builtin_invoke_t,const WCHAR*,const builtin_info_t*,DWORD,
         jsdisp_t*,jsdisp_t**) DECLSPEC_HIDDEN;
-HRESULT create_proxy_function(jsdisp_t*,DISPID,DWORD,jsdisp_t**) DECLSPEC_HIDDEN;
-HRESULT create_proxy_accessor(jsdisp_t*,DISPID,property_desc_t*) DECLSPEC_HIDDEN;
-HRESULT create_proxy_constructor(DISPID,const WCHAR*,jsdisp_t*,jsdisp_t**) DECLSPEC_HIDDEN;
-HRESULT Function_invoke(jsdisp_t*,IDispatch*,WORD,unsigned,jsval_t*,jsval_t*) DECLSPEC_HIDDEN;
+HRESULT create_proxy_functions(jsdisp_t*,const struct proxy_prop_info*,jsdisp_t**) DECLSPEC_HIDDEN;
+HRESULT create_proxy_constructor(IDispatch*,const WCHAR*,jsdisp_t*,jsdisp_t**) DECLSPEC_HIDDEN;
+HRESULT Function_invoke(jsdisp_t*,jsval_t,WORD,unsigned,jsval_t*,jsval_t*,IServiceProvider*) DECLSPEC_HIDDEN;
 
 HRESULT Function_value(script_ctx_t*,jsval_t,WORD,unsigned,jsval_t*,jsval_t*) DECLSPEC_HIDDEN;
 HRESULT Function_get_value(script_ctx_t*,jsdisp_t*,jsval_t*) DECLSPEC_HIDDEN;
@@ -451,12 +436,15 @@ typedef struct {
 
 void release_cc(cc_ctx_t*) DECLSPEC_HIDDEN;
 
+#define SP_CALLER_UNINITIALIZED ((IServiceProvider*)IntToPtr(-1))
+
 typedef struct {
     IServiceProvider IServiceProvider_iface;
 
     LONG ref;
 
     script_ctx_t *ctx;
+    IServiceProvider *caller;
 } JSCaller;
 
 #include "jsval.h"
@@ -498,9 +486,11 @@ struct _script_ctx_t {
 
     heap_pool_t tmp_heap;
 
+    BOOL gc_is_unlinking;
+    DWORD gc_last_tick;
+
     jsval_t *stack;
     unsigned stack_top;
-    DWORD gc_last_tick;
     jsval_t acc;
 
     jsstr_t *last_match;
@@ -508,35 +498,40 @@ struct _script_ctx_t {
     DWORD last_match_index;
     DWORD last_match_length;
 
-    jsdisp_t *global;
-    jsdisp_t *js_global;
-    jsdisp_t *function_constr;
-    jsdisp_t *array_constr;
-    jsdisp_t *bool_constr;
-    jsdisp_t *date_constr;
-    jsdisp_t *enumerator_constr;
-    jsdisp_t *error_constr;
-    jsdisp_t *eval_error_constr;
-    jsdisp_t *range_error_constr;
-    jsdisp_t *reference_error_constr;
-    jsdisp_t *regexp_error_constr;
-    jsdisp_t *syntax_error_constr;
-    jsdisp_t *type_error_constr;
-    jsdisp_t *uri_error_constr;
-    jsdisp_t *number_constr;
-    jsdisp_t *object_constr;
-    jsdisp_t *object_prototype;
-    jsdisp_t *regexp_constr;
-    jsdisp_t *string_constr;
-    jsdisp_t *vbarray_constr;
-    jsdisp_t *arraybuf_constr;
-    jsdisp_t *dataview_constr;
-    jsdisp_t *typedarr_constr[LAST_TYPEDARRAY_JSCLASS - FIRST_TYPEDARRAY_JSCLASS + 1];
-    jsdisp_t *map_prototype;
-    jsdisp_t *set_prototype;
-
+    union {
+        struct {
+            jsdisp_t *global;
+            jsdisp_t *js_global;
+            jsdisp_t *function_constr;
+            jsdisp_t *array_constr;
+            jsdisp_t *bool_constr;
+            jsdisp_t *date_constr;
+            jsdisp_t *enumerator_constr;
+            jsdisp_t *error_constr;
+            jsdisp_t *eval_error_constr;
+            jsdisp_t *range_error_constr;
+            jsdisp_t *reference_error_constr;
+            jsdisp_t *regexp_error_constr;
+            jsdisp_t *syntax_error_constr;
+            jsdisp_t *type_error_constr;
+            jsdisp_t *uri_error_constr;
+            jsdisp_t *number_constr;
+            jsdisp_t *object_constr;
+            jsdisp_t *object_prototype;
+            jsdisp_t *regexp_constr;
+            jsdisp_t *string_constr;
+            jsdisp_t *vbarray_constr;
+            jsdisp_t *arraybuf_constr;
+            jsdisp_t *dataview_constr;
+            jsdisp_t *typedarr_constr[NUM_TYPEDARRAY_TYPES];
+            jsdisp_t *map_prototype;
+            jsdisp_t *set_prototype;
+        };
+        jsdisp_t *global_objects[25 + NUM_TYPEDARRAY_TYPES];
+    };
     struct proxy_prototypes *proxy_prototypes;
 };
+C_ASSERT(RTL_SIZEOF_THROUGH_FIELD(script_ctx_t, set_prototype) == RTL_SIZEOF_THROUGH_FIELD(script_ctx_t, global_objects));
 
 void script_release(script_ctx_t*) DECLSPEC_HIDDEN;
 
@@ -598,66 +593,6 @@ static inline BOOL is_int32(double d)
 static inline DWORD make_grfdex(script_ctx_t *ctx, DWORD flags)
 {
     return ((ctx->version & 0xff) << 28) | flags;
-}
-
-#define GC_TRAVERSE_SPECULATIVELY NULL
-#define GC_TRAVERSE_UNLINK ((void*)(INT_PTR)-1)
-
-/*
- * During unlinking (GC_TRAVERSE_UNLINK), it is important that we unlink *all* linked objects from the
- * object, to be certain that releasing the object later will not release any other objects. Otherwise
- * calculating the "next" object in the list becomes impossible and can lead to already freed objects.
- */
-static inline HRESULT gc_process_linked_obj(jsdisp_t *obj, jsdisp_t *link, void **unlink_ref, void *arg)
-{
-    if(arg == GC_TRAVERSE_UNLINK) {
-        *unlink_ref = NULL;
-        jsdisp_release(link);
-        return S_OK;
-    }
-
-    if(link->ctx != obj->ctx)
-        return S_OK;
-    if(arg == GC_TRAVERSE_SPECULATIVELY)
-        link->ref--;
-    else if(link->gc_marked)
-        return heap_stack_push(arg, link);
-    return S_OK;
-}
-
-static inline HRESULT gc_process_linked_val(jsdisp_t *obj, jsval_t *link, void *arg)
-{
-    jsdisp_t *jsdisp;
-
-    if(arg == GC_TRAVERSE_UNLINK) {
-        jsval_t val = *link;
-        *link = jsval_undefined();
-        jsval_release(val);
-        return S_OK;
-    }
-
-    if(!is_object_instance(*link) || !(jsdisp = to_jsdisp(get_object(*link))) || jsdisp->ctx != obj->ctx)
-        return S_OK;
-    if(arg == GC_TRAVERSE_SPECULATIVELY)
-        jsdisp->ref--;
-    else if(jsdisp->gc_marked)
-        return heap_stack_push(arg, jsdisp);
-    return S_OK;
-}
-
-static inline HRESULT gc_process_linked_disp(jsdisp_t *obj, IDispatch **link, void *arg)
-{
-    jsdisp_t *jsdisp;
-
-    if(arg == GC_TRAVERSE_UNLINK) {
-        IDispatch *disp = *link;
-        *link = NULL;
-        IDispatch_Release(disp);
-        return S_OK;
-    }
-
-    jsdisp = to_jsdisp(*link);
-    return jsdisp ? gc_process_linked_obj(obj, jsdisp, (void**)link, arg) : S_OK;
 }
 
 #define FACILITY_JSCRIPT 10
@@ -753,4 +688,5 @@ static inline void unlock_module(void)
     InterlockedDecrement(&module_ref);
 }
 
+HRESULT WINAPI WineDispatchProxyCbPrivate_CreateArrayBuffer(IWineDispatchProxyCbPrivate*,DWORD,IDispatch**,void**) DECLSPEC_HIDDEN;
 HRESULT WINAPI WineDispatchProxyCbPrivate_GetRandomValues(IDispatch*) DECLSPEC_HIDDEN;

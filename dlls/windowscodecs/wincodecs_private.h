@@ -229,16 +229,6 @@ extern HRESULT MetadataQueryReader_CreateInstance(IWICMetadataBlockReader *, con
 extern HRESULT MetadataQueryWriter_CreateInstance(IWICMetadataBlockWriter *, const WCHAR *, IWICMetadataQueryWriter **) DECLSPEC_HIDDEN;
 extern HRESULT stream_initialize_from_filehandle(IWICStream *iface, HANDLE hfile) DECLSPEC_HIDDEN;
 
-static inline WCHAR *heap_strdupW(const WCHAR *src)
-{
-    WCHAR *dst;
-    SIZE_T len;
-    if (!src) return NULL;
-    len = (lstrlenW(src) + 1) * sizeof(WCHAR);
-    if ((dst = HeapAlloc(GetProcessHeap(), 0, len))) memcpy(dst, src, len);
-    return dst;
-}
-
 static inline const char *debug_wic_rect(const WICRect *rect)
 {
     if (!rect) return "(null)";
@@ -265,7 +255,7 @@ struct decoder_info
 struct decoder_stat
 {
     DWORD flags;
-    DWORD frame_count;
+    UINT frame_count;
 };
 
 struct decoder_frame
@@ -361,7 +351,7 @@ struct encoder_frame
     UINT bpp;
     BOOL indexed;
     DOUBLE dpix, dpiy;
-    DWORD num_colors;
+    UINT num_colors;
     WICColor palette[256];
     /* encoder options */
     BOOL interlace;

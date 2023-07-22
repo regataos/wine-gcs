@@ -1,5 +1,5 @@
 /*
- * Copyright 2021 Connor McAdams for CodeWeavers
+ * Copyright 2022 Connor McAdams for CodeWeavers
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -16,126 +16,163 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#define COBJMACROS
+
 #include "uiautomation.h"
-#include "oleacc.h"
-#include "ia2api.h"
-#include "servprov.h"
-
+#include "uia_classes.h"
 #include "wine/list.h"
+#include "wine/heap.h"
 
-/*
- * EVH = Event Handler.
- */
-enum {
-    BASIC_EVH,
-    CHANGES_EVH,
-    FOCUS_EVH,
-    PROPERTY_EVH,
-    STRUCTURE_EVH,
-    TEXT_EDIT_EVH,
-};
+extern HMODULE huia_module DECLSPEC_HIDDEN;
 
-struct uia_evh
-{
-    struct list entry;
-
-    UINT event_type;
-    union
-    {
-        IUIAutomationEventHandler                    *IUIAutomationEvh_iface;
-        IUIAutomationChangesEventHandler             *IUIAutomationChangesEvh_iface;
-        IUIAutomationFocusChangedEventHandler        *IUIAutomationFocusChangedEvh_iface;
-        IUIAutomationPropertyChangedEventHandler     *IUIAutomationPropertyChangedEvh_iface;
-        IUIAutomationStructureChangedEventHandler    *IUIAutomationStructureChangedEvh_iface;
-        IUIAutomationTextEditTextChangedEventHandler *IUIAutomationTextEditTextChangedEvh_iface;
-    } u;
+enum uia_prop_type {
+    PROP_TYPE_UNKNOWN,
+    PROP_TYPE_ELEM_PROP,
+    PROP_TYPE_SPECIAL,
+    PROP_TYPE_PATTERN_PROP,
 };
 
 /*
- * EVM = Event message. Result of an event being raised, either with
- * UiaRaiseAutomationEvent or an MSAA event with NotifyWinEvent.
+ * HUIANODEs that have an associated HWND are able to pull data from up to 4
+ * different providers:
+ *
+ * - Override providers are used to override values from all other providers.
+ * - Main providers are the base provider for an HUIANODE.
+ * - Nonclient providers are used to represent the nonclient area of the HWND.
+ * - HWND providers are used to represent data from the HWND as a whole, such
+ *   as the bounding box.
+ *
+ * When a property is requested from the node, each provider is queried in
+ * descending order starting with the override provider until either one
+ * returns a property or there are no more providers to query.
  */
-struct uia_evm
-{
-    struct list entry;
-
-    UINT event;
-    IUIAutomationElement *elem;
-
-    enum uia_event_origin
-    {
-        UIA_EVO_MSAA,
-        UIA_EVO_UIA,
-    } uia_evo;
-
-    union
-    {
-        struct
-        {
-            HWND hwnd;
-
-            LONG obj_id, child_id;
-        } msaa_ev;
-        struct
-        {
-            IRawElementProviderSimple *elem_prov;
-        } uia_ev;
-    } u;
+enum uia_node_prov_type {
+    PROV_TYPE_OVERRIDE,
+    PROV_TYPE_MAIN,
+    PROV_TYPE_NONCLIENT,
+    PROV_TYPE_HWND,
+    PROV_TYPE_COUNT,
 };
 
-struct uia_data;
-
-/*
- * EVL = Event listener.
- */
-struct uia_evl
-{
-    HANDLE h_thread, pump_initialized, first_event;
-    CRITICAL_SECTION ev_handler_cs;
-    CRITICAL_SECTION evm_queue_cs;
-    UINT tid;
-
-    HWINEVENTHOOK win_creation_hook;
-    HWINEVENTHOOK object_focus_hook;
-    HWINEVENTHOOK ia2_event_hook;
-    IUIAEvlConnection *evlc_iface;
-
-    struct uia_data *data;
-
-    struct list uia_evh_list;
-    struct list uia_evm_queue;
-};
-
-/*
- * EVLC = Event listener connection.
- */
-struct uia_evlc
-{
-    IUIAEvlConnection IUIAEvlConnection_iface;
+struct uia_node {
+    IWineUiaNode IWineUiaNode_iface;
     LONG ref;
 
-    struct uia_evl *evl;
+    IWineUiaProvider *prov[PROV_TYPE_COUNT];
+    DWORD git_cookie[PROV_TYPE_COUNT];
+    int prov_count;
+    int parent_link_idx;
+    int creator_prov_idx;
+
+    HWND hwnd;
+    BOOL nested_node;
+    BOOL disconnected;
+    int creator_prov_type;
+    struct list prov_thread_list_entry;
+    struct list node_map_list_entry;
+    struct uia_provider_thread_map_entry *map;
 };
 
-struct uia_data {
-    IUIAutomation IUIAutomation_iface;
+static inline struct uia_node *impl_from_IWineUiaNode(IWineUiaNode *iface)
+{
+    return CONTAINING_RECORD(iface, struct uia_node, IWineUiaNode_iface);
+}
+
+struct uia_provider {
+    IWineUiaProvider IWineUiaProvider_iface;
     LONG ref;
 
-    struct uia_evl *evl;
+    IRawElementProviderSimple *elprov;
+    BOOL return_nested_node;
+    BOOL parent_check_ran;
+    BOOL has_parent;
+    BOOL is_wpf_prov;
 };
 
-HRESULT create_uia_iface(IUIAutomation **) DECLSPEC_HIDDEN;
+static inline struct uia_provider *impl_from_IWineUiaProvider(IWineUiaProvider *iface)
+{
+    return CONTAINING_RECORD(iface, struct uia_provider, IWineUiaProvider_iface);
+}
 
-HRESULT create_uia_elem_from_raw_provider(IUIAutomationElement **,
-        IRawElementProviderSimple *) DECLSPEC_HIDDEN;
-HRESULT create_uia_elem_from_msaa_acc(IUIAutomationElement **,
-        IAccessible *, INT) DECLSPEC_HIDDEN;
+static inline BOOL uia_array_reserve(void **elements, SIZE_T *capacity, SIZE_T count, SIZE_T size)
+{
+    SIZE_T max_capacity, new_capacity;
+    void *new_elements;
 
-/*
- * uia_event.c functions.
- */
-HRESULT uia_evh_add_focus_event_handler(struct uia_data *data,
-        IUIAutomationFocusChangedEventHandler *handler) DECLSPEC_HIDDEN;
-HRESULT uia_evh_remove_focus_event_handler(struct uia_data *data,
-        IUIAutomationFocusChangedEventHandler *handler) DECLSPEC_HIDDEN;
-HRESULT uia_evh_remove_all_event_handlers(struct uia_data *data) DECLSPEC_HIDDEN;
+    if (count <= *capacity)
+        return TRUE;
+
+    max_capacity = ~(SIZE_T)0 / size;
+    if (count > max_capacity)
+        return FALSE;
+
+    new_capacity = max(1, *capacity);
+    while (new_capacity < count && new_capacity <= max_capacity / 2)
+        new_capacity *= 2;
+    if (new_capacity < count)
+        new_capacity = count;
+
+    if (!*elements)
+        new_elements = heap_alloc_zero(new_capacity * size);
+    else
+        new_elements = HeapReAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, *elements, new_capacity * size);
+    if (!new_elements)
+        return FALSE;
+
+    *elements = new_elements;
+    *capacity = new_capacity;
+    return TRUE;
+}
+
+struct uia_event_args
+{
+    LONG ref;
+
+    union {
+        struct UiaEventArgs                    simple_args;
+        struct UiaPropertyChangedEventArgs     prop_change_args;
+        struct UiaStructureChangedEventArgs    struct_change_args;
+        struct UiaAsyncContentLoadedEventArgs  async_loaded_args;
+        struct UiaWindowClosedEventArgs        window_closed_args;
+        struct UiaTextEditTextChangedEventArgs text_edit_change_args;
+        struct UiaChangesEventArgs             changes_args;
+    } u;
+    void *event_handler_data;
+};
+
+static inline struct uia_event_args *impl_from_UiaEventArgs(struct UiaEventArgs *args)
+{
+    return CONTAINING_RECORD(args, struct uia_event_args, u.simple_args);
+}
+
+static inline void variant_init_bool(VARIANT *v, BOOL val)
+{
+    V_VT(v) = VT_BOOL;
+    V_BOOL(v) = val ? VARIANT_TRUE : VARIANT_FALSE;
+}
+
+/* uia_client.c */
+int uia_compare_safearrays(SAFEARRAY *sa1, SAFEARRAY *sa2, int prop_type) DECLSPEC_HIDDEN;
+int get_node_provider_type_at_idx(struct uia_node *node, int idx) DECLSPEC_HIDDEN;
+HRESULT create_uia_node_from_elprov(IRawElementProviderSimple *elprov, HUIANODE *out_node,
+        BOOL get_hwnd_providers) DECLSPEC_HIDDEN;
+HRESULT uia_add_event(HUIANODE huianode, EVENTID event_id, UiaEventCallback *callback, enum TreeScope scope,
+        PROPERTYID *prop_ids, int prop_ids_count, struct UiaCacheRequest *cache_req, void *event_handler_data,
+        HUIAEVENT *huiaevent) DECLSPEC_HIDDEN;
+
+/* uia_com_client.c */
+HRESULT create_uia_iface(IUnknown **iface, BOOL is_cui8) DECLSPEC_HIDDEN;
+
+/* uia_ids.c */
+const struct uia_prop_info *uia_prop_info_from_id(PROPERTYID prop_id) DECLSPEC_HIDDEN;
+const struct uia_event_info *uia_event_info_from_id(EVENTID event_id) DECLSPEC_HIDDEN;
+const struct uia_pattern_info *uia_pattern_info_from_id(PATTERNID pattern_id) DECLSPEC_HIDDEN;
+
+/* uia_provider.c */
+void uia_stop_provider_thread(void) DECLSPEC_HIDDEN;
+BOOL uia_start_provider_thread(void) DECLSPEC_HIDDEN;
+void uia_provider_thread_remove_node(HUIANODE node) DECLSPEC_HIDDEN;
+LRESULT uia_lresult_from_node(HUIANODE huianode) DECLSPEC_HIDDEN;
+HRESULT create_msaa_provider(IAccessible *acc, long child_id, HWND hwnd, BOOL known_root_acc, BOOL clientside_prov,
+        IRawElementProviderSimple **elprov) DECLSPEC_HIDDEN;
+HRESULT create_base_hwnd_provider(HWND hwnd, IRawElementProviderSimple **elprov) DECLSPEC_HIDDEN;

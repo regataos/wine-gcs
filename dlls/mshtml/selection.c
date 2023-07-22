@@ -99,7 +99,7 @@ static ULONG WINAPI HTMLSelectionObject_Release(IHTMLSelectionObject *iface)
         if(This->doc)
             list_remove(&This->entry);
         release_dispex(&This->dispex);
-        heap_free(This);
+        free(This);
     }
 
     return ref;
@@ -160,17 +160,17 @@ static HRESULT WINAPI HTMLSelectionObject_createRange(IHTMLSelectionObject *ifac
 
             TRACE("nsrange_cnt = 0\n");
 
-            if(!This->doc->nsdoc) {
-                WARN("nsdoc is NULL\n");
+            if(!This->doc->dom_document) {
+                WARN("dom_document is NULL\n");
                 return E_UNEXPECTED;
             }
 
-            if(!This->doc->nshtmldoc) {
+            if(!This->doc->html_document) {
                 FIXME("Not implemented for XML document\n");
                 return E_NOTIMPL;
             }
 
-            nsres = nsIDOMHTMLDocument_GetBody(This->doc->nshtmldoc, &nsbody);
+            nsres = nsIDOMHTMLDocument_GetBody(This->doc->html_document, &nsbody);
             if(NS_FAILED(nsres) || !nsbody) {
                 ERR("Could not get body: %08lx\n", nsres);
                 return E_FAIL;
@@ -346,17 +346,18 @@ HRESULT HTMLSelectionObject_Create(HTMLDocumentNode *doc, nsISelection *nsselect
 {
     HTMLSelectionObject *selection;
 
-    selection = heap_alloc(sizeof(HTMLSelectionObject));
+    selection = malloc(sizeof(HTMLSelectionObject));
     if(!selection)
         return E_OUTOFMEMORY;
-
-    init_dispatch(&selection->dispex, (IUnknown*)&selection->IHTMLSelectionObject_iface,
-                  &HTMLSelectionObject_dispex, doc, dispex_compat_mode(&doc->node.event_target.dispex));
 
     selection->IHTMLSelectionObject_iface.lpVtbl = &HTMLSelectionObjectVtbl;
     selection->IHTMLSelectionObject2_iface.lpVtbl = &HTMLSelectionObject2Vtbl;
     selection->ref = 1;
     selection->nsselection = nsselection; /* We shouldn't call AddRef here */
+
+    init_dispatch(&selection->dispex, (IUnknown*)&selection->IHTMLSelectionObject_iface,
+                  &HTMLSelectionObject_dispex, get_inner_window(doc),
+                  dispex_compat_mode(&doc->node.event_target.dispex));
 
     selection->doc = doc;
     list_add_head(&doc->selection_list, &selection->entry);

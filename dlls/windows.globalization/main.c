@@ -17,36 +17,10 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include <stdarg.h>
-
-#define COBJMACROS
-#include "windef.h"
-#include "winbase.h"
-#include "winstring.h"
-#include "wine/debug.h"
-#include "objbase.h"
-
 #include "initguid.h"
-#include "activation.h"
-
-#define WIDL_using_Windows_Foundation
-#define WIDL_using_Windows_Foundation_Collections
-#include "windows.foundation.h"
-#define WIDL_using_Windows_Globalization
-#include "windows.globalization.h"
-#define WIDL_using_Windows_System_UserProfile
-#include "windows.system.userprofile.h"
+#include "winewinrt_classes.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(locale);
-
-static const char *debugstr_hstring(HSTRING hstr)
-{
-    const WCHAR *str;
-    UINT32 len;
-    if (hstr && !((ULONG_PTR)hstr >> 16)) return "(invalid)";
-    str = WindowsGetStringRawBuffer(hstr, &len);
-    return wine_dbgstr_wn(str, len);
-}
 
 struct hstring_vector
 {
@@ -54,8 +28,10 @@ struct hstring_vector
     LONG ref;
 
     ULONG count;
-    HSTRING values[1];
+    HSTRING values[];
 };
+
+C_ASSERT(sizeof(struct hstring_vector) == offsetof(struct hstring_vector, values[0]));
 
 static inline struct hstring_vector *impl_from_IVectorView_HSTRING(IVectorView_HSTRING *iface)
 {
@@ -87,7 +63,7 @@ static ULONG STDMETHODCALLTYPE hstring_vector_AddRef(IVectorView_HSTRING *iface)
 {
     struct hstring_vector *impl = impl_from_IVectorView_HSTRING(iface);
     ULONG ref = InterlockedIncrement(&impl->ref);
-    TRACE("iface %p, ref %u.\n", iface, ref);
+    TRACE("iface %p, ref %lu.\n", iface, ref);
     return ref;
 }
 
@@ -95,7 +71,7 @@ static ULONG STDMETHODCALLTYPE hstring_vector_Release(IVectorView_HSTRING *iface
 {
     struct hstring_vector *impl = impl_from_IVectorView_HSTRING(iface);
     ULONG ref = InterlockedDecrement(&impl->ref);
-    TRACE("iface %p, ref %u.\n", iface, ref);
+    TRACE("iface %p, ref %lu.\n", iface, ref);
     if (ref == 0)
     {
         while (impl->count--) WindowsDeleteString(impl->values[impl->count]);
@@ -126,7 +102,7 @@ static HRESULT STDMETHODCALLTYPE hstring_vector_GetTrustLevel(IVectorView_HSTRIN
 }
 
 static HRESULT STDMETHODCALLTYPE hstring_vector_GetAt(IVectorView_HSTRING *iface,
-        ULONG index, HSTRING *value)
+        UINT32 index, HSTRING *value)
 {
     struct hstring_vector *impl = impl_from_IVectorView_HSTRING(iface);
 
@@ -138,7 +114,7 @@ static HRESULT STDMETHODCALLTYPE hstring_vector_GetAt(IVectorView_HSTRING *iface
 }
 
 static HRESULT STDMETHODCALLTYPE hstring_vector_get_Size(IVectorView_HSTRING *iface,
-        ULONG *value)
+        UINT32 *value)
 {
     struct hstring_vector *impl = impl_from_IVectorView_HSTRING(iface);
 
@@ -149,7 +125,7 @@ static HRESULT STDMETHODCALLTYPE hstring_vector_get_Size(IVectorView_HSTRING *if
 }
 
 static HRESULT STDMETHODCALLTYPE hstring_vector_IndexOf(IVectorView_HSTRING *iface,
-        HSTRING element, ULONG *index, BOOLEAN *found)
+        HSTRING element, UINT32 *index, BOOLEAN *found)
 {
     struct hstring_vector *impl = impl_from_IVectorView_HSTRING(iface);
     INT32 i, order;
@@ -175,7 +151,7 @@ static HRESULT STDMETHODCALLTYPE hstring_vector_IndexOf(IVectorView_HSTRING *ifa
 }
 
 static HRESULT STDMETHODCALLTYPE hstring_vector_GetMany(IVectorView_HSTRING *iface,
-        ULONG start_index, ULONG items_size, HSTRING *items, UINT *count)
+        UINT32 start_index, UINT32 items_size, HSTRING *items, UINT *count)
 {
     struct hstring_vector *impl = impl_from_IVectorView_HSTRING(iface);
     HRESULT hr = S_OK;
@@ -415,7 +391,7 @@ static ULONG STDMETHODCALLTYPE windows_globalization_AddRef(
 {
     struct windows_globalization *impl = impl_from_IActivationFactory(iface);
     ULONG ref = InterlockedIncrement(&impl->ref);
-    TRACE("iface %p, ref %u.\n", iface, ref);
+    TRACE("iface %p, ref %lu.\n", iface, ref);
     return ref;
 }
 
@@ -424,7 +400,7 @@ static ULONG STDMETHODCALLTYPE windows_globalization_Release(
 {
     struct windows_globalization *impl = impl_from_IActivationFactory(iface);
     ULONG ref = InterlockedDecrement(&impl->ref);
-    TRACE("iface %p, ref %u.\n", iface, ref);
+    TRACE("iface %p, ref %lu.\n", iface, ref);
     return ref;
 }
 
@@ -749,6 +725,21 @@ HRESULT WINAPI DllGetActivationFactory(HSTRING classid, IActivationFactory **fac
     else if (!wcscmp(name, RuntimeClass_Windows_Globalization_Language))
     {
         *factory = &language_factory.IActivationFactory_iface;
+        IUnknown_AddRef(*factory);
+    }
+    else if (!wcscmp(name, RuntimeClass_Windows_Globalization_GeographicRegion))
+    {
+        *factory = (IActivationFactory *)globalization_geographic_region_factory;
+        IUnknown_AddRef(*factory);
+    }
+    else if (!wcscmp(name, RuntimeClass_Windows_System_Profile_AnalyticsInfo))
+    {
+        *factory = (IActivationFactory *)system_profile_analytics_info_factory;
+        IUnknown_AddRef(*factory);
+    }
+    else if (!wcscmp(name, RuntimeClass_Windows_System_UserProfile_AdvertisingManager))
+    {
+        *factory = (IActivationFactory *)system_user_profile_advertising_manager_factory;
         IUnknown_AddRef(*factory);
     }
 

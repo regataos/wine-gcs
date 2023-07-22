@@ -156,7 +156,7 @@ static LPCSTR DIALOG_GetControl16( LPCSTR p, DLG_CONTROL_INFO *info )
 
     p += *p + 1;
 
-    TRACE("   %s %s %d, %d, %d, %d, %d, %08x, %p\n",
+    TRACE("   %s %s %d, %d, %d, %d, %d, %08lx, %p\n",
           debugstr_a(info->className),  debugstr_a(info->windowName),
           info->id, info->x, info->y, info->cx, info->cy,
           info->style, info->data );
@@ -181,13 +181,25 @@ static BOOL DIALOG_CreateControls16( HWND hwnd, LPCSTR template,
     TRACE(" BEGIN\n" );
     while (items--)
     {
+        char *caption, caption_buf[4];
         HINSTANCE16 instance = hInst;
         SEGPTR segptr;
 
         template = DIALOG_GetControl16( template, &info );
         segptr = MapLS( info.data );
+
+        caption = (char *)info.windowName;
+        if (caption && IS_INTRESOURCE(caption))
+        {
+            caption_buf[0] = 0xff;
+            caption_buf[1] = PtrToUlong( caption );
+            caption_buf[2] = PtrToUlong( caption ) >> 8;
+            caption_buf[3] = 0;
+            caption = caption_buf;
+        }
+
         hwndCtrl = WIN_Handle32( CreateWindowEx16( WS_EX_NOPARENTNOTIFY,
-                                                   info.className, info.windowName,
+                                                   info.className, caption,
                                                    info.style | WS_CHILD,
                                                    MulDiv(info.x, dlgInfo->xBaseUnit, 4),
                                                    MulDiv(info.y, dlgInfo->yBaseUnit, 8),
@@ -238,7 +250,7 @@ static LPCSTR DIALOG_ParseTemplate16( LPCSTR p, DLG_TEMPLATE * result )
     result->cy      = GET_WORD(p);  p += sizeof(WORD);
 
     TRACE("DIALOG %d, %d, %d, %d\n", result->x, result->y, result->cx, result->cy );
-    TRACE(" STYLE %08x\n", result->style );
+    TRACE(" STYLE %08lx\n", result->style );
 
     /* Get the menu name */
 
@@ -777,7 +789,7 @@ HWND16 WINAPI CreateDialogParam16( HINSTANCE16 hInst, LPCSTR dlgTemplate,
     HGLOBAL16 hmem;
     LPCVOID data;
 
-    TRACE("%04x,%s,%04x,%p,%ld\n",
+    TRACE("%04x,%s,%04x,%p,%Ix\n",
           hInst, debugstr_a(dlgTemplate), owner, dlgProc, param );
 
     if (!(hRsrc = FindResource16( hInst, dlgTemplate, (LPSTR)RT_DIALOG ))) return 0;

@@ -63,6 +63,7 @@ file_type get_file_type(const char* filename)
     /* see tools/winebuild/res32.c: check_header for details */
     static const char res_sig[] = { 0,0,0,0, 32,0,0,0, 0xff,0xff, 0,0, 0xff,0xff, 0,0, 0,0,0,0, 0,0, 0,0, 0,0,0,0, 0,0,0,0 };
     static const char elf_sig[4] = "\177ELF";
+    static const char ar_sig[8] = "!<arch>\n";
     char buf[sizeof(res_sig)];
     int fd, cnt;
 
@@ -83,6 +84,7 @@ file_type get_file_type(const char* filename)
     if (strendswith(filename, ".spec")) return file_spec;
     if (strendswith(filename, ".rc")) return file_rc;
     if (cnt >= sizeof(elf_sig) && !memcmp(buf, elf_sig, sizeof(elf_sig))) return file_so;  /* ELF lib */
+    if (cnt >= sizeof(ar_sig) && !memcmp(buf, ar_sig, sizeof(ar_sig))) return file_arh;
     if (cnt >= sizeof(unsigned int) &&
         (*(unsigned int *)buf == 0xfeedface || *(unsigned int *)buf == 0xcefaedfe ||
          *(unsigned int *)buf == 0xfeedfacf || *(unsigned int *)buf == 0xcffaedfe))
@@ -91,7 +93,7 @@ file_type get_file_type(const char* filename)
     return file_other;
 }
 
-static char* try_lib_path(const char* dir, const char* pre, 
+static char* try_lib_path(const char *dir, const char *arch_dir, const char *pre,
 			  const char* library, const char* ext,
 			  file_type expected_type)
 {
@@ -99,7 +101,7 @@ static char* try_lib_path(const char* dir, const char* pre,
     file_type type;
 
     /* first try a subdir named from the library we are looking for */
-    fullname = strmake("%s/%s/%s%s%s", dir, library, pre, library, ext);
+    fullname = strmake("%s/%s%s/%s%s%s", dir, library, arch_dir, pre, library, ext);
     if (verbose > 1) fprintf(stderr, "Try %s...", fullname);
     type = get_file_type(fullname);
     if (verbose > 1) fprintf(stderr, type == expected_type ? "FOUND!\n" : "no\n");
@@ -118,25 +120,36 @@ static char* try_lib_path(const char* dir, const char* pre,
 static file_type guess_lib_type(struct target target, const char* dir,
                                 const char* library, const char *prefix, const char *suffix, char** file)
 {
+    const char *arch_dir = "";
+
     if (target.platform != PLATFORM_WINDOWS &&
         target.platform != PLATFORM_MINGW &&
         target.platform != PLATFORM_CYGWIN)
     {
         /* Unix shared object */
-        if ((*file = try_lib_path(dir, prefix, library, ".so", file_so)))
+        if ((*file = try_lib_path(dir, "", prefix, library, ".so", file_so)))
             return file_so;
 
         /* Mach-O (Darwin/Mac OS X) Dynamic Library behaves mostly like .so */
-        if ((*file = try_lib_path(dir, prefix, library, ".dylib", file_so)))
+        if ((*file = try_lib_path(dir, "", prefix, library, ".dylib", file_so)))
             return file_so;
 
         /* Windows DLL */
-        if ((*file = try_lib_path(dir, prefix, library, ".def", file_def)))
+        if ((*file = try_lib_path(dir, "", prefix, library, ".def", file_def)))
             return file_dll;
+    }
+    else
+    {
+        arch_dir = get_arch_dir( target );
+        if (!strcmp( suffix, ".a" ))  /* try Mingw-style .dll.a import lib */
+        {
+            if ((*file = try_lib_path(dir, arch_dir, prefix, library, ".dll.a", file_arh)))
+                return file_arh;
+        }
     }
 
     /* static archives */
-    if ((*file = try_lib_path(dir, prefix, library, suffix, file_arh)))
+    if ((*file = try_lib_path(dir, arch_dir, prefix, library, suffix, file_arh)))
 	return file_arh;
 
     return file_na;

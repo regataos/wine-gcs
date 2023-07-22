@@ -1497,7 +1497,7 @@ static LRESULT WINAPI SysLinkWindowProc(HWND hwnd, UINT message,
 {
     SYSLINK_INFO *infoPtr;
 
-    TRACE("hwnd=%p msg=%04x wparam=%lx lParam=%lx\n", hwnd, message, wParam, lParam);
+    TRACE("hwnd %p, msg %04x, wparam %Ix, lParam %Ix\n", hwnd, message, wParam, lParam);
 
     infoPtr = (SYSLINK_INFO *)GetWindowLongPtrW(hwnd, 0);
 
@@ -1676,11 +1676,7 @@ static LRESULT WINAPI SysLinkWindowProc(HWND hwnd, UINT message,
 
     case WM_STYLECHANGED:
         if (wParam == GWL_STYLE)
-        {
             infoPtr->Style = ((LPSTYLESTRUCT)lParam)->styleNew;
-
-            InvalidateRect(infoPtr->Self, NULL, TRUE);
-        }
         return 0;
 
     case WM_CREATE:
@@ -1726,7 +1722,7 @@ static LRESULT WINAPI SysLinkWindowProc(HWND hwnd, UINT message,
     default:
         if ((message >= WM_USER) && (message < WM_APP) && !COMCTL32_IsReflectedMessage(message))
         {
-            ERR("unknown msg %04x wp=%04lx lp=%08lx\n", message, wParam, lParam );
+            ERR("unknown msg %04x, wp %Ix, lp %Ix\n", message, wParam, lParam );
         }
         return DefWindowProcW(hwnd, message, wParam, lParam);
     }

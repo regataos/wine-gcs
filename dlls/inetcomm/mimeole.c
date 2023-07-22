@@ -34,7 +34,6 @@
 #include "mimeole.h"
 #include "propvarutil.h"
 
-#include "wine/heap.h"
 #include "wine/list.h"
 #include "wine/debug.h"
 
@@ -204,7 +203,7 @@ static ULONG WINAPI sub_stream_AddRef(IStream *iface)
     sub_stream_t *This = impl_from_IStream(iface);
     LONG ref = InterlockedIncrement(&This->ref);
 
-    TRACE("(%p) ref=%d\n", This, ref);
+    TRACE("(%p) ref=%ld\n", This, ref);
 
     return ref;
 }
@@ -214,12 +213,12 @@ static ULONG WINAPI sub_stream_Release(IStream *iface)
     sub_stream_t *This = impl_from_IStream(iface);
     LONG ref = InterlockedDecrement(&This->ref);
 
-    TRACE("(%p) ref=%d\n", This, ref);
+    TRACE("(%p) ref=%ld\n", This, ref);
 
     if(!ref)
     {
         IStream_Release(This->base);
-        HeapFree(GetProcessHeap(), 0, This);
+        free(This);
     }
     return ref;
 }
@@ -234,7 +233,7 @@ static HRESULT WINAPI sub_stream_Read(
     HRESULT hr;
     LARGE_INTEGER tmp_pos;
 
-    TRACE("(%p, %d, %p)\n", pv, cb, pcbRead);
+    TRACE("(%p, %ld, %p)\n", pv, cb, pcbRead);
 
     tmp_pos.QuadPart = This->pos.QuadPart + This->start.QuadPart;
     IStream_Seek(This->base, tmp_pos, STREAM_SEEK_SET, NULL);
@@ -268,7 +267,7 @@ static HRESULT WINAPI sub_stream_Seek(
     sub_stream_t *This = impl_from_IStream(iface);
     LARGE_INTEGER new_pos;
 
-    TRACE("(%08x.%08x, %x, %p)\n", dlibMove.u.HighPart, dlibMove.u.LowPart, dwOrigin, plibNewPosition);
+    TRACE("(%08lx.%08lx, %lx, %p)\n", dlibMove.u.HighPart, dlibMove.u.LowPart, dwOrigin, plibNewPosition);
 
     switch(dwOrigin)
     {
@@ -315,7 +314,7 @@ static HRESULT WINAPI sub_stream_CopyTo(
     ULARGE_INTEGER totalBytesRead;
     ULARGE_INTEGER totalBytesWritten;
 
-    TRACE("(%p)->(%p, %d, %p, %p)\n", iface, pstm, cb.u.LowPart, pcbRead, pcbWritten);
+    TRACE("(%p)->(%p, %ld, %p, %p)\n", iface, pstm, cb.u.LowPart, pcbRead, pcbWritten);
 
     totalBytesRead.QuadPart = 0;
     totalBytesWritten.QuadPart = 0;
@@ -392,7 +391,7 @@ static HRESULT WINAPI sub_stream_Stat(
         DWORD grfStatFlag)
 {
     sub_stream_t *This = impl_from_IStream(iface);
-    FIXME("(%p)->(%p, %08x)\n", This, pstatstg, grfStatFlag);
+    FIXME("(%p)->(%p, %08lx)\n", This, pstatstg, grfStatFlag);
     memset(pstatstg, 0, sizeof(*pstatstg));
     pstatstg->cbSize = This->length;
     return S_OK;
@@ -429,7 +428,7 @@ static HRESULT create_sub_stream(IStream *stream, ULARGE_INTEGER start, ULARGE_I
     sub_stream_t *This;
 
     *out = NULL;
-    This = HeapAlloc(GetProcessHeap(), 0, sizeof(*This));
+    This = malloc(sizeof(*This));
     if(!This) return E_OUTOFMEMORY;
 
     This->IStream_iface.lpVtbl = &sub_stream_vtbl;
@@ -476,15 +475,6 @@ static inline propschema *impl_from_IMimePropertySchema(IMimePropertySchema *ifa
     return CONTAINING_RECORD(iface, propschema, IMimePropertySchema_iface);
 }
 
-static LPSTR strdupA(LPCSTR str)
-{
-    char *ret;
-    int len = strlen(str);
-    ret = HeapAlloc(GetProcessHeap(), 0, len + 1);
-    memcpy(ret, str, len + 1);
-    return ret;
-}
-
 #define PARSER_BUF_SIZE 1024
 
 /*****************************************************
@@ -508,11 +498,11 @@ static HRESULT copy_headers_to_buf(IStream *stm, char **ptr)
         DWORD read;
 
         if(!buf)
-            buf = HeapAlloc(GetProcessHeap(), 0, size + 1);
+            buf = malloc(size + 1);
         else
         {
             size *= 2;
-            buf = HeapReAlloc(GetProcessHeap(), 0, buf, size + 1);
+            buf = realloc(buf, size + 1);
         }
         if(!buf)
         {
@@ -548,7 +538,7 @@ static HRESULT copy_headers_to_buf(IStream *stm, char **ptr)
     return S_OK;
 
 fail:
-    HeapFree(GetProcessHeap(), 0, buf);
+    free(buf);
     return hr;
 }
 
@@ -566,7 +556,7 @@ static header_t *read_prop(MimeBody *body, char **ptr)
     {
         if(!lstrcmpiA(*ptr, prop->name))
         {
-            TRACE("%s: found match with default property id %d\n", *ptr, prop->id);
+            TRACE("%s: found match with default property id %ld\n", *ptr, prop->id);
             break;
         }
     }
@@ -578,25 +568,25 @@ static header_t *read_prop(MimeBody *body, char **ptr)
         {
             if(!lstrcmpiA(*ptr, prop_entry->prop.name))
             {
-                TRACE("%s: found match with already added new property id %d\n", *ptr, prop_entry->prop.id);
+                TRACE("%s: found match with already added new property id %ld\n", *ptr, prop_entry->prop.id);
                 prop = &prop_entry->prop;
                 break;
             }
         }
         if(!prop->name)
         {
-            prop_entry = HeapAlloc(GetProcessHeap(), 0, sizeof(*prop_entry));
-            prop_entry->prop.name = strdupA(*ptr);
+            prop_entry = malloc(sizeof(*prop_entry));
+            prop_entry->prop.name = strdup(*ptr);
             prop_entry->prop.id = body->next_prop_id++;
             prop_entry->prop.flags = 0;
             prop_entry->prop.default_vt = VT_LPSTR;
             list_add_tail(&body->new_props, &prop_entry->entry);
             prop = &prop_entry->prop;
-            TRACE("%s: allocating new prop id %d\n", *ptr, prop_entry->prop.id);
+            TRACE("%s: allocating new prop id %ld\n", *ptr, prop_entry->prop.id);
         }
     }
 
-    ret = HeapAlloc(GetProcessHeap(), 0, sizeof(*ret));
+    ret = malloc(sizeof(*ret));
     ret->prop = prop;
     PropVariantInit(&ret->value);
     list_init(&ret->params);
@@ -642,7 +632,7 @@ static char *unquote_string(const char *str)
         quoted = TRUE;
         str++;
     }
-    ret = strdupA(str);
+    ret = strdup(str);
     for(cp = ret; *cp; cp++)
     {
         if(*cp == '\\')
@@ -680,13 +670,13 @@ static void add_param(header_t *header, const char *p)
         return;
     }
 
-    name = HeapAlloc(GetProcessHeap(), 0, cp - key + 1);
+    name = malloc(cp - key + 1);
     memcpy(name, key, cp - key);
     name[cp - key] = '\0';
 
     value = cp + 1;
 
-    param = HeapAlloc(GetProcessHeap(), 0, sizeof(*param));
+    param = malloc(sizeof(*param));
     param->name = name;
     param->value = unquote_string(value);
     list_add_tail(&header->params, &param->entry);
@@ -724,7 +714,7 @@ static void read_value(header_t *header, char **cur)
     } while(*end == ' ' || *end == '\t');
 
     len = end - *cur;
-    value = HeapAlloc(GetProcessHeap(), 0, len + 1);
+    value = CoTaskMemAlloc(len + 1);
     memcpy(value, *cur, len);
     value[len] = '\0';
 
@@ -755,10 +745,10 @@ static void init_content_type(MimeBody *body, header_t *header)
         return;
     }
     len = slash - header->value.pszVal;
-    body->content_pri_type = HeapAlloc(GetProcessHeap(), 0, len + 1);
+    body->content_pri_type = malloc(len + 1);
     memcpy(body->content_pri_type, header->value.pszVal, len);
     body->content_pri_type[len] = '\0';
-    body->content_sub_type = strdupA(slash + 1);
+    body->content_sub_type = strdup(slash + 1);
 }
 
 static void init_content_encoding(MimeBody *body, header_t *header)
@@ -802,7 +792,7 @@ static HRESULT parse_headers(MimeBody *body, IStream *stm)
         }
     }
 
-    HeapFree(GetProcessHeap(), 0, header_buf);
+    free(header_buf);
     return hr;
 }
 
@@ -813,9 +803,9 @@ static void empty_param_list(struct list *list)
     LIST_FOR_EACH_ENTRY_SAFE(param, cursor2, list, param_t, entry)
     {
         list_remove(&param->entry);
-        HeapFree(GetProcessHeap(), 0, param->name);
-        HeapFree(GetProcessHeap(), 0, param->value);
-        HeapFree(GetProcessHeap(), 0, param);
+        free(param->name);
+        free(param->value);
+        free(param);
     }
 }
 
@@ -824,7 +814,7 @@ static void free_header(header_t *header)
     list_remove(&header->entry);
     PropVariantClear(&header->value);
     empty_param_list(&header->params);
-    heap_free(header);
+    free(header);
 }
 
 static void empty_header_list(struct list *list)
@@ -844,8 +834,8 @@ static void empty_new_prop_list(struct list *list)
     LIST_FOR_EACH_ENTRY_SAFE(prop, cursor2, list, property_list_entry_t, entry)
     {
         list_remove(&prop->entry);
-        HeapFree(GetProcessHeap(), 0, (char *)prop->prop.name);
-        HeapFree(GetProcessHeap(), 0, prop);
+        free((char *)prop->prop.name);
+        free(prop);
     }
 }
 
@@ -905,7 +895,7 @@ static const property_t *find_default_prop(const char *name)
     }
 
     if(prop_def->id)
-       TRACE("%s: found match with default property id %d\n", prop_def->name, prop_def->id);
+       TRACE("%s: found match with default property id %ld\n", prop_def->name, prop_def->id);
     else
        prop_def = NULL;
 
@@ -944,7 +934,7 @@ static ULONG WINAPI MimeBody_AddRef(IMimeBody *iface)
     MimeBody *This = impl_from_IMimeBody(iface);
     LONG ref = InterlockedIncrement(&This->ref);
 
-    TRACE("(%p) ref=%d\n", This, ref);
+    TRACE("(%p) ref=%ld\n", This, ref);
 
     return ref;
 }
@@ -954,19 +944,19 @@ static ULONG WINAPI MimeBody_Release(IMimeBody *iface)
     MimeBody *This = impl_from_IMimeBody(iface);
     LONG ref = InterlockedDecrement(&This->ref);
 
-    TRACE("(%p) ref=%d\n", This, ref);
+    TRACE("(%p) ref=%ld\n", This, ref);
 
     if (!ref)
     {
         empty_header_list(&This->headers);
         empty_new_prop_list(&This->new_props);
 
-        HeapFree(GetProcessHeap(), 0, This->content_pri_type);
-        HeapFree(GetProcessHeap(), 0, This->content_sub_type);
+        free(This->content_pri_type);
+        free(This->content_sub_type);
 
         release_data(&This->data_iid, This->data);
 
-        HeapFree(GetProcessHeap(), 0, This);
+        free(This);
     }
 
     return ref;
@@ -1041,10 +1031,10 @@ static HRESULT WINAPI MimeBody_GetPropInfo(
     if(!pszName || !pInfo)
         return E_INVALIDARG;
 
-    TRACE("mask 0x%04x\n", pInfo->dwMask);
+    TRACE("mask 0x%04lx\n", pInfo->dwMask);
 
     if(pInfo->dwMask & ~supported)
-         FIXME("Unsupported mask flags 0x%04x\n", pInfo->dwMask & ~supported);
+         FIXME("Unsupported mask flags 0x%04lx\n", pInfo->dwMask & ~supported);
 
     hr = find_prop(This, pszName, &header);
     if(hr == S_OK)
@@ -1090,7 +1080,7 @@ static HRESULT WINAPI MimeBody_GetProp(
     header_t *header;
     HRESULT hr;
 
-    TRACE("(%p)->(%s, 0x%x, %p)\n", This, debugstr_a(pszName), dwFlags, pValue);
+    TRACE("(%p)->(%s, 0x%lx, %p)\n", This, debugstr_a(pszName), dwFlags, pValue);
 
     if(!pszName || !pValue)
         return E_INVALIDARG;
@@ -1099,7 +1089,8 @@ static HRESULT WINAPI MimeBody_GetProp(
     {
         PropVariantClear(pValue);
         pValue->vt = VT_LPSTR;
-        pValue->pszVal = strdupA(This->content_pri_type);
+        pValue->pszVal = CoTaskMemAlloc(strlen(This->content_pri_type) + 1);
+        strcpy(pValue->pszVal, This->content_pri_type);
         return S_OK;
     }
 
@@ -1126,7 +1117,7 @@ static HRESULT WINAPI MimeBody_SetProp(
     header_t *header;
     HRESULT hr;
 
-    TRACE("(%p)->(%s, 0x%x, %p)\n", This, debugstr_a(pszName), dwFlags, pValue);
+    TRACE("(%p)->(%s, 0x%lx, %p)\n", This, debugstr_a(pszName), dwFlags, pValue);
 
     if(!pszName || !pValue)
         return E_INVALIDARG;
@@ -1143,49 +1134,49 @@ static HRESULT WINAPI MimeBody_SetProp(
             {
                 if(STRTOPID(pszName) == prop_entry->prop.id)
                 {
-                    TRACE("Found match with already added new property id %d\n", prop_entry->prop.id);
+                    TRACE("Found match with already added new property id %ld\n", prop_entry->prop.id);
                     prop = &prop_entry->prop;
                     break;
                 }
             }
             else if(!lstrcmpiA(pszName, prop_entry->prop.name))
             {
-                TRACE("Found match with already added new property id %d\n", prop_entry->prop.id);
+                TRACE("Found match with already added new property id %ld\n", prop_entry->prop.id);
                 prop = &prop_entry->prop;
                 break;
             }
         }
 
-        header = HeapAlloc(GetProcessHeap(), 0, sizeof(*header));
+        header = malloc(sizeof(*header));
         if(!header)
             return E_OUTOFMEMORY;
 
         if(!prop)
         {
             const property_t *prop_def = NULL;
-            prop_entry = HeapAlloc(GetProcessHeap(), 0, sizeof(*prop_entry));
+            prop_entry = malloc(sizeof(*prop_entry));
             if(!prop_entry)
             {
-                HeapFree(GetProcessHeap(), 0, header);
+                free(header);
                 return E_OUTOFMEMORY;
             }
 
             prop_def = find_default_prop(pszName);
             if(prop_def)
             {
-                prop_entry->prop.name = strdupA(prop_def->name);
+                prop_entry->prop.name = strdup(prop_def->name);
                 prop_entry->prop.id =  prop_def->id;
             }
             else
             {
                 if(ISPIDSTR(pszName))
                 {
-                    HeapFree(GetProcessHeap(), 0, prop_entry);
-                    HeapFree(GetProcessHeap(), 0, header);
+                    free(prop_entry);
+                    free(header);
                     return MIME_E_NOT_FOUND;
                 }
 
-                prop_entry->prop.name = strdupA(pszName);
+                prop_entry->prop.name = strdup(pszName);
                 prop_entry->prop.id = This->next_prop_id++;
             }
 
@@ -1193,7 +1184,7 @@ static HRESULT WINAPI MimeBody_SetProp(
             prop_entry->prop.default_vt = pValue->vt;
             list_add_tail(&This->new_props, &prop_entry->entry);
             prop = &prop_entry->prop;
-            TRACE("Allocating new prop id %d\n", prop_entry->prop.id);
+            TRACE("Allocating new prop id %ld\n", prop_entry->prop.id);
         }
 
         header->prop = prop;
@@ -1214,7 +1205,7 @@ static HRESULT WINAPI MimeBody_AppendProp(
                                  LPPROPVARIANT pValue)
 {
     MimeBody *This = impl_from_IMimeBody(iface);
-    FIXME("(%p)->(%s, 0x%x, %p) stub\n", This, debugstr_a(pszName), dwFlags, pValue);
+    FIXME("(%p)->(%s, 0x%lx, %p) stub\n", This, debugstr_a(pszName), dwFlags, pValue);
     return E_NOTIMPL;
 }
 
@@ -1252,7 +1243,7 @@ static HRESULT WINAPI MimeBody_CopyProps(
                                 IMimePropertySet* pPropertySet)
 {
     MimeBody *This = impl_from_IMimeBody(iface);
-    FIXME("(%p)->(%d, %p, %p) stub\n", This, cNames, prgszName, pPropertySet);
+    FIXME("(%p)->(%ld, %p, %p) stub\n", This, cNames, prgszName, pPropertySet);
     return E_NOTIMPL;
 }
 
@@ -1263,7 +1254,7 @@ static HRESULT WINAPI MimeBody_MoveProps(
                                 IMimePropertySet* pPropertySet)
 {
     MimeBody *This = impl_from_IMimeBody(iface);
-    FIXME("(%p)->(%d, %p, %p) stub\n", This, cNames, prgszName, pPropertySet);
+    FIXME("(%p)->(%ld, %p, %p) stub\n", This, cNames, prgszName, pPropertySet);
     return E_NOTIMPL;
 }
 
@@ -1273,7 +1264,7 @@ static HRESULT WINAPI MimeBody_DeleteExcept(
                                    LPCSTR* prgszName)
 {
     MimeBody *This = impl_from_IMimeBody(iface);
-    FIXME("(%p)->(%d, %p) stub\n", This, cNames, prgszName);
+    FIXME("(%p)->(%ld, %p) stub\n", This, cNames, prgszName);
     return E_NOTIMPL;
 }
 
@@ -1405,26 +1396,26 @@ static HRESULT WINAPI MimeBody_SetOption(
 {
     MimeBody *This = impl_from_IMimeBody(iface);
     HRESULT hr = E_NOTIMPL;
-    TRACE("(%p)->(%08x, %p)\n", This, oid, pValue);
+    TRACE("(%p)->(%08lx, %p)\n", This, oid, pValue);
 
     if(pValue->vt != TYPEDID_TYPE(oid))
     {
-        WARN("Called with vartype %04x and oid %08x\n", pValue->vt, oid);
+        WARN("Called with vartype %04x and oid %08lx\n", pValue->vt, oid);
         return E_INVALIDARG;
     }
 
     switch(oid)
     {
     case OID_SECURITY_HWND_OWNER:
-        FIXME("OID_SECURITY_HWND_OWNER (value %08x): ignoring\n", pValue->ulVal);
+        FIXME("OID_SECURITY_HWND_OWNER (value %08lx): ignoring\n", pValue->ulVal);
         hr = S_OK;
         break;
     case OID_TRANSMIT_BODY_ENCODING:
-        FIXME("OID_TRANSMIT_BODY_ENCODING (value %08x): ignoring\n", pValue->ulVal);
+        FIXME("OID_TRANSMIT_BODY_ENCODING (value %08lx): ignoring\n", pValue->ulVal);
         hr = S_OK;
         break;
     default:
-        FIXME("Unhandled oid %08x\n", oid);
+        FIXME("Unhandled oid %08lx\n", oid);
     }
 
     return hr;
@@ -1436,7 +1427,7 @@ static HRESULT WINAPI MimeBody_GetOption(
                                 LPPROPVARIANT pValue)
 {
     MimeBody *This = impl_from_IMimeBody(iface);
-    FIXME("(%p)->(%08x, %p): stub\n", This, oid, pValue);
+    FIXME("(%p)->(%08lx, %p): stub\n", This, oid, pValue);
     return E_NOTIMPL;
 }
 
@@ -1446,7 +1437,7 @@ static HRESULT WINAPI MimeBody_EnumProps(
                                 IMimeEnumProperties** ppEnum)
 {
     MimeBody *This = impl_from_IMimeBody(iface);
-    FIXME("(%p)->(0x%x, %p) stub\n", This, dwFlags, ppEnum);
+    FIXME("(%p)->(0x%lx, %p) stub\n", This, dwFlags, ppEnum);
     return E_NOTIMPL;
 }
 
@@ -1877,7 +1868,7 @@ static IMimeBodyVtbl body_vtbl =
 
 static HRESULT MimeBody_set_offsets(MimeBody *body, const BODYOFFSETS *offsets)
 {
-    TRACE("setting offsets to %d, %d, %d, %d\n", offsets->cbBoundaryStart,
+    TRACE("setting offsets to %ld, %ld, %ld, %ld\n", offsets->cbBoundaryStart,
           offsets->cbHeaderStart, offsets->cbBodyStart, offsets->cbBodyEnd);
 
     body->body_offsets = *offsets;
@@ -1891,7 +1882,7 @@ static MimeBody *mimebody_create(void)
     MimeBody *This;
     BODYOFFSETS body_offsets;
 
-    This = HeapAlloc(GetProcessHeap(), 0, sizeof(*This));
+    This = malloc(sizeof(*This));
     if (!This)
         return NULL;
 
@@ -1983,7 +1974,7 @@ static ULONG WINAPI MimeMessage_AddRef(IMimeMessage *iface)
     MimeMessage *This = impl_from_IMimeMessage(iface);
     ULONG ref = InterlockedIncrement(&This->ref);
 
-    TRACE("(%p) ref=%d\n", This, ref);
+    TRACE("(%p) ref=%ld\n", This, ref);
 
     return ref;
 }
@@ -1996,7 +1987,7 @@ static void empty_body_list(struct list *list)
         empty_body_list(&body->children);
         list_remove(&body->entry);
         IMimeBody_Release(&body->mime_body->IMimeBody_iface);
-        HeapFree(GetProcessHeap(), 0, body);
+        free(body);
     }
 }
 
@@ -2005,14 +1996,14 @@ static ULONG WINAPI MimeMessage_Release(IMimeMessage *iface)
     MimeMessage *This = impl_from_IMimeMessage(iface);
     ULONG ref = InterlockedDecrement(&This->ref);
 
-    TRACE("(%p) ref=%d\n", This, ref);
+    TRACE("(%p) ref=%ld\n", This, ref);
 
     if (!ref)
     {
         empty_body_list(&This->body_tree);
 
         if(This->stream) IStream_Release(This->stream);
-        HeapFree(GetProcessHeap(), 0, This);
+        free(This);
     }
 
     return ref;
@@ -2037,7 +2028,7 @@ static HRESULT WINAPI MimeMessage_IsDirty(
 
 static body_t *new_body_entry(MimeBody *mime_body, DWORD index, body_t *parent)
 {
-    body_t *body = HeapAlloc(GetProcessHeap(), 0, sizeof(*body));
+    body_t *body = malloc(sizeof(*body));
     if(body)
     {
         body->mime_body = mime_body;
@@ -2072,7 +2063,7 @@ static HRESULT create_body_offset_list(IStream *stm, const char *boundary, struc
 
     overlap_no = boundary_len + 5;
 
-    overlap = buf = HeapAlloc(GetProcessHeap(), 0, overlap_no + PARSER_BUF_SIZE + 1);
+    overlap = buf = malloc(overlap_no + PARSER_BUF_SIZE + 1);
 
     zero.QuadPart = 0;
     hr = IStream_Seek(stm, zero, STREAM_SEEK_CUR, &cur);
@@ -2108,7 +2099,7 @@ static HRESULT create_body_offset_list(IStream *stm, const char *boundary, struc
                         cur_body->offsets.cbBodyEnd = boundary_start - 2;
                         list_add_tail(body_offsets, &cur_body->entry);
                     }
-                    cur_body = HeapAlloc(GetProcessHeap(), 0, sizeof(*cur_body));
+                    cur_body = malloc(sizeof(*cur_body));
                     cur_body->offsets.cbBoundaryStart = boundary_start;
                     cur_body->offsets.cbHeaderStart = start + ptr - buf;
                 }
@@ -2138,7 +2129,7 @@ static HRESULT create_body_offset_list(IStream *stm, const char *boundary, struc
     } while(1);
 
 end:
-    HeapFree(GetProcessHeap(), 0, buf);
+    free(buf);
     return hr;
 }
 
@@ -2193,7 +2184,7 @@ static body_t *create_sub_body(MimeMessage *msg, IStream *pStm, BODYOFFSETS *off
                     sub_body = create_sub_body(msg, pStm, &cur->offsets, body);
                     list_add_tail(&body->children, &sub_body->entry);
                     list_remove(&cur->entry);
-                    HeapFree(GetProcessHeap(), 0, cur);
+                    free(cur);
                 }
                 break;
             }
@@ -2266,7 +2257,7 @@ static HRESULT WINAPI MimeMessage_GetMessageSource(IMimeMessage *iface, IStream 
 {
     MimeMessage *This = impl_from_IMimeMessage(iface);
 
-    FIXME("(%p)->(%p, 0x%x)\n", iface, ppStream, dwFlags);
+    FIXME("(%p)->(%p, 0x%lx)\n", iface, ppStream, dwFlags);
 
     IStream_AddRef(This->stream);
     *ppStream = This->stream;
@@ -2278,7 +2269,7 @@ static HRESULT WINAPI MimeMessage_GetMessageSize(
     ULONG *pcbSize,
     DWORD dwFlags)
 {
-    FIXME("(%p)->(%p, 0x%x)\n", iface, pcbSize, dwFlags);
+    FIXME("(%p)->(%p, 0x%lx)\n", iface, pcbSize, dwFlags);
     return E_NOTIMPL;
 }
 
@@ -2295,7 +2286,7 @@ static HRESULT WINAPI MimeMessage_SaveOffsetTable(
     IStream *pStream,
     DWORD dwFlags)
 {
-    FIXME("(%p)->(%p, 0x%x)\n", iface, pStream, dwFlags);
+    FIXME("(%p)->(%p, 0x%lx)\n", iface, pStream, dwFlags);
     return E_NOTIMPL;
 }
 
@@ -2312,7 +2303,7 @@ static HRESULT WINAPI MimeMessage_Commit(
     IMimeMessage *iface,
     DWORD dwFlags)
 {
-    FIXME("(%p)->(0x%x)\n", iface, dwFlags);
+    FIXME("(%p)->(0x%lx)\n", iface, dwFlags);
     return S_OK;
 }
 
@@ -2377,7 +2368,7 @@ static HRESULT WINAPI MimeMessage_SaveBody(
     DWORD dwFlags,
     IStream *pStream)
 {
-    FIXME("(%p)->(%p, 0x%x, %p)\n", iface, hBody, dwFlags, pStream);
+    FIXME("(%p)->(%p, 0x%lx, %p)\n", iface, hBody, dwFlags, pStream);
     return E_NOTIMPL;
 }
 
@@ -2485,7 +2476,7 @@ static HRESULT WINAPI MimeMessage_DeleteBody(
     HBODY hBody,
     DWORD dwFlags)
 {
-    FIXME("(%p)->(%p, %08x)\n", iface, hBody, dwFlags);
+    FIXME("(%p)->(%p, %08lx)\n", iface, hBody, dwFlags);
     return E_NOTIMPL;
 }
 
@@ -2589,7 +2580,7 @@ static HRESULT WINAPI MimeMessage_ResolveURL(
     DWORD dwFlags,
     LPHBODY phBody)
 {
-    FIXME("(%p)->(%p, %s, %s, 0x%x, %p)\n", iface, hRelated, pszBase, pszURL, dwFlags, phBody);
+    FIXME("(%p)->(%p, %s, %s, 0x%lx, %p)\n", iface, hRelated, pszBase, pszURL, dwFlags, phBody);
     return E_NOTIMPL;
 }
 
@@ -2688,7 +2679,7 @@ static HRESULT WINAPI MimeMessage_GetBodyProp(
     HRESULT hr;
     IMimeBody *mime_body;
 
-    TRACE("(%p)->(%p, %s, 0x%x, %p)\n", iface, hBody, pszName, dwFlags, pValue);
+    TRACE("(%p)->(%p, %s, 0x%lx, %p)\n", iface, hBody, pszName, dwFlags, pValue);
 
     hr = IMimeMessage_BindToObject(iface, hBody, &IID_IMimeBody, (void**)&mime_body);
     if(hr != S_OK) return hr;
@@ -2706,7 +2697,7 @@ static HRESULT WINAPI MimeMessage_SetBodyProp(
     DWORD dwFlags,
     LPCPROPVARIANT pValue)
 {
-    FIXME("(%p)->(%p, %s, 0x%x, %p)\n", iface, hBody, pszName, dwFlags, pValue);
+    FIXME("(%p)->(%p, %s, 0x%lx, %p)\n", iface, hBody, pszName, dwFlags, pValue);
     return E_NOTIMPL;
 }
 
@@ -2725,20 +2716,20 @@ static HRESULT WINAPI MimeMessage_SetOption(
     LPCPROPVARIANT pValue)
 {
     HRESULT hr = S_OK;
-    TRACE("(%p)->(%08x, %p)\n", iface, oid, pValue);
+    TRACE("(%p)->(%08lx, %p)\n", iface, oid, pValue);
 
     /* Message ID is checked before type.
      *  OID 0x4D -> 0x56 and 0x58 aren't defined but will filtered out later.
      */
     if(TYPEDID_ID(oid) < TYPEDID_ID(OID_ALLOW_8BIT_HEADER) || TYPEDID_ID(oid) > TYPEDID_ID(OID_SECURITY_2KEY_CERT_BAG_64))
     {
-        WARN("oid (%08x) out of range\n", oid);
+        WARN("oid (%08lx) out of range\n", oid);
         return MIME_E_INVALID_OPTION_ID;
     }
 
     if(pValue->vt != TYPEDID_TYPE(oid))
     {
-        WARN("Called with vartype %04x and oid %08x\n", pValue->vt, oid);
+        WARN("Called with vartype %04x and oid %08lx\n", pValue->vt, oid);
         return S_OK;
     }
 
@@ -2757,7 +2748,7 @@ static HRESULT WINAPI MimeMessage_SetOption(
         FIXME("OID_CLEANUP_TREE_ON_SAVE (value %d): ignoring\n", pValue->boolVal);
         break;
     default:
-        FIXME("Unhandled oid %08x\n", oid);
+        FIXME("Unhandled oid %08lx\n", oid);
         hr = MIME_E_INVALID_OPTION_ID;
     }
 
@@ -2769,7 +2760,7 @@ static HRESULT WINAPI MimeMessage_GetOption(
     const TYPEDID oid,
     LPPROPVARIANT pValue)
 {
-    FIXME("(%p)->(%08x, %p)\n", iface, oid, pValue);
+    FIXME("(%p)->(%08lx, %p)\n", iface, oid, pValue);
     return E_NOTIMPL;
 }
 
@@ -2792,7 +2783,7 @@ static HRESULT WINAPI MimeMessage_GetProp(
     DWORD dwFlags,
     LPPROPVARIANT pValue)
 {
-    FIXME("(%p)->(%s, 0x%x, %p)\n", iface, pszName, dwFlags, pValue);
+    FIXME("(%p)->(%s, 0x%lx, %p)\n", iface, pszName, dwFlags, pValue);
     return E_NOTIMPL;
 }
 
@@ -2802,7 +2793,7 @@ static HRESULT WINAPI MimeMessage_SetProp(
     DWORD dwFlags,
     LPCPROPVARIANT pValue)
 {
-    FIXME("(%p)->(%s, 0x%x, %p)\n", iface, pszName, dwFlags, pValue);
+    FIXME("(%p)->(%s, 0x%lx, %p)\n", iface, pszName, dwFlags, pValue);
     return E_NOTIMPL;
 }
 
@@ -2840,7 +2831,7 @@ static HRESULT WINAPI MimeMessage_GetTextBody(
     static char plain[] = "plain";
     static char html[] = "html";
 
-    TRACE("(%p)->(%d, %d, %p, %p)\n", iface, dwTxtType, ietEncoding, pStream, phBody);
+    TRACE("(%p)->(%ld, %d, %p, %p)\n", iface, dwTxtType, ietEncoding, pStream, phBody);
 
     find_struct.pszPriType = text;
 
@@ -2859,7 +2850,7 @@ static HRESULT WINAPI MimeMessage_GetTextBody(
     hr = IMimeMessage_FindFirst(iface, &find_struct, &hbody);
     if(hr != S_OK)
     {
-        TRACE("not found hr %08x\n", hr);
+        TRACE("not found hr %08lx\n", hr);
         *phBody = NULL;
         return hr;
     }
@@ -2880,7 +2871,7 @@ static HRESULT WINAPI MimeMessage_SetTextBody(
     IStream *pStream,
     LPHBODY phBody)
 {
-    FIXME("(%p)->(%d, %d, %p, %p, %p)\n", iface, dwTxtType, ietEncoding, hAlternative, pStream, phBody);
+    FIXME("(%p)->(%ld, %d, %p, %p, %p)\n", iface, dwTxtType, ietEncoding, hAlternative, pStream, phBody);
     return E_NOTIMPL;
 }
 
@@ -2913,7 +2904,7 @@ static HRESULT WINAPI MimeMessage_AttachURL(
     LPSTR *ppszCIDURL,
     LPHBODY phBody)
 {
-    FIXME("(%p)->(%s, %s, 0x%x, %p, %p, %p)\n", iface, pszBase, pszURL, dwFlags, pstmURL, ppszCIDURL, phBody);
+    FIXME("(%p)->(%s, %s, 0x%lx, %p, %p, %p)\n", iface, pszBase, pszURL, dwFlags, pstmURL, ppszCIDURL, phBody);
     return E_NOTIMPL;
 }
 
@@ -2938,7 +2929,7 @@ static HRESULT WINAPI MimeMessage_GetAttachments(
     while(hr == S_OK)
     {
         hr = IMimeMessage_IsContentType(iface, hbody, "multipart", NULL);
-        TRACE("IsCT rets %08x %d\n", hr, *pcAttach);
+        TRACE("IsCT rets %08lx %ld\n", hr, *pcAttach);
         if(hr != S_OK)
         {
             if(*pcAttach + 1 > size)
@@ -2978,7 +2969,7 @@ static HRESULT WINAPI MimeMessage_GetAddressTypes(
     DWORD dwProps,
     LPADDRESSLIST pList)
 {
-    FIXME("(%p)->(%d, %d, %p)\n", iface, dwAdrTypes, dwProps, pList);
+    FIXME("(%p)->(%ld, %ld, %p)\n", iface, dwAdrTypes, dwProps, pList);
     return E_NOTIMPL;
 }
 
@@ -2988,7 +2979,7 @@ static HRESULT WINAPI MimeMessage_GetAddressFormat(
     ADDRESSFORMAT format,
     LPSTR *ppszFormat)
 {
-    FIXME("(%p)->(%d, %d, %p)\n", iface, dwAdrTypes, format, ppszFormat);
+    FIXME("(%p)->(%ld, %d, %p)\n", iface, dwAdrTypes, format, ppszFormat);
     return E_NOTIMPL;
 }
 
@@ -2998,7 +2989,7 @@ static HRESULT WINAPI MimeMessage_EnumAddressTypes(
     DWORD dwProps,
     IMimeEnumAddressTypes **ppEnum)
 {
-    FIXME("(%p)->(%d, %d, %p)\n", iface, dwAdrTypes, dwProps, ppEnum);
+    FIXME("(%p)->(%ld, %ld, %p)\n", iface, dwAdrTypes, dwProps, ppEnum);
     return E_NOTIMPL;
 }
 
@@ -3007,7 +2998,7 @@ static HRESULT WINAPI MimeMessage_SplitMessage(
     ULONG cbMaxPart,
     IMimeMessageParts **ppParts)
 {
-    FIXME("(%p)->(%d, %p)\n", iface, cbMaxPart, ppParts);
+    FIXME("(%p)->(%ld, %p)\n", iface, cbMaxPart, ppParts);
     return E_NOTIMPL;
 }
 
@@ -3095,7 +3086,7 @@ HRESULT MimeMessage_create(IUnknown *outer, void **obj)
 
     *obj = NULL;
 
-    This = HeapAlloc(GetProcessHeap(), 0, sizeof(*This));
+    This = malloc(sizeof(*This));
     if (!This) return E_OUTOFMEMORY;
 
     This->IMimeMessage_iface.lpVtbl = &MimeMessageVtbl;
@@ -3126,7 +3117,7 @@ HRESULT WINAPI MimeOleCreateMessage(IUnknown *pUnkOuter, IMimeMessage **ppMessag
  */
 HRESULT WINAPI MimeOleSetCompatMode(DWORD dwMode)
 {
-    FIXME("(0x%x)\n", dwMode);
+    FIXME("(0x%lx)\n", dwMode);
     return S_OK;
 }
 
@@ -3175,7 +3166,7 @@ static ULONG WINAPI MimeSecurity_AddRef(IMimeSecurity *iface)
     MimeSecurity *This = impl_from_IMimeSecurity(iface);
     LONG ref = InterlockedIncrement(&This->ref);
 
-    TRACE("(%p) ref=%d\n", This, ref);
+    TRACE("(%p) ref=%ld\n", This, ref);
 
     return ref;
 }
@@ -3185,10 +3176,10 @@ static ULONG WINAPI MimeSecurity_Release(IMimeSecurity *iface)
     MimeSecurity *This = impl_from_IMimeSecurity(iface);
     LONG ref = InterlockedDecrement(&This->ref);
 
-    TRACE("(%p) ref=%d\n", This, ref);
+    TRACE("(%p) ref=%ld\n", This, ref);
 
     if (!ref)
-        HeapFree(GetProcessHeap(), 0, This);
+        free(This);
 
     return ref;
 }
@@ -3212,7 +3203,7 @@ static HRESULT WINAPI MimeSecurity_EncodeMessage(
         IMimeMessageTree* pTree,
         DWORD dwFlags)
 {
-    FIXME("(%p)->(%p, %08x): stub\n", iface, pTree, dwFlags);
+    FIXME("(%p)->(%p, %08lx): stub\n", iface, pTree, dwFlags);
     return E_NOTIMPL;
 }
 
@@ -3222,7 +3213,7 @@ static HRESULT WINAPI MimeSecurity_EncodeBody(
         HBODY hEncodeRoot,
         DWORD dwFlags)
 {
-    FIXME("(%p)->(%p, %p, %08x): stub\n", iface, pTree, hEncodeRoot, dwFlags);
+    FIXME("(%p)->(%p, %p, %08lx): stub\n", iface, pTree, hEncodeRoot, dwFlags);
     return E_NOTIMPL;
 }
 
@@ -3231,7 +3222,7 @@ static HRESULT WINAPI MimeSecurity_DecodeMessage(
         IMimeMessageTree* pTree,
         DWORD dwFlags)
 {
-    FIXME("(%p)->(%p, %08x): stub\n", iface, pTree, dwFlags);
+    FIXME("(%p)->(%p, %08lx): stub\n", iface, pTree, dwFlags);
     return E_NOTIMPL;
 }
 
@@ -3241,7 +3232,7 @@ static HRESULT WINAPI MimeSecurity_DecodeBody(
         HBODY hDecodeRoot,
         DWORD dwFlags)
 {
-    FIXME("(%p)->(%p, %p, %08x): stub\n", iface, pTree, hDecodeRoot, dwFlags);
+    FIXME("(%p)->(%p, %p, %08lx): stub\n", iface, pTree, hDecodeRoot, dwFlags);
     return E_NOTIMPL;
 }
 
@@ -3252,7 +3243,7 @@ static HRESULT WINAPI MimeSecurity_EnumCertificates(
         PCX509CERT pPrev,
         PCX509CERT* ppCert)
 {
-    FIXME("(%p)->(%p, %08x, %p, %p): stub\n", iface, hc, dwUsage, pPrev, ppCert);
+    FIXME("(%p)->(%p, %08lx, %p, %p): stub\n", iface, hc, dwUsage, pPrev, ppCert);
     return E_NOTIMPL;
 }
 
@@ -3312,7 +3303,7 @@ HRESULT MimeSecurity_create(IUnknown *outer, void **obj)
 
     if (outer) return CLASS_E_NOAGGREGATION;
 
-    This = HeapAlloc(GetProcessHeap(), 0, sizeof(*This));
+    This = malloc(sizeof(*This));
     if (!This) return E_OUTOFMEMORY;
 
     This->IMimeSecurity_iface.lpVtbl = &MimeSecurityVtbl;
@@ -3415,7 +3406,7 @@ static HRESULT WINAPI MimeAlloc_FreeParamInfoArray(
         boolean fFreeArray)
 {
     ULONG i;
-    TRACE("(%p)->(%d, %p, %d)\n", iface, cParams, prgParam, fFreeArray);
+    TRACE("(%p)->(%ld, %p, %d)\n", iface, cParams, prgParam, fFreeArray);
 
     for(i = 0; i < cParams; i++)
     {
@@ -3567,7 +3558,7 @@ static ULONG WINAPI propschema_AddRef(IMimePropertySchema *iface)
     propschema *This = impl_from_IMimePropertySchema(iface);
     LONG ref = InterlockedIncrement(&This->ref);
 
-    TRACE("(%p) ref=%d\n", This, ref);
+    TRACE("(%p) ref=%ld\n", This, ref);
 
     return ref;
 }
@@ -3577,11 +3568,11 @@ static ULONG WINAPI propschema_Release(IMimePropertySchema *iface)
     propschema *This = impl_from_IMimePropertySchema(iface);
     LONG ref = InterlockedDecrement(&This->ref);
 
-    TRACE("(%p) ref=%d\n", This, ref);
+    TRACE("(%p) ref=%ld\n", This, ref);
 
     if (!ref)
     {
-        HeapFree(GetProcessHeap(), 0, This);
+        free(This);
     }
 
     return ref;
@@ -3591,7 +3582,7 @@ static HRESULT WINAPI propschema_RegisterProperty(IMimePropertySchema *iface, co
         DWORD rownumber, VARTYPE vtdefault, DWORD *propid)
 {
     propschema *This = impl_from_IMimePropertySchema(iface);
-    FIXME("(%p)->(%s, %x, %d, %d, %p) stub\n", This, debugstr_a(name), flags, rownumber, vtdefault, propid);
+    FIXME("(%p)->(%s, %lx, %ld, %d, %p) stub\n", This, debugstr_a(name), flags, rownumber, vtdefault, propid);
     return E_NOTIMPL;
 }
 
@@ -3599,7 +3590,7 @@ static HRESULT WINAPI propschema_ModifyProperty(IMimePropertySchema *iface, cons
         DWORD rownumber, VARTYPE vtdefault)
 {
     propschema *This = impl_from_IMimePropertySchema(iface);
-    FIXME("(%p)->(%s, %x, %d, %d) stub\n", This, debugstr_a(name), flags, rownumber, vtdefault);
+    FIXME("(%p)->(%s, %lx, %ld, %d) stub\n", This, debugstr_a(name), flags, rownumber, vtdefault);
     return S_OK;
 }
 
@@ -3613,7 +3604,7 @@ static HRESULT WINAPI propschema_GetPropertyId(IMimePropertySchema *iface, const
 static HRESULT WINAPI propschema_GetPropertyName(IMimePropertySchema *iface, DWORD propid, char **name)
 {
     propschema *This = impl_from_IMimePropertySchema(iface);
-    FIXME("(%p)->(%d, %p) stub\n", This, propid, name);
+    FIXME("(%p)->(%ld, %p) stub\n", This, propid, name);
     return E_NOTIMPL;
 }
 
@@ -3643,7 +3634,7 @@ HRESULT WINAPI MimeOleGetPropertySchema(IMimePropertySchema **schema)
 
     TRACE("(%p) stub\n", schema);
 
-    This = HeapAlloc(GetProcessHeap(), 0, sizeof(*This));
+    This = malloc(sizeof(*This));
     if (!This)
         return E_OUTOFMEMORY;
 
@@ -3658,7 +3649,7 @@ HRESULT WINAPI MimeOleGetPropertySchema(IMimePropertySchema **schema)
 HRESULT WINAPI MimeGetAddressFormatW(REFIID riid, void *object, DWORD addr_type,
        ADDRESSFORMAT addr_format, WCHAR **address)
 {
-    FIXME("(%s, %p, %d, %d, %p) stub\n", debugstr_guid(riid), object, addr_type, addr_format, address);
+    FIXME("(%s, %p, %ld, %d, %p) stub\n", debugstr_guid(riid), object, addr_type, addr_format, address);
 
     return E_NOTIMPL;
 }
@@ -3711,16 +3702,16 @@ HRESULT WINAPI MimeOleObjectFromMoniker(BINDF bindf, IMoniker *moniker, IBindCtx
     TRACE("display name %s\n", debugstr_w(display_name));
 
     len = lstrlenW(display_name);
-    mhtml_url = heap_alloc(len*sizeof(WCHAR) + sizeof(L"mhtml:"));
+    mhtml_url = malloc(len * sizeof(WCHAR) + sizeof(L"mhtml:"));
     if(!mhtml_url)
         return E_OUTOFMEMORY;
 
     lstrcpyW(mhtml_url, L"mhtml:");
     lstrcatW(mhtml_url, display_name);
-    HeapFree(GetProcessHeap(), 0, display_name);
+    CoTaskMemFree(display_name);
 
     hres = CreateURLMoniker(NULL, mhtml_url, moniker_new);
-    heap_free(mhtml_url);
+    free(mhtml_url);
     if(FAILED(hres))
         return hres;
 

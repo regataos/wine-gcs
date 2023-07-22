@@ -23,7 +23,7 @@
 #include "windef.h"
 #include "winbase.h"
 
-#include "wmvcore.h"
+#include "wmvcore_private.h"
 #include "wmsdk.h"
 
 #include "wine/debug.h"

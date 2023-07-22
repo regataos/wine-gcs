@@ -293,7 +293,7 @@ void wg_sample_queue_destroy(struct wg_sample_queue *queue)
     wg_sample_queue_flush(queue, true);
 
     queue->cs.DebugInfo->Spare[0] = 0;
-    InitializeCriticalSection(&queue->cs);
+    DeleteCriticalSection(&queue->cs);
 
     free(queue);
 }
@@ -330,6 +330,8 @@ HRESULT wg_transform_push_mf(struct wg_transform *transform, IMFSample *sample,
     }
     if (SUCCEEDED(IMFSample_GetUINT32(sample, &MFSampleExtension_CleanPoint, &value)) && value)
         wg_sample->flags |= WG_SAMPLE_FLAG_SYNC_POINT;
+    if (SUCCEEDED(IMFSample_GetUINT32(sample, &MFSampleExtension_Discontinuity, &value)) && value)
+        wg_sample->flags |= WG_SAMPLE_FLAG_DISCONTINUITY;
 
     wg_sample_queue_begin_append(queue, wg_sample);
     hr = wg_transform_push_data(transform, wg_sample);
@@ -338,34 +340,47 @@ HRESULT wg_transform_push_mf(struct wg_transform *transform, IMFSample *sample,
     return hr;
 }
 
-HRESULT wg_transform_read_mf(struct wg_transform *transform, struct wg_sample *wg_sample,
-        struct wg_format *format, DWORD *flags)
+HRESULT wg_transform_read_mf(struct wg_transform *transform, IMFSample *sample,
+        DWORD sample_size, struct wg_format *format, DWORD *flags)
 {
-    struct sample *sample = unsafe_mf_from_wg_sample(wg_sample);
+    struct wg_sample *wg_sample;
+    IMFMediaBuffer *buffer;
     HRESULT hr;
 
-    TRACE_(mfplat)("transform %p, wg_sample %p, format %p, flags %p.\n", transform, wg_sample, format, flags);
+    TRACE_(mfplat)("transform %p, sample %p, format %p, flags %p.\n", transform, sample, format, flags);
+
+    if (FAILED(hr = wg_sample_create_mf(sample, &wg_sample)))
+        return hr;
+
+    wg_sample->size = 0;
 
     if (FAILED(hr = wg_transform_read_data(transform, wg_sample, format)))
     {
         if (hr == MF_E_TRANSFORM_STREAM_CHANGE && !format)
             FIXME("Unexpected stream format change!\n");
+        wg_sample_release(wg_sample);
         return hr;
     }
-
-    if (FAILED(hr = IMFMediaBuffer_SetCurrentLength(sample->u.mf.buffer, wg_sample->size)))
-        return hr;
 
     if (wg_sample->flags & WG_SAMPLE_FLAG_INCOMPLETE)
         *flags |= MFT_OUTPUT_DATA_BUFFER_INCOMPLETE;
     if (wg_sample->flags & WG_SAMPLE_FLAG_HAS_PTS)
-        IMFSample_SetSampleTime(sample->u.mf.sample, wg_sample->pts);
+        IMFSample_SetSampleTime(sample, wg_sample->pts);
     if (wg_sample->flags & WG_SAMPLE_FLAG_HAS_DURATION)
-        IMFSample_SetSampleDuration(sample->u.mf.sample, wg_sample->duration);
+        IMFSample_SetSampleDuration(sample, wg_sample->duration);
     if (wg_sample->flags & WG_SAMPLE_FLAG_SYNC_POINT)
-        IMFSample_SetUINT32(sample->u.mf.sample, &MFSampleExtension_CleanPoint, 1);
+        IMFSample_SetUINT32(sample, &MFSampleExtension_CleanPoint, 1);
+    if (wg_sample->flags & WG_SAMPLE_FLAG_DISCONTINUITY)
+        IMFSample_SetUINT32(sample, &MFSampleExtension_Discontinuity, 1);
 
-    return S_OK;
+    if (SUCCEEDED(hr = IMFSample_ConvertToContiguousBuffer(sample, &buffer)))
+    {
+        hr = IMFMediaBuffer_SetCurrentLength(buffer, wg_sample->size);
+        IMFMediaBuffer_Release(buffer);
+    }
+
+    wg_sample_release(wg_sample);
+    return hr;
 }
 
 HRESULT wg_transform_push_quartz(struct wg_transform *transform, struct wg_sample *wg_sample,
@@ -391,6 +406,8 @@ HRESULT wg_transform_push_quartz(struct wg_transform *transform, struct wg_sampl
 
     if (IMediaSample_IsSyncPoint(sample->u.quartz.sample) == S_OK)
         wg_sample->flags |= WG_SAMPLE_FLAG_SYNC_POINT;
+    if (IMediaSample_IsDiscontinuity(sample->u.quartz.sample) == S_OK)
+        wg_sample->flags |= WG_SAMPLE_FLAG_DISCONTINUITY;
 
     wg_sample_queue_begin_append(queue, wg_sample);
     hr = wg_transform_push_data(transform, wg_sample);
@@ -434,6 +451,8 @@ HRESULT wg_transform_read_quartz(struct wg_transform *transform, struct wg_sampl
 
     value = !!(wg_sample->flags & WG_SAMPLE_FLAG_SYNC_POINT);
     IMediaSample_SetSyncPoint(sample->u.quartz.sample, value);
+    value = !!(wg_sample->flags & WG_SAMPLE_FLAG_DISCONTINUITY);
+    IMediaSample_SetDiscontinuity(sample->u.quartz.sample, value);
 
     return S_OK;
 }

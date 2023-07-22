@@ -240,7 +240,7 @@ typedef struct macexpstackentry {
  * Prototypes
  */
 static void newline(int);
-static int make_number(int radix, YYSTYPE *val, const char *str, int len);
+static int make_number(int radix, PPY_STYPE *val, const char *str, int len);
 static void put_buffer(const char *s, int len);
 /* Buffer management */
 static void push_buffer(pp_entry_t *ppp, char *filename, char *incname, int pop);
@@ -796,7 +796,7 @@ static void newline(int dowrite)
  *
  *-------------------------------------------------------------------------
  */
-static int make_number(int radix, YYSTYPE *val, const char *str, int len)
+static int make_number(int radix, PPY_STYPE *val, const char *str, int len)
 {
 	int is_l  = 0;
 	int is_ll = 0;
@@ -1071,9 +1071,9 @@ static void expand_macro(macexpstackentry_t *mep)
 	assert(ppp->type == def_macro);
 	assert(ppp->expanding == 0);
 
-	if((ppp->nargs >= 0 && nargs != ppp->nargs) || (ppp->nargs < 0 && nargs < -ppp->nargs))
+	if((!ppp->variadic && nargs != ppp->nargs) || (ppp->variadic && nargs < ppp->nargs))
 	{
-		ppy_error("Too %s macro arguments (%d)", nargs < abs(ppp->nargs) ? "few" : "many", nargs);
+		ppy_error("Too %s macro arguments (%d)", nargs < ppp->nargs ? "few" : "many", nargs);
 		return;
 	}
 

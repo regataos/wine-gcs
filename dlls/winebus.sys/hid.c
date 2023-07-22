@@ -74,29 +74,39 @@ static BOOL hid_report_descriptor_append_usage(struct hid_report_descriptor *des
     return hid_report_descriptor_append(desc, template, sizeof(template));
 }
 
-BOOL hid_device_begin_report_descriptor(struct unix_device *iface, const USAGE_AND_PAGE *device_usage)
+static BOOL hid_device_begin_collection(struct hid_report_descriptor *desc, const USAGE_AND_PAGE *usage, BYTE type)
 {
-    struct hid_report_descriptor *desc = &iface->hid_report_descriptor;
     const BYTE template[] =
     {
-        USAGE_PAGE(2, device_usage->UsagePage),
-        USAGE(2, device_usage->Usage),
-        COLLECTION(1, Application),
+        USAGE_PAGE(2, usage->UsagePage),
+        USAGE(2, usage->Usage),
+        COLLECTION(1, type),
     };
 
-    memset(desc, 0, sizeof(*desc));
     return hid_report_descriptor_append(desc, template, sizeof(template));
 }
 
-BOOL hid_device_end_report_descriptor(struct unix_device *iface)
+static BOOL hid_device_end_collection(struct hid_report_descriptor *desc)
 {
-    struct hid_report_descriptor *desc = &iface->hid_report_descriptor;
     static const BYTE template[] =
     {
         END_COLLECTION,
     };
 
     return hid_report_descriptor_append(desc, template, sizeof(template));
+}
+
+BOOL hid_device_begin_report_descriptor(struct unix_device *iface, const USAGE_AND_PAGE *device_usage)
+{
+    struct hid_report_descriptor *desc = &iface->hid_report_descriptor;
+    memset(desc, 0, sizeof(*desc));
+    return hid_device_begin_collection(desc, device_usage, Application);
+}
+
+BOOL hid_device_end_report_descriptor(struct unix_device *iface)
+{
+    struct hid_report_descriptor *desc = &iface->hid_report_descriptor;
+    return hid_device_end_collection(desc);
 }
 
 BOOL hid_device_begin_input_report(struct unix_device *iface, const USAGE_AND_PAGE *physical_usage)
@@ -106,10 +116,7 @@ BOOL hid_device_begin_input_report(struct unix_device *iface, const USAGE_AND_PA
     const BYTE report_id = ++desc->next_report_id[HidP_Input];
     const BYTE template[] =
     {
-        USAGE_PAGE(2, physical_usage->UsagePage),
-        USAGE(2, physical_usage->Usage),
-        COLLECTION(1, Physical),
-            REPORT_ID(1, report_id),
+        REPORT_ID(1, report_id),
     };
 
     if (state->report_len)
@@ -120,6 +127,10 @@ BOOL hid_device_begin_input_report(struct unix_device *iface, const USAGE_AND_PA
 
     state->id = report_id;
     state->bit_size += 8;
+
+    if (!hid_device_begin_collection(desc, physical_usage, Physical))
+        return FALSE;
+
     return hid_report_descriptor_append(desc, template, sizeof(template));
 }
 
@@ -127,10 +138,6 @@ BOOL hid_device_end_input_report(struct unix_device *iface)
 {
     struct hid_report_descriptor *desc = &iface->hid_report_descriptor;
     struct hid_device_state *state = &iface->hid_device_state;
-    static const BYTE template[] =
-    {
-        END_COLLECTION,
-    };
 
     state->report_len = (state->bit_size + 7) / 8;
     if (!(state->report_buf = calloc(1, state->report_len))) return FALSE;
@@ -138,7 +145,7 @@ BOOL hid_device_end_input_report(struct unix_device *iface)
 
     state->report_buf[0] = state->id;
     state->last_report_buf[0] = state->id;
-    return hid_report_descriptor_append(desc, template, sizeof(template));
+    return hid_device_end_collection(desc);
 }
 
 static BOOL hid_device_add_button_count(struct unix_device *iface, BYTE count)
@@ -347,6 +354,7 @@ BOOL hid_device_add_haptics(struct unix_device *iface)
 
             USAGE(1, HID_USAGE_HAPTICS_WAVEFORM_LIST),
             COLLECTION(1, NamedArray),
+                /* ordinal 1 and 2 are reserved for implicit waveforms */
                 USAGE(4, (HID_USAGE_PAGE_ORDINAL<<16)|3),
                 REPORT_SIZE(1, 16),
                 REPORT_COUNT(1, 1),
@@ -355,6 +363,7 @@ BOOL hid_device_add_haptics(struct unix_device *iface)
 
             USAGE(1, HID_USAGE_HAPTICS_DURATION_LIST),
             COLLECTION(1, NamedArray),
+                /* ordinal 1 and 2 are reserved for implicit waveforms */
                 USAGE(4, (HID_USAGE_PAGE_ORDINAL<<16)|3),
                 REPORT_SIZE(1, 16),
                 REPORT_COUNT(1, 1),

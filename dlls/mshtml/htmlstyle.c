@@ -751,7 +751,7 @@ static void fix_px_value(nsAString *nsstr)
             LPWSTR ret, p;
             int len = lstrlenW(val)+1;
 
-            ret = heap_alloc((len+2)*sizeof(WCHAR));
+            ret = malloc((len + 2) * sizeof(WCHAR));
             memcpy(ret, val, (ptr-val)*sizeof(WCHAR));
             p = ret + (ptr-val);
             *p++ = 'p';
@@ -761,7 +761,7 @@ static void fix_px_value(nsAString *nsstr)
             TRACE("fixed %s -> %s\n", debugstr_w(val), debugstr_w(ret));
 
             nsAString_SetData(nsstr, ret);
-            heap_free(ret);
+            free(ret);
             break;
         }
 
@@ -779,7 +779,7 @@ static LPWSTR fix_url_value(LPCWSTR val)
     if(wcsncmp(val, urlW, ARRAY_SIZE(urlW)) || !wcschr(val, '\\'))
         return NULL;
 
-    ret = heap_strdupW(val);
+    ret = wcsdup(val);
 
     for(ptr = ret; *ptr; ptr++) {
         if(*ptr == '\\')
@@ -850,7 +850,7 @@ static inline HRESULT set_style_property(CSSStyle *style, styleid_t sid, const W
         fix_px_value(&value_str);
     hres = set_nsstyle_property(style->nsstyle, sid, &value_str);
     nsAString_Finish(&value_str);
-    heap_free(val);
+    free(val);
     return hres;
 }
 
@@ -2863,12 +2863,12 @@ static HRESULT WINAPI HTMLStyle_put_filter(IHTMLStyle *iface, BSTR v)
     }
 
     if(v) {
-        new_filter = heap_strdupW(v);
+        new_filter = wcsdup(v);
         if(!new_filter)
             return E_OUTOFMEMORY;
     }
 
-    heap_free(This->elem->filter);
+    free(This->elem->filter);
     This->elem->filter = new_filter;
 
     update_filter(This);
@@ -2985,28 +2985,22 @@ static HRESULT WINAPI HTMLStyle_removeAttribute(IHTMLStyle *iface, BSTR strAttri
 
     style_entry = lookup_style_tbl(&This->css_style, strAttributeName);
     if(!style_entry) {
+        DWORD fdex = (lFlags&1) ? fdexNameCaseSensitive : fdexNameCaseInsensitive;
         compat_mode_t compat_mode = dispex_compat_mode(&This->css_style.dispex);
-        IWineDispatchProxyCbPrivate *proxy = This->css_style.dispex.proxy;
-        DISPID dispid;
+        DISPID dispid, prop_dispid;
         unsigned i;
 
-        hres = IDispatchEx_GetDispID(&This->css_style.dispex.IDispatchEx_iface, strAttributeName,
-                (lFlags&1) ? fdexNameCaseSensitive : fdexNameCaseInsensitive, &dispid);
+        hres = IDispatchEx_GetDispID(&This->css_style.dispex.IDispatchEx_iface, strAttributeName, fdex, &dispid);
         if(hres != S_OK) {
             *pfSuccess = VARIANT_FALSE;
             return S_OK;
         }
+        prop_dispid = dispid;
 
-        if(proxy) {
-            DISPID underlying = proxy->lpVtbl->GetUnderlyingDispID(proxy, dispid);
-            hres = IDispatchEx_DeleteMemberByDispID((IDispatchEx*)proxy, dispid);
-            if(underlying == DISPID_UNKNOWN) {
-                if(FAILED(hres))
-                    return hres;
-                *pfSuccess = (hres == S_OK);
-                return S_OK;
-            }
-            dispid = underlying;
+        if(This->css_style.dispex.proxy) {
+            hres = dispex_get_builtin_id(&This->css_style.dispex, strAttributeName, fdex, &dispid);
+            if(hres != S_OK)
+                return remove_attribute(&This->css_style.dispex, prop_dispid, pfSuccess);
         }
 
         for(i=0; i < ARRAY_SIZE(style_tbl); i++) {
@@ -3016,7 +3010,7 @@ static HRESULT WINAPI HTMLStyle_removeAttribute(IHTMLStyle *iface, BSTR strAttri
         }
 
         if(i == ARRAY_SIZE(style_tbl))
-            return remove_attribute(&This->css_style.dispex, dispid, pfSuccess);
+            return remove_attribute(&This->css_style.dispex, prop_dispid, pfSuccess);
         style_entry = style_tbl+i;
     }
 
@@ -3025,7 +3019,7 @@ static HRESULT WINAPI HTMLStyle_removeAttribute(IHTMLStyle *iface, BSTR strAttri
         if(!This->elem)
             return E_UNEXPECTED;
         *pfSuccess = variant_bool(This->elem->filter && *This->elem->filter);
-        heap_free(This->elem->filter);
+        free(This->elem->filter);
         This->elem->filter = NULL;
         update_filter(This);
         return S_OK;
@@ -4795,7 +4789,7 @@ static ULONG WINAPI HTMLCSSStyleDeclaration_Release(IHTMLCSSStyleDeclaration *if
         if(This->nsstyle)
             nsIDOMCSSStyleDeclaration_Release(This->nsstyle);
         release_dispex(&This->dispex);
-        heap_free(This);
+        free(This);
     }
 
     return ref;
@@ -5149,7 +5143,7 @@ static HRESULT WINAPI HTMLCSSStyleDeclaration_put_backgroundPositionX(IHTMLCSSSt
         }
 
         posy_len = lstrlenW(posy);
-        pos_val = heap_alloc((val_len+posy_len+1)*sizeof(WCHAR));
+        pos_val = malloc((val_len + posy_len + 1) * sizeof(WCHAR));
         if(pos_val) {
             if(val_len)
                 memcpy(pos_val, val, val_len*sizeof(WCHAR));
@@ -5167,7 +5161,7 @@ static HRESULT WINAPI HTMLCSSStyleDeclaration_put_backgroundPositionX(IHTMLCSSSt
 
     TRACE("setting position to %s\n", debugstr_w(pos_val));
     hres = set_style_property(This, STYLEID_BACKGROUND_POSITION, pos_val);
-    heap_free(pos_val);
+    free(pos_val);
     return hres;
 }
 
@@ -5246,7 +5240,7 @@ static HRESULT WINAPI HTMLCSSStyleDeclaration_put_backgroundPositionY(IHTMLCSSSt
 
         posx_len = space-pos;
 
-        pos_val = heap_alloc((posx_len+val_len+1)*sizeof(WCHAR));
+        pos_val = malloc((posx_len + val_len + 1) * sizeof(WCHAR));
         if(pos_val) {
             memcpy(pos_val, pos, posx_len*sizeof(WCHAR));
             if(val_len)
@@ -5263,7 +5257,7 @@ static HRESULT WINAPI HTMLCSSStyleDeclaration_put_backgroundPositionY(IHTMLCSSSt
 
     TRACE("setting position to %s\n", debugstr_w(pos_val));
     hres = set_style_property(This, STYLEID_BACKGROUND_POSITION, pos_val);
-    heap_free(pos_val);
+    free(pos_val);
     return hres;
 }
 
@@ -10021,6 +10015,9 @@ const dispex_static_data_vtbl_t CSSStyle_dispex_vtbl = {
     NULL,
     NULL,
     NULL,
+    NULL,
+    NULL,
+    NULL,
     CSSStyle_get_static_dispid
 };
 
@@ -10081,7 +10078,7 @@ static HRESULT get_style_from_elem(HTMLElement *elem, nsIDOMCSSStyleDeclaration 
 }
 
 void init_css_style(CSSStyle *style, nsIDOMCSSStyleDeclaration *nsstyle, style_qi_t qi,
-                    dispex_static_data_t *dispex_info, HTMLDocumentNode *doc, compat_mode_t compat_mode)
+                    dispex_static_data_t *dispex_info, HTMLInnerWindow *window, compat_mode_t compat_mode)
 {
     style->IHTMLCSSStyleDeclaration_iface.lpVtbl = &HTMLCSSStyleDeclarationVtbl;
     style->IHTMLCSSStyleDeclaration2_iface.lpVtbl = &HTMLCSSStyleDeclaration2Vtbl;
@@ -10091,7 +10088,7 @@ void init_css_style(CSSStyle *style, nsIDOMCSSStyleDeclaration *nsstyle, style_q
     nsIDOMCSSStyleDeclaration_AddRef(nsstyle);
 
     init_dispatch(&style->dispex, (IUnknown*)&style->IHTMLCSSStyleDeclaration_iface,
-                  dispex_info, doc, compat_mode);
+                  dispex_info, window, compat_mode);
 }
 
 HRESULT HTMLStyle_Create(HTMLElement *elem, HTMLStyle **ret)
@@ -10104,7 +10101,7 @@ HRESULT HTMLStyle_Create(HTMLElement *elem, HTMLStyle **ret)
     if(FAILED(hres))
         return hres;
 
-    style = heap_alloc_zero(sizeof(HTMLStyle));
+    style = calloc(1, sizeof(HTMLStyle));
     if(!style) {
         nsIDOMCSSStyleDeclaration_Release(nsstyle);
         return E_OUTOFMEMORY;
@@ -10120,7 +10117,7 @@ HRESULT HTMLStyle_Create(HTMLElement *elem, HTMLStyle **ret)
     style->elem = elem;
 
     init_css_style(&style->css_style, nsstyle, HTMLStyle_QI, &HTMLStyle_dispex,
-                   elem->node.doc, dispex_compat_mode(&elem->node.event_target.dispex));
+                   get_inner_window(elem->node.doc), dispex_compat_mode(&elem->node.event_target.dispex));
 
     *ret = style;
     return S_OK;
@@ -10181,6 +10178,9 @@ static void HTMLCSSProperties_init_dispex_info(dispex_data_t *info, compat_mode_
 }
 
 const dispex_static_data_vtbl_t HTMLCSSProperties_dispex_vtbl = {
+    NULL,
+    NULL,
+    NULL,
     NULL,
     NULL,
     NULL,
@@ -10270,30 +10270,30 @@ const dispex_static_data_vtbl_t HTMLW3CComputedStyle_dispex_vtbl = {
     NULL,
     NULL,
     NULL,
+    NULL,
+    NULL,
+    NULL,
     HTMLW3CComputedStyle_get_static_dispid
 };
 
-static const tid_t HTMLW3CComputedStyle_iface_tids[] = {
-    0
-};
 dispex_static_data_t HTMLW3CComputedStyle_dispex = {
     L"CSSStyleDeclaration",
     &HTMLW3CComputedStyle_dispex_vtbl,
     PROTO_ID_HTMLW3CComputedStyle,
     DispHTMLW3CComputedStyle_tid,
-    HTMLW3CComputedStyle_iface_tids,
+    no_iface_tids,
     HTMLW3CComputedStyle_init_dispex_info
 };
 
-HRESULT create_computed_style(nsIDOMCSSStyleDeclaration *nsstyle, HTMLDocumentNode *doc,
+HRESULT create_computed_style(nsIDOMCSSStyleDeclaration *nsstyle, HTMLInnerWindow *window,
         compat_mode_t compat_mode, IHTMLCSSStyleDeclaration **p)
 {
     CSSStyle *style;
 
-    if(!(style = heap_alloc_zero(sizeof(*style))))
+    if(!(style = calloc(1, sizeof(*style))))
         return E_OUTOFMEMORY;
 
-    init_css_style(style, nsstyle, NULL, &HTMLW3CComputedStyle_dispex, doc, compat_mode);
+    init_css_style(style, nsstyle, NULL, &HTMLW3CComputedStyle_dispex, window, compat_mode);
     *p = &style->IHTMLCSSStyleDeclaration_iface;
     return S_OK;
 }

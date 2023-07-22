@@ -31,7 +31,6 @@
 #include "irpcss.h"
 
 #include "wine/debug.h"
-#include "wine/heap.h"
 #include "wine/list.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(ole);
@@ -52,20 +51,20 @@ struct registered_class
 static CRITICAL_SECTION registered_classes_cs = { NULL, -1, 0, 0, 0, 0 };
 static struct list registered_classes = LIST_INIT(registered_classes);
 
-HRESULT __cdecl irpcss_server_register(handle_t h, const GUID *clsid, DWORD flags,
+HRESULT __cdecl irpcss_server_register(handle_t h, const GUID *clsid, unsigned int flags,
         PMInterfacePointer object, unsigned int *cookie)
 {
     struct registered_class *entry;
-    static int next_cookie;
+    static LONG next_cookie;
 
-    if (!(entry = heap_alloc_zero(sizeof(*entry))))
+    if (!(entry = calloc(1, sizeof(*entry))))
         return E_OUTOFMEMORY;
 
     entry->clsid = *clsid;
     entry->single_use = !(flags & (REGCLS_MULTIPLEUSE | REGCLS_MULTI_SEPARATE));
-    if (!(entry->object = heap_alloc(FIELD_OFFSET(MInterfacePointer, abData[object->ulCntData]))))
+    if (!(entry->object = malloc(FIELD_OFFSET(MInterfacePointer, abData[object->ulCntData]))))
     {
-        heap_free(entry);
+        free(entry);
         return E_OUTOFMEMORY;
     }
     entry->object->ulCntData = object->ulCntData;
@@ -82,8 +81,8 @@ HRESULT __cdecl irpcss_server_register(handle_t h, const GUID *clsid, DWORD flag
 static void scm_revoke_class(struct registered_class *_class)
 {
     list_remove(&_class->entry);
-    heap_free(_class->object);
-    heap_free(_class);
+    free(_class->object);
+    free(_class);
 }
 
 HRESULT __cdecl irpcss_server_revoke(handle_t h, unsigned int cookie)
@@ -230,7 +229,7 @@ static DWORD WINAPI service_handler( DWORD ctrl, DWORD event_type, LPVOID event_
         SetEvent( exit_event );
         return NO_ERROR;
     default:
-        FIXME( "got service ctrl %x\n", ctrl );
+        FIXME( "got service ctrl %lx\n", ctrl );
         status.dwCurrentState = SERVICE_RUNNING;
         SetServiceStatus( service_handle, &status );
         return NO_ERROR;
@@ -246,7 +245,7 @@ static void WINAPI ServiceMain( DWORD argc, LPWSTR *argv )
 
     if ((ret = RPCSS_Initialize()))
     {
-        WARN("Failed to initialize rpc interfaces, status %d.\n", ret);
+        WARN("Failed to initialize rpc interfaces, status %ld.\n", ret);
         return;
     }
 

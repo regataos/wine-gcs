@@ -72,7 +72,7 @@ static ULONG WINAPI IUnknownImpl_AddRef(IUnknown *iface)
     IDirectMusicWaveImpl *This = impl_from_IUnknown(iface);
     LONG ref = InterlockedIncrement(&This->ref);
 
-    TRACE("(%p) ref=%d\n", This, ref);
+    TRACE("(%p) ref=%ld\n", This, ref);
 
     return ref;
 }
@@ -82,7 +82,7 @@ static ULONG WINAPI IUnknownImpl_Release(IUnknown *iface)
     IDirectMusicWaveImpl *This = impl_from_IUnknown(iface);
     LONG ref = InterlockedDecrement(&This->ref);
 
-    TRACE("(%p) ref=%d\n", This, ref);
+    TRACE("(%p) ref=%ld\n", This, ref);
 
     if (!ref) {
         HeapFree(GetProcessHeap(), 0, This);
@@ -175,7 +175,7 @@ static const IPersistStreamVtbl persiststream_vtbl = {
 };
 
 /* for ClassFactory */
-HRESULT WINAPI create_dswave(REFIID lpcGUID, void **ppobj)
+HRESULT create_dswave(REFIID lpcGUID, void **ppobj)
 {
     IDirectMusicWaveImpl *obj;
     HRESULT hr;

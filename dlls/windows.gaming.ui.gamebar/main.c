@@ -17,22 +17,8 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include <stdarg.h>
-#include <stddef.h>
-
-#define COBJMACROS
-#include "windef.h"
-#include "winbase.h"
-#include "winreg.h"
-#include "winuser.h"
-#include "winstring.h"
-
 #include "initguid.h"
-
-#define WIDL_using_Windows_Foundation
-#define WIDL_using_Windows_Gaming_UI
-#include "activation.h"
-#include "windows.gaming.ui.h"
+#include "private.h"
 
 #include "wine/debug.h"
 
@@ -63,13 +49,15 @@ static HRESULT WINAPI factory_QueryInterface( IActivationFactory *iface, REFIID 
         IsEqualGUID( iid, &IID_IAgileObject ) ||
         IsEqualGUID( iid, &IID_IActivationFactory ))
     {
-        IInspectable_AddRef( (*out = &impl->IActivationFactory_iface) );
+        *out = &impl->IActivationFactory_iface;
+        IInspectable_AddRef( *out );
         return S_OK;
     }
 
     if (IsEqualGUID( iid, &IID_IGameBarStatics ))
     {
-        IInspectable_AddRef( (*out = &impl->IGameBarStatics_iface) );
+        *out = &impl->IGameBarStatics_iface;
+        IInspectable_AddRef( *out );
         return S_OK;
     }
 
@@ -131,49 +119,11 @@ static const struct IActivationFactoryVtbl factory_vtbl =
     factory_ActivateInstance,
 };
 
-#define DEFINE_IINSPECTABLE_( pfx, iface_type, impl_type, impl_from, iface_mem, expr )             \
-    static inline impl_type *impl_from( iface_type *iface )                                        \
-    {                                                                                              \
-        return CONTAINING_RECORD( iface, impl_type, iface_mem );                                   \
-    }                                                                                              \
-    static HRESULT WINAPI pfx##_QueryInterface( iface_type *iface, REFIID iid, void **out )        \
-    {                                                                                              \
-        impl_type *impl = impl_from( iface );                                                      \
-        return IInspectable_QueryInterface( (IInspectable *)(expr), iid, out );                    \
-    }                                                                                              \
-    static ULONG WINAPI pfx##_AddRef( iface_type *iface )                                          \
-    {                                                                                              \
-        impl_type *impl = impl_from( iface );                                                      \
-        return IInspectable_AddRef( (IInspectable *)(expr) );                                      \
-    }                                                                                              \
-    static ULONG WINAPI pfx##_Release( iface_type *iface )                                         \
-    {                                                                                              \
-        impl_type *impl = impl_from( iface );                                                      \
-        return IInspectable_Release( (IInspectable *)(expr) );                                     \
-    }                                                                                              \
-    static HRESULT WINAPI pfx##_GetIids( iface_type *iface, ULONG *iid_count, IID **iids )         \
-    {                                                                                              \
-        impl_type *impl = impl_from( iface );                                                      \
-        return IInspectable_GetIids( (IInspectable *)(expr), iid_count, iids );                    \
-    }                                                                                              \
-    static HRESULT WINAPI pfx##_GetRuntimeClassName( iface_type *iface, HSTRING *class_name )      \
-    {                                                                                              \
-        impl_type *impl = impl_from( iface );                                                      \
-        return IInspectable_GetRuntimeClassName( (IInspectable *)(expr), class_name );             \
-    }                                                                                              \
-    static HRESULT WINAPI pfx##_GetTrustLevel( iface_type *iface, TrustLevel *trust_level )        \
-    {                                                                                              \
-        impl_type *impl = impl_from( iface );                                                      \
-        return IInspectable_GetTrustLevel( (IInspectable *)(expr), trust_level );                  \
-    }
-#define DEFINE_IINSPECTABLE( pfx, iface_type, impl_type, base_iface )                              \
-    DEFINE_IINSPECTABLE_( pfx, iface_type, impl_type, impl_from_##iface_type, iface_type##_iface, &impl->base_iface )
-
 DEFINE_IINSPECTABLE( statics, IGameBarStatics, struct gamebar_statics, IActivationFactory_iface )
 
 static HRESULT WINAPI statics_add_VisibilityChanged( IGameBarStatics *iface,
-                                                          IEventHandler_IInspectable *handler,
-                                                          EventRegistrationToken *token )
+                                                     IEventHandler_IInspectable *handler,
+                                                     EventRegistrationToken *token )
 {
     FIXME( "iface %p, handler %p, token %p stub.\n", iface, handler, token );
     *token = dummy_token;
@@ -187,8 +137,8 @@ static HRESULT WINAPI statics_remove_VisibilityChanged( IGameBarStatics *iface, 
 }
 
 static HRESULT WINAPI statics_add_IsInputRedirectedChanged( IGameBarStatics *iface,
-                                                          IEventHandler_IInspectable *handler,
-                                                          EventRegistrationToken *token )
+                                                            IEventHandler_IInspectable *handler,
+                                                            EventRegistrationToken *token )
 {
     FIXME( "iface %p, handler %p, token %p stub.\n", iface, handler, token );
     *token = dummy_token;
@@ -205,16 +155,16 @@ static HRESULT WINAPI statics_get_Visible( IGameBarStatics *iface, BOOLEAN *valu
 {
     TRACE( "iface %p, value %p.\n", iface, value );
 
-    if (!value) return E_INVALIDARG;
+    if (!value) return E_POINTER;
     *value = FALSE;
     return S_OK;
 }
 
-static HRESULT WINAPI statics_get_IsInputRedirected( IGameBarStatics *iface, BOOLEAN *value)
+static HRESULT WINAPI statics_get_IsInputRedirected( IGameBarStatics *iface, BOOLEAN *value )
 {
     TRACE( "iface %p, value %p.\n", iface, value );
 
-    if (!value) return E_INVALIDARG;
+    if (!value) return E_POINTER;
     *value = FALSE;
     return S_OK;
 }
@@ -246,7 +196,7 @@ static struct gamebar_statics gamebar_statics =
 
 static IActivationFactory *gamebar_factory = &gamebar_statics.IActivationFactory_iface;
 
-HRESULT WINAPI DllGetClassObject(REFCLSID clsid, REFIID riid, void **out)
+HRESULT WINAPI DllGetClassObject( REFCLSID clsid, REFIID riid, void **out )
 {
     FIXME("clsid %s, riid %s, out %p stub!\n", debugstr_guid(clsid), debugstr_guid(riid), out);
 

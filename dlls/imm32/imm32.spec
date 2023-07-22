@@ -1,4 +1,4 @@
-@ stub ImmActivateLayout
+@ stdcall ImmActivateLayout(long)
 @ stdcall ImmAssociateContext(long long)
 @ stdcall ImmAssociateContextEx(long long long)
 @ stdcall ImmConfigureIMEA(long long long ptr)
@@ -9,8 +9,8 @@
 @ stdcall ImmDestroyContext(long)
 @ stdcall ImmDestroyIMCC(long)
 @ stdcall ImmDestroySoftKeyboard(long)
-@ stdcall ImmDisableIME(long)
-@ stdcall ImmDisableIme(long) ImmDisableIME
+@ stdcall ImmDisableIME(long) NtUserDisableThreadIme
+@ stdcall ImmDisableIme(long) NtUserDisableThreadIme
 @ stdcall ImmDisableLegacyIME()
 @ stdcall ImmDisableTextFrameService(long)
 @ stdcall ImmEnumInputContext(long ptr long)
@@ -18,7 +18,7 @@
 @ stdcall ImmEnumRegisterWordW(long ptr wstr long wstr ptr)
 @ stdcall ImmEscapeA(long long long ptr)
 @ stdcall ImmEscapeW(long long long ptr)
-@ stub ImmFreeLayout
+@ stdcall ImmFreeLayout(long)
 @ stdcall ImmGenerateMessage(ptr)
 @ stdcall ImmGetCandidateListA(long long ptr long)
 @ stdcall ImmGetCandidateListCountA(long ptr)
@@ -66,7 +66,7 @@
 @ stdcall ImmIsIME(long)
 @ stdcall ImmIsUIMessageA(long long long long)
 @ stdcall ImmIsUIMessageW(long long long long)
-@ stub ImmLoadIME
+@ stdcall ImmLoadIME(long)
 @ stub ImmLoadLayout
 @ stub ImmLockClientImc
 @ stdcall ImmLockIMC(long)
@@ -114,6 +114,4 @@
 
 ################################################################
 # Wine internal extensions
-@ stdcall __wine_get_ui_window(ptr)
-@ stdcall __wine_register_window(long)
-@ stdcall __wine_unregister_window(long)
+@ stdcall __wine_ime_wnd_proc(long long long long long)

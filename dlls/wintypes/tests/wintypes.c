@@ -31,14 +31,6 @@
 
 #include "wine/test.h"
 
-static HRESULT (WINAPI *pRoActivateInstance)(HSTRING, IInspectable **);
-static HRESULT (WINAPI *pRoGetActivationFactory)(HSTRING, REFIID, void **);
-static HRESULT (WINAPI *pRoInitialize)(RO_INIT_TYPE);
-static void    (WINAPI *pRoUninitialize)(void);
-static HRESULT (WINAPI *pWindowsCreateString)(LPCWSTR, UINT32, HSTRING *);
-static HRESULT (WINAPI *pWindowsDeleteString)(HSTRING);
-static WCHAR * (WINAPI *pWindowsGetStringRawBuffer)(HSTRING, UINT32 *);
-
 static void test_IApiInformationStatics(void)
 {
     static const WCHAR *class_name = L"Windows.Foundation.Metadata.ApiInformation";
@@ -50,19 +42,19 @@ static void test_IApiInformationStatics(void)
     BOOLEAN ret;
     HRESULT hr;
 
-    hr = pRoInitialize(RO_INIT_MULTITHREADED);
+    hr = RoInitialize(RO_INIT_MULTITHREADED);
     ok(hr == S_OK, "RoInitialize failed, hr %#lx.\n", hr);
 
-    hr = pWindowsCreateString(class_name, wcslen(class_name), &str);
+    hr = WindowsCreateString(class_name, wcslen(class_name), &str);
     ok(hr == S_OK, "WindowsCreateString failed, hr %#lx.\n", hr);
 
-    hr = pRoGetActivationFactory(str, &IID_IActivationFactory, (void **)&factory);
+    hr = RoGetActivationFactory(str, &IID_IActivationFactory, (void **)&factory);
     ok(hr == S_OK || broken(hr == REGDB_E_CLASSNOTREG), "RoGetActivationFactory failed, hr %#lx.\n", hr);
-    pWindowsDeleteString(str);
+    WindowsDeleteString(str);
     if (hr == REGDB_E_CLASSNOTREG)
     {
         win_skip("%s runtimeclass not registered, skipping tests.\n", wine_dbgstr_w(class_name));
-        pRoUninitialize();
+        RoUninitialize();
         return;
     }
 
@@ -88,17 +80,18 @@ static void test_IApiInformationStatics(void)
     IAgileObject_Release(tmp_agile_object);
 
     /* IsTypePresent() */
-    hr = pWindowsCreateString(L"Windows.Foundation.FoundationContract",
+    hr = WindowsCreateString(L"Windows.Foundation.FoundationContract",
             wcslen(L"Windows.Foundation.FoundationContract"), &str);
     ok(hr == S_OK, "WindowsCreateString failed, hr %#lx.\n", hr);
 
     hr = IApiInformationStatics_IsTypePresent(statics, NULL, &ret);
     ok(hr == E_INVALIDARG, "IsTypePresent failed, hr %#lx.\n", hr);
 
-#if 0 /* Crash on Windows */
+    if (0) /* Crash on Windows */
+    {
     hr = IApiInformationStatics_IsTypePresent(statics, str, NULL);
     ok(hr == E_INVALIDARG, "IsTypePresent failed, hr %#lx.\n", hr);
-#endif
+    }
 
     ret = FALSE;
     hr = IApiInformationStatics_IsTypePresent(statics, str, &ret);
@@ -107,13 +100,13 @@ static void test_IApiInformationStatics(void)
     todo_wine
     ok(ret == TRUE, "IsTypePresent returned FALSE.\n");
 
-    pWindowsDeleteString(str);
+    WindowsDeleteString(str);
 
     /* IsMethodPresent() */
-    hr = pWindowsCreateString(L"Windows.Foundation.Metadata.IApiInformationStatics",
+    hr = WindowsCreateString(L"Windows.Foundation.Metadata.IApiInformationStatics",
             wcslen(L"Windows.Foundation.Metadata.IApiInformationStatics"), &str);
     ok(hr == S_OK, "WindowsCreateString failed, hr %#lx.\n", hr);
-    hr = pWindowsCreateString(L"IsTypePresent", wcslen(L"IsTypePresent"), &str2);
+    hr = WindowsCreateString(L"IsTypePresent", wcslen(L"IsTypePresent"), &str2);
     ok(hr == S_OK, "WindowsCreateString failed, hr %#lx.\n", hr);
 
     hr = IApiInformationStatics_IsMethodPresent(statics, NULL, str2, &ret);
@@ -126,10 +119,11 @@ static void test_IApiInformationStatics(void)
     todo_wine
     ok(ret == FALSE, "IsMethodPresent returned TRUE.\n");
 
-#if 0 /* Crash on Windows */
+    if (0) /* Crash on Windows */
+    {
     hr = IApiInformationStatics_IsMethodPresent(statics, str, str2, NULL);
     ok(hr == E_INVALIDARG, "IsMethodPresent failed, hr %#lx.\n", hr);
-#endif
+    }
 
     ret = FALSE;
     hr = IApiInformationStatics_IsMethodPresent(statics, str, str2, &ret);
@@ -163,10 +157,11 @@ static void test_IApiInformationStatics(void)
     todo_wine
     ok(ret == FALSE, "IsMethodPresentWithArity returned FALSE.\n");
 
-#if 0 /* Crash on Windows */
+    if (0) /* Crash on Windows */
+    {
     hr = IApiInformationStatics_IsMethodPresentWithArity(statics, str, str2, 1, NULL);
     ok(hr == E_INVALIDARG, "IsMethodPresentWithArity failed, hr %#lx.\n", hr);
-#endif
+    }
 
     ret = FALSE;
     hr = IApiInformationStatics_IsMethodPresentWithArity(statics, str, str2, 1, &ret);
@@ -175,14 +170,14 @@ static void test_IApiInformationStatics(void)
     todo_wine
     ok(ret == TRUE, "IsMethodPresentWithArity returned FALSE.\n");
 
-    pWindowsDeleteString(str2);
-    pWindowsDeleteString(str);
+    WindowsDeleteString(str2);
+    WindowsDeleteString(str);
 
     /* IsEventPresent() */
-    hr = pWindowsCreateString(L"Windows.Devices.Enumeration.IDeviceWatcher",
+    hr = WindowsCreateString(L"Windows.Devices.Enumeration.IDeviceWatcher",
             wcslen(L"Windows.Devices.Enumeration.IDeviceWatcher"), &str);
     ok(hr == S_OK, "WindowsCreateString failed, hr %#lx.\n", hr);
-    hr = pWindowsCreateString(L"Added", wcslen(L"Added"), &str2);
+    hr = WindowsCreateString(L"Added", wcslen(L"Added"), &str2);
     ok(hr == S_OK, "WindowsCreateString failed, hr %#lx.\n", hr);
 
     hr = IApiInformationStatics_IsEventPresent(statics, NULL, str2, &ret);
@@ -195,10 +190,11 @@ static void test_IApiInformationStatics(void)
     todo_wine
     ok(ret == FALSE, "IsEventPresent returned FALSE.\n");
 
-#if 0 /* Crash on Windows */
+    if (0) /* Crash on Windows */
+    {
     hr = IApiInformationStatics_IsEventPresent(statics, str, str2, NULL);
     ok(hr == E_INVALIDARG, "IsEventPresent failed, hr %#lx.\n", hr);
-#endif
+    }
 
     ret = FALSE;
     hr = IApiInformationStatics_IsEventPresent(statics, str, str2, &ret);
@@ -207,14 +203,14 @@ static void test_IApiInformationStatics(void)
     todo_wine
     ok(ret == TRUE, "IsEventPresent returned FALSE.\n");
 
-    pWindowsDeleteString(str2);
-    pWindowsDeleteString(str);
+    WindowsDeleteString(str2);
+    WindowsDeleteString(str);
 
     /* IsPropertyPresent() */
-    hr = pWindowsCreateString(L"Windows.Devices.Enumeration.IDeviceWatcher",
+    hr = WindowsCreateString(L"Windows.Devices.Enumeration.IDeviceWatcher",
             wcslen(L"Windows.Devices.Enumeration.IDeviceWatcher"), &str);
     ok(hr == S_OK, "WindowsCreateString failed, hr %#lx.\n", hr);
-    hr = pWindowsCreateString(L"Status", wcslen(L"Status"), &str2);
+    hr = WindowsCreateString(L"Status", wcslen(L"Status"), &str2);
     ok(hr == S_OK, "WindowsCreateString failed, hr %#lx.\n", hr);
 
     hr = IApiInformationStatics_IsPropertyPresent(statics, NULL, str2, &ret);
@@ -227,10 +223,11 @@ static void test_IApiInformationStatics(void)
     todo_wine
     ok(ret == FALSE, "IsPropertyPresent returned TRUE.\n");
 
-#if 0 /* Crash on Windows */
+    if (0) /* Crash on Windows */
+    {
     hr = IApiInformationStatics_IsPropertyPresent(statics, str, str2, NULL);
     ok(hr == E_INVALIDARG, "IsPropertyPresent failed, hr %#lx.\n", hr);
-#endif
+    }
 
     ret = FALSE;
     hr = IApiInformationStatics_IsPropertyPresent(statics, str, str2, &ret);
@@ -239,14 +236,14 @@ static void test_IApiInformationStatics(void)
     todo_wine
     ok(ret == TRUE, "IsPropertyPresent returned FALSE.\n");
 
-    pWindowsDeleteString(str2);
-    pWindowsDeleteString(str);
+    WindowsDeleteString(str2);
+    WindowsDeleteString(str);
 
     /* IsReadOnlyPropertyPresent() */
-    hr = pWindowsCreateString(L"Windows.Devices.Enumeration.IDeviceWatcher",
+    hr = WindowsCreateString(L"Windows.Devices.Enumeration.IDeviceWatcher",
             wcslen(L"Windows.Devices.Enumeration.IDeviceWatcher"), &str);
     ok(hr == S_OK, "WindowsCreateString failed, hr %#lx.\n", hr);
-    hr = pWindowsCreateString(L"Id", wcslen(L"Id"), &str2);
+    hr = WindowsCreateString(L"Id", wcslen(L"Id"), &str2);
     ok(hr == S_OK, "WindowsCreateString failed, hr %#lx.\n", hr);
 
     hr = IApiInformationStatics_IsReadOnlyPropertyPresent(statics, NULL, str2, &ret);
@@ -259,10 +256,11 @@ static void test_IApiInformationStatics(void)
     todo_wine
     ok(ret == FALSE, "IsReadOnlyPropertyPresent returned TRUE.\n");
 
-#if 0 /* Crash on Windows */
+    if (0) /* Crash on Windows */
+    {
     hr = IApiInformationStatics_IsReadOnlyPropertyPresent(statics, str, str2, NULL);
     ok(hr == E_INVALIDARG, "IsReadOnlyPropertyPresent failed, hr %#lx.\n", hr);
-#endif
+    }
 
     ret = TRUE;
     hr = IApiInformationStatics_IsReadOnlyPropertyPresent(statics, str, str2, &ret);
@@ -271,14 +269,14 @@ static void test_IApiInformationStatics(void)
     todo_wine
     ok(ret == FALSE, "IsReadOnlyPropertyPresent returned TRUE.\n");
 
-    pWindowsDeleteString(str2);
-    pWindowsDeleteString(str);
+    WindowsDeleteString(str2);
+    WindowsDeleteString(str);
 
     /* IsWriteablePropertyPresent() */
-    hr = pWindowsCreateString(L"Windows.Gaming.Input.ForceFeedback.IForceFeedbackEffect",
+    hr = WindowsCreateString(L"Windows.Gaming.Input.ForceFeedback.IForceFeedbackEffect",
             wcslen(L"Windows.Gaming.Input.ForceFeedback.IForceFeedbackEffect"), &str);
     ok(hr == S_OK, "WindowsCreateString failed, hr %#lx.\n", hr);
-    hr = pWindowsCreateString(L"Gain", wcslen(L"Gain"), &str2);
+    hr = WindowsCreateString(L"Gain", wcslen(L"Gain"), &str2);
     ok(hr == S_OK, "WindowsCreateString failed, hr %#lx.\n", hr);
 
     hr = IApiInformationStatics_IsWriteablePropertyPresent(statics, NULL, str2, &ret);
@@ -291,10 +289,11 @@ static void test_IApiInformationStatics(void)
     todo_wine
     ok(ret == FALSE, "IsWriteablePropertyPresent returned TRUE.\n");
 
-#if 0 /* Crash on Windows */
+    if (0) /* Crash on Windows */
+    {
     hr = IApiInformationStatics_IsWriteablePropertyPresent(statics, str, str2, NULL);
     ok(hr == E_INVALIDARG, "IsWriteablePropertyPresent failed, hr %#lx.\n", hr);
-#endif
+    }
 
     ret = FALSE;
     hr = IApiInformationStatics_IsWriteablePropertyPresent(statics, str, str2, &ret);
@@ -304,14 +303,14 @@ static void test_IApiInformationStatics(void)
     ok(ret == TRUE || broken(ret == FALSE) /* Win10 1507 */,
             "IsWriteablePropertyPresent returned FALSE.\n");
 
-    pWindowsDeleteString(str2);
-    pWindowsDeleteString(str);
+    WindowsDeleteString(str2);
+    WindowsDeleteString(str);
 
     /* IsEnumNamedValuePresent */
-    hr = pWindowsCreateString(L"Windows.Foundation.Metadata.GCPressureAmount",
+    hr = WindowsCreateString(L"Windows.Foundation.Metadata.GCPressureAmount",
             wcslen(L"Windows.Foundation.Metadata.GCPressureAmount"), &str);
     ok(hr == S_OK, "WindowsCreateString failed, hr %#lx.\n", hr);
-    hr = pWindowsCreateString(L"Low", wcslen(L"Low"), &str2);
+    hr = WindowsCreateString(L"Low", wcslen(L"Low"), &str2);
     ok(hr == S_OK, "WindowsCreateString failed, hr %#lx.\n", hr);
 
     hr = IApiInformationStatics_IsEnumNamedValuePresent(statics, NULL, str2, &ret);
@@ -324,10 +323,11 @@ static void test_IApiInformationStatics(void)
     todo_wine
     ok(ret == FALSE, "IsEnumNamedValuePresent returned TRUE.\n");
 
-#if 0 /* Crash on Windows */
+    if (0) /* Crash on Windows */
+    {
     hr = IApiInformationStatics_IsEnumNamedValuePresent(statics, str, str2, NULL);
     ok(hr == E_INVALIDARG, "IsEnumNamedValuePresent failed, hr %#lx.\n", hr);
-#endif
+    }
 
     ret = FALSE;
     hr = IApiInformationStatics_IsEnumNamedValuePresent(statics, str, str2, &ret);
@@ -343,21 +343,22 @@ static void test_IApiInformationStatics(void)
     todo_wine
     ok(ret == FALSE, "IsEnumNamedValuePresent returned TRUE.\n");
 
-    pWindowsDeleteString(str2);
-    pWindowsDeleteString(str);
+    WindowsDeleteString(str2);
+    WindowsDeleteString(str);
 
     /* IsApiContractPresentByMajor */
-    hr = pWindowsCreateString(L"Windows.Foundation.FoundationContract",
+    hr = WindowsCreateString(L"Windows.Foundation.FoundationContract",
             wcslen(L"Windows.Foundation.FoundationContract"), &str);
     ok(hr == S_OK, "WindowsCreateString failed, hr %#lx.\n", hr);
 
     hr = IApiInformationStatics_IsApiContractPresentByMajor(statics, NULL, 1, &ret);
     ok(hr == E_INVALIDARG, "IsApiContractPresentByMajor failed, hr %#lx.\n", hr);
 
-#if 0 /* Crash on Windows */
+    if (0) /* Crash on Windows */
+    {
     hr = IApiInformationStatics_IsApiContractPresentByMajor(statics, str, 1, NULL);
     ok(hr == E_INVALIDARG, "IsApiContractPresentByMajor failed, hr %#lx.\n", hr);
-#endif
+    }
 
     ret = FALSE;
     hr = IApiInformationStatics_IsApiContractPresentByMajor(statics, str, 1, &ret);
@@ -376,20 +377,21 @@ static void test_IApiInformationStatics(void)
     ok(hr == S_OK, "IsApiContractPresentByMajor failed, hr %#lx.\n", hr);
     ok(ret == FALSE, "IsApiContractPresentByMajor returned TRUE.\n");
 
-    pWindowsDeleteString(str);
+    WindowsDeleteString(str);
 
     /* IsApiContractPresentByMajorAndMinor */
-    hr = pWindowsCreateString(L"Windows.Foundation.FoundationContract",
+    hr = WindowsCreateString(L"Windows.Foundation.FoundationContract",
             wcslen(L"Windows.Foundation.FoundationContract"), &str);
     ok(hr == S_OK, "WindowsCreateString failed, hr %#lx.\n", hr);
 
     hr = IApiInformationStatics_IsApiContractPresentByMajorAndMinor(statics, NULL, 1, 0, &ret);
     ok(hr == E_INVALIDARG, "IsApiContractPresentByMajorAndMinor failed, hr %#lx.\n", hr);
 
-#if 0 /* Crash on Windows */
+    if (0) /* Crash on Windows */
+    {
     hr = IApiInformationStatics_IsApiContractPresentByMajorAndMinor(statics, str, 1, 0, NULL);
     ok(hr == E_INVALIDARG, "IsApiContractPresentByMajorAndMinor failed, hr %#lx.\n", hr);
-#endif
+    }
 
     ret = FALSE;
     hr = IApiInformationStatics_IsApiContractPresentByMajorAndMinor(statics, str, 1, 0, &ret);
@@ -420,40 +422,16 @@ static void test_IApiInformationStatics(void)
     todo_wine
     ok(ret == FALSE, "IsApiContractPresentByMajorAndMinor returned TRUE.\n");
 
-    pWindowsDeleteString(str);
+    WindowsDeleteString(str);
 
     IApiInformationStatics_Release(statics);
     IAgileObject_Release(agile_object);
     IInspectable_Release(inspectable);
     IActivationFactory_Release(factory);
-    pRoUninitialize();
+    RoUninitialize();
 }
 
 START_TEST(wintypes)
 {
-    HMODULE combase;
-
-    if (!(combase = LoadLibraryW(L"combase.dll")))
-    {
-        win_skip("Failed to load combase.dll, skipping tests.\n");
-        return;
-    }
-
-#define LOAD_FUNCPTR(x)                                                      \
-    if (!(p##x = (void *)GetProcAddress(combase, #x)))                       \
-    {                                                                        \
-        win_skip("Failed to find %s in combase.dll, skipping tests.\n", #x); \
-        return;                                                              \
-    }
-
-    LOAD_FUNCPTR(RoActivateInstance)
-    LOAD_FUNCPTR(RoGetActivationFactory)
-    LOAD_FUNCPTR(RoInitialize)
-    LOAD_FUNCPTR(RoUninitialize)
-    LOAD_FUNCPTR(WindowsCreateString)
-    LOAD_FUNCPTR(WindowsDeleteString)
-    LOAD_FUNCPTR(WindowsGetStringRawBuffer)
-#undef LOAD_FUNCPTR
-
     test_IApiInformationStatics();
 }

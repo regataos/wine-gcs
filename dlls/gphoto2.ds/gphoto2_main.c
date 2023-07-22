@@ -477,19 +477,17 @@ static TW_UINT16 GPHOTO2_XferGroupSet (pTW_IDENTITY pOrigin,
 }
 
 HINSTANCE GPHOTO2_instance = 0;
-unixlib_handle_t gphoto2_handle = 0;
 
 BOOL WINAPI DllMain (HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
 {
-    TRACE("%p,%x,%p\n", hinstDLL, fdwReason, lpvReserved);
+    TRACE("%p,%lx,%p\n", hinstDLL, fdwReason, lpvReserved);
 
     switch (fdwReason)
     {
         case DLL_PROCESS_ATTACH:
 	    GPHOTO2_instance = hinstDLL;
             DisableThreadLibraryCalls(hinstDLL);
-            NtQueryVirtualMemory( GetCurrentProcess(), hinstDLL, MemoryWineUnixFuncs,
-                                  &gphoto2_handle, sizeof(gphoto2_handle), NULL );
+            __wine_init_unix_call();
             break;
     }
 
@@ -943,7 +941,7 @@ DS_Entry ( pTW_IDENTITY pOrigin,
 {
     TW_UINT16 twRC = TWRC_SUCCESS;  /* Return Code */
 
-    TRACE("(DG=%d DAT=%d MSG=%d)\n", DG, DAT, MSG);
+    TRACE("(DG=%ld DAT=%d MSG=%d)\n", DG, DAT, MSG);
 
     switch (DG)
     {

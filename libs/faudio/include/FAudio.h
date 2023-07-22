@@ -1,6 +1,6 @@
 /* FAudio - XAudio Reimplementation for FNA
  *
- * Copyright (c) 2011-2021 Ethan Lee, Luigi Auriemma, and the MonoGame Team
+ * Copyright (c) 2011-2022 Ethan Lee, Luigi Auriemma, and the MonoGame Team
  *
  * This software is provided 'as-is', without any express or implied warranty.
  * In no event will the authors be held liable for any damages arising from
@@ -484,7 +484,7 @@ extern FAudioGUID DATAFORMAT_SUBTYPE_IEEE_FLOAT;
 #define FAUDIO_TARGET_VERSION 8 /* Targeting compatibility with XAudio 2.8 */
 
 #define FAUDIO_ABI_VERSION	 0
-#define FAUDIO_MAJOR_VERSION	21
+#define FAUDIO_MAJOR_VERSION	22
 #define FAUDIO_MINOR_VERSION	11
 #define FAUDIO_PATCH_VERSION	 0
 

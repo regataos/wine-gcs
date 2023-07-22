@@ -40,7 +40,8 @@ static REFIID tid_ids[] = {
     &IID_IWshEnvironment,
     &IID_IWshExec,
     &IID_IWshShell3,
-    &IID_IWshShortcut
+    &IID_IWshShortcut,
+    &IID_IWshNetwork2
 };
 
 static HRESULT load_typelib(void)
@@ -53,7 +54,7 @@ static HRESULT load_typelib(void)
 
     hres = LoadRegTypeLib(&LIBID_IWshRuntimeLibrary, 1, 0, LOCALE_SYSTEM_DEFAULT, &tl);
     if(FAILED(hres)) {
-        ERR("LoadRegTypeLib failed: %08x\n", hres);
+        ERR("LoadRegTypeLib failed: %#lx.\n", hres);
         return hres;
     }
 
@@ -84,7 +85,7 @@ HRESULT get_typeinfo(tid_t tid, ITypeInfo **typeinfo)
 
         hres = ITypeLib_GetTypeInfoOfGuid(typelib, tid_ids[tid], &ti);
         if(FAILED(hres)) {
-            ERR("GetTypeInfoOfGuid(%s) failed: %08x\n", debugstr_guid(tid_ids[tid]), hres);
+            ERR("GetTypeInfoOfGuid(%s) failed: %#lx.\n", debugstr_guid(tid_ids[tid]), hres);
             return hres;
         }
 
@@ -209,14 +210,23 @@ static const IClassFactoryVtbl WshShellFactoryVtbl = {
     ClassFactory_LockServer
 };
 
+static const IClassFactoryVtbl WshNetworkFactoryVtbl = {
+    ClassFactory_QueryInterface,
+    ClassFactory_AddRef,
+    ClassFactory_Release,
+    WshNetworkFactory_CreateInstance,
+    ClassFactory_LockServer
+};
+
 static IClassFactory WshShellFactory = { &WshShellFactoryVtbl };
+static IClassFactory WshNetworkFactory = { &WshNetworkFactoryVtbl };
 
 /******************************************************************
  *              DllMain (wshom.ocx.@)
  */
 BOOL WINAPI DllMain(HINSTANCE hInstDLL, DWORD fdwReason, LPVOID lpv)
 {
-    TRACE("(%p %d %p)\n", hInstDLL, fdwReason, lpv);
+    TRACE("%p, %ld, %p.\n", hInstDLL, fdwReason, lpv);
 
     switch(fdwReason)
     {
@@ -240,6 +250,10 @@ HRESULT WINAPI DllGetClassObject(REFCLSID rclsid, REFIID riid, LPVOID *ppv)
     if(IsEqualGUID(&CLSID_WshShell, rclsid)) {
         TRACE("(CLSID_WshShell %s %p)\n", debugstr_guid(riid), ppv);
         return IClassFactory_QueryInterface(&WshShellFactory, riid, ppv);
+    }
+    else if(IsEqualGUID(&CLSID_WshNetwork, rclsid)) {
+        TRACE("(CLSID_WshNetwork %s %p)\n", debugstr_guid(riid), ppv);
+        return IClassFactory_QueryInterface(&WshNetworkFactory, riid, ppv);
     }
 
     FIXME("%s %s %p\n", debugstr_guid(rclsid), debugstr_guid(riid), ppv);

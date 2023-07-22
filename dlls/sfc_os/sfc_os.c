@@ -119,8 +119,15 @@ BOOL WINAPI SfcIsKeyProtected(HKEY hKey, LPCWSTR lpSubKey, REGSAM samDesired)
 
 DWORD WINAPI SfcConnectToServer(DWORD unknown)
 {
-    FIXME("%x\n", unknown);
+    FIXME("%lx\n", unknown);
     return 0;
+}
+
+BOOL WINAPI SfpVerifyFile(LPCSTR filename, LPSTR error, DWORD size)
+{
+    FIXME("%s: stub\n", debugstr_a(filename));
+    SetLastError( ERROR_CALL_NOT_IMPLEMENTED );
+    return FALSE;
 }
 
 BOOL WINAPI SRSetRestorePointA(RESTOREPOINTINFOA *restorepoint, STATEMGRSTATUS *status)

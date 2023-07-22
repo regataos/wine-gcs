@@ -1,5 +1,5 @@
-EXTRADEFS = -DWINE_NO_LONG_TYPES
 MODULE    = dwmapi.dll
+IMPORTS   = user32
 IMPORTLIB = dwmapi
 IMPORTS   = user32
 

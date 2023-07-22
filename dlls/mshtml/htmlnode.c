@@ -99,7 +99,7 @@ static ULONG WINAPI HTMLDOMChildrenCollectionEnum_Release(IEnumVARIANT *iface)
 
     if(!ref) {
         IHTMLDOMChildrenCollection_Release(&This->col->IHTMLDOMChildrenCollection_iface);
-        heap_free(This);
+        free(This);
     }
 
     return ref;
@@ -241,7 +241,7 @@ static ULONG WINAPI HTMLDOMChildrenCollection_Release(IHTMLDOMChildrenCollection
 
     if(!ref) {
         nsIDOMNodeList_Release(This->nslist);
-        heap_free(This);
+        free(This);
     }
 
     return ref;
@@ -296,7 +296,7 @@ static HRESULT WINAPI HTMLDOMChildrenCollection_get__newEnum(IHTMLDOMChildrenCol
 
     TRACE("(%p)->(%p)\n", This, p);
 
-    ret = heap_alloc(sizeof(*ret));
+    ret = malloc(sizeof(*ret));
     if(!ret)
         return E_OUTOFMEMORY;
 
@@ -386,6 +386,21 @@ static HRESULT HTMLDOMChildrenCollection_get_dispid(DispatchEx *dispex, BSTR nam
     return S_OK;
 }
 
+static HRESULT HTMLDOMChildrenCollection_get_name(DispatchEx *dispex, DISPID id, BSTR *name)
+{
+    HTMLDOMChildrenCollection *This = impl_from_DispatchEx(dispex);
+    DWORD idx = id - DISPID_CHILDCOL_0;
+    UINT32 len = 0;
+    WCHAR buf[11];
+
+    nsIDOMNodeList_GetLength(This->nslist, &len);
+    if(idx >= len)
+        return DISP_E_MEMBERNOTFOUND;
+
+    len = swprintf(buf, ARRAY_SIZE(buf), L"%u", idx);
+    return (*name = SysAllocStringLen(buf, len)) ? S_OK : E_OUTOFMEMORY;
+}
+
 static HRESULT HTMLDOMChildrenCollection_invoke(DispatchEx *dispex, IDispatch *this_obj, DISPID id, LCID lcid, WORD flags,
         DISPPARAMS *params, VARIANT *res, EXCEPINFO *ei, IServiceProvider *caller)
 {
@@ -419,6 +434,7 @@ static HRESULT HTMLDOMChildrenCollection_invoke(DispatchEx *dispex, IDispatch *t
 static const dispex_static_data_vtbl_t HTMLDOMChildrenCollection_dispex_vtbl = {
     NULL,
     HTMLDOMChildrenCollection_get_dispid,
+    HTMLDOMChildrenCollection_get_name,
     HTMLDOMChildrenCollection_invoke,
     NULL
 };
@@ -439,10 +455,9 @@ dispex_static_data_t HTMLDOMChildrenCollection_dispex = {
 
 HRESULT create_child_collection(nsIDOMNodeList *nslist, HTMLDocumentNode *doc, IHTMLDOMChildrenCollection **ret)
 {
-    compat_mode_t compat_mode = doc ? dispex_compat_mode(&doc->node.event_target.dispex) : COMPAT_MODE_NONE;
     HTMLDOMChildrenCollection *collection;
 
-    if(!(collection = heap_alloc_zero(sizeof(*collection))))
+    if(!(collection = calloc(1, sizeof(*collection))))
         return E_OUTOFMEMORY;
 
     collection->IHTMLDOMChildrenCollection_iface.lpVtbl = &HTMLDOMChildrenCollectionVtbl;
@@ -452,7 +467,8 @@ HRESULT create_child_collection(nsIDOMNodeList *nslist, HTMLDocumentNode *doc, I
     collection->nslist = nslist;
 
     init_dispatch(&collection->dispex, (IUnknown*)&collection->IHTMLDOMChildrenCollection_iface,
-                  &HTMLDOMChildrenCollection_dispex, doc, compat_mode);
+                  &HTMLDOMChildrenCollection_dispex, get_inner_window(doc),
+                  dispex_compat_mode(&doc->node.event_target.dispex));
 
     *ret = &collection->IHTMLDOMChildrenCollection_iface;
     return S_OK;
@@ -1137,7 +1153,7 @@ static HRESULT WINAPI HTMLDOMNode2_get_ownerDocument(IHTMLDOMNode2 *iface, IDisp
     if(This == &This->doc->node) {
         *p = NULL;
     }else {
-        *p = (IDispatch*)&This->doc->basedoc.IHTMLDocument2_iface;
+        *p = (IDispatch*)&This->doc->IHTMLDocument2_iface;
         IDispatch_AddRef(*p);
     }
     return S_OK;
@@ -1431,7 +1447,7 @@ void HTMLDOMNode_destructor(HTMLDOMNode *This)
     if(This->nsnode)
         nsIDOMNode_Release(This->nsnode);
     if(This->doc && &This->doc->node != This)
-        htmldoc_release(&This->doc->basedoc);
+        IHTMLDOMNode_Release(&This->doc->node.IHTMLDOMNode_iface);
 }
 
 static HRESULT HTMLDOMNode_clone(HTMLDOMNode *This, nsIDOMNode *nsnode, HTMLDOMNode **ret)
@@ -1461,6 +1477,7 @@ static const NodeImplVtbl HTMLDOMNodeImplVtbl = {
 
 void HTMLDOMNode_Init(HTMLDocumentNode *doc, HTMLDOMNode *node, nsIDOMNode *nsnode, dispex_static_data_t *dispex_data)
 {
+    HTMLInnerWindow *window = NULL;
     nsresult nsres;
 
     node->IHTMLDOMNode_iface.lpVtbl = &HTMLDOMNodeVtbl;
@@ -1468,11 +1485,13 @@ void HTMLDOMNode_Init(HTMLDocumentNode *doc, HTMLDOMNode *node, nsIDOMNode *nsno
     node->IHTMLDOMNode3_iface.lpVtbl = &HTMLDOMNode3Vtbl;
 
     ccref_init(&node->ccref, 1);
-    EventTarget_Init(&node->event_target, (IUnknown*)&node->IHTMLDOMNode_iface, dispex_data, doc);
-
-    if(&doc->node != node)
-        htmldoc_addref(&doc->basedoc);
+    if(&doc->node != node) {
+        IHTMLDOMNode_AddRef(&doc->node.IHTMLDOMNode_iface);
+        window = get_inner_window(doc);
+    }
     node->doc = doc;
+
+    EventTarget_Init(&node->event_target, (IUnknown*)&node->IHTMLDOMNode_iface, dispex_data, window);
 
     nsIDOMNode_AddRef(nsnode);
     node->nsnode = nsnode;
@@ -1515,8 +1534,15 @@ static HRESULT create_node(HTMLDocumentNode *doc, nsIDOMNode *nsnode, HTMLDOMNod
         if(FAILED(hres))
             return hres;
         break;
-    /* doctype nodes are represented as comment nodes (at least in quirks mode) */
     case DOCUMENT_TYPE_NODE:
+        if(dispex_compat_mode(&doc->node.event_target.dispex) >= COMPAT_MODE_IE9) {
+            hres = create_doctype_node(doc, nsnode, ret);
+            if(FAILED(hres))
+                return hres;
+            break;
+        }
+        /* doctype nodes are represented as comment nodes in quirks mode */
+        /* fall through */
     case COMMENT_NODE: {
         HTMLElement *comment;
         hres = HTMLCommentElement_Create(doc, nsnode, &comment);
@@ -1533,7 +1559,7 @@ static HRESULT create_node(HTMLDocumentNode *doc, nsIDOMNode *nsnode, HTMLDOMNod
 
         FIXME("unimplemented node type %u\n", node_type);
 
-        node = heap_alloc_zero(sizeof(HTMLDOMNode));
+        node = calloc(1, sizeof(HTMLDOMNode));
         if(!node)
             return E_OUTOFMEMORY;
 
@@ -1587,7 +1613,7 @@ static nsresult NSAPI HTMLDOMNode_unlink(void *p)
     if(This->doc && &This->doc->node != This) {
         HTMLDocumentNode *doc = This->doc;
         This->doc = NULL;
-        htmldoc_release(&doc->basedoc);
+        IHTMLDOMNode_Release(&doc->node.IHTMLDOMNode_iface);
     }else {
         This->doc = NULL;
     }
@@ -1605,7 +1631,7 @@ static void NSAPI HTMLDOMNode_delete_cycle_collectable(void *p)
         This->vtbl->unlink(This);
     This->vtbl->destructor(This);
     release_dispex(&This->event_target.dispex);
-    heap_free(This);
+    free(This);
 }
 
 void init_node_cc(void)
@@ -1653,6 +1679,6 @@ HRESULT get_node(nsIDOMNode *nsnode, BOOL create, HTMLDOMNode **ret)
         return E_FAIL;
 
     hres = create_node(document, nsnode, ret);
-    htmldoc_release(&document->basedoc);
+    IHTMLDOMNode_Release(&document->node.IHTMLDOMNode_iface);
     return hres;
 }

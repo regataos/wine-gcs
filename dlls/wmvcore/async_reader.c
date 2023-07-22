@@ -26,9 +26,8 @@
 
 #define EXTERN_GUID DEFINE_GUID
 #include "initguid.h"
-#include "wmvcore.h"
+#include "wmvcore_private.h"
 
-#include "dshow.h"
 #include "wmsdk.h"
 
 #include "wine/debug.h"
@@ -970,8 +969,8 @@ static HRESULT WINAPI WMReader_Start(IWMReader *iface,
     struct async_reader *reader = impl_from_IWMReader(iface);
     HRESULT hr;
 
-    TRACE("reader %p, start %I64d, duration %I64d, rate %.8e, context %p.\n",
-            reader, start, duration, rate, context);
+    TRACE("reader %p, start %s, duration %s, rate %.8e, context %p.\n",
+            reader, debugstr_time(start), debugstr_time(duration), rate, context);
 
     if (rate != 1.0f)
         FIXME("Ignoring rate %.8e.\n", rate);
@@ -1085,7 +1084,7 @@ static HRESULT WINAPI WMReaderAdvanced_DeliverTime(IWMReaderAdvanced6 *iface, QW
 {
     struct async_reader *reader = impl_from_IWMReaderAdvanced6(iface);
 
-    TRACE("reader %p, time %I64d.\n", reader, time);
+    TRACE("reader %p, time %s.\n", reader, debugstr_time(time));
 
     EnterCriticalSection(&reader->callback_cs);
 
@@ -2170,8 +2169,8 @@ static HRESULT WINAPI refclock_AdviseTime(IReferenceClock *iface, REFERENCE_TIME
 {
     struct async_reader *reader = impl_from_IReferenceClock(iface);
 
-    FIXME("reader %p, basetime %I64d, streamtime %I64d, event %#Ix, cookie %p, stub!\n",
-            reader, basetime, streamtime, event, cookie);
+    FIXME("reader %p, basetime %s, streamtime %s, event %#Ix, cookie %p, stub!\n",
+            reader, debugstr_time(basetime), debugstr_time(streamtime), event, cookie);
 
     return E_NOTIMPL;
 }
@@ -2181,8 +2180,8 @@ static HRESULT WINAPI refclock_AdvisePeriodic(IReferenceClock *iface, REFERENCE_
 {
     struct async_reader *reader = impl_from_IReferenceClock(iface);
 
-    FIXME("reader %p, starttime %I64d, period %I64d, semaphore %#Ix, cookie %p, stub!\n",
-            reader, starttime, period, semaphore, cookie);
+    FIXME("reader %p, starttime %s, period %s, semaphore %#Ix, cookie %p, stub!\n",
+            reader, debugstr_time(starttime), debugstr_time(period), semaphore, cookie);
 
     return E_NOTIMPL;
 }

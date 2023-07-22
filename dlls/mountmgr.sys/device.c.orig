@@ -113,24 +113,6 @@ static CRITICAL_SECTION_DEBUG critsect_debug =
 };
 static CRITICAL_SECTION device_section = { &critsect_debug, -1, 0, 0, 0, 0 };
 
-static char *strdupA( const char *str )
-{
-    char *ret;
-
-    if (!str) return NULL;
-    if ((ret = RtlAllocateHeap( GetProcessHeap(), 0, strlen(str) + 1 ))) strcpy( ret, str );
-    return ret;
-}
-
-static WCHAR *strdupW( const WCHAR *str )
-{
-    WCHAR *ret;
-
-    if (!str) return NULL;
-    if ((ret = RtlAllocateHeap( GetProcessHeap(), 0, (lstrlenW(str) + 1) * sizeof(WCHAR) ))) lstrcpyW( ret, str );
-    return ret;
-}
-
 static const GUID *get_default_uuid( int letter )
 {
     static GUID guid;
@@ -673,7 +655,7 @@ static NTSTATUS create_disk_device( enum device_type type, struct disk_device **
             UNICODE_STRING symlink;
 
             symlink.MaximumLength = (lstrlenW(link_format) + 10) * sizeof(WCHAR);
-            if ((symlink.Buffer = RtlAllocateHeap( GetProcessHeap(), 0, symlink.MaximumLength)))
+            if ((symlink.Buffer = RtlAllocateHeap( GetProcessHeap(), 0, symlink.MaximumLength )))
             {
                 swprintf( symlink.Buffer, symlink.MaximumLength / sizeof(WCHAR), link_format, i );
                 symlink.Length = lstrlenW(symlink.Buffer) * sizeof(WCHAR);
@@ -717,7 +699,7 @@ static NTSTATUS create_disk_device( enum device_type type, struct disk_device **
     }
     else
     {
-        FIXME( "IoCreateDevice %s got %x\n", debugstr_w(name.Buffer), status );
+        FIXME( "IoCreateDevice %s got %lx\n", debugstr_w(name.Buffer), status );
         RtlFreeUnicodeString( &name );
     }
     return status;
@@ -732,9 +714,9 @@ static void delete_disk_device( struct disk_device *device )
         IoDeleteSymbolicLink( &device->symlink );
         RtlFreeUnicodeString( &device->symlink );
     }
-    RtlFreeHeap( GetProcessHeap(), 0, device->unix_device );
-    RtlFreeHeap( GetProcessHeap(), 0, device->unix_mount );
-    RtlFreeHeap( GetProcessHeap(), 0, device->serial );
+    free( device->unix_device );
+    free( device->unix_mount );
+    free( device->serial );
     RtlFreeUnicodeString( &device->name );
     IoDeleteDevice( device->dev_obj );
 }
@@ -758,7 +740,7 @@ static unsigned int release_volume( struct volume *volume )
         list_remove( &volume->entry );
         if (volume->mount) delete_mount_point( volume->mount );
         delete_disk_device( volume->device );
-        RtlFreeHeap( GetProcessHeap(), 0, volume );
+        free( volume );
     }
     return ret;
 }
@@ -770,11 +752,11 @@ static void set_volume_udi( struct volume *volume, const char *udi )
     {
         assert( !volume->udi );
         /* having a udi means the HAL side holds an extra reference */
-        if ((volume->udi = strdupA( udi ))) grab_volume( volume );
+        if ((volume->udi = strdup( udi ))) grab_volume( volume );
     }
     else if (volume->udi)
     {
-        RtlFreeHeap( GetProcessHeap(), 0, volume->udi );
+        free( volume->udi );
         volume->udi = NULL;
         release_volume( volume );
     }
@@ -786,7 +768,7 @@ static NTSTATUS create_volume( const char *udi, enum device_type type, struct vo
     struct volume *volume;
     NTSTATUS status;
 
-    if (!(volume = RtlAllocateHeap( GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*volume) )))
+    if (!(volume = calloc( 1, sizeof(*volume) )))
         return STATUS_NO_MEMORY;
 
     if (!(status = create_disk_device( type, &volume->device, volume )))
@@ -795,7 +777,7 @@ static NTSTATUS create_volume( const char *udi, enum device_type type, struct vo
         list_add_tail( &volumes_list, &volume->entry );
         *volume_ret = grab_volume( volume );
     }
-    else RtlFreeHeap( GetProcessHeap(), 0, volume );
+    else free( volume );
 
     return status;
 }
@@ -807,7 +789,7 @@ static NTSTATUS create_dos_device( struct volume *volume, const char *udi, int l
     struct dos_drive *drive;
     NTSTATUS status;
 
-    if (!(drive = RtlAllocateHeap( GetProcessHeap(), 0, sizeof(*drive) ))) return STATUS_NO_MEMORY;
+    if (!(drive = malloc( sizeof(*drive) ))) return STATUS_NO_MEMORY;
     drive->drive = letter;
     drive->mount = NULL;
 
@@ -824,7 +806,7 @@ static NTSTATUS create_dos_device( struct volume *volume, const char *udi, int l
         list_add_tail( &drives_list, &drive->entry );
         *drive_ret = drive;
     }
-    else RtlFreeHeap( GetProcessHeap(), 0, drive );
+    else free( drive );
 
     return status;
 }
@@ -835,7 +817,7 @@ static void delete_dos_device( struct dos_drive *drive )
     list_remove( &drive->entry );
     if (drive->mount) delete_mount_point( drive->mount );
     release_volume( drive->volume );
-    RtlFreeHeap( GetProcessHeap(), 0, drive );
+    free( drive );
 }
 
 /* find a volume that matches the parameters */
@@ -890,15 +872,15 @@ static BOOL get_volume_device_info( struct volume *volume )
 
     if (!(name = wine_get_dos_file_name( unix_device )))
     {
-        ERR("Failed to convert %s to NT, err %u\n", debugstr_a(unix_device), GetLastError());
+        ERR("Failed to convert %s to NT, err %lu\n", debugstr_a(unix_device), GetLastError());
         return FALSE;
     }
     handle = CreateFileW( name, GENERIC_READ | SYNCHRONIZE, FILE_SHARE_READ | FILE_SHARE_WRITE,
                           NULL, OPEN_EXISTING, 0, 0 );
-    RtlFreeHeap( GetProcessHeap(), 0, name );
+    HeapFree( GetProcessHeap(), 0, name );
     if (handle == INVALID_HANDLE_VALUE)
     {
-        WARN("Failed to open %s, err %u\n", debugstr_a(unix_device), GetLastError());
+        WARN("Failed to open %s, err %lu\n", debugstr_a(unix_device), GetLastError());
         return FALSE;
     }
 
@@ -952,8 +934,8 @@ static void set_dos_devices_disk_serial( struct disk_device *device )
         /* copy serial if drive resides on this Unix device */
         if (devices & (1 << drive->drive))
         {
-            HeapFree( GetProcessHeap(), 0, drive->volume->device->serial );
-            drive->volume->device->serial = strdupA( device->serial );
+            free( drive->volume->device->serial );
+            drive->volume->device->serial = strdup( device->serial );
         }
     }
 }
@@ -986,13 +968,13 @@ static NTSTATUS set_volume_info( struct volume *volume, struct dos_drive *drive,
     }
     else
     {
-        RtlFreeHeap( GetProcessHeap(), 0, disk_device->unix_device );
-        RtlFreeHeap( GetProcessHeap(), 0, disk_device->unix_mount );
-        RtlFreeHeap( GetProcessHeap(), 0, disk_device->serial );
+        free( disk_device->unix_device );
+        free( disk_device->unix_mount );
+        free( disk_device->serial );
     }
-    disk_device->unix_device = strdupA( device );
-    disk_device->unix_mount = strdupA( mount_point );
-    disk_device->serial = strdupA( disk_serial );
+    disk_device->unix_device = strdup( device );
+    disk_device->unix_mount = strdup( mount_point );
+    disk_device->serial = strdup( disk_serial );
     set_dos_devices_disk_serial( disk_device );
 
     if (!get_volume_device_info( volume ))
@@ -1008,7 +990,7 @@ static NTSTATUS set_volume_info( struct volume *volume, struct dos_drive *drive,
         get_filesystem_serial( volume );
     }
 
-    TRACE("fs_type %#x, label %s, serial %08x\n", volume->fs_type, debugstr_w(volume->label), volume->serial);
+    TRACE("fs_type %#x, label %s, serial %08lx\n", volume->fs_type, debugstr_w(volume->label), volume->serial);
 
     if (guid && memcmp( &volume->guid, guid, sizeof(volume->guid) ))
     {
@@ -1467,9 +1449,9 @@ NTSTATUS query_unix_drive( void *buff, SIZE_T insize, SIZE_T outsize, IO_STATUS_
         device_type = volume->device->type;
         fs_type = get_mountmgr_fs_type( volume->fs_type );
         serial = volume->serial;
-        device = strdupA( volume->device->unix_device );
-        mount_point = strdupA( volume->device->unix_mount );
-        label = strdupW( volume->label );
+        device = strdup( volume->device->unix_device );
+        mount_point = strdup( volume->device->unix_mount );
+        label = wcsdup( volume->label );
         release_volume( volume );
     }
     LeaveCriticalSection( &device_section );
@@ -1526,15 +1508,15 @@ NTSTATUS query_unix_drive( void *buff, SIZE_T insize, SIZE_T outsize, IO_STATUS_
         ptr += strlen(ptr) + 1;
     }
 
-    TRACE( "returning %c: dev %s mount %s type %u\n",
+    TRACE( "returning %c: dev %s mount %s type %lu\n",
            letter, debugstr_a(device), debugstr_a(mount_point), type );
 
     iosb->Information = ptr - (char *)output;
     if (size > outsize) status = STATUS_BUFFER_OVERFLOW;
 
-    RtlFreeHeap( GetProcessHeap(), 0, device );
-    RtlFreeHeap( GetProcessHeap(), 0, mount_point );
-    RtlFreeHeap( GetProcessHeap(), 0, label );
+    free( device );
+    free( mount_point );
+    free( label );
     return status;
 }
 
@@ -1622,7 +1604,7 @@ static NTSTATUS WINAPI harddisk_query_volume( DEVICE_OBJECT *device, IRP *irp )
     struct volume *volume;
     NTSTATUS status;
 
-    TRACE( "volume query %x length %u\n", info_class, length );
+    TRACE( "volume query %x length %lu\n", info_class, length );
 
     EnterCriticalSection( &device_section );
     volume = dev->volume;
@@ -1654,6 +1636,30 @@ static NTSTATUS WINAPI harddisk_query_volume( DEVICE_OBJECT *device, IRP *irp )
 
         io->Information = offsetof( FILE_FS_VOLUME_INFORMATION, VolumeLabel ) + info->VolumeLabelLength;
         status = STATUS_SUCCESS;
+        break;
+    }
+    case FileFsSizeInformation:
+    {
+        FILE_FS_SIZE_INFORMATION *info = irp->AssociatedIrp.SystemBuffer;
+        struct size_info size_info = { 0, 0, 0, 0, 0 };
+        struct get_volume_size_info_params params = { dev->unix_mount, &size_info };
+
+        if (length < sizeof(FILE_FS_SIZE_INFORMATION))
+        {
+            status = STATUS_BUFFER_TOO_SMALL;
+            break;
+        }
+
+        if ((status = MOUNTMGR_CALL( get_volume_size_info, &params )) == STATUS_SUCCESS)
+        {
+            info->TotalAllocationUnits.QuadPart = size_info.total_allocation_units;
+            info->AvailableAllocationUnits.QuadPart = size_info.caller_available_allocation_units;
+            info->SectorsPerAllocationUnit = size_info.sectors_per_allocation_unit;
+            info->BytesPerSector = size_info.bytes_per_sector;
+            io->Information = sizeof(*info);
+            status = STATUS_SUCCESS;
+        }
+
         break;
     }
     case FileFsAttributeInformation:
@@ -1702,6 +1708,32 @@ static NTSTATUS WINAPI harddisk_query_volume( DEVICE_OBJECT *device, IRP *irp )
         status = STATUS_SUCCESS;
         break;
     }
+    case FileFsFullSizeInformation:
+    {
+        FILE_FS_FULL_SIZE_INFORMATION *info = irp->AssociatedIrp.SystemBuffer;
+        struct size_info size_info = { 0, 0, 0, 0, 0 };
+        struct get_volume_size_info_params params = { dev->unix_mount, &size_info };
+
+        if (length < sizeof(FILE_FS_FULL_SIZE_INFORMATION))
+        {
+            status = STATUS_BUFFER_TOO_SMALL;
+            break;
+        }
+
+        if ((status = MOUNTMGR_CALL( get_volume_size_info, &params )) == STATUS_SUCCESS)
+        {
+            info->TotalAllocationUnits.QuadPart = size_info.total_allocation_units;
+            info->CallerAvailableAllocationUnits.QuadPart = size_info.caller_available_allocation_units;
+            info->ActualAvailableAllocationUnits.QuadPart = size_info.actual_available_allocation_units;
+            info->SectorsPerAllocationUnit = size_info.sectors_per_allocation_unit;
+            info->BytesPerSector = size_info.bytes_per_sector;
+            io->Information = sizeof(*info);
+            status = STATUS_SUCCESS;
+        }
+
+        break;
+    }
+
     default:
         FIXME("Unsupported volume query %x\n", irpsp->Parameters.QueryVolume.FsInformationClass);
         status = STATUS_NOT_SUPPORTED;
@@ -1722,7 +1754,7 @@ static NTSTATUS WINAPI harddisk_ioctl( DEVICE_OBJECT *device, IRP *irp )
     struct disk_device *dev = device->DeviceExtension;
     NTSTATUS status;
 
-    TRACE( "ioctl %x insize %u outsize %u\n",
+    TRACE( "ioctl %lx insize %lu outsize %lu\n",
            irpsp->Parameters.DeviceIoControl.IoControlCode,
            irpsp->Parameters.DeviceIoControl.InputBufferLength,
            irpsp->Parameters.DeviceIoControl.OutputBufferLength );
@@ -1794,7 +1826,7 @@ static NTSTATUS WINAPI harddisk_ioctl( DEVICE_OBJECT *device, IRP *irp )
     default:
     {
         ULONG code = irpsp->Parameters.DeviceIoControl.IoControlCode;
-        FIXME("Unsupported ioctl %x (device=%x access=%x func=%x method=%x)\n",
+        FIXME("Unsupported ioctl %lx (device=%lx access=%lx func=%lx method=%lx)\n",
               code, code >> 16, (code >> 14) & 3, (code >> 2) & 0xfff, code & 3);
         status = STATUS_NOT_SUPPORTED;
         break;
@@ -1864,7 +1896,7 @@ static BOOL create_port_device( DRIVER_OBJECT *driver, int n, const char *unix_p
     status = IoCreateDevice( driver, 0, &nt_name, 0, 0, FALSE, &dev_obj );
     if (status != STATUS_SUCCESS)
     {
-        FIXME( "IoCreateDevice %s got %x\n", debugstr_w(nt_name.Buffer), status );
+        FIXME( "IoCreateDevice %s got %lx\n", debugstr_w(nt_name.Buffer), status );
         return FALSE;
     }
     swprintf( symlink_buffer, ARRAY_SIZE(symlink_buffer), symlink_format, n );

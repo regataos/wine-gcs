@@ -87,7 +87,7 @@ struct device_extension
     struct list reports;
     IRP *pending_read;
 
-    struct unix_device *unix_device;
+    UINT64 unix_device;
 };
 
 static CRITICAL_SECTION device_list_cs;
@@ -101,24 +101,23 @@ static CRITICAL_SECTION device_list_cs = { &critsect_debug, -1, 0, 0, 0, 0 };
 
 static struct list device_list = LIST_INIT(device_list);
 
-static HMODULE instance;
-static unixlib_handle_t winebus_handle;
-
 static NTSTATUS winebus_call(unsigned int code, void *args)
 {
-    return __wine_unix_call(winebus_handle, code, args);
+    return WINE_UNIX_CALL(code, args);
 }
 
 static void unix_device_remove(DEVICE_OBJECT *device)
 {
     struct device_extension *ext = (struct device_extension *)device->DeviceExtension;
-    winebus_call(device_remove, ext->unix_device);
+    struct device_remove_params params = {.device = ext->unix_device};
+    winebus_call(device_remove, &params);
 }
 
 static NTSTATUS unix_device_start(DEVICE_OBJECT *device)
 {
     struct device_extension *ext = (struct device_extension *)device->DeviceExtension;
-    return winebus_call(device_start, ext->unix_device);
+    struct device_start_params params = {.device = ext->unix_device};
+    return winebus_call(device_start, &params);
 }
 
 static NTSTATUS unix_device_get_report_descriptor(DEVICE_OBJECT *device, BYTE *buffer, UINT length, UINT *out_length)
@@ -126,7 +125,7 @@ static NTSTATUS unix_device_get_report_descriptor(DEVICE_OBJECT *device, BYTE *b
     struct device_extension *ext = (struct device_extension *)device->DeviceExtension;
     struct device_descriptor_params params =
     {
-        .iface = ext->unix_device,
+        .device = ext->unix_device,
         .buffer = buffer,
         .length = length,
         .out_length = out_length
@@ -139,7 +138,7 @@ static void unix_device_set_output_report(DEVICE_OBJECT *device, HID_XFER_PACKET
     struct device_extension *ext = (struct device_extension *)device->DeviceExtension;
     struct device_report_params params =
     {
-        .iface = ext->unix_device,
+        .device = ext->unix_device,
         .packet = packet,
         .io = io,
     };
@@ -151,7 +150,7 @@ static void unix_device_get_feature_report(DEVICE_OBJECT *device, HID_XFER_PACKE
     struct device_extension *ext = (struct device_extension *)device->DeviceExtension;
     struct device_report_params params =
     {
-        .iface = ext->unix_device,
+        .device = ext->unix_device,
         .packet = packet,
         .io = io,
     };
@@ -163,7 +162,7 @@ static void unix_device_set_feature_report(DEVICE_OBJECT *device, HID_XFER_PACKE
     struct device_extension *ext = (struct device_extension *)device->DeviceExtension;
     struct device_report_params params =
     {
-        .iface = ext->unix_device,
+        .device = ext->unix_device,
         .packet = packet,
         .io = io,
     };
@@ -285,7 +284,7 @@ static void remove_pending_irps(DEVICE_OBJECT *device)
     }
 }
 
-static DEVICE_OBJECT *bus_create_hid_device(const WCHAR *bus_name, struct device_desc *desc, struct unix_device *unix_device)
+static DEVICE_OBJECT *bus_create_hid_device(const WCHAR *bus_name, struct device_desc *desc, UINT64 unix_device)
 {
     struct device_extension *ext;
     DEVICE_OBJECT *device;
@@ -293,7 +292,7 @@ static DEVICE_OBJECT *bus_create_hid_device(const WCHAR *bus_name, struct device
     WCHAR dev_name[256];
     NTSTATUS status;
 
-    TRACE("desc %s, unix_device %p\n", debugstr_device_desc(desc), unix_device);
+    TRACE("desc %s, unix_device %#I64x\n", debugstr_device_desc(desc), unix_device);
 
     swprintf(dev_name, ARRAY_SIZE(dev_name), L"\\Device\\WINEBUS#%p", unix_device);
     RtlInitUnicodeString(&nameW, dev_name);
@@ -323,11 +322,11 @@ static DEVICE_OBJECT *bus_create_hid_device(const WCHAR *bus_name, struct device
 
     RtlLeaveCriticalSection(&device_list_cs);
 
-    TRACE("created device %p/%p\n", device, unix_device);
+    TRACE("created device %p/%#I64x\n", device, unix_device);
     return device;
 }
 
-static DEVICE_OBJECT *bus_find_unix_device(struct unix_device *unix_device)
+static DEVICE_OBJECT *bus_find_unix_device(UINT64 unix_device)
 {
     struct device_extension *ext;
 
@@ -428,7 +427,7 @@ static BOOL deliver_next_report(struct device_extension *ext, IRP *irp)
 
     if (TRACE_ON(hid))
     {
-        TRACE("device %p/%p input report length %lu:\n", ext->device, ext->unix_device, report->length);
+        TRACE("device %p/%#I64x input report length %lu:\n", ext->device, ext->unix_device, report->length);
         for (i = 0; i < report->length;)
         {
             char buffer[256], *buf = buffer;
@@ -583,7 +582,7 @@ static DWORD CALLBACK bus_main_thread(void *args)
         case BUS_EVENT_TYPE_DEVICE_REMOVED:
             RtlEnterCriticalSection(&device_list_cs);
             device = bus_find_unix_device(event->device);
-            if (!device) WARN("could not find device for %s bus device %p\n", debugstr_w(bus.name), event->device);
+            if (!device) WARN("could not find device for %s bus device %#I64x\n", debugstr_w(bus.name), event->device);
             else bus_unlink_hid_device(device);
             RtlLeaveCriticalSection(&device_list_cs);
             IoInvalidateDeviceRelations(bus_pdo, BusRelations);
@@ -606,14 +605,15 @@ static DWORD CALLBACK bus_main_thread(void *args)
             if (device) IoInvalidateDeviceRelations(bus_pdo, BusRelations);
             else
             {
-                WARN("failed to create device for %s bus device %p\n", debugstr_w(bus.name), event->device);
-                winebus_call(device_remove, event->device);
+                struct device_remove_params params = {.device = event->device};
+                WARN("failed to create device for %s bus device %#I64x\n", debugstr_w(bus.name), event->device);
+                winebus_call(device_remove, &params);
             }
             break;
         case BUS_EVENT_TYPE_INPUT_REPORT:
             RtlEnterCriticalSection(&device_list_cs);
             device = bus_find_unix_device(event->device);
-            if (!device) WARN("could not find device for %s bus device %p\n", debugstr_w(bus.name), event->device);
+            if (!device) WARN("could not find device for %s bus device %#I64x\n", debugstr_w(bus.name), event->device);
             else process_hid_report(device, event->input_report.buffer, event->input_report.length);
             RtlLeaveCriticalSection(&device_list_cs);
             break;
@@ -748,6 +748,8 @@ static NTSTATUS sdl_driver_init(void)
     };
     NTSTATUS status;
 
+    bus_options.split_controllers = check_bus_option(L"Split Controllers", 0);
+    if (bus_options.split_controllers) TRACE("SDL controller splitting enabled\n");
     bus_options.map_controllers = check_bus_option(L"Map Controllers", 1);
     if (!bus_options.map_controllers) TRACE("SDL controller to XInput HID gamepad mapping disabled\n");
     sdl_bus_load_mappings(&bus_options);
@@ -1200,10 +1202,7 @@ NTSTATUS WINAPI DriverEntry( DRIVER_OBJECT *driver, UNICODE_STRING *path )
 
     TRACE( "(%p, %s)\n", driver, debugstr_w(path->Buffer) );
 
-    RtlPcToFileHeader(&DriverEntry, (void *)&instance);
-    if ((ret = NtQueryVirtualMemory(GetCurrentProcess(), instance, MemoryWineUnixFuncs,
-                                    &winebus_handle, sizeof(winebus_handle), NULL)))
-        return ret;
+    if ((ret = __wine_init_unix_call())) return ret;
 
     attr.Length = sizeof(attr);
     attr.ObjectName = path;

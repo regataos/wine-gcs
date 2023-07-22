@@ -38,7 +38,7 @@ int* __cdecl __processing_throw(void);
 #if _MSVCP_VER >= 70 || defined(_MSVCIRT)
 typedef const char **exception_name;
 #define EXCEPTION_STR(name) (*name)
-#define EXCEPTION_NAME(str) ((exception_name)&str)
+#define EXCEPTION_NAME(str) (&str)
 #else
 typedef const char *exception_name;
 #define EXCEPTION_STR(name) (name)
@@ -98,7 +98,7 @@ exception* __thiscall exception_copy_ctor(exception *this, const exception *rhs)
         this->name = rhs->name;
         this->do_free = FALSE;
     } else
-        MSVCP_exception_ctor(this, EXCEPTION_NAME(rhs->name));
+        MSVCP_exception_ctor(this, (exception_name)EXCEPTION_NAME(rhs->name));
     TRACE("name = %s\n", this->name);
     return this;
 }
@@ -216,7 +216,7 @@ bad_alloc* __thiscall MSVCP_bad_alloc_ctor(bad_alloc *this, exception_name name)
 DEFINE_THISCALL_WRAPPER(MSVCP_bad_alloc_default_ctor, 4)
 bad_alloc* __thiscall MSVCP_bad_alloc_default_ctor(bad_alloc *this)
 {
-    static const char name[] = "bad allocation";
+    static const char *name = "bad allocation";
     return MSVCP_bad_alloc_ctor(this, EXCEPTION_NAME(name));
 }
 
@@ -1005,7 +1005,7 @@ int __cdecl __uncaught_exceptions(void)
 typedef struct
 {
     EXCEPTION_RECORD *rec;
-    int *ref; /* not binary compatible with native */
+    LONG *ref; /* not binary compatible with native */
 } exception_ptr;
 
 /*********************************************************************

@@ -917,14 +917,14 @@ static void test_InternetTimeToSystemTime(void)
     {
         { "Fri, 07 Jan 2005 12:06:35 GMT", &expect1, TRUE },
         { " fri, 7 jan 2005 12 06 35",     &expect1, TRUE },
-        { "Fri, 07-01-2005 12:06:35",      &expect1, TRUE, TRUE },
-        { "5, 07-01-2005 12:06:35 GMT",    &expect1, TRUE, TRUE },
-        { "5, 07-01-2005 12:06:35 GMT;",   &expect1, TRUE, TRUE },
-        { "5, 07-01-2005 12:06:35 GMT123", &expect1, TRUE, TRUE },
-        { "2, 11 01 2022 11 13 05",        &expect2, TRUE, TRUE },
-        { "2, 11-01-2022 11#13^05",        &expect2, TRUE, TRUE },
-        { "2, 11*01/2022 11+13=05",        &expect2, TRUE, TRUE },
-        { "2, 11-Jan-2022 11:13:05",       &expect2, TRUE, TRUE },
+        { "Fri, 07-01-2005 12:06:35",      &expect1, TRUE },
+        { "5, 07-01-2005 12:06:35 GMT",    &expect1, TRUE },
+        { "5, 07-01-2005 12:06:35 GMT;",   &expect1, TRUE },
+        { "5, 07-01-2005 12:06:35 GMT123", &expect1, TRUE },
+        { "2, 11 01 2022 11 13 05",        &expect2, TRUE },
+        { "2, 11-01-2022 11#13^05",        &expect2, TRUE },
+        { "2, 11*01/2022 11+13=05",        &expect2, TRUE },
+        { "2, 11-Jan-2022 11:13:05",       &expect2, TRUE },
         { "Fr",                            NULL,     FALSE },
     };
 
@@ -1306,6 +1306,9 @@ static void test_Option_PerConnectionOption(void)
             "Retrieved flags should've been PROXY_TYPE_PROXY, was: %ld\n",
             list.pOptions[1].Value.dwValue);
     verifyProxyEnable(1);
+
+    ret = HeapValidate(GetProcessHeap(), 0, list.pOptions[0].Value.pszValue);
+    ok(ret, "HeapValidate failed, last error %lu\n", GetLastError());
 
     HeapFree(GetProcessHeap(), 0, list.pOptions[0].Value.pszValue);
     HeapFree(GetProcessHeap(), 0, list.pOptions);
@@ -1730,12 +1733,17 @@ static void test_InternetGetConnectedStateExW(void)
     }
 
     flags = 0;
-    buffer[0] = 0;
+    wcscpy(buffer, L"wine");
+    SetLastError(0xdeadbeef);
     res = pInternetGetConnectedStateExW(&flags, buffer, ARRAY_SIZE(buffer), 0);
     trace("Internet Connection: Flags 0x%02lx - Name '%s'\n", flags, wine_dbgstr_w(buffer));
     ok (flags & INTERNET_RAS_INSTALLED, "Missing RAS flag\n");
     if(!res) {
-        win_skip("InternetGetConnectedStateExW tests require a valid connection\n");
+        DWORD error = GetLastError();
+        ok(error == ERROR_SUCCESS, "Last error = %#lx\n", error);
+        ok(!buffer[0], "Expected empty connection name, got %s\n", wine_dbgstr_w(buffer));
+
+        skip("InternetGetConnectedStateExW tests require a valid connection\n");
         return;
     }
 

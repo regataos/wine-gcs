@@ -20,14 +20,238 @@
 #include <limits.h>
 #include <math.h>
 #include <float.h>
-#include "d2d1_1.h"
+#include "d2d1_3.h"
+#include "d2d1effectauthor.h"
 #include "d3d11.h"
 #include "wincrypt.h"
 #include "wine/test.h"
 #include "initguid.h"
 #include "dwrite.h"
 #include "wincodec.h"
-#include "wine/heap.h"
+
+DEFINE_GUID(CLSID_TestEffect, 0xb9ee12e9,0x32d9,0xe659,0xac,0x61,0x2d,0x7c,0xea,0x69,0x28,0x78);
+DEFINE_GUID(GUID_TestVertexShader, 0x5bcdcfae,0x1e92,0x4dc1,0x94,0xfa,0x3b,0x01,0xca,0x54,0x59,0x20);
+DEFINE_GUID(GUID_TestPixelShader,  0x53015748,0xfc13,0x4168,0xbd,0x13,0x0f,0xcf,0x15,0x29,0x7f,0x01);
+
+static const WCHAR *effect_xml_a =
+L"<?xml version='1.0'?>                                                       \
+    <Effect>                                                                  \
+        <Property name='DisplayName' type='string' value='TestEffectA'/>      \
+        <Property name='Author'      type='string' value='The Wine Project'/> \
+        <Property name='Category'    type='string' value='Test'/>             \
+        <Property name='Description' type='string' value='Test effect.'/>     \
+        <Inputs>                                                              \
+            <Input name='Source'/>                                            \
+        </Inputs>                                                             \
+        <Property name='Integer' type='uint32'>                               \
+            <Property name='DisplayName' type='string' value='Integer'/>      \
+            <Property name='Min'         type='uint32' value='0'/>            \
+            <Property name='Max'         type='uint32' value='100'/>          \
+            <Property name='Default'     type='uint32' value='10'/>           \
+        </Property>                                                           \
+        <Property name='Int32Prop' type='int32' value='-2'>                   \
+            <Property name='DisplayName' type='string' value='Int32 prop'/>   \
+            <Property name='Default' type='int32' value='10'/>                \
+        </Property>                                                           \
+        <Property name='UInt32Prop' type='uint32' value='-3'>                 \
+            <Property name='DisplayName' type='string' value='UInt32 prop'/>  \
+            <Property name='Default' type='uint32' value='10'/>               \
+        </Property>                                                           \
+        <Property name='Bool' type='bool'>                                     \
+            <Property name='DisplayName' type='string' value='Bool property'/> \
+            <Property name='Default'     type='bool' value='false'/>           \
+        </Property>                                                            \
+        <Property name='Vec2Prop' type='vector2' value='( 3.0,  4.0)'>         \
+            <Property name='DisplayName' type='string' value='Vec2 prop'/>    \
+            <Property name='Default'     type='vector2' value='(1.0, 2.0)'/>  \
+        </Property>                                                           \
+        <Property name='Vec3Prop' type='vector3' value='(5.0, 6.0, 7.0)'>     \
+            <Property name='DisplayName' type='string' value='Vec3 prop'/>    \
+            <Property name='Default' type='vector3' value='(0.1, 0.2, 0.3)'/> \
+        </Property>                                                           \
+        <Property name='Vec4Prop' type='vector4' value='(8.0,9.0,10.0,11.0)'>   \
+            <Property name='DisplayName' type='string' value='Vec4 prop'/>      \
+            <Property name='Default' type='vector4' value='(0.8,0.9,1.0,1.1)'/> \
+        </Property>                                                             \
+        <Property name='Mat3x2Prop' type='matrix3x2'                          \
+            value='(1.0,2.0,3.0,4.0,5.0,6.0)'>                                \
+            <Property name='DisplayName' type='string' value='Mat3x2 prop'/>  \
+            <Property name='Default' type='matrix3x2'                         \
+                value='(0.1,0.2,0.3,0.4,0.5,0.6)'/>                           \
+        </Property>                                                           \
+        <Property name='Mat4x3Prop' type='matrix4x3'                          \
+            value='(1.0,2.0,3.0,4.0,5.0,6.0,7.0,8.0,9.0,10.0,11.0,12)'>       \
+            <Property name='DisplayName' type='string' value='Mat4x3 prop'/>  \
+            <Property name='Default' type='matrix4x3'                         \
+                value='(0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0,1.1,1.2)'/>   \
+        </Property>                                                           \
+        <Property name='Mat4x4Prop' type='matrix4x4'                          \
+            value='(1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16)'>                 \
+            <Property name='DisplayName' type='string' value='Mat4x4 prop'/>  \
+            <Property name='Default' type='matrix4x4'                         \
+                value='(16,15,14,13,12,11,10,9,8,7,6,5,4,3,2,1)'/>            \
+        </Property>                                                           \
+        <Property name='Mat5x4Prop' type='matrix5x4'                          \
+            value='(1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20)'>     \
+            <Property name='DisplayName' type='string' value='Mat5x4 prop'/>  \
+            <Property name='Default' type='matrix5x4'                         \
+                value='(20,19,18,17,16,15,14,13,12,11,10,9,8,7,6,5,4,3,2,1)'/>\
+        </Property>                                                           \
+    </Effect>                                                                 \
+";
+
+static const WCHAR *effect_xml_b =
+L"<?xml version='1.0'?>                                                       \
+    <Effect>                                                                  \
+        <Property name='DisplayName' type='string' value='TestEffectB'/>      \
+        <Property name='Author'      type='string' value='The Wine Project'/> \
+        <Property name='Category'    type='string' value='Test'/>             \
+        <Property name='Description' type='string' value='Test effect.'/>     \
+        <Inputs>                                                              \
+            <Input name='Source'/>                                            \
+        </Inputs>                                                             \
+        <Property name='Context' type='iunknown'>                             \
+            <Property name='DisplayName' type='string' value='Context'/>      \
+        </Property>                                                           \
+    </Effect>                                                                 \
+";
+
+static const WCHAR *effect_xml_c =
+L"<?xml version='1.0'?>                                                       \
+    <Effect>                                                                  \
+        <Property name='DisplayName' type='string' value='TestEffectC'/>      \
+        <Property name='Author'      type='string' value='The Wine Project'/> \
+        <Property name='Category'    type='string' value='Test'/>             \
+        <Property name='Description' type='string' value='Test effect.'/>     \
+        <Inputs>                                                              \
+            <Input name='Source'/>                                            \
+        </Inputs>                                                             \
+        <Property name='Context' type='iunknown'>                             \
+            <Property name='DisplayName' type='string' value='Context'/>      \
+        </Property>                                                           \
+        <Property name='Integer' type='uint32'>                               \
+            <Property name='DisplayName' type='string' value='Integer'/>      \
+        </Property>                                                           \
+        <Property name='Graph' type='iunknown'>                               \
+            <Property name='DisplayName' type='string' value='Graph'/>        \
+        </Property>                                                           \
+    </Effect>                                                                 \
+";
+
+static const WCHAR *effect_xml_minimum =
+L"<?xml version='1.0'?>                                                       \
+    <Effect>                                                                  \
+        <Property name='DisplayName' type='string'/>                          \
+        <Property name='Author'      type='string'/>                          \
+        <Property name='Category'    type='string'/>                          \
+        <Property name='Description' type='string'/>                          \
+        <Inputs/>                                                             \
+    </Effect>                                                                 \
+";
+
+static const WCHAR *effect_xml_without_version =
+L"<Effect>                                                                    \
+        <Property name='DisplayName' type='string'/>                          \
+        <Property name='Author'      type='string'/>                          \
+        <Property name='Category'    type='string'/>                          \
+        <Property name='Description' type='string'/>                          \
+        <Inputs/>                                                             \
+    </Effect>                                                                 \
+";
+
+static const WCHAR *effect_xml_without_inputs =
+L"<?xml version='1.0'?>                                                       \
+    <Effect>                                                                  \
+        <Property name='DisplayName' type='string'/>                          \
+        <Property name='Author'      type='string'/>                          \
+        <Property name='Category'    type='string'/>                          \
+        <Property name='Description' type='string'/>                          \
+    </Effect>                                                                 \
+";
+
+static const WCHAR *effect_xml_without_name =
+L"<?xml version='1.0'?>                                                       \
+    <Effect>                                                                  \
+        <Property name='Author'      type='string'/>                          \
+        <Property name='Category'    type='string'/>                          \
+        <Property name='Description' type='string'/>                          \
+        <Inputs/>                                                             \
+    </Effect>                                                                 \
+";
+
+static const WCHAR *effect_xml_without_author =
+L"<?xml version='1.0'?>                                                       \
+    <Effect>                                                                  \
+        <Property name='DisplayName' type='string'/>                          \
+        <Property name='Category'    type='string'/>                          \
+        <Property name='Description' type='string'/>                          \
+        <Inputs/>                                                             \
+    </Effect>                                                                 \
+";
+
+static const WCHAR *effect_xml_without_category =
+L"<?xml version='1.0'?>                                                       \
+    <Effect>                                                                  \
+        <Property name='DisplayName' type='string'/>                          \
+        <Property name='Author'      type='string'/>                          \
+        <Property name='Description' type='string'/>                          \
+        <Inputs/>                                                             \
+    </Effect>                                                                 \
+";
+
+static const WCHAR *effect_xml_without_description =
+L"<?xml version='1.0'?>                                                       \
+    <Effect>                                                                  \
+        <Property name='DisplayName' type='string'/>                          \
+        <Property name='Author'      type='string'/>                          \
+        <Property name='Category'    type='string'/>                          \
+        <Inputs/>                                                             \
+    </Effect>                                                                 \
+";
+
+static const WCHAR *effect_xml_without_type =
+L"<?xml version='1.0'?>                                                       \
+    <Effect>                                                                  \
+        <Property name='DisplayName' type='string'/>                          \
+        <Property name='Author'      type='string'/>                          \
+        <Property name='Category'    type='string'/>                          \
+        <Property name='Description'/>                                        \
+        <Inputs/>                                                             \
+    </Effect>                                                                 \
+";
+
+static const DWORD test_vs[] =
+{
+#if 0
+    void main(float4 pos : Position, out float4 output : SV_Position)
+    {
+        output = pos;
+    }
+#endif
+    0x43425844, 0xa84b398b, 0xc4047d32, 0xc19c67bb, 0x4644285e, 0x00000001, 0x000000d8, 0x00000003,
+    0x0000002c, 0x00000060, 0x00000094, 0x4e475349, 0x0000002c, 0x00000001, 0x00000008, 0x00000020,
+    0x00000000, 0x00000000, 0x00000003, 0x00000000, 0x00000f0f, 0x69736f50, 0x6e6f6974, 0xababab00,
+    0x4e47534f, 0x0000002c, 0x00000001, 0x00000008, 0x00000020, 0x00000000, 0x00000001, 0x00000003,
+    0x00000000, 0x0000000f, 0x505f5653, 0x7469736f, 0x006e6f69, 0x52444853, 0x0000003c, 0x00010040,
+    0x0000000f, 0x0300005f, 0x001010f2, 0x00000000, 0x04000067, 0x001020f2, 0x00000000, 0x00000001,
+    0x05000036, 0x001020f2, 0x00000000, 0x00101e46, 0x00000000, 0x0100003e,
+};
+
+static const DWORD test_ps[] =
+{
+#if 0
+    float4 main() : SV_Target
+    {
+        return float4(0.1, 0.2, 0.3, 0.4);
+    }
+#endif
+    0x43425844, 0xf34300ae, 0x22fc6d56, 0x5cca66fa, 0x86ae3266, 0x00000001, 0x000000b0, 0x00000003,
+    0x0000002c, 0x0000003c, 0x00000070, 0x4e475349, 0x00000008, 0x00000000, 0x00000008, 0x4e47534f,
+    0x0000002c, 0x00000001, 0x00000008, 0x00000020, 0x00000000, 0x00000000, 0x00000003, 0x00000000,
+    0x0000000f, 0x545f5653, 0x65677261, 0xabab0074, 0x52444853, 0x00000038, 0x00000040, 0x0000000e,
+    0x03000065, 0x001020f2, 0x00000000, 0x08000036, 0x001020f2, 0x00000000, 0x00004002, 0x3dcccccd,
+    0x3e4ccccd, 0x3e99999a, 0x3ecccccd, 0x0100003e,
+};
 
 static HRESULT (WINAPI *pD2D1CreateDevice)(IDXGIDevice *dxgi_device,
         const D2D1_CREATION_PROPERTIES *properties, ID2D1Device **device);
@@ -54,6 +278,11 @@ struct d2d1_test_context
     IDXGISwapChain *swapchain;
     IDXGISurface *surface;
     ID2D1RenderTarget *rt;
+    ID2D1DeviceContext *context;
+    ID2D1Factory *factory;
+    ID2D1Factory1 *factory1;
+    ID2D1Factory2 *factory2;
+    ID2D1Factory3 *factory3;
 };
 
 struct resource_readback
@@ -118,12 +347,21 @@ struct expected_geometry_figure
     const struct geometry_segment *segments;
 };
 
+struct effect_impl
+{
+    ID2D1EffectImpl ID2D1EffectImpl_iface;
+    LONG refcount;
+    UINT integer;
+    ID2D1EffectContext *effect_context;
+    ID2D1TransformGraph *transform_graph;
+};
+
 static void queue_d3d1x_test(void (*test)(BOOL d3d11), BOOL d3d11)
 {
     if (mt_test_count >= mt_tests_size)
     {
         mt_tests_size = max(16, mt_tests_size * 2);
-        mt_tests = heap_realloc(mt_tests, mt_tests_size * sizeof(*mt_tests));
+        mt_tests = realloc(mt_tests, mt_tests_size * sizeof(*mt_tests));
     }
     mt_tests[mt_test_count].test = test;
     mt_tests[mt_test_count++].d3d11 = d3d11;
@@ -173,7 +411,7 @@ static void run_queued_tests(void)
 
     GetSystemInfo(&si);
     thread_count = si.dwNumberOfProcessors;
-    threads = heap_calloc(thread_count, sizeof(*threads));
+    threads = calloc(thread_count, sizeof(*threads));
     for (i = 0, test_idx = 0; i < thread_count; ++i)
     {
         threads[i] = CreateThread(NULL, 0, thread_func, &test_idx, 0, NULL);
@@ -184,7 +422,7 @@ static void run_queued_tests(void)
     {
         CloseHandle(threads[i]);
     }
-    heap_free(threads);
+    free(threads);
 }
 
 static void set_point(D2D1_POINT_2F *point, float x, float y)
@@ -343,12 +581,12 @@ static void get_d3d10_surface_readback(IDXGISurface *surface, struct resource_re
     HRESULT hr;
 
     hr = IDXGISurface_GetDevice(surface, &IID_ID3D10Device, (void **)&device);
-    ok(SUCCEEDED(hr), "Failed to get device, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     hr = IDXGISurface_QueryInterface(surface, &IID_ID3D10Resource, (void **)&src_resource);
-    ok(SUCCEEDED(hr), "Failed to query resource interface, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     hr = IDXGISurface_GetDesc(surface, &surface_desc);
-    ok(SUCCEEDED(hr), "Failed to get surface desc, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     texture_desc.Width = surface_desc.Width;
     texture_desc.Height = surface_desc.Height;
     texture_desc.MipLevels = 1;
@@ -360,7 +598,7 @@ static void get_d3d10_surface_readback(IDXGISurface *surface, struct resource_re
     texture_desc.CPUAccessFlags = D3D10_CPU_ACCESS_READ;
     texture_desc.MiscFlags = 0;
     hr = ID3D10Device_CreateTexture2D(device, &texture_desc, NULL, (ID3D10Texture2D **)&rb->u.d3d10_resource);
-    ok(SUCCEEDED(hr), "Failed to create texture, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     rb->width = texture_desc.Width;
     rb->height = texture_desc.Height;
@@ -370,7 +608,7 @@ static void get_d3d10_surface_readback(IDXGISurface *surface, struct resource_re
     ID3D10Device_Release(device);
 
     hr = ID3D10Texture2D_Map((ID3D10Texture2D *)rb->u.d3d10_resource, 0, D3D10_MAP_READ, 0, &map_desc);
-    ok(SUCCEEDED(hr), "Failed to map texture, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     rb->pitch = map_desc.RowPitch;
     rb->data = map_desc.pData;
@@ -387,12 +625,12 @@ static void get_d3d11_surface_readback(IDXGISurface *surface, struct resource_re
     HRESULT hr;
 
     hr = IDXGISurface_GetDevice(surface, &IID_ID3D11Device, (void **)&device);
-    ok(SUCCEEDED(hr), "Failed to get device, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     hr = IDXGISurface_QueryInterface(surface, &IID_ID3D11Resource, (void **)&src_resource);
-    ok(SUCCEEDED(hr), "Failed to query resource interface, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     hr = IDXGISurface_GetDesc(surface, &surface_desc);
-    ok(SUCCEEDED(hr), "Failed to get surface desc, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     texture_desc.Width = surface_desc.Width;
     texture_desc.Height = surface_desc.Height;
     texture_desc.MipLevels = 1;
@@ -404,7 +642,7 @@ static void get_d3d11_surface_readback(IDXGISurface *surface, struct resource_re
     texture_desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
     texture_desc.MiscFlags = 0;
     hr = ID3D11Device_CreateTexture2D(device, &texture_desc, NULL, (ID3D11Texture2D **)&rb->u.d3d11_resource);
-    ok(SUCCEEDED(hr), "Failed to create texture, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     rb->width = texture_desc.Width;
     rb->height = texture_desc.Height;
@@ -415,7 +653,7 @@ static void get_d3d11_surface_readback(IDXGISurface *surface, struct resource_re
     ID3D11Device_Release(device);
 
     hr = ID3D11DeviceContext_Map(context, rb->u.d3d11_resource, 0, D3D11_MAP_READ, 0, &map_desc);
-    ok(SUCCEEDED(hr), "Failed to map texture, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ID3D11DeviceContext_Release(context);
 
     rb->pitch = map_desc.RowPitch;
@@ -536,6 +774,7 @@ static BOOL compare_sha1(void *data, unsigned int pitch, unsigned int bpp,
     HCRYPTPROV provider;
     BYTE hash_data[20];
     HCRYPTHASH hash;
+    DWORD hash_size;
     unsigned int i;
     char sha1[41];
     BOOL ret;
@@ -552,10 +791,10 @@ static BOOL compare_sha1(void *data, unsigned int pitch, unsigned int bpp,
     }
     ok(ret, "Failed to hash data.\n");
 
-    i = sizeof(hash_data);
-    ret = CryptGetHashParam(hash, HP_HASHVAL, hash_data, &i, 0);
+    hash_size = sizeof(hash_data);
+    ret = CryptGetHashParam(hash, HP_HASHVAL, hash_data, &hash_size, 0);
     ok(ret, "Failed to get hash value.\n");
-    ok(i == sizeof(hash_data), "Got unexpected hash size %u.\n", i);
+    ok(hash_size == sizeof(hash_data), "Got unexpected hash size %lu.\n", hash_size);
 
     ret = CryptDestroyHash(hash);
     ok(ret, "Failed to destroy hash.\n");
@@ -593,16 +832,16 @@ static BOOL compare_wic_bitmap(IWICBitmap *bitmap, const char *ref_sha1)
     BOOL ret;
 
     hr = IWICBitmap_Lock(bitmap, NULL, WICBitmapLockRead, &lock);
-    ok(SUCCEEDED(hr), "Failed to lock bitmap, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     hr = IWICBitmapLock_GetDataPointer(lock, &buffer_size, &data);
-    ok(SUCCEEDED(hr), "Failed to get bitmap data, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     hr = IWICBitmapLock_GetStride(lock, &stride);
-    ok(SUCCEEDED(hr), "Failed to get bitmap stride, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     hr = IWICBitmapLock_GetSize(lock, &width, &height);
-    ok(SUCCEEDED(hr), "Failed to get bitmap size, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     ret = compare_sha1(data, stride, 4, width, height, ref_sha1);
 
@@ -823,17 +1062,17 @@ static ID3D10Device1 *create_d3d10_device(void)
 
 static ID3D11Device *create_d3d11_device(void)
 {
-    DWORD level = D3D_FEATURE_LEVEL_11_0;
+    D3D_FEATURE_LEVEL level = D3D_FEATURE_LEVEL_11_0;
     ID3D11Device *device;
 
     if (SUCCEEDED(D3D11CreateDevice(NULL, D3D_DRIVER_TYPE_HARDWARE, NULL,
-            D3D10_CREATE_DEVICE_BGRA_SUPPORT, &level, 1, D3D11_SDK_VERSION, &device, NULL, NULL)))
+            D3D11_CREATE_DEVICE_BGRA_SUPPORT, &level, 1, D3D11_SDK_VERSION, &device, NULL, NULL)))
         return device;
     if (SUCCEEDED(D3D11CreateDevice(NULL, D3D_DRIVER_TYPE_WARP, NULL,
-            D3D10_CREATE_DEVICE_BGRA_SUPPORT, &level, 1, D3D11_SDK_VERSION, &device, NULL, NULL)))
+            D3D11_CREATE_DEVICE_BGRA_SUPPORT, &level, 1, D3D11_SDK_VERSION, &device, NULL, NULL)))
         return device;
     if (SUCCEEDED(D3D11CreateDevice(NULL, D3D_DRIVER_TYPE_REFERENCE, NULL,
-            D3D10_CREATE_DEVICE_BGRA_SUPPORT, &level, 1, D3D11_SDK_VERSION, &device, NULL, NULL)))
+            D3D11_CREATE_DEVICE_BGRA_SUPPORT, &level, 1, D3D11_SDK_VERSION, &device, NULL, NULL)))
         return device;
 
     return NULL;
@@ -861,7 +1100,7 @@ static IDXGIDevice *create_device(BOOL d3d11)
         ID3D10Device1_Release(d3d10_device);
     }
 
-    ok(SUCCEEDED(hr), "Failed to get DXGI device, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     return device;
 }
@@ -885,9 +1124,9 @@ static IDXGISwapChain *create_swapchain(IDXGIDevice *device, HWND window, BOOL w
     HRESULT hr;
 
     hr = IDXGIDevice_GetAdapter(device, &adapter);
-    ok(SUCCEEDED(hr), "Failed to get adapter, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     hr = IDXGIAdapter_GetParent(adapter, &IID_IDXGIFactory, (void **)&factory);
-    ok(SUCCEEDED(hr), "Failed to get factory, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     IDXGIAdapter_Release(adapter);
 
     desc.BufferDesc.Width = 640;
@@ -907,7 +1146,7 @@ static IDXGISwapChain *create_swapchain(IDXGIDevice *device, HWND window, BOOL w
     desc.Flags = 0;
 
     hr = IDXGIFactory_CreateSwapChain(factory, (IUnknown *)device, &desc, &swapchain);
-    ok(SUCCEEDED(hr), "Failed to create swapchain, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     IDXGIFactory_Release(factory);
 
     return swapchain;
@@ -920,7 +1159,7 @@ static IDXGISwapChain *create_d3d10_swapchain(ID3D10Device1 *device, HWND window
     HRESULT hr;
 
     hr = ID3D10Device1_QueryInterface(device, &IID_IDXGIDevice, (void **)&dxgi_device);
-    ok(SUCCEEDED(hr), "Failed to get DXGI device, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     swapchain = create_swapchain(dxgi_device, window, windowed);
     IDXGIDevice_Release(dxgi_device);
     return swapchain;
@@ -934,9 +1173,9 @@ static ID2D1RenderTarget *create_render_target_desc(IDXGISurface *surface,
     HRESULT hr;
 
     hr = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, &IID_ID2D1Factory, NULL, (void **)&factory);
-    ok(SUCCEEDED(hr), "Failed to create factory, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     hr = ID2D1Factory_CreateDxgiSurfaceRenderTarget(factory, surface, desc, &render_target);
-    ok(SUCCEEDED(hr), "Failed to create render target, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ID2D1Factory_Release(factory);
 
     return render_target;
@@ -960,18 +1199,24 @@ static ID2D1RenderTarget *create_render_target(IDXGISurface *surface, BOOL d3d11
 #define release_test_context(ctx) release_test_context_(__LINE__, ctx)
 static void release_test_context_(unsigned int line, struct d2d1_test_context *ctx)
 {
-    ID2D1Factory *factory;
     ULONG ref;
 
-    ID2D1RenderTarget_GetFactory(ctx->rt, &factory);
+    if (ctx->factory3)
+        ID2D1Factory3_Release(ctx->factory3);
+    if (ctx->factory2)
+        ID2D1Factory2_Release(ctx->factory2);
+    if (ctx->factory1)
+        ID2D1Factory1_Release(ctx->factory1);
+    ID2D1DeviceContext_Release(ctx->context);
     ID2D1RenderTarget_Release(ctx->rt);
-    ref = ID2D1Factory_Release(factory);
-    ok_(__FILE__, line)(!ref, "Factory has %u references left.\n", ref);
+    ref = ID2D1Factory_Release(ctx->factory);
+    ok_(__FILE__, line)(!ref, "Factory has %lu references left.\n", ref);
 
     IDXGISurface_Release(ctx->surface);
     IDXGISwapChain_Release(ctx->swapchain);
     DestroyWindow(ctx->window);
-    IDXGIDevice_Release(ctx->device);
+    ref = IDXGIDevice_Release(ctx->device);
+    ok_(__FILE__, line)(!ref, "Device has %lu references left.\n", ref);
 }
 
 #define init_test_context(ctx, d3d11) init_test_context_(__LINE__, ctx, d3d11)
@@ -993,7 +1238,7 @@ static BOOL init_test_context_(unsigned int line, struct d2d1_test_context *ctx,
     ctx->swapchain = create_swapchain(ctx->device, ctx->window, TRUE);
     ok_(__FILE__, line)(!!ctx->swapchain, "Failed to create swapchain.\n");
     hr = IDXGISwapChain_GetBuffer(ctx->swapchain, 0, &IID_IDXGISurface, (void **)&ctx->surface);
-    ok_(__FILE__, line)(SUCCEEDED(hr), "Failed to get buffer, hr %#x.\n", hr);
+    ok_(__FILE__, line)(hr == S_OK, "Failed to get buffer, hr %#lx.\n", hr);
 
     ctx->rt = create_render_target(ctx->surface, d3d11);
     if (!ctx->rt && d3d11)
@@ -1009,7 +1254,33 @@ static BOOL init_test_context_(unsigned int line, struct d2d1_test_context *ctx,
     }
     ok_(__FILE__, line)(!!ctx->rt, "Failed to create render target.\n");
 
+    hr = ID2D1RenderTarget_QueryInterface(ctx->rt, &IID_ID2D1DeviceContext, (void **)&ctx->context);
+    ok_(__FILE__, line)(hr == S_OK, "Failed to get device context, hr %#lx.\n", hr);
+
+    ID2D1RenderTarget_GetFactory(ctx->rt, &ctx->factory);
+    ID2D1Factory_QueryInterface(ctx->factory, &IID_ID2D1Factory1, (void **)&ctx->factory1);
+    ID2D1Factory_QueryInterface(ctx->factory, &IID_ID2D1Factory2, (void **)&ctx->factory2);
+    ID2D1Factory_QueryInterface(ctx->factory, &IID_ID2D1Factory3, (void **)&ctx->factory3);
+
     return TRUE;
+}
+
+#define check_bitmap_options(b, o) check_bitmap_options_(__LINE__, b, o)
+static void check_bitmap_options_(unsigned int line, ID2D1Bitmap *bitmap, DWORD expected_options)
+{
+    D2D1_BITMAP_OPTIONS options;
+    ID2D1Bitmap1 *bitmap1;
+    HRESULT hr;
+
+    hr = ID2D1Bitmap_QueryInterface(bitmap, &IID_ID2D1Bitmap1, (void **)&bitmap1);
+    if (FAILED(hr))
+        return;
+
+    options = ID2D1Bitmap1_GetOptions(bitmap1);
+    ok_(__FILE__, line)(options == expected_options, "Got unexpected bitmap options %#x, expected %#lx.\n",
+            options, expected_options);
+
+    ID2D1Bitmap1_Release(bitmap1);
 }
 
 #define check_bitmap_surface(b, s, o) check_bitmap_surface_(__LINE__, b, s, o)
@@ -1025,7 +1296,7 @@ static void check_bitmap_surface_(unsigned int line, ID2D1Bitmap *bitmap, BOOL h
         return;
 
     options = ID2D1Bitmap1_GetOptions(bitmap1);
-    ok_(__FILE__, line)(options == expected_options, "Unexpected bitmap options %#x, expected %#x.\n",
+    ok_(__FILE__, line)(options == expected_options, "Got unexpected bitmap options %#x, expected %#lx.\n",
             options, expected_options);
 
     surface = (void *)0xdeadbeef;
@@ -1037,12 +1308,12 @@ static void check_bitmap_surface_(unsigned int line, ID2D1Bitmap *bitmap, BOOL h
         D2D1_SIZE_U pixel_size;
         DWORD bind_flags = 0;
 
-        ok_(__FILE__, line)(SUCCEEDED(hr), "Failed to get bitmap surface, hr %#x.\n", hr);
+        ok_(__FILE__, line)(hr == S_OK, "Failed to get bitmap surface, hr %#lx.\n", hr);
         ok_(__FILE__, line)(!!surface, "Expected surface instance.\n");
 
         /* Correlate with resource configuration. */
         hr = IDXGISurface_QueryInterface(surface, &IID_ID3D10Texture2D, (void **)&texture);
-        ok_(__FILE__, line)(SUCCEEDED(hr), "Failed to get texture pointer, hr %#x.\n", hr);
+        ok_(__FILE__, line)(hr == S_OK, "Failed to get texture pointer, hr %#lx.\n", hr);
 
         ID3D10Texture2D_GetDesc(texture, &desc);
         ok_(__FILE__, line)(desc.Usage == 0, "Unexpected usage %#x.\n", desc.Usage);
@@ -1071,7 +1342,7 @@ static void check_bitmap_surface_(unsigned int line, ID2D1Bitmap *bitmap, BOOL h
     }
     else
     {
-        ok_(__FILE__, line)(hr == D2DERR_INVALID_CALL, "Unexpected hr %#x.\n", hr);
+        ok_(__FILE__, line)(hr == D2DERR_INVALID_CALL, "Got unexpected hr %#lx.\n", hr);
         ok_(__FILE__, line)(!surface, "Unexpected surface instance.\n");
     }
 
@@ -1288,7 +1559,7 @@ static void geometry_sink_check_(unsigned int line, const struct geometry_sink *
                     "Got unexpected figure %u, segment %u type %#x, expected %#x.\n",
                     i, j, segment->type, expected_segment->type);
             ok_(__FILE__, line)(segment->flags == expected_segment->flags,
-                    "Got unexpected figure %u, segment %u flags %#x, expected %#x.\n",
+                    "Got unexpected figure %u, segment %u flags %#lx, expected %#lx.\n",
                     i, j, segment->flags, expected_segment->flags);
             switch (segment->type)
             {
@@ -1479,7 +1750,7 @@ static void test_clip(BOOL d3d11)
     ID2D1RenderTarget_PopAxisAlignedClip(rt);
 
     hr = ID2D1RenderTarget_EndDraw(rt, NULL, NULL);
-    ok(SUCCEEDED(hr), "Failed to end draw, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     match = compare_surface(&ctx, "035a44d4198d6e422e9de6185b5b2c2bac5e33c9");
     ok(match, "Surface does not match.\n");
 
@@ -1545,7 +1816,7 @@ static void test_clip(BOOL d3d11)
     ID2D1RenderTarget_PopAxisAlignedClip(rt);
 
     hr = ID2D1RenderTarget_EndDraw(rt, NULL, NULL);
-    ok(SUCCEEDED(hr), "Failed to end draw, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     match = compare_surface(&ctx, "cb418ec4a7c8407b5e36db06fc6292a06bb8476c");
     ok(match, "Surface does not match.\n");
 
@@ -1564,6 +1835,7 @@ static void test_state_block(BOOL d3d11)
     ID2D1Factory *factory;
     ULONG refcount;
     HRESULT hr;
+    void *ptr;
     static const D2D1_MATRIX_3X2_F identity =
     {{{
         1.0f, 0.0f,
@@ -1587,11 +1859,12 @@ static void test_state_block(BOOL d3d11)
         return;
 
     rt = ctx.rt;
-    ID2D1RenderTarget_GetFactory(rt, &factory);
+    factory = ctx.factory;
+    factory1 = ctx.factory1;
     hr = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, &IID_IDWriteFactory, (IUnknown **)&dwrite_factory);
-    ok(SUCCEEDED(hr), "Failed to create dwrite factory, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     hr = IDWriteFactory_CreateRenderingParams(dwrite_factory, &text_rendering_params1);
-    ok(SUCCEEDED(hr), "Failed to create dwrite rendering params, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     IDWriteFactory_Release(dwrite_factory);
 
     drawing_state.antialiasMode = ID2D1RenderTarget_GetAntialiasMode(rt);
@@ -1612,7 +1885,7 @@ static void test_state_block(BOOL d3d11)
     ok(!text_rendering_params2, "Got unexpected text rendering params %p.\n", text_rendering_params2);
 
     hr = ID2D1Factory_CreateDrawingStateBlock(factory, NULL, NULL, &state_block);
-    ok(SUCCEEDED(hr), "Failed to create drawing state block, hr %#x\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ID2D1DrawingStateBlock_GetDescription(state_block, &drawing_state);
     ok(drawing_state.antialiasMode == D2D1_ANTIALIAS_MODE_PER_PRIMITIVE,
             "Got unexpected antialias mode %#x.\n", drawing_state.antialiasMode);
@@ -1634,7 +1907,7 @@ static void test_state_block(BOOL d3d11)
     drawing_state.tag2 = 0xbeef;
     drawing_state.transform = transform1;
     hr = ID2D1Factory_CreateDrawingStateBlock(factory, &drawing_state, text_rendering_params1, &state_block);
-    ok(SUCCEEDED(hr), "Failed to create drawing state block, hr %#x\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     ID2D1DrawingStateBlock_GetDescription(state_block, &drawing_state);
     ok(drawing_state.antialiasMode == D2D1_ANTIALIAS_MODE_ALIASED,
@@ -1736,13 +2009,13 @@ static void test_state_block(BOOL d3d11)
             text_rendering_params2, text_rendering_params1);
     IDWriteRenderingParams_Release(text_rendering_params2);
 
-    if (SUCCEEDED(ID2D1Factory_QueryInterface(factory, &IID_ID2D1Factory1, (void **)&factory1)))
+    if (factory1)
     {
         D2D1_DRAWING_STATE_DESCRIPTION1 drawing_state1;
         ID2D1DrawingStateBlock1 *state_block1;
 
         hr = ID2D1DrawingStateBlock_QueryInterface(state_block, &IID_ID2D1DrawingStateBlock1, (void **)&state_block1);
-        ok(SUCCEEDED(hr), "Failed to get ID2D1DrawingStateBlock1 interface, hr %#x.\n", hr);
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
         ID2D1DrawingStateBlock1_GetDescription(state_block1, &drawing_state1);
         ok(drawing_state1.antialiasMode == D2D1_ANTIALIAS_MODE_ALIASED,
@@ -1782,7 +2055,7 @@ static void test_state_block(BOOL d3d11)
         ID2D1DrawingStateBlock1_Release(state_block1);
 
         hr = ID2D1Factory1_CreateDrawingStateBlock(factory1, NULL, NULL, &state_block1);
-        ok(SUCCEEDED(hr), "Failed to create drawing state block, hr %#x\n", hr);
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
         ID2D1DrawingStateBlock1_GetDescription(state_block1, &drawing_state1);
         ok(drawing_state1.antialiasMode == D2D1_ANTIALIAS_MODE_PER_PRIMITIVE,
                 "Got unexpected antialias mode %#x.\n", drawing_state1.antialiasMode);
@@ -1800,15 +2073,21 @@ static void test_state_block(BOOL d3d11)
         ID2D1DrawingStateBlock1_GetTextRenderingParams(state_block1, &text_rendering_params2);
         ok(!text_rendering_params2, "Got unexpected text rendering params %p.\n", text_rendering_params2);
         ID2D1DrawingStateBlock1_Release(state_block1);
-
-        ID2D1Factory1_Release(factory1);
     }
 
     ID2D1DrawingStateBlock_Release(state_block);
 
     refcount = IDWriteRenderingParams_Release(text_rendering_params1);
-    ok(!refcount, "Rendering params %u references left.\n", refcount);
-    ID2D1Factory_Release(factory);
+    ok(!refcount, "Rendering params %lu references left.\n", refcount);
+
+    /* State block object pointer is validated, but does not result in an error state. */
+    ptr = (void *)0xdeadbeef;
+    ID2D1RenderTarget_BeginDraw(rt);
+    ID2D1RenderTarget_SaveDrawingState(rt, (ID2D1DrawingStateBlock *)&ptr);
+    ID2D1RenderTarget_RestoreDrawingState(rt, (ID2D1DrawingStateBlock *)&ptr);
+    hr = ID2D1RenderTarget_EndDraw(rt, NULL, NULL);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
     release_test_context(&ctx);
 }
 
@@ -1834,7 +2113,7 @@ static void test_color_brush(BOOL d3d11)
 
     set_color(&color, 0.0f, 0.0f, 0.0f, 0.0f);
     hr = ID2D1RenderTarget_CreateSolidColorBrush(rt, &color, NULL, &brush);
-    ok(SUCCEEDED(hr), "Failed to create brush, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     opacity = ID2D1SolidColorBrush_GetOpacity(brush);
     ok(opacity == 1.0f, "Got unexpected opacity %.8e.\n", opacity);
     set_matrix_identity(&matrix);
@@ -1855,7 +2134,7 @@ static void test_color_brush(BOOL d3d11)
     scale_matrix(&matrix, 2.0f, 2.0f);
     brush_desc.transform = matrix;
     hr = ID2D1RenderTarget_CreateSolidColorBrush(rt, &color, &brush_desc, &brush);
-    ok(SUCCEEDED(hr), "Failed to create brush, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     opacity = ID2D1SolidColorBrush_GetOpacity(brush);
     ok(opacity == 0.3f, "Got unexpected opacity %.8e.\n", opacity);
     ID2D1SolidColorBrush_GetTransform(brush, &tmp_matrix);
@@ -1889,7 +2168,7 @@ static void test_color_brush(BOOL d3d11)
     ID2D1RenderTarget_FillRectangle(rt, &rect, (ID2D1Brush *)brush);
 
     hr = ID2D1RenderTarget_EndDraw(rt, NULL, NULL);
-    ok(SUCCEEDED(hr), "Failed to end draw, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     match = compare_surface(&ctx, "6d1218fca5e21fb7e287b3a439d60dbc251f5ceb");
     ok(match, "Surface does not match.\n");
 
@@ -1963,19 +2242,16 @@ static void test_bitmap_brush(BOOL d3d11)
     bitmap_desc.dpiX = 96.0f;
     bitmap_desc.dpiY = 96.0f;
     hr = ID2D1RenderTarget_CreateBitmap(rt, size, bitmap_data, 4 * sizeof(*bitmap_data), &bitmap_desc, &bitmap);
-    ok(SUCCEEDED(hr), "Failed to create bitmap, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     image_size = ID2D1Bitmap_GetSize(bitmap);
 
     hr = ID2D1Bitmap_QueryInterface(bitmap, &IID_ID2D1Image, (void **)&image);
-    ok(SUCCEEDED(hr) || broken(hr == E_NOINTERFACE) /* Vista */, "Failed to get ID2D1Image, hr %#x.\n", hr);
+    ok(hr == S_OK || broken(hr == E_NOINTERFACE) /* Vista */, "Got unexpected hr %#lx.\n", hr);
     if (hr == S_OK)
     {
-        ID2D1DeviceContext *context;
+        ID2D1DeviceContext *context = ctx.context;
         D2D1_POINT_2F offset;
         D2D1_RECT_F src_rect;
-
-        hr = ID2D1RenderTarget_QueryInterface(rt, &IID_ID2D1DeviceContext, (void **)&context);
-        ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
 
         ID2D1RenderTarget_BeginDraw(rt);
         set_color(&color, 0.0f, 0.0f, 1.0f, 1.0f);
@@ -2028,7 +2304,7 @@ static void test_bitmap_brush(BOOL d3d11)
                 D2D1_COMPOSITE_MODE_SOURCE_OVER);
 
         hr = ID2D1RenderTarget_EndDraw(rt, NULL, NULL);
-        ok(SUCCEEDED(hr), "Failed to end draw, hr %#x.\n", hr);
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
         match = compare_surface(&ctx, "95675fbc4a16404c9568d41b14e8f6be64240998");
         ok(match, "Surface does not match.\n");
 
@@ -2040,19 +2316,18 @@ static void test_bitmap_brush(BOOL d3d11)
                 D2D1_COMPOSITE_MODE_SOURCE_OVER);
 
         hr = ID2D1RenderTarget_EndDraw(rt, NULL, NULL);
-        ok(SUCCEEDED(hr), "Failed to end draw, hr %#x.\n", hr);
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
         match = compare_surface(&ctx, "95675fbc4a16404c9568d41b14e8f6be64240998");
         ok(match, "Surface does not match.\n");
 
         ID2D1RenderTarget_SetTransform(rt, &tmp_matrix);
-        ID2D1DeviceContext_Release(context);
         ID2D1Image_Release(image);
     }
 
     /* Creating a brush with a NULL bitmap crashes on Vista, but works fine on
      * Windows 7+. */
     hr = ID2D1RenderTarget_CreateBitmapBrush(rt, bitmap, NULL, NULL, &brush);
-    ok(SUCCEEDED(hr), "Failed to create brush, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ID2D1BitmapBrush_GetBitmap(brush, &tmp_bitmap);
     ok(tmp_bitmap == bitmap, "Got unexpected bitmap %p, expected %p.\n", tmp_bitmap, bitmap);
     ID2D1Bitmap_Release(tmp_bitmap);
@@ -2074,7 +2349,7 @@ static void test_bitmap_brush(BOOL d3d11)
     ID2D1BitmapBrush_Release(brush);
 
     hr = ID2D1RenderTarget_CreateBitmapBrush(rt, bitmap, NULL, NULL, &brush);
-    ok(SUCCEEDED(hr), "Failed to create brush, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     set_matrix_identity(&matrix);
     translate_matrix(&matrix, 40.0f, 120.0f);
     scale_matrix(&matrix, 20.0f, 60.0f);
@@ -2129,7 +2404,7 @@ static void test_bitmap_brush(BOOL d3d11)
             D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR, &src_rect);
 
     hr = ID2D1RenderTarget_EndDraw(rt, NULL, NULL);
-    ok(SUCCEEDED(hr), "Failed to end draw, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     match = compare_surface(&ctx, "f5d039c280fa33ba05496c9883192a34108efbbe");
     ok(match, "Surface does not match.\n");
 
@@ -2147,7 +2422,7 @@ static void test_bitmap_brush(BOOL d3d11)
             D2D1_BITMAP_INTERPOLATION_MODE_LINEAR + 1, &src_rect);
 
     hr = ID2D1RenderTarget_EndDraw(rt, NULL, NULL);
-    ok(hr == E_INVALIDARG, "Unexpected hr %#x.\n", hr);
+    ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
     match = compare_surface(&ctx, "f5d039c280fa33ba05496c9883192a34108efbbe");
     ok(match, "Surface does not match.\n");
 
@@ -2159,7 +2434,7 @@ static void test_bitmap_brush(BOOL d3d11)
             D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR, &src_rect);
 
     hr = ID2D1RenderTarget_EndDraw(rt, NULL, NULL);
-    ok(SUCCEEDED(hr), "Failed to end draw, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     match = compare_surface(&ctx, "59043096393570ad800dbcbfdd644394b79493bd");
     ok(match, "Surface does not match.\n");
 
@@ -2188,7 +2463,7 @@ static void test_bitmap_brush(BOOL d3d11)
     }
 
     hr = ID2D1RenderTarget_EndDraw(rt, NULL, NULL);
-    ok(SUCCEEDED(hr), "Failed to end draw, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     match = compare_surface(&ctx, "b4b775afecdae2d26642001f4faff73663bb8b31");
     ok(match, "Surface does not match.\n");
 
@@ -2196,7 +2471,7 @@ static void test_bitmap_brush(BOOL d3d11)
     bitmap_desc.dpiX = 96.0f / 20.0f;
     bitmap_desc.dpiY = 96.0f / 60.0f;
     hr = ID2D1RenderTarget_CreateBitmap(rt, size, bitmap_data, 4 * sizeof(*bitmap_data), &bitmap_desc, &bitmap);
-    ok(SUCCEEDED(hr), "Failed to create bitmap, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ID2D1BitmapBrush_SetBitmap(brush, bitmap);
 
     ID2D1RenderTarget_BeginDraw(rt);
@@ -2212,18 +2487,18 @@ static void test_bitmap_brush(BOOL d3d11)
     set_rect(&dst_rect, 0.0f, 0.0f, 80.0f, 240.0f);
     ID2D1RenderTarget_FillRectangle(rt, &dst_rect, (ID2D1Brush *)brush);
 
-    ID2D1RenderTarget_GetFactory(rt, &factory);
+    factory = ctx.factory;
 
     set_rect(&dst_rect, -1.0f, -1.0f, 1.0f, 1.0f);
     hr = ID2D1Factory_CreateRectangleGeometry(factory, &dst_rect, &rectangle_geometry);
-    ok(SUCCEEDED(hr), "Failed to create geometry, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     set_matrix_identity(&matrix);
     translate_matrix(&matrix, 240.0f, 720.0f);
     scale_matrix(&matrix, 40.0f, 120.0f);
     hr = ID2D1Factory_CreateTransformedGeometry(factory, (ID2D1Geometry *)rectangle_geometry,
             &matrix, &transformed_geometry);
-    ok(SUCCEEDED(hr), "Failed to create geometry, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ID2D1RectangleGeometry_Release(rectangle_geometry);
 
     set_matrix_identity(&matrix);
@@ -2234,10 +2509,8 @@ static void test_bitmap_brush(BOOL d3d11)
     ID2D1RenderTarget_FillGeometry(rt, (ID2D1Geometry *)transformed_geometry, (ID2D1Brush *)brush, NULL);
     ID2D1TransformedGeometry_Release(transformed_geometry);
 
-    ID2D1Factory_Release(factory);
-
     hr = ID2D1RenderTarget_EndDraw(rt, NULL, NULL);
-    ok(SUCCEEDED(hr), "Failed to end draw, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     match = compare_surface(&ctx, "cf7b90ba7b139fdfbe9347e1907d635cfb4ed197");
     ok(match, "Surface does not match.\n");
 
@@ -2286,7 +2559,165 @@ static void test_bitmap_brush(BOOL d3d11)
 
     ID2D1BitmapBrush_Release(brush);
     refcount = ID2D1Bitmap_Release(bitmap);
-    ok(!refcount, "Bitmap has %u references left.\n", refcount);
+    ok(!refcount, "Bitmap has %lu references left.\n", refcount);
+    release_test_context(&ctx);
+}
+
+static void test_image_brush(BOOL d3d11)
+{
+    D2D1_IMAGE_BRUSH_PROPERTIES image_brush_desc;
+    D2D1_INTERPOLATION_MODE interp_mode;
+    ID2D1DeviceContext *device_context;
+    D2D1_BITMAP_PROPERTIES bitmap_desc;
+    D2D1_BRUSH_PROPERTIES brush_desc;
+    ID2D1Image *image, *tmp_image;
+    D2D1_RECT_F dst_rect;
+    struct d2d1_test_context ctx;
+    D2D1_EXTEND_MODE extend_mode;
+    D2D1_MATRIX_3X2_F matrix;
+    ID2D1ImageBrush *brush;
+    ID2D1Bitmap *bitmap;
+    D2D1_COLOR_F color;
+    D2D1_SIZE_U size;
+    D2D1_RECT_F rect;
+    ULONG refcount;
+    float opacity;
+    HRESULT hr;
+    BOOL match;
+
+    static const DWORD bitmap_data[] =
+    {
+        0xffff0000, 0xffffff00, 0xff00ff00, 0xff00ffff,
+        0xff0000ff, 0xffff00ff, 0xff000000, 0xff7f7f7f,
+        0xffffffff, 0xffffffff, 0xffffffff, 0xff000000,
+        0xffffffff, 0xff000000, 0xff000000, 0xff000000,
+    };
+    static const D2D1_MATRIX_3X2_F identity =
+    {{{
+        1.0f, 0.0f,
+        0.0f, 1.0f,
+        0.0f, 0.0f,
+    }}};
+
+    if (!init_test_context(&ctx, d3d11))
+        return;
+
+    device_context = ctx.context;
+
+    set_size_u(&size, 4, 4);
+    bitmap_desc.pixelFormat.format = DXGI_FORMAT_B8G8R8A8_UNORM;
+    bitmap_desc.pixelFormat.alphaMode = D2D1_ALPHA_MODE_IGNORE;
+    bitmap_desc.dpiX = 96.0f;
+    bitmap_desc.dpiY = 96.0f;
+    hr = ID2D1RenderTarget_CreateBitmap(ctx.rt, size, bitmap_data, 4 * sizeof(*bitmap_data), &bitmap_desc, &bitmap);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+    hr = ID2D1Bitmap_QueryInterface(bitmap, &IID_ID2D1Image, (void **)&image);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+    /* Only image brush description is required. */
+    set_rect(&image_brush_desc.sourceRectangle, 1.0f, 2.0f, 3.0f, 4.0f);
+    image_brush_desc.extendModeX = D2D1_EXTEND_MODE_WRAP;
+    image_brush_desc.extendModeY = D2D1_EXTEND_MODE_MIRROR;
+    image_brush_desc.interpolationMode = D2D1_INTERPOLATION_MODE_LINEAR;
+
+    hr = ID2D1DeviceContext_CreateImageBrush(device_context, NULL, &image_brush_desc, NULL, &brush);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+    tmp_image = (void *)0xdeadbeef;
+    ID2D1ImageBrush_GetImage(brush, &tmp_image);
+    ok(!tmp_image, "Unexpected image %p.\n", image);
+
+    opacity = ID2D1ImageBrush_GetOpacity(brush);
+    ok(opacity == 1.0f, "Unexpected opacity %.8e.\n", opacity);
+    ID2D1ImageBrush_GetTransform(brush, &matrix);
+    ok(!memcmp(&matrix, &identity, sizeof(matrix)),
+            "Got unexpected matrix {%.8e, %.8e, %.8e, %.8e, %.8e, %.8e}.\n",
+            matrix._11, matrix._12, matrix._21, matrix._22, matrix._31, matrix._32);
+
+    ID2D1ImageBrush_GetSourceRectangle(brush, &rect);
+    match = compare_rect(&rect, 1.0f, 2.0f, 3.0f, 4.0f, 0);
+    ok(match, "Got unexpected rectangle {%.8e, %.8e, %.8e, %.8e}.\n",
+            rect.left, rect.top, rect.right, rect.bottom);
+
+    extend_mode = ID2D1ImageBrush_GetExtendModeX(brush);
+    ok(extend_mode == D2D1_EXTEND_MODE_WRAP, "Unexpected extend mode %u.\n", extend_mode);
+    extend_mode = ID2D1ImageBrush_GetExtendModeY(brush);
+    ok(extend_mode == D2D1_EXTEND_MODE_MIRROR, "Unexpected extend mode %u.\n", extend_mode);
+    interp_mode = ID2D1ImageBrush_GetInterpolationMode(brush);
+    ok(interp_mode == D2D1_INTERPOLATION_MODE_LINEAR, "Unexpected interpolation mode %u.\n", interp_mode);
+
+    ID2D1ImageBrush_Release(brush);
+
+    /* FillRectangle */
+    set_rect(&image_brush_desc.sourceRectangle, 0.0f, 0.0f, 4.0f, 4.0f);
+    hr = ID2D1DeviceContext_CreateImageBrush(device_context, image, &image_brush_desc, NULL, &brush);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+    ID2D1ImageBrush_SetInterpolationMode(brush, D2D1_INTERPOLATION_MODE_NEAREST_NEIGHBOR);
+
+    ID2D1RenderTarget_BeginDraw(ctx.rt);
+
+    set_color(&color, 0.0f, 0.0f, 1.0f, 1.0f);
+    ID2D1RenderTarget_Clear(ctx.rt, &color);
+
+    set_rect(&dst_rect, 40.0f, 120.0f, 120.0f, 360.0f);
+    ID2D1RenderTarget_FillRectangle(ctx.rt, &dst_rect, (ID2D1Brush *)brush);
+
+    hr = ID2D1RenderTarget_EndDraw(ctx.rt, NULL, NULL);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    match = compare_surface(&ctx, "89917481db82e6d683a75f068d3984fe2703cce5");
+    ok(match, "Surface does not match.\n");
+
+    ID2D1ImageBrush_Release(brush);
+
+    set_rect(&image_brush_desc.sourceRectangle, 0.0f, 0.0f, 1.0f, 1.0f);
+    hr = ID2D1DeviceContext_CreateImageBrush(device_context, image, &image_brush_desc, NULL, &brush);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+    ID2D1ImageBrush_SetInterpolationMode(brush, D2D1_INTERPOLATION_MODE_NEAREST_NEIGHBOR);
+
+    ID2D1RenderTarget_BeginDraw(ctx.rt);
+
+    set_color(&color, 0.0f, 0.0f, 1.0f, 1.0f);
+    ID2D1RenderTarget_Clear(ctx.rt, &color);
+
+    set_rect(&dst_rect, 40.0f, 120.0f, 120.0f, 360.0f);
+    ID2D1RenderTarget_FillRectangle(ctx.rt, &dst_rect, (ID2D1Brush *)brush);
+
+    hr = ID2D1RenderTarget_EndDraw(ctx.rt, NULL, NULL);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    match = compare_surface(&ctx, "23544adf9695a51428c194a1cffd531be3416e65");
+    todo_wine
+    ok(match, "Surface does not match.\n");
+
+    ID2D1ImageBrush_Release(brush);
+
+    /* Custom brush description and image pointer. */
+    brush_desc.opacity = 2.0f;
+    set_matrix_identity(&brush_desc.transform);
+    scale_matrix(&brush_desc.transform, 2.0f, 3.0f);
+
+    hr = ID2D1DeviceContext_CreateImageBrush(device_context, image, &image_brush_desc, &brush_desc, &brush);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+    ID2D1ImageBrush_GetImage(brush, &tmp_image);
+    ok(tmp_image == image, "Got unexpected image %p, expected %p.\n", tmp_image, image);
+    ID2D1Image_Release(tmp_image);
+
+    opacity = ID2D1ImageBrush_GetOpacity(brush);
+    ok(opacity == 2.0f, "Unexpected opacity %.8e.\n", opacity);
+    ID2D1ImageBrush_GetTransform(brush, &matrix);
+    ok(!memcmp(&matrix, &brush_desc.transform, sizeof(matrix)),
+            "Got unexpected matrix {%.8e, %.8e, %.8e, %.8e, %.8e, %.8e}.\n",
+            matrix._11, matrix._12, matrix._21, matrix._22, matrix._31, matrix._32);
+
+    ID2D1ImageBrush_Release(brush);
+
+    ID2D1Image_Release(image);
+    refcount = ID2D1Bitmap_Release(bitmap);
+    ok(!refcount, "Bitmap has %lu references left.\n", refcount);
+
     release_test_context(&ctx);
 }
 
@@ -2356,12 +2787,12 @@ static void test_linear_brush(BOOL d3d11)
 
     hr = ID2D1RenderTarget_CreateGradientStopCollection(rt, stops, ARRAY_SIZE(stops),
             D2D1_GAMMA_2_2, D2D1_EXTEND_MODE_CLAMP, &gradient);
-    ok(SUCCEEDED(hr), "Failed to create stop collection, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     set_point(&gradient_properties.startPoint, 320.0f, 0.0f);
     set_point(&gradient_properties.endPoint, 0.0f, 960.0f);
     hr = ID2D1RenderTarget_CreateLinearGradientBrush(rt, &gradient_properties, NULL, gradient, &brush);
-    ok(SUCCEEDED(hr), "Failed to create brush, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     opacity = ID2D1LinearGradientBrush_GetOpacity(brush);
     ok(opacity == 1.0f, "Got unexpected opacity %.8e.\n", opacity);
@@ -2388,7 +2819,7 @@ static void test_linear_brush(BOOL d3d11)
     ID2D1RenderTarget_FillRectangle(rt, &r, (ID2D1Brush *)brush);
 
     hr = ID2D1RenderTarget_EndDraw(rt, NULL, NULL);
-    ok(SUCCEEDED(hr), "Failed to end draw, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     get_surface_readback(&ctx, &rb);
     for (i = 0; i < ARRAY_SIZE(test1); ++i)
@@ -2397,7 +2828,7 @@ static void test_linear_brush(BOOL d3d11)
 
         colour = get_readback_colour(&rb, test1[i].x, test1[i].y);
         ok(compare_colour(colour, test1[i].colour, 1),
-                "Got unexpected colour 0x%08x at position {%u, %u}.\n",
+                "Got unexpected colour 0x%08lx at position {%u, %u}.\n",
                 colour, test1[i].x, test1[i].y);
     }
     release_resource_readback(&rb);
@@ -2434,18 +2865,18 @@ static void test_linear_brush(BOOL d3d11)
     set_rect(&r, -80.0f, -60.0f, 80.0f, 60.0f);
     ID2D1RenderTarget_FillRectangle(rt, &r, (ID2D1Brush *)brush);
 
-    ID2D1RenderTarget_GetFactory(rt, &factory);
+    factory = ctx.factory;
 
     set_rect(&r, -1.0f, -1.0f, 1.0f, 1.0f);
     hr = ID2D1Factory_CreateRectangleGeometry(factory, &r, &rectangle_geometry);
-    ok(SUCCEEDED(hr), "Failed to create geometry, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     set_matrix_identity(&matrix);
     translate_matrix(&matrix, 228.5f, 714.0f);
     scale_matrix(&matrix, 40.0f, 120.0f);
     hr = ID2D1Factory_CreateTransformedGeometry(factory, (ID2D1Geometry *)rectangle_geometry,
             &matrix, &transformed_geometry);
-    ok(SUCCEEDED(hr), "Failed to create geometry, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ID2D1RectangleGeometry_Release(rectangle_geometry);
 
     set_matrix_identity(&matrix);
@@ -2458,10 +2889,8 @@ static void test_linear_brush(BOOL d3d11)
     ID2D1RenderTarget_FillGeometry(rt, (ID2D1Geometry *)transformed_geometry, (ID2D1Brush *)brush, NULL);
     ID2D1TransformedGeometry_Release(transformed_geometry);
 
-    ID2D1Factory_Release(factory);
-
     hr = ID2D1RenderTarget_EndDraw(rt, NULL, NULL);
-    ok(SUCCEEDED(hr), "Failed to end draw, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     get_surface_readback(&ctx, &rb);
     for (i = 0; i < ARRAY_SIZE(test2); ++i)
@@ -2470,14 +2899,14 @@ static void test_linear_brush(BOOL d3d11)
 
         colour = get_readback_colour(&rb, test2[i].x, test2[i].y);
         ok(compare_colour(colour, test2[i].colour, 1),
-                "Got unexpected colour 0x%08x at position {%u, %u}.\n",
+                "Got unexpected colour 0x%08lx at position {%u, %u}.\n",
                 colour, test2[i].x, test2[i].y);
     }
     release_resource_readback(&rb);
 
     ID2D1LinearGradientBrush_Release(brush);
     refcount = ID2D1GradientStopCollection_Release(gradient);
-    ok(!refcount, "Gradient has %u references left.\n", refcount);
+    ok(!refcount, "Gradient has %lu references left.\n", refcount);
     release_test_context(&ctx);
 }
 
@@ -2547,14 +2976,14 @@ static void test_radial_brush(BOOL d3d11)
 
     hr = ID2D1RenderTarget_CreateGradientStopCollection(rt, stops, ARRAY_SIZE(stops),
             D2D1_GAMMA_2_2, D2D1_EXTEND_MODE_CLAMP, &gradient);
-    ok(SUCCEEDED(hr), "Failed to create stop collection, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     set_point(&gradient_properties.center, 160.0f, 480.0f);
     set_point(&gradient_properties.gradientOriginOffset, 40.0f, -120.0f);
     gradient_properties.radiusX = 160.0f;
     gradient_properties.radiusY = 480.0f;
     hr = ID2D1RenderTarget_CreateRadialGradientBrush(rt, &gradient_properties, NULL, gradient, &brush);
-    ok(SUCCEEDED(hr), "Failed to create brush, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     f = ID2D1RadialGradientBrush_GetOpacity(brush);
     ok(f == 1.0f, "Got unexpected opacity %.8e.\n", f);
@@ -2585,7 +3014,7 @@ static void test_radial_brush(BOOL d3d11)
     ID2D1RenderTarget_FillRectangle(rt, &r, (ID2D1Brush *)brush);
 
     hr = ID2D1RenderTarget_EndDraw(rt, NULL, NULL);
-    ok(SUCCEEDED(hr), "Failed to end draw, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     get_surface_readback(&ctx, &rb);
     for (i = 0; i < ARRAY_SIZE(test1); ++i)
@@ -2594,7 +3023,7 @@ static void test_radial_brush(BOOL d3d11)
 
         colour = get_readback_colour(&rb, test1[i].x, test1[i].y);
         ok(compare_colour(colour, test1[i].colour, 1),
-                "Got unexpected colour 0x%08x at position {%u, %u}.\n",
+                "Got unexpected colour 0x%08lx at position {%u, %u}.\n",
                 colour, test1[i].x, test1[i].y);
     }
     release_resource_readback(&rb);
@@ -2631,18 +3060,18 @@ static void test_radial_brush(BOOL d3d11)
     set_rect(&r, -80.0f, -60.0f, 80.0f, 60.0f);
     ID2D1RenderTarget_FillRectangle(rt, &r, (ID2D1Brush *)brush);
 
-    ID2D1RenderTarget_GetFactory(rt, &factory);
+    factory = ctx.factory;
 
     set_rect(&r, -1.0f, -1.0f, 1.0f, 1.0f);
     hr = ID2D1Factory_CreateRectangleGeometry(factory, &r, &rectangle_geometry);
-    ok(SUCCEEDED(hr), "Failed to create geometry, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     set_matrix_identity(&matrix);
     translate_matrix(&matrix, 228.5f, 714.0f);
     scale_matrix(&matrix, 40.0f, 120.0f);
     hr = ID2D1Factory_CreateTransformedGeometry(factory, (ID2D1Geometry *)rectangle_geometry,
             &matrix, &transformed_geometry);
-    ok(SUCCEEDED(hr), "Failed to create geometry, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ID2D1RectangleGeometry_Release(rectangle_geometry);
 
     set_matrix_identity(&matrix);
@@ -2657,10 +3086,8 @@ static void test_radial_brush(BOOL d3d11)
     ID2D1RenderTarget_FillGeometry(rt, (ID2D1Geometry *)transformed_geometry, (ID2D1Brush *)brush, NULL);
     ID2D1TransformedGeometry_Release(transformed_geometry);
 
-    ID2D1Factory_Release(factory);
-
     hr = ID2D1RenderTarget_EndDraw(rt, NULL, NULL);
-    ok(SUCCEEDED(hr), "Failed to end draw, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     get_surface_readback(&ctx, &rb);
     for (i = 0; i < ARRAY_SIZE(test2); ++i)
@@ -2669,14 +3096,14 @@ static void test_radial_brush(BOOL d3d11)
 
         colour = get_readback_colour(&rb, test2[i].x, test2[i].y);
         ok(compare_colour(colour, test2[i].colour, 1),
-                "Got unexpected colour 0x%08x at position {%u, %u}.\n",
+                "Got unexpected colour 0x%08lx at position {%u, %u}.\n",
                 colour, test2[i].x, test2[i].y);
     }
     release_resource_readback(&rb);
 
     ID2D1RadialGradientBrush_Release(brush);
     refcount = ID2D1GradientStopCollection_Release(gradient);
-    ok(!refcount, "Gradient has %u references left.\n", refcount);
+    ok(!refcount, "Gradient has %lu references left.\n", refcount);
     release_test_context(&ctx);
 }
 
@@ -3154,169 +3581,169 @@ static void test_path_geometry(BOOL d3d11)
         return;
 
     rt = ctx.rt;
-    ID2D1RenderTarget_GetFactory(rt, &factory);
+    factory = ctx.factory;
 
     ID2D1RenderTarget_SetDpi(rt, 192.0f, 48.0f);
     ID2D1RenderTarget_SetAntialiasMode(rt, D2D1_ANTIALIAS_MODE_ALIASED);
     set_color(&color, 0.890f, 0.851f, 0.600f, 1.0f);
     hr = ID2D1RenderTarget_CreateSolidColorBrush(rt, &color, NULL, &brush);
-    ok(SUCCEEDED(hr), "Failed to create brush, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     /* Close() when closed. */
     hr = ID2D1Factory_CreatePathGeometry(factory, &geometry);
-    ok(SUCCEEDED(hr), "Failed to create path geometry, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     hr = ID2D1PathGeometry_GetFigureCount(geometry, &count);
-    ok(hr == D2DERR_WRONG_STATE, "Got unexpected hr %#x.\n", hr);
+    ok(hr == D2DERR_WRONG_STATE, "Got unexpected hr %#lx.\n", hr);
     hr = ID2D1PathGeometry_GetSegmentCount(geometry, &count);
-    ok(hr == D2DERR_WRONG_STATE, "Got unexpected hr %#x.\n", hr);
+    ok(hr == D2DERR_WRONG_STATE, "Got unexpected hr %#lx.\n", hr);
     hr = ID2D1PathGeometry_Open(geometry, &sink);
-    ok(SUCCEEDED(hr), "Failed to open geometry sink, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     hr = ID2D1PathGeometry_GetFigureCount(geometry, &count);
-    ok(hr == D2DERR_WRONG_STATE, "Got unexpected hr %#x.\n", hr);
+    ok(hr == D2DERR_WRONG_STATE, "Got unexpected hr %#lx.\n", hr);
     hr = ID2D1PathGeometry_GetSegmentCount(geometry, &count);
-    ok(hr == D2DERR_WRONG_STATE, "Got unexpected hr %#x.\n", hr);
+    ok(hr == D2DERR_WRONG_STATE, "Got unexpected hr %#lx.\n", hr);
     hr = ID2D1GeometrySink_Close(sink);
-    ok(SUCCEEDED(hr), "Failed to close geometry sink, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     hr = ID2D1PathGeometry_GetFigureCount(geometry, &count);
-    ok(SUCCEEDED(hr), "Failed to get figure count, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ok(!count, "Got unexpected figure count %u.\n", count);
     hr = ID2D1PathGeometry_GetSegmentCount(geometry, &count);
-    ok(SUCCEEDED(hr), "Failed to get segment count, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ok(!count, "Got unexpected segment count %u.\n", count);
     hr = ID2D1GeometrySink_Close(sink);
-    ok(hr == D2DERR_WRONG_STATE, "Got unexpected hr %#x.\n", hr);
+    ok(hr == D2DERR_WRONG_STATE, "Got unexpected hr %#lx.\n", hr);
     ID2D1GeometrySink_Release(sink);
     hr = ID2D1PathGeometry_GetFigureCount(geometry, &count);
-    ok(SUCCEEDED(hr), "Failed to get figure count, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ok(!count, "Got unexpected figure count %u.\n", count);
     hr = ID2D1PathGeometry_GetSegmentCount(geometry, &count);
-    ok(SUCCEEDED(hr), "Failed to get segment count, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ok(!count, "Got unexpected segment count %u.\n", count);
     ID2D1PathGeometry_Release(geometry);
 
     /* Open() when closed. */
     hr = ID2D1Factory_CreatePathGeometry(factory, &geometry);
-    ok(SUCCEEDED(hr), "Failed to create path geometry, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     hr = ID2D1PathGeometry_Open(geometry, &sink);
-    ok(SUCCEEDED(hr), "Failed to open geometry sink, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     hr = ID2D1GeometrySink_Close(sink);
-    ok(SUCCEEDED(hr), "Failed to close geometry sink, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ID2D1GeometrySink_Release(sink);
     hr = ID2D1PathGeometry_Open(geometry, &sink);
-    ok(hr == D2DERR_WRONG_STATE, "Got unexpected hr %#x.\n", hr);
+    ok(hr == D2DERR_WRONG_STATE, "Got unexpected hr %#lx.\n", hr);
     hr = ID2D1PathGeometry_GetFigureCount(geometry, &count);
-    ok(SUCCEEDED(hr), "Failed to get figure count, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ok(!count, "Got unexpected figure count %u.\n", count);
     hr = ID2D1PathGeometry_GetSegmentCount(geometry, &count);
-    ok(SUCCEEDED(hr), "Failed to get segment count, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ok(!count, "Got unexpected segment count %u.\n", count);
     ID2D1PathGeometry_Release(geometry);
 
     /* Open() when open. */
     hr = ID2D1Factory_CreatePathGeometry(factory, &geometry);
-    ok(SUCCEEDED(hr), "Failed to create path geometry, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     hr = ID2D1PathGeometry_Open(geometry, &sink);
-    ok(SUCCEEDED(hr), "Failed to open geometry sink, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     hr = ID2D1PathGeometry_Open(geometry, &tmp_sink);
-    ok(hr == D2DERR_WRONG_STATE, "Got unexpected hr %#x.\n", hr);
+    ok(hr == D2DERR_WRONG_STATE, "Got unexpected hr %#lx.\n", hr);
     hr = ID2D1GeometrySink_Close(sink);
-    ok(SUCCEEDED(hr), "Failed to close geometry sink, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ID2D1GeometrySink_Release(sink);
     hr = ID2D1PathGeometry_GetFigureCount(geometry, &count);
-    ok(SUCCEEDED(hr), "Failed to get figure count, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ok(!count, "Got unexpected figure count %u.\n", count);
     hr = ID2D1PathGeometry_GetSegmentCount(geometry, &count);
-    ok(SUCCEEDED(hr), "Failed to get segment count, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ok(!count, "Got unexpected segment count %u.\n", count);
     ID2D1PathGeometry_Release(geometry);
 
     /* BeginFigure() without EndFigure(). */
     hr = ID2D1Factory_CreatePathGeometry(factory, &geometry);
-    ok(SUCCEEDED(hr), "Failed to create path geometry, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     hr = ID2D1PathGeometry_Open(geometry, &sink);
-    ok(SUCCEEDED(hr), "Failed to open geometry sink, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ID2D1GeometrySink_BeginFigure(sink, point, D2D1_FIGURE_BEGIN_FILLED);
     hr = ID2D1GeometrySink_Close(sink);
-    ok(hr == D2DERR_WRONG_STATE, "Got unexpected hr %#x.\n", hr);
+    ok(hr == D2DERR_WRONG_STATE, "Got unexpected hr %#lx.\n", hr);
     ID2D1GeometrySink_EndFigure(sink, D2D1_FIGURE_END_CLOSED);
     hr = ID2D1GeometrySink_Close(sink);
-    ok(hr == D2DERR_WRONG_STATE, "Got unexpected hr %#x.\n", hr);
+    ok(hr == D2DERR_WRONG_STATE, "Got unexpected hr %#lx.\n", hr);
     ID2D1GeometrySink_Release(sink);
     hr = ID2D1PathGeometry_GetFigureCount(geometry, &count);
-    ok(hr == D2DERR_WRONG_STATE, "Got unexpected hr %#x.\n", hr);
+    ok(hr == D2DERR_WRONG_STATE, "Got unexpected hr %#lx.\n", hr);
     hr = ID2D1PathGeometry_GetSegmentCount(geometry, &count);
-    ok(hr == D2DERR_WRONG_STATE, "Got unexpected hr %#x.\n", hr);
+    ok(hr == D2DERR_WRONG_STATE, "Got unexpected hr %#lx.\n", hr);
     ID2D1PathGeometry_Release(geometry);
 
     /* EndFigure() without BeginFigure(). */
     hr = ID2D1Factory_CreatePathGeometry(factory, &geometry);
-    ok(SUCCEEDED(hr), "Failed to create path geometry, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     hr = ID2D1PathGeometry_Open(geometry, &sink);
-    ok(SUCCEEDED(hr), "Failed to open geometry sink, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ID2D1GeometrySink_EndFigure(sink, D2D1_FIGURE_END_CLOSED);
     hr = ID2D1GeometrySink_Close(sink);
-    ok(hr == D2DERR_WRONG_STATE, "Got unexpected hr %#x.\n", hr);
+    ok(hr == D2DERR_WRONG_STATE, "Got unexpected hr %#lx.\n", hr);
     ID2D1GeometrySink_Release(sink);
     hr = ID2D1PathGeometry_GetFigureCount(geometry, &count);
-    ok(hr == D2DERR_WRONG_STATE, "Got unexpected hr %#x.\n", hr);
+    ok(hr == D2DERR_WRONG_STATE, "Got unexpected hr %#lx.\n", hr);
     hr = ID2D1PathGeometry_GetSegmentCount(geometry, &count);
-    ok(hr == D2DERR_WRONG_STATE, "Got unexpected hr %#x.\n", hr);
+    ok(hr == D2DERR_WRONG_STATE, "Got unexpected hr %#lx.\n", hr);
     ID2D1PathGeometry_Release(geometry);
 
     /* BeginFigure()/EndFigure() mismatch. */
     hr = ID2D1Factory_CreatePathGeometry(factory, &geometry);
-    ok(SUCCEEDED(hr), "Failed to create path geometry, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     hr = ID2D1PathGeometry_Open(geometry, &sink);
-    ok(SUCCEEDED(hr), "Failed to open geometry sink, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ID2D1GeometrySink_BeginFigure(sink, point, D2D1_FIGURE_BEGIN_FILLED);
     ID2D1GeometrySink_BeginFigure(sink, point, D2D1_FIGURE_BEGIN_FILLED);
     ID2D1GeometrySink_EndFigure(sink, D2D1_FIGURE_END_CLOSED);
     ID2D1GeometrySink_EndFigure(sink, D2D1_FIGURE_END_CLOSED);
     hr = ID2D1GeometrySink_Close(sink);
-    ok(hr == D2DERR_WRONG_STATE, "Got unexpected hr %#x.\n", hr);
+    ok(hr == D2DERR_WRONG_STATE, "Got unexpected hr %#lx.\n", hr);
     ID2D1GeometrySink_EndFigure(sink, D2D1_FIGURE_END_CLOSED);
     hr = ID2D1GeometrySink_Close(sink);
-    ok(hr == D2DERR_WRONG_STATE, "Got unexpected hr %#x.\n", hr);
+    ok(hr == D2DERR_WRONG_STATE, "Got unexpected hr %#lx.\n", hr);
     ID2D1GeometrySink_Release(sink);
     ID2D1PathGeometry_Release(geometry);
 
     /* AddLine() outside BeginFigure()/EndFigure(). */
     hr = ID2D1Factory_CreatePathGeometry(factory, &geometry);
-    ok(SUCCEEDED(hr), "Failed to create path geometry, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     hr = ID2D1PathGeometry_Open(geometry, &sink);
-    ok(SUCCEEDED(hr), "Failed to open geometry sink, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ID2D1GeometrySink_AddLine(sink, point);
     hr = ID2D1GeometrySink_Close(sink);
-    ok(hr == D2DERR_WRONG_STATE, "Got unexpected hr %#x.\n", hr);
+    ok(hr == D2DERR_WRONG_STATE, "Got unexpected hr %#lx.\n", hr);
     ID2D1GeometrySink_AddLine(sink, point);
     ID2D1GeometrySink_Release(sink);
     hr = ID2D1PathGeometry_GetFigureCount(geometry, &count);
-    ok(hr == D2DERR_WRONG_STATE, "Got unexpected hr %#x.\n", hr);
+    ok(hr == D2DERR_WRONG_STATE, "Got unexpected hr %#lx.\n", hr);
     hr = ID2D1PathGeometry_GetSegmentCount(geometry, &count);
-    ok(hr == D2DERR_WRONG_STATE, "Got unexpected hr %#x.\n", hr);
+    ok(hr == D2DERR_WRONG_STATE, "Got unexpected hr %#lx.\n", hr);
     ID2D1PathGeometry_Release(geometry);
 
     /* Empty figure. */
     hr = ID2D1Factory_CreatePathGeometry(factory, &geometry);
-    ok(SUCCEEDED(hr), "Failed to create path geometry, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     hr = ID2D1PathGeometry_Open(geometry, &sink);
-    ok(SUCCEEDED(hr), "Failed to open geometry sink, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     set_point(&point, 123.0f, 456.0f);
     ID2D1GeometrySink_BeginFigure(sink, point, D2D1_FIGURE_BEGIN_FILLED);
     ID2D1GeometrySink_EndFigure(sink, D2D1_FIGURE_END_CLOSED);
     hr = ID2D1GeometrySink_Close(sink);
-    ok(SUCCEEDED(hr), "Failed to close geometry sink, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ID2D1GeometrySink_Release(sink);
     hr = ID2D1PathGeometry_GetFigureCount(geometry, &count);
-    ok(SUCCEEDED(hr), "Failed to get figure count, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ok(count == 1, "Got unexpected figure count %u.\n", count);
     hr = ID2D1PathGeometry_GetSegmentCount(geometry, &count);
-    ok(SUCCEEDED(hr), "Failed to get segment count, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ok(count == 1, "Got unexpected segment count %u.\n", count);
 
     set_rect(&rect, 0.0f, 0.0f, 0.0f, 0.0f);
     hr = ID2D1PathGeometry_GetBounds(geometry, NULL, &rect);
-    ok(SUCCEEDED(hr), "Failed to get geometry bounds, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     match = compare_rect(&rect, 123.0f, 456.0f, 123.0f, 456.0f, 0);
     ok(match, "Got unexpected rectangle {%.8e, %.8e, %.8e, %.8e}.\n",
             rect.left, rect.top, rect.right, rect.bottom);
@@ -3325,7 +3752,7 @@ static void test_path_geometry(BOOL d3d11)
     translate_matrix(&matrix, 80.0f, 640.0f);
     scale_matrix(&matrix, 2.0f, 0.5f);
     hr = ID2D1PathGeometry_GetBounds(geometry, &matrix, &rect);
-    ok(SUCCEEDED(hr), "Failed to get geometry bounds, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     match = compare_rect(&rect, 326.0f, 868.0f, 326.0f, 868.0f, 0);
     ok(match, "Got unexpected rectangle {%.8e, %.8e, %.8e, %.8e}.\n",
             rect.left, rect.top, rect.right, rect.bottom);
@@ -3334,9 +3761,9 @@ static void test_path_geometry(BOOL d3d11)
 
     /* Degenerate figure. */
     hr = ID2D1Factory_CreatePathGeometry(factory, &geometry);
-    ok(SUCCEEDED(hr), "Failed to create path geometry, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     hr = ID2D1PathGeometry_Open(geometry, &sink);
-    ok(SUCCEEDED(hr), "Failed to open geometry sink, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     set_point(&point, 123.0f, 456.0f);
     ID2D1GeometrySink_BeginFigure(sink, point, D2D1_FIGURE_BEGIN_FILLED);
     quadratic_to(sink, 123.0f, 456.0f, 123.0f, 456.0f);
@@ -3344,52 +3771,52 @@ static void test_path_geometry(BOOL d3d11)
     quadratic_to(sink, 123.0f, 456.0f, 123.0f, 456.0f);
     ID2D1GeometrySink_EndFigure(sink, D2D1_FIGURE_END_CLOSED);
     hr = ID2D1GeometrySink_Close(sink);
-    ok(SUCCEEDED(hr), "Failed to close geometry sink, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ID2D1GeometrySink_Release(sink);
     hr = ID2D1PathGeometry_GetFigureCount(geometry, &count);
-    ok(SUCCEEDED(hr), "Failed to get figure count, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ok(count == 1, "Got unexpected figure count %u.\n", count);
     hr = ID2D1PathGeometry_GetSegmentCount(geometry, &count);
-    ok(SUCCEEDED(hr), "Failed to get segment count, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ok(count == 4, "Got unexpected segment count %u.\n", count);
     ID2D1PathGeometry_Release(geometry);
 
     /* Close right after Open(). */
     hr = ID2D1Factory_CreatePathGeometry(factory, &geometry);
-    ok(SUCCEEDED(hr), "Failed to create path geometry, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     /* Not open yet. */
     set_rect(&rect, 1.0f, 2.0f, 3.0f, 4.0f);
     hr = ID2D1PathGeometry_GetBounds(geometry, NULL, &rect);
-    ok(hr == D2DERR_WRONG_STATE, "Unexpected hr %#x.\n", hr);
+    ok(hr == D2DERR_WRONG_STATE, "Got unexpected hr %#lx.\n", hr);
     match = compare_rect(&rect, 1.0f, 2.0f, 3.0f, 4.0f, 0);
     ok(match, "Got unexpected rectangle {%.8e, %.8e, %.8e, %.8e}.\n",
             rect.left, rect.top, rect.right, rect.bottom);
 
     hr = ID2D1PathGeometry_Open(geometry, &sink);
-    ok(SUCCEEDED(hr), "Failed to open geometry sink, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     /* Open, not closed. */
     set_rect(&rect, 1.0f, 2.0f, 3.0f, 4.0f);
     hr = ID2D1PathGeometry_GetBounds(geometry, NULL, &rect);
-    ok(hr == D2DERR_WRONG_STATE, "Unexpected hr %#x.\n", hr);
+    ok(hr == D2DERR_WRONG_STATE, "Got unexpected hr %#lx.\n", hr);
     match = compare_rect(&rect, 1.0f, 2.0f, 3.0f, 4.0f, 0);
     ok(match, "Got unexpected rectangle {%.8e, %.8e, %.8e, %.8e}.\n",
             rect.left, rect.top, rect.right, rect.bottom);
 
     hr = ID2D1GeometrySink_Close(sink);
-    ok(SUCCEEDED(hr), "Failed to close geometry sink, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ID2D1GeometrySink_Release(sink);
     hr = ID2D1PathGeometry_GetFigureCount(geometry, &count);
-    ok(SUCCEEDED(hr), "Failed to get figure count, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ok(count == 0, "Got unexpected figure count %u.\n", count);
     hr = ID2D1PathGeometry_GetSegmentCount(geometry, &count);
-    ok(SUCCEEDED(hr), "Failed to get segment count, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ok(count == 0, "Got unexpected segment count %u.\n", count);
 
     set_rect(&rect, 0.0f, 0.0f, 0.0f, 0.0f);
     hr = ID2D1PathGeometry_GetBounds(geometry, NULL, &rect);
-    ok(SUCCEEDED(hr), "Failed to get geometry bounds, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ok(rect.left > rect.right && rect.top > rect.bottom,
             "Got unexpected rectangle {%.8e, %.8e, %.8e, %.8e}.\n", rect.left, rect.top, rect.right, rect.bottom);
 
@@ -3398,7 +3825,7 @@ static void test_path_geometry(BOOL d3d11)
     scale_matrix(&matrix, 10.0f, 20.0f);
     set_rect(&rect, 0.0f, 0.0f, 0.0f, 0.0f);
     hr = ID2D1PathGeometry_GetBounds(geometry, &matrix, &rect);
-    ok(SUCCEEDED(hr), "Failed to get geometry bounds, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ok(rect.left > rect.right && rect.top > rect.bottom,
             "Got unexpected rectangle {%.8e, %.8e, %.8e, %.8e}.\n", rect.left, rect.top, rect.right, rect.bottom);
 
@@ -3406,17 +3833,17 @@ static void test_path_geometry(BOOL d3d11)
 
     /* GetBounds() with bezier segments. */
     hr = ID2D1Factory_CreatePathGeometry(factory, &geometry);
-    ok(SUCCEEDED(hr), "Failed to create path geometry, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     hr = ID2D1PathGeometry_Open(geometry, &sink);
-    ok(SUCCEEDED(hr), "Failed to open geometry sink, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     fill_geometry_sink_bezier(sink, 0);
     hr = ID2D1GeometrySink_Close(sink);
-    ok(SUCCEEDED(hr), "Failed to close geometry sink, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ID2D1GeometrySink_Release(sink);
 
     set_rect(&rect, 0.0f, 0.0f, 0.0f, 0.0f);
     hr = ID2D1PathGeometry_GetBounds(geometry, NULL, &rect);
-    ok(SUCCEEDED(hr), "Failed to get geometry bounds, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     match = compare_rect(&rect, 5.0f, 20.0f, 75.0f, 752.0f, 0);
     ok(match, "Got unexpected rectangle {%.8e, %.8e, %.8e, %.8e}.\n",
             rect.left, rect.top, rect.right, rect.bottom);
@@ -3426,7 +3853,7 @@ static void test_path_geometry(BOOL d3d11)
     scale_matrix(&matrix, 2.0f, 0.5f);
     set_rect(&rect, 0.0f, 0.0f, 0.0f, 0.0f);
     hr = ID2D1PathGeometry_GetBounds(geometry, &matrix, &rect);
-    ok(SUCCEEDED(hr), "Failed to get geometry bounds, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     match = compare_rect(&rect, 90.0f, 650.0f, 230.0f, 1016.0f, 0);
     ok(match, "Got unexpected rectangle {%.8e, %.8e, %.8e, %.8e}.\n",
             rect.left, rect.top, rect.right, rect.bottom);
@@ -3435,17 +3862,17 @@ static void test_path_geometry(BOOL d3d11)
 
     /* GetBounds() with bezier segments and some hollow components. */
     hr = ID2D1Factory_CreatePathGeometry(factory, &geometry);
-    ok(SUCCEEDED(hr), "Failed to create path geometry, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     hr = ID2D1PathGeometry_Open(geometry, &sink);
-    ok(SUCCEEDED(hr), "Failed to open geometry sink, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     fill_geometry_sink_bezier(sink, 2);
     hr = ID2D1GeometrySink_Close(sink);
-    ok(SUCCEEDED(hr), "Failed to close geometry sink, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ID2D1GeometrySink_Release(sink);
 
     set_rect(&rect, 0.0f, 0.0f, 0.0f, 0.0f);
     hr = ID2D1PathGeometry_GetBounds(geometry, NULL, &rect);
-    ok(SUCCEEDED(hr), "Failed to get geometry bounds, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     match = compare_rect(&rect, 5.0f, 472.0f, 75.0f, 752.0f, 0);
     ok(match, "Got unexpected rectangle {%.8e, %.8e, %.8e, %.8e}.\n",
             rect.left, rect.top, rect.right, rect.bottom);
@@ -3455,7 +3882,7 @@ static void test_path_geometry(BOOL d3d11)
     scale_matrix(&matrix, 2.0f, 0.5f);
     set_rect(&rect, 0.0f, 0.0f, 0.0f, 0.0f);
     hr = ID2D1PathGeometry_GetBounds(geometry, &matrix, &rect);
-    ok(SUCCEEDED(hr), "Failed to get geometry bounds, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     match = compare_rect(&rect, 90.0f, 876.0f, 230.0f, 1016.0f, 0);
     ok(match, "Got unexpected rectangle {%.8e, %.8e, %.8e, %.8e}.\n",
             rect.left, rect.top, rect.right, rect.bottom);
@@ -3464,17 +3891,17 @@ static void test_path_geometry(BOOL d3d11)
 
     /* GetBounds() with bezier segments and all hollow components. */
     hr = ID2D1Factory_CreatePathGeometry(factory, &geometry);
-    ok(SUCCEEDED(hr), "Failed to create path geometry, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     hr = ID2D1PathGeometry_Open(geometry, &sink);
-    ok(SUCCEEDED(hr), "Failed to open geometry sink, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     fill_geometry_sink_bezier(sink, 4);
     hr = ID2D1GeometrySink_Close(sink);
-    ok(SUCCEEDED(hr), "Failed to close geometry sink, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ID2D1GeometrySink_Release(sink);
 
     set_rect(&rect, 0.0f, 0.0f, 0.0f, 0.0f);
     hr = ID2D1PathGeometry_GetBounds(geometry, NULL, &rect);
-    ok(SUCCEEDED(hr), "Failed to get geometry bounds, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     match = compare_rect(&rect, INFINITY, INFINITY, FLT_MAX, FLT_MAX, 0);
     ok(match, "Got unexpected rectangle {%.8e, %.8e, %.8e, %.8e}.\n",
             rect.left, rect.top, rect.right, rect.bottom);
@@ -3484,7 +3911,7 @@ static void test_path_geometry(BOOL d3d11)
     scale_matrix(&matrix, 2.0f, 0.5f);
     set_rect(&rect, 0.0f, 0.0f, 0.0f, 0.0f);
     hr = ID2D1PathGeometry_GetBounds(geometry, &matrix, &rect);
-    ok(SUCCEEDED(hr), "Failed to get geometry bounds, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     match = compare_rect(&rect, INFINITY, INFINITY, FLT_MAX, FLT_MAX, 0);
     ok(match, "Got unexpected rectangle {%.8e, %.8e, %.8e, %.8e}.\n",
             rect.left, rect.top, rect.right, rect.bottom);
@@ -3492,20 +3919,20 @@ static void test_path_geometry(BOOL d3d11)
     ID2D1PathGeometry_Release(geometry);
 
     hr = ID2D1Factory_CreatePathGeometry(factory, &geometry);
-    ok(SUCCEEDED(hr), "Failed to create path geometry, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     hr = ID2D1PathGeometry_Open(geometry, &sink);
-    ok(SUCCEEDED(hr), "Failed to open geometry sink, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     /* The fillmode that's used is the last one set before the sink is closed. */
     ID2D1GeometrySink_SetFillMode(sink, D2D1_FILL_MODE_WINDING);
     fill_geometry_sink(sink, 0);
     ID2D1GeometrySink_SetFillMode(sink, D2D1_FILL_MODE_ALTERNATE);
     hr = ID2D1GeometrySink_Close(sink);
-    ok(SUCCEEDED(hr), "Failed to close geometry sink, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     hr = ID2D1PathGeometry_GetFigureCount(geometry, &count);
-    ok(SUCCEEDED(hr), "Failed to get figure count, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ok(count == 6, "Got unexpected figure count %u.\n", count);
     hr = ID2D1PathGeometry_GetSegmentCount(geometry, &count);
-    ok(SUCCEEDED(hr), "Failed to get segment count, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     /* Intersections don't create extra segments. */
     ok(count == 44, "Got unexpected segment count %u.\n", count);
     ID2D1GeometrySink_SetFillMode(sink, D2D1_FILL_MODE_WINDING);
@@ -3514,13 +3941,13 @@ static void test_path_geometry(BOOL d3d11)
     geometry_sink_init(&simplify_sink);
     hr = ID2D1PathGeometry_Simplify(geometry, D2D1_GEOMETRY_SIMPLIFICATION_OPTION_LINES,
             NULL, 0.0f, &simplify_sink.ID2D1SimplifiedGeometrySink_iface);
-    ok(SUCCEEDED(hr), "Failed to simplify geometry, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     geometry_sink_check(&simplify_sink, D2D1_FILL_MODE_ALTERNATE, 6, &expected_figures[0], 0);
     geometry_sink_cleanup(&simplify_sink);
     geometry_sink_init(&simplify_sink);
     hr = ID2D1PathGeometry_Simplify(geometry, D2D1_GEOMETRY_SIMPLIFICATION_OPTION_CUBICS_AND_LINES,
             NULL, 0.0f, &simplify_sink.ID2D1SimplifiedGeometrySink_iface);
-    ok(SUCCEEDED(hr), "Failed to simplify geometry, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     geometry_sink_check(&simplify_sink, D2D1_FILL_MODE_ALTERNATE, 6, &expected_figures[0], 0);
     geometry_sink_cleanup(&simplify_sink);
 
@@ -3528,12 +3955,12 @@ static void test_path_geometry(BOOL d3d11)
     translate_matrix(&matrix, 80.0f, 640.0f);
     scale_matrix(&matrix, 1.0f, -1.0f);
     hr = ID2D1Factory_CreateTransformedGeometry(factory, (ID2D1Geometry *)geometry, &matrix, &transformed_geometry);
-    ok(SUCCEEDED(hr), "Failed to create transformed geometry, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     geometry_sink_init(&simplify_sink);
     hr = ID2D1TransformedGeometry_Simplify(transformed_geometry, D2D1_GEOMETRY_SIMPLIFICATION_OPTION_LINES,
             NULL, 0.0f, &simplify_sink.ID2D1SimplifiedGeometrySink_iface);
-    ok(SUCCEEDED(hr), "Failed to simplify geometry, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     geometry_sink_check(&simplify_sink, D2D1_FILL_MODE_ALTERNATE, 6, &expected_figures[6], 0);
     geometry_sink_cleanup(&simplify_sink);
 
@@ -3548,7 +3975,7 @@ static void test_path_geometry(BOOL d3d11)
     geometry_sink_init(&simplify_sink);
     hr = ID2D1Geometry_Simplify(tmp_geometry, D2D1_GEOMETRY_SIMPLIFICATION_OPTION_LINES,
             &tmp_matrix, 0.0f, &simplify_sink.ID2D1SimplifiedGeometrySink_iface);
-    ok(SUCCEEDED(hr), "Failed to simplify geometry, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     geometry_sink_check(&simplify_sink, D2D1_FILL_MODE_ALTERNATE, 6, &expected_figures[6], 0);
     geometry_sink_cleanup(&simplify_sink);
     ID2D1Geometry_Release(tmp_geometry);
@@ -3559,7 +3986,7 @@ static void test_path_geometry(BOOL d3d11)
     ID2D1RenderTarget_FillGeometry(rt, (ID2D1Geometry *)geometry, (ID2D1Brush *)brush, NULL);
     ID2D1RenderTarget_FillGeometry(rt, (ID2D1Geometry *)transformed_geometry, (ID2D1Brush *)brush, NULL);
     hr = ID2D1RenderTarget_EndDraw(rt, NULL, NULL);
-    ok(SUCCEEDED(hr), "Failed to end draw, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     match = compare_surface(&ctx, "3aace1b22aae111cb577614fed16e4eb1650dba5");
     ok(match, "Surface does not match.\n");
 
@@ -3567,13 +3994,13 @@ static void test_path_geometry(BOOL d3d11)
     set_point(&point, 94.0f, 620.0f);
     contains = TRUE;
     hr = ID2D1TransformedGeometry_FillContainsPoint(transformed_geometry, point, NULL, 0.0f, &contains);
-    ok(hr == S_OK, "FillContainsPoint failed, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ok(!contains, "Got unexpected contains %#x.\n", contains);
 
     set_point(&point, 95.0f, 620.0f);
     contains = FALSE;
     hr = ID2D1TransformedGeometry_FillContainsPoint(transformed_geometry, point, NULL, 0.0f, &contains);
-    ok(hr == S_OK, "FillContainsPoint failed, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ok(contains == TRUE, "Got unexpected contains %#x.\n", contains);
 
     /* With transformation matrix. */
@@ -3582,31 +4009,31 @@ static void test_path_geometry(BOOL d3d11)
     set_point(&point, 85.0f, 620.0f);
     contains = FALSE;
     hr = ID2D1TransformedGeometry_FillContainsPoint(transformed_geometry, point, &matrix, 0.0f, &contains);
-    ok(hr == S_OK, "FillContainsPoint failed, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ok(contains == TRUE, "Got unexpected contains %#x.\n", contains);
 
     ID2D1TransformedGeometry_Release(transformed_geometry);
     ID2D1PathGeometry_Release(geometry);
 
     hr = ID2D1Factory_CreatePathGeometry(factory, &geometry);
-    ok(SUCCEEDED(hr), "Failed to create path geometry, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     hr = ID2D1PathGeometry_Open(geometry, &sink);
-    ok(SUCCEEDED(hr), "Failed to open geometry sink, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     fill_geometry_sink(sink, 0);
     ID2D1GeometrySink_SetFillMode(sink, D2D1_FILL_MODE_WINDING);
     hr = ID2D1GeometrySink_Close(sink);
-    ok(SUCCEEDED(hr), "Failed to close geometry sink, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     hr = ID2D1PathGeometry_GetFigureCount(geometry, &count);
-    ok(SUCCEEDED(hr), "Failed to get figure count, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ok(count == 6, "Got unexpected figure count %u.\n", count);
     hr = ID2D1PathGeometry_GetSegmentCount(geometry, &count);
-    ok(SUCCEEDED(hr), "Failed to get segment count, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ok(count == 44, "Got unexpected segment count %u.\n", count);
     ID2D1GeometrySink_Release(sink);
 
     set_rect(&rect, 0.0f, 0.0f, 0.0f, 0.0f);
     hr = ID2D1PathGeometry_GetBounds(geometry, NULL, &rect);
-    ok(SUCCEEDED(hr), "Failed to get geometry bounds, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     match = compare_rect(&rect, 5.0f, 20.0f, 235.0f, 300.0f, 0);
     ok(match, "Got unexpected rectangle {%.8e, %.8e, %.8e, %.8e}.\n",
             rect.left, rect.top, rect.right, rect.bottom);
@@ -3617,7 +4044,7 @@ static void test_path_geometry(BOOL d3d11)
     rotate_matrix(&matrix, M_PI / 4.0f);
     set_rect(&rect, 0.0f, 0.0f, 0.0f, 0.0f);
     hr = ID2D1PathGeometry_GetBounds(geometry, &matrix, &rect);
-    ok(SUCCEEDED(hr), "Failed to get geometry bounds, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     match = compare_rect(&rect, -3.17192993e+02f, 8.71231079e+01f, 4.04055908e+02f, 6.17453125e+02f, 1);
     ok(match, "Got unexpected rectangle {%.8e, %.8e, %.8e, %.8e}.\n",
             rect.left, rect.top, rect.right, rect.bottom);
@@ -3625,7 +4052,7 @@ static void test_path_geometry(BOOL d3d11)
     geometry_sink_init(&simplify_sink);
     hr = ID2D1PathGeometry_Simplify(geometry, D2D1_GEOMETRY_SIMPLIFICATION_OPTION_LINES,
             NULL, 0.0f, &simplify_sink.ID2D1SimplifiedGeometrySink_iface);
-    ok(SUCCEEDED(hr), "Failed to simplify geometry, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     geometry_sink_check(&simplify_sink, D2D1_FILL_MODE_WINDING, 6, &expected_figures[0], 0);
     geometry_sink_cleanup(&simplify_sink);
 
@@ -3633,50 +4060,50 @@ static void test_path_geometry(BOOL d3d11)
     translate_matrix(&matrix, 320.0f, 320.0f);
     scale_matrix(&matrix, -1.0f, 1.0f);
     hr = ID2D1Factory_CreateTransformedGeometry(factory, (ID2D1Geometry *)geometry, &matrix, &transformed_geometry);
-    ok(SUCCEEDED(hr), "Failed to create transformed geometry, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     ID2D1RenderTarget_BeginDraw(rt);
     ID2D1RenderTarget_Clear(rt, &color);
     ID2D1RenderTarget_FillGeometry(rt, (ID2D1Geometry *)geometry, (ID2D1Brush *)brush, NULL);
     ID2D1RenderTarget_FillGeometry(rt, (ID2D1Geometry *)transformed_geometry, (ID2D1Brush *)brush, NULL);
     hr = ID2D1RenderTarget_EndDraw(rt, NULL, NULL);
-    ok(SUCCEEDED(hr), "Failed to end draw, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     match = compare_surface(&ctx, "bfb40a1f007694fa07dbd3b854f3f5d9c3e1d76b");
     ok(match, "Surface does not match.\n");
     ID2D1TransformedGeometry_Release(transformed_geometry);
     ID2D1PathGeometry_Release(geometry);
 
     hr = ID2D1Factory_CreatePathGeometry(factory, &geometry);
-    ok(SUCCEEDED(hr), "Failed to create path geometry, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     hr = ID2D1PathGeometry_Open(geometry, &sink);
-    ok(SUCCEEDED(hr), "Failed to open geometry sink, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     fill_geometry_sink_bezier(sink, 0);
     hr = ID2D1GeometrySink_Close(sink);
-    ok(SUCCEEDED(hr), "Failed to close geometry sink, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     hr = ID2D1PathGeometry_GetFigureCount(geometry, &count);
-    ok(SUCCEEDED(hr), "Failed to get figure count, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ok(count == 4, "Got unexpected figure count %u.\n", count);
     hr = ID2D1PathGeometry_GetSegmentCount(geometry, &count);
-    ok(SUCCEEDED(hr), "Failed to get segment count, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ok(count == 20, "Got unexpected segment count %u.\n", count);
     ID2D1GeometrySink_Release(sink);
 
     geometry_sink_init(&simplify_sink);
     hr = ID2D1PathGeometry_Simplify(geometry, D2D1_GEOMETRY_SIMPLIFICATION_OPTION_CUBICS_AND_LINES,
             NULL, 0.0f, &simplify_sink.ID2D1SimplifiedGeometrySink_iface);
-    ok(SUCCEEDED(hr), "Failed to simplify geometry, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     geometry_sink_check(&simplify_sink, D2D1_FILL_MODE_ALTERNATE, 4, &expected_figures[12], 1);
     geometry_sink_cleanup(&simplify_sink);
     geometry_sink_init(&simplify_sink);
     hr = ID2D1PathGeometry_Simplify(geometry, D2D1_GEOMETRY_SIMPLIFICATION_OPTION_LINES,
             NULL, 100.0f, &simplify_sink.ID2D1SimplifiedGeometrySink_iface);
-    ok(SUCCEEDED(hr), "Failed to simplify geometry, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     geometry_sink_check(&simplify_sink, D2D1_FILL_MODE_ALTERNATE, 4, &expected_figures[20], 1);
     geometry_sink_cleanup(&simplify_sink);
     geometry_sink_init(&simplify_sink);
     hr = ID2D1PathGeometry_Simplify(geometry, D2D1_GEOMETRY_SIMPLIFICATION_OPTION_LINES,
             NULL, 10.0f, &simplify_sink.ID2D1SimplifiedGeometrySink_iface);
-    ok(SUCCEEDED(hr), "Failed to simplify geometry, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     geometry_sink_check(&simplify_sink, D2D1_FILL_MODE_ALTERNATE, 4, &expected_figures[24], 1);
     geometry_sink_cleanup(&simplify_sink);
 
@@ -3686,12 +4113,12 @@ static void test_path_geometry(BOOL d3d11)
     rotate_matrix(&matrix, M_PI / 4.0f);
     scale_matrix(&matrix, 2.0f, 0.5f);
     hr = ID2D1Factory_CreateTransformedGeometry(factory, (ID2D1Geometry *)geometry, &matrix, &transformed_geometry);
-    ok(SUCCEEDED(hr), "Failed to create transformed geometry, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     geometry_sink_init(&simplify_sink);
     hr = ID2D1TransformedGeometry_Simplify(transformed_geometry, D2D1_GEOMETRY_SIMPLIFICATION_OPTION_CUBICS_AND_LINES,
             NULL, 0.0f, &simplify_sink.ID2D1SimplifiedGeometrySink_iface);
-    ok(SUCCEEDED(hr), "Failed to simplify geometry, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     geometry_sink_check(&simplify_sink, D2D1_FILL_MODE_ALTERNATE, 4, &expected_figures[16], 4);
     geometry_sink_cleanup(&simplify_sink);
 
@@ -3700,7 +4127,7 @@ static void test_path_geometry(BOOL d3d11)
     ID2D1RenderTarget_FillGeometry(rt, (ID2D1Geometry *)geometry, (ID2D1Brush *)brush, NULL);
     ID2D1RenderTarget_FillGeometry(rt, (ID2D1Geometry *)transformed_geometry, (ID2D1Brush *)brush, NULL);
     hr = ID2D1RenderTarget_EndDraw(rt, NULL, NULL);
-    ok(SUCCEEDED(hr), "Failed to end draw, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     match = compare_figure(&ctx, 0, 0, 160, 160, 0xff652e89, 64,
             "7xoCngECngECngECngECngECngECngECnQEEnAEEnAEEnAEEnAEEmwEGmgEGmgEGmgEGmQEImAEI"
             "lAEECASLAQgKCIEBDQoMew8KD3YQDBByEgwSbhMOEmwUDhRpFBAUZxUQFWUVEhVjFhIWYRYUFl8X"
@@ -3749,37 +4176,37 @@ static void test_path_geometry(BOOL d3d11)
     ID2D1PathGeometry_Release(geometry);
 
     hr = ID2D1Factory_CreatePathGeometry(factory, &geometry);
-    ok(SUCCEEDED(hr), "Failed to create path geometry, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     hr = ID2D1PathGeometry_Open(geometry, &sink);
-    ok(SUCCEEDED(hr), "Failed to open geometry sink, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     fill_geometry_sink_bezier(sink, 0);
     ID2D1GeometrySink_SetFillMode(sink, D2D1_FILL_MODE_WINDING);
     hr = ID2D1GeometrySink_Close(sink);
-    ok(SUCCEEDED(hr), "Failed to close geometry sink, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     hr = ID2D1PathGeometry_GetFigureCount(geometry, &count);
-    ok(SUCCEEDED(hr), "Failed to get figure count, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ok(count == 4, "Got unexpected figure count %u.\n", count);
     hr = ID2D1PathGeometry_GetSegmentCount(geometry, &count);
-    ok(SUCCEEDED(hr), "Failed to get segment count, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ok(count == 20, "Got unexpected segment count %u.\n", count);
     ID2D1GeometrySink_Release(sink);
 
     geometry_sink_init(&simplify_sink);
     hr = ID2D1PathGeometry_Simplify(geometry, D2D1_GEOMETRY_SIMPLIFICATION_OPTION_CUBICS_AND_LINES,
             NULL, 0.0f, &simplify_sink.ID2D1SimplifiedGeometrySink_iface);
-    ok(SUCCEEDED(hr), "Failed to simplify geometry, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     geometry_sink_check(&simplify_sink, D2D1_FILL_MODE_WINDING, 4, &expected_figures[12], 1);
     geometry_sink_cleanup(&simplify_sink);
     geometry_sink_init(&simplify_sink);
     hr = ID2D1PathGeometry_Simplify(geometry, D2D1_GEOMETRY_SIMPLIFICATION_OPTION_LINES,
             NULL, 100.0f, &simplify_sink.ID2D1SimplifiedGeometrySink_iface);
-    ok(SUCCEEDED(hr), "Failed to simplify geometry, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     geometry_sink_check(&simplify_sink, D2D1_FILL_MODE_WINDING, 4, &expected_figures[20], 1);
     geometry_sink_cleanup(&simplify_sink);
     geometry_sink_init(&simplify_sink);
     hr = ID2D1PathGeometry_Simplify(geometry, D2D1_GEOMETRY_SIMPLIFICATION_OPTION_LINES,
             NULL, 10.0f, &simplify_sink.ID2D1SimplifiedGeometrySink_iface);
-    ok(SUCCEEDED(hr), "Failed to simplify geometry, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     geometry_sink_check(&simplify_sink, D2D1_FILL_MODE_WINDING, 4, &expected_figures[24], 1);
     geometry_sink_cleanup(&simplify_sink);
 
@@ -3789,14 +4216,14 @@ static void test_path_geometry(BOOL d3d11)
     rotate_matrix(&matrix, M_PI / -4.0f);
     scale_matrix(&matrix, 2.0f, 0.5f);
     hr = ID2D1Factory_CreateTransformedGeometry(factory, (ID2D1Geometry *)geometry, &matrix, &transformed_geometry);
-    ok(SUCCEEDED(hr), "Failed to create transformed geometry, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     ID2D1RenderTarget_BeginDraw(rt);
     ID2D1RenderTarget_Clear(rt, &color);
     ID2D1RenderTarget_FillGeometry(rt, (ID2D1Geometry *)geometry, (ID2D1Brush *)brush, NULL);
     ID2D1RenderTarget_FillGeometry(rt, (ID2D1Geometry *)transformed_geometry, (ID2D1Brush *)brush, NULL);
     hr = ID2D1RenderTarget_EndDraw(rt, NULL, NULL);
-    ok(SUCCEEDED(hr), "Failed to end draw, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     match = compare_figure(&ctx, 0, 0, 160, 160, 0xff652e89, 64,
             "7xoCngECngECngECngECngECngECngECnQEEnAEEnAEEnAEEnAEEmwEGmgEGmgEGmgEGmQEImAEI"
             "lAEQiwEagQEjeyh2LHIwbjNsNmk4ZzplPGM+YUBfQl1DXURbRlpGWUhYSFdKVkpVS1VMVExUTFRM"
@@ -3833,9 +4260,9 @@ static void test_path_geometry(BOOL d3d11)
     ID2D1PathGeometry_Release(geometry);
 
     hr = ID2D1Factory_CreatePathGeometry(factory, &geometry);
-    ok(SUCCEEDED(hr), "Failed to create path geometry, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     hr = ID2D1PathGeometry_Open(geometry, &sink);
-    ok(SUCCEEDED(hr), "Failed to open geometry sink, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     set_point(&point, 40.0f,   20.0f);
     ID2D1GeometrySink_BeginFigure(sink, point, D2D1_FIGURE_BEGIN_FILLED);
@@ -3850,12 +4277,12 @@ static void test_path_geometry(BOOL d3d11)
     ID2D1GeometrySink_EndFigure(sink, D2D1_FIGURE_END_CLOSED);
 
     hr = ID2D1GeometrySink_Close(sink);
-    ok(SUCCEEDED(hr), "Failed to close geometry sink, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     hr = ID2D1PathGeometry_GetFigureCount(geometry, &count);
-    ok(SUCCEEDED(hr), "Failed to get figure count, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ok(count == 2, "Got unexpected figure count %u.\n", count);
     hr = ID2D1PathGeometry_GetSegmentCount(geometry, &count);
-    ok(SUCCEEDED(hr), "Failed to get segment count, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ok(count == 6, "Got unexpected segment count %u.\n", count);
     ID2D1GeometrySink_Release(sink);
 
@@ -3863,40 +4290,40 @@ static void test_path_geometry(BOOL d3d11)
     ID2D1RenderTarget_Clear(rt, &color);
     ID2D1RenderTarget_FillGeometry(rt, (ID2D1Geometry *)geometry, (ID2D1Brush *)brush, NULL);
     hr = ID2D1RenderTarget_EndDraw(rt, NULL, NULL);
-    ok(SUCCEEDED(hr), "Failed to end draw, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     match = compare_surface(&ctx, "a875e68e0cb9c055927b1b50b879f90b24e38470");
     ok(match, "Surface does not match.\n");
     ID2D1PathGeometry_Release(geometry);
 
     hr = ID2D1Factory_CreatePathGeometry(factory, &geometry);
-    ok(SUCCEEDED(hr), "Failed to create path geometry, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     hr = ID2D1PathGeometry_Open(geometry, &sink);
-    ok(SUCCEEDED(hr), "Failed to open geometry sink, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     set_point(&point, 40.0f,   20.0f);
     ID2D1GeometrySink_BeginFigure(sink, point, D2D1_FIGURE_BEGIN_HOLLOW);
     line_to(sink, 75.0f,  300.0f);
     line_to(sink,  5.0f,  300.0f);
     ID2D1GeometrySink_EndFigure(sink, D2D1_FIGURE_END_OPEN);
     hr = ID2D1GeometrySink_Close(sink);
-    ok(SUCCEEDED(hr), "Failed to close geometry sink, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ID2D1GeometrySink_Release(sink);
     hr = ID2D1PathGeometry_GetSegmentCount(geometry, &count);
-    ok(SUCCEEDED(hr), "Failed to get segment count, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ok(count == 2, "Got unexpected segment count %u.\n", count);
 
     geometry_sink_init(&simplify_sink);
     hr = ID2D1PathGeometry_Simplify(geometry, D2D1_GEOMETRY_SIMPLIFICATION_OPTION_LINES,
             NULL, 0.0f, &simplify_sink.ID2D1SimplifiedGeometrySink_iface);
-    ok(SUCCEEDED(hr), "Failed to simplify geometry, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     geometry_sink_check(&simplify_sink, D2D1_FILL_MODE_ALTERNATE, 1, &expected_figures[28], 1);
     geometry_sink_cleanup(&simplify_sink);
 
     ID2D1PathGeometry_Release(geometry);
 
     hr = ID2D1Factory_CreatePathGeometry(factory, &geometry);
-    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     hr = ID2D1PathGeometry_Open(geometry, &sink);
-    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     set_point(&point, 20.0f,   80.0f);
     ID2D1GeometrySink_BeginFigure(sink, point, D2D1_FIGURE_BEGIN_FILLED);
@@ -3923,12 +4350,12 @@ static void test_path_geometry(BOOL d3d11)
     ID2D1GeometrySink_EndFigure(sink, D2D1_FIGURE_END_CLOSED);
 
     hr = ID2D1GeometrySink_Close(sink);
-    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ID2D1GeometrySink_Release(sink);
 
     set_rect(&rect, 0.0f, 0.0f, 0.0f, 0.0f);
     hr = ID2D1PathGeometry_GetBounds(geometry, NULL, &rect);
-    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     match = compare_rect(&rect, 20.0f, 20.0f, 180.0f, 180.0f, 0);
     ok(match, "Got unexpected rectangle {%.8e, %.8e, %.8e, %.8e}.\n",
             rect.left, rect.top, rect.right, rect.bottom);
@@ -3936,14 +4363,13 @@ static void test_path_geometry(BOOL d3d11)
     geometry_sink_init(&simplify_sink);
     hr = ID2D1PathGeometry_Simplify(geometry, D2D1_GEOMETRY_SIMPLIFICATION_OPTION_CUBICS_AND_LINES,
             NULL, 0.0f, &simplify_sink.ID2D1SimplifiedGeometrySink_iface);
-    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     geometry_sink_check(&simplify_sink, D2D1_FILL_MODE_ALTERNATE, 4, &expected_figures[29], 1);
     geometry_sink_cleanup(&simplify_sink);
 
     ID2D1PathGeometry_Release(geometry);
 
     ID2D1SolidColorBrush_Release(brush);
-    ID2D1Factory_Release(factory);
     release_test_context(&ctx);
 }
 
@@ -4009,11 +4435,11 @@ static void test_rectangle_geometry(BOOL d3d11)
     };
 
     hr = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, &IID_ID2D1Factory, NULL, (void **)&factory);
-    ok(SUCCEEDED(hr), "Failed to create factory, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     set_rect(&rect, 0.0f, 0.0f, 0.0f, 0.0f);
     hr = ID2D1Factory_CreateRectangleGeometry(factory, &rect, &geometry);
-    ok(SUCCEEDED(hr), "Failed to create geometry, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ID2D1RectangleGeometry_GetRect(geometry, &rect2);
     match = compare_rect(&rect2, 0.0f, 0.0f, 0.0f, 0.0f, 0);
     ok(match, "Got unexpected rectangle {%.8e, %.8e, %.8e, %.8e}.\n",
@@ -4022,7 +4448,7 @@ static void test_rectangle_geometry(BOOL d3d11)
 
     set_rect(&rect, 50.0f, 0.0f, 40.0f, 100.0f);
     hr = ID2D1Factory_CreateRectangleGeometry(factory, &rect, &geometry);
-    ok(SUCCEEDED(hr), "Failed to create geometry, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ID2D1RectangleGeometry_GetRect(geometry, &rect2);
     match = compare_rect(&rect2, 50.0f, 0.0f, 40.0f, 100.0f, 0);
     ok(match, "Got unexpected rectangle {%.8e, %.8e, %.8e, %.8e}.\n",
@@ -4031,7 +4457,7 @@ static void test_rectangle_geometry(BOOL d3d11)
 
     set_rect(&rect, 0.0f, 100.0f, 40.0f, 50.0f);
     hr = ID2D1Factory_CreateRectangleGeometry(factory, &rect, &geometry);
-    ok(SUCCEEDED(hr), "Failed to create geometry, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ID2D1RectangleGeometry_GetRect(geometry, &rect2);
     match = compare_rect(&rect2, 0.0f, 100.0f, 40.0f, 50.0f, 0);
     ok(match, "Got unexpected rectangle {%.8e, %.8e, %.8e, %.8e}.\n",
@@ -4040,7 +4466,7 @@ static void test_rectangle_geometry(BOOL d3d11)
 
     set_rect(&rect, 50.0f, 100.0f, 40.0f, 50.0f);
     hr = ID2D1Factory_CreateRectangleGeometry(factory, &rect, &geometry);
-    ok(SUCCEEDED(hr), "Failed to create geometry, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ID2D1RectangleGeometry_GetRect(geometry, &rect2);
     match = compare_rect(&rect2, 50.0f, 100.0f, 40.0f, 50.0f, 0);
     ok(match, "Got unexpected rectangle {%.8e, %.8e, %.8e, %.8e}.\n",
@@ -4049,63 +4475,63 @@ static void test_rectangle_geometry(BOOL d3d11)
 
     set_rect(&rect, 0.0f, 0.0f, 10.0f, 20.0f);
     hr = ID2D1Factory_CreateRectangleGeometry(factory, &rect, &geometry);
-    ok(SUCCEEDED(hr), "Failed to create geometry, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     /* Edge. */
     contains = FALSE;
     set_point(&point, 0.0f, 0.0f);
     hr = ID2D1RectangleGeometry_FillContainsPoint(geometry, point, NULL, 0.0f, &contains);
-    ok(SUCCEEDED(hr), "FillContainsPoint() failed, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ok(!!contains, "Got wrong hit test result %d.\n", contains);
 
     /* Within tolerance limit around corner. */
     contains = TRUE;
     set_point(&point, -D2D1_DEFAULT_FLATTENING_TOLERANCE, 0.0f);
     hr = ID2D1RectangleGeometry_FillContainsPoint(geometry, point, NULL, 0.0f, &contains);
-    ok(SUCCEEDED(hr), "FillContainsPoint() failed, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ok(!contains, "Got wrong hit test result %d.\n", contains);
 
     contains = FALSE;
     set_point(&point, -D2D1_DEFAULT_FLATTENING_TOLERANCE + 0.01f, 0.0f);
     hr = ID2D1RectangleGeometry_FillContainsPoint(geometry, point, NULL, 0.0f, &contains);
-    ok(SUCCEEDED(hr), "FillContainsPoint() failed, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ok(!!contains, "Got wrong hit test result %d.\n", contains);
 
     contains = TRUE;
     set_point(&point, -D2D1_DEFAULT_FLATTENING_TOLERANCE - 0.01f, 0.0f);
     hr = ID2D1RectangleGeometry_FillContainsPoint(geometry, point, NULL, 0.0f, &contains);
-    ok(SUCCEEDED(hr), "FillContainsPoint() failed, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ok(!contains, "Got wrong hit test result %d.\n", contains);
 
     contains = TRUE;
     set_point(&point, -D2D1_DEFAULT_FLATTENING_TOLERANCE, -D2D1_DEFAULT_FLATTENING_TOLERANCE);
     hr = ID2D1RectangleGeometry_FillContainsPoint(geometry, point, NULL, 0.0f, &contains);
-    ok(SUCCEEDED(hr), "FillContainsPoint() failed, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ok(!contains, "Got wrong hit test result %d.\n", contains);
 
     /* Inside. */
     contains = FALSE;
     set_point(&point, 5.0f, 5.0f);
     hr = ID2D1RectangleGeometry_FillContainsPoint(geometry, point, NULL, 0.0f, &contains);
-    ok(SUCCEEDED(hr), "FillContainsPoint() failed, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ok(!!contains, "Got wrong hit test result %d.\n", contains);
 
     /* Test GetBounds() and Simplify(). */
     hr = ID2D1RectangleGeometry_GetBounds(geometry, NULL, &rect);
-    ok(SUCCEEDED(hr), "Failed to get bounds.\n");
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     match = compare_rect(&rect, 0.0f, 0.0f, 10.0f, 20.0f, 0);
     ok(match, "Got unexpected bounds {%.8e, %.8e, %.8e, %.8e}.\n",
             rect.left, rect.top, rect.right, rect.bottom);
     geometry_sink_init(&sink);
     hr = ID2D1RectangleGeometry_Simplify(geometry, D2D1_GEOMETRY_SIMPLIFICATION_OPTION_CUBICS_AND_LINES,
             NULL, 0.0f, &sink.ID2D1SimplifiedGeometrySink_iface);
-    ok(SUCCEEDED(hr), "Failed to simplify geometry, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     geometry_sink_check(&sink, D2D1_FILL_MODE_ALTERNATE, 1, &expected_figures[0], 0);
     geometry_sink_cleanup(&sink);
     geometry_sink_init(&sink);
     hr = ID2D1RectangleGeometry_Simplify(geometry, D2D1_GEOMETRY_SIMPLIFICATION_OPTION_LINES,
             NULL, 0.0f, &sink.ID2D1SimplifiedGeometrySink_iface);
-    ok(SUCCEEDED(hr), "Failed to simplify geometry, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     geometry_sink_check(&sink, D2D1_FILL_MODE_ALTERNATE, 1, &expected_figures[0], 0);
     geometry_sink_cleanup(&sink);
 
@@ -4114,14 +4540,14 @@ static void test_rectangle_geometry(BOOL d3d11)
     scale_matrix(&matrix, 3.0f, 2.0f);
     rotate_matrix(&matrix, M_PI / -5.0f);
     hr = ID2D1RectangleGeometry_GetBounds(geometry, &matrix, &rect);
-    ok(SUCCEEDED(hr), "Failed to get bounds.\n");
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     match = compare_rect(&rect, 2.00000000e+01f, 1.82442951e+01f, 7.95376282e+01f, 6.23606796e+01f, 0);
     ok(match, "Got unexpected bounds {%.8e, %.8e, %.8e, %.8e}.\n",
             rect.left, rect.top, rect.right, rect.bottom);
     geometry_sink_init(&sink);
     hr = ID2D1RectangleGeometry_Simplify(geometry, D2D1_GEOMETRY_SIMPLIFICATION_OPTION_CUBICS_AND_LINES,
             &matrix, 0.0f, &sink.ID2D1SimplifiedGeometrySink_iface);
-    ok(SUCCEEDED(hr), "Failed to simplify geometry, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     geometry_sink_check(&sink, D2D1_FILL_MODE_ALTERNATE, 1, &expected_figures[1], 1);
     geometry_sink_cleanup(&sink);
 
@@ -4129,14 +4555,14 @@ static void test_rectangle_geometry(BOOL d3d11)
     translate_matrix(&matrix, 25.0f, 15.0f);
     scale_matrix(&matrix, 0.0f, 2.0f);
     hr = ID2D1RectangleGeometry_GetBounds(geometry, &matrix, &rect);
-    ok(SUCCEEDED(hr), "Failed to get bounds.\n");
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     match = compare_rect(&rect, 25.0f, 15.0f, 25.0f, 55.0f, 0);
     ok(match, "Got unexpected bounds {%.8e, %.8e, %.8e, %.8e}.\n",
             rect.left, rect.top, rect.right, rect.bottom);
     geometry_sink_init(&sink);
     hr = ID2D1RectangleGeometry_Simplify(geometry, D2D1_GEOMETRY_SIMPLIFICATION_OPTION_LINES,
             &matrix, 0.0f, &sink.ID2D1SimplifiedGeometrySink_iface);
-    ok(SUCCEEDED(hr), "Failed to simplify geometry, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     geometry_sink_check(&sink, D2D1_FILL_MODE_ALTERNATE, 1, &expected_figures[2], 0);
     geometry_sink_cleanup(&sink);
 
@@ -4144,14 +4570,14 @@ static void test_rectangle_geometry(BOOL d3d11)
     translate_matrix(&matrix, 30.0f, 45.0f);
     scale_matrix(&matrix, 0.5f, 0.0f);
     hr = ID2D1RectangleGeometry_GetBounds(geometry, &matrix, &rect);
-    ok(SUCCEEDED(hr), "Failed to get bounds.\n");
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     match = compare_rect(&rect, 30.0f, 45.0f, 35.0f, 45.0f, 0);
     ok(match, "Got unexpected bounds {%.8e, %.8e, %.8e, %.8e}.\n",
             rect.left, rect.top, rect.right, rect.bottom);
     geometry_sink_init(&sink);
     hr = ID2D1RectangleGeometry_Simplify(geometry, D2D1_GEOMETRY_SIMPLIFICATION_OPTION_LINES,
             &matrix, 0.0f, &sink.ID2D1SimplifiedGeometrySink_iface);
-    ok(SUCCEEDED(hr), "Failed to simplify geometry, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     geometry_sink_check(&sink, D2D1_FILL_MODE_ALTERNATE, 1, &expected_figures[3], 0);
     geometry_sink_cleanup(&sink);
 
@@ -4160,66 +4586,66 @@ static void test_rectangle_geometry(BOOL d3d11)
     rotate_matrix(&matrix, M_PI / 3.0f);
     translate_matrix(&matrix, 30.0f, 20.0f);
     hr = ID2D1Factory_CreateTransformedGeometry(factory, (ID2D1Geometry *)geometry, &matrix, &transformed_geometry);
-    ok(SUCCEEDED(hr), "Failed to create transformed geometry, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
-    ID2D1TransformedGeometry_GetBounds(transformed_geometry, NULL, &rect);
-    ok(SUCCEEDED(hr), "Failed to get bounds.\n");
+    hr = ID2D1TransformedGeometry_GetBounds(transformed_geometry, NULL, &rect);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     match = compare_rect(&rect, -7.85640717e+01f, 1.79903809e+02f, 1.07179594e+01f, 2.73205078e+02f, 1);
     ok(match, "Got unexpected bounds {%.8e, %.8e, %.8e, %.8e}.\n",
             rect.left, rect.top, rect.right, rect.bottom);
     geometry_sink_init(&sink);
     hr = ID2D1TransformedGeometry_Simplify(transformed_geometry, D2D1_GEOMETRY_SIMPLIFICATION_OPTION_CUBICS_AND_LINES,
             NULL, 0.0f, &sink.ID2D1SimplifiedGeometrySink_iface);
-    ok(SUCCEEDED(hr), "Failed to simplify geometry, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     geometry_sink_check(&sink, D2D1_FILL_MODE_ALTERNATE, 1, &expected_figures[4], 1);
     geometry_sink_cleanup(&sink);
     geometry_sink_init(&sink);
     hr = ID2D1TransformedGeometry_Simplify(transformed_geometry, D2D1_GEOMETRY_SIMPLIFICATION_OPTION_LINES,
             NULL, 0.0f, &sink.ID2D1SimplifiedGeometrySink_iface);
-    ok(SUCCEEDED(hr), "Failed to simplify geometry, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     geometry_sink_check(&sink, D2D1_FILL_MODE_ALTERNATE, 1, &expected_figures[4], 1);
     geometry_sink_cleanup(&sink);
 
     set_matrix_identity(&matrix);
     rotate_matrix(&matrix, M_PI / -3.0f);
     scale_matrix(&matrix, 0.25f, 0.2f);
-    ID2D1TransformedGeometry_GetBounds(transformed_geometry, &matrix, &rect);
-    ok(SUCCEEDED(hr), "Failed to get bounds.\n");
+    hr = ID2D1TransformedGeometry_GetBounds(transformed_geometry, &matrix, &rect);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     match = compare_rect(&rect, 30.0f, 20.0f, 40.0f, 40.0f, 2);
     ok(match, "Got unexpected bounds {%.8e, %.8e, %.8e, %.8e}.\n",
             rect.left, rect.top, rect.right, rect.bottom);
     geometry_sink_init(&sink);
     hr = ID2D1TransformedGeometry_Simplify(transformed_geometry, D2D1_GEOMETRY_SIMPLIFICATION_OPTION_LINES,
             &matrix, 0.0f, &sink.ID2D1SimplifiedGeometrySink_iface);
-    ok(SUCCEEDED(hr), "Failed to simplify geometry, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     geometry_sink_check(&sink, D2D1_FILL_MODE_ALTERNATE, 1, &expected_figures[5], 4);
     geometry_sink_cleanup(&sink);
 
     set_matrix_identity(&matrix);
     scale_matrix(&matrix, 2.0f, 0.0f);
-    ID2D1TransformedGeometry_GetBounds(transformed_geometry, &matrix, &rect);
-    ok(SUCCEEDED(hr), "Failed to get bounds.\n");
+    hr = ID2D1TransformedGeometry_GetBounds(transformed_geometry, &matrix, &rect);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     match = compare_rect(&rect, -1.57128143e+02f, 0.00000000e+00f, 2.14359188e+01f, 0.00000000e+00f, 1);
     ok(match, "Got unexpected bounds {%.8e, %.8e, %.8e, %.8e}.\n",
             rect.left, rect.top, rect.right, rect.bottom);
     geometry_sink_init(&sink);
     hr = ID2D1TransformedGeometry_Simplify(transformed_geometry, D2D1_GEOMETRY_SIMPLIFICATION_OPTION_CUBICS_AND_LINES,
             &matrix, 0.0f, &sink.ID2D1SimplifiedGeometrySink_iface);
-    ok(SUCCEEDED(hr), "Failed to simplify geometry, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     geometry_sink_check(&sink, D2D1_FILL_MODE_ALTERNATE, 1, &expected_figures[6], 1);
     geometry_sink_cleanup(&sink);
 
     set_matrix_identity(&matrix);
     scale_matrix(&matrix, 0.0f, 0.5f);
-    ID2D1TransformedGeometry_GetBounds(transformed_geometry, &matrix, &rect);
-    ok(SUCCEEDED(hr), "Failed to get bounds.\n");
+    hr = ID2D1TransformedGeometry_GetBounds(transformed_geometry, &matrix, &rect);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     match = compare_rect(&rect, 0.00000000e+00f, 8.99519043e+01f, 0.00000000e+00, 1.36602539e+02f, 1);
     ok(match, "Got unexpected bounds {%.8e, %.8e, %.8e, %.8e}.\n",
             rect.left, rect.top, rect.right, rect.bottom);
     geometry_sink_init(&sink);
     hr = ID2D1TransformedGeometry_Simplify(transformed_geometry, D2D1_GEOMETRY_SIMPLIFICATION_OPTION_CUBICS_AND_LINES,
             &matrix, 0.0f, &sink.ID2D1SimplifiedGeometrySink_iface);
-    ok(SUCCEEDED(hr), "Failed to simplify geometry, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     geometry_sink_check(&sink, D2D1_FILL_MODE_ALTERNATE, 1, &expected_figures[7], 1);
     geometry_sink_cleanup(&sink);
 
@@ -4236,11 +4662,11 @@ static void test_rounded_rectangle_geometry(BOOL d3d11)
     HRESULT hr;
 
     hr = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, &IID_ID2D1Factory, NULL, (void **)&factory);
-    ok(SUCCEEDED(hr), "Failed to create factory, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     set_rounded_rect(&rect, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
     hr = ID2D1Factory_CreateRoundedRectangleGeometry(factory, &rect, &geometry);
-    ok(SUCCEEDED(hr), "Failed to create geometry, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     ID2D1RoundedRectangleGeometry_GetRoundedRect(geometry, &rect2);
     ok(!memcmp(&rect, &rect2, sizeof(rect)), "Got unexpected rectangle {%.8e, %.8e, %.8e, %.8e, %.8e, %.8e}.\n",
@@ -4324,10 +4750,10 @@ static void test_bitmap_formats(BOOL d3d11)
             bitmap_desc.pixelFormat.alphaMode = j;
             hr = ID2D1RenderTarget_CreateBitmap(rt, size, NULL, 0, &bitmap_desc, &bitmap);
             if (bitmap_formats[i].mask & (1u << j))
-                ok(hr == S_OK, "Got unexpected hr %#x, for format %#x/%#x.\n",
+                ok(hr == S_OK, "Got unexpected hr %#lx, for format %#x/%#x.\n",
                         hr, bitmap_formats[i].format, j);
             else
-                ok(hr == D2DERR_UNSUPPORTED_PIXEL_FORMAT, "Got unexpected hr %#x, for format %#x/%#x.\n",
+                ok(hr == D2DERR_UNSUPPORTED_PIXEL_FORMAT, "Got unexpected hr %#lx, for format %#x/%#x.\n",
                         hr, bitmap_formats[i].format, j);
             if (SUCCEEDED(hr))
                 ID2D1Bitmap_Release(bitmap);
@@ -4340,18 +4766,22 @@ static void test_bitmap_formats(BOOL d3d11)
 static void test_alpha_mode(BOOL d3d11)
 {
     D2D1_RENDER_TARGET_PROPERTIES rt_desc;
+    D2D1_BITMAP_PROPERTIES1 bitmap_desc1;
     D2D1_BITMAP_PROPERTIES bitmap_desc;
     ID2D1SolidColorBrush *color_brush;
     ID2D1BitmapBrush *bitmap_brush;
     struct d2d1_test_context ctx;
+    ID2D1DeviceContext *context;
+    ID2D1Bitmap1 *bitmap1;
     ID2D1RenderTarget *rt;
+    IDXGISurface *surface;
     ID2D1Bitmap *bitmap;
     D2D1_COLOR_F color;
+    BOOL match, match2;
     D2D1_RECT_F rect;
     D2D1_SIZE_U size;
     ULONG refcount;
     HRESULT hr;
-    BOOL match;
 
     static const DWORD bitmap_data[] =
     {
@@ -4373,22 +4803,22 @@ static void test_alpha_mode(BOOL d3d11)
     bitmap_desc.dpiX = 96.0f / 40.0f;
     bitmap_desc.dpiY = 96.0f / 30.0f;
     hr = ID2D1RenderTarget_CreateBitmap(rt, size, bitmap_data, 4 * sizeof(*bitmap_data), &bitmap_desc, &bitmap);
-    ok(SUCCEEDED(hr), "Failed to create bitmap, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     hr = ID2D1RenderTarget_CreateBitmapBrush(rt, bitmap, NULL, NULL, &bitmap_brush);
-    ok(SUCCEEDED(hr), "Failed to create brush, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ID2D1BitmapBrush_SetInterpolationMode(bitmap_brush, D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR);
     ID2D1BitmapBrush_SetExtendModeX(bitmap_brush, D2D1_EXTEND_MODE_WRAP);
     ID2D1BitmapBrush_SetExtendModeY(bitmap_brush, D2D1_EXTEND_MODE_WRAP);
 
     set_color(&color, 0.0f, 1.0f, 0.0f, 0.75f);
     hr = ID2D1RenderTarget_CreateSolidColorBrush(rt, &color, NULL, &color_brush);
-    ok(SUCCEEDED(hr), "Failed to create brush, hr %#x.\n", hr);
+    ok(SUCCEEDED(hr), "Failed to create brush, hr %#lx.\n", hr);
 
     ID2D1RenderTarget_BeginDraw(rt);
     ID2D1RenderTarget_Clear(rt, NULL);
     hr = ID2D1RenderTarget_EndDraw(rt, NULL, NULL);
-    ok(SUCCEEDED(hr), "Failed to end draw, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     match = compare_surface(&ctx, "48c41aff3a130a17ee210866b2ab7d36763934d5");
     ok(match, "Surface does not match.\n");
 
@@ -4396,7 +4826,7 @@ static void test_alpha_mode(BOOL d3d11)
     set_color(&color, 1.0f, 0.0f, 0.0f, 0.25f);
     ID2D1RenderTarget_Clear(rt, &color);
     hr = ID2D1RenderTarget_EndDraw(rt, NULL, NULL);
-    ok(SUCCEEDED(hr), "Failed to end draw, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     match = compare_surface(&ctx, "6487e683730fb5a77c1911388d00b04664c5c4e4");
     ok(match, "Surface does not match.\n");
 
@@ -4404,7 +4834,7 @@ static void test_alpha_mode(BOOL d3d11)
     set_color(&color, 0.0f, 0.0f, 1.0f, 0.75f);
     ID2D1RenderTarget_Clear(rt, &color);
     hr = ID2D1RenderTarget_EndDraw(rt, NULL, NULL);
-    ok(SUCCEEDED(hr), "Failed to end draw, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     match = compare_surface(&ctx, "7a35ba09e43cbaf591388ff1ef8de56157630c98");
     ok(match, "Surface does not match.\n");
 
@@ -4422,7 +4852,7 @@ static void test_alpha_mode(BOOL d3d11)
     ID2D1Bitmap_Release(bitmap);
     bitmap_desc.pixelFormat.alphaMode = D2D1_ALPHA_MODE_PREMULTIPLIED;
     hr = ID2D1RenderTarget_CreateBitmap(rt, size, bitmap_data, 4 * sizeof(*bitmap_data), &bitmap_desc, &bitmap);
-    ok(SUCCEEDED(hr), "Failed to create bitmap, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ID2D1BitmapBrush_SetBitmap(bitmap_brush, bitmap);
 
     set_rect(&rect,   0.0f, 120.0f, 160.0f, 240.0f);
@@ -4445,7 +4875,7 @@ static void test_alpha_mode(BOOL d3d11)
     ID2D1RenderTarget_FillRectangle(rt, &rect, (ID2D1Brush *)color_brush);
 
     hr = ID2D1RenderTarget_EndDraw(rt, NULL, NULL);
-    ok(SUCCEEDED(hr), "Failed to end draw, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     match = compare_surface(&ctx, "14f8ac64b70966c7c3c6281c59aaecdb17c3b16a");
     ok(match, "Surface does not match.\n");
 
@@ -4464,12 +4894,12 @@ static void test_alpha_mode(BOOL d3d11)
     ID2D1Bitmap_Release(bitmap);
     bitmap_desc.pixelFormat.alphaMode = D2D1_ALPHA_MODE_IGNORE;
     hr = ID2D1RenderTarget_CreateBitmap(rt, size, bitmap_data, 4 * sizeof(*bitmap_data), &bitmap_desc, &bitmap);
-    ok(SUCCEEDED(hr), "Failed to create bitmap, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ID2D1BitmapBrush_SetBitmap(bitmap_brush, bitmap);
 
     ID2D1BitmapBrush_Release(bitmap_brush);
     hr = ID2D1RenderTarget_CreateBitmapBrush(rt, bitmap, NULL, NULL, &bitmap_brush);
-    ok(SUCCEEDED(hr), "Failed to create brush, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ID2D1BitmapBrush_SetInterpolationMode(bitmap_brush, D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR);
     ID2D1BitmapBrush_SetExtendModeX(bitmap_brush, D2D1_EXTEND_MODE_WRAP);
     ID2D1BitmapBrush_SetExtendModeY(bitmap_brush, D2D1_EXTEND_MODE_WRAP);
@@ -4477,12 +4907,12 @@ static void test_alpha_mode(BOOL d3d11)
     ID2D1SolidColorBrush_Release(color_brush);
     set_color(&color, 0.0f, 1.0f, 0.0f, 0.75f);
     hr = ID2D1RenderTarget_CreateSolidColorBrush(rt, &color, NULL, &color_brush);
-    ok(SUCCEEDED(hr), "Failed to create brush, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     ID2D1RenderTarget_BeginDraw(rt);
     ID2D1RenderTarget_Clear(rt, NULL);
     hr = ID2D1RenderTarget_EndDraw(rt, NULL, NULL);
-    ok(SUCCEEDED(hr), "Failed to end draw, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     match = compare_surface(&ctx, "b44510bf2d2e61a8d7c0ad862de49a471f1fd13f");
     ok(match, "Surface does not match.\n");
 
@@ -4490,7 +4920,7 @@ static void test_alpha_mode(BOOL d3d11)
     set_color(&color, 1.0f, 0.0f, 0.0f, 0.25f);
     ID2D1RenderTarget_Clear(rt, &color);
     hr = ID2D1RenderTarget_EndDraw(rt, NULL, NULL);
-    ok(SUCCEEDED(hr), "Failed to end draw, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     match = compare_surface(&ctx, "2184f4a9198fc1de09ac85301b7a03eebadd9b81");
     ok(match, "Surface does not match.\n");
 
@@ -4498,7 +4928,7 @@ static void test_alpha_mode(BOOL d3d11)
     set_color(&color, 0.0f, 0.0f, 1.0f, 0.75f);
     ID2D1RenderTarget_Clear(rt, &color);
     hr = ID2D1RenderTarget_EndDraw(rt, NULL, NULL);
-    ok(SUCCEEDED(hr), "Failed to end draw, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     match = compare_surface(&ctx, "6527ec83b4039c895b50f9b3e144fe0cf90d1889");
     ok(match, "Surface does not match.\n");
 
@@ -4516,7 +4946,7 @@ static void test_alpha_mode(BOOL d3d11)
     ID2D1Bitmap_Release(bitmap);
     bitmap_desc.pixelFormat.alphaMode = D2D1_ALPHA_MODE_PREMULTIPLIED;
     hr = ID2D1RenderTarget_CreateBitmap(rt, size, bitmap_data, 4 * sizeof(*bitmap_data), &bitmap_desc, &bitmap);
-    ok(SUCCEEDED(hr), "Failed to create bitmap, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ID2D1BitmapBrush_SetBitmap(bitmap_brush, bitmap);
 
     set_rect(&rect,   0.0f, 120.0f, 160.0f, 240.0f);
@@ -4539,14 +4969,55 @@ static void test_alpha_mode(BOOL d3d11)
     ID2D1RenderTarget_FillRectangle(rt, &rect, (ID2D1Brush *)color_brush);
 
     hr = ID2D1RenderTarget_EndDraw(rt, NULL, NULL);
-    ok(SUCCEEDED(hr), "Failed to end draw, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     match = compare_surface(&ctx, "465f5a3190d7bde408b3206b4be939fb22f8a3d6");
     ok(match, "Surface does not match.\n");
 
     refcount = ID2D1Bitmap_Release(bitmap);
-    ok(refcount == 1, "Bitmap has %u references left.\n", refcount);
-    ID2D1SolidColorBrush_Release(color_brush);
+    ok(refcount == 1, "Bitmap has %lu references left.\n", refcount);
     ID2D1BitmapBrush_Release(bitmap_brush);
+
+    hr = ID2D1RenderTarget_QueryInterface(rt, &IID_ID2D1DeviceContext, (void **)&context);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+    set_size_u(&size, 4, 4);
+    memset(&bitmap_desc1, 0, sizeof(bitmap_desc1));
+    bitmap_desc1.dpiX = 96.0f;
+    bitmap_desc1.dpiY = 96.0f;
+    bitmap_desc1.pixelFormat.format = DXGI_FORMAT_B8G8R8A8_UNORM;
+    bitmap_desc1.pixelFormat.alphaMode = D2D1_ALPHA_MODE_IGNORE;
+    bitmap_desc1.bitmapOptions = D2D1_BITMAP_OPTIONS_TARGET | D2D1_BITMAP_OPTIONS_CANNOT_DRAW;
+    hr = ID2D1DeviceContext_CreateBitmap(context, size, bitmap_data, 4 * sizeof(*bitmap_data),
+            &bitmap_desc1, &bitmap1);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+    ID2D1DeviceContext_BeginDraw(context);
+    ID2D1DeviceContext_SetTarget(context, (ID2D1Image *)bitmap1);
+    set_rect(&rect, 0.0f, 2.0f, 1.0f, 2.0f);
+    ID2D1SolidColorBrush_SetOpacity(color_brush, 1.0f);
+    ID2D1DeviceContext_FillRectangle(context, &rect, (ID2D1Brush *)color_brush);
+    set_rect(&rect, 1.0f, 2.0f, 3.0f, 3.0f);
+    ID2D1SolidColorBrush_SetOpacity(color_brush, 0.75f);
+    ID2D1DeviceContext_FillRectangle(context, &rect, (ID2D1Brush *)color_brush);
+    set_rect(&rect, 3.0f, 2.0f, 3.0f, 3.0f);
+    ID2D1SolidColorBrush_SetOpacity(color_brush, 0.25f);
+    ID2D1DeviceContext_FillRectangle(context, &rect, (ID2D1Brush *)color_brush);
+    hr = ID2D1DeviceContext_EndDraw(context, NULL, NULL);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+    surface = ctx.surface;
+    hr = ID2D1Bitmap1_GetSurface(bitmap1, &ctx.surface);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    match = compare_surface(&ctx, "e7ee77e89745fa5d195fd78bd398738330cfcde8");
+    match2 = compare_surface(&ctx, "4855c7c082c8ede364cf6e2dcde83f95b88aecbe");
+    ok(match || broken(match2) /* Win7 TestBots */, "Surface does not match.\n");
+    IDXGISurface_Release(ctx.surface);
+    ctx.surface = surface;
+    ID2D1DeviceContext_SetTarget(context, NULL);
+
+    ID2D1Bitmap1_Release(bitmap1);
+    ID2D1DeviceContext_Release(context);
+    ID2D1SolidColorBrush_Release(color_brush);
     ID2D1RenderTarget_Release(rt);
     release_test_context(&ctx);
 }
@@ -4578,18 +5049,18 @@ static void test_shared_bitmap(BOOL d3d11)
     window2 = create_window();
     swapchain2 = create_swapchain(ctx.device, window2, TRUE);
     hr = IDXGISwapChain_GetBuffer(swapchain2, 0, &IID_IDXGISurface, (void **)&surface2);
-    ok(SUCCEEDED(hr), "Failed to get buffer, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
     hr = CoCreateInstance(&CLSID_WICImagingFactory, NULL, CLSCTX_INPROC_SERVER,
             &IID_IWICImagingFactory, (void **)&wic_factory);
-    ok(SUCCEEDED(hr), "Failed to create WIC imaging factory, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     hr = IWICImagingFactory_CreateBitmap(wic_factory, 640, 480,
             &GUID_WICPixelFormat32bppPBGRA, WICBitmapCacheOnDemand, &wic_bitmap1);
-    ok(SUCCEEDED(hr), "Failed to create bitmap, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     hr = IWICImagingFactory_CreateBitmap(wic_factory, 640, 480,
             &GUID_WICPixelFormat32bppPBGRA, WICBitmapCacheOnDemand, &wic_bitmap2);
-    ok(SUCCEEDED(hr), "Failed to create bitmap, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     IWICImagingFactory_Release(wic_factory);
 
     desc.type = D2D1_RENDER_TARGET_TYPE_DEFAULT;
@@ -4606,32 +5077,32 @@ static void test_shared_bitmap(BOOL d3d11)
     bitmap_desc.dpiY = 96.0f;
 
     hr = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, &IID_ID2D1Factory, NULL, (void **)&factory1);
-    ok(SUCCEEDED(hr), "Failed to create factory, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     hr = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, &IID_ID2D1Factory, NULL, (void **)&factory2);
-    ok(SUCCEEDED(hr), "Failed to create factory, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     /* DXGI surface render targets with the same device and factory. */
     hr = ID2D1Factory_CreateDxgiSurfaceRenderTarget(factory1, ctx.surface, &desc, &rt1);
-    ok(SUCCEEDED(hr), "Failed to create render target, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     hr = ID2D1RenderTarget_CreateBitmap(rt1, size, NULL, 0, &bitmap_desc, &bitmap1);
     check_bitmap_surface(bitmap1, TRUE, 0);
-    ok(SUCCEEDED(hr), "Failed to create bitmap, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     hr = ID2D1Factory_CreateDxgiSurfaceRenderTarget(factory1, surface2, &desc, &rt2);
-    ok(SUCCEEDED(hr), "Failed to create render target, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     hr = ID2D1RenderTarget_CreateSharedBitmap(rt2, &IID_ID2D1Bitmap, bitmap1, NULL, &bitmap2);
-    ok(SUCCEEDED(hr), "Failed to create bitmap, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     check_bitmap_surface(bitmap2, TRUE, 0);
     ID2D1Bitmap_Release(bitmap2);
     hr = ID2D1RenderTarget_CreateSharedBitmap(rt2, &IID_IUnknown, bitmap1, NULL, &bitmap2);
-    ok(hr == E_INVALIDARG, "Got unexpected hr %#x.\n", hr);
+    ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
     ID2D1RenderTarget_Release(rt2);
 
     /* DXGI surface render targets with the same device but different factories. */
     hr = ID2D1Factory_CreateDxgiSurfaceRenderTarget(factory2, surface2, &desc, &rt2);
-    ok(SUCCEEDED(hr), "Failed to create render target, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     hr = ID2D1RenderTarget_CreateSharedBitmap(rt2, &IID_ID2D1Bitmap, bitmap1, NULL, &bitmap2);
-    ok(hr == D2DERR_WRONG_FACTORY, "Got unexpected hr %#x.\n", hr);
+    ok(hr == D2DERR_WRONG_FACTORY, "Got unexpected hr %#lx.\n", hr);
     ID2D1RenderTarget_Release(rt2);
 
     /* DXGI surface render targets with different devices but the same factory. */
@@ -4641,55 +5112,55 @@ static void test_shared_bitmap(BOOL d3d11)
     ok(!!device2, "Failed to create device.\n");
     swapchain2 = create_swapchain(device2, window2, TRUE);
     hr = IDXGISwapChain_GetBuffer(swapchain2, 0, &IID_IDXGISurface, (void **)&surface2);
-    ok(SUCCEEDED(hr), "Failed to get buffer, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     hr = ID2D1Factory_CreateDxgiSurfaceRenderTarget(factory1, surface2, &desc, &rt2);
-    ok(SUCCEEDED(hr), "Failed to create render target, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     hr = ID2D1RenderTarget_CreateSharedBitmap(rt2, &IID_ID2D1Bitmap, bitmap1, NULL, &bitmap2);
-    ok(hr == D2DERR_UNSUPPORTED_OPERATION, "Got unexpected hr %#x.\n", hr);
+    ok(hr == D2DERR_UNSUPPORTED_OPERATION, "Got unexpected hr %#lx.\n", hr);
     ID2D1RenderTarget_Release(rt2);
 
     /* DXGI surface render targets with different devices and different factories. */
     hr = ID2D1Factory_CreateDxgiSurfaceRenderTarget(factory2, surface2, &desc, &rt2);
-    ok(SUCCEEDED(hr), "Failed to create render target, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     hr = ID2D1RenderTarget_CreateSharedBitmap(rt2, &IID_ID2D1Bitmap, bitmap1, NULL, &bitmap2);
-    ok(hr == D2DERR_WRONG_FACTORY, "Got unexpected hr %#x.\n", hr);
+    ok(hr == D2DERR_WRONG_FACTORY, "Got unexpected hr %#lx.\n", hr);
     ID2D1RenderTarget_Release(rt2);
 
     /* DXGI surface render target and WIC bitmap render target, same factory. */
     hr = ID2D1Factory_CreateWicBitmapRenderTarget(factory1, wic_bitmap2, &desc, &rt2);
-    ok(SUCCEEDED(hr), "Failed to create render target, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     hr = ID2D1RenderTarget_CreateSharedBitmap(rt2, &IID_ID2D1Bitmap, bitmap1, NULL, &bitmap2);
-    ok(hr == D2DERR_UNSUPPORTED_OPERATION, "Got unexpected hr %#x.\n", hr);
+    ok(hr == D2DERR_UNSUPPORTED_OPERATION, "Got unexpected hr %#lx.\n", hr);
     ID2D1RenderTarget_Release(rt2);
 
     /* WIC bitmap render targets on different D2D factories. */
     ID2D1Bitmap_Release(bitmap1);
     ID2D1RenderTarget_Release(rt1);
     hr = ID2D1Factory_CreateWicBitmapRenderTarget(factory1, wic_bitmap1, &desc, &rt1);
-    ok(SUCCEEDED(hr), "Failed to create render target, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     hr = ID2D1RenderTarget_CreateBitmap(rt1, size, NULL, 0, &bitmap_desc, &bitmap1);
-    ok(SUCCEEDED(hr), "Failed to create bitmap, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     hr = ID2D1RenderTarget_QueryInterface(rt1, &IID_ID2D1GdiInteropRenderTarget, (void **)&interop);
-    ok(SUCCEEDED(hr), "Failed to get interop target, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     hr = ID2D1GdiInteropRenderTarget_QueryInterface(interop, &IID_ID2D1RenderTarget, (void **)&rt3);
-    ok(SUCCEEDED(hr), "Failed to get render target back, %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ok(rt3 == rt1, "Unexpected render target\n");
     ID2D1RenderTarget_Release(rt3);
     ID2D1GdiInteropRenderTarget_Release(interop);
 
     hr = ID2D1Factory_CreateWicBitmapRenderTarget(factory2, wic_bitmap2, &desc, &rt2);
-    ok(SUCCEEDED(hr), "Failed to create render target, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     hr = ID2D1RenderTarget_CreateSharedBitmap(rt2, &IID_ID2D1Bitmap, bitmap1, NULL, &bitmap2);
-    ok(hr == D2DERR_WRONG_FACTORY, "Got unexpected hr %#x.\n", hr);
+    ok(hr == D2DERR_WRONG_FACTORY, "Got unexpected hr %#lx.\n", hr);
     ID2D1RenderTarget_Release(rt2);
 
     /* WIC bitmap render targets on the same D2D factory. */
     hr = ID2D1Factory_CreateWicBitmapRenderTarget(factory1, wic_bitmap2, &desc, &rt2);
-    ok(SUCCEEDED(hr), "Failed to create render target, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     hr = ID2D1RenderTarget_CreateSharedBitmap(rt2, &IID_ID2D1Bitmap, bitmap1, NULL, &bitmap2);
-    ok(SUCCEEDED(hr), "Failed to create bitmap, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     check_bitmap_surface(bitmap2, FALSE, 0);
     ID2D1Bitmap_Release(bitmap2);
     ID2D1RenderTarget_Release(rt2);
@@ -4704,7 +5175,7 @@ static void test_shared_bitmap(BOOL d3d11)
     desc.minLevel = D2D1_FEATURE_LEVEL_DEFAULT;
 
     hr = ID2D1Factory_CreateDxgiSurfaceRenderTarget(factory1, surface2, &desc, &rt2);
-    ok(SUCCEEDED(hr), "Failed to create render target, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     bitmap_desc.pixelFormat.format = DXGI_FORMAT_B8G8R8A8_UNORM;
     bitmap_desc.pixelFormat.alphaMode = D2D1_ALPHA_MODE_PREMULTIPLIED;
@@ -4712,7 +5183,7 @@ static void test_shared_bitmap(BOOL d3d11)
     bitmap_desc.dpiY = 0.0f;
 
     hr = ID2D1RenderTarget_CreateSharedBitmap(rt2, &IID_IDXGISurface, surface2, &bitmap_desc, &bitmap2);
-    ok(SUCCEEDED(hr) || broken(hr == E_INVALIDARG) /* vista */, "Failed to create bitmap, hr %#x.\n", hr);
+    ok(hr == S_OK || broken(hr == E_INVALIDARG) /* vista */, "Got unexpected hr %#lx.\n", hr);
 
     if (SUCCEEDED(hr))
     {
@@ -4730,21 +5201,21 @@ static void test_shared_bitmap(BOOL d3d11)
             { { DXGI_FORMAT_UNKNOWN, D2D1_ALPHA_MODE_IGNORE },
               { DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_IGNORE } },
 
-            { { DXGI_FORMAT_UNKNOWN, D2D1_ALPHA_MODE_UNKNOWN }, { 0 }, WINCODEC_ERR_UNSUPPORTEDPIXELFORMAT },
+            { { DXGI_FORMAT_UNKNOWN, D2D1_ALPHA_MODE_UNKNOWN }, { 0 }, D2DERR_UNSUPPORTED_PIXEL_FORMAT },
 
-            { { DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_UNKNOWN }, { 0 }, WINCODEC_ERR_UNSUPPORTEDPIXELFORMAT },
+            { { DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_UNKNOWN }, { 0 }, D2DERR_UNSUPPORTED_PIXEL_FORMAT },
 
             { { DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_IGNORE },
               { DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_IGNORE } },
 
-            { { DXGI_FORMAT_UNKNOWN, D2D1_ALPHA_MODE_STRAIGHT }, { 0 }, WINCODEC_ERR_UNSUPPORTEDPIXELFORMAT },
-            { { DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_STRAIGHT }, { 0 }, WINCODEC_ERR_UNSUPPORTEDPIXELFORMAT },
+            { { DXGI_FORMAT_UNKNOWN, D2D1_ALPHA_MODE_STRAIGHT }, { 0 }, D2DERR_UNSUPPORTED_PIXEL_FORMAT },
+            { { DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_STRAIGHT }, { 0 }, D2DERR_UNSUPPORTED_PIXEL_FORMAT },
         };
         unsigned int i;
 
         size = ID2D1Bitmap_GetPixelSize(bitmap2);
         hr = IDXGISurface_GetDesc(surface2, &surface_desc);
-        ok(SUCCEEDED(hr), "Failed to get surface description, hr %#x.\n", hr);
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
         ok(size.width == surface_desc.Width && size.height == surface_desc.Height, "Got wrong bitmap size.\n");
 
         check_bitmap_surface(bitmap2, TRUE, D2D1_BITMAP_OPTIONS_TARGET | D2D1_BITMAP_OPTIONS_CANNOT_DRAW);
@@ -4755,7 +5226,7 @@ static void test_shared_bitmap(BOOL d3d11)
         if (IDXGISurface_QueryInterface(surface2, &IID_IDXGISurface1, (void **)&surface3) == S_OK)
         {
             hr = ID2D1RenderTarget_CreateSharedBitmap(rt2, &IID_IDXGISurface1, surface3, &bitmap_desc, &bitmap2);
-            ok(SUCCEEDED(hr), "Failed to create bitmap, hr %#x.\n", hr);
+            ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
             ID2D1Bitmap_Release(bitmap2);
             IDXGISurface1_Release(surface3);
@@ -4766,19 +5237,82 @@ static void test_shared_bitmap(BOOL d3d11)
             bitmap_desc.pixelFormat = bitmap_format_tests[i].original;
 
             hr = ID2D1RenderTarget_CreateSharedBitmap(rt2, &IID_IDXGISurface, surface2, &bitmap_desc, &bitmap2);
-        todo_wine_if(i == 2 || i == 3 || i == 5 || i == 6)
-            ok(hr == bitmap_format_tests[i].hr, "%u: unexpected hr %#x.\n", i, hr);
+            todo_wine_if(i == 2 || i == 3 || i == 5 || i == 6)
+            ok(hr == bitmap_format_tests[i].hr, "%u: Got unexpected hr %#lx.\n", i, hr);
 
-            if (SUCCEEDED(bitmap_format_tests[i].hr))
+            if (SUCCEEDED(hr) && hr == bitmap_format_tests[i].hr)
             {
                 pixel_format = ID2D1Bitmap_GetPixelFormat(bitmap2);
                 ok(pixel_format.format == bitmap_format_tests[i].result.format, "%u: unexpected pixel format %#x.\n",
                         i, pixel_format.format);
                 ok(pixel_format.alphaMode == bitmap_format_tests[i].result.alphaMode, "%u: unexpected alpha mode %d.\n",
                         i, pixel_format.alphaMode);
-
-                ID2D1Bitmap_Release(bitmap2);
             }
+
+            if (SUCCEEDED(hr))
+                ID2D1Bitmap_Release(bitmap2);
+        }
+    }
+
+    ID2D1Bitmap_Release(bitmap1);
+
+    /* Create from another bitmap, with a different description. */
+    set_size_u(&size, 4, 4);
+    bitmap_desc.pixelFormat.format = DXGI_FORMAT_B8G8R8A8_UNORM;
+    bitmap_desc.pixelFormat.alphaMode = D2D1_ALPHA_MODE_PREMULTIPLIED;
+    bitmap_desc.dpiX = 96.0f;
+    bitmap_desc.dpiY = 96.0f;
+    hr = ID2D1RenderTarget_CreateBitmap(rt2, size, NULL, 0, &bitmap_desc, &bitmap1);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+    if (SUCCEEDED(hr))
+    {
+        static const struct bitmap_format_test
+        {
+            D2D1_PIXEL_FORMAT original;
+            D2D1_PIXEL_FORMAT result;
+            HRESULT hr;
+        }
+        bitmap_format_tests[] =
+        {
+            { { DXGI_FORMAT_UNKNOWN, D2D1_ALPHA_MODE_PREMULTIPLIED },
+              { DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED } },
+
+            { { DXGI_FORMAT_UNKNOWN, D2D1_ALPHA_MODE_IGNORE },
+              { DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_IGNORE } },
+
+            { { DXGI_FORMAT_UNKNOWN, D2D1_ALPHA_MODE_UNKNOWN },
+              { DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED } },
+
+            { { DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_UNKNOWN },
+              { DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED } },
+
+            { { DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_IGNORE },
+              { DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_IGNORE } },
+
+            { { DXGI_FORMAT_UNKNOWN, D2D1_ALPHA_MODE_STRAIGHT }, { 0 }, D2DERR_UNSUPPORTED_PIXEL_FORMAT },
+            { { DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_STRAIGHT }, { 0 }, D2DERR_UNSUPPORTED_PIXEL_FORMAT },
+        };
+        unsigned int i;
+
+        for (i = 0; i < ARRAY_SIZE(bitmap_format_tests); ++i)
+        {
+            bitmap_desc.pixelFormat = bitmap_format_tests[i].original;
+
+            hr = ID2D1RenderTarget_CreateSharedBitmap(rt2, &IID_ID2D1Bitmap, bitmap1, &bitmap_desc, &bitmap2);
+            ok(hr == bitmap_format_tests[i].hr, "%u: Got unexpected hr %#lx.\n", i, hr);
+
+            if (SUCCEEDED(hr) && hr == bitmap_format_tests[i].hr)
+            {
+                pixel_format = ID2D1Bitmap_GetPixelFormat(bitmap2);
+                ok(pixel_format.format == bitmap_format_tests[i].result.format, "%u: unexpected pixel format %#x.\n",
+                        i, pixel_format.format);
+                ok(pixel_format.alphaMode == bitmap_format_tests[i].result.alphaMode, "%u: unexpected alpha mode %d.\n",
+                        i, pixel_format.alphaMode);
+            }
+
+            if (SUCCEEDED(hr))
+                ID2D1Bitmap_Release(bitmap2);
         }
     }
 
@@ -4801,10 +5335,11 @@ static void test_shared_bitmap(BOOL d3d11)
 static void test_bitmap_updates(BOOL d3d11)
 {
     D2D1_BITMAP_PROPERTIES bitmap_desc;
+    ID2D1Bitmap *bitmap, *dst_bitmap;
+    D2D1_RECT_U dst_rect, src_rect;
     struct d2d1_test_context ctx;
+    D2D1_POINT_2U dst_point;
     ID2D1RenderTarget *rt;
-    D2D1_RECT_U dst_rect;
-    ID2D1Bitmap *bitmap;
     D2D1_COLOR_F color;
     D2D1_RECT_F rect;
     D2D1_SIZE_U size;
@@ -4835,7 +5370,7 @@ static void test_bitmap_updates(BOOL d3d11)
     bitmap_desc.dpiX = 96.0f;
     bitmap_desc.dpiY = 96.0f;
     hr = ID2D1RenderTarget_CreateBitmap(rt, size, NULL, 0, &bitmap_desc, &bitmap);
-    ok(SUCCEEDED(hr), "Failed to create bitmap, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     set_rect(&rect, 0.0f, 0.0f, 320.0f, 240.0f);
     ID2D1RenderTarget_DrawBitmap(rt, bitmap, &rect, 1.0f,
@@ -4845,7 +5380,7 @@ static void test_bitmap_updates(BOOL d3d11)
 
     bitmap_desc.pixelFormat.alphaMode = D2D1_ALPHA_MODE_IGNORE;
     hr = ID2D1RenderTarget_CreateBitmap(rt, size, NULL, 0, &bitmap_desc, &bitmap);
-    ok(SUCCEEDED(hr), "Failed to create bitmap, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     set_rect(&rect, 0.0f, 240.0f, 320.0f, 480.0f);
     ID2D1RenderTarget_DrawBitmap(rt, bitmap, &rect, 1.0f,
@@ -4853,34 +5388,68 @@ static void test_bitmap_updates(BOOL d3d11)
 
     set_rect_u(&dst_rect, 1, 1, 3, 3);
     hr = ID2D1Bitmap_CopyFromMemory(bitmap, &dst_rect, bitmap_data, 4 * sizeof(*bitmap_data));
-    ok(SUCCEEDED(hr), "Failed to update bitmap, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     set_rect_u(&dst_rect, 0, 3, 3, 4);
     hr = ID2D1Bitmap_CopyFromMemory(bitmap, &dst_rect, &bitmap_data[6], 4 * sizeof(*bitmap_data));
-    ok(SUCCEEDED(hr), "Failed to update bitmap, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     set_rect_u(&dst_rect, 0, 0, 4, 1);
     hr = ID2D1Bitmap_CopyFromMemory(bitmap, &dst_rect, &bitmap_data[10], 4 * sizeof(*bitmap_data));
-    ok(SUCCEEDED(hr), "Failed to update bitmap, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     set_rect_u(&dst_rect, 0, 1, 1, 3);
     hr = ID2D1Bitmap_CopyFromMemory(bitmap, &dst_rect, &bitmap_data[2], sizeof(*bitmap_data));
-    ok(SUCCEEDED(hr), "Failed to update bitmap, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     set_rect_u(&dst_rect, 4, 4, 3, 1);
     hr = ID2D1Bitmap_CopyFromMemory(bitmap, &dst_rect, bitmap_data, sizeof(*bitmap_data));
-    ok(SUCCEEDED(hr), "Failed to update bitmap, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     set_rect(&rect, 320.0f, 240.0f, 640.0f, 480.0f);
     ID2D1RenderTarget_DrawBitmap(rt, bitmap, &rect, 1.0f,
             D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR, NULL);
 
     hr = ID2D1Bitmap_CopyFromMemory(bitmap, NULL, bitmap_data, 4 * sizeof(*bitmap_data));
-    ok(SUCCEEDED(hr), "Failed to update bitmap, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     set_rect(&rect, 320.0f, 0.0f, 640.0f, 240.0f);
     ID2D1RenderTarget_DrawBitmap(rt, bitmap, &rect, 1.0f,
             D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR, NULL);
 
     hr = ID2D1RenderTarget_EndDraw(rt, NULL, NULL);
-    ok(SUCCEEDED(hr), "Failed to end draw, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     match = compare_surface(&ctx, "cb8136c91fbbdc76bb83b8c09edc1907b0a5d0a6");
     ok(match, "Surface does not match.\n");
+
+    ID2D1RenderTarget_BeginDraw(rt);
+    set_color(&color, 0.0f, 0.0f, 1.0f, 1.0f);
+    ID2D1RenderTarget_Clear(rt, &color);
+    bitmap_desc.pixelFormat.alphaMode = D2D1_ALPHA_MODE_IGNORE;
+    hr = ID2D1RenderTarget_CreateBitmap(rt, size, NULL, 0, &bitmap_desc, &dst_bitmap);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+    hr = ID2D1Bitmap_CopyFromBitmap(dst_bitmap, NULL, bitmap, NULL);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    dst_point.x = 1; dst_point.y = 1;
+    hr = ID2D1Bitmap_CopyFromBitmap(dst_bitmap, &dst_point, bitmap, NULL);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    dst_point.x = 0; dst_point.y = 1;
+    set_rect_u(&src_rect, 1, 1, 3, 3);
+    hr = ID2D1Bitmap_CopyFromBitmap(dst_bitmap, &dst_point, bitmap, &src_rect);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    dst_point.x = 1; dst_point.y = 0;
+    set_rect_u(&src_rect, 2, 2, 1, 1);
+    hr = ID2D1Bitmap_CopyFromBitmap(dst_bitmap, &dst_point, bitmap, &src_rect);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    set_rect_u(&src_rect, 1, 1, 2, 2);
+    hr = ID2D1Bitmap_CopyFromBitmap(dst_bitmap, NULL, bitmap, &src_rect);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+    set_rect(&rect, 320.0f, 0.0f, 640.0f, 240.0f);
+    ID2D1RenderTarget_DrawBitmap(rt, dst_bitmap, &rect, 1.0f,
+            D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR, NULL);
+
+    hr = ID2D1RenderTarget_EndDraw(rt, NULL, NULL);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    match = compare_surface(&ctx, "a1758bd644d897f75d43769ba26456af70cd9056");
+    ok(match, "Surface does not match.\n");
+    ID2D1Bitmap_Release(dst_bitmap);
 
     ID2D1Bitmap_Release(bitmap);
     release_test_context(&ctx);
@@ -4916,14 +5485,14 @@ static void test_opacity_brush(BOOL d3d11)
         return;
 
     rt = ctx.rt;
-    ID2D1RenderTarget_GetFactory(rt, &factory);
+    factory = ctx.factory;
 
     ID2D1RenderTarget_SetDpi(rt, 192.0f, 48.0f);
     ID2D1RenderTarget_SetAntialiasMode(rt, D2D1_ANTIALIAS_MODE_ALIASED);
 
     set_color(&color, 0.0f, 1.0f, 0.0f, 0.8f);
     hr = ID2D1RenderTarget_CreateSolidColorBrush(rt, &color, NULL, &color_brush);
-    ok(SUCCEEDED(hr), "Failed to create color brush, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     set_size_u(&size, 4, 4);
     bitmap_desc.pixelFormat.format = DXGI_FORMAT_B8G8R8A8_UNORM;
@@ -4931,12 +5500,12 @@ static void test_opacity_brush(BOOL d3d11)
     bitmap_desc.dpiX = 96.0f;
     bitmap_desc.dpiY = 96.0f;
     hr = ID2D1RenderTarget_CreateBitmap(rt, size, bitmap_data, 4 * sizeof(*bitmap_data), &bitmap_desc, &bitmap);
-    ok(SUCCEEDED(hr), "Failed to create bitmap, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     hr = ID2D1RenderTarget_CreateBitmapBrush(rt, bitmap, NULL, NULL, &opacity_brush);
-    ok(SUCCEEDED(hr), "Failed to create bitmap brush, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ID2D1BitmapBrush_SetInterpolationMode(opacity_brush, D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR);
     refcount = ID2D1Bitmap_Release(bitmap);
-    ok(refcount == 1, "Got unexpected refcount %u.\n", refcount);
+    ok(refcount == 1, "Got unexpected refcount %lu.\n", refcount);
 
     set_size_u(&size, 1, 1);
     bitmap_desc.pixelFormat.format = DXGI_FORMAT_B8G8R8A8_UNORM;
@@ -4944,12 +5513,12 @@ static void test_opacity_brush(BOOL d3d11)
     bitmap_desc.dpiX = 96.0f;
     bitmap_desc.dpiY = 96.0f;
     hr = ID2D1RenderTarget_CreateBitmap(rt, size, &bitmap_data[2], sizeof(*bitmap_data), &bitmap_desc, &bitmap);
-    ok(SUCCEEDED(hr), "Failed to create bitmap, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     hr = ID2D1RenderTarget_CreateBitmapBrush(rt, bitmap, NULL, NULL, &bitmap_brush);
-    ok(SUCCEEDED(hr), "Failed to create bitmap brush, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ID2D1BitmapBrush_SetInterpolationMode(bitmap_brush, D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR);
     refcount = ID2D1Bitmap_Release(bitmap);
-    ok(refcount == 1, "Got unexpected refcount %u.\n", refcount);
+    ok(refcount == 1, "Got unexpected refcount %lu.\n", refcount);
 
     ID2D1RenderTarget_BeginDraw(rt);
 
@@ -4999,7 +5568,7 @@ static void test_opacity_brush(BOOL d3d11)
             (ID2D1Brush *)bitmap_brush, (ID2D1Brush *)opacity_brush);
 
     hr = ID2D1RenderTarget_EndDraw(rt, NULL, NULL);
-    ok(hr == D2DERR_INCOMPATIBLE_BRUSH_TYPES, "Got unexpected hr %#x.\n", hr);
+    ok(hr == D2DERR_INCOMPATIBLE_BRUSH_TYPES, "Got unexpected hr %#lx.\n", hr);
     match = compare_surface(&ctx, "7141c6c7b3decb91196428efb1856bcbf9872935");
     ok(match, "Surface does not match.\n");
     ID2D1RenderTarget_BeginDraw(rt);
@@ -5041,14 +5610,13 @@ static void test_opacity_brush(BOOL d3d11)
     ID2D1RectangleGeometry_Release(geometry);
 
     hr = ID2D1RenderTarget_EndDraw(rt, NULL, NULL);
-    ok(SUCCEEDED(hr), "Failed to end draw, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     match = compare_surface(&ctx, "c3a5802d1750efa3e9122c1a92f6064df3872732");
     ok(match, "Surface does not match.\n");
 
     ID2D1BitmapBrush_Release(bitmap_brush);
     ID2D1BitmapBrush_Release(opacity_brush);
     ID2D1SolidColorBrush_Release(color_brush);
-    ID2D1Factory_Release(factory);
     release_test_context(&ctx);
 }
 
@@ -5079,7 +5647,7 @@ static void test_create_target(BOOL d3d11)
         return;
 
     hr = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, &IID_ID2D1Factory, NULL, (void **)&factory);
-    ok(SUCCEEDED(hr), "Failed to create factory, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     for (i = 0; i < ARRAY_SIZE(create_dpi_tests); ++i)
     {
@@ -5098,21 +5666,21 @@ static void test_create_target(BOOL d3d11)
         desc.minLevel = D2D1_FEATURE_LEVEL_DEFAULT;
 
         hr = ID2D1Factory_CreateDxgiSurfaceRenderTarget(factory, ctx.surface, &desc, &rt);
-        ok(hr == create_dpi_tests[i].hr, "Wrong return code, hr %#x, expected %#x, test %u.\n", hr,
-            create_dpi_tests[i].hr, i);
+        ok(hr == create_dpi_tests[i].hr, "Test %u: Got unexpected hr %#lx, expected %#lx.\n",
+                i, hr, create_dpi_tests[i].hr);
 
         if (FAILED(hr))
             continue;
 
         hr = ID2D1RenderTarget_QueryInterface(rt, &IID_IUnknown, (void **)&unk);
-        ok(SUCCEEDED(hr), "Failed to get IUnknown, hr %#x.\n", hr);
+        ok(hr == S_OK, "Test %u: Got unexpected hr %#lx.\n", i, hr);
         ok(unk == (IUnknown *)rt, "Expected same interface pointer.\n");
         IUnknown_Release(unk);
 
         hr = ID2D1RenderTarget_QueryInterface(rt, &IID_ID2D1GdiInteropRenderTarget, (void **)&interop);
-        ok(SUCCEEDED(hr), "Failed to get interop target, hr %#x.\n", hr);
+        ok(hr == S_OK, "Test %u: Got unexpected hr %#lx.\n", i, hr);
         hr = ID2D1GdiInteropRenderTarget_QueryInterface(interop, &IID_ID2D1RenderTarget, (void **)&rt2);
-        ok(SUCCEEDED(hr), "Failed to get render target back, %#x.\n", hr);
+        ok(hr == S_OK, "Test %u: Got unexpected hr %#lx.\n", i, hr);
         ok(rt2 == rt, "Unexpected render target\n");
         ID2D1RenderTarget_Release(rt2);
         ID2D1GdiInteropRenderTarget_Release(interop);
@@ -5184,10 +5752,10 @@ static void test_draw_text_layout(BOOL d3d11)
 
 
     hr = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, &IID_ID2D1Factory, NULL, (void **)&factory);
-    ok(SUCCEEDED(hr), "Failed to create factory, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     hr = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, &IID_ID2D1Factory, NULL, (void **)&factory2);
-    ok(SUCCEEDED(hr), "Failed to create factory, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ok(factory != factory2, "got same factory\n");
 
     desc.type = D2D1_RENDER_TARGET_TYPE_DEFAULT;
@@ -5199,33 +5767,33 @@ static void test_draw_text_layout(BOOL d3d11)
     desc.minLevel = D2D1_FEATURE_LEVEL_DEFAULT;
 
     hr = ID2D1Factory_CreateDxgiSurfaceRenderTarget(factory, ctx.surface, &desc, &rt);
-    ok(SUCCEEDED(hr), "Failed to create a target, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     hr = ID2D1Factory_CreateDxgiSurfaceRenderTarget(factory2, ctx.surface, &desc, &rt2);
-    ok(SUCCEEDED(hr), "Failed to create a target, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     hr = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, &IID_IDWriteFactory, (IUnknown **)&dwrite_factory);
-    ok(SUCCEEDED(hr), "Failed to create factory, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     hr = IDWriteFactory_CreateTextFormat(dwrite_factory, L"Tahoma", NULL, DWRITE_FONT_WEIGHT_NORMAL,
         DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, 10.0f, L"", &text_format);
-    ok(SUCCEEDED(hr), "Failed to create text format, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     hr = IDWriteFactory_CreateTextLayout(dwrite_factory, L"text", 4, text_format, 100.0f, 100.0f, &text_layout);
-    ok(SUCCEEDED(hr), "Failed to create text layout, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     set_color(&color, 0.0f, 0.0f, 0.0f, 0.0f);
     hr = ID2D1RenderTarget_CreateSolidColorBrush(rt, &color, NULL, &brush);
-    ok(SUCCEEDED(hr), "Failed to create brush, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     hr = ID2D1RenderTarget_CreateSolidColorBrush(rt2, &color, NULL, &brush2);
-    ok(SUCCEEDED(hr), "Failed to create brush, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     /* effect brush is created from different factory */
     range.startPosition = 0;
     range.length = 4;
     hr = IDWriteTextLayout_SetDrawingEffect(text_layout, (IUnknown*)brush2, range);
-    ok(SUCCEEDED(hr), "Failed to set drawing effect, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     ID2D1RenderTarget_BeginDraw(rt);
 
@@ -5233,18 +5801,17 @@ static void test_draw_text_layout(BOOL d3d11)
     ID2D1RenderTarget_DrawTextLayout(rt, origin, text_layout, (ID2D1Brush*)brush, D2D1_DRAW_TEXT_OPTIONS_NONE);
 
     hr = ID2D1RenderTarget_EndDraw(rt, NULL, NULL);
-todo_wine
-    ok(hr == D2DERR_WRONG_FACTORY, "Unexpected hr %#x.\n", hr);
+    todo_wine ok(hr == D2DERR_WRONG_FACTORY, "Got unexpected hr %#lx.\n", hr);
 
     /* Effect is d2d resource, but not a brush. */
     set_rect(&rect, 0.0f, 0.0f, 10.0f, 10.0f);
     hr = ID2D1Factory_CreateRectangleGeometry(factory, &rect, &geometry);
-    ok(SUCCEEDED(hr), "Failed to geometry, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     range.startPosition = 0;
     range.length = 4;
     hr = IDWriteTextLayout_SetDrawingEffect(text_layout, (IUnknown*)geometry, range);
-    ok(SUCCEEDED(hr), "Failed to set drawing effect, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ID2D1RectangleGeometry_Release(geometry);
 
     ID2D1RenderTarget_BeginDraw(rt);
@@ -5253,7 +5820,7 @@ todo_wine
     ID2D1RenderTarget_DrawTextLayout(rt, origin, text_layout, (ID2D1Brush*)brush, D2D1_DRAW_TEXT_OPTIONS_NONE);
 
     hr = ID2D1RenderTarget_EndDraw(rt, NULL, NULL);
-    ok(SUCCEEDED(hr), "EndDraw() failed, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     for (i = 0; i < ARRAY_SIZE(antialias_mode_tests); ++i)
     {
@@ -5263,7 +5830,7 @@ todo_wine
 
         hr = IDWriteFactory_CreateCustomRenderingParams(dwrite_factory, 2.0f, 1.0f, 0.0f, DWRITE_PIXEL_GEOMETRY_FLAT,
                 antialias_mode_tests[i].rendering_mode, &rendering_params);
-        ok(SUCCEEDED(hr), "Failed to create custom rendering params, hr %#x.\n", hr);
+        ok(hr == S_OK, "Test %u: Got unexpected hr %#lx.\n", i, hr);
 
         ID2D1RenderTarget_SetTextRenderingParams(rt, rendering_params);
 
@@ -5272,11 +5839,13 @@ todo_wine
         ID2D1RenderTarget_DrawTextLayout(rt, origin, text_layout, (ID2D1Brush *)brush, D2D1_DRAW_TEXT_OPTIONS_NONE);
 
         hr = ID2D1RenderTarget_EndDraw(rt, NULL, NULL);
-        ok(hr == antialias_mode_tests[i].hr, "%u: unexpected hr %#x.\n", i, hr);
+        ok(hr == antialias_mode_tests[i].hr, "Test %u: Got unexpected hr %#lx.\n", i, hr);
 
         IDWriteRenderingParams_Release(rendering_params);
     }
 
+    ID2D1SolidColorBrush_Release(brush2);
+    ID2D1SolidColorBrush_Release(brush);
     IDWriteTextFormat_Release(text_format);
     IDWriteTextLayout_Release(text_layout);
     IDWriteFactory_Release(dwrite_factory);
@@ -5328,22 +5897,25 @@ static void test_dc_target(BOOL d3d11)
     ID2D1Factory *factory;
     FLOAT dpi_x, dpi_y;
     D2D1_COLOR_F color;
+    HENHMETAFILE hemf;
     D2D1_SIZE_U sizeu;
     D2D1_SIZE_F size;
     D2D1_TAG t1, t2;
     unsigned int i;
     HDC hdc, hdc2;
+    HMETAFILE hmf;
     D2D_RECT_F r;
     COLORREF clr;
     HRESULT hr;
     RECT rect;
+    HWND hwnd;
 
     if (!init_test_context(&ctx, d3d11))
         return;
     release_test_context(&ctx);
 
     hr = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, &IID_ID2D1Factory, NULL, (void **)&factory);
-    ok(SUCCEEDED(hr), "Failed to create factory, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     for (i = 0; i < ARRAY_SIZE(invalid_formats); ++i)
     {
@@ -5355,7 +5927,7 @@ static void test_dc_target(BOOL d3d11)
         desc.minLevel = D2D1_FEATURE_LEVEL_DEFAULT;
 
         hr = ID2D1Factory_CreateDCRenderTarget(factory, &desc, &rt);
-        ok(hr == D2DERR_UNSUPPORTED_PIXEL_FORMAT, "Got unexpected hr %#x.\n", hr);
+        ok(hr == D2DERR_UNSUPPORTED_PIXEL_FORMAT, "Got unexpected hr %#lx.\n", hr);
     }
 
     desc.type = D2D1_RENDER_TARGET_TYPE_DEFAULT;
@@ -5366,16 +5938,16 @@ static void test_dc_target(BOOL d3d11)
     desc.usage = D2D1_RENDER_TARGET_USAGE_NONE;
     desc.minLevel = D2D1_FEATURE_LEVEL_DEFAULT;
     hr = ID2D1Factory_CreateDCRenderTarget(factory, &desc, &rt);
-    ok(SUCCEEDED(hr), "Failed to create target, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     hr = ID2D1DCRenderTarget_QueryInterface(rt, &IID_ID2D1GdiInteropRenderTarget, (void **)&interop);
-    ok(SUCCEEDED(hr), "Failed to get interop target, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     hr = ID2D1GdiInteropRenderTarget_QueryInterface(interop, &IID_ID2D1RenderTarget, (void **)&rt3);
-    ok(SUCCEEDED(hr), "Failed to get render target back, %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ok(rt3 == (ID2D1RenderTarget *)rt, "Unexpected render target\n");
     ID2D1RenderTarget_Release(rt3);
     hr = ID2D1GdiInteropRenderTarget_QueryInterface(interop, &IID_ID2D1DCRenderTarget, (void **)&rt2);
-    ok(SUCCEEDED(hr), "Failed to get render target back, %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ok(rt2 == rt, "Unexpected render target\n");
     ID2D1DCRenderTarget_Release(rt2);
     ID2D1GdiInteropRenderTarget_Release(interop);
@@ -5391,18 +5963,18 @@ static void test_dc_target(BOOL d3d11)
     /* object creation methods work without BindDC() */
     set_color(&color, 0.0f, 0.0f, 0.0f, 0.0f);
     hr = ID2D1DCRenderTarget_CreateSolidColorBrush(rt, &color, NULL, &brush);
-    ok(SUCCEEDED(hr), "Failed to create a brush, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ID2D1SolidColorBrush_Release(brush);
 
     ID2D1DCRenderTarget_BeginDraw(rt);
     hr = ID2D1DCRenderTarget_EndDraw(rt, NULL, NULL);
-    ok(hr == D2DERR_WRONG_STATE, "Got unexpected hr %#x.\n", hr);
+    ok(hr == D2DERR_WRONG_STATE, "Got unexpected hr %#lx.\n", hr);
 
     ID2D1DCRenderTarget_Release(rt);
 
     /* BindDC() */
     hr = ID2D1Factory_CreateDCRenderTarget(factory, &desc, &rt);
-    ok(SUCCEEDED(hr), "Failed to create target, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     aa_mode = ID2D1DCRenderTarget_GetAntialiasMode(rt);
     ok(aa_mode == D2D1_ANTIALIAS_MODE_PER_PRIMITIVE, "Got wrong default aa mode %d.\n", aa_mode);
@@ -5419,7 +5991,7 @@ static void test_dc_target(BOOL d3d11)
 
     SetRect(&rect, 0, 0, 32, 32);
     hr = ID2D1DCRenderTarget_BindDC(rt, NULL, &rect);
-    ok(hr == E_INVALIDARG, "BindDC() returned %#x.\n", hr);
+    ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
 
     /* Target properties are retained during BindDC() */
     ID2D1DCRenderTarget_SetTags(rt, 1, 2);
@@ -5431,7 +6003,7 @@ static void test_dc_target(BOOL d3d11)
     ID2D1DCRenderTarget_SetTransform(rt, &matrix);
 
     hr = ID2D1DCRenderTarget_BindDC(rt, hdc, &rect);
-    ok(hr == S_OK, "BindDC() returned %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     ID2D1DCRenderTarget_GetTags(rt, &t1, &t2);
     ok(t1 == 1 && t2 == 2, "Got wrong tags.\n");
@@ -5460,10 +6032,10 @@ static void test_dc_target(BOOL d3d11)
     ID2D1DCRenderTarget_Clear(rt, &color);
 
     hr = ID2D1DCRenderTarget_EndDraw(rt, NULL, NULL);
-    ok(SUCCEEDED(hr), "EndDraw() failed, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     clr = GetPixel(hdc, 0, 0);
-    ok(clr == RGB(255, 0, 0), "Unexpected color 0x%08x.\n", clr);
+    ok(clr == RGB(255, 0, 0), "Got unexpected colour 0x%08lx.\n", clr);
 
     hdc2 = CreateCompatibleDC(NULL);
     ok(hdc2 != NULL, "Failed to create an HDC.\n");
@@ -5471,14 +6043,14 @@ static void test_dc_target(BOOL d3d11)
     create_target_dibsection(hdc2, 16, 16);
 
     hr = ID2D1DCRenderTarget_BindDC(rt, hdc2, &rect);
-    ok(hr == S_OK, "BindDC() returned %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     clr = GetPixel(hdc2, 0, 0);
-    ok(clr == 0, "Unexpected color 0x%08x.\n", clr);
+    ok(clr == 0, "Got unexpected colour 0x%08lx.\n", clr);
 
     set_color(&color, 0.0f, 1.0f, 0.0f, 1.0f);
     hr = ID2D1DCRenderTarget_CreateSolidColorBrush(rt, &color, NULL, &brush);
-    ok(SUCCEEDED(hr), "Failed to create brush, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     ID2D1DCRenderTarget_BeginDraw(rt);
 
@@ -5488,20 +6060,19 @@ static void test_dc_target(BOOL d3d11)
     ID2D1DCRenderTarget_FillRectangle(rt, &r, (ID2D1Brush*)brush);
 
     hr = ID2D1DCRenderTarget_EndDraw(rt, NULL, NULL);
-    ok(SUCCEEDED(hr), "EndDraw() failed, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     ID2D1SolidColorBrush_Release(brush);
 
     clr = GetPixel(hdc2, 0, 0);
-    ok(clr == RGB(0, 255, 0), "Unexpected color 0x%08x.\n", clr);
+    ok(clr == RGB(0, 255, 0), "Got unexpected colour 0x%08lx.\n", clr);
 
     clr = GetPixel(hdc2, 10, 0);
-    ok(clr == 0, "Unexpected color 0x%08x.\n", clr);
+    ok(clr == 0, "Got unexpected colour 0x%08lx.\n", clr);
 
     /* Invalid DC. */
     hr = ID2D1DCRenderTarget_BindDC(rt, (HDC)0xdeadbeef, &rect);
-todo_wine
-    ok(hr == E_INVALIDARG, "BindDC() returned %#x.\n", hr);
+    ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
 
     ID2D1DCRenderTarget_BeginDraw(rt);
 
@@ -5509,14 +6080,13 @@ todo_wine
     ID2D1DCRenderTarget_Clear(rt, &color);
 
     hr = ID2D1DCRenderTarget_EndDraw(rt, NULL, NULL);
-    ok(SUCCEEDED(hr), "EndDraw() failed, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     clr = GetPixel(hdc2, 0, 0);
-todo_wine
-    ok(clr == RGB(255, 0, 0), "Unexpected color 0x%08x.\n", clr);
+    ok(clr == RGB(255, 0, 0), "Got unexpected colour 0x%08lx.\n", clr);
 
     hr = ID2D1DCRenderTarget_BindDC(rt, NULL, &rect);
-    ok(hr == E_INVALIDARG, "BindDC() returned %#x.\n", hr);
+    ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
 
     ID2D1DCRenderTarget_BeginDraw(rt);
 
@@ -5524,14 +6094,49 @@ todo_wine
     ID2D1DCRenderTarget_Clear(rt, &color);
 
     hr = ID2D1DCRenderTarget_EndDraw(rt, NULL, NULL);
-    ok(SUCCEEDED(hr), "EndDraw() failed, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     clr = GetPixel(hdc2, 0, 0);
-todo_wine
-    ok(clr == RGB(0, 0, 255), "Unexpected color 0x%08x.\n", clr);
+    ok(clr == RGB(0, 0, 255), "Got unexpected colour 0x%08lx.\n", clr);
 
     DeleteDC(hdc);
     DeleteDC(hdc2);
+
+    /* Metafile context. */
+    hdc = CreateMetaFileA(NULL);
+    ok(!!hdc, "Failed to create a device context.\n");
+
+    hr = ID2D1DCRenderTarget_BindDC(rt, hdc, &rect);
+    ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
+
+    hmf = CloseMetaFile(hdc);
+    ok(!!hmf, "Failed to close a metafile, error %ld.\n", GetLastError());
+    DeleteMetaFile(hmf);
+
+    /* Enhanced metafile context. */
+    hdc = CreateEnhMetaFileA(NULL, NULL, NULL, NULL);
+    ok(!!hdc, "Failed to create a device context.\n");
+
+    hr = ID2D1DCRenderTarget_BindDC(rt, hdc, &rect);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+    hemf = CloseEnhMetaFile(hdc);
+    ok(!!hemf, "Failed to close a metafile, error %ld.\n", GetLastError());
+    DeleteEnhMetaFile(hemf);
+
+    /* Window context. */
+    hwnd = CreateWindowExA(0, "static", NULL, WS_POPUP|WS_VISIBLE, 0, 0, 100, 100, 0, 0, 0, NULL);
+    ok(!!hwnd, "Failed to create a test window.\n");
+
+    hdc = GetDC(hwnd);
+    ok(!!hdc, "Failed to get a context.\n");
+
+    hr = ID2D1DCRenderTarget_BindDC(rt, hdc, &rect);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+    ReleaseDC(hwnd, hdc);
+    DestroyWindow(hwnd);
+
     ID2D1DCRenderTarget_Release(rt);
     ID2D1Factory_Release(factory);
 }
@@ -5542,18 +6147,39 @@ static void test_hwnd_target(BOOL d3d11)
     ID2D1GdiInteropRenderTarget *interop;
     D2D1_RENDER_TARGET_PROPERTIES desc;
     ID2D1HwndRenderTarget *rt, *rt2;
+    D2D1_PIXEL_FORMAT pixel_format;
     struct d2d1_test_context ctx;
     ID2D1RenderTarget *rt3;
     ID2D1Factory *factory;
     D2D1_SIZE_U size;
+    unsigned int i;
     HRESULT hr;
+    ULONG ref;
+
+    static const struct format_test
+    {
+        D2D1_PIXEL_FORMAT format;
+        D2D1_PIXEL_FORMAT expected_format;
+        BOOL expected_failure;
+    }
+    format_tests[] =
+    {
+        {{DXGI_FORMAT_UNKNOWN, D2D1_ALPHA_MODE_UNKNOWN}, {DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_IGNORE}},
+        {{DXGI_FORMAT_UNKNOWN, D2D1_ALPHA_MODE_PREMULTIPLIED}, {DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED}},
+        {{DXGI_FORMAT_UNKNOWN, D2D1_ALPHA_MODE_STRAIGHT}, {DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_STRAIGHT}, TRUE},
+        {{DXGI_FORMAT_UNKNOWN, D2D1_ALPHA_MODE_IGNORE}, {DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_IGNORE}},
+        {{DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_UNKNOWN}, {DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_IGNORE}},
+        {{DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED}, {DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED}},
+        {{DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_STRAIGHT}, {DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_STRAIGHT}, TRUE},
+        {{DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_IGNORE}, {DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_IGNORE}},
+    };
 
     if (!init_test_context(&ctx, d3d11))
         return;
     release_test_context(&ctx);
 
     hr = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, &IID_ID2D1Factory, NULL, (void **)&factory);
-    ok(SUCCEEDED(hr), "Failed to create factory, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     desc.type = D2D1_RENDER_TARGET_TYPE_DEFAULT;
     desc.pixelFormat.format = DXGI_FORMAT_B8G8R8A8_UNORM;
@@ -5569,25 +6195,25 @@ static void test_hwnd_target(BOOL d3d11)
     hwnd_rt_desc.presentOptions = D2D1_PRESENT_OPTIONS_NONE;
 
     hr = ID2D1Factory_CreateHwndRenderTarget(factory, &desc, &hwnd_rt_desc, &rt);
-    ok(FAILED(hr), "Target creation should fail, hr %#x.\n", hr);
+    ok(hr != S_OK, "Got unexpected hr %#lx.\n", hr);
 
     hwnd_rt_desc.hwnd = (HWND)0xdeadbeef;
     hr = ID2D1Factory_CreateHwndRenderTarget(factory, &desc, &hwnd_rt_desc, &rt);
-    ok(FAILED(hr), "Target creation should fail, hr %#x.\n", hr);
+    ok(hr != S_OK, "Got unexpected hr %#lx.\n", hr);
 
     hwnd_rt_desc.hwnd = CreateWindowA("static", "d2d_test", 0, 0, 0, 0, 0, 0, 0, 0, 0);
     ok(!!hwnd_rt_desc.hwnd, "Failed to create target window.\n");
     hr = ID2D1Factory_CreateHwndRenderTarget(factory, &desc, &hwnd_rt_desc, &rt);
-    ok(SUCCEEDED(hr), "Failed to create render target, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     hr = ID2D1HwndRenderTarget_QueryInterface(rt, &IID_ID2D1GdiInteropRenderTarget, (void **)&interop);
-    ok(SUCCEEDED(hr), "Failed to get interop target, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     hr = ID2D1GdiInteropRenderTarget_QueryInterface(interop, &IID_ID2D1RenderTarget, (void **)&rt3);
-    ok(SUCCEEDED(hr), "Failed to get render target back, %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ok(rt3 == (ID2D1RenderTarget *)rt, "Unexpected render target\n");
     ID2D1RenderTarget_Release(rt3);
     hr = ID2D1GdiInteropRenderTarget_QueryInterface(interop, &IID_ID2D1HwndRenderTarget, (void **)&rt2);
-    ok(SUCCEEDED(hr), "Failed to get render target back, %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ok(rt2 == rt, "Unexpected render target\n");
     ID2D1HwndRenderTarget_Release(rt2);
     ID2D1GdiInteropRenderTarget_Release(interop);
@@ -5595,12 +6221,41 @@ static void test_hwnd_target(BOOL d3d11)
     size.width = 128;
     size.height = 64;
     hr = ID2D1HwndRenderTarget_Resize(rt, &size);
-    ok(SUCCEEDED(hr), "Failed to resize render target, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     ID2D1HwndRenderTarget_Release(rt);
 
+    /* Test render target format */
+    for (i = 0; i < ARRAY_SIZE(format_tests); ++i)
+    {
+        winetest_push_context("test %d", i);
+
+        desc.pixelFormat = format_tests[i].format;
+        hr = ID2D1Factory_CreateHwndRenderTarget(factory, &desc, &hwnd_rt_desc, &rt);
+        if (format_tests[i].expected_failure)
+        {
+            todo_wine
+            ok(FAILED(hr), "Got unexpected hr %#lx.\n", hr);
+            if (SUCCEEDED(hr))
+                ID2D1HwndRenderTarget_Release(rt);
+            winetest_pop_context();
+            continue;
+        }
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+        pixel_format = ID2D1HwndRenderTarget_GetPixelFormat(rt);
+        ok(pixel_format.format == format_tests[i].expected_format.format,
+                "Got unexpected format %#x.\n", pixel_format.format);
+        ok(pixel_format.alphaMode == format_tests[i].expected_format.alphaMode,
+                "Got unexpected alpha mode %d.\n", pixel_format.alphaMode);
+
+        ID2D1HwndRenderTarget_Release(rt);
+        winetest_pop_context();
+    }
+
     DestroyWindow(hwnd_rt_desc.hwnd);
-    ID2D1Factory_Release(factory);
+    ref = ID2D1Factory_Release(factory);
+    ok(!ref, "Factory has %lu references left.\n", ref);
 }
 
 #define test_compatible_target_size(r) test_compatible_target_size_(__LINE__, r)
@@ -5637,7 +6292,7 @@ static void test_compatible_target_size_(unsigned int line, ID2D1RenderTarget *r
     {
         hr = ID2D1RenderTarget_CreateCompatibleRenderTarget(rt, size_tests[i].size, size_tests[i].pixel_size,
                 NULL, D2D1_COMPATIBLE_RENDER_TARGET_OPTIONS_NONE, &bitmap_rt);
-        ok_(__FILE__, line)(SUCCEEDED(hr), "%u: Failed to create render target, hr %#x.\n", i, hr);
+        ok_(__FILE__, line)(SUCCEEDED(hr), "%u: Failed to create render target, hr %#lx.\n", i, hr);
 
         if (size_tests[i].pixel_size)
         {
@@ -5674,7 +6329,7 @@ static void test_compatible_target_size_(unsigned int line, ID2D1RenderTarget *r
     pixel_size.height = pixel_size.width = 0;
     hr = ID2D1RenderTarget_CreateCompatibleRenderTarget(rt, NULL, &pixel_size, NULL,
             D2D1_COMPATIBLE_RENDER_TARGET_OPTIONS_NONE, &bitmap_rt);
-    ok_(__FILE__, line)(SUCCEEDED(hr), "Failed to create render target, hr %#x.\n", hr);
+    ok_(__FILE__, line)(SUCCEEDED(hr), "Failed to create render target, hr %#lx.\n", hr);
 
     if (SUCCEEDED(ID2D1BitmapRenderTarget_QueryInterface(bitmap_rt, &IID_ID2D1DeviceContext, (void **)&context)))
     {
@@ -5720,7 +6375,7 @@ static void test_bitmap_target(BOOL d3d11)
     release_test_context(&ctx);
 
     hr = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, &IID_ID2D1Factory, NULL, (void **)&factory);
-    ok(SUCCEEDED(hr), "Failed to create factory, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     desc.type = D2D1_RENDER_TARGET_TYPE_DEFAULT;
     desc.pixelFormat.format = DXGI_FORMAT_B8G8R8A8_UNORM;
@@ -5737,22 +6392,22 @@ static void test_bitmap_target(BOOL d3d11)
     hwnd_rt_desc.presentOptions = D2D1_PRESENT_OPTIONS_NONE;
 
     hr = ID2D1Factory_CreateHwndRenderTarget(factory, &desc, &hwnd_rt_desc, &hwnd_rt);
-    ok(SUCCEEDED(hr), "Failed to create render target, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     test_compatible_target_size((ID2D1RenderTarget *)hwnd_rt);
 
     hr = ID2D1HwndRenderTarget_CreateCompatibleRenderTarget(hwnd_rt, NULL, NULL, NULL,
             D2D1_COMPATIBLE_RENDER_TARGET_OPTIONS_NONE, &rt);
-    ok(SUCCEEDED(hr), "Failed to create render target, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     hr = ID2D1BitmapRenderTarget_QueryInterface(rt, &IID_ID2D1GdiInteropRenderTarget, (void **)&interop);
-    ok(SUCCEEDED(hr), "Failed to get interop target, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     hr = ID2D1GdiInteropRenderTarget_QueryInterface(interop, &IID_ID2D1RenderTarget, (void **)&rt3);
-    ok(SUCCEEDED(hr), "Failed to get render target back, %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ok(rt3 == (ID2D1RenderTarget *)rt, "Unexpected render target\n");
     ID2D1RenderTarget_Release(rt3);
     hr = ID2D1GdiInteropRenderTarget_QueryInterface(interop, &IID_ID2D1BitmapRenderTarget, (void **)&rt2);
-    ok(SUCCEEDED(hr), "Failed to get render target back, %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ok(rt2 == rt, "Unexpected render target\n");
     ID2D1BitmapRenderTarget_Release(rt2);
     ID2D1GdiInteropRenderTarget_Release(interop);
@@ -5760,7 +6415,7 @@ static void test_bitmap_target(BOOL d3d11)
     /* See if parent target is referenced. */
     ID2D1HwndRenderTarget_AddRef(hwnd_rt);
     refcount = ID2D1HwndRenderTarget_Release(hwnd_rt);
-    ok(refcount == 1, "Target should not have been referenced, got %u.\n", refcount);
+    ok(refcount == 1, "Target should not have been referenced, got %lu.\n", refcount);
 
     /* Size was not specified, should match parent. */
     pixel_size = ID2D1HwndRenderTarget_GetPixelSize(hwnd_rt);
@@ -5781,7 +6436,7 @@ static void test_bitmap_target(BOOL d3d11)
     set_size_u(&pixel_size, 32, 32);
     hr = ID2D1HwndRenderTarget_CreateCompatibleRenderTarget(hwnd_rt, NULL, &pixel_size, NULL,
             D2D1_COMPATIBLE_RENDER_TARGET_OPTIONS_NONE, &rt);
-    ok(SUCCEEDED(hr), "Failed to create render target, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     pixel_size2 = ID2D1BitmapRenderTarget_GetPixelSize(rt);
     ok(!memcmp(&pixel_size, &pixel_size2, sizeof(pixel_size)), "Got target pixel size mismatch.\n");
@@ -5795,7 +6450,7 @@ static void test_bitmap_target(BOOL d3d11)
     set_size_u(&pixel_size, 128, 128);
     hr = ID2D1HwndRenderTarget_CreateCompatibleRenderTarget(hwnd_rt, &size, &pixel_size, NULL,
             D2D1_COMPATIBLE_RENDER_TARGET_OPTIONS_NONE, &rt);
-    ok(SUCCEEDED(hr), "Failed to create render target, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     /* Doubled pixel size dimensions with the same DIP size give doubled dpi. */
     ID2D1BitmapRenderTarget_GetDpi(rt, dpi2, dpi2 + 1);
@@ -5807,7 +6462,7 @@ static void test_bitmap_target(BOOL d3d11)
     set_size_f(&size, 70.1f, 70.4f);
     hr = ID2D1HwndRenderTarget_CreateCompatibleRenderTarget(hwnd_rt, &size, NULL, NULL,
             D2D1_COMPATIBLE_RENDER_TARGET_OPTIONS_NONE, &rt);
-    ok(SUCCEEDED(hr), "Failed to create render target, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     ID2D1BitmapRenderTarget_GetDpi(rt, dpi2, dpi2 + 1);
 
@@ -5825,9 +6480,9 @@ static void test_bitmap_target(BOOL d3d11)
 
     /* Check if GetBitmap() returns same instance. */
     hr = ID2D1BitmapRenderTarget_GetBitmap(rt, &bitmap);
-    ok(SUCCEEDED(hr), "GetBitmap() failed, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     hr = ID2D1BitmapRenderTarget_GetBitmap(rt, &bitmap2);
-    ok(SUCCEEDED(hr), "GetBitmap() failed, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ok(bitmap == bitmap2, "Got different bitmap instances.\n");
 
     /* Draw something, see if bitmap instance is retained. */
@@ -5835,18 +6490,18 @@ static void test_bitmap_target(BOOL d3d11)
     set_color(&color, 1.0f, 1.0f, 0.0f, 1.0f);
     ID2D1BitmapRenderTarget_Clear(rt, &color);
     hr = ID2D1BitmapRenderTarget_EndDraw(rt, NULL, NULL);
-    ok(SUCCEEDED(hr), "EndDraw() failed, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     ID2D1Bitmap_Release(bitmap2);
     hr = ID2D1BitmapRenderTarget_GetBitmap(rt, &bitmap2);
-    ok(SUCCEEDED(hr), "GetBitmap() failed, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ok(bitmap == bitmap2, "Got different bitmap instances.\n");
 
     ID2D1Bitmap_Release(bitmap);
     ID2D1Bitmap_Release(bitmap2);
 
     refcount = ID2D1BitmapRenderTarget_Release(rt);
-    ok(!refcount, "Target should be released, got %u.\n", refcount);
+    ok(!refcount, "Target should be released, got %lu.\n", refcount);
 
     DestroyWindow(hwnd_rt_desc.hwnd);
 
@@ -5859,19 +6514,19 @@ static void test_bitmap_target(BOOL d3d11)
     desc.usage = D2D1_RENDER_TARGET_USAGE_NONE;
     desc.minLevel = D2D1_FEATURE_LEVEL_DEFAULT;
     hr = ID2D1Factory_CreateDCRenderTarget(factory, &desc, &dc_rt);
-    ok(SUCCEEDED(hr), "Failed to create target, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     test_compatible_target_size((ID2D1RenderTarget *)dc_rt);
 
     hr = ID2D1DCRenderTarget_CreateCompatibleRenderTarget(dc_rt, NULL, NULL, NULL,
             D2D1_COMPATIBLE_RENDER_TARGET_OPTIONS_NONE, &rt);
-    ok(SUCCEEDED(hr), "Failed to create render target, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     pixel_size = ID2D1BitmapRenderTarget_GetPixelSize(rt);
     ok(pixel_size.width == 0 && pixel_size.height == 0, "Got wrong size\n");
 
     hr = ID2D1BitmapRenderTarget_GetBitmap(rt, &bitmap);
-    ok(SUCCEEDED(hr), "GetBitmap() failed, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     pixel_size = ID2D1Bitmap_GetPixelSize(bitmap);
     ok(pixel_size.width == 0 && pixel_size.height == 0, "Got wrong size\n");
     ID2D1Bitmap_Release(bitmap);
@@ -5889,7 +6544,7 @@ static void test_desktop_dpi(BOOL d3d11)
     HRESULT hr;
 
     hr = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, &IID_ID2D1Factory, NULL, (void **)&factory);
-    ok(SUCCEEDED(hr), "Failed to create factory, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     dpi_x = dpi_y = 0.0f;
     ID2D1Factory_GetDesktopDpi(factory, &dpi_x, &dpi_y);
@@ -5927,7 +6582,7 @@ static void test_stroke_style(BOOL d3d11)
     float dashes[2];
 
     hr = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, &IID_ID2D1Factory, NULL, (void **)&factory);
-    ok(SUCCEEDED(hr), "Failed to create factory, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     desc.startCap = D2D1_CAP_STYLE_SQUARE;
     desc.endCap = D2D1_CAP_STYLE_ROUND;
@@ -5938,7 +6593,7 @@ static void test_stroke_style(BOOL d3d11)
     desc.dashOffset = -1.0f;
 
     hr = ID2D1Factory_CreateStrokeStyle(factory, &desc, NULL, 0, &style);
-    ok(SUCCEEDED(hr), "Failed to create stroke style, %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     cap_style = ID2D1StrokeStyle_GetStartCap(style);
     ok(cap_style == D2D1_CAP_STYLE_SQUARE, "Unexpected cap style %d.\n", cap_style);
@@ -5967,24 +6622,24 @@ static void test_stroke_style(BOOL d3d11)
     ID2D1StrokeStyle_Release(style);
 
     hr = ID2D1Factory_CreateStrokeStyle(factory, &desc, NULL, 0, &style);
-    ok(hr == E_INVALIDARG, "Unexpected return value, %#x.\n", hr);
+    ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
 
     hr = ID2D1Factory_CreateStrokeStyle(factory, &desc, dashes, 0, &style);
-    ok(hr == E_INVALIDARG, "Unexpected return value, %#x.\n", hr);
+    ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
 
     hr = ID2D1Factory_CreateStrokeStyle(factory, &desc, dashes, 1, &style);
-    ok(hr == S_OK, "Unexpected return value, %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ID2D1StrokeStyle_Release(style);
 
     /* Builtin style, dashes are specified. */
     desc.dashStyle = D2D1_DASH_STYLE_DOT;
     hr = ID2D1Factory_CreateStrokeStyle(factory, &desc, dashes, 1, &style);
-    ok(hr == E_INVALIDARG, "Unexpected return value, %#x.\n", hr);
+    ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
 
     /* Invalid style. */
     desc.dashStyle = 100;
     hr = ID2D1Factory_CreateStrokeStyle(factory, &desc, NULL, 0, &style);
-    ok(hr == E_INVALIDARG, "Unexpected return value, %#x.\n", hr);
+    ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
 
     /* Test returned dash pattern for builtin styles. */
     desc.startCap = D2D1_CAP_STYLE_SQUARE;
@@ -6002,7 +6657,7 @@ static void test_stroke_style(BOOL d3d11)
         desc.dashStyle = dash_style_tests[i].dash_style;
 
         hr = ID2D1Factory_CreateStrokeStyle(factory, &desc, NULL, 0, &style);
-        ok(SUCCEEDED(hr), "Failed to create stroke style, %#x.\n", hr);
+        ok(hr == S_OK, "Test %u: Got unexpected hr %#lx.\n", i, hr);
 
         dash_count = ID2D1StrokeStyle_GetDashesCount(style);
         ok(dash_count == dash_style_tests[i].dash_count, "%u: unexpected dash count %u, expected %u.\n",
@@ -6032,7 +6687,7 @@ static void test_stroke_style(BOOL d3d11)
     /* NULL dashes array, non-zero length. */
     memset(&desc, 0, sizeof(desc));
     hr = ID2D1Factory_CreateStrokeStyle(factory, &desc, NULL, 1, &style);
-    ok(SUCCEEDED(hr), "Failed to create stroke style, %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     count = ID2D1StrokeStyle_GetDashesCount(style);
     ok(count == 0, "Unexpected dashes count %u.\n", count);
@@ -6062,7 +6717,7 @@ static void test_gradient(BOOL d3d11)
     stops2[1] = stops2[0];
     hr = ID2D1RenderTarget_CreateGradientStopCollection(rt, stops2, 2, D2D1_GAMMA_2_2,
             D2D1_EXTEND_MODE_CLAMP, &gradient);
-    ok(SUCCEEDED(hr), "Failed to create stop collection, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     count = ID2D1GradientStopCollection_GetGradientStopCount(gradient);
     ok(count == 2, "Unexpected stop count %u.\n", count);
@@ -6109,13 +6764,13 @@ static void test_draw_geometry(BOOL d3d11)
         return;
 
     rt = ctx.rt;
-    ID2D1RenderTarget_GetFactory(rt, &factory);
+    factory = ctx.factory;
 
     ID2D1RenderTarget_SetDpi(rt, 192.0f, 48.0f);
     ID2D1RenderTarget_SetAntialiasMode(rt, D2D1_ANTIALIAS_MODE_ALIASED);
     set_color(&color, 0.890f, 0.851f, 0.600f, 1.0f);
     hr = ID2D1RenderTarget_CreateSolidColorBrush(rt, &color, NULL, &brush);
-    ok(SUCCEEDED(hr), "Failed to create brush, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     ID2D1RenderTarget_BeginDraw(rt);
     set_color(&color, 0.396f, 0.180f, 0.537f, 1.0f);
@@ -6152,7 +6807,7 @@ static void test_draw_geometry(BOOL d3d11)
     ID2D1RenderTarget_DrawEllipse(rt, &ellipse, (ID2D1Brush *)brush, 10.0f, NULL);
 
     hr = ID2D1RenderTarget_EndDraw(rt, NULL, NULL);
-    ok(SUCCEEDED(hr), "Failed to end draw, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     match = compare_figure(&ctx,   0,   0, 160, 160, 0xff652e89, 0, "");
     ok(match, "Figure does not match.\n");
@@ -6245,7 +6900,7 @@ static void test_draw_geometry(BOOL d3d11)
     ID2D1RenderTarget_DrawRoundedRectangle(rt, &rounded_rect, (ID2D1Brush *)brush, 10.0f, NULL);
 
     hr = ID2D1RenderTarget_EndDraw(rt, NULL, NULL);
-    ok(SUCCEEDED(hr), "Failed to end draw, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     match = compare_figure(&ctx,   0,   0, 160, 160, 0xff652e89, 0, "iGIQjgEUjAEUjgEQiGIA");
     todo_wine ok(match, "Figure does not match.\n");
@@ -6339,7 +6994,7 @@ static void test_draw_geometry(BOOL d3d11)
     ID2D1RenderTarget_DrawRoundedRectangle(rt, &rounded_rect, (ID2D1Brush *)brush, 10.0f, NULL);
 
     hr = ID2D1RenderTarget_EndDraw(rt, NULL, NULL);
-    ok(SUCCEEDED(hr), "Failed to end draw, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     match = compare_figure(&ctx,   0,   0, 160, 160, 0xff652e89, 0, "iGIQjgEUjAEUjgEQiGIA");
     todo_wine ok(match, "Figure does not match.\n");
@@ -6402,9 +7057,9 @@ static void test_draw_geometry(BOOL d3d11)
     todo_wine ok(match, "Figure does not match.\n");
 
     hr = ID2D1Factory_CreatePathGeometry(factory, &geometry);
-    ok(SUCCEEDED(hr), "Failed to create path geometry, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     hr = ID2D1PathGeometry_Open(geometry, &sink);
-    ok(SUCCEEDED(hr), "Failed to open geometry sink, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     set_point(&point, 40.0f, 160.0f);
     ID2D1GeometrySink_BeginFigure(sink, point, D2D1_FIGURE_BEGIN_FILLED);
@@ -6474,14 +7129,14 @@ static void test_draw_geometry(BOOL d3d11)
 
     ID2D1GeometrySink_SetFillMode(sink, D2D1_FILL_MODE_ALTERNATE);
     hr = ID2D1GeometrySink_Close(sink);
-    ok(SUCCEEDED(hr), "Failed to close geometry sink, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ID2D1GeometrySink_Release(sink);
 
     ID2D1RenderTarget_BeginDraw(rt);
     ID2D1RenderTarget_Clear(rt, &color);
     ID2D1RenderTarget_DrawGeometry(rt, (ID2D1Geometry *)geometry, (ID2D1Brush *)brush, 5.0f, NULL);
     hr = ID2D1RenderTarget_EndDraw(rt, NULL, NULL);
-    ok(SUCCEEDED(hr), "Failed to end draw, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ID2D1PathGeometry_Release(geometry);
 
     match = compare_figure(&ctx,   0,   0, 160, 160, 0xff652e89, 0, "");
@@ -6553,11 +7208,11 @@ static void test_draw_geometry(BOOL d3d11)
 
     set_rect(&rect, 20.0f, 80.0f, 60.0f, 240.0f);
     hr = ID2D1Factory_CreateRectangleGeometry(factory, &rect, &rect_geometry[0]);
-    ok(SUCCEEDED(hr), "Failed to create geometry, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     set_rect(&rect, -1.0f, -1.0f, 1.0f, 1.0f);
     hr = ID2D1Factory_CreateRectangleGeometry(factory, &rect, &rect_geometry[1]);
-    ok(SUCCEEDED(hr), "Failed to create geometry, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     set_matrix_identity(&matrix);
     translate_matrix(&matrix, 160.0f, 640.0f);
@@ -6565,14 +7220,14 @@ static void test_draw_geometry(BOOL d3d11)
     rotate_matrix(&matrix, M_PI / -5.0f);
     hr = ID2D1Factory_CreateTransformedGeometry(factory,
             (ID2D1Geometry *)rect_geometry[1], &matrix, &transformed_geometry[0]);
-    ok(SUCCEEDED(hr), "Failed to create geometry, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     set_matrix_identity(&matrix);
     scale_matrix(&matrix, 0.5f, 1.0f);
     translate_matrix(&matrix, -80.0f, 0.0f);
     hr = ID2D1Factory_CreateTransformedGeometry(factory,
             (ID2D1Geometry *)transformed_geometry[0], &matrix, &transformed_geometry[1]);
-    ok(SUCCEEDED(hr), "Failed to create geometry, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     set_matrix_identity(&matrix);
     rotate_matrix(&matrix, M_PI / 2.0f);
@@ -6580,7 +7235,7 @@ static void test_draw_geometry(BOOL d3d11)
     scale_matrix(&matrix, 2.0f, 0.25f);
     hr = ID2D1Factory_CreateTransformedGeometry(factory,
             (ID2D1Geometry *)transformed_geometry[1], &matrix, &transformed_geometry[2]);
-    ok(SUCCEEDED(hr), "Failed to create geometry, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     ID2D1RenderTarget_BeginDraw(rt);
     ID2D1RenderTarget_Clear(rt, &color);
@@ -6589,7 +7244,7 @@ static void test_draw_geometry(BOOL d3d11)
     ID2D1RenderTarget_DrawGeometry(rt, (ID2D1Geometry *)transformed_geometry[1], (ID2D1Brush *)brush, 5.0f, NULL);
     ID2D1RenderTarget_DrawGeometry(rt, (ID2D1Geometry *)transformed_geometry[2], (ID2D1Brush *)brush, 15.0f, NULL);
     hr = ID2D1RenderTarget_EndDraw(rt, NULL, NULL);
-    ok(SUCCEEDED(hr), "Failed to end draw, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ID2D1TransformedGeometry_Release(transformed_geometry[2]);
     ID2D1TransformedGeometry_Release(transformed_geometry[1]);
     ID2D1TransformedGeometry_Release(transformed_geometry[0]);
@@ -6656,40 +7311,40 @@ static void test_draw_geometry(BOOL d3d11)
     ok(match, "Figure does not match.\n");
 
     hr = ID2D1Factory_CreatePathGeometry(factory, &geometry);
-    ok(SUCCEEDED(hr), "Failed to create path geometry, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     hr = ID2D1PathGeometry_Open(geometry, &sink);
-    ok(SUCCEEDED(hr), "Failed to open geometry sink, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
-    set_point(&point, 20.0f, 80.0f);
+    set_point(&point, 20.0f, 79.5f);
     ID2D1GeometrySink_BeginFigure(sink, point, D2D1_FIGURE_BEGIN_HOLLOW);
-    quadratic_to(sink, 40.0f,  80.0f, 60.0f,  80.0f);
-    quadratic_to(sink, 60.0f, 160.0f, 60.0f, 240.0f);
-    quadratic_to(sink, 40.0f, 240.0f, 20.0f, 240.0f);
-    quadratic_to(sink, 20.0f, 160.0f, 20.0f,  80.0f);
+    quadratic_to(sink, 40.0f,  79.5f, 60.0f,  79.5f);
+    quadratic_to(sink, 60.0f, 159.5f, 60.0f, 239.5f);
+    quadratic_to(sink, 40.0f, 239.5f, 20.0f, 239.5f);
+    quadratic_to(sink, 20.0f, 159.5f, 20.0f,  79.5f);
     ID2D1GeometrySink_EndFigure(sink, D2D1_FIGURE_END_CLOSED);
 
-    set_point(&point, 100.0f, 80.0f);
+    set_point(&point, 100.0f, 79.5f);
     ID2D1GeometrySink_BeginFigure(sink, point, D2D1_FIGURE_BEGIN_HOLLOW);
-    quadratic_to(sink, 105.0f,  80.0f, 140.0f,  80.0f);
-    quadratic_to(sink, 140.0f, 100.0f, 140.0f, 240.0f);
-    quadratic_to(sink, 135.0f, 240.0f, 100.0f, 240.0f);
-    quadratic_to(sink, 100.0f, 220.0f, 100.0f,  80.0f);
+    quadratic_to(sink, 105.0f,  79.5f, 140.0f,  79.5f);
+    quadratic_to(sink, 140.0f,  99.5f, 140.0f, 239.5f);
+    quadratic_to(sink, 135.0f, 239.5f, 100.0f, 239.5f);
+    quadratic_to(sink, 100.0f, 219.5f, 100.0f,  79.5f);
     ID2D1GeometrySink_EndFigure(sink, D2D1_FIGURE_END_CLOSED);
 
-    set_point(&point, 180.0f, 80.0f);
+    set_point(&point, 180.0f, 79.5f);
     ID2D1GeometrySink_BeginFigure(sink, point, D2D1_FIGURE_BEGIN_HOLLOW);
-    quadratic_to(sink, 215.0f,  80.0f, 220.0f,  80.0f);
-    quadratic_to(sink, 220.0f, 220.0f, 220.0f, 240.0f);
-    quadratic_to(sink, 185.0f, 240.0f, 180.0f, 240.0f);
-    quadratic_to(sink, 180.0f, 100.0f, 180.0f,  80.0f);
+    quadratic_to(sink, 215.0f,  79.5f, 220.0f,  79.5f);
+    quadratic_to(sink, 220.0f, 219.5f, 220.0f, 239.5f);
+    quadratic_to(sink, 185.0f, 239.5f, 180.0f, 239.5f);
+    quadratic_to(sink, 180.0f,  99.5f, 180.0f,  79.5f);
     ID2D1GeometrySink_EndFigure(sink, D2D1_FIGURE_END_CLOSED);
 
-    set_point(&point, 260.0f, 80.0f);
+    set_point(&point, 260.0f, 79.5f);
     ID2D1GeometrySink_BeginFigure(sink, point, D2D1_FIGURE_BEGIN_HOLLOW);
-    quadratic_to(sink, 280.0f,  80.0f, 300.0f,  80.0f);
-    quadratic_to(sink, 300.0f, 160.0f, 300.0f, 240.0f);
-    quadratic_to(sink, 280.0f, 240.0f, 260.0f, 240.0f);
-    quadratic_to(sink, 260.0f, 160.0f, 260.0f,  80.0f);
+    quadratic_to(sink, 280.0f,  79.5f, 300.0f,  79.5f);
+    quadratic_to(sink, 300.0f, 159.5f, 300.0f, 239.5f);
+    quadratic_to(sink, 280.0f, 239.5f, 260.0f, 239.5f);
+    quadratic_to(sink, 260.0f, 159.5f, 260.0f,  79.5f);
     ID2D1GeometrySink_EndFigure(sink, D2D1_FIGURE_END_OPEN);
 
     set_point(&point, 20.0f, 400.0f);
@@ -6757,14 +7412,14 @@ static void test_draw_geometry(BOOL d3d11)
     ID2D1GeometrySink_EndFigure(sink, D2D1_FIGURE_END_OPEN);
 
     hr = ID2D1GeometrySink_Close(sink);
-    ok(SUCCEEDED(hr), "Failed to close geometry sink, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ID2D1GeometrySink_Release(sink);
 
     ID2D1RenderTarget_BeginDraw(rt);
     ID2D1RenderTarget_Clear(rt, &color);
     ID2D1RenderTarget_DrawGeometry(rt, (ID2D1Geometry *)geometry, (ID2D1Brush *)brush, 10.0f, NULL);
     hr = ID2D1RenderTarget_EndDraw(rt, NULL, NULL);
-    ok(SUCCEEDED(hr), "Failed to end draw, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ID2D1PathGeometry_Release(geometry);
 
     match = compare_figure(&ctx,   0,   0, 160, 160, 0xff652e89, 0,
@@ -6879,9 +7534,9 @@ static void test_draw_geometry(BOOL d3d11)
     ok(match, "Figure does not match.\n");
 
     hr = ID2D1Factory_CreatePathGeometry(factory, &geometry);
-    ok(SUCCEEDED(hr), "Failed to create path geometry, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     hr = ID2D1PathGeometry_Open(geometry, &sink);
-    ok(SUCCEEDED(hr), "Failed to open geometry sink, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     set_point(&point, -0.402914f, 0.915514f);
     ID2D1GeometrySink_BeginFigure(sink, point, D2D1_FIGURE_BEGIN_HOLLOW);
@@ -6900,7 +7555,7 @@ static void test_draw_geometry(BOOL d3d11)
     ID2D1GeometrySink_EndFigure(sink, D2D1_FIGURE_END_CLOSED);
 
     hr = ID2D1GeometrySink_Close(sink);
-    ok(SUCCEEDED(hr), "Failed to close geometry sink, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ID2D1GeometrySink_Release(sink);
 
     set_matrix_identity(&matrix);
@@ -6908,7 +7563,7 @@ static void test_draw_geometry(BOOL d3d11)
     scale_matrix(&matrix, 20.0f, 80.0f);
     hr = ID2D1Factory_CreateTransformedGeometry(factory,
             (ID2D1Geometry *)geometry, &matrix, &transformed_geometry[0]);
-    ok(SUCCEEDED(hr), "Failed to create geometry, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     set_matrix_identity(&matrix);
     translate_matrix(&matrix, 160.0f, 640.0f);
@@ -6916,7 +7571,7 @@ static void test_draw_geometry(BOOL d3d11)
     rotate_matrix(&matrix, M_PI / -5.0f);
     hr = ID2D1Factory_CreateTransformedGeometry(factory,
             (ID2D1Geometry *)geometry, &matrix, &transformed_geometry[1]);
-    ok(SUCCEEDED(hr), "Failed to create geometry, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ID2D1PathGeometry_Release(geometry);
 
     set_matrix_identity(&matrix);
@@ -6924,7 +7579,7 @@ static void test_draw_geometry(BOOL d3d11)
     translate_matrix(&matrix, -80.0f, 0.0f);
     hr = ID2D1Factory_CreateTransformedGeometry(factory,
             (ID2D1Geometry *)transformed_geometry[1], &matrix, &transformed_geometry[2]);
-    ok(SUCCEEDED(hr), "Failed to create geometry, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     set_matrix_identity(&matrix);
     rotate_matrix(&matrix, M_PI / 2.0f);
@@ -6932,7 +7587,7 @@ static void test_draw_geometry(BOOL d3d11)
     scale_matrix(&matrix, 2.0f, 0.25f);
     hr = ID2D1Factory_CreateTransformedGeometry(factory,
             (ID2D1Geometry *)transformed_geometry[2], &matrix, &transformed_geometry[3]);
-    ok(SUCCEEDED(hr), "Failed to create geometry, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     ID2D1RenderTarget_BeginDraw(rt);
     ID2D1RenderTarget_Clear(rt, &color);
@@ -6941,7 +7596,7 @@ static void test_draw_geometry(BOOL d3d11)
     ID2D1RenderTarget_DrawGeometry(rt, (ID2D1Geometry *)transformed_geometry[2], (ID2D1Brush *)brush, 5.0f, NULL);
     ID2D1RenderTarget_DrawGeometry(rt, (ID2D1Geometry *)transformed_geometry[3], (ID2D1Brush *)brush, 15.0f, NULL);
     hr = ID2D1RenderTarget_EndDraw(rt, NULL, NULL);
-    ok(SUCCEEDED(hr), "Failed to end draw, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ID2D1TransformedGeometry_Release(transformed_geometry[3]);
     ID2D1TransformedGeometry_Release(transformed_geometry[2]);
     ID2D1TransformedGeometry_Release(transformed_geometry[1]);
@@ -6993,9 +7648,9 @@ static void test_draw_geometry(BOOL d3d11)
     ok(match, "Figure does not match.\n");
 
     hr = ID2D1Factory_CreatePathGeometry(factory, &geometry);
-    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     hr = ID2D1PathGeometry_Open(geometry, &sink);
-    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     set_point(&point, 20.0f, 80.0f);
     ID2D1GeometrySink_BeginFigure(sink, point, D2D1_FIGURE_BEGIN_HOLLOW);
@@ -7008,14 +7663,14 @@ static void test_draw_geometry(BOOL d3d11)
     ID2D1GeometrySink_EndFigure(sink, D2D1_FIGURE_END_OPEN);
 
     hr = ID2D1GeometrySink_Close(sink);
-    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ID2D1GeometrySink_Release(sink);
 
     ID2D1RenderTarget_BeginDraw(rt);
     ID2D1RenderTarget_Clear(rt, &color);
     ID2D1RenderTarget_DrawGeometry(rt, (ID2D1Geometry *)geometry, (ID2D1Brush *)brush, 10.0f, NULL);
     hr = ID2D1RenderTarget_EndDraw(rt, NULL, NULL);
-    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ID2D1PathGeometry_Release(geometry);
 
     match = compare_figure(&ctx,   0,   0, 160, 160, 0xff652e89, 32,
@@ -7032,7 +7687,6 @@ static void test_draw_geometry(BOOL d3d11)
     ok(match, "Figure does not match.\n");
 
     ID2D1SolidColorBrush_Release(brush);
-    ID2D1Factory_Release(factory);
     release_test_context(&ctx);
 }
 
@@ -7059,13 +7713,13 @@ static void test_fill_geometry(BOOL d3d11)
         return;
 
     rt = ctx.rt;
-    ID2D1RenderTarget_GetFactory(rt, &factory);
+    factory = ctx.factory;
 
     ID2D1RenderTarget_SetDpi(rt, 192.0f, 48.0f);
     ID2D1RenderTarget_SetAntialiasMode(rt, D2D1_ANTIALIAS_MODE_ALIASED);
     set_color(&color, 0.890f, 0.851f, 0.600f, 1.0f);
     hr = ID2D1RenderTarget_CreateSolidColorBrush(rt, &color, NULL, &brush);
-    ok(SUCCEEDED(hr), "Failed to create brush, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     ID2D1RenderTarget_BeginDraw(rt);
     set_color(&color, 0.396f, 0.180f, 0.537f, 1.0f);
@@ -7090,7 +7744,7 @@ static void test_fill_geometry(BOOL d3d11)
     ID2D1RenderTarget_FillEllipse(rt, &ellipse, (ID2D1Brush *)brush);
 
     hr = ID2D1RenderTarget_EndDraw(rt, NULL, NULL);
-    ok(SUCCEEDED(hr), "Failed to end draw, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     match = compare_figure(&ctx,   0, 160, 160, 160, 0xff652e89, 0, "gMgB");
     ok(match, "Figure does not match.\n");
@@ -7148,7 +7802,7 @@ static void test_fill_geometry(BOOL d3d11)
     ID2D1RenderTarget_FillRoundedRectangle(rt, &rounded_rect, (ID2D1Brush *)brush);
 
     hr = ID2D1RenderTarget_EndDraw(rt, NULL, NULL);
-    ok(SUCCEEDED(hr), "Failed to end draw, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     match = compare_figure(&ctx,   0,   0, 160, 160, 0xff652e89, 0, "gMgB");
     ok(match, "Figure does not match.\n");
@@ -7218,7 +7872,7 @@ static void test_fill_geometry(BOOL d3d11)
     ID2D1RenderTarget_FillRoundedRectangle(rt, &rounded_rect, (ID2D1Brush *)brush);
 
     hr = ID2D1RenderTarget_EndDraw(rt, NULL, NULL);
-    ok(SUCCEEDED(hr), "Failed to end draw, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     match = compare_figure(&ctx,   0,   0, 160, 160, 0xff652e89, 0, "gMgB");
     ok(match, "Figure does not match.\n");
@@ -7257,9 +7911,9 @@ static void test_fill_geometry(BOOL d3d11)
     ok(match, "Figure does not match.\n");
 
     hr = ID2D1Factory_CreatePathGeometry(factory, &geometry);
-    ok(SUCCEEDED(hr), "Failed to create path geometry, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     hr = ID2D1PathGeometry_Open(geometry, &sink);
-    ok(SUCCEEDED(hr), "Failed to open geometry sink, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     set_point(&point, 40.0f, 160.0f);
     ID2D1GeometrySink_BeginFigure(sink, point, D2D1_FIGURE_BEGIN_FILLED);
@@ -7329,14 +7983,14 @@ static void test_fill_geometry(BOOL d3d11)
 
     ID2D1GeometrySink_SetFillMode(sink, D2D1_FILL_MODE_ALTERNATE);
     hr = ID2D1GeometrySink_Close(sink);
-    ok(SUCCEEDED(hr), "Failed to close geometry sink, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ID2D1GeometrySink_Release(sink);
 
     ID2D1RenderTarget_BeginDraw(rt);
     ID2D1RenderTarget_Clear(rt, &color);
     ID2D1RenderTarget_FillGeometry(rt, (ID2D1Geometry *)geometry, (ID2D1Brush *)brush, NULL);
     hr = ID2D1RenderTarget_EndDraw(rt, NULL, NULL);
-    ok(SUCCEEDED(hr), "Failed to end draw, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ID2D1PathGeometry_Release(geometry);
 
     match = compare_figure(&ctx,   0,   0, 160, 160, 0xff652e89, 0, "gMgB");
@@ -7384,11 +8038,11 @@ static void test_fill_geometry(BOOL d3d11)
 
     set_rect(&rect, 20.0f, 80.0f, 60.0f, 240.0f);
     hr = ID2D1Factory_CreateRectangleGeometry(factory, &rect, &rect_geometry[0]);
-    ok(SUCCEEDED(hr), "Failed to create geometry, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     set_rect(&rect, -1.0f, -1.0f, 1.0f, 1.0f);
     hr = ID2D1Factory_CreateRectangleGeometry(factory, &rect, &rect_geometry[1]);
-    ok(SUCCEEDED(hr), "Failed to create geometry, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     set_matrix_identity(&matrix);
     translate_matrix(&matrix, 160.0f, 640.0f);
@@ -7396,14 +8050,14 @@ static void test_fill_geometry(BOOL d3d11)
     rotate_matrix(&matrix, M_PI / -5.0f);
     hr = ID2D1Factory_CreateTransformedGeometry(factory,
             (ID2D1Geometry *)rect_geometry[1], &matrix, &transformed_geometry[0]);
-    ok(SUCCEEDED(hr), "Failed to create geometry, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     set_matrix_identity(&matrix);
     scale_matrix(&matrix, 0.5f, 1.0f);
     translate_matrix(&matrix, -80.0f, 0.0f);
     hr = ID2D1Factory_CreateTransformedGeometry(factory,
             (ID2D1Geometry *)transformed_geometry[0], &matrix, &transformed_geometry[1]);
-    ok(SUCCEEDED(hr), "Failed to create geometry, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     set_matrix_identity(&matrix);
     rotate_matrix(&matrix, M_PI / 2.0f);
@@ -7411,7 +8065,7 @@ static void test_fill_geometry(BOOL d3d11)
     scale_matrix(&matrix, 2.0f, 0.25f);
     hr = ID2D1Factory_CreateTransformedGeometry(factory,
             (ID2D1Geometry *)transformed_geometry[1], &matrix, &transformed_geometry[2]);
-    ok(SUCCEEDED(hr), "Failed to create geometry, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     ID2D1RenderTarget_BeginDraw(rt);
     ID2D1RenderTarget_Clear(rt, &color);
@@ -7420,7 +8074,7 @@ static void test_fill_geometry(BOOL d3d11)
     ID2D1RenderTarget_FillGeometry(rt, (ID2D1Geometry *)transformed_geometry[1], (ID2D1Brush *)brush, NULL);
     ID2D1RenderTarget_FillGeometry(rt, (ID2D1Geometry *)transformed_geometry[2], (ID2D1Brush *)brush, NULL);
     hr = ID2D1RenderTarget_EndDraw(rt, NULL, NULL);
-    ok(SUCCEEDED(hr), "Failed to end draw, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ID2D1TransformedGeometry_Release(transformed_geometry[2]);
     ID2D1TransformedGeometry_Release(transformed_geometry[1]);
     ID2D1TransformedGeometry_Release(transformed_geometry[0]);
@@ -7466,9 +8120,9 @@ static void test_fill_geometry(BOOL d3d11)
     ok(match, "Figure does not match.\n");
 
     hr = ID2D1Factory_CreatePathGeometry(factory, &geometry);
-    ok(SUCCEEDED(hr), "Failed to create path geometry, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     hr = ID2D1PathGeometry_Open(geometry, &sink);
-    ok(SUCCEEDED(hr), "Failed to open geometry sink, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     set_point(&point, 20.0f, 80.0f);
     ID2D1GeometrySink_BeginFigure(sink, point, D2D1_FIGURE_BEGIN_FILLED);
@@ -7567,14 +8221,14 @@ static void test_fill_geometry(BOOL d3d11)
     ID2D1GeometrySink_EndFigure(sink, D2D1_FIGURE_END_OPEN);
 
     hr = ID2D1GeometrySink_Close(sink);
-    ok(SUCCEEDED(hr), "Failed to close geometry sink, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ID2D1GeometrySink_Release(sink);
 
     ID2D1RenderTarget_BeginDraw(rt);
     ID2D1RenderTarget_Clear(rt, &color);
     ID2D1RenderTarget_FillGeometry(rt, (ID2D1Geometry *)geometry, (ID2D1Brush *)brush, NULL);
     hr = ID2D1RenderTarget_EndDraw(rt, NULL, NULL);
-    ok(SUCCEEDED(hr), "Failed to end draw, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ID2D1PathGeometry_Release(geometry);
 
     match = compare_figure(&ctx,   0,   0, 160, 160, 0xff652e89, 0,
@@ -7648,9 +8302,9 @@ static void test_fill_geometry(BOOL d3d11)
     ok(match, "Figure does not match.\n");
 
     hr = ID2D1Factory_CreatePathGeometry(factory, &geometry);
-    ok(SUCCEEDED(hr), "Failed to create path geometry, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     hr = ID2D1PathGeometry_Open(geometry, &sink);
-    ok(SUCCEEDED(hr), "Failed to open geometry sink, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     set_point(&point, -0.402914f, 0.915514f);
     ID2D1GeometrySink_BeginFigure(sink, point, D2D1_FIGURE_BEGIN_FILLED);
@@ -7669,7 +8323,7 @@ static void test_fill_geometry(BOOL d3d11)
     ID2D1GeometrySink_EndFigure(sink, D2D1_FIGURE_END_CLOSED);
 
     hr = ID2D1GeometrySink_Close(sink);
-    ok(SUCCEEDED(hr), "Failed to close geometry sink, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ID2D1GeometrySink_Release(sink);
 
     set_matrix_identity(&matrix);
@@ -7677,7 +8331,7 @@ static void test_fill_geometry(BOOL d3d11)
     scale_matrix(&matrix, 20.0f, 80.0f);
     hr = ID2D1Factory_CreateTransformedGeometry(factory,
             (ID2D1Geometry *)geometry, &matrix, &transformed_geometry[0]);
-    ok(SUCCEEDED(hr), "Failed to create geometry, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     set_matrix_identity(&matrix);
     translate_matrix(&matrix, 160.0f, 640.0f);
@@ -7685,7 +8339,7 @@ static void test_fill_geometry(BOOL d3d11)
     rotate_matrix(&matrix, M_PI / -5.0f);
     hr = ID2D1Factory_CreateTransformedGeometry(factory,
             (ID2D1Geometry *)geometry, &matrix, &transformed_geometry[1]);
-    ok(SUCCEEDED(hr), "Failed to create geometry, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ID2D1PathGeometry_Release(geometry);
 
     set_matrix_identity(&matrix);
@@ -7693,7 +8347,7 @@ static void test_fill_geometry(BOOL d3d11)
     translate_matrix(&matrix, -80.0f, 0.0f);
     hr = ID2D1Factory_CreateTransformedGeometry(factory,
             (ID2D1Geometry *)transformed_geometry[1], &matrix, &transformed_geometry[2]);
-    ok(SUCCEEDED(hr), "Failed to create geometry, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     set_matrix_identity(&matrix);
     rotate_matrix(&matrix, M_PI / 2.0f);
@@ -7701,7 +8355,7 @@ static void test_fill_geometry(BOOL d3d11)
     scale_matrix(&matrix, 2.0f, 0.25f);
     hr = ID2D1Factory_CreateTransformedGeometry(factory,
             (ID2D1Geometry *)transformed_geometry[2], &matrix, &transformed_geometry[3]);
-    ok(SUCCEEDED(hr), "Failed to create geometry, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     ID2D1RenderTarget_BeginDraw(rt);
     ID2D1RenderTarget_Clear(rt, &color);
@@ -7710,7 +8364,7 @@ static void test_fill_geometry(BOOL d3d11)
     ID2D1RenderTarget_FillGeometry(rt, (ID2D1Geometry *)transformed_geometry[2], (ID2D1Brush *)brush, NULL);
     ID2D1RenderTarget_FillGeometry(rt, (ID2D1Geometry *)transformed_geometry[3], (ID2D1Brush *)brush, NULL);
     hr = ID2D1RenderTarget_EndDraw(rt, NULL, NULL);
-    ok(SUCCEEDED(hr), "Failed to end draw, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ID2D1TransformedGeometry_Release(transformed_geometry[3]);
     ID2D1TransformedGeometry_Release(transformed_geometry[2]);
     ID2D1TransformedGeometry_Release(transformed_geometry[1]);
@@ -7752,9 +8406,9 @@ static void test_fill_geometry(BOOL d3d11)
     ok(match, "Figure does not match.\n");
 
     hr = ID2D1Factory_CreatePathGeometry(factory, &geometry);
-    ok(SUCCEEDED(hr), "Failed to create path geometry, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     hr = ID2D1PathGeometry_Open(geometry, &sink);
-    ok(SUCCEEDED(hr), "Failed to open geometry sink, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     set_point(&point, -0.402914f, 0.915514f);
     ID2D1GeometrySink_BeginFigure(sink, point, D2D1_FIGURE_BEGIN_HOLLOW);
@@ -7773,7 +8427,7 @@ static void test_fill_geometry(BOOL d3d11)
     ID2D1GeometrySink_EndFigure(sink, D2D1_FIGURE_END_CLOSED);
 
     hr = ID2D1GeometrySink_Close(sink);
-    ok(SUCCEEDED(hr), "Failed to close geometry sink, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ID2D1GeometrySink_Release(sink);
 
     set_matrix_identity(&matrix);
@@ -7781,7 +8435,7 @@ static void test_fill_geometry(BOOL d3d11)
     scale_matrix(&matrix, 20.0f, 80.0f);
     hr = ID2D1Factory_CreateTransformedGeometry(factory,
             (ID2D1Geometry *)geometry, &matrix, &transformed_geometry[0]);
-    ok(SUCCEEDED(hr), "Failed to create geometry, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     set_matrix_identity(&matrix);
     translate_matrix(&matrix, 160.0f, 640.0f);
@@ -7789,7 +8443,7 @@ static void test_fill_geometry(BOOL d3d11)
     rotate_matrix(&matrix, M_PI / -5.0f);
     hr = ID2D1Factory_CreateTransformedGeometry(factory,
             (ID2D1Geometry *)geometry, &matrix, &transformed_geometry[1]);
-    ok(SUCCEEDED(hr), "Failed to create geometry, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ID2D1PathGeometry_Release(geometry);
 
     set_matrix_identity(&matrix);
@@ -7797,7 +8451,7 @@ static void test_fill_geometry(BOOL d3d11)
     translate_matrix(&matrix, -80.0f, 0.0f);
     hr = ID2D1Factory_CreateTransformedGeometry(factory,
             (ID2D1Geometry *)transformed_geometry[1], &matrix, &transformed_geometry[2]);
-    ok(SUCCEEDED(hr), "Failed to create geometry, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     set_matrix_identity(&matrix);
     rotate_matrix(&matrix, M_PI / 2.0f);
@@ -7805,7 +8459,7 @@ static void test_fill_geometry(BOOL d3d11)
     scale_matrix(&matrix, 2.0f, 0.25f);
     hr = ID2D1Factory_CreateTransformedGeometry(factory,
             (ID2D1Geometry *)transformed_geometry[2], &matrix, &transformed_geometry[3]);
-    ok(SUCCEEDED(hr), "Failed to create geometry, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     ID2D1RenderTarget_BeginDraw(rt);
     ID2D1RenderTarget_Clear(rt, &color);
@@ -7814,7 +8468,7 @@ static void test_fill_geometry(BOOL d3d11)
     ID2D1RenderTarget_FillGeometry(rt, (ID2D1Geometry *)transformed_geometry[2], (ID2D1Brush *)brush, NULL);
     ID2D1RenderTarget_FillGeometry(rt, (ID2D1Geometry *)transformed_geometry[3], (ID2D1Brush *)brush, NULL);
     hr = ID2D1RenderTarget_EndDraw(rt, NULL, NULL);
-    ok(SUCCEEDED(hr), "Failed to end draw, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ID2D1TransformedGeometry_Release(transformed_geometry[3]);
     ID2D1TransformedGeometry_Release(transformed_geometry[2]);
     ID2D1TransformedGeometry_Release(transformed_geometry[1]);
@@ -7830,7 +8484,6 @@ static void test_fill_geometry(BOOL d3d11)
     ok(match, "Figure does not match.\n");
 
     ID2D1SolidColorBrush_Release(brush);
-    ID2D1Factory_Release(factory);
     release_test_context(&ctx);
 }
 
@@ -7854,15 +8507,15 @@ static void test_gdi_interop(BOOL d3d11)
         return;
 
     hr = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, &IID_ID2D1Factory, NULL, (void **)&factory);
-    ok(SUCCEEDED(hr), "Failed to create factory, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
     hr = CoCreateInstance(&CLSID_WICImagingFactory, NULL, CLSCTX_INPROC_SERVER,
             &IID_IWICImagingFactory, (void **)&wic_factory);
-    ok(SUCCEEDED(hr), "Failed to create WIC imaging factory, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     hr = IWICImagingFactory_CreateBitmap(wic_factory, 16, 16,
             &GUID_WICPixelFormat32bppPBGRA, WICBitmapCacheOnDemand, &wic_bitmap);
-    ok(SUCCEEDED(hr), "Failed to create bitmap, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     IWICImagingFactory_Release(wic_factory);
 
     /* WIC target, default usage */
@@ -7875,20 +8528,19 @@ static void test_gdi_interop(BOOL d3d11)
     desc.minLevel = D2D1_FEATURE_LEVEL_DEFAULT;
 
     hr = ID2D1Factory_CreateWicBitmapRenderTarget(factory, wic_bitmap, &desc, &rt);
-    ok(SUCCEEDED(hr), "Failed to create render target, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     hr = ID2D1RenderTarget_QueryInterface(rt, &IID_ID2D1GdiInteropRenderTarget, (void **)&interop);
-    ok(SUCCEEDED(hr), "Failed to get gdi interop interface, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     ID2D1RenderTarget_BeginDraw(rt);
     dc = (void *)0xdeadbeef;
     hr = ID2D1GdiInteropRenderTarget_GetDC(interop, D2D1_DC_INITIALIZE_MODE_COPY, &dc);
-    ok(FAILED(hr), "GetDC() was expected to fail, hr %#x.\n", hr);
-todo_wine
-    ok(dc == NULL, "Expected NULL dc, got %p.\n", dc);
+    ok(hr != S_OK, "Got unexpected hr %#lx.\n", hr);
+    todo_wine ok(!dc, "Got unexpected DC %p.\n", dc);
     ID2D1GdiInteropRenderTarget_Release(interop);
     hr = ID2D1RenderTarget_EndDraw(rt, NULL, NULL);
-    ok(SUCCEEDED(hr), "Failed to end draw, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     ID2D1RenderTarget_Release(rt);
 
@@ -7896,25 +8548,25 @@ todo_wine
     desc.usage = D2D1_RENDER_TARGET_USAGE_GDI_COMPATIBLE;
 
     hr = ID2D1Factory_CreateWicBitmapRenderTarget(factory, wic_bitmap, &desc, &rt);
-    ok(SUCCEEDED(hr), "Failed to create render target, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     hr = ID2D1RenderTarget_QueryInterface(rt, &IID_ID2D1GdiInteropRenderTarget, (void **)&interop);
-    ok(SUCCEEDED(hr), "Failed to get gdi interop interface, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     ID2D1RenderTarget_BeginDraw(rt);
     dc = NULL;
     hr = ID2D1GdiInteropRenderTarget_GetDC(interop, D2D1_DC_INITIALIZE_MODE_COPY, &dc);
-    ok(SUCCEEDED(hr), "GetDC() was expected to succeed, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ok(dc != NULL, "Expected NULL dc, got %p.\n", dc);
     ID2D1GdiInteropRenderTarget_ReleaseDC(interop, NULL);
     hr = ID2D1RenderTarget_EndDraw(rt, NULL, NULL);
-    ok(SUCCEEDED(hr), "EndDraw() failed, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     ID2D1RenderTarget_BeginDraw(rt);
     set_color(&color, 1.0f, 0.0f, 0.0f, 1.0f);
     ID2D1RenderTarget_Clear(rt, &color);
     hr = ID2D1RenderTarget_EndDraw(rt, NULL, NULL);
-    ok(SUCCEEDED(hr), "EndDraw() failed, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     match = compare_wic_bitmap(wic_bitmap, "54034063dbc1c1bb61cb60ec57e4498678dc2b13");
     ok(match, "Bitmap does not match.\n");
@@ -7923,39 +8575,37 @@ todo_wine
     ID2D1RenderTarget_BeginDraw(rt);
 
     hr = ID2D1GdiInteropRenderTarget_GetDC(interop, D2D1_DC_INITIALIZE_MODE_COPY, &dc);
-    ok(SUCCEEDED(hr), "GetDC() was expected to succeed, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     SetRect(&rect, 0, 0, 16, 16);
     FillRect(dc, &rect, GetStockObject(BLACK_BRUSH));
     ID2D1GdiInteropRenderTarget_ReleaseDC(interop, NULL);
 
     hr = ID2D1RenderTarget_EndDraw(rt, NULL, NULL);
-    ok(SUCCEEDED(hr), "EndDraw() failed, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     match = compare_wic_bitmap(wic_bitmap, "60cacbf3d72e1e7834203da608037b1bf83b40e8");
     ok(match, "Bitmap does not match.\n");
 
     /* Bitmap is locked at BeginDraw(). */
     hr = IWICBitmap_Lock(wic_bitmap, NULL, WICBitmapLockRead, &wic_lock);
-    ok(SUCCEEDED(hr), "Expected bitmap to be unlocked, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     IWICBitmapLock_Release(wic_lock);
 
     ID2D1RenderTarget_BeginDraw(rt);
     hr = IWICBitmap_Lock(wic_bitmap, NULL, WICBitmapLockRead, &wic_lock);
-todo_wine
-    ok(hr == WINCODEC_ERR_ALREADYLOCKED, "Expected bitmap to be locked, hr %#x.\n", hr);
+    todo_wine ok(hr == WINCODEC_ERR_ALREADYLOCKED, "Got unexpected hr %#lx.\n", hr);
     if (SUCCEEDED(hr))
         IWICBitmapLock_Release(wic_lock);
     hr = ID2D1RenderTarget_EndDraw(rt, NULL, NULL);
-    ok(SUCCEEDED(hr), "EndDraw() failed, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     /* Lock before BeginDraw(). */
     hr = IWICBitmap_Lock(wic_bitmap, NULL, WICBitmapLockRead, &wic_lock);
-    ok(SUCCEEDED(hr), "Expected bitmap to be unlocked, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ID2D1RenderTarget_BeginDraw(rt);
     hr = ID2D1RenderTarget_EndDraw(rt, NULL, NULL);
-todo_wine
-    ok(hr == WINCODEC_ERR_ALREADYLOCKED, "Unexpected hr %#x.\n", hr);
+    todo_wine ok(hr == WINCODEC_ERR_ALREADYLOCKED, "Got unexpected hr %#lx.\n", hr);
     IWICBitmapLock_Release(wic_lock);
 
     ID2D1GdiInteropRenderTarget_Release(interop);
@@ -7979,13 +8629,13 @@ static void test_layer(BOOL d3d11)
         return;
 
     rt = ctx.rt;
-    ID2D1RenderTarget_GetFactory(rt, &factory);
+    factory = ctx.factory;
 
     ID2D1RenderTarget_SetDpi(rt, 192.0f, 48.0f);
     ID2D1RenderTarget_SetAntialiasMode(rt, D2D1_ANTIALIAS_MODE_ALIASED);
 
     hr = ID2D1RenderTarget_CreateLayer(rt, NULL, &layer);
-    ok(SUCCEEDED(hr), "Failed to create layer, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ID2D1Layer_GetFactory(layer, &layer_factory);
     ok(layer_factory == factory, "Got unexpected layer factory %p, expected %p.\n", layer_factory, factory);
     ID2D1Factory_Release(layer_factory);
@@ -7996,13 +8646,12 @@ static void test_layer(BOOL d3d11)
 
     set_size_f(&size, 800.0f, 600.0f);
     hr = ID2D1RenderTarget_CreateLayer(rt, &size, &layer);
-    ok(SUCCEEDED(hr), "Failed to create layer, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     size = ID2D1Layer_GetSize(layer);
     ok(size.width == 800.0f, "Got unexpected width %.8e.\n", size.width);
     ok(size.height == 600.0f, "Got unexpected height %.8e.\n", size.height);
     ID2D1Layer_Release(layer);
 
-    ID2D1Factory_Release(factory);
     release_test_context(&ctx);
 }
 
@@ -8023,18 +8672,18 @@ static void test_bezier_intersect(BOOL d3d11)
         return;
 
     rt = ctx.rt;
-    ID2D1RenderTarget_GetFactory(rt, &factory);
+    factory = ctx.factory;
 
     ID2D1RenderTarget_SetDpi(rt, 192.0f, 48.0f);
     ID2D1RenderTarget_SetAntialiasMode(rt, D2D1_ANTIALIAS_MODE_ALIASED);
     set_color(&color, 0.890f, 0.851f, 0.600f, 1.0f);
     hr = ID2D1RenderTarget_CreateSolidColorBrush(rt, &color, NULL, &brush);
-    ok(SUCCEEDED(hr), "Failed to create brush, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     hr = ID2D1Factory_CreatePathGeometry(factory, &geometry);
-    ok(SUCCEEDED(hr), "Failed to create path geometry, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     hr = ID2D1PathGeometry_Open(geometry, &sink);
-    ok(SUCCEEDED(hr), "Failed to open geometry sink, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     set_point(&point, 160.0f, 720.0f);
     ID2D1GeometrySink_BeginFigure(sink, point, D2D1_FIGURE_BEGIN_FILLED);
@@ -8055,7 +8704,7 @@ static void test_bezier_intersect(BOOL d3d11)
     ID2D1GeometrySink_EndFigure(sink, D2D1_FIGURE_END_CLOSED);
 
     hr = ID2D1GeometrySink_Close(sink);
-    ok(SUCCEEDED(hr), "Failed to close geometry sink, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ID2D1GeometrySink_Release(sink);
 
     ID2D1RenderTarget_BeginDraw(rt);
@@ -8063,7 +8712,7 @@ static void test_bezier_intersect(BOOL d3d11)
     ID2D1RenderTarget_Clear(rt, &color);
     ID2D1RenderTarget_FillGeometry(rt, (ID2D1Geometry *)geometry, (ID2D1Brush *)brush, NULL);
     hr = ID2D1RenderTarget_EndDraw(rt, NULL, NULL);
-    ok(SUCCEEDED(hr), "Failed to end draw, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ID2D1PathGeometry_Release(geometry);
 
     match = compare_figure(&ctx, 160, 120, 320, 240, 0xff652e89, 2048,
@@ -8093,9 +8742,9 @@ static void test_bezier_intersect(BOOL d3d11)
     ok(match, "Figure does not match.\n");
 
     hr = ID2D1Factory_CreatePathGeometry(factory, &geometry);
-    ok(SUCCEEDED(hr), "Failed to create path geometry, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     hr = ID2D1PathGeometry_Open(geometry, &sink);
-    ok(SUCCEEDED(hr), "Failed to open geometry sink, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     set_point(&point, 240.0f, 720.0f);
     ID2D1GeometrySink_BeginFigure(sink, point, D2D1_FIGURE_BEGIN_FILLED);
@@ -8106,14 +8755,14 @@ static void test_bezier_intersect(BOOL d3d11)
     ID2D1GeometrySink_EndFigure(sink, D2D1_FIGURE_END_CLOSED);
 
     hr = ID2D1GeometrySink_Close(sink);
-    ok(SUCCEEDED(hr), "Failed to close geometry sink, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ID2D1GeometrySink_Release(sink);
 
     ID2D1RenderTarget_BeginDraw(rt);
     ID2D1RenderTarget_Clear(rt, &color);
     ID2D1RenderTarget_FillGeometry(rt, (ID2D1Geometry *)geometry, (ID2D1Brush *)brush, NULL);
     hr = ID2D1RenderTarget_EndDraw(rt, NULL, NULL);
-    ok(SUCCEEDED(hr), "Failed to end draw, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ID2D1PathGeometry_Release(geometry);
 
     match = compare_figure(&ctx, 160, 120, 320, 240, 0xff652e89, 2048,
@@ -8136,7 +8785,6 @@ static void test_bezier_intersect(BOOL d3d11)
     ok(match, "Figure does not match.\n");
 
     ID2D1SolidColorBrush_Release(brush);
-    ID2D1Factory_Release(factory);
     release_test_context(&ctx);
 }
 
@@ -8161,7 +8809,7 @@ static void test_create_device(BOOL d3d11)
     }
 
     hr = ID2D1Factory1_CreateDevice(factory, ctx.device, &device);
-    ok(SUCCEEDED(hr), "Failed to get ID2D1Device, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     ID2D1Device_GetFactory(device, &factory2);
     ok(factory2 == (ID2D1Factory *)factory, "Got unexpected factory %p, expected %p.\n", factory2, factory);
@@ -8171,11 +8819,11 @@ static void test_create_device(BOOL d3d11)
     if (pD2D1CreateDevice)
     {
         hr = pD2D1CreateDevice(ctx.device, NULL, &device);
-        ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
         ID2D1Device_Release(device);
 
         hr = pD2D1CreateDevice(ctx.device, &properties, &device);
-        ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
         ID2D1Device_Release(device);
     }
     else
@@ -8184,7 +8832,7 @@ static void test_create_device(BOOL d3d11)
     release_test_context(&ctx);
 
     refcount = ID2D1Factory1_Release(factory);
-    ok(!refcount, "Factory has %u references left.\n", refcount);
+    ok(!refcount, "Factory has %lu references left.\n", refcount);
 }
 
 #define check_rt_bitmap_surface(r, s, o) check_rt_bitmap_surface_(__LINE__, r, s, o)
@@ -8213,7 +8861,7 @@ static void check_rt_bitmap_surface_(unsigned int line, ID2D1RenderTarget *rt, B
     bitmap_desc.dpiX = 96.0f;
     bitmap_desc.dpiY = 96.0f;
     hr = ID2D1RenderTarget_CreateBitmap(rt, size, bitmap_data, sizeof(*bitmap_data), &bitmap_desc, &bitmap);
-    ok_(__FILE__, line)(SUCCEEDED(hr), "Failed to create bitmap, hr %#x.\n", hr);
+    ok_(__FILE__, line)(hr == S_OK, "Failed to create bitmap, hr %#lx.\n", hr);
 
     check_bitmap_surface_(line, bitmap, has_surface, options);
 
@@ -8222,19 +8870,19 @@ static void check_rt_bitmap_surface_(unsigned int line, ID2D1RenderTarget *rt, B
     /* Zero sized bitmaps. */
     set_size_u(&size, 0, 0);
     hr = ID2D1RenderTarget_CreateBitmap(rt, size, NULL, 0, &bitmap_desc, &bitmap);
-    ok_(__FILE__, line)(SUCCEEDED(hr), "Failed to create bitmap, hr %#x.\n", hr);
+    ok_(__FILE__, line)(hr == S_OK, "Failed to create bitmap, hr %#lx.\n", hr);
     check_bitmap_surface_(line, bitmap, has_surface, options);
     ID2D1Bitmap_Release(bitmap);
 
     set_size_u(&size, 2, 0);
     hr = ID2D1RenderTarget_CreateBitmap(rt, size, NULL, 0, &bitmap_desc, &bitmap);
-    ok_(__FILE__, line)(SUCCEEDED(hr), "Failed to create bitmap, hr %#x.\n", hr);
+    ok_(__FILE__, line)(hr == S_OK, "Failed to create bitmap, hr %#lx.\n", hr);
     check_bitmap_surface_(line, bitmap, has_surface, options);
     ID2D1Bitmap_Release(bitmap);
 
     set_size_u(&size, 0, 2);
     hr = ID2D1RenderTarget_CreateBitmap(rt, size, NULL, 0, &bitmap_desc, &bitmap);
-    ok_(__FILE__, line)(SUCCEEDED(hr), "Failed to create bitmap, hr %#x.\n", hr);
+    ok_(__FILE__, line)(hr == S_OK, "Failed to create bitmap, hr %#lx.\n", hr);
     check_bitmap_surface_(line, bitmap, has_surface, options);
     ID2D1Bitmap_Release(bitmap);
 
@@ -8243,15 +8891,15 @@ static void check_rt_bitmap_surface_(unsigned int line, ID2D1RenderTarget *rt, B
 
     hr = CoCreateInstance(&CLSID_WICImagingFactory, NULL, CLSCTX_INPROC_SERVER,
             &IID_IWICImagingFactory, (void **)&wic_factory);
-    ok_(__FILE__, line)(SUCCEEDED(hr), "Failed to create WIC imaging factory, hr %#x.\n", hr);
+    ok_(__FILE__, line)(hr == S_OK, "Failed to create WIC imaging factory, hr %#lx.\n", hr);
 
     hr = IWICImagingFactory_CreateBitmap(wic_factory, 16, 16,
             &GUID_WICPixelFormat32bppPBGRA, WICBitmapCacheOnDemand, &wic_bitmap);
-    ok_(__FILE__, line)(SUCCEEDED(hr), "Failed to create WIC bitmap, hr %#x.\n", hr);
+    ok_(__FILE__, line)(hr == S_OK, "Failed to create WIC bitmap, hr %#lx.\n", hr);
     IWICImagingFactory_Release(wic_factory);
 
     hr = ID2D1RenderTarget_CreateBitmapFromWicBitmap(rt, (IWICBitmapSource *)wic_bitmap, NULL, &bitmap);
-    ok_(__FILE__, line)(SUCCEEDED(hr), "Failed to create bitmap from WIC source, hr %#x.\n", hr);
+    ok_(__FILE__, line)(hr == S_OK, "Failed to create bitmap from WIC source, hr %#lx.\n", hr);
 
     check_bitmap_surface_(line, bitmap, has_surface, options);
 
@@ -8261,7 +8909,7 @@ static void check_rt_bitmap_surface_(unsigned int line, ID2D1RenderTarget *rt, B
 
     /* Compatible target follows its parent. */
     hr = ID2D1RenderTarget_QueryInterface(rt, &IID_ID2D1DeviceContext, (void **)&context);
-    ok_(__FILE__, line)(SUCCEEDED(hr), "Failed to get device context, hr %#x.\n", hr);
+    ok_(__FILE__, line)(hr == S_OK, "Failed to get device context, hr %#lx.\n", hr);
 
     dc_rt = NULL;
     ID2D1RenderTarget_QueryInterface(rt, &IID_ID2D1DCRenderTarget, (void **)&dc_rt);
@@ -8295,10 +8943,10 @@ static void check_rt_bitmap_surface_(unsigned int line, ID2D1RenderTarget *rt, B
 
         hr = ID2D1RenderTarget_CreateCompatibleRenderTarget(rt, NULL, NULL, NULL,
                 D2D1_COMPATIBLE_RENDER_TARGET_OPTIONS_NONE, &compatible_rt);
-        ok_(__FILE__, line)(SUCCEEDED(hr), "Failed to create compatible render target, hr %#x.\n", hr);
+        ok_(__FILE__, line)(hr == S_OK, "Failed to create compatible render target, hr %#lx.\n", hr);
 
         hr = ID2D1BitmapRenderTarget_QueryInterface(compatible_rt, &IID_ID2D1DeviceContext, (void **)&context2);
-        ok_(__FILE__, line)(SUCCEEDED(hr), "Failed to get device context, hr %#x.\n", hr);
+        ok_(__FILE__, line)(hr == S_OK, "Failed to get device context, hr %#lx.\n", hr);
 
         ID2D1DeviceContext_GetDevice(context2, &device2);
         ok_(__FILE__, line)(device == device2, "Unexpected device.\n");
@@ -8308,12 +8956,12 @@ static void check_rt_bitmap_surface_(unsigned int line, ID2D1RenderTarget *rt, B
 
         hr = ID2D1BitmapRenderTarget_CreateBitmap(compatible_rt, size,
                 bitmap_data, sizeof(*bitmap_data), &bitmap_desc, &bitmap);
-        ok_(__FILE__, line)(SUCCEEDED(hr), "Failed to create bitmap, hr %#x.\n", hr);
+        ok_(__FILE__, line)(hr == S_OK, "Failed to create bitmap, hr %#lx.\n", hr);
         check_bitmap_surface_(line, bitmap, has_surface, options);
         ID2D1Bitmap_Release(bitmap);
 
         hr = ID2D1BitmapRenderTarget_GetBitmap(compatible_rt, &bitmap);
-        ok_(__FILE__, line)(SUCCEEDED(hr), "Failed to get compatible target bitmap, hr %#x.\n", hr);
+        ok_(__FILE__, line)(hr == S_OK, "Failed to get compatible target bitmap, hr %#lx.\n", hr);
 
         bitmap2 = NULL;
         ID2D1DeviceContext_GetTarget(context2, (ID2D1Image **)&bitmap2);
@@ -8330,7 +8978,7 @@ static void check_rt_bitmap_surface_(unsigned int line, ID2D1RenderTarget *rt, B
     {
         hr = ID2D1RenderTarget_CreateCompatibleRenderTarget(rt, NULL, NULL, NULL,
                  D2D1_COMPATIBLE_RENDER_TARGET_OPTIONS_NONE, &compatible_rt);
-        ok_(__FILE__, line)(hr == WINCODEC_ERR_UNSUPPORTEDPIXELFORMAT, "Unexpected hr %#x.\n", hr);
+        ok_(__FILE__, line)(hr == D2DERR_UNSUPPORTED_PIXEL_FORMAT, "Unexpected hr %#lx.\n", hr);
     }
 
     ID2D1DeviceContext_Release(context);
@@ -8361,13 +9009,13 @@ static IDXGISurface *create_surface(IDXGIDevice *dxgi_device, DXGI_FORMAT format
     texture_desc.MiscFlags = 0;
 
     hr = IDXGIDevice_QueryInterface(dxgi_device, &IID_ID3D10Device, (void **)&d3d_device);
-    ok(SUCCEEDED(hr), "Failed to get device interface, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     hr = ID3D10Device_CreateTexture2D(d3d_device, &texture_desc, NULL, &texture);
-    ok(SUCCEEDED(hr), "Failed to create a texture, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     hr = ID3D10Texture2D_QueryInterface(texture, &IID_IDXGISurface, (void **)&surface);
-    ok(SUCCEEDED(hr), "Failed to get surface interface, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     ID3D10Device_Release(d3d_device);
     ID3D10Texture2D_Release(texture);
@@ -8388,19 +9036,19 @@ static void test_bitmap_surface(BOOL d3d11)
         { { DXGI_FORMAT_UNKNOWN, D2D1_ALPHA_MODE_PREMULTIPLIED },
           { DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED } },
 
-        { { DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_STRAIGHT }, { 0 }, WINCODEC_ERR_UNSUPPORTEDPIXELFORMAT },
+        { { DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_STRAIGHT }, { 0 }, D2DERR_UNSUPPORTED_PIXEL_FORMAT },
 
         { { DXGI_FORMAT_UNKNOWN, D2D1_ALPHA_MODE_IGNORE },
           { DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_IGNORE } },
 
-        { { DXGI_FORMAT_UNKNOWN, D2D1_ALPHA_MODE_UNKNOWN }, { 0 }, WINCODEC_ERR_UNSUPPORTEDPIXELFORMAT },
+        { { DXGI_FORMAT_UNKNOWN, D2D1_ALPHA_MODE_UNKNOWN }, { 0 }, D2DERR_UNSUPPORTED_PIXEL_FORMAT },
 
-        { { DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_UNKNOWN }, { 0 }, WINCODEC_ERR_UNSUPPORTEDPIXELFORMAT },
+        { { DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_UNKNOWN }, { 0 }, D2DERR_UNSUPPORTED_PIXEL_FORMAT },
 
         { { DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_IGNORE },
           { DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_IGNORE } },
 
-        { { DXGI_FORMAT_UNKNOWN, D2D1_ALPHA_MODE_STRAIGHT }, { 0 }, WINCODEC_ERR_UNSUPPORTEDPIXELFORMAT },
+        { { DXGI_FORMAT_UNKNOWN, D2D1_ALPHA_MODE_STRAIGHT }, { 0 }, D2DERR_UNSUPPORTED_PIXEL_FORMAT },
     };
     D2D1_HWND_RENDER_TARGET_PROPERTIES hwnd_rt_desc;
     D2D1_RENDER_TARGET_PROPERTIES rt_desc;
@@ -8434,7 +9082,7 @@ static void test_bitmap_surface(BOOL d3d11)
 
     /* DXGI target */
     hr = ID2D1RenderTarget_QueryInterface(ctx.rt, &IID_ID2D1DeviceContext, (void **)&device_context);
-    ok(SUCCEEDED(hr), "Failed to get device context, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     bitmap = NULL;
     ID2D1DeviceContext_GetTarget(device_context, (ID2D1Image **)&bitmap);
@@ -8448,10 +9096,10 @@ static void test_bitmap_surface(BOOL d3d11)
 
     /* Bitmap created from DXGI surface. */
     hr = ID2D1Factory1_CreateDevice(factory, ctx.device, &device);
-    ok(SUCCEEDED(hr), "Failed to get ID2D1Device, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     hr = ID2D1Device_CreateDeviceContext(device, D2D1_DEVICE_CONTEXT_OPTIONS_NONE, &device_context);
-    ok(SUCCEEDED(hr), "Failed to create device context, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     for (i = 0; i < ARRAY_SIZE(bitmap_format_tests); ++i)
     {
@@ -8460,10 +9108,10 @@ static void test_bitmap_surface(BOOL d3d11)
         bitmap_desc.bitmapOptions = D2D1_BITMAP_OPTIONS_TARGET | D2D1_BITMAP_OPTIONS_CANNOT_DRAW;
 
         hr = ID2D1DeviceContext_CreateBitmapFromDxgiSurface(device_context, ctx.surface, &bitmap_desc, &bitmap);
-    todo_wine_if(bitmap_format_tests[i].hr == WINCODEC_ERR_UNSUPPORTEDPIXELFORMAT)
-        ok(hr == bitmap_format_tests[i].hr, "%u: unexpected hr %#x.\n", i, hr);
+        todo_wine_if(bitmap_format_tests[i].hr == D2DERR_UNSUPPORTED_PIXEL_FORMAT)
+        ok(hr == bitmap_format_tests[i].hr, "%u: Got unexpected hr %#lx.\n", i, hr);
 
-        if (SUCCEEDED(bitmap_format_tests[i].hr))
+        if (SUCCEEDED(hr) && hr == bitmap_format_tests[i].hr)
         {
             pixel_format = ID2D1Bitmap1_GetPixelFormat(bitmap);
 
@@ -8471,17 +9119,18 @@ static void test_bitmap_surface(BOOL d3d11)
                     i, pixel_format.format);
             ok(pixel_format.alphaMode == bitmap_format_tests[i].result.alphaMode, "%u: unexpected alpha mode %d.\n",
                     i, pixel_format.alphaMode);
-
-            ID2D1Bitmap1_Release(bitmap);
         }
+
+        if (SUCCEEDED(hr))
+            ID2D1Bitmap1_Release(bitmap);
     }
 
     /* A8 surface */
     surface2 = create_surface(ctx.device, DXGI_FORMAT_A8_UNORM);
 
     hr = ID2D1DeviceContext_CreateBitmapFromDxgiSurface(device_context, surface2, NULL, &bitmap);
-    ok(SUCCEEDED(hr) || broken(hr == WINCODEC_ERR_UNSUPPORTEDPIXELFORMAT) /* Win7 */,
-            "Failed to create a bitmap, hr %#x.\n", hr);
+    ok(hr == S_OK || broken(hr == D2DERR_UNSUPPORTED_PIXEL_FORMAT) /* Win7 */,
+            "Got unexpected hr %#lx.\n", hr);
 
     if (SUCCEEDED(hr))
     {
@@ -8495,7 +9144,7 @@ static void test_bitmap_surface(BOOL d3d11)
     IDXGISurface_Release(surface2);
 
     hr = ID2D1DeviceContext_CreateBitmapFromDxgiSurface(device_context, ctx.surface, NULL, &bitmap);
-    ok(SUCCEEDED(hr), "Failed to create a bitmap, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     pixel_format = ID2D1Bitmap1_GetPixelFormat(bitmap);
     ok(pixel_format.alphaMode == D2D1_ALPHA_MODE_PREMULTIPLIED,
@@ -8507,6 +9156,7 @@ static void test_bitmap_surface(BOOL d3d11)
     ID2D1DeviceContext_SetTarget(device_context, (ID2D1Image *)bitmap);
     ID2D1DeviceContext_GetTarget(device_context, &target);
     ok(target == (ID2D1Image *)bitmap, "Unexpected target.\n");
+    ID2D1Image_Release(target);
 
     check_rt_bitmap_surface((ID2D1RenderTarget *)device_context, TRUE, D2D1_BITMAP_OPTIONS_NONE);
 
@@ -8517,14 +9167,14 @@ static void test_bitmap_surface(BOOL d3d11)
     bitmap_desc.pixelFormat = ID2D1DeviceContext_GetPixelFormat(device_context);
     size.width = size.height = 4;
     hr = ID2D1DeviceContext_CreateBitmap(device_context, size, NULL, 0, &bitmap_desc, &bitmap);
-    ok(SUCCEEDED(hr), "Failed to create a bitmap, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     check_bitmap_surface((ID2D1Bitmap *)bitmap, TRUE, D2D1_BITMAP_OPTIONS_NONE);
     ID2D1DeviceContext_SetTags(device_context, 1, 2);
 
     ID2D1DeviceContext_BeginDraw(device_context);
     ID2D1DeviceContext_SetTarget(device_context, (ID2D1Image *)bitmap);
     hr = ID2D1DeviceContext_EndDraw(device_context, &t1, &t2);
-    ok(hr == D2DERR_INVALID_TARGET, "Unexpected hr %#x.\n", hr);
+    ok(hr == D2DERR_INVALID_TARGET, "Got unexpected hr %#lx.\n", hr);
     ok(t1 == 1 && t2 == 2, "Unexpected tags %s:%s.\n", wine_dbgstr_longlong(t1), wine_dbgstr_longlong(t2));
 
     ID2D1Bitmap1_Release(bitmap);
@@ -8535,7 +9185,7 @@ static void test_bitmap_surface(BOOL d3d11)
 
     bitmap_desc.bitmapOptions = D2D1_BITMAP_OPTIONS_TARGET;
     hr = ID2D1DeviceContext_CreateBitmap(device_context, size, NULL, 0, &bitmap_desc, &bitmap);
-    ok(SUCCEEDED(hr), "Failed to create a bitmap, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     check_bitmap_surface((ID2D1Bitmap *)bitmap, TRUE, D2D1_BITMAP_OPTIONS_TARGET);
     ID2D1DeviceContext_SetTarget(device_context, NULL);
     ID2D1DeviceContext_SetTags(device_context, 3, 4);
@@ -8543,7 +9193,7 @@ static void test_bitmap_surface(BOOL d3d11)
     ID2D1DeviceContext_BeginDraw(device_context);
     ID2D1DeviceContext_SetTarget(device_context, (ID2D1Image *)bitmap);
     hr = ID2D1DeviceContext_EndDraw(device_context, &t1, &t2);
-    ok(SUCCEEDED(hr), "Failed to end draw, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ok(!t1 && !t2, "Unexpected tags %s:%s.\n", wine_dbgstr_longlong(t1), wine_dbgstr_longlong(t2));
 
     ID2D1Bitmap1_Release(bitmap);
@@ -8561,10 +9211,10 @@ static void test_bitmap_surface(BOOL d3d11)
     rt_desc.usage = D2D1_RENDER_TARGET_USAGE_NONE;
     rt_desc.minLevel = D2D1_FEATURE_LEVEL_DEFAULT;
     hr = ID2D1Factory1_CreateDCRenderTarget(factory, &rt_desc, (ID2D1DCRenderTarget **)&rt);
-    ok(SUCCEEDED(hr), "Failed to create target, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     hr = ID2D1RenderTarget_QueryInterface(rt, &IID_ID2D1DeviceContext, (void **)&device_context);
-    ok(SUCCEEDED(hr), "Failed to get device context, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     ID2D1DeviceContext_GetTarget(device_context, (ID2D1Image **)&bitmap);
     ok(!bitmap, "Unexpected target.\n");
@@ -8581,7 +9231,7 @@ static void test_bitmap_surface(BOOL d3d11)
     ok(!!hwnd_rt_desc.hwnd, "Failed to create target window.\n");
 
     hr = ID2D1Factory1_CreateHwndRenderTarget(factory, &rt_desc, &hwnd_rt_desc, (ID2D1HwndRenderTarget **)&rt);
-    ok(SUCCEEDED(hr), "Failed to create render target, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     check_rt_bitmap_surface(rt, FALSE, D2D1_BITMAP_OPTIONS_NONE);
     ID2D1RenderTarget_Release(rt);
@@ -8592,14 +9242,15 @@ static void test_bitmap_surface(BOOL d3d11)
 
     hr = CoCreateInstance(&CLSID_WICImagingFactory, NULL, CLSCTX_INPROC_SERVER,
             &IID_IWICImagingFactory, (void **)&wic_factory);
-    ok(SUCCEEDED(hr), "Failed to create WIC imaging factory, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     hr = IWICImagingFactory_CreateBitmap(wic_factory, 16, 16,
             &GUID_WICPixelFormat32bppPBGRA, WICBitmapCacheOnDemand, &wic_bitmap);
-    ok(SUCCEEDED(hr), "Failed to create bitmap, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     IWICImagingFactory_Release(wic_factory);
 
     hr = ID2D1Factory1_CreateWicBitmapRenderTarget(factory, wic_bitmap, &rt_desc, &rt);
-    ok(SUCCEEDED(hr), "Failed to create render target, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    IWICBitmap_Release(wic_bitmap);
 
     check_rt_bitmap_surface(rt, FALSE, D2D1_BITMAP_OPTIONS_NONE);
     ID2D1RenderTarget_Release(rt);
@@ -8643,10 +9294,10 @@ static void test_device_context(BOOL d3d11)
     }
 
     hr = ID2D1Factory1_CreateDevice(factory, ctx.device, &device);
-    ok(SUCCEEDED(hr), "Failed to get ID2D1Device, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     hr = ID2D1Device_CreateDeviceContext(device, D2D1_DEVICE_CONTEXT_OPTIONS_NONE, &device_context);
-    ok(SUCCEEDED(hr), "Failed to create device context, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     ID2D1DeviceContext_GetDevice(device_context, &device2);
     ok(device2 == device, "Unexpected device instance.\n");
@@ -8661,22 +9312,37 @@ static void test_device_context(BOOL d3d11)
 
     ID2D1DeviceContext_Release(device_context);
 
+    if (ctx.factory2)
+    {
+        ID2D1Device1 *device1;
+        ID2D1DeviceContext1 *device_context1;
+
+        hr = ID2D1Factory2_CreateDevice(ctx.factory2, ctx.device, &device1);
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+        hr = ID2D1Device1_CreateDeviceContext(device1, D2D1_DEVICE_CONTEXT_OPTIONS_NONE, &device_context1);
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+        ID2D1DeviceContext1_Release(device_context1);
+        ID2D1Device1_Release(device1);
+    }
+
     /* DXGI target */
     rt = ctx.rt;
     hr = ID2D1RenderTarget_QueryInterface(rt, &IID_ID2D1DeviceContext, (void **)&device_context);
-    ok(SUCCEEDED(hr), "Failed to get device context interface, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ID2D1DeviceContext_GetTarget(device_context, (ID2D1Image **)&bitmap);
     options = ID2D1Bitmap1_GetOptions(bitmap);
     ok(options == (D2D1_BITMAP_OPTIONS_TARGET | D2D1_BITMAP_OPTIONS_CANNOT_DRAW),
             "Unexpected bitmap options %#x.\n", options);
     hr = ID2D1Bitmap1_GetSurface(bitmap, &surface2);
-    ok(SUCCEEDED(hr), "Failed to get bitmap surface, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ok(surface2 == ctx.surface, "Unexpected surface instance.\n");
     IDXGISurface_Release(surface2);
 
     ID2D1DeviceContext_BeginDraw(device_context);
     hr = ID2D1Bitmap1_GetSurface(bitmap, &surface2);
-    ok(SUCCEEDED(hr), "Failed to get bitmap surface, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ok(surface2 == ctx.surface, "Unexpected surface instance.\n");
     IDXGISurface_Release(surface2);
     ID2D1DeviceContext_EndDraw(device_context, NULL, NULL);
@@ -8693,10 +9359,10 @@ static void test_device_context(BOOL d3d11)
 
     hr = CoCreateInstance(&CLSID_WICImagingFactory, NULL, CLSCTX_INPROC_SERVER,
             &IID_IWICImagingFactory, (void **)&wic_factory);
-    ok(SUCCEEDED(hr), "Failed to create WIC imaging factory, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     hr = IWICImagingFactory_CreateBitmap(wic_factory, 16, 16,
             &GUID_WICPixelFormat32bppPBGRA, WICBitmapCacheOnDemand, &wic_bitmap);
-    ok(SUCCEEDED(hr), "Failed to create bitmap, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     IWICImagingFactory_Release(wic_factory);
 
     rt_desc.type = D2D1_RENDER_TARGET_TYPE_DEFAULT;
@@ -8707,17 +9373,16 @@ static void test_device_context(BOOL d3d11)
     rt_desc.usage = D2D1_RENDER_TARGET_USAGE_NONE;
     rt_desc.minLevel = D2D1_FEATURE_LEVEL_DEFAULT;
     hr = ID2D1Factory1_CreateWicBitmapRenderTarget(factory, wic_bitmap, &rt_desc, &rt);
-    ok(SUCCEEDED(hr), "Failed to create render target, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     hr = ID2D1RenderTarget_QueryInterface(rt, &IID_ID2D1DeviceContext, (void **)&device_context);
-    ok(SUCCEEDED(hr), "Failed to get device context interface, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ID2D1DeviceContext_GetTarget(device_context, (ID2D1Image **)&bitmap);
     options = ID2D1Bitmap1_GetOptions(bitmap);
     ok(options == (D2D1_BITMAP_OPTIONS_TARGET | D2D1_BITMAP_OPTIONS_CANNOT_DRAW),
             "Unexpected bitmap options %#x.\n", options);
     hr = ID2D1Bitmap1_GetSurface(bitmap, &surface);
-todo_wine
-    ok(hr == E_FAIL, "Unexpected hr %#x.\n", hr);
+    todo_wine ok(hr == E_FAIL, "Got unexpected hr %#lx.\n", hr);
     ID2D1Bitmap1_Release(bitmap);
 
     ID2D1DeviceContext_SetTarget(device_context, NULL);
@@ -8738,16 +9403,16 @@ todo_wine
     ok(!!hwnd_rt_desc.hwnd, "Failed to create target window.\n");
 
     hr = ID2D1Factory1_CreateHwndRenderTarget(factory, &rt_desc, &hwnd_rt_desc, (ID2D1HwndRenderTarget **)&rt);
-    ok(SUCCEEDED(hr), "Failed to create render target, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     hr = ID2D1RenderTarget_QueryInterface(rt, &IID_ID2D1DeviceContext, (void **)&device_context);
-    ok(SUCCEEDED(hr), "Failed to get device context interface, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ID2D1DeviceContext_GetTarget(device_context, (ID2D1Image **)&bitmap);
     options = ID2D1Bitmap1_GetOptions(bitmap);
     ok(options == (D2D1_BITMAP_OPTIONS_TARGET | D2D1_BITMAP_OPTIONS_CANNOT_DRAW),
             "Unexpected bitmap options %#x.\n", options);
     hr = ID2D1Bitmap1_GetSurface(bitmap, &surface);
-    ok(hr == D2DERR_INVALID_CALL, "Unexpected hr %#x.\n", hr);
+    ok(hr == D2DERR_INVALID_CALL, "Got unexpected hr %#lx.\n", hr);
     ID2D1Bitmap1_Release(bitmap);
 
     ID2D1DeviceContext_SetTarget(device_context, NULL);
@@ -8760,10 +9425,10 @@ todo_wine
 
     /* DC target */
     hr = ID2D1Factory1_CreateDCRenderTarget(factory, &rt_desc, &dc_rt);
-    ok(SUCCEEDED(hr), "Failed to create target, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     hr = ID2D1DCRenderTarget_QueryInterface(dc_rt, &IID_ID2D1DeviceContext, (void **)&device_context);
-    ok(SUCCEEDED(hr), "Failed to get device context interface, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ID2D1DeviceContext_GetTarget(device_context, (ID2D1Image **)&bitmap);
     ok(bitmap == NULL, "Unexpected bitmap instance.\n");
 
@@ -8774,14 +9439,14 @@ todo_wine
 
     SetRect(&rect, 0, 0, 16, 16);
     hr = ID2D1DCRenderTarget_BindDC(dc_rt, hdc, &rect);
-    ok(SUCCEEDED(hr), "BindDC() failed, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     ID2D1DeviceContext_GetTarget(device_context, (ID2D1Image **)&bitmap);
     options = ID2D1Bitmap1_GetOptions(bitmap);
     ok(options == (D2D1_BITMAP_OPTIONS_TARGET | D2D1_BITMAP_OPTIONS_CANNOT_DRAW | D2D1_BITMAP_OPTIONS_GDI_COMPATIBLE),
             "Unexpected bitmap options %#x.\n", options);
     hr = ID2D1Bitmap1_GetSurface(bitmap, &surface);
-    ok(hr == D2DERR_INVALID_CALL, "Unexpected hr %#x.\n", hr);
+    ok(hr == D2DERR_INVALID_CALL, "Got unexpected hr %#lx.\n", hr);
     ID2D1Bitmap1_Release(bitmap);
 
     ID2D1DeviceContext_SetTarget(device_context, NULL);
@@ -8925,10 +9590,10 @@ static ID2D1DeviceContext *create_device_context(ID2D1Factory1 *factory, IDXGIDe
     HRESULT hr;
 
     hr = ID2D1Factory1_CreateDevice(factory, dxgi_device, &device);
-    ok(SUCCEEDED(hr), "Failed to get ID2D1Device, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     hr = ID2D1Device_CreateDeviceContext(device, D2D1_DEVICE_CONTEXT_OPTIONS_NONE, &device_context);
-    ok(SUCCEEDED(hr), "Failed to create device context, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ID2D1Device_Release(device);
 
     return device_context;
@@ -8955,8 +9620,8 @@ static void test_command_list(BOOL d3d11)
     ID2D1StrokeStyle *stroke_style;
     ID2D1CommandList *command_list;
     struct d2d1_test_context ctx;
+    D2D1_PIXEL_FORMAT format;
     ID2D1Geometry *geometry;
-    ID2D1Factory1 *factory;
     ID2D1RenderTarget *rt;
     D2D1_POINT_2F p0, p1;
     ID2D1Bitmap *bitmap;
@@ -8971,32 +9636,32 @@ static void test_command_list(BOOL d3d11)
     if (!init_test_context(&ctx, d3d11))
         return;
 
-    if (FAILED(D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, &IID_ID2D1Factory1, NULL, (void **)&factory)))
+    if (!ctx.factory1)
     {
-        win_skip("ID2D1Factory1 is not supported.\n");
+        win_skip("Command lists are not supported.\n");
         release_test_context(&ctx);
         return;
     }
 
-    device_context = create_device_context(factory, ctx.device, d3d11);
-    ok(device_context != NULL, "Failed to create device context.\n");
+    device_context = ctx.context;
 
     hr = ID2D1DeviceContext_CreateCommandList(device_context, &command_list);
-todo_wine
-    ok(SUCCEEDED(hr), "Failed to create command list, hr %#x.\n", hr);
-
-    if (FAILED(hr))
-    {
-        ID2D1DeviceContext_Release(device_context);
-        ID2D1Factory1_Release(factory);
-        return;
-    }
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     ID2D1DeviceContext_SetTarget(device_context, (ID2D1Image *)command_list);
+
+    size = ID2D1DeviceContext_GetPixelSize(device_context);
+    ok(!size.width, "Got unexpected width %u.\n", size.width);
+    ok(!size.height, "Got unexpected height %u.\n", size.height);
+
+    format = ID2D1DeviceContext_GetPixelFormat(device_context);
+    ok(format.format == DXGI_FORMAT_UNKNOWN && format.alphaMode == D2D1_ALPHA_MODE_UNKNOWN,
+            "Unexpected format %u, alpha mode %u.\n", format.format, format.alphaMode);
+
     ID2D1DeviceContext_BeginDraw(device_context);
 
     hr = ID2D1DeviceContext_QueryInterface(device_context, &IID_ID2D1RenderTarget, (void **)&rt);
-    ok(SUCCEEDED(hr), "Failed to get rt interface, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     /* Test how resources are referenced by the list. */
 
@@ -9007,70 +9672,70 @@ todo_wine
     bitmap_desc.dpiX = 96.0f;
     bitmap_desc.dpiY = 96.0f;
     hr = ID2D1RenderTarget_CreateBitmap(rt, size, bitmap_data, 4 * sizeof(*bitmap_data), &bitmap_desc, &bitmap);
-    ok(SUCCEEDED(hr), "Failed to create bitmap, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     ID2D1RenderTarget_DrawBitmap(rt, bitmap, NULL, 0.25f, D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR, NULL);
 
     refcount = ID2D1Bitmap_Release(bitmap);
-    ok(refcount == 1, "Got unexpected refcount %u.\n", refcount);
+    ok(refcount == 1, "Got unexpected refcount %lu.\n", refcount);
 
     /* Solid color brush. */
     set_color(&color, 0.0f, 0.0f, 0.0f, 0.0f);
     hr = ID2D1RenderTarget_CreateSolidColorBrush(rt, &color, NULL, (ID2D1SolidColorBrush **)&brush);
-    ok(SUCCEEDED(hr), "Failed to create a brush, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     set_rect(&rect, 0.0f, 0.0f, 16.0f, 16.0f);
     ID2D1RenderTarget_FillRectangle(rt, &rect, brush);
 
     refcount = ID2D1Brush_Release(brush);
-    ok(refcount == 0, "Got unexpected refcount %u.\n", refcount);
+    ok(refcount == 0, "Got unexpected refcount %lu.\n", refcount);
 
     /* Bitmap brush. */
     hr = ID2D1RenderTarget_CreateBitmap(rt, size, bitmap_data, 4 * sizeof(*bitmap_data), &bitmap_desc, &bitmap);
-    ok(SUCCEEDED(hr), "Failed to create bitmap, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     hr = ID2D1RenderTarget_CreateBitmapBrush(rt, bitmap, NULL, NULL, (ID2D1BitmapBrush **)&brush);
-    ok(SUCCEEDED(hr), "Failed to create bitmap brush, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     set_rect(&rect, 0.0f, 0.0f, 16.0f, 16.0f);
     ID2D1RenderTarget_FillRectangle(rt, &rect, brush);
 
     refcount = ID2D1Brush_Release(brush);
-    ok(refcount == 0, "Got unexpected refcount %u.\n", refcount);
+    ok(refcount == 0, "Got unexpected refcount %lu.\n", refcount);
 
     refcount = ID2D1Bitmap_Release(bitmap);
-    ok(refcount == 1, "Got unexpected refcount %u.\n", refcount);
+    ok(refcount == 1, "Got unexpected refcount %lu.\n", refcount);
 
     /* Linear gradient brush. */
     hr = ID2D1RenderTarget_CreateGradientStopCollection(rt, stops, ARRAY_SIZE(stops),
             D2D1_GAMMA_2_2, D2D1_EXTEND_MODE_CLAMP, &gradient);
-    ok(SUCCEEDED(hr), "Failed to create stop collection, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     set_point(&linear_gradient_properties.startPoint, 320.0f, 0.0f);
     set_point(&linear_gradient_properties.endPoint, 0.0f, 960.0f);
     hr = ID2D1RenderTarget_CreateLinearGradientBrush(rt, &linear_gradient_properties, NULL, gradient,
             (ID2D1LinearGradientBrush **)&brush);
-    ok(SUCCEEDED(hr), "Failed to create brush, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     set_rect(&rect, -1.0f, -1.0f, 1.0f, 1.0f);
-    hr = ID2D1Factory1_CreateRectangleGeometry(factory, &rect, (ID2D1RectangleGeometry **)&geometry);
-    ok(SUCCEEDED(hr), "Failed to create geometry, hr %#x.\n", hr);
+    hr = ID2D1Factory1_CreateRectangleGeometry(ctx.factory1, &rect, (ID2D1RectangleGeometry **)&geometry);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     ID2D1RenderTarget_FillGeometry(rt, geometry, brush, NULL);
 
     refcount = ID2D1Brush_Release(brush);
-    ok(refcount == 0, "Got unexpected refcount %u.\n", refcount);
+    ok(refcount == 0, "Got unexpected refcount %lu.\n", refcount);
 
     refcount = ID2D1Geometry_Release(geometry);
-    ok(refcount == 1, "Got unexpected refcount %u.\n", refcount);
+    ok(refcount == 1, "Got unexpected refcount %lu.\n", refcount);
 
     refcount = ID2D1GradientStopCollection_Release(gradient);
-    ok(refcount == 1, "Got unexpected refcount %u.\n", refcount);
+    ok(refcount == 1, "Got unexpected refcount %lu.\n", refcount);
 
     /* Radial gradient brush. */
     hr = ID2D1RenderTarget_CreateGradientStopCollection(rt, stops, ARRAY_SIZE(stops),
             D2D1_GAMMA_2_2, D2D1_EXTEND_MODE_CLAMP, &gradient);
-    ok(SUCCEEDED(hr), "Failed to create stop collection, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     set_point(&radial_gradient_properties.center, 160.0f, 480.0f);
     set_point(&radial_gradient_properties.gradientOriginOffset, 40.0f, -120.0f);
@@ -9078,39 +9743,39 @@ todo_wine
     radial_gradient_properties.radiusY = 480.0f;
     hr = ID2D1RenderTarget_CreateRadialGradientBrush(rt, &radial_gradient_properties, NULL, gradient,
             (ID2D1RadialGradientBrush **)&brush);
-    ok(SUCCEEDED(hr), "Failed to create brush, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     set_rect(&rect, -1.0f, -1.0f, 1.0f, 1.0f);
-    hr = ID2D1Factory1_CreateRectangleGeometry(factory, &rect, (ID2D1RectangleGeometry **)&geometry);
-    ok(SUCCEEDED(hr), "Failed to create geometry, hr %#x.\n", hr);
+    hr = ID2D1Factory1_CreateRectangleGeometry(ctx.factory1, &rect, (ID2D1RectangleGeometry **)&geometry);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     ID2D1RenderTarget_FillGeometry(rt, geometry, brush, NULL);
 
     refcount = ID2D1Brush_Release(brush);
-    ok(refcount == 0, "Got unexpected refcount %u.\n", refcount);
+    ok(refcount == 0, "Got unexpected refcount %lu.\n", refcount);
 
     refcount = ID2D1Geometry_Release(geometry);
-    ok(refcount == 1, "Got unexpected refcount %u.\n", refcount);
+    ok(refcount == 1, "Got unexpected refcount %lu.\n", refcount);
 
     refcount = ID2D1GradientStopCollection_Release(gradient);
-    ok(refcount == 1, "Got unexpected refcount %u.\n", refcount);
+    ok(refcount == 1, "Got unexpected refcount %lu.\n", refcount);
 
     /* Geometry. */
     set_rect(&rect, -1.0f, -1.0f, 1.0f, 1.0f);
-    hr = ID2D1Factory1_CreateRectangleGeometry(factory, &rect, (ID2D1RectangleGeometry **)&geometry);
-    ok(SUCCEEDED(hr), "Failed to create geometry, hr %#x.\n", hr);
+    hr = ID2D1Factory1_CreateRectangleGeometry(ctx.factory1, &rect, (ID2D1RectangleGeometry **)&geometry);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     set_color(&color, 0.0f, 0.0f, 0.0f, 0.0f);
     hr = ID2D1RenderTarget_CreateSolidColorBrush(rt, &color, NULL, (ID2D1SolidColorBrush **)&brush);
-    ok(SUCCEEDED(hr), "Failed to create a brush, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     ID2D1RenderTarget_FillGeometry(rt, geometry, brush, NULL);
 
     refcount = ID2D1Brush_Release(brush);
-    ok(refcount == 0, "Got unexpected refcount %u.\n", refcount);
+    ok(refcount == 0, "Got unexpected refcount %lu.\n", refcount);
 
     refcount = ID2D1Geometry_Release(geometry);
-    ok(refcount == 1, "Got unexpected refcount %u.\n", refcount);
+    ok(refcount == 1, "Got unexpected refcount %lu.\n", refcount);
 
     /* Stroke style. */
     stroke_desc.startCap = D2D1_CAP_STYLE_SQUARE;
@@ -9121,22 +9786,22 @@ todo_wine
     stroke_desc.dashStyle = D2D1_DASH_STYLE_DOT;
     stroke_desc.dashOffset = -1.0f;
 
-    hr = ID2D1Factory_CreateStrokeStyle((ID2D1Factory *)factory, &stroke_desc, NULL, 0, &stroke_style);
-    ok(SUCCEEDED(hr), "Failed to create stroke style, %#x.\n", hr);
+    hr = ID2D1Factory_CreateStrokeStyle((ID2D1Factory *)ctx.factory, &stroke_desc, NULL, 0, &stroke_style);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     set_color(&color, 0.0f, 0.0f, 0.0f, 0.0f);
     hr = ID2D1RenderTarget_CreateSolidColorBrush(rt, &color, NULL, (ID2D1SolidColorBrush **)&brush);
-    ok(SUCCEEDED(hr), "Failed to create a brush, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     set_point(&p0, 100.0f, 160.0f);
     set_point(&p1, 140.0f, 160.0f);
     ID2D1RenderTarget_DrawLine(rt, p0, p1, brush, 1.0f, stroke_style);
 
     refcount = ID2D1Brush_Release(brush);
-    ok(refcount == 0, "Got unexpected refcount %u.\n", refcount);
+    ok(refcount == 0, "Got unexpected refcount %lu.\n", refcount);
 
     refcount = ID2D1StrokeStyle_Release(stroke_style);
-    ok(refcount == 1, "Got unexpected refcount %u.\n", refcount);
+    ok(refcount == 1, "Got unexpected refcount %lu.\n", refcount);
 
     /* Close on attached list. */
     ID2D1DeviceContext_GetTarget(device_context, &target);
@@ -9144,42 +9809,45 @@ todo_wine
     ID2D1Image_Release(target);
 
     hr = ID2D1CommandList_Close(command_list);
-    ok(SUCCEEDED(hr), "Failed to close a list, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     ID2D1DeviceContext_GetTarget(device_context, &target);
+    todo_wine
     ok(target == NULL, "Unexpected context target.\n");
+    if (target) ID2D1Image_Release(target);
 
     hr = ID2D1CommandList_Close(command_list);
-    ok(hr == D2DERR_WRONG_STATE, "Unexpected hr %#x.\n", hr);
+    ok(hr == D2DERR_WRONG_STATE, "Got unexpected hr %#lx.\n", hr);
 
     ID2D1CommandList_Release(command_list);
 
     /* Close empty list. */
     hr = ID2D1DeviceContext_CreateCommandList(device_context, &command_list);
-    ok(SUCCEEDED(hr), "Failed to create command list, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     hr = ID2D1CommandList_Close(command_list);
-    ok(SUCCEEDED(hr), "Failed to close a list, hr %#x.\n", hr);
+    todo_wine
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     ID2D1CommandList_Release(command_list);
 
     /* List created with different context. */
-    device_context2 = create_device_context(factory, ctx.device, d3d11);
+    device_context2 = create_device_context(ctx.factory1, ctx.device, d3d11);
     ok(device_context2 != NULL, "Failed to create device context.\n");
 
     hr = ID2D1DeviceContext_CreateCommandList(device_context, &command_list);
-    ok(SUCCEEDED(hr), "Failed to create command list, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     ID2D1DeviceContext_SetTarget(device_context2, (ID2D1Image *)command_list);
     ID2D1DeviceContext_GetTarget(device_context2, &target);
+    todo_wine
     ok(target == NULL, "Unexpected target.\n");
+    if (target) ID2D1Image_Release(target);
 
     ID2D1CommandList_Release(command_list);
     ID2D1DeviceContext_Release(device_context2);
 
     ID2D1RenderTarget_Release(rt);
-    ID2D1DeviceContext_Release(device_context);
-    ID2D1Factory1_Release(factory);
     release_test_context(&ctx);
 }
 
@@ -9221,21 +9889,21 @@ static void test_max_bitmap_size(BOOL d3d11)
     };
 
     hr = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, &IID_ID2D1Factory, NULL, (void **)&factory);
-    ok(SUCCEEDED(hr), "Failed to create factory, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     for (i = 0; i < ARRAY_SIZE(device_types); ++i)
     {
         if (FAILED(hr = D3D10CreateDevice1(NULL, device_types[i].type, NULL, D3D10_CREATE_DEVICE_BGRA_SUPPORT,
                 D3D10_FEATURE_LEVEL_10_0, D3D10_1_SDK_VERSION, &device)))
         {
-            skip("Failed to create %s d3d device, hr %#x.\n", device_types[i].name, hr);
+            skip("Failed to create %s d3d device, hr %#lx.\n", device_types[i].name, hr);
             continue;
         }
 
         window = create_window();
         swapchain = create_d3d10_swapchain(device, window, TRUE);
         hr = IDXGISwapChain_GetBuffer(swapchain, 0, &IID_IDXGISurface, (void **)&surface);
-        ok(SUCCEEDED(hr), "Failed to get buffer, hr %#x.\n", hr);
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
         for (j = 0; j < ARRAY_SIZE(target_types); ++j)
         {
@@ -9252,8 +9920,7 @@ static void test_max_bitmap_size(BOOL d3d11)
             desc.minLevel = D2D1_FEATURE_LEVEL_DEFAULT;
 
             hr = ID2D1Factory_CreateDxgiSurfaceRenderTarget(factory, surface, &desc, &rt);
-            ok(SUCCEEDED(hr), "%s/%s: failed to create render target, hr %#x.\n", device_types[i].name,
-                    target_types[j].name, hr);
+            ok(hr == S_OK, "%s/%s: Got unexpected hr %#lx.\n", device_types[i].name, target_types[j].name, hr);
 
             bitmap_size = ID2D1RenderTarget_GetMaximumBitmapSize(rt);
             ok(bitmap_size >= D3D10_REQ_TEXTURE2D_U_OR_V_DIMENSION, "%s/%s: unexpected bitmap size %u.\n",
@@ -9267,7 +9934,7 @@ static void test_max_bitmap_size(BOOL d3d11)
             size.width = bitmap_size;
             size.height = 1;
             hr = ID2D1RenderTarget_CreateBitmap(rt, size, NULL, 0, &bitmap_desc, &bitmap);
-            ok(SUCCEEDED(hr), "Failed to create a bitmap, hr %#x.\n", hr);
+            ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
             ID2D1Bitmap_Release(bitmap);
 
             ID2D1RenderTarget_Release(rt);
@@ -9285,8 +9952,8 @@ static void test_max_bitmap_size(BOOL d3d11)
             texture_desc.MiscFlags = 0;
 
             hr = ID3D10Device1_CreateTexture2D(device, &texture_desc, NULL, &texture);
-            ok(SUCCEEDED(hr) || broken(hr == E_INVALIDARG && device_types[i].type == D3D10_DRIVER_TYPE_WARP) /* Vista */,
-                    "%s/%s: failed to create texture, hr %#x.\n", device_types[i].name, target_types[j].name, hr);
+            ok(hr == S_OK || broken(hr == E_INVALIDARG && device_types[i].type == D3D10_DRIVER_TYPE_WARP) /* Vista */,
+                    "%s/%s: Got unexpected hr %#lx.\n", device_types[i].name, target_types[j].name, hr);
             if (SUCCEEDED(hr))
                 ID3D10Texture2D_Release(texture);
         }
@@ -9363,7 +10030,7 @@ static void test_dpi(BOOL d3d11)
         bitmap_desc.colorContext = NULL;
         hr = ID2D1DeviceContext_CreateBitmapFromDxgiSurface(device_context, ctx.surface, &bitmap_desc, &bitmap);
         /* Native accepts negative DPI values for DXGI surface bitmap. */
-        ok(hr == S_OK, "Test %u: Got unexpected hr %#x.\n", i, hr);
+        ok(hr == S_OK, "Test %u: Got unexpected hr %#lx.\n", i, hr);
 
         ID2D1DeviceContext_SetDpi(device_context, dc_dpi_x, dc_dpi_y);
 
@@ -9378,7 +10045,7 @@ static void test_dpi(BOOL d3d11)
         ID2D1DeviceContext_BeginDraw(device_context);
         ID2D1DeviceContext_SetTarget(device_context, (ID2D1Image *)bitmap);
         hr = ID2D1DeviceContext_EndDraw(device_context, NULL, NULL);
-        ok(hr == S_OK, "Test %u: Got unexpected hr %#x.\n", i, hr);
+        ok(hr == S_OK, "Test %u: Got unexpected hr %#lx.\n", i, hr);
 
         /* Device context DPI values aren't updated by SetTarget. */
         ID2D1DeviceContext_GetDpi(device_context, &dpi_x, &dpi_y);
@@ -9392,7 +10059,7 @@ static void test_dpi(BOOL d3d11)
     CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
     hr = CoCreateInstance(&CLSID_WICImagingFactory, NULL, CLSCTX_INPROC_SERVER,
             &IID_IWICImagingFactory, (void **)&wic_factory);
-    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     for (i = 0; i < ARRAY_SIZE(create_dpi_tests); ++i)
     {
         IWICBitmapSource *wic_bitmap_src;
@@ -9402,9 +10069,9 @@ static void test_dpi(BOOL d3d11)
 
         hr = IWICImagingFactory_CreateBitmap(wic_factory, 16, 16,
                 &GUID_WICPixelFormat32bppPBGRA, WICBitmapCacheOnDemand, &wic_bitmap);
-        ok(hr == S_OK, "Test %u: Got unexpected hr %#x.\n", i, hr);
+        ok(hr == S_OK, "Test %u: Got unexpected hr %#lx.\n", i, hr);
         hr = IWICBitmap_QueryInterface(wic_bitmap, &IID_IWICBitmapSource, (void **)&wic_bitmap_src);
-        ok(hr == S_OK, "Test %u: Got unexpected hr %#x.\n", i, hr);
+        ok(hr == S_OK, "Test %u: Got unexpected hr %#lx.\n", i, hr);
         IWICBitmap_Release(wic_bitmap);
 
         bitmap_desc.pixelFormat.format = DXGI_FORMAT_UNKNOWN;
@@ -9414,7 +10081,7 @@ static void test_dpi(BOOL d3d11)
         bitmap_desc.bitmapOptions = D2D1_BITMAP_OPTIONS_TARGET | D2D1_BITMAP_OPTIONS_CANNOT_DRAW;
         bitmap_desc.colorContext = NULL;
         hr = ID2D1DeviceContext_CreateBitmapFromWicBitmap(device_context, wic_bitmap_src, &bitmap_desc, &bitmap);
-        ok(hr == create_dpi_tests[i].hr, "Test %u: Got unexpected hr %#x, expected %#x.\n",
+        ok(hr == create_dpi_tests[i].hr, "Test %u: Got unexpected hr %#lx, expected %#lx.\n",
                 i, hr, create_dpi_tests[i].hr);
         IWICBitmapSource_Release(wic_bitmap_src);
 
@@ -9441,7 +10108,7 @@ static void test_dpi(BOOL d3d11)
         ID2D1DeviceContext_BeginDraw(device_context);
         ID2D1DeviceContext_SetTarget(device_context, (ID2D1Image *)bitmap);
         hr = ID2D1DeviceContext_EndDraw(device_context, NULL, NULL);
-        ok(hr == S_OK, "Test %u: Got unexpected hr %#x.\n", i, hr);
+        ok(hr == S_OK, "Test %u: Got unexpected hr %#lx.\n", i, hr);
 
         /* Device context DPI values aren't updated by SetTarget. */
         ID2D1DeviceContext_GetDpi(device_context, &dpi_x, &dpi_y);
@@ -9467,7 +10134,7 @@ static void test_dpi(BOOL d3d11)
         bitmap_desc.bitmapOptions = D2D1_BITMAP_OPTIONS_TARGET | D2D1_BITMAP_OPTIONS_CANNOT_DRAW;
         bitmap_desc.colorContext = NULL;
         hr = ID2D1DeviceContext_CreateBitmap(device_context, size, NULL, 0, &bitmap_desc, &bitmap);
-        ok(hr == create_dpi_tests[i].hr, "Test %u: Got unexpected hr %#x, expected %#x.\n",
+        ok(hr == create_dpi_tests[i].hr, "Test %u: Got unexpected hr %#lx, expected %#lx.\n",
                 i, hr, create_dpi_tests[i].hr);
 
         if (FAILED(hr))
@@ -9493,7 +10160,7 @@ static void test_dpi(BOOL d3d11)
         ID2D1DeviceContext_BeginDraw(device_context);
         ID2D1DeviceContext_SetTarget(device_context, (ID2D1Image *)bitmap);
         hr = ID2D1DeviceContext_EndDraw(device_context, NULL, NULL);
-        ok(hr == S_OK, "Test %u: Got unexpected hr %#x.\n", i, hr);
+        ok(hr == S_OK, "Test %u: Got unexpected hr %#lx.\n", i, hr);
 
         /* Device context DPI values aren't updated by SetTarget. */
         ID2D1DeviceContext_GetDpi(device_context, &dpi_x, &dpi_y);
@@ -9510,6 +10177,35 @@ static void test_dpi(BOOL d3d11)
 
     ID2D1DeviceContext_Release(device_context);
     ID2D1Factory1_Release(factory);
+    release_test_context(&ctx);
+}
+
+static void test_unit_mode(BOOL d3d11)
+{
+    struct d2d1_test_context ctx;
+    ID2D1DeviceContext *context;
+    D2D1_UNIT_MODE unit_mode;
+
+    if (!init_test_context(&ctx, d3d11))
+        return;
+
+    context = ctx.context;
+
+    unit_mode = ID2D1DeviceContext_GetUnitMode(context);
+    ok(unit_mode == D2D1_UNIT_MODE_DIPS, "Got unexpected unit mode %#x.\n", unit_mode);
+
+    ID2D1DeviceContext_SetUnitMode(context, 0xdeadbeef);
+    unit_mode = ID2D1DeviceContext_GetUnitMode(context);
+    ok(unit_mode == D2D1_UNIT_MODE_DIPS, "Got unexpected unit mode %#x.\n", unit_mode);
+
+    ID2D1DeviceContext_SetUnitMode(context, D2D1_UNIT_MODE_PIXELS);
+    unit_mode = ID2D1DeviceContext_GetUnitMode(context);
+    ok(unit_mode == D2D1_UNIT_MODE_PIXELS, "Got unexpected unit mode %#x.\n", unit_mode);
+
+    ID2D1DeviceContext_SetUnitMode(context, 0xdeadbeef);
+    unit_mode = ID2D1DeviceContext_GetUnitMode(context);
+    ok(unit_mode == D2D1_UNIT_MODE_PIXELS, "Got unexpected unit mode %#x.\n", unit_mode);
+
     release_test_context(&ctx);
 }
 
@@ -9544,16 +10240,16 @@ static void test_wic_bitmap_format(BOOL d3d11)
 
     hr = CoCreateInstance(&CLSID_WICImagingFactory, NULL, CLSCTX_INPROC_SERVER,
             &IID_IWICImagingFactory, (void **)&wic_factory);
-    ok(hr == S_OK, "Failed to create WIC imaging factory, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     for (i = 0; i < ARRAY_SIZE(tests); ++i)
     {
         hr = IWICImagingFactory_CreateBitmap(wic_factory, 16, 16,
                 tests[i].wic, WICBitmapCacheOnDemand, &wic_bitmap);
-        ok(hr == S_OK, "%s: Failed to create WIC bitmap, hr %#x.\n", debugstr_guid(tests[i].wic), hr);
+        ok(hr == S_OK, "%s: Got unexpected hr %#lx.\n", debugstr_guid(tests[i].wic), hr);
 
         hr = ID2D1RenderTarget_CreateBitmapFromWicBitmap(rt, (IWICBitmapSource *)wic_bitmap, NULL, &bitmap);
-        ok(hr == S_OK, "%s: Failed to create bitmap from WIC source, hr %#x.\n", debugstr_guid(tests[i].wic), hr);
+        ok(hr == S_OK, "%s: Got unexpected hr %#lx.\n", debugstr_guid(tests[i].wic), hr);
 
         format = ID2D1Bitmap_GetPixelFormat(bitmap);
         ok(format.format == tests[i].d2d.format, "%s: Got unexpected DXGI format %#x.\n",
@@ -9748,22 +10444,22 @@ static void test_geometry_group(BOOL d3d11)
     BOOL match;
 
     hr = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, &IID_ID2D1Factory, NULL, (void **)&factory);
-    ok(SUCCEEDED(hr), "Failed to create factory, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     set_rect(&rect, -1.0f, -1.0f, 1.0f, 1.0f);
     hr = ID2D1Factory_CreateRectangleGeometry(factory, &rect, (ID2D1RectangleGeometry **)&geometries[0]);
-    ok(SUCCEEDED(hr), "Failed to create geometry, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     set_rect(&rect, -2.0f, -2.0f, 0.0f, 2.0f);
     hr = ID2D1Factory_CreateRectangleGeometry(factory, &rect, (ID2D1RectangleGeometry **)&geometries[1]);
-    ok(SUCCEEDED(hr), "Failed to create geometry, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     hr = ID2D1Factory_CreateGeometryGroup(factory, D2D1_FILL_MODE_ALTERNATE, geometries, 2, &group);
-    ok(SUCCEEDED(hr), "Failed to create geometry group, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     set_rect(&rect, 0.0f, 0.0f, 0.0f, 0.0f);
     hr = ID2D1GeometryGroup_GetBounds(group, NULL, &rect);
-    ok(SUCCEEDED(hr), "Failed to get geometry group bounds, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     match = compare_rect(&rect, -2.0f, -2.0f, 1.0f, 2.0f, 0);
     ok(match, "Got unexpected rectangle {%.8e, %.8e, %.8e, %.8e}.\n",
             rect.left, rect.top, rect.right, rect.bottom);
@@ -9772,7 +10468,7 @@ static void test_geometry_group(BOOL d3d11)
     translate_matrix(&matrix, 80.0f, 640.0f);
     scale_matrix(&matrix, 2.0f, 0.5f);
     hr = ID2D1GeometryGroup_GetBounds(group, &matrix, &rect);
-    ok(SUCCEEDED(hr), "Failed to get geometry group bounds, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     match = compare_rect(&rect, 76.0f, 639.0f, 82.0f, 641.0f, 0);
     ok(match, "Got unexpected rectangle {%.8e, %.8e, %.8e, %.8e}.\n",
             rect.left, rect.top, rect.right, rect.bottom);
@@ -9803,10 +10499,10 @@ static void test_mt_factory(BOOL d3d11)
     DWORD ret;
 
     hr = D2D1CreateFactory(D2D1_FACTORY_TYPE_MULTI_THREADED + 1, &IID_ID2D1Factory, NULL, (void **)&factory);
-    ok(hr == E_INVALIDARG, "Unexpected hr %#x.\n", hr);
+    ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
 
     hr = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, &IID_ID2D1Factory, NULL, (void **)&factory);
-    ok(SUCCEEDED(hr), "Failed to create factory, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     hr = ID2D1Factory_QueryInterface(factory, &IID_ID2D1Multithread, (void **)&multithread);
     if (hr == E_NOINTERFACE)
@@ -9815,7 +10511,7 @@ static void test_mt_factory(BOOL d3d11)
         ID2D1Factory_Release(factory);
         return;
     }
-    ok(SUCCEEDED(hr), "Failed to get interface, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     ret = ID2D1Multithread_GetMultithreadProtected(multithread);
     ok(!ret, "Unexpected return value.\n");
@@ -9830,10 +10526,10 @@ static void test_mt_factory(BOOL d3d11)
     ID2D1Factory_Release(factory);
 
     hr = D2D1CreateFactory(D2D1_FACTORY_TYPE_MULTI_THREADED, &IID_ID2D1Factory, NULL, (void **)&factory);
-    ok(SUCCEEDED(hr), "Failed to create factory, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     hr = ID2D1Factory_QueryInterface(factory, &IID_ID2D1Multithread, (void **)&multithread);
-    ok(SUCCEEDED(hr), "Failed to get interface, hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     ret = ID2D1Multithread_GetMultithreadProtected(multithread);
     ok(!!ret, "Unexpected return value.\n");
@@ -9852,7 +10548,87 @@ static void test_mt_factory(BOOL d3d11)
     ID2D1Factory_Release(factory);
 }
 
-static void test_effect(BOOL d3d11)
+#define check_system_properties(effect, is_builtin) check_system_properties_(__LINE__, effect, is_builtin)
+static void check_system_properties_(unsigned int line, ID2D1Effect *effect, BOOL is_builtin)
+{
+    UINT i, value_size, str_size;
+    WCHAR name[32], buffer[256];
+    D2D1_PROPERTY_TYPE type;
+    HRESULT hr;
+
+    static const struct system_property_test
+    {
+        UINT32 index;
+        const WCHAR *name;
+        D2D1_PROPERTY_TYPE type;
+        UINT32 value_size;
+    }
+    system_property_tests[] =
+    {
+        {D2D1_PROPERTY_CLSID,       L"CLSID",       D2D1_PROPERTY_TYPE_CLSID,  sizeof(CLSID)},
+        {D2D1_PROPERTY_DISPLAYNAME, L"DisplayName", D2D1_PROPERTY_TYPE_STRING },
+        {D2D1_PROPERTY_AUTHOR,      L"Author",      D2D1_PROPERTY_TYPE_STRING },
+        {D2D1_PROPERTY_CATEGORY,    L"Category",    D2D1_PROPERTY_TYPE_STRING },
+        {D2D1_PROPERTY_DESCRIPTION, L"Description", D2D1_PROPERTY_TYPE_STRING },
+        {D2D1_PROPERTY_INPUTS,      L"Inputs",      D2D1_PROPERTY_TYPE_ARRAY,  sizeof(UINT32)},
+        {D2D1_PROPERTY_CACHED,      L"Cached",      D2D1_PROPERTY_TYPE_BOOL,   sizeof(BOOL)},
+        {D2D1_PROPERTY_PRECISION,   L"Precision",   D2D1_PROPERTY_TYPE_ENUM,   sizeof(UINT32)},
+        {D2D1_PROPERTY_MIN_INPUTS,  L"MinInputs",   D2D1_PROPERTY_TYPE_UINT32, sizeof(UINT32)},
+        {D2D1_PROPERTY_MAX_INPUTS,  L"MaxInputs",   D2D1_PROPERTY_TYPE_UINT32, sizeof(UINT32)},
+    };
+
+    hr = ID2D1Effect_GetPropertyName(effect, 0xdeadbeef, name, sizeof(name));
+    ok_(__FILE__, line)(hr == D2DERR_INVALID_PROPERTY, "GetPropertyName() got unexpected hr %#lx for 0xdeadbeef.\n", hr);
+    type = ID2D1Effect_GetType(effect, 0xdeadbeef);
+    ok_(__FILE__, line)(type == D2D1_PROPERTY_TYPE_UNKNOWN, "Got unexpected property type %#x for 0xdeadbeef.\n", type);
+    value_size = ID2D1Effect_GetValueSize(effect, 0xdeadbeef);
+    ok_(__FILE__, line)(value_size == 0, "Got unexpected value size %u for 0xdeadbeef.\n", value_size);
+
+    for (i = 0; i < ARRAY_SIZE(system_property_tests); ++i)
+    {
+        const struct system_property_test *test = &system_property_tests[i];
+        winetest_push_context("Property %u", i);
+
+        name[0] = 0;
+        hr = ID2D1Effect_GetPropertyName(effect, test->index, name, sizeof(name));
+        todo_wine_if((is_builtin && (test->type == D2D1_PROPERTY_TYPE_ARRAY || test->type == D2D1_PROPERTY_TYPE_STRING)))
+        ok_(__FILE__, line)(hr == S_OK, "Failed to get property name, hr %#lx\n", hr);
+        if (hr == D2DERR_INVALID_PROPERTY)
+        {
+            winetest_pop_context();
+            continue;
+        }
+        ok_(__FILE__, line)(!wcscmp(name, test->name), "Got unexpected property name %s, expected %s.\n",
+                debugstr_w(name), debugstr_w(test->name));
+
+        type = ID2D1Effect_GetType(effect, test->index);
+        todo_wine_if((is_builtin && (test->type == D2D1_PROPERTY_TYPE_ARRAY || test->type == D2D1_PROPERTY_TYPE_STRING)))
+        ok_(__FILE__, line)(type == test->type, "Got unexpected property type %#x, expected %#x.\n",
+                type, test->type);
+
+        value_size = 0;
+        value_size = ID2D1Effect_GetValueSize(effect, test->index);
+        if (test->value_size != 0)
+        {
+            todo_wine_if(is_builtin && test->type == D2D1_PROPERTY_TYPE_ARRAY)
+            ok_(__FILE__, line)(value_size == test->value_size, "Got unexpected value size %u, expected %u.\n",
+                    value_size, test->value_size);
+        }
+        else if (test->type == D2D1_PROPERTY_TYPE_STRING)
+        {
+            hr = ID2D1Effect_GetValue(effect, test->index, D2D1_PROPERTY_TYPE_STRING, (BYTE *)buffer, sizeof(buffer));
+            todo_wine_if(is_builtin)
+            ok_(__FILE__, line)(hr == S_OK, "Failed to get value, hr %#lx.\n", hr);
+            str_size = (wcslen((WCHAR *)buffer) + 1) * sizeof(WCHAR);
+            todo_wine_if(is_builtin || buffer[0] == 0)
+            ok_(__FILE__, line)(value_size == str_size, "Got unexpected value size %u, expected %u.\n",
+                    value_size, str_size);
+        }
+        winetest_pop_context();
+    }
+}
+
+static void test_builtin_effect(BOOL d3d11)
 {
     unsigned int i, j, min_inputs, max_inputs, str_size, input_count;
     D2D1_BITMAP_PROPERTIES bitmap_desc;
@@ -9872,128 +10648,132 @@ static void test_effect(BOOL d3d11)
     const struct effect_test
     {
         const CLSID *clsid;
+        UINT32 factory_version;
         UINT32 default_input_count;
         UINT32 min_inputs;
         UINT32 max_inputs;
     }
     effect_tests[] =
     {
-        {&CLSID_D2D12DAffineTransform,       1, 1, 1},
-        {&CLSID_D2D13DPerspectiveTransform,  1, 1, 1},
-        {&CLSID_D2D1Composite,               2, 1, 0xffffffff},
-        {&CLSID_D2D1Crop,                    1, 1, 1},
+        {&CLSID_D2D12DAffineTransform,       1, 1, 1, 1},
+        {&CLSID_D2D13DPerspectiveTransform,  1, 1, 1, 1},
+        {&CLSID_D2D1Composite,               1, 2, 1, 0xffffffff},
+        {&CLSID_D2D1Crop,                    1, 1, 1, 1},
+        {&CLSID_D2D1Shadow,                  1, 1, 1, 1},
+        {&CLSID_D2D1Grayscale,               3, 1, 1, 1},
     };
 
     if (!init_test_context(&ctx, d3d11))
         return;
 
-    if (FAILED(D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, &IID_ID2D1Factory1, NULL, (void **)&factory)))
+    factory = ctx.factory1;
+    if (!factory)
     {
         win_skip("ID2D1Factory1 is not supported.\n");
         release_test_context(&ctx);
         return;
     }
+    if (!ctx.factory3)
+        win_skip("ID2D1Factory3 is not supported.\n");
 
-    hr = ID2D1RenderTarget_QueryInterface(ctx.rt, &IID_ID2D1DeviceContext, (void **)&context);
-    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    context = ctx.context;
 
     for (i = 0; i < ARRAY_SIZE(effect_tests); ++i)
     {
         const struct effect_test *test = effect_tests + i;
 
+        if (test->factory_version == 3 && !ctx.factory3)
+            continue;
+
         winetest_push_context("Test %u", i);
 
         hr = ID2D1DeviceContext_CreateEffect(context, test->clsid, &effect);
-        ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
+        /* Test output image pointer */
         hr = ID2D1Effect_QueryInterface(effect, &IID_ID2D1Image, (void **)&image_a);
-        ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
         ID2D1Effect_GetOutput(effect, &image_b);
         ok(image_b == image_a, "Got unexpected image_b %p, expected %p.\n", image_b, image_a);
         ID2D1Image_Release(image_b);
         ID2D1Image_Release(image_a);
 
+        /* Test GetValue() */
         hr = ID2D1Effect_GetValue(effect, 0xdeadbeef, D2D1_PROPERTY_TYPE_CLSID, (BYTE *)&clsid, sizeof(clsid));
-        ok(hr == D2DERR_INVALID_PROPERTY, "Got unexpected hr %#x.\n", hr);
+        ok(hr == D2DERR_INVALID_PROPERTY, "Got unexpected hr %#lx.\n", hr);
 
         hr = ID2D1Effect_GetValue(effect, D2D1_PROPERTY_CLSID, D2D1_PROPERTY_TYPE_CLSID, buffer, sizeof(clsid) + 1);
-        ok(hr == E_INVALIDARG, "Got unexpected hr %#x.\n", hr);
+        ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
         hr = ID2D1Effect_GetValue(effect, D2D1_PROPERTY_CLSID, D2D1_PROPERTY_TYPE_CLSID, buffer, sizeof(clsid) - 1);
-        ok(hr == E_INVALIDARG, "Got unexpected hr %#x.\n", hr);
+        ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
         hr = ID2D1Effect_GetValue(effect, D2D1_PROPERTY_CLSID, D2D1_PROPERTY_TYPE_CLSID, buffer, sizeof(clsid));
-        ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
         hr = ID2D1Effect_GetValue(effect, D2D1_PROPERTY_DISPLAYNAME, D2D1_PROPERTY_TYPE_STRING, buffer, sizeof(buffer));
-        todo_wine
-        ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+        todo_wine ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
         str_size = (wcslen((WCHAR *)buffer) + 1) * sizeof(WCHAR);
         hr = ID2D1Effect_GetValue(effect, D2D1_PROPERTY_DISPLAYNAME, D2D1_PROPERTY_TYPE_STRING, buffer, str_size);
-        todo_wine
-        ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+        todo_wine ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
         hr = ID2D1Effect_GetValue(effect, D2D1_PROPERTY_DISPLAYNAME, D2D1_PROPERTY_TYPE_STRING, buffer, str_size - 1);
-        todo_wine
-        ok(hr == D2DERR_INSUFFICIENT_BUFFER, "Got unexpected hr %#x.\n", hr);
+        todo_wine ok(hr == D2DERR_INSUFFICIENT_BUFFER, "Got unexpected hr %#lx.\n", hr);
 
         hr = ID2D1Effect_GetValue(effect, D2D1_PROPERTY_CLSID, 0xdeadbeef, (BYTE *)&clsid, sizeof(clsid));
-        ok(hr == E_INVALIDARG, "Got unexpected hr %#x.\n", hr);
+        ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
         hr = ID2D1Effect_GetValue(effect, D2D1_PROPERTY_CLSID, D2D1_PROPERTY_TYPE_UNKNOWN, (BYTE *)&clsid, sizeof(clsid));
-        ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
         hr = ID2D1Effect_GetValue(effect, D2D1_PROPERTY_CLSID, D2D1_PROPERTY_TYPE_VECTOR4, (BYTE *)&clsid, sizeof(clsid));
-        ok(hr == E_INVALIDARG, "Got unexpected hr %#x.\n", hr);
+        ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
         hr = ID2D1Effect_GetValue(effect, D2D1_PROPERTY_CLSID, D2D1_PROPERTY_TYPE_VECTOR4, buffer, sizeof(buffer));
-        ok(hr == E_INVALIDARG, "Got unexpected hr %#x.\n", hr);
+        ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
 
         hr = ID2D1Effect_GetValue(effect, D2D1_PROPERTY_CLSID,
                 D2D1_PROPERTY_TYPE_CLSID, (BYTE *)&clsid, sizeof(clsid));
-        ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
-        if (hr == S_OK)
-            ok(IsEqualGUID(&clsid, test->clsid), "Got unexpected clsid %s, expected %s.\n",
-                    debugstr_guid(&clsid), debugstr_guid(test->clsid));
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+        ok(IsEqualGUID(&clsid, test->clsid), "Got unexpected clsid %s, expected %s.\n",
+                debugstr_guid(&clsid), debugstr_guid(test->clsid));
 
-        hr = ID2D1Effect_GetValue(effect, D2D1_PROPERTY_CACHED,
-                D2D1_PROPERTY_TYPE_BOOL, (BYTE *)&cached, sizeof(cached));
-        todo_wine
-        ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
-        if (hr == S_OK)
-            ok(cached == FALSE, "Got unexpected cached %d.\n", cached);
+        cached = TRUE;
+        hr = ID2D1Effect_GetValue(effect, D2D1_PROPERTY_CACHED, D2D1_PROPERTY_TYPE_BOOL,
+                (BYTE *)&cached, sizeof(cached));
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+        ok(cached == FALSE, "Got unexpected cached %d.\n", cached);
 
         hr = ID2D1Effect_GetValue(effect, D2D1_PROPERTY_PRECISION,
                 D2D1_PROPERTY_TYPE_ENUM, (BYTE *)&precision, sizeof(precision));
-        todo_wine
-        ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
-        if (hr == S_OK)
-            ok(precision == D2D1_BUFFER_PRECISION_UNKNOWN, "Got unexpected precision %u.\n", precision);
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+        ok(precision == D2D1_BUFFER_PRECISION_UNKNOWN, "Got unexpected precision %u.\n", precision);
 
         hr = ID2D1Effect_GetValue(effect, D2D1_PROPERTY_MIN_INPUTS,
                 D2D1_PROPERTY_TYPE_UINT32, (BYTE *)&min_inputs, sizeof(min_inputs));
-        ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
-        if (hr == S_OK)
-            ok(min_inputs == test->min_inputs, "Got unexpected min inputs %u, expected %u.\n",
-                    min_inputs, test->min_inputs);
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+        ok(min_inputs == test->min_inputs, "Got unexpected min inputs %u, expected %u.\n",
+                min_inputs, test->min_inputs);
 
         hr = ID2D1Effect_GetValue(effect, D2D1_PROPERTY_MAX_INPUTS,
                 D2D1_PROPERTY_TYPE_UINT32, (BYTE *)&max_inputs, sizeof(max_inputs));
-        ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
-        if (hr == S_OK)
-            ok(max_inputs == test->max_inputs, "Got unexpected max inputs %u, expected %u.\n",
-                    max_inputs, test->max_inputs);
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+        ok(max_inputs == test->max_inputs, "Got unexpected max inputs %u, expected %u.\n",
+                max_inputs, test->max_inputs);
 
+        /* Test default input count */
         input_count = ID2D1Effect_GetInputCount(effect);
-        ok (input_count == test->default_input_count, "Got unexpected input count %u, expected %u.\n",
+        ok(input_count == test->default_input_count, "Got unexpected input count %u, expected %u.\n",
                 input_count, test->default_input_count);
 
+        /* Test SetInputCount() */
         input_count = (test->max_inputs < 16 ? test->max_inputs : 16);
         for (j = 0; j < input_count + 4; ++j)
         {
             winetest_push_context("Input %u", j);
             hr = ID2D1Effect_SetInputCount(effect, j);
             if (j < test->min_inputs || j > test->max_inputs)
-                ok(hr == E_INVALIDARG, "Got unexpected hr %#x.\n", hr);
+                ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
             else
-                ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+                ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
             winetest_pop_context();
         }
 
+        /* Test GetInput() before any input is set */
         input_count = ID2D1Effect_GetInputCount(effect);
         for (j = 0; j < input_count + 4; ++j)
         {
@@ -10003,13 +10783,14 @@ static void test_effect(BOOL d3d11)
             winetest_pop_context();
         }
 
+        /* Test GetInput() after an input is set */
         set_size_u(&size, 1, 1);
         bitmap_desc.pixelFormat.format = DXGI_FORMAT_B8G8R8A8_UNORM;
         bitmap_desc.pixelFormat.alphaMode = D2D1_ALPHA_MODE_IGNORE;
         bitmap_desc.dpiX = 96.0f;
         bitmap_desc.dpiY = 96.0f;
         hr = ID2D1RenderTarget_CreateBitmap(ctx.rt, size, NULL, 4, &bitmap_desc, &bitmap);
-        ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
         ID2D1Effect_SetInput(effect, 0, (ID2D1Image *)bitmap, FALSE);
         for (j = 0; j < input_count + 4; ++j)
@@ -10029,6 +10810,7 @@ static void test_effect(BOOL d3d11)
             winetest_pop_context();
         }
 
+        /* Test setting inputs with out-of-bounds index */
         for (j = input_count; j < input_count + 4; ++j)
         {
             winetest_push_context("Input %u", j);
@@ -10044,25 +10826,967 @@ static void test_effect(BOOL d3d11)
         winetest_pop_context();
     }
 
-    ID2D1DeviceContext_Release(context);
-    ID2D1Factory1_Release(factory);
     release_test_context(&ctx);
+}
+
+static inline struct effect_impl *impl_from_ID2D1EffectImpl(ID2D1EffectImpl *iface)
+{
+    return CONTAINING_RECORD(iface, struct effect_impl, ID2D1EffectImpl_iface);
+}
+
+static HRESULT STDMETHODCALLTYPE effect_impl_QueryInterface(ID2D1EffectImpl *iface, REFIID iid, void **out)
+{
+    if (IsEqualGUID(iid, &IID_ID2D1EffectImpl)
+            || IsEqualGUID(iid, &IID_IUnknown))
+    {
+        ID2D1EffectImpl_AddRef(iface);
+        *out = iface;
+        return S_OK;
+    }
+
+    *out = NULL;
+    return E_NOINTERFACE;
+}
+
+static ULONG STDMETHODCALLTYPE effect_impl_AddRef(ID2D1EffectImpl *iface)
+{
+    struct effect_impl *effect_impl = impl_from_ID2D1EffectImpl(iface);
+    ULONG refcount = InterlockedIncrement(&effect_impl->refcount);
+    return refcount;
+}
+
+static ULONG STDMETHODCALLTYPE effect_impl_Release(ID2D1EffectImpl *iface)
+{
+    struct effect_impl *effect_impl = impl_from_ID2D1EffectImpl(iface);
+    ULONG refcount = InterlockedDecrement(&effect_impl->refcount);
+
+    if (!refcount)
+    {
+        if (effect_impl->effect_context)
+            ID2D1EffectContext_Release(effect_impl->effect_context);
+        free(effect_impl);
+    }
+
+    return refcount;
+}
+
+static HRESULT STDMETHODCALLTYPE effect_impl_Initialize(ID2D1EffectImpl *iface,
+        ID2D1EffectContext *context,ID2D1TransformGraph *graph)
+{
+    struct effect_impl *effect_impl = impl_from_ID2D1EffectImpl(iface);
+    ID2D1EffectContext_AddRef(effect_impl->effect_context = context);
+    ID2D1TransformGraph_AddRef(effect_impl->transform_graph = graph);
+    return S_OK;
+}
+
+static HRESULT STDMETHODCALLTYPE effect_impl_PrepareForRender(ID2D1EffectImpl *iface, D2D1_CHANGE_TYPE type)
+{
+    return S_OK;
+}
+
+static HRESULT STDMETHODCALLTYPE effect_impl_SetGraph(ID2D1EffectImpl *iface, ID2D1TransformGraph *graph)
+{
+    return E_NOTIMPL;
+}
+
+static const ID2D1EffectImplVtbl effect_impl_vtbl =
+{
+    effect_impl_QueryInterface,
+    effect_impl_AddRef,
+    effect_impl_Release,
+    effect_impl_Initialize,
+    effect_impl_PrepareForRender,
+    effect_impl_SetGraph,
+};
+
+static HRESULT STDMETHODCALLTYPE effect_impl_create(IUnknown **effect_impl)
+{
+    struct effect_impl *object;
+
+    if (!(object = calloc(1, sizeof(*object))))
+        return E_OUTOFMEMORY;
+
+    object->ID2D1EffectImpl_iface.lpVtbl = &effect_impl_vtbl;
+    object->refcount = 1;
+    object->integer = 10;
+    object->effect_context = NULL;
+    object->transform_graph = NULL;
+
+    *effect_impl = (IUnknown *)&object->ID2D1EffectImpl_iface;
+    return S_OK;
+}
+
+static HRESULT STDMETHODCALLTYPE effect_impl_set_integer(IUnknown *iface, const BYTE *data, UINT32 data_size)
+{
+    struct effect_impl *effect_impl = impl_from_ID2D1EffectImpl((ID2D1EffectImpl *)iface);
+
+    if (!data)
+        return E_INVALIDARG;
+
+    effect_impl->integer = *((UINT *)data);
+
+    return S_OK;
+}
+
+static HRESULT STDMETHODCALLTYPE effect_impl_get_integer(const IUnknown *iface,
+        BYTE *data, UINT32 data_size, UINT32 *actual_size)
+{
+    struct effect_impl *effect_impl = impl_from_ID2D1EffectImpl((ID2D1EffectImpl *)iface);
+
+    if (!data)
+        return E_INVALIDARG;
+
+    *((UINT *)data) = effect_impl->integer;
+    if (actual_size)
+        *actual_size = sizeof(effect_impl->integer);
+
+    return S_OK;
+}
+
+static HRESULT STDMETHODCALLTYPE effect_impl_get_context(const IUnknown *iface,
+        BYTE *data, UINT32 data_size, UINT32 *actual_size)
+{
+    struct effect_impl *effect_impl = impl_from_ID2D1EffectImpl((ID2D1EffectImpl *)iface);
+
+    if (!data)
+        return E_INVALIDARG;
+
+    *((ID2D1EffectContext **)data) = effect_impl->effect_context;
+    if (actual_size)
+        *actual_size = sizeof(effect_impl->effect_context);
+
+    return S_OK;
+}
+
+static HRESULT STDMETHODCALLTYPE effect_impl_get_graph(const IUnknown *iface,
+        BYTE *data, UINT32 data_size, UINT32 *actual_size)
+{
+    struct effect_impl *effect_impl = impl_from_ID2D1EffectImpl((ID2D1EffectImpl *)iface);
+
+    if (!data)
+        return E_INVALIDARG;
+
+    *((ID2D1TransformGraph **)data) = effect_impl->transform_graph;
+    if (actual_size)
+        *actual_size = sizeof(effect_impl->transform_graph);
+
+    return S_OK;
+}
+
+static void test_effect_register(BOOL d3d11)
+{
+    ID2D1DeviceContext *device_context;
+    ID2D1EffectContext *effect_context;
+    struct d2d1_test_context ctx;
+    unsigned int i, integer;
+    ID2D1Factory1 *factory;
+    WCHAR display_name[64];
+    ID2D1Effect *effect;
+    HRESULT hr;
+
+    const struct xml_test
+    {
+        const WCHAR *xml;
+        HRESULT hr;
+    }
+    xml_tests[] =
+    {
+        {effect_xml_a,       S_OK},
+        {effect_xml_b,       S_OK},
+        {effect_xml_c,       S_OK},
+        {effect_xml_minimum, S_OK},
+        {effect_xml_without_version,     HRESULT_FROM_WIN32(ERROR_NOT_FOUND)},
+        {effect_xml_without_inputs,      E_INVALIDARG},
+        {effect_xml_without_name,        E_INVALIDARG},
+        {effect_xml_without_author,      E_INVALIDARG},
+        {effect_xml_without_category,    E_INVALIDARG},
+        {effect_xml_without_description, E_INVALIDARG},
+        {effect_xml_without_type,        E_INVALIDARG},
+    };
+
+    const D2D1_PROPERTY_BINDING binding[] =
+    {
+        {L"Integer",  effect_impl_set_integer, effect_impl_get_integer},
+        {L"Context",  NULL,                    effect_impl_get_context},
+        {L"Integer",  NULL,                    effect_impl_get_integer},
+        {L"Integer",  effect_impl_set_integer, NULL},
+        {L"Integer",  NULL,                    NULL},
+        {L"DeadBeef", effect_impl_set_integer, effect_impl_get_integer},
+    };
+
+    const struct binding_test
+    {
+        const D2D1_PROPERTY_BINDING *binding;
+        UINT32 binding_count;
+        const WCHAR *effect_xml;
+        HRESULT hr;
+    }
+    binding_tests[] =
+    {
+        {NULL,        0, effect_xml_a, S_OK},
+        {NULL,        0, effect_xml_b, S_OK},
+        {binding,     1, effect_xml_a, S_OK},
+        {binding,     1, effect_xml_b, D2DERR_INVALID_PROPERTY},
+        {binding + 1, 1, effect_xml_b, S_OK},
+        {binding + 2, 1, effect_xml_a, S_OK},
+        {binding + 3, 1, effect_xml_a, S_OK},
+        {binding + 4, 1, effect_xml_a, S_OK},
+        {binding + 5, 1, effect_xml_a, D2DERR_INVALID_PROPERTY},
+        {binding,     2, effect_xml_a, D2DERR_INVALID_PROPERTY},
+        {binding,     2, effect_xml_b, D2DERR_INVALID_PROPERTY},
+        {binding,     2, effect_xml_c, S_OK},
+    };
+
+    if (!init_test_context(&ctx, d3d11))
+        return;
+
+    device_context = ctx.context;
+    factory = ctx.factory1;
+    if (!factory)
+    {
+        win_skip("ID2D1Factory1 is not supported.\n");
+        release_test_context(&ctx);
+        return;
+    }
+
+    /* Using builtin effect CLSID. */
+    hr = ID2D1Factory1_RegisterEffectFromString(factory, &CLSID_D2D1Crop, effect_xml_a, NULL,
+            0, effect_impl_create);
+    ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
+
+    /* Register effect once */
+    for (i = 0; i < ARRAY_SIZE(xml_tests); ++i)
+    {
+        const struct xml_test *test = &xml_tests[i];
+        winetest_push_context("Test %u", i);
+
+        hr = ID2D1Factory1_RegisterEffectFromString(factory, &CLSID_TestEffect, test->xml, NULL, 0, effect_impl_create);
+        ok(hr == test->hr, "Got unexpected hr %#lx, expected %#lx.\n", hr, test->hr);
+        if (hr == S_OK)
+        {
+            hr = ID2D1DeviceContext_CreateEffect(device_context, &CLSID_TestEffect, &effect);
+            ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+            hr = ID2D1Factory1_UnregisterEffect(factory, &CLSID_TestEffect);
+            ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+            hr = ID2D1Factory1_UnregisterEffect(factory, &CLSID_TestEffect);
+            ok(hr == D2DERR_EFFECT_IS_NOT_REGISTERED, "Got unexpected hr %#lx.\n", hr);
+            ID2D1Effect_Release(effect);
+        }
+
+        winetest_pop_context();
+    }
+
+    /* Register effect multiple times */
+    for (i = 0; i < ARRAY_SIZE(xml_tests); ++i)
+    {
+        const struct xml_test *test = &xml_tests[i];
+
+        if (test->hr != S_OK)
+            continue;
+
+        winetest_push_context("Test %u", i);
+
+        hr = ID2D1Factory1_RegisterEffectFromString(factory, &CLSID_TestEffect, test->xml, NULL, 0, effect_impl_create);
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+        hr = ID2D1Factory1_RegisterEffectFromString(factory, &CLSID_TestEffect, test->xml, NULL, 0, effect_impl_create);
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+        hr = ID2D1Factory1_UnregisterEffect(factory, &CLSID_TestEffect);
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+        hr = ID2D1Factory1_UnregisterEffect(factory, &CLSID_TestEffect);
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+        hr = ID2D1Factory1_UnregisterEffect(factory, &CLSID_TestEffect);
+        ok(hr == D2DERR_EFFECT_IS_NOT_REGISTERED, "Got unexpected hr %#lx.\n", hr);
+
+        winetest_pop_context();
+    }
+
+    /* Register effect multiple times with different xml */
+    hr = ID2D1Factory1_RegisterEffectFromString(factory, &CLSID_TestEffect,
+            effect_xml_a, NULL, 0, effect_impl_create);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    hr = ID2D1DeviceContext_CreateEffect(device_context, &CLSID_TestEffect, &effect);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+    hr = ID2D1Effect_GetValue(effect, D2D1_PROPERTY_DISPLAYNAME,
+            D2D1_PROPERTY_TYPE_STRING, (BYTE *)display_name, sizeof(display_name));
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    ok(!wcscmp(display_name, L"TestEffectA"), "Got unexpected display name %s.\n", debugstr_w(display_name));
+    ID2D1Effect_Release(effect);
+
+    hr = ID2D1Factory1_RegisterEffectFromString(factory, &CLSID_TestEffect,
+            effect_xml_b, NULL, 0, effect_impl_create);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    hr = ID2D1DeviceContext_CreateEffect(device_context, &CLSID_TestEffect, &effect);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+    hr = ID2D1Effect_GetValue(effect, D2D1_PROPERTY_DISPLAYNAME,
+            D2D1_PROPERTY_TYPE_STRING, (BYTE *)display_name, sizeof(display_name));
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    ok(!wcscmp(display_name, L"TestEffectA"), "Got unexpected display name %s.\n", debugstr_w(display_name));
+    ID2D1Effect_Release(effect);
+
+    hr = ID2D1Factory1_UnregisterEffect(factory, &CLSID_TestEffect);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    hr = ID2D1Factory1_UnregisterEffect(factory, &CLSID_TestEffect);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+    /* Register effect with property binding */
+    for (i = 0; i < ARRAY_SIZE(binding_tests); ++i)
+    {
+        const struct binding_test *test = &binding_tests[i];
+        winetest_push_context("Test %u", i);
+
+        hr = ID2D1Factory1_RegisterEffectFromString(factory, &CLSID_TestEffect,
+                test->effect_xml, test->binding, test->binding_count, effect_impl_create);
+        ok(hr == test->hr, "Got unexpected hr %#lx, expected %#lx.\n", hr, test->hr);
+        if (SUCCEEDED(hr))
+        {
+            hr = ID2D1Factory1_UnregisterEffect(factory, &CLSID_TestEffect);
+            ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+        }
+
+        winetest_pop_context();
+    }
+
+    /* Register effect multiple times with different binding */
+    hr = ID2D1Factory1_RegisterEffectFromString(factory, &CLSID_TestEffect,
+            effect_xml_c, binding, 1, effect_impl_create);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    hr = ID2D1DeviceContext_CreateEffect(device_context, &CLSID_TestEffect, &effect);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+    integer = 0xdeadbeef;
+    effect_context = (ID2D1EffectContext *)0xdeadbeef;
+    hr = ID2D1Effect_GetValueByName(effect, L"Integer",
+            D2D1_PROPERTY_TYPE_UINT32, (BYTE *)&integer, sizeof(integer));
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    hr = ID2D1Effect_GetValueByName(effect, L"Context",
+            D2D1_PROPERTY_TYPE_IUNKNOWN, (BYTE *)&effect_context, sizeof(effect_context));
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    ok(integer == 10, "Got unexpected integer %u.\n", integer);
+    ok(effect_context == NULL, "Got unexpected effect context %p.\n", effect_context);
+    ID2D1Effect_Release(effect);
+
+    hr = ID2D1Factory1_RegisterEffectFromString(factory, &CLSID_TestEffect,
+            effect_xml_c, binding + 1, 1, effect_impl_create);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    hr = ID2D1DeviceContext_CreateEffect(device_context, &CLSID_TestEffect, &effect);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+    integer = 0xdeadbeef;
+    effect_context = (ID2D1EffectContext *)0xdeadbeef;
+    hr = ID2D1Effect_GetValueByName(effect, L"Integer",
+            D2D1_PROPERTY_TYPE_UINT32, (BYTE *)&integer, sizeof(integer));
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    hr = ID2D1Effect_GetValueByName(effect, L"Context",
+            D2D1_PROPERTY_TYPE_IUNKNOWN, (BYTE *)&effect_context, sizeof(effect_context));
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    ok(integer == 10, "Got unexpected integer %u.\n", integer);
+    ok(effect_context == NULL, "Got unexpected effect context %p.\n", effect_context);
+    ID2D1Effect_Release(effect);
+
+    hr = ID2D1Factory1_UnregisterEffect(factory, &CLSID_TestEffect);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    hr = ID2D1Factory1_UnregisterEffect(factory, &CLSID_TestEffect);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+    /* Unregister builtin effect */
+    hr = ID2D1Factory1_UnregisterEffect(factory, &CLSID_D2D1Composite);
+    ok(hr == D2DERR_EFFECT_IS_NOT_REGISTERED, "Got unexpected hr %#lx.\n", hr);
+
+    release_test_context(&ctx);
+}
+
+static void test_effect_context(BOOL d3d11)
+{
+    ID2D1EffectContext *effect_context;
+    D2D1_PROPERTY_BINDING binding;
+    struct d2d1_test_context ctx;
+    ID2D1Effect *effect = NULL;
+    ID2D1Factory1 *factory;
+    BOOL loaded;
+    HRESULT hr;
+
+    if (!init_test_context(&ctx, d3d11))
+        return;
+
+    factory = ctx.factory1;
+    if (!factory)
+    {
+        win_skip("ID2D1Factory1 is not supported.\n");
+        release_test_context(&ctx);
+        return;
+    }
+
+    binding.propertyName = L"Context";
+    binding.setFunction = NULL;
+    binding.getFunction = effect_impl_get_context;
+    hr = ID2D1Factory1_RegisterEffectFromString(factory, &CLSID_TestEffect,
+            effect_xml_b, &binding, 1, effect_impl_create);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+    hr = ID2D1DeviceContext_CreateEffect(ctx.context, &CLSID_TestEffect, &effect);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+    effect_context = NULL;
+    hr = ID2D1Effect_GetValueByName(effect, L"Context",
+            D2D1_PROPERTY_TYPE_IUNKNOWN, (BYTE *)&effect_context, sizeof(effect_context));
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+    /* Test shader loading */
+    loaded = ID2D1EffectContext_IsShaderLoaded(effect_context, &GUID_TestVertexShader);
+    ok(!loaded, "Shader is loaded.\n");
+    loaded = ID2D1EffectContext_IsShaderLoaded(effect_context, &GUID_TestPixelShader);
+    ok(!loaded, "Shader is loaded.\n");
+
+    hr = ID2D1EffectContext_LoadVertexShader(effect_context,
+            &GUID_TestVertexShader, (const BYTE *)test_ps, sizeof(test_ps));
+    ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
+    hr = ID2D1EffectContext_LoadVertexShader(effect_context,
+            &GUID_TestVertexShader, (const BYTE *)test_vs, sizeof(test_vs));
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    loaded = ID2D1EffectContext_IsShaderLoaded(effect_context, &GUID_TestVertexShader);
+    ok(loaded, "Shader is not loaded.\n");
+
+    hr = ID2D1EffectContext_LoadVertexShader(effect_context,
+            &GUID_TestVertexShader, (const BYTE *)test_ps, sizeof(test_ps));
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    hr = ID2D1EffectContext_LoadVertexShader(effect_context,
+            &GUID_TestVertexShader, (const BYTE *)test_vs, sizeof(test_vs));
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+    hr = ID2D1EffectContext_LoadPixelShader(effect_context,
+            &GUID_TestPixelShader, (const BYTE *)test_vs, sizeof(test_vs));
+    ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
+    hr = ID2D1EffectContext_LoadPixelShader(effect_context,
+            &GUID_TestPixelShader, (const BYTE *)test_ps, sizeof(test_ps));
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    loaded = ID2D1EffectContext_IsShaderLoaded(effect_context, &GUID_TestPixelShader);
+    ok(loaded, "Shader is not loaded.\n");
+
+    ID2D1Effect_Release(effect);
+    hr = ID2D1Factory1_UnregisterEffect(factory, &CLSID_TestEffect);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    release_test_context(&ctx);
+}
+
+static void test_effect_properties(BOOL d3d11)
+{
+    UINT32 i, min_inputs, max_inputs, integer, index, size;
+    ID2D1EffectContext *effect_context;
+    D2D1_BUFFER_PRECISION precision;
+    float vec2[2], vec3[3], vec4[4];
+    ID2D1Properties *subproperties;
+    D2D1_PROPERTY_TYPE prop_type;
+    struct d2d1_test_context ctx;
+    ID2D1Factory1 *factory;
+    ID2D1Effect *effect;
+    UINT32 count, data;
+    WCHAR buffer[128];
+    float mat[20];
+    INT32 val;
+    CLSID clsid;
+    BOOL cached;
+    HRESULT hr;
+
+    static const WCHAR *effect_author = L"The Wine Project";
+    static const WCHAR *effect_category = L"Test";
+    static const WCHAR *effect_description = L"Test effect.";
+
+    const D2D1_PROPERTY_BINDING binding[] =
+    {
+        {L"Integer",  effect_impl_set_integer, effect_impl_get_integer},
+        {L"Context",  NULL,                    effect_impl_get_context},
+    };
+
+    const struct system_property_test
+    {
+        const WCHAR *xml;
+        const WCHAR *display_name;
+        const WCHAR *author;
+        const WCHAR *category;
+        const WCHAR *description;
+        UINT32 min_inputs;
+        UINT32 max_inputs;
+    }
+    system_property_tests[] =
+    {
+        {effect_xml_a,       L"TestEffectA", effect_author, effect_category, effect_description, 1, 1},
+        {effect_xml_b,       L"TestEffectB", effect_author, effect_category, effect_description, 1, 1},
+        {effect_xml_c,       L"TestEffectC", effect_author, effect_category, effect_description, 1, 1},
+        {effect_xml_minimum, L"", L"" ,L"", L"", 0, 0},
+    };
+
+    if (!init_test_context(&ctx, d3d11))
+        return;
+
+    factory = ctx.factory1;
+    if (!factory)
+    {
+        win_skip("ID2D1Factory1 is not supported.\n");
+        release_test_context(&ctx);
+        return;
+    }
+
+    /* Inputs array */
+    hr = ID2D1Factory1_RegisterEffectFromString(factory, &CLSID_TestEffect, effect_xml_a,
+            NULL, 0, effect_impl_create);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+    hr = ID2D1DeviceContext_CreateEffect(ctx.context, &CLSID_TestEffect, &effect);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+    size = ID2D1Effect_GetValueSize(effect, D2D1_PROPERTY_INPUTS);
+    ok(size == 4, "Unexpected size %u.\n", size);
+    prop_type = ID2D1Effect_GetType(effect, D2D1_PROPERTY_INPUTS);
+    ok(prop_type == D2D1_PROPERTY_TYPE_ARRAY, "Unexpected type %u.\n", prop_type);
+    hr = ID2D1Effect_GetPropertyName(effect, D2D1_PROPERTY_INPUTS, buffer, ARRAY_SIZE(buffer));
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    ok(!wcscmp(buffer, L"Inputs"), "Unexpected name %s.\n", wine_dbgstr_w(buffer));
+
+    /* Value is the number of elements. */
+    data = 123;
+    hr = ID2D1Effect_GetValue(effect, D2D1_PROPERTY_INPUTS, D2D1_PROPERTY_TYPE_ARRAY,
+            (BYTE *)&data, sizeof(data));
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    ok(data == 1, "Unexpected data %u.\n", data);
+
+    hr = ID2D1Effect_GetSubProperties(effect, D2D1_PROPERTY_INPUTS, &subproperties);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+    count = ID2D1Properties_GetPropertyCount(subproperties);
+    ok(count == 1, "Unexpected count %u.\n", count);
+
+    hr = ID2D1Properties_GetPropertyName(subproperties, 0, buffer, ARRAY_SIZE(buffer));
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    ok(!wcscmp(buffer, L"0"), "Unexpected name %s.\n", wine_dbgstr_w(buffer));
+    hr = ID2D1Properties_GetValue(subproperties, 0, D2D1_PROPERTY_TYPE_STRING,
+            (BYTE *)buffer, sizeof(buffer));
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    ok(!wcscmp(buffer, L"Source"), "Unexpected value %s.\n", wine_dbgstr_w(buffer));
+
+    hr = ID2D1Properties_GetValue(subproperties, D2D1_SUBPROPERTY_ISREADONLY, D2D1_PROPERTY_TYPE_BOOL,
+            (BYTE *)&data, sizeof(data));
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    ok(data == TRUE, "Unexpected value %u.\n", data);
+    hr = ID2D1Properties_GetPropertyName(subproperties, D2D1_SUBPROPERTY_ISREADONLY,
+            buffer, ARRAY_SIZE(buffer));
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    ok(!wcscmp(buffer, L"IsReadOnly"), "Unexpected name %s.\n", wine_dbgstr_w(buffer));
+
+    ID2D1Properties_Release(subproperties);
+
+    /* Int32 property. */
+    index = ID2D1Effect_GetPropertyIndex(effect, L"Int32Prop");
+    hr = ID2D1Effect_GetPropertyName(effect, index, buffer, ARRAY_SIZE(buffer));
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    ok(!wcscmp(buffer, L"Int32Prop"), "Unexpected name %s.\n", wine_dbgstr_w(buffer));
+    prop_type = ID2D1Effect_GetType(effect, index);
+    ok(prop_type == D2D1_PROPERTY_TYPE_INT32, "Unexpected type %u.\n", prop_type);
+    hr = ID2D1Effect_GetValue(effect, index, D2D1_PROPERTY_TYPE_INT32, (BYTE *)&val, sizeof(val));
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    ok(val == -2, "Unexpected value %d.\n", val);
+
+    /* UInt32 property. */
+    index = ID2D1Effect_GetPropertyIndex(effect, L"UInt32Prop");
+    hr = ID2D1Effect_GetPropertyName(effect, index, buffer, ARRAY_SIZE(buffer));
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    ok(!wcscmp(buffer, L"UInt32Prop"), "Unexpected name %s.\n", wine_dbgstr_w(buffer));
+    prop_type = ID2D1Effect_GetType(effect, index);
+    ok(prop_type == D2D1_PROPERTY_TYPE_UINT32, "Unexpected type %u.\n", prop_type);
+    hr = ID2D1Effect_GetValue(effect, index, D2D1_PROPERTY_TYPE_UINT32, (BYTE *)&integer, sizeof(integer));
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    ok(integer == -3, "Unexpected value %u.\n", integer);
+
+    /* Vector2 property. */
+    index = ID2D1Effect_GetPropertyIndex(effect, L"Vec2Prop");
+    hr = ID2D1Effect_GetPropertyName(effect, index, buffer, ARRAY_SIZE(buffer));
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    ok(!wcscmp(buffer, L"Vec2Prop"), "Unexpected name %s.\n", wine_dbgstr_w(buffer));
+    prop_type = ID2D1Effect_GetType(effect, index);
+    ok(prop_type == D2D1_PROPERTY_TYPE_VECTOR2, "Unexpected type %u.\n", prop_type);
+    hr = ID2D1Effect_GetValue(effect, index, D2D1_PROPERTY_TYPE_VECTOR2, (BYTE *)vec2, sizeof(vec2));
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    ok(vec2[0] == 3.0f && vec2[1] == 4.0f, "Unexpected vector (%.8e,%.8e).\n", vec2[0], vec2[1]);
+
+    /* Vector3 property. */
+    index = ID2D1Effect_GetPropertyIndex(effect, L"Vec3Prop");
+    hr = ID2D1Effect_GetPropertyName(effect, index, buffer, ARRAY_SIZE(buffer));
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    ok(!wcscmp(buffer, L"Vec3Prop"), "Unexpected name %s.\n", wine_dbgstr_w(buffer));
+    prop_type = ID2D1Effect_GetType(effect, index);
+    ok(prop_type == D2D1_PROPERTY_TYPE_VECTOR3, "Unexpected type %u.\n", prop_type);
+    hr = ID2D1Effect_GetValue(effect, index, D2D1_PROPERTY_TYPE_VECTOR3, (BYTE *)vec3, sizeof(vec3));
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    ok(vec3[0] == 5.0f && vec3[1] == 6.0f && vec3[2] == 7.0f, "Unexpected vector (%.8e,%.8e,%.8e).\n",
+            vec3[0], vec3[1], vec3[2]);
+
+    /* Vector4 property. */
+    index = ID2D1Effect_GetPropertyIndex(effect, L"Vec4Prop");
+    hr = ID2D1Effect_GetPropertyName(effect, index, buffer, ARRAY_SIZE(buffer));
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    ok(!wcscmp(buffer, L"Vec4Prop"), "Unexpected name %s.\n", wine_dbgstr_w(buffer));
+    prop_type = ID2D1Effect_GetType(effect, index);
+    ok(prop_type == D2D1_PROPERTY_TYPE_VECTOR4, "Unexpected type %u.\n", prop_type);
+    hr = ID2D1Effect_GetValue(effect, index, D2D1_PROPERTY_TYPE_VECTOR4, (BYTE *)vec4, sizeof(vec4));
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    ok(vec4[0] == 8.0f && vec4[1] == 9.0f && vec4[2] == 10.0f && vec4[3] == 11.0f,
+            "Unexpected vector (%.8e,%.8e,%.8e,%.8e).\n", vec4[0], vec4[1], vec4[2], vec4[3]);
+
+    /* Matrix3x2 property. */
+    index = ID2D1Effect_GetPropertyIndex(effect, L"Mat3x2Prop");
+    hr = ID2D1Effect_GetPropertyName(effect, index, buffer, ARRAY_SIZE(buffer));
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    ok(!wcscmp(buffer, L"Mat3x2Prop"), "Unexpected name %s.\n", wine_dbgstr_w(buffer));
+    prop_type = ID2D1Effect_GetType(effect, index);
+    ok(prop_type == D2D1_PROPERTY_TYPE_MATRIX_3X2, "Unexpected type %u.\n", prop_type);
+    hr = ID2D1Effect_GetValue(effect, index, D2D1_PROPERTY_TYPE_MATRIX_3X2, (BYTE *)mat, 6 * sizeof(float));
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    ok(mat[0] == 1.0f && mat[1] == 2.0f && mat[2] == 3.0f && mat[3] == 4.0f && mat[4] == 5.0f && mat[5] == 6.0f,
+            "Unexpected matrix (%.8e,%.8e,%.8e,%.8e,%.8e,%.8e).\n",
+            mat[0], mat[1], mat[2], mat[3], mat[4], mat[5]);
+
+    /* Matrix4x3 property. */
+    index = ID2D1Effect_GetPropertyIndex(effect, L"Mat4x3Prop");
+    hr = ID2D1Effect_GetPropertyName(effect, index, buffer, ARRAY_SIZE(buffer));
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    ok(!wcscmp(buffer, L"Mat4x3Prop"), "Unexpected name %s.\n", wine_dbgstr_w(buffer));
+    prop_type = ID2D1Effect_GetType(effect, index);
+    ok(prop_type == D2D1_PROPERTY_TYPE_MATRIX_4X3, "Unexpected type %u.\n", prop_type);
+    hr = ID2D1Effect_GetValue(effect, index, D2D1_PROPERTY_TYPE_MATRIX_4X3, (BYTE *)mat, 12 * sizeof(float));
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    for (i = 0; i < 12; ++i)
+        ok(mat[i] == 1.0f + i, "Unexpected matrix element %u.\n", i);
+
+    /* Matrix4x4 property. */
+    index = ID2D1Effect_GetPropertyIndex(effect, L"Mat4x4Prop");
+    hr = ID2D1Effect_GetPropertyName(effect, index, buffer, ARRAY_SIZE(buffer));
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    ok(!wcscmp(buffer, L"Mat4x4Prop"), "Unexpected name %s.\n", wine_dbgstr_w(buffer));
+    prop_type = ID2D1Effect_GetType(effect, index);
+    ok(prop_type == D2D1_PROPERTY_TYPE_MATRIX_4X4, "Unexpected type %u.\n", prop_type);
+    hr = ID2D1Effect_GetValue(effect, index, D2D1_PROPERTY_TYPE_MATRIX_4X4, (BYTE *)mat, 16 * sizeof(float));
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    for (i = 0; i < 16; ++i)
+        ok(mat[i] == 1.0f + i, "Unexpected matrix element %u.\n", i);
+
+    /* Matrix5x4 property. */
+    index = ID2D1Effect_GetPropertyIndex(effect, L"Mat5x4Prop");
+    hr = ID2D1Effect_GetPropertyName(effect, index, buffer, ARRAY_SIZE(buffer));
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    ok(!wcscmp(buffer, L"Mat5x4Prop"), "Unexpected name %s.\n", wine_dbgstr_w(buffer));
+    prop_type = ID2D1Effect_GetType(effect, index);
+    ok(prop_type == D2D1_PROPERTY_TYPE_MATRIX_5X4, "Unexpected type %u.\n", prop_type);
+    hr = ID2D1Effect_GetValue(effect, index, D2D1_PROPERTY_TYPE_MATRIX_5X4, (BYTE *)mat, 20 * sizeof(float));
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    for (i = 0; i < 20; ++i)
+        ok(mat[i] == 1.0f + i, "Unexpected matrix element %u.\n", i);
+
+    ID2D1Effect_Release(effect);
+
+    hr = ID2D1Factory1_UnregisterEffect(factory, &CLSID_TestEffect);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+    /* Test system properties */
+
+    for (i = 0; i < ARRAY_SIZE(system_property_tests); ++i)
+    {
+        const struct system_property_test *test = &system_property_tests[i];
+        winetest_push_context("Test %u", i);
+
+        hr = ID2D1Factory1_RegisterEffectFromString(factory, &CLSID_TestEffect, test->xml, NULL, 0, effect_impl_create);
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+        effect = NULL;
+        hr = ID2D1DeviceContext_CreateEffect(ctx.context, &CLSID_TestEffect, &effect);
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+        check_system_properties(effect, FALSE);
+
+        hr = ID2D1Effect_GetValue(effect, D2D1_PROPERTY_CLSID,
+                D2D1_PROPERTY_TYPE_CLSID, (BYTE *)&clsid, sizeof(clsid));
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+        ok(IsEqualGUID(&clsid, &CLSID_TestEffect), "Got unexpected clsid %s, expected %s.\n",
+                debugstr_guid(&clsid), debugstr_guid(&CLSID_TestEffect));
+
+        hr = ID2D1Effect_GetValue(effect, D2D1_PROPERTY_DISPLAYNAME,
+                D2D1_PROPERTY_TYPE_STRING, (BYTE *)buffer, sizeof(buffer));
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+        ok(!wcscmp(buffer, test->display_name), "Got unexpected display name %s, expected %s.\n",
+                debugstr_w(buffer), debugstr_w(test->display_name));
+
+        hr = ID2D1Effect_GetValue(effect, D2D1_PROPERTY_AUTHOR,
+                D2D1_PROPERTY_TYPE_STRING, (BYTE *)buffer, sizeof(buffer));
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+        ok(!wcscmp(buffer, test->author), "Got unexpected author %s, expected %s.\n",
+                debugstr_w(buffer), debugstr_w(test->author));
+
+        hr = ID2D1Effect_GetValue(effect, D2D1_PROPERTY_CATEGORY,
+                D2D1_PROPERTY_TYPE_STRING, (BYTE *)buffer, sizeof(buffer));
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+        ok(!wcscmp(buffer, test->category), "Got unexpected category %s, expected %s.\n",
+                debugstr_w(buffer), debugstr_w(test->category));
+
+        hr = ID2D1Effect_GetValue(effect, D2D1_PROPERTY_DESCRIPTION,
+                D2D1_PROPERTY_TYPE_STRING, (BYTE *)buffer, sizeof(buffer));
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+        ok(!wcscmp(buffer, test->description), "Got unexpected description %s, expected %s.\n",
+                debugstr_w(buffer), debugstr_w(test->description));
+
+        hr = ID2D1Effect_GetValue(effect, D2D1_PROPERTY_CACHED,
+                D2D1_PROPERTY_TYPE_BOOL, (BYTE *)&cached, sizeof(cached));
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+        ok(cached == FALSE, "Got unexpected cached %d.\n", cached);
+
+        hr = ID2D1Effect_GetValue(effect, D2D1_PROPERTY_PRECISION,
+                D2D1_PROPERTY_TYPE_ENUM, (BYTE *)&precision, sizeof(precision));
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+        ok(precision == D2D1_BUFFER_PRECISION_UNKNOWN, "Got unexpected precision %#x.\n", precision);
+
+        hr = ID2D1Effect_GetValue(effect, D2D1_PROPERTY_MIN_INPUTS,
+                D2D1_PROPERTY_TYPE_UINT32, (BYTE *)&min_inputs, sizeof(min_inputs));
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+        todo_wine_if(test->min_inputs == 0)
+        ok(min_inputs == test->min_inputs, "Got unexpected min inputs %u, expected %u.\n",
+                min_inputs, test->min_inputs);
+
+        hr = ID2D1Effect_GetValue(effect, D2D1_PROPERTY_MAX_INPUTS,
+                D2D1_PROPERTY_TYPE_UINT32, (BYTE *)&max_inputs, sizeof(max_inputs));
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+        todo_wine_if(test->max_inputs == 0)
+        ok(max_inputs == test->max_inputs, "Got unexpected max inputs %u, expected %u.\n",
+                max_inputs, test->max_inputs);
+
+        hr = ID2D1Effect_SetValue(effect, D2D1_PROPERTY_CLSID,
+                D2D1_PROPERTY_TYPE_CLSID, (BYTE *)&clsid, sizeof(clsid));
+        ok(hr == E_INVALIDARG || broken(hr == S_OK) /* win8 */, "Got unexpected hr %#lx.\n", hr);
+        hr = ID2D1Effect_SetValue(effect, D2D1_PROPERTY_DISPLAYNAME,
+                D2D1_PROPERTY_TYPE_STRING, (BYTE *)buffer, sizeof(buffer));
+        ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
+        hr = ID2D1Effect_SetValue(effect, D2D1_PROPERTY_AUTHOR,
+                D2D1_PROPERTY_TYPE_STRING, (BYTE *)buffer, sizeof(buffer));
+        ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
+        hr = ID2D1Effect_SetValue(effect, D2D1_PROPERTY_CATEGORY,
+                D2D1_PROPERTY_TYPE_STRING, (BYTE *)buffer, sizeof(buffer));
+        ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
+        hr = ID2D1Effect_SetValue(effect, D2D1_PROPERTY_DISPLAYNAME,
+                D2D1_PROPERTY_TYPE_STRING, (BYTE *)buffer, sizeof(buffer));
+        ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
+        hr = ID2D1Effect_SetValue(effect, D2D1_PROPERTY_CACHED,
+                D2D1_PROPERTY_TYPE_BOOL, (BYTE *)&cached, sizeof(cached));
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+        hr = ID2D1Effect_SetValue(effect, D2D1_PROPERTY_PRECISION,
+                D2D1_PROPERTY_TYPE_ENUM, (BYTE *)&precision, sizeof(precision));
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+        hr = ID2D1Effect_SetValue(effect, D2D1_PROPERTY_MIN_INPUTS,
+                D2D1_PROPERTY_TYPE_UINT32, (BYTE *)&min_inputs, sizeof(min_inputs));
+        ok(hr == E_INVALIDARG || broken(hr == S_OK) /* win8 */, "Got unexpected hr %#lx.\n", hr);
+        hr = ID2D1Effect_SetValue(effect, D2D1_PROPERTY_MAX_INPUTS,
+                D2D1_PROPERTY_TYPE_UINT32, (BYTE *)&max_inputs, sizeof(max_inputs));
+        ok(hr == E_INVALIDARG || broken(hr == S_OK) /* win8 */, "Got unexpected hr %#lx.\n", hr);
+
+        ID2D1Effect_Release(effect);
+        hr = ID2D1Factory1_UnregisterEffect(factory, &CLSID_TestEffect);
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+        winetest_pop_context();
+    }
+
+    /* Test custom properties */
+
+    hr = ID2D1Factory1_RegisterEffectFromString(factory, &CLSID_TestEffect,
+            effect_xml_c, binding, 2, effect_impl_create);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+    effect = NULL;
+    hr = ID2D1DeviceContext_CreateEffect(ctx.context, &CLSID_TestEffect, &effect);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+    count = ID2D1Effect_GetPropertyCount(effect);
+    ok(count == 3, "Got unexpected property count %u.\n", count);
+
+    index = ID2D1Effect_GetPropertyIndex(effect, L"Context");
+    ok(index == 0, "Got unexpected index %u.\n", index);
+    index = ID2D1Effect_GetPropertyIndex(effect, L"Integer");
+    ok(index == 1, "Got unexpected index %u.\n", index);
+
+    effect_context = (ID2D1EffectContext *)0xdeadbeef;
+    hr = ID2D1Effect_GetValueByName(effect,
+            L"Context", D2D1_PROPERTY_TYPE_IUNKNOWN, (BYTE *)&effect_context, sizeof(effect_context) - 1);
+    ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
+    hr = ID2D1Effect_GetValueByName(effect,
+            L"Context", D2D1_PROPERTY_TYPE_IUNKNOWN, (BYTE *)&effect_context, sizeof(effect_context) + 1);
+    ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
+    hr = ID2D1Effect_GetValueByName(effect,
+            L"Context", D2D1_PROPERTY_TYPE_IUNKNOWN, (BYTE *)&effect_context, sizeof(effect_context));
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    ok(effect_context != NULL && effect_context != (ID2D1EffectContext *)0xdeadbeef,
+       "Got unexpected effect context %p.\n", effect_context);
+
+    effect_context = (ID2D1EffectContext *)0xdeadbeef;
+    hr = ID2D1Effect_GetValue(effect, 0, D2D1_PROPERTY_TYPE_IUNKNOWN, (BYTE *)&effect_context, sizeof(effect_context) - 1);
+    ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
+    hr = ID2D1Effect_GetValue(effect, 0, D2D1_PROPERTY_TYPE_IUNKNOWN, (BYTE *)&effect_context, sizeof(effect_context) + 1);
+    ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
+    hr = ID2D1Effect_GetValue(effect, 0, D2D1_PROPERTY_TYPE_IUNKNOWN, (BYTE *)&effect_context, sizeof(effect_context));
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    ok(effect_context != NULL && effect_context != (ID2D1EffectContext *)0xdeadbeef,
+       "Got unexpected effect context %p.\n", effect_context);
+
+    hr = ID2D1Effect_SetValue(effect, 0, D2D1_PROPERTY_TYPE_IUNKNOWN, (BYTE *)&effect_context, sizeof(effect_context));
+    ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
+
+    integer = 0xdeadbeef;
+    hr = ID2D1Effect_GetValueByName(effect, L"Integer", D2D1_PROPERTY_TYPE_UINT32, (BYTE *)&integer, sizeof(integer) - 1);
+    ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
+    hr = ID2D1Effect_GetValueByName(effect, L"Integer", D2D1_PROPERTY_TYPE_UINT32, (BYTE *)&integer, sizeof(integer) + 1);
+    ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
+    hr = ID2D1Effect_GetValueByName(effect, L"Integer", D2D1_PROPERTY_TYPE_UINT32, (BYTE *)&integer, sizeof(integer));
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    ok(integer == 10, "Got unexpected integer %u.", integer);
+
+    integer = 0xdeadbeef;
+    hr = ID2D1Effect_GetValue(effect, 1, D2D1_PROPERTY_TYPE_UINT32, (BYTE *)&integer, sizeof(integer) - 1);
+    ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
+    hr = ID2D1Effect_GetValue(effect, 1, D2D1_PROPERTY_TYPE_UINT32, (BYTE *)&integer, sizeof(integer) + 1);
+    ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
+    hr = ID2D1Effect_GetValue(effect, 1, D2D1_PROPERTY_TYPE_UINT32, (BYTE *)&integer, sizeof(integer));
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    ok(integer == 10, "Got unexpected integer %u.", integer);
+
+    integer = 20;
+    hr = ID2D1Effect_SetValue(effect, 1, D2D1_PROPERTY_TYPE_UINT32, (BYTE *)&integer, sizeof(integer) - 1);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    hr = ID2D1Effect_SetValue(effect, 1, D2D1_PROPERTY_TYPE_UINT32, (BYTE *)&integer, sizeof(integer) + 1);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    hr = ID2D1Effect_SetValue(effect, 1, D2D1_PROPERTY_TYPE_UINT32, (BYTE *)&integer, sizeof(integer));
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    integer = 0xdeadbeef;
+    hr = ID2D1Effect_GetValue(effect, 1, D2D1_PROPERTY_TYPE_UINT32, (BYTE *)&integer, sizeof(integer));
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    ok(integer == 20, "Got unexpected integer %u\n.", integer);
+
+    ID2D1Effect_Release(effect);
+    hr = ID2D1Factory1_UnregisterEffect(factory, &CLSID_TestEffect);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+    /* Test custom properties without binding */
+
+    hr = ID2D1Factory1_RegisterEffectFromString(factory, &CLSID_TestEffect, effect_xml_c, NULL, 0, effect_impl_create);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    hr = ID2D1DeviceContext_CreateEffect(ctx.context, &CLSID_TestEffect, &effect);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+    index = ID2D1Effect_GetPropertyIndex(effect, L"Context");
+    ok(index == 0, "Got unexpected index %u.\n", index);
+    index = ID2D1Effect_GetPropertyIndex(effect, L"Integer");
+    ok(index == 1, "Got unexpected index %u.\n", index);
+
+    hr = ID2D1Effect_GetValueByName(effect, L"DeadBeef", D2D1_PROPERTY_TYPE_UINT32, (BYTE *)&integer, sizeof(integer));
+    ok(hr == D2DERR_INVALID_PROPERTY, "Got unexpected hr %#lx.\n", hr);
+
+    effect_context = (ID2D1EffectContext *)0xdeadbeef;
+    hr = ID2D1Effect_GetValue(effect, 0, D2D1_PROPERTY_TYPE_IUNKNOWN, (BYTE *)&effect_context, sizeof(effect_context));
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    ok(effect_context == NULL, "Got unexpected effect context %p.\n", effect_context);
+
+    integer = 0xdeadbeef;
+    hr = ID2D1Effect_GetValue(effect, 1, D2D1_PROPERTY_TYPE_UINT32, (BYTE *)&integer, sizeof(integer));
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    ok(integer == 0, "Got unexpected integer %u.", integer);
+
+    hr = ID2D1Effect_SetValue(effect, 0, D2D1_PROPERTY_TYPE_IUNKNOWN, (BYTE *)&effect_context, sizeof(effect_context));
+    ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
+    hr = ID2D1Effect_SetValue(effect, 1, D2D1_PROPERTY_TYPE_UINT32, (BYTE *)&integer, sizeof(integer));
+    ok(hr == E_INVALIDARG || broken(hr == S_OK) /* win8 */, "Got unexpected hr %#lx.\n", hr);
+
+    ID2D1Effect_Release(effect);
+    hr = ID2D1Factory1_UnregisterEffect(factory, &CLSID_TestEffect);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+    release_test_context(&ctx);
+}
+
+static void check_enum_property(ID2D1Effect *effect, UINT32 property,
+        const UINT32 *values, UINT32 count)
+{
+    ID2D1Properties *subproperties, *fields_subproperties, *field_subproperties;
+    D2D1_PROPERTY_TYPE prop_type;
+    UINT32 prop_count, value;
+    WCHAR buffer[64];
+    unsigned int i;
+    HRESULT hr;
+
+    prop_type = ID2D1Effect_GetType(effect, property);
+    ok(prop_type == D2D1_PROPERTY_TYPE_ENUM, "Unexpected type %d.\n", prop_type);
+
+    hr = ID2D1Effect_GetSubProperties(effect, property, &subproperties);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+    prop_type = ID2D1Properties_GetType(subproperties, D2D1_SUBPROPERTY_FIELDS);
+    ok(prop_type == D2D1_PROPERTY_TYPE_ARRAY, "Unexpected type %d.\n", prop_type);
+
+    /* Number of enum members. */
+    hr = ID2D1Properties_GetValue(subproperties, D2D1_SUBPROPERTY_FIELDS, D2D1_PROPERTY_TYPE_ARRAY,
+            (BYTE *)&value, sizeof(value));
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    ok(value == count, "Unexpected value %u.\n", value);
+
+    prop_count = ID2D1Properties_GetPropertyCount(subproperties);
+    ok(!prop_count, "Got unexpected property count %u.\n", count);
+
+    /* Fields is an array of strings providing display names for members. */
+    hr = ID2D1Properties_GetSubProperties(subproperties, D2D1_SUBPROPERTY_FIELDS,
+            &fields_subproperties);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    prop_count = ID2D1Properties_GetPropertyCount(fields_subproperties);
+    ok(prop_count == count, "Got unexpected property count %u.\n", count);
+
+    for (i = 0; i < prop_count; ++i)
+    {
+        winetest_push_context("Test %u", i);
+
+        prop_type = ID2D1Properties_GetType(fields_subproperties, i);
+        ok(prop_type == D2D1_PROPERTY_TYPE_STRING, "Unexpected type %d.\n", prop_type);
+
+        /* Field names are localized. */
+        hr = ID2D1Properties_GetSubProperties(fields_subproperties, i, &field_subproperties);
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+        prop_count = ID2D1Properties_GetPropertyCount(field_subproperties);
+        ok(prop_count == 1, "Got unexpected property count %u.\n", count);
+
+        prop_type = ID2D1Properties_GetType(field_subproperties, 0);
+        ok(prop_type == D2D1_PROPERTY_TYPE_UINT32, "Unexpected type %d.\n", prop_type);
+        hr = ID2D1Properties_GetPropertyName(field_subproperties, 0, buffer, ARRAY_SIZE(buffer));
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+        ok(!wcscmp(buffer, L"Index"), "Unexpected name %s.\n", wine_dbgstr_w(buffer));
+        hr = ID2D1Properties_GetValue(field_subproperties, 0, D2D1_PROPERTY_TYPE_UINT32, (BYTE *)&value, sizeof(value));
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+        ok(value == values[i], "Unexpected value %u, expected %u.\n", value, values[i]);
+
+        ID2D1Properties_Release(field_subproperties);
+
+        winetest_pop_context();
+    }
+
+    ID2D1Properties_Release(fields_subproperties);
+    ID2D1Properties_Release(subproperties);
 }
 
 static void test_effect_2d_affine(BOOL d3d11)
 {
     D2D1_MATRIX_3X2_F rotate, scale, skew;
     D2D1_BITMAP_PROPERTIES1 bitmap_desc;
+    unsigned int i, x, y, w, h, count;
     D2D_RECT_F output_bounds = {0};
     struct d2d1_test_context ctx;
     ID2D1DeviceContext *context;
-    unsigned int i, x, y, w, h;
     D2D1_SIZE_U input_size;
     ID2D1Factory1 *factory;
     D2D1_POINT_2F offset;
     ID2D1Bitmap1 *bitmap;
     ID2D1Effect *effect;
     ID2D1Image *output;
+    UINT32 value;
     BOOL match;
     HRESULT hr;
 
@@ -10106,6 +11830,22 @@ static void test_effect_2d_affine(BOOL d3d11)
          "BgEfAQQBIQECASMChAEA"},
     };
 
+    static const unsigned int border_modes[] =
+    {
+        D2D1_BORDER_MODE_SOFT,
+        D2D1_BORDER_MODE_HARD,
+    };
+
+    static const unsigned int interp_modes[] =
+    {
+        D2D1_2DAFFINETRANSFORM_INTERPOLATION_MODE_NEAREST_NEIGHBOR,
+        D2D1_2DAFFINETRANSFORM_INTERPOLATION_MODE_LINEAR,
+        D2D1_2DAFFINETRANSFORM_INTERPOLATION_MODE_CUBIC,
+        D2D1_2DAFFINETRANSFORM_INTERPOLATION_MODE_MULTI_SAMPLE_LINEAR,
+        D2D1_2DAFFINETRANSFORM_INTERPOLATION_MODE_ANISOTROPIC,
+        D2D1_2DAFFINETRANSFORM_INTERPOLATION_MODE_HIGH_QUALITY_CUBIC,
+    };
+
     memset(image_16x16, 0xff, sizeof(image_16x16));
     set_matrix_identity(&rotate);
     set_matrix_identity(&scale);
@@ -10120,18 +11860,45 @@ static void test_effect_2d_affine(BOOL d3d11)
     if (!init_test_context(&ctx, d3d11))
         return;
 
-    if (FAILED(D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, &IID_ID2D1Factory1, NULL, (void **)&factory)))
+    factory = ctx.factory1;
+    if (!factory)
     {
         win_skip("ID2D1Factory1 is not supported.\n");
         release_test_context(&ctx);
         return;
     }
 
-    hr = ID2D1RenderTarget_QueryInterface(ctx.rt, &IID_ID2D1DeviceContext, (void **)&context);
-    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    context = ctx.context;
 
     hr = ID2D1DeviceContext_CreateEffect(context, &CLSID_D2D12DAffineTransform, &effect);
-    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+    check_system_properties(effect, TRUE);
+
+    count = ID2D1Effect_GetPropertyCount(effect);
+    todo_wine ok(count == 4, "Got unexpected property count %u.\n", count);
+
+    hr = ID2D1Effect_GetValue(effect, D2D1_2DAFFINETRANSFORM_PROP_INTERPOLATION_MODE,
+            D2D1_PROPERTY_TYPE_ENUM, (BYTE *)&value, sizeof(value));
+    todo_wine
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    if (SUCCEEDED(hr))
+    {
+        ok(value == D2D1_2DAFFINETRANSFORM_INTERPOLATION_MODE_LINEAR, "Unexpected value %u.\n", value);
+        check_enum_property(effect, D2D1_2DAFFINETRANSFORM_PROP_INTERPOLATION_MODE, interp_modes,
+                ARRAY_SIZE(interp_modes));
+    }
+
+    hr = ID2D1Effect_GetValue(effect, D2D1_2DAFFINETRANSFORM_PROP_BORDER_MODE, D2D1_PROPERTY_TYPE_ENUM,
+            (BYTE *)&value, sizeof(value));
+    todo_wine
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    if (SUCCEEDED(hr))
+    {
+        ok(value == D2D1_BORDER_MODE_SOFT, "Unexpected value %u.\n", value);
+        check_enum_property(effect, D2D1_2DAFFINETRANSFORM_PROP_BORDER_MODE, border_modes,
+                ARRAY_SIZE(border_modes));
+    }
 
     for (i = 0; i < ARRAY_SIZE(effect_2d_affine_tests); ++i)
     {
@@ -10147,13 +11914,19 @@ static void test_effect_2d_affine(BOOL d3d11)
         bitmap_desc.colorContext = NULL;
         hr = ID2D1DeviceContext_CreateBitmap(context, input_size, test->img_data,
                 sizeof(*test->img_data) * test->img_width, &bitmap_desc, &bitmap);
-        ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
         ID2D1Effect_SetInput(effect, 0, (ID2D1Image *)bitmap, FALSE);
-        todo_wine
         hr = ID2D1Effect_SetValue(effect, D2D1_2DAFFINETRANSFORM_PROP_TRANSFORM_MATRIX,
                 D2D1_PROPERTY_TYPE_MATRIX_3X2, (const BYTE *)test->matrix, sizeof(*test->matrix));
-        ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+        todo_wine
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+        if (hr == D2DERR_INVALID_PROPERTY)
+        {
+            ID2D1Bitmap1_Release(bitmap);
+            winetest_pop_context();
+            continue;
+        }
         ID2D1Effect_GetOutput(effect, &output);
 
         ID2D1DeviceContext_GetImageLocalBounds(context, output, &output_bounds);
@@ -10176,7 +11949,7 @@ static void test_effect_2d_affine(BOOL d3d11)
         offset.y = 240.0f;
         ID2D1DeviceContext_DrawImage(context, output, &offset, NULL, 0, 0);
         hr = ID2D1DeviceContext_EndDraw(context, NULL, NULL);
-        ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
         x = offset.x + output_bounds.left - 2.0f;
         y = offset.y + output_bounds.top - 2.0f;
@@ -10192,8 +11965,6 @@ static void test_effect_2d_affine(BOOL d3d11)
     }
 
     ID2D1Effect_Release(effect);
-    ID2D1DeviceContext_Release(context);
-    ID2D1Factory1_Release(factory);
     release_test_context(&ctx);
 }
 
@@ -10205,11 +11976,11 @@ static void test_effect_crop(BOOL d3d11)
     D2D_RECT_F output_bounds;
     D2D1_SIZE_U input_size;
     ID2D1Factory1 *factory;
+    unsigned int count, i;
     ID2D1Bitmap1 *bitmap;
     DWORD image[16 * 16];
     ID2D1Effect *effect;
     ID2D1Image *output;
-    unsigned int i;
     HRESULT hr;
 
     const struct crop_effect_test
@@ -10232,18 +12003,23 @@ static void test_effect_crop(BOOL d3d11)
     if (!init_test_context(&ctx, d3d11))
         return;
 
-    if (FAILED(D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, &IID_ID2D1Factory1, NULL, (void **)&factory)))
+    factory = ctx.factory1;
+    if (!factory)
     {
         win_skip("ID2D1Factory1 is not supported.\n");
         release_test_context(&ctx);
         return;
     }
 
-    hr = ID2D1RenderTarget_QueryInterface(ctx.rt, &IID_ID2D1DeviceContext, (void **)&context);
-    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    context = ctx.context;
 
     hr = ID2D1DeviceContext_CreateEffect(context, &CLSID_D2D1Crop, &effect);
-    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+    check_system_properties(effect, TRUE);
+
+    count = ID2D1Effect_GetPropertyCount(effect);
+    todo_wine ok(count == 2, "Got unexpected property count %u.\n", count);
 
     for (i = 0; i < ARRAY_SIZE(crop_effect_tests); ++i)
     {
@@ -10259,12 +12035,19 @@ static void test_effect_crop(BOOL d3d11)
         bitmap_desc.colorContext = NULL;
         hr = ID2D1DeviceContext_CreateBitmap(context, input_size, image,
                 sizeof(*image) * 16, &bitmap_desc, &bitmap);
-        ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
         ID2D1Effect_SetInput(effect, 0, (ID2D1Image *)bitmap, FALSE);
         hr = ID2D1Effect_SetValue(effect, D2D1_CROP_PROP_RECT, D2D1_PROPERTY_TYPE_VECTOR4,
                 (const BYTE *)&test->crop_rect, sizeof(test->crop_rect));
-        ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+        todo_wine
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+        if (hr == D2DERR_INVALID_PROPERTY)
+        {
+            ID2D1Bitmap1_Release(bitmap);
+            winetest_pop_context();
+            continue;
+        }
         ID2D1Effect_GetOutput(effect, &output);
 
         set_rect(&output_bounds, -1.0f, -1.0f, -1.0f, -1.0f);
@@ -10281,14 +12064,564 @@ static void test_effect_crop(BOOL d3d11)
     }
 
     ID2D1Effect_Release(effect);
-    ID2D1DeviceContext_Release(context);
-    ID2D1Factory1_Release(factory);
+    release_test_context(&ctx);
+}
+
+static void test_effect_grayscale(BOOL d3d11)
+{
+    DWORD colour, expected_colour, luminance;
+    D2D1_BITMAP_PROPERTIES1 bitmap_desc;
+    struct d2d1_test_context ctx;
+    struct resource_readback rb;
+    ID2D1DeviceContext *context;
+    D2D1_SIZE_U input_size;
+    ID2D1Factory3 *factory;
+    unsigned int count, i;
+    ID2D1Bitmap1 *bitmap;
+    ID2D1Effect *effect;
+    ID2D1Image *output;
+    HRESULT hr;
+
+    const DWORD test_pixels[] = {0xffffffff, 0x12345678, 0x89abcdef, 0x77777777, 0xdeadbeef};
+
+    if (!init_test_context(&ctx, d3d11))
+        return;
+
+    factory = ctx.factory3;
+    if (!factory)
+    {
+        win_skip("ID2D1Factory3 is not supported.\n");
+        release_test_context(&ctx);
+        return;
+    }
+
+    context = ctx.context;
+
+    hr = ID2D1DeviceContext_CreateEffect(context, &CLSID_D2D1Grayscale, &effect);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+    check_system_properties(effect, TRUE);
+
+    count = ID2D1Effect_GetPropertyCount(effect);
+    ok(!count, "Got unexpected property count %u.\n", count);
+
+    for (i = 0; i < ARRAY_SIZE(test_pixels); ++i)
+    {
+        DWORD pixel = test_pixels[i];
+        winetest_push_context("Test %u", i);
+
+        set_size_u(&input_size, 1, 1);
+        bitmap_desc.pixelFormat.format = DXGI_FORMAT_B8G8R8A8_UNORM;
+        bitmap_desc.pixelFormat.alphaMode = D2D1_ALPHA_MODE_IGNORE;
+        bitmap_desc.dpiX = 96.0f;
+        bitmap_desc.dpiY = 96.0f;
+        bitmap_desc.bitmapOptions = D2D1_BITMAP_OPTIONS_NONE;
+        bitmap_desc.colorContext = NULL;
+        hr = ID2D1DeviceContext_CreateBitmap(context, input_size, &pixel, sizeof(pixel), &bitmap_desc, &bitmap);
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+        ID2D1Effect_SetInput(effect, 0, (ID2D1Image *)bitmap, FALSE);
+        ID2D1Effect_GetOutput(effect, &output);
+
+        ID2D1DeviceContext_BeginDraw(context);
+        ID2D1DeviceContext_Clear(context, 0);
+        ID2D1DeviceContext_DrawImage(context, output, NULL, NULL, 0, 0);
+        hr = ID2D1DeviceContext_EndDraw(context, NULL, NULL);
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+        get_surface_readback(&ctx, &rb);
+        colour = get_readback_colour(&rb, 0, 0);
+        luminance = (DWORD)(0.299f * ((pixel >> 16) & 0xff)
+                + 0.587f * ((pixel >> 8) & 0xff)
+                + 0.114f * ((pixel >> 0) & 0xff) + 0.5f);
+        expected_colour = (pixel & 0xff000000) | (luminance << 16) | (luminance << 8) | luminance;
+        todo_wine ok(compare_colour(colour, expected_colour, 1),
+                "Got unexpected colour %#lx, expected %#lx.\n", colour, expected_colour);
+        release_resource_readback(&rb);
+
+        ID2D1Image_Release(output);
+        ID2D1Bitmap1_Release(bitmap);
+        winetest_pop_context();
+    }
+
+    ID2D1Effect_Release(effect);
+    release_test_context(&ctx);
+}
+
+static void test_registered_effects(BOOL d3d11)
+{
+    UINT32 ret, count, count2, count3;
+    struct d2d1_test_context ctx;
+    ID2D1Factory1 *factory;
+    CLSID *effects;
+    HRESULT hr;
+
+    if (!init_test_context(&ctx, d3d11))
+        return;
+
+    factory = ctx.factory1;
+
+    count = 0;
+    hr = ID2D1Factory1_GetRegisteredEffects(factory, NULL, 0, NULL, &count);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    ok(count > 0, "Unexpected effect count %u.\n", count);
+
+    hr = ID2D1Factory1_RegisterEffectFromString(factory, &CLSID_TestEffect, effect_xml_a,
+            NULL, 0, effect_impl_create);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+
+    count2 = 0;
+    hr = ID2D1Factory1_GetRegisteredEffects(factory, NULL, 0, NULL, &count2);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    ok(count2 == count + 1, "Unexpected effect count %u.\n", count2);
+
+    effects = calloc(count2, sizeof(*effects));
+
+    count3 = 0;
+    hr = ID2D1Factory1_GetRegisteredEffects(factory, effects, 0, NULL, &count3);
+    ok(hr == D2DERR_INSUFFICIENT_BUFFER, "Unexpected hr %#lx.\n", hr);
+    ok(count2 == count3, "Unexpected effect count %u.\n", count3);
+
+    ret = 999;
+    hr = ID2D1Factory1_GetRegisteredEffects(factory, effects, 0, &ret, NULL);
+    ok(hr == D2DERR_INSUFFICIENT_BUFFER, "Unexpected hr %#lx.\n", hr);
+    ok(!ret, "Unexpected count %u.\n", ret);
+
+    ret = 0;
+    hr = ID2D1Factory1_GetRegisteredEffects(factory, effects, 1, &ret, NULL);
+    ok(hr == D2DERR_INSUFFICIENT_BUFFER, "Unexpected hr %#lx.\n", hr);
+    ok(ret == 1, "Unexpected count %u.\n", ret);
+    ok(!IsEqualGUID(effects, &CLSID_TestEffect), "Unexpected clsid.\n");
+
+    ret = 0;
+    hr = ID2D1Factory1_GetRegisteredEffects(factory, effects, count2, &ret, NULL);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    ok(ret == count2, "Unexpected count %u.\n", ret);
+    ok(IsEqualGUID(&effects[ret - 1], &CLSID_TestEffect), "Unexpected clsid.\n");
+
+    free(effects);
+
+    hr = ID2D1Factory1_UnregisterEffect(factory, &CLSID_TestEffect);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+
+    count2 = 0;
+    hr = ID2D1Factory1_GetRegisteredEffects(factory, NULL, 0, NULL, &count2);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    ok(count2 == count, "Unexpected effect count %u.\n", count2);
+
+    release_test_context(&ctx);
+}
+
+static void test_transform_graph(BOOL d3d11)
+{
+    ID2D1OffsetTransform *offset_transform = NULL;
+    ID2D1BlendTransform *blend_transform = NULL;
+    D2D1_BLEND_DESCRIPTION blend_desc = {0};
+    ID2D1EffectContext *effect_context;
+    struct d2d1_test_context ctx;
+    ID2D1TransformGraph *graph;
+    ID2D1Factory1 *factory;
+    POINT point = {0 ,0};
+    ID2D1Effect *effect;
+    UINT i, count;
+    HRESULT hr;
+
+    const D2D1_PROPERTY_BINDING binding[] =
+    {
+        {L"Context", NULL, effect_impl_get_context},
+        {L"Graph",   NULL, effect_impl_get_graph},
+    };
+
+    if (!init_test_context(&ctx, d3d11))
+        return;
+
+    factory = ctx.factory1;
+    if (!factory)
+    {
+        win_skip("ID2D1Factory1 is not supported.\n");
+        release_test_context(&ctx);
+        return;
+    }
+
+    hr = ID2D1Factory1_RegisterEffectFromString(factory, &CLSID_TestEffect,
+            effect_xml_c, binding, ARRAY_SIZE(binding), effect_impl_create);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+    hr = ID2D1DeviceContext_CreateEffect(ctx.context, &CLSID_TestEffect, &effect);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+    hr = ID2D1Effect_GetValueByName(effect, L"Graph", D2D1_PROPERTY_TYPE_IUNKNOWN, (BYTE *)&graph, sizeof(graph));
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    hr = ID2D1Effect_GetValueByName(effect, L"Context",
+            D2D1_PROPERTY_TYPE_IUNKNOWN, (BYTE *)&effect_context, sizeof(effect_context));
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+    /* Create transforms */
+    hr = ID2D1EffectContext_CreateOffsetTransform(effect_context, point, &offset_transform);
+    todo_wine ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    hr = ID2D1EffectContext_CreateBlendTransform(effect_context, 2, &blend_desc, &blend_transform);
+    todo_wine ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    if (!offset_transform || !blend_transform)
+        goto done;
+
+    /* Add nodes */
+    hr = ID2D1TransformGraph_AddNode(graph, (ID2D1TransformNode *)offset_transform);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    hr = ID2D1TransformGraph_AddNode(graph, (ID2D1TransformNode *)offset_transform);
+    ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
+    hr = ID2D1TransformGraph_AddNode(graph, (ID2D1TransformNode *)blend_transform);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+    /* Remove nodes */
+    hr = ID2D1TransformGraph_RemoveNode(graph, (ID2D1TransformNode *)offset_transform);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    hr = ID2D1TransformGraph_RemoveNode(graph, (ID2D1TransformNode *)offset_transform);
+    ok(hr == HRESULT_FROM_WIN32(ERROR_NOT_FOUND), "Got unexpected hr %#lx.\n", hr);
+    hr = ID2D1TransformGraph_RemoveNode(graph, (ID2D1TransformNode *)blend_transform);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+    /* Connect nodes which are both un-added */
+    ID2D1TransformGraph_Clear(graph);
+    hr = ID2D1TransformGraph_ConnectNode(graph,
+            (ID2D1TransformNode *)offset_transform, (ID2D1TransformNode *)blend_transform, 0);
+    ok(hr == HRESULT_FROM_WIN32(ERROR_NOT_FOUND), "Got unexpected hr %#lx.\n", hr);
+
+    /* Connect added node to un-added node */
+    hr = ID2D1TransformGraph_AddNode(graph, (ID2D1TransformNode *)offset_transform);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    hr = ID2D1TransformGraph_ConnectNode(graph,
+            (ID2D1TransformNode *)offset_transform, (ID2D1TransformNode *)blend_transform, 0);
+    ok(hr == HRESULT_FROM_WIN32(ERROR_NOT_FOUND), "Got unexpected hr %#lx.\n", hr);
+
+    /* Connect un-added node to added node */
+    ID2D1TransformGraph_Clear(graph);
+    hr = ID2D1TransformGraph_AddNode(graph, (ID2D1TransformNode *)blend_transform);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    hr = ID2D1TransformGraph_ConnectNode(graph,
+            (ID2D1TransformNode *)offset_transform, (ID2D1TransformNode *)blend_transform, 0);
+    ok(hr == HRESULT_FROM_WIN32(ERROR_NOT_FOUND), "Got unexpected hr %#lx.\n", hr);
+
+    /* Connect nodes */
+    ID2D1TransformGraph_Clear(graph);
+    hr = ID2D1TransformGraph_AddNode(graph, (ID2D1TransformNode *)offset_transform);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    hr = ID2D1TransformGraph_AddNode(graph, (ID2D1TransformNode *)blend_transform);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    count = ID2D1BlendTransform_GetInputCount(blend_transform);
+    for (i = 0; i < count; ++i)
+    {
+        hr = ID2D1TransformGraph_ConnectNode(graph,
+                (ID2D1TransformNode *)offset_transform, (ID2D1TransformNode *)blend_transform, i);
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    }
+
+    /* Connect node to out-of-bounds index */
+    hr = ID2D1TransformGraph_ConnectNode(graph,
+            (ID2D1TransformNode *)offset_transform, (ID2D1TransformNode *)blend_transform, count);
+    ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
+
+done:
+    if (blend_transform)
+        ID2D1BlendTransform_Release(blend_transform);
+    if (offset_transform)
+        ID2D1OffsetTransform_Release(offset_transform);
+    ID2D1Effect_Release(effect);
+    hr = ID2D1Factory1_UnregisterEffect(factory, &CLSID_TestEffect);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    release_test_context(&ctx);
+}
+
+static void test_offset_transform(BOOL d3d11)
+{
+    ID2D1OffsetTransform *transform = NULL;
+    ID2D1EffectContext *effect_context;
+    D2D1_PROPERTY_BINDING binding;
+    struct d2d1_test_context ctx;
+    ID2D1Factory1 *factory;
+    D2D1_POINT_2L offset;
+    ID2D1Effect *effect;
+    UINT input_count;
+    HRESULT hr;
+
+    if (!init_test_context(&ctx, d3d11))
+        return;
+
+    factory = ctx.factory1;
+    if (!factory)
+    {
+        win_skip("ID2D1Factory1 is not supported.\n");
+        release_test_context(&ctx);
+        return;
+    }
+
+    binding.propertyName = L"Context";
+    binding.setFunction = NULL;
+    binding.getFunction = effect_impl_get_context;
+    hr = ID2D1Factory1_RegisterEffectFromString(factory, &CLSID_TestEffect,
+            effect_xml_b, &binding, 1, effect_impl_create);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+    hr = ID2D1DeviceContext_CreateEffect(ctx.context, &CLSID_TestEffect, &effect);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+    hr = ID2D1Effect_GetValueByName(effect, L"Context",
+            D2D1_PROPERTY_TYPE_IUNKNOWN, (BYTE *)&effect_context, sizeof(effect_context));
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+    /* Create transform */
+    offset.x = 1;
+    offset.y = 2;
+    hr = ID2D1EffectContext_CreateOffsetTransform(effect_context, offset, &transform);
+    todo_wine ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    if (hr != S_OK)
+        goto done;
+    offset = ID2D1OffsetTransform_GetOffset(transform);
+    ok(offset.x == 1 && offset.y == 2, "Got unexpected offset {%ld, %ld}.\n", offset.x, offset.y);
+
+    /* Input count */
+    input_count = ID2D1OffsetTransform_GetInputCount(transform);
+    ok(input_count == 1, "Got unexpected input count %u.\n", input_count);
+
+    /* Set offset */
+    offset.x = -10;
+    offset.y = 20;
+    ID2D1OffsetTransform_SetOffset(transform, offset);
+    offset = ID2D1OffsetTransform_GetOffset(transform);
+    ok(offset.x == -10 && offset.y == 20, "Got unexpected offset {%ld, %ld}.\n", offset.x, offset.y);
+
+done:
+    if (transform)
+        ID2D1OffsetTransform_Release(transform);
+    ID2D1Effect_Release(effect);
+    hr = ID2D1Factory1_UnregisterEffect(factory, &CLSID_TestEffect);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    release_test_context(&ctx);
+}
+
+#define check_blend_desc(blend_desc, expected) check_blend_desc_(__LINE__, blend_desc, expected)
+static void check_blend_desc_(unsigned int line,
+        const D2D1_BLEND_DESCRIPTION *blend_desc, const D2D1_BLEND_DESCRIPTION *expected)
+{
+    ok_(__FILE__, line)(blend_desc->sourceBlend == expected->sourceBlend,
+            "Got unexpected source blend %u, expected %u.\n",
+            blend_desc->sourceBlend, expected->sourceBlend);
+    ok_(__FILE__, line)(blend_desc->destinationBlend == expected->destinationBlend,
+            "Got unexpected destination blend %u, expected %u.\n",
+            blend_desc->destinationBlend, expected->destinationBlend);
+    ok_(__FILE__, line)(blend_desc->blendOperation == expected->blendOperation,
+            "Got unexpected blend operation %u, expected %u.\n",
+            blend_desc->blendOperation, expected->blendOperation);
+    ok_(__FILE__, line)(blend_desc->sourceBlendAlpha == expected->sourceBlendAlpha,
+            "Got unexpected source blend alpha %u, expected %u.\n",
+            blend_desc->sourceBlendAlpha, expected->sourceBlendAlpha);
+    ok_(__FILE__, line)(blend_desc->destinationBlendAlpha == expected->destinationBlendAlpha,
+            "Got unexpected destination blend alpha %u, expected %u.\n",
+            blend_desc->destinationBlendAlpha, expected->destinationBlendAlpha);
+    ok_(__FILE__, line)(blend_desc->blendOperationAlpha == expected->blendOperationAlpha,
+            "Got unexpected blend operation alpha %u, expected %u.\n",
+            blend_desc->blendOperationAlpha, expected->blendOperationAlpha);
+    ok_(__FILE__, line)(blend_desc->blendFactor[0] == expected->blendFactor[0],
+            "Got unexpected blendFactor[0] %.8e, expected %.8e.\n",
+            blend_desc->blendFactor[0], expected->blendFactor[0]);
+    ok_(__FILE__, line)(blend_desc->blendFactor[1] == expected->blendFactor[1],
+            "Got unexpected blendFactor[1] %.8e, expected %.8e.\n",
+            blend_desc->blendFactor[1], expected->blendFactor[1]);
+    ok_(__FILE__, line)(blend_desc->blendFactor[2] == expected->blendFactor[2],
+            "Got unexpected blendFactor[2] %.8e, expected %.8e.\n",
+            blend_desc->blendFactor[2], expected->blendFactor[2]);
+    ok_(__FILE__, line)(blend_desc->blendFactor[3] == expected->blendFactor[3],
+            "Got unexpected blendFactor[3] %.8e, expected %.8e.\n",
+            blend_desc->blendFactor[3], expected->blendFactor[3]);
+}
+
+static void test_blend_transform(BOOL d3d11)
+{
+    D2D1_BLEND_DESCRIPTION blend_desc, expected= {0};
+    ID2D1BlendTransform *transform = NULL;
+    ID2D1EffectContext *effect_context;
+    D2D1_PROPERTY_BINDING binding;
+    struct d2d1_test_context ctx;
+    ID2D1Factory1 *factory;
+    ID2D1Effect *effect;
+    UINT input_count;
+    HRESULT hr;
+
+    if (!init_test_context(&ctx, d3d11))
+        return;
+
+    factory = ctx.factory1;
+    if (!factory)
+    {
+        win_skip("ID2D1Factory1 is not supported.\n");
+        release_test_context(&ctx);
+        return;
+    }
+
+    binding.propertyName = L"Context";
+    binding.setFunction = NULL;
+    binding.getFunction = effect_impl_get_context;
+    hr = ID2D1Factory1_RegisterEffectFromString(factory, &CLSID_TestEffect,
+            effect_xml_b, &binding, 1, effect_impl_create);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+    hr = ID2D1DeviceContext_CreateEffect(ctx.context, &CLSID_TestEffect, &effect);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+    hr = ID2D1Effect_GetValueByName(effect, L"Context",
+            D2D1_PROPERTY_TYPE_IUNKNOWN, (BYTE *)&effect_context, sizeof(effect_context));
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+    /* Create transform */
+    hr = ID2D1EffectContext_CreateBlendTransform(effect_context, 0, &expected, &transform);
+    todo_wine ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
+    hr = ID2D1EffectContext_CreateBlendTransform(effect_context, 1, &expected, &transform);
+    todo_wine ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    if (hr != S_OK)
+        goto done;
+    ID2D1BlendTransform_Release(transform);
+    hr = ID2D1EffectContext_CreateBlendTransform(effect_context, 4, &expected, &transform);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+    /* Get description */
+    ID2D1BlendTransform_GetDescription(transform, &blend_desc);
+    check_blend_desc(&blend_desc, &expected);
+
+    /* Input count */
+    input_count = ID2D1BlendTransform_GetInputCount(transform);
+    ok(input_count == 4, "Got unexpected input count %u.\n", input_count);
+
+    /* Set output buffer */
+    hr = ID2D1BlendTransform_SetOutputBuffer(transform, 0xdeadbeef, D2D1_CHANNEL_DEPTH_DEFAULT);
+    ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
+    hr = ID2D1BlendTransform_SetOutputBuffer(transform, D2D1_BUFFER_PRECISION_UNKNOWN, 0xdeadbeef);
+    ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
+    hr = ID2D1BlendTransform_SetOutputBuffer(transform, D2D1_BUFFER_PRECISION_UNKNOWN, D2D1_CHANNEL_DEPTH_DEFAULT);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+    /* Set description */
+    expected.sourceBlend = D2D1_BLEND_ZERO;
+    expected.destinationBlend = D2D1_BLEND_ZERO;
+    expected.blendOperation = D2D1_BLEND_OPERATION_ADD;
+    expected.sourceBlendAlpha = 0xdeadbeef;
+    expected.destinationBlendAlpha = 0;
+    expected.blendOperationAlpha = 12345678;
+    expected.blendFactor[0] = 0.0f;
+    expected.blendFactor[1] = 0.0f;
+    expected.blendFactor[2] = 0.0f;
+    expected.blendFactor[3] = 0.0f;
+    ID2D1BlendTransform_SetDescription(transform, &expected);
+    ID2D1BlendTransform_GetDescription(transform, &blend_desc);
+    check_blend_desc(&blend_desc, &expected);
+
+done:
+    if (transform)
+        ID2D1BlendTransform_Release(transform);
+    ID2D1Effect_Release(effect);
+    hr = ID2D1Factory1_UnregisterEffect(factory, &CLSID_TestEffect);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    release_test_context(&ctx);
+}
+
+static void test_border_transform(BOOL d3d11)
+{
+    ID2D1BorderTransform *transform = NULL;
+    ID2D1EffectContext *effect_context;
+    D2D1_PROPERTY_BINDING binding;
+    struct d2d1_test_context ctx;
+    ID2D1Factory1 *factory;
+    D2D1_EXTEND_MODE mode;
+    ID2D1Effect *effect;
+    UINT input_count;
+    HRESULT hr;
+
+    if (!init_test_context(&ctx, d3d11))
+        return;
+
+    factory = ctx.factory1;
+    if (!factory)
+    {
+        win_skip("ID2D1Factory1 is not supported.\n");
+        release_test_context(&ctx);
+        return;
+    }
+
+    binding.propertyName = L"Context";
+    binding.setFunction = NULL;
+    binding.getFunction = effect_impl_get_context;
+    hr = ID2D1Factory1_RegisterEffectFromString(factory, &CLSID_TestEffect,
+            effect_xml_b, &binding, 1, effect_impl_create);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+    hr = ID2D1DeviceContext_CreateEffect(ctx.context, &CLSID_TestEffect, &effect);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+    hr = ID2D1Effect_GetValueByName(effect, L"Context",
+            D2D1_PROPERTY_TYPE_IUNKNOWN, (BYTE *)&effect_context, sizeof(effect_context));
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+    /* Create transform with invalid extend mode */
+    hr = ID2D1EffectContext_CreateBorderTransform(effect_context, 0xdeadbeef, 0xdeadbeef, &transform);
+    todo_wine ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    if (hr != S_OK)
+        goto done;
+    mode = ID2D1BorderTransform_GetExtendModeX(transform);
+    ok(mode == 0xdeadbeef, "Got unexpected extend mode %u.\n", mode);
+    mode = ID2D1BorderTransform_GetExtendModeY(transform);
+    ok(mode == 0xdeadbeef, "Got unexpected extend mode %u.\n", mode);
+    ID2D1BorderTransform_Release(transform);
+
+    /* Create transform */
+    hr = ID2D1EffectContext_CreateBorderTransform(effect_context, D2D1_EXTEND_MODE_CLAMP, D2D1_EXTEND_MODE_WRAP, &transform);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+    /* Get extend mode */
+    mode = ID2D1BorderTransform_GetExtendModeX(transform);
+    ok(mode == D2D1_EXTEND_MODE_CLAMP, "Got unexpected extend mode %u.\n", mode);
+    mode = ID2D1BorderTransform_GetExtendModeY(transform);
+    ok(mode == D2D1_EXTEND_MODE_WRAP, "Got unexpected extend mode %u.\n", mode);
+
+    /* Input count */
+    input_count = ID2D1BorderTransform_GetInputCount(transform);
+    ok(input_count == 1, "Got unexpected input count %u.\n", input_count);
+
+    /* Set output buffer */
+    hr = ID2D1BorderTransform_SetOutputBuffer(transform, 0xdeadbeef, D2D1_CHANNEL_DEPTH_DEFAULT);
+    ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
+    hr = ID2D1BorderTransform_SetOutputBuffer(transform, D2D1_BUFFER_PRECISION_UNKNOWN, 0xdeadbeef);
+    ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
+    hr = ID2D1BorderTransform_SetOutputBuffer(transform, D2D1_BUFFER_PRECISION_UNKNOWN, D2D1_CHANNEL_DEPTH_DEFAULT);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+    /* Set extend mode */
+    ID2D1BorderTransform_SetExtendModeX(transform, D2D1_EXTEND_MODE_MIRROR);
+    mode = ID2D1BorderTransform_GetExtendModeX(transform);
+    ok(mode == D2D1_EXTEND_MODE_MIRROR, "Got unexpected extend mode %u.\n", mode);
+    ID2D1BorderTransform_SetExtendModeY(transform, D2D1_EXTEND_MODE_CLAMP);
+    mode = ID2D1BorderTransform_GetExtendModeY(transform);
+    ok(mode == D2D1_EXTEND_MODE_CLAMP, "Got unexpected extend mode %u.\n", mode);
+
+    /* Set extend mode with invalid value */
+    ID2D1BorderTransform_SetExtendModeX(transform, 0xdeadbeef);
+    mode = ID2D1BorderTransform_GetExtendModeX(transform);
+    ok(mode == D2D1_EXTEND_MODE_MIRROR, "Got unexpected extend mode %u.\n", mode);
+    ID2D1BorderTransform_SetExtendModeY(transform, 0xdeadbeef);
+    mode = ID2D1BorderTransform_GetExtendModeY(transform);
+    ok(mode == D2D1_EXTEND_MODE_CLAMP, "Got unexpected extend mode %u.\n", mode);
+
+done:
+    if (transform)
+        ID2D1BorderTransform_Release(transform);
+    ID2D1Effect_Release(effect);
+    hr = ID2D1Factory1_UnregisterEffect(factory, &CLSID_TestEffect);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     release_test_context(&ctx);
 }
 
 static void test_stroke_contains_point(BOOL d3d11)
 {
+    ID2D1TransformedGeometry *transformed_geometry;
     ID2D1RectangleGeometry *rectangle;
+    D2D1_MATRIX_3X2_F matrix;
     ID2D1GeometrySink *sink;
     ID2D1PathGeometry *path;
     ID2D1Factory *factory;
@@ -10463,14 +12796,32 @@ static void test_stroke_contains_point(BOOL d3d11)
         {{{{1.0f, 0.0f, 1.0f, 1.0f}}}, {1425.0f, 827.6f}, 0.1f, 5.0f, TRUE, FALSE},
         {{{{1.0f, 0.0f, 1.0f, 1.0f}}}, {1620.1f, 800.0f}, 0.1f, 5.0f, TRUE, FALSE},
         {{{{1.0f, 0.0f, 1.0f, 1.0f}}}, {1620.4f, 800.0f}, 0.1f, 5.0f, TRUE, TRUE},
+    },
+    transformed_tests[] =
+    {
+        /* 0. Stroked area hittesting. Edge. Tolerance is 0.0f */
+        {{{{0.0f}}}, {0.74f,  2.5f},  0.0f,   1.0f, FALSE, TRUE},
+        {{{{0.0f}}}, {0.75f,  2.5f},  0.0f,   1.0f, FALSE, FALSE},
+
+        /* 2. Stroked area hittesting. Edge. Tolerance is negative */
+        {{{{0.0f}}}, {0.74f,  2.5f}, -1.0f,   1.0f, FALSE, TRUE},
+        {{{{0.0f}}}, {0.75f,  2.5f}, -1.0f,   1.0f, FALSE, FALSE},
+
+        /* 4. Stroked area hittesting. Edge. Tolerance is close to zero */
+        {{{{0.0f}}}, {0.501f, 2.5f},  0.001f, 1.0f, FALSE, TRUE},
+        {{{{0.0f}}}, {0.502f, 2.5f},  0.001f, 1.0f, FALSE, FALSE},
+
+        /* 6. Stroked area hittesting. Edge. Tolerance is D2D1_DEFAULT_FLATTENING_TOLERANCE */
+        {{{{0.0f}}}, {0.74f,  2.5f},  0.25f,  1.0f, FALSE, TRUE},
+        {{{{0.0f}}}, {0.75f,  2.5f},  0.25f,  1.0f, FALSE, FALSE},
     };
 
     hr = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, &IID_ID2D1Factory, NULL, (void **)&factory);
-    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     set_rect(&rect, 0.0f, 0.0f, 10.0f, 20.0f);
     hr = ID2D1Factory_CreateRectangleGeometry(factory, &rect, &rectangle);
-    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     for (i = 0; i < ARRAY_SIZE(rectangle_tests); ++i)
     {
         const struct contains_point_test *test = &rectangle_tests[i];
@@ -10480,7 +12831,7 @@ static void test_stroke_contains_point(BOOL d3d11)
         contains = !test->contains;
         hr = ID2D1RectangleGeometry_StrokeContainsPoint(rectangle, test->point, test->stroke_width,
                 NULL, test->matrix ? &test->transform : NULL, test->tolerance, &contains);
-        ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
         ok(contains == test->contains, "Got unexpected result %#x.\n", contains);
 
         winetest_pop_context();
@@ -10488,9 +12839,9 @@ static void test_stroke_contains_point(BOOL d3d11)
     ID2D1RectangleGeometry_Release(rectangle);
 
     hr = ID2D1Factory_CreatePathGeometry(factory, &path);
-    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     hr = ID2D1PathGeometry_Open(path, &sink);
-    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 
     /* A limaçon. */
     set_point(&point, 160.0f, 720.0f);
@@ -10532,7 +12883,7 @@ static void test_stroke_contains_point(BOOL d3d11)
     ID2D1GeometrySink_EndFigure(sink, D2D1_FIGURE_END_OPEN);
 
     hr = ID2D1GeometrySink_Close(sink);
-    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     ID2D1GeometrySink_Release(sink);
 
     for (i = 0; i < ARRAY_SIZE(path_tests); ++i)
@@ -10544,7 +12895,7 @@ static void test_stroke_contains_point(BOOL d3d11)
         contains = !test->contains;
         hr = ID2D1PathGeometry_StrokeContainsPoint(path, test->point, test->stroke_width,
                 NULL, test->matrix ? &test->transform : NULL, test->tolerance, &contains);
-        ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
         ok(contains == test->contains, "Got unexpected result %#x.\n", contains);
 
         winetest_pop_context();
@@ -10552,7 +12903,457 @@ static void test_stroke_contains_point(BOOL d3d11)
 
     ID2D1PathGeometry_Release(path);
 
+    set_rect(&rect, 0.0f, 0.0f, 5.0f, 5.0f);
+    hr = ID2D1Factory_CreateRectangleGeometry(factory, &rect, &rectangle);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    set_matrix_identity(&matrix);
+    scale_matrix(&matrix, 2.0f, 4.0f);
+    hr = ID2D1Factory_CreateTransformedGeometry(factory, (ID2D1Geometry *)rectangle, &matrix,
+                &transformed_geometry);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+    for (i = 0; i < ARRAY_SIZE(transformed_tests); ++i)
+    {
+        const struct contains_point_test *test = &transformed_tests[i];
+
+        winetest_push_context("Test %u", i);
+
+        contains = !test->contains;
+        hr = ID2D1TransformedGeometry_StrokeContainsPoint(transformed_geometry, test->point,
+                test->stroke_width, NULL, test->matrix ? &test->transform : NULL, test->tolerance,
+                &contains);
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+        ok(contains == test->contains, "Got unexpected result %#x.\n", contains);
+
+        winetest_pop_context();
+    }
+    ID2D1TransformedGeometry_Release(transformed_geometry);
+    ID2D1RectangleGeometry_Release(rectangle);
+
     ID2D1Factory_Release(factory);
+}
+
+static void test_image_bounds(BOOL d3d11)
+{
+    D2D1_BITMAP_PROPERTIES bitmap_desc;
+    struct d2d1_test_context ctx;
+    ID2D1DeviceContext *context;
+    D2D1_UNIT_MODE unit_mode;
+    ID2D1Factory1 *factory;
+    ID2D1Bitmap *bitmap;
+    float dpi_x, dpi_y;
+    D2D_RECT_F bounds;
+    D2D1_SIZE_F size;
+    unsigned int i;
+    HRESULT hr;
+
+    const struct bitmap_bounds_test
+    {
+        float dpi_x;
+        float dpi_y;
+        D2D_SIZE_U pixel_size;
+    }
+    bitmap_bounds_tests[] =
+    {
+        {96.0f,  96.0f,  {100, 100}},
+        {48.0f,  48.0f,  {100, 100}},
+        {192.0f, 192.0f, {100, 100}},
+        {96.0f,  10.0f,  {100, 100}},
+        {50.0f,  100.0f, {100, 100}},
+        {150.0f, 150.0f, {100, 100}},
+        {48.0f,  48.0f,  {1, 1}},
+        {192.0f, 192.0f, {1, 1}},
+    };
+
+    if (!init_test_context(&ctx, d3d11))
+        return;
+
+    factory = ctx.factory1;
+    if (!factory)
+    {
+        win_skip("ID2D1Factory1 is not supported.\n");
+        release_test_context(&ctx);
+        return;
+    }
+
+    context = ctx.context;
+
+    for (i = 0; i < ARRAY_SIZE(bitmap_bounds_tests); ++i)
+    {
+        const struct bitmap_bounds_test *test = &bitmap_bounds_tests[i];
+        winetest_push_context("Test %u", i);
+
+        bitmap_desc.dpiX = test->dpi_x;
+        bitmap_desc.dpiY = test->dpi_y;
+        bitmap_desc.pixelFormat.format = DXGI_FORMAT_B8G8R8A8_UNORM;
+        bitmap_desc.pixelFormat.alphaMode = D2D1_ALPHA_MODE_IGNORE;
+        hr = ID2D1RenderTarget_CreateBitmap(ctx.rt, test->pixel_size, NULL, 0, &bitmap_desc, &bitmap);
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+        set_rect(&bounds, 0.0f, 0.0f, 0.0f, 0.0f);
+        size = ID2D1Bitmap_GetSize(bitmap);
+        ID2D1DeviceContext_GetImageLocalBounds(context, (ID2D1Image *)bitmap, &bounds);
+        ok(compare_rect(&bounds, 0.0f, 0.0f, size.width, size.height, 0),
+                "Got unexpected bounds {%.8e, %.8e, %.8e, %.8e}, expected {%.8e, %.8e, %.8e, %.8e}.\n",
+                bounds.left, bounds.top, bounds.right, bounds.bottom, 0.0f, 0.0f, size.width, size.height);
+
+        /* Test bitmap local bounds after changing context dpi */
+        ID2D1DeviceContext_GetDpi(context, &dpi_x, &dpi_y);
+        ID2D1DeviceContext_SetDpi(context, dpi_x * 2.0f, dpi_y * 2.0f);
+        ID2D1DeviceContext_GetImageLocalBounds(context, (ID2D1Image *)bitmap, &bounds);
+        ok(compare_rect(&bounds, 0.0f, 0.0f, size.width, size.height, 0),
+                "Got unexpected bounds {%.8e, %.8e, %.8e, %.8e}, expected {%.8e, %.8e, %.8e, %.8e}.\n",
+                bounds.left, bounds.top, bounds.right, bounds.bottom, 0.0f, 0.0f, size.width, size.height);
+        ID2D1DeviceContext_SetDpi(context, dpi_x, dpi_y);
+
+        /* Test bitmap local bounds after changing context unit mode */
+        unit_mode = ID2D1DeviceContext_GetUnitMode(context);
+        ok(unit_mode == D2D1_UNIT_MODE_DIPS, "Got unexpected unit mode %#x.\n", unit_mode);
+        ID2D1DeviceContext_SetUnitMode(context, D2D1_UNIT_MODE_PIXELS);
+        ID2D1DeviceContext_GetImageLocalBounds(context, (ID2D1Image *)bitmap, &bounds);
+        ok(compare_rect(&bounds, 0.0f, 0.0f, test->pixel_size.width, test->pixel_size.height, 0),
+                "Got unexpected bounds {%.8e, %.8e, %.8e, %.8e}, expected {%.8e, %.8e, %.8e, %.8e}.\n",
+                bounds.left, bounds.top, bounds.right, bounds.bottom, 0.0f, 0.0f,
+                (float)test->pixel_size.width, (float)test->pixel_size.height);
+        ID2D1DeviceContext_SetUnitMode(context, unit_mode);
+
+        ID2D1Bitmap_Release(bitmap);
+        winetest_pop_context();
+    }
+
+    release_test_context(&ctx);
+}
+
+static void test_bitmap_map(BOOL d3d11)
+{
+    static const struct
+    {
+        unsigned int options;
+    } invalid_map_options[] =
+    {
+        { D2D1_BITMAP_OPTIONS_NONE },
+        { D2D1_BITMAP_OPTIONS_TARGET },
+        { D2D1_BITMAP_OPTIONS_CANNOT_DRAW | D2D1_BITMAP_OPTIONS_TARGET },
+        { D2D1_BITMAP_OPTIONS_TARGET | D2D1_BITMAP_OPTIONS_GDI_COMPATIBLE },
+    };
+    static const struct
+    {
+        unsigned int options;
+    } valid_map_options[] =
+    {
+        { D2D1_BITMAP_OPTIONS_CANNOT_DRAW | D2D1_BITMAP_OPTIONS_CPU_READ },
+    };
+    D2D1_BITMAP_PROPERTIES1 bitmap_desc;
+    D3D11_TEXTURE2D_DESC texture_desc;
+    ID2D1Bitmap *bitmap2, *bitmap3;
+    struct d2d1_test_context ctx;
+    D2D1_MAPPED_RECT mapped_rect;
+    ID3D11Device *d3d_device;
+    ID3D11Texture2D *texture;
+    unsigned int i, options;
+    IDXGISurface *surface;
+    ID2D1Bitmap1 *bitmap;
+    D2D1_SIZE_U size;
+    HRESULT hr;
+
+    if (!init_test_context(&ctx, d3d11))
+        return;
+
+    for (i = 0; i < ARRAY_SIZE(invalid_map_options); ++i)
+    {
+        winetest_push_context("Test %u", i);
+
+        set_size_u(&size, 4, 4);
+        bitmap_desc.dpiX = 96.0f;
+        bitmap_desc.dpiY = 96.0f;
+        bitmap_desc.pixelFormat.format = DXGI_FORMAT_B8G8R8A8_UNORM;
+        bitmap_desc.pixelFormat.alphaMode = D2D1_ALPHA_MODE_IGNORE;
+        bitmap_desc.bitmapOptions = invalid_map_options[i].options;
+        bitmap_desc.colorContext = NULL;
+        hr = ID2D1DeviceContext_CreateBitmap(ctx.context, size, NULL, 0, &bitmap_desc, &bitmap);
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+        hr = ID2D1Bitmap1_Map(bitmap, D2D1_MAP_OPTIONS_NONE, &mapped_rect);
+        ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
+        hr = ID2D1Bitmap1_Map(bitmap, D2D1_MAP_OPTIONS_READ, &mapped_rect);
+        ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
+        hr = ID2D1Bitmap1_Map(bitmap, D2D1_MAP_OPTIONS_WRITE, &mapped_rect);
+        ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
+
+        hr = ID2D1Bitmap1_GetSurface(bitmap, &surface);
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+        hr = IDXGISurface_QueryInterface(surface, &IID_ID3D11Texture2D, (void **)&texture);
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+        ID3D11Texture2D_GetDesc(texture, &texture_desc);
+        ok(!texture_desc.CPUAccessFlags, "Unexpected CPU access flags %#x.\n", texture_desc.CPUAccessFlags);
+        ID3D11Texture2D_Release(texture);
+        IDXGISurface_Release(surface);
+
+        ID2D1Bitmap1_Release(bitmap);
+
+        winetest_pop_context();
+    }
+
+    for (i = 0; i < ARRAY_SIZE(valid_map_options); ++i)
+    {
+        winetest_push_context("Test %u", i);
+
+        set_size_u(&size, 4, 4);
+        bitmap_desc.dpiX = 96.0f;
+        bitmap_desc.dpiY = 96.0f;
+        bitmap_desc.pixelFormat.format = DXGI_FORMAT_B8G8R8A8_UNORM;
+        bitmap_desc.pixelFormat.alphaMode = D2D1_ALPHA_MODE_IGNORE;
+        bitmap_desc.bitmapOptions = valid_map_options[i].options;
+        bitmap_desc.colorContext = NULL;
+        hr = ID2D1DeviceContext_CreateBitmap(ctx.context, size, NULL, 0, &bitmap_desc, &bitmap);
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+        hr = ID2D1Bitmap1_Map(bitmap, D2D1_MAP_OPTIONS_NONE, &mapped_rect);
+        ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
+
+        hr = ID2D1Bitmap1_Map(bitmap, D2D1_MAP_OPTIONS_READ, &mapped_rect);
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+        hr = ID2D1Bitmap1_Map(bitmap, D2D1_MAP_OPTIONS_READ, &mapped_rect);
+        ok(hr == D2DERR_WRONG_STATE, "Got unexpected hr %#lx.\n", hr);
+        hr = ID2D1Bitmap1_Map(bitmap, D2D1_MAP_OPTIONS_WRITE, &mapped_rect);
+        todo_wine
+        ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
+
+        hr = ID2D1Bitmap1_Unmap(bitmap);
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+        hr = ID2D1Bitmap1_Unmap(bitmap);
+        ok(hr == D2DERR_WRONG_STATE, "Got unexpected hr %#lx.\n", hr);
+
+        hr = ID2D1Bitmap1_Map(bitmap, D2D1_MAP_OPTIONS_WRITE, &mapped_rect);
+        ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
+        hr = ID2D1Bitmap1_Map(bitmap, D2D1_MAP_OPTIONS_READ | D2D1_MAP_OPTIONS_DISCARD, &mapped_rect);
+        ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
+        hr = ID2D1Bitmap1_Map(bitmap, D2D1_MAP_OPTIONS_WRITE | D2D1_MAP_OPTIONS_DISCARD, &mapped_rect);
+        ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
+        hr = ID2D1Bitmap1_Map(bitmap, D2D1_MAP_OPTIONS_READ | D2D1_MAP_OPTIONS_WRITE, &mapped_rect);
+        ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
+
+        hr = ID2D1Bitmap1_GetSurface(bitmap, &surface);
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+        hr = IDXGISurface_QueryInterface(surface, &IID_ID3D11Texture2D, (void **)&texture);
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+        ID3D11Texture2D_GetDesc(texture, &texture_desc);
+        ok(texture_desc.Usage == D3D11_USAGE_STAGING, "Unexpected usage %u.\n", texture_desc.Usage);
+        ok(!texture_desc.BindFlags, "Unexpected bind flags %#x.\n", texture_desc.BindFlags);
+        ok(texture_desc.CPUAccessFlags == D3D11_CPU_ACCESS_READ, "Unexpected CPU access flags %#x.\n",
+                texture_desc.CPUAccessFlags);
+        ok(!texture_desc.MiscFlags, "Unexpected misc flags %#x.\n", texture_desc.MiscFlags);
+        ID3D11Texture2D_Release(texture);
+        IDXGISurface_Release(surface);
+
+        ID2D1Bitmap1_Release(bitmap);
+
+        winetest_pop_context();
+    }
+
+    hr = IDXGIDevice_QueryInterface(ctx.device, &IID_ID3D11Device, (void **)&d3d_device);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+    texture_desc.Width = 4;
+    texture_desc.Height = 4;
+    texture_desc.MipLevels = 1;
+    texture_desc.ArraySize = 1;
+    texture_desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+    texture_desc.SampleDesc.Count = 1;
+    texture_desc.SampleDesc.Quality = 0;
+    texture_desc.Usage = D3D11_USAGE_STAGING;
+    texture_desc.BindFlags = 0;
+    texture_desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ | D3D11_CPU_ACCESS_WRITE;
+    texture_desc.MiscFlags = 0;
+
+    hr = ID3D11Device_CreateTexture2D(d3d_device, &texture_desc, NULL, &texture);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    hr = ID3D11Texture2D_QueryInterface(texture, &IID_IDXGISurface, (void **)&surface);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+    bitmap_desc.bitmapOptions = D2D1_BITMAP_OPTIONS_CANNOT_DRAW | D2D1_BITMAP_OPTIONS_CPU_READ;
+    hr = ID2D1DeviceContext_CreateBitmapFromDxgiSurface(ctx.context, surface, &bitmap_desc, &bitmap);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+    hr = ID2D1Bitmap1_Map(bitmap, D2D1_MAP_OPTIONS_READ | D2D1_MAP_OPTIONS_DISCARD, &mapped_rect);
+    ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
+    hr = ID2D1Bitmap1_Map(bitmap, D2D1_MAP_OPTIONS_READ, &mapped_rect);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    hr = ID2D1Bitmap1_Unmap(bitmap);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+    hr = ID2D1Bitmap1_Map(bitmap, D2D1_MAP_OPTIONS_WRITE, &mapped_rect);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    hr = ID2D1Bitmap1_Unmap(bitmap);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+    hr = ID2D1Bitmap1_Map(bitmap, D2D1_MAP_OPTIONS_WRITE | D2D1_MAP_OPTIONS_READ, &mapped_rect);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    hr = ID2D1Bitmap1_Unmap(bitmap);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+    hr = ID2D1Bitmap1_Map(bitmap, D2D1_MAP_OPTIONS_WRITE | D2D1_MAP_OPTIONS_DISCARD, &mapped_rect);
+    todo_wine
+    ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
+    if (SUCCEEDED(hr)) ID2D1Bitmap1_Unmap(bitmap);
+    hr = ID2D1Bitmap1_Map(bitmap, D2D1_MAP_OPTIONS_WRITE | D2D1_MAP_OPTIONS_READ | D2D1_MAP_OPTIONS_DISCARD, &mapped_rect);
+    ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
+
+    ID2D1Bitmap1_Release(bitmap);
+
+    /* Options are derived from the surface properties. */
+    bitmap_desc.pixelFormat.format = DXGI_FORMAT_B8G8R8A8_UNORM;
+    bitmap_desc.pixelFormat.alphaMode = D2D1_ALPHA_MODE_IGNORE;
+    bitmap_desc.dpiX = bitmap_desc.dpiY = 0.0f;
+    hr = ID2D1DeviceContext_CreateSharedBitmap(ctx.context, &IID_IDXGISurface, surface,
+            (const D2D1_BITMAP_PROPERTIES *)&bitmap_desc, &bitmap2);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    check_bitmap_options(bitmap2, D2D1_BITMAP_OPTIONS_CANNOT_DRAW | D2D1_BITMAP_OPTIONS_CPU_READ);
+
+    hr = ID2D1DeviceContext_CreateSharedBitmap(ctx.context, &IID_ID2D1Bitmap, bitmap2, NULL, &bitmap3);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    check_bitmap_options(bitmap3, D2D1_BITMAP_OPTIONS_CANNOT_DRAW | D2D1_BITMAP_OPTIONS_CPU_READ);
+    ID2D1Bitmap_Release(bitmap3);
+
+    ID2D1Bitmap_Release(bitmap2);
+
+    hr = ID2D1DeviceContext_CreateBitmapFromDxgiSurface(ctx.context, surface, NULL, &bitmap);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    options = ID2D1Bitmap1_GetOptions(bitmap);
+    ok(options == (D2D1_BITMAP_OPTIONS_CANNOT_DRAW | D2D1_BITMAP_OPTIONS_CPU_READ),
+            "Unexpected options %#x.\n", options);
+    ID2D1Bitmap1_Release(bitmap);
+
+    /* Options incompatible with the surface. */
+    bitmap_desc.bitmapOptions = D2D1_BITMAP_OPTIONS_TARGET;
+    hr = ID2D1DeviceContext_CreateBitmapFromDxgiSurface(ctx.context, surface, &bitmap_desc, &bitmap);
+    ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
+    bitmap_desc.bitmapOptions = D2D1_BITMAP_OPTIONS_NONE;
+    hr = ID2D1DeviceContext_CreateBitmapFromDxgiSurface(ctx.context, surface, &bitmap_desc, &bitmap);
+    todo_wine
+    ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
+    if (SUCCEEDED(hr)) ID2D1Bitmap1_Release(bitmap);
+    bitmap_desc.bitmapOptions = D2D1_BITMAP_OPTIONS_TARGET | D2D1_BITMAP_OPTIONS_CANNOT_DRAW;
+    hr = ID2D1DeviceContext_CreateBitmapFromDxgiSurface(ctx.context, surface, &bitmap_desc, &bitmap);
+    ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
+
+    /* Create without D2D1_BITMAP_OPTIONS_CPU_READ, surface supports CPU reads. */
+    bitmap_desc.bitmapOptions = D2D1_BITMAP_OPTIONS_CANNOT_DRAW;
+    hr = ID2D1DeviceContext_CreateBitmapFromDxgiSurface(ctx.context, surface, &bitmap_desc, &bitmap);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    hr = ID2D1Bitmap1_Map(bitmap, D2D1_MAP_OPTIONS_READ, &mapped_rect);
+    ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
+    ID2D1Bitmap1_Release(bitmap);
+
+    ID3D11Texture2D_Release(texture);
+    IDXGISurface_Release(surface);
+
+    /* Surface D2D1_BITMAP_OPTIONS_TARGET */
+    texture_desc.Width = 4;
+    texture_desc.Height = 4;
+    texture_desc.MipLevels = 1;
+    texture_desc.ArraySize = 1;
+    texture_desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+    texture_desc.SampleDesc.Count = 1;
+    texture_desc.SampleDesc.Quality = 0;
+    texture_desc.Usage = D3D11_USAGE_DEFAULT;
+    texture_desc.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
+    texture_desc.CPUAccessFlags = 0;
+    texture_desc.MiscFlags = 0;
+
+    hr = ID3D11Device_CreateTexture2D(d3d_device, &texture_desc, NULL, &texture);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    hr = ID3D11Texture2D_QueryInterface(texture, &IID_IDXGISurface, (void **)&surface);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+    bitmap_desc.bitmapOptions = D2D1_BITMAP_OPTIONS_CANNOT_DRAW | D2D1_BITMAP_OPTIONS_TARGET;
+    hr = ID2D1DeviceContext_CreateBitmapFromDxgiSurface(ctx.context, surface, &bitmap_desc, &bitmap);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    ID2D1Bitmap1_Release(bitmap);
+
+    bitmap_desc.bitmapOptions = 0;
+    hr = ID2D1DeviceContext_CreateBitmapFromDxgiSurface(ctx.context, surface, &bitmap_desc, &bitmap);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+    check_bitmap_options((ID2D1Bitmap *)bitmap, 0);
+    ID2D1Bitmap1_Release(bitmap);
+
+    ID3D11Texture2D_Release(texture);
+    IDXGISurface_Release(surface);
+
+    ID3D11Device_Release(d3d_device);
+
+    release_test_context(&ctx);
+}
+
+static void test_bitmap_create(BOOL d3d11)
+{
+    static const struct
+    {
+        unsigned int options;
+    } invalid_options[] =
+    {
+        { D2D1_BITMAP_OPTIONS_CANNOT_DRAW },
+        { D2D1_BITMAP_OPTIONS_CPU_READ },
+        { D2D1_BITMAP_OPTIONS_GDI_COMPATIBLE },
+    };
+    static const struct
+    {
+        unsigned int options;
+    } valid_options[] =
+    {
+        { D2D1_BITMAP_OPTIONS_NONE },
+        { D2D1_BITMAP_OPTIONS_TARGET },
+        { D2D1_BITMAP_OPTIONS_TARGET | D2D1_BITMAP_OPTIONS_CANNOT_DRAW },
+        { D2D1_BITMAP_OPTIONS_TARGET | D2D1_BITMAP_OPTIONS_CANNOT_DRAW | D2D1_BITMAP_OPTIONS_GDI_COMPATIBLE },
+        { D2D1_BITMAP_OPTIONS_TARGET | D2D1_BITMAP_OPTIONS_GDI_COMPATIBLE },
+        { D2D1_BITMAP_OPTIONS_CANNOT_DRAW | D2D1_BITMAP_OPTIONS_CPU_READ },
+    };
+    D2D1_BITMAP_PROPERTIES1 bitmap_desc;
+    struct d2d1_test_context ctx;
+    ID2D1Bitmap1 *bitmap;
+    D2D1_SIZE_U size;
+    unsigned int i;
+    HRESULT hr;
+
+    if (!init_test_context(&ctx, d3d11))
+        return;
+
+    for (i = 0; i < ARRAY_SIZE(invalid_options); ++i)
+    {
+        winetest_push_context("Test %u", i);
+
+        set_size_u(&size, 4, 4);
+        bitmap_desc.dpiX = 96.0f;
+        bitmap_desc.dpiY = 96.0f;
+        bitmap_desc.pixelFormat.format = DXGI_FORMAT_B8G8R8A8_UNORM;
+        bitmap_desc.pixelFormat.alphaMode = D2D1_ALPHA_MODE_IGNORE;
+        bitmap_desc.bitmapOptions = invalid_options[i].options;
+        bitmap_desc.colorContext = NULL;
+        hr = ID2D1DeviceContext_CreateBitmap(ctx.context, size, NULL, 0, &bitmap_desc, &bitmap);
+        ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
+
+        winetest_pop_context();
+    }
+
+    for (i = 0; i < ARRAY_SIZE(valid_options); ++i)
+    {
+        winetest_push_context("Test %u", i);
+
+        set_size_u(&size, 4, 4);
+        bitmap_desc.dpiX = 96.0f;
+        bitmap_desc.dpiY = 96.0f;
+        bitmap_desc.pixelFormat.format = DXGI_FORMAT_B8G8R8A8_UNORM;
+        bitmap_desc.pixelFormat.alphaMode = D2D1_ALPHA_MODE_IGNORE;
+        bitmap_desc.bitmapOptions = valid_options[i].options;
+        bitmap_desc.colorContext = NULL;
+        hr = ID2D1DeviceContext_CreateBitmap(ctx.context, size, NULL, 0, &bitmap_desc, &bitmap);
+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+        ID2D1Bitmap1_Release(bitmap);
+
+        winetest_pop_context();
+    }
+
+    release_test_context(&ctx);
 }
 
 START_TEST(d2d1)
@@ -10568,6 +13369,11 @@ START_TEST(d2d1)
     pD2D1ConvertColorSpace = (void *)GetProcAddress(d2d1_dll, "D2D1ConvertColorSpace");
 
     use_mt = !getenv("WINETEST_NO_MT_D3D");
+    /* Some host drivers (MacOS, Mesa radeonsi) never unmap memory even when
+     * requested. When using the chunk allocator, running the tests with more
+     * than one thread can exceed the 32-bit virtual address space. */
+    if (sizeof(void *) == 4 && !strcmp(winetest_platform, "wine"))
+        use_mt = FALSE;
 
     argc = winetest_get_mainargs(&argv);
     for (i = 2; i < argc; ++i)
@@ -10580,6 +13386,7 @@ START_TEST(d2d1)
     queue_test(test_state_block);
     queue_test(test_color_brush);
     queue_test(test_bitmap_brush);
+    queue_test(test_image_brush);
     queue_test(test_linear_brush);
     queue_test(test_radial_brush);
     queue_test(test_path_geometry);
@@ -10611,15 +13418,28 @@ START_TEST(d2d1)
     queue_test(test_command_list);
     queue_d3d10_test(test_max_bitmap_size);
     queue_test(test_dpi);
+    queue_test(test_unit_mode);
     queue_test(test_wic_bitmap_format);
     queue_d3d10_test(test_math);
     queue_d3d10_test(test_colour_space);
     queue_test(test_geometry_group);
     queue_test(test_mt_factory);
-    queue_test(test_effect);
+    queue_test(test_effect_register);
+    queue_test(test_effect_context);
+    queue_test(test_effect_properties);
+    queue_test(test_builtin_effect);
     queue_test(test_effect_2d_affine);
     queue_test(test_effect_crop);
+    queue_test(test_effect_grayscale);
+    queue_test(test_registered_effects);
+    queue_test(test_transform_graph);
+    queue_test(test_offset_transform);
+    queue_test(test_blend_transform);
+    queue_test(test_border_transform);
     queue_d3d10_test(test_stroke_contains_point);
+    queue_test(test_image_bounds);
+    queue_test(test_bitmap_map);
+    queue_test(test_bitmap_create);
 
     run_queued_tests();
 }

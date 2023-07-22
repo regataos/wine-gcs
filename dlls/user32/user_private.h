@@ -27,81 +27,14 @@
 #include "wingdi.h"
 #include "ntuser.h"
 #include "winreg.h"
-#include "winternl.h"
-#include "hidusage.h"
-#include "wine/gdi_driver.h"
+#include "winnls.h"
 #include "wine/heap.h"
 
 #define GET_WORD(ptr)  (*(const WORD *)(ptr))
 #define GET_DWORD(ptr) (*(const DWORD *)(ptr))
 #define GET_LONG(ptr) (*(const LONG *)(ptr))
 
-#define WM_SYSTIMER	    0x0118
-#define WM_POPUPSYSTEMMENU  0x0313
-
-#define WINE_MOUSE_HANDLE       ((HANDLE)1)
-#define WINE_KEYBOARD_HANDLE    ((HANDLE)2)
-
-struct window_surface;
-
-/* internal messages codes */
-enum wine_internal_message
-{
-    WM_WINE_DESTROYWINDOW = 0x80000000,
-    WM_WINE_SETWINDOWPOS,
-    WM_WINE_SHOWWINDOW,
-    WM_WINE_SETPARENT,
-    WM_WINE_SETWINDOWLONG,
-    WM_WINE_SETSTYLE,
-    WM_WINE_SETACTIVEWINDOW,
-    WM_WINE_KEYBOARD_LL_HOOK,
-    WM_WINE_MOUSE_LL_HOOK,
-    WM_WINE_CLIPCURSOR,
-    WM_WINE_UPDATEWINDOWSTATE,
-    WM_WINE_FIRST_DRIVER_MSG = 0x80001000,  /* range of messages reserved for the USER driver */
-    WM_WINE_LAST_DRIVER_MSG = 0x80001fff
-};
-
-extern const struct user_driver_funcs *USER_Driver DECLSPEC_HIDDEN;
-
-extern void USER_unload_driver(void) DECLSPEC_HIDDEN;
-
-struct received_message_info;
-
-enum user_obj_type
-{
-    USER_WINDOW = 1,  /* window */
-    USER_MENU,        /* menu */
-    USER_ACCEL,       /* accelerator */
-    USER_ICON,        /* icon or cursor */
-    USER_DWP          /* DeferWindowPos structure */
-};
-
-struct user_object
-{
-    HANDLE             handle;
-    enum user_obj_type type;
-};
-
-#define OBJ_OTHER_PROCESS ((void *)1)  /* returned by get_user_handle_ptr on unknown handles */
-
-HANDLE alloc_user_handle( struct user_object *ptr, enum user_obj_type type ) DECLSPEC_HIDDEN;
-void *get_user_handle_ptr( HANDLE handle, enum user_obj_type type ) DECLSPEC_HIDDEN;
-void release_user_handle_ptr( void *ptr ) DECLSPEC_HIDDEN;
-void *free_user_handle( HANDLE handle, enum user_obj_type type ) DECLSPEC_HIDDEN;
-
-/* type of message-sending functions that need special WM_CHAR handling */
-enum wm_char_mapping
-{
-    WMCHAR_MAP_POSTMESSAGE,
-    WMCHAR_MAP_SENDMESSAGE,
-    WMCHAR_MAP_SENDMESSAGETIMEOUT,
-    WMCHAR_MAP_RECVMESSAGE,
-    WMCHAR_MAP_DISPATCHMESSAGE,
-    WMCHAR_MAP_CALLWINDOWPROC,
-    WMCHAR_MAP_COUNT,
-    WMCHAR_MAP_NOMAPPING = WMCHAR_MAP_COUNT
-};
+#define WINPROC_PROC16  ((void *)1)  /* placeholder for 16-bit window procs */
 
 /* data to store state for A/W mappings of WM_CHAR */
 struct wm_char_mapping_data
@@ -110,135 +43,52 @@ struct wm_char_mapping_data
     MSG  get_msg;
 };
 
-/* on windows the buffer capacity is quite large as well, enough to */
-/* hold up to 10s of 1kHz mouse rawinput events */
-#define RAWINPUT_BUFFER_SIZE (512*1024)
-
-struct rawinput_thread_data
-{
-    UINT     hw_id;     /* current rawinput message id */
-    RAWINPUT buffer[1]; /* rawinput message data buffer */
-};
-
-struct touchinput_thread_data
-{
-    BYTE       index;            /* history index */
-    TOUCHINPUT current[8];       /* current touch state */
-    TOUCHINPUT history[128][8];  /* touches history buffer */
-};
-
-extern BOOL (WINAPI *imm_register_window)(HWND) DECLSPEC_HIDDEN;
-extern void (WINAPI *imm_unregister_window)(HWND) DECLSPEC_HIDDEN;
-#define WM_IME_INTERNAL 0x287
-#define IME_INTERNAL_ACTIVATE 0x17
-#define IME_INTERNAL_DEACTIVATE 0x18
-
-struct hook_extra_info
-{
-    HHOOK handle;
-    LPARAM lparam;
-};
-
-static inline struct user_thread_info *get_user_thread_info(void)
-{
-    return (struct user_thread_info *)NtCurrentTeb()->Win32ClientInfo;
-}
-
-/* check if hwnd is a broadcast magic handle */
-static inline BOOL is_broadcast( HWND hwnd )
-{
-    return (hwnd == HWND_BROADCAST || hwnd == HWND_TOPMOST);
-}
-
 extern HMODULE user32_module DECLSPEC_HIDDEN;
-extern BOOL enable_mouse_in_pointer DECLSPEC_HIDDEN;
 
-struct dce;
-struct tagWND;
-
-struct hardware_msg_data;
-extern BOOL rawinput_from_hardware_message(RAWINPUT *rawinput, const struct hardware_msg_data *msg_data);
-extern BOOL rawinput_device_get_usages(HANDLE handle, USAGE *usage_page, USAGE *usage);
-extern struct rawinput_thread_data *rawinput_thread_data(void);
-extern void rawinput_update_device_list(void);
-extern void rawinput_add_device(const WCHAR *device_path);
-extern void rawinput_remove_device(const WCHAR *device_path);
-
-extern void create_offscreen_window_surface( const RECT *visible_rect, struct window_surface **surface ) DECLSPEC_HIDDEN;
+extern BOOL post_dde_message( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam, DWORD dest_tid,
+                              DWORD type ) DECLSPEC_HIDDEN;
+extern BOOL unpack_dde_message( HWND hwnd, UINT message, WPARAM *wparam, LPARAM *lparam,
+                                const void *buffer, size_t size ) DECLSPEC_HIDDEN;
+extern void free_cached_data( UINT format, HANDLE handle ) DECLSPEC_HIDDEN;
+extern HANDLE render_synthesized_format( UINT format, UINT from ) DECLSPEC_HIDDEN;
 
 extern void CLIPBOARD_ReleaseOwner( HWND hwnd ) DECLSPEC_HIDDEN;
-extern BOOL FOCUS_MouseActivate( HWND hwnd ) DECLSPEC_HIDDEN;
-extern BOOL set_capture_window( HWND hwnd, UINT gui_flags, HWND *prev_ret ) DECLSPEC_HIDDEN;
-extern void free_dce( struct dce *dce, HWND hwnd ) DECLSPEC_HIDDEN;
-extern void invalidate_dce( struct tagWND *win, const RECT *rect ) DECLSPEC_HIDDEN;
 extern HDC get_display_dc(void) DECLSPEC_HIDDEN;
 extern void release_display_dc( HDC hdc ) DECLSPEC_HIDDEN;
-extern void erase_now( HWND hwnd, UINT rdw_flags ) DECLSPEC_HIDDEN;
-extern void move_window_bits( HWND hwnd, struct window_surface *old_surface,
-                              struct window_surface *new_surface,
-                              const RECT *visible_rect, const RECT *old_visible_rect,
-                              const RECT *window_rect, const RECT *valid_rects ) DECLSPEC_HIDDEN;
-extern void move_window_bits_parent( HWND hwnd, HWND parent, const RECT *window_rect,
-                                     const RECT *valid_rects ) DECLSPEC_HIDDEN;
-extern void update_window_state( HWND hwnd ) DECLSPEC_HIDDEN;
-extern void wait_graphics_driver_ready(void) DECLSPEC_HIDDEN;
 extern void *get_hook_proc( void *proc, const WCHAR *module, HMODULE *free_module ) DECLSPEC_HIDDEN;
-extern RECT get_virtual_screen_rect(void) DECLSPEC_HIDDEN;
-extern RECT get_primary_monitor_rect(void) DECLSPEC_HIDDEN;
-extern LRESULT call_current_hook( HHOOK hhook, INT code, WPARAM wparam, LPARAM lparam ) DECLSPEC_HIDDEN;
 extern DWORD get_input_codepage( void ) DECLSPEC_HIDDEN;
 extern BOOL map_wparam_AtoW( UINT message, WPARAM *wparam, enum wm_char_mapping mapping ) DECLSPEC_HIDDEN;
-extern NTSTATUS send_hardware_message( HWND hwnd, const INPUT *input, const RAWINPUT *rawinput, UINT flags ) DECLSPEC_HIDDEN;
-extern LRESULT MSG_SendInternalMessageTimeout( DWORD dest_pid, DWORD dest_tid,
-                                               UINT msg, WPARAM wparam, LPARAM lparam,
-                                               UINT flags, UINT timeout, PDWORD_PTR res_ptr ) DECLSPEC_HIDDEN;
 extern HPEN SYSCOLOR_GetPen( INT index ) DECLSPEC_HIDDEN;
 extern HBRUSH SYSCOLOR_Get55AABrush(void) DECLSPEC_HIDDEN;
 extern void SYSPARAMS_Init(void) DECLSPEC_HIDDEN;
-extern void USER_CheckNotLock(void) DECLSPEC_HIDDEN;
-extern BOOL USER_IsExitingThread( DWORD tid ) DECLSPEC_HIDDEN;
-
-extern BOOL USER_SetWindowPos( WINDOWPOS * winpos, int parent_x, int parent_y ) DECLSPEC_HIDDEN;
 
 typedef LRESULT (*winproc_callback_t)( HWND hwnd, UINT msg, WPARAM wp, LPARAM lp,
                                        LRESULT *result, void *arg );
-
-extern WNDPROC WINPROC_GetProc( WNDPROC proc, BOOL unicode ) DECLSPEC_HIDDEN;
-extern WNDPROC WINPROC_AllocProc( WNDPROC func, BOOL unicode ) DECLSPEC_HIDDEN;
-extern BOOL WINPROC_IsUnicode( WNDPROC proc, BOOL def_val ) DECLSPEC_HIDDEN;
 
 extern LRESULT WINPROC_CallProcAtoW( winproc_callback_t callback, HWND hwnd, UINT msg,
                                      WPARAM wParam, LPARAM lParam, LRESULT *result, void *arg,
                                      enum wm_char_mapping mapping ) DECLSPEC_HIDDEN;
 
-extern INT_PTR WINPROC_CallDlgProcA( DLGPROC func, HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam ) DECLSPEC_HIDDEN;
-extern INT_PTR WINPROC_CallDlgProcW( DLGPROC func, HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam ) DECLSPEC_HIDDEN;
-extern BOOL WINPROC_call_window( HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam,
-                                 LRESULT *result, BOOL unicode, enum wm_char_mapping mapping ) DECLSPEC_HIDDEN;
+extern INT_PTR WINPROC_CallDlgProcA( HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam ) DECLSPEC_HIDDEN;
+extern INT_PTR WINPROC_CallDlgProcW( HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam ) DECLSPEC_HIDDEN;
+extern void winproc_init(void) DECLSPEC_HIDDEN;
+extern void dispatch_win_proc_params( struct win_proc_params *params ) DECLSPEC_HIDDEN;
 
-extern const WCHAR *CLASS_GetVersionedName(const WCHAR *classname, UINT *basename_offset,
-        WCHAR *combined, BOOL register_class) DECLSPEC_HIDDEN;
-extern volatile struct desktop_shared_memory *get_desktop_shared_memory( void ) DECLSPEC_HIDDEN;
-extern volatile struct queue_shared_memory *get_queue_shared_memory( void ) DECLSPEC_HIDDEN;
-extern volatile struct input_shared_memory *get_input_shared_memory( void ) DECLSPEC_HIDDEN;
-extern volatile struct input_shared_memory *get_foreground_shared_memory( void ) DECLSPEC_HIDDEN;
+extern ATOM get_class_info( HINSTANCE instance, const WCHAR *name, WNDCLASSEXW *info,
+                            UNICODE_STRING *name_str, BOOL ansi ) DECLSPEC_HIDDEN;
 
 /* kernel callbacks */
 
 BOOL WINAPI User32CallEnumDisplayMonitor( struct enum_display_monitor_params *params, ULONG size );
+BOOL WINAPI User32CallSendAsyncCallback( const struct send_async_params *params, ULONG size );
+BOOL WINAPI User32CallWinEventHook( const struct win_event_hook_params *params, ULONG size );
+BOOL WINAPI User32CallWindowProc( struct win_proc_params *params, ULONG size );
+BOOL WINAPI User32CallWindowsHook( struct win_hook_params *params, ULONG size );
+BOOL WINAPI User32InitBuiltinClasses( const struct win_hook_params *params, ULONG size );
 
 /* message spy definitions */
 
-#define SPY_DISPATCHMESSAGE       0x0100
-#define SPY_SENDMESSAGE           0x0101
-#define SPY_DEFWNDPROC            0x0102
-
-#define SPY_RESULT_OK             0x0001
-#define SPY_RESULT_DEFWND         0x0002
-
-extern const char *SPY_GetClassLongOffsetName( INT offset ) DECLSPEC_HIDDEN;
 extern const char *SPY_GetMsgName( UINT msg, HWND hWnd ) DECLSPEC_HIDDEN;
-extern const char *SPY_GetVKeyName(WPARAM wParam) DECLSPEC_HIDDEN;
 extern void SPY_EnterMessage( INT iFlag, HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam ) DECLSPEC_HIDDEN;
 extern void SPY_ExitMessage( INT iFlag, HWND hwnd, UINT msg,
                              LRESULT lReturn, WPARAM wParam, LPARAM lParam ) DECLSPEC_HIDDEN;
@@ -302,36 +152,33 @@ typedef struct
 extern int bitmap_info_size( const BITMAPINFO * info, WORD coloruse ) DECLSPEC_HIDDEN;
 extern BOOL get_icon_size( HICON handle, SIZE *size ) DECLSPEC_HIDDEN;
 
-/* Mingw's assert() imports MessageBoxA and gets confused by user32 exporting it */
-#ifdef __MINGW32__
-#undef assert
-#define assert(expr) ((void)0)
-#endif
-
 extern struct user_api_hook *user_api DECLSPEC_HIDDEN;
+LRESULT WINAPI USER_DefDlgProc(HWND, UINT, WPARAM, LPARAM, BOOL) DECLSPEC_HIDDEN;
 LRESULT WINAPI USER_ScrollBarProc(HWND, UINT, WPARAM, LPARAM, BOOL) DECLSPEC_HIDDEN;
+void WINAPI USER_NonClientButtonDraw(HWND, HDC, enum NONCLIENT_BUTTON_TYPE, RECT, BOOL, BOOL) DECLSPEC_HIDDEN;
 void WINAPI USER_ScrollBarDraw(HWND, HDC, INT, enum SCROLL_HITTEST,
-                               const struct SCROLL_TRACKING_INFO *, BOOL, BOOL, RECT *, INT, INT,
-                               INT, BOOL) DECLSPEC_HIDDEN;
+                               const struct SCROLL_TRACKING_INFO *, BOOL, BOOL, RECT *, UINT,
+                               INT, INT, INT, BOOL) DECLSPEC_HIDDEN;
+struct scroll_info *SCROLL_GetInternalInfo( HWND hwnd, INT nBar, BOOL alloc );
 
-#if defined(__i386__) || defined(__x86_64__)
-#define __SHARED_READ_SEQ( x ) (*(x))
-#define __SHARED_READ_FENCE do {} while(0)
-#else
-#define __SHARED_READ_SEQ( x ) __atomic_load_n( x, __ATOMIC_RELAXED )
-#define __SHARED_READ_FENCE __atomic_thread_fence( __ATOMIC_ACQUIRE )
-#endif
+/* Window functions */
+BOOL is_desktop_window( HWND hwnd ) DECLSPEC_HIDDEN;
+HWND WIN_GetFullHandle( HWND hwnd ) DECLSPEC_HIDDEN;
+HWND WIN_IsCurrentProcess( HWND hwnd ) DECLSPEC_HIDDEN;
+HWND WIN_IsCurrentThread( HWND hwnd ) DECLSPEC_HIDDEN;
+ULONG WIN_SetStyle( HWND hwnd, ULONG set_bits, ULONG clear_bits ) DECLSPEC_HIDDEN;
+HWND WIN_CreateWindowEx( CREATESTRUCTW *cs, LPCWSTR className, HINSTANCE module, BOOL unicode ) DECLSPEC_HIDDEN;
+HWND *WIN_ListChildren( HWND hwnd ) DECLSPEC_HIDDEN;
+void MDI_CalcDefaultChildPos( HWND hwndClient, INT total, LPPOINT lpPos, INT delta, UINT *id ) DECLSPEC_HIDDEN;
+HDESK open_winstation_desktop( HWINSTA hwinsta, LPCWSTR name, DWORD flags, BOOL inherit,
+                               ACCESS_MASK access ) DECLSPEC_HIDDEN;
 
-#define SHARED_READ_BEGIN( x )                                          \
-    do {                                                                \
-        unsigned int __seq;                                             \
-        do {                                                            \
-            while ((__seq = __SHARED_READ_SEQ( x )) & SEQUENCE_MASK) NtYieldExecution(); \
-            __SHARED_READ_FENCE;
-
-#define SHARED_READ_END( x )                       \
-            __SHARED_READ_FENCE;                   \
-        } while (__SHARED_READ_SEQ( x ) != __seq); \
-    } while(0)
+static inline void mirror_rect( const RECT *window_rect, RECT *rect )
+{
+    int width = window_rect->right - window_rect->left;
+    int tmp = rect->left;
+    rect->left = width - rect->right;
+    rect->right = width - tmp;
+}
 
 #endif /* __WINE_USER_PRIVATE_H */

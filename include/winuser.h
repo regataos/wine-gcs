@@ -19,10 +19,12 @@
 #ifndef _WINUSER_
 #define _WINUSER_
 
-#if !defined(_USER32_)
-#define WINUSERAPI DECLSPEC_HIDDEN
+#ifndef WINUSERAPI
+#if !defined(_USER32_) && !defined(WINE_UNIX_LIB)
+#define WINUSERAPI DECLSPEC_IMPORT
 #else
 #define WINUSERAPI
+#endif
 #endif
 
 #ifndef RC_INVOKED
@@ -2502,6 +2504,10 @@ typedef struct tagDROPSTRUCT
 #define SPI_SETPENVISUALIZATION        0x201F
 #define SPI_GETPENARBITRATIONTYPE      0x2020
 #define SPI_SETPENARBITRATIONTYPE      0x2021
+#define SPI_GETCARETTIMEOUT            0x2022
+#define SPI_SETCARETTIMEOUT            0x2023
+#define SPI_GETHANDEDNESS              0x2024
+#define SPI_SETHANDEDNESS              0x2025
 
 #define FE_FONTSMOOTHINGSTANDARD       0x0001
 #define FE_FONTSMOOTHINGCLEARTYPE      0x0002
@@ -3128,7 +3134,7 @@ typedef struct tagTRACKMOUSEEVENT {
 #define LR_LOADFROMFILE		0x0010
 #define LR_LOADTRANSPARENT	0x0020
 #define LR_DEFAULTSIZE		0x0040
-#define LR_VGA_COLOR		0x0080
+#define LR_VGACOLOR		0x0080
 #define LR_LOADMAP3DCOLORS	0x1000
 #define	LR_CREATEDIBSECTION	0x2000
 #define LR_COPYFROMRESOURCE	0x4000
@@ -4569,7 +4575,7 @@ WINUSERAPI BOOL        WINAPI SetScrollRange(HWND,INT,INT,INT,BOOL);
 #define                       SetSysModalWindow(hwnd) ((HWND)0)
 WINUSERAPI BOOL        WINAPI SetSystemCursor(HCURSOR,DWORD);
 WINUSERAPI BOOL        WINAPI SetSystemMenu(HWND,HMENU);
-WINUSERAPI UINT_PTR    WINAPI SetSystemTimer(HWND,UINT_PTR,UINT,TIMERPROC);
+WINUSERAPI UINT_PTR    WINAPI SetSystemTimer(HWND,UINT_PTR,UINT,void*);
 WINUSERAPI BOOL        WINAPI SetThreadDesktop(HDESK);
 WINUSERAPI DPI_AWARENESS_CONTEXT WINAPI SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT);
 WINUSERAPI UINT_PTR    WINAPI SetTimer(HWND,UINT_PTR,UINT,TIMERPROC);
@@ -4785,11 +4791,22 @@ struct SCROLL_TRACKING_INFO
     enum SCROLL_HITTEST hit_test;   /* Hit Test code of the last button-down event */
 };
 
+enum NONCLIENT_BUTTON_TYPE
+{
+    MENU_CLOSE_BUTTON,               /* Menu close button */
+    MENU_MIN_BUTTON,                 /* Menu min button */
+    MENU_MAX_BUTTON,                 /* Menu max button */
+    MENU_RESTORE_BUTTON,             /* Menu restore button */
+    MENU_HELP_BUTTON,                /* Menu help button */
+};
+
 struct user_api_hook
 {
+    LRESULT (WINAPI *pDefDlgProc)(HWND, UINT, WPARAM, LPARAM, BOOL);
+    void (WINAPI *pNonClientButtonDraw)(HWND, HDC, enum NONCLIENT_BUTTON_TYPE, RECT, BOOL, BOOL);
     void (WINAPI *pScrollBarDraw)(HWND, HDC, INT, enum SCROLL_HITTEST,
-                                  const struct SCROLL_TRACKING_INFO *, BOOL, BOOL, RECT *, INT, INT,
-                                  INT, BOOL);
+                                  const struct SCROLL_TRACKING_INFO *, BOOL, BOOL, RECT *, UINT,
+                                  INT, INT, INT, BOOL);
     LRESULT (WINAPI *pScrollBarWndProc)(HWND, UINT, WPARAM, LPARAM, BOOL);
 };
 

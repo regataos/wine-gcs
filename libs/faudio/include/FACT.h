@@ -1,6 +1,6 @@
 /* FAudio - XAudio Reimplementation for FNA
  *
- * Copyright (c) 2011-2021 Ethan Lee, Luigi Auriemma, and the MonoGame Team
+ * Copyright (c) 2011-2022 Ethan Lee, Luigi Auriemma, and the MonoGame Team
  *
  * This software is provided 'as-is', without any express or implied warranty.
  * In no event will the authors be held liable for any damages arising from
@@ -804,18 +804,6 @@ FACTAPI uint32_t FACTCue_SetOutputVoiceMatrix(
 	uint32_t DestinationChannels,
 	const float *pLevelMatrix /* SourceChannels * DestinationChannels */
 );
-
-FACTAPI void FACTWave_SetPrivateContext(FACTWave *pWave, void *context);
-FACTAPI void* FACTWave_GetPrivateContext(FACTWave *pWave);
-
-FACTAPI void FACTWaveBank_SetPrivateContext(FACTWaveBank *pWaveBank, void *context);
-FACTAPI void* FACTWaveBank_GetPrivateContext(FACTWaveBank *pWaveBank);
-
-FACTAPI void FACTSoundBank_SetPrivateContext(FACTSoundBank *pSoundBank, void *context);
-FACTAPI void* FACTSoundBank_GetPrivateContext(FACTSoundBank *pSoundBank);
-
-FACTAPI void FACTCue_SetPrivateContext(FACTCue *pCue, void *context);
-FACTAPI void* FACTCue_GetPrivateContext(FACTCue *pCue);
 
 #ifdef __cplusplus
 }

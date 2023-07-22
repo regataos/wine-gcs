@@ -40,7 +40,7 @@
 #include <assert.h>
 #include <unistd.h>
 
-#ifdef HAVE_CARBON_CARBON_H
+#ifdef __APPLE__
 #define LoadResource __carbon_LoadResource
 #define CheckMenuItem __carbon_CheckMenuItem
 #define CompareString __carbon_CompareString
@@ -93,7 +93,7 @@
 #undef ResizePalette
 #undef SetRectRgn
 #undef ShowWindow
-#endif /* HAVE_CARBON_CARBON_H */
+#endif /* __APPLE__ */
 
 #ifdef HAVE_FT2BUILD_H
 #include <ft2build.h>
@@ -327,7 +327,7 @@ static BOOL freetype_set_bitmap_text_metrics( struct gdi_font *font );
  * cga40woa.fon=cga40850.fon
  */
 
-#ifdef HAVE_CARBON_CARBON_H
+#ifdef __APPLE__
 static char *find_cache_dir(void)
 {
     FSRef ref;
@@ -527,7 +527,7 @@ static char **expand_mac_font(const char *path)
     return ret.array;
 }
 
-#endif /* HAVE_CARBON_CARBON_H */
+#endif /* __APPLE__ */
 
 /* 
    This function builds an FT_Fixed from a double. It fails if the absolute
@@ -583,24 +583,6 @@ static BOOL is_subpixel_rendering_enabled( void )
         TRACE("subpixel rendering is %senabled\n", enabled ? "" : "NOT ");
     }
     return enabled;
-}
-
-
-static LPWSTR strdupW(LPCWSTR p)
-{
-    LPWSTR ret;
-    DWORD len = (lstrlenW(p) + 1) * sizeof(WCHAR);
-    ret = malloc( len );
-    memcpy(ret, p, len);
-    return ret;
-}
-
-static WCHAR *towstr(const char *str)
-{
-    DWORD len = strlen(str) + 1;
-    WCHAR *wstr = malloc( len * sizeof(WCHAR) );
-    win32u_mbtowc( NULL, wstr, len * sizeof(WCHAR), str, len );
-    return wstr;
 }
 
 
@@ -699,8 +681,8 @@ static const LANGID mac_langid_table[] =
     0,                                                       /* TT_MAC_LANGID_RUANDA */
     0,                                                       /* TT_MAC_LANGID_RUNDI */
     0,                                                       /* TT_MAC_LANGID_CHEWA */
-    MAKELANGID(LANG_MALAGASY,SUBLANG_DEFAULT),               /* TT_MAC_LANGID_MALAGASY */
-    MAKELANGID(LANG_ESPERANTO,SUBLANG_DEFAULT),              /* TT_MAC_LANGID_ESPERANTO */
+    0,                                                       /* TT_MAC_LANGID_MALAGASY */
+    0,                                                       /* TT_MAC_LANGID_ESPERANTO */
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,       /* 95-111 */
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,          /* 112-127 */
     MAKELANGID(LANG_WELSH,SUBLANG_DEFAULT),                  /* TT_MAC_LANGID_WELSH */
@@ -720,7 +702,7 @@ static const LANGID mac_langid_table[] =
     MAKELANGID(LANG_BRETON,SUBLANG_DEFAULT),                 /* TT_MAC_LANGID_BRETON */
     MAKELANGID(LANG_INUKTITUT,SUBLANG_DEFAULT),              /* TT_MAC_LANGID_INUKTITUT */
     MAKELANGID(LANG_SCOTTISH_GAELIC,SUBLANG_DEFAULT),        /* TT_MAC_LANGID_SCOTTISH_GAELIC */
-    MAKELANGID(LANG_MANX_GAELIC,SUBLANG_DEFAULT),            /* TT_MAC_LANGID_MANX_GAELIC */
+    0,                                                       /* TT_MAC_LANGID_MANX_GAELIC */
     MAKELANGID(LANG_IRISH,SUBLANG_IRISH_IRELAND),            /* TT_MAC_LANGID_IRISH_GAELIC */
     0,                                                       /* TT_MAC_LANGID_TONGAN */
     0,                                                       /* TT_MAC_LANGID_GREEK_POLYTONIC */
@@ -802,9 +784,8 @@ static WCHAR *copy_name_table_string( const FT_SfntName *name )
     case TT_PLATFORM_MACINTOSH:
         if (!(cp = get_mac_code_page( name ))) return NULL;
         ret = malloc( (name->string_len + 1) * sizeof(WCHAR) );
-        i = win32u_mbtowc( cp, ret, name->string_len * sizeof(WCHAR),
-                           (char *)name->string, name->string_len );
-        ret[i / sizeof(WCHAR)] = 0;
+        i = win32u_mbtowc( cp, ret, name->string_len, (char *)name->string, name->string_len );
+        ret[i] = 0;
         return ret;
     }
     return NULL;
@@ -1021,7 +1002,7 @@ static inline void get_fontsig( FT_Face ft_face, FONTSIGNATURE *fs )
     }
 }
 
-static FT_Face new_ft_face( const char *file, void *font_data_ptr, DWORD font_data_size,
+static FT_Face new_ft_face( const char *file, void *font_data_ptr, UINT font_data_size,
                             FT_Long face_index, BOOL allow_bitmap )
 {
     FT_Error err;
@@ -1121,7 +1102,7 @@ static BOOL search_family_names_callback( LANGID langid, struct opentype_name *n
     else if (data->primary_langid == langid)
     {
         data->primary_seen = TRUE;
-        if (!data->second_name.bytes) data->second_name = data->family_name;
+        if (data->family_name.bytes) data->second_name = data->family_name;
         data->family_name = *name;
     }
     else if (!data->second_name.bytes) data->second_name = *name;
@@ -1162,15 +1143,14 @@ static WCHAR *decode_opentype_name( struct opentype_name *name )
     {
         CPTABLEINFO *cptable = get_cptable( name->codepage );
         if (!cptable) return NULL;
-        len = win32u_mbtowc( cptable, buffer, sizeof(buffer), name->bytes, name->length );
-        len /= sizeof(WCHAR);
+        len = win32u_mbtowc( cptable, buffer, ARRAY_SIZE(buffer), name->bytes, name->length );
     }
 
     buffer[ARRAY_SIZE(buffer) - 1] = 0;
     if (len == ARRAY_SIZE(buffer)) WARN("Truncated font name %s -> %s\n", debugstr_an(name->bytes, name->length), debugstr_w(buffer));
     else buffer[len] = 0;
 
-    return strdupW( buffer );
+    return wcsdup( buffer );
 }
 
 struct unix_face
@@ -1188,8 +1168,8 @@ struct unix_face
     struct bitmap_font_size size;
 };
 
-static struct unix_face *unix_face_create( const char *unix_name, void *data_ptr, DWORD data_size,
-                                           UINT face_index, DWORD flags )
+static struct unix_face *unix_face_create( const char *unix_name, void *data_ptr, UINT data_size,
+                                           UINT face_index, UINT flags )
 {
     static const WCHAR space_w[] = {' ',0};
 
@@ -1353,8 +1333,10 @@ static int add_unix_face( const char *unix_name, const WCHAR *file, void *data_p
                         file, data_ptr, data_size, face_index, unix_face->fs, unix_face->ntm_flags,
                         unix_face->font_version, flags, unix_face->scalable ? NULL : &unix_face->size );
 
-    TRACE("fsCsb = %08x %08x/%08x %08x %08x %08x\n", unix_face->fs.fsCsb[0], unix_face->fs.fsCsb[1],
-          unix_face->fs.fsUsb[0], unix_face->fs.fsUsb[1], unix_face->fs.fsUsb[2], unix_face->fs.fsUsb[3]);
+    TRACE("fsCsb = %08x %08x/%08x %08x %08x %08x\n",
+          (int)unix_face->fs.fsCsb[0], (int)unix_face->fs.fsCsb[1],
+          (int)unix_face->fs.fsUsb[0], (int)unix_face->fs.fsUsb[1],
+          (int)unix_face->fs.fsUsb[2], (int)unix_face->fs.fsUsb[3]);
 
     if (num_faces) *num_faces = unix_face->num_faces;
     unix_face_destroy( unix_face );
@@ -1403,7 +1385,7 @@ static char *get_unix_file_name( LPCWSTR path )
 }
 
 static INT AddFontToList(const WCHAR *dos_name, const char *unix_name, void *font_data_ptr,
-                         DWORD font_data_size, DWORD flags)
+                         UINT font_data_size, UINT flags)
 {
     DWORD face_index = 0, num_faces;
     INT ret = 0;
@@ -1412,7 +1394,7 @@ static INT AddFontToList(const WCHAR *dos_name, const char *unix_name, void *fon
     /* we always load external fonts from files - otherwise we would get a crash in update_reg_entries */
     assert(unix_name || !(flags & ADDFONT_EXTERNAL_FONT));
 
-#ifdef HAVE_CARBON_CARBON_H
+#ifdef __APPLE__
     if(unix_name)
     {
         char **mac_list = expand_mac_font(unix_name);
@@ -1431,7 +1413,7 @@ static INT AddFontToList(const WCHAR *dos_name, const char *unix_name, void *fon
                 return 1;
         }
     }
-#endif /* HAVE_CARBON_CARBON_H */
+#endif /* __APPLE__ */
 
     if (!dos_name && unix_name) dos_name = filename = get_dos_file_name( unix_name );
 
@@ -1446,7 +1428,7 @@ static INT AddFontToList(const WCHAR *dos_name, const char *unix_name, void *fon
 /*************************************************************
  * freetype_add_font
  */
-static INT freetype_add_font( const WCHAR *file, DWORD flags )
+static INT freetype_add_font( const WCHAR *file, UINT flags )
 {
     int ret = 0;
     char *unixname = get_unix_file_name( file );
@@ -1462,7 +1444,7 @@ static INT freetype_add_font( const WCHAR *file, DWORD flags )
 /*************************************************************
  * freetype_add_mem_font
  */
-static INT freetype_add_mem_font( void *ptr, SIZE_T size, DWORD flags )
+static INT freetype_add_mem_font( void *ptr, SIZE_T size, UINT flags )
 {
     return AddFontToList( NULL, NULL, ptr, size, flags );
 }
@@ -1559,7 +1541,7 @@ static FcPattern *create_family_pattern( const char *name, FcPattern **cached )
     return ret;
 }
 
-static void fontconfig_add_font( FcPattern *pattern, DWORD flags )
+static void fontconfig_add_font( FcPattern *pattern, UINT flags )
 {
     const char *unix_name, *format;
     WCHAR *dos_name;
@@ -1663,7 +1645,7 @@ static void init_fontconfig(void)
     }
 }
 
-static void fontconfig_add_fonts_from_dir_list( FcConfig *config, FcStrList *dir_list, FcStrSet *done_set, DWORD flags )
+static void fontconfig_add_fonts_from_dir_list( FcConfig *config, FcStrList *dir_list, FcStrSet *done_set, UINT flags )
 {
     const FcChar8 *dir;
     FcFontSet *font_set = NULL;
@@ -1726,7 +1708,7 @@ done:
     if (done_set) pFcStrSetDestroy( done_set );
 }
 
-#elif defined(HAVE_CARBON_CARBON_H)
+#elif defined(__APPLE__)
 
 static void load_mac_font_callback(const void *value, void *context)
 {
@@ -1790,35 +1772,7 @@ static void load_mac_fonts(void)
         CFStringRef path;
 
         desc = CFArrayGetValueAtIndex(descs, i);
-
-#if defined(MAC_OS_X_VERSION_10_6) && MAC_OS_X_VERSION_MAX_ALLOWED >= MAC_OS_X_VERSION_10_6
         url = CTFontDescriptorCopyAttribute(desc, kCTFontURLAttribute);
-#else
-        /* CTFontDescriptor doesn't support kCTFontURLAttribute prior to 10.6, so
-           we have to go CFFontDescriptor -> CTFont -> ATSFont -> FSRef -> CFURL. */
-        {
-            CTFontRef font;
-            ATSFontRef atsFont;
-            OSStatus status;
-            FSRef fsref;
-
-            font = CTFontCreateWithFontDescriptor(desc, 0, NULL);
-            if (!font) continue;
-
-            atsFont = CTFontGetPlatformFont(font, NULL);
-            if (!atsFont)
-            {
-                CFRelease(font);
-                continue;
-            }
-
-            status = ATSFontGetFileReference(atsFont, &fsref);
-            CFRelease(font);
-            if (status != noErr) continue;
-
-            url = CFURLCreateFromFSRef(NULL, &fsref);
-        }
-#endif
         if (!url) continue;
 
         ext = CFURLCopyPathExtension(url);
@@ -1948,7 +1902,7 @@ static void freetype_load_fonts(void)
 {
 #ifdef SONAME_LIBFONTCONFIG
     load_fontconfig_fonts();
-#elif defined(HAVE_CARBON_CARBON_H)
+#elif defined(__APPLE__)
     load_mac_fonts();
 #elif defined(__ANDROID__)
     ReadFontDir("/system/fonts", TRUE);
@@ -1963,13 +1917,13 @@ static inline USHORT get_fixed_windescent(USHORT windescent)
     return abs((SHORT)windescent);
 }
 
-static LONG calc_ppem_for_height(FT_Face ft_face, LONG height)
+static int calc_ppem_for_height(FT_Face ft_face, int height)
 {
     TT_OS2 *pOS2;
     TT_HoriHeader *pHori;
 
-    LONG ppem;
-    const LONG MAX_PPEM = (1 << 16) - 1;
+    int ppem;
+    const int MAX_PPEM = (1 << 16) - 1;
 
     pOS2 = pFT_Get_Sfnt_Table(ft_face, ft_sfnt_os2);
     pHori = pFT_Get_Sfnt_Table(ft_face, ft_sfnt_hhea);
@@ -1992,7 +1946,7 @@ static LONG calc_ppem_for_height(FT_Face ft_face, LONG height)
 
     if(height > 0) {
         USHORT windescent = get_fixed_windescent(pOS2->usWinDescent);
-        LONG units;
+        int units;
 
         if(pOS2->usWinAscent + windescent == 0)
             units = pHori->Ascender - pHori->Descender;
@@ -2070,7 +2024,7 @@ static void unmap_font_file( struct font_mapping *mapping )
     }
 }
 
-static LONG load_VDMX(struct gdi_font *font, LONG height);
+static int load_VDMX(struct gdi_font *font, int height);
 
 /*************************************************************
  * freetype_destroy_font
@@ -2087,8 +2041,8 @@ static void freetype_destroy_font( struct gdi_font *font )
 /*************************************************************
  * freetype_get_font_data
  */
-static DWORD freetype_get_font_data( struct gdi_font *font, DWORD table, DWORD offset,
-                                     void *buf, DWORD cbData)
+static UINT freetype_get_font_data( struct gdi_font *font, UINT table, UINT offset,
+                                     void *buf, UINT cbData)
 {
     FT_Face ft_face = get_ft_face( font );
     FT_ULong len;
@@ -2160,15 +2114,14 @@ typedef struct {
     WORD yMin;
 } VDMX_vTable;
 
-static LONG load_VDMX(struct gdi_font *font, LONG height)
+static int load_VDMX(struct gdi_font *font, int height)
 {
     VDMX_Header hdr;
     VDMX_group group;
     BYTE devXRatio, devYRatio;
     USHORT numRecs, numRatios;
-    DWORD result, offset = -1;
-    LONG ppem = 0;
-    int i;
+    UINT result, offset = -1;
+    int i, ppem = 0;
 
     result = freetype_get_font_data(font, MS_VDMX_TAG, 0, &hdr, sizeof(hdr));
 
@@ -2368,7 +2321,7 @@ static FT_Encoding pick_charmap( FT_Face face, int charset )
 static BOOL get_gasp_flags( struct gdi_font *font, WORD *flags )
 {
     FT_Face ft_face = get_ft_face( font );
-    DWORD size;
+    UINT size;
     WORD buf[16]; /* Enough for seven ranges before we need to alloc */
     WORD *alloced = NULL, *ptr = buf;
     WORD num_recs, version;
@@ -2412,7 +2365,7 @@ done:
 /*************************************************************
  * fontconfig_enum_family_fallbacks
  */
-static BOOL fontconfig_enum_family_fallbacks( DWORD pitch_and_family, int index,
+static BOOL fontconfig_enum_family_fallbacks( UINT pitch_and_family, int index,
                                               WCHAR buffer[LF_FACESIZE] )
 {
 #ifdef SONAME_LIBFONTCONFIG
@@ -2502,7 +2455,7 @@ static BOOL freetype_load_font( struct gdi_font *font )
         /* load the VDMX table if we have one */
         font->ppem = load_VDMX( font, font->lf.lfHeight );
         if (font->ppem == 0) font->ppem = calc_ppem_for_height( ft_face, font->lf.lfHeight );
-        TRACE( "height %d => ppem %d\n", font->lf.lfHeight, font->ppem );
+        TRACE( "height %d => ppem %d\n", (int)font->lf.lfHeight, font->ppem );
         height = font->ppem;
         font->ttc_item_offset = get_ttc_offset( ft_face, font->face_index );
         font->otm.otmEMSquare = ft_face->units_per_EM;
@@ -2548,7 +2501,7 @@ static UINT freetype_get_aa_flags( struct gdi_font *font, UINT aa_flags, BOOL an
             if (get_gasp_flags( font, &gasp_flags ) && !(gasp_flags & GASP_DOGRAY))
             {
                 TRACE( "font %s %d aa disabled by GASP\n",
-                       debugstr_w(font->lf.lfFaceName), font->lf.lfHeight );
+                       debugstr_w(font->lf.lfFaceName), (int)font->lf.lfHeight );
                 aa_flags = GGO_BITMAP;
             }
         }
@@ -2597,7 +2550,7 @@ static BOOL freetype_get_glyph_index( struct gdi_font *font, UINT *glyph, BOOL u
             DWORD len;
             char ch;
 
-            len = win32u_wctomb( NULL, &ch, 1, &wc, sizeof(wc) );
+            len = win32u_wctomb( &ansi_cp, &ch, 1, &wc, 1 );
             if (len) *glyph = get_glyph_index_symbol( font, (unsigned char)ch );
         }
         return TRUE;
@@ -3499,9 +3452,9 @@ static FT_Int get_load_flags( UINT format )
 /*************************************************************
  * freetype_get_glyph_outline
  */
-static DWORD freetype_get_glyph_outline( struct gdi_font *font, UINT glyph, UINT format,
-                                         GLYPHMETRICS *lpgm, ABC *abc, DWORD buflen, void *buf,
-                                         const MAT2 *lpmat, BOOL tategaki )
+static UINT freetype_get_glyph_outline( struct gdi_font *font, UINT glyph, UINT format,
+                                        GLYPHMETRICS *lpgm, ABC *abc, UINT buflen, void *buf,
+                                        const MAT2 *lpmat, BOOL tategaki )
 {
     struct gdi_font *base_font = font->base_font ? font->base_font : font;
     FT_Face ft_face = get_ft_face( font );
@@ -3740,7 +3693,7 @@ static BOOL freetype_set_outline_text_metrics( struct gdi_font *font )
     {
         static const WCHAR fake_nameW[] = {'f','a','k','e',' ','n','a','m','e', 0};
         FIXME("failed to read full_nameW for font %s!\n", wine_dbgstr_w((WCHAR *)font->otm.otmpFamilyName));
-        font->otm.otmpFullName = (char *)strdupW(fake_nameW);
+        font->otm.otmpFullName = (char *)wcsdup( fake_nameW );
     }
     needed = sizeof(font->otm) + (lstrlenW( (WCHAR *)font->otm.otmpFamilyName ) + 1 +
                                   lstrlenW( (WCHAR *)font->otm.otmpStyleName ) + 1 +
@@ -4019,10 +3972,10 @@ static BOOL freetype_get_char_width_info( struct gdi_font *font, struct char_wid
  * Can be called with NULL gs to calculate the buffer size. Returns
  * the number of ranges found.
  */
-static DWORD freetype_get_unicode_ranges( struct gdi_font *font, GLYPHSET *gs )
+static UINT freetype_get_unicode_ranges( struct gdi_font *font, GLYPHSET *gs )
 {
     FT_Face ft_face = get_ft_face( font );
-    DWORD num_ranges = 0;
+    UINT num_ranges = 0;
 
     if (ft_face->charmap->encoding == FT_ENCODING_UNICODE)
     {
@@ -4178,10 +4131,10 @@ static DWORD parse_format0_kern_subtable(struct gdi_font *font,
 /*************************************************************
  * freetype_get_kerning_pairs
  */
-static DWORD freetype_get_kerning_pairs( struct gdi_font *font, KERNINGPAIR **pairs )
+static UINT freetype_get_kerning_pairs( struct gdi_font *font, KERNINGPAIR **pairs )
 {
     FT_Face ft_face = get_ft_face( font );
-    DWORD length, count = 0;
+    UINT length, count = 0;
     void *buf;
     const struct TT_kern_table *tt_kern_table;
     const struct TT_kern_subtable *tt_kern_subtable;

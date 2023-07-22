@@ -31,7 +31,22 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(mfplat);
 
-DEFINE_MEDIATYPE_GUID(MEDIASUBTYPE_VC1S,MAKEFOURCC('V','C','1','S'));
+extern const GUID MFVideoFormat_VC1S;
+
+DEFINE_GUID(MFVideoFormat_WMV_Unknown, 0x7ce12ca9,0xbfbf,0x43d9,0x9d,0x00,0x82,0xb8,0xed,0x54,0x31,0x6b);
+
+static const GUID *const wmv_decoder_input_types[] =
+{
+    &MFVideoFormat_WMV1,
+    &MFVideoFormat_WMV2,
+    &MEDIASUBTYPE_WMVA,
+    &MEDIASUBTYPE_WMVP,
+    &MEDIASUBTYPE_WVP2,
+    &MFVideoFormat_WMV_Unknown,
+    &MFVideoFormat_WVC1,
+    &MFVideoFormat_WMV3,
+    &MFVideoFormat_VC1S,
+};
 
 static enum wg_video_format const video_formats[] =
 {
@@ -138,21 +153,23 @@ static ULONG WINAPI transform_Release(IMFTransform *iface)
 static HRESULT WINAPI transform_GetStreamLimits(IMFTransform *iface, DWORD *input_minimum,
         DWORD *input_maximum, DWORD *output_minimum, DWORD *output_maximum)
 {
-    FIXME("iface %p, input_minimum %p, input_maximum %p, output_minimum %p, output_maximum %p stub!\n",
+    TRACE("iface %p, input_minimum %p, input_maximum %p, output_minimum %p, output_maximum %p.\n",
             iface, input_minimum, input_maximum, output_minimum, output_maximum);
-    return E_NOTIMPL;
+    *input_minimum = *input_maximum = *output_minimum = *output_maximum = 1;
+    return S_OK;
 }
 
 static HRESULT WINAPI transform_GetStreamCount(IMFTransform *iface, DWORD *inputs, DWORD *outputs)
 {
-    FIXME("iface %p, inputs %p, outputs %p stub!\n", iface, inputs, outputs);
-    return E_NOTIMPL;
+    TRACE("iface %p, inputs %p, outputs %p.\n", iface, inputs, outputs);
+    *inputs = *outputs = 1;
+    return S_OK;
 }
 
 static HRESULT WINAPI transform_GetStreamIDs(IMFTransform *iface, DWORD input_size, DWORD *inputs,
         DWORD output_size, DWORD *outputs)
 {
-    FIXME("iface %p, input_size %lu, inputs %p, output_size %lu, outputs %p stub!\n", iface,
+    TRACE("iface %p, input_size %lu, inputs %p, output_size %lu, outputs %p.\n", iface,
             input_size, inputs, output_size, outputs);
     return E_NOTIMPL;
 }
@@ -177,7 +194,7 @@ static HRESULT WINAPI transform_GetAttributes(IMFTransform *iface, IMFAttributes
 
 static HRESULT WINAPI transform_GetInputStreamAttributes(IMFTransform *iface, DWORD id, IMFAttributes **attributes)
 {
-    FIXME("iface %p, id %#lx, attributes %p stub!\n", iface, id, attributes);
+    TRACE("iface %p, id %#lx, attributes %p.\n", iface, id, attributes);
     return E_NOTIMPL;
 }
 
@@ -189,13 +206,13 @@ static HRESULT WINAPI transform_GetOutputStreamAttributes(IMFTransform *iface, D
 
 static HRESULT WINAPI transform_DeleteInputStream(IMFTransform *iface, DWORD id)
 {
-    FIXME("iface %p, id %#lx stub!\n", iface, id);
+    TRACE("iface %p, id %#lx.\n", iface, id);
     return E_NOTIMPL;
 }
 
 static HRESULT WINAPI transform_AddInputStreams(IMFTransform *iface, DWORD streams, DWORD *ids)
 {
-    FIXME("iface %p, streams %lu, ids %p stub!\n", iface, streams, ids);
+    TRACE("iface %p, streams %lu, ids %p.\n", iface, streams, ids);
     return E_NOTIMPL;
 }
 
@@ -251,7 +268,7 @@ static HRESULT WINAPI transform_GetOutputStatus(IMFTransform *iface, DWORD *flag
 
 static HRESULT WINAPI transform_SetOutputBounds(IMFTransform *iface, LONGLONG lower, LONGLONG upper)
 {
-    FIXME("iface %p, lower %I64d, upper %I64d stub!\n", iface, lower, upper);
+    TRACE("iface %p, lower %I64d, upper %I64d.\n", iface, lower, upper);
     return E_NOTIMPL;
 }
 
@@ -365,7 +382,12 @@ static HRESULT WINAPI media_object_GetInputType(IMediaObject *iface, DWORD index
     if (!format.u.video.width)
         format.u.video.width = 1920;
     if (!format.u.video.height)
-        format.u.video.height = 1080;
+    {
+        if (wg_video_format_is_rgb(format.u.video.format))
+            format.u.video.height = -1080;
+        else
+            format.u.video.height = 1080;
+    }
     if (!format.u.video.fps_d)
         format.u.video.fps_d = 1;
     if (!format.u.video.fps_n)
@@ -393,12 +415,16 @@ static HRESULT WINAPI media_object_GetOutputType(IMediaObject *iface, DWORD inde
     if (!format.u.video.width)
         format.u.video.width = 1920;
     if (!format.u.video.height)
-        format.u.video.height = 1080;
+    {
+        if (wg_video_format_is_rgb(format.u.video.format))
+            format.u.video.height = -1080;
+        else
+            format.u.video.height = 1080;
+    }
     if (!format.u.video.fps_d)
         format.u.video.fps_d = 1;
     if (!format.u.video.fps_n)
         format.u.video.fps_n = 1;
-
     if (!amt_from_wg_format((AM_MEDIA_TYPE *)type, &format, false))
         return VFW_E_NO_TYPES;
 
@@ -408,31 +434,42 @@ static HRESULT WINAPI media_object_GetOutputType(IMediaObject *iface, DWORD inde
 static HRESULT WINAPI media_object_SetInputType(IMediaObject *iface, DWORD index,
         const DMO_MEDIA_TYPE *type, DWORD flags)
 {
-    struct wmv_decoder *impl = impl_from_IMediaObject(iface);
+    struct wmv_decoder *decoder = impl_from_IMediaObject(iface);
     struct wg_format wg_format;
-    DWORD i;
+    unsigned int i;
 
-    FIXME("iface %p, index %lu, type %p, flags %#lx semi-stub!\n", iface, index, type, flags);
+    TRACE("iface %p, index %lu, type %p, flags %#lx.\n", iface, index, type, flags);
 
-    if (flags & DMO_SET_TYPEF_CLEAR)
+    if (index > 0)
+        return DMO_E_INVALIDSTREAMINDEX;
+
+    if (!type)
     {
-        memset(&impl->output_format, 0, sizeof(impl->output_format));
-        return S_OK;
+        if (flags & DMO_SET_TYPEF_CLEAR)
+        {
+            memset(&decoder->input_format, 0, sizeof(decoder->input_format));
+            return S_OK;
+        }
+        return DMO_E_TYPE_NOT_ACCEPTED;
     }
 
+    if (!IsEqualGUID(&type->majortype, &MEDIATYPE_Video))
+        return DMO_E_TYPE_NOT_ACCEPTED;
+
     if (!amt_to_wg_format((const AM_MEDIA_TYPE *)type, &wg_format))
-        return VFW_E_INVALIDMEDIATYPE;
+        return DMO_E_TYPE_NOT_ACCEPTED;
 
     if (wg_format.major_type != WG_MAJOR_TYPE_VIDEO)
-        return VFW_E_INVALIDMEDIATYPE;
-    for (i = 0; i < ARRAY_SIZE(video_formats); ++i)
-        if (wg_format.u.video.format == video_formats[i])
-            break;
-    if (i == ARRAY_SIZE(video_formats))
-        return VFW_E_INVALIDMEDIATYPE;
+    {
+        for (i = 0; i < ARRAY_SIZE(wmv_decoder_input_types); ++i)
+            if (IsEqualGUID(&type->subtype, wmv_decoder_input_types[i]))
+                break;
+        if (i == ARRAY_SIZE(wmv_decoder_input_types))
+            return DMO_E_TYPE_NOT_ACCEPTED;
+    }
 
     if (!(flags & DMO_SET_TYPEF_TEST_ONLY))
-        impl->input_format = wg_format;
+        decoder->input_format = wg_format;
 
     return S_OK;
 }

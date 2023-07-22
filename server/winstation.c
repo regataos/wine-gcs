@@ -30,6 +30,7 @@
 #include "winbase.h"
 #include "winuser.h"
 #include "winternl.h"
+#include "ntuser.h"
 
 #include "object.h"
 #include "handle.h"
@@ -260,7 +261,6 @@ static struct desktop *create_desktop( const struct unicode_str *name, unsigned 
             desktop->close_timeout_val = 0;
             desktop->foreground_input = NULL;
             desktop->users = 0;
-            desktop->cursor_clip_msg = 0;
             desktop->cursor_win = 0;
             desktop->last_press_alt = 0;
             list_add_tail( &winstation->desktops, &desktop->entry );
@@ -272,7 +272,11 @@ static struct desktop *create_desktop( const struct unicode_str *name, unsigned 
                 return NULL;
             }
         }
-        else clear_error();
+        else
+        {
+            desktop->flags |= (flags & DF_WINE_CREATE_DESKTOP);
+            clear_error();
+        }
     }
     return desktop;
 }
@@ -320,8 +324,8 @@ static void desktop_destroy( struct object *obj )
 
     free_hotkeys( desktop, 0 );
     free_touches( desktop, 0 );
-    if (desktop->top_window) destroy_window( desktop->top_window );
-    if (desktop->msg_window) destroy_window( desktop->msg_window );
+    if (desktop->top_window) free_window_handle( desktop->top_window );
+    if (desktop->msg_window) free_window_handle( desktop->msg_window );
     if (desktop->global_hooks) release_object( desktop->global_hooks );
     if (desktop->close_timeout) remove_timeout_user( desktop->close_timeout );
     list_remove( &desktop->entry );

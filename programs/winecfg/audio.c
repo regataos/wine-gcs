@@ -40,8 +40,9 @@
 #include <mmddk.h>
 
 #include "ole2.h"
-#include "initguid.h"
 #include "propkey.h"
+#include "initguid.h"
+#include "propkeydef.h"
 #include "devpkey.h"
 #include "mmdeviceapi.h"
 #include "audioclient.h"
@@ -152,8 +153,7 @@ static BOOL load_devices(IMMDeviceEnumerator *devenum, EDataFlow dataflow,
     }
 
     if(*ndevs > 0){
-        *out = HeapAlloc(GetProcessHeap(), 0,
-                sizeof(struct DeviceInfo) * (*ndevs));
+        *out = malloc(sizeof(struct DeviceInfo) * (*ndevs));
         if(!*out){
             IMMDeviceCollection_Release(coll);
             return FALSE;
@@ -359,10 +359,10 @@ static void initAudioDlg (HWND hDlg)
                 SendDlgItemMessageW(hDlg, IDC_VOICEIN_DEVICE, CB_SETCURSEL, i + 1, 0);
         }
 
-        HeapFree(GetProcessHeap(), 0, reg_out_dev);
-        HeapFree(GetProcessHeap(), 0, reg_vout_dev);
-        HeapFree(GetProcessHeap(), 0, reg_in_dev);
-        HeapFree(GetProcessHeap(), 0, reg_vin_dev);
+        free(reg_out_dev);
+        free(reg_vout_dev);
+        free(reg_in_dev);
+        free(reg_vin_dev);
     }else
         swprintf(display_str, ARRAY_SIZE(display_str), format_str, disabled_str);
 
@@ -412,7 +412,7 @@ static void apply_speaker_configs(void)
         CLSCTX_INPROC_SERVER, &IID_IMMDeviceEnumerator, (void**)&devenum);
 
     if(FAILED(hr)){
-        ERR("Unable to create MMDeviceEnumerator: 0x%08x\n", hr);
+        ERR("Unable to create MMDeviceEnumerator: 0x%08lx\n", hr);
         return;
     }
 
@@ -423,14 +423,14 @@ static void apply_speaker_configs(void)
         hr = IMMDeviceEnumerator_GetDevice(devenum, render_devs[i].id, &dev);
 
         if(FAILED(hr)){
-            WARN("Could not get MMDevice for %s: 0x%08x\n", wine_dbgstr_w(render_devs[i].id), hr);
+            WARN("Could not get MMDevice for %s: 0x%08lx\n", wine_dbgstr_w(render_devs[i].id), hr);
             continue;
         }
 
         hr = IMMDevice_OpenPropertyStore(dev, STGM_WRITE, &ps);
 
         if(FAILED(hr)){
-            WARN("Could not open property store for %s: 0x%08x\n", wine_dbgstr_w(render_devs[i].id), hr);
+            WARN("Could not open property store for %s: 0x%08lx\n", wine_dbgstr_w(render_devs[i].id), hr);
             IMMDevice_Release(dev);
             continue;
         }
@@ -440,7 +440,7 @@ static void apply_speaker_configs(void)
         hr = IPropertyStore_SetValue(ps, &PKEY_AudioEndpoint_PhysicalSpeakers, &pv);
 
         if (FAILED(hr))
-            WARN("IPropertyStore_SetValue failed for %s: 0x%08x\n", wine_dbgstr_w(render_devs[i].id), hr);
+            WARN("IPropertyStore_SetValue failed for %s: 0x%08lx\n", wine_dbgstr_w(render_devs[i].id), hr);
 
         IPropertyStore_Release(ps);
         IMMDevice_Release(dev);

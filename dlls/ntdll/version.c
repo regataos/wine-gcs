@@ -105,64 +105,64 @@ static const RTL_OSVERSIONINFOEXW VersionData[NB_WINDOWS_VERSIONS] =
     },
     /* NT351 */
     {
-        sizeof(RTL_OSVERSIONINFOEXW), 3, 51, 0x421, VER_PLATFORM_WIN32_NT,
+        sizeof(RTL_OSVERSIONINFOEXW), 3, 51, 1057, VER_PLATFORM_WIN32_NT,
         L"Service Pack 5", 5, 0, 0, VER_NT_WORKSTATION, 0
     },
     /* NT40 */
     {
-        sizeof(RTL_OSVERSIONINFOEXW), 4, 0, 0x565, VER_PLATFORM_WIN32_NT,
+        sizeof(RTL_OSVERSIONINFOEXW), 4, 0, 1381, VER_PLATFORM_WIN32_NT,
         L"Service Pack 6a", 6, 0, 0, VER_NT_WORKSTATION, 0
     },
     /* NT2K */
     {
-        sizeof(RTL_OSVERSIONINFOEXW), 5, 0, 0x893, VER_PLATFORM_WIN32_NT,
+        sizeof(RTL_OSVERSIONINFOEXW), 5, 0, 2195, VER_PLATFORM_WIN32_NT,
         L"Service Pack 4", 4, 0, 0, VER_NT_WORKSTATION,
         30 /* FIXME: Great, a reserved field with a value! */
     },
     /* WINXP */
     {
-        sizeof(RTL_OSVERSIONINFOEXW), 5, 1, 0xA28, VER_PLATFORM_WIN32_NT,
+        sizeof(RTL_OSVERSIONINFOEXW), 5, 1, 2600, VER_PLATFORM_WIN32_NT,
         L"Service Pack 3", 3, 0, VER_SUITE_SINGLEUSERTS, VER_NT_WORKSTATION,
         30 /* FIXME: Great, a reserved field with a value! */
     },
     /* WINXP64 */
     {
-        sizeof(RTL_OSVERSIONINFOEXW), 5, 2, 0xECE, VER_PLATFORM_WIN32_NT,
+        sizeof(RTL_OSVERSIONINFOEXW), 5, 2, 3790, VER_PLATFORM_WIN32_NT,
         L"Service Pack 2", 2, 0, VER_SUITE_SINGLEUSERTS, VER_NT_WORKSTATION, 0
     },
     /* WIN2K3 */
     {
-        sizeof(RTL_OSVERSIONINFOEXW), 5, 2, 0xECE, VER_PLATFORM_WIN32_NT,
+        sizeof(RTL_OSVERSIONINFOEXW), 5, 2, 3790, VER_PLATFORM_WIN32_NT,
         L"Service Pack 2", 2, 0, VER_SUITE_SINGLEUSERTS, VER_NT_SERVER, 0
     },
     /* WINVISTA */
     {
-        sizeof(RTL_OSVERSIONINFOEXW), 6, 0, 0x1772, VER_PLATFORM_WIN32_NT,
+        sizeof(RTL_OSVERSIONINFOEXW), 6, 0, 6002, VER_PLATFORM_WIN32_NT,
         L"Service Pack 2", 2, 0, VER_SUITE_SINGLEUSERTS, VER_NT_WORKSTATION, 0
     },
     /* WIN2K8 */
     {
-        sizeof(RTL_OSVERSIONINFOEXW), 6, 0, 0x1772, VER_PLATFORM_WIN32_NT,
+        sizeof(RTL_OSVERSIONINFOEXW), 6, 0, 6002, VER_PLATFORM_WIN32_NT,
         L"Service Pack 2", 2, 0, VER_SUITE_SINGLEUSERTS, VER_NT_SERVER, 0
     },
     /* WIN7 */
     {
-        sizeof(RTL_OSVERSIONINFOEXW), 6, 1, 0x1DB1, VER_PLATFORM_WIN32_NT,
+        sizeof(RTL_OSVERSIONINFOEXW), 6, 1, 7601, VER_PLATFORM_WIN32_NT,
         L"Service Pack 1", 1, 0, VER_SUITE_SINGLEUSERTS, VER_NT_WORKSTATION, 0
     },
     /* WIN2K8R2 */
     {
-        sizeof(RTL_OSVERSIONINFOEXW), 6, 1, 0x1DB1, VER_PLATFORM_WIN32_NT,
+        sizeof(RTL_OSVERSIONINFOEXW), 6, 1, 7601, VER_PLATFORM_WIN32_NT,
         L"Service Pack 1", 1, 0, VER_SUITE_SINGLEUSERTS, VER_NT_SERVER, 0
     },
     /* WIN8 */
     {
-        sizeof(RTL_OSVERSIONINFOEXW), 6, 2, 0x23F0, VER_PLATFORM_WIN32_NT,
+        sizeof(RTL_OSVERSIONINFOEXW), 6, 2, 9200, VER_PLATFORM_WIN32_NT,
         L"", 0, 0, VER_SUITE_SINGLEUSERTS, VER_NT_WORKSTATION, 0
     },
     /* WIN81 */
     {
-        sizeof(RTL_OSVERSIONINFOEXW), 6, 3, 0x2580, VER_PLATFORM_WIN32_NT,
+        sizeof(RTL_OSVERSIONINFOEXW), 6, 3, 9600, VER_PLATFORM_WIN32_NT,
         L"", 0, 0, VER_SUITE_SINGLEUSERTS, VER_NT_WORKSTATION, 0
     },
     /* WIN10 */
@@ -264,7 +264,7 @@ static BOOL get_nt_registry_version( RTL_OSVERSIONINFOEXW *version )
     attr.Attributes = 0;
     attr.SecurityDescriptor = NULL;
     attr.SecurityQualityOfService = NULL;
-    RtlInitUnicodeString( &nameW, L"Machine\\Software\\Microsoft\\Windows NT\\CurrentVersion" );
+    RtlInitUnicodeString( &nameW, L"\\Registry\\Machine\\Software\\Microsoft\\Windows NT\\CurrentVersion" );
 
     if (NtOpenKey( &hkey, KEY_ALL_ACCESS, &attr )) return FALSE;
 
@@ -311,7 +311,7 @@ static BOOL get_nt_registry_version( RTL_OSVERSIONINFOEXW *version )
 
         /* get service pack version */
 
-        RtlInitUnicodeString( &nameW, L"Machine\\System\\CurrentControlSet\\Control\\Windows" );
+        RtlInitUnicodeString( &nameW, L"\\Registry\\Machine\\System\\CurrentControlSet\\Control\\Windows" );
         if (!NtOpenKey( &hkey2, KEY_ALL_ACCESS, &attr ))
         {
             RtlInitUnicodeString( &valueW, L"CSDVersion" );
@@ -329,7 +329,7 @@ static BOOL get_nt_registry_version( RTL_OSVERSIONINFOEXW *version )
 
         /* get product type */
 
-        RtlInitUnicodeString( &nameW, L"Machine\\System\\CurrentControlSet\\Control\\ProductOptions" );
+        RtlInitUnicodeString( &nameW, L"\\Registry\\Machine\\System\\CurrentControlSet\\Control\\ProductOptions" );
         if (!NtOpenKey( &hkey2, KEY_ALL_ACCESS, &attr ))
         {
             RtlInitUnicodeString( &valueW, L"ProductType" );
@@ -373,7 +373,7 @@ static BOOL get_win9x_registry_version( RTL_OSVERSIONINFOEXW *version )
     attr.Attributes = 0;
     attr.SecurityDescriptor = NULL;
     attr.SecurityQualityOfService = NULL;
-    RtlInitUnicodeString( &nameW, L"Machine\\Software\\Microsoft\\Windows\\CurrentVersion" );
+    RtlInitUnicodeString( &nameW, L"\\Registry\\Machine\\Software\\Microsoft\\Windows\\CurrentVersion" );
 
     if (NtOpenKey( &hkey, KEY_ALL_ACCESS, &attr )) return FALSE;
 
@@ -525,7 +525,7 @@ done:
     NtCurrentTeb()->Peb->OSBuildNumber  = current_version->dwBuildNumber;
     NtCurrentTeb()->Peb->OSPlatformId   = current_version->dwPlatformId;
 
-    TRACE( "got %d.%d platform %d build %x name %s service pack %d.%d product %d\n",
+    TRACE( "got %ld.%ld platform %ld build %lx name %s service pack %d.%d product %d\n",
            current_version->dwMajorVersion, current_version->dwMinorVersion,
            current_version->dwPlatformId, current_version->dwBuildNumber,
            debugstr_w(current_version->szCSDVersion),
@@ -544,7 +544,7 @@ done:
 BOOLEAN WINAPI RtlGetProductInfo(DWORD dwOSMajorVersion, DWORD dwOSMinorVersion, DWORD dwSpMajorVersion,
                                  DWORD dwSpMinorVersion, PDWORD pdwReturnedProductType)
 {
-    TRACE("(%d, %d, %d, %d, %p)\n", dwOSMajorVersion, dwOSMinorVersion,
+    TRACE("(%ld, %ld, %ld, %ld, %p)\n", dwOSMajorVersion, dwOSMinorVersion,
           dwSpMajorVersion, dwSpMinorVersion, pdwReturnedProductType);
 
     if (!pdwReturnedProductType)
@@ -681,7 +681,7 @@ NTSTATUS WINAPI RtlVerifyVersionInfo( const RTL_OSVERSIONINFOEXW *info,
     RTL_OSVERSIONINFOEXW ver;
     NTSTATUS status;
 
-    TRACE("(%p,0x%x,0x%s)\n", info, dwTypeMask, wine_dbgstr_longlong(dwlConditionMask));
+    TRACE("(%p,0x%lx,0x%s)\n", info, dwTypeMask, wine_dbgstr_longlong(dwlConditionMask));
 
     ver.dwOSVersionInfoSize = sizeof(ver);
     if ((status = RtlGetVersion( &ver )) != STATUS_SUCCESS) return status;

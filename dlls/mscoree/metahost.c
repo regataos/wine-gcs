@@ -130,12 +130,15 @@ MonoThread* (CDECL *mono_thread_attach)(MonoDomain *domain);
 void (CDECL *mono_thread_manage)(void);
 void (CDECL *mono_trace_set_print_handler)(MonoPrintCallback callback);
 void (CDECL *mono_trace_set_printerr_handler)(MonoPrintCallback callback);
+static MonoAssembly* (CDECL *wine_mono_assembly_load_from_gac)(MonoAssemblyName *aname, MonoImageOpenStatus *status, int refonly);
 static void (CDECL *wine_mono_install_assembly_preload_hook)(WineMonoAssemblyPreLoadFunc func, void *user_data);
+static void (CDECL *wine_mono_install_assembly_preload_hook_v2)(WineMonoAssemblyPreLoadFunc func, void *user_data);
 
 static BOOL find_mono_dll(LPCWSTR path, LPWSTR dll_path);
 
 static MonoAssembly* CDECL mono_assembly_preload_hook_fn(MonoAssemblyName *aname, char **assemblies_path, void *user_data);
 static MonoAssembly* CDECL wine_mono_assembly_preload_hook_fn(MonoAssemblyName *aname, char **assemblies_path, int *search_path, void *user_data);
+static MonoAssembly* CDECL wine_mono_assembly_preload_hook_v2_fn(MonoAssemblyName *aname, char **assemblies_path, int *flags, void *user_data);
 
 static void CDECL mono_shutdown_callback_fn(MonoProfiler *prof);
 
@@ -251,7 +254,9 @@ static HRESULT load_mono(LPCWSTR mono_path)
         LOAD_OPT_MONO_FUNCTION(mono_set_crash_chaining, set_crash_chaining_dummy);
         LOAD_OPT_MONO_FUNCTION(mono_trace_set_print_handler, set_print_handler_dummy);
         LOAD_OPT_MONO_FUNCTION(mono_trace_set_printerr_handler, set_print_handler_dummy);
+        LOAD_OPT_MONO_FUNCTION(wine_mono_assembly_load_from_gac, NULL);
         LOAD_OPT_MONO_FUNCTION(wine_mono_install_assembly_preload_hook, NULL);
+        LOAD_OPT_MONO_FUNCTION(wine_mono_install_assembly_preload_hook_v2, NULL);
 
 #undef LOAD_OPT_MONO_FUNCTION
 
@@ -282,7 +287,9 @@ static HRESULT load_mono(LPCWSTR mono_path)
 
         mono_config_parse(NULL);
 
-        if (wine_mono_install_assembly_preload_hook)
+        if (wine_mono_install_assembly_preload_hook_v2)
+            wine_mono_install_assembly_preload_hook_v2(wine_mono_assembly_preload_hook_v2_fn, NULL);
+        else if (wine_mono_install_assembly_preload_hook)
             wine_mono_install_assembly_preload_hook(wine_mono_assembly_preload_hook_fn, NULL);
         else
             mono_install_assembly_preload_hook(mono_assembly_preload_hook_fn, NULL);
@@ -495,7 +502,7 @@ static HRESULT WINAPI CLRRuntimeInfo_GetVersionString(ICLRRuntimeInfo* iface,
 
     TRACE("%p %p %p\n", iface, pwzBuffer, pcchBuffer);
 
-    size = snprintf(version, sizeof(version), "v%u.%u.%u", This->major, This->minor, This->build);
+    size = snprintf(version, sizeof(version), "v%lu.%lu.%lu", This->major, This->minor, This->build);
 
     assert(size <= sizeof(version));
 
@@ -584,7 +591,7 @@ static HRESULT WINAPI CLRRuntimeInfo_IsLoaded(ICLRRuntimeInfo* iface,
 static HRESULT WINAPI CLRRuntimeInfo_LoadErrorString(ICLRRuntimeInfo* iface,
     UINT iResourceID, LPWSTR pwzBuffer, DWORD *pcchBuffer, LONG iLocaleid)
 {
-    FIXME("%p %u %p %p %x\n", iface, iResourceID, pwzBuffer, pcchBuffer, iLocaleid);
+    FIXME("%p %u %p %p %lx\n", iface, iResourceID, pwzBuffer, pcchBuffer, iLocaleid);
 
     return E_NOTIMPL;
 }
@@ -641,7 +648,7 @@ static HRESULT WINAPI CLRRuntimeInfo_IsLoadable(ICLRRuntimeInfo* iface,
 static HRESULT WINAPI CLRRuntimeInfo_SetDefaultStartupFlags(ICLRRuntimeInfo* iface,
     DWORD dwStartupFlags, LPCWSTR pwzHostConfigFile)
 {
-    FIXME("%p %x %s\n", iface, dwStartupFlags, debugstr_w(pwzHostConfigFile));
+    FIXME("%p %lx %s\n", iface, dwStartupFlags, debugstr_w(pwzHostConfigFile));
 
     return E_NOTIMPL;
 }
@@ -907,7 +914,7 @@ static ULONG WINAPI InstalledRuntimeEnum_AddRef(IEnumUnknown* iface)
     struct InstalledRuntimeEnum *This = impl_from_IEnumUnknown(iface);
     ULONG ref = InterlockedIncrement(&This->ref);
 
-    TRACE("(%p) refcount=%u\n", iface, ref);
+    TRACE("(%p) refcount=%lu\n", iface, ref);
 
     return ref;
 }
@@ -917,7 +924,7 @@ static ULONG WINAPI InstalledRuntimeEnum_Release(IEnumUnknown* iface)
     struct InstalledRuntimeEnum *This = impl_from_IEnumUnknown(iface);
     ULONG ref = InterlockedDecrement(&This->ref);
 
-    TRACE("(%p) refcount=%u\n", iface, ref);
+    TRACE("(%p) refcount=%lu\n", iface, ref);
 
     if (ref == 0)
     {
@@ -935,7 +942,7 @@ static HRESULT WINAPI InstalledRuntimeEnum_Next(IEnumUnknown *iface, ULONG celt,
     HRESULT hr=S_OK;
     IUnknown *item;
 
-    TRACE("(%p,%u,%p,%p)\n", iface, celt, rgelt, pceltFetched);
+    TRACE("(%p,%lu,%p,%p)\n", iface, celt, rgelt, pceltFetched);
 
     while (num_fetched < celt)
     {
@@ -963,7 +970,7 @@ static HRESULT WINAPI InstalledRuntimeEnum_Skip(IEnumUnknown *iface, ULONG celt)
     ULONG num_fetched = 0;
     HRESULT hr=S_OK;
 
-    TRACE("(%p,%u)\n", iface, celt);
+    TRACE("(%p,%lu)\n", iface, celt);
 
     while (num_fetched < celt)
     {
@@ -1344,7 +1351,7 @@ static HRESULT WINAPI metahostpolicy_GetRequestedRuntime(ICLRMetaHostPolicy *ifa
         ICLRRuntimeInfo_Release(result);
     }
 
-    TRACE("<- 0x%08x\n", hr);
+    TRACE("<- 0x%08lx\n", hr);
 
     return hr;
 }
@@ -1370,16 +1377,19 @@ HRESULT CLRMetaHostPolicy_CreateInstance(REFIID riid, void **ppobj)
  * Assembly search override settings:
  *
  * WINE_MONO_OVERRIDES=*,Gac=n
- *  Never search the GAC for libraries.
+ *  Never search the Windows GAC for libraries.
+ *
+ * WINE_MONO_OVERRIDES=*,MonoGac=n
+ *  Never search the Mono GAC for libraries.
  *
  * WINE_MONO_OVERRIDES=*,PrivatePath=n
  *  Never search the AppDomain search path for libraries.
  *
  * WINE_MONO_OVERRIDES=Microsoft.Xna.Framework,Gac=n
- *  Never search the GAC for Microsoft.Xna.Framework
+ *  Never search the Windows GAC for Microsoft.Xna.Framework
  *
  * WINE_MONO_OVERRIDES=Microsoft.Xna.Framework.*,Gac=n;Microsoft.Xna.Framework.GamerServices,Gac=y
- *  Never search the GAC for Microsoft.Xna.Framework, or any library starting
+ *  Never search the Windows GAC for Microsoft.Xna.Framework, or any library starting
  *  with Microsoft.Xna.Framework, except for Microsoft.Xna.Framework.GamerServices
  */
 
@@ -1387,7 +1397,8 @@ HRESULT CLRMetaHostPolicy_CreateInstance(REFIID riid, void **ppobj)
 #define ASSEMBLY_SEARCH_GAC 1
 #define ASSEMBLY_SEARCH_UNDEFINED 2
 #define ASSEMBLY_SEARCH_PRIVATEPATH 4
-#define ASSEMBLY_SEARCH_DEFAULT (ASSEMBLY_SEARCH_GAC|ASSEMBLY_SEARCH_PRIVATEPATH)
+#define ASSEMBLY_SEARCH_MONOGAC 8
+#define ASSEMBLY_SEARCH_DEFAULT (ASSEMBLY_SEARCH_GAC|ASSEMBLY_SEARCH_PRIVATEPATH|ASSEMBLY_SEARCH_MONOGAC)
 
 typedef struct override_entry {
     char *name;
@@ -1434,6 +1445,14 @@ static void parse_override_entry(override_entry *entry, const char *string, int 
                         entry->flags |= ASSEMBLY_SEARCH_GAC;
                     else if (IS_OPTION_FALSE(*value))
                         entry->flags &= ~ASSEMBLY_SEARCH_GAC;
+                }
+                break;
+            case 7:
+                if (!_strnicmp(string, "monogac", 7)) {
+                    if (IS_OPTION_TRUE(*value))
+                        entry->flags |= ASSEMBLY_SEARCH_MONOGAC;
+                    else if (IS_OPTION_FALSE(*value))
+                        entry->flags &= ~ASSEMBLY_SEARCH_MONOGAC;
                 }
                 break;
             case 11:
@@ -1563,7 +1582,7 @@ static DWORD get_basename_search_flags(const char *basename, MonoAssemblyName *a
     if (strcmp(basename, "Microsoft.Xna.Framework.*") == 0 &&
         mono_assembly_name_get_version(aname, NULL, NULL, NULL) == 4)
         /* Use FNA as a replacement for XNA4. */
-        return 0;
+        return ASSEMBLY_SEARCH_MONOGAC;
 
     return ASSEMBLY_SEARCH_UNDEFINED;
 }
@@ -1745,11 +1764,20 @@ static BOOL compile_assembly(const char *source, const char *target, char *targe
 
 static MonoAssembly* CDECL mono_assembly_preload_hook_fn(MonoAssemblyName *aname, char **assemblies_path, void *user_data)
 {
-    int dummy;
-    return wine_mono_assembly_preload_hook_fn(aname, assemblies_path, &dummy, user_data);
+    int flags = 0;
+    return wine_mono_assembly_preload_hook_v2_fn(aname, assemblies_path, &flags, user_data);
 }
 
 static MonoAssembly* CDECL wine_mono_assembly_preload_hook_fn(MonoAssemblyName *aname, char **assemblies_path, int *halt_search, void *user_data)
+{
+    int flags = 0;
+    MonoAssembly* result = wine_mono_assembly_preload_hook_v2_fn(aname, assemblies_path, &flags, user_data);
+    if (flags & WINE_PRELOAD_SKIP_PRIVATE_PATH)
+        *halt_search = 1;
+    return result;
+}
+
+static MonoAssembly* CDECL wine_mono_assembly_preload_hook_v2_fn(MonoAssemblyName *aname, char **assemblies_path, int *flags, void *user_data)
 {
     HRESULT hr;
     MonoAssembly *result=NULL;
@@ -1843,9 +1871,7 @@ static MonoAssembly* CDECL wine_mono_assembly_preload_hook_fn(MonoAssemblyName *
             if (result)
                 goto done;
             else
-            {
                 ERR("Bannerlord.exe failed to load\n");
-            }
         }
     }
 
@@ -1904,8 +1930,6 @@ static MonoAssembly* CDECL wine_mono_assembly_preload_hook_fn(MonoAssemblyName *
         }
     }
 
-    /* FIXME: We should search the given paths before the GAC. */
-
     if ((search_flags & ASSEMBLY_SEARCH_GAC) != 0)
     {
         stringnameW_size = MultiByteToWideChar(CP_UTF8, 0, stringname, -1, NULL, 0);
@@ -1936,16 +1960,42 @@ static MonoAssembly* CDECL wine_mono_assembly_preload_hook_fn(MonoAssemblyName *
                     ERR("Failed to load %s, status=%u\n", debugstr_w(path), stat);
 
                 HeapFree(GetProcessHeap(), 0, pathA);
+
+                if (result)
+                {
+                    *flags |= WINE_PRELOAD_SET_GAC;
+                    goto done;
+                }
             }
         }
     }
     else
         TRACE("skipping Windows GAC search due to override setting\n");
 
+    if (wine_mono_assembly_load_from_gac)
+    {
+        if (search_flags & ASSEMBLY_SEARCH_MONOGAC)
+        {
+            result = wine_mono_assembly_load_from_gac (aname, &stat, FALSE);
+
+            if (result)
+            {
+                TRACE("found in Mono GAC\n");
+                *flags |= WINE_PRELOAD_SET_GAC;
+                goto done;
+            }
+        }
+        else
+        {
+            *flags |= WINE_PRELOAD_SKIP_GAC;
+            TRACE("skipping Mono GAC search due to override setting\n");
+        }
+    }
+
     if ((search_flags & ASSEMBLY_SEARCH_PRIVATEPATH) == 0)
     {
         TRACE("skipping AppDomain search path due to override setting\n");
-        *halt_search = 1;
+        *flags |= WINE_PRELOAD_SKIP_PRIVATE_PATH;
     }
 
 done:
@@ -1970,10 +2020,10 @@ HRESULT get_runtime_info(LPCWSTR exefile, LPCWSTR version, LPCWSTR config_file,
     parsed_config_file parsed_config;
 
     if (startup_flags & ~supported_startup_flags)
-        FIXME("unsupported startup flags %x\n", startup_flags & ~supported_startup_flags);
+        FIXME("unsupported startup flags %lx\n", startup_flags & ~supported_startup_flags);
 
     if (runtimeinfo_flags & ~supported_runtime_flags)
-        FIXME("unsupported runtimeinfo flags %x\n", runtimeinfo_flags & ~supported_runtime_flags);
+        FIXME("unsupported runtimeinfo flags %lx\n", runtimeinfo_flags & ~supported_runtime_flags);
 
     if (exefile && !exefile[0])
         exefile = NULL;
@@ -2009,7 +2059,7 @@ HRESULT get_runtime_info(LPCWSTR exefile, LPCWSTR version, LPCWSTR config_file,
         }
         else
         {
-            WARN("failed to parse config file %s, hr=%x\n", debugstr_w(config_file), hr);
+            WARN("failed to parse config file %s, hr=%lx\n", debugstr_w(config_file), hr);
         }
 
         free_parsed_config_file(&parsed_config);

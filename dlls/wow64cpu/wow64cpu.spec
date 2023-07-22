@@ -3,7 +3,8 @@
 @ stdcall BTCpuProcessInit()
 @ stdcall BTCpuResetToConsistentState(ptr)
 @ stdcall BTCpuSetContext(long long ptr ptr)
-@ stdcall BTCpuSimulate()
+@ stdcall -norelay BTCpuSimulate()
 @ stdcall BTCpuTurboThunkControl(long)
 #@ stub TurboDispatchJumpAddressEnd
 #@ stub TurboDispatchJumpAddressStart
+@ stdcall __wine_get_unix_opcode()

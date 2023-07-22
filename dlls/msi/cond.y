@@ -114,6 +114,7 @@ static void value_free( struct value val )
 
 %lex-param { COND_input *info }
 %parse-param { COND_input *info }
+%define api.prefix {cond_}
 %define api.pure
 
 %union
@@ -125,7 +126,7 @@ static void value_free( struct value val )
     BOOL bool;
 }
 
-%token COND_SPACE COND_EOF
+%token COND_SPACE
 %token COND_OR COND_AND COND_NOT COND_XOR COND_IMP COND_EQV
 %token COND_LT COND_GT COND_EQ COND_NE COND_GE COND_LE
 %token COND_ILT COND_IGT COND_IEQ COND_INE COND_IGE COND_ILE
@@ -134,7 +135,7 @@ static void value_free( struct value val )
 %token COND_PERCENT COND_DOLLARS COND_QUESTION COND_AMPER COND_EXCLAM
 %token <str> COND_IDENT <str> COND_NUMBER <str> COND_LITER
 
-%nonassoc COND_ERROR COND_EOF
+%nonassoc COND_ERROR
 
 %type <bool> expression boolean_term boolean_factor
 %type <value> value
@@ -412,13 +413,13 @@ static int COND_IsNumber( WCHAR x )
 static WCHAR *strstriW( const WCHAR *str, const WCHAR *sub )
 {
     LPWSTR strlower, sublower, r;
-    strlower = CharLowerW( strdupW( str ) );
-    sublower = CharLowerW( strdupW( sub ) );
+    strlower = CharLowerW( wcsdup( str ) );
+    sublower = CharLowerW( wcsdup( sub ) );
     r = wcsstr( strlower, sublower );
     if (r)
         r = (LPWSTR)str + (r - strlower);
-    msi_free( strlower );
-    msi_free( sublower );
+    free( strlower );
+    free( sublower );
     return r;
 }
 
@@ -754,7 +755,7 @@ static void *cond_alloc( COND_input *cond, unsigned int sz )
 {
     struct list *mem;
 
-    mem = msi_alloc( sizeof (struct list) + sz );
+    mem = malloc( sizeof (struct list) + sz );
     if( !mem )
         return NULL;
 
@@ -772,12 +773,12 @@ static void *cond_track_mem( COND_input *cond, void *ptr, unsigned int sz )
     new_ptr = cond_alloc( cond, sz );
     if( !new_ptr )
     {
-        msi_free( ptr );
+        free( ptr );
         return NULL;
     }
 
     memcpy( new_ptr, ptr, sz );
-    msi_free( ptr );
+    free( ptr );
     return new_ptr;
 }
 
@@ -788,7 +789,7 @@ static void cond_free( void *ptr )
     if( ptr )
     {
         list_remove( mem );
-        msi_free( mem );
+        free( mem );
     }
 }
 
@@ -877,6 +878,6 @@ MSICONDITION WINAPI MsiEvaluateConditionA( MSIHANDLE hInstall, LPCSTR szConditio
         return MSICONDITION_ERROR;
 
     r = MsiEvaluateConditionW( hInstall, szwCond );
-    msi_free( szwCond );
+    free( szwCond );
     return r;
 }

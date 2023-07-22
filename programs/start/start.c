@@ -38,25 +38,22 @@ WINE_DEFAULT_DEBUG_CHANNEL(start);
 static void output(const WCHAR *message)
 {
 	DWORD count;
-	DWORD   res;
 	int    wlen = lstrlenW(message);
 
 	if (!wlen) return;
 
-	res = WriteConsoleW(GetStdHandle(STD_OUTPUT_HANDLE), message, wlen, &count, NULL);
-
 	/* If writing to console fails, assume it's file
          * i/o so convert to OEM codepage and output
          */
-	if (!res)
+	if (!WriteConsoleW(GetStdHandle(STD_OUTPUT_HANDLE), message, wlen, &count, NULL))
 	{
 		DWORD len;
 		char  *mesA;
 		/* Convert to OEM, then output */
-		len = WideCharToMultiByte( GetConsoleOutputCP(), 0, message, wlen, NULL, 0, NULL, NULL );
+		len = WideCharToMultiByte( GetOEMCP(), 0, message, wlen, NULL, 0, NULL, NULL );
 		mesA = HeapAlloc(GetProcessHeap(), 0, len*sizeof(char));
 		if (!mesA) return;
-		WideCharToMultiByte( GetConsoleOutputCP(), 0, message, wlen, mesA, len, NULL, NULL );
+		WideCharToMultiByte( GetOEMCP(), 0, message, wlen, mesA, len, NULL, NULL );
 		WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), mesA, len, &count, FALSE);
 		HeapFree(GetProcessHeap(), 0, mesA);
 	}
@@ -98,7 +95,7 @@ static void fatal_string_error(int which, DWORD error_code, const WCHAR *filenam
 	WCHAR msg[2048];
 
 	if (!LoadStringW(GetModuleHandleW(NULL), which, msg, ARRAY_SIZE(msg)))
-		WINE_ERR("LoadString failed, error %d\n", GetLastError());
+		WINE_ERR("LoadString failed, error %ld\n", GetLastError());
 
 	fatal_error(msg, error_code, filename);
 }
@@ -108,7 +105,7 @@ static void fatal_string(int which)
 	WCHAR msg[2048];
 
 	if (!LoadStringW(GetModuleHandleW(NULL), which, msg, ARRAY_SIZE(msg)))
-		WINE_ERR("LoadString failed, error %d\n", GetLastError());
+		WINE_ERR("LoadString failed, error %ld\n", GetLastError());
 
 	output(msg);
 	ExitProcess(1);
@@ -516,8 +513,8 @@ int __cdecl wmain (int argc, WCHAR *argv[])
                         break;
 		}
                 else if (is_option(argv[i], L"/exec")) {
-			creation_flags = 0;
-			sei.fMask = SEE_MASK_NOCLOSEPROCESS | SEE_MASK_NO_CONSOLE | SEE_MASK_FLAG_NO_UI;
+                        creation_flags = 0;
+                        sei.fMask = SEE_MASK_NOCLOSEPROCESS | SEE_MASK_NO_CONSOLE | SEE_MASK_FLAG_NO_UI;
                         i++;
                         break;
 		}
@@ -676,7 +673,24 @@ done:
 
 	if (sei.fMask & SEE_MASK_NOCLOSEPROCESS) {
 		DWORD exitcode;
+		HANDLE hJob;
+		JOBOBJECT_EXTENDED_LIMIT_INFORMATION info;
+
 		SetConsoleCtrlHandler(NULL, TRUE);
+		hJob = CreateJobObjectA(NULL, NULL);
+		/* Create a job where the child is associated... if the start.exe terminates
+		 * before the child, the job will be terminated, and the child will be terminated as well.
+		 * (The idea is to allow to kill (from a Unix standpoint) a created Windows
+		 * process (here start.exe), and that the unix-kill of start.exe will be also terminate
+		 * start.exe's child process).
+		 */
+		memset(&info, 0, sizeof(info));
+		info.BasicLimitInformation.LimitFlags =
+                    JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE |
+                    JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK;
+		SetInformationJobObject(hJob, JobObjectExtendedLimitInformation, &info, sizeof(info));
+		AssignProcessToJobObject(hJob, sei.hProcess);
+
 		WaitForSingleObject(sei.hProcess, INFINITE);
 		GetExitCodeProcess(sei.hProcess, &exitcode);
 		ExitProcess(exitcode);

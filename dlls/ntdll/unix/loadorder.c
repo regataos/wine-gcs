@@ -448,7 +448,7 @@ enum loadorder get_load_order( const UNICODE_STRING *nt_name )
         else
         {
             ret = LO_NATIVE;
-            TRACE( "got hardcoded %s for %s, as the eac unix library (%s) is not present. status %x\n", debugstr_loadorder(ret), debugstr_w(path), debugstr_w(eac_unix_name.Buffer), status );
+            TRACE( "got hardcoded %s for %s, as the eac unix library (%s) is not present. status %x\n", debugstr_loadorder(ret), debugstr_w(path), debugstr_w(eac_unix_name.Buffer), (int)status );
             free(eac_unix_name.Buffer);
             return ret;
         }

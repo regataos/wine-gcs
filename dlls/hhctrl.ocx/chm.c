@@ -32,19 +32,21 @@ WINE_DEFAULT_DEBUG_CHANNEL(htmlhelp);
 static LPCSTR GetChmString(CHMInfo *chm, DWORD offset)
 {
     LPCSTR str;
+    char **new_strings;
+    DWORD new_strings_size;
 
     if(!chm->strings_stream)
         return NULL;
 
     if(chm->strings_size <= (offset >> BLOCK_BITS)) {
-        chm->strings_size = (offset >> BLOCK_BITS)+1;
-        if(chm->strings)
-            chm->strings = heap_realloc_zero(chm->strings,
-                    chm->strings_size*sizeof(char*));
-        else
-            chm->strings = heap_alloc_zero(
-                    chm->strings_size*sizeof(char*));
-
+        new_strings_size = (offset >> BLOCK_BITS) + 1;
+        new_strings = realloc(chm->strings, new_strings_size * sizeof(char*));
+        if(!new_strings)
+            return NULL;
+        memset(new_strings + chm->strings_size, 0,
+                (new_strings_size - chm->strings_size) * sizeof(char*));
+        chm->strings = new_strings;
+        chm->strings_size = new_strings_size;
     }
 
     if(!chm->strings[offset >> BLOCK_BITS]) {
@@ -55,24 +57,24 @@ static LPCSTR GetChmString(CHMInfo *chm, DWORD offset)
         pos.QuadPart = offset & ~BLOCK_MASK;
         hres = IStream_Seek(chm->strings_stream, pos, STREAM_SEEK_SET, NULL);
         if(FAILED(hres)) {
-            WARN("Seek failed: %08x\n", hres);
+            WARN("Seek failed: %08lx\n", hres);
             return NULL;
         }
 
-        chm->strings[offset >> BLOCK_BITS] = heap_alloc(BLOCK_SIZE);
+        chm->strings[offset >> BLOCK_BITS] = malloc(BLOCK_SIZE);
 
         hres = IStream_Read(chm->strings_stream, chm->strings[offset >> BLOCK_BITS],
                             BLOCK_SIZE, &read);
         if(FAILED(hres)) {
-            WARN("Read failed: %08x\n", hres);
-            heap_free(chm->strings[offset >> BLOCK_BITS]);
+            WARN("Read failed: %08lx\n", hres);
+            free(chm->strings[offset >> BLOCK_BITS]);
             chm->strings[offset >> BLOCK_BITS] = NULL;
             return NULL;
         }
     }
 
     str = chm->strings[offset >> BLOCK_BITS] + (offset & BLOCK_MASK);
-    TRACE("offset %#x => %s\n", offset, debugstr_a(str));
+    TRACE("offset %#lx => %s\n", offset, debugstr_a(str));
     return str;
 }
 
@@ -92,14 +94,14 @@ static BOOL ReadChmSystem(CHMInfo *chm)
 
     hres = IStorage_OpenStream(chm->pStorage, wszSYSTEM, NULL, STGM_READ, 0, &stream);
     if(FAILED(hres)) {
-        WARN("Could not open #SYSTEM stream: %08x\n", hres);
+        WARN("Could not open #SYSTEM stream: %08lx\n", hres);
         return FALSE;
     }
 
     IStream_Read(stream, &ver, sizeof(ver), &read);
-    TRACE("version is %x\n", ver);
+    TRACE("version is %lx\n", ver);
 
-    buf = heap_alloc(8*sizeof(DWORD));
+    buf = malloc(8 * sizeof(DWORD));
     buf_size = 8*sizeof(DWORD);
 
     while(1) {
@@ -108,7 +110,7 @@ static BOOL ReadChmSystem(CHMInfo *chm)
             break;
 
         if(entry.len > buf_size)
-            buf = heap_realloc(buf, buf_size=entry.len);
+            buf = realloc(buf, buf_size=entry.len);
 
         hres = IStream_Read(stream, buf, entry.len, &read);
         if(hres != S_OK)
@@ -117,22 +119,22 @@ static BOOL ReadChmSystem(CHMInfo *chm)
         switch(entry.code) {
         case 0x0:
             TRACE("TOC is %s\n", debugstr_an(buf, entry.len));
-            heap_free(chm->defToc);
+            free(chm->defToc);
             chm->defToc = strdupnAtoW(buf, entry.len);
             break;
         case 0x2:
             TRACE("Default topic is %s\n", debugstr_an(buf, entry.len));
-            heap_free(chm->defTopic);
+            free(chm->defTopic);
             chm->defTopic = strdupnAtoW(buf, entry.len);
             break;
         case 0x3:
             TRACE("Title is %s\n", debugstr_an(buf, entry.len));
-            heap_free(chm->defTitle);
+            free(chm->defTitle);
             chm->defTitle = strdupnAtoW(buf, entry.len);
             break;
         case 0x4:
             /* TODO: Currently only the Locale ID is loaded from this field */
-            TRACE("Locale is: %d\n", *(LCID*)&buf[0]);
+            TRACE("Locale is: %ld\n", *(LCID*)&buf[0]);
             if(!GetLocaleInfoW(*(LCID*)&buf[0], LOCALE_IDEFAULTANSICODEPAGE|LOCALE_RETURN_NUMBER,
                                (WCHAR *)&chm->codePage, sizeof(chm->codePage)/sizeof(WCHAR)))
                 chm->codePage = CP_ACP;
@@ -143,27 +145,27 @@ static BOOL ReadChmSystem(CHMInfo *chm)
             break;
         case 0x6:
             TRACE("Compiled file is %s\n", debugstr_an(buf, entry.len));
-            heap_free(chm->compiledFile);
+            free(chm->compiledFile);
             chm->compiledFile = strdupnAtoW(buf, entry.len);
             break;
         case 0x9:
             TRACE("Version is %s\n", debugstr_an(buf, entry.len));
             break;
         case 0xa:
-            TRACE("Time is %08x\n", *(DWORD*)buf);
+            TRACE("Time is %08lx\n", *(DWORD*)buf);
             break;
         case 0xc:
-            TRACE("Number of info types: %d\n", *(DWORD*)buf);
+            TRACE("Number of info types: %ld\n", *(DWORD*)buf);
             break;
         case 0xf:
-            TRACE("Check sum: %x\n", *(DWORD*)buf);
+            TRACE("Check sum: %lx\n", *(DWORD*)buf);
             break;
         default:
             TRACE("unhandled code %x, size %x\n", entry.code, entry.len);
         }
     }
 
-    heap_free(buf);
+    free(buf);
     IStream_Release(stream);
 
     return SUCCEEDED(hres);
@@ -181,23 +183,23 @@ LPWSTR FindContextAlias(CHMInfo *chm, DWORD index)
 
     hres = IStorage_OpenStream(chm->pStorage, wszIVB, NULL, STGM_READ, 0, &ivb_stream);
     if(FAILED(hres)) {
-        WARN("Could not open #IVB stream: %08x\n", hres);
+        WARN("Could not open #IVB stream: %08lx\n", hres);
         return NULL;
     }
 
     hres = IStream_Read(ivb_stream, &size, sizeof(size), &read);
     if(FAILED(hres)) {
-        WARN("Read failed: %08x\n", hres);
+        WARN("Read failed: %08lx\n", hres);
         IStream_Release(ivb_stream);
         return NULL;
     }
 
-    buf = heap_alloc(size);
+    buf = malloc(size);
     hres = IStream_Read(ivb_stream, buf, size, &read);
     IStream_Release(ivb_stream);
     if(FAILED(hres)) {
-        WARN("Read failed: %08x\n", hres);
-        heap_free(buf);
+        WARN("Read failed: %08lx\n", hres);
+        free(buf);
         return NULL;
     }
 
@@ -210,7 +212,7 @@ LPWSTR FindContextAlias(CHMInfo *chm, DWORD index)
         }
     }
 
-    heap_free(buf);
+    free(buf);
 
     TRACE("returning %s\n", debugstr_a(ret));
     return strdupAtoW(ret);
@@ -228,15 +230,15 @@ static WCHAR *FindHTMLHelpSetting(HHInfo *info, const WCHAR *extW)
     WCHAR *filename;
     HRESULT hr;
 
-    filename = heap_alloc( (lstrlenW(info->pCHMInfo->compiledFile)
-                            + lstrlenW(periodW) + lstrlenW(extW) + 1) * sizeof(WCHAR) );
+    filename = malloc( (wcslen(info->pCHMInfo->compiledFile)
+                        + wcslen(periodW) + wcslen(extW) + 1) * sizeof(WCHAR) );
     lstrcpyW(filename, info->pCHMInfo->compiledFile);
     lstrcatW(filename, periodW);
     lstrcatW(filename, extW);
     hr = IStorage_OpenStream(pStorage, filename, NULL, STGM_READ, 0, &pStream);
     if (FAILED(hr))
     {
-        heap_free(filename);
+        free(filename);
         return strdupAtoW("");
     }
     IStream_Release(pStream);
@@ -246,7 +248,7 @@ static WCHAR *FindHTMLHelpSetting(HHInfo *info, const WCHAR *extW)
 static inline WCHAR *MergeChmString(LPCWSTR src, WCHAR **dst)
 {
     if(*dst == NULL)
-        *dst = strdupW(src);
+        *dst = wcsdup(src);
     return *dst;
 }
 
@@ -261,7 +263,7 @@ void MergeChmProperties(HH_WINTYPEW *src, HHInfo *info, BOOL override)
     DWORD merge = override ? src->fsValidMembers : src->fsValidMembers & ~dst->fsValidMembers;
 
     if (unhandled_params)
-        FIXME("Unsupported fsValidMembers fields: 0x%x\n", unhandled_params);
+        FIXME("Unsupported fsValidMembers fields: 0x%lx\n", unhandled_params);
 
     dst->fsValidMembers |= merge;
     if (dst->cbStruct == 0)
@@ -319,18 +321,18 @@ static inline WCHAR *ConvertChmString(HHInfo *info, DWORD id)
 
 static inline void wintype_free(HH_WINTYPEW *wintype)
 {
-    heap_free((void *)wintype->pszType);
-    heap_free((void *)wintype->pszCaption);
-    heap_free(wintype->paInfoTypes);
-    heap_free((void *)wintype->pszToc);
-    heap_free((void *)wintype->pszIndex);
-    heap_free((void *)wintype->pszFile);
-    heap_free((void *)wintype->pszHome);
-    heap_free((void *)wintype->pszJump1);
-    heap_free((void *)wintype->pszJump2);
-    heap_free((void *)wintype->pszUrlJump1);
-    heap_free((void *)wintype->pszUrlJump2);
-    heap_free((void *)wintype->pszCustomTabs);
+    free((void *)wintype->pszType);
+    free((void *)wintype->pszCaption);
+    free(wintype->paInfoTypes);
+    free((void *)wintype->pszToc);
+    free((void *)wintype->pszIndex);
+    free((void *)wintype->pszFile);
+    free((void *)wintype->pszHome);
+    free((void *)wintype->pszJump1);
+    free((void *)wintype->pszJump2);
+    free((void *)wintype->pszUrlJump1);
+    free((void *)wintype->pszUrlJump2);
+    free((void *)wintype->pszCustomTabs);
 }
 
 /* Loads the HH_WINTYPE data from the CHM file
@@ -445,9 +447,9 @@ BOOL LoadWinTypeFromCHM(HHInfo *info)
     {
         /* no defined window types so use (hopefully) sane defaults */
         static const WCHAR defaultwinW[] = {'d','e','f','a','u','l','t','w','i','n','\0'};
-        wintype.pszType    = strdupW(info->pCHMInfo->defWindow ? info->pCHMInfo->defWindow : defaultwinW);
-        wintype.pszToc     = strdupW(info->pCHMInfo->defToc ? info->pCHMInfo->defToc : empty);
-        wintype.pszIndex   = strdupW(empty);
+        wintype.pszType    = wcsdup(info->pCHMInfo->defWindow ? info->pCHMInfo->defWindow : defaultwinW);
+        wintype.pszToc     = wcsdup(info->pCHMInfo->defToc ? info->pCHMInfo->defToc : empty);
+        wintype.pszIndex   = wcsdup(empty);
         wintype.fsValidMembers = 0;
         wintype.fsWinProperties = HHWIN_PROP_TRI_PANE;
         wintype.dwStyles = WS_POPUP;
@@ -459,9 +461,9 @@ BOOL LoadWinTypeFromCHM(HHInfo *info)
     /* merge the new data with any pre-existing HH_WINTYPE structure */
     MergeChmProperties(&wintype, info, FALSE);
     if (!info->WinType.pszCaption)
-        info->WinType.pszCaption = info->stringsW.pszCaption = strdupW(info->pCHMInfo->defTitle ? info->pCHMInfo->defTitle : empty);
+        info->WinType.pszCaption = info->stringsW.pszCaption = wcsdup(info->pCHMInfo->defTitle ? info->pCHMInfo->defTitle : empty);
     if (!info->WinType.pszFile)
-        info->WinType.pszFile    = info->stringsW.pszFile    = strdupW(info->pCHMInfo->defTopic ? info->pCHMInfo->defTopic : empty);
+        info->WinType.pszFile    = info->stringsW.pszFile    = wcsdup(info->pCHMInfo->defTopic ? info->pCHMInfo->defTopic : empty);
     if (!info->WinType.pszToc)
         info->WinType.pszToc     = info->stringsW.pszToc     = FindHTMLHelpSetting(info, toc_extW);
     if (!info->WinType.pszIndex)
@@ -517,14 +519,14 @@ void SetChmPath(ChmPath *file, LPCWSTR base_file, LPCWSTR path)
 
         PathCombineW(chm_file, base_path, rel_path);
 
-        file->chm_file = strdupW(chm_file);
+        file->chm_file = wcsdup(chm_file);
         ptr += 2;
     }else {
-        file->chm_file = strdupW(base_file);
+        file->chm_file = wcsdup(base_file);
         ptr = path;
     }
 
-    file->chm_index = strdupW(ptr);
+    file->chm_index = wcsdup(ptr);
 
     TRACE("ChmFile = {%s %s}\n", debugstr_w(file->chm_file), debugstr_w(file->chm_index));
 }
@@ -543,7 +545,7 @@ IStream *GetChmStream(CHMInfo *info, LPCWSTR parent_chm, ChmPath *chm_file)
                 chm_file->chm_file ? chm_file->chm_file : parent_chm, NULL,
                 STGM_READ | STGM_SHARE_DENY_WRITE, NULL, 0, &storage);
         if(FAILED(hres)) {
-            WARN("Could not open storage: %08x\n", hres);
+            WARN("Could not open storage: %08lx\n", hres);
             return NULL;
         }
     }else {
@@ -554,7 +556,7 @@ IStream *GetChmStream(CHMInfo *info, LPCWSTR parent_chm, ChmPath *chm_file)
     hres = IStorage_OpenStream(storage, chm_file->chm_index, NULL, STGM_READ, 0, &stream);
     IStorage_Release(storage);
     if(FAILED(hres))
-        WARN("Could not open stream: %08x\n", hres);
+        WARN("Could not open stream: %08lx\n", hres);
 
     return stream;
 }
@@ -583,7 +585,7 @@ WCHAR *GetDocumentTitle(CHMInfo *info, LPCWSTR document)
     hres = IStorage_OpenStream(storage, document, NULL, STGM_READ, 0, &str);
     IStorage_Release(storage);
     if(FAILED(hres))
-        WARN("Could not open stream: %08x\n", hres);
+        WARN("Could not open stream: %08lx\n", hres);
 
     stream_init(&stream, str);
     strbuf_init(&node);
@@ -623,32 +625,32 @@ CHMInfo *OpenCHM(LPCWSTR szFile)
 
     static const WCHAR wszSTRINGS[] = {'#','S','T','R','I','N','G','S',0};
 
-    if (!(ret = heap_alloc_zero(sizeof(CHMInfo))))
+    if (!(ret = calloc(1, sizeof(CHMInfo))))
         return NULL;
     ret->codePage = CP_ACP;
 
-    if (!(ret->szFile = strdupW(szFile))) {
-        heap_free(ret);
+    if (!(ret->szFile = wcsdup(szFile))) {
+        free(ret);
         return NULL;
     }
 
     hres = CoCreateInstance(&CLSID_ITStorage, NULL, CLSCTX_INPROC_SERVER,
             &IID_IITStorage, (void **) &ret->pITStorage) ;
     if(FAILED(hres)) {
-        WARN("Could not create ITStorage: %08x\n", hres);
+        WARN("Could not create ITStorage: %08lx\n", hres);
         return CloseCHM(ret);
     }
 
     hres = IITStorage_StgOpenStorage(ret->pITStorage, szFile, NULL,
             STGM_READ | STGM_SHARE_DENY_WRITE, NULL, 0, &ret->pStorage);
     if(FAILED(hres)) {
-        WARN("Could not open storage: %08x\n", hres);
+        WARN("Could not open storage: %08lx\n", hres);
         return CloseCHM(ret);
     }
     hres = IStorage_OpenStream(ret->pStorage, wszSTRINGS, NULL, STGM_READ, 0,
             &ret->strings_stream);
     if(FAILED(hres)) {
-        WARN("Could not open #STRINGS stream: %08x\n", hres);
+        WARN("Could not open #STRINGS stream: %08lx\n", hres);
         /* It's not critical, so we pass */
     }
 
@@ -675,17 +677,17 @@ CHMInfo *CloseCHM(CHMInfo *chm)
         DWORD i;
 
         for(i=0; i<chm->strings_size; i++)
-            heap_free(chm->strings[i]);
+            free(chm->strings[i]);
     }
 
-    heap_free(chm->strings);
-    heap_free(chm->defWindow);
-    heap_free(chm->defTitle);
-    heap_free(chm->defTopic);
-    heap_free(chm->defToc);
-    heap_free(chm->szFile);
-    heap_free(chm->compiledFile);
-    heap_free(chm);
+    free(chm->strings);
+    free(chm->defWindow);
+    free(chm->defTitle);
+    free(chm->defTopic);
+    free(chm->defToc);
+    free(chm->szFile);
+    free(chm->compiledFile);
+    free(chm);
 
     return NULL;
 }

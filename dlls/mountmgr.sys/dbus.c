@@ -573,7 +573,7 @@ found:
     while (p_dbus_connection_read_write_dispatch( connection, -1 )) /* nothing */ ;
 }
 
-#if !defined(HAVE_SYSTEMCONFIGURATION_SCDYNAMICSTORECOPYDHCPINFO_H) || !defined(HAVE_SYSTEMCONFIGURATION_SCNETWORKCONFIGURATION_H)
+#if !defined(__APPLE__)
 
 /* The udisks dispatch loop will block all threads using the same connection, so we'll
    use a private connection. Multiple threads can make methods calls at the same time
@@ -600,6 +600,9 @@ static DBusMessage *device_by_iface_request( const char *iface )
     DBusMessage *request, *reply;
     DBusMessageIter iter;
     DBusError error;
+    DBusConnection *connection = get_dhcp_connection();
+
+    if (!connection) return NULL;
 
     request = p_dbus_message_new_method_call( "org.freedesktop.NetworkManager", "/org/freedesktop/NetworkManager",
                                               "org.freedesktop.NetworkManager", "GetDeviceByIpIface" );
@@ -609,7 +612,7 @@ static DBusMessage *device_by_iface_request( const char *iface )
     p_dbus_message_iter_append_basic( &iter, DBUS_TYPE_STRING, &iface );
 
     p_dbus_error_init( &error );
-    reply = p_dbus_connection_send_with_reply_and_block( get_dhcp_connection(), request, -1, &error );
+    reply = p_dbus_connection_send_with_reply_and_block( connection, request, -1, &error );
     p_dbus_message_unref( request );
     if (!reply)
     {
@@ -753,7 +756,7 @@ static DBusMessage *dhcp4_config_option_request( const char *unix_name, const ch
     return reply;
 }
 
-static const char *map_option( ULONG option )
+static const char *map_option( unsigned option )
 {
     switch (option)
     {
@@ -777,8 +780,9 @@ NTSTATUS dhcp_request( void *args )
     ULONG ret = 0;
 
     params->req->offset = params->req->size = 0;
+    *params->ret_size = 0;
 
-    if (!(reply = dhcp4_config_option_request( params->unix_name, map_option(params->req->id), &value ))) return 0;
+    if (!(reply = dhcp4_config_option_request( params->unix_name, map_option(params->req->id), &value ))) return STATUS_SUCCESS;
 
     switch (params->req->id)
     {
@@ -792,7 +796,7 @@ NTSTATUS dhcp_request( void *args )
             ptr->S_un.S_addr = inet_addr( value );
             params->req->offset = params->offset;
             params->req->size   = sizeof(*ptr);
-            TRACE( "returning %08x\n", *(DWORD *)ptr );
+            TRACE( "returning %08x\n", *(unsigned int*)ptr );
         }
         ret = sizeof(*ptr);
         break;
@@ -814,7 +818,7 @@ NTSTATUS dhcp_request( void *args )
         break;
     }
     default:
-        FIXME( "option %u not supported\n", params->req->id );
+        FIXME( "option %u not supported\n", (unsigned int)params->req->id );
         break;
     }
 

@@ -28,7 +28,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <assert.h>
-#include "wine/heap.h"
 #include "winecfg.h"
 #include "resource.h"
 
@@ -50,24 +49,24 @@ struct win_version
 
 static const struct win_version win_versions[] =
 {
-    { L"win10",     L"Windows 10",       10,  0, 0x4563,VER_PLATFORM_WIN32_NT, L"", 0, 0, L"WinNT"},
-    { L"win81",     L"Windows 8.1",       6,  3, 0x2580,VER_PLATFORM_WIN32_NT, L"", 0, 0, L"WinNT"},
-    { L"win8",      L"Windows 8",         6,  2, 0x23F0,VER_PLATFORM_WIN32_NT, L"", 0, 0, L"WinNT"},
-    { L"win2008r2", L"Windows 2008 R2",   6,  1, 0x1DB1,VER_PLATFORM_WIN32_NT, L"Service Pack 1", 1, 0, L"ServerNT"},
-    { L"win7",      L"Windows 7",         6,  1, 0x1DB1,VER_PLATFORM_WIN32_NT, L"Service Pack 1", 1, 0, L"WinNT"},
-    { L"win2008",   L"Windows 2008",      6,  0, 0x1772,VER_PLATFORM_WIN32_NT, L"Service Pack 2", 2, 0, L"ServerNT"},
-    { L"vista",     L"Windows Vista",     6,  0, 0x1772,VER_PLATFORM_WIN32_NT, L"Service Pack 2", 2, 0, L"WinNT"},
-    { L"win2003",   L"Windows 2003",      5,  2, 0xECE, VER_PLATFORM_WIN32_NT, L"Service Pack 2", 2, 0, L"ServerNT"},
+    { L"win10",     L"Windows 10",       10,  0, 18362, VER_PLATFORM_WIN32_NT, L"", 0, 0, L"WinNT"},
+    { L"win81",     L"Windows 8.1",       6,  3,  9600, VER_PLATFORM_WIN32_NT, L"", 0, 0, L"WinNT"},
+    { L"win8",      L"Windows 8",         6,  2,  9200, VER_PLATFORM_WIN32_NT, L"", 0, 0, L"WinNT"},
+    { L"win2008r2", L"Windows 2008 R2",   6,  1,  7601, VER_PLATFORM_WIN32_NT, L"Service Pack 1", 1, 0, L"ServerNT"},
+    { L"win7",      L"Windows 7",         6,  1,  7601, VER_PLATFORM_WIN32_NT, L"Service Pack 1", 1, 0, L"WinNT"},
+    { L"win2008",   L"Windows 2008",      6,  0,  6002, VER_PLATFORM_WIN32_NT, L"Service Pack 2", 2, 0, L"ServerNT"},
+    { L"vista",     L"Windows Vista",     6,  0,  6002, VER_PLATFORM_WIN32_NT, L"Service Pack 2", 2, 0, L"WinNT"},
+    { L"win2003",   L"Windows 2003",      5,  2,  3790, VER_PLATFORM_WIN32_NT, L"Service Pack 2", 2, 0, L"ServerNT"},
 #ifdef _WIN64
-    { L"winxp64",   L"Windows XP",        5,  2, 0xECE, VER_PLATFORM_WIN32_NT, L"Service Pack 2", 2, 0, L"WinNT"},
+    { L"winxp64",   L"Windows XP",        5,  2,  3790, VER_PLATFORM_WIN32_NT, L"Service Pack 2", 2, 0, L"WinNT"},
 #else
-    { L"winxp",     L"Windows XP",        5,  1, 0xA28, VER_PLATFORM_WIN32_NT, L"Service Pack 3", 3, 0, L"WinNT"},
-    { L"win2k",     L"Windows 2000",      5,  0, 0x893, VER_PLATFORM_WIN32_NT, L"Service Pack 4", 4, 0, L"WinNT"},
-    { L"winme",     L"Windows ME",        4, 90, 0xBB8, VER_PLATFORM_WIN32_WINDOWS, L" ", 0, 0, L""},
-    { L"win98",     L"Windows 98",        4, 10, 0x8AE, VER_PLATFORM_WIN32_WINDOWS, L" A ", 0, 0, L""},
-    { L"win95",     L"Windows 95",        4,  0, 0x3B6, VER_PLATFORM_WIN32_WINDOWS, L"", 0, 0, L""},
-    { L"nt40",      L"Windows NT 4.0",    4,  0, 0x565, VER_PLATFORM_WIN32_NT, L"Service Pack 6a", 6, 0, L"WinNT"},
-    { L"nt351",     L"Windows NT 3.51",   3, 51, 0x421, VER_PLATFORM_WIN32_NT, L"Service Pack 5", 5, 0, L"WinNT"},
+    { L"winxp",     L"Windows XP",        5,  1,  2600, VER_PLATFORM_WIN32_NT, L"Service Pack 3", 3, 0, L"WinNT"},
+    { L"win2k",     L"Windows 2000",      5,  0,  2195, VER_PLATFORM_WIN32_NT, L"Service Pack 4", 4, 0, L"WinNT"},
+    { L"winme",     L"Windows ME",        4, 90,  3000, VER_PLATFORM_WIN32_WINDOWS, L" ", 0, 0, L""},
+    { L"win98",     L"Windows 98",        4, 10,  2222, VER_PLATFORM_WIN32_WINDOWS, L" A ", 0, 0, L""},
+    { L"win95",     L"Windows 95",        4,  0,   950, VER_PLATFORM_WIN32_WINDOWS, L"", 0, 0, L""},
+    { L"nt40",      L"Windows NT 4.0",    4,  0,  1381, VER_PLATFORM_WIN32_NT, L"Service Pack 6a", 6, 0, L"WinNT"},
+    { L"nt351",     L"Windows NT 3.51",   3, 51,  1057, VER_PLATFORM_WIN32_NT, L"Service Pack 5", 5, 0, L"WinNT"},
     { L"win31",     L"Windows 3.1",       3, 10,     0, VER_PLATFORM_WIN32s, L"Win32s 1.3", 0, 0, L""},
     { L"win30",     L"Windows 3.0",       3,  0,     0, VER_PLATFORM_WIN32s, L"Win32s 1.3", 0, 0, L""},
     { L"win20",     L"Windows 2.0",       2,  0,     0, VER_PLATFORM_WIN32s, L"Win32s 1.3", 0, 0, L""}
@@ -139,7 +138,7 @@ static void update_comboboxes(HWND dialog)
 
     if (!winver || !winver[0])
     {
-        HeapFree(GetProcessHeap(), 0, winver);
+        free(winver);
 
         if (current_app) /* no explicit setting */
         {
@@ -147,8 +146,8 @@ static void update_comboboxes(HWND dialog)
             SendDlgItemMessageW(dialog, IDC_WINVER, CB_SETCURSEL, 0, 0);
             return;
         }
-        if (ver != -1) winver = strdupW( win_versions[ver].szVersion );
-        else winver = strdupW(DEFAULT_WIN_VERSION);
+        if (ver != -1) winver = wcsdup(win_versions[ver].szVersion);
+        else winver = wcsdup(DEFAULT_WIN_VERSION);
     }
     WINE_TRACE("winver is %s\n", debugstr_w(winver));
 
@@ -164,7 +163,7 @@ static void update_comboboxes(HWND dialog)
 	}
     }
 
-    HeapFree(GetProcessHeap(), 0, winver);
+    free(winver);
 }
 
 static void
@@ -229,7 +228,7 @@ static void init_appsheet(HWND dialog)
       size = ARRAY_SIZE(appname);
       while (RegEnumKeyExW (key, i, appname, &size, NULL, NULL, NULL, NULL) == ERROR_SUCCESS)
       {
-          add_listview_item(listview, appname, strdupW(appname));
+          add_listview_item(listview, appname, wcsdup(appname));
 
           i++;
           size = ARRAY_SIZE(appname);
@@ -355,7 +354,7 @@ static void on_add_app_click(HWND dialog)
       if (list_contains_file(listview, filetitle))
           return;
 
-      new_app = strdupW(filetitle);
+      new_app = wcsdup(filetitle);
 
       WINE_TRACE("adding %s\n", wine_dbgstr_w (new_app));
 
@@ -387,7 +386,7 @@ static void on_remove_app_click(HWND dialog)
 
     set_reg_key(config_key, keypath(L""), NULL, NULL); /* delete the section  */
     SendMessageW(listview, LVM_GETITEMW, 0, (LPARAM) &item);
-    HeapFree (GetProcessHeap(), 0, (void*)item.lParam);
+    free((void*)item.lParam);
     SendMessageW(listview, LVM_DELETEITEM, selection, 0);
     item.mask = LVIF_STATE;
     item.state = LVIS_SELECTED | LVIS_FOCUSED;
@@ -510,7 +509,7 @@ void print_current_winver(void)
     else
         wprintf(L"%s\n", winver);
 
-    heap_free(winver);
+    free(winver);
 }
 
 static void on_winver_change(HWND dialog)

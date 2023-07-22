@@ -52,41 +52,44 @@ struct mo_file
     /* ... rest of file data here */
 };
 
-static int is_english( const language_t *lan )
+static int is_english( language_t lan )
 {
-    return lan->id == LANG_ENGLISH && lan->sub == SUBLANG_DEFAULT;
+    return lan == MAKELANGID( LANG_ENGLISH, SUBLANG_DEFAULT );
 }
 
-static int is_rtl_language( const language_t *lan )
+static int is_rtl_language( language_t lan )
 {
-    return lan->id == LANG_ARABIC || lan->id == LANG_HEBREW || lan->id == LANG_PERSIAN;
+    return PRIMARYLANGID(lan) == LANG_ARABIC ||
+           PRIMARYLANGID(lan) == LANG_HEBREW ||
+           PRIMARYLANGID(lan) == LANG_PERSIAN;
 }
 
-static int uses_larger_font( const language_t *lan )
+static int uses_larger_font( language_t lan )
 {
-    return lan->id == LANG_CHINESE || lan->id == LANG_JAPANESE || lan->id == LANG_KOREAN;
+    return PRIMARYLANGID(lan) == LANG_CHINESE ||
+           PRIMARYLANGID(lan) == LANG_JAPANESE ||
+           PRIMARYLANGID(lan) == LANG_KOREAN;
 }
 
-static int get_default_sublang( const language_t *lan )
+static language_t get_default_sublang( language_t lan )
 {
-    if (lan->sub != SUBLANG_NEUTRAL)
-        return lan->sub;
+    if (SUBLANGID(lan) != SUBLANG_NEUTRAL) return lan;
 
-    switch (lan->id)
+    switch (PRIMARYLANGID(lan))
     {
     case LANG_SPANISH:
-        return SUBLANG_SPANISH_MODERN;
+        return MAKELANGID( LANG_SPANISH, SUBLANG_SPANISH_MODERN );
     case LANG_CHINESE:
-        return SUBLANG_CHINESE_SIMPLIFIED;
+        return MAKELANGID( LANG_CHINESE, SUBLANG_CHINESE_SIMPLIFIED );
     default:
-        return SUBLANG_DEFAULT;
+        return MAKELANGID( PRIMARYLANGID(lan), SUBLANG_DEFAULT );
     }
 }
 
-static version_t *get_dup_version( language_t *lang )
+static version_t get_dup_version( language_t lang )
 {
     /* English "translations" take precedence over the original rc contents */
-    return new_version( is_english( lang ) ? 1 : -1 );
+    return is_english( lang ) ? 1 : -1;
 }
 
 static name_id_t *dup_name_id( name_id_t *id )
@@ -156,7 +159,7 @@ static int control_has_title( const control_t *ctrl )
     return TRUE;
 }
 
-static resource_t *dup_resource( resource_t *res, language_t *lang )
+static resource_t *dup_resource( resource_t *res, language_t lang )
 {
     resource_t *new = xmalloc( sizeof(*new) );
 
@@ -202,318 +205,6 @@ static resource_t *dup_resource( resource_t *res, language_t *lang )
     }
     return new;
 }
-
-static const struct
-{
-    unsigned int id, sub;
-    const char *name;
-} languages[] =
-{
-    { LANG_AFRIKAANS,      SUBLANG_NEUTRAL,                     "af" },
-    { LANG_AFRIKAANS,      SUBLANG_AFRIKAANS_SOUTH_AFRICA,      "af_ZA" },
-    { LANG_ALBANIAN,       SUBLANG_NEUTRAL,                     "sq" },
-    { LANG_ALBANIAN,       SUBLANG_ALBANIAN_ALBANIA,            "sq_AL" },
-    { LANG_AMHARIC,        SUBLANG_NEUTRAL,                     "am" },
-    { LANG_AMHARIC,        SUBLANG_AMHARIC_ETHIOPIA,            "am_ET" },
-    { LANG_ARABIC,         SUBLANG_NEUTRAL,                     "ar" },
-    { LANG_ARABIC,         SUBLANG_ARABIC_SAUDI_ARABIA,         "ar_SA" },
-    { LANG_ARABIC,         SUBLANG_ARABIC_IRAQ,                 "ar_IQ" },
-    { LANG_ARABIC,         SUBLANG_ARABIC_EGYPT,                "ar_EG" },
-    { LANG_ARABIC,         SUBLANG_ARABIC_LIBYA,                "ar_LY" },
-    { LANG_ARABIC,         SUBLANG_ARABIC_ALGERIA,              "ar_DZ" },
-    { LANG_ARABIC,         SUBLANG_ARABIC_MOROCCO,              "ar_MA" },
-    { LANG_ARABIC,         SUBLANG_ARABIC_TUNISIA,              "ar_TN" },
-    { LANG_ARABIC,         SUBLANG_ARABIC_OMAN,                 "ar_OM" },
-    { LANG_ARABIC,         SUBLANG_ARABIC_YEMEN,                "ar_YE" },
-    { LANG_ARABIC,         SUBLANG_ARABIC_SYRIA,                "ar_SY" },
-    { LANG_ARABIC,         SUBLANG_ARABIC_JORDAN,               "ar_JO" },
-    { LANG_ARABIC,         SUBLANG_ARABIC_LEBANON,              "ar_LB" },
-    { LANG_ARABIC,         SUBLANG_ARABIC_KUWAIT,               "ar_KW" },
-    { LANG_ARABIC,         SUBLANG_ARABIC_UAE,                  "ar_AE" },
-    { LANG_ARABIC,         SUBLANG_ARABIC_BAHRAIN,              "ar_BH" },
-    { LANG_ARABIC,         SUBLANG_ARABIC_QATAR,                "ar_QA" },
-    { LANG_ARMENIAN,       SUBLANG_NEUTRAL,                     "hy" },
-    { LANG_ARMENIAN,       SUBLANG_ARMENIAN_ARMENIA,            "hy_AM" },
-    { LANG_ASSAMESE,       SUBLANG_NEUTRAL,                     "as" },
-    { LANG_ASSAMESE,       SUBLANG_ASSAMESE_INDIA,              "as_IN" },
-    { LANG_ASTURIAN,       SUBLANG_NEUTRAL,                     "ast" },
-    { LANG_ASTURIAN,       SUBLANG_DEFAULT,                     "ast_ES" },
-    { LANG_AZERBAIJANI,    SUBLANG_NEUTRAL,                     "az" },
-    { LANG_AZERBAIJANI,    SUBLANG_AZERBAIJANI_AZERBAIJAN_LATIN,"az_AZ@latin" },
-    { LANG_AZERBAIJANI,    SUBLANG_AZERBAIJANI_AZERBAIJAN_CYRILLIC, "az_AZ@cyrillic" },
-    { LANG_BASQUE,         SUBLANG_NEUTRAL,                     "eu" },
-    { LANG_BASQUE,         SUBLANG_BASQUE_BASQUE,               "eu_ES" },
-    { LANG_BELARUSIAN,     SUBLANG_NEUTRAL,                     "be" },
-    { LANG_BELARUSIAN,     SUBLANG_BELARUSIAN_BELARUS,          "be_BY" },
-    { LANG_BENGALI,        SUBLANG_NEUTRAL,                     "bn" },
-    { LANG_BENGALI,        SUBLANG_BENGALI_INDIA,               "bn_IN" },
-    { LANG_BENGALI,        SUBLANG_BENGALI_BANGLADESH,          "bn_BD" },
-    { LANG_BRETON,         SUBLANG_NEUTRAL,                     "br" },
-    { LANG_BRETON,         SUBLANG_BRETON_FRANCE,               "br_FR" },
-    { LANG_BULGARIAN,      SUBLANG_NEUTRAL,                     "bg" },
-    { LANG_BULGARIAN,      SUBLANG_BULGARIAN_BULGARIA,          "bg_BG" },
-    { LANG_CATALAN,        SUBLANG_NEUTRAL,                     "ca" },
-    { LANG_CATALAN,        SUBLANG_CATALAN_CATALAN,             "ca_ES" },
-    { LANG_CHINESE,        SUBLANG_NEUTRAL,                     "zh" },
-    { LANG_CHINESE,        SUBLANG_CHINESE_TRADITIONAL,         "zh_TW" },
-    { LANG_CHINESE,        SUBLANG_CHINESE_SIMPLIFIED,          "zh_CN" },
-    { LANG_CHINESE,        SUBLANG_CHINESE_HONGKONG,            "zh_HK" },
-    { LANG_CHINESE,        SUBLANG_CHINESE_SINGAPORE,           "zh_SG" },
-    { LANG_CHINESE,        SUBLANG_CHINESE_MACAU,               "zh_MO" },
-    { LANG_CZECH,          SUBLANG_NEUTRAL,                     "cs" },
-    { LANG_CZECH,          SUBLANG_CZECH_CZECH_REPUBLIC,        "cs_CZ" },
-    { LANG_DANISH,         SUBLANG_NEUTRAL,                     "da" },
-    { LANG_DANISH,         SUBLANG_DANISH_DENMARK,              "da_DK" },
-    { LANG_DIVEHI,         SUBLANG_NEUTRAL,                     "dv" },
-    { LANG_DIVEHI,         SUBLANG_DIVEHI_MALDIVES,             "dv_MV" },
-    { LANG_DUTCH,          SUBLANG_NEUTRAL,                     "nl" },
-    { LANG_DUTCH,          SUBLANG_DUTCH,                       "nl_NL" },
-    { LANG_DUTCH,          SUBLANG_DUTCH_BELGIAN,               "nl_BE" },
-    { LANG_DUTCH,          SUBLANG_DUTCH_SURINAM,               "nl_SR" },
-    { LANG_ENGLISH,        SUBLANG_NEUTRAL,                     "en" },
-    { LANG_ENGLISH,        SUBLANG_ENGLISH_US,                  "en_US" },
-    { LANG_ENGLISH,        SUBLANG_ENGLISH_UK,                  "en_GB" },
-    { LANG_ENGLISH,        SUBLANG_ENGLISH_AUS,                 "en_AU" },
-    { LANG_ENGLISH,        SUBLANG_ENGLISH_CAN,                 "en_CA" },
-    { LANG_ENGLISH,        SUBLANG_ENGLISH_NZ,                  "en_NZ" },
-    { LANG_ENGLISH,        SUBLANG_ENGLISH_EIRE,                "en_IE" },
-    { LANG_ENGLISH,        SUBLANG_ENGLISH_SOUTH_AFRICA,        "en_ZA" },
-    { LANG_ENGLISH,        SUBLANG_ENGLISH_JAMAICA,             "en_JM" },
-    { LANG_ENGLISH,        SUBLANG_ENGLISH_CARIBBEAN,           "en_CB" },
-    { LANG_ENGLISH,        SUBLANG_ENGLISH_BELIZE,              "en_BZ" },
-    { LANG_ENGLISH,        SUBLANG_ENGLISH_TRINIDAD,            "en_TT" },
-    { LANG_ENGLISH,        SUBLANG_ENGLISH_ZIMBABWE,            "en_ZW" },
-    { LANG_ENGLISH,        SUBLANG_ENGLISH_PHILIPPINES,         "en_PH" },
-    { LANG_ENGLISH,        SUBLANG_ENGLISH_INDIA,               "en_IN" },
-    { LANG_ENGLISH,        SUBLANG_ENGLISH_MALAYSIA,            "en_MY" },
-    { LANG_ENGLISH,        SUBLANG_ENGLISH_SINGAPORE,           "en_SG" },
-    { LANG_ESTONIAN,       SUBLANG_NEUTRAL,                     "et" },
-    { LANG_ESTONIAN,       SUBLANG_ESTONIAN_ESTONIA,            "et_EE" },
-    { LANG_FAEROESE,       SUBLANG_NEUTRAL,                     "fo" },
-    { LANG_FAEROESE,       SUBLANG_FAEROESE_FAROE_ISLANDS,      "fo_FO" },
-    { LANG_FILIPINO,       SUBLANG_NEUTRAL,                     "fil" },
-    { LANG_FILIPINO,       SUBLANG_FILIPINO_PHILIPPINES,        "fil_PH" },
-    { LANG_FINNISH,        SUBLANG_NEUTRAL,                     "fi" },
-    { LANG_FINNISH,        SUBLANG_FINNISH_FINLAND,             "fi_FI" },
-    { LANG_FRENCH,         SUBLANG_NEUTRAL,                     "fr" },
-    { LANG_FRENCH,         SUBLANG_FRENCH,                      "fr_FR" },
-    { LANG_FRENCH,         SUBLANG_FRENCH_BELGIAN,              "fr_BE" },
-    { LANG_FRENCH,         SUBLANG_FRENCH_CANADIAN,             "fr_CA" },
-    { LANG_FRENCH,         SUBLANG_FRENCH_SWISS,                "fr_CH" },
-    { LANG_FRENCH,         SUBLANG_FRENCH_LUXEMBOURG,           "fr_LU" },
-    { LANG_FRENCH,         SUBLANG_FRENCH_MONACO,               "fr_MC" },
-    { LANG_GALICIAN,       SUBLANG_NEUTRAL,                     "gl" },
-    { LANG_GALICIAN,       SUBLANG_GALICIAN_GALICIAN,           "gl_ES" },
-    { LANG_GEORGIAN,       SUBLANG_NEUTRAL,                     "ka" },
-    { LANG_GEORGIAN,       SUBLANG_GEORGIAN_GEORGIA,            "ka_GE" },
-    { LANG_GERMAN,         SUBLANG_NEUTRAL,                     "de" },
-    { LANG_GERMAN,         SUBLANG_GERMAN,                      "de_DE" },
-    { LANG_GERMAN,         SUBLANG_GERMAN_SWISS,                "de_CH" },
-    { LANG_GERMAN,         SUBLANG_GERMAN_AUSTRIAN,             "de_AT" },
-    { LANG_GERMAN,         SUBLANG_GERMAN_LUXEMBOURG,           "de_LU" },
-    { LANG_GERMAN,         SUBLANG_GERMAN_LIECHTENSTEIN,        "de_LI" },
-    { LANG_GREEK,          SUBLANG_NEUTRAL,                     "el" },
-    { LANG_GREEK,          SUBLANG_GREEK_GREECE,                "el_GR" },
-    { LANG_GUJARATI,       SUBLANG_NEUTRAL,                     "gu" },
-    { LANG_GUJARATI,       SUBLANG_GUJARATI_INDIA,              "gu_IN" },
-    { LANG_HAUSA,          SUBLANG_NEUTRAL,                     "ha" },
-    { LANG_HAUSA,          SUBLANG_HAUSA_NIGERIA,               "ha_NG" },
-    { LANG_HAWAIIAN,       SUBLANG_NEUTRAL,                     "haw" },
-    { LANG_HAWAIIAN,       SUBLANG_HAWAIIAN_US,                 "haw_US" },
-    { LANG_HEBREW,         SUBLANG_NEUTRAL,                     "he" },
-    { LANG_HEBREW,         SUBLANG_HEBREW_ISRAEL,               "he_IL" },
-    { LANG_HINDI,          SUBLANG_NEUTRAL,                     "hi" },
-    { LANG_HINDI,          SUBLANG_HINDI_INDIA,                 "hi_IN" },
-    { LANG_HUNGARIAN,      SUBLANG_NEUTRAL,                     "hu" },
-    { LANG_HUNGARIAN,      SUBLANG_HUNGARIAN_HUNGARY,           "hu_HU" },
-    { LANG_ICELANDIC,      SUBLANG_NEUTRAL,                     "is" },
-    { LANG_ICELANDIC,      SUBLANG_ICELANDIC_ICELAND,           "is_IS" },
-    { LANG_IGBO,           SUBLANG_NEUTRAL,                     "ig" },
-    { LANG_IGBO,           SUBLANG_IGBO_NIGERIA,                "ig_NG" },
-    { LANG_INDONESIAN,     SUBLANG_NEUTRAL,                     "id" },
-    { LANG_INDONESIAN,     SUBLANG_INDONESIAN_INDONESIA,        "id_ID" },
-    { LANG_INUKTITUT,      SUBLANG_NEUTRAL,                     "iu" },
-    { LANG_INUKTITUT,      SUBLANG_INUKTITUT_CANADA,            "iu_CA" },
-    { LANG_IRISH,          SUBLANG_NEUTRAL,                     "ga" },
-    { LANG_IRISH,          SUBLANG_IRISH_IRELAND,               "ga_IE" },
-    { LANG_ITALIAN,        SUBLANG_NEUTRAL,                     "it" },
-    { LANG_ITALIAN,        SUBLANG_ITALIAN,                     "it_IT" },
-    { LANG_ITALIAN,        SUBLANG_ITALIAN_SWISS,               "it_CH" },
-    { LANG_JAPANESE,       SUBLANG_NEUTRAL,                     "ja" },
-    { LANG_JAPANESE,       SUBLANG_JAPANESE_JAPAN,              "ja_JP" },
-    { LANG_KANNADA,        SUBLANG_NEUTRAL,                     "kn" },
-    { LANG_KANNADA,        SUBLANG_KANNADA_INDIA,               "kn_IN" },
-    { LANG_KAZAK,          SUBLANG_NEUTRAL,                     "kk" },
-    { LANG_KAZAK,          SUBLANG_KAZAK_KAZAKHSTAN,            "kk_KZ" },
-    { LANG_KHMER,          SUBLANG_NEUTRAL,                     "km" },
-    { LANG_KHMER,          SUBLANG_KHMER_CAMBODIA,              "km_KH" },
-    { LANG_KINYARWANDA,    SUBLANG_NEUTRAL,                     "rw" },
-    { LANG_KINYARWANDA,    SUBLANG_KINYARWANDA_RWANDA,          "rw_RW" },
-    { LANG_KONKANI,        SUBLANG_NEUTRAL,                     "kok" },
-    { LANG_KONKANI,        SUBLANG_KONKANI_INDIA,               "kok_IN" },
-    { LANG_KOREAN,         SUBLANG_NEUTRAL,                     "ko" },
-    { LANG_KOREAN,         SUBLANG_KOREAN,                      "ko_KR" },
-    { LANG_KYRGYZ,         SUBLANG_NEUTRAL,                     "ky" },
-    { LANG_KYRGYZ,         SUBLANG_KYRGYZ_KYRGYZSTAN,           "ky_KG" },
-    { LANG_LAO,            SUBLANG_NEUTRAL,                     "lo" },
-    { LANG_LAO,            SUBLANG_LAO_LAO,                     "lo_LA" },
-    { LANG_LATVIAN,        SUBLANG_NEUTRAL,                     "lv" },
-    { LANG_LATVIAN,        SUBLANG_LATVIAN_LATVIA,              "lv_LV" },
-    { LANG_LITHUANIAN,     SUBLANG_NEUTRAL,                     "lt" },
-    { LANG_LITHUANIAN,     SUBLANG_LITHUANIAN,                  "lt_LT" },
-    { LANG_MACEDONIAN,     SUBLANG_NEUTRAL,                     "mk" },
-    { LANG_MACEDONIAN,     SUBLANG_MACEDONIAN_MACEDONIA,        "mk_MK" },
-    { LANG_MALAY,          SUBLANG_NEUTRAL,                     "ms" },
-    { LANG_MALAY,          SUBLANG_MALAY_MALAYSIA,              "ms_MY" },
-    { LANG_MALAY,          SUBLANG_MALAY_BRUNEI_DARUSSALAM,     "ms_BN" },
-    { LANG_MALAYALAM,      SUBLANG_NEUTRAL,                     "ml" },
-    { LANG_MALAYALAM,      SUBLANG_MALAYALAM_INDIA,             "ml_IN" },
-    { LANG_MALTESE,        SUBLANG_NEUTRAL,                     "mt" },
-    { LANG_MALTESE,        SUBLANG_MALTESE_MALTA,               "mt_MT" },
-    { LANG_MARATHI,        SUBLANG_NEUTRAL,                     "mr" },
-    { LANG_MARATHI,        SUBLANG_MARATHI_INDIA,               "mr_IN" },
-    { LANG_MONGOLIAN,      SUBLANG_NEUTRAL,                     "mn" },
-    { LANG_MONGOLIAN,      SUBLANG_MONGOLIAN_CYRILLIC_MONGOLIA, "mn_MN" },
-    { LANG_MONGOLIAN,      SUBLANG_MONGOLIAN_PRC,               "mn_CN" },
-    { LANG_NEPALI,         SUBLANG_NEUTRAL,                     "ne" },
-    { LANG_NEPALI,         SUBLANG_NEPALI_NEPAL,                "ne_NP" },
-    { LANG_NEPALI,         SUBLANG_NEPALI_INDIA,                "ne_IN" },
-    { LANG_NORWEGIAN,      SUBLANG_NORWEGIAN_BOKMAL,            "nb_NO" },
-    { LANG_NORWEGIAN,      SUBLANG_NORWEGIAN_NYNORSK,           "nn_NO" },
-    { LANG_ODIA,           SUBLANG_NEUTRAL,                     "or" },
-    { LANG_ODIA,           SUBLANG_ODIA_INDIA,                  "or_IN" },
-    { LANG_PASHTO,         SUBLANG_NEUTRAL,                     "ps" },
-    { LANG_PASHTO,         SUBLANG_PASHTO_AFGHANISTAN,          "ps_AF" },
-    { LANG_PERSIAN,        SUBLANG_NEUTRAL,                     "fa" },
-    { LANG_PERSIAN,        SUBLANG_PERSIAN_IRAN,                "fa_IR" },
-    { LANG_POLISH,         SUBLANG_NEUTRAL,                     "pl" },
-    { LANG_POLISH,         SUBLANG_POLISH_POLAND,               "pl_PL" },
-    { LANG_PORTUGUESE,     SUBLANG_NEUTRAL,                     "pt" },
-    { LANG_PORTUGUESE,     SUBLANG_PORTUGUESE_BRAZILIAN,        "pt_BR" },
-    { LANG_PORTUGUESE,     SUBLANG_PORTUGUESE_PORTUGAL,         "pt_PT" },
-    { LANG_PUNJABI,        SUBLANG_NEUTRAL,                     "pa" },
-    { LANG_PUNJABI,        SUBLANG_PUNJABI_INDIA,               "pa_IN" },
-    { LANG_PUNJABI,        SUBLANG_PUNJABI_PAKISTAN,            "pa_PK" },
-    { LANG_ROMANIAN,       SUBLANG_NEUTRAL,                     "ro" },
-    { LANG_ROMANIAN,       SUBLANG_ROMANIAN_ROMANIA,            "ro_RO" },
-    { LANG_ROMANSH,        SUBLANG_NEUTRAL,                     "rm" },
-    { LANG_ROMANSH,        SUBLANG_ROMANSH_SWITZERLAND,         "rm_CH" },
-    { LANG_RUSSIAN,        SUBLANG_NEUTRAL,                     "ru" },
-    { LANG_RUSSIAN,        SUBLANG_RUSSIAN_RUSSIA,              "ru_RU" },
-    { LANG_SAMI,           SUBLANG_NEUTRAL,                     "se" },
-    { LANG_SAMI,           SUBLANG_SAMI_NORTHERN_NORWAY,        "se_NO" },
-    { LANG_SAMI,           SUBLANG_SAMI_NORTHERN_SWEDEN,        "se_SE" },
-    { LANG_SAMI,           SUBLANG_SAMI_NORTHERN_FINLAND,       "se_FI" },
-    { LANG_SANSKRIT,       SUBLANG_NEUTRAL,                     "sa" },
-    { LANG_SANSKRIT,       SUBLANG_SANSKRIT_INDIA,              "sa_IN" },
-    { LANG_SCOTTISH_GAELIC,SUBLANG_NEUTRAL,                     "gd" },
-    { LANG_SCOTTISH_GAELIC,SUBLANG_SCOTTISH_GAELIC,             "gd_GB" },
-    /* LANG_SERBIAN/LANG_CROATIAN/LANG_BOSNIAN are the same */
-    { LANG_SERBIAN,        SUBLANG_NEUTRAL,                     "hr" },
-    { LANG_SERBIAN,        SUBLANG_SERBIAN_CROATIA,             "hr_HR" },
-    { LANG_SERBIAN,        SUBLANG_SERBIAN_LATIN,               "sr_RS@latin" },
-    { LANG_SERBIAN,        SUBLANG_SERBIAN_CYRILLIC,            "sr_RS@cyrillic" },
-    { LANG_SERBIAN,        SUBLANG_CROATIAN_BOSNIA_HERZEGOVINA_LATIN,   "hr_BA@latin" },
-    { LANG_SERBIAN,        SUBLANG_BOSNIAN_BOSNIA_HERZEGOVINA_LATIN,    "bs_BA@latin" },
-    { LANG_SERBIAN,        SUBLANG_SERBIAN_BOSNIA_HERZEGOVINA_LATIN,    "sr_BA@latin" },
-    { LANG_SERBIAN,        SUBLANG_SERBIAN_BOSNIA_HERZEGOVINA_CYRILLIC, "sr_BA@cyrillic" },
-    { LANG_SERBIAN,        SUBLANG_BOSNIAN_BOSNIA_HERZEGOVINA_CYRILLIC, "bs_BA@cyrillic" },
-    { LANG_SERBIAN,        SUBLANG_SERBIAN_SERBIA_LATIN,        "sr_RS@latin" },
-    { LANG_SERBIAN,        SUBLANG_SERBIAN_SERBIA_CYRILLIC,     "sr_RS@cyrillic" },
-    { LANG_SERBIAN,        SUBLANG_SERBIAN_MONTENEGRO_LATIN,    "sr_ME@latin" },
-    { LANG_SERBIAN,        SUBLANG_SERBIAN_MONTENEGRO_CYRILLIC, "sr_ME@cyrillic" },
-    { LANG_SINHALESE,      SUBLANG_NEUTRAL,                     "si" },
-    { LANG_SINHALESE,      SUBLANG_SINHALESE_SRI_LANKA,         "si_LK" },
-    { LANG_SLOVAK,         SUBLANG_NEUTRAL,                     "sk" },
-    { LANG_SLOVAK,         SUBLANG_SLOVAK_SLOVAKIA,             "sk_SK" },
-    { LANG_SLOVENIAN,      SUBLANG_NEUTRAL,                     "sl" },
-    { LANG_SLOVENIAN,      SUBLANG_SLOVENIAN_SLOVENIA,          "sl_SI" },
-    { LANG_SOTHO,          SUBLANG_NEUTRAL,                     "nso" },
-    { LANG_SOTHO,          SUBLANG_SOTHO_NORTHERN_SOUTH_AFRICA, "nso_ZA" },
-    { LANG_SPANISH,        SUBLANG_NEUTRAL,                     "es" },
-    { LANG_SPANISH,        SUBLANG_SPANISH,                     "es_ES" },
-    { LANG_SPANISH,        SUBLANG_SPANISH_MEXICAN,             "es_MX" },
-    { LANG_SPANISH,        SUBLANG_SPANISH_MODERN,              "es_ES_modern" },
-    { LANG_SPANISH,        SUBLANG_SPANISH_GUATEMALA,           "es_GT" },
-    { LANG_SPANISH,        SUBLANG_SPANISH_COSTA_RICA,          "es_CR" },
-    { LANG_SPANISH,        SUBLANG_SPANISH_PANAMA,              "es_PA" },
-    { LANG_SPANISH,        SUBLANG_SPANISH_DOMINICAN_REPUBLIC,  "es_DO" },
-    { LANG_SPANISH,        SUBLANG_SPANISH_VENEZUELA,           "es_VE" },
-    { LANG_SPANISH,        SUBLANG_SPANISH_COLOMBIA,            "es_CO" },
-    { LANG_SPANISH,        SUBLANG_SPANISH_PERU,                "es_PE" },
-    { LANG_SPANISH,        SUBLANG_SPANISH_ARGENTINA,           "es_AR" },
-    { LANG_SPANISH,        SUBLANG_SPANISH_ECUADOR,             "es_EC" },
-    { LANG_SPANISH,        SUBLANG_SPANISH_CHILE,               "es_CL" },
-    { LANG_SPANISH,        SUBLANG_SPANISH_URUGUAY,             "es_UY" },
-    { LANG_SPANISH,        SUBLANG_SPANISH_PARAGUAY,            "es_PY" },
-    { LANG_SPANISH,        SUBLANG_SPANISH_BOLIVIA,             "es_BO" },
-    { LANG_SPANISH,        SUBLANG_SPANISH_EL_SALVADOR,         "es_SV" },
-    { LANG_SPANISH,        SUBLANG_SPANISH_HONDURAS,            "es_HN" },
-    { LANG_SPANISH,        SUBLANG_SPANISH_NICARAGUA,           "es_NI" },
-    { LANG_SPANISH,        SUBLANG_SPANISH_PUERTO_RICO,         "es_PR" },
-    { LANG_SPANISH,        SUBLANG_SPANISH_US,                  "es_US" },
-    { LANG_SWAHILI,        SUBLANG_NEUTRAL,                     "sw" },
-    { LANG_SWAHILI,        SUBLANG_SWAHILI_KENYA,               "sw_KE" },
-    { LANG_SWEDISH,        SUBLANG_NEUTRAL,                     "sv" },
-    { LANG_SWEDISH,        SUBLANG_SWEDISH_SWEDEN,              "sv_SE" },
-    { LANG_SWEDISH,        SUBLANG_SWEDISH_FINLAND,             "sv_FI" },
-    { LANG_SYRIAC,         SUBLANG_NEUTRAL,                     "syr" },
-    { LANG_SYRIAC,         SUBLANG_SYRIAC_SYRIA,                "syr_SY" },
-    { LANG_TAJIK,          SUBLANG_NEUTRAL,                     "tg" },
-    { LANG_TAJIK,          SUBLANG_TAJIK_TAJIKISTAN,            "tg_TJ" },
-    { LANG_TAMIL,          SUBLANG_NEUTRAL,                     "ta" },
-    { LANG_TAMIL,          SUBLANG_TAMIL_INDIA,                 "ta_IN" },
-    { LANG_TATAR,          SUBLANG_NEUTRAL,                     "tt" },
-    { LANG_TATAR,          SUBLANG_TATAR_RUSSIA,                "tt_TA" },
-    { LANG_TELUGU,         SUBLANG_NEUTRAL,                     "te" },
-    { LANG_TELUGU,         SUBLANG_TELUGU_INDIA,                "te_IN" },
-    { LANG_THAI,           SUBLANG_NEUTRAL,                     "th" },
-    { LANG_THAI,           SUBLANG_THAI_THAILAND,               "th_TH" },
-    { LANG_TIGRINYA,       SUBLANG_NEUTRAL,                     "ti" },
-    { LANG_TIGRINYA,       SUBLANG_TIGRINYA_ETHIOPIA,           "ti_ET" },
-    { LANG_TIGRINYA,       SUBLANG_TIGRINYA_ERITREA,            "ti_ER" },
-    { LANG_TSWANA,         SUBLANG_NEUTRAL,                     "tn" },
-    { LANG_TSWANA,         SUBLANG_TSWANA_SOUTH_AFRICA,         "tn_ZA" },
-    { LANG_TURKISH,        SUBLANG_NEUTRAL,                     "tr" },
-    { LANG_TURKISH,        SUBLANG_TURKISH_TURKEY,              "tr_TR" },
-    { LANG_UIGHUR,         SUBLANG_NEUTRAL,                     "ug" },
-    { LANG_UIGHUR,         SUBLANG_UIGHUR_PRC,                  "ug_CN" },
-    { LANG_UKRAINIAN,      SUBLANG_NEUTRAL,                     "uk" },
-    { LANG_UKRAINIAN,      SUBLANG_UKRAINIAN_UKRAINE,           "uk_UA" },
-    { LANG_URDU,           SUBLANG_NEUTRAL,                     "ur" },
-    { LANG_URDU,           SUBLANG_URDU_PAKISTAN,               "ur_PK" },
-    { LANG_URDU,           SUBLANG_URDU_INDIA,                  "ur_IN" },
-    { LANG_UZBEK,          SUBLANG_NEUTRAL,                     "uz" },
-    { LANG_UZBEK,          SUBLANG_UZBEK_LATIN,                 "uz_UZ@latin" },
-    { LANG_UZBEK,          SUBLANG_UZBEK_CYRILLIC,              "uz_UZ@cyrillic" },
-    { LANG_VIETNAMESE,     SUBLANG_NEUTRAL,                     "vi" },
-    { LANG_VIETNAMESE,     SUBLANG_VIETNAMESE_VIETNAM,          "vi_VN" },
-    { LANG_WELSH,          SUBLANG_NEUTRAL,                     "cy" },
-    { LANG_WELSH,          SUBLANG_WELSH_UNITED_KINGDOM,        "cy_GB" },
-    { LANG_WOLOF,          SUBLANG_NEUTRAL,                     "wo" },
-    { LANG_WOLOF,          SUBLANG_WOLOF_SENEGAL,               "wo_SN" },
-    { LANG_XHOSA,          SUBLANG_NEUTRAL,                     "xh" },
-    { LANG_XHOSA,          SUBLANG_XHOSA_SOUTH_AFRICA,          "xh_ZA" },
-    { LANG_YORUBA,         SUBLANG_NEUTRAL,                     "yo" },
-    { LANG_YORUBA,         SUBLANG_YORUBA_NIGERIA,              "yo_NG" },
-    { LANG_ZULU,           SUBLANG_NEUTRAL,                     "zu" },
-    { LANG_ZULU,           SUBLANG_ZULU_SOUTH_AFRICA,           "zu_ZA" },
-
-#ifdef LANG_ESPERANTO
-    { LANG_ESPERANTO,      SUBLANG_DEFAULT,                     "eo" },
-#endif
-#ifdef LANG_WALON
-    { LANG_WALON,          SUBLANG_NEUTRAL,                     "wa" },
-    { LANG_WALON,          SUBLANG_DEFAULT,                     "wa_BE" },
-#endif
-#ifdef LANG_CORNISH
-    { LANG_CORNISH,        SUBLANG_NEUTRAL,                     "kw" },
-    { LANG_CORNISH,        SUBLANG_DEFAULT,                     "kw_GB" },
-#endif
-#ifdef LANG_MANX_GAELIC
-    { LANG_MANX_GAELIC,    SUBLANG_MANX_GAELIC,                 "gv_GB" },
-#endif
-};
 
 #ifndef HAVE_LIBGETTEXTPO
 
@@ -571,8 +262,7 @@ static po_message_t find_message( po_file_t po, const char *msgid, const char *m
     return msg;
 }
 
-static void add_po_string( po_file_t po, const string_t *msgid, const string_t *msgstr,
-                           const language_t *lang )
+static void add_po_string( po_file_t po, const string_t *msgid, const string_t *msgstr, language_t lang )
 {
     static const char dnt[] = "do not translate";
     po_message_t msg;
@@ -593,9 +283,7 @@ static void add_po_string( po_file_t po, const string_t *msgid, const string_t *
 
     if (msgstr)
     {
-        if (lang) codepage = get_language_codepage( lang->id, lang->sub );
-        else codepage = get_language_codepage( 0, 0 );
-        assert( codepage != -1 );
+        codepage = get_language_codepage( lang );
         str = str_buffer = convert_string_utf8( msgstr, codepage );
         if (is_english( lang )) get_message_context( &str );
     }
@@ -647,37 +335,24 @@ static po_file_t create_po_file(void)
     return po;
 }
 
-static po_file_t get_po_file( const language_t *lang )
+static po_file_t get_po_file( language_t lang )
 {
     struct po_file_lang *po_file;
 
     LIST_FOR_EACH_ENTRY( po_file, &po_file_langs, struct po_file_lang, entry )
-        if (po_file->lang.id == lang->id && po_file->lang.sub == lang->sub) return po_file->po;
+        if (po_file->lang == lang) return po_file->po;
 
     /* create a new one */
     po_file = xmalloc( sizeof(*po_file) );
-    po_file->lang = *lang;
+    po_file->lang = lang;
     po_file->po = create_po_file();
     list_add_tail( &po_file_langs, &po_file->entry );
     return po_file->po;
 }
 
-static const char *get_language_name( const language_t *lang )
+static char *get_po_file_name( language_t lang )
 {
-    static char name[20];
-    unsigned int i;
-
-    for (i = 0; i < ARRAY_SIZE(languages); i++)
-        if (languages[i].id == lang->id && languages[i].sub == lang->sub)
-            return languages[i].name;
-
-    sprintf( name, "%02x-%02x", lang->id, lang->sub );
-    return name;
-}
-
-static char *get_po_file_name( const language_t *lang )
-{
-    return strmake( "%s.po", get_language_name( lang ) );
+    return strmake( "%04x.po", lang );
 }
 
 static unsigned int flush_po_files( const char *output_name )
@@ -687,7 +362,7 @@ static unsigned int flush_po_files( const char *output_name )
 
     LIST_FOR_EACH_ENTRY_SAFE( po_file, next, &po_file_langs, struct po_file_lang, entry )
     {
-        char *name = get_po_file_name( &po_file->lang );
+        char *name = get_po_file_name( po_file->lang );
         if (output_name)
         {
             if (!strcmp( get_basename(output_name), name ))
@@ -718,7 +393,7 @@ static void add_pot_stringtable( po_file_t po, const resource_t *res )
     while (stt)
     {
         for (i = 0; i < stt->nentries; i++)
-            if (stt->entries[i].str) add_po_string( po, stt->entries[i].str, NULL, NULL );
+            if (stt->entries[i].str) add_po_string( po, stt->entries[i].str, NULL, 0 );
         stt = stt->next;
     }
 }
@@ -744,7 +419,7 @@ static void add_pot_dialog_controls( po_file_t po, const control_t *ctrl )
 {
     while (ctrl)
     {
-        if (control_has_title( ctrl )) add_po_string( po, ctrl->title->name.s_name, NULL, NULL );
+        if (control_has_title( ctrl )) add_po_string( po, ctrl->title->name.s_name, NULL, 0 );
         ctrl = ctrl->next;
     }
 }
@@ -753,7 +428,7 @@ static void add_pot_dialog( po_file_t po, const resource_t *res )
 {
     const dialog_t *dlg = res->res.dlg;
 
-    if (dlg->title) add_po_string( po, dlg->title, NULL, NULL );
+    if (dlg->title) add_po_string( po, dlg->title, NULL, 0 );
     add_pot_dialog_controls( po, dlg->controls );
 }
 
@@ -765,8 +440,8 @@ static void compare_dialogs( const dialog_t *english_dlg, const dialog_t *dlg )
     char *title = english_dlg->title ? convert_msgid_ascii( english_dlg->title, 0 ) : xstrdup("??");
 
     if (english_dlg->width != dlg->width || english_dlg->height != dlg->height)
-        warning( "%s: dialog %s doesn't have the same size (%d,%d vs %d,%d)\n",
-                 get_language_name( dlg->lvc.language ), title, dlg->width, dlg->height,
+        warning( "%04x: dialog %s doesn't have the same size (%d,%d vs %d,%d)\n",
+                 dlg->lvc.language, title, dlg->width, dlg->height,
                  english_dlg->width, english_dlg->height );
 
     if (dlg->gotstyle) style = dlg->style->or_mask;
@@ -776,11 +451,11 @@ static void compare_dialogs( const dialog_t *english_dlg, const dialog_t *dlg )
     if (is_rtl_language( dlg->lvc.language )) english_exstyle |= WS_EX_LAYOUTRTL;
 
     if (english_style != style)
-        warning( "%s: dialog %s doesn't have the same style (%08x vs %08x)\n",
-                 get_language_name( dlg->lvc.language ), title, style, english_style );
+        warning( "%04x: dialog %s doesn't have the same style (%08x vs %08x)\n",
+                 dlg->lvc.language, title, style, english_style );
     if (english_exstyle != exstyle)
-        warning( "%s: dialog %s doesn't have the same exstyle (%08x vs %08x)\n",
-                 get_language_name( dlg->lvc.language ), title, exstyle, english_exstyle );
+        warning( "%04x: dialog %s doesn't have the same exstyle (%08x vs %08x)\n",
+                 dlg->lvc.language, title, exstyle, english_exstyle );
 
     if (english_dlg->font || dlg->font)
     {
@@ -800,8 +475,8 @@ static void compare_dialogs( const dialog_t *english_dlg, const dialog_t *dlg )
         if (uses_larger_font( dlg->lvc.language )) english_size++;
 
         if (!english_font || !font || strcasecmp( english_font, font ) || english_size != size)
-            warning( "%s: dialog %s doesn't have the same font (%s %u vs %s %u)\n",
-                     get_language_name(dlg->lvc.language), title,
+            warning( "%04x: dialog %s doesn't have the same font (%s %u vs %s %u)\n",
+                     dlg->lvc.language, title,
                      english_font ? english_font : "default", english_size,
                      font ? font : "default", size );
         free( font );
@@ -817,20 +492,19 @@ static void compare_dialogs( const dialog_t *english_dlg, const dialog_t *dlg )
             name = strmake( "%d", ctrl->id );
 
         if (english_ctrl->width != ctrl->width || english_ctrl->height != ctrl->height)
-            warning( "%s: dialog %s control %s doesn't have the same size (%d,%d vs %d,%d)\n",
-                     get_language_name( dlg->lvc.language ), title, name,
+            warning( "%04x: dialog %s control %s doesn't have the same size (%d,%d vs %d,%d)\n",
+                     dlg->lvc.language, title, name,
                      ctrl->width, ctrl->height, english_ctrl->width, english_ctrl->height );
         if (english_ctrl->x != ctrl->x || english_ctrl->y != ctrl->y)
-            warning( "%s: dialog %s control %s doesn't have the same position (%d,%d vs %d,%d)\n",
-                     get_language_name( dlg->lvc.language ), title, name,
-                     ctrl->x, ctrl->y, english_ctrl->x, english_ctrl->y );
+            warning( "%04x: dialog %s control %s doesn't have the same position (%d,%d vs %d,%d)\n",
+                     dlg->lvc.language, title, name, ctrl->x, ctrl->y, english_ctrl->x, english_ctrl->y );
         free( name );
     }
     free( title );
 }
 
 static void add_po_dialog_controls( po_file_t po, const control_t *english_ctrl,
-                                    const control_t *ctrl, const language_t *lang )
+                                    const control_t *ctrl, language_t lang )
 {
     while (english_ctrl && ctrl)
     {
@@ -859,7 +533,7 @@ static void add_pot_menu_items( po_file_t po, const menu_item_t *item )
 {
     while (item)
     {
-        if (item->name) add_po_string( po, item->name, NULL, NULL );
+        if (item->name) add_po_string( po, item->name, NULL, 0 );
         if (item->popup) add_pot_menu_items( po, item->popup );
         item = item->next;
     }
@@ -871,7 +545,7 @@ static void add_pot_menu( po_file_t po, const resource_t *res )
 }
 
 static void add_po_menu_items( po_file_t po, const menu_item_t *english_item,
-                               const menu_item_t *item, const language_t *lang )
+                               const menu_item_t *item, language_t lang )
 {
     while (english_item && item)
     {
@@ -911,7 +585,7 @@ static void add_pot_accel( po_file_t po, const resource_t *res )
     {
         /* accelerators without a context don't make sense in po files */
         if (event->str && string_has_context( event->str ))
-            add_po_string( po, event->str, NULL, NULL );
+            add_po_string( po, event->str, NULL, 0 );
         event = event->next;
     }
 }
@@ -1002,7 +676,7 @@ static void add_pot_versioninfo( po_file_t po, const resource_t *res )
     if (!langcharset) return;
     for (val = langcharset->values; val; val = val->next)
         if (version_value_needs_translation( val ))
-            add_po_string( po, val->value.str, NULL, NULL );
+            add_po_string( po, val->value.str, NULL, 0 );
 }
 
 static void add_po_versioninfo( const resource_t *english, const resource_t *res )
@@ -1102,21 +776,13 @@ static void byteswap( unsigned int *data, unsigned int count )
 
 static void load_mo_file( const char *name )
 {
-    struct stat st;
-    int res, fd;
+    size_t size;
 
-    fd = open( name, O_RDONLY | O_BINARY );
-    if (fd == -1) fatal_perror( "Failed to open %s", name );
-    fstat( fd, &st );
-    mo_file = xmalloc( st.st_size );
-    res = read( fd, mo_file, st.st_size );
-    if (res == -1) fatal_perror( "Failed to read %s", name );
-    else if (res != st.st_size) error( "Failed to read %s\n", name );
-    close( fd );
+    if (!(mo_file = read_file( name, &size ))) fatal_perror( "Failed to read %s", name );
 
     /* sanity checks */
 
-    if (st.st_size < sizeof(*mo_file))
+    if (size < sizeof(*mo_file))
         error( "%s is not a valid .mo file\n", name );
     if (mo_file->magic == 0xde120495)
         byteswap( &mo_file->revision, 4 );
@@ -1124,9 +790,9 @@ static void load_mo_file( const char *name )
         error( "%s is not a valid .mo file\n", name );
     if ((mo_file->revision >> 16) > 1)
         error( "%s: unsupported file version %x\n", name, mo_file->revision );
-    if (mo_file->msgid_off >= st.st_size ||
-        mo_file->msgstr_off >= st.st_size ||
-        st.st_size < sizeof(*mo_file) + 2 * 8 * mo_file->count)
+    if (mo_file->msgid_off >= size ||
+        mo_file->msgstr_off >= size ||
+        size < sizeof(*mo_file) + 2 * 8 * mo_file->count)
         error( "%s: corrupted file\n", name );
 
     if (mo_file->magic == 0xde120495)
@@ -1261,7 +927,7 @@ static menu_item_t *translate_items( menu_item_t *item, int *found )
     return head;
 }
 
-static stringtable_t *translate_stringtable( stringtable_t *stt, language_t *lang, int *found )
+static stringtable_t *translate_stringtable( stringtable_t *stt, language_t lang, int *found )
 {
     stringtable_t *new, *head = NULL, *tail = NULL;
     int i;
@@ -1329,7 +995,7 @@ static event_t *translate_accel( accelerator_t *acc, accelerator_t *new, int *fo
     return head;
 }
 
-static ver_value_t *translate_langcharset_values( ver_value_t *val, language_t *lang, int *found )
+static ver_value_t *translate_langcharset_values( ver_value_t *val, language_t lang, int *found )
 {
     ver_value_t *new_val, *head = NULL, *tail = NULL;
     while (val)
@@ -1348,16 +1014,16 @@ static ver_value_t *translate_langcharset_values( ver_value_t *val, language_t *
     return head;
 }
 
-static ver_value_t *translate_stringfileinfo( ver_value_t *val, language_t *lang, int *found )
+static ver_value_t *translate_stringfileinfo( ver_value_t *val, language_t lang, int *found )
 {
     int i;
     ver_value_t *new_val, *head = NULL, *tail = NULL;
     const char *english_block_name[2] = { "040904b0", "040904e4" };
     char *block_name[2];
-    int langid = MAKELANGID( lang->id, get_default_sublang( lang ) );
+    language_t langid = get_default_sublang( lang );
 
     block_name[0] = strmake( "%04x%04x", langid, 1200 );
-    block_name[1] = strmake( "%04x%04x", langid, get_language_codepage( lang->id, lang->sub ) );
+    block_name[1] = strmake( "%04x%04x", langid, get_language_codepage( lang ));
 
     while (val)
     {
@@ -1408,7 +1074,7 @@ static ver_value_t *translate_stringfileinfo( ver_value_t *val, language_t *lang
     return head;
 }
 
-static ver_value_t *translate_varfileinfo( ver_value_t *val, language_t *lang )
+static ver_value_t *translate_varfileinfo( ver_value_t *val, language_t lang )
 {
     ver_value_t *new_val, *head = NULL, *tail = NULL;
 
@@ -1424,13 +1090,13 @@ static ver_value_t *translate_varfileinfo( ver_value_t *val, language_t *lang )
                 val->value.words->words[0] == MAKELANGID( LANG_ENGLISH, SUBLANG_ENGLISH_US ))
             {
                 ver_words_t *new_words;
-                int langid, codepage;
-                langid = MAKELANGID( lang->id, get_default_sublang( lang ) );
+                int codepage;
+                language_t langid = get_default_sublang( lang );
                 new_words = new_ver_words( langid );
                 if (val->value.words->words[1] == 1200)
                     codepage = 1200;
                 else
-                    codepage = get_language_codepage( lang->id, lang->sub );
+                    codepage = get_language_codepage( lang );
                 new_val->value.words = add_ver_words( new_words, codepage );
             }
             free( key );
@@ -1445,7 +1111,7 @@ static ver_value_t *translate_varfileinfo( ver_value_t *val, language_t *lang )
     return head;
 }
 
-static ver_block_t *translate_versioninfo( ver_block_t *blk, language_t *lang, int *found )
+static ver_block_t *translate_versioninfo( ver_block_t *blk, language_t lang, int *found )
 {
     ver_block_t *new_blk, *head = NULL, *tail = NULL;
     char *name;
@@ -1470,7 +1136,7 @@ static ver_block_t *translate_versioninfo( ver_block_t *blk, language_t *lang, i
     return head;
 }
 
-static void translate_resources( language_t *lang )
+static void translate_resources( language_t lang )
 {
     resource_t *res;
 
@@ -1520,12 +1186,80 @@ static void translate_resources( language_t *lang )
     }
 }
 
+/* Unix format is: lang[_country][.charset][@modifier]
+ * Windows format is: lang[-script][-country][_modifier] */
+static int unix_to_win_locale( const char *unix_name, char *win_name )
+{
+    static const char sep[] = "_.@";
+    const char *extra = NULL;
+    char buffer[LOCALE_NAME_MAX_LENGTH];
+    char *p, *country = NULL, *modifier = NULL;
+
+    if (strlen( unix_name ) >= LOCALE_NAME_MAX_LENGTH) return FALSE;
+    strcpy( buffer, unix_name );
+    if (!(p = strpbrk( buffer, sep )))
+    {
+        strcpy( win_name, buffer );
+        return TRUE;
+    }
+
+    if (*p == '_')
+    {
+        *p++ = 0;
+        country = p;
+        p = strpbrk( p, sep + 1 );
+    }
+    if (p && *p == '.')
+    {
+        *p++ = 0;
+        /* charset, ignore */
+        p = strchr( p, '@' );
+    }
+    if (p)
+    {
+        *p++ = 0;
+        modifier = p;
+    }
+
+    /* rebuild a Windows name */
+
+    strcpy( win_name, buffer );
+    if (modifier)
+    {
+        if (!strcmp( modifier, "arabic" )) strcat( win_name, "-Arab" );
+        else if (!strcmp( modifier, "chakma" )) strcat( win_name, "-Cakm" );
+        else if (!strcmp( modifier, "cherokee" )) strcat( win_name, "-Cher" );
+        else if (!strcmp( modifier, "cyrillic" )) strcat( win_name, "-Cyrl" );
+        else if (!strcmp( modifier, "devanagari" )) strcat( win_name, "-Deva" );
+        else if (!strcmp( modifier, "gurmukhi" )) strcat( win_name, "-Guru" );
+        else if (!strcmp( modifier, "javanese" )) strcat( win_name, "-Java" );
+        else if (!strcmp( modifier, "latin" )) strcat( win_name, "-Latn" );
+        else if (!strcmp( modifier, "mongolian" )) strcat( win_name, "-Mong" );
+        else if (!strcmp( modifier, "syriac" )) strcat( win_name, "-Syrc" );
+        else if (!strcmp( modifier, "tifinagh" )) strcat( win_name, "-Tfng" );
+        else if (!strcmp( modifier, "tibetan" )) strcat( win_name, "-Tibt" );
+        else if (!strcmp( modifier, "vai" )) strcat( win_name, "-Vaii" );
+        else if (!strcmp( modifier, "yi" )) strcat( win_name, "-Yiii" );
+        else if (!strcmp( modifier, "saaho" )) strcpy( win_name, "ssy" );
+        else if (!strcmp( modifier, "valencia" )) extra = "-valencia";
+        /* ignore unknown modifiers */
+    }
+    if (country)
+    {
+        p = win_name + strlen(win_name);
+        *p++ = '-';
+        strcpy( p, country );
+    }
+    if (extra) strcat( win_name, extra );
+    return TRUE;
+}
+
+
 void add_translations( const char *po_dir )
 {
     resource_t *res;
     char buffer[256];
     char *p, *tok, *name;
-    unsigned int i;
     FILE *f;
 
     /* first check if we have English resources to translate */
@@ -1534,7 +1268,7 @@ void add_translations( const char *po_dir )
 
     if (!po_dir)  /* run through the translation process to remove msg contexts */
     {
-        translate_resources( new_language( LANG_ENGLISH, SUBLANG_DEFAULT ));
+        translate_resources( MAKELANGID( LANG_ENGLISH, SUBLANG_DEFAULT ));
         goto done;
     }
 
@@ -1552,15 +1286,15 @@ void add_translations( const char *po_dir )
         if ((p = strchr( buffer, '#' ))) *p = 0;
         for (tok = strtok( buffer, " \t\r\n" ); tok; tok = strtok( NULL, " \t\r\n" ))
         {
-            for (i = 0; i < ARRAY_SIZE(languages); i++)
-                if (!strcmp( tok, languages[i].name )) break;
+            char locale[LOCALE_NAME_MAX_LENGTH];
+            language_t lang;
 
-            if (i == ARRAY_SIZE(languages))
+            if (!unix_to_win_locale( tok, locale ) || !(lang = get_language_from_name( locale )))
                 error( "unknown language '%s'\n", tok );
 
             name = strmake( "%s/%s.mo", po_dir, tok );
             load_mo_file( name );
-            translate_resources( new_language(languages[i].id, languages[i].sub) );
+            translate_resources( lang );
             free_mo_file();
             free( name );
         }

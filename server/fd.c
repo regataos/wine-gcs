@@ -1900,7 +1900,7 @@ static WCHAR *dup_nt_name( struct fd *root, struct unicode_str name, data_size_t
         name.str++;
         name.len -= sizeof(WCHAR);
     }
-    if ((ret = malloc( retlen + name.len + 1 )))
+    if ((ret = malloc( retlen + name.len + sizeof(WCHAR) )))
     {
         memcpy( ret, root->nt_name, root->nt_namelen );
         if (name.len && name.str[0] != '\\' &&
@@ -2017,7 +2017,12 @@ struct fd *open_fd( struct fd *root, const char *name, struct unicode_str nt_nam
 
         if (fd->unix_fd == -1)
         {
-            file_set_error();
+            /* check for trailing slash on file path */
+            if ((errno == ENOENT || errno == ENOTDIR) && name[strlen(name) - 1] == '/')
+                set_error( STATUS_OBJECT_NAME_INVALID );
+            else
+                file_set_error();
+
             if (do_chmod) chmod( name, *mode );
             goto error;
         }

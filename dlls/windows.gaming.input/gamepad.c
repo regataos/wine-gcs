@@ -339,7 +339,7 @@ static const struct IGamepadVtbl gamepad_vtbl =
 
 DEFINE_IINSPECTABLE_OUTER( gamepad2, IGamepad2, struct gamepad, IGameController_outer )
 
-static HRESULT WINAPI gamepad2_GetButtonLabel(IGamepad2 *iface, GamepadButtons button, GameControllerButtonLabel *value)
+static HRESULT WINAPI gamepad2_GetButtonLabel( IGamepad2 *iface, GamepadButtons button, GameControllerButtonLabel *value )
 {
     FIXME( "iface %p, button %#x, value %p stub!\n", iface, button, value );
     *value = GameControllerButtonLabel_None;

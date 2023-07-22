@@ -45,9 +45,7 @@
 WINE_DEFAULT_DEBUG_CHANNEL(odbc);
 WINE_DECLARE_DEBUG_CHANNEL(winediag);
 
-static unixlib_handle_t odbc_handle;
-
-#define ODBC_CALL( func, params ) __wine_unix_call( odbc_handle, unix_ ## func, params )
+#define ODBC_CALL( func, params ) WINE_UNIX_CALL( unix_ ## func, params )
 
 /***********************************************************************
  * ODBC_ReplicateODBCInstToRegistry
@@ -107,14 +105,14 @@ static void ODBC_ReplicateODBCInstToRegistry (SQLHENV hEnv)
                         if ((reg_ret = RegSetValueExA (hDrivers, desc, 0,
                                 REG_SZ, (const BYTE *)"Installed", 10)) != ERROR_SUCCESS)
                         {
-                            TRACE ("Error %d replicating driver %s\n",
+                            TRACE ("Error %ld replicating driver %s\n",
                                     reg_ret, desc);
                             success = FALSE;
                         }
                     }
                     else if (reg_ret != ERROR_SUCCESS)
                     {
-                        TRACE ("Error %d checking for %s in drivers\n",
+                        TRACE ("Error %ld checking for %s in drivers\n",
                                 reg_ret, desc);
                         success = FALSE;
                     }
@@ -131,12 +129,12 @@ static void ODBC_ReplicateODBCInstToRegistry (SQLHENV hEnv)
                          */
                         if ((reg_ret = RegCloseKey (hThis)) !=
                                 ERROR_SUCCESS)
-                            TRACE ("Error %d closing %s key\n", reg_ret,
+                            TRACE ("Error %ld closing %s key\n", reg_ret,
                                     desc);
                     }
                     else
                     {
-                        TRACE ("Error %d ensuring driver key %s\n",
+                        TRACE ("Error %ld ensuring driver key %s\n",
                                 reg_ret, desc);
                         success = FALSE;
                     }
@@ -155,21 +153,21 @@ static void ODBC_ReplicateODBCInstToRegistry (SQLHENV hEnv)
             }
             if ((reg_ret = RegCloseKey (hDrivers)) != ERROR_SUCCESS)
             {
-                TRACE ("Error %d closing hDrivers\n", reg_ret);
+                TRACE ("Error %ld closing hDrivers\n", reg_ret);
             }
         }
         else
         {
-            TRACE ("Error %d opening HKLM\\S\\O\\OI\\Drivers\n", reg_ret);
+            TRACE ("Error %ld opening HKLM\\S\\O\\OI\\Drivers\n", reg_ret);
         }
         if ((reg_ret = RegCloseKey (hODBCInst)) != ERROR_SUCCESS)
         {
-            TRACE ("Error %d closing HKLM\\S\\O\\ODBCINST.INI\n", reg_ret);
+            TRACE ("Error %ld closing HKLM\\S\\O\\ODBCINST.INI\n", reg_ret);
         }
     }
     else
     {
-        TRACE ("Error %d opening HKLM\\S\\O\\ODBCINST.INI\n", reg_ret);
+        TRACE ("Error %ld opening HKLM\\S\\O\\ODBCINST.INI\n", reg_ret);
     }
     if (!success)
     {
@@ -242,26 +240,26 @@ static void ODBC_ReplicateODBCToRegistry (BOOL is_user, SQLHENV hEnv)
                         if ((reg_ret = RegSetValueExA (hDSN, DRIVERKEY, 0,
                                 REG_SZ, (LPBYTE)desc, sizedesc)) != ERROR_SUCCESS)
                         {
-                            TRACE ("Error %d replicating description of "
+                            TRACE ("Error %ld replicating description of "
                                     "%s(%s)\n", reg_ret, dsn, desc);
                             success = FALSE;
                         }
                     }
                     else if (reg_ret != ERROR_SUCCESS)
                     {
-                        TRACE ("Error %d checking for description of %s\n",
+                        TRACE ("Error %ld checking for description of %s\n",
                                 reg_ret, dsn);
                         success = FALSE;
                     }
                     if ((reg_ret = RegCloseKey (hDSN)) != ERROR_SUCCESS)
                     {
-                        TRACE ("Error %d closing %s DSN key %s\n",
+                        TRACE ("Error %ld closing %s DSN key %s\n",
                                 reg_ret, which, dsn);
                     }
                 }
                 else
                 {
-                    TRACE ("Error %d opening %s DSN key %s\n",
+                    TRACE ("Error %ld opening %s DSN key %s\n",
                             reg_ret, which, dsn);
                     success = FALSE;
                 }
@@ -281,13 +279,13 @@ static void ODBC_ReplicateODBCToRegistry (BOOL is_user, SQLHENV hEnv)
         }
         if ((reg_ret = RegCloseKey (hODBC)) != ERROR_SUCCESS)
         {
-            TRACE ("Error %d closing %s ODBC.INI registry key\n", reg_ret,
+            TRACE ("Error %ld closing %s ODBC.INI registry key\n", reg_ret,
                     which);
         }
     }
     else
     {
-        TRACE ("Error %d creating/opening %s ODBC.INI registry key\n",
+        TRACE ("Error %ld creating/opening %s ODBC.INI registry key\n",
                 reg_ret, which);
     }
     if (!success)
@@ -421,7 +419,7 @@ SQLRETURN WINAPI SQLAllocHandleStd(SQLSMALLINT HandleType, SQLHANDLE InputHandle
 static const char *debugstr_sqllen( SQLLEN len )
 {
 #ifdef _WIN64
-    return wine_dbg_sprintf( "%ld", len );
+    return wine_dbg_sprintf( "%Id", len );
 #else
     return wine_dbg_sprintf( "%d", len );
 #endif
@@ -448,7 +446,7 @@ SQLRETURN WINAPI SQLBindCol(SQLHSTMT StatementHandle, SQLUSMALLINT ColumnNumber,
 static const char *debugstr_sqlulen( SQLULEN len )
 {
 #ifdef _WIN64
-    return wine_dbg_sprintf( "%lu", len );
+    return wine_dbg_sprintf( "%Iu", len );
 #else
     return wine_dbg_sprintf( "%u", len );
 #endif
@@ -1040,12 +1038,6 @@ SQLRETURN WINAPI SQLGetInfo(SQLHDBC ConnectionHandle, SQLUSMALLINT InfoType, SQL
 
     TRACE("(ConnectionHandle, %p, InfoType %d, InfoValue %p, BufferLength %d, StringLength %p)\n", ConnectionHandle,
           InfoType, InfoValue, BufferLength, StringLength);
-
-    if (!InfoValue)
-    {
-        WARN("Unexpected NULL InfoValue address\n");
-        return SQL_ERROR;
-    }
 
     ret = ODBC_CALL( SQLGetInfo, &params );
     TRACE("Returning %d\n", ret);
@@ -2246,12 +2238,6 @@ SQLRETURN WINAPI SQLGetInfoW(SQLHDBC ConnectionHandle, SQLUSMALLINT InfoType, SQ
     TRACE("(ConnectionHandle, %p, InfoType %d, InfoValue %p, BufferLength %d, StringLength %p)\n", ConnectionHandle,
           InfoType, InfoValue, BufferLength, StringLength);
 
-    if (!InfoValue)
-    {
-        WARN("Unexpected NULL InfoValue address\n");
-        return SQL_ERROR;
-    }
-
     ret = ODBC_CALL( SQLGetInfoW, &params );
     TRACE("Returning %d\n", ret);
     return ret;
@@ -2648,23 +2634,21 @@ SQLRETURN WINAPI SQLGetDiagRecA(SQLSMALLINT HandleType, SQLHANDLE Handle, SQLSMA
  */
 BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD reason, LPVOID reserved)
 {
-    TRACE("proxy ODBC: %p,%x,%p\n", hinstDLL, reason, reserved);
+    TRACE("proxy ODBC: %p,%lx,%p\n", hinstDLL, reason, reserved);
 
     switch (reason)
     {
     case DLL_PROCESS_ATTACH:
-       DisableThreadLibraryCalls(hinstDLL);
-        if (!NtQueryVirtualMemory( GetCurrentProcess(), hinstDLL, MemoryWineUnixFuncs,
-                                   &odbc_handle, sizeof(odbc_handle), NULL ) &&
-            !__wine_unix_call( odbc_handle, process_attach, NULL))
+        DisableThreadLibraryCalls(hinstDLL);
+        if (!__wine_init_unix_call() && !WINE_UNIX_CALL( process_attach, NULL ))
         {
             ODBC_ReplicateToRegistry();
         }
-       break;
+        break;
 
     case DLL_PROCESS_DETACH:
-      if (reserved) break;
-      __wine_unix_call( odbc_handle, process_detach, NULL );
+        if (reserved) break;
+        WINE_UNIX_CALL( process_detach, NULL );
     }
 
     return TRUE;

@@ -55,7 +55,6 @@
 #include "uxtheme.h"
 #include "vssym32.h"
 #include "wine/debug.h"
-#include "wine/heap.h"
 
 #include "comctl32.h"
 
@@ -255,7 +254,7 @@ static inline void paint_button( BUTTON_INFO *infoPtr, LONG style, UINT action )
 static inline WCHAR *get_button_text( const BUTTON_INFO *infoPtr )
 {
     INT len = GetWindowTextLengthW( infoPtr->hwnd );
-    WCHAR *buffer = heap_alloc( (len + 1) * sizeof(WCHAR) );
+    WCHAR *buffer = Alloc( (len + 1) * sizeof(WCHAR) );
     if (buffer)
         GetWindowTextW( infoPtr->hwnd, buffer, len + 1 );
     return buffer;
@@ -335,7 +334,7 @@ HRGN set_control_clipping( HDC hdc, const RECT *rect )
 static WCHAR *heap_strndupW(const WCHAR *src, size_t length)
 {
     size_t size = (length + 1) * sizeof(WCHAR);
-    WCHAR *dst = heap_alloc(size);
+    WCHAR *dst = Alloc(size);
     if (dst) memcpy(dst, src, size);
     return dst;
 }
@@ -396,7 +395,7 @@ static int get_draw_state(const BUTTON_INFO *infoPtr)
     static const int pushlike_cb_states[3][DRAW_STATE_COUNT] =
     {
         { PBS_NORMAL, PBS_DISABLED, PBS_HOT, PBS_PRESSED, PBS_NORMAL },
-        { PBS_PRESSED, PBS_PRESSED, PBS_HOT, PBS_PRESSED, PBS_PRESSED },
+        { PBS_PRESSED, PBS_PRESSED, PBS_PRESSED, PBS_PRESSED, PBS_PRESSED },
         { PBS_NORMAL, PBS_DISABLED, PBS_HOT, PBS_PRESSED, PBS_NORMAL }
     };
     static const int rb_states[2][DRAW_STATE_COUNT] =
@@ -407,7 +406,7 @@ static int get_draw_state(const BUTTON_INFO *infoPtr)
     static const int pushlike_rb_states[2][DRAW_STATE_COUNT] =
     {
         { PBS_NORMAL, PBS_DISABLED, PBS_HOT, PBS_PRESSED, PBS_NORMAL },
-        { PBS_PRESSED, PBS_PRESSED, PBS_HOT, PBS_PRESSED, PBS_PRESSED }
+        { PBS_PRESSED, PBS_PRESSED, PBS_PRESSED, PBS_PRESSED, PBS_PRESSED }
     };
     static const int gb_states[DRAW_STATE_COUNT] = { GBS_NORMAL, GBS_DISABLED, GBS_NORMAL, GBS_NORMAL, GBS_NORMAL };
     LONG style = GetWindowLongW(infoPtr->hwnd, GWL_STYLE);
@@ -504,7 +503,7 @@ static LRESULT CALLBACK BUTTON_WindowProc(HWND hWnd, UINT uMsg, WPARAM wParam, L
     {
         CREATESTRUCTW *cs = (CREATESTRUCTW *)lParam;
 
-        infoPtr = heap_alloc_zero( sizeof(*infoPtr) );
+        infoPtr = Alloc( sizeof(*infoPtr) );
         SetWindowLongPtrW( hWnd, 0, (LONG_PTR)infoPtr );
         infoPtr->hwnd = hWnd;
         infoPtr->parent = cs->hwndParent;
@@ -521,11 +520,14 @@ static LRESULT CALLBACK BUTTON_WindowProc(HWND hWnd, UINT uMsg, WPARAM wParam, L
             DeleteObject(infoPtr->u.bitmap);
         else if (infoPtr->image_type == IMAGE_ICON)
             DestroyIcon(infoPtr->u.icon);
-        heap_free(infoPtr->note);
-        heap_free(infoPtr);
+        Free(infoPtr->note);
+        Free(infoPtr);
         break;
 
     case WM_CREATE:
+    {
+        HWND parent;
+
         if (btn_type >= MAX_BTN_TYPE)
             return -1; /* abort */
 
@@ -537,7 +539,12 @@ static LRESULT CALLBACK BUTTON_WindowProc(HWND hWnd, UINT uMsg, WPARAM wParam, L
         }
         infoPtr->state = BST_UNCHECKED;
         OpenThemeData( hWnd, WC_BUTTONW );
+
+        parent = GetParent( hWnd );
+        if (parent)
+            EnableThemeDialogTexture( parent, ETDT_ENABLE );
         return 0;
+    }
 
     case WM_DESTROY:
         theme = GetWindowTheme( hWnd );
@@ -774,7 +781,7 @@ static LRESULT CALLBACK BUTTON_WindowProc(HWND hWnd, UINT uMsg, WPARAM wParam, L
             return FALSE;
         }
 
-        heap_free(infoPtr->note);
+        Free(infoPtr->note);
         if (note)
         {
             infoPtr->note_length = lstrlenW(note);
@@ -784,7 +791,7 @@ static LRESULT CALLBACK BUTTON_WindowProc(HWND hWnd, UINT uMsg, WPARAM wParam, L
         if (!note || !infoPtr->note)
         {
             infoPtr->note_length = 0;
-            infoPtr->note = heap_alloc_zero(sizeof(WCHAR));
+            infoPtr->note = Alloc(sizeof(WCHAR));
         }
 
         SetLastError(NO_ERROR);
@@ -1221,7 +1228,12 @@ static SIZE BUTTON_GetImageSize(const BUTTON_INFO *infoPtr)
 
     /* ImageList has priority over image */
     if (infoPtr->imagelist.himl)
-        ImageList_GetIconSize(infoPtr->imagelist.himl, &size.cx, &size.cy);
+    {
+        int scx, scy;
+        ImageList_GetIconSize(infoPtr->imagelist.himl, &scx, &scy);
+        size.cx = scx;
+        size.cy = scy;
+    }
     else if (infoPtr->u.image)
     {
         if (infoPtr->image_type == IMAGE_ICON)
@@ -1276,7 +1288,7 @@ static void BUTTON_GetTextIdealSize(BUTTON_INFO *infoPtr, LONG maxWidth, SIZE *s
     hdc = GetDC(infoPtr->hwnd);
     rect = BUTTON_GetTextRect(infoPtr, hdc, text, maxWidth);
     ReleaseDC(infoPtr->hwnd, hdc);
-    heap_free(text);
+    Free(text);
 
     size->cx = rect.right - rect.left + margin->left + margin->right;
     size->cy = rect.bottom - rect.top + margin->top + margin->bottom;
@@ -1476,7 +1488,7 @@ static BOOL CL_GetIdealSize(BUTTON_INFO *infoPtr, SIZE *size)
             RECT r;
             GetThemeTextExtent(theme, hdc, BP_COMMANDLINK, CMDLS_NORMAL,
                                text, -1, flags, &text_bound, &r);
-            heap_free(text);
+            Free(text);
             text_w = r.right - r.left;
             text_h = r.bottom - r.top;
         }
@@ -1514,7 +1526,7 @@ static BOOL CL_GetIdealSize(BUTTON_INFO *infoPtr, SIZE *size)
                     RECT r = text_bound;
                     old_font = SelectObject(hdc, font);
                     DrawTextW(hdc, text, -1, &r, flags | DT_CALCRECT);
-                    heap_free(text);
+                    Free(text);
 
                     text_w = r.right - r.left;
                     text_h = r.bottom - r.top;
@@ -1583,7 +1595,7 @@ static UINT BUTTON_CalcLayoutRects(const BUTTON_INFO *infoPtr, HDC hdc, RECT *la
        SetRectEmpty(labelRc);
        SetRectEmpty(imageRc);
        SetRectEmpty(textRc);
-       heap_free(text);
+       Free(text);
        return (UINT)-1;
    }
 
@@ -1686,7 +1698,7 @@ static UINT BUTTON_CalcLayoutRects(const BUTTON_INFO *infoPtr, HDC hdc, RECT *la
            SetRectEmpty(&imageRect);
        }
    }
-   heap_free(text);
+   Free(text);
 
    CopyRect(labelRc, &labelRect);
    CopyRect(imageRc, &imageRect);
@@ -1779,7 +1791,7 @@ static void BUTTON_DrawLabel(const BUTTON_INFO *infoPtr, HDC hdc, UINT dtFlags, 
    if (!(text = get_button_text(infoPtr))) return;
    DrawStateW(hdc, hbr, BUTTON_DrawTextCallback, (LPARAM)text, dtFlags, textRect->left, textRect->top,
               textRect->right - textRect->left, textRect->bottom - textRect->top, flags);
-   heap_free(text);
+   Free(text);
 }
 
 static void BUTTON_DrawThemedLabel(const BUTTON_INFO *info, HDC hdc, UINT text_flags,
@@ -1811,7 +1823,7 @@ static void BUTTON_DrawThemedLabel(const BUTTON_INFO *info, HDC hdc, UINT text_f
        return;
 
    DrawThemeText(theme, hdc, part, state, text, lstrlenW(text), text_flags, 0, text_rect);
-   heap_free(text);
+   Free(text);
 }
 
 /**********************************************************************
@@ -1820,7 +1832,7 @@ static void BUTTON_DrawThemedLabel(const BUTTON_INFO *info, HDC hdc, UINT text_f
 static void PB_Paint( const BUTTON_INFO *infoPtr, HDC hDC, UINT action )
 {
     RECT     rc, labelRect, imageRect, textRect;
-    UINT     dtFlags, uState;
+    UINT     dtFlags = (UINT)-1, uState;
     HPEN     hOldPen, hpen;
     HBRUSH   hOldBrush;
     INT      oldBkMode;
@@ -2647,7 +2659,7 @@ static void CL_Paint( const BUTTON_INFO *infoPtr, HDC hDC, UINT action )
                     SelectObject(hDC, font);
                     txt_h = DrawTextW(hDC, text, -1, &r,
                                       DT_TOP | DT_LEFT | DT_WORDBREAK | DT_END_ELLIPSIS);
-                    heap_free(text);
+                    Free(text);
                 }
                 DeleteObject(font);
             }
@@ -2716,6 +2728,7 @@ static void PB_ThemedPaint(HTHEME theme, const BUTTON_INFO *infoPtr, HDC hDC, in
 {
     RECT bgRect, labelRect, imageRect, textRect, focusRect;
     NMCUSTOMDRAW nmcd;
+    HBRUSH brush;
     LRESULT cdrf;
     HWND parent;
 
@@ -2735,7 +2748,13 @@ static void PB_ThemedPaint(HTHEME theme, const BUTTON_INFO *infoPtr, HDC hDC, in
     if (cdrf & CDRF_SKIPDEFAULT) return;
 
     if (IsThemeBackgroundPartiallyTransparent(theme, BP_PUSHBUTTON, state))
+    {
         DrawThemeParentBackground(infoPtr->hwnd, hDC, NULL);
+        /* Tests show that the brush from WM_CTLCOLORBTN is used for filling background after a
+         * DrawThemeParentBackground() call */
+        brush = (HBRUSH)SendMessageW(parent, WM_CTLCOLORBTN, (WPARAM)hDC, (LPARAM)infoPtr->hwnd);
+        FillRect(hDC, &bgRect, brush ? brush : GetSysColorBrush(COLOR_BTNFACE));
+    }
     DrawThemeBackground(theme, hDC, BP_PUSHBUTTON, state, &bgRect, NULL);
 
     if (cdrf & CDRF_NOTIFYPOSTERASE)
@@ -2776,6 +2795,7 @@ static void CB_ThemedPaint(HTHEME theme, const BUTTON_INFO *infoPtr, HDC hDC, in
     UINT btn_type = get_button_type( dwStyle );
     int part = (btn_type == BS_RADIOBUTTON) || (btn_type == BS_AUTORADIOBUTTON) ? BP_RADIOBUTTON : BP_CHECKBOX;
     NMCUSTOMDRAW nmcd;
+    HBRUSH brush;
     LRESULT cdrf;
     LOGFONTW lf;
     HWND parent;
@@ -2809,7 +2829,7 @@ static void CB_ThemedPaint(HTHEME theme, const BUTTON_INFO *infoPtr, HDC hDC, in
     GetThemeBackgroundContentRect(theme, hDC, part, state, &client_rect, &content_rect);
     region = set_control_clipping(hDC, &client_rect);
 
-    if (FAILED(GetThemePartSize(theme, hDC, part, state, NULL, TS_DRAW, &box_size)))
+    if (FAILED(GetThemePartSize(theme, hDC, part, state, &content_rect, TS_DRAW, &box_size)))
     {
         box_size.cx = 12 * GetDpiForWindow(infoPtr->hwnd) / 96 + 1;
         box_size.cy = box_size.cx;
@@ -2839,6 +2859,10 @@ static void CB_ThemedPaint(HTHEME theme, const BUTTON_INFO *infoPtr, HDC hDC, in
     if (cdrf & CDRF_SKIPDEFAULT) goto cleanup;
 
     DrawThemeParentBackground(infoPtr->hwnd, hDC, NULL);
+    /* Tests show that the brush from WM_CTLCOLORSTATIC is used for filling background after a
+     * DrawThemeParentBackground() call */
+    brush = (HBRUSH)SendMessageW(parent, WM_CTLCOLORSTATIC, (WPARAM)hDC, (LPARAM)infoPtr->hwnd);
+    FillRect(hDC, &client_rect, brush ? brush : GetSysColorBrush(COLOR_BTNFACE));
 
     if (cdrf & CDRF_NOTIFYPOSTERASE)
     {
@@ -2889,10 +2913,20 @@ static void GB_ThemedPaint(HTHEME theme, const BUTTON_INFO *infoPtr, HDC hDC, in
     HFONT font, hPrevFont = NULL;
     BOOL created_font = FALSE;
     TEXTMETRICW textMetric;
+    HBRUSH brush;
+    HWND parent;
+    HRESULT hr;
     LONG style;
     int part;
 
-    HRESULT hr = GetThemeFont(theme, hDC, BP_GROUPBOX, state, TMT_FONT, &lf);
+    /* DrawThemeParentBackground() is used for filling content background. The brush from
+     * WM_CTLCOLORSTATIC is used for filling text background */
+    parent = GetParent(infoPtr->hwnd);
+    if (!parent)
+        parent = infoPtr->hwnd;
+    brush = (HBRUSH)SendMessageW(parent, WM_CTLCOLORSTATIC, (WPARAM)hDC, (LPARAM)infoPtr->hwnd);
+
+    hr = GetThemeFont(theme, hDC, BP_GROUPBOX, state, TMT_FONT, &lf);
     if (SUCCEEDED(hr)) {
         font = CreateFontIndirectW(&lf);
         if (!font)
@@ -2944,6 +2978,7 @@ static void GB_ThemedPaint(HTHEME theme, const BUTTON_INFO *infoPtr, HDC hDC, in
             SelectClipRgn(hDC, textRegion);
             DeleteObject(textRegion);
         }
+        FillRect(hDC, &textRect, brush ? brush : GetSysColorBrush(COLOR_BTNFACE));
         BUTTON_DrawThemedLabel(infoPtr, hDC, dtFlags, &imageRect, &textRect, theme, part, state);
     }
 
@@ -3117,7 +3152,7 @@ static void CL_ThemedPaint(HTHEME theme, const BUTTON_INFO *infoPtr, HDC hDC, in
             DrawThemeText(theme, hDC, part, state, text, len, dtFlags | DT_END_ELLIPSIS, 0, &r);
 
             txt_h = text_rect.bottom - text_rect.top;
-            heap_free(text);
+            Free(text);
         }
 
         /* Draw the note */

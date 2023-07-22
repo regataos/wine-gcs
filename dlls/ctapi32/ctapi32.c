@@ -32,9 +32,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(ctapi32);
 
 #define FALLBACK_LIBCTAPI "libctapi.so"
 
-static unixlib_handle_t ctapi_handle;
-
-#define CTAPI_CALL( func, params ) __wine_unix_call( ctapi_handle, unix_ ## func, params )
+#define CTAPI_CALL( func, params ) WINE_UNIX_CALL( unix_ ## func, params )
 
 
 static BOOL load_functions(void) {
@@ -98,14 +96,13 @@ IS8 WINAPI CT_close(IU16 ctn)
  */
 BOOL WINAPI DllMain (HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
 {
-    TRACE("%p,%x,%p\n", hinstDLL, fdwReason, lpvReserved);
+    TRACE("%p,%lx,%p\n", hinstDLL, fdwReason, lpvReserved);
 
     switch (fdwReason)
     {
         case DLL_PROCESS_ATTACH:
             DisableThreadLibraryCalls(hinstDLL);
-            if (NtQueryVirtualMemory( GetCurrentProcess(), hinstDLL, MemoryWineUnixFuncs,
-                                      &ctapi_handle, sizeof(ctapi_handle), NULL ))
+            if (__wine_init_unix_call())
                 return FALSE;
             if (!load_functions())
 		return FALSE;

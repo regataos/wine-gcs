@@ -44,12 +44,13 @@ interface IWineDXGISwapChainFactory : IUnknown
 ]
 interface IWineDXGIDevice : IDXGIDevice3
 {
-    HRESULT create_surface(
-        [in] struct wined3d_texture *wined3d_texture,
+    HRESULT create_resource(
+        [in] struct wined3d_resource *wined3d_resource,
         [in] DXGI_USAGE usage,
         [in] const DXGI_SHARED_RESOURCE *shared_resource,
         [in] IUnknown *outer,
-        [out] void **surface
+        [in] BOOL needs_surface,
+        [out] void **resource
     );
 }
 
@@ -91,14 +92,4 @@ interface IWineDXGIAdapter : IDXGIAdapter4
 ]
 interface IWineDXGIFactory : IDXGIFactory7
 {
-}
-
-[
-    object,
-    local,
-    uuid(18044258-baef-418b-9c2e-0eeca45b31f5)
-]
-interface IWineD3DDeviceContext : IUnknown
-{
-    struct wined3d_device_context *get_wined3d_device_context();
 }

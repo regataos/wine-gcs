@@ -88,10 +88,10 @@ static bool (__thiscall *critical_section_trylock)(critical_section*);
 static _Condition_variable* (__thiscall *_Condition_variable_ctor)(_Condition_variable*);
 static void (__thiscall *_Condition_variable_dtor)(_Condition_variable*);
 static void (__thiscall *_Condition_variable_wait)(_Condition_variable*, critical_section*);
-bool (__thiscall *_Condition_variable_wait_for)(_Condition_variable*,
+static bool (__thiscall *_Condition_variable_wait_for)(_Condition_variable*,
         critical_section*, unsigned int);
-void (__thiscall *_Condition_variable_notify_one)(_Condition_variable*);
-void (__thiscall *_Condition_variable_notify_all)(_Condition_variable*);
+static void (__thiscall *_Condition_variable_notify_one)(_Condition_variable*);
+static void (__thiscall *_Condition_variable_notify_all)(_Condition_variable*);
 
 void cs_init(cs *cs)
 {
@@ -357,7 +357,7 @@ static void init_cxx_funcs(void)
 
 BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
 {
-    TRACE("(0x%p, %d, %p)\n", hinstDLL, fdwReason, lpvReserved);
+    TRACE("(0x%p, %ld, %p)\n", hinstDLL, fdwReason, lpvReserved);
 
     switch (fdwReason)
     {

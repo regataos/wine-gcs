@@ -94,8 +94,8 @@ static ULONG WINAPI HTMLDOMAttribute_Release(IHTMLDOMAttribute *iface)
         assert(!This->elem);
         release_dispex(&This->node.event_target.dispex);
         VariantClear(&This->value);
-        heap_free(This->name);
-        heap_free(This);
+        free(This->name);
+        free(This);
     }
 
     return ref;
@@ -706,7 +706,7 @@ HRESULT HTMLDOMAttribute_Create(const WCHAR *name, HTMLDocumentNode *doc, HTMLEl
     HTMLDOMAttribute *ret;
     HRESULT hres;
 
-    ret = heap_alloc_zero(sizeof(*ret));
+    ret = calloc(1, sizeof(*ret));
     if(!ret)
         return E_OUTOFMEMORY;
 
@@ -721,7 +721,7 @@ HRESULT HTMLDOMAttribute_Create(const WCHAR *name, HTMLDocumentNode *doc, HTMLEl
     if(elem) {
         hres = HTMLElement_get_attr_col(&elem->node, &col);
         if(FAILED(hres)) {
-            heap_free(ret);
+            free(ret);
             return hres;
         }
         IHTMLAttributeCollection_Release(&col->IHTMLAttributeCollection_iface);
@@ -738,11 +738,11 @@ HRESULT HTMLDOMAttribute_Create(const WCHAR *name, HTMLDocumentNode *doc, HTMLEl
     }
 
     init_dispatch(&ret->node.event_target.dispex, (IUnknown*)&ret->IHTMLDOMAttribute_iface,
-                  &HTMLDOMAttribute_dispex, doc, compat_mode);
+                  &HTMLDOMAttribute_dispex, get_inner_window(doc), compat_mode);
 
     /* For detached attributes we may still do most operations if we have its name available. */
     if(name) {
-        ret->name = heap_strdupW(name);
+        ret->name = wcsdup(name);
         if(!ret->name) {
             IHTMLDOMAttribute_Release(&ret->IHTMLDOMAttribute_iface);
             return E_OUTOFMEMORY;

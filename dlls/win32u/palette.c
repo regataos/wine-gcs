@@ -27,17 +27,8 @@
 #pragma makedep unix
 #endif
 
-#include <stdarg.h>
-#include <stdlib.h>
-#include <string.h>
-
-#include "windef.h"
-#include "winbase.h"
-#include "winerror.h"
-#include "wingdi.h"
-#include "winuser.h"
-
 #include "ntgdi_private.h"
+#include "ntuser_private.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(palette);
@@ -205,7 +196,7 @@ static UINT set_palette_entries( HPALETTE hpalette, UINT start, UINT count,
 
     TRACE("hpal=%p,start=%i,count=%i\n",hpalette,start,count );
 
-    if (hpalette == get_stock_object(DEFAULT_PALETTE)) return 0;
+    if (hpalette == GetStockObject(DEFAULT_PALETTE)) return 0;
     palPtr = GDI_GetObjPtr( hpalette, NTGDI_OBJ_PAL );
     if (!palPtr) return 0;
 
@@ -258,7 +249,7 @@ static BOOL animate_palette( HPALETTE hPal, UINT StartIndex, UINT NumEntries,
 {
     TRACE("%p (%i - %i)\n", hPal, StartIndex,StartIndex+NumEntries);
 
-    if( hPal != get_stock_object(DEFAULT_PALETTE) )
+    if( hPal != GetStockObject(DEFAULT_PALETTE) )
     {
         PALETTEOBJ * palPtr;
         UINT pal_entries;
@@ -393,7 +384,7 @@ UINT WINAPI NtGdiGetNearestPaletteIndex( HPALETTE hpalette, COLORREF color )
         }
         GDI_ReleaseObj( hpalette );
     }
-    TRACE("(%p,%06x): returning %d\n", hpalette, color, index );
+    TRACE("(%p,%s): returning %d\n", hpalette, debugstr_color(color), index );
     return index;
 }
 
@@ -414,7 +405,7 @@ COLORREF CDECL nulldrv_GetNearestColor( PHYSDEV dev, COLORREF color )
         PALETTEENTRY entry;
         HPALETTE hpal = dc->hPalette;
 
-        if (!hpal) hpal = get_stock_object( DEFAULT_PALETTE );
+        if (!hpal) hpal = GetStockObject( DEFAULT_PALETTE );
         if (spec_type == 2) /* PALETTERGB */
             index = NtGdiGetNearestPaletteIndex( hpal, color );
         else  /* PALETTEINDEX */
@@ -422,7 +413,7 @@ COLORREF CDECL nulldrv_GetNearestColor( PHYSDEV dev, COLORREF color )
 
         if (!get_palette_entries( hpal, index, 1, &entry ))
         {
-            WARN("RGB(%x) : idx %d is out of bounds, assuming NULL\n", color, index );
+            WARN("%s: idx %d is out of bounds, assuming NULL\n", debugstr_color(color), index );
             if (!get_palette_entries( hpal, 0, 1, &entry )) return CLR_INVALID;
         }
         color = RGB( entry.peRed, entry.peGreen, entry.peBlue );
@@ -517,12 +508,22 @@ static BOOL PALETTE_DeleteObject( HGDIOBJ handle )
  */
 HPALETTE WINAPI NtUserSelectPalette( HDC hdc, HPALETTE hpal, WORD bkg )
 {
+    BOOL is_primary = FALSE;
     HPALETTE ret = 0;
     DC *dc;
 
     TRACE("%p %p\n", hdc, hpal );
 
-    /* FIXME: move primary palette handling from user32 */
+    if (!bkg && hpal != GetStockObject( DEFAULT_PALETTE ))
+    {
+        HWND hwnd = NtUserWindowFromDC( hdc );
+        if (hwnd)
+        {
+            /* set primary palette if it's related to current active */
+            HWND foreground = NtUserGetForegroundWindow();
+            is_primary = foreground == hwnd || is_child( foreground, hwnd );
+        }
+    }
 
     if (get_gdi_object_type(hpal) != NTGDI_OBJ_PAL)
     {
@@ -533,7 +534,7 @@ HPALETTE WINAPI NtUserSelectPalette( HDC hdc, HPALETTE hpal, WORD bkg )
     {
         ret = dc->hPalette;
         dc->hPalette = hpal;
-        if (!bkg) hPrimaryPalette = hpal;
+        if (is_primary) hPrimaryPalette = hpal;
         release_dc_ptr( dc );
     }
     return ret;
@@ -545,6 +546,7 @@ HPALETTE WINAPI NtUserSelectPalette( HDC hdc, HPALETTE hpal, WORD bkg )
  */
 UINT realize_palette( HDC hdc )
 {
+    BOOL is_primary = FALSE;
     UINT realized = 0;
     DC* dc = get_dc_ptr( hdc );
 
@@ -553,7 +555,7 @@ UINT realize_palette( HDC hdc )
 
     /* FIXME: move primary palette handling from user32 */
 
-    if( dc->hPalette == get_stock_object( DEFAULT_PALETTE ))
+    if( dc->hPalette == GetStockObject( DEFAULT_PALETTE ))
     {
         PHYSDEV physdev = GET_DC_PHYSDEV( dc, pRealizeDefaultPalette );
         realized = physdev->funcs->pRealizeDefaultPalette( physdev );
@@ -568,18 +570,25 @@ UINT realize_palette( HDC hdc )
                                                         (dc->hPalette == hPrimaryPalette) );
             palPtr->unrealize = physdev->funcs->pUnrealizePalette;
             GDI_ReleaseObj( dc->hPalette );
+            is_primary = dc->hPalette == hPrimaryPalette;
         }
     }
     else TRACE("  skipping (hLastRealizedPalette = %p)\n", hLastRealizedPalette);
 
     release_dc_ptr( dc );
     TRACE("   realized %i colors.\n", realized );
+
+    /* do not send anything if no colors were changed */
+    if (realized && is_primary)
+    {
+        /* send palette change notification */
+        HWND hwnd = NtUserWindowFromDC( hdc );
+        if (hwnd) send_message_timeout( HWND_BROADCAST, WM_PALETTECHANGED, HandleToUlong(hwnd), 0,
+                                        SMTO_ABORTIFHUNG, 2000, FALSE );
+    }
     return realized;
 }
 
-
-typedef HWND (WINAPI *WindowFromDC_funcptr)( HDC );
-typedef BOOL (WINAPI *RedrawWindow_funcptr)( HWND, const RECT *, HRGN, UINT );
 
 /**********************************************************************
  *           NtGdiUpdateColors    (win32u.@)
@@ -592,14 +601,13 @@ BOOL WINAPI NtGdiUpdateColors( HDC hDC )
     HWND hwnd;
 
     if (!size) return FALSE;
-    if (!user_callbacks) return TRUE;
 
-    hwnd = user_callbacks->pWindowFromDC( hDC );
+    hwnd = NtUserWindowFromDC( hDC );
 
     /* Docs say that we have to remap current drawable pixel by pixel
      * but it would take forever given the speed of XGet/PutPixel.
      */
-    if (hwnd && size) user_callbacks->pRedrawWindow( hwnd, NULL, 0, RDW_INVALIDATE );
+    if (hwnd && size) NtUserRedrawWindow( hwnd, NULL, 0, RDW_INVALIDATE );
     return TRUE;
 }
 
@@ -608,7 +616,7 @@ BOOL WINAPI NtGdiUpdateColors( HDC hDC )
  */
 BOOL WINAPI NtGdiSetMagicColors( HDC hdc, DWORD magic, ULONG index )
 {
-    FIXME( "(%p 0x%08x 0x%08x): stub\n", hdc, magic, index );
+    FIXME( "(%p 0x%08x 0x%08x): stub\n", hdc, (int)magic, (int)index );
     return TRUE;
 }
 
@@ -633,7 +641,7 @@ LONG WINAPI NtGdiDoPalette( HGDIOBJ handle, WORD start, WORD count, void *entrie
     case NtGdiGetDIBColorTable:
         return get_dib_dc_color_table( handle, start, count, entries );
     default:
-        WARN( "invalid func %u\n", func );
+        WARN( "invalid func %u\n", (int)func );
         return 0;
     }
 }

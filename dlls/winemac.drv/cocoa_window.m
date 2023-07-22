@@ -23,9 +23,7 @@
 #define GL_SILENCE_DEPRECATION
 #import <Carbon/Carbon.h>
 #import <CoreVideo/CoreVideo.h>
-#ifdef HAVE_METAL_METAL_H
 #import <Metal/Metal.h>
-#endif
 #import <QuartzCore/QuartzCore.h>
 
 #import "cocoa_window.h"
@@ -44,6 +42,16 @@ enum {
 #endif
 
 
+@interface NSWindow (PrivatePreventsActivation)
+
+/* Needed to ensure proper behavior after adding or removing
+ * NSWindowStyleMaskNonactivatingPanel.
+ * Available since at least macOS 10.6. */
+- (void)_setPreventsActivation:(BOOL)flag;
+
+@end
+
+
 static NSUInteger style_mask_for_features(const struct macdrv_window_features* wf)
 {
     NSUInteger style_mask;
@@ -57,6 +65,8 @@ static NSUInteger style_mask_for_features(const struct macdrv_window_features* w
         if (wf->utility) style_mask |= NSWindowStyleMaskUtilityWindow;
     }
     else style_mask = NSWindowStyleMaskBorderless;
+
+    if (wf->prevents_app_activation) style_mask |= NSWindowStyleMaskNonactivatingPanel;
 
     return style_mask;
 }
@@ -327,7 +337,6 @@ static CVReturn WineDisplayLinkCallback(CVDisplayLinkRef displayLink, const CVTi
 @end
 
 
-#ifdef HAVE_METAL_METAL_H
 @interface WineMetalView : WineBaseView
 {
     id<MTLDevice> _device;
@@ -336,7 +345,6 @@ static CVReturn WineDisplayLinkCallback(CVDisplayLinkRef displayLink, const CVTi
     - (id) initWithFrame:(NSRect)frame device:(id<MTLDevice>)device;
 
 @end
-#endif
 
 
 @interface WineContentView : WineBaseView <NSTextInputClient, NSViewLayerContentScaleDelegate>
@@ -354,9 +362,7 @@ static CVReturn WineDisplayLinkCallback(CVDisplayLinkRef displayLink, const CVTi
     BOOL _retinaMode;
     int backingSize[2];
 
-#ifdef HAVE_METAL_METAL_H
     WineMetalView *_metalView;
-#endif
 }
 
 @property (readonly, nonatomic) BOOL everHadGLContext;
@@ -368,9 +374,7 @@ static CVReturn WineDisplayLinkCallback(CVDisplayLinkRef displayLink, const CVTi
     - (void) wine_getBackingSize:(int*)outBackingSize;
     - (void) wine_setBackingSize:(const int*)newBackingSize;
 
-#ifdef HAVE_METAL_METAL_H
     - (WineMetalView*) newMetalViewWithDevice:(id<MTLDevice>)device;
-#endif
 
 @end
 
@@ -378,7 +382,8 @@ static CVReturn WineDisplayLinkCallback(CVDisplayLinkRef displayLink, const CVTi
 @interface WineWindow ()
 
 @property (readwrite, nonatomic) BOOL disabled;
-@property (readwrite, nonatomic) BOOL noActivate;
+@property (readwrite, nonatomic) BOOL noForeground;
+@property (readwrite, nonatomic) BOOL preventsAppActivation;
 @property (readwrite, nonatomic) BOOL floating;
 @property (readwrite, nonatomic) BOOL drawnSinceShown;
 @property (readwrite, nonatomic) BOOL closing;
@@ -398,7 +403,7 @@ static CVReturn WineDisplayLinkCallback(CVDisplayLinkRef displayLink, const CVTi
 @property (nonatomic) CGFloat colorKeyRed, colorKeyGreen, colorKeyBlue;
 @property (nonatomic) BOOL usePerPixelAlpha;
 
-@property (assign, nonatomic) void* imeData;
+@property (assign, nonatomic) void* himc;
 @property (nonatomic) BOOL commandDone;
 
 @property (readonly, copy, nonatomic) NSArray* childWineWindows;
@@ -644,7 +649,6 @@ static CVReturn WineDisplayLinkCallback(CVDisplayLinkRef displayLink, const CVTi
         }
     }
 
-#ifdef HAVE_METAL_METAL_H
     - (WineMetalView*) newMetalViewWithDevice:(id<MTLDevice>)device
     {
         if (_metalView) return _metalView;
@@ -659,7 +663,6 @@ static CVReturn WineDisplayLinkCallback(CVDisplayLinkRef displayLink, const CVTi
 
         return _metalView;
     }
-#endif
 
     - (void) setRetinaMode:(int)mode
     {
@@ -711,7 +714,7 @@ static CVReturn WineDisplayLinkCallback(CVDisplayLinkRef displayLink, const CVTi
         WineWindow* window = (WineWindow*)[self window];
 
         event = macdrv_create_event(IM_SET_TEXT, window);
-        event->im_set_text.data = [window imeData];
+        event->im_set_text.himc = [window himc];
         event->im_set_text.text = (CFStringRef)[text copy];
         event->im_set_text.complete = TRUE;
 
@@ -741,10 +744,8 @@ static CVReturn WineDisplayLinkCallback(CVDisplayLinkRef displayLink, const CVTi
             if (!view->_cachedHasGLDescendantValid || view->_cachedHasGLDescendant)
                 [self invalidateHasGLDescendant];
         }
-#ifdef HAVE_METAL_METAL_H
         if (subview == _metalView)
             _metalView = nil;
-#endif
         [super willRemoveSubview:subview];
     }
 
@@ -796,7 +797,7 @@ static CVReturn WineDisplayLinkCallback(CVDisplayLinkRef displayLink, const CVTi
             markedTextSelection.location += replacementRange.location;
 
             event = macdrv_create_event(IM_SET_TEXT, window);
-            event->im_set_text.data = [window imeData];
+            event->im_set_text.himc = [window himc];
             event->im_set_text.text = (CFStringRef)[[markedText string] copy];
             event->im_set_text.complete = FALSE;
             event->im_set_text.cursor_pos = markedTextSelection.location + markedTextSelection.length;
@@ -859,7 +860,7 @@ static CVReturn WineDisplayLinkCallback(CVDisplayLinkRef displayLink, const CVTi
         query = macdrv_create_query();
         query->type = QUERY_IME_CHAR_RECT;
         query->window = (macdrv_window)[window retain];
-        query->ime_char_rect.data = [window imeData];
+        query->ime_char_rect.himc = [window himc];
         query->ime_char_rect.range = CFRangeMake(aRange.location, aRange.length);
 
         if ([window.queue query:query timeout:0.3 flags:WineQueryNoPreemptWait])
@@ -891,7 +892,6 @@ static CVReturn WineDisplayLinkCallback(CVDisplayLinkRef displayLink, const CVTi
 @end
 
 
-#ifdef HAVE_METAL_METAL_H
 @implementation WineMetalView
 
     - (id) initWithFrame:(NSRect)frame device:(id<MTLDevice>)device
@@ -935,20 +935,19 @@ static CVReturn WineDisplayLinkCallback(CVDisplayLinkRef displayLink, const CVTi
     }
 
 @end
-#endif
 
 
 @implementation WineWindow
 
     static WineWindow* causing_becomeKeyWindow;
 
-    @synthesize disabled, noActivate, floating, fullscreen, fakingClose, closing, latentParentWindow, hwnd, queue;
+    @synthesize disabled, noForeground, preventsAppActivation, floating, fullscreen, fakingClose, closing, latentParentWindow, hwnd, queue;
     @synthesize drawnSinceShown;
     @synthesize surface, surface_mutex;
     @synthesize shapeChangedSinceLastDraw;
     @synthesize colorKeyed, colorKeyRed, colorKeyGreen, colorKeyBlue;
     @synthesize usePerPixelAlpha;
-    @synthesize imeData, commandDone;
+    @synthesize himc, commandDone;
 
     + (WineWindow*) createWindowWithFeatures:(const struct macdrv_window_features*)wf
                                  windowFrame:(NSRect)window_frame
@@ -1126,9 +1125,12 @@ static CVReturn WineDisplayLinkCallback(CVDisplayLinkRef displayLink, const CVTi
     - (void) setWindowFeatures:(const struct macdrv_window_features*)wf
     {
         static const NSUInteger usedStyles = NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskMiniaturizable |
-                                             NSWindowStyleMaskResizable | NSWindowStyleMaskUtilityWindow | NSWindowStyleMaskBorderless;
+                                             NSWindowStyleMaskResizable | NSWindowStyleMaskUtilityWindow | NSWindowStyleMaskBorderless |
+                                             NSWindowStyleMaskNonactivatingPanel;
         NSUInteger currentStyle = [self styleMask];
         NSUInteger newStyle = style_mask_for_features(wf) | (currentStyle & ~usedStyles);
+
+        self.preventsAppActivation = wf->prevents_app_activation;
 
         if (newStyle != currentStyle)
         {
@@ -1145,6 +1147,17 @@ static CVReturn WineDisplayLinkCallback(CVDisplayLinkRef displayLink, const CVTi
                 [self setStyleMask:newStyle ^ NSWindowStyleMaskClosable];
             }
             [self setStyleMask:newStyle];
+
+            BOOL isNonActivating = (currentStyle & NSWindowStyleMaskNonactivatingPanel) != 0;
+            BOOL shouldBeNonActivating = (newStyle & NSWindowStyleMaskNonactivatingPanel) != 0;
+            if (isNonActivating != shouldBeNonActivating) {
+                // Changing NSWindowStyleMaskNonactivatingPanel with -setStyleMask is also
+                // buggy. If it's added, clicking the title bar will still activate the
+                // app. If it's removed, nothing changes at all.
+                // This private method ensures the correct behavior.
+                if ([self respondsToSelector:@selector(_setPreventsActivation:)])
+                    [self _setPreventsActivation:shouldBeNonActivating];
+            }
 
             // -setStyleMask: resets the firstResponder to the window.  Set it
             // back to the content view.
@@ -1232,7 +1245,7 @@ static CVReturn WineDisplayLinkCallback(CVDisplayLinkRef displayLink, const CVTi
         NSWindowCollectionBehavior behavior;
 
         self.disabled = state->disabled;
-        self.noActivate = state->no_activate;
+        self.noForeground = state->no_foreground;
 
         if (self.floating != state->floating)
         {
@@ -1662,7 +1675,7 @@ static CVReturn WineDisplayLinkCallback(CVDisplayLinkRef displayLink, const CVTi
             WineWindow* parent;
             WineWindow* child;
 
-            [controller transformProcessToForeground];
+            [controller transformProcessToForeground:!self.preventsAppActivation];
             if ([NSApp isHidden])
                 [NSApp unhide:nil];
             wasVisible = [self isVisible];
@@ -2032,7 +2045,7 @@ static CVReturn WineDisplayLinkCallback(CVDisplayLinkRef displayLink, const CVTi
     {
         if (activate)
         {
-            [[WineApplicationController sharedController] transformProcessToForeground];
+            [[WineApplicationController sharedController] transformProcessToForeground:YES];
             [NSApp activateIgnoringOtherApps:YES];
         }
 
@@ -2338,7 +2351,7 @@ static CVReturn WineDisplayLinkCallback(CVDisplayLinkRef displayLink, const CVTi
     - (BOOL) canBecomeKeyWindow
     {
         if (causing_becomeKeyWindow == self) return YES;
-        if (self.disabled || self.noActivate) return NO;
+        if (self.disabled || self.noForeground) return NO;
         if ([self isKeyWindow]) return YES;
 
         // If a window's collectionBehavior says it participates in cycling,
@@ -2406,7 +2419,7 @@ static CVReturn WineDisplayLinkCallback(CVDisplayLinkRef displayLink, const CVTi
         BOOL ret = [super validateMenuItem:menuItem];
 
         if ([menuItem action] == @selector(makeKeyAndOrderFront:))
-            ret = [self isKeyWindow] || (!self.disabled && !self.noActivate);
+            ret = [self isKeyWindow] || (!self.disabled && !self.noForeground);
         if ([menuItem action] == @selector(toggleFullScreen:) && (self.disabled || maximized))
             ret = NO;
 
@@ -2421,7 +2434,7 @@ static CVReturn WineDisplayLinkCallback(CVDisplayLinkRef displayLink, const CVTi
         [self orderBelow:nil orAbove:nil activate:NO];
         [[self ancestorWineWindow] postBroughtForwardEvent];
 
-        if (![self isKeyWindow] && !self.disabled && !self.noActivate)
+        if (![self isKeyWindow] && !self.disabled && !self.noForeground)
             [[WineApplicationController sharedController] windowGotFocus:self];
     }
 
@@ -2815,7 +2828,7 @@ static CVReturn WineDisplayLinkCallback(CVDisplayLinkRef displayLink, const CVTi
         if (![self parentWindow])
             [self postBroughtForwardEvent];
 
-        if (!self.disabled && !self.noActivate)
+        if (!self.disabled && !self.noForeground)
         {
             causing_becomeKeyWindow = self;
             [self makeKeyWindow];
@@ -3770,7 +3783,6 @@ void macdrv_remove_view_opengl_context(macdrv_view v, macdrv_opengl_context c)
     [pool release];
 }
 
-#ifdef HAVE_METAL_METAL_H
 macdrv_metal_device macdrv_create_metal_device(void)
 {
     macdrv_metal_device ret;
@@ -3826,7 +3838,6 @@ void macdrv_view_release_metal_view(macdrv_metal_view v)
         [view release];
     });
 }
-#endif
 
 int macdrv_get_view_backing_size(macdrv_view v, int backing_size[2])
 {
@@ -3892,7 +3903,7 @@ uint32_t macdrv_window_background_color(void)
 /***********************************************************************
  *              macdrv_send_text_input_event
  */
-void macdrv_send_text_input_event(int pressed, unsigned int flags, int repeat, int keyc, void* data, int* done)
+void macdrv_send_text_input_event(int pressed, unsigned int flags, int repeat, int keyc, void* himc, int* done)
 {
     OnMainThreadAsync(^{
         BOOL ret;
@@ -3911,7 +3922,7 @@ void macdrv_send_text_input_event(int pressed, unsigned int flags, int repeat, i
             CGEventRef c;
             NSEvent* event;
 
-            window.imeData = data;
+            window.himc = himc;
             fix_device_modifiers_by_generic(&localFlags);
 
             // An NSEvent created with +keyEventWithType:... is internally marked

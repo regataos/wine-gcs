@@ -56,30 +56,30 @@ static void test_dbg_hidden_thread_creation(void)
 
     status = pNtCreateThreadEx( &thread, THREAD_ALL_ACCESS, NULL, GetCurrentProcess(), test_NtCreateThreadEx_proc,
                                 NULL, THREAD_CREATE_FLAGS_CREATE_SUSPENDED, 0, 0, 0, NULL );
-    ok( status == STATUS_SUCCESS, "Got unexpected status %#x.\n", status );
+    ok( status == STATUS_SUCCESS, "Got unexpected status %#lx.\n", status );
 
     dbg_hidden = 0xcc;
     status = NtQueryInformationThread( thread, ThreadHideFromDebugger, &dbg_hidden, sizeof(dbg_hidden), NULL );
-    ok( status == STATUS_SUCCESS, "Got unexpected status %#x.\n", status );
+    ok( status == STATUS_SUCCESS, "Got unexpected status %#lx.\n", status );
     ok( !dbg_hidden, "Got unexpected dbg_hidden %#x.\n", dbg_hidden );
 
     status = NtResumeThread( thread, NULL );
-    ok( status == STATUS_SUCCESS, "Got unexpected status %#x.\n", status );
+    ok( status == STATUS_SUCCESS, "Got unexpected status %#lx.\n", status );
     WaitForSingleObject( thread, INFINITE );
     CloseHandle( thread );
 
     status = pNtCreateThreadEx( &thread, THREAD_ALL_ACCESS, NULL, GetCurrentProcess(), test_NtCreateThreadEx_proc,
                                 NULL, THREAD_CREATE_FLAGS_CREATE_SUSPENDED | THREAD_CREATE_FLAGS_HIDE_FROM_DEBUGGER,
                                 0, 0, 0, NULL );
-    ok( status == STATUS_SUCCESS, "Got unexpected status %#x.\n", status );
+    ok( status == STATUS_SUCCESS, "Got unexpected status %#lx.\n", status );
 
     dbg_hidden = 0xcc;
     status = NtQueryInformationThread( thread, ThreadHideFromDebugger, &dbg_hidden, sizeof(dbg_hidden), NULL );
-    ok( status == STATUS_SUCCESS, "Got unexpected status %#x.\n", status );
+    ok( status == STATUS_SUCCESS, "Got unexpected status %#lx.\n", status );
     ok( dbg_hidden == 1, "Got unexpected dbg_hidden %#x.\n", dbg_hidden );
 
     status = NtResumeThread( thread, NULL );
-    ok( status == STATUS_SUCCESS, "Got unexpected status %#x.\n", status );
+    ok( status == STATUS_SUCCESS, "Got unexpected status %#lx.\n", status );
     WaitForSingleObject( thread, INFINITE );
     CloseHandle( thread );
 
@@ -97,7 +97,7 @@ static void test_dbg_hidden_thread_creation(void)
     status = RtlCreateProcessParametersEx( &params, &imageW, NULL, NULL,
                                            NULL, NULL, NULL, NULL,
                                            NULL, NULL, PROCESS_PARAMS_FLAG_NORMALIZED );
-    ok( status == STATUS_SUCCESS, "Got unexpected status %#x.\n", status );
+    ok( status == STATUS_SUCCESS, "Got unexpected status %#lx.\n", status );
 
     /* NtCreateUserProcess() may return STATUS_INVALID_PARAMETER with some uninitialized data in create_info. */
     memset( &create_info, 0, sizeof(create_info) );
@@ -107,15 +107,74 @@ static void test_dbg_hidden_thread_creation(void)
                                   NULL, NULL, 0, THREAD_CREATE_FLAGS_CREATE_SUSPENDED
                                   | THREAD_CREATE_FLAGS_HIDE_FROM_DEBUGGER, params,
                                   &create_info, &ps_attr );
-    ok( status == STATUS_INVALID_PARAMETER, "Got unexpected status %#x.\n", status );
+    ok( status == STATUS_INVALID_PARAMETER, "Got unexpected status %#lx.\n", status );
     status = NtCreateUserProcess( &process, &thread, PROCESS_ALL_ACCESS, THREAD_ALL_ACCESS,
                                   NULL, NULL, 0, THREAD_CREATE_FLAGS_CREATE_SUSPENDED, params,
                                   &create_info, &ps_attr );
-    ok( status == STATUS_SUCCESS, "Got unexpected status %#x.\n", status );
+    ok( status == STATUS_SUCCESS, "Got unexpected status %#lx.\n", status );
     status = NtTerminateProcess( process, 0 );
-    ok( status == STATUS_SUCCESS, "Got unexpected status %#x.\n", status );
+    ok( status == STATUS_SUCCESS, "Got unexpected status %#lx.\n", status );
     CloseHandle( process );
     CloseHandle( thread );
+}
+
+struct unique_teb_thread_args
+{
+    TEB *teb;
+    HANDLE running_event;
+    HANDLE quit_event;
+};
+
+static void CALLBACK test_unique_teb_proc(void *param)
+{
+    struct unique_teb_thread_args *args = param;
+    args->teb = NtCurrentTeb();
+    SetEvent( args->running_event );
+    WaitForSingleObject( args->quit_event, INFINITE );
+}
+
+static void test_unique_teb(void)
+{
+    HANDLE threads[2], running_events[2];
+    struct unique_teb_thread_args args1, args2;
+    NTSTATUS status;
+
+    if (!pNtCreateThreadEx)
+    {
+        win_skip( "NtCreateThreadEx is not available.\n" );
+        return;
+    }
+
+    args1.running_event = running_events[0] = CreateEventW( NULL, FALSE, FALSE, NULL );
+    ok( args1.running_event != NULL, "CreateEventW failed %lu.\n", GetLastError() );
+
+    args2.running_event = running_events[1] = CreateEventW( NULL, FALSE, FALSE, NULL );
+    ok( args2.running_event != NULL, "CreateEventW failed %lu.\n", GetLastError() );
+
+    args1.quit_event = args2.quit_event = CreateEventW( NULL, TRUE, FALSE, NULL );
+    ok( args1.quit_event != NULL, "CreateEventW failed %lu.\n", GetLastError() );
+
+    status = pNtCreateThreadEx( &threads[0], THREAD_ALL_ACCESS, NULL, GetCurrentProcess(), test_unique_teb_proc,
+                                &args1, 0, 0, 0, 0, NULL );
+    ok( status == STATUS_SUCCESS, "Got unexpected status %#lx.\n", status );
+
+    status = pNtCreateThreadEx( &threads[1], THREAD_ALL_ACCESS, NULL, GetCurrentProcess(), test_unique_teb_proc,
+                                &args2, 0, 0, 0, 0, NULL );
+    ok( status == STATUS_SUCCESS, "Got unexpected status %#lx.\n", status );
+
+    WaitForMultipleObjects( 2, running_events, TRUE, INFINITE );
+    SetEvent( args1.quit_event );
+
+    WaitForMultipleObjects( 2, threads, TRUE, INFINITE );
+    CloseHandle( threads[0] );
+    CloseHandle( threads[1] );
+    CloseHandle( args1.running_event );
+    CloseHandle( args2.running_event );
+    CloseHandle( args1.quit_event );
+
+    ok( NtCurrentTeb() != args1.teb, "Multiple threads have TEB %p.\n", args1.teb );
+    ok( NtCurrentTeb() != args2.teb, "Multiple threads have TEB %p.\n", args2.teb );
+    ok( args1.teb != args2.teb, "Multiple threads have TEB %p.\n", args1.teb );
 }
 
 START_TEST(thread)
@@ -123,4 +182,5 @@ START_TEST(thread)
     init_function_pointers();
 
     test_dbg_hidden_thread_creation();
+    test_unique_teb();
 }

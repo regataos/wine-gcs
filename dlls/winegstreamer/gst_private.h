@@ -33,9 +33,7 @@
 #define NONAMELESSUNION
 #include "dshow.h"
 #include "mfidl.h"
-#include "wmsdk.h"
 #include "wine/debug.h"
-#include "wine/list.h"
 #include "wine/strmbase.h"
 
 #include "unixlib.h"
@@ -87,7 +85,8 @@ void wg_parser_stream_get_preferred_format(struct wg_parser_stream *stream, stru
 void wg_parser_stream_enable(struct wg_parser_stream *stream, const struct wg_format *format, uint32_t flags);
 void wg_parser_stream_disable(struct wg_parser_stream *stream);
 
-bool wg_parser_stream_get_buffer(struct wg_parser_stream *stream, struct wg_parser_buffer *buffer);
+bool wg_parser_stream_get_buffer(struct wg_parser *parser, struct wg_parser_stream *stream,
+        struct wg_parser_buffer *buffer);
 bool wg_parser_stream_copy_buffer(struct wg_parser_stream *stream,
         void *data, uint32_t offset, uint32_t size);
 void wg_parser_stream_release_buffer(struct wg_parser_stream *stream);
@@ -96,23 +95,36 @@ void wg_parser_stream_notify_qos(struct wg_parser_stream *stream,
 
 /* Returns the duration in 100-nanosecond units. */
 uint64_t wg_parser_stream_get_duration(struct wg_parser_stream *stream);
-bool wg_parser_stream_get_tag(struct wg_parser_stream *stream, enum wg_parser_tag tag,
-        char *buffer, uint32_t size);
+char *wg_parser_stream_get_tag(struct wg_parser_stream *stream, enum wg_parser_tag tag);
 /* start_pos and stop_pos are in 100-nanosecond units. */
 void wg_parser_stream_seek(struct wg_parser_stream *stream, double rate,
         uint64_t start_pos, uint64_t stop_pos, DWORD start_flags, DWORD stop_flags);
 
 struct wg_transform *wg_transform_create(const struct wg_format *input_format,
-        const struct wg_format *output_format);
+        const struct wg_format *output_format, const struct wg_transform_attrs *attrs);
 void wg_transform_destroy(struct wg_transform *transform);
 bool wg_transform_set_output_format(struct wg_transform *transform, struct wg_format *format);
+bool wg_transform_get_status(struct wg_transform *transform, bool *accepts_input);
 HRESULT wg_transform_drain(struct wg_transform *transform);
+HRESULT wg_transform_flush(struct wg_transform *transform);
+
+struct wg_source *wg_source_create(const WCHAR *url, uint64_t file_size,
+        const void *data, uint32_t size, WCHAR mime_type[256]);
+void wg_source_destroy(struct wg_source *source);
+bool wg_source_get_status(struct wg_source *source, uint32_t *stream_count,
+        uint64_t *duration, uint64_t *read_offset);
+HRESULT wg_source_push_data(struct wg_source *source, const void *data, uint32_t size);
+bool wg_source_get_stream_format(struct wg_source *source, UINT32 index,
+        struct wg_format *format);
+char *wg_source_get_stream_tag(struct wg_source *source, UINT32 index,
+        enum wg_parser_tag tag);
 
 unsigned int wg_format_get_max_size(const struct wg_format *format);
 
 HRESULT avi_splitter_create(IUnknown *outer, IUnknown **out);
 HRESULT decodebin_parser_create(IUnknown *outer, IUnknown **out);
 HRESULT mpeg_audio_codec_create(IUnknown *outer, IUnknown **out);
+HRESULT mpeg_layer3_decoder_create(IUnknown *outer, IUnknown **out);
 HRESULT mpeg_splitter_create(IUnknown *outer, IUnknown **out);
 HRESULT wave_parser_create(IUnknown *outer, IUnknown **out);
 HRESULT wma_decoder_create(IUnknown *outer, IUnknown **out);
@@ -144,17 +156,23 @@ HRESULT wg_transform_push_quartz(struct wg_transform *transform, struct wg_sampl
         struct wg_sample_queue *queue);
 HRESULT wg_transform_read_dmo(struct wg_transform *transform, struct wg_sample *sample,
         DWORD *flags, REFERENCE_TIME *pts, REFERENCE_TIME *duration);
-HRESULT wg_transform_read_mf(struct wg_transform *transform, struct wg_sample *sample,
-        struct wg_format *format, DWORD *flags);
+HRESULT wg_transform_read_mf(struct wg_transform *transform, IMFSample *sample,
+        DWORD sample_size, struct wg_format *format, DWORD *flags);
 HRESULT wg_transform_read_quartz(struct wg_transform *transform, struct wg_sample *sample);
 
 HRESULT winegstreamer_stream_handler_create(REFIID riid, void **obj);
-HRESULT winegstreamer_create_media_source_from_uri(const WCHAR *uri, IUnknown **out_media_source) DECLSPEC_HIDDEN;
+HRESULT winegstreamer_scheme_handler_create(REFIID riid, void **obj);
+HRESULT media_source_create(IMFByteStream *stream, const WCHAR *url, BYTE *data, UINT64 size, IMFMediaSource **out);
+HRESULT media_source_create_old(IMFByteStream *stream, const WCHAR *url, IMFMediaSource **out);
+HRESULT media_source_create_from_url(const WCHAR *url, IMFMediaSource **out);
+
+unsigned int wg_format_get_stride(const struct wg_format *format);
+
+bool wg_video_format_is_rgb(enum wg_video_format format);
 
 HRESULT aac_decoder_create(REFIID riid, void **ret);
 HRESULT h264_decoder_create(REFIID riid, void **ret);
 HRESULT video_processor_create(REFIID riid, void **ret);
-HRESULT gstreamer_scheme_handler_construct(REFIID riid, void **ret) DECLSPEC_HIDDEN;
 
 extern const GUID MFAudioFormat_RAW_AAC;
 

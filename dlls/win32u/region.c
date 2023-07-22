@@ -99,13 +99,8 @@ SOFTWARE.
 #endif
 
 #include <assert.h>
-#include <stdarg.h>
-#include <stdlib.h>
-#include <string.h>
-#include "windef.h"
-#include "winbase.h"
-#include "wingdi.h"
 #include "ntgdi_private.h"
+#include "ntuser_private.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(region);
@@ -835,7 +830,7 @@ DWORD WINAPI NtGdiGetRegionData( HRGN hrgn, DWORD count, RGNDATA *rgndata )
     DWORD size;
     WINEREGION *obj = GDI_GetObjPtr( hrgn, NTGDI_OBJ_REGION );
 
-    TRACE(" %p count = %d, rgndata = %p\n", hrgn, count, rgndata);
+    TRACE(" %p count = %d, rgndata = %p\n", hrgn, (int)count, rgndata);
 
     if(!obj) return 0;
 
@@ -871,8 +866,8 @@ static void translate( POINT *pt, UINT count, const XFORM *xform )
     {
         double x = pt->x;
         double y = pt->y;
-        pt->x = floor( x * xform->eM11 + y * xform->eM21 + xform->eDx + 0.5 );
-        pt->y = floor( x * xform->eM12 + y * xform->eM22 + xform->eDy + 0.5 );
+        pt->x = GDI_ROUND( x * xform->eM11 + y * xform->eM21 + xform->eDx );
+        pt->y = GDI_ROUND( x * xform->eM12 + y * xform->eM22 + xform->eDy );
         pt++;
     }
 }
@@ -906,7 +901,7 @@ HRGN WINAPI NtGdiExtCreateRegion( const XFORM *xform, DWORD count, const RGNDATA
 
     /* XP doesn't care about the type */
     if( rgndata->rdh.iType != RDH_RECTANGLES )
-        WARN("(Unsupported region data type: %u)\n", rgndata->rdh.iType);
+        WARN("(Unsupported region data type: %u)\n", (int)rgndata->rdh.iType);
 
     if (xform)
     {
@@ -953,7 +948,7 @@ HRGN WINAPI NtGdiExtCreateRegion( const XFORM *xform, DWORD count, const RGNDATA
 done:
     if (!hrgn) free_region( obj );
 
-    TRACE("%p %d %p returning %p\n", xform, count, rgndata, hrgn );
+    TRACE("%p %d %p returning %p\n", xform, (int)count, rgndata, hrgn );
     return hrgn;
 }
 
@@ -1381,8 +1376,7 @@ BOOL mirror_window_region( HWND hwnd, HRGN hrgn )
 {
     RECT rect;
 
-    if (!user_callbacks) return FALSE;
-    user_callbacks->pGetWindowRect( hwnd, &rect );
+    if (!get_window_rect( hwnd, &rect, get_thread_dpi() )) return FALSE;
     return mirror_region( hrgn, hrgn, rect.right - rect.left ) != ERROR;
 }
 

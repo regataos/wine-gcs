@@ -53,8 +53,8 @@ typedef struct {
     LONG ref;
 } event_data;
 
-BOOL keyboard_up;
-BOOL use_steam_osk;
+static BOOL keyboard_up;
+static BOOL use_steam_osk;
 static unsigned int steam_app_id;
 
 static const char *ct_id_str[] = {
@@ -347,13 +347,13 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
         goto exit;
     }
 
+    SetEvent(started_event);
+
     if (FAILED(create_uia_event_handler(&uia_iface, &data)))
     {
         ret = -1;
         goto exit;
     }
-
-    SetEvent(started_event);
 
     wc.lpfnWndProc   = WindowProc;
     wc.hInstance     = hInstance;

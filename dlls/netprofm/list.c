@@ -36,7 +36,6 @@
 #include "olectl.h"
 
 #include "wine/debug.h"
-#include "wine/heap.h"
 #include "wine/list.h"
 #include "netprofm_private.h"
 
@@ -44,12 +43,13 @@ WINE_DEFAULT_DEBUG_CHANNEL(netprofm);
 
 struct network
 {
-    INetwork     INetwork_iface;
-    LONG         refs;
-    struct list  entry;
-    GUID         id;
-    VARIANT_BOOL connected_to_internet;
-    VARIANT_BOOL connected;
+    INetwork             INetwork_iface;
+    LONG                 refs;
+    struct list          entry;
+    GUID                 id;
+    INetworkListManager *mgr;
+    VARIANT_BOOL         connected_to_internet;
+    VARIANT_BOOL         connected;
 };
 
 struct connection
@@ -94,9 +94,6 @@ struct sink_entry
     IUnknown *unk;
 };
 
-static HRESULT create_connections_enum(
-    struct list_manager *, IEnumNetworkConnections** );
-
 static inline struct list_manager *impl_from_IConnectionPointContainer(IConnectionPointContainer *iface)
 {
     return CONTAINING_RECORD(iface, struct list_manager, IConnectionPointContainer_iface);
@@ -112,12 +109,6 @@ static inline struct connection_point *impl_from_IConnectionPoint(
     IConnectionPoint *iface )
 {
     return CONTAINING_RECORD( iface, struct connection_point, IConnectionPoint_iface );
-}
-
-static inline struct list_manager *impl_from_INetworkListManager(
-    INetworkListManager *iface )
-{
-    return CONTAINING_RECORD( iface, struct list_manager, INetworkListManager_iface );
 }
 
 static HRESULT WINAPI connection_point_QueryInterface(
@@ -208,7 +199,7 @@ static HRESULT WINAPI connection_point_Advise(
         return CO_E_FAILEDTOOPENTHREADTOKEN;
     }
 
-    sink_entry = heap_alloc( sizeof(*sink_entry) );
+    sink_entry = malloc( sizeof(*sink_entry) );
     if (!sink_entry)
     {
         IUnknown_Release( unk );
@@ -225,7 +216,7 @@ static void sink_entry_release( struct sink_entry *entry )
 {
     list_remove( &entry->entry );
     IUnknown_Release( entry->unk );
-    heap_free( entry );
+    free( entry );
 }
 
 static HRESULT WINAPI connection_point_Unadvise(
@@ -235,7 +226,7 @@ static HRESULT WINAPI connection_point_Unadvise(
     struct connection_point *cp = impl_from_IConnectionPoint( iface );
     struct sink_entry *iter;
 
-    TRACE( "%p, %d\n", cp, cookie );
+    TRACE( "%p, %ld\n", cp, cookie );
 
     LIST_FOR_EACH_ENTRY( iter, &cp->sinks, struct sink_entry, entry )
     {
@@ -337,7 +328,8 @@ static ULONG WINAPI network_Release(
     if (!(refs = InterlockedDecrement( &network->refs )))
     {
         list_remove( &network->entry );
-        heap_free( network );
+        INetworkListManager_Release( network->mgr );
+        free( network );
     }
     return refs;
 }
@@ -441,42 +433,24 @@ static HRESULT WINAPI network_GetDomainType(
     return S_OK;
 }
 
-static ULONG WINAPI connection_Release(
-    INetworkConnection  *iface );
+static inline struct list_manager *impl_from_INetworkListManager(
+    INetworkListManager *iface )
+{
+    return CONTAINING_RECORD( iface, struct list_manager, INetworkListManager_iface );
+}
+
+static HRESULT create_connections_enum(
+    struct list_manager *, IEnumNetworkConnections** );
 
 static HRESULT WINAPI network_GetNetworkConnections(
     INetwork *iface,
-    IEnumNetworkConnections **ppEnumNetworkConnection )
+    IEnumNetworkConnections **ppEnum )
 {
-    HRESULT hr;
-    INetworkListManager *network_list_mgr = NULL;
-    struct list_manager *mgr = NULL;
-    struct network *current_network = impl_from_INetwork( iface );
+    struct network *network = impl_from_INetwork( iface );
+    struct list_manager *mgr = impl_from_INetworkListManager( network->mgr );
 
-    struct connection *connection, *next;
-    struct network *network;
-
-    if (FAILED(hr = list_manager_create((void**)&network_list_mgr)))
-        return hr;
-
-    mgr = impl_from_INetworkListManager(network_list_mgr);
-
-    if (FAILED(hr = create_connections_enum(mgr, ppEnumNetworkConnection)))
-        return hr;
-
-    TRACE("%p, %s\n", iface, debugstr_guid(&current_network->id));
-
-    LIST_FOR_EACH_ENTRY_SAFE(connection, next, &mgr->connections, struct connection, entry)
-    {
-        network = impl_from_INetwork(connection->network);
-        if (!IsEqualGUID(&network->id, &current_network->id))
-        {
-            TRACE("Filtering %s\n", debugstr_guid(&network->id));
-            list_remove(&connection->entry);
-        }
-    }
-
-    return S_OK;
+    TRACE( "%p, %p\n", iface, ppEnum );
+    return create_connections_enum( mgr, ppEnum );
 }
 
 static HRESULT WINAPI network_GetTimeCreatedAndConnected(
@@ -519,9 +493,17 @@ static HRESULT WINAPI network_GetConnectivity(
     INetwork *iface,
     NLM_CONNECTIVITY *pConnectivity )
 {
+    struct network *network = impl_from_INetwork( iface );
+
     FIXME( "%p, %p\n", iface, pConnectivity );
 
-    *pConnectivity = NLM_CONNECTIVITY_IPV4_INTERNET;
+    *pConnectivity = NLM_CONNECTIVITY_DISCONNECTED;
+
+    if (network->connected_to_internet)
+        *pConnectivity |= NLM_CONNECTIVITY_IPV4_INTERNET;
+    else if (network->connected)
+        *pConnectivity |= NLM_CONNECTIVITY_IPV4_LOCALNETWORK;
+
     return S_OK;
 }
 
@@ -571,7 +553,7 @@ static struct network *create_network( const GUID *id )
 {
     struct network *ret;
 
-    if (!(ret = heap_alloc( sizeof(*ret) ))) return NULL;
+    if (!(ret = calloc( 1, sizeof(*ret) ))) return NULL;
 
     ret->INetwork_iface.lpVtbl = &network_vtbl;
     ret->refs                  = 1;
@@ -755,7 +737,7 @@ static ULONG WINAPI networks_enum_Release(
     if (!(refs = InterlockedDecrement( &iter->refs )))
     {
         INetworkListManager_Release( &iter->mgr->INetworkListManager_iface );
-        heap_free( iter );
+        free( iter );
     }
     return refs;
 }
@@ -818,7 +800,7 @@ static HRESULT WINAPI networks_enum_Next(
     struct networks_enum *iter = impl_from_IEnumNetworks( iface );
     ULONG i = 0;
 
-    TRACE( "%p, %u %p %p\n", iter, count, ret, fetched );
+    TRACE( "%p, %lu %p %p\n", iter, count, ret, fetched );
 
     if (fetched) *fetched = 0;
     if (!count) return S_OK;
@@ -841,7 +823,7 @@ static HRESULT WINAPI networks_enum_Skip(
 {
     struct networks_enum *iter = impl_from_IEnumNetworks( iface );
 
-    TRACE( "%p, %u\n", iter, count);
+    TRACE( "%p, %lu\n", iter, count);
 
     if (!count) return S_OK;
     if (!iter->cursor) return S_FALSE;
@@ -900,7 +882,7 @@ static HRESULT create_networks_enum(
     struct networks_enum *iter;
 
     *ret = NULL;
-    if (!(iter = heap_alloc( sizeof(*iter) ))) return E_OUTOFMEMORY;
+    if (!(iter = calloc( 1, sizeof(*iter) ))) return E_OUTOFMEMORY;
 
     iter->IEnumNetworks_iface.lpVtbl = &networks_enum_vtbl;
     iter->cursor = list_head( &mgr->networks );
@@ -969,7 +951,7 @@ static ULONG WINAPI connections_enum_Release(
     if (!(refs = InterlockedDecrement( &iter->refs )))
     {
         INetworkListManager_Release( &iter->mgr->INetworkListManager_iface );
-        heap_free( iter );
+        free( iter );
     }
     return refs;
 }
@@ -1032,7 +1014,7 @@ static HRESULT WINAPI connections_enum_Next(
     struct connections_enum *iter = impl_from_IEnumNetworkConnections( iface );
     ULONG i = 0;
 
-    TRACE( "%p, %u %p %p\n", iter, count, ret, fetched );
+    TRACE( "%p, %lu %p %p\n", iter, count, ret, fetched );
 
     if (!ret) return E_POINTER;
     *ret = NULL;
@@ -1057,7 +1039,7 @@ static HRESULT WINAPI connections_enum_Skip(
 {
     struct connections_enum *iter = impl_from_IEnumNetworkConnections( iface );
 
-    TRACE( "%p, %u\n", iter, count);
+    TRACE( "%p, %lu\n", iter, count);
 
     if (!count) return S_OK;
     if (!iter->cursor) return S_FALSE;
@@ -1113,7 +1095,7 @@ static HRESULT create_connections_enum(
     struct connections_enum *iter;
 
     *ret = NULL;
-    if (!(iter = heap_alloc( sizeof(*iter) ))) return E_OUTOFMEMORY;
+    if (!(iter = calloc( 1, sizeof(*iter) ))) return E_OUTOFMEMORY;
 
     iter->IEnumNetworkConnections_iface.lpVtbl = &connections_enum_vtbl;
     iter->mgr         = mgr;
@@ -1139,7 +1121,8 @@ static ULONG WINAPI list_manager_Release(
     LONG refs = InterlockedDecrement( &mgr->refs );
     if (!refs)
     {
-        struct list *ptr;
+        struct network *network, *next_network;
+        struct connection *connection, *next_connection;
 
         TRACE( "destroying %p\n", mgr );
 
@@ -1147,19 +1130,15 @@ static ULONG WINAPI list_manager_Release(
         connection_point_release( &mgr->conn_mgr_cp );
         connection_point_release( &mgr->cost_mgr_cp );
         connection_point_release( &mgr->list_mgr_cp );
-        while ((ptr = list_head( &mgr->networks )))
+        LIST_FOR_EACH_ENTRY_SAFE( connection, next_connection, &mgr->connections, struct connection, entry )
         {
-            struct network *network = LIST_ENTRY( ptr, struct network, entry );
-            list_remove( &network->entry );
-            INetwork_Release( &network->INetwork_iface );
-        }
-        while ((ptr = list_head( &mgr->connections )))
-        {
-            struct connection *connection = LIST_ENTRY( ptr, struct connection, entry );
-            list_remove( &connection->entry );
             INetworkConnection_Release( &connection->INetworkConnection_iface );
         }
-        heap_free( mgr );
+        LIST_FOR_EACH_ENTRY_SAFE( network, next_network, &mgr->networks, struct network, entry )
+        {
+            INetwork_Release( &network->INetwork_iface );
+        }
+        free( mgr );
     }
     return refs;
 }
@@ -1360,9 +1339,21 @@ static HRESULT WINAPI list_manager_GetConnectivity(
     INetworkListManager *iface,
     NLM_CONNECTIVITY *pConnectivity )
 {
+    struct list_manager *mgr = impl_from_INetworkListManager( iface );
+    struct network *network;
+
     FIXME( "%p, %p\n", iface, pConnectivity );
 
-    *pConnectivity = NLM_CONNECTIVITY_IPV4_INTERNET;
+    *pConnectivity = NLM_CONNECTIVITY_DISCONNECTED;
+
+    LIST_FOR_EACH_ENTRY( network, &mgr->networks, struct network, entry )
+    {
+        if (network->connected_to_internet)
+            *pConnectivity |= NLM_CONNECTIVITY_IPV4_INTERNET;
+        else if (network->connected)
+            *pConnectivity |= NLM_CONNECTIVITY_IPV4_LOCALNETWORK;
+    }
+
     return S_OK;
 }
 
@@ -1502,9 +1493,9 @@ static ULONG WINAPI connection_Release(
 
     if (!(refs = InterlockedDecrement( &connection->refs )))
     {
-        INetwork_Release( connection->network );
         list_remove( &connection->entry );
-        heap_free( connection );
+        INetwork_Release( connection->network );
+        free( connection );
     }
     return refs;
 }
@@ -1595,9 +1586,17 @@ static HRESULT WINAPI connection_GetConnectivity(
     INetworkConnection *iface,
     NLM_CONNECTIVITY *pConnectivity )
 {
+    struct connection *connection = impl_from_INetworkConnection( iface );
+
     FIXME( "%p, %p\n", iface, pConnectivity );
 
-    *pConnectivity = NLM_CONNECTIVITY_IPV4_INTERNET;
+    *pConnectivity = NLM_CONNECTIVITY_DISCONNECTED;
+
+    if (connection->connected_to_internet)
+        *pConnectivity |= NLM_CONNECTIVITY_IPV4_INTERNET;
+    else if (connection->connected)
+        *pConnectivity |= NLM_CONNECTIVITY_IPV4_LOCALNETWORK;
+
     return S_OK;
 }
 
@@ -1728,7 +1727,7 @@ static struct connection *create_connection( const GUID *id )
 {
     struct connection *ret;
 
-    if (!(ret = heap_alloc( sizeof(*ret) ))) return NULL;
+    if (!(ret = calloc( 1, sizeof(*ret) ))) return NULL;
 
     ret->INetworkConnection_iface.lpVtbl     = &connection_vtbl;
     ret->INetworkConnectionCost_iface.lpVtbl = &connection_cost_vtbl;
@@ -1756,10 +1755,10 @@ static void init_networks( struct list_manager *mgr )
     ret = GetAdaptersAddresses( AF_UNSPEC, flags, NULL, NULL, &size );
     if (ret != ERROR_BUFFER_OVERFLOW) return;
 
-    if (!(buf = heap_alloc( size ))) return;
+    if (!(buf = malloc( size ))) return;
     if (GetAdaptersAddresses( AF_UNSPEC, flags, NULL, buf, &size ))
     {
-        heap_free( buf );
+        free( buf );
         return;
     }
 
@@ -1792,6 +1791,8 @@ static void init_networks( struct list_manager *mgr )
             connection->connected_to_internet = VARIANT_TRUE;
         }
 
+        network->mgr = &mgr->INetworkListManager_iface;
+        INetworkListManager_AddRef( network->mgr );
         connection->network = &network->INetwork_iface;
         INetwork_AddRef( connection->network );
 
@@ -1800,7 +1801,7 @@ static void init_networks( struct list_manager *mgr )
     }
 
 done:
-    heap_free( buf );
+    free( buf );
 }
 
 HRESULT list_manager_create( void **obj )
@@ -1809,7 +1810,7 @@ HRESULT list_manager_create( void **obj )
 
     TRACE( "%p\n", obj );
 
-    if (!(mgr = heap_alloc( sizeof(*mgr) ))) return E_OUTOFMEMORY;
+    if (!(mgr = calloc( 1, sizeof(*mgr) ))) return E_OUTOFMEMORY;
     mgr->INetworkListManager_iface.lpVtbl = &list_manager_vtbl;
     mgr->INetworkCostManager_iface.lpVtbl = &cost_manager_vtbl;
     mgr->IConnectionPointContainer_iface.lpVtbl = &cpc_vtbl;

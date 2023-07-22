@@ -40,6 +40,7 @@
     SYSCALL_ENTRY( NtCallbackReturn ) \
     SYSCALL_ENTRY( NtCancelIoFile ) \
     SYSCALL_ENTRY( NtCancelIoFileEx ) \
+    SYSCALL_ENTRY( NtCancelSynchronousIoFile ) \
     SYSCALL_ENTRY( NtCancelTimer ) \
     SYSCALL_ENTRY( NtClearEvent ) \
     SYSCALL_ENTRY( NtClose ) \
@@ -97,12 +98,14 @@
     SYSCALL_ENTRY( NtGetNlsSectionPtr ) \
     SYSCALL_ENTRY( NtGetWriteWatch ) \
     SYSCALL_ENTRY( NtImpersonateAnonymousToken ) \
+    SYSCALL_ENTRY( NtInitializeNlsFiles ) \
     SYSCALL_ENTRY( NtInitiatePowerAction  ) \
     SYSCALL_ENTRY( NtIsProcessInJob ) \
     SYSCALL_ENTRY( NtListenPort ) \
     SYSCALL_ENTRY( NtLoadDriver ) \
     SYSCALL_ENTRY( NtLoadKey ) \
     SYSCALL_ENTRY( NtLoadKey2 ) \
+    SYSCALL_ENTRY( NtLoadKeyEx ) \
     SYSCALL_ENTRY( NtLockFile ) \
     SYSCALL_ENTRY( NtLockVirtualMemory ) \
     SYSCALL_ENTRY( NtMakeTemporaryObject ) \
@@ -210,6 +213,7 @@
     SYSCALL_ENTRY( NtSetInformationProcess ) \
     SYSCALL_ENTRY( NtSetInformationThread ) \
     SYSCALL_ENTRY( NtSetInformationToken ) \
+    SYSCALL_ENTRY( NtSetInformationVirtualMemory ) \
     SYSCALL_ENTRY( NtSetIntervalProfile ) \
     SYSCALL_ENTRY( NtSetIoCompletion ) \
     SYSCALL_ENTRY( NtSetLdtEntries ) \
@@ -251,7 +255,6 @@
     SYSCALL_ENTRY( NtWriteVirtualMemory ) \
     SYSCALL_ENTRY( NtYieldExecution ) \
     SYSCALL_ENTRY( __wine_dbg_write ) \
-    SYSCALL_ENTRY( __wine_unix_call ) \
     SYSCALL_ENTRY( __wine_unix_spawnvp ) \
     SYSCALL_ENTRY( wine_nt_to_unix_file_name ) \
     SYSCALL_ENTRY( wine_server_call ) \

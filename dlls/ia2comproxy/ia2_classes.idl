@@ -1,5 +1,5 @@
 /*
- * Copyright 2021 Connor McAdams for CodeWeavers
+ * Copyright 2022 Connor McAdams for CodeWeavers
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -17,12 +17,11 @@
  */
 
 #pragma makedep ident
-#pragma makedep regtypelib
 #pragma makedep proxy
 #pragma makedep register
 
 cpp_quote("#include \"oleacc.h\"")
-#include "ia2api.idl"
+#include "wine/iaccessible2.idl"
 
 [
     threading(both),

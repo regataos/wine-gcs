@@ -214,7 +214,7 @@ DWORD WINAPI CreateIpNetEntry(PMIB_IPNETROW pArpEntry)
  */
 DWORD WINAPI CreateProxyArpEntry(DWORD dwAddress, DWORD dwMask, DWORD dwIfIndex)
 {
-  FIXME("(dwAddress 0x%08x, dwMask 0x%08x, dwIfIndex 0x%08x): stub\n",
+  FIXME("(dwAddress 0x%08lx, dwMask 0x%08lx, dwIfIndex 0x%08lx): stub\n",
    dwAddress, dwMask, dwIfIndex);
   return ERROR_NOT_SUPPORTED;
 }
@@ -307,7 +307,7 @@ DWORD WINAPI CreateSortedAddressPairs( const PSOCKADDR_IN6 src_list, DWORD src_c
     SOCKADDR_IN addr4;
     MIB_IPADDRTABLE *table;
 
-    FIXME( "(src_list %p src_count %u dst_list %p dst_count %u options %x pair_list %p pair_count %p): stub\n",
+    FIXME( "(src_list %p src_count %lu dst_list %p dst_count %lu options %lx pair_list %p pair_count %p): stub\n",
            src_list, src_count, dst_list, dst_count, options, pair_list, pair_count );
 
     if (src_list || src_count || !dst_list || !pair_list || !pair_count || dst_count > 500)
@@ -373,7 +373,7 @@ DWORD WINAPI CreateSortedAddressPairs( const PSOCKADDR_IN6 src_list, DWORD src_c
  */
 DWORD WINAPI DeleteIPAddress(ULONG NTEContext)
 {
-  FIXME("(NTEContext %d): stub\n", NTEContext);
+  FIXME("(NTEContext %ld): stub\n", NTEContext);
   return ERROR_NOT_SUPPORTED;
 }
 
@@ -443,7 +443,7 @@ DWORD WINAPI DeleteIpNetEntry(PMIB_IPNETROW pArpEntry)
  */
 DWORD WINAPI DeleteProxyArpEntry(DWORD dwAddress, DWORD dwMask, DWORD dwIfIndex)
 {
-  FIXME("(dwAddress 0x%08x, dwMask 0x%08x, dwIfIndex 0x%08x): stub\n",
+  FIXME("(dwAddress 0x%08lx, dwMask 0x%08lx, dwIfIndex 0x%08lx): stub\n",
    dwAddress, dwMask, dwIfIndex);
   return ERROR_NOT_SUPPORTED;
 }
@@ -492,7 +492,7 @@ DWORD WINAPI EnableRouter(HANDLE * pHandle, OVERLAPPED * pOverlapped)
  */
 DWORD WINAPI FlushIpNetTable(DWORD dwIfIndex)
 {
-  FIXME("(dwIfIndex 0x%08x): stub\n", dwIfIndex);
+  FIXME("(dwIfIndex 0x%08lx): stub\n", dwIfIndex);
   /* this flushes the arp cache of the given index */
   return ERROR_NOT_SUPPORTED;
 }
@@ -959,12 +959,14 @@ static DWORD unicast_addresses_alloc( IP_ADAPTER_ADDRESSES *aa, ULONG family, UL
             {
                 SOCKADDR_IN *in = (SOCKADDR_IN *)addr->Address.lpSockaddr;
                 in->sin_addr = key4->addr;
+                aa->Ipv4Enabled = TRUE;
             }
             else
             {
                 SOCKADDR_IN6 *in6 = (SOCKADDR_IN6 *)addr->Address.lpSockaddr;
                 in6->sin6_addr = key6->addr;
                 in6->sin6_scope_id = dyn[i].scope_id;
+                aa->Ipv6Enabled = TRUE;
             }
             addr->PrefixOrigin = rw[i].prefix_origin;
             addr->SuffixOrigin = rw[i].suffix_origin;
@@ -1057,6 +1059,7 @@ static DWORD gateway_and_prefix_addresses_alloc( IP_ADAPTER_ADDRESSES *aa, ULONG
             if (flags & GAA_FLAG_INCLUDE_PREFIX)
             {
                 memset( &sockaddr, 0, sizeof(sockaddr) );
+                prefix_len = 0;
                 if (family == AF_INET)
                 {
                     if (!key4->next_hop.s_addr)
@@ -1137,7 +1140,7 @@ static DWORD dns_info_alloc( IP_ADAPTER_ADDRESSES *aa, ULONG family, ULONG flags
     DWORD err, i, size, attempt, sockaddr_len;
     WCHAR name[MAX_ADAPTER_NAME_LENGTH + 1];
     DNS_ADDR_ARRAY *servers;
-    DNS_TXT_DATAW *search;
+    WCHAR *search;
 
     while (aa)
     {
@@ -1191,9 +1194,9 @@ static DWORD dns_info_alloc( IP_ADAPTER_ADDRESSES *aa, ULONG family, ULONG flags
             (search = heap_alloc( size )))
         {
             if (!DnsQueryConfig( DnsConfigSearchList, 0, name, NULL, search, &size ) &&
-                search->dwStringCount && wcslen( search->pStringArray[0] ) < MAX_DNS_SUFFIX_STRING_LENGTH)
+                search[0] && wcslen( search ) < MAX_DNS_SUFFIX_STRING_LENGTH)
             {
-                wcscpy( aa->DnsSuffix, search->pStringArray[0] );
+                wcscpy( aa->DnsSuffix, search );
             }
             heap_free( search );
         }
@@ -1287,7 +1290,7 @@ ULONG WINAPI DECLSPEC_HOTPATCH GetAdaptersAddresses( ULONG family, ULONG flags, 
     IP_ADAPTER_ADDRESSES *info;
     DWORD err, needed;
 
-    TRACE( "(%d, %08x, %p, %p, %p)\n", family, flags, reserved, aa, size );
+    TRACE( "(%ld, %08lx, %p, %p, %p)\n", family, flags, reserved, aa, size );
 
     if (!size) return ERROR_INVALID_PARAMETER;
 
@@ -1361,7 +1364,7 @@ DWORD WINAPI GetBestInterfaceEx(struct sockaddr *pDestAddr, PDWORD pdwBestIfInde
       ret = ERROR_NOT_SUPPORTED;
     }
   }
-  TRACE("returning %d\n", ret);
+  TRACE("returning %ld\n", ret);
   return ret;
 }
 
@@ -1385,7 +1388,7 @@ DWORD WINAPI GetBestRoute(DWORD dwDestAddr, DWORD dwSourceAddr, PMIB_IPFORWARDRO
   PMIB_IPFORWARDTABLE table;
   DWORD ret;
 
-  TRACE("dwDestAddr 0x%08x, dwSourceAddr 0x%08x, pBestRoute %p\n", dwDestAddr,
+  TRACE("dwDestAddr 0x%08lx, dwSourceAddr 0x%08lx, pBestRoute %p\n", dwDestAddr,
    dwSourceAddr, pBestRoute);
   if (!pBestRoute)
     return ERROR_INVALID_PARAMETER;
@@ -1422,7 +1425,7 @@ DWORD WINAPI GetBestRoute(DWORD dwDestAddr, DWORD dwSourceAddr, PMIB_IPFORWARDRO
     }
     HeapFree(GetProcessHeap(), 0, table);
   }
-  TRACE("returning %d\n", ret);
+  TRACE("returning %ld\n", ret);
   return ret;
 }
 
@@ -1445,7 +1448,7 @@ DWORD WINAPI GetFriendlyIfIndex(DWORD IfIndex)
   /* windows doesn't validate these, either, just makes sure the top byte is
      cleared.  I assume my ifenum module never gives an index with the top
      byte set. */
-  TRACE("returning %d\n", IfIndex);
+  TRACE("returning %ld\n", IfIndex);
   return IfIndex;
 }
 
@@ -2014,7 +2017,7 @@ DWORD WINAPI AllocateAndGetIpAddrTableFromStack( MIB_IPADDRTABLE **table, BOOL s
 {
     DWORD err, size = FIELD_OFFSET(MIB_IPADDRTABLE, table[2]), attempt;
 
-    TRACE( "table %p, sort %d, heap %p, flags 0x%08x\n", table, sort, heap, flags );
+    TRACE( "table %p, sort %d, heap %p, flags 0x%08lx\n", table, sort, heap, flags );
 
     for (attempt = 0; attempt < 5; attempt++)
     {
@@ -2144,7 +2147,7 @@ DWORD WINAPI AllocateAndGetIpForwardTableFromStack( MIB_IPFORWARDTABLE **table, 
 {
     DWORD err, size = FIELD_OFFSET(MIB_IPFORWARDTABLE, table[2]), attempt;
 
-    TRACE( "table %p, sort %d, heap %p, flags 0x%08x\n", table, sort, heap, flags );
+    TRACE( "table %p, sort %d, heap %p, flags 0x%08lx\n", table, sort, heap, flags );
 
     for (attempt = 0; attempt < 5; attempt++)
     {
@@ -2381,7 +2384,7 @@ DWORD WINAPI AllocateAndGetIpNetTableFromStack( MIB_IPNETTABLE **table, BOOL sor
 {
     DWORD err, size = FIELD_OFFSET(MIB_IPNETTABLE, table[2]), attempt;
 
-    TRACE( "table %p, sort %d, heap %p, flags 0x%08x\n", table, sort, heap, flags );
+    TRACE( "table %p, sort %d, heap %p, flags 0x%08lx\n", table, sort, heap, flags );
 
     for (attempt = 0; attempt < 5; attempt++)
     {
@@ -2532,7 +2535,7 @@ DWORD WINAPI GetIpStatisticsEx( MIB_IPSTATS *stats, DWORD family )
     const NPI_MODULEID *mod;
     DWORD err, cmpt = 1;
 
-    TRACE( "%p %d\n", stats, family );
+    TRACE( "%p %ld\n", stats, family );
 
     if (!stats) return ERROR_INVALID_PARAMETER;
     mod = ip_module_id( family );
@@ -2598,6 +2601,7 @@ static DWORD get_dns_server_list( const NET_LUID *luid, IP_ADDR_STRING *list, IP
     for (;;)
     {
         err = DnsQueryConfig( DnsConfigDnsServerList, 0, NULL, NULL, servers, &array_len );
+        if (err != ERROR_SUCCESS && err != ERROR_MORE_DATA) goto err;
         num = (array_len - FIELD_OFFSET(IP4_ARRAY, AddrArray[0])) / sizeof(IP4_ADDRESS);
         needed = num * sizeof(IP_ADDR_STRING);
         if (!list || *len < needed)
@@ -2738,7 +2742,7 @@ DWORD WINAPI GetPerAdapterInfo( ULONG index, IP_PER_ADAPTER_INFO *info, ULONG *s
     DWORD needed = sizeof(*info), dns_size;
     NET_LUID luid;
 
-    TRACE( "(index %d, info %p, size %p)\n", index, info, size );
+    TRACE( "(index %ld, info %p, size %p)\n", index, info, size );
 
     if (!size) return ERROR_INVALID_PARAMETER;
     if (ConvertInterfaceIndexToLuid( index, &luid )) return ERROR_NO_DATA;
@@ -2782,7 +2786,7 @@ DWORD WINAPI GetPerAdapterInfo( ULONG index, IP_PER_ADAPTER_INFO *info, ULONG *s
  */
 BOOL WINAPI GetRTTAndHopCount(IPAddr DestIpAddress, PULONG HopCount, ULONG MaxHops, PULONG RTT)
 {
-  FIXME("(DestIpAddress 0x%08x, HopCount %p, MaxHops %d, RTT %p): stub\n",
+  FIXME("(DestIpAddress 0x%08lx, HopCount %p, MaxHops %ld, RTT %p): stub\n",
    DestIpAddress, HopCount, MaxHops, RTT);
   return FALSE;
 }
@@ -2873,7 +2877,7 @@ static DWORD tcp_table_id( ULONG table_class )
         return NSI_TCP_ALL_TABLE;
 
     default:
-        ERR( "unhandled class %u\n", table_class );
+        ERR( "unhandled class %lu\n", table_class );
         return ~0u;
     }
 }
@@ -2909,7 +2913,7 @@ static DWORD tcp_table_size( ULONG family, ULONG table_class, DWORD row_count, D
             FIELD_OFFSET(MIB_TCP6TABLE2, table[row_count]);
 
     default:
-        ERR( "unhandled class %u\n", table_class );
+        ERR( "unhandled class %lu\n", table_class );
         return 0;
     }
 }
@@ -2976,7 +2980,7 @@ static void tcp_row_fill( void *table, DWORD num, ULONG family, ULONG table_clas
             return;
         }
         default:
-            ERR( "Unknown class %d\n", table_class );
+            ERR( "Unknown class %ld\n", table_class );
             return;
         }
     }
@@ -3046,11 +3050,11 @@ static void tcp_row_fill( void *table, DWORD num, ULONG family, ULONG table_clas
             return;
         }
         default:
-            ERR( "Unknown class %d\n", table_class );
+            ERR( "Unknown class %ld\n", table_class );
             return;
         }
     }
-    ERR( "Unknown family %d\n", family );
+    ERR( "Unknown family %ld\n", family );
 }
 
 static int tcp_row_cmp( const void *a, const void *b )
@@ -3176,7 +3180,7 @@ static DWORD get_extended_tcp_table( void *table, DWORD *size, BOOL sort, ULONG 
 DWORD WINAPI GetExtendedTcpTable( void *table, DWORD *size, BOOL sort, ULONG family,
                                   TCP_TABLE_CLASS table_class, ULONG reserved )
 {
-    TRACE( "table %p, size %p, sort %d, family %u, class %u, reserved %u\n",
+    TRACE( "table %p, size %p, sort %d, family %lu, class %u, reserved %lu\n",
            table, size, sort, family, table_class, reserved );
 
     if (!ip_module_id( family )) return ERROR_INVALID_PARAMETER;
@@ -3261,7 +3265,7 @@ static DWORD allocate_tcp_table( void **table, BOOL sort, HANDLE heap, DWORD fla
  */
 DWORD WINAPI AllocateAndGetTcpTableFromStack( MIB_TCPTABLE **table, BOOL sort, HANDLE heap, DWORD flags )
 {
-    TRACE( "table %p, sort %d, heap %p, flags 0x%08x\n", table, sort, heap, flags );
+    TRACE( "table %p, sort %d, heap %p, flags 0x%08lx\n", table, sort, heap, flags );
 
     if (!table) return ERROR_INVALID_PARAMETER;
 
@@ -3273,7 +3277,7 @@ DWORD WINAPI AllocateAndGetTcpTableFromStack( MIB_TCPTABLE **table, BOOL sort, H
  */
 DWORD WINAPI AllocateAndGetTcpExTableFromStack( void **table, BOOL sort, HANDLE heap, DWORD flags, DWORD family )
 {
-    TRACE( "table %p, sort %d, heap %p, flags 0x%08x, family %u\n", table, sort, heap, flags, family );
+    TRACE( "table %p, sort %d, heap %p, flags 0x%08lx, family %lu\n", table, sort, heap, flags, family );
 
     if (!table || !ip_module_id( family )) return ERROR_INVALID_PARAMETER;
     if (family == AF_INET6) return ERROR_NOT_SUPPORTED;
@@ -3372,7 +3376,7 @@ static DWORD udp_table_size( ULONG family, ULONG table_class, DWORD row_count, D
             FIELD_OFFSET(MIB_UDP6TABLE_OWNER_MODULE, table[row_count]);
 
     default:
-        ERR( "unhandled class %u\n", table_class );
+        ERR( "unhandled class %lu\n", table_class );
         return 0;
     }
 }
@@ -3413,7 +3417,7 @@ static void udp_row_fill( void *table, DWORD num, ULONG family, ULONG table_clas
             return;
         }
         default:
-            ERR( "Unknown class %d\n", table_class );
+            ERR( "Unknown class %ld\n", table_class );
             return;
         }
     }
@@ -3452,11 +3456,11 @@ static void udp_row_fill( void *table, DWORD num, ULONG family, ULONG table_clas
             return;
         }
         default:
-            ERR( "Unknown class %d\n", table_class );
+            ERR( "Unknown class %ld\n", table_class );
             return;
         }
     }
-    ERR( "Unknown family %d\n", family );
+    ERR( "Unknown family %ld\n", family );
     return;
 }
 
@@ -3489,7 +3493,7 @@ DWORD WINAPI GetExtendedUdpTable( void *table, DWORD *size, BOOL sort, ULONG fam
     struct nsi_udp_endpoint_key *key;
     struct nsi_udp_endpoint_static *stat;
 
-    TRACE( "table %p, size %p, sort %d, family %u, table_class %u, reserved %u\n",
+    TRACE( "table %p, size %p, sort %d, family %lu, table_class %u, reserved %lu\n",
            table, size, sort, family, table_class, reserved );
 
     if (!size || !ip_module_id( family )) return ERROR_INVALID_PARAMETER;
@@ -3539,7 +3543,7 @@ DWORD WINAPI AllocateAndGetUdpTableFromStack( MIB_UDPTABLE **table, BOOL sort, H
 {
     DWORD err, size = 0x100, attempt;
 
-    TRACE("table %p, sort %d, heap %p, flags 0x%08x\n", table, sort, heap, flags );
+    TRACE("table %p, sort %d, heap %p, flags 0x%08lx\n", table, sort, heap, flags );
 
     if (!table) return ERROR_INVALID_PARAMETER;
 
@@ -3880,7 +3884,7 @@ DWORD WINAPI NotifyUnicastIpAddressChange(ADDRESS_FAMILY family, PUNICAST_IPADDR
  */
 DWORD WINAPI SendARP(IPAddr DestIP, IPAddr SrcIP, PULONG pMacAddr, PULONG PhyAddrLen)
 {
-  FIXME("(DestIP 0x%08x, SrcIP 0x%08x, pMacAddr %p, PhyAddrLen %p): stub\n",
+  FIXME("(DestIP 0x%08lx, SrcIP 0x%08lx, pMacAddr %p, PhyAddrLen %p): stub\n",
    DestIP, SrcIP, pMacAddr, PhyAddrLen);
   return ERROR_NOT_SUPPORTED;
 }
@@ -4033,7 +4037,7 @@ DWORD WINAPI SetTcpEntry(PMIB_TCPROW pTcpRow)
 DWORD WINAPI SetPerTcpConnectionEStats(PMIB_TCPROW row, TCP_ESTATS_TYPE state, PBYTE rw,
                                        ULONG version, ULONG size, ULONG offset)
 {
-  FIXME("(row %p, state %d, rw %p, version %u, size %u, offset %u): stub\n",
+  FIXME("(row %p, state %d, rw %p, version %lu, size %lu, offset %lu): stub\n",
         row, state, rw, version, size, offset);
   return ERROR_NOT_SUPPORTED;
 }
@@ -4072,7 +4076,7 @@ DWORD WINAPI UnenableRouter(OVERLAPPED * pOverlapped, LPDWORD lpdwEnableCount)
 DWORD WINAPI PfCreateInterface(DWORD dwName, PFFORWARD_ACTION inAction, PFFORWARD_ACTION outAction,
         BOOL bUseLog, BOOL bMustBeUnique, INTERFACE_HANDLE *ppInterface)
 {
-    FIXME("(%d %d %d %x %x %p) stub\n", dwName, inAction, outAction, bUseLog, bMustBeUnique, ppInterface);
+    FIXME("(%ld %d %d %x %x %p) stub\n", dwName, inAction, outAction, bUseLog, bMustBeUnique, ppInterface);
     return ERROR_CALL_NOT_IMPLEMENTED;
 }
 
@@ -4175,7 +4179,7 @@ DWORD WINAPI ConvertInterfaceIndexToLuid(NET_IFINDEX index, NET_LUID *luid)
 {
     DWORD err;
 
-    TRACE( "(%u %p)\n", index, luid );
+    TRACE( "(%lu %p)\n", index, luid );
 
     if (!luid) return ERROR_INVALID_PARAMETER;
 
@@ -4193,7 +4197,7 @@ DWORD WINAPI ConvertInterfaceLuidToAlias( const NET_LUID *luid, WCHAR *alias, SI
     DWORD err;
     IF_COUNTED_STRING name;
 
-    TRACE( "(%p %p %u)\n", luid, alias, (DWORD)len );
+    TRACE( "(%p %p %Iu)\n", luid, alias, len );
 
     if (!luid || !alias) return ERROR_INVALID_PARAMETER;
 
@@ -4253,7 +4257,7 @@ DWORD WINAPI ConvertInterfaceLuidToNameA(const NET_LUID *luid, char *name, SIZE_
     DWORD err;
     WCHAR nameW[IF_MAX_STRING_SIZE + 1];
 
-    TRACE( "(%p %p %u)\n", luid, name, (DWORD)len );
+    TRACE( "(%p %p %Iu)\n", luid, name, len );
 
     if (!luid) return ERROR_INVALID_PARAMETER;
     if (!name || !len) return ERROR_NOT_ENOUGH_MEMORY;
@@ -4293,7 +4297,7 @@ DWORD WINAPI ConvertInterfaceLuidToNameW(const NET_LUID *luid, WCHAR *name, SIZE
     const WCHAR *prefix = NULL;
     WCHAR buf[IF_MAX_STRING_SIZE + 1];
 
-    TRACE( "(%p %p %u)\n", luid, name, (DWORD)len );
+    TRACE( "(%p %p %Iu)\n", luid, name, len );
 
     if (!luid || !name) return ERROR_INVALID_PARAMETER;
 
@@ -4417,7 +4421,7 @@ char *WINAPI IPHLP_if_indextoname( NET_IFINDEX index, char *name )
     NET_LUID luid;
     DWORD err;
 
-    TRACE( "(%u, %p)\n", index, name );
+    TRACE( "(%lu, %p)\n", index, name );
 
     err = ConvertInterfaceIndexToLuid( index, &luid );
     if (err) return NULL;
@@ -4447,7 +4451,7 @@ DWORD WINAPI GetBestRoute2(NET_LUID *luid, NET_IFINDEX index,
     static int once;
 
     if (!once++)
-        FIXME("(%p, %d, %p, %p, 0x%08x, %p, %p): stub\n", luid, index, source,
+        FIXME("(%p, %ld, %p, %p, 0x%08lx, %p, %p): stub\n", luid, index, source,
                 destination, options, bestroute, bestaddress);
 
     if (!destination || !bestroute || !bestaddress)
@@ -4468,7 +4472,7 @@ DWORD WINAPI ParseNetworkString(const WCHAR *str, DWORD type,
     USHORT temp_port = 0;
     NTSTATUS status;
 
-    TRACE("(%s, %d, %p, %p, %p)\n", debugstr_w(str), type, info, port, prefix_len);
+    TRACE("(%s, %ld, %p, %p, %p)\n", debugstr_w(str), type, info, port, prefix_len);
 
     if (!str)
         return ERROR_INVALID_PARAMETER;
@@ -4544,7 +4548,7 @@ DWORD WINAPI ParseNetworkString(const WCHAR *str, DWORD type,
 
     if (type & ~(NET_STRING_IPV4_ADDRESS|NET_STRING_IPV4_SERVICE|NET_STRING_IPV6_ADDRESS|NET_STRING_IPV6_SERVICE))
     {
-        FIXME("Unimplemented type 0x%x\n", type);
+        FIXME("Unimplemented type 0x%lx\n", type);
         return ERROR_NOT_SUPPORTED;
     }
 
@@ -4627,6 +4631,21 @@ DWORD WINAPI IcmpSendEcho2( HANDLE handle, HANDLE event, PIO_APC_ROUTINE apc_rou
                             opts, reply, reply_size, timeout );
 }
 
+struct icmp_apc_ctxt
+{
+    void *apc_ctxt;
+    PIO_APC_ROUTINE apc_routine;
+    IO_STATUS_BLOCK iosb;
+};
+
+void WINAPI icmp_apc_routine( void *context, IO_STATUS_BLOCK *iosb, ULONG reserved )
+{
+    struct icmp_apc_ctxt *ctxt = context;
+
+    ctxt->apc_routine( ctxt->apc_ctxt, iosb, reserved );
+    heap_free( ctxt );
+}
+
 /***********************************************************************
  *    IcmpSendEcho2Ex (IPHLPAPI.@)
  */
@@ -4635,17 +4654,22 @@ DWORD WINAPI IcmpSendEcho2Ex( HANDLE handle, HANDLE event, PIO_APC_ROUTINE apc_r
                               void *reply, DWORD reply_size, DWORD timeout )
 {
     struct icmp_handle_data *data = (struct icmp_handle_data *)handle;
+    struct icmp_apc_ctxt *ctxt = heap_alloc( sizeof(*ctxt) );
+    IO_STATUS_BLOCK *iosb = &ctxt->iosb;
     DWORD opt_size, in_size, ret = 0;
     struct nsiproxy_icmp_echo *in;
     HANDLE request_event;
-    IO_STATUS_BLOCK iosb;
     NTSTATUS status;
 
     if (handle == INVALID_HANDLE_VALUE || !reply)
     {
+        heap_free( ctxt );
         SetLastError( ERROR_INVALID_PARAMETER );
         return 0;
     }
+
+    ctxt->apc_routine = apc_routine;
+    ctxt->apc_ctxt = apc_ctxt;
 
     opt_size = opts ? (opts->OptionsSize + 3) & ~3 : 0;
     in_size = FIELD_OFFSET(struct nsiproxy_icmp_echo, data[opt_size + request_size]);
@@ -4653,6 +4677,7 @@ DWORD WINAPI IcmpSendEcho2Ex( HANDLE handle, HANDLE event, PIO_APC_ROUTINE apc_r
 
     if (!in)
     {
+        heap_free( ctxt );
         SetLastError( IP_NO_RESOURCES );
         return 0;
     }
@@ -4677,20 +4702,21 @@ DWORD WINAPI IcmpSendEcho2Ex( HANDLE handle, HANDLE event, PIO_APC_ROUTINE apc_r
 
     request_event = event ? event : (apc_routine ? NULL : CreateEventW( NULL, 0, 0, NULL ));
 
-    status = NtDeviceIoControlFile( data->nsi_device, request_event, apc_routine, apc_ctxt,
-                                    &iosb, IOCTL_NSIPROXY_WINE_ICMP_ECHO, in, in_size,
-                                    reply, reply_size );
+    status = NtDeviceIoControlFile( data->nsi_device, request_event, apc_routine ? icmp_apc_routine : NULL,
+                                    apc_routine ? ctxt : apc_ctxt, iosb, IOCTL_NSIPROXY_WINE_ICMP_ECHO,
+                                    in, in_size, reply, reply_size );
 
     if (status == STATUS_PENDING)
     {
         if (!event && !apc_routine && !WaitForSingleObject( request_event, INFINITE ))
-            status = iosb.Status;
+            status = iosb->Status;
     }
 
     if (!status)
         ret = IcmpParseReplies( reply, reply_size );
 
     if (!event && request_event) CloseHandle( request_event );
+    if (!apc_routine || status != STATUS_PENDING) heap_free( ctxt );
     heap_free( in );
 
     if (status) SetLastError( RtlNtStatusToDosError( status ) );
@@ -4714,7 +4740,7 @@ DWORD WINAPI Icmp6SendEcho2( HANDLE handle, HANDLE event, PIO_APC_ROUTINE apc_ro
                              struct sockaddr_in6 *src, struct sockaddr_in6 *dst, void *request, WORD request_size,
                              IP_OPTION_INFORMATION *opts, void *reply, DWORD reply_size, DWORD timeout )
 {
-    FIXME( "(%p, %p, %p, %p, %p, %p, %p, %d, %p, %p, %d, %d): stub\n", handle, event,
+    FIXME( "(%p, %p, %p, %p, %p, %p, %p, %d, %p, %p, %ld, %ld): stub\n", handle, event,
            apc_routine, apc_ctxt, src, dst, request, request_size, opts, reply, reply_size, timeout );
     SetLastError( ERROR_CALL_NOT_IMPLEMENTED );
     return 0;

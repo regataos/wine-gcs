@@ -75,7 +75,7 @@ HRESULT CStdStubBuffer_Construct(REFIID riid,
   if(FAILED(r))
     return r;
 
-  This = HeapAlloc(GetProcessHeap(),HEAP_ZERO_MEMORY,sizeof(CStdStubBuffer));
+  This = calloc(1, sizeof(CStdStubBuffer));
   if (!This) {
     IUnknown_Release(pvServer);
     return E_OUTOFMEMORY;
@@ -248,7 +248,7 @@ static BOOL fill_delegated_stub_table(IUnknownVtbl *vtbl, DWORD num)
 
     if (num - 3 > BLOCK_SIZE * MAX_BLOCKS)
     {
-        FIXME( "%u methods not supported\n", num );
+        FIXME( "%lu methods not supported\n", num );
         return FALSE;
     }
     vtbl->QueryInterface = delegating_QueryInterface;
@@ -270,7 +270,7 @@ BOOL fill_delegated_proxy_table(IUnknownVtbl *vtbl, DWORD num)
 
     if (num - 3 > BLOCK_SIZE * MAX_BLOCKS)
     {
-        FIXME( "%u methods not supported\n", num );
+        FIXME( "%lu methods not supported\n", num );
         return FALSE;
     }
     vtbl->QueryInterface = IUnknown_QueryInterface_Proxy;
@@ -296,8 +296,7 @@ IUnknownVtbl *get_delegating_vtbl(DWORD num_methods)
 
     if(!current_vtbl || num_methods > current_vtbl->size)
     {
-        ref_counted_vtbl *table = HeapAlloc(GetProcessHeap(), 0,
-                                            FIELD_OFFSET(ref_counted_vtbl, vtbl) + num_methods * sizeof(void*));
+        ref_counted_vtbl *table = malloc(FIELD_OFFSET(ref_counted_vtbl, vtbl) + num_methods * sizeof(void *));
         if (!table)
         {
             LeaveCriticalSection(&delegating_vtbl_section);
@@ -311,7 +310,7 @@ IUnknownVtbl *get_delegating_vtbl(DWORD num_methods)
         if (current_vtbl && current_vtbl->ref == 0)
         {
             TRACE("freeing old table\n");
-            HeapFree(GetProcessHeap(), 0, current_vtbl);
+            free(current_vtbl);
         }
         current_vtbl = table;
     }
@@ -328,11 +327,11 @@ void release_delegating_vtbl(IUnknownVtbl *vtbl)
 
     EnterCriticalSection(&delegating_vtbl_section);
     table->ref--;
-    TRACE("ref now %d\n", table->ref);
+    TRACE("ref now %ld\n", table->ref);
     if(table->ref == 0 && table != current_vtbl)
     {
         TRACE("... and we're not current so free'ing\n");
-        HeapFree(GetProcessHeap(), 0, table);
+        free(table);
     }
     LeaveCriticalSection(&delegating_vtbl_section);
 }
@@ -362,7 +361,7 @@ HRESULT CStdStubBuffer_Delegating_Construct(REFIID riid,
     r = IUnknown_QueryInterface(pUnkServer, riid, (void**)&pvServer);
     if(FAILED(r)) return r;
 
-    This = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*This));
+    This = calloc(1, sizeof(*This));
     if (!This)
     {
         IUnknown_Release(pvServer);
@@ -374,7 +373,7 @@ HRESULT CStdStubBuffer_Delegating_Construct(REFIID riid,
     if(FAILED(r))
     {
         release_delegating_vtbl(This->base_obj);
-        HeapFree(GetProcessHeap(), 0, This);
+        free(This);
         IUnknown_Release(pvServer);
         return r;
     }
@@ -430,7 +429,7 @@ ULONG WINAPI NdrCStdStubBuffer_Release(LPRPCSTUBBUFFER iface,
     IRpcStubBuffer_Disconnect(iface);
 
     IPSFactoryBuffer_Release(pPSF);
-    HeapFree(GetProcessHeap(),0,This);
+    free(This);
   }
   return refs;
 }
@@ -454,7 +453,7 @@ ULONG WINAPI NdrCStdStubBuffer2_Release(LPRPCSTUBBUFFER iface,
         release_delegating_vtbl(This->base_obj);
 
         IPSFactoryBuffer_Release(pPSF);
-        HeapFree(GetProcessHeap(), 0, This);
+        free(This);
     }
 
     return refs;
@@ -508,7 +507,7 @@ HRESULT WINAPI CStdStubBuffer_Invoke(LPRPCSTUBBUFFER iface,
   __EXCEPT(stub_filter)
   {
     DWORD dwExceptionCode = GetExceptionCode();
-    WARN("a stub call failed with exception 0x%08x (%d)\n", dwExceptionCode, dwExceptionCode);
+    WARN("a stub call failed with exception 0x%08lx (%ld)\n", dwExceptionCode, dwExceptionCode);
     if (FAILED(dwExceptionCode))
       hr = dwExceptionCode;
     else

@@ -67,7 +67,7 @@ static char *get_file_buffer(void)
 {
     static char *output_bufA = NULL;
     if (!output_bufA)
-        output_bufA = heap_xalloc(MAX_WRITECONSOLE_SIZE);
+        output_bufA = xalloc(MAX_WRITECONSOLE_SIZE);
     return output_bufA;
 }
 
@@ -132,7 +132,7 @@ void WINAPIV WCMD_output (const WCHAR *format, ...) {
                        format, 0, 0, (LPWSTR)&string, 0, &ap);
   va_end(ap);
   if (len == 0 && GetLastError() != ERROR_NO_WORK_DONE)
-    WINE_FIXME("Could not format string: le=%u, fmt=%s\n", GetLastError(), wine_dbgstr_w(format));
+    WINE_FIXME("Could not format string: le=%lu, fmt=%s\n", GetLastError(), wine_dbgstr_w(format));
   else
   {
     WCMD_output_asis_len(string, len, GetStdHandle(STD_OUTPUT_HANDLE));
@@ -157,7 +157,7 @@ void WINAPIV WCMD_output_stderr (const WCHAR *format, ...) {
                        format, 0, 0, (LPWSTR)&string, 0, &ap);
   va_end(ap);
   if (len == 0 && GetLastError() != ERROR_NO_WORK_DONE)
-    WINE_FIXME("Could not format string: le=%u, fmt=%s\n", GetLastError(), wine_dbgstr_w(format));
+    WINE_FIXME("Could not format string: le=%lu, fmt=%s\n", GetLastError(), wine_dbgstr_w(format));
   else
   {
     WCMD_output_asis_len(string, len, GetStdHandle(STD_ERROR_HANDLE));
@@ -181,7 +181,7 @@ WCHAR* WINAPIV WCMD_format_string (const WCHAR *format, ...)
                        format, 0, 0, (LPWSTR)&string, 0, &ap);
   va_end(ap);
   if (len == 0 && GetLastError() != ERROR_NO_WORK_DONE) {
-    WINE_FIXME("Could not format string: le=%u, fmt=%s\n", GetLastError(), wine_dbgstr_w(format));
+    WINE_FIXME("Could not format string: le=%lu, fmt=%s\n", GetLastError(), wine_dbgstr_w(format));
     string = (WCHAR*)LocalAlloc(LMEM_FIXED, 2);
     *string = 0;
   }
@@ -303,7 +303,7 @@ void WCMD_print_error (void) {
   status = FormatMessageW(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM,
 			  NULL, error_code, 0, (LPWSTR) &lpMsgBuf, 0, NULL);
   if (!status) {
-    WINE_FIXME ("Cannot display message for error %d, status %d\n",
+    WINE_FIXME ("Cannot display message for error %ld, status %ld\n",
 			error_code, GetLastError());
     return;
   }
@@ -423,11 +423,11 @@ static void WCMD_show_prompt (BOOL newLine) {
   WCMD_output_asis (out_string);
 }
 
-void *heap_xalloc(size_t size)
+void *xalloc(size_t size)
 {
     void *ret;
 
-    ret = heap_alloc(size);
+    ret = malloc(size);
     if(!ret) {
         ERR("Out of memory\n");
         ExitProcess(1);
@@ -450,6 +450,18 @@ void WCMD_strsubstW(WCHAR *start, const WCHAR *next, const WCHAR *insert, int le
        memmove(start+len, next, (lstrlenW(next) + 1) * sizeof(*next));
    if (insert)
        memcpy(start, insert, len * sizeof(*insert));
+}
+
+BOOL WCMD_get_fullpath(const WCHAR* in, SIZE_T outsize, WCHAR* out, WCHAR** start)
+{
+    DWORD ret = GetFullPathNameW(in, outsize, out, start);
+    if (!ret) return FALSE;
+    if (ret > outsize)
+    {
+        WCMD_output_asis_stderr(WCMD_LoadMessage(WCMD_FILENAMETOOLONG));
+        return FALSE;
+    }
+    return TRUE;
 }
 
 /***************************************************************************
@@ -720,16 +732,16 @@ static WCHAR *WCMD_expand_envvar(WCHAR *start, WCHAR startchar)
       WCHAR *searchFor;
 
       if (equalspos == NULL) return start+1;
-      s = heap_strdupW(endOfVar + 1);
+      s = xstrdupW(endOfVar + 1);
 
       /* Null terminate both strings */
       thisVar[lstrlenW(thisVar)-1] = 0x00;
       *equalspos = 0x00;
 
       /* Since we need to be case insensitive, copy the 2 buffers */
-      searchIn  = heap_strdupW(thisVarContents);
+      searchIn  = xstrdupW(thisVarContents);
       CharUpperBuffW(searchIn, lstrlenW(thisVarContents));
-      searchFor = heap_strdupW(colonpos+1);
+      searchFor = xstrdupW(colonpos + 1);
       CharUpperBuffW(searchFor, lstrlenW(colonpos+1));
 
       /* Handle wildcard case */
@@ -767,9 +779,9 @@ static WCHAR *WCMD_expand_envvar(WCHAR *start, WCHAR startchar)
                 thisVarContents + (lastFound-searchIn));
         lstrcatW(outputposn, s);
       }
-      heap_free(s);
-      heap_free(searchIn);
-      heap_free(searchFor);
+      free(s);
+      free(searchIn);
+      free(searchFor);
     }
     return start;
 }
@@ -959,7 +971,7 @@ static void init_msvcrt_io_block(STARTUPINFOW* st)
          * its new input & output handles)
          */
         sz = max(sizeof(unsigned) + (sizeof(char) + sizeof(HANDLE)) * 3, st_p.cbReserved2);
-        ptr = heap_xalloc(sz);
+        ptr = xalloc(sz);
         flags = (char*)(ptr + sizeof(unsigned));
         handles = (HANDLE*)(flags + num * sizeof(char));
 
@@ -1057,7 +1069,7 @@ void WCMD_run_program (WCHAR *command, BOOL called)
   } else {
 
     /* Convert eg. ..\fred to include a directory by removing file part */
-    GetFullPathNameW(firstParam, ARRAY_SIZE(pathtosearch), pathtosearch, NULL);
+    if (!WCMD_get_fullpath(firstParam, ARRAY_SIZE(pathtosearch), pathtosearch, NULL)) return;
     lastSlash = wcsrchr(pathtosearch, '\\');
     if (lastSlash && wcschr(lastSlash, '.') != NULL) extensionsupplied = TRUE;
     lstrcpyW(stemofsearch, lastSlash+1);
@@ -1125,7 +1137,7 @@ void WCMD_run_program (WCHAR *command, BOOL called)
 
         /* Since you can have eg. ..\.. on the path, need to expand
            to full information                                      */
-        GetFullPathNameW(temp, MAX_PATH, thisDir, NULL);
+        if (!WCMD_get_fullpath(temp, ARRAY_SIZE(thisDir), thisDir, NULL)) return;
     }
 
     /* 1. If extension supplied, see if that file exists */
@@ -1245,7 +1257,7 @@ void WCMD_run_program (WCHAR *command, BOOL called)
             WINE_TRACE("Process still running, but returning anyway\n");
             errorlevel = 0;
           } else {
-            WINE_TRACE("Process ended, errorlevel %d\n", errorlevel);
+            WINE_TRACE("Process ended, errorlevel %ld\n", errorlevel);
           }
 
           CloseHandle(pe.hProcess);
@@ -1265,7 +1277,7 @@ void WCMD_run_program (WCHAR *command, BOOL called)
       WINE_TRACE("Launching via CreateProcess\n");
       status = CreateProcessW(thisDir,
                               command, NULL, NULL, TRUE, 0, NULL, NULL, &st, &pe);
-      heap_free(st.lpReserved2);
+      free(st.lpReserved2);
       if ((opt_c || opt_k) && !opt_s && !status
           && GetLastError()==ERROR_FILE_NOT_FOUND && command[0]=='\"') {
         /* strip first and last quote WCHARacters and try again */
@@ -1276,7 +1288,7 @@ void WCMD_run_program (WCHAR *command, BOOL called)
       }
 
       if (!status) {
-        WINE_TRACE("Failed to launch via CreateProcess, rc %d (%d)\n",
+        WINE_TRACE("Failed to launch via CreateProcess, rc %d (%ld)\n",
                    status, GetLastError());
         break;
       }
@@ -1293,7 +1305,7 @@ void WCMD_run_program (WCHAR *command, BOOL called)
         WINE_TRACE("Process still running, but returning anyway\n");
         errorlevel = 0;
       } else {
-        WINE_TRACE("Process ended, errorlevel %d\n", errorlevel);
+        WINE_TRACE("Process ended, errorlevel %ld\n", errorlevel);
       }
 
       CloseHandle(pe.hProcess);
@@ -1355,12 +1367,12 @@ void WCMD_execute (const WCHAR *command, const WCHAR *redirects,
                wine_dbgstr_w(command), cmdList);
 
     /* Move copy of the command onto the heap so it can be expanded */
-    new_cmd = heap_xalloc(MAXSTRING * sizeof(WCHAR));
+    new_cmd = xalloc(MAXSTRING * sizeof(WCHAR));
     lstrcpyW(new_cmd, command);
     cmd = new_cmd;
 
     /* Move copy of the redirects onto the heap so it can be expanded */
-    new_redir = heap_xalloc(MAXSTRING * sizeof(WCHAR));
+    new_redir = xalloc(MAXSTRING * sizeof(WCHAR));
     redir = new_redir;
 
     /* Strip leading whitespaces, and a '@' if supplied */
@@ -1443,8 +1455,8 @@ void WCMD_execute (const WCHAR *command, const WCHAR *redirects,
       WINE_TRACE("Got directory %s as %s\n", wine_dbgstr_w(envvar), wine_dbgstr_w(cmd));
       status = SetCurrentDirectoryW(cmd);
       if (!status) WCMD_print_error ();
-      heap_free(cmd );
-      heap_free(new_redir);
+      free(cmd);
+      free(new_redir);
       return;
     }
 
@@ -1466,8 +1478,8 @@ void WCMD_execute (const WCHAR *command, const WCHAR *redirects,
                     FILE_ATTRIBUTE_NORMAL | FILE_FLAG_DELETE_ON_CLOSE, NULL);
           if (h == INVALID_HANDLE_VALUE) {
             WCMD_print_error ();
-            heap_free(cmd);
-            heap_free(new_redir);
+            free(cmd);
+            free(new_redir);
             return;
           }
           SetStdHandle (STD_INPUT_HANDLE, h);
@@ -1481,8 +1493,8 @@ void WCMD_execute (const WCHAR *command, const WCHAR *redirects,
                         &sa, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
         if (h == INVALID_HANDLE_VALUE) {
           WCMD_print_error ();
-          heap_free(cmd);
-          heap_free(new_redir);
+          free(cmd);
+          free(new_redir);
           return;
         }
         SetStdHandle (STD_INPUT_HANDLE, h);
@@ -1516,7 +1528,7 @@ void WCMD_execute (const WCHAR *command, const WCHAR *redirects,
                           GetCurrentProcess(),
                           &h,
                           0, TRUE, DUPLICATE_SAME_ACCESS) == 0) {
-            WINE_FIXME("Duplicating handle failed with gle %d\n", GetLastError());
+            WINE_FIXME("Duplicating handle failed with gle %ld\n", GetLastError());
           }
           WINE_TRACE("Redirect %d (%p) to %d (%p)\n", handle, GetStdHandle(idx_stdhandles[idx]), idx, h);
 
@@ -1526,8 +1538,8 @@ void WCMD_execute (const WCHAR *command, const WCHAR *redirects,
                           &sa, creationDisposition, FILE_ATTRIBUTE_NORMAL, NULL);
           if (h == INVALID_HANDLE_VALUE) {
             WCMD_print_error ();
-            heap_free(cmd);
-            heap_free(new_redir);
+            free(cmd);
+            free(new_redir);
             return;
           }
           if (SetFilePointer (h, 0, NULL, FILE_END) ==
@@ -1697,8 +1709,8 @@ void WCMD_execute (const WCHAR *command, const WCHAR *redirects,
         WCMD_run_program (whichcmd, FALSE);
         echo_mode = prev_echo_mode;
     }
-    heap_free(cmd);
-    heap_free(new_redir);
+    free(cmd);
+    free(new_redir);
 
     /* Restore old handles */
     for (i=0; i<3; i++) {
@@ -1718,7 +1730,7 @@ WCHAR *WCMD_LoadMessage(UINT id) {
     static WCHAR msg[2048];
 
     if (!LoadStringW(GetModuleHandleW(NULL), id, msg, ARRAY_SIZE(msg))) {
-       WINE_FIXME("LoadString failed with %d\n", GetLastError());
+       WINE_FIXME("LoadString failed with %ld\n", GetLastError());
        lstrcpyW(msg, L"Failed!");
     }
     return msg;
@@ -1759,16 +1771,16 @@ static void WCMD_addCommand(WCHAR *command, int *commandLen,
     CMD_LIST *thisEntry = NULL;
 
     /* Allocate storage for command */
-    thisEntry = heap_xalloc(sizeof(CMD_LIST));
+    thisEntry = xalloc(sizeof(CMD_LIST));
 
     /* Copy in the command */
     if (command) {
-        thisEntry->command = heap_xalloc((*commandLen+1) * sizeof(WCHAR));
+        thisEntry->command = xalloc((*commandLen + 1) * sizeof(WCHAR));
         memcpy(thisEntry->command, command, *commandLen * sizeof(WCHAR));
         thisEntry->command[*commandLen] = 0x00;
 
         /* Copy in the redirects */
-        thisEntry->redirects = heap_xalloc((*redirLen+1) * sizeof(WCHAR));
+        thisEntry->redirects = xalloc((*redirLen + 1) * sizeof(WCHAR));
         memcpy(thisEntry->redirects, redirs, *redirLen * sizeof(WCHAR));
         thisEntry->redirects[*redirLen] = 0x00;
         thisEntry->pipeFile[0] = 0x00;
@@ -1899,7 +1911,7 @@ WCHAR *WCMD_ReadAndParseLine(const WCHAR *optionalcmd, CMD_LIST **output, HANDLE
 
     /* Allocate working space for a command read from keyboard, file etc */
     if (!extraSpace)
-        extraSpace = heap_xalloc((MAXSTRING+1) * sizeof(WCHAR));
+        extraSpace = xalloc((MAXSTRING + 1) * sizeof(WCHAR));
     if (!extraSpace)
     {
         WINE_ERR("Could not allocate memory for extraSpace\n");
@@ -2453,9 +2465,9 @@ void WCMD_free_commands(CMD_LIST *cmds) {
     while (cmds) {
       CMD_LIST *thisCmd = cmds;
       cmds = cmds->nextcommand;
-      heap_free(thisCmd->command);
-      heap_free(thisCmd->redirects);
-      heap_free(thisCmd);
+      free(thisCmd->command);
+      free(thisCmd->redirects);
+      free(thisCmd);
     }
 }
 
@@ -2496,7 +2508,7 @@ int __cdecl wmain (int argc, WCHAR *argvW[])
 
   /* Pre initialize some messages */
   lstrcpyW(anykey, WCMD_LoadMessage(WCMD_ANYKEY));
-  sprintf(osver, "%d.%d.%d", osv.dwMajorVersion, osv.dwMinorVersion, osv.dwBuildNumber);
+  sprintf(osver, "%ld.%ld.%ld", osv.dwMajorVersion, osv.dwMinorVersion, osv.dwBuildNumber);
   cmd = WCMD_format_string(WCMD_LoadMessage(WCMD_VERSION), osver);
   lstrcpyW(version_string, cmd);
   LocalFree(cmd);
@@ -2570,7 +2582,7 @@ int __cdecl wmain (int argc, WCHAR *argvW[])
       WCHAR   *q1 = NULL,*q2 = NULL,*p;
 
       /* Take a copy */
-      cmd = heap_strdupW(arg);
+      cmd = xstrdupW(arg);
 
       /* opt_s left unflagged if the command starts with and contains exactly
        * one quoted string (exactly two quote characters). The quoted string
@@ -2630,7 +2642,7 @@ int __cdecl wmain (int argc, WCHAR *argvW[])
         WINE_TRACE("First parameter is '%s'\n", wine_dbgstr_w(thisArg));
         if (wcschr(thisArg, '\\') != NULL) {
 
-          GetFullPathNameW(thisArg, ARRAY_SIZE(string), string, NULL);
+          if (!WCMD_get_fullpath(thisArg, ARRAY_SIZE(string), string, NULL)) return FALSE;
           WINE_TRACE("Full path name '%s'\n", wine_dbgstr_w(string));
           p = string + lstrlenW(string);
 
@@ -2728,7 +2740,7 @@ int __cdecl wmain (int argc, WCHAR *argvW[])
       WCMD_free_commands(toExecute);
       toExecute = NULL;
 
-      heap_free(cmd);
+      free(cmd);
       return errorlevel;
   }
 
@@ -2808,7 +2820,7 @@ int __cdecl wmain (int argc, WCHAR *argvW[])
       WCMD_process_commands(toExecute, FALSE, FALSE);
       WCMD_free_commands(toExecute);
       toExecute = NULL;
-      heap_free(cmd);
+      free(cmd);
   }
 
 /*

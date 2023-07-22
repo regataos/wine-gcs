@@ -1,6 +1,5 @@
-EXTRADEFS = -DWINE_NO_LONG_TYPES
 TESTDLL   = localspl.dll
-IMPORTS   = advapi32
+IMPORTS   = advapi32 winspool
 
 C_SRCS = \
 	localmon.c

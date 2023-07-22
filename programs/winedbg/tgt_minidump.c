@@ -245,7 +245,7 @@ static enum dbg_start minidump_do_reload(struct tgt_process_minidump_data* data)
         const char *str;
         char tmp[128];
 
-        dbg_printf("WineDbg starting on minidump on pid %04x\n", pid);
+        dbg_printf("WineDbg starting on minidump on pid %04lx\n", pid);
         switch (msi->ProcessorArchitecture)
         {
         case PROCESSOR_ARCHITECTURE_UNKNOWN:
@@ -307,8 +307,8 @@ static enum dbg_start minidump_do_reload(struct tgt_process_minidump_data* data)
             str = "???";
             break;
         }
-        dbg_printf("  %s was running on #%d %s CPU%s",
-                   dbg_W2A(exec_name, -1), msi->u.s.NumberOfProcessors, str,
+        dbg_printf("  %ls was running on #%d %s CPU%s",
+                   exec_name, msi->u.s.NumberOfProcessors, str,
                    msi->u.s.NumberOfProcessors < 2 ? "" : "s");
         switch (msi->MajorVersion)
         {
@@ -497,7 +497,7 @@ static void cleanup(struct tgt_process_minidump_data* data)
     if (data->mapping)                          UnmapViewOfFile(data->mapping);
     if (data->hMap)                             CloseHandle(data->hMap);
     if (data->hFile != INVALID_HANDLE_VALUE)    CloseHandle(data->hFile);
-    HeapFree(GetProcessHeap(), 0, data);
+    free(data);
 }
 
 static struct be_process_io be_process_minidump_io;
@@ -512,7 +512,7 @@ enum dbg_start minidump_reload(int argc, char* argv[])
     
     WINE_TRACE("Processing Minidump file %s\n", argv[0]);
 
-    data = HeapAlloc(GetProcessHeap(), 0, sizeof(struct tgt_process_minidump_data));
+    data = malloc(sizeof(struct tgt_process_minidump_data));
     if (!data) return start_error_init;
     data->mapping = NULL;
     data->hMap    = NULL;

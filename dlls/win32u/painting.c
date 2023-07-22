@@ -112,12 +112,12 @@ BOOL CDECL nulldrv_InvertRgn( PHYSDEV dev, HRGN rgn )
     INT prev_rop = dc->attr->rop_mode;
     BOOL ret;
     dc->attr->rop_mode = R2_NOT;
-    ret = NtGdiFillRgn( dev->hdc, rgn, get_stock_object(BLACK_BRUSH) );
+    ret = NtGdiFillRgn( dev->hdc, rgn, GetStockObject(BLACK_BRUSH) );
     dc->attr->rop_mode = prev_rop;
     return ret;
 }
 
-static BOOL polyline( HDC hdc, const POINT *points, UINT count )
+static BOOL polyline( HDC hdc, const POINT *points, ULONG count )
 {
     return NtGdiPolyPolyDraw( hdc, points, &count, 1, NtGdiPolyPolyline );
 }
@@ -549,8 +549,8 @@ BOOL WINAPI NtGdiInvertRgn( HDC hdc, HRGN hrgn )
 /**********************************************************************
  *          NtGdiPolyPolyDraw  (win32u.@)
  */
-ULONG WINAPI NtGdiPolyPolyDraw( HDC hdc, const POINT *points, const UINT *counts,
-                                UINT count, UINT function )
+ULONG WINAPI NtGdiPolyPolyDraw( HDC hdc, const POINT *points, const ULONG *counts,
+                                DWORD count, UINT function )
 {
     PHYSDEV physdev;
     ULONG ret;
@@ -572,7 +572,7 @@ ULONG WINAPI NtGdiPolyPolyDraw( HDC hdc, const POINT *points, const UINT *counts
 
     case NtGdiPolyPolyline:
         physdev = GET_DC_PHYSDEV( dc, pPolyPolyline );
-        ret = physdev->funcs->pPolyPolyline( physdev, points, counts, count );
+        ret = physdev->funcs->pPolyPolyline( physdev, points, (const DWORD *)counts, count );
         break;
 
     case NtGdiPolyBezier:
@@ -891,7 +891,7 @@ BOOL WINAPI NtGdiGradientFill( HDC hdc, TRIVERTEX *vert_array, ULONG nvert,
 
     if (!vert_array || !nvert || !grad_array || !ngrad || mode > GRADIENT_FILL_TRIANGLE)
     {
-        SetLastError( ERROR_INVALID_PARAMETER );
+        RtlSetLastWin32Error( ERROR_INVALID_PARAMETER );
         return FALSE;
     }
     for (i = 0; i < ngrad * (mode == GRADIENT_FILL_TRIANGLE ? 3 : 2); i++)
@@ -910,7 +910,7 @@ BOOL WINAPI NtGdiGradientFill( HDC hdc, TRIVERTEX *vert_array, ULONG nvert,
  */
 BOOL WINAPI NtGdiDrawStream( HDC hdc, ULONG in, void *pvin )
 {
-    FIXME("stub: %p, %d, %p\n", hdc, in, pvin);
+    FIXME("stub: %p, %d, %p\n", hdc, (int)in, pvin);
     return FALSE;
 }
 
@@ -958,7 +958,7 @@ BOOL WINAPI NtUserScrollDC( HDC hdc, INT dx, INT dy, const RECT *scroll, const R
     else
         NtGdiGetAppClipBox( hdc, &clip_rect );
     src_rect = clip_rect;
-    offset_rect( &clip_rect, -dx, -dy );
+    OffsetRect( &clip_rect, -dx, -dy );
     intersect_rect( &src_rect, &src_rect, &clip_rect );
 
     /* if an scroll rectangle is specified, only the pixels within that

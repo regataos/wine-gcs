@@ -287,7 +287,7 @@ static BOOL controller_check_caps(struct xinput_controller *controller, HANDLE d
     return TRUE;
 }
 
-static DWORD HID_set_state(struct xinput_controller *controller, XINPUT_VIBRATION *state, BOOL force)
+static DWORD HID_set_state(struct xinput_controller *controller, XINPUT_VIBRATION *state)
 {
     ULONG report_len = controller->hid.caps.OutputReportByteLength;
     PHIDP_PREPARSED_DATA preparsed = controller->hid.preparsed;
@@ -298,7 +298,6 @@ static DWORD HID_set_state(struct xinput_controller *controller, XINPUT_VIBRATIO
     BYTE report_id;
 
     if (!(controller->caps.Flags & XINPUT_CAPS_FFB_SUPPORTED)) return ERROR_SUCCESS;
-    if (!memcmp( &controller->vibration, state, sizeof(*state) ) && !force) return ERROR_SUCCESS;
 
     update_rumble = (controller->vibration.wLeftMotorSpeed != state->wLeftMotorSpeed);
     controller->vibration.wLeftMotorSpeed = state->wLeftMotorSpeed;
@@ -334,7 +333,7 @@ static void controller_disable(struct xinput_controller *controller)
     XINPUT_VIBRATION state = {0};
 
     if (!controller->enabled) return;
-    if (controller->caps.Flags & XINPUT_CAPS_FFB_SUPPORTED) HID_set_state(controller, &state, TRUE);
+    if (controller->caps.Flags & XINPUT_CAPS_FFB_SUPPORTED) HID_set_state(controller, &state);
     controller->enabled = FALSE;
 
     CancelIoEx(controller->device, &controller->hid.read_ovl);
@@ -372,7 +371,7 @@ static void controller_enable(struct xinput_controller *controller)
     BOOL ret;
 
     if (controller->enabled) return;
-    if (controller->caps.Flags & XINPUT_CAPS_FFB_SUPPORTED) HID_set_state(controller, &state, TRUE);
+    if (controller->caps.Flags & XINPUT_CAPS_FFB_SUPPORTED) HID_set_state(controller, &state);
     controller->enabled = TRUE;
 
     memset(&controller->hid.read_ovl, 0, sizeof(controller->hid.read_ovl));
@@ -732,6 +731,8 @@ static DWORD WINAPI hid_update_thread_proc(void *param)
     HWND hwnd;
     MSG msg;
 
+    SetThreadDescription(GetCurrentThread(), L"wine_xinput_hid_update");
+
     RegisterClassExW(&cls);
     hwnd = CreateWindowExW(0, cls.lpszClassName, NULL, 0, 0, 0, 0, 0,
                            HWND_MESSAGE, NULL, NULL, NULL);
@@ -879,7 +880,7 @@ DWORD WINAPI DECLSPEC_HOTPATCH XInputSetState(DWORD index, XINPUT_VIBRATION *vib
 
     if (WaitForSingleObject(steam_overlay_event, 0) == WAIT_OBJECT_0) ret = ERROR_SUCCESS;
     else if (WaitForSingleObject(steam_keyboard_event, 0) == WAIT_OBJECT_0) ret = ERROR_SUCCESS;
-    else ret = HID_set_state(&controllers[index], vibration, FALSE);
+    else ret = HID_set_state(&controllers[index], vibration);
 
     controller_unlock(&controllers[index]);
 
@@ -1146,6 +1147,7 @@ DWORD WINAPI DECLSPEC_HOTPATCH XInputGetCapabilities(DWORD index, DWORD flags, X
     start_update_thread();
 
     if (index >= XUSER_MAX_COUNT) return ERROR_BAD_ARGUMENTS;
+
     if (!controller_lock(&controllers[index])) return ERROR_DEVICE_NOT_CONNECTED;
 
     if (flags & XINPUT_FLAG_GAMEPAD && controllers[index].caps.SubType != XINPUT_DEVSUBTYPE_GAMEPAD)

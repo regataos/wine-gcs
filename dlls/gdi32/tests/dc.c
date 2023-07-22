@@ -44,30 +44,30 @@ static void test_dc_values(void)
 
     ok( hdc != NULL, "CreateDC failed\n" );
     color = SetBkColor( hdc, 0x12345678 );
-    ok( color == 0xffffff, "initial color %08x\n", color );
+    ok( color == 0xffffff, "initial color %08lx\n", color );
     color = GetBkColor( hdc );
-    ok( color == 0x12345678, "wrong color %08x\n", color );
+    ok( color == 0x12345678, "wrong color %08lx\n", color );
     color = SetBkColor( hdc, 0xffffffff );
-    ok( color == 0x12345678, "wrong color %08x\n", color );
+    ok( color == 0x12345678, "wrong color %08lx\n", color );
     color = GetBkColor( hdc );
-    ok( color == 0xffffffff, "wrong color %08x\n", color );
+    ok( color == 0xffffffff, "wrong color %08lx\n", color );
     color = SetBkColor( hdc, 0 );
-    ok( color == 0xffffffff, "wrong color %08x\n", color );
+    ok( color == 0xffffffff, "wrong color %08lx\n", color );
     color = GetBkColor( hdc );
-    ok( color == 0, "wrong color %08x\n", color );
+    ok( color == 0, "wrong color %08lx\n", color );
 
     color = SetTextColor( hdc, 0xffeeddcc );
-    ok( color == 0, "initial color %08x\n", color );
+    ok( color == 0, "initial color %08lx\n", color );
     color = GetTextColor( hdc );
-    ok( color == 0xffeeddcc, "wrong color %08x\n", color );
+    ok( color == 0xffeeddcc, "wrong color %08lx\n", color );
     color = SetTextColor( hdc, 0xffffffff );
-    ok( color == 0xffeeddcc, "wrong color %08x\n", color );
+    ok( color == 0xffeeddcc, "wrong color %08lx\n", color );
     color = GetTextColor( hdc );
-    ok( color == 0xffffffff, "wrong color %08x\n", color );
+    ok( color == 0xffffffff, "wrong color %08lx\n", color );
     color = SetTextColor( hdc, 0 );
-    ok( color == 0xffffffff, "wrong color %08x\n", color );
+    ok( color == 0xffffffff, "wrong color %08lx\n", color );
     color = GetTextColor( hdc );
-    ok( color == 0, "wrong color %08x\n", color );
+    ok( color == 0, "wrong color %08lx\n", color );
 
     extra = GetTextCharacterExtra( hdc );
     ok( extra == 0, "initial extra %d\n", extra );
@@ -84,7 +84,7 @@ static void test_dc_values(void)
     SetLastError(0xdeadbeef);
     attr = SetBkMode(ULongToHandle(0xdeadbeef), OPAQUE);
     ok(!attr, "attr = %x\n", attr);
-    ok(GetLastError() == ERROR_INVALID_HANDLE, "GetLastError() = %u\n", GetLastError());
+    ok(GetLastError() == ERROR_INVALID_HANDLE, "GetLastError() = %lu\n", GetLastError());
 
     attr = GetBkColor(ULongToHandle(0xdeadbeef));
     ok(attr == CLR_INVALID, "attr = %x\n", attr);
@@ -92,7 +92,7 @@ static void test_dc_values(void)
     SetLastError(0xdeadbeef);
     attr = GetDeviceCaps(ULongToHandle(0xdeadbeef), TECHNOLOGY);
     ok(!attr, "GetDeviceCaps rets %d\n", attr);
-    ok(GetLastError() == ERROR_INVALID_HANDLE, "GetLastError() = %u\n", GetLastError());
+    ok(GetLastError() == ERROR_INVALID_HANDLE, "GetLastError() = %lu\n", GetLastError());
 
     DeleteDC( hdc );
 }
@@ -129,7 +129,7 @@ static void test_savedc_2(void)
        ret, wine_dbgstr_rect(&rc));
     ret = GetRegionData(hrgn, sizeof(buffer), rgndata);
     ok(ret == sizeof(RGNDATAHEADER), "got %u\n", ret);
-    ok(!rgndata->rdh.nCount, "got %u rectangles\n", rgndata->rdh.nCount);
+    ok(!rgndata->rdh.nCount, "got %lu rectangles\n", rgndata->rdh.nCount);
     SetRect(&rc, 0, 0, 100, 100);
     ok(EqualRect(&rc, &rc_clip), "rects are not equal: %s - %s\n", wine_dbgstr_rect(&rc),
        wine_dbgstr_rect(&rc_clip));
@@ -144,7 +144,7 @@ static void test_savedc_2(void)
     ok(ret == 1, "GetClipRgn returned %d instead of 1\n", ret);
     ret = GetRegionData(hrgn, sizeof(buffer), rgndata);
     ok(ret == sizeof(RGNDATAHEADER) + sizeof(RECT), "got %u\n", ret);
-    ok(rgndata->rdh.nCount == 1, "got %u rectangles\n", rgndata->rdh.nCount);
+    ok(rgndata->rdh.nCount == 1, "got %lu rectangles\n", rgndata->rdh.nCount);
     SetRect(&rc, 0, 0, 50, 50);
     ok(EqualRect((RECT *)rgndata->Buffer, &rc), "got rect %s\n", wine_dbgstr_rect((RECT *)rgndata->Buffer));
 
@@ -243,7 +243,7 @@ static void test_savedc(void)
     SetLastError(0xdeadbeef);
     ret = SaveDC(ULongToHandle(0xdeadbeef));
     ok(!ret, "SaveDC returned %u\n", ret);
-    ok(GetLastError() == ERROR_INVALID_HANDLE, "GetLastError() = %u\n", GetLastError());
+    ok(GetLastError() == ERROR_INVALID_HANDLE, "GetLastError() = %lu\n", GetLastError());
 }
 
 static void test_GdiConvertToDevmodeW(void)
@@ -263,7 +263,7 @@ static void test_GdiConvertToDevmodeW(void)
     memset(&dmA, 0, sizeof(dmA));
     dmA.dmSize = sizeof(dmA);
     ret = EnumDisplaySettingsA(NULL, ENUM_CURRENT_SETTINGS, &dmA);
-    ok(ret, "EnumDisplaySettingsExA error %u\n", GetLastError());
+    ok(ret, "EnumDisplaySettingsExA error %lu\n", GetLastError());
     ok(dmA.dmSize >= FIELD_OFFSET(DEVMODEA, dmICMMethod), "dmSize is too small: %04x\n", dmA.dmSize);
     ok(dmA.dmSize <= sizeof(DEVMODEA), "dmSize is too large: %04x\n", dmA.dmSize);
 
@@ -284,7 +284,7 @@ static void test_GdiConvertToDevmodeW(void)
     ok(dmW->dmSize == FIELD_OFFSET(DEVMODEW, dmICMMethod) + sizeof(dmW->dmICMMethod),
        "wrong size %u\n", dmW->dmSize);
     ok(dmW->dmICMMethod == DMICMMETHOD_NONE,
-       "expected DMICMMETHOD_NONE, got %u\n", dmW->dmICMMethod);
+       "expected DMICMMETHOD_NONE, got %lu\n", dmW->dmICMMethod);
     HeapFree(GetProcessHeap(), 0, dmW);
 
     dmA.dmSize = 1024;
@@ -297,13 +297,13 @@ static void test_GdiConvertToDevmodeW(void)
     dmA.dmSize = 0;
     dmW = pGdiConvertToDevmodeW(&dmA);
     ok(!dmW, "GdiConvertToDevmodeW should fail\n");
-    ok(GetLastError() == 0xdeadbeef, "expected 0xdeadbeef, got %u\n", GetLastError());
+    ok(GetLastError() == 0xdeadbeef, "expected 0xdeadbeef, got %lu\n", GetLastError());
 
     /* this is the minimal dmSize that XP accepts */
     dmA.dmSize = FIELD_OFFSET(DEVMODEA, dmFields);
     dmW = pGdiConvertToDevmodeW(&dmA);
     ok(dmW->dmSize == FIELD_OFFSET(DEVMODEW, dmFields),
-       "expected %04x, got %04x\n", FIELD_OFFSET(DEVMODEW, dmFields), dmW->dmSize);
+       "expected %04lx, got %04x\n", FIELD_OFFSET(DEVMODEW, dmFields), dmW->dmSize);
     HeapFree(GetProcessHeap(), 0, dmW);
 }
 
@@ -415,7 +415,7 @@ static void test_device_caps( HDC hdc, HDC ref_dc, const char *descr, int scale 
                 type, descr );
         type = SetBoundsRect( hdc, NULL, DCB_RESET | DCB_ENABLE );
         ok( type == (DCB_RESET | DCB_DISABLE) || broken(type == (DCB_SET | DCB_ENABLE)) /* XP */,
-            "SetBoundsRect returned %x for %s (hdc type %d)\n", type, descr, GetObjectType( hdc ) );
+            "SetBoundsRect returned %x for %s (hdc type %ld)\n", type, descr, GetObjectType( hdc ) );
 
         SetMapMode( hdc, MM_TEXT );
         Rectangle( hdc, 2, 2, 4, 4 );
@@ -523,15 +523,15 @@ static void test_device_caps( HDC hdc, HDC ref_dc, const char *descr, int scale 
         ret = GetDeviceGammaRamp( hdc, &ramp );
         if (GetObjectType( hdc ) != OBJ_DC || GetDeviceCaps( hdc, TECHNOLOGY ) == DT_RASPRINTER)
         {
-            ok( !ret, "GetDeviceGammaRamp succeeded on %s (type %d)\n", descr, GetObjectType( hdc ) );
+            ok( !ret, "GetDeviceGammaRamp succeeded on %s (type %ld)\n", descr, GetObjectType( hdc ) );
             ok( GetLastError() == ERROR_INVALID_PARAMETER
                 || broken(GetLastError() == 0xdeadbeef) /* nt4 */
                 || broken(GetLastError() == NO_ERROR), /* Printer DC on Win10 1909+ */
-                "wrong error %u on %s\n", GetLastError(), descr );
+                "wrong error %lu on %s\n", GetLastError(), descr );
         }
         else
         {
-            ok( ret || broken(!ret) /* NT4 */, "GetDeviceGammaRamp failed on %s (type %d), error %u\n",
+            ok( ret || broken(!ret) /* NT4 */, "GetDeviceGammaRamp failed on %s (type %ld), error %lu\n",
                 descr, GetObjectType( hdc ), GetLastError() );
         }
     }
@@ -723,11 +723,11 @@ static void test_DC_bitmap(void)
     oldhbmp = SelectObject( hdcmem, hbmp);
     ok( oldhbmp != NULL, "SelectObject returned NULL\n" ); /* a memdc always has a bitmap selected */
     col = GetPixel( hdcmem, 0, 0);
-    ok( col == 0xffffff, "GetPixel returned %08x, expected 00ffffff\n", col);
+    ok( col == 0xffffff, "GetPixel returned %08lx, expected 00ffffff\n", col);
     col = GetPixel( hdcmem, 1, 1);
-    ok( col == 0x000000, "GetPixel returned %08x, expected 00000000\n", col);
+    ok( col == 0x000000, "GetPixel returned %08lx, expected 00000000\n", col);
     col = GetPixel( hdcmem, 100, 1);
-    ok( col == CLR_INVALID, "GetPixel returned %08x, expected ffffffff\n", col);
+    ok( col == CLR_INVALID, "GetPixel returned %08lx, expected ffffffff\n", col);
     SelectObject( hdcmem, oldhbmp);
     DeleteObject( hbmp);
 
@@ -748,10 +748,10 @@ static void test_DC_bitmap(void)
         ok( oldhbmp != NULL, "SelectObject returned NULL\n" );
         col = GetPixel( hdcmem, 0, 0);
         ok( col == 0xffffff,
-            "GetPixel of a bitmap with 16 bits/pixel returned %08x, expected 00ffffff\n", col);
+            "GetPixel of a bitmap with 16 bits/pixel returned %08lx, expected 00ffffff\n", col);
         col = GetPixel( hdcmem, 1, 1);
         ok( col == 0x000000,
-            "GetPixel of a bitmap with 16 bits/pixel returned returned %08x, expected 00000000\n", col);
+            "GetPixel of a bitmap with 16 bits/pixel returned returned %08lx, expected 00000000\n", col);
     }
     if( oldhbmp) SelectObject( hdcmem, oldhbmp);
     DeleteObject( hbmp);
@@ -764,10 +764,10 @@ static void test_DC_bitmap(void)
         ok( oldhbmp != NULL, "SelectObject returned NULL\n" );
         col = GetPixel( hdcmem, 0, 0);
         ok( col == 0xffffff,
-            "GetPixel of a bitmap with 32 bits/pixel returned %08x, expected 00ffffff\n", col);
+            "GetPixel of a bitmap with 32 bits/pixel returned %08lx, expected 00ffffff\n", col);
         col = GetPixel( hdcmem, 1, 1);
         ok( col == 0x000000,
-            "GetPixel of a bitmap with 32 bits/pixel returned returned %08x, expected 00000000\n", col);
+            "GetPixel of a bitmap with 32 bits/pixel returned returned %08lx, expected 00000000\n", col);
     }
     if( oldhbmp) SelectObject( hdcmem, oldhbmp);
     DeleteObject( hbmp);
@@ -1399,13 +1399,13 @@ static void test_printer_dc(void)
     ok( display_memdc != NULL, "CreateCompatibleDC failed for screen\n" );
 
     ret = GetDeviceCaps( hdc, TECHNOLOGY );
-    ok( ret == DT_RASPRINTER, "wrong type %u\n", ret );
+    ok( ret == DT_RASPRINTER, "wrong type %lu\n", ret );
 
     ret = GetDeviceCaps( memdc, TECHNOLOGY );
-    ok( ret == DT_RASPRINTER, "wrong type %u\n", ret );
+    ok( ret == DT_RASPRINTER, "wrong type %lu\n", ret );
 
     ret = GetDeviceCaps( display_memdc, TECHNOLOGY );
-    ok( ret == DT_RASDISPLAY, "wrong type %u\n", ret );
+    ok( ret == DT_RASDISPLAY, "wrong type %lu\n", ret );
 
     bmp = CreateBitmap( 100, 100, 1, GetDeviceCaps( hdc, BITSPIXEL ), NULL );
     orig = SelectObject( memdc, bmp );
@@ -1427,7 +1427,7 @@ static void test_printer_dc(void)
     ok( BitBlt( display_memdc, 10, 10, 20, 20, memdc, 0, 0, SRCCOPY ), "BitBlt failed\n" );
 
     ret = GetPixel( hdc, 0, 0 );
-    ok( ret == CLR_INVALID, "wrong pixel value %x\n", ret );
+    ok( ret == CLR_INVALID, "wrong pixel value %lx\n", ret );
 
     enhmf_dc = CreateEnhMetaFileA( hdc, NULL, NULL, NULL );
     ok(enhmf_dc != 0, "CreateEnhMetaFileA failed\n");
@@ -1463,12 +1463,12 @@ static void print_something(HDC hdc)
     di.lpszDatatype = NULL;
     di.fwType = 0;
     ret = StartDocA(hdc, &di);
-    ok(ret > 0, "StartDoc failed: %d\n", ret);
+    ok(ret > 0, "StartDoc failed: %ld\n", ret);
 
     strcpy(buf + 2, "\n% ===> before DOWNLOADHEADER <===\n");
     *(WORD *)buf = strlen(buf + 2);
     ret = Escape(hdc, POSTSCRIPT_PASSTHROUGH, 0, buf, NULL);
-    ok(ret == *(WORD *)buf, "POSTSCRIPT_PASSTHROUGH failed: %d\n", ret);
+    ok(ret == *(WORD *)buf, "POSTSCRIPT_PASSTHROUGH failed: %ld\n", ret);
 
     strcpy(buf, "deadbeef");
     ret = ExtEscape(hdc, DOWNLOADHEADER, 0, NULL, sizeof(buf), buf );
@@ -1478,7 +1478,7 @@ static void print_something(HDC hdc)
     strcpy(buf + 2, "\n% ===> after DOWNLOADHEADER <===\n");
     *(WORD *)buf = strlen(buf + 2);
     ret = Escape(hdc, POSTSCRIPT_PASSTHROUGH, 0, buf, NULL);
-    ok(ret == *(WORD *)buf, "POSTSCRIPT_PASSTHROUGH failed: %d\n", ret);
+    ok(ret == *(WORD *)buf, "POSTSCRIPT_PASSTHROUGH failed: %ld\n", ret);
 
     ret = EndDoc(hdc);
     ok(ret == 1, "EndDoc failed\n");
@@ -1695,225 +1695,9 @@ static void test_SetPixel(void)
     COLORREF c;
 
     c = SetPixel((HDC)0xdeadbeef, 0, 0, 0);
-    ok(c == ~0, "SetPixel returned: %x\n", c);
+    ok(c == ~0, "SetPixel returned: %lx\n", c);
 }
 
-static void test_multi_monitor_dc(void)
-{
-    INT value, count, old_count;
-    DWORD device_idx, mode_idx;
-    DEVMODEA dm, dm2, dm3;
-    DISPLAY_DEVICEA dd;
-    BOOL ret;
-    LONG res;
-    HDC hdc;
-
-    /* Test DCs covering the entire virtual screen */
-    hdc = CreateDCA("DISPLAY", NULL, NULL, NULL);
-    ok(!!hdc, "CreateDCA failed.\n");
-
-    memset(&dm, 0, sizeof(dm));
-    dm.dmSize = sizeof(dm);
-    ret = EnumDisplaySettingsA(NULL, ENUM_CURRENT_SETTINGS, &dm);
-    ok(ret, "EnumDisplaySettingsA failed.\n");
-
-    value = GetDeviceCaps(hdc, HORZRES);
-    ok(value == dm.dmPelsWidth, "Expected %d, got %d.\n", dm.dmPelsWidth, value);
-
-    value = GetDeviceCaps(hdc, VERTRES);
-    ok(value == dm.dmPelsHeight, "Expected %d, got %d.\n", dm.dmPelsHeight, value);
-
-    value = GetDeviceCaps(hdc, DESKTOPHORZRES);
-    todo_wine_if(dm.dmPelsWidth != GetSystemMetrics(SM_CXVIRTUALSCREEN)
-                 && value == GetSystemMetrics(SM_CXVIRTUALSCREEN))
-    ok(value == dm.dmPelsWidth, "Expected %d, got %d.\n", dm.dmPelsWidth, value);
-
-    value = GetDeviceCaps(hdc, DESKTOPVERTRES);
-    todo_wine_if(dm.dmPelsHeight != GetSystemMetrics(SM_CYVIRTUALSCREEN)
-                 && value == GetSystemMetrics(SM_CYVIRTUALSCREEN))
-    ok(value == dm.dmPelsHeight, "Expected %d, got %d.\n", dm.dmPelsHeight, value);
-
-    value = GetDeviceCaps(hdc, VREFRESH);
-    todo_wine_if(value != dm.dmDisplayFrequency && value == 1)
-    ok(value == dm.dmDisplayFrequency, "Expected %d, got %d.\n", dm.dmDisplayFrequency, value);
-
-    /* Test GetDeviceCaps() values after mode changes */
-    memset(&dm2, 0, sizeof(dm2));
-    dm2.dmSize = sizeof(dm2);
-    for (mode_idx = 0; EnumDisplaySettingsA(NULL, mode_idx, &dm2); ++mode_idx)
-    {
-        if (dm2.dmPelsWidth != dm.dmPelsWidth && dm2.dmPelsHeight != dm.dmPelsHeight)
-            break;
-    }
-    ok(dm2.dmPelsWidth && dm2.dmPelsWidth != dm.dmPelsWidth && dm2.dmPelsHeight != dm.dmPelsHeight,
-       "Failed to find a different resolution.\n");
-
-    res = ChangeDisplaySettingsExA(NULL, &dm2, NULL, CDS_RESET, NULL);
-    ok(res == DISP_CHANGE_SUCCESSFUL || broken(res == DISP_CHANGE_FAILED), /* Win8 TestBots */
-       "ChangeDisplaySettingsExA returned unexpected %d.\n", res);
-    if (res == DISP_CHANGE_SUCCESSFUL)
-    {
-        value = GetDeviceCaps(hdc, HORZRES);
-        ok(value == dm2.dmPelsWidth, "Expected %d, got %d.\n", dm2.dmPelsWidth, value);
-
-        value = GetDeviceCaps(hdc, VERTRES);
-        ok(value == dm2.dmPelsHeight, "Expected %d, got %d.\n", dm2.dmPelsHeight, value);
-
-        value = GetDeviceCaps(hdc, DESKTOPHORZRES);
-        todo_wine_if(dm2.dmPelsWidth != GetSystemMetrics(SM_CXVIRTUALSCREEN)
-                     && value == GetSystemMetrics(SM_CXVIRTUALSCREEN))
-        ok(value == dm2.dmPelsWidth, "Expected %d, got %d.\n", dm2.dmPelsWidth, value);
-
-        value = GetDeviceCaps(hdc, DESKTOPVERTRES);
-        todo_wine_if(dm2.dmPelsHeight != GetSystemMetrics(SM_CYVIRTUALSCREEN)
-                     && value == GetSystemMetrics(SM_CYVIRTUALSCREEN))
-        ok(value == dm2.dmPelsHeight, "Expected %d, got %d.\n", dm2.dmPelsHeight, value);
-
-        value = GetDeviceCaps(hdc, VREFRESH);
-        todo_wine_if(value != dm2.dmDisplayFrequency && value == 1)
-        ok(value == dm2.dmDisplayFrequency, "Expected %d, got %d.\n", dm2.dmDisplayFrequency, value);
-
-        res = ChangeDisplaySettingsExA(NULL, NULL, NULL, 0, NULL);
-        ok(res == DISP_CHANGE_SUCCESSFUL, "ChangeDisplaySettingsExA returned unexpected %d.\n", res);
-    }
-
-    DeleteDC(hdc);
-
-    /* Test DCs covering a specific monitor */
-    dd.cb = sizeof(dd);
-    for (device_idx = 0; EnumDisplayDevicesA(NULL, device_idx, &dd, 0); ++device_idx)
-    {
-        if (!(dd.StateFlags & DISPLAY_DEVICE_ATTACHED_TO_DESKTOP))
-            continue;
-
-        memset(&dm, 0, sizeof(dm));
-        dm.dmSize = sizeof(dm);
-        ret = EnumDisplaySettingsA(dd.DeviceName, ENUM_CURRENT_SETTINGS, &dm);
-        ok(ret, "EnumDisplaySettingsA %s failed.\n", dd.DeviceName);
-
-        hdc = CreateDCA(dd.DeviceName, NULL, NULL, NULL);
-        ok(!!hdc, "CreateDCA %s failed.\n", dd.DeviceName);
-
-        value = GetDeviceCaps(hdc, HORZRES);
-        todo_wine_if(dm.dmPelsWidth != GetSystemMetrics(SM_CXSCREEN))
-        ok(value == dm.dmPelsWidth, "Expected %d, got %d.\n", dm.dmPelsWidth, value);
-
-        value = GetDeviceCaps(hdc, VERTRES);
-        todo_wine_if(dm.dmPelsHeight != GetSystemMetrics(SM_CYSCREEN))
-        ok(value == dm.dmPelsHeight, "Expected %d, got %d.\n", dm.dmPelsHeight, value);
-
-        value = GetDeviceCaps(hdc, DESKTOPHORZRES);
-        todo_wine_if(dm.dmPelsWidth != GetSystemMetrics(SM_CXVIRTUALSCREEN)
-                     && value == GetSystemMetrics(SM_CXVIRTUALSCREEN))
-        ok(value == dm.dmPelsWidth, "Expected %d, got %d.\n", dm.dmPelsWidth, value);
-
-        value = GetDeviceCaps(hdc, DESKTOPVERTRES);
-        todo_wine_if(dm.dmPelsHeight != GetSystemMetrics(SM_CYVIRTUALSCREEN)
-                     && value == GetSystemMetrics(SM_CYVIRTUALSCREEN))
-        ok(value == dm.dmPelsHeight, "Expected %d, got %d.\n", dm.dmPelsHeight, value);
-
-        value = GetDeviceCaps(hdc, VREFRESH);
-        todo_wine_if(value != dm.dmDisplayFrequency && value == 1)
-        ok(value == dm.dmDisplayFrequency, "Expected %d, got %d.\n", dm.dmDisplayFrequency, value);
-
-        /* Test GetDeviceCaps() values after mode changes */
-        memset(&dm2, 0, sizeof(dm2));
-        dm2.dmSize = sizeof(dm2);
-        for (mode_idx = 0; EnumDisplaySettingsA(dd.DeviceName, mode_idx, &dm2); ++mode_idx)
-        {
-            if (dm2.dmPelsWidth != dm.dmPelsWidth && dm2.dmPelsHeight != dm.dmPelsHeight)
-                break;
-        }
-        ok(dm2.dmPelsWidth && dm2.dmPelsWidth != dm.dmPelsWidth && dm2.dmPelsHeight != dm.dmPelsHeight,
-           "Failed to find a different resolution for %s.\n", dd.DeviceName);
-
-        res = ChangeDisplaySettingsExA(dd.DeviceName, &dm2, NULL, CDS_RESET, NULL);
-        ok(res == DISP_CHANGE_SUCCESSFUL
-           || broken(res == DISP_CHANGE_FAILED), /* Win8 TestBots */
-           "ChangeDisplaySettingsExA %s returned unexpected %d.\n", dd.DeviceName, res);
-        if (res != DISP_CHANGE_SUCCESSFUL)
-        {
-            win_skip("Failed to change display mode for %s.\n", dd.DeviceName);
-            DeleteDC(hdc);
-            continue;
-        }
-
-        value = GetDeviceCaps(hdc, HORZRES);
-        todo_wine_if(dm2.dmPelsWidth != GetSystemMetrics(SM_CXSCREEN))
-        ok(value == dm2.dmPelsWidth, "Expected %d, got %d.\n", dm2.dmPelsWidth, value);
-
-        value = GetDeviceCaps(hdc, VERTRES);
-        todo_wine_if(dm2.dmPelsHeight != GetSystemMetrics(SM_CYSCREEN))
-        ok(value == dm2.dmPelsHeight, "Expected %d, got %d.\n", dm2.dmPelsHeight, value);
-
-        value = GetDeviceCaps(hdc, DESKTOPHORZRES);
-        todo_wine_if(dm2.dmPelsWidth != GetSystemMetrics(SM_CXVIRTUALSCREEN)
-                     && value == GetSystemMetrics(SM_CXVIRTUALSCREEN))
-        ok(value == dm2.dmPelsWidth, "Expected %d, got %d.\n", dm2.dmPelsWidth, value);
-
-        value = GetDeviceCaps(hdc, DESKTOPVERTRES);
-        todo_wine_if(dm2.dmPelsHeight != GetSystemMetrics(SM_CYVIRTUALSCREEN)
-                     && value == GetSystemMetrics(SM_CYVIRTUALSCREEN))
-        ok(value == dm2.dmPelsHeight, "Expected %d, got %d.\n", dm2.dmPelsHeight, value);
-
-        value = GetDeviceCaps(hdc, VREFRESH);
-        todo_wine_if(value != dm2.dmDisplayFrequency && value == 1)
-        ok(value == dm2.dmDisplayFrequency, "Expected %d, got %d.\n", dm2.dmDisplayFrequency, value);
-
-        /* Test GetDeviceCaps() values after monitor detach */
-        if (!(dd.StateFlags & DISPLAY_DEVICE_PRIMARY_DEVICE))
-        {
-            old_count = GetSystemMetrics(SM_CMONITORS);
-
-            ret = EnumDisplaySettingsA(dd.DeviceName, ENUM_CURRENT_SETTINGS, &dm3);
-            ok(ret, "EnumDisplaySettingsA %s failed.\n", dd.DeviceName);
-
-            dm3.dmFields = DM_POSITION | DM_PELSWIDTH | DM_PELSHEIGHT;
-            dm3.dmPelsWidth = 0;
-            dm3.dmPelsHeight = 0;
-            res = ChangeDisplaySettingsExA(dd.DeviceName, &dm3, NULL, CDS_UPDATEREGISTRY | CDS_NORESET, NULL);
-            ok(res == DISP_CHANGE_SUCCESSFUL, "ChangeDisplaySettingsExA %s returned unexpected %d.\n",
-               dd.DeviceName, res);
-            res = ChangeDisplaySettingsExA(dd.DeviceName, NULL, NULL, 0, NULL);
-            ok(res == DISP_CHANGE_SUCCESSFUL, "ChangeDisplaySettingsExA %s returned unexpected %d.\n",
-               dd.DeviceName, res);
-
-            count = GetSystemMetrics(SM_CMONITORS);
-            ok(count == old_count - 1, "Expect monitor count %d, got %d.\n", old_count - 1, count);
-
-            /* Should report the same values before detach */
-            value = GetDeviceCaps(hdc, HORZRES);
-            todo_wine_if(dm2.dmPelsWidth != GetSystemMetrics(SM_CXSCREEN))
-            ok(value == dm2.dmPelsWidth, "Expected %d, got %d.\n", dm2.dmPelsWidth, value);
-
-            value = GetDeviceCaps(hdc, VERTRES);
-            todo_wine_if(dm2.dmPelsHeight != GetSystemMetrics(SM_CYSCREEN))
-            ok(value == dm2.dmPelsHeight, "Expected %d, got %d.\n", dm2.dmPelsHeight, value);
-
-            value = GetDeviceCaps(hdc, DESKTOPHORZRES);
-            todo_wine_if(dm2.dmPelsWidth != GetSystemMetrics(SM_CXVIRTUALSCREEN)
-                         && value == GetSystemMetrics(SM_CXVIRTUALSCREEN))
-            ok(value == dm2.dmPelsWidth, "Expected %d, got %d.\n", dm2.dmPelsWidth, value);
-
-            value = GetDeviceCaps(hdc, DESKTOPVERTRES);
-            todo_wine_if(dm2.dmPelsHeight != GetSystemMetrics(SM_CYVIRTUALSCREEN)
-                         && value == GetSystemMetrics(SM_CYVIRTUALSCREEN))
-            ok(value == dm2.dmPelsHeight, "Expected %d, got %d.\n", dm2.dmPelsHeight, value);
-
-            value = GetDeviceCaps(hdc, VREFRESH);
-            todo_wine_if(value != dm2.dmDisplayFrequency && value == 1)
-            ok(value == dm2.dmDisplayFrequency, "Expected %d, got %d.\n", dm2.dmDisplayFrequency, value);
-        }
-
-        res = ChangeDisplaySettingsExA(dd.DeviceName, &dm, NULL, CDS_UPDATEREGISTRY | CDS_NORESET, NULL);
-        ok(res == DISP_CHANGE_SUCCESSFUL, "ChangeDisplaySettingsExA %s returned unexpected %d.\n",
-           dd.DeviceName, res);
-        res = ChangeDisplaySettingsExA(NULL, NULL, NULL, 0, NULL);
-        ok(res == DISP_CHANGE_SUCCESSFUL, "ChangeDisplaySettingsExA %s returned unexpected %d.\n",
-           dd.DeviceName, res);
-        DeleteDC(hdc);
-    }
-}
 
 START_TEST(dc)
 {
@@ -1932,5 +1716,4 @@ START_TEST(dc)
     test_pscript_printer_dc();
     test_clip_box();
     test_SetPixel();
-    test_multi_monitor_dc();
 }

@@ -25,19 +25,14 @@
 #include "main.h"
 
 #include "wine/debug.h"
-#include "wine/heap.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(regedit);
 
 ChildWnd* g_pChildWnd;
 static int last_split;
 
-static const WCHAR wszLastKey[] = {'L','a','s','t','K','e','y',0};
-static const WCHAR wszKeyName[] = {'S','o','f','t','w','a','r','e','\\',
-                                   'M','i','c','r','o','s','o','f','t','\\',
-                                   'W','i','n','d','o','w','s','\\',
-                                   'C','u','r','r','e','n','t','V','e','r','s','i','o','n','\\',
-                                   'A','p','p','l','e','t','s','\\','R','e','g','e','d','i','t',0};
+static const WCHAR wszLastKey[] = L"LastKey";
+static const WCHAR wszKeyName[] = L"Software\\Microsoft\\Windows\\CurrentVersion\\Applets\\Regedit";
 
 /*******************************************************************************
  * Local module support methods
@@ -58,11 +53,7 @@ static LPCWSTR GetRootKeyName(HKEY hRootKey)
     if(hRootKey == HKEY_DYN_DATA)
         return reg_class_namesW[INDEX_HKEY_DYN_DATA];
     else
-    {
-        static const WCHAR unknown_key[] = {'U','N','K','N','O','W','N',' ','H','K','E','Y',',',' ',
-                                            'P','L','E','A','S','E',' ','R','E','P','O','R','T',0};
-        return unknown_key;
-    }
+        return L"Unknown HKEY. Please report.";
 }
 
 static void draw_splitbar(HWND hWnd, int x)
@@ -88,17 +79,6 @@ static void ResizeWnd(int cx, int cy)
     EndDeferWindowPos(hdwp);
 }
 
-static void OnPaint(HWND hWnd)
-{
-    PAINTSTRUCT ps;
-    RECT rt;
-
-    GetClientRect(hWnd, &rt);
-    BeginPaint(hWnd, &ps);
-    FillRect(ps.hdc, &rt, GetSysColorBrush(COLOR_BTNFACE));
-    EndPaint(hWnd, &ps);
-}
-
 static LPWSTR CombinePaths(LPCWSTR pPaths[], int nPaths) {
     int i, len, pos;
     LPWSTR combined;
@@ -107,7 +87,7 @@ static LPWSTR CombinePaths(LPCWSTR pPaths[], int nPaths) {
             len += lstrlenW(pPaths[i])+1;
         }
     }
-    combined = heap_xalloc(len * sizeof(WCHAR));
+    combined = malloc(len * sizeof(WCHAR));
     *combined = '\0';
     for (i=0, pos=0; i<nPaths; i++) {
         if (pPaths[i] && *pPaths[i]) {
@@ -130,7 +110,7 @@ static LPWSTR GetPathRoot(HWND hwndTV, HTREEITEM hItem, BOOL bFull) {
     HKEY hRootKey = NULL;
     if (!hItem)
         hItem = (HTREEITEM)SendMessageW(hwndTV, TVM_GETNEXTITEM, TVGN_CARET, 0);
-    heap_free(GetItemPath(hwndTV, hItem, &hRootKey));
+    free(GetItemPath(hwndTV, hItem, &hRootKey));
     if (!bFull && !hRootKey)
         return NULL;
     if (hRootKey)
@@ -151,8 +131,8 @@ LPWSTR GetItemFullPath(HWND hwndTV, HTREEITEM hItem, BOOL bFull) {
     parts[0] = GetPathRoot(hwndTV, hItem, bFull);
     parts[1] = GetItemPath(hwndTV, hItem, &hRootKey);
     ret = CombinePaths((LPCWSTR *)parts, 2);
-    heap_free(parts[0]);
-    heap_free(parts[1]);
+    free(parts[0]);
+    free(parts[1]);
     return ret;
 }
 
@@ -173,7 +153,7 @@ static void OnTreeSelectionChanged(HWND hwndTV, HWND hwndLV, HTREEITEM hItem, BO
 
         keyPath = GetItemPath(hwndTV, hItem, &hRootKey);
         RefreshListView(hwndLV, hRootKey, keyPath, NULL);
-        heap_free(keyPath);
+        free(keyPath);
     }
     UpdateStatusBar();
 }
@@ -280,7 +260,7 @@ static void set_last_key(HWND hwndTV)
             value = GetItemFullPath(g_pChildWnd->hTreeWnd, selection, FALSE);
         RegSetValueExW(hkey, wszLastKey, 0, REG_SZ, (LPBYTE)value, (lstrlenW(value) + 1) * sizeof(WCHAR));
         if (selection != root)
-            heap_free(value);
+            free(value);
         RegCloseKey(hkey);
     }
 }
@@ -312,7 +292,7 @@ static int treeview_notify(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam
             WCHAR *path = GetItemPath(g_pChildWnd->hTreeWnd, 0, &hRootKey);
             BOOL res = RenameKey(hWnd, hRootKey, path, dispInfo->item.pszText);
 
-            heap_free(path);
+            free(path);
 
             if (res)
             {
@@ -325,7 +305,7 @@ static int treeview_notify(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam
 
                 path = GetItemPath(g_pChildWnd->hTreeWnd, 0, &hRootKey);
                 update_listview_path(path);
-                heap_free(path);
+                free(path);
 
                 UpdateStatusBar();
             }
@@ -399,9 +379,9 @@ static int listview_notify(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam
             NMLISTVIEW *nmlv = (NMLISTVIEW *)lParam;
             LINE_INFO *info = (LINE_INFO *)nmlv->lParam;
 
-            heap_free(info->name);
-            heap_free(info->val);
-            heap_free(info);
+            free(info->name);
+            free(info->val);
+            free(info);
             break;
         }
         case LVN_ENDLABELEDITW:
@@ -420,7 +400,7 @@ static int listview_notify(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam
                              dispInfo->item.iItem, (LPARAM)&dispInfo->item);
             }
 
-            heap_free(oldName);
+            free(oldName);
             return 0;
         }
         case LVN_GETDISPINFOW:
@@ -448,7 +428,7 @@ LRESULT CALLBACK ChildWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPa
 {
     switch (message) {
     case WM_CREATE:
-        g_pChildWnd = heap_xalloc(sizeof(ChildWnd));
+        g_pChildWnd = malloc(sizeof(ChildWnd));
         if (!g_pChildWnd) return 0;
         LoadStringW(hInst, IDS_REGISTRY_ROOT_NAME, g_pChildWnd->szPath, MAX_PATH);
         g_pChildWnd->nSplitPos = 250;
@@ -464,9 +444,6 @@ LRESULT CALLBACK ChildWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPa
             goto def;
         }
         break;
-    case WM_PAINT:
-        OnPaint(hWnd);
-        return 0;
     case WM_SETCURSOR:
         if (LOWORD(lParam) == HTCLIENT) {
             POINT pt;
@@ -480,7 +457,7 @@ LRESULT CALLBACK ChildWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPa
         goto def;
     case WM_DESTROY:
         set_last_key(g_pChildWnd->hTreeWnd);
-        heap_free(g_pChildWnd);
+        free(g_pChildWnd);
         g_pChildWnd = NULL;
         PostQuitMessage(0);
         break;

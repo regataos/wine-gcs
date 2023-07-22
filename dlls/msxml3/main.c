@@ -142,7 +142,7 @@ static int wineXmlReadCallback(void * context, char * buffer, int len)
         return -1;
     }
 
-    TRACE("Read %d\n", dwBytesRead);
+    TRACE("Read %ld bytes.\n", dwBytesRead);
 
     return dwBytesRead;
 }
@@ -322,8 +322,6 @@ static void init_char_encoders(void)
         { "windows-1258", win1258_to_utf8, utf8_to_win1258 }
     };
     int i;
-
-    xmlInitCharEncodingHandlers();
 
     for (i = 0; i < ARRAY_SIZE(encoder); i++)
     {

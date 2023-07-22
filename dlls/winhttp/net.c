@@ -303,8 +303,8 @@ void netconn_release( struct netconn *conn )
     free(conn);
 }
 
-static DWORD netconn_negotiate(struct netconn *conn, CredHandle *cred_handle, CtxtHandle *ctx_handle, WCHAR *hostname,
-                               DWORD isc_req_flags, SecBufferDesc *init_desc, CtxtHandle *new_ctx_handle)
+static DWORD netconn_negotiate( struct netconn *conn, WCHAR *hostname, CredHandle *cred_handle,
+                                CtxtHandle *prev_ctx, SecBufferDesc *prev_buf, CtxtHandle *ctx )
 {
     SecBuffer out_buf = {0, SECBUFFER_TOKEN, NULL}, in_bufs[2] = {{0, SECBUFFER_TOKEN}, {0, SECBUFFER_EMPTY}};
     SecBufferDesc out_desc = {SECBUFFER_VERSION, 1, &out_buf}, in_desc = {SECBUFFER_VERSION, 2, in_bufs};
@@ -314,11 +314,14 @@ static DWORD netconn_negotiate(struct netconn *conn, CredHandle *cred_handle, Ct
     SSIZE_T size;
     SECURITY_STATUS status;
 
+    const DWORD isc_req_flags = ISC_REQ_ALLOCATE_MEMORY|ISC_REQ_USE_SESSION_KEY|ISC_REQ_CONFIDENTIALITY
+        |ISC_REQ_SEQUENCE_DETECT|ISC_REQ_REPLAY_DETECT|ISC_REQ_MANUAL_CRED_VALIDATION;
+
     if (!(read_buf = malloc( read_buf_size ))) return ERROR_OUTOFMEMORY;
 
-    status = InitializeSecurityContextW(cred_handle, ctx_handle, hostname, isc_req_flags, 0, 0, init_desc,
-            0, new_ctx_handle, &out_desc, &attrs, NULL);
-    if (!ctx_handle) ctx_handle = new_ctx_handle;
+    status = InitializeSecurityContextW(cred_handle, prev_ctx, hostname, isc_req_flags, 0, 0, prev_buf, 0,
+            ctx, &out_desc, &attrs, NULL);
+    if (!ctx) ctx = prev_ctx;
 
     assert(status != SEC_E_OK);
 
@@ -345,14 +348,12 @@ static DWORD netconn_negotiate(struct netconn *conn, CredHandle *cred_handle, Ct
 
             memmove(read_buf, (BYTE*)in_bufs[0].pvBuffer+in_bufs[0].cbBuffer-in_bufs[1].cbBuffer, in_bufs[1].cbBuffer);
             in_bufs[0].cbBuffer = in_bufs[1].cbBuffer;
-
-            in_bufs[1].BufferType = SECBUFFER_EMPTY;
-            in_bufs[1].cbBuffer = 0;
-            in_bufs[1].pvBuffer = NULL;
         }
 
         assert(in_bufs[0].BufferType == SECBUFFER_TOKEN);
-        assert(in_bufs[1].BufferType == SECBUFFER_EMPTY);
+        in_bufs[1].BufferType = SECBUFFER_EMPTY;
+        in_bufs[1].cbBuffer = 0;
+        in_bufs[1].pvBuffer = NULL;
 
         if(in_bufs[0].cbBuffer + 1024 > read_buf_size) {
             BYTE *new_read_buf;
@@ -377,7 +378,7 @@ static DWORD netconn_negotiate(struct netconn *conn, CredHandle *cred_handle, Ct
 
         in_bufs[0].cbBuffer += size;
         in_bufs[0].pvBuffer = read_buf;
-        status = InitializeSecurityContextW(cred_handle, ctx_handle, hostname, isc_req_flags, 0, 0, &in_desc,
+        status = InitializeSecurityContextW(cred_handle, ctx, hostname, isc_req_flags, 0, 0, &in_desc,
                 0, NULL, &out_desc, &attrs, NULL);
         TRACE( "InitializeSecurityContext ret %#lx\n", status );
         if(status == SEC_E_OK && in_bufs[1].BufferType == SECBUFFER_EXTRA)
@@ -392,17 +393,13 @@ static DWORD netconn_negotiate(struct netconn *conn, CredHandle *cred_handle, Ct
 DWORD netconn_secure_connect( struct netconn *conn, WCHAR *hostname, DWORD security_flags, CredHandle *cred_handle,
                               BOOL check_revocation )
 {
-    CtxtHandle ctx;
+    CtxtHandle ctx = {0};
     const CERT_CONTEXT *cert;
     SECURITY_STATUS status;
     DWORD res = ERROR_SUCCESS;
 
-    const DWORD isc_req_flags = ISC_REQ_ALLOCATE_MEMORY|ISC_REQ_USE_SESSION_KEY|ISC_REQ_CONFIDENTIALITY
-        |ISC_REQ_SEQUENCE_DETECT|ISC_REQ_REPLAY_DETECT|ISC_REQ_MANUAL_CRED_VALIDATION;
-
-    memset( &ctx, 0, sizeof(ctx) );
-    status = netconn_negotiate(conn, cred_handle, NULL, hostname, isc_req_flags, NULL, &ctx);
-    if(status != SEC_E_OK)
+    status = netconn_negotiate(conn, hostname, cred_handle, NULL, NULL, &ctx);
+    if(status != SEC_E_OK || res != ERROR_SUCCESS)
         goto failed;
 
     status = QueryContextAttributesW(&ctx, SECPKG_ATTR_STREAM_SIZES, &conn->ssl_sizes);
@@ -420,7 +417,7 @@ DWORD netconn_secure_connect( struct netconn *conn, WCHAR *hostname, DWORD secur
     res = netconn_verify_cert(cert, hostname, security_flags, check_revocation);
     CertFreeCertificateContext(cert);
     if(res != ERROR_SUCCESS) {
-        WARN("cert verify failed: %lu\n", res);
+        WARN( "cert verify failed: %lu\n", res );
         goto failed;
     }
 
@@ -441,7 +438,7 @@ DWORD netconn_secure_connect( struct netconn *conn, WCHAR *hostname, DWORD secur
     return ERROR_SUCCESS;
 
 failed:
-    WARN("Failed to initialize security context: %#lx\n", status);
+    WARN( "Failed to initialize security context: %#lx\n", status );
     free(conn->ssl_read_buf);
     conn->ssl_read_buf = NULL;
     free(conn->ssl_write_buf);
@@ -521,10 +518,8 @@ DWORD netconn_send( struct netconn *conn, const void *msg, size_t len, int *sent
 
 static DWORD read_ssl_chunk( struct netconn *conn, void *buf, SIZE_T buf_size, SIZE_T *ret_size, BOOL *eof )
 {
-    const DWORD isc_req_flags = ISC_REQ_ALLOCATE_MEMORY|ISC_REQ_USE_SESSION_KEY|ISC_REQ_CONFIDENTIALITY
-        |ISC_REQ_SEQUENCE_DETECT|ISC_REQ_REPLAY_DETECT|ISC_REQ_USE_SUPPLIED_CREDS;
     const SIZE_T ssl_buf_size = conn->ssl_sizes.cbHeader+conn->ssl_sizes.cbMaximumMessage+conn->ssl_sizes.cbTrailer;
-    SecBuffer bufs[4], tmp;
+    SecBuffer bufs[4];
     SecBufferDesc buf_desc = {SECBUFFER_VERSION, ARRAY_SIZE(bufs), bufs};
     SSIZE_T size, buf_len;
     unsigned int i;
@@ -564,17 +559,23 @@ static DWORD read_ssl_chunk( struct netconn *conn, void *buf, SIZE_T buf_size, S
             break;
 
         case SEC_I_RENEGOTIATE:
+        {
+            SecBuffer out_buf = {0, SECBUFFER_TOKEN, NULL};
+            SecBufferDesc out_desc = {SECBUFFER_VERSION, 1, &out_buf};
+
             TRACE("renegotiate\n");
-            memset(&tmp, 0, sizeof(tmp));
+
             for(i = 0; i < ARRAY_SIZE(bufs); i++) {
-                if(bufs[i].BufferType == SECBUFFER_EXTRA) tmp = bufs[i];
+                if(bufs[i].BufferType == SECBUFFER_EXTRA) {
+                    out_buf.cbBuffer = bufs[i].cbBuffer;
+                    out_buf.pvBuffer = bufs[i].pvBuffer;
+                }
             }
-            memset(bufs, 0, sizeof(bufs));
-            bufs[0] = tmp;
-            bufs[0].BufferType = SECBUFFER_TOKEN;
-            res = netconn_negotiate(conn, NULL, &conn->ssl_ctx, conn->host->hostname, isc_req_flags, &buf_desc, NULL);
+
+            res = netconn_negotiate(conn, conn->host->hostname, NULL, &conn->ssl_ctx, &out_desc, NULL);
             if (res != SEC_E_OK) return res;
-            break;
+            continue;
+        }
 
         case SEC_I_CONTEXT_EXPIRED:
             TRACE("context expired\n");

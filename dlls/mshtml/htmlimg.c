@@ -24,6 +24,7 @@
 #include "winbase.h"
 #include "winuser.h"
 #include "ole2.h"
+#include "mshtmdid.h"
 
 #include "wine/debug.h"
 
@@ -38,6 +39,7 @@ struct HTMLImg {
     IHTMLImgElement IHTMLImgElement_iface;
 
     nsIDOMHTMLImageElement *nsimg;
+    eventid_t skip_event;
 };
 
 static inline HTMLImg *impl_from_IHTMLImgElement(IHTMLImgElement *iface)
@@ -280,6 +282,7 @@ static HRESULT WINAPI HTMLImgElement_get_alt(IHTMLImgElement *iface, BSTR *p)
 static HRESULT WINAPI HTMLImgElement_put_src(IHTMLImgElement *iface, BSTR v)
 {
     HTMLImg *This = impl_from_IHTMLImgElement(iface);
+    HRESULT hres = S_OK;
     nsAString src_str;
     nsresult nsres;
 
@@ -291,7 +294,29 @@ static HRESULT WINAPI HTMLImgElement_put_src(IHTMLImgElement *iface, BSTR v)
     if(NS_FAILED(nsres))
         ERR("SetSrc failed: %08lx\n", nsres);
 
-    return S_OK;
+    if(dispex_compat_mode(&This->element.node.event_target.dispex) < COMPAT_MODE_IE9) {
+        eventid_t eventid;
+        cpp_bool complete;
+        UINT32 height = 0;
+        DOMEvent *event;
+
+        /* Synchronously send load event if the image was completed immediately (such as from cache) */
+        This->skip_event = EVENTID_INVALID_ID;
+
+        nsres = nsIDOMHTMLImageElement_GetComplete(This->nsimg, &complete);
+        if(NS_SUCCEEDED(nsres) && complete) {
+            nsIDOMHTMLImageElement_GetNaturalHeight(This->nsimg, &height);
+            eventid = height ? EVENTID_LOAD : EVENTID_ERROR;
+
+            hres = create_document_event(This->element.node.doc, eventid, &event);
+            if(SUCCEEDED(hres)) {
+                This->skip_event = eventid;
+                dispatch_event(&This->element.node.event_target, event);
+                IDOMEvent_Release(&event->IDOMEvent_iface);
+            }
+        }
+    }
+    return hres;
 }
 
 static HRESULT WINAPI HTMLImgElement_get_src(IHTMLImgElement *iface, BSTR *p)
@@ -677,6 +702,18 @@ static HRESULT HTMLImgElement_QI(HTMLDOMNode *iface, REFIID riid, void **ppv)
     return S_OK;
 }
 
+static HRESULT HTMLImgElement_dispatch_nsevent_hook(HTMLDOMNode *iface, DOMEvent *event)
+{
+    HTMLImg *This = impl_from_HTMLDOMNode(iface);
+
+    if(event->event_id == This->skip_event) {
+        This->skip_event = EVENTID_INVALID_ID;
+        return S_OK;
+    }
+
+    return S_FALSE;
+}
+
 static HRESULT HTMLImgElement_get_readystate(HTMLDOMNode *iface, BSTR *p)
 {
     HTMLImg *This = impl_from_HTMLDOMNode(iface);
@@ -710,6 +747,7 @@ static const NodeImplVtbl HTMLImgElementImplVtbl = {
     HTMLElement_destructor,
     HTMLElement_cpc,
     HTMLElement_clone,
+    HTMLImgElement_dispatch_nsevent_hook,
     HTMLElement_handle_event,
     HTMLElement_get_attr_col,
     NULL,
@@ -720,22 +758,35 @@ static const NodeImplVtbl HTMLImgElementImplVtbl = {
     NULL,
     NULL,
     NULL,
+    NULL,
     HTMLImgElement_traverse,
     HTMLImgElement_unlink
 };
 
 static const tid_t HTMLImgElement_iface_tids[] = {
     HTMLELEMENT_TIDS,
-    IHTMLImgElement_tid,
     0
 };
+
+static void HTMLImgElement_init_dispex_info(dispex_data_t *info, compat_mode_t mode)
+{
+    static const dispex_hook_t img_ie11_hooks[] = {
+        {DISPID_IHTMLIMGELEMENT_FILESIZE, NULL},
+        {DISPID_UNKNOWN}
+    };
+
+    HTMLElement_init_dispex_info(info, mode);
+
+    dispex_info_add_interface(info, IHTMLImgElement_tid, mode >= COMPAT_MODE_IE11 ? img_ie11_hooks : NULL);
+}
+
 dispex_static_data_t HTMLImgElement_dispex = {
     L"HTMLImageElement",
     NULL,
     PROTO_ID_HTMLImgElement,
     DispHTMLImg_tid,
     HTMLImgElement_iface_tids,
-    HTMLElement_init_dispex_info
+    HTMLImgElement_init_dispex_info
 };
 
 HRESULT HTMLImgElement_Create(HTMLDocumentNode *doc, nsIDOMElement *nselem, HTMLElement **elem)
@@ -743,12 +794,13 @@ HRESULT HTMLImgElement_Create(HTMLDocumentNode *doc, nsIDOMElement *nselem, HTML
     HTMLImg *ret;
     nsresult nsres;
 
-    ret = heap_alloc_zero(sizeof(HTMLImg));
+    ret = calloc(1, sizeof(HTMLImg));
     if(!ret)
         return E_OUTOFMEMORY;
 
     ret->IHTMLImgElement_iface.lpVtbl = &HTMLImgElementVtbl;
     ret->element.node.vtbl = &HTMLImgElementImplVtbl;
+    ret->skip_event = EVENTID_INVALID_ID;
 
     HTMLElement_Init(&ret->element, doc, nselem, &HTMLImgElement_dispex);
 
@@ -759,15 +811,15 @@ HRESULT HTMLImgElement_Create(HTMLDocumentNode *doc, nsIDOMElement *nselem, HTML
     return S_OK;
 }
 
-static inline struct compat_ctor *impl_from_IHTMLImageElementFactory(IHTMLImageElementFactory *iface)
+static inline struct legacy_ctor *impl_from_IHTMLImageElementFactory(IHTMLImageElementFactory *iface)
 {
-    return CONTAINING_RECORD(iface, struct compat_ctor, IHTMLImageElementFactory_iface);
+    return CONTAINING_RECORD(iface, struct legacy_ctor, IHTMLImageElementFactory_iface);
 }
 
 static HRESULT WINAPI HTMLImageElementFactory_QueryInterface(IHTMLImageElementFactory *iface,
         REFIID riid, void **ppv)
 {
-    struct compat_ctor *This = impl_from_IHTMLImageElementFactory(iface);
+    struct legacy_ctor *This = impl_from_IHTMLImageElementFactory(iface);
 
     TRACE("(%p)->(%s %p)\n", This, debugstr_mshtml_guid(riid), ppv);
 
@@ -789,7 +841,7 @@ static HRESULT WINAPI HTMLImageElementFactory_QueryInterface(IHTMLImageElementFa
 
 static ULONG WINAPI HTMLImageElementFactory_AddRef(IHTMLImageElementFactory *iface)
 {
-    struct compat_ctor *This = impl_from_IHTMLImageElementFactory(iface);
+    struct legacy_ctor *This = impl_from_IHTMLImageElementFactory(iface);
     LONG ref = InterlockedIncrement(&This->ref);
 
     TRACE("(%p) ref=%ld\n", This, ref);
@@ -799,13 +851,18 @@ static ULONG WINAPI HTMLImageElementFactory_AddRef(IHTMLImageElementFactory *ifa
 
 static ULONG WINAPI HTMLImageElementFactory_Release(IHTMLImageElementFactory *iface)
 {
-    struct compat_ctor *This = impl_from_IHTMLImageElementFactory(iface);
+    struct legacy_ctor *This = impl_from_IHTMLImageElementFactory(iface);
     LONG ref = InterlockedDecrement(&This->ref);
 
     TRACE("(%p) ref=%ld\n", This, ref);
 
-    if(!ref)
-        heap_free(This);
+    if(!ref) {
+        /* Proxy constructor disps hold ref to window, others are always detached first */
+        if(This->window)
+            IHTMLWindow2_Release(&This->window->base.IHTMLWindow2_iface);
+        release_dispex(&This->dispex);
+        free(This);
+    }
 
     return ref;
 }
@@ -813,14 +870,14 @@ static ULONG WINAPI HTMLImageElementFactory_Release(IHTMLImageElementFactory *if
 static HRESULT WINAPI HTMLImageElementFactory_GetTypeInfoCount(IHTMLImageElementFactory *iface,
         UINT *pctinfo)
 {
-    struct compat_ctor *This = impl_from_IHTMLImageElementFactory(iface);
+    struct legacy_ctor *This = impl_from_IHTMLImageElementFactory(iface);
     return IDispatchEx_GetTypeInfoCount(&This->dispex.IDispatchEx_iface, pctinfo);
 }
 
 static HRESULT WINAPI HTMLImageElementFactory_GetTypeInfo(IHTMLImageElementFactory *iface,
         UINT iTInfo, LCID lcid, ITypeInfo **ppTInfo)
 {
-    struct compat_ctor *This = impl_from_IHTMLImageElementFactory(iface);
+    struct legacy_ctor *This = impl_from_IHTMLImageElementFactory(iface);
     return IDispatchEx_GetTypeInfo(&This->dispex.IDispatchEx_iface, iTInfo, lcid, ppTInfo);
 }
 
@@ -828,7 +885,7 @@ static HRESULT WINAPI HTMLImageElementFactory_GetIDsOfNames(IHTMLImageElementFac
         REFIID riid, LPOLESTR *rgszNames, UINT cNames, LCID lcid,
         DISPID *rgDispId)
 {
-    struct compat_ctor *This = impl_from_IHTMLImageElementFactory(iface);
+    struct legacy_ctor *This = impl_from_IHTMLImageElementFactory(iface);
     return IDispatchEx_GetIDsOfNames(&This->dispex.IDispatchEx_iface, riid, rgszNames, cNames, lcid, rgDispId);
 }
 
@@ -837,7 +894,7 @@ static HRESULT WINAPI HTMLImageElementFactory_Invoke(IHTMLImageElementFactory *i
         DISPPARAMS *pDispParams, VARIANT *pVarResult, EXCEPINFO *pExcepInfo,
         UINT *puArgErr)
 {
-    struct compat_ctor *This = impl_from_IHTMLImageElementFactory(iface);
+    struct legacy_ctor *This = impl_from_IHTMLImageElementFactory(iface);
     return IDispatchEx_Invoke(&This->dispex.IDispatchEx_iface, dispIdMember, riid, lcid, wFlags,
             pDispParams, pVarResult, pExcepInfo, puArgErr);
 }
@@ -869,7 +926,7 @@ static LONG var_to_size(const VARIANT *v)
 static HRESULT WINAPI HTMLImageElementFactory_create(IHTMLImageElementFactory *iface,
         VARIANT width, VARIANT height, IHTMLImgElement **img_elem)
 {
-    struct compat_ctor *This = impl_from_IHTMLImageElementFactory(iface);
+    struct legacy_ctor *This = impl_from_IHTMLImageElementFactory(iface);
     HTMLDocumentNode *doc;
     IHTMLImgElement *img;
     HTMLElement *elem;
@@ -930,16 +987,16 @@ const IHTMLImageElementFactoryVtbl HTMLImageElementFactoryVtbl = {
     HTMLImageElementFactory_create
 };
 
-static inline struct compat_ctor *impl_from_DispatchEx(DispatchEx *iface)
+static inline struct legacy_ctor *impl_from_DispatchEx(DispatchEx *iface)
 {
-    return CONTAINING_RECORD(iface, struct compat_ctor, dispex);
+    return CONTAINING_RECORD(iface, struct legacy_ctor, dispex);
 }
 
 static HRESULT HTMLImageElementFactory_value(DispatchEx *dispex, LCID lcid,
         WORD flags, DISPPARAMS *params, VARIANT *res, EXCEPINFO *ei,
         IServiceProvider *caller)
 {
-    struct compat_ctor *This = impl_from_DispatchEx(dispex);
+    struct legacy_ctor *This = impl_from_DispatchEx(dispex);
     IHTMLImgElement *img;
     VARIANT empty, *width, *height;
     HRESULT hres;
@@ -966,16 +1023,17 @@ static HRESULT HTMLImageElementFactory_value(DispatchEx *dispex, LCID lcid,
     return S_OK;
 }
 
+static const dispex_static_data_vtbl_t HTMLImageElementFactory_dispex_vtbl = {
+    HTMLImageElementFactory_value,
+    legacy_ctor_get_dispid,
+    legacy_ctor_get_name,
+    legacy_ctor_invoke,
+    legacy_ctor_delete
+};
+
 static const tid_t HTMLImageElementFactory_iface_tids[] = {
     IHTMLImageElementFactory_tid,
     0
-};
-
-static const dispex_static_data_vtbl_t HTMLImageElementFactory_dispex_vtbl = {
-    HTMLImageElementFactory_value,
-    compat_ctor_get_dispid,
-    compat_ctor_invoke,
-    compat_ctor_delete
 };
 
 dispex_static_data_t HTMLImageElementFactory_dispex = {
@@ -992,14 +1050,21 @@ static HRESULT HTMLImageCtor_value(DispatchEx *iface, LCID lcid, WORD flags, DIS
     if(flags == DISPATCH_CONSTRUCT)
         return HTMLImageElementFactory_value(iface, lcid, flags, params, res, ei, caller);
 
-    return compat_ctor_value(iface, lcid, flags, params, res, ei, caller);
+    return legacy_ctor_value(iface, lcid, flags, params, res, ei, caller);
+}
+
+static void HTMLImageCtor_init_dispex_info(dispex_data_t *info, compat_mode_t compat_mode)
+{
+    if(compat_mode < COMPAT_MODE_IE9)
+        dispex_info_add_interface(info, IHTMLImageElementFactory_tid, NULL);
 }
 
 static const dispex_static_data_vtbl_t HTMLImageCtor_dispex_vtbl = {
     HTMLImageCtor_value,
-    compat_ctor_get_dispid,
-    compat_ctor_invoke,
-    compat_ctor_delete
+    legacy_ctor_get_dispid,
+    legacy_ctor_get_name,
+    legacy_ctor_invoke,
+    legacy_ctor_delete
 };
 
 dispex_static_data_t HTMLImageCtor_dispex = {
@@ -1007,5 +1072,6 @@ dispex_static_data_t HTMLImageCtor_dispex = {
     &HTMLImageCtor_dispex_vtbl,
     PROTO_ID_NULL,
     IHTMLImageElementFactory_tid,
-    HTMLImageElementFactory_iface_tids
+    no_iface_tids,
+    HTMLImageCtor_init_dispex_info
 };

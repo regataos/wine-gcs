@@ -180,7 +180,7 @@ static struct esync *add_to_list( HANDLE handle, enum esync_type type, int fd, v
         }
     }
 
-    if (!InterlockedCompareExchange( (int *)&esync_list[entry][idx].type, type, 0 ))
+    if (!InterlockedCompareExchange( (LONG *)&esync_list[entry][idx].type, type, 0 ))
     {
         esync_list[entry][idx].fd = fd;
         esync_list[entry][idx].shm = shm;
@@ -253,7 +253,7 @@ static NTSTATUS get_object( HANDLE handle, struct esync **obj )
 
     if (ret)
     {
-        WARN("Failed to retrieve fd for handle %p, status %#x.\n", handle, ret);
+        WARN("Failed to retrieve fd for handle %p, status %#x.\n", handle, (unsigned int)ret);
         *obj = NULL;
         return ret;
     }
@@ -272,7 +272,7 @@ NTSTATUS esync_close( HANDLE handle )
 
     if (entry < ESYNC_LIST_ENTRIES && esync_list[entry])
     {
-        if (InterlockedExchange((int *)&esync_list[entry][idx].type, 0))
+        if (InterlockedExchange((LONG *)&esync_list[entry][idx].type, 0))
         {
             close( esync_list[entry][idx].fd );
             return STATUS_SUCCESS;
@@ -371,7 +371,7 @@ extern NTSTATUS esync_create_semaphore(HANDLE *handle, ACCESS_MASK access,
     const OBJECT_ATTRIBUTES *attr, LONG initial, LONG max)
 {
     TRACE("name %s, initial %d, max %d.\n",
-        attr ? debugstr_us(attr->ObjectName) : "<no name>", initial, max);
+        attr ? debugstr_us(attr->ObjectName) : "<no name>", (int)initial, (int)max);
 
     return create_esync( ESYNC_SEMAPHORE, handle, access, attr, initial, max );
 }
@@ -392,7 +392,7 @@ NTSTATUS esync_release_semaphore( HANDLE handle, ULONG count, ULONG *prev )
     ULONG current;
     NTSTATUS ret;
 
-    TRACE("%p, %d, %p.\n", handle, count, prev);
+    TRACE("%p, %d, %p.\n", handle, (int)count, prev);
 
     if ((ret = get_object( handle, &obj))) return ret;
     semaphore = obj->shm;
@@ -403,7 +403,7 @@ NTSTATUS esync_release_semaphore( HANDLE handle, ULONG count, ULONG *prev )
 
         if (count + current > semaphore->max)
             return STATUS_SEMAPHORE_LIMIT_EXCEEDED;
-    } while (InterlockedCompareExchange( &semaphore->count, count + current, current ) != current);
+    } while (InterlockedCompareExchange( (LONG *)&semaphore->count, count + current, current ) != current);
 
     if (prev) *prev = current;
 
@@ -532,7 +532,7 @@ NTSTATUS esync_set_event( HANDLE handle )
     if (obj->type == ESYNC_MANUAL_EVENT)
     {
         /* Acquire the spinlock. */
-        while (InterlockedCompareExchange( &event->locked, 1, 0 ))
+        while (InterlockedCompareExchange( (LONG *)&event->locked, 1, 0 ))
             small_pause();
     }
 
@@ -545,7 +545,7 @@ NTSTATUS esync_set_event( HANDLE handle )
      * eventfd is unsignaled (i.e. reset shm, set shm, set fd, reset fd), we
      * *must* signal the fd now, or any waiting threads will never wake up. */
 
-    if (!InterlockedExchange( &event->signaled, 1 ) || obj->type == ESYNC_AUTO_EVENT)
+    if (!InterlockedExchange( (LONG *)&event->signaled, 1 ) || obj->type == ESYNC_AUTO_EVENT)
     {
         if (write( obj->fd, &value, sizeof(value) ) == -1)
             ERR("write: %s\n", strerror(errno));
@@ -572,10 +572,13 @@ NTSTATUS esync_reset_event( HANDLE handle )
     if ((ret = get_object( handle, &obj ))) return ret;
     event = obj->shm;
 
+    if (obj->type != ESYNC_MANUAL_EVENT && obj->type != ESYNC_AUTO_EVENT)
+        return STATUS_OBJECT_TYPE_MISMATCH;
+
     if (obj->type == ESYNC_MANUAL_EVENT)
     {
         /* Acquire the spinlock. */
-        while (InterlockedCompareExchange( &event->locked, 1, 0 ))
+        while (InterlockedCompareExchange( (LONG *)&event->locked, 1, 0 ))
             small_pause();
     }
 
@@ -585,7 +588,7 @@ NTSTATUS esync_reset_event( HANDLE handle )
      * For auto-reset events, we have no guarantee that the previous "signaled"
      * state is actually correct. We need to leave both states unsignaled after
      * leaving this function, so we always have to read(). */
-    if (InterlockedExchange( &event->signaled, 0 ) || obj->type == ESYNC_AUTO_EVENT)
+    if (InterlockedExchange( (LONG *)&event->signaled, 0 ) || obj->type == ESYNC_AUTO_EVENT)
     {
         if (read( obj->fd, &value, sizeof(value) ) == -1 && errno != EWOULDBLOCK && errno != EAGAIN)
         {
@@ -611,6 +614,9 @@ NTSTATUS esync_pulse_event( HANDLE handle )
     TRACE("%p.\n", handle);
 
     if ((ret = get_object( handle, &obj ))) return ret;
+
+    if (obj->type != ESYNC_MANUAL_EVENT && obj->type != ESYNC_AUTO_EVENT)
+        return STATUS_OBJECT_TYPE_MISMATCH;
 
     /* This isn't really correct; an application could miss the write.
      * Unfortunately we can't really do much better. Fortunately this is rarely
@@ -785,7 +791,7 @@ static BOOL update_grabbed_object( struct esync *obj )
          * fact that we were able to grab it at all means the count is nonzero,
          * and if someone else grabbed it then the count must have been >= 2,
          * etc. */
-        InterlockedExchangeAdd( &semaphore->count, -1 );
+        InterlockedExchangeAdd( (LONG *)&semaphore->count, -1 );
     }
     else if (obj->type == ESYNC_AUTO_EVENT)
     {
@@ -872,7 +878,7 @@ static NTSTATUS __esync_wait_objects( DWORD count, const HANDLE *handles, BOOLEA
 
     if (TRACE_ON(esync))
     {
-        TRACE("Waiting for %s of %d handles:", wait_any ? "any" : "all", count);
+        TRACE("Waiting for %s of %d handles:", wait_any ? "any" : "all", (int)count);
         for (i = 0; i < count; i++)
             TRACE(" %p", handles[i]);
 
@@ -939,7 +945,7 @@ static NTSTATUS __esync_wait_objects( DWORD count, const HANDLE *handles, BOOLEA
                         if ((size = read( obj->fd, &value, sizeof(value) )) == sizeof(value))
                         {
                             TRACE("Woken up by handle %p [%d].\n", handles[i], i);
-                            InterlockedDecrement( &semaphore->count );
+                            InterlockedDecrement( (LONG *)&semaphore->count );
                             return i;
                         }
                     }

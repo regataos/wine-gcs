@@ -70,7 +70,7 @@ static unsigned int msihandletable_size = 0;
 
 void msi_free_handle_table(void)
 {
-    msi_free( msihandletable );
+    free( msihandletable );
     msihandletable = NULL;
     msihandletable_size = 0;
     DeleteCriticalSection(&MSI_handle_cs);
@@ -92,13 +92,13 @@ static MSIHANDLE alloc_handle_table_entry(void)
         if (msihandletable_size == 0)
         {
             newsize = 256;
-            p = msi_alloc_zero(newsize*sizeof(msi_handle_info));
+            p = calloc(newsize, sizeof(*p));
         }
         else
         {
             newsize = msihandletable_size * 2;
-            p = msi_realloc_zero(msihandletable,
-                            newsize*sizeof(msi_handle_info));
+            p = realloc(msihandletable, newsize * sizeof(*p));
+            if (p) memset(p + msihandletable_size, 0, (newsize - msihandletable_size) * sizeof(*p));
         }
         if (!p)
             return 0;
@@ -127,7 +127,7 @@ MSIHANDLE alloc_msihandle( MSIOBJECTHDR *obj )
 
     LeaveCriticalSection( &MSI_handle_cs );
 
-    TRACE("%p -> %d\n", obj, ret );
+    TRACE( "%p -> %lu\n", obj, ret );
 
     return ret;
 }
@@ -150,7 +150,7 @@ MSIHANDLE alloc_msi_remote_handle(MSIHANDLE remote)
 
     LeaveCriticalSection( &MSI_handle_cs );
 
-    TRACE("%d -> %d\n", remote, ret);
+    TRACE( "%lu -> %lu\n", remote, ret );
 
     return ret;
 }
@@ -202,7 +202,7 @@ void *alloc_msiobject(UINT type, UINT size, msihandledestructor destroy )
 {
     MSIOBJECTHDR *info;
 
-    info = msi_alloc_zero( size );
+    info = calloc( 1, size );
     if( info )
     {
         info->magic = MSIHANDLE_MAGIC;
@@ -256,8 +256,8 @@ int msiobj_release( MSIOBJECTHDR *info )
     {
         if( info->destructor )
             info->destructor( info );
-        msi_free( info );
         TRACE("object %p destroyed\n", info);
+        free( info );
     }
 
     return ret;
@@ -271,7 +271,7 @@ UINT WINAPI MsiCloseHandle(MSIHANDLE handle)
     MSIOBJECTHDR *info = NULL;
     UINT ret = ERROR_INVALID_HANDLE;
 
-    TRACE("%x\n",handle);
+    TRACE( "%lu\n", handle );
 
     if (!handle)
         return ERROR_SUCCESS;
@@ -305,7 +305,7 @@ UINT WINAPI MsiCloseHandle(MSIHANDLE handle)
 
     ret = ERROR_SUCCESS;
 
-    TRACE("handle %x destroyed\n", handle+1);
+    TRACE( "handle %lu destroyed\n", handle + 1 );
 out:
     LeaveCriticalSection( &MSI_handle_cs );
     if( info )

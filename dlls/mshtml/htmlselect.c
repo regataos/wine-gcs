@@ -252,8 +252,8 @@ static HRESULT WINAPI HTMLOptionElement_put_text(IHTMLOptionElement *iface, BSTR
 
     TRACE("(%p)->(%s)\n", This, debugstr_w(v));
 
-    if(!This->element.node.doc->nsdoc) {
-        WARN("NULL nsdoc\n");
+    if(!This->element.node.doc->dom_document) {
+        WARN("NULL dom_document\n");
         return E_UNEXPECTED;
     }
 
@@ -275,7 +275,7 @@ static HRESULT WINAPI HTMLOptionElement_put_text(IHTMLOptionElement *iface, BSTR
     }
 
     nsAString_InitDepend(&text_str, v);
-    nsres = nsIDOMDocument_CreateTextNode(This->element.node.doc->nsdoc, &text_str, &text_node);
+    nsres = nsIDOMDocument_CreateTextNode(This->element.node.doc->dom_document, &text_str, &text_node);
     nsAString_Finish(&text_str);
     if(NS_FAILED(nsres)) {
         ERR("CreateTextNode failed: %08lx\n", nsres);
@@ -396,8 +396,10 @@ static const NodeImplVtbl HTMLOptionElementImplVtbl = {
     HTMLElement_destructor,
     HTMLElement_cpc,
     HTMLElement_clone,
+    HTMLElement_dispatch_nsevent_hook,
     HTMLElement_handle_event,
     HTMLElement_get_attr_col,
+    NULL,
     NULL,
     NULL,
     NULL,
@@ -429,7 +431,7 @@ HRESULT HTMLOptionElement_Create(HTMLDocumentNode *doc, nsIDOMElement *nselem, H
     HTMLOptionElement *ret;
     nsresult nsres;
 
-    ret = heap_alloc_zero(sizeof(HTMLOptionElement));
+    ret = calloc(1, sizeof(HTMLOptionElement));
     if(!ret)
         return E_OUTOFMEMORY;
 
@@ -445,15 +447,15 @@ HRESULT HTMLOptionElement_Create(HTMLDocumentNode *doc, nsIDOMElement *nselem, H
     return S_OK;
 }
 
-static inline struct compat_ctor *impl_from_IHTMLOptionElementFactory(IHTMLOptionElementFactory *iface)
+static inline struct legacy_ctor *impl_from_IHTMLOptionElementFactory(IHTMLOptionElementFactory *iface)
 {
-    return CONTAINING_RECORD(iface, struct compat_ctor, IHTMLOptionElementFactory_iface);
+    return CONTAINING_RECORD(iface, struct legacy_ctor, IHTMLOptionElementFactory_iface);
 }
 
 static HRESULT WINAPI HTMLOptionElementFactory_QueryInterface(IHTMLOptionElementFactory *iface,
                                                               REFIID riid, void **ppv)
 {
-    struct compat_ctor *This = impl_from_IHTMLOptionElementFactory(iface);
+    struct legacy_ctor *This = impl_from_IHTMLOptionElementFactory(iface);
 
     TRACE("(%p)->(%s %p)\n", This, debugstr_mshtml_guid(riid), ppv);
 
@@ -477,7 +479,7 @@ static HRESULT WINAPI HTMLOptionElementFactory_QueryInterface(IHTMLOptionElement
 
 static ULONG WINAPI HTMLOptionElementFactory_AddRef(IHTMLOptionElementFactory *iface)
 {
-    struct compat_ctor *This = impl_from_IHTMLOptionElementFactory(iface);
+    struct legacy_ctor *This = impl_from_IHTMLOptionElementFactory(iface);
     LONG ref = InterlockedIncrement(&This->ref);
 
     TRACE("(%p) ref=%ld\n", This, ref);
@@ -487,14 +489,17 @@ static ULONG WINAPI HTMLOptionElementFactory_AddRef(IHTMLOptionElementFactory *i
 
 static ULONG WINAPI HTMLOptionElementFactory_Release(IHTMLOptionElementFactory *iface)
 {
-    struct compat_ctor *This = impl_from_IHTMLOptionElementFactory(iface);
+    struct legacy_ctor *This = impl_from_IHTMLOptionElementFactory(iface);
     LONG ref = InterlockedDecrement(&This->ref);
 
     TRACE("(%p) ref=%ld\n", This, ref);
 
     if(!ref) {
+        /* Proxy constructor disps hold ref to window, others are always detached first */
+        if(This->window)
+            IHTMLWindow2_Release(&This->window->base.IHTMLWindow2_iface);
         release_dispex(&This->dispex);
-        heap_free(This);
+        free(This);
     }
 
     return ref;
@@ -502,14 +507,14 @@ static ULONG WINAPI HTMLOptionElementFactory_Release(IHTMLOptionElementFactory *
 
 static HRESULT WINAPI HTMLOptionElementFactory_GetTypeInfoCount(IHTMLOptionElementFactory *iface, UINT *pctinfo)
 {
-    struct compat_ctor *This = impl_from_IHTMLOptionElementFactory(iface);
+    struct legacy_ctor *This = impl_from_IHTMLOptionElementFactory(iface);
     return IDispatchEx_GetTypeInfoCount(&This->dispex.IDispatchEx_iface, pctinfo);
 }
 
 static HRESULT WINAPI HTMLOptionElementFactory_GetTypeInfo(IHTMLOptionElementFactory *iface, UINT iTInfo,
                                               LCID lcid, ITypeInfo **ppTInfo)
 {
-    struct compat_ctor *This = impl_from_IHTMLOptionElementFactory(iface);
+    struct legacy_ctor *This = impl_from_IHTMLOptionElementFactory(iface);
     return IDispatchEx_GetTypeInfo(&This->dispex.IDispatchEx_iface, iTInfo, lcid, ppTInfo);
 }
 
@@ -517,7 +522,7 @@ static HRESULT WINAPI HTMLOptionElementFactory_GetIDsOfNames(IHTMLOptionElementF
                                                 LPOLESTR *rgszNames, UINT cNames,
                                                 LCID lcid, DISPID *rgDispId)
 {
-    struct compat_ctor *This = impl_from_IHTMLOptionElementFactory(iface);
+    struct legacy_ctor *This = impl_from_IHTMLOptionElementFactory(iface);
     return IDispatchEx_GetIDsOfNames(&This->dispex.IDispatchEx_iface, riid, rgszNames, cNames, lcid, rgDispId);
 }
 
@@ -525,7 +530,7 @@ static HRESULT WINAPI HTMLOptionElementFactory_Invoke(IHTMLOptionElementFactory 
                             REFIID riid, LCID lcid, WORD wFlags, DISPPARAMS *pDispParams,
                             VARIANT *pVarResult, EXCEPINFO *pExcepInfo, UINT *puArgErr)
 {
-    struct compat_ctor *This = impl_from_IHTMLOptionElementFactory(iface);
+    struct legacy_ctor *This = impl_from_IHTMLOptionElementFactory(iface);
     return IDispatchEx_Invoke(&This->dispex.IDispatchEx_iface, dispIdMember, riid, lcid, wFlags, pDispParams,
             pVarResult, pExcepInfo, puArgErr);
 }
@@ -534,7 +539,7 @@ static HRESULT WINAPI HTMLOptionElementFactory_create(IHTMLOptionElementFactory 
         VARIANT text, VARIANT value, VARIANT defaultselected, VARIANT selected,
         IHTMLOptionElement **optelem)
 {
-    struct compat_ctor *This = impl_from_IHTMLOptionElementFactory(iface);
+    struct legacy_ctor *This = impl_from_IHTMLOptionElementFactory(iface);
     nsIDOMElement *nselem;
     HTMLDOMNode *node;
     HRESULT hres;
@@ -591,16 +596,16 @@ const IHTMLOptionElementFactoryVtbl HTMLOptionElementFactoryVtbl = {
     HTMLOptionElementFactory_create
 };
 
-static inline struct compat_ctor *HTMLOptionElementFactory_from_DispatchEx(DispatchEx *iface)
+static inline struct legacy_ctor *HTMLOptionElementFactory_from_DispatchEx(DispatchEx *iface)
 {
-    return CONTAINING_RECORD(iface, struct compat_ctor, dispex);
+    return CONTAINING_RECORD(iface, struct legacy_ctor, dispex);
 }
 
 static HRESULT HTMLOptionElementFactory_value(DispatchEx *dispex, LCID lcid,
         WORD flags, DISPPARAMS *params, VARIANT *res, EXCEPINFO *ei,
         IServiceProvider *caller)
 {
-    struct compat_ctor *This = HTMLOptionElementFactory_from_DispatchEx(dispex);
+    struct legacy_ctor *This = HTMLOptionElementFactory_from_DispatchEx(dispex);
     unsigned int i, argc = params->cArgs - params->cNamedArgs;
     IHTMLOptionElement *opt;
     VARIANT empty, *arg[4];
@@ -626,16 +631,17 @@ static HRESULT HTMLOptionElementFactory_value(DispatchEx *dispex, LCID lcid,
     return S_OK;
 }
 
+static const dispex_static_data_vtbl_t HTMLOptionElementFactory_dispex_vtbl = {
+    HTMLOptionElementFactory_value,
+    legacy_ctor_get_dispid,
+    legacy_ctor_get_name,
+    legacy_ctor_invoke,
+    legacy_ctor_delete
+};
+
 static const tid_t HTMLOptionElementFactory_iface_tids[] = {
     IHTMLOptionElementFactory_tid,
     0
-};
-
-static const dispex_static_data_vtbl_t HTMLOptionElementFactory_dispex_vtbl = {
-    HTMLOptionElementFactory_value,
-    compat_ctor_get_dispid,
-    compat_ctor_invoke,
-    compat_ctor_delete
 };
 
 dispex_static_data_t HTMLOptionElementFactory_dispex = {
@@ -643,8 +649,7 @@ dispex_static_data_t HTMLOptionElementFactory_dispex = {
     &HTMLOptionElementFactory_dispex_vtbl,
     PROTO_ID_NULL,
     IHTMLOptionElementFactory_tid,
-    HTMLOptionElementFactory_iface_tids,
-    HTMLElement_init_dispex_info
+    HTMLOptionElementFactory_iface_tids
 };
 
 static HRESULT HTMLOptionCtor_value(DispatchEx *iface, LCID lcid, WORD flags, DISPPARAMS *params,
@@ -653,14 +658,21 @@ static HRESULT HTMLOptionCtor_value(DispatchEx *iface, LCID lcid, WORD flags, DI
     if(flags == DISPATCH_CONSTRUCT)
         return HTMLOptionElementFactory_value(iface, lcid, flags, params, res, ei, caller);
 
-    return compat_ctor_value(iface, lcid, flags, params, res, ei, caller);
+    return legacy_ctor_value(iface, lcid, flags, params, res, ei, caller);
+}
+
+static void HTMLOptionCtor_init_dispex_info(dispex_data_t *info, compat_mode_t compat_mode)
+{
+    if(compat_mode < COMPAT_MODE_IE9)
+        dispex_info_add_interface(info, IHTMLOptionElementFactory_tid, NULL);
 }
 
 static const dispex_static_data_vtbl_t HTMLOptionCtor_dispex_vtbl = {
     HTMLOptionCtor_value,
-    compat_ctor_get_dispid,
-    compat_ctor_invoke,
-    compat_ctor_delete
+    legacy_ctor_get_dispid,
+    legacy_ctor_get_name,
+    legacy_ctor_invoke,
+    legacy_ctor_delete
 };
 
 dispex_static_data_t HTMLOptionCtor_dispex = {
@@ -668,8 +680,8 @@ dispex_static_data_t HTMLOptionCtor_dispex = {
     &HTMLOptionCtor_dispex_vtbl,
     PROTO_ID_NULL,
     IHTMLOptionElementFactory_tid,
-    HTMLOptionElementFactory_iface_tids,
-    HTMLElement_init_dispex_info
+    no_iface_tids,
+    HTMLOptionCtor_init_dispex_info
 };
 
 struct HTMLSelectElement {
@@ -774,7 +786,7 @@ static ULONG WINAPI HTMLSelectElementEnum_Release(IEnumVARIANT *iface)
 
     if(!ref) {
         IHTMLSelectElement_Release(&This->elem->IHTMLSelectElement_iface);
-        heap_free(This);
+        free(This);
     }
 
     return ref;
@@ -1266,7 +1278,7 @@ static HRESULT WINAPI HTMLSelectElement_get__newEnum(IHTMLSelectElement *iface, 
 
     TRACE("(%p)->(%p)\n", This, p);
 
-    ret = heap_alloc(sizeof(*ret));
+    ret = malloc(sizeof(*ret));
     if(!ret)
         return E_OUTOFMEMORY;
 
@@ -1532,6 +1544,19 @@ static HRESULT HTMLSelectElement_get_dispid(HTMLDOMNode *iface, BSTR name, DWORD
     return S_OK;
 }
 
+static HRESULT HTMLSelectElement_dispex_get_name(HTMLDOMNode *iface, DISPID id, BSTR *name)
+{
+    DWORD idx = id - DISPID_OPTIONCOL_0;
+    WCHAR buf[11];
+    UINT len;
+
+    if(idx > MSHTML_CUSTOM_DISPID_CNT)
+        return DISP_E_MEMBERNOTFOUND;
+
+    len = swprintf(buf, ARRAY_SIZE(buf), L"%u", idx);
+    return (*name = SysAllocStringLen(buf, len)) ? S_OK : E_OUTOFMEMORY;
+}
+
 static HRESULT HTMLSelectElement_invoke(HTMLDOMNode *iface, IDispatch *this_obj, DISPID id, LCID lcid, WORD flags,
         DISPPARAMS *params, VARIANT *res, EXCEPINFO *ei, IServiceProvider *caller)
 {
@@ -1591,6 +1616,7 @@ static const NodeImplVtbl HTMLSelectElementImplVtbl = {
     HTMLElement_destructor,
     HTMLElement_cpc,
     HTMLElement_clone,
+    HTMLElement_dispatch_nsevent_hook,
     HTMLElement_handle_event,
     HTMLElement_get_attr_col,
     NULL,
@@ -1599,6 +1625,7 @@ static const NodeImplVtbl HTMLSelectElementImplVtbl = {
     NULL,
     NULL,
     HTMLSelectElement_get_dispid,
+    HTMLSelectElement_dispex_get_name,
     HTMLSelectElement_invoke,
     NULL,
     HTMLSelectElement_traverse,
@@ -1633,7 +1660,7 @@ HRESULT HTMLSelectElement_Create(HTMLDocumentNode *doc, nsIDOMElement *nselem, H
     HTMLSelectElement *ret;
     nsresult nsres;
 
-    ret = heap_alloc_zero(sizeof(HTMLSelectElement));
+    ret = calloc(1, sizeof(HTMLSelectElement));
     if(!ret)
         return E_OUTOFMEMORY;
 

@@ -1,4 +1,4 @@
-EXTRADEFS = -DWINE_NO_LONG_TYPES -D_CRTIMP=
+EXTRADEFS = -D_CRTIMP=
 MODULE    = msvcr71.dll
 IMPORTLIB = msvcr71
 IMPORTS   = ntdll
@@ -18,6 +18,7 @@ C_SRCS = \
 	except_arm64.c \
 	except_i386.c \
 	except_x86_64.c \
+	exception_ptr.c \
 	exit.c \
 	file.c \
 	heap.c \

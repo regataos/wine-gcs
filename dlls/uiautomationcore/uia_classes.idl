@@ -1,5 +1,5 @@
 /*
- * Copyright 2021 Connor Mcadams for CodeWeavers
+ * Copyright 2022 Connor McAdams for CodeWeavers
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -18,4 +18,90 @@
 
 #pragma makedep regtypelib
 
-#include "uiautomationclient.idl"
+import "oaidl.idl";
+
+struct uia_prop_info {
+    const GUID *guid;
+    int prop_id;
+    int prop_type;
+    int type;
+    int pattern_id;
+};
+
+struct uia_event_info {
+    const GUID *guid;
+    int event_id;
+    int event_arg_type;
+};
+
+struct uia_pattern_info {
+    const GUID *guid;
+    int pattern_id;
+    const GUID *pattern_iid;
+};
+
+[
+   version(1.0),
+   uuid(8a9ca8eb-856b-43d9-abd7-4a590054064f),
+   id(1),
+]
+library UIA_wine_private
+{
+    importlib("stdole2.tlb");
+
+    [
+        object,
+        uuid(5e60162c-ab0e-4e22-a61d-3a3acd442aba),
+        pointer_default(unique),
+        oleautomation,
+    ]
+    interface IWineUiaEvent : IUnknown
+    {
+        HRESULT detach();
+        HRESULT get_event_data([out, retval]GUID *event_guid, [out, retval]VARIANT *runtime_id,
+                [out, retval]long *scope);
+        HRESULT raise_event([in]VARIANT node, [in]BOOL needs_clientside);
+    }
+
+    [
+        object,
+        uuid(9a754e12-e570-49ab-b223-6f6871007d28),
+        pointer_default(unique),
+    ]
+    interface IWineUiaAdviseEvents : IUnknown
+    {
+        HRESULT advise_events([in]BOOL advise_removed, [in]long event_id, [in]SAFEARRAY *prop_ids);
+    }
+
+    [
+        object,
+        uuid(57865755-6c05-4522-98df-4ca658b768ef),
+        pointer_default(unique),
+        oleautomation,
+    ]
+    interface IWineUiaProvider : IUnknown
+    {
+        HRESULT get_prop_val([in]const struct uia_prop_info *prop_info, [out, retval]VARIANT *ret_val);
+        HRESULT get_prov_opts([out, retval]int *out_opts);
+        HRESULT has_parent([out, retval]BOOL *out_val);
+        HRESULT navigate([in]int nav_dir, [out, retval]VARIANT *ret_val);
+        HRESULT attach_event([in]LONG_PTR huiaevent);
+        HRESULT get_focus([out, retval]VARIANT *ret_val);
+    }
+
+    [
+        object,
+        uuid(bccb6799-d831-4057-bd50-6425823ff1a3),
+        pointer_default(unique),
+        oleautomation,
+    ]
+    interface IWineUiaNode : IUnknown
+    {
+        HRESULT get_provider([in]int idx, [out, retval]IWineUiaProvider **out_prov);
+        HRESULT get_prop_val([in]const GUID *prop_guid, [out, retval]VARIANT *ret_val);
+        HRESULT disconnect();
+        HRESULT get_hwnd([out, retval]ULONG *out_hwnd);
+        HRESULT add_event([in]IWineUiaEvent *event_iface, [in]long proc_id, [in]long event_cookie,
+                [out, retval]IWineUiaEvent **ret_event);
+    }
+}

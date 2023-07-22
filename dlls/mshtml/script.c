@@ -74,6 +74,7 @@ struct ScriptHost {
     IActiveScriptSiteUIControl     IActiveScriptSiteUIControl_iface;
     IActiveScriptSiteDebug         IActiveScriptSiteDebug_iface;
     IServiceProvider               IServiceProvider_iface;
+    IOleCommandTarget              IOleCommandTarget_iface;
 
     LONG ref;
 
@@ -115,6 +116,8 @@ static BOOL set_script_prop(ScriptHost *script_host, DWORD property, VARIANT *va
 
 static BOOL init_script_engine(ScriptHost *script_host)
 {
+    IWineDispatchProxyCbPrivate *proxy;
+    BOOL was_locked, ret = FALSE;
     compat_mode_t compat_mode;
     IObjectSafety *safety;
     SCRIPTSTATE state;
@@ -151,7 +154,11 @@ static BOOL init_script_engine(ScriptHost *script_host)
     if(FAILED(hres))
         return FALSE;
 
-    compat_mode = lock_document_mode(script_host->window->doc);
+    /* Don't lock it properly yet, but mark it as such, to avoid recursively creating another script engine when initializing proxies */
+    was_locked = script_host->window->doc->document_mode_locked;
+    script_host->window->doc->document_mode_locked = TRUE;
+
+    compat_mode = script_host->window->doc->document_mode;
     script_mode = compat_mode < COMPAT_MODE_IE8 ? SCRIPTLANGUAGEVERSION_5_7 : SCRIPTLANGUAGEVERSION_5_8;
     if(IsEqualGUID(&script_host->guid, &CLSID_JScript)) {
         if(compat_mode >= COMPAT_MODE_IE11)
@@ -176,24 +183,24 @@ static BOOL init_script_engine(ScriptHost *script_host)
     hres = IActiveScriptParse_InitNew(script_host->parse);
     if(FAILED(hres)) {
         WARN("InitNew failed: %08lx\n", hres);
-        return FALSE;
+        goto done;
     }
 
     hres = IActiveScript_SetScriptSite(script_host->script, &script_host->IActiveScriptSite_iface);
     if(FAILED(hres)) {
         WARN("SetScriptSite failed: %08lx\n", hres);
         IActiveScript_Close(script_host->script);
-        return FALSE;
+        goto done;
     }
 
     if(script_mode & SCRIPTLANGUAGEVERSION_HTML) {
-        IWineDispatchProxyCbPrivate *proxy = script_host->window->event_target.dispex.proxy;
+        proxy = script_host->window->event_target.dispex.proxy;
         if(proxy) {
             hres = proxy->lpVtbl->HostUpdated(proxy, script_host->script);
             if(FAILED(hres)) {
-                WARN("Proxy->HostUpdated failed: %08lx\n", hres);
+                ERR("Proxy->HostUpdated failed: %08lx\n", hres);
                 IActiveScript_Close(script_host->script);
-                return FALSE;
+                goto done;
             }
         }
     }
@@ -207,17 +214,32 @@ static BOOL init_script_engine(ScriptHost *script_host)
     hres = IActiveScript_SetScriptState(script_host->script, SCRIPTSTATE_STARTED);
     if(FAILED(hres)) {
         WARN("Starting script failed: %08lx\n", hres);
-        return FALSE;
+        goto done;
     }
 
     hres = IActiveScript_AddNamedItem(script_host->script, L"window",
             SCRIPTITEM_ISVISIBLE|SCRIPTITEM_ISSOURCE|SCRIPTITEM_GLOBALMEMBERS);
     if(SUCCEEDED(hres)) {
+        const struct list *list = &script_host->window->script_hosts, *head = list_head(list);
         V_VT(&var) = VT_BOOL;
-        V_BOOL(&var) = VARIANT_TRUE;
+        V_BOOL(&var) = head ? VARIANT_FALSE : VARIANT_TRUE;
         set_script_prop(script_host, SCRIPTPROP_ABBREVIATE_GLOBALNAME_RESOLUTION, &var);
+
+        /* if this was second engine added, also set it to first engine, since it used to be TRUE */
+        if(head && !list_next(list, head)) {
+            ScriptHost *first_host = LIST_ENTRY(head, ScriptHost, entry);
+            if(first_host->script)
+                set_script_prop(first_host, SCRIPTPROP_ABBREVIATE_GLOBALNAME_RESOLUTION, &var);
+        }
     }else {
        WARN("AddNamedItem failed: %08lx\n", hres);
+    }
+
+    proxy = script_host->window->event_target.dispex.proxy;
+    if(proxy) {
+        hres = proxy->lpVtbl->InitProxy(proxy, (IDispatch*)&script_host->window->doc->node.event_target.dispex.IDispatchEx_iface);
+        if(FAILED(hres))
+            ERR("InitProxy for document failed: %08lx\n", hres);
     }
 
     hres = IActiveScript_QueryInterface(script_host->script, &IID_IActiveScriptParseProcedure2,
@@ -227,7 +249,11 @@ static BOOL init_script_engine(ScriptHost *script_host)
         WARN("Could not get IActiveScriptParseProcedure iface: %08lx\n", hres);
     }
 
-    return TRUE;
+    ret = TRUE;
+
+done:
+    script_host->window->doc->document_mode_locked = was_locked;
+    return ret;
 }
 
 static void release_script_engine(ScriptHost *This)
@@ -303,6 +329,9 @@ static HRESULT WINAPI ActiveScriptSite_QueryInterface(IActiveScriptSite *iface, 
     }else if(IsEqualGUID(&IID_IServiceProvider, riid)) {
         TRACE("(%p)->(IID_IServiceProvider %p)\n", This, ppv);
         *ppv = &This->IServiceProvider_iface;
+    }else if(IsEqualGUID(&IID_IOleCommandTarget, riid)) {
+        TRACE("(%p)->(IID_IOleCommandTarget %p)\n", This, ppv);
+        *ppv = &This->IOleCommandTarget_iface;
     }else if(IsEqualGUID(&IID_ICanHandleException, riid)) {
         TRACE("(%p)->(IID_ICanHandleException not supported %p)\n", This, ppv);
         return E_NOINTERFACE;
@@ -336,7 +365,7 @@ static ULONG WINAPI ActiveScriptSite_Release(IActiveScriptSite *iface)
         release_script_engine(This);
         if(This->window)
             list_remove(&This->entry);
-        heap_free(This);
+        free(This);
     }
 
     return ref;
@@ -373,7 +402,7 @@ static HRESULT WINAPI ActiveScriptSite_GetItemInfo(IActiveScriptSite *iface, LPC
         return E_FAIL;
 
     /* FIXME: Return proxy object */
-    *ppiunkItem = (IUnknown*)&This->window->base.IHTMLWindow2_iface;
+    *ppiunkItem = (IUnknown*)&This->window->base.outer_window->base.IHTMLWindow2_iface;
     IUnknown_AddRef(*ppiunkItem);
 
     return S_OK;
@@ -513,7 +542,7 @@ static HRESULT WINAPI ActiveScriptSiteWindow_GetWindow(IActiveScriptSiteWindow *
 
     TRACE("(%p)->(%p)\n", This, phwnd);
 
-    if(!This->window || !This->window->base.outer_window)
+    if(!This->window)
         return E_UNEXPECTED;
 
     *phwnd = This->window->base.outer_window->browser->doc->hwnd;
@@ -670,6 +699,18 @@ static HRESULT WINAPI ASServiceProvider_QueryService(IServiceProvider *iface, RE
 {
     ScriptHost *This = impl_from_IServiceProvider(iface);
 
+    if(IsEqualGUID(&IID_IActiveScriptSite, guidService)) {
+        ScriptHost *script_host = This;
+
+        TRACE("(%p)->(IID_IActiveScriptSite)\n", This);
+
+        /* Use first script site if available */
+        if(This->window && !list_empty(&This->window->script_hosts))
+            script_host = LIST_ENTRY(list_head(&This->window->script_hosts), ScriptHost, entry);
+
+        return IActiveScriptSite_QueryInterface(&script_host->IActiveScriptSite_iface, riid, ppv);
+    }
+
     if(IsEqualGUID(&SID_SInternetHostSecurityManager, guidService)) {
         TRACE("(%p)->(SID_SInternetHostSecurityManager)\n", This);
 
@@ -686,7 +727,7 @@ static HRESULT WINAPI ASServiceProvider_QueryService(IServiceProvider *iface, RE
         if(!This->window || !This->window->doc)
             return E_NOINTERFACE;
 
-        return IHTMLDocument2_QueryInterface(&This->window->doc->basedoc.IHTMLDocument2_iface, riid, ppv);
+        return IHTMLDocument2_QueryInterface(&This->window->doc->IHTMLDocument2_iface, riid, ppv);
     }
 
     FIXME("(%p)->(%s %s %p)\n", This, debugstr_guid(guidService), debugstr_guid(riid), ppv);
@@ -700,12 +741,88 @@ static const IServiceProviderVtbl ASServiceProviderVtbl = {
     ASServiceProvider_QueryService
 };
 
+static inline ScriptHost *impl_from_IOleCommandTarget(IOleCommandTarget *iface)
+{
+    return CONTAINING_RECORD(iface, ScriptHost, IOleCommandTarget_iface);
+}
+
+static HRESULT WINAPI OleCommandTarget_QueryInterface(IOleCommandTarget *iface, REFIID riid, void **ppv)
+{
+    ScriptHost *This = impl_from_IOleCommandTarget(iface);
+    return IActiveScriptSite_QueryInterface(&This->IActiveScriptSite_iface, riid, ppv);
+}
+
+static ULONG WINAPI OleCommandTarget_AddRef(IOleCommandTarget *iface)
+{
+    ScriptHost *This = impl_from_IOleCommandTarget(iface);
+    return IActiveScriptSite_AddRef(&This->IActiveScriptSite_iface);
+}
+
+static ULONG WINAPI OleCommandTarget_Release(IOleCommandTarget *iface)
+{
+    ScriptHost *This = impl_from_IOleCommandTarget(iface);
+    return IActiveScriptSite_Release(&This->IActiveScriptSite_iface);
+}
+
+static HRESULT WINAPI OleCommandTarget_QueryStatus(IOleCommandTarget *iface, const GUID *pguidCmdGroup,
+        ULONG cCmds, OLECMD prgCmds[], OLECMDTEXT *pCmdText)
+{
+    ScriptHost *This = impl_from_IOleCommandTarget(iface);
+
+    FIXME("(%p)->(%s %ld %p %p)\n", This, debugstr_guid(pguidCmdGroup), cCmds, prgCmds, pCmdText);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI OleCommandTarget_Exec(IOleCommandTarget *iface, const GUID *pguidCmdGroup,
+        DWORD nCmdID, DWORD nCmdexecopt, VARIANT *pvaIn, VARIANT *pvaOut)
+{
+    ScriptHost *This = impl_from_IOleCommandTarget(iface);
+
+    TRACE("(%p)->(%s %ld %ld %s %p)\n", This, debugstr_guid(pguidCmdGroup), nCmdID, nCmdexecopt, wine_dbgstr_variant(pvaIn), pvaOut);
+
+    if(!pguidCmdGroup) {
+        FIXME("Unsupported pguidCmdGroup %s\n", debugstr_guid(pguidCmdGroup));
+        return OLECMDERR_E_UNKNOWNGROUP;
+    }
+
+    if(IsEqualGUID(&CGID_ScriptSite, pguidCmdGroup)) {
+        switch(nCmdID) {
+        case CMDID_SCRIPTSITE_SECURITY_WINDOW:
+            if(!This->window) {
+                FIXME("No window\n");
+                return E_FAIL;
+            }
+            V_VT(pvaOut) = VT_DISPATCH;
+            V_DISPATCH(pvaOut) = (IDispatch*)&This->window->base.outer_window->base.IHTMLWindow2_iface;
+            IDispatch_AddRef(V_DISPATCH(pvaOut));
+            break;
+
+        default:
+            FIXME("Unsupported nCmdID %ld of CGID_ScriptSite group\n", nCmdID);
+            return OLECMDERR_E_NOTSUPPORTED;
+        }
+        return S_OK;
+    }
+
+    FIXME("Unsupported pguidCmdGroup %s\n", debugstr_guid(pguidCmdGroup));
+    return OLECMDERR_E_UNKNOWNGROUP;
+}
+
+static const IOleCommandTargetVtbl OleCommandTargetVtbl = {
+    OleCommandTarget_QueryInterface,
+    OleCommandTarget_AddRef,
+    OleCommandTarget_Release,
+    OleCommandTarget_QueryStatus,
+    OleCommandTarget_Exec
+};
+
 static ScriptHost *create_script_host(HTMLInnerWindow *window, const GUID *guid)
 {
     ScriptHost *ret;
     HRESULT hres;
 
-    ret = heap_alloc_zero(sizeof(*ret));
+    ret = calloc(1, sizeof(*ret));
     if(!ret)
         return NULL;
 
@@ -715,12 +832,12 @@ static ScriptHost *create_script_host(HTMLInnerWindow *window, const GUID *guid)
     ret->IActiveScriptSiteUIControl_iface.lpVtbl = &ActiveScriptSiteUIControlVtbl;
     ret->IActiveScriptSiteDebug_iface.lpVtbl = &ActiveScriptSiteDebugVtbl;
     ret->IServiceProvider_iface.lpVtbl = &ASServiceProviderVtbl;
+    ret->IOleCommandTarget_iface.lpVtbl = &OleCommandTargetVtbl;
     ret->ref = 1;
     ret->window = window;
     ret->script_state = SCRIPTSTATE_UNINITIALIZED;
 
     ret->guid = *guid;
-    list_add_tail(&window->script_hosts, &ret->entry);
 
     hres = CoCreateInstance(&ret->guid, NULL, CLSCTX_INPROC_SERVER|CLSCTX_INPROC_HANDLER,
             &IID_IActiveScript, (void**)&ret->script);
@@ -729,6 +846,10 @@ static ScriptHost *create_script_host(HTMLInnerWindow *window, const GUID *guid)
     else if(!init_script_engine(ret))
         release_script_engine(ret);
 
+    list_add_tail(&window->script_hosts, &ret->entry);
+
+    /* It's safe to lock it now since we're done */
+    lock_document_mode(window->doc);
     return ret;
 }
 
@@ -794,7 +915,7 @@ static void set_script_elem_readystate(HTMLScriptElement *script_elem, READYSTAT
             if(script_elem->pending_readystatechange_event)
                 return;
 
-            task = heap_alloc(sizeof(*task));
+            task = malloc(sizeof(*task));
             if(!task)
                 return;
 
@@ -850,7 +971,7 @@ static HRESULT get_binding_text(ScriptBSC *bsc, WCHAR **ret)
     WCHAR *text;
 
     if(!bsc->bsc.read) {
-        text = heap_alloc(sizeof(WCHAR));
+        text = malloc(sizeof(WCHAR));
         if(!text)
             return E_OUTOFMEMORY;
         *text = 0;
@@ -865,7 +986,7 @@ static HRESULT get_binding_text(ScriptBSC *bsc, WCHAR **ret)
             return E_FAIL;
         }
 
-        text = heap_alloc(bsc->bsc.read+sizeof(WCHAR));
+        text = malloc(bsc->bsc.read + sizeof(WCHAR));
         if(!text)
             return E_OUTOFMEMORY;
 
@@ -881,7 +1002,7 @@ static HRESULT get_binding_text(ScriptBSC *bsc, WCHAR **ret)
         DWORD len;
 
         len = MultiByteToWideChar(cp, 0, bsc->buf, bsc->bsc.read, NULL, 0);
-        text = heap_alloc((len+1)*sizeof(WCHAR));
+        text = malloc((len + 1) * sizeof(WCHAR));
         if(!text)
             return E_OUTOFMEMORY;
 
@@ -918,7 +1039,7 @@ static void script_file_available(ScriptBSC *bsc)
 
         TRACE("Adding to queue\n");
 
-        queue = heap_alloc(sizeof(*queue));
+        queue = malloc(sizeof(*queue));
         if(!queue)
             return;
 
@@ -968,8 +1089,8 @@ static void ScriptBSC_destroy(BSCallback *bsc)
     if(This->load_group)
         nsILoadGroup_Release(This->load_group);
 
-    heap_free(This->buf);
-    heap_free(This);
+    free(This->buf);
+    free(This);
 }
 
 static HRESULT ScriptBSC_init_bindinfo(BSCallback *bsc)
@@ -1018,7 +1139,7 @@ static HRESULT ScriptBSC_stop_binding(BSCallback *bsc, HRESULT result)
         script_file_available(This);
     }else {
         FIXME("binding failed %08lx\n", result);
-        heap_free(This->buf);
+        free(This->buf);
         This->buf = NULL;
         This->size = 0;
     }
@@ -1043,7 +1164,7 @@ static HRESULT ScriptBSC_read_data(BSCallback *bsc, IStream *stream)
     HRESULT hres;
 
     if(!This->buf) {
-        This->buf = heap_alloc(128);
+        This->buf = malloc(128);
         if(!This->buf)
             return E_OUTOFMEMORY;
         This->size = 128;
@@ -1052,7 +1173,7 @@ static HRESULT ScriptBSC_read_data(BSCallback *bsc, IStream *stream)
     do {
         if(This->bsc.read >= This->size) {
             void *new_buf;
-            new_buf = heap_realloc(This->buf, This->size << 1);
+            new_buf = realloc(This->buf, This->size << 1);
             if(!new_buf)
                 return E_OUTOFMEMORY;
             This->size <<= 1;
@@ -1065,7 +1186,7 @@ static HRESULT ScriptBSC_read_data(BSCallback *bsc, IStream *stream)
     return S_OK;
 }
 
-static HRESULT ScriptBSC_on_progress(BSCallback *bsc, ULONG status_code, LPCWSTR status_text)
+static HRESULT ScriptBSC_on_progress(BSCallback *bsc, ULONG progress, ULONG total, ULONG status_code, LPCWSTR status_text)
 {
     return S_OK;
 }
@@ -1123,7 +1244,7 @@ HRESULT load_script(HTMLScriptElement *script_elem, const WCHAR *src, BOOL async
         return hres;
     }
 
-    bsc = heap_alloc_zero(sizeof(*bsc));
+    bsc = calloc(1, sizeof(*bsc));
     if(!bsc) {
         IMoniker_Release(mon);
         IUri_Release(uri);
@@ -1135,7 +1256,7 @@ HRESULT load_script(HTMLScriptElement *script_elem, const WCHAR *src, BOOL async
 
     hres = IUri_GetScheme(uri, &bsc->scheme);
     IUri_Release(uri);
-    if(FAILED(hres))
+    if(hres != S_OK)
         bsc->scheme = URL_SCHEME_UNKNOWN;
 
     IHTMLScriptElement_AddRef(&script_elem->IHTMLScriptElement_iface);
@@ -1356,6 +1477,15 @@ void doc_insert_script(HTMLInnerWindow *window, HTMLScriptElement *script_elem, 
         set_script_elem_readystate(script_elem, READYSTATE_COMPLETE);
 }
 
+void init_proxies(HTMLInnerWindow *window)
+{
+    if(!window->doc->browser || window->doc->browser->script_mode != SCRIPTMODE_ACTIVESCRIPT)
+        return;
+
+    /* init jscript engine, which should create the global window and document proxies */
+    get_script_host(window, &CLSID_JScript);
+}
+
 IDispatch *script_parse_event(HTMLInnerWindow *window, LPCWSTR text)
 {
     ScriptHost *script_host;
@@ -1371,7 +1501,7 @@ IDispatch *script_parse_event(HTMLInnerWindow *window, LPCWSTR text)
         LPWSTR language;
         BOOL b;
 
-        language = heap_alloc((ptr-text+1)*sizeof(WCHAR));
+        language = malloc((ptr - text + 1) * sizeof(WCHAR));
         if(!language)
             return NULL;
 
@@ -1380,7 +1510,7 @@ IDispatch *script_parse_event(HTMLInnerWindow *window, LPCWSTR text)
 
         b = get_guid_from_language(language, &guid);
 
-        heap_free(language);
+        free(language);
 
         if(!b) {
             WARN("Could not find language\n");
@@ -1464,6 +1594,16 @@ IDispatch *get_script_disp(ScriptHost *script_host)
     return disp;
 }
 
+IActiveScriptSite *get_first_script_site(HTMLInnerWindow *window)
+{
+    if(list_empty(&window->script_hosts)) {
+        ScriptHost *script_host = create_script_host(window, &CLSID_JScript);
+        if(!script_host)
+            return NULL;
+    }
+    return &LIST_ENTRY(list_head(&window->script_hosts), ScriptHost, entry)->IActiveScriptSite_iface;
+}
+
 static EventTarget *find_event_target(HTMLDocumentNode *doc, HTMLScriptElement *script_elem)
 {
     EventTarget *event_target = NULL;
@@ -1485,7 +1625,7 @@ static EventTarget *find_event_target(HTMLDocumentNode *doc, HTMLScriptElement *
         FIXME("Empty for attribute\n");
     }else if(!wcscmp(target_id, L"document")) {
         event_target = &doc->node.event_target;
-        htmldoc_addref(&doc->basedoc);
+        IHTMLDOMNode_AddRef(&doc->node.IHTMLDOMNode_iface);
     }else if(!wcscmp(target_id, L"window")) {
         if(doc->window) {
             event_target = &doc->window->event_target;
@@ -1554,7 +1694,7 @@ static IDispatch *parse_event_elem(HTMLDocumentNode *doc, HTMLScriptElement *scr
         const PRUnichar *event_val;
 
         nsAString_GetData(&nsstr, &event_val);
-        event = heap_strdupW(event_val);
+        event = wcsdup(event_val);
     }
     nsAString_Finish(&nsstr);
     if(!event)
@@ -1562,7 +1702,7 @@ static IDispatch *parse_event_elem(HTMLDocumentNode *doc, HTMLScriptElement *scr
 
     if(!parse_event_str(event, &args)) {
         WARN("parsing %s failed\n", debugstr_w(event));
-        heap_free(event);
+        free(event);
         return NULL;
     }
 
@@ -1583,7 +1723,7 @@ static IDispatch *parse_event_elem(HTMLDocumentNode *doc, HTMLScriptElement *scr
     }
     nsAString_Finish(&nsstr);
     if(!disp) {
-        heap_free(event);
+        free(event);
         return NULL;
     }
 
@@ -1608,11 +1748,11 @@ void bind_event_scripts(HTMLDocumentNode *doc)
 
     TRACE("%p\n", doc);
 
-    if(!doc->nsdoc)
+    if(!doc->dom_document)
         return;
 
     nsAString_InitDepend(&selector_str, L"script[event]");
-    nsres = nsIDOMDocument_QuerySelectorAll(doc->nsdoc, &selector_str, &node_list);
+    nsres = nsIDOMDocument_QuerySelectorAll(doc->dom_document, &selector_str, &node_list);
     nsAString_Finish(&selector_str);
     if(NS_FAILED(nsres)) {
         ERR("QuerySelectorAll failed: %08lx\n", nsres);
@@ -1656,7 +1796,7 @@ void bind_event_scripts(HTMLDocumentNode *doc)
                     node_release(&plugin_container->element.node);
             }
 
-            heap_free(event);
+            free(event);
             IDispatch_Release(event_disp);
         }
 
@@ -1681,8 +1821,7 @@ BOOL find_global_prop(HTMLInnerWindow *window, BSTR name, DWORD flags, ScriptHos
         hres = IDispatch_QueryInterface(disp, &IID_IDispatchEx, (void**)&dispex);
         if(SUCCEEDED(hres)) {
             /* Avoid looking into ourselves if it's a proxy used as actual global object */
-            if(dispex == &window->base.IDispatchEx_iface ||
-               dispex == &window->base.outer_window->base.IDispatchEx_iface)
+            if(dispex == &window->base.outer_window->base.IDispatchEx_iface)
                 hres = DISP_E_UNKNOWNNAME;
             else
                 hres = IDispatchEx_GetDispID(dispex, name, flags & (~fdexNameEnsure), ret_id);
@@ -1772,6 +1911,22 @@ void update_browser_script_mode(GeckoBrowser *browser, IUri *uri)
         ERR("JavaScript setup failed: %08lx\n", nsres);
 }
 
+void move_script_hosts(HTMLInnerWindow *window, HTMLInnerWindow *new_window)
+{
+    ScriptHost *iter, *iter2;
+
+    if(list_empty(&window->script_hosts))
+        return;
+
+    LIST_FOR_EACH_ENTRY_SAFE(iter, iter2, &window->script_hosts, ScriptHost, entry) {
+        iter->window = new_window;
+        list_remove(&iter->entry);
+        list_add_tail(&new_window->script_hosts, &iter->entry);
+    }
+
+    lock_document_mode(new_window->doc);
+}
+
 void release_script_hosts(HTMLInnerWindow *window)
 {
     script_queue_entry_t *queue_iter;
@@ -1782,7 +1937,7 @@ void release_script_hosts(HTMLInnerWindow *window)
 
         list_remove(&queue_iter->entry);
         IHTMLScriptElement_Release(&queue_iter->script->IHTMLScriptElement_iface);
-        heap_free(queue_iter);
+        free(queue_iter);
     }
 
     while(!list_empty(&window->script_hosts)) {

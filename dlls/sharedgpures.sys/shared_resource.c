@@ -397,7 +397,7 @@ static NTSTATUS WINAPI dispatch_ioctl(DEVICE_OBJECT *device, IRP *irp)
     struct shared_resource *res = &resource_pool[ (UINT_PTR) stack->FileObject->FsContext ];
     NTSTATUS status;
 
-    TRACE( "ioctl %lx insize %lu outsize %lu\n",
+    TRACE( "ioctl %#lx insize %lu outsize %lu\n",
            stack->Parameters.DeviceIoControl.IoControlCode,
            stack->Parameters.DeviceIoControl.InputBufferLength,
            stack->Parameters.DeviceIoControl.OutputBufferLength );
@@ -454,13 +454,13 @@ static NTSTATUS WINAPI dispatch_ioctl(DEVICE_OBJECT *device, IRP *irp)
                                       &irp->IoStatus);
             break;
     default:
-        FIXME( "ioctl %lx not supported\n", stack->Parameters.DeviceIoControl.IoControlCode );
+        FIXME( "ioctl %#lx not supported\n", stack->Parameters.DeviceIoControl.IoControlCode );
         status = STATUS_NOT_SUPPORTED;
         break;
     }
 
     if (!status)
-        stack->FileObject->FsContext = (UINT_PTR)(res - resource_pool);
+        stack->FileObject->FsContext = (void *)(UINT_PTR)(res - resource_pool);
 
     irp->IoStatus.u.Status = status;
     IoCompleteRequest( irp, IO_NO_INCREMENT );

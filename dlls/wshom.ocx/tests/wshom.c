@@ -28,8 +28,20 @@
 
 DEFINE_GUID(GUID_NULL,0,0,0,0,0,0,0,0,0,0,0);
 
-#define EXPECT_HR(hr,hr_exp) \
-    ok(hr == hr_exp, "got 0x%08x, expected 0x%08x\n", hr, hr_exp)
+#define check_interface(a, b, c) check_interface_(__LINE__, a, b, c)
+static void check_interface_(unsigned int line, void *iface_ptr, REFIID iid, BOOL supported)
+{
+    IUnknown *iface = iface_ptr;
+    HRESULT hr, expected_hr;
+    IUnknown *unk;
+
+    expected_hr = supported ? S_OK : E_NOINTERFACE;
+
+    hr = IUnknown_QueryInterface(iface, iid, (void **)&unk);
+    ok_(__FILE__, line)(hr == expected_hr, "Got hr %#lx, expected %#lx.\n", hr, expected_hr);
+    if (SUCCEEDED(hr))
+        IUnknown_Release(unk);
+}
 
 #define test_provideclassinfo(a, b) _test_provideclassinfo((IDispatch*)a, b, __LINE__)
 static void _test_provideclassinfo(IDispatch *disp, const GUID *guid, int line)
@@ -40,13 +52,13 @@ static void _test_provideclassinfo(IDispatch *disp, const GUID *guid, int line)
     HRESULT hr;
 
     hr = IDispatch_QueryInterface(disp, &IID_IProvideClassInfo, (void **)&classinfo);
-    ok_(__FILE__,line) (hr == S_OK, "Failed to get IProvideClassInfo, %#x.\n", hr);
+    ok_(__FILE__,line) (hr == S_OK, "Failed to get IProvideClassInfo, %#lx.\n", hr);
 
     hr = IProvideClassInfo_GetClassInfo(classinfo, &ti);
-    ok_(__FILE__,line) (hr == S_OK, "GetClassInfo() failed, %#x.\n", hr);
+    ok_(__FILE__,line) (hr == S_OK, "GetClassInfo() failed, %#lx.\n", hr);
 
     hr = ITypeInfo_GetTypeAttr(ti, &attr);
-    ok_(__FILE__,line) (hr == S_OK, "GetTypeAttr() failed, %#x.\n", hr);
+    ok_(__FILE__,line) (hr == S_OK, "GetTypeAttr() failed, %#lx.\n", hr);
 
     ok_(__FILE__,line) (IsEqualGUID(&attr->guid, guid), "Unexpected typeinfo %s, expected %s\n", wine_dbgstr_guid(&attr->guid),
         wine_dbgstr_guid(guid));
@@ -84,50 +96,51 @@ static void test_wshshell(void)
     EXCEPINFO ei;
     VARIANT arg, res, arg2;
     BSTR str, ret;
-    DWORD retval, attrs;
+    int retval;
+    DWORD attrs;
     UINT err;
 
     hr = CoCreateInstance(&CLSID_WshShell, NULL, CLSCTX_INPROC_SERVER|CLSCTX_INPROC_HANDLER,
             &IID_IDispatch, (void**)&disp);
-    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
     hr = IDispatch_QueryInterface(disp, &IID_IWshShell3, (void**)&shell);
-    EXPECT_HR(hr, S_OK);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
     test_provideclassinfo(disp, &IID_IWshShell3);
 
     hr = IDispatch_QueryInterface(disp, &IID_IDispatchEx, (void**)&dispex);
-    EXPECT_HR(hr, E_NOINTERFACE);
+    ok(hr == E_NOINTERFACE, "Unexpected hr %#lx.\n", hr);
     IDispatch_Release(disp);
 
     hr = IUnknown_QueryInterface(shell, &IID_IWshShell3, (void**)&sh3);
-    EXPECT_HR(hr, S_OK);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
     hr = IWshShell3_QueryInterface(sh3, &IID_IObjectWithSite, (void**)&unk);
-    ok(hr == E_NOINTERFACE, "got 0x%08x\n", hr);
+    ok(hr == E_NOINTERFACE, "Unexpected hr %#lx.\n", hr);
 
     hr = IWshShell3_QueryInterface(sh3, &IID_IWshShell, (void**)&unk);
-    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
     IUnknown_Release(unk);
 
     hr = IWshShell3_QueryInterface(sh3, &IID_IWshShell2, (void**)&unk);
-    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
     IUnknown_Release(unk);
 
     hr = IWshShell3_get_SpecialFolders(sh3, &coll);
-    EXPECT_HR(hr, S_OK);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
     test_provideclassinfo(coll, &IID_IWshCollection);
 
     hr = IWshCollection_QueryInterface(coll, &IID_IFolderCollection, (void**)&folders);
-    EXPECT_HR(hr, E_NOINTERFACE);
+    ok(hr == E_NOINTERFACE, "Unexpected hr %#lx.\n", hr);
 
     hr = IWshCollection_QueryInterface(coll, &IID_IDispatch, (void**)&disp);
-    EXPECT_HR(hr, S_OK);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
     hr = IDispatch_GetTypeInfo(disp, 0, 0, &ti);
-    EXPECT_HR(hr, S_OK);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
     hr = ITypeInfo_GetTypeAttr(ti, &tattr);
-    EXPECT_HR(hr, S_OK);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
     ok(IsEqualIID(&tattr->guid, &IID_IWshCollection), "got wrong type guid\n");
     ITypeInfo_ReleaseTypeAttr(ti, tattr);
 
@@ -140,12 +153,12 @@ static void test_wshshell(void)
     dp.cArgs = 1;
     dp.cNamedArgs = 0;
     hr = IDispatch_Invoke(disp, DISPID_VALUE, &IID_NULL, 1033, DISPATCH_PROPERTYGET, &dp, &res, &ei, &err);
-    EXPECT_HR(hr, DISP_E_MEMBERNOTFOUND);
+    ok(hr == DISP_E_MEMBERNOTFOUND, "Unexpected hr %#lx.\n", hr);
 
     /* try Item() directly, it returns directory path apparently */
     V_VT(&res) = VT_EMPTY;
     hr = IWshCollection_Item(coll, &arg, &res);
-    EXPECT_HR(hr, S_OK);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
     ok(V_VT(&res) == VT_BSTR, "got res type %d\n", V_VT(&res));
     CHECK_BSTR_LENGTH(V_BSTR(&res));
     SysFreeString(str);
@@ -154,54 +167,54 @@ static void test_wshshell(void)
     /* CreateShortcut() */
     str = SysAllocString(L"file.lnk");
     hr = IWshShell3_CreateShortcut(sh3, str, &shortcut);
-    EXPECT_HR(hr, S_OK);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
     SysFreeString(str);
     hr = IDispatch_QueryInterface(shortcut, &IID_IWshShortcut, (void**)&shcut);
-    EXPECT_HR(hr, S_OK);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
     test_provideclassinfo(shortcut, &IID_IWshShortcut);
 
     hr = IWshShortcut_get_Arguments(shcut, NULL);
-    ok(hr == E_POINTER, "got 0x%08x\n", hr);
+    ok(hr == E_POINTER, "Unexpected hr %#lx.\n", hr);
 
     hr = IWshShortcut_get_IconLocation(shcut, NULL);
-    ok(hr == E_POINTER, "got 0x%08x\n", hr);
+    ok(hr == E_POINTER, "Unexpected hr %#lx.\n", hr);
 
     IWshShortcut_Release(shcut);
     IDispatch_Release(shortcut);
 
     /* ExpandEnvironmentStrings */
     hr = IWshShell3_ExpandEnvironmentStrings(sh3, NULL, NULL);
-    ok(hr == E_POINTER, "got 0x%08x\n", hr);
+    ok(hr == E_POINTER, "Unexpected hr %#lx.\n", hr);
 
     str = SysAllocString(L"%PATH%");
     hr = IWshShell3_ExpandEnvironmentStrings(sh3, str, NULL);
-    ok(hr == E_POINTER, "got 0x%08x\n", hr);
+    ok(hr == E_POINTER, "Unexpected hr %#lx.\n", hr);
     SysFreeString(str);
 
     V_VT(&arg) = VT_BSTR;
     V_BSTR(&arg) = SysAllocString(L"SYSTEM");
     hr = IWshShell3_get_Environment(sh3, &arg, &env);
-    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
     VariantClear(&arg);
 
     hr = IWshEnvironment_get_Item(env, NULL, NULL);
-    ok(hr == E_POINTER, "got 0x%08x\n", hr);
+    ok(hr == E_POINTER, "Unexpected hr %#lx.\n", hr);
     test_provideclassinfo(env, &IID_IWshEnvironment);
 
     ret = (BSTR)0x1;
     hr = IWshEnvironment_get_Item(env, NULL, &ret);
-    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
     ok(ret && !*ret, "got %p\n", ret);
     SysFreeString(ret);
 
     /* invalid var name */
     str = SysAllocString(L"file.lnk");
     hr = IWshEnvironment_get_Item(env, str, NULL);
-    ok(hr == E_POINTER, "got 0x%08x\n", hr);
+    ok(hr == E_POINTER, "Unexpected hr %#lx.\n", hr);
 
     ret = NULL;
     hr = IWshEnvironment_get_Item(env, str, &ret);
-    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
     ok(ret && *ret == 0, "got %s\n", wine_dbgstr_w(ret));
     CHECK_BSTR_LENGTH(ret);
     SysFreeString(ret);
@@ -210,7 +223,7 @@ static void test_wshshell(void)
     /* valid name */
     str = SysAllocString(L"PATH");
     hr = IWshEnvironment_get_Item(env, str, &ret);
-    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
     ok(ret && *ret != 0, "got %s\n", wine_dbgstr_w(ret));
     CHECK_BSTR_LENGTH(ret);
     SysFreeString(ret);
@@ -225,41 +238,53 @@ static void test_wshshell(void)
 
     str = SysAllocString(L"notepad.exe");
     hr = IWshShell3_Run(sh3, str, &arg, &arg2, NULL);
-    ok(hr == E_POINTER, "got 0x%08x\n", hr);
+    ok(hr == E_POINTER, "Unexpected hr %#lx.\n", hr);
 
     retval = 10;
     hr = IWshShell3_Run(sh3, str, NULL, &arg2, &retval);
-    ok(hr == E_POINTER, "got 0x%08x\n", hr);
-    ok(retval == 10, "got %u\n", retval);
+    ok(hr == E_POINTER, "Unexpected hr %#lx.\n", hr);
+    ok(retval == 10, "Unexpected retval %d.\n", retval);
 
     retval = 10;
     hr = IWshShell3_Run(sh3, str, &arg, NULL, &retval);
-    ok(hr == E_POINTER, "got 0x%08x\n", hr);
-    ok(retval == 10, "got %u\n", retval);
+    ok(hr == E_POINTER, "Unexpected hr %#lx.\n", hr);
+    ok(retval == 10, "Unexpected retval %d.\n", retval);
 
     retval = 10;
     V_VT(&arg2) = VT_ERROR;
     V_ERROR(&arg2) = 0;
     hr = IWshShell3_Run(sh3, str, &arg, &arg2, &retval);
-    ok(hr == DISP_E_TYPEMISMATCH, "got 0x%08x\n", hr);
-    ok(retval == 10, "got %u\n", retval);
+    ok(hr == DISP_E_TYPEMISMATCH, "Unexpected hr %#lx.\n", hr);
+    ok(retval == 10, "Unexpected retval %d.\n", retval);
     SysFreeString(str);
 
+    V_VT(&arg) = VT_ERROR;
+    V_ERROR(&arg) = DISP_E_PARAMNOTFOUND;
     V_VT(&arg2) = VT_BOOL;
     V_BOOL(&arg2) = VARIANT_TRUE;
 
     retval = 0xdeadbeef;
     str = SysAllocString(L"cmd.exe /c rd /s /q c:\\nosuchdir");
     hr = IWshShell3_Run(sh3, str, &arg, &arg2, &retval);
-    ok(hr == S_OK, "got 0x%08x\n", hr);
-    todo_wine ok(retval == ERROR_FILE_NOT_FOUND, "got %u\n", retval);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    todo_wine ok(retval == ERROR_FILE_NOT_FOUND, "Unexpected retval %d.\n", retval);
+    SysFreeString(str);
+
+    V_VT(&arg) = VT_I2;
+    V_I2(&arg) = 0;
+
+    retval = 0xdeadbeef;
+    str = SysAllocString(L"cmd.exe /c rd /s /q c:\\nosuchdir");
+    hr = IWshShell3_Run(sh3, str, &arg, &arg2, &retval);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    todo_wine ok(retval == ERROR_FILE_NOT_FOUND, "Unexpected retval %d.\n", retval);
     SysFreeString(str);
 
     retval = 0xdeadbeef;
     str = SysAllocString(L"\"cmd.exe \" /c rd /s /q c:\\nosuchdir");
     hr = IWshShell3_Run(sh3, str, &arg, &arg2, &retval);
-    ok(hr == S_OK, "got 0x%08x\n", hr);
-    todo_wine ok(retval == ERROR_FILE_NOT_FOUND, "got %u\n", retval);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    todo_wine ok(retval == ERROR_FILE_NOT_FOUND, "Unexpected retval %d.\n", retval);
     SysFreeString(str);
 
     GetSystemDirectoryW(path, ARRAY_SIZE(path));
@@ -282,8 +307,8 @@ static void test_wshshell(void)
     retval = 0xdeadbeef;
     str = SysAllocString(buf);
     hr = IWshShell3_Run(sh3, str, &arg, &arg2, &retval);
-    ok(hr == S_OK, "got 0x%08x\n", hr);
-    todo_wine ok(retval == ERROR_FILE_NOT_FOUND, "got %u\n", retval);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    todo_wine ok(retval == ERROR_FILE_NOT_FOUND, "Unexpected retval %d.\n", retval);
     SysFreeString(str);
 
     DeleteFileW(path2);
@@ -296,45 +321,45 @@ static void test_wshshell(void)
 
     str = NULL;
     hr = IWshShell3_get_CurrentDirectory(sh3, &str);
-    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
     ok(str && str[0] != 0, "got empty string\n");
     CHECK_BSTR_LENGTH(str);
     SysFreeString(str);
 
     hr = IWshShell3_put_CurrentDirectory(sh3, NULL);
     ok(hr == E_INVALIDARG ||
-       broken(hr == HRESULT_FROM_WIN32(ERROR_NOACCESS)), "got 0x%08x\n", hr);
+       broken(hr == HRESULT_FROM_WIN32(ERROR_NOACCESS)), "Unexpected hr %#lx.\n", hr);
 
     str = SysAllocString(emptyW);
     hr = IWshShell3_put_CurrentDirectory(sh3, str);
-    ok(hr == HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND), "got 0x%08x\n", hr);
+    ok(hr == HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND), "Unexpected hr %#lx.\n", hr);
     SysFreeString(str);
 
     str = SysAllocString(L"deadparrot");
     hr = IWshShell3_put_CurrentDirectory(sh3, str);
-    ok(hr == HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND), "got 0x%08x\n", hr);
+    ok(hr == HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND), "Unexpected hr %#lx.\n", hr);
     SysFreeString(str);
 
     /* Exec */
     hr = IWshShell3_Exec(sh3, NULL, NULL);
-    ok(hr == E_POINTER, "got 0x%08x\n", hr);
+    ok(hr == E_POINTER, "Unexpected hr %#lx.\n", hr);
 
     hr = IWshShell3_Exec(sh3, NULL, &shexec);
-    ok(hr == DISP_E_EXCEPTION, "got 0x%08x\n", hr);
+    ok(hr == DISP_E_EXCEPTION, "Unexpected hr %#lx.\n", hr);
 
     str = SysAllocString(emptyW);
     hr = IWshShell3_Exec(sh3, str, &shexec);
-    ok(hr == HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND), "got 0x%08x\n", hr);
+    ok(hr == HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND), "Unexpected hr %#lx.\n", hr);
     SysFreeString(str);
 
     str = SysAllocString(L"%deadbeaf% /c echo test");
     hr = IWshShell3_Exec(sh3, str, &shexec);
-    ok(hr == HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND), "got 0x%08x\n", hr);
+    ok(hr == HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND), "Unexpected hr %#lx.\n", hr);
     SysFreeString(str);
 
     str = SysAllocString(L"%ComSpec% /c echo test");
     hr = IWshShell3_Exec(sh3, str, &shexec);
-    ok(hr == HRESULT_FROM_WIN32(ERROR_SUCCESS), "got 0x%08x\n", hr);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
     SysFreeString(str);
 
     IWshCollection_Release(coll);
@@ -380,49 +405,49 @@ static void test_registry(void)
 
     hr = CoCreateInstance(&CLSID_WshShell, NULL, CLSCTX_INPROC_SERVER|CLSCTX_INPROC_HANDLER,
             &IID_IWshShell3, (void**)&sh3);
-    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
     /* RegRead() */
     V_VT(&value) = VT_I2;
     hr = IWshShell3_RegRead(sh3, NULL, &value);
-    ok(hr == E_POINTER, "got 0x%08x\n", hr);
+    ok(hr == E_POINTER, "Unexpected hr %#lx.\n", hr);
     ok(V_VT(&value) == VT_I2, "got %d\n", V_VT(&value));
 
     name = SysAllocString(L"HKEY_broken_key");
     hr = IWshShell3_RegRead(sh3, name, NULL);
-    ok(hr == E_POINTER, "got 0x%08x\n", hr);
+    ok(hr == E_POINTER, "Unexpected hr %#lx.\n", hr);
     V_VT(&value) = VT_I2;
     hr = IWshShell3_RegRead(sh3, name, &value);
-    ok(hr == HRESULT_FROM_WIN32(ERROR_PATH_NOT_FOUND), "got 0x%08x\n", hr);
+    ok(hr == HRESULT_FROM_WIN32(ERROR_PATH_NOT_FOUND), "Unexpected hr %#lx.\n", hr);
     ok(V_VT(&value) == VT_I2, "got %d\n", V_VT(&value));
     SysFreeString(name);
 
     name = SysAllocString(L"HKEY_CURRENT_USERa");
     V_VT(&value) = VT_I2;
     hr = IWshShell3_RegRead(sh3, name, &value);
-    ok(hr == HRESULT_FROM_WIN32(ERROR_PATH_NOT_FOUND), "got 0x%08x\n", hr);
+    ok(hr == HRESULT_FROM_WIN32(ERROR_PATH_NOT_FOUND), "Unexpected hr %#lx.\n", hr);
     ok(V_VT(&value) == VT_I2, "got %d\n", V_VT(&value));
     SysFreeString(name);
 
     ret = RegCreateKeyA(HKEY_CURRENT_USER, "Software\\Wine\\Test", &root);
-    ok(ret == 0, "got %d\n", ret);
+    ok(!ret, "Unexpected retval %ld.\n", ret);
 
     ret = RegSetValueExA(root, "regsz", 0, REG_SZ, (const BYTE*)"foobar", 7);
-    ok(ret == 0, "got %d\n", ret);
+    ok(!ret, "Unexpected retval %ld.\n", ret);
 
     ret = RegSetValueExA(root, "regsz2", 0, REG_SZ, (const BYTE*)"foobar\0f", 9);
-    ok(ret == 0, "got %d\n", ret);
+    ok(!ret, "Unexpected retval %ld.\n", ret);
 
     ret = RegSetValueExA(root, "regmultisz", 0, REG_MULTI_SZ, (const BYTE*)"foo\0bar\0", 9);
-    ok(ret == 0, "got %d\n", ret);
+    ok(!ret, "Unexpected retval %ld.\n", ret);
 
     dwvalue = 10;
     ret = RegSetValueExA(root, "regdword", 0, REG_DWORD, (const BYTE*)&dwvalue, sizeof(dwvalue));
-    ok(ret == 0, "got %d\n", ret);
+    ok(!ret, "Unexpected retval %ld.\n", ret);
 
     dwvalue = 11;
     ret = RegSetValueExA(root, "regbinary", 0, REG_BINARY, (const BYTE*)&dwvalue, sizeof(dwvalue));
-    ok(ret == 0, "got %d\n", ret);
+    ok(!ret, "Unexpected retval %ld.\n", ret);
 
     /* REG_SZ */
     lstrcpyW(pathW, keypathW);
@@ -430,7 +455,7 @@ static void test_registry(void)
     name = SysAllocString(pathW);
     VariantInit(&value);
     hr = IWshShell3_RegRead(sh3, name, &value);
-    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
     ok(V_VT(&value) == VT_BSTR, "got %d\n", V_VT(&value));
     ok(!lstrcmpW(V_BSTR(&value), L"foobar"), "got %s\n", wine_dbgstr_w(V_BSTR(&value)));
     CHECK_BSTR_LENGTH(V_BSTR(&value));
@@ -443,7 +468,7 @@ static void test_registry(void)
     name = SysAllocString(pathW);
     VariantInit(&value);
     hr = IWshShell3_RegRead(sh3, name, &value);
-    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
     ok(V_VT(&value) == VT_BSTR, "got %d\n", V_VT(&value));
     ok(SysStringLen(V_BSTR(&value)) == 6, "len %d\n", SysStringLen(V_BSTR(&value)));
     CHECK_BSTR_LENGTH(V_BSTR(&value));
@@ -456,9 +481,9 @@ static void test_registry(void)
     name = SysAllocString(pathW);
     VariantInit(&value);
     hr = IWshShell3_RegRead(sh3, name, &value);
-    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
     ok(V_VT(&value) == VT_I4, "got %d\n", V_VT(&value));
-    ok(V_I4(&value) == 10, "got %d\n", V_I4(&value));
+    ok(V_I4(&value) == 10, "Unexpected value %ld.\n", V_I4(&value));
     SysFreeString(name);
 
     /* REG_BINARY */
@@ -467,26 +492,26 @@ static void test_registry(void)
     name = SysAllocString(pathW);
     VariantInit(&value);
     hr = IWshShell3_RegRead(sh3, name, &value);
-    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
     ok(V_VT(&value) == (VT_ARRAY|VT_VARIANT), "got 0x%x\n", V_VT(&value));
     dim = SafeArrayGetDim(V_ARRAY(&value));
     ok(dim == 1, "got %u\n", dim);
 
     hr = SafeArrayGetLBound(V_ARRAY(&value), 1, &bound);
-    ok(hr == S_OK, "got 0x%08x\n", hr);
-    ok(bound == 0, "got %u\n", bound);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    ok(bound == 0, "Unexpected value %lu.\n", bound);
 
     hr = SafeArrayGetUBound(V_ARRAY(&value), 1, &bound);
-    ok(hr == S_OK, "got 0x%08x\n", hr);
-    ok(bound == 3, "got %u\n", bound);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    ok(bound == 3, "Unexpected value %lu.\n", bound);
 
     hr = SafeArrayGetVartype(V_ARRAY(&value), &vartype);
-    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
     ok(vartype == VT_VARIANT, "got %d\n", vartype);
 
     bound = 0;
     hr = SafeArrayGetElement(V_ARRAY(&value), &bound, &v);
-    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
     ok(V_VT(&v) == VT_UI1, "got %d\n", V_VT(&v));
     ok(V_UI1(&v) == 11, "got %u\n", V_UI1(&v));
     VariantClear(&v);
@@ -499,7 +524,7 @@ static void test_registry(void)
     name = SysAllocString(pathW);
     VariantInit(&value);
     hr = IWshShell3_RegRead(sh3, name, &value);
-    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
     ok(V_VT(&value) == (VT_ARRAY|VT_VARIANT), "got 0x%x\n", V_VT(&value));
     SysFreeString(name);
 
@@ -507,20 +532,20 @@ static void test_registry(void)
     ok(dim == 1, "got %u\n", dim);
 
     hr = SafeArrayGetLBound(V_ARRAY(&value), 1, &bound);
-    ok(hr == S_OK, "got 0x%08x\n", hr);
-    ok(bound == 0, "got %u\n", bound);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    ok(bound == 0, "Unexpected value %lu.\n", bound);
 
     hr = SafeArrayGetUBound(V_ARRAY(&value), 1, &bound);
-    ok(hr == S_OK, "got 0x%08x\n", hr);
-    ok(bound == 1, "got %u\n", bound);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    ok(bound == 1, "Unexpected value %lu.\n", bound);
 
     hr = SafeArrayGetVartype(V_ARRAY(&value), &vartype);
-    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
     ok(vartype == VT_VARIANT, "got %d\n", vartype);
 
     bound = 0;
     hr = SafeArrayGetElement(V_ARRAY(&value), &bound, &v);
-    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
     ok(V_VT(&v) == VT_BSTR, "got %d\n", V_VT(&v));
     ok(!lstrcmpW(V_BSTR(&v), L"foo"), "got %s\n", wine_dbgstr_w(V_BSTR(&v)));
     CHECK_BSTR_LENGTH(V_BSTR(&v));
@@ -530,7 +555,7 @@ static void test_registry(void)
     name = SysAllocString(L"HKEY_CURRENT_USER\\Software\\Wine\\Test\\regsz1");
     V_VT(&value) = VT_I2;
     hr = IWshShell3_RegRead(sh3, name, &value);
-    ok(hr == HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND), "got 0x%08x\n", hr);
+    ok(hr == HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND), "Unexpected hr %#lx.\n", hr);
     ok(V_VT(&value) == VT_I2, "got %d\n", V_VT(&value));
     VariantClear(&value);
     SysFreeString(name);
@@ -539,76 +564,76 @@ static void test_registry(void)
 
     /* RegWrite() */
     ret = RegCreateKeyA(HKEY_CURRENT_USER, "Software\\Wine\\Test", &root);
-    ok(ret == 0, "got %d\n", ret);
+    ok(!ret, "Unexpected retval %ld.\n", ret);
 
     hr = IWshShell3_RegWrite(sh3, NULL, NULL, NULL);
-    ok(hr == E_POINTER, "got 0x%08x\n", hr);
+    ok(hr == E_POINTER, "Unexpected hr %#lx.\n", hr);
 
     lstrcpyW(pathW, keypathW);
     lstrcatW(pathW, regszW);
     name = SysAllocString(pathW);
 
     hr = IWshShell3_RegWrite(sh3, name, NULL, NULL);
-    ok(hr == E_POINTER, "got 0x%08x\n", hr);
+    ok(hr == E_POINTER, "Unexpected hr %#lx.\n", hr);
 
     VariantInit(&value);
     hr = IWshShell3_RegWrite(sh3, name, &value, NULL);
-    ok(hr == E_POINTER, "got 0x%08x\n", hr);
+    ok(hr == E_POINTER, "Unexpected hr %#lx.\n", hr);
 
     hr = IWshShell3_RegWrite(sh3, name, &value, &value);
-    ok(hr == E_INVALIDARG, "got 0x%08x\n", hr);
+    ok(hr == E_INVALIDARG, "Unexpected hr %#lx.\n", hr);
 
     /* type is optional */
     V_VT(&v) = VT_ERROR;
     V_ERROR(&v) = DISP_E_PARAMNOTFOUND;
     hr = IWshShell3_RegWrite(sh3, name, &value, &v);
-    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
     /* default type is REG_SZ */
     V_VT(&value) = VT_I4;
     V_I4(&value) = 12;
     hr = IWshShell3_RegWrite(sh3, name, &value, &v);
-    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
     type = REG_NONE;
     ret = RegQueryValueExA(root, "regsz", 0, &type, NULL, NULL);
-    ok(ret == ERROR_SUCCESS, "got %d\n", ret);
-    ok(type == REG_SZ, "got %d\n", type);
+    ok(!ret, "Unexpected retval %ld.\n", ret);
+    ok(type == REG_SZ, "Unexpected type %ld.\n", type);
 
     ret = RegDeleteValueA(root, "regsz");
-    ok(ret == ERROR_SUCCESS, "got %d\n", ret);
+    ok(!ret, "Unexpected retval %ld.\n", ret);
     V_VT(&value) = VT_BSTR;
     V_BSTR(&value) = SysAllocString(regszW);
     hr = IWshShell3_RegWrite(sh3, name, &value, &v);
-    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
     VariantClear(&value);
 
     type = REG_NONE;
     ret = RegQueryValueExA(root, "regsz", 0, &type, NULL, NULL);
-    ok(ret == ERROR_SUCCESS, "got %d\n", ret);
-    ok(type == REG_SZ, "got %d\n", type);
+    ok(!ret, "Unexpected retval %ld.\n", ret);
+    ok(type == REG_SZ, "Unexpected type %ld.\n", type);
 
     ret = RegDeleteValueA(root, "regsz");
-    ok(ret == ERROR_SUCCESS, "got %d\n", ret);
+    ok(!ret, "Unexpected retval %ld.\n", ret);
     V_VT(&value) = VT_R4;
     V_R4(&value) = 1.2;
     hr = IWshShell3_RegWrite(sh3, name, &value, &v);
-    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
     VariantClear(&value);
 
     type = REG_NONE;
     ret = RegQueryValueExA(root, "regsz", 0, &type, NULL, NULL);
-    ok(ret == ERROR_SUCCESS, "got %d\n", ret);
-    ok(type == REG_SZ, "got %d\n", type);
+    ok(!ret, "Unexpected retval %ld.\n", ret);
+    ok(type == REG_SZ, "Unexpected type %ld.\n", type);
 
     ret = RegDeleteValueA(root, "regsz");
-    ok(ret == ERROR_SUCCESS, "got %d\n", ret);
+    ok(!ret, "Unexpected retval %ld.\n", ret);
     V_VT(&value) = VT_R4;
     V_R4(&value) = 1.2;
     V_VT(&v) = VT_I2;
     V_I2(&v) = 1;
     hr = IWshShell3_RegWrite(sh3, name, &value, &v);
-    ok(hr == E_INVALIDARG, "got 0x%08x\n", hr);
+    ok(hr == E_INVALIDARG, "Unexpected hr %#lx.\n", hr);
     VariantClear(&value);
 
     SysFreeString(name);
@@ -627,17 +652,17 @@ static void test_popup(void)
 
     hr = CoCreateInstance(&CLSID_WshShell, NULL, CLSCTX_INPROC_SERVER | CLSCTX_INPROC_HANDLER,
             &IID_IWshShell, (void **)&sh);
-    ok(hr == S_OK, "Failed to create WshShell object, hr %#x.\n", hr);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
     button = 123;
     text = SysAllocString(L"Text");
 
     hr = IWshShell_Popup(sh, NULL, NULL, NULL, NULL, &button);
-    ok(hr == E_POINTER, "Unexpected retval %#x.\n", hr);
+    ok(hr == E_POINTER, "Unexpected hr %#lx.\n", hr);
     ok(button == 123, "Unexpected button id %d.\n", button);
 
     hr = IWshShell_Popup(sh, text, NULL, NULL, NULL, &button);
-    ok(hr == E_POINTER, "Unexpected retval %#x.\n", hr);
+    ok(hr == E_POINTER, "Unexpected hr %#lx.\n", hr);
     ok(button == 123, "Unexpected button id %d.\n", button);
 
     V_VT(&optional) = VT_ERROR;
@@ -653,15 +678,53 @@ static void test_popup(void)
     V_BSTR(&title) = NULL;
 
     hr = IWshShell_Popup(sh, text, &timeout, &optional, &type, &button);
-    ok(hr == S_OK, "Unexpected retval %#x.\n", hr);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
     ok(button == -1, "Unexpected button id %d.\n", button);
 
     hr = IWshShell_Popup(sh, text, &timeout, &title, &optional, &button);
-    ok(hr == S_OK, "Unexpected retval %#x.\n", hr);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
     ok(button == -1, "Unexpected button id %d.\n", button);
 
     SysFreeString(text);
     IWshShell_Release(sh);
+}
+
+static void test_wshnetwork(void)
+{
+    IDispatch *disp;
+    IWshNetwork2 *nw2;
+    BSTR str,username;
+    HRESULT hr;
+    DWORD len = 0;
+    BOOL ret;
+
+    hr = CoCreateInstance(&CLSID_WshNetwork, NULL, CLSCTX_INPROC_SERVER|CLSCTX_INPROC_HANDLER,
+            &IID_IDispatch, (void**)&disp);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+
+    check_interface(disp, &IID_IWshNetwork, TRUE);
+    check_interface(disp, &IID_IWshNetwork2, TRUE);
+    check_interface(disp, &IID_IDispatchEx, FALSE);
+    check_interface(disp, &IID_IObjectWithSite, FALSE);
+
+    hr = IDispatch_QueryInterface(disp, &IID_IWshNetwork2, (void**)&nw2);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+
+    str = NULL;
+    hr = IWshNetwork2_get_UserName(nw2, &str);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    ok(str && str[0] != 0, "got empty string\n");
+    CHECK_BSTR_LENGTH(str);
+    GetUserNameW(NULL, &len);
+    ok(len > 0, "Unexpected len %ld.\n", len);
+    username = SysAllocStringLen(NULL, len-1);
+    ret = GetUserNameW(username, &len);
+    ok(ret == TRUE, "GetUserNameW returned %d.\n", ret);
+    ok(!wcscmp(str,username), "user names do not match %s %s.\n", debugstr_w(str), debugstr_w(username));
+    SysFreeString(username);
+    SysFreeString(str);
+
+    IDispatch_Release(disp);
 }
 
 START_TEST(wshom)
@@ -673,8 +736,9 @@ START_TEST(wshom)
 
     hr = CoCreateInstance(&CLSID_WshShell, NULL, CLSCTX_INPROC_SERVER|CLSCTX_INPROC_HANDLER,
             &IID_IUnknown, (void**)&unk);
-    if (FAILED(hr)) {
-        win_skip("Could not create WshShell object: %08x\n", hr);
+    if (FAILED(hr))
+    {
+        win_skip("Could not create WshShell object: %#lx.\n", hr);
         return;
     }
     IUnknown_Release(unk);
@@ -682,6 +746,7 @@ START_TEST(wshom)
     test_wshshell();
     test_registry();
     test_popup();
+    test_wshnetwork();
 
     CoUninitialize();
 }

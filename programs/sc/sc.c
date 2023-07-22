@@ -27,6 +27,26 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(sc);
 
+static BOOL parse_string_param( int argc, const WCHAR *argv[], unsigned int *index,
+                                const WCHAR *param_name, size_t name_len, const WCHAR **out )
+{
+    if (!wcsnicmp( argv[*index], param_name, name_len ))
+    {
+        if (argv[*index][name_len])
+        {
+            *out = &argv[*index][name_len];
+            return TRUE;
+        }
+        else if (*index < argc - 1)
+        {
+            *index += 1;
+            *out = argv[*index];
+            return TRUE;
+        }
+    }
+    return FALSE;
+}
+
 struct create_params
 {
     const WCHAR *displayname;
@@ -56,48 +76,56 @@ static BOOL parse_create_params( int argc, const WCHAR *argv[], struct create_pa
     cp->obj         = NULL;
     cp->password    = NULL;
 
+#define PARSE(x, y) parse_string_param( (argc), (argv), &(i), (x), ARRAY_SIZE(x) - 1, (y) )
     for (i = 0; i < argc; i++)
     {
-        if (!wcsicmp( argv[i], L"displayname=" ) && i < argc - 1) cp->displayname = argv[i + 1];
-        if (!wcsicmp( argv[i], L"binpath=" ) && i < argc - 1) cp->binpath = argv[i + 1];
-        if (!wcsicmp( argv[i], L"group=" ) && i < argc - 1) cp->group = argv[i + 1];
-        if (!wcsicmp( argv[i], L"depend=" ) && i < argc - 1) cp->depend = argv[i + 1];
-        if (!wcsicmp( argv[i], L"obj=" ) && i < argc - 1) cp->obj = argv[i + 1];
-        if (!wcsicmp( argv[i], L"password=" ) && i < argc - 1) cp->password = argv[i + 1];
+        const WCHAR *tag, *type, *start, *error;
 
-        if (!wcsicmp( argv[i], L"tag=" ) && i < argc - 1)
+        if (PARSE( L"displayname=", &cp->displayname )) continue;
+        if (PARSE( L"binpath=", &cp->binpath )) continue;
+        if (PARSE( L"group=", &cp->group )) continue;
+        if (PARSE( L"depend=", &cp->depend )) continue;
+        if (PARSE( L"obj=", &cp->obj )) continue;
+        if (PARSE( L"password=", &cp->password )) continue;
+
+        if (PARSE( L"tag=", &tag ))
         {
-            if (!wcsicmp( argv[i], L"yes" ))
+            if (!wcsicmp( tag, L"yes" ))
             {
                 WINE_FIXME("tag argument not supported\n");
                 cp->tag = TRUE;
             }
+            continue;
         }
-        if (!wcsicmp( argv[i], L"type=" ) && i < argc - 1)
+        if (PARSE( L"type=", &type ))
         {
-            if (!wcsicmp( argv[i + 1], L"own" )) cp->type = SERVICE_WIN32_OWN_PROCESS;
-            if (!wcsicmp( argv[i + 1], L"share" )) cp->type = SERVICE_WIN32_SHARE_PROCESS;
-            if (!wcsicmp( argv[i + 1], L"kernel" )) cp->type = SERVICE_KERNEL_DRIVER;
-            if (!wcsicmp( argv[i + 1], L"filesys" )) cp->type = SERVICE_FILE_SYSTEM_DRIVER;
-            if (!wcsicmp( argv[i + 1], L"rec" )) cp->type = SERVICE_RECOGNIZER_DRIVER;
-            if (!wcsicmp( argv[i + 1], L"interact" )) cp->type |= SERVICE_INTERACTIVE_PROCESS;
+            if (!wcsicmp( type, L"own" )) cp->type = SERVICE_WIN32_OWN_PROCESS;
+            else if (!wcsicmp( type, L"share" )) cp->type = SERVICE_WIN32_SHARE_PROCESS;
+            else if (!wcsicmp( type, L"kernel" )) cp->type = SERVICE_KERNEL_DRIVER;
+            else if (!wcsicmp( type, L"filesys" )) cp->type = SERVICE_FILE_SYSTEM_DRIVER;
+            else if (!wcsicmp( type, L"rec" )) cp->type = SERVICE_RECOGNIZER_DRIVER;
+            else if (!wcsicmp( type, L"interact" )) cp->type |= SERVICE_INTERACTIVE_PROCESS;
+            continue;
         }
-        if (!wcsicmp( argv[i], L"start=" ) && i < argc - 1)
+        if (PARSE( L"start=", &start ))
         {
-            if (!wcsicmp( argv[i + 1], L"boot" )) cp->start = SERVICE_BOOT_START;
-            if (!wcsicmp( argv[i + 1], L"system" )) cp->start = SERVICE_SYSTEM_START;
-            if (!wcsicmp( argv[i + 1], L"auto" )) cp->start = SERVICE_AUTO_START;
-            if (!wcsicmp( argv[i + 1], L"demand" )) cp->start = SERVICE_DEMAND_START;
-            if (!wcsicmp( argv[i + 1], L"disabled" )) cp->start = SERVICE_DISABLED;
+            if (!wcsicmp( start, L"boot" )) cp->start = SERVICE_BOOT_START;
+            else if (!wcsicmp( start, L"system" )) cp->start = SERVICE_SYSTEM_START;
+            else if (!wcsicmp( start, L"auto" )) cp->start = SERVICE_AUTO_START;
+            else if (!wcsicmp( start, L"demand" )) cp->start = SERVICE_DEMAND_START;
+            else if (!wcsicmp( start, L"disabled" )) cp->start = SERVICE_DISABLED;
+            continue;
         }
-        if (!wcsicmp( argv[i], L"error=" ) && i < argc - 1)
+        if (PARSE( L"error=", &error ))
         {
-            if (!wcsicmp( argv[i + 1], L"normal" )) cp->error = SERVICE_ERROR_NORMAL;
-            if (!wcsicmp( argv[i + 1], L"severe" )) cp->error = SERVICE_ERROR_SEVERE;
-            if (!wcsicmp( argv[i + 1], L"critical" )) cp->error = SERVICE_ERROR_CRITICAL;
-            if (!wcsicmp( argv[i + 1], L"ignore" )) cp->error = SERVICE_ERROR_IGNORE;
+            if (!wcsicmp( error, L"normal" )) cp->error = SERVICE_ERROR_NORMAL;
+            else if (!wcsicmp( error, L"severe" )) cp->error = SERVICE_ERROR_SEVERE;
+            else if (!wcsicmp( error, L"critical" )) cp->error = SERVICE_ERROR_CRITICAL;
+            else if (!wcsicmp( error, L"ignore" )) cp->error = SERVICE_ERROR_IGNORE;
+            continue;
         }
     }
+#undef PARSE
     if (!cp->binpath) return FALSE;
     return TRUE;
 }
@@ -156,17 +184,25 @@ static BOOL parse_failure_params( int argc, const WCHAR *argv[], SERVICE_FAILURE
     fa->cActions      = 0;
     fa->lpsaActions   = NULL;
 
+#define PARSE(x, y) parse_string_param( (argc), (argv), &(i), (x), ARRAY_SIZE(x) - 1, (y) )
     for (i = 0; i < argc; i++)
     {
-        if (!wcsicmp( argv[i], L"reset=" ) && i < argc - 1) fa->dwResetPeriod = wcstol( argv[i + 1], NULL, 10 );
-        if (!wcsicmp( argv[i], L"reboot=" ) && i < argc - 1) fa->lpRebootMsg = (WCHAR *)argv[i + 1];
-        if (!wcsicmp( argv[i], L"command=" ) && i < argc - 1) fa->lpCommand = (WCHAR *)argv[i + 1];
-        if (!wcsicmp( argv[i], L"actions=" ))
+        const WCHAR *reset, *actions;
+
+        if (PARSE( L"reset=", &reset ))
         {
-            if (i == argc - 1) return FALSE;
-            if (!parse_failure_actions( argv[i + 1], fa )) return FALSE;
+            fa->dwResetPeriod = wcstol( reset, NULL, 10 );
+            continue;
+        }
+        if (PARSE( L"reboot=", (const WCHAR **)&fa->lpRebootMsg )) continue;
+        if (PARSE( L"command=", (const WCHAR **)&fa->lpCommand )) continue;
+        if (PARSE( L"actions=", &actions ))
+        {
+            if (!parse_failure_actions( actions, fa )) return FALSE;
+            continue;
         }
     }
+#undef PARSE
     return TRUE;
 }
 
@@ -174,6 +210,58 @@ static void usage( void )
 {
     WINE_MESSAGE( "Usage: sc command servicename [parameter= value ...]\n" );
     exit( 1 );
+}
+
+static const WCHAR *service_type_string( DWORD type )
+{
+    switch (type)
+    {
+        case SERVICE_WIN32_OWN_PROCESS: return L"WIN32_OWN_PROCESS";
+        case SERVICE_WIN32_SHARE_PROCESS: return L"WIN32_SHARE_PROCESS";
+        case SERVICE_WIN32: return L"WIN32";
+        default: return L"";
+    }
+}
+
+static const WCHAR *service_state_string( DWORD state )
+{
+    static const WCHAR * const state_str[] = { L"", L"STOPPED", L"START_PENDING",
+        L"STOP_PENDING", L"RUNNING", L"CONTINUE_PENDING", L"PAUSE_PENDING", L"PAUSED" };
+
+    if (state < ARRAY_SIZE( state_str )) return state_str[ state ];
+    return L"";
+}
+
+static BOOL query_service( SC_HANDLE manager, const WCHAR *name )
+{
+    SC_HANDLE service;
+    SERVICE_STATUS status;
+    BOOL ret = FALSE;
+
+    service = OpenServiceW( manager, name, SERVICE_QUERY_STATUS );
+    if (service)
+    {
+        ret = QueryServiceStatus( service, &status );
+        if (!ret)
+            WINE_ERR("failed to query service status %lu\n", GetLastError());
+        else
+            printf( "SERVICE_NAME: %ls\n"
+                    "        TYPE               : %lx  %ls\n"
+                    "        STATE              : %lx  %ls\n"
+                    "        WIN32_EXIT_CODE    : %lu  (0x%lx)\n"
+                    "        SERVICE_EXIT_CODE  : %lu  (0x%lx)\n"
+                    "        CHECKPOINT         : 0x%lx\n"
+                    "        WAIT_HINT          : 0x%lx\n",
+                    name, status.dwServiceType, service_type_string( status.dwServiceType ),
+                    status.dwCurrentState, service_state_string( status.dwCurrentState ),
+                    status.dwWin32ExitCode, status.dwWin32ExitCode,
+                    status.dwServiceSpecificExitCode, status.dwServiceSpecificExitCode,
+                    status.dwCheckPoint, status.dwWaitHint );
+        CloseServiceHandle( service );
+    }
+    else WINE_ERR("failed to open service %lu\n", GetLastError());
+
+    return ret;
 }
 
 int __cdecl wmain( int argc, const WCHAR *argv[] )
@@ -208,7 +296,7 @@ int __cdecl wmain( int argc, const WCHAR *argv[] )
         }
         if (!parse_create_params( argc - 3, argv + 3, &cp ))
         {
-            WINE_WARN("failed to parse create parameters\n");
+            WINE_ERR("failed to parse create parameters\n");
             CloseServiceHandle( manager );
             return 1;
         }
@@ -220,7 +308,7 @@ int __cdecl wmain( int argc, const WCHAR *argv[] )
             CloseServiceHandle( service );
             ret = TRUE;
         }
-        else WINE_TRACE("failed to create service %u\n", GetLastError());
+        else WINE_ERR("failed to create service %lu\n", GetLastError());
     }
     else if (!wcsicmp( argv[1], L"description" ))
     {
@@ -230,10 +318,10 @@ int __cdecl wmain( int argc, const WCHAR *argv[] )
             SERVICE_DESCRIPTIONW sd;
             sd.lpDescription = argc > 3 ? (WCHAR *)argv[3] : NULL;
             ret = ChangeServiceConfig2W( service, SERVICE_CONFIG_DESCRIPTION, &sd );
-            if (!ret) WINE_TRACE("failed to set service description %u\n", GetLastError());
+            if (!ret) WINE_ERR("failed to set service description %lu\n", GetLastError());
             CloseServiceHandle( service );
         }
-        else WINE_TRACE("failed to open service %u\n", GetLastError());
+        else WINE_ERR("failed to open service %lu\n", GetLastError());
     }
     else if (!wcsicmp( argv[1], L"failure" ))
     {
@@ -244,14 +332,14 @@ int __cdecl wmain( int argc, const WCHAR *argv[] )
             if (parse_failure_params( argc - 3, argv + 3, &sfa ))
             {
                 ret = ChangeServiceConfig2W( service, SERVICE_CONFIG_FAILURE_ACTIONS, &sfa );
-                if (!ret) WINE_TRACE("failed to set service failure actions %u\n", GetLastError());
+                if (!ret) WINE_ERR("failed to set service failure actions %lu\n", GetLastError());
                 HeapFree( GetProcessHeap(), 0, sfa.lpsaActions );
             }
             else
-                WINE_WARN("failed to parse failure parameters\n");
+                WINE_ERR("failed to parse failure parameters\n");
             CloseServiceHandle( service );
         }
-        else WINE_TRACE("failed to open service %u\n", GetLastError());
+        else WINE_ERR("failed to open service %lu\n", GetLastError());
     }
     else if (!wcsicmp( argv[1], L"delete" ))
     {
@@ -259,10 +347,10 @@ int __cdecl wmain( int argc, const WCHAR *argv[] )
         if (service)
         {
             ret = DeleteService( service );
-            if (!ret) WINE_TRACE("failed to delete service %u\n", GetLastError());
+            if (!ret) WINE_ERR("failed to delete service %lu\n", GetLastError());
             CloseServiceHandle( service );
         }
-        else WINE_TRACE("failed to open service %u\n", GetLastError());
+        else WINE_ERR("failed to open service %lu\n", GetLastError());
     }
     else if (!wcsicmp( argv[1], L"start" ))
     {
@@ -270,10 +358,11 @@ int __cdecl wmain( int argc, const WCHAR *argv[] )
         if (service)
         {
             ret = StartServiceW( service, argc - 3, argv + 3 );
-            if (!ret) WINE_TRACE("failed to start service %u\n", GetLastError());
+            if (!ret) WINE_ERR("failed to start service %lu\n", GetLastError());
+            else query_service( manager, argv[2] );
             CloseServiceHandle( service );
         }
-        else WINE_TRACE("failed to open service %u\n", GetLastError());
+        else WINE_ERR("failed to open service %lu\n", GetLastError());
     }
     else if (!wcsicmp( argv[1], L"stop" ))
     {
@@ -281,10 +370,15 @@ int __cdecl wmain( int argc, const WCHAR *argv[] )
         if (service)
         {
             ret = ControlService( service, SERVICE_CONTROL_STOP, &status );
-            if (!ret) WINE_TRACE("failed to stop service %u\n", GetLastError());
+            if (!ret) WINE_ERR("failed to stop service %lu\n", GetLastError());
+            else query_service( manager, argv[2] );
             CloseServiceHandle( service );
         }
-        else WINE_TRACE("failed to open service %u\n", GetLastError());
+        else WINE_ERR("failed to open service %lu\n", GetLastError());
+    }
+    else if (!wcsicmp( argv[1], L"query" ))
+    {
+        ret = query_service( manager, argv[2] );
     }
     else if (!wcsicmp( argv[1], L"sdset" ))
     {

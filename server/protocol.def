@@ -1529,22 +1529,22 @@ enum server_fd_type
 @REQ(recv_socket)
     int          oob;           /* are we receiving OOB data? */
     async_data_t async;         /* async I/O parameters */
-    unsigned int status;        /* status of initial call */
-    unsigned int total;         /* number of bytes already read */
+    int          force_async;   /* Force asynchronous mode? */
 @REPLY
     obj_handle_t wait;          /* handle to wait on for blocking recv */
     unsigned int options;       /* device open options */
+    int          nonblocking;   /* is socket non-blocking? */
 @END
 
 
 /* Perform a send on a socket */
 @REQ(send_socket)
     async_data_t async;         /* async I/O parameters */
-    unsigned int status;        /* status of initial call */
-    unsigned int total;         /* number of bytes already sent */
+    int          force_async;   /* Force asynchronous mode? */
 @REPLY
     obj_handle_t wait;          /* handle to wait on for blocking send */
     unsigned int options;       /* device open options */
+    int          nonblocking;   /* is socket non-blocking? */
 @END
 
 
@@ -1815,7 +1815,6 @@ struct process_info
     VARARG(class,unicode_str);         /* class name */
 @REPLY
     obj_handle_t hkey;         /* handle to the created key */
-    int          created;      /* has it been newly created? */
 @END
 
 /* Open a registry key */
@@ -1838,6 +1837,18 @@ struct process_info
 /* Flush a registry key */
 @REQ(flush_key)
     obj_handle_t hkey;         /* handle to the key */
+@REPLY
+    abstime_t   timestamp_counter; /* branch last change timestamp counter */
+    data_size_t total;             /* total length needed for data */
+    int         branch_count;      /* number of registry branches to flush */
+    VARARG(data,bytes);            /* registry data */
+@END
+
+
+/* Clear KEY_DIRTY after key flush */
+@REQ(flush_key_done)
+    abstime_t    timestamp_counter; /* timestamp counter returned from flush_key */
+    int          branch;            /* saved registry branch id */
 @END
 
 
@@ -1918,11 +1929,19 @@ struct process_info
 @END
 
 
-/* Save a registry branch to a file */
+/* Return full registry branch non-volatile data for saving */
 @REQ(save_registry)
-    obj_handle_t hkey;         /* key to save */
-    obj_handle_t file;         /* file to save to */
+    obj_handle_t hkey;  /* key to save */
+@REPLY
+    data_size_t  total; /* total length needed for data */
+    VARARG(data,bytes); /* registry data */
 @END
+enum prefix_type
+{
+    PREFIX_UNKNOWN,
+    PREFIX_32BIT,
+    PREFIX_64BIT,
+};
 
 
 /* Add a registry key change notification */
@@ -1931,6 +1950,13 @@ struct process_info
     obj_handle_t event;        /* event to set */
     int          subtree;      /* should we watch the whole subtree? */
     unsigned int filter;       /* things to watch */
+@END
+
+
+/* Rename a registry key */
+@REQ(rename_key)
+    obj_handle_t hkey;         /* handle to the key to be renamed */
+    VARARG(name,unicode_str);  /* new name */
 @END
 
 
@@ -2231,6 +2257,11 @@ enum message_type
 #define SERIALINFO_PENDING_WRITE 0x04
 #define SERIALINFO_PENDING_WAIT  0x08
 
+/* Cancel all sync io on a thread */
+@REQ(cancel_sync)
+    obj_handle_t handle;        /* thread handle on which to cancel io */
+    client_ptr_t iosb;          /* I/O status block (NULL=all) */
+@END
 
 /* Create an async I/O */
 @REQ(register_async)
@@ -2256,6 +2287,17 @@ enum message_type
     client_ptr_t   user_arg;      /* user arg used to identify async */
 @REPLY
     VARARG(out_data,bytes);       /* iosb output data */
+@END
+
+
+/* Notify direct completion of async and close the wait handle if not blocking */
+@REQ(set_async_direct_result)
+    obj_handle_t   handle;        /* wait handle */
+    apc_param_t    information;   /* IO_STATUS_BLOCK Information */
+    unsigned int   status;        /* completion status */
+    int            mark_pending;  /* set async to pending before completion? */
+@REPLY
+    obj_handle_t   handle;        /* wait handle, or NULL if closed */
 @END
 
 
@@ -2399,19 +2441,18 @@ enum message_type
     user_handle_t  handle;        /* handle to the window */
     unsigned int   style;         /* window style */
     unsigned int   ex_style;      /* window extended style */
-    unsigned int   id;            /* window id */
+    data_size_t    extra_size;    /* size to set in extra bytes */
     mod_handle_t   instance;      /* creator instance */
     lparam_t       user_data;     /* user-specific data */
+    lparam_t       extra_value;   /* value to set in extra bytes or window id */
     int            extra_offset;  /* offset to set in extra bytes */
-    data_size_t    extra_size;    /* size to set in extra bytes */
-    lparam_t       extra_value;   /* value to set in extra bytes */
 @REPLY
     unsigned int   old_style;     /* old window style */
     unsigned int   old_ex_style;  /* old window extended style */
     mod_handle_t   old_instance;  /* old creator instance */
     lparam_t       old_user_data; /* old user-specific data */
     lparam_t       old_extra_value; /* old value in extra bytes */
-    unsigned int   old_id;        /* old window id */
+    lparam_t       old_id;        /* old window id */
 @END
 #define SET_WIN_STYLE     0x01
 #define SET_WIN_EXSTYLE   0x02
@@ -2583,13 +2624,6 @@ enum coords_relative
 @REQ(set_window_region)
     user_handle_t  window;        /* handle to the window */
     int            redraw;        /* redraw the window? */
-    VARARG(region,rectangles);    /* list of rectangles for the region (in window coords) */
-@END
-
-
-/* Set the layer region */
-@REQ(set_layer_region)
-    user_handle_t  window;        /* handle to the window */
     VARARG(region,rectangles);    /* list of rectangles for the region (in window coords) */
 @END
 
@@ -3376,6 +3410,7 @@ struct handle_info
     obj_handle_t   handle;             /* handle to the directory */
     unsigned int   index;              /* entry index */
 @REPLY
+    data_size_t    total_len;          /* total length needed for strings */
     data_size_t    name_len;           /* length of the entry name in bytes */
     VARARG(name,unicode_str,name_len); /* entry name */
     VARARG(type,unicode_str);          /* entry type */
@@ -3714,7 +3749,6 @@ struct handle_info
     int            x;             /* cursor position */
     int            y;
     rectangle_t    clip;          /* cursor clip rectangle */
-    unsigned int   clip_msg;      /* message to post on cursor clip changes */
 @REPLY
     user_handle_t  prev_handle;   /* previous handle */
     int            prev_count;    /* previous show count */
@@ -3730,6 +3764,7 @@ struct handle_info
 #define SET_CURSOR_POS    0x04
 #define SET_CURSOR_CLIP   0x08
 #define SET_CURSOR_NOCLIP 0x10
+#define SET_CURSOR_FSCLIP 0x20
 
 /* Get the history of the 64 last cursor positions */
 @REQ(get_cursor_history)
@@ -3750,13 +3785,6 @@ struct handle_info
 
 /* Modify the list of registered rawinput devices */
 @REQ(update_rawinput_devices)
-    VARARG(devices,rawinput_devices);
-@END
-
-/* Retrieve the list of registered rawinput devices */
-@REQ(get_rawinput_devices)
-@REPLY
-    unsigned int device_count;
     VARARG(devices,rawinput_devices);
 @END
 

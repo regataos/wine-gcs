@@ -128,13 +128,14 @@ static expression_t *new_literal_expression(parser_ctx_t*,literal_t*);
 static expression_t *new_array_literal_expression(parser_ctx_t*,element_list_t*,int);
 static expression_t *new_prop_and_value_expression(parser_ctx_t*,property_list_t*);
 
-#define YYLTYPE unsigned
+#define PARSER_LTYPE unsigned
 #define YYLLOC_DEFAULT(Cur, Rhs, N) Cur = YYRHSLOC((Rhs), (N) ? 1 : 0)
 
 %}
 
 %lex-param { parser_ctx_t *ctx }
 %parse-param { parser_ctx_t *ctx }
+%define api.prefix {parser_}
 %define api.pure
 %start Script
 
@@ -1617,7 +1618,7 @@ void parser_release(parser_ctx_t *ctx)
 {
     script_release(ctx->script);
     heap_pool_free(&ctx->heap);
-    heap_free(ctx);
+    free(ctx);
 }
 
 HRESULT script_parse(script_ctx_t *ctx, struct _compiler_ctx_t *compiler, bytecode_t *code, const WCHAR *delimiter, BOOL from_eval,
@@ -1627,7 +1628,7 @@ HRESULT script_parse(script_ctx_t *ctx, struct _compiler_ctx_t *compiler, byteco
     heap_pool_t *mark;
     HRESULT hres;
 
-    parser_ctx = heap_alloc_zero(sizeof(parser_ctx_t));
+    parser_ctx = calloc(1, sizeof(parser_ctx_t));
     if(!parser_ctx)
         return E_OUTOFMEMORY;
 

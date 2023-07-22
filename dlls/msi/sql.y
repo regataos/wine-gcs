@@ -58,6 +58,7 @@ static struct expr * EXPR_wildcard( void *info );
 
 %lex-param { SQL_input *info }
 %parse-param { SQL_input *info }
+%define api.prefix {sql_}
 %define api.pure
 
 %union
@@ -758,7 +759,7 @@ static void *parser_alloc( void *info, unsigned int sz )
     SQL_input* sql = (SQL_input*) info;
     struct list *mem;
 
-    mem = msi_alloc( sizeof (struct list) + sz );
+    mem = malloc( sizeof (struct list) + sz );
     list_add_tail( sql->mem, mem );
     return &mem[1];
 }

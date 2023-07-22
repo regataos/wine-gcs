@@ -137,11 +137,9 @@ typedef struct macdrv_opaque_window* macdrv_window;
 typedef struct macdrv_opaque_event_queue* macdrv_event_queue;
 typedef struct macdrv_opaque_view* macdrv_view;
 typedef struct macdrv_opaque_opengl_context* macdrv_opengl_context;
-#ifdef HAVE_METAL_METAL_H
 typedef struct macdrv_opaque_metal_device* macdrv_metal_device;
 typedef struct macdrv_opaque_metal_view* macdrv_metal_view;
 typedef struct macdrv_opaque_metal_layer* macdrv_metal_layer;
-#endif
 typedef struct macdrv_opaque_status_item* macdrv_status_item;
 struct macdrv_event;
 struct macdrv_query;
@@ -162,6 +160,7 @@ extern int right_option_is_alt DECLSPEC_HIDDEN;
 extern int left_command_is_ctrl DECLSPEC_HIDDEN;
 extern int right_command_is_ctrl DECLSPEC_HIDDEN;
 extern int allow_immovable_windows DECLSPEC_HIDDEN;
+extern int use_confinement_cursor_clipping DECLSPEC_HIDDEN;
 extern int cursor_clipping_locks_windows DECLSPEC_HIDDEN;
 extern int use_precise_scrolling DECLSPEC_HIDDEN;
 extern int gl_surface_mode DECLSPEC_HIDDEN;
@@ -292,8 +291,6 @@ struct macdrv_adapter
 /* Represent a monitor in EnumDisplayDevices context */
 struct macdrv_monitor
 {
-    /* Name, in UTF-8 encoding */
-    char name[128];
     /* as RcMonitor in MONITORINFO struct after conversion by rect_from_cgrect */
     CGRect rc_monitor;
     /* as RcWork in MONITORINFO struct after conversion by rect_from_cgrect */
@@ -327,7 +324,7 @@ enum {
     KEYBOARD_CHANGED,
     LOST_PASTEBOARD_OWNERSHIP,
     MOUSE_BUTTON,
-    MOUSE_MOVED,
+    MOUSE_MOVED_RELATIVE,
     MOUSE_MOVED_ABSOLUTE,
     MOUSE_SCROLL,
     QUERY_EVENT,
@@ -381,7 +378,7 @@ typedef struct macdrv_event {
             unsigned long   time_ms;
         }                                           hotkey_press;
         struct {
-            void           *data;
+            void           *himc;
             CFStringRef     text;       /* new text or NULL if just completing existing text */
             unsigned int    cursor_pos;
             unsigned int    complete;   /* is completing text? */
@@ -490,7 +487,7 @@ typedef struct macdrv_query {
             CFTypeRef           pasteboard;
         }                                           drag_operation;
         struct {
-            void   *data;
+            void   *himc;
             CFRange range;
             CGRect  rect;
         }                                           ime_char_rect;
@@ -538,11 +535,12 @@ struct macdrv_window_features {
     unsigned int    maximize_button:1;
     unsigned int    utility:1;
     unsigned int    shadow:1;
+    unsigned int    prevents_app_activation:1;
 };
 
 struct macdrv_window_state {
     unsigned int    disabled:1;
-    unsigned int    no_activate:1;
+    unsigned int    no_foreground:1;
     unsigned int    floating:1;
     unsigned int    excluded_by_expose:1;
     unsigned int    excluded_by_cycle:1;
@@ -587,13 +585,11 @@ extern void macdrv_set_view_superview(macdrv_view v, macdrv_view s, macdrv_windo
 extern void macdrv_set_view_hidden(macdrv_view v, int hidden) DECLSPEC_HIDDEN;
 extern void macdrv_add_view_opengl_context(macdrv_view v, macdrv_opengl_context c) DECLSPEC_HIDDEN;
 extern void macdrv_remove_view_opengl_context(macdrv_view v, macdrv_opengl_context c) DECLSPEC_HIDDEN;
-#ifdef HAVE_METAL_METAL_H
 extern macdrv_metal_device macdrv_create_metal_device(void) DECLSPEC_HIDDEN;
 extern void macdrv_release_metal_device(macdrv_metal_device d) DECLSPEC_HIDDEN;
 extern macdrv_metal_view macdrv_view_create_metal_view(macdrv_view v, macdrv_metal_device d) DECLSPEC_HIDDEN;
 extern macdrv_metal_layer macdrv_view_get_metal_layer(macdrv_metal_view v) DECLSPEC_HIDDEN;
 extern void macdrv_view_release_metal_view(macdrv_metal_view v) DECLSPEC_HIDDEN;
-#endif
 extern int macdrv_get_view_backing_size(macdrv_view v, int backing_size[2]) DECLSPEC_HIDDEN;
 extern void macdrv_set_view_backing_size(macdrv_view v, const int backing_size[2]) DECLSPEC_HIDDEN;
 extern uint32_t macdrv_window_background_color(void) DECLSPEC_HIDDEN;

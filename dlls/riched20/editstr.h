@@ -147,11 +147,13 @@ typedef enum {
 /******************************** structures *************************/
 
 struct tagME_DisplayItem;
+struct tagME_Run;
 
 struct re_object
 {
   struct list entry;
   REOBJECT obj;
+  struct tagME_Run *run; /* ptr to the reobj's run */
 };
 
 typedef struct tagME_Run
@@ -283,6 +285,12 @@ typedef enum {
   umAddBackToUndo
 } ME_UndoMode;
 
+typedef enum {
+  undoActive,
+  undoSuspended,
+  undoDisabled
+} ME_UndoControlState;
+
 enum undo_type
 {
     undo_insert_run,
@@ -400,8 +408,9 @@ typedef struct tagME_TextEditor
   int nUndoStackSize;
   int nUndoLimit;
   ME_UndoMode nUndoMode;
+  ME_UndoControlState undo_ctl_state;
   int nParagraphs;
-  int nLastSelStart, nLastSelEnd;
+  LONG nLastSelStart, nLastSelEnd;
   ME_Paragraph *last_sel_start_para, *last_sel_end_para;
   ME_FontCacheItem pFontCache[HFONT_CACHE_SIZE];
   int nZoomNumerator, nZoomDenominator;

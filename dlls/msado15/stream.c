@@ -25,7 +25,6 @@
 #include "msado15_backcompat.h"
 
 #include "wine/debug.h"
-#include "wine/heap.h"
 
 #include "msado15_private.h"
 
@@ -64,9 +63,9 @@ static ULONG WINAPI stream_Release( _Stream *iface )
     if (!refs)
     {
         TRACE( "destroying %p\n", stream );
-        heap_free( stream->charset );
-        heap_free( stream->buf );
-        heap_free( stream );
+        free( stream->charset );
+        free( stream->buf );
+        free( stream );
     }
     return refs;
 }
@@ -100,7 +99,7 @@ static HRESULT WINAPI stream_GetTypeInfoCount( _Stream *iface, UINT *count )
 static HRESULT WINAPI stream_GetTypeInfo( _Stream *iface, UINT index, LCID lcid, ITypeInfo **info )
 {
     struct stream *stream = impl_from_Stream( iface );
-    TRACE( "%p, %u, %u, %p\n", stream, index, lcid, info );
+    TRACE( "%p, %u, %lu, %p\n", stream, index, lcid, info );
     return get_typeinfo(Stream_tid, info);
 }
 
@@ -111,7 +110,7 @@ static HRESULT WINAPI stream_GetIDsOfNames( _Stream *iface, REFIID riid, LPOLEST
     HRESULT hr;
     ITypeInfo *typeinfo;
 
-    TRACE( "%p, %s, %p, %u, %u, %p\n", stream, debugstr_guid(riid), names, count, lcid, dispid );
+    TRACE( "%p, %s, %p, %u, %lu, %p\n", stream, debugstr_guid(riid), names, count, lcid, dispid );
 
     hr = get_typeinfo(Stream_tid, &typeinfo);
     if(SUCCEEDED(hr))
@@ -130,7 +129,7 @@ static HRESULT WINAPI stream_Invoke( _Stream *iface, DISPID member, REFIID riid,
     HRESULT hr;
     ITypeInfo *typeinfo;
 
-    TRACE( "%p, %d, %s, %d, %d, %p, %p, %p, %p\n", stream, member, debugstr_guid(riid), lcid, flags, params,
+    TRACE( "%p, %ld, %s, %ld, %d, %p, %p, %p, %p\n", stream, member, debugstr_guid(riid), lcid, flags, params,
            result, excep_info, arg_err );
 
     hr = get_typeinfo(Stream_tid, &typeinfo);
@@ -144,7 +143,7 @@ static HRESULT WINAPI stream_Invoke( _Stream *iface, DISPID member, REFIID riid,
     return hr;
 }
 
-static HRESULT WINAPI stream_get_Size( _Stream *iface, LONG *size )
+static HRESULT WINAPI stream_get_Size( _Stream *iface, ADO_LONGPTR *size )
 {
     struct stream *stream = impl_from_Stream( iface );
     TRACE( "%p, %p\n", stream, size );
@@ -166,7 +165,7 @@ static HRESULT WINAPI stream_get_EOS( _Stream *iface, VARIANT_BOOL *eos )
     return S_OK;
 }
 
-static HRESULT WINAPI stream_get_Position( _Stream *iface, LONG *pos )
+static HRESULT WINAPI stream_get_Position( _Stream *iface, ADO_LONGPTR *pos )
 {
     struct stream *stream = impl_from_Stream( iface );
     TRACE( "%p, %p\n", stream, pos );
@@ -183,7 +182,8 @@ static HRESULT resize_buffer( struct stream *stream, LONG size )
     {
         BYTE *tmp;
         LONG new_size = max( size, stream->allocated * 2 );
-        if (!(tmp = heap_realloc_zero( stream->buf, new_size ))) return E_OUTOFMEMORY;
+        if (!(tmp = realloc( stream->buf, new_size ))) return E_OUTOFMEMORY;
+        memset( tmp + stream->allocated, 0, new_size - stream->allocated );
         stream->buf = tmp;
         stream->allocated = new_size;
     }
@@ -191,12 +191,12 @@ static HRESULT resize_buffer( struct stream *stream, LONG size )
     return S_OK;
 }
 
-static HRESULT WINAPI stream_put_Position( _Stream *iface, LONG pos )
+static HRESULT WINAPI stream_put_Position( _Stream *iface, ADO_LONGPTR pos )
 {
     struct stream *stream = impl_from_Stream( iface );
     HRESULT hr;
 
-    TRACE( "%p, %d\n", stream, pos );
+    TRACE( "%p, %Id\n", stream, pos );
 
     if (stream->state == adStateClosed) return MAKE_ADO_HRESULT( adErrObjectClosed );
     if (pos < 0) return MAKE_ADO_HRESULT( adErrInvalidArgument );
@@ -289,8 +289,8 @@ static HRESULT WINAPI stream_put_Charset( _Stream *iface, BSTR charset )
 
     TRACE( "%p, %s\n", stream, debugstr_w(charset) );
 
-    if (!(str = strdupW( charset ))) return E_OUTOFMEMORY;
-    heap_free( stream->charset );
+    if (!(str = wcsdup( charset ))) return E_OUTOFMEMORY;
+    free( stream->charset );
     stream->charset = str;
     return S_OK;
 }
@@ -326,7 +326,7 @@ static HRESULT WINAPI stream_Read( _Stream *iface, LONG size, VARIANT *val )
     struct stream *stream = impl_from_Stream( iface );
     HRESULT hr;
 
-    TRACE( "%p, %d, %p\n", stream, size, val );
+    TRACE( "%p, %ld, %p\n", stream, size, val );
 
     if (stream->state == adStateClosed) return MAKE_ADO_HRESULT( adErrObjectClosed );
     if (stream->type != adTypeBinary) return MAKE_ADO_HRESULT( adErrIllegalOperation );
@@ -360,7 +360,7 @@ static HRESULT WINAPI stream_Close( _Stream *iface )
 
     if (stream->state == adStateClosed) return MAKE_ADO_HRESULT( adErrObjectClosed );
 
-    heap_free( stream->buf );
+    free( stream->buf );
     stream->buf  = NULL;
     stream->size = stream->allocated = stream->pos = 0;
 
@@ -406,9 +406,9 @@ static HRESULT WINAPI stream_SetEOS( _Stream *iface )
     return resize_buffer( stream, stream->pos );
 }
 
-static HRESULT WINAPI stream_CopyTo( _Stream *iface, _Stream *dst, LONG size )
+static HRESULT WINAPI stream_CopyTo( _Stream *iface, _Stream *dst, ADO_LONGPTR size )
 {
-    FIXME( "%p, %p, %d\n", iface, dst, size );
+    FIXME( "%p, %p, %Id\n", iface, dst, size );
     return E_NOTIMPL;
 }
 
@@ -435,7 +435,7 @@ static HRESULT WINAPI stream_ReadText( _Stream *iface, LONG len, BSTR *ret )
     struct stream *stream = impl_from_Stream( iface );
     BSTR str;
 
-    TRACE( "%p, %d, %p\n", stream, len, ret );
+    TRACE( "%p, %ld, %p\n", stream, len, ret );
     if (len == adReadLine)
     {
         FIXME( "adReadLine not supported\n" );
@@ -539,7 +539,7 @@ HRESULT Stream_create( void **obj )
 {
     struct stream *stream;
 
-    if (!(stream = heap_alloc_zero( sizeof(*stream) ))) return E_OUTOFMEMORY;
+    if (!(stream = calloc( 1, sizeof(*stream) ))) return E_OUTOFMEMORY;
     stream->Stream_iface.lpVtbl = &stream_vtbl;
     stream->refs = 1;
     stream->type = adTypeText;

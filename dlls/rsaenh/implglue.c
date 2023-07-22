@@ -36,48 +36,32 @@ BOOL WINAPI SystemFunction036(PVOID pbBuffer, ULONG dwLen);
 
 BOOL init_hash_impl(ALG_ID aiAlgid, BCRYPT_HASH_HANDLE *hash_handle)
 {
-    BCRYPT_ALG_HANDLE provider;
-    NTSTATUS status;
-
-    switch (aiAlgid) 
+    switch (aiAlgid)
     {
-        case CALG_MD2:
-            status = BCryptOpenAlgorithmProvider(&provider, BCRYPT_MD2_ALGORITHM, MS_PRIMITIVE_PROVIDER, 0);
-            break;
-        
-        case CALG_MD4:
-            status = BCryptOpenAlgorithmProvider(&provider, BCRYPT_MD4_ALGORITHM, MS_PRIMITIVE_PROVIDER, 0);
-            break;
-        
-        case CALG_MD5:
-            status = BCryptOpenAlgorithmProvider(&provider, BCRYPT_MD5_ALGORITHM, MS_PRIMITIVE_PROVIDER, 0);
-            break;
-        
-        case CALG_SHA:
-            status = BCryptOpenAlgorithmProvider(&provider, BCRYPT_SHA1_ALGORITHM, MS_PRIMITIVE_PROVIDER, 0);
-            break;
+    case CALG_MD2:
+        return !BCryptCreateHash(BCRYPT_MD2_ALG_HANDLE, hash_handle, NULL, 0, NULL, 0, 0);
 
-        case CALG_SHA_256:
-            status = BCryptOpenAlgorithmProvider(&provider, BCRYPT_SHA256_ALGORITHM, MS_PRIMITIVE_PROVIDER, 0);
-            break;
+    case CALG_MD4:
+        return !BCryptCreateHash(BCRYPT_MD4_ALG_HANDLE, hash_handle, NULL, 0, NULL, 0, 0);
 
-        case CALG_SHA_384:
-            status = BCryptOpenAlgorithmProvider(&provider, BCRYPT_SHA384_ALGORITHM, MS_PRIMITIVE_PROVIDER, 0);
-            break;
+    case CALG_MD5:
+        return !BCryptCreateHash(BCRYPT_MD5_ALG_HANDLE, hash_handle, NULL, 0, NULL, 0, 0);
 
-        case CALG_SHA_512:
-            status = BCryptOpenAlgorithmProvider(&provider, BCRYPT_SHA512_ALGORITHM, MS_PRIMITIVE_PROVIDER, 0);
-            break;
+    case CALG_SHA:
+        return !BCryptCreateHash(BCRYPT_SHA1_ALG_HANDLE, hash_handle, NULL, 0, NULL, 0, 0);
 
-        default:
-            return TRUE;
+    case CALG_SHA_256:
+        return !BCryptCreateHash(BCRYPT_SHA256_ALG_HANDLE, hash_handle, NULL, 0, NULL, 0, 0);
+
+    case CALG_SHA_384:
+        return !BCryptCreateHash(BCRYPT_SHA384_ALG_HANDLE, hash_handle, NULL, 0, NULL, 0, 0);
+
+    case CALG_SHA_512:
+        return !BCryptCreateHash(BCRYPT_SHA512_ALG_HANDLE, hash_handle, NULL, 0, NULL, 0, 0);
+
+    default:
+        return TRUE;
     }
-
-    if (status) return FALSE;
-
-    status = BCryptCreateHash(provider, hash_handle, NULL, 0, NULL, 0, 0);
-    BCryptCloseAlgorithmProvider(provider, 0);
-    return !status;
 }
 
 BOOL update_hash_impl(BCRYPT_HASH_HANDLE hash_handle, const BYTE *pbData, DWORD dwDataLen)
@@ -86,9 +70,9 @@ BOOL update_hash_impl(BCRYPT_HASH_HANDLE hash_handle, const BYTE *pbData, DWORD 
     return TRUE;
 }
 
-BOOL finalize_hash_impl(BCRYPT_HASH_HANDLE hash_handle, BYTE *pbHashValue)
+BOOL finalize_hash_impl(BCRYPT_HASH_HANDLE hash_handle, BYTE *hash_value, DWORD hash_size)
 {
-    BCryptFinishHash(hash_handle, pbHashValue, RSAENH_MAX_HASH_SIZE, 0);
+    BCryptFinishHash(hash_handle, hash_value, hash_size, 0);
     BCryptDestroyHash(hash_handle);
     return TRUE;
 }

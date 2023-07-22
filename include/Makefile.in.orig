@@ -16,10 +16,10 @@ SOURCES = \
 	amstream.idl \
 	amva.h \
 	amvideo.idl \
-	apiset.h \
 	appcompatapi.h \
 	appmgmt.h \
 	appmodel.h \
+	appnotify.h \
 	asferr.h \
 	asptlb.idl \
 	asyncinfo.idl \
@@ -85,6 +85,7 @@ SOURCES = \
 	compobj.h \
 	comsvcs.idl \
 	concurrencysal.h \
+	config.h.in \
 	consoleapi.h \
 	control.idl \
 	cor.idl \
@@ -98,15 +99,17 @@ SOURCES = \
 	cryptuiapi.h \
 	ctfutb.idl \
 	ctxtcall.idl \
-	cuda.h \
 	custcntl.h \
-	cuviddec.h \
 	cvconst.h \
 	cvttyp.idl \
 	d2d1.idl \
 	d2d1_1.idl \
 	d2d1_2.idl \
+	d2d1_3.idl \
+	d2d1effectauthor.idl \
 	d2d1effects.idl \
+	d2d1effects_1.idl \
+	d2d1effects_2.idl \
 	d2dbasetypes.h \
 	d2derr.h \
 	d3d.h \
@@ -193,7 +196,6 @@ SOURCES = \
 	ddk/hidport.h \
 	ddk/hidsdi.h \
 	ddk/hidtypes.h \
-	ddk/imm.h \
 	ddk/mountmgr.h \
 	ddk/ndis.h \
 	ddk/ntddcdvd.h \
@@ -343,7 +345,6 @@ SOURCES = \
 	httprequest.idl \
 	httprequestid.h \
 	i_cryptasn1tls.h \
-        ia2api.idl \
 	iads.idl \
 	icftypes.idl \
 	icm.h \
@@ -358,6 +359,7 @@ SOURCES = \
 	imagehlp.h \
 	ime.h \
 	imm.h \
+	immdev.h \
 	imnact.idl \
 	imnxport.idl \
 	in6addr.h \
@@ -369,6 +371,7 @@ SOURCES = \
 	inspectable.idl \
 	interactioncontext.h \
 	intshcut.h \
+	ioringapi.h \
 	ip2string.h \
 	ipexport.h \
 	iphlpapi.h \
@@ -377,6 +380,8 @@ SOURCES = \
 	iprtrmib.h \
 	iptypes.h \
 	isguids.h \
+	ivectorchangedeventargs.idl \
+	kbd.h \
 	knownfolders.h \
 	ks.h \
 	ksguid.h \
@@ -415,6 +420,7 @@ SOURCES = \
 	mediaerr.h \
 	mediaobj.idl \
 	medparam.idl \
+	memoryapi.h \
 	metahost.idl \
 	mfapi.h \
 	mfd3d12.idl \
@@ -428,7 +434,9 @@ SOURCES = \
 	midles.h \
 	mimeinfo.idl \
 	mimeole.idl \
+	minidumpapiset.h \
 	minmax.h \
+	minschannel.h \
 	mlang.idl \
 	mmc.idl \
 	mmddk.h \
@@ -470,6 +478,7 @@ SOURCES = \
 	msvcrt/conio.h \
 	msvcrt/corecrt.h \
 	msvcrt/corecrt_io.h \
+	msvcrt/corecrt_malloc.h \
 	msvcrt/corecrt_startup.h \
 	msvcrt/corecrt_stdio_config.h \
 	msvcrt/corecrt_wctype.h \
@@ -507,6 +516,7 @@ SOURCES = \
 	msvcrt/setjmp.h \
 	msvcrt/share.h \
 	msvcrt/signal.h \
+	msvcrt/stdarg.h \
 	msvcrt/stdbool.h \
 	msvcrt/stddef.h \
 	msvcrt/stdint.h \
@@ -522,6 +532,7 @@ SOURCES = \
 	msvcrt/time.h \
 	msvcrt/uchar.h \
 	msvcrt/unistd.h \
+	msvcrt/vadefs.h \
 	msvcrt/wchar.h \
 	msvcrt/wctype.h \
 	mswsock.h \
@@ -560,15 +571,13 @@ SOURCES = \
 	ntdef.h \
 	ntdsapi.h \
 	ntgdi.h \
+	ntioring_x.h \
 	ntlsa.h \
 	ntquery.h \
 	ntsecapi.h \
 	ntsecpkg.h \
 	ntstatus.h \
 	ntuser.h \
-	nvapi.h \
-	nvcuvid.h \
-	nvencodeapi.h \
 	oaidl.idl \
 	objbase.h \
 	objectarray.idl \
@@ -665,6 +674,7 @@ SOURCES = \
 	schemadef.h \
 	schnlsp.h \
 	sddl.h \
+	sdkddkver.h \
 	secext.h \
 	security.h \
 	sensapi.h \
@@ -683,6 +693,7 @@ SOURCES = \
 	shlobj.h \
 	shlwapi.h \
 	shobjidl.idl \
+	shobjidl_core.idl \
 	shtypes.idl \
 	sipbase.h \
 	slerror.h \
@@ -700,6 +711,8 @@ SOURCES = \
 	srcrst.idl \
 	srrestoreptapi.h \
 	sspi.h \
+	stamp-h.in \
+	stdole32.idl \
 	stgprop.h \
 	sti.h \
 	storage.h \
@@ -729,6 +742,8 @@ SOURCES = \
 	traffic.h \
 	transact.idl \
 	trnjoi.idl \
+	trnlcl.idl \
+	trnobj.idl \
 	twain.h \
 	txcoord.idl \
 	txdtc.idl \
@@ -765,6 +780,7 @@ SOURCES = \
 	wbemdisp.idl \
 	wbemprov.idl \
 	wct.h \
+	wdbgexts.h \
 	weakreference.idl \
 	webservices.h \
 	werapi.h \
@@ -799,8 +815,10 @@ SOURCES = \
 	windows.gaming.ui.idl \
 	windows.globalization.idl \
 	windows.h \
+	windows.media.closedcaptioning.idl \
 	windows.media.devices.idl \
 	windows.media.idl \
+	windows.media.speechrecognition.idl \
 	windows.media.speechsynthesis.idl \
 	windows.networking.connectivity.idl \
 	windows.security.cryptography.idl \
@@ -808,17 +826,59 @@ SOURCES = \
 	windows.storage.streams.idl \
 	windows.system.idl \
 	windows.system.power.idl \
+	windows.system.profile.idl \
 	windows.system.threading.idl \
 	windows.system.userprofile.idl \
+	windows.ui.idl \
 	windowscontracts.idl \
 	windowsx.h \
+	wine/afd.h \
+	wine/asm.h \
+	wine/atsvc.idl \
+	wine/condrv.h \
+	wine/dcetypes.idl \
 	wine/debug.h \
+	wine/dplaysp.h \
+	wine/epm.idl \
 	wine/exception.h \
 	wine/fil_data.idl \
+	wine/gdi_driver.h \
+	wine/glu.h \
+	wine/heap.h \
+	wine/hid.h \
+	wine/http.h \
+	wine/iaccessible2.idl \
+	wine/irot.idl \
+	wine/irpcss.idl \
 	wine/itss.idl \
+	wine/list.h \
+	wine/mfinternal.idl \
+	wine/mmsystem16.h \
+	wine/mscvpdb.h \
+	wine/mssign.h \
+	wine/nsi.h \
 	wine/orpc.idl \
+	wine/plugplay.idl \
+	wine/rbtree.h \
+	wine/schrpc.idl \
+	wine/server.h \
+	wine/server_protocol.h \
+	wine/strmbase.h \
 	wine/svcctl.idl \
+	wine/test.h \
+	wine/unixlib.h \
+	wine/vulkan.h \
+	wine/vulkan_driver.h \
+	wine/wgl.h \
+	wine/wgl_driver.h \
+	wine/winbase16.h \
+	wine/windef16.h \
+	wine/wine_common_ver.rc \
+	wine/wined3d.h \
 	wine/winedxgi.idl \
+	wine/wingdi16.h \
+	wine/winnet16.h \
+	wine/winuser16.h \
 	winerror.h \
 	winevt.h \
 	wingdi.h \
@@ -849,6 +909,7 @@ SOURCES = \
 	wintabx.h \
 	winternl.h \
 	wintrust.h \
+	winusb.h \
 	winuser.h \
 	winuser.rh \
 	winver.h \
@@ -867,6 +928,7 @@ SOURCES = \
 	wmsdkidl.idl \
 	wmsecure.idl \
 	wnaspi32.h \
+	wofapi.h \
 	wownt16.h \
 	wownt32.h \
 	wpcapi.idl \
@@ -884,6 +946,7 @@ SOURCES = \
 	wshisotp.h \
 	wsipx.h \
 	wsnwlink.h \
+	wspiapi.h \
 	wtsapi32.h \
 	wtypes.idl \
 	wuapi.idl \

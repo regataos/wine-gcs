@@ -124,17 +124,20 @@ struct system_time_source
     MFCLOCK_STATE state;
     IMFClock *clock;
     LONGLONG start_offset;
+    LONGLONG system_time;
+    LONGLONG clock_time;
     float rate;
     int i_rate;
     CRITICAL_SECTION cs;
 };
 
-static void system_time_source_apply_rate(const struct system_time_source *source, LONGLONG *value)
+static void system_time_source_update_clock_time(struct system_time_source *source, LONGLONG system_time)
 {
-    if (source->i_rate)
-        *value *= source->i_rate;
-    else
-        *value *= source->rate;
+    LONGLONG diff = system_time - source->system_time;
+    if (source->i_rate) diff *= source->i_rate;
+    else if (source->rate != 1.0f) diff *= source->rate;
+    source->clock_time += diff;
+    source->system_time = system_time;
 }
 
 static struct system_time_source *impl_from_IMFPresentationTimeSource(IMFPresentationTimeSource *iface)
@@ -1350,6 +1353,7 @@ HRESULT WINAPI MFTEnum(GUID category, UINT32 flags, MFT_REGISTER_TYPE_INFO *inpu
         return E_INVALIDARG;
 
     *count = 0;
+    *clsids = NULL;
 
     list_init(&mfts);
 
@@ -1693,14 +1697,17 @@ const char *debugstr_attr(const GUID *guid)
         X(MF_MT_ALPHA_MODE),
         X(MF_MT_MPEG2_TIMECODE),
         X(MF_PMP_SERVER_CONTEXT),
+        X(MF_TRANSCODE_TOPOLOGYMODE),
         X(MFT_SUPPORT_DYNAMIC_FORMAT_CHANGE),
         X(MF_MEDIA_ENGINE_TRACK_ID),
+        X(MFTranscodeContainerType_MP3),
         X(MF_MT_CUSTOM_VIDEO_PRIMARIES),
         X(MF_MT_TIMESTAMP_CAN_BE_DTS),
         X(MFT_CODEC_MERIT_Attribute),
         X(MF_TOPOLOGY_PLAYBACK_MAX_DIMS),
         X(MF_XVP_DISABLE_FRC),
         X(MF_LOW_LATENCY),
+        X(MF_TRANSCODE_ADJUST_PROFILE),
         X(MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS),
         X(MF_MT_MPEG2_FLAGS),
         X(MF_MEDIA_ENGINE_AUDIO_CATEGORY),
@@ -1747,6 +1754,7 @@ const char *debugstr_attr(const GUID *guid)
         X(MF_PD_PLAYBACK_BOUNDARY_TIME),
         X(MF_MEDIA_ENGINE_TELEMETRY_APPLICATION_ID),
         X(MF_ACTIVATE_MFT_LOCKED),
+        X(MFTranscodeContainerType_WAVE),
         X(MF_MEDIA_ENGINE_VIDEO_OUTPUT_FORMAT),
         X(MF_SOURCE_READER_ENABLE_VIDEO_PROCESSING),
         X(MF_MT_FRAME_SIZE),
@@ -1754,6 +1762,7 @@ const char *debugstr_attr(const GUID *guid)
         X(MF_SINK_WRITER_ASYNC_CALLBACK),
         X(MF_TOPOLOGY_START_TIME_ON_PRESENTATION_SWITCH),
         X(MFT_DECODER_EXPOSE_OUTPUT_TYPES_IN_NATIVE_ORDER),
+        X(MF_TRANSCODE_CONTAINERTYPE),
         X(MF_TOPONODE_WORKQUEUE_MMCSS_PRIORITY),
         X(MF_MT_FRAME_RATE_RANGE_MAX),
         X(MF_MT_PALETTE),
@@ -1785,6 +1794,7 @@ const char *debugstr_attr(const GUID *guid)
         X(MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_AUDCAP_ENDPOINT_ID),
         X(MF_DEVSOURCE_ATTRIBUTE_FRIENDLY_NAME),
         X(MF_MT_VIDEO_ROTATION),
+        X(MFTranscodeContainerType_MPEG4),
         X(MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_AUDCAP_SYMBOLIC_LINK),
         X(MF_MEDIA_ENGINE_BROWSER_COMPATIBILITY_MODE_IE11),
         X(MF_MT_USER_DATA),
@@ -1804,12 +1814,14 @@ const char *debugstr_attr(const GUID *guid)
         X(MF_SA_D3D12_HEAP_FLAGS),
         X(MF_MT_MINIMUM_DISPLAY_APERTURE),
         X(MFSampleExtension_Token),
+        X(MFTranscodeContainerType_3GP),
         X(MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_VIDCAP_CATEGORY),
         X(MF_D3D12_SYNCHRONIZATION_OBJECT),
         X(MF_MT_AUDIO_VALID_BITS_PER_SAMPLE),
         X(MF_TRANSFORM_ASYNC_UNLOCK),
         X(MF_DISABLE_FRAME_CORRUPTION_INFO),
         X(MF_TOPOLOGY_ENUMERATE_SOURCE_TYPES),
+        X(MFTranscodeContainerType_ASF),
         X(MF_MT_VIDEO_NO_FRAME_ORDERING),
         X(MF_MEDIA_ENGINE_PLAYBACK_VISUAL),
         X(MF_MT_VIDEO_CHROMA_SITING),
@@ -1824,8 +1836,10 @@ const char *debugstr_attr(const GUID *guid)
         X(MF_MT_AAC_PAYLOAD_TYPE),
         X(MF_TOPOLOGY_PLAYBACK_FRAMERATE),
         X(MF_SOURCE_READER_D3D11_BIND_FLAGS),
+        X(MF_TRANSCODE_ENCODINGPROFILE),
         X(MF_MT_AUDIO_FOLDDOWN_MATRIX),
         X(MF_MT_AUDIO_WMADRC_PEAKREF),
+        X(MFTranscodeContainerType_ADTS),
         X(MF_MT_AUDIO_WMADRC_PEAKTARGET),
         X(MF_TRANSFORM_FLAGS_Attribute),
         X(MF_MT_H264_SUPPORTED_RATE_CONTROL_MODES),
@@ -1894,6 +1908,7 @@ const char *debugstr_attr(const GUID *guid)
         X(MF_MT_VIDEO_3D_FORMAT),
         X(MF_EVENT_STREAM_METADATA_KEYDATA),
         X(MF_READER_WRITER_D3D_MANAGER),
+        X(MFTranscodeContainerType_FLAC),
         X(MFSampleExtension_3DVideo),
         X(MF_SA_MINIMUM_OUTPUT_SAMPLE_COUNT_PROGRESSIVE),
         X(MF_MT_H264_USAGE),
@@ -1912,6 +1927,7 @@ const char *debugstr_attr(const GUID *guid)
         X(MFT_ENCODER_SUPPORTS_CONFIG_EVENT),
         X(MF_MT_AUDIO_FLAC_MAX_BLOCK_SIZE),
         X(MFT_FRIENDLY_NAME_Attribute),
+        X(MFTranscodeContainerType_AVI),
         X(MF_MT_FIXED_SIZE_SAMPLES),
         X(MFT_SUPPORT_3DVIDEO),
         X(MFT_SUPPORT_3DVIDEO),
@@ -1935,6 +1951,7 @@ const char *debugstr_attr(const GUID *guid)
         X(MF_SA_D3D11_SHARED),
         X(MF_MT_PAN_SCAN_ENABLED),
         X(MF_MT_D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL),
+        X(MFTranscodeContainerType_AC3),
         X(MF_AUDIO_RENDERER_ATTRIBUTE_ENDPOINT_ID),
         X(MF_MT_DV_VAUX_CTRL_PACK),
         X(MFSampleExtension_ForwardedDecodeUnitType),
@@ -1949,6 +1966,7 @@ const char *debugstr_attr(const GUID *guid)
         X(MFT_ENUM_HARDWARE_VENDOR_ID_Attribute),
         X(MFT_ENUM_TRANSCODE_ONLY_ATTRIBUTE),
         X(MF_READWRITE_MMCSS_PRIORITY),
+        X(MF_TRANSCODE_DONOT_INSERT_ENCODER),
         X(MF_MT_VIDEO_3D),
         X(MF_EVENT_START_PRESENTATION_TIME),
         X(MF_EVENT_SESSIONCAPS),
@@ -1956,6 +1974,7 @@ const char *debugstr_attr(const GUID *guid)
         X(MF_MEDIA_ENGINE_AUDIO_ENDPOINT_ROLE),
         X(MF_EVENT_SESSIONCAPS_DELTA),
         X(MF_EVENT_START_PRESENTATION_TIME_AT_OUTPUT),
+        X(MFTranscodeContainerType_AMR),
         X(MFSampleExtension_DecodeTimestamp),
         X(MF_MEDIA_ENGINE_COMPATIBILITY_MODE),
         X(MF_SA_MINIMUM_OUTPUT_SAMPLE_COUNT),
@@ -2006,8 +2025,10 @@ const char *debugstr_attr(const GUID *guid)
         X(MF_TOPONODE_STREAM_DESCRIPTOR),
         X(MF_TOPONODE_ERRORCODE),
         X(MF_TOPONODE_SEQUENCE_ELEMENTID),
+        X(MF_TRANSCODE_SKIP_METADATA_TRANSFER),
         X(MF_EVENT_MFT_CONTEXT),
         X(MF_MT_FORWARD_CUSTOM_SEI),
+        X(MFTranscodeContainerType_FMPEG4),
         X(MF_TOPONODE_CONNECT_METHOD),
         X(MFT_OUTPUT_TYPES_Attributes),
         X(MF_MT_IMAGE_LOSS_TOLERANT),
@@ -2017,9 +2038,11 @@ const char *debugstr_attr(const GUID *guid)
         X(MF_MT_ARBITRARY_HEADER),
         X(MF_TOPOLOGY_DXVA_MODE),
         X(MF_TOPONODE_LOCKED),
+        X(MF_TRANSCODE_QUALITYVSSPEED),
         X(MF_TOPONODE_WORKQUEUE_ID),
         X(MF_MEDIA_ENGINE_CONTINUE_ON_CODEC_ERROR),
         X(MF_TOPONODE_WORKQUEUE_MMCSS_CLASS),
+        X(MFTranscodeContainerType_MPEG2),
         X(MF_TOPONODE_DECRYPTOR),
         X(MF_EVENT_DO_THINNING),
         X(MF_TOPONODE_DISCARDABLE),
@@ -2758,7 +2781,8 @@ HRESULT attributes_GetAllocatedBlob(struct attributes *attributes, REFGUID key, 
     if (SUCCEEDED(hr))
     {
         *buf = attrval.caub.pElems;
-        *size = attrval.caub.cElems;
+        if (size)
+            *size = attrval.caub.cElems;
     }
 
     return hr;
@@ -3802,7 +3826,7 @@ static HRESULT bytestream_create_io_request(struct bytestream *stream, enum asyn
             &stream->write_callback, NULL, &request)))
         goto failed;
 
-    RtwqPutWorkItem(MFASYNC_CALLBACK_QUEUE_STANDARD, 0, request);
+    RtwqPutWorkItem(MFASYNC_CALLBACK_QUEUE_IO, 0, request);
     IRtwqAsyncResult_Release(request);
 
 failed:
@@ -4084,11 +4108,30 @@ static HRESULT WINAPI bytestream_EndRead(IMFByteStream *iface, IMFAsyncResult *r
     return bytestream_complete_io_request(stream, ASYNC_STREAM_OP_READ, result, byte_read);
 }
 
-static HRESULT WINAPI bytestream_file_Write(IMFByteStream *iface, const BYTE *data, ULONG count, ULONG *written)
+static HRESULT WINAPI bytestream_file_Write(IMFByteStream *iface, const BYTE *data, ULONG size, ULONG *written)
 {
-    FIXME("%p, %p, %lu, %p\n", iface, data, count, written);
+    struct bytestream *stream = impl_from_IMFByteStream(iface);
+    LARGE_INTEGER position;
+    HRESULT hr = S_OK;
+    BOOL ret;
 
-    return E_NOTIMPL;
+    TRACE("%p, %p, %lu, %p\n", iface, data, size, written);
+
+    EnterCriticalSection(&stream->cs);
+
+    position.QuadPart = stream->position;
+    if ((ret = SetFilePointerEx(stream->hfile, position, NULL, FILE_BEGIN)))
+    {
+        if ((ret = WriteFile(stream->hfile, data, size, written, NULL)))
+            stream->position += *written;
+    }
+
+    if (!ret)
+        hr = HRESULT_FROM_WIN32(GetLastError());
+
+    LeaveCriticalSection(&stream->cs);
+
+    return hr;
 }
 
 static HRESULT WINAPI bytestream_BeginWrite(IMFByteStream *iface, const BYTE *data, ULONG size,
@@ -4116,7 +4159,7 @@ static HRESULT WINAPI bytestream_Seek(IMFByteStream *iface, MFBYTESTREAM_SEEK_OR
     struct bytestream *stream = impl_from_IMFByteStream(iface);
     HRESULT hr = S_OK;
 
-    TRACE("%p, %u, %s, 0x%08lx, %p\n", iface, origin, wine_dbgstr_longlong(offset), flags, current);
+    TRACE("%p, %u, %s, %#lx, %p.\n", iface, origin, wine_dbgstr_longlong(offset), flags, current);
 
     EnterCriticalSection(&stream->cs);
 
@@ -8033,12 +8076,8 @@ static HRESULT WINAPI system_time_source_GetCorrelatedTime(IMFPresentationTimeSo
     if (SUCCEEDED(hr = IMFClock_GetCorrelatedTime(source->clock, 0, clock_time, system_time)))
     {
         if (source->state == MFCLOCK_STATE_RUNNING)
-        {
-            system_time_source_apply_rate(source, clock_time);
-            *clock_time += source->start_offset;
-        }
-        else
-            *clock_time = source->start_offset;
+            system_time_source_update_clock_time(source, *system_time);
+        *clock_time = source->start_offset + source->clock_time;
     }
     LeaveCriticalSection(&source->cs);
 
@@ -8177,25 +8216,19 @@ static HRESULT WINAPI system_time_source_sink_OnClockStart(IMFClockStateSink *if
     state = source->state;
     if (SUCCEEDED(hr = system_time_source_change_state(source, CLOCK_CMD_START)))
     {
-        system_time_source_apply_rate(source, &system_time);
         if (start_offset == PRESENTATION_CURRENT_POSITION)
         {
-            switch (state)
+            if (state != MFCLOCK_STATE_RUNNING)
             {
-                case MFCLOCK_STATE_RUNNING:
-                    break;
-                case MFCLOCK_STATE_PAUSED:
-                    source->start_offset -= system_time;
-                    break;
-                default:
-                    source->start_offset = -system_time;
-                    break;
-                    ;
+                source->start_offset -= system_time;
+                source->system_time = 0;
             }
         }
         else
         {
-            source->start_offset = -system_time + start_offset;
+            source->start_offset = start_offset;
+            source->system_time = system_time;
+            source->clock_time = 0;
         }
     }
     LeaveCriticalSection(&source->cs);
@@ -8212,7 +8245,9 @@ static HRESULT WINAPI system_time_source_sink_OnClockStop(IMFClockStateSink *ifa
 
     EnterCriticalSection(&source->cs);
     if (SUCCEEDED(hr = system_time_source_change_state(source, CLOCK_CMD_STOP)))
-        source->start_offset = 0;
+    {
+        source->start_offset = source->system_time = source->clock_time = 0;
+    }
     LeaveCriticalSection(&source->cs);
 
     return hr;
@@ -8228,8 +8263,7 @@ static HRESULT WINAPI system_time_source_sink_OnClockPause(IMFClockStateSink *if
     EnterCriticalSection(&source->cs);
     if (SUCCEEDED(hr = system_time_source_change_state(source, CLOCK_CMD_PAUSE)))
     {
-        system_time_source_apply_rate(source, &system_time);
-        source->start_offset += system_time;
+        system_time_source_update_clock_time(source, system_time);
     }
     LeaveCriticalSection(&source->cs);
 
@@ -8246,8 +8280,7 @@ static HRESULT WINAPI system_time_source_sink_OnClockRestart(IMFClockStateSink *
     EnterCriticalSection(&source->cs);
     if (SUCCEEDED(hr = system_time_source_change_state(source, CLOCK_CMD_RESTART)))
     {
-        system_time_source_apply_rate(source, &system_time);
-        source->start_offset -= system_time;
+        source->system_time = system_time;
     }
     LeaveCriticalSection(&source->cs);
 

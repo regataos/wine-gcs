@@ -153,7 +153,7 @@ static BOOL handle_enhanced_keys(INPUT_RECORD *ir, unsigned char *ch1, unsigned 
         }
     }
 
-    WARN("Unmapped char keyState=%x vk=%x\n",
+    WARN("Unmapped char keyState=%lx vk=%x\n",
             ir->Event.KeyEvent.dwControlKeyState, ir->Event.KeyEvent.wVirtualScanCode);
     return FALSE;
 }
@@ -522,6 +522,16 @@ static int puts_clbk_console_w(void *ctx, int len, const wchar_t *str)
     return len;
 }
 
+#if _MSVCR_VER<=120
+/*********************************************************************
+ *		_vcprintf_l (MSVCRT.@)
+ */
+int CDECL _vcprintf_l(const char* format, _locale_t locale, va_list valist)
+{
+    return pf_printf_a(puts_clbk_console_a, NULL, format, locale, 0, arg_clbk_valist, NULL, &valist);
+}
+#endif
+
 /*********************************************************************
  *		_vcprintf (MSVCRT.@)
  */
@@ -545,6 +555,13 @@ int WINAPIV _cprintf(const char* format, ...)
   return retval;
 }
 
+/*********************************************************************
+ *		_vcwprintf_l (MSVCRT.@)
+ */
+int CDECL _vcwprintf_l(const wchar_t* format, _locale_t locale, va_list valist)
+{
+    return pf_printf_w(puts_clbk_console_w, NULL, format, locale, 0, arg_clbk_valist, NULL, &valist);
+}
 
 /*********************************************************************
  *		_vcwprintf (MSVCRT.@)
@@ -578,7 +595,7 @@ int CDECL __conio_common_vcprintf(unsigned __int64 options, const char* format,
                                         _locale_t locale, va_list valist)
 {
     if (options & ~UCRTBASE_PRINTF_MASK)
-        FIXME("options %s not handled\n", wine_dbgstr_longlong(options));
+        FIXME("options %#I64x not handled\n", options);
     return pf_printf_a(puts_clbk_console_a, NULL, format, locale,
              options & UCRTBASE_PRINTF_MASK, arg_clbk_valist, NULL, &valist);
 }
@@ -590,7 +607,7 @@ int CDECL __conio_common_vcwprintf(unsigned __int64 options, const wchar_t* form
                                          _locale_t locale, va_list valist)
 {
     if (options & ~UCRTBASE_PRINTF_MASK)
-        FIXME("options %s not handled\n", wine_dbgstr_longlong(options));
+        FIXME("options %#I64x not handled\n", options);
     return pf_printf_w(puts_clbk_console_w, NULL, format, locale,
              options & UCRTBASE_PRINTF_MASK, arg_clbk_valist, NULL, &valist);
 }

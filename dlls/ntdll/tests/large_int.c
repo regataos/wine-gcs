@@ -39,6 +39,7 @@ static LONGLONG (WINAPI *p_allrem)( LONGLONG a, LONGLONG b );
 static LONGLONG (WINAPI *p_allmul)( LONGLONG a, LONGLONG b );
 static ULONGLONG (WINAPI *p_aulldiv)( ULONGLONG a, ULONGLONG b );
 static ULONGLONG (WINAPI *p_aullrem)( ULONGLONG a, ULONGLONG b );
+static void *p_allshl, *p_allshr, *p_aullshr;
 
 static void InitFunctionPtrs(void)
 {
@@ -54,8 +55,11 @@ static void InitFunctionPtrs(void)
         p_alldiv = (void *)GetProcAddress(hntdll, "_alldiv");
         p_allrem = (void *)GetProcAddress(hntdll, "_allrem");
         p_allmul = (void *)GetProcAddress(hntdll, "_allmul");
+        p_allshl = (void *)GetProcAddress(hntdll, "_allshl");
+        p_allshr = (void *)GetProcAddress(hntdll, "_allshr");
         p_aulldiv = (void *)GetProcAddress(hntdll, "_aulldiv");
         p_aullrem = (void *)GetProcAddress(hntdll, "_aullrem");
+        p_aullshr = (void *)GetProcAddress(hntdll, "_aullshr");
     } /* if */
 }
 
@@ -139,6 +143,7 @@ typedef struct {
     USHORT MaximumLength;
     const char *Buffer;
     NTSTATUS result;
+    int broken_len;
 } largeint2str_t;
 
 /*
@@ -267,17 +272,17 @@ static const largeint2str_t largeint2str[] = {
  */
 
     { 2,        32768, 16, 17, "1000000000000000\0--------------------------------------------------", STATUS_SUCCESS},
-    { 2,        32768, 16, 16, "1000000000000000---------------------------------------------------",  STATUS_SUCCESS},
+    { 2,        32768, 16, 16, "1000000000000000---------------------------------------------------",  STATUS_SUCCESS, 1},
     { 2,        65536, 17, 18, "10000000000000000\0-------------------------------------------------", STATUS_SUCCESS},
-    { 2,        65536, 17, 17, "10000000000000000--------------------------------------------------",  STATUS_SUCCESS},
+    { 2,        65536, 17, 17, "10000000000000000--------------------------------------------------",  STATUS_SUCCESS, 1},
     { 2,       131072, 18, 19, "100000000000000000\0------------------------------------------------", STATUS_SUCCESS},
-    { 2,       131072, 18, 18, "100000000000000000-------------------------------------------------",  STATUS_SUCCESS},
+    { 2,       131072, 18, 18, "100000000000000000-------------------------------------------------",  STATUS_SUCCESS, 1},
     {16,   0xffffffff,  8,  9, "FFFFFFFF\0----------------------------------------------------------", STATUS_SUCCESS},
-    {16,   0xffffffff,  8,  8, "FFFFFFFF-----------------------------------------------------------",  STATUS_SUCCESS},
-    {16,   0xffffffff,  8,  7, "-------------------------------------------------------------------",  STATUS_BUFFER_OVERFLOW},
+    {16,   0xffffffff,  8,  8, "FFFFFFFF-----------------------------------------------------------",  STATUS_SUCCESS, 1},
+    {16,   0xffffffff,  8,  7, "-------------------------------------------------------------------",  STATUS_BUFFER_OVERFLOW, 1},
     {16,          0xa,  1,  2, "A\0-----------------------------------------------------------------", STATUS_SUCCESS},
-    {16,          0xa,  1,  1, "A------------------------------------------------------------------",  STATUS_SUCCESS},
-    {16,            0,  1,  0, "-------------------------------------------------------------------",  STATUS_BUFFER_OVERFLOW},
+    {16,          0xa,  1,  1, "A------------------------------------------------------------------",  STATUS_SUCCESS, 1},
+    {16,            0,  1,  0, "-------------------------------------------------------------------",  STATUS_BUFFER_OVERFLOW, 1},
     {20,   0xdeadbeef,  0,  9, "-------------------------------------------------------------------",  STATUS_INVALID_PARAMETER},
     {-8,     07654321,  0, 12, "-------------------------------------------------------------------",  STATUS_INVALID_PARAMETER},
 };
@@ -297,7 +302,7 @@ static void one_RtlInt64ToUnicodeString_test(int test_num, const largeint2str_t 
 #ifdef _WIN64
     if (largeint2str->value >> 32 == 0xffffffff)  /* this crashes on 64-bit Vista */
     {
-        skip( "Value ffffffff%08x broken on 64-bit windows\n", (DWORD)largeint2str->value );
+        skip( "Value ffffffff%08lx broken on 64-bit windows\n", (DWORD)largeint2str->value );
         return;
     }
 #endif
@@ -340,7 +345,7 @@ static void one_RtlInt64ToUnicodeString_test(int test_num, const largeint2str_t 
 	} /* if */
     } else {
 	ok(result == largeint2str->result,
-           "(test %d): RtlInt64ToUnicodeString(0x%s, %d, [out]) has result %x, expected: %x\n",
+           "(test %d): RtlInt64ToUnicodeString(0x%s, %d, [out]) has result %lx, expected: %lx\n",
 	   test_num, wine_dbgstr_longlong(largeint2str->value), largeint2str->base, result, largeint2str->result);
 	if (result == STATUS_SUCCESS) {
 	    ok(unicode_string.Buffer[unicode_string.Length/sizeof(WCHAR)] == '\0',
@@ -349,10 +354,10 @@ static void one_RtlInt64ToUnicodeString_test(int test_num, const largeint2str_t 
 	} /* if */
     } /* if */
     ok(memcmp(unicode_string.Buffer, expected_unicode_string.Buffer, LARGE_STRI_BUFFER_LENGTH * sizeof(WCHAR)) == 0,
-       "(test %d): RtlInt64ToUnicodeString(0x%x%08x, %d, [out]) assigns string \"%s\", expected: \"%s\"\n",
-       test_num, (DWORD)(largeint2str->value >>32), (DWORD)largeint2str->value, largeint2str->base, 
-       ansi_str.Buffer, expected_ansi_str.Buffer);
-    ok(unicode_string.Length == expected_unicode_string.Length,
+       "(test %d): RtlInt64ToUnicodeString(0x%I64x, %d, [out]) assigns string \"%s\", expected: \"%s\"\n",
+       test_num, largeint2str->value, largeint2str->base, ansi_str.Buffer, expected_ansi_str.Buffer);
+    ok(unicode_string.Length == expected_unicode_string.Length ||
+       broken(largeint2str->broken_len && !unicode_string.Length) /* win11 */,
        "(test %d): RtlInt64ToUnicodeString(0x%s, %d, [out]) string has Length %d, expected: %d\n",
        test_num, wine_dbgstr_longlong(largeint2str->value), largeint2str->base,
        unicode_string.Length, expected_unicode_string.Length);
@@ -384,7 +389,7 @@ static void one_RtlLargeIntegerToChar_test(int test_num, const largeint2str_t *l
 #ifdef _WIN64
     if (largeint2str->value >> 32 == 0xffffffff)  /* this crashes on 64-bit Vista */
     {
-        skip( "Value ffffffff%08x broken on 64-bit windows\n", (DWORD)largeint2str->value );
+        skip( "Value ffffffff%08lx broken on 64-bit windows\n", (DWORD)largeint2str->value );
         return;
     }
 #endif
@@ -398,7 +403,7 @@ static void one_RtlLargeIntegerToChar_test(int test_num, const largeint2str_t *l
 	result = pRtlLargeIntegerToChar(&value, largeint2str->base, largeint2str->MaximumLength, dest_str);
     } /* if */
     ok(result == largeint2str->result,
-       "(test %d): RtlLargeIntegerToChar(0x%s, %d, %d, [out]) has result %x, expected: %x\n",
+       "(test %d): RtlLargeIntegerToChar(0x%s, %d, %d, [out]) has result %lx, expected: %lx\n",
        test_num, wine_dbgstr_longlong(largeint2str->value), largeint2str->base,
        largeint2str->MaximumLength, result, largeint2str->result);
     ok(memcmp(dest_str, largeint2str->Buffer, LARGE_STRI_BUFFER_LENGTH) == 0,
@@ -421,24 +426,24 @@ static void test_RtlLargeIntegerToChar(void)
     value = largeint2str[0].value;
     result = pRtlLargeIntegerToChar(&value, 20, largeint2str[0].MaximumLength, NULL);
     ok(result == STATUS_INVALID_PARAMETER,
-       "(test a): RtlLargeIntegerToChar(0x%s, %d, %d, NULL) has result %x, expected: %x\n",
+       "(test a): RtlLargeIntegerToChar(0x%s, %d, %d, NULL) has result %lx, expected: %lx\n",
        wine_dbgstr_longlong(largeint2str[0].value), 20,
        largeint2str[0].MaximumLength, result, STATUS_INVALID_PARAMETER);
 
     result = pRtlLargeIntegerToChar(&value, 20, 0, NULL);
     ok(result == STATUS_INVALID_PARAMETER,
-       "(test b): RtlLargeIntegerToChar(0x%s, %d, %d, NULL) has result %x, expected: %x\n",
+       "(test b): RtlLargeIntegerToChar(0x%s, %d, %d, NULL) has result %lx, expected: %lx\n",
        wine_dbgstr_longlong(largeint2str[0].value), 20,
        largeint2str[0].MaximumLength, result, STATUS_INVALID_PARAMETER);
 
     result = pRtlLargeIntegerToChar(&value, largeint2str[0].base, 0, NULL);
     ok(result == STATUS_BUFFER_OVERFLOW,
-       "(test c): RtlLargeIntegerToChar(0x%s, %d, %d, NULL) has result %x, expected: %x\n",
+       "(test c): RtlLargeIntegerToChar(0x%s, %d, %d, NULL) has result %lx, expected: %lx\n",
        wine_dbgstr_longlong(largeint2str[0].value), largeint2str[0].base, 0, result, STATUS_BUFFER_OVERFLOW);
 
     result = pRtlLargeIntegerToChar(&value, largeint2str[0].base, largeint2str[0].MaximumLength, NULL);
     ok(result == STATUS_ACCESS_VIOLATION,
-       "(test d): RtlLargeIntegerToChar(0x%s, %d, %d, NULL) has result %x, expected: %x\n",
+       "(test d): RtlLargeIntegerToChar(0x%s, %d, %d, NULL) has result %lx, expected: %lx\n",
        wine_dbgstr_longlong(largeint2str[0].value),
        largeint2str[0].base, largeint2str[0].MaximumLength, result, STATUS_ACCESS_VIOLATION);
 }
@@ -446,8 +451,30 @@ static void test_RtlLargeIntegerToChar(void)
 static void test_builtins(void)
 {
 #ifdef __i386__
+    void *code_mem;
     ULONGLONG u;
     LONGLONG l;
+
+    static const BYTE call_shift_code[] =
+    {
+        0x55,                           /* pushl %ebp */
+        0x89, 0xe5,                     /* movl %esp,%ebp */
+        0x31, 0xc0,                     /* xorl %eax,%eax */
+        0x31, 0xd2,                     /* xorl %edx,%edx */
+        0x31, 0xc9,                     /* xorl %ecx,%ecx */
+        0x87, 0x45, 0x0c,               /* xchgl 12(%ebp),%eax */
+        0x87, 0x55, 0x10,               /* xchgl 16(%ebp),%edx */
+        0x87, 0x4d, 0x14,               /* xchgl 20(%ebp),%ecx */
+        0xff, 0x55, 0x08,               /* call *8(%ebp) */
+        0x39, 0xe5,                     /* cmpl %esp,%ebp */
+        0x74, 0x05,                     /* je 1f */
+        0xb8, 0xef, 0xbe, 0xad, 0xde,   /* movl $0xdeadbeef,%eax */
+        0xc9,                           /* leave */
+        0xc3,                           /* ret */
+    };
+    LONGLONG (__cdecl *call_shift_func)(void *func, LONGLONG a, LONG b);
+
+    code_mem = VirtualAlloc(NULL, 0x1000, MEM_RESERVE | MEM_COMMIT, PAGE_EXECUTE_READWRITE);
 
     l = p_alldiv(100, 7);
     ok(l == 14, "_alldiv returned %s\n", wine_dbgstr_longlong(l));
@@ -490,6 +517,59 @@ static void test_builtins(void)
 
     l = p_allmul(0x300000001ll, 4);
     ok(l == 0xc00000004, "_allmul = %s\n", wine_dbgstr_longlong(l));
+
+    memcpy(code_mem, call_shift_code, sizeof(call_shift_code));
+    call_shift_func = code_mem;
+
+    l = call_shift_func(p_allshl, 0x0123456789abcdefll, 12);
+    ok(l == 0x3456789abcdef000ll, "got %#I64x\n", l);
+
+    l = call_shift_func(p_allshl, 0x0123456789abcdefll, 44);
+    ok(l == 0xbcdef00000000000ll, "got %#I64x\n", l);
+
+    l = call_shift_func(p_allshl, 0x0123456789abcdefll, 88);
+    ok(!l, "got %#I64x\n", l);
+
+    l = call_shift_func(p_allshl, 0x0123456789abcdefll, 0x88);
+    ok(!l, "got %#I64x\n", l);
+
+    l = call_shift_func(p_allshl, 0x0123456789abcdefll, 0x108);
+    ok(l == 0x23456789abcdef00ll, "got %#I64x\n", l);
+
+    l = call_shift_func(p_allshr, 0x0123456789abcdefll, 12);
+    ok(l == 0x0123456789abcll, "got %#I64x\n", l);
+
+    l = call_shift_func(p_allshr, 0x0123456789abcdefll, 44);
+    ok(l == 0x01234ll, "got %#I64x\n", l);
+
+    l = call_shift_func(p_allshr, 0x0123456789abcdefll, 88);
+    ok(!l, "got %#I64x\n", l);
+
+    l = call_shift_func(p_allshr, 0x8123456789abcdefll, 12);
+    ok(l == 0xfff8123456789abcll, "got %#I64x\n", l);
+
+    l = call_shift_func(p_allshr, 0x8123456789abcdefll, 44);
+    ok(l == 0xfffffffffff81234ll, "got %#I64x\n", l);
+
+    l = call_shift_func(p_allshr, 0x8123456789abcdefll, 88);
+    ok(l == -1ll, "got %#I64x\n", l);
+
+    l = call_shift_func(p_allshr, 0x8123456789abcdefll, 0x108);
+    ok(l == 0xff8123456789abcdll, "got %#I64x\n", l);
+
+    l = call_shift_func(p_aullshr, 0x8123456789abcdefll, 12);
+    ok(l == 0x8123456789abcll, "got %#I64x\n", l);
+
+    l = call_shift_func(p_aullshr, 0x8123456789abcdefll, 44);
+    ok(l == 0x81234ll, "got %#I64x\n", l);
+
+    l = call_shift_func(p_aullshr, 0x8123456789abcdefll, 88);
+    ok(!l, "got %#I64x\n", l);
+
+    l = call_shift_func(p_aullshr, 0x8123456789abcdefll, 0x108);
+    ok(l == 0x8123456789abcdll, "got %#I64x\n", l);
+
+    VirtualFree(code_mem, 0, MEM_RELEASE);
 #endif /* __i386__ */
 }
 

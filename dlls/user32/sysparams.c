@@ -26,9 +26,6 @@
 #include <string.h>
 #include <wchar.h>
 
-#define NONAMELESSUNION
-#define NONAMELESSSTRUCT
-
 #include "windef.h"
 #include "winbase.h"
 #include "winnls.h"
@@ -162,43 +159,6 @@ static void SYSPARAMS_NonClientMetrics32ATo32W( const NONCLIENTMETRICSA* lpnm32A
 
 
 /* Helper functions to retrieve monitors info */
-
-static BOOL CALLBACK get_virtual_screen_proc( HMONITOR monitor, HDC hdc, LPRECT rect, LPARAM lp )
-{
-    RECT *virtual_rect = (RECT *)lp;
-
-    UnionRect( virtual_rect, virtual_rect, rect );
-    return TRUE;
-}
-
-RECT get_virtual_screen_rect(void)
-{
-    RECT rect = {0};
-
-    NtUserEnumDisplayMonitors( 0, NULL, get_virtual_screen_proc, (LPARAM)&rect );
-    return rect;
-}
-
-static BOOL CALLBACK get_primary_monitor_proc( HMONITOR monitor, HDC hdc, LPRECT rect, LPARAM lp )
-{
-    RECT *primary_rect = (RECT *)lp;
-
-    if (!rect->top && !rect->left && rect->right && rect->bottom)
-    {
-        *primary_rect = *rect;
-        return FALSE;
-    }
-
-    return TRUE;
-}
-
-RECT get_primary_monitor_rect(void)
-{
-    RECT rect = {0};
-
-    NtUserEnumDisplayMonitors( 0, NULL, get_primary_monitor_proc, (LPARAM)&rect );
-    return rect;
-}
 
 HDC get_display_dc(void)
 {
@@ -444,7 +404,7 @@ BOOL WINAPI SystemParametersInfoA( UINT uiAction, UINT uiParam,
  */
 INT WINAPI GetSystemMetrics( INT index )
 {
-    return NtUserCallOneParam( index, NtUserGetSystemMetrics );
+    return NtUserGetSystemMetrics( index );
 }
 
 
@@ -453,7 +413,7 @@ INT WINAPI GetSystemMetrics( INT index )
  */
 INT WINAPI GetSystemMetricsForDpi( INT index, UINT dpi )
 {
-    return NtUserCallTwoParam( index, dpi, NtUserGetSystemMetricsForDpi );
+    return NtUserGetSystemMetricsForDpi( index, dpi );
 }
 
 
@@ -486,7 +446,7 @@ BOOL WINAPI SetDoubleClickTime( UINT interval )
  */
 COLORREF WINAPI DECLSPEC_HOTPATCH GetSysColor( INT index )
 {
-    return NtUserCallOneParam( index, NtUserGetSysColor );
+    return NtUserGetSysColor( index );
 }
 
 
@@ -505,7 +465,7 @@ DWORD_PTR WINAPI SetSysColorsTemp( const COLORREF *pPens, const HBRUSH *pBrushes
  */
 HBRUSH WINAPI DECLSPEC_HOTPATCH GetSysColorBrush( INT index )
 {
-    return UlongToHandle( NtUserCallOneParam( index, NtUserGetSysColorBrush ));
+    return NtUserGetSysColorBrush( index );
 }
 
 
@@ -514,7 +474,7 @@ HBRUSH WINAPI DECLSPEC_HOTPATCH GetSysColorBrush( INT index )
  */
 HPEN SYSCOLOR_GetPen( INT index )
 {
-    return UlongToHandle( NtUserCallOneParam( index, NtUserGetSysColorPen ));
+    return NtUserGetSysColorPen( index );
 }
 
 
@@ -523,7 +483,7 @@ HPEN SYSCOLOR_GetPen( INT index )
  */
 HBRUSH SYSCOLOR_Get55AABrush(void)
 {
-    return UlongToHandle( NtUserCallOneParam( COLOR_55AA_BRUSH, NtUserGetSysColorBrush ));
+    return NtUserGetSysColorBrush( COLOR_55AA_BRUSH );
 }
 
 /***********************************************************************
@@ -644,14 +604,14 @@ BOOL WINAPI EnumDisplaySettingsExA(LPCSTR lpszDeviceName, DWORD iModeNum,
         lpDevMode->dmBitsPerPel       = devmodeW.dmBitsPerPel;
         lpDevMode->dmPelsHeight       = devmodeW.dmPelsHeight;
         lpDevMode->dmPelsWidth        = devmodeW.dmPelsWidth;
-        lpDevMode->u2.dmDisplayFlags  = devmodeW.u2.dmDisplayFlags;
+        lpDevMode->dmDisplayFlags  = devmodeW.dmDisplayFlags;
         lpDevMode->dmDisplayFrequency = devmodeW.dmDisplayFrequency;
         lpDevMode->dmFields           = devmodeW.dmFields;
 
-        lpDevMode->u1.s2.dmPosition.x = devmodeW.u1.s2.dmPosition.x;
-        lpDevMode->u1.s2.dmPosition.y = devmodeW.u1.s2.dmPosition.y;
-        lpDevMode->u1.s2.dmDisplayOrientation = devmodeW.u1.s2.dmDisplayOrientation;
-        lpDevMode->u1.s2.dmDisplayFixedOutput = devmodeW.u1.s2.dmDisplayFixedOutput;
+        lpDevMode->dmPosition.x = devmodeW.dmPosition.x;
+        lpDevMode->dmPosition.y = devmodeW.dmPosition.y;
+        lpDevMode->dmDisplayOrientation = devmodeW.dmDisplayOrientation;
+        lpDevMode->dmDisplayFixedOutput = devmodeW.dmDisplayFixedOutput;
     }
     if (lpszDeviceName) RtlFreeUnicodeString(&nameW);
     return ret;
@@ -667,121 +627,6 @@ BOOL WINAPI EnumDisplaySettingsExW( const WCHAR *device, DWORD mode,
     UNICODE_STRING str;
     RtlInitUnicodeString( &str, device );
     return NtUserEnumDisplaySettings( &str, mode, dev_mode, flags );
-}
-
-/**********************************************************************
- *              get_monitor_dpi
- */
-UINT get_monitor_dpi( HMONITOR monitor )
-{
-    /* FIXME: use the monitor DPI instead */
-    return system_dpi;
-}
-
-/**********************************************************************
- *              get_win_monitor_dpi
- */
-UINT get_win_monitor_dpi( HWND hwnd )
-{
-    /* FIXME: use the monitor DPI instead */
-    return system_dpi;
-}
-
-/**********************************************************************
- *              get_thread_dpi
- */
-UINT get_thread_dpi(void)
-{
-    switch (GetAwarenessFromDpiAwarenessContext( GetThreadDpiAwarenessContext() ))
-    {
-    case DPI_AWARENESS_UNAWARE:      return USER_DEFAULT_SCREEN_DPI;
-    case DPI_AWARENESS_SYSTEM_AWARE: return system_dpi;
-    default:                         return 0;  /* no scaling */
-    }
-}
-
-/**********************************************************************
- *              map_dpi_point
- */
-POINT map_dpi_point( POINT pt, UINT dpi_from, UINT dpi_to )
-{
-    if (dpi_from && dpi_to && dpi_from != dpi_to)
-    {
-        pt.x = MulDiv( pt.x, dpi_to, dpi_from );
-        pt.y = MulDiv( pt.y, dpi_to, dpi_from );
-    }
-    return pt;
-}
-
-/**********************************************************************
- *              point_win_to_phys_dpi
- */
-POINT point_win_to_phys_dpi( HWND hwnd, POINT pt )
-{
-    return map_dpi_point( pt, GetDpiForWindow( hwnd ), get_win_monitor_dpi( hwnd ) );
-}
-
-/**********************************************************************
- *              point_phys_to_win_dpi
- */
-POINT point_phys_to_win_dpi( HWND hwnd, POINT pt )
-{
-    return map_dpi_point( pt, get_win_monitor_dpi( hwnd ), GetDpiForWindow( hwnd ));
-}
-
-/**********************************************************************
- *              point_win_to_thread_dpi
- */
-POINT point_win_to_thread_dpi( HWND hwnd, POINT pt )
-{
-    UINT dpi = get_thread_dpi();
-    if (!dpi) dpi = get_win_monitor_dpi( hwnd );
-    return map_dpi_point( pt, GetDpiForWindow( hwnd ), dpi );
-}
-
-/**********************************************************************
- *              point_thread_to_win_dpi
- */
-POINT point_thread_to_win_dpi( HWND hwnd, POINT pt )
-{
-    UINT dpi = get_thread_dpi();
-    if (!dpi) dpi = get_win_monitor_dpi( hwnd );
-    return map_dpi_point( pt, dpi, GetDpiForWindow( hwnd ));
-}
-
-/**********************************************************************
- *              map_dpi_rect
- */
-RECT map_dpi_rect( RECT rect, UINT dpi_from, UINT dpi_to )
-{
-    if (dpi_from && dpi_to && dpi_from != dpi_to)
-    {
-        rect.left   = MulDiv( rect.left, dpi_to, dpi_from );
-        rect.top    = MulDiv( rect.top, dpi_to, dpi_from );
-        rect.right  = MulDiv( rect.right, dpi_to, dpi_from );
-        rect.bottom = MulDiv( rect.bottom, dpi_to, dpi_from );
-    }
-    return rect;
-}
-
-/**********************************************************************
- *              rect_win_to_thread_dpi
- */
-RECT rect_win_to_thread_dpi( HWND hwnd, RECT rect )
-{
-    UINT dpi = get_thread_dpi();
-    if (!dpi) dpi = get_win_monitor_dpi( hwnd );
-    return map_dpi_rect( rect, GetDpiForWindow( hwnd ), dpi );
-}
-
-/**********************************************************************
- *              rect_thread_to_win_dpi
- */
-RECT rect_thread_to_win_dpi( HWND hwnd, RECT rect )
-{
-    UINT dpi = get_thread_dpi();
-    if (!dpi) dpi = get_win_monitor_dpi( hwnd );
-    return map_dpi_rect( rect, dpi, GetDpiForWindow( hwnd ) );
 }
 
 /**********************************************************************
@@ -927,7 +772,7 @@ UINT WINAPI GetDpiForSystem(void)
  */
 DPI_AWARENESS_CONTEXT WINAPI GetThreadDpiAwarenessContext(void)
 {
-    struct user_thread_info *info = get_user_thread_info();
+    struct ntuser_thread_info *info = NtUserGetThreadInfo();
 
     if (info->dpi_awareness) return ULongToHandle( info->dpi_awareness );
     return UlongToHandle( (NtUserGetProcessDpiAwarenessContext( GetCurrentProcess() ) & 3 ) | 0x10 );
@@ -938,7 +783,7 @@ DPI_AWARENESS_CONTEXT WINAPI GetThreadDpiAwarenessContext(void)
  */
 DPI_AWARENESS_CONTEXT WINAPI SetThreadDpiAwarenessContext( DPI_AWARENESS_CONTEXT context )
 {
-    struct user_thread_info *info = get_user_thread_info();
+    struct ntuser_thread_info *info = NtUserGetThreadInfo();
     DPI_AWARENESS prev, val = GetAwarenessFromDpiAwarenessContext( context );
 
     if (val == DPI_AWARENESS_INVALID)
@@ -956,122 +801,12 @@ DPI_AWARENESS_CONTEXT WINAPI SetThreadDpiAwarenessContext( DPI_AWARENESS_CONTEXT
     return ULongToHandle( prev );
 }
 
-/**********************************************************************
- *              LogicalToPhysicalPointForPerMonitorDPI   (USER32.@)
- */
-BOOL WINAPI LogicalToPhysicalPointForPerMonitorDPI( HWND hwnd, POINT *pt )
-{
-    RECT rect;
-
-    if (!GetWindowRect( hwnd, &rect )) return FALSE;
-    if (pt->x < rect.left || pt->y < rect.top || pt->x > rect.right || pt->y > rect.bottom) return FALSE;
-    *pt = point_win_to_phys_dpi( hwnd, *pt );
-    return TRUE;
-}
-
-/**********************************************************************
- *              PhysicalToLogicalPointForPerMonitorDPI   (USER32.@)
- */
-BOOL WINAPI PhysicalToLogicalPointForPerMonitorDPI( HWND hwnd, POINT *pt )
-{
-    DPI_AWARENESS_CONTEXT context;
-    RECT rect;
-    BOOL ret = FALSE;
-
-    context = SetThreadDpiAwarenessContext( DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE );
-    if (GetWindowRect( hwnd, &rect ) &&
-        pt->x >= rect.left && pt->y >= rect.top && pt->x <= rect.right && pt->y <= rect.bottom)
-    {
-        *pt = point_phys_to_win_dpi( hwnd, *pt );
-        ret = TRUE;
-    }
-    SetThreadDpiAwarenessContext( context );
-    return ret;
-}
-
-struct monitor_enum_info
-{
-    RECT     rect;
-    UINT     max_area;
-    UINT     min_distance;
-    HMONITOR primary;
-    HMONITOR nearest;
-    HMONITOR ret;
-};
-
-/* helper callback for MonitorFromRect */
-static BOOL CALLBACK monitor_enum( HMONITOR monitor, HDC hdc, LPRECT rect, LPARAM lp )
-{
-    struct monitor_enum_info *info = (struct monitor_enum_info *)lp;
-    RECT intersect;
-
-    if (IntersectRect( &intersect, rect, &info->rect ))
-    {
-        /* check for larger intersecting area */
-        UINT area = (intersect.right - intersect.left) * (intersect.bottom - intersect.top);
-        if (area > info->max_area)
-        {
-            info->max_area = area;
-            info->ret = monitor;
-        }
-    }
-    else if (!info->max_area)  /* if not intersecting, check for min distance */
-    {
-        UINT distance;
-        UINT x, y;
-
-        if (info->rect.right <= rect->left) x = rect->left - info->rect.right;
-        else if (rect->right <= info->rect.left) x = info->rect.left - rect->right;
-        else x = 0;
-        if (info->rect.bottom <= rect->top) y = rect->top - info->rect.bottom;
-        else if (rect->bottom <= info->rect.top) y = info->rect.top - rect->bottom;
-        else y = 0;
-        distance = x * x + y * y;
-        if (distance < info->min_distance)
-        {
-            info->min_distance = distance;
-            info->nearest = monitor;
-        }
-    }
-    if (!info->primary)
-    {
-        MONITORINFO mon_info;
-        mon_info.cbSize = sizeof(mon_info);
-        GetMonitorInfoW( monitor, &mon_info );
-        if (mon_info.dwFlags & MONITORINFOF_PRIMARY) info->primary = monitor;
-    }
-    return TRUE;
-}
-
 /***********************************************************************
  *		MonitorFromRect (USER32.@)
  */
 HMONITOR WINAPI MonitorFromRect( const RECT *rect, DWORD flags )
 {
-    struct monitor_enum_info info;
-
-    info.rect         = *rect;
-    info.max_area     = 0;
-    info.min_distance = ~0u;
-    info.primary      = 0;
-    info.nearest      = 0;
-    info.ret          = 0;
-
-    if (IsRectEmpty(&info.rect))
-    {
-        info.rect.right = info.rect.left + 1;
-        info.rect.bottom = info.rect.top + 1;
-    }
-
-    if (!NtUserEnumDisplayMonitors( 0, NULL, monitor_enum, (LPARAM)&info )) return 0;
-    if (!info.ret)
-    {
-        if (flags & MONITOR_DEFAULTTOPRIMARY) info.ret = info.primary;
-        else if (flags & MONITOR_DEFAULTTONEAREST) info.ret = info.nearest;
-    }
-
-    TRACE( "%s flags %x returning %p\n", wine_dbgstr_rect(rect), flags, info.ret );
-    return info.ret;
+    return NtUserMonitorFromRect( rect, flags );
 }
 
 /***********************************************************************
@@ -1088,24 +823,9 @@ HMONITOR WINAPI MonitorFromPoint( POINT pt, DWORD flags )
 /***********************************************************************
  *		MonitorFromWindow (USER32.@)
  */
-HMONITOR WINAPI MonitorFromWindow(HWND hWnd, DWORD dwFlags)
+HMONITOR WINAPI MonitorFromWindow( HWND hwnd, DWORD flags )
 {
-    RECT rect;
-    WINDOWPLACEMENT wp;
-
-    TRACE("(%p, 0x%08x)\n", hWnd, dwFlags);
-
-    wp.length = sizeof(wp);
-    if (IsIconic(hWnd) && GetWindowPlacement(hWnd, &wp))
-        return MonitorFromRect( &wp.rcNormalPosition, dwFlags );
-
-    if (GetWindowRect( hWnd, &rect ))
-        return MonitorFromRect( &rect, dwFlags );
-
-    if (!(dwFlags & (MONITOR_DEFAULTTOPRIMARY|MONITOR_DEFAULTTONEAREST))) return 0;
-    /* retrieve the primary */
-    SetRect( &rect, 0, 0, 1, 1 );
-    return MonitorFromRect( &rect, dwFlags );
+    return NtUserMonitorFromWindow( hwnd, flags );
 }
 
 /***********************************************************************
@@ -1137,7 +857,7 @@ BOOL WINAPI GetMonitorInfoA( HMONITOR monitor, LPMONITORINFO info )
  */
 BOOL WINAPI GetMonitorInfoW( HMONITOR monitor, LPMONITORINFO info )
 {
-    return NtUserCallTwoParam( HandleToUlong(monitor), (ULONG_PTR)info, NtUserGetMonitorInfo );
+    return NtUserGetMonitorInfo( monitor, info );
 }
 
 #ifdef __i386__
@@ -1261,7 +981,7 @@ BOOL WINAPI GetPhysicalCursorPos( POINT *point )
  */
 BOOL WINAPI SetPhysicalCursorPos( INT x, INT y )
 {
-    return SetCursorPos( x, y );
+    return NtUserSetCursorPos( x, y );
 }
 
 /***********************************************************************
@@ -1291,7 +1011,7 @@ BOOL WINAPI PhysicalToLogicalPoint( HWND hwnd, POINT *point )
 static DISPLAYCONFIG_ROTATION get_dc_rotation(const DEVMODEW *devmode)
 {
     if (devmode->dmFields & DM_DISPLAYORIENTATION)
-        return devmode->u1.s2.dmDisplayOrientation + 1;
+        return devmode->dmDisplayOrientation + 1;
     else
         return DISPLAYCONFIG_ROTATION_IDENTITY;
 }
@@ -1300,7 +1020,7 @@ static DISPLAYCONFIG_SCANLINE_ORDERING get_dc_scanline_ordering(const DEVMODEW *
 {
     if (!(devmode->dmFields & DM_DISPLAYFLAGS))
         return DISPLAYCONFIG_SCANLINE_ORDERING_UNSPECIFIED;
-    else if (devmode->u2.dmDisplayFlags & DM_INTERLACED)
+    else if (devmode->dmDisplayFlags & DM_INTERLACED)
         return DISPLAYCONFIG_SCANLINE_ORDERING_INTERLACED;
     else
         return DISPLAYCONFIG_SCANLINE_ORDERING_PROGRESSIVE;
@@ -1318,7 +1038,7 @@ static DISPLAYCONFIG_PIXELFORMAT get_dc_pixelformat(DWORD dmBitsPerPel)
 static void set_mode_target_info(DISPLAYCONFIG_MODE_INFO *info, const LUID *gpu_luid, UINT32 target_id,
                                  UINT32 flags, const DEVMODEW *devmode)
 {
-    DISPLAYCONFIG_TARGET_MODE *mode = &(info->u.targetMode);
+    DISPLAYCONFIG_TARGET_MODE *mode = &info->targetMode;
 
     info->infoType = DISPLAYCONFIG_MODE_INFO_TYPE_TARGET;
     info->adapterId = *gpu_luid;
@@ -1342,7 +1062,7 @@ static void set_mode_target_info(DISPLAYCONFIG_MODE_INFO *info, const LUID *gpu_
         mode->targetVideoSignalInfo.totalSize.cx = devmode->dmPelsWidth;
         mode->targetVideoSignalInfo.totalSize.cy = devmode->dmPelsHeight;
     }
-    mode->targetVideoSignalInfo.u.videoStandard = D3DKMDT_VSS_OTHER;
+    mode->targetVideoSignalInfo.videoStandard = D3DKMDT_VSS_OTHER;
     mode->targetVideoSignalInfo.scanLineOrdering = get_dc_scanline_ordering(devmode);
 }
 
@@ -1351,7 +1071,7 @@ static void set_path_target_info(DISPLAYCONFIG_PATH_TARGET_INFO *info, const LUI
 {
     info->adapterId = *gpu_luid;
     info->id = target_id;
-    info->u.modeInfoIdx = mode_index;
+    info->modeInfoIdx = mode_index;
     info->outputTechnology = DISPLAYCONFIG_OUTPUT_TECHNOLOGY_DISPLAYPORT_EXTERNAL;
     info->rotation = get_dc_rotation(devmode);
     info->scaling = DISPLAYCONFIG_SCALING_IDENTITY;
@@ -1365,7 +1085,7 @@ static void set_path_target_info(DISPLAYCONFIG_PATH_TARGET_INFO *info, const LUI
 static void set_mode_source_info(DISPLAYCONFIG_MODE_INFO *info, const LUID *gpu_luid,
                                  UINT32 source_id, const DEVMODEW *devmode)
 {
-    DISPLAYCONFIG_SOURCE_MODE *mode = &(info->u.sourceMode);
+    DISPLAYCONFIG_SOURCE_MODE *mode = &(info->sourceMode);
 
     info->infoType = DISPLAYCONFIG_MODE_INFO_TYPE_SOURCE;
     info->adapterId = *gpu_luid;
@@ -1376,7 +1096,7 @@ static void set_mode_source_info(DISPLAYCONFIG_MODE_INFO *info, const LUID *gpu_
     mode->pixelFormat = get_dc_pixelformat(devmode->dmBitsPerPel);
     if (devmode->dmFields & DM_POSITION)
     {
-        mode->position = devmode->u1.s2.dmPosition;
+        mode->position = devmode->dmPosition;
     }
     else
     {
@@ -1390,7 +1110,7 @@ static void set_path_source_info(DISPLAYCONFIG_PATH_SOURCE_INFO *info, const LUI
 {
     info->adapterId = *gpu_luid;
     info->id = source_id;
-    info->u.modeInfoIdx = mode_index;
+    info->modeInfoIdx = mode_index;
     info->statusFlags = DISPLAYCONFIG_SOURCE_IN_USE;
 }
 
@@ -1430,8 +1150,8 @@ LONG WINAPI QueryDisplayConfig(UINT32 flags, UINT32 *numpathelements, DISPLAYCON
     POINT origin;
     HMONITOR monitor;
     MONITORINFOEXW monitor_info;
-    DISPLAYCONFIG_SOURCE_MODE *source_mode = &modeinfo[0].DUMMYUNIONNAME.sourceMode;
-    DISPLAYCONFIG_TARGET_MODE *target_mode = &modeinfo[1].DUMMYUNIONNAME.targetMode;
+    DISPLAYCONFIG_SOURCE_MODE *source_mode = &modeinfo[0].sourceMode;
+    DISPLAYCONFIG_TARGET_MODE *target_mode = &modeinfo[1].targetMode;
     DISPLAYCONFIG_PATH_SOURCE_INFO *source_info = &pathinfo[0].sourceInfo;
     DISPLAYCONFIG_PATH_TARGET_INFO *target_info = &pathinfo[0].targetInfo;
 
@@ -1471,7 +1191,7 @@ LONG WINAPI QueryDisplayConfig(UINT32 flags, UINT32 *numpathelements, DISPLAYCON
     target_mode->targetVideoSignalInfo.activeSize.cy = devmode.dmPelsHeight;
     target_mode->targetVideoSignalInfo.totalSize.cx = devmode.dmPelsWidth;
     target_mode->targetVideoSignalInfo.totalSize.cy = devmode.dmPelsHeight;
-    target_mode->targetVideoSignalInfo.DUMMYUNIONNAME.videoStandard = D3DKMDT_VSS_NTSC_M;
+    target_mode->targetVideoSignalInfo.videoStandard = D3DKMDT_VSS_NTSC_M;
     target_mode->targetVideoSignalInfo.scanLineOrdering = DISPLAYCONFIG_SCANLINE_ORDERING_UNSPECIFIED;
 
     modeinfo[0].infoType = DISPLAYCONFIG_MODE_INFO_TYPE_SOURCE;
@@ -1483,13 +1203,13 @@ LONG WINAPI QueryDisplayConfig(UINT32 flags, UINT32 *numpathelements, DISPLAYCON
 
     source_info->adapterId = gpu_luid;
     source_info->id = 0;
-    source_info->DUMMYUNIONNAME.modeInfoIdx = 0;
+    source_info->modeInfoIdx = 0;
     source_info->statusFlags = DISPLAYCONFIG_SOURCE_IN_USE;
 
     target_info->adapterId = gpu_luid;
     target_info->id = 0;
 
-    target_info->DUMMYUNIONNAME.modeInfoIdx = 1;
+    target_info->modeInfoIdx = 1;
     target_info->outputTechnology = DISPLAYCONFIG_OUTPUT_TECHNOLOGY_HDMI;
     target_info->rotation = DISPLAYCONFIG_ROTATION_IDENTITY;
     target_info->scaling = DISPLAYCONFIG_SCALING_IDENTITY;
@@ -1602,114 +1322,7 @@ done:
  */
 LONG WINAPI DisplayConfigGetDeviceInfo(DISPLAYCONFIG_DEVICE_INFO_HEADER *packet)
 {
-    LONG ret = ERROR_GEN_FAILURE;
-    HANDLE mutex;
-    HDEVINFO devinfo;
-    SP_DEVINFO_DATA device_data = {sizeof(device_data)};
-    DWORD index = 0, type;
-    LUID gpu_luid;
-
-    TRACE("(%p)\n", packet);
-
-    if (!packet || packet->size < sizeof(*packet))
-        return ERROR_GEN_FAILURE;
-    wait_graphics_driver_ready();
-
-    switch (packet->type)
-    {
-    case DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME:
-    {
-        DISPLAYCONFIG_SOURCE_DEVICE_NAME *source_name = (DISPLAYCONFIG_SOURCE_DEVICE_NAME *)packet;
-        WCHAR device_name[CCHDEVICENAME];
-        LONG source_id;
-
-        TRACE("DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME\n");
-
-        if (packet->size < sizeof(*source_name))
-            return ERROR_INVALID_PARAMETER;
-
-        mutex = get_display_device_init_mutex();
-        devinfo = SetupDiGetClassDevsW(&GUID_DEVCLASS_MONITOR, L"DISPLAY", NULL, DIGCF_PRESENT);
-        if (devinfo == INVALID_HANDLE_VALUE)
-        {
-            release_display_device_init_mutex(mutex);
-            return ret;
-        }
-
-        while (SetupDiEnumDeviceInfo(devinfo, index++, &device_data))
-        {
-            if (!SetupDiGetDevicePropertyW(devinfo, &device_data, &DEVPROPKEY_MONITOR_GPU_LUID,
-                                           &type, (BYTE *)&gpu_luid, sizeof(gpu_luid), NULL, 0))
-                continue;
-
-            if ((source_name->header.adapterId.LowPart != gpu_luid.LowPart) ||
-                (source_name->header.adapterId.HighPart != gpu_luid.HighPart))
-                continue;
-
-            /* QueryDisplayConfig() derives the source ID from the adapter name. */
-            if (!SetupDiGetDevicePropertyW(devinfo, &device_data, &WINE_DEVPROPKEY_MONITOR_ADAPTERNAME,
-                                           &type, (BYTE *)device_name, sizeof(device_name), NULL, 0))
-                continue;
-
-            source_id = wcstol(device_name + lstrlenW(L"\\\\.\\DISPLAY"), NULL, 10);
-            source_id--;
-            if (source_name->header.id != source_id)
-                continue;
-
-            lstrcpyW(source_name->viewGdiDeviceName, device_name);
-            ret = ERROR_SUCCESS;
-            break;
-        }
-        SetupDiDestroyDeviceInfoList(devinfo);
-        release_display_device_init_mutex(mutex);
-        return ret;
-    }
-    case DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_NAME:
-    {
-        DISPLAYCONFIG_TARGET_DEVICE_NAME *target_name = (DISPLAYCONFIG_TARGET_DEVICE_NAME *)packet;
-
-        FIXME("DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_NAME: stub\n");
-
-        if (packet->size < sizeof(*target_name))
-            return ERROR_INVALID_PARAMETER;
-
-        memset(&target_name->flags, 0, sizeof(*target_name) - offsetof(DISPLAYCONFIG_TARGET_DEVICE_NAME, flags));
-        wcscpy(target_name->monitorFriendlyDeviceName, L"Display");
-        return ERROR_NOT_SUPPORTED;
-    }
-    case DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_PREFERRED_MODE:
-    {
-        DISPLAYCONFIG_TARGET_PREFERRED_MODE *preferred_mode = (DISPLAYCONFIG_TARGET_PREFERRED_MODE *)packet;
-
-        FIXME("DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_PREFERRED_MODE: stub\n");
-
-        if (packet->size < sizeof(*preferred_mode))
-            return ERROR_INVALID_PARAMETER;
-
-        return ERROR_NOT_SUPPORTED;
-    }
-    case DISPLAYCONFIG_DEVICE_INFO_GET_ADAPTER_NAME:
-    {
-        DISPLAYCONFIG_ADAPTER_NAME *adapter_name = (DISPLAYCONFIG_ADAPTER_NAME *)packet;
-
-        FIXME("DISPLAYCONFIG_DEVICE_INFO_GET_ADAPTER_NAME: stub\n");
-
-        if (packet->size < sizeof(*adapter_name))
-            return ERROR_INVALID_PARAMETER;
-
-        return ERROR_NOT_SUPPORTED;
-    }
-    case DISPLAYCONFIG_DEVICE_INFO_SET_TARGET_PERSISTENCE:
-    case DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_BASE_TYPE:
-    case DISPLAYCONFIG_DEVICE_INFO_GET_SUPPORT_VIRTUAL_RESOLUTION:
-    case DISPLAYCONFIG_DEVICE_INFO_SET_SUPPORT_VIRTUAL_RESOLUTION:
-    case DISPLAYCONFIG_DEVICE_INFO_GET_ADVANCED_COLOR_INFO:
-    case DISPLAYCONFIG_DEVICE_INFO_SET_ADVANCED_COLOR_STATE:
-    case DISPLAYCONFIG_DEVICE_INFO_GET_SDR_WHITE_LEVEL:
-    default:
-        FIXME("Unimplemented packet type: %u\n", packet->type);
-        return ERROR_INVALID_PARAMETER;
-    }
+    return RtlNtStatusToDosError(NtUserDisplayConfigGetDeviceInfo(packet));
 }
 
 /***********************************************************************

@@ -1,10 +1,10 @@
-EXTRADEFS = -DWINE_NO_LONG_TYPES
+EXTRADEFS = -DWINGDIAPI= -DWINUSERAPI=
 MODULE    = win32u.dll
 UNIXLIB   = win32u.so
 IMPORTLIB = win32u
-EXTRAINCL = $(FREETYPE_CFLAGS) $(FONTCONFIG_CFLAGS)
-EXTRALIBS = $(CARBON_LIBS) $(APPKIT_LIBS) $(PTHREAD_LIBS) -lm
 IMPORTS   = ntdll winecrt0
+UNIX_CFLAGS  = $(FREETYPE_CFLAGS) $(FONTCONFIG_CFLAGS)
+UNIX_LIBS    = $(CARBON_LIBS) $(APPKIT_LIBS) $(PTHREAD_LIBS) -lm
 
 EXTRADLLFLAGS = -nodefaultlibs -Wb,--syscall-table,1
 
@@ -12,10 +12,13 @@ C_SRCS = \
 	bitblt.c \
 	bitmap.c \
 	brush.c \
+	class.c \
 	clipboard.c \
 	clipping.c \
 	cursoricon.c \
 	dc.c \
+	dce.c \
+	defwnd.c \
 	dib.c \
 	dibdrv/bitblt.c \
 	dibdrv/dc.c \
@@ -28,16 +31,23 @@ C_SRCS = \
 	font.c \
 	freetype.c \
 	gdiobj.c \
+	hook.c \
+	imm.c \
 	input.c \
 	main.c \
 	mapping.c \
+	menu.c \
+	message.c \
 	opentype.c \
 	painting.c \
 	palette.c \
 	path.c \
 	pen.c \
 	printdrv.c \
+	rawinput.c \
 	region.c \
+	scroll.c \
+	spy.c \
 	syscall.c \
 	sysparams.c \
 	vertical.c \

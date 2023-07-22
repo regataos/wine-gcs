@@ -141,7 +141,7 @@ static BOOL fetch_thread_info(struct dump_context* dc, int thd_idx,
 
     if ((hThread = OpenThread(THREAD_ALL_ACCESS, FALSE, tid)) == NULL)
     {
-        FIXME("Couldn't open thread %u (%u)\n", tid, GetLastError());
+        FIXME("Couldn't open thread %lu (%lu)\n", tid, GetLastError());
         return FALSE;
     }
     
@@ -607,7 +607,7 @@ static  unsigned        dump_system_info(struct dump_context* dc)
 {
     MINIDUMP_SYSTEM_INFO        mdSysInfo;
     SYSTEM_INFO                 sysInfo;
-    OSVERSIONINFOW              osInfo;
+    RTL_OSVERSIONINFOEXW        osInfo;
     DWORD                       written;
     ULONG                       slen;
     DWORD                       wine_extra = 0;
@@ -620,7 +620,7 @@ static  unsigned        dump_system_info(struct dump_context* dc)
 
     GetSystemInfo(&sysInfo);
     osInfo.dwOSVersionInfoSize = sizeof(osInfo);
-    GetVersionExW(&osInfo);
+    RtlGetVersion(&osInfo);
 
     wine_get_build_id = (void *)GetProcAddress(GetModuleHandleA("ntdll.dll"), "wine_get_build_id");
     wine_get_host_version = (void *)GetProcAddress(GetModuleHandleA("ntdll.dll"), "wine_get_host_version");

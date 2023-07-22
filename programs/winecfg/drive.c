@@ -85,7 +85,7 @@ ULONG drive_available_mask(char letter)
   result = ~result;
   if (letter) result |= DRIVE_MASK_BIT(letter);
 
-  WINE_TRACE("finished drive letter loop with %x\n", result);
+  WINE_TRACE("finished drive letter loop with %lx\n", result);
   return result;
 }
 
@@ -97,14 +97,14 @@ BOOL add_drive(char letter, const char *targetpath, const char *device, const WC
     if(drives[driveIndex].in_use)
         return FALSE;
 
-    WINE_TRACE("letter == '%c', unixpath == %s, device == %s, label == %s, serial == %08x, type == %d\n",
+    WINE_TRACE("letter == '%c', unixpath == %s, device == %s, label == %s, serial == %08lx, type == %ld\n",
                letter, wine_dbgstr_a(targetpath), wine_dbgstr_a(device),
                wine_dbgstr_w(label), serial, type);
 
     drives[driveIndex].letter   = toupper(letter);
-    drives[driveIndex].unixpath = strdupA(targetpath);
-    drives[driveIndex].device   = device ? strdupA(device) : NULL;
-    drives[driveIndex].label    = label ? strdupW(label) : NULL;
+    drives[driveIndex].unixpath = strdup(targetpath);
+    drives[driveIndex].device   = strdup(device);
+    drives[driveIndex].label    = wcsdup(label);
     drives[driveIndex].serial   = serial;
     drives[driveIndex].type     = type;
     drives[driveIndex].in_use   = TRUE;
@@ -116,11 +116,11 @@ BOOL add_drive(char letter, const char *targetpath, const char *device, const WC
 /* deallocates the contents of the drive. does not free the drive itself  */
 void delete_drive(struct drive *d)
 {
-    HeapFree(GetProcessHeap(), 0, d->unixpath);
+    free(d->unixpath);
     d->unixpath = NULL;
-    HeapFree(GetProcessHeap(), 0, d->device);
+    free(d->device);
     d->device = NULL;
-    HeapFree(GetProcessHeap(), 0, d->label);
+    free(d->label);
     d->label = NULL;
     d->serial = 0;
     d->in_use = FALSE;
@@ -183,7 +183,7 @@ static void set_drive_serial( WCHAR letter, DWORD serial )
     HANDLE hFile;
 
     filename[0] = letter;
-    WINE_TRACE("Putting serial number of %08X into file %s\n", serial, wine_dbgstr_w(filename));
+    WINE_TRACE("Putting serial number of %08lX into file %s\n", serial, wine_dbgstr_w(filename));
     hFile = CreateFileW(filename, GENERIC_WRITE, FILE_SHARE_READ, NULL,
                         CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
     if (hFile != INVALID_HANDLE_VALUE)
@@ -191,7 +191,7 @@ static void set_drive_serial( WCHAR letter, DWORD serial )
         DWORD w;
         char buffer[16];
 
-        sprintf( buffer, "%X\n", serial );
+        sprintf( buffer, "%lX\n", serial );
         WriteFile(hFile, buffer, strlen(buffer), &w, NULL);
         CloseHandle(hFile);
     }
@@ -204,7 +204,7 @@ static HANDLE open_mountmgr(void)
     if ((ret = CreateFileW( MOUNTMGR_DOS_DEVICE_NAME, GENERIC_READ|GENERIC_WRITE,
                             FILE_SHARE_READ|FILE_SHARE_WRITE, NULL, OPEN_EXISTING,
                             0, 0 )) == INVALID_HANDLE_VALUE)
-        WINE_ERR( "failed to open mount manager err %u\n", GetLastError() );
+        WINE_ERR( "failed to open mount manager err %lu\n", GetLastError() );
     return ret;
 }
 
@@ -222,7 +222,7 @@ BOOL load_drives(void)
         struct mountmgr_unix_drive input;
         struct mountmgr_unix_drive *data;
 
-        if (!(data = HeapAlloc( GetProcessHeap(), 0, size ))) break;
+        if (!(data = malloc( size ))) break;
 
         memset( &input, 0, sizeof(input) );
         input.letter = root[0];
@@ -252,7 +252,7 @@ BOOL load_drives(void)
             if (GetLastError() == ERROR_MORE_DATA) size = data->size;
             else root[0]++;  /* skip this drive */
         }
-        HeapFree( GetProcessHeap(), 0, data );
+        free( data );
     }
 
     /* reset modified flags */
@@ -287,7 +287,7 @@ void apply_drive_changes(void)
             len += strlen(drives[i].unixpath) + 1;
             if (drives[i].device) len += strlen(drives[i].device) + 1;
         }
-        if (!(ioctl = HeapAlloc( GetProcessHeap(), 0, len ))) continue;
+        if (!(ioctl = malloc( len ))) continue;
         ioctl->size = len;
         ioctl->letter = 'a' + i;
         ioctl->device_offset = 0;
@@ -315,12 +315,12 @@ void apply_drive_changes(void)
         {
             set_drive_label( drives[i].letter, drives[i].label );
             if (drives[i].in_use) set_drive_serial( drives[i].letter, drives[i].serial );
-            WINE_TRACE( "set drive %c: to %s type %u\n", 'a' + i,
+            WINE_TRACE( "set drive %c: to %s type %lu\n", 'a' + i,
                         wine_dbgstr_a(drives[i].unixpath), drives[i].type );
         }
-        else WINE_WARN( "failed to set drive %c: to %s type %u err %u\n", 'a' + i,
+        else WINE_WARN( "failed to set drive %c: to %s type %lu err %lu\n", 'a' + i,
                        wine_dbgstr_a(drives[i].unixpath), drives[i].type, GetLastError() );
-        HeapFree( GetProcessHeap(), 0, ioctl );
+        free( ioctl );
     }
     CloseHandle( mgr );
 }
@@ -361,7 +361,7 @@ void set_shell_folder( const WCHAR *path, const char *dest )
     len = sizeof(*ioctl) + nt_name.Length;
     if (dest) len += strlen(dest) + 1;
 
-    if (!(ioctl = HeapAlloc( GetProcessHeap(), 0, len ))) return;
+    if (!(ioctl = malloc( len ))) return;
     ioctl->create_backup = TRUE;
     ioctl->folder_offset = sizeof(*ioctl);
     ioctl->folder_size = nt_name.Length;
@@ -374,6 +374,6 @@ void set_shell_folder( const WCHAR *path, const char *dest )
     else ioctl->symlink_offset = 0;
 
     DeviceIoControl( mgr, IOCTL_MOUNTMGR_DEFINE_SHELL_FOLDER, ioctl, len, NULL, 0, NULL, NULL );
-    HeapFree( GetProcessHeap(), 0, ioctl );
+    free( ioctl );
     RtlFreeUnicodeString( &nt_name );
 }

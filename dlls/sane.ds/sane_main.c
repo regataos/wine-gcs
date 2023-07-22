@@ -30,19 +30,17 @@ struct tagActiveDS activeDS;
 
 DSMENTRYPROC SANE_dsmentry;
 HINSTANCE SANE_instance;
-unixlib_handle_t sane_handle = 0;
 
 BOOL WINAPI DllMain (HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
 {
-    TRACE("%p,%x,%p\n", hinstDLL, fdwReason, lpvReserved);
+    TRACE("%p,%lx,%p\n", hinstDLL, fdwReason, lpvReserved);
 
     switch (fdwReason)
     {
         case DLL_PROCESS_ATTACH: {
 	    SANE_instance = hinstDLL;
             DisableThreadLibraryCalls(hinstDLL);
-            if (NtQueryVirtualMemory( GetCurrentProcess(), hinstDLL, MemoryWineUnixFuncs,
-                                      &sane_handle, sizeof(sane_handle), NULL )) return FALSE;
+            if (__wine_init_unix_call()) return FALSE;
             SANE_CALL( process_attach, NULL );
             break;
 	}
@@ -333,7 +331,7 @@ DS_Entry ( pTW_IDENTITY pOrigin,
 {
     TW_UINT16 twRC = TWRC_SUCCESS;  /* Return Code */
 
-    TRACE("(DG=%d DAT=%d MSG=%d)\n", DG, DAT, MSG);
+    TRACE("(DG=%ld DAT=%d MSG=%d)\n", DG, DAT, MSG);
 
     switch (DG)
     {

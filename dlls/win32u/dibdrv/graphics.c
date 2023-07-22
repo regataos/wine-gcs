@@ -692,7 +692,7 @@ static struct cached_font *add_cached_font( DC *dc, HFONT hfont, UINT aa_flags )
 done:
     list_add_head( &font_cache, &ptr->entry );
     pthread_mutex_unlock( &font_cache_lock );
-    TRACE( "%d %s -> %p\n", ptr->lf.lfHeight, debugstr_w(ptr->lf.lfFaceName), ptr );
+    TRACE( "%d %s -> %p\n", (int)ptr->lf.lfHeight, debugstr_w(ptr->lf.lfFaceName), ptr );
     return ptr;
 }
 
@@ -1136,7 +1136,7 @@ BOOL CDECL dibdrv_ExtFloodFill( PHYSDEV dev, INT x, INT y, COLORREF color, UINT 
     RECT row;
     HRGN rgn;
 
-    TRACE( "(%p, %d, %d, %08x, %d)\n", pdev, x, y, color, type );
+    TRACE( "(%p, %d, %d, %s, %d)\n", pdev, x, y, debugstr_color(color), type );
 
     if (x < 0 || x >= pdev->dib.rect.right - pdev->dib.rect.left ||
         y < 0 || y >= pdev->dib.rect.bottom - pdev->dib.rect.top) return FALSE;
@@ -1177,7 +1177,7 @@ COLORREF CDECL dibdrv_GetNearestColor( PHYSDEV dev, COLORREF color )
     DC *dc = get_physdev_dc( dev );
     DWORD pixel;
 
-    TRACE( "(%p, %08x)\n", dev, color );
+    TRACE( "(%p, %s)\n", dev, debugstr_color(color) );
 
     pixel = get_pixel_color( dc, &pdev->dib, color, FALSE );
     return pdev->dib.funcs->pixel_to_colorref( &pdev->dib, pixel );
@@ -1265,7 +1265,7 @@ BOOL CDECL dibdrv_PatBlt( PHYSDEV dev, struct bitblt_coords *dst, DWORD rop )
     DWORD and = 0, xor = 0;
     BOOL ret = TRUE;
 
-    TRACE("(%p, %d, %d, %d, %d, %06x)\n", dev, dst->x, dst->y, dst->width, dst->height, rop);
+    TRACE("(%p, %d, %d, %d, %d, %06x)\n", dev, dst->x, dst->y, dst->width, dst->height, (int)rop);
 
     add_clipped_bounds( pdev, &dst->visrect, 0 );
     if (!get_clipped_rects( &pdev->dib, &dst->visrect, pdev->clip, &clipped_rects )) return TRUE;
@@ -1324,7 +1324,7 @@ BOOL CDECL dibdrv_PaintRgn( PHYSDEV dev, HRGN rgn )
 /***********************************************************************
  *           dibdrv_PolyPolygon
  */
-BOOL CDECL dibdrv_PolyPolygon( PHYSDEV dev, const POINT *pt, const INT *counts, DWORD polygons )
+BOOL CDECL dibdrv_PolyPolygon( PHYSDEV dev, const POINT *pt, const INT *counts, UINT polygons )
 {
     dibdrv_physdev *pdev = get_dibdrv_pdev(dev);
     DC *dc = get_physdev_dc( dev );
@@ -1625,7 +1625,7 @@ BOOL CDECL dibdrv_RoundRect( PHYSDEV dev, INT left, INT top, INT right, INT bott
     }
 
     if (pdev->brush.style != BS_NULL &&
-        !(interior = NtGdiPolyPolyDraw( ULongToHandle(ALTERNATE), points, (const UINT *)&count, 1, NtGdiPolyPolygonRgn )))
+        !(interior = ULongToHandle(NtGdiPolyPolyDraw( ULongToHandle(ALTERNATE), points, (const UINT *)&count, 1, NtGdiPolyPolygonRgn ))))
     {
         free( points );
         if (outline) NtGdiDeleteObjectApp( outline );
@@ -1679,7 +1679,7 @@ COLORREF CDECL dibdrv_SetPixel( PHYSDEV dev, INT x, INT y, COLORREF color )
     POINT pt;
     DWORD pixel;
 
-    TRACE( "(%p, %d, %d, %08x)\n", dev, x, y, color );
+    TRACE( "(%p, %d, %d, %s)\n", dev, x, y, debugstr_color(color) );
 
     pt.x = x;
     pt.y = y;

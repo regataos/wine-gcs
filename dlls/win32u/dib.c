@@ -181,7 +181,7 @@ static BOOL bitmapinfoheader_from_user_bitmapinfo( BITMAPINFOHEADER *dst, const 
     }
     else
     {
-        WARN( "(%u): unknown/wrong size for header\n", info->biSize );
+        WARN( "(%u): unknown/wrong size for header\n", (int)info->biSize );
         return FALSE;
     }
 
@@ -479,7 +479,7 @@ INT CDECL nulldrv_StretchDIBits( PHYSDEV dev, INT xDst, INT yDst, INT widthDst, 
     RECT rect;
 
     TRACE("%d %d %d %d <- %d %d %d %d rop %08x\n", xDst, yDst, widthDst, heightDst,
-          xSrc, ySrc, widthSrc, heightSrc, rop);
+          xSrc, ySrc, widthSrc, heightSrc, (int)rop);
 
     src_bits.ptr = (void*)bits;
     src_bits.is_copy = FALSE;
@@ -625,7 +625,7 @@ INT WINAPI NtGdiStretchDIBitsInternal( HDC hdc, INT xDst, INT yDst, INT widthDst
     if (!bits) return 0;
     if (!bitmapinfo_from_user_bitmapinfo( info, bmi, coloruse, TRUE ))
     {
-        SetLastError( ERROR_INVALID_PARAMETER );
+        RtlSetLastWin32Error( ERROR_INVALID_PARAMETER );
         return 0;
     }
 
@@ -677,7 +677,7 @@ INT WINAPI SetDIBits( HDC hdc, HBITMAP hbitmap, UINT startscan,
 
     if (!bitmapinfo_from_user_bitmapinfo( src_info, info, coloruse, TRUE ) || coloruse > DIB_PAL_COLORS)
     {
-        SetLastError( ERROR_INVALID_PARAMETER );
+        RtlSetLastWin32Error( ERROR_INVALID_PARAMETER );
         return 0;
     }
     if (src_info->bmiHeader.biCompression == BI_BITFIELDS)
@@ -685,7 +685,7 @@ INT WINAPI SetDIBits( HDC hdc, HBITMAP hbitmap, UINT startscan,
         DWORD *masks = (DWORD *)src_info->bmiColors;
         if (!masks[0] || !masks[1] || !masks[2])
         {
-            SetLastError( ERROR_INVALID_PARAMETER );
+            RtlSetLastWin32Error( ERROR_INVALID_PARAMETER );
             return 0;
         }
     }
@@ -733,10 +733,10 @@ INT WINAPI SetDIBits( HDC hdc, HBITMAP hbitmap, UINT startscan,
 
     result = lines;
 
-    offset_rect( &src.visrect, 0, src_to_dst_offset );
+    OffsetRect( &src.visrect, 0, src_to_dst_offset );
     if (!intersect_rect( &dst.visrect, &src.visrect, &dst.visrect )) goto done;
     src.visrect = dst.visrect;
-    offset_rect( &src.visrect, 0, -src_to_dst_offset );
+    OffsetRect( &src.visrect, 0, -src_to_dst_offset );
 
     src.x      = src.visrect.left;
     src.y      = src.visrect.top;
@@ -859,11 +859,11 @@ INT CDECL nulldrv_SetDIBitsToDevice( PHYSDEV dev, INT x_dst, INT y_dst, DWORD cx
     rect.bottom = dst.y + cy;
     if (!clip_visrect( dc, &dst.visrect, &rect )) goto done;
 
-    offset_rect( &src.visrect, dst.x - src.x, dst.y - src.y );
+    OffsetRect( &src.visrect, dst.x - src.x, dst.y - src.y );
     intersect_rect( &rect, &src.visrect, &dst.visrect );
     src.visrect = dst.visrect = rect;
-    offset_rect( &src.visrect, src.x - dst.x, src.y - dst.y );
-    if (is_rect_empty( &dst.visrect )) goto done;
+    OffsetRect( &src.visrect, src.x - dst.x, src.y - dst.y );
+    if (IsRectEmpty( &dst.visrect )) goto done;
     if (clip) NtGdiOffsetRgn( clip, dst.x - src.x, dst.y - src.y );
 
     dev = GET_DC_PHYSDEV( dc, pPutImage );
@@ -900,7 +900,7 @@ INT WINAPI NtGdiSetDIBitsToDeviceInternal( HDC hdc, INT xDest, INT yDest, DWORD 
     if (!bits) return 0;
     if (!bitmapinfo_from_user_bitmapinfo( info, bmi, coloruse, TRUE ))
     {
-        SetLastError( ERROR_INVALID_PARAMETER );
+        RtlSetLastWin32Error( ERROR_INVALID_PARAMETER );
         return 0;
     }
 
@@ -1227,7 +1227,7 @@ INT WINAPI NtGdiGetDIBitsInternal( HDC hdc, HBITMAP hbitmap, UINT startscan, UIN
 
     if (!(dc = get_dc_ptr( hdc )))
     {
-        SetLastError( ERROR_INVALID_PARAMETER );
+        RtlSetLastWin32Error( ERROR_INVALID_PARAMETER );
         return 0;
     }
     update_dc( dc );
@@ -1308,10 +1308,10 @@ INT WINAPI NtGdiGetDIBitsInternal( HDC hdc, HBITMAP hbitmap, UINT startscan, UIN
             if (lines < dst.visrect.bottom) dst.visrect.bottom = lines;
         }
 
-        offset_rect( &dst.visrect, 0, dst_to_src_offset );
+        OffsetRect( &dst.visrect, 0, dst_to_src_offset );
         empty_rect = !intersect_rect( &src.visrect, &src.visrect, &dst.visrect );
         dst.visrect = src.visrect;
-        offset_rect( &dst.visrect, 0, -dst_to_src_offset );
+        OffsetRect( &dst.visrect, 0, -dst_to_src_offset );
 
         if (dst_info->bmiHeader.biHeight > 0)
         {
@@ -1441,7 +1441,7 @@ HBITMAP WINAPI NtGdiCreateDIBitmapInternal( HDC hdc, INT width, INT height, DWOR
     height = abs( height );
 
     TRACE( "hdc=%p, init=%u, bits=%p, data=%p, coloruse=%u (bitmap: width=%d, height=%d)\n",
-           hdc, init, bits, data, coloruse, width, height );
+           hdc, (int)init, bits, data, coloruse, width, height );
 
     if (hdc == NULL)
         handle = NtGdiCreateBitmap( width, height, 1, 1, NULL );
@@ -1489,10 +1489,10 @@ HBITMAP WINAPI NtGdiCreateDIBSection( HDC hdc, HANDLE section, DWORD offset, con
     if (!(bmp = calloc( 1, sizeof(*bmp) ))) return 0;
 
     TRACE("format (%d,%d), planes %d, bpp %d, %s, size %d %s\n",
-          info->bmiHeader.biWidth, info->bmiHeader.biHeight,
+          (int)info->bmiHeader.biWidth, (int)info->bmiHeader.biHeight,
           info->bmiHeader.biPlanes, info->bmiHeader.biBitCount,
           info->bmiHeader.biCompression == BI_BITFIELDS? "BI_BITFIELDS" : "BI_RGB",
-          info->bmiHeader.biSizeImage, usage == DIB_PAL_COLORS? "PAL" : "RGB");
+          (int)info->bmiHeader.biSizeImage, usage == DIB_PAL_COLORS? "PAL" : "RGB");
 
     bmp->dib.dsBm.bmType       = 0;
     bmp->dib.dsBm.bmWidth      = info->bmiHeader.biWidth;
@@ -1548,8 +1548,8 @@ HBITMAP WINAPI NtGdiCreateDIBSection( HDC hdc, HANDLE section, DWORD offset, con
     {
         SIZE_T size = bmp->dib.dsBmih.biSizeImage;
         offset = 0;
-        if (NtAllocateVirtualMemory( GetCurrentProcess(), &bmp->dib.dsBm.bmBits, 0, &size,
-                                     MEM_RESERVE|MEM_COMMIT, PAGE_READWRITE ))
+        if (NtAllocateVirtualMemory( GetCurrentProcess(), &bmp->dib.dsBm.bmBits, zero_bits(),
+                                     &size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE ))
             goto error;
     }
     bmp->dib.dshSection = section;

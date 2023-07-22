@@ -31,7 +31,6 @@
 WINE_DEFAULT_DEBUG_CHANNEL(avicap);
 
 static HINSTANCE avicap_instance;
-static unixlib_handle_t unix_handle;
 
 static const WCHAR class_name[] = L"wine_avicap_class";
 
@@ -59,13 +58,13 @@ static void register_class(void)
     };
 
     if (!RegisterClassExW(&class) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS)
-        ERR("Failed to register class, error %u.\n", GetLastError());
+        ERR("Failed to register class, error %lu.\n", GetLastError());
 }
 
 static void unregister_class(void)
 {
     if (!UnregisterClassW(class_name, avicap_instance) && GetLastError() != ERROR_CLASS_DOES_NOT_EXIST)
-        ERR("Failed to unregister class, error %u.\n", GetLastError());
+        ERR("Failed to unregister class, error %lu.\n", GetLastError());
 }
 
 /***********************************************************************
@@ -74,7 +73,7 @@ static void unregister_class(void)
 HWND VFWAPI capCreateCaptureWindowW(const WCHAR *window_name, DWORD style,
         int x, int y, int width, int height, HWND parent, int id)
 {
-    TRACE("window_name %s, style %#x, x %d, y %d, width %d, height %d, parent %p, id %#x.\n",
+    TRACE("window_name %s, style %#lx, x %d, y %d, width %d, height %d, parent %p, id %#x.\n",
             debugstr_w(window_name), style, x, y, width, height, parent, id);
 
     return CreateWindowW(class_name, window_name, style, x, y, width, height, parent, NULL, avicap_instance, NULL);
@@ -125,8 +124,7 @@ BOOL VFWAPI capGetDriverDescriptionW(WORD index, WCHAR *name, int name_len, WCHA
     struct get_device_desc_params params;
 
     params.index = index;
-    if (__wine_unix_call(unix_handle, unix_get_device_desc, &params))
-        return FALSE;
+    if (WINE_UNIX_CALL(unix_get_device_desc, &params)) return FALSE;
 
     TRACE("Found device name %s, version %s.\n", debugstr_w(params.name), debugstr_w(params.version));
     lstrcpynW(name, params.name, name_len);
@@ -139,9 +137,8 @@ BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, void *reserved)
     switch (reason)
     {
         case DLL_PROCESS_ATTACH:
-            NtQueryVirtualMemory(GetCurrentProcess(), instance,
-                    MemoryWineUnixFuncs, &unix_handle, sizeof(unix_handle), NULL);
             DisableThreadLibraryCalls(instance);
+            __wine_init_unix_call();
             register_class();
             avicap_instance = instance;
             break;

@@ -1,9 +1,8 @@
-EXTRADEFS = -DWINE_NO_LONG_TYPES
 MODULE    = bcrypt.dll
 IMPORTS   = advapi32
 IMPORTLIB = bcrypt
 UNIXLIB   = bcrypt.so
-EXTRAINCL = $(GNUTLS_CFLAGS) $(GMP_CFLAGS)
+UNIX_CFLAGS = $(GNUTLS_CFLAGS) $(GMP_CFLAGS)
 
 C_SRCS = \
 	bcrypt_main.c \

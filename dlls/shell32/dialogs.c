@@ -34,7 +34,27 @@
 #include "shlobj.h"
 #include "shell32_main.h"
 #include "shresdef.h"
-#include "undocshell.h"
+
+/* RunFileDlg flags */
+#define RFF_NOBROWSE        0x01
+#define RFF_NODEFAULT       0x02
+#define RFF_CALCDIRECTORY   0x04
+#define RFF_NOLABEL         0x08
+#define RFF_NOSEPARATEMEM   0x20  /* NT only */
+
+/* RunFileFlg notification structure */
+typedef struct
+{
+    NMHDR hdr;
+    const char *lpFile;
+    const char *lpDirectory;
+    int nShow;
+} NM_RUNFILEDLG;
+
+/* RunFileDlg notification return values */
+#define RF_OK      0x00
+#define RF_CANCEL  0x01
+#define RF_RETRY   0x02
 
 typedef struct
     {
@@ -251,8 +271,6 @@ static INT_PTR CALLBACK RunDlgProc (HWND hwnd, UINT message, WPARAM wParam, LPAR
 
                 case IDC_RUNDLG_BROWSE :
                     {
-                    HMODULE hComdlg = NULL ;
-                    LPFNOFN ofnProc = NULL ;
                     WCHAR szFName[1024] = {0};
                     WCHAR filter_exe[256], filter_all[256], filter[MAX_PATH], szCaption[MAX_PATH];
                     OPENFILENAMEW ofn;
@@ -272,23 +290,13 @@ static INT_PTR CALLBACK RunDlgProc (HWND hwnd, UINT message, WPARAM wParam, LPAR
                     ofn.Flags = OFN_ENABLESIZING | OFN_FILEMUSTEXIST | OFN_HIDEREADONLY | OFN_PATHMUSTEXIST;
                     ofn.lpstrInitialDir = prfdp->lpstrDirectory;
 
-                    if (NULL == (hComdlg = LoadLibraryExW (L"comdlg32.dll", NULL, 0)) ||
-                        NULL == (ofnProc = (LPFNOFN)GetProcAddress (hComdlg, "GetOpenFileNameW")))
-                    {
-                        ERR("Couldn't get GetOpenFileName function entry (lib=%p, proc=%p)\n", hComdlg, ofnProc);
-                        ShellMessageBoxW(shell32_hInstance, hwnd, MAKEINTRESOURCEW(IDS_RUNDLG_BROWSE_ERROR), NULL, MB_OK | MB_ICONERROR);
-                        return TRUE ;
-                    }
-
-                    if (ofnProc(&ofn))
+                    if (GetOpenFileNameW(&ofn))
                     {
                         SetFocus (GetDlgItem (hwnd, IDOK)) ;
                         SetWindowTextW (GetDlgItem (hwnd, IDC_RUNDLG_EDITPATH), szFName) ;
                         SendMessageW (GetDlgItem (hwnd, IDC_RUNDLG_EDITPATH), CB_SETEDITSEL, 0, MAKELPARAM (0, -1)) ;
                         SetFocus (GetDlgItem (hwnd, IDOK)) ;
                     }
-
-                    FreeLibrary (hComdlg) ;
 
                     return TRUE ;
                     }

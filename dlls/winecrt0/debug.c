@@ -52,7 +52,7 @@ static void load_func( void **func, const char *name, void *def )
     if (!*func)
     {
         DWORD err = GetLastError();
-        HMODULE module = GetModuleHandleA( "ntdll.dll" );
+        HMODULE module = GetModuleHandleW( L"ntdll.dll" );
         void *proc = GetProcAddress( module, name );
         InterlockedExchangePointer( func, proc ? proc : def );
         SetLastError( err );
@@ -161,7 +161,7 @@ static void init_options(void)
 static const char * __cdecl fallback__wine_dbg_strdup( const char *str )
 {
     static char *list[32];
-    static int pos;
+    static LONG pos;
     char *ret = strdup( str );
     int idx;
 
@@ -201,11 +201,11 @@ static int __cdecl fallback__wine_dbg_header( enum __wine_debug_class cls,
     }
     else if (TRACE_ON(timestamp))
     {
-        ULONG ticks = GetTickCount();
+        UINT ticks = GetTickCount();
         pos += sprintf( pos, "%3u.%03u:", ticks / 1000, ticks % 1000 );
     }
-    if (TRACE_ON(pid)) pos += sprintf( pos, "%04x:", GetCurrentProcessId() );
-    pos += sprintf( pos, "%04x:", GetCurrentThreadId() );
+    if (TRACE_ON(pid)) pos += sprintf( pos, "%04x:", (UINT)GetCurrentProcessId() );
+    pos += sprintf( pos, "%04x:", (UINT)GetCurrentThreadId() );
     if (function && cls < ARRAY_SIZE( debug_classes ))
         snprintf( pos, sizeof(buffer) - (pos - buffer), "%s:%s:%s ",
                   debug_classes[cls], channel->name, function );

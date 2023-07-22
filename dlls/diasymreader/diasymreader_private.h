@@ -22,4 +22,3 @@
 #include "diasymreader.h"
 
 HRESULT SymWriter_CreateInstance(REFIID iid, void **ppv) DECLSPEC_HIDDEN;
-

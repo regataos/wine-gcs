@@ -98,15 +98,17 @@ static BOOL stack_set_frame_internal(int newframe)
     return TRUE;
 }
 
-BOOL stack_get_register_frame(const struct dbg_internal_var* div, DWORD_PTR** pval)
+BOOL stack_get_register_frame(const struct dbg_internal_var* div, struct dbg_lvalue* lvalue)
 {
     struct dbg_frame* currfrm = stack_get_curr_frame();
     if (currfrm == NULL) return FALSE;
     if (currfrm->is_ctx_valid)
-        *pval = (DWORD_PTR*)((char*)&currfrm->context + (DWORD_PTR)div->pval);
+        init_lvalue_in_debugger(lvalue, 0, div->typeid,
+                                (char*)&currfrm->context + (DWORD_PTR)div->pval);
     else
     {
         enum be_cpu_addr        kind;
+        DWORD                   itype = ADDRSIZE == 4 ? dbg_itype_unsigned_long32 : dbg_itype_unsigned_long64;
 
         if (!dbg_curr_process->be_cpu->get_register_info(div->val, &kind)) return FALSE;
 
@@ -114,13 +116,13 @@ BOOL stack_get_register_frame(const struct dbg_internal_var* div, DWORD_PTR** pv
         switch (kind)
         {
         case be_cpu_addr_pc:
-            *pval = &currfrm->linear_pc;
+            init_lvalue_in_debugger(lvalue, 0, itype, &currfrm->linear_pc);
             break;
         case be_cpu_addr_stack:
-            *pval = &currfrm->linear_stack;
+            init_lvalue_in_debugger(lvalue, 0, itype, &currfrm->linear_stack);
             break;
         case be_cpu_addr_frame:
-            *pval = &currfrm->linear_frame;
+            init_lvalue_in_debugger(lvalue, 0, itype, &currfrm->linear_frame);
             break;
         }
     }
@@ -180,7 +182,7 @@ unsigned stack_fetch_frames(const dbg_ctx_t* _ctx)
     dbg_ctx_t     ctx = *_ctx;
     BOOL          ret;
 
-    HeapFree(GetProcessHeap(), 0, dbg_curr_thread->frames);
+    free(dbg_curr_thread->frames);
     dbg_curr_thread->frames = NULL;
 
     memset(&sf, 0, sizeof(sf));
@@ -202,8 +204,10 @@ unsigned stack_fetch_frames(const dbg_ctx_t* _ctx)
                               SymFunctionTableAccess64, SymGetModuleBase64, NULL, SYM_STKWALK_DEFAULT)) ||
            nf == 0) /* we always register first frame information */
     {
-        dbg_curr_thread->frames = dbg_heap_realloc(dbg_curr_thread->frames,
-                                                   (nf + 1) * sizeof(dbg_curr_thread->frames[0]));
+        struct dbg_frame* new = realloc(dbg_curr_thread->frames,
+                                        (nf + 1) * sizeof(dbg_curr_thread->frames[0]));
+        if (!new) break;
+        dbg_curr_thread->frames = new;
 
         dbg_curr_thread->frames[nf].addr_pc      = sf.AddrPC;
         dbg_curr_thread->frames[nf].linear_pc    = (DWORD_PTR)memory_to_linear_addr(&sf.AddrPC);
@@ -246,7 +250,8 @@ static BOOL WINAPI sym_enum_cb(PSYMBOL_INFO sym_info, ULONG size, PVOID user)
     if (sym_info->Flags & SYMFLAG_PARAMETER)
     {
         if (!se->first) dbg_printf(", "); else se->first = FALSE;
-        symbol_print_local(sym_info, se->frame, FALSE);
+        dbg_printf("%s=", sym_info->Name);
+        symbol_print_localvalue(sym_info, se->frame, FALSE);
     }
     return TRUE;
 }
@@ -288,10 +293,10 @@ static void stack_print_addr_and_args(void)
         il.SizeOfStruct = sizeof(il);
         if (SymGetLineFromInlineContext(dbg_curr_process->handle, frm->linear_pc, frm->inline_ctx,
                                         0, &disp, &il))
-            dbg_printf(" [%s:%u]", il.FileName, il.LineNumber);
+            dbg_printf(" [%s:%lu]", il.FileName, il.LineNumber);
         dbg_printf(" in %s", im.ModuleName);
     }
-    else dbg_printf(" in %s (+0x%Ix)", im.ModuleName, frm->linear_pc - im.BaseOfImage);
+    else dbg_printf(" in %s (+0x%Ix)", im.ModuleName, frm->linear_pc - (DWORD_PTR)im.BaseOfImage);
 }
 
 /******************************************************************
@@ -333,7 +338,7 @@ static void backtrace_tid(struct dbg_process* pcs, DWORD tid)
     struct dbg_thread*  thread = dbg_curr_thread;
 
     if (!(dbg_curr_thread = dbg_get_thread(pcs, tid)))
-        dbg_printf("Unknown thread id (%04x) in process (%04x)\n", tid, pcs->pid);
+        dbg_printf("Unknown thread id (%04lx) in process (%04lx)\n", tid, pcs->pid);
     else
     {
         dbg_ctx_t ctx = {{0}};
@@ -343,7 +348,7 @@ static void backtrace_tid(struct dbg_process* pcs, DWORD tid)
         {
             if (!pcs->be_cpu->get_context(dbg_curr_thread->handle, &ctx))
             {
-                dbg_printf("Can't get context for thread %04x in current process\n",
+                dbg_printf("Can't get context for thread %04lx in current process\n",
                            tid);
             }
             else
@@ -353,7 +358,7 @@ static void backtrace_tid(struct dbg_process* pcs, DWORD tid)
             }
             ResumeThread(dbg_curr_thread->handle);
         }
-        else dbg_printf("Can't suspend thread %04x in current process\n", tid);
+        else dbg_printf("Can't suspend thread %04lx in current process\n", tid);
     }
     dbg_curr_thread = thread;
     dbg_curr_tid = thread ? thread->tid : 0;
@@ -399,7 +404,7 @@ static void backtrace_all(void)
             {
                 if (!dbg_attach_debuggee(entry.th32OwnerProcessID))
                 {
-                    dbg_printf("\nwarning: could not attach to %04x\n",
+                    dbg_printf("\nwarning: could not attach to %04lx\n",
                                entry.th32OwnerProcessID);
                     continue;
                 }
@@ -407,9 +412,8 @@ static void backtrace_all(void)
                 dbg_active_wait_for_first_exception();
             }
 
-            dbg_printf("\nBacktracing for thread %04x in process %04x (%s):\n",
-                       entry.th32ThreadID, dbg_curr_pid,
-                       dbg_W2A(dbg_curr_process->imageName, -1));
+            dbg_printf("\nBacktracing for thread %04lx in process %04lx (%ls):\n",
+                       entry.th32ThreadID, dbg_curr_pid, dbg_curr_process->imageName);
             backtrace_tid(dbg_curr_process, entry.th32ThreadID);
         }
         while (Thread32Next(snapshot, &entry));

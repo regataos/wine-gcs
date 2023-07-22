@@ -58,10 +58,10 @@ WINE_DEFAULT_DEBUG_CHANNEL(appwizcpl);
 #define GECKO_SHA "???"
 #endif
 
-#define MONO_VERSION "7.4.0"
+#define MONO_VERSION "8.0.0"
 #if defined(__i386__) || defined(__x86_64__)
 #define MONO_ARCH "x86"
-#define MONO_SHA "6413ff328ebbf7ec7689c648feb3546d8102ded865079d1fbf0331b14b3ab0ec"
+#define MONO_SHA "75b3f45dca1dc89857fe9e932da78710f64cc6d49ef1ab0c723a177085b4711b"
 #else
 #define MONO_ARCH ""
 #define MONO_SHA "???"
@@ -119,15 +119,13 @@ static BOOL sha_check(const WCHAR *file_name)
     const unsigned char *file_map;
     HANDLE file, map;
     DWORD size, i;
-    BCRYPT_HASH_HANDLE hash = NULL;
-    BCRYPT_ALG_HANDLE alg = NULL;
     UCHAR sha[32];
     char buf[1024];
     BOOL ret = FALSE;
 
     file = CreateFileW(file_name, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_READONLY, NULL);
     if(file == INVALID_HANDLE_VALUE) {
-        WARN("Could not open file: %u\n", GetLastError());
+        WARN("Could not open file: %lu\n", GetLastError());
         return FALSE;
     }
 
@@ -143,26 +141,16 @@ static BOOL sha_check(const WCHAR *file_name)
     if(!file_map)
         return FALSE;
 
-    if(BCryptOpenAlgorithmProvider(&alg, BCRYPT_SHA256_ALGORITHM, MS_PRIMITIVE_PROVIDER, 0))
-        goto end;
-    if(BCryptCreateHash(alg, &hash, NULL, 0, NULL, 0, 0))
-        goto end;
-    if(BCryptHashData(hash, (UCHAR *)file_map, size, 0))
-        goto end;
-    if(BCryptFinishHash(hash, sha, sizeof(sha), 0))
-        goto end;
+    if(!BCryptHash(BCRYPT_SHA256_ALG_HANDLE, NULL, 0, (UCHAR *)file_map, size, sha, sizeof(sha))) {
+        for(i=0; i < sizeof(sha); i++)
+            sprintf(buf + i * 2, "%02x", sha[i]);
 
-    for(i=0; i < sizeof(sha); i++)
-        sprintf(buf + i * 2, "%02x", sha[i]);
+        ret = !strcmp(buf, addon->sha);
+        if(!ret)
+            WARN("Got %s, expected %s\n", buf, addon->sha);
+    }
 
-    ret = !strcmp(buf, addon->sha);
-    if(!ret)
-        WARN("Got %s, expected %s\n", buf, addon->sha);
-
-end:
     UnmapViewOfFile(file_map);
-    if(hash) BCryptDestroyHash(hash);
-    if(alg) BCryptCloseAlgorithmProvider(alg, 0);
     return ret;
 }
 
@@ -189,7 +177,7 @@ static enum install_res install_file(const WCHAR *file_name)
     if(res == ERROR_PRODUCT_VERSION)
         res = MsiInstallProductW(file_name, L"REINSTALL=ALL REINSTALLMODE=vomus");
     if(res != ERROR_SUCCESS) {
-        ERR("MsiInstallProduct failed: %u\n", res);
+        ERR("MsiInstallProduct failed: %lu\n", res);
         return INSTALL_FAILED;
     }
 
@@ -205,7 +193,7 @@ static enum install_res install_from_dos_file(const WCHAR *dir, const WCHAR *sub
     HRESULT hr;
 
     size += lstrlenW( subdir ) + lstrlenW( file_name ) + 2;
-    if (!(path = heap_alloc( size * sizeof(WCHAR) ))) return INSTALL_FAILED;
+    if (!(path = malloc( size * sizeof(WCHAR) ))) return INSTALL_FAILED;
 
     lstrcpyW( path, dir );
     if (!wcsncmp( path, L"\\??\\", 4 ))  path[1] = '\\';  /* change \??\ into \\?\ */
@@ -218,11 +206,11 @@ static enum install_res install_from_dos_file(const WCHAR *dir, const WCHAR *sub
     hr = PathAllocCanonicalize( path, PATHCCH_ALLOW_LONG_PATHS, &canonical_path );
     if (FAILED( hr ))
     {
-        ERR( "Failed to canonicalize %s, hr %#x\n", debugstr_w(path), hr );
-        heap_free( path );
+        ERR( "Failed to canonicalize %s, hr %#lx\n", debugstr_w(path), hr );
+        free( path );
         return INSTALL_NEXT;
     }
-    heap_free( path );
+    free( path );
 
     if (GetFileAttributesW( canonical_path ) == INVALID_FILE_ATTRIBUTES)
     {
@@ -245,7 +233,7 @@ static enum install_res install_from_unix_file(const char *dir, const WCHAR *sub
     if (p_wine_get_dos_file_name && (dos_dir = p_wine_get_dos_file_name( dir )))
     {
         ret = install_from_dos_file( dos_dir, subdir, file_name );
-        heap_free( dos_dir );
+        HeapFree( GetProcessHeap(), 0, dos_dir );
     }
     return ret;
 }
@@ -276,24 +264,24 @@ static enum install_res install_from_registered_dir(void)
     if(!hkey)
         return INSTALL_NEXT;
 
-    package_dir = heap_alloc(size);
+    package_dir = malloc(size);
     res = RegGetValueA(hkey, NULL, addon->dir_config_key, RRF_RT_ANY, &type, (PBYTE)package_dir, &size);
     if(res == ERROR_MORE_DATA) {
-        package_dir = heap_realloc(package_dir, size);
+        package_dir = realloc(package_dir, size);
         res = RegGetValueA(hkey, NULL, addon->dir_config_key, RRF_RT_ANY, &type, (PBYTE)package_dir, &size);
     }
     RegCloseKey(hkey);
     if(res == ERROR_FILE_NOT_FOUND) {
-        heap_free(package_dir);
+        free(package_dir);
         return INSTALL_NEXT;
     } else if(res != ERROR_SUCCESS || (type != REG_SZ && type != REG_EXPAND_SZ)) {
-        heap_free(package_dir);
+        free(package_dir);
         return INSTALL_FAILED;
     }
 
     ret = install_from_unix_file(package_dir, L"", addon->file_name);
 
-    heap_free(package_dir);
+    free(package_dir);
     return ret;
 }
 
@@ -305,7 +293,7 @@ static enum install_res install_from_default_dir(void)
 
     if ((package_dir = _wgetenv( L"WINEBUILDDIR" )))
     {
-        dir_buf = heap_alloc( lstrlenW(package_dir) * sizeof(WCHAR) + sizeof(L"\\..\\") );
+        dir_buf = malloc( wcslen(package_dir) * sizeof(WCHAR) + sizeof(L"\\..\\") );
         lstrcpyW( dir_buf, package_dir );
         lstrcatW( dir_buf, L"\\..\\" );
         package_dir = dir_buf;
@@ -315,7 +303,7 @@ static enum install_res install_from_default_dir(void)
     if (package_dir)
     {
         ret = install_from_dos_file(package_dir, addon->subdir_name, addon->file_name);
-        heap_free(dir_buf);
+        free(dir_buf);
     }
 
     if (ret == INSTALL_NEXT)
@@ -341,7 +329,7 @@ static WCHAR *get_cache_file_name(BOOL ensure_exists)
     }
     else if ((home_dir = _wgetenv( L"WINEHOMEDIR" )))
     {
-        if (!(cache_dir = heap_alloc( lstrlenW(home_dir) * sizeof(WCHAR) + sizeof(L"\\.cache") ))) return NULL;
+        if (!(cache_dir = HeapAlloc( GetProcessHeap(), 0, wcslen(home_dir) * sizeof(WCHAR) + sizeof(L"\\.cache") ))) return NULL;
         lstrcpyW( cache_dir, home_dir );
         lstrcatW( cache_dir, L"\\.cache" );
         cache_dir[1] = '\\';  /* change \??\ into \\?\ */
@@ -350,25 +338,25 @@ static WCHAR *get_cache_file_name(BOOL ensure_exists)
 
     if (ensure_exists && !CreateDirectoryW( cache_dir, NULL ) && GetLastError() != ERROR_ALREADY_EXISTS)
     {
-        WARN( "%s does not exist and could not be created (%u)\n", debugstr_w(cache_dir), GetLastError() );
-        heap_free( cache_dir );
+        WARN( "%s does not exist and could not be created (%lu)\n", debugstr_w(cache_dir), GetLastError() );
+        HeapFree( GetProcessHeap(), 0, cache_dir );
         return NULL;
     }
 
     size = lstrlenW( cache_dir ) + ARRAY_SIZE(L"\\wine") + lstrlenW( addon->file_name ) + 1;
-    if (!(ret = heap_alloc( size * sizeof(WCHAR) )))
+    if (!(ret = malloc( size * sizeof(WCHAR) )))
     {
-        heap_free( cache_dir );
+        HeapFree( GetProcessHeap(), 0, cache_dir );
         return NULL;
     }
     lstrcpyW( ret, cache_dir );
     lstrcatW( ret, L"\\wine" );
-    heap_free( cache_dir );
+    HeapFree( GetProcessHeap(), 0, cache_dir );
 
     if (ensure_exists && !CreateDirectoryW( ret, NULL ) && GetLastError() != ERROR_ALREADY_EXISTS)
     {
-        WARN( "%s does not exist and could not be created (%u)\n", debugstr_w(ret), GetLastError() );
-        heap_free( ret );
+        WARN( "%s does not exist and could not be created (%lu)\n", debugstr_w(ret), GetLastError() );
+        free( ret );
         return NULL;
     }
     len = lstrlenW( ret );
@@ -391,12 +379,12 @@ static enum install_res install_from_cache(void)
     if(!sha_check(cache_file_name)) {
         WARN("could not validate checksum\n");
         DeleteFileW(cache_file_name);
-        heap_free(cache_file_name);
+        free(cache_file_name);
         return INSTALL_NEXT;
     }
 
     res = install_file(cache_file_name);
-    heap_free(cache_file_name);
+    free(cache_file_name);
     return res;
 }
 
@@ -477,7 +465,7 @@ static HRESULT WINAPI InstallCallback_OnStopBinding(IBindStatusCallback *iface,
         if(hresult == E_ABORT)
             TRACE("Binding aborted\n");
         else
-            ERR("Binding failed %08x\n", hresult);
+            ERR("Binding failed %08lx\n", hresult);
         return S_OK;
     }
 
@@ -497,7 +485,7 @@ static HRESULT WINAPI InstallCallback_OnStopBinding(IBindStatusCallback *iface,
         cache_file_name = get_cache_file_name(TRUE);
         if(cache_file_name) {
             CopyFileW(msi_file, cache_file_name, FALSE);
-            heap_free(cache_file_name);
+            free(cache_file_name);
         }
     }else {
         WCHAR message[256];
@@ -507,7 +495,7 @@ static HRESULT WINAPI InstallCallback_OnStopBinding(IBindStatusCallback *iface,
     }
 
     DeleteFileW(msi_file);
-    heap_free(msi_file);
+    free(msi_file);
     msi_file = NULL;
 
     EndDialog(install_dialog, 0);
@@ -527,7 +515,7 @@ static HRESULT WINAPI InstallCallback_OnDataAvailable(IBindStatusCallback *iface
         DWORD dwSize, FORMATETC* pformatetc, STGMEDIUM* pstgmed)
 {
     if(!msi_file) {
-        msi_file = heap_strdupW(pstgmed->u.lpszFileName);
+        msi_file = wcsdup(pstgmed->u.lpszFileName);
         TRACE("got file name %s\n", debugstr_w(msi_file));
     }
 
@@ -634,15 +622,15 @@ static LPWSTR get_url(void)
 
     static const WCHAR httpW[] = {'h','t','t','p'};
 
-    url = heap_alloc(size);
+    url = malloc(size);
     returned_size = size;
 
     hkey = open_config_key();
     if (hkey)
     {
-        config_key = heap_strdupAtoW(addon->url_config_key);
+        config_key = strdupAtoW(addon->url_config_key);
         res = RegQueryValueExW(hkey, config_key, NULL, &type, (LPBYTE)url, &returned_size);
-        heap_free(config_key);
+        free(config_key);
         RegCloseKey(hkey);
         if(res == ERROR_SUCCESS && type == REG_SZ) goto found;
     }
@@ -696,7 +684,7 @@ static void run_winebrowser(const WCHAR *url)
     lstrcpyW(app+len, L"\\winebrowser.exe");
     len += ARRAY_SIZE(L"\\winebrowser.exe") - 1;
 
-    args = heap_alloc((len+1+url_len)*sizeof(WCHAR));
+    args = malloc((len + 1 + url_len) * sizeof(WCHAR));
     if(!args)
         return;
 
@@ -709,7 +697,7 @@ static void run_winebrowser(const WCHAR *url)
     memset(&si, 0, sizeof(si));
     si.cb = sizeof(si);
     ret = CreateProcessW(app, args, NULL, NULL, FALSE, DETACHED_PROCESS, NULL, NULL, &si, &pi);
-    heap_free(args);
+    free(args);
     if (ret) {
         CloseHandle(pi.hThread);
         CloseHandle(pi.hProcess);
@@ -778,7 +766,7 @@ BOOL install_addon(addon_t addon_type)
         && (url = get_url()))
         DialogBoxW(hInst, addon->dialog_template, 0, installer_proc);
 
-    heap_free(url);
+    free(url);
     url = NULL;
     return TRUE;
 }

@@ -30,6 +30,9 @@ WINE_DEFAULT_DEBUG_CHANNEL(oleacc);
 
 static const WCHAR lresult_atom_prefix[] = {'w','i','n','e','_','o','l','e','a','c','c',':'};
 
+#define NAVDIR_INTERNAL_HWND 10
+DEFINE_GUID(SID_AccFromDAWrapper, 0x33f139ee, 0xe509, 0x47f7, 0xbf,0x39, 0x83,0x76,0x44,0xf7,0x45,0x76);
+
 extern HRESULT WINAPI OLEACC_DllGetClassObject(REFCLSID, REFIID, void**) DECLSPEC_HIDDEN;
 extern BOOL WINAPI OLEACC_DllMain(HINSTANCE, DWORD, void*) DECLSPEC_HIDDEN;
 extern HRESULT WINAPI OLEACC_DllRegisterServer(void) DECLSPEC_HIDDEN;
@@ -84,7 +87,7 @@ const struct win_class_data* find_class_data(HWND hwnd, const struct win_class_d
 HRESULT WINAPI CreateStdAccessibleObject( HWND hwnd, LONG idObject,
         REFIID riidInterface, void** ppvObject )
 {
-    TRACE("%p %d %s %p\n", hwnd, idObject,
+    TRACE("%p %ld %s %p\n", hwnd, idObject,
           debugstr_guid( riidInterface ), ppvObject );
 
     switch(idObject) {
@@ -93,7 +96,7 @@ HRESULT WINAPI CreateStdAccessibleObject( HWND hwnd, LONG idObject,
     case OBJID_WINDOW:
         return create_window_object(hwnd, riidInterface, ppvObject);
     default:
-        FIXME("unhandled object id: %d\n", idObject);
+        FIXME("unhandled object id: %ld\n", idObject);
         return E_NOTIMPL;
     }
 }
@@ -109,10 +112,10 @@ HRESULT WINAPI ObjectFromLresult( LRESULT result, REFIID riid, WPARAM wParam, vo
     HRESULT hr;
     WCHAR *p;
 
-    TRACE("%ld %s %ld %p\n", result, debugstr_guid(riid), wParam, ppObject );
+    TRACE("%Id %s %Id %p\n", result, debugstr_guid(riid), wParam, ppObject );
 
     if(wParam)
-        FIXME("unsupported wParam = %lx\n", wParam);
+        FIXME("unsupported wParam = %Ix\n", wParam);
 
     if(!ppObject)
         return E_INVALIDARG;
@@ -182,10 +185,10 @@ LRESULT WINAPI LresultFromObject( REFIID riid, WPARAM wParam, LPUNKNOWN pAcc )
     ATOM atom;
     void *view;
 
-    TRACE("%s %ld %p\n", debugstr_guid(riid), wParam, pAcc);
+    TRACE("%s %Id %p\n", debugstr_guid(riid), wParam, pAcc);
 
     if(wParam)
-        FIXME("unsupported wParam = %lx\n", wParam);
+        FIXME("unsupported wParam = %Ix\n", wParam);
 
     if(!pAcc)
         return E_INVALIDARG;
@@ -276,7 +279,7 @@ HRESULT WINAPI AccessibleObjectFromPoint( POINT point, IAccessible** acc, VARIAN
     VARIANT v;
     HWND hwnd;
 
-    TRACE("{%d,%d} %p %p\n", point.x, point.y, acc, child_id);
+    TRACE("{%ld,%ld} %p %p\n", point.x, point.y, acc, child_id);
 
     if (!acc || !child_id)
         return E_INVALIDARG;
@@ -342,7 +345,7 @@ HRESULT WINAPI AccessibleObjectFromEvent( HWND hwnd, DWORD object_id, DWORD chil
     IDispatch *child = NULL;
     HRESULT hr;
 
-    TRACE("%p %d %d %p %p\n", hwnd, object_id, child_id, acc_out, child_id_out);
+    TRACE("%p %ld %ld %p %p\n", hwnd, object_id, child_id, acc_out, child_id_out);
 
     if (!acc_out)
         return E_INVALIDARG;
@@ -356,7 +359,7 @@ HRESULT WINAPI AccessibleObjectFromEvent( HWND hwnd, DWORD object_id, DWORD chil
     variant_init_i4(&child_id_variant, child_id);
     hr = IAccessible_get_accChild(acc, child_id_variant, &child);
     if (FAILED(hr))
-        TRACE("get_accChild failed with %#x!\n", hr);
+        TRACE("get_accChild failed with %#lx!\n", hr);
 
     if (SUCCEEDED(hr) && child)
     {
@@ -378,7 +381,7 @@ HRESULT WINAPI AccessibleObjectFromEvent( HWND hwnd, DWORD object_id, DWORD chil
 HRESULT WINAPI AccessibleObjectFromWindow( HWND hwnd, DWORD dwObjectID,
                              REFIID riid, void** ppvObject )
 {
-    TRACE("%p %d %s %p\n", hwnd, dwObjectID,
+    TRACE("%p %ld %s %p\n", hwnd, dwObjectID,
           debugstr_guid( riid ), ppvObject );
 
     if(!ppvObject)
@@ -400,42 +403,78 @@ HRESULT WINAPI AccessibleObjectFromWindow( HWND hwnd, DWORD dwObjectID,
 
 HRESULT WINAPI WindowFromAccessibleObject(IAccessible *acc, HWND *phwnd)
 {
+    IServiceProvider *sp;
+    IAccessible *acc2;
     IDispatch *parent;
     IOleWindow *ow;
+    VARIANT v, cid;
     HRESULT hres;
 
     TRACE("%p %p\n", acc, phwnd);
 
-    IAccessible_AddRef(acc);
+    hres = IAccessible_QueryInterface(acc, &IID_IOleWindow, (void**)&ow);
+    if(SUCCEEDED(hres)) {
+        hres = IOleWindow_GetWindow(ow, phwnd);
+        IOleWindow_Release(ow);
+        if(SUCCEEDED(hres) && *phwnd)
+            return S_OK;
+    }
+
+    VariantInit(&v);
+    variant_init_i4(&cid, CHILDID_SELF);
+    hres = IAccessible_accNavigate(acc, NAVDIR_INTERNAL_HWND, cid, &v);
+    if(SUCCEEDED(hres)) {
+        if(hres == S_OK && V_VT(&v) == VT_I4 && V_I4(&v)) {
+            *phwnd = LongToHandle(V_I4(&v));
+            return S_OK;
+        }
+        /* native leaks v here */
+        VariantClear(&v);
+    }
+
+    hres = IAccessible_QueryInterface(acc, &IID_IServiceProvider, (void**)&sp);
+    if(SUCCEEDED(hres)) {
+        hres = IServiceProvider_QueryService(sp, &SID_AccFromDAWrapper,
+                &IID_IAccessible, (void**)&acc2);
+        IServiceProvider_Release(sp);
+    }
+    if(FAILED(hres)) {
+        acc2 = acc;
+        IAccessible_AddRef(acc2);
+    }
+
     while(1) {
-        hres = IAccessible_QueryInterface(acc, &IID_IOleWindow, (void**)&ow);
+        hres = IAccessible_QueryInterface(acc2, &IID_IOleWindow, (void**)&ow);
         if(SUCCEEDED(hres)) {
             hres = IOleWindow_GetWindow(ow, phwnd);
             IOleWindow_Release(ow);
-            IAccessible_Release(acc);
-            return hres;
+            if(SUCCEEDED(hres)) {
+                IAccessible_Release(acc2);
+                return hres;
+            }
         }
 
         hres = IAccessible_get_accParent(acc, &parent);
-        IAccessible_Release(acc);
+        IAccessible_Release(acc2);
         if(FAILED(hres))
             return hres;
-        if(hres!=S_OK || !parent) {
+        if(!parent) {
             *phwnd = NULL;
             return hres;
         }
 
-        hres = IDispatch_QueryInterface(parent, &IID_IAccessible, (void**)&acc);
+        hres = IDispatch_QueryInterface(parent, &IID_IAccessible, (void**)&acc2);
         IDispatch_Release(parent);
         if(FAILED(hres))
             return hres;
+        acc = acc2;
     }
 }
 
 BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason,
                     LPVOID lpvReserved)
 {
-    TRACE("%p, %d, %p\n", hinstDLL, fdwReason, lpvReserved);
+    TRACE("%p, %ld, %p\n", hinstDLL, fdwReason, lpvReserved);
 
     switch (fdwReason)
     {
@@ -497,7 +536,7 @@ UINT WINAPI GetRoleTextW(DWORD role, LPWSTR lpRole, UINT rolemax)
     INT ret;
     WCHAR *resptr;
 
-    TRACE("%u %p %u\n", role, lpRole, rolemax);
+    TRACE("%lu %p %u\n", role, lpRole, rolemax);
 
     /* return role text length */
     if(!lpRole)
@@ -517,7 +556,7 @@ UINT WINAPI GetRoleTextA(DWORD role, LPSTR lpRole, UINT rolemax)
     UINT length;
     WCHAR *roletextW;
 
-    TRACE("%u %p %u\n", role, lpRole, rolemax);
+    TRACE("%lu %p %u\n", role, lpRole, rolemax);
 
     if(lpRole && !rolemax)
         return 0;
@@ -564,7 +603,7 @@ UINT WINAPI GetStateTextW(DWORD state_bit, WCHAR *state_str, UINT state_str_len)
 {
     DWORD state_id;
 
-    TRACE("%x %p %u\n", state_bit, state_str, state_str_len);
+    TRACE("%lx %p %u\n", state_bit, state_str, state_str_len);
 
     if(state_bit & ~(STATE_SYSTEM_VALID | STATE_SYSTEM_HASPOPUP)) {
         if(state_str && state_str_len)
@@ -594,7 +633,7 @@ UINT WINAPI GetStateTextA(DWORD state_bit, CHAR *state_str, UINT state_str_len)
 {
     DWORD state_id;
 
-    TRACE("%x %p %u\n", state_bit, state_str, state_str_len);
+    TRACE("%lx %p %u\n", state_bit, state_str, state_str_len);
 
     if(state_str && !state_str_len)
         return 0;
@@ -629,7 +668,7 @@ HRESULT WINAPI AccessibleChildren(IAccessible *container,
     LONG i, child_no;
     HRESULT hr;
 
-    TRACE("%p %d %d %p %p\n", container, start, count, children, children_cnt);
+    TRACE("%p %ld %ld %p %p\n", container, start, count, children, children_cnt);
 
     if(!container || !children || !children_cnt)
         return E_INVALIDARG;

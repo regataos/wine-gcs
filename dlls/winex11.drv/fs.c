@@ -20,247 +20,274 @@
  * License along with this library; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
+
+#if 0
+#pragma makedep unix
+#endif
+
 #include "config.h"
+
 #include <math.h>
 #include <stdlib.h>
-
-#define NONAMELESSSTRUCT
-#define NONAMELESSUNION
 
 #include "x11drv.h"
 #include "wine/debug.h"
 #include "wine/list.h"
-#include "wine/heap.h"
-#include "wine/unicode.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(fshack);
 
 static struct x11drv_display_device_handler real_device_handler;
 static struct x11drv_settings_handler real_settings_handler;
-static struct list fs_monitors = LIST_INIT(fs_monitors);
 
-static WORD gamma_ramp_i[GAMMA_RAMP_SIZE * 3];
-static float gamma_ramp[GAMMA_RAMP_SIZE * 4];
-static LONG gamma_serial;
-
-/* Access to fs_monitors is protected by fs_section */
-static CRITICAL_SECTION fs_section;
-static CRITICAL_SECTION_DEBUG critsect_debug =
-{
-    0, 0, &fs_section,
-    {&critsect_debug.ProcessLocksList, &critsect_debug.ProcessLocksList},
-    0, 0, {(DWORD_PTR)(__FILE__ ": fs_section")}
-};
-static CRITICAL_SECTION fs_section = {&critsect_debug, -1, 0, 0, 0, 0};
-
-struct fs_monitor_size
-{
-    DWORD width;
-    DWORD height;
-};
-
-/* Some games have a limit on the number of entries allowed in the resolution list, 
-for example, Elden Ring's limit is 26. Therefore we cannot add all of the FSR 
-resolutions to the list without hitting the limit, which causes missing resolutions
-within the game's resolution list. You can use WINE_FULLSCREEN_FAKE_CURRENT_RES to 
-set the resolution used to scale up from. 
-
-Example: 
-Your monitor is 3440x1440
-You want to use FSR to scale up using ""Ultra Quality" FSR mode.
-
-You use:
-
-WINE_FULLSCREEN_FAKE_CURRENT_RES=2646x1108
-
-This allows you to use the custom resolution that is not in the games fullscreen
-resolution list to scale up.
-
-Below is a table of FSR values allowed that are not part of the fullscreen
-resolution list:
-
-    32:9 (5120x1440) -- Samsung Neo G9:
-    {2560, 720},  // 32:9 - 'FSR 32:9 Performance'
-    {3012, 847},  // 32:9 - 'FSR 32:9 Balanced'
-    {3413, 960},  // 32:9 - 'FSR 32:9 Quality'
-    {3938, 1108}, // 32:9 - 'FSR 32:9 Ultra Quality'
-
-    4K:
-    {1920, 1080}, // 16:9 - 'FSR 2160p Performance'
-    {2259, 1270}, // 16:9 - 'FSR 2160p Balanced'
-    {2560, 1440}, // 16:9 - 'FSR 2160p Quality'
-    {2954, 1662}, // 16:9 - 'FSR 2160p Ultra Quality'
-
-    Ultra-wide:
-    {1720, 720},  // 21:9 - 'FSR ultra-wide Performance'
-    {2024, 847},  // 21:9 - 'FSR ultra-wide Balanced'
-    {2293, 960},  // 21:9 - 'FSR ultra-wide Quality'
-    {2646, 1108}, // 21:9 - 'FSR ultra-wide Ultra Quality'
-
-    2K:
-    {1280, 720},  // 16:9 - 'FSR 1440p Performance'
-    {1506, 847},  // 16:9 - 'FSR 1440p Balanced'
-    {1706, 960},  // 16:9 - 'FSR 1440p Quality'
-    {1970, 1108}, // 16:9 - 'FSR 1440p Ultra Quality'
-
-    1080p:
-    {960, 640},   // 16:9 - 'FSR 1080p Performance'
-    {1129, 635},  // 16:9 - 'FSR 1080p Balanced'
-    {1280, 720},  // 16:9 - 'FSR 1080p Quality'
-    {1477, 831},  // 16:9 - 'FSR 1080p Ultra Quality'
-
-The formula for FSR resolutions is as follows:
-
-    Ultra Quality — 1.3x scaling
-    Quality — 1.5x scaling
-    Balanced — 1.7x scaling 
-    Performance — 2x scaling
-
-*/
+static BOOL initialized;
 
 /* A table of resolutions some games expect but host system may not report */
+struct fs_monitor_size
+{
+    SIZE size;
+    BOOL additional;
+};
 static struct fs_monitor_size fs_monitor_sizes_base[] =
 {
-    {640, 480},   /*  4:3 */
-    {800, 600},   /*  4:3 */
-    {1024, 768},  /*  4:3 */
-    {1600, 1200}, /*  4:3 */
-    {960, 540},   /* 16:9 */
-    {1280, 720},  /* 16:9 */
-    {1600, 900},  /* 16:9 */
-    {1920, 1080}, /* 16:9 */
-    {2560, 1440}, /* 16:9 */
-    {2048, 1152}, /* 16:9 */
-    {1440, 900},  /*  8:5 */
-    {1680, 1050}, /*  8:5 */
-    {1920, 1200}, /*  8:5 */
-    {1440, 960},  /*  3:2 */
-    {1920, 1280}, /*  3:2 */
-    {2560, 1080}, /* 21:9 ultra-wide */
-    {1920, 800},  /* 12:5 */
-    {1280, 1024}, /*  5:4 */
+    {{640, 480}},   /*  4:3 */
+    {{800, 600}},   /*  4:3 */
+    {{1024, 768}},  /*  4:3 */
+    {{1600, 1200}}, /*  4:3 */
+    {{960, 540}},   /* 16:9 */
+    {{1280, 720}},  /* 16:9 */
+    {{1600, 900}},  /* 16:9 */
+    {{1920, 1080}}, /* 16:9 */
+    {{2560, 1440}}, /* 16:9 */
+    {{2880, 1620}}, /* 16:9 */
+    {{3200, 1800}}, /* 16:9 */
+    {{1440, 900}},  /*  8:5 */
+    {{1680, 1050}}, /*  8:5 */
+    {{1920, 1200}}, /*  8:5 */
+    {{2560, 1600}}, /*  8:5 */
+    {{1440, 960}},  /*  3:2 */
+    {{1920, 1280}}, /*  3:2 */
+    {{2560, 1080}}, /* 21:9 ultra-wide */
+    {{1920, 800}},  /* 12:5 */
+    {{3840, 1600}}, /* 12:5 */
+    {{1280, 1024}}, /*  5:4 */
+    {{1280, 768}, TRUE },
 };
 
 /* The order should be in sync with the values in 'fs_hack_is_fsr_single_mode'*/
 static float fsr_ratios[] = {
-    2.0f, /* FSR Performance */
-    1.7f, /* FSR Balanced */
-    1.5f, /* FSR Quality */
-    1.3f, /* FSR Ultra Quality */
+	2.0f, /* FSR Performance */
+	1.7f, /* FSR Balanced */
+	1.5f, /* FSR Quality */
+	1.3f, /* FSR Ultra Quality */
 };
 
 /* A fake monitor for the fullscreen hack */
 struct fs_monitor
 {
     struct list entry;
+    UINT_PTR gpu_id;
+    UINT_PTR adapter_id;
 
     DEVMODEW user_mode;         /* Mode changed to by users */
     DEVMODEW real_mode;         /* Mode actually used by the host system */
     double user_to_real_scale;  /* Scale factor from fake monitor to real monitor */
     POINT top_left;             /* Top left corner of the fake monitor rectangle in real virtual screen coordinates */
-    DEVMODEW *modes;            /* Supported display modes */
-    UINT mode_count;            /* Display mode count */
-    UINT unique_resolutions;    /* Number of unique resolutions in terms of WxH */
 };
 
-static void add_fs_mode(struct fs_monitor *fs_monitor, DWORD depth, DWORD width, DWORD height,
-                        DWORD frequency, DWORD orientation)
-{
-    int i;
-    DEVMODEW *mode;
-    const char *appid;
-    BOOL is_new_resolution;
+/* Access to fs_monitors is protected by fs_lock */
+static pthread_mutex_t fs_lock = PTHREAD_MUTEX_INITIALIZER;
+static struct list fs_monitors = LIST_INIT( fs_monitors );
 
-    /* Titan Souls renders incorrectly if we report modes smaller than 800x600 */
-    if ((appid = getenv("SteamAppId")) && !strcmp(appid, "297130"))
+static WORD gamma_ramp_i[GAMMA_RAMP_SIZE * 3];
+static float gamma_ramp[GAMMA_RAMP_SIZE * 4];
+static LONG gamma_serial;
+
+#define NEXT_DEVMODEW(mode) ((DEVMODEW *)((char *)((mode) + 1) + (mode)->dmDriverExtra))
+
+static const char *debugstr_devmode( const DEVMODEW *devmode )
+{
+    char buffer[256], *buf = buffer;
+
+    if (devmode->dmFields & DM_BITSPERPEL)
+        buf += sprintf( buf, "bits %u ", (int)devmode->dmBitsPerPel );
+    if (devmode->dmFields & DM_PELSWIDTH)
+        buf += sprintf( buf, "width %u ", (int)devmode->dmPelsWidth );
+    if (devmode->dmFields & DM_PELSHEIGHT)
+        buf += sprintf( buf, "height %u ", (int)devmode->dmPelsHeight );
+    if (devmode->dmFields & DM_DISPLAYFREQUENCY)
+        buf += sprintf( buf, "%u Hz ", (int)devmode->dmDisplayFrequency );
+    if (devmode->dmFields & DM_POSITION)
+        buf += sprintf( buf, "pos (%d,%d) ", (int)devmode->dmPosition.x, (int)devmode->dmPosition.y );
+    if (devmode->dmFields & DM_DISPLAYFLAGS)
+        buf += sprintf( buf, "flags %#x ", (int)devmode->dmDisplayFlags );
+    if (devmode->dmFields & DM_DISPLAYORIENTATION)
+        buf += sprintf( buf, "orientation %u ", (int)devmode->dmDisplayOrientation );
+
+    return wine_dbg_sprintf("%s", buffer);
+}
+
+static struct fs_monitor *find_adapter_monitor( struct list *monitors, struct gdi_adapter *adapter, DEVMODEW *mode )
+{
+    struct fs_monitor *monitor;
+
+    LIST_FOR_EACH_ENTRY( monitor, monitors, struct fs_monitor, entry )
     {
-        if (orientation == DMDO_DEFAULT || orientation == DMDO_180)
+        if (monitor->real_mode.dmPosition.x != mode->dmPosition.x) continue;
+        if (monitor->real_mode.dmPosition.y != mode->dmPosition.y) continue;
+        if (monitor->real_mode.dmPelsWidth != mode->dmPelsWidth) continue;
+        if (monitor->real_mode.dmPelsHeight != mode->dmPelsHeight) continue;
+        return monitor;
+    }
+
+    return NULL;
+}
+
+static void update_gpu_monitor_list( struct gdi_gpu *gpu, struct list *monitors )
+{
+    struct gdi_adapter *adapters;
+    struct fs_monitor *monitor;
+    int count;
+
+    if (!real_device_handler.get_adapters( gpu->id, &adapters, &count )) return;
+
+    while (count--)
+    {
+        struct gdi_adapter *adapter = adapters + count;
+        DEVMODEW mode = {0};
+
+        TRACE( "adapter %p id %p\n", adapter, (void *)adapter->id );
+
+        if (!real_settings_handler.get_current_mode( adapter->id, &mode ))
         {
-            if (height <= 600 && !(height == 600 && width == 800))
-                return;
+            WARN( "Failed to get current display mode\n" );
+            continue;
+        }
+
+        if ((monitor = find_adapter_monitor( monitors, adapter, &mode )))
+        {
+            TRACE( "Reusing monitor %p, mode %s\n", monitor, debugstr_devmode( &mode ) );
+            list_remove( &monitor->entry );
+        }
+        else if (!(monitor = calloc( 1, sizeof(*monitor) )))
+        {
+            WARN( "Failed to allocate monitor\n" );
+            continue;
         }
         else
         {
-            if (width <= 600 && !(width == 600 && height == 800))
-                return;
+            monitor->gpu_id = gpu->id;
+            monitor->user_mode = mode;
+            monitor->real_mode = mode;
+            monitor->user_to_real_scale = 1.0;
+            monitor->top_left.x = mode.dmPosition.x;
+            monitor->top_left.y = mode.dmPosition.y;
+
+            TRACE( "Created monitor %p, mode %s\n", monitor, debugstr_devmode( &mode ) );
+        }
+
+        monitor->adapter_id = adapter->id;
+        list_add_tail( &fs_monitors, &monitor->entry );
+    }
+
+    real_device_handler.free_adapters( adapters );
+}
+
+static void update_monitor_list( struct gdi_gpu *gpus, int count )
+{
+    struct list monitors = LIST_INIT( monitors );
+    struct fs_monitor *monitor, *next;
+
+    list_move_tail( &monitors, &fs_monitors );
+
+    while (count--)
+    {
+        struct list gpu_monitors = LIST_INIT( gpu_monitors );
+        struct gdi_gpu *gpu = gpus + count;
+
+        TRACE( "gpu %p id %p\n", gpu, (void *)gpu->id );
+
+        LIST_FOR_EACH_ENTRY_SAFE( monitor, next, &monitors, struct fs_monitor, entry )
+        {
+            if (monitor->gpu_id != gpu->id) continue;
+            list_remove( &monitor->entry );
+            list_add_tail( &gpu_monitors, &monitor->entry );
+        }
+
+        update_gpu_monitor_list( gpu, &gpu_monitors );
+
+        list_move_tail( &monitors, &gpu_monitors );
+    }
+
+    LIST_FOR_EACH_ENTRY_SAFE( monitor, next, &monitors, struct fs_monitor, entry )
+    {
+        TRACE( "Removing stale monitor %p with gpu id %p, adapter id %p\n",
+               monitor, (void *)monitor->gpu_id, (void *)monitor->adapter_id );
+        free( monitor );
+    }
+}
+
+static void modes_append( DEVMODEW *modes, UINT *mode_count, UINT *resolutions, DEVMODEW *mode )
+{
+    BOOL is_new_resolution;
+    const char *appid;
+    int i;
+
+    /* Titan Souls renders incorrectly if we report modes smaller than 800x600 */
+    if ((appid = getenv( "SteamAppId" )) && !strcmp( appid, "297130" ))
+    {
+        if (mode->dmDisplayOrientation == DMDO_DEFAULT || mode->dmDisplayOrientation == DMDO_180)
+        {
+            if (mode->dmPelsHeight <= 600 && !(mode->dmPelsHeight == 600 && mode->dmPelsWidth == 800)) return;
+        }
+        else
+        {
+            if (mode->dmPelsWidth <= 600 && !(mode->dmPelsWidth == 600 && mode->dmPelsHeight == 800)) return;
         }
     }
 
     is_new_resolution = TRUE;
 
-    for (i = 0; i < fs_monitor->mode_count; ++i)
+    for (i = 0; i < *mode_count; ++i)
     {
-        if (fs_monitor->modes[i].dmPelsWidth == width &&
-            fs_monitor->modes[i].dmPelsHeight == height)
-        {
-            is_new_resolution = FALSE;
+        if (modes[i].dmPelsWidth != mode->dmPelsWidth) continue;
+        if (modes[i].dmPelsHeight != mode->dmPelsHeight) continue;
+        is_new_resolution = FALSE;
 
-            if (fs_monitor->modes[i].dmBitsPerPel == depth &&
-                fs_monitor->modes[i].dmDisplayFrequency == frequency &&
-                fs_monitor->modes[i].u1.s2.dmDisplayOrientation == orientation)
-                return; /* The exact mode is already added, nothing to do */
-        }
+        if (modes[i].dmBitsPerPel != mode->dmBitsPerPel) continue;
+        if (modes[i].dmDisplayFrequency != mode->dmDisplayFrequency) continue;
+        if (modes[i].dmDisplayOrientation != mode->dmDisplayOrientation) continue;
+        return; /* The exact mode is already added, nothing to do */
     }
 
-    if (is_new_resolution) {
+    if (is_new_resolution)
+    {
         /* Some games crash if we report too many unique resolutions (in terms of HxW) */
-        if (limit_number_of_resolutions && fs_monitor->unique_resolutions >= limit_number_of_resolutions)
-            return;
-
-        fs_monitor->unique_resolutions++;
+        if (limit_number_of_resolutions && *resolutions >= limit_number_of_resolutions) return;
+        *resolutions = *resolutions + 1;
     }
 
-    mode = &fs_monitor->modes[fs_monitor->mode_count++];
-    mode->dmSize = sizeof(*mode);
-
-    mode->dmDriverExtra = 0;
     mode->dmFields = DM_DISPLAYORIENTATION | DM_BITSPERPEL | DM_PELSWIDTH | DM_PELSHEIGHT |
                      DM_DISPLAYFLAGS | DM_DISPLAYFREQUENCY;
-    mode->u1.s2.dmDisplayOrientation = orientation;
-    mode->dmBitsPerPel = depth;
-    mode->dmPelsWidth = width;
-    mode->dmPelsHeight = height;
-    mode->u2.dmDisplayFlags = 0;
-    mode->dmDisplayFrequency = frequency;
-}
+    mode->dmSize = sizeof(DEVMODEW);
+    mode->dmDriverExtra = 0;
+    mode->dmDisplayFlags = 0;
 
-static BOOL fs_hack_is_fsr_custom_mode(struct fs_monitor_size *fsr_custom_size)
-{
-    DWORD width, height;
-    const char *e;
+    TRACE( "adding mode %s\n", debugstr_devmode(mode) );
 
-    width = 0;
-    height = 0;
-    e = getenv("WINE_FULLSCREEN_FSR_CUSTOM_MODE");
-    if (e)
-    {
-        const int n = sscanf(e, "%dx%d", &width, &height);
-        if (n==2)
-        {
-            fsr_custom_size->width = width;
-            fsr_custom_size->height = height;
-            TRACE("found custom resolution: %dx%d\n", fsr_custom_size->width, fsr_custom_size->height);
-            return TRUE;
-        }
-    }
-    return FALSE;
+    modes[*mode_count] = *mode;
+    *mode_count = *mode_count + 1;
 }
 
 static BOOL fs_hack_is_fsr_single_mode(UINT *mode)
 {
-    const char *e, *e2;
+    const char *e;
 
     e = getenv("WINE_FULLSCREEN_FSR_MODE");
-    e2 = getenv("WINE_FULLSCREEN_FSR_CUSTOM_MODE");
     if (e)
     {
-        /* If a custom mode is set, don't apply a default mode */
-        if (e2)
-            return FALSE;
-
-        /* If empty or zero use Balanced mode as default */
+        /* If empty or zero don't apply a mode */
         if (*e == '\0' || *e == '0')
-            *mode = 1;
+            return FALSE;
         /* The 'mode' values should be in sync with the order in 'fsr_ratios' */
         if (!strcmp(e, "Ultra") || !strcmp(e, "ultra"))
             *mode = 3;
@@ -278,98 +305,67 @@ static BOOL fs_hack_is_fsr_single_mode(UINT *mode)
     return FALSE;
 }
 
-static BOOL fs_monitor_add_modes(struct fs_monitor *fs_monitor)
+static BOOL fs_hack_is_fsr_custom_mode(struct fs_monitor_size *fsr_custom_size)
 {
-    DEVMODEW *real_modes, *real_mode, current_mode;
-    UINT real_mode_count;
     DWORD width, height;
-    ULONG_PTR real_id;
-    ULONG offset;
-    UINT i, j;
+    const char *e;
+
+    width = 0;
+    height = 0;
+    e = getenv("WINE_FULLSCREEN_FSR_CUSTOM_MODE");
+    if (e)
+    {
+        const int n = sscanf(e, "%dx%d", &width, &height);
+        if (n==2)
+        {
+            fsr_custom_size->size.cx = width;
+            fsr_custom_size->size.cy = height;
+            TRACE("found custom resolution: %dx%d\n", fsr_custom_size->size.cx, fsr_custom_size->size.cy);
+            return TRUE;
+        }
+    }
+    return FALSE;
+}
+
+static void monitor_get_modes( struct fs_monitor *monitor, DEVMODEW **modes, UINT *mode_count )
+{
+    UINT i, j, max_count, real_mode_count, resolutions = 0;
+    DEVMODEW *real_modes, *real_mode, mode_host = {0};
+    BOOL additional_modes = FALSE;
+    const char *env;
 
     /* Default resolutions + FSR resolutions + Custom resolution */
-    struct fs_monitor_size fs_monitor_sizes[ARRAY_SIZE(fs_monitor_sizes_base) + ARRAY_SIZE(fsr_ratios) + 1];
-    struct fs_monitor_size fs_monitor_sizes_fsr[ARRAY_SIZE(fsr_ratios)];
-    struct fs_monitor_size fsr_custom_size;
+    struct fs_monitor_size fs_monitor_sizes[ARRAY_SIZE(fs_monitor_sizes_base) + ARRAY_SIZE(fsr_ratios) + 1] = { {{1920, 1080}, TRUE }, };
+    struct fs_monitor_size fs_monitor_sizes_fsr[ARRAY_SIZE(fsr_ratios)] = { {{1477, 831}, TRUE }, };
+    struct fs_monitor_size fsr_custom_size = { {{1477, 831}, TRUE }, };
     UINT fs_monitor_sizes_count, fsr_mode;
-    float sharpness, real_w_ratio, h_ratio, h_factor;
+    float sharpness;
     BOOL is_fsr, is_fsr_single_mode, is_fsr_custom_mode;
 
-    if (!real_settings_handler.get_id(fs_monitor->user_mode.dmDeviceName, &real_id))
-        return FALSE;
+    *mode_count = 0;
+    *modes = NULL;
 
-    if (!real_settings_handler.get_current_mode(real_id, &current_mode))
-        return FALSE;
-
+    if (!real_settings_handler.get_current_mode( monitor->adapter_id, &mode_host )) return;
     /* Fullscreen hack doesn't support changing display orientations */
-    if (!real_settings_handler.get_modes(real_id, 0, &real_modes, &real_mode_count))
-        return FALSE;
-    
+    if (!real_settings_handler.get_modes( monitor->adapter_id, 0, &real_modes, &real_mode_count )) return;
+
     is_fsr = fs_hack_is_fsr(&sharpness);
     is_fsr_single_mode = FALSE;
     is_fsr_custom_mode = FALSE;
 
     fs_monitor_sizes_count = 0;
 
-    /* Copy the default list */
-    memcpy(fs_monitor_sizes+fs_monitor_sizes_count, fs_monitor_sizes_base, sizeof(fs_monitor_sizes_base));
-    fs_monitor_sizes_count += ARRAY_SIZE(fs_monitor_sizes_base);
-
     /* If FSR is enabled, generate and add FSR resolutions */
     if (is_fsr)
     {
-        if (current_mode.dmPelsWidth / 16.0f == current_mode.dmPelsHeight / 9.0f)
-        {
-            /* 16:9 resolutions */
-            h_ratio = 9.0f;
-        }
-        else if ((DWORD)(current_mode.dmPelsWidth / 210.0f) == (DWORD)(current_mode.dmPelsHeight / 90.0f))
-        {
-            /* 21:9 ultra-wide resolutions */
-            h_ratio = 9.0f;
-        }
-        else if (current_mode.dmPelsWidth / 32.0f == current_mode.dmPelsHeight / 9.0f)
-        {
-            /* 32:9 "duper-ultra-wide" resolutions */
-            h_ratio = 9.0f;
-        }
-        else if (current_mode.dmPelsWidth / 8.0f == current_mode.dmPelsHeight / 5.0f)
-        {
-            /* 16:10 resolutions */
-            h_ratio = 10.0f;
-        }
-        else if (current_mode.dmPelsWidth / 12.0f == current_mode.dmPelsHeight / 5.0f)
-        {
-            /* 24:10 resolutions */
-            h_ratio = 10.0f;
-        }
-        else
-        {
-            /* In case of unknown ratio, naively create FSR resolutions */
-            h_ratio = 1.0f;
-        }
-
-        /* All inconsistent resolutions have correct height ratio, so compute the width ratio */
-        real_w_ratio = current_mode.dmPelsWidth / (current_mode.dmPelsHeight / h_ratio);
         for (i = 0; i < ARRAY_SIZE(fs_monitor_sizes_fsr); ++i)
         {
-            if (h_ratio == 1.0f)
-            {
-                /* Naive generation (matches AMD mode documentation but not sample code) */
-                /* AMD's sample rounds down, which doesn't match their published list of resolutions */
-                fs_monitor_sizes_fsr[i].width = (DWORD)(current_mode.dmPelsWidth / fsr_ratios[i] + 0.5f);
-                fs_monitor_sizes_fsr[i].height = (DWORD)(current_mode.dmPelsHeight / fsr_ratios[i] + 0.5f);
-            }
-            else
-            {
-                /* Round to nearest integer (our way) */
-                h_factor = (DWORD)((current_mode.dmPelsHeight / h_ratio) / fsr_ratios[i] + 0.5f);
-                fs_monitor_sizes_fsr[i].width = (DWORD)(real_w_ratio * h_factor + 0.5f);
-                fs_monitor_sizes_fsr[i].height = (DWORD)(h_ratio * h_factor + 0.5f);
-            }
+            fs_monitor_sizes_fsr[i].size.cx = (DWORD)(mode_host.dmPelsWidth / fsr_ratios[i] + 0.5f);
+            fs_monitor_sizes_fsr[i].size.cy = (DWORD)(mode_host.dmPelsHeight / fsr_ratios[i] + 0.5f);
+            
             TRACE("created fsr resolution: %dx%d, ratio: %1.1f\n",
-                  fs_monitor_sizes_fsr[i].width,
-                  fs_monitor_sizes_fsr[i].height,
+                  fs_monitor_sizes_fsr[i].size.cx,
+                  fs_monitor_sizes_fsr[i].size.cy,
                   fsr_ratios[i]);
         }
 
@@ -380,8 +376,8 @@ static BOOL fs_monitor_add_modes(struct fs_monitor *fs_monitor)
             memcpy(fs_monitor_sizes+fs_monitor_sizes_count, &fs_monitor_sizes_fsr[fsr_mode], sizeof(fs_monitor_sizes_fsr[fsr_mode]));
             fs_monitor_sizes_count += 1;
             /* Also place it in the custom resolution container, so we can limit resolutions later on */
-            fsr_custom_size.width = fs_monitor_sizes_fsr[fsr_mode].width;
-            fsr_custom_size.height = fs_monitor_sizes_fsr[fsr_mode].height;
+            fsr_custom_size.size.cx = fs_monitor_sizes_fsr[fsr_mode].size.cx;
+            fsr_custom_size.size.cy = fs_monitor_sizes_fsr[fsr_mode].size.cy;
         }
         /* If a single mode was not specified, add all FSR resolutions */
         else
@@ -394,251 +390,176 @@ static BOOL fs_monitor_add_modes(struct fs_monitor *fs_monitor)
         is_fsr_custom_mode = fs_hack_is_fsr_custom_mode(&fsr_custom_size);
         if (is_fsr_custom_mode)
         {
-            memcpy(fs_monitor_sizes+fs_monitor_sizes_count, &fsr_custom_size, sizeof(fsr_custom_size));
-            fs_monitor_sizes_count += 1;
-            TRACE("added custom resolution: %dx%d\n", fsr_custom_size.width, fsr_custom_size.height);
+			memcpy(fs_monitor_sizes + fs_monitor_sizes_count, &fsr_custom_size, sizeof(fsr_custom_size));
+			fs_monitor_sizes_count += 1;
+            TRACE("added custom resolution: %dx%d\n", fsr_custom_size.size.cx, fsr_custom_size.size.cy);
         }
     }
 
-    fs_monitor->mode_count = 0;
-    fs_monitor->unique_resolutions = 0;
-    fs_monitor->modes = heap_calloc(fs_monitor_sizes_count * DEPTH_COUNT + real_mode_count,
-                                    sizeof(*fs_monitor->modes));
-    if (!fs_monitor->modes)
+    /* Copy the default list */
+    memcpy(fs_monitor_sizes+fs_monitor_sizes_count, fs_monitor_sizes_base, sizeof(fs_monitor_sizes_base));
+    fs_monitor_sizes_count += ARRAY_SIZE(fs_monitor_sizes_base);
+
+    max_count = ARRAY_SIZE(fs_monitor_sizes) * DEPTH_COUNT + real_mode_count;
+    if (!(*modes = calloc( max_count, sizeof(DEVMODEW) )))
     {
-        real_settings_handler.free_modes(real_modes);
-        return FALSE;
+        real_settings_handler.free_modes( real_modes );
+        return;
     }
 
     /* Add the current mode early, in case we have to limit */
-    add_fs_mode(fs_monitor, current_mode.dmBitsPerPel, current_mode.dmPelsWidth,
-                current_mode.dmPelsHeight, current_mode.dmDisplayFrequency,
-                current_mode.u1.s2.dmDisplayOrientation);
+    modes_append( *modes, mode_count, &resolutions, &mode_host );
+
+    if ((env = getenv( "WINE_ADDITIONAL_DISPLAY_MODES" )))
+        additional_modes = (env[0] != '0');
+    else if ((env = getenv( "SteamAppId" )))
+        additional_modes = !strcmp( env, "979400" );
 
     /* Linux reports far fewer resolutions than Windows. Add modes that some games may expect. */
     for (i = 0; i < fs_monitor_sizes_count; ++i)
     {
-        if (current_mode.u1.s2.dmDisplayOrientation == DMDO_DEFAULT ||
-            current_mode.u1.s2.dmDisplayOrientation == DMDO_180)
+        DEVMODEW mode = mode_host;
+
+        if (!additional_modes && fs_monitor_sizes[i].additional) continue;
+
+        if (mode_host.dmDisplayOrientation == DMDO_DEFAULT ||
+            mode_host.dmDisplayOrientation == DMDO_180)
         {
-            width = fs_monitor_sizes[i].width;
-            height = fs_monitor_sizes[i].height;
+            mode.dmPelsWidth = fs_monitor_sizes[i].size.cx;
+            mode.dmPelsHeight = fs_monitor_sizes[i].size.cy;
         }
         else
         {
-            width = fs_monitor_sizes[i].height;
-            height = fs_monitor_sizes[i].width;
+            mode.dmPelsWidth = fs_monitor_sizes[i].size.cy;
+            mode.dmPelsHeight = fs_monitor_sizes[i].size.cx;
         }
 
         /* Don't report modes that are larger than the current mode */
-        if (width > current_mode.dmPelsWidth || height > current_mode.dmPelsHeight)
-            continue;
+        if (mode.dmPelsWidth > mode_host.dmPelsWidth) continue;
+        if (mode.dmPelsHeight > mode_host.dmPelsHeight) continue;
 
         /* Don't report modes that are larger than the requested fsr mode or the custom mode */
-        if(is_fsr && (is_fsr_custom_mode || is_fsr_single_mode))
-            if (width > fsr_custom_size.width || height > fsr_custom_size.height)
-                continue;
+        if(is_fsr && (is_fsr_custom_mode || is_fsr_single_mode)) {
+            if (mode.dmPelsWidth < fsr_custom_size.size.cx) continue;
+            if (mode.dmPelsHeight < fsr_custom_size.size.cy) continue;
+        }
 
         for (j = 0; j < DEPTH_COUNT; ++j)
-            add_fs_mode(fs_monitor, depths[j], width, height, 60,
-                        current_mode.u1.s2.dmDisplayOrientation);
+        {
+            mode.dmBitsPerPel = depths[j];
+            mode.dmDisplayFrequency = 60;
+            modes_append( *modes, mode_count, &resolutions, &mode );
+        }
     }
 
-    for (i = 0; i < real_mode_count; ++i)
+    /* report real modes only if FSR is not used */
+    if(!is_fsr)
+    for (i = 0, real_mode = real_modes; i < real_mode_count; ++i)
     {
-        offset = (sizeof(*real_modes) + real_modes[0].dmDriverExtra) * i;
-        real_mode = (DEVMODEW *)((BYTE *)real_modes + offset);
+        DEVMODEW mode = *real_mode;
 
-        /* Don't report real modes that are larger than the current mode */
-        if (real_mode->dmPelsWidth > current_mode.dmPelsWidth ||
-            real_mode->dmPelsHeight > current_mode.dmPelsHeight)
-            continue;
+        /* Don't report modes that are larger than the current mode */
+        if (mode.dmPelsWidth <= mode_host.dmPelsWidth && mode.dmPelsHeight <= mode_host.dmPelsHeight)
+            modes_append( *modes, mode_count, &resolutions, &mode );
 
-        /* Don't report modes that are larger than the requested fsr mode or the custom mode */
-        if(is_fsr && (is_fsr_custom_mode || is_fsr_single_mode))
-            if (real_mode->dmPelsWidth > fsr_custom_size.width ||
-                real_mode->dmPelsHeight > fsr_custom_size.height)
-                continue;
-
-        add_fs_mode(fs_monitor, real_mode->dmBitsPerPel, real_mode->dmPelsWidth,
-                    real_mode->dmPelsHeight, real_mode->dmDisplayFrequency,
-                    real_mode->u1.s2.dmDisplayOrientation);
+        real_mode = NEXT_DEVMODEW(real_mode);
     }
-    real_settings_handler.free_modes(real_modes);
 
-    /* Sort display modes so that X11DRV_EnumDisplaySettingsEx gets an already sorted mode list */
-    qsort(fs_monitor->modes, fs_monitor->mode_count, sizeof(*fs_monitor->modes), mode_compare);
-    return TRUE;
+    real_settings_handler.free_modes( real_modes );
 }
 
-/* Add a fake monitor to fs_monitors list.
- * Call this function with fs_section entered */
-static BOOL fs_add_monitor(const WCHAR *device_name)
+static struct fs_monitor *monitor_from_adapter_id( ULONG_PTR adapter_id )
 {
-    struct fs_monitor *fs_monitor;
-    DEVMODEW real_mode;
-    ULONG_PTR real_id;
+    struct fs_monitor *monitor;
+    struct gdi_gpu *gpus;
+    int count;
 
-    if (!real_settings_handler.get_id(device_name, &real_id))
-        return FALSE;
+    LIST_FOR_EACH_ENTRY( monitor, &fs_monitors, struct fs_monitor, entry )
+        if (monitor->adapter_id == adapter_id) return monitor;
 
-    if (!real_settings_handler.get_current_mode(real_id, &real_mode))
-        return FALSE;
-
-    if (!(fs_monitor = heap_alloc(sizeof(*fs_monitor))))
-        return FALSE;
-
-    fs_monitor->user_mode = real_mode;
-    fs_monitor->real_mode = real_mode;
-    fs_monitor->user_to_real_scale = 1.0;
-    fs_monitor->top_left.x = real_mode.u1.s2.dmPosition.x;
-    fs_monitor->top_left.y = real_mode.u1.s2.dmPosition.y;
-    lstrcpyW(fs_monitor->user_mode.dmDeviceName, device_name);
-    if (!fs_monitor_add_modes(fs_monitor))
+    if (real_device_handler.get_gpus( &gpus, &count ))
     {
-        ERR("Failed to initialize display modes.\n");
-        heap_free(fs_monitor);
-        return FALSE;
-    }
-    list_add_tail(&fs_monitors, &fs_monitor->entry);
-    return TRUE;
-}
+        update_monitor_list( gpus, count );
+        real_device_handler.free_gpus( gpus );
 
-/* Fullscreen settings handler */
-
-/* Convert fullscreen hack settings handler id to GDI device name */
-static void fs_id_to_device_name(ULONG_PTR id, WCHAR *device_name)
-{
-    static WCHAR display_fmtW[] = {'\\','\\','.','\\','D','I','S','P','L','A','Y','%','d',0};
-    sprintfW(device_name, display_fmtW, (INT)id);
-}
-
-static BOOL fs_get_id(const WCHAR *device_name, ULONG_PTR *id)
-{
-    static const WCHAR displayW[] = {'\\','\\','.','\\','D','I','S','P','L','A','Y'};
-    long int display_index;
-    WCHAR *end;
-
-    if (strncmpiW( device_name, displayW, ARRAY_SIZE(displayW) ))
-        return FALSE;
-
-    display_index = strtolW( device_name + ARRAY_SIZE(displayW), &end, 10 );
-    if (*end)
-        return FALSE;
-
-    *id = (ULONG_PTR)display_index;
-    return TRUE;
-}
-
-/* Find a fs_monitor from a display name.
- * Call this function with fs_section entered */
-static struct fs_monitor *fs_get_monitor_by_name(const WCHAR *name)
-{
-    struct fs_monitor *fs_monitor;
-
-    TRACE("name %s\n", wine_dbgstr_w(name));
-
-    LIST_FOR_EACH_ENTRY(fs_monitor, &fs_monitors, struct fs_monitor, entry)
-    {
-        if (!lstrcmpiW(fs_monitor->user_mode.dmDeviceName, name))
-            return fs_monitor;
+        LIST_FOR_EACH_ENTRY( monitor, &fs_monitors, struct fs_monitor, entry )
+            if (monitor->adapter_id == adapter_id) return monitor;
     }
 
+    WARN( "Failed to find monitor for adapter id %p\n", (void *)adapter_id );
     return NULL;
 }
 
-static BOOL fs_get_modes(ULONG_PTR id, DWORD flags, DEVMODEW **new_modes, UINT *mode_count)
+static BOOL fs_get_modes( ULONG_PTR adapter_id, DWORD flags, DEVMODEW **new_modes, UINT *mode_count )
 {
-    WCHAR device_name[CCHDEVICENAME];
-    struct fs_monitor *fs_monitor;
+    struct fs_monitor *monitor;
 
-    fs_id_to_device_name(id, device_name);
-    EnterCriticalSection(&fs_section);
-    if ((fs_monitor = fs_get_monitor_by_name(device_name)))
-    {
-        *new_modes = fs_monitor->modes;
-        *mode_count = fs_monitor->mode_count;
-        LeaveCriticalSection(&fs_section);
-        return TRUE;
-    }
+    TRACE( "adapter_id %#zx, flags %#x, modes %p, modes_count %p\n",
+           (size_t)adapter_id, (int)flags, new_modes, mode_count );
 
-    LeaveCriticalSection(&fs_section);
-    return FALSE;
+    pthread_mutex_lock( &fs_lock );
+
+    if ((monitor = monitor_from_adapter_id( adapter_id )))
+        monitor_get_modes( monitor, new_modes, mode_count );
+
+    pthread_mutex_unlock( &fs_lock );
+    return monitor && *new_modes;
 }
 
-static void fs_free_modes(DEVMODEW *modes){}
-
-/* Find a fs_monitor from a HMONITOR handle.
- * Call this function with fs_section entered */
-static struct fs_monitor *fs_find_monitor_by_handle(HMONITOR monitor)
+static void fs_free_modes( DEVMODEW *modes )
 {
-    MONITORINFOEXW monitor_info;
-
-    TRACE("monitor %p\n", monitor);
-
-    monitor_info.cbSize = sizeof(monitor_info);
-    if (!GetMonitorInfoW(monitor, (MONITORINFO *)&monitor_info))
-        return NULL;
-
-    return fs_get_monitor_by_name(monitor_info.szDevice);
+    free( modes );
 }
 
-static BOOL fs_get_current_mode(ULONG_PTR id, DEVMODEW *mode)
+static BOOL fs_get_current_mode( ULONG_PTR adapter_id, DEVMODEW *mode )
 {
-    WCHAR device_name[CCHDEVICENAME];
-    struct fs_monitor *fs_monitor;
+    struct fs_monitor *monitor;
 
-    fs_id_to_device_name(id, device_name);
+    TRACE( "adapter_id %p, mode %p\n", (void *)adapter_id, mode );
 
-    EnterCriticalSection(&fs_section);
-    fs_monitor = fs_get_monitor_by_name(device_name);
-    if (fs_monitor)
-    {
-        *mode = fs_monitor->user_mode;
-        LeaveCriticalSection(&fs_section);
-        return TRUE;
-    }
-    LeaveCriticalSection(&fs_section);
-    return FALSE;
+    pthread_mutex_lock( &fs_lock );
+    if ((monitor = monitor_from_adapter_id( adapter_id )))
+        *mode = monitor->user_mode;
+    pthread_mutex_unlock( &fs_lock );
+
+    return !!monitor;
 }
 
-static LONG fs_set_current_mode(ULONG_PTR id, DEVMODEW *user_mode)
+static LONG fs_set_current_mode( ULONG_PTR adapter_id, const DEVMODEW *user_mode )
 {
     WCHAR device_name[CCHDEVICENAME];
     struct fs_monitor *fs_monitor;
     DEVMODEW real_mode;
-    ULONG_PTR real_id;
     double scale;
 
-    fs_id_to_device_name(id, device_name);
+    TRACE( "id %p, mode %s\n", (void *)adapter_id, debugstr_devmode( user_mode ) );
 
-    EnterCriticalSection(&fs_section);
-    fs_monitor = fs_get_monitor_by_name(device_name);
-    if (!fs_monitor)
+    pthread_mutex_lock( &fs_lock );
+
+    if (!(fs_monitor = monitor_from_adapter_id( adapter_id )))
     {
-        LeaveCriticalSection(&fs_section);
+        pthread_mutex_unlock( &fs_lock );
         return DISP_CHANGE_FAILED;
     }
 
-    if (is_detached_mode(&fs_monitor->real_mode) && !is_detached_mode(user_mode))
+    if (is_detached_mode( &fs_monitor->real_mode ) && !is_detached_mode( user_mode ))
     {
-        FIXME("Attaching adapters is unsupported with fullscreen hack.\n");
+        FIXME( "Attaching adapters is unsupported with fullscreen hack.\n" );
         return DISP_CHANGE_SUCCESSFUL;
     }
 
     /* Real modes may be changed since initialization */
-    if (!real_settings_handler.get_id(device_name, &real_id) ||
-        !real_settings_handler.get_current_mode(real_id, &real_mode))
+    if (!real_settings_handler.get_current_mode( adapter_id, &real_mode ))
     {
-        LeaveCriticalSection(&fs_section);
+        pthread_mutex_unlock( &fs_lock );
         return DISP_CHANGE_FAILED;
     }
 
     fs_monitor->user_mode = *user_mode;
     fs_monitor->real_mode = real_mode;
-    lstrcpyW(fs_monitor->user_mode.dmDeviceName, device_name);
+    lstrcpyW( fs_monitor->user_mode.dmDeviceName, device_name );
 
-    if (is_detached_mode(user_mode))
+    if (is_detached_mode( user_mode ))
     {
         fs_monitor->user_to_real_scale = 0;
         fs_monitor->top_left.x = 0;
@@ -647,68 +568,90 @@ static LONG fs_set_current_mode(ULONG_PTR id, DEVMODEW *user_mode)
     /* Integer scaling */
     else if (fs_hack_is_integer())
     {
-        scale = min(real_mode.dmPelsWidth / user_mode->dmPelsWidth, real_mode.dmPelsHeight / user_mode->dmPelsHeight);
+        scale = min( real_mode.dmPelsWidth / user_mode->dmPelsWidth,
+                     real_mode.dmPelsHeight / user_mode->dmPelsHeight );
         fs_monitor->user_to_real_scale = scale;
-        fs_monitor->top_left.x = real_mode.u1.s2.dmPosition.x + (real_mode.dmPelsWidth - user_mode->dmPelsWidth * scale) / 2;
-        fs_monitor->top_left.y = real_mode.u1.s2.dmPosition.y + (real_mode.dmPelsHeight - user_mode->dmPelsHeight * scale) / 2;
+        fs_monitor->top_left.x = real_mode.dmPosition.x +
+                                 (real_mode.dmPelsWidth - user_mode->dmPelsWidth * scale) / 2;
+        fs_monitor->top_left.y = real_mode.dmPosition.y +
+                                 (real_mode.dmPelsHeight - user_mode->dmPelsHeight * scale) / 2;
     }
     /* If real mode is narrower than fake mode, scale to fit width */
-    else if ((double)real_mode.dmPelsWidth / (double)real_mode.dmPelsHeight
-             < (double)user_mode->dmPelsWidth / (double)user_mode->dmPelsHeight)
+    else if ((double)real_mode.dmPelsWidth / (double)real_mode.dmPelsHeight <
+             (double)user_mode->dmPelsWidth / (double)user_mode->dmPelsHeight)
     {
         scale = (double)real_mode.dmPelsWidth / (double)user_mode->dmPelsWidth;
         fs_monitor->user_to_real_scale = scale;
-        fs_monitor->top_left.x = real_mode.u1.s2.dmPosition.x;
-        fs_monitor->top_left.y = real_mode.u1.s2.dmPosition.y + (real_mode.dmPelsHeight - user_mode->dmPelsHeight * scale) / 2;
+        fs_monitor->top_left.x = real_mode.dmPosition.x;
+        fs_monitor->top_left.y = real_mode.dmPosition.y +
+                                 (real_mode.dmPelsHeight - user_mode->dmPelsHeight * scale) / 2;
     }
     /* Else scale to fit height */
     else
     {
         scale = (double)real_mode.dmPelsHeight / (double)user_mode->dmPelsHeight;
         fs_monitor->user_to_real_scale = scale;
-        fs_monitor->top_left.x = real_mode.u1.s2.dmPosition.x + (real_mode.dmPelsWidth - user_mode->dmPelsWidth * scale) / 2;
-        fs_monitor->top_left.y = real_mode.u1.s2.dmPosition.y;
+        fs_monitor->top_left.x = real_mode.dmPosition.x +
+                                 (real_mode.dmPelsWidth - user_mode->dmPelsWidth * scale) / 2;
+        fs_monitor->top_left.y = real_mode.dmPosition.y;
     }
 
-    TRACE("real_mode x %d y %d width %d height %d\n", real_mode.u1.s2.dmPosition.x, real_mode.u1.s2.dmPosition.y,
-          real_mode.dmPelsWidth, real_mode.dmPelsHeight);
-    TRACE("user_mode x %d y %d width %d height %d\n", user_mode->u1.s2.dmPosition.x, user_mode->u1.s2.dmPosition.y,
-          user_mode->dmPelsWidth, user_mode->dmPelsHeight);
-    TRACE("user_to_real_scale %lf\n", fs_monitor->user_to_real_scale);
-    TRACE("top left corner:%s\n", wine_dbgstr_point(&fs_monitor->top_left));
+    TRACE( "real_mode x %d y %d width %d height %d\n", (int)real_mode.dmPosition.x,
+           (int)real_mode.dmPosition.y, (int)real_mode.dmPelsWidth, (int)real_mode.dmPelsHeight );
+    TRACE( "user_mode x %d y %d width %d height %d\n", (int)user_mode->dmPosition.x,
+           (int)user_mode->dmPosition.y, (int)user_mode->dmPelsWidth, (int)user_mode->dmPelsHeight );
+    TRACE( "user_to_real_scale %lf\n", fs_monitor->user_to_real_scale );
+    TRACE( "top left corner:%s\n", wine_dbgstr_point( &fs_monitor->top_left ) );
 
-    LeaveCriticalSection(&fs_section);
+    pthread_mutex_unlock( &fs_lock );
     return DISP_CHANGE_SUCCESSFUL;
 }
 
 /* Display device handler functions */
 
-static BOOL fs_get_monitors(ULONG_PTR adapter_id, struct gdi_monitor **new_monitors, int *count)
+static BOOL fs_get_gpus( struct gdi_gpu **gpus, int *count )
 {
-    struct gdi_monitor *monitor;
+    struct list monitors = LIST_INIT( monitors );
+
+    TRACE( "gpus %p, count %p\n", gpus, count );
+
+    if (!real_device_handler.get_gpus( gpus, count )) return FALSE;
+
+    pthread_mutex_lock( &fs_lock );
+    update_monitor_list( *gpus, *count );
+    pthread_mutex_unlock( &fs_lock );
+
+    return TRUE;
+}
+
+static BOOL fs_get_monitors( ULONG_PTR adapter_id, struct gdi_monitor **new_monitors, int *count )
+{
     struct fs_monitor *fs_monitor;
+    struct gdi_monitor *monitor;
     RECT rect;
     INT i;
 
-    if (!real_device_handler.get_monitors(adapter_id, new_monitors, count))
-        return FALSE;
+    TRACE( "adapter_id %p, monitors %p, count %p\n", (void *)adapter_id, new_monitors, count );
 
-    EnterCriticalSection(&fs_section);
+    if (!real_device_handler.get_monitors( adapter_id, new_monitors, count )) return FALSE;
+
+    pthread_mutex_lock( &fs_lock );
+
     for (i = 0; i < *count; ++i)
     {
         monitor = &(*new_monitors)[i];
 
-        LIST_FOR_EACH_ENTRY(fs_monitor, &fs_monitors, struct fs_monitor, entry)
+        LIST_FOR_EACH_ENTRY( fs_monitor, &fs_monitors, struct fs_monitor, entry )
         {
-            rect.left = fs_monitor->real_mode.u1.s2.dmPosition.x;
-            rect.top = fs_monitor->real_mode.u1.s2.dmPosition.y;
+            rect.left = fs_monitor->real_mode.dmPosition.x;
+            rect.top = fs_monitor->real_mode.dmPosition.y;
             rect.right = rect.left + fs_monitor->real_mode.dmPelsWidth;
             rect.bottom = rect.top + fs_monitor->real_mode.dmPelsHeight;
 
-            if (EqualRect(&rect, &monitor->rc_monitor))
+            if (EqualRect( &rect, &monitor->rc_monitor ))
             {
-                monitor->rc_monitor.left = fs_monitor->user_mode.u1.s2.dmPosition.x;
-                monitor->rc_monitor.top = fs_monitor->user_mode.u1.s2.dmPosition.y;
+                monitor->rc_monitor.left = fs_monitor->user_mode.dmPosition.x;
+                monitor->rc_monitor.top = fs_monitor->user_mode.dmPosition.y;
                 monitor->rc_monitor.right = monitor->rc_monitor.left + fs_monitor->user_mode.dmPelsWidth;
                 monitor->rc_monitor.bottom = monitor->rc_monitor.top + fs_monitor->user_mode.dmPelsHeight;
                 monitor->rc_work = monitor->rc_monitor;
@@ -718,39 +661,57 @@ static BOOL fs_get_monitors(ULONG_PTR adapter_id, struct gdi_monitor **new_monit
             }
         }
     }
-    LeaveCriticalSection(&fs_section);
+
+    pthread_mutex_unlock( &fs_lock );
+
     return TRUE;
 }
 
 /* Fullscreen hack helpers */
 
+static struct fs_monitor *monitor_from_handle( HMONITOR handle )
+{
+    MONITORINFOEXW info = {.cbSize = sizeof(MONITORINFOEXW)};
+    ULONG_PTR adapter_id;
+    BOOL is_primary;
+
+    TRACE( "handle %p\n", handle );
+
+    if (!initialized) return NULL;
+
+    if (!NtUserGetMonitorInfo( handle, (MONITORINFO *)&info )) return NULL;
+    is_primary = !!(info.dwFlags & MONITORINFOF_PRIMARY);
+    if (!real_settings_handler.get_id( info.szDevice, is_primary, &adapter_id )) return FALSE;
+    return monitor_from_adapter_id( adapter_id );
+}
+
 /* Return whether fullscreen hack is enabled on a specific monitor */
-BOOL fs_hack_enabled(HMONITOR monitor)
+BOOL fs_hack_enabled( HMONITOR monitor )
 {
     struct fs_monitor *fs_monitor;
     BOOL enabled = FALSE;
 
-    TRACE("monitor %p\n", monitor);
+    TRACE( "monitor %p\n", monitor );
 
-    EnterCriticalSection(&fs_section);
-    fs_monitor = fs_find_monitor_by_handle(monitor);
+    pthread_mutex_lock( &fs_lock );
+    fs_monitor = monitor_from_handle( monitor );
     if (fs_monitor && (fs_monitor->user_mode.dmPelsWidth != fs_monitor->real_mode.dmPelsWidth ||
                        fs_monitor->user_mode.dmPelsHeight != fs_monitor->real_mode.dmPelsHeight))
         enabled = TRUE;
-    LeaveCriticalSection(&fs_section);
-    TRACE("enabled: %s\n", enabled ? "TRUE" : "FALSE");
+    pthread_mutex_unlock( &fs_lock );
+    TRACE( "enabled: %s\n", enabled ? "TRUE" : "FALSE" );
     return enabled;
 }
 
-BOOL fs_hack_mapping_required(HMONITOR monitor)
+BOOL fs_hack_mapping_required( HMONITOR monitor )
 {
     BOOL required;
 
-    TRACE("monitor %p\n", monitor);
+    TRACE( "monitor %p\n", monitor );
 
     /* steamcompmgr does our mapping for us */
-    required = !wm_is_steamcompmgr(NULL) && fs_hack_enabled(monitor);
-    TRACE("required: %s\n", required ? "TRUE" : "FALSE");
+    required = !wm_is_steamcompmgr( NULL ) && fs_hack_enabled( monitor );
+    TRACE( "required: %s\n", required ? "TRUE" : "FALSE" );
     return required;
 }
 
@@ -760,10 +721,10 @@ BOOL fs_hack_is_integer(void)
     static int is_int = -1;
     if (is_int < 0)
     {
-        const char *e = getenv("WINE_FULLSCREEN_INTEGER_SCALING");
-        is_int = e && strcmp(e, "0");
+        const char *e = getenv( "WINE_FULLSCREEN_INTEGER_SCALING" );
+        is_int = e && strcmp( e, "0" );
     }
-    TRACE("is_interger_scaling: %s\n", is_int ? "TRUE" : "FALSE");
+    TRACE( "is_interger_scaling: %s\n", is_int ? "TRUE" : "FALSE" );
     return is_int;
 }
 
@@ -776,7 +737,7 @@ BOOL fs_hack_is_fsr(float *sharpness)
     {
         is_fsr = 0;
     }
-    if (sharpness)
+	if (sharpness)
     {
         const char *e = getenv("WINE_FULLSCREEN_FSR_STRENGTH");
         if (e)
@@ -789,14 +750,14 @@ BOOL fs_hack_is_fsr(float *sharpness)
     return is_fsr;
 }
 
-HMONITOR fs_hack_monitor_from_rect(const RECT *in_rect)
+HMONITOR fs_hack_monitor_from_rect( const RECT *in_rect )
 {
     RECT rect = *in_rect;
 
-    TRACE("rect %s\n", wine_dbgstr_rect(&rect));
+    TRACE( "rect %s\n", wine_dbgstr_rect( &rect ) );
     rect.right = rect.left + 1;
     rect.bottom = rect.top + 1;
-    return MonitorFromRect(&rect, MONITOR_DEFAULTTOPRIMARY);
+    return NtUserMonitorFromRect( &rect, MONITOR_DEFAULTTOPRIMARY );
 }
 
 /* Get the monitor a window is on. MonitorFromWindow() doesn't work here because it finds the
@@ -805,159 +766,157 @@ HMONITOR fs_hack_monitor_from_rect(const RECT *in_rect)
  * one. For example, a game with a window of 3840x2160 changes the primary monitor to 1280x720, if
  * there is a secondary monitor of 3840x2160 to the right, MonitorFromWindow() will return the
  * secondary monitor instead of the primary one. */
-HMONITOR fs_hack_monitor_from_hwnd(HWND hwnd)
+HMONITOR fs_hack_monitor_from_hwnd( HWND hwnd )
 {
     RECT rect = {0};
 
-    if (!GetWindowRect(hwnd, &rect))
-        ERR("Invalid hwnd %p.\n", hwnd);
+    if (!NtUserGetWindowRect( hwnd, &rect )) ERR( "Invalid hwnd %p.\n", hwnd );
 
-    TRACE("hwnd %p rect %s\n", hwnd, wine_dbgstr_rect(&rect));
-    return fs_hack_monitor_from_rect(&rect);
+    TRACE( "hwnd %p rect %s\n", hwnd, wine_dbgstr_rect( &rect ) );
+    return fs_hack_monitor_from_rect( &rect );
 }
 
 /* Return the rectangle of a monitor in current mode in user virtual screen coordinates */
-RECT fs_hack_current_mode(HMONITOR monitor)
+RECT fs_hack_current_mode( HMONITOR monitor )
 {
     struct fs_monitor *fs_monitor;
     RECT rect = {0};
 
-    TRACE("monitor %p\n", monitor);
+    TRACE( "monitor %p\n", monitor );
 
-    EnterCriticalSection(&fs_section);
-    fs_monitor = fs_find_monitor_by_handle(monitor);
+    pthread_mutex_lock( &fs_lock );
+    fs_monitor = monitor_from_handle( monitor );
     if (!fs_monitor)
     {
-        LeaveCriticalSection(&fs_section);
+        pthread_mutex_unlock( &fs_lock );
         return rect;
     }
 
-    rect.left = fs_monitor->user_mode.u1.s2.dmPosition.x;
-    rect.top = fs_monitor->user_mode.u1.s2.dmPosition.y;
+    rect.left = fs_monitor->user_mode.dmPosition.x;
+    rect.top = fs_monitor->user_mode.dmPosition.y;
     rect.right = rect.left + fs_monitor->user_mode.dmPelsWidth;
     rect.bottom = rect.top + fs_monitor->user_mode.dmPelsHeight;
-    LeaveCriticalSection(&fs_section);
-    TRACE("current mode rect: %s\n", wine_dbgstr_rect(&rect));
+    pthread_mutex_unlock( &fs_lock );
+    TRACE( "current mode rect: %s\n", wine_dbgstr_rect( &rect ) );
     return rect;
 }
 
 /* Return the rectangle of a monitor in real mode in real virtual screen coordinates */
-RECT fs_hack_real_mode(HMONITOR monitor)
+RECT fs_hack_real_mode( HMONITOR monitor )
 {
     struct fs_monitor *fs_monitor;
     RECT rect = {0};
 
-    TRACE("monitor %p\n", monitor);
+    TRACE( "monitor %p\n", monitor );
 
-    EnterCriticalSection(&fs_section);
-    fs_monitor = fs_find_monitor_by_handle(monitor);
+    pthread_mutex_lock( &fs_lock );
+    fs_monitor = monitor_from_handle( monitor );
     if (!fs_monitor)
     {
-        LeaveCriticalSection(&fs_section);
+        pthread_mutex_unlock( &fs_lock );
         return rect;
     }
 
-    rect.left = fs_monitor->real_mode.u1.s2.dmPosition.x;
-    rect.top = fs_monitor->real_mode.u1.s2.dmPosition.y;
+    rect.left = fs_monitor->real_mode.dmPosition.x;
+    rect.top = fs_monitor->real_mode.dmPosition.y;
     rect.right = rect.left + fs_monitor->real_mode.dmPelsWidth;
     rect.bottom = rect.top + fs_monitor->real_mode.dmPelsHeight;
-    LeaveCriticalSection(&fs_section);
-    TRACE("real mode rect: %s\n", wine_dbgstr_rect(&rect));
+    pthread_mutex_unlock( &fs_lock );
+    TRACE( "real mode rect: %s\n", wine_dbgstr_rect( &rect ) );
     return rect;
 }
 
 /* Return whether width and height are the same as the current mode used by a monitor */
-BOOL fs_hack_matches_current_mode(HMONITOR monitor, INT width, INT height)
+BOOL fs_hack_matches_current_mode( HMONITOR monitor, INT width, INT height )
 {
-    MONITORINFO monitor_info;
+    MONITORINFO info = {.cbSize = sizeof(MONITORINFO)};
     BOOL matched;
 
-    TRACE("monitor %p\n", monitor);
+    TRACE( "monitor %p\n", monitor );
 
-    monitor_info.cbSize = sizeof(monitor_info);
-    if (!GetMonitorInfoW(monitor, &monitor_info))
-        return FALSE;
+    if (!NtUserGetMonitorInfo( monitor, &info )) return FALSE;
 
-    matched = (width == monitor_info.rcMonitor.right - monitor_info.rcMonitor.left)
-              && (height == monitor_info.rcMonitor.bottom - monitor_info.rcMonitor.top);
-    TRACE("matched: %s\n", matched ? "TRUE" : "FALSE");
+    matched = (width == info.rcMonitor.right - info.rcMonitor.left) &&
+              (height == info.rcMonitor.bottom - info.rcMonitor.top);
+    TRACE( "matched: %s\n", matched ? "TRUE" : "FALSE" );
+
     return matched;
 }
 
 /* Transform a point in user virtual screen coordinates to real virtual screen coordinates */
-void fs_hack_point_user_to_real(POINT *pos)
+void fs_hack_point_user_to_real( POINT *pos )
 {
     struct fs_monitor *fs_monitor;
     RECT rect;
 
-    TRACE("from %d,%d\n", pos->x, pos->y);
+    TRACE( "from %s\n", wine_dbgstr_point( pos ) );
 
-    if (wm_is_steamcompmgr(NULL))
-        return;
+    if (wm_is_steamcompmgr( NULL )) return;
 
-    EnterCriticalSection(&fs_section);
-    LIST_FOR_EACH_ENTRY(fs_monitor, &fs_monitors, struct fs_monitor, entry)
+    pthread_mutex_lock( &fs_lock );
+    LIST_FOR_EACH_ENTRY( fs_monitor, &fs_monitors, struct fs_monitor, entry )
     {
-        rect.left = fs_monitor->user_mode.u1.s2.dmPosition.x;
-        rect.top = fs_monitor->user_mode.u1.s2.dmPosition.y;
+        rect.left = fs_monitor->user_mode.dmPosition.x;
+        rect.top = fs_monitor->user_mode.dmPosition.y;
         rect.right = rect.left + fs_monitor->user_mode.dmPelsWidth;
         rect.bottom = rect.top + fs_monitor->user_mode.dmPelsHeight;
 
-        if (PtInRect(&rect, *pos))
+        if (PtInRect( &rect, *pos ))
         {
-            pos->x -= fs_monitor->user_mode.u1.s2.dmPosition.x;
-            pos->y -= fs_monitor->user_mode.u1.s2.dmPosition.y;
-            pos->x = lround(pos->x * fs_monitor->user_to_real_scale);
-            pos->y = lround(pos->y * fs_monitor->user_to_real_scale);
+            pos->x -= fs_monitor->user_mode.dmPosition.x;
+            pos->y -= fs_monitor->user_mode.dmPosition.y;
+            pos->x = lround( pos->x * fs_monitor->user_to_real_scale );
+            pos->y = lround( pos->y * fs_monitor->user_to_real_scale );
             pos->x += fs_monitor->top_left.x;
             pos->y += fs_monitor->top_left.y;
-            LeaveCriticalSection(&fs_section);
-            TRACE("to %d,%d\n", pos->x, pos->y);
+            pthread_mutex_unlock( &fs_lock );
+            TRACE( "to %s\n", wine_dbgstr_point( pos ) );
             return;
         }
     }
-    LeaveCriticalSection(&fs_section);
-    WARN("%d,%d not transformed.\n", pos->x, pos->y);
+    pthread_mutex_unlock( &fs_lock );
+    WARN( "%s not transformed.\n", wine_dbgstr_point( pos ) );
 }
 
 /* Transform a point in real virtual screen coordinates to user virtual screen coordinates */
-void fs_hack_point_real_to_user(POINT *pos)
+void fs_hack_point_real_to_user( POINT *pos )
 {
     struct fs_monitor *fs_monitor;
     RECT rect;
 
-    TRACE("from %d,%d\n", pos->x, pos->y);
+    TRACE( "from %s\n", wine_dbgstr_point( pos ) );
 
-    if (wm_is_steamcompmgr(NULL))
-        return;
+    if (wm_is_steamcompmgr( NULL )) return;
 
-    EnterCriticalSection(&fs_section);
-    LIST_FOR_EACH_ENTRY(fs_monitor, &fs_monitors, struct fs_monitor, entry)
+    pthread_mutex_lock( &fs_lock );
+    LIST_FOR_EACH_ENTRY( fs_monitor, &fs_monitors, struct fs_monitor, entry )
     {
-        rect.left = fs_monitor->real_mode.u1.s2.dmPosition.x;
-        rect.top = fs_monitor->real_mode.u1.s2.dmPosition.y;
+        rect.left = fs_monitor->real_mode.dmPosition.x;
+        rect.top = fs_monitor->real_mode.dmPosition.y;
         rect.right = rect.left + fs_monitor->real_mode.dmPelsWidth;
         rect.bottom = rect.top + fs_monitor->real_mode.dmPelsHeight;
 
-        if (PtInRect(&rect, *pos))
+        if (PtInRect( &rect, *pos ))
         {
             pos->x -= fs_monitor->top_left.x;
             pos->y -= fs_monitor->top_left.y;
-            pos->x = lround(pos->x / fs_monitor->user_to_real_scale);
-            pos->y = lround(pos->y / fs_monitor->user_to_real_scale);
-            pos->x += fs_monitor->user_mode.u1.s2.dmPosition.x;
-            pos->y += fs_monitor->user_mode.u1.s2.dmPosition.y;
-            pos->x = max(pos->x, fs_monitor->user_mode.u1.s2.dmPosition.x);
-            pos->y = max(pos->y, fs_monitor->user_mode.u1.s2.dmPosition.y);
-            pos->x = min(pos->x, fs_monitor->user_mode.u1.s2.dmPosition.x + (INT)fs_monitor->user_mode.dmPelsWidth - 1);
-            pos->y = min(pos->y, fs_monitor->user_mode.u1.s2.dmPosition.y + (INT)fs_monitor->user_mode.dmPelsHeight - 1);
-            LeaveCriticalSection(&fs_section);
-            TRACE("to %d,%d\n", pos->x, pos->y);
+            pos->x = lround( pos->x / fs_monitor->user_to_real_scale );
+            pos->y = lround( pos->y / fs_monitor->user_to_real_scale );
+            pos->x += fs_monitor->user_mode.dmPosition.x;
+            pos->y += fs_monitor->user_mode.dmPosition.y;
+            pos->x = max( pos->x, fs_monitor->user_mode.dmPosition.x );
+            pos->y = max( pos->y, fs_monitor->user_mode.dmPosition.y );
+            pos->x = min( pos->x, fs_monitor->user_mode.dmPosition.x +
+                                      (INT)fs_monitor->user_mode.dmPelsWidth - 1 );
+            pos->y = min( pos->y, fs_monitor->user_mode.dmPosition.y +
+                                      (INT)fs_monitor->user_mode.dmPelsHeight - 1 );
+            pthread_mutex_unlock( &fs_lock );
+            TRACE( "to %s\n", wine_dbgstr_point( pos ) );
             return;
         }
     }
-    LeaveCriticalSection(&fs_section);
-    WARN("%d,%d not transformed.\n", pos->x, pos->y);
+    pthread_mutex_unlock( &fs_lock );
+    WARN( "%s not transformed.\n", wine_dbgstr_point( pos ) );
 }
 
 /* Transform RGNDATA in user virtual screen coordinates to real virtual screen coordinates.
@@ -967,14 +926,13 @@ void fs_hack_point_real_to_user(POINT *pos)
  * 1920x1080 and the fake primary monitor resolution is 1024x768. Then (0, 10, 1024, 768) should be
  * transformed to (0, 14, 1920, 1080). While (1024, 10, 2944, 1080) should be transformed to
  * (1920, 10, 3840, 1080) and this is breaking YXBanded because it requires y in non-decreasing order */
-void fs_hack_rgndata_user_to_real(RGNDATA *data)
+void fs_hack_rgndata_user_to_real( RGNDATA *data )
 {
     unsigned int i;
     XRectangle *xrect;
     RECT rect;
 
-    if (!data || wm_is_steamcompmgr(NULL))
-        return;
+    if (!data || wm_is_steamcompmgr( NULL )) return;
 
     xrect = (XRectangle *)data->Buffer;
     for (i = 0; i < data->rdh.nCount; i++)
@@ -983,9 +941,9 @@ void fs_hack_rgndata_user_to_real(RGNDATA *data)
         rect.top = xrect[i].y;
         rect.right = xrect[i].x + xrect[i].width;
         rect.bottom = xrect[i].y + xrect[i].height;
-        TRACE("from rect %s\n", wine_dbgstr_rect(&rect));
-        fs_hack_rect_user_to_real(&rect);
-        TRACE("to rect %s\n", wine_dbgstr_rect(&rect));
+        TRACE( "from rect %s\n", wine_dbgstr_rect( &rect ) );
+        fs_hack_rect_user_to_real( &rect );
+        TRACE( "to rect %s\n", wine_dbgstr_rect( &rect ) );
         xrect[i].x = rect.left;
         xrect[i].y = rect.top;
         xrect[i].width = rect.right - rect.left;
@@ -1001,93 +959,91 @@ void fs_hack_rgndata_user_to_real(RGNDATA *data)
  * (0, 0, 1920, 1080). If (1024, 768) is passed to fs_hack_point_user_to_real(),
  * fs_hack_point_user_to_real() will think (1024, 768) is on the secondary monitor, ends up
  * returning a wrong result to callers. */
-void fs_hack_rect_user_to_real(RECT *rect)
+void fs_hack_rect_user_to_real( RECT *rect )
 {
     struct fs_monitor *fs_monitor;
     HMONITOR monitor;
-    POINT point;
+    RECT point;
 
-    TRACE("from %s\n", wine_dbgstr_rect(rect));
+    TRACE( "from %s\n", wine_dbgstr_rect( rect ) );
 
-    if (wm_is_steamcompmgr(NULL))
-        return;
+    if (wm_is_steamcompmgr( NULL )) return;
 
-    point.x = rect->left;
-    point.y = rect->top;
-    monitor = MonitorFromPoint(point, MONITOR_DEFAULTTONEAREST);
-    EnterCriticalSection(&fs_section);
-    fs_monitor = fs_find_monitor_by_handle(monitor);
+    SetRect( &point, rect->left, rect->top, rect->left + 1, rect->top + 1 );
+    monitor = NtUserMonitorFromRect( &point, MONITOR_DEFAULTTONEAREST );
+    pthread_mutex_lock( &fs_lock );
+    fs_monitor = monitor_from_handle( monitor );
     if (!fs_monitor)
     {
-        LeaveCriticalSection(&fs_section);
-        WARN("%s not transformed.\n", wine_dbgstr_rect(rect));
+        pthread_mutex_unlock( &fs_lock );
+        WARN( "%s not transformed.\n", wine_dbgstr_rect( rect ) );
         return;
     }
 
-    OffsetRect(rect, -fs_monitor->user_mode.u1.s2.dmPosition.x, -fs_monitor->user_mode.u1.s2.dmPosition.y);
-    rect->left = lround(rect->left * fs_monitor->user_to_real_scale);
-    rect->right = lround(rect->right * fs_monitor->user_to_real_scale);
-    rect->top = lround(rect->top * fs_monitor->user_to_real_scale);
-    rect->bottom = lround(rect->bottom * fs_monitor->user_to_real_scale);
-    OffsetRect(rect, fs_monitor->top_left.x, fs_monitor->top_left.y);
-    LeaveCriticalSection(&fs_section);
-    TRACE("to %s\n", wine_dbgstr_rect(rect));
+    OffsetRect( rect, -fs_monitor->user_mode.dmPosition.x,
+                -fs_monitor->user_mode.dmPosition.y );
+    rect->left = lround( rect->left * fs_monitor->user_to_real_scale );
+    rect->right = lround( rect->right * fs_monitor->user_to_real_scale );
+    rect->top = lround( rect->top * fs_monitor->user_to_real_scale );
+    rect->bottom = lround( rect->bottom * fs_monitor->user_to_real_scale );
+    OffsetRect( rect, fs_monitor->top_left.x, fs_monitor->top_left.y );
+    pthread_mutex_unlock( &fs_lock );
+    TRACE( "to %s\n", wine_dbgstr_rect( rect ) );
 }
 
 /* Get the user_to_real_scale value in a monitor */
-double fs_hack_get_user_to_real_scale(HMONITOR monitor)
+double fs_hack_get_user_to_real_scale( HMONITOR monitor )
 {
     struct fs_monitor *fs_monitor;
     double scale = 1.0;
 
-    TRACE("monitor %p\n", monitor);
+    TRACE( "monitor %p\n", monitor );
 
-    if (wm_is_steamcompmgr(NULL))
-        return scale;
+    if (wm_is_steamcompmgr( NULL )) return scale;
 
-    EnterCriticalSection(&fs_section);
-    fs_monitor = fs_find_monitor_by_handle(monitor);
+    pthread_mutex_lock( &fs_lock );
+    fs_monitor = monitor_from_handle( monitor );
     if (!fs_monitor)
     {
-        LeaveCriticalSection(&fs_section);
+        pthread_mutex_unlock( &fs_lock );
         return scale;
     }
     scale = fs_monitor->user_to_real_scale;
 
-    LeaveCriticalSection(&fs_section);
-    TRACE("scale %lf\n", scale);
+    pthread_mutex_unlock( &fs_lock );
+    TRACE( "scale %lf\n", scale );
     return scale;
 }
 
 /* Get the scaled scree size of a monitor */
-SIZE fs_hack_get_scaled_screen_size(HMONITOR monitor)
+SIZE fs_hack_get_scaled_screen_size( HMONITOR monitor )
 {
     struct fs_monitor *fs_monitor;
     SIZE size = {0};
 
-    TRACE("monitor %p\n", monitor);
+    TRACE( "monitor %p\n", monitor );
 
-    EnterCriticalSection(&fs_section);
-    fs_monitor = fs_find_monitor_by_handle(monitor);
+    pthread_mutex_lock( &fs_lock );
+    fs_monitor = monitor_from_handle( monitor );
     if (!fs_monitor)
     {
-        LeaveCriticalSection(&fs_section);
+        pthread_mutex_unlock( &fs_lock );
         return size;
     }
 
-    if (wm_is_steamcompmgr(NULL))
+    if (wm_is_steamcompmgr( NULL ))
     {
-        LeaveCriticalSection(&fs_section);
+        pthread_mutex_unlock( &fs_lock );
         size.cx = fs_monitor->user_mode.dmPelsWidth;
         size.cy = fs_monitor->user_mode.dmPelsHeight;
-        TRACE("width %d height %d\n", size.cx, size.cy);
+        TRACE( "width %d height %d\n", (int)size.cx, (int)size.cy );
         return size;
     }
 
-    size.cx = lround(fs_monitor->user_mode.dmPelsWidth * fs_monitor->user_to_real_scale);
-    size.cy = lround(fs_monitor->user_mode.dmPelsHeight * fs_monitor->user_to_real_scale);
-    LeaveCriticalSection(&fs_section);
-    TRACE("width %d height %d\n", size.cx, size.cy);
+    size.cx = lround( fs_monitor->user_mode.dmPelsWidth * fs_monitor->user_to_real_scale );
+    size.cy = lround( fs_monitor->user_mode.dmPelsHeight * fs_monitor->user_to_real_scale );
+    pthread_mutex_unlock( &fs_lock );
+    TRACE( "width %d height %d\n", (int)size.cx, (int)size.cy );
     return size;
 }
 
@@ -1097,18 +1053,18 @@ RECT fs_hack_get_real_virtual_screen(void)
     struct fs_monitor *fs_monitor;
     RECT rect, virtual = {0};
 
-    EnterCriticalSection(&fs_section);
-    LIST_FOR_EACH_ENTRY(fs_monitor, &fs_monitors, struct fs_monitor, entry)
+    pthread_mutex_lock( &fs_lock );
+    LIST_FOR_EACH_ENTRY( fs_monitor, &fs_monitors, struct fs_monitor, entry )
     {
-        rect.left = fs_monitor->real_mode.u1.s2.dmPosition.x;
-        rect.top = fs_monitor->real_mode.u1.s2.dmPosition.y;
+        rect.left = fs_monitor->real_mode.dmPosition.x;
+        rect.top = fs_monitor->real_mode.dmPosition.y;
         rect.right = rect.left + fs_monitor->real_mode.dmPelsWidth;
         rect.bottom = rect.top + fs_monitor->real_mode.dmPelsHeight;
 
-        UnionRect(&virtual, &virtual, &rect);
+        union_rect( &virtual, &virtual, &rect );
     }
-    LeaveCriticalSection(&fs_section);
-    TRACE("real virtual screen rect:%s\n", wine_dbgstr_rect(&virtual));
+    pthread_mutex_unlock( &fs_lock );
+    TRACE( "real virtual screen rect:%s\n", wine_dbgstr_rect( &virtual ) );
     return virtual;
 }
 
@@ -1116,71 +1072,65 @@ RECT fs_hack_get_real_virtual_screen(void)
  * display device handlers */
 void fs_hack_init(void)
 {
-    static WCHAR display_fmt[] = {'\\','\\','.','\\','D','I','S','P','L','A','Y','%','d',0};
     struct x11drv_display_device_handler device_handler;
     struct x11drv_settings_handler settings_handler;
-    WCHAR device_name[CCHDEVICENAME];
-    INT i = 0;
+    RECT rect;
 
     real_device_handler = X11DRV_DisplayDevices_GetHandler();
     real_settings_handler = X11DRV_Settings_GetHandler();
 
-    EnterCriticalSection(&fs_section);
-    while (1)
-    {
-        sprintfW(device_name, display_fmt, ++i);
-        if (!fs_add_monitor(device_name))
-            break;
-    }
-    LeaveCriticalSection(&fs_section);
+    rect = get_host_primary_monitor_rect();
+    xinerama_init( rect.right - rect.left, rect.bottom - rect.top );
 
     settings_handler.name = "Fullscreen Hack";
     settings_handler.priority = 500;
-    settings_handler.get_id = fs_get_id;
+    settings_handler.get_id = real_settings_handler.get_id;
     settings_handler.get_modes = fs_get_modes;
     settings_handler.free_modes = fs_free_modes;
     settings_handler.get_current_mode = fs_get_current_mode;
     settings_handler.set_current_mode = fs_set_current_mode;
-    settings_handler.convert_coordinates = NULL;
-    X11DRV_Settings_SetHandler(&settings_handler);
+    X11DRV_Settings_SetHandler( &settings_handler );
 
     device_handler.name = "Fullscreen Hack";
     device_handler.priority = 500;
-    device_handler.get_gpus = real_device_handler.get_gpus;
+    device_handler.get_gpus = fs_get_gpus;
     device_handler.get_adapters = real_device_handler.get_adapters;
     device_handler.get_monitors = fs_get_monitors;
     device_handler.free_gpus = real_device_handler.free_gpus;
     device_handler.free_adapters = real_device_handler.free_adapters;
     device_handler.free_monitors = real_device_handler.free_monitors;
-    device_handler.register_event_handlers = NULL;
-    X11DRV_DisplayDevices_SetHandler(&device_handler);
+    device_handler.register_event_handlers = real_device_handler.register_event_handlers;
+    X11DRV_DisplayDevices_SetHandler( &device_handler );
+
+    initialized = TRUE;
 }
 
-const float *fs_hack_get_gamma_ramp(LONG *serial)
+const float *fs_hack_get_gamma_ramp( LONG *serial )
 {
-    if(gamma_serial == 0)
-        return NULL;
-    if(serial)
-        *serial = gamma_serial;
+    if (gamma_serial == 0) return NULL;
+    if (serial) *serial = gamma_serial;
     return gamma_ramp;
 }
 
-void fs_hack_set_gamma_ramp(const WORD *ramp)
+void fs_hack_set_gamma_ramp( const WORD *ramp )
 {
     int i;
-    if(memcmp(gamma_ramp_i, ramp, sizeof(gamma_ramp_i)) == 0){
+    if (memcmp( gamma_ramp_i, ramp, sizeof(gamma_ramp_i) ) == 0)
+    {
         /* identical */
         return;
     }
-    for(i = 0; i < GAMMA_RAMP_SIZE; ++i){
-        gamma_ramp[i * 4    ] = ramp[i                      ] / 65535.f;
-        gamma_ramp[i * 4 + 1] = ramp[i +     GAMMA_RAMP_SIZE] / 65535.f;
+    for (i = 0; i < GAMMA_RAMP_SIZE; ++i)
+    {
+        gamma_ramp[i * 4] = ramp[i] / 65535.f;
+        gamma_ramp[i * 4 + 1] = ramp[i + GAMMA_RAMP_SIZE] / 65535.f;
         gamma_ramp[i * 4 + 2] = ramp[i + 2 * GAMMA_RAMP_SIZE] / 65535.f;
     }
-    memcpy(gamma_ramp_i, ramp, sizeof(gamma_ramp_i));
-    InterlockedIncrement(&gamma_serial);
-    TRACE("new gamma serial: %u\n", gamma_serial);
-    if(gamma_serial == 0){
-        InterlockedIncrement(&gamma_serial);
+    memcpy( gamma_ramp_i, ramp, sizeof(gamma_ramp_i) );
+    InterlockedIncrement( &gamma_serial );
+    TRACE( "new gamma serial: %u\n", (int)gamma_serial );
+    if (gamma_serial == 0)
+    {
+        InterlockedIncrement( &gamma_serial );
     }
 }

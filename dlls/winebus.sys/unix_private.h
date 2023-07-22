@@ -91,6 +91,8 @@ struct effect_params
     };
 };
 
+struct unix_device;
+
 struct raw_device_vtbl
 {
     void (*destroy)(struct unix_device *iface);
@@ -123,21 +125,6 @@ struct hid_report_descriptor
     SIZE_T size;
     SIZE_T max_size;
     BYTE next_report_id[3];
-};
-
-/* HID spec uses None / Stop names for the first two implicit waveforms,
- * where Windows SDK headers use STOP / NULL for the corresponding HID
- * usage constants. We're not actually using the usages anyway are we
- * stick to the HID spec here.
- */
-enum haptics_waveform_ordinal
-{
-    HAPTICS_WAVEFORM_NONE_ORDINAL = 1, /* implicit, not included in waveform_list / duration_list */
-    HAPTICS_WAVEFORM_STOP_ORDINAL = 2, /* implicit, not included in waveform_list / duration_list */
-    HAPTICS_WAVEFORM_RUMBLE_ORDINAL = 3,
-    HAPTICS_WAVEFORM_BUZZ_ORDINAL = 4,
-    HAPTICS_WAVEFORM_FIRST_ORDINAL = HAPTICS_WAVEFORM_RUMBLE_ORDINAL,
-    HAPTICS_WAVEFORM_LAST_ORDINAL = HAPTICS_WAVEFORM_BUZZ_ORDINAL,
 };
 
 #include "pshpack1.h"

@@ -125,7 +125,7 @@ static int WINAPIV NETSTAT_wprintf(const WCHAR *format, ...)
         }
 
         /* Convert to OEM, then output */
-        convertedChars = WideCharToMultiByte(GetConsoleOutputCP(), 0, output_bufW,
+        convertedChars = WideCharToMultiByte(GetOEMCP(), 0, output_bufW,
                                              len, output_bufA, MAX_WRITECONSOLE_SIZE,
                                              "?", &usedDefaultChar);
         WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), output_bufA, convertedChars,
@@ -145,7 +145,7 @@ static WCHAR *NETSTAT_load_message(UINT id) {
     static const WCHAR failedW[]  = {'F','a','i','l','e','d','!','\0'};
 
     if (!LoadStringW(GetModuleHandleW(NULL), id, msg, ARRAY_SIZE(msg))) {
-        WINE_FIXME("LoadString failed with %d\n", GetLastError());
+        WINE_FIXME("LoadString failed with %ld\n", GetLastError());
         lstrcpyW(msg, failedW);
     }
     return msg;

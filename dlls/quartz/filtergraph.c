@@ -42,6 +42,19 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(quartz);
 
+DECLARE_CRITICAL_SECTION(message_cs);
+
+struct filter_create_params
+{
+    HRESULT hr;
+    IMoniker *moniker;
+    IBaseFilter *filter;
+};
+
+static HANDLE message_thread, message_thread_ret;
+static DWORD message_thread_id;
+static unsigned int message_thread_refcount;
+
 struct media_event
 {
     struct list entry;
@@ -133,9 +146,6 @@ struct filter_graph
     IUnknown *pSite;
     LONG version;
 
-    HANDLE message_thread, message_thread_ret;
-    DWORD message_thread_id;
-
     /* Respectively: the last timestamp at which we started streaming, and the
      * current offset within the stream. */
     REFERENCE_TIME stream_start, stream_elapsed;
@@ -143,6 +153,7 @@ struct filter_graph
     LONGLONG current_pos;
 
     unsigned int needs_async_run : 1;
+    unsigned int threaded : 1;
 };
 
 struct enum_filters
@@ -466,14 +477,17 @@ static ULONG WINAPI FilterGraphInner_Release(IUnknown *iface)
         flush_media_events(This);
         CloseHandle(This->media_event_handle);
 
-        This->cs.DebugInfo->Spare[0] = 0;
-        if (This->message_thread)
+        EnterCriticalSection(&message_cs);
+        if (This->threaded && !--message_thread_refcount)
         {
-            PostThreadMessageW(This->message_thread_id, WM_USER + 1, 0, 0);
-            WaitForSingleObject(This->message_thread, INFINITE);
-            CloseHandle(This->message_thread);
-            CloseHandle(This->message_thread_ret);
+            PostThreadMessageW(message_thread_id, WM_USER + 1, 0, 0);
+            WaitForSingleObject(message_thread, INFINITE);
+            CloseHandle(message_thread);
+            CloseHandle(message_thread_ret);
         }
+        LeaveCriticalSection(&message_cs);
+
+        This->cs.DebugInfo->Spare[0] = 0;
         DeleteCriticalSection(&This->event_cs);
 	DeleteCriticalSection(&This->cs);
         free(This);
@@ -660,6 +674,8 @@ static HRESULT WINAPI FilterGraph2_AddFilter(IFilterGraph2 *iface,
         heap_free(entry);
         return hr;
     }
+
+    IBaseFilter_SetSyncSource(filter, graph->refClock);
 
     IBaseFilter_AddRef(entry->filter = filter);
 
@@ -1027,21 +1043,13 @@ static HRESULT WINAPI FilterGraph2_SetDefaultSyncSource(IFilterGraph2 *iface)
     return hr;
 }
 
-struct filter_create_params
-{
-    HRESULT hr;
-    IMoniker *moniker;
-    IBaseFilter *filter;
-};
-
 static DWORD WINAPI message_thread_run(void *ctx)
 {
-    struct filter_graph *graph = ctx;
     MSG msg;
 
     /* Make sure we have a message queue. */
     PeekMessageW(&msg, NULL, 0, 0, PM_NOREMOVE);
-    SetEvent(graph->message_thread_ret);
+    SetEvent(message_thread_ret);
 
     CoInitializeEx(NULL, COINIT_MULTITHREADED);
 
@@ -1055,7 +1063,7 @@ static DWORD WINAPI message_thread_run(void *ctx)
 
             params->hr = IMoniker_BindToObject(params->moniker, NULL, NULL,
                     &IID_IBaseFilter, (void **)&params->filter);
-            SetEvent(graph->message_thread_ret);
+            SetEvent(message_thread_ret);
         }
         else if (!msg.hwnd && msg.message == WM_USER + 1)
         {
@@ -1074,13 +1082,17 @@ static DWORD WINAPI message_thread_run(void *ctx)
 
 static HRESULT create_filter(struct filter_graph *graph, IMoniker *moniker, IBaseFilter **filter)
 {
-    if (graph->message_thread)
+    if (graph->threaded)
     {
         struct filter_create_params params;
 
         params.moniker = moniker;
-        PostThreadMessageW(graph->message_thread_id, WM_USER, (WPARAM)&params, 0);
-        WaitForSingleObject(graph->message_thread_ret, INFINITE);
+
+        EnterCriticalSection(&message_cs);
+        PostThreadMessageW(message_thread_id, WM_USER, (WPARAM)&params, 0);
+        WaitForSingleObject(message_thread_ret, INFINITE);
+        LeaveCriticalSection(&message_cs);
+
         *filter = params.filter;
         return params.hr;
     }
@@ -5686,14 +5698,16 @@ static HRESULT filter_graph_common_create(IUnknown *outer, IUnknown **out, BOOL 
     object->name_index = 1;
     object->timeformatseek = TIME_FORMAT_MEDIA_TIME;
 
-    if (threaded)
+    object->threaded = !!threaded;
+
+    EnterCriticalSection(&message_cs);
+    if (threaded && !message_thread_refcount++)
     {
-        object->message_thread_ret = CreateEventW(NULL, FALSE, FALSE, NULL);
-        object->message_thread = CreateThread(NULL, 0, message_thread_run, object, 0, &object->message_thread_id);
-        WaitForSingleObject(object->message_thread_ret, INFINITE);
+        message_thread_ret = CreateEventW(NULL, FALSE, FALSE, NULL);
+        message_thread = CreateThread(NULL, 0, message_thread_run, object, 0, &message_thread_id);
+        WaitForSingleObject(message_thread_ret, INFINITE);
     }
-    else
-        object->message_thread = NULL;
+    LeaveCriticalSection(&message_cs);
 
     TRACE("Created %sthreaded filter graph %p.\n", threaded ? "" : "non-", object);
     *out = &object->IUnknown_inner;

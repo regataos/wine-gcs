@@ -292,6 +292,16 @@ static inline ENCODING PROFILE_DetectTextEncoding(const void * buffer, int * len
     return ENCODING_ANSI;
 }
 
+static void profile_trim_spaces(WCHAR **start, WCHAR **end)
+{
+    WCHAR *s = *start, *e = *end;
+
+    while (s < e && PROFILE_isspaceW(*s)) s++;
+    while ((e > s) && PROFILE_isspaceW(e[-1])) e--;
+
+    *start = s;
+    *end = e;
+}
 
 /***********************************************************************
  *           PROFILE_Load
@@ -302,8 +312,8 @@ static PROFILESECTION *PROFILE_Load(HANDLE hFile, ENCODING * pEncoding)
 {
     void *buffer_base, *pBuffer;
     WCHAR * szFile;
-    const WCHAR *szLineStart, *szLineEnd;
-    const WCHAR *szValueStart, *szEnd, *next_line;
+    WCHAR *szLineStart, *szLineEnd, *next_line;
+    const WCHAR *szValueStart, *szEnd;
     int len;
     PROFILESECTION *section, *first_section;
     PROFILESECTION **next_section;
@@ -322,7 +332,7 @@ static PROFILESECTION *PROFILE_Load(HANDLE hFile, ENCODING * pEncoding)
     if (!ReadFile(hFile, buffer_base, dwFileSize, &dwFileSize, NULL))
     {
         HeapFree(GetProcessHeap(), 0, buffer_base);
-        WARN("Error %d reading file\n", GetLastError());
+        WARN("Error %ld reading file\n", GetLastError());
         return NULL;
     }
     len = dwFileSize;
@@ -400,8 +410,7 @@ static PROFILESECTION *PROFILE_Load(HANDLE hFile, ENCODING * pEncoding)
         szLineEnd = next_line;
 
         /* get rid of white space */
-        while (szLineStart < szLineEnd && PROFILE_isspaceW(*szLineStart)) szLineStart++;
-        while ((szLineEnd > szLineStart) && PROFILE_isspaceW(szLineEnd[-1])) szLineEnd--;
+        profile_trim_spaces(&szLineStart, &szLineEnd);
 
         if (szLineStart >= szLineEnd) continue;
 
@@ -415,8 +424,13 @@ static PROFILESECTION *PROFILE_Load(HANDLE hFile, ENCODING * pEncoding)
             }
             else
             {
+                /* Skip brackets */
                 szLineStart++;
                 len -= 2;
+                szLineEnd = szLineStart + len;
+                profile_trim_spaces(&szLineStart, &szLineEnd);
+                len = szLineEnd - szLineStart;
+
                 /* no need to allocate +1 for NULL terminating character as
                  * already included in structure */
                 if (!(section = HeapAlloc( GetProcessHeap(), 0, sizeof(*section) + len * sizeof(WCHAR) )))
@@ -641,7 +655,7 @@ static BOOL PROFILE_FlushFile(void)
 
     if (hFile == INVALID_HANDLE_VALUE)
     {
-        WARN("could not save profile file %s (error was %d)\n", debugstr_w(CurProfile->filename), GetLastError());
+        WARN("could not save profile file %s (error was %ld)\n", debugstr_w(CurProfile->filename), GetLastError());
         return FALSE;
     }
 
@@ -747,7 +761,7 @@ static BOOL PROFILE_Open( LPCWSTR filename, BOOL write_access )
 
     if ((hFile == INVALID_HANDLE_VALUE) && (GetLastError() != ERROR_FILE_NOT_FOUND))
     {
-        WARN("Error %d opening file %s\n", GetLastError(), debugstr_w(buffer));
+        WARN("Error %ld opening file %s\n", GetLastError(), debugstr_w(buffer));
         return FALSE;
     }
 
@@ -1563,7 +1577,7 @@ INT WINAPI GetPrivateProfileSectionW( LPCWSTR section, LPWSTR buffer,
         return 0;
     }
 
-    TRACE("(%s, %p, %d, %s)\n", debugstr_w(section), buffer, len, debugstr_w(filename));
+    TRACE("(%s, %p, %ld, %s)\n", debugstr_w(section), buffer, len, debugstr_w(filename));
 
     return get_section( filename, section, buffer, len, TRUE );
 }
@@ -2044,8 +2058,13 @@ BOOL WINAPI WritePrivateProfileStructW (LPCWSTR section, LPCWSTR key,
     LPWSTR outstring, p;
     DWORD sum = 0;
 
+    TRACE("(%s %s %p %u %s)\n", debugstr_w(section), debugstr_w(key), buf, bufsize, debugstr_w(filename));
+
     if (!section && !key && !buf)  /* flush the cache */
         return WritePrivateProfileStringW( NULL, NULL, NULL, filename );
+
+    if (!buf)
+        return WritePrivateProfileStringW(section, key, NULL, filename);
 
     /* allocate string buffer for hex chars + checksum hex char + '\0' */
     outstring = HeapAlloc( GetProcessHeap(), 0, (bufsize*2 + 2 + 1) * sizeof(WCHAR) );

@@ -1,8 +1,0 @@
-EXTRADEFS = -DWINE_NO_LONG_TYPES
-MODULE = twinapi.appcore.dll
-IMPORTS = combase
-
-C_SRCS = \
-       main.c
-
-IDL_SRCS = classes.idl

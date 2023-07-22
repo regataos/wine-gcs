@@ -80,6 +80,7 @@
 #include <setupapi.h>
 #include <wininet.h>
 #include <newdev.h>
+#include <wincrypt.h>
 #include "resource.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(wineboot);
@@ -433,7 +434,7 @@ static void create_user_shared_data( UINT64 *tsc_frequency )
     InitializeObjectAttributes( &attr, &name, OBJ_OPENIF, NULL, NULL );
     if ((status = NtOpenSection( &handle, SECTION_ALL_ACCESS, &attr )))
     {
-        ERR( "cannot open __wine_user_shared_data: %x\n", status );
+        ERR( "cannot open __wine_user_shared_data: %lx\n", status );
         return;
     }
     data = MapViewOfFile( handle, FILE_MAP_WRITE, 0, 0, sizeof(*data) );
@@ -1098,7 +1099,9 @@ static void create_computer_name_keys(void)
 
     if (gethostname( buffer, sizeof(buffer) )) return;
     hints.ai_flags = AI_CANONNAME;
-    if (!getaddrinfo( buffer, NULL, &hints, &res )) name = res->ai_canonname;
+    if (!getaddrinfo( buffer, NULL, &hints, &res ) &&
+        res->ai_canonname && strcasecmp(res->ai_canonname, "localhost") != 0)
+        name = res->ai_canonname;
     dot = strchr( name, '.' );
     if (dot) *dot++ = 0;
     else dot = name + strlen(name);
@@ -1230,7 +1233,7 @@ static BOOL wininit(void)
 
     if( !MoveFileExW( L"wininit.ini", L"wininit.bak", MOVEFILE_REPLACE_EXISTING) )
     {
-        WINE_ERR("Couldn't rename wininit.ini, error %d\n", GetLastError() );
+        WINE_ERR("Couldn't rename wininit.ini, error %ld\n", GetLastError() );
 
         return FALSE;
     }
@@ -1333,7 +1336,7 @@ static DWORD runCmd(LPWSTR cmdline, LPCWSTR dir, BOOL wait, BOOL minimized)
 
     if( !CreateProcessW(NULL, cmdline, NULL, NULL, FALSE, 0, NULL, dir, &si, &info) )
     {
-        WINE_WARN("Failed to run command %s (%d)\n", wine_dbgstr_w(cmdline), GetLastError() );
+        WINE_WARN("Failed to run command %s (%ld)\n", wine_dbgstr_w(cmdline), GetLastError() );
         return INVALID_RUNCMD_RETURN;
     }
 
@@ -1390,23 +1393,23 @@ static void process_run_key( HKEY key, const WCHAR *keyname, BOOL delete, BOOL s
 
         if ((res = RegEnumValueW( runkey, --i, value, &len, 0, &type, (BYTE *)cmdline, &len_data )))
         {
-            WINE_ERR( "Couldn't read value %u (%d).\n", i, res );
+            WINE_ERR( "Couldn't read value %lu (%ld).\n", i, res );
             continue;
         }
         if (delete && (res = RegDeleteValueW( runkey, value )))
         {
-            WINE_ERR( "Couldn't delete value %u (%d). Running command anyways.\n", i, res );
+            WINE_ERR( "Couldn't delete value %lu (%ld). Running command anyways.\n", i, res );
         }
         if (type != REG_SZ)
         {
-            WINE_ERR( "Incorrect type of value %u (%u).\n", i, type );
+            WINE_ERR( "Incorrect type of value %lu (%lu).\n", i, type );
             continue;
         }
         if (runCmd( cmdline, NULL, synchronous, FALSE ) == INVALID_RUNCMD_RETURN)
         {
-            WINE_ERR( "Error running cmd %s (%u).\n", wine_dbgstr_w(cmdline), GetLastError() );
+            WINE_ERR( "Error running cmd %s (%lu).\n", wine_dbgstr_w(cmdline), GetLastError() );
         }
-        WINE_TRACE( "Done processing cmd %u.\n", i );
+        WINE_TRACE( "Done processing cmd %lu.\n", i );
     }
 
 end:
@@ -1522,7 +1525,7 @@ static int ProcessWindowsFileProtection(void)
                              dllcache, targetpath, currentpath, tempfile, &sz);
         if (rc != ERROR_SUCCESS)
         {
-            WINE_WARN("WFP: %s error 0x%x\n",wine_dbgstr_w(finddata.cFileName),rc);
+            WINE_WARN("WFP: %s error 0x%lx\n",wine_dbgstr_w(finddata.cFileName),rc);
             DeleteFileW(tempfile);
         }
 
@@ -1532,7 +1535,7 @@ static int ProcessWindowsFileProtection(void)
         targetpath[sz++] = '\\';
         lstrcpynW( targetpath + sz, finddata.cFileName, MAX_PATH - sz );
         if (!DeleteFileW( targetpath ))
-            WINE_WARN( "failed to delete %s: error %u\n", wine_dbgstr_w(targetpath), GetLastError() );
+            WINE_WARN( "failed to delete %s: error %lu\n", wine_dbgstr_w(targetpath), GetLastError() );
 
         find_rc = FindNextFileW(find_handle,&finddata);
     }
@@ -1551,7 +1554,7 @@ static BOOL start_services_process(void)
     if (!CreateProcessW(L"C:\\windows\\system32\\services.exe", NULL,
                         NULL, NULL, TRUE, DETACHED_PROCESS, NULL, NULL, &si, &pi))
     {
-        WINE_ERR("Couldn't start services.exe: error %u\n", GetLastError());
+        WINE_ERR("Couldn't start services.exe: error %lu\n", GetLastError());
         return FALSE;
     }
     CloseHandle(pi.hThread);
@@ -1564,7 +1567,7 @@ static BOOL start_services_process(void)
     {
         DWORD exit_code;
         GetExitCodeProcess(pi.hProcess, &exit_code);
-        WINE_ERR("Unexpected termination of services.exe - exit code %d\n", exit_code);
+        WINE_ERR("Unexpected termination of services.exe - exit code %ld\n", exit_code);
         CloseHandle(pi.hProcess);
         CloseHandle(wait_handles[0]);
         return FALSE;
@@ -1656,7 +1659,7 @@ static void install_root_pnp_devices(void)
 
     if ((set = SetupDiCreateDeviceInfoList( NULL, NULL )) == INVALID_HANDLE_VALUE)
     {
-        WINE_ERR("Failed to create device info list, error %#x.\n", GetLastError());
+        WINE_ERR("Failed to create device info list, error %#lx.\n", GetLastError());
         return;
     }
 
@@ -1665,25 +1668,25 @@ static void install_root_pnp_devices(void)
         if (!SetupDiCreateDeviceInfoA( set, root_devices[i].name, &GUID_NULL, NULL, NULL, 0, &device))
         {
             if (GetLastError() != ERROR_DEVINST_ALREADY_EXISTS)
-                WINE_ERR("Failed to create device %s, error %#x.\n", debugstr_a(root_devices[i].name), GetLastError());
+                WINE_ERR("Failed to create device %s, error %#lx.\n", debugstr_a(root_devices[i].name), GetLastError());
             continue;
         }
 
         if (!SetupDiSetDeviceRegistryPropertyA(set, &device, SPDRP_HARDWAREID,
                 (const BYTE *)root_devices[i].hardware_id, (strlen(root_devices[i].hardware_id) + 2) * sizeof(WCHAR)))
         {
-            WINE_ERR("Failed to set hardware id for %s, error %#x.\n", debugstr_a(root_devices[i].name), GetLastError());
+            WINE_ERR("Failed to set hardware id for %s, error %#lx.\n", debugstr_a(root_devices[i].name), GetLastError());
             continue;
         }
 
         if (!SetupDiCallClassInstaller(DIF_REGISTERDEVICE, set, &device))
         {
-            WINE_ERR("Failed to register device %s, error %#x.\n", debugstr_a(root_devices[i].name), GetLastError());
+            WINE_ERR("Failed to register device %s, error %#lx.\n", debugstr_a(root_devices[i].name), GetLastError());
             continue;
         }
 
         if (!UpdateDriverForPlugAndPlayDevicesA(NULL, root_devices[i].hardware_id, root_devices[i].infpath, 0, NULL))
-            WINE_ERR("Failed to install drivers for %s, error %#x.\n", debugstr_a(root_devices[i].name), GetLastError());
+            WINE_ERR("Failed to install drivers for %s, error %#lx.\n", debugstr_a(root_devices[i].name), GetLastError());
     }
 
     SetupDiDestroyDeviceInfoList(set);
@@ -1762,6 +1765,15 @@ static void update_win_version(void)
     }
 }
 
+static void update_root_certs(void)
+{
+    HCERTSTORE store;
+
+    store = CertOpenStore( CERT_STORE_PROV_SYSTEM_REGISTRY_W, 0, 0, CERT_STORE_OPEN_EXISTING_FLAG
+                           | CERT_STORE_READONLY_FLAG | CERT_SYSTEM_STORE_LOCAL_MACHINE, L"Root");
+    CertCloseStore( store, 0 );
+}
+
 /* execute rundll32 on the wine.inf file if necessary */
 static void update_wineprefix( BOOL force )
 {
@@ -1818,6 +1830,7 @@ static void update_wineprefix( BOOL force )
         install_root_pnp_devices();
         update_user_profile();
         update_win_version();
+        update_root_certs();
 
         WINE_MESSAGE( "wine: configuration in %s has been updated.\n", debugstr_w(prettyprint_configdir()) );
     }
@@ -1979,7 +1992,7 @@ int __cdecl main( int argc, char *argv[] )
     end_session = force = init = kill = restart = shutdown = update = FALSE;
     GetWindowsDirectoryW( windowsdir, MAX_PATH );
     if( !SetCurrentDirectoryW( windowsdir ) )
-        WINE_ERR("Cannot set the dir to %s (%d)\n", wine_dbgstr_w(windowsdir), GetLastError() );
+        WINE_ERR("Cannot set the dir to %s (%ld)\n", wine_dbgstr_w(windowsdir), GetLastError() );
 
     if (IsWow64Process( GetCurrentProcess(), &is_wow64 ) && is_wow64)
     {
@@ -2002,7 +2015,7 @@ int __cdecl main( int argc, char *argv[] )
             GetExitCodeProcess( pi.hProcess, &exit_code );
             ExitProcess( exit_code );
         }
-        else WINE_ERR( "failed to restart 64-bit %s, err %d\n", wine_dbgstr_w(filename), GetLastError() );
+        else WINE_ERR( "failed to restart 64-bit %s, err %ld\n", wine_dbgstr_w(filename), GetLastError() );
         Wow64RevertWow64FsRedirection( redir );
     }
 

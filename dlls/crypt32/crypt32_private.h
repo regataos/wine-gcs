@@ -23,6 +23,8 @@
 #include "wine/unixlib.h"
 
 BOOL CNG_ImportPubKey(CERT_PUBLIC_KEY_INFO *pubKeyInfo, BCRYPT_KEY_HANDLE *key) DECLSPEC_HIDDEN;
+BOOL cng_prepare_signature(const char *alg_oid, BYTE *encoded_sig, DWORD encoded_sig_len,
+    BYTE **sig_value, DWORD *sig_len) DECLSPEC_HIDDEN;
 
 /* a few asn.1 tags we need */
 #define ASN_BOOL            (ASN_UNIVERSAL | ASN_PRIMITIVE | 0x01)
@@ -349,6 +351,8 @@ WINECRYPT_CERTSTORE *CRYPT_FileNameOpenStoreW(HCRYPTPROV hCryptProv,
 void CRYPT_ImportSystemRootCertsToReg(void) DECLSPEC_HIDDEN;
 BOOL CRYPT_SerializeContextsToReg(HKEY key, DWORD flags, const WINE_CONTEXT_INTERFACE *contextInterface,
     HCERTSTORE memStore) DECLSPEC_HIDDEN;
+void CRYPT_RegReadSerializedFromReg(HKEY key, DWORD contextType,
+    HCERTSTORE store, DWORD disposition) DECLSPEC_HIDDEN;
 
 DWORD CRYPT_IsCertificateSelfSigned(const CERT_CONTEXT *cert) DECLSPEC_HIDDEN;
 
@@ -508,8 +512,6 @@ enum unix_funcs
     unix_enum_root_certs,
 };
 
-extern unixlib_handle_t crypt32_handle;
-
-#define CRYPT32_CALL( func, params ) __wine_unix_call( crypt32_handle, unix_ ## func, params )
+#define CRYPT32_CALL( func, params ) WINE_UNIX_CALL( unix_ ## func, params )
 
 #endif

@@ -1,5 +1,5 @@
 /*
- * Copyright 2022 Gabriel Ivăncescu for CodeWeavers
+ * Copyright 2023 Gabriel Ivăncescu for CodeWeavers
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -20,9 +20,14 @@
 #include <math.h>
 #include <limits.h>
 #include <assert.h>
-#include "windef.h"
-#include "ntsecapi.h"
+#include <stdarg.h>
+#include <stdlib.h>
 
+#include "ntstatus.h"
+#define WIN32_NO_STATUS
+#include "windef.h"
+#include "winbase.h"
+#include "ntsecapi.h"
 #include "jscript.h"
 
 #include "wine/debug.h"
@@ -32,12 +37,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(jscript);
 typedef struct {
     jsdisp_t dispex;
     DWORD size;
-
-    /* align the buffer */
-    union {
-        double _align_;
-        BYTE buf[1];
-    };
+    DECLSPEC_ALIGN(sizeof(double)) BYTE buf[];
 } ArrayBufferInstance;
 
 typedef struct {
@@ -170,12 +170,12 @@ static HRESULT create_arraybuf(script_ctx_t *ctx, DWORD size, jsdisp_t **ret)
     ArrayBufferInstance *arraybuf;
     HRESULT hres;
 
-    if(!(arraybuf = heap_alloc_zero(FIELD_OFFSET(ArrayBufferInstance, buf[size]))))
+    if(!(arraybuf = calloc(1, FIELD_OFFSET(ArrayBufferInstance, buf[size]))))
         return E_OUTOFMEMORY;
 
     hres = init_dispex_from_constr(&arraybuf->dispex, ctx, &ArrayBufferInst_info, ctx->arraybuf_constr);
     if(FAILED(hres)) {
-        heap_free(arraybuf);
+        free(arraybuf);
         return hres;
     }
 
@@ -644,13 +644,13 @@ static void DataView_destructor(jsdisp_t *dispex)
     DataViewInstance *view = dataview_from_jsdisp(dispex);
     if(view->buffer)
         jsdisp_release(view->buffer);
-    heap_free(view);
+    free(view);
 }
 
-static HRESULT DataView_gc_traverse(jsdisp_t *dispex, void *arg)
+static HRESULT DataView_gc_traverse(struct gc_ctx *gc_ctx, enum gc_traverse_op op, jsdisp_t *dispex)
 {
     DataViewInstance *view = dataview_from_jsdisp(dispex);
-    return gc_process_linked_obj(dispex, view->buffer, (void**)&view->buffer, arg);
+    return gc_process_linked_obj(gc_ctx, op, dispex, view->buffer, (void**)&view->buffer);
 }
 
 static const builtin_info_t DataView_info = {
@@ -719,12 +719,12 @@ static HRESULT DataViewConstr_value(script_ctx_t *ctx, jsval_t vthis, WORD flags
         if(!r)
             return S_OK;
 
-        if(!(view = heap_alloc_zero(sizeof(DataViewInstance))))
+        if(!(view = calloc(1, sizeof(DataViewInstance))))
             return E_OUTOFMEMORY;
 
         hres = init_dispex_from_constr(&view->dispex, ctx, &DataViewInst_info, ctx->dataview_constr);
         if(FAILED(hres)) {
-            heap_free(view);
+            free(view);
             return hres;
         }
 
@@ -928,7 +928,7 @@ static HRESULT TypedArray_set(script_ctx_t *ctx, jsval_t vthis, WORD flags, unsi
 
         if(dest < src + len * TypedArray_elem_size[TYPEDARRAY_INDEX(obj->builtin_info->class)] &&
            dest + size > src) {
-            if(!(data = heap_alloc(size))) {
+            if(!(data = malloc(size))) {
                 hres = E_OUTOFMEMORY;
                 goto done;
             }
@@ -938,7 +938,7 @@ static HRESULT TypedArray_set(script_ctx_t *ctx, jsval_t vthis, WORD flags, unsi
     hres = fill_typedarr_data_from_object(ctx, data, obj, len, jsclass);
     if(SUCCEEDED(hres) && dest != data) {
         memcpy(dest, data, size);
-        heap_free(data);
+        free(data);
     }
 
 done:
@@ -1007,13 +1007,13 @@ static void TypedArray_destructor(jsdisp_t *dispex)
     TypedArrayInstance *typedarr = typedarr_from_jsdisp(dispex);
     if(typedarr->buffer)
         jsdisp_release(typedarr->buffer);
-    heap_free(typedarr);
+    free(typedarr);
 }
 
-static HRESULT TypedArray_gc_traverse(jsdisp_t *dispex, void *arg)
+static HRESULT TypedArray_gc_traverse(struct gc_ctx *gc_ctx, enum gc_traverse_op op, jsdisp_t *dispex)
 {
     TypedArrayInstance *typedarr = typedarr_from_jsdisp(dispex);
-    return gc_process_linked_obj(dispex, typedarr->buffer, (void**)&typedarr->buffer, arg);
+    return gc_process_linked_obj(gc_ctx, op, dispex, typedarr->buffer, (void**)&typedarr->buffer);
 }
 
 static const builtin_prop_t TypedArrayInst_props[] = {
@@ -1117,13 +1117,13 @@ static HRESULT create_typedarr(script_ctx_t *ctx, jsclass_t jsclass, jsdisp_t *b
     TypedArrayInstance *typedarr;
     HRESULT hres;
 
-    if(!(typedarr = heap_alloc_zero(sizeof(TypedArrayInstance))))
+    if(!(typedarr = calloc(1, sizeof(TypedArrayInstance))))
         return E_OUTOFMEMORY;
 
     hres = init_dispex_from_constr(&typedarr->dispex, ctx, &TypedArrayInst_info[TYPEDARRAY_INDEX(jsclass)],
                                    ctx->typedarr_constr[TYPEDARRAY_INDEX(jsclass)]);
     if(FAILED(hres)) {
-        heap_free(typedarr);
+        free(typedarr);
         return hres;
     }
 
@@ -1277,6 +1277,26 @@ static const builtin_info_t TypedArrayConstr_info = {
     NULL
 };
 
+static inline jsdisp_t *impl_from_IWineDispatchProxyCbPrivate(IWineDispatchProxyCbPrivate *iface)
+{
+    return CONTAINING_RECORD((IDispatchEx*)iface, jsdisp_t, IDispatchEx_iface);
+}
+
+HRESULT WINAPI WineDispatchProxyCbPrivate_CreateArrayBuffer(IWineDispatchProxyCbPrivate *iface, DWORD size, IDispatch **arraybuf, void **data)
+{
+    jsdisp_t *This = impl_from_IWineDispatchProxyCbPrivate(iface);
+    jsdisp_t *obj;
+    HRESULT hres;
+
+    hres = create_arraybuf(This->ctx, size, &obj);
+    if(FAILED(hres))
+        return hres;
+
+    *arraybuf = (IDispatch*)&obj->IDispatchEx_iface;
+    *data = arraybuf_from_jsdisp(obj)->buf;
+    return S_OK;
+}
+
 HRESULT WINAPI WineDispatchProxyCbPrivate_GetRandomValues(IDispatch *disp)
 {
     jsdisp_t *obj = to_jsdisp(disp);
@@ -1324,12 +1344,12 @@ HRESULT init_arraybuf_constructors(script_ctx_t *ctx)
     if(ctx->version < SCRIPTLANGUAGEVERSION_ES5)
         return S_OK;
 
-    if(!(arraybuf = heap_alloc_zero(FIELD_OFFSET(ArrayBufferInstance, buf[0]))))
+    if(!(arraybuf = calloc(1, FIELD_OFFSET(ArrayBufferInstance, buf[0]))))
         return E_OUTOFMEMORY;
 
     hres = init_dispex(&arraybuf->dispex, ctx, &ArrayBuffer_info, ctx->object_prototype);
     if(FAILED(hres)) {
-        heap_free(arraybuf);
+        free(arraybuf);
         return hres;
     }
 
@@ -1344,19 +1364,19 @@ HRESULT init_arraybuf_constructors(script_ctx_t *ctx)
     if(FAILED(hres))
         return hres;
 
-    if(!(view = heap_alloc_zero(sizeof(DataViewInstance))))
+    if(!(view = calloc(1, sizeof(DataViewInstance))))
         return E_OUTOFMEMORY;
 
     hres = create_arraybuf(ctx, 0, &view->buffer);
     if(FAILED(hres)) {
-        heap_free(view);
+        free(view);
         return hres;
     }
 
     hres = init_dispex(&view->dispex, ctx, &DataView_info, ctx->object_prototype);
     if(FAILED(hres)) {
         jsdisp_release(view->buffer);
-        heap_free(view);
+        free(view);
         return hres;
     }
 
@@ -1390,19 +1410,19 @@ HRESULT init_arraybuf_constructors(script_ctx_t *ctx)
         return hres;
 
     for(i = 0; i < ARRAY_SIZE(TypedArray_info); i++) {
-        if(!(typedarr = heap_alloc_zero(sizeof(TypedArrayInstance))))
+        if(!(typedarr = calloc(1, sizeof(TypedArrayInstance))))
             return E_OUTOFMEMORY;
 
         hres = create_arraybuf(ctx, 0, &typedarr->buffer);
         if(FAILED(hres)) {
-            heap_free(typedarr);
+            free(typedarr);
             return hres;
         }
 
         hres = init_dispex(&typedarr->dispex, ctx, &TypedArray_info[i], ctx->object_prototype);
         if(FAILED(hres)) {
             jsdisp_release(typedarr->buffer);
-            heap_free(typedarr);
+            free(typedarr);
             return hres;
         }
 

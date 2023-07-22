@@ -1,13 +1,12 @@
-EXTRADEFS = -DWINE_NO_LONG_TYPES -D_USER32_ -D_WINABLE_
+EXTRADEFS = -D_USER32_
 MODULE    = user32.dll
 IMPORTLIB = user32
-IMPORTS   = $(PNG_PE_LIBS) setupapi gdi32 version sechost advapi32 kernelbase win32u
+IMPORTS   = $(PNG_PE_LIBS) gdi32 version sechost advapi32 kernelbase win32u
 EXTRAINCL = $(PNG_PE_CFLAGS)
-DELAYIMPORTS = hid imm32
+DELAYIMPORTS = setupapi imm32
 
 C_SRCS = \
 	button.c \
-	caret.c \
 	class.c \
 	clipboard.c \
 	combo.c \
@@ -19,10 +18,8 @@ C_SRCS = \
 	defwnd.c \
 	desktop.c \
 	dialog.c \
-	driver.c \
 	edit.c \
 	exticon.c \
-	focus.c \
 	hook.c \
 	icontitle.c \
 	input.c \
@@ -34,12 +31,9 @@ C_SRCS = \
 	misc.c \
 	msgbox.c \
 	nonclient.c \
-	painting.c \
 	property.c \
-	rawinput.c \
 	resource.c \
 	scroll.c \
-	spy.c \
 	static.c \
 	sysparams.c \
 	text.c \
@@ -47,7 +41,6 @@ C_SRCS = \
 	user_main.c \
 	win.c \
 	winhelp.c \
-	winpos.c \
 	winproc.c \
 	winstation.c \
 	wsprintf.c

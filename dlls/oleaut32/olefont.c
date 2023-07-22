@@ -117,7 +117,7 @@ static void HFONTItem_Delete(PHFONTItem item)
 {
   DeleteObject(item->gdiFont);
   list_remove(&item->entry);
-  HeapFree(GetProcessHeap(), 0, item);
+  free(item);
 }
 
 /* Find hfont item entry in the list.  Should be called while holding the crit sect */
@@ -136,7 +136,7 @@ static HFONTItem *find_hfontitem(HFONT hfont)
 /* Add an item to the list with one internal reference */
 static HRESULT add_hfontitem(HFONT hfont)
 {
-    HFONTItem *new_item = HeapAlloc(GetProcessHeap(), 0, sizeof(*new_item));
+    HFONTItem *new_item = malloc(sizeof(*new_item));
 
     if(!new_item) return E_OUTOFMEMORY;
 
@@ -224,17 +224,6 @@ static HRESULT dec_ext_ref(HFONT hfont)
     LeaveCriticalSection(&OLEFontImpl_csHFONTLIST);
 
     return hr;
-}
-
-static WCHAR *strdupW(const WCHAR* str)
-{
-    WCHAR *ret;
-    DWORD size = (lstrlenW(str) + 1) * sizeof(WCHAR);
-
-    ret = HeapAlloc(GetProcessHeap(), 0, size);
-    if(ret)
-        memcpy(ret, str, size);
-    return ret;
 }
 
 /***********************************************************************
@@ -489,28 +478,20 @@ static HRESULT WINAPI OLEFontImpl_QueryInterface(
   return S_OK;
 }
 
-/************************************************************************
- * OLEFontImpl_AddRef (IUnknown)
- */
-static ULONG WINAPI OLEFontImpl_AddRef(
-  IFont* iface)
+static ULONG WINAPI OLEFontImpl_AddRef(IFont* iface)
 {
   OLEFontImpl *this = impl_from_IFont(iface);
-  TRACE("(%p)->(ref=%d)\n", this, this->ref);
-  return InterlockedIncrement(&this->ref);
+  ULONG ref = InterlockedIncrement(&this->ref);
+  TRACE("%p, refcount %lu.\n", iface, ref);
+  return ref;
 }
 
-/************************************************************************
- * OLEFontImpl_Release (IUnknown)
- */
 static ULONG WINAPI OLEFontImpl_Release(IFont* iface)
 {
   OLEFontImpl *this = impl_from_IFont(iface);
-  ULONG ref;
+  ULONG ref = InterlockedDecrement(&this->ref);
 
-  TRACE("(%p)->(ref=%d)\n", this, this->ref);
-
-  ref = InterlockedDecrement(&this->ref);
+  TRACE("%p, refcount %lu.\n", iface, ref);
 
   if (ref == 0)
   {
@@ -629,8 +610,8 @@ static void realize_font(OLEFontImpl *This)
     GetTextFaceW(hdc, ARRAY_SIZE(text_face), text_face);
     if(lstrcmpiW(text_face, This->description.lpstrName))
     {
-        HeapFree(GetProcessHeap(), 0, This->description.lpstrName);
-        This->description.lpstrName = strdupW(text_face);
+        free(This->description.lpstrName);
+        This->description.lpstrName = wcsdup(text_face);
     }
     GetTextMetricsW(hdc, &tm);
     This->description.sCharset = tm.tmCharSet;
@@ -677,8 +658,8 @@ static HRESULT WINAPI OLEFontImpl_put_Name(
   if (!name)
     return CTL_E_INVALIDPROPERTYVALUE;
 
-  HeapFree(GetProcessHeap(), 0, This->description.lpstrName);
-  This->description.lpstrName = strdupW(name);
+  free(This->description.lpstrName);
+  This->description.lpstrName = wcsdup(name);
   if (!This->description.lpstrName) return E_OUTOFMEMORY;
 
   TRACE("new name %s\n", debugstr_w(This->description.lpstrName));
@@ -712,15 +693,10 @@ static HRESULT WINAPI OLEFontImpl_get_Size(
   return S_OK;
 }
 
-/************************************************************************
- * OLEFontImpl_put_Size (IFont)
- */
-static HRESULT WINAPI OLEFontImpl_put_Size(
-  IFont* iface,
-  CY     size)
+static HRESULT WINAPI OLEFontImpl_put_Size(IFont *iface, CY size)
 {
   OLEFontImpl *this = impl_from_IFont(iface);
-  TRACE("(%p)->(%d)\n", this, size.s.Lo);
+  TRACE("%p, %ld.\n", iface, size.s.Lo);
   this->description.cySize.s.Hi = 0;
   this->description.cySize.s.Lo = size.s.Lo;
   OLEFont_SendNotify(this, DISPID_FONT_SIZE);
@@ -728,14 +704,7 @@ static HRESULT WINAPI OLEFontImpl_put_Size(
   return S_OK;
 }
 
-/************************************************************************
- * OLEFontImpl_get_Bold (IFont)
- *
- * See Windows documentation for more details on IFont methods.
- */
-static HRESULT WINAPI OLEFontImpl_get_Bold(
-  IFont*  iface,
-  BOOL* pbold)
+static HRESULT WINAPI OLEFontImpl_get_Bold(IFont *iface, BOOL *pbold)
 {
   OLEFontImpl *this = impl_from_IFont(iface);
   TRACE("(%p)->(%p)\n", this, pbold);
@@ -980,13 +949,13 @@ static HRESULT WINAPI OLEFontImpl_Clone(
 
   *ppfont = NULL;
 
-  newObject = HeapAlloc(GetProcessHeap(), 0, sizeof(OLEFontImpl));
+  newObject = malloc(sizeof(OLEFontImpl));
   if (newObject==NULL)
     return E_OUTOFMEMORY;
 
   *newObject = *this;
   /* allocate separate buffer */
-  newObject->description.lpstrName = strdupW(this->description.lpstrName);
+  newObject->description.lpstrName = wcsdup(this->description.lpstrName);
 
   /* Increment internal ref in hfont item list */
   if(newObject->gdiFont) inc_int_ref(newObject->gdiFont);
@@ -1063,7 +1032,8 @@ static HRESULT WINAPI OLEFontImpl_SetRatio(
   LONG   cyHimetric)
 {
   OLEFontImpl *this = impl_from_IFont(iface);
-  TRACE("(%p)->(%d, %d)\n", this, cyLogical, cyHimetric);
+
+  TRACE("%p, %ld, %ld.\n", iface, cyLogical, cyHimetric);
 
   if(cyLogical == 0 || cyHimetric == 0)
     return E_FAIL;
@@ -1243,9 +1213,9 @@ static HRESULT WINAPI OLEFontImpl_GetTypeInfo(
   }
   hres = ITypeLib_GetTypeInfoOfGuid(tl, &IID_IFontDisp, ppTInfo);
   ITypeLib_Release(tl);
-  if (FAILED(hres)) {
-    FIXME("Did not IDispatch typeinfo from typelib, hres %x\n",hres);
-  }
+  if (FAILED(hres))
+    FIXME("Did not IDispatch typeinfo from typelib, hres %#lx.\n", hres);
+
   return hres;
 }
 
@@ -1302,7 +1272,7 @@ static HRESULT WINAPI OLEFontImpl_Invoke(
   OLEFontImpl *this = impl_from_IDispatch(iface);
   HRESULT hr;
 
-  TRACE("%p->(%d,%s,0x%x,0x%x,%p,%p,%p,%p)\n", this, dispIdMember,
+  TRACE("%p, %ld, %s, %#lx, %#x, %p, %p, %p, %p.\n", iface, dispIdMember,
     debugstr_guid(riid), lcid, wFlags, pDispParams, pVarResult, pExepInfo,
     puArgErr);
 
@@ -1499,7 +1469,7 @@ static HRESULT WINAPI OLEFontImpl_Invoke(
     }
     break;
   default:
-    ERR("member not found for dispid 0x%x\n", dispIdMember);
+    ERR("member not found for dispid %#lx.\n", dispIdMember);
     return DISP_E_MEMBERNOTFOUND;
   }
 }
@@ -1642,10 +1612,10 @@ static HRESULT WINAPI OLEFontImpl_Load(
   IStream_Read(pLoadStream, readBuffer, string_size, &cbRead);
   if (cbRead != string_size) return E_FAIL;
 
-  HeapFree(GetProcessHeap(), 0, this->description.lpstrName);
+  free(this->description.lpstrName);
 
   len = MultiByteToWideChar( CP_ACP, 0, readBuffer, string_size, NULL, 0 );
-  this->description.lpstrName = HeapAlloc( GetProcessHeap(), 0, (len+1) * sizeof(WCHAR) );
+  this->description.lpstrName = malloc((len + 1) * sizeof(WCHAR));
   MultiByteToWideChar( CP_ACP, 0, readBuffer, string_size, this->description.lpstrName, len );
   this->description.lpstrName[len] = 0;
 
@@ -1716,13 +1686,13 @@ static HRESULT WINAPI OLEFontImpl_Save(
 
   if (string_size)
   {
-      if (!(writeBuffer = HeapAlloc( GetProcessHeap(), 0, string_size ))) return E_OUTOFMEMORY;
+      if (!(writeBuffer = malloc(string_size))) return E_OUTOFMEMORY;
       WideCharToMultiByte( CP_ACP, 0, this->description.lpstrName,
                            lstrlenW(this->description.lpstrName),
                            writeBuffer, string_size, NULL, NULL );
 
       IStream_Write(pOutStream, writeBuffer, string_size, &written);
-      HeapFree(GetProcessHeap(), 0, writeBuffer);
+      free(writeBuffer);
 
       if (written != string_size) return E_FAIL;
   }
@@ -2006,7 +1976,7 @@ static HRESULT WINAPI OLEFontImpl_IPersistPropertyBag_Load(
     }
 
     if (FAILED(iRes))
-        WARN("-- 0x%08x\n", iRes);
+        WARN("-- %#lx.\n", iRes);
     return iRes;
 }
 
@@ -2043,7 +2013,7 @@ static OLEFontImpl* OLEFontImpl_Construct(const FONTDESC *fontDesc)
 {
   OLEFontImpl* newObject;
 
-  newObject = HeapAlloc(GetProcessHeap(), 0, sizeof(OLEFontImpl));
+  newObject = malloc(sizeof(OLEFontImpl));
 
   if (newObject==0)
     return newObject;
@@ -2057,7 +2027,7 @@ static OLEFontImpl* OLEFontImpl_Construct(const FONTDESC *fontDesc)
   newObject->ref = 1;
 
   newObject->description.cbSizeofstruct = sizeof(FONTDESC);
-  newObject->description.lpstrName      = strdupW(fontDesc->lpstrName);
+  newObject->description.lpstrName      = wcsdup(fontDesc->lpstrName);
   newObject->description.cySize         = fontDesc->cySize;
   newObject->description.sWeight        = fontDesc->sWeight;
   newObject->description.sCharset       = fontDesc->sCharset;
@@ -2098,14 +2068,14 @@ static void OLEFontImpl_Destroy(OLEFontImpl* fontDesc)
 {
   TRACE("(%p)\n", fontDesc);
 
-  HeapFree(GetProcessHeap(), 0, fontDesc->description.lpstrName);
+  free(fontDesc->description.lpstrName);
 
   if (fontDesc->pPropertyNotifyCP)
       IConnectionPoint_Release(fontDesc->pPropertyNotifyCP);
   if (fontDesc->pFontEventsCP)
       IConnectionPoint_Release(fontDesc->pFontEventsCP);
 
-  HeapFree(GetProcessHeap(), 0, fontDesc);
+  free(fontDesc);
 }
 
 /*******************************************************************************

@@ -175,7 +175,7 @@ static PRUnichar *handle_insert_comment(HTMLDocumentNode *doc, const PRUnichar *
         return NULL;
     }
 
-    buf = heap_alloc((end-ptr+1)*sizeof(WCHAR));
+    buf = malloc((end - ptr + 1) * sizeof(WCHAR));
     if(!buf)
         return NULL;
 
@@ -211,8 +211,8 @@ static nsresult run_insert_comment(HTMLDocumentNode *doc, nsISupports *comment_i
     if(replace_html) {
         HRESULT hres;
 
-        hres = replace_node_by_html(doc->nsdoc, (nsIDOMNode*)nscomment, replace_html);
-        heap_free(replace_html);
+        hres = replace_node_by_html(doc->dom_document, (nsIDOMNode*)nscomment, replace_html);
+        free(replace_html);
         if(FAILED(hres))
             nsres = NS_ERROR_FAILURE;
     }
@@ -275,16 +275,16 @@ static void parse_complete(HTMLDocumentObj *doc)
     TRACE("(%p)\n", doc);
 
     if(doc->nscontainer->usermode == EDITMODE)
-        init_editor(doc->basedoc.doc_node);
+        init_editor(doc->doc_node);
 
     call_explorer_69(doc);
     if(doc->view_sink)
         IAdviseSink_OnViewChange(doc->view_sink, DVASPECT_CONTENT, -1);
-    call_property_onchanged(&doc->basedoc.cp_container, 1005);
+    call_property_onchanged(&doc->cp_container, 1005);
     call_explorer_69(doc);
 
-    if(doc->webbrowser && doc->nscontainer->usermode != EDITMODE && !(doc->basedoc.window->load_flags & BINDING_REFRESH))
-        IDocObjectService_FireNavigateComplete2(doc->doc_object_service, &doc->basedoc.window->base.IHTMLWindow2_iface, 0);
+    if(doc->webbrowser && !(doc->window->load_flags & BINDING_REFRESH))
+        IDocObjectService_FireNavigateComplete2(doc->doc_object_service, &doc->window->base.IHTMLWindow2_iface, 0);
 
     /* FIXME: IE7 calls EnableModelless(TRUE), EnableModelless(FALSE) and sets interactive state here */
 }
@@ -293,19 +293,21 @@ static nsresult run_end_load(HTMLDocumentNode *This, nsISupports *arg1, nsISuppo
 {
     TRACE("(%p)\n", This);
 
-    if(!This->basedoc.doc_obj)
+    if(!This->doc_obj)
         return NS_OK;
 
-    if(This == This->basedoc.doc_obj->basedoc.doc_node) {
+    if(This == This->doc_obj->doc_node) {
         /*
          * This should be done in the worker thread that parses HTML,
          * but we don't have such thread (Gecko parses HTML for us).
          */
-        parse_complete(This->basedoc.doc_obj);
+        parse_complete(This->doc_obj);
     }
 
     bind_event_scripts(This);
-    set_ready_state(This->basedoc.window, READYSTATE_INTERACTIVE);
+
+    This->window->performance_timing->dom_interactive_time = get_time_stamp();
+    set_ready_state(This->outer_window, READYSTATE_INTERACTIVE);
     return NS_OK;
 }
 
@@ -359,7 +361,7 @@ static nsresult run_insert_script(HTMLDocumentNode *doc, nsISupports *script_ifa
         if(!iter->script->parsed)
             doc_insert_script(window, iter->script, TRUE);
         IHTMLScriptElement_Release(&iter->script->IHTMLScriptElement_iface);
-        heap_free(iter);
+        free(iter);
     }
 
     IHTMLWindow2_Release(&window->base.IHTMLWindow2_iface);
@@ -375,6 +377,38 @@ static nsresult run_insert_script(HTMLDocumentNode *doc, nsISupports *script_ifa
     return NS_OK;
 }
 
+static void setup_doc_proxy(HTMLDocumentNode *doc)
+{
+    HTMLOuterWindow *outer_window = doc->outer_window ? doc->outer_window : doc->doc_obj->window;
+    HTMLInnerWindow *window = outer_window->base.inner_window;
+
+    /* If stray document while inner window not attached yet, let update_window_doc handle it. */
+    if(doc->window && doc->window != window)
+        return;
+
+    init_proxies(window);
+
+    if(!doc->node.event_target.dispex.proxy) {
+        IWineDispatchProxyCbPrivate *proxy = window->event_target.dispex.proxy;
+        if(proxy) {
+            HRESULT hres = proxy->lpVtbl->InitProxy(proxy, (IDispatch*)&doc->node.event_target.dispex.IDispatchEx_iface);
+            if(FAILED(hres))
+                ERR("InitProxy failed: %08lx\n", hres);
+        }
+    }
+}
+
+static void update_location_dispex(HTMLDocumentNode *doc)
+{
+    HTMLOuterWindow *outer_window = doc->window->base.outer_window;
+
+    if(outer_window->location.dispex.outer) {
+        if(outer_window->location.dispex.prototype)
+            IUnknown_Release(&outer_window->location.dispex.prototype->IUnknown_iface);
+        outer_window->location.dispex.prototype = get_legacy_prototype(doc->window, PROTO_ID_HTMLLocation, min(doc->document_mode, COMPAT_MODE_IE8));
+    }
+}
+
 /*
  * We may change document mode only in early stage of document lifetime.
  * Later attempts will not have an effect.
@@ -383,13 +417,23 @@ compat_mode_t lock_document_mode(HTMLDocumentNode *doc)
 {
     TRACE("%p: %d\n", doc, doc->document_mode);
 
-    doc->document_mode_locked = TRUE;
+    if(!doc->document_mode_locked) {
+        doc->document_mode_locked = TRUE;
+
+        /* Setup the proxy immediately since mode is decided. Proxies delegate the
+           methods so we can't rely on the delay init of the dispex to set them up. */
+        if(doc->document_mode >= COMPAT_MODE_IE9)
+            setup_doc_proxy(doc);
+
+        /* location is special case since it's tied to the outer window */
+        if(doc->window)
+            update_location_dispex(doc);
+    }
     return doc->document_mode;
 }
 
 static void set_document_mode(HTMLDocumentNode *doc, compat_mode_t document_mode, BOOL lock)
 {
-    dispex_static_data_t *dispex_data = &HTMLDocumentNode_dispex;
     compat_mode_t max_compat_mode;
 
     if(doc->document_mode_locked) {
@@ -399,7 +443,7 @@ static void set_document_mode(HTMLDocumentNode *doc, compat_mode_t document_mode
 
     TRACE("%p: %d\n", doc, document_mode);
 
-    max_compat_mode = doc->window && doc->window->base.outer_window
+    max_compat_mode = doc->window
         ? get_max_compat_mode(doc->window->base.outer_window->uri)
         : COMPAT_MODE_IE11;
     if(max_compat_mode < document_mode) {
@@ -411,25 +455,6 @@ static void set_document_mode(HTMLDocumentNode *doc, compat_mode_t document_mode
     doc->document_mode = document_mode;
     if(lock)
         lock_document_mode(doc);
-
-    if(doc->basedoc.doc_type != DOCTYPE_HTML)
-        return;
-
-    /* The prototype and dispex need to be changed since they depend on mode */
-    if(doc->window && doc->window->compat_prototypes[PROTO_ID_HTMLDocument]) {
-        IUnknown_Release(&doc->window->compat_prototypes[PROTO_ID_HTMLDocument]->IUnknown_iface);
-        doc->window->compat_prototypes[PROTO_ID_HTMLDocument] = NULL;
-    }
-
-    if(doc->node.event_target.dispex.prototype) {
-        IUnknown_Release(&doc->node.event_target.dispex.prototype->IUnknown_iface);
-        doc->node.event_target.dispex.prototype = NULL;
-    }
-
-    if(COMPAT_MODE_IE9 <= document_mode && document_mode < COMPAT_MODE_IE11)
-        dispex_data = &DocumentNode_dispex;
-
-    update_dispex(&doc->node.event_target.dispex, dispex_data, doc, document_mode);
 }
 
 static BOOL is_ua_compatible_delimiter(WCHAR c)
@@ -522,12 +547,12 @@ void process_document_response_headers(HTMLDocumentNode *doc, IBinding *binding)
 
         TRACE("size %lu\n", size);
 
-        header = heap_strdupAtoW(buf);
+        header = strdupAtoW(buf);
         if(header && parse_ua_compatible(header, &document_mode)) {
             TRACE("setting document mode %d\n", document_mode);
             set_document_mode(doc, document_mode, FALSE);
         }
-        heap_free(header);
+        free(header);
     }
 
     IWinInetHttpInfo_Release(http_info);
@@ -625,12 +650,12 @@ static nsrefcnt NSAPI nsRunnable_Release(nsIRunnable *iface)
     TRACE("(%p) ref=%ld\n", This, ref);
 
     if(!ref) {
-        htmldoc_release(&This->doc->basedoc);
+        IHTMLDOMNode_Release(&This->doc->node.IHTMLDOMNode_iface);
         if(This->arg1)
             nsISupports_Release(This->arg1);
         if(This->arg2)
             nsISupports_Release(This->arg2);
-        heap_free(This);
+        free(This);
     }
 
     return ref;
@@ -654,14 +679,14 @@ static void add_script_runner(HTMLDocumentNode *This, runnable_proc_t proc, nsIS
 {
     nsRunnable *runnable;
 
-    runnable = heap_alloc_zero(sizeof(*runnable));
+    runnable = calloc(1, sizeof(*runnable));
     if(!runnable)
         return;
 
     runnable->nsIRunnable_iface.lpVtbl = &nsRunnableVtbl;
     runnable->ref = 1;
 
-    htmldoc_addref(&This->basedoc);
+    IHTMLDOMNode_AddRef(&This->node.IHTMLDOMNode_iface);
     runnable->doc = This;
     runnable->proc = proc;
 
@@ -703,20 +728,20 @@ static nsresult NSAPI nsDocumentObserver_QueryInterface(nsIDocumentObserver *ifa
         return NS_NOINTERFACE;
     }
 
-    htmldoc_addref(&This->basedoc);
+    IHTMLDOMNode_AddRef(&This->node.IHTMLDOMNode_iface);
     return NS_OK;
 }
 
 static nsrefcnt NSAPI nsDocumentObserver_AddRef(nsIDocumentObserver *iface)
 {
     HTMLDocumentNode *This = impl_from_nsIDocumentObserver(iface);
-    return htmldoc_addref(&This->basedoc);
+    return IHTMLDOMNode_AddRef(&This->node.IHTMLDOMNode_iface);
 }
 
 static nsrefcnt NSAPI nsDocumentObserver_Release(nsIDocumentObserver *iface)
 {
     HTMLDocumentNode *This = impl_from_nsIDocumentObserver(iface);
-    return htmldoc_release(&This->basedoc);
+    return IHTMLDOMNode_Release(&This->node.IHTMLDOMNode_iface);
 }
 
 static void NSAPI nsDocumentObserver_CharacterDataWillChange(nsIDocumentObserver *iface,
@@ -877,7 +902,7 @@ static void NSAPI nsDocumentObserver_BindToDocument(nsIDocumentObserver *iface, 
                but it is not set by default on native, and the behavior is still different. This was tested
                by removing all iexplore.exe values from any FeatureControl subkeys, and renaming the test
                executable to iexplore.exe, which changed its default compat mode in such cases. */
-            if(This->window && This->window->base.outer_window && is_iexplore()) {
+            if(This->window && is_iexplore()) {
                 HTMLOuterWindow *window = This->window->base.outer_window;
                 DWORD zone;
                 HRESULT hres;
@@ -991,7 +1016,7 @@ void init_document_mutation(HTMLDocumentNode *doc)
 
     doc->nsIDocumentObserver_iface.lpVtbl = &nsDocumentObserverVtbl;
 
-    nsres = nsIDOMDocument_QueryInterface(doc->nsdoc, &IID_nsIDocument, (void**)&nsdoc);
+    nsres = nsIDOMDocument_QueryInterface(doc->dom_document, &IID_nsIDocument, (void**)&nsdoc);
     if(NS_FAILED(nsres)) {
         ERR("Could not get nsIDocument: %08lx\n", nsres);
         return;
@@ -1006,7 +1031,7 @@ void release_document_mutation(HTMLDocumentNode *doc)
     nsIDocument *nsdoc;
     nsresult nsres;
 
-    nsres = nsIDOMDocument_QueryInterface(doc->nsdoc, &IID_nsIDocument, (void**)&nsdoc);
+    nsres = nsIDOMDocument_QueryInterface(doc->dom_document, &IID_nsIDocument, (void**)&nsdoc);
     if(NS_FAILED(nsres)) {
         ERR("Could not get nsIDocument: %08lx\n", nsres);
         return;

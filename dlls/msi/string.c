@@ -75,24 +75,24 @@ static string_table *init_stringtable( int entries, UINT codepage )
     if (!validate_codepage( codepage ))
         return NULL;
 
-    st = msi_alloc( sizeof (string_table) );
+    st = malloc( sizeof(string_table) );
     if( !st )
         return NULL;
     if( entries < 1 )
         entries = 1;
 
-    st->strings = msi_alloc_zero( sizeof(struct msistring) * entries );
+    st->strings = calloc( entries, sizeof(struct msistring) );
     if( !st->strings )
     {
-        msi_free( st );
+        free( st );
         return NULL;
     }
 
-    st->sorted = msi_alloc( sizeof (UINT) * entries );
+    st->sorted = malloc( sizeof(UINT) * entries );
     if( !st->sorted )
     {
-        msi_free( st->strings );
-        msi_free( st );
+        free( st->strings );
+        free( st );
         return NULL;
     }
 
@@ -112,11 +112,11 @@ VOID msi_destroy_stringtable( string_table *st )
     {
         if( st->strings[i].persistent_refcount ||
             st->strings[i].nonpersistent_refcount )
-            msi_free( st->strings[i].data );
+            free( st->strings[i].data );
     }
-    msi_free( st->strings );
-    msi_free( st->sorted );
-    msi_free( st );
+    free( st->strings );
+    free( st->sorted );
+    free( st );
 }
 
 static int st_find_free_entry( string_table *st )
@@ -139,15 +139,13 @@ static int st_find_free_entry( string_table *st )
             return i;
 
     /* dynamically resize */
-    sz = st->maxcount + 1 + st->maxcount/2;
-    p = msi_realloc_zero( st->strings, sz * sizeof(struct msistring) );
-    if( !p )
-        return -1;
+    sz = st->maxcount + 1 + st->maxcount / 2;
+    if (!(p = realloc( st->strings, sz * sizeof(*p) ))) return -1;
+    memset( p + st->maxcount, 0, (sz - st->maxcount) * sizeof(*p) );
 
-    s = msi_realloc( st->sorted, sz*sizeof(UINT) );
-    if( !s )
+    if (!(s = realloc( st->sorted, sz * sizeof(*s) )))
     {
-        msi_free( p );
+        free( p );
         return -1;
     }
 
@@ -246,13 +244,13 @@ static UINT string2id( const string_table *st, const char *buffer, UINT *id )
 
     if (!(sz = MultiByteToWideChar( st->codepage, 0, buffer, -1, NULL, 0 )))
         return r;
-    str = msi_alloc( sz*sizeof(WCHAR) );
+    str = malloc( sz * sizeof(WCHAR) );
     if( !str )
         return ERROR_NOT_ENOUGH_MEMORY;
     MultiByteToWideChar( st->codepage, 0, buffer, -1, str, sz );
 
     r = msi_string2id( st, str, sz - 1, id );
-    msi_free( str );
+    free( str );
     return r;
 }
 
@@ -292,7 +290,7 @@ static int add_string( string_table *st, UINT n, const char *data, UINT len, USH
 
     /* allocate a new string */
     sz = MultiByteToWideChar( st->codepage, 0, data, len, NULL, 0 );
-    str = msi_alloc( (sz+1)*sizeof(WCHAR) );
+    str = malloc( (sz + 1) * sizeof(WCHAR) );
     if( !str )
         return -1;
     MultiByteToWideChar( st->codepage, 0, data, len, str, sz );
@@ -331,7 +329,7 @@ int msi_add_string( string_table *st, const WCHAR *data, int len, BOOL persisten
     /* allocate a new string */
     TRACE( "%s, n = %d len = %d\n", debugstr_wn(data, len), n, len );
 
-    str = msi_alloc( (len+1)*sizeof(WCHAR) );
+    str = malloc( (len + 1) * sizeof(WCHAR) );
     if( !str )
         return -1;
     memcpy( str, data, len*sizeof(WCHAR) );
@@ -546,19 +544,19 @@ string_table *msi_load_string_table( IStorage *stg, UINT *bytes_per_strref )
 
         r = add_string( st, n, data+offset, len, refs, TRUE );
         if( r != n )
-            ERR("Failed to add string %d\n", n );
+            ERR( "Failed to add string %lu\n", n );
         n++;
         offset += len;
     }
 
     if ( datasize != offset )
-        ERR("string table load failed! (%08x != %08x), please report\n", datasize, offset );
+        ERR( "string table load failed! (%u != %lu), please report\n", datasize, offset );
 
-    TRACE("Loaded %d strings\n", count);
+    TRACE( "loaded %lu strings\n", count );
 
 end:
-    msi_free( pool );
-    msi_free( data );
+    free( pool );
+    free( data );
 
     return st;
 }
@@ -577,13 +575,13 @@ UINT msi_save_string_table( const string_table *st, IStorage *storage, UINT *byt
 
     TRACE("%u %u %u\n", st->maxcount, datasize, poolsize );
 
-    pool = msi_alloc( poolsize );
+    pool = malloc( poolsize );
     if( ! pool )
     {
         WARN("Failed to alloc pool %d bytes\n", poolsize );
         goto err;
     }
-    data = msi_alloc( datasize );
+    data = malloc( datasize );
     if( ! data )
     {
         WARN("Failed to alloc data %d bytes\n", datasize );
@@ -664,8 +662,8 @@ UINT msi_save_string_table( const string_table *st, IStorage *storage, UINT *byt
     ret = ERROR_SUCCESS;
 
 err:
-    msi_free( data );
-    msi_free( pool );
+    free( data );
+    free( pool );
 
     return ret;
 }

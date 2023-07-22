@@ -375,7 +375,7 @@ static void test_RtlGetFullPathName_U(void)
     file_part = (WCHAR *)0xdeadbeef;
     lstrcpyW(rbufferW, deadbeefW);
     ret = pRtlGetFullPathName_U(NULL, MAX_PATH, rbufferW, &file_part);
-    ok(!ret, "Expected RtlGetFullPathName_U to return 0, got %u\n", ret);
+    ok(!ret, "Expected RtlGetFullPathName_U to return 0, got %lu\n", ret);
     ok(!lstrcmpW(rbufferW, deadbeefW),
        "Expected the output buffer to be untouched, got %s\n", wine_dbgstr_w(rbufferW));
     ok(file_part == (WCHAR *)0xdeadbeef ||
@@ -385,7 +385,7 @@ static void test_RtlGetFullPathName_U(void)
     file_part = (WCHAR *)0xdeadbeef;
     lstrcpyW(rbufferW, deadbeefW);
     ret = pRtlGetFullPathName_U(emptyW, MAX_PATH, rbufferW, &file_part);
-    ok(!ret, "Expected RtlGetFullPathName_U to return 0, got %u\n", ret);
+    ok(!ret, "Expected RtlGetFullPathName_U to return 0, got %lu\n", ret);
     ok(!lstrcmpW(rbufferW, deadbeefW),
        "Expected the output buffer to be untouched, got %s\n", wine_dbgstr_w(rbufferW));
     ok(file_part == (WCHAR *)0xdeadbeef ||
@@ -398,7 +398,7 @@ static void test_RtlGetFullPathName_U(void)
         pRtlMultiByteToUnicodeN(pathbufW , sizeof(pathbufW), NULL, test->path, strlen(test->path)+1 );
         ret = pRtlGetFullPathName_U( pathbufW,MAX_PATH, rbufferW, &file_part);
         ok( ret == len || (test->alt_rname && ret == strlen(test->alt_rname)*sizeof(WCHAR)),
-            "Wrong result %d/%d for \"%s\"\n", ret, len, test->path );
+            "Wrong result %ld/%d for \"%s\"\n", ret, len, test->path );
         ok(pRtlUnicodeToMultiByteN(rbufferA,MAX_PATH,&reslen,rbufferW,(lstrlenW(rbufferW) + 1) * sizeof(WCHAR)) == STATUS_SUCCESS,
            "RtlUnicodeToMultiByteN failed\n");
         ok(!lstrcmpA(rbufferA,test->rname) || (test->alt_rname && !lstrcmpA(rbufferA,test->alt_rname)),
@@ -580,7 +580,7 @@ static void test_RtlDosPathNameToNtPathName_U(void)
         if (pRtlDosPathNameToNtPathName_U_WithStatus)
         {
             status = pRtlDosPathNameToNtPathName_U_WithStatus(error_paths[i], &nameW, &file_part, NULL);
-            ok(status == STATUS_OBJECT_NAME_INVALID, "Got status %#x.\n", status);
+            ok(status == STATUS_OBJECT_NAME_INVALID, "Got status %#lx.\n", status);
         }
 
         winetest_pop_context();
@@ -600,7 +600,7 @@ static void test_RtlDosPathNameToNtPathName_U(void)
         {
             RtlFreeUnicodeString(&nameW);
             status = pRtlDosPathNameToNtPathName_U_WithStatus(tests[i].dos, &nameW, &file_part, NULL);
-            ok(status == STATUS_SUCCESS, "%s: Got status %#x.\n", debugstr_w(tests[i].dos), status);
+            ok(status == STATUS_SUCCESS, "%s: Got status %#lx.\n", debugstr_w(tests[i].dos), status);
         }
 
         ok(!wcscmp(nameW.Buffer, tests[i].nt)
@@ -627,7 +627,7 @@ static void test_RtlDosPathNameToNtPathName_U(void)
 
 static void test_nt_names(void)
 {
-    static const struct { const WCHAR *root, *name; NTSTATUS expect, broken; BOOL todo; } tests[] =
+    static const struct { const WCHAR *root, *name; NTSTATUS expect, broken; } tests[] =
     {
         { NULL, L"\\??\\C:\\windows\\system32\\kernel32.dll", STATUS_SUCCESS },
         { NULL, L"\\??\\C:\\\\windows\\system32\\kernel32.dll", STATUS_SUCCESS, STATUS_OBJECT_NAME_INVALID },
@@ -648,8 +648,14 @@ static void test_nt_names(void)
         { NULL, L"/??\\C:\\windows\\system32\\kernel32.dll", STATUS_OBJECT_PATH_SYNTAX_BAD },
         { NULL, L"\\??" L"/C:\\windows\\system32\\kernel32.dll", STATUS_OBJECT_PATH_NOT_FOUND },
         { NULL, L"\\??\\C:/windows\\system32\\kernel32.dll", STATUS_OBJECT_PATH_NOT_FOUND },
-        { NULL, L"\\??\\C:\\windows\\system32\\kernel32.dll\\", STATUS_OBJECT_NAME_INVALID, 0, TRUE },
-        { NULL, L"\\??\\C:\\windows\\system32\\kernel32.dll\\foo", STATUS_OBJECT_PATH_NOT_FOUND, 0, TRUE },
+        { NULL, L"\\??\\C:\\windows\\system32\\", STATUS_FILE_IS_A_DIRECTORY },
+        { NULL, L"\\??\\C:\\windows\\SyStEm32\\", STATUS_FILE_IS_A_DIRECTORY },
+        { NULL, L"\\??\\C:\\windows\\system32\\\\", STATUS_OBJECT_NAME_INVALID },
+        { NULL, L"\\??\\C:\\windows\\system32\\foobar\\", STATUS_OBJECT_NAME_NOT_FOUND },
+        { NULL, L"\\??\\C:\\windows\\system32\\kernel32.dll\\", STATUS_OBJECT_NAME_INVALID },
+        { NULL, L"\\??\\C:\\windows\\system32\\kernel32.dll\\foo", STATUS_OBJECT_PATH_NOT_FOUND },
+        { NULL, L"\\??\\C:\\windows\\system32\\Kernel32.Dll\\", STATUS_OBJECT_NAME_INVALID },
+        { NULL, L"\\??\\C:\\windows\\system32\\Kernel32.Dll\\foo", STATUS_OBJECT_PATH_NOT_FOUND },
         { NULL, L"\\??\\C:\\windows\\sys\001", STATUS_OBJECT_NAME_INVALID },
         { L"\\??\\", NULL, STATUS_OBJECT_NAME_INVALID },
         { L"\\??\\C:\\", NULL, STATUS_SUCCESS },
@@ -669,8 +675,13 @@ static void test_nt_names(void)
         { L"\\??\\C:\\windows", L"system32\\kernel32.dll", STATUS_SUCCESS },
         { L"\\??\\C:\\windows\\", L"system32\\kernel32.dll", STATUS_SUCCESS },
         { L"\\??\\C:\\windows\\", L"system32\\", STATUS_FILE_IS_A_DIRECTORY },
-        { L"\\??\\C:\\windows\\", L"system32\\kernel32.dll\\", STATUS_OBJECT_NAME_INVALID, 0, TRUE },
-        { L"\\??\\C:\\windows\\", L"system32\\kernel32.dll\\foo", STATUS_OBJECT_PATH_NOT_FOUND, 0, TRUE },
+        { L"\\??\\C:\\windows\\", L"SyStEm32\\", STATUS_FILE_IS_A_DIRECTORY },
+        { L"\\??\\C:\\windows\\", L"system32\\\\", STATUS_OBJECT_NAME_INVALID },
+        { L"\\??\\C:\\windows\\", L"system32\\foobar\\", STATUS_OBJECT_NAME_NOT_FOUND },
+        { L"\\??\\C:\\windows\\", L"system32\\kernel32.dll\\", STATUS_OBJECT_NAME_INVALID },
+        { L"\\??\\C:\\windows\\", L"system32\\kernel32.dll\\foo", STATUS_OBJECT_PATH_NOT_FOUND },
+        { L"\\??\\C:\\windows\\", L"system32\\Kernel32.Dll\\", STATUS_OBJECT_NAME_INVALID },
+        { L"\\??\\C:\\windows\\", L"system32\\Kernel32.Dll\\foo", STATUS_OBJECT_PATH_NOT_FOUND },
         { L"\\??\\C:\\windows\\", L"\\system32\\kernel32.dll", STATUS_INVALID_PARAMETER },
         { L"\\??\\C:\\windows\\", L"/system32\\kernel32.dll", STATUS_OBJECT_NAME_INVALID },
         { L"\\??\\C:\\windows\\", L".\\system32\\kernel32.dll", STATUS_OBJECT_NAME_INVALID, STATUS_OBJECT_PATH_NOT_FOUND },
@@ -709,9 +720,8 @@ static void test_nt_names(void)
         }
         if (attr.RootDirectory) NtClose( attr.RootDirectory );
         if (handle) NtClose( handle );
-        todo_wine_if( tests[i].todo )
         ok( status == tests[i].expect || broken( tests[i].broken && status == tests[i].broken ),
-            "%u: got %x / %x for %s + %s\n", i, status, tests[i].expect,
+            "%u: got %lx / %lx for %s + %s\n", i, status, tests[i].expect,
             debugstr_w( tests[i].root ), debugstr_w( tests[i].name ));
     }
 }

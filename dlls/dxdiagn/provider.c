@@ -84,7 +84,7 @@ static ULONG WINAPI IDxDiagProviderImpl_AddRef(IDxDiagProvider *iface)
     IDxDiagProviderImpl *This = impl_from_IDxDiagProvider(iface);
     ULONG refCount = InterlockedIncrement(&This->ref);
 
-    TRACE("(%p)->(ref before=%u)\n", This, refCount - 1);
+    TRACE("(%p)->(ref before=%lu)\n", This, refCount - 1);
 
     DXDIAGN_LockModule();
 
@@ -96,7 +96,7 @@ static ULONG WINAPI IDxDiagProviderImpl_Release(IDxDiagProvider *iface)
     IDxDiagProviderImpl *This = impl_from_IDxDiagProvider(iface);
     ULONG refCount = InterlockedDecrement(&This->ref);
 
-    TRACE("(%p)->(ref before=%u)\n", This, refCount + 1);
+    TRACE("(%p)->(ref before=%lu)\n", This, refCount + 1);
 
     if (!refCount) {
         free_information_tree(This->info_root);
@@ -614,7 +614,7 @@ static HRESULT build_systeminfo_tree(IDxDiagContainerImpl_Container *node)
     WCHAR buffer[MAX_PATH], computer_name[MAX_COMPUTERNAME_LENGTH + 1], print_buf[200], localized_pagefile_fmt[200];
     DWORD_PTR args[2];
 
-    hr = add_ui4_property(node, L"dwDirectXVersionMajor", 9);
+    hr = add_ui4_property(node, L"dwDirectXVersionMajor", 12);
     if (FAILED(hr))
         return hr;
 
@@ -622,15 +622,15 @@ static HRESULT build_systeminfo_tree(IDxDiagContainerImpl_Container *node)
     if (FAILED(hr))
         return hr;
 
-    hr = add_bstr_property(node, L"szDirectXVersionLetter", L"c");
+    hr = add_bstr_property(node, L"szDirectXVersionLetter", L" ");
     if (FAILED(hr))
         return hr;
 
-    hr = add_bstr_property(node, L"szDirectXVersionEnglish", L"4.09.0000.0904");
+    hr = add_bstr_property(node, L"szDirectXVersionEnglish", L"");
     if (FAILED(hr))
         return hr;
 
-    hr = add_bstr_property(node, L"szDirectXVersionLongEnglish", L"= \"DirectX 9.0c (4.09.0000.0904)");
+    hr = add_bstr_property(node, L"szDirectXVersionLongEnglish", L"DirectX 12");
     if (FAILED(hr))
         return hr;
 
@@ -685,7 +685,7 @@ static HRESULT build_systeminfo_tree(IDxDiagContainerImpl_Container *node)
         return hr;
 
     /* FIXME: Roundoff should not be done with truncated division. */
-    swprintf(print_buf, ARRAY_SIZE(print_buf), L"%uMB RAM", (DWORD)(msex.ullTotalPhys / (1024 * 1024)));
+    swprintf(print_buf, ARRAY_SIZE(print_buf), L"%I64uMB RAM", msex.ullTotalPhys / (1024 * 1024));
     hr = add_bstr_property(node, L"szPhysicalMemoryEnglish", print_buf);
     if (FAILED(hr))
         return hr;
@@ -825,7 +825,7 @@ static const WCHAR *vendor_id_to_manufacturer_string(DWORD vendor_id)
             return vendors[i].name;
     }
 
-    FIXME("Unknown PCI vendor ID 0x%04x.\n", vendor_id);
+    FIXME("Unknown PCI vendor ID 0x%04lx.\n", vendor_id);
 
     return L"Unknown";
 }

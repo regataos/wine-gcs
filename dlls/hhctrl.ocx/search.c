@@ -32,10 +32,10 @@ static SearchItem *alloc_search_item(WCHAR *title, const WCHAR *filename)
     int filename_len = filename ? (lstrlenW(filename)+1)*sizeof(WCHAR) : 0;
     SearchItem *item;
 
-    item = heap_alloc_zero(sizeof(SearchItem));
+    item = calloc(1, sizeof(SearchItem));
     if(filename)
     {
-        item->filename = heap_alloc(filename_len);
+        item->filename = malloc(filename_len);
         memcpy(item->filename, filename, filename_len);
     }
     item->title = title; /* Already allocated */
@@ -72,7 +72,7 @@ static void fill_search_tree(HWND hwndList, SearchItem *item)
  */
 static WCHAR *SearchCHM_File(IStorage *pStorage, const WCHAR *file, const char *needle)
 {
-    char *buffer = heap_alloc(BLOCK_SIZE);
+    char *buffer = malloc(BLOCK_SIZE);
     strbuf_t content, node, node_name;
     IStream *temp_stream = NULL;
     DWORD i, buffer_size = 0;
@@ -83,7 +83,7 @@ static WCHAR *SearchCHM_File(IStorage *pStorage, const WCHAR *file, const char *
 
     hres = IStorage_OpenStream(pStorage, file, NULL, STGM_READ, 0, &temp_stream);
     if(FAILED(hres)) {
-        FIXME("Could not open '%s' stream: %08x\n", debugstr_w(file), hres);
+        FIXME("Could not open '%s' stream: %08lx\n", debugstr_w(file), hres);
         goto cleanup;
     }
 
@@ -105,12 +105,12 @@ static WCHAR *SearchCHM_File(IStorage *pStorage, const WCHAR *file, const char *
             if(!stricmp(node_name.buf, "title"))
             {
                 int wlen = MultiByteToWideChar(CP_ACP, 0, text, textlen, NULL, 0);
-                title = heap_alloc((wlen+1)*sizeof(WCHAR));
+                title = malloc((wlen + 1) * sizeof(WCHAR));
                 MultiByteToWideChar(CP_ACP, 0, text, textlen, title, wlen);
                 title[wlen] = 0;
             }
 
-            buffer = heap_realloc(buffer, buffer_size + textlen + 1);
+            buffer = realloc(buffer, buffer_size + textlen + 1);
             memcpy(&buffer[buffer_size], text, textlen);
             buffer[buffer_size + textlen] = '\0';
             buffer_size += textlen;
@@ -135,12 +135,12 @@ static WCHAR *SearchCHM_File(IStorage *pStorage, const WCHAR *file, const char *
     strbuf_free(&node_name);
 
 cleanup:
-    heap_free(buffer);
+    free(buffer);
     if(temp_stream)
         IStream_Release(temp_stream);
     if(!found)
     {
-        heap_free(title);
+        free(title);
         return NULL;
     }
     return title;
@@ -162,7 +162,7 @@ static SearchItem *SearchCHM_Storage(SearchItem *item, IStorage *pStorage,
     hres = IStorage_EnumElements(pStorage, 0, NULL, 0, &elem);
     if(hres != S_OK)
     {
-        FIXME("Could not enumerate '/' storage elements: %08x\n", hres);
+        FIXME("Could not enumerate '/' storage elements: %08lx\n", hres);
         return NULL;
     }
     while (IEnumSTATSTG_Next(elem, 1, &entries, &retr) == NOERROR)
@@ -206,7 +206,7 @@ static SearchItem *SearchCHM_Folder(SearchItem *item, IStorage *pStorage,
     hres = IStorage_OpenStorage(pStorage, folder, NULL, STGM_READ, NULL, 0, &temp_storage);
     if(FAILED(hres))
     {
-        FIXME("Could not open '%s' storage object: %08x\n", debugstr_w(folder), hres);
+        FIXME("Could not open '%s' storage object: %08lx\n", debugstr_w(folder), hres);
         return NULL;
     }
     item = SearchCHM_Storage(item, temp_storage, needle);
@@ -238,7 +238,7 @@ void ReleaseSearch(HHInfo *info)
 
     info->search.root = NULL;
     while(item) {
-        heap_free(item->filename);
+        free(item->filename);
         item = item->next;
     }
 }

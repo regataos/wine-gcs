@@ -66,7 +66,7 @@ static void __cdecl test_invalid_parameter_handler(const wchar_t *expression,
     ok(function == NULL, "function is not NULL\n");
     ok(file == NULL, "file is not NULL\n");
     ok(line == 0, "line = %u\n", line);
-    ok(arg == 0, "arg = %lx\n", (UINT_PTR)arg);
+    ok(arg == 0, "arg = %Ix\n", arg);
 }
 
 #ifdef __i386__
@@ -237,6 +237,9 @@ static int (__cdecl *p__memicmp_l)(const char*, const char*, size_t,_locale_t);
 static char* (__cdecl *p_setlocale)(int, const char*);
 static size_t (__cdecl *p___strncnt)(const char*, size_t);
 
+static int (__cdecl *p_strcmp)(const char *, const char *);
+static int (__cdecl *p_strncmp)(const char *, const char *, size_t);
+
 /* make sure we use the correct errno */
 #undef errno
 #define errno (*p_errno())
@@ -251,7 +254,7 @@ static BOOL init(void)
     SetLastError(0xdeadbeef);
     hcrt = LoadLibraryA("msvcr100.dll");
     if (!hcrt) {
-        win_skip("msvcr100.dll not installed (got %d)\n", GetLastError());
+        win_skip("msvcr100.dll not installed (got %ld)\n", GetLastError());
         return FALSE;
     }
 
@@ -276,6 +279,9 @@ static BOOL init(void)
     SET(p_Context_Id, "?Id@Context@Concurrency@@SAIXZ");
     SET(p_CurrentScheduler_Detach, "?Detach@CurrentScheduler@Concurrency@@SAXXZ");
     SET(p_CurrentScheduler_Id, "?Id@CurrentScheduler@Concurrency@@SAIXZ");
+
+    SET(p_strcmp, "strcmp");
+    SET(p_strncmp, "strncmp");
 
     if(sizeof(void*) == 8) { /* 64-bit initialization */
         SET(pSpinWait_ctor_yield, "??0?$_SpinWait@$00@details@Concurrency@@QEAA@P6AXXZ@Z");
@@ -691,34 +697,34 @@ static void test__SpinWait(void)
     CHECK_CALLED(yield_func);
 
     ul = call_func1(pSpinWait__NumberOfSpins, &sp);
-    ok(ul == 1, "_SpinWait::_NumberOfSpins returned %u\n", ul);
+    ok(ul == 1, "_SpinWait::_NumberOfSpins returned %lu\n", ul);
 
     sp.spin = 2;
     b = call_func1(pSpinWait__ShouldSpinAgain, &sp);
     ok(b, "_SpinWait::_ShouldSpinAgain returned %x\n", b);
-    ok(sp.spin == 1, "sp.spin = %u\n", sp.spin);
+    ok(sp.spin == 1, "sp.spin = %lu\n", sp.spin);
     b = call_func1(pSpinWait__ShouldSpinAgain, &sp);
     ok(!b, "_SpinWait::_ShouldSpinAgain returned %x\n", b);
-    ok(sp.spin == 0, "sp.spin = %u\n", sp.spin);
+    ok(sp.spin == 0, "sp.spin = %lu\n", sp.spin);
     b = call_func1(pSpinWait__ShouldSpinAgain, &sp);
     ok(b, "_SpinWait::_ShouldSpinAgain returned %x\n", b);
-    ok(sp.spin == -1, "sp.spin = %u\n", sp.spin);
+    ok(sp.spin == -1, "sp.spin = %lu\n", sp.spin);
 
     call_func2(pSpinWait__SetSpinCount, &sp, 2);
     b = call_func1(pSpinWait__SpinOnce, &sp);
     ok(b, "_SpinWait::_SpinOnce returned %x\n", b);
-    ok(sp.spin == 1, "sp.spin = %u\n", sp.spin);
+    ok(sp.spin == 1, "sp.spin = %lu\n", sp.spin);
     b = call_func1(pSpinWait__SpinOnce, &sp);
     ok(b, "_SpinWait::_SpinOnce returned %x\n", b);
-    ok(sp.spin == 0, "sp.spin = %u\n", sp.spin);
+    ok(sp.spin == 0, "sp.spin = %lu\n", sp.spin);
     SET_EXPECT(yield_func);
     b = call_func1(pSpinWait__SpinOnce, &sp);
     ok(b, "_SpinWait::_SpinOnce returned %x\n", b);
-    ok(sp.spin == 0, "sp.spin = %u\n", sp.spin);
+    ok(sp.spin == 0, "sp.spin = %lu\n", sp.spin);
     CHECK_CALLED(yield_func);
     b = call_func1(pSpinWait__SpinOnce, &sp);
     ok(!b, "_SpinWait::_SpinOnce returned %x\n", b);
-    ok(sp.spin==0 || sp.spin==4000, "sp.spin = %u\n", sp.spin);
+    ok(sp.spin==0 || sp.spin==4000, "sp.spin = %lu\n", sp.spin);
 
     call_func1(pSpinWait_dtor, &sp);
 }
@@ -763,7 +769,7 @@ static void test_reader_writer_lock(void)
 
     call_func1(preader_writer_lock_lock, rw_lock);
     thread = CreateThread(NULL, 0, lock_read_thread, rw_lock, 0, NULL);
-    ok(thread != NULL, "CreateThread failed: %d\n", GetLastError());
+    ok(thread != NULL, "CreateThread failed: %ld\n", GetLastError());
     WaitForSingleObject(thread, INFINITE);
     ok(GetExitCodeThread(thread, &d), "GetExitCodeThread failed\n");
     ok(!d, "reader_writer_lock::try_lock_read succeeded on already locked object\n");
@@ -772,7 +778,7 @@ static void test_reader_writer_lock(void)
 
     call_func1(preader_writer_lock_lock_read, rw_lock);
     thread = CreateThread(NULL, 0, lock_read_thread, rw_lock, 0, NULL);
-    ok(thread != NULL, "CreateThread failed: %d\n", GetLastError());
+    ok(thread != NULL, "CreateThread failed: %ld\n", GetLastError());
     WaitForSingleObject(thread, INFINITE);
     ok(GetExitCodeThread(thread, &d), "GetExitCodeThread failed\n");
     ok(d, "reader_writer_lock::try_lock_read failed on object locked for reading\n");
@@ -951,7 +957,7 @@ static void test_ExternalContextBase(void)
     ok(id == 0, "Context::Id() = %u\n", id);
 
     thread = CreateThread(NULL, 0, external_context_thread, NULL, 0, NULL);
-    ok(thread != NULL, "CreateThread failed: %d\n", GetLastError());
+    ok(thread != NULL, "CreateThread failed: %ld\n", GetLastError());
     WaitForSingleObject(thread, INFINITE);
     CloseHandle(thread);
 }
@@ -1106,6 +1112,46 @@ static void test___strncnt(void)
     }
 }
 
+static void test_strcmp(void)
+{
+    int ret = p_strcmp( "abc", "abcd" );
+    ok( ret == -1, "wrong ret %d\n", ret );
+    ret = p_strcmp( "", "abc" );
+    ok( ret == -1, "wrong ret %d\n", ret );
+    ret = p_strcmp( "abc", "ab\xa0" );
+    ok( ret == -1, "wrong ret %d\n", ret );
+    ret = p_strcmp( "ab\xb0", "ab\xa0" );
+    ok( ret == 1, "wrong ret %d\n", ret );
+    ret = p_strcmp( "ab\xc2", "ab\xc2" );
+    ok( ret == 0, "wrong ret %d\n", ret );
+
+    ret = p_strncmp( "abc", "abcd", 3 );
+    ok( ret == 0, "wrong ret %d\n", ret );
+#ifdef _WIN64
+    ret = p_strncmp( "", "abc", 3 );
+    ok( ret == -1, "wrong ret %d\n", ret );
+    ret = p_strncmp( "abc", "ab\xa0", 4 );
+    ok( ret == -1, "wrong ret %d\n", ret );
+    ret = p_strncmp( "ab\xb0", "ab\xa0", 3 );
+    ok( ret == 1, "wrong ret %d\n", ret );
+#else
+    ret = p_strncmp( "", "abc", 3 );
+    ok( ret == 0 - 'a', "wrong ret %d\n", ret );
+    ret = p_strncmp( "abc", "ab\xa0", 4 );
+    ok( ret == 'c' - 0xa0, "wrong ret %d\n", ret );
+    ret = p_strncmp( "ab\xb0", "ab\xa0", 3 );
+    ok( ret == 0xb0 - 0xa0, "wrong ret %d\n", ret );
+#endif
+    ret = p_strncmp( "ab\xb0", "ab\xa0", 2 );
+    ok( ret == 0, "wrong ret %d\n", ret );
+    ret = p_strncmp( "ab\xc2", "ab\xc2", 3 );
+    ok( ret == 0, "wrong ret %d\n", ret );
+    ret = p_strncmp( "abc", "abd", 0 );
+    ok( ret == 0, "wrong ret %d\n", ret );
+    ret = p_strncmp( "abc", "abc", 12 );
+    ok( ret == 0, "wrong ret %d\n", ret );
+}
+
 START_TEST(msvcr100)
 {
     if (!init())
@@ -1126,4 +1172,5 @@ START_TEST(msvcr100)
     test__memicmp_l();
     test_setlocale();
     test___strncnt();
+    test_strcmp();
 }

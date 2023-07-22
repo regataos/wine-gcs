@@ -40,7 +40,6 @@
 #include "wine/wined3d.h"
 
 #define D3D9_MAX_VERTEX_SHADER_CONSTANTF 256
-#define D3D9_MAX_VERTEX_SHADER_CONSTANTF_SWVP 8192
 #define D3D9_MAX_TEXTURE_UNITS 20
 #define D3D9_MAX_STREAMS 16
 
@@ -72,7 +71,7 @@ struct d3d9
 };
 
 void d3d9_caps_from_wined3dcaps(const struct d3d9 *d3d9, unsigned int adapter_ordinal,
-        D3DCAPS9 *caps, const struct wined3d_caps *wined3d_caps, DWORD flags) DECLSPEC_HIDDEN;
+        D3DCAPS9 *caps, const struct wined3d_caps *wined3d_caps) DECLSPEC_HIDDEN;
 BOOL d3d9_init(struct d3d9 *d3d9, BOOL extended) DECLSPEC_HIDDEN;
 
 struct fvf_declaration
@@ -101,12 +100,7 @@ struct d3d9_device
     struct fvf_declaration *fvf_decls;
     UINT fvf_decl_count, fvf_decl_size;
 
-    struct wined3d_buffer *vertex_buffer;
-    UINT vertex_buffer_size;
-    UINT vertex_buffer_pos;
-    struct wined3d_buffer *index_buffer;
-    UINT index_buffer_size;
-    UINT index_buffer_pos;
+    struct wined3d_streaming_buffer vertex_buffer, index_buffer;
 
     struct d3d9_surface *render_targets[D3D_MAX_SIMULTANEOUS_RENDERTARGETS];
 
@@ -212,9 +206,9 @@ struct d3d9_indexbuffer
     struct d3d9_resource resource;
     struct wined3d_buffer *wined3d_buffer;
     IDirect3DDevice9Ex *parent_device;
-    struct wined3d_buffer *draw_buffer;
     enum wined3d_format_id format;
     DWORD usage;
+    bool sysmem;
 };
 
 HRESULT indexbuffer_init(struct d3d9_indexbuffer *buffer, struct d3d9_device *device,
@@ -225,7 +219,7 @@ struct d3d9_texture
 {
     IDirect3DBaseTexture9 IDirect3DBaseTexture9_iface;
     struct d3d9_resource resource;
-    struct wined3d_texture *wined3d_texture;
+    struct wined3d_texture *wined3d_texture, *draw_texture;
     struct d3d9_device *parent_device;
     struct list rtv_list;
     DWORD usage;
@@ -234,12 +228,18 @@ struct d3d9_texture
     D3DTEXTUREFILTERTYPE autogen_filter_type;
 };
 
-HRESULT cubetexture_init(struct d3d9_texture *texture, struct d3d9_device *device,
-        UINT edge_length, UINT levels, DWORD usage, D3DFORMAT format, D3DPOOL pool) DECLSPEC_HIDDEN;
-HRESULT texture_init(struct d3d9_texture *texture, struct d3d9_device *device,
-        UINT width, UINT height, UINT levels, DWORD usage, D3DFORMAT format, D3DPOOL pool) DECLSPEC_HIDDEN;
-HRESULT volumetexture_init(struct d3d9_texture *texture, struct d3d9_device *device,
-        UINT width, UINT height, UINT depth, UINT levels, DWORD usage, D3DFORMAT format, D3DPOOL pool) DECLSPEC_HIDDEN;
+HRESULT d3d9_texture_2d_init(struct d3d9_texture *texture, struct d3d9_device *device, unsigned int width,
+        unsigned int height, unsigned int level_count, DWORD usage, D3DFORMAT format, D3DPOOL pool);
+HRESULT d3d9_texture_3d_init(struct d3d9_texture *texture, struct d3d9_device *device, unsigned int width,
+        unsigned int height, unsigned int depth, unsigned int level_count, DWORD usage, D3DFORMAT format, D3DPOOL pool);
+HRESULT d3d9_texture_cube_init(struct d3d9_texture *texture, struct d3d9_device *device,
+        unsigned int edge_length, unsigned int level_count, DWORD usage, D3DFORMAT format, D3DPOOL pool);
+
+static inline struct wined3d_texture *d3d9_texture_get_draw_texture(struct d3d9_texture *texture)
+{
+    return texture->draw_texture ? texture->draw_texture : texture->wined3d_texture;
+}
+
 struct d3d9_texture *unsafe_impl_from_IDirect3DBaseTexture9(IDirect3DBaseTexture9 *iface) DECLSPEC_HIDDEN;
 void d3d9_texture_flag_auto_gen_mipmap(struct d3d9_texture *texture) DECLSPEC_HIDDEN;
 void d3d9_texture_gen_auto_mipmap(struct d3d9_texture *texture) DECLSPEC_HIDDEN;
@@ -324,6 +324,9 @@ static inline DWORD d3dusage_from_wined3dusage(unsigned int wined3d_usage, unsig
 
 static inline D3DPOOL d3dpool_from_wined3daccess(unsigned int access, unsigned int usage)
 {
+    if (usage & WINED3DUSAGE_MANAGED)
+        return D3DPOOL_MANAGED;
+
     switch (access & (WINED3D_RESOURCE_ACCESS_GPU | WINED3D_RESOURCE_ACCESS_CPU))
     {
         default:
@@ -379,6 +382,16 @@ static inline unsigned int wined3daccess_from_d3dpool(D3DPOOL pool, unsigned int
     return access;
 }
 
+static inline unsigned int wined3d_usage_from_d3d(D3DPOOL pool, DWORD usage)
+{
+    usage &= WINED3DUSAGE_MASK;
+    if (pool == D3DPOOL_SCRATCH)
+        usage |= WINED3DUSAGE_SCRATCH;
+    else if (pool == D3DPOOL_MANAGED)
+        usage |= WINED3DUSAGE_MANAGED;
+    return usage;
+}
+
 static inline unsigned int wined3d_bind_flags_from_d3d9_usage(DWORD usage)
 {
     unsigned int bind_flags = 0;
@@ -389,11 +402,6 @@ static inline unsigned int wined3d_bind_flags_from_d3d9_usage(DWORD usage)
         bind_flags |= WINED3D_BIND_DEPTH_STENCIL;
 
     return bind_flags;
-}
-
-static inline DWORD wined3dusage_from_d3dusage(unsigned int usage)
-{
-    return usage & WINED3DUSAGE_MASK;
 }
 
 static inline enum wined3d_multisample_type wined3d_multisample_type_from_d3d(D3DMULTISAMPLE_TYPE type)

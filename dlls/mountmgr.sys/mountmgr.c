@@ -46,14 +46,12 @@ struct mount_point
 static struct list mount_points_list = LIST_INIT(mount_points_list);
 static HKEY mount_key;
 
-unixlib_handle_t mountmgr_handle = 0;
-
 void set_mount_point_id( struct mount_point *mount, const void *id, unsigned int id_len, int drive )
 {
     WCHAR logicalW[] = {'\\','\\','.','\\','a',':',0};
-    RtlFreeHeap( GetProcessHeap(), 0, mount->id );
+    free( mount->id );
     mount->id_len = max( MIN_ID_LEN, id_len );
-    if ((mount->id = RtlAllocateHeap( GetProcessHeap(), HEAP_ZERO_MEMORY, mount->id_len )))
+    if ((mount->id = calloc( mount->id_len, 1 )))
     {
         memcpy( mount->id, id, id_len );
         if (drive < 0)
@@ -74,7 +72,7 @@ static struct mount_point *add_mount_point( DEVICE_OBJECT *device, UNICODE_STRIN
     WCHAR *str;
     UINT len = (lstrlenW(link) + 1) * sizeof(WCHAR) + device_name->Length + sizeof(WCHAR);
 
-    if (!(mount = RtlAllocateHeap( GetProcessHeap(), 0, sizeof(*mount) + len ))) return NULL;
+    if (!(mount = malloc( sizeof(*mount) + len ))) return NULL;
 
     str = (WCHAR *)(mount + 1);
     lstrcpyW( str, link );
@@ -125,8 +123,8 @@ void delete_mount_point( struct mount_point *mount )
     list_remove( &mount->entry );
     RegDeleteValueW( mount_key, mount->link.Buffer );
     IoDeleteSymbolicLink( &mount->link );
-    RtlFreeHeap( GetProcessHeap(), 0, mount->id );
-    RtlFreeHeap( GetProcessHeap(), 0, mount );
+    free( mount->id );
+    free( mount );
 }
 
 /* check if a given mount point matches the requested specs */
@@ -195,7 +193,7 @@ static NTSTATUS query_mount_points( void *buff, SIZE_T insize,
         return STATUS_BUFFER_OVERFLOW;
     }
 
-    input = HeapAlloc( GetProcessHeap(), 0, insize );
+    input = malloc( insize );
     if (!input)
         return STATUS_NO_MEMORY;
     memcpy( input, buff, insize );
@@ -226,7 +224,7 @@ static NTSTATUS query_mount_points( void *buff, SIZE_T insize,
     }
     info->Size = pos;
     iosb->Information = pos;
-    HeapFree( GetProcessHeap(), 0, input );
+    free( input );
     return STATUS_SUCCESS;
 }
 
@@ -258,7 +256,7 @@ static NTSTATUS define_unix_drive( const void *in_buff, SIZE_T insize )
     {
         enum device_type type = DEVICE_UNKNOWN;
 
-        TRACE( "defining %c: dev %s mount %s type %u\n",
+        TRACE( "defining %c: dev %s mount %s type %lu\n",
                letter, debugstr_a(device), debugstr_a(mount_point), input->type );
         switch (input->type)
         {
@@ -307,7 +305,7 @@ static NTSTATUS define_shell_folder( const void *in_buff, SIZE_T insize )
 
     for (;;)
     {
-        if (!(buffer = HeapAlloc( GetProcessHeap(), 0, size )))
+        if (!(buffer = malloc( size )))
         {
             status = STATUS_NO_MEMORY;
             goto done;
@@ -316,12 +314,12 @@ static NTSTATUS define_shell_folder( const void *in_buff, SIZE_T insize )
         if (status == STATUS_NO_SUCH_FILE) status = STATUS_SUCCESS;
         if (status == STATUS_SUCCESS) break;
         if (status != STATUS_BUFFER_TOO_SMALL) goto done;
-        HeapFree( GetProcessHeap(), 0, buffer );
+        free( buffer );
     }
 
     if (input->create_backup)
     {
-        if (!(backup = HeapAlloc( GetProcessHeap(), 0, strlen(buffer) + sizeof(".backup" ) )))
+        if (!(backup = malloc( strlen(buffer) + sizeof(".backup" ) )))
         {
             status = STATUS_NO_MEMORY;
             goto done;
@@ -336,8 +334,8 @@ static NTSTATUS define_shell_folder( const void *in_buff, SIZE_T insize )
     status = MOUNTMGR_CALL( set_shell_folder, &params );
 
 done:
-    HeapFree( GetProcessHeap(), 0, buffer );
-    HeapFree( GetProcessHeap(), 0, backup );
+    free( buffer );
+    free( backup );
     return status;
 }
 
@@ -357,7 +355,7 @@ static NTSTATUS query_shell_folder( void *buff, SIZE_T insize, SIZE_T outsize, I
 
     for (;;)
     {
-        if (!(buffer = HeapAlloc( GetProcessHeap(), 0, size ))) return STATUS_NO_MEMORY;
+        if (!(buffer = malloc( size ))) return STATUS_NO_MEMORY;
         status = wine_nt_to_unix_file_name( &attr, buffer, &size, FILE_OPEN );
         if (!status)
         {
@@ -367,10 +365,10 @@ static NTSTATUS query_shell_folder( void *buff, SIZE_T insize, SIZE_T outsize, I
             break;
         }
         if (status != STATUS_BUFFER_TOO_SMALL) break;
-        HeapFree( GetProcessHeap(), 0, buffer );
+        free( buffer );
     }
 
-    HeapFree( GetProcessHeap(), 0, buffer );
+    free( buffer );
     return status;
 }
 
@@ -474,7 +472,7 @@ static NTSTATUS WINAPI mountmgr_ioctl( DEVICE_OBJECT *device, IRP *irp )
     NTSTATUS status;
     ULONG info = 0;
 
-    TRACE( "ioctl %x insize %u outsize %u\n",
+    TRACE( "ioctl %lx insize %lu outsize %lu\n",
            irpsp->Parameters.DeviceIoControl.IoControlCode,
            irpsp->Parameters.DeviceIoControl.InputBufferLength,
            irpsp->Parameters.DeviceIoControl.OutputBufferLength );
@@ -599,7 +597,7 @@ static NTSTATUS WINAPI mountmgr_ioctl( DEVICE_OBJECT *device, IRP *irp )
         else status = STATUS_INVALID_PARAMETER;
         break;
     default:
-        FIXME( "ioctl %x not supported\n", irpsp->Parameters.DeviceIoControl.IoControlCode );
+        FIXME( "ioctl %lx not supported\n", irpsp->Parameters.DeviceIoControl.IoControlCode );
         status = STATUS_NOT_SUPPORTED;
         break;
     }
@@ -620,6 +618,27 @@ static DWORD WINAPI run_loop_thread( void *arg )
     return MOUNTMGR_CALL( run_loop, &params );
 }
 
+static DWORD WINAPI registry_flush_thread( void *arg )
+{
+    UNICODE_STRING name = RTL_CONSTANT_STRING( L"\\Registry" );
+    OBJECT_ATTRIBUTES attr;
+    HANDLE root;
+
+    InitializeObjectAttributes( &attr, &name, 0, 0, NULL );
+    if (NtOpenKeyEx( &root, MAXIMUM_ALLOWED, &attr, 0 ))
+    {
+        ERR( "Failed opening root registry key.\n" );
+        return 0;
+    }
+
+    for (;;)
+    {
+        Sleep( 30000 );
+        if (NtFlushKey( root )) ERR( "Failed flushing registry.\n" );
+    }
+
+    return 0;
+}
 
 /* main entry point for the mount point manager driver */
 NTSTATUS WINAPI DriverEntry( DRIVER_OBJECT *driver, UNICODE_STRING *path )
@@ -627,7 +646,6 @@ NTSTATUS WINAPI DriverEntry( DRIVER_OBJECT *driver, UNICODE_STRING *path )
 #ifdef _WIN64
     HKEY wow64_ports_key = NULL;
 #endif
-    void *instance;
     UNICODE_STRING nameW, linkW;
     DEVICE_OBJECT *device;
     HKEY devicemap_key;
@@ -636,9 +654,7 @@ NTSTATUS WINAPI DriverEntry( DRIVER_OBJECT *driver, UNICODE_STRING *path )
 
     TRACE( "%s\n", debugstr_w(path->Buffer) );
 
-    RtlPcToFileHeader( DriverEntry, &instance );
-    status = NtQueryVirtualMemory( GetCurrentProcess(), instance, MemoryWineUnixFuncs,
-                                   &mountmgr_handle, sizeof(mountmgr_handle), NULL );
+    status = __wine_init_unix_call();
     if (status) return status;
 
     driver->MajorFunction[IRP_MJ_DEVICE_CONTROL] = mountmgr_ioctl;
@@ -649,7 +665,7 @@ NTSTATUS WINAPI DriverEntry( DRIVER_OBJECT *driver, UNICODE_STRING *path )
         status = IoCreateSymbolicLink( &linkW, &nameW );
     if (status)
     {
-        FIXME( "failed to create device error %x\n", status );
+        FIXME( "failed to create device error %lx\n", status );
         return status;
     }
 
@@ -665,6 +681,7 @@ NTSTATUS WINAPI DriverEntry( DRIVER_OBJECT *driver, UNICODE_STRING *path )
 
     thread = CreateThread( NULL, 0, device_op_thread, NULL, 0, NULL );
     CloseHandle( CreateThread( NULL, 0, run_loop_thread, thread, 0, NULL ));
+    CloseHandle( CreateThread( NULL, 0, registry_flush_thread, thread, 0, NULL ));
 
 #ifdef _WIN64
     /* create a symlink so that the Wine port overrides key can be edited with 32-bit reg or regedit */

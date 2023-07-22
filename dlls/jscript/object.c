@@ -76,7 +76,7 @@ HRESULT Object_toString(script_ctx_t *ctx, jsval_t vthis, WORD flags, unsigned a
         if(ctx->version < SCRIPTLANGUAGEVERSION_ES5)
             str = L"[object Object]";
         else
-            str = is_null(vthis) ? L"[object Null]" : L"[object Object]";
+            str = is_null(vthis) ? L"[object Null]" : L"[object Undefined]";
         goto set_output;
     }
 
@@ -464,7 +464,7 @@ done:
 
 static void Object_destructor(jsdisp_t *dispex)
 {
-    heap_free(dispex);
+    free(dispex);
 }
 
 static const builtin_prop_t Object_props[] = {
@@ -1154,13 +1154,13 @@ HRESULT create_object(script_ctx_t *ctx, jsdisp_t *constr, jsdisp_t **ret)
     jsdisp_t *object;
     HRESULT hres;
 
-    object = heap_alloc_zero(sizeof(jsdisp_t));
+    object = calloc(1, sizeof(jsdisp_t));
     if(!object)
         return E_OUTOFMEMORY;
 
     hres = init_dispex_from_constr(object, ctx, &ObjectInst_info, constr ? constr : ctx->object_constr);
     if(FAILED(hres)) {
-        heap_free(object);
+        free(object);
         return hres;
     }
 

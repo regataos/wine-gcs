@@ -52,7 +52,7 @@ static int (CDECL *p___std_type_info_compare)(const type_info140*, const type_in
 static const char* (CDECL *p___std_type_info_name)(type_info140*, SLIST_HEADER*);
 static void (CDECL *p___std_type_info_destroy_list)(SLIST_HEADER*);
 static size_t (CDECL *p___std_type_info_hash)(type_info140*);
-
+static char* (__cdecl *p___unDName)(char*,const char*,int,void*,void*,unsigned short int);
 
 static BOOL init(void)
 {
@@ -72,6 +72,7 @@ static BOOL init(void)
     p___std_type_info_name = (void*)GetProcAddress(module, "__std_type_info_name");
     p___std_type_info_destroy_list = (void*)GetProcAddress(module, "__std_type_info_destroy_list");
     p___std_type_info_hash = (void*)GetProcAddress(module, "__std_type_info_hash");
+    p___unDName = (void*)GetProcAddress(module, "__unDName");
     return TRUE;
 }
 
@@ -189,9 +190,46 @@ static void test___std_type_info(void)
     ok(hash1 != hash2, "hash1 == hash2 for different strings\n");
 }
 
+static void test___unDName(void)
+{
+    static struct {const char *in; const char *out; const char *broken; unsigned int flags;} und_tests[] =
+    {
+/*   0 */ {"??4QDnsDomainNameRecord@@QAEAAV0@$$QAV0@@Z",
+           "public: class QDnsDomainNameRecord & __thiscall QDnsDomainNameRecord::operator=(class QDnsDomainNameRecord &&)"},
+/*   1 */ {"??4QDnsDomainNameRecord@@QAEAAV0@$$QEAV0@@Z",
+          "public: class QDnsDomainNameRecord & __thiscall QDnsDomainNameRecord::operator=(class QDnsDomainNameRecord && __ptr64)"},
+/*   2 */ {"??__K_l@@YA?AUCC@@I@Z", "struct CC __cdecl operator \"\" _l(unsigned int)",
+           "??__K_l@@YA?AUCC@@I@Z" /* W10 1507 fails on this :-( */},
+/*   3 */ {"?meth@Q@@QEGBA?AV1@XZ",
+           "public: class Q __cdecl Q::meth(void)const __ptr64& ",
+           "public: ?? :: ?? ::XZ::V1" /* W10 1507 fails on this :-( */},
+/*   4 */ {"?meth@Q@@QEHAA?AV1@XZ",
+           "public: class Q __cdecl Q::meth(void) __ptr64&& ",
+           "public: ?? :: ?? ::XZ::V1" /* W10 1507 fails on this :-( */},
+/*   5 */ {"?meth@Q@@QEGBA?AV1@XZ",
+           "public: class Q Q::meth(void)const & ",
+           "public: ?? :: ?? ::XZ::V1" /* W10 1507 fails on this :-( */,
+           0x02 /*UNDNAME_NO_MS_KEYWORDS*/},
+/*   6 */ {"?meth@Q@@QEHAA?AV1@XZ",
+           "public: class Q Q::meth(void)&& ",
+           "public: ?? :: ?? ::XZ::V1" /* W10 1507 fails on this :-( */,
+           0x02 /*UNDNAME_NO_MS_KEYWORDS*/},
+    };
+    unsigned i;
+    for (i = 0; i < ARRAY_SIZE(und_tests); i++)
+    {
+        char *name = p___unDName(0, und_tests[i].in, 0, malloc, free, und_tests[i].flags);
+        ok(!strcmp(name, und_tests[i].out) ||
+           broken(und_tests[i].broken && !strcmp(und_tests[i].broken, name)),
+           "unDName returned %s for #%u\n", wine_dbgstr_a(name), i);
+        free(name);
+    }
+}
+
 START_TEST(cpp)
 {
     if (!init()) return;
     test___std_exception();
     test___std_type_info();
+    test___unDName();
 }

@@ -46,27 +46,26 @@ const struct reg_type_rels type_rels[] =
     {REG_DWORD,               L"REG_DWORD"},
     {REG_DWORD_LITTLE_ENDIAN, L"REG_DWORD_LITTLE_ENDIAN"},
     {REG_DWORD_BIG_ENDIAN,    L"REG_DWORD_BIG_ENDIAN"},
+    {REG_QWORD,               L"REG_QWORD"},
     {REG_MULTI_SZ,            L"REG_MULTI_SZ"},
 };
 
 void output_writeconsole(const WCHAR *str, DWORD wlen)
 {
-    DWORD count, ret;
+    DWORD count;
 
-    ret = WriteConsoleW(GetStdHandle(STD_OUTPUT_HANDLE), str, wlen, &count, NULL);
-    if (!ret)
+    if (!WriteConsoleW(GetStdHandle(STD_OUTPUT_HANDLE), str, wlen, &count, NULL))
     {
         DWORD len;
         char  *msgA;
 
         /* On Windows WriteConsoleW() fails if the output is redirected. So fall
-         * back to WriteFile(), assuming the console encoding is still the right
-         * one in that case.
+         * back to WriteFile() with OEM code page.
          */
-        len = WideCharToMultiByte(GetConsoleOutputCP(), 0, str, wlen, NULL, 0, NULL, NULL);
+        len = WideCharToMultiByte(GetOEMCP(), 0, str, wlen, NULL, 0, NULL, NULL);
         msgA = malloc(len);
 
-        WideCharToMultiByte(GetConsoleOutputCP(), 0, str, wlen, msgA, len, NULL, NULL);
+        WideCharToMultiByte(GetOEMCP(), 0, str, wlen, msgA, len, NULL, NULL);
         WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), msgA, len, &count, FALSE);
         free(msgA);
     }
@@ -81,7 +80,7 @@ static void output_formatstring(const WCHAR *fmt, va_list va_args)
                          fmt, 0, 0, (WCHAR *)&str, 0, &va_args);
     if (len == 0 && GetLastError() != ERROR_NO_WORK_DONE)
     {
-        WINE_FIXME("Could not format string: le=%u, fmt=%s\n", GetLastError(), wine_dbgstr_w(fmt));
+        WINE_FIXME("Could not format string: le=%lu, fmt=%s\n", GetLastError(), wine_dbgstr_w(fmt));
         return;
     }
     output_writeconsole(str, len);
@@ -96,7 +95,7 @@ void WINAPIV output_message(unsigned int id, ...)
 
     if (!(len = LoadStringW(GetModuleHandleW(NULL), id, (WCHAR *)&fmt, 0)))
     {
-        WINE_FIXME("LoadString failed with %d\n", GetLastError());
+        WINE_FIXME("LoadString failed with %ld\n", GetLastError());
         return;
     }
 

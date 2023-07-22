@@ -79,7 +79,7 @@ MSIRECORD *msi_query_merge_record( UINT fields, const column_info *vl, MSIRECORD
         switch( vl->val->type )
         {
         case EXPR_SVAL:
-            TRACE("field %d -> %s\n", i, debugstr_w(vl->val->u.sval));
+            TRACE( "field %lu -> %s\n", i, debugstr_w(vl->val->u.sval) );
             MSI_RecordSetStringW( merged, i, vl->val->u.sval );
             break;
         case EXPR_IVAL:
@@ -312,7 +312,7 @@ static UINT INSERT_delete( struct tagMSIVIEW *view )
     if( sv )
         sv->ops->delete( sv );
     msiobj_release( &iv->db->hdr );
-    msi_free( iv );
+    free( iv );
 
     return ERROR_SUCCESS;
 }
@@ -373,7 +373,7 @@ UINT INSERT_CreateView( MSIDATABASE *db, MSIVIEW **view, LPCWSTR table,
         return r;
     }
 
-    iv = msi_alloc_zero( sizeof *iv );
+    iv = calloc( 1, sizeof *iv );
     if( !iv )
         return ERROR_FUNCTION_FAILED;
 

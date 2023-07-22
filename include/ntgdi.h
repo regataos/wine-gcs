@@ -109,10 +109,37 @@ enum
     NtGdiSetMapMode = 8,
     /* not compatible with Windows */
     NtGdiSetBkColor = 100,
+    NtGdiSetBkMode,
     NtGdiSetTextColor,
     NtGdiSetDCBrushColor,
     NtGdiSetDCPenColor,
     NtGdiSetGraphicsMode,
+    NtGdiSetROP2,
+    NtGdiSetTextAlign,
+};
+
+/* NtGdiGetDCDword parameter, not compatible with Windows */
+enum
+{
+    NtGdiGetArcDirection,
+    NtGdiGetBkColor,
+    NtGdiGetBkMode,
+    NtGdiGetDCBrushColor,
+    NtGdiGetDCPenColor,
+    NtGdiGetGraphicsMode,
+    NtGdiGetLayout,
+    NtGdiGetPolyFillMode,
+    NtGdiGetROP2,
+    NtGdiGetTextColor,
+    NtGdiIsMemDC,
+};
+
+/* NtGdiGetDCPoint parameter, not compatible with Windows */
+enum
+{
+    NtGdiGetBrushOrgEx,
+    NtGdiGetCurrentPosition,
+    NtGdiGetDCOrg,
 };
 
 enum
@@ -138,7 +165,7 @@ enum
 
 typedef struct DC_ATTR
 {
-    HDC       hdc;                 /* handle to self */
+    UINT      hdc;                 /* handle to self */
     LONG      disabled;            /* disabled flag, controlled by DCHF_(DISABLE|ENABLE)DC */
     int       save_level;
     COLORREF  background_color;
@@ -169,8 +196,10 @@ typedef struct DC_ATTR
     SIZE      virtual_size;
     UINT      font_code_page;
     RECTL     emf_bounds;
-    void     *emf;
-    ABORTPROC abort_proc;          /* AbortProc for printing */
+    UINT64    emf;                 /* client EMF record pointer */
+    UINT64    abort_proc;          /* AbortProc for printing */
+    UINT64    hspool;
+    UINT64    output;
 } DC_ATTR;
 
 struct font_enum_entry
@@ -182,6 +211,9 @@ struct font_enum_entry
 
 /* flag for NtGdiGetRandomRgn to respect LAYOUT_RTL */
 #define NTGDI_RGN_MIRROR_RTL   0x80000000
+
+/* magic driver version that we use for win16 DCs with DIB surfaces */
+#define NTGDI_WIN16_DIB  0xfafa000
 
 #endif /* __WINESRC__ */
 
@@ -342,7 +374,7 @@ BOOL     WINAPI NtGdiGetTextMetricsW( HDC hdc, TEXTMETRICW *metrics, ULONG flags
 BOOL     WINAPI NtGdiGetTransform( HDC hdc, DWORD which, XFORM *xform );
 BOOL     WINAPI NtGdiGradientFill( HDC hdc, TRIVERTEX *vert_array, ULONG nvert,
                                    void *grad_array, ULONG ngrad, ULONG mode );
-HFONT    WINAPI NtGdiHfontCreate( const ENUMLOGFONTEXDVW *enumex, ULONG unk2, ULONG unk3,
+HFONT    WINAPI NtGdiHfontCreate( const void *logfont, ULONG unk2, ULONG unk3,
                                   ULONG unk4, void *data );
 DWORD    WINAPI NtGdiInitSpool(void);
 INT      WINAPI NtGdiIntersectClipRect( HDC hdc, INT left, INT top, INT right, INT bottom );
@@ -364,7 +396,7 @@ BOOL     WINAPI NtGdiPlgBlt( HDC hdc, const POINT *point, HDC hdc_src, INT x_src
                              INT width, INT height, HBITMAP mask, INT x_mask, INT y_mask,
                              DWORD bk_color );
 BOOL     WINAPI NtGdiPolyDraw(HDC hdc, const POINT *points, const BYTE *types, DWORD count );
-ULONG    WINAPI NtGdiPolyPolyDraw( HDC hdc, const POINT *points, const UINT *counts,
+ULONG    WINAPI NtGdiPolyPolyDraw( HDC hdc, const POINT *points, const ULONG *counts,
                                    DWORD count, UINT function );
 BOOL     WINAPI NtGdiPtInRegion( HRGN hrgn, INT x, INT y );
 BOOL     WINAPI NtGdiPtVisible( HDC hdc, INT x, INT y );
@@ -445,6 +477,7 @@ NTSTATUS WINAPI NtGdiDdDDIOpenAdapterFromHdc( D3DKMT_OPENADAPTERFROMHDC *desc );
 NTSTATUS WINAPI NtGdiDdDDIOpenAdapterFromDeviceName( D3DKMT_OPENADAPTERFROMDEVICENAME *desc );
 NTSTATUS WINAPI NtGdiDdDDIOpenAdapterFromLuid( D3DKMT_OPENADAPTERFROMLUID *desc );
 NTSTATUS WINAPI NtGdiDdDDIQueryStatistics( D3DKMT_QUERYSTATISTICS *stats );
+NTSTATUS WINAPI NtGdiDdDDIQueryVideoMemoryInfo( D3DKMT_QUERYVIDEOMEMORYINFO *desc );
 NTSTATUS WINAPI NtGdiDdDDISetQueuedLimit( D3DKMT_SETQUEUEDLIMIT *desc );
 NTSTATUS WINAPI NtGdiDdDDISetVidPnSourceOwner( const D3DKMT_SETVIDPNSOURCEOWNER *desc );
 

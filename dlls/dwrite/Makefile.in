@@ -1,9 +1,8 @@
-EXTRADEFS = -DWINE_NO_LONG_TYPES
 MODULE    = dwrite.dll
 IMPORTLIB = dwrite
 UNIXLIB   = dwrite.so
 IMPORTS   = user32 gdi32 advapi32
-EXTRAINCL = $(FREETYPE_CFLAGS)
+UNIX_CFLAGS = $(FREETYPE_CFLAGS)
 
 C_SRCS = \
 	analyzer.c \
@@ -11,6 +10,7 @@ C_SRCS = \
 	bracket.c \
 	direction.c \
 	font.c \
+	format.c \
 	freetype.c \
 	gdiinterop.c \
 	layout.c \

@@ -26,6 +26,7 @@
 #include <assert.h>
 #include <limits.h>
 #include <math.h>
+#include <stdbool.h>
 #define COBJMACROS
 #define NONAMELESSSTRUCT
 #define NONAMELESSUNION
@@ -69,7 +70,7 @@ struct FvfToDecl
 #define DDRAW_WINED3D_FLAGS     (WINED3D_LEGACY_DEPTH_BIAS | WINED3D_VIDMEM_ACCOUNTING \
         | WINED3D_RESTORE_MODE_ON_ACTIVATE | WINED3D_FOCUS_MESSAGES | WINED3D_PIXEL_CENTER_INTEGER \
         | WINED3D_LEGACY_UNBOUND_RESOURCE_COLOR | WINED3D_NO_PRIMITIVE_RESTART \
-        | WINED3D_LEGACY_CUBEMAP_FILTERING)
+        | WINED3D_LEGACY_CUBEMAP_FILTERING | WINED3D_NO_DRAW_INDIRECT)
 
 #define DDRAW_MAX_ACTIVE_LIGHTS 32
 #define DDRAW_MAX_TEXTURES 8
@@ -139,6 +140,9 @@ struct ddraw
 
     struct wined3d_stateblock *state;
     const struct wined3d_stateblock_state *stateblock_state;
+
+    unsigned int frames;
+    DWORD prev_frame_time;
 };
 
 #define DDRAW_WINDOW_CLASS_NAME "DirectDrawDeviceWnd"
@@ -336,13 +340,7 @@ struct d3d_device
     struct ddraw *ddraw;
     IUnknown *rt_iface;
 
-    struct wined3d_buffer *index_buffer;
-    UINT index_buffer_size;
-    UINT index_buffer_pos;
-
-    struct wined3d_buffer *vertex_buffer;
-    UINT vertex_buffer_size;
-    UINT vertex_buffer_pos;
+    struct wined3d_streaming_buffer vertex_buffer, index_buffer;
 
     /* Viewport management */
     struct list viewport_list;
@@ -603,6 +601,7 @@ struct d3d_vertex_buffer
     DWORD                fvf;
     DWORD                size;
     BOOL                 dynamic;
+    bool discarded;
 };
 
 HRESULT d3d_vertex_buffer_create(struct d3d_vertex_buffer **buffer, struct ddraw *ddraw,

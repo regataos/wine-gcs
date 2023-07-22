@@ -244,7 +244,7 @@ DWORD convert_bitmapinfo( const BITMAPINFO *src_info, void *src_bits, struct bit
     /* update coordinates, the destination rectangle is always stored at 0,0 */
     src->x -= src->visrect.left;
     src->y -= src->visrect.top;
-    offset_rect( &src->visrect, -src->visrect.left, -src->visrect.top );
+    OffsetRect( &src->visrect, -src->visrect.left, -src->visrect.top );
     return ERROR_SUCCESS;
 }
 
@@ -254,7 +254,7 @@ int get_dib_rect( const dib_info *dib, RECT *rc )
     rc->top    = max( 0, -dib->rect.top );
     rc->right  = min( dib->rect.right, dib->width ) - dib->rect.left;
     rc->bottom = min( dib->rect.bottom, dib->height ) - dib->rect.top;
-    return !is_rect_empty( rc );
+    return !IsRectEmpty( rc );
 }
 
 int clip_rect_to_dib( const dib_info *dib, RECT *rc )
@@ -317,8 +317,8 @@ void add_clipped_bounds( dibdrv_physdev *dev, const RECT *rect, HRGN clip )
     }
     else rc = *rect;
 
-    if (is_rect_empty( &rc )) return;
-    offset_rect( &rc, dev->dib.rect.left, dev->dib.rect.top );
+    if (IsRectEmpty( &rc )) return;
+    OffsetRect( &rc, dev->dib.rect.left, dev->dib.rect.top );
     add_bounds_rect( dev->bounds, &rc );
 }
 
@@ -430,7 +430,7 @@ static const struct
 /**********************************************************************
  *	     dibdrv_wglDescribePixelFormat
  */
-static int WINAPI dibdrv_wglDescribePixelFormat( HDC hdc, int fmt, UINT size, PIXELFORMATDESCRIPTOR *descr )
+static int dibdrv_wglDescribePixelFormat( HDC hdc, int fmt, UINT size, PIXELFORMATDESCRIPTOR *descr )
 {
     int ret = ARRAY_SIZE( pixel_formats );
 
@@ -467,7 +467,7 @@ static int WINAPI dibdrv_wglDescribePixelFormat( HDC hdc, int fmt, UINT size, PI
 /***********************************************************************
  *		dibdrv_wglCopyContext
  */
-static BOOL WINAPI dibdrv_wglCopyContext( struct wgl_context *src, struct wgl_context *dst, UINT mask )
+static BOOL dibdrv_wglCopyContext( struct wgl_context *src, struct wgl_context *dst, UINT mask )
 {
     FIXME( "not supported yet\n" );
     return FALSE;
@@ -476,7 +476,7 @@ static BOOL WINAPI dibdrv_wglCopyContext( struct wgl_context *src, struct wgl_co
 /***********************************************************************
  *		dibdrv_wglDeleteContext
  */
-static BOOL WINAPI dibdrv_wglDeleteContext( struct wgl_context *context )
+static BOOL dibdrv_wglDeleteContext( struct wgl_context *context )
 {
     if (!osmesa_funcs) return FALSE;
     return osmesa_funcs->delete_context( context );
@@ -485,7 +485,7 @@ static BOOL WINAPI dibdrv_wglDeleteContext( struct wgl_context *context )
 /***********************************************************************
  *		dibdrv_wglGetPixelFormat
  */
-static int WINAPI dibdrv_wglGetPixelFormat( HDC hdc )
+static int dibdrv_wglGetPixelFormat( HDC hdc )
 {
     DC *dc = get_dc_ptr( hdc );
     int ret = 0;
@@ -501,7 +501,7 @@ static int WINAPI dibdrv_wglGetPixelFormat( HDC hdc )
 /***********************************************************************
  *		dibdrv_wglCreateContext
  */
-static struct wgl_context * WINAPI dibdrv_wglCreateContext( HDC hdc )
+static struct wgl_context *dibdrv_wglCreateContext( HDC hdc )
 {
     PIXELFORMATDESCRIPTOR descr;
     int format = dibdrv_wglGetPixelFormat( hdc );
@@ -516,7 +516,7 @@ static struct wgl_context * WINAPI dibdrv_wglCreateContext( HDC hdc )
 /***********************************************************************
  *		dibdrv_wglGetProcAddress
  */
-static PROC WINAPI dibdrv_wglGetProcAddress( const char *proc )
+static PROC dibdrv_wglGetProcAddress( const char *proc )
 {
     if (!strncmp( proc, "wgl", 3 )) return NULL;
     if (!osmesa_funcs) return NULL;
@@ -526,7 +526,7 @@ static PROC WINAPI dibdrv_wglGetProcAddress( const char *proc )
 /***********************************************************************
  *		dibdrv_wglMakeCurrent
  */
-static BOOL WINAPI dibdrv_wglMakeCurrent( HDC hdc, struct wgl_context *context )
+static BOOL dibdrv_wglMakeCurrent( HDC hdc, struct wgl_context *context )
 {
     HBITMAP bitmap;
     BITMAPOBJ *bmp;
@@ -563,7 +563,7 @@ static BOOL WINAPI dibdrv_wglMakeCurrent( HDC hdc, struct wgl_context *context )
 /**********************************************************************
  *	     dibdrv_wglSetPixelFormat
  */
-static BOOL WINAPI dibdrv_wglSetPixelFormat( HDC hdc, int fmt, const PIXELFORMATDESCRIPTOR *descr )
+static BOOL dibdrv_wglSetPixelFormat( HDC hdc, int fmt, const PIXELFORMATDESCRIPTOR *descr )
 {
     if (fmt <= 0 || fmt > ARRAY_SIZE( pixel_formats )) return FALSE;
     return NtGdiSetPixelFormat( hdc, fmt );
@@ -572,7 +572,7 @@ static BOOL WINAPI dibdrv_wglSetPixelFormat( HDC hdc, int fmt, const PIXELFORMAT
 /***********************************************************************
  *		dibdrv_wglShareLists
  */
-static BOOL WINAPI dibdrv_wglShareLists( struct wgl_context *org, struct wgl_context *dest )
+static BOOL dibdrv_wglShareLists( struct wgl_context *org, struct wgl_context *dest )
 {
     FIXME( "not supported yet\n" );
     return FALSE;
@@ -581,7 +581,7 @@ static BOOL WINAPI dibdrv_wglShareLists( struct wgl_context *org, struct wgl_con
 /***********************************************************************
  *		dibdrv_wglSwapBuffers
  */
-static BOOL WINAPI dibdrv_wglSwapBuffers( HDC hdc )
+static BOOL dibdrv_wglSwapBuffers( HDC hdc )
 {
     return TRUE;
 }
@@ -603,15 +603,10 @@ static struct opengl_funcs opengl_funcs =
 };
 
 /**********************************************************************
- *	     dibdrv_wine_get_wgl_driver
+ *	     dibdrv_get_wgl_driver
  */
-static struct opengl_funcs * CDECL dibdrv_wine_get_wgl_driver( PHYSDEV dev, UINT version )
+struct opengl_funcs *dibdrv_get_wgl_driver(void)
 {
-    if (version != WINE_WGL_DRIVER_VERSION)
-    {
-        ERR( "version mismatch, opengl32 wants %u but dibdrv has %u\n", version, WINE_WGL_DRIVER_VERSION );
-        return NULL;
-    }
     if (!osmesa_funcs && !(osmesa_funcs = init_opengl_lib()))
     {
         static int warned;
@@ -714,8 +709,10 @@ const struct gdi_dc_funcs dib_driver =
     dibdrv_StrokePath,                  /* pStrokePath */
     NULL,                               /* pUnrealizePalette */
     NULL,                               /* pD3DKMTCheckVidPnExclusiveOwnership */
+    NULL,                               /* pD3DKMTCloseAdapter */
+    NULL,                               /* pD3DKMTOpenAdapterFromLuid */
+    NULL,                               /* pD3DKMTQueryVideoMemoryInfo */
     NULL,                               /* pD3DKMTSetVidPnSourceOwner */
-    dibdrv_wine_get_wgl_driver,         /* wine_get_wgl_driver */
     GDI_PRIORITY_DIB_DRV                /* priority */
 };
 
@@ -748,7 +745,7 @@ static inline void lock_surface( struct windrv_physdev *dev )
 {
     /* gdi_lock should not be locked */
     dev->surface->funcs->lock( dev->surface );
-    if (is_rect_empty( dev->dibdrv->bounds )) dev->start_ticks = NtGetTickCount();
+    if (IsRectEmpty( dev->dibdrv->bounds )) dev->start_ticks = NtGetTickCount();
 }
 
 static inline void unlock_surface( struct windrv_physdev *dev )
@@ -794,7 +791,7 @@ void dibdrv_set_window_surface( DC *dc, struct window_surface *surface )
         bits = surface->funcs->get_info( surface, info );
         init_dib_info_from_bitmapinfo( &dibdrv->dib, info, bits );
         dibdrv->dib.rect = dc->attr->vis_rect;
-        offset_rect( &dibdrv->dib.rect, -dc->device_rect.left, -dc->device_rect.top );
+        OffsetRect( &dibdrv->dib.rect, -dc->device_rect.left, -dc->device_rect.top );
         dibdrv->bounds = surface->funcs->get_bounds( surface );
         DC_InitDC( dc );
     }
@@ -1177,13 +1174,6 @@ static INT CDECL windrv_StretchDIBits( PHYSDEV dev, INT x_dst, INT y_dst, INT wi
     return ret;
 }
 
-static struct opengl_funcs * CDECL windrv_wine_get_wgl_driver( PHYSDEV dev, UINT version )
-{
-    dev = GET_NEXT_PHYSDEV( dev, wine_get_wgl_driver );
-    if (dev->funcs == &dib_driver) dev = GET_NEXT_PHYSDEV( dev, wine_get_wgl_driver );
-    return dev->funcs->wine_get_wgl_driver( dev, version );
-}
-
 static const struct gdi_dc_funcs window_driver =
 {
     NULL,                               /* pAbortDoc */
@@ -1276,7 +1266,9 @@ static const struct gdi_dc_funcs window_driver =
     NULL,                               /* pStrokePath */
     NULL,                               /* pUnrealizePalette */
     NULL,                               /* pD3DKMTCheckVidPnExclusiveOwnership */
+    NULL,                               /* pD3DKMTCloseAdapter */
+    NULL,                               /* pD3DKMTOpenAdapterFromLuid */
+    NULL,                               /* pD3DKMTQueryVideoMemoryInfo */
     NULL,                               /* pD3DKMTSetVidPnSourceOwner */
-    windrv_wine_get_wgl_driver,         /* wine_get_wgl_driver */
     GDI_PRIORITY_DIB_DRV + 10           /* priority */
 };

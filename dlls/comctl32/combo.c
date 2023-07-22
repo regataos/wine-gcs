@@ -33,7 +33,6 @@
 #include "vssym32.h"
 #include "commctrl.h"
 #include "wine/debug.h"
-#include "wine/heap.h"
 
 #include "comctl32.h"
 
@@ -125,7 +124,7 @@ static LRESULT COMBO_NCCreate(HWND hwnd, LONG style)
 {
     HEADCOMBO *lphc;
 
-    if (COMBO_Init() && (lphc = heap_alloc_zero(sizeof(*lphc))))
+    if (COMBO_Init() && (lphc = Alloc(sizeof(*lphc))))
     {
         lphc->self = hwnd;
         SetWindowLongPtrW( hwnd, 0, (LONG_PTR)lphc );
@@ -166,7 +165,7 @@ static LRESULT COMBO_NCDestroy( HEADCOMBO *lphc )
             DestroyWindow( lphc->hWndLBox );
 
         SetWindowLongPtrW( lphc->self, 0, 0 );
-        heap_free( lphc );
+        Free( lphc );
     }
 
     return 0;
@@ -635,7 +634,7 @@ static void CBPaintText(HEADCOMBO *lphc, HDC hdc_paint)
         size = SendMessageW(lphc->hWndLBox, LB_GETTEXTLEN, id, 0);
 	if (size == LB_ERR)
 	  FIXME("LB_ERR probably not handled yet\n");
-        if ((pText = heap_alloc((size + 1) * sizeof(WCHAR))))
+        if ((pText = Alloc((size + 1) * sizeof(WCHAR))))
 	{
             /* size from LB_GETTEXTLEN may be too large, from LB_GETTEXT is accurate */
            size=SendMessageW(lphc->hWndLBox, LB_GETTEXT, id, (LPARAM)pText);
@@ -731,7 +730,7 @@ static void CBPaintText(HEADCOMBO *lphc, HDC hdc_paint)
        ReleaseDC( lphc->self, hdc );
    }
 
-    heap_free(pText);
+    Free(pText);
 }
 
 /***********************************************************************
@@ -853,7 +852,7 @@ static INT CBUpdateLBox( LPHEADCOMBO lphc, BOOL bSelect )
    length = SendMessageW( lphc->hWndEdit, WM_GETTEXTLENGTH, 0, 0 );
 
     if (length > 0)
-        pText = heap_alloc((length + 1) * sizeof(WCHAR));
+        pText = Alloc((length + 1) * sizeof(WCHAR));
 
    TRACE("\t edit text length %i\n", length );
 
@@ -861,7 +860,7 @@ static INT CBUpdateLBox( LPHEADCOMBO lphc, BOOL bSelect )
    {
        GetWindowTextW( lphc->hWndEdit, pText, length + 1);
        idx = SendMessageW(lphc->hWndLBox, LB_FINDSTRING, -1, (LPARAM)pText);
-       heap_free( pText );
+       Free( pText );
    }
 
    SendMessageW(lphc->hWndLBox, LB_SETCURSEL, bSelect ? idx : -1, 0);
@@ -890,7 +889,7 @@ static void CBUpdateEdit( LPHEADCOMBO lphc , INT index )
        length = SendMessageW(lphc->hWndLBox, LB_GETTEXTLEN, index, 0);
        if( length != LB_ERR)
        {
-           if ((pText = heap_alloc((length + 1) * sizeof(WCHAR))))
+           if ((pText = Alloc((length + 1) * sizeof(WCHAR))))
                SendMessageW(lphc->hWndLBox, LB_GETTEXT, index, (LPARAM)pText);
        }
    }
@@ -905,7 +904,7 @@ static void CBUpdateEdit( LPHEADCOMBO lphc , INT index )
    if( lphc->wState & CBF_FOCUSED )
       SendMessageW(lphc->hWndEdit, EM_SETSEL, 0, -1);
 
-    heap_free( pText );
+    Free( pText );
 }
 
 /***********************************************************************
@@ -1319,7 +1318,7 @@ static LRESULT COMBO_GetText( HEADCOMBO *lphc, INT count, LPWSTR buf )
         /* 'length' is without the terminating character */
         if (length >= count)
         {
-            WCHAR *lpBuffer = heap_alloc((length + 1) * sizeof(WCHAR));
+            WCHAR *lpBuffer = Alloc((length + 1) * sizeof(WCHAR));
             if (!lpBuffer) goto error;
             length = SendMessageW(lphc->hWndLBox, LB_GETTEXT, idx, (LPARAM)lpBuffer);
 
@@ -1329,7 +1328,7 @@ static LRESULT COMBO_GetText( HEADCOMBO *lphc, INT count, LPWSTR buf )
                 lstrcpynW( buf, lpBuffer, count );
                 length = count;
             }
-            heap_free( lpBuffer );
+            Free( lpBuffer );
         }
         else length = SendMessageW(lphc->hWndLBox, LB_GETTEXT, idx, (LPARAM)buf);
 
@@ -1411,7 +1410,7 @@ static void COMBO_Size( HEADCOMBO *lphc )
      */
     if( curComboHeight > newComboHeight )
     {
-      TRACE("oldComboHeight=%d, newComboHeight=%d, oldDropBottom=%d, oldDropTop=%d\n",
+      TRACE("oldComboHeight=%d, newComboHeight=%d, oldDropBottom=%ld, oldDropTop=%ld\n",
             curComboHeight, newComboHeight, lphc->droppedRect.bottom,
             lphc->droppedRect.top);
       lphc->droppedRect.bottom = lphc->droppedRect.top + curComboHeight - newComboHeight;
@@ -1663,7 +1662,7 @@ static LRESULT CALLBACK COMBO_WindowProc( HWND hwnd, UINT message, WPARAM wParam
     HEADCOMBO *lphc = (HEADCOMBO *)GetWindowLongPtrW( hwnd, 0 );
     HTHEME theme;
 
-    TRACE("[%p]: msg %#x wp %08lx lp %08lx\n", hwnd, message, wParam, lParam );
+    TRACE("[%p]: msg %#x, wp %Ix, lp %Ix\n", hwnd, message, wParam, lParam );
 
     if (!IsWindow(hwnd)) return 0;
 
@@ -2108,7 +2107,7 @@ static LRESULT CALLBACK COMBO_WindowProc( HWND hwnd, UINT message, WPARAM wParam
 
     default:
         if (message >= WM_USER)
-            WARN("unknown msg WM_USER+%04x wp=%04lx lp=%08lx\n", message - WM_USER, wParam, lParam );
+            WARN("unknown msg WM_USER+%04x, wp %Ix, lp %Ix\n", message - WM_USER, wParam, lParam );
         break;
     }
 

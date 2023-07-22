@@ -57,7 +57,7 @@ static ULONG WINAPI status_code_Release(
     if (!refs)
     {
         TRACE("destroying %p\n", status_code);
-        heap_free( status_code );
+        free( status_code );
     }
     return refs;
 }
@@ -94,7 +94,7 @@ static HRESULT WINAPI status_code_GetErrorCodeText(
 {
     WCHAR msg[32];
 
-    FIXME("%p, 0x%08x, 0x%04x, 0x%08x, %p\n", iface, res, lcid, flags, text);
+    FIXME("%p, %#lx, %#lx, %#lx, %p\n", iface, res, lcid, flags, text);
 
     swprintf(msg, ARRAY_SIZE(msg), L"Error code: 0x%08x", res);
     *text = SysAllocString(msg);
@@ -110,7 +110,7 @@ static HRESULT WINAPI status_code_GetFacilityCodeText(
 {
     WCHAR msg[32];
 
-    FIXME("%p, 0x%08x, 0x%04x, 0x%08x, %p\n", iface, res, lcid, flags, text);
+    FIXME("%p, %#lx, %#lx, %#lx, %p\n", iface, res, lcid, flags, text);
 
     swprintf(msg, ARRAY_SIZE(msg), L"Facility code: 0x%08x", res);
     *text = SysAllocString(msg);
@@ -132,7 +132,7 @@ HRESULT WbemStatusCodeText_create( LPVOID *ppObj )
 
     TRACE("(%p)\n", ppObj);
 
-    if (!(sc = heap_alloc( sizeof(*sc) ))) return E_OUTOFMEMORY;
+    if (!(sc = calloc( 1, sizeof(*sc) ))) return E_OUTOFMEMORY;
 
     sc->IWbemStatusCodeText_iface.lpVtbl = &status_code_vtbl;
     sc->refs = 1;

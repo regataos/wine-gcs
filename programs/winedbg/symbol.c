@@ -61,30 +61,63 @@ static BOOL symbol_get_debug_start(const struct dbg_type* func, ULONG64* start)
     return FALSE;
 }
 
+static BOOL fetch_tls_lvalue(const SYMBOL_INFO* sym, struct dbg_lvalue* lvalue)
+{
+    struct dbg_module*        mod = dbg_get_module(dbg_curr_process, sym->ModBase);
+    unsigned                  tlsindex;
+    struct dbg_lvalue         lv_teb_tls, lv_index_addr, lv_module_tls;
+    dbg_lgint_t               teb_tls_addr, index_addr, tls_module_addr;
+    char*                     teb_tls_storage;
+
+    if (!mod || !mod->tls_index_offset || !dbg_curr_thread)
+        return FALSE;
+    /* get ThreadLocalStoragePointer offset depending on debuggee bitness */
+    teb_tls_storage = (char*)dbg_curr_thread->teb;
+    if (ADDRSIZE == sizeof(void*))
+        /* debugger and debuggee have same bitness */
+        teb_tls_storage += offsetof(TEB, ThreadLocalStoragePointer);
+    else
+        /* debugger is 64bit, while debuggee is 32bit */
+        teb_tls_storage += 0x2000 /* TEB64 => TEB32 */ + offsetof(TEB32, ThreadLocalStoragePointer);
+    init_lvalue(&lv_teb_tls, TRUE, teb_tls_storage);
+
+    if (!memory_fetch_integer(&lv_teb_tls, ADDRSIZE, FALSE, &teb_tls_addr))
+        return FALSE;
+
+    init_lvalue(&lv_index_addr, TRUE, (void*)(DWORD_PTR)(sym->ModBase + mod->tls_index_offset));
+    if (!memory_fetch_integer(&lv_index_addr, ADDRSIZE, FALSE, &index_addr))
+        return FALSE;
+
+    if (!dbg_read_memory((const char*)(DWORD_PTR)index_addr, &tlsindex, sizeof(tlsindex)))
+        return FALSE;
+
+    init_lvalue(&lv_module_tls, TRUE, (void*)(DWORD_PTR)(teb_tls_addr + tlsindex * ADDRSIZE));
+    if (!memory_fetch_integer(&lv_module_tls, ADDRSIZE, FALSE, &tls_module_addr))
+        return FALSE;
+    init_lvalue(lvalue, TRUE, (void*)(DWORD_PTR)(tls_module_addr + sym->Address));
+    return TRUE;
+}
+
 static BOOL fill_sym_lvalue(const SYMBOL_INFO* sym, ULONG_PTR base,
                             struct dbg_lvalue* lvalue, char* buffer, size_t sz)
 {
     if (buffer) buffer[0] = '\0';
     if (sym->Flags & SYMFLAG_REGISTER)
     {
-        DWORD_PTR* pval;
-
-        if (!memory_get_register(sym->Register, &pval, buffer, sz))
+        if (!memory_get_register(sym->Register, lvalue, buffer, sz))
             return FALSE;
-        init_lvalue(lvalue, FALSE, pval);
     }
     else if (sym->Flags & SYMFLAG_REGREL)
     {
-        DWORD_PTR* pval;
         size_t  l;
 
         *buffer++ = '['; sz--;
-        if (!memory_get_register(sym->Register, &pval, buffer, sz))
+        if (!memory_get_register(sym->Register, lvalue, buffer, sz))
             return FALSE;
         l = strlen(buffer);
         sz -= l;
         buffer += l;
-        init_lvalue(lvalue, TRUE, (void*)(DWORD_PTR)(*pval + sym->Address));
+        init_lvalue(lvalue, TRUE, (void*)(DWORD_PTR)(types_extract_as_integer(lvalue) + sym->Address));
         if ((LONG64)sym->Address >= 0)
             snprintf(buffer, sz, "+%I64d]", sym->Address);
         else
@@ -132,46 +165,11 @@ static BOOL fill_sym_lvalue(const SYMBOL_INFO* sym, ULONG_PTR base,
     }
     else if (sym->Flags & SYMFLAG_TLSREL)
     {
-        PROCESS_BASIC_INFORMATION pbi;
-        THREAD_BASIC_INFORMATION  tbi;
-        DWORD_PTR                 addr;
-        PEB                       peb;
-        PEB_LDR_DATA              ldr_data;
-        PLIST_ENTRY               head, current;
-        LDR_DATA_TABLE_ENTRY      ldr_module;
-        unsigned                  tlsindex = -1;
-
-        if (NtQueryInformationProcess(dbg_curr_process->handle, ProcessBasicInformation,
-                                      &pbi, sizeof(pbi), NULL) ||
-            NtQueryInformationThread(dbg_curr_thread->handle, ThreadBasicInformation,
-                                     &tbi, sizeof(tbi), NULL))
+        if (!fetch_tls_lvalue(sym, lvalue))
         {
-        tls_error:
             if (buffer) snprintf(buffer, sz, "Cannot read TLS address\n");
             return FALSE;
         }
-        addr = (DWORD_PTR)&(((TEB*)tbi.TebBaseAddress)->ThreadLocalStoragePointer);
-        if (!dbg_read_memory((void*)addr, &addr, sizeof(addr)) ||
-            !dbg_read_memory(pbi.PebBaseAddress, &peb, sizeof(peb)) ||
-            !dbg_read_memory(peb.LdrData, &ldr_data, sizeof(ldr_data)))
-            goto tls_error;
-        current = ldr_data.InLoadOrderModuleList.Flink;
-        head = &((PEB_LDR_DATA*)peb.LdrData)->InLoadOrderModuleList;
-        do
-        {
-            if (!dbg_read_memory(CONTAINING_RECORD(current, LDR_DATA_TABLE_ENTRY, InLoadOrderLinks),
-                                 &ldr_module, sizeof(ldr_module))) goto tls_error;
-            if ((DWORD_PTR)ldr_module.DllBase == sym->ModBase)
-            {
-                tlsindex = ldr_module.TlsIndex;
-                break;
-            }
-            current = ldr_module.InLoadOrderLinks.Flink;
-        } while (current != head);
-
-        addr += tlsindex * sizeof(DWORD_PTR);
-        if (!dbg_read_memory((void*)addr, &addr, sizeof(addr))) goto tls_error;
-        init_lvalue(lvalue, TRUE, (void*)(DWORD_PTR)(addr + sym->Address));
     }
     else
     {
@@ -597,7 +595,7 @@ enum dbg_line_status symbol_get_function_line_status(const ADDRESS64* addr)
     case SymTagFunction:
     case SymTagPublicSymbol: break;
     default:
-        WINE_FIXME("Unexpected sym-tag 0x%08x\n", sym->Tag);
+        WINE_FIXME("Unexpected sym-tag 0x%08lx\n", sym->Tag);
     case SymTagData:
         return dbg_no_line_info;
     }
@@ -692,19 +690,17 @@ BOOL symbol_get_line(const char* filename, const char* name,
 }
 
 /******************************************************************
- *		symbol_print_local
+ *		symbol_print_localvalue
  *
  * Overall format is:
- * <name>=<value>                       in non detailed form
- * <name>=<value> (local|pmt <where>)   in detailed form
+ * <value>                       in non detailed form
+ * <value> (local|pmt <where>)   in detailed form
  * Note <value> can be an error message in case of error
  */
-void symbol_print_local(const SYMBOL_INFO* sym, DWORD_PTR base, BOOL detailed)
+void symbol_print_localvalue(const SYMBOL_INFO* sym, DWORD_PTR base, BOOL detailed)
 {
     struct dbg_lvalue   lvalue;
     char                buffer[64];
-
-    dbg_printf("%s=", sym->Name);
 
     if (fill_sym_lvalue(sym, base, &lvalue, buffer, sizeof(buffer)))
     {
@@ -725,16 +721,28 @@ void symbol_print_local(const SYMBOL_INFO* sym, DWORD_PTR base, BOOL detailed)
 
 static BOOL CALLBACK info_locals_cb(PSYMBOL_INFO sym, ULONG size, PVOID ctx)
 {
-    struct dbg_type     type;
+    DWORD len;
+    WCHAR* nameW;
 
-    dbg_printf("\t");
-    type.module = sym->ModBase;
-    type.id = sym->TypeIndex;
-    types_print_type(&type, FALSE);
+    len = MultiByteToWideChar(CP_ACP, 0, sym->Name, -1, NULL, 0);
+    nameW = malloc(len * sizeof(WCHAR));
+    if (nameW)
+    {
+        struct dbg_type type;
 
-    dbg_printf(" ");
-    symbol_print_local(sym, (DWORD_PTR)ctx, TRUE);
-    dbg_printf("\n");
+        MultiByteToWideChar(CP_ACP, 0, sym->Name, -1, nameW, len);
+
+        type.module = sym->ModBase;
+        type.id = sym->TypeIndex;
+
+        dbg_printf("\t");
+        types_print_type(&type, FALSE, nameW);
+        dbg_printf("=");
+
+        symbol_print_localvalue(sym, (DWORD_PTR)ctx, TRUE);
+        dbg_printf("\n");
+        free(nameW);
+    }
 
     return TRUE;
 }
@@ -778,7 +786,7 @@ static BOOL CALLBACK symbols_info_cb(PSYMBOL_INFO sym, ULONG size, PVOID ctx)
     if (sym->TypeIndex != dbg_itype_none && sym->TypeIndex != 0)
     {
         dbg_printf(" ");
-        types_print_type(&type, FALSE);
+        types_print_type(&type, FALSE, NULL);
     }
     dbg_printf("\n");
     return TRUE;

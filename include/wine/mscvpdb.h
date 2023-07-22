@@ -112,6 +112,25 @@ typedef unsigned short  cv_typ16_t;
 typedef unsigned int    cv_typ_t;
 typedef cv_typ_t        cv_itemid_t;
 
+typedef struct cv_property_t
+{
+    unsigned short  is_packed               : 1;
+    unsigned short  has_ctor                : 1;
+    unsigned short  has_overloaded_operator : 1;
+    unsigned short  is_nested               : 1;
+    unsigned short  has_nested              : 1;
+    unsigned short  has_overloaded_assign   : 1;
+    unsigned short  has_operator_cast       : 1;
+    unsigned short  is_forward_defn         : 1;
+    unsigned short  is_scoped               : 1;
+    unsigned short  has_decorated_name      : 1; /* follows name field */
+    unsigned short  is_sealed               : 1; /* not usage as base class */
+    unsigned short  hfa                     : 2;
+    unsigned short  is_intrinsic            : 1;
+    unsigned short  mocom                   : 2;
+}
+cv_property_t;
+
 /* ======================================== *
  *             Type information
  * ======================================== */
@@ -201,7 +220,7 @@ union codeview_type
         unsigned short int      id;
         short int               n_element;
         cv_typ16_t              fieldlist;
-        short int               property;
+        cv_property_t           property;
         cv_typ16_t              derived;
         cv_typ16_t              vshape;
         unsigned short int      structlen;  /* numeric leaf */
@@ -215,7 +234,7 @@ union codeview_type
         unsigned short int      len;
         unsigned short int      id;
         short int               n_element;
-        short int               property;
+        cv_property_t           property;
         cv_typ_t                fieldlist;
         cv_typ_t                derived;
         cv_typ_t                vshape;
@@ -230,7 +249,7 @@ union codeview_type
         unsigned short int      len;
         unsigned short int      id;
         short int               n_element;
-        short int               property;
+        cv_property_t           property;
         cv_typ_t                fieldlist;
         cv_typ_t                derived;
         cv_typ_t                vshape;
@@ -246,7 +265,7 @@ union codeview_type
         unsigned short int      id;
         short int               count;
         cv_typ16_t              fieldlist;
-        short int               property;
+        cv_property_t           property;
         unsigned short int      un_len;     /* numeric leaf */
 #if 0
         struct p_string         p_name;
@@ -258,7 +277,7 @@ union codeview_type
         unsigned short int      len;
         unsigned short int      id;
         short int               count;
-        short int               property;
+        cv_property_t           property;
         cv_typ_t                fieldlist;
         unsigned short int      un_len;     /* numeric leaf */
 #if 0
@@ -271,7 +290,7 @@ union codeview_type
         unsigned short int      len;
         unsigned short int      id;
         short int               count;
-        short int               property;
+        cv_property_t           property;
         cv_typ_t                fieldlist;
         unsigned short int      un_len;     /* numeric leaf */
 #if 0
@@ -286,7 +305,7 @@ union codeview_type
         short int               count;
         cv_typ16_t              type;
         cv_typ16_t              fieldlist;
-        short int               property;
+        cv_property_t           property;
         struct p_string         p_name;
     } enumeration_v1;
 
@@ -295,7 +314,7 @@ union codeview_type
         unsigned short int      len;
         unsigned short int      id;
         short int               count;
-        short int               property;
+        cv_property_t           property;
         cv_typ_t                type;
         cv_typ_t                fieldlist;
         struct p_string         p_name;
@@ -306,7 +325,7 @@ union codeview_type
         unsigned short int      len;
         unsigned short int      id;
         short int               count;
-        short int               property;
+        cv_property_t           property;
         cv_typ_t                type;
         cv_typ_t                fieldlist;
         char                    name[1];
@@ -1172,7 +1191,8 @@ union codeview_fieldtype
 #define T_64PCHAR8          0x067c  /* 64 near pointer to 8-bit unicode char */
 
 /* counts, bit masks, and shift values needed to access various parts of the built-in type numbers */
-#define T_MAXPREDEFINEDTYPE 0x0580  /* maximum type index for all built-in types */
+#define T_FIRSTDEFINABLETYPE 0x1000 /* first type index that's not predefined */
+#define T_MAXPREDEFINEDTYPE 0x0680  /* maximum type index for all built-in types */
 #define T_MAXBASICTYPE      0x0080  /* maximum type index all non-pointer built-in types */
 #define T_BASICTYPE_MASK    0x00ff  /* mask of bits that can potentially identify a non-pointer basic type */
 #define T_BASICTYPE_SHIFT   8       /* shift count to push out the basic type bits from a type number */
@@ -1352,6 +1372,24 @@ struct cv_addr_gap
 {
     unsigned short              gapStartOffset;
     unsigned short              cbRange;
+};
+
+struct cv_local_varflag
+{
+    unsigned short is_param          : 1;
+    unsigned short address_taken     : 1;
+    unsigned short from_compiler     : 1; /* generated by compiler */
+    unsigned short is_aggregate      : 1; /* split in several variables by compiler */
+    unsigned short from_aggregate    : 1; /* marks a temporary from an aggregate */
+    unsigned short is_aliased        : 1;
+    unsigned short from_alias        : 1;
+    unsigned short is_return_value   : 1;
+    unsigned short optimized_out     : 1;
+    unsigned short enreg_global      : 1; /* global variable accessed from register */
+    unsigned short enreg_static      : 1;
+
+    unsigned short unused            : 5;
+
 };
 
 union codeview_symbol
@@ -1854,7 +1892,7 @@ union codeview_symbol
         unsigned short int      len;
         unsigned short int      id;
         cv_typ_t                symtype;
-        unsigned short          varflags;
+        struct cv_local_varflag varflags;
         char                    name[1];
     } local_v3;
 
@@ -1983,7 +2021,7 @@ union codeview_symbol
         unsigned short int      id;
         cv_typ_t                typind;
         unsigned int            modOffset;
-        unsigned short          varflags;
+        struct cv_local_varflag varflags;
         char                    name[1];
     } file_static_v3;
 
@@ -2340,237 +2378,291 @@ struct startend
 
 struct PDB_FILE
 {
-    DWORD               size;
-    DWORD               unknown;
+    unsigned int        size;
+    unsigned int        unknown;
 };
 
 struct PDB_JG_HEADER
 {
-    CHAR                ident[40];
-    DWORD               signature;
-    DWORD               block_size;
-    WORD                free_list;
-    WORD                total_alloc;
+    char                ident[40];
+    unsigned int        signature;
+    unsigned int        block_size;
+    unsigned short      free_list;
+    unsigned short      total_alloc;
     struct PDB_FILE     toc;
-    WORD                toc_block[1];
+    unsigned short      toc_block[1];
 };
 
 struct PDB_DS_HEADER
 {
     char                signature[32];
-    DWORD               block_size;
-    DWORD               unknown1;
-    DWORD               num_pages;
-    DWORD               toc_size;
-    DWORD               unknown2;
-    DWORD               toc_page;
+    unsigned int        block_size;
+    unsigned int        unknown1;
+    unsigned int        num_pages;
+    unsigned int        toc_size;
+    unsigned int        unknown2;
+    unsigned int        toc_page;
 };
 
 struct PDB_JG_TOC
 {
-    DWORD               num_files;
+    unsigned int        num_files;
     struct PDB_FILE     file[1];
 };
 
 struct PDB_DS_TOC
 {
-    DWORD               num_files;
-    DWORD               file_size[1];
+    unsigned int        num_files;
+    unsigned int        file_size[1];
 };
 
 struct PDB_JG_ROOT
 {
-    DWORD               Version;
-    DWORD               TimeDateStamp;
-    DWORD               Age;
-    DWORD               cbNames;
-    CHAR                names[1];
+    unsigned int        Version;
+    unsigned int        TimeDateStamp;
+    unsigned int        Age;
+    unsigned int        cbNames;
+    char                names[1];
 };
 
 struct PDB_DS_ROOT
 {
-    DWORD               Version;
-    DWORD               TimeDateStamp;
-    DWORD               Age;
+    unsigned int        Version;
+    unsigned int        TimeDateStamp;
+    unsigned int        Age;
     GUID                guid;
-    DWORD               cbNames;
-    CHAR                names[1];
+    unsigned int        cbNames;
+    char                names[1];
 };
 
 typedef struct _PDB_TYPES_OLD
 {
-    DWORD       version;
-    WORD        first_index;
-    WORD        last_index;
-    DWORD       type_size;
-    WORD        file;
-    WORD        pad;
+    unsigned int   version;
+    unsigned short first_index;
+    unsigned short last_index;
+    unsigned int   type_size;
+    unsigned short hash_file;
+    unsigned short pad;
 } PDB_TYPES_OLD, *PPDB_TYPES_OLD;
 
 typedef struct _PDB_TYPES
 {
-    DWORD       version;
-    DWORD       type_offset;
-    DWORD       first_index;
-    DWORD       last_index;
-    DWORD       type_size;
-    WORD        file;
-    WORD        pad;
-    DWORD       hash_size;
-    DWORD       hash_base;
-    DWORD       hash_offset;
-    DWORD       hash_len;
-    DWORD       search_offset;
-    DWORD       search_len;
-    DWORD       unknown_offset;
-    DWORD       unknown_len;
+    unsigned int   version;
+    unsigned int   type_offset;
+    unsigned int   first_index;
+    unsigned int   last_index;
+    unsigned int   type_size;
+    unsigned short hash_file;
+    unsigned short pad;
+    unsigned int   hash_size;
+    unsigned int   hash_num_buckets;
+    unsigned int   hash_offset;
+    unsigned int   hash_len;
+    unsigned int   search_offset;
+    unsigned int   search_len;
+    unsigned int   type_remap_offset;
+    unsigned int   type_remap_len;
 } PDB_TYPES, *PPDB_TYPES;
 
 typedef struct _PDB_SYMBOL_RANGE
 {
-    WORD        segment;
-    WORD        pad1;
-    DWORD       offset;
-    DWORD       size;
-    DWORD       characteristics;
-    WORD        index;
-    WORD        pad2;
+    unsigned short segment;
+    unsigned short pad1;
+    unsigned int   offset;
+    unsigned int   size;
+    unsigned int   characteristics;
+    unsigned short index;
+    unsigned short pad2;
 } PDB_SYMBOL_RANGE, *PPDB_SYMBOL_RANGE;
 
 typedef struct _PDB_SYMBOL_RANGE_EX
 {
-    WORD        segment;
-    WORD        pad1;
-    DWORD       offset;
-    DWORD       size;
-    DWORD       characteristics;
-    WORD        index;
-    WORD        pad2;
-    DWORD       timestamp;
-    DWORD       unknown;
+    unsigned short segment;
+    unsigned short pad1;
+    unsigned int   offset;
+    unsigned int   size;
+    unsigned int   characteristics;
+    unsigned short index;
+    unsigned short pad2;
+    unsigned int   timestamp;
+    unsigned int   unknown;
 } PDB_SYMBOL_RANGE_EX, *PPDB_SYMBOL_RANGE_EX;
 
 typedef struct _PDB_SYMBOL_FILE
 {
-    DWORD       unknown1;
+    unsigned int     unknown1;
     PDB_SYMBOL_RANGE range;
-    WORD        flag;
-    WORD        file;
-    DWORD       symbol_size;
-    DWORD       lineno_size;
-    DWORD       lineno2_size;
-    DWORD       nSrcFiles;
-    DWORD       attribute;
-    CHAR        filename[1];
+    unsigned short   flag;
+    unsigned short   file;
+    unsigned int     symbol_size;
+    unsigned int     lineno_size;
+    unsigned int     lineno2_size;
+    unsigned int     nSrcFiles;
+    unsigned int     attribute;
+    char             filename[1];
 } PDB_SYMBOL_FILE, *PPDB_SYMBOL_FILE;
 
 typedef struct _PDB_SYMBOL_FILE_EX
 {
-    DWORD       unknown1;
+    unsigned int        unknown1;
     PDB_SYMBOL_RANGE_EX range;
-    WORD        flag;
-    WORD        file;
-    DWORD       symbol_size;
-    DWORD       lineno_size;
-    DWORD       lineno2_size;
-    DWORD       nSrcFiles;
-    DWORD       attribute;
-    DWORD       reserved[2];
-    CHAR        filename[1];
+    unsigned short      flag;
+    unsigned short      file;
+    unsigned int        symbol_size;
+    unsigned int        lineno_size;
+    unsigned int        lineno2_size;
+    unsigned int        nSrcFiles;
+    unsigned int        attribute;
+    unsigned int        reserved[2];
+    char                filename[1];
 } PDB_SYMBOL_FILE_EX, *PPDB_SYMBOL_FILE_EX;
 
 typedef struct _PDB_SYMBOL_SOURCE
 {
-    WORD        nModules;
-    WORD        nSrcFiles;
-    WORD        table[1];
+    unsigned short        nModules;
+    unsigned short        nSrcFiles;
+    unsigned short        table[1];
 } PDB_SYMBOL_SOURCE, *PPDB_SYMBOL_SOURCE;
 
 typedef struct _PDB_SYMBOL_IMPORT
 {
-    DWORD       unknown1;
-    DWORD       unknown2;
-    DWORD       TimeDateStamp;
-    DWORD       Age;
-    CHAR        filename[1];
+    unsigned int unknown1;
+    unsigned int unknown2;
+    unsigned int TimeDateStamp;
+    unsigned int Age;
+    char         filename[1];
 } PDB_SYMBOL_IMPORT, *PPDB_SYMBOL_IMPORT;
 
 typedef struct _PDB_SYMBOLS_OLD
 {
-    WORD        global_file;
-    WORD        public_file;
-    WORD        gsym_file;
-    WORD        pad;
-    DWORD       module_size;
-    DWORD       offset_size;
-    DWORD       hash_size;
-    DWORD       srcmodule_size;
+    unsigned short global_hash_file;
+    unsigned short public_file;
+    unsigned short gsym_file;
+    unsigned short pad;
+    unsigned int   module_size;
+    unsigned int   offset_size;
+    unsigned int   hash_size;
+    unsigned int   srcmodule_size;
 } PDB_SYMBOLS_OLD, *PPDB_SYMBOLS_OLD;
 
 typedef struct _PDB_SYMBOLS
 {
-    DWORD       signature;
-    DWORD       version;
-    DWORD       age;
-    WORD        global_file;
-    WORD        flags;
-    WORD        public_file;
-    WORD        bldVer;
-    WORD        gsym_file;
-    WORD        rbldVer;
-    DWORD       module_size;
-    DWORD       offset_size;
-    DWORD       hash_size;
-    DWORD       srcmodule_size;
-    DWORD       pdbimport_size;
-    DWORD       resvd0;
-    DWORD       stream_index_size;
-    DWORD       unknown2_size;
-    WORD        resvd3;
-    WORD        machine;
-    DWORD       resvd4;
+    unsigned int   signature;
+    unsigned int   version;
+    unsigned int   age;
+    unsigned short global_hash_file;
+    unsigned short flags;
+    unsigned short public_file;
+    unsigned short bldVer;
+    unsigned short gsym_file;
+    unsigned short rbldVer;
+    unsigned int   module_size;
+    unsigned int   offset_size;
+    unsigned int   hash_size;
+    unsigned int   srcmodule_size;
+    unsigned int   pdbimport_size;
+    unsigned int   resvd0;
+    unsigned int   stream_index_size;
+    unsigned int   unknown2_size;
+    unsigned short resvd3;
+    unsigned short machine;
+    unsigned int   resvd4;
 } PDB_SYMBOLS, *PPDB_SYMBOLS;
 
 typedef struct
 {
-    WORD        FPO;
-    WORD        unk0;
-    WORD        unk1;
-    WORD        unk2;
-    WORD        unk3;
-    WORD        segments;
+    unsigned short FPO;
+    unsigned short unk0;
+    unsigned short unk1;
+    unsigned short unk2;
+    unsigned short unk3;
+    unsigned short segments;
 } PDB_STREAM_INDEXES_OLD;
 
 typedef struct
 {
-    WORD        FPO;
-    WORD        unk0;
-    WORD        unk1;
-    WORD        unk2;
-    WORD        unk3;
-    WORD        segments;
-    WORD        unk4;
-    WORD        unk5;
-    WORD        unk6;
-    WORD        FPO_EXT;
-    WORD        unk7;
+    unsigned short FPO;
+    unsigned short unk0;
+    unsigned short unk1;
+    unsigned short unk2;
+    unsigned short unk3;
+    unsigned short segments;
+    unsigned short unk4;
+    unsigned short unk5;
+    unsigned short unk6;
+    unsigned short FPO_EXT;
+    unsigned short unk7;
 } PDB_STREAM_INDEXES;
 
 typedef struct _PDB_FPO_DATA
 {
-    DWORD       start;
-    DWORD       func_size;
-    DWORD       locals_size;
-    DWORD       params_size;
-    DWORD       maxstack_size;
-    DWORD       str_offset;
-    WORD        prolog_size;
-    WORD        savedregs_size;
+    unsigned int   start;
+    unsigned int   func_size;
+    unsigned int   locals_size;
+    unsigned int   params_size;
+    unsigned int   maxstack_size;
+    unsigned int   str_offset;
+    unsigned short prolog_size;
+    unsigned short savedregs_size;
 #define PDB_FPO_DFL_SEH         0x00000001
 #define PDB_FPO_DFL_EH          0x00000002
 #define PDB_FPO_DFL_IN_BLOCK    0x00000004
-    DWORD       flags;
+    unsigned int   flags;
 } PDB_FPO_DATA;
+
+typedef struct _PDB_STRING_TABLE
+{
+    unsigned int   magic;
+    unsigned int   hash_version;
+    unsigned int   length;
+}
+PDB_STRING_TABLE;
+/* This header is followed by:
+ * - a series (of bytes hdr.length) of 0-terminated strings
+ * - a serialized hash table
+ */
+
+/* Header for hash tables inside DBI (aka symbols) stream.
+ * - The global hash stream contains only the hash table.
+ * - The public stream contains the same layout for its hash table
+ *   (but other information as well).
+ */
+typedef struct
+{
+    unsigned signature;
+    unsigned version;
+    unsigned size_hash_records;
+    unsigned unknown;
+} DBI_HASH_HEADER;
+/* This header is followed by:
+ * - DBI_HASH_RECORDS (on hdr:size_hash_records bytes)
+ * - a bitmap of DBI_MAX_HASH + 1 entries (on DBI_BITMAP_HASH_SIZE bytes)
+ * - a table (one entry per present bit in bitmap) as index into hdr:num_records
+ */
+
+typedef struct
+{
+    unsigned offset;
+    unsigned unknown;
+} DBI_HASH_RECORD;
+
+#define DBI_MAX_HASH 4096
+#define DBI_BITMAP_HASH_SIZE ((DBI_MAX_HASH / (8 * sizeof(unsigned)) + 1) * sizeof(unsigned))
+
+/* Header for public stream (from DBI / SYMBOLS stream)
+ * Followed by a hash table (cf DBI_HASH_HEADER and the following bits)
+ */
+typedef struct
+{
+    unsigned hash_size;
+    unsigned address_map_size;
+    unsigned num_thunks;
+    unsigned size_thunk;
+    unsigned short section_thunk_table;
+    unsigned short _pad0;
+    unsigned offset_thunk_table;
+    unsigned num_sects;
+} DBI_PUBLIC_HEADER;
 
 #include "poppack.h"
 
@@ -2601,59 +2693,59 @@ typedef struct _PDB_FPO_DATA
 typedef struct OMFSignature
 {
     char        Signature[4];
-    long        filepos;
+    int         filepos;
 } OMFSignature;
 
 typedef struct OMFSignatureRSDS
 {
-    char        Signature[4];
-    GUID        guid;
-    DWORD       age;
-    CHAR        name[1];
+    char         Signature[4];
+    GUID         guid;
+    unsigned int age;
+    char         name[1];
 } OMFSignatureRSDS;
 
 typedef struct _CODEVIEW_PDB_DATA
 {
     char        Signature[4];
-    long        filepos;
-    DWORD       timestamp;
-    DWORD       age;
-    CHAR        name[1];
+    int         filepos;
+    unsigned int timestamp;
+    unsigned int age;
+    char         name[1];
 } CODEVIEW_PDB_DATA, *PCODEVIEW_PDB_DATA;
 
 typedef struct OMFDirHeader
 {
-    WORD        cbDirHeader;
-    WORD        cbDirEntry;
-    DWORD       cDir;
-    DWORD       lfoNextDir;
-    DWORD       flags;
+    unsigned short cbDirHeader;
+    unsigned short cbDirEntry;
+    unsigned int   cDir;
+    unsigned int   lfoNextDir;
+    unsigned int   flags;
 } OMFDirHeader;
 
 typedef struct OMFDirEntry
 {
-    WORD        SubSection;
-    WORD        iMod;
-    DWORD       lfo;
-    DWORD       cb;
+    unsigned short SubSection;
+    unsigned short iMod;
+    unsigned int   lfo;
+    unsigned int   cb;
 } OMFDirEntry;
 
 /* sstModule subsection */
 
 typedef struct OMFSegDesc
 {
-    WORD        Seg;
-    WORD        pad;
-    DWORD       Off;
-    DWORD       cbSeg;
+    unsigned short Seg;
+    unsigned short pad;
+    unsigned int   Off;
+    unsigned int   cbSeg;
 } OMFSegDesc;
 
 typedef struct OMFModule
 {
-    WORD        ovlNumber;
-    WORD        iLib;
-    WORD        cSeg;
-    char        Style[2];
+    unsigned short ovlNumber;
+    unsigned short iLib;
+    unsigned short cSeg;
+    char           Style[2];
 /*
     OMFSegDesc  SegInfo[cSeg];
     p_string    Name;
@@ -2662,10 +2754,10 @@ typedef struct OMFModule
 
 typedef struct OMFGlobalTypes
 {
-    DWORD       flags;
-    DWORD       cTypes;
+    unsigned int flags;
+    unsigned int cTypes;
 /*
-    DWORD       offset[cTypes];
+    unsigned int offset[cTypes];
                 types_record[];
 */
 } OMFGlobalTypes;
@@ -2677,9 +2769,9 @@ typedef struct OMFSymHash
 {
     unsigned short  symhash;
     unsigned short  addrhash;
-    unsigned long   cbSymbol;
-    unsigned long   cbHSym;
-    unsigned long   cbHAddr;
+    unsigned int    cbSymbol;
+    unsigned int    cbHSym;
+    unsigned int    cbHAddr;
 } OMFSymHash;
 
 /* sstSegMap section */
@@ -2692,8 +2784,8 @@ typedef struct OMFSegMapDesc
     unsigned short  frame;
     unsigned short  iSegName;
     unsigned short  iClassName;
-    unsigned long   offset;
-    unsigned long   cbSeg;
+    unsigned int    offset;
+    unsigned int    cbSeg;
 } OMFSegMapDesc;
 
 typedef struct OMFSegMap
@@ -2710,7 +2802,7 @@ typedef struct OMFSourceLine
 {
     unsigned short  Seg;
     unsigned short  cLnOff;
-    unsigned long   offset[1];
+    unsigned int    offset[1];
     unsigned short  lineNbr[1];
 } OMFSourceLine;
 
@@ -2718,7 +2810,7 @@ typedef struct OMFSourceFile
 {
     unsigned short  cSeg;
     unsigned short  reserved;
-    unsigned long   baseSrcLn[1];
+    unsigned int    baseSrcLn[1];
     unsigned short  cFName;
     char            Name;
 } OMFSourceFile;
@@ -2727,5 +2819,5 @@ typedef struct OMFSourceModule
 {
     unsigned short  cFile;
     unsigned short  cSeg;
-    unsigned long   baseSrcFile[1];
+    unsigned int    baseSrcFile[1];
 } OMFSourceModule;

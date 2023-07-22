@@ -46,7 +46,6 @@
 #include "uxtheme.h"
 #include "vssym32.h"
 #include "wine/debug.h"
-#include "wine/heap.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(monthcal);
 
@@ -671,7 +670,7 @@ MONTHCAL_GetMonthRange(const MONTHCAL_INFO *infoPtr, DWORD flag, SYSTEMTIME *st)
 {
   INT range;
 
-  TRACE("flag=%d, st=%p\n", flag, st);
+  TRACE("flags %#lx, st %p\n", flag, st);
 
   switch (flag) {
   case GMR_VISIBLE:
@@ -709,7 +708,7 @@ MONTHCAL_GetMonthRange(const MONTHCAL_INFO *infoPtr, DWORD flag, SYSTEMTIME *st)
       break;
   }
   default:
-      WARN("Unknown flag value, got %d\n", flag);
+      WARN("Unknown flag value, got %ld\n", flag);
       range = 0;
   }
 
@@ -1296,7 +1295,7 @@ MONTHCAL_SetColor(MONTHCAL_INFO *infoPtr, UINT index, COLORREF color)
   enum CachedBrush type;
   COLORREF prev;
 
-  TRACE("%p, %d: color %08x\n", infoPtr, index, color);
+  TRACE("%p, %d: color %#lx\n", infoPtr, index, color);
 
   if (index > MCSC_TRAILINGTEXT) return -1;
 
@@ -1946,7 +1945,7 @@ static void MONTHCAL_NotifyDayState(MONTHCAL_INFO *infoPtr)
   nmds.nmhdr.idFrom   = GetWindowLongPtrW(infoPtr->hwndSelf, GWLP_ID);
   nmds.nmhdr.code     = MCN_GETDAYSTATE;
   nmds.cDayState      = MONTHCAL_GetMonthRange(infoPtr, GMR_DAYSTATE, 0);
-  nmds.prgDayState    = state = heap_alloc_zero(nmds.cDayState * sizeof(MONTHDAYSTATE));
+  nmds.prgDayState    = state = Alloc(nmds.cDayState * sizeof(MONTHDAYSTATE));
 
   MONTHCAL_GetMinDate(infoPtr, &nmds.stStart);
   nmds.stStart.wDay = 1;
@@ -1955,7 +1954,7 @@ static void MONTHCAL_NotifyDayState(MONTHCAL_INFO *infoPtr)
   memcpy(infoPtr->monthdayState, nmds.prgDayState,
       MONTHCAL_GetMonthRange(infoPtr, GMR_DAYSTATE, 0)*sizeof(MONTHDAYSTATE));
 
-  heap_free(state);
+  Free(state);
 }
 
 /* no valid range check performed */
@@ -2071,8 +2070,7 @@ static LRESULT CALLBACK EditWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM 
 {
     MONTHCAL_INFO *infoPtr = (MONTHCAL_INFO *)GetWindowLongPtrW(GetParent(hwnd), 0);
 
-    TRACE("(hwnd=%p, uMsg=%x, wParam=%lx, lParam=%lx)\n",
-	  hwnd, uMsg, wParam, lParam);
+    TRACE("hwnd %p, uMsg %x, wParam %Ix, lParam %Ix\n", hwnd, uMsg, wParam, lParam);
 
     switch (uMsg)
     {
@@ -2160,7 +2158,7 @@ MONTHCAL_LButtonDown(MONTHCAL_INFO *infoPtr, LPARAM lParam)
 
   hit = MONTHCAL_HitTest(infoPtr, &ht);
 
-  TRACE("%x at %s\n", hit, wine_dbgstr_point(&ht.pt));
+  TRACE("%lx at %s\n", hit, wine_dbgstr_point(&ht.pt));
 
   switch(hit)
   {
@@ -2320,7 +2318,7 @@ MONTHCAL_LButtonUp(MONTHCAL_INFO *infoPtr, LPARAM lParam)
 static LRESULT
 MONTHCAL_Timer(MONTHCAL_INFO *infoPtr, WPARAM id)
 {
-  TRACE("%ld\n", id);
+  TRACE("%Id\n", id);
 
   switch(id) {
   case MC_PREVNEXTMONTHTIMER:
@@ -2343,7 +2341,7 @@ MONTHCAL_Timer(MONTHCAL_INFO *infoPtr, WPARAM id)
     return 0;
   }
   default:
-    ERR("got unknown timer %ld\n", id);
+    ERR("got unknown timer %Id\n", id);
     break;
   }
 
@@ -2449,7 +2447,7 @@ MONTHCAL_EraseBkgnd(const MONTHCAL_INFO *infoPtr, HDC hdc)
 static LRESULT
 MONTHCAL_PrintClient(MONTHCAL_INFO *infoPtr, HDC hdc, DWORD options)
 {
-  FIXME("Partial Stub: (hdc=%p options=0x%08x)\n", hdc, options);
+  FIXME("Partial Stub: (hdc %p options %#lx)\n", hdc, options);
 
   if ((options & PRF_CHECKVISIBLE) && !IsWindowVisible(infoPtr->hwndSelf))
       return 0;
@@ -2594,9 +2592,9 @@ static void MONTHCAL_UpdateSize(MONTHCAL_INFO *infoPtr)
   {
       infoPtr->dim.cx = x;
       infoPtr->dim.cy = y;
-      infoPtr->calendars = heap_realloc(infoPtr->calendars, MONTHCAL_GetCalCount(infoPtr)*sizeof(CALENDAR_INFO));
+      infoPtr->calendars = ReAlloc(infoPtr->calendars, MONTHCAL_GetCalCount(infoPtr)*sizeof(CALENDAR_INFO));
 
-      infoPtr->monthdayState = heap_realloc(infoPtr->monthdayState,
+      infoPtr->monthdayState = ReAlloc(infoPtr->monthdayState,
           MONTHCAL_GetMonthRange(infoPtr, GMR_DAYSTATE, 0)*sizeof(MONTHDAYSTATE));
       MONTHCAL_NotifyDayState(infoPtr);
 
@@ -2705,8 +2703,7 @@ static LRESULT theme_changed (const MONTHCAL_INFO* infoPtr)
 static INT MONTHCAL_StyleChanged(MONTHCAL_INFO *infoPtr, WPARAM wStyleType,
                                  const STYLESTRUCT *lpss)
 {
-    TRACE("(styletype=%lx, styleOld=0x%08x, styleNew=0x%08x)\n",
-          wStyleType, lpss->styleOld, lpss->styleNew);
+    TRACE("styletype %Ix, styleOld %#lx, styleNew %#lx\n", wStyleType, lpss->styleOld, lpss->styleNew);
 
     if (wStyleType != GWL_STYLE) return 0;
 
@@ -2722,8 +2719,7 @@ static INT MONTHCAL_StyleChanged(MONTHCAL_INFO *infoPtr, WPARAM wStyleType,
 static INT MONTHCAL_StyleChanging(MONTHCAL_INFO *infoPtr, WPARAM wStyleType,
                                   STYLESTRUCT *lpss)
 {
-    TRACE("(styletype=%lx, styleOld=0x%08x, styleNew=0x%08x)\n",
-          wStyleType, lpss->styleOld, lpss->styleNew);
+    TRACE("styletype %Ix, styleOld %#lx, styleNew %#lx\n", wStyleType, lpss->styleOld, lpss->styleNew);
 
     /* block MCS_MULTISELECT change */
     if ((lpss->styleNew ^ lpss->styleOld) & MCS_MULTISELECT)
@@ -2753,7 +2749,7 @@ MONTHCAL_Create(HWND hwnd, LPCREATESTRUCTW lpcs)
   MONTHCAL_INFO *infoPtr;
 
   /* allocate memory for info structure */
-  infoPtr = heap_alloc_zero(sizeof(*infoPtr));
+  infoPtr = Alloc(sizeof(*infoPtr));
   SetWindowLongPtrW(hwnd, 0, (DWORD_PTR)infoPtr);
 
   if (infoPtr == NULL) {
@@ -2765,9 +2761,9 @@ MONTHCAL_Create(HWND hwnd, LPCREATESTRUCTW lpcs)
   infoPtr->hwndNotify = lpcs->hwndParent;
   infoPtr->dwStyle = GetWindowLongW(hwnd, GWL_STYLE);
   infoPtr->dim.cx = infoPtr->dim.cy = 1;
-  infoPtr->calendars = heap_alloc_zero(sizeof(CALENDAR_INFO));
+  infoPtr->calendars = Alloc(sizeof(*infoPtr->calendars));
   if (!infoPtr->calendars) goto fail;
-  infoPtr->monthdayState = heap_alloc_zero(3 * sizeof(MONTHDAYSTATE));
+  infoPtr->monthdayState = Alloc(3 * sizeof(*infoPtr->monthdayState));
   if (!infoPtr->monthdayState) goto fail;
 
   /* initialize info structure */
@@ -2808,9 +2804,9 @@ MONTHCAL_Create(HWND hwnd, LPCREATESTRUCTW lpcs)
   return 0;
 
 fail:
-  heap_free(infoPtr->monthdayState);
-  heap_free(infoPtr->calendars);
-  heap_free(infoPtr);
+  Free(infoPtr->monthdayState);
+  Free(infoPtr->calendars);
+  Free(infoPtr);
   return 0;
 }
 
@@ -2819,9 +2815,8 @@ MONTHCAL_Destroy(MONTHCAL_INFO *infoPtr)
 {
   INT i;
 
-  /* free month calendar info data */
-  heap_free(infoPtr->monthdayState);
-  heap_free(infoPtr->calendars);
+  Free(infoPtr->monthdayState);
+  Free(infoPtr->calendars);
   SetWindowLongPtrW(infoPtr->hwndSelf, 0, 0);
 
   CloseThemeData (GetWindowTheme (infoPtr->hwndSelf));
@@ -2829,7 +2824,7 @@ MONTHCAL_Destroy(MONTHCAL_INFO *infoPtr)
   for (i = 0; i < BrushLast; i++) DeleteObject(infoPtr->brushes[i]);
   for (i = 0; i < PenLast; i++) DeleteObject(infoPtr->pens[i]);
 
-  heap_free(infoPtr);
+  Free(infoPtr);
   return 0;
 }
 
@@ -2874,7 +2869,7 @@ MONTHCAL_WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
   MONTHCAL_INFO *infoPtr = (MONTHCAL_INFO *)GetWindowLongPtrW(hwnd, 0);
 
-  TRACE("hwnd=%p msg=%x wparam=%lx lparam=%lx\n", hwnd, uMsg, wParam, lParam);
+  TRACE("hwnd %p, msg %x, wparam %Ix, lparam %Ix\n", hwnd, uMsg, wParam, lParam);
 
   if (!infoPtr && (uMsg != WM_CREATE))
     return DefWindowProcW(hwnd, uMsg, wParam, lParam);
@@ -3015,7 +3010,7 @@ MONTHCAL_WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 
   default:
     if ((uMsg >= WM_USER) && (uMsg < WM_APP) && !COMCTL32_IsReflectedMessage(uMsg))
-      ERR( "unknown msg %04x wp=%08lx lp=%08lx\n", uMsg, wParam, lParam);
+      ERR( "unknown msg %04x, wp %Ix, lp %Ix\n", uMsg, wParam, lParam);
     return DefWindowProcW(hwnd, uMsg, wParam, lParam);
   }
 }

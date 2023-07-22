@@ -26,13 +26,15 @@
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
 #include <stdarg.h>
+#include <stdlib.h>
+#include <assert.h>
 #include "windef.h"
 #include "winbase.h"
 #include "winternl.h"
 #include "wine/debug.h"
 #include "wine/vulkan.h"
-#include "wine/vulkan_driver.h"
 #include "wine/unixlib.h"
+#include "wine/list.h"
 
 #include "loader_thunks.h"
 
@@ -42,8 +44,6 @@
 #define WINEVULKAN_QUIRK_GET_DEVICE_PROC_ADDR 0x00000001
 #define WINEVULKAN_QUIRK_ADJUST_MAX_IMAGE_COUNT 0x00000002
 #define WINEVULKAN_QUIRK_IGNORE_EXPLICIT_LAYERS 0x00000004
-#define WINEVULKAN_QUIRK_EXPOSE_MEM_PRIORITY 0x00000008
-#define WINEVULKAN_QUIRK_EXPOSE_KEYED_MUTEX 0x00000010
 
 /* Base 'class' for our Vulkan dispatchable objects such as VkDevice and VkInstance.
  * This structure MUST be the first element of a dispatchable object as the ICD
@@ -55,13 +55,59 @@ struct wine_vk_base
     /* Special section in each dispatchable object for use by the ICD loader for
      * storing dispatch tables. The start contains a magical value '0x01CDC0DE'.
      */
-    UINT_PTR loader_magic;
+    UINT64 loader_magic;
+    UINT64 unix_handle;
 };
 
-struct wine_vk_device_base
+struct VkPhysicalDevice_T
+{
+    struct wine_vk_base base;
+};
+
+struct VkInstance_T
+{
+    struct wine_vk_base base;
+    uint32_t phys_dev_count;
+    struct VkPhysicalDevice_T phys_devs[1];
+};
+
+struct VkQueue_T
+{
+    struct wine_vk_base base;
+};
+
+struct VkDevice_T
 {
     struct wine_vk_base base;
     unsigned int quirks;
+    struct VkQueue_T queues[1];
+};
+
+struct vk_swapchain
+{
+    UINT64 unix_handle;
+};
+
+static inline struct vk_swapchain *swapchain_from_handle(VkSwapchainKHR handle)
+{
+    return (struct vk_swapchain *)(uintptr_t)handle;
+}
+
+struct vk_command_pool
+{
+    UINT64 unix_handle;
+    struct list command_buffers;
+};
+
+static inline struct vk_command_pool *command_pool_from_handle(VkCommandPool handle)
+{
+    return (struct vk_command_pool *)(uintptr_t)handle;
+}
+
+struct VkCommandBuffer_T
+{
+    struct wine_vk_base base;
+    struct list pool_link;
 };
 
 struct vulkan_func
@@ -100,35 +146,32 @@ struct wine_vk_debug_report_params
     const char *message;
 };
 
-extern const struct unix_funcs *unix_funcs;
-extern unixlib_handle_t unix_handle DECLSPEC_HIDDEN;
-
-static inline NTSTATUS vk_unix_call(enum unix_call code, void *params)
+struct is_available_instance_function_params
 {
-    return __wine_unix_call(unix_handle, code, params);
+    VkInstance instance;
+    const char *name;
+};
+
+struct is_available_device_function_params
+{
+    VkDevice device;
+    const char *name;
+};
+
+#define wine_vk_find_struct(s, t) wine_vk_find_struct_((void *)s, VK_STRUCTURE_TYPE_##t)
+static inline void *wine_vk_find_struct_(void *s, VkStructureType t)
+{
+    VkBaseOutStructure *header;
+
+    for (header = s; header; header = header->pNext)
+    {
+        if (header->sType == t)
+            return header;
+    }
+
+    return NULL;
 }
 
-typedef VkResult (WINAPI *PFN_native_vkCreateInstance)(const VkInstanceCreateInfo *, const VkAllocationCallbacks *, VkInstance *,
-                                                       void * (*)(VkInstance, const char *), void *);
-typedef VkResult (WINAPI *PFN_native_vkCreateDevice)(VkPhysicalDevice, const VkDeviceCreateInfo *, const VkAllocationCallbacks *, VkDevice *,
-                                                     void * (*)(VkInstance, const char *), void *);
-
-struct unix_funcs
-{
-    NTSTATUS (WINAPI *p_vk_call)(enum unix_call, void *);
-    BOOL (WINAPI *p_is_available_instance_function)(VkInstance, const char *);
-    BOOL (WINAPI *p_is_available_device_function)(VkDevice, const char *);
-
-    VkDevice (WINAPI *p_wine_get_native_VkDevice)(VkDevice);
-    VkInstance (WINAPI *p_wine_get_native_VkInstance)(VkInstance);
-    VkPhysicalDevice (WINAPI *p_wine_get_native_VkPhysicalDevice)(VkPhysicalDevice);
-    VkQueue (WINAPI *p_wine_get_native_VkQueue)(VkQueue);
-    VkPhysicalDevice (WINAPI *p_wine_get_wrapped_VkPhysicalDevice)(VkInstance, VkPhysicalDevice);
-
-    VkResult (WINAPI *p_wine_create_vk_instance_with_callback)(const VkInstanceCreateInfo *, const VkAllocationCallbacks *, VkInstance *,
-                                                               PFN_native_vkCreateInstance, void *);
-    VkResult (WINAPI *p_wine_create_vk_device_with_callback)(VkPhysicalDevice, const VkDeviceCreateInfo *, const VkAllocationCallbacks *, VkDevice *,
-                                                             PFN_native_vkCreateDevice, void *);
-};
+#define UNIX_CALL(code, params) WINE_UNIX_CALL(unix_ ## code, params)
 
 #endif /* __WINE_VULKAN_LOADER_H */

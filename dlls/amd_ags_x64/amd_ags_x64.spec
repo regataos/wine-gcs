@@ -1,7 +1,7 @@
 @ stdcall agsDeInit(ptr)
 @ stdcall agsDeInitialize(ptr)
 @ stdcall agsCheckDriverVersion(ptr long)
-@ stub agsDriverExtensionsDX11_BeginUAVOverlap
+@ stdcall -norelay -arch=win64 agsDriverExtensionsDX11_BeginUAVOverlap() DX11_BeginUAVOverlap_impl
 @ stub agsDriverExtensionsDX11_CreateBuffer
 @ stdcall agsDriverExtensionsDX11_CreateDevice(ptr ptr ptr ptr)
 @ stub agsDriverExtensionsDX11_CreateFromDevice
@@ -11,7 +11,7 @@
 @ stub agsDriverExtensionsDX11_DeInit
 @ stub agsDriverExtensionsDX11_Destroy
 @ stdcall -norelay -arch=win64 agsDriverExtensionsDX11_DestroyDevice()
-@ stub agsDriverExtensionsDX11_EndUAVOverlap
+@ stdcall -norelay -arch=win64 agsDriverExtensionsDX11_EndUAVOverlap() DX11_EndUAVOverlap_impl
 @ stub agsDriverExtensionsDX11_GetMaxClipRects
 @ stub agsDriverExtensionsDX11_IASetPrimitiveTopology
 @ stdcall agsDriverExtensionsDX11_Init(ptr ptr long ptr)
@@ -42,4 +42,4 @@
 @ stdcall agsGetVersionNumber()
 @ stdcall agsInit(ptr ptr ptr)
 @ stdcall agsInitialize(long ptr ptr ptr)
-@ stub agsSetDisplayMode
+@ stdcall agsSetDisplayMode(ptr long long ptr)

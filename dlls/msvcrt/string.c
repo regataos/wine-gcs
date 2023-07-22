@@ -377,8 +377,8 @@ int fpnum_double(struct fpnum *fp, double *d)
         return 0;
     }
 
-    TRACE("%c %s *2^%d (round %d)\n", fp->sign == -1 ? '-' : '+',
-            wine_dbgstr_longlong(fp->m), fp->exp, fp->mod);
+    TRACE("%c %#I64x *2^%d (round %d)\n", fp->sign == -1 ? '-' : '+',
+            fp->m, fp->exp, fp->mod);
     if (!fp->m)
     {
         *d = fp->sign * 0.0;
@@ -467,7 +467,7 @@ int fpnum_double(struct fpnum *fp, double *d)
     bits |= (ULONGLONG)fp->exp << (MANT_BITS - 1);
     bits |= fp->m & (((ULONGLONG)1 << (MANT_BITS - 1)) - 1);
 
-    TRACE("returning %s\n", wine_dbgstr_longlong(bits));
+    TRACE("returning %#I64x\n", bits);
     *d = *(double*)&bits;
     return 0;
 }
@@ -496,8 +496,8 @@ int fpnum_ldouble(struct fpnum *fp, MSVCRT__LDOUBLE *d)
         return 0;
     }
 
-    TRACE("%c %s *2^%d (round %d)\n", fp->sign == -1 ? '-' : '+',
-            wine_dbgstr_longlong(fp->m), fp->exp, fp->mod);
+    TRACE("%c %#I64x *2^%d (round %d)\n", fp->sign == -1 ? '-' : '+',
+            fp->m, fp->exp, fp->mod);
     if (!fp->m)
     {
         d->x80[0] = 0;
@@ -1268,6 +1268,50 @@ char* __cdecl strncpy(char *dst, const char *src, size_t len)
     return dst;
 }
 
+/******************************************************************
+ *                  strncpy_s (MSVCRT.@)
+ */
+int __cdecl strncpy_s( char *dst, size_t elem, const char *src, size_t count )
+{
+    char *p = dst;
+    BOOL truncate = (count == _TRUNCATE);
+
+    TRACE("(%p %Iu %s %Iu)\n", dst, elem, debugstr_a(src), count);
+
+    if (!count)
+    {
+        if (dst && elem) *dst = 0;
+        return 0;
+    }
+
+    if (!MSVCRT_CHECK_PMT(dst != NULL)) return EINVAL;
+    if (!MSVCRT_CHECK_PMT(elem != 0)) return EINVAL;
+    if (!MSVCRT_CHECK_PMT(src != NULL))
+    {
+        *dst = 0;
+        return EINVAL;
+    }
+
+    while (elem && count && *src)
+    {
+        *p++ = *src++;
+        elem--;
+        count--;
+    }
+    if (!elem && truncate)
+    {
+        *(p-1) = 0;
+        return STRUNCATE;
+    }
+    else if (!elem)
+    {
+        *dst = 0;
+        return ERANGE;
+    }
+    *p = 0;
+    return 0;
+}
+
 /*********************************************************************
  *      strcpy (MSVCRT.@)
  */
@@ -1284,9 +1328,9 @@ char* CDECL strcpy(char *dst, const char *src)
 int CDECL strcpy_s( char* dst, size_t elem, const char* src )
 {
     size_t i;
-    if(!elem) return EINVAL;
-    if(!dst) return EINVAL;
-    if(!src)
+    if (!MSVCRT_CHECK_PMT(dst != 0)) return EINVAL;
+    if (!MSVCRT_CHECK_PMT(elem != 0)) return EINVAL;
+    if (!MSVCRT_CHECK_PMT(src != NULL))
     {
         dst[0] = '\0';
         return EINVAL;
@@ -1296,6 +1340,7 @@ int CDECL strcpy_s( char* dst, size_t elem, const char* src )
     {
         if((dst[i] = src[i]) == '\0') return 0;
     }
+    MSVCRT_INVALID_PMT("dst[elem] is too small", ERANGE);
     dst[0] = '\0';
     return ERANGE;
 }
@@ -1306,9 +1351,9 @@ int CDECL strcpy_s( char* dst, size_t elem, const char* src )
 int CDECL strcat_s( char* dst, size_t elem, const char* src )
 {
     size_t i, j;
-    if(!dst) return EINVAL;
-    if(elem == 0) return EINVAL;
-    if(!src)
+    if (!MSVCRT_CHECK_PMT(dst != 0)) return EINVAL;
+    if (!MSVCRT_CHECK_PMT(elem != 0)) return EINVAL;
+    if (!MSVCRT_CHECK_PMT(src != NULL))
     {
         dst[0] = '\0';
         return EINVAL;
@@ -1325,6 +1370,7 @@ int CDECL strcat_s( char* dst, size_t elem, const char* src )
         }
     }
     /* Set the first element to 0, not the first element after the skipped part */
+    MSVCRT_INVALID_PMT("dst[elem] is too small", ERANGE);
     dst[0] = '\0';
     return ERANGE;
 }
@@ -1349,32 +1395,38 @@ int CDECL strncat_s( char* dst, size_t elem, const char* src, size_t count )
 
     if (!MSVCRT_CHECK_PMT(dst != 0)) return EINVAL;
     if (!MSVCRT_CHECK_PMT(elem != 0)) return EINVAL;
-    if (!MSVCRT_CHECK_PMT(src != 0))
+    if (count == 0) return 0;
+
+    if (!MSVCRT_CHECK_PMT(src != NULL))
     {
-        dst[0] = '\0';
+        *dst = 0;
         return EINVAL;
     }
 
-    for(i = 0; i < elem; i++)
+    for (i = 0; i < elem; i++) if (!dst[i]) break;
+
+    if (i == elem)
     {
-        if(dst[i] == '\0')
+        MSVCRT_INVALID_PMT("dst[elem] is not NULL terminated\n", EINVAL);
+        *dst = 0;
+        return EINVAL;
+    }
+
+    for (j = 0; (j + i) < elem; j++)
+    {
+        if(count == _TRUNCATE && j + i == elem - 1)
         {
-            for(j = 0; (j + i) < elem; j++)
-            {
-                if(count == _TRUNCATE && j + i == elem - 1)
-                {
-                    dst[j + i] = '\0';
-                    return STRUNCATE;
-                }
-                if(j == count || (dst[j + i] = src[j]) == '\0')
-                {
-                    dst[j + i] = '\0';
-                    return 0;
-                }
-            }
+            dst[j + i] = '\0';
+            return STRUNCATE;
+        }
+        if(j == count || (dst[j + i] = src[j]) == '\0')
+        {
+            dst[j + i] = '\0';
+            return 0;
         }
     }
-    /* Set the first element to 0, not the first element after the skipped part */
+
+    MSVCRT_INVALID_PMT("dst[elem] is too small", ERANGE);
     dst[0] = '\0';
     return ERANGE;
 }
@@ -2675,19 +2727,62 @@ int CDECL I10_OUTPUT(MSVCRT__LDOUBLE ld80, int prec, int flag, struct _I10_OUTPU
 }
 #undef I10_OUTPUT_MAX_PREC
 
-/*********************************************************************
- *                  memcmp (MSVCRT.@)
- */
-int __cdecl memcmp(const void *ptr1, const void *ptr2, size_t n)
+static inline int memcmp_bytes(const void *ptr1, const void *ptr2, size_t n)
 {
     const unsigned char *p1, *p2;
 
     for (p1 = ptr1, p2 = ptr2; n; n--, p1++, p2++)
     {
-        if (*p1 < *p2) return -1;
-        if (*p1 > *p2) return 1;
+        if (*p1 != *p2)
+            return *p1 > *p2 ? 1 : -1;
     }
     return 0;
+}
+
+static inline int memcmp_blocks(const void *ptr1, const void *ptr2, size_t size)
+{
+    typedef uint64_t DECLSPEC_ALIGN(1) unaligned_ui64;
+
+    const uint64_t *p1 = ptr1;
+    const unaligned_ui64 *p2 = ptr2;
+    size_t remainder = size & (sizeof(uint64_t) - 1);
+    size_t block_count = size / sizeof(uint64_t);
+
+    while (block_count)
+    {
+        if (*p1 != *p2)
+            return memcmp_bytes(p1, p2, sizeof(uint64_t));
+
+        p1++;
+        p2++;
+        block_count--;
+    }
+
+    return memcmp_bytes(p1, p2, remainder);
+}
+
+/*********************************************************************
+ *                  memcmp (MSVCRT.@)
+ */
+int __cdecl memcmp(const void *ptr1, const void *ptr2, size_t n)
+{
+    const unsigned char *p1 = ptr1, *p2 = ptr2;
+    size_t align;
+    int result;
+
+    if (n < sizeof(uint64_t))
+        return memcmp_bytes(p1, p2, n);
+
+    align = -(size_t)p1 & (sizeof(uint64_t) - 1);
+
+    if ((result = memcmp_bytes(p1, p2, align)))
+        return result;
+
+    p1 += align;
+    p2 += align;
+    n  -= align;
+
+    return memcmp_blocks(p1, p2, n);
 }
 
 #if defined(__i386__) || defined(__x86_64__)
@@ -2724,8 +2819,11 @@ int __cdecl memcmp(const void *ptr1, const void *ptr2, size_t n)
 
 #define MEMMOVE_INIT \
     "pushq " SRC_REG "\n\t" \
+    __ASM_SEH(".seh_pushreg " SRC_REG "\n\t") \
     __ASM_CFI(".cfi_adjust_cfa_offset 8\n\t") \
     "pushq " DEST_REG "\n\t" \
+    __ASM_SEH(".seh_pushreg " DEST_REG "\n\t") \
+    __ASM_SEH(".seh_endprologue\n\t") \
     __ASM_CFI(".cfi_adjust_cfa_offset 8\n\t") \
     "movq %rcx, " DEST_REG "\n\t" \
     "movq %rdx, " SRC_REG "\n\t"
@@ -2941,11 +3039,6 @@ __ASM_GLOBAL_FUNC( sse2_memmove,
         MEMMOVE_CLEANUP
         "ret" )
 
-#undef DEST_REG
-#undef SRC_REG
-#undef LEN_REG
-#undef TMP_REG
-
 #endif
 
 /*********************************************************************
@@ -3080,71 +3173,6 @@ void * __cdecl _memccpy(void *dst, const void *src, int c, size_t n)
     return NULL;
 }
 
-#if defined(__i386__) || defined(__x86_64__)
-
-#ifdef __i386__
-#define DEST_REG "%edi"
-#define LEN_REG "%ecx"
-#define VAL_REG "%eax"
-
-#define MEMSET_INIT \
-    "movl " DEST_REG ", %edx\n\t" \
-    "movl 4(%esp), " DEST_REG "\n\t" \
-    "movl 8(%esp), " VAL_REG "\n\t" \
-    "movl 12(%esp), " LEN_REG "\n\t"
-
-#define MEMSET_RET \
-    "movl %edx, " DEST_REG "\n\t" \
-    "ret"
-
-#else
-
-#define DEST_REG "%rdi"
-#define LEN_REG "%rcx"
-#define VAL_REG "%eax"
-
-#define MEMSET_INIT \
-    "movq " DEST_REG ", %r9\n\t" \
-    "movq %rcx, " DEST_REG "\n\t" \
-    "movl %edx, " VAL_REG "\n\t" \
-    "movq %r8, " LEN_REG "\n\t"
-
-#define MEMSET_RET \
-    "movq %r9, " DEST_REG "\n\t" \
-    "ret"
-
-#endif
-
-void __cdecl sse2_memset_aligned_32(unsigned char *d, unsigned int c, size_t n);
-__ASM_GLOBAL_FUNC( sse2_memset_aligned_32,
-        MEMSET_INIT
-        "movd " VAL_REG ", %xmm0\n\t"
-        "pshufd $0, %xmm0, %xmm0\n\t"
-        "test $0x20, " LEN_REG "\n\t"
-        "je 1f\n\t"
-        "add $0x20, " DEST_REG "\n\t"
-        "sub $0x20, " LEN_REG "\n\t"
-        "movdqa %xmm0, -0x20(" DEST_REG ")\n\t"
-        "movdqa %xmm0, -0x10(" DEST_REG ")\n\t"
-        "je 2f\n\t"
-        "1:\n\t"
-        "add $0x40, " DEST_REG "\n\t"
-        "sub $0x40, " LEN_REG "\n\t"
-        "movdqa %xmm0, -0x40(" DEST_REG ")\n\t"
-        "movdqa %xmm0, -0x30(" DEST_REG ")\n\t"
-        "movdqa %xmm0, -0x20(" DEST_REG ")\n\t"
-        "movdqa %xmm0, -0x10(" DEST_REG ")\n\t"
-        "ja 1b\n\t"
-        "2:\n\t"
-        MEMSET_RET )
-
-#undef MEMSET_INIT
-#undef MEMSET_RET
-#undef DEST_REG
-#undef LEN_REG
-#undef VAL_REG
-
-#endif
 
 static inline void memset_aligned_32(unsigned char *d, uint64_t v, size_t n)
 {
@@ -3186,22 +3214,8 @@ void *__cdecl memset(void *dst, int c, size_t n)
         if (n <= 64) return dst;
 
         n = (n - a) & ~0x1f;
-
-#ifdef __x86_64__
-        sse2_memset_aligned_32(d + a, v, n);
-        return dst;
-#endif
-#ifdef __i386__
-        if (sse2_supported)
-        {
-            sse2_memset_aligned_32(d + a, v, n);
-            return dst;
-        }
-#endif
-#ifndef __x86_64__
         memset_aligned_32(d + a, v, n);
         return dst;
-#endif
     }
     if (n >= 8)
     {

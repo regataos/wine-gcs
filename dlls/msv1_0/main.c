@@ -30,6 +30,7 @@
 #include "ntsecpkg.h"
 #include "rpc.h"
 #include "wincred.h"
+#include "wincrypt.h"
 #include "lmwksta.h"
 #include "lmapibuf.h"
 #include "lmerr.h"
@@ -42,30 +43,28 @@ WINE_DEFAULT_DEBUG_CHANNEL(ntlm);
 static ULONG ntlm_package_id;
 static LSA_DISPATCH_TABLE lsa_dispatch;
 
-static unixlib_handle_t ntlm_handle;
-
 static NTSTATUS ntlm_check_version(void)
 {
-    return __wine_unix_call( ntlm_handle, unix_check_version, NULL );
+    return WINE_UNIX_CALL( unix_check_version, NULL );
 }
 
 static void ntlm_cleanup( struct ntlm_ctx *ctx )
 {
-    __wine_unix_call( ntlm_handle, unix_cleanup, ctx );
+    WINE_UNIX_CALL( unix_cleanup, ctx );
 }
 
 static NTSTATUS ntlm_chat( struct ntlm_ctx *ctx, char *buf, unsigned int buflen, unsigned int *retlen )
 {
     struct chat_params params = { ctx, buf, buflen, retlen };
 
-    return __wine_unix_call( ntlm_handle, unix_chat, &params );
+    return WINE_UNIX_CALL( unix_chat, &params );
 }
 
 static NTSTATUS ntlm_fork( struct ntlm_ctx *ctx, char **argv )
 {
     struct fork_params params = { ctx, argv };
 
-    return __wine_unix_call( ntlm_handle, unix_fork, &params );
+    return WINE_UNIX_CALL( unix_fork, &params );
 }
 
 #define NTLM_CAPS \
@@ -111,7 +110,7 @@ static NTSTATUS NTAPI ntlm_LsaApInitializePackage( ULONG package_id, LSA_DISPATC
     LSA_STRING *str;
     char *ptr;
 
-    TRACE( "%08x, %p, %s, %s, %p\n", package_id, dispatch, debugstr_as(database), debugstr_as(confidentiality),
+    TRACE( "%#lx, %p, %s, %s, %p\n", package_id, dispatch, debugstr_as(database), debugstr_as(confidentiality),
            package_name );
 
     if (ntlm_check_version())
@@ -135,7 +134,7 @@ static NTSTATUS NTAPI ntlm_LsaApInitializePackage( ULONG package_id, LSA_DISPATC
 static NTSTATUS NTAPI ntlm_SpInitialize( ULONG_PTR package_id, SECPKG_PARAMETERS *params,
                                          LSA_SECPKG_FUNCTION_TABLE *lsa_function_table )
 {
-    TRACE( "%lu, %p, %p\n", package_id, params, lsa_function_table );
+    TRACE( "%#Ix, %p, %p\n", package_id, params, lsa_function_table );
 
     if (ntlm_check_version())
     {
@@ -192,7 +191,7 @@ static NTSTATUS NTAPI ntlm_SpAcquireCredentialsHandle( UNICODE_STRING *principal
     WCHAR *domain = NULL, *user = NULL, *password = NULL;
     SEC_WINNT_AUTH_IDENTITY_W *id = NULL;
 
-    TRACE( "%s, 0x%08x, %p, %p, %p, %p, %p, %p\n", debugstr_us(principal), cred_use, logon_id, auth_data,
+    TRACE( "%s, %#lx, %p, %p, %p, %p, %p, %p\n", debugstr_us(principal), cred_use, logon_id, auth_data,
            get_key_fn, get_key_arg, cred, expiry );
 
     switch (cred_use & ~SECPKG_CRED_RESERVED)
@@ -298,7 +297,7 @@ static NTSTATUS NTAPI ntlm_SpFreeCredentialsHandle( LSA_SEC_HANDLE handle )
 {
     struct ntlm_cred *cred = (struct ntlm_cred *)handle;
 
-    TRACE( "%lx\n", handle );
+    TRACE( "%#Ix\n", handle );
 
     if (!cred) return SEC_E_OK;
 
@@ -589,7 +588,7 @@ static NTSTATUS NTAPI ntlm_SpInitLsaModeContext( LSA_SEC_HANDLE cred_handle, LSA
     unsigned int len, bin_len;
     int idx;
 
-    TRACE( "%lx, %lx, %s, 0x%08x, %u, %p, %p, %p, %p, %p, %p, %p\n", cred_handle, ctx_handle, debugstr_us(target),
+    TRACE( "%#Ix, %#Ix, %s, %#lx, %lu, %p, %p, %p, %p, %p, %p, %p\n", cred_handle, ctx_handle, debugstr_us(target),
            ctx_req, data_rep, input, new_ctx_handle, output, ctx_attr, expiry, mapped_ctx, ctx_data );
 
     /* when communicating with the client there can be the following reply packets:
@@ -863,7 +862,7 @@ static NTSTATUS NTAPI ntlm_SpInitLsaModeContext( LSA_SEC_HANDLE cred_handle, LSA
     }
 
 done:
-    if (status != SEC_E_OK && status != SEC_I_CONTINUE_NEEDED)
+    if (status != SEC_E_OK && status != SEC_I_CONTINUE_NEEDED && !ctx_handle && !input)
     {
         ntlm_cleanup( ctx );
         free( ctx );
@@ -875,7 +874,7 @@ done:
     free( bin );
     free( want_flags );
 
-    TRACE( "returning %08x\n", status );
+    TRACE( "returning %#lx\n", status );
     return status;
 }
 
@@ -890,9 +889,9 @@ static NTSTATUS NTAPI ntlm_SpAcceptLsaModeContext( LSA_SEC_HANDLE cred_handle, L
     char *buf, *bin, *want_flags = NULL;
     unsigned int len, bin_len;
 
-    TRACE( "%lx, %lx, %08x, %u, %p, %p, %p, %p, %p, %p, %p\n", cred_handle, ctx_handle, ctx_req, data_rep, input,
+    TRACE( "%#Ix, %#Ix, %#lx, %lu, %p, %p, %p, %p, %p, %p, %p\n", cred_handle, ctx_handle, ctx_req, data_rep, input,
            new_ctx_handle, output, ctx_attr, expiry, mapped_ctx, ctx_data );
-    if (ctx_req) FIXME( "ignoring flags %08x\n", ctx_req );
+    if (ctx_req) FIXME( "ignoring flags %#lx\n", ctx_req );
 
     if (!(buf = malloc( NTLM_MAX_BUF ))) return SEC_E_INSUFFICIENT_MEMORY;
     if (!(bin = malloc( NTLM_MAX_BUF ))) goto done;
@@ -1079,7 +1078,7 @@ static NTSTATUS NTAPI ntlm_SpAcceptLsaModeContext( LSA_SEC_HANDLE cred_handle, L
     }
 
 done:
-    if (status != SEC_E_OK && status != SEC_I_CONTINUE_NEEDED)
+    if (status != SEC_E_OK && status != SEC_I_CONTINUE_NEEDED && !ctx_handle)
     {
         ntlm_cleanup( ctx );
         free( ctx );
@@ -1088,7 +1087,7 @@ done:
     free( bin );
     free( want_flags );
 
-    TRACE( "returning %08x\n", status );
+    TRACE( "returning %#lx\n", status );
     return status;
 }
 
@@ -1096,7 +1095,7 @@ static NTSTATUS NTAPI ntlm_SpDeleteContext( LSA_SEC_HANDLE handle )
 {
     struct ntlm_ctx *ctx = (struct ntlm_ctx *)handle;
 
-    TRACE( "%lx\n", handle );
+    TRACE( "%#Ix\n", handle );
 
     if (!ctx) return SEC_E_INVALID_HANDLE;
     ntlm_cleanup( ctx );
@@ -1124,7 +1123,7 @@ static SecPkgInfoW *build_package_info( const SecPkgInfoW *info )
 
 static NTSTATUS NTAPI ntlm_SpQueryContextAttributes( LSA_SEC_HANDLE handle, ULONG attr, void *buf )
 {
-    TRACE( "%lx, %u, %p\n", handle, attr, buf );
+    TRACE( "%#Ix, %lu, %p\n", handle, attr, buf );
 
     if (!handle) return SEC_E_INVALID_HANDLE;
 
@@ -1134,7 +1133,6 @@ static NTSTATUS NTAPI ntlm_SpQueryContextAttributes( LSA_SEC_HANDLE handle, ULON
     X(SECPKG_ATTR_ACCESS_TOKEN);
     X(SECPKG_ATTR_AUTHORITY);
     X(SECPKG_ATTR_DCE_INFO);
-    X(SECPKG_ATTR_KEY_INFO);
     X(SECPKG_ATTR_LIFESPAN);
     X(SECPKG_ATTR_NAMES);
     X(SECPKG_ATTR_NATIVE_NAMES);
@@ -1169,9 +1167,45 @@ static NTSTATUS NTAPI ntlm_SpQueryContextAttributes( LSA_SEC_HANDLE handle, ULON
         info->NegotiationState = SECPKG_NEGOTIATION_COMPLETE;
         return SEC_E_OK;
     }
+    case SECPKG_ATTR_KEY_INFO:
+    {
+        struct ntlm_ctx *ctx = (struct ntlm_ctx *)handle;
+        SecPkgContext_KeyInfoW *info = (SecPkgContext_KeyInfoW *)buf;
+        SEC_WCHAR *signature_alg;
+        ULONG signature_size, signature_algid;
+
+        if (ctx->flags & FLAG_NEGOTIATE_KEY_EXCHANGE)
+        {
+            signature_alg = (SEC_WCHAR *)L"HMAC-MD5";
+            signature_size = sizeof(L"HMAC-MD5");
+            signature_algid = 0xffffff76;
+        }
+        else
+        {
+            signature_alg = (SEC_WCHAR *)L"RSADSI RC4-CRC32";
+            signature_size = sizeof(L"RSADSI RC4-CRC32");
+            signature_algid = 0xffffff7c;
+        }
+
+        if (!(info->sSignatureAlgorithmName = RtlAllocateHeap( GetProcessHeap(), 0, signature_size )))
+            return SEC_E_INSUFFICIENT_MEMORY;
+        wcscpy( info->sSignatureAlgorithmName, signature_alg );
+
+        if (!(info->sEncryptAlgorithmName = RtlAllocateHeap( GetProcessHeap(), 0, sizeof(L"RSADSI RC4") )))
+        {
+            RtlFreeHeap( GetProcessHeap(), 0, info->sSignatureAlgorithmName );
+            return SEC_E_INSUFFICIENT_MEMORY;
+        }
+        wcscpy( info->sEncryptAlgorithmName, L"RSADSI RC4" );
+
+        info->KeySize = sizeof(ctx->session_key) * 8;
+        info->SignatureAlgorithm = signature_algid;
+        info->EncryptAlgorithm = CALG_RC4;
+        return SEC_E_OK;
+    }
 #undef X
     default:
-        FIXME( "unknown attribute %u\n", attr );
+        FIXME( "unknown attribute %lu\n", attr );
         break;
     }
 
@@ -1221,7 +1255,7 @@ static SECPKG_FUNCTION_TABLE ntlm_table =
 NTSTATUS NTAPI SpLsaModeInitialize( ULONG lsa_version, ULONG *package_version, SECPKG_FUNCTION_TABLE **table,
                                     ULONG *table_count )
 {
-    TRACE( "%08x, %p, %p, %p\n", lsa_version, package_version, table, table_count );
+    TRACE( "%#lx, %p, %p, %p\n", lsa_version, package_version, table, table_count );
 
     *package_version = SECPKG_INTERFACE_VERSION;
     *table = &ntlm_table;
@@ -1231,7 +1265,7 @@ NTSTATUS NTAPI SpLsaModeInitialize( ULONG lsa_version, ULONG *package_version, S
 
 static NTSTATUS NTAPI ntlm_SpInstanceInit( ULONG version, SECPKG_DLL_FUNCTIONS *dll_functions, void **user_functions )
 {
-    TRACE( "%08x, %p, %p\n", version, dll_functions, user_functions );
+    TRACE( "%#lx, %p, %p\n", version, dll_functions, user_functions );
     return STATUS_SUCCESS;
 }
 
@@ -1400,9 +1434,9 @@ static NTSTATUS NTAPI ntlm_SpMakeSignature( LSA_SEC_HANDLE handle, ULONG qop, Se
     struct ntlm_ctx *ctx = (struct ntlm_ctx *)handle;
     int idx;
 
-    TRACE( "%lx, 0x%08x, %p, %u\n", handle, qop, msg, msg_seq_no );
-    if (qop) FIXME( "ignoring quality of protection %08x\n", qop );
-    if (msg_seq_no) FIXME( "ignoring message sequence number %u\n", msg_seq_no );
+    TRACE( "%#Ix, %#lx, %p, %lu\n", handle, qop, msg, msg_seq_no );
+    if (qop) FIXME( "ignoring quality of protection %#lx\n", qop );
+    if (msg_seq_no) FIXME( "ignoring message sequence number %lu\n", msg_seq_no );
 
     if (!handle) return SEC_E_INVALID_HANDLE;
     if (!msg || !msg->pBuffers || msg->cBuffers < 2 || (idx = get_buffer_index( msg, SECBUFFER_TOKEN )) == -1)
@@ -1456,8 +1490,8 @@ static NTSTATUS NTAPI ntlm_SpVerifySignature( LSA_SEC_HANDLE handle, SecBufferDe
     struct ntlm_ctx *ctx = (struct ntlm_ctx *)handle;
     int idx;
 
-    TRACE( "%lx, %p, %u, %p\n", handle, msg, msg_seq_no, qop );
-    if (msg_seq_no) FIXME( "ignoring message sequence number %u\n", msg_seq_no );
+    TRACE( "%#Ix, %p, %lu, %p\n", handle, msg, msg_seq_no, qop );
+    if (msg_seq_no) FIXME( "ignoring message sequence number %lu\n", msg_seq_no );
 
     if (!handle) return SEC_E_INVALID_HANDLE;
     if (!msg || !msg->pBuffers || msg->cBuffers < 2 || (idx = get_buffer_index( msg, SECBUFFER_TOKEN )) == -1)
@@ -1472,9 +1506,9 @@ static NTSTATUS NTAPI ntlm_SpSealMessage( LSA_SEC_HANDLE handle, ULONG qop, SecB
     int token_idx, data_idx;
     struct ntlm_ctx *ctx;
 
-    TRACE( "%lx, %08x, %p %u\n", handle, qop, msg, msg_seq_no );
-    if (qop) FIXME( "ignoring quality of protection %08x\n", qop );
-    if (msg_seq_no) FIXME( "ignoring message sequence number %u\n", msg_seq_no );
+    TRACE( "%#Ix, %#lx, %p %lu\n", handle, qop, msg, msg_seq_no );
+    if (qop) FIXME( "ignoring quality of protection %#lx\n", qop );
+    if (msg_seq_no) FIXME( "ignoring message sequence number %lu\n", msg_seq_no );
 
     if (!handle) return SEC_E_INVALID_HANDLE;
 
@@ -1514,8 +1548,8 @@ static NTSTATUS NTAPI ntlm_SpUnsealMessage( LSA_SEC_HANDLE handle, SecBufferDesc
     int token_idx, data_idx;
     struct ntlm_ctx *ctx;
 
-    TRACE( "%lx, %p, %u, %p\n", handle, msg, msg_seq_no, qop );
-    if (msg_seq_no) FIXME( "ignoring message sequence number %u\n", msg_seq_no );
+    TRACE( "%#Ix, %p, %lu, %p\n", handle, msg, msg_seq_no, qop );
+    if (msg_seq_no) FIXME( "ignoring message sequence number %lu\n", msg_seq_no );
 
     if (!handle) return SEC_E_INVALID_HANDLE;
 
@@ -1559,7 +1593,7 @@ static SECPKG_USER_FUNCTION_TABLE ntlm_user_table =
 NTSTATUS NTAPI SpUserModeInitialize( ULONG lsa_version, ULONG *package_version, SECPKG_USER_FUNCTION_TABLE **table,
                                      ULONG *table_count )
 {
-    TRACE( "%08x, %p, %p, %p\n", lsa_version, package_version, table, table_count );
+    TRACE( "%#lx, %p, %p, %p\n", lsa_version, package_version, table, table_count );
 
     *package_version = SECPKG_INTERFACE_VERSION;
     *table = &ntlm_user_table;
@@ -1572,8 +1606,7 @@ BOOL WINAPI DllMain( HINSTANCE hinst, DWORD reason, void *reserved )
     switch (reason)
     {
     case DLL_PROCESS_ATTACH:
-        if (NtQueryVirtualMemory( GetCurrentProcess(), hinst, MemoryWineUnixFuncs,
-                                  &ntlm_handle, sizeof(ntlm_handle), NULL ))
+        if (__wine_init_unix_call())
             return FALSE;
         DisableThreadLibraryCalls( hinst );
         break;

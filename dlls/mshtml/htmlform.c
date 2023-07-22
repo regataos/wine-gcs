@@ -162,7 +162,7 @@ static ULONG WINAPI HTMLFormElementEnum_Release(IEnumVARIANT *iface)
 
     if(!ref) {
         IHTMLFormElement_Release(&This->elem->IHTMLFormElement_iface);
-        heap_free(This);
+        free(This);
     }
 
     return ref;
@@ -453,7 +453,8 @@ static HRESULT WINAPI HTMLFormElement_get_elements(IHTMLFormElement *iface, IDis
         return E_FAIL;
     }
 
-    *p = (IDispatch*)create_collection_from_htmlcol(elements, This->element.node.doc);
+    *p = (IDispatch*)create_collection_from_htmlcol(elements, This->element.node.doc,
+                                                    dispex_compat_mode(&This->element.node.event_target.dispex));
     nsIDOMHTMLCollection_Release(elements);
     return S_OK;
 }
@@ -571,7 +572,7 @@ static HRESULT WINAPI HTMLFormElement_submit(IHTMLFormElement *iface)
 
     if(This->element.node.doc) {
         HTMLDocumentNode *doc = This->element.node.doc;
-        if(doc->window && doc->window->base.outer_window)
+        if(doc->window)
             this_window = doc->window->base.outer_window;
     }
     if(!this_window) {
@@ -688,7 +689,7 @@ static HRESULT WINAPI HTMLFormElement__newEnum(IHTMLFormElement *iface, IUnknown
 
     TRACE("(%p)->(%p)\n", This, p);
 
-    ret = heap_alloc(sizeof(*ret));
+    ret = malloc(sizeof(*ret));
     if(!ret)
         return E_OUTOFMEMORY;
 
@@ -1015,6 +1016,31 @@ static HRESULT HTMLFormElement_get_dispid(HTMLDOMNode *iface,
     return hres;
 }
 
+static HRESULT HTMLFormElement_dispex_get_name(HTMLDOMNode *iface, DISPID id, BSTR *name)
+{
+    HTMLFormElement *This = impl_from_HTMLDOMNode(iface);
+    DWORD idx = id - MSHTML_DISPID_CUSTOM_MIN;
+    nsIDOMHTMLCollection *elements;
+    nsresult nsres;
+    UINT32 len = 0;
+    WCHAR buf[11];
+
+    nsres = nsIDOMHTMLFormElement_GetElements(This->nsform, &elements);
+    if(NS_FAILED(nsres))
+        return map_nsresult(nsres);
+
+    nsres = nsIDOMHTMLCollection_GetLength(elements, &len);
+    nsIDOMHTMLCollection_Release(elements);
+    if(NS_FAILED(nsres))
+        return map_nsresult(nsres);
+
+    if(idx >= len)
+        return DISP_E_MEMBERNOTFOUND;
+
+    len = swprintf(buf, ARRAY_SIZE(buf), L"%u", idx);
+    return (*name = SysAllocStringLen(buf, len)) ? S_OK : E_OUTOFMEMORY;
+}
+
 static HRESULT HTMLFormElement_invoke(HTMLDOMNode *iface, IDispatch *this_obj,
         DISPID id, LCID lcid, WORD flags, DISPPARAMS *params, VARIANT *res,
         EXCEPINFO *ei, IServiceProvider *caller)
@@ -1076,6 +1102,7 @@ static const NodeImplVtbl HTMLFormElementImplVtbl = {
     HTMLElement_destructor,
     HTMLElement_cpc,
     HTMLElement_clone,
+    HTMLElement_dispatch_nsevent_hook,
     HTMLFormElement_handle_event,
     HTMLElement_get_attr_col,
     NULL,
@@ -1084,6 +1111,7 @@ static const NodeImplVtbl HTMLFormElementImplVtbl = {
     NULL,
     NULL,
     HTMLFormElement_get_dispid,
+    HTMLFormElement_dispex_get_name,
     HTMLFormElement_invoke,
     NULL,
     HTMLFormElement_traverse,
@@ -1123,7 +1151,7 @@ HRESULT HTMLFormElement_Create(HTMLDocumentNode *doc, nsIDOMElement *nselem, HTM
     HTMLFormElement *ret;
     nsresult nsres;
 
-    ret = heap_alloc_zero(sizeof(HTMLFormElement));
+    ret = calloc(1, sizeof(HTMLFormElement));
     if(!ret)
         return E_OUTOFMEMORY;
 

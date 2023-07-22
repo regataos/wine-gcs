@@ -56,8 +56,8 @@
 #include "request.h"
 #include "user.h"
 #include "security.h"
-#include "unicode.h"
 #include "esync.h"
+#include "unicode.h"
 #include "fsync.h"
 
 
@@ -1816,8 +1816,10 @@ DECL_HANDLER(get_thread_times)
 DECL_HANDLER(set_thread_info)
 {
     struct thread *thread;
+    unsigned int access = (req->mask == SET_THREAD_INFO_DESCRIPTION) ? THREAD_SET_LIMITED_INFORMATION
+                                                                     : THREAD_SET_INFORMATION;
 
-    if ((thread = get_thread_from_handle( req->handle, THREAD_SET_INFORMATION )))
+    if ((thread = get_thread_from_handle( req->handle, access )))
     {
         set_thread_info( thread, req );
         release_object( thread );
