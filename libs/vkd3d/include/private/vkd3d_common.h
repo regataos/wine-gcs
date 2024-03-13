@@ -20,6 +20,7 @@
 #define __VKD3D_COMMON_H
 
 #include "config.h"
+#define WIN32_LEAN_AND_MEAN
 #include "windows.h"
 #include "vkd3d_types.h"
 
@@ -28,6 +29,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 #ifdef _MSC_VER
 #include <intrin.h>
@@ -47,12 +49,35 @@
         ((uint32_t)(ch0) | ((uint32_t)(ch1) << 8) \
         | ((uint32_t)(ch2) << 16) | ((uint32_t)(ch3) << 24))
 
-static inline size_t align(size_t addr, size_t alignment)
+#define TAG_AON9 VKD3D_MAKE_TAG('A', 'o', 'n', '9')
+#define TAG_DXBC VKD3D_MAKE_TAG('D', 'X', 'B', 'C')
+#define TAG_DXIL VKD3D_MAKE_TAG('D', 'X', 'I', 'L')
+#define TAG_FX10 VKD3D_MAKE_TAG('F', 'X', '1', '0')
+#define TAG_ISG1 VKD3D_MAKE_TAG('I', 'S', 'G', '1')
+#define TAG_ISGN VKD3D_MAKE_TAG('I', 'S', 'G', 'N')
+#define TAG_OSG1 VKD3D_MAKE_TAG('O', 'S', 'G', '1')
+#define TAG_OSG5 VKD3D_MAKE_TAG('O', 'S', 'G', '5')
+#define TAG_OSGN VKD3D_MAKE_TAG('O', 'S', 'G', 'N')
+#define TAG_PCSG VKD3D_MAKE_TAG('P', 'C', 'S', 'G')
+#define TAG_PSG1 VKD3D_MAKE_TAG('P', 'S', 'G', '1')
+#define TAG_RD11 VKD3D_MAKE_TAG('R', 'D', '1', '1')
+#define TAG_RDEF VKD3D_MAKE_TAG('R', 'D', 'E', 'F')
+#define TAG_RTS0 VKD3D_MAKE_TAG('R', 'T', 'S', '0')
+#define TAG_SDBG VKD3D_MAKE_TAG('S', 'D', 'B', 'G')
+#define TAG_SFI0 VKD3D_MAKE_TAG('S', 'F', 'I', '0')
+#define TAG_SHDR VKD3D_MAKE_TAG('S', 'H', 'D', 'R')
+#define TAG_SHEX VKD3D_MAKE_TAG('S', 'H', 'E', 'X')
+#define TAG_STAT VKD3D_MAKE_TAG('S', 'T', 'A', 'T')
+#define TAG_TEXT VKD3D_MAKE_TAG('T', 'E', 'X', 'T')
+#define TAG_XNAP VKD3D_MAKE_TAG('X', 'N', 'A', 'P')
+#define TAG_XNAS VKD3D_MAKE_TAG('X', 'N', 'A', 'S')
+
+static inline uint64_t align(uint64_t addr, size_t alignment)
 {
     return (addr + (alignment - 1)) & ~(alignment - 1);
 }
 
-#ifdef __GNUC__
+#if defined(__GNUC__) || defined(__clang__)
 # define VKD3D_NORETURN __attribute__((noreturn))
 # ifdef __MINGW_PRINTF_FORMAT
 #  define VKD3D_PRINTF_FUNC(fmt, args) __attribute__((format(__MINGW_PRINTF_FORMAT, fmt, args)))
@@ -171,6 +196,11 @@ static inline bool vkd3d_bound_range(size_t start, size_t count, size_t limit)
 #endif
 }
 
+static inline bool vkd3d_object_range_overflow(size_t start, size_t count, size_t size)
+{
+    return (~(size_t)0 - start) / size < count;
+}
+
 static inline uint16_t vkd3d_make_u16(uint8_t low, uint8_t high)
 {
     return low | ((uint16_t)high << 8);
@@ -184,6 +214,21 @@ static inline uint32_t vkd3d_make_u32(uint16_t low, uint16_t high)
 static inline int vkd3d_u32_compare(uint32_t x, uint32_t y)
 {
     return (x > y) - (x < y);
+}
+
+static inline bool bitmap_clear(uint32_t *map, unsigned int idx)
+{
+    return map[idx >> 5] &= ~(1u << (idx & 0x1f));
+}
+
+static inline bool bitmap_set(uint32_t *map, unsigned int idx)
+{
+    return map[idx >> 5] |= (1u << (idx & 0x1f));
+}
+
+static inline bool bitmap_is_set(const uint32_t *map, unsigned int idx)
+{
+    return map[idx >> 5] & (1u << (idx & 0x1f));
 }
 
 static inline int ascii_isupper(int c)
@@ -223,33 +268,42 @@ static inline int ascii_strcasecmp(const char *a, const char *b)
     return c_a - c_b;
 }
 
-#ifndef _WIN32
-# if HAVE_SYNC_ADD_AND_FETCH
-static inline LONG InterlockedIncrement(LONG volatile *x)
+static inline uint64_t vkd3d_atomic_add_fetch_u64(uint64_t volatile *x, uint64_t val)
 {
-    return __sync_add_and_fetch(x, 1);
-}
-static inline LONG64 InterlockedIncrement64(LONG64 volatile *x)
-{
-    return __sync_add_and_fetch(x, 1);
-}
-static inline LONG InterlockedAdd(LONG volatile *x, LONG val)
-{
+#if HAVE_SYNC_ADD_AND_FETCH
     return __sync_add_and_fetch(x, val);
+#elif defined(_WIN32)
+    return InterlockedAdd64((LONG64 *)x, val);
+#else
+# error "vkd3d_atomic_add_fetch_u64() not implemented for this platform"
+#endif
 }
-# else
-#  error "InterlockedIncrement() not implemented for this platform"
-# endif  /* HAVE_SYNC_ADD_AND_FETCH */
 
-# if HAVE_SYNC_SUB_AND_FETCH
-static inline LONG InterlockedDecrement(LONG volatile *x)
+static inline uint32_t vkd3d_atomic_add_fetch_u32(uint32_t volatile *x, uint32_t val)
 {
-    return __sync_sub_and_fetch(x, 1);
+#if HAVE_SYNC_ADD_AND_FETCH
+    return __sync_add_and_fetch(x, val);
+#elif defined(_WIN32)
+    return InterlockedAdd((LONG *)x, val);
+#else
+# error "vkd3d_atomic_add_fetch_u32() not implemented for this platform"
+#endif
 }
-# else
-#  error "InterlockedDecrement() not implemented for this platform"
-# endif
-#endif  /* _WIN32 */
+
+static inline uint64_t vkd3d_atomic_increment_u64(uint64_t volatile *x)
+{
+    return vkd3d_atomic_add_fetch_u64(x, 1);
+}
+
+static inline uint32_t vkd3d_atomic_decrement_u32(uint32_t volatile *x)
+{
+    return vkd3d_atomic_add_fetch_u32(x, ~0u);
+}
+
+static inline uint32_t vkd3d_atomic_increment_u32(uint32_t volatile *x)
+{
+    return vkd3d_atomic_add_fetch_u32(x, 1);
+}
 
 static inline void vkd3d_parse_version(const char *version, int *major, int *minor)
 {

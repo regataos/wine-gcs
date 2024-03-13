@@ -120,7 +120,7 @@ static BOOL check_info_filename(PSP_INF_INFORMATION info, LPSTR test)
     if (!SetupQueryInfFileInformationA(info, 0, NULL, 0, &size))
         return FALSE;
 
-    filename = HeapAlloc(GetProcessHeap(), 0, size);
+    filename = malloc(size);
     if (!filename)
         return FALSE;
 
@@ -129,7 +129,7 @@ static BOOL check_info_filename(PSP_INF_INFORMATION info, LPSTR test)
     if (!lstrcmpiA(test, filename))
         ret = TRUE;
 
-    HeapFree(GetProcessHeap(), 0, filename);
+    free(filename);
     return ret;
 }
 
@@ -142,7 +142,7 @@ static PSP_INF_INFORMATION alloc_inf_info(LPCSTR filename, DWORD search, PDWORD 
     if (!ret)
         return NULL;
 
-    info = HeapAlloc(GetProcessHeap(), 0, *size);
+    info = malloc(*size);
     return info;
 }
 
@@ -234,7 +234,7 @@ static void test_SetupGetInfInformation(void)
     ret = SetupGetInfInformationA(inf_filename, INFINFO_INF_NAME_IS_ABSOLUTE, NULL, size, NULL);
     ok(ret == FALSE, "Expected SetupGetInfInformation to fail\n");
 
-    info = HeapAlloc(GetProcessHeap(), 0, size);
+    info = malloc(size);
 
     /* try valid ReturnBuffer but too small size */
     SetLastError(0xbeefcafe);
@@ -248,7 +248,7 @@ static void test_SetupGetInfInformation(void)
     ok(ret == TRUE, "Expected SetupGetInfInformation to succeed\n");
     ok(check_info_filename(info, inf_filename), "Expected returned filename to be equal\n");
 
-    HeapFree(GetProcessHeap(), 0, info);
+    free(info);
 
     /* try the INFINFO_INF_SPEC_IS_HINF search flag */
     hinf = SetupOpenInfFileA(inf_filename, NULL, INF_STYLE_WIN4, NULL);
@@ -269,7 +269,7 @@ static void test_SetupGetInfInformation(void)
     }
     ok(ret, "can't create inf file %lu\n", GetLastError());
 
-    HeapFree(GetProcessHeap(), 0, info);
+    free(info);
     info = alloc_inf_info("test.inf", INFINFO_DEFAULT_SEARCH, &size);
 
     /* check if system32 is searched for inf */
@@ -284,7 +284,7 @@ static void test_SetupGetInfInformation(void)
     lstrcatA(inf_one, "test.inf");
     create_inf_file(inf_one, inf_data1, sizeof(inf_data1) - 1);
 
-    HeapFree(GetProcessHeap(), 0, info);
+    free(info);
     info = alloc_inf_info("test.inf", INFINFO_DEFAULT_SEARCH, &size);
 
     /* test the INFINFO_DEFAULT_SEARCH search flag */
@@ -292,7 +292,7 @@ static void test_SetupGetInfInformation(void)
     ok(ret == TRUE, "Expected SetupGetInfInformation to succeed: %ld\n", GetLastError());
     ok(check_info_filename(info, inf_one), "Expected returned filename to be equal\n");
 
-    HeapFree(GetProcessHeap(), 0, info);
+    free(info);
     info = alloc_inf_info("test.inf", INFINFO_REVERSE_DEFAULT_SEARCH, &size);
 
     /* test the INFINFO_REVERSE_DEFAULT_SEARCH search flag */
@@ -301,7 +301,7 @@ static void test_SetupGetInfInformation(void)
     ok(check_info_filename(info, revfile), "Expected returned filename to be equal\n");
 
 done:
-    HeapFree(GetProcessHeap(), 0, info);
+    free(info);
     DeleteFileA(inf_filename);
     DeleteFileA(inf_one);
     DeleteFileA(inf_two);
@@ -513,6 +513,72 @@ static void test_SetupGetTargetPath(void)
     DeleteFileA(inf_filename);
 }
 
+static void test_DriverStoreFindDriverPackageW(void)
+{
+    HMODULE library;
+    HRESULT result;
+    WCHAR buffer[500];
+    DWORD len;
+    HRESULT (WINAPI *pDriverStoreFindDriverPackageW)(const WCHAR*, void*, void*, DWORD, void*, WCHAR*, DWORD*);
+
+    library = LoadLibraryA("setupapi.dll");
+    ok(library != NULL, "Failed to load setupapi.dll\n");
+    if (!library) return;
+
+    pDriverStoreFindDriverPackageW = (void *)GetProcAddress(library, "DriverStoreFindDriverPackageW");
+    if (!pDriverStoreFindDriverPackageW)
+    {
+        win_skip("Can't find DriverStoreFindDriverPackageW\n");
+        return;
+    }
+
+    len = ARRAY_SIZE(buffer);
+
+    /* No invalid parameters, with flags */
+    result = pDriverStoreFindDriverPackageW(L"c:\\nonexistent.inf", 0, 0, 9, 0, buffer, &len);
+    todo_wine
+    ok(result == HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND), "Got %lx\n", result);
+
+    /* No invalid parameters, no flags */
+    result = pDriverStoreFindDriverPackageW(L"c:\\nonexistent.inf", 0, 0, 0, 0, buffer, &len);
+    if (sizeof(void *) == 4)
+        todo_wine
+        ok(result == HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND), "Got %lx\n", result);
+    else
+        todo_wine
+        ok(result == E_INVALIDARG, "Got %lx\n", result); /* Win64 needs flags 0x9, or it gives invalid parameter */
+
+    /* Invalid parameter tests */
+
+    result = pDriverStoreFindDriverPackageW(L"c:\\nonexistent.inf", 0, 0, 9, 0, 0, &len);
+    ok(result == E_INVALIDARG, "Got %lx\n", result);
+
+    result = pDriverStoreFindDriverPackageW(0, 0, 0, 9, 0, buffer, &len);
+    ok(result == E_INVALIDARG, "Got %lx\n", result);
+
+    result = pDriverStoreFindDriverPackageW(L"", 0, 0, 9, 0, buffer, &len);
+    todo_wine
+    ok(result == HRESULT_FROM_WIN32(ERROR_INVALID_NAME) /* win7 */ || result == E_INVALIDARG /* win10 */, "Got %lx\n", result);
+
+    result = pDriverStoreFindDriverPackageW(L"c:\\nonexistent.inf", 0, 0, 9, 0, buffer, 0);
+    ok(result == E_INVALIDARG, "Got %lx\n", result);
+
+    /* Tests with different length parameter */
+
+    len = 0;
+    result = pDriverStoreFindDriverPackageW(L"c:\\nonexistent.inf", 0, 0, 9, 0, buffer, &len);
+    ok(result == E_INVALIDARG, "Got %lx\n", result);
+
+    len = 259;
+    result = pDriverStoreFindDriverPackageW(L"c:\\nonexistent.inf", 0, 0, 9, 0, buffer, &len);
+    ok(result == E_INVALIDARG, "Got %lx\n", result);
+
+    len = 260;
+    result = pDriverStoreFindDriverPackageW(L"c:\\nonexistent.inf", 0, 0, 9, 0, buffer, &len);
+    todo_wine
+    ok(result == HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND), "Got %lx\n", result);
+}
+
 START_TEST(query)
 {
     get_directories();
@@ -521,4 +587,5 @@ START_TEST(query)
     test_SetupGetSourceFileLocation();
     test_SetupGetSourceInfo();
     test_SetupGetTargetPath();
+    test_DriverStoreFindDriverPackageW();
 }

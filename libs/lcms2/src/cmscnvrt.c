@@ -1,7 +1,7 @@
 //---------------------------------------------------------------------------------
 //
 //  Little Color Management System
-//  Copyright (c) 1998-2022 Marti Maria Saguer
+//  Copyright (c) 1998-2023 Marti Maria Saguer
 //
 // Permission is hereby granted, free of charge, to any person obtaining
 // a copy of this software and associated documentation files (the "Software"),
@@ -234,7 +234,7 @@ cmsFloat64Number CHAD2Temp(const cmsMAT3* Chad)
 
 // Compute a CHAD based on a given temperature
 static
-    void Temp2CHAD(cmsMAT3* Chad, cmsFloat64Number Temp)
+void Temp2CHAD(cmsMAT3* Chad, cmsFloat64Number Temp)
 {
     cmsCIEXYZ White;
     cmsCIExyY ChromaticityOfWhite;
@@ -370,11 +370,11 @@ cmsBool ComputeConversion(cmsUInt32Number i,
         cmsCIEXYZ WhitePointIn, WhitePointOut;
         cmsMAT3 ChromaticAdaptationMatrixIn, ChromaticAdaptationMatrixOut;
 
-        _cmsReadMediaWhitePoint(&WhitePointIn,  hProfiles[i-1]);
-        _cmsReadCHAD(&ChromaticAdaptationMatrixIn, hProfiles[i-1]);
+        if (!_cmsReadMediaWhitePoint(&WhitePointIn, hProfiles[i - 1])) return FALSE;
+        if (!_cmsReadCHAD(&ChromaticAdaptationMatrixIn, hProfiles[i - 1])) return FALSE;
 
-        _cmsReadMediaWhitePoint(&WhitePointOut,  hProfiles[i]);
-        _cmsReadCHAD(&ChromaticAdaptationMatrixOut, hProfiles[i]);
+        if (!_cmsReadMediaWhitePoint(&WhitePointOut, hProfiles[i])) return FALSE;
+        if (!_cmsReadCHAD(&ChromaticAdaptationMatrixOut, hProfiles[i])) return FALSE;
 
         if (!ComputeAbsoluteIntent(AdaptationState,
                                   &WhitePointIn,  &ChromaticAdaptationMatrixIn,
@@ -715,6 +715,16 @@ int BlackPreservingGrayOnlySampler(CMSREGISTER const cmsUInt16Number In[], CMSRE
     return TRUE;
 }
 
+
+// Check whatever the profile is a CMYK->CMYK devicelink
+static
+cmsBool is_cmyk_devicelink(cmsHPROFILE hProfile)
+{
+    return cmsGetDeviceClass(hProfile) == cmsSigLinkClass &&
+            cmsGetColorSpace(hProfile) == cmsSigCmykData &&
+            cmsGetColorSpace(hProfile) == cmsSigCmykData;
+}
+
 // This is the entry for black-preserving K-only intents, which are non-ICC
 static
 cmsPipeline*  BlackPreservingKOnlyIntents(cmsContext     ContextID,
@@ -747,13 +757,15 @@ cmsPipeline*  BlackPreservingKOnlyIntents(cmsContext     ContextID,
     lastProfilePos = nProfiles - 1;
     hLastProfile = hProfiles[lastProfilePos];
 
-    while (lastProfilePos > 1)
+    // Skip CMYK->CMYK devicelinks on ending
+    while (is_cmyk_devicelink(hLastProfile))
     {
-        hLastProfile = hProfiles[--lastProfilePos];
-        if (cmsGetColorSpace(hLastProfile) != cmsSigCmykData ||
-            cmsGetDeviceClass(hLastProfile) != cmsSigLinkClass)
+        if (lastProfilePos < 2)
             break;
+
+        hLastProfile = hProfiles[--lastProfilePos];
     }
+
 
     preservationProfilesCount = lastProfilePos + 1;
 
@@ -771,7 +783,7 @@ cmsPipeline*  BlackPreservingKOnlyIntents(cmsContext     ContextID,
 
     // Create a LUT holding normal ICC transform
     bp.cmyk2cmyk = DefaultICCintents(ContextID,
-                                     preservationProfilesCount,
+        preservationProfilesCount,
         ICCIntents,
         hProfiles,
         BPC,
@@ -783,7 +795,7 @@ cmsPipeline*  BlackPreservingKOnlyIntents(cmsContext     ContextID,
     // Now, compute the tone curve
     bp.KTone = _cmsBuildKToneCurve(ContextID,
         4096,
-                                    preservationProfilesCount,
+        preservationProfilesCount,
         ICCIntents,
         hProfiles,
         BPC,
@@ -973,13 +985,14 @@ cmsPipeline* BlackPreservingKPlaneIntents(cmsContext     ContextID,
     lastProfilePos = nProfiles - 1;
     hLastProfile = hProfiles[lastProfilePos];
 
-    while (lastProfilePos > 1)
-    {   
+    // Skip CMYK->CMYK devicelinks on ending
+    while (is_cmyk_devicelink(hLastProfile))
+    {
+        if (lastProfilePos < 2)
+            break;
+
         hLastProfile = hProfiles[--lastProfilePos];
-        if (cmsGetColorSpace(hLastProfile) != cmsSigCmykData ||
-            cmsGetDeviceClass(hLastProfile) != cmsSigLinkClass)
-            break;        
-    } 
+    }
 
     preservationProfilesCount = lastProfilePos + 1;
 
@@ -1148,20 +1161,6 @@ cmsUInt32Number CMSEXPORT cmsGetSupportedIntentsTHR(cmsContext ContextID, cmsUIn
     cmsIntentsList* pt;
     cmsUInt32Number nIntents;
 
-
-    for (nIntents=0, pt = ctx->Intents; pt != NULL; pt = pt -> Next)
-    {
-        if (nIntents < nMax) {
-            if (Codes != NULL)
-                Codes[nIntents] = pt ->Intent;
-
-            if (Descriptions != NULL)
-                Descriptions[nIntents] = pt ->Description;
-        }
-
-        nIntents++;
-    }
-
     for (nIntents=0, pt = DefaultIntents; pt != NULL; pt = pt -> Next)
     {
         if (nIntents < nMax) {
@@ -1174,6 +1173,20 @@ cmsUInt32Number CMSEXPORT cmsGetSupportedIntentsTHR(cmsContext ContextID, cmsUIn
 
         nIntents++;
     }
+
+    for (pt = ctx->Intents; pt != NULL; pt = pt -> Next)
+    {
+        if (nIntents < nMax) {
+            if (Codes != NULL)
+                Codes[nIntents] = pt ->Intent;
+
+            if (Descriptions != NULL)
+                Descriptions[nIntents] = pt ->Description;
+        }
+
+        nIntents++;
+    }
+
     return nIntents;
 }
 
@@ -1211,4 +1224,3 @@ cmsBool  _cmsRegisterRenderingIntentPlugin(cmsContext id, cmsPluginBase* Data)
 
     return TRUE;
 }
-

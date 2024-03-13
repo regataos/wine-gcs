@@ -110,10 +110,12 @@ static void MSGBOX_OnInit(HWND hwnd, LPMSGBOXPARAMSW lpmb)
     }
 
     /* handle modal message boxes */
-    if (((lpmb->dwStyle & MB_TASKMODAL) && (lpmb->hwndOwner==NULL)))
-        NtUserSetWindowPos( hwnd, HWND_TOP, 0, 0, 0, 0, SWP_NOSIZE | SWP_NOMOVE );
+    if (lpmb->dwStyle & MB_TASKMODAL && lpmb->hwndOwner == NULL)
+        NtUserSetWindowPos( hwnd, lpmb->dwStyle & MB_TOPMOST ? HWND_TOPMOST : HWND_TOP, 0, 0, 0, 0, SWP_NOSIZE | SWP_NOMOVE );
     else if (lpmb->dwStyle & MB_SYSTEMMODAL)
         NtUserSetWindowPos( hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_FRAMECHANGED );
+    else if (lpmb->dwStyle & MB_TOPMOST)
+        NtUserSetWindowPos( hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE );
 
     TRACE_(msgbox)("%s\n", debugstr_w(lpszText));
     SetWindowTextW(GetDlgItem(hwnd, MSGBOX_IDTEXT), lpszText);
@@ -321,10 +323,9 @@ static void MSGBOX_OnInit(HWND hwnd, LPMSGBOXPARAMSW lpmb)
 static void MSGBOX_CopyToClipbaord( HWND hwnd )
 {
     int i;
-    static const WCHAR line[] = {'-','-','-','-','-','-','-','-','-','-','-','-','-','-','-','-','-','-','-',
-                           '-','-','-','-','-','-','-','-','\r','\n', 0};
-    static const WCHAR carriage[] = {'\r','\n', 0};
-    static const WCHAR spaces[] = {' ',' ',' ', 0};
+    static const WCHAR line[] = L"---------------------------\r\n";
+    static const WCHAR carriage[] = L"\r\n";
+    static const WCHAR spaces[] = L"   ";
     int lenTitle = GetWindowTextLengthW(hwnd) + 1;
     int lenMsg = GetWindowTextLengthW(GetDlgItem(hwnd, MSGBOX_IDTEXT)) + 1;
 
@@ -337,7 +338,7 @@ static void MSGBOX_CopyToClipbaord( HWND hwnd )
     Button(s) Text. OK
     ---------------------------
     */
-    int len = ((sizeof(carriage) * 3) + (sizeof(line) * 4) + lenTitle + lenMsg) * sizeof(WCHAR);
+    int len = ((wcslen(carriage) * 3) + (wcslen(line) * 4) + lenTitle + lenMsg) * sizeof(WCHAR);
     WCHAR *text = heap_alloc(len);
     if(text)
     {

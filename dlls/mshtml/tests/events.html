@@ -285,11 +285,9 @@ function test_attach_in_attach() {
 
 function test_event_obj_props(e) {
     var i, props = [
-        "actionURL", "altKey", "altLeft", "behaviorCookie", "behaviorPart", "bookmarks", "boundElements", "button", "buttonID",
-        "cancelBubble", "clientX", "clientY", "contentOverflow", "ctrlKey", "ctrlLeft", "data", "dataFld", "dataTransfer",
-        "fromElement", "keyCode", "nextPage", "offsetX", "offsetY", "origin", "propertyName", "qualifier", "reason", "recordset",
-        "repeat", "returnValue", "screenX", "screenY", "shiftKey", "shiftLeft", "source", "srcElement", "srcFilter", "srcUrn",
-        "toElement", "type", "url", "wheelDelta", "x", "y", "getAttribute", "setAttribute", "removeAttribute" ];
+        "altKey", "button", "cancelBubble", "clientX", "clientY", "ctrlKey", "data", "fromElement", "keyCode", "offsetX", "offsetY",
+        "origin", "qualifier", "reason", "returnValue", "screenX", "screenY", "shiftKey", "source", "srcElement", "srcFilter",
+        "toElement", "type", "url", "x", "y" ];
     for(i = 0; i < props.length; i++)
         ok(props[i] in e, props[i] + " not in event obj");
 

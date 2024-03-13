@@ -2,7 +2,8 @@ MODULE    = vulkan-1.dll
 IMPORTS   = user32
 IMPORTLIB = vulkan-1
 
-RC_SRCS = version.rc
+EXTRADLLFLAGS = -Wb,--prefer-native
 
-C_SRCS = \
+SOURCES = \
+	version.rc \
 	vulkan.c

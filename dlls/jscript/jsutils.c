@@ -286,7 +286,7 @@ HRESULT variant_to_jsval(script_ctx_t *ctx, VARIANT *var, jsval_t *r)
         }
         IDispatch_AddRef(V_DISPATCH(var));
         *r = jsval_disp(V_DISPATCH(var));
-        return convert_to_proxy(ctx, r);
+        return S_OK;
     }
     case VT_I1:
         *r = jsval_number(V_I1(var));
@@ -330,7 +330,7 @@ HRESULT variant_to_jsval(script_ctx_t *ctx, VARIANT *var, jsval_t *r)
             hres = IUnknown_QueryInterface(V_UNKNOWN(var), &IID_IDispatch, (void**)&disp);
             if(SUCCEEDED(hres)) {
                 *r = jsval_disp(disp);
-                return convert_to_proxy(ctx, r);
+                return S_OK;
             }
         }else {
             *r = ctx->html_mode ? jsval_null() : jsval_null_disp();
@@ -344,9 +344,6 @@ HRESULT variant_to_jsval(script_ctx_t *ctx, VARIANT *var, jsval_t *r)
 
 HRESULT jsval_to_variant(jsval_t val, VARIANT *retv)
 {
-    jsdisp_t *jsdisp;
-    IDispatch *disp;
-
     switch(jsval_type(val)) {
     case JSV_UNDEFINED:
         V_VT(retv) = VT_EMPTY;
@@ -360,14 +357,9 @@ HRESULT jsval_to_variant(jsval_t val, VARIANT *retv)
         V_VT(retv) = VT_NULL;
         return S_OK;
     case JSV_OBJECT:
-        disp = get_object(val);
-        jsdisp = to_jsdisp(disp);
-        if(jsdisp && jsdisp->proxy)
-            disp = (IDispatch*)jsdisp->proxy;
-
-        IDispatch_AddRef(disp);
         V_VT(retv) = VT_DISPATCH;
-        V_DISPATCH(retv) = disp;
+        V_DISPATCH(retv) = get_object(val);
+        IDispatch_AddRef(get_object(val));
         return S_OK;
     case JSV_STRING:
         V_VT(retv) = VT_BSTR;
@@ -398,24 +390,6 @@ HRESULT jsval_to_variant(jsval_t val, VARIANT *retv)
     return E_FAIL;
 }
 
-static HRESULT proxy_tostring(jsdisp_t *jsdisp, jsval_t *ret)
-{
-    jsstr_t *str;
-    HRESULT hres;
-    BSTR bstr;
-
-    /* Proxy prototype with custom toString fails when called on itself */
-    hres = jsdisp->proxy->lpVtbl->ToString(jsdisp->proxy, &bstr);
-    if(FAILED(hres))
-        return hres;
-    str = jsstr_alloc(bstr);
-    SysFreeString(bstr);
-    if(!str)
-        return E_OUTOFMEMORY;
-    *ret = jsval_string(str);
-    return S_OK;
-}
-
 /* ECMA-262 3rd Edition    9.1 */
 HRESULT to_primitive(script_ctx_t *ctx, jsval_t val, jsval_t *ret, hint_t hint)
 {
@@ -438,11 +412,8 @@ HRESULT to_primitive(script_ctx_t *ctx, jsval_t val, jsval_t *ret, hint_t hint)
         if(SUCCEEDED(hres)) {
             hres = jsdisp_call(jsdisp, id, DISPATCH_METHOD, 0, NULL, &prim);
             if(FAILED(hres)) {
-                if(hres == E_UNEXPECTED && jsdisp->proxy)
-                    hres = proxy_tostring(jsdisp, ret);
+                WARN("call error - forwarding exception\n");
                 jsdisp_release(jsdisp);
-                if(FAILED(hres))
-                    WARN("call error - forwarding exception\n");
                 return hres;
             }else if(!is_object_instance(prim)) {
                 jsdisp_release(jsdisp);
@@ -460,11 +431,8 @@ HRESULT to_primitive(script_ctx_t *ctx, jsval_t val, jsval_t *ret, hint_t hint)
         if(SUCCEEDED(hres)) {
             hres = jsdisp_call(jsdisp, id, DISPATCH_METHOD, 0, NULL, &prim);
             if(FAILED(hres)) {
-                if(hres == E_UNEXPECTED && jsdisp->proxy)
-                    hres = proxy_tostring(jsdisp, ret);
+                WARN("call error - forwarding exception\n");
                 jsdisp_release(jsdisp);
-                if(FAILED(hres))
-                    WARN("call error - forwarding exception\n");
                 return hres;
             }else if(!is_object_instance(prim)) {
                 jsdisp_release(jsdisp);
@@ -979,6 +947,7 @@ HRESULT variant_change_type(script_ctx_t *ctx, VARIANT *dst, VARIANT *src, VARTY
             break;
 
         hres = jsstr_to_bstr(str, &V_BSTR(dst));
+        jsstr_release(str);
         break;
     }
     case VT_EMPTY:

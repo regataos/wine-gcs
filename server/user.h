@@ -22,6 +22,7 @@
 #define __WINE_SERVER_USER_H
 
 #include "wine/server_protocol.h"
+#include "unicode.h"
 
 struct thread;
 struct region;
@@ -47,9 +48,19 @@ struct winstation
     unsigned int       flags;              /* winstation flags */
     struct list        entry;              /* entry in global winstation list */
     struct list        desktops;           /* list of desktops of this winstation */
+    struct desktop    *input_desktop;      /* desktop receiving user input */
     struct clipboard  *clipboard;          /* clipboard information */
     struct atom_table *atom_table;         /* global atom table */
     struct namespace  *desktop_names;      /* namespace for desktops of this winstation */
+};
+
+struct global_cursor
+{
+    int                  x;                /* cursor position */
+    int                  y;
+    rectangle_t          clip;             /* cursor clip rectangle */
+    unsigned int         last_change;      /* time of last position change */
+    user_handle_t        win;              /* window that contains the cursor */
 };
 
 struct desktop
@@ -57,21 +68,19 @@ struct desktop
     struct object        obj;              /* object header */
     unsigned int         flags;            /* desktop flags */
     struct winstation   *winstation;       /* winstation this desktop belongs to */
+    timeout_t            input_time;       /* last time this desktop had the input */
     struct list          entry;            /* entry in winstation list of desktops */
+    struct list          threads;          /* list of threads connected to this desktop */
     struct window       *top_window;       /* desktop window for this desktop */
     struct window       *msg_window;       /* HWND_MESSAGE top window */
     struct hook_table   *global_hooks;     /* table of global hooks on this desktop */
     struct list          hotkeys;          /* list of registered hotkeys */
+    struct list          pointers;         /* list of active pointers */
     struct timeout_user *close_timeout;    /* timeout before closing the desktop */
-    timeout_t            close_timeout_val;/* timeout duration before closing desktop */
-    struct list          touches;          /* list of active touches */
     struct thread_input *foreground_input; /* thread input of foreground thread */
     unsigned int         users;            /* processes and threads using this desktop */
-    user_handle_t        cursor_win;       /* window that contains the cursor */
-    user_handle_t        cursor_handle;    /* last set cursor handle */
-    struct object                         *shared_mapping;   /* desktop shared memory mapping */
-    volatile struct desktop_shared_memory *shared;           /* desktop shared memory ptr */
-    unsigned int                           last_press_alt:1; /* last key press was Alt (used to determine msg on Alt release) */
+    struct global_cursor cursor;           /* global cursor information */
+    unsigned char        keystate[256];    /* asynchronous key state */
 };
 
 /* user handles functions */
@@ -92,8 +101,8 @@ extern void cleanup_clipboard_thread( struct thread *thread );
 /* hook functions */
 
 extern void remove_thread_hooks( struct thread *thread );
-extern struct thread *get_first_global_hook( int id, thread_id_t *thread_id, client_ptr_t *proc );
-extern void disable_hung_hook( struct desktop *desktop, int id, thread_id_t thread_id, client_ptr_t proc );
+extern unsigned int get_active_hooks(void);
+extern struct thread *get_first_global_hook( int id );
 
 /* queue functions */
 
@@ -117,7 +126,8 @@ extern void post_win_event( struct thread *thread, unsigned int event,
                             const WCHAR *module, data_size_t module_size,
                             user_handle_t handle );
 extern void free_hotkeys( struct desktop *desktop, user_handle_t window );
-extern void free_touches( struct desktop *desktop, user_handle_t window );
+extern void free_pointers( struct desktop *desktop );
+extern void set_rawinput_process( struct process *process, int enable );
 
 /* region functions */
 
@@ -180,11 +190,14 @@ extern client_ptr_t get_class_client_ptr( struct window_class *class );
 
 /* windows station functions */
 
+extern struct winstation *get_visible_winstation(void);
+extern struct desktop *get_input_desktop( struct winstation *winstation );
+extern int set_input_desktop( struct winstation *winstation, struct desktop *new_desktop );
 extern struct desktop *get_desktop_obj( struct process *process, obj_handle_t handle, unsigned int access );
 extern struct winstation *get_process_winstation( struct process *process, unsigned int access );
 extern struct desktop *get_thread_desktop( struct thread *thread, unsigned int access );
-extern void connect_process_winstation( struct process *process, struct thread *parent_thread,
-                                        struct process *parent_process );
+extern void connect_process_winstation( struct process *process, struct unicode_str *desktop_path,
+                                        struct thread *parent_thread, struct process *parent_process );
 extern void set_process_default_desktop( struct process *process, struct desktop *desktop,
                                          obj_handle_t handle );
 extern void close_process_desktop( struct process *process );

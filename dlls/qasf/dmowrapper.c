@@ -206,6 +206,7 @@ static HRESULT process_output(struct dmo_wrapper *filter, IMediaObject *dmo)
 {
     DMO_OUTPUT_DATA_BUFFER *buffers = filter->buffers;
     DWORD status, i;
+    BOOL more_data;
     HRESULT hr;
 
     for (i = 0; i < filter->source_count; ++i)
@@ -227,6 +228,8 @@ static HRESULT process_output(struct dmo_wrapper *filter, IMediaObject *dmo)
 
     do
     {
+        more_data = FALSE;
+
         hr = IMediaObject_ProcessOutput(dmo, DMO_PROCESS_OUTPUT_DISCARD_WHEN_NO_BUFFER,
                 filter->source_count, buffers, &status);
         if (hr != S_OK)
@@ -238,6 +241,9 @@ static HRESULT process_output(struct dmo_wrapper *filter, IMediaObject *dmo)
 
             if (!buffers[i].pBuffer)
                 continue;
+
+            if (buffers[i].dwStatus & DMO_OUTPUT_DATA_BUFFERF_INCOMPLETE)
+                more_data = TRUE;
 
             if (buffers[i].dwStatus & DMO_OUTPUT_DATA_BUFFERF_TIME)
             {
@@ -264,7 +270,7 @@ static HRESULT process_output(struct dmo_wrapper *filter, IMediaObject *dmo)
             }
 
         }
-    } while (1);
+    } while (more_data);
 
 out:
     for (i = 0; i < filter->source_count; ++i)

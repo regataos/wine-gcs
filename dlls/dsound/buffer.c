@@ -145,9 +145,8 @@ static HRESULT WINAPI IDirectSoundNotifyImpl_SetNotificationPositions(IDirectSou
 	if (howmuch > 0) {
 	    /* Make an internal copy of the caller-supplied array.
 	     * Replace the existing copy if one is already present. */
-            HeapFree(GetProcessHeap(), 0, This->notifies);
-            This->notifies = HeapAlloc(GetProcessHeap(), 0,
-			howmuch * sizeof(DSBPOSITIONNOTIFY));
+            free(This->notifies);
+            This->notifies = malloc(howmuch * sizeof(DSBPOSITIONNOTIFY));
 
             if (This->notifies == NULL) {
 		    WARN("out of memory\n");
@@ -157,7 +156,7 @@ static HRESULT WINAPI IDirectSoundNotifyImpl_SetNotificationPositions(IDirectSou
             This->nrofnotifies = howmuch;
             qsort(This->notifies, howmuch, sizeof(DSBPOSITIONNOTIFY), notify_compar);
 	} else {
-           HeapFree(GetProcessHeap(), 0, This->notifies);
+           free(This->notifies);
            This->notifies = NULL;
            This->nrofnotifies = 0;
 	}
@@ -266,7 +265,6 @@ static HRESULT WINAPI IDirectSoundBufferImpl_SetFrequency(IDirectSoundBuffer8 *i
 {
         IDirectSoundBufferImpl *This = impl_from_IDirectSoundBuffer8(iface);
 	DWORD oldFreq;
-	void *newcommitted;
 
 	TRACE("(%p,%ld)\n",This,freq);
 
@@ -290,20 +288,16 @@ static HRESULT WINAPI IDirectSoundBufferImpl_SetFrequency(IDirectSoundBuffer8 *i
 
 	AcquireSRWLockExclusive(&This->lock);
 
-	oldFreq = This->freq;
-	This->freq = freq;
-	if (freq != oldFreq) {
-		This->freqAdjustNum = This->freq;
-		This->freqAdjustDen = This->device->pwfx->nSamplesPerSec;
-		This->nAvgBytesPerSec = freq * This->pwfx->nBlockAlign;
-		DSOUND_RecalcFormat(This);
-
-		newcommitted = HeapReAlloc(GetProcessHeap(), 0, This->committedbuff, This->writelead);
-		if(!newcommitted) {
-			ReleaseSRWLockExclusive(&This->lock);
-			return DSERR_OUTOFMEMORY;
-		}
-		This->committedbuff = newcommitted;
+	if (This->dsbd.dwFlags & DSBCAPS_CTRL3D) {
+		oldFreq = This->ds3db_freq;
+		This->ds3db_freq = freq;
+		if (freq != oldFreq)
+			DSOUND_Calc3DBuffer(This);
+	} else {
+		oldFreq = This->freq;
+		This->freq = freq;
+		if (freq != oldFreq)
+			DSOUND_RecalcFormat(This);
 	}
 
 	ReleaseSRWLockExclusive(&This->lock);
@@ -581,12 +575,15 @@ static HRESULT WINAPI IDirectSoundBufferImpl_SetCurrentPosition(IDirectSoundBuff
         IDirectSoundBufferImpl *This = impl_from_IDirectSoundBuffer8(iface);
 	HRESULT hres = DS_OK;
 
-	TRACE("(%p,%ld)\n",This,newpos);
+	TRACE("(%p,%lu)\n",This,newpos);
+
+        if (newpos >= This->buflen) {
+            return E_INVALIDARG;
+        }
 
 	AcquireSRWLockExclusive(&This->lock);
 
 	/* start mixing from this new location instead */
-	newpos %= This->buflen;
 	newpos -= newpos%This->pwfx->nBlockAlign;
 	This->sec_mixpos = newpos;
 
@@ -714,7 +711,7 @@ static HRESULT WINAPI IDirectSoundBufferImpl_GetFrequency(IDirectSoundBuffer8 *i
 		return DSERR_INVALIDPARAM;
 	}
 
-	*freq = This->freq;
+	*freq = (This->dsbd.dwFlags & DSBCAPS_CTRL3D) ? This->ds3db_freq : This->freq;
 	TRACE("-> %ld\n", *freq);
 
 	return DS_OK;
@@ -773,7 +770,7 @@ static HRESULT WINAPI IDirectSoundBufferImpl_SetFX(IDirectSoundBuffer8 *iface, D
 			for (u = 0; u < This->num_filters; u++) {
 				IMediaObject_Release(This->filters[u].obj);
 			}
-			HeapFree(GetProcessHeap(), 0, This->filters);
+			free(This->filters);
 
 			This->filters = NULL;
 			This->num_filters = 0;
@@ -782,7 +779,7 @@ static HRESULT WINAPI IDirectSoundBufferImpl_SetFX(IDirectSoundBuffer8 *iface, D
 		return DS_OK;
 	}
 
-	filters = HeapAlloc(GetProcessHeap(), 0, dwEffectsCount * sizeof(DSFilter));
+	filters = malloc(dwEffectsCount * sizeof(DSFilter));
 	if (!filters) {
 		WARN("out of memory\n");
 		return DSERR_OUTOFMEMORY;
@@ -846,14 +843,14 @@ static HRESULT WINAPI IDirectSoundBufferImpl_SetFX(IDirectSoundBuffer8 *iface, D
 				IMediaObject_Release(filters[u].obj);
 		}
 
-		HeapFree(GetProcessHeap(), 0, filters);
+		free(filters);
 	} else {
 		if (This->num_filters > 0) {
 			for (u = 0; u < This->num_filters; u++) {
 				IMediaObject_Release(This->filters[u].obj);
 				if (This->filters[u].inplace) IMediaObjectInPlace_Release(This->filters[u].inplace);
 			}
-			HeapFree(GetProcessHeap(), 0, This->filters);
+			free(This->filters);
 		}
 
 		for (u = 0; u < dwEffectsCount; u++) {
@@ -1046,7 +1043,7 @@ HRESULT secondarybuffer_create(DirectSoundDevice *device, const DSBUFFERDESC *ds
 		return DSERR_INVALIDPARAM; /* FIXME: which error? */
 	}
 
-	dsb = HeapAlloc(GetProcessHeap(),HEAP_ZERO_MEMORY,sizeof(*dsb));
+	dsb = calloc(1, sizeof(*dsb));
 
         if (!dsb)
 		return DSERR_OUTOFMEMORY;
@@ -1094,7 +1091,7 @@ HRESULT secondarybuffer_create(DirectSoundDevice *device, const DSBUFFERDESC *ds
 
 	/* Allocate an empty buffer */
 	bufsize = (sizeof(*(dsb->buffer)) + sizeof(void *) - 1) & ~(sizeof(void *) - 1);
-	dsb->buffer = HeapAlloc(GetProcessHeap(),0,bufsize + dsb->buflen);
+	dsb->buffer = malloc(bufsize + dsb->buflen);
         if (!dsb->buffer) {
                 IDirectSoundBuffer8_Release(&dsb->IDirectSoundBuffer8_iface);
 		return DSERR_OUTOFMEMORY;
@@ -1110,23 +1107,9 @@ HRESULT secondarybuffer_create(DirectSoundDevice *device, const DSBUFFERDESC *ds
 	FillMemory(dsb->buffer->memory, dsb->buflen, dsbd->lpwfxFormat->wBitsPerSample == 8 ? 128 : 0);
 
 	/* It's not necessary to initialize values to zero since */
-	/* we allocated this structure with HEAP_ZERO_MEMORY... */
+	/* we allocated this structure with calloc... */
 	dsb->sec_mixpos = 0;
 	dsb->state = STATE_STOPPED;
-
-	dsb->freqAdjustNum = dsb->freq;
-	dsb->freqAdjustDen = device->pwfx->nSamplesPerSec;
-	dsb->nAvgBytesPerSec = dsb->freq *
-		dsbd->lpwfxFormat->nBlockAlign;
-
-	/* calculate fragment size and write lead */
-	DSOUND_RecalcFormat(dsb);
-
-	dsb->committedbuff = HeapAlloc(GetProcessHeap(), 0, dsb->writelead);
-	if(!dsb->committedbuff) {
-		IDirectSoundBuffer8_Release(&dsb->IDirectSoundBuffer8_iface);
-		return DSERR_OUTOFMEMORY;
-	}
 
 	dsb->eax.reverb_mix = EAX_REVERBMIX_USEDISTANCE;
 
@@ -1148,10 +1131,22 @@ HRESULT secondarybuffer_create(DirectSoundDevice *device, const DSBUFFERDESC *ds
 		dsb->ds3db_ds3db.flMaxDistance = DS3D_DEFAULTMAXDISTANCE;
 		dsb->ds3db_ds3db.dwMode = DS3DMODE_NORMAL;
 
+		dsb->ds3db_freq = dsbd->lpwfxFormat->nSamplesPerSec;
+
 		dsb->ds3db_need_recalc = FALSE;
 		DSOUND_Calc3DBuffer(dsb);
-	} else
+	} else {
 		DSOUND_RecalcVolPan(&(dsb->volpan));
+
+		/* calculate fragment size and write lead */
+		DSOUND_RecalcFormat(dsb);
+	}
+
+	dsb->committedbuff = malloc(dsb->maxwritelead);
+	if(!dsb->committedbuff) {
+		IDirectSoundBuffer8_Release(&dsb->IDirectSoundBuffer8_iface);
+		return DSERR_OUTOFMEMORY;
+	}
 
         InitializeSRWLock(&dsb->lock);
 	if (dsb->device->eax.using_eax)
@@ -1182,11 +1177,11 @@ void secondarybuffer_destroy(IDirectSoundBufferImpl *This)
     This->buffer->ref--;
     list_remove(&This->entry);
     if (This->buffer->ref == 0)
-        HeapFree(GetProcessHeap(), 0, This->buffer);
+        free(This->buffer);
 
-    HeapFree(GetProcessHeap(), 0, This->notifies);
-    HeapFree(GetProcessHeap(), 0, This->pwfx);
-    HeapFree(GetProcessHeap(), 0, This->committedbuff);
+    free(This->notifies);
+    free(This->pwfx);
+    free(This->committedbuff);
 
     if (This->filters) {
         int i;
@@ -1194,14 +1189,14 @@ void secondarybuffer_destroy(IDirectSoundBufferImpl *This)
             IMediaObject_Release(This->filters[i].obj);
             if (This->filters[i].inplace) IMediaObjectInPlace_Release(This->filters[i].inplace);
         }
-        HeapFree(GetProcessHeap(), 0, This->filters);
+        free(This->filters);
     }
 
     free_eax_buffer(This);
 
     TRACE("(%p) released\n", This);
 
-    HeapFree(GetProcessHeap(), 0, This);
+    free(This);
 }
 
 BOOL secondarybuffer_is_audible(IDirectSoundBufferImpl *This)
@@ -1225,16 +1220,16 @@ HRESULT IDirectSoundBufferImpl_Duplicate(
     VOID *committedbuff;
     TRACE("(%p,%p,%p)\n", device, ppdsb, pdsb);
 
-    dsb = HeapAlloc(GetProcessHeap(),HEAP_ZERO_MEMORY,sizeof(*dsb));
+    dsb = calloc(1, sizeof(*dsb));
     if (dsb == NULL) {
         WARN("out of memory\n");
         *ppdsb = NULL;
         return DSERR_OUTOFMEMORY;
     }
 
-    committedbuff = HeapAlloc(GetProcessHeap(),0,pdsb->writelead);
+    committedbuff = malloc(pdsb->maxwritelead);
     if (committedbuff == NULL) {
-        HeapFree(GetProcessHeap(),0,dsb);
+        free(dsb);
         *ppdsb = NULL;
         return DSERR_OUTOFMEMORY;
     }
@@ -1248,8 +1243,8 @@ HRESULT IDirectSoundBufferImpl_Duplicate(
     ReleaseSRWLockShared(&pdsb->lock);
 
     if (dsb->pwfx == NULL) {
-        HeapFree(GetProcessHeap(),0,committedbuff);
-        HeapFree(GetProcessHeap(),0,dsb);
+        free(committedbuff);
+        free(dsb);
         *ppdsb = NULL;
         return DSERR_OUTOFMEMORY;
     }
@@ -1280,9 +1275,9 @@ HRESULT IDirectSoundBufferImpl_Duplicate(
     if (hres != DS_OK) {
         list_remove(&dsb->entry);
         dsb->buffer->ref--;
-        HeapFree(GetProcessHeap(),0,dsb->pwfx);
-        HeapFree(GetProcessHeap(),0,dsb->committedbuff);
-        HeapFree(GetProcessHeap(),0,dsb);
+        free(dsb->pwfx);
+        free(dsb->committedbuff);
+        free(dsb);
         dsb = NULL;
     }else
         IDirectSoundBuffer8_AddRef(&dsb->IDirectSoundBuffer8_iface);

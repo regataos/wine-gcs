@@ -31,7 +31,6 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(win);
 WINE_DECLARE_DEBUG_CHANNEL(keyboard);
-WINE_DECLARE_DEBUG_CHANNEL(rawinput);
 
 /***********************************************************************
  *           get_locale_kbd_layout
@@ -39,7 +38,6 @@ WINE_DECLARE_DEBUG_CHANNEL(rawinput);
 static HKL get_locale_kbd_layout(void)
 {
     ULONG_PTR layout;
-    LANGID langid;
 
     /* FIXME:
      *
@@ -53,19 +51,7 @@ static HKL get_locale_kbd_layout(void)
      */
 
     layout = GetUserDefaultLCID();
-
-    /*
-     * Microsoft Office expects this value to be something specific
-     * for Japanese and Korean Windows with an IME the value is 0xe001
-     * We should probably check to see if an IME exists and if so then
-     * set this word properly.
-     */
-    langid = PRIMARYLANGID( LANGIDFROMLCID( layout ) );
-    if (langid == LANG_CHINESE || langid == LANG_JAPANESE || langid == LANG_KOREAN)
-        layout = MAKELONG( layout, 0xe001 ); /* IME */
-    else
-        layout = MAKELONG( layout, layout );
-
+    layout = MAKELONG( layout, layout );
     return (HKL)layout;
 }
 
@@ -433,6 +419,7 @@ BOOL WINAPI BlockInput(BOOL fBlockIt)
     return FALSE;
 }
 
+
 /***********************************************************************
  *		LoadKeyboardLayoutW (USER32.@)
  */
@@ -493,7 +480,7 @@ HKL WINAPI LoadKeyboardLayoutA(LPCSTR pwszKLID, UINT Flags)
  */
 HKL WINAPI LoadKeyboardLayoutEx(DWORD unknown, const WCHAR *locale, UINT flags)
 {
-    FIXME("(%d, %s, %x) semi-stub!\n", unknown, debugstr_w(locale), flags);
+    FIXME("(%ld, %s, %x) semi-stub!\n", unknown, debugstr_w(locale), flags);
     SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
     return LoadKeyboardLayoutW(locale, flags);
 }
@@ -508,11 +495,49 @@ BOOL WINAPI UnloadKeyboardLayout( HKL layout )
     return FALSE;
 }
 
-
-static DWORD CALLBACK devnotify_window_callback(HANDLE handle, DWORD flags, DEV_BROADCAST_HDR *header)
+static DWORD CALLBACK devnotify_window_callbackW(HANDLE handle, DWORD flags, DEV_BROADCAST_HDR *header)
 {
-    TRACE_(rawinput)("handle %p, flags %#lx, header %p\n", handle, flags, header);
     SendMessageTimeoutW(handle, WM_DEVICECHANGE, flags, (LPARAM)header, SMTO_ABORTIFHUNG, 2000, NULL);
+    return 0;
+}
+
+static DWORD CALLBACK devnotify_window_callbackA(HANDLE handle, DWORD flags, DEV_BROADCAST_HDR *header)
+{
+    if (flags & 0x8000)
+    {
+        switch (header->dbch_devicetype)
+        {
+        case DBT_DEVTYP_DEVICEINTERFACE:
+        {
+            const DEV_BROADCAST_DEVICEINTERFACE_W *ifaceW = (const DEV_BROADCAST_DEVICEINTERFACE_W *)header;
+            size_t lenW = wcslen( ifaceW->dbcc_name );
+            DEV_BROADCAST_DEVICEINTERFACE_A *ifaceA;
+            DWORD lenA;
+
+            if (!(ifaceA = malloc( offsetof(DEV_BROADCAST_DEVICEINTERFACE_A, dbcc_name[lenW * 3 + 1]) )))
+                return 0;
+            lenA = WideCharToMultiByte( CP_ACP, 0, ifaceW->dbcc_name, lenW + 1,
+                                        ifaceA->dbcc_name, lenW * 3 + 1, NULL, NULL );
+
+            ifaceA->dbcc_size = offsetof(DEV_BROADCAST_DEVICEINTERFACE_A, dbcc_name[lenA + 1]);
+            ifaceA->dbcc_devicetype = ifaceW->dbcc_devicetype;
+            ifaceA->dbcc_reserved = ifaceW->dbcc_reserved;
+            ifaceA->dbcc_classguid = ifaceW->dbcc_classguid;
+            SendMessageTimeoutA( handle, WM_DEVICECHANGE, flags, (LPARAM)ifaceA, SMTO_ABORTIFHUNG, 2000, NULL );
+            free( ifaceA );
+            return 0;
+        }
+
+        default:
+            FIXME( "unimplemented W to A mapping for %#lx\n", header->dbch_devicetype );
+            /* fall through */
+        case DBT_DEVTYP_HANDLE:
+        case DBT_DEVTYP_OEM:
+            break;
+        }
+    }
+
+    SendMessageTimeoutA( handle, WM_DEVICECHANGE, flags, (LPARAM)header, SMTO_ABORTIFHUNG, 2000, NULL );
     return 0;
 }
 
@@ -555,7 +580,7 @@ HDEVNOTIFY WINAPI RegisterDeviceNotificationW( HANDLE handle, void *filter, DWOR
     struct device_notification_details details;
     DEV_BROADCAST_HDR *header = filter;
 
-    TRACE_(rawinput)("handle %p, filter %p, flags %#lx\n", handle, filter, flags);
+    TRACE("handle %p, filter %p, flags %#lx\n", handle, filter, flags);
 
     if (flags & ~(DEVICE_NOTIFY_SERVICE_HANDLE | DEVICE_NOTIFY_ALL_INTERFACE_CLASSES))
     {
@@ -595,8 +620,10 @@ HDEVNOTIFY WINAPI RegisterDeviceNotificationW( HANDLE handle, void *filter, DWOR
 
     if (flags & DEVICE_NOTIFY_SERVICE_HANDLE)
         details.cb = devnotify_service_callback;
+    else if (IsWindowUnicode( handle ))
+        details.cb = devnotify_window_callbackW;
     else
-        details.cb = devnotify_window_callback;
+        details.cb = devnotify_window_callbackA;
 
     return I_ScRegisterDeviceNotification( &details, filter, 0 );
 }
@@ -663,8 +690,28 @@ LRESULT WINAPI DefRawInputProc( RAWINPUT **data, INT data_count, UINT header_siz
  */
 BOOL WINAPI CloseTouchInputHandle( HTOUCHINPUT handle )
 {
-    TRACE( "handle %p.\n", handle );
-    return TRUE;
+    FIXME( "handle %p stub!\n", handle );
+    SetLastError( ERROR_CALL_NOT_IMPLEMENTED );
+    return FALSE;
+}
+
+/*****************************************************************************
+ * GetTouchInputInfo (USER32.@)
+ */
+BOOL WINAPI GetTouchInputInfo( HTOUCHINPUT handle, UINT count, TOUCHINPUT *ptr, int size )
+{
+    FIXME( "handle %p, count %u, ptr %p, size %u stub!\n", handle, count, ptr, size );
+    SetLastError( ERROR_CALL_NOT_IMPLEMENTED );
+    return FALSE;
+}
+
+/**********************************************************************
+ * IsTouchWindow (USER32.@)
+ */
+BOOL WINAPI IsTouchWindow( HWND hwnd, ULONG *flags )
+{
+    FIXME( "hwnd %p, flags %p stub!\n", hwnd, flags );
+    return FALSE;
 }
 
 /*****************************************************************************
@@ -672,8 +719,9 @@ BOOL WINAPI CloseTouchInputHandle( HTOUCHINPUT handle )
  */
 BOOL WINAPI RegisterTouchWindow( HWND hwnd, ULONG flags )
 {
-    TRACE( "hwnd %p, flags %#lx.\n", hwnd, flags );
-    return NtUserCallTwoParam( (ULONG_PTR)hwnd, flags, NtUserCallTwoParam_RegisterTouchWindow );
+    FIXME( "hwnd %p, flags %#lx stub!\n", hwnd, flags );
+    SetLastError( ERROR_CALL_NOT_IMPLEMENTED );
+    return FALSE;
 }
 
 /*****************************************************************************
@@ -681,8 +729,9 @@ BOOL WINAPI RegisterTouchWindow( HWND hwnd, ULONG flags )
  */
 BOOL WINAPI UnregisterTouchWindow( HWND hwnd )
 {
-    TRACE( "hwnd %p.\n", hwnd );
-    return NtUserCallOneParam( (ULONG_PTR)hwnd, NtUserCallOneParam_UnregisterTouchWindow );
+    FIXME( "hwnd %p stub!\n", hwnd );
+    SetLastError( ERROR_CALL_NOT_IMPLEMENTED );
+    return FALSE;
 }
 
 /*****************************************************************************

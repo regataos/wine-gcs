@@ -645,19 +645,9 @@ BOOL WINAPI CryptReleaseContext (HCRYPTPROV hProv, DWORD dwFlags)
 
 	if (InterlockedDecrement(&pProv->refcount) == 0)
 	{
-		static unsigned int once;
-		char sgi[64];
-
 		ret = pProv->pFuncs->pCPReleaseContext(pProv->hPrivate, dwFlags);
 		pProv->dwMagic = 0;
-		if(GetEnvironmentVariableA("SteamGameId", sgi, sizeof(sgi)) && !strcmp(sgi, "1252330"))
-		{
-			if (!once++) FIXME("HACK: not freeing provider library.\n");
-		}
-		else
-		{
-			FreeLibrary(pProv->hModule);
-		}
+		FreeLibrary(pProv->hModule);
 #if 0
 		CRYPT_Free(pProv->pVTable->pContextInfo);
 #endif
@@ -2400,7 +2390,7 @@ static CRITICAL_SECTION_DEBUG random_debug =
 };
 static CRITICAL_SECTION random_cs = { &random_debug, -1, 0, 0, 0, 0 };
 
-#define MAX_CPUS 128
+#define MAX_CPUS 256
 static char random_buf[sizeof(SYSTEM_INTERRUPT_INFORMATION) * MAX_CPUS];
 static ULONG random_len;
 static ULONG random_pos;

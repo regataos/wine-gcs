@@ -21,15 +21,24 @@
 #ifndef __WINE_TOOLS_H
 #define __WINE_TOOLS_H
 
+#ifndef __WINE_CONFIG_H
+# error You must include config.h to use this header
+#endif
+
+#include <limits.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <signal.h>
 #include <fcntl.h>
 #include <time.h>
 #include <errno.h>
+#ifdef HAVE_SYS_SYSCTL_H
+# include <sys/sysctl.h>
+#endif
 
 #ifdef _WIN32
 # include <direct.h>
@@ -48,6 +57,8 @@
 #  define strcasecmp _stricmp
 # endif
 #else
+extern char **environ;
+# include <spawn.h>
 # include <sys/wait.h>
 # include <unistd.h>
 # ifndef O_BINARY
@@ -79,7 +90,7 @@
 
 struct target
 {
-    enum { CPU_i386, CPU_x86_64, CPU_ARM, CPU_ARM64 } cpu;
+    enum { CPU_i386, CPU_x86_64, CPU_ARM, CPU_ARM64, CPU_ARM64EC } cpu;
 
     enum
     {
@@ -274,13 +285,9 @@ static inline int strarray_spawn( struct strarray args )
     pid_t pid, wret;
     int status;
 
-    if (!(pid = fork()))
-    {
-        strarray_add( &args, NULL );
-        execvp( args.str[0], (char **)args.str );
-        _exit(1);
-    }
-    if (pid == -1) return -1;
+    strarray_add( &args, NULL );
+    if (posix_spawnp( &pid, args.str[0], NULL, NULL, (char **)args.str, environ ))
+        return -1;
 
     while (pid != (wret = waitpid( pid, &status, 0 )))
         if (wret == -1 && errno != EINTR) break;
@@ -322,6 +329,7 @@ static inline char *replace_extension( const char *name, const char *old_ext, co
 /* temp files management */
 
 extern const char *temp_dir;
+extern struct strarray temp_files;
 
 static inline char *make_temp_dir(void)
 {
@@ -348,10 +356,11 @@ static inline char *make_temp_dir(void)
     exit(1);
 }
 
-static inline int make_temp_file( const char *prefix, const char *suffix, char **name )
+static inline char *make_temp_file( const char *prefix, const char *suffix )
 {
     static unsigned int value;
     int fd, count;
+    char *name;
 
     if (!temp_dir) temp_dir = make_temp_dir();
     if (!suffix) suffix = "";
@@ -360,13 +369,48 @@ static inline int make_temp_file( const char *prefix, const char *suffix, char *
 
     for (count = 0; count < 0x8000; count++)
     {
-        *name = strmake( "%s/%s-%08x%s", temp_dir, prefix, value++, suffix );
-        fd = open( *name, O_RDWR | O_CREAT | O_EXCL, 0600 );
-        if (fd >= 0) return fd;
-        free( *name );
+        name = strmake( "%s/%s-%08x%s", temp_dir, prefix, value++, suffix );
+        fd = open( name, O_RDWR | O_CREAT | O_EXCL, 0600 );
+        if (fd >= 0)
+        {
+#ifdef HAVE_SIGPROCMASK /* block signals while manipulating the temp files list */
+            sigset_t mask_set, old_set;
+
+            sigemptyset( &mask_set );
+            sigaddset( &mask_set, SIGHUP );
+            sigaddset( &mask_set, SIGTERM );
+            sigaddset( &mask_set, SIGINT );
+            sigprocmask( SIG_BLOCK, &mask_set, &old_set );
+            strarray_add( &temp_files, name );
+            sigprocmask( SIG_SETMASK, &old_set, NULL );
+#else
+            strarray_add( &temp_files, name );
+#endif
+            close( fd );
+            return name;
+        }
+        free( name );
     }
     fprintf( stderr, "failed to create temp file for %s%s in %s\n", prefix, suffix, temp_dir );
     exit(1);
+}
+
+static inline void remove_temp_files(void)
+{
+    unsigned int i;
+
+    for (i = 0; i < temp_files.count; i++) if (temp_files.str[i]) unlink( temp_files.str[i] );
+    if (temp_dir) rmdir( temp_dir );
+}
+
+
+static inline void init_signals( void (*cleanup)(int) )
+{
+    signal( SIGTERM, cleanup );
+    signal( SIGINT, cleanup );
+#ifdef SIGHUP
+    signal( SIGHUP, cleanup );
+#endif
 }
 
 
@@ -437,6 +481,7 @@ static inline unsigned int get_target_ptr_size( struct target target )
         [CPU_x86_64]    = 8,
         [CPU_ARM]       = 4,
         [CPU_ARM64]     = 8,
+        [CPU_ARM64EC]   = 8,
     };
     return sizes[target.cpu];
 }
@@ -456,6 +501,7 @@ static inline void set_target_ptr_size( struct target *target, unsigned int size
         if (size == 8) target->cpu = CPU_ARM64;
         break;
     case CPU_ARM64:
+    case CPU_ARM64EC:
         if (size == 4) target->cpu = CPU_ARM;
         break;
     }
@@ -478,6 +524,7 @@ static inline int get_cpu_from_name( const char *name )
         { "x86_64",    CPU_x86_64 },
         { "amd64",     CPU_x86_64 },
         { "aarch64",   CPU_ARM64 },
+        { "arm64ec",   CPU_ARM64EC },
         { "arm64",     CPU_ARM64 },
         { "arm",       CPU_ARM },
     };
@@ -522,10 +569,11 @@ static inline const char *get_arch_dir( struct target target )
 {
     static const char *cpu_names[] =
     {
-        [CPU_i386]   = "i386",
-        [CPU_x86_64] = "x86_64",
-        [CPU_ARM]    = "arm",
-        [CPU_ARM64]  = "aarch64"
+        [CPU_i386]    = "i386",
+        [CPU_x86_64]  = "x86_64",
+        [CPU_ARM]     = "arm",
+        [CPU_ARM64]   = "aarch64",
+        [CPU_ARM64EC] = "arm64ec",
     };
 
     if (!cpu_names[target.cpu]) return "";
@@ -600,6 +648,29 @@ static inline struct target init_argv0_target( const char *argv0 )
 
     free( name );
     return target;
+}
+
+
+static inline char *get_argv0_dir( const char *argv0 )
+{
+#ifndef _WIN32
+    char *dir = NULL;
+
+#if defined(__linux__) || defined(__FreeBSD_kernel__) || defined(__NetBSD__)
+    dir = realpath( "/proc/self/exe", NULL );
+#elif defined (__FreeBSD__) || defined(__DragonFly__)
+    static int pathname[] = { CTL_KERN, KERN_PROC, KERN_PROC_PATHNAME, -1 };
+    size_t path_size = PATH_MAX;
+    char *path = xmalloc( path_size );
+    if (!sysctl( pathname, ARRAY_SIZE(pathname), path, &path_size, NULL, 0 ))
+        dir = realpath( path, NULL );
+    free( path );
+#endif
+    if (!dir && !(dir = realpath( argv0, NULL ))) return NULL;
+    return get_dirname( dir );
+#else
+    return get_dirname( argv0 );
+#endif
 }
 
 
@@ -702,7 +773,7 @@ static inline struct strarray parse_options( int argc, char **argv, const char *
     char *start, *end;
     int i;
 
-#define OPT_ERR(fmt) { callback( '?', strmake( fmt, argv[1] )); continue; }
+#define OPT_ERR(fmt) { callback( '?', strmake( fmt, argv[i] )); continue; }
 
     for (i = 1; i < argc; i++)
     {

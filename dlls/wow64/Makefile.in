@@ -2,9 +2,9 @@ MODULE    = wow64.dll
 IMPORTLIB = wow64
 IMPORTS   = ntdll winecrt0
 
-EXTRADLLFLAGS = -nodefaultlibs -Wl,--image-base,0x6f000000
+EXTRADLLFLAGS = -nodefaultlibs
 
-C_SRCS = \
+SOURCES = \
 	file.c \
 	process.c \
 	registry.c \

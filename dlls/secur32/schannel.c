@@ -23,7 +23,6 @@
 #include <stdlib.h>
 #include <errno.h>
 
-#define NONAMELESSUNION
 #include "windef.h"
 #include "winbase.h"
 #include "winternl.h"
@@ -63,14 +62,16 @@ struct schan_context
     ULONG req_ctx_attr;
     const CERT_CONTEXT *cert;
     SIZE_T header_size;
-    BOOL shutdown_requested;
-    BOOL rehandshake_requested;
+    enum control_token control_token;
+    unsigned int alert_type;
+    unsigned int alert_number;
 };
 
 static struct schan_handle *schan_handle_table;
 static struct schan_handle *schan_free_handles;
 static SIZE_T schan_handle_table_size;
 static SIZE_T schan_handle_count;
+static SRWLOCK handle_table_lock = SRWLOCK_INIT;
 
 /* Protocols enabled, only those may be used for the connection. */
 static DWORD config_enabled_protocols;
@@ -81,22 +82,24 @@ static DWORD config_default_disabled_protocols;
 static ULONG_PTR schan_alloc_handle(void *object, enum schan_handle_type type)
 {
     struct schan_handle *handle;
+    ULONG_PTR index = SCHAN_INVALID_HANDLE;
 
+    AcquireSRWLockExclusive(&handle_table_lock);
     if (schan_free_handles)
     {
-        DWORD index = schan_free_handles - schan_handle_table;
         /* Use a free handle */
         handle = schan_free_handles;
         if (handle->type != SCHAN_HANDLE_FREE)
         {
-            ERR("Handle %ld(%p) is in the free list, but has type %#x.\n", index, handle, handle->type);
-            return SCHAN_INVALID_HANDLE;
+            ERR("Handle %p is in the free list, but has type %#x.\n", handle, handle->type);
+            goto done;
         }
+        index = schan_free_handles - schan_handle_table;
         schan_free_handles = handle->object;
         handle->object = object;
         handle->type = type;
 
-        return index;
+        goto done;
     }
     if (!(schan_handle_count < schan_handle_table_size))
     {
@@ -106,7 +109,7 @@ static ULONG_PTR schan_alloc_handle(void *object, enum schan_handle_type type)
         if (!new_table)
         {
             ERR("Failed to grow the handle table\n");
-            return SCHAN_INVALID_HANDLE;
+            goto done;
         }
         schan_handle_table = new_table;
         schan_handle_table_size = new_size;
@@ -116,21 +119,30 @@ static ULONG_PTR schan_alloc_handle(void *object, enum schan_handle_type type)
     handle->object = object;
     handle->type = type;
 
-    return handle - schan_handle_table;
+    index = handle - schan_handle_table;
+
+done:
+    ReleaseSRWLockExclusive(&handle_table_lock);
+    return index;
 }
 
 static void *schan_free_handle(ULONG_PTR handle_idx, enum schan_handle_type type)
 {
     struct schan_handle *handle;
-    void *object;
+    void *object = NULL;
 
     if (handle_idx == SCHAN_INVALID_HANDLE) return NULL;
-    if (handle_idx >= schan_handle_count) return NULL;
+
+    AcquireSRWLockExclusive(&handle_table_lock);
+
+    if (handle_idx >= schan_handle_count)
+        goto done;
+
     handle = &schan_handle_table[handle_idx];
     if (handle->type != type)
     {
         ERR("Handle %Id(%p) is not of type %#x\n", handle_idx, handle, type);
-        return NULL;
+        goto done;
     }
 
     object = handle->object;
@@ -138,23 +150,32 @@ static void *schan_free_handle(ULONG_PTR handle_idx, enum schan_handle_type type
     handle->type = SCHAN_HANDLE_FREE;
     schan_free_handles = handle;
 
+done:
+    ReleaseSRWLockExclusive(&handle_table_lock);
     return object;
 }
 
 static void *schan_get_object(ULONG_PTR handle_idx, enum schan_handle_type type)
 {
     struct schan_handle *handle;
+    void *object = NULL;
 
     if (handle_idx == SCHAN_INVALID_HANDLE) return NULL;
-    if (handle_idx >= schan_handle_count) return NULL;
+
+    AcquireSRWLockShared(&handle_table_lock);
+    if (handle_idx >= schan_handle_count)
+        goto done;
     handle = &schan_handle_table[handle_idx];
     if (handle->type != type)
     {
-        ERR("Handle %Id(%p) is not of type %#x\n", handle_idx, handle, type);
-        return NULL;
+        ERR("Handle %Id(%p) is not of type %#x (%#x)\n", handle_idx, handle, type, handle->type);
+        goto done;
     }
+    object = handle->object;
 
-    return handle->object;
+done:
+    ReleaseSRWLockShared(&handle_table_lock);
+    return object;
 }
 
 static void read_config(void)
@@ -311,7 +332,7 @@ static SECURITY_STATUS SEC_ENTRY schan_QueryCredentialsAttributesA(
     {
     case SECPKG_CRED_ATTR_NAMES:
         FIXME("SECPKG_CRED_ATTR_NAMES: stub\n");
-        ret = SEC_E_UNSUPPORTED_FUNCTION;
+        ret = SEC_E_NO_CREDENTIALS;
         break;
     default:
         ret = schan_QueryCredentialsAttributes(phCredential, ulAttribute,
@@ -393,7 +414,7 @@ static SECURITY_STATUS get_cert(const void *credentials, CERT_CONTEXT const **ce
 
     default:
         FIXME("unhandled version %lu\n", cred->dwVersion);
-        return SEC_E_INTERNAL_ERROR;
+        return SEC_E_UNKNOWN_CREDENTIALS;
     }
 
     if (!cert_count) status = SEC_E_NO_CREDENTIALS;
@@ -569,7 +590,7 @@ static SECURITY_STATUS acquire_credentials_handle(ULONG fCredentialUse,
 
         status = SEC_E_OK;
     }
-    else if (fCredentialUse & SECPKG_CRED_INBOUND)
+    else if (!fCredentialUse || (fCredentialUse & SECPKG_CRED_INBOUND))
     {
         return SEC_E_NO_CREDENTIALS;
     }
@@ -866,9 +887,9 @@ static SECURITY_STATUS establish_context(
         unsigned char *ptr;
 
         if (phContext && !(ctx = schan_get_object(phContext->dwLower, SCHAN_HANDLE_CTX))) return SEC_E_INVALID_HANDLE;
-        if (!pInput && !ctx->shutdown_requested && !is_dtls_context(ctx)) return SEC_E_INCOMPLETE_MESSAGE;
+        if (!pInput && !ctx->control_token && !is_dtls_context(ctx)) return SEC_E_INCOMPLETE_MESSAGE;
 
-        if (!ctx->shutdown_requested && pInput)
+        if (!ctx->control_token && pInput)
         {
             if (!validate_input_buffers(pInput)) return SEC_E_INVALID_TOKEN;
             if ((idx = schan_find_sec_buffer_idx(pInput, 0, SECBUFFER_TOKEN)) == -1) return SEC_E_INCOMPLETE_MESSAGE;
@@ -876,7 +897,7 @@ static SECURITY_STATUS establish_context(
             buffer = &pInput->pBuffers[idx];
             ptr = buffer->pvBuffer;
 
-            if (buffer->cbBuffer < ctx->header_size && !ctx->rehandshake_requested)
+            if (buffer->cbBuffer < ctx->header_size)
             {
                 TRACE("Expected at least %Iu bytes, but buffer only contains %lu bytes.\n",
                       ctx->header_size, buffer->cbBuffer);
@@ -893,7 +914,7 @@ static SECURITY_STATUS establish_context(
                 ptr += record_size;
             }
 
-            if (!expected_size && !ctx->rehandshake_requested)
+            if (!expected_size)
             {
                 TRACE("Expected at least %Iu bytes, but buffer only contains %lu bytes.\n",
                       max(ctx->header_size, record_size), buffer->cbBuffer);
@@ -941,9 +962,10 @@ static SECURITY_STATUS establish_context(
     params.input_offset = &input_offset;
     params.output_buffer_idx = &output_buffer_idx;
     params.output_offset = &output_offset;
-    params.control_token = ctx->shutdown_requested ? control_token_shutdown : control_token_none;
-    ctx->shutdown_requested = FALSE;
-    ctx->rehandshake_requested = FALSE;
+    params.control_token = ctx->control_token;
+    params.alert_type = ctx->alert_type;
+    params.alert_number = ctx->alert_number;
+    ctx->control_token = CONTROL_TOKEN_NONE;
     ret = GNUTLS_CALL( handshake, &params );
 
     if (output_buffer_idx != -1)
@@ -1032,7 +1054,7 @@ static SECURITY_STATUS SEC_ENTRY schan_InitializeSecurityContextA(
     SECURITY_STATUS ret;
     SEC_WCHAR *target_name = NULL;
 
-    TRACE("%p %p %s %ld %ld %ld %p %ld %p %p %p %p\n", phCredential, phContext,
+    TRACE("%p %p %s 0x%08lx %ld %ld %p %ld %p %p %p %p\n", phCredential, phContext,
      debugstr_a(pszTargetName), fContextReq, Reserved1, TargetDataRep, pInput,
      Reserved1, phNewContext, pOutput, pfContextAttr, ptsExpiry);
 
@@ -1148,197 +1170,178 @@ static SECURITY_STATUS SEC_ENTRY schan_QueryContextAttributesW(
     struct schan_context *ctx;
     SECURITY_STATUS status;
 
-    TRACE("context_handle %p, attribute %#lx, buffer %p\n",
-            context_handle, attribute, buffer);
+    TRACE("context_handle %p, attribute %#lx, buffer %p\n", context_handle, attribute, buffer);
 
-    if (!context_handle) return SEC_E_INVALID_HANDLE;
-    ctx = schan_get_object(context_handle->dwLower, SCHAN_HANDLE_CTX);
+    if (!context_handle || !(ctx = schan_get_object(context_handle->dwLower, SCHAN_HANDLE_CTX)))
+        return SEC_E_INVALID_HANDLE;
 
-    switch(attribute)
+    switch (attribute)
     {
-        case SECPKG_ATTR_STREAM_SIZES:
+    case SECPKG_ATTR_STREAM_SIZES:
+    {
+        SecPkgContext_ConnectionInfo info;
+        struct get_connection_info_params params = { ctx->session, &info };
+        status = GNUTLS_CALL( get_connection_info, &params );
+        if (status == SEC_E_OK)
         {
-            SecPkgContext_ConnectionInfo info;
-            struct get_connection_info_params params = { ctx->session, &info };
-            status = GNUTLS_CALL( get_connection_info, &params );
-            if (status == SEC_E_OK)
-            {
-                struct session_params params = { ctx->session };
-                SecPkgContext_StreamSizes *stream_sizes = buffer;
-                SIZE_T mac_size = info.dwHashStrength;
-                unsigned int block_size = GNUTLS_CALL( get_session_cipher_block_size, &params );
-                unsigned int message_size = GNUTLS_CALL( get_max_message_size, &params );
+            struct session_params params = { ctx->session };
+            SecPkgContext_StreamSizes *stream_sizes = buffer;
+            SIZE_T mac_size = info.dwHashStrength;
+            unsigned int block_size = GNUTLS_CALL( get_session_cipher_block_size, &params );
+            unsigned int message_size = GNUTLS_CALL( get_max_message_size, &params );
 
-                TRACE("Using header size %Iu mac bytes %Iu, message size %u, block size %u\n",
-                      ctx->header_size, mac_size, message_size, block_size);
+            TRACE("Using header size %Iu mac bytes %Iu, message size %u, block size %u\n",
+                  ctx->header_size, mac_size, message_size, block_size);
 
-                /* These are defined by the TLS RFC */
-                stream_sizes->cbHeader = ctx->header_size;
-                stream_sizes->cbTrailer = mac_size + 256; /* Max 255 bytes padding + 1 for padding size */
-                stream_sizes->cbMaximumMessage = message_size;
-                stream_sizes->cBuffers = 4;
-                stream_sizes->cbBlockSize = block_size;
-            }
-
-            return status;
-        }
-        case SECPKG_ATTR_KEY_INFO:
-        {
-            SecPkgContext_ConnectionInfo conn_info;
-            struct get_connection_info_params params = { ctx->session, &conn_info };
-            status = GNUTLS_CALL( get_connection_info, &params );
-            if (status == SEC_E_OK)
-            {
-                struct session_params params = { ctx->session };
-                SecPkgContext_KeyInfoW *info = buffer;
-                info->KeySize = conn_info.dwCipherStrength;
-                info->SignatureAlgorithm = GNUTLS_CALL( get_key_signature_algorithm, &params );
-                info->EncryptAlgorithm = conn_info.aiCipher;
-                info->sSignatureAlgorithmName = get_alg_name(info->SignatureAlgorithm, TRUE);
-                info->sEncryptAlgorithmName = get_alg_name(info->EncryptAlgorithm, TRUE);
-            }
-            return status;
-        }
-        case SECPKG_ATTR_REMOTE_CERT_CONTEXT:
-        {
-            PCCERT_CONTEXT *cert = buffer;
-
-            status = ensure_remote_cert(ctx);
-            if(status != SEC_E_OK)
-                return status;
-
-            *cert = CertDuplicateCertificateContext(ctx->cert);
-            return SEC_E_OK;
-        }
-        case SECPKG_ATTR_CONNECTION_INFO:
-        {
-            SecPkgContext_ConnectionInfo *info = buffer;
-            struct get_connection_info_params params = { ctx->session, info };
-            return GNUTLS_CALL( get_connection_info, &params );
-        }
-        case SECPKG_ATTR_ENDPOINT_BINDINGS:
-        {
-            SecPkgContext_Bindings *bindings = buffer;
-            CCRYPT_OID_INFO *info;
-            ALG_ID hash_alg = CALG_SHA_256;
-            BYTE hash[1024];
-            DWORD hash_size;
-            char *p;
-            BOOL r;
-
-            static const char prefix[] = "tls-server-end-point:";
-
-            status = ensure_remote_cert(ctx);
-            if(status != SEC_E_OK)
-                return status;
-
-            /* RFC 5929 */
-            info = CryptFindOIDInfo(CRYPT_OID_INFO_OID_KEY, ctx->cert->pCertInfo->SignatureAlgorithm.pszObjId, 0);
-            if(info && info->u.Algid != CALG_SHA1 && info->u.Algid != CALG_MD5)
-                hash_alg = info->u.Algid;
-
-            hash_size = sizeof(hash);
-            r = CryptHashCertificate(0, hash_alg, 0, ctx->cert->pbCertEncoded, ctx->cert->cbCertEncoded, hash, &hash_size);
-            if(!r)
-                return GetLastError();
-
-            bindings->BindingsLength = sizeof(*bindings->Bindings) + sizeof(prefix)-1 + hash_size;
-            /* freed with FreeContextBuffer */
-            bindings->Bindings = RtlAllocateHeap(GetProcessHeap(), HEAP_ZERO_MEMORY, bindings->BindingsLength);
-            if(!bindings->Bindings)
-                return SEC_E_INSUFFICIENT_MEMORY;
-
-            bindings->Bindings->cbApplicationDataLength = sizeof(prefix)-1 + hash_size;
-            bindings->Bindings->dwApplicationDataOffset = sizeof(*bindings->Bindings);
-
-            p = (char*)(bindings->Bindings+1);
-            memcpy(p, prefix, sizeof(prefix)-1);
-            p += sizeof(prefix)-1;
-            memcpy(p, hash, hash_size);
-            return SEC_E_OK;
-        }
-        case SECPKG_ATTR_UNIQUE_BINDINGS:
-        {
-            static const char prefix[] = "tls-unique:";
-            SecPkgContext_Bindings *bindings = buffer;
-            ULONG size;
-            char *p;
-            struct get_unique_channel_binding_params params = { ctx->session, NULL, &size };
-
-            if (GNUTLS_CALL( get_unique_channel_binding, &params ) != SEC_E_BUFFER_TOO_SMALL)
-                return SEC_E_INTERNAL_ERROR;
-
-            bindings->BindingsLength = sizeof(*bindings->Bindings) + sizeof(prefix)-1 + size;
-            /* freed with FreeContextBuffer */
-            bindings->Bindings = RtlAllocateHeap(GetProcessHeap(), HEAP_ZERO_MEMORY, bindings->BindingsLength);
-            if(!bindings->Bindings)
-                return SEC_E_INSUFFICIENT_MEMORY;
-
-            bindings->Bindings->cbApplicationDataLength = sizeof(prefix)-1 + size;
-            bindings->Bindings->dwApplicationDataOffset = sizeof(*bindings->Bindings);
-
-            p = (char*)(bindings->Bindings+1);
-            memcpy(p, prefix, sizeof(prefix)-1);
-            p += sizeof(prefix)-1;
-            params.buffer = p;
-            return GNUTLS_CALL( get_unique_channel_binding, &params );
-        }
-        case SECPKG_ATTR_APPLICATION_PROTOCOL:
-        {
-            SecPkgContext_ApplicationProtocol *protocol = buffer;
-            struct get_application_protocol_params params = { ctx->session, protocol };
-            return GNUTLS_CALL( get_application_protocol, &params );
-        }
-        case SECPKG_ATTR_CIPHER_INFO:
-        {
-            SecPkgContext_CipherInfo *info = buffer;
-            struct get_cipher_info_params params = { ctx->session, info };
-            return GNUTLS_CALL( get_cipher_info, &params );
+            /* These are defined by the TLS RFC */
+            stream_sizes->cbHeader = ctx->header_size;
+            stream_sizes->cbTrailer = mac_size + 256; /* Max 255 bytes padding + 1 for padding size */
+            stream_sizes->cbMaximumMessage = message_size;
+            stream_sizes->cBuffers = 4;
+            stream_sizes->cbBlockSize = block_size;
         }
 
-        default:
-            FIXME("Unhandled attribute %#lx\n", attribute);
-            return SEC_E_UNSUPPORTED_FUNCTION;
+        return status;
+    }
+    case SECPKG_ATTR_KEY_INFO:
+    {
+        SecPkgContext_ConnectionInfo conn_info;
+        struct get_connection_info_params params = { ctx->session, &conn_info };
+        status = GNUTLS_CALL( get_connection_info, &params );
+        if (status == SEC_E_OK)
+        {
+            struct session_params params = { ctx->session };
+            SecPkgContext_KeyInfoW *info = buffer;
+            info->KeySize = conn_info.dwCipherStrength;
+            info->SignatureAlgorithm = GNUTLS_CALL( get_key_signature_algorithm, &params );
+            info->EncryptAlgorithm = conn_info.aiCipher;
+            info->sSignatureAlgorithmName = get_alg_name(info->SignatureAlgorithm, TRUE);
+            info->sEncryptAlgorithmName = get_alg_name(info->EncryptAlgorithm, TRUE);
+        }
+        return status;
+    }
+    case SECPKG_ATTR_REMOTE_CERT_CONTEXT:
+    {
+        PCCERT_CONTEXT *cert = buffer;
+
+        if ((status = ensure_remote_cert(ctx)) != SEC_E_OK) return status;
+        *cert = CertDuplicateCertificateContext(ctx->cert);
+        return SEC_E_OK;
+    }
+    case SECPKG_ATTR_CONNECTION_INFO:
+    {
+        SecPkgContext_ConnectionInfo *info = buffer;
+        struct get_connection_info_params params = { ctx->session, info };
+        return GNUTLS_CALL( get_connection_info, &params );
+    }
+    case SECPKG_ATTR_ENDPOINT_BINDINGS:
+    {
+        static const char prefix[] = "tls-server-end-point:";
+        SecPkgContext_Bindings *bindings = buffer;
+        CCRYPT_OID_INFO *info;
+        ALG_ID hash_alg = CALG_SHA_256;
+        BYTE hash[1024];
+        DWORD hash_size;
+        char *p;
+        BOOL ret;
+
+        if ((status = ensure_remote_cert(ctx)) != SEC_E_OK) return status;
+
+        /* RFC 5929 */
+        info = CryptFindOIDInfo(CRYPT_OID_INFO_OID_KEY, ctx->cert->pCertInfo->SignatureAlgorithm.pszObjId, 0);
+        if (info && info->Algid != CALG_SHA1 && info->Algid != CALG_MD5) hash_alg = info->Algid;
+
+        hash_size = sizeof(hash);
+        ret = CryptHashCertificate(0, hash_alg, 0, ctx->cert->pbCertEncoded, ctx->cert->cbCertEncoded, hash, &hash_size);
+        if (!ret) return GetLastError();
+
+        bindings->BindingsLength = sizeof(*bindings->Bindings) + sizeof(prefix) - 1 + hash_size;
+        /* freed with FreeContextBuffer */
+        bindings->Bindings = RtlAllocateHeap(GetProcessHeap(), HEAP_ZERO_MEMORY, bindings->BindingsLength);
+        if (!bindings->Bindings) return SEC_E_INSUFFICIENT_MEMORY;
+
+        bindings->Bindings->cbApplicationDataLength = sizeof(prefix) - 1 + hash_size;
+        bindings->Bindings->dwApplicationDataOffset = sizeof(*bindings->Bindings);
+
+        p = (char *)(bindings->Bindings + 1);
+        memcpy(p, prefix, sizeof(prefix) - 1);
+        p += sizeof(prefix) - 1;
+        memcpy(p, hash, hash_size);
+        return SEC_E_OK;
+    }
+    case SECPKG_ATTR_UNIQUE_BINDINGS:
+    {
+        static const char prefix[] = "tls-unique:";
+        SecPkgContext_Bindings *bindings = buffer;
+        ULONG size;
+        char *p;
+        struct get_unique_channel_binding_params params = { ctx->session, NULL, &size };
+
+        if (GNUTLS_CALL( get_unique_channel_binding, &params ) != SEC_E_BUFFER_TOO_SMALL)
+            return SEC_E_INTERNAL_ERROR;
+
+        bindings->BindingsLength = sizeof(*bindings->Bindings) + sizeof(prefix) - 1 + size;
+        /* freed with FreeContextBuffer */
+        bindings->Bindings = RtlAllocateHeap(GetProcessHeap(), HEAP_ZERO_MEMORY, bindings->BindingsLength);
+        if (!bindings->Bindings) return SEC_E_INSUFFICIENT_MEMORY;
+
+        bindings->Bindings->cbApplicationDataLength = sizeof(prefix) - 1 + size;
+        bindings->Bindings->dwApplicationDataOffset = sizeof(*bindings->Bindings);
+
+        p = (char *)(bindings->Bindings + 1);
+        memcpy(p, prefix, sizeof(prefix) - 1);
+        p += sizeof(prefix) - 1;
+        params.buffer = p;
+        return GNUTLS_CALL( get_unique_channel_binding, &params );
+    }
+    case SECPKG_ATTR_APPLICATION_PROTOCOL:
+    {
+        SecPkgContext_ApplicationProtocol *protocol = buffer;
+        struct get_application_protocol_params params = { ctx->session, protocol };
+        return GNUTLS_CALL( get_application_protocol, &params );
+    }
+    case SECPKG_ATTR_CIPHER_INFO:
+    {
+        SecPkgContext_CipherInfo *info = buffer;
+        struct get_cipher_info_params params = { ctx->session, info };
+        return GNUTLS_CALL( get_cipher_info, &params );
+    }
+    default:
+        FIXME("Unhandled attribute %#lx\n", attribute);
+        return SEC_E_UNSUPPORTED_FUNCTION;
     }
 }
 
 static SECURITY_STATUS SEC_ENTRY schan_QueryContextAttributesA(
         PCtxtHandle context_handle, ULONG attribute, PVOID buffer)
 {
-    TRACE("context_handle %p, attribute %#lx, buffer %p\n",
-            context_handle, attribute, buffer);
+    TRACE("context_handle %p, attribute %#lx, buffer %p\n", context_handle, attribute, buffer);
 
     switch(attribute)
     {
-        case SECPKG_ATTR_STREAM_SIZES:
-            return schan_QueryContextAttributesW(context_handle, attribute, buffer);
-        case SECPKG_ATTR_KEY_INFO:
+    case SECPKG_ATTR_KEY_INFO:
+    {
+        SECURITY_STATUS status = schan_QueryContextAttributesW(context_handle, attribute, buffer);
+        if (status == SEC_E_OK)
         {
-            SECURITY_STATUS status = schan_QueryContextAttributesW(context_handle, attribute, buffer);
-            if (status == SEC_E_OK)
-            {
-                SecPkgContext_KeyInfoA *info = buffer;
-                info->sSignatureAlgorithmName = get_alg_name(info->SignatureAlgorithm, FALSE);
-                info->sEncryptAlgorithmName = get_alg_name(info->EncryptAlgorithm, FALSE);
-            }
-            return status;
+            SecPkgContext_KeyInfoA *info = buffer;
+            info->sSignatureAlgorithmName = get_alg_name(info->SignatureAlgorithm, FALSE);
+            info->sEncryptAlgorithmName = get_alg_name(info->EncryptAlgorithm, FALSE);
         }
-        case SECPKG_ATTR_REMOTE_CERT_CONTEXT:
-            return schan_QueryContextAttributesW(context_handle, attribute, buffer);
-        case SECPKG_ATTR_CONNECTION_INFO:
-            return schan_QueryContextAttributesW(context_handle, attribute, buffer);
-        case SECPKG_ATTR_ENDPOINT_BINDINGS:
-            return schan_QueryContextAttributesW(context_handle, attribute, buffer);
-        case SECPKG_ATTR_UNIQUE_BINDINGS:
-            return schan_QueryContextAttributesW(context_handle, attribute, buffer);
-        case SECPKG_ATTR_APPLICATION_PROTOCOL:
-            return schan_QueryContextAttributesW(context_handle, attribute, buffer);
-        case SECPKG_ATTR_CIPHER_INFO:
-            return schan_QueryContextAttributesW(context_handle, attribute, buffer);
+        return status;
+    }
+    case SECPKG_ATTR_STREAM_SIZES:
+    case SECPKG_ATTR_REMOTE_CERT_CONTEXT:
+    case SECPKG_ATTR_CONNECTION_INFO:
+    case SECPKG_ATTR_ENDPOINT_BINDINGS:
+    case SECPKG_ATTR_UNIQUE_BINDINGS:
+    case SECPKG_ATTR_APPLICATION_PROTOCOL:
+    case SECPKG_ATTR_CIPHER_INFO:
+        return schan_QueryContextAttributesW(context_handle, attribute, buffer);
 
-        default:
-            FIXME("Unhandled attribute %#lx\n", attribute);
-            return SEC_E_UNSUPPORTED_FUNCTION;
+    default:
+        FIXME("Unhandled attribute %#lx\n", attribute);
+        return SEC_E_UNSUPPORTED_FUNCTION;
     }
 }
 
@@ -1565,7 +1568,6 @@ static SECURITY_STATUS SEC_ENTRY schan_DecryptMessage(PCtxtHandle context_handle
     buffer->BufferType = SECBUFFER_STREAM_HEADER;
     buffer->cbBuffer = ctx->header_size;
 
-    if (status == SEC_I_RENEGOTIATE) ctx->rehandshake_requested = TRUE;
     return status;
 }
 
@@ -1591,23 +1593,43 @@ static SECURITY_STATUS SEC_ENTRY schan_DeleteSecurityContext(PCtxtHandle context
 static SECURITY_STATUS SEC_ENTRY schan_ApplyControlToken(PCtxtHandle context_handle, PSecBufferDesc input)
 {
     struct schan_context *ctx;
+    DWORD type;
 
     TRACE("%p %p\n", context_handle, input);
 
     dump_buffer_desc(input);
 
-    if (!context_handle) return SEC_E_INVALID_HANDLE;
+    if (!context_handle || !(ctx = schan_get_object(context_handle->dwLower, SCHAN_HANDLE_CTX)))
+        return SEC_E_INVALID_HANDLE;
     if (!input) return SEC_E_INTERNAL_ERROR;
 
     if (input->cBuffers != 1) return SEC_E_INVALID_TOKEN;
     if (input->pBuffers[0].BufferType != SECBUFFER_TOKEN) return SEC_E_INVALID_TOKEN;
-    if (input->pBuffers[0].cbBuffer < sizeof(DWORD)) return SEC_E_UNSUPPORTED_FUNCTION;
-    if (*(DWORD *)input->pBuffers[0].pvBuffer != SCHANNEL_SHUTDOWN) return SEC_E_UNSUPPORTED_FUNCTION;
+    if (input->pBuffers[0].cbBuffer < sizeof(type)) return SEC_E_UNSUPPORTED_FUNCTION;
+    type = *(DWORD *)input->pBuffers[0].pvBuffer;
 
-    ctx = schan_get_object(context_handle->dwLower, SCHAN_HANDLE_CTX);
-    ctx->shutdown_requested = TRUE;
+    switch (type)
+    {
+    case SCHANNEL_SHUTDOWN:
+        ctx->control_token = CONTROL_TOKEN_SHUTDOWN;
+        ctx->alert_type = TLS1_ALERT_WARNING;
+        ctx->alert_number = TLS1_ALERT_CLOSE_NOTIFY;
+        return SEC_E_OK;
 
-    return SEC_E_OK;
+    case SCHANNEL_ALERT:
+    {
+        SCHANNEL_ALERT_TOKEN *alert = input->pBuffers[0].pvBuffer;
+        if (input->pBuffers[0].cbBuffer < sizeof(*alert)) return SEC_E_INVALID_TOKEN;
+        ctx->control_token = CONTROL_TOKEN_ALERT;
+        ctx->alert_type = alert->dwAlertType;
+        ctx->alert_number = alert->dwAlertNumber;
+        return SEC_E_OK;
+    }
+
+    default:
+        FIXME("token type %lu not supported\n", type);
+        return SEC_E_UNSUPPORTED_FUNCTION;
+    }
 }
 
 static const SecurityFunctionTableA schanTableA = {

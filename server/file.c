@@ -123,8 +123,8 @@ static const struct object_ops file_ops =
     add_queue,                    /* add_queue */
     remove_queue,                 /* remove_queue */
     default_fd_signaled,          /* signaled */
-    default_fd_get_esync_fd,      /* get_esync_fd */
-    default_fd_get_fsync_idx,     /* get_fsync_idx */
+    NULL,                         /* get_esync_fd */
+    NULL,                         /* get_fsync_idx */
     no_satisfied,                 /* satisfied */
     no_signal,                    /* signal */
     file_get_fd,                  /* get_fd */
@@ -186,7 +186,6 @@ struct file *create_file_for_fd( int fd, unsigned int access, unsigned int shari
         release_object( file );
         return NULL;
     }
-    set_unix_name_of_fd( file->fd, &st );
     allow_fd_caching( file->fd );
     return file;
 }
@@ -399,6 +398,7 @@ static enum server_fd_type file_get_fd_type( struct fd *fd )
 {
     struct file *file = get_fd_user( fd );
 
+    if (S_ISLNK(file->mode)) return FD_TYPE_SYMLINK;
     if (S_ISREG(file->mode) || S_ISBLK(file->mode)) return FD_TYPE_FILE;
     if (S_ISDIR(file->mode)) return FD_TYPE_DIR;
     return FD_TYPE_CHAR;

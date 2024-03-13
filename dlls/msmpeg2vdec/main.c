@@ -1,5 +1,5 @@
 /*
- * Copyright 2023 Rémi Bernon for CodeWeavers
+ * Copyright (C) 2023 Mohamad Al-Jaf
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -16,33 +16,12 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include <stddef.h>
-#include <stdarg.h>
-#include <stdlib.h>
-
-#include "windef.h"
-#include "winbase.h"
-
 #include "wine/debug.h"
 
-WINE_DEFAULT_DEBUG_CHANNEL(mfplat);
+WINE_DEFAULT_DEBUG_CHANNEL(msmpeg2vdec);
 
-BOOL WINAPI DllMain( HINSTANCE instance, DWORD reason, void *reserved )
+HRESULT WINAPI DllGetClassObject( REFCLSID clsid, REFIID riid, void **out )
 {
-    TRACE( "instance %p, reason %#lx, reserved %p\n", instance, reason, reserved );
-
-    switch (reason)
-    {
-    case DLL_PROCESS_ATTACH:
-    {
-        const char *sgi;
-        if ((sgi = getenv( "SteamGameId" )) && !strcmp( sgi, "1498570" )) return FALSE;
-        DisableThreadLibraryCalls( instance );
-        break;
-    }
-    case DLL_PROCESS_DETACH:
-        break;
-    }
-
-    return TRUE;
+    FIXME( "clsid %s, riid %s, out %p stub!\n", debugstr_guid(clsid), debugstr_guid(riid), out );
+    return CLASS_E_CLASSNOTAVAILABLE;
 }

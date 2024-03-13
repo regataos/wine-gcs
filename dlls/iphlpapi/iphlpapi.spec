@@ -73,14 +73,14 @@
 @ stdcall GetAdaptersAddresses( long long ptr ptr ptr )
 @ stdcall GetAdaptersInfo( ptr ptr )
 #@ stub GetAnycastIpAddressEntry
-#@ stub GetAnycastIpAddressTable
+@ stdcall GetAnycastIpAddressTable( long ptr )
 @ stdcall GetBestInterface( long ptr )
 @ stdcall GetBestInterfaceEx( ptr ptr )
 @ stub GetBestInterfaceFromStack
 @ stdcall GetBestRoute( long long ptr )
 @ stdcall GetBestRoute2( ptr long ptr ptr long ptr ptr )
 @ stub GetBestRouteFromStack
-#@ stub GetCurrentThreadCompartmentId
+@ stdcall GetCurrentThreadCompartmentId()
 @ stdcall GetExtendedTcpTable( ptr ptr long long long long )
 @ stdcall GetExtendedUdpTable( ptr ptr long long long long )
 @ stdcall GetFriendlyIfIndex( long )
@@ -130,7 +130,7 @@
 @ stdcall GetPerAdapterInfo( long ptr ptr )
 #@ stub GetPerTcp6ConnectionEStats
 #@ stub GetPerTcp6ConnectionStats
-#@ stub GetPerTcpConnectionEStats
+@ stdcall GetPerTcpConnectionEStats( ptr long ptr long long ptr long long ptr long long )
 #@ stub GetPerTcpConnectionStats
 @ stdcall GetRTTAndHopCount( long ptr long ptr )
 #@ stub GetSessionCompartmentId

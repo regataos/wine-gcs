@@ -91,7 +91,7 @@ static ULONG WINAPI FlipRotator_Release(IWICBitmapFlipRotator *iface)
         This->lock.DebugInfo->Spare[0] = 0;
         DeleteCriticalSection(&This->lock);
         if (This->source) IWICBitmapSource_Release(This->source);
-        HeapFree(GetProcessHeap(), 0, This);
+        free(This);
     }
 
     return ref;
@@ -267,7 +267,7 @@ HRESULT FlipRotator_Create(IWICBitmapFlipRotator **fliprotator)
 {
     FlipRotator *This;
 
-    This = HeapAlloc(GetProcessHeap(), 0, sizeof(FlipRotator));
+    This = malloc(sizeof(FlipRotator));
     if (!This) return E_OUTOFMEMORY;
 
     This->IWICBitmapFlipRotator_iface.lpVtbl = &FlipRotator_Vtbl;
@@ -276,7 +276,7 @@ HRESULT FlipRotator_Create(IWICBitmapFlipRotator **fliprotator)
     This->flip_x = 0;
     This->flip_y = 0;
     This->swap_xy = 0;
-    InitializeCriticalSection(&This->lock);
+    InitializeCriticalSectionEx(&This->lock, 0, RTL_CRITICAL_SECTION_FLAG_FORCE_DEBUG_INFO);
     This->lock.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": FlipRotator.lock");
 
     *fliprotator = &This->IWICBitmapFlipRotator_iface;

@@ -23,6 +23,7 @@
 #include <assert.h>
 #include <stdarg.h>
 #include <stdio.h>
+#include <math.h>
 
 #define COBJMACROS
 
@@ -127,7 +128,7 @@ static HRESULT DirectSoundDevice_Create(DirectSoundDevice ** ppDevice)
     TRACE("(%p)\n", ppDevice);
 
     /* Allocate memory */
-    device = HeapAlloc(GetProcessHeap(),HEAP_ZERO_MEMORY,sizeof(DirectSoundDevice));
+    device = calloc(1, sizeof(DirectSoundDevice));
     if (device == NULL) {
         WARN("out of memory\n");
         return DSERR_OUTOFMEMORY;
@@ -136,9 +137,9 @@ static HRESULT DirectSoundDevice_Create(DirectSoundDevice ** ppDevice)
     device->ref            = 1;
     device->priolevel      = DSSCL_NORMAL;
     device->stopped        = 1;
+    device->speaker_config = DSSPEAKER_COMBINED(DSSPEAKER_STEREO, DSSPEAKER_GEOMETRY_WIDE);
 
-    device->speaker_config = 0;
-    device->num_speakers = 0;
+    DSOUND_ParseSpeakerConfig(device);
 
     /* 3D listener initial parameters */
     device->ds3dl.dwSize   = sizeof(DS3DLISTENER);
@@ -161,10 +162,10 @@ static HRESULT DirectSoundDevice_Create(DirectSoundDevice ** ppDevice)
     device->guid = GUID_NULL;
 
     /* Set default wave format (may need it for waveOutOpen) */
-    device->primary_pwfx = HeapAlloc(GetProcessHeap(),HEAP_ZERO_MEMORY,sizeof(WAVEFORMATEXTENSIBLE));
+    device->primary_pwfx = calloc(1, sizeof(WAVEFORMATEXTENSIBLE));
     if (!device->primary_pwfx) {
         WARN("out of memory\n");
-        HeapFree(GetProcessHeap(),0,device);
+        free(device);
         return DSERR_OUTOFMEMORY;
     }
 
@@ -176,7 +177,7 @@ static HRESULT DirectSoundDevice_Create(DirectSoundDevice ** ppDevice)
     device->primary_pwfx->nAvgBytesPerSec = device->primary_pwfx->nSamplesPerSec * device->primary_pwfx->nBlockAlign;
     device->primary_pwfx->cbSize = 0;
 
-    InitializeCriticalSection(&(device->mixlock));
+    InitializeCriticalSectionEx(&(device->mixlock), 0, RTL_CRITICAL_SECTION_FLAG_FORCE_DEBUG_INFO);
     device->mixlock.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": DirectSoundDevice.mixlock");
 
     InitializeSRWLock(&device->buffer_list_lock);
@@ -235,15 +236,14 @@ static ULONG DirectSoundDevice_Release(DirectSoundDevice * device)
         if(device->mmdevice)
             IMMDevice_Release(device->mmdevice);
         CloseHandle(device->sleepev);
-
-        HeapFree(GetProcessHeap(), 0, device->dsp_buffer);
-        HeapFree(GetProcessHeap(), 0, device->tmp_buffer);
-        HeapFree(GetProcessHeap(), 0, device->cp_buffer);
-        HeapFree(GetProcessHeap(), 0, device->buffer);
+        free(device->dsp_buffer);
+        free(device->tmp_buffer);
+        free(device->cp_buffer);
+        free(device->buffer);
         device->mixlock.DebugInfo->Spare[0] = 0;
         DeleteCriticalSection(&device->mixlock);
         TRACE("(%p) released\n", device);
-        HeapFree(GetProcessHeap(),0,device);
+        free(device);
     }
     return ref;
 }
@@ -291,9 +291,10 @@ static HRESULT DirectSoundDevice_Initialize(DirectSoundDevice ** ppDevice, LPCGU
             IsEqualGUID(lpcGUID, &DSDEVID_DefaultVoiceCapture))
         return DSERR_NODRIVER;
 
-    if (GetDeviceID(lpcGUID, &devGUID) != DS_OK) {
+    hr = GetDeviceID(lpcGUID, &devGUID);
+    if (FAILED(hr)) {
         WARN("invalid parameter: lpcGUID\n");
-        return DSERR_INVALIDPARAM;
+        return hr;
     }
 
     hr = get_mmdevice(eRender, &devGUID, &mmdevice);
@@ -328,7 +329,7 @@ static HRESULT DirectSoundDevice_Initialize(DirectSoundDevice ** ppDevice, LPCGU
     hr = DSOUND_ReopenDevice(device, FALSE);
     if (FAILED(hr))
     {
-        HeapFree(GetProcessHeap(), 0, device);
+        free(device);
         LeaveCriticalSection(&DSOUND_renderers_lock);
         IMMDevice_Release(mmdevice);
         WARN("DSOUND_ReopenDevice failed: %08lx\n", hr);
@@ -492,6 +493,9 @@ static HRESULT DirectSoundDevice_CreateSoundBuffer(
             return DSERR_INVALIDPARAM;
         }
 
+        if (dsbd->lpwfxFormat->nChannels > 2 && dsbd->lpwfxFormat->wFormatTag != WAVE_FORMAT_EXTENSIBLE)
+            return DSERR_INVALIDPARAM;
+
         if (dsbd->lpwfxFormat->wFormatTag == WAVE_FORMAT_EXTENSIBLE)
         {
             WAVEFORMATEXTENSIBLE *pwfxe = (WAVEFORMATEXTENSIBLE*)dsbd->lpwfxFormat;
@@ -614,10 +618,7 @@ HRESULT DirectSoundDevice_AddBuffer(
 
     AcquireSRWLockExclusive(&device->buffer_list_lock);
 
-    if (device->buffers)
-        newbuffers = HeapReAlloc(GetProcessHeap(),0,device->buffers,sizeof(IDirectSoundBufferImpl*)*(device->nrofbuffers+1));
-    else
-        newbuffers = HeapAlloc(GetProcessHeap(),0,sizeof(IDirectSoundBufferImpl*)*(device->nrofbuffers+1));
+    newbuffers = realloc(device->buffers, sizeof(IDirectSoundBufferImpl*) * (device->nrofbuffers + 1));
 
     if (newbuffers) {
         device->buffers = newbuffers;
@@ -648,7 +649,7 @@ void DirectSoundDevice_RemoveBuffer(DirectSoundDevice * device, IDirectSoundBuff
 
     if (device->nrofbuffers == 1) {
         assert(device->buffers[0] == pDSB);
-        HeapFree(GetProcessHeap(), 0, device->buffers);
+        free(device->buffers);
         device->buffers = NULL;
     } else {
         for (i = 0; i < device->nrofbuffers; i++) {
@@ -674,7 +675,7 @@ static void directsound_destroy(IDirectSoundImpl *This)
     if (This->device)
         DirectSoundDevice_Release(This->device);
     TRACE("(%p) released\n", This);
-    HeapFree(GetProcessHeap(),0,This);
+    free(This);
 }
 
 static inline IDirectSoundImpl *impl_from_IUnknown(IUnknown *iface)
@@ -984,7 +985,7 @@ HRESULT IDirectSoundImpl_Create(IUnknown *outer_unk, REFIID riid, void **ppv, BO
     TRACE("(%s, %p)\n", debugstr_guid(riid), ppv);
 
     *ppv = NULL;
-    obj = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*obj));
+    obj = calloc(1, sizeof(*obj));
     if (!obj) {
         WARN("out of memory\n");
         return DSERR_OUTOFMEMORY;
@@ -1126,4 +1127,76 @@ HRESULT WINAPI DirectSoundCreate8(
     *ppDS = pDS;
 
     return hr;
+}
+
+void DSOUND_ParseSpeakerConfig(DirectSoundDevice *device)
+{
+    switch (DSSPEAKER_CONFIG(device->speaker_config)) {
+        case DSSPEAKER_MONO:
+            device->speaker_angles[0] = M_PI/180.0f * 0.0f;
+            device->speaker_num[0] = 0;
+            device->num_speakers = 1;
+            device->lfe_channel = -1;
+        break;
+
+        case DSSPEAKER_STEREO:
+        case DSSPEAKER_HEADPHONE:
+            device->speaker_angles[0] = M_PI/180.0f * -90.0f;
+            device->speaker_angles[1] = M_PI/180.0f *  90.0f;
+            device->speaker_num[0] = 0; /* Left */
+            device->speaker_num[1] = 1; /* Right */
+            device->num_speakers = 2;
+            device->lfe_channel = -1;
+        break;
+
+        case DSSPEAKER_QUAD:
+            device->speaker_angles[0] = M_PI/180.0f * -135.0f;
+            device->speaker_angles[1] = M_PI/180.0f *  -45.0f;
+            device->speaker_angles[2] = M_PI/180.0f *   45.0f;
+            device->speaker_angles[3] = M_PI/180.0f *  135.0f;
+            device->speaker_num[0] = 2; /* Rear left */
+            device->speaker_num[1] = 0; /* Front left */
+            device->speaker_num[2] = 1; /* Front right */
+            device->speaker_num[3] = 3; /* Rear right */
+            device->num_speakers = 4;
+            device->lfe_channel = -1;
+        break;
+
+        case DSSPEAKER_5POINT1_BACK:
+            device->speaker_angles[0] = M_PI/180.0f * -135.0f;
+            device->speaker_angles[1] = M_PI/180.0f *  -45.0f;
+            device->speaker_angles[2] = M_PI/180.0f *    0.0f;
+            device->speaker_angles[3] = M_PI/180.0f *   45.0f;
+            device->speaker_angles[4] = M_PI/180.0f *  135.0f;
+            device->speaker_angles[5] = 9999.0f;
+            device->speaker_num[0] = 4; /* Rear left */
+            device->speaker_num[1] = 0; /* Front left */
+            device->speaker_num[2] = 2; /* Front centre */
+            device->speaker_num[3] = 1; /* Front right */
+            device->speaker_num[4] = 5; /* Rear right */
+            device->speaker_num[5] = 3; /* LFE */
+            device->num_speakers = 6;
+            device->lfe_channel = 3;
+        break;
+
+        case DSSPEAKER_5POINT1_SURROUND:
+            device->speaker_angles[0] = M_PI/180.0f *  -90.0f;
+            device->speaker_angles[1] = M_PI/180.0f *  -30.0f;
+            device->speaker_angles[2] = M_PI/180.0f *    0.0f;
+            device->speaker_angles[3] = M_PI/180.0f *   30.0f;
+            device->speaker_angles[4] = M_PI/180.0f *   90.0f;
+            device->speaker_angles[5] = 9999.0f;
+            device->speaker_num[0] = 4; /* Rear left */
+            device->speaker_num[1] = 0; /* Front left */
+            device->speaker_num[2] = 2; /* Front centre */
+            device->speaker_num[3] = 1; /* Front right */
+            device->speaker_num[4] = 5; /* Rear right */
+            device->speaker_num[5] = 3; /* LFE */
+            device->num_speakers = 6;
+            device->lfe_channel = 3;
+        break;
+
+        default:
+            WARN("unknown speaker_config %lu\n", device->speaker_config);
+    }
 }

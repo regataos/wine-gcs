@@ -42,9 +42,8 @@
 #include "winnls.h"
 #include "msvcrt.h"
 #include "mtdll.h"
-
-#include "wine/debug.h"
 #include "wine/asm.h"
+#include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(msvcrt);
 
@@ -110,9 +109,9 @@ typedef struct {
     unsigned char       wxflag;
     char                textmode;
     char                lookahead[3];
-    char unicode          : 1;
-    char utf8translations : 1;
-    char dbcsBufferUsed   : 1;
+    unsigned int unicode          : 1;
+    unsigned int utf8translations : 1;
+    unsigned int dbcsBufferUsed   : 1;
     char dbcsBuffer[MB_LEN_MAX];
 } ioinfo;
 
@@ -561,12 +560,14 @@ static void msvcrt_set_fd(ioinfo *fdinfo, HANDLE hand, int flag)
   ioinfo_set_unicode(fdinfo, FALSE);
   ioinfo_set_textmode(fdinfo, TEXTMODE_ANSI);
 
-  if (hand == MSVCRT_NO_CONSOLE) hand = 0;
-  switch (fdinfo-MSVCRT___pioinfo[0])
+  if (hand != MSVCRT_NO_CONSOLE)
   {
-  case 0: SetStdHandle(STD_INPUT_HANDLE,  hand); break;
-  case 1: SetStdHandle(STD_OUTPUT_HANDLE, hand); break;
-  case 2: SetStdHandle(STD_ERROR_HANDLE,  hand); break;
+    switch (fdinfo-MSVCRT___pioinfo[0])
+    {
+    case 0: SetStdHandle(STD_INPUT_HANDLE,  hand); break;
+    case 1: SetStdHandle(STD_OUTPUT_HANDLE, hand); break;
+    case 2: SetStdHandle(STD_ERROR_HANDLE,  hand); break;
+    }
   }
 }
 
@@ -605,7 +606,7 @@ static FILE* msvcrt_alloc_fp(void)
       {
           if (file<MSVCRT__iob || file>=MSVCRT__iob+_IOB_ENTRIES)
           {
-              InitializeCriticalSection(&((file_crit*)file)->crit);
+              InitializeCriticalSectionEx(&((file_crit*)file)->crit, 0, RTL_CRITICAL_SECTION_FLAG_FORCE_DEBUG_INFO);
               ((file_crit*)file)->crit.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": file_crit.crit");
           }
           MSVCRT_stream_idx++;
@@ -819,28 +820,12 @@ static int msvcrt_flush_buffer(FILE* file)
 /*********************************************************************
  *		_isatty (MSVCRT.@)
  */
-#ifdef __x86_64__
-int CDECL MSVCRT__isatty(int fd)
-{
-    TRACE(":fd (%d)\n",fd);
-
-    return get_ioinfo_nolock(fd)->wxflag & WX_TTY;
-}
-__ASM_GLOBAL_FUNC( _isatty,
-        "sub $0x30,%rsp\n\t"
-        "lea MSVCRT___pioinfo(%rip),%rdx\n\t"
-        "nop;nop;nop;nop;nop;nop;nop;nop;nop\n\t"
-        "add $0x30,%rsp\n\t"
-        "jmp " __ASM_NAME( "MSVCRT__isatty" ) )
-#else
 int CDECL _isatty(int fd)
 {
     TRACE(":fd (%d)\n",fd);
 
     return get_ioinfo_nolock(fd)->wxflag & WX_TTY;
 }
-#endif
-
 
 /* INTERNAL: Allocate stdio file buffer */
 static BOOL msvcrt_alloc_buffer(FILE* file)
@@ -1674,6 +1659,19 @@ int CDECL clearerr_s(FILE* file)
   _unlock_file(file);
   return 0;
 }
+
+#if defined(__i386__)
+/* Stack preserving thunk for rewind
+ * needed for the UIO mod for Fallout: New Vegas
+ */
+__ASM_GLOBAL_FUNC(rewind_preserve_stack,
+                  "pushl 4(%esp)\n\t"
+                  __ASM_CFI(".cfi_adjust_cfa_offset 4\n\t")
+                  "call "__ASM_NAME("rewind") "\n\t"
+                  "addl $4,%esp\n\t"
+                  __ASM_CFI(".cfi_adjust_cfa_offset -4\n\t")
+                  "ret")
+#endif
 
 /*********************************************************************
  *		rewind (MSVCRT.@)
@@ -4605,9 +4603,7 @@ FILE* CDECL _wfreopen(const wchar_t *path, const wchar_t *mode, FILE* file)
     TRACE(":path (%s) mode (%s) file (%p) fd (%d)\n", debugstr_w(path), debugstr_w(mode), file, file ? file->_file : -1);
 
     LOCK_FILES();
-    if (!file || ((fd = file->_file) < 0))
-        file = NULL;
-    else
+    if (file)
     {
         fclose(file);
         if (msvcrt_get_flags(mode, &open_flags, &stream_flags) == -1)
@@ -4688,19 +4684,7 @@ errno_t CDECL freopen_s(FILE** pFile,
  */
 int CDECL fsetpos(FILE* file, fpos_t *pos)
 {
-  int ret;
-
-  _lock_file(file);
-  msvcrt_flush_buffer(file);
-
-  /* Reset direction of i/o */
-  if(file->_flag & _IORW) {
-        file->_flag &= ~(_IOREAD|_IOWRT);
-  }
-
-  ret = (_lseeki64(file->_file,*pos,SEEK_SET) == -1) ? -1 : 0;
-  _unlock_file(file);
-  return ret;
+    return _fseeki64(file,*pos,SEEK_SET);
 }
 
 /*********************************************************************

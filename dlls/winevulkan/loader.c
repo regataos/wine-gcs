@@ -39,6 +39,20 @@ static HINSTANCE hinstance;
 
 static void *wine_vk_get_global_proc_addr(const char *name);
 
+#define wine_vk_find_struct(s, t) wine_vk_find_struct_((void *)s, VK_STRUCTURE_TYPE_##t)
+static void *wine_vk_find_struct_(void *s, VkStructureType t)
+{
+    VkBaseOutStructure *header;
+
+    for (header = s; header; header = header->pNext)
+    {
+        if (header->sType == t)
+            return header;
+    }
+
+    return NULL;
+}
+
 VkResult WINAPI vkEnumerateInstanceLayerProperties(uint32_t *count, VkLayerProperties *properties)
 {
     TRACE("%p, %p\n", count, properties);
@@ -416,49 +430,6 @@ static void fill_luid_property(VkPhysicalDeviceProperties2 *properties2)
             device_node_mask);
 }
 
-static void fixup_device_id(VkPhysicalDeviceProperties *properties)
-{
-    const char *sgi;
-    if (properties->vendorID == 0x10de /* NVIDIA */)
-    {
-        sgi = getenv("WINE_HIDE_NVIDIA_GPU");
-        if (sgi && *sgi != '0')
-        {
-            {
-                properties->vendorID = 0x1002; /* AMD */
-                properties->deviceID = 0x67df; /* RX 480 */
-            }
-        }
-    }
-    else if (properties->vendorID && properties->vendorID == 0x1002 && properties->deviceID == 0x163f)
-    {
-        /* AMD VAN GOGH */
-        BOOL hide;
-        sgi = getenv("WINE_HIDE_VANGOGH_GPU");
-        if (sgi)
-            hide = *sgi != '0';
-        else
-            hide = (sgi = getenv("SteamGameId")) && !strcmp(sgi, "257420");
-        if (hide)
-            properties->deviceID = 0x687f; /* Radeon RX Vega 56/64 */
-    }
-}
-
-void WINAPI vkGetPhysicalDeviceProperties(VkPhysicalDevice physical_device,
-        VkPhysicalDeviceProperties *properties)
-{
-    struct vkGetPhysicalDeviceProperties_params params;
-    NTSTATUS status;
-
-    TRACE("%p, %p\n", physical_device, properties);
-
-    params.physicalDevice = physical_device;
-    params.pProperties = properties;
-    status = UNIX_CALL(vkGetPhysicalDeviceProperties, &params);
-    assert(!status);
-    fixup_device_id(properties);
-}
-
 void WINAPI vkGetPhysicalDeviceProperties2(VkPhysicalDevice phys_dev,
         VkPhysicalDeviceProperties2 *properties2)
 {
@@ -472,7 +443,6 @@ void WINAPI vkGetPhysicalDeviceProperties2(VkPhysicalDevice phys_dev,
     status = UNIX_CALL(vkGetPhysicalDeviceProperties2, &params);
     assert(!status);
     fill_luid_property(properties2);
-    fixup_device_id(&properties2->properties);
 }
 
 void WINAPI vkGetPhysicalDeviceProperties2KHR(VkPhysicalDevice phys_dev,
@@ -488,18 +458,6 @@ void WINAPI vkGetPhysicalDeviceProperties2KHR(VkPhysicalDevice phys_dev,
     status = UNIX_CALL(vkGetPhysicalDeviceProperties2KHR, &params);
     assert(!status);
     fill_luid_property(properties2);
-
-    {
-        const char *sgi = getenv("WINE_HIDE_NVIDIA_GPU");
-        if (sgi && *sgi != '0')
-        {
-            if (properties2->properties.vendorID == 0x10de /* NVIDIA */)
-            {
-                properties2->properties.vendorID = 0x1002; /* AMD */
-                properties2->properties.deviceID = 0x67df; /* RX 480 */
-            }
-        }
-    }
 }
 
 VkResult WINAPI vkCreateDevice(VkPhysicalDevice phys_dev, const VkDeviceCreateInfo *create_info,
@@ -644,60 +602,24 @@ void WINAPI vkFreeCommandBuffers(VkDevice device, VkCommandPool cmd_pool, uint32
     }
 }
 
-VkResult WINAPI vkCreateSwapchainKHR(VkDevice device, const VkSwapchainCreateInfoKHR *pCreateInfo,
-                                     const VkAllocationCallbacks *pAllocator, VkSwapchainKHR *pSwapchain)
+static NTSTATUS WINAPI call_vulkan_debug_report_callback( void *args, ULONG size )
 {
-    struct vkCreateSwapchainKHR_params params;
-    struct vk_swapchain *swapchain;
-    NTSTATUS status;
-
-    if (!(swapchain = malloc(sizeof(*swapchain))))
-        return VK_ERROR_OUT_OF_HOST_MEMORY;
-    swapchain->unix_handle = 0;
-
-    params.device = device;
-    params.pCreateInfo = pCreateInfo;
-    params.pAllocator = pAllocator;
-    params.pSwapchain = pSwapchain;
-    params.client_ptr = swapchain;
-    status = UNIX_CALL(vkCreateSwapchainKHR, &params);
-    assert(!status);
-    if (!swapchain->unix_handle)
-        free(swapchain);
-    return params.result;
+    struct wine_vk_debug_report_params *params = args;
+    VkBool32 ret = params->user_callback(params->flags, params->object_type, params->object_handle, params->location,
+                                         params->code, params->layer_prefix, params->message, params->user_data);
+    return NtCallbackReturn( &ret, sizeof(ret), STATUS_SUCCESS );
 }
 
-void WINAPI vkDestroySwapchainKHR(VkDevice device, VkSwapchainKHR handle, const VkAllocationCallbacks *pAllocator)
+static NTSTATUS WINAPI call_vulkan_debug_utils_callback( void *args, ULONG size )
 {
-    struct vk_swapchain *swapchain = swapchain_from_handle(handle);
-    struct vkDestroySwapchainKHR_params params;
-    NTSTATUS status;
-
-    if (!swapchain)
-        return;
-
-    params.device = device;
-    params.swapchain = handle;
-    params.pAllocator = pAllocator;
-    status = UNIX_CALL(vkDestroySwapchainKHR, &params);
-    assert(!status);
-    free(swapchain);
-}
-
-static BOOL WINAPI call_vulkan_debug_report_callback( struct wine_vk_debug_report_params *params, ULONG size )
-{
-    return params->user_callback(params->flags, params->object_type, params->object_handle, params->location,
-                                 params->code, params->layer_prefix, params->message, params->user_data);
-}
-
-static BOOL WINAPI call_vulkan_debug_utils_callback( struct wine_vk_debug_utils_params *params, ULONG size )
-{
-    return params->user_callback(params->severity, params->message_types, &params->data, params->user_data);
+    struct wine_vk_debug_utils_params *params = args;
+    VkBool32 ret = params->user_callback(params->severity, params->message_types, &params->data, params->user_data);
+    return NtCallbackReturn( &ret, sizeof(ret), STATUS_SUCCESS );
 }
 
 BOOL WINAPI DllMain(HINSTANCE hinst, DWORD reason, void *reserved)
 {
-    void **kernel_callback_table;
+    KERNEL_CALLBACK_PROC *kernel_callback_table;
 
     TRACE("%p, %lu, %p\n", hinst, reason, reserved);
 

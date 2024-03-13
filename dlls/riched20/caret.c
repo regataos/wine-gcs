@@ -416,7 +416,7 @@ BOOL ME_InternalDeleteText(ME_TextEditor *editor, ME_Cursor *start,
       /* c = updated data now */
 
       if (c.run == cursor.run) c.run->nCharOfs -= shift;
-      editor_propagate_char_ofs( NULL, c.run, shift );
+      editor_propagate_char_ofs( editor, NULL, c.run, shift );
 
       if (!cursor.run->len)
       {
@@ -444,7 +444,7 @@ BOOL ME_DeleteTextAtCursor(ME_TextEditor *editor, int nCursor, int nChars)
 
 static struct re_object* create_re_object(const REOBJECT *reo, ME_Run *run)
 {
-  struct re_object *reobj = heap_alloc(sizeof(*reobj));
+  struct re_object *reobj = malloc(sizeof(*reobj));
 
   if (!reobj)
   {
@@ -802,15 +802,18 @@ ME_MoveCursorWords(ME_TextEditor *editor, ME_Cursor *cursor, int nRelOfs)
       }
       else
       {
-        para = para_next( para );
-        if (!para_next( para ))
+        ME_Paragraph *other_para = para_next( para );
+        if (!para_next( other_para ))
         {
           if (cursor->run == run) return FALSE;
           nOffset = 0;
           break;
         }
-        if (para->nFlags & MEPF_ROWSTART) para = para_next( para );
-        if (cursor->run == run) run = para_first_run( para );
+        if (other_para->nFlags & MEPF_ROWSTART) other_para = para_next( other_para );
+        if (cursor->run == run) {
+          para = other_para;
+          run = para_first_run( para );
+        }
         nOffset = 0;
         break;
       }

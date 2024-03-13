@@ -96,8 +96,8 @@ static int dns_only_query( const char *node, const struct addrinfo *hints, struc
         }
     }
 
-    for (ptr = rec; ptr; ptr = ptr->pNext) count++;
-    for (ptr = rec6; ptr; ptr = ptr->pNext) count++;
+    for (ptr = rec; ptr; ptr = ptr->pNext) { if (ptr->wType == DNS_TYPE_A) count++; };
+    for (ptr = rec6; ptr; ptr = ptr->pNext) { if (ptr->wType == DNS_TYPE_AAAA) count++; };
     if (!count)
     {
         DnsRecordListFree( (DNS_RECORD *)rec, DnsFreeRecordList );
@@ -114,6 +114,7 @@ static int dns_only_query( const char *node, const struct addrinfo *hints, struc
 
     for (ptr = rec; ptr; ptr = ptr->pNext)
     {
+        if (ptr->wType != DNS_TYPE_A) continue;
         info->ai_family   = AF_INET;
         info->ai_socktype = hints->ai_socktype;
         info->ai_protocol = hints->ai_protocol;
@@ -128,6 +129,7 @@ static int dns_only_query( const char *node, const struct addrinfo *hints, struc
     }
     for (ptr = rec6; ptr; ptr = ptr->pNext)
     {
+        if (ptr->wType != DNS_TYPE_AAAA) continue;
         info->ai_family   = AF_INET6;
         info->ai_socktype = hints->ai_socktype;
         info->ai_protocol = hints->ai_protocol;
@@ -144,25 +146,6 @@ static int dns_only_query( const char *node, const struct addrinfo *hints, struc
     DnsRecordListFree( (DNS_RECORD *)rec, DnsFreeRecordList );
     DnsRecordListFree( (DNS_RECORD *)rec6, DnsFreeRecordList );
     return 0;
-}
-
-static BOOL eac_download_hack(void)
-{
-    static int eac_download_hack_enabled = -1;
-    char str[64];
-
-    if (eac_download_hack_enabled == -1)
-    {
-        if (GetEnvironmentVariableA("WINE_DISABLE_EAC_ALT_DOWNLOAD", str, sizeof(str)))
-            eac_download_hack_enabled = !!atoi(str);
-        else
-            eac_download_hack_enabled = GetEnvironmentVariableA("SteamGameId", str, sizeof(str))
-                                        && !strcmp(str, "626690");
-
-        if (eac_download_hack_enabled)
-            ERR("HACK: failing download-alt.easyanticheat.net resolution.\n");
-    }
-    return eac_download_hack_enabled;
 }
 
 /***********************************************************************
@@ -186,25 +169,6 @@ int WINAPI getaddrinfo( const char *node, const char *service,
 
     if (node)
     {
-        char sgi[64];
-        /* default -- if star citizen and url is modules-cdn.eac-prod.on.epicgames.com, block */
-        if (GetEnvironmentVariableA("SteamGameId", sgi, sizeof(sgi)) && !strcmp(sgi, "starcitizen"))
-        {
-            TRACE( "node %s, matched sgi %s\n", debugstr_a(node), debugstr_a(sgi) );
-            if (!strcmp(node, "modules-cdn.eac-prod.on.epicgames.com"))
-            {
-               SetLastError(WSAHOST_NOT_FOUND);
-               return WSAHOST_NOT_FOUND;
-            }
-        }
-        TRACE( "node %s, unmatched sgi %s\n", debugstr_a(node), debugstr_a(sgi) );
-
-        if (eac_download_hack() && !strcmp(node, "download-alt.easyanticheat.net"))
-        {
-            SetLastError(WSAHOST_NOT_FOUND);
-            return WSAHOST_NOT_FOUND;
-        }
-
         if (!node[0])
         {
             if (!(fqdn = get_fqdn())) return WSA_NOT_ENOUGH_MEMORY;
@@ -392,7 +356,7 @@ static void WINAPI getaddrinfo_callback(TP_CALLBACK_INSTANCE *instance, void *co
     if (res)
     {
         *args->result = addrinfo_list_AtoW(res);
-        overlapped->u.Pointer = args->result;
+        overlapped->Pointer = args->result;
         freeaddrinfo(res);
     }
 
@@ -872,7 +836,7 @@ static struct hostent *get_local_ips( char *hostname )
         /* Check if this is a default route (there may be more than one) */
         if (!routes->table[n].dwForwardDest)
             ifdefault = ++default_routes;
-        else if (routes->table[n].u1.ForwardType != MIB_IPROUTE_TYPE_DIRECT)
+        else if (routes->table[n].ForwardType != MIB_IPROUTE_TYPE_DIRECT)
             continue;
         ifindex = routes->table[n].dwForwardIfIndex;
         ifmetric = routes->table[n].dwForwardMetric1;
@@ -960,25 +924,6 @@ struct hostent * WINAPI gethostbyname( const char *name )
     if (!num_startup)
     {
         SetLastError( WSANOTINITIALISED );
-        return NULL;
-    }
-    
-    char sgi[64];
-    /* default -- if star citizen and url is modules-cdn.eac-prod.on.epicgames.com, block */
-    if (GetEnvironmentVariableA("SteamGameId", sgi, sizeof(sgi)) && !strcmp(sgi, "starcitizen"))
-    {
-        TRACE( "name %s, matched sgi %s\n", debugstr_a(name), debugstr_a(sgi) );
-        if (name && !strcmp(name, "modules-cdn.eac-prod.on.epicgames.com"))
-        {
-            SetLastError( WSAHOST_NOT_FOUND );
-            return NULL;
-        }
-    }
-    TRACE( "name %s, unmatched sgi %s\n", debugstr_a(name), debugstr_a(sgi) );
-
-    if (eac_download_hack() && name && !strcmp(name, "download-alt.easyanticheat.net"))
-    {
-        SetLastError( WSAHOST_NOT_FOUND );
         return NULL;
     }
 
@@ -1950,18 +1895,18 @@ u_long WINAPI inet_addr( const char *str )
 /***********************************************************************
  *      htonl   (ws2_32.8)
  */
-u_long WINAPI WS_htonl( u_long hostlong )
+u_long WINAPI htonl( u_long hostlong )
 {
-    return htonl( hostlong );
+    return RtlUlongByteSwap( hostlong );
 }
 
 
 /***********************************************************************
  *      htons   (ws2_32.9)
  */
-u_short WINAPI WS_htons( u_short hostshort )
+u_short WINAPI htons( u_short hostshort )
 {
-    return htons( hostshort );
+    return RtlUshortByteSwap( hostshort );
 }
 
 
@@ -1998,18 +1943,18 @@ int WINAPI WSAHtons( SOCKET s, u_short hostshort, u_short *netshort )
 /***********************************************************************
  *      ntohl   (ws2_32.14)
  */
-u_long WINAPI WS_ntohl( u_long netlong )
+u_long WINAPI ntohl( u_long netlong )
 {
-    return ntohl( netlong );
+    return RtlUlongByteSwap( netlong );
 }
 
 
 /***********************************************************************
  *      ntohs   (ws2_32.15)
  */
-u_short WINAPI WS_ntohs( u_short netshort )
+u_short WINAPI ntohs( u_short netshort )
 {
-    return ntohs( netshort );
+    return RtlUshortByteSwap( netshort );
 }
 
 

@@ -27,6 +27,8 @@
 #include <stdio.h>
 
 #include "wined3d_private.h"
+#include "wined3d_gl.h"
+#include "wined3d_vk.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(d3d);
 
@@ -74,101 +76,102 @@ struct wined3d_format_channels
     DWORD red_offset, green_offset, blue_offset, alpha_offset;
     UINT bpp;
     BYTE depth_size, stencil_size;
+    const char *channels;
 };
 
 static const struct wined3d_format_channels formats[] =
 {
     /*                                          size            offset
-     *  format id                           r   g   b   a    r   g   b   a    bpp depth stencil */
-    {WINED3DFMT_UNKNOWN,                    0,  0,  0,  0,   0,  0,  0,  0,    0,   0,     0},
+     *  format id                           r   g   b   a    r   g   b   a    bpp   z   s   channels */
+    {WINED3DFMT_UNKNOWN,                    0,  0,  0,  0,   0,  0,  0,  0,    0,   0,  0},
     /* FourCC formats */
-    {WINED3DFMT_UYVY,                       0,  0,  0,  0,   0,  0,  0,  0,    2,   0,     0},
-    {WINED3DFMT_YUY2,                       0,  0,  0,  0,   0,  0,  0,  0,    2,   0,     0},
-    {WINED3DFMT_YV12,                       0,  0,  0,  0,   0,  0,  0,  0,    1,   0,     0},
-    {WINED3DFMT_NV12,                       0,  0,  0,  0,   0,  0,  0,  0,    1,   0,     0},
-    {WINED3DFMT_DXT1,                       0,  0,  0,  0,   0,  0,  0,  0,    1,   0,     0},
-    {WINED3DFMT_DXT2,                       0,  0,  0,  0,   0,  0,  0,  0,    1,   0,     0},
-    {WINED3DFMT_DXT3,                       0,  0,  0,  0,   0,  0,  0,  0,    1,   0,     0},
-    {WINED3DFMT_DXT4,                       0,  0,  0,  0,   0,  0,  0,  0,    1,   0,     0},
-    {WINED3DFMT_DXT5,                       0,  0,  0,  0,   0,  0,  0,  0,    1,   0,     0},
-    {WINED3DFMT_MULTI2_ARGB8,               0,  0,  0,  0,   0,  0,  0,  0,    1,   0,     0},
-    {WINED3DFMT_G8R8_G8B8,                  0,  0,  0,  0,   0,  0,  0,  0,    1,   0,     0},
-    {WINED3DFMT_R8G8_B8G8,                  0,  0,  0,  0,   0,  0,  0,  0,    1,   0,     0},
+    {WINED3DFMT_UYVY,                       0,  0,  0,  0,   0,  0,  0,  0,    2,   0,  0},
+    {WINED3DFMT_YUY2,                       0,  0,  0,  0,   0,  0,  0,  0,    2,   0,  0},
+    {WINED3DFMT_YV12,                       0,  0,  0,  0,   0,  0,  0,  0,    1,   0,  0},
+    {WINED3DFMT_NV12,                       0,  0,  0,  0,   0,  0,  0,  0,    1,   0,  0},
+    {WINED3DFMT_DXT1,                       0,  0,  0,  0,   0,  0,  0,  0,    1,   0,  0},
+    {WINED3DFMT_DXT2,                       0,  0,  0,  0,   0,  0,  0,  0,    1,   0,  0},
+    {WINED3DFMT_DXT3,                       0,  0,  0,  0,   0,  0,  0,  0,    1,   0,  0},
+    {WINED3DFMT_DXT4,                       0,  0,  0,  0,   0,  0,  0,  0,    1,   0,  0},
+    {WINED3DFMT_DXT5,                       0,  0,  0,  0,   0,  0,  0,  0,    1,   0,  0},
+    {WINED3DFMT_MULTI2_ARGB8,               0,  0,  0,  0,   0,  0,  0,  0,    1,   0,  0},
+    {WINED3DFMT_G8R8_G8B8,                  0,  0,  0,  0,   0,  0,  0,  0,    1,   0,  0},
+    {WINED3DFMT_R8G8_B8G8,                  0,  0,  0,  0,   0,  0,  0,  0,    1,   0,  0},
     /* Hmm? */
-    {WINED3DFMT_R8G8_SNORM_Cx,              0,  0,  0,  0,   0,  0,  0,  0,    2,   0,     0},
-    {WINED3DFMT_R11G11B10_FLOAT,           11, 11, 10,  0,   0, 11, 22,  0,    4,   0,     0},
+    {WINED3DFMT_R8G8_SNORM_Cx,              0,  0,  0,  0,   0,  0,  0,  0,    2,   0,  0},
+    {WINED3DFMT_R11G11B10_FLOAT,           11, 11, 10,  0,   0, 11, 22,  0,    4,   0,  0,   "FFF"},
     /* Palettized formats */
-    {WINED3DFMT_P8_UINT_A8_UNORM,           0,  0,  0,  8,   0,  0,  0,  8,    2,   0,     0},
-    {WINED3DFMT_P8_UINT,                    0,  0,  0,  0,   0,  0,  0,  0,    1,   0,     0},
+    {WINED3DFMT_P8_UINT_A8_UNORM,           0,  0,  0,  8,   0,  0,  0,  8,    2,   0,  0},
+    {WINED3DFMT_P8_UINT,                    0,  0,  0,  0,   0,  0,  0,  0,    1,   0,  0},
     /* Standard ARGB formats. */
-    {WINED3DFMT_B8G8R8_UNORM,               8,  8,  8,  0,  16,  8,  0,  0,    3,   0,     0},
-    {WINED3DFMT_B5G6R5_UNORM,               5,  6,  5,  0,  11,  5,  0,  0,    2,   0,     0},
-    {WINED3DFMT_B5G5R5X1_UNORM,             5,  5,  5,  0,  10,  5,  0,  0,    2,   0,     0},
-    {WINED3DFMT_B5G5R5A1_UNORM,             5,  5,  5,  1,  10,  5,  0, 15,    2,   0,     0},
-    {WINED3DFMT_B4G4R4A4_UNORM,             4,  4,  4,  4,   8,  4,  0, 12,    2,   0,     0},
-    {WINED3DFMT_B2G3R3_UNORM,               3,  3,  2,  0,   5,  2,  0,  0,    1,   0,     0},
-    {WINED3DFMT_A8_UNORM,                   0,  0,  0,  8,   0,  0,  0,  0,    1,   0,     0},
-    {WINED3DFMT_B2G3R3A8_UNORM,             3,  3,  2,  8,   5,  2,  0,  8,    2,   0,     0},
-    {WINED3DFMT_B4G4R4X4_UNORM,             4,  4,  4,  0,   8,  4,  0,  0,    2,   0,     0},
-    {WINED3DFMT_R8G8B8X8_UNORM,             8,  8,  8,  0,   0,  8, 16,  0,    4,   0,     0},
-    {WINED3DFMT_B10G10R10A2_UNORM,         10, 10, 10,  2,  20, 10,  0, 30,    4,   0,     0},
+    {WINED3DFMT_B8G8R8_UNORM,               8,  8,  8,  0,  16,  8,  0,  0,    3,   0,  0,   "uuu"},
+    {WINED3DFMT_B5G6R5_UNORM,               5,  6,  5,  0,  11,  5,  0,  0,    2,   0,  0,   "uuu"},
+    {WINED3DFMT_B5G5R5X1_UNORM,             5,  5,  5,  0,  10,  5,  0,  0,    2,   0,  0,   "uuuX"},
+    {WINED3DFMT_B5G5R5A1_UNORM,             5,  5,  5,  1,  10,  5,  0, 15,    2,   0,  0,   "uuuu"},
+    {WINED3DFMT_B4G4R4A4_UNORM,             4,  4,  4,  4,   8,  4,  0, 12,    2,   0,  0,   "uuuu"},
+    {WINED3DFMT_B2G3R3_UNORM,               3,  3,  2,  0,   5,  2,  0,  0,    1,   0,  0,   "uuu"},
+    {WINED3DFMT_A8_UNORM,                   0,  0,  0,  8,   0,  0,  0,  0,    1,   0,  0,   "u"},
+    {WINED3DFMT_B2G3R3A8_UNORM,             3,  3,  2,  8,   5,  2,  0,  8,    2,   0,  0,   "uuuu"},
+    {WINED3DFMT_B4G4R4X4_UNORM,             4,  4,  4,  0,   8,  4,  0,  0,    2,   0,  0,   "uuuX"},
+    {WINED3DFMT_R8G8B8X8_UNORM,             8,  8,  8,  0,   0,  8, 16,  0,    4,   0,  0,   "uuuX"},
+    {WINED3DFMT_B10G10R10A2_UNORM,         10, 10, 10,  2,  20, 10,  0, 30,    4,   0,  0,   "uuuu"},
     /* Luminance */
-    {WINED3DFMT_L8_UNORM,                   0,  0,  0,  0,   0,  0,  0,  0,    1,   0,     0},
-    {WINED3DFMT_L8A8_UNORM,                 0,  0,  0,  8,   0,  0,  0,  8,    2,   0,     0},
-    {WINED3DFMT_L4A4_UNORM,                 0,  0,  0,  4,   0,  0,  0,  4,    1,   0,     0},
-    {WINED3DFMT_L16_UNORM,                  0,  0,  0,  0,   0,  0,  0,  0,    2,   0,     0},
+    {WINED3DFMT_L8_UNORM,                   0,  0,  0,  0,   0,  0,  0,  0,    1,   0,  0},
+    {WINED3DFMT_L8A8_UNORM,                 0,  0,  0,  8,   0,  0,  0,  8,    2,   0,  0},
+    {WINED3DFMT_L4A4_UNORM,                 0,  0,  0,  4,   0,  0,  0,  4,    1,   0,  0},
+    {WINED3DFMT_L16_UNORM,                  0,  0,  0,  0,   0,  0,  0,  0,    2,   0,  0},
     /* Bump mapping stuff */
-    {WINED3DFMT_R5G5_SNORM_L6_UNORM,        5,  5,  0,  0,   0,  5,  0,  0,    2,   0,     0},
-    {WINED3DFMT_R8G8_SNORM_L8X8_UNORM,      8,  8,  0,  0,   0,  8,  0,  0,    4,   0,     0},
-    {WINED3DFMT_R10G11B11_SNORM,           10, 11, 11,  0,   0, 10, 21,  0,    4,   0,     0},
-    {WINED3DFMT_R10G10B10_SNORM_A2_UNORM,  10, 10, 10,  2,   0, 10, 20, 30,    4,   0,     0},
+    {WINED3DFMT_R5G5_SNORM_L6_UNORM,        5,  5,  0,  0,   0,  5,  0,  0,    2,   0,  0},
+    {WINED3DFMT_R8G8_SNORM_L8X8_UNORM,      8,  8,  0,  0,   0,  8,  0,  0,    4,   0,  0},
+    {WINED3DFMT_R10G11B11_SNORM,           10, 11, 11,  0,   0, 10, 21,  0,    4,   0,  0,   "iii"},
+    {WINED3DFMT_R10G10B10_SNORM_A2_UNORM,  10, 10, 10,  2,   0, 10, 20, 30,    4,   0,  0,   "iiiu"},
     /* Depth stencil formats */
-    {WINED3DFMT_D16_LOCKABLE,               0,  0,  0,  0,   0,  0,  0,  0,    2,  16,     0},
-    {WINED3DFMT_D32_UNORM,                  0,  0,  0,  0,   0,  0,  0,  0,    4,  32,     0},
-    {WINED3DFMT_S1_UINT_D15_UNORM,          0,  0,  0,  0,   0,  0,  0,  0,    2,  15,     1},
-    {WINED3DFMT_X8D24_UNORM,                0,  0,  0,  0,   0,  0,  0,  0,    4,  24,     0},
-    {WINED3DFMT_S4X4_UINT_D24_UNORM,        0,  0,  0,  0,   0,  0,  0,  0,    4,  24,     4},
-    {WINED3DFMT_S8_UINT_D24_FLOAT,          0,  0,  0,  0,   0,  0,  0,  0,    4,  24,     8},
+    {WINED3DFMT_D16_LOCKABLE,               0,  0,  0,  0,   0,  0,  0,  0,    2,  16,  0,   "D"},
+    {WINED3DFMT_D32_UNORM,                  0,  0,  0,  0,   0,  0,  0,  0,    4,  32,  0,   "D"},
+    {WINED3DFMT_S1_UINT_D15_UNORM,          0,  0,  0,  0,   0,  0,  0,  0,    2,  15,  1,   "SD"},
+    {WINED3DFMT_X8D24_UNORM,                0,  0,  0,  0,   0,  0,  0,  0,    4,  24,  0,   "XD"},
+    {WINED3DFMT_S4X4_UINT_D24_UNORM,        0,  0,  0,  0,   0,  0,  0,  0,    4,  24,  4,   "SXD"},
+    {WINED3DFMT_S8_UINT_D24_FLOAT,          0,  0,  0,  0,   0,  0,  0,  0,    4,  24,  8,   "SD"},
     /* Vendor-specific formats */
-    {WINED3DFMT_ATI1N,                      0,  0,  0,  0,   0,  0,  0,  0,    1,   0,     0},
-    {WINED3DFMT_ATI2N,                      0,  0,  0,  0,   0,  0,  0,  0,    1,   0,     0},
-    {WINED3DFMT_NVDB,                       0,  0,  0,  0,   0,  0,  0,  0,    0,   0,     0},
-    {WINED3DFMT_ATOC,                       0,  0,  0,  0,   0,  0,  0,  0,    0,   0,     0},
-    {WINED3DFMT_INST,                       0,  0,  0,  0,   0,  0,  0,  0,    0,   0,     0},
-    {WINED3DFMT_INTZ,                       0,  0,  0,  0,   0,  0,  0,  0,    4,  24,     8},
-    {WINED3DFMT_RESZ,                       0,  0,  0,  0,   0,  0,  0,  0,    0,   0,     0},
-    {WINED3DFMT_NVHU,                       0,  0,  0,  0,   0,  0,  0,  0,    2,   0,     0},
-    {WINED3DFMT_NVHS,                       0,  0,  0,  0,   0,  0,  0,  0,    2,   0,     0},
-    {WINED3DFMT_NULL,                       8,  8,  8,  8,   0,  8, 16, 24,    4,   0,     0},
+    {WINED3DFMT_ATI1N,                      0,  0,  0,  0,   0,  0,  0,  0,    1,   0,  0},
+    {WINED3DFMT_ATI2N,                      0,  0,  0,  0,   0,  0,  0,  0,    1,   0,  0},
+    {WINED3DFMT_NVDB,                       0,  0,  0,  0,   0,  0,  0,  0,    0,   0,  0},
+    {WINED3DFMT_ATOC,                       0,  0,  0,  0,   0,  0,  0,  0,    0,   0,  0},
+    {WINED3DFMT_INST,                       0,  0,  0,  0,   0,  0,  0,  0,    0,   0,  0},
+    {WINED3DFMT_INTZ,                       0,  0,  0,  0,   0,  0,  0,  0,    4,  24,  8},
+    {WINED3DFMT_RESZ,                       0,  0,  0,  0,   0,  0,  0,  0,    0,   0,  0},
+    {WINED3DFMT_NVHU,                       0,  0,  0,  0,   0,  0,  0,  0,    2,   0,  0},
+    {WINED3DFMT_NVHS,                       0,  0,  0,  0,   0,  0,  0,  0,    2,   0,  0},
+    {WINED3DFMT_NULL,                       8,  8,  8,  8,   0,  8, 16, 24,    4,   0,  0},
     /* Unsure about them, could not find a Windows driver that supports them */
-    {WINED3DFMT_R16,                       16,  0,  0,  0,   0,  0,  0,  0,    2,   0,     0},
-    {WINED3DFMT_AL16,                       0,  0,  0, 16,   0,  0,  0, 16,    4,   0,     0},
+    {WINED3DFMT_R16,                       16,  0,  0,  0,   0,  0,  0,  0,    2,   0,  0},
+    {WINED3DFMT_AL16,                       0,  0,  0, 16,   0,  0,  0, 16,    4,   0,  0},
     /* DirectX 10 HDR formats */
-    {WINED3DFMT_R9G9B9E5_SHAREDEXP,         0,  0,  0,  0,   0,  0,  0,  0,    4,   0,     0},
+    {WINED3DFMT_R9G9B9E5_SHAREDEXP,         0,  0,  0,  0,   0,  0,  0,  0,    4,   0,  0},
     /* Typeless */
-    {WINED3DFMT_R32G32B32A32_TYPELESS,     32, 32, 32, 32,   0, 32, 64, 96,   16,   0,     0},
-    {WINED3DFMT_R32G32B32_TYPELESS,        32, 32, 32,  0,   0, 32, 64,  0,   12,   0,     0},
-    {WINED3DFMT_R16G16B16A16_TYPELESS,     16, 16, 16, 16,   0, 16, 32, 48,    8,   0,     0},
-    {WINED3DFMT_R32G32_TYPELESS,           32, 32,  0,  0,   0, 32,  0,  0,    8,   0,     0},
-    {WINED3DFMT_R32G8X24_TYPELESS,         32,  8,  0,  0,   0,  0,  0,  0,    8,   0,     0},
-    {WINED3DFMT_R10G10B10A2_TYPELESS,      10, 10, 10,  2,   0, 10, 20, 30,    4,   0,     0},
-    {WINED3DFMT_R10G10B10X2_TYPELESS,      10, 10, 10,  0,   0, 10, 20,  0,    4,   0,     0},
-    {WINED3DFMT_R8G8B8A8_TYPELESS,          8,  8,  8,  8,   0,  8, 16, 24,    4,   0,     0},
-    {WINED3DFMT_R16G16_TYPELESS,           16, 16,  0,  0,   0, 16,  0,  0,    4,   0,     0},
-    {WINED3DFMT_R32_TYPELESS,              32,  0,  0,  0,   0,  0,  0,  0,    4,   0,     0},
-    {WINED3DFMT_R24G8_TYPELESS,            24,  8,  0,  0,   0,  0,  0,  0,    4,   0,     0},
-    {WINED3DFMT_R8G8_TYPELESS,              8,  8,  0,  0,   0,  8,  0,  0,    2,   0,     0},
-    {WINED3DFMT_R16_TYPELESS,              16,  0,  0,  0,   0,  0,  0,  0,    2,   0,     0},
-    {WINED3DFMT_R8_TYPELESS,                8,  0,  0,  0,   0,  0,  0,  0,    1,   0,     0},
-    {WINED3DFMT_BC1_TYPELESS,               0,  0,  0,  0,   0,  0,  0,  0,    1,   0,     0},
-    {WINED3DFMT_BC2_TYPELESS,               0,  0,  0,  0,   0,  0,  0,  0,    1,   0,     0},
-    {WINED3DFMT_BC3_TYPELESS,               0,  0,  0,  0,   0,  0,  0,  0,    1,   0,     0},
-    {WINED3DFMT_BC4_TYPELESS,               0,  0,  0,  0,   0,  0,  0,  0,    1,   0,     0},
-    {WINED3DFMT_BC5_TYPELESS,               0,  0,  0,  0,   0,  0,  0,  0,    1,   0,     0},
-    {WINED3DFMT_BC6H_TYPELESS,              0,  0,  0,  0,   0,  0,  0,  0,    1,   0,     0},
-    {WINED3DFMT_BC7_TYPELESS,               0,  0,  0,  0,   0,  0,  0,  0,    1,   0,     0},
-    {WINED3DFMT_B8G8R8A8_TYPELESS,          8,  8,  8,  8,  16,  8,  0, 24,    4,   0,     0},
-    {WINED3DFMT_B8G8R8X8_TYPELESS,          8,  8,  8,  0,  16,  8,  0,  0,    4,   0,     0},
+    {WINED3DFMT_R32G32B32A32_TYPELESS,     32, 32, 32, 32,   0, 32, 64, 96,   16,   0,  0},
+    {WINED3DFMT_R32G32B32_TYPELESS,        32, 32, 32,  0,   0, 32, 64,  0,   12,   0,  0},
+    {WINED3DFMT_R16G16B16A16_TYPELESS,     16, 16, 16, 16,   0, 16, 32, 48,    8,   0,  0},
+    {WINED3DFMT_R32G32_TYPELESS,           32, 32,  0,  0,   0, 32,  0,  0,    8,   0,  0},
+    {WINED3DFMT_R32G8X24_TYPELESS,         32,  8,  0,  0,   0,  0,  0,  0,    8,   0,  0},
+    {WINED3DFMT_R10G10B10A2_TYPELESS,      10, 10, 10,  2,   0, 10, 20, 30,    4,   0,  0},
+    {WINED3DFMT_R10G10B10X2_TYPELESS,      10, 10, 10,  0,   0, 10, 20,  0,    4,   0,  0},
+    {WINED3DFMT_R8G8B8A8_TYPELESS,          8,  8,  8,  8,   0,  8, 16, 24,    4,   0,  0},
+    {WINED3DFMT_R16G16_TYPELESS,           16, 16,  0,  0,   0, 16,  0,  0,    4,   0,  0},
+    {WINED3DFMT_R32_TYPELESS,              32,  0,  0,  0,   0,  0,  0,  0,    4,   0,  0},
+    {WINED3DFMT_R24G8_TYPELESS,            24,  8,  0,  0,   0,  0,  0,  0,    4,   0,  0},
+    {WINED3DFMT_R8G8_TYPELESS,              8,  8,  0,  0,   0,  8,  0,  0,    2,   0,  0},
+    {WINED3DFMT_R16_TYPELESS,              16,  0,  0,  0,   0,  0,  0,  0,    2,   0,  0},
+    {WINED3DFMT_R8_TYPELESS,                8,  0,  0,  0,   0,  0,  0,  0,    1,   0,  0},
+    {WINED3DFMT_BC1_TYPELESS,               0,  0,  0,  0,   0,  0,  0,  0,    1,   0,  0},
+    {WINED3DFMT_BC2_TYPELESS,               0,  0,  0,  0,   0,  0,  0,  0,    1,   0,  0},
+    {WINED3DFMT_BC3_TYPELESS,               0,  0,  0,  0,   0,  0,  0,  0,    1,   0,  0},
+    {WINED3DFMT_BC4_TYPELESS,               0,  0,  0,  0,   0,  0,  0,  0,    1,   0,  0},
+    {WINED3DFMT_BC5_TYPELESS,               0,  0,  0,  0,   0,  0,  0,  0,    1,   0,  0},
+    {WINED3DFMT_BC6H_TYPELESS,              0,  0,  0,  0,   0,  0,  0,  0,    1,   0,  0},
+    {WINED3DFMT_BC7_TYPELESS,               0,  0,  0,  0,   0,  0,  0,  0,    1,   0,  0},
+    {WINED3DFMT_B8G8R8A8_TYPELESS,          8,  8,  8,  8,  16,  8,  0, 24,    4,   0,  0},
+    {WINED3DFMT_B8G8R8X8_TYPELESS,          8,  8,  8,  0,  16,  8,  0,  0,    4,   0,  0},
 };
 
 struct wined3d_typed_format_info
@@ -319,7 +322,6 @@ static const struct wined3d_format_base_flags format_base_flags[] =
     {WINED3DFMT_ATI2N,                 WINED3D_FORMAT_ATTR_MAPPABLE | WINED3D_FORMAT_ATTR_BROKEN_PITCH},
     {WINED3DFMT_D16_LOCKABLE,          WINED3D_FORMAT_ATTR_MAPPABLE},
     {WINED3DFMT_INTZ,                  WINED3D_FORMAT_ATTR_MAPPABLE},
-    {WINED3DFMT_R11G11B10_FLOAT,       WINED3D_FORMAT_ATTR_FLOAT},
     {WINED3DFMT_D32_FLOAT,             WINED3D_FORMAT_ATTR_FLOAT},
     {WINED3DFMT_S8_UINT_D24_FLOAT,     WINED3D_FORMAT_ATTR_FLOAT},
     {WINED3DFMT_D32_FLOAT_S8X24_UINT,  WINED3D_FORMAT_ATTR_FLOAT},
@@ -349,16 +351,6 @@ static const struct wined3d_format_base_flags format_base_flags[] =
     {WINED3DFMT_R32_SINT,              WINED3D_FORMAT_ATTR_CAST_TO_BLOCK},
     {WINED3DFMT_R16_UINT,              0,
         WINED3D_FORMAT_CAP_INDEX_BUFFER},
-    {WINED3DFMT_A8_UNORM,              WINED3D_FORMAT_ATTR_NORMALISED},
-    {WINED3DFMT_B10G10R10A2_UNORM,     WINED3D_FORMAT_ATTR_NORMALISED},
-    {WINED3DFMT_B2G3R3_UNORM,          WINED3D_FORMAT_ATTR_NORMALISED},
-    {WINED3DFMT_B4G4R4A4_UNORM,        WINED3D_FORMAT_ATTR_NORMALISED},
-    {WINED3DFMT_B4G4R4X4_UNORM,        WINED3D_FORMAT_ATTR_NORMALISED},
-    {WINED3DFMT_B5G5R5A1_UNORM,        WINED3D_FORMAT_ATTR_NORMALISED},
-    {WINED3DFMT_B5G5R5X1_UNORM,        WINED3D_FORMAT_ATTR_NORMALISED},
-    {WINED3DFMT_B5G6R5_UNORM,          WINED3D_FORMAT_ATTR_NORMALISED},
-    {WINED3DFMT_B8G8R8_UNORM,          WINED3D_FORMAT_ATTR_NORMALISED},
-    {WINED3DFMT_R10G10B10A2_UNORM,     WINED3D_FORMAT_ATTR_NORMALISED},
     {WINED3DFMT_R8G8_SNORM,            WINED3D_FORMAT_ATTR_BUMPMAP},
     {WINED3DFMT_R5G5_SNORM_L6_UNORM,   WINED3D_FORMAT_ATTR_BUMPMAP},
     {WINED3DFMT_R8G8_SNORM_L8X8_UNORM, WINED3D_FORMAT_ATTR_BUMPMAP},
@@ -2048,10 +2040,46 @@ static enum wined3d_channel_type map_channel_type(char t)
     }
 }
 
+static void parse_channel_desc(struct wined3d_format *format, const char *channel_desc)
+{
+    unsigned int component_count = 0;
+    unsigned int attrs = 0;
+    unsigned int j;
+
+    for (j = 0; j < strlen(channel_desc); ++j)
+    {
+        enum wined3d_channel_type channel_type = map_channel_type(channel_desc[j]);
+
+        if (channel_type == WINED3D_CHANNEL_TYPE_UNORM || channel_type == WINED3D_CHANNEL_TYPE_SNORM)
+            attrs |= WINED3D_FORMAT_ATTR_NORMALISED;
+        if (channel_type == WINED3D_CHANNEL_TYPE_UINT || channel_type == WINED3D_CHANNEL_TYPE_SINT)
+            attrs |= WINED3D_FORMAT_ATTR_INTEGER;
+        if (channel_type == WINED3D_CHANNEL_TYPE_FLOAT)
+            attrs |= WINED3D_FORMAT_ATTR_FLOAT;
+        if (channel_type != WINED3D_CHANNEL_TYPE_UNUSED)
+            ++component_count;
+
+        if (channel_type == WINED3D_CHANNEL_TYPE_DEPTH && !format->depth_size)
+        {
+            format->depth_size = format->red_size;
+            format->red_size = format->red_offset = 0;
+        }
+
+        if (channel_type == WINED3D_CHANNEL_TYPE_STENCIL && !format->stencil_size)
+        {
+            format->stencil_size = format->green_size;
+            format->green_size = format->green_offset = 0;
+        }
+    }
+
+    format->attrs |= attrs;
+    format->component_count = component_count;
+}
+
 static BOOL init_format_base_info(struct wined3d_adapter *adapter)
 {
     struct wined3d_format *format;
-    unsigned int i, j;
+    unsigned int i;
 
     for (i = 0; i < ARRAY_SIZE(formats); ++i)
     {
@@ -2073,13 +2101,14 @@ static BOOL init_format_base_info(struct wined3d_adapter *adapter)
         format->block_width = 1;
         format->block_height = 1;
         format->block_byte_count = formats[i].bpp;
+
+        if (formats[i].channels)
+            parse_channel_desc(format, formats[i].channels);
     }
 
     for (i = 0; i < ARRAY_SIZE(typed_formats); ++i)
     {
         struct wined3d_format *typeless_format;
-        unsigned int component_count = 0;
-        unsigned int attrs = 0;
 
         if (!(format = get_format_internal(adapter, typed_formats[i].id)))
             return FALSE;
@@ -2106,34 +2135,7 @@ static BOOL init_format_base_info(struct wined3d_adapter *adapter)
 
         typeless_format->typeless_id = typeless_format->id;
 
-        for (j = 0; j < strlen(typed_formats[i].channels); ++j)
-        {
-            enum wined3d_channel_type channel_type = map_channel_type(typed_formats[i].channels[j]);
-
-            if (channel_type == WINED3D_CHANNEL_TYPE_UNORM || channel_type == WINED3D_CHANNEL_TYPE_SNORM)
-                attrs |= WINED3D_FORMAT_ATTR_NORMALISED;
-            if (channel_type == WINED3D_CHANNEL_TYPE_UINT || channel_type == WINED3D_CHANNEL_TYPE_SINT)
-                attrs |= WINED3D_FORMAT_ATTR_INTEGER;
-            if (channel_type == WINED3D_CHANNEL_TYPE_FLOAT)
-                attrs |= WINED3D_FORMAT_ATTR_FLOAT;
-            if (channel_type != WINED3D_CHANNEL_TYPE_UNUSED)
-                ++component_count;
-
-            if (channel_type == WINED3D_CHANNEL_TYPE_DEPTH && !format->depth_size)
-            {
-                format->depth_size = format->red_size;
-                format->red_size = format->red_offset = 0;
-            }
-
-            if (channel_type == WINED3D_CHANNEL_TYPE_STENCIL && !format->stencil_size)
-            {
-                format->stencil_size = format->green_size;
-                format->green_size = format->green_offset = 0;
-            }
-        }
-
-        format->component_count = component_count;
-        format->attrs |= attrs;
+        parse_channel_desc(format, typed_formats[i].channels);
     }
 
     for (i = 0; i < ARRAY_SIZE(ddi_formats); ++i)
@@ -3191,8 +3193,7 @@ static BOOL init_format_texture_info(struct wined3d_adapter *adapter, struct win
 
     adapter->fragment_pipe->get_caps(adapter, &fragment_caps);
     adapter->shader_backend->shader_get_caps(adapter, &shader_caps);
-    srgb_write = (fragment_caps.wined3d_caps & WINED3D_FRAGMENT_CAP_SRGB_WRITE)
-            && (shader_caps.wined3d_caps & WINED3D_SHADER_CAP_SRGB_WRITE);
+    srgb_write = fragment_caps.srgb_write && (shader_caps.wined3d_caps & WINED3D_SHADER_CAP_SRGB_WRITE);
 
     for (i = 0; i < ARRAY_SIZE(format_texture_info); ++i)
     {
@@ -4149,7 +4150,7 @@ static BOOL wined3d_adapter_init_format_info(struct wined3d_adapter *adapter, si
 {
     unsigned int count = WINED3D_FORMAT_COUNT + ARRAY_SIZE(typeless_depth_stencil_formats);
 
-    if (!(adapter->formats = heap_calloc(count, format_size)))
+    if (!(adapter->formats = calloc(count, format_size)))
     {
         ERR("Failed to allocate memory.\n");
         return FALSE;
@@ -4168,7 +4169,7 @@ static BOOL wined3d_adapter_init_format_info(struct wined3d_adapter *adapter, si
     return TRUE;
 
 fail:
-    heap_free(adapter->formats);
+    free(adapter->formats);
     adapter->formats = NULL;
     return FALSE;
 }
@@ -4217,7 +4218,7 @@ BOOL wined3d_adapter_no3d_init_format_info(struct wined3d_adapter *adapter)
 /* Context activation is done by the caller. */
 BOOL wined3d_adapter_gl_init_format_info(struct wined3d_adapter *adapter, struct wined3d_caps_gl_ctx *ctx)
 {
-    struct wined3d_gl_info *gl_info = &adapter->gl_info;
+    struct wined3d_gl_info *gl_info = &wined3d_adapter_gl(adapter)->gl_info;
 
     if (!wined3d_adapter_init_format_info(adapter, sizeof(struct wined3d_format_gl)))
         return FALSE;
@@ -4236,7 +4237,7 @@ BOOL wined3d_adapter_gl_init_format_info(struct wined3d_adapter *adapter, struct
     return TRUE;
 
 fail:
-    heap_free(adapter->formats);
+    free(adapter->formats);
     adapter->formats = NULL;
     return FALSE;
 }
@@ -4459,7 +4460,7 @@ BOOL wined3d_adapter_vk_init_format_info(struct wined3d_adapter_vk *adapter_vk,
     return TRUE;
 
 fail:
-    heap_free(adapter->formats);
+    free(adapter->formats);
     adapter->formats = NULL;
     return FALSE;
 }
@@ -4917,6 +4918,7 @@ const char *wined3d_debug_view_desc(const struct wined3d_view_desc *d, const str
     VIEW_FLAG_TO_STR(WINED3D_VIEW_TEXTURE_ARRAY);
     VIEW_FLAG_TO_STR(WINED3D_VIEW_READ_ONLY_DEPTH);
     VIEW_FLAG_TO_STR(WINED3D_VIEW_READ_ONLY_STENCIL);
+    VIEW_FLAG_TO_STR(WINED3D_VIEW_FORWARD_REFERENCE);
 #undef VIEW_FLAG_TO_STR
     if (flags)
         FIXME("Unrecognised view flag(s) %#x.\n", flags);
@@ -4952,6 +4954,7 @@ const char *debug_d3dusage(uint32_t usage)
     WINED3DUSAGE_TO_STR(WINED3DUSAGE_STATICDECL);
     WINED3DUSAGE_TO_STR(WINED3DUSAGE_OVERLAY);
     WINED3DUSAGE_TO_STR(WINED3DUSAGE_MANAGED);
+    WINED3DUSAGE_TO_STR(WINED3DUSAGE_VIDMEM_ACCOUNTING);
     WINED3DUSAGE_TO_STR(WINED3DUSAGE_QUERY_FILTER);
     WINED3DUSAGE_TO_STR(WINED3DUSAGE_QUERY_GENMIPMAP);
     WINED3DUSAGE_TO_STR(WINED3DUSAGE_QUERY_LEGACYBUMPMAP);
@@ -5416,6 +5419,8 @@ const char *debug_d3dstate(uint32_t state)
         return "STATE_MATERIAL";
     if (STATE_IS_RASTERIZER(state))
         return "STATE_RASTERIZER";
+    if (STATE_IS_DEPTH_BOUNDS(state))
+        return "STATE_DEPTH_BOUNDS";
     if (STATE_IS_POINTSPRITECOORDORIGIN(state))
         return "STATE_POINTSPRITECOORDORIGIN";
     if (STATE_IS_BASEVERTEXINDEX(state))
@@ -5607,7 +5612,7 @@ BOOL is_invalid_op(const struct wined3d_state *state, int stage,
 {
     if (op == WINED3D_TOP_DISABLE)
         return FALSE;
-    if (state->textures[stage])
+    if (wined3d_state_get_ffp_texture(state, stage))
         return FALSE;
 
     if ((arg1 & WINED3DTA_SELECTMASK) == WINED3DTA_TEXTURE
@@ -5639,7 +5644,7 @@ void get_identity_matrix(struct wined3d_matrix *mat)
 void get_modelview_matrix(const struct wined3d_context *context, const struct wined3d_state *state,
         unsigned int index, struct wined3d_matrix *mat)
 {
-    if (context->last_was_rhw)
+    if (context->stream_info.position_transformed)
         get_identity_matrix(mat);
     else
         multiply_matrix(mat, &state->transforms[WINED3D_TS_VIEW], &state->transforms[WINED3D_TS_WORLD_MATRIX(index)]);
@@ -5682,7 +5687,7 @@ void get_projection_matrix(const struct wined3d_context *context, const struct w
     else
         center_offset = 0.0f;
 
-    if (context->last_was_rhw)
+    if (context->stream_info.position_transformed)
     {
         /* Transform D3D RHW coordinates to OpenGL clip coordinates. */
         float x = state->viewports[0].x;
@@ -5843,23 +5848,23 @@ static void compute_texture_matrix(const struct wined3d_matrix *matrix, uint32_t
 }
 
 void get_texture_matrix(const struct wined3d_context *context, const struct wined3d_state *state,
-        unsigned int tex, struct wined3d_matrix *mat)
+        const unsigned int tex, struct wined3d_matrix *mat)
 {
-    const struct wined3d_device *device = context->device;
     BOOL generated = (state->texture_states[tex][WINED3D_TSS_TEXCOORD_INDEX] & 0xffff0000)
             != WINED3DTSS_TCI_PASSTHRU;
-    unsigned int coord_idx = min(state->texture_states[tex][WINED3D_TSS_TEXCOORD_INDEX & 0x0000ffff],
-            WINED3D_MAX_TEXTURES - 1);
+    unsigned int coord_idx = min(state->texture_states[tex][WINED3D_TSS_TEXCOORD_INDEX] & 0x0000ffff,
+            WINED3D_MAX_FFP_TEXTURES - 1);
+    struct wined3d_texture *texture = wined3d_state_get_ffp_texture(state, tex);
 
     compute_texture_matrix(&state->transforms[WINED3D_TS_TEXTURE0 + tex],
             state->texture_states[tex][WINED3D_TSS_TEXTURE_TRANSFORM_FLAGS],
-            generated, context->last_was_rhw,
+            generated, context->stream_info.position_transformed,
             context->stream_info.use_map & (1u << (WINED3D_FFP_TEXCOORD0 + coord_idx))
             ? context->stream_info.elements[WINED3D_FFP_TEXCOORD0 + coord_idx].format->id
             : WINED3DFMT_UNKNOWN,
-            device->shader_backend->shader_has_ffp_proj_control(device->shader_priv), mat);
+            context->d3d_info->ffp_fragment_caps.proj_control, mat);
 
-    if ((context->lastWasPow2Texture & (1u << tex)) && state->textures[tex])
+    if (texture && !(texture->flags & WINED3D_TEXTURE_POW2_MAT_IDENT))
     {
         if (generated)
             FIXME("Non-power-of-two texture being used with generated texture coords.\n");
@@ -5868,7 +5873,7 @@ void get_texture_matrix(const struct wined3d_context *context, const struct wine
         if (!use_ps(state))
         {
             TRACE("Non-power-of-two texture matrix multiply fixup.\n");
-            multiply_matrix(mat, mat, (struct wined3d_matrix *)state->textures[tex]->pow2_matrix);
+            multiply_matrix(mat, mat, (struct wined3d_matrix *)texture->pow2_matrix);
         }
     }
 }
@@ -6404,13 +6409,12 @@ void wined3d_ffp_get_fs_settings(const struct wined3d_context *context, const st
     DWORD ttff;
     DWORD cop, aop, carg0, carg1, carg2, aarg0, aarg1, aarg2;
     const struct wined3d_d3d_info *d3d_info = context->d3d_info;
+    struct wined3d_texture *texture;
 
     settings->padding = 0;
 
-    for (i = 0; i < d3d_info->limits.ffp_blend_stages; ++i)
+    for (i = 0; i < d3d_info->ffp_fragment_caps.max_blend_stages; ++i)
     {
-        struct wined3d_texture *texture;
-
         settings->op[i].padding = 0;
         if (state->texture_states[i][WINED3D_TSS_COLOR_OP] == WINED3D_TOP_DISABLE)
         {
@@ -6426,37 +6430,16 @@ void wined3d_ffp_get_fs_settings(const struct wined3d_context *context, const st
             break;
         }
 
-        if ((texture = state->textures[i]))
+        if ((texture = wined3d_state_get_ffp_texture(state, i)))
         {
             if (can_use_texture_swizzle(d3d_info, texture->resource.format))
                 settings->op[i].color_fixup = COLOR_FIXUP_IDENTITY;
             else
                 settings->op[i].color_fixup = texture->resource.format->color_fixup;
             if (ignore_textype)
-            {
                 settings->op[i].tex_type = WINED3D_GL_RES_TYPE_TEX_1D;
-            }
             else
-            {
-                switch (wined3d_texture_gl(texture)->target)
-                {
-                    case GL_TEXTURE_1D:
-                        settings->op[i].tex_type = WINED3D_GL_RES_TYPE_TEX_1D;
-                        break;
-                    case GL_TEXTURE_2D:
-                        settings->op[i].tex_type = WINED3D_GL_RES_TYPE_TEX_2D;
-                        break;
-                    case GL_TEXTURE_3D:
-                        settings->op[i].tex_type = WINED3D_GL_RES_TYPE_TEX_3D;
-                        break;
-                    case GL_TEXTURE_CUBE_MAP_ARB:
-                        settings->op[i].tex_type = WINED3D_GL_RES_TYPE_TEX_CUBE;
-                        break;
-                    case GL_TEXTURE_RECTANGLE_ARB:
-                        settings->op[i].tex_type = WINED3D_GL_RES_TYPE_TEX_RECT;
-                        break;
-                }
-            }
+                settings->op[i].tex_type = texture->resource.gl_type;
         } else {
             settings->op[i].color_fixup = COLOR_FIXUP_IDENTITY;
             settings->op[i].tex_type = WINED3D_GL_RES_TYPE_TEX_1D;
@@ -6494,40 +6477,37 @@ void wined3d_ffp_get_fs_settings(const struct wined3d_context *context, const st
             aarg0 = (args[aop] & ARG0) ? state->texture_states[i][WINED3D_TSS_ALPHA_ARG0] : ARG_UNUSED;
         }
 
-        if (!i && state->textures[0] && state->render_states[WINED3D_RS_COLORKEYENABLE])
+        if (!i && state->render_states[WINED3D_RS_COLORKEYENABLE]
+                && texture && !(texture->resource.usage & WINED3DUSAGE_LEGACY_CUBEMAP)
+                && (texture->async.color_key_flags & WINED3D_CKEY_SRC_BLT) && !texture->resource.format->alpha_size)
         {
-            GLenum texture_dimensions;
-
-            texture = state->textures[0];
-            texture_dimensions = wined3d_texture_gl(texture)->target;
-
-            if (texture_dimensions == GL_TEXTURE_2D || texture_dimensions == GL_TEXTURE_RECTANGLE_ARB)
+            if (aop == WINED3D_TOP_DISABLE)
             {
-                if (texture->async.color_key_flags & WINED3D_CKEY_SRC_BLT && !texture->resource.format->alpha_size)
+               aarg1 = WINED3DTA_TEXTURE;
+               aop = WINED3D_TOP_SELECT_ARG1;
+            }
+            else if (aop == WINED3D_TOP_SELECT_ARG1 && aarg1 != WINED3DTA_TEXTURE)
+            {
+                if (state->blend_state && state->blend_state->desc.rt[0].enable)
                 {
-                    if (aop == WINED3D_TOP_DISABLE)
-                    {
-                       aarg1 = WINED3DTA_TEXTURE;
-                       aop = WINED3D_TOP_SELECT_ARG1;
-                    }
-                    else if (aop == WINED3D_TOP_SELECT_ARG1 && aarg1 != WINED3DTA_TEXTURE)
-                    {
-                        if (state->blend_state && state->blend_state->desc.rt[0].enable)
-                        {
-                            aarg2 = WINED3DTA_TEXTURE;
-                            aop = WINED3D_TOP_MODULATE;
-                        }
-                        else aarg1 = WINED3DTA_TEXTURE;
-                    }
-                    else if (aop == WINED3D_TOP_SELECT_ARG2 && aarg2 != WINED3DTA_TEXTURE)
-                    {
-                        if (state->blend_state && state->blend_state->desc.rt[0].enable)
-                        {
-                            aarg1 = WINED3DTA_TEXTURE;
-                            aop = WINED3D_TOP_MODULATE;
-                        }
-                        else aarg2 = WINED3DTA_TEXTURE;
-                    }
+                    aarg2 = WINED3DTA_TEXTURE;
+                    aop = WINED3D_TOP_MODULATE;
+                }
+                else
+                {
+                    aarg1 = WINED3DTA_TEXTURE;
+                }
+            }
+            else if (aop == WINED3D_TOP_SELECT_ARG2 && aarg2 != WINED3DTA_TEXTURE)
+            {
+                if (state->blend_state && state->blend_state->desc.rt[0].enable)
+                {
+                    aarg1 = WINED3DTA_TEXTURE;
+                    aop = WINED3D_TOP_MODULATE;
+                }
+                else
+                {
+                    aarg2 = WINED3DTA_TEXTURE;
                 }
             }
         }
@@ -6568,9 +6548,8 @@ void wined3d_ffp_get_fs_settings(const struct wined3d_context *context, const st
     }
 
     /* Clear unsupported stages */
-    for(; i < WINED3D_MAX_TEXTURES; i++) {
+    for (; i < WINED3D_MAX_FFP_TEXTURES; ++i)
         memset(&settings->op[i], 0xff, sizeof(settings->op[i]));
-    }
 
     if (!state->render_states[WINED3D_RS_FOGENABLE])
     {
@@ -6627,8 +6606,9 @@ void wined3d_ffp_get_fs_settings(const struct wined3d_context *context, const st
         settings->emul_clipplanes = 1;
     }
 
-    if (state->render_states[WINED3D_RS_COLORKEYENABLE] && state->textures[0]
-            && state->textures[0]->async.color_key_flags & WINED3D_CKEY_SRC_BLT
+    texture = wined3d_state_get_ffp_texture(state, 0);
+    if (state->render_states[WINED3D_RS_COLORKEYENABLE]
+            && texture && (texture->async.color_key_flags & WINED3D_CKEY_SRC_BLT)
             && settings->op[0].cop != WINED3D_TOP_DISABLE)
         settings->color_key_enabled = 1;
     else
@@ -6644,7 +6624,7 @@ void wined3d_ffp_get_fs_settings(const struct wined3d_context *context, const st
     if (d3d_info->limits.varying_count && !d3d_info->full_ffp_varyings)
     {
         settings->texcoords_initialized = 0;
-        for (i = 0; i < WINED3D_MAX_TEXTURES; ++i)
+        for (i = 0; i < WINED3D_MAX_FFP_TEXTURES; ++i)
         {
             if (use_vs(state))
             {
@@ -6657,14 +6637,14 @@ void wined3d_ffp_get_fs_settings(const struct wined3d_context *context, const st
                 unsigned int coord_idx = state->texture_states[i][WINED3D_TSS_TEXCOORD_INDEX];
                 if ((state->texture_states[i][WINED3D_TSS_TEXCOORD_INDEX] >> WINED3D_FFP_TCI_SHIFT)
                         & WINED3D_FFP_TCI_MASK
-                        || (coord_idx < WINED3D_MAX_TEXTURES && (si->use_map & (1u << (WINED3D_FFP_TEXCOORD0 + coord_idx)))))
+                        || (coord_idx < WINED3D_MAX_FFP_TEXTURES && (si->use_map & (1u << (WINED3D_FFP_TEXCOORD0 + coord_idx)))))
                     settings->texcoords_initialized |= 1u << i;
             }
         }
     }
     else
     {
-        settings->texcoords_initialized = wined3d_mask_from_size(WINED3D_MAX_TEXTURES);
+        settings->texcoords_initialized = wined3d_mask_from_size(WINED3D_MAX_FFP_TEXTURES);
     }
 
     settings->pointsprite = state->render_states[WINED3D_RS_POINTSPRITEENABLE]
@@ -6700,117 +6680,6 @@ void add_ffp_frag_shader(struct wine_rb_tree *shaders, struct ffp_frag_desc *des
     }
 }
 
-/* Activates the texture dimension according to the bound D3D texture. Does
- * not care for the colorop or correct gl texture unit (when using nvrc).
- * Requires the caller to activate the correct unit. */
-/* Context activation is done by the caller (state handler). */
-void texture_activate_dimensions(struct wined3d_texture *texture, const struct wined3d_gl_info *gl_info)
-{
-    if (texture)
-    {
-        switch (wined3d_texture_gl(texture)->target)
-        {
-            case GL_TEXTURE_2D:
-                gl_info->gl_ops.gl.p_glDisable(GL_TEXTURE_3D);
-                checkGLcall("glDisable(GL_TEXTURE_3D)");
-                if (gl_info->supported[ARB_TEXTURE_CUBE_MAP])
-                {
-                    gl_info->gl_ops.gl.p_glDisable(GL_TEXTURE_CUBE_MAP_ARB);
-                    checkGLcall("glDisable(GL_TEXTURE_CUBE_MAP_ARB)");
-                }
-                if (gl_info->supported[ARB_TEXTURE_RECTANGLE])
-                {
-                    gl_info->gl_ops.gl.p_glDisable(GL_TEXTURE_RECTANGLE_ARB);
-                    checkGLcall("glDisable(GL_TEXTURE_RECTANGLE_ARB)");
-                }
-                gl_info->gl_ops.gl.p_glEnable(GL_TEXTURE_2D);
-                checkGLcall("glEnable(GL_TEXTURE_2D)");
-                break;
-            case GL_TEXTURE_RECTANGLE_ARB:
-                gl_info->gl_ops.gl.p_glDisable(GL_TEXTURE_2D);
-                checkGLcall("glDisable(GL_TEXTURE_2D)");
-                gl_info->gl_ops.gl.p_glDisable(GL_TEXTURE_3D);
-                checkGLcall("glDisable(GL_TEXTURE_3D)");
-                if (gl_info->supported[ARB_TEXTURE_CUBE_MAP])
-                {
-                    gl_info->gl_ops.gl.p_glDisable(GL_TEXTURE_CUBE_MAP_ARB);
-                    checkGLcall("glDisable(GL_TEXTURE_CUBE_MAP_ARB)");
-                }
-                gl_info->gl_ops.gl.p_glEnable(GL_TEXTURE_RECTANGLE_ARB);
-                checkGLcall("glEnable(GL_TEXTURE_RECTANGLE_ARB)");
-                break;
-            case GL_TEXTURE_3D:
-                if (gl_info->supported[ARB_TEXTURE_CUBE_MAP])
-                {
-                    gl_info->gl_ops.gl.p_glDisable(GL_TEXTURE_CUBE_MAP_ARB);
-                    checkGLcall("glDisable(GL_TEXTURE_CUBE_MAP_ARB)");
-                }
-                if (gl_info->supported[ARB_TEXTURE_RECTANGLE])
-                {
-                    gl_info->gl_ops.gl.p_glDisable(GL_TEXTURE_RECTANGLE_ARB);
-                    checkGLcall("glDisable(GL_TEXTURE_RECTANGLE_ARB)");
-                }
-                gl_info->gl_ops.gl.p_glDisable(GL_TEXTURE_2D);
-                checkGLcall("glDisable(GL_TEXTURE_2D)");
-                gl_info->gl_ops.gl.p_glEnable(GL_TEXTURE_3D);
-                checkGLcall("glEnable(GL_TEXTURE_3D)");
-                break;
-            case GL_TEXTURE_CUBE_MAP_ARB:
-                gl_info->gl_ops.gl.p_glDisable(GL_TEXTURE_2D);
-                checkGLcall("glDisable(GL_TEXTURE_2D)");
-                gl_info->gl_ops.gl.p_glDisable(GL_TEXTURE_3D);
-                checkGLcall("glDisable(GL_TEXTURE_3D)");
-                if (gl_info->supported[ARB_TEXTURE_RECTANGLE])
-                {
-                    gl_info->gl_ops.gl.p_glDisable(GL_TEXTURE_RECTANGLE_ARB);
-                    checkGLcall("glDisable(GL_TEXTURE_RECTANGLE_ARB)");
-                }
-                gl_info->gl_ops.gl.p_glEnable(GL_TEXTURE_CUBE_MAP_ARB);
-                checkGLcall("glEnable(GL_TEXTURE_CUBE_MAP_ARB)");
-              break;
-        }
-    }
-    else
-    {
-        gl_info->gl_ops.gl.p_glEnable(GL_TEXTURE_2D);
-        checkGLcall("glEnable(GL_TEXTURE_2D)");
-        gl_info->gl_ops.gl.p_glDisable(GL_TEXTURE_3D);
-        checkGLcall("glDisable(GL_TEXTURE_3D)");
-        if (gl_info->supported[ARB_TEXTURE_CUBE_MAP])
-        {
-            gl_info->gl_ops.gl.p_glDisable(GL_TEXTURE_CUBE_MAP_ARB);
-            checkGLcall("glDisable(GL_TEXTURE_CUBE_MAP_ARB)");
-        }
-        if (gl_info->supported[ARB_TEXTURE_RECTANGLE])
-        {
-            gl_info->gl_ops.gl.p_glDisable(GL_TEXTURE_RECTANGLE_ARB);
-            checkGLcall("glDisable(GL_TEXTURE_RECTANGLE_ARB)");
-        }
-        /* Binding textures is done by samplers. A dummy texture will be bound */
-    }
-}
-
-/* Context activation is done by the caller (state handler). */
-void sampler_texdim(struct wined3d_context *context, const struct wined3d_state *state, DWORD state_id)
-{
-    struct wined3d_context_gl *context_gl = wined3d_context_gl(context);
-    unsigned int sampler = state_id - STATE_SAMPLER(0);
-    unsigned int mapped_stage;
-
-    /* No need to enable / disable anything here for unused samplers. The
-     * tex_colorop handler takes care. Also no action is needed with pixel
-     * shaders, or if tex_colorop will take care of this business. */
-    mapped_stage = context_gl->tex_unit_map[sampler];
-    if (mapped_stage == WINED3D_UNMAPPED_STAGE || mapped_stage >= context_gl->gl_info->limits.textures)
-        return;
-    if (sampler >= context->lowest_disabled_stage)
-        return;
-    if (isStateDirty(context, STATE_TEXTURESTAGE(sampler, WINED3D_TSS_COLOR_OP)))
-        return;
-
-    texture_activate_dimensions(state->textures[sampler], context_gl->gl_info);
-}
-
 int wined3d_ffp_frag_program_key_compare(const void *key, const struct wine_rb_entry *entry)
 {
     const struct ffp_frag_settings *ka = key;
@@ -6841,15 +6710,15 @@ void wined3d_ffp_get_vs_settings(const struct wined3d_context *context,
         else
             settings->fog_mode = WINED3D_FFP_VS_FOG_FOGCOORD;
 
-        for (i = 0; i < WINED3D_MAX_TEXTURES; ++i)
+        for (i = 0; i < WINED3D_MAX_FFP_TEXTURES; ++i)
         {
             coord_idx = state->texture_states[i][WINED3D_TSS_TEXCOORD_INDEX];
-            if (coord_idx < WINED3D_MAX_TEXTURES && (si->use_map & (1u << (WINED3D_FFP_TEXCOORD0 + coord_idx))))
+            if (coord_idx < WINED3D_MAX_FFP_TEXTURES && (si->use_map & (1u << (WINED3D_FFP_TEXCOORD0 + coord_idx))))
                 settings->texcoords |= 1u << i;
             settings->texgen[i] = state->texture_states[i][WINED3D_TSS_TEXCOORD_INDEX];
         }
         if (d3d_info->full_ffp_varyings)
-            settings->texcoords = wined3d_mask_from_size(WINED3D_MAX_TEXTURES);
+            settings->texcoords = wined3d_mask_from_size(WINED3D_MAX_FFP_TEXTURES);
 
         if (d3d_info->emulated_flatshading)
             settings->flatshading = state->render_states[WINED3D_RS_SHADEMODE] == WINED3D_SHADE_FLAT;
@@ -6880,6 +6749,7 @@ void wined3d_ffp_get_vs_settings(const struct wined3d_context *context,
     settings->normalize = settings->normal && state->render_states[WINED3D_RS_NORMALIZENORMALS];
     settings->lighting = !!state->render_states[WINED3D_RS_LIGHTING];
     settings->localviewer = !!state->render_states[WINED3D_RS_LOCALVIEWER];
+    settings->specular_enable = !!state->render_states[WINED3D_RS_SPECULARENABLE];
     settings->point_size = state->primitive_type == WINED3D_PT_POINTLIST;
     settings->per_vertex_point_size = !!(si->use_map & 1u << WINED3D_FFP_PSIZE);
 
@@ -6890,15 +6760,15 @@ void wined3d_ffp_get_vs_settings(const struct wined3d_context *context,
     settings->ambient_source = ambient_source;
     settings->specular_source = specular_source;
 
-    for (i = 0; i < WINED3D_MAX_TEXTURES; ++i)
+    for (i = 0; i < WINED3D_MAX_FFP_TEXTURES; ++i)
     {
         coord_idx = state->texture_states[i][WINED3D_TSS_TEXCOORD_INDEX];
-        if (coord_idx < WINED3D_MAX_TEXTURES && (si->use_map & (1u << (WINED3D_FFP_TEXCOORD0 + coord_idx))))
+        if (coord_idx < WINED3D_MAX_FFP_TEXTURES && (si->use_map & (1u << (WINED3D_FFP_TEXCOORD0 + coord_idx))))
             settings->texcoords |= 1u << i;
         settings->texgen[i] = state->texture_states[i][WINED3D_TSS_TEXCOORD_INDEX];
     }
     if (d3d_info->full_ffp_varyings)
-        settings->texcoords = wined3d_mask_from_size(WINED3D_MAX_TEXTURES);
+        settings->texcoords = wined3d_mask_from_size(WINED3D_MAX_FFP_TEXTURES);
 
     for (i = 0; i < WINED3D_MAX_ACTIVE_LIGHTS; ++i)
     {
@@ -7131,10 +7001,7 @@ BOOL wined3d_array_reserve(void **elements, SIZE_T *capacity, SIZE_T count, SIZE
     if (new_capacity < count)
         new_capacity = count;
 
-    if (!*elements)
-        new_elements = heap_alloc_zero(new_capacity * size);
-    else
-        new_elements = HeapReAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, *elements, new_capacity * size);
+    new_elements = _recalloc(*elements, new_capacity, size);
     if (!new_elements)
         return FALSE;
 
@@ -7449,7 +7316,7 @@ static struct wined3d_allocator_block *wined3d_allocator_acquire_block(struct wi
     struct wined3d_allocator_block *block;
 
     if (!allocator->free)
-        return heap_alloc(sizeof(*block));
+        return malloc(sizeof(*block));
 
     block = allocator->free;
     allocator->free = block->parent;
@@ -7547,13 +7414,13 @@ void wined3d_allocator_cleanup(struct wined3d_allocator *allocator)
             allocator->ops->allocator_destroy_chunk(chunk);
         }
     }
-    heap_free(allocator->pools);
+    free(allocator->pools);
 
     next = allocator->free;
     while ((block = next))
     {
         next = block->parent;
-        heap_free(block);
+        free(block);
     }
 }
 
@@ -7642,7 +7509,7 @@ bool wined3d_allocator_init(struct wined3d_allocator *allocator,
 
     allocator->ops = allocator_ops;
     allocator->pool_count = pool_count;
-    if (!(allocator->pools = heap_calloc(pool_count, sizeof(*allocator->pools))))
+    if (!(allocator->pools = calloc(pool_count, sizeof(*allocator->pools))))
         return false;
     for (i = 0; i < pool_count; ++i)
     {

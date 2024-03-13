@@ -49,6 +49,11 @@ static void test_InternetInitializeAutoProxyDll(void)
     ret = pInternetInitializeAutoProxyDll( 0, NULL, NULL, NULL, &buf );
     err = GetLastError();
     ok( !ret, "unexpected success\n" );
+    if (!ret && err == 0xdeadbeef)
+    {
+        win_skip("InternetInitializeAutoProxyDll() is not supported on Windows 11\n");
+        return;
+    }
     ok( err == ERROR_INVALID_PARAMETER, "got %lu\n", err );
 
     buf.dwScriptBufferSize = strlen(script) + 1;
@@ -58,6 +63,7 @@ static void test_InternetInitializeAutoProxyDll(void)
     ret = pInternetGetProxyInfo( url, strlen(url), host, strlen(host), &proxy, &len );
     ok( ret, "got %lu\n", GetLastError() );
     ok( !strcmp( proxy, "DIRECT" ), "got \"%s\"\n", proxy );
+    ok( len == strlen(proxy) + 1, "got len=%ld for \"%s\"\n", len, proxy );
     GlobalFree( proxy );
 
     buf.dwScriptBufferSize = strlen(script2) + 1;
@@ -68,6 +74,7 @@ static void test_InternetInitializeAutoProxyDll(void)
     ret = pInternetGetProxyInfo( url, strlen(url), host, strlen(host), &proxy, &len );
     ok( ret, "got %lu\n", GetLastError() );
     ok( !strcmp( proxy, "PROXY 10.0.0.1:8080" ), "got \"%s\"\n", proxy );
+    ok( len == strlen(proxy) + 1, "got len=%ld for \"%s\"\n", len, proxy );
     GlobalFree( proxy );
 
     buf.dwScriptBufferSize = strlen(script2) + 2;
@@ -77,6 +84,7 @@ static void test_InternetInitializeAutoProxyDll(void)
     ret = pInternetGetProxyInfo( url, strlen(url), host, strlen(host), &proxy, &len );
     ok( ret, "got %lu\n", GetLastError() );
     ok( !strcmp( proxy, "PROXY 10.0.0.1:8080" ), "got \"%s\"\n", proxy );
+    ok( len == strlen(proxy) + 1, "got len=%ld for \"%s\"\n", len, proxy );
     GlobalFree( proxy );
 
     buf.lpszScriptBuffer = script3;
@@ -96,7 +104,9 @@ static void test_InternetInitializeAutoProxyDll(void)
 static void test_InternetGetProxyInfo(void)
 {
     const char url[] = "http://localhost";
-    char script[] = "function FindProxyForURL(url, host) { return \"DIRECT\"; }";
+    char script[] = "function FindProxyForURL(url, host) { "
+        "if (url.substring(0, 4) === 'test') return url + ' ' + host; "
+        "return \"DIRECT\"; }";
     char *proxy, host[] = "localhost";
     AUTO_PROXY_SCRIPT_BUFFER buf;
     DWORD len, err;
@@ -105,6 +115,11 @@ static void test_InternetGetProxyInfo(void)
     SetLastError( 0xdeadbeef );
     ret = pInternetGetProxyInfo( url, strlen(url), host, strlen(host), &proxy, &len );
     err = GetLastError();
+    if (!ret && err == 0xdeadbeef)
+    {
+        win_skip("InternetGetProxyInfo() is not supported on Windows 11\n");
+        return;
+    }
     ok( !ret, "unexpected success\n" );
     ok( err == ERROR_CAN_NOT_COMPLETE, "got %lu\n", err );
 
@@ -144,6 +159,14 @@ static void test_InternetGetProxyInfo(void)
     ok( ret, "got %lu\n", GetLastError() );
     ok( !strcmp( proxy, "DIRECT" ), "got \"%s\"\n", proxy );
     ok( len == strlen("DIRECT") + 1, "got %lu\n", len );
+    GlobalFree( proxy );
+
+    len = 0;
+    proxy = NULL;
+    ret = pInternetGetProxyInfo( "testa", 4, host, 4, &proxy, &len);
+    ok( ret, "got %lu\n", GetLastError() );
+    ok( !strcmp( proxy, "test loca" ), "got \"%s\"\n", proxy );
+    ok( len == 10, "got %lu\n", len );
     GlobalFree( proxy );
 
     ret = pInternetDeInitializeAutoProxyDll( NULL, 0 );

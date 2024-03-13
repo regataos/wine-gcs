@@ -66,6 +66,7 @@
 
 #ifdef HAVE_NETIPX_IPX_H
 # include <netipx/ipx.h>
+# define HAS_IPX
 #elif defined(HAVE_LINUX_IPX_H)
 # ifdef HAVE_ASM_TYPES_H
 #  include <asm/types.h>
@@ -74,9 +75,9 @@
 #  include <linux/types.h>
 # endif
 # include <linux/ipx.h>
-#endif
-#if defined(SOL_IPX) || defined(SO_DEFAULT_HEADERS)
-# define HAS_IPX
+# ifdef SOL_IPX
+#  define HAS_IPX
+# endif
 #endif
 
 #ifdef HAVE_LINUX_IRDA_H
@@ -102,6 +103,7 @@
 #include "ws2_32_private.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(winsock);
+WINE_DECLARE_DEBUG_CHANNEL(winediag);
 
 #ifndef HAVE_LINUX_GETHOSTBYNAME_R_6
 static pthread_mutex_t host_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -120,7 +122,9 @@ static const int addrinfo_flag_map[][2] =
 #ifdef AI_V4MAPPED
     MAP( AI_V4MAPPED ),
 #endif
+#ifdef AI_ALL
     MAP( AI_ALL ),
+#endif
     MAP( AI_ADDRCONFIG ),
 };
 
@@ -463,6 +467,7 @@ static int addrinfo_err_from_unix( int err )
         case EAI_SERVICE:   return WS_EAI_SERVICE;
         case EAI_SOCKTYPE:  return WS_EAI_SOCKTYPE;
         case EAI_SYSTEM:
+            if (errno == EBUSY) ERR_(winediag)("getaddrinfo() returned EBUSY. You may be missing a libnss plugin\n");
             /* some broken versions of glibc return EAI_SYSTEM and set errno to
              * 0 instead of returning EAI_NONAME */
             return errno ? errno_from_unix( errno ) : WS_EAI_NONAME;
@@ -1068,6 +1073,8 @@ const unixlib_entry_t __wine_unix_call_funcs[] =
     unix_getnameinfo,
 };
 
+C_ASSERT( ARRAYSIZE(__wine_unix_call_funcs) == ws_unix_funcs_count );
+
 #ifdef _WIN64
 
 typedef ULONG PTR32;
@@ -1345,5 +1352,7 @@ const unixlib_entry_t __wine_unix_call_wow64_funcs[] =
     wow64_unix_gethostname,
     wow64_unix_getnameinfo,
 };
+
+C_ASSERT( ARRAYSIZE(__wine_unix_call_wow64_funcs) == ws_unix_funcs_count );
 
 #endif  /* _WIN64 */

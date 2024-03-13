@@ -406,6 +406,7 @@ static const KBDTABLES kbdus_tables =
 
 static LONG clipping_cursor; /* clipping thread counter */
 
+LONG global_key_state_counter = 0;
 BOOL grab_pointer = TRUE;
 BOOL grab_fullscreen = FALSE;
 
@@ -513,8 +514,13 @@ static WCHAR kbd_tables_vkey_to_wchar( const KBDTABLES *tables, UINT vkey, const
     ctrl = state[VK_CONTROL] & 0x80;
     caps = state[VK_CAPITAL] & 1;
 
-    if (ctrl && alt) return WCH_NONE;
+    if (ctrl && alt && !(tables->fLocaleFlags & KLLF_ALTGR)) return WCH_NONE;
     if (!ctrl && vkey == VK_ESCAPE) return VK_ESCAPE;
+    if (ctrl && !alt)
+    {
+        if (vkey >= 'A' && vkey <= 'Z') return vkey - 'A' + 1;
+        tables = &kbdus_tables;
+    }
 
     mod = caps_mod = kbd_tables_get_mod_num( tables, state, FALSE );
     if (caps) caps_mod = kbd_tables_get_mod_num( tables, state, TRUE );
@@ -525,35 +531,34 @@ static WCHAR kbd_tables_vkey_to_wchar( const KBDTABLES *tables, UINT vkey, const
         for (entry = table->pVkToWchars; entry->VirtualKey; entry = NEXT_ENTRY(table, entry))
         {
             if (entry->VirtualKey != vkey) continue;
+            /* SGCAPS attribute may be set on entries where VK_CAPITAL and VK_SHIFT behave differently.
+             * The entry corresponds to the mapping when Caps Lock is on, and a second entry follows it
+             * with the mapping when Caps Lock is off.
+             */
+            if ((entry->Attributes & SGCAPS) && !caps) entry = NEXT_ENTRY(table, entry);
             if ((entry->Attributes & CAPLOK) && table->nModifications > caps_mod) return entry->wch[caps_mod];
             return entry->wch[mod];
         }
     }
 
-    if (ctrl && vkey >= 'A' && vkey <= 'Z') return vkey - 'A' + 1;
     return WCH_NONE;
 }
 
 #undef NEXT_ENTRY
-
-BOOL enable_mouse_in_pointer = FALSE;
 
 /*******************************************************************
  *           NtUserGetForegroundWindow  (win32u.@)
  */
 HWND WINAPI NtUserGetForegroundWindow(void)
 {
-    volatile struct input_shared_memory *shared = get_foreground_shared_memory();
     HWND ret = 0;
 
-    if (!shared) return 0;
-
-    SHARED_READ_BEGIN( &shared->seq )
+    SERVER_START_REQ( get_thread_input )
     {
-        ret = wine_server_ptr_handle( shared->active );
+        req->tid = 0;
+        if (!wine_server_call_err( req )) ret = wine_server_ptr_handle( reply->foreground );
     }
-    SHARED_READ_END( &shared->seq );
-
+    SERVER_END_REQ;
     return ret;
 }
 
@@ -597,16 +602,6 @@ BOOL WINAPI NtUserAttachThreadInput( DWORD from, DWORD to, BOOL attach )
     }
     SERVER_END_REQ;
     return ret;
-}
-
-/***********************************************************************
- *           __wine_send_input  (win32u.@)
- *
- * Internal SendInput function to allow the graphics driver to inject real events.
- */
-BOOL CDECL __wine_send_input( HWND hwnd, const INPUT *input, const RAWINPUT *rawinput )
-{
-    return set_ntstatus( send_hardware_message( hwnd, input, rawinput, 0 ));
 }
 
 /***********************************************************************
@@ -659,7 +654,6 @@ UINT WINAPI NtUserSendInput( UINT count, INPUT *inputs, int size )
 {
     UINT i;
     NTSTATUS status = STATUS_SUCCESS;
-    RAWINPUT rawinput;
 
     if (size != sizeof(INPUT))
     {
@@ -689,7 +683,7 @@ UINT WINAPI NtUserSendInput( UINT count, INPUT *inputs, int size )
             update_mouse_coords( &input );
             /* fallthrough */
         case INPUT_KEYBOARD:
-            status = send_hardware_message( 0, &input, &rawinput, SEND_HWMSG_INJECTED );
+            status = send_hardware_message( 0, SEND_HWMSG_INJECTED, &input, 0 );
             break;
         case INPUT_HARDWARE:
             RtlSetLastWin32Error( ERROR_CALL_NOT_IMPLEMENTED );
@@ -745,23 +739,25 @@ BOOL WINAPI NtUserSetCursorPos( INT x, INT y )
  */
 BOOL get_cursor_pos( POINT *pt )
 {
-    volatile struct desktop_shared_memory *shared = get_desktop_shared_memory();
+    BOOL ret;
     DWORD last_change;
-    BOOL ret = TRUE;
     UINT dpi;
 
-    if (!pt || !shared) return FALSE;
+    if (!pt) return FALSE;
 
-    SHARED_READ_BEGIN( &shared->seq )
+    SERVER_START_REQ( set_cursor )
     {
-        pt->x = shared->cursor.x;
-        pt->y = shared->cursor.y;
-        last_change = shared->cursor.last_change;
+        if ((ret = !wine_server_call( req )))
+        {
+            pt->x = reply->new_x;
+            pt->y = reply->new_y;
+            last_change = reply->last_change;
+        }
     }
-    SHARED_READ_END( &shared->seq );
+    SERVER_END_REQ;
 
     /* query new position from graphics driver if we haven't updated recently */
-    if (NtGetTickCount() - last_change > 100) ret = user_driver->pGetCursorPos( pt );
+    if (ret && NtGetTickCount() - last_change > 100) ret = user_driver->pGetCursorPos( pt );
     if (ret && (dpi = get_thread_dpi()))
     {
         HMONITOR monitor = monitor_from_point( *pt, MONITOR_DEFAULTTOPRIMARY, 0 );
@@ -775,19 +771,20 @@ BOOL get_cursor_pos( POINT *pt )
  */
 BOOL WINAPI NtUserGetCursorInfo( CURSORINFO *info )
 {
-    volatile struct input_shared_memory *shared = get_foreground_shared_memory();
     BOOL ret;
 
     if (!info) return FALSE;
 
-    if (!shared) ret = FALSE;
-    else SHARED_READ_BEGIN( &shared->seq )
+    SERVER_START_REQ( get_thread_input )
     {
-        info->hCursor = wine_server_ptr_handle( shared->cursor );
-        info->flags = (shared->cursor_count >= 0) ? CURSOR_SHOWING : 0;
-        ret = TRUE;
+        req->tid = 0;
+        if ((ret = !wine_server_call( req )))
+        {
+            info->hCursor = wine_server_ptr_handle( reply->cursor );
+            info->flags = reply->show_count >= 0 ? CURSOR_SHOWING : 0;
+        }
     }
-    SHARED_READ_END( &shared->seq );
+    SERVER_END_REQ;
     get_cursor_pos( &info->ptScreenPos );
     return ret;
 }
@@ -803,20 +800,57 @@ static void check_for_events( UINT flags )
  */
 SHORT WINAPI NtUserGetAsyncKeyState( INT key )
 {
-    volatile struct desktop_shared_memory *shared = get_desktop_shared_memory();
-    BYTE state;
+    struct user_key_state_info *key_state_info = get_user_thread_info()->key_state;
+    INT counter = global_key_state_counter;
+    BYTE prev_key_state;
+    SHORT ret;
 
-    if (key < 0 || key >= 256 || !shared) return 0;
+    if (key < 0 || key >= 256) return 0;
 
     check_for_events( QS_INPUT );
 
-    SHARED_READ_BEGIN( &shared->seq )
+    if (key_state_info && !(key_state_info->state[key] & 0xc0) &&
+        key_state_info->counter == counter && NtGetTickCount() - key_state_info->time < 50)
     {
-        state = shared->keystate[key];
+        /* use cached value */
+        return 0;
     }
-    SHARED_READ_END( &shared->seq );
+    else if (!key_state_info)
+    {
+        key_state_info = calloc( 1, sizeof(*key_state_info) );
+        get_user_thread_info()->key_state = key_state_info;
+    }
 
-    return (state & 0x80) << 8;
+    ret = 0;
+    SERVER_START_REQ( get_key_state )
+    {
+        req->async = 1;
+        req->key = key;
+        if (key_state_info)
+        {
+            prev_key_state = key_state_info->state[key];
+            wine_server_set_reply( req, key_state_info->state, sizeof(key_state_info->state) );
+        }
+        if (!wine_server_call( req ))
+        {
+            if (reply->state & 0x40) ret |= 0x0001;
+            if (reply->state & 0x80) ret |= 0x8000;
+            if (key_state_info)
+            {
+                /* force refreshing the key state cache - some multithreaded programs
+                 * (like Adobe Photoshop CS5) expect that changes to the async key state
+                 * are also immediately available in other threads. */
+                if (prev_key_state != key_state_info->state[key])
+                    counter = InterlockedIncrement( &global_key_state_counter );
+
+                key_state_info->time    = NtGetTickCount();
+                key_state_info->counter = counter;
+            }
+        }
+    }
+    SERVER_END_REQ;
+
+    return ret;
 }
 
 /***********************************************************************
@@ -869,7 +903,6 @@ DWORD get_input_state(void)
 static HKL get_locale_kbd_layout(void)
 {
     LCID layout;
-    LANGID langid;
 
     /* FIXME:
      *
@@ -883,19 +916,7 @@ static HKL get_locale_kbd_layout(void)
      */
 
     NtQueryDefaultLocale( TRUE, &layout );
-
-    /*
-     * Microsoft Office expects this value to be something specific
-     * for Japanese and Korean Windows with an IME the value is 0xe001
-     * We should probably check to see if an IME exists and if so then
-     * set this word properly.
-     */
-    langid = PRIMARYLANGID( LANGIDFROMLCID( layout ) );
-    if (langid == LANG_CHINESE || langid == LANG_JAPANESE || langid == LANG_KOREAN)
-        layout = MAKELONG( layout, 0xe001 ); /* IME */
-    else
-        layout = MAKELONG( layout, layout );
-
+    layout = MAKELONG( layout, layout );
     return ULongToHandle( layout );
 }
 
@@ -926,32 +947,9 @@ HKL WINAPI NtUserGetKeyboardLayout( DWORD thread_id )
  */
 SHORT WINAPI NtUserGetKeyState( INT vkey )
 {
-    volatile struct input_shared_memory *shared = get_input_shared_memory();
-    volatile struct desktop_shared_memory *desktop_shared;
     SHORT retval = 0;
-    BOOL skip = TRUE;
 
-    if (!shared) skip = FALSE;
-    else SHARED_READ_BEGIN( &shared->seq )
-    {
-        if (!shared->created) skip = FALSE; /* server needs to create the queue */
-        else if (!shared->keystate_lock)
-        {
-            desktop_shared = get_desktop_shared_memory();
-            if (!desktop_shared) skip = FALSE;
-            else SHARED_READ_BEGIN( &desktop_shared->seq )
-            {
-                if (shared->sync_serial != desktop_shared->update_serial)
-                    skip = FALSE; /* server needs to call sync_input_keystate */
-            }
-            SHARED_READ_END( &desktop_shared->seq );
-        }
-        if (skip)
-            retval = (signed char)(shared->keystate[vkey & 0xff] & 0x81);
-    }
-    SHARED_READ_END( &shared->seq );
-
-    if (!skip) SERVER_START_REQ( get_key_state )
+    SERVER_START_REQ( get_key_state )
     {
         req->key = vkey;
         if (!wine_server_call( req )) retval = (signed char)(reply->state & 0x81);
@@ -966,25 +964,10 @@ SHORT WINAPI NtUserGetKeyState( INT vkey )
  */
 BOOL WINAPI NtUserGetKeyboardState( BYTE *state )
 {
-    volatile struct input_shared_memory *shared = get_input_shared_memory();
-    BOOL ret, skip = TRUE;
+    BOOL ret;
     UINT i;
 
     TRACE("(%p)\n", state);
-
-    if (!shared) skip = FALSE;
-    else SHARED_READ_BEGIN( &shared->seq )
-    {
-        if (!shared->created) skip = FALSE; /* server needs to create the queue */
-        else memcpy( state, (const void *)shared->keystate, 256 );
-    }
-    SHARED_READ_END( &shared->seq );
-
-    if (skip)
-    {
-        for (i = 0; i < 256; i++) state[i] &= 0x81;
-        return TRUE;
-    }
 
     memset( state, 0, 256 );
     SERVER_START_REQ( get_key_state )
@@ -995,7 +978,6 @@ BOOL WINAPI NtUserGetKeyboardState( BYTE *state )
         for (i = 0; i < 256; i++) state[i] &= 0x81;
     }
     SERVER_END_REQ;
-
     return ret;
 }
 
@@ -1020,13 +1002,16 @@ BOOL WINAPI NtUserSetKeyboardState( BYTE *state )
  */
 WORD WINAPI NtUserVkKeyScanEx( WCHAR chr, HKL layout )
 {
-    const KBDTABLES *kbd_tables = &kbdus_tables;
+    const KBDTABLES *kbd_tables;
     SHORT ret;
 
     TRACE_(keyboard)( "chr %s, layout %p\n", debugstr_wn(&chr, 1), layout );
 
     if ((ret = user_driver->pVkKeyScanEx( chr, layout )) != -256) return ret;
+
+    if (!(kbd_tables = user_driver->pKbdLayerDescriptor( layout ))) kbd_tables = &kbdus_tables;
     ret = kbd_tables_wchar_to_vkey( kbd_tables, chr );
+    if (kbd_tables != &kbdus_tables) user_driver->pReleaseKbdTables( kbd_tables );
 
     TRACE_(keyboard)( "ret %04x\n", ret );
     return ret;
@@ -1038,16 +1023,15 @@ WORD WINAPI NtUserVkKeyScanEx( WCHAR chr, HKL layout )
  */
 UINT WINAPI NtUserMapVirtualKeyEx( UINT code, UINT type, HKL layout )
 {
-    const KBDTABLES *kbd_tables = &kbdus_tables;
     BYTE vsc2vk[0x300], vk2char[0x100];
-    UINT ret;
+    const KBDTABLES *kbd_tables;
+    UINT ret = 0;
 
     TRACE_(keyboard)( "code %u, type %u, layout %p.\n", code, type, layout );
 
     if ((ret = user_driver->pMapVirtualKeyEx( code, type, layout )) != -1) return ret;
 
-    kbd_tables_init_vsc2vk( kbd_tables, vsc2vk );
-    kbd_tables_init_vk2char( kbd_tables, vk2char );
+    if (!(kbd_tables = user_driver->pKbdLayerDescriptor( layout ))) kbd_tables = &kbdus_tables;
 
     switch (type)
     {
@@ -1071,6 +1055,7 @@ UINT WINAPI NtUserMapVirtualKeyEx( UINT code, UINT type, HKL layout )
         case VK_DECIMAL: code = VK_DELETE; break;
         }
 
+        kbd_tables_init_vsc2vk( kbd_tables, vsc2vk );
         for (ret = 0; ret < ARRAY_SIZE(vsc2vk); ++ret) if (vsc2vk[ret] == code) break;
         if (ret >= ARRAY_SIZE(vsc2vk)) ret = 0;
 
@@ -1083,6 +1068,8 @@ UINT WINAPI NtUserMapVirtualKeyEx( UINT code, UINT type, HKL layout )
         break;
     case MAPVK_VSC_TO_VK:
     case MAPVK_VSC_TO_VK_EX:
+        kbd_tables_init_vsc2vk( kbd_tables, vsc2vk );
+
         if (code & 0xe000) code -= 0xdf00;
         if (code >= ARRAY_SIZE(vsc2vk)) ret = 0;
         else ret = vsc2vk[code];
@@ -1098,14 +1085,17 @@ UINT WINAPI NtUserMapVirtualKeyEx( UINT code, UINT type, HKL layout )
         }
         break;
     case MAPVK_VK_TO_CHAR:
+        kbd_tables_init_vk2char( kbd_tables, vk2char );
         if (code >= ARRAY_SIZE(vk2char)) ret = 0;
         else if (code >= 'A' && code <= 'Z') ret = code;
         else ret = vk2char[code];
         break;
     default:
         FIXME_(keyboard)( "unknown type %d\n", type );
-        return 0;
+        break;
     }
+
+    if (kbd_tables != &kbdus_tables) user_driver->pReleaseKbdTables( kbd_tables );
 
     TRACE_(keyboard)( "returning 0x%04x\n", ret );
     return ret;
@@ -1117,19 +1107,21 @@ UINT WINAPI NtUserMapVirtualKeyEx( UINT code, UINT type, HKL layout )
 INT WINAPI NtUserGetKeyNameText( LONG lparam, WCHAR *buffer, INT size )
 {
     INT code = ((lparam >> 16) & 0x1ff), vkey, len;
-    const KBDTABLES *kbd_tables = &kbdus_tables;
+    HKL layout = NtUserGetKeyboardLayout( 0 );
+    const KBDTABLES *kbd_tables;
     VSC_LPWSTR *key_name;
-    BYTE vsc2vk[0x300];
 
     TRACE_(keyboard)( "lparam %#x, buffer %p, size %d.\n", (int)lparam, buffer, size );
 
     if (!buffer || !size) return 0;
     if ((len = user_driver->pGetKeyNameText( lparam, buffer, size )) >= 0) return len;
 
-    kbd_tables_init_vsc2vk( kbd_tables, vsc2vk );
+    if (!(kbd_tables = user_driver->pKbdLayerDescriptor( layout ))) kbd_tables = &kbdus_tables;
 
     if (lparam & 0x2000000)
     {
+        BYTE vsc2vk[0x300];
+        kbd_tables_init_vsc2vk( kbd_tables, vsc2vk );
         switch ((vkey = vsc2vk[code]))
         {
         case VK_RSHIFT:
@@ -1145,7 +1137,7 @@ INT WINAPI NtUserGetKeyNameText( LONG lparam, WCHAR *buffer, INT size )
     else key_name = kbd_tables->pKeyNamesExt;
     while (key_name->vsc && key_name->vsc != (BYTE)code) key_name++;
 
-    if (key_name->vsc == (BYTE)code)
+    if (key_name->vsc == (BYTE)code && key_name->pwsz)
     {
         len = min( size - 1, wcslen( key_name->pwsz ) );
         memcpy( buffer, key_name->pwsz, len * sizeof(WCHAR) );
@@ -1159,6 +1151,8 @@ INT WINAPI NtUserGetKeyNameText( LONG lparam, WCHAR *buffer, INT size )
     }
     buffer[len] = 0;
 
+    if (kbd_tables != &kbdus_tables) user_driver->pReleaseKbdTables( kbd_tables );
+
     TRACE_(keyboard)( "ret %d, str %s.\n", len, debugstr_w(buffer) );
     return len;
 }
@@ -1169,26 +1163,26 @@ INT WINAPI NtUserGetKeyNameText( LONG lparam, WCHAR *buffer, INT size )
 INT WINAPI NtUserToUnicodeEx( UINT virt, UINT scan, const BYTE *state,
                               WCHAR *str, int size, UINT flags, HKL layout )
 {
-    const KBDTABLES *kbd_tables = &kbdus_tables;
-    WCHAR buffer[2] = {0};
+    const KBDTABLES *kbd_tables;
     INT len;
 
     TRACE_(keyboard)( "virt %#x, scan %#x, state %p, str %p, size %d, flags %#x, layout %p.\n",
                       virt, scan, state, str, size, flags, layout );
 
-    if (!state) return 0;
-    if ((len = user_driver->pToUnicodeEx( virt, scan, state, str, size, flags, layout )) >= -1)
-        return len;
+    if (!state || !size) return 0;
+    if ((len = user_driver->pToUnicodeEx( virt, scan, state, str, size, flags, layout )) >= -1) return len;
 
-    if (scan & 0x8000) buffer[0] = 0; /* key up */
-    else buffer[0] = kbd_tables_vkey_to_wchar( kbd_tables, virt, state );
+    if (!(kbd_tables = user_driver->pKbdLayerDescriptor( layout ))) kbd_tables = &kbdus_tables;
+    if (scan & 0x8000) str[0] = 0; /* key up */
+    else str[0] = kbd_tables_vkey_to_wchar( kbd_tables, virt, state );
+    if (size > 1) str[1] = 0;
 
-    if (buffer[0] != WCH_NONE) len = 1;
-    else buffer[0] = len = 0;
+    if (str[0] != WCH_NONE) len = 1;
+    else str[0] = len = 0;
 
-    lstrcpynW( str, buffer, size );
+    if (kbd_tables != &kbdus_tables) user_driver->pReleaseKbdTables( kbd_tables );
 
-    TRACE_(keyboard)( "ret %d, str %s.\n", len, debugstr_w(str) );
+    TRACE_(keyboard)( "ret %d, str %s.\n", len, debugstr_wn(str, len) );
     return len;
 }
 
@@ -1743,12 +1737,15 @@ HWND WINAPI NtUserSetCapture( HWND hwnd )
 /**********************************************************************
  *           release_capture
  */
-BOOL WINAPI release_capture(void)
+BOOL release_capture(void)
 {
-    BOOL ret = set_capture_window( 0, 0, NULL );
+    HWND previous = NULL;
+    BOOL ret;
+
+    ret = set_capture_window( 0, 0, &previous );
 
     /* Somebody may have missed some mouse movements */
-    if (ret)
+    if (ret && previous)
     {
         INPUT input = { .type = INPUT_MOUSE };
         input.mi.dwFlags = MOUSEEVENTF_MOVE;
@@ -1763,7 +1760,7 @@ BOOL WINAPI release_capture(void)
  *
  * Change the focus window, sending the WM_SETFOCUS and WM_KILLFOCUS messages
  */
-static HWND set_focus_window( HWND hwnd, BOOL from_active, BOOL force )
+static HWND set_focus_window( HWND hwnd )
 {
     HWND previous = 0, ime_hwnd;
     BOOL ret;
@@ -1777,13 +1774,9 @@ static HWND set_focus_window( HWND hwnd, BOOL from_active, BOOL force )
     SERVER_END_REQ;
     if (!ret) return 0;
     if (previous == hwnd) return previous;
-    if (!force && hwnd == previous) return previous;
 
     if (previous)
     {
-        if (!NtUserIsWindow(hwnd) && !from_active)
-            NtUserNotifyWinEvent( EVENT_OBJECT_FOCUS, previous, OBJID_CLIENT, CHILDID_SELF );
-
         send_message( previous, WM_KILLFOCUS, (WPARAM)hwnd, 0 );
 
         ime_hwnd = get_default_ime_window( previous );
@@ -1796,8 +1789,6 @@ static HWND set_focus_window( HWND hwnd, BOOL from_active, BOOL force )
     if (is_window(hwnd))
     {
         user_driver->pSetFocus(hwnd);
-        if (!from_active)
-            NtUserNotifyWinEvent( EVENT_OBJECT_FOCUS, hwnd, OBJID_CLIENT, CHILDID_SELF );
 
         ime_hwnd = get_default_ime_window( hwnd );
         if (ime_hwnd)
@@ -1818,8 +1809,8 @@ static HWND set_focus_window( HWND hwnd, BOOL from_active, BOOL force )
 static BOOL set_active_window( HWND hwnd, HWND *prev, BOOL mouse, BOOL focus )
 {
     HWND previous = get_active_window();
-    BOOL ret = FALSE;
-    DWORD old_thread, new_thread;
+    BOOL ret;
+    DWORD winflags, old_thread, new_thread;
     CBTACTIVATESTRUCT cbt;
 
     if (previous == hwnd)
@@ -1828,30 +1819,34 @@ static BOOL set_active_window( HWND hwnd, HWND *prev, BOOL mouse, BOOL focus )
         goto done;
     }
 
-    if (prev) *prev = previous;
-    if (win_set_flags( hwnd, WIN_IS_ACTIVATING, 0 ) & WIN_IS_ACTIVATING) return TRUE;
-
-    /* call CBT hook chain */
-    cbt.fMouse     = mouse;
-    cbt.hWndActive = previous;
-    if (call_hooks( WH_CBT, HCBT_ACTIVATE, (WPARAM)hwnd, (LPARAM)&cbt, sizeof(cbt) )) return FALSE;
-
-    if (is_window( previous ))
+    /* Prevent a recursive activation loop with the activation messages */
+    winflags = win_set_flags(hwnd, WIN_IS_IN_ACTIVATION, 0);
+    if (!(winflags & WIN_IS_IN_ACTIVATION))
     {
-        send_message( previous, WM_NCACTIVATE, FALSE, (LPARAM)hwnd );
-        send_message( previous, WM_ACTIVATE,
-                      MAKEWPARAM( WA_INACTIVE, is_iconic(previous) ), (LPARAM)hwnd );
+        ret = FALSE;
+
+        /* call CBT hook chain */
+        cbt.fMouse     = mouse;
+        cbt.hWndActive = previous;
+        if (call_hooks( WH_CBT, HCBT_ACTIVATE, (WPARAM)hwnd, (LPARAM)&cbt, sizeof(cbt) ))
+            goto clear_flags;
+
+        if (is_window(previous))
+        {
+            send_message( previous, WM_NCACTIVATE, FALSE, (LPARAM)hwnd );
+            send_message( previous, WM_ACTIVATE,
+                          MAKEWPARAM( WA_INACTIVE, is_iconic(previous) ), (LPARAM)hwnd );
+        }
     }
 
     SERVER_START_REQ( set_active_window )
     {
         req->handle = wine_server_user_handle( hwnd );
-        req->internal_msg = WM_WINE_SETACTIVEWINDOW;
         if ((ret = !wine_server_call_err( req )))
             previous = wine_server_ptr_handle( reply->previous );
     }
     SERVER_END_REQ;
-    if (!ret) goto done;
+    if (!ret) return FALSE;
     if (prev) *prev = previous;
     if (previous == hwnd) goto done;
 
@@ -1861,7 +1856,11 @@ static BOOL set_active_window( HWND hwnd, HWND *prev, BOOL mouse, BOOL focus )
         if (send_message( hwnd, WM_QUERYNEWPALETTE, 0, 0 ))
             send_message_timeout( HWND_BROADCAST, WM_PALETTEISCHANGING, (WPARAM)hwnd, 0,
                                   SMTO_ABORTIFHUNG, 2000, FALSE );
-        if (!(ret = is_window(hwnd))) goto done;
+        if (!is_window(hwnd))
+        {
+            ret = FALSE;
+            goto clear_flags;
+        }
     }
 
     old_thread = previous ? get_window_thread( previous, NULL ) : 0;
@@ -1893,17 +1892,24 @@ static BOOL set_active_window( HWND hwnd, HWND *prev, BOOL mouse, BOOL focus )
         }
     }
 
-    if (is_window(hwnd))
+    if (!(winflags & WIN_IS_IN_ACTIVATION) && is_window(hwnd))
     {
-        send_message( hwnd, WM_NCACTIVATE,
-                      (hwnd == NtUserGetForegroundWindow()) && !(win_get_flags(previous) & WIN_IS_ACTIVATING),
-                      (LPARAM)previous );
+        send_message( hwnd, WM_NCACTIVATE, hwnd == NtUserGetForegroundWindow(), (LPARAM)previous );
         send_message( hwnd, WM_ACTIVATE,
                       MAKEWPARAM( mouse ? WA_CLICKACTIVE : WA_ACTIVE, is_iconic(hwnd) ),
                       (LPARAM)previous );
+
+        send_message( hwnd, WM_NCPOINTERUP, 0, 0);
+
         if (NtUserGetAncestor( hwnd, GA_PARENT ) == get_desktop_window())
             NtUserPostMessage( get_desktop_window(), WM_PARENTNOTIFY, WM_NCACTIVATE, (LPARAM)hwnd );
+
+        if (hwnd == NtUserGetForegroundWindow() && !is_iconic( hwnd ))
+            NtUserSetActiveWindow( hwnd );
+
     }
+
+    user_driver->pSetActiveWindow( hwnd );
 
     /* now change focus if necessary */
     if (focus)
@@ -1916,13 +1922,16 @@ static BOOL set_active_window( HWND hwnd, HWND *prev, BOOL mouse, BOOL focus )
         if (hwnd == info.hwndActive)
         {
             if (!info.hwndFocus || !hwnd || NtUserGetAncestor( info.hwndFocus, GA_ROOT ) != hwnd)
-                set_focus_window( hwnd, TRUE, FALSE );
+                set_focus_window( hwnd );
         }
     }
 
+clear_flags:
+    win_set_flags(hwnd, 0, WIN_IS_IN_ACTIVATION);
+
 done:
-    win_set_flags( hwnd, 0, WIN_IS_ACTIVATING );
-    if (ret && hwnd) clip_fullscreen_window( hwnd, FALSE );
+    if (hwnd) clip_fullscreen_window( hwnd, FALSE );
+
     return ret;
 }
 
@@ -2011,7 +2020,7 @@ HWND WINAPI NtUserSetFocus( HWND hwnd )
     }
 
     /* change focus and send messages */
-    return set_focus_window( hwnd, FALSE, hwnd != previous );
+    return set_focus_window( hwnd );
 }
 
 /*******************************************************************
@@ -2039,16 +2048,14 @@ BOOL set_foreground_window( HWND hwnd, BOOL mouse )
     if (ret && previous != hwnd)
     {
         if (send_msg_old)  /* old window belongs to other thread */
-            NtUserPostMessage( previous, WM_WINE_SETACTIVEWINDOW, 0, 0 );
+            NtUserMessageCall( previous, WM_WINE_SETACTIVEWINDOW, 0, 0,
+                               0, NtUserSendNotifyMessage, FALSE );
         else if (send_msg_new)  /* old window belongs to us but new one to other thread */
             ret = set_active_window( 0, NULL, mouse, TRUE );
 
-        /* already active, set_active_window will do no nothing */
-        if (!send_msg_new && hwnd == get_active_window())
-            send_message( hwnd, WM_NCACTIVATE, TRUE, (LPARAM)hwnd );
-
         if (send_msg_new)  /* new window belongs to other thread */
-            NtUserPostMessage( hwnd, WM_WINE_SETACTIVEWINDOW, (WPARAM)hwnd, 0 );
+            NtUserMessageCall( hwnd, WM_WINE_SETACTIVEWINDOW, (WPARAM)hwnd, 0,
+                               0, NtUserSendNotifyMessage, FALSE );
         else  /* new window belongs to us */
             ret = set_active_window( hwnd, NULL, mouse, TRUE );
     }
@@ -2318,6 +2325,8 @@ BOOL set_caret_pos( int x, int y )
         r.left = x;
         r.top = y;
         display_caret( hwnd, &r );
+        if (user_driver->pUpdateCandidatePos)
+            user_driver->pUpdateCandidatePos( hwnd, &r );
         NtUserSetSystemTimer( hwnd, SYSTEM_TIMER_CARET, caret.timeout );
     }
     return ret;
@@ -2355,6 +2364,8 @@ BOOL WINAPI NtUserShowCaret( HWND hwnd )
     if (ret && hidden == 1)  /* hidden was 1 so it's now 0 */
     {
         display_caret( hwnd, &r );
+        if (user_driver->pUpdateCandidatePos)
+            user_driver->pUpdateCandidatePos( hwnd, &r );
         NtUserSetSystemTimer( hwnd, SYSTEM_TIMER_CARET, caret.timeout );
     }
     return ret;
@@ -2434,9 +2445,9 @@ void toggle_caret( HWND hwnd )
  */
 BOOL WINAPI NtUserEnableMouseInPointer( BOOL enable )
 {
-    FIXME( "enable %u semi-stub!\n", enable );
-    enable_mouse_in_pointer = TRUE;
-    return TRUE;
+    FIXME( "enable %u stub!\n", enable );
+    RtlSetLastWin32Error( ERROR_CALL_NOT_IMPLEMENTED );
+    return FALSE;
 }
 
 /**********************************************************************
@@ -2447,6 +2458,13 @@ BOOL WINAPI NtUserIsMouseInPointerEnabled(void)
     FIXME( "stub!\n" );
     RtlSetLastWin32Error( ERROR_CALL_NOT_IMPLEMENTED );
     return FALSE;
+}
+
+static BOOL is_captured_by_system(void)
+{
+    GUITHREADINFO info;
+    info.cbSize = sizeof(info);
+    return NtUserGetGUIThreadInfo( GetCurrentThreadId(), &info ) && info.hwndCapture && (info.flags & (GUI_INMOVESIZE | GUI_INMENUMODE));
 }
 
 /***********************************************************************
@@ -2474,8 +2492,8 @@ BOOL clip_fullscreen_window( HWND hwnd, BOOL reset )
 
     if (!NtUserGetWindowRect( hwnd, &rect )) return FALSE;
     if (!NtUserIsWindowRectFullScreen( &rect )) return FALSE;
-
-    if (!reset && NtGetTickCount() - thread_info->clipping_reset < 1000) return FALSE;
+    if (is_captured_by_system()) return FALSE;
+    if (NtGetTickCount() - thread_info->clipping_reset < 1000) return FALSE;
     if (!reset && clipping_cursor && thread_info->clipping_cursor) return FALSE;  /* already clipping */
 
     if (!(monitor = NtUserMonitorFromWindow( hwnd, MONITOR_DEFAULTTONEAREST ))) return FALSE;
@@ -2504,32 +2522,6 @@ BOOL clip_fullscreen_window( HWND hwnd, BOOL reset )
 }
 
 /**********************************************************************
- *       NtUserIsTouchWindow    (win32u.@)
- */
-BOOL WINAPI NtUserIsTouchWindow( HWND hwnd, ULONG *flags )
-{
-    DWORD win_flags = win_set_flags( hwnd, 0, 0 );
-    TRACE( "hwnd %p, flags %p.\n", hwnd, flags );
-    return (win_flags & WIN_IS_TOUCH) != 0;
-}
-
-
-BOOL register_touch_window( HWND hwnd, UINT flags )
-{
-    DWORD win_flags = win_set_flags( hwnd, WIN_IS_TOUCH, 0 );
-    TRACE( "hwnd %p, flags %#x.\n", hwnd, flags );
-    return (win_flags & WIN_IS_TOUCH) == 0;
-}
-
-
-BOOL unregister_touch_window( HWND hwnd )
-{
-    DWORD win_flags = win_set_flags( hwnd, 0, WIN_IS_TOUCH );
-    TRACE( "hwnd %p.\n", hwnd );
-    return (win_flags & WIN_IS_TOUCH) != 0;
-}
-
-/**********************************************************************
  *       NtUserGetPointerInfoList    (win32u.@)
  */
 BOOL WINAPI NtUserGetPointerInfoList( UINT32 id, POINTER_INPUT_TYPE type, UINT_PTR unk0, UINT_PTR unk1, SIZE_T size,
@@ -2543,37 +2535,41 @@ BOOL WINAPI NtUserGetPointerInfoList( UINT32 id, POINTER_INPUT_TYPE type, UINT_P
 
 BOOL get_clip_cursor( RECT *rect )
 {
-    volatile struct desktop_shared_memory *shared = get_desktop_shared_memory();
     UINT dpi;
+    BOOL ret;
 
-    if (!rect || !shared) return FALSE;
+    if (!rect) return FALSE;
 
-    SHARED_READ_BEGIN( &shared->seq )
+    SERVER_START_REQ( set_cursor )
     {
-        rect->left   = shared->cursor.clip.left;
-        rect->top    = shared->cursor.clip.top;
-        rect->right  = shared->cursor.clip.right;
-        rect->bottom = shared->cursor.clip.bottom;
+        req->flags = 0;
+        if ((ret = !wine_server_call( req )))
+        {
+            rect->left   = reply->new_clip.left;
+            rect->top    = reply->new_clip.top;
+            rect->right  = reply->new_clip.right;
+            rect->bottom = reply->new_clip.bottom;
+        }
     }
-    SHARED_READ_END( &shared->seq );
+    SERVER_END_REQ;
 
-    if ((dpi = get_thread_dpi()))
+    if (ret && (dpi = get_thread_dpi()))
     {
         HMONITOR monitor = monitor_from_rect( rect, MONITOR_DEFAULTTOPRIMARY, 0 );
         *rect = map_dpi_rect( *rect, get_monitor_dpi( monitor ), dpi );
     }
-    return TRUE;
+    return ret;
 }
 
 BOOL process_wine_clipcursor( HWND hwnd, UINT flags, BOOL reset )
 {
     struct user_thread_info *thread_info = get_user_thread_info();
     RECT rect, virtual_rect = NtUserGetVirtualScreenRect();
-    BOOL empty = !!(flags & SET_CURSOR_NOCLIP);
+    BOOL was_clipping, empty = !!(flags & SET_CURSOR_NOCLIP);
 
     TRACE( "hwnd %p, flags %#x, reset %u\n", hwnd, flags, reset );
 
-    if (thread_info->clipping_cursor) InterlockedDecrement( &clipping_cursor );
+    if ((was_clipping = thread_info->clipping_cursor)) InterlockedDecrement( &clipping_cursor );
     thread_info->clipping_cursor = FALSE;
 
     if (reset)
@@ -2591,7 +2587,7 @@ BOOL process_wine_clipcursor( HWND hwnd, UINT flags, BOOL reset )
     if (empty && !(flags & SET_CURSOR_FSCLIP))
     {
         /* if currently clipping, check if we should switch to fullscreen clipping */
-        if (clip_fullscreen_window( hwnd, TRUE )) return TRUE;
+        if (was_clipping && clip_fullscreen_window( hwnd, TRUE )) return TRUE;
         return user_driver->pClipCursor( NULL, FALSE );
     }
 
@@ -2606,18 +2602,11 @@ BOOL process_wine_clipcursor( HWND hwnd, UINT flags, BOOL reset )
  */
 BOOL WINAPI NtUserClipCursor( const RECT *rect )
 {
-    HWND foreground = NtUserGetForegroundWindow();
     UINT dpi;
     BOOL ret;
-    RECT new_rect, full_rect;
+    RECT new_rect;
 
     TRACE( "Clipping to %s\n", wine_dbgstr_rect(rect) );
-
-    if (foreground == NtUserGetDesktopWindow())
-    {
-        WARN( "desktop is foreground, ignoring ClipCursor\n" );
-        rect = NULL;
-    }
 
     if (rect)
     {
@@ -2627,16 +2616,6 @@ BOOL WINAPI NtUserClipCursor( const RECT *rect )
             HMONITOR monitor = monitor_from_rect( rect, MONITOR_DEFAULTTOPRIMARY, dpi );
             new_rect = map_dpi_rect( *rect, dpi, get_monitor_dpi( monitor ));
             rect = &new_rect;
-        }
-
-        /* keep the mouse clipped inside of a fullscreen foreground window */
-        if (NtUserGetWindowRect( foreground, &full_rect ) && is_window_rect_full_screen( &full_rect ))
-        {
-            full_rect.left = max( full_rect.left, min( full_rect.right - 1, rect->left ) );
-            full_rect.right = max( full_rect.left, min( full_rect.right - 1, rect->right ) );
-            full_rect.top = max( full_rect.top, min( full_rect.bottom - 1, rect->top ) );
-            full_rect.bottom = max( full_rect.top, min( full_rect.bottom - 1, rect->bottom ) );
-            rect = &full_rect;
         }
     }
 
@@ -2657,26 +2636,4 @@ BOOL WINAPI NtUserClipCursor( const RECT *rect )
     SERVER_END_REQ;
 
     return ret;
-}
-
-/*****************************************************************************
- * NtUserGetTouchInputInfo (WIN32U.@)
- */
-BOOL WINAPI NtUserGetTouchInputInfo( HTOUCHINPUT handle, UINT count, TOUCHINPUT *ptr, int size )
-{
-    struct user_thread_info *thread_info = get_user_thread_info();
-    struct touchinput_thread_data *thread_data;
-    UINT index = (ULONG_PTR)handle;
-
-    TRACE( "handle %p, count %u, ptr %p, size %u.\n", handle, count, ptr, size );
-
-    if (!thread_info || !(thread_data = thread_info->touchinput) || size != sizeof(TOUCHINPUT) ||
-        index >= ARRAY_SIZE(thread_data->history))
-    {
-        RtlSetLastWin32Error( ERROR_INVALID_PARAMETER );
-        return FALSE;
-    }
-
-    memcpy( ptr, thread_data->history + index, min( count, ARRAY_SIZE(thread_data->current) ) * size );
-    return TRUE;
 }

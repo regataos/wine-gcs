@@ -256,6 +256,20 @@ typedef enum _SCHEMATYPEVARIETY
 } SCHEMATYPEVARIETY;
 cpp_quote("#endif /* __msxml_som_enums__ */")
 
+typedef [v1_enum] enum _XHR_CRED_PROMPT
+{
+    XHR_CRED_PROMPT_ALL,
+    XHR_CRED_PROMPT_NONE,
+    XHR_CRED_PROMPT_PROXY
+} XHR_CRED_PROMPT;
+
+typedef [v1_enum] enum _XHR_AUTH
+{
+    XHR_AUTH_ALL,
+    XHR_AUTH_NONE,
+    XHR_AUTH_PROXY
+} XHR_AUTH;
+
 typedef [v1_enum] enum _XHR_PROPERTY
 {
     XHR_PROP_NO_CRED_PROMPT,
@@ -1702,17 +1716,6 @@ interface ISAXDeclHandler : IUnknown
 }
 
 [
-    helpstring("Free Threaded XML HTTP Request class 6.0"),
-    progid("Msxml2.FreeThreadedXMLHTTP60.6.0"),
-    threading(both),
-    uuid(88d96a09-f192-11d4-a65f-0040963251e5)
-]
-coclass FreeThreadedXMLHTTP60
-{
-    [default] interface IXMLHTTPRequest2;
-}
-
-[
     object,
     local,
     uuid(e15c1baf-afb3-4d60-8c36-19a8c45defed)
@@ -3038,6 +3041,17 @@ interface ISchemaNotation;
     enum _SCHEMATYPEVARIETY __schemaTypeVarietyEnum__;
     SCHEMATYPEVARIETY __schemaTypeVariety__;
 } __msxml6_ReferenceRemainingTypes__;
+
+[
+    helpstring("Free Threaded XML HTTP Request class 6.0"),
+    progid("Msxml2.FreeThreadedXMLHTTP60.6.0"),
+    threading(both),
+    uuid(88d96a09-f192-11d4-a65f-0040963251e5)
+]
+coclass FreeThreadedXMLHTTP60
+{
+    [default] interface IXMLHTTPRequest2;
+}
 
 [
     helpstring("XML DOM Document 6.0"),

@@ -3,5 +3,5 @@ IMPORTS   = shlwapi shcore
 
 EXTRADLLFLAGS = -mwindows -municode
 
-C_SRCS = \
-        main.c \
+SOURCES = \
+	main.c

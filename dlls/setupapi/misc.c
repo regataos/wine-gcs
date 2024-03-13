@@ -67,7 +67,7 @@ static CRITICAL_SECTION setupapi_cs = { &critsect_debug, -1, 0, 0, 0, 0 };
  */
 VOID WINAPI MyFree(LPVOID lpMem)
 {
-    HeapFree(GetProcessHeap(), 0, lpMem);
+    free(lpMem);
 }
 
 
@@ -85,7 +85,7 @@ VOID WINAPI MyFree(LPVOID lpMem)
  */
 LPVOID WINAPI MyMalloc(DWORD dwSize)
 {
-    return HeapAlloc(GetProcessHeap(), 0, dwSize);
+    return malloc(dwSize);
 }
 
 
@@ -109,10 +109,7 @@ LPVOID WINAPI MyMalloc(DWORD dwSize)
  */
 LPVOID WINAPI MyRealloc(LPVOID lpSrc, DWORD dwSize)
 {
-    if (lpSrc == NULL)
-        return HeapAlloc(GetProcessHeap(), 0, dwSize);
-
-    return HeapReAlloc(GetProcessHeap(), 0, lpSrc, dwSize);
+    return realloc(lpSrc, dwSize);
 }
 
 
@@ -740,7 +737,7 @@ fail:;
 DWORD WINAPI RetreiveFileSecurity(LPCWSTR lpFileName,
                                   PSECURITY_DESCRIPTOR *pSecurityDescriptor)
 {
-    PSECURITY_DESCRIPTOR SecDesc;
+    SECURITY_DESCRIPTOR *SecDesc, *NewSecDesc;
     DWORD dwSize = 0x100;
     DWORD dwError;
 
@@ -763,9 +760,13 @@ DWORD WINAPI RetreiveFileSecurity(LPCWSTR lpFileName,
         return dwError;
     }
 
-    SecDesc = MyRealloc(SecDesc, dwSize);
-    if (SecDesc == NULL)
+    NewSecDesc = MyRealloc(SecDesc, dwSize);
+    if (NewSecDesc == NULL)
+    {
+        MyFree(SecDesc);
         return ERROR_NOT_ENOUGH_MEMORY;
+    }
+    SecDesc = NewSecDesc;
 
     if (GetFileSecurityW(lpFileName, OWNER_SECURITY_INFORMATION |
                          GROUP_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
@@ -868,8 +869,8 @@ BOOL WINAPI SetupCopyOEMInfA( PCSTR source, PCSTR location,
 
 done:
     MyFree( destW );
-    HeapFree( GetProcessHeap(), 0, sourceW );
-    HeapFree( GetProcessHeap(), 0, locationW );
+    free( sourceW );
+    free( locationW );
     if (ret) SetLastError(ERROR_SUCCESS);
     return ret;
 }
@@ -1067,22 +1068,19 @@ BOOL WINAPI SetupCopyOEMInfW( PCWSTR source, PCWSTR location,
     if (!(ret = CopyFileW( source, target, TRUE )))
         return ret;
 
+    wcscpy(pnf_path, target);
+    PathRemoveExtensionW(pnf_path);
+    PathAddExtensionW(pnf_path, L".pnf");
+    if ((pnf_file = _wfopen(pnf_path, L"w")))
+    {
+        fputws(PNF_HEADER, pnf_file);
+        fputws(source, pnf_file);
+        fclose(pnf_file);
+    }
+
 done:
     if (style & SP_COPY_DELETESOURCE)
         DeleteFileW( source );
-
-    if (ret)
-    {
-        wcscpy(pnf_path, target);
-        PathRemoveExtensionW(pnf_path);
-        PathAddExtensionW(pnf_path, L".pnf");
-        if ((pnf_file = _wfopen(pnf_path, L"w")))
-        {
-            fputws(PNF_HEADER, pnf_file);
-            fputws(source, pnf_file);
-            fclose(pnf_file);
-        }
-    }
 
     size = lstrlenW( target ) + 1;
     if (dest)
@@ -1117,7 +1115,7 @@ BOOL WINAPI SetupUninstallOEMInfA( PCSTR inf_file, DWORD flags, PVOID reserved )
 
     if (inf_file && !(inf_fileW = strdupAtoW( inf_file ))) return FALSE;
     ret = SetupUninstallOEMInfW( inf_fileW, flags, reserved );
-    HeapFree( GetProcessHeap(), 0, inf_fileW );
+    free( inf_fileW );
     return ret;
 }
 
@@ -1321,7 +1319,7 @@ BOOL WINAPI SetupGetFileCompressionInfoExA( PCSTR source, PSTR name, DWORD len, 
     if (name)
     {
         ret = SetupGetFileCompressionInfoExW( sourceW, NULL, 0, &nb_chars, NULL, NULL, NULL );
-        if (!(nameW = HeapAlloc( GetProcessHeap(), 0, nb_chars * sizeof(WCHAR) )))
+        if (!(nameW = malloc( nb_chars * sizeof(WCHAR) )))
         {
             MyFree( sourceW );
             return FALSE;
@@ -1342,7 +1340,7 @@ BOOL WINAPI SetupGetFileCompressionInfoExA( PCSTR source, PSTR name, DWORD len, 
         }
     }
     if (required) *required = nb_chars;
-    HeapFree( GetProcessHeap(), 0, nameW );
+    free( nameW );
     MyFree( sourceW );
 
     return ret;
@@ -1772,7 +1770,7 @@ BOOL WINAPI SetupLogErrorW(LPCWSTR message, LogSeverity severity)
     if (message)
     {
         len = WideCharToMultiByte(CP_ACP, 0, message, -1, NULL, 0, NULL, NULL);
-        msg = HeapAlloc(GetProcessHeap(), 0, len);
+        msg = malloc(len);
         if (msg == NULL)
         {
             SetLastError(ERROR_NOT_ENOUGH_MEMORY);
@@ -1786,7 +1784,7 @@ BOOL WINAPI SetupLogErrorW(LPCWSTR message, LogSeverity severity)
      */
     ret = SetupLogErrorA(msg, severity);
 
-    HeapFree(GetProcessHeap(), 0, msg);
+    free(msg);
     return ret;
 }
 

@@ -218,7 +218,6 @@ static DWORD queue_task( struct queue *queue, TASK_CALLBACK task, struct task_he
     if (!callback_running)
     {
         release_object( obj );
-        free( task_hdr );
         ERR( "Submiting threadpool callback failed, err %lu.\n", GetLastError() );
         return ERROR_OUTOFMEMORY;
     }
@@ -256,6 +255,16 @@ static BOOL cancel_queue( struct queue *queue )
         release_task( found );
     }
     return cancelled;
+}
+
+static void task_send_callback( void *ctx, BOOL abort )
+{
+    struct send_callback *s = ctx;
+
+    if (abort) return;
+
+    TRACE( "running %p\n", ctx );
+    send_callback( s->task_hdr.obj, s->status, s->info, s->buflen );
 }
 
 static void free_header( struct header *header )
@@ -735,15 +744,15 @@ static DWORD query_headers( struct request *request, DWORD level, const WCHAR *n
     if (!header || (request_only && !header->is_request)) return ERROR_WINHTTP_HEADER_NOT_FOUND;
     if (level & WINHTTP_QUERY_FLAG_NUMBER)
     {
-        if (!buffer || sizeof(int) > *buflen) ret = ERROR_INSUFFICIENT_BUFFER;
+        if (!buffer || sizeof(DWORD) > *buflen) ret = ERROR_INSUFFICIENT_BUFFER;
         else
         {
-            int *number = buffer;
-            *number = wcstol( header->value, NULL, 10 );
-            TRACE("returning number: %d\n", *number);
+            DWORD *number = buffer;
+            *number = wcstoul( header->value, NULL, 10 );
+            TRACE("returning number: %lu\n", *number);
             ret = ERROR_SUCCESS;
         }
-        *buflen = sizeof(int);
+        *buflen = sizeof(DWORD);
     }
     else if (level & WINHTTP_QUERY_FLAG_SYSTEMTIME)
     {
@@ -2217,8 +2226,10 @@ static DWORD send_request( struct request *request, const WCHAR *headers, DWORD 
     struct connect *connect = request->connect;
     struct session *session = connect->session;
     DWORD ret, len, buflen, content_length;
+    WCHAR encoding[20];
     char *wire_req;
     int bytes_sent;
+    BOOL chunked;
 
     TRACE( "request state %d.\n", request->state );
 
@@ -2246,7 +2257,11 @@ static DWORD send_request( struct request *request, const WCHAR *headers, DWORD 
     if (request->creds[TARGET_SERVER][SCHEME_BASIC].username)
         do_authorization( request, WINHTTP_AUTH_TARGET_SERVER, WINHTTP_AUTH_SCHEME_BASIC );
 
-    if (total_len || (request->verb && (!wcscmp( request->verb, L"POST" ) || !wcscmp( request->verb, L"PUT" ))))
+    buflen = sizeof(encoding);
+    chunked = !query_headers( request, WINHTTP_QUERY_FLAG_REQUEST_HEADERS | WINHTTP_QUERY_TRANSFER_ENCODING,
+                              NULL, encoding, &buflen, NULL ) && !wcsicmp( encoding, L"chunked" );
+    if (!chunked && (total_len || (request->verb && (!wcscmp( request->verb, L"POST" )
+                               || !wcscmp( request->verb, L"PUT" )))))
     {
         WCHAR length[21]; /* decimal long int + null */
         swprintf( length, ARRAY_SIZE(length), L"%ld", total_len );
@@ -2312,7 +2327,7 @@ static DWORD send_request( struct request *request, const WCHAR *headers, DWORD 
                        | WINHTTP_QUERY_FLAG_NUMBER, NULL, &content_length, &buflen, NULL ))
         content_length = total_len;
 
-    if (content_length <= optional_len)
+    if (!chunked && content_length <= optional_len)
     {
         netconn_set_timeout( request->netconn, FALSE, request->receive_response_timeout );
         request->read_reply_status = read_reply( request );
@@ -3047,9 +3062,12 @@ static DWORD query_data_ready( struct request *request )
     return count;
 }
 
-static BOOL skip_async_queue( struct request *request )
+static BOOL skip_async_queue( struct request *request, BOOL *wont_block, DWORD to_read )
 {
-    return request->hdr.recursion_count < 3 && (end_of_read_data( request ) || query_data_ready( request ));
+    if (!request->read_chunked)
+        to_read = min( to_read, request->content_length - request->content_read );
+    *wont_block = end_of_read_data( request ) || query_data_ready( request ) >= to_read;
+    return request->hdr.recursion_count < 3 && *wont_block;
 }
 
 static DWORD query_data_available( struct request *request, DWORD *available, BOOL async )
@@ -3101,6 +3119,7 @@ BOOL WINAPI WinHttpQueryDataAvailable( HINTERNET hrequest, LPDWORD available )
     DWORD ret;
     struct request *request;
     BOOL async;
+    BOOL wont_block = FALSE;
 
     TRACE("%p, %p\n", hrequest, available);
 
@@ -3116,7 +3135,44 @@ BOOL WINAPI WinHttpQueryDataAvailable( HINTERNET hrequest, LPDWORD available )
         return FALSE;
     }
 
-    if ((async = request->connect->hdr.flags & WINHTTP_FLAG_ASYNC) && !skip_async_queue( request ))
+    if (!(async = request->connect->hdr.flags & WINHTTP_FLAG_ASYNC) || skip_async_queue( request, &wont_block, 1 ))
+    {
+        ret = query_data_available( request, available, async );
+    }
+    else if (wont_block)
+    {
+        /* Data available but recursion limit reached, only queue callback. */
+        struct send_callback *s;
+
+        if (!(s = malloc( sizeof(*s) )))
+        {
+            release_object( &request->hdr );
+            SetLastError( ERROR_OUTOFMEMORY );
+            return FALSE;
+        }
+
+        if (!(ret = query_data_available( request, &s->count, FALSE )))
+        {
+            if (available) *available = s->count;
+            s->status = WINHTTP_CALLBACK_STATUS_DATA_AVAILABLE;
+            s->info = &s->count;
+            s->buflen = sizeof(s->count);
+        }
+        else
+        {
+            s->result.dwResult = API_QUERY_DATA_AVAILABLE;
+            s->result.dwError  = ret;
+            s->status = WINHTTP_CALLBACK_STATUS_REQUEST_ERROR;
+            s->info = &s->result;
+            s->buflen = sizeof(s->result);
+        }
+
+        if ((ret = queue_task( &request->queue, task_send_callback, &s->task_hdr, &request->hdr )))
+            free( s );
+        else
+            ret = ERROR_IO_PENDING;
+    }
+    else
     {
         struct query_data *q;
 
@@ -3134,7 +3190,6 @@ BOOL WINAPI WinHttpQueryDataAvailable( HINTERNET hrequest, LPDWORD available )
         else
             ret = ERROR_IO_PENDING;
     }
-    else ret = query_data_available( request, available, async );
 
     release_object( &request->hdr );
     SetLastError( ret );
@@ -3160,6 +3215,7 @@ BOOL WINAPI WinHttpReadData( HINTERNET hrequest, void *buffer, DWORD to_read, DW
     DWORD ret;
     struct request *request;
     BOOL async;
+    BOOL wont_block = FALSE;
 
     TRACE( "%p, %p, %lu, %p\n", hrequest, buffer, to_read, read );
 
@@ -3175,7 +3231,44 @@ BOOL WINAPI WinHttpReadData( HINTERNET hrequest, void *buffer, DWORD to_read, DW
         return FALSE;
     }
 
-    if ((async = request->connect->hdr.flags & WINHTTP_FLAG_ASYNC) && !skip_async_queue( request ))
+    if (!(async = request->connect->hdr.flags & WINHTTP_FLAG_ASYNC) || skip_async_queue( request, &wont_block, to_read ))
+    {
+        ret = read_data( request, buffer, to_read, read, async );
+    }
+    else if (wont_block)
+    {
+        /* Data available but recursion limit reached, only queue callback. */
+        struct send_callback *s;
+
+        if (!(s = malloc( sizeof(*s) )))
+        {
+            release_object( &request->hdr );
+            SetLastError( ERROR_OUTOFMEMORY );
+            return FALSE;
+        }
+
+        if (!(ret = read_data( request, buffer, to_read, &s->count, FALSE )))
+        {
+            if (read) *read = s->count;
+            s->status = WINHTTP_CALLBACK_STATUS_READ_COMPLETE;
+            s->info = buffer;
+            s->buflen = s->count;
+        }
+        else
+        {
+            s->result.dwResult = API_READ_DATA;
+            s->result.dwError  = ret;
+            s->status = WINHTTP_CALLBACK_STATUS_REQUEST_ERROR;
+            s->info = &s->result;
+            s->buflen = sizeof(s->result);
+        }
+
+        if ((ret = queue_task( &request->queue, task_send_callback, &s->task_hdr, &request->hdr )))
+            free( s );
+        else
+            ret = ERROR_IO_PENDING;
+    }
+    else
     {
         struct read_data *r;
 
@@ -3194,7 +3287,6 @@ BOOL WINAPI WinHttpReadData( HINTERNET hrequest, void *buffer, DWORD to_read, DW
         else
             ret = ERROR_IO_PENDING;
     }
-    else ret = read_data( request, buffer, to_read, read, async );
 
     release_object( &request->hdr );
     SetLastError( ret );
@@ -5494,6 +5586,7 @@ static DWORD request_get_codepage( struct winhttp_request *request, UINT *codepa
         if (!(buffer = malloc( size ))) return ERROR_OUTOFMEMORY;
         if (!WinHttpQueryHeaders( request->hrequest, WINHTTP_QUERY_CONTENT_TYPE, NULL, buffer, &size, NULL ))
         {
+            free( buffer );
             return GetLastError();
         }
         if ((p = wcsstr( buffer, L"charset" )))
@@ -6005,7 +6098,7 @@ HRESULT WinHttpRequest_create( void **obj )
     if (!(request = calloc( 1, sizeof(*request) ))) return E_OUTOFMEMORY;
     request->IWinHttpRequest_iface.lpVtbl = &winhttp_request_vtbl;
     request->refs = 1;
-    InitializeCriticalSection( &request->cs );
+    InitializeCriticalSectionEx( &request->cs, 0, RTL_CRITICAL_SECTION_FLAG_FORCE_DEBUG_INFO );
     request->cs.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": winhttp_request.cs");
     initialize_request( request );
 

@@ -95,7 +95,7 @@ IV50_DecompressQuery( LPBITMAPINFO in, LPBITMAPINFO out )
             return ICERR_BADFORMAT;
         }
 
-        if ( out->bmiHeader.biBitCount != 32 && out->bmiHeader.biBitCount != 16 )
+        if ( out->bmiHeader.biBitCount != 32 && out->bmiHeader.biBitCount != 24 && out->bmiHeader.biBitCount != 16 )
         {
             TRACE("incompatible depth requested\n");
             return ICERR_BADFORMAT;
@@ -154,6 +154,8 @@ static LRESULT IV50_DecompressBegin( IMFTransform *decoder, LPBITMAPINFO in, LPB
 
     if ( out->bmiHeader.biBitCount == 32 )
         output_subtype = &MFVideoFormat_RGB32;
+    else if ( out->bmiHeader.biBitCount == 24 )
+        output_subtype = &MFVideoFormat_RGB24;
     else if ( out->bmiHeader.biBitCount == 16 )
         output_subtype = &MFVideoFormat_RGB555;
     else
@@ -250,7 +252,7 @@ static LRESULT IV50_Decompress( IMFTransform *decoder, ICDECOMPRESS *icd, DWORD 
     mft_buf.pSample = out_sample;
 
     hr = IMFTransform_ProcessOutput( decoder, 0, 1, &mft_buf, &mft_status );
-    if ( SUCCEEDED(hr) && (mft_status & MFT_OUTPUT_DATA_BUFFER_FORMAT_CHANGE) )
+    if ( hr == MF_E_TRANSFORM_STREAM_CHANGE )
         hr = IMFTransform_ProcessOutput( decoder, 0, 1, &mft_buf, &mft_status );
 
     if ( SUCCEEDED(hr) )

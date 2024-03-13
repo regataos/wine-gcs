@@ -1,6 +1,6 @@
 PROGRAMS = wineserver
 
-C_SRCS = \
+SOURCES = \
 	async.c \
 	atom.c \
 	change.c \
@@ -32,6 +32,7 @@ C_SRCS = \
 	region.c \
 	registry.c \
 	request.c \
+	scheduler.c \
 	semaphore.c \
 	serial.c \
 	signal.c \
@@ -44,12 +45,10 @@ C_SRCS = \
 	unicode.c \
 	user.c \
 	window.c \
-	winstation.c
-
-MANPAGES = \
 	wineserver.de.UTF-8.man.in \
 	wineserver.fr.UTF-8.man.in \
-	wineserver.man.in
+	wineserver.man.in \
+	winstation.c
 
 UNIX_LIBS = $(LDEXECFLAGS) $(RT_LIBS) $(INOTIFY_LIBS) $(PROCSTAT_LIBS)
 

@@ -23,8 +23,6 @@
 
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
-#define NONAMELESSUNION
-#define NONAMELESSSTRUCT
 #include "windef.h"
 #include "winbase.h"
 #include "winnls.h"
@@ -35,7 +33,6 @@
 #include "kernelbase.h"
 #include "wine/debug.h"
 #include "wine/condrv.h"
-#include "wine/heap.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(process);
 
@@ -191,7 +188,11 @@ static RTL_USER_PROCESS_PARAMETERS *create_process_params( const WCHAR *filename
     }
     RtlFreeUnicodeString( &newdirW );
 
-    if (flags & CREATE_NEW_PROCESS_GROUP) params->ConsoleFlags = 1;
+    if (!(flags & CREATE_NEW_PROCESS_GROUP))
+        params->ProcessGroupId = NtCurrentTeb()->Peb->ProcessParameters->ProcessGroupId;
+    else if (!(flags & CREATE_NEW_CONSOLE))
+        params->ConsoleFlags = 1;
+
     if (flags & CREATE_NEW_CONSOLE) params->ConsoleHandle = CONSOLE_HANDLE_ALLOC;
     else if (!(flags & DETACHED_PROCESS))
     {
@@ -209,18 +210,16 @@ static RTL_USER_PROCESS_PARAMETERS *create_process_params( const WCHAR *filename
         params->hStdOutput = startup->hStdOutput;
         params->hStdError  = startup->hStdError;
     }
-    else if (flags & (DETACHED_PROCESS | CREATE_NEW_CONSOLE))
-    {
-        params->hStdInput  = INVALID_HANDLE_VALUE;
-        params->hStdOutput = INVALID_HANDLE_VALUE;
-        params->hStdError  = INVALID_HANDLE_VALUE;
-    }
-    else
+    else if (!(flags & (DETACHED_PROCESS | CREATE_NEW_CONSOLE)))
     {
         params->hStdInput  = NtCurrentTeb()->Peb->ProcessParameters->hStdInput;
         params->hStdOutput = NtCurrentTeb()->Peb->ProcessParameters->hStdOutput;
         params->hStdError  = NtCurrentTeb()->Peb->ProcessParameters->hStdError;
     }
+
+    if (params->hStdInput  == INVALID_HANDLE_VALUE) params->hStdInput  = NULL;
+    if (params->hStdOutput == INVALID_HANDLE_VALUE) params->hStdOutput = NULL;
+    if (params->hStdError  == INVALID_HANDLE_VALUE) params->hStdError  = NULL;
 
     params->dwX             = startup->dwX;
     params->dwY             = startup->dwY;
@@ -259,13 +258,14 @@ struct _PROC_THREAD_ATTRIBUTE_LIST
 static NTSTATUS create_nt_process( HANDLE token, HANDLE debug, SECURITY_ATTRIBUTES *psa,
                                    SECURITY_ATTRIBUTES *tsa, DWORD process_flags,
                                    RTL_USER_PROCESS_PARAMETERS *params,
-                                   RTL_USER_PROCESS_INFORMATION *info, HANDLE parent,
+                                   RTL_USER_PROCESS_INFORMATION *info,
+                                   HANDLE parent, USHORT machine,
                                    const struct proc_thread_attr *handle_list,
                                    const struct proc_thread_attr *job_list)
 {
     OBJECT_ATTRIBUTES process_attr, thread_attr;
     PS_CREATE_INFO create_info;
-    ULONG_PTR buffer[offsetof( PS_ATTRIBUTE_LIST, Attributes[8] ) / sizeof(ULONG_PTR)];
+    ULONG_PTR buffer[offsetof( PS_ATTRIBUTE_LIST, Attributes[9] ) / sizeof(ULONG_PTR)];
     PS_ATTRIBUTE_LIST *attr = (PS_ATTRIBUTE_LIST *)buffer;
     UNICODE_STRING nameW;
     NTSTATUS status;
@@ -332,6 +332,14 @@ static NTSTATUS create_nt_process( HANDLE token, HANDLE debug, SECURITY_ATTRIBUT
             attr->Attributes[pos].ReturnLength = NULL;
             pos++;
         }
+        if (machine)
+        {
+            attr->Attributes[pos].Attribute    = PS_ATTRIBUTE_MACHINE_TYPE;
+            attr->Attributes[pos].Size         = sizeof(machine);
+            attr->Attributes[pos].Value        = machine;
+            attr->Attributes[pos].ReturnLength = NULL;
+            pos++;
+        }
         attr->TotalLength = offsetof( PS_ATTRIBUTE_LIST, Attributes[pos] );
 
         InitializeObjectAttributes( &process_attr, NULL, 0, NULL, psa ? psa->lpSecurityDescriptor : NULL );
@@ -373,7 +381,7 @@ static NTSTATUS create_vdm_process( HANDLE token, HANDLE debug, SECURITY_ATTRIBU
               winevdm, params->ImagePathName.Buffer, params->CommandLine.Buffer );
     RtlInitUnicodeString( &params->ImagePathName, winevdm );
     RtlInitUnicodeString( &params->CommandLine, newcmdline );
-    status = create_nt_process( token, debug, psa, tsa, flags, params, info, NULL, NULL, NULL );
+    status = create_nt_process( token, debug, psa, tsa, flags, params, info, 0, 0, NULL, NULL );
     HeapFree( GetProcessHeap(), 0, newcmdline );
     return status;
 }
@@ -402,7 +410,7 @@ static NTSTATUS create_cmd_process( HANDLE token, HANDLE debug, SECURITY_ATTRIBU
     swprintf( newcmdline, len, L"%s /s/c \"%s\"", comspec, params->CommandLine.Buffer );
     RtlInitUnicodeString( &params->ImagePathName, comspec );
     RtlInitUnicodeString( &params->CommandLine, newcmdline );
-    status = create_nt_process( token, debug, psa, tsa, flags, params, info, NULL, NULL, NULL );
+    status = create_nt_process( token, debug, psa, tsa, flags, params, info, 0, 0, NULL, NULL );
     RtlFreeHeap( GetProcessHeap(), 0, newcmdline );
     return status;
 }
@@ -544,68 +552,50 @@ static BOOL product_name_matches(const WCHAR *app_name, const char *match)
     return TRUE;
 }
 
-static int battleye_launcher_redirect_hack( const WCHAR *app_name, WCHAR *new_name, DWORD new_name_len,
-                                            WCHAR **orig_app_name )
+static int battleye_launcher_redirect_hack(const WCHAR *app_name, WCHAR *new_name, DWORD new_name_len, WCHAR **cmd_line)
 {
     static const WCHAR belauncherW[] = L"c:\\windows\\system32\\belauncher.exe";
-    unsigned int len;
+    WCHAR *new_cmd_line;
+    WCHAR *p;
 
     /* We detect the BattlEye launcher executable through the product name property, as the executable name varies */
-    if (!product_name_matches( app_name, "BattlEye Launcher" ))
+    if (!product_name_matches(app_name, "BattlEye Launcher"))
         return 0;
 
-    TRACE( "Detected launch of a BattlEye Launcher, redirecting to Proton version.\n" );
+    TRACE("Detected launch of a BattlEye Launcher, redirecting to Proton version.\n");
 
-    if (new_name_len < wcslen( belauncherW ) + 1)
+    if (new_name_len < wcslen(belauncherW) + 1)
     {
-        ERR( "Game executable path doesn't fit in buffer.\n" );
+        WARN("Game executable path doesn't fit in buffer.\n");
         return 0;
     }
 
-    len = (wcslen( app_name ) + 1) * sizeof(*app_name);
-    if (!(*orig_app_name = HeapAlloc( GetProcessHeap(), 0, len )))
+    wcscpy(new_name, belauncherW);
+
+    /* find and replace executable name in command line, and add BE argument */
+    p = *cmd_line;
+    if (p[0] == '\"')
+        p++;
+
+    if (!wcsncmp(p, app_name, wcslen(app_name)))
     {
-        ERR( "No memory.\n" );
-        return 0;
+        new_cmd_line = HeapAlloc( GetProcessHeap(), 0, ( wcslen(*cmd_line) + wcslen(belauncherW) + 1 - wcslen(app_name) ) * sizeof(WCHAR) );
+
+        wcscpy(new_cmd_line, *cmd_line);
+        p = new_cmd_line;
+        if (p[0] == '\"')
+            p++;
+
+        memmove( p + wcslen(belauncherW), p + wcslen(app_name), (wcslen(p) - wcslen(belauncherW)) * sizeof(WCHAR) );
+        memcpy( p, belauncherW, wcslen(belauncherW) * sizeof(WCHAR) );
+
+        TRACE("old command line %s.\n", debugstr_w(*cmd_line));
+        TRACE("new command line %s.\n", debugstr_w(new_cmd_line));
+
+        *cmd_line = new_cmd_line;
     }
-    memcpy( *orig_app_name, app_name, len );
-    wcscpy( new_name, belauncherW );
+
     return 1;
-}
-
-static const WCHAR *hack_append_command_line( const WCHAR *cmd )
-{
-    static const struct
-    {
-        const WCHAR *exe_name;
-        const WCHAR *append;
-    }
-    options[] =
-    {
-        {L"UplayWebCore.exe", L" --use-angle=vulkan"},
-        {L"Paradox Launcher.exe", L" --use-angle=gl"},
-        {L"Montaro\\nw.exe", L" --use-gl=swiftshader"},
-        {L"\\EOSOverlayRenderer-Win64-Shipping.exe", L" --use-gl=swiftshader --in-process-gpu"},
-        {L"\\EpicOnlineServicesUIHelper", L" --use-gl=desktop"},
-        {L"OlympiaRising.exe", L" --use-gl=swiftshader"},
-        {L"nw.exe.exe", L" --use-angle=d3d9"},
-        {L"DC Universe Online\\LaunchPad.exe", L" --use-gl=swiftshader"},
-        {L"PlanetSide 2\\LaunchPad.exe", L" --use-gl=swiftshader"},
-        {L"PaladinLias\\Game.exe", L" --use-gl=desktop"},
-    };
-    unsigned int i;
-
-    if (!cmd) return NULL;
-
-    for (i = 0; i < ARRAY_SIZE(options); ++i)
-    {
-        if (wcsstr( cmd, options[i].exe_name ))
-        {
-            FIXME( "HACK: appending %s to command line.\n", debugstr_w(options[i].append) );
-            return options[i].append;
-        }
-    }
-    return NULL;
 }
 
 /**********************************************************************
@@ -620,12 +610,12 @@ BOOL WINAPI DECLSPEC_HOTPATCH CreateProcessInternalW( HANDLE token, const WCHAR 
 {
     const struct proc_thread_attr *handle_list = NULL, *job_list = NULL;
     WCHAR name[MAX_PATH];
-    WCHAR *p, *tidy_cmdline = cmd_line, *orig_app_name = NULL;
+    WCHAR *p, *tidy_cmdline = cmd_line;
     RTL_USER_PROCESS_PARAMETERS *params = NULL;
     RTL_USER_PROCESS_INFORMATION rtl_info;
     HANDLE parent = 0, debug = 0;
-    const WCHAR *append;
     ULONG nt_flags = 0;
+    USHORT machine = 0;
     NTSTATUS status;
 
     /* Process the AppName and/or CmdLine to get module name and path */
@@ -642,44 +632,20 @@ BOOL WINAPI DECLSPEC_HOTPATCH CreateProcessInternalW( HANDLE token, const WCHAR 
                 return FALSE;
             swprintf( tidy_cmdline, lstrlenW(app_name) + 3, L"\"%s\"", app_name );
         }
-        else if ((append = hack_append_command_line( app_name )))
-        {
-            tidy_cmdline = RtlAllocateHeap( GetProcessHeap(), 0,
-                                            sizeof(WCHAR) * (lstrlenW(cmd_line) + lstrlenW(append) + 1) );
-            lstrcpyW(tidy_cmdline, cmd_line);
-            lstrcatW(tidy_cmdline, append);
-        }
     }
     else
     {
-        WCHAR *cmdline_new = NULL;
-
-        if ((append = hack_append_command_line( cmd_line )))
-        {
-            cmdline_new = RtlAllocateHeap( GetProcessHeap(), 0, sizeof(WCHAR)
-                                           * (lstrlenW(cmd_line) + lstrlenW(append) + 1) );
-            lstrcpyW(cmdline_new, cmd_line);
-            lstrcatW(cmdline_new, append);
-        }
-
-        tidy_cmdline = get_file_name( cmdline_new ? cmdline_new : cmd_line, name, ARRAY_SIZE(name) );
-
-        if (!tidy_cmdline)
-        {
-            HeapFree( GetProcessHeap(), 0, cmdline_new );
-            return FALSE;
-        }
-
-        if (cmdline_new)
-        {
-            if (cmdline_new == tidy_cmdline) cmd_line = NULL;
-            else HeapFree( GetProcessHeap(), 0, cmdline_new );
-        }
+        if (!(tidy_cmdline = get_file_name( cmd_line, name, ARRAY_SIZE(name) ))) return FALSE;
         app_name = name;
     }
 
-    if (battleye_launcher_redirect_hack( app_name, name, ARRAY_SIZE(name), &orig_app_name ))
+    p = tidy_cmdline;
+    if (battleye_launcher_redirect_hack( app_name, name, ARRAY_SIZE(name), &tidy_cmdline ))
+    {
         app_name = name;
+        if (p != tidy_cmdline && p != cmd_line)
+            HeapFree( GetProcessHeap(), 0, p );
+    }
 
     /* Warn if unsupported features are used */
 
@@ -702,7 +668,6 @@ BOOL WINAPI DECLSPEC_HOTPATCH CreateProcessInternalW( HANDLE token, const WCHAR 
 
     if (!(params = create_process_params( app_name, tidy_cmdline, cur_dir, env, flags, startup_info )))
     {
-        HeapFree( GetProcessHeap(), 0, orig_app_name );
         status = STATUS_NO_MEMORY;
         goto done;
     }
@@ -711,25 +676,18 @@ BOOL WINAPI DECLSPEC_HOTPATCH CreateProcessInternalW( HANDLE token, const WCHAR 
       - We don't do this check in ntdll itself because it's harder to get the product name there
       - we don't overwrite WINEDLLOVERRIDES because it's fetched from the unix environment */
     {
-        UNICODE_STRING name, value;
+        UNICODE_STRING is_eac_launcher_us;
+        UNICODE_STRING one_us;
 
         WCHAR *new_env = RtlAllocateHeap( GetProcessHeap(), 0, params->EnvironmentSize );
         memcpy(new_env, params->Environment, params->EnvironmentSize);
 
         RtlDestroyProcessParameters( params );
 
-        RtlInitUnicodeString( &name, L"PROTON_EAC_LAUNCHER_PROCESS" );
-        RtlInitUnicodeString( &value, L"1" );
-        RtlSetEnvironmentVariable( &new_env, &name, product_name_matches(app_name, "EasyAntiCheat Launcher") ? &value : NULL );
+        RtlInitUnicodeString( &is_eac_launcher_us, L"PROTON_EAC_LAUNCHER_PROCESS" );
+        RtlInitUnicodeString( &one_us, L"1" );
+        RtlSetEnvironmentVariable( &new_env, &is_eac_launcher_us, product_name_matches(app_name, "EasyAntiCheat Launcher") ? &one_us : NULL );
 
-        if (orig_app_name)
-        {
-            RtlInitUnicodeString( &name, L"PROTON_ORIG_LAUNCHER_NAME" );
-            RtlInitUnicodeString( &value, orig_app_name );
-            RtlSetEnvironmentVariable( &new_env, &name, &value );
-        }
-
-        HeapFree( GetProcessHeap(), 0, orig_app_name );
         params = create_process_params( app_name, tidy_cmdline, cur_dir, new_env, flags | CREATE_UNICODE_ENVIRONMENT, startup_info );
 
         RtlFreeHeap(GetProcessHeap(), 0, new_env);
@@ -784,6 +742,10 @@ BOOL WINAPI DECLSPEC_HOTPATCH CreateProcessInternalW( HANDLE token, const WCHAR 
                         TRACE( "PROC_THREAD_ATTRIBUTE_JOB_LIST handle count %Iu.\n",
                                attrs->attrs[i].size / sizeof(HANDLE) );
                         break;
+                    case PROC_THREAD_ATTRIBUTE_MACHINE_TYPE:
+                        machine = *(USHORT *)attrs->attrs[i].value;
+                        TRACE( "PROC_THREAD_ATTRIBUTE_MACHINE %x.\n", machine );
+                        break;
                     default:
                         FIXME("Unsupported attribute %#Ix.\n", attrs->attrs[i].attr);
                         break;
@@ -798,7 +760,7 @@ BOOL WINAPI DECLSPEC_HOTPATCH CreateProcessInternalW( HANDLE token, const WCHAR 
     if (flags & CREATE_SUSPENDED) nt_flags |= PROCESS_CREATE_FLAGS_SUSPENDED;
 
     status = create_nt_process( token, debug, process_attr, thread_attr,
-                                nt_flags, params, &rtl_info, parent, handle_list, job_list );
+                                nt_flags, params, &rtl_info, parent, machine, handle_list, job_list );
     switch (status)
     {
     case STATUS_SUCCESS:
@@ -975,15 +937,15 @@ BOOL WINAPI DECLSPEC_HOTPATCH GetExitCodeProcess( HANDLE process, LPDWORD exit_c
  */
 BOOL WINAPI DECLSPEC_HOTPATCH GetHandleInformation( HANDLE handle, DWORD *flags )
 {
-    OBJECT_DATA_INFORMATION info;
+    OBJECT_HANDLE_FLAG_INFORMATION info;
 
-    if (!set_ntstatus( NtQueryObject( handle, ObjectDataInformation, &info, sizeof(info), NULL )))
+    if (!set_ntstatus( NtQueryObject( handle, ObjectHandleFlagInformation, &info, sizeof(info), NULL )))
         return FALSE;
 
     if (flags)
     {
         *flags = 0;
-        if (info.InheritHandle) *flags |= HANDLE_FLAG_INHERIT;
+        if (info.Inherit) *flags |= HANDLE_FLAG_INHERIT;
         if (info.ProtectFromClose) *flags |= HANDLE_FLAG_PROTECT_FROM_CLOSE;
     }
     return TRUE;
@@ -1204,6 +1166,57 @@ BOOL WINAPI DECLSPEC_HOTPATCH IsWow64Process( HANDLE process, PBOOL wow64 )
     return set_ntstatus( status );
 }
 
+/*********************************************************************
+ *           GetProcessInformation   (kernelbase.@)
+ */
+BOOL WINAPI GetProcessInformation( HANDLE process, PROCESS_INFORMATION_CLASS info_class, void *data, DWORD size )
+{
+    switch (info_class)
+    {
+        case ProcessMachineTypeInfo:
+        {
+            PROCESS_MACHINE_INFORMATION *mi = data;
+            SYSTEM_SUPPORTED_PROCESSOR_ARCHITECTURES_INFORMATION machines[8];
+            NTSTATUS status;
+            ULONG i;
+
+            if (size != sizeof(*mi))
+            {
+                SetLastError(ERROR_BAD_LENGTH);
+                return FALSE;
+            }
+
+            status = NtQuerySystemInformationEx( SystemSupportedProcessorArchitectures, &process, sizeof(process),
+                    machines, sizeof(machines), NULL );
+            if (status) return set_ntstatus( status );
+
+            for (i = 0; machines[i].Machine; i++)
+            {
+                if (machines[i].Process)
+                {
+                    mi->ProcessMachine = machines[i].Machine;
+                    mi->Res0 = 0;
+                    mi->MachineAttributes = 0;
+                    if (machines[i].KernelMode)
+                        mi->MachineAttributes |= KernelEnabled;
+                    if (machines[i].UserMode)
+                        mi->MachineAttributes |= UserEnabled;
+                    if (machines[i].WoW64Container)
+                        mi->MachineAttributes |= Wow64Container;
+
+                    return TRUE;
+                }
+            }
+
+            break;
+        }
+        default:
+            FIXME("Unsupported information class %d.\n", info_class);
+    }
+
+    return FALSE;
+}
+
 
 /*********************************************************************
  *           OpenProcess   (kernelbase.@)
@@ -1256,10 +1269,13 @@ BOOL WINAPI DECLSPEC_HOTPATCH ProcessIdToSessionId( DWORD pid, DWORD *id )
  */
 BOOL WINAPI DECLSPEC_HOTPATCH QueryProcessCycleTime( HANDLE process, ULONG64 *cycle )
 {
-    static int once;
-    if (!once++) FIXME( "(%p,%p): stub!\n", process, cycle );
-    SetLastError( ERROR_CALL_NOT_IMPLEMENTED );
-    return FALSE;
+    PROCESS_CYCLE_TIME_INFORMATION time;
+
+    if (!set_ntstatus( NtQueryInformationProcess( process, ProcessCycleTime, &time, sizeof(time), NULL ) ))
+        return FALSE;
+
+    *cycle = time.AccumulatedCycles;
+    return TRUE;
 }
 
 
@@ -1290,21 +1306,21 @@ UINT WINAPI DECLSPEC_HOTPATCH SetHandleCount( UINT count )
  */
 BOOL WINAPI DECLSPEC_HOTPATCH SetHandleInformation( HANDLE handle, DWORD mask, DWORD flags )
 {
-    OBJECT_DATA_INFORMATION info;
+    OBJECT_HANDLE_FLAG_INFORMATION info;
 
     /* if not setting both fields, retrieve current value first */
     if ((mask & (HANDLE_FLAG_INHERIT | HANDLE_FLAG_PROTECT_FROM_CLOSE)) !=
         (HANDLE_FLAG_INHERIT | HANDLE_FLAG_PROTECT_FROM_CLOSE))
     {
-        if (!set_ntstatus( NtQueryObject( handle, ObjectDataInformation, &info, sizeof(info), NULL )))
+        if (!set_ntstatus( NtQueryObject( handle, ObjectHandleFlagInformation, &info, sizeof(info), NULL )))
             return FALSE;
     }
     if (mask & HANDLE_FLAG_INHERIT)
-        info.InheritHandle = (flags & HANDLE_FLAG_INHERIT) != 0;
+        info.Inherit = (flags & HANDLE_FLAG_INHERIT) != 0;
     if (mask & HANDLE_FLAG_PROTECT_FROM_CLOSE)
         info.ProtectFromClose = (flags & HANDLE_FLAG_PROTECT_FROM_CLOSE) != 0;
 
-    return set_ntstatus( NtSetInformationObject( handle, ObjectDataInformation, &info, sizeof(info) ));
+    return set_ntstatus( NtSetInformationObject( handle, ObjectHandleFlagInformation, &info, sizeof(info) ));
 }
 
 
@@ -1417,7 +1433,6 @@ BOOL WINAPI DECLSPEC_HOTPATCH TerminateProcess( HANDLE handle, DWORD exit_code )
  ***********************************************************************/
 
 
-static STARTUPINFOW startup_infoW;
 static char *command_lineA;
 static WCHAR *command_lineW;
 
@@ -1427,25 +1442,6 @@ static WCHAR *command_lineW;
 void init_startup_info( RTL_USER_PROCESS_PARAMETERS *params )
 {
     ANSI_STRING ansi;
-
-    startup_infoW.cb              = sizeof(startup_infoW);
-    startup_infoW.lpReserved      = NULL;
-    startup_infoW.lpDesktop       = params->Desktop.Buffer;
-    startup_infoW.lpTitle         = params->WindowTitle.Buffer;
-    startup_infoW.dwX             = params->dwX;
-    startup_infoW.dwY             = params->dwY;
-    startup_infoW.dwXSize         = params->dwXSize;
-    startup_infoW.dwYSize         = params->dwYSize;
-    startup_infoW.dwXCountChars   = params->dwXCountChars;
-    startup_infoW.dwYCountChars   = params->dwYCountChars;
-    startup_infoW.dwFillAttribute = params->dwFillAttribute;
-    startup_infoW.dwFlags         = params->dwFlags;
-    startup_infoW.wShowWindow     = params->wShowWindow;
-    startup_infoW.cbReserved2     = params->RuntimeInfo.MaximumLength;
-    startup_infoW.lpReserved2     = params->RuntimeInfo.MaximumLength ? (void *)params->RuntimeInfo.Buffer : NULL;
-    startup_infoW.hStdInput       = params->hStdInput ? params->hStdInput : INVALID_HANDLE_VALUE;
-    startup_infoW.hStdOutput      = params->hStdOutput ? params->hStdOutput : INVALID_HANDLE_VALUE;
-    startup_infoW.hStdError       = params->hStdError ? params->hStdError : INVALID_HANDLE_VALUE;
 
     command_lineW = params->CommandLine.Buffer;
     if (!RtlUnicodeStringToAnsiString( &ansi, &params->CommandLine, TRUE )) command_lineA = ansi.Buffer;
@@ -1486,7 +1482,34 @@ LPWSTR WINAPI GetCommandLineW(void)
  */
 void WINAPI DECLSPEC_HOTPATCH GetStartupInfoW( STARTUPINFOW *info )
 {
-    *info = startup_infoW;
+    RTL_USER_PROCESS_PARAMETERS *params;
+
+    RtlAcquirePebLock();
+
+    params = RtlGetCurrentPeb()->ProcessParameters;
+
+    info->cb              = sizeof(*info);
+    info->lpReserved      = NULL;
+    info->lpDesktop       = params->Desktop.Buffer;
+    info->lpTitle         = params->WindowTitle.Buffer;
+    info->dwX             = params->dwX;
+    info->dwY             = params->dwY;
+    info->dwXSize         = params->dwXSize;
+    info->dwYSize         = params->dwYSize;
+    info->dwXCountChars   = params->dwXCountChars;
+    info->dwYCountChars   = params->dwYCountChars;
+    info->dwFillAttribute = params->dwFillAttribute;
+    info->dwFlags         = params->dwFlags;
+    info->wShowWindow     = params->wShowWindow;
+    info->cbReserved2     = params->RuntimeInfo.MaximumLength;
+    info->lpReserved2     = params->RuntimeInfo.MaximumLength ? (void *)params->RuntimeInfo.Buffer : NULL;
+    if (params->dwFlags & STARTF_USESTDHANDLES)
+    {
+        info->hStdInput   = params->hStdInput;
+        info->hStdOutput  = params->hStdOutput;
+        info->hStdError   = params->hStdError;
+    }
+    RtlReleasePebLock();
 }
 
 
@@ -1632,59 +1655,6 @@ LPSTR WINAPI DECLSPEC_HOTPATCH GetEnvironmentStringsA(void)
     return ret;
 }
 
-static void hack_shrink_environment( WCHAR *env, SIZE_T len )
-{
-    static int enabled = -1;
-    static const char *skip[] =
-    {
-        "SteamGenericControllers=",
-        "STEAM_RUNTIME_LIBRARY_PATH=",
-        "SDL_GAMECONTROLLER_IGNORE_DEVICES=",
-        "SDL_GAMECONTROLLERCONFIG=",
-        "LD_LIBRARY_PATH=",
-        "ORIG_LD_LIBRARY_PATH=",
-        "LS_COLORS=",
-        "BASH_FUNC_",
-        "XDG_DATA_DIRS=",
-    };
-    SIZE_T l;
-    unsigned int i, j;
-
-    if (enabled == -1)
-    {
-        WCHAR str[40];
-
-        *str = 0;
-        if (GetEnvironmentVariableW( L"WINE_SHRINK_ENV", str, sizeof(str)) )
-            enabled = *str != '0';
-        else if (GetEnvironmentVariableW( L"SteamGameId", str, sizeof(str)) )
-            enabled = !wcscmp( str, L"431590" );
-        else
-            enabled = 0;
-
-        if (enabled)
-            ERR( "HACK: shrinking environment size.\n" );
-    }
-
-    if (!enabled) return;
-
-    while (*env)
-    {
-        for (i = 0; i < ARRAY_SIZE(skip); ++i)
-        {
-            j = 0;
-            while (skip[i][j] && skip[i][j] == env[j])
-                ++j;
-            if (!skip[i][j]) break;
-        }
-        l = lstrlenW( env );
-        len -= (l + 1) * sizeof(WCHAR);
-        if (i == ARRAY_SIZE(skip))
-            env += l + 1;
-        else
-            memmove( env, env + l + 1, len );
-    }
-}
 
 /***********************************************************************
  *           GetEnvironmentStringsW   (kernelbase.@)
@@ -1697,10 +1667,7 @@ LPWSTR WINAPI DECLSPEC_HOTPATCH GetEnvironmentStringsW(void)
     RtlAcquirePebLock();
     len = get_env_length( NtCurrentTeb()->Peb->ProcessParameters->Environment ) * sizeof(WCHAR);
     if ((ret = HeapAlloc( GetProcessHeap(), 0, len )))
-    {
         memcpy( ret, NtCurrentTeb()->Peb->ProcessParameters->Environment, len );
-        hack_shrink_environment( ret, len );
-    }
     RtlReleasePebLock();
     return ret;
 }
@@ -1888,37 +1855,6 @@ BOOL WINAPI DECLSPEC_HOTPATCH SetEnvironmentVariableW( LPCWSTR name, LPCWSTR val
         return FALSE;
     }
 
-    if (name && !lstrcmpW( name, L"QT_OPENGL" ) && value && !lstrcmpW( value, L"angle" ))
-    {
-        static const WCHAR *names[] =
-        {
-            L"\\EADesktop.exe",
-            L"\\Link2EA.exe",
-            L"\\EAConnect_microsoft.exe",
-            L"\\EALaunchHelper.exe",
-            L"\\EACrashReporter.exe",
-            L"EA Desktop\\ErrorReporter.exe",
-        };
-        unsigned int i, len;
-        WCHAR module[256];
-        DWORD size;
-
-        if ((size = GetModuleFileNameW( NULL, module, ARRAY_SIZE(module) )) && size < ARRAY_SIZE(module))
-        {
-            for (i = 0; i < ARRAY_SIZE(names); ++i)
-            {
-                len = lstrlenW(names[i]);
-                if (size > len && !memcmp( module + size - len, names[i], len * sizeof(*module) ))
-                {
-                    value = L"desktop";
-                    FIXME( "HACK: setting QT_OPENGL=desktop.\n" );
-                    break;
-                }
-            }
-        }
-    }
-
-
     RtlInitUnicodeString( &us_name, name );
     if (value)
     {
@@ -1962,6 +1898,43 @@ BOOL WINAPI DECLSPEC_HOTPATCH InitializeProcThreadAttributeList( struct _PROC_TH
 }
 
 
+static inline DWORD validate_proc_thread_attribute( DWORD_PTR attr, SIZE_T size )
+{
+    switch (attr)
+    {
+    case PROC_THREAD_ATTRIBUTE_PARENT_PROCESS:
+        if (size != sizeof(HANDLE)) return ERROR_BAD_LENGTH;
+        break;
+    case PROC_THREAD_ATTRIBUTE_HANDLE_LIST:
+        if ((size / sizeof(HANDLE)) * sizeof(HANDLE) != size) return ERROR_BAD_LENGTH;
+        break;
+    case PROC_THREAD_ATTRIBUTE_IDEAL_PROCESSOR:
+        if (size != sizeof(PROCESSOR_NUMBER)) return ERROR_BAD_LENGTH;
+        break;
+    case PROC_THREAD_ATTRIBUTE_CHILD_PROCESS_POLICY:
+       if (size != sizeof(DWORD) && size != sizeof(DWORD64)) return ERROR_BAD_LENGTH;
+       break;
+    case PROC_THREAD_ATTRIBUTE_MITIGATION_POLICY:
+        if (size != sizeof(DWORD) && size != sizeof(DWORD64) && size != sizeof(DWORD64) * 2)
+            return ERROR_BAD_LENGTH;
+        break;
+    case PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE:
+       if (size != sizeof(HPCON)) return ERROR_BAD_LENGTH;
+       break;
+    case PROC_THREAD_ATTRIBUTE_JOB_LIST:
+        if ((size / sizeof(HANDLE)) * sizeof(HANDLE) != size) return ERROR_BAD_LENGTH;
+        break;
+    case PROC_THREAD_ATTRIBUTE_MACHINE_TYPE:
+        if (size != sizeof(USHORT)) return ERROR_BAD_LENGTH;
+        break;
+    default:
+        FIXME( "Unhandled attribute %Iu\n", attr & PROC_THREAD_ATTRIBUTE_NUMBER );
+        return ERROR_NOT_SUPPORTED;
+    }
+    return 0;
+}
+
+
 /***********************************************************************
  *           UpdateProcThreadAttribute   (kernelbase.@)
  */
@@ -1969,7 +1942,7 @@ BOOL WINAPI DECLSPEC_HOTPATCH UpdateProcThreadAttribute( struct _PROC_THREAD_ATT
                                                          DWORD flags, DWORD_PTR attr, void *value,
                                                          SIZE_T size, void *prev_ret, SIZE_T *size_ret )
 {
-    DWORD mask;
+    DWORD mask, err;
     struct proc_thread_attr *entry;
 
     TRACE( "(%p %lx %08Ix %p %Id %p %p)\n", list, flags, attr, value, size, prev_ret, size_ret );
@@ -1979,68 +1952,9 @@ BOOL WINAPI DECLSPEC_HOTPATCH UpdateProcThreadAttribute( struct _PROC_THREAD_ATT
         SetLastError( ERROR_GEN_FAILURE );
         return FALSE;
     }
-
-    switch (attr)
+    if ((err = validate_proc_thread_attribute( attr, size )))
     {
-    case PROC_THREAD_ATTRIBUTE_PARENT_PROCESS:
-        if (size != sizeof(HANDLE))
-        {
-            SetLastError( ERROR_BAD_LENGTH );
-            return FALSE;
-        }
-        break;
-
-    case PROC_THREAD_ATTRIBUTE_HANDLE_LIST:
-        if ((size / sizeof(HANDLE)) * sizeof(HANDLE) != size)
-        {
-            SetLastError( ERROR_BAD_LENGTH );
-            return FALSE;
-        }
-        break;
-
-    case PROC_THREAD_ATTRIBUTE_IDEAL_PROCESSOR:
-        if (size != sizeof(PROCESSOR_NUMBER))
-        {
-            SetLastError( ERROR_BAD_LENGTH );
-            return FALSE;
-        }
-        break;
-
-    case PROC_THREAD_ATTRIBUTE_CHILD_PROCESS_POLICY:
-       if (size != sizeof(DWORD) && size != sizeof(DWORD64))
-       {
-           SetLastError( ERROR_BAD_LENGTH );
-           return FALSE;
-       }
-       break;
-
-    case PROC_THREAD_ATTRIBUTE_MITIGATION_POLICY:
-        if (size != sizeof(DWORD) && size != sizeof(DWORD64) && size != sizeof(DWORD64) * 2)
-        {
-            SetLastError( ERROR_BAD_LENGTH );
-            return FALSE;
-        }
-        break;
-
-    case PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE:
-       if (size != sizeof(HPCON))
-       {
-           SetLastError( ERROR_BAD_LENGTH );
-           return FALSE;
-       }
-       break;
-
-    case PROC_THREAD_ATTRIBUTE_JOB_LIST:
-        if ((size / sizeof(HANDLE)) * sizeof(HANDLE) != size)
-        {
-            SetLastError( ERROR_BAD_LENGTH );
-            return FALSE;
-        }
-        break;
-
-    default:
-        SetLastError( ERROR_NOT_SUPPORTED );
-        FIXME( "Unhandled attribute %Iu\n", attr & PROC_THREAD_ATTRIBUTE_NUMBER );
+        SetLastError( err );
         return FALSE;
     }
 

@@ -516,6 +516,12 @@ HKEY reg_open_key( HKEY root, const WCHAR *name, ULONG name_len )
     return ret;
 }
 
+HKEY reg_open_ascii_key( HKEY root, const char *name )
+{
+    WCHAR nameW[MAX_PATH];
+    return reg_open_key( root, nameW, asciiz_to_unicode( nameW, name ) - sizeof(WCHAR) );
+}
+
 /* wrapper for NtCreateKey that creates the key recursively if necessary */
 HKEY reg_create_key( HKEY root, const WCHAR *name, ULONG name_len,
                      DWORD options, DWORD *disposition )
@@ -565,10 +571,17 @@ HKEY reg_create_key( HKEY root, const WCHAR *name, ULONG name_len,
     return ret;
 }
 
+HKEY reg_create_ascii_key( HKEY root, const char *name, DWORD options,
+                           DWORD *disposition )
+{
+    WCHAR nameW[MAX_PATH];
+    return reg_create_key( root, nameW, asciiz_to_unicode( nameW, name ) - sizeof(WCHAR),
+                           options, disposition );
+}
+
 HKEY reg_open_hkcu_key( const char *name )
 {
-    WCHAR nameW[128];
-    return reg_open_key( hkcu_key, nameW, asciiz_to_unicode( nameW, name ) - sizeof(WCHAR) );
+    return reg_open_ascii_key( hkcu_key, name );
 }
 
 BOOL set_reg_value( HKEY hkey, const WCHAR *name, UINT type, const void *value, DWORD count )
@@ -3232,8 +3245,7 @@ static void update_codepage( UINT screen_dpi )
 /*************************************************************
  * font_CreateDC
  */
-static BOOL CDECL font_CreateDC( PHYSDEV *dev, LPCWSTR device, LPCWSTR output,
-                                 const DEVMODEW *devmode )
+static BOOL font_CreateDC( PHYSDEV *dev, LPCWSTR device, LPCWSTR output, const DEVMODEW *devmode )
 {
     struct font_physdev *physdev;
 
@@ -3247,7 +3259,7 @@ static BOOL CDECL font_CreateDC( PHYSDEV *dev, LPCWSTR device, LPCWSTR output,
 /*************************************************************
  * font_DeleteDC
  */
-static BOOL CDECL font_DeleteDC( PHYSDEV dev )
+static BOOL font_DeleteDC( PHYSDEV dev )
 {
     struct font_physdev *physdev = get_font_dev( dev );
 
@@ -3454,7 +3466,7 @@ static BOOL face_matches( const WCHAR *family_name, struct gdi_font_face *face, 
 }
 
 static BOOL enum_face_charsets( const struct gdi_font_family *family, struct gdi_font_face *face,
-                                struct enum_charset *list, DWORD count, FONTENUMPROCW proc, LPARAM lparam,
+                                struct enum_charset *list, DWORD count, font_enum_proc proc, LPARAM lparam,
                                 const WCHAR *subst )
 {
     ENUMLOGFONTEXW elf;
@@ -3518,7 +3530,7 @@ static BOOL enum_face_charsets( const struct gdi_font_family *family, struct gdi
 /*************************************************************
  * font_EnumFonts
  */
-static BOOL CDECL font_EnumFonts( PHYSDEV dev, LOGFONTW *lf, FONTENUMPROCW proc, LPARAM lparam )
+static BOOL font_EnumFonts( PHYSDEV dev, LOGFONTW *lf, font_enum_proc proc, LPARAM lparam )
 {
     struct gdi_font_family *family;
     struct gdi_font_face *face;
@@ -3572,7 +3584,7 @@ static BOOL CDECL font_EnumFonts( PHYSDEV dev, LOGFONTW *lf, FONTENUMPROCW proc,
 
 static BOOL check_unicode_tategaki( WCHAR ch )
 {
-    extern const unsigned short vertical_orientation_table[] DECLSPEC_HIDDEN;
+    extern const unsigned short vertical_orientation_table[];
     unsigned short orientation = vertical_orientation_table[vertical_orientation_table[vertical_orientation_table[ch >> 8]+((ch >> 4) & 0x0f)]+ (ch & 0xf)];
 
     /* We only reach this code if typographical substitution did not occur */
@@ -3883,7 +3895,7 @@ done:
 /*************************************************************
  * font_FontIsLinked
  */
-static BOOL CDECL font_FontIsLinked( PHYSDEV dev )
+static BOOL font_FontIsLinked( PHYSDEV dev )
 {
     struct font_physdev *physdev = get_font_dev( dev );
 
@@ -3899,8 +3911,7 @@ static BOOL CDECL font_FontIsLinked( PHYSDEV dev )
 /*************************************************************
  * font_GetCharABCWidths
  */
-static BOOL CDECL font_GetCharABCWidths( PHYSDEV dev, UINT first, UINT count,
-                                         WCHAR *chars, ABC *buffer )
+static BOOL font_GetCharABCWidths( PHYSDEV dev, UINT first, UINT count, WCHAR *chars, ABC *buffer )
 {
     struct font_physdev *physdev = get_font_dev( dev );
     UINT c, i;
@@ -3927,7 +3938,7 @@ static BOOL CDECL font_GetCharABCWidths( PHYSDEV dev, UINT first, UINT count,
 /*************************************************************
  * font_GetCharABCWidthsI
  */
-static BOOL CDECL font_GetCharABCWidthsI( PHYSDEV dev, UINT first, UINT count, WORD *gi, ABC *buffer )
+static BOOL font_GetCharABCWidthsI( PHYSDEV dev, UINT first, UINT count, WORD *gi, ABC *buffer )
 {
     struct font_physdev *physdev = get_font_dev( dev );
     UINT c;
@@ -3952,8 +3963,7 @@ static BOOL CDECL font_GetCharABCWidthsI( PHYSDEV dev, UINT first, UINT count, W
 /*************************************************************
  * font_GetCharWidth
  */
-static BOOL CDECL font_GetCharWidth( PHYSDEV dev, UINT first, UINT count,
-                                     const WCHAR *chars, INT *buffer )
+static BOOL font_GetCharWidth( PHYSDEV dev, UINT first, UINT count, const WCHAR *chars, INT *buffer )
 {
     struct font_physdev *physdev = get_font_dev( dev );
     UINT c, i;
@@ -3984,7 +3994,7 @@ static BOOL CDECL font_GetCharWidth( PHYSDEV dev, UINT first, UINT count,
 /*************************************************************
  * font_GetCharWidthInfo
  */
-static BOOL CDECL font_GetCharWidthInfo( PHYSDEV dev, void *ptr )
+static BOOL font_GetCharWidthInfo( PHYSDEV dev, void *ptr )
 {
     struct font_physdev *physdev = get_font_dev( dev );
     struct char_width_info *info = ptr;
@@ -4006,7 +4016,7 @@ static BOOL CDECL font_GetCharWidthInfo( PHYSDEV dev, void *ptr )
 /*************************************************************
  * font_GetFontData
  */
-static DWORD CDECL font_GetFontData( PHYSDEV dev, DWORD table, DWORD offset, void *buf, DWORD size )
+static DWORD font_GetFontData( PHYSDEV dev, DWORD table, DWORD offset, void *buf, DWORD size )
 {
     struct font_physdev *physdev = get_font_dev( dev );
 
@@ -4022,7 +4032,7 @@ static DWORD CDECL font_GetFontData( PHYSDEV dev, DWORD table, DWORD offset, voi
 /*************************************************************
  * font_GetFontRealizationInfo
  */
-static BOOL CDECL font_GetFontRealizationInfo( PHYSDEV dev, void *ptr )
+static BOOL font_GetFontRealizationInfo( PHYSDEV dev, void *ptr )
 {
     struct font_physdev *physdev = get_font_dev( dev );
     struct font_realization_info *info = ptr;
@@ -4055,7 +4065,7 @@ static BOOL CDECL font_GetFontRealizationInfo( PHYSDEV dev, void *ptr )
 /*************************************************************
  * font_GetFontUnicodeRanges
  */
-static DWORD CDECL font_GetFontUnicodeRanges( PHYSDEV dev, GLYPHSET *glyphset )
+static DWORD font_GetFontUnicodeRanges( PHYSDEV dev, GLYPHSET *glyphset )
 {
     struct font_physdev *physdev = get_font_dev( dev );
     DWORD size, num_ranges;
@@ -4081,7 +4091,7 @@ static DWORD CDECL font_GetFontUnicodeRanges( PHYSDEV dev, GLYPHSET *glyphset )
 /*************************************************************
  * font_GetGlyphIndices
  */
-static DWORD CDECL font_GetGlyphIndices( PHYSDEV dev, const WCHAR *str, INT count, WORD *gi, DWORD flags )
+static DWORD font_GetGlyphIndices( PHYSDEV dev, const WCHAR *str, INT count, WORD *gi, DWORD flags )
 {
     struct font_physdev *physdev = get_font_dev( dev );
     UINT default_char;
@@ -4138,8 +4148,8 @@ static DWORD CDECL font_GetGlyphIndices( PHYSDEV dev, const WCHAR *str, INT coun
 /*************************************************************
  * font_GetGlyphOutline
  */
-static DWORD CDECL font_GetGlyphOutline( PHYSDEV dev, UINT glyph, UINT format,
-                                         GLYPHMETRICS *gm, DWORD buflen, void *buf, const MAT2 *mat )
+static DWORD font_GetGlyphOutline( PHYSDEV dev, UINT glyph, UINT format,
+                                   GLYPHMETRICS *gm, DWORD buflen, void *buf, const MAT2 *mat )
 {
     struct font_physdev *physdev = get_font_dev( dev );
     DWORD ret;
@@ -4159,7 +4169,7 @@ static DWORD CDECL font_GetGlyphOutline( PHYSDEV dev, UINT glyph, UINT format,
 /*************************************************************
  * font_GetKerningPairs
  */
-static DWORD CDECL font_GetKerningPairs( PHYSDEV dev, DWORD count, KERNINGPAIR *pairs )
+static DWORD font_GetKerningPairs( PHYSDEV dev, DWORD count, KERNINGPAIR *pairs )
 {
     struct font_physdev *physdev = get_font_dev( dev );
 
@@ -4253,7 +4263,7 @@ static void scale_outline_font_metrics( const struct gdi_font *font, OUTLINETEXT
 /*************************************************************
  * font_GetOutlineTextMetrics
  */
-static UINT CDECL font_GetOutlineTextMetrics( PHYSDEV dev, UINT size, OUTLINETEXTMETRICW *metrics )
+static UINT font_GetOutlineTextMetrics( PHYSDEV dev, UINT size, OUTLINETEXTMETRICW *metrics )
 {
     struct font_physdev *physdev = get_font_dev( dev );
     UINT ret = 0;
@@ -4296,7 +4306,7 @@ static UINT CDECL font_GetOutlineTextMetrics( PHYSDEV dev, UINT size, OUTLINETEX
 /*************************************************************
  * font_GetTextCharsetInfo
  */
-static UINT CDECL font_GetTextCharsetInfo( PHYSDEV dev, FONTSIGNATURE *fs, DWORD flags )
+static UINT font_GetTextCharsetInfo( PHYSDEV dev, FONTSIGNATURE *fs, DWORD flags )
 {
     struct font_physdev *physdev = get_font_dev( dev );
 
@@ -4313,7 +4323,7 @@ static UINT CDECL font_GetTextCharsetInfo( PHYSDEV dev, FONTSIGNATURE *fs, DWORD
 /*************************************************************
  * font_GetTextExtentExPoint
  */
-static BOOL CDECL font_GetTextExtentExPoint( PHYSDEV dev, const WCHAR *str, INT count, INT *dxs )
+static BOOL font_GetTextExtentExPoint( PHYSDEV dev, const WCHAR *str, INT count, INT *dxs )
 {
     struct font_physdev *physdev = get_font_dev( dev );
     INT i, pos;
@@ -4342,7 +4352,7 @@ static BOOL CDECL font_GetTextExtentExPoint( PHYSDEV dev, const WCHAR *str, INT 
 /*************************************************************
  * font_GetTextExtentExPointI
  */
-static BOOL CDECL font_GetTextExtentExPointI( PHYSDEV dev, const WORD *indices, INT count, INT *dxs )
+static BOOL font_GetTextExtentExPointI( PHYSDEV dev, const WORD *indices, INT count, INT *dxs )
 {
     struct font_physdev *physdev = get_font_dev( dev );
     INT i, pos;
@@ -4372,7 +4382,7 @@ static BOOL CDECL font_GetTextExtentExPointI( PHYSDEV dev, const WORD *indices, 
 /*************************************************************
  * font_GetTextFace
  */
-static INT CDECL font_GetTextFace( PHYSDEV dev, INT count, WCHAR *str )
+static INT font_GetTextFace( PHYSDEV dev, INT count, WCHAR *str )
 {
     struct font_physdev *physdev = get_font_dev( dev );
     const WCHAR *font_name;
@@ -4442,7 +4452,7 @@ static void scale_font_metrics( struct gdi_font *font, TEXTMETRICW *tm )
 /*************************************************************
  * font_GetTextMetrics
  */
-static BOOL CDECL font_GetTextMetrics( PHYSDEV dev, TEXTMETRICW *metrics )
+static BOOL font_GetTextMetrics( PHYSDEV dev, TEXTMETRICW *metrics )
 {
     struct font_physdev *physdev = get_font_dev( dev );
     BOOL ret = FALSE;
@@ -4599,7 +4609,7 @@ static struct gdi_font *select_font( LOGFONTW *lf, FMAT2 dcmat, BOOL can_use_bit
 /*************************************************************
  * font_SelectFont
  */
-static HFONT CDECL font_SelectFont( PHYSDEV dev, HFONT hfont, UINT *aa_flags )
+static HFONT font_SelectFont( PHYSDEV dev, HFONT hfont, UINT *aa_flags )
 {
     struct font_physdev *physdev = get_font_dev( dev );
     struct gdi_font *font = NULL, *prev = physdev->font;
@@ -4621,6 +4631,9 @@ static HFONT CDECL font_SelectFont( PHYSDEV dev, HFONT hfont, UINT *aa_flags )
             if (!*aa_flags) *aa_flags = GGO_GRAY4_BITMAP;
             break;
         }
+
+        if (lf.lfOutPrecision == OUT_TT_ONLY_PRECIS)
+            can_use_bitmap = FALSE;
 
         lf.lfWidth = abs(lf.lfWidth);
 
@@ -5207,8 +5220,7 @@ struct font_enum
     ULONG charset;
 };
 
-static INT WINAPI font_enum_proc( const LOGFONTW *lf, const TEXTMETRICW *tm,
-                                  DWORD type, LPARAM lp )
+static INT enum_fonts( const LOGFONTW *lf, const TEXTMETRICW *tm, DWORD type, LPARAM lp )
 {
     struct font_enum *fe = (struct font_enum *)lp;
 
@@ -5251,7 +5263,7 @@ BOOL WINAPI NtGdiEnumFonts( HDC hdc, ULONG type, ULONG win32_compat, ULONG face_
     fe.charset = charset;
 
     physdev = GET_DC_PHYSDEV( dc, pEnumFonts );
-    ret = physdev->funcs->pEnumFonts( physdev, &lf, font_enum_proc, (LPARAM)&fe );
+    ret = physdev->funcs->pEnumFonts( physdev, &lf, enum_fonts, (LPARAM)&fe );
     if (ret && buf) ret = fe.count <= fe.size;
     *count = fe.count * sizeof(*fe.buf);
 
@@ -5692,8 +5704,8 @@ static void draw_glyph( DC *dc, INT origin_x, INT origin_y, const GLYPHMETRICS *
 /***********************************************************************
  *           nulldrv_ExtTextOut
  */
-BOOL CDECL nulldrv_ExtTextOut( PHYSDEV dev, INT x, INT y, UINT flags, const RECT *rect,
-                               LPCWSTR str, UINT count, const INT *dx )
+BOOL nulldrv_ExtTextOut( PHYSDEV dev, INT x, INT y, UINT flags, const RECT *rect,
+                         LPCWSTR str, UINT count, const INT *dx )
 {
     DC *dc = get_nulldrv_dc( dev );
     UINT i;
@@ -6244,7 +6256,6 @@ BOOL WINAPI NtGdiGetCharABCWidthsW( HDC hdc, UINT first, UINT last, WCHAR *chars
     PHYSDEV dev;
     unsigned int i, count = last;
     BOOL ret;
-    TEXTMETRICW tm;
 
     if (!dc) return FALSE;
 
@@ -6261,17 +6272,6 @@ BOOL WINAPI NtGdiGetCharABCWidthsW( HDC hdc, UINT first, UINT last, WCHAR *chars
     }
     else
     {
-        if (flags & NTGDI_GETCHARABCWIDTHS_INT)
-        {
-            /* unlike float variant, this one is supposed to fail on non-scalable fonts */
-            dev = GET_DC_PHYSDEV( dc, pGetTextMetrics );
-            if (!dev->funcs->pGetTextMetrics( dev, &tm ) || !(tm.tmPitchAndFamily & TMPF_VECTOR))
-            {
-                release_dc_ptr( dc );
-                return FALSE;
-            }
-        }
-
         if (!chars) count = last - first + 1;
         dev = GET_DC_PHYSDEV( dc, pGetCharABCWidths );
         ret = dev->funcs->pGetCharABCWidths( dev, first, count, chars, buffer );
@@ -6338,7 +6338,8 @@ DWORD WINAPI NtGdiGetGlyphOutline( HDC hdc, UINT ch, UINT format, GLYPHMETRICS *
 /**********************************************************************
  *           __wine_get_file_outline_text_metric    (win32u.@)
  */
-BOOL CDECL __wine_get_file_outline_text_metric( const WCHAR *path, OUTLINETEXTMETRICW *otm )
+BOOL WINAPI __wine_get_file_outline_text_metric( const WCHAR *path, TEXTMETRICW *otm,
+                                                 UINT *em_square, WCHAR *face_name )
 {
     struct gdi_font *font = NULL;
 
@@ -6348,7 +6349,9 @@ BOOL CDECL __wine_get_file_outline_text_metric( const WCHAR *path, OUTLINETEXTME
     font->lf.lfHeight = 100;
     if (!font_funcs->load_font( font )) goto done;
     if (!font_funcs->set_outline_text_metrics( font )) goto done;
-    *otm = font->otm;
+    *otm = font->otm.otmTextMetrics;
+    *em_square = font->otm.otmEMSquare;
+    wcscpy( face_name, (const WCHAR *)font->otm.otmpFamilyName );
     free_gdi_font( font );
     return TRUE;
 
@@ -7006,7 +7009,7 @@ BOOL WINAPI NtGdiGetRasterizerCaps( RASTERIZER_STATUS *status, UINT size )
  *             NtGdiGetFontFileData   (win32u.@)
  */
 BOOL WINAPI NtGdiGetFontFileData( DWORD instance_id, DWORD file_index, UINT64 *offset,
-                                  void *buff, DWORD buff_size )
+                                  void *buff, SIZE_T buff_size )
 {
     struct gdi_font *font;
     DWORD tag = 0, size;
@@ -7083,23 +7086,28 @@ BOOL WINAPI NtGdiGetCharWidthInfo( HDC hdc, struct char_width_info *info )
 /***********************************************************************
  *           DrawTextW    (win32u.so)
  */
-INT WINAPI DECLSPEC_HIDDEN DrawTextW( HDC hdc, const WCHAR *str, INT count, RECT *rect, UINT flags )
+INT WINAPI DrawTextW( HDC hdc, const WCHAR *str, INT count, RECT *rect, UINT flags )
 {
     struct draw_text_params *params;
+    struct draw_text_result *result;
     ULONG ret_len, size;
-    void *ret_ptr;
-    int ret;
+    NTSTATUS status;
+    int ret = 0;
 
     if (count == -1) count = wcslen( str );
     size = FIELD_OFFSET( struct draw_text_params, str[count] );
     if (!(params = malloc( size ))) return 0;
     params->hdc = hdc;
     params->rect = *rect;
-    params->ret_rect = rect;
     params->flags = flags;
     if (count) memcpy( params->str, str, count * sizeof(WCHAR) );
-    ret = KeUserModeCallback( NtUserDrawText, params, size, &ret_ptr, &ret_len );
-    if (ret_len == sizeof(*rect)) *rect = *(const RECT *)ret_ptr;
+
+    status = KeUserModeCallback( NtUserDrawText, params, size, (void **)&result, &ret_len );
+    if (!status && ret_len == sizeof(*result))
+    {
+        ret = result->height;
+        *rect = result->rect;
+    }
     free( params );
     return ret;
 }

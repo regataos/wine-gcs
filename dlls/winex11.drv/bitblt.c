@@ -48,6 +48,7 @@
 
 #include "x11drv.h"
 #include "winternl.h"
+#include "wine/server.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(bitblt);
@@ -754,7 +755,7 @@ void execute_rop( X11DRV_PDEVICE *physdev, Pixmap src_pixmap, GC gc, const RECT 
 /***********************************************************************
  *           X11DRV_PatBlt
  */
-BOOL CDECL X11DRV_PatBlt( PHYSDEV dev, struct bitblt_coords *dst, DWORD rop )
+BOOL X11DRV_PatBlt( PHYSDEV dev, struct bitblt_coords *dst, DWORD rop )
 {
     X11DRV_PDEVICE *physDev = get_x11drv_dev( dev );
     BOOL usePat = (((rop >> 4) & 0x0f0000) != (rop & 0x0f0000));
@@ -806,8 +807,8 @@ BOOL CDECL X11DRV_PatBlt( PHYSDEV dev, struct bitblt_coords *dst, DWORD rop )
 /***********************************************************************
  *           X11DRV_StretchBlt
  */
-BOOL CDECL X11DRV_StretchBlt( PHYSDEV dst_dev, struct bitblt_coords *dst,
-                              PHYSDEV src_dev, struct bitblt_coords *src, DWORD rop )
+BOOL X11DRV_StretchBlt( PHYSDEV dst_dev, struct bitblt_coords *dst,
+                        PHYSDEV src_dev, struct bitblt_coords *src, DWORD rop )
 {
     X11DRV_PDEVICE *physDevDst = get_x11drv_dev( dst_dev );
     X11DRV_PDEVICE *physDevSrc = get_x11drv_dev( src_dev );
@@ -926,12 +927,12 @@ BOOL CDECL X11DRV_StretchBlt( PHYSDEV dst_dev, struct bitblt_coords *dst,
 }
 
 
-static void CDECL free_heap_bits( struct gdi_image_bits *bits )
+static void free_heap_bits( struct gdi_image_bits *bits )
 {
     free( bits->ptr );
 }
 
-static void CDECL free_ximage_bits( struct gdi_image_bits *bits )
+static void free_ximage_bits( struct gdi_image_bits *bits )
 {
     XFree( bits->ptr );
 }
@@ -1220,9 +1221,9 @@ DWORD copy_image_bits( BITMAPINFO *info, BOOL is_r8g8b8, XImage *image,
 /***********************************************************************
  *           X11DRV_PutImage
  */
-DWORD CDECL X11DRV_PutImage( PHYSDEV dev, HRGN clip, BITMAPINFO *info,
-                             const struct gdi_image_bits *bits, struct bitblt_coords *src,
-                             struct bitblt_coords *dst, DWORD rop )
+DWORD X11DRV_PutImage( PHYSDEV dev, HRGN clip, BITMAPINFO *info,
+                       const struct gdi_image_bits *bits, struct bitblt_coords *src,
+                       struct bitblt_coords *dst, DWORD rop )
 {
     X11DRV_PDEVICE *physdev = get_x11drv_dev( dev );
     DWORD ret;
@@ -1312,8 +1313,8 @@ update_format:
 /***********************************************************************
  *           X11DRV_GetImage
  */
-DWORD CDECL X11DRV_GetImage( PHYSDEV dev, BITMAPINFO *info,
-                             struct gdi_image_bits *bits, struct bitblt_coords *src )
+DWORD X11DRV_GetImage( PHYSDEV dev, BITMAPINFO *info,
+                       struct gdi_image_bits *bits, struct bitblt_coords *src )
 {
     X11DRV_PDEVICE *physdev = get_x11drv_dev( dev );
     DWORD ret = ERROR_SUCCESS;
@@ -1497,7 +1498,9 @@ Pixmap create_pixmap_from_image( HDC hdc, const XVisualInfo *vis, const BITMAPIN
         {
             if (src_info->bmiHeader.biBitCount == 1 && !src_info->bmiHeader.biClrUsed)
                 memcpy( src_info->bmiColors, default_colortable, sizeof(default_colortable) );
-            SetDIBits( hdc, dib, 0, abs(info->bmiHeader.biHeight), bits->ptr, src_info, coloruse );
+            NtGdiSetDIBitsToDeviceInternal( hdc, 0, 0, 0, 0, 0, 0, 0,
+                                            abs(info->bmiHeader.biHeight), bits->ptr, src_info, coloruse,
+                                            0, 0, FALSE, dib ); /* SetDIBits */
             dst_bits.free = NULL;
             dst_bits.is_copy = TRUE;
             err = put_pixmap_image( pixmap, vis, dst_info, &dst_bits );
@@ -1625,6 +1628,48 @@ static inline void add_row( HRGN rgn, RGNDATA *data, int x, int y, int len )
 }
 #endif
 
+static void set_layer_region( struct x11drv_window_surface *surface, HRGN hrgn )
+{
+    static const RECT empty_rect;
+    RGNDATA *data;
+    DWORD size;
+    HWND hwnd;
+
+    if (XFindContext( thread_init_display(), surface->window, winContext, (char **)&hwnd ))
+        return;
+
+    if (hrgn)
+    {
+        if (!(size = NtGdiGetRegionData( hrgn, 0, NULL ))) return;
+        if (!(data = malloc( size ))) return;
+        if (!NtGdiGetRegionData( hrgn, size, data ))
+        {
+            free( data );
+            return;
+        }
+        SERVER_START_REQ( set_layer_region )
+        {
+            req->window = wine_server_user_handle( hwnd );
+            if (data->rdh.nCount)
+                wine_server_add_data( req, data->Buffer, data->rdh.nCount * sizeof(RECT) );
+            else
+                wine_server_add_data( req, &empty_rect, sizeof(empty_rect) );
+            wine_server_call( req );
+        }
+        SERVER_END_REQ;
+        free( data );
+    }
+    else  /* clear existing region */
+    {
+        SERVER_START_REQ( set_layer_region )
+        {
+            req->window = wine_server_user_handle( hwnd );
+            wine_server_call( req );
+        }
+        SERVER_END_REQ;
+    }
+}
+
 /***********************************************************************
  *           update_surface_region
  */
@@ -1643,6 +1688,7 @@ static void update_surface_region( struct x11drv_window_surface *surface )
     if (!surface->is_argb && surface->color_key == CLR_INVALID)
     {
         XShapeCombineMask( gdi_display, surface->window, ShapeBounding, 0, 0, None, ShapeSet );
+        set_layer_region( surface, NULL );
         return;
     }
 
@@ -1748,24 +1794,12 @@ static void update_surface_region( struct x11drv_window_surface *surface )
 
     if ((data = X11DRV_GetRegionData( rgn, 0 )))
     {
-        if (!data->rdh.nCount && wm_is_mutter(gdi_display))
-        {
-            XRectangle xrect;
-
-            xrect.x = xrect.y = -1;
-            xrect.width = 1;
-            xrect.height = 1;
-            XShapeCombineRectangles( gdi_display, surface->window, ShapeBounding, 0, 0,
-                                     &xrect, 1, ShapeSet, YXBanded );
-        }
-        else
-        {
-            XShapeCombineRectangles( gdi_display, surface->window, ShapeBounding, 0, 0,
-                                     (XRectangle *)data->Buffer, data->rdh.nCount, ShapeSet, YXBanded );
-        }
+        XShapeCombineRectangles( gdi_display, surface->window, ShapeBounding, 0, 0,
+                                 (XRectangle *)data->Buffer, data->rdh.nCount, ShapeSet, YXBanded );
         free( data );
     }
 
+    set_layer_region( surface, rgn );
     NtGdiDeleteObjectApp( rgn );
 #endif
 }

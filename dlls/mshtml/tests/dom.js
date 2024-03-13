@@ -147,18 +147,9 @@ async_test("iframe_location", function() {
     iframe.onload = function() {
         ok(iframe.contentWindow.location.pathname === "/emptyfile",
            "path = " + iframe.contentWindow.location.pathname);
-        ok(iframe.contentWindow.Image !== undefined, "Image is undefined");
-        ok(iframe.contentWindow.VBArray !== undefined, "VBArray is undefined");
-        iframe.contentWindow.Image = undefined;
-        iframe.contentWindow.VBArray = undefined;
-        iframe.contentWindow.foobar = 1234;
         iframe.onload = function () {
             ok(iframe.contentWindow.location.pathname === "/empty/file",
                "path = " + iframe.contentWindow.location.pathname);
-            ok(iframe.contentWindow.Image !== undefined, "Image is undefined (2)");
-            ok(iframe.contentWindow.VBArray !== undefined, "VBArray is undefined (2)");
-            ok(!Object.prototype.hasOwnProperty.call(iframe.contentWindow, "foobar"),
-               "contentWindow has foobar");
             next_test();
         }
         iframe.src = "empty/file";
@@ -253,9 +244,19 @@ sync_test("query_selector", function() {
         + '</div>'
         + '<script class="class1"></script>';
 
-    var e = document.querySelector("nomatch");
+    var frag = document.createDocumentFragment()
+    var e = document.createElement("div");
+    e.innerHTML = '<div class="class3"></div><a id="class3" class="class4"></a></div>';
+    frag.appendChild(e);
+    var e = document.createElement("script");
+    e.className = "class3";
+    frag.appendChild(e);
+
+    e = document.querySelector("nomatch");
     ok(e === null, "e = " + e);
     e = document.body.querySelector("nomatch");
+    ok(e === null, "e = " + e);
+    e = frag.querySelector("nomatch");
     ok(e === null, "e = " + e);
 
     e = document.querySelector(".class1");
@@ -264,11 +265,39 @@ sync_test("query_selector", function() {
     ok(e.tagName === "DIV", "e.tagName = " + e.tagName);
     ok(e.msMatchesSelector(".class1") === true, "msMatchesSelector returned " + e.msMatchesSelector(".class1"));
     ok(e.msMatchesSelector(".class2") === false, "msMatchesSelector returned " + e.msMatchesSelector(".class2"));
+    e = document.querySelector(".class3");
+    ok(e === null, "e = " + e);
+    e = document.body.querySelector(".class3");
+    ok(e === null, "e = " + e);
+
+    e = frag.querySelector(".class3");
+    ok(e.tagName === "DIV", "e.tagName = " + e.tagName);
+    e = frag.querySelector(".class4");
+    ok(e.tagName === "A", "e.tagName = " + e.tagName);
+    e = frag.querySelector(".class1");
+    ok(e === null, "e = " + e);
+    e = frag.querySelector(".class2");
+    ok(e === null, "e = " + e);
 
     e = document.querySelector("a");
     ok(e.tagName === "A", "e.tagName = " + e.tagName);
     e = document.body.querySelector("a");
     ok(e.tagName === "A", "e.tagName = " + e.tagName);
+    e = frag.querySelector("a");
+    ok(e.tagName === "A", "e.tagName = " + e.tagName);
+
+    e = document.querySelectorAll(".class1");
+    ok(e.length === 3, "e.length = " + e.length);
+    e = document.body.querySelectorAll(".class1");
+    ok(e.length === 3, "e.length = " + e.length);
+    e = document.querySelectorAll(".class2");
+    ok(e.length === 1, "e.length = " + e.length);
+    e = document.body.querySelectorAll(".class2");
+    ok(e.length === 1, "e.length = " + e.length);
+    e = frag.querySelectorAll(".class3");
+    ok(e.length === 2, "e.length = " + e.length);
+    e = frag.querySelectorAll(".class4");
+    ok(e.length === 1, "e.length = " + e.length);
 });
 
 sync_test("compare_position", function() {
@@ -308,6 +337,12 @@ sync_test("rects", function() {
     elem = document.createElement("style");
     rects = elem.getClientRects();
     ok(rects.length === 0, "rect.length = " + rects.length);
+});
+
+sync_test("document_lastModified", function() {
+    // actually it seems to be rounded up from about ~250ms above a sec, but be more conservative with the check
+    var diff = Date.parse(document.lastModified) - performance.timing.navigationStart;
+    ok(diff > -1000 && diff < 1000, "lastModified too far from navigationStart: " + diff);
 });
 
 sync_test("document_owner", function() {
@@ -496,7 +531,6 @@ sync_test("storage", function() {
 
     sessionStorage.setItem("foobar", 42);
     ok("foobar" in sessionStorage, "foobar not in sessionStorage");
-    ok(Object.prototype.hasOwnProperty.call(sessionStorage, "foobar"), "foobar not prop of sessionStorage");
     item = sessionStorage.getItem("foobar");
     ok(item === "42", "'foobar' item = " + item);
     item = sessionStorage["foobar"];
@@ -507,141 +541,10 @@ sync_test("storage", function() {
 
     sessionStorage["barfoo"] = true;
     ok("barfoo" in sessionStorage, "barfoo not in sessionStorage");
-    ok(Object.prototype.hasOwnProperty.call(sessionStorage, "barfoo"), "barfoo not prop of sessionStorage");
     item = sessionStorage["barfoo"];
     ok(item === "true", "[barfoo] item = " + item);
     item = sessionStorage.getItem("barfoo");
     ok(item === "true", "'barfoo' item = " + item);
-
-    Object.defineProperty(sessionStorage, "barfoo", {writable: false, enumerable: false, configurable: false, value: 1234});
-    var desc = Object.getOwnPropertyDescriptor(sessionStorage, "barfoo");
-    ok(desc.value === "1234", "barfoo desc.value = " + desc.value);
-    ok(desc.writable === true, "barfoo desc.writable = " + desc.writable);
-    ok(desc.enumerable === true, "barfoo desc.enumerable = " + desc.enumerable);
-    ok(desc.configurable === true, "barfoo desc.configurable = " + desc.configurable);
-
-    item = sessionStorage.barfoo;
-    ok(item === "1234", "'barfoo' prop after defineProperty = " + item);
-    item = sessionStorage.getItem("barfoo");
-    ok(item === "1234", "'barfoo' item after defineProperty = " + item);
-
-    sessionStorage.barfoo = 4321;
-    item = sessionStorage.barfoo;
-    ok(item === "4321", "'barfoo' prop after re-set = " + item);
-    item = sessionStorage.getItem("barfoo");
-    ok(item === "4321", "'barfoo' item after re-set = " + item);
-
-    ok((delete sessionStorage.barfoo) === true, "delete sessionStorage.barfoo returned false");
-    ok(!("barfoo" in sessionStorage), "barfoo in sessionStorage after defined prop deleted");
-    ok(!Object.prototype.hasOwnProperty.call(sessionStorage, "barfoo"), "barfoo prop of sessionStorage after defined prop deleted");
-    item = sessionStorage.barfoo;
-    ok(item === undefined, "[barfoo] item after second delete = " + item);
-    item = sessionStorage.getItem("barfoo");
-    ok(item === null, "'barfoo' item after second delete = " + item);
-
-    Object.defineProperty(sessionStorage, "winetest", {enumerable: false, configurable: true,
-            get: function() { return 42; }, set: function() { item = 1234; } });
-    desc = Object.getOwnPropertyDescriptor(sessionStorage, "winetest");
-    ok(desc.get() === 42, "winetest desc.get() = " + desc.get());
-    ok(desc.enumerable === false, "winetest desc.enumerable = " + desc.enumerable);
-    ok(desc.configurable === true, "winetest desc.configurable = " + desc.configurable);
-
-    item = sessionStorage.winetest;
-    ok(item === 42, "'winetest' prop = " + item);
-    item = sessionStorage.getItem("winetest");
-    ok(item === null, "'winetest' item = " + item);
-
-    sessionStorage.winetest = 0;
-    ok(item === 1234, "'winetest' item after setter = " + item);
-
-    sessionStorage.setItem("winetest", "test");
-    item = sessionStorage.winetest;
-    ok(item === "test", "'winetest' prop after setItem = " + item);
-    item = sessionStorage.getItem("winetest");
-    ok(item === "test", "'winetest' item after setItem = " + item);
-
-    desc = Object.getOwnPropertyDescriptor(sessionStorage, "winetest");
-    ok(desc.get() === 42, "winetest desc.get() after setItem = " + desc.get());
-    ok(desc.enumerable === false, "winetest desc.enumerable after setItem = " + desc.enumerable);
-    ok(desc.configurable === true, "winetest desc.configurable after setItem = " + desc.configurable);
-
-    item = sessionStorage.winetest;
-    ok(item === "test", "'winetest' prop before second setter = " + item);
-    sessionStorage.winetest = 0;
-    ok(item === 1234, "'winetest' item after second setter = " + item);
-    item = sessionStorage.winetest;
-    ok(item === "test", "'winetest' prop after second setter = " + item);
-
-    sessionStorage.removeItem("winetest");
-    item = sessionStorage.winetest;
-    ok(item === 42, "'winetest' prop after removeItem = " + item);
-    item = sessionStorage.getItem("winetest");
-    ok(item === null, "'winetest' item after removeItem = " + item);
-
-    sessionStorage.setItem("winetest", "wine");
-    item = sessionStorage.winetest;
-    ok(item === "wine", "'winetest' prop after second setItem = " + item);
-    item = sessionStorage.getItem("winetest");
-    ok(item === "wine", "'winetest' item after second setItem = " + item);
-
-    ok((delete sessionStorage.winetest) === true, "delete sessionStorage.winetest returned false");
-    ok("winetest" in sessionStorage, "'winetest' not in sessionStorage after delete");
-    ok(Object.prototype.hasOwnProperty.call(sessionStorage, "winetest"), "'winetest' not prop of sessionStorage after delete");
-    item = sessionStorage.winetest;
-    ok(item === 42, "'winetest' item after delete = " + item);
-    item = sessionStorage.getItem("winetest");
-    ok(item === null, "'winetest' item after delete = " + item);
-
-    ok((delete sessionStorage.winetest) === true, "second delete sessionStorage.winetest returned false");
-    ok("winetest" in sessionStorage, "'winetest' not in sessionStorage after second delete");
-    ok(Object.prototype.hasOwnProperty.call(sessionStorage, "winetest"), "'winetest' not prop of sessionStorage after second delete");
-    item = sessionStorage.winetest;
-    ok(item === 42, "'winetest' item after second delete = " + item);
-    item = sessionStorage.getItem("winetest");
-    ok(item === null, "'winetest' item after second delete = " + item);
-
-    Object.defineProperty(sessionStorage, "nonconf", {enumerable: false, configurable: false,
-            get: function() { return 1; }, set: function() {} });
-    desc = Object.getOwnPropertyDescriptor(sessionStorage, "nonconf");
-    ok(desc.get() === 1, "nonconf desc.get() = " + desc.get());
-    ok(desc.enumerable === false, "nonconf desc.enumerable = " + desc.enumerable);
-    ok(desc.configurable === false, "nonconf desc.configurable = " + desc.configurable);
-
-    sessionStorage.setItem("nonconf", "test");
-    item = sessionStorage.nonconf;
-    ok(item === "test", "'nonconf' prop after setItem = " + item);
-    item = sessionStorage.getItem("nonconf");
-    ok(item === "test", "'nonconf' item after setItem = " + item);
-
-    desc = Object.getOwnPropertyDescriptor(sessionStorage, "nonconf");
-    ok(desc.get() === 1, "nonconf desc.get() after setItem = " + desc.get());
-    ok(desc.enumerable === false, "nonconf desc.enumerable after setItem = " + desc.enumerable);
-    ok(desc.configurable === false, "nonconf desc.configurable after setItem = " + desc.configurable);
-
-    ok((delete sessionStorage.nonconf) === true, "delete sessionStorage.nonconf returned false");
-    ok("nonconf" in sessionStorage, "'nonconf' not in sessionStorage after delete");
-    ok(Object.prototype.hasOwnProperty.call(sessionStorage, "nonconf"), "'nonconf' not prop of sessionStorage after delete");
-    item = sessionStorage.nonconf;
-    ok(item === 1, "'nonconf' item after delete = " + item);
-    item = sessionStorage.getItem("nonconf");
-    ok(item === null, "'nonconf' item after delete = " + item);
-
-    sessionStorage.setItem("protoprop", "1111");
-    item = sessionStorage.protoprop;
-    ok(item === "1111", "'protoprop' = " + item);
-
-    var obj = Object.create(sessionStorage);
-    ok("protoprop" in obj, "'protoprop' not in object with sessionStorage prototype");
-    ok(!Object.prototype.hasOwnProperty.call(obj, "protoprop"), "'protoprop' prop of object with sessionStorage prototype");
-    item = obj.protoprop;
-    ok(item === "1111", "'protoprop' on obj = " + item);
-
-    var name = null;
-    for(name in obj)
-        ok(name === "protoprop", "got " + name + " prop enumerating");
-    ok(name === "protoprop", "protoprop not enumerated");
-
-    sessionStorage.clear();
 });
 
 async_test("animation", function() {
@@ -764,19 +667,31 @@ sync_test("hasAttribute", function() {
 
 sync_test("classList", function() {
     var elem = document.createElement("div");
-    var classList = elem.classList;
+    var classList = elem.classList, i, r;
+
+    var props = [ "add", "contains", "item", "length", "remove", "toggle" ];
+    for(i = 0; i < props.length; i++)
+        ok(props[i] in classList, props[i] + " not found in classList.");
+
+    props = [ "entries", "forEach", "keys", "replace", "supports", "value", "values"];
+    for(i = 0; i < props.length; i++)
+        ok(!(props[i] in classList), props[i] + " found in classList.");
 
     classList.add("a");
     ok(elem.className === "a", "Expected className 'a', got " + elem.className);
+    ok(classList.length === 1, "Expected length 1 for className 'a', got " + classList.length);
 
     classList.add("b");
     ok(elem.className === "a b", "Expected className 'a b', got " + elem.className);
+    ok(classList.length === 2, "Expected length 2 for className 'a b', got " + classList.length);
 
     classList.add("c");
     ok(elem.className === "a b c", "Expected className 'a b c', got " + elem.className);
+    ok(classList.length === 3, "Expected length 3 for className 'a b c', got " + classList.length);
 
     classList.add(4);
     ok(elem.className === "a b c 4", "Expected className 'a b c 4', got " + elem.className);
+    ok(classList.length === 4, "Expected length 4 for className 'a b c 4', got " + classList.length);
 
     classList.add("c");
     ok(elem.className === "a b c 4", "(2) Expected className 'a b c 4', got " + elem.className);
@@ -817,6 +732,56 @@ sync_test("classList", function() {
         exception = true;
     }
     ok(exception, "Expected exception for classList.add(\"e f\")");
+
+    exception = false;
+    try
+    {
+        classList.contains();
+    }
+    catch(e)
+    {
+        exception = true;
+    }
+    ok(exception, "Expected exception for classList.contains()");
+
+    exception = false;
+    try
+    {
+        classList.contains("");
+    }
+    catch(e)
+    {
+        exception = true;
+    }
+    ok(exception, "Expected exception for classList.contains(\"\")");
+
+    exception = false;
+    try
+    {
+        classList.contains("a b");
+    }
+    catch(e)
+    {
+        exception = true;
+    }
+    ok(exception, "Expected exception for classList.contains(\"a b\")");
+
+    ok(classList.contains("4") === true, "contains: expected '4' to return true");
+    ok(classList.contains("b") === true, "contains: expected 'b' to return true");
+    ok(classList.contains("d") === false, "contains: expected 'd' to return false");
+
+    r = classList.item(-1);
+    ok(r === null, "item(-1) = " + r);
+    r = classList.item(0);
+    ok(r === "a", "item(0) = " + r);
+    r = classList.item(1);
+    ok(r === "b", "item(1) = " + r);
+    r = classList.item(2);
+    ok(r === "c", "item(2) = " + r);
+    r = classList.item(3);
+    ok(r === "4", "item(3) = " + r);
+    r = classList.item(4);
+    ok(r === null, "item(4) = " + r);
 
     classList.remove("e");
     ok(elem.className === "a b c 4", "remove: expected className 'a b c 4', got " + elem.className);
@@ -861,9 +826,97 @@ sync_test("classList", function() {
     classList.remove("b");
     ok(elem.className === "", "remove: expected className '', got " + elem.className);
 
+    exception = false;
+    try
+    {
+        classList.toggle();
+    }
+    catch(e)
+    {
+        exception = true;
+    }
+    ok(exception, "Expected exception for classList.toggle()");
+
+    exception = false;
+    try
+    {
+        classList.toggle("");
+    }
+    catch(e)
+    {
+        exception = true;
+    }
+    ok(exception, "Expected exception for classList.toggle(\"\")");
+
+    exception = false;
+    try
+    {
+        classList.toggle("a b");
+    }
+    catch(e)
+    {
+        exception = true;
+    }
+    ok(exception, "Expected exception for classList.toggle(\"a b\")");
+
+    // toggle's second arg is not implemented by IE, and ignored
+    r = classList.toggle("abc");
+    ok(r === true, "toggle('abc') returned " + r);
+    ok(elem.className === "abc", "toggle('abc'): got className " + elem.className);
+
+    r = classList.toggle("def", false);
+    ok(r === true, "toggle('def', false) returned " + r);
+    ok(elem.className === "abc def", "toggle('def', false): got className " + elem.className);
+
+    r = classList.toggle("123", 1234);
+    ok(r === true, "toggle('123', 1234) returned " + r);
+    ok(elem.className === "abc def 123", "toggle('123', 1234): got className " + elem.className);
+
+    r = classList.toggle("def", true);
+    ok(r === false, "toggle('def', true) returned " + r);
+    ok(elem.className === "abc 123", "toggle('def', true): got className " + elem.className);
+
+    r = classList.toggle("123", null);
+    ok(r === false, "toggle('123', null) returned " + r);
+    ok(elem.className === "abc", "toggle('123', null): got className " + elem.className);
+
     elem.className = "  testclass    foobar  ";
+    ok(classList.length === 2, "Expected length 2 for className '  testclass    foobar  ', got " + classList.length);
     ok(("" + classList) === "  testclass    foobar  ", "Expected classList value '  testclass    foobar  ', got " + classList);
     ok(classList.toString() === "  testclass    foobar  ", "Expected classList toString '  testclass    foobar  ', got " + classList.toString());
+
+    r = classList[-1];
+    ok(r === null, "classList[-1] = " + r);
+    r = classList[0];
+    ok(r === "testclass", "classList[0] = " + r);
+    r = classList[1];
+    ok(r === "foobar", "classList[1] = " + r);
+    r = classList[2];
+    ok(r === null, "classList[2] = " + r);
+
+    classList[0] = "barfoo";
+    classList[2] = "added";
+    ok(classList.toString() === "  testclass    foobar  ", "Expected classList toString to not be changed after setting indexed props, got " + classList.toString());
+
+    try
+    {
+        classList[0]();
+        ok(false, "Expected exception calling classList[0]");
+    }
+    catch(e)
+    {
+        ok(e.number === 0xa138a - 0x80000000, "Calling classList[0] threw " + e.number);
+    }
+
+    try
+    {
+        new classList[0]();
+        ok(false, "Expected exception calling classList[0] as constructor");
+    }
+    catch(e)
+    {
+        ok(e.number === 0xa01bd - 0x80000000, "Calling classList[0] as constructor threw " + e.number);
+    }
 });
 
 sync_test("importNode", function() {

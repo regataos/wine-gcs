@@ -28,8 +28,8 @@
 
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
-#define NONAMELESSUNION
 #include "winternl.h"
+#include "ddk/ntddk.h"
 #include "ddk/wdm.h"
 #include "ntdll_misc.h"
 #include "wine/exception.h"
@@ -54,8 +54,6 @@ WINE_DEFAULT_DEBUG_CHANNEL(actctx);
 /* we don't want to include winuser.h */
 #define RT_MANIFEST                        ((ULONG_PTR)24)
 #define CREATEPROCESS_MANIFEST_RESOURCE_ID ((ULONG_PTR)1)
-#define MINIMUM_RESERVED_MANIFEST_RESOURCE_ID ((ULONG_PTR)1)
-#define MAXIMUM_RESERVED_MANIFEST_RESOURCE_ID ((ULONG_PTR)16)
 
 /* from oaidl.h */
 typedef enum tagLIBFLAGS {
@@ -2567,6 +2565,15 @@ static void parse_application_elem( xmlbuf_t *xmlbuf, struct assembly *assembly,
                                     struct actctx_loader *acl, const struct xml_elem *parent )
 {
     struct xml_elem elem;
+    struct xml_attr attr;
+    BOOL end = FALSE;
+
+    while (next_xml_attr(xmlbuf, &attr, &end))
+    {
+        if (!is_xmlns_attr( &attr )) WARN( "unknown attr %s\n", debugstr_xml_attr(&attr) );
+    }
+
+    if (end) return;
 
     while (next_xml_elem( xmlbuf, &elem, parent ))
     {
@@ -2711,11 +2718,14 @@ static void parse_assembly_elem( xmlbuf_t *xmlbuf, struct assembly* assembly,
         }
     }
 
-    if (end || !version)
+    if (!version)
     {
         set_error( xmlbuf );
         return;
     }
+
+    if (end)
+        return;
 
     while (next_xml_elem(xmlbuf, &elem, parent))
     {
@@ -2927,7 +2937,26 @@ static NTSTATUS open_nt_file( HANDLE *handle, UNICODE_STRING *name )
     attr.ObjectName = name;
     attr.SecurityDescriptor = NULL;
     attr.SecurityQualityOfService = NULL;
-    return NtOpenFile( handle, GENERIC_READ | SYNCHRONIZE, &attr, &io, FILE_SHARE_READ, FILE_SYNCHRONOUS_IO_ALERT );
+    return NtOpenFile( handle, GENERIC_READ | SYNCHRONIZE, &attr, &io,
+                       FILE_SHARE_READ | FILE_SHARE_DELETE, FILE_SYNCHRONOUS_IO_ALERT );
+}
+
+static NTSTATUS find_first_manifest_resource_in_module( HANDLE hModule, const WCHAR **resname )
+{
+    static const LDR_RESOURCE_INFO manifest_res_info = { RT_MANIFEST };
+    const IMAGE_RESOURCE_DIRECTORY_ENTRY *entry_base, *entry;
+    const IMAGE_RESOURCE_DIRECTORY *resdir;
+    NTSTATUS status;
+
+    status = LdrFindResourceDirectory_U( hModule, &manifest_res_info, 1, &resdir );
+    if (status != STATUS_SUCCESS) return status;
+
+    if (!resdir->NumberOfIdEntries) return STATUS_RESOURCE_NAME_NOT_FOUND;
+    entry_base = (const IMAGE_RESOURCE_DIRECTORY_ENTRY *)(resdir + 1);
+    entry = entry_base + resdir->NumberOfNamedEntries;
+    *resname = (const WCHAR *)(ULONG_PTR)entry->Id;
+
+    return STATUS_SUCCESS;
 }
 
 static NTSTATUS get_manifest_in_module( struct actctx_loader* acl, struct assembly_identity* ai,
@@ -2952,7 +2981,11 @@ static NTSTATUS get_manifest_in_module( struct actctx_loader* acl, struct assemb
                     hModule, debugstr_w(filename) );
     }
 
-    if (!resname) return STATUS_INVALID_PARAMETER;
+    if (!resname)
+    {
+        status = find_first_manifest_resource_in_module( hModule, &resname );
+        if (status != STATUS_SUCCESS) return status;
+    }
 
     info.Type = RT_MANIFEST;
     info.Language = lang;
@@ -3264,14 +3297,14 @@ static NTSTATUS lookup_winsxs(struct actctx_loader* acl, struct assembly_identit
 
     if (!open_nt_file( &handle, &path_us ))
     {
-        io.u.Status = get_manifest_in_manifest_file(acl, &sxs_ai, path_us.Buffer, file, TRUE, handle);
+        io.Status = get_manifest_in_manifest_file(acl, &sxs_ai, path_us.Buffer, file, TRUE, handle);
         NtClose( handle );
     }
-    else io.u.Status = STATUS_NO_SUCH_FILE;
+    else io.Status = STATUS_NO_SUCH_FILE;
 
     RtlFreeHeap( GetProcessHeap(), 0, file );
     RtlFreeUnicodeString( &path_us );
-    return io.u.Status;
+    return io.Status;
 }
 
 static NTSTATUS lookup_assembly(struct actctx_loader* acl,
@@ -3333,14 +3366,7 @@ static NTSTATUS lookup_assembly(struct actctx_loader* acl,
             status = open_nt_file( &file, &nameW );
             if (!status)
             {
-                INT rid;
-                for (rid = MINIMUM_RESERVED_MANIFEST_RESOURCE_ID;
-                     rid <= MAXIMUM_RESERVED_MANIFEST_RESOURCE_ID; rid++)
-                {
-                    status = get_manifest_in_pe_file( acl, ai, nameW.Buffer, directory, FALSE, file,
-                                                      (LPCWSTR)(ULONG_PTR)rid, 0 );
-                    if (status == STATUS_SUCCESS) break;
-                }
+                status = get_manifest_in_pe_file( acl, ai, nameW.Buffer, directory, FALSE, file, NULL, 0 );
                 NtClose( file );
                 if (status == STATUS_SUCCESS)
                     break;
@@ -3391,6 +3417,16 @@ static NTSTATUS parse_depend_manifests(struct actctx_loader* acl)
     return status;
 }
 
+static HANDLE get_current_actctx_no_addref(void)
+{
+    ACTIVATION_CONTEXT_STACK *actctx_stack = NtCurrentTeb()->ActivationContextStackPointer;
+
+    if (actctx_stack->ActiveFrame)
+        return actctx_stack->ActiveFrame->ActivationContext;
+
+    return NULL;
+}
+
 /* find the appropriate activation context for RtlQueryInformationActivationContext */
 static NTSTATUS find_query_actctx( HANDLE *handle, DWORD flags, ULONG class )
 {
@@ -3400,8 +3436,7 @@ static NTSTATUS find_query_actctx( HANDLE *handle, DWORD flags, ULONG class )
     {
         if (*handle) return STATUS_INVALID_PARAMETER;
 
-        if (NtCurrentTeb()->ActivationContextStack.ActiveFrame)
-            *handle = NtCurrentTeb()->ActivationContextStack.ActiveFrame->ActivationContext;
+        *handle = get_current_actctx_no_addref();
     }
     else if (flags & (QUERY_ACTCTX_FLAG_ACTCTX_IS_ADDRESS|QUERY_ACTCTX_FLAG_ACTCTX_IS_HMODULE))
     {
@@ -3431,7 +3466,8 @@ static NTSTATUS build_dllredirect_section(ACTIVATION_CONTEXT* actctx, struct str
 {
     unsigned int i, j, total_len = 0, dll_count = 0;
     struct strsection_header *header;
-    struct dllredirect_data *data;
+    ACTIVATION_CONTEXT_DATA_DLL_REDIRECTION *data;
+    ACTIVATION_CONTEXT_DATA_DLL_REDIRECTION_PATH_SEGMENT *path;
     struct string_index *index;
     ULONG name_offset;
 
@@ -3446,12 +3482,12 @@ static NTSTATUS build_dllredirect_section(ACTIVATION_CONTEXT* actctx, struct str
             /* each entry needs index, data and string data */
             total_len += sizeof(*index);
             total_len += aligned_string_len((wcslen(dll->name)+1)*sizeof(WCHAR));
+            total_len += sizeof(*data);
             if (dll->load_from)
             {
-                total_len += offsetof( struct dllredirect_data, paths[1] );
+                total_len += sizeof(*path);
                 total_len += aligned_string_len( wcslen(dll->load_from) * sizeof(WCHAR) );
             }
-            else total_len += offsetof( struct dllredirect_data, paths[0] );
         }
 
         dll_count += assembly->num_dlls;
@@ -3489,7 +3525,7 @@ static NTSTATUS build_dllredirect_section(ACTIVATION_CONTEXT* actctx, struct str
             index->name_offset = name_offset;
             index->name_len = str.Length;
             index->data_offset = index->name_offset + aligned_string_len(str.MaximumLength);
-            index->data_len = offsetof( struct dllredirect_data, paths[0] );
+            index->data_len = sizeof(*data);
             index->rosterindex = i + 1;
 
             /* dll name */
@@ -3499,30 +3535,32 @@ static NTSTATUS build_dllredirect_section(ACTIVATION_CONTEXT* actctx, struct str
             name_offset += aligned_string_len(str.MaximumLength);
 
             /* setup data */
-            data = (struct dllredirect_data*)((BYTE*)header + index->data_offset);
+            data = (ACTIVATION_CONTEXT_DATA_DLL_REDIRECTION *)((BYTE *)header + index->data_offset);
             if (dll->load_from)
             {
                 ULONG len = wcslen(dll->load_from) * sizeof(WCHAR);
-                data->size = offsetof( struct dllredirect_data, paths[1] );
-                data->flags = 0;
-                data->total_len = aligned_string_len( len );
-                data->paths_count = 1;
-                data->paths_offset = index->data_offset + offsetof( struct dllredirect_data, paths[0] );
-                data->paths[0].offset = index->data_offset + data->size;
-                data->paths[0].len = len;
-                ptrW = (WCHAR *)((BYTE *)header + data->paths[0].offset);
+                data->Size = sizeof(*data) + sizeof(*path);
+                data->Flags = 0;
+                data->TotalPathLength = aligned_string_len( len );
+                data->PathSegmentCount = 1;
+                data->PathSegmentOffset = index->data_offset + sizeof(*data);
+                path = (ACTIVATION_CONTEXT_DATA_DLL_REDIRECTION_PATH_SEGMENT *)(data + 1);
+                path->Offset = index->data_offset + data->Size;
+                path->Length = len;
+                ptrW = (WCHAR *)((BYTE *)header + path->Offset);
                 memcpy( ptrW, dll->load_from, len );
-                if (wcschr( dll->load_from, '%' )) data->flags |= DLL_REDIRECT_PATH_EXPAND;
+                if (wcschr( dll->load_from, '%' ))
+                    data->Flags |= ACTIVATION_CONTEXT_DATA_DLL_REDIRECTION_PATH_EXPAND;
             }
             else
             {
-                data->size = offsetof( struct dllredirect_data, paths[0] );
-                data->flags = DLL_REDIRECT_PATH_OMITS_ASSEMBLY_ROOT;
-                data->total_len = 0;
-                data->paths_count = 0;
-                data->paths_offset = 0;
+                data->Size = sizeof(*data);
+                data->Flags = ACTIVATION_CONTEXT_DATA_DLL_REDIRECTION_PATH_OMITS_ASSEMBLY_ROOT;
+                data->TotalPathLength = 0;
+                data->PathSegmentCount = 0;
+                data->PathSegmentOffset = 0;
             }
-            name_offset += data->size + data->total_len;
+            name_offset += data->Size + data->TotalPathLength;
 
             index++;
         }
@@ -3582,15 +3620,15 @@ static struct guid_index *find_guid_index(const struct guidsection_header *secti
     return index;
 }
 
-static inline struct dllredirect_data *get_dllredirect_data(ACTIVATION_CONTEXT *ctxt, struct string_index *index)
+static inline ACTIVATION_CONTEXT_DATA_DLL_REDIRECTION *get_dllredirect_data(ACTIVATION_CONTEXT *ctxt, struct string_index *index)
 {
-    return (struct dllredirect_data*)((BYTE*)ctxt->dllredirect_section + index->data_offset);
+    return (ACTIVATION_CONTEXT_DATA_DLL_REDIRECTION *)((BYTE *)ctxt->dllredirect_section + index->data_offset);
 }
 
 static NTSTATUS find_dll_redirection(ACTIVATION_CONTEXT* actctx, const UNICODE_STRING *name,
                                      PACTCTX_SECTION_KEYED_DATA data)
 {
-    struct dllredirect_data *dll;
+    ACTIVATION_CONTEXT_DATA_DLL_REDIRECTION *dll;
     struct string_index *index;
 
     if (!(actctx->sections & DLLREDIRECT_SECTION)) return STATUS_SXS_KEY_NOT_FOUND;
@@ -3615,7 +3653,7 @@ static NTSTATUS find_dll_redirection(ACTIVATION_CONTEXT* actctx, const UNICODE_S
 
         data->ulDataFormatVersion = 1;
         data->lpData = dll;
-        data->ulLength = dll->size;
+        data->ulLength = dll->Size;
         data->lpSectionGlobalData = NULL;
         data->ulSectionGlobalDataLength = 0;
         data->lpSectionBase = actctx->dllredirect_section;
@@ -4826,7 +4864,7 @@ static NTSTATUS build_clr_surrogate_section(ACTIVATION_CONTEXT* actctx, struct g
                     ptrW[data->version_len/sizeof(WCHAR)] = 0;
                 }
 
-                data_offset += index->data_offset;
+                data_offset += index->data_len;
                 index++;
             }
         }
@@ -5226,8 +5264,19 @@ NTSTATUS WINAPI RtlCreateActivationContext( HANDLE *handle, const void *ptr )
 
     TRACE("%p %08lx\n", pActCtx, pActCtx ? pActCtx->dwFlags : 0);
 
-    if (!pActCtx || pActCtx->cbSize < sizeof(*pActCtx) ||
-        (pActCtx->dwFlags & ~ACTCTX_FLAGS_ALL))
+#define CHECK_LIMIT( field ) (pActCtx->cbSize >= RTL_SIZEOF_THROUGH_FIELD( ACTCTXW, field ))
+    if (!pActCtx || (pActCtx->dwFlags & ~ACTCTX_FLAGS_ALL) ||
+        !CHECK_LIMIT( lpSource ) ||
+        ((pActCtx->dwFlags & ACTCTX_FLAG_PROCESSOR_ARCHITECTURE_VALID) && !CHECK_LIMIT( wProcessorArchitecture )) ||
+        ((pActCtx->dwFlags & ACTCTX_FLAG_LANGID_VALID) && !CHECK_LIMIT( wLangId )) ||
+        ((pActCtx->dwFlags & ACTCTX_FLAG_ASSEMBLY_DIRECTORY_VALID) && !CHECK_LIMIT( lpAssemblyDirectory )) ||
+        ((pActCtx->dwFlags & ACTCTX_FLAG_RESOURCE_NAME_VALID) && !CHECK_LIMIT( lpResourceName )) ||
+        ((pActCtx->dwFlags & ACTCTX_FLAG_APPLICATION_NAME_VALID) && !CHECK_LIMIT( lpApplicationName )) ||
+        ((pActCtx->dwFlags & ACTCTX_FLAG_HMODULE_VALID) && !CHECK_LIMIT( hModule )))
+        return STATUS_INVALID_PARAMETER;
+#undef CHECK_LIMIT
+
+    if ((pActCtx->dwFlags & ACTCTX_FLAG_RESOURCE_NAME_VALID) && !pActCtx->lpResourceName)
         return STATUS_INVALID_PARAMETER;
 
     if (!(actctx = RtlAllocateHeap( GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*actctx) )))
@@ -5395,15 +5444,14 @@ NTSTATUS WINAPI RtlActivateActivationContext( ULONG unknown, HANDLE handle, PULO
  */
 NTSTATUS WINAPI RtlActivateActivationContextEx( ULONG flags, TEB *teb, HANDLE handle, ULONG_PTR *cookie )
 {
+    ACTIVATION_CONTEXT_STACK *actctx_stack = teb->ActivationContextStackPointer;
     RTL_ACTIVATION_CONTEXT_STACK_FRAME *frame;
 
-    if (!(frame = RtlAllocateHeap( GetProcessHeap(), 0, sizeof(*frame) )))
-        return STATUS_NO_MEMORY;
-
-    frame->Previous = teb->ActivationContextStack.ActiveFrame;
+    frame = RtlAllocateHeap( GetProcessHeap(), HEAP_GENERATE_EXCEPTIONS, sizeof(*frame) );
+    frame->Previous = actctx_stack->ActiveFrame;
     frame->ActivationContext = handle;
     frame->Flags = 0;
-    teb->ActivationContextStack.ActiveFrame = frame;
+    actctx_stack->ActiveFrame = frame;
     RtlAddRefActivationContext( handle );
 
     *cookie = (ULONG_PTR)frame;
@@ -5417,12 +5465,13 @@ NTSTATUS WINAPI RtlActivateActivationContextEx( ULONG flags, TEB *teb, HANDLE ha
  */
 void WINAPI RtlDeactivateActivationContext( ULONG flags, ULONG_PTR cookie )
 {
+    ACTIVATION_CONTEXT_STACK *actctx_stack = NtCurrentTeb()->ActivationContextStackPointer;
     RTL_ACTIVATION_CONTEXT_STACK_FRAME *frame, *top;
 
     TRACE( "%lx cookie=%Ix\n", flags, cookie );
 
     /* find the right frame */
-    top = NtCurrentTeb()->ActivationContextStack.ActiveFrame;
+    top = actctx_stack->ActiveFrame;
     for (frame = top; frame; frame = frame->Previous)
         if ((ULONG_PTR)frame == cookie) break;
 
@@ -5433,9 +5482,9 @@ void WINAPI RtlDeactivateActivationContext( ULONG flags, ULONG_PTR cookie )
         RtlRaiseStatus( STATUS_SXS_EARLY_DEACTIVATION );
 
     /* pop everything up to and including frame */
-    NtCurrentTeb()->ActivationContextStack.ActiveFrame = frame->Previous;
+    actctx_stack->ActiveFrame = frame->Previous;
 
-    while (top != NtCurrentTeb()->ActivationContextStack.ActiveFrame)
+    while (top != actctx_stack->ActiveFrame)
     {
         frame = top->Previous;
         RtlReleaseActivationContext( top->ActivationContext );
@@ -5450,9 +5499,18 @@ void WINAPI RtlDeactivateActivationContext( ULONG flags, ULONG_PTR cookie )
  */
 void WINAPI RtlFreeThreadActivationContextStack(void)
 {
+    RtlFreeActivationContextStack( NtCurrentTeb()->ActivationContextStackPointer );
+}
+
+
+/******************************************************************
+ *		RtlFreeActivationContextStack (NTDLL.@)
+ */
+void WINAPI RtlFreeActivationContextStack( ACTIVATION_CONTEXT_STACK *actctx_stack )
+{
     RTL_ACTIVATION_CONTEXT_STACK_FRAME *frame;
 
-    frame = NtCurrentTeb()->ActivationContextStack.ActiveFrame;
+    frame = actctx_stack->ActiveFrame;
     while (frame)
     {
         RTL_ACTIVATION_CONTEXT_STACK_FRAME *prev = frame->Previous;
@@ -5460,7 +5518,7 @@ void WINAPI RtlFreeThreadActivationContextStack(void)
         RtlFreeHeap( GetProcessHeap(), 0, frame );
         frame = prev;
     }
-    NtCurrentTeb()->ActivationContextStack.ActiveFrame = NULL;
+    actctx_stack->ActiveFrame = NULL;
 }
 
 
@@ -5469,14 +5527,7 @@ void WINAPI RtlFreeThreadActivationContextStack(void)
  */
 NTSTATUS WINAPI RtlGetActiveActivationContext( HANDLE *handle )
 {
-    if (NtCurrentTeb()->ActivationContextStack.ActiveFrame)
-    {
-        *handle = NtCurrentTeb()->ActivationContextStack.ActiveFrame->ActivationContext;
-        RtlAddRefActivationContext( *handle );
-    }
-    else
-        *handle = 0;
-
+    RtlAddRefActivationContext( *handle = get_current_actctx_no_addref() );
     return STATUS_SUCCESS;
 }
 
@@ -5486,9 +5537,10 @@ NTSTATUS WINAPI RtlGetActiveActivationContext( HANDLE *handle )
  */
 BOOLEAN WINAPI RtlIsActivationContextActive( HANDLE handle )
 {
+    ACTIVATION_CONTEXT_STACK *actctx_stack = NtCurrentTeb()->ActivationContextStackPointer;
     RTL_ACTIVATION_CONTEXT_STACK_FRAME *frame;
 
-    for (frame = NtCurrentTeb()->ActivationContextStack.ActiveFrame; frame; frame = frame->Previous)
+    for (frame = actctx_stack->ActiveFrame; frame; frame = frame->Previous)
         if (frame->ActivationContext == handle) return TRUE;
     return FALSE;
 }
@@ -5761,6 +5813,7 @@ NTSTATUS WINAPI RtlFindActivationContextSectionString( ULONG flags, const GUID *
 {
     PACTCTX_SECTION_KEYED_DATA data = ptr;
     NTSTATUS status = STATUS_SXS_KEY_NOT_FOUND;
+    ACTIVATION_CONTEXT *actctx;
 
     TRACE("%08lx %s %lu %s %p\n", flags, debugstr_guid(guid), section_kind,
           debugstr_us(section_name), data);
@@ -5782,11 +5835,8 @@ NTSTATUS WINAPI RtlFindActivationContextSectionString( ULONG flags, const GUID *
         return STATUS_INVALID_PARAMETER;
     }
 
-    if (NtCurrentTeb()->ActivationContextStack.ActiveFrame)
-    {
-        ACTIVATION_CONTEXT *actctx = check_actctx(NtCurrentTeb()->ActivationContextStack.ActiveFrame->ActivationContext);
-        if (actctx) status = find_string( actctx, section_kind, section_name, flags, data );
-    }
+    actctx = check_actctx( get_current_actctx_no_addref() );
+    if (actctx) status = find_string( actctx, section_kind, section_name, flags, data );
 
     if (status != STATUS_SUCCESS)
         status = find_string( process_actctx, section_kind, section_name, flags, data );
@@ -5805,6 +5855,7 @@ NTSTATUS WINAPI RtlFindActivationContextSectionGuid( ULONG flags, const GUID *ex
 {
     ACTCTX_SECTION_KEYED_DATA *data = ptr;
     NTSTATUS status = STATUS_SXS_KEY_NOT_FOUND;
+    ACTIVATION_CONTEXT *actctx;
 
     TRACE("%08lx %s %lu %s %p\n", flags, debugstr_guid(extguid), section_kind, debugstr_guid(guid), data);
 
@@ -5823,11 +5874,8 @@ NTSTATUS WINAPI RtlFindActivationContextSectionGuid( ULONG flags, const GUID *ex
     if (!data || data->cbSize < FIELD_OFFSET(ACTCTX_SECTION_KEYED_DATA, ulAssemblyRosterIndex) || !guid)
         return STATUS_INVALID_PARAMETER;
 
-    if (NtCurrentTeb()->ActivationContextStack.ActiveFrame)
-    {
-        ACTIVATION_CONTEXT *actctx = check_actctx(NtCurrentTeb()->ActivationContextStack.ActiveFrame->ActivationContext);
-        if (actctx) status = find_guid( actctx, section_kind, guid, flags, data );
-    }
+    actctx = check_actctx( get_current_actctx_no_addref() );
+    if (actctx) status = find_guid( actctx, section_kind, guid, flags, data );
 
     if (status != STATUS_SUCCESS)
         status = find_guid( process_actctx, section_kind, guid, flags, data );

@@ -31,6 +31,9 @@
 #include "wcmd.h"
 #include <shellapi.h>
 #include "wine/debug.h"
+#include "winternl.h"
+#include "winioctl.h"
+#include "ddk/ntifs.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(cmd);
 
@@ -1631,6 +1634,19 @@ static void WCMD_part_execute(CMD_LIST **cmdList, const WCHAR *firstcmd,
   return;
 }
 
+static BOOL option_equals(WCHAR **haystack, const WCHAR *needle)
+{
+  int len = wcslen(needle);
+
+  if (CompareStringW(LOCALE_USER_DEFAULT, NORM_IGNORECASE | SORT_STRINGSORT,
+                     *haystack, len, needle, len) == CSTR_EQUAL) {
+    *haystack += len;
+    return TRUE;
+  }
+
+  return FALSE;
+}
+
 /*****************************************************************************
  * WCMD_parse_forf_options
  *
@@ -1653,11 +1669,6 @@ static BOOL WCMD_parse_forf_options(WCHAR *options, WCHAR *eol, int *skip,
 
   WCHAR *pos = options;
   int    len = lstrlenW(pos);
-  const int eol_len = lstrlenW(L"eol=");
-  const int skip_len = lstrlenW(L"skip=");
-  const int tokens_len = lstrlenW(L"tokens=");
-  const int delims_len = lstrlenW(L"delims=");
-  const int usebackq_len = lstrlenW(L"usebackq");
 
   /* Initialize to defaults */
   lstrcpyW(delims, L" \t");
@@ -1678,36 +1689,28 @@ static BOOL WCMD_parse_forf_options(WCHAR *options, WCHAR *eol, int *skip,
       pos++;
 
     /* Save End of line character (Ignore line if first token (based on delims) starts with it) */
-    } else if (CompareStringW(LOCALE_USER_DEFAULT, NORM_IGNORECASE | SORT_STRINGSORT,
-                       pos, eol_len, L"eol=", eol_len) == CSTR_EQUAL) {
-      *eol = *(pos + eol_len);
-      pos = pos + eol_len + 1;
+    } else if (option_equals(&pos, L"eol=")) {
+      *eol = *pos++;
       WINE_TRACE("Found eol as %c(%x)\n", *eol, *eol);
 
     /* Save number of lines to skip (Can be in base 10, hex (0x...) or octal (0xx) */
-    } else if (CompareStringW(LOCALE_USER_DEFAULT, NORM_IGNORECASE | SORT_STRINGSORT,
-                       pos, skip_len, L"skip=", skip_len) == CSTR_EQUAL) {
+    } else if (option_equals(&pos, L"skip=")) {
       WCHAR *nextchar = NULL;
-      pos = pos + skip_len;
       *skip = wcstoul(pos, &nextchar, 0);
       WINE_TRACE("Found skip as %d lines\n", *skip);
       pos = nextchar;
 
     /* Save if usebackq semantics are in effect */
-    } else if (CompareStringW(LOCALE_USER_DEFAULT, NORM_IGNORECASE | SORT_STRINGSORT, pos,
-                       usebackq_len, L"usebackq", usebackq_len) == CSTR_EQUAL) {
+    } else if (option_equals(&pos, L"usebackq")) {
       *usebackq = TRUE;
-      pos = pos + usebackq_len;
       WINE_TRACE("Found usebackq\n");
 
     /* Save the supplied delims. Slightly odd as space can be a delimiter but only
        if you finish the optionsroot string with delims= otherwise the space is
        just a token delimiter!                                                     */
-    } else if (CompareStringW(LOCALE_USER_DEFAULT, NORM_IGNORECASE | SORT_STRINGSORT,
-                       pos, delims_len, L"delims=", delims_len) == CSTR_EQUAL) {
+    } else if (option_equals(&pos, L"delims=")) {
       int i=0;
 
-      pos = pos + delims_len;
       while (*pos && *pos != ' ') {
         delims[i++] = *pos;
         pos++;
@@ -1717,11 +1720,9 @@ static BOOL WCMD_parse_forf_options(WCHAR *options, WCHAR *eol, int *skip,
       WINE_TRACE("Found delims as '%s'\n", wine_dbgstr_w(delims));
 
     /* Save the tokens being requested */
-    } else if (CompareStringW(LOCALE_USER_DEFAULT, NORM_IGNORECASE | SORT_STRINGSORT,
-                       pos, tokens_len, L"tokens=", tokens_len) == CSTR_EQUAL) {
+    } else if (option_equals(&pos, L"tokens=")) {
       int i=0;
 
-      pos = pos + tokens_len;
       while (*pos && *pos != ' ') {
         tokens[i++] = *pos;
         pos++;
@@ -2843,13 +2844,16 @@ int evaluate_if_condition(WCHAR *p, WCHAR **command, int *test, int *negate)
     WCHAR *param = WCMD_parameter(p, 1+(*negate), NULL, FALSE, FALSE);
     int    len = lstrlenW(param);
 
-    if (!len) goto syntax_err;
-    /* FindFirstFile does not like a directory path ending in '\', append a '.' */
-    if (param[len-1] == '\\') lstrcatW(param, L".");
+    if (!len) {
+        *test = FALSE;
+    } else {
+        /* FindFirstFile does not like a directory path ending in '\' or '/', so append a '.' */
+        if (param[len-1] == '\\' || param[len-1] == '/') wcscat(param, L".");
 
-    hff = FindFirstFileW(param, &fd);
-    *test = (hff != INVALID_HANDLE_VALUE );
-    if (*test) FindClose(hff);
+        hff = FindFirstFileW(param, &fd);
+        *test = (hff != INVALID_HANDLE_VALUE);
+        if (*test) FindClose(hff);
+    }
 
     WCMD_parameter(p, 2+(*negate), command, FALSE, FALSE);
   }
@@ -3498,7 +3502,7 @@ void WCMD_setshow_default (const WCHAR *args) {
       /* Restore old directory if drive letter would change, and
            CD x:\directory /D (or pushd c:\directory) not supplied */
       if ((wcsstr(quals, L"/D") == NULL) &&
-          (param1[1] == ':') && (toupper(param1[0]) != toupper(cwd[0]))) {
+          (param1[1] == ':') && (towupper(param1[0]) != towupper(cwd[0]))) {
         SetCurrentDirectoryW(cwd);
       }
     }
@@ -5002,6 +5006,49 @@ void WCMD_color (void) {
   }
 }
 
+BOOL WCMD_create_junction(WCHAR *link, WCHAR *target) {
+    static INT struct_size = offsetof(REPARSE_DATA_BUFFER, SymbolicLinkReparseBuffer.PathBuffer[0]);
+    static INT header_size = offsetof(REPARSE_DATA_BUFFER, GenericReparseBuffer);
+    INT buffer_size, data_size, string_len, prefix_len;
+    WCHAR *subst_dest, *print_dest, *string;
+    REPARSE_DATA_BUFFER *buffer;
+    UNICODE_STRING nt_name;
+    NTSTATUS status;
+    HANDLE hlink;
+    DWORD dwret;
+    BOOL ret;
+
+    if (!CreateDirectoryW(link, NULL ))
+        return FALSE;
+    hlink = CreateFileW(link, GENERIC_READ | GENERIC_WRITE, 0, 0, OPEN_EXISTING,
+                        FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, 0);
+    if (hlink == INVALID_HANDLE_VALUE)
+        return FALSE;
+    status = RtlDosPathNameToNtPathName_U_WithStatus(target, &nt_name, NULL, NULL);
+    if (status)
+        return FALSE;
+    prefix_len = strlen("\\??\\");
+    string = nt_name.Buffer;
+    string_len = lstrlenW( &string[prefix_len] );
+    data_size = (prefix_len + 2 * string_len + 2) * sizeof(WCHAR);
+    buffer_size = struct_size + data_size;
+    buffer = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, buffer_size );
+    buffer->ReparseTag = IO_REPARSE_TAG_MOUNT_POINT;
+    buffer->ReparseDataLength = struct_size - header_size + data_size;
+    buffer->MountPointReparseBuffer.SubstituteNameLength = (prefix_len + string_len) * sizeof(WCHAR);
+    buffer->MountPointReparseBuffer.PrintNameOffset = (prefix_len + string_len + 1) * sizeof(WCHAR);
+    buffer->MountPointReparseBuffer.PrintNameLength = string_len * sizeof(WCHAR);
+    subst_dest = &buffer->MountPointReparseBuffer.PathBuffer[0];
+    print_dest = &buffer->MountPointReparseBuffer.PathBuffer[prefix_len + string_len + 1];
+    lstrcpyW(subst_dest, string);
+    lstrcpyW(print_dest, &string[prefix_len]);
+    RtlFreeUnicodeString(&nt_name );
+    ret = DeviceIoControl(hlink, FSCTL_SET_REPARSE_POINT, (LPVOID)buffer, buffer_size, NULL, 0,
+                          &dwret, 0 );
+    HeapFree(GetProcessHeap(), 0, buffer);
+    return ret;
+}
+
 /****************************************************************************
  * WCMD_mklink
  */
@@ -5050,7 +5097,7 @@ void WCMD_mklink(WCHAR *args)
     else if(!junction)
         ret = CreateSymbolicLinkW(file1, file2, isdir);
     else
-        WINE_TRACE("Juction links currently not supported.\n");
+        ret = WCMD_create_junction(file1, file2);
 
     if(!ret)
         WCMD_output_stderr(WCMD_LoadMessage(WCMD_READFAIL), file1);

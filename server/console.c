@@ -610,10 +610,13 @@ static void disconnect_console_server( struct console_server *server )
         list_remove( &call->entry );
         console_host_ioctl_terminate( call, STATUS_CANCELLED );
     }
+
     if (do_fsync())
-        fsync_clear( &server->obj );
+        fsync_clear_futex( server->fsync_idx );
+
     if (do_esync())
         esync_clear( server->esync_fd );
+
     while (!list_empty( &server->read_queue ))
     {
         struct console_host_ioctl *call = LIST_ENTRY( list_head( &server->read_queue ), struct console_host_ioctl, entry );
@@ -718,14 +721,16 @@ static void propagate_console_signal( struct console *console,
         set_error( STATUS_INVALID_PARAMETER );
         return;
     }
-    /* FIXME: should support the other events (like CTRL_BREAK) */
-    if (sig != CTRL_C_EVENT)
+    switch (sig)
     {
+    case CTRL_C_EVENT:     csi.signal = SIGINT; break;
+    case CTRL_BREAK_EVENT: csi.signal = SIGQUIT; break;
+    default:
+        /* FIXME: should support the other events */
         set_error( STATUS_NOT_IMPLEMENTED );
         return;
     }
     csi.console = console;
-    csi.signal  = SIGINT;
     csi.group   = group_id;
 
     enum_processes(propagate_console_signal_cb, &csi);
@@ -895,7 +900,6 @@ static void console_server_destroy( struct object *obj )
     disconnect_console_server( server );
     if (server->fd) release_object( server->fd );
     if (do_esync()) close( server->esync_fd );
-    if (server->fsync_idx) fsync_free_shm_idx( server->fsync_idx );
 }
 
 static struct object *console_server_lookup_name( struct object *obj, struct unicode_str *name,
@@ -983,7 +987,6 @@ static struct object *create_console_server( void )
     }
     allow_fd_caching(server->fd);
     server->esync_fd = -1;
-    server->fsync_idx = 0;
 
     if (do_fsync())
         server->fsync_idx = fsync_alloc_shm( 0, 0 );
@@ -1229,7 +1232,7 @@ static void console_server_ioctl( struct fd *fd, ioctl_code_t code, struct async
                 return;
             }
             term = server->termios;
-            term.c_lflag &= ~(ECHO | ECHONL | ICANON | IEXTEN);
+            term.c_lflag &= ~(ECHO | ECHONL | ICANON | IEXTEN | ISIG);
             term.c_iflag &= ~(BRKINT | ICRNL | INPCK | ISTRIP | IXON);
             term.c_cflag &= ~(CSIZE | PARENB);
             term.c_cflag |= CS8;
@@ -1603,8 +1606,10 @@ DECL_HANDLER(get_next_console_request)
         /* set result of previous ioctl */
         ioctl = LIST_ENTRY( list_head( &server->queue ), struct console_host_ioctl, entry );
         list_remove( &ioctl->entry );
+
         if (do_fsync() && list_empty( &server->queue ))
-            fsync_clear( &server->obj );
+            fsync_clear_futex( server->fsync_idx );
+
         if (do_esync() && list_empty( &server->queue ))
             esync_clear( server->esync_fd );
     }
@@ -1692,8 +1697,10 @@ DECL_HANDLER(get_next_console_request)
     {
         set_error( STATUS_PENDING );
     }
+
     if (do_fsync() && list_empty( &server->queue ))
-        fsync_clear( &server->obj );
+        fsync_clear_futex( server->fsync_idx );
+
     if (do_esync() && list_empty( &server->queue ))
         esync_clear( server->esync_fd );
 

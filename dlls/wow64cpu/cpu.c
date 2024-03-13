@@ -25,6 +25,7 @@
 #include "windef.h"
 #include "winnt.h"
 #include "winternl.h"
+#include "rtlsupportapi.h"
 #include "wine/asm.h"
 #include "wine/debug.h"
 
@@ -171,7 +172,7 @@ static void copy_context_64to32( I386_CONTEXT *ctx32, DWORD flags, AMD64_CONTEXT
  *
  * Execute a 64-bit syscall from 32-bit code, then return to 32-bit.
  */
-extern void WINAPI syscall_32to64(void) DECLSPEC_HIDDEN;
+extern void WINAPI syscall_32to64(void);
 __ASM_GLOBAL_FUNC( syscall_32to64,
                    /* cf. BTCpuSimulate prolog */
                    __ASM_SEH(".seh_stackalloc 0x28\n\t")
@@ -192,6 +193,7 @@ __ASM_GLOBAL_FUNC( syscall_32to64,
                    "movq %rax,%rcx\n\t"         /* syscall number */
                    "leaq 8(%r14),%rdx\n\t"      /* parameters */
                    "call " __ASM_NAME("Wow64SystemServiceEx") "\n\t"
+                   "movl %eax,0xb0(%r13)\n\t"   /* context->Eax */
 
                    "syscall_32to64_return:\n\t"
                    "movl 0x9c(%r13),%edi\n\t"   /* context->Edi */
@@ -233,7 +235,7 @@ __ASM_GLOBAL_FUNC( syscall_32to64,
  *
  * Execute a 64-bit Unix call from 32-bit code, then return to 32-bit.
  */
-extern void WINAPI unix_call_32to64(void) DECLSPEC_HIDDEN;
+extern void WINAPI unix_call_32to64(void);
 __ASM_GLOBAL_FUNC( unix_call_32to64,
                    /* cf. BTCpuSimulate prolog */
                    __ASM_SEH(".seh_stackalloc 0x28\n\t")
@@ -266,7 +268,7 @@ __ASM_GLOBAL_FUNC( unix_call_32to64,
 /**********************************************************************
  *           BTCpuSimulate  (wow64cpu.@)
  */
-__ASM_STDCALL_FUNC( BTCpuSimulate, 0,
+__ASM_GLOBAL_FUNC( BTCpuSimulate,
                     "subq $0x28,%rsp\n"
                    __ASM_SEH(".seh_stackalloc 0x28\n\t")
                    __ASM_SEH(".seh_endprologue\n\t")
@@ -287,8 +289,9 @@ NTSTATUS WINAPI BTCpuProcessInit(void)
     ULONG old_prot;
     CONTEXT context;
     HMODULE module;
-    UNICODE_STRING str;
+    UNICODE_STRING str = RTL_CONSTANT_STRING( L"ntdll.dll" );
     void **p__wine_unix_call_dispatcher;
+    WOW64INFO *wow64info = NtCurrentTeb()->TlsSlots[WOW64_TLS_WOW64INFO];
 
     if ((ULONG_PTR)syscall_32to64 >> 32)
     {
@@ -296,7 +299,8 @@ NTSTATUS WINAPI BTCpuProcessInit(void)
         return STATUS_INVALID_ADDRESS;
     }
 
-    RtlInitUnicodeString( &str, L"ntdll.dll" );
+    wow64info->CpuFlags |= WOW64_CPUFLAGS_MSFT64;
+
     LdrGetDllHandle( NULL, 0, &str, &module );
     p__wine_unix_call_dispatcher = RtlFindExportedRoutineByName( module, "__wine_unix_call_dispatcher" );
 
@@ -349,11 +353,21 @@ void * WINAPI __wine_get_unix_opcode(void)
 
 
 /**********************************************************************
+ *           BTCpuIsProcessorFeaturePresent  (wow64cpu.@)
+ */
+BOOLEAN WINAPI BTCpuIsProcessorFeaturePresent( UINT feature )
+{
+    /* assume CPU features are the same for 32- and 64-bit */
+    return RtlIsProcessorFeaturePresent( feature );
+}
+
+
+/**********************************************************************
  *           BTCpuGetContext  (wow64cpu.@)
  */
 NTSTATUS WINAPI BTCpuGetContext( HANDLE thread, HANDLE process, void *unknown, I386_CONTEXT *ctx )
 {
-    return NtQueryInformationThread( thread, ThreadWow64Context, ctx, sizeof(*ctx), NULL );
+    return RtlWow64GetThreadContext( thread, ctx );
 }
 
 
@@ -362,7 +376,7 @@ NTSTATUS WINAPI BTCpuGetContext( HANDLE thread, HANDLE process, void *unknown, I
  */
 NTSTATUS WINAPI BTCpuSetContext( HANDLE thread, HANDLE process, void *unknown, I386_CONTEXT *ctx )
 {
-    return NtSetInformationThread( thread, ThreadWow64Context, ctx, sizeof(*ctx) );
+    return RtlWow64SetThreadContext( thread, ctx );
 }
 
 
@@ -373,6 +387,16 @@ NTSTATUS WINAPI BTCpuResetToConsistentState( EXCEPTION_POINTERS *ptrs )
 {
     CONTEXT *context = ptrs->ContextRecord;
     I386_CONTEXT wow_context;
+    struct machine_frame
+    {
+        ULONG64 rip;
+        ULONG64 cs;
+        ULONG64 eflags;
+        ULONG64 rsp;
+        ULONG64 ss;
+    } *machine_frame;
+
+    if (context->SegCs == cs64_sel) return STATUS_SUCCESS;  /* exception in 64-bit code, nothing to do */
 
     copy_context_64to32( &wow_context, CONTEXT_I386_ALL, context );
     wow_context.EFlags &= ~(0x100|0x40000);
@@ -382,6 +406,10 @@ NTSTATUS WINAPI BTCpuResetToConsistentState( EXCEPTION_POINTERS *ptrs )
     context->Rip = (ULONG64)syscall_32to64;
     context->SegCs = cs64_sel;
     context->Rsp = context->R14;
+    /* fixup machine frame */
+    machine_frame = (struct machine_frame *)(((ULONG_PTR)(ptrs->ExceptionRecord + 1) + 15) & ~15);
+    machine_frame->rip = context->Rip;
+    machine_frame->rsp = context->Rsp;
     return STATUS_SUCCESS;
 }
 

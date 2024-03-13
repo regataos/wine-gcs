@@ -38,89 +38,6 @@
 
 #include "unix_private.h"
 
-BOOL is_wine_blacklisted(WORD vid, WORD pid)
-{
-    if (vid == 0x056a) return TRUE; /* all Wacom devices */
-    return FALSE;
-}
-
-/* logic from SDL2's SDL_ShouldIgnoreGameController */
-BOOL is_sdl_blacklisted(WORD vid, WORD pid)
-{
-    const char *allow_virtual = getenv("SDL_GAMECONTROLLER_ALLOW_STEAM_VIRTUAL_GAMEPAD");
-    const char *whitelist = getenv("SDL_GAMECONTROLLER_IGNORE_DEVICES_EXCEPT");
-    const char *blacklist = getenv("SDL_GAMECONTROLLER_IGNORE_DEVICES");
-    char needle[16];
-
-    if (vid == 0x28de && pid == 0x11ff && allow_virtual && *allow_virtual &&
-        *allow_virtual != '0' && strcasecmp(allow_virtual, "false"))
-        return FALSE;
-
-    sprintf(needle, "0x%04x/0x%04x", vid, pid);
-    if (whitelist) return strcasestr(whitelist, needle) == NULL;
-    if (blacklist) return strcasestr(blacklist, needle) != NULL;
-    return FALSE;
-}
-
-BOOL is_dualshock4_gamepad(WORD vid, WORD pid)
-{
-    if (vid != 0x054c) return FALSE;
-    if (pid == 0x05c4) return TRUE; /* DualShock 4 [CUH-ZCT1x] */
-    if (pid == 0x09cc) return TRUE; /* DualShock 4 [CUH-ZCT2x] */
-    if (pid == 0x0ba0) return TRUE; /* Dualshock 4 Wireless Adaptor */
-    return FALSE;
-}
-
-BOOL is_dualsense_gamepad(WORD vid, WORD pid)
-{
-    if (vid == 0x054c && pid == 0x0ce6) return TRUE;
-    return FALSE;
-}
-
-BOOL is_logitech_g920(WORD vid, WORD pid)
-{
-    return vid == 0x046D && pid == 0xC262;
-}
-
-static BOOL is_thrustmaster_hotas(WORD vid, WORD pid)
-{
-    return vid == 0x044F && (pid == 0xB679 || pid == 0xB687 || pid == 0xB10A);
-}
-
-static BOOL is_simucube_wheel(WORD vid, WORD pid)
-{
-    if (vid != 0x16D0) return FALSE;
-    if (pid == 0x0D61) return TRUE; /* Simucube 2 Sport */
-    if (pid == 0x0D60) return TRUE; /* Simucube 2 Pro */
-    if (pid == 0x0D5F) return TRUE; /* Simucube 2 Ultimate */
-    if (pid == 0x0D5A) return TRUE; /* Simucube 1 */
-    return FALSE;
-}
-
-static BOOL is_fanatec_pedals(WORD vid, WORD pid)
-{
-    if (vid != 0x0EB7) return FALSE;
-    if (pid == 0x183B) return TRUE; /* Fanatec ClubSport Pedals v3 */
-    if (pid == 0x1839) return TRUE; /* Fanatec ClubSport Pedals v1/v2 */
-    return FALSE;
-}
-
-BOOL is_hidraw_enabled(WORD vid, WORD pid)
-{
-    const char *enabled = getenv("PROTON_ENABLE_HIDRAW");
-    char needle[16];
-
-    if (is_dualshock4_gamepad(vid, pid)) return TRUE;
-    if (is_dualsense_gamepad(vid, pid)) return TRUE;
-    if (is_thrustmaster_hotas(vid, pid)) return TRUE;
-    if (is_simucube_wheel(vid, pid)) return TRUE;
-    if (is_fanatec_pedals(vid, pid)) return TRUE;
-
-    sprintf(needle, "0x%04x/0x%04x", vid, pid);
-    if (enabled) return strcasestr(enabled, needle) != NULL;
-    return FALSE;
-}
-
 struct mouse_device
 {
     struct unix_device unix_device;
@@ -395,6 +312,8 @@ const unixlib_entry_t __wine_unix_call_funcs[] =
     unix_device_get_feature_report,
     unix_device_set_feature_report,
 };
+
+C_ASSERT(ARRAYSIZE(__wine_unix_call_funcs) == unix_funcs_count);
 
 void bus_event_cleanup(struct bus_event *event)
 {

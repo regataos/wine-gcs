@@ -16,6 +16,10 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#if 0
+#pragma makedep testdll
+#endif
+
 #include <stdarg.h>
 #include <stdio.h>
 
@@ -32,6 +36,7 @@
 
 #include "wine/list.h"
 
+#define WINE_DRIVER_TEST
 #include "initguid.h"
 #include "driver_hid.h"
 
@@ -183,6 +188,7 @@ static NTSTATUS WINAPI driver_ioctl( DEVICE_OBJECT *device, IRP *irp )
     case IOCTL_WINETEST_HID_WAIT_EXPECT:
     case IOCTL_WINETEST_HID_SEND_INPUT:
     case IOCTL_WINETEST_HID_SET_CONTEXT:
+    case IOCTL_WINETEST_HID_WAIT_INPUT:
         IoSkipCurrentIrpStackLocation( irp );
         return IoCallDriver( ext->PhysicalDeviceObject, irp );
 

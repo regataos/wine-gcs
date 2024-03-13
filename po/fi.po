@@ -5,7 +5,7 @@ msgstr ""
 "Project-Id-Version: Wine\n"
 "Report-Msgid-Bugs-To: https://bugs.winehq.org\n"
 "POT-Creation-Date: N/A\n"
-"PO-Revision-Date: 2022-03-17 20:32+0200\n"
+"PO-Revision-Date: 2023-12-27 19:27+0200\n"
 "Last-Translator: Lauri Kenttä <lauri.kentta@gmail.com>\n"
 "Language-Team: Finnish\n"
 "Language: fi\n"
@@ -34,11 +34,11 @@ msgstr "Estä"
 msgid "Permissions for %1"
 msgstr "Oikeudet taholle %1"
 
-#: dlls/appwiz.cpl/appwiz.rc:58
+#: dlls/appwiz.cpl/appwiz.rc:59
 msgid "Install/Uninstall"
 msgstr "Asenna/Poista"
 
-#: dlls/appwiz.cpl/appwiz.rc:61
+#: dlls/appwiz.cpl/appwiz.rc:62
 msgid ""
 "To install a new program from a floppy disk, CD-ROM drive, or your hard "
 "drive, click Install."
@@ -46,11 +46,11 @@ msgstr ""
 "Asentaaksesi uuden ohjelman levykkeeltä, CD-levyltä tai kovalevyltäsi "
 "valitse Asenna."
 
-#: dlls/appwiz.cpl/appwiz.rc:62
+#: dlls/appwiz.cpl/appwiz.rc:63
 msgid "&Install..."
 msgstr "&Asenna..."
 
-#: dlls/appwiz.cpl/appwiz.rc:65
+#: dlls/appwiz.cpl/appwiz.rc:66
 msgid ""
 "The following software can be automatically removed. To remove a program or "
 "to modify its installed components, select it from the list and click Modify/"
@@ -59,27 +59,27 @@ msgstr ""
 "Seuraavat ohjelmat voi poistaa automaattisesti. Poistaaksesi ohjelman tai "
 "muokataksesi sen asennusta valitse se listasta ja paina Muokkaa tai Poista."
 
-#: dlls/appwiz.cpl/appwiz.rc:67
+#: dlls/appwiz.cpl/appwiz.rc:68
 msgid "&Support Information"
 msgstr "&Tukitiedot"
 
-#: dlls/appwiz.cpl/appwiz.rc:68 programs/regedit/regedit.rc:136
+#: dlls/appwiz.cpl/appwiz.rc:69 programs/regedit/regedit.rc:136
 #: programs/regedit/regedit.rc:237
 msgid "&Modify..."
 msgstr "&Muokkaa..."
 
-#: dlls/appwiz.cpl/appwiz.rc:69 dlls/appwiz.cpl/appwiz.rc:45
+#: dlls/appwiz.cpl/appwiz.rc:70 dlls/appwiz.cpl/appwiz.rc:45
 #: dlls/cryptui/cryptui.rc:351 dlls/msacm32/msacm32.rc:40
-#: programs/winecfg/winecfg.rc:199 programs/winecfg/winecfg.rc:236
+#: programs/winecfg/winecfg.rc:205 programs/winecfg/winecfg.rc:242
 #: programs/wordpad/wordpad.rc:256
 msgid "&Remove"
 msgstr "&Poista"
 
-#: dlls/appwiz.cpl/appwiz.rc:75
+#: dlls/appwiz.cpl/appwiz.rc:76
 msgid "Support Information"
 msgstr "Tukitietoja"
 
-#: dlls/appwiz.cpl/appwiz.rc:78 dlls/avifil32/avifil32.rc:54
+#: dlls/appwiz.cpl/appwiz.rc:79 dlls/avifil32/avifil32.rc:54
 #: dlls/comctl32/comctl32.rc:71 dlls/comctl32/comctl32.rc:55
 #: dlls/comdlg32/comdlg32.rc:233 dlls/comdlg32/comdlg32.rc:263
 #: dlls/comdlg32/comdlg32.rc:307 dlls/comdlg32/comdlg32.rc:390
@@ -92,71 +92,71 @@ msgstr "Tukitietoja"
 #: dlls/mshtml/mshtml.rc:47 dlls/mshtml/mshtml.rc:57 dlls/msvfw32/msvfw32.rc:36
 #: dlls/oledlg/oledlg.rc:62 dlls/oledlg/oledlg.rc:94
 #: dlls/serialui/serialui.rc:41 dlls/setupapi/setupapi.rc:59
-#: dlls/shell32/shell32.rc:274 dlls/shell32/shell32.rc:298
-#: dlls/shell32/shell32.rc:320 dlls/shell32/shell32.rc:339
+#: dlls/shell32/shell32.rc:278 dlls/shell32/shell32.rc:302
+#: dlls/shell32/shell32.rc:324 dlls/shell32/shell32.rc:343
 #: dlls/shlwapi/shlwapi.rc:44 dlls/twain_32/twain.rc:32
-#: dlls/user32/user32.rc:83 dlls/user32/user32.rc:98 dlls/wininet/wininet.rc:62
-#: dlls/wininet/wininet.rc:82 dlls/winspool.drv/winspool.rc:42
-#: programs/net/net.rc:47 programs/notepad/notepad.rc:124
-#: programs/oleview/oleview.rc:161 programs/oleview/oleview.rc:174
-#: programs/progman/progman.rc:106 programs/progman/progman.rc:124
-#: programs/progman/progman.rc:142 programs/progman/progman.rc:158
-#: programs/progman/progman.rc:180 programs/progman/progman.rc:199
-#: programs/progman/progman.rc:216 programs/regedit/regedit.rc:301
-#: programs/regedit/regedit.rc:312 programs/regedit/regedit.rc:325
-#: programs/regedit/regedit.rc:341 programs/regedit/regedit.rc:354
-#: programs/regedit/regedit.rc:367 programs/taskmgr/taskmgr.rc:442
-#: programs/taskmgr/taskmgr.rc:517 programs/winecfg/winecfg.rc:213
-#: programs/winecfg/winecfg.rc:223 programs/winefile/winefile.rc:127
-#: programs/winefile/winefile.rc:150 programs/winefile/winefile.rc:180
-#: programs/winemine/winemine.rc:73 programs/winemine/winemine.rc:84
-#: programs/winemine/winemine.rc:98 programs/wordpad/wordpad.rc:215
-#: programs/wordpad/wordpad.rc:226 programs/wordpad/wordpad.rc:244
-#: programs/wordpad/wordpad.rc:257
+#: dlls/user32/user32.rc:94 dlls/user32/user32.rc:109 dlls/user32/user32.rc:73
+#: dlls/wininet/wininet.rc:62 dlls/wininet/wininet.rc:82
+#: dlls/winspool.drv/winspool.rc:42 programs/net/net.rc:48
+#: programs/notepad/notepad.rc:124 programs/oleview/oleview.rc:161
+#: programs/oleview/oleview.rc:174 programs/progman/progman.rc:106
+#: programs/progman/progman.rc:124 programs/progman/progman.rc:142
+#: programs/progman/progman.rc:158 programs/progman/progman.rc:180
+#: programs/progman/progman.rc:199 programs/progman/progman.rc:216
+#: programs/regedit/regedit.rc:301 programs/regedit/regedit.rc:312
+#: programs/regedit/regedit.rc:325 programs/regedit/regedit.rc:341
+#: programs/regedit/regedit.rc:354 programs/regedit/regedit.rc:367
+#: programs/taskmgr/taskmgr.rc:442 programs/taskmgr/taskmgr.rc:517
+#: programs/winecfg/winecfg.rc:219 programs/winecfg/winecfg.rc:229
+#: programs/winefile/winefile.rc:127 programs/winefile/winefile.rc:150
+#: programs/winefile/winefile.rc:180 programs/winemine/winemine.rc:73
+#: programs/winemine/winemine.rc:84 programs/winemine/winemine.rc:98
+#: programs/wordpad/wordpad.rc:215 programs/wordpad/wordpad.rc:226
+#: programs/wordpad/wordpad.rc:244 programs/wordpad/wordpad.rc:257
 msgid "OK"
 msgstr "OK"
 
-#: dlls/appwiz.cpl/appwiz.rc:79
+#: dlls/appwiz.cpl/appwiz.rc:80
 msgid "The following information can be used to get technical support for %s:"
 msgstr "Seuraavilla tiedoilla saa teknistä tukea ohjelmalle %s:"
 
-#: dlls/appwiz.cpl/appwiz.rc:80
+#: dlls/appwiz.cpl/appwiz.rc:81
 msgid "Publisher:"
 msgstr "Julkaisija:"
 
-#: dlls/appwiz.cpl/appwiz.rc:81 programs/winefile/winefile.rc:165
+#: dlls/appwiz.cpl/appwiz.rc:82 programs/winefile/winefile.rc:165
 msgid "Version:"
 msgstr "Versio:"
 
-#: dlls/appwiz.cpl/appwiz.rc:82
+#: dlls/appwiz.cpl/appwiz.rc:83
 msgid "Contact:"
 msgstr "Yhteystiedot:"
 
-#: dlls/appwiz.cpl/appwiz.rc:83
+#: dlls/appwiz.cpl/appwiz.rc:84
 msgid "Support Information:"
 msgstr "Tukitietoja:"
 
-#: dlls/appwiz.cpl/appwiz.rc:84
+#: dlls/appwiz.cpl/appwiz.rc:85
 msgid "Support Telephone:"
 msgstr "Tukipuhelin:"
 
-#: dlls/appwiz.cpl/appwiz.rc:85
+#: dlls/appwiz.cpl/appwiz.rc:86
 msgid "Readme:"
 msgstr "Ohjeet:"
 
-#: dlls/appwiz.cpl/appwiz.rc:86
+#: dlls/appwiz.cpl/appwiz.rc:87
 msgid "Product Updates:"
 msgstr "Päivitykset:"
 
-#: dlls/appwiz.cpl/appwiz.rc:87
+#: dlls/appwiz.cpl/appwiz.rc:88
 msgid "Comments:"
 msgstr "Kommentit:"
 
-#: dlls/appwiz.cpl/appwiz.rc:100
+#: dlls/appwiz.cpl/appwiz.rc:101
 msgid "Wine Gecko Installer"
 msgstr "Wine Gecko -asennusohjelma"
 
-#: dlls/appwiz.cpl/appwiz.rc:103
+#: dlls/appwiz.cpl/appwiz.rc:104
 msgid ""
 "Wine could not find a Gecko package which is needed for applications "
 "embedding HTML to work correctly. Wine can automatically download and "
@@ -173,11 +173,11 @@ msgstr ""
 "Lisätietoja: <a href=\"https://wiki.winehq.org/Gecko\">https://wiki.winehq."
 "org/Gecko</a>."
 
-#: dlls/appwiz.cpl/appwiz.rc:109 dlls/appwiz.cpl/appwiz.rc:124
+#: dlls/appwiz.cpl/appwiz.rc:110 dlls/appwiz.cpl/appwiz.rc:125
 msgid "&Install"
 msgstr "&Asenna"
 
-#: dlls/appwiz.cpl/appwiz.rc:110 dlls/appwiz.cpl/appwiz.rc:125
+#: dlls/appwiz.cpl/appwiz.rc:111 dlls/appwiz.cpl/appwiz.rc:126
 #: dlls/avifil32/avifil32.rc:55 dlls/browseui/browseui.rc:45
 #: dlls/comctl32/comctl32.rc:72 dlls/comctl32/comctl32.rc:87
 #: dlls/comctl32/comctl32.rc:56 dlls/comdlg32/comdlg32.rc:172
@@ -196,35 +196,35 @@ msgstr "&Asenna"
 #: dlls/mshtml/mshtml.rc:48 dlls/mshtml/mshtml.rc:58 dlls/msvfw32/msvfw32.rc:37
 #: dlls/oledlg/oledlg.rc:63 dlls/oledlg/oledlg.rc:95
 #: dlls/serialui/serialui.rc:42 dlls/setupapi/setupapi.rc:42
-#: dlls/setupapi/setupapi.rc:60 dlls/shell32/shell32.rc:275
-#: dlls/shell32/shell32.rc:299 dlls/shell32/shell32.rc:310
-#: dlls/shell32/shell32.rc:340 dlls/shlwapi/shlwapi.rc:45
-#: dlls/twain_32/twain.rc:33 dlls/user32/user32.rc:84 dlls/user32/user32.rc:99
-#: dlls/wininet/wininet.rc:63 dlls/wininet/wininet.rc:83
-#: dlls/winspool.drv/winspool.rc:43 programs/notepad/notepad.rc:125
-#: programs/notepad/notepad.rc:138 programs/oleview/oleview.rc:162
-#: programs/oleview/oleview.rc:175 programs/progman/progman.rc:107
-#: programs/progman/progman.rc:125 programs/progman/progman.rc:143
-#: programs/progman/progman.rc:159 programs/progman/progman.rc:181
-#: programs/progman/progman.rc:200 programs/progman/progman.rc:217
-#: programs/regedit/regedit.rc:302 programs/regedit/regedit.rc:313
-#: programs/regedit/regedit.rc:326 programs/regedit/regedit.rc:342
-#: programs/regedit/regedit.rc:355 programs/regedit/regedit.rc:368
-#: programs/taskmgr/taskmgr.rc:443 programs/taskmgr/taskmgr.rc:518
-#: programs/wineboot/wineboot.rc:34 programs/winecfg/winecfg.rc:214
-#: programs/winecfg/winecfg.rc:224 programs/winefile/winefile.rc:128
-#: programs/winefile/winefile.rc:151 programs/winefile/winefile.rc:181
-#: programs/winemine/winemine.rc:99 programs/wordpad/wordpad.rc:216
-#: programs/wordpad/wordpad.rc:227 programs/wordpad/wordpad.rc:245
-#: programs/wordpad/wordpad.rc:258
+#: dlls/setupapi/setupapi.rc:60 dlls/shell32/shell32.rc:279
+#: dlls/shell32/shell32.rc:303 dlls/shell32/shell32.rc:314
+#: dlls/shell32/shell32.rc:344 dlls/shlwapi/shlwapi.rc:45
+#: dlls/twain_32/twain.rc:33 dlls/user32/user32.rc:95 dlls/user32/user32.rc:110
+#: dlls/user32/user32.rc:74 dlls/wininet/wininet.rc:63
+#: dlls/wininet/wininet.rc:83 dlls/winspool.drv/winspool.rc:43
+#: programs/notepad/notepad.rc:125 programs/notepad/notepad.rc:138
+#: programs/oleview/oleview.rc:162 programs/oleview/oleview.rc:175
+#: programs/progman/progman.rc:107 programs/progman/progman.rc:125
+#: programs/progman/progman.rc:143 programs/progman/progman.rc:159
+#: programs/progman/progman.rc:181 programs/progman/progman.rc:200
+#: programs/progman/progman.rc:217 programs/regedit/regedit.rc:302
+#: programs/regedit/regedit.rc:313 programs/regedit/regedit.rc:326
+#: programs/regedit/regedit.rc:342 programs/regedit/regedit.rc:355
+#: programs/regedit/regedit.rc:368 programs/taskmgr/taskmgr.rc:443
+#: programs/taskmgr/taskmgr.rc:518 programs/wineboot/wineboot.rc:34
+#: programs/winecfg/winecfg.rc:220 programs/winecfg/winecfg.rc:230
+#: programs/winefile/winefile.rc:128 programs/winefile/winefile.rc:151
+#: programs/winefile/winefile.rc:181 programs/winemine/winemine.rc:99
+#: programs/wordpad/wordpad.rc:216 programs/wordpad/wordpad.rc:227
+#: programs/wordpad/wordpad.rc:245 programs/wordpad/wordpad.rc:258
 msgid "Cancel"
 msgstr "Peruuta"
 
-#: dlls/appwiz.cpl/appwiz.rc:115
+#: dlls/appwiz.cpl/appwiz.rc:116
 msgid "Wine Mono Installer"
 msgstr "Wine Mono -asennusohjelma"
 
-#: dlls/appwiz.cpl/appwiz.rc:118
+#: dlls/appwiz.cpl/appwiz.rc:119
 msgid ""
 "Wine could not find a wine-mono package which is needed for .NET "
 "applications to work correctly. Wine can automatically download and install "
@@ -269,7 +269,7 @@ msgid "Not specified"
 msgstr "Ei määritelty"
 
 #: dlls/appwiz.cpl/appwiz.rc:38 dlls/oledb32/version.rc:38
-#: dlls/shell32/shell32.rc:144 dlls/shell32/shell32.rc:239
+#: dlls/shell32/shell32.rc:141 dlls/shell32/shell32.rc:243
 #: programs/regedit/regedit.rc:150 programs/winefile/winefile.rc:106
 msgid "Name"
 msgstr "Nimi"
@@ -291,7 +291,7 @@ msgid "Programs (*.exe)"
 msgstr "Ohjelmat (*.exe)"
 
 #: dlls/appwiz.cpl/appwiz.rc:43 dlls/avifil32/avifil32.rc:33
-#: dlls/cryptui/cryptui.rc:83 dlls/shell32/shell32.rc:197
+#: dlls/cryptui/cryptui.rc:83 dlls/shell32/shell32.rc:199
 #: programs/notepad/notepad.rc:81 programs/oleview/oleview.rc:103
 #: programs/progman/progman.rc:82 programs/regedit/regedit.rc:230
 #: programs/winedbg/winedbg.rc:43 programs/winhlp32/winhlp32.rc:90
@@ -302,21 +302,25 @@ msgstr "Kaikki tiedostot (*.*)"
 msgid "&Modify/Remove"
 msgstr "&Muokkaa/poista"
 
-#: dlls/appwiz.cpl/appwiz.rc:51
+#: dlls/appwiz.cpl/appwiz.rc:52
 msgid "Downloading..."
 msgstr "Ladataan..."
 
-#: dlls/appwiz.cpl/appwiz.rc:52
+#: dlls/appwiz.cpl/appwiz.rc:53
 msgid "Installing..."
 msgstr "Asennetaan..."
 
-#: dlls/appwiz.cpl/appwiz.rc:53
+#: dlls/appwiz.cpl/appwiz.rc:54
 msgid ""
 "Unexpected checksum of downloaded file. Aborting installation of corrupted "
 "file."
 msgstr ""
 "Ladatun tiedoston tarkistussumma ei täsmää. Keskeytetään viallisen tiedoston "
 "asennus."
+
+#: dlls/appwiz.cpl/appwiz.rc:47
+msgid "Please wait until the current uninstall/modify process is complete."
+msgstr "Odota, että nykyinen poisto- tai muokkausprosessi päättyy."
 
 #: dlls/avifil32/avifil32.rc:42
 msgid "Compress options"
@@ -403,7 +407,8 @@ msgid "&Apply"
 msgstr "&Käytä"
 
 #: dlls/comctl32/comctl32.rc:74 dlls/comctl32/comctl32.rc:88
-#: dlls/comdlg32/comdlg32.rc:309 dlls/user32/user32.rc:88
+#: dlls/comdlg32/comdlg32.rc:309 dlls/user32/user32.rc:99
+#: dlls/user32/user32.rc:81
 msgid "Help"
 msgstr "Ohje"
 
@@ -429,9 +434,9 @@ msgstr "Muokkaa työkalupalkkia"
 
 #: dlls/comctl32/comctl32.rc:100 dlls/comctl32/comctl32.rc:57
 #: dlls/cryptui/cryptui.rc:356 dlls/ieframe/ieframe.rc:43
-#: programs/oleview/oleview.rc:83 programs/oleview/oleview.rc:187
-#: programs/oleview/oleview.rc:200 programs/oleview/oleview.rc:212
-#: programs/taskmgr/taskmgr.rc:139
+#: dlls/user32/user32.rc:80 programs/oleview/oleview.rc:83
+#: programs/oleview/oleview.rc:187 programs/oleview/oleview.rc:200
+#: programs/oleview/oleview.rc:212 programs/taskmgr/taskmgr.rc:139
 msgid "&Close"
 msgstr "&Sulje"
 
@@ -446,7 +451,7 @@ msgstr "&Nollaa"
 #: dlls/comdlg32/comdlg32.rc:482 dlls/comdlg32/comdlg32.rc:508
 #: dlls/comdlg32/comdlg32.rc:531 dlls/ieframe/ieframe.rc:58
 #: dlls/msacm32/msacm32.rc:52 dlls/oledlg/oledlg.rc:96
-#: dlls/shell32/shell32.rc:128 programs/clock/clock.rc:44
+#: dlls/shell32/shell32.rc:125 programs/clock/clock.rc:44
 #: programs/notepad/notepad.rc:65 programs/notepad/notepad.rc:126
 #: programs/oleview/oleview.rc:72 programs/progman/progman.rc:55
 #: programs/progman/progman.rc:108 programs/progman/progman.rc:126
@@ -492,17 +497,18 @@ msgctxt "hotkey"
 msgid "None"
 msgstr "Ei valittu"
 
-#: dlls/comctl32/comctl32.rc:52 dlls/shell32/shell32.rc:307
-#: dlls/shlwapi/shlwapi.rc:46 dlls/user32/user32.rc:79
+#: dlls/comctl32/comctl32.rc:52 dlls/shell32/shell32.rc:311
+#: dlls/shlwapi/shlwapi.rc:46 dlls/user32/user32.rc:90 dlls/user32/user32.rc:78
 msgid "&Yes"
 msgstr "&Kyllä"
 
-#: dlls/comctl32/comctl32.rc:53 dlls/shell32/shell32.rc:309
-#: dlls/shlwapi/shlwapi.rc:47 dlls/user32/user32.rc:80
+#: dlls/comctl32/comctl32.rc:53 dlls/shell32/shell32.rc:313
+#: dlls/shlwapi/shlwapi.rc:47 dlls/user32/user32.rc:91 dlls/user32/user32.rc:79
 msgid "&No"
 msgstr "&Ei"
 
-#: dlls/comctl32/comctl32.rc:54 dlls/user32/user32.rc:82
+#: dlls/comctl32/comctl32.rc:54 dlls/user32/user32.rc:93
+#: dlls/user32/user32.rc:76
 msgid "&Retry"
 msgstr "&Uudelleen"
 
@@ -531,8 +537,7 @@ msgstr "Mene tähän päivään"
 
 #: dlls/comdlg32/comdlg32.rc:158 dlls/comdlg32/comdlg32.rc:171
 #: dlls/comdlg32/comdlg32.rc:462 dlls/comdlg32/comdlg32.rc:487
-#: dlls/comdlg32/comdlg32.rc:514 dlls/shell32/shell32.rc:165
-#: programs/oleview/oleview.rc:101
+#: dlls/comdlg32/comdlg32.rc:514 programs/oleview/oleview.rc:101
 msgid "Open"
 msgstr "Avaa"
 
@@ -553,7 +558,7 @@ msgid "Dri&ves:"
 msgstr "&Asemat:"
 
 #: dlls/comdlg32/comdlg32.rc:174 dlls/comdlg32/comdlg32.rc:196
-#: dlls/shell32/shell32.rc:368 dlls/shell32/shell32.rc:405
+#: dlls/shell32/shell32.rc:372 dlls/shell32/shell32.rc:409
 #: programs/winefile/winefile.rc:172
 msgid "&Read Only"
 msgstr "&Vain luku"
@@ -678,7 +683,7 @@ msgid "Font St&yle:"
 msgstr "Fontin t&yyli:"
 
 #: dlls/comdlg32/comdlg32.rc:260 dlls/comdlg32/comdlg32.rc:439
-#: programs/winecfg/winecfg.rc:292
+#: programs/winecfg/winecfg.rc:300
 msgid "&Size:"
 msgstr "&Koko:"
 
@@ -694,7 +699,7 @@ msgstr "Yli&viivaus"
 msgid "&Underline"
 msgstr "A&lleviivaus"
 
-#: dlls/comdlg32/comdlg32.rc:270 programs/winecfg/winecfg.rc:290
+#: dlls/comdlg32/comdlg32.rc:270 programs/winecfg/winecfg.rc:298
 msgid "&Color:"
 msgstr "&Väri:"
 
@@ -812,7 +817,7 @@ msgstr "Korvaa ka&ikki"
 
 #: dlls/comdlg32/comdlg32.rc:363 dlls/comdlg32/comdlg32.rc:403
 #: dlls/ieframe/ieframe.rc:42 dlls/shdoclc/shdoclc.rc:61
-#: dlls/shell32/shell32.rc:108 programs/clock/clock.rc:31
+#: dlls/shell32/shell32.rc:105 programs/clock/clock.rc:31
 #: programs/conhost/conhost.rc:34
 msgid "&Properties"
 msgstr "&Ominaisuudet"
@@ -870,7 +875,7 @@ msgstr "Kopioiden &määrä:"
 msgid "C&ollate"
 msgstr "&Kokoa"
 
-#: dlls/comdlg32/comdlg32.rc:414 programs/winecfg/winecfg.rc:298
+#: dlls/comdlg32/comdlg32.rc:414 programs/winecfg/winecfg.rc:306
 msgid "Si&ze:"
 msgstr "&Koko:"
 
@@ -936,7 +941,7 @@ msgstr "Avaa vain &lukuoikeuksilla"
 
 #: dlls/comdlg32/comdlg32.rc:480 dlls/comdlg32/comdlg32.rc:506
 #: dlls/comdlg32/comdlg32.rc:524 dlls/shdoclc/shdoclc.rc:127
-#: dlls/shell32/shell32.rc:99
+#: dlls/shell32/shell32.rc:165
 msgid "&Open"
 msgstr "&Avaa"
 
@@ -2237,8 +2242,8 @@ msgid "Notice Text="
 msgstr "Huomautusteksti="
 
 #: dlls/cryptui/cryptui.rc:185 dlls/cryptui/cryptui.rc:240
-#: dlls/inetcpl.cpl/inetcpl.rc:46 dlls/shell32/shell32.rc:346
-#: dlls/shell32/shell32.rc:375
+#: dlls/inetcpl.cpl/inetcpl.rc:46 dlls/shell32/shell32.rc:350
+#: dlls/shell32/shell32.rc:379
 msgid "General"
 msgstr "Yleiset"
 
@@ -2373,7 +2378,7 @@ msgid "&File name:"
 msgstr "&Tiedostonimi:"
 
 #: dlls/cryptui/cryptui.rc:301 dlls/cryptui/cryptui.rc:323
-#: dlls/cryptui/cryptui.rc:437 programs/winecfg/winecfg.rc:311
+#: dlls/cryptui/cryptui.rc:437 programs/winecfg/winecfg.rc:319
 msgid "B&rowse..."
 msgstr "&Selaa..."
 
@@ -2453,7 +2458,7 @@ msgid "Certificate intended purposes"
 msgstr "Varmenteen suunnitellut tarkoitukset"
 
 #: dlls/cryptui/cryptui.rc:355 dlls/ieframe/ieframe.rc:45
-#: dlls/shell32/shell32.rc:43 dlls/shell32/shell32.rc:120
+#: dlls/shell32/shell32.rc:43 dlls/shell32/shell32.rc:117
 #: programs/notepad/notepad.rc:61 programs/oleview/oleview.rc:59
 #: programs/oleview/oleview.rc:61 programs/oleview/oleview.rc:85
 #: programs/regedit/regedit.rc:65 programs/taskmgr/taskmgr.rc:52
@@ -2734,7 +2739,7 @@ msgstr "Laajennettu avaimen käyttö (EKU) (ominaisuus)"
 msgid "Friendly name"
 msgstr "Näyttönimi"
 
-#: dlls/cryptui/cryptui.rc:65 dlls/shell32/shell32.rc:240
+#: dlls/cryptui/cryptui.rc:65 dlls/shell32/shell32.rc:244
 #: programs/ipconfig/ipconfig.rc:45
 msgid "Description"
 msgstr "Kuvaus"
@@ -2831,7 +2836,7 @@ msgstr "Valittu varmennesäilö"
 msgid "Automatically determined by the program"
 msgstr "Ohjelman automaattisesti päättelemä"
 
-#: dlls/cryptui/cryptui.rc:91 dlls/shell32/shell32.rc:137
+#: dlls/cryptui/cryptui.rc:91 dlls/shell32/shell32.rc:134
 msgid "File"
 msgstr "Tiedosto"
 
@@ -3122,7 +3127,7 @@ msgstr "Huomio: Tämän varmenteen yksityistä avainta ei voi viedä."
 msgid "Intended Use"
 msgstr "Suunniteltu käyttö"
 
-#: dlls/cryptui/cryptui.rc:178 dlls/shell32/shell32.rc:150
+#: dlls/cryptui/cryptui.rc:178 dlls/shell32/shell32.rc:147
 msgid "Location"
 msgstr "Sijainti"
 
@@ -3348,7 +3353,7 @@ msgstr "&Leikkaa"
 #: dlls/hhctrl.ocx/hhctrl.rc:88 dlls/shdoclc/shdoclc.rc:80
 #: dlls/shdoclc/shdoclc.rc:94 dlls/shdoclc/shdoclc.rc:118
 #: dlls/shdoclc/shdoclc.rc:133 dlls/shdoclc/shdoclc.rc:160
-#: dlls/shdoclc/shdoclc.rc:184 dlls/shell32/shell32.rc:102
+#: dlls/shdoclc/shdoclc.rc:184 dlls/shell32/shell32.rc:98
 #: dlls/user32/user32.rc:61 programs/conhost/conhost.rc:36
 #: programs/winhlp32/winhlp32.rc:40 programs/wordpad/wordpad.rc:113
 msgid "&Copy"
@@ -3360,6 +3365,7 @@ msgid "Paste"
 msgstr "Liitä"
 
 #: dlls/hhctrl.ocx/hhctrl.rc:91 dlls/shdoclc/shdoclc.rc:121
+#: dlls/shell32/shell32.rc:166
 msgid "&Print"
 msgstr "&Tulosta"
 
@@ -3426,7 +3432,7 @@ msgstr "Seuraava"
 msgid "Cinepak Video codec"
 msgstr "Cinepak-videokoodekki"
 
-#: dlls/ieframe/ieframe.rc:28 dlls/shell32/shell32.rc:114
+#: dlls/ieframe/ieframe.rc:28 dlls/shell32/shell32.rc:111
 #: programs/notepad/notepad.rc:29 programs/oleview/oleview.rc:30
 #: programs/oleview/oleview.rc:80 programs/progman/progman.rc:32
 #: programs/taskmgr/taskmgr.rc:35 programs/view/view.rc:31
@@ -3702,22 +3708,18 @@ msgid "High"
 msgstr "Korkea"
 
 #: dlls/ir50_32/ir50_32.rc:28
-#, fuzzy
-#| msgid "Index"
 msgid "Indeo5"
-msgstr "Sisällys"
+msgstr "Indeo5"
 
 #: dlls/ir50_32/ir50_32.rc:29
-#, fuzzy
-#| msgid "Wine Video 1 video codec"
 msgid "Indeo Video Interactive version 5 video codec"
-msgstr "Winen Video 1 -videokoodekki"
+msgstr "Indeo Video Interactive versio 5 -videokoodekki"
 
 #: dlls/joy.cpl/joy.rc:37
 msgid "Joysticks"
 msgstr "Joystickit"
 
-#: dlls/joy.cpl/joy.rc:40 programs/winecfg/winecfg.rc:212
+#: dlls/joy.cpl/joy.rc:40 programs/winecfg/winecfg.rc:218
 msgid "&Disable"
 msgstr "&Poista käytöstä"
 
@@ -3946,15 +3948,15 @@ msgstr "Ehdollinen kääntäminen on pois käytöstä"
 msgid "Expected '@'"
 msgstr "Odotettiin merkkiä '@'"
 
-#: dlls/jscript/jscript.rc:82
+#: dlls/jscript/jscript.rc:89
 msgid "Microsoft JScript compilation error"
 msgstr "Microsoft JScript -käännösvirhe"
 
-#: dlls/jscript/jscript.rc:83
+#: dlls/jscript/jscript.rc:90
 msgid "Microsoft JScript runtime error"
 msgstr "Microsoft JScript -suoritusvirhe"
 
-#: dlls/jscript/jscript.rc:84 dlls/vbscript/vbscript.rc:64
+#: dlls/jscript/jscript.rc:91 dlls/vbscript/vbscript.rc:64
 msgid "Unknown runtime error"
 msgstr "Tuntematon ajonaikainen virhe"
 
@@ -4011,65 +4013,97 @@ msgid "Syntax error in regular expression"
 msgstr "Syntaksivirhe säännöllisessä lausekkeessa"
 
 #: dlls/jscript/jscript.rc:66
+msgid "Unexpected quantifier"
+msgstr "Odottamaton määre"
+
+#: dlls/jscript/jscript.rc:67
 msgid "Exception thrown and not caught"
 msgstr "Poikkeusta ei otettu kiinni"
 
-#: dlls/jscript/jscript.rc:68
+#: dlls/jscript/jscript.rc:69
 msgid "URI to be encoded contains invalid characters"
 msgstr "Enkoodattava URI sisältää virheellisiä merkkejä"
 
-#: dlls/jscript/jscript.rc:67
+#: dlls/jscript/jscript.rc:68
 msgid "URI to be decoded is incorrect"
 msgstr "Dekoodattava URI on virheellinen"
 
-#: dlls/jscript/jscript.rc:69
+#: dlls/jscript/jscript.rc:70
 msgid "Number of fraction digits is out of range"
 msgstr "Desimaalien määrä ei kelpaa"
 
-#: dlls/jscript/jscript.rc:70
+#: dlls/jscript/jscript.rc:71
 msgid "Precision is out of range"
 msgstr "Tarkkuus ei kelpaa"
 
-#: dlls/jscript/jscript.rc:71
+#: dlls/jscript/jscript.rc:72
 msgid "Array length must be a finite positive integer"
 msgstr "Taulukon pituuden täytyy olla positiivinen kokonaisluku"
 
-#: dlls/jscript/jscript.rc:72
+#: dlls/jscript/jscript.rc:73
 msgid "Array object expected"
 msgstr "Odotettiin taulukkoa"
 
-#: dlls/jscript/jscript.rc:73
+#: dlls/jscript/jscript.rc:74
 msgid ""
 "'writable' attribute on the property descriptor cannot be set to 'true' on "
 "this object"
 msgstr ""
 "Attribuutti 'writable' ei voi olla 'true' tämän objektin ominaisuuksissa"
 
-#: dlls/jscript/jscript.rc:74
+#: dlls/jscript/jscript.rc:75
 msgid "Cyclic __proto__ value"
 msgstr "Syklinen __proto__"
 
-#: dlls/jscript/jscript.rc:75
+#: dlls/jscript/jscript.rc:76
 msgid "Cannot create property for a non-extensible object"
 msgstr "Ominaisuutta ei voi määritellä, koska objekti ei ole laajennettava"
 
-#: dlls/jscript/jscript.rc:76
+#: dlls/jscript/jscript.rc:77
 msgid "Cannot define property '|': object is not extensible"
 msgstr "Ominaisuutta '|' ei voi määritellä: objekti ei ole laajennettava"
 
-#: dlls/jscript/jscript.rc:77
+#: dlls/jscript/jscript.rc:78
 msgid "Cannot redefine non-configurable property '|'"
 msgstr "Ei-konfiguroitavaa ominaisuutta '|' ei voi määritellä uudestaan"
 
-#: dlls/jscript/jscript.rc:78
+#: dlls/jscript/jscript.rc:79
 msgid "Cannot modify non-writable property '|'"
 msgstr "Kirjoitussuojattua ominaisuutta '|' ei voi muokata"
 
-#: dlls/jscript/jscript.rc:79
+#: dlls/jscript/jscript.rc:80
+#, fuzzy
+#| msgid "'this' is not a | object"
+msgid "'this' is not a DataView object"
+msgstr "'this' ei ole |-objekti"
+
+#: dlls/jscript/jscript.rc:81
+msgid "Required argument offset or value in DataView method is not specified"
+msgstr ""
+
+#: dlls/jscript/jscript.rc:82
+msgid "DataView operation access beyond specified buffer length"
+msgstr ""
+
+#: dlls/jscript/jscript.rc:83
+msgid "DataView constructor argument offset is invalid"
+msgstr ""
+
+#: dlls/jscript/jscript.rc:84
 msgid "'this' is not a | object"
 msgstr "'this' ei ole |-objekti"
 
-#: dlls/jscript/jscript.rc:80
+#: dlls/jscript/jscript.rc:85
+msgid "'key' is not an object"
+msgstr "'key' ei ole objekti"
+
+#: dlls/jscript/jscript.rc:86
+#, fuzzy
+#| msgid "Array object expected"
+msgid "ArrayBuffer object expected"
+msgstr "Odotettiin taulukkoa"
+
+#: dlls/jscript/jscript.rc:87
 msgid "Property cannot have both accessors and a value"
 msgstr "Ominaisuudella ei voi olla sekä hakufunktiota että arvoa"
 
@@ -4078,7 +4112,7 @@ msgid "Wine kernel DLL"
 msgstr "Winen ydin-DLL"
 
 #: include/wine/wine_common_ver.rc:143 dlls/winemac.drv/winemac.rc:32
-#: programs/wineboot/wineboot.rc:42 programs/winecfg/winecfg.rc:137
+#: programs/wineboot/wineboot.rc:42 programs/winecfg/winecfg.rc:143
 msgid "Wine"
 msgstr "Wine"
 
@@ -5490,7 +5524,7 @@ msgstr "Käyttäjän keskeyttämä.\n"
 msgid "File has a user-mapped section.\n"
 msgstr "Tiedoston osa on kuvattu muistiin.\n"
 
-#: dlls/kernelbase/winerror.mc:1758 dlls/kernelbase/winerror.mc:3783
+#: dlls/kernelbase/winerror.mc:1758 dlls/kernelbase/winerror.mc:3788
 msgid "Connection refused.\n"
 msgstr "Yhteys estetty.\n"
 
@@ -7091,42 +7125,46 @@ msgid "Invalid argument.\n"
 msgstr "Argumentti ei kelpaa.\n"
 
 #: dlls/kernelbase/winerror.mc:3778
+msgid "Cannot assign requested address.\n"
+msgstr ""
+
+#: dlls/kernelbase/winerror.mc:3783
 msgid "Connection reset by peer.\n"
 msgstr "Vastapuoli nollasi yhteyden.\n"
 
-#: dlls/kernelbase/winerror.mc:3788
+#: dlls/kernelbase/winerror.mc:3793
 msgid "Host not found.\n"
 msgstr "Isäntää ei löydy.\n"
 
-#: dlls/kernelbase/winerror.mc:3793
+#: dlls/kernelbase/winerror.mc:3798
 msgid "Nonauthoritative host not found.\n"
 msgstr "Isäntää ei löydy (ei-autoritatiivinen).\n"
 
-#: dlls/kernelbase/winerror.mc:3798
+#: dlls/kernelbase/winerror.mc:3803
 msgid "Nonrecoverable error.\n"
 msgstr "Peruuttamaton virhe.\n"
 
-#: dlls/kernelbase/winerror.mc:3803
+#: dlls/kernelbase/winerror.mc:3808
 msgid "Name valid, no data record.\n"
 msgstr "Nimi kelpaa, ei tietuetta.\n"
 
-#: dlls/kernelbase/winerror.mc:3817
+#: dlls/kernelbase/winerror.mc:3822
 msgid "Not implemented.\n"
 msgstr "Ei toteutettu.\n"
 
-#: dlls/kernelbase/winerror.mc:3838
+#: dlls/kernelbase/winerror.mc:3843
 msgid "Call failed.\n"
 msgstr "Kutsu epäonnistui.\n"
 
-#: dlls/kernelbase/winerror.mc:3810
+#: dlls/kernelbase/winerror.mc:3815
 msgid "No Signature found in file.\n"
 msgstr "Tiedostosta ei löytynyt allekirjoitusta.\n"
 
-#: dlls/kernelbase/winerror.mc:3824
+#: dlls/kernelbase/winerror.mc:3829
 msgid "Invalid call.\n"
 msgstr "Kutsu ei kelpaa.\n"
 
-#: dlls/kernelbase/winerror.mc:3831
+#: dlls/kernelbase/winerror.mc:3836
 msgid "Resource is not currently available.\n"
 msgstr "Resurssi ei ole nyt saatavilla.\n"
 
@@ -8093,7 +8131,7 @@ msgstr "Hyperlinkki"
 msgid "Hyperlink Information"
 msgstr "Tietoja hyperlinkistä"
 
-#: dlls/mshtml/mshtml.rc:43 programs/winecfg/winecfg.rc:243
+#: dlls/mshtml/mshtml.rc:43 programs/winecfg/winecfg.rc:249
 msgid "&Type:"
 msgstr "&Tyyppi:"
 
@@ -8211,7 +8249,7 @@ msgstr "ominaisuus lähteestä:"
 msgid "choose which folder contains %s"
 msgstr "valitse kansio, jossa on %s"
 
-#: dlls/msi/msi.rc:66 dlls/shell32/shell32.rc:236
+#: dlls/msi/msi.rc:66 dlls/shell32/shell32.rc:238
 msgid "New Folder"
 msgstr "Uusi kansio"
 
@@ -9339,8 +9377,9 @@ msgstr "Lähde:"
 #: dlls/oledlg/oledlg.rc:86 dlls/shdoclc/shdoclc.rc:50
 #: dlls/shdoclc/shdoclc.rc:82 dlls/shdoclc/shdoclc.rc:95
 #: dlls/shdoclc/shdoclc.rc:135 dlls/shdoclc/shdoclc.rc:162
-#: dlls/shdoclc/shdoclc.rc:186 dlls/user32/user32.rc:62
-#: programs/conhost/conhost.rc:37 programs/wordpad/wordpad.rc:114
+#: dlls/shdoclc/shdoclc.rc:186 dlls/shell32/shell32.rc:99
+#: dlls/user32/user32.rc:62 programs/conhost/conhost.rc:37
+#: programs/wordpad/wordpad.rc:114
 msgid "&Paste"
 msgstr "L&iitä"
 
@@ -9372,7 +9411,7 @@ msgstr ""
 "Lisää tiedoston sisältö objektina dokumenttiisi, niin voit aktivoida sen "
 "ohjelmalla, jolla se luotiin."
 
-#: dlls/oledlg/oledlg.rc:30 dlls/shell32/shell32.rc:195
+#: dlls/oledlg/oledlg.rc:30 dlls/shell32/shell32.rc:197
 msgid "Browse"
 msgstr "Selaa"
 
@@ -9486,8 +9525,8 @@ msgctxt "unit: bits"
 msgid "b"
 msgstr "b"
 
-#: dlls/sane.ds/sane.rc:34 dlls/wineps.drv/wineps.rc:49
-#: programs/winecfg/winecfg.rc:182
+#: dlls/sane.ds/sane.rc:34 dlls/wineps.drv/wineps.rc:52
+#: programs/winecfg/winecfg.rc:188
 msgctxt "unit: dots/inch"
 msgid "dpi"
 msgstr "dpi"
@@ -9669,12 +9708,12 @@ msgstr "Ominaisuu&det"
 msgid "&Undo"
 msgstr "K&umoa"
 
-#: dlls/shdoclc/shdoclc.rc:96 dlls/shell32/shell32.rc:105
+#: dlls/shdoclc/shdoclc.rc:96 dlls/shell32/shell32.rc:102
 #: dlls/user32/user32.rc:63
 msgid "&Delete"
 msgstr "&Poista"
 
-#: dlls/shdoclc/shdoclc.rc:103 dlls/shell32/shell32.rc:97
+#: dlls/shdoclc/shdoclc.rc:103
 msgid "&Select"
 msgstr "&Valitse"
 
@@ -9843,26 +9882,26 @@ msgid "&w&bPage &p"
 msgstr "&w&bSivu &p"
 
 #: dlls/shell32/shell32.rc:30 dlls/shell32/shell32.rc:45
-#: dlls/shell32/shell32.rc:122 dlls/shell32/shell32.rc:160
+#: dlls/shell32/shell32.rc:119 dlls/shell32/shell32.rc:157
 #: programs/taskmgr/taskmgr.rc:65 programs/taskmgr/taskmgr.rc:110
 #: programs/taskmgr/taskmgr.rc:252
 msgid "Lar&ge Icons"
 msgstr "&Suuret kuvakkeet"
 
 #: dlls/shell32/shell32.rc:31 dlls/shell32/shell32.rc:46
-#: dlls/shell32/shell32.rc:123 dlls/shell32/shell32.rc:161
+#: dlls/shell32/shell32.rc:120 dlls/shell32/shell32.rc:158
 #: programs/taskmgr/taskmgr.rc:66 programs/taskmgr/taskmgr.rc:111
 #: programs/taskmgr/taskmgr.rc:253
 msgid "S&mall Icons"
 msgstr "&Pienet kuvakkeet"
 
 #: dlls/shell32/shell32.rc:32 dlls/shell32/shell32.rc:47
-#: dlls/shell32/shell32.rc:124 dlls/shell32/shell32.rc:162
+#: dlls/shell32/shell32.rc:121 dlls/shell32/shell32.rc:159
 msgid "&List"
 msgstr "&Lista"
 
 #: dlls/shell32/shell32.rc:33 dlls/shell32/shell32.rc:48
-#: dlls/shell32/shell32.rc:125 dlls/shell32/shell32.rc:163
+#: dlls/shell32/shell32.rc:122 dlls/shell32/shell32.rc:160
 #: programs/taskmgr/taskmgr.rc:67 programs/taskmgr/taskmgr.rc:112
 #: programs/taskmgr/taskmgr.rc:254
 msgid "&Details"
@@ -9905,7 +9944,7 @@ msgstr "Liitä linkiksi"
 msgid "New"
 msgstr "Uusi"
 
-#: dlls/shell32/shell32.rc:69
+#: dlls/shell32/shell32.rc:69 dlls/shell32/shell32.rc:240
 msgid "New &Folder"
 msgstr "Uusi &kansio"
 
@@ -9922,23 +9961,19 @@ msgstr "&Palauta"
 msgid "&Erase"
 msgstr "&Poista"
 
-#: dlls/shell32/shell32.rc:98
-msgid "E&xplore"
-msgstr "&Selaa"
-
-#: dlls/shell32/shell32.rc:101
+#: dlls/shell32/shell32.rc:97
 msgid "C&ut"
 msgstr "&Leikkaa"
 
-#: dlls/shell32/shell32.rc:104
+#: dlls/shell32/shell32.rc:101
 msgid "Create &Link"
 msgstr "Lu&o linkki"
 
-#: dlls/shell32/shell32.rc:106
+#: dlls/shell32/shell32.rc:103
 msgid "&Rename"
 msgstr "&Nimeä uudelleen"
 
-#: dlls/shell32/shell32.rc:117 programs/notepad/notepad.rc:39
+#: dlls/shell32/shell32.rc:114 programs/notepad/notepad.rc:39
 #: programs/oleview/oleview.rc:38 programs/regedit/regedit.rc:41
 #: programs/view/view.rc:34 programs/winefile/winefile.rc:40
 #: programs/winemine/winemine.rc:51 programs/winhlp32/winhlp32.rc:37
@@ -9946,337 +9981,345 @@ msgstr "&Nimeä uudelleen"
 msgid "E&xit"
 msgstr "&Poistu"
 
-#: dlls/shell32/shell32.rc:130
+#: dlls/shell32/shell32.rc:127
 msgid "&About Control Panel"
 msgstr "Ti&etoja Ohjauspaneelista"
 
-#: dlls/shell32/shell32.rc:271 dlls/shell32/shell32.rc:286
+#: dlls/shell32/shell32.rc:275 dlls/shell32/shell32.rc:290
 msgid "Browse for Folder"
 msgstr "Valitse kansio"
 
-#: dlls/shell32/shell32.rc:291
+#: dlls/shell32/shell32.rc:295
 msgid "Folder:"
 msgstr "Kansio:"
 
-#: dlls/shell32/shell32.rc:297
+#: dlls/shell32/shell32.rc:301
 msgid "&Make New Folder"
 msgstr "&Luo uusi kansio"
 
-#: dlls/shell32/shell32.rc:304
+#: dlls/shell32/shell32.rc:308
 msgid "Message"
 msgstr "Viesti"
 
-#: dlls/shell32/shell32.rc:308
+#: dlls/shell32/shell32.rc:312
 msgid "Yes to &all"
 msgstr "Kyllä k&aikkiin"
 
-#: dlls/shell32/shell32.rc:317
+#: dlls/shell32/shell32.rc:321
 msgid "About %s"
 msgstr "Tietoja ohjelmasta %s"
 
-#: dlls/shell32/shell32.rc:321
+#: dlls/shell32/shell32.rc:325
 msgid "Wine &license"
 msgstr "Winen &lisenssi"
 
-#: dlls/shell32/shell32.rc:326
+#: dlls/shell32/shell32.rc:330
 msgid "Running on %s"
 msgstr "Käytössä on versio %s"
 
-#: dlls/shell32/shell32.rc:327
+#: dlls/shell32/shell32.rc:331
 msgid "Wine was brought to you by:"
 msgstr "Winen ovat tehneet:"
 
-#: dlls/shell32/shell32.rc:332
+#: dlls/shell32/shell32.rc:336
 msgid "Run"
 msgstr "Suorita"
 
-#: dlls/shell32/shell32.rc:336
+#: dlls/shell32/shell32.rc:340
 msgid ""
 "Type the name of a program, folder, document, or Internet resource, and Wine "
 "will open it for you."
 msgstr "Anna ohjelma, dokumentti tai Internet-osoite, niin Wine avaa sen."
 
-#: dlls/shell32/shell32.rc:337
+#: dlls/shell32/shell32.rc:341
 msgid "&Open:"
 msgstr "&Avaa:"
 
-#: dlls/shell32/shell32.rc:341 programs/progman/progman.rc:182
+#: dlls/shell32/shell32.rc:345 programs/progman/progman.rc:182
 #: programs/progman/progman.rc:201 programs/progman/progman.rc:218
-#: programs/winecfg/winecfg.rc:241 programs/winefile/winefile.rc:129
+#: programs/winecfg/winecfg.rc:247 programs/winefile/winefile.rc:129
 msgid "&Browse..."
 msgstr "&Selaa..."
 
-#: dlls/shell32/shell32.rc:353 dlls/shell32/shell32.rc:382
+#: dlls/shell32/shell32.rc:357 dlls/shell32/shell32.rc:386
 msgid "File type:"
 msgstr "Tiedostotyyppi:"
 
-#: dlls/shell32/shell32.rc:357 dlls/shell32/shell32.rc:390
+#: dlls/shell32/shell32.rc:361 dlls/shell32/shell32.rc:394
 #: dlls/urlmon/urlmon.rc:37 programs/explorer/explorer.rc:33
 msgid "Location:"
 msgstr "Sijainti:"
 
-#: dlls/shell32/shell32.rc:359 dlls/shell32/shell32.rc:392
+#: dlls/shell32/shell32.rc:363 dlls/shell32/shell32.rc:396
 #: programs/winefile/winefile.rc:169
 msgid "Size:"
 msgstr "Koko:"
 
-#: dlls/shell32/shell32.rc:363 dlls/shell32/shell32.rc:396
+#: dlls/shell32/shell32.rc:367 dlls/shell32/shell32.rc:400
 msgid "Creation date:"
 msgstr "Luotu:"
 
-#: dlls/shell32/shell32.rc:367 dlls/shell32/shell32.rc:404
+#: dlls/shell32/shell32.rc:371 dlls/shell32/shell32.rc:408
 msgid "Attributes:"
 msgstr "Ominaisuudet:"
 
-#: dlls/shell32/shell32.rc:369 dlls/shell32/shell32.rc:406
+#: dlls/shell32/shell32.rc:373 dlls/shell32/shell32.rc:410
 #: programs/winefile/winefile.rc:173
 msgid "H&idden"
 msgstr "P&iilotettu"
 
-#: dlls/shell32/shell32.rc:370 dlls/shell32/shell32.rc:407
+#: dlls/shell32/shell32.rc:374 dlls/shell32/shell32.rc:411
 #: programs/winefile/winefile.rc:174
 msgid "&Archive"
 msgstr "&Arkisto"
 
-#: dlls/shell32/shell32.rc:384
+#: dlls/shell32/shell32.rc:388
 msgid "Open with:"
 msgstr "Avaa ohjelmalla:"
 
-#: dlls/shell32/shell32.rc:387
+#: dlls/shell32/shell32.rc:391
 msgid "&Change..."
 msgstr "&Vaihda..."
 
-#: dlls/shell32/shell32.rc:398
+#: dlls/shell32/shell32.rc:402
 msgid "Last modified:"
 msgstr "Muokattu:"
 
-#: dlls/shell32/shell32.rc:400
+#: dlls/shell32/shell32.rc:404
 msgid "Last accessed:"
 msgstr "Käytetty:"
 
-#: dlls/shell32/shell32.rc:138 dlls/shell32/shell32.rc:142
+#: dlls/shell32/shell32.rc:135 dlls/shell32/shell32.rc:139
 #: programs/winefile/winefile.rc:107
 msgid "Size"
 msgstr "Koko"
 
-#: dlls/shell32/shell32.rc:139 programs/regedit/regedit.rc:151
+#: dlls/shell32/shell32.rc:136 programs/regedit/regedit.rc:151
 msgid "Type"
 msgstr "Tyyppi"
 
-#: dlls/shell32/shell32.rc:140
+#: dlls/shell32/shell32.rc:137
 msgid "Modified"
 msgstr "Muokattu"
 
-#: dlls/shell32/shell32.rc:141 programs/winefile/winefile.rc:171
+#: dlls/shell32/shell32.rc:138 programs/winefile/winefile.rc:171
 #: programs/winefile/winefile.rc:113
 msgid "Attributes"
 msgstr "Ominaisuudet"
 
-#: dlls/shell32/shell32.rc:143
+#: dlls/shell32/shell32.rc:140
 msgid "Size available"
 msgstr "Tilaa jäljellä"
 
-#: dlls/shell32/shell32.rc:145
+#: dlls/shell32/shell32.rc:142
 msgid "Comments"
 msgstr "Kommentit"
 
-#: dlls/shell32/shell32.rc:146
+#: dlls/shell32/shell32.rc:143
 msgid "Original location"
 msgstr "Alkuperäinen sijainti"
 
-#: dlls/shell32/shell32.rc:147
+#: dlls/shell32/shell32.rc:144
 msgid "Date deleted"
 msgstr "Poistoaika"
 
-#: dlls/shell32/shell32.rc:154 programs/winecfg/winecfg.rc:100
+#: dlls/shell32/shell32.rc:151 programs/winecfg/winecfg.rc:106
 #: programs/winefile/winefile.rc:99
 msgctxt "display name"
 msgid "Desktop"
 msgstr "Työpöytä"
 
-#: dlls/shell32/shell32.rc:155 programs/regedit/regedit.rc:243
+#: dlls/shell32/shell32.rc:152 programs/regedit/regedit.rc:243
 msgid "My Computer"
 msgstr "Oma tietokone"
 
-#: dlls/shell32/shell32.rc:157
+#: dlls/shell32/shell32.rc:154
 msgid "Control Panel"
 msgstr "Ohjauspaneeli"
 
-#: dlls/shell32/shell32.rc:164
-msgid "Select"
-msgstr "Valitse"
+#: dlls/shell32/shell32.rc:162
+msgid "Ne&w"
+msgstr ""
 
-#: dlls/shell32/shell32.rc:187
+#: dlls/shell32/shell32.rc:164
+msgid "E&xplore"
+msgstr "&Selaa"
+
+#: dlls/shell32/shell32.rc:167
+msgid "Run as &Administrator"
+msgstr ""
+
+#: dlls/shell32/shell32.rc:189
 msgid "Restart"
 msgstr "Käynnistä uudelleen"
 
-#: dlls/shell32/shell32.rc:188
+#: dlls/shell32/shell32.rc:190
 msgid "Do you want to simulate a Windows reboot?"
 msgstr "Haluatko simuloida Windowsin uudelleenkäynnistämistä?"
 
-#: dlls/shell32/shell32.rc:189
+#: dlls/shell32/shell32.rc:191
 msgid "Shutdown"
 msgstr "Sammuta"
 
-#: dlls/shell32/shell32.rc:190
+#: dlls/shell32/shell32.rc:192
 msgid "Do you want to shutdown your Wine session?"
 msgstr "Haluatko lopettaa Wine-istunnon?"
 
-#: dlls/shell32/shell32.rc:201 programs/progman/progman.rc:83
+#: dlls/shell32/shell32.rc:203 programs/progman/progman.rc:83
 msgid "Programs"
 msgstr "Ohjelmat"
 
-#: dlls/shell32/shell32.rc:202 dlls/shell32/shell32.rc:217
-#: dlls/shell32/shell32.rc:148 dlls/shell32/shell32.rc:233
+#: dlls/shell32/shell32.rc:204 dlls/shell32/shell32.rc:219
+#: dlls/shell32/shell32.rc:145 dlls/shell32/shell32.rc:235
 msgid "Documents"
 msgstr "Tiedostot"
 
-#: dlls/shell32/shell32.rc:203
+#: dlls/shell32/shell32.rc:205
 msgid "Favorites"
 msgstr "Suosikit"
 
-#: dlls/shell32/shell32.rc:204
+#: dlls/shell32/shell32.rc:206
 msgid "StartUp"
 msgstr "Käynnistys"
 
-#: dlls/shell32/shell32.rc:205
+#: dlls/shell32/shell32.rc:207
 msgid "Start Menu"
 msgstr "Käynnistä-valikko"
 
-#: dlls/shell32/shell32.rc:206 dlls/shell32/shell32.rc:219
+#: dlls/shell32/shell32.rc:208 dlls/shell32/shell32.rc:221
 msgid "Music"
 msgstr "Musiikki"
 
-#: dlls/shell32/shell32.rc:207 dlls/shell32/shell32.rc:221
+#: dlls/shell32/shell32.rc:209 dlls/shell32/shell32.rc:223
 msgid "Videos"
 msgstr "Videot"
 
-#: dlls/shell32/shell32.rc:208
+#: dlls/shell32/shell32.rc:210
 msgctxt "directory"
 msgid "Desktop"
 msgstr "Työpöytä"
 
-#: dlls/shell32/shell32.rc:209
+#: dlls/shell32/shell32.rc:211
 msgid "NetHood"
 msgstr "Verkkoympäristö"
 
-#: dlls/shell32/shell32.rc:210
+#: dlls/shell32/shell32.rc:212
 msgid "Templates"
 msgstr "Mallit"
 
-#: dlls/shell32/shell32.rc:211
+#: dlls/shell32/shell32.rc:213
 msgid "PrintHood"
 msgstr "Tulostinympäristö"
 
-#: dlls/shell32/shell32.rc:212 programs/winhlp32/winhlp32.rc:49
+#: dlls/shell32/shell32.rc:214 programs/winhlp32/winhlp32.rc:49
 msgid "History"
 msgstr "Historia"
 
-#: dlls/shell32/shell32.rc:213
+#: dlls/shell32/shell32.rc:215
 msgid "Program Files"
 msgstr "Ohjelmatiedostot"
 
-#: dlls/shell32/shell32.rc:215 dlls/shell32/shell32.rc:220
+#: dlls/shell32/shell32.rc:217 dlls/shell32/shell32.rc:222
 msgid "Pictures"
 msgstr "Kuvat"
 
-#: dlls/shell32/shell32.rc:216
+#: dlls/shell32/shell32.rc:218
 msgid "Common Files"
 msgstr "Yhteiset tiedostot"
 
-#: dlls/shell32/shell32.rc:218
+#: dlls/shell32/shell32.rc:220
 msgid "Administrative Tools"
 msgstr "Hallintatyökalut"
 
-#: dlls/shell32/shell32.rc:214
+#: dlls/shell32/shell32.rc:216
 msgid "Program Files (x86)"
 msgstr "Ohjelmatiedostot (x86)"
 
-#: dlls/shell32/shell32.rc:222
+#: dlls/shell32/shell32.rc:224
 msgid "Contacts"
 msgstr "Kontaktit"
 
-#: dlls/shell32/shell32.rc:223 programs/winefile/winefile.rc:112
+#: dlls/shell32/shell32.rc:225 programs/winefile/winefile.rc:112
 msgid "Links"
 msgstr "Linkit"
 
-#: dlls/shell32/shell32.rc:224
+#: dlls/shell32/shell32.rc:226
 msgid "Slide Shows"
 msgstr "Diaesitykset"
 
-#: dlls/shell32/shell32.rc:225
+#: dlls/shell32/shell32.rc:227
 msgid "Playlists"
 msgstr "Soittolistat"
 
-#: dlls/shell32/shell32.rc:149 programs/taskmgr/taskmgr.rc:326
+#: dlls/shell32/shell32.rc:146 programs/taskmgr/taskmgr.rc:326
 msgid "Status"
 msgstr "Tila"
 
-#: dlls/shell32/shell32.rc:151
+#: dlls/shell32/shell32.rc:148
 msgid "Model"
 msgstr "Malli"
 
-#: dlls/shell32/shell32.rc:226
+#: dlls/shell32/shell32.rc:228
 msgid "Sample Music"
 msgstr "Esimerkkimusiikki"
 
-#: dlls/shell32/shell32.rc:227
+#: dlls/shell32/shell32.rc:229
 msgid "Sample Pictures"
 msgstr "Esimerkkikuvat"
 
-#: dlls/shell32/shell32.rc:228
+#: dlls/shell32/shell32.rc:230
 msgid "Sample Playlists"
 msgstr "Esimerkkisoittolistat"
 
-#: dlls/shell32/shell32.rc:229
+#: dlls/shell32/shell32.rc:231
 msgid "Sample Videos"
 msgstr "Esimerkkivideot"
 
-#: dlls/shell32/shell32.rc:230
+#: dlls/shell32/shell32.rc:232
 msgid "Saved Games"
 msgstr "Tallennetut pelit"
 
-#: dlls/shell32/shell32.rc:231
+#: dlls/shell32/shell32.rc:233
 msgid "Searches"
 msgstr "Haut"
 
-#: dlls/shell32/shell32.rc:232
+#: dlls/shell32/shell32.rc:234
 msgid "Users"
 msgstr "Käyttäjät"
 
-#: dlls/shell32/shell32.rc:234
+#: dlls/shell32/shell32.rc:236
 msgid "Downloads"
 msgstr "Lataukset"
 
-#: dlls/shell32/shell32.rc:167
+#: dlls/shell32/shell32.rc:169
 msgid "Unable to create new Folder: Permission denied."
 msgstr "Uutta kansiota ei voitu luoda: Oikeudet eivät riitä."
 
-#: dlls/shell32/shell32.rc:168
+#: dlls/shell32/shell32.rc:170
 msgid "Error during creation of a new folder"
 msgstr "Virhe luotaessa uutta kansiota"
 
-#: dlls/shell32/shell32.rc:169
+#: dlls/shell32/shell32.rc:171
 msgid "Confirm file deletion"
 msgstr "Vahvista tiedoston tuhoaminen"
 
-#: dlls/shell32/shell32.rc:170
+#: dlls/shell32/shell32.rc:172
 msgid "Confirm folder deletion"
 msgstr "Vahvista kansion tuhoaminen"
 
-#: dlls/shell32/shell32.rc:171
+#: dlls/shell32/shell32.rc:173
 msgid "Are you sure you want to delete '%1'?"
 msgstr "Haluatko varmasti tuhota kohteen '%1'?"
 
-#: dlls/shell32/shell32.rc:172
+#: dlls/shell32/shell32.rc:174
 msgid "Are you sure you want to delete these %1 items?"
 msgstr "Haluatko varmasti tuhota nämä %1?"
 
-#: dlls/shell32/shell32.rc:179
+#: dlls/shell32/shell32.rc:181
 msgid "Confirm file overwrite"
 msgstr "Vahvista tiedoston ylikirjoitus"
 
-#: dlls/shell32/shell32.rc:178
+#: dlls/shell32/shell32.rc:180
 msgid ""
 "This folder already contains a file called '%1'.\n"
 "\n"
@@ -10286,31 +10329,31 @@ msgstr ""
 "\n"
 "Korvataanko entinen tiedosto?"
 
-#: dlls/shell32/shell32.rc:173
+#: dlls/shell32/shell32.rc:175
 msgid "Are you sure you want to delete the selected item(s)?"
 msgstr "Haluatko varmasti tuhota valitut kohteet?"
 
-#: dlls/shell32/shell32.rc:175
+#: dlls/shell32/shell32.rc:177
 msgid ""
 "Are you sure that you want to send '%1' and all its content to the Trash?"
 msgstr ""
 "Haluatko varmasti siirtää kohteen '%1' ja kaiken sen sisällön Roskakoriin?"
 
-#: dlls/shell32/shell32.rc:174
+#: dlls/shell32/shell32.rc:176
 msgid "Are you sure that you want to send '%1' to the Trash?"
 msgstr "Haluatko varmasti siirtää kohteen '%1' Roskakoriin?"
 
-#: dlls/shell32/shell32.rc:176
+#: dlls/shell32/shell32.rc:178
 msgid "Are you sure that you want to send these %1 items to the Trash?"
 msgstr "Haluatko varmasti siirtää nämä %1 kohdetta roskakoriin?"
 
-#: dlls/shell32/shell32.rc:177
+#: dlls/shell32/shell32.rc:179
 msgid "The item '%1' can't be sent to Trash. Do you want to delete it instead?"
 msgstr ""
 "Kohdetta '%1' ei voida siirtää Roskakoriin. Haluatko sen sijaan poistaa sen "
 "kokonaan?"
 
-#: dlls/shell32/shell32.rc:184
+#: dlls/shell32/shell32.rc:186
 msgid ""
 "This folder already contains a folder named '%1'.\n"
 "\n"
@@ -10324,40 +10367,40 @@ msgstr ""
 "ne korvataan uusilla. Haluatko siitä huolimatta siirtää tai kopioida\n"
 "kansion?"
 
-#: dlls/shell32/shell32.rc:238
+#: dlls/shell32/shell32.rc:242
 msgid "Wine Control Panel"
 msgstr "Winen Ohjauspaneeli"
 
-#: dlls/shell32/shell32.rc:193
+#: dlls/shell32/shell32.rc:195
 msgid "Unable to display Run dialog box (internal error)"
 msgstr "Suorita-valintaikkunaa ei voida näyttää (sisäinen virhe)"
 
-#: dlls/shell32/shell32.rc:194
+#: dlls/shell32/shell32.rc:196
 msgid "Unable to display Browse dialog box (internal error)"
 msgstr "Selaa-valintaikkunaa ei voida näyttää (sisäinen virhe)"
 
-#: dlls/shell32/shell32.rc:196
+#: dlls/shell32/shell32.rc:198
 msgid "Executable files (*.exe)"
 msgstr "Suoritettavat tiedostot (*.exe)"
 
-#: dlls/shell32/shell32.rc:242
+#: dlls/shell32/shell32.rc:246
 msgid "There is no Windows program configured to open this type of file."
 msgstr ""
 "Tämän tiedostotyypin avaamiseen ei ole kytketty mitään Windows-ohjelmaa."
 
-#: dlls/shell32/shell32.rc:244
+#: dlls/shell32/shell32.rc:248
 msgid "Are you sure you wish to permanently delete '%1'?"
 msgstr "Haluatko varmasti tuhota kohteen '%1'?"
 
-#: dlls/shell32/shell32.rc:245
+#: dlls/shell32/shell32.rc:249
 msgid "Are you sure you wish to permanently delete these %1 items?"
 msgstr "Haluatko varmasti tuhota nämä %1 kohdetta?"
 
-#: dlls/shell32/shell32.rc:246
+#: dlls/shell32/shell32.rc:250
 msgid "Confirm deletion"
 msgstr "Vahvista tuhoaminen"
 
-#: dlls/shell32/shell32.rc:247
+#: dlls/shell32/shell32.rc:251
 msgid ""
 "A file already exists at the path %1.\n"
 "\n"
@@ -10367,7 +10410,7 @@ msgstr ""
 "\n"
 "Haluatko kirjoittaa sen yli?"
 
-#: dlls/shell32/shell32.rc:248
+#: dlls/shell32/shell32.rc:252
 msgid ""
 "A folder already exists at the path %1.\n"
 "\n"
@@ -10377,11 +10420,11 @@ msgstr ""
 "\n"
 "Haluatko kirjoittaa sen yli?"
 
-#: dlls/shell32/shell32.rc:249
+#: dlls/shell32/shell32.rc:253
 msgid "Confirm overwrite"
 msgstr "Vahvista ylikirjoitus"
 
-#: dlls/shell32/shell32.rc:266
+#: dlls/shell32/shell32.rc:270
 msgid ""
 "Wine is free software; you can redistribute it and/or modify it under the "
 "terms of the GNU Lesser General Public License as published by the Free "
@@ -10410,11 +10453,11 @@ msgstr ""
 "ei, kirjoita osoitteeseen Free Software Foundation Inc., 51 Franklin St, "
 "Fifth Floor, Boston, MA 02110-1301, USA."
 
-#: dlls/shell32/shell32.rc:254
+#: dlls/shell32/shell32.rc:258
 msgid "Wine License"
 msgstr "Winen lisenssi"
 
-#: dlls/shell32/shell32.rc:156
+#: dlls/shell32/shell32.rc:153
 msgid "Trash"
 msgstr "Roskakori"
 
@@ -12420,23 +12463,23 @@ msgstr "&Sulje\tCtrl+F4"
 msgid "Nex&t\tCtrl+F6"
 msgstr "&Seuraava\tCtrl+F6"
 
-#: dlls/user32/user32.rc:81
+#: dlls/user32/user32.rc:92 dlls/user32/user32.rc:75
 msgid "&Abort"
 msgstr "&Keskeytä"
 
-#: dlls/user32/user32.rc:85
+#: dlls/user32/user32.rc:96 dlls/user32/user32.rc:77
 msgid "&Ignore"
 msgstr "&Hylkää"
 
-#: dlls/user32/user32.rc:86
+#: dlls/user32/user32.rc:97 dlls/user32/user32.rc:82
 msgid "&Try Again"
 msgstr "&Yritä uudelleen"
 
-#: dlls/user32/user32.rc:87
+#: dlls/user32/user32.rc:98 dlls/user32/user32.rc:83
 msgid "&Continue"
 msgstr "&Jatka"
 
-#: dlls/user32/user32.rc:94
+#: dlls/user32/user32.rc:105
 msgid "Select Window"
 msgstr "Valitse ikkuna"
 
@@ -12604,6 +12647,10 @@ msgstr "Paperi&koko:"
 msgid "Duplex:"
 msgstr "Kaksipuolinen:"
 
+#: dlls/wineps.drv/wineps.rc:45
+msgid "Paper &Tray:"
+msgstr "&Paperilähde:"
+
 #: dlls/wininet/wininet.rc:53 dlls/wininet/wininet.rc:73
 msgid "Realm"
 msgstr "Alue"
@@ -12612,7 +12659,7 @@ msgstr "Alue"
 msgid "Authentication Required"
 msgstr "Vaaditaan tunnistautuminen"
 
-#: dlls/wininet/wininet.rc:72
+#: dlls/wininet/wininet.rc:72 programs/klist/klist.rc:35
 msgid "Server"
 msgstr "Palvelin"
 
@@ -13658,7 +13705,7 @@ msgid "Digi&tal"
 msgstr "Di&gitaalinen"
 
 #: programs/clock/clock.rc:35 programs/notepad/notepad.rc:53
-#: programs/winecfg/winecfg.rc:305 programs/winefile/winefile.rc:63
+#: programs/winecfg/winecfg.rc:313 programs/winefile/winefile.rc:63
 #: programs/wordpad/wordpad.rc:84
 msgid "&Font..."
 msgstr "&Fontti..."
@@ -14680,6 +14727,31 @@ msgstr "Käynnistä"
 msgid "&Run..."
 msgstr "&Suorita..."
 
+#: programs/explorer/explorer.rc:36
+msgid "E&xit desktop"
+msgstr "&Sulje työpöytä"
+
+#: programs/explorer/explorer.rc:37
+msgid ""
+"Are you sure you want to close all programs and exit the virtual desktop?"
+msgstr "Haluatko varmasti lopettaa kaikki ohjelmat ja sulkea työpöydän?"
+
+#: programs/findstr/findstr.rc:28
+msgid "Usage: findstr /options string\n"
+msgstr "Käyttö: findstr /asetukset merkkijono\n"
+
+#: programs/findstr/findstr.rc:29
+msgid "FINDSTR: Bad command line\n"
+msgstr "FINDSTR: Komentorivi ei kelpaa\n"
+
+#: programs/findstr/findstr.rc:30
+msgid "FINDSTR: Cannot open %s\n"
+msgstr "FINDSTR: Tiedostoa %s ei voi avata\n"
+
+#: programs/findstr/findstr.rc:31
+msgid "FINDSTR: /%c ignored\n"
+msgstr "FINDSTR: /%c ohitettu\n"
+
 #: programs/fsutil/fsutil.mc:28
 msgid ""
 "- Supported Commands -\n"
@@ -14794,6 +14866,42 @@ msgstr "IPv6-osoite"
 msgid "Primary DNS suffix"
 msgstr "Ensisijainen DNS-liite"
 
+#: programs/klist/klist.rc:28
+msgid "Usage: klist <tickets | tgt | purge | get [service principal name]>\n"
+msgstr "Käyttö: klist <tickets | tgt | purge | get [palvelun päänimi (SPN)]>\n"
+
+#: programs/klist/klist.rc:29
+msgid "Unknown error\n"
+msgstr "Tuntematon virhe\n"
+
+#: programs/klist/klist.rc:30
+msgid "Start Time"
+msgstr "Alkamisaika"
+
+#: programs/klist/klist.rc:31
+msgid "End Time"
+msgstr "Päättymisaika"
+
+#: programs/klist/klist.rc:32
+msgid "Renew Time"
+msgstr "Uudistamisaika"
+
+#: programs/klist/klist.rc:33
+msgid "Ticket Flags"
+msgstr "Tiketin liput"
+
+#: programs/klist/klist.rc:34
+msgid "Cached Tickets"
+msgstr "Välimuistissa olevat tiketit"
+
+#: programs/klist/klist.rc:36
+msgid "KerbTicket Encryption Type"
+msgstr "KerbTicketin salauksen tyyppi"
+
+#: programs/klist/klist.rc:37
+msgid "Current LogonId is"
+msgstr "Nykyinen LogonId on"
+
 #: programs/msinfo32/msinfo32.rc:28
 msgid "System Information"
 msgstr "Järjestelmätiedot"
@@ -14886,11 +14994,11 @@ msgstr "Palvelu %1 pysähtyi onnistuneesti.\n"
 msgid "The %1 service failed to stop.\n"
 msgstr "Palvelun %1 pysähtyminen epäonnistui.\n"
 
-#: programs/net/net.rc:44
+#: programs/net/net.rc:45
 msgid "There are no entries in the list.\n"
 msgstr "Listalla ei ole jäseniä.\n"
 
-#: programs/net/net.rc:45
+#: programs/net/net.rc:46
 msgid ""
 "\n"
 "Status  Local   Remote\n"
@@ -14900,33 +15008,37 @@ msgstr ""
 "Tila  Paikallinen  Etä\n"
 "---------------------------------------------------------------\n"
 
-#: programs/net/net.rc:46
+#: programs/net/net.rc:47
 msgid "%1      %2      %3      Open resources: %4!u!\n"
 msgstr "%1      %2      %3      Avoimia resursseja: %4!u!\n"
 
-#: programs/net/net.rc:48
+#: programs/net/net.rc:49
 msgid "Paused"
 msgstr "Pysäytetty"
 
-#: programs/net/net.rc:49
+#: programs/net/net.rc:50
 msgid "Disconnected"
 msgstr "Yhteys katkaistu"
 
-#: programs/net/net.rc:50
+#: programs/net/net.rc:51
 msgid "A network error occurred"
 msgstr "Verkkovirhe"
 
-#: programs/net/net.rc:51
+#: programs/net/net.rc:52
 msgid "Connection is being made"
 msgstr "Yhteyttä muodostetaan"
 
-#: programs/net/net.rc:52
+#: programs/net/net.rc:53
 msgid "Reconnecting"
 msgstr "Yhdistetään uudelleen"
 
 #: programs/net/net.rc:43
 msgid "The following services are running:\n"
 msgstr "Seuraavat palvelut ovat toiminnassa:\n"
+
+#: programs/net/net.rc:44
+msgid "A command was used with conflicting switches.\n"
+msgstr "Annetut valitsimet ovat ristiriidassa.\n"
 
 #: programs/netstat/netstat.rc:30
 msgid "Active Connections"
@@ -17079,7 +17191,7 @@ msgstr "regsvr32: DLL:n '%1' asennuksen purku epäonnistui\n"
 msgid "regsvr32: Successfully uninstalled DLL '%1'\n"
 msgstr "regsvr32: DLL:n '%1' asennus purettu\n"
 
-#: programs/start/start.rc:57
+#: programs/start/start.rc:56
 msgid ""
 "Start a program, or open a document in the program normally used for files\n"
 "with that suffix.\n"
@@ -17102,9 +17214,10 @@ msgid ""
 "/belownormal   Start the program in the belownormal priority class.\n"
 "/node n        Start the program on the specified NUMA node.\n"
 "/affinity mask Start the program with the specified affinity mask.\n"
-"/wait          Wait for the started program to finish, then exit with its\n"
-"exit code.\n"
-"/unix          Use a Unix filename and start the file like Windows\n"
+"/machine arch  Force using a specific architecture (x86,arm,amd64,arm64).\n"
+"/wait          Wait for the program to finish, then exit with its exit "
+"code.\n"
+"/unix          Use a Unix filename and start the file like Windows "
 "Explorer.\n"
 "/exec          Exec the specified file (for internal Wine usage).\n"
 "/ProgIDOpen    Open a document using the specified progID.\n"
@@ -17131,6 +17244,7 @@ msgstr ""
 "/belownormal    Käynnistä ohjelma prioriteetilla 'normaalia matalampi'.\n"
 "/node n         Käynnistä ohjelma määrätyllä NUMA-solmulla.\n"
 "/affinity peite Käynnistä ohjelma määrätyllä affiniteettipeitteellä.\n"
+"/machine arkk.  Käytä väkisin tätä arkkitehtuuria (x86,arm,amd64,arm64).\n"
 "/wait           Odota, että ohjelma sulkeutuu, ja palauta sen paluuarvo.\n"
 "/unix           Käytä Unix-tiedostonimeä ja avaa tiedosto siten, kuin\n"
 "                Windows Explorer avaisi sen.\n"
@@ -17138,7 +17252,7 @@ msgstr ""
 "/ProgIDOpen     Avaa dokumentti määrätyllä progID:llä.\n"
 "/?              Näytä tämä ohje ja lopeta.\n"
 
-#: programs/start/start.rc:59
+#: programs/start/start.rc:58
 msgid ""
 "Application could not be started, or no application associated with the "
 "specified file.\n"
@@ -17148,7 +17262,7 @@ msgstr ""
 "ohjelmaa.\n"
 "ShellExecuteEx epäonnistui"
 
-#: programs/start/start.rc:61
+#: programs/start/start.rc:60
 msgid "Could not translate the specified Unix filename to a DOS filename."
 msgstr "Unix-tiedostonimeä ei voitu kääntää DOS-tiedostonimeksi."
 
@@ -17211,17 +17325,57 @@ msgid "Error: Process self-termination is not permitted.\n"
 msgstr "Virhe: Prosessin itsensä sulkemista ei sallita.\n"
 
 #: programs/taskkill/taskkill.rc:44
-#, fuzzy
-#| msgid "Process with PID %1!u! was forcibly terminated.\n"
 msgid ""
 "The process with PID %1!u! (child process of PID %2!u!) has been "
 "terminated.\n"
-msgstr "Prosessi PID %1!u! suljettiin väkisin.\n"
+msgstr "Prosessi PID %1!u! (prosessin PID %2!u! lapsi) suljettiin väkisin.\n"
 
 #: programs/taskkill/taskkill.rc:45
 msgid ""
 "Sent termination signal to process with PID %1!u!, child of PID %2!u!.\n"
 msgstr ""
+"Lähetettiin lopetussignaali prosessille PID %1!u! (prosessin PID %2!u! "
+"lapsi).\n"
+
+#: include/wine/wine_common_ver.rc:138
+msgid "Wine tasklist"
+msgstr "Winen tehtävälista"
+
+#: programs/tasklist/tasklist.rc:29
+msgid "Usage: tasklist [/?]\n"
+msgstr "Käyttö: tasklist [/?]\n"
+
+#: programs/tasklist/tasklist.rc:30 programs/taskmgr/taskmgr.rc:272
+msgid "Image Name"
+msgstr "Kuvan nimi"
+
+#: programs/tasklist/tasklist.rc:31 programs/taskmgr/taskmgr.rc:273
+msgid "PID"
+msgstr "PID"
+
+#: programs/tasklist/tasklist.rc:32
+msgid "Session Name"
+msgstr "Istunnon nimi"
+
+#: programs/tasklist/tasklist.rc:33
+msgid "Session#"
+msgstr "Istunto#"
+
+#: programs/tasklist/tasklist.rc:34 programs/taskmgr/taskmgr.rc:276
+msgid "Mem Usage"
+msgstr "Muistin käyttö"
+
+#: programs/tasklist/tasklist.rc:35
+msgid "K"
+msgstr "K"
+
+#: programs/tasklist/tasklist.rc:36
+msgid "ERROR: Invalid syntax\n"
+msgstr "VIRHE: Syntaksi ei kelpaa\n"
+
+#: programs/tasklist/tasklist.rc:37
+msgid "ERROR: The search filter cannot be recognized.\n"
+msgstr "VIRHE: Haun suodatinta ei tunnistettu.\n"
 
 #: programs/taskmgr/taskmgr.rc:37 programs/taskmgr/taskmgr.rc:108
 msgid "&New Task (Run...)"
@@ -17886,14 +18040,6 @@ msgstr "Prosessit: %d"
 msgid "Mem Usage: %1!u!kB / %2!u!kB"
 msgstr "Muistin käyttö: %1!u! kt / %2!u! kt"
 
-#: programs/taskmgr/taskmgr.rc:272
-msgid "Image Name"
-msgstr "Kuvan nimi"
-
-#: programs/taskmgr/taskmgr.rc:273
-msgid "PID"
-msgstr "PID"
-
 #: programs/taskmgr/taskmgr.rc:274
 msgid "CPU"
 msgstr "Suoritin"
@@ -17901,10 +18047,6 @@ msgstr "Suoritin"
 #: programs/taskmgr/taskmgr.rc:275
 msgid "CPU Time"
 msgstr "Suoritinaika"
-
-#: programs/taskmgr/taskmgr.rc:276
-msgid "Mem Usage"
-msgstr "Muistin käyttö"
 
 #: programs/taskmgr/taskmgr.rc:277
 msgid "Mem Delta"
@@ -18134,7 +18276,7 @@ msgstr ""
 msgid "The Wine configuration in %s is being updated, please wait..."
 msgstr "Winen asetuksia kohteessa %s päivitetään, ole hyvä ja odota..."
 
-#: programs/winecfg/winecfg.rc:140
+#: programs/winecfg/winecfg.rc:146
 msgid ""
 "This program is free software; you can redistribute it and/or modify it "
 "under the terms of the GNU Lesser General Public License as published by the "
@@ -18145,23 +18287,23 @@ msgstr ""
 "Foundationin GNU Lesser General Public License (LGPL) määrää joko lisenssin "
 "versiossa 2.1 tai (halutessasi) missä tahansa uudemmassa versiossa."
 
-#: programs/winecfg/winecfg.rc:142
+#: programs/winecfg/winecfg.rc:148
 msgid "Windows registration information"
 msgstr "Windowsin rekisteröintitiedot"
 
-#: programs/winecfg/winecfg.rc:143
+#: programs/winecfg/winecfg.rc:149
 msgid "&Owner:"
 msgstr "&Omistaja:"
 
-#: programs/winecfg/winecfg.rc:145
+#: programs/winecfg/winecfg.rc:151
 msgid "Organi&zation:"
 msgstr "Or&ganisaatio:"
 
-#: programs/winecfg/winecfg.rc:153
+#: programs/winecfg/winecfg.rc:159
 msgid "Application settings"
 msgstr "Sovellusten asetukset"
 
-#: programs/winecfg/winecfg.rc:154
+#: programs/winecfg/winecfg.rc:160
 msgid ""
 "Wine can mimic different Windows versions for each application. This tab is "
 "linked to the Libraries and Graphics tabs to allow you to change system-wide "
@@ -18171,55 +18313,55 @@ msgstr ""
 "välilehti toimii yhdessä Kirjastot- ja Grafiikka-välilehtien kanssa sallien "
 "järjestelmän laajuiset ja sovelluskohtaiset asetukset."
 
-#: programs/winecfg/winecfg.rc:158
+#: programs/winecfg/winecfg.rc:164
 msgid "Add appli&cation..."
 msgstr "&Lisää sovellus..."
 
-#: programs/winecfg/winecfg.rc:159
+#: programs/winecfg/winecfg.rc:165
 msgid "&Remove application"
 msgstr "&Poista sovellus"
 
-#: programs/winecfg/winecfg.rc:160
+#: programs/winecfg/winecfg.rc:166
 msgid "&Windows Version:"
 msgstr "&Windowsin versio:"
 
-#: programs/winecfg/winecfg.rc:168
+#: programs/winecfg/winecfg.rc:174
 msgid "Window settings"
 msgstr "Ikkuna-asetukset"
 
-#: programs/winecfg/winecfg.rc:169
+#: programs/winecfg/winecfg.rc:175
 msgid "Automatically capture the &mouse in full-screen windows"
 msgstr "Kaappaa hiiri kokoruututilassa automaattisesti"
 
-#: programs/winecfg/winecfg.rc:170
+#: programs/winecfg/winecfg.rc:176
 msgid "Allow the window manager to &decorate the windows"
 msgstr "Salli ikkunointiohjelman määrätä ikkunoiden &tyyli"
 
-#: programs/winecfg/winecfg.rc:171
+#: programs/winecfg/winecfg.rc:177
 msgid "Allow the &window manager to control the windows"
 msgstr "Salli ikkunointiohjelman &hallita ikkunoita"
 
-#: programs/winecfg/winecfg.rc:172
+#: programs/winecfg/winecfg.rc:178
 msgid "&Emulate a virtual desktop"
 msgstr "&Emuloi virtuaalista työpöytää"
 
-#: programs/winecfg/winecfg.rc:174
+#: programs/winecfg/winecfg.rc:180
 msgid "Desktop &size:"
 msgstr "Työpöydän &koko:"
 
-#: programs/winecfg/winecfg.rc:179
+#: programs/winecfg/winecfg.rc:185
 msgid "Screen resolution"
 msgstr "Näytön resoluutio"
 
-#: programs/winecfg/winecfg.rc:183
+#: programs/winecfg/winecfg.rc:189
 msgid "This is a sample text using 10 point Tahoma"
 msgstr "Tämä on näyteteksti 10 pisteen Tahoma-fontilla"
 
-#: programs/winecfg/winecfg.rc:190
+#: programs/winecfg/winecfg.rc:196
 msgid "DLL overrides"
 msgstr "DLL-tiedostojen ohitukset"
 
-#: programs/winecfg/winecfg.rc:191
+#: programs/winecfg/winecfg.rc:197
 msgid ""
 "Dynamic Link Libraries can be specified individually to be either builtin "
 "(provided by Wine) or native (taken from Windows or provided by the "
@@ -18229,161 +18371,165 @@ msgstr ""
 "sisäänrakennettua (Winen tarjoamaa) tai natiivia (Windows-asennuksesta "
 "otettua tai sovelluksen tarjoamaa) versiota."
 
-#: programs/winecfg/winecfg.rc:193
+#: programs/winecfg/winecfg.rc:199
 msgid "&New override for library:"
 msgstr "&Uusi ohitus kirjastolle:"
 
-#: programs/winecfg/winecfg.rc:195
+#: programs/winecfg/winecfg.rc:201
 msgid "A&dd"
 msgstr "&Lisää"
 
-#: programs/winecfg/winecfg.rc:196
+#: programs/winecfg/winecfg.rc:202
 msgid "Existing &overrides:"
 msgstr "&Olemassaolevat ohitukset:"
 
-#: programs/winecfg/winecfg.rc:198
+#: programs/winecfg/winecfg.rc:204
 msgid "&Edit..."
 msgstr "&Muokkaa..."
 
-#: programs/winecfg/winecfg.rc:204
+#: programs/winecfg/winecfg.rc:210
 msgid "Edit Override"
 msgstr "Muokkaa ohitusta"
 
-#: programs/winecfg/winecfg.rc:207
+#: programs/winecfg/winecfg.rc:213
 msgid "Load order"
 msgstr "&Latausjärjestys"
 
-#: programs/winecfg/winecfg.rc:208
+#: programs/winecfg/winecfg.rc:214
 msgid "&Builtin (Wine)"
 msgstr "&Sisäinen (Wine)"
 
-#: programs/winecfg/winecfg.rc:209
+#: programs/winecfg/winecfg.rc:215
 msgid "&Native (Windows)"
 msgstr "&Natiivi (Windows)"
 
-#: programs/winecfg/winecfg.rc:210
+#: programs/winecfg/winecfg.rc:216
 msgid "Buil&tin then Native"
 msgstr "S&isäinen, sitten natiivi"
 
-#: programs/winecfg/winecfg.rc:211
+#: programs/winecfg/winecfg.rc:217
 msgid "Nati&ve then Builtin"
 msgstr "Na&tiivi, sitten sisäinen"
 
-#: programs/winecfg/winecfg.rc:219
+#: programs/winecfg/winecfg.rc:225
 msgid "Select Drive Letter"
 msgstr "Valitse aseman kirjain"
 
-#: programs/winecfg/winecfg.rc:231
+#: programs/winecfg/winecfg.rc:237
 msgid "Drive configuration"
 msgstr "Asemien asetukset"
 
-#: programs/winecfg/winecfg.rc:232
+#: programs/winecfg/winecfg.rc:238
 msgid ""
 "Failed to connect to the mount manager; the drive configuration cannot be "
 "edited."
 msgstr "Levyasemien hallintaan ei saatu yhteyttä. Asemia ei voi muokata."
 
-#: programs/winecfg/winecfg.rc:235
+#: programs/winecfg/winecfg.rc:241
 msgid "A&dd..."
 msgstr "&Lisää..."
 
-#: programs/winecfg/winecfg.rc:239
+#: programs/winecfg/winecfg.rc:245
 msgid "&Path:"
 msgstr "P&olku:"
 
-#: programs/winecfg/winecfg.rc:246 programs/winecfg/winecfg.rc:37
+#: programs/winecfg/winecfg.rc:252 programs/winecfg/winecfg.rc:37
 msgid "Show Advan&ced"
 msgstr "Näytä lisä&asetukset"
 
-#: programs/winecfg/winecfg.rc:247
+#: programs/winecfg/winecfg.rc:253
 msgid "De&vice:"
 msgstr "La&ite:"
 
-#: programs/winecfg/winecfg.rc:249
+#: programs/winecfg/winecfg.rc:255
 msgid "Bro&wse..."
 msgstr "S&elaa..."
 
-#: programs/winecfg/winecfg.rc:251
+#: programs/winecfg/winecfg.rc:257
 msgid "&Label:"
 msgstr "&Nimi:"
 
-#: programs/winecfg/winecfg.rc:253
+#: programs/winecfg/winecfg.rc:259
 msgid "S&erial:"
 msgstr "Sarjanumer&o:"
 
-#: programs/winecfg/winecfg.rc:256
+#: programs/winecfg/winecfg.rc:262
 msgid "&Show dot files"
 msgstr "N&äytä pistetiedostot"
 
-#: programs/winecfg/winecfg.rc:263
+#: programs/winecfg/winecfg.rc:269
 msgid "Driver diagnostics"
 msgstr "Ajurin diagnostiikka"
 
-#: programs/winecfg/winecfg.rc:265
+#: programs/winecfg/winecfg.rc:271
 msgid "Defaults"
 msgstr "Oletukset"
 
-#: programs/winecfg/winecfg.rc:266
+#: programs/winecfg/winecfg.rc:272
 msgid "Output device:"
 msgstr "Ulostulolaite:"
 
-#: programs/winecfg/winecfg.rc:267
+#: programs/winecfg/winecfg.rc:273
 msgid "Voice output device:"
 msgstr "Äänen ulostulolaite:"
 
-#: programs/winecfg/winecfg.rc:268
+#: programs/winecfg/winecfg.rc:274
 msgid "Input device:"
 msgstr "Sisääntulolaite:"
 
-#: programs/winecfg/winecfg.rc:269
+#: programs/winecfg/winecfg.rc:275
 msgid "Voice input device:"
 msgstr "Äänen sisääntulolaite:"
 
-#: programs/winecfg/winecfg.rc:274
+#: programs/winecfg/winecfg.rc:280
 msgid "&Test Sound"
 msgstr "&Testiääni"
 
-#: programs/winecfg/winecfg.rc:275 programs/winecfg/winecfg.rc:89
+#: programs/winecfg/winecfg.rc:281 programs/winecfg/winecfg.rc:89
 msgid "Speaker configuration"
 msgstr "Kaiutinasetukset"
 
-#: programs/winecfg/winecfg.rc:278
+#: programs/winecfg/winecfg.rc:284
 msgid "Speakers:"
 msgstr "Kaiuttimet:"
 
-#: programs/winecfg/winecfg.rc:286
+#: programs/winecfg/winecfg.rc:292
 msgid "Appearance"
 msgstr "Ulkonäkö"
 
-#: programs/winecfg/winecfg.rc:287
+#: programs/winecfg/winecfg.rc:293
 msgid "&Theme:"
 msgstr "&Teema:"
 
-#: programs/winecfg/winecfg.rc:289
+#: programs/winecfg/winecfg.rc:295
+msgid "&WinRT theme:"
+msgstr "&WinRT-teema:"
+
+#: programs/winecfg/winecfg.rc:297
 msgid "&Install theme..."
 msgstr "&Asenna teema..."
 
-#: programs/winecfg/winecfg.rc:294
+#: programs/winecfg/winecfg.rc:302
 msgid "It&em:"
 msgstr "Ko&hta:"
 
-#: programs/winecfg/winecfg.rc:296
+#: programs/winecfg/winecfg.rc:304
 msgid "C&olor:"
 msgstr "&Väri:"
 
-#: programs/winecfg/winecfg.rc:302
+#: programs/winecfg/winecfg.rc:310
 msgid "MIME types"
 msgstr "MIME-tyypit"
 
-#: programs/winecfg/winecfg.rc:303
-msgid "Manage file &associations"
-msgstr "&Muokkaa tiedostosidoksia"
+#: programs/winecfg/winecfg.rc:311
+msgid "Manage file and protocol &associations"
+msgstr "&Muokkaa tiedosto- ja protokollasidoksia"
 
-#: programs/winecfg/winecfg.rc:306
+#: programs/winecfg/winecfg.rc:314
 msgid "Folders"
 msgstr "Kansiot"
 
-#: programs/winecfg/winecfg.rc:309
+#: programs/winecfg/winecfg.rc:317
 msgid "&Link to:"
 msgstr "&Linkitä kohteeseen:"
 
@@ -18478,6 +18624,14 @@ msgstr "Stereo"
 #: programs/winecfg/winecfg.rc:93
 msgid "Mono"
 msgstr "Mono"
+
+#: programs/winecfg/winecfg.rc:98
+msgid "Light"
+msgstr "Vaalea"
+
+#: programs/winecfg/winecfg.rc:99
+msgid "Dark"
+msgstr "Tumma"
 
 #: programs/winecfg/winecfg.rc:53
 msgid ""
@@ -18592,127 +18746,127 @@ msgstr ""
 "\n"
 "Muista painaa Asemat-välilehdellä 'Lisää' ja luoda se!\n"
 
-#: programs/winecfg/winecfg.rc:98
+#: programs/winecfg/winecfg.rc:104
 msgid "Controls Background"
 msgstr "Kontrollien tausta"
 
-#: programs/winecfg/winecfg.rc:99
+#: programs/winecfg/winecfg.rc:105
 msgid "Controls Text"
 msgstr "Kontrollien teksti"
 
-#: programs/winecfg/winecfg.rc:101
+#: programs/winecfg/winecfg.rc:107
 msgid "Menu Background"
 msgstr "Valikon tausta"
 
-#: programs/winecfg/winecfg.rc:102
+#: programs/winecfg/winecfg.rc:108
 msgid "Menu Text"
 msgstr "Valikon teksti"
 
-#: programs/winecfg/winecfg.rc:103
+#: programs/winecfg/winecfg.rc:109
 msgid "Scrollbar"
 msgstr "Vierityspalkki"
 
-#: programs/winecfg/winecfg.rc:104
+#: programs/winecfg/winecfg.rc:110
 msgid "Selection Background"
 msgstr "Valintojen tausta"
 
-#: programs/winecfg/winecfg.rc:105
+#: programs/winecfg/winecfg.rc:111
 msgid "Selection Text"
 msgstr "Valintojen teksti"
 
-#: programs/winecfg/winecfg.rc:106
+#: programs/winecfg/winecfg.rc:112
 msgid "Tooltip Background"
 msgstr "Työkaluvihjeen tausta"
 
-#: programs/winecfg/winecfg.rc:107
+#: programs/winecfg/winecfg.rc:113
 msgid "Tooltip Text"
 msgstr "Työkaluvihjeen teksti"
 
-#: programs/winecfg/winecfg.rc:108
+#: programs/winecfg/winecfg.rc:114
 msgid "Window Background"
 msgstr "Ikkunan tausta"
 
-#: programs/winecfg/winecfg.rc:109
+#: programs/winecfg/winecfg.rc:115
 msgid "Window Text"
 msgstr "Ikkunan teksti"
 
-#: programs/winecfg/winecfg.rc:110
+#: programs/winecfg/winecfg.rc:116
 msgid "Active Title Bar"
 msgstr "Aktiivinen otsikkopalkki"
 
-#: programs/winecfg/winecfg.rc:111
+#: programs/winecfg/winecfg.rc:117
 msgid "Active Title Text"
 msgstr "Aktiivinen otsikkoteksti"
 
-#: programs/winecfg/winecfg.rc:112
+#: programs/winecfg/winecfg.rc:118
 msgid "Inactive Title Bar"
 msgstr "Epäaktiivinen otsikkopalkki"
 
-#: programs/winecfg/winecfg.rc:113
+#: programs/winecfg/winecfg.rc:119
 msgid "Inactive Title Text"
 msgstr "Epäaktiivinen otsikkoteksti"
 
-#: programs/winecfg/winecfg.rc:114
+#: programs/winecfg/winecfg.rc:120
 msgid "Message Box Text"
 msgstr "Viestilaatikon teksti"
 
-#: programs/winecfg/winecfg.rc:115
+#: programs/winecfg/winecfg.rc:121
 msgid "Application Workspace"
 msgstr "Ohjelmien työtila"
 
-#: programs/winecfg/winecfg.rc:116
+#: programs/winecfg/winecfg.rc:122
 msgid "Window Frame"
 msgstr "Ikkunanreuna"
 
-#: programs/winecfg/winecfg.rc:117
+#: programs/winecfg/winecfg.rc:123
 msgid "Active Border"
 msgstr "Aktiivinen reunus"
 
-#: programs/winecfg/winecfg.rc:118
+#: programs/winecfg/winecfg.rc:124
 msgid "Inactive Border"
 msgstr "Epäaktiivinen reunus"
 
-#: programs/winecfg/winecfg.rc:119
+#: programs/winecfg/winecfg.rc:125
 msgid "Controls Shadow"
 msgstr "Kontrollien varjo"
 
-#: programs/winecfg/winecfg.rc:120
+#: programs/winecfg/winecfg.rc:126
 msgid "Gray Text"
 msgstr "Harmaa teksti"
 
-#: programs/winecfg/winecfg.rc:121
+#: programs/winecfg/winecfg.rc:127
 msgid "Controls Highlight"
 msgstr "Kontrollien korostus"
 
-#: programs/winecfg/winecfg.rc:122
+#: programs/winecfg/winecfg.rc:128
 msgid "Controls Dark Shadow"
 msgstr "Kontrollien syvä varjo"
 
-#: programs/winecfg/winecfg.rc:123
+#: programs/winecfg/winecfg.rc:129
 msgid "Controls Light"
 msgstr "Kontrollien valo"
 
-#: programs/winecfg/winecfg.rc:124
+#: programs/winecfg/winecfg.rc:130
 msgid "Controls Alternate Background"
 msgstr "Kontrollien vaihtoehtotausta"
 
-#: programs/winecfg/winecfg.rc:125
+#: programs/winecfg/winecfg.rc:131
 msgid "Hot Tracked Item"
 msgstr "Aktiivinen elementti"
 
-#: programs/winecfg/winecfg.rc:126
+#: programs/winecfg/winecfg.rc:132
 msgid "Active Title Bar Gradient"
 msgstr "Aktiivisen otsikkopalkin liukuväri"
 
-#: programs/winecfg/winecfg.rc:127
+#: programs/winecfg/winecfg.rc:133
 msgid "Inactive Title Bar Gradient"
 msgstr "Epäaktiivisen otsikkopalkin liukuväri"
 
-#: programs/winecfg/winecfg.rc:128
+#: programs/winecfg/winecfg.rc:134
 msgid "Menu Highlight"
 msgstr "Valikon korostus"
 
-#: programs/winecfg/winecfg.rc:129
+#: programs/winecfg/winecfg.rc:135
 msgid "Menu Bar"
 msgstr "Valikkopalkki"
 

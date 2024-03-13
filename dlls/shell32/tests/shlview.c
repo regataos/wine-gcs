@@ -619,6 +619,22 @@ static const IShellBrowserVtbl shellbrowservtbl = {
 
 static IShellBrowser test_shellbrowser = { &shellbrowservtbl };
 
+static void create_interfaces(IShellFolder **desktop, IShellView **view)
+{
+    HRESULT hr;
+
+    hr = SHGetDesktopFolder(desktop);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+    hr = IShellFolder_CreateViewObject(*desktop, NULL, &IID_IShellView, (void **)view);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+}
+
+static void destroy_interfaces(IShellFolder *desktop, IShellView *view)
+{
+    IShellFolder_Release(desktop);
+    IShellView_Release(view);
+}
+
 static void test_CreateViewWindow(void)
 {
     IShellFolder *desktop;
@@ -631,11 +647,7 @@ static void test_CreateViewWindow(void)
     ULONG ref1, ref2;
     IUnknown *unk;
 
-    hr = SHGetDesktopFolder(&desktop);
-    ok(hr == S_OK, "got (0x%08lx)\n", hr);
-
-    hr = IShellFolder_CreateViewObject(desktop, NULL, &IID_IShellView, (void**)&view);
-    ok(hr == S_OK, "got (0x%08lx)\n", hr);
+    create_interfaces(&desktop, &view);
 
     hr = IShellView_QueryInterface(view, &IID_CDefView, (void **)&unk);
     ok(hr == S_OK, "got (0x%08lx)\n", hr);
@@ -719,18 +731,13 @@ static void test_IFolderView(void)
     POINT pt;
     RECT r;
 
-    hr = SHGetDesktopFolder(&desktop);
-    ok(hr == S_OK, "got (0x%08lx)\n", hr);
-
-    hr = IShellFolder_CreateViewObject(desktop, NULL, &IID_IShellView, (void**)&view);
-    ok(hr == S_OK, "got (0x%08lx)\n", hr);
+    create_interfaces(&desktop, &view);
 
     hr = IShellView_QueryInterface(view, &IID_IFolderView, (void**)&fv);
     if (hr != S_OK)
     {
         win_skip("IFolderView not supported by desktop folder\n");
-        IShellView_Release(view);
-        IShellFolder_Release(desktop);
+        destroy_interfaces(desktop, view);
         return;
     }
 
@@ -772,8 +779,7 @@ if (0)
         win_skip("Failed to subclass ListView control\n");
         IShellBrowser_Release(browser);
         IFolderView_Release(fv);
-        IShellView_Release(view);
-        IShellFolder_Release(desktop);
+        destroy_interfaces(desktop, view);
         return;
     }
 
@@ -863,8 +869,7 @@ if (0)
 
     IShellBrowser_Release(browser);
     IFolderView_Release(fv);
-    IShellView_Release(view);
-    IShellFolder_Release(desktop);
+    destroy_interfaces(desktop, view);
 }
 
 static void test_GetItemObject(void)
@@ -874,11 +879,7 @@ static void test_GetItemObject(void)
     IUnknown *unk;
     HRESULT hr;
 
-    hr = SHGetDesktopFolder(&desktop);
-    ok(hr == S_OK, "got (0x%08lx)\n", hr);
-
-    hr = IShellFolder_CreateViewObject(desktop, NULL, &IID_IShellView, (void**)&view);
-    ok(hr == S_OK, "got (0x%08lx)\n", hr);
+    create_interfaces(&desktop, &view);
 
     /* from documentation three interfaces are supported for SVGIO_BACKGROUND:
        IContextMenu, IDispatch, IPersistHistory */
@@ -900,8 +901,7 @@ static void test_GetItemObject(void)
     hr = IShellView_GetItemObject(view, SVGIO_BACKGROUND, &IID_IPersist, (void**)&unk);
     ok(hr == E_NOINTERFACE || broken(hr == E_NOTIMPL) /* W2K */, "got (0x%08lx)\n", hr);
 
-    IShellView_Release(view);
-    IShellFolder_Release(desktop);
+    destroy_interfaces(desktop, view);
 }
 
 static void test_IShellFolderView(void)
@@ -913,18 +913,13 @@ static void test_IShellFolderView(void)
     UINT i;
     HRESULT hr;
 
-    hr = SHGetDesktopFolder(&desktop);
-    ok(hr == S_OK, "got (0x%08lx)\n", hr);
-
-    hr = IShellFolder_CreateViewObject(desktop, NULL, &IID_IShellView, (void**)&view);
-    ok(hr == S_OK, "got (0x%08lx)\n", hr);
+    create_interfaces(&desktop, &view);
 
     hr = IShellView_QueryInterface(view, &IID_IShellFolderView, (void**)&folderview);
     if (hr != S_OK)
     {
         win_skip("IShellView doesn't provide IShellFolderView on this platform\n");
-        IShellView_Release(view);
-        IShellFolder_Release(desktop);
+        destroy_interfaces(desktop, view);
         return;
     }
 
@@ -955,8 +950,7 @@ static void test_IShellFolderView(void)
 
     IShellFolderView_Release(folderview);
 
-    IShellView_Release(view);
-    IShellFolder_Release(desktop);
+    destroy_interfaces(desktop, view);
 }
 
 static void test_IOleWindow(void)
@@ -966,11 +960,7 @@ static void test_IOleWindow(void)
     IOleWindow *wnd;
     HRESULT hr;
 
-    hr = SHGetDesktopFolder(&desktop);
-    ok(hr == S_OK, "got (0x%08lx)\n", hr);
-
-    hr = IShellFolder_CreateViewObject(desktop, NULL, &IID_IShellView, (void**)&view);
-    ok(hr == S_OK, "got (0x%08lx)\n", hr);
+    create_interfaces(&desktop, &view);
 
     hr = IShellView_QueryInterface(view, &IID_IOleWindow, (void**)&wnd);
     ok(hr == E_NOINTERFACE, "got (0x%08lx)\n", hr);
@@ -981,8 +971,7 @@ static void test_IOleWindow(void)
     hr = IShellView_ContextSensitiveHelp(view, FALSE);
     ok(hr == E_NOTIMPL, "got (0x%08lx)\n", hr);
 
-    IShellView_Release(view);
-    IShellFolder_Release(desktop);
+    destroy_interfaces(desktop, view);
 }
 
 static const struct message folderview_setcurrentviewmode1_2_prevista[] = {
@@ -1088,11 +1077,15 @@ static void test_GetSetCurrentViewMode(void)
     static const int vista_res[11] = {0, 1, 5, 3, 4, 5, 6, 7, 7, 0, 0};
     static const int win7_res[11] = {1, 1, 1, 3, 4, 1, 6, 1, 8, 8, 8};
 
-    hr = SHGetDesktopFolder(&desktop);
-    ok(hr == S_OK, "got (0x%08lx)\n", hr);
+    create_interfaces(&desktop, &sview);
 
-    hr = IShellFolder_CreateViewObject(desktop, NULL, &IID_IShellView, (void**)&sview);
-    ok(hr == S_OK, "got (0x%08lx)\n", hr);
+    hr = IShellView_QueryInterface(sview, &IID_IFolderView, (void **)&fview);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+
+    viewmode = 0xdeadbeef;
+    hr = IFolderView_GetCurrentViewMode(fview, &viewmode);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+    ok(viewmode == FVM_TILE || broken(viewmode == 0) /* pre win7 */, "Got view mode %u.\n", viewmode);
 
     fs.ViewMode = 1;
     fs.fFlags = 0;
@@ -1100,8 +1093,6 @@ static void test_GetSetCurrentViewMode(void)
     hr = IShellView_CreateViewWindow(sview, NULL, &fs, browser, &rc, &hwnd);
     ok(hr == S_OK || broken(hr == S_FALSE /*Win2k*/ ), "got (0x%08lx)\n", hr);
 
-    hr = IShellView_QueryInterface(sview, &IID_IFolderView, (void**)&fview);
-    ok(hr == S_OK || broken(hr == E_NOINTERFACE), "got (0x%08lx)\n", hr);
     if(SUCCEEDED(hr))
     {
         HWND hwnd_lv;
@@ -1119,13 +1110,23 @@ static void test_GetSetCurrentViewMode(void)
 
         hr = IFolderView_SetCurrentViewMode(fview, FVM_AUTO);
         ok(hr == S_OK, "got (0x%08lx)\n", hr);
+        viewmode = 0xdeadbeef;
+        hr = IFolderView_GetCurrentViewMode(fview, &viewmode);
+        ok(hr == S_OK, "Got hr %#lx.\n", hr);
+        ok(viewmode == FVM_ICON || broken(viewmode == FVM_AUTO) /* pre vista */, "Got view mode %d.\n", viewmode);
 
+        hr = IFolderView_SetCurrentViewMode(fview, FVM_LIST);
+        ok(hr == S_OK, "Got hr %#lx.\n", hr);
+        viewmode = 0xdeadbeef;
+        hr = IFolderView_GetCurrentViewMode(fview, &viewmode);
+        ok(hr == S_OK, "Got hr %#lx.\n", hr);
+        ok(viewmode == FVM_LIST, "Got view mode %d.\n", viewmode);
         hr = IFolderView_SetCurrentViewMode(fview, 0);
-        ok(hr == E_INVALIDARG || broken(hr == S_OK),
-           "got (0x%08lx)\n", hr);
-
+        ok(hr == S_OK || broken(hr == E_INVALIDARG) /* pre win7 */, "Got hr %#lx.\n", hr);
+        viewmode = 0xdeadbeef;
         hr = IFolderView_GetCurrentViewMode(fview, &viewmode);
         ok(hr == S_OK, "got (0x%08lx)\n", hr);
+        ok(viewmode == FVM_LIST || broken(viewmode == 0) /* pre vista */, "Got view mode %d.\n", viewmode);
 
         for(i = 1; i < 9; i++)
         {
@@ -1143,8 +1144,12 @@ static void test_GetSetCurrentViewMode(void)
         }
 
         hr = IFolderView_SetCurrentViewMode(fview, 9);
-        ok(hr == E_INVALIDARG || broken(hr == S_OK),
-           "got (0x%08lx)\n", hr);
+        ok(hr == S_OK || broken(hr == E_INVALIDARG) /* pre win7 */, "Got hr %#lx.\n", hr);
+        viewmode = 0xdeadbeef;
+        hr = IFolderView_GetCurrentViewMode(fview, &viewmode);
+        ok(hr == S_OK, "Got hr %#lx.\n", hr);
+        ok(viewmode == FVM_CONTENT || broken(viewmode == 9) /* pre vista */ ||
+                broken(viewmode == FVM_THUMBSTRIP) /* vista */, "Got view mode %d.\n", viewmode);
 
         /* Test messages */
         hwnd_lv = subclass_listview(hwnd);
@@ -1284,8 +1289,7 @@ static void test_GetSetCurrentViewMode(void)
 
     IShellBrowser_Release(browser);
     IShellView_DestroyViewWindow(sview);
-    IShellView_Release(sview);
-    IShellFolder_Release(desktop);
+    destroy_interfaces(desktop, sview);
 }
 
 static void test_IOleCommandTarget(void)
@@ -1474,38 +1478,160 @@ if (0)
 
 static void test_newmenu(void)
 {
-    IUnknown *unk, *unk2;
+    CMINVOKECOMMANDINFO invoke_info = {.cbSize = sizeof(CMINVOKECOMMANDINFO)};
+    IObjectWithSite *ows;
+    WCHAR path[MAX_PATH];
+    IShellExtInit *init;
+    IContextMenu3 *menu;
+    MENUITEMINFOA info;
+    ITEMIDLIST *pidl;
+    IUnknown *unk;
+    HMENU hmenu;
     HRESULT hr;
+    ULONG ref;
+    int count;
+    BOOL ret;
+
+    hmenu = CreatePopupMenu();
 
     hr = CoCreateInstance(&CLSID_NewMenu, NULL, CLSCTX_INPROC_SERVER, &IID_IUnknown, (void **)&unk);
     ok(hr == S_OK, "Failed to create NewMenu object, hr %#lx.\n", hr);
+    hr = IUnknown_QueryInterface(unk, &IID_IShellExtInit, (void **)&init);
+    ok(hr == S_OK, "Failed to get IShellExtInit, hr %#lx.\n", hr);
+    hr = IUnknown_QueryInterface(unk, &IID_IContextMenu3, (void **)&menu);
+    ok(hr == S_OK, "Failed to get IContextMenu3, hr %#lx.\n", hr);
+    hr = IUnknown_QueryInterface(unk, &IID_IObjectWithSite, (void **)&ows);
+    ok(hr == S_OK, "Failed to get IObjectWithSite, hr %#lx.\n", hr);
+
+    GetTempPathW(ARRAY_SIZE(path), path);
+    hr = SHParseDisplayName(path, NULL, &pidl, 0, NULL);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+
+    hr = IShellExtInit_Initialize(init, NULL, NULL, NULL);
+    ok(hr == E_INVALIDARG, "Got hr %#lx.\n", hr);
+
+    hr = IShellExtInit_Initialize(init, pidl, NULL, NULL);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+
+    hr = IContextMenu3_QueryContextMenu(menu, hmenu, 0, 1, 1000, CMF_EXPLORE);
+    ok(hr == 0x40, "Got hr %#lx.\n", hr);
+
+    count = GetMenuItemCount(hmenu);
+    ok(count == 1, "Got count %d.\n", count);
+
+    info.cbSize = sizeof(info);
+    info.fMask = MIIM_ID | MIIM_FTYPE | MIIM_SUBMENU;
+    ret = GetMenuItemInfoA(hmenu, 0, TRUE, &info);
+    ok(ret == TRUE, "Got error %lu.\n", GetLastError());
+    ok(info.wID == 1, "Got ID %u.\n", info.wID);
+    ok(!info.fType, "Got type %#x.\n", info.fType);
+    ok(!!info.hSubMenu, "Got sub-menu %p.\n", info.hSubMenu);
+
+    invoke_info.lpVerb = (const char *)1234;
+    hr = IContextMenu3_InvokeCommand(menu, &invoke_info);
+    ok(hr == E_FAIL, "Got hr %#lx.\n", hr);
+
+    ILFree(pidl);
+    IObjectWithSite_Release(ows);
+    IContextMenu3_Release(menu);
+    IShellExtInit_Release(init);
+    ref = IUnknown_Release(unk);
+    ok(!ref, "Got refcount %ld.\n", ref);
+
+    /* Test with a virtual folder that can't create new items. */
+
+    hmenu = CreatePopupMenu();
+
+    hr = CoCreateInstance(&CLSID_NewMenu, NULL, CLSCTX_INPROC_SERVER, &IID_IUnknown, (void **)&unk);
+    ok(hr == S_OK, "Failed to create NewMenu object, hr %#lx.\n", hr);
+    hr = IUnknown_QueryInterface(unk, &IID_IShellExtInit, (void **)&init);
+    ok(hr == S_OK, "Failed to get IShellExtInit, hr %#lx.\n", hr);
+    hr = IUnknown_QueryInterface(unk, &IID_IContextMenu3, (void **)&menu);
+    ok(hr == S_OK, "Failed to get IContextMenu3, hr %#lx.\n", hr);
+
+    hr = SHGetKnownFolderIDList(&FOLDERID_ComputerFolder, 0, NULL, &pidl);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+
+    hr = IShellExtInit_Initialize(init, pidl, NULL, NULL);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+
+    hr = IContextMenu3_QueryContextMenu(menu, hmenu, 0, 1, 1000, CMF_EXPLORE);
+    ok(hr == 0, "Got hr %#lx.\n", hr);
+
+    count = GetMenuItemCount(hmenu);
+    ok(!count, "Got count %d.\n", count);
+
+    ILFree(pidl);
+    IContextMenu3_Release(menu);
+    IShellExtInit_Release(init);
+    ref = IUnknown_Release(unk);
+    ok(!ref, "Got refcount %ld.\n", ref);
+}
+
+static void test_folder_flags(void)
+{
+    IFolderView2 *folderview;
+    FOLDERSETTINGS settings;
+    IShellFolder *desktop;
+    IShellView *shellview;
+    DWORD flags;
+    HRESULT hr;
+    int i;
+    static const struct
+    {
+        DWORD mask, flags;
+        DWORD expected;
+    } tests[] =
+    {
+        { FWF_USESEARCHFOLDER, FWF_NONE, FWF_NONE },
+        { FWF_NONE, FWF_AUTOARRANGE, FWF_NONE },
+        { FWF_AUTOARRANGE, FWF_AUTOARRANGE, FWF_AUTOARRANGE },
+        { FWF_OWNERDATA, FWF_AUTOARRANGE, FWF_NONE },
+        { FWF_AUTOARRANGE, FWF_OWNERDATA | FWF_AUTOARRANGE, FWF_AUTOARRANGE },
+        { ~FWF_NONE, FWF_AUTOARRANGE, FWF_AUTOARRANGE },
+    };
+
+    create_interfaces(&desktop, &shellview);
+
+    hr = IShellView_GetCurrentInfo(shellview, &settings);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+    ok(settings.ViewMode == FVM_TILE || broken(!settings.ViewMode) /* pre win7 */,
+            "Got view mode %u.\n", settings.ViewMode);
+    ok(settings.fFlags == FWF_USESEARCHFOLDER || broken(!settings.fFlags) /* pre vista */,
+            "Got flags %#x.\n", settings.fFlags);
+
+    hr = IShellView_QueryInterface(shellview, &IID_IFolderView2, (void **)&folderview);
+    ok(hr == S_OK || broken(hr == E_NOINTERFACE) /* pre vista */, "Got hr %#lx.\n", hr);
     if (hr != S_OK)
     {
-        skip("NewMenu is not supported.\n");
+        win_skip("No IFolderView2 for the desktop folder.\n");
+        destroy_interfaces(desktop, shellview);
         return;
     }
 
-    hr = IUnknown_QueryInterface(unk, &IID_IShellExtInit, (void **)&unk2);
-    ok(hr == S_OK, "Failed to get IShellExtInit, hr %#lx.\n", hr);
-    IUnknown_Release(unk2);
+    hr = IFolderView2_GetCurrentFolderFlags(folderview, NULL);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
 
-    hr = IUnknown_QueryInterface(unk, &IID_IContextMenu, (void **)&unk2);
-    ok(hr == S_OK, "Failed to get IContextMenu, hr %#lx.\n", hr);
-    IUnknown_Release(unk2);
+    flags = 0xdeadbeef;
+    hr = IFolderView2_GetCurrentFolderFlags(folderview, &flags);
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+    ok(flags == FWF_USESEARCHFOLDER, "Got flags %#lx.\n", flags);
 
-    hr = IUnknown_QueryInterface(unk, &IID_IContextMenu2, (void **)&unk2);
-    ok(hr == S_OK, "Failed to get IContextMenu2, hr %#lx.\n", hr);
-    IUnknown_Release(unk2);
+    for (i = 0; i < ARRAY_SIZE(tests); ++i)
+    {
+        hr = IFolderView2_SetCurrentFolderFlags(folderview, tests[i].mask, tests[i].flags);
+        ok(hr == S_OK, "Test %u: Got hr %#lx.\n", i, hr);
+        flags = 0xdeadbeef;
+        hr = IFolderView2_GetCurrentFolderFlags(folderview, &flags);
+        ok(hr == S_OK, "Test %u: Got hr %#lx.\n", i, hr);
+        ok(flags == tests[i].expected, "Test %u: Got flags %#lx.\n", i, flags);
 
-    hr = IUnknown_QueryInterface(unk, &IID_IContextMenu3, (void **)&unk2);
-    ok(hr == S_OK, "Failed to get IContextMenu3, hr %#lx.\n", hr);
-    IUnknown_Release(unk2);
+        hr = IFolderView2_SetCurrentFolderFlags(folderview, ~FWF_NONE, FWF_NONE);
+        ok(hr == S_OK, "Test %u: Got hr %#lx.\n", i, hr);
+    }
 
-    hr = IUnknown_QueryInterface(unk, &IID_IObjectWithSite, (void **)&unk2);
-    ok(hr == S_OK, "Failed to get IObjectWithSite, hr %#lx.\n", hr);
-    IUnknown_Release(unk2);
-
-    IUnknown_Release(unk);
+    IFolderView2_Release(folderview);
+    destroy_interfaces(desktop, shellview);
 }
 
 START_TEST(shlview)
@@ -1524,6 +1650,7 @@ START_TEST(shlview)
     test_SHCreateShellFolderView();
     test_SHCreateShellFolderViewEx();
     test_newmenu();
+    test_folder_flags();
 
     OleUninitialize();
 }

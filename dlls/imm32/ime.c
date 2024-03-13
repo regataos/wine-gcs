@@ -98,6 +98,8 @@ static void input_context_set_comp_str( INPUTCONTEXT *ctx, const WCHAR *str, UIN
     UINT size;
     BYTE *dst;
 
+    TRACE( "ctx %p, str %s\n", ctx, debugstr_wn( str, len ) );
+
     size = sizeof(*compstr);
     size += len * sizeof(WCHAR); /* GCS_COMPSTR */
     size += len; /* GCS_COMPSTRATTR */
@@ -310,20 +312,17 @@ static void ime_ui_paint( HIMC himc, HWND hwnd )
 
 static void ime_ui_update_window( INPUTCONTEXT *ctx, HWND hwnd )
 {
-    COMPOSITIONSTRING *string;
+    WCHAR *str;
+    UINT len;
 
-    if (ctx->hCompStr) string = ImmLockIMCC( ctx->hCompStr );
-    else string = NULL;
-
-    if (!string || string->dwCompStrLen == 0)
+    if (!(str = input_context_get_comp_str( ctx, FALSE, &len )) || !*str)
         ShowWindow( hwnd, SW_HIDE );
     else
     {
         ShowWindow( hwnd, SW_SHOWNOACTIVATE );
         RedrawWindow( hwnd, NULL, NULL, RDW_ERASENOW | RDW_INVALIDATE );
     }
-
-    if (string) ImmUnlockIMCC( ctx->hCompStr );
+    free( str );
 
     ctx->hWnd = GetFocus();
 }
@@ -398,7 +397,6 @@ static LRESULT ime_ui_notify( HIMC himc, HWND hwnd, WPARAM wparam, LPARAM lparam
     case IMN_WINE_SET_COMP_STRING:
         return ime_set_comp_string( himc, lparam );
     default:
-        FIXME( "himc %p, hwnd %p, wparam %s, lparam %#Ix stub!\n", hwnd, himc, debugstr_imn(wparam), lparam );
         return 0;
     }
 }
@@ -505,8 +503,7 @@ BOOL WINAPI ImeSelect( HIMC himc, BOOL select )
 
 BOOL WINAPI ImeSetActiveContext( HIMC himc, BOOL flag )
 {
-    static int once;
-    if (!once++) FIXME( "himc %p, flag %#x stub!\n", himc, flag );
+    TRACE( "himc %p, flag %#x stub!\n", himc, flag );
     return TRUE;
 }
 
@@ -656,15 +653,8 @@ BOOL WINAPI NotifyIME( HIMC himc, DWORD action, DWORD index, DWORD value )
             }
             break;
         case IMC_SETOPENSTATUS:
-            if (!ctx->fOpen)
-            {
-                input_context_set_comp_str( ctx, NULL, 0 );
-                if ((msg = ime_set_composition_status( himc, FALSE ))) ime_send_message( himc, msg, 0, 0 );
-            }
+            if (!ctx->fOpen) ImmNotifyIME( himc, NI_COMPOSITIONSTR, CPS_COMPLETE, 0 );
             NtUserNotifyIMEStatus( ctx->hWnd, ctx->fOpen );
-            break;
-        default:
-            FIXME( "himc %p, action %#lx, index %#lx, value %#lx stub!\n", himc, action, index, value );
             break;
         }
         break;
@@ -697,13 +687,12 @@ BOOL WINAPI NotifyIME( HIMC himc, DWORD action, DWORD index, DWORD value )
                 if (flags) ime_send_message( himc, WM_IME_COMPOSITION, wchr, flags );
             }
 
-            ImmSetOpenStatus( himc, FALSE );
-            break;
+            /* fallthrough */
         }
         case CPS_CANCEL:
             input_context_set_comp_str( ctx, NULL, 0 );
-            if ((msg = ime_set_composition_status( himc, FALSE ))) ime_send_message( himc, msg, 0, 0 );
-            NtUserNotifyIMEStatus( ctx->hWnd, FALSE );
+            if ((msg = ime_set_composition_status( himc, FALSE )))
+                ime_send_message( himc, msg, 0, 0 );
             break;
         default:
             FIXME( "himc %p, action %#lx, index %#lx, value %#lx stub!\n", himc, action, index, value );

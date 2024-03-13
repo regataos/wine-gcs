@@ -17,6 +17,7 @@
  */
 
 #include "d2d1_private.h"
+#include <d3dcompiler.h>
 
 WINE_DEFAULT_DEBUG_CHANNEL(d2d);
 
@@ -39,8 +40,6 @@ static inline struct d2d_device *impl_from_ID2D1Device(ID2D1Device1 *iface)
 {
     return CONTAINING_RECORD(iface, struct d2d_device, ID2D1Device1_iface);
 }
-
-static struct d2d_device *unsafe_impl_from_ID2D1Device(ID2D1Device1 *iface);
 
 static ID2D1Brush *d2d_draw_get_text_brush(struct d2d_draw_text_layout_ctx *context, IUnknown *effect)
 {
@@ -137,6 +136,9 @@ static void d2d_device_context_draw(struct d2d_device_context *render_target, en
     vp.MinDepth = 0.0f;
     vp.MaxDepth = 1.0f;
 
+    if (render_target->cs)
+        EnterCriticalSection(render_target->cs);
+
     ID3D11Device1_GetImmediateContext1(device, &context);
     ID3D11DeviceContext1_SwapDeviceContextState(context, render_target->d3d_state, &prev_state);
 
@@ -190,6 +192,9 @@ static void d2d_device_context_draw(struct d2d_device_context *render_target, en
     ID3D11DeviceContext1_SwapDeviceContextState(context, prev_state, NULL);
     ID3D11DeviceContext1_Release(context);
     ID3DDeviceContextState_Release(prev_state);
+
+    if (render_target->cs)
+        LeaveCriticalSection(render_target->cs);
 }
 
 static void d2d_device_context_set_error(struct d2d_device_context *context, HRESULT code)
@@ -293,7 +298,7 @@ static ULONG STDMETHODCALLTYPE d2d_device_context_inner_Release(IUnknown *iface)
             IUnknown_Release(context->target.object);
         ID3D11Device1_Release(context->d3d_device);
         ID2D1Factory_Release(context->factory);
-        ID2D1Device_Release(context->device);
+        ID2D1Device1_Release(&context->device->ID2D1Device1_iface);
         free(context);
     }
 
@@ -944,6 +949,7 @@ static void STDMETHODCALLTYPE d2d_device_context_DrawGeometry(ID2D1DeviceContext
     const struct d2d_geometry *geometry_impl = unsafe_impl_from_ID2D1Geometry(geometry);
     struct d2d_device_context *context = impl_from_ID2D1DeviceContext(iface);
     struct d2d_brush *brush_impl = unsafe_impl_from_ID2D1Brush(brush);
+    struct d2d_stroke_style *stroke_style_impl = unsafe_impl_from_ID2D1StrokeStyle(stroke_style);
 
     TRACE("iface %p, geometry %p, brush %p, stroke_width %.8e, stroke_style %p.\n",
             iface, geometry, brush, stroke_width, stroke_style);
@@ -957,6 +963,12 @@ static void STDMETHODCALLTYPE d2d_device_context_DrawGeometry(ID2D1DeviceContext
 
     if (stroke_style)
         FIXME("Ignoring stroke style %p.\n", stroke_style);
+
+    if (stroke_style_impl)
+    {
+        if (stroke_style_impl->desc.transformType == D2D1_STROKE_TRANSFORM_TYPE_FIXED)
+            stroke_width /= context->drawing_state.transform.m11;
+    }
 
     d2d_device_context_draw_geometry(context, geometry_impl, brush_impl, stroke_width);
 }
@@ -2097,10 +2109,10 @@ static BOOL d2d_bitmap_check_options_with_surface(unsigned int options, unsigned
 
     if (options && (options & D2D1_BITMAP_OPTIONS_TARGET) != (surface_options & D2D1_BITMAP_OPTIONS_TARGET))
         return FALSE;
+    if (!(options & D2D1_BITMAP_OPTIONS_CANNOT_DRAW) && (surface_options & D2D1_BITMAP_OPTIONS_CANNOT_DRAW))
+        return FALSE;
     if (options & D2D1_BITMAP_OPTIONS_TARGET)
     {
-        if (!(options & D2D1_BITMAP_OPTIONS_CANNOT_DRAW) && (surface_options & D2D1_BITMAP_OPTIONS_CANNOT_DRAW))
-            return FALSE;
         if (options & D2D1_BITMAP_OPTIONS_GDI_COMPATIBLE && !(surface_options & D2D1_BITMAP_OPTIONS_GDI_COMPATIBLE))
             return FALSE;
         return TRUE;
@@ -2338,7 +2350,7 @@ static void STDMETHODCALLTYPE d2d_device_context_GetDevice(ID2D1DeviceContext1 *
 
     TRACE("iface %p, device %p.\n", iface, device);
 
-    *device = (ID2D1Device *)context->device;
+    *device = (ID2D1Device *)&context->device->ID2D1Device1_iface;
     ID2D1Device_AddRef(*device);
 }
 
@@ -2539,8 +2551,7 @@ static void STDMETHODCALLTYPE d2d_device_context_DrawImage(ID2D1DeviceContext1 *
 
     if (SUCCEEDED(ID2D1Image_QueryInterface(image, &IID_ID2D1Bitmap, (void **)&bitmap)))
     {
-        d2d_device_context_draw_bitmap(context, bitmap, NULL, 1.0f, d2d1_1_interp_mode_from_d2d1(interpolation_mode),
-                image_rect, target_offset, NULL);
+        d2d_device_context_draw_bitmap(context, bitmap, NULL, 1.0f, interpolation_mode, image_rect, target_offset, NULL);
 
         ID2D1Bitmap_Release(bitmap);
         return;
@@ -3097,7 +3108,7 @@ static ULONG STDMETHODCALLTYPE d2d_gdi_interop_render_target_Release(ID2D1GdiInt
     return IUnknown_Release(render_target->outer_unknown);
 }
 
-static HRESULT d2d_device_context_get_surface(struct d2d_device_context *context, IDXGISurface1 **surface)
+static HRESULT d2d_gdi_interop_get_surface(struct d2d_device_context *context, IDXGISurface1 **surface)
 {
     ID3D11Resource *resource;
     HRESULT hr;
@@ -3107,6 +3118,9 @@ static HRESULT d2d_device_context_get_surface(struct d2d_device_context *context
         FIXME("Unimplemented for target type %u.\n", context->target.type);
         return E_NOTIMPL;
     }
+
+    if (!(context->target.bitmap->options & D2D1_BITMAP_OPTIONS_GDI_COMPATIBLE))
+        return D2DERR_TARGET_NOT_GDI_COMPATIBLE;
 
     ID3D11RenderTargetView_GetResource(context->target.bitmap->rtv, &resource);
     hr = ID3D11Resource_QueryInterface(resource, &IID_IDXGISurface1, (void **)surface);
@@ -3130,11 +3144,19 @@ static HRESULT STDMETHODCALLTYPE d2d_gdi_interop_render_target_GetDC(ID2D1GdiInt
 
     TRACE("iface %p, mode %d, dc %p.\n", iface, mode, dc);
 
-    if (FAILED(hr = d2d_device_context_get_surface(render_target, &surface)))
+    *dc = NULL;
+
+    if (render_target->target.hdc)
+        return D2DERR_WRONG_STATE;
+
+    if (FAILED(hr = d2d_gdi_interop_get_surface(render_target, &surface)))
         return hr;
 
-    hr = IDXGISurface1_GetDC(surface, mode != D2D1_DC_INITIALIZE_MODE_COPY, dc);
+    hr = IDXGISurface1_GetDC(surface, mode != D2D1_DC_INITIALIZE_MODE_COPY, &render_target->target.hdc);
     IDXGISurface1_Release(surface);
+
+    if (SUCCEEDED(hr))
+        *dc = render_target->target.hdc;
 
     return hr;
 }
@@ -3149,9 +3171,13 @@ static HRESULT STDMETHODCALLTYPE d2d_gdi_interop_render_target_ReleaseDC(ID2D1Gd
 
     TRACE("iface %p, update rect %s.\n", iface, wine_dbgstr_rect(update));
 
-    if (FAILED(hr = d2d_device_context_get_surface(render_target, &surface)))
+    if (!render_target->target.hdc)
+        return D2DERR_WRONG_STATE;
+
+    if (FAILED(hr = d2d_gdi_interop_get_surface(render_target, &surface)))
         return hr;
 
+    render_target->target.hdc = NULL;
     if (update)
         update_rect = *update;
     hr = IDXGISurface1_ReleaseDC(surface, update ? &update_rect : NULL);
@@ -3169,14 +3195,15 @@ static const struct ID2D1GdiInteropRenderTargetVtbl d2d_gdi_interop_render_targe
     d2d_gdi_interop_render_target_ReleaseDC,
 };
 
-static HRESULT d2d_device_context_init(struct d2d_device_context *render_target, ID2D1Device *device,
-        IUnknown *outer_unknown, const struct d2d_device_context_ops *ops)
+static HRESULT d2d_device_context_init(struct d2d_device_context *render_target,
+        struct d2d_device *device, IUnknown *outer_unknown, const struct d2d_device_context_ops *ops)
 {
     D3D11_SUBRESOURCE_DATA buffer_data;
     struct d2d_device *device_impl;
     IDWriteFactory *dwrite_factory;
     D3D11_RASTERIZER_DESC rs_desc;
     D3D11_BUFFER_DESC buffer_desc;
+    struct d2d_factory *factory;
     unsigned int i;
     HRESULT hr;
 
@@ -3204,107 +3231,54 @@ static HRESULT d2d_device_context_init(struct d2d_device_context *render_target,
         {"POSITION", 0, DXGI_FORMAT_R32G32_FLOAT,    0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0},
         {"TEXCOORD", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 8, D3D11_INPUT_PER_VERTEX_DATA, 0},
     };
-    static const DWORD vs_code_outline[] =
-    {
-#if 0
-        float3x2 transform_geometry;
-        float stroke_width;
-        float4 transform_rtx;
-        float4 transform_rty;
-
-        struct output
-        {
-            float2 p : WORLD_POSITION;
-            float4 b : BEZIER;
-            nointerpolation float2x2 stroke_transform : STROKE_TRANSFORM;
-            float4 position : SV_POSITION;
-        };
-
-        /* The lines PₚᵣₑᵥP₀ and P₀Pₙₑₓₜ, both offset by ±½w, intersect each other at:
-         *
-         *   Pᵢ = P₀ ± w · ½q⃑ᵢ.
-         *
-         * Where:
-         *
-         *   q⃑ᵢ = q̂ₚᵣₑᵥ⊥ + tan(½θ) · -q̂ₚᵣₑᵥ
-         *   θ  = ∠PₚᵣₑᵥP₀Pₙₑₓₜ
-         *   q⃑ₚᵣₑᵥ = P₀ - Pₚᵣₑᵥ */
-        void main(float2 position : POSITION, float2 prev : PREV, float2 next : NEXT, out struct output o)
-        {
-            float2 q_prev, q_next, v_p, q_i;
-            float2x2 geom;
-            float l;
-
-            o.stroke_transform = float2x2(transform_rtx.xy, transform_rty.xy) * stroke_width * 0.5f;
-
-            geom = float2x2(transform_geometry._11_21, transform_geometry._12_22);
-            q_prev = normalize(mul(geom, prev));
-            q_next = normalize(mul(geom, next));
-
-            /* tan(½θ) = sin(θ) / (1 + cos(θ))
-             *         = (q̂ₚᵣₑᵥ⊥ · q̂ₙₑₓₜ) / (1 + (q̂ₚᵣₑᵥ · q̂ₙₑₓₜ)) */
-            v_p = float2(-q_prev.y, q_prev.x);
-            l = -dot(v_p, q_next) / (1.0f + dot(q_prev, q_next));
-            q_i = l * q_prev + v_p;
-
-            o.b = float4(0.0, 0.0, 0.0, 0.0);
-
-            o.p = mul(float3(position, 1.0f), transform_geometry) + stroke_width * 0.5f * q_i;
-            position = mul(float2x3(transform_rtx.xyz, transform_rty.xyz), float3(o.p, 1.0f))
-                    * float2(transform_rtx.w, transform_rty.w);
-            o.position = float4(position + float2(-1.0f, 1.0f), 0.0f, 1.0f);
-        }
-#endif
-        0x43425844, 0xfb16cd75, 0xf5ec3e80, 0xceacf250, 0x91d29d18, 0x00000001, 0x00000608, 0x00000003,
-        0x0000002c, 0x00000098, 0x00000154, 0x4e475349, 0x00000064, 0x00000003, 0x00000008, 0x00000050,
-        0x00000000, 0x00000000, 0x00000003, 0x00000000, 0x00000303, 0x00000059, 0x00000000, 0x00000000,
-        0x00000003, 0x00000001, 0x00000303, 0x0000005e, 0x00000000, 0x00000000, 0x00000003, 0x00000002,
-        0x00000303, 0x49534f50, 0x4e4f4954, 0x45525000, 0x454e0056, 0xab005458, 0x4e47534f, 0x000000b4,
-        0x00000005, 0x00000008, 0x00000080, 0x00000000, 0x00000000, 0x00000003, 0x00000000, 0x00000c03,
-        0x0000008f, 0x00000000, 0x00000000, 0x00000003, 0x00000001, 0x0000000f, 0x00000096, 0x00000000,
-        0x00000000, 0x00000003, 0x00000002, 0x00000c03, 0x00000096, 0x00000001, 0x00000000, 0x00000003,
-        0x00000003, 0x00000c03, 0x000000a7, 0x00000000, 0x00000001, 0x00000003, 0x00000004, 0x0000000f,
-        0x4c524f57, 0x4f505f44, 0x49544953, 0x42004e4f, 0x45495a45, 0x54530052, 0x454b4f52, 0x4152545f,
-        0x4f46534e, 0x53004d52, 0x4f505f56, 0x49544953, 0xab004e4f, 0x52444853, 0x000004ac, 0x00010040,
-        0x0000012b, 0x04000059, 0x00208e46, 0x00000000, 0x00000004, 0x0300005f, 0x00101032, 0x00000000,
-        0x0300005f, 0x00101032, 0x00000001, 0x0300005f, 0x00101032, 0x00000002, 0x03000065, 0x00102032,
-        0x00000000, 0x03000065, 0x001020f2, 0x00000001, 0x03000065, 0x00102032, 0x00000002, 0x03000065,
-        0x00102032, 0x00000003, 0x04000067, 0x001020f2, 0x00000004, 0x00000001, 0x02000068, 0x00000003,
-        0x0800000f, 0x00100012, 0x00000000, 0x00208046, 0x00000000, 0x00000000, 0x00101046, 0x00000002,
-        0x0800000f, 0x00100022, 0x00000000, 0x00208046, 0x00000000, 0x00000001, 0x00101046, 0x00000002,
-        0x0700000f, 0x00100042, 0x00000000, 0x00100046, 0x00000000, 0x00100046, 0x00000000, 0x05000044,
-        0x00100042, 0x00000000, 0x0010002a, 0x00000000, 0x07000038, 0x00100032, 0x00000000, 0x00100aa6,
-        0x00000000, 0x00100046, 0x00000000, 0x0800000f, 0x00100012, 0x00000001, 0x00208046, 0x00000000,
-        0x00000000, 0x00101046, 0x00000001, 0x0800000f, 0x00100022, 0x00000001, 0x00208046, 0x00000000,
-        0x00000001, 0x00101046, 0x00000001, 0x0700000f, 0x00100042, 0x00000000, 0x00100046, 0x00000001,
-        0x00100046, 0x00000001, 0x05000044, 0x00100042, 0x00000000, 0x0010002a, 0x00000000, 0x07000038,
-        0x00100032, 0x00000001, 0x00100aa6, 0x00000000, 0x00100046, 0x00000001, 0x06000036, 0x001000c2,
-        0x00000001, 0x80100556, 0x00000041, 0x00000001, 0x0700000f, 0x00100042, 0x00000000, 0x00100a26,
-        0x00000001, 0x00100046, 0x00000000, 0x0700000f, 0x00100012, 0x00000000, 0x00100046, 0x00000001,
-        0x00100046, 0x00000000, 0x07000000, 0x00100012, 0x00000000, 0x0010000a, 0x00000000, 0x00004001,
-        0x3f800000, 0x0800000e, 0x00100012, 0x00000000, 0x8010002a, 0x00000041, 0x00000000, 0x0010000a,
-        0x00000000, 0x09000032, 0x00100032, 0x00000000, 0x00100006, 0x00000000, 0x00100046, 0x00000001,
-        0x00100f36, 0x00000001, 0x08000038, 0x00100042, 0x00000000, 0x0020803a, 0x00000000, 0x00000001,
-        0x00004001, 0x3f000000, 0x05000036, 0x00100032, 0x00000001, 0x00101046, 0x00000000, 0x05000036,
-        0x00100042, 0x00000001, 0x00004001, 0x3f800000, 0x08000010, 0x00100012, 0x00000002, 0x00100246,
-        0x00000001, 0x00208246, 0x00000000, 0x00000000, 0x08000010, 0x00100022, 0x00000002, 0x00100246,
-        0x00000001, 0x00208246, 0x00000000, 0x00000001, 0x09000032, 0x00100032, 0x00000000, 0x00100aa6,
-        0x00000000, 0x00100046, 0x00000000, 0x00100046, 0x00000002, 0x05000036, 0x00102032, 0x00000000,
-        0x00100046, 0x00000000, 0x08000036, 0x001020f2, 0x00000001, 0x00004002, 0x00000000, 0x00000000,
-        0x00000000, 0x00000000, 0x06000036, 0x00100032, 0x00000001, 0x00208046, 0x00000000, 0x00000002,
-        0x06000036, 0x001000c2, 0x00000001, 0x00208406, 0x00000000, 0x00000003, 0x08000038, 0x001000f2,
-        0x00000001, 0x00100e46, 0x00000001, 0x00208ff6, 0x00000000, 0x00000001, 0x0a000038, 0x001000f2,
-        0x00000001, 0x00100e46, 0x00000001, 0x00004002, 0x3f000000, 0x3f000000, 0x3f000000, 0x3f000000,
-        0x05000036, 0x00102032, 0x00000002, 0x00100086, 0x00000001, 0x05000036, 0x00102032, 0x00000003,
-        0x001005d6, 0x00000001, 0x05000036, 0x00100042, 0x00000000, 0x00004001, 0x3f800000, 0x08000010,
-        0x00100082, 0x00000000, 0x00208246, 0x00000000, 0x00000002, 0x00100246, 0x00000000, 0x08000010,
-        0x00100012, 0x00000000, 0x00208246, 0x00000000, 0x00000003, 0x00100246, 0x00000000, 0x08000038,
-        0x00100022, 0x00000000, 0x0010000a, 0x00000000, 0x0020803a, 0x00000000, 0x00000003, 0x08000038,
-        0x00100012, 0x00000000, 0x0010003a, 0x00000000, 0x0020803a, 0x00000000, 0x00000002, 0x0a000000,
-        0x00102032, 0x00000004, 0x00100046, 0x00000000, 0x00004002, 0xbf800000, 0x3f800000, 0x00000000,
-        0x00000000, 0x08000036, 0x001020c2, 0x00000004, 0x00004002, 0x00000000, 0x00000000, 0x00000000,
-        0x3f800000, 0x0100003e,
-    };
+    static const char vs_code_outline[] =
+        "float3x2 transform_geometry;\n"
+        "float stroke_width;\n"
+        "float4 transform_rtx;\n"
+        "float4 transform_rty;\n"
+        "\n"
+        "struct output\n"
+        "{\n"
+        "    float2 p : WORLD_POSITION;\n"
+        "    float4 b : BEZIER;\n"
+        "    nointerpolation float2x2 stroke_transform : STROKE_TRANSFORM;\n"
+        "    float4 position : SV_POSITION;\n"
+        "};\n"
+        "\n"
+        "/* The lines PₚᵣₑᵥP₀ and P₀Pₙₑₓₜ, both offset by ±½w, intersect each other at:\n"
+        " *\n"
+        " *   Pᵢ = P₀ ± w · ½q⃑ᵢ.\n"
+        " *\n"
+        " * Where:\n"
+        " *\n"
+        " *   q⃑ᵢ = q̂ₚᵣₑᵥ⊥ + tan(½θ) · -q̂ₚᵣₑᵥ\n"
+        " *   θ  = ∠PₚᵣₑᵥP₀Pₙₑₓₜ\n"
+        " *   q⃑ₚᵣₑᵥ = P₀ - Pₚᵣₑᵥ */\n"
+        "void main(float2 position : POSITION, float2 prev : PREV, float2 next : NEXT, out struct output o)\n"
+        "{\n"
+        "    float2 q_prev, q_next, v_p, q_i;\n"
+        "    float2x2 geom;\n"
+        "    float l;\n"
+        "\n"
+        "    o.stroke_transform = float2x2(transform_rtx.xy, transform_rty.xy) * stroke_width * 0.5f;\n"
+        "\n"
+        "    geom = float2x2(transform_geometry._11_21, transform_geometry._12_22);\n"
+        "    q_prev = normalize(mul(geom, prev));\n"
+        "    q_next = normalize(mul(geom, next));\n"
+        "\n"
+        "    /* tan(½θ) = sin(θ) / (1 + cos(θ))\n"
+        "     *         = (q̂ₚᵣₑᵥ⊥ · q̂ₙₑₓₜ) / (1 + (q̂ₚᵣₑᵥ · q̂ₙₑₓₜ)) */\n"
+        "    v_p = float2(-q_prev.y, q_prev.x);\n"
+        "    l = -dot(v_p, q_next) / (1.0f + dot(q_prev, q_next));\n"
+        "    q_i = l * q_prev + v_p;\n"
+        "\n"
+        "    o.b = float4(0.0, 0.0, 0.0, 0.0);\n"
+        "\n"
+        "    o.p = mul(float3(position, 1.0f), transform_geometry) + stroke_width * 0.5f * q_i;\n"
+        "    position = mul(float2x3(transform_rtx.xyz, transform_rty.xyz), float3(o.p, 1.0f))\n"
+        "            * float2(transform_rtx.w, transform_rty.w);\n"
+        "    o.position = float4(position + float2(-1.0f, 1.0f), 0.0f, 1.0f);\n"
+        "}\n";
     /*     ⎡p0.x p0.y 1⎤
      * A = ⎢p1.x p1.y 1⎥
      *     ⎣p2.x p2.y 1⎦
@@ -3322,160 +3296,68 @@ static HRESULT d2d_device_context_init(struct d2d_device_context *render_target,
      * A'T = B'
      * T = A'⁻¹B'
      */
-    static const DWORD vs_code_bezier_outline[] =
-    {
-#if 0
-        float3x2 transform_geometry;
-        float stroke_width;
-        float4 transform_rtx;
-        float4 transform_rty;
-
-        struct output
-        {
-            float2 p : WORLD_POSITION;
-            float4 b : BEZIER;
-            nointerpolation float2x2 stroke_transform : STROKE_TRANSFORM;
-            float4 position : SV_POSITION;
-        };
-
-        void main(float2 position : POSITION, float2 p0 : P0, float2 p1 : P1, float2 p2 : P2,
-                float2 prev : PREV, float2 next : NEXT, out struct output o)
-        {
-            float2 q_prev, q_next, v_p, q_i, p;
-            float2x2 geom, rt;
-            float l;
-
-            geom = float2x2(transform_geometry._11_21, transform_geometry._12_22);
-            rt = float2x2(transform_rtx.xy, transform_rty.xy);
-            o.stroke_transform = rt * stroke_width * 0.5f;
-
-            p = mul(geom, position);
-            p0 = mul(geom, p0);
-            p1 = mul(geom, p1);
-            p2 = mul(geom, p2);
-
-            p -= p0;
-            p1 -= p0;
-            p2 -= p0;
-
-            q_prev = normalize(mul(geom, prev));
-            q_next = normalize(mul(geom, next));
-
-            v_p = float2(-q_prev.y, q_prev.x);
-            l = -dot(v_p, q_next) / (1.0f + dot(q_prev, q_next));
-            q_i = l * q_prev + v_p;
-            p += 0.5f * stroke_width * q_i;
-
-            v_p = mul(rt, p2);
-            v_p = normalize(float2(-v_p.y, v_p.x));
-            if (abs(dot(mul(rt, p1), v_p)) < 1.0f)
-            {
-                o.b.xzw = float3(0.0f, 0.0f, 0.0f);
-                o.b.y = dot(mul(rt, p), v_p);
-            }
-            else
-            {
-                o.b.zw = sign(dot(mul(rt, p1), v_p)) * v_p;
-                v_p = -float2(-p.y, p.x) / dot(float2(-p1.y, p1.x), p2);
-                o.b.x = dot(v_p, p1 - 0.5f * p2);
-                o.b.y = dot(v_p, p1);
-            }
-
-            o.p = mul(float3(position, 1.0f), transform_geometry) + 0.5f * stroke_width * q_i;
-            position = mul(float2x3(transform_rtx.xyz, transform_rty.xyz), float3(o.p, 1.0f))
-                    * float2(transform_rtx.w, transform_rty.w);
-            o.position = float4(position + float2(-1.0f, 1.0f), 0.0f, 1.0f);
-        }
-#endif
-        0x43425844, 0x356a0c5f, 0x8e4ba153, 0xe52cf793, 0xa6b774ea, 0x00000001, 0x00000afc, 0x00000003,
-        0x0000002c, 0x000000e4, 0x000001a0, 0x4e475349, 0x000000b0, 0x00000006, 0x00000008, 0x00000098,
-        0x00000000, 0x00000000, 0x00000003, 0x00000000, 0x00000303, 0x000000a1, 0x00000000, 0x00000000,
-        0x00000003, 0x00000001, 0x00000303, 0x000000a1, 0x00000001, 0x00000000, 0x00000003, 0x00000002,
-        0x00000303, 0x000000a1, 0x00000002, 0x00000000, 0x00000003, 0x00000003, 0x00000303, 0x000000a3,
-        0x00000000, 0x00000000, 0x00000003, 0x00000004, 0x00000303, 0x000000a8, 0x00000000, 0x00000000,
-        0x00000003, 0x00000005, 0x00000303, 0x49534f50, 0x4e4f4954, 0x50005000, 0x00564552, 0x5458454e,
-        0xababab00, 0x4e47534f, 0x000000b4, 0x00000005, 0x00000008, 0x00000080, 0x00000000, 0x00000000,
-        0x00000003, 0x00000000, 0x00000c03, 0x0000008f, 0x00000000, 0x00000000, 0x00000003, 0x00000001,
-        0x0000000f, 0x00000096, 0x00000000, 0x00000000, 0x00000003, 0x00000002, 0x00000c03, 0x00000096,
-        0x00000001, 0x00000000, 0x00000003, 0x00000003, 0x00000c03, 0x000000a7, 0x00000000, 0x00000001,
-        0x00000003, 0x00000004, 0x0000000f, 0x4c524f57, 0x4f505f44, 0x49544953, 0x42004e4f, 0x45495a45,
-        0x54530052, 0x454b4f52, 0x4152545f, 0x4f46534e, 0x53004d52, 0x4f505f56, 0x49544953, 0xab004e4f,
-        0x52444853, 0x00000954, 0x00010040, 0x00000255, 0x04000059, 0x00208e46, 0x00000000, 0x00000004,
-        0x0300005f, 0x00101032, 0x00000000, 0x0300005f, 0x00101032, 0x00000001, 0x0300005f, 0x00101032,
-        0x00000002, 0x0300005f, 0x00101032, 0x00000003, 0x0300005f, 0x00101032, 0x00000004, 0x0300005f,
-        0x00101032, 0x00000005, 0x03000065, 0x00102032, 0x00000000, 0x03000065, 0x001020f2, 0x00000001,
-        0x03000065, 0x00102032, 0x00000002, 0x03000065, 0x00102032, 0x00000003, 0x04000067, 0x001020f2,
-        0x00000004, 0x00000001, 0x02000068, 0x00000006, 0x0800000f, 0x00100012, 0x00000000, 0x00208046,
-        0x00000000, 0x00000000, 0x00101046, 0x00000005, 0x0800000f, 0x00100022, 0x00000000, 0x00208046,
-        0x00000000, 0x00000001, 0x00101046, 0x00000005, 0x0700000f, 0x00100042, 0x00000000, 0x00100046,
-        0x00000000, 0x00100046, 0x00000000, 0x05000044, 0x00100042, 0x00000000, 0x0010002a, 0x00000000,
-        0x07000038, 0x00100032, 0x00000000, 0x00100aa6, 0x00000000, 0x00100046, 0x00000000, 0x0800000f,
-        0x00100012, 0x00000001, 0x00208046, 0x00000000, 0x00000000, 0x00101046, 0x00000004, 0x0800000f,
-        0x00100022, 0x00000001, 0x00208046, 0x00000000, 0x00000001, 0x00101046, 0x00000004, 0x0700000f,
-        0x00100042, 0x00000000, 0x00100046, 0x00000001, 0x00100046, 0x00000001, 0x05000044, 0x00100042,
-        0x00000000, 0x0010002a, 0x00000000, 0x07000038, 0x00100032, 0x00000001, 0x00100aa6, 0x00000000,
-        0x00100046, 0x00000001, 0x06000036, 0x001000c2, 0x00000001, 0x80100556, 0x00000041, 0x00000001,
-        0x0700000f, 0x00100042, 0x00000000, 0x00100a26, 0x00000001, 0x00100046, 0x00000000, 0x0700000f,
-        0x00100012, 0x00000000, 0x00100046, 0x00000001, 0x00100046, 0x00000000, 0x07000000, 0x00100012,
-        0x00000000, 0x0010000a, 0x00000000, 0x00004001, 0x3f800000, 0x0800000e, 0x00100012, 0x00000000,
-        0x8010002a, 0x00000041, 0x00000000, 0x0010000a, 0x00000000, 0x09000032, 0x00100032, 0x00000000,
-        0x00100006, 0x00000000, 0x00100046, 0x00000001, 0x00100f36, 0x00000001, 0x05000036, 0x00100032,
-        0x00000001, 0x00101046, 0x00000000, 0x05000036, 0x00100042, 0x00000001, 0x00004001, 0x3f800000,
-        0x08000010, 0x00100012, 0x00000002, 0x00100246, 0x00000001, 0x00208246, 0x00000000, 0x00000000,
-        0x08000010, 0x00100022, 0x00000002, 0x00100246, 0x00000001, 0x00208246, 0x00000000, 0x00000001,
-        0x08000038, 0x00100042, 0x00000000, 0x0020803a, 0x00000000, 0x00000001, 0x00004001, 0x3f000000,
-        0x09000032, 0x00100032, 0x00000001, 0x00100aa6, 0x00000000, 0x00100046, 0x00000000, 0x00100046,
-        0x00000002, 0x05000036, 0x00102032, 0x00000000, 0x00100046, 0x00000001, 0x0800000f, 0x00100012,
-        0x00000002, 0x00208046, 0x00000000, 0x00000000, 0x00101046, 0x00000000, 0x0800000f, 0x00100022,
-        0x00000002, 0x00208046, 0x00000000, 0x00000001, 0x00101046, 0x00000000, 0x0800000f, 0x00100012,
-        0x00000003, 0x00208046, 0x00000000, 0x00000000, 0x00101046, 0x00000001, 0x0800000f, 0x00100022,
-        0x00000003, 0x00208046, 0x00000000, 0x00000001, 0x00101046, 0x00000001, 0x08000000, 0x00100032,
-        0x00000002, 0x00100046, 0x00000002, 0x80100046, 0x00000041, 0x00000003, 0x09000032, 0x00100032,
-        0x00000000, 0x00100aa6, 0x00000000, 0x00100046, 0x00000000, 0x00100046, 0x00000002, 0x0800000f,
-        0x00100012, 0x00000002, 0x00208046, 0x00000000, 0x00000002, 0x00100046, 0x00000000, 0x0800000f,
-        0x00100022, 0x00000002, 0x00208046, 0x00000000, 0x00000003, 0x00100046, 0x00000000, 0x0800000f,
-        0x00100012, 0x00000004, 0x00208046, 0x00000000, 0x00000000, 0x00101046, 0x00000003, 0x0800000f,
-        0x00100022, 0x00000004, 0x00208046, 0x00000000, 0x00000001, 0x00101046, 0x00000003, 0x08000000,
-        0x001000c2, 0x00000002, 0x80100406, 0x00000041, 0x00000003, 0x00100406, 0x00000004, 0x0800000f,
-        0x00100082, 0x00000000, 0x00208046, 0x00000000, 0x00000003, 0x00100ae6, 0x00000002, 0x06000036,
-        0x00100042, 0x00000003, 0x8010003a, 0x00000041, 0x00000000, 0x0800000f, 0x00100082, 0x00000003,
-        0x00208046, 0x00000000, 0x00000002, 0x00100ae6, 0x00000002, 0x0700000f, 0x00100082, 0x00000000,
-        0x00100ae6, 0x00000003, 0x00100ae6, 0x00000003, 0x05000044, 0x00100082, 0x00000000, 0x0010003a,
-        0x00000000, 0x07000038, 0x001000c2, 0x00000003, 0x00100ff6, 0x00000000, 0x00100ea6, 0x00000003,
-        0x0700000f, 0x00100022, 0x00000004, 0x00100046, 0x00000002, 0x00100ae6, 0x00000003, 0x06000036,
-        0x00100042, 0x00000000, 0x8010001a, 0x00000041, 0x00000000, 0x0800000f, 0x00100012, 0x00000002,
-        0x00208046, 0x00000000, 0x00000000, 0x00101046, 0x00000002, 0x0800000f, 0x00100022, 0x00000002,
-        0x00208046, 0x00000000, 0x00000001, 0x00101046, 0x00000002, 0x08000000, 0x00100032, 0x00000005,
-        0x80100046, 0x00000041, 0x00000003, 0x00100046, 0x00000002, 0x06000036, 0x00100042, 0x00000005,
-        0x8010001a, 0x00000041, 0x00000005, 0x0700000f, 0x00100022, 0x00000000, 0x00100a26, 0x00000005,
-        0x00100ae6, 0x00000002, 0x0d000032, 0x00100032, 0x00000002, 0x80100ae6, 0x00000041, 0x00000002,
-        0x00004002, 0x3f000000, 0x3f000000, 0x00000000, 0x00000000, 0x00100046, 0x00000005, 0x0800000e,
-        0x00100032, 0x00000000, 0x80100a26, 0x00000041, 0x00000000, 0x00100556, 0x00000000, 0x0700000f,
-        0x00100012, 0x00000002, 0x00100046, 0x00000000, 0x00100046, 0x00000002, 0x0700000f, 0x00100022,
-        0x00000002, 0x00100046, 0x00000000, 0x00100046, 0x00000005, 0x0800000f, 0x00100012, 0x00000000,
-        0x00208046, 0x00000000, 0x00000002, 0x00100046, 0x00000005, 0x0800000f, 0x00100022, 0x00000000,
-        0x00208046, 0x00000000, 0x00000003, 0x00100046, 0x00000005, 0x0700000f, 0x00100012, 0x00000000,
-        0x00100046, 0x00000000, 0x00100ae6, 0x00000003, 0x07000031, 0x00100022, 0x00000000, 0x00004001,
-        0x00000000, 0x0010000a, 0x00000000, 0x07000031, 0x00100042, 0x00000000, 0x0010000a, 0x00000000,
-        0x00004001, 0x00000000, 0x08000031, 0x00100012, 0x00000000, 0x8010000a, 0x00000081, 0x00000000,
-        0x00004001, 0x3f800000, 0x0800001e, 0x00100022, 0x00000000, 0x8010001a, 0x00000041, 0x00000000,
-        0x0010002a, 0x00000000, 0x0500002b, 0x00100022, 0x00000000, 0x0010001a, 0x00000000, 0x07000038,
-        0x001000c2, 0x00000002, 0x00100ea6, 0x00000003, 0x00100556, 0x00000000, 0x08000036, 0x001000d2,
-        0x00000004, 0x00004002, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x09000037, 0x001020f2,
-        0x00000001, 0x00100006, 0x00000000, 0x00100e46, 0x00000004, 0x00100e46, 0x00000002, 0x06000036,
-        0x00100032, 0x00000000, 0x00208046, 0x00000000, 0x00000002, 0x06000036, 0x001000c2, 0x00000000,
-        0x00208406, 0x00000000, 0x00000003, 0x08000038, 0x001000f2, 0x00000000, 0x00100e46, 0x00000000,
-        0x00208ff6, 0x00000000, 0x00000001, 0x0a000038, 0x001000f2, 0x00000000, 0x00100e46, 0x00000000,
-        0x00004002, 0x3f000000, 0x3f000000, 0x3f000000, 0x3f000000, 0x05000036, 0x00102032, 0x00000002,
-        0x00100086, 0x00000000, 0x05000036, 0x00102032, 0x00000003, 0x001005d6, 0x00000000, 0x05000036,
-        0x00100042, 0x00000001, 0x00004001, 0x3f800000, 0x08000010, 0x00100012, 0x00000000, 0x00208246,
-        0x00000000, 0x00000002, 0x00100246, 0x00000001, 0x08000010, 0x00100022, 0x00000000, 0x00208246,
-        0x00000000, 0x00000003, 0x00100246, 0x00000001, 0x08000038, 0x00100022, 0x00000001, 0x0010001a,
-        0x00000000, 0x0020803a, 0x00000000, 0x00000003, 0x08000038, 0x00100012, 0x00000001, 0x0010000a,
-        0x00000000, 0x0020803a, 0x00000000, 0x00000002, 0x0a000000, 0x00102032, 0x00000004, 0x00100046,
-        0x00000001, 0x00004002, 0xbf800000, 0x3f800000, 0x00000000, 0x00000000, 0x08000036, 0x001020c2,
-        0x00000004, 0x00004002, 0x00000000, 0x00000000, 0x00000000, 0x3f800000, 0x0100003e,
-    };
+    static const char vs_code_bezier_outline[] =
+        "float3x2 transform_geometry;\n"
+        "float stroke_width;\n"
+        "float4 transform_rtx;\n"
+        "float4 transform_rty;\n"
+        "\n"
+        "struct output\n"
+        "{\n"
+        "    float2 p : WORLD_POSITION;\n"
+        "    float4 b : BEZIER;\n"
+        "    nointerpolation float2x2 stroke_transform : STROKE_TRANSFORM;\n"
+        "    float4 position : SV_POSITION;\n"
+        "};\n"
+        "\n"
+        "void main(float2 position : POSITION, float2 p0 : P0, float2 p1 : P1, float2 p2 : P2,\n"
+        "        float2 prev : PREV, float2 next : NEXT, out struct output o)\n"
+        "{\n"
+        "    float2 q_prev, q_next, v_p, q_i, p;\n"
+        "    float2x2 geom, rt;\n"
+        "    float l;\n"
+        "\n"
+        "    geom = float2x2(transform_geometry._11_21, transform_geometry._12_22);\n"
+        "    rt = float2x2(transform_rtx.xy, transform_rty.xy);\n"
+        "    o.stroke_transform = rt * stroke_width * 0.5f;\n"
+        "\n"
+        "    p = mul(geom, position);\n"
+        "    p0 = mul(geom, p0);\n"
+        "    p1 = mul(geom, p1);\n"
+        "    p2 = mul(geom, p2);\n"
+        "\n"
+        "    p -= p0;\n"
+        "    p1 -= p0;\n"
+        "    p2 -= p0;\n"
+        "\n"
+        "    q_prev = normalize(mul(geom, prev));\n"
+        "    q_next = normalize(mul(geom, next));\n"
+        "\n"
+        "    v_p = float2(-q_prev.y, q_prev.x);\n"
+        "    l = -dot(v_p, q_next) / (1.0f + dot(q_prev, q_next));\n"
+        "    q_i = l * q_prev + v_p;\n"
+        "    p += 0.5f * stroke_width * q_i;\n"
+        "\n"
+        "    v_p = mul(rt, p2);\n"
+        "    v_p = normalize(float2(-v_p.y, v_p.x));\n"
+        "    if (abs(dot(mul(rt, p1), v_p)) < 1.0f)\n"
+        "    {\n"
+        "        o.b.xzw = float3(0.0f, 0.0f, 0.0f);\n"
+        "        o.b.y = dot(mul(rt, p), v_p);\n"
+        "    }\n"
+        "    else\n"
+        "    {\n"
+        "        o.b.zw = sign(dot(mul(rt, p1), v_p)) * v_p;\n"
+        "        v_p = -float2(-p.y, p.x) / dot(float2(-p1.y, p1.x), p2);\n"
+        "        o.b.x = dot(v_p, p1 - 0.5f * p2);\n"
+        "        o.b.y = dot(v_p, p1);\n"
+        "    }\n"
+        "\n"
+        "    o.p = mul(float3(position, 1.0f), transform_geometry) + 0.5f * stroke_width * q_i;\n"
+        "    position = mul(float2x3(transform_rtx.xyz, transform_rty.xyz), float3(o.p, 1.0f))\n"
+        "            * float2(transform_rtx.w, transform_rty.w);\n"
+        "    o.position = float4(position + float2(-1.0f, 1.0f), 0.0f, 1.0f);\n"
+        "}\n";
     /*     ⎡p0.x p0.y 1⎤
      * A = ⎢p1.x p1.y 1⎥
      *     ⎣p2.x p2.y 1⎦
@@ -3493,244 +3375,103 @@ static HRESULT d2d_device_context_init(struct d2d_device_context *render_target,
      * A'T = B'
      * T = A'⁻¹B' = (B'⁻¹A')⁻¹
      */
-    static const DWORD vs_code_arc_outline[] =
-    {
-#if 0
-        float3x2 transform_geometry;
-        float stroke_width;
-        float4 transform_rtx;
-        float4 transform_rty;
-
-        struct output
-        {
-            float2 p : WORLD_POSITION;
-            float4 b : BEZIER;
-            nointerpolation float2x2 stroke_transform : STROKE_TRANSFORM;
-            float4 position : SV_POSITION;
-        };
-
-        void main(float2 position : POSITION, float2 p0 : P0, float2 p1 : P1, float2 p2 : P2,
-                float2 prev : PREV, float2 next : NEXT, out struct output o)
-        {
-            float2 q_prev, q_next, v_p, q_i, p;
-            float2x2 geom, rt, p_inv;
-            float l;
-            float a;
-            float2 bc;
-
-            geom = float2x2(transform_geometry._11_21, transform_geometry._12_22);
-            rt = float2x2(transform_rtx.xy, transform_rty.xy);
-            o.stroke_transform = rt * stroke_width * 0.5f;
-
-            p = mul(geom, position);
-            p0 = mul(geom, p0);
-            p1 = mul(geom, p1);
-            p2 = mul(geom, p2);
-
-            p -= p0;
-            p1 -= p0;
-            p2 -= p0;
-
-            q_prev = normalize(mul(geom, prev));
-            q_next = normalize(mul(geom, next));
-
-            v_p = float2(-q_prev.y, q_prev.x);
-            l = -dot(v_p, q_next) / (1.0f + dot(q_prev, q_next));
-            q_i = l * q_prev + v_p;
-            p += 0.5f * stroke_width * q_i;
-
-            p_inv = float2x2(p1.y, -p1.x, p2.y - p1.y, p1.x - p2.x) / (p1.x * p2.y - p2.x * p1.y);
-            o.b.xy = mul(p_inv, p) + float2(1.0f, 0.0f);
-            o.b.zw = 0.0f;
-
-            o.p = mul(float3(position, 1.0f), transform_geometry) + 0.5f * stroke_width * q_i;
-            position = mul(float2x3(transform_rtx.xyz, transform_rty.xyz), float3(o.p, 1.0f))
-                    * float2(transform_rtx.w, transform_rty.w);
-            o.position = float4(position + float2(-1.0f, 1.0f), 0.0f, 1.0f);
-        }
-#endif
-        0x43425844, 0xde1911bf, 0xfff8c893, 0xb0bfc24d, 0x78c9bbc4, 0x00000001, 0x00000924, 0x00000003,
-        0x0000002c, 0x000000e4, 0x000001a0, 0x4e475349, 0x000000b0, 0x00000006, 0x00000008, 0x00000098,
-        0x00000000, 0x00000000, 0x00000003, 0x00000000, 0x00000303, 0x000000a1, 0x00000000, 0x00000000,
-        0x00000003, 0x00000001, 0x00000303, 0x000000a1, 0x00000001, 0x00000000, 0x00000003, 0x00000002,
-        0x00000303, 0x000000a1, 0x00000002, 0x00000000, 0x00000003, 0x00000003, 0x00000303, 0x000000a3,
-        0x00000000, 0x00000000, 0x00000003, 0x00000004, 0x00000303, 0x000000a8, 0x00000000, 0x00000000,
-        0x00000003, 0x00000005, 0x00000303, 0x49534f50, 0x4e4f4954, 0x50005000, 0x00564552, 0x5458454e,
-        0xababab00, 0x4e47534f, 0x000000b4, 0x00000005, 0x00000008, 0x00000080, 0x00000000, 0x00000000,
-        0x00000003, 0x00000000, 0x00000c03, 0x0000008f, 0x00000000, 0x00000000, 0x00000003, 0x00000001,
-        0x0000000f, 0x00000096, 0x00000000, 0x00000000, 0x00000003, 0x00000002, 0x00000c03, 0x00000096,
-        0x00000001, 0x00000000, 0x00000003, 0x00000003, 0x00000c03, 0x000000a7, 0x00000000, 0x00000001,
-        0x00000003, 0x00000004, 0x0000000f, 0x4c524f57, 0x4f505f44, 0x49544953, 0x42004e4f, 0x45495a45,
-        0x54530052, 0x454b4f52, 0x4152545f, 0x4f46534e, 0x53004d52, 0x4f505f56, 0x49544953, 0xab004e4f,
-        0x52444853, 0x0000077c, 0x00010040, 0x000001df, 0x04000059, 0x00208e46, 0x00000000, 0x00000004,
-        0x0300005f, 0x00101032, 0x00000000, 0x0300005f, 0x00101032, 0x00000001, 0x0300005f, 0x00101032,
-        0x00000002, 0x0300005f, 0x00101032, 0x00000003, 0x0300005f, 0x00101032, 0x00000004, 0x0300005f,
-        0x00101032, 0x00000005, 0x03000065, 0x00102032, 0x00000000, 0x03000065, 0x001020f2, 0x00000001,
-        0x03000065, 0x00102032, 0x00000002, 0x03000065, 0x00102032, 0x00000003, 0x04000067, 0x001020f2,
-        0x00000004, 0x00000001, 0x02000068, 0x00000004, 0x0800000f, 0x00100012, 0x00000000, 0x00208046,
-        0x00000000, 0x00000000, 0x00101046, 0x00000005, 0x0800000f, 0x00100022, 0x00000000, 0x00208046,
-        0x00000000, 0x00000001, 0x00101046, 0x00000005, 0x0700000f, 0x00100042, 0x00000000, 0x00100046,
-        0x00000000, 0x00100046, 0x00000000, 0x05000044, 0x00100042, 0x00000000, 0x0010002a, 0x00000000,
-        0x07000038, 0x00100032, 0x00000000, 0x00100aa6, 0x00000000, 0x00100046, 0x00000000, 0x0800000f,
-        0x00100012, 0x00000001, 0x00208046, 0x00000000, 0x00000000, 0x00101046, 0x00000004, 0x0800000f,
-        0x00100022, 0x00000001, 0x00208046, 0x00000000, 0x00000001, 0x00101046, 0x00000004, 0x0700000f,
-        0x00100042, 0x00000000, 0x00100046, 0x00000001, 0x00100046, 0x00000001, 0x05000044, 0x00100042,
-        0x00000000, 0x0010002a, 0x00000000, 0x07000038, 0x00100032, 0x00000001, 0x00100aa6, 0x00000000,
-        0x00100046, 0x00000001, 0x06000036, 0x001000c2, 0x00000001, 0x80100556, 0x00000041, 0x00000001,
-        0x0700000f, 0x00100042, 0x00000000, 0x00100a26, 0x00000001, 0x00100046, 0x00000000, 0x0700000f,
-        0x00100012, 0x00000000, 0x00100046, 0x00000001, 0x00100046, 0x00000000, 0x07000000, 0x00100012,
-        0x00000000, 0x0010000a, 0x00000000, 0x00004001, 0x3f800000, 0x0800000e, 0x00100012, 0x00000000,
-        0x8010002a, 0x00000041, 0x00000000, 0x0010000a, 0x00000000, 0x09000032, 0x00100032, 0x00000000,
-        0x00100006, 0x00000000, 0x00100046, 0x00000001, 0x00100f36, 0x00000001, 0x05000036, 0x00100032,
-        0x00000001, 0x00101046, 0x00000000, 0x05000036, 0x00100042, 0x00000001, 0x00004001, 0x3f800000,
-        0x08000010, 0x00100012, 0x00000002, 0x00100246, 0x00000001, 0x00208246, 0x00000000, 0x00000000,
-        0x08000010, 0x00100022, 0x00000002, 0x00100246, 0x00000001, 0x00208246, 0x00000000, 0x00000001,
-        0x08000038, 0x00100042, 0x00000000, 0x0020803a, 0x00000000, 0x00000001, 0x00004001, 0x3f000000,
-        0x09000032, 0x00100032, 0x00000001, 0x00100aa6, 0x00000000, 0x00100046, 0x00000000, 0x00100046,
-        0x00000002, 0x05000036, 0x00102032, 0x00000000, 0x00100046, 0x00000001, 0x0800000f, 0x00100012,
-        0x00000002, 0x00208046, 0x00000000, 0x00000000, 0x00101046, 0x00000000, 0x0800000f, 0x00100022,
-        0x00000002, 0x00208046, 0x00000000, 0x00000001, 0x00101046, 0x00000000, 0x0800000f, 0x00100022,
-        0x00000003, 0x00208046, 0x00000000, 0x00000000, 0x00101046, 0x00000001, 0x0800000f, 0x00100012,
-        0x00000003, 0x00208046, 0x00000000, 0x00000001, 0x00101046, 0x00000001, 0x08000000, 0x00100032,
-        0x00000002, 0x00100046, 0x00000002, 0x80100516, 0x00000041, 0x00000003, 0x09000032, 0x00100032,
-        0x00000000, 0x00100aa6, 0x00000000, 0x00100046, 0x00000000, 0x00100046, 0x00000002, 0x0800000f,
-        0x00100022, 0x00000002, 0x00208046, 0x00000000, 0x00000000, 0x00101046, 0x00000003, 0x0800000f,
-        0x00100012, 0x00000002, 0x00208046, 0x00000000, 0x00000001, 0x00101046, 0x00000003, 0x08000000,
-        0x001000c2, 0x00000000, 0x80100406, 0x00000041, 0x00000003, 0x00100406, 0x00000002, 0x0800000f,
-        0x00100022, 0x00000002, 0x00208046, 0x00000000, 0x00000000, 0x00101046, 0x00000002, 0x0800000f,
-        0x00100012, 0x00000002, 0x00208046, 0x00000000, 0x00000001, 0x00101046, 0x00000002, 0x08000000,
-        0x00100032, 0x00000002, 0x80100046, 0x00000041, 0x00000003, 0x00100046, 0x00000002, 0x07000038,
-        0x00100082, 0x00000001, 0x0010003a, 0x00000000, 0x0010000a, 0x00000002, 0x0a000032, 0x00100082,
-        0x00000001, 0x0010001a, 0x00000002, 0x0010002a, 0x00000000, 0x8010003a, 0x00000041, 0x00000001,
-        0x08000000, 0x00100042, 0x00000003, 0x0010002a, 0x00000000, 0x8010000a, 0x00000041, 0x00000002,
-        0x08000000, 0x00100082, 0x00000003, 0x8010003a, 0x00000041, 0x00000000, 0x0010001a, 0x00000002,
-        0x0a000038, 0x00100032, 0x00000003, 0x00100046, 0x00000002, 0x00004002, 0x3f800000, 0xbf800000,
-        0x00000000, 0x00000000, 0x0700000e, 0x001000f2, 0x00000002, 0x00100e46, 0x00000003, 0x00100ff6,
-        0x00000001, 0x0700000f, 0x00100012, 0x00000002, 0x00100046, 0x00000002, 0x00100046, 0x00000000,
-        0x0700000f, 0x00100022, 0x00000002, 0x00100ae6, 0x00000002, 0x00100046, 0x00000000, 0x0a000000,
-        0x00102032, 0x00000001, 0x00100046, 0x00000002, 0x00004002, 0x3f800000, 0x00000000, 0x00000000,
-        0x00000000, 0x08000036, 0x001020c2, 0x00000001, 0x00004002, 0x00000000, 0x00000000, 0x00000000,
-        0x00000000, 0x06000036, 0x00100032, 0x00000000, 0x00208046, 0x00000000, 0x00000002, 0x06000036,
-        0x001000c2, 0x00000000, 0x00208406, 0x00000000, 0x00000003, 0x08000038, 0x001000f2, 0x00000000,
-        0x00100e46, 0x00000000, 0x00208ff6, 0x00000000, 0x00000001, 0x0a000038, 0x001000f2, 0x00000000,
-        0x00100e46, 0x00000000, 0x00004002, 0x3f000000, 0x3f000000, 0x3f000000, 0x3f000000, 0x05000036,
-        0x00102032, 0x00000002, 0x00100086, 0x00000000, 0x05000036, 0x00102032, 0x00000003, 0x001005d6,
-        0x00000000, 0x05000036, 0x00100042, 0x00000001, 0x00004001, 0x3f800000, 0x08000010, 0x00100012,
-        0x00000000, 0x00208246, 0x00000000, 0x00000002, 0x00100246, 0x00000001, 0x08000010, 0x00100022,
-        0x00000000, 0x00208246, 0x00000000, 0x00000003, 0x00100246, 0x00000001, 0x08000038, 0x00100022,
-        0x00000001, 0x0010001a, 0x00000000, 0x0020803a, 0x00000000, 0x00000003, 0x08000038, 0x00100012,
-        0x00000001, 0x0010000a, 0x00000000, 0x0020803a, 0x00000000, 0x00000002, 0x0a000000, 0x00102032,
-        0x00000004, 0x00100046, 0x00000001, 0x00004002, 0xbf800000, 0x3f800000, 0x00000000, 0x00000000,
-        0x08000036, 0x001020c2, 0x00000004, 0x00004002, 0x00000000, 0x00000000, 0x00000000, 0x3f800000,
-        0x0100003e,
-    };
-    static const DWORD vs_code_triangle[] =
-    {
-#if 0
-        float3x2 transform_geometry;
-        float4 transform_rtx;
-        float4 transform_rty;
-
-        struct output
-        {
-            float2 p : WORLD_POSITION;
-            float4 b : BEZIER;
-            nointerpolation float2x2 stroke_transform : STROKE_TRANSFORM;
-            float4 position : SV_POSITION;
-        };
-
-        void main(float2 position : POSITION, out struct output o)
-        {
-            o.p = mul(float3(position, 1.0f), transform_geometry);
-            o.b = float4(1.0, 0.0, 1.0, 1.0);
-            o.stroke_transform = float2x2(1.0, 0.0, 0.0, 1.0);
-            position = mul(float2x3(transform_rtx.xyz, transform_rty.xyz), float3(o.p, 1.0f))
-                    * float2(transform_rtx.w, transform_rty.w);
-            o.position = float4(position + float2(-1.0f, 1.0f), 0.0f, 1.0f);
-        }
-#endif
-        0x43425844, 0xda43bf17, 0x06e6d155, 0xdbce2ae5, 0x8aed6fd8, 0x00000001, 0x0000034c, 0x00000003,
-        0x0000002c, 0x00000060, 0x0000011c, 0x4e475349, 0x0000002c, 0x00000001, 0x00000008, 0x00000020,
-        0x00000000, 0x00000000, 0x00000003, 0x00000000, 0x00000303, 0x49534f50, 0x4e4f4954, 0xababab00,
-        0x4e47534f, 0x000000b4, 0x00000005, 0x00000008, 0x00000080, 0x00000000, 0x00000000, 0x00000003,
-        0x00000000, 0x00000c03, 0x0000008f, 0x00000000, 0x00000000, 0x00000003, 0x00000001, 0x0000000f,
-        0x00000096, 0x00000000, 0x00000000, 0x00000003, 0x00000002, 0x00000c03, 0x00000096, 0x00000001,
-        0x00000000, 0x00000003, 0x00000003, 0x00000c03, 0x000000a7, 0x00000000, 0x00000001, 0x00000003,
-        0x00000004, 0x0000000f, 0x4c524f57, 0x4f505f44, 0x49544953, 0x42004e4f, 0x45495a45, 0x54530052,
-        0x454b4f52, 0x4152545f, 0x4f46534e, 0x53004d52, 0x4f505f56, 0x49544953, 0xab004e4f, 0x52444853,
-        0x00000228, 0x00010040, 0x0000008a, 0x04000059, 0x00208e46, 0x00000000, 0x00000004, 0x0300005f,
-        0x00101032, 0x00000000, 0x03000065, 0x00102032, 0x00000000, 0x03000065, 0x001020f2, 0x00000001,
-        0x03000065, 0x00102032, 0x00000002, 0x03000065, 0x00102032, 0x00000003, 0x04000067, 0x001020f2,
-        0x00000004, 0x00000001, 0x02000068, 0x00000002, 0x05000036, 0x00100032, 0x00000000, 0x00101046,
-        0x00000000, 0x05000036, 0x00100042, 0x00000000, 0x00004001, 0x3f800000, 0x08000010, 0x00100012,
-        0x00000001, 0x00100246, 0x00000000, 0x00208246, 0x00000000, 0x00000000, 0x08000010, 0x00100022,
-        0x00000001, 0x00100246, 0x00000000, 0x00208246, 0x00000000, 0x00000001, 0x05000036, 0x00102032,
-        0x00000000, 0x00100046, 0x00000001, 0x08000036, 0x001020f2, 0x00000001, 0x00004002, 0x3f800000,
-        0x00000000, 0x3f800000, 0x3f800000, 0x08000036, 0x00102032, 0x00000002, 0x00004002, 0x3f800000,
-        0x00000000, 0x00000000, 0x00000000, 0x08000036, 0x00102032, 0x00000003, 0x00004002, 0x00000000,
-        0x3f800000, 0x00000000, 0x00000000, 0x05000036, 0x00100042, 0x00000001, 0x00004001, 0x3f800000,
-        0x08000010, 0x00100012, 0x00000000, 0x00208246, 0x00000000, 0x00000002, 0x00100246, 0x00000001,
-        0x08000010, 0x00100022, 0x00000000, 0x00208246, 0x00000000, 0x00000003, 0x00100246, 0x00000001,
-        0x08000038, 0x00100022, 0x00000001, 0x0010001a, 0x00000000, 0x0020803a, 0x00000000, 0x00000003,
-        0x08000038, 0x00100012, 0x00000001, 0x0010000a, 0x00000000, 0x0020803a, 0x00000000, 0x00000002,
-        0x0a000000, 0x00102032, 0x00000004, 0x00100046, 0x00000001, 0x00004002, 0xbf800000, 0x3f800000,
-        0x00000000, 0x00000000, 0x08000036, 0x001020c2, 0x00000004, 0x00004002, 0x00000000, 0x00000000,
-        0x00000000, 0x3f800000, 0x0100003e,
-    };
-    static const DWORD vs_code_curve[] =
-    {
-#if 0
-        float3x2 transform_geometry;
-        float4 transform_rtx;
-        float4 transform_rty;
-
-        struct output
-        {
-            float2 p : WORLD_POSITION;
-            float4 b : BEZIER;
-            nointerpolation float2x2 stroke_transform : STROKE_TRANSFORM;
-            float4 position : SV_POSITION;
-        };
-
-        void main(float2 position : POSITION, float3 texcoord : TEXCOORD0, out struct output o)
-        {
-            o.p = mul(float3(position, 1.0f), transform_geometry);
-            o.b = float4(texcoord, 1.0);
-            o.stroke_transform = float2x2(1.0, 0.0, 0.0, 1.0);
-            position = mul(float2x3(transform_rtx.xyz, transform_rty.xyz), float3(o.p, 1.0f))
-                    * float2(transform_rtx.w, transform_rty.w);
-            o.position = float4(position + float2(-1.0f, 1.0f), 0.0f, 1.0f);
-        }
-#endif
-        0x43425844, 0xedb7472a, 0x2c2ea147, 0x36710079, 0xffc2e907, 0x00000001, 0x00000380, 0x00000003,
-        0x0000002c, 0x00000080, 0x0000013c, 0x4e475349, 0x0000004c, 0x00000002, 0x00000008, 0x00000038,
-        0x00000000, 0x00000000, 0x00000003, 0x00000000, 0x00000303, 0x00000041, 0x00000000, 0x00000000,
-        0x00000003, 0x00000001, 0x00000707, 0x49534f50, 0x4e4f4954, 0x58455400, 0x524f4f43, 0xabab0044,
-        0x4e47534f, 0x000000b4, 0x00000005, 0x00000008, 0x00000080, 0x00000000, 0x00000000, 0x00000003,
-        0x00000000, 0x00000c03, 0x0000008f, 0x00000000, 0x00000000, 0x00000003, 0x00000001, 0x0000000f,
-        0x00000096, 0x00000000, 0x00000000, 0x00000003, 0x00000002, 0x00000c03, 0x00000096, 0x00000001,
-        0x00000000, 0x00000003, 0x00000003, 0x00000c03, 0x000000a7, 0x00000000, 0x00000001, 0x00000003,
-        0x00000004, 0x0000000f, 0x4c524f57, 0x4f505f44, 0x49544953, 0x42004e4f, 0x45495a45, 0x54530052,
-        0x454b4f52, 0x4152545f, 0x4f46534e, 0x53004d52, 0x4f505f56, 0x49544953, 0xab004e4f, 0x52444853,
-        0x0000023c, 0x00010040, 0x0000008f, 0x04000059, 0x00208e46, 0x00000000, 0x00000004, 0x0300005f,
-        0x00101032, 0x00000000, 0x0300005f, 0x00101072, 0x00000001, 0x03000065, 0x00102032, 0x00000000,
-        0x03000065, 0x001020f2, 0x00000001, 0x03000065, 0x00102032, 0x00000002, 0x03000065, 0x00102032,
-        0x00000003, 0x04000067, 0x001020f2, 0x00000004, 0x00000001, 0x02000068, 0x00000002, 0x05000036,
-        0x00100032, 0x00000000, 0x00101046, 0x00000000, 0x05000036, 0x00100042, 0x00000000, 0x00004001,
-        0x3f800000, 0x08000010, 0x00100012, 0x00000001, 0x00100246, 0x00000000, 0x00208246, 0x00000000,
-        0x00000000, 0x08000010, 0x00100022, 0x00000001, 0x00100246, 0x00000000, 0x00208246, 0x00000000,
-        0x00000001, 0x05000036, 0x00102032, 0x00000000, 0x00100046, 0x00000001, 0x05000036, 0x00102072,
-        0x00000001, 0x00101246, 0x00000001, 0x05000036, 0x00102082, 0x00000001, 0x00004001, 0x3f800000,
-        0x08000036, 0x00102032, 0x00000002, 0x00004002, 0x3f800000, 0x00000000, 0x00000000, 0x00000000,
-        0x08000036, 0x00102032, 0x00000003, 0x00004002, 0x00000000, 0x3f800000, 0x00000000, 0x00000000,
-        0x05000036, 0x00100042, 0x00000001, 0x00004001, 0x3f800000, 0x08000010, 0x00100012, 0x00000000,
-        0x00208246, 0x00000000, 0x00000002, 0x00100246, 0x00000001, 0x08000010, 0x00100022, 0x00000000,
-        0x00208246, 0x00000000, 0x00000003, 0x00100246, 0x00000001, 0x08000038, 0x00100022, 0x00000001,
-        0x0010001a, 0x00000000, 0x0020803a, 0x00000000, 0x00000003, 0x08000038, 0x00100012, 0x00000001,
-        0x0010000a, 0x00000000, 0x0020803a, 0x00000000, 0x00000002, 0x0a000000, 0x00102032, 0x00000004,
-        0x00100046, 0x00000001, 0x00004002, 0xbf800000, 0x3f800000, 0x00000000, 0x00000000, 0x08000036,
-        0x001020c2, 0x00000004, 0x00004002, 0x00000000, 0x00000000, 0x00000000, 0x3f800000, 0x0100003e,
-    };
+    static const char vs_code_arc_outline[] =
+        "float3x2 transform_geometry;\n"
+        "float stroke_width;\n"
+        "float4 transform_rtx;\n"
+        "float4 transform_rty;\n"
+        "\n"
+        "struct output\n"
+        "{\n"
+        "    float2 p : WORLD_POSITION;\n"
+        "    float4 b : BEZIER;\n"
+        "    nointerpolation float2x2 stroke_transform : STROKE_TRANSFORM;\n"
+        "    float4 position : SV_POSITION;\n"
+        "};\n"
+        "\n"
+        "void main(float2 position : POSITION, float2 p0 : P0, float2 p1 : P1, float2 p2 : P2,\n"
+        "        float2 prev : PREV, float2 next : NEXT, out struct output o)\n"
+        "{\n"
+        "    float2 q_prev, q_next, v_p, q_i, p;\n"
+        "    float2x2 geom, rt, p_inv;\n"
+        "    float l;\n"
+        "    float a;\n"
+        "    float2 bc;\n"
+        "\n"
+        "    geom = float2x2(transform_geometry._11_21, transform_geometry._12_22);\n"
+        "    rt = float2x2(transform_rtx.xy, transform_rty.xy);\n"
+        "    o.stroke_transform = rt * stroke_width * 0.5f;\n"
+        "\n"
+        "    p = mul(geom, position);\n"
+        "    p0 = mul(geom, p0);\n"
+        "    p1 = mul(geom, p1);\n"
+        "    p2 = mul(geom, p2);\n"
+        "\n"
+        "    p -= p0;\n"
+        "    p1 -= p0;\n"
+        "    p2 -= p0;\n"
+        "\n"
+        "    q_prev = normalize(mul(geom, prev));\n"
+        "    q_next = normalize(mul(geom, next));\n"
+        "\n"
+        "    v_p = float2(-q_prev.y, q_prev.x);\n"
+        "    l = -dot(v_p, q_next) / (1.0f + dot(q_prev, q_next));\n"
+        "    q_i = l * q_prev + v_p;\n"
+        "    p += 0.5f * stroke_width * q_i;\n"
+        "\n"
+        "    p_inv = float2x2(p1.y, -p1.x, p2.y - p1.y, p1.x - p2.x) / (p1.x * p2.y - p2.x * p1.y);\n"
+        "    o.b.xy = mul(p_inv, p) + float2(1.0f, 0.0f);\n"
+        "    o.b.zw = 0.0f;\n"
+        "\n"
+        "    o.p = mul(float3(position, 1.0f), transform_geometry) + 0.5f * stroke_width * q_i;\n"
+        "    position = mul(float2x3(transform_rtx.xyz, transform_rty.xyz), float3(o.p, 1.0f))\n"
+        "            * float2(transform_rtx.w, transform_rty.w);\n"
+        "    o.position = float4(position + float2(-1.0f, 1.0f), 0.0f, 1.0f);\n"
+        "}\n";
+    static const char vs_code_triangle[] =
+        "float3x2 transform_geometry;\n"
+        "float4 transform_rtx;\n"
+        "float4 transform_rty;\n"
+        "\n"
+        "struct output\n"
+        "{\n"
+        "    float2 p : WORLD_POSITION;\n"
+        "    float4 b : BEZIER;\n"
+        "    nointerpolation float2x2 stroke_transform : STROKE_TRANSFORM;\n"
+        "    float4 position : SV_POSITION;\n"
+        "};\n"
+        "\n"
+        "void main(float2 position : POSITION, out struct output o)\n"
+        "{\n"
+        "    o.p = mul(float3(position, 1.0f), transform_geometry);\n"
+        "    o.b = float4(1.0, 0.0, 1.0, 1.0);\n"
+        "    o.stroke_transform = float2x2(1.0, 0.0, 0.0, 1.0);\n"
+        "    position = mul(float2x3(transform_rtx.xyz, transform_rty.xyz), float3(o.p, 1.0f))\n"
+        "            * float2(transform_rtx.w, transform_rty.w);\n"
+        "    o.position = float4(position + float2(-1.0f, 1.0f), 0.0f, 1.0f);\n"
+        "}\n";
+    static const char vs_code_curve[] =
+        "float3x2 transform_geometry;\n"
+        "float4 transform_rtx;\n"
+        "float4 transform_rty;\n"
+        "\n"
+        "struct output\n"
+        "{\n"
+        "    float2 p : WORLD_POSITION;\n"
+        "    float4 b : BEZIER;\n"
+        "    nointerpolation float2x2 stroke_transform : STROKE_TRANSFORM;\n"
+        "    float4 position : SV_POSITION;\n"
+        "};\n"
+        "\n"
+        "void main(float2 position : POSITION, float3 texcoord : TEXCOORD0, out struct output o)\n"
+        "{\n"
+        "    o.p = mul(float3(position, 1.0f), transform_geometry);\n"
+        "    o.b = float4(texcoord, 1.0);\n"
+        "    o.stroke_transform = float2x2(1.0, 0.0, 0.0, 1.0);\n"
+        "    position = mul(float2x3(transform_rtx.xyz, transform_rty.xyz), float3(o.p, 1.0f))\n"
+        "            * float2(transform_rtx.w, transform_rty.w);\n"
+        "    o.position = float4(position + float2(-1.0f, 1.0f), 0.0f, 1.0f);\n"
+        "}\n";
     static const DWORD ps_code[] =
     {
 #if 0
@@ -4198,21 +3939,22 @@ static HRESULT d2d_device_context_init(struct d2d_device_context *render_target,
         enum d2d_shape_type shape_type;
         const D3D11_INPUT_ELEMENT_DESC *il_desc;
         unsigned int il_element_count;
-        const void *vs_code;
+        const char *name;
+        const char *vs_code;
         size_t vs_code_size;
     }
     shape_info[] =
     {
         {D2D_SHAPE_TYPE_OUTLINE,        il_desc_outline,        ARRAY_SIZE(il_desc_outline),
-                                        vs_code_outline,        sizeof(vs_code_outline)},
+         "outline",                     vs_code_outline,        sizeof(vs_code_outline) - 1},
         {D2D_SHAPE_TYPE_BEZIER_OUTLINE, il_desc_curve_outline,  ARRAY_SIZE(il_desc_curve_outline),
-                                        vs_code_bezier_outline, sizeof(vs_code_bezier_outline)},
+         "bezier_outline",              vs_code_bezier_outline, sizeof(vs_code_bezier_outline) - 1},
         {D2D_SHAPE_TYPE_ARC_OUTLINE,    il_desc_curve_outline,  ARRAY_SIZE(il_desc_curve_outline),
-                                        vs_code_arc_outline,    sizeof(vs_code_arc_outline)},
+         "arc_outline",                 vs_code_arc_outline,    sizeof(vs_code_arc_outline) - 1},
         {D2D_SHAPE_TYPE_TRIANGLE,       il_desc_triangle,       ARRAY_SIZE(il_desc_triangle),
-                                        vs_code_triangle,       sizeof(vs_code_triangle)},
+         "triangle",                    vs_code_triangle,       sizeof(vs_code_triangle) - 1},
         {D2D_SHAPE_TYPE_CURVE,          il_desc_curve,          ARRAY_SIZE(il_desc_curve),
-                                        vs_code_curve,          sizeof(vs_code_curve)},
+         "curve",                       vs_code_curve,          sizeof(vs_code_curve) - 1},
     };
     static const struct
     {
@@ -4233,9 +3975,13 @@ static HRESULT d2d_device_context_init(struct d2d_device_context *render_target,
     render_target->IDWriteTextRenderer_iface.lpVtbl = &d2d_text_renderer_vtbl;
     render_target->IUnknown_iface.lpVtbl = &d2d_device_context_inner_unknown_vtbl;
     render_target->refcount = 1;
-    ID2D1Device_GetFactory(device, &render_target->factory);
+    ID2D1Device1_GetFactory(&device->ID2D1Device1_iface, &render_target->factory);
     render_target->device = device;
-    ID2D1Device_AddRef(render_target->device);
+    ID2D1Device1_AddRef(&render_target->device->ID2D1Device1_iface);
+
+    factory = unsafe_impl_from_ID2D1Factory(render_target->factory);
+    if (factory->factory_type == D2D1_FACTORY_TYPE_MULTI_THREADED)
+        render_target->cs = &factory->cs;
 
     render_target->outer_unknown = outer_unknown ? outer_unknown : &render_target->IUnknown_iface;
     render_target->ops = ops;
@@ -4259,21 +4005,34 @@ static HRESULT d2d_device_context_init(struct d2d_device_context *render_target,
     for (i = 0; i < ARRAY_SIZE(shape_info); ++i)
     {
         const struct shape_info *si = &shape_info[i];
+        ID3D10Blob *compiled;
+
+        if (FAILED(hr = D3DCompile(si->vs_code, si->vs_code_size, si->name, NULL, NULL,
+                "main", "vs_4_0", 0, 0, &compiled, NULL)))
+        {
+            WARN("Failed to compile shader for shape type %#x, hr %#lx.\n", si->shape_type, hr);
+            goto err;
+        }
 
         if (FAILED(hr = ID3D11Device1_CreateInputLayout(render_target->d3d_device, si->il_desc, si->il_element_count,
-                si->vs_code, si->vs_code_size, &render_target->shape_resources[si->shape_type].il)))
+                ID3D10Blob_GetBufferPointer(compiled), ID3D10Blob_GetBufferSize(compiled),
+                &render_target->shape_resources[si->shape_type].il)))
         {
             WARN("Failed to create input layout for shape type %#x, hr %#lx.\n", si->shape_type, hr);
+            ID3D10Blob_Release(compiled);
             goto err;
         }
 
-        if (FAILED(hr = ID3D11Device1_CreateVertexShader(render_target->d3d_device, si->vs_code,
-                si->vs_code_size, NULL, &render_target->shape_resources[si->shape_type].vs)))
+        if (FAILED(hr = ID3D11Device1_CreateVertexShader(render_target->d3d_device,
+                ID3D10Blob_GetBufferPointer(compiled), ID3D10Blob_GetBufferSize(compiled),
+                NULL, &render_target->shape_resources[si->shape_type].vs)))
         {
             WARN("Failed to create vertex shader for shape type %#x, hr %#lx.\n", si->shape_type, hr);
+            ID3D10Blob_Release(compiled);
             goto err;
         }
 
+        ID3D10Blob_Release(compiled);
     }
 
     buffer_desc.ByteWidth = sizeof(struct d2d_vs_cb);
@@ -4409,12 +4168,12 @@ err:
         ID3DDeviceContextState_Release(render_target->d3d_state);
     if (render_target->d3d_device)
         ID3D11Device1_Release(render_target->d3d_device);
-    ID2D1Device_Release(render_target->device);
+    ID2D1Device1_Release(&render_target->device->ID2D1Device1_iface);
     ID2D1Factory_Release(render_target->factory);
     return hr;
 }
 
-HRESULT d2d_d3d_create_render_target(ID2D1Device *device, IDXGISurface *surface, IUnknown *outer_unknown,
+HRESULT d2d_d3d_create_render_target(struct d2d_device *device, IDXGISurface *surface, IUnknown *outer_unknown,
         const struct d2d_device_context_ops *ops, const D2D1_RENDER_TARGET_PROPERTIES *desc, void **render_target)
 {
     D2D1_BITMAP_PROPERTIES1 bitmap_desc;
@@ -4456,6 +4215,8 @@ HRESULT d2d_d3d_create_render_target(ID2D1Device *device, IDXGISurface *surface,
     {
         bitmap_desc.pixelFormat = desc->pixelFormat;
         bitmap_desc.bitmapOptions = D2D1_BITMAP_OPTIONS_TARGET | D2D1_BITMAP_OPTIONS_CANNOT_DRAW;
+        if (desc->usage & D2D1_RENDER_TARGET_USAGE_GDI_COMPATIBLE)
+            bitmap_desc.bitmapOptions |= D2D1_BITMAP_OPTIONS_GDI_COMPATIBLE;
         bitmap_desc.colorContext = NULL;
 
         if (FAILED(hr = ID2D1DeviceContext1_CreateBitmapFromDxgiSurface(&object->ID2D1DeviceContext1_iface,
@@ -4513,6 +4274,7 @@ static ULONG WINAPI d2d_device_Release(ID2D1Device1 *iface)
 {
     struct d2d_device *device = impl_from_ID2D1Device(iface);
     ULONG refcount = InterlockedDecrement(&device->refcount);
+    size_t i;
 
     TRACE("%p decreasing refcount to %lu.\n", iface, refcount);
 
@@ -4520,6 +4282,9 @@ static ULONG WINAPI d2d_device_Release(ID2D1Device1 *iface)
     {
         IDXGIDevice_Release(device->dxgi_device);
         ID2D1Factory1_Release(device->factory);
+        for (i = 0; i < device->shaders.count; ++i)
+            IUnknown_Release(device->shaders.objects[i].shader);
+        free(device->shaders.objects);
         free(device);
     }
 
@@ -4536,8 +4301,9 @@ static void WINAPI d2d_device_GetFactory(ID2D1Device1 *iface, ID2D1Factory **fac
     ID2D1Factory1_AddRef(device->factory);
 }
 
-static HRESULT d2d_device_create_device_context(ID2D1Device1 *iface, D2D1_DEVICE_CONTEXT_OPTIONS options,
-        ID2D1DeviceContext1 **context) {
+static HRESULT d2d_device_create_device_context(struct d2d_device *device,
+        D2D1_DEVICE_CONTEXT_OPTIONS options, ID2D1DeviceContext1 **context)
+{
     struct d2d_device_context *object;
     HRESULT hr;
 
@@ -4547,7 +4313,7 @@ static HRESULT d2d_device_create_device_context(ID2D1Device1 *iface, D2D1_DEVICE
     if (!(object = calloc(1, sizeof(*object))))
         return E_OUTOFMEMORY;
 
-    if (FAILED(hr = d2d_device_context_init(object, (ID2D1Device *)iface, NULL, NULL)))
+    if (FAILED(hr = d2d_device_context_init(object, device, NULL, NULL)))
     {
         WARN("Failed to initialise device context, hr %#lx.\n", hr);
         free(object);
@@ -4563,9 +4329,11 @@ static HRESULT d2d_device_create_device_context(ID2D1Device1 *iface, D2D1_DEVICE
 static HRESULT WINAPI d2d_device_CreateDeviceContext(ID2D1Device1 *iface, D2D1_DEVICE_CONTEXT_OPTIONS options,
         ID2D1DeviceContext **context)
 {
+    struct d2d_device *device = impl_from_ID2D1Device(iface);
+
     TRACE("iface %p, options %#x, context %p.\n", iface, options, context);
 
-    return d2d_device_create_device_context(iface, options, (ID2D1DeviceContext1 **)context);
+    return d2d_device_create_device_context(device, options, (ID2D1DeviceContext1 **)context);
 }
 
 static HRESULT WINAPI d2d_device_CreatePrintControl(ID2D1Device1 *iface, IWICImagingFactory *wic_factory,
@@ -4612,9 +4380,11 @@ static void WINAPI d2d_device_SetRenderingPriority(ID2D1Device1 *iface, D2D1_REN
 static HRESULT WINAPI d2d_device_CreateDeviceContext1(ID2D1Device1 *iface, D2D1_DEVICE_CONTEXT_OPTIONS options,
         ID2D1DeviceContext1 **context)
 {
+    struct d2d_device *device = impl_from_ID2D1Device(iface);
+
     TRACE("iface %p, options %#x, context %p.\n", iface, options, context);
 
-    return d2d_device_create_device_context(iface, options, context);
+    return d2d_device_create_device_context(device, options, context);
 }
 
 static const struct ID2D1Device1Vtbl d2d_device_vtbl =
@@ -4633,7 +4403,7 @@ static const struct ID2D1Device1Vtbl d2d_device_vtbl =
     d2d_device_CreateDeviceContext1,
 };
 
-static struct d2d_device *unsafe_impl_from_ID2D1Device(ID2D1Device1 *iface)
+struct d2d_device *unsafe_impl_from_ID2D1Device(ID2D1Device1 *iface)
 {
     if (!iface)
         return NULL;
@@ -4649,4 +4419,36 @@ void d2d_device_init(struct d2d_device *device, ID2D1Factory1 *iface, IDXGIDevic
     ID2D1Factory1_AddRef(device->factory);
     device->dxgi_device = dxgi_device;
     IDXGIDevice_AddRef(device->dxgi_device);
+}
+
+HRESULT d2d_device_add_shader(struct d2d_device *device, REFGUID shader_id, IUnknown *shader)
+{
+    struct d2d_shader *entry;
+
+    if (!d2d_array_reserve((void **)&device->shaders.objects, &device->shaders.size,
+            device->shaders.count + 1, sizeof(*device->shaders.objects)))
+    {
+        WARN("Failed to resize shaders array.\n");
+        return E_OUTOFMEMORY;
+    }
+
+    entry = &device->shaders.objects[device->shaders.count++];
+    entry->id = *shader_id;
+    entry->shader = shader;
+    IUnknown_AddRef(entry->shader);
+
+    return S_OK;
+}
+
+BOOL d2d_device_is_shader_loaded(struct d2d_device *device, REFGUID shader_id)
+{
+     size_t i;
+
+     for (i = 0; i < device->shaders.count; ++i)
+     {
+         if (IsEqualGUID(shader_id, &device->shaders.objects[i].id))
+             return TRUE;
+     }
+
+     return FALSE;
 }

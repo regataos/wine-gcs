@@ -22,8 +22,6 @@
 #include <errno.h>
 
 #define COBJMACROS
-#define NONAMELESSUNION
-
 #include "windef.h"
 #include "winbase.h"
 #include "winuser.h"
@@ -46,22 +44,22 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(appwizcpl);
 
-#define GECKO_VERSION "2.47.3"
+#define GECKO_VERSION "2.47.4"
 #ifdef __i386__
 #define GECKO_ARCH "x86"
-#define GECKO_SHA "e5b9b06d3ce355646a8d2e72e044e37e1e0c8d18464eb1985adcd187a7f48e01"
+#define GECKO_SHA "26cecc47706b091908f7f814bddb074c61beb8063318e9efc5a7f789857793d6"
 #elif defined(__x86_64__)
 #define GECKO_ARCH "x86_64"
-#define GECKO_SHA "a53ee954392b6d1fe3d68545f6e4e2a97afbc8dc8b03a8b443349545ce139675"
+#define GECKO_SHA "e590b7d988a32d6aa4cf1d8aa3aa3d33766fdd4cf4c89c2dcc2095ecb28d066f"
 #else
 #define GECKO_ARCH ""
 #define GECKO_SHA "???"
 #endif
 
-#define MONO_VERSION "8.0.0"
+#define MONO_VERSION "9.0.0"
 #if defined(__i386__) || defined(__x86_64__)
 #define MONO_ARCH "x86"
-#define MONO_SHA "75b3f45dca1dc89857fe9e932da78710f64cc6d49ef1ab0c723a177085b4711b"
+#define MONO_SHA "79f6c43100675566c112f4199b9ea7b944d338164b34bd91fa11b0b0a414e1c4"
 #else
 #define MONO_ARCH ""
 #define MONO_SHA "???"
@@ -97,7 +95,7 @@ static const addon_info_t addons_info[] = {
         L"wine-mono-" MONO_VERSION "-" MONO_ARCH ".msi",
         L"mono",
         MONO_SHA,
-        "https://github.com/madewokherd/wine-mono/releases/download/wine-mono-" MONO_VERSION "/wine-mono-" MONO_VERSION "-" MONO_ARCH ".msi",
+        "http://source.winehq.org/winemono.php",
         "Dotnet", "MonoUrl", "MonoCabDir",
         MAKEINTRESOURCEW(ID_DWL_MONO_DIALOG)
     }
@@ -110,8 +108,7 @@ static LPWSTR url = NULL;
 static IBinding *dwl_binding;
 static WCHAR *msi_file;
 
-extern const char * CDECL wine_get_version(void);
-
+static const char * (CDECL *p_wine_get_version)(void);
 static WCHAR * (CDECL *p_wine_get_dos_file_name)(const char*);
 
 static BOOL sha_check(const WCHAR *file_name)
@@ -255,7 +252,7 @@ static HKEY open_config_key(void)
 
 static enum install_res install_from_registered_dir(void)
 {
-    char *package_dir;
+    char *package_dir, *new_package_dir;
     HKEY hkey;
     DWORD res, type, size = MAX_PATH;
     enum install_res ret;
@@ -267,8 +264,11 @@ static enum install_res install_from_registered_dir(void)
     package_dir = malloc(size);
     res = RegGetValueA(hkey, NULL, addon->dir_config_key, RRF_RT_ANY, &type, (PBYTE)package_dir, &size);
     if(res == ERROR_MORE_DATA) {
-        package_dir = realloc(package_dir, size);
-        res = RegGetValueA(hkey, NULL, addon->dir_config_key, RRF_RT_ANY, &type, (PBYTE)package_dir, &size);
+        new_package_dir = realloc(package_dir, size);
+        if(new_package_dir) {
+            package_dir = new_package_dir;
+            res = RegGetValueA(hkey, NULL, addon->dir_config_key, RRF_RT_ANY, &type, (PBYTE)package_dir, &size);
+        }
     }
     RegCloseKey(hkey);
     if(res == ERROR_FILE_NOT_FOUND) {
@@ -515,7 +515,7 @@ static HRESULT WINAPI InstallCallback_OnDataAvailable(IBindStatusCallback *iface
         DWORD dwSize, FORMATETC* pformatetc, STGMEDIUM* pstgmed)
 {
     if(!msi_file) {
-        msi_file = wcsdup(pstgmed->u.lpszFileName);
+        msi_file = wcsdup(pstgmed->lpszFileName);
         TRACE("got file name %s\n", debugstr_w(msi_file));
     }
 
@@ -609,7 +609,7 @@ static void append_url_params( WCHAR *url )
     len += MultiByteToWideChar(CP_ACP, 0, addon->version, -1, url+len, size/sizeof(WCHAR)-len)-1;
     lstrcpyW(url+len, L"&winev=");
     len += lstrlenW(L"&winev=");
-    MultiByteToWideChar(CP_ACP, 0, wine_get_version(), -1, url+len, size/sizeof(WCHAR)-len);
+    MultiByteToWideChar(CP_ACP, 0, p_wine_get_version() ? p_wine_get_version() : 0, -1, url+len, size/sizeof(WCHAR)-len);
 }
 
 static LPWSTR get_url(void)
@@ -750,6 +750,7 @@ BOOL install_addon(addon_t addon_type)
     addon = addons_info+addon_type;
 
     p_wine_get_dos_file_name = (void *)GetProcAddress(GetModuleHandleW(L"kernel32.dll"), "wine_get_dos_file_name");
+    p_wine_get_version = (void *)GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "wine_get_version");
 
     /*
      * Try to find addon .msi file in following order:

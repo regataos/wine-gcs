@@ -1,5 +1,5 @@
 /*
- * Copyright 2021 Alistair Leslie-Hughes
+ * Copyright (C) 2023 Mohamad Al-Jaf
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -25,6 +25,8 @@ import "asyncinfo.idl";
 import "eventtoken.idl";
 import "windowscontracts.idl";
 import "windows.foundation.idl";
+/* import "windows.networking.idl"; */
+import "windows.storage.streams.idl";
 
 namespace Windows
 {
@@ -192,8 +194,8 @@ namespace Windows
             [uuid(d85145e0-138f-47d7-9b3a-36bb488cef33)]
             interface IIPInformation : IInspectable
             {
-                [propget] HRESULT NetworkAdapter([out, retval] Windows.Networking.Connectivity.NetworkAdapter** value);
-                [propget] HRESULT PrefixLength([out, retval] /*Windows.Foundation.IReference<BYTE>** */ BYTE **value);
+                [propget] HRESULT NetworkAdapter([out, retval] Windows.Networking.Connectivity.NetworkAdapter **value);
+                [propget] HRESULT PrefixLength([out, retval] Windows.Foundation.IReference<BYTE> **value);
             }
 
             [contract(Windows.Foundation.UniversalApiContract, 1.0)]

@@ -72,13 +72,8 @@ static UINT MCI_SetCommandTable(HGLOBAL hMem, UINT uDevType);
 /* dup a string and uppercase it */
 static inline LPWSTR str_dup_upper( LPCWSTR str )
 {
-    INT len = (lstrlenW(str) + 1) * sizeof(WCHAR);
-    LPWSTR p = HeapAlloc( GetProcessHeap(), 0, len );
-    if (p)
-    {
-        memcpy( p, str, len );
-        CharUpperW( p );
-    }
+    WCHAR *p = wcsdup( str );
+    if (p) CharUpperW( p );
     return p;
 }
 
@@ -204,12 +199,12 @@ static LPWSTR MCI_strdupAtoW( LPCSTR str )
 
     if (!str) return NULL;
     len = MultiByteToWideChar( CP_ACP, 0, str, -1, NULL, 0 );
-    ret = HeapAlloc( GetProcessHeap(), 0, len * sizeof(WCHAR) );
+    ret = malloc( len * sizeof(WCHAR) );
     if (ret) MultiByteToWideChar( CP_ACP, 0, str, -1, ret, len );
     return ret;
 }
 
-static int MCI_MapMsgAtoW(UINT msg, DWORD_PTR dwParam1, DWORD_PTR *dwParam2)
+static DWORD MCI_MapMsgAtoW(UINT msg, DWORD_PTR dwParam1, DWORD_PTR *dwParam2)
 {
     if (msg < DRV_RESERVED) return 0;
 
@@ -252,8 +247,12 @@ static int MCI_MapMsgAtoW(UINT msg, DWORD_PTR dwParam1, DWORD_PTR *dwParam2)
             MCI_ANIM_OPEN_PARMSW *mci_openW;
             DWORD_PTR *ptr;
 
-            ptr = HeapAlloc(GetProcessHeap(), 0, sizeof(DWORD_PTR) + sizeof(*mci_openW));
-            if (!ptr) return -1;
+            if ((dwParam1 & (MCI_OPEN_TYPE|MCI_OPEN_TYPE_ID)) == MCI_OPEN_TYPE &&
+                (GetVersion() & 0x80000000) && IsBadStringPtrA(mci_openA->lpstrDeviceType, -1))
+                return MCIERR_MISSING_COMMAND_STRING;
+
+            ptr = malloc(sizeof(DWORD_PTR) + sizeof(*mci_openW));
+            if (!ptr) return MCIERR_OUT_OF_MEMORY;
 
             *ptr++ = *dwParam2; /* save the previous pointer */
             *dwParam2 = (DWORD_PTR)ptr;
@@ -283,7 +282,7 @@ static int MCI_MapMsgAtoW(UINT msg, DWORD_PTR dwParam1, DWORD_PTR *dwParam2)
             if (HIWORD(dwParam1))
                 memcpy(&mci_openW->dwStyle, &mci_openA->dwStyle, sizeof(MCI_ANIM_OPEN_PARMSW) - sizeof(MCI_OPEN_PARMSW));
         }
-        return 1;
+        return 0;
 
     case MCI_WINDOW:
         if (dwParam1 & MCI_ANIM_WINDOW_TEXT)
@@ -291,8 +290,8 @@ static int MCI_MapMsgAtoW(UINT msg, DWORD_PTR dwParam1, DWORD_PTR *dwParam2)
             MCI_ANIM_WINDOW_PARMSA *mci_windowA = (MCI_ANIM_WINDOW_PARMSA *)*dwParam2;
             MCI_ANIM_WINDOW_PARMSW *mci_windowW;
 
-            mci_windowW = HeapAlloc(GetProcessHeap(), 0, sizeof(*mci_windowW));
-            if (!mci_windowW) return -1;
+            mci_windowW = malloc( sizeof(*mci_windowW));
+            if (!mci_windowW) return MCIERR_OUT_OF_MEMORY;
 
             *dwParam2 = (DWORD_PTR)mci_windowW;
 
@@ -304,8 +303,6 @@ static int MCI_MapMsgAtoW(UINT msg, DWORD_PTR dwParam1, DWORD_PTR *dwParam2)
                 mci_windowW->hWnd = mci_windowA->hWnd;
             if (dwParam1 & MCI_ANIM_WINDOW_STATE)
                 mci_windowW->nCmdShow = mci_windowA->nCmdShow;
-
-            return 1;
         }
         return 0;
 
@@ -316,8 +313,8 @@ static int MCI_MapMsgAtoW(UINT msg, DWORD_PTR dwParam1, DWORD_PTR *dwParam2)
             MCI_SYSINFO_PARMSW *mci_sysinfoW;
             DWORD_PTR *ptr;
 
-            ptr = HeapAlloc(GetProcessHeap(), 0, sizeof(*mci_sysinfoW) + sizeof(DWORD_PTR));
-            if (!ptr) return -1;
+            ptr = malloc(sizeof(*mci_sysinfoW) + sizeof(DWORD_PTR));
+            if (!ptr) return MCIERR_OUT_OF_MEMORY;
 
             *ptr++ = *dwParam2; /* save the previous pointer */
             *dwParam2 = (DWORD_PTR)ptr;
@@ -328,10 +325,9 @@ static int MCI_MapMsgAtoW(UINT msg, DWORD_PTR dwParam1, DWORD_PTR *dwParam2)
 
             /* Size is measured in numbers of characters, despite what MSDN says. */
             mci_sysinfoW->dwRetSize = mci_sysinfoA->dwRetSize;
-            mci_sysinfoW->lpstrReturn = HeapAlloc(GetProcessHeap(), 0, mci_sysinfoW->dwRetSize * sizeof(WCHAR));
+            mci_sysinfoW->lpstrReturn = malloc(mci_sysinfoW->dwRetSize * sizeof(WCHAR));
             mci_sysinfoW->dwNumber = mci_sysinfoA->dwNumber;
             mci_sysinfoW->wDeviceType = mci_sysinfoA->wDeviceType;
-            return 1;
         }
         return 0;
     case MCI_INFO:
@@ -340,8 +336,8 @@ static int MCI_MapMsgAtoW(UINT msg, DWORD_PTR dwParam1, DWORD_PTR *dwParam2)
             MCI_DGV_INFO_PARMSW *mci_infoW;
             DWORD_PTR *ptr;
 
-            ptr = HeapAlloc(GetProcessHeap(), 0, sizeof(*mci_infoW) + sizeof(DWORD_PTR));
-            if (!ptr) return -1;
+            ptr = malloc(sizeof(*mci_infoW) + sizeof(DWORD_PTR));
+            if (!ptr) return MCIERR_OUT_OF_MEMORY;
 
             *ptr++ = *dwParam2; /* save the previous pointer */
             *dwParam2 = (DWORD_PTR)ptr;
@@ -352,11 +348,11 @@ static int MCI_MapMsgAtoW(UINT msg, DWORD_PTR dwParam1, DWORD_PTR *dwParam2)
 
             /* Size is measured in numbers of characters. */
             mci_infoW->dwRetSize = mci_infoA->dwRetSize;
-            mci_infoW->lpstrReturn = HeapAlloc(GetProcessHeap(), 0, mci_infoW->dwRetSize * sizeof(WCHAR));
+            mci_infoW->lpstrReturn = malloc(mci_infoW->dwRetSize * sizeof(WCHAR));
             if (dwParam1 & MCI_DGV_INFO_ITEM)
                 mci_infoW->dwItem = mci_infoA->dwItem;
-            return 1;
         }
+        return 0;
     case MCI_SAVE:
     case MCI_LOAD:
     case MCI_CAPTURE:
@@ -365,8 +361,8 @@ static int MCI_MapMsgAtoW(UINT msg, DWORD_PTR dwParam1, DWORD_PTR *dwParam2)
             MCI_OVLY_LOAD_PARMSA *mci_loadA = (MCI_OVLY_LOAD_PARMSA *)*dwParam2;
             MCI_OVLY_LOAD_PARMSW *mci_loadW;
 
-            mci_loadW = HeapAlloc(GetProcessHeap(), 0, sizeof(*mci_loadW));
-            if (!mci_loadW) return -1;
+            mci_loadW = malloc(sizeof(*mci_loadW));
+            if (!mci_loadW) return MCIERR_OUT_OF_MEMORY;
 
             *dwParam2 = (DWORD_PTR)mci_loadW;
             if (dwParam1 & MCI_NOTIFY)
@@ -377,23 +373,23 @@ static int MCI_MapMsgAtoW(UINT msg, DWORD_PTR dwParam1, DWORD_PTR *dwParam2)
                 (MCI_CAPTURE == msg && dwParam1 & MCI_DGV_CAPTURE_AT) ||
                 (MCI_RESTORE == msg && dwParam1 & MCI_DGV_RESTORE_AT))
                 mci_loadW->rc = mci_loadA->rc;
-            return 1;
         }
+        return 0;
     case MCI_SOUND:
     case MCI_ESCAPE:
         {   /* All these commands have the same layout: callback + string */
             MCI_VD_ESCAPE_PARMSA *mci_vd_escapeA = (MCI_VD_ESCAPE_PARMSA *)*dwParam2;
             MCI_VD_ESCAPE_PARMSW *mci_vd_escapeW;
 
-            mci_vd_escapeW = HeapAlloc(GetProcessHeap(), 0, sizeof(*mci_vd_escapeW));
-            if (!mci_vd_escapeW) return -1;
+            mci_vd_escapeW = malloc(sizeof(*mci_vd_escapeW));
+            if (!mci_vd_escapeW) return MCIERR_OUT_OF_MEMORY;
 
             *dwParam2 = (DWORD_PTR)mci_vd_escapeW;
             if (dwParam1 & MCI_NOTIFY)
                 mci_vd_escapeW->dwCallback = mci_vd_escapeA->dwCallback;
             mci_vd_escapeW->lpstrCommand = MCI_strdupAtoW(mci_vd_escapeA->lpstrCommand);
-            return 1;
         }
+        return 0;
     case MCI_SETAUDIO:
     case MCI_SETVIDEO:
         if (!(dwParam1 & (MCI_DGV_SETVIDEO_QUALITY | MCI_DGV_SETVIDEO_ALG
@@ -425,16 +421,16 @@ static void MCI_UnmapMsgAtoW(UINT msg, DWORD_PTR dwParam1, DWORD_PTR dwParam2,
             if (dwParam1 & MCI_OPEN_TYPE)
             {
                 if (!(dwParam1 & MCI_OPEN_TYPE_ID))
-                    HeapFree(GetProcessHeap(), 0, (LPWSTR)mci_openW->lpstrDeviceType);
+                    free((WCHAR *)mci_openW->lpstrDeviceType);
             }
             if (dwParam1 & MCI_OPEN_ELEMENT)
             {
                 if (!(dwParam1 & MCI_OPEN_ELEMENT_ID))
-                    HeapFree(GetProcessHeap(), 0, (LPWSTR)mci_openW->lpstrElementName);
+                    free((WCHAR *)mci_openW->lpstrElementName);
             }
             if (dwParam1 & MCI_OPEN_ALIAS)
-                HeapFree(GetProcessHeap(), 0, (LPWSTR)mci_openW->lpstrAlias);
-            HeapFree(GetProcessHeap(), 0, ptr);
+                free((WCHAR *)mci_openW->lpstrAlias);
+            free(ptr);
         }
         break;
     case MCI_WINDOW:
@@ -442,8 +438,8 @@ static void MCI_UnmapMsgAtoW(UINT msg, DWORD_PTR dwParam1, DWORD_PTR dwParam2,
         {
             MCI_ANIM_WINDOW_PARMSW *mci_windowW = (MCI_ANIM_WINDOW_PARMSW *)dwParam2;
 
-            HeapFree(GetProcessHeap(), 0, (void*)mci_windowW->lpstrText);
-            HeapFree(GetProcessHeap(), 0, mci_windowW);
+            free((void *)mci_windowW->lpstrText);
+            free(mci_windowW);
         }
         break;
 
@@ -462,8 +458,8 @@ static void MCI_UnmapMsgAtoW(UINT msg, DWORD_PTR dwParam1, DWORD_PTR dwParam2,
                                     NULL, NULL);
             }
 
-            HeapFree(GetProcessHeap(), 0, mci_sysinfoW->lpstrReturn);
-            HeapFree(GetProcessHeap(), 0, ptr);
+            free(mci_sysinfoW->lpstrReturn);
+            free(ptr);
         }
         break;
     case MCI_INFO:
@@ -480,8 +476,8 @@ static void MCI_UnmapMsgAtoW(UINT msg, DWORD_PTR dwParam1, DWORD_PTR dwParam2,
                                     NULL, NULL);
             }
 
-            HeapFree(GetProcessHeap(), 0, mci_infoW->lpstrReturn);
-            HeapFree(GetProcessHeap(), 0, ptr);
+            free(mci_infoW->lpstrReturn);
+            free(ptr);
         }
         break;
     case MCI_SAVE:
@@ -491,8 +487,8 @@ static void MCI_UnmapMsgAtoW(UINT msg, DWORD_PTR dwParam1, DWORD_PTR dwParam2,
         {   /* All these commands have the same layout: callback + string + optional rect */
             MCI_OVLY_LOAD_PARMSW *mci_loadW = (MCI_OVLY_LOAD_PARMSW *)dwParam2;
 
-            HeapFree(GetProcessHeap(), 0, (void*)mci_loadW->lpfilename);
-            HeapFree(GetProcessHeap(), 0, mci_loadW);
+            free((void *)mci_loadW->lpfilename);
+            free(mci_loadW);
         }
         break;
     case MCI_SOUND:
@@ -500,13 +496,12 @@ static void MCI_UnmapMsgAtoW(UINT msg, DWORD_PTR dwParam1, DWORD_PTR dwParam2,
         {   /* All these commands have the same layout: callback + string */
             MCI_VD_ESCAPE_PARMSW *mci_vd_escapeW = (MCI_VD_ESCAPE_PARMSW *)dwParam2;
 
-            HeapFree(GetProcessHeap(), 0, (void*)mci_vd_escapeW->lpstrCommand);
-            HeapFree(GetProcessHeap(), 0, mci_vd_escapeW);
+            free((void *)mci_vd_escapeW->lpstrCommand);
+            free(mci_vd_escapeW);
         }
         break;
 
     default:
-        FIXME("Message %s needs unmapping\n", MCI_MessageToString(msg));
         break;
     }
 }
@@ -726,7 +721,7 @@ static UINT MCI_SetCommandTable(HGLOBAL hMem, UINT uDevType)
 		    count++;
 	    } while (eid != MCI_END_COMMAND_LIST);
 
-	    S_MciCmdTable[uTbl].aVerbs = HeapAlloc(GetProcessHeap(), 0, count * sizeof(LPCWSTR));
+	    S_MciCmdTable[uTbl].aVerbs = malloc(count * sizeof(const WCHAR *));
 	    S_MciCmdTable[uTbl].nVerbs = count;
 
 	    lmem = S_MciCmdTable[uTbl].lpTable;
@@ -771,10 +766,10 @@ static	BOOL	MCI_UnLoadMciDriver(LPWINE_MCIDRIVER wmd)
     }
     LeaveCriticalSection(&WINMM_cs);
 
-    HeapFree(GetProcessHeap(), 0, wmd->lpstrDeviceType);
-    HeapFree(GetProcessHeap(), 0, wmd->lpstrAlias);
+    free(wmd->lpstrDeviceType);
+    free(wmd->lpstrAlias);
 
-    HeapFree(GetProcessHeap(), 0, wmd);
+    free(wmd);
     return TRUE;
 }
 
@@ -799,7 +794,7 @@ static	BOOL	MCI_OpenMciDriver(LPWINE_MCIDRIVER wmd, LPCWSTR drvTyp, DWORD_PTR lp
 static	DWORD	MCI_LoadMciDriver(LPCWSTR _strDevTyp, LPWINE_MCIDRIVER* lpwmd)
 {
     LPWSTR			strDevTyp = str_dup_upper(_strDevTyp);
-    LPWINE_MCIDRIVER		wmd = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*wmd));
+    WINE_MCIDRIVER*		wmd = calloc(1, sizeof(*wmd));
     MCI_OPEN_DRIVER_PARMSW	modp;
     DWORD			dwRet = 0;
 
@@ -865,7 +860,7 @@ static	DWORD	MCI_LoadMciDriver(LPCWSTR _strDevTyp, LPWINE_MCIDRIVER* lpwmd)
     return 0;
 errCleanUp:
     MCI_UnLoadMciDriver(wmd);
-    HeapFree(GetProcessHeap(), 0, strDevTyp);
+    free(strDevTyp);
     *lpwmd = 0;
     return dwRet;
 }
@@ -916,9 +911,8 @@ static	DWORD	MCI_FinishOpen(LPWINE_MCIDRIVER wmd, LPMCI_OPEN_PARMSW lpParms,
             return MCIERR_DEVICE_OPEN;
     }
     if (alias) {
-        wmd->lpstrAlias = HeapAlloc(GetProcessHeap(), 0, (lstrlenW(alias)+1) * sizeof(WCHAR));
+        wmd->lpstrAlias = wcsdup(alias);
         if (!wmd->lpstrAlias) return MCIERR_OUT_OF_MEMORY;
-        lstrcpyW( wmd->lpstrAlias, alias);
         /* In most cases, natives adds MCI_OPEN_ALIAS to the flags passed to the driver.
          * Don't.  The drivers don't care about the winmm alias. */
     }
@@ -1324,9 +1318,8 @@ DWORD WINAPI mciSendStringW(LPCWSTR lpstrCommand, LPWSTR lpstrRet,
         return MCIERR_MISSING_COMMAND_STRING;
 
     /* format is <command> <device> <optargs> */
-    if (!(verb = HeapAlloc(GetProcessHeap(), 0, (lstrlenW(lpstrCommand)+1) * sizeof(WCHAR))))
+    if (!(verb = wcsdup(lpstrCommand)))
 	return MCIERR_OUT_OF_MEMORY;
-    lstrcpyW( verb, lpstrCommand );
     CharLowerW(verb);
 
     memset(&data, 0, sizeof(data));
@@ -1575,8 +1568,8 @@ errCleanUp:
     }
     if (wMsg == MCI_OPEN && LOWORD(dwRet) && wmd)
 	MCI_UnLoadMciDriver(wmd);
-    HeapFree(GetProcessHeap(), 0, devType);
-    HeapFree(GetProcessHeap(), 0, verb);
+    free(devType);
+    free(verb);
     return dwRet;
 }
 
@@ -1593,22 +1586,22 @@ DWORD WINAPI mciSendStringA(LPCSTR lpstrCommand, LPSTR lpstrRet,
 
     /* FIXME: is there something to do with lpstrReturnString ? */
     len = MultiByteToWideChar( CP_ACP, 0, lpstrCommand, -1, NULL, 0 );
-    lpwstrCommand = HeapAlloc( GetProcessHeap(), 0, len * sizeof(WCHAR) );
+    lpwstrCommand = malloc( len * sizeof(WCHAR) );
     MultiByteToWideChar( CP_ACP, 0, lpstrCommand, -1, lpwstrCommand, len );
     if (lpstrRet)
     {
         if (uRetLen) *lpstrRet = '\0'; /* NT-w2k3 use memset(lpstrRet, 0, uRetLen); */
-        lpwstrRet = HeapAlloc(GetProcessHeap(), 0, uRetLen * sizeof(WCHAR));
+        lpwstrRet = malloc( uRetLen * sizeof(WCHAR) );
         if (!lpwstrRet) {
-            HeapFree( GetProcessHeap(), 0, lpwstrCommand );
+            free( lpwstrCommand );
             return MCIERR_OUT_OF_MEMORY;
         }
     }
     ret = mciSendStringW(lpwstrCommand, lpwstrRet, uRetLen, hwndCallback);
     if (!ret && lpwstrRet)
         WideCharToMultiByte( CP_ACP, 0, lpwstrRet, -1, lpstrRet, uRetLen, NULL, NULL );
-    HeapFree(GetProcessHeap(), 0, lpwstrCommand);
-    HeapFree(GetProcessHeap(), 0, lpwstrRet);
+    free(lpwstrCommand);
+    free(lpwstrRet);
     return ret;
 }
 
@@ -1688,7 +1681,7 @@ BOOL WINAPI mciFreeCommandResource(UINT uTable)
     FreeResource(S_MciCmdTable[uTable].hMem);
     S_MciCmdTable[uTable].hMem = NULL;
     S_MciCmdTable[uTable].lpTable = NULL;
-    HeapFree(GetProcessHeap(), 0, S_MciCmdTable[uTable].aVerbs);
+    free(S_MciCmdTable[uTable].aVerbs);
     S_MciCmdTable[uTable].aVerbs = 0;
     S_MciCmdTable[uTable].nVerbs = 0;
     return TRUE;
@@ -2289,20 +2282,18 @@ DWORD WINAPI mciSendCommandW(MCIDEVICEID wDevID, UINT wMsg, DWORD_PTR dwParam1, 
 DWORD WINAPI mciSendCommandA(MCIDEVICEID wDevID, UINT wMsg, DWORD_PTR dwParam1, DWORD_PTR dwParam2)
 {
     DWORD ret;
-    int mapped;
 
     TRACE("(%08x, %s, %08Ix, %08Ix)\n",
 	  wDevID, MCI_MessageToString(wMsg), dwParam1, dwParam2);
 
-    mapped = MCI_MapMsgAtoW(wMsg, dwParam1, &dwParam2);
-    if (mapped == -1)
+    ret = MCI_MapMsgAtoW(wMsg, dwParam1, &dwParam2);
+    if (ret)
     {
         FIXME("message %04x mapping failed\n", wMsg);
-        return MCIERR_OUT_OF_MEMORY;
+        return ret;
     }
-    ret = mciSendCommandW(wDevID, wMsg, dwParam1, dwParam2);
-    if (mapped)
-        MCI_UnmapMsgAtoW(wMsg, dwParam1, dwParam2, ret);
+     ret = mciSendCommandW(wDevID, wMsg, dwParam1, dwParam2);
+    MCI_UnmapMsgAtoW(wMsg, dwParam1, dwParam2, ret);
     return ret;
 }
 
@@ -2317,7 +2308,7 @@ UINT WINAPI mciGetDeviceIDA(LPCSTR lpstrName)
     if (w)
     {
         ret = mciGetDeviceIDW(w);
-        HeapFree(GetProcessHeap(), 0, w);
+        free(w);
     }
     return ret;
 }
@@ -2383,7 +2374,7 @@ UINT WINAPI mciGetDeviceIDFromElementIDA(DWORD dwElementID, LPCSTR lpstrType)
     if (w)
     {
         ret = mciGetDeviceIDFromElementIDW(dwElementID, w);
-        HeapFree(GetProcessHeap(), 0, w);
+        free(w);
     }
     return ret;
 }

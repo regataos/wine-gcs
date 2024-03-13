@@ -20,42 +20,38 @@
 #pragma winrt ns_prefix
 #endif
 
+#ifndef DO_NO_IMPORTS
 import "inspectable.idl";
 import "eventtoken.idl";
 import "windows.foundation.idl";
+#endif
 
-namespace Windows {
-    namespace Security {
-        namespace ExchangeActiveSyncProvisioning {
-            interface IEasClientDeviceInformation;
-            runtimeclass EasClientDeviceInformation;
-        }
+namespace Windows.Security.ExchangeActiveSyncProvisioning {
+    interface IEasClientDeviceInformation;
+    runtimeclass EasClientDeviceInformation;
+
+    [
+        contract(Windows.Foundation.UniversalApiContract, 1.0),
+        exclusiveto(Windows.Security.ExchangeActiveSyncProvisioning.EasClientDeviceInformation),
+        uuid(54dfd981-1968-4ca3-b958-e595d16505eb)
+    ]
+    interface IEasClientDeviceInformation : IInspectable
+    {
+        [propget] HRESULT Id([out, retval] GUID *value);
+        [propget] HRESULT OperatingSystem([out, retval] HSTRING *value);
+        [propget] HRESULT FriendlyName([out, retval] HSTRING *value);
+        [propget] HRESULT SystemManufacturer([out, retval] HSTRING *value);
+        [propget] HRESULT SystemProductName([out, retval] HSTRING *value);
+        [propget] HRESULT SystemSku([out, retval] HSTRING *value);
     }
-}
 
-namespace Windows {
-    namespace Security {
-        namespace ExchangeActiveSyncProvisioning {
-            [contract(Windows.Foundation.UniversalApiContract, 1.0)]
-            [exclusiveto(Windows.Security.ExchangeActiveSyncProvisioning.EasClientDeviceInformation)]
-            [uuid(54DFD981-1968-4CA3-B958-E595D16505EB)]
-            interface IEasClientDeviceInformation : IInspectable
-            {
-                [propget] HRESULT Id([out] [retval] GUID* value);
-                [propget] HRESULT OperatingSystem([out] [retval] HSTRING* value);
-                [propget] HRESULT FriendlyName([out] [retval] HSTRING* value);
-                [propget] HRESULT SystemManufacturer([out] [retval] HSTRING* value);
-                [propget] HRESULT SystemProductName([out] [retval] HSTRING* value);
-                [propget] HRESULT SystemSku([out] [retval] HSTRING* value);
-            }
-
-            [activatable(Windows.Foundation.UniversalApiContract, 1.0)]
-            [contract(Windows.Foundation.UniversalApiContract, 1.0)]
-            [threading(both)]
-            runtimeclass EasClientDeviceInformation
-            {
-                [default] interface Windows.Security.ExchangeActiveSyncProvisioning.IEasClientDeviceInformation;
-            }
-       }
+    [
+        activatable(Windows.Foundation.UniversalApiContract, 1.0),
+        contract(Windows.Foundation.UniversalApiContract, 1.0),
+        threading(both)
+    ]
+    runtimeclass EasClientDeviceInformation
+    {
+        [default] interface Windows.Security.ExchangeActiveSyncProvisioning.IEasClientDeviceInformation;
     }
 }

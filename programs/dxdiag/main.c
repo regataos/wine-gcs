@@ -72,13 +72,7 @@ static BOOL process_file_name(const WCHAR *cmdline, enum output_type output_type
         endptr = cmdline + lstrlenW(cmdline);
 
     len = endptr - cmdline;
-    if (len == 0)
-    {
-        *filename = 0;
-        return TRUE;
-    }
-
-    if (len >= filename_len)
+    if (len == 0 || len >= filename_len)
         return FALSE;
 
     memcpy(filename, cmdline, len * sizeof(WCHAR));
@@ -163,6 +157,12 @@ static BOOL process_command_line(const WCHAR *cmdline, struct command_line_info 
             else
                 return FALSE;
 
+            break;
+
+        case '6':
+            if (wcsnicmp(cmdline, L"64bit", 5))
+                return FALSE;
+            cmdline += 5;
             break;
 
         case 'd':

@@ -129,7 +129,6 @@ static const CFStringRef cocoa_cursor_names[] =
 static void send_mouse_input(HWND hwnd, macdrv_window cocoa_window, UINT flags, int x, int y,
                              DWORD mouse_data, BOOL drag, unsigned long time)
 {
-    RAWINPUT rawinput;
     INPUT input;
     HWND top_level_hwnd;
 
@@ -159,7 +158,7 @@ static void send_mouse_input(HWND hwnd, macdrv_window cocoa_window, UINT flags, 
     input.mi.time           = time;
     input.mi.dwExtraInfo    = 0;
 
-    __wine_send_input(top_level_hwnd, &input, &rawinput);
+    NtUserSendHardwareInput(top_level_hwnd, 0, &input, 0);
 }
 
 
@@ -188,7 +187,7 @@ CFStringRef copy_system_cursor_name(ICONINFOEXW *info)
     else
     {
         char buf[16];
-        sprintf(buf, "%hu", info->wResID);
+        snprintf(buf, sizeof(buf), "%hu", info->wResID);
         asciiz_to_unicode(p, buf);
     }
 

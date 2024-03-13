@@ -18,24 +18,20 @@
 
 var E_INVALIDARG = 0x80070057;
 var JS_E_PROP_DESC_MISMATCH = 0x800a01bd;
+var JS_E_INVALID_ACTION = 0x800a01bd;
 var JS_E_NUMBER_EXPECTED = 0x800a1389;
 var JS_E_FUNCTION_EXPECTED = 0x800a138a;
 var JS_E_DATE_EXPECTED = 0x800a138e;
 var JS_E_OBJECT_EXPECTED = 0x800a138f;
-var JS_E_UNDEFINED_VARIABLE = 0x800a1391;
 var JS_E_BOOLEAN_EXPECTED = 0x800a1392;
 var JS_E_VBARRAY_EXPECTED = 0x800a1395;
 var JS_E_ENUMERATOR_EXPECTED = 0x800a1397;
 var JS_E_REGEXP_EXPECTED = 0x800a1398;
+var JS_E_UNEXPECTED_QUANTIFIER = 0x800a139a;
 var JS_E_INVALID_LENGTH = 0x800a13a5;
 var JS_E_INVALID_WRITABLE_PROP_DESC = 0x800a13ac;
 var JS_E_NONCONFIGURABLE_REDEFINED = 0x800a13d6;
 var JS_E_NONWRITABLE_MODIFIED = 0x800a13d7;
-var JS_E_TYPEDARRAY_BAD_CTOR_ARG = 0x800a13da;
-var JS_E_NOT_TYPEDARRAY = 0x800a13db;
-var JS_E_TYPEDARRAY_INVALID_OFFSLEN = 0x800a13dc;
-var JS_E_TYPEDARRAY_INVALID_SUBARRAY = 0x800a13dd;
-var JS_E_TYPEDARRAY_INVALID_SOURCE = 0x800a13de;
 var JS_E_NOT_DATAVIEW = 0x800a13df;
 var JS_E_DATAVIEW_NO_ARGUMENT = 0x800a13e0;
 var JS_E_DATAVIEW_INVALID_ACCESS = 0x800a13e1;
@@ -384,6 +380,13 @@ sync_test("isArray", function() {
     expect_array(new C(), false);
 });
 
+sync_test("array_splice", function() {
+    var arr = [1,2,3,4,5]
+    var tmp = arr.splice(2);
+    ok(arr.toString() === "1,2", "arr = " + arr);
+    ok(tmp.toString() === "3,4,5", "tmp = " + tmp);
+});
+
 sync_test("array_map", function() {
     var calls, m, arr, ctx;
 
@@ -434,6 +437,13 @@ sync_test("array_map", function() {
     [1,2].map(function() {
         ok(this.valueOf() === 137, "this.valueOf() = " + this.valueOf());
     }, 137);
+
+    r = [1,,2,].map(function(x) { return "" + x; });
+    ok(r.length === 3, "[1,,2,].map length = " + r.length);
+    ok(r[0] === "1", "[1,,2,].map[0] = " + r[0]);
+    ok(r[2] === "2", "[1,,2,].map[2] = " + r[2]);
+    ok(!("1" in r), "[1,,2,].map[1] exists");
+    ok(!("3" in r), "[1,,2,].map[3] exists");
 });
 
 sync_test("array_sort", function() {
@@ -454,14 +464,7 @@ sync_test("array_sort", function() {
 });
 
 sync_test("identifier_keywords", function() {
-    function get(let, set) { { get instanceof (Object); } return let + set; }
-    set: var let = get(1, 2);
-    { get: 10 }
-    var set = 0;
     var o = {
-        get: get,
-        set: set,
-        let: let,
         if: 1,
         default: 2,
         function: 3,
@@ -474,8 +477,8 @@ sync_test("identifier_keywords", function() {
         else: true,
         finally: true,
         for: true,
-        set in(x) { },
-        get instanceof() { return 3; },
+        in: true,
+        instanceof: true,
         new: true,
         return: true,
         switch: true,
@@ -496,19 +499,6 @@ sync_test("identifier_keywords", function() {
     ok(o.if === 1, "o.if = " + o.if);
     ok(ro().default === 2, "ro().default = " + ro().default);
     ok(o.false === true, "o.false = " + o.false);
-    ok(o.get === get, "o.let = " + o.get);
-    ok(o.set === set, "o.let = " + o.set);
-    ok(o.let === let, "o.let = " + o.let);
-    ok(o.instanceof === 3, "o.instanceof = " + o.instanceof);
-
-    var tmp = false;
-    try {
-        eval('function var() { }');
-    }
-    catch(set) {
-        tmp = true;
-    }
-    ok(tmp === true, "Expected exception for 'function var() { }'");
 });
 
 function test_own_data_prop_desc(obj, prop, expected_writable, expected_enumerable,
@@ -556,11 +546,16 @@ sync_test("getOwnPropertyDescriptor", function() {
     (function() {
         test_own_data_prop_desc(arguments, "length", true, false, true);
         test_own_data_prop_desc(arguments, "callee", true, false, true);
+        ok(!("caller" in arguments), "caller in arguments");
     })();
 
     test_own_data_prop_desc(String, "prototype", false, false, false);
     test_own_data_prop_desc(function(){}, "prototype", true, false, false);
+    test_own_data_prop_desc(function(){}, "caller", false, false, false);
+    test_own_data_prop_desc(function(){}, "arguments", false, false, false);
     test_own_data_prop_desc(Function, "prototype", false, false, false);
+    test_own_data_prop_desc(Function.prototype, "caller", false, false, false);
+    test_own_data_prop_desc(Function.prototype, "arguments", false, false, false);
     test_own_data_prop_desc(String.prototype, "constructor", true, false, true);
 
     try {
@@ -819,6 +814,7 @@ sync_test("defineProperty", function() {
     /* call prop with getter */
     desc = {
         get: function() {
+            ok(this === obj, "this != obj");
             return function(x) {
                 ok(x === 100, "x = " + x);
                 return 10;
@@ -828,6 +824,10 @@ sync_test("defineProperty", function() {
     Object.defineProperty(obj, "funcprop", desc);
     test_accessor_prop_desc(obj, "funcprop", desc);
     ok(obj.funcprop(100) === 10, "obj.funcprop() = " + obj.funcprop(100));
+
+    Object.defineProperty(child.prototype, "funcprop_prot", desc);
+    test_accessor_prop_desc(child.prototype, "funcprop_prot", desc);
+    ok(obj.funcprop_prot(100) === 10, "obj.funcprop_prot() = " + obj.funcprop_prot(100));
 
     expect_exception(function() {
         Object.defineProperty(null, "funcprop", desc);
@@ -1137,6 +1137,7 @@ sync_test("toString", function() {
     todo_wine.
     ok(tmp === "[object Arguments]", "toString.call(arguments) = " + tmp);
     tmp = Object.prototype.toString.call(this);
+    todo_wine.
     ok(tmp === "[object Window]", "toString.call(null) = " + tmp);
     tmp = Object.prototype.toString.call(null);
     ok(tmp === "[object Null]", "toString.call(null) = " + tmp);
@@ -1151,6 +1152,9 @@ sync_test("toString", function() {
     obj = Object.create(Number.prototype);
     tmp = Object.prototype.toString.call(obj);
     ok(tmp === "[object Object]", "toString.call(Object.create(Number.prototype)) = " + tmp);
+
+    tmp = (new Number(303)).toString(undefined);
+    ok(tmp === "303", "Number 303 toString(undefined) = " + tmp);
 });
 
 sync_test("bind", function() {
@@ -1165,6 +1169,21 @@ sync_test("bind", function() {
     ok(f.length === 0, "f.length = " + f.length);
     r = f.call(o2);
     ok(r === 1, "r = " + r);
+
+    try {
+        f.arguments;
+        ok(false, "expected exception getting f.arguments");
+    }catch(ex) {
+        var n = ex.number >>> 0;
+        ok(n === JS_E_INVALID_ACTION, "f.arguments threw " + n);
+    }
+    try {
+        f.caller;
+        ok(false, "expected exception getting f.caller");
+    }catch(ex) {
+        var n = ex.number >>> 0;
+        ok(n === JS_E_INVALID_ACTION, "f.caller threw " + n);
+    }
 
     f = (function() {
         ok(this === o, "this != o");
@@ -1322,6 +1341,9 @@ sync_test("reduce", function() {
 
     r = [1,2,3].reduce(function(a, value) { return a + value; }, "str");
     ok(r === "str123", "reduce() returned " + r);
+
+    r = [1,2,].reduce(function(a, value) { return a + value; }, "str");
+    ok(r === "str12", "reduce() returned " + r);
 
     array = [1,2,3];
     r = array.reduce(function(a, value, index, src) {
@@ -1641,8 +1663,32 @@ sync_test("isFrozen", function() {
     }
 });
 
+sync_test("RegExp", function() {
+    var r;
+
+    r = /()/.exec("")[1];
+    ok(r === "", "/()/ captured: " + r);
+    r = /()?/.exec("")[1];
+    ok(r === undefined, "/()?/ captured: " + r);
+    r = /()??/.exec("")[1];
+    ok(r === undefined, "/()??/ captured: " + r);
+    r = /()*/.exec("")[1];
+    ok(r === undefined, "/()*/ captured: " + r);
+    r = /()??()/.exec("");
+    ok(r[1] === undefined, "/()??()/ [1] captured: " + r);
+    ok(r[2] === "", "/()??()/ [2] captured: " + r);
+
+    try {
+        r = new RegExp("(?<a>b)", "g");
+        ok(false, "expected exception with /(?<a>b)/ regex");
+    }catch(ex) {
+        var n = ex.number >>> 0;
+        ok(n === JS_E_UNEXPECTED_QUANTIFIER, "/(?<a>b)/ regex threw " + n);
+    }
+});
+
 sync_test("ArrayBuffers & Views", function() {
-    var i, r, buf, buf2, view, view2, arr, arr2;
+    var i, r, buf, buf2, view, view2, arr;
 
     var types = [
         [ "Int8",    1 ],
@@ -1717,13 +1763,6 @@ sync_test("ArrayBuffers & Views", function() {
     ok(buf.byteLength === 10, "ArrayBuffer(10).byteLength = " + buf.byteLength);
     test_readonly(buf, "byteLength", 10);
     test_own_data_prop_desc(buf, "byteLength", false, false, false);
-
-    ok(ArrayBuffer.isView() === false, "ArrayBuffer.isView() returned true");
-    ok(ArrayBuffer.isView([]) === false, "ArrayBuffer.isView([]) returned true");
-    ok(ArrayBuffer.isView({}) === false, "ArrayBuffer.isView({}) returned true");
-    ok(ArrayBuffer.isView(undefined) === false, "ArrayBuffer.isView(undefined) returned true");
-    ok(ArrayBuffer.isView(null) === false, "ArrayBuffer.isView(null) returned true");
-    ok(ArrayBuffer.isView(buf) === false, "ArrayBuffer.isView(ArrayBuffer) returned true");
 
     test_own_props("DataView.prototype", [
         "buffer", "byteLength", "byteOffset",
@@ -1844,9 +1883,6 @@ sync_test("ArrayBuffers & Views", function() {
     ok(view.buffer === buf,  "DataView(buf).buffer = " + view.buffer);
     ok(view.byteLength === 10, "DataView(buf).byteLength = " + view.byteLength);
     ok(view.byteOffset === 0,  "DataView(buf).byteOffset = " + view.byteOffset);
-
-    ok(ArrayBuffer.isView(DataView) === false, "ArrayBuffer.isView(DataView) returned true");
-    ok(ArrayBuffer.isView(view) === true, "ArrayBuffer.isView(DataView(buf)) returned false");
 
     for(i = 0; i < 10; i++) {
         r = view.getInt8(i);
@@ -1982,8 +2018,6 @@ sync_test("ArrayBuffers & Views", function() {
     ok(buf2.byteLength === 9, "buf.slice(-9).byteLength = " + buf2.byteLength);
     view2 = DataView(buf2, 1);
     ok(view2.byteLength === 8, "buf.slice(-9) view(1).byteLength = " + view2.byteLength);
-    ok(ArrayBuffer.isView(buf2) === false, "ArrayBuffer.isView(buf.slice(-9)) returned true");
-    ok(ArrayBuffer.isView(view2) === true, "ArrayBuffer.isView(DataView(buf.slice(-9))) returned false");
 
     r = view2.getUint32(0);
     ok(r === 4294967040, "buf.slice(-9) view(1).getUint32(0) returned " + r);
@@ -1997,451 +2031,6 @@ sync_test("ArrayBuffers & Views", function() {
     ok(r === undefined, "buf.slice(-9) view(1).setFloat64(0, 11.875) returned " + r);
     r = view2.getFloat64(0);
     ok(r === 11.875, "buf.slice(-9) view(1).getFloat64(0) returned " + r);
-
-    for(i = 0; i < types.length; i++) {
-        var arrType = types[i][0] + "Array", typeSz = types[i][1];
-        test_own_props(arrType, [ "BYTES_PER_ELEMENT" ]);
-        test_not_own_props(arrType, [ "from", "of" ]);
-        test_own_props(arrType + ".prototype", [ "buffer", "byteLength", "byteOffset", "length", "set", "subarray" ]);
-        test_not_own_props(arrType + ".prototype", [
-            "at", "copyWithin", "entries", "every", "fill", "filter", "find", "findIndex", "forEach",
-            "includes", "indexOf", "join", "keys", "lastIndexOf", "map", "reduce", "reduceRight",
-            "reverse", "slice", "some", "sort", "toLocaleString", "toString", "values"
-        ]);
-
-        arr = eval(arrType);
-        test_own_data_prop_desc(arr, "BYTES_PER_ELEMENT", false, false, false);
-        ok(arr.BYTES_PER_ELEMENT === typeSz, arrType + ".BYTES_PER_ELEMENT = " + arr.BYTES_PER_ELEMENT);
-        r = arr.length;
-        ok(r === 1, arrType + ".length = " + r);
-        r = arr.prototype.set.length;
-        ok(r === 2, arrType + ".prototype.set.length = " + r);
-        r = arr.prototype.subarray.length;
-        ok(r === 2, arrType + ".prototype.subarray.length = " + r);
-
-        r = eval("Object.getPrototypeOf(" + arrType + ")");
-        ok(r === Function.prototype, arrType + "'s prototype is not Function.prototype: " + r);
-        r = eval("Object.getPrototypeOf(" + arrType + ".prototype)");
-        ok(r === Object.prototype, arrType + ".prototype's prototype is not Object.prototype: " + r);
-        r = eval("Object.prototype.toString.call(new " + arrType + "(3))");
-        ok(r === "[object " + arrType + "]", "Object toString(new " + arrType + "(3)) = " + r);
-        r = eval(arrType + ".prototype");
-        test_own_data_prop_desc(r, "byteLength", false, false, false);
-        test_own_data_prop_desc(r, "byteOffset", false, false, false);
-        test_own_data_prop_desc(r, "length", false, false, false);
-        test_own_data_prop_desc(r, "buffer", false, false, false);
-
-        buf = ArrayBuffer(34);
-        try {
-            eval("new " + arrType + "(-1)");
-            ok(false, "new " + arrType + "(-1) did not throw exception");
-        }catch(ex) {
-            var n = ex.number >>> 0;
-            ok(n === JS_E_TYPEDARRAY_INVALID_OFFSLEN, "new " + arrType + "(-1) threw " + n);
-        }
-        try {
-            eval("new " + arrType + "(buf, -1)");
-            ok(false, "new " + arrType + "(buf, -1) did not throw exception");
-        }catch(ex) {
-            var n = ex.number >>> 0;
-            ok(n === JS_E_TYPEDARRAY_INVALID_OFFSLEN, "new " + arrType + "(buf, -1) threw " + n);
-        }
-        try {
-            eval("new " + arrType + "(buf, 36)");
-            ok(false, "new " + arrType + "(buf, 36) did not throw exception");
-        }catch(ex) {
-            var n = ex.number >>> 0;
-            ok(n === JS_E_TYPEDARRAY_INVALID_OFFSLEN, "new " + arrType + "(buf, 36) threw " + n);
-        }
-        try {
-            eval("new " + arrType + "(buf, 32, 4)");
-            ok(false, "new " + arrType + "(buf, 32, 4) did not throw exception");
-        }catch(ex) {
-            var n = ex.number >>> 0;
-            ok(n === JS_E_TYPEDARRAY_INVALID_OFFSLEN, "new " + arrType + "(buf, 32, 4) threw " + n);
-        }
-        try {
-            eval("new " + arrType + "('9')");
-            ok(false, "new " + arrType + "('9') did not throw exception");
-        }catch(ex) {
-            var n = ex.number >>> 0;
-            ok(n === JS_E_TYPEDARRAY_BAD_CTOR_ARG, "new " + arrType + "('9') threw " + n);
-        }
-        try {
-            eval("new " + arrType + "(null)");
-            ok(false, "new " + arrType + "(null) did not throw exception");
-        }catch(ex) {
-            var n = ex.number >>> 0;
-            ok(n === JS_E_TYPEDARRAY_BAD_CTOR_ARG, "new " + arrType + "(null) threw " + n);
-        }
-        try {
-            eval("new " + arrType + "({})");
-            ok(false, "new " + arrType + "({}) did not throw exception");
-        }catch(ex) {
-            var n = ex.number >>> 0;
-            ok(n === JS_E_TYPEDARRAY_BAD_CTOR_ARG, "new " + arrType + "({}) threw " + n);
-        }
-        if(typeSz > 1) {
-            /* test misalignment */
-            var a = typeSz >>> 1;
-            try {
-                eval("new " + arrType + "(buf, a, 1)");
-                ok(false, "new " + arrType + "(buf, " + a + ", 1) did not throw exception");
-            }catch(ex) {
-                var n = ex.number >>> 0;
-                ok(n === JS_E_TYPEDARRAY_INVALID_OFFSLEN, "new " + arrType + "(buf, " + a + ", 1) threw " + n);
-            }
-            a += typeSz;
-            var b = new ArrayBuffer(a);
-            try {
-                eval("new " + arrType + "(b)");
-                ok(false, "new " + arrType + "(new ArrayBuffer(" + a + ")) did not throw exception");
-            }catch(ex) {
-                var n = ex.number >>> 0;
-                ok(n === JS_E_TYPEDARRAY_INVALID_OFFSLEN, "new " + arrType + "(new ArrayBuffer(" + a + ")) threw " + n);
-            }
-        }
-
-        arr = eval("new " + arrType + "()");
-        ok(arr.byteLength === 0, arrType + "().byteLength = " + arr.byteLength);
-        ok(arr.byteOffset === 0, arrType + "().byteOffset = " + arr.byteOffset);
-        ok(arr.length === 0, arrType + "().length = " + arr.length);
-        ok(arr.buffer.byteLength === 0, arrType + "().buffer.byteLength = " + arr.buffer.byteLength);
-        test_readonly(arr, "byteLength", 0);
-        test_readonly(arr, "byteOffset", 0);
-        test_readonly(arr, "length", 0);
-        test_own_data_prop_desc(arr, "byteLength", false, false, false);
-        test_own_data_prop_desc(arr, "byteOffset", false, false, false);
-        test_own_data_prop_desc(arr, "length", false, false, false);
-        test_own_data_prop_desc(arr, "buffer", false, false, false);
-
-        ok(ArrayBuffer.isView(arr) === true, "ArrayBuffer.isView(" + arrType + "()) returned false");
-        Object.freeze(arr);
-        ok(Object.isFrozen(arr) === true, arrType + "() not frozen");
-
-        arr = eval(arrType + "(9.1)");
-        ok(arr.byteLength === 9 * typeSz, arrType + "(9.1).byteLength = " + arr.byteLength);
-        ok(arr.byteOffset === 0, arrType + "(9.1).byteOffset = " + arr.byteOffset);
-        ok(arr.length === 9, arrType + "(9.1).length = " + arr.length);
-        ok(arr.buffer.byteLength === arr.byteLength, arrType + "(9.1).buffer.byteLength = " + arr.buffer.byteLength);
-        for(var j = 0; j < 9; j++)
-            ok(arr[j] === 0, "arr[" + j + "] = " + arr[j]);
-        arr[5] = 42;
-        ok(arr[5] === 42, arrType + "(9.1)[5] = " + arr[5]);
-        arr[9] = 50;
-        ok(arr[9] === undefined, arrType + "(9.1)[9] = " + arr[9]);
-
-        eval(arrType + ".prototype[6] = 'foo'");
-        r = eval(arrType + ".prototype[6]");
-        ok(r === undefined, arrType + ".prototype[6] = " + r);
-        ok(arr[6] === 0, arrType + "(9.1)[6] after set in prototype = " + arr[6]);
-        arr[6] = 0;
-        ok(Object.prototype.hasOwnProperty.call(arr, "6"), "'6' not a property of " + arrType + "(9.1)[6]");
-        test_own_data_prop_desc(arr, "6", true, true, false);
-        r = (delete arr[6]);
-        ok(r === false, "delete " + arrType + "(9.1)[6] returned " + r);
-        try {
-            Object.defineProperty(arr, "6", {writable: false, enumerable: false, configurable: true, value: 10});
-            ok(false, "redefining " + arrType + "(9.1)[6] with different flags did not throw exception");
-        }catch(ex) {
-            var n = ex.number >>> 0;
-            ok(n === JS_E_NONCONFIGURABLE_REDEFINED, "redefining " + arrType + "(9.1)[6] with different flags threw " + n);
-        }
-        Object.defineProperty(arr, "6", {writable: true, enumerable: true, configurable: false, value: 10});
-        ok(arr[6] === 10, arrType + "(9.1)[6] after definition = " + arr[6]);
-        Object.defineProperty(arr, "6", {writable: true, enumerable: true, configurable: false, value: "foo"});
-        if(arrType.substr(0, 5) === "Float")
-            ok(arr[6] !== arr[6] /* NaN */, arrType + "(9.1)[6] after definition to string = " + arr[6]);
-        else
-            ok(arr[6] === 0, arrType + "(9.1)[6] after definition to string = " + arr[6]);
-
-        eval(arrType + ".prototype[100] = 'foobar'");
-        r = eval(arrType + ".prototype[100]");
-        ok(r === undefined, arrType + ".prototype[100] = " + r);
-        ok(arr[100] === undefined, arrType + "(9.1)[100] after set in prototype = " + arr[100]);
-        arr[100] = 0;
-        ok(arr[100] === undefined, arrType + "(9.1)[100] after set to zero = " + arr[100]);
-        ok(!Object.prototype.hasOwnProperty.call(arr, "100"), "'100' is a property of " + arrType + "(9.1)[100]");
-        r = (delete arr[100]);
-        ok(r === false, "delete " + arrType + "(9.1)[100] returned " + r);
-        try {
-            Object.defineProperty(arr, "100", {writable: false, enumerable: false, configurable: true, value: 10});
-            ok(false, "redefining " + arrType + "(9.1)[100] with different flags did not throw exception");
-        }catch(ex) {
-            var n = ex.number >>> 0;
-            ok(n === JS_E_NONCONFIGURABLE_REDEFINED, "redefining " + arrType + "(9.1)[100] with different flags threw " + n);
-        }
-        Object.defineProperty(arr, "100", {writable: true, enumerable: true, configurable: false, value: 10});
-        ok(arr[100] === undefined, arrType + "(9.1)[100] after defined to 10 = " + arr[100]);
-        ok(!Object.prototype.hasOwnProperty.call(arr, "100"), "'100' is a property of " + arrType + "(9.1)[100] after definition");
-        ok(arr[100] === undefined, arrType + "(9.1)[100] after definition = " + arr[100]);
-
-        r = 0;
-        for(var idx in arr) {
-            ok(idx === ""+r, arrType + "(9.1) enum idx " + r + " = " + idx);
-            r++;
-        }
-        ok(r === 9, arrType + "(9.1) enum did " + r + " iterations");
-
-        eval(arrType + ".prototype[-1] = 'barfoo'");
-        r = eval(arrType + ".prototype[-1]");
-        ok(r === "barfoo", arrType + ".prototype[-1] = " + r);
-        ok(arr[-1] === "barfoo", arrType + "(9.1)[-1] after set in prototype = " + arr[-1]);
-
-        eval(arrType + ".prototype.foo = 'bar'");
-        r = eval(arrType + ".prototype.foo = 'bar'");
-        ok(r === "bar", arrType + ".prototype.foo = " + r);
-        ok(arr.foo === "bar", arrType + "(9.1).foo after set in prototype = " + arr.foo);
-        Object.freeze(arr);
-        ok(Object.isFrozen(arr) === true, arrType + "(9.1) not frozen");
-        arr = eval(arrType + ".prototype");
-        delete arr[-1];
-        delete arr.foo;
-
-        arr2 = { length: 4 };
-        arr2[0] = 1.5;
-        arr2[1] = '3';
-        arr2[3] = 12;
-        var name = arrType + "(array-like object)";
-        arr = eval(arrType + "(arr2)");
-        ok(arr.byteLength === 4 * typeSz, name + ".byteLength = " + arr.byteLength);
-        ok(arr.byteOffset === 0, name + ".byteOffset = " + arr.byteOffset);
-        ok(arr.length === 4, name + ".length = " + arr.length);
-        if(isNaN(arr[2])) {
-            ok(arr[0] === 1.5, name + "[0] = " + arr[0]);
-            ok(arr[1] === 3,   name + "[1] = " + arr[1]);
-            ok(arr[3] === 12,  name + "[3] = " + arr[3]);
-        }else
-            for(var j = 0; j < 4; j++)
-                ok(arr[j] === [1, 3, 0, 12][j], name + "[" + j + "] = " + arr[j]);
-
-        name = arrType + "(buf, " + typeSz + ", 2)";
-        arr = eval(name);
-        ok(arr.byteLength === 2 * typeSz, name + ".byteLength = " + arr.byteLength);
-        ok(arr.byteOffset === typeSz, name + ".byteOffset = " + arr.byteOffset);
-        ok(arr.length === 2, name + ".length = " + arr.length);
-        ok(arr.buffer === buf, name + ".buffer = " + arr.buffer);
-        view = DataView(buf);
-        view["set" + types[i][0]](typeSz, 10, true);
-        ok(arr[0] === 10, "arr[0] after DataView(buf).set" + types[i][0] + " = " + arr[0]);
-        arr[0] = 12;
-        r = view["get" + types[i][0]](typeSz, true);
-        ok(r === 12, "DataView(buf).get" + types[i][0] + " after arr[0] set = " + r);
-        Object.freeze(arr);
-        ok(Object.isFrozen(arr) === true, name + " not frozen");
-
-        arr2 = eval(arrType + "(arr)");
-        ok(arr2.byteLength === arr.byteLength, name + " copy.byteLength = " + arr2.byteLength);
-        ok(arr2.byteOffset === 0, name + " copy.byteOffset = " + arr2.byteOffset);
-        ok(arr2.length === arr.length, name + " copy.length = " + arr2.length);
-        ok(arr2.buffer !== arr.buffer, name + " copy.buffer = " + arr2.buffer);
-        arr2 = arr.subarray(undefined, "1");
-        ok(arr2.byteLength === typeSz, name + " subarray(undefined, '1').byteLength = " + arr2.byteLength);
-        ok(arr2.byteOffset === arr.byteOffset, name + " subarray(undefined, '1').byteOffset = " + arr2.byteOffset);
-        ok(arr2.length === 1, name + " subarray(undefined, '1').length = " + arr2.length);
-        ok(arr2.buffer === arr.buffer, name + " subarray(undefined, '1').buffer = " + arr2.buffer);
-
-        name = arrType + "(10)";
-        arr = eval(name);
-        try {
-            arr.subarray.call(null, 0);
-            ok(false, arrType + ": calling subarray with null context did not throw exception");
-        }catch(ex) {
-            var n = ex.number >>> 0;
-            ok(n === JS_E_NOT_TYPEDARRAY, arrType + ": calling subarray with null context threw " + n);
-        }
-        try {
-            arr.subarray.call({}, 0);
-            ok(false, arrType + ": calling subarray with an object context did not throw exception");
-        }catch(ex) {
-            var n = ex.number >>> 0;
-            ok(n === JS_E_NOT_TYPEDARRAY, arrType + ": calling subarray with an object context threw " + n);
-        }
-        try {
-            arr.subarray();
-            ok(false, name + " subarray() did not throw exception");
-        }catch(ex) {
-            var n = ex.number >>> 0;
-            ok(n === JS_E_TYPEDARRAY_INVALID_SUBARRAY, name + " subarray() threw " + n);
-        }
-        arr2 = arr.subarray(4);
-        ok(arr2.byteLength === 6 * typeSz, name + ".subarray(4).byteLength = " + arr2.byteLength);
-        ok(arr2.byteOffset === 4 * typeSz, name + ".subarray(4).byteOffset = " + arr2.byteOffset);
-        ok(arr2.length === 6, name + ".subarray(4).length = " + arr2.length);
-        ok(arr2.buffer === arr.buffer, name + ".subarray(4).buffer = " + arr2.buffer);
-        arr2 = arr.subarray(4, 2);
-        ok(arr2.byteLength === 0, name + ".subarray(4, 2).byteLength = " + arr2.byteLength);
-        ok(arr2.byteOffset === 4 * typeSz, name + ".subarray(4, 2).byteOffset = " + arr2.byteOffset);
-        ok(arr2.length === 0, name + ".subarray(4, 2).length = " + arr2.length);
-        ok(arr2.buffer === arr.buffer, name + ".subarray(4, 2).buffer = " + arr2.buffer);
-        arr2 = arr.subarray(-3, 100);
-        ok(arr2.byteLength === 3 * typeSz, name + ".subarray(-3, 100).byteLength = " + arr2.byteLength);
-        ok(arr2.byteOffset === 7 * typeSz, name + ".subarray(-3, 100).byteOffset = " + arr2.byteOffset);
-        ok(arr2.length === 3, name + ".subarray(-3, 100).length = " + arr2.length);
-        ok(arr2.buffer === arr.buffer, name + ".subarray(-3, 100).buffer = " + arr2.buffer);
-        arr2 = arr.subarray(42, -1);
-        ok(arr2.byteLength === 0, name + ".subarray(42, -1).byteLength = " + arr2.byteLength);
-        ok(arr2.byteOffset === 10 * typeSz, name + ".subarray(42, -1).byteOffset = " + arr2.byteOffset);
-        ok(arr2.length === 0, name + ".subarray(42, -1).length = " + arr2.length);
-        ok(arr2.buffer === arr.buffer, name + ".subarray(42, -1).buffer = " + arr2.buffer);
-        arr2 = arr.subarray(2, -3);
-        ok(arr2.byteLength === 5 * typeSz, name + ".subarray(2, -3).byteLength = " + arr2.byteLength);
-        ok(arr2.byteOffset === 2 * typeSz, name + ".subarray(2, -3).byteOffset = " + arr2.byteOffset);
-        ok(arr2.length === 5, name + ".subarray(2, -3).length = " + arr2.length);
-        ok(arr2.buffer === arr.buffer, name + ".subarray(2, -3).buffer = " + arr2.buffer);
-
-        try {
-            arr.set.call(null, [1]);
-            ok(false, arrType + ": calling set with null context did not throw exception");
-        }catch(ex) {
-            var n = ex.number >>> 0;
-            ok(n === JS_E_NOT_TYPEDARRAY, arrType + ": calling set with null context threw " + n);
-        }
-        try {
-            arr.set.call({}, [1]);
-            ok(false, arrType + ": calling set with an object context did not throw exception");
-        }catch(ex) {
-            var n = ex.number >>> 0;
-            ok(n === JS_E_NOT_TYPEDARRAY, arrType + ": calling set with an object context threw " + n);
-        }
-        try {
-            arr.set();
-            ok(false, name + ".set() did not throw exception");
-        }catch(ex) {
-            var n = ex.number >>> 0;
-            ok(n === JS_E_TYPEDARRAY_INVALID_SOURCE, name + ".set() threw " + n);
-        }
-        try {
-            arr.set(null);
-            ok(false, name + ".set(null) did not throw exception");
-        }catch(ex) {
-            var n = ex.number >>> 0;
-            ok(n === JS_E_TYPEDARRAY_INVALID_SOURCE, name + ".set(null) threw " + n);
-        }
-        try {
-            arr.set([1,2,3], 8);
-            ok(false, name + ".set([1,2,3], 8) did not throw exception");
-        }catch(ex) {
-            var n = ex.number >>> 0;
-            ok(n === JS_E_TYPEDARRAY_INVALID_OFFSLEN, name + ".set([1,2,3], 8) threw " + n);
-        }
-        try {
-            arr.set([99], -3);
-            ok(false, name + ".set([99], -3) did not throw exception");
-        }catch(ex) {
-            var n = ex.number >>> 0;
-            ok(n === JS_E_TYPEDARRAY_INVALID_OFFSLEN, name + ".set([99], -3) threw " + n);
-        }
-
-        r = arr.set(5);
-        ok(r === undefined, name + ".set(5) returned " + r);
-        for(var j = 0; j < 10; j++)
-            ok(arr[j] === 0, name + ".set(5): arr[" + j + "] = " + arr[j]);
-
-        r = arr.set({});
-        ok(r === undefined, name + ".set({}) returned " + r);
-        for(var j = 0; j < 10; j++)
-            ok(arr[j] === 0, name + ".set({}): arr[" + j + "] = " + arr[j]);
-
-        r = arr.set("12");
-        ok(r === undefined, name + ".set('12') returned " + r);
-        for(var j = 0; j < 10; j++)
-            ok(arr[j] === [ 1, 2, 0, 0, 0, 0, 0, 0, 0, 0 ][j], name + ".set('12'): arr[" + j + "] = " + arr[j]);
-
-        arr2 = { length: 2 };
-        arr2[0] = 9;
-        arr2[1] = 7;
-        r = arr.set(arr2);
-        ok(r === undefined, name + ".set(array-like obj) returned " + r);
-        for(var j = 0; j < 10; j++)
-            ok(arr[j] === [ 9, 7, 0, 0, 0, 0, 0, 0, 0, 0 ][j], name + ".set(array-like obj): arr[" + j + "] = " + arr[j]);
-
-        r = arr.set([12, 10, 11], 3);
-        ok(r === undefined, name + ".set([12, 10, 11], 3) returned " + r);
-        for(var j = 0; j < 10; j++)
-            ok(arr[j] === [ 9, 7, 0, 12, 10, 11, 0, 0, 0, 0 ][j], name + ".set([12, 10, 11], 3): arr[" + j + "] = " + arr[j]);
-
-        r = arr.set(arr.subarray(4, 6), 5);
-        ok(r === undefined, name + ".set(arr.subarray(4, 2), 5) returned " + r);
-        for(var j = 0; j < 10; j++)
-            ok(arr[j] === [ 9, 7, 0, 12, 10, 10, 11, 0, 0, 0 ][j], name + ".set(arr.subarray(4, 2), 5): arr[" + j + "] = " + arr[j]);
-
-        r = arr.set(arr.subarray(3, 7), 2);
-        ok(r === undefined, name + ".set(arr.subarray(3, 7), 2) returned " + r);
-        for(var j = 0; j < 10; j++)
-            ok(arr[j] === [ 9, 7, 12, 10, 10, 11, 11, 0, 0, 0 ][j], name + ".set(arr.subarray(3, 7), 2): arr[" + j + "] = " + arr[j]);
-    }
-
-    arr = new Float32Array(3);
-    arr[0] = 1.125;
-    arr[1] = 2.25;
-    arr[2] = 3.375;
-    arr2 = new Uint16Array(arr);
-    ok(arr[0] === 1.125, "arr[0] = " + arr[0]);
-    ok(arr[1] === 2.25, "arr[1] = " + arr[1]);
-    ok(arr[2] === 3.375, "arr[2] = " + arr[2]);
-    ok(arr2[0] === 1, "arr2[0] = " + arr2[0]);
-    ok(arr2[1] === 2, "arr2[1] = " + arr2[1]);
-    ok(arr2[2] === 3, "arr2[2] = " + arr2[2]);
-    arr2[0] = 100;
-    ok(arr[0] === 1.125, "arr[0] after arr2[0] changed = " + arr[0]);
-    ok(arr2[0] === 100, "arr2[0] after change = " + arr2[0]);
-
-    arr = new Int16Array(2);
-    arr[0] = 65535;
-    arr[1] = -65535;
-    ok(arr[0] == -1, "16-bit arr[0] after overflow = " + arr[0]);
-    ok(arr[1] == 1, "16-bit arr[1] after overflow = " + arr[1]);
-
-    arr = new Uint8Array(2);
-    arr[0] = -2;
-    arr[1] = 258;
-    ok(arr[0] == 254, "8-bit arr[0] after overflow = " + arr[0]);
-    ok(arr[1] == 2, "8-bit arr[1] after overflow = " + arr[1]);
-
-    arr = new Int8Array(12);
-    arr.set([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
-    for(var j = 0; j < 12; j++)
-        ok(arr[j] === j + 1, "sequential arr[" + j + "] = " + arr[j]);
-    arr2 = new Int32Array(arr.buffer);
-    ok(arr2.buffer === arr.buffer, "arr2.buffer = " + arr2.buffer);
-    for(var j = 0; j < 3; j++)
-        ok(arr2[j] === [ 0x04030201, 0x08070605, 0x0c0b0a09 ][j], "sequential 32-bit arr[" + j + "] = " + arr2[j]);
-
-    /* test overlap */
-    arr2.set(arr.subarray(1, 4));
-    for(var j = 0; j < 3; j++)
-        ok(arr2[j] === j + 2, "arr with overlap[" + j + "] = " + arr[j]);
-
-    /* methods are incompatible, even though thrown error is not explicit */
-    ok(Uint16Array.prototype.subarray !== Int32Array.prototype.subarray, "Uint16Array and Int32Array have same subarray methods");
-    ok(Int8Array.prototype.set !== Float32Array.prototype.set, "Int8Array and Float32Array have same set methods");
-    try {
-        Uint8Array.prototype.set.call(arr, [12, 50]);
-        ok(false, "calling Uint8Array's set with Int8Array context did not throw exception");
-    }catch(ex) {
-        var n = ex.number >>> 0;
-        ok(n === JS_E_NOT_TYPEDARRAY, "calling Uint8Array's set with Int8Array context threw " + n);
-    }
-    try {
-        Uint32Array.prototype.subarray.call(arr2, 0);
-        ok(false, "calling Uint32Array's subarray with Int32Array context did not throw exception");
-    }catch(ex) {
-        var n = ex.number >>> 0;
-        ok(n === JS_E_NOT_TYPEDARRAY, "calling Uint32Array's subarray with Int32Array context threw " + n);
-    }
-
-    /* clamped array */
-    arr = new Uint8ClampedArray(7);
-    arr2 = new Uint8Array(7);
-    arr.set ([42, -1, 999, 0.9, NaN, Infinity, -Infinity]);
-    arr2.set([42, -1, 999, 0.9, NaN, Infinity, -Infinity]);
-    for(var j = 0; j < 7; j++) {
-        ok(arr[j] ===  [42, 0, 255, 1, 0, 255, 0][j], "clamped arr[" + j + "] = " + arr[j]);
-        ok(arr2[j] === [42, 255, 231, 0, 0, 0, 0][j], "non-clamped arr[" + j + "] = " + arr2[j]);
-    }
-    r = Object.prototype.toString.call(arr);
-    ok(r === "[object Uint8ClampedArray]", "Object toString for Uint8ClampedArray = " + r);
 });
 
 sync_test("builtin_context", function() {
@@ -2500,108 +2089,9 @@ sync_test("builtin_context", function() {
     ok(obj === window, "obj = " + obj);
     obj = (function() { return this; }).call(42);
     ok(obj.valueOf() === 42, "obj = " + obj);
-});
 
-sync_test("builtin override", function() {
-    /* configurable */
-    var builtins = [
-        "ActiveXObject",
-        "Array",
-        "ArrayBuffer",
-        "Boolean",
-        "CollectGarbage",
-        "DataView",
-        "Date",
-        "decodeURI",
-        "decodeURIComponent",
-        "encodeURI",
-        "encodeURIComponent",
-        "Enumerator",
-        "Error",
-        "escape",
-        "EvalError",
-        "Float32Array",
-        "Float64Array",
-        "Function",
-        "Int8Array",
-        "Int16Array",
-        "Int32Array",
-        "isFinite",
-        "isNaN",
-        "JSON",
-        "Map",
-        "Math",
-        "Number",
-        "parseFloat",
-        "parseInt",
-        "RangeError",
-        "ReferenceError",
-        "RegExp",
-        "ScriptEngine",
-        "ScriptEngineBuildVersion",
-        "ScriptEngineMajorVersion",
-        "ScriptEngineMinorVersion",
-        "Set",
-        "String",
-        "SyntaxError",
-        "TypeError",
-        "Uint8Array",
-        "Uint16Array",
-        "Uint32Array",
-        "unescape",
-        "URIError",
-        "VBArray"
-    ];
-
-    var override = {
-        value: 12,
-        configurable: true,
-        writable: true
-    };
-    for(var i = 0; i < builtins.length; i++) {
-        var desc = Object.getOwnPropertyDescriptor(window, builtins[i]), r;
-        ok(desc !== undefined, "getOwnPropertyDescriptor('" + builtins[i] + "' returned undefined");
-        ok(desc.configurable === true, builtins[i] + " not configurable");
-        ok(desc.enumerable === false, builtins[i] + " is enumerable");
-        ok(desc.writable === true, builtins[i] + " not writable");
-
-        r = Object.defineProperty(window, builtins[i], override);
-        ok(r === window, "defineProperty('" + builtins[i] + "' returned " + r);
-        r = Object.getOwnPropertyDescriptor(window, builtins[i]);
-        ok(r !== undefined, "getOwnPropertyDescriptor('" + builtins[i] + "' after override returned undefined");
-        ok(r.value === 12, builtins[i] + " value = " + r.value);
-
-        r = eval(builtins[i]);
-        ok(r === window[builtins[i]], "Global " + builtins[i] + " does not match redefined window." + builtins[i]);
-        r = (delete window[builtins[i]]);
-        ok(r === true, "delete window." + builtins[i] + " returned " + r);
-        ok(!(builtins[i] in window), builtins[i] + " in window after delete");
-        try {
-            eval(builtins[i]);
-            ok(false, "expected exception retrieving global " + builtins[i] + " after delete.");
-        }catch(ex) {
-            var n = ex.number >>> 0;
-            ok(n === JS_E_UNDEFINED_VARIABLE, "retrieving global " + builtins[i] + " after delete threw " + n);
-        }
-
-        r = Object.defineProperty(window, builtins[i], desc);
-        ok(r === window, "defineProperty('" + builtins[i] + "' to restore returned " + r);
-    }
-
-    /* non-configurable */
-    builtins = [
-        "undefined",
-        "Infinity",
-        "NaN"
-    ];
-
-    for(var i = 0; i < builtins.length; i++) {
-        var desc = Object.getOwnPropertyDescriptor(window, builtins[i]), r;
-        ok(desc !== undefined, "getOwnPropertyDescriptor('" + builtins[i] + "' returned undefined");
-        ok(desc.configurable === false, builtins[i] + " is configurable");
-        ok(desc.enumerable === false, builtins[i] + " is enumerable");
-        ok(desc.writable === false, builtins[i] + " is writable");
-    }
+    obj = Object.create([100]);
+    ok(obj.length === 1, "obj.length = " + obj.length);
 });
 
 sync_test("host this", function() {
@@ -2793,6 +2283,7 @@ sync_test("substituted this", function() {
     ok(r === "[object Undefined]", "detached scope Object.toString returned " + r);
 
     var r = (function() { this.f = Object.prototype.toString; return this.f(); })();
+    todo_wine.
     ok(r === "[object Window]", "Object.toString returned " + r);
 
     var r = (function() { var f = Object.prototype.toString; return f(); })();
@@ -2942,88 +2433,6 @@ sync_test("functions scope", function() {
     })();
 });
 
-sync_test("input validation", function() {
-    var fired, elem = document.createElement("input");
-    elem.type = "number";
-    elem.setAttribute("min", "1");
-    elem.setAttribute("max", "4");
-    elem.addEventListener("invalid", function(e) {
-        ok(e.target === elem, "unexpected target " + e.target);
-        fired = true;
-    });
-    fired = false;
-    elem.value = 1;
-    ok(elem.checkValidity() === true, "input number (1-4) with value 1: invalid");
-    ok(fired === false, "input number (1-4) with value 1 fired invalid event");
-    fired = false;
-    elem.value = 0;
-    ok(elem.checkValidity() === false, "input number (1-4) with value 0: valid");
-    ok(fired === true, "input number (1-4) with value 0 did not fire invalid event");
-    fired = false;
-    elem.value = 5;
-    ok(elem.checkValidity() === false, "input number (1-4) with value 5: valid");
-    ok(fired === true, "input number (1-4) with value 5 did not fire invalid event");
-});
-
-sync_test("instanceof", function() {
-    var r;
-
-    try {
-        ({} instanceof { prototype: {} });
-        ok(false, "expected exception using it on non-function object");
-    }catch(e) {
-        ok(e.number === 0xa138a - 0x80000000, "using it on non-function object threw " + e.number);
-    }
-
-    r = (document.createElement("iframe") instanceof HTMLIFrameElement);
-    ok(r === true, "iframe element not instance of HTMLIFrameElement");
-    r = (document.createElement("div") instanceof HTMLIFrameElement);
-    ok(r === false, "div element instance of HTMLIFrameElement");
-    r = (document instanceof Node);
-    ok(r === true, "document not instance of Node");
-});
-
-sync_test("perf toJSON", function() {
-    var tests = [
-        [ "performance", "navigation", "timing" ],
-        [ "performance.navigation", "redirectCount", "type" ],
-        [ "performance.timing", "connectEnd", "connectStart", "domComplete", "domContentLoadedEventEnd",
-          "domContentLoadedEventStart", "domInteractive", "domLoading", "domainLookupEnd", "domainLookupStart",
-          "fetchStart", "loadEventEnd", "loadEventStart", "msFirstPaint", "navigationStart", "redirectEnd",
-          "redirectStart", "requestStart", "responseEnd", "responseStart", "unloadEventEnd", "unloadEventStart" ]
-    ];
-
-    for(var i = 0; i < tests.length; i++) {
-        var desc, name = tests[i][0], obj = eval("window." + name), json;
-
-        Object.defineProperty(obj, "foobar", {writable: true, enumerable: true, configurable: true, value: 1});
-        Object.defineProperty(Object.getPrototypeOf(obj), "barfoo", {writable: true, enumerable: true, configurable: true, value: 3});
-        json = obj.toJSON();
-
-        ok(Object.getPrototypeOf(json) === Object.prototype, "prototype of " + name + ".toJSON() != Object.prototype");
-        ok(typeof json === "object", "typeof " + name + ".toJSON() != object");
-        for(var j = 1; j < tests[i].length; j++) {
-            desc = Object.getOwnPropertyDescriptor(json, tests[i][j]);
-            ok(json.hasOwnProperty(tests[i][j]), name + ".toJSON() does not have " + tests[i][j]);
-            ok(desc.writable === true, name + ".toJSON()." + tests[i][j] + " not writable");
-            ok(desc.enumerable === true, name + ".toJSON()." + tests[i][j] + " not enumerable");
-            ok(desc.configurable === true, name + ".toJSON()." + tests[i][j] + " not configurable");
-        }
-        ok(!("foobar" in json), "foobar in " + name + ".toJSON()");
-        ok(!("barfoo" in json), "barfoo in " + name + ".toJSON()");
-
-        delete obj.foobar;
-        delete Object.getPrototypeOf(obj).barfoo;
-
-        desc = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(obj), tests[i][1]);
-        delete Object.getPrototypeOf(obj)[tests[i][1]];
-        ok(!(tests[i][1] in obj), tests[i][1] + " in " + name + " after delete");
-        json = obj.toJSON();
-        ok(json.hasOwnProperty(tests[i][1]), name + ".toJSON() does not have " + tests[i][1] + " after delete");
-        Object.defineProperty(Object.getPrototypeOf(obj), tests[i][1], desc);
-    }
-});
-
 sync_test("console", function() {
     var except
 
@@ -3088,8 +2497,8 @@ sync_test("console", function() {
     ok(except, "console.timeLog: expected exception");
 });
 
-sync_test("matchMedia", function() {
-    var i, r, mql;
+async_test("matchMedia", function() {
+    var i, r, mql, expect, event_fired, event2_fired;
 
     try {
         mql = window.matchMedia("");
@@ -3111,210 +2520,84 @@ sync_test("matchMedia", function() {
     }
     mql = window.matchMedia("(max-width: 1000px)");
     ok(mql.matches === true, "(max-width: 1000px) does not match");
+    mql = window.matchMedia("(max-width: 50px)");
+    ok(mql.matches === false, "(max-width: 50px) matches");
+
+    ok(!("addEventListener" in mql), "addEventListener in MediaQueryList");
+    ok(!("removeEventListener" in mql), "removeEventListener in MediaQueryList");
+    r = mql.addListener(null);
+    ok(r === undefined, "addListener with null returned " + r);
+    r = mql.removeListener(null);
+    ok(r === undefined, "removeListener with null returned " + r);
+    r = mql.addListener("function() { ok(false, 'string handler called'); }");
+    ok(r === undefined, "addListener with string returned " + r);
+
+    var handler = function(e) {
+        ok(this === window, "handler this = " + this);
+        ok(e === mql, "handler argument = " + e);
+        event_fired = true;
+        ok(event2_fired !== true, "second handler fired before first");
+    }
+    var handler2 = function(e) {
+        ok(this === window, "handler2 this = " + this);
+        ok(e === mql, "handler2 argument = " + e);
+        event2_fired = true;
+    }
+    var tests = [
+        [ 20, 20, function() {
+            var r = mql.removeListener("function() { ok(false, 'string handler called'); }");
+            ok(r === undefined, "removeListener with string returned " + r);
+            r = mql.addListener(handler);
+            ok(r === undefined, "addListener with function returned " + r);
+        }],
+        [ 120, 120, function() {
+            ok(event_fired === true, "event not fired after changing from 20x20 to 120x120 view");
+            mql.addListener(null);
+            mql.addListener("function() { ok(false, 'second string handler called'); }");
+            mql.addListener(handler2);
+        }],
+        [ 30, 30, function() {
+            ok(event_fired === true, "event not fired after changing from 120x120 to 30x30 view");
+            ok(event2_fired === true, "event not fired from second handler after changing from 120x120 to 30x30 view");
+            var r = mql.removeListener(handler);
+            ok(r === undefined, "removeListener with function returned " + r);
+        }],
+        [ 300, 300, function() {
+            ok(event_fired === false, "removed event handler fired after changing from 30x30 to 300x300 view");
+            ok(event2_fired === true, "event not fired from second handler after changing from 30x30 to 300x300 view");
+        }]
+    ];
+
+    function test() {
+        tests[i][2]();
+        if(++i >= tests.length) {
+            next_test();
+            return;
+        }
+        expect = !expect;
+        event_fired = event2_fired = false;
+        external.setViewSize(tests[i][0], tests[i][1]);
+        window.setTimeout(check);
+    }
+
+    // async dispatch once even after change confirmed, to ensure that any possible listeners are dispatched first (or not)
+    function check() { window.setTimeout(mql.matches === expect ? test : check); }
+
+    i = 0;
+    expect = !mql.matches;
+    external.setViewSize(tests[i][0], tests[i][1]);
+    window.setTimeout(check);
 });
 
-sync_test("Crypto", function() {
-    var crypto = window.msCrypto, arr, r;
-    ok(Object.prototype.hasOwnProperty.call(Object.getPrototypeOf(window), "msCrypto"), "msCrypto not a property of window's prototype.");
-    r = Object.getPrototypeOf(crypto);
-    ok(r === window.Crypto.prototype, "getPrototypeOf(crypto) = " + r);
+sync_test("initProgressEvent", function() {
+    var e = document.createEvent("ProgressEvent");
+    e.initProgressEvent("loadend", false, false, true, 13, 42);
+    ok(e.lengthComputable === true, "lengthComputable = " + e.lengthComputable);
+    ok(e.loaded === 13, "loaded = " + e.loaded);
+    ok(e.total === 42, "total = " + e.total);
 
-    ok("subtle" in crypto, "subtle not in crypto");
-    ok("getRandomValues" in crypto, "getRandomValues not in crypto");
-    ok(!("randomUUID" in crypto), "randomUUID is in crypto");
-
-    var list = [ "decrypt", "deriveKey", "digest", "encrypt", "exportKey", "generateKey", "importKey", "sign", "unwrapKey", "verify", "wrapKey" ];
-    for(var i = 0; i < list.length; i++)
-        ok(list[i] in crypto.subtle, list[i] + " not in crypto.subtle");
-    ok(!("deriveBits" in crypto.subtle), "deriveBits is in crypto.subtle");
-
-    list = [
-        [ "Int8Array",    65536 ],
-        [ "Uint8Array",   65536 ],
-        [ "Int16Array",   32768 ],
-        [ "Uint16Array",  32768 ],
-        [ "Int32Array",   16384 ],
-        [ "Uint32Array",  16384 ]
-    ];
-    for(var i = 0; i < list.length; i++) {
-        var arrType = list[i][0];
-        arr = eval(arrType + "(" + list[i][1] + ")");
-
-        ok(arr[0] === 0, arrType + "[0] = " + arr[0]);
-        ok(arr[1] === 0, arrType + "[1] = " + arr[1]);
-        r = crypto.getRandomValues(arr);
-        ok(r === arr, "getRandomValues returned " + r);
-
-        arr = eval(arrType + "(" + (list[i][1]+1) + ")");
-        try {
-            crypto.getRandomValues(arr);
-        }catch(ex) {
-            var n = ex.number >>> 0;
-            todo_wine.
-            ok(ex.name === "QuotaExceededError", "getRandomValues(oversized " + arrType + ") threw " + ex.name);
-            todo_wine.
-            ok(n === 0, "getRandomValues(oversized " + arrType + ") threw code " + n);
-            todo_wine.
-            ok(ex.message === "QuotaExceededError", "getRandomValues(oversized " + arrType + ") threw message " + ex.message);
-        }
-    }
-
-    try {
-        crypto.getRandomValues(null);
-        ok(false, "getRandomValues(null) did not throw exception");
-    }catch(ex) {
-        var n = ex.number >>> 0;
-        ok(n === E_INVALIDARG, "getRandomValues(null) threw " + n);
-    }
-    try {
-        crypto.getRandomValues(external.nullDisp);
-        ok(false, "getRandomValues(nullDisp) did not throw exception");
-    }catch(ex) {
-        var n = ex.number >>> 0;
-        ok(n === E_INVALIDARG, "getRandomValues(nullDisp) threw " + n);
-    }
-    try {
-        crypto.getRandomValues([1,2,3]);
-        ok(false, "getRandomValues([1,2,3]) did not throw exception");
-    }catch(ex) {
-        var n = ex.number >>> 0;
-        ok(n === E_INVALIDARG, "getRandomValues([1,2,3]) threw " + n);
-    }
-    arr = Float32Array(2);
-    try {
-        crypto.getRandomValues(arr);
-        ok(false, "getRandomValues(Float32Array) did not throw exception");
-    }catch(ex) {
-        var n = ex.number >>> 0;
-        todo_wine.
-        ok(ex.name === "TypeMismatchError", "getRandomValues(Float32Array) threw " + ex.name);
-        todo_wine.
-        ok(n === 0, "getRandomValues(Float32Array) threw code " + n);
-    }
-    arr = Float64Array(2);
-    try {
-        crypto.getRandomValues(arr);
-        ok(false, "getRandomValues(Float64Array) did not throw exception");
-    }catch(ex) {
-        var n = ex.number >>> 0;
-        todo_wine.
-        ok(ex.name === "TypeMismatchError", "getRandomValues(Float64Array) threw " + ex.name);
-        todo_wine.
-        ok(n === 0, "getRandomValues(Float64Array) threw code " + n);
-    }
-});
-
-sync_test("DOMParser", function() {
-    var p, r = DOMParser.length, mimeType;
-    ok(r === 0, "length = " + r);
-
-    p = DOMParser();
-    r = Object.getPrototypeOf(p);
-    ok(r === DOMParser.prototype, "prototype of instance created without new = " + r);
-    ok(p !== new DOMParser(), "DOMParser() == new DOMParser()");
-    ok(new DOMParser() !== new DOMParser(), "new DOMParser() == new DOMParser()");
-
-    var teststr = { toString: function() { return "<a name=\"test\">wine</a>"; } };
-
-    // HTML mime types
-    mimeType = [
-        "text/hTml"
-    ];
-    for(var i = 0; i < mimeType.length; i++) {
-        var m = mimeType[i], html = p.parseFromString(teststr, m), e = external.getExpectedMimeType(m.toLowerCase());
-        r = html.mimeType;
-        ok(r === e, "mimeType of HTML document with mime type " + m + " = " + r + ", expected " + e);
-        r = html.childNodes;
-        ok(r.length === 1 || r.length === 2, "childNodes.length of HTML document with mime type " + m + " = " + r.length);
-        var html_elem = r[r.length - 1];
-        ok(html_elem.nodeName === "HTML", "child nodeName of HTML document with mime type " + m + " = " + r.nodeName);
-        ok(html_elem.nodeValue === null, "child nodeValue of HTML document with mime type " + m + " = " + r.nodeValue);
-        r = html.anchors;
-        ok(r.length === 1, "anchors.length of HTML document with mime type " + m + " = " + r.length);
-        r = r[0];
-        ok(r.nodeName === "A", "anchor nodeName of HTML document with mime type " + m + " = " + r.nodeName);
-        ok(r.nodeValue === null, "anchor nodeValue of HTML document with mime type " + m + " = " + r.nodeValue);
-        r = r.parentNode;
-        ok(r.nodeName === "BODY", "anchor parent nodeName of HTML document with mime type " + m + " = " + r.nodeName);
-        ok(r.nodeValue === null, "anchor parent nodeValue of HTML document with mime type " + m + " = " + r.nodeValue);
-        r = r.parentNode;
-        ok(r === html_elem, "body parent of HTML document with mime type " + m + " = " + r);
-    }
-
-    // XML mime types
-    mimeType = [
-        "text/xmL",
-        "aPPlication/xml",
-        "application/xhtml+xml",
-        "image/svg+xml"
-    ];
-    for(var i = 0; i < mimeType.length; i++) {
-        var m = mimeType[i], xml = p.parseFromString(teststr, m), e;
-        e = external.getExpectedMimeType(m === "aPPlication/xml" ? "text/xml" : m.toLowerCase());
-        r = xml.mimeType;
-        ok(r === e, "mimeType of XML document with mime type " + m + " = " + r + ", expected " + e);
-        r = xml.childNodes;
-        ok(r.length === 1, "childNodes.length of XML document with mime type " + m + " = " + r.length);
-        r = r[0];
-        ok(r.nodeName === "a", "child nodeName of XML document with mime type " + m + " = " + r.nodeName);
-        ok(r.nodeValue === null, "child nodeValue of XML document with mime type " + m + " = " + r.nodeValue);
-        r = r.childNodes;
-        ok(r.length === 1, "childNodes of child.length of XML document with mime type " + m + " = " + r.length);
-        r = r[0];
-        ok(r.nodeName === "#text", "child of child nodeName of XML document with mime type " + m + " = " + r.nodeName);
-        ok(r.nodeValue === "wine", "child of child nodeValue of XML document with mime type " + m + " = " + r.nodeValue);
-        ok(!("test" in xml), "'test' in XML document with mime type " + m);
-
-        // test HTMLDocument specific props, which are available in DocumentPrototype,
-        // so they are shared in XMLDocument since they both have the same prototype
-        r = xml.anchors;
-        if(m === "application/xhtml+xml") {
-            todo_wine.
-            ok(r.length === 1, "anchors.length of XML document with mime type " + m + " = " + r.length);
-            r = r[0];
-            todo_wine.
-            ok(r === xml.childNodes[0], "anchor of XML document with mime type " + m + " = " + r);
-            r = Object.prototype.toString.call(xml.getElementsByTagName("a")[0]);
-            todo_wine.
-            ok(r === "[object HTMLAnchorElement]", "element's Object.toString of XML document with mime type " + m + " = " + r);
-        }else {
-            ok(r.length === 0, "anchors.length of XML document with mime type " + m + " = " + r.length);
-            r = Object.getPrototypeOf(xml.getElementsByTagName("a")[0]);
-            ok(r === Element.prototype, "element's prototype of XML document with mime type " + m + " = " + r);
-            r = document.importNode(xml.childNodes[0], true);
-            ok(r.nodeName === "a", "imported node name of XML document with mime type " + m + " = " + r.nodeName);
-            ok(r.nodeValue === null, "imported node value of XML document with mime type " + m + " = " + r.nodeValue);
-            r = Object.getPrototypeOf(r);
-            ok(r === Element.prototype, "imported node's prototype of XML document with mime type " + m + " = " + r);
-        }
-    }
-
-    // Invalid mime types
-    mimeType = [
-        "application/html",
-        "wine/test+xml",
-        "image/jpeg",
-        "text/plain",
-        "html",
-        "+xml",
-        "xml",
-        42
-    ];
-    for(var i = 0; i < mimeType.length; i++) {
-        try {
-            p.parseFromString(teststr, mimeType[i]);
-            ok(false, "expected exception calling parseFromString with mime type " + mimeType[i]);
-        }catch(ex) {
-            var n = ex.number >>> 0;
-            ok(n === E_INVALIDARG, "parseFromString with mime type " + mimeType[i] + " threw " + n);
-        }
-    }
-
-    try {
-        r = p.parseFromString("<invalid>xml", "text/xml");
-        ok(false, "expected exception calling parseFromString with invalid xml");
-    }catch(ex) {
-        ok(ex.name === "SyntaxError", "parseFromString with invalid xml threw " + ex.name);
-    }
-    p.parseFromString("<parsererror></parsererror>", "text/xml");
+    e.initProgressEvent("loadstart", false, false, false, 99, 50);
+    ok(e.lengthComputable === false, "lengthComputable after re-init = " + e.lengthComputable);
+    ok(e.loaded === 99, "loaded after re-init = " + e.loaded);
+    ok(e.total === 50, "total after re-init = " + e.total);
 });

@@ -22,6 +22,7 @@
 #include "winbase.h"
 #include "winternl.h"
 #include "winioctl.h"
+#include "winreg.h"
 #include "ddk/wdm.h"
 #include "hidusage.h"
 #include "ddk/hidport.h"
@@ -84,9 +85,6 @@ typedef struct _BASE_DEVICE_EXTENSION
     WCHAR container_id[MAX_GUID_STRING_LEN];
     const GUID *class_guid;
 
-    HANDLE steam_overlay_event;
-    HANDLE steam_keyboard_event;
-
     BOOL is_fdo;
 } BASE_DEVICE_EXTENSION;
 
@@ -118,21 +116,18 @@ typedef struct _minidriver
 
     PDRIVER_ADD_DEVICE AddDevice;
     PDRIVER_DISPATCH PNPDispatch;
-
-    HANDLE steam_overlay_event;
-    HANDLE steam_keyboard_event;
 } minidriver;
 
 void call_minidriver( ULONG code, DEVICE_OBJECT *device, void *in_buff, ULONG in_size,
-                      void *out_buff, ULONG out_size, IO_STATUS_BLOCK *io ) DECLSPEC_HIDDEN;
+                      void *out_buff, ULONG out_size, IO_STATUS_BLOCK *io );
 
 /* Internal device functions */
-void HID_StartDeviceThread(DEVICE_OBJECT *device) DECLSPEC_HIDDEN;
+void HID_StartDeviceThread( DEVICE_OBJECT *device );
 void hid_queue_remove_pending_irps( struct hid_queue *queue );
 void hid_queue_destroy( struct hid_queue *queue );
 
-NTSTATUS WINAPI pdo_ioctl(DEVICE_OBJECT *device, IRP *irp) DECLSPEC_HIDDEN;
-NTSTATUS WINAPI pdo_read(DEVICE_OBJECT *device, IRP *irp) DECLSPEC_HIDDEN;
-NTSTATUS WINAPI pdo_write(DEVICE_OBJECT *device, IRP *irp) DECLSPEC_HIDDEN;
-NTSTATUS WINAPI pdo_create(DEVICE_OBJECT *device, IRP *irp) DECLSPEC_HIDDEN;
-NTSTATUS WINAPI pdo_close(DEVICE_OBJECT *device, IRP *irp) DECLSPEC_HIDDEN;
+NTSTATUS WINAPI pdo_ioctl( DEVICE_OBJECT *device, IRP *irp );
+NTSTATUS WINAPI pdo_read( DEVICE_OBJECT *device, IRP *irp );
+NTSTATUS WINAPI pdo_write( DEVICE_OBJECT *device, IRP *irp );
+NTSTATUS WINAPI pdo_create( DEVICE_OBJECT *device, IRP *irp );
+NTSTATUS WINAPI pdo_close( DEVICE_OBJECT *device, IRP *irp );

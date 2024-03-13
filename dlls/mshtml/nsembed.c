@@ -42,7 +42,6 @@ WINE_DECLARE_DEBUG_CHANNEL(gecko);
 #define NS_WEBBROWSER_CONTRACTID "@mozilla.org/embedding/browser/nsWebBrowser;1"
 #define NS_COMMANDPARAMS_CONTRACTID "@mozilla.org/embedcomp/command-params;1"
 #define NS_HTMLSERIALIZER_CONTRACTID "@mozilla.org/layout/contentserializer;1?mimetype=text/html"
-#define NS_DOMPARSER_CONTRACTID "@mozilla.org/xmlextras/domparser;1"
 #define NS_EDITORCONTROLLER_CONTRACTID "@mozilla.org/editor/editorcontroller;1"
 #define NS_PREFERENCES_CONTRACTID "@mozilla.org/preferences;1"
 #define NS_VARIANT_CONTRACTID "@mozilla.org/variant;1"
@@ -541,6 +540,7 @@ static void set_preferences(void)
     set_lang(pref);
     set_bool_pref(pref, "security.warn_entering_secure", FALSE);
     set_bool_pref(pref, "security.warn_submit_insecure", FALSE);
+    set_bool_pref(pref, "dom.ipc.plugins.enabled", FALSE);
     set_bool_pref(pref, "layout.css.grid.enabled", TRUE);
     set_int_pref(pref, "layout.spellcheckDefault", 0);
 
@@ -561,6 +561,7 @@ static BOOL init_xpcom(const PRUnichar *gre_path)
     }
 
     nsres = NS_InitXPCOM2(&pServMgr, gre_dir, (nsIDirectoryServiceProvider*)&nsDirectoryServiceProvider2);
+    nsIFile_Release(gre_dir);
     if(NS_FAILED(nsres)) {
         ERR("NS_InitXPCOM2 failed: %08lx\n", nsres);
         FreeLibrary(xul_handle);
@@ -595,7 +596,8 @@ static BOOL init_xpcom(const PRUnichar *gre_path)
         ERR("NS_GetComponentRegistrar failed: %08lx\n", nsres);
     }
 
-    init_node_cc();
+    init_dispex_cc();
+    init_window_cc();
 
     return TRUE;
 }
@@ -817,7 +819,8 @@ BOOL load_gecko(void)
            MESSAGE("Could not find Wine Gecko. HTML rendering will be disabled.\n");
         }
     }else {
-        ret = pCompMgr != NULL;
+        FIXME("Gecko can only be used from one thread.\n");
+        ret = FALSE;
     }
 
     LeaveCriticalSection(&cs_load_gecko);
@@ -1215,15 +1218,8 @@ void setup_editor_controller(GeckoBrowser *This)
     nsIControllerContext *ctrlctx;
     nsresult nsres;
 
-    if(This->editor) {
-        nsIEditor_Release(This->editor);
-        This->editor = NULL;
-    }
-
-    if(This->editor_controller) {
-        nsIController_Release(This->editor_controller);
-        This->editor_controller = NULL;
-    }
+    unlink_ref(&This->editor);
+    unlink_ref(&This->editor_controller);
 
     nsres = get_nsinterface((nsISupports*)This->webbrowser, &IID_nsIEditingSession,
             (void**)&editing_session);
@@ -1302,7 +1298,7 @@ BOOL is_gecko_path(const char *path)
             *ptr = '/';
     }
 
-    UrlUnescapeW(buf, NULL, NULL, URL_UNESCAPE_INPLACE);
+    UrlUnescapeW(buf, NULL, NULL, URL_UNESCAPE_INPLACE | URL_UNESCAPE_AS_UTF8);
     buf[gecko_path_len] = 0;
 
     ret = !wcsicmp(buf, gecko_path);
@@ -1667,8 +1663,7 @@ static nsresult NSAPI nsContextMenuListener_OnShowContextMenu(nsIContextMenuList
     if(FAILED(hres))
         return NS_ERROR_FAILURE;
 
-    hres = create_event_from_nsevent(aEvent, This->doc->window->base.inner_window,
-                                     dispex_compat_mode(&node->event_target.dispex), &event);
+    hres = create_event_from_nsevent(aEvent, dispex_compat_mode(&node->event_target.dispex), &event);
     if(SUCCEEDED(hres)) {
         dispatch_event(&node->event_target, event);
         IDOMEvent_Release(&event->IDOMEvent_iface);
@@ -2419,53 +2414,6 @@ __ASM_GLOBAL_FUNC(call_thiscall_func,
 #define nsIScriptObjectPrincipal_GetPrincipal(this) ((void* (WINAPI*)(void*,void*))&call_thiscall_func)((this)->lpVtbl->GetPrincipal,this)
 #endif
 
-nsIDOMParser *create_nsdomparser(HTMLDocumentNode *doc_node)
-{
-    nsIScriptObjectPrincipal *sop;
-    HTMLOuterWindow *outer_window;
-    mozIDOMWindow *inner_window;
-    nsIGlobalObject *nsglo;
-    nsIDOMParser *nsparser;
-    nsIPrincipal *nspri;
-    nsresult nsres;
-
-    outer_window = doc_node->outer_window;
-    if(!outer_window)
-        outer_window = doc_node->doc_obj->window;
-
-    nsres = nsIDOMWindow_GetInnerWindow(outer_window->nswindow, &inner_window);
-    if(NS_FAILED(nsres)) {
-        ERR("Could not get inner window: %08lx\n", nsres);
-        return NULL;
-    }
-
-    nsres = mozIDOMWindow_QueryInterface(inner_window, &IID_nsIGlobalObject, (void**)&nsglo);
-    mozIDOMWindow_Release(inner_window);
-    assert(nsres == NS_OK);
-
-    nsres = nsIGlobalObject_QueryInterface(nsglo, &IID_nsIScriptObjectPrincipal, (void**)&sop);
-    assert(nsres == NS_OK);
-
-    nspri = nsIScriptObjectPrincipal_GetPrincipal(sop);
-    nsIScriptObjectPrincipal_Release(sop);
-
-    nsres = nsIComponentManager_CreateInstanceByContractID(pCompMgr,
-            NS_DOMPARSER_CONTRACTID, NULL, &IID_nsIDOMParser, (void**)&nsparser);
-    if(NS_SUCCEEDED(nsres)) {
-        nsres = nsIDOMParser_Init(nsparser, nspri, NULL, NULL, nsglo);
-        if(NS_FAILED(nsres))
-            nsIDOMParser_Release(nsparser);
-    }
-    nsISupports_Release(nspri);
-    nsIGlobalObject_Release(nsglo);
-    if(NS_FAILED(nsres)) {
-        ERR("nsIDOMParser_Init failed: %08lx\n", nsres);
-        return NULL;
-    }
-
-    return nsparser;
-}
-
 nsIXMLHttpRequest *create_nsxhr(nsIDOMWindow *nswindow)
 {
     nsIScriptObjectPrincipal *sop;
@@ -2488,6 +2436,7 @@ nsIXMLHttpRequest *create_nsxhr(nsIDOMWindow *nswindow)
     nsres = nsIGlobalObject_QueryInterface(nsglo, &IID_nsIScriptObjectPrincipal, (void**)&sop);
     assert(nsres == NS_OK);
 
+    /* The returned principal is *not* AddRef'd */
     nspri = nsIScriptObjectPrincipal_GetPrincipal(sop);
     nsIScriptObjectPrincipal_Release(sop);
 
@@ -2499,7 +2448,6 @@ nsIXMLHttpRequest *create_nsxhr(nsIDOMWindow *nswindow)
         if(NS_FAILED(nsres))
             nsIXMLHttpRequest_Release(nsxhr);
     }
-    nsISupports_Release(nspri);
     nsIGlobalObject_Release(nsglo);
     if(NS_FAILED(nsres)) {
         ERR("nsIXMLHttpRequest_Init failed: %08lx\n", nsres);

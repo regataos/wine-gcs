@@ -50,7 +50,6 @@ struct process
     timeout_t            sigkill_delay;   /* delay before final SIGKILL */
     unsigned short       machine;         /* client machine type */
     int                  unix_pid;        /* Unix pid for final SIGKILL */
-    int                  nice_limit;      /* RLIMIT_NICE of the process */
     int                  exit_code;       /* process exit code */
     int                  running_threads; /* number of threads running in this process */
     timeout_t            start_time;      /* absolute time at process start */
@@ -84,12 +83,11 @@ struct process
     unsigned int         rawinput_device_count;   /* number of registered rawinput devices */
     const struct rawinput_device *rawinput_mouse; /* rawinput mouse device, if any */
     const struct rawinput_device *rawinput_kbd;   /* rawinput keyboard device, if any */
+    struct list          rawinput_entry;  /* entry in the rawinput process list */
     struct list          kernel_object;   /* list of kernel object pointers */
     pe_image_info_t      image_info;      /* main exe image info */
     int                  esync_fd;        /* esync file descriptor (signaled on exit) */
     unsigned int         fsync_idx;
-    struct cpu_topology_override cpu_override; /* Overridden CPUs to host CPUs mapping. */
-    unsigned char   wine_cpu_id_from_host[64]; /* Host to overridden CPU mapping. */
 };
 
 /* process functions */

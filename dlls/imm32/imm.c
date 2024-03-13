@@ -2338,15 +2338,10 @@ BOOL WINAPI ImmRegisterWordW( HKL hkl, const WCHAR *readingW, DWORD style, const
 /***********************************************************************
  *		ImmReleaseContext (IMM32.@)
  */
-BOOL WINAPI ImmReleaseContext(HWND hWnd, HIMC hIMC)
+BOOL WINAPI ImmReleaseContext( HWND hwnd, HIMC himc )
 {
-  static BOOL shown = FALSE;
-
-  if (!shown) {
-     FIXME("(%p, %p): stub\n", hWnd, hIMC);
-     shown = TRUE;
-  }
-  return TRUE;
+    TRACE( "hwnd %p, himc %p\n", hwnd, himc );
+    return TRUE;
 }
 
 /***********************************************************************
@@ -3104,7 +3099,7 @@ BOOL WINAPI ImmTranslateMessage( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpar
     if ((vkey = data->vkey) == VK_PROCESSKEY) return FALSE;
     data->vkey = VK_PROCESSKEY;
     GetKeyboardState( state );
-    scan = lparam >> 0x10;
+    scan = (lparam >> 0x10) & 0xffff;
 
     if (ime->info.fdwProperty & IME_PROP_KBD_CHAR_FIRST)
     {

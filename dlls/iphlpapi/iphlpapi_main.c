@@ -20,6 +20,7 @@
  */
 #include <stdarg.h>
 
+#define IPHLPAPI_DLL_LINKAGE
 #include "windef.h"
 #include "winbase.h"
 #include "winreg.h"
@@ -32,7 +33,6 @@
 #include "fltdefs.h"
 #include "ifdef.h"
 #include "netioapi.h"
-#include "tcpestats.h"
 #include "ip2string.h"
 #include "netiodef.h"
 #include "icmpapi.h"
@@ -128,14 +128,15 @@ DWORD WINAPI AddIPAddress(IPAddr Address, IPMask IpMask, DWORD IfIndex, PULONG N
  * RETURNS
  *  Success: TRUE
  *  Failure: FALSE
- *
- * FIXME
- *  Stub, returns FALSE.
  */
 BOOL WINAPI CancelIPChangeNotify(LPOVERLAPPED overlapped)
 {
-  FIXME("(overlapped %p): stub\n", overlapped);
-  return FALSE;
+    DWORD err;
+
+    TRACE("overlapped %p.\n", overlapped);
+
+    if ((err = NsiCancelChangeNotification( overlapped ))) SetLastError( err );
+    return !err;
 }
 
 
@@ -992,6 +993,7 @@ static DWORD gateway_and_prefix_addresses_alloc( IP_ADAPTER_ADDRESSES *aa, ULONG
 {
     struct nsi_ipv4_forward_key *key4;
     struct nsi_ipv6_forward_key *key6;
+    struct nsi_ip_forward_rw *rw;
     IP_ADAPTER_GATEWAY_ADDRESS *gw, **gw_next;
     IP_ADAPTER_PREFIX *prefix, **prefix_next;
     DWORD err, count, i, prefix_len, key_size = (family == AF_INET) ? sizeof(*key4) : sizeof(*key6);
@@ -1001,11 +1003,14 @@ static DWORD gateway_and_prefix_addresses_alloc( IP_ADAPTER_ADDRESSES *aa, ULONG
     void *key;
 
     err = NsiAllocateAndGetTable( 1, ip_module_id( family ), NSI_IP_FORWARD_TABLE, &key, key_size,
-                                  NULL, 0, NULL, 0, NULL, 0, &count, 0 );
+                                  (void **)&rw, sizeof(*rw), NULL, 0, NULL, 0, &count, 0 );
     if (err) return err;
 
     while (aa)
     {
+        if (family == AF_INET) aa->Ipv4Metric = ~0u;
+        else                   aa->Ipv6Metric = ~0u;
+
         for (gw_next = &aa->FirstGatewayAddress; *gw_next; gw_next = &(*gw_next)->Next)
             ;
         for (prefix_next = &aa->FirstPrefix; *prefix_next; prefix_next = &(*prefix_next)->Next)
@@ -1018,7 +1023,13 @@ static DWORD gateway_and_prefix_addresses_alloc( IP_ADAPTER_ADDRESSES *aa, ULONG
             luid = (family == AF_INET) ? &key4->luid : &key6->luid;
             if (luid->Value != aa->Luid.Value) continue;
 
-            if (flags & GAA_FLAG_INCLUDE_ALL_GATEWAYS)
+            if (rw[i].metric)
+            {
+                if (family == AF_INET) aa->Ipv4Metric = min( aa->Ipv4Metric, rw[i].metric );
+                else                   aa->Ipv6Metric = min( aa->Ipv6Metric, rw[i].metric );
+            }
+
+            if (flags & GAA_FLAG_INCLUDE_GATEWAYS)
             {
                 memset( &sockaddr, 0, sizeof(sockaddr) );
                 if (family == AF_INET)
@@ -1102,7 +1113,7 @@ static DWORD gateway_and_prefix_addresses_alloc( IP_ADAPTER_ADDRESSES *aa, ULONG
     }
 
 err:
-    NsiFreeTable( key, NULL, NULL, NULL );
+    NsiFreeTable( key, rw, NULL, NULL );
     return err;
 }
 
@@ -1268,11 +1279,8 @@ static DWORD adapters_addresses_alloc( ULONG family, ULONG flags, IP_ADAPTER_ADD
         if (err) goto err;
     }
 
-    if (flags & (GAA_FLAG_INCLUDE_ALL_GATEWAYS | GAA_FLAG_INCLUDE_PREFIX))
-    {
-        err = call_families( gateway_and_prefix_addresses_alloc, aa, family, flags );
-        if (err) goto err;
-    }
+    err = call_families( gateway_and_prefix_addresses_alloc, aa, family, flags );
+    if (err) goto err;
 
     err = dns_info_alloc( aa, family, flags );
     if (err) goto err;
@@ -2780,15 +2788,51 @@ DWORD WINAPI GetPerAdapterInfo( ULONG index, IP_PER_ADAPTER_INFO *info, ULONG *s
  * RETURNS
  *  Success: TRUE
  *  Failure: FALSE
- *
- * FIXME
- *  Stub, returns FALSE.
  */
-BOOL WINAPI GetRTTAndHopCount(IPAddr DestIpAddress, PULONG HopCount, ULONG MaxHops, PULONG RTT)
+BOOL WINAPI GetRTTAndHopCount( IPAddr dest_ip_address, ULONG *hop_count, ULONG max_hops, ULONG *rtt )
 {
-  FIXME("(DestIpAddress 0x%08lx, HopCount %p, MaxHops %ld, RTT %p): stub\n",
-   DestIpAddress, HopCount, MaxHops, RTT);
-  return FALSE;
+    char send_buffer[0x20] = { 0xDE, 0xAD, 0xBE, 0xEF };
+    char receive_buffer[sizeof(ICMP_ECHO_REPLY) + sizeof(send_buffer)];
+    const DWORD timeout = 5000;
+    DWORD replies;
+    IP_OPTION_INFORMATION send_options = { 0 };
+    ICMP_ECHO_REPLY *reply;
+    HANDLE icmp_handle;
+
+    TRACE( "(dest_ip_address 0x%08lx, hop_count %p, max_hops %ld, rtt %p)\n",
+        dest_ip_address, hop_count, max_hops, rtt );
+
+    if (!hop_count || !rtt || dest_ip_address == INADDR_NONE)
+        return FALSE;
+
+    if ((icmp_handle = IcmpCreateFile()) == INVALID_HANDLE_VALUE)
+        return FALSE;
+
+    for (send_options.Ttl = 1; send_options.Ttl <= max_hops; send_options.Ttl++)
+    {
+        replies = IcmpSendEcho( icmp_handle, dest_ip_address, send_buffer, sizeof(send_buffer),
+                                &send_options, receive_buffer, sizeof(receive_buffer), timeout );
+
+        if (!replies)
+        {
+            if (GetLastError() == IP_TTL_EXPIRED_TRANSIT) continue;
+            if (GetLastError() == IP_REQ_TIMED_OUT) continue;
+            break;
+        }
+
+        reply = (PICMP_ECHO_REPLY)receive_buffer;
+
+        if (reply->Status == IP_SUCCESS)
+        {
+            *hop_count = send_options.Ttl;
+            *rtt = reply->RoundTripTime;
+            IcmpCloseHandle( icmp_handle );
+            return TRUE;
+        }
+    }
+
+    IcmpCloseHandle( icmp_handle );
+    return FALSE;
 }
 
 /******************************************************************
@@ -3697,6 +3741,18 @@ err:
     return err;
 }
 
+DWORD WINAPI GetAnycastIpAddressTable(ADDRESS_FAMILY family, MIB_ANYCASTIPADDRESS_TABLE **table)
+{
+    FIXME( "(%u, %p) stub\n", family, table );
+    if (!table || (family != AF_INET && family != AF_INET6 && family != AF_UNSPEC))
+        return ERROR_INVALID_PARAMETER;
+
+    *table = heap_alloc_zero(sizeof(MIB_ANYCASTIPADDRESS_TABLE));
+    if (!*table) return ERROR_NOT_ENOUGH_MEMORY;
+    (*table)->NumEntries = 0;
+    return NO_ERROR;
+}
+
 /******************************************************************
  *    GetUniDirectionalAdapterInfo (IPHLPAPI.@)
  *
@@ -3787,16 +3843,12 @@ DWORD WINAPI IpRenewAddress(PIP_ADAPTER_INDEX_MAP AdapterInfo)
  * RETURNS
  *  Success: NO_ERROR
  *  Failure: error code from winerror.h
- *
- * FIXME
- *  Stub, returns ERROR_NOT_SUPPORTED.
  */
 DWORD WINAPI NotifyAddrChange(PHANDLE Handle, LPOVERLAPPED overlapped)
 {
-  FIXME("(Handle %p, overlapped %p): stub\n", Handle, overlapped);
-  if (Handle) *Handle = INVALID_HANDLE_VALUE;
-  if (overlapped) ((IO_STATUS_BLOCK *) overlapped)->Status = STATUS_PENDING;
-  return ERROR_IO_PENDING;
+    TRACE("Handle %p, overlapped %p.\n", Handle, overlapped);
+
+    return NsiRequestChangeNotification(0, &NPI_MS_IPV4_MODULEID, NSI_IP_UNICAST_TABLE, overlapped, Handle);
 }
 
 
@@ -4029,6 +4081,19 @@ DWORD WINAPI SetTcpEntry(PMIB_TCPROW pTcpRow)
 {
   FIXME("(pTcpRow %p): stub\n", pTcpRow);
   return 0;
+}
+
+/***********************************************************************
+ *    GetPerTcpConnectionEStats (IPHLPAPI.@)
+ */
+ULONG WINAPI GetPerTcpConnectionEStats(MIB_TCPROW *row, TCP_ESTATS_TYPE stats, UCHAR *rw, ULONG rw_version,
+                                       ULONG rw_size, UCHAR *ro_static, ULONG ro_static_version,
+                                       ULONG ro_static_size, UCHAR *ro_dynamic, ULONG ro_dynamic_version,
+                                       ULONG ro_dynamic_size)
+{
+    FIXME( "(%p, %d, %p, %ld, %ld, %p, %ld, %ld, %p, %ld, %ld): stub\n", row, stats, rw, rw_version, rw_size,
+           ro_static, ro_static_version, ro_static_size, ro_dynamic, ro_dynamic_version, ro_dynamic_size );
+    return ERROR_CALL_NOT_IMPLEMENTED;
 }
 
 /******************************************************************
@@ -4565,7 +4630,12 @@ struct icmp_handle_data
  */
 BOOL WINAPI IcmpCloseHandle( HANDLE handle )
 {
-    struct icmp_handle_data *data = (struct icmp_handle_data *)handle;
+    struct icmp_handle_data *data;
+
+    if (handle == NULL || handle == INVALID_HANDLE_VALUE)
+        return FALSE;
+
+    data = (struct icmp_handle_data *)handle;
 
     CloseHandle( data->nsi_device );
     heap_free( data );
@@ -4744,4 +4814,13 @@ DWORD WINAPI Icmp6SendEcho2( HANDLE handle, HANDLE event, PIO_APC_ROUTINE apc_ro
            apc_routine, apc_ctxt, src, dst, request, request_size, opts, reply, reply_size, timeout );
     SetLastError( ERROR_CALL_NOT_IMPLEMENTED );
     return 0;
+}
+
+/***********************************************************************
+ *    GetCurrentThreadCompartmentId (IPHLPAPI.@)
+ */
+NET_IF_COMPARTMENT_ID WINAPI GetCurrentThreadCompartmentId( void )
+{
+    FIXME( "stub\n" );
+    return NET_IF_COMPARTMENT_ID_PRIMARY;
 }

@@ -497,8 +497,7 @@ BOOL WINAPI GetPointerType(UINT32 id, POINTER_INPUT_TYPE *type)
         return FALSE;
     }
 
-    if (id == 1) *type = PT_MOUSE;
-    else *type = PT_TOUCH;
+    *type = PT_MOUSE;
     return TRUE;
 }
 

@@ -5,7 +5,7 @@ msgstr ""
 "Project-Id-Version: Wine\n"
 "Report-Msgid-Bugs-To: https://bugs.winehq.org\n"
 "POT-Creation-Date: N/A\n"
-"PO-Revision-Date: 2022-12-18 19:29+0900\n"
+"PO-Revision-Date: 2023-12-18 22:35+0900\n"
 "Last-Translator: Akihiro Sagawa <sagawa.aki@gmail.com>\n"
 "Language-Team: Japanese\n"
 "Language: ja\n"
@@ -35,11 +35,11 @@ msgstr "拒否"
 msgid "Permissions for %1"
 msgstr "%1 のアクセス許可"
 
-#: dlls/appwiz.cpl/appwiz.rc:58
+#: dlls/appwiz.cpl/appwiz.rc:59
 msgid "Install/Uninstall"
 msgstr "インストールとアンインストール"
 
-#: dlls/appwiz.cpl/appwiz.rc:61
+#: dlls/appwiz.cpl/appwiz.rc:62
 msgid ""
 "To install a new program from a floppy disk, CD-ROM drive, or your hard "
 "drive, click Install."
@@ -47,11 +47,11 @@ msgstr ""
 "フロッピー ディスク、CD-ROM ドライブまたはハードドライブからプログラムをイン"
 "ストールするには、[インストール] をクリックしてください。"
 
-#: dlls/appwiz.cpl/appwiz.rc:62
+#: dlls/appwiz.cpl/appwiz.rc:63
 msgid "&Install..."
 msgstr "インストール(&I)..."
 
-#: dlls/appwiz.cpl/appwiz.rc:65
+#: dlls/appwiz.cpl/appwiz.rc:66
 msgid ""
 "The following software can be automatically removed. To remove a program or "
 "to modify its installed components, select it from the list and click Modify/"
@@ -61,27 +61,27 @@ msgstr ""
 "されたコンポーネントを変更するには、リストからプログラムを選択し [変更と削"
 "除] をクリックしてください。"
 
-#: dlls/appwiz.cpl/appwiz.rc:67
+#: dlls/appwiz.cpl/appwiz.rc:68
 msgid "&Support Information"
 msgstr "サポート情報(&S)"
 
-#: dlls/appwiz.cpl/appwiz.rc:68 programs/regedit/regedit.rc:136
+#: dlls/appwiz.cpl/appwiz.rc:69 programs/regedit/regedit.rc:136
 #: programs/regedit/regedit.rc:237
 msgid "&Modify..."
 msgstr "変更(&M)..."
 
-#: dlls/appwiz.cpl/appwiz.rc:69 dlls/appwiz.cpl/appwiz.rc:45
+#: dlls/appwiz.cpl/appwiz.rc:70 dlls/appwiz.cpl/appwiz.rc:45
 #: dlls/cryptui/cryptui.rc:351 dlls/msacm32/msacm32.rc:40
-#: programs/winecfg/winecfg.rc:199 programs/winecfg/winecfg.rc:236
+#: programs/winecfg/winecfg.rc:205 programs/winecfg/winecfg.rc:242
 #: programs/wordpad/wordpad.rc:256
 msgid "&Remove"
 msgstr "削除(&R)"
 
-#: dlls/appwiz.cpl/appwiz.rc:75
+#: dlls/appwiz.cpl/appwiz.rc:76
 msgid "Support Information"
 msgstr "サポート情報"
 
-#: dlls/appwiz.cpl/appwiz.rc:78 dlls/avifil32/avifil32.rc:54
+#: dlls/appwiz.cpl/appwiz.rc:79 dlls/avifil32/avifil32.rc:54
 #: dlls/comctl32/comctl32.rc:71 dlls/comctl32/comctl32.rc:55
 #: dlls/comdlg32/comdlg32.rc:233 dlls/comdlg32/comdlg32.rc:263
 #: dlls/comdlg32/comdlg32.rc:307 dlls/comdlg32/comdlg32.rc:390
@@ -94,71 +94,71 @@ msgstr "サポート情報"
 #: dlls/mshtml/mshtml.rc:47 dlls/mshtml/mshtml.rc:57 dlls/msvfw32/msvfw32.rc:36
 #: dlls/oledlg/oledlg.rc:62 dlls/oledlg/oledlg.rc:94
 #: dlls/serialui/serialui.rc:41 dlls/setupapi/setupapi.rc:59
-#: dlls/shell32/shell32.rc:274 dlls/shell32/shell32.rc:298
-#: dlls/shell32/shell32.rc:320 dlls/shell32/shell32.rc:339
+#: dlls/shell32/shell32.rc:278 dlls/shell32/shell32.rc:302
+#: dlls/shell32/shell32.rc:324 dlls/shell32/shell32.rc:343
 #: dlls/shlwapi/shlwapi.rc:44 dlls/twain_32/twain.rc:32
-#: dlls/user32/user32.rc:83 dlls/user32/user32.rc:98 dlls/wininet/wininet.rc:62
-#: dlls/wininet/wininet.rc:82 dlls/winspool.drv/winspool.rc:42
-#: programs/net/net.rc:47 programs/notepad/notepad.rc:124
-#: programs/oleview/oleview.rc:161 programs/oleview/oleview.rc:174
-#: programs/progman/progman.rc:106 programs/progman/progman.rc:124
-#: programs/progman/progman.rc:142 programs/progman/progman.rc:158
-#: programs/progman/progman.rc:180 programs/progman/progman.rc:199
-#: programs/progman/progman.rc:216 programs/regedit/regedit.rc:301
-#: programs/regedit/regedit.rc:312 programs/regedit/regedit.rc:325
-#: programs/regedit/regedit.rc:341 programs/regedit/regedit.rc:354
-#: programs/regedit/regedit.rc:367 programs/taskmgr/taskmgr.rc:442
-#: programs/taskmgr/taskmgr.rc:517 programs/winecfg/winecfg.rc:213
-#: programs/winecfg/winecfg.rc:223 programs/winefile/winefile.rc:127
-#: programs/winefile/winefile.rc:150 programs/winefile/winefile.rc:180
-#: programs/winemine/winemine.rc:73 programs/winemine/winemine.rc:84
-#: programs/winemine/winemine.rc:98 programs/wordpad/wordpad.rc:215
-#: programs/wordpad/wordpad.rc:226 programs/wordpad/wordpad.rc:244
-#: programs/wordpad/wordpad.rc:257
+#: dlls/user32/user32.rc:94 dlls/user32/user32.rc:109 dlls/user32/user32.rc:73
+#: dlls/wininet/wininet.rc:62 dlls/wininet/wininet.rc:82
+#: dlls/winspool.drv/winspool.rc:42 programs/net/net.rc:48
+#: programs/notepad/notepad.rc:124 programs/oleview/oleview.rc:161
+#: programs/oleview/oleview.rc:174 programs/progman/progman.rc:106
+#: programs/progman/progman.rc:124 programs/progman/progman.rc:142
+#: programs/progman/progman.rc:158 programs/progman/progman.rc:180
+#: programs/progman/progman.rc:199 programs/progman/progman.rc:216
+#: programs/regedit/regedit.rc:301 programs/regedit/regedit.rc:312
+#: programs/regedit/regedit.rc:325 programs/regedit/regedit.rc:341
+#: programs/regedit/regedit.rc:354 programs/regedit/regedit.rc:367
+#: programs/taskmgr/taskmgr.rc:442 programs/taskmgr/taskmgr.rc:517
+#: programs/winecfg/winecfg.rc:219 programs/winecfg/winecfg.rc:229
+#: programs/winefile/winefile.rc:127 programs/winefile/winefile.rc:150
+#: programs/winefile/winefile.rc:180 programs/winemine/winemine.rc:73
+#: programs/winemine/winemine.rc:84 programs/winemine/winemine.rc:98
+#: programs/wordpad/wordpad.rc:215 programs/wordpad/wordpad.rc:226
+#: programs/wordpad/wordpad.rc:244 programs/wordpad/wordpad.rc:257
 msgid "OK"
 msgstr "OK"
 
-#: dlls/appwiz.cpl/appwiz.rc:79
+#: dlls/appwiz.cpl/appwiz.rc:80
 msgid "The following information can be used to get technical support for %s:"
 msgstr "以下の情報は %s に対する技術サポートを得るのに利用できます:"
 
-#: dlls/appwiz.cpl/appwiz.rc:80
+#: dlls/appwiz.cpl/appwiz.rc:81
 msgid "Publisher:"
 msgstr "発行元:"
 
-#: dlls/appwiz.cpl/appwiz.rc:81 programs/winefile/winefile.rc:165
+#: dlls/appwiz.cpl/appwiz.rc:82 programs/winefile/winefile.rc:165
 msgid "Version:"
 msgstr "バージョン:"
 
-#: dlls/appwiz.cpl/appwiz.rc:82
+#: dlls/appwiz.cpl/appwiz.rc:83
 msgid "Contact:"
 msgstr "連絡:"
 
-#: dlls/appwiz.cpl/appwiz.rc:83
+#: dlls/appwiz.cpl/appwiz.rc:84
 msgid "Support Information:"
 msgstr "サポート情報:"
 
-#: dlls/appwiz.cpl/appwiz.rc:84
+#: dlls/appwiz.cpl/appwiz.rc:85
 msgid "Support Telephone:"
 msgstr "サポート電話:"
 
-#: dlls/appwiz.cpl/appwiz.rc:85
+#: dlls/appwiz.cpl/appwiz.rc:86
 msgid "Readme:"
 msgstr "付属文書:"
 
-#: dlls/appwiz.cpl/appwiz.rc:86
+#: dlls/appwiz.cpl/appwiz.rc:87
 msgid "Product Updates:"
 msgstr "製品の更新:"
 
-#: dlls/appwiz.cpl/appwiz.rc:87
+#: dlls/appwiz.cpl/appwiz.rc:88
 msgid "Comments:"
 msgstr "コメント:"
 
-#: dlls/appwiz.cpl/appwiz.rc:100
+#: dlls/appwiz.cpl/appwiz.rc:101
 msgid "Wine Gecko Installer"
 msgstr "Wine Gecko インストーラー"
 
-#: dlls/appwiz.cpl/appwiz.rc:103
+#: dlls/appwiz.cpl/appwiz.rc:104
 msgid ""
 "Wine could not find a Gecko package which is needed for applications "
 "embedding HTML to work correctly. Wine can automatically download and "
@@ -176,11 +176,11 @@ msgstr ""
 "す。詳しくは、<a href=\"https://wiki.winehq.org/Gecko\">https://wiki.winehq."
 "org/Gecko</a> を参照ください。"
 
-#: dlls/appwiz.cpl/appwiz.rc:109 dlls/appwiz.cpl/appwiz.rc:124
+#: dlls/appwiz.cpl/appwiz.rc:110 dlls/appwiz.cpl/appwiz.rc:125
 msgid "&Install"
 msgstr "インストール(&I)"
 
-#: dlls/appwiz.cpl/appwiz.rc:110 dlls/appwiz.cpl/appwiz.rc:125
+#: dlls/appwiz.cpl/appwiz.rc:111 dlls/appwiz.cpl/appwiz.rc:126
 #: dlls/avifil32/avifil32.rc:55 dlls/browseui/browseui.rc:45
 #: dlls/comctl32/comctl32.rc:72 dlls/comctl32/comctl32.rc:87
 #: dlls/comctl32/comctl32.rc:56 dlls/comdlg32/comdlg32.rc:172
@@ -199,35 +199,35 @@ msgstr "インストール(&I)"
 #: dlls/mshtml/mshtml.rc:48 dlls/mshtml/mshtml.rc:58 dlls/msvfw32/msvfw32.rc:37
 #: dlls/oledlg/oledlg.rc:63 dlls/oledlg/oledlg.rc:95
 #: dlls/serialui/serialui.rc:42 dlls/setupapi/setupapi.rc:42
-#: dlls/setupapi/setupapi.rc:60 dlls/shell32/shell32.rc:275
-#: dlls/shell32/shell32.rc:299 dlls/shell32/shell32.rc:310
-#: dlls/shell32/shell32.rc:340 dlls/shlwapi/shlwapi.rc:45
-#: dlls/twain_32/twain.rc:33 dlls/user32/user32.rc:84 dlls/user32/user32.rc:99
-#: dlls/wininet/wininet.rc:63 dlls/wininet/wininet.rc:83
-#: dlls/winspool.drv/winspool.rc:43 programs/notepad/notepad.rc:125
-#: programs/notepad/notepad.rc:138 programs/oleview/oleview.rc:162
-#: programs/oleview/oleview.rc:175 programs/progman/progman.rc:107
-#: programs/progman/progman.rc:125 programs/progman/progman.rc:143
-#: programs/progman/progman.rc:159 programs/progman/progman.rc:181
-#: programs/progman/progman.rc:200 programs/progman/progman.rc:217
-#: programs/regedit/regedit.rc:302 programs/regedit/regedit.rc:313
-#: programs/regedit/regedit.rc:326 programs/regedit/regedit.rc:342
-#: programs/regedit/regedit.rc:355 programs/regedit/regedit.rc:368
-#: programs/taskmgr/taskmgr.rc:443 programs/taskmgr/taskmgr.rc:518
-#: programs/wineboot/wineboot.rc:34 programs/winecfg/winecfg.rc:214
-#: programs/winecfg/winecfg.rc:224 programs/winefile/winefile.rc:128
-#: programs/winefile/winefile.rc:151 programs/winefile/winefile.rc:181
-#: programs/winemine/winemine.rc:99 programs/wordpad/wordpad.rc:216
-#: programs/wordpad/wordpad.rc:227 programs/wordpad/wordpad.rc:245
-#: programs/wordpad/wordpad.rc:258
+#: dlls/setupapi/setupapi.rc:60 dlls/shell32/shell32.rc:279
+#: dlls/shell32/shell32.rc:303 dlls/shell32/shell32.rc:314
+#: dlls/shell32/shell32.rc:344 dlls/shlwapi/shlwapi.rc:45
+#: dlls/twain_32/twain.rc:33 dlls/user32/user32.rc:95 dlls/user32/user32.rc:110
+#: dlls/user32/user32.rc:74 dlls/wininet/wininet.rc:63
+#: dlls/wininet/wininet.rc:83 dlls/winspool.drv/winspool.rc:43
+#: programs/notepad/notepad.rc:125 programs/notepad/notepad.rc:138
+#: programs/oleview/oleview.rc:162 programs/oleview/oleview.rc:175
+#: programs/progman/progman.rc:107 programs/progman/progman.rc:125
+#: programs/progman/progman.rc:143 programs/progman/progman.rc:159
+#: programs/progman/progman.rc:181 programs/progman/progman.rc:200
+#: programs/progman/progman.rc:217 programs/regedit/regedit.rc:302
+#: programs/regedit/regedit.rc:313 programs/regedit/regedit.rc:326
+#: programs/regedit/regedit.rc:342 programs/regedit/regedit.rc:355
+#: programs/regedit/regedit.rc:368 programs/taskmgr/taskmgr.rc:443
+#: programs/taskmgr/taskmgr.rc:518 programs/wineboot/wineboot.rc:34
+#: programs/winecfg/winecfg.rc:220 programs/winecfg/winecfg.rc:230
+#: programs/winefile/winefile.rc:128 programs/winefile/winefile.rc:151
+#: programs/winefile/winefile.rc:181 programs/winemine/winemine.rc:99
+#: programs/wordpad/wordpad.rc:216 programs/wordpad/wordpad.rc:227
+#: programs/wordpad/wordpad.rc:245 programs/wordpad/wordpad.rc:258
 msgid "Cancel"
 msgstr "キャンセル"
 
-#: dlls/appwiz.cpl/appwiz.rc:115
+#: dlls/appwiz.cpl/appwiz.rc:116
 msgid "Wine Mono Installer"
 msgstr "Wine Mono インストーラー"
 
-#: dlls/appwiz.cpl/appwiz.rc:118
+#: dlls/appwiz.cpl/appwiz.rc:119
 msgid ""
 "Wine could not find a wine-mono package which is needed for .NET "
 "applications to work correctly. Wine can automatically download and install "
@@ -275,7 +275,7 @@ msgid "Not specified"
 msgstr "指定されていません"
 
 #: dlls/appwiz.cpl/appwiz.rc:38 dlls/oledb32/version.rc:38
-#: dlls/shell32/shell32.rc:144 dlls/shell32/shell32.rc:239
+#: dlls/shell32/shell32.rc:141 dlls/shell32/shell32.rc:243
 #: programs/regedit/regedit.rc:150 programs/winefile/winefile.rc:106
 msgid "Name"
 msgstr "名前"
@@ -297,7 +297,7 @@ msgid "Programs (*.exe)"
 msgstr "プログラム (*.exe)"
 
 #: dlls/appwiz.cpl/appwiz.rc:43 dlls/avifil32/avifil32.rc:33
-#: dlls/cryptui/cryptui.rc:83 dlls/shell32/shell32.rc:197
+#: dlls/cryptui/cryptui.rc:83 dlls/shell32/shell32.rc:199
 #: programs/notepad/notepad.rc:81 programs/oleview/oleview.rc:103
 #: programs/progman/progman.rc:82 programs/regedit/regedit.rc:230
 #: programs/winedbg/winedbg.rc:43 programs/winhlp32/winhlp32.rc:90
@@ -308,21 +308,25 @@ msgstr "すべてのファイル (*.*)"
 msgid "&Modify/Remove"
 msgstr "変更と削除(&M)"
 
-#: dlls/appwiz.cpl/appwiz.rc:51
+#: dlls/appwiz.cpl/appwiz.rc:52
 msgid "Downloading..."
 msgstr "ダウンロードしています..."
 
-#: dlls/appwiz.cpl/appwiz.rc:52
+#: dlls/appwiz.cpl/appwiz.rc:53
 msgid "Installing..."
 msgstr "インストールしています..."
 
-#: dlls/appwiz.cpl/appwiz.rc:53
+#: dlls/appwiz.cpl/appwiz.rc:54
 msgid ""
 "Unexpected checksum of downloaded file. Aborting installation of corrupted "
 "file."
 msgstr ""
 "ダウンロードしたファイルのチェックサムが異なります。ファイルが破損しているた"
 "め、インストールを中止します。"
+
+#: dlls/appwiz.cpl/appwiz.rc:47
+msgid "Please wait until the current uninstall/modify process is complete."
+msgstr "実行中のアンインストール・変更が完了するのをお待ちください。"
 
 #: dlls/avifil32/avifil32.rc:42
 msgid "Compress options"
@@ -409,7 +413,8 @@ msgid "&Apply"
 msgstr "適用(&A)"
 
 #: dlls/comctl32/comctl32.rc:74 dlls/comctl32/comctl32.rc:88
-#: dlls/comdlg32/comdlg32.rc:309 dlls/user32/user32.rc:88
+#: dlls/comdlg32/comdlg32.rc:309 dlls/user32/user32.rc:99
+#: dlls/user32/user32.rc:81
 msgid "Help"
 msgstr "ヘルプ"
 
@@ -435,9 +440,9 @@ msgstr "ツール バーのカスタマイズ"
 
 #: dlls/comctl32/comctl32.rc:100 dlls/comctl32/comctl32.rc:57
 #: dlls/cryptui/cryptui.rc:356 dlls/ieframe/ieframe.rc:43
-#: programs/oleview/oleview.rc:83 programs/oleview/oleview.rc:187
-#: programs/oleview/oleview.rc:200 programs/oleview/oleview.rc:212
-#: programs/taskmgr/taskmgr.rc:139
+#: dlls/user32/user32.rc:80 programs/oleview/oleview.rc:83
+#: programs/oleview/oleview.rc:187 programs/oleview/oleview.rc:200
+#: programs/oleview/oleview.rc:212 programs/taskmgr/taskmgr.rc:139
 msgid "&Close"
 msgstr "閉じる(&C)"
 
@@ -452,7 +457,7 @@ msgstr "リセット(&E)"
 #: dlls/comdlg32/comdlg32.rc:482 dlls/comdlg32/comdlg32.rc:508
 #: dlls/comdlg32/comdlg32.rc:531 dlls/ieframe/ieframe.rc:58
 #: dlls/msacm32/msacm32.rc:52 dlls/oledlg/oledlg.rc:96
-#: dlls/shell32/shell32.rc:128 programs/clock/clock.rc:44
+#: dlls/shell32/shell32.rc:125 programs/clock/clock.rc:44
 #: programs/notepad/notepad.rc:65 programs/notepad/notepad.rc:126
 #: programs/oleview/oleview.rc:72 programs/progman/progman.rc:55
 #: programs/progman/progman.rc:108 programs/progman/progman.rc:126
@@ -498,17 +503,18 @@ msgctxt "hotkey"
 msgid "None"
 msgstr "なし"
 
-#: dlls/comctl32/comctl32.rc:52 dlls/shell32/shell32.rc:307
-#: dlls/shlwapi/shlwapi.rc:46 dlls/user32/user32.rc:79
+#: dlls/comctl32/comctl32.rc:52 dlls/shell32/shell32.rc:311
+#: dlls/shlwapi/shlwapi.rc:46 dlls/user32/user32.rc:90 dlls/user32/user32.rc:78
 msgid "&Yes"
 msgstr "はい(&Y)"
 
-#: dlls/comctl32/comctl32.rc:53 dlls/shell32/shell32.rc:309
-#: dlls/shlwapi/shlwapi.rc:47 dlls/user32/user32.rc:80
+#: dlls/comctl32/comctl32.rc:53 dlls/shell32/shell32.rc:313
+#: dlls/shlwapi/shlwapi.rc:47 dlls/user32/user32.rc:91 dlls/user32/user32.rc:79
 msgid "&No"
 msgstr "いいえ(&N)"
 
-#: dlls/comctl32/comctl32.rc:54 dlls/user32/user32.rc:82
+#: dlls/comctl32/comctl32.rc:54 dlls/user32/user32.rc:93
+#: dlls/user32/user32.rc:76
 msgid "&Retry"
 msgstr "再試行(&R)"
 
@@ -537,8 +543,7 @@ msgstr "今日へ移動"
 
 #: dlls/comdlg32/comdlg32.rc:158 dlls/comdlg32/comdlg32.rc:171
 #: dlls/comdlg32/comdlg32.rc:462 dlls/comdlg32/comdlg32.rc:487
-#: dlls/comdlg32/comdlg32.rc:514 dlls/shell32/shell32.rc:165
-#: programs/oleview/oleview.rc:101
+#: dlls/comdlg32/comdlg32.rc:514 programs/oleview/oleview.rc:101
 msgid "Open"
 msgstr "開く"
 
@@ -559,7 +564,7 @@ msgid "Dri&ves:"
 msgstr "ドライブ(&V):"
 
 #: dlls/comdlg32/comdlg32.rc:174 dlls/comdlg32/comdlg32.rc:196
-#: dlls/shell32/shell32.rc:368 dlls/shell32/shell32.rc:405
+#: dlls/shell32/shell32.rc:372 dlls/shell32/shell32.rc:409
 #: programs/winefile/winefile.rc:172
 msgid "&Read Only"
 msgstr "読み取り専用(&R)"
@@ -684,7 +689,7 @@ msgid "Font St&yle:"
 msgstr "スタイル(&Y):"
 
 #: dlls/comdlg32/comdlg32.rc:260 dlls/comdlg32/comdlg32.rc:439
-#: programs/winecfg/winecfg.rc:292
+#: programs/winecfg/winecfg.rc:300
 msgid "&Size:"
 msgstr "サイズ(&S):"
 
@@ -700,7 +705,7 @@ msgstr "取り消し線(&K)"
 msgid "&Underline"
 msgstr "下線(&U)"
 
-#: dlls/comdlg32/comdlg32.rc:270 programs/winecfg/winecfg.rc:290
+#: dlls/comdlg32/comdlg32.rc:270 programs/winecfg/winecfg.rc:298
 msgid "&Color:"
 msgstr "配色(&C):"
 
@@ -818,7 +823,7 @@ msgstr "すべてを置換(&A)"
 
 #: dlls/comdlg32/comdlg32.rc:363 dlls/comdlg32/comdlg32.rc:403
 #: dlls/ieframe/ieframe.rc:42 dlls/shdoclc/shdoclc.rc:61
-#: dlls/shell32/shell32.rc:108 programs/clock/clock.rc:31
+#: dlls/shell32/shell32.rc:105 programs/clock/clock.rc:31
 #: programs/conhost/conhost.rc:34
 msgid "&Properties"
 msgstr "プロパティ(&P)"
@@ -876,7 +881,7 @@ msgstr "部数(&C):"
 msgid "C&ollate"
 msgstr "部単位で印刷(&O)"
 
-#: dlls/comdlg32/comdlg32.rc:414 programs/winecfg/winecfg.rc:298
+#: dlls/comdlg32/comdlg32.rc:414 programs/winecfg/winecfg.rc:306
 msgid "Si&ze:"
 msgstr "サイズ(&Z):"
 
@@ -942,7 +947,7 @@ msgstr "読み取り専用ファイルとして開く(&R)"
 
 #: dlls/comdlg32/comdlg32.rc:480 dlls/comdlg32/comdlg32.rc:506
 #: dlls/comdlg32/comdlg32.rc:524 dlls/shdoclc/shdoclc.rc:127
-#: dlls/shell32/shell32.rc:99
+#: dlls/shell32/shell32.rc:165
 msgid "&Open"
 msgstr "開く(&O)"
 
@@ -2245,8 +2250,8 @@ msgid "Notice Text="
 msgstr "通知テキスト="
 
 #: dlls/cryptui/cryptui.rc:185 dlls/cryptui/cryptui.rc:240
-#: dlls/inetcpl.cpl/inetcpl.rc:46 dlls/shell32/shell32.rc:346
-#: dlls/shell32/shell32.rc:375
+#: dlls/inetcpl.cpl/inetcpl.rc:46 dlls/shell32/shell32.rc:350
+#: dlls/shell32/shell32.rc:379
 msgid "General"
 msgstr "全般"
 
@@ -2380,7 +2385,7 @@ msgid "&File name:"
 msgstr "ファイル名(&F):"
 
 #: dlls/cryptui/cryptui.rc:301 dlls/cryptui/cryptui.rc:323
-#: dlls/cryptui/cryptui.rc:437 programs/winecfg/winecfg.rc:311
+#: dlls/cryptui/cryptui.rc:437 programs/winecfg/winecfg.rc:319
 msgid "B&rowse..."
 msgstr "参照(&R)..."
 
@@ -2460,7 +2465,7 @@ msgid "Certificate intended purposes"
 msgstr "証明書の目的"
 
 #: dlls/cryptui/cryptui.rc:355 dlls/ieframe/ieframe.rc:45
-#: dlls/shell32/shell32.rc:43 dlls/shell32/shell32.rc:120
+#: dlls/shell32/shell32.rc:43 dlls/shell32/shell32.rc:117
 #: programs/notepad/notepad.rc:61 programs/oleview/oleview.rc:59
 #: programs/oleview/oleview.rc:61 programs/oleview/oleview.rc:85
 #: programs/regedit/regedit.rc:65 programs/taskmgr/taskmgr.rc:52
@@ -2739,7 +2744,7 @@ msgstr "拡張されたキー使用法 (プロパティ)"
 msgid "Friendly name"
 msgstr "フレンドリ名"
 
-#: dlls/cryptui/cryptui.rc:65 dlls/shell32/shell32.rc:240
+#: dlls/cryptui/cryptui.rc:65 dlls/shell32/shell32.rc:244
 #: programs/ipconfig/ipconfig.rc:45
 msgid "Description"
 msgstr "説明"
@@ -2834,7 +2839,7 @@ msgstr "選択された証明書ストア"
 msgid "Automatically determined by the program"
 msgstr "プログラムで自動的に決定する"
 
-#: dlls/cryptui/cryptui.rc:91 dlls/shell32/shell32.rc:137
+#: dlls/cryptui/cryptui.rc:91 dlls/shell32/shell32.rc:134
 msgid "File"
 msgstr "ファイル"
 
@@ -3122,7 +3127,7 @@ msgstr "注意: この証明書の秘密鍵はエクスポートできません�
 msgid "Intended Use"
 msgstr "利用目的"
 
-#: dlls/cryptui/cryptui.rc:178 dlls/shell32/shell32.rc:150
+#: dlls/cryptui/cryptui.rc:178 dlls/shell32/shell32.rc:147
 msgid "Location"
 msgstr "場所"
 
@@ -3348,7 +3353,7 @@ msgstr "切り取り(&T)"
 #: dlls/hhctrl.ocx/hhctrl.rc:88 dlls/shdoclc/shdoclc.rc:80
 #: dlls/shdoclc/shdoclc.rc:94 dlls/shdoclc/shdoclc.rc:118
 #: dlls/shdoclc/shdoclc.rc:133 dlls/shdoclc/shdoclc.rc:160
-#: dlls/shdoclc/shdoclc.rc:184 dlls/shell32/shell32.rc:102
+#: dlls/shdoclc/shdoclc.rc:184 dlls/shell32/shell32.rc:98
 #: dlls/user32/user32.rc:61 programs/conhost/conhost.rc:36
 #: programs/winhlp32/winhlp32.rc:40 programs/wordpad/wordpad.rc:113
 msgid "&Copy"
@@ -3360,6 +3365,7 @@ msgid "Paste"
 msgstr "貼り付け"
 
 #: dlls/hhctrl.ocx/hhctrl.rc:91 dlls/shdoclc/shdoclc.rc:121
+#: dlls/shell32/shell32.rc:166
 msgid "&Print"
 msgstr "印刷(&P)"
 
@@ -3426,7 +3432,7 @@ msgstr "進む"
 msgid "Cinepak Video codec"
 msgstr "Cinepak ビデオコーデック"
 
-#: dlls/ieframe/ieframe.rc:28 dlls/shell32/shell32.rc:114
+#: dlls/ieframe/ieframe.rc:28 dlls/shell32/shell32.rc:111
 #: programs/notepad/notepad.rc:29 programs/oleview/oleview.rc:30
 #: programs/oleview/oleview.rc:80 programs/progman/progman.rc:32
 #: programs/taskmgr/taskmgr.rc:35 programs/view/view.rc:31
@@ -3700,22 +3706,18 @@ msgid "High"
 msgstr "高"
 
 #: dlls/ir50_32/ir50_32.rc:28
-#, fuzzy
-#| msgid "Index"
 msgid "Indeo5"
-msgstr "索引"
+msgstr "Indeo5"
 
 #: dlls/ir50_32/ir50_32.rc:29
-#, fuzzy
-#| msgid "Wine Video 1 video codec"
 msgid "Indeo Video Interactive version 5 video codec"
-msgstr "Wine ビデオ 1 ビデオコーデック"
+msgstr "Indeo Video Interactive バージョン 5 ビデオ コーデック"
 
 #: dlls/joy.cpl/joy.rc:37
 msgid "Joysticks"
 msgstr "ジョイスティック"
 
-#: dlls/joy.cpl/joy.rc:40 programs/winecfg/winecfg.rc:212
+#: dlls/joy.cpl/joy.rc:40 programs/winecfg/winecfg.rc:218
 msgid "&Disable"
 msgstr "無効化(&D)"
 
@@ -3944,15 +3946,15 @@ msgstr "条件コンパイルはオフにされています"
 msgid "Expected '@'"
 msgstr "'@'を期待していました"
 
-#: dlls/jscript/jscript.rc:82
+#: dlls/jscript/jscript.rc:89
 msgid "Microsoft JScript compilation error"
 msgstr "Microsoft JScript コンパイル エラー"
 
-#: dlls/jscript/jscript.rc:83
+#: dlls/jscript/jscript.rc:90
 msgid "Microsoft JScript runtime error"
 msgstr "Microsoft JScript 実行時エラー"
 
-#: dlls/jscript/jscript.rc:84 dlls/vbscript/vbscript.rc:64
+#: dlls/jscript/jscript.rc:91 dlls/vbscript/vbscript.rc:64
 msgid "Unknown runtime error"
 msgstr "未知の実行時エラー"
 
@@ -4009,34 +4011,38 @@ msgid "Syntax error in regular expression"
 msgstr "正規表現に構文誤りがあります"
 
 #: dlls/jscript/jscript.rc:66
+msgid "Unexpected quantifier"
+msgstr "予期しない数量詞です"
+
+#: dlls/jscript/jscript.rc:67
 msgid "Exception thrown and not caught"
 msgstr "例外が送出されましたが捕捉されませんでした"
 
-#: dlls/jscript/jscript.rc:68
+#: dlls/jscript/jscript.rc:69
 msgid "URI to be encoded contains invalid characters"
 msgstr "エンコードされる URI に使用できない文字が含まれています"
 
-#: dlls/jscript/jscript.rc:67
+#: dlls/jscript/jscript.rc:68
 msgid "URI to be decoded is incorrect"
 msgstr "デコードされる URI が正しくありません"
 
-#: dlls/jscript/jscript.rc:69
+#: dlls/jscript/jscript.rc:70
 msgid "Number of fraction digits is out of range"
 msgstr "小数点以下の桁数が範囲外です"
 
-#: dlls/jscript/jscript.rc:70
+#: dlls/jscript/jscript.rc:71
 msgid "Precision is out of range"
 msgstr "精度指定が範囲外です"
 
-#: dlls/jscript/jscript.rc:71
+#: dlls/jscript/jscript.rc:72
 msgid "Array length must be a finite positive integer"
 msgstr "配列の長さは有限の正整数である必要があります"
 
-#: dlls/jscript/jscript.rc:72
+#: dlls/jscript/jscript.rc:73
 msgid "Array object expected"
 msgstr "配列オブジェクトを期待していました"
 
-#: dlls/jscript/jscript.rc:73
+#: dlls/jscript/jscript.rc:74
 msgid ""
 "'writable' attribute on the property descriptor cannot be set to 'true' on "
 "this object"
@@ -4044,31 +4050,59 @@ msgstr ""
 "このオブジェクトにおけるプロパティ記述子の 'writable' 属性は 'true' に設定で"
 "きません"
 
-#: dlls/jscript/jscript.rc:74
+#: dlls/jscript/jscript.rc:75
 msgid "Cyclic __proto__ value"
 msgstr "循環した __proto__ 値"
 
-#: dlls/jscript/jscript.rc:75
+#: dlls/jscript/jscript.rc:76
 msgid "Cannot create property for a non-extensible object"
 msgstr "拡張可能ではないオブジェクトにプロパティを作成できません"
 
-#: dlls/jscript/jscript.rc:76
+#: dlls/jscript/jscript.rc:77
 msgid "Cannot define property '|': object is not extensible"
 msgstr "プロパティ '|' を定義できません: オブジェクトは拡張可能ではありません"
 
-#: dlls/jscript/jscript.rc:77
+#: dlls/jscript/jscript.rc:78
 msgid "Cannot redefine non-configurable property '|'"
 msgstr "変更不可のプロパティ '|' は再定義できません"
 
-#: dlls/jscript/jscript.rc:78
+#: dlls/jscript/jscript.rc:79
 msgid "Cannot modify non-writable property '|'"
 msgstr "書換不可のプロパティ '|' は変更できません"
 
-#: dlls/jscript/jscript.rc:79
+#: dlls/jscript/jscript.rc:80
+#, fuzzy
+#| msgid "'this' is not a | object"
+msgid "'this' is not a DataView object"
+msgstr "'this' は | オブジェクトではありません"
+
+#: dlls/jscript/jscript.rc:81
+msgid "Required argument offset or value in DataView method is not specified"
+msgstr ""
+
+#: dlls/jscript/jscript.rc:82
+msgid "DataView operation access beyond specified buffer length"
+msgstr ""
+
+#: dlls/jscript/jscript.rc:83
+msgid "DataView constructor argument offset is invalid"
+msgstr ""
+
+#: dlls/jscript/jscript.rc:84
 msgid "'this' is not a | object"
 msgstr "'this' は | オブジェクトではありません"
 
-#: dlls/jscript/jscript.rc:80
+#: dlls/jscript/jscript.rc:85
+msgid "'key' is not an object"
+msgstr "'key' はオブジェクトではありません"
+
+#: dlls/jscript/jscript.rc:86
+#, fuzzy
+#| msgid "Array object expected"
+msgid "ArrayBuffer object expected"
+msgstr "配列オブジェクトを期待していました"
+
+#: dlls/jscript/jscript.rc:87
 msgid "Property cannot have both accessors and a value"
 msgstr "プロパティはアクセサーと値の両方になることはできません"
 
@@ -4077,7 +4111,7 @@ msgid "Wine kernel DLL"
 msgstr ""
 
 #: include/wine/wine_common_ver.rc:143 dlls/winemac.drv/winemac.rc:32
-#: programs/wineboot/wineboot.rc:42 programs/winecfg/winecfg.rc:137
+#: programs/wineboot/wineboot.rc:42 programs/winecfg/winecfg.rc:143
 msgid "Wine"
 msgstr "Wine"
 
@@ -5489,7 +5523,7 @@ msgstr "操作はユーザーによって中断されました。\n"
 msgid "File has a user-mapped section.\n"
 msgstr "ファイルにはユーザーマップされたセクションがあります。\n"
 
-#: dlls/kernelbase/winerror.mc:1758 dlls/kernelbase/winerror.mc:3783
+#: dlls/kernelbase/winerror.mc:1758 dlls/kernelbase/winerror.mc:3788
 msgid "Connection refused.\n"
 msgstr "接続は拒否されました。\n"
 
@@ -7091,42 +7125,46 @@ msgid "Invalid argument.\n"
 msgstr "引数は正しくありません。\n"
 
 #: dlls/kernelbase/winerror.mc:3778
+msgid "Cannot assign requested address.\n"
+msgstr ""
+
+#: dlls/kernelbase/winerror.mc:3783
 msgid "Connection reset by peer.\n"
 msgstr "相手側により接続がリセットされました。\n"
 
-#: dlls/kernelbase/winerror.mc:3788
+#: dlls/kernelbase/winerror.mc:3793
 msgid "Host not found.\n"
 msgstr "ホストが見つかりません。\n"
 
-#: dlls/kernelbase/winerror.mc:3793
+#: dlls/kernelbase/winerror.mc:3798
 msgid "Nonauthoritative host not found.\n"
 msgstr "権威のないホストが見つかりません。\n"
 
-#: dlls/kernelbase/winerror.mc:3798
+#: dlls/kernelbase/winerror.mc:3803
 msgid "Nonrecoverable error.\n"
 msgstr "回復不能エラーです。\n"
 
-#: dlls/kernelbase/winerror.mc:3803
+#: dlls/kernelbase/winerror.mc:3808
 msgid "Name valid, no data record.\n"
 msgstr "名前は有効ですが、データ レコードがありません。\n"
 
-#: dlls/kernelbase/winerror.mc:3817
+#: dlls/kernelbase/winerror.mc:3822
 msgid "Not implemented.\n"
 msgstr "未実装です。\n"
 
-#: dlls/kernelbase/winerror.mc:3838
+#: dlls/kernelbase/winerror.mc:3843
 msgid "Call failed.\n"
 msgstr "呼び出しが失敗しました。\n"
 
-#: dlls/kernelbase/winerror.mc:3810
+#: dlls/kernelbase/winerror.mc:3815
 msgid "No Signature found in file.\n"
 msgstr "ファイルにデジタル署名がありません。\n"
 
-#: dlls/kernelbase/winerror.mc:3824
+#: dlls/kernelbase/winerror.mc:3829
 msgid "Invalid call.\n"
 msgstr "呼び出しは正しくありません。\n"
 
-#: dlls/kernelbase/winerror.mc:3831
+#: dlls/kernelbase/winerror.mc:3836
 msgid "Resource is not currently available.\n"
 msgstr "リソースは現在使用できません。\n"
 
@@ -8094,7 +8132,7 @@ msgstr "ハイパーリンク"
 msgid "Hyperlink Information"
 msgstr "ハイパーリンクの情報"
 
-#: dlls/mshtml/mshtml.rc:43 programs/winecfg/winecfg.rc:243
+#: dlls/mshtml/mshtml.rc:43 programs/winecfg/winecfg.rc:249
 msgid "&Type:"
 msgstr "タイプ(&T):"
 
@@ -8213,7 +8251,7 @@ msgstr "機能の導入元:"
 msgid "choose which folder contains %s"
 msgstr "%s を含むフォルダーを選択"
 
-#: dlls/msi/msi.rc:66 dlls/shell32/shell32.rc:236
+#: dlls/msi/msi.rc:66 dlls/shell32/shell32.rc:238
 msgid "New Folder"
 msgstr "新しいフォルダー"
 
@@ -9342,8 +9380,9 @@ msgstr "コピー元:"
 #: dlls/oledlg/oledlg.rc:86 dlls/shdoclc/shdoclc.rc:50
 #: dlls/shdoclc/shdoclc.rc:82 dlls/shdoclc/shdoclc.rc:95
 #: dlls/shdoclc/shdoclc.rc:135 dlls/shdoclc/shdoclc.rc:162
-#: dlls/shdoclc/shdoclc.rc:186 dlls/user32/user32.rc:62
-#: programs/conhost/conhost.rc:37 programs/wordpad/wordpad.rc:114
+#: dlls/shdoclc/shdoclc.rc:186 dlls/shell32/shell32.rc:99
+#: dlls/user32/user32.rc:62 programs/conhost/conhost.rc:37
+#: programs/wordpad/wordpad.rc:114
 msgid "&Paste"
 msgstr "貼り付け(&P)"
 
@@ -9375,7 +9414,7 @@ msgstr ""
 "ファイルの内容をオブジェクトとしてドキュメントに挿入します。オブジェクトは作"
 "成したプログラムから有効にできます。"
 
-#: dlls/oledlg/oledlg.rc:30 dlls/shell32/shell32.rc:195
+#: dlls/oledlg/oledlg.rc:30 dlls/shell32/shell32.rc:197
 msgid "Browse"
 msgstr "参照"
 
@@ -9486,8 +9525,8 @@ msgctxt "unit: bits"
 msgid "b"
 msgstr "b"
 
-#: dlls/sane.ds/sane.rc:34 dlls/wineps.drv/wineps.rc:49
-#: programs/winecfg/winecfg.rc:182
+#: dlls/sane.ds/sane.rc:34 dlls/wineps.drv/wineps.rc:52
+#: programs/winecfg/winecfg.rc:188
 msgctxt "unit: dots/inch"
 msgid "dpi"
 msgstr "dpi"
@@ -9669,12 +9708,12 @@ msgstr "プロパティ(&R)"
 msgid "&Undo"
 msgstr "元に戻す(&U)"
 
-#: dlls/shdoclc/shdoclc.rc:96 dlls/shell32/shell32.rc:105
+#: dlls/shdoclc/shdoclc.rc:96 dlls/shell32/shell32.rc:102
 #: dlls/user32/user32.rc:63
 msgid "&Delete"
 msgstr "削除(&D)"
 
-#: dlls/shdoclc/shdoclc.rc:103 dlls/shell32/shell32.rc:97
+#: dlls/shdoclc/shdoclc.rc:103
 msgid "&Select"
 msgstr "選択(&S)"
 
@@ -9843,26 +9882,26 @@ msgid "&w&bPage &p"
 msgstr "&w&b&pページ"
 
 #: dlls/shell32/shell32.rc:30 dlls/shell32/shell32.rc:45
-#: dlls/shell32/shell32.rc:122 dlls/shell32/shell32.rc:160
+#: dlls/shell32/shell32.rc:119 dlls/shell32/shell32.rc:157
 #: programs/taskmgr/taskmgr.rc:65 programs/taskmgr/taskmgr.rc:110
 #: programs/taskmgr/taskmgr.rc:252
 msgid "Lar&ge Icons"
 msgstr "大きいアイコン(&G)"
 
 #: dlls/shell32/shell32.rc:31 dlls/shell32/shell32.rc:46
-#: dlls/shell32/shell32.rc:123 dlls/shell32/shell32.rc:161
+#: dlls/shell32/shell32.rc:120 dlls/shell32/shell32.rc:158
 #: programs/taskmgr/taskmgr.rc:66 programs/taskmgr/taskmgr.rc:111
 #: programs/taskmgr/taskmgr.rc:253
 msgid "S&mall Icons"
 msgstr "小さいアイコン(&M)"
 
 #: dlls/shell32/shell32.rc:32 dlls/shell32/shell32.rc:47
-#: dlls/shell32/shell32.rc:124 dlls/shell32/shell32.rc:162
+#: dlls/shell32/shell32.rc:121 dlls/shell32/shell32.rc:159
 msgid "&List"
 msgstr "一覧(&L)"
 
 #: dlls/shell32/shell32.rc:33 dlls/shell32/shell32.rc:48
-#: dlls/shell32/shell32.rc:125 dlls/shell32/shell32.rc:163
+#: dlls/shell32/shell32.rc:122 dlls/shell32/shell32.rc:160
 #: programs/taskmgr/taskmgr.rc:67 programs/taskmgr/taskmgr.rc:112
 #: programs/taskmgr/taskmgr.rc:254
 msgid "&Details"
@@ -9905,7 +9944,7 @@ msgstr "ショートカットの貼り付け"
 msgid "New"
 msgstr "新規作成"
 
-#: dlls/shell32/shell32.rc:69
+#: dlls/shell32/shell32.rc:69 dlls/shell32/shell32.rc:240
 msgid "New &Folder"
 msgstr "新規フォルダー(&F)"
 
@@ -9922,23 +9961,19 @@ msgstr "元に戻す(&R)"
 msgid "&Erase"
 msgstr "消去(&E)"
 
-#: dlls/shell32/shell32.rc:98
-msgid "E&xplore"
-msgstr "エクスプローラ(&X)"
-
-#: dlls/shell32/shell32.rc:101
+#: dlls/shell32/shell32.rc:97
 msgid "C&ut"
 msgstr "切り取り(&U)"
 
-#: dlls/shell32/shell32.rc:104
+#: dlls/shell32/shell32.rc:101
 msgid "Create &Link"
 msgstr "ショートカットの作成(&L)"
 
-#: dlls/shell32/shell32.rc:106
+#: dlls/shell32/shell32.rc:103
 msgid "&Rename"
 msgstr "名前の変更(&R)"
 
-#: dlls/shell32/shell32.rc:117 programs/notepad/notepad.rc:39
+#: dlls/shell32/shell32.rc:114 programs/notepad/notepad.rc:39
 #: programs/oleview/oleview.rc:38 programs/regedit/regedit.rc:41
 #: programs/view/view.rc:34 programs/winefile/winefile.rc:40
 #: programs/winemine/winemine.rc:51 programs/winhlp32/winhlp32.rc:37
@@ -9946,51 +9981,51 @@ msgstr "名前の変更(&R)"
 msgid "E&xit"
 msgstr "終了(&X)"
 
-#: dlls/shell32/shell32.rc:130
+#: dlls/shell32/shell32.rc:127
 msgid "&About Control Panel"
 msgstr "バージョン情報(&A)"
 
-#: dlls/shell32/shell32.rc:271 dlls/shell32/shell32.rc:286
+#: dlls/shell32/shell32.rc:275 dlls/shell32/shell32.rc:290
 msgid "Browse for Folder"
 msgstr "フォルダーの参照"
 
-#: dlls/shell32/shell32.rc:291
+#: dlls/shell32/shell32.rc:295
 msgid "Folder:"
 msgstr "フォルダー:"
 
-#: dlls/shell32/shell32.rc:297
+#: dlls/shell32/shell32.rc:301
 msgid "&Make New Folder"
 msgstr "新しいフォルダーの作成(&M)"
 
-#: dlls/shell32/shell32.rc:304
+#: dlls/shell32/shell32.rc:308
 msgid "Message"
 msgstr "メッセージ"
 
-#: dlls/shell32/shell32.rc:308
+#: dlls/shell32/shell32.rc:312
 msgid "Yes to &all"
 msgstr "すべてはい(&A)"
 
-#: dlls/shell32/shell32.rc:317
+#: dlls/shell32/shell32.rc:321
 msgid "About %s"
 msgstr "%s について"
 
-#: dlls/shell32/shell32.rc:321
+#: dlls/shell32/shell32.rc:325
 msgid "Wine &license"
 msgstr "Wine ライセンス(&L)"
 
-#: dlls/shell32/shell32.rc:326
+#: dlls/shell32/shell32.rc:330
 msgid "Running on %s"
 msgstr "%s 上で動作しています"
 
-#: dlls/shell32/shell32.rc:327
+#: dlls/shell32/shell32.rc:331
 msgid "Wine was brought to you by:"
 msgstr "Wine の提供:"
 
-#: dlls/shell32/shell32.rc:332
+#: dlls/shell32/shell32.rc:336
 msgid "Run"
 msgstr "実行"
 
-#: dlls/shell32/shell32.rc:336
+#: dlls/shell32/shell32.rc:340
 msgid ""
 "Type the name of a program, folder, document, or Internet resource, and Wine "
 "will open it for you."
@@ -9998,287 +10033,295 @@ msgstr ""
 "実行するプログラムまたは、開くフォルダー名や ドキュメント名、 インターネット "
 "リソース名を入力してください。"
 
-#: dlls/shell32/shell32.rc:337
+#: dlls/shell32/shell32.rc:341
 msgid "&Open:"
 msgstr "名前(&O):"
 
-#: dlls/shell32/shell32.rc:341 programs/progman/progman.rc:182
+#: dlls/shell32/shell32.rc:345 programs/progman/progman.rc:182
 #: programs/progman/progman.rc:201 programs/progman/progman.rc:218
-#: programs/winecfg/winecfg.rc:241 programs/winefile/winefile.rc:129
+#: programs/winecfg/winecfg.rc:247 programs/winefile/winefile.rc:129
 msgid "&Browse..."
 msgstr "参照(&B)..."
 
-#: dlls/shell32/shell32.rc:353 dlls/shell32/shell32.rc:382
+#: dlls/shell32/shell32.rc:357 dlls/shell32/shell32.rc:386
 msgid "File type:"
 msgstr "ファイルの種類:"
 
-#: dlls/shell32/shell32.rc:357 dlls/shell32/shell32.rc:390
+#: dlls/shell32/shell32.rc:361 dlls/shell32/shell32.rc:394
 #: dlls/urlmon/urlmon.rc:37 programs/explorer/explorer.rc:33
 msgid "Location:"
 msgstr "場所:"
 
-#: dlls/shell32/shell32.rc:359 dlls/shell32/shell32.rc:392
+#: dlls/shell32/shell32.rc:363 dlls/shell32/shell32.rc:396
 #: programs/winefile/winefile.rc:169
 msgid "Size:"
 msgstr "サイズ:"
 
-#: dlls/shell32/shell32.rc:363 dlls/shell32/shell32.rc:396
+#: dlls/shell32/shell32.rc:367 dlls/shell32/shell32.rc:400
 msgid "Creation date:"
 msgstr "作成日:"
 
-#: dlls/shell32/shell32.rc:367 dlls/shell32/shell32.rc:404
+#: dlls/shell32/shell32.rc:371 dlls/shell32/shell32.rc:408
 msgid "Attributes:"
 msgstr "属性:"
 
-#: dlls/shell32/shell32.rc:369 dlls/shell32/shell32.rc:406
+#: dlls/shell32/shell32.rc:373 dlls/shell32/shell32.rc:410
 #: programs/winefile/winefile.rc:173
 msgid "H&idden"
 msgstr "隠し(&I)"
 
-#: dlls/shell32/shell32.rc:370 dlls/shell32/shell32.rc:407
+#: dlls/shell32/shell32.rc:374 dlls/shell32/shell32.rc:411
 #: programs/winefile/winefile.rc:174
 msgid "&Archive"
 msgstr "アーカイブ(&A)"
 
-#: dlls/shell32/shell32.rc:384
+#: dlls/shell32/shell32.rc:388
 msgid "Open with:"
 msgstr "アプリケーション:"
 
-#: dlls/shell32/shell32.rc:387
+#: dlls/shell32/shell32.rc:391
 msgid "&Change..."
 msgstr "変更(&C)..."
 
-#: dlls/shell32/shell32.rc:398
+#: dlls/shell32/shell32.rc:402
 msgid "Last modified:"
 msgstr "最終変更日時:"
 
-#: dlls/shell32/shell32.rc:400
+#: dlls/shell32/shell32.rc:404
 msgid "Last accessed:"
 msgstr "最終アクセス日時:"
 
-#: dlls/shell32/shell32.rc:138 dlls/shell32/shell32.rc:142
+#: dlls/shell32/shell32.rc:135 dlls/shell32/shell32.rc:139
 #: programs/winefile/winefile.rc:107
 msgid "Size"
 msgstr "サイズ"
 
-#: dlls/shell32/shell32.rc:139 programs/regedit/regedit.rc:151
+#: dlls/shell32/shell32.rc:136 programs/regedit/regedit.rc:151
 msgid "Type"
 msgstr "型"
 
-#: dlls/shell32/shell32.rc:140
+#: dlls/shell32/shell32.rc:137
 msgid "Modified"
 msgstr "更新日時"
 
-#: dlls/shell32/shell32.rc:141 programs/winefile/winefile.rc:171
+#: dlls/shell32/shell32.rc:138 programs/winefile/winefile.rc:171
 #: programs/winefile/winefile.rc:113
 msgid "Attributes"
 msgstr "属性"
 
-#: dlls/shell32/shell32.rc:143
+#: dlls/shell32/shell32.rc:140
 msgid "Size available"
 msgstr "空き容量"
 
-#: dlls/shell32/shell32.rc:145
+#: dlls/shell32/shell32.rc:142
 msgid "Comments"
 msgstr "コメント"
 
-#: dlls/shell32/shell32.rc:146
+#: dlls/shell32/shell32.rc:143
 msgid "Original location"
 msgstr "元の場所"
 
-#: dlls/shell32/shell32.rc:147
+#: dlls/shell32/shell32.rc:144
 msgid "Date deleted"
 msgstr "削除日"
 
-#: dlls/shell32/shell32.rc:154 programs/winecfg/winecfg.rc:100
+#: dlls/shell32/shell32.rc:151 programs/winecfg/winecfg.rc:106
 #: programs/winefile/winefile.rc:99
 msgctxt "display name"
 msgid "Desktop"
 msgstr "デスクトップ"
 
-#: dlls/shell32/shell32.rc:155 programs/regedit/regedit.rc:243
+#: dlls/shell32/shell32.rc:152 programs/regedit/regedit.rc:243
 msgid "My Computer"
 msgstr "マイ コンピューター"
 
-#: dlls/shell32/shell32.rc:157
+#: dlls/shell32/shell32.rc:154
 msgid "Control Panel"
 msgstr "コントロール パネル"
 
-#: dlls/shell32/shell32.rc:164
-msgid "Select"
-msgstr "選択"
+#: dlls/shell32/shell32.rc:162
+msgid "Ne&w"
+msgstr ""
 
-#: dlls/shell32/shell32.rc:187
+#: dlls/shell32/shell32.rc:164
+msgid "E&xplore"
+msgstr "エクスプローラ(&X)"
+
+#: dlls/shell32/shell32.rc:167
+msgid "Run as &Administrator"
+msgstr ""
+
+#: dlls/shell32/shell32.rc:189
 msgid "Restart"
 msgstr "再起動"
 
-#: dlls/shell32/shell32.rc:188
+#: dlls/shell32/shell32.rc:190
 msgid "Do you want to simulate a Windows reboot?"
 msgstr "Windows の再起動をシミュレートしますか?"
 
-#: dlls/shell32/shell32.rc:189
+#: dlls/shell32/shell32.rc:191
 msgid "Shutdown"
 msgstr "シャットダウン"
 
-#: dlls/shell32/shell32.rc:190
+#: dlls/shell32/shell32.rc:192
 msgid "Do you want to shutdown your Wine session?"
 msgstr "Wine セッションをシャットダウンしますか?"
 
-#: dlls/shell32/shell32.rc:201 programs/progman/progman.rc:83
+#: dlls/shell32/shell32.rc:203 programs/progman/progman.rc:83
 msgid "Programs"
 msgstr "プログラム"
 
-#: dlls/shell32/shell32.rc:202 dlls/shell32/shell32.rc:217
-#: dlls/shell32/shell32.rc:148 dlls/shell32/shell32.rc:233
+#: dlls/shell32/shell32.rc:204 dlls/shell32/shell32.rc:219
+#: dlls/shell32/shell32.rc:145 dlls/shell32/shell32.rc:235
 msgid "Documents"
 msgstr "Documents"
 
-#: dlls/shell32/shell32.rc:203
+#: dlls/shell32/shell32.rc:205
 msgid "Favorites"
 msgstr "Favorites"
 
-#: dlls/shell32/shell32.rc:204
+#: dlls/shell32/shell32.rc:206
 msgid "StartUp"
 msgstr "StartUp"
 
-#: dlls/shell32/shell32.rc:205
+#: dlls/shell32/shell32.rc:207
 msgid "Start Menu"
 msgstr "Start Menu"
 
-#: dlls/shell32/shell32.rc:206 dlls/shell32/shell32.rc:219
+#: dlls/shell32/shell32.rc:208 dlls/shell32/shell32.rc:221
 msgid "Music"
 msgstr "Music"
 
-#: dlls/shell32/shell32.rc:207 dlls/shell32/shell32.rc:221
+#: dlls/shell32/shell32.rc:209 dlls/shell32/shell32.rc:223
 msgid "Videos"
 msgstr "Videos"
 
-#: dlls/shell32/shell32.rc:208
+#: dlls/shell32/shell32.rc:210
 msgctxt "directory"
 msgid "Desktop"
 msgstr "Desktop"
 
-#: dlls/shell32/shell32.rc:209
+#: dlls/shell32/shell32.rc:211
 msgid "NetHood"
 msgstr "NetHood"
 
-#: dlls/shell32/shell32.rc:210
+#: dlls/shell32/shell32.rc:212
 msgid "Templates"
 msgstr "Templates"
 
-#: dlls/shell32/shell32.rc:211
+#: dlls/shell32/shell32.rc:213
 msgid "PrintHood"
 msgstr "PrintHood"
 
-#: dlls/shell32/shell32.rc:212 programs/winhlp32/winhlp32.rc:49
+#: dlls/shell32/shell32.rc:214 programs/winhlp32/winhlp32.rc:49
 msgid "History"
 msgstr "History"
 
-#: dlls/shell32/shell32.rc:213
+#: dlls/shell32/shell32.rc:215
 msgid "Program Files"
 msgstr "Program Files"
 
-#: dlls/shell32/shell32.rc:215 dlls/shell32/shell32.rc:220
+#: dlls/shell32/shell32.rc:217 dlls/shell32/shell32.rc:222
 msgid "Pictures"
 msgstr "Pictures"
 
-#: dlls/shell32/shell32.rc:216
+#: dlls/shell32/shell32.rc:218
 msgid "Common Files"
 msgstr "Common Files"
 
-#: dlls/shell32/shell32.rc:218
+#: dlls/shell32/shell32.rc:220
 msgid "Administrative Tools"
 msgstr "Administrative Tools"
 
-#: dlls/shell32/shell32.rc:214
+#: dlls/shell32/shell32.rc:216
 msgid "Program Files (x86)"
 msgstr "Program Files (x86)"
 
-#: dlls/shell32/shell32.rc:222
+#: dlls/shell32/shell32.rc:224
 msgid "Contacts"
 msgstr "Contacts"
 
-#: dlls/shell32/shell32.rc:223 programs/winefile/winefile.rc:112
+#: dlls/shell32/shell32.rc:225 programs/winefile/winefile.rc:112
 msgid "Links"
 msgstr "Links"
 
-#: dlls/shell32/shell32.rc:224
+#: dlls/shell32/shell32.rc:226
 msgid "Slide Shows"
 msgstr "Slide Shows"
 
-#: dlls/shell32/shell32.rc:225
+#: dlls/shell32/shell32.rc:227
 msgid "Playlists"
 msgstr "Playlists"
 
-#: dlls/shell32/shell32.rc:149 programs/taskmgr/taskmgr.rc:326
+#: dlls/shell32/shell32.rc:146 programs/taskmgr/taskmgr.rc:326
 msgid "Status"
 msgstr "状態"
 
-#: dlls/shell32/shell32.rc:151
+#: dlls/shell32/shell32.rc:148
 msgid "Model"
 msgstr "機種名"
 
-#: dlls/shell32/shell32.rc:226
+#: dlls/shell32/shell32.rc:228
 msgid "Sample Music"
 msgstr "Sample Music"
 
-#: dlls/shell32/shell32.rc:227
+#: dlls/shell32/shell32.rc:229
 msgid "Sample Pictures"
 msgstr "Sample Pictures"
 
-#: dlls/shell32/shell32.rc:228
+#: dlls/shell32/shell32.rc:230
 msgid "Sample Playlists"
 msgstr "Sample Playlists"
 
-#: dlls/shell32/shell32.rc:229
+#: dlls/shell32/shell32.rc:231
 msgid "Sample Videos"
 msgstr "Sample Videos"
 
-#: dlls/shell32/shell32.rc:230
+#: dlls/shell32/shell32.rc:232
 msgid "Saved Games"
 msgstr "Saved Games"
 
-#: dlls/shell32/shell32.rc:231
+#: dlls/shell32/shell32.rc:233
 msgid "Searches"
 msgstr "Searches"
 
-#: dlls/shell32/shell32.rc:232
+#: dlls/shell32/shell32.rc:234
 msgid "Users"
 msgstr "Users"
 
-#: dlls/shell32/shell32.rc:234
+#: dlls/shell32/shell32.rc:236
 msgid "Downloads"
 msgstr "Downloads"
 
-#: dlls/shell32/shell32.rc:167
+#: dlls/shell32/shell32.rc:169
 msgid "Unable to create new Folder: Permission denied."
 msgstr "新しいフォルダーを作成できませんでした。アクセスが拒否されました。"
 
-#: dlls/shell32/shell32.rc:168
+#: dlls/shell32/shell32.rc:170
 msgid "Error during creation of a new folder"
 msgstr "フォルダーの作成に失敗"
 
-#: dlls/shell32/shell32.rc:169
+#: dlls/shell32/shell32.rc:171
 msgid "Confirm file deletion"
 msgstr "ファイルの削除の確認"
 
-#: dlls/shell32/shell32.rc:170
+#: dlls/shell32/shell32.rc:172
 msgid "Confirm folder deletion"
 msgstr "フォルダーの削除の確認"
 
-#: dlls/shell32/shell32.rc:171
+#: dlls/shell32/shell32.rc:173
 msgid "Are you sure you want to delete '%1'?"
 msgstr "'%1' を削除しますか?"
 
-#: dlls/shell32/shell32.rc:172
+#: dlls/shell32/shell32.rc:174
 msgid "Are you sure you want to delete these %1 items?"
 msgstr "これら %1 ファイルを削除しますか?"
 
-#: dlls/shell32/shell32.rc:179
+#: dlls/shell32/shell32.rc:181
 msgid "Confirm file overwrite"
 msgstr "ファイルの上書きの確認"
 
-#: dlls/shell32/shell32.rc:178
+#: dlls/shell32/shell32.rc:180
 msgid ""
 "This folder already contains a file called '%1'.\n"
 "\n"
@@ -10288,28 +10331,28 @@ msgstr ""
 "\n"
 "このファイルを上書きしますか?"
 
-#: dlls/shell32/shell32.rc:173
+#: dlls/shell32/shell32.rc:175
 msgid "Are you sure you want to delete the selected item(s)?"
 msgstr "選択されているファイルを削除しますか?"
 
-#: dlls/shell32/shell32.rc:175
+#: dlls/shell32/shell32.rc:177
 msgid ""
 "Are you sure that you want to send '%1' and all its content to the Trash?"
 msgstr "'%1' とその中にあるすべてのファイルをごみ箱に移しますか?"
 
-#: dlls/shell32/shell32.rc:174
+#: dlls/shell32/shell32.rc:176
 msgid "Are you sure that you want to send '%1' to the Trash?"
 msgstr "'%1' をごみ箱に移しますか?"
 
-#: dlls/shell32/shell32.rc:176
+#: dlls/shell32/shell32.rc:178
 msgid "Are you sure that you want to send these %1 items to the Trash?"
 msgstr "これら %1 ファイルをごみ箱に移しますか?"
 
-#: dlls/shell32/shell32.rc:177
+#: dlls/shell32/shell32.rc:179
 msgid "The item '%1' can't be sent to Trash. Do you want to delete it instead?"
 msgstr "'%1' はごみ箱に移せません。代わりに削除しますか?"
 
-#: dlls/shell32/shell32.rc:184
+#: dlls/shell32/shell32.rc:186
 msgid ""
 "This folder already contains a folder named '%1'.\n"
 "\n"
@@ -10323,39 +10366,39 @@ msgstr ""
 "同じ名前のファイルがある場合、新しいファイルで上書きされます。\n"
 "フォルダーの移動またはコピーを続けますか?"
 
-#: dlls/shell32/shell32.rc:238
+#: dlls/shell32/shell32.rc:242
 msgid "Wine Control Panel"
 msgstr "Wine コントロール パネル"
 
-#: dlls/shell32/shell32.rc:193
+#: dlls/shell32/shell32.rc:195
 msgid "Unable to display Run dialog box (internal error)"
 msgstr "[ファイルを指定して実行] ダイアログを表示できません (内部エラー)"
 
-#: dlls/shell32/shell32.rc:194
+#: dlls/shell32/shell32.rc:196
 msgid "Unable to display Browse dialog box (internal error)"
 msgstr "[参照] ダイアログを表示できません (内部エラー)"
 
-#: dlls/shell32/shell32.rc:196
+#: dlls/shell32/shell32.rc:198
 msgid "Executable files (*.exe)"
 msgstr "実行可能ファイル (*.exe)"
 
-#: dlls/shell32/shell32.rc:242
+#: dlls/shell32/shell32.rc:246
 msgid "There is no Windows program configured to open this type of file."
 msgstr "このファイルの種類に関連付けられた Windows プログラムはありません。"
 
-#: dlls/shell32/shell32.rc:244
+#: dlls/shell32/shell32.rc:248
 msgid "Are you sure you wish to permanently delete '%1'?"
 msgstr "'%1' を完全に削除しますか?"
 
-#: dlls/shell32/shell32.rc:245
+#: dlls/shell32/shell32.rc:249
 msgid "Are you sure you wish to permanently delete these %1 items?"
 msgstr "これら %1 項目を完全に削除しますか?"
 
-#: dlls/shell32/shell32.rc:246
+#: dlls/shell32/shell32.rc:250
 msgid "Confirm deletion"
 msgstr "削除の確認"
 
-#: dlls/shell32/shell32.rc:247
+#: dlls/shell32/shell32.rc:251
 msgid ""
 "A file already exists at the path %1.\n"
 "\n"
@@ -10365,7 +10408,7 @@ msgstr ""
 "\n"
 "既存のファイルを置き換えますか?"
 
-#: dlls/shell32/shell32.rc:248
+#: dlls/shell32/shell32.rc:252
 msgid ""
 "A folder already exists at the path %1.\n"
 "\n"
@@ -10375,11 +10418,11 @@ msgstr ""
 "\n"
 "既存のフォルダーを置き換えますか?"
 
-#: dlls/shell32/shell32.rc:249
+#: dlls/shell32/shell32.rc:253
 msgid "Confirm overwrite"
 msgstr "上書きの確認"
 
-#: dlls/shell32/shell32.rc:266
+#: dlls/shell32/shell32.rc:270
 msgid ""
 "Wine is free software; you can redistribute it and/or modify it under the "
 "terms of the GNU Lesser General Public License as published by the Free "
@@ -10409,11 +10452,11 @@ msgstr ""
 "い(宛先は the Free Software Foundation, Inc., 51 Franklin St, Fifth Floor, "
 "Boston, MA 02110-1301, USA)。"
 
-#: dlls/shell32/shell32.rc:254
+#: dlls/shell32/shell32.rc:258
 msgid "Wine License"
 msgstr "Wine ライセンス"
 
-#: dlls/shell32/shell32.rc:156
+#: dlls/shell32/shell32.rc:153
 msgid "Trash"
 msgstr "ごみ箱"
 
@@ -12423,23 +12466,23 @@ msgstr "閉じる(&C)\tCtrl+F4"
 msgid "Nex&t\tCtrl+F6"
 msgstr "次のウィンドウ(&T)\tCtrl+F6"
 
-#: dlls/user32/user32.rc:81
+#: dlls/user32/user32.rc:92 dlls/user32/user32.rc:75
 msgid "&Abort"
 msgstr "中止(&A)"
 
-#: dlls/user32/user32.rc:85
+#: dlls/user32/user32.rc:96 dlls/user32/user32.rc:77
 msgid "&Ignore"
 msgstr "無視(&I)"
 
-#: dlls/user32/user32.rc:86
+#: dlls/user32/user32.rc:97 dlls/user32/user32.rc:82
 msgid "&Try Again"
 msgstr "再試行(&T)"
 
-#: dlls/user32/user32.rc:87
+#: dlls/user32/user32.rc:98 dlls/user32/user32.rc:83
 msgid "&Continue"
 msgstr "続ける(&C)"
 
-#: dlls/user32/user32.rc:94
+#: dlls/user32/user32.rc:105
 msgid "Select Window"
 msgstr "ウィンドウの選択"
 
@@ -12607,6 +12650,10 @@ msgstr "用紙サイズ(&Z):"
 msgid "Duplex:"
 msgstr "両面印刷:"
 
+#: dlls/wineps.drv/wineps.rc:45
+msgid "Paper &Tray:"
+msgstr "給紙方法(&T):"
+
 #: dlls/wininet/wininet.rc:53 dlls/wininet/wininet.rc:73
 msgid "Realm"
 msgstr "領域"
@@ -12615,7 +12662,7 @@ msgstr "領域"
 msgid "Authentication Required"
 msgstr "認証が必要です"
 
-#: dlls/wininet/wininet.rc:72
+#: dlls/wininet/wininet.rc:72 programs/klist/klist.rc:35
 msgid "Server"
 msgstr "サーバー"
 
@@ -13678,7 +13725,7 @@ msgid "Digi&tal"
 msgstr "デジタル(&T)"
 
 #: programs/clock/clock.rc:35 programs/notepad/notepad.rc:53
-#: programs/winecfg/winecfg.rc:305 programs/winefile/winefile.rc:63
+#: programs/winecfg/winecfg.rc:313 programs/winefile/winefile.rc:63
 #: programs/wordpad/wordpad.rc:84
 msgid "&Font..."
 msgstr "フォント(&F)..."
@@ -14701,6 +14748,31 @@ msgstr "スタート"
 msgid "&Run..."
 msgstr "実行(&R)..."
 
+#: programs/explorer/explorer.rc:36
+msgid "E&xit desktop"
+msgstr "デスクトップの終了(&X)"
+
+#: programs/explorer/explorer.rc:37
+msgid ""
+"Are you sure you want to close all programs and exit the virtual desktop?"
+msgstr "すべてのプログラムを閉じて、仮想デスクトップを終了しますか?"
+
+#: programs/findstr/findstr.rc:28
+msgid "Usage: findstr /options string\n"
+msgstr "使い方: findstr /オプション 文字列\n"
+
+#: programs/findstr/findstr.rc:29
+msgid "FINDSTR: Bad command line\n"
+msgstr "FINDSTR: コマンド ラインが正しくありません\n"
+
+#: programs/findstr/findstr.rc:30
+msgid "FINDSTR: Cannot open %s\n"
+msgstr "FINDSTR: %s を開けません\n"
+
+#: programs/findstr/findstr.rc:31
+msgid "FINDSTR: /%c ignored\n"
+msgstr "FINDSTR: /%c は無視されました\n"
+
 #: programs/fsutil/fsutil.mc:28
 msgid ""
 "- Supported Commands -\n"
@@ -14816,6 +14888,43 @@ msgstr "IPv6 アドレス"
 msgid "Primary DNS suffix"
 msgstr "プライマリ DNS サフィックス"
 
+#: programs/klist/klist.rc:28
+msgid "Usage: klist <tickets | tgt | purge | get [service principal name]>\n"
+msgstr ""
+"使い方: klist <tickets | tgt | purge | get [サービス プリンシパル名]>\n"
+
+#: programs/klist/klist.rc:29
+msgid "Unknown error\n"
+msgstr "不明なエラー\n"
+
+#: programs/klist/klist.rc:30
+msgid "Start Time"
+msgstr "開始時刻"
+
+#: programs/klist/klist.rc:31
+msgid "End Time"
+msgstr "終了時刻"
+
+#: programs/klist/klist.rc:32
+msgid "Renew Time"
+msgstr "更新時刻"
+
+#: programs/klist/klist.rc:33
+msgid "Ticket Flags"
+msgstr "チケット フラグ"
+
+#: programs/klist/klist.rc:34
+msgid "Cached Tickets"
+msgstr "キャッシュされたチケット"
+
+#: programs/klist/klist.rc:36
+msgid "KerbTicket Encryption Type"
+msgstr "Kerberos チケットの暗号化の種類"
+
+#: programs/klist/klist.rc:37
+msgid "Current LogonId is"
+msgstr "現在のログオン ID は"
+
 #: programs/msinfo32/msinfo32.rc:28
 msgid "System Information"
 msgstr "システム情報"
@@ -14908,11 +15017,11 @@ msgstr "%1 サービスは停止しました。\n"
 msgid "The %1 service failed to stop.\n"
 msgstr "%1 サービスの停止に失敗しました。\n"
 
-#: programs/net/net.rc:44
+#: programs/net/net.rc:45
 msgid "There are no entries in the list.\n"
 msgstr "一覧にエントリがありません。\n"
 
-#: programs/net/net.rc:45
+#: programs/net/net.rc:46
 msgid ""
 "\n"
 "Status  Local   Remote\n"
@@ -14922,33 +15031,37 @@ msgstr ""
 "状態    ローカル リモート\n"
 "---------------------------------------------------------------\n"
 
-#: programs/net/net.rc:46
+#: programs/net/net.rc:47
 msgid "%1      %2      %3      Open resources: %4!u!\n"
 msgstr "%1      %2       %3      リソース数: %4!u!\n"
 
-#: programs/net/net.rc:48
+#: programs/net/net.rc:49
 msgid "Paused"
 msgstr "中断"
 
-#: programs/net/net.rc:49
+#: programs/net/net.rc:50
 msgid "Disconnected"
 msgstr "切断"
 
-#: programs/net/net.rc:50
+#: programs/net/net.rc:51
 msgid "A network error occurred"
 msgstr "ネットワーク エラーが発生しました"
 
-#: programs/net/net.rc:51
+#: programs/net/net.rc:52
 msgid "Connection is being made"
 msgstr "接続を確立中です"
 
-#: programs/net/net.rc:52
+#: programs/net/net.rc:53
 msgid "Reconnecting"
 msgstr "再接続中です"
 
 #: programs/net/net.rc:43
 msgid "The following services are running:\n"
 msgstr "以下のサービスが実行中です:\n"
+
+#: programs/net/net.rc:44
+msgid "A command was used with conflicting switches.\n"
+msgstr "コマンドで相反するスイッチが使われました。\n"
 
 #: programs/netstat/netstat.rc:30
 msgid "Active Connections"
@@ -17112,7 +17225,7 @@ msgstr "regsvr32: DLL '%1'のアンインストールに失敗しました\n"
 msgid "regsvr32: Successfully uninstalled DLL '%1'\n"
 msgstr "regsvr32: DLL '%1'のアンインストールに成功しました\n"
 
-#: programs/start/start.rc:57
+#: programs/start/start.rc:56
 msgid ""
 "Start a program, or open a document in the program normally used for files\n"
 "with that suffix.\n"
@@ -17135,9 +17248,10 @@ msgid ""
 "/belownormal   Start the program in the belownormal priority class.\n"
 "/node n        Start the program on the specified NUMA node.\n"
 "/affinity mask Start the program with the specified affinity mask.\n"
-"/wait          Wait for the started program to finish, then exit with its\n"
-"exit code.\n"
-"/unix          Use a Unix filename and start the file like Windows\n"
+"/machine arch  Force using a specific architecture (x86,arm,amd64,arm64).\n"
+"/wait          Wait for the program to finish, then exit with its exit "
+"code.\n"
+"/unix          Use a Unix filename and start the file like Windows "
 "Explorer.\n"
 "/exec          Exec the specified file (for internal Wine usage).\n"
 "/ProgIDOpen    Open a document using the specified progID.\n"
@@ -17164,15 +17278,16 @@ msgstr ""
 "/belownormal 優先度クラス「通常以下」でプログラムを開始します。\n"
 "/node n      指定した NUMA ノードでプログラムを開始します。\n"
 "/affinity mask 指定した関連マスクでプログラムを開始します。\n"
-"/wait        開始プログラムの完了を待ち、そのプログラムの終了コードで終了し\n"
-"ます。\n"
+"/machine arch アーキテクチャ (x86,arm,amd64,arm64) の利用を強制します。\n"
+"/wait        プログラムの完了を待ち、そのプログラムの終了コードで終了しま\n"
+"す。\n"
 "/unix        Unix ファイル名を使い、Windows エクスプローラーのようにファイ\n"
 "ルを開始します。\n"
 "/exec        指定したファイルを実行します (Wine 内部で使用)。\n"
 "/ProgIDOpen  文書を指定した progID を用いて開きます。\n"
 "/?           このヘルプを表示し、終了します。\n"
 
-#: programs/start/start.rc:59
+#: programs/start/start.rc:58
 msgid ""
 "Application could not be started, or no application associated with the "
 "specified file.\n"
@@ -17182,7 +17297,7 @@ msgstr ""
 "ンが関連付けられていません。\n"
 "ShellExecuteEx が失敗"
 
-#: programs/start/start.rc:61
+#: programs/start/start.rc:60
 msgid "Could not translate the specified Unix filename to a DOS filename."
 msgstr "指定された Unix ファイル名を DOS ファイル名に変換できませんでした。"
 
@@ -17248,17 +17363,56 @@ msgid "Error: Process self-termination is not permitted.\n"
 msgstr "エラー: このプロセス自身を終了することはできません。\n"
 
 #: programs/taskkill/taskkill.rc:44
-#, fuzzy
-#| msgid "Process with PID %1!u! was forcibly terminated.\n"
 msgid ""
 "The process with PID %1!u! (child process of PID %2!u!) has been "
 "terminated.\n"
-msgstr "プロセス(PID %1!u!)は強制的に終了されました。\n"
+msgstr "PID %1!u! のプロセス (PID %2!u! の子プロセス) は終了されました。\n"
 
 #: programs/taskkill/taskkill.rc:45
 msgid ""
 "Sent termination signal to process with PID %1!u!, child of PID %2!u!.\n"
 msgstr ""
+"終了シグナルが PID %1!u! のプロセス (PID %2!u! の子) に送られました。\n"
+
+#: include/wine/wine_common_ver.rc:138
+msgid "Wine tasklist"
+msgstr "Wine tasklist"
+
+#: programs/tasklist/tasklist.rc:29
+msgid "Usage: tasklist [/?]\n"
+msgstr "使い方: tasklist [/?]\n"
+
+#: programs/tasklist/tasklist.rc:30 programs/taskmgr/taskmgr.rc:272
+msgid "Image Name"
+msgstr "イメージ名"
+
+#: programs/tasklist/tasklist.rc:31 programs/taskmgr/taskmgr.rc:273
+msgid "PID"
+msgstr "PID"
+
+#: programs/tasklist/tasklist.rc:32
+msgid "Session Name"
+msgstr "セッション名"
+
+#: programs/tasklist/tasklist.rc:33
+msgid "Session#"
+msgstr "セッション#"
+
+#: programs/tasklist/tasklist.rc:34 programs/taskmgr/taskmgr.rc:276
+msgid "Mem Usage"
+msgstr "メモリ使用量"
+
+#: programs/tasklist/tasklist.rc:35
+msgid "K"
+msgstr "K"
+
+#: programs/tasklist/tasklist.rc:36
+msgid "ERROR: Invalid syntax\n"
+msgstr "ERROR: 構文が無効です\n"
+
+#: programs/tasklist/tasklist.rc:37
+msgid "ERROR: The search filter cannot be recognized.\n"
+msgstr "ERROR: 認識できない検索フィルタです。\n"
 
 #: programs/taskmgr/taskmgr.rc:37 programs/taskmgr/taskmgr.rc:108
 msgid "&New Task (Run...)"
@@ -17921,14 +18075,6 @@ msgstr "プロセス数: %d"
 msgid "Mem Usage: %1!u!kB / %2!u!kB"
 msgstr "メモリ使用量: %1!u!kB / %2!u!kB"
 
-#: programs/taskmgr/taskmgr.rc:272
-msgid "Image Name"
-msgstr "イメージ名"
-
-#: programs/taskmgr/taskmgr.rc:273
-msgid "PID"
-msgstr "PID"
-
 #: programs/taskmgr/taskmgr.rc:274
 msgid "CPU"
 msgstr "CPU"
@@ -17936,10 +18082,6 @@ msgstr "CPU"
 #: programs/taskmgr/taskmgr.rc:275
 msgid "CPU Time"
 msgstr "CPU 時間"
-
-#: programs/taskmgr/taskmgr.rc:276
-msgid "Mem Usage"
-msgstr "メモリ使用量"
 
 #: programs/taskmgr/taskmgr.rc:277
 msgid "Mem Delta"
@@ -18173,7 +18315,7 @@ msgstr ""
 msgid "The Wine configuration in %s is being updated, please wait..."
 msgstr "%s にある Wine 設定を更新しています。しばらくお待ちください..."
 
-#: programs/winecfg/winecfg.rc:140
+#: programs/winecfg/winecfg.rc:146
 msgid ""
 "This program is free software; you can redistribute it and/or modify it "
 "under the terms of the GNU Lesser General Public License as published by the "
@@ -18185,23 +18327,23 @@ msgstr ""
 "望によってはそれ以降の バージョン のうちどれか) の定める条件の下で 再頒布 ま"
 "たは 改変 することができます。"
 
-#: programs/winecfg/winecfg.rc:142
+#: programs/winecfg/winecfg.rc:148
 msgid "Windows registration information"
 msgstr "Windows 登録情報"
 
-#: programs/winecfg/winecfg.rc:143
+#: programs/winecfg/winecfg.rc:149
 msgid "&Owner:"
 msgstr "所有者(&O):"
 
-#: programs/winecfg/winecfg.rc:145
+#: programs/winecfg/winecfg.rc:151
 msgid "Organi&zation:"
 msgstr "組織(&Z):"
 
-#: programs/winecfg/winecfg.rc:153
+#: programs/winecfg/winecfg.rc:159
 msgid "Application settings"
 msgstr "アプリケーション設定"
 
-#: programs/winecfg/winecfg.rc:154
+#: programs/winecfg/winecfg.rc:160
 msgid ""
 "Wine can mimic different Windows versions for each application. This tab is "
 "linked to the Libraries and Graphics tabs to allow you to change system-wide "
@@ -18211,55 +18353,55 @@ msgstr ""
 "ます。このタブはライブラリおよびグラフィック各タブと連動しますので、システム"
 "全体の設定や個別アプリケーションの設定の変更が行えます。"
 
-#: programs/winecfg/winecfg.rc:158
+#: programs/winecfg/winecfg.rc:164
 msgid "Add appli&cation..."
 msgstr "アプリケーションを追加(&C)..."
 
-#: programs/winecfg/winecfg.rc:159
+#: programs/winecfg/winecfg.rc:165
 msgid "&Remove application"
 msgstr "アプリケーションを削除(&R)"
 
-#: programs/winecfg/winecfg.rc:160
+#: programs/winecfg/winecfg.rc:166
 msgid "&Windows Version:"
 msgstr "&Windows バージョン:"
 
-#: programs/winecfg/winecfg.rc:168
+#: programs/winecfg/winecfg.rc:174
 msgid "Window settings"
 msgstr "ウィンドウ設定"
 
-#: programs/winecfg/winecfg.rc:169
+#: programs/winecfg/winecfg.rc:175
 msgid "Automatically capture the &mouse in full-screen windows"
 msgstr "フルスクリーン ウィンドウでマウスを自動的に捕捉する(&M)"
 
-#: programs/winecfg/winecfg.rc:170
+#: programs/winecfg/winecfg.rc:176
 msgid "Allow the window manager to &decorate the windows"
 msgstr "ウィンドウ マネージャーがウィンドウを装飾するのを許可する(&D)"
 
-#: programs/winecfg/winecfg.rc:171
+#: programs/winecfg/winecfg.rc:177
 msgid "Allow the &window manager to control the windows"
 msgstr "ウィンドウ マネージャーがウィンドウを制御するのを許可する(&W)"
 
-#: programs/winecfg/winecfg.rc:172
+#: programs/winecfg/winecfg.rc:178
 msgid "&Emulate a virtual desktop"
 msgstr "仮想デスクトップをエミュレートする(&E)"
 
-#: programs/winecfg/winecfg.rc:174
+#: programs/winecfg/winecfg.rc:180
 msgid "Desktop &size:"
 msgstr "デスクトップの大きさ(&S):"
 
-#: programs/winecfg/winecfg.rc:179
+#: programs/winecfg/winecfg.rc:185
 msgid "Screen resolution"
 msgstr "画面の解像度"
 
-#: programs/winecfg/winecfg.rc:183
+#: programs/winecfg/winecfg.rc:189
 msgid "This is a sample text using 10 point Tahoma"
 msgstr "10 ポイントの Tahoma による見本です"
 
-#: programs/winecfg/winecfg.rc:190
+#: programs/winecfg/winecfg.rc:196
 msgid "DLL overrides"
 msgstr "DLL オーバーライド"
 
-#: programs/winecfg/winecfg.rc:191
+#: programs/winecfg/winecfg.rc:197
 msgid ""
 "Dynamic Link Libraries can be specified individually to be either builtin "
 "(provided by Wine) or native (taken from Windows or provided by the "
@@ -18268,162 +18410,166 @@ msgstr ""
 "ダイナミック リンク ライブラリ (DLL) は個別に 内蔵版 (Wine提供) または ネイ"
 "ティブ版 (Windows もしくはアプリケーション提供のもの) を選ぶことができます。"
 
-#: programs/winecfg/winecfg.rc:193
+#: programs/winecfg/winecfg.rc:199
 msgid "&New override for library:"
 msgstr "ライブラリの新規オーバーライド(&N):"
 
-#: programs/winecfg/winecfg.rc:195
+#: programs/winecfg/winecfg.rc:201
 msgid "A&dd"
 msgstr "追加(&D)"
 
-#: programs/winecfg/winecfg.rc:196
+#: programs/winecfg/winecfg.rc:202
 msgid "Existing &overrides:"
 msgstr "既存のオーバーライド(&O):"
 
-#: programs/winecfg/winecfg.rc:198
+#: programs/winecfg/winecfg.rc:204
 msgid "&Edit..."
 msgstr "編集(&E)..."
 
-#: programs/winecfg/winecfg.rc:204
+#: programs/winecfg/winecfg.rc:210
 msgid "Edit Override"
 msgstr "オーバーライドの編集"
 
-#: programs/winecfg/winecfg.rc:207
+#: programs/winecfg/winecfg.rc:213
 msgid "Load order"
 msgstr "読み込み順序"
 
-#: programs/winecfg/winecfg.rc:208
+#: programs/winecfg/winecfg.rc:214
 msgid "&Builtin (Wine)"
 msgstr "内蔵版 (Wine)(&B)"
 
-#: programs/winecfg/winecfg.rc:209
+#: programs/winecfg/winecfg.rc:215
 msgid "&Native (Windows)"
 msgstr "ネイティブ版 (Windows)(&N)"
 
-#: programs/winecfg/winecfg.rc:210
+#: programs/winecfg/winecfg.rc:216
 msgid "Buil&tin then Native"
 msgstr "内蔵版後にネイティブ版(&T)"
 
-#: programs/winecfg/winecfg.rc:211
+#: programs/winecfg/winecfg.rc:217
 msgid "Nati&ve then Builtin"
 msgstr "ネイティブ版後に内蔵版(&V)"
 
-#: programs/winecfg/winecfg.rc:219
+#: programs/winecfg/winecfg.rc:225
 msgid "Select Drive Letter"
 msgstr "ドライブ レターを選択"
 
-#: programs/winecfg/winecfg.rc:231
+#: programs/winecfg/winecfg.rc:237
 msgid "Drive configuration"
 msgstr "ドライブの設定"
 
-#: programs/winecfg/winecfg.rc:232
+#: programs/winecfg/winecfg.rc:238
 msgid ""
 "Failed to connect to the mount manager; the drive configuration cannot be "
 "edited."
 msgstr ""
 "マウント マネージャーへの接続に失敗したため、ドライブ設定は変更できません。"
 
-#: programs/winecfg/winecfg.rc:235
+#: programs/winecfg/winecfg.rc:241
 msgid "A&dd..."
 msgstr "追加(&D)..."
 
-#: programs/winecfg/winecfg.rc:239
+#: programs/winecfg/winecfg.rc:245
 msgid "&Path:"
 msgstr "パス(&P):"
 
-#: programs/winecfg/winecfg.rc:246 programs/winecfg/winecfg.rc:37
+#: programs/winecfg/winecfg.rc:252 programs/winecfg/winecfg.rc:37
 msgid "Show Advan&ced"
 msgstr "詳細を表示(&C)"
 
-#: programs/winecfg/winecfg.rc:247
+#: programs/winecfg/winecfg.rc:253
 msgid "De&vice:"
 msgstr "デバイス(&V):"
 
-#: programs/winecfg/winecfg.rc:249
+#: programs/winecfg/winecfg.rc:255
 msgid "Bro&wse..."
 msgstr "参照(&W)..."
 
-#: programs/winecfg/winecfg.rc:251
+#: programs/winecfg/winecfg.rc:257
 msgid "&Label:"
 msgstr "ラベル(&L):"
 
-#: programs/winecfg/winecfg.rc:253
+#: programs/winecfg/winecfg.rc:259
 msgid "S&erial:"
 msgstr "シリアル番号(&E):"
 
-#: programs/winecfg/winecfg.rc:256
+#: programs/winecfg/winecfg.rc:262
 msgid "&Show dot files"
 msgstr "ドット ファイルを表示する(&S)"
 
-#: programs/winecfg/winecfg.rc:263
+#: programs/winecfg/winecfg.rc:269
 msgid "Driver diagnostics"
 msgstr "ドライバー診断"
 
-#: programs/winecfg/winecfg.rc:265
+#: programs/winecfg/winecfg.rc:271
 msgid "Defaults"
 msgstr "デフォルト"
 
-#: programs/winecfg/winecfg.rc:266
+#: programs/winecfg/winecfg.rc:272
 msgid "Output device:"
 msgstr "出力デバイス:"
 
-#: programs/winecfg/winecfg.rc:267
+#: programs/winecfg/winecfg.rc:273
 msgid "Voice output device:"
 msgstr "音声出力デバイス:"
 
-#: programs/winecfg/winecfg.rc:268
+#: programs/winecfg/winecfg.rc:274
 msgid "Input device:"
 msgstr "入力デバイス:"
 
-#: programs/winecfg/winecfg.rc:269
+#: programs/winecfg/winecfg.rc:275
 msgid "Voice input device:"
 msgstr "音声入力デバイス:"
 
-#: programs/winecfg/winecfg.rc:274
+#: programs/winecfg/winecfg.rc:280
 msgid "&Test Sound"
 msgstr "音をテスト(&T)"
 
-#: programs/winecfg/winecfg.rc:275 programs/winecfg/winecfg.rc:89
+#: programs/winecfg/winecfg.rc:281 programs/winecfg/winecfg.rc:89
 msgid "Speaker configuration"
 msgstr "スピーカー 設定"
 
-#: programs/winecfg/winecfg.rc:278
+#: programs/winecfg/winecfg.rc:284
 msgid "Speakers:"
 msgstr "スピーカー:"
 
-#: programs/winecfg/winecfg.rc:286
+#: programs/winecfg/winecfg.rc:292
 msgid "Appearance"
 msgstr "外観"
 
-#: programs/winecfg/winecfg.rc:287
+#: programs/winecfg/winecfg.rc:293
 msgid "&Theme:"
 msgstr "テーマ(&T):"
 
-#: programs/winecfg/winecfg.rc:289
+#: programs/winecfg/winecfg.rc:295
+msgid "&WinRT theme:"
+msgstr "&WinRT テーマ:"
+
+#: programs/winecfg/winecfg.rc:297
 msgid "&Install theme..."
 msgstr "テーマのインストール(&I)..."
 
-#: programs/winecfg/winecfg.rc:294
+#: programs/winecfg/winecfg.rc:302
 msgid "It&em:"
 msgstr "項目(&E):"
 
-#: programs/winecfg/winecfg.rc:296
+#: programs/winecfg/winecfg.rc:304
 msgid "C&olor:"
 msgstr "色(&O):"
 
-#: programs/winecfg/winecfg.rc:302
+#: programs/winecfg/winecfg.rc:310
 msgid "MIME types"
 msgstr "MIME タイプ"
 
-#: programs/winecfg/winecfg.rc:303
-msgid "Manage file &associations"
-msgstr "ファイル関連付けの管理(&A)"
+#: programs/winecfg/winecfg.rc:311
+msgid "Manage file and protocol &associations"
+msgstr "ファイルとプロトコル関連付けの管理(&A)"
 
-#: programs/winecfg/winecfg.rc:306
+#: programs/winecfg/winecfg.rc:314
 msgid "Folders"
 msgstr "フォルダー"
 
-#: programs/winecfg/winecfg.rc:309
+#: programs/winecfg/winecfg.rc:317
 msgid "&Link to:"
 msgstr "リンク先(&L):"
 
@@ -18518,6 +18664,14 @@ msgstr "ステレオ"
 #: programs/winecfg/winecfg.rc:93
 msgid "Mono"
 msgstr "モノラル"
+
+#: programs/winecfg/winecfg.rc:98
+msgid "Light"
+msgstr "ライト"
+
+#: programs/winecfg/winecfg.rc:99
+msgid "Dark"
+msgstr "ダーク"
 
 #: programs/winecfg/winecfg.rc:53
 msgid ""
@@ -18635,127 +18789,127 @@ msgstr ""
 "C ドライブを作成するためにドライブ タブ内の [追加] を忘れずにクリックしてくだ"
 "さい!\n"
 
-#: programs/winecfg/winecfg.rc:98
+#: programs/winecfg/winecfg.rc:104
 msgid "Controls Background"
 msgstr "コントロールの背景"
 
-#: programs/winecfg/winecfg.rc:99
+#: programs/winecfg/winecfg.rc:105
 msgid "Controls Text"
 msgstr "コントロールのテキスト"
 
-#: programs/winecfg/winecfg.rc:101
+#: programs/winecfg/winecfg.rc:107
 msgid "Menu Background"
 msgstr "メニューの背景"
 
-#: programs/winecfg/winecfg.rc:102
+#: programs/winecfg/winecfg.rc:108
 msgid "Menu Text"
 msgstr "メニューのテキスト"
 
-#: programs/winecfg/winecfg.rc:103
+#: programs/winecfg/winecfg.rc:109
 msgid "Scrollbar"
 msgstr "スクロール バー"
 
-#: programs/winecfg/winecfg.rc:104
+#: programs/winecfg/winecfg.rc:110
 msgid "Selection Background"
 msgstr "選択項目の背景"
 
-#: programs/winecfg/winecfg.rc:105
+#: programs/winecfg/winecfg.rc:111
 msgid "Selection Text"
 msgstr "選択項目のテキスト"
 
-#: programs/winecfg/winecfg.rc:106
+#: programs/winecfg/winecfg.rc:112
 msgid "Tooltip Background"
 msgstr "ヒントの背景"
 
-#: programs/winecfg/winecfg.rc:107
+#: programs/winecfg/winecfg.rc:113
 msgid "Tooltip Text"
 msgstr "ヒントのテキスト"
 
-#: programs/winecfg/winecfg.rc:108
+#: programs/winecfg/winecfg.rc:114
 msgid "Window Background"
 msgstr "ウィンドウの背景"
 
-#: programs/winecfg/winecfg.rc:109
+#: programs/winecfg/winecfg.rc:115
 msgid "Window Text"
 msgstr "ウィンドウのテキスト"
 
-#: programs/winecfg/winecfg.rc:110
+#: programs/winecfg/winecfg.rc:116
 msgid "Active Title Bar"
 msgstr "アクティブ タイトル バー"
 
-#: programs/winecfg/winecfg.rc:111
+#: programs/winecfg/winecfg.rc:117
 msgid "Active Title Text"
 msgstr "アクティブ タイトルのテキスト"
 
-#: programs/winecfg/winecfg.rc:112
+#: programs/winecfg/winecfg.rc:118
 msgid "Inactive Title Bar"
 msgstr "非アクティブ タイトル バー"
 
-#: programs/winecfg/winecfg.rc:113
+#: programs/winecfg/winecfg.rc:119
 msgid "Inactive Title Text"
 msgstr "非アクティブ タイトルのテキスト"
 
-#: programs/winecfg/winecfg.rc:114
+#: programs/winecfg/winecfg.rc:120
 msgid "Message Box Text"
 msgstr "メッセージ ボックスのテキスト"
 
-#: programs/winecfg/winecfg.rc:115
+#: programs/winecfg/winecfg.rc:121
 msgid "Application Workspace"
 msgstr "アプリケーション作業域"
 
-#: programs/winecfg/winecfg.rc:116
+#: programs/winecfg/winecfg.rc:122
 msgid "Window Frame"
 msgstr "ウィンドウの境界"
 
-#: programs/winecfg/winecfg.rc:117
+#: programs/winecfg/winecfg.rc:123
 msgid "Active Border"
 msgstr "アクティブ境界"
 
-#: programs/winecfg/winecfg.rc:118
+#: programs/winecfg/winecfg.rc:124
 msgid "Inactive Border"
 msgstr "非アクティブ境界"
 
-#: programs/winecfg/winecfg.rc:119
+#: programs/winecfg/winecfg.rc:125
 msgid "Controls Shadow"
 msgstr "コントロールの影"
 
-#: programs/winecfg/winecfg.rc:120
+#: programs/winecfg/winecfg.rc:126
 msgid "Gray Text"
 msgstr "灰色テキスト"
 
-#: programs/winecfg/winecfg.rc:121
+#: programs/winecfg/winecfg.rc:127
 msgid "Controls Highlight"
 msgstr "コントロールの明るい部分"
 
-#: programs/winecfg/winecfg.rc:122
+#: programs/winecfg/winecfg.rc:128
 msgid "Controls Dark Shadow"
 msgstr "コントロールの暗い影"
 
-#: programs/winecfg/winecfg.rc:123
+#: programs/winecfg/winecfg.rc:129
 msgid "Controls Light"
 msgstr "コントロールの明かり"
 
-#: programs/winecfg/winecfg.rc:124
+#: programs/winecfg/winecfg.rc:130
 msgid "Controls Alternate Background"
 msgstr "コントロールの別の背景"
 
-#: programs/winecfg/winecfg.rc:125
+#: programs/winecfg/winecfg.rc:131
 msgid "Hot Tracked Item"
 msgstr "選択中のアイテム"
 
-#: programs/winecfg/winecfg.rc:126
+#: programs/winecfg/winecfg.rc:132
 msgid "Active Title Bar Gradient"
 msgstr "アクティブ タイトル バーの階調"
 
-#: programs/winecfg/winecfg.rc:127
+#: programs/winecfg/winecfg.rc:133
 msgid "Inactive Title Bar Gradient"
 msgstr "非アクティブ タイトル バーの階調"
 
-#: programs/winecfg/winecfg.rc:128
+#: programs/winecfg/winecfg.rc:134
 msgid "Menu Highlight"
 msgstr "メニューの明るい部分"
 
-#: programs/winecfg/winecfg.rc:129
+#: programs/winecfg/winecfg.rc:135
 msgid "Menu Bar"
 msgstr "メニュー バー"
 

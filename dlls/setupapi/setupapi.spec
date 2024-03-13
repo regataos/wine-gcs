@@ -208,6 +208,7 @@
 @ stub DelimStringToMultiSz
 @ stub DestroyTextFileReadBuffer
 @ stdcall DoesUserHavePrivilege(wstr)
+@ stdcall DriverStoreFindDriverPackageW(ptr ptr ptr long ptr ptr ptr)
 @ stdcall DuplicateString(wstr)
 @ stdcall EnablePrivilege(wstr long)
 @ stub ExtensionPropSheetPageProc
@@ -337,6 +338,8 @@
 @ stub SetupDiGetClassInstallParamsA
 @ stub SetupDiGetClassInstallParamsW
 @ stdcall SetupDiGetClassRegistryPropertyW(ptr long ptr ptr long ptr wstr ptr)
+@ stdcall SetupDiGetCustomDevicePropertyA(ptr ptr str long ptr ptr long ptr)
+@ stdcall SetupDiGetCustomDevicePropertyW(ptr ptr wstr long ptr ptr long ptr)
 @ stub SetupDiGetDeviceInfoListClass
 @ stdcall SetupDiGetDeviceInfoListDetailA(ptr ptr)
 @ stdcall SetupDiGetDeviceInfoListDetailW(ptr ptr)

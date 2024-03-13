@@ -1339,7 +1339,6 @@ static HRESULT stream_queue_sample(struct audio_renderer *renderer, IMFSample *s
 {
     struct queued_object *object;
     DWORD sample_len, sample_frames;
-    MFTIME time, clocktime, systime;
     HRESULT hr;
 
     if (FAILED(hr = IMFSample_GetTotalLength(sample, &sample_len)))
@@ -1354,27 +1353,8 @@ static HRESULT stream_queue_sample(struct audio_renderer *renderer, IMFSample *s
     object->u.sample.sample = sample;
     IMFSample_AddRef(object->u.sample.sample);
 
-    if (FAILED(hr = IMFSample_GetSampleTime(sample, &time)))
-    {
-        WARN("Failed to get sample time, hr %#lx.\n", hr);
-        return hr;
-    }
-
-    if (!renderer->clock)
-        clocktime = time;
-    else if (FAILED(hr = IMFPresentationClock_GetCorrelatedTime(renderer->clock, 0, &clocktime, &systime)))
-    {
-        WARN("Failed to get clock time, hr %#lx.\n", hr);
-        return hr;
-    }
-
-    if (time < clocktime)
-        FIXME("Dropping sample %p, time %I64u, clocktime %I64u, systime %I64u.\n", sample, time, clocktime, systime);
-    else
-    {
-        list_add_tail(&renderer->queue, &object->entry);
-        renderer->queued_frames += sample_frames;
-    }
+    list_add_tail(&renderer->queue, &object->entry);
+    renderer->queued_frames += sample_frames;
 
     return S_OK;
 }

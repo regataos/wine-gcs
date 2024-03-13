@@ -30,9 +30,6 @@
 #include "winnls.h"
 #include "guiddef.h"
 
-#define HASH_STRING_ALGORITHM_X65599   1
-#define HASH_STRING_ALGORITHM_INVALID  0xffffffff
-
 /* Function ptrs for ntdll calls */
 static HMODULE hntdll = 0;
 static NTSTATUS (WINAPI *pRtlAnsiStringToUnicodeString)(PUNICODE_STRING, PCANSI_STRING, BOOLEAN);
@@ -792,6 +789,7 @@ typedef struct {
     int res_buf_size;
     const char *res_buf;
     NTSTATUS result;
+    int broken_len;
 } ustr2astr_t;
 
 static const ustr2astr_t ustr2astr[] = {
@@ -799,7 +797,7 @@ static const ustr2astr_t ustr2astr[] = {
     { 10, 12, 12, "------------", 12, 12, 12, "abcdef", TRUE,  6, 7, 7, "abcdef", STATUS_SUCCESS},
     {  0,  2, 12, "------------", 12, 12, 12, "abcdef", TRUE,  6, 7, 7, "abcdef", STATUS_SUCCESS},
     { 10, 12, 12, NULL,           12, 12, 12, "abcdef", TRUE,  6, 7, 7, "abcdef", STATUS_SUCCESS},
-    {  0,  0, 12, "------------", 12, 12, 12, "abcdef", FALSE, 6, 0, 0, "",       STATUS_BUFFER_OVERFLOW},
+    {  0,  0, 12, "------------", 12, 12, 12, "abcdef", FALSE, 6, 0, 0, "",       STATUS_BUFFER_OVERFLOW, 1},
     {  0,  1, 12, "------------", 12, 12, 12, "abcdef", FALSE, 0, 1, 1, "",       STATUS_BUFFER_OVERFLOW},
     {  0,  2, 12, "------------", 12, 12, 12, "abcdef", FALSE, 1, 2, 2, "a",      STATUS_BUFFER_OVERFLOW},
     {  0,  3, 12, "------------", 12, 12, 12, "abcdef", FALSE, 2, 3, 3, "ab",     STATUS_BUFFER_OVERFLOW},
@@ -849,7 +847,8 @@ static void test_RtlUnicodeStringToAnsiString(void)
 	ok(result == ustr2astr[test_num].result,
            "(test %d): RtlUnicodeStringToAnsiString(ansi, uni, %d) has result %lx, expected %lx\n",
 	   test_num, ustr2astr[test_num].doalloc, result, ustr2astr[test_num].result);
-	ok(ansi_str.Length == ustr2astr[test_num].res_Length,
+	ok(ansi_str.Length == ustr2astr[test_num].res_Length ||
+       broken(ustr2astr[test_num].broken_len && !ansi_str.Length) /* win11 */,
 	   "(test %d): RtlUnicodeStringToAnsiString(ansi, uni, %d) ansi has Length %d, expected %d\n",
 	   test_num, ustr2astr[test_num].doalloc, ansi_str.Length, ustr2astr[test_num].res_Length);
 	ok(ansi_str.MaximumLength == ustr2astr[test_num].res_MaximumLength,
@@ -1523,6 +1522,7 @@ typedef struct {
     USHORT MaximumLength;
     const char *Buffer;
     NTSTATUS result;
+    int broken_len;
 } int2str_t;
 
 static const int2str_t int2str[] = {
@@ -1622,11 +1622,11 @@ static const int2str_t int2str[] = {
     { 2,       131072, 18, 19, "100000000000000000\0----------------", STATUS_SUCCESS},
     { 2,       131072, 18, 18, "100000000000000000-----------------",  STATUS_SUCCESS},
     {16,   0xffffffff,  8,  9, "FFFFFFFF\0--------------------------", STATUS_SUCCESS},
-    {16,   0xffffffff,  8,  8, "FFFFFFFF---------------------------",  STATUS_SUCCESS}, /* No \0 term */
-    {16,   0xffffffff,  8,  7, "-----------------------------------",  STATUS_BUFFER_OVERFLOW}, /* Too short */
+    {16,   0xffffffff,  8,  8, "FFFFFFFF---------------------------",  STATUS_SUCCESS, 1}, /* No \0 term */
+    {16,   0xffffffff,  8,  7, "-----------------------------------",  STATUS_BUFFER_OVERFLOW, 1}, /* Too short */
     {16,          0xa,  1,  2, "A\0---------------------------------", STATUS_SUCCESS},
-    {16,          0xa,  1,  1, "A----------------------------------",  STATUS_SUCCESS}, /* No \0 term */
-    {16,            0,  1,  0, "-----------------------------------",  STATUS_BUFFER_OVERFLOW},
+    {16,          0xa,  1,  1, "A----------------------------------",  STATUS_SUCCESS, 1}, /* No \0 term */
+    {16,            0,  1,  0, "-----------------------------------",  STATUS_BUFFER_OVERFLOW, 1},
     {20,   0xdeadbeef,  0,  9, "-----------------------------------",  STATUS_INVALID_PARAMETER}, /* ill. base */
     {-8,     07654321,  0, 12, "-----------------------------------",  STATUS_INVALID_PARAMETER}, /* neg. base */
 };
@@ -1687,7 +1687,8 @@ static void one_RtlIntegerToUnicodeString_test(int test_num, const int2str_t *in
     ok(memcmp(unicode_string.Buffer, expected_unicode_string.Buffer, STRI_BUFFER_LENGTH * sizeof(WCHAR)) == 0,
        "(test %d): RtlIntegerToUnicodeString(%lu, %d, [out]) assigns string \"%s\", expected: \"%s\"\n",
        test_num, int2str->value, int2str->base, ansi_str.Buffer, expected_ansi_str.Buffer);
-    ok(unicode_string.Length == expected_unicode_string.Length,
+    ok(unicode_string.Length == expected_unicode_string.Length ||
+       broken(int2str->broken_len && !unicode_string.Length) /* win11 */,
        "(test %d): RtlIntegerToUnicodeString(%lu, %d, [out]) string has Length %d, expected: %d\n",
        test_num, int2str->value, int2str->base, unicode_string.Length, expected_unicode_string.Length);
     ok(unicode_string.MaximumLength == expected_unicode_string.MaximumLength,
@@ -2132,7 +2133,7 @@ static void test_RtlUnicodeToUTF8N(void)
 
     if (!pRtlUnicodeToUTF8N)
     {
-        skip("RtlUnicodeToUTF8N unavailable\n");
+        win_skip("RtlUnicodeToUTF8N is not available\n");
         return;
     }
 
@@ -2465,7 +2466,7 @@ static void test_RtlUTF8ToUnicodeN(void)
 
     if (!pRtlUTF8ToUnicodeN)
     {
-        skip("RtlUTF8ToUnicodeN unavailable\n");
+        win_skip("RtlUTF8ToUnicodeN is not available\n");
         return;
     }
 

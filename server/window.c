@@ -71,6 +71,7 @@ struct window
     rectangle_t      surface_rect;    /* window surface rectangle (relative to parent client area) */
     rectangle_t      client_rect;     /* client rectangle (relative to parent client area) */
     struct region   *win_region;      /* region for shaped windows (relative to window rect) */
+    struct region   *layer_region;    /* region for layered windows (relative to window rect) */
     struct region   *update_region;   /* update region (relative to window rect) */
     unsigned int     style;           /* window style */
     unsigned int     ex_style;        /* window extended style */
@@ -566,6 +567,7 @@ static struct window *create_window( struct window *parent, struct window *owner
     win->atom           = atom;
     win->last_active    = win->handle;
     win->win_region     = NULL;
+    win->layer_region   = NULL;
     win->update_region  = NULL;
     win->style          = 0;
     win->ex_style       = 0;
@@ -824,6 +826,9 @@ static int is_point_in_window( struct window *win, int *x, int *y, unsigned int 
     if (win->win_region &&
         !point_in_region( win->win_region, *x - win->window_rect.left, *y - win->window_rect.top ))
         return 0;  /* not in window region */
+    if (win->layer_region &&
+        !point_in_region( win->layer_region, *x - win->window_rect.left, *y - win->window_rect.top ))
+        return 0;  /* not in layer mask region */
     return 1;
 }
 
@@ -1250,8 +1255,7 @@ static struct region *get_surface_region( struct window *win )
     set_region_rect( clip, &win->client_rect );
     if (win->win_region && !intersect_window_region( clip, win )) goto error;
 
-    if (!(win->ex_style & WS_EX_LAYERED) && (win->paint_flags & PAINT_HAS_PIXEL_FORMAT)
-            && !subtract_region( region, region, clip ))
+    if ((win->paint_flags & PAINT_HAS_PIXEL_FORMAT) && !subtract_region( region, region, clip ))
         goto error;
 
     /* clip children */
@@ -1769,8 +1773,9 @@ static struct region *expose_window( struct window *win, const rectangle_t *old_
         offset_region( new_vis_rgn, win->window_rect.left - old_window_rect->left,
                        win->window_rect.top - old_window_rect->top  );
 
-        if (is_composited ? union_region( new_vis_rgn, old_vis_rgn, new_vis_rgn )
-                          : subtract_region( new_vis_rgn, old_vis_rgn, new_vis_rgn ))
+        if (is_region_empty( old_vis_rgn ) ||
+            (is_composited ? union_region( new_vis_rgn, old_vis_rgn, new_vis_rgn )
+                           : subtract_region( new_vis_rgn, old_vis_rgn, new_vis_rgn )))
         {
             if (!is_region_empty( new_vis_rgn ))
             {
@@ -1981,6 +1986,14 @@ static void set_window_region( struct window *win, struct region *region, int re
 }
 
 
+/* set the layer region */
+static void set_layer_region( struct window *win, struct region *region )
+{
+    if (win->layer_region) free_region( win->layer_region );
+    win->layer_region = region;
+}
+
+
 /* destroy a window */
 void free_window_handle( struct window *win )
 {
@@ -2027,7 +2040,6 @@ void free_window_handle( struct window *win )
     if (win == progman_window) progman_window = NULL;
     if (win == taskman_window) taskman_window = NULL;
     free_hotkeys( win->desktop, win->handle );
-    free_touches( win->desktop, win->handle );
     cleanup_clipboard_window( win->desktop, win->handle );
     destroy_properties( win );
     if (is_desktop_window(win))
@@ -2045,6 +2057,7 @@ void free_window_handle( struct window *win )
     detach_window_thread( win );
 
     if (win->parent) set_parent_window( win, NULL );
+    if (win->layer_region) free_region( win->layer_region );
     free_user_handle( win->handle );
     win->handle = 0;
     release_object( win );
@@ -2154,14 +2167,10 @@ DECL_HANDLER(destroy_window)
 DECL_HANDLER(get_desktop_window)
 {
     struct desktop *desktop = get_thread_desktop( current, 0 );
-    int force;
 
     if (!desktop) return;
 
-    /* if winstation is invisible, then avoid roundtrip */
-    force = req->force || !(desktop->winstation->flags & WSF_VISIBLE);
-
-    if (!desktop->top_window && force)  /* create it */
+    if (!desktop->top_window && req->force)  /* create it */
     {
         if ((desktop->top_window = create_window( NULL, NULL, DESKTOP_ATOM, 0 )))
         {
@@ -2170,7 +2179,7 @@ DECL_HANDLER(get_desktop_window)
         }
     }
 
-    if (!desktop->msg_window && force)  /* create it */
+    if (!desktop->msg_window && req->force)  /* create it */
     {
         static const WCHAR messageW[] = {'M','e','s','s','a','g','e'};
         static const struct unicode_str name = { messageW, sizeof(messageW) };
@@ -2703,6 +2712,24 @@ DECL_HANDLER(set_window_region)
         if (win->ex_style & WS_EX_LAYOUTRTL) mirror_region( &win->window_rect, region );
     }
     set_window_region( win, region, req->redraw );
+}
+
+
+/* set the layer region */
+DECL_HANDLER(set_layer_region)
+{
+    struct region *region = NULL;
+    struct window *win = get_window( req->window );
+
+    if (!win) return;
+
+    if (get_req_data_size())  /* no data means remove the region completely */
+    {
+        if (!(region = create_region_from_req_data( get_req_data(), get_req_data_size() )))
+            return;
+        if (win->ex_style & WS_EX_LAYOUTRTL) mirror_region( &win->window_rect, region );
+    }
+    set_layer_region( win, region );
 }
 
 
