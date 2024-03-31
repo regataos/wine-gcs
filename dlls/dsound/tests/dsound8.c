@@ -26,6 +26,7 @@
  */
 
 #define COBJMACROS
+#define NONAMELESSUNION
 #include <windows.h>
 #include <stdio.h>
 

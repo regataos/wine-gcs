@@ -26,8 +26,6 @@
 #endif
 #include "macdrv_cocoa.h"
 
-#pragma GCC diagnostic ignored "-Wdeclaration-after-statement"
-
 static uint64_t dedicated_gpu_id;
 static uint64_t integrated_gpu_id;
 
@@ -60,8 +58,9 @@ static inline void convert_display_rect(CGRect* out_rect, NSRect in_rect,
  */
 int macdrv_get_displays(struct macdrv_display** displays, int* count)
 {
-@autoreleasepool
-{
+    int ret = -1;
+    NSAutoreleasePool* pool = [[NSAutoreleasePool alloc] init];
+
     NSArray* screens = [NSScreen screens];
     if (screens)
     {
@@ -75,14 +74,14 @@ int macdrv_get_displays(struct macdrv_display** displays, int* count)
             NSUInteger i;
             for (i = 0; i < num_screens; i++)
             {
-                NSScreen* screen = screens[i];
+                NSScreen* screen = [screens objectAtIndex:i];
                 NSRect frame = [screen frame];
                 NSRect visible_frame = [screen visibleFrame];
 
                 if (i == 0)
                     primary_frame = frame;
 
-                disps[i].displayID = [[screen deviceDescription][@"NSScreenNumber"] unsignedIntValue];
+                disps[i].displayID = [[[screen deviceDescription] objectForKey:@"NSScreenNumber"] unsignedIntValue];
                 convert_display_rect(&disps[i].frame, frame, primary_frame);
                 convert_display_rect(&disps[i].work_frame, visible_frame,
                                      primary_frame);
@@ -92,12 +91,12 @@ int macdrv_get_displays(struct macdrv_display** displays, int* count)
 
             *displays = disps;
             *count = num_screens;
-            return 0;
+            ret = 0;
         }
     }
 
-    return -1;
-}
+    [pool release];
+    return ret;
 }
 
 
@@ -192,12 +191,11 @@ done:
  */
 static int macdrv_get_gpu_info_from_entry(struct macdrv_gpu* gpu, io_registry_entry_t entry)
 {
-@autoreleasepool
-{
     io_registry_entry_t parent_entry;
     io_registry_entry_t gpu_entry;
     kern_return_t result;
     int ret = -1;
+    NSAutoreleasePool* pool = [[NSAutoreleasePool alloc] init];
 
     gpu_entry = entry;
     while (![@"IOPCIDevice" isEqualToString:[(NSString*)IOObjectCopyClass(gpu_entry) autorelease]])
@@ -213,6 +211,7 @@ static int macdrv_get_gpu_info_from_entry(struct macdrv_gpu* gpu, io_registry_en
         }
         else if (result != kIOReturnSuccess)
         {
+            [pool release];
             return ret;
         }
 
@@ -233,8 +232,8 @@ static int macdrv_get_gpu_info_from_entry(struct macdrv_gpu* gpu, io_registry_en
 done:
     if (gpu_entry != entry)
         IOObjectRelease(gpu_entry);
+    [pool release];
     return ret;
-}
 }
 
 #ifdef HAVE_MTLDEVICE_REGISTRYID
@@ -258,39 +257,6 @@ static int macdrv_get_gpu_info_from_registry_id(struct macdrv_gpu* gpu, uint64_t
 }
 
 /***********************************************************************
- *              macdrv_get_gpu_info_from_mtldevice
- *
- * Get GPU information from a Metal device that responds to the registryID selector.
- *
- * Returns non-zero value on failure.
- */
-static int macdrv_get_gpu_info_from_mtldevice(struct macdrv_gpu* gpu, id<MTLDevice> device)
-{
-    int ret;
-    if ((ret = macdrv_get_gpu_info_from_registry_id(gpu, [device registryID])))
-        return ret;
-#if defined(MAC_OS_X_VERSION_10_15) && MAC_OS_X_VERSION_MAX_ALLOWED >= MAC_OS_X_VERSION_10_15
-    /* Apple GPUs aren't PCI devices and therefore have no device ID
-     * Use the Metal GPUFamily as the device ID */
-    if (!gpu->device_id && [device respondsToSelector:@selector(supportsFamily:)] && [device supportsFamily:MTLGPUFamilyApple1])
-    {
-        MTLGPUFamily highest = MTLGPUFamilyApple1;
-        while (1)
-        {
-            /* Apple2, etc are all in order */
-            MTLGPUFamily next = highest + 1;
-            if ([device supportsFamily:next])
-                highest = next;
-            else
-                break;
-        }
-        gpu->device_id = highest;
-    }
-#endif
-    return 0;
-}
-
-/***********************************************************************
  *              macdrv_get_gpus_from_metal
  *
  * Get a list of GPUs from Metal.
@@ -299,32 +265,32 @@ static int macdrv_get_gpu_info_from_mtldevice(struct macdrv_gpu* gpu, id<MTLDevi
  */
 static int macdrv_get_gpus_from_metal(struct macdrv_gpu** new_gpus, int* count)
 {
-@autoreleasepool
-{
     struct macdrv_gpu* gpus = NULL;
     struct macdrv_gpu primary_gpu;
     id<MTLDevice> primary_device;
     BOOL hide_integrated = FALSE;
     int primary_index = 0, i;
     int gpu_count = 0;
+    int ret = -1;
+    NSAutoreleasePool* pool = [[NSAutoreleasePool alloc] init];
 
     /* Test if Metal is available */
     if (&MTLCopyAllDevices == NULL)
-        return -1;
+        goto done;
     NSArray<id<MTLDevice>>* devices = [MTLCopyAllDevices() autorelease];
     if (!devices.count || ![devices[0] respondsToSelector:@selector(registryID)])
-        return -1;
+        goto done;
 
     gpus = calloc(devices.count, sizeof(*gpus));
     if (!gpus)
-        return -1;
+        goto done;
 
     /* Use MTLCreateSystemDefaultDevice instead of CGDirectDisplayCopyCurrentMetalDevice(CGMainDisplayID()) to get
      * the primary GPU because we need to hide the integrated GPU for an automatic graphic switching pair to avoid apps
      * using the integrated GPU. This is the behavior of Windows on a Mac. */
     primary_device = [MTLCreateSystemDefaultDevice() autorelease];
-    if (macdrv_get_gpu_info_from_mtldevice(&primary_gpu, primary_device))
-        goto fail;
+    if (macdrv_get_gpu_info_from_registry_id(&primary_gpu, primary_device.registryID))
+        goto done;
 
     /* Hide the integrated GPU if the system default device is a dedicated GPU */
     if (!primary_device.isLowPower)
@@ -335,8 +301,8 @@ static int macdrv_get_gpus_from_metal(struct macdrv_gpu** new_gpus, int* count)
 
     for (i = 0; i < devices.count; i++)
     {
-        if (macdrv_get_gpu_info_from_mtldevice(&gpus[gpu_count], devices[i]))
-            goto fail;
+        if (macdrv_get_gpu_info_from_registry_id(&gpus[gpu_count], devices[i].registryID))
+            goto done;
 
         if (hide_integrated && devices[i].isLowPower)
         {
@@ -361,11 +327,12 @@ static int macdrv_get_gpus_from_metal(struct macdrv_gpu** new_gpus, int* count)
 
     *new_gpus = gpus;
     *count = gpu_count;
-    return 0;
-fail:
-    macdrv_free_gpus(gpus);
-    return -1;
-}
+    ret = 0;
+done:
+    if (ret)
+        macdrv_free_gpus(gpus);
+    [pool release];
+    return ret;
 }
 
 /***********************************************************************
@@ -377,20 +344,21 @@ fail:
  */
 static int macdrv_get_gpu_info_from_display_id_using_metal(struct macdrv_gpu* gpu, CGDirectDisplayID display_id)
 {
-@autoreleasepool
-{
     id<MTLDevice> device;
+    int ret = -1;
+    NSAutoreleasePool* pool = [[NSAutoreleasePool alloc] init];
 
     /* Test if Metal is available */
     if (&CGDirectDisplayCopyCurrentMetalDevice == NULL)
-        return -1;
+        goto done;
 
     device = [CGDirectDisplayCopyCurrentMetalDevice(display_id) autorelease];
     if (device && [device respondsToSelector:@selector(registryID)])
-        return macdrv_get_gpu_info_from_registry_id(gpu, device.registryID);
-    else
-        return -1;
-}
+        ret = macdrv_get_gpu_info_from_registry_id(gpu, device.registryID);
+
+done:
+    [pool release];
+    return ret;
 }
 
 #else
@@ -707,6 +675,7 @@ int macdrv_get_monitors(uint32_t adapter_id, struct macdrv_monitor** new_monitor
                 if (j == 0)
                     primary_index = monitor_count;
 
+                monitors[monitor_count].state_flags = DISPLAY_DEVICE_ATTACHED | DISPLAY_DEVICE_ACTIVE;
                 monitors[monitor_count].rc_monitor = displays[j].frame;
                 monitors[monitor_count].rc_work = displays[j].work_frame;
                 monitor_count++;

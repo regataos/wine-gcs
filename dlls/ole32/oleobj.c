@@ -24,6 +24,8 @@
 #include <string.h>
 
 #define COBJMACROS
+#define NONAMELESSUNION
+
 #include "windef.h"
 #include "winbase.h"
 #include "winuser.h"
@@ -765,7 +767,7 @@ static HRESULT WINAPI DataAdviseHolder_SendOnDataChange(IDataAdviseHolder *iface
         {
             STGMEDIUM stg;
             stg.tymed = TYMED_NULL;
-            stg.pstg = NULL;
+            stg.u.pstg = NULL;
             stg.pUnkForRelease = NULL;
 
             if(!(statdata.advf & ADVF_NODATA))

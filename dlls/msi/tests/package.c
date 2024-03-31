@@ -2137,7 +2137,7 @@ static void test_condition(void)
     DeleteFileA(msifile);
 }
 
-static void check_prop(MSIHANDLE hpkg, const char *prop, const char *expect, int match_case, int todo_value)
+static void check_prop(MSIHANDLE hpkg, const char *prop, const char *expect, int match_case)
 {
     char buffer[MAX_PATH] = "x";
     DWORD sz = sizeof(buffer);
@@ -2145,9 +2145,9 @@ static void check_prop(MSIHANDLE hpkg, const char *prop, const char *expect, int
     ok(!r, "'%s': got %u\n", prop, r);
     ok(sz == lstrlenA(buffer), "'%s': expected %u, got %lu\n", prop, lstrlenA(buffer), sz);
     if (match_case)
-        todo_wine_if (todo_value) ok(!strcmp(buffer, expect), "'%s': expected '%s', got '%s'\n", prop, expect, buffer);
+        ok(!strcmp(buffer, expect), "'%s': expected '%s', got '%s'\n", prop, expect, buffer);
     else
-        todo_wine_if (todo_value) ok(!_stricmp(buffer, expect), "'%s': expected '%s', got '%s'\n", prop, expect, buffer);
+        ok(!_stricmp(buffer, expect), "'%s': expected '%s', got '%s'\n", prop, expect, buffer);
 }
 
 static void test_props(void)
@@ -2220,29 +2220,29 @@ static void test_props(void)
 
     r = MsiSetPropertyA( hpkg, "=", "asdf" );
     ok(!r, "got %u\n", r);
-    check_prop(hpkg, "=", "asdf", 1, 0);
+    check_prop(hpkg, "=", "asdf", 1);
 
     r = MsiSetPropertyA( hpkg, " ", "asdf" );
     ok(!r, "got %u\n", r);
-    check_prop(hpkg, " ", "asdf", 1, 0);
+    check_prop(hpkg, " ", "asdf", 1);
 
     r = MsiSetPropertyA( hpkg, "'", "asdf" );
     ok(!r, "got %u\n", r);
-    check_prop(hpkg, "'", "asdf", 1, 0);
+    check_prop(hpkg, "'", "asdf", 1);
 
     /* set empty values */
     r = MsiSetPropertyA( hpkg, "boo", NULL );
     ok(!r, "got %u\n", r);
-    check_prop(hpkg, "boo", "", 1, 0);
+    check_prop(hpkg, "boo", "", 1);
 
     r = MsiSetPropertyA( hpkg, "boo", "" );
     ok(!r, "got %u\n", r);
-    check_prop(hpkg, "boo", "", 1, 0);
+    check_prop(hpkg, "boo", "", 1);
 
     /* set a non-empty value */
     r = MsiSetPropertyA( hpkg, "boo", "xyz" );
     ok(!r, "got %u\n", r);
-    check_prop(hpkg, "boo", "xyz", 1, 0);
+    check_prop(hpkg, "boo", "xyz", 1);
 
     r = MsiGetPropertyA(hpkg, "boo", NULL, NULL);
     ok(!r, "got %u\n", r);
@@ -2317,10 +2317,10 @@ static void test_props(void)
     ok(sz == 3, "got size %lu\n", sz);
 
     /* properties are case-sensitive */
-    check_prop(hpkg, "BOO", "", 1, 0);
+    check_prop(hpkg, "BOO", "", 1);
 
     /* properties set in Property table should work */
-    check_prop(hpkg, "MetadataCompName", "Photoshop.dll", 1, 0);
+    check_prop(hpkg, "MetadataCompName", "Photoshop.dll", 1);
 
     MsiCloseHandle( hpkg );
     DeleteFileA(msifile);
@@ -4717,7 +4717,7 @@ static void test_appsearch_reglocator(void)
     memset(&si, 0, sizeof(si));
     GetNativeSystemInfo(&si);
 
-    if (si.wProcessorArchitecture == PROCESSOR_ARCHITECTURE_INTEL)
+    if (S(U(si)).wProcessorArchitecture == PROCESSOR_ARCHITECTURE_INTEL)
     {
         size = ExpandEnvironmentStringsA("%PATH%", NULL, 0);
         pathvar = malloc(size);
@@ -5066,7 +5066,6 @@ static void test_appsearch_inilocator(void)
     }
     ok(r == ERROR_SUCCESS, "Expected a valid package handle %u\n", r);
 
-    MsiCloseHandle( hdb );
     MsiSetInternalUI(INSTALLUILEVEL_NONE, NULL);
 
     r = MsiDoActionA(hpkg, "AppSearch");
@@ -5075,12 +5074,6 @@ static void test_appsearch_inilocator(void)
     size = MAX_PATH;
     r = MsiGetPropertyA(hpkg, "SIGPROP1", prop, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
-    if (!prop[0])
-    {
-        win_skip("broken result\n");
-        MsiCloseHandle(hpkg);
-        goto error;
-    }
     ok(!lstrcmpA(prop, "keydata"), "Expected \"keydata\", got \"%s\"\n", prop);
 
     size = MAX_PATH;
@@ -5583,7 +5576,7 @@ static void test_installprops(void)
     CHAR path[MAX_PATH], buf[MAX_PATH];
     DWORD size, type;
     LANGID langid;
-    HKEY hkey1, hkey2, pathkey = NULL;
+    HKEY hkey1, hkey2, pathkey;
     int res;
     UINT r;
     REGSAM access = KEY_ALL_ACCESS;
@@ -5635,12 +5628,7 @@ static void test_installprops(void)
     ok( !lstrcmpA(buf, path), "Expected %s, got %s\n", path, buf);
 
     RegOpenKeyA(HKEY_CURRENT_USER, "SOFTWARE\\Microsoft\\MS Setup (ACME)\\User Info", &hkey1);
-    res = RegOpenKeyExA(HKEY_LOCAL_MACHINE, "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion", 0, access, &hkey2);
-    if (res == ERROR_ACCESS_DENIED)
-    {
-        win_skip("no access\n");
-        goto done;
-    }
+    RegOpenKeyExA(HKEY_LOCAL_MACHINE, "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion", 0, access, &hkey2);
     RegOpenKeyExA(HKEY_LOCAL_MACHINE, "SOFTWARE\\Microsoft\\Windows\\CurrentVersion",
         0, KEY_QUERY_VALUE | KEY_WOW64_64KEY, &pathkey);
 
@@ -5746,73 +5734,72 @@ static void test_installprops(void)
     GetNativeSystemInfo(&si);
 
     sprintf(buf, "%d", LOBYTE(LOWORD(GetVersion())) * 100 + HIBYTE(LOWORD(GetVersion())));
-    check_prop(hpkg, "VersionNT", buf, 1, 1);
+    check_prop(hpkg, "VersionNT", buf, 1);
 
-    if (si.wProcessorArchitecture == PROCESSOR_ARCHITECTURE_AMD64)
+    if (S(U(si)).wProcessorArchitecture == PROCESSOR_ARCHITECTURE_AMD64)
     {
         sprintf(buf, "%d", si.wProcessorLevel);
-        check_prop(hpkg, "Intel", buf, 1, 0);
-        check_prop(hpkg, "MsiAMD64", buf, 1, 0);
-        check_prop(hpkg, "Msix64", buf, 1, 0);
+        check_prop(hpkg, "Intel", buf, 1);
+        check_prop(hpkg, "MsiAMD64", buf, 1);
+        check_prop(hpkg, "Msix64", buf, 1);
         sprintf(buf, "%d", LOBYTE(LOWORD(GetVersion())) * 100 + HIBYTE(LOWORD(GetVersion())));
-        check_prop(hpkg, "VersionNT64", buf, 1, 1);
+        check_prop(hpkg, "VersionNT64", buf, 1);
 
         GetSystemDirectoryA(path, MAX_PATH);
         strcat(path, "\\");
-        check_prop(hpkg, "System64Folder", path, 0, 0);
+        check_prop(hpkg, "System64Folder", path, 0);
 
         GetSystemWow64DirectoryA(path, MAX_PATH);
         strcat(path, "\\");
-        check_prop(hpkg, "SystemFolder", path, 0, 0);
+        check_prop(hpkg, "SystemFolder", path, 0);
 
         size = MAX_PATH;
         r = RegQueryValueExA(pathkey, "ProgramFilesDir (x86)", 0, &type, (BYTE *)path, &size);
         strcat(path, "\\");
-        check_prop(hpkg, "ProgramFilesFolder", path, 0, 0);
+        check_prop(hpkg, "ProgramFilesFolder", path, 0);
 
         size = MAX_PATH;
         RegQueryValueExA(pathkey, "ProgramFilesDir", 0, &type, (BYTE *)path, &size);
         strcat(path, "\\");
-        check_prop(hpkg, "ProgramFiles64Folder", path, 0, 0);
+        check_prop(hpkg, "ProgramFiles64Folder", path, 0);
 
         size = MAX_PATH;
         RegQueryValueExA(pathkey, "CommonFilesDir (x86)", 0, &type, (BYTE *)path, &size);
         strcat(path, "\\");
-        check_prop(hpkg, "CommonFilesFolder", path, 0, 0);
+        check_prop(hpkg, "CommonFilesFolder", path, 0);
 
         size = MAX_PATH;
         RegQueryValueExA(pathkey, "CommonFilesDir", 0, &type, (BYTE *)path, &size);
         strcat(path, "\\");
-        check_prop(hpkg, "CommonFiles64Folder", path, 0, 0);
+        check_prop(hpkg, "CommonFiles64Folder", path, 0);
     }
-    else if (si.wProcessorArchitecture == PROCESSOR_ARCHITECTURE_INTEL)
+    else if (S(U(si)).wProcessorArchitecture == PROCESSOR_ARCHITECTURE_INTEL)
     {
         sprintf(buf, "%d", si.wProcessorLevel);
-        check_prop(hpkg, "Intel", buf, 1, 0);
+        check_prop(hpkg, "Intel", buf, 1);
 
         GetSystemDirectoryA(path, MAX_PATH);
         strcat(path, "\\");
-        check_prop(hpkg, "SystemFolder", path, 0, 0);
+        check_prop(hpkg, "SystemFolder", path, 0);
 
         size = MAX_PATH;
         RegQueryValueExA(pathkey, "ProgramFilesDir", 0, &type, (BYTE *)path, &size);
         strcat(path, "\\");
-        check_prop(hpkg, "ProgramFilesFolder", path, 0, 0);
+        check_prop(hpkg, "ProgramFilesFolder", path, 0);
 
         size = MAX_PATH;
         RegQueryValueExA(pathkey, "CommonFilesDir", 0, &type, (BYTE *)path, &size);
         strcat(path, "\\");
-        check_prop(hpkg, "CommonFilesFolder", path, 0, 0);
+        check_prop(hpkg, "CommonFilesFolder", path, 0);
 
-        check_prop(hpkg, "MsiAMD64", "", 1, 0);
-        check_prop(hpkg, "Msix64", "", 1, 0);
-        check_prop(hpkg, "VersionNT64", "", 1, 0);
-        check_prop(hpkg, "System64Folder", "", 0, 0);
-        check_prop(hpkg, "ProgramFiles64Dir", "", 0, 0);
-        check_prop(hpkg, "CommonFiles64Dir", "", 0, 0);
+        check_prop(hpkg, "MsiAMD64", "", 1);
+        check_prop(hpkg, "Msix64", "", 1);
+        check_prop(hpkg, "VersionNT64", "", 1);
+        check_prop(hpkg, "System64Folder", "", 0);
+        check_prop(hpkg, "ProgramFiles64Dir", "", 0);
+        check_prop(hpkg, "CommonFiles64Dir", "", 0);
     }
 
-done:
     CloseHandle(hkey1);
     CloseHandle(hkey2);
     RegCloseKey(pathkey);
@@ -8472,14 +8459,10 @@ static void test_costs(void)
     add_media_entry( hdb, "'1', '2', 'cabinet', '', '', ''");
 
     create_file_table( hdb );
-    add_file_entry( hdb, "'a.txt', 'one', 'a.txt', 2048000000, '', '', 8192, 1" );
-    add_file_entry( hdb, "'b.txt', 'one', 'b.txt', 2048000000, '', '', 8192, 1" );
-    add_file_entry( hdb, "'c.txt', 'one', 'c.txt', 2048000000, '', '', 8192, 1" );
-    add_file_entry( hdb, "'d.txt', 'one', 'd.txt', 4097, '', '', 8192, 1" );
-    add_file_entry( hdb, "'e.txt', 'one', 'e.txt', 1, '', '', 8192, 1" );
+    add_file_entry( hdb, "'one.txt', 'one', 'one.txt', 4096, '', '', 8192, 1" );
 
     create_component_table( hdb );
-    add_component_entry( hdb, "'one', '{B2F86B9D-8447-4BC5-8883-750C45AA31CA}', 'TARGETDIR', 0, '', 'a.txt'" );
+    add_component_entry( hdb, "'one', '{B2F86B9D-8447-4BC5-8883-750C45AA31CA}', 'TARGETDIR', 0, '', 'one.txt'" );
     add_component_entry( hdb, "'two', '{62A09F6E-0B74-4829-BDB7-CAB66F42CCE8}', 'TARGETDIR', 0, '', ''" );
 
     create_feature_table( hdb );
@@ -8607,7 +8590,7 @@ static void test_costs(void)
     ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r );
     ok( len == 2, "expected len == 2, got %lu\n", len );
     ok( drive[0], "expected a drive\n" );
-    ok( cost == 12000024, "got %d\n", cost );
+    ok( cost && cost != 0xdead, "expected cost > 0, got %d\n", cost );
     ok( !temp, "expected temp == 0, got %d\n", temp );
 
     len = sizeof(drive);
@@ -8628,7 +8611,7 @@ static void test_costs(void)
     ok( len == 2, "expected len == 2, got %lu\n", len );
     ok( drive[0], "expected a drive\n" );
     ok( !cost, "expected cost == 0, got %d\n", cost );
-    todo_wine ok( temp && temp != 0xdead, "expected temp > 0, got %d\n", temp );
+    ok( temp && temp != 0xdead, "expected temp > 0, got %d\n", temp );
 
     /* increased index */
     len = sizeof(drive);
@@ -8651,7 +8634,7 @@ static void test_costs(void)
     cost = 0xdead;
     r = MsiGetFeatureCostA( hpkg, "one", MSICOSTTREE_SELFONLY, INSTALLSTATE_LOCAL, &cost );
     ok( !r, "got %u\n", r);
-    ok( cost == 12000024, "got %d\n", cost );
+    ok( cost == 8, "got %d\n", cost );
 
     MsiCloseHandle( hpkg );
 error:

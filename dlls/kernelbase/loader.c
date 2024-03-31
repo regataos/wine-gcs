@@ -22,13 +22,14 @@
 
 #include <stdarg.h>
 
+#define NONAMELESSUNION
+#define NONAMELESSSTRUCT
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
 #include "windef.h"
 #include "winbase.h"
 #include "winnls.h"
 #include "winternl.h"
-#include "ddk/ntddk.h"
 #include "kernelbase.h"
 #include "wine/list.h"
 #include "wine/asm.h"
@@ -209,7 +210,7 @@ FARPROC WINAPI DECLSPEC_HOTPATCH DelayLoadFailureHook( LPCSTR name, LPCSTR funct
         ERR( "failed to delay load %s.%u\n", name, LOWORD(function) );
     args[0] = (ULONG_PTR)name;
     args[1] = (ULONG_PTR)function;
-    RaiseException( EXCEPTION_WINE_STUB, EXCEPTION_NONCONTINUABLE, 2, args );
+    RaiseException( EXCEPTION_WINE_STUB, EH_NONCONTINUABLE, 2, args );
     return NULL;
 }
 
@@ -301,7 +302,7 @@ DWORD WINAPI DECLSPEC_HOTPATCH GetModuleFileNameW( HMODULE module, LPWSTR filena
     UNICODE_STRING name;
     NTSTATUS status;
 
-    if (!module && ((win16_tib = NtCurrentTeb()->Tib.SubSystemTib)) && win16_tib->exe_name)
+    if (!module && (0 && (win16_tib = NtCurrentTeb()->Tib.SubSystemTib)) && win16_tib->exe_name)
     {
         len = min( size, win16_tib->exe_name->Length / sizeof(WCHAR) );
         memcpy( filename, win16_tib->exe_name->Buffer, len * sizeof(WCHAR) );
@@ -351,21 +352,10 @@ BOOL WINAPI DECLSPEC_HOTPATCH GetModuleHandleExA( DWORD flags, LPCSTR name, HMOD
 {
     WCHAR *nameW;
 
-    if (!module)
-    {
-        SetLastError( ERROR_INVALID_PARAMETER );
-        return FALSE;
-    }
-
     if (!name || (flags & GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS))
         return GetModuleHandleExW( flags, (LPCWSTR)name, module );
 
-    if (!(nameW = file_name_AtoW( name, FALSE )))
-    {
-        *module = NULL;
-        SetLastError( ERROR_MOD_NOT_FOUND );
-        return FALSE;
-    }
+    if (!(nameW = file_name_AtoW( name, FALSE ))) return FALSE;
     return GetModuleHandleExW( flags, nameW, module );
 }
 
@@ -536,6 +526,14 @@ HMODULE WINAPI DECLSPEC_HOTPATCH LoadLibraryExW( LPCWSTR name, HANDLE file, DWOR
         SetLastError( ERROR_INVALID_PARAMETER );
         return 0;
     }
+
+    /* HACK: allow webservices.dll to be shipped together with remote debugger tools. */
+    if (flags == LOAD_LIBRARY_SEARCH_SYSTEM32 && !file && !wcscmp( name, L"webservices.dll" ))
+    {
+        FIXME( "HACK: ignoring LOAD_LIBRARY_SEARCH_SYSTEM32 for webservices.dll\n" );
+        flags = 0;
+    }
+
     RtlInitUnicodeString( &str, name );
     if (str.Buffer[str.Length/sizeof(WCHAR) - 1] != ' ') return load_library( &str, flags );
 
@@ -682,7 +680,7 @@ BOOL WINAPI DECLSPEC_HOTPATCH EnumResourceLanguagesExA( HMODULE module, LPCSTR t
     {
         for (i = 0; i < resdir->NumberOfNamedEntries + resdir->NumberOfIdEntries; i++)
         {
-            ret = func( module, type, name, et[i].Id, param );
+            ret = func( module, type, name, et[i].u.Id, param );
             if (!ret) break;
         }
     }
@@ -742,7 +740,7 @@ BOOL WINAPI DECLSPEC_HOTPATCH EnumResourceLanguagesExW( HMODULE module, LPCWSTR 
     {
         for (i = 0; i < resdir->NumberOfNamedEntries + resdir->NumberOfIdEntries; i++)
         {
-            ret = func( module, type, name, et[i].Id, param );
+            ret = func( module, type, name, et[i].u.Id, param );
             if (!ret) break;
         }
     }
@@ -800,9 +798,9 @@ BOOL WINAPI DECLSPEC_HOTPATCH EnumResourceNamesExA( HMODULE module, LPCSTR type,
     {
         for (i = 0; i < resdir->NumberOfNamedEntries+resdir->NumberOfIdEntries; i++)
         {
-            if (et[i].NameIsString)
+            if (et[i].u.s.NameIsString)
             {
-                str = (const IMAGE_RESOURCE_DIR_STRING_U *)((const BYTE *)basedir + et[i].NameOffset);
+                str = (const IMAGE_RESOURCE_DIR_STRING_U *)((const BYTE *)basedir + et[i].u.s.NameOffset);
                 newlen = WideCharToMultiByte(CP_ACP, 0, str->NameString, str->Length, NULL, 0, NULL, NULL);
                 if (newlen + 1 > len)
                 {
@@ -820,7 +818,7 @@ BOOL WINAPI DECLSPEC_HOTPATCH EnumResourceNamesExA( HMODULE module, LPCSTR type,
             }
             else
             {
-                ret = func( module, type, UIntToPtr(et[i].Id), param );
+                ret = func( module, type, UIntToPtr(et[i].u.Id), param );
             }
             if (!ret) break;
         }
@@ -879,9 +877,9 @@ BOOL WINAPI DECLSPEC_HOTPATCH EnumResourceNamesExW( HMODULE module, LPCWSTR type
     {
         for (i = 0; i < resdir->NumberOfNamedEntries+resdir->NumberOfIdEntries; i++)
         {
-            if (et[i].NameIsString)
+            if (et[i].u.s.NameIsString)
             {
-                str = (const IMAGE_RESOURCE_DIR_STRING_U *)((const BYTE *)basedir + et[i].NameOffset);
+                str = (const IMAGE_RESOURCE_DIR_STRING_U *)((const BYTE *)basedir + et[i].u.s.NameOffset);
                 if (str->Length + 1 > len)
                 {
                     len = str->Length + 1;
@@ -898,7 +896,7 @@ BOOL WINAPI DECLSPEC_HOTPATCH EnumResourceNamesExW( HMODULE module, LPCWSTR type
             }
             else
             {
-                ret = func( module, type, UIntToPtr(et[i].Id), param );
+                ret = func( module, type, UIntToPtr(et[i].u.Id), param );
             }
             if (!ret) break;
         }
@@ -956,9 +954,9 @@ BOOL WINAPI DECLSPEC_HOTPATCH EnumResourceTypesExA( HMODULE module, ENUMRESTYPEP
     et = (const IMAGE_RESOURCE_DIRECTORY_ENTRY *)(resdir + 1);
     for (i = 0; i < resdir->NumberOfNamedEntries+resdir->NumberOfIdEntries; i++)
     {
-        if (et[i].NameIsString)
+        if (et[i].u.s.NameIsString)
         {
-            str = (const IMAGE_RESOURCE_DIR_STRING_U *)((const BYTE *)resdir + et[i].NameOffset);
+            str = (const IMAGE_RESOURCE_DIR_STRING_U *)((const BYTE *)resdir + et[i].u.s.NameOffset);
             newlen = WideCharToMultiByte( CP_ACP, 0, str->NameString, str->Length, NULL, 0, NULL, NULL);
             if (newlen + 1 > len)
             {
@@ -972,7 +970,7 @@ BOOL WINAPI DECLSPEC_HOTPATCH EnumResourceTypesExA( HMODULE module, ENUMRESTYPEP
         }
         else
         {
-            ret = func( module, UIntToPtr(et[i].Id), param );
+            ret = func( module, UIntToPtr(et[i].u.Id), param );
         }
         if (!ret) break;
     }
@@ -1006,9 +1004,9 @@ BOOL WINAPI DECLSPEC_HOTPATCH EnumResourceTypesExW( HMODULE module, ENUMRESTYPEP
     et = (const IMAGE_RESOURCE_DIRECTORY_ENTRY *)(resdir + 1);
     for (i = 0; i < resdir->NumberOfNamedEntries + resdir->NumberOfIdEntries; i++)
     {
-        if (et[i].NameIsString)
+        if (et[i].u.s.NameIsString)
         {
-            str = (const IMAGE_RESOURCE_DIR_STRING_U *)((const BYTE *)resdir + et[i].NameOffset);
+            str = (const IMAGE_RESOURCE_DIR_STRING_U *)((const BYTE *)resdir + et[i].u.s.NameOffset);
             if (str->Length + 1 > len)
             {
                 len = str->Length + 1;
@@ -1021,7 +1019,7 @@ BOOL WINAPI DECLSPEC_HOTPATCH EnumResourceTypesExW( HMODULE module, ENUMRESTYPEP
         }
         else
         {
-            ret = func( module, UIntToPtr(et[i].Id), param );
+            ret = func( module, UIntToPtr(et[i].u.Id), param );
         }
         if (!ret) break;
     }

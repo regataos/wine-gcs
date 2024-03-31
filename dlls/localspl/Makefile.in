@@ -6,8 +6,9 @@ UNIX_LIBS    = $(APPLICATIONSERVICES_LIBS)
 
 EXTRADLLFLAGS = -Wb,--prefer-native
 
-SOURCES = \
+C_SRCS = \
 	cups.c \
 	localmon.c \
-	localspl.rc \
 	provider.c
+
+RC_SRCS = localspl.rc

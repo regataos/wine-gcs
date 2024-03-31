@@ -1,11 +1,11 @@
 EXTRADEFS = -D_CRTIMP=
 MODULE    = msvcr70.dll
 IMPORTLIB = msvcr70
-IMPORTS   = $(MUSL_PE_LIBS) ntdll
+IMPORTS   = ntdll
 DELAYIMPORTS = advapi32 user32
 PARENTSRC = ../msvcrt
 
-SOURCES = \
+C_SRCS = \
 	console.c \
 	cpp.c \
 	ctype.c \
@@ -16,7 +16,6 @@ SOURCES = \
 	except.c \
 	except_arm.c \
 	except_arm64.c \
-	except_arm64ec.c \
 	except_i386.c \
 	except_x86_64.c \
 	exception_ptr.c \

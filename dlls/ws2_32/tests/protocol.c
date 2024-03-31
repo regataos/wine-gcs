@@ -96,7 +96,7 @@ static void test_WSAEnumProtocolsA(void)
     error = WSAGetLastError();
     ok( error == WSAENOBUFS, "Expected 10055, received %ld\n", error);
 
-    buffer = malloc( len );
+    buffer = HeapAlloc( GetProcessHeap(), 0, len );
 
     if (buffer)
     {
@@ -113,7 +113,7 @@ static void test_WSAEnumProtocolsA(void)
                                 buffer[i].dwServiceFlags1);
         }
 
-        free( buffer );
+        HeapFree( GetProcessHeap(), 0, buffer );
     }
 
     /* Test invalid protocols in the list */
@@ -123,7 +123,7 @@ static void test_WSAEnumProtocolsA(void)
     ok( error == WSAENOBUFS || broken(error == WSAEFAULT) /* NT4 */,
        "Expected 10055, received %ld\n", error);
 
-    buffer = malloc( len );
+    buffer = HeapAlloc( GetProcessHeap(), 0, len );
 
     if (buffer)
     {
@@ -141,7 +141,7 @@ static void test_WSAEnumProtocolsA(void)
                 }
         ok(found == 0x0A, "Expected 2 bits represented as 0xA, received 0x%x\n", found);
 
-        free( buffer );
+        HeapFree( GetProcessHeap(), 0, buffer );
     }
 }
 
@@ -164,7 +164,7 @@ static void test_WSAEnumProtocolsW(void)
     error = WSAGetLastError();
     ok( error == WSAENOBUFS, "Expected 10055, received %ld\n", error);
 
-    buffer = malloc( len );
+    buffer = HeapAlloc( GetProcessHeap(), 0, len );
 
     if (buffer)
     {
@@ -181,7 +181,7 @@ static void test_WSAEnumProtocolsW(void)
                                 buffer[i].dwServiceFlags1);
         }
 
-        free( buffer );
+        HeapFree( GetProcessHeap(), 0, buffer );
     }
 
     /* Test invalid protocols in the list */
@@ -191,7 +191,7 @@ static void test_WSAEnumProtocolsW(void)
     ok( error == WSAENOBUFS || broken(error == WSAEFAULT) /* NT4 */,
        "Expected 10055, received %ld\n", error);
 
-    buffer = malloc( len );
+    buffer = HeapAlloc( GetProcessHeap(), 0, len );
 
     if (buffer)
     {
@@ -209,7 +209,7 @@ static void test_WSAEnumProtocolsW(void)
                 }
         ok(found == 0x0A, "Expected 2 bits represented as 0xA, received 0x%x\n", found);
 
-        free( buffer );
+        HeapFree( GetProcessHeap(), 0, buffer );
     }
 }
 
@@ -2176,7 +2176,6 @@ static void test_getaddrinfo(void)
     SOCKADDR_IN *sockaddr;
     CHAR name[256], *ip;
     DWORD size = sizeof(name);
-    BOOL has_ipv6_getaddrinfo = TRUE;
     BOOL has_ipv6_addr;
 
     memset(&hint, 0, sizeof(ADDRINFOA));
@@ -2377,10 +2376,8 @@ static void test_getaddrinfo(void)
     }
     else
     {
-        todo_wine
         ok(ret == WSAHOST_NOT_FOUND, "getaddrinfo failed with %d\n", ret);
-        skip("getaddrinfo does not support IPV6\n");
-        has_ipv6_getaddrinfo = FALSE;
+        win_skip("getaddrinfo does not support IPV6\n");
     }
 
     hint.ai_flags = 0;
@@ -2471,10 +2468,7 @@ static void test_getaddrinfo(void)
     ret = getaddrinfo("www.kernel.org", NULL, NULL, &result);
     ok(!ret, "getaddrinfo failed with %d\n", WSAGetLastError());
     if (!has_ipv6_addr)
-    {
-        todo_wine_if(has_ipv6_getaddrinfo)
-        ok(!ipv6_found(result), "IPv6 address is returned.\n");
-    }
+        todo_wine ok(!ipv6_found(result), "IPv6 address is returned.\n");
     freeaddrinfo(result);
 
     for (i = 0; i < ARRAY_SIZE(hinttests); i++)
@@ -2595,8 +2589,8 @@ static void test_gethostbyname(void)
     ret = GetIpForwardTable(NULL, &route_size, FALSE);
     ok(ret == ERROR_INSUFFICIENT_BUFFER, "GetIpForwardTable failed with a different error: %d\n", ret);
 
-    adapters = malloc(adap_size);
-    routes = malloc(route_size);
+    adapters = HeapAlloc(GetProcessHeap(), 0, adap_size);
+    routes = HeapAlloc(GetProcessHeap(), 0, route_size);
 
     ret = GetAdaptersInfo(adapters, &adap_size);
     ok(ret  == NO_ERROR, "GetAdaptersInfo failed, error: %d\n", ret);
@@ -2633,8 +2627,8 @@ static void test_gethostbyname(void)
     ok(found_default, "failed to find the first IP from gethostbyname!\n");
 
 cleanup:
-    free(adapters);
-    free(routes);
+    HeapFree(GetProcessHeap(), 0, adapters);
+    HeapFree(GetProcessHeap(), 0, routes);
 }
 
 static void test_gethostbyname_hack(void)
@@ -2792,13 +2786,13 @@ static void test_WSAEnumNameSpaceProvidersA(void)
     todo_wine
     ok(error == WSAEFAULT, "Expected 10014, got %lu\n", error);
 
-    name = malloc(len);
+    name = HeapAlloc(GetProcessHeap(), 0, len);
 
     ret = WSAEnumNameSpaceProvidersA(&len, name);
     todo_wine
     ok(ret > 0, "Expected more than zero name space providers\n");
 
-    free(name);
+    HeapFree(GetProcessHeap(), 0, name);
 }
 
 static void test_WSAEnumNameSpaceProvidersW(void)
@@ -2839,7 +2833,7 @@ static void test_WSAEnumNameSpaceProvidersW(void)
     todo_wine
     ok(error == WSAEFAULT, "Expected 10014, got %lu\n", error);
 
-    name = malloc(len);
+    name = HeapAlloc(GetProcessHeap(), 0, len);
 
     ret = WSAEnumNameSpaceProvidersW(&len, name);
     todo_wine
@@ -2868,7 +2862,7 @@ static void test_WSAEnumNameSpaceProvidersW(void)
         }
     }
 
-    free(name);
+    HeapFree(GetProcessHeap(), 0, name);
 }
 
 static void test_WSCGetProviderInfo(void)
@@ -2881,7 +2875,7 @@ static void test_WSCGetProviderInfo(void)
 
     if (!pWSCGetProviderInfo)
     {
-        win_skip("WSCGetProviderInfo is not available.\n");
+        skip("WSCGetProviderInfo is not available.\n");
         return;
     }
 

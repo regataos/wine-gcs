@@ -173,7 +173,7 @@ HRESULT read_png_chunk(IStream *stream, BYTE *type, BYTE **data, ULONG *data_siz
 
     if (data)
     {
-        *data = malloc(*data_size);
+        *data = RtlAllocateHeap(GetProcessHeap(), 0, *data_size);
         if (!*data)
             return E_OUTOFMEMORY;
 
@@ -183,7 +183,7 @@ HRESULT read_png_chunk(IStream *stream, BYTE *type, BYTE **data, ULONG *data_siz
         {
             if (SUCCEEDED(hr))
                 hr = E_FAIL;
-            free(*data);
+            RtlFreeHeap(GetProcessHeap(), 0, *data);
             *data = NULL;
             return hr;
         }

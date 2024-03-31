@@ -170,8 +170,8 @@ static ULONG WINAPI TgaDecoder_Release(IWICBitmapDecoder *iface)
         DeleteCriticalSection(&This->lock);
         if (This->stream)
             IStream_Release(This->stream);
-        free(This->imagebits);
-        free(This);
+        HeapFree(GetProcessHeap(), 0, This->imagebits);
+        HeapFree(GetProcessHeap(), 0, This);
     }
 
     return ref;
@@ -623,7 +623,7 @@ static HRESULT WINAPI TgaDecoder_Frame_CopyPalette(IWICBitmapFrameDecode *iface,
         return E_FAIL;
     }
 
-    colormap_data = malloc(This->colormap_length);
+    colormap_data = HeapAlloc(GetProcessHeap(), 0, This->colormap_length);
     if (!colormap_data) return E_OUTOFMEMORY;
 
     wcolormap_data = (WORD*)colormap_data;
@@ -743,7 +743,7 @@ static HRESULT WINAPI TgaDecoder_Frame_CopyPalette(IWICBitmapFrameDecode *iface,
         }
     }
 
-    free(colormap_data);
+    HeapFree(GetProcessHeap(), 0, colormap_data);
 
     if (SUCCEEDED(hr))
         hr = IWICPalette_InitializeCustom(pIPalette, colors, 256);
@@ -831,7 +831,7 @@ static HRESULT TgaDecoder_ReadImage(TgaDecoder *This)
         if (SUCCEEDED(hr))
         {
             datasize = This->header.width * This->header.height * (This->header.depth / 8);
-            This->imagebits = malloc(datasize);
+            This->imagebits = HeapAlloc(GetProcessHeap(), 0, datasize);
             if (!This->imagebits) hr = E_OUTOFMEMORY;
         }
 
@@ -870,7 +870,7 @@ static HRESULT TgaDecoder_ReadImage(TgaDecoder *This)
         }
         else
         {
-            free(This->imagebits);
+            HeapFree(GetProcessHeap(), 0, This->imagebits);
             This->imagebits = NULL;
         }
     }
@@ -944,7 +944,7 @@ HRESULT TgaDecoder_CreateInstance(REFIID iid, void** ppv)
 
     *ppv = NULL;
 
-    This = malloc(sizeof(TgaDecoder));
+    This = HeapAlloc(GetProcessHeap(), 0, sizeof(TgaDecoder));
     if (!This) return E_OUTOFMEMORY;
 
     This->IWICBitmapDecoder_iface.lpVtbl = &TgaDecoder_Vtbl;
@@ -953,7 +953,7 @@ HRESULT TgaDecoder_CreateInstance(REFIID iid, void** ppv)
     This->initialized = FALSE;
     This->stream = NULL;
     This->imagebits = NULL;
-    InitializeCriticalSectionEx(&This->lock, 0, RTL_CRITICAL_SECTION_FLAG_FORCE_DEBUG_INFO);
+    InitializeCriticalSection(&This->lock);
     This->lock.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": TgaDecoder.lock");
 
     ret = IWICBitmapDecoder_QueryInterface(&This->IWICBitmapDecoder_iface, iid, ppv);

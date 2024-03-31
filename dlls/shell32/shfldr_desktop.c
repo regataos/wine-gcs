@@ -26,6 +26,8 @@
 #include <stdio.h>
 
 #define COBJMACROS
+#define NONAMELESSUNION
+
 #include "winerror.h"
 #include "windef.h"
 #include "winbase.h"
@@ -530,14 +532,14 @@ static HRESULT WINAPI ISF_Desktop_fnGetUIObjectOf (IShellFolder2 * iface,
     {
         pidl = ILCombine (This->pidlRoot, apidl[0]);
         pObj = (LPUNKNOWN) IExtractIconA_Constructor (pidl);
-        ILFree(pidl);
+        SHFree (pidl);
         hr = S_OK;
     }
     else if (IsEqualIID (riid, &IID_IExtractIconW) && (cidl == 1))
     {
         pidl = ILCombine (This->pidlRoot, apidl[0]);
         pObj = (LPUNKNOWN) IExtractIconW_Constructor (pidl);
-        ILFree(pidl);
+        SHFree (pidl);
         hr = S_OK;
     }
     else if (IsEqualIID (riid, &IID_IDropTarget) && (cidl >= 1))
@@ -550,7 +552,7 @@ static HRESULT WINAPI ISF_Desktop_fnGetUIObjectOf (IShellFolder2 * iface,
     {
         pidl = ILCombine (This->pidlRoot, apidl[0]);
         hr = IShellLink_ConstructFromFile(NULL, riid, pidl, &pObj);
-        ILFree(pidl);
+        SHFree (pidl);
     }
     else
         hr = E_NOINTERFACE;
@@ -688,23 +690,23 @@ static HRESULT WINAPI ISF_Desktop_fnGetDisplayNameOf (IShellFolder2 * iface,
         if (GetVersion() & 0x80000000)
         {
             strRet->uType = STRRET_CSTR;
-            if (!WideCharToMultiByte(CP_ACP, 0, pszPath, -1, strRet->cStr, MAX_PATH,
+            if (!WideCharToMultiByte(CP_ACP, 0, pszPath, -1, strRet->u.cStr, MAX_PATH,
                                      NULL, NULL))
-                strRet->cStr[0] = '\0';
+                strRet->u.cStr[0] = '\0';
             CoTaskMemFree(pszPath);
         }
         else
         {
             strRet->uType = STRRET_WSTR;
-            strRet->pOleStr = pszPath;
+            strRet->u.pOleStr = pszPath;
         }
     }
     else
         CoTaskMemFree(pszPath);
 
     TRACE ("-- (%p)->(%s,0x%08lx)\n", This,
-    strRet->uType == STRRET_CSTR ? strRet->cStr :
-    debugstr_w(strRet->pOleStr), hr);
+    strRet->uType == STRRET_CSTR ? strRet->u.cStr :
+    debugstr_w(strRet->u.pOleStr), hr);
     return hr;
 }
 

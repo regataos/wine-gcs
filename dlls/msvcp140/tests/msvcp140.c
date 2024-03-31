@@ -150,7 +150,6 @@ typedef struct
 
 typedef struct cs_queue
 {
-    void *ctx;
     struct cs_queue *next;
     BOOL free;
     int unknown;
@@ -158,6 +157,7 @@ typedef struct cs_queue
 
 typedef struct
 {
+    ULONG_PTR unk_thread_id;
     cs_queue unk_active;
     void *unknown[2];
     cs_queue *head;
@@ -168,7 +168,6 @@ typedef struct
 {
     DWORD flags;
     critical_section cs;
-    ULONG_PTR unknown;
     DWORD thread_id;
     DWORD count;
 } *_Mtx_t;
@@ -858,15 +857,16 @@ static void test_Stat(void)
         WCHAR const *path;
         enum file_type ret;
         int perms;
+        int is_todo;
     } tests[] = {
-        { NULL, file_not_found, 0xdeadbeef },
-        { L"wine_test_dir", directory_file, 0777 },
-        { L"wine_test_dir/f1", regular_file, 0777 },
-        { L"wine_test_dir/f2", regular_file, 0555 },
-        { L"wine_test_dir/ne", file_not_found, 0xdeadbeef },
-        { L"wine_test_dir\\??invalid_name>>", file_not_found, 0xdeadbeef },
-        { L"wine_test_dir\\f1_link", regular_file, 0777 },
-        { L"wine_test_dir\\dir_link", directory_file, 0777 },
+        { NULL, file_not_found, 0xdeadbeef, FALSE },
+        { L"wine_test_dir", directory_file, 0777, FALSE },
+        { L"wine_test_dir/f1", regular_file, 0777, FALSE },
+        { L"wine_test_dir/f2", regular_file, 0555, FALSE },
+        { L"wine_test_dir/ne", file_not_found, 0xdeadbeef, FALSE },
+        { L"wine_test_dir\\??invalid_name>>", file_not_found, 0xdeadbeef, FALSE },
+        { L"wine_test_dir\\f1_link", regular_file, 0777, TRUE },
+        { L"wine_test_dir\\dir_link", directory_file, 0777, TRUE },
     };
 
     GetCurrentDirectoryW(MAX_PATH, origin_path);
@@ -924,20 +924,26 @@ static void test_Stat(void)
     for(i=0; i<ARRAY_SIZE(tests); i++) {
         perms = 0xdeadbeef;
         val = p_Stat(tests[i].path, &perms);
-        ok(tests[i].ret == val, "_Stat(): test %d expect: %d, got %d\n", i+1, tests[i].ret, val);
-        ok(tests[i].perms == perms, "_Stat(): test %d perms expect: 0%o, got 0%o\n",
-                i+1, tests[i].perms, perms);
+        todo_wine_if(tests[i].is_todo) {
+            ok(tests[i].ret == val, "_Stat(): test %d expect: %d, got %d\n", i+1, tests[i].ret, val);
+            ok(tests[i].perms == perms, "_Stat(): test %d perms expect: 0%o, got 0%o\n",
+                    i+1, tests[i].perms, perms);
+        }
         val = p_Stat(tests[i].path, NULL);
-        ok(tests[i].ret == val, "_Stat(): test %d expect: %d, got %d\n", i+1, tests[i].ret, val);
+        todo_wine_if(tests[i].is_todo)
+            ok(tests[i].ret == val, "_Stat(): test %d expect: %d, got %d\n", i+1, tests[i].ret, val);
 
         /* test _Lstat */
         perms = 0xdeadbeef;
         val = p_Lstat(tests[i].path, &perms);
-        ok(tests[i].ret == val, "_Lstat(): test %d expect: %d, got %d\n", i+1, tests[i].ret, val);
-        ok(tests[i].perms == perms, "_Lstat(): test %d perms expect: 0%o, got 0%o\n",
-                i+1, tests[i].perms, perms);
+        todo_wine_if(tests[i].is_todo) {
+            ok(tests[i].ret == val, "_Lstat(): test %d expect: %d, got %d\n", i+1, tests[i].ret, val);
+            ok(tests[i].perms == perms, "_Lstat(): test %d perms expect: 0%o, got 0%o\n",
+                    i+1, tests[i].perms, perms);
+        }
         val = p_Lstat(tests[i].path, NULL);
-        ok(tests[i].ret == val, "_Lstat(): test %d expect: %d, got %d\n", i+1, tests[i].ret, val);
+        todo_wine_if(tests[i].is_todo)
+            ok(tests[i].ret == val, "_Lstat(): test %d expect: %d, got %d\n", i+1, tests[i].ret, val);
     }
 
     GetSystemDirectoryW(sys_path, MAX_PATH);
@@ -949,9 +955,9 @@ static void test_Stat(void)
     ok(perms == expected_perms, "_Stat(): perms expect: 0%o, got 0%o\n", expected_perms, perms);
 
     if(ret) {
-        ok(DeleteFileW(L"wine_test_dir\\f1_link"),
+        todo_wine ok(DeleteFileW(L"wine_test_dir\\f1_link"),
                 "expect wine_test_dir/f1_link to exist\n");
-        ok(RemoveDirectoryW(L"wine_test_dir\\dir_link"),
+        todo_wine ok(RemoveDirectoryW(L"wine_test_dir\\dir_link"),
                 "expect wine_test_dir/dir_link to exist\n");
     }
     ok(DeleteFileW(L"wine_test_dir/f1"), "expect wine_test_dir/f1 to exist\n");
@@ -1070,14 +1076,15 @@ static void test_Unlink(void)
     struct {
         WCHAR const *path;
         int last_error;
+        MSVCP_bool is_todo;
     } tests[] = {
-        { L"wine_test_dir\\f1_symlink", ERROR_SUCCESS },
-        { L"wine_test_dir\\f1_link", ERROR_SUCCESS },
-        { L"wine_test_dir\\f1", ERROR_SUCCESS },
-        { L"wine_test_dir", ERROR_ACCESS_DENIED },
-        { L"not_exist", ERROR_FILE_NOT_FOUND },
-        { L"not_exist_dir\\not_exist_file", ERROR_PATH_NOT_FOUND },
-        { NULL, ERROR_PATH_NOT_FOUND }
+        { L"wine_test_dir\\f1_symlink", ERROR_SUCCESS, TRUE },
+        { L"wine_test_dir\\f1_link", ERROR_SUCCESS, FALSE },
+        { L"wine_test_dir\\f1", ERROR_SUCCESS, FALSE },
+        { L"wine_test_dir", ERROR_ACCESS_DENIED, FALSE },
+        { L"not_exist", ERROR_FILE_NOT_FOUND, FALSE },
+        { L"not_exist_dir\\not_exist_file", ERROR_PATH_NOT_FOUND, FALSE },
+        { NULL, ERROR_PATH_NOT_FOUND, FALSE }
     };
 
     GetCurrentDirectoryW(MAX_PATH, current_path);
@@ -1106,8 +1113,9 @@ static void test_Unlink(void)
     for(i=0; i<ARRAY_SIZE(tests); i++) {
         errno = 0xdeadbeef;
         ret = p_Unlink(tests[i].path);
-        ok(ret == tests[i].last_error, "_Unlink(): test %d expect: %d, got %d\n",
-           i+1, tests[i].last_error, ret);
+        todo_wine_if(tests[i].is_todo)
+            ok(ret == tests[i].last_error, "_Unlink(): test %d expect: %d, got %d\n",
+                    i+1, tests[i].last_error, ret);
         ok(errno == 0xdeadbeef, "_Unlink(): test %d errno expect: 0xdeadbeef, got %d\n", i+1, ret);
     }
 
@@ -1388,8 +1396,6 @@ static void test__Syserror_map(void)
 
     r1 = p__Syserror_map(0);
     ok(r1 != NULL, "_Syserror_map(0) returned NULL\n");
-    r1 = p__Syserror_map(1233);
-    ok(r1 != NULL, "_Syserror_map(1233) returned NULL\n");
     r2 = p__Syserror_map(1234);
     ok(r2 != NULL, "_Syserror_map(1234) returned NULL\n");
     ok(r1 == r2, "r1 = %p(%s), r2 = %p(%s)\n", r1, r1, r2, r2);
@@ -1632,35 +1638,6 @@ static void test_Copy_file(void)
     ok(SetCurrentDirectoryW(origin_path), "SetCurrentDirectoryW to origin_path failed\n");
 }
 
-static void test__Mtx(void)
-{
-    _Mtx_t mtx = NULL;
-    int r;
-
-    r = p__Mtx_init(&mtx, 0);
-    ok(!r, "failed to init mtx\n");
-
-    ok(mtx->thread_id == -1, "mtx.thread_id = %lx\n", mtx->thread_id);
-    ok(mtx->count == 0, "mtx.count = %lx\n", mtx->count);
-    p__Mtx_lock(mtx);
-    ok(mtx->thread_id == GetCurrentThreadId(), "mtx.thread_id = %lx\n", mtx->thread_id);
-    ok(mtx->count == 1, "mtx.count = %lx\n", mtx->count);
-    p__Mtx_lock(mtx);
-    ok(mtx->thread_id == GetCurrentThreadId(), "mtx.thread_id = %lx\n", mtx->thread_id);
-    ok(mtx->count == 1, "mtx.count = %lx\n", mtx->count);
-    p__Mtx_unlock(mtx);
-    ok(mtx->thread_id == -1, "mtx.thread_id = %lx\n", mtx->thread_id);
-    ok(mtx->count == 0, "mtx.count = %lx\n", mtx->count);
-    p__Mtx_unlock(mtx);
-    ok(mtx->thread_id == -1, "mtx.thread_id = %lx\n", mtx->thread_id);
-    ok(mtx->count == -1, "mtx.count = %lx\n", mtx->count);
-    p__Mtx_unlock(mtx);
-    ok(mtx->thread_id == -1, "mtx.thread_id = %lx\n", mtx->thread_id);
-    ok(mtx->count == -2, "mtx.count = %lx\n", mtx->count);
-
-    p__Mtx_destroy(mtx);
-}
-
 START_TEST(msvcp140)
 {
     if(!init()) return;
@@ -1688,6 +1665,5 @@ START_TEST(msvcp140)
     test_Equivalent();
     test_cnd();
     test_Copy_file();
-    test__Mtx();
     FreeLibrary(msvcp);
 }

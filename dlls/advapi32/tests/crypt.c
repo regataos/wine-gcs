@@ -1260,10 +1260,10 @@ static void test_container_sd(void)
     ok(err == ERROR_INSUFFICIENT_BUFFER || broken(err == ERROR_INVALID_PARAMETER), "got %lu\n", err);
     ok(len, "expected len > 0\n");
 
-    sd = malloc(len);
+    sd = HeapAlloc(GetProcessHeap(), 0, len);
     ret = CryptGetProvParam(prov, PP_KEYSET_SEC_DESCR, (BYTE *)sd, &len, OWNER_SECURITY_INFORMATION);
     ok(ret, "got %lu\n", GetLastError());
-    free(sd);
+    HeapFree(GetProcessHeap(), 0, sd);
 
     ret = CryptReleaseContext(prov, 0);
     ok(ret, "got %lu\n", GetLastError());

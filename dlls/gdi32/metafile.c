@@ -360,7 +360,6 @@ HMETAFILE WINAPI CopyMetaFileA( HMETAFILE hSrcMetaFile, LPCSTR lpFilename )
  */
 BOOL WINAPI PlayMetaFile( HDC hdc, HMETAFILE hmf )
 {
-    BOOL metadc = GetObjectType(hdc) == OBJ_METADC;
     METAHEADER *mh = get_metafile_bits( hmf );
     METARECORD *mr;
     HANDLETABLE *ht;
@@ -373,19 +372,16 @@ BOOL WINAPI PlayMetaFile( HDC hdc, HMETAFILE hmf )
 
     if (!mh) return FALSE;
 
-    if (!metadc)
-    {
-        /* save DC */
-        hPen = GetCurrentObject(hdc, OBJ_PEN);
-        hBrush = GetCurrentObject(hdc, OBJ_BRUSH);
-        hPal = GetCurrentObject(hdc, OBJ_PAL);
+    /* save DC */
+    hPen = GetCurrentObject(hdc, OBJ_PEN);
+    hBrush = GetCurrentObject(hdc, OBJ_BRUSH);
+    hPal = GetCurrentObject(hdc, OBJ_PAL);
 
-        hRgn = NtGdiCreateRectRgn(0, 0, 0, 0);
-        if (!GetClipRgn(hdc, hRgn))
-        {
-            DeleteObject(hRgn);
-            hRgn = 0;
-        }
+    hRgn = NtGdiCreateRectRgn(0, 0, 0, 0);
+    if (!GetClipRgn(hdc, hRgn))
+    {
+        DeleteObject(hRgn);
+        hRgn = 0;
     }
 
     /* create the handle table */
@@ -418,15 +414,12 @@ BOOL WINAPI PlayMetaFile( HDC hdc, HMETAFILE hmf )
 	PlayMetaFileRecord( hdc, ht, mr, mh->mtNoObjects );
     }
 
-    if (!metadc)
-    {
-        /* restore DC */
-        SelectObject(hdc, hPen);
-        SelectObject(hdc, hBrush);
-        SelectPalette(hdc, hPal, FALSE);
-        ExtSelectClipRgn(hdc, hRgn, RGN_COPY);
-        DeleteObject(hRgn);
-    }
+    /* restore DC */
+    SelectObject(hdc, hPen);
+    SelectObject(hdc, hBrush);
+    SelectPalette(hdc, hPal, FALSE);
+    ExtSelectClipRgn(hdc, hRgn, RGN_COPY);
+    DeleteObject(hRgn);
 
     /* free objects in handle table */
     for(i = 0; i < mh->mtNoObjects; i++)

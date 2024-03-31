@@ -21,6 +21,7 @@
  */
 
 #define COBJMACROS
+#define NONAMELESSUNION
 
 #include <stdarg.h>
 
@@ -97,7 +98,7 @@ static BOOL WINAPI init_trash_dirs( INIT_ONCE *once, void *param, void **context
     if (!home) return TRUE;
     if (is_macos())
     {
-        files = malloc( (wcslen(home) + ARRAY_SIZE(L"\\.Trash")) * sizeof(WCHAR) );
+        files = heap_alloc( (lstrlenW(home) + lstrlenW(L"\\.Trash") + 1) * sizeof(WCHAR) );
         lstrcpyW( files, home );
         lstrcatW( files, L"\\.Trash" );
         files[1] = '\\';  /* change \??\ to \\?\ */
@@ -114,12 +115,12 @@ static BOOL WINAPI init_trash_dirs( INIT_ONCE *once, void *param, void **context
             fmt = L"\\??\\unix%s/Trash";
         }
         len = lstrlenW(home) + lstrlenW(fmt) + 7;
-        files = malloc( len * sizeof(WCHAR) );
+        files = heap_alloc( len * sizeof(WCHAR) );
         swprintf( files, len, fmt, home );
         files[1] = '\\';  /* change \??\ to \\?\ */
         for (p = files; *p; p++) if (*p == '/') *p = '\\';
         CreateDirectoryW( files, NULL );
-        info = malloc( len * sizeof(WCHAR) );
+        info = heap_alloc( len * sizeof(WCHAR) );
         lstrcpyW( info, files );
         lstrcatW( files, L"\\files" );
         lstrcatW( info, L"\\info" );
@@ -133,8 +134,8 @@ static BOOL WINAPI init_trash_dirs( INIT_ONCE *once, void *param, void **context
     return TRUE;
 
 done:
-    free( files );
-    free( info );
+    heap_free( files );
+    heap_free( info );
     return TRUE;
 }
 
@@ -201,14 +202,14 @@ static BOOL write_trashinfo_file( HANDLE handle, const WCHAR *orig_path )
     if (!(path = wine_get_unix_file_name( orig_path ))) return FALSE;
     GetLocalTime( &now );
 
-    buffer = malloc( strlen(path) * 3 + 128 );
+    buffer = heap_alloc( strlen(path) * 3 + 128 );
     strcpy( buffer, "[Trash Info]\nPath=" );
     encode( path, buffer + strlen(buffer) );
     sprintf( buffer + strlen(buffer), "\nDeletionDate=%04u-%02u-%02uT%02u:%02u:%02u\n",
              now.wYear, now.wMonth, now.wDay, now.wHour, now.wMinute, now.wSecond);
     WriteFile( handle, buffer, strlen(buffer), NULL, NULL );
     heap_free( path );
-    free( buffer );
+    heap_free( buffer );
     return TRUE;
 }
 
@@ -220,7 +221,7 @@ static void read_trashinfo_file( HANDLE handle, WIN32_FIND_DATAW *data )
     int header = 0;
 
     size = GetFileSize( handle, NULL );
-    if (!(buffer = malloc( size + 1 ))) return;
+    if (!(buffer = heap_alloc( size + 1 ))) return;
     if (!ReadFile( handle, buffer, size, &size, NULL )) size = 0;
     buffer[size] = 0;
     next = buffer;
@@ -264,7 +265,7 @@ static void read_trashinfo_file( HANDLE handle, WIN32_FIND_DATAW *data )
             }
         }
     }
-    free( buffer );
+    heap_free( buffer );
 }
 
 
@@ -278,13 +279,13 @@ BOOL trash_file( const WCHAR *path )
     if (!trash_dir) return FALSE;
 
     len = lstrlenW(trash_dir) + lstrlenW(file) + 11;
-    dest = malloc( len * sizeof(WCHAR) );
+    dest = heap_alloc( len * sizeof(WCHAR) );
 
     if (trash_info_dir)
     {
         HANDLE handle;
         ULONG infolen = lstrlenW(trash_info_dir) + lstrlenW(file) + 21;
-        WCHAR *info = malloc( infolen * sizeof(WCHAR) );
+        WCHAR *info = heap_alloc( infolen * sizeof(WCHAR) );
 
         swprintf( info, infolen, L"%s\\%s.trashinfo", trash_info_dir, file );
         for (i = 0; i < 1000; i++)
@@ -316,7 +317,7 @@ BOOL trash_file( const WCHAR *path )
         }
     }
     if (ret) TRACE( "%s -> %s\n", debugstr_w(path), debugstr_w(dest) );
-    free( dest );
+    heap_free( dest );
     return ret;
 }
 
@@ -330,11 +331,11 @@ static BOOL get_trash_item_info( const WCHAR *filename, WIN32_FIND_DATAW *data )
     {
         HANDLE handle;
         ULONG len = lstrlenW(trash_info_dir) + lstrlenW(filename) + 12;
-        WCHAR *info = malloc( len * sizeof(WCHAR) );
+        WCHAR *info = heap_alloc( len * sizeof(WCHAR) );
 
         swprintf( info, len, L"%s\\%s.trashinfo", trash_info_dir, filename );
         handle = CreateFileW( info, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, 0 );
-        free( info );
+        heap_free( info );
         if (handle == INVALID_HANDLE_VALUE) return FALSE;
         read_trashinfo_file( handle, data );
         CloseHandle( handle );
@@ -365,7 +366,7 @@ static HRESULT add_trash_item( WIN32_FIND_DATAW *orig_data, LPITEMIDLIST **pidls
             LPITEMIDLIST *new;
 
             *size = max( *size * 2, 32 );
-            new = realloc( *pidls, *size * sizeof(**pidls) );
+            new = heap_realloc( *pidls, *size * sizeof(**pidls) );
             if (!new)
             {
                 SHFree( pidl );
@@ -392,7 +393,7 @@ static HRESULT enum_trash_items( LPITEMIDLIST **pidls, int *ret_count )
     if (!trash_dir) return E_FAIL;
 
     *pidls = NULL;
-    file = malloc( (wcslen(trash_dir) + ARRAY_SIZE(L"\\*")) * sizeof(WCHAR) );
+    file = heap_alloc( (lstrlenW(trash_dir) + lstrlenW(L"\\*") + 1) * sizeof(WCHAR) );
     lstrcpyW( file, trash_dir );
     lstrcatW( file, L"\\*" );
     handle = FindFirstFileW( file, &data );
@@ -413,7 +414,7 @@ static HRESULT enum_trash_items( LPITEMIDLIST **pidls, int *ret_count )
         *pidls = SHAlloc( count * sizeof(**pidls) );
         memcpy( *pidls, ret, count * sizeof(**pidls) );
     }
-    free( ret );
+    heap_free( ret );
     *ret_count = count;
     return hr;
 }
@@ -425,10 +426,10 @@ static void remove_trashinfo( const WCHAR *filename )
 
     if (!trash_info_dir) return;
     len = lstrlenW(trash_info_dir) + lstrlenW(filename) + 12;
-    info = malloc( len * sizeof(WCHAR) );
+    info = heap_alloc( len * sizeof(WCHAR) );
     swprintf( info, len, L"%s\\%s.trashinfo", trash_info_dir, filename );
     DeleteFileW( info );
-    free( info );
+    heap_free( info );
 }
 
 static HRESULT restore_trash_item( LPCITEMIDLIST pidl )
@@ -443,11 +444,11 @@ static HRESULT restore_trash_item( LPCITEMIDLIST pidl )
         return E_NOTIMPL;
     }
     len = lstrlenW(trash_dir) + lstrlenW(filename) + 2;
-    from = malloc( len * sizeof(WCHAR) );
+    from = heap_alloc( len * sizeof(WCHAR) );
     swprintf( from, len, L"%s\\%s", trash_dir, filename );
     if (MoveFileW( from, data->cFileName )) remove_trashinfo( filename );
     else WARN( "failed to restore %s to %s\n", debugstr_w(from), debugstr_w(data->cFileName) );
-    free( from );
+    heap_free( from );
     return S_OK;
 }
 
@@ -457,10 +458,10 @@ static HRESULT erase_trash_item( LPCITEMIDLIST pidl )
     WCHAR *from, *filename = (WCHAR *)(data + 1);
     ULONG len = lstrlenW(trash_dir) + lstrlenW(filename) + 2;
 
-    from = malloc( len * sizeof(WCHAR) );
+    from = heap_alloc( len * sizeof(WCHAR) );
     swprintf( from, len, L"%s\\%s", trash_dir, filename );
     if (DeleteFileW( from )) remove_trashinfo( filename );
-    free( from );
+    heap_free( from );
     return S_OK;
 }
 
@@ -570,7 +571,7 @@ static void DoErase(RecycleBinMenu *This)
     ISFHelper *helper;
     IShellFolder2_QueryInterface(This->folder,&IID_ISFHelper,(void**)&helper);
     if(helper)
-        ISFHelper_DeleteItems(helper,This->cidl,(LPCITEMIDLIST*)This->apidl);
+        ISFHelper_DeleteItems(helper, This->cidl, (LPCITEMIDLIST *)This->apidl, TRUE);
 }
 
 static void DoRestore(RecycleBinMenu *This)
@@ -914,7 +915,7 @@ static HRESULT WINAPI RecycleBin_GetDisplayNameOf(IShellFolder2 *This, LPCITEMID
 
     TRACE("(%p, %p, %lx, %p)\n", This, pidl, uFlags, pName);
     pName->uType = STRRET_WSTR;
-    return SHStrDupW(PathFindFileNameW(data->cFileName), &pName->pOleStr);
+    return SHStrDupW(PathFindFileNameW(data->cFileName), &pName->u.pOleStr);
 }
 
 static HRESULT WINAPI RecycleBin_SetNameOf(IShellFolder2 *This, HWND hwnd, LPCITEMIDLIST pidl, LPCOLESTR pszName,
@@ -1031,7 +1032,7 @@ static HRESULT WINAPI RecycleBin_GetDetailsOf(IShellFolder2 *iface, LPCITEMIDLIS
     }
     
     pDetails->str.uType = STRRET_WSTR;
-    return SHStrDupW(buffer, &pDetails->str.pOleStr);
+    return SHStrDupW(buffer, &pDetails->str.u.pOleStr);
 }
 
 static HRESULT WINAPI RecycleBin_MapColumnToSCID(IShellFolder2 *iface, UINT iColumn, SHCOLUMNID *pscid)
@@ -1194,10 +1195,17 @@ static HRESULT erase_items(HWND parent,const LPCITEMIDLIST * apidl, UINT cidl, B
 }
 
 static HRESULT WINAPI RecycleBin_DeleteItems(ISFHelper * iface, UINT cidl,
-                                             LPCITEMIDLIST * apidl)
+                                             LPCITEMIDLIST * apidl, BOOL confirm)
 {
     TRACE("(%p,%u,%p)\n",iface,cidl,apidl);
-    return erase_items(GetActiveWindow(),apidl,cidl,TRUE);
+    return erase_items(GetActiveWindow(), apidl, cidl, confirm);
+}
+
+static HRESULT WINAPI RecycleBin_CopyItems(ISFHelper * iface,
+                                           IShellFolder * pSFFrom,
+                                           UINT cidl, LPCITEMIDLIST * apidl)
+{
+    return E_NOTIMPL;
 }
 
 static const ISFHelperVtbl sfhelperVtbl =
@@ -1208,6 +1216,7 @@ static const ISFHelperVtbl sfhelperVtbl =
     RecycleBin_GetUniqueName,
     RecycleBin_AddFolder,
     RecycleBin_DeleteItems,
+    RecycleBin_CopyItems
 };
 
 HRESULT WINAPI SHQueryRecycleBinA(LPCSTR pszRootPath, LPSHQUERYRBINFO pSHQueryRBInfo)

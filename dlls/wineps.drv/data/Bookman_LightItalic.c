@@ -257,9 +257,9 @@ static const AFMMETRICS metrics[228] =
 const AFM PSDRV_Bookman_LightItalic =
 {
     "Bookman-LightItalic",		    /* FontName */
-    L"ITC Bookman Light Italic",	    /* FullName */
-    L"ITC Bookman",			    /* FamilyName */
-    L"AdobeStandardEncoding",		    /* EncodingScheme */
+    "ITC Bookman Light Italic",		    /* FullName */
+    "ITC Bookman",			    /* FamilyName */
+    "AdobeStandardEncoding",		    /* EncodingScheme */
     FW_NORMAL,				    /* Weight */
     -10,				    /* ItalicAngle */
     FALSE,				    /* IsFixedPitch */

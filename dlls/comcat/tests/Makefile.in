@@ -1,5 +1,5 @@
 TESTDLL   = comcat.dll
 IMPORTS   = ole32 advapi32
 
-SOURCES = \
+C_SRCS = \
 	comcat.c

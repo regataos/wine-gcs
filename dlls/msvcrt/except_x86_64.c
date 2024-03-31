@@ -18,13 +18,11 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#if defined(__x86_64__) && !defined(__arm64ec__)
+#ifdef __x86_64__
 
+#include <setjmp.h>
 #include <stdarg.h>
 #include <fpieee.h>
-#define longjmp ms_longjmp  /* avoid prototype mismatch */
-#include <setjmp.h>
-#undef longjmp
 
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
@@ -566,9 +564,9 @@ static DWORD cxx_frame_handler(EXCEPTION_RECORD *rec, ULONG64 frame,
         }
     }
 
-    if (rec->ExceptionFlags & (EXCEPTION_UNWINDING|EXCEPTION_EXIT_UNWIND))
+    if (rec->ExceptionFlags & (EH_UNWINDING|EH_EXIT_UNWIND))
     {
-        if (rec->ExceptionFlags & EXCEPTION_TARGET_UNWIND)
+        if (rec->ExceptionFlags & EH_TARGET_UNWIND)
             cxx_local_unwind(orig_frame, dispatch, descr,
                 cxx_is_consolidate(rec) ? rec->ExceptionInformation[3] : trylevel);
         else
@@ -581,14 +579,14 @@ static DWORD cxx_frame_handler(EXCEPTION_RECORD *rec, ULONG64 frame,
         return ExceptionContinueSearch;
     }
 
-    if (rec->ExceptionCode == CXX_EXCEPTION &&
-        (!rec->ExceptionInformation[1] && !rec->ExceptionInformation[2]))
-    {
-        TRACE("rethrow detected.\n");
-        *rec = *msvcrt_get_thread_data()->exc_record;
-    }
     if (rec->ExceptionCode == CXX_EXCEPTION)
     {
+        if (!rec->ExceptionInformation[1] && !rec->ExceptionInformation[2])
+        {
+            TRACE("rethrow detected.\n");
+            *rec = *msvcrt_get_thread_data()->exc_record;
+        }
+
         exc_type = (cxx_exception_type *)rec->ExceptionInformation[2];
 
         if (TRACE_ON(seh))
@@ -700,10 +698,15 @@ unsigned int CDECL __CxxQueryExceptionSize(void)
 
 
 /*******************************************************************
+ *		_setjmp (MSVCRT.@)
+ */
+__ASM_GLOBAL_FUNC( MSVCRT__setjmp,
+                   "jmp " __ASM_NAME("__wine_setjmpex") );
+
+/*******************************************************************
  *		longjmp (MSVCRT.@)
  */
-#ifndef __WINE_PE_BUILD
-void __cdecl longjmp( _JUMP_BUFFER *jmp, int retval )
+void __cdecl MSVCRT_longjmp( _JUMP_BUFFER *jmp, int retval )
 {
     EXCEPTION_RECORD rec;
 
@@ -720,7 +723,6 @@ void __cdecl longjmp( _JUMP_BUFFER *jmp, int retval )
     }
     __wine_longjmp( (__wine_jmp_buf *)jmp, retval );
 }
-#endif
 
 /*******************************************************************
  *		_local_unwind (MSVCRT.@)

@@ -17,6 +17,7 @@
  */
 
 #define COBJMACROS
+#define NONAMELESSUNION
 
 #include <stdarg.h>
 
@@ -24,6 +25,7 @@
 #include "winbase.h"
 #include "winnls.h"
 #include "winreg.h"
+#include "wine/heap.h"
 #include "wine/debug.h"
 #include "wine/list.h"
 
@@ -35,7 +37,7 @@
 #include "audiopolicy.h"
 #include "spatialaudioclient.h"
 
-#include "mmdevapi_private.h"
+#include "mmdevapi.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(mmdevapi);
 
@@ -159,8 +161,8 @@ static ULONG WINAPI SAO_Release(ISpatialAudioObject *iface)
         LeaveCriticalSection(&This->sa_stream->lock);
 
         ISpatialAudioObjectRenderStream_Release(&This->sa_stream->ISpatialAudioObjectRenderStream_iface);
-        free(This->buf);
-        free(This);
+        heap_free(This->buf);
+        heap_free(This);
     }
     return ref;
 }
@@ -287,11 +289,11 @@ static ULONG WINAPI SAORS_Release(ISpatialAudioObjectRenderStream *iface)
         IAudioClient_Release(This->client);
         if(This->params.NotifyObject)
             ISpatialAudioObjectRenderStreamNotify_Release(This->params.NotifyObject);
-        free((void*)This->params.ObjectFormat);
+        heap_free((void*)This->params.ObjectFormat);
         CloseHandle(This->params.EventHandle);
         DeleteCriticalSection(&This->lock);
         ISpatialAudioClient_Release(&This->sa_client->ISpatialAudioClient_iface);
-        free(This);
+        heap_free(This);
     }
     return ref;
 }
@@ -468,7 +470,7 @@ static HRESULT WINAPI SAORS_ActivateSpatialAudioObject(ISpatialAudioObjectRender
             return SPTLAUDCLNT_E_OBJECT_ALREADY_ACTIVE;
     }
 
-    obj = calloc(1, sizeof(*obj));
+    obj = heap_alloc_zero(sizeof(*obj));
     obj->ISpatialAudioObject_iface.lpVtbl = &ISpatialAudioObject_vtbl;
     obj->ref = 1;
     obj->type = type;
@@ -482,7 +484,7 @@ static HRESULT WINAPI SAORS_ActivateSpatialAudioObject(ISpatialAudioObjectRender
     obj->sa_stream = This;
     SAORS_AddRef(&This->ISpatialAudioObjectRenderStream_iface);
 
-    obj->buf = calloc(This->period_frames, This->sa_client->object_fmtex.Format.nBlockAlign);
+    obj->buf = heap_alloc_zero(This->period_frames * This->sa_client->object_fmtex.Format.nBlockAlign);
 
     EnterCriticalSection(&This->lock);
 
@@ -547,7 +549,7 @@ static ULONG WINAPI SAC_Release(ISpatialAudioClient *iface)
     TRACE("(%p) new ref %lu\n", This, ref);
     if (!ref) {
         IMMDevice_Release(This->mmdev);
-        free(This);
+        heap_free(This);
     }
     return ref;
 }
@@ -625,7 +627,7 @@ static HRESULT WINAPI SAC_IsSpatialAudioStreamAvailable(ISpatialAudioClient *ifa
 
 static WAVEFORMATEX *clone_fmtex(const WAVEFORMATEX *src)
 {
-    WAVEFORMATEX *r = malloc(sizeof(WAVEFORMATEX) + src->cbSize);
+    WAVEFORMATEX *r = heap_alloc(sizeof(WAVEFORMATEX) + src->cbSize);
     memcpy(r, src, sizeof(WAVEFORMATEX) + src->cbSize);
     return r;
 }
@@ -782,7 +784,7 @@ static HRESULT WINAPI SAC_ActivateSpatialAudioStream(ISpatialAudioClient *iface,
             return AUDCLNT_E_UNSUPPORTED_FORMAT;
         }
 
-        obj = calloc(1, sizeof(SpatialAudioStreamImpl));
+        obj = heap_alloc_zero(sizeof(SpatialAudioStreamImpl));
 
         obj->ISpatialAudioObjectRenderStream_iface.lpVtbl = &ISpatialAudioObjectRenderStream_vtbl;
         obj->ref = 1;
@@ -820,10 +822,10 @@ static HRESULT WINAPI SAC_ActivateSpatialAudioStream(ISpatialAudioClient *iface,
             if(obj->params.NotifyObject)
                 ISpatialAudioObjectRenderStreamNotify_Release(obj->params.NotifyObject);
             DeleteCriticalSection(&obj->lock);
-            free((void*)obj->params.ObjectFormat);
+            heap_free((void*)obj->params.ObjectFormat);
             CloseHandle(obj->params.EventHandle);
             ISpatialAudioClient_Release(&obj->sa_client->ISpatialAudioClient_iface);
-            free(obj);
+            heap_free(obj);
             *stream = NULL;
             return hr;
         }
@@ -912,7 +914,7 @@ HRESULT SpatialAudioClient_Create(IMMDevice *mmdev, ISpatialAudioClient **out)
     WAVEFORMATEX *closest;
     HRESULT hr;
 
-    obj = calloc(1, sizeof(*obj));
+    obj = heap_alloc_zero(sizeof(*obj));
 
     obj->ref = 1;
     obj->ISpatialAudioClient_iface.lpVtbl = &ISpatialAudioClient_vtbl;
@@ -930,7 +932,7 @@ HRESULT SpatialAudioClient_Create(IMMDevice *mmdev, ISpatialAudioClient **out)
             CLSCTX_INPROC_SERVER, NULL, (void**)&aclient);
     if(FAILED(hr)){
         WARN("Activate failed: %08lx\n", hr);
-        free(obj);
+        heap_free(obj);
         return hr;
     }
 
@@ -942,7 +944,7 @@ HRESULT SpatialAudioClient_Create(IMMDevice *mmdev, ISpatialAudioClient **out)
         if(sizeof(WAVEFORMATEX) + closest->cbSize > sizeof(obj->object_fmtex)){
             ERR("Returned format too large: %s\n", debugstr_fmtex(closest));
             CoTaskMemFree(closest);
-            free(obj);
+            heap_free(obj);
             return AUDCLNT_E_UNSUPPORTED_FORMAT;
         }else if(!((closest->wFormatTag == WAVE_FORMAT_IEEE_FLOAT ||
                     (closest->wFormatTag == WAVE_FORMAT_EXTENSIBLE &&
@@ -951,7 +953,7 @@ HRESULT SpatialAudioClient_Create(IMMDevice *mmdev, ISpatialAudioClient **out)
                     closest->wBitsPerSample == 32)){
             ERR("Returned format not 32-bit float: %s\n", debugstr_fmtex(closest));
             CoTaskMemFree(closest);
-            free(obj);
+            heap_free(obj);
             return AUDCLNT_E_UNSUPPORTED_FORMAT;
         }
         WARN("The audio stack doesn't support 48kHz 32bit float. Using the closest match. Audio may be glitchy. %s\n", debugstr_fmtex(closest));
@@ -961,7 +963,7 @@ HRESULT SpatialAudioClient_Create(IMMDevice *mmdev, ISpatialAudioClient **out)
         CoTaskMemFree(closest);
     } else if(hr != S_OK){
         WARN("Checking supported formats failed: %08lx\n", hr);
-        free(obj);
+        heap_free(obj);
         return hr;
     }
 

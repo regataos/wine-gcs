@@ -28,76 +28,74 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(regedit);
 
-static BOOL silent;
-
-static void output_formatstring(BOOL with_help, UINT id, va_list va_args)
+static void output_writeconsole(const WCHAR *str, DWORD wlen)
 {
-    WCHAR buffer[4096];
-    WCHAR fmt[1536];
-    DWORD len;
-    LCID  current_lcid;
+    DWORD count;
 
-    if (silent && with_help) return;
-
-    current_lcid = GetThreadLocale();
-    if (silent) /* force en-US not to have localized strings */
-        SetThreadLocale(MAKELCID(MAKELANGID(LANG_ENGLISH, SUBLANG_ENGLISH_US), SORT_DEFAULT));
-
-    if (!LoadStringW(GetModuleHandleW(NULL), id, fmt, ARRAY_SIZE(fmt)))
+    if (!WriteConsoleW(GetStdHandle(STD_OUTPUT_HANDLE), str, wlen, &count, NULL))
     {
-        WINE_FIXME("LoadString failed with %ld\n", GetLastError());
-        if (silent) SetThreadLocale(current_lcid);
-        return;
-    }
+        DWORD len;
+        char  *msgA;
 
-    len = FormatMessageW(FORMAT_MESSAGE_FROM_STRING,
-                         fmt, 0, 0, buffer, ARRAY_SIZE(buffer), &va_args);
+        /* WriteConsole() fails on Windows if its output is redirected. If this occurs,
+         * we should call WriteFile() with OEM code page.
+         */
+        len = WideCharToMultiByte(GetOEMCP(), 0, str, wlen, NULL, 0, NULL, NULL);
+        msgA = malloc(len);
+        if (!msgA) return;
+
+        WideCharToMultiByte(GetOEMCP(), 0, str, wlen, msgA, len, NULL, NULL);
+        WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), msgA, len, &count, FALSE);
+        free(msgA);
+    }
+}
+
+static void output_formatstring(const WCHAR *fmt, va_list va_args)
+{
+    WCHAR *str;
+    DWORD len;
+
+    len = FormatMessageW(FORMAT_MESSAGE_FROM_STRING|FORMAT_MESSAGE_ALLOCATE_BUFFER,
+                         fmt, 0, 0, (WCHAR *)&str, 0, &va_args);
     if (len == 0 && GetLastError() != ERROR_NO_WORK_DONE)
     {
         WINE_FIXME("Could not format string: le=%lu, fmt=%s\n", GetLastError(), wine_dbgstr_w(fmt));
-        if (silent) SetThreadLocale(current_lcid);
         return;
     }
-    if (with_help &&
-        !LoadStringW(GetModuleHandleW(NULL), STRING_HELP,
-                     &buffer[wcslen(buffer)], ARRAY_SIZE(buffer) - wcslen(buffer)))
-    {
-        WINE_FIXME("LoadString failed with %ld\n", GetLastError());
-        if (silent) SetThreadLocale(current_lcid);
-        return;
-    }
-    if (silent)
-    {
-        MESSAGE("%ls", buffer);
-        SetThreadLocale(current_lcid);
-    }
-    else
-        MessageBoxW(NULL, buffer, MAKEINTRESOURCEW(IDS_APP_TITLE), MB_OK | MB_ICONHAND);
+    output_writeconsole(str, len);
+    LocalFree(str);
 }
 
 void WINAPIV output_message(unsigned int id, ...)
 {
+    WCHAR fmt[1536];
     va_list va_args;
 
+    if (!LoadStringW(GetModuleHandleW(NULL), id, fmt, ARRAY_SIZE(fmt)))
+    {
+        WINE_FIXME("LoadString failed with %ld\n", GetLastError());
+        return;
+    }
     va_start(va_args, id);
-    output_formatstring(FALSE, id, va_args);
+    output_formatstring(fmt, va_args);
     va_end(va_args);
 }
 
-void WINAPIV error_exit(void)
+void WINAPIV error_exit(unsigned int id, ...)
 {
+    WCHAR fmt[1536];
+    va_list va_args;
+
+    if (!LoadStringW(GetModuleHandleW(NULL), id, fmt, ARRAY_SIZE(fmt)))
+    {
+        WINE_FIXME("LoadString failed with %lu\n", GetLastError());
+        return;
+    }
+    va_start(va_args, id);
+    output_formatstring(fmt, va_args);
+    va_end(va_args);
+
     exit(0); /* regedit.exe always terminates with error code zero */
-}
-
-static void WINAPIV usage(unsigned int id, ...)
-{
-    va_list va_args;
-
-    va_start(va_args, id);
-    output_formatstring(TRUE, id, va_args);
-    va_end(va_args);
-
-    error_exit();
 }
 
 typedef enum {
@@ -161,8 +159,8 @@ static void PerformRegAction(REGEDIT_ACTION action, WCHAR **argv, int *i)
             break;
         }
     default:
-        output_message(STRING_UNHANDLED_ACTION);
-        error_exit();
+        error_exit(STRING_UNHANDLED_ACTION);
+        break;
     }
 }
 
@@ -197,8 +195,7 @@ BOOL ProcessCmdLine(WCHAR *cmdline)
         switch (towupper(argv[i][1]))
         {
         case '?':
-            output_message(STRING_USAGE);
-            error_exit();
+            error_exit(STRING_USAGE);
             break;
         case 'D':
             action = ACTION_DELETE;
@@ -213,13 +210,12 @@ BOOL ProcessCmdLine(WCHAR *cmdline)
             /* unhandled */;
             break;
         case 'S':
-            silent = TRUE;
-            break;
         case 'V':
             /* ignored */;
             break;
         default:
-            usage(STRING_INVALID_SWITCH, argv[i]);
+            output_message(STRING_INVALID_SWITCH, argv[i]);
+            error_exit(STRING_HELP);
         }
     }
 
@@ -229,12 +225,13 @@ BOOL ProcessCmdLine(WCHAR *cmdline)
         {
         case ACTION_ADD:
         case ACTION_EXPORT:
-            usage(STRING_NO_FILENAME);
+            output_message(STRING_NO_FILENAME);
             break;
         case ACTION_DELETE:
-            usage(STRING_NO_REG_KEY);
+            output_message(STRING_NO_REG_KEY);
             break;
         }
+        error_exit(STRING_HELP);
     }
 
     for (; i < argc; i++)

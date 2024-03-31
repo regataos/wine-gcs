@@ -30,7 +30,6 @@
 #include "windef.h"
 #include "winnt.h"
 #include "winternl.h"
-#include "ddk/ntddk.h"
 #include "wine/debug.h"
 #include "ntdll_misc.h"
 

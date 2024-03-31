@@ -122,18 +122,17 @@ static BOOL     source_locate_file(const char* srcfile, char* path)
         strcpy(path, srcfile);
         found = TRUE;
     }
-    else
+    else if (dbg_curr_process->search_path)
     {
         const char* spath;
-        const char* sp = dbg_curr_process->search_path;
-        if (!sp) sp = ".";
+
         spath = srcfile;
         while (!found)
         {
             while (*spath && *spath != '/' && *spath != '\\') spath++;
             if (!*spath) break;
             spath++;
-            found = SearchPathA(sp, spath, NULL, MAX_PATH, path, NULL);
+            found = SearchPathA(dbg_curr_process->search_path, spath, NULL, MAX_PATH, path, NULL);
         }
     }
     return found;

@@ -29,6 +29,8 @@
 #include "dvdmedia.h"
 #include "mmreg.h"
 #include "ks.h"
+#include "mfapi.h"
+#include "d3d9types.h"
 #include "wmcodecdsp.h"
 #include "initguid.h"
 #include "ksmedia.h"
@@ -39,6 +41,8 @@ static const GUID MEDIASUBTYPE_CVID = {mmioFOURCC('c','v','i','d'), 0x0000, 0x00
 static const GUID MEDIASUBTYPE_VC1S = {mmioFOURCC('V','C','1','S'), 0x0000, 0x0010, {0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71}};
 static const GUID MEDIASUBTYPE_MP3  = {WAVE_FORMAT_MPEGLAYER3, 0x0000, 0x0010, {0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71}};
 static const GUID MEDIASUBTYPE_WMV_Unknown = {0x7ce12ca9, 0xbfbf, 0x43d9, {0x9d, 0x00, 0x82, 0xb8, 0xed, 0x54, 0x31, 0x6b}};
+static const GUID MEDIASUBTYPE_XMAUDIO2 = {0x0166, 0x0000, 0x0010, {0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71}};
+extern const GUID MFVideoFormat_ABGR32;
 
 struct parser
 {
@@ -52,7 +56,7 @@ struct parser
     unsigned int source_count;
     BOOL enum_sink_first;
 
-    wg_parser_t wg_parser;
+    struct wg_parser *wg_parser;
 
     /* This protects the "streaming" and "flushing" fields, accessed by both
      * the application and streaming threads.
@@ -83,7 +87,7 @@ struct parser_source
     struct strmbase_source pin;
     IQualityControl IQualityControl_iface;
 
-    wg_parser_stream_t wg_stream;
+    struct wg_parser_stream *wg_stream;
 
     SourceSeeking seek;
 
@@ -109,7 +113,7 @@ static const IMediaSeekingVtbl GST_Seeking_Vtbl;
 static const IQualityControlVtbl GSTOutPin_QualityControl_Vtbl;
 
 static struct parser_source *create_pin(struct parser *filter,
-        wg_parser_stream_t stream, const WCHAR *name);
+        struct wg_parser_stream *stream, const WCHAR *name);
 static HRESULT GST_RemoveOutputPins(struct parser *This);
 static HRESULT WINAPI GST_ChangeCurrent(IMediaSeeking *iface);
 static HRESULT WINAPI GST_ChangeStop(IMediaSeeking *iface);
@@ -278,131 +282,108 @@ static bool amt_from_wg_format_audio_mpeg1(AM_MEDIA_TYPE *mt, const struct wg_fo
     return false;
 }
 
-static bool amt_from_wg_format_audio_wma(AM_MEDIA_TYPE *mt, const struct wg_format *format)
+static bool amt_from_wg_format_wma(AM_MEDIA_TYPE *mt, const struct wg_format *format)
 {
-    DWORD codec_data_len, size;
     WAVEFORMATEX *wave_format;
-    const GUID *subtype;
-    WORD fmt_tag;
 
     mt->majortype = MEDIATYPE_Audio;
     mt->formattype = FORMAT_WaveFormatEx;
 
+    if (!(wave_format = CoTaskMemAlloc(sizeof(*wave_format) + format->u.audio_wma.codec_data_len)))
+        return false;
+    memset(wave_format, 0, sizeof(*wave_format));
+    memcpy(wave_format + 1, format->u.audio_wma.codec_data, format->u.audio_wma.codec_data_len);
+
+    mt->cbFormat = sizeof(*wave_format);
+    mt->pbFormat = (BYTE *)wave_format;
+
     switch (format->u.audio_wma.version)
     {
         case 1:
-            subtype = &MEDIASUBTYPE_MSAUDIO1;
-            codec_data_len = MSAUDIO1_WFX_EXTRA_BYTES;
-            fmt_tag = WAVE_FORMAT_MSAUDIO1;
+            mt->subtype = MEDIASUBTYPE_MSAUDIO1;
+            wave_format->wFormatTag = WAVE_FORMAT_MSAUDIO1;
             break;
         case 2:
-            subtype = &MEDIASUBTYPE_WMAUDIO2;
-            codec_data_len = WMAUDIO2_WFX_EXTRA_BYTES;
-            fmt_tag = WAVE_FORMAT_WMAUDIO2;
+            mt->subtype = MEDIASUBTYPE_WMAUDIO2;
+            wave_format->wFormatTag = WAVE_FORMAT_WMAUDIO2;
+            if (format->u.audio_wma.is_xma)
+            {
+                mt->subtype = MEDIASUBTYPE_XMAUDIO2;
+                wave_format->wFormatTag = 0x0166;
+            }
             break;
         case 3:
-            subtype = &MEDIASUBTYPE_WMAUDIO3;
-            codec_data_len = WMAUDIO3_WFX_EXTRA_BYTES;
-            fmt_tag = WAVE_FORMAT_WMAUDIO3;
+            mt->subtype = MEDIASUBTYPE_WMAUDIO3;
+            wave_format->wFormatTag = WAVE_FORMAT_WMAUDIO3;
             break;
         case 4:
-            subtype = &MEDIASUBTYPE_WMAUDIO_LOSSLESS;
-            codec_data_len = 18;
-            fmt_tag = WAVE_FORMAT_WMAUDIO_LOSSLESS;
+            mt->subtype = MEDIASUBTYPE_WMAUDIO_LOSSLESS;
+            wave_format->wFormatTag = WAVE_FORMAT_WMAUDIO_LOSSLESS;
             break;
         default:
-            assert(false);
+            FIXME("unsupported version %u\n", format->u.audio_wma.version);
+            assert(0);
             return false;
     }
 
-    size = sizeof(WAVEFORMATEX) + codec_data_len;
-    if (!(wave_format = CoTaskMemAlloc(size)))
-        return false;
-    memset(wave_format, 0, size);
-
-    mt->subtype = *subtype;
-    mt->bFixedSizeSamples = TRUE;
-    mt->lSampleSize = format->u.audio_wma.block_align;
-    mt->cbFormat = size;
-    mt->pbFormat = (BYTE *)wave_format;
-    wave_format->wFormatTag = fmt_tag;
     wave_format->nChannels = format->u.audio_wma.channels;
     wave_format->nSamplesPerSec = format->u.audio_wma.rate;
-    wave_format->nAvgBytesPerSec = format->u.audio_wma.bitrate / 8;
-    wave_format->nBlockAlign = format->u.audio_wma.block_align;
     wave_format->wBitsPerSample = format->u.audio_wma.depth;
-    wave_format->cbSize = codec_data_len;
-
-    if (format->u.audio_wma.codec_data_len == codec_data_len)
-        memcpy(wave_format+1, format->u.audio_wma.codec_data, format->u.audio_wma.codec_data_len);
-    else
-        FIXME("Unexpected codec_data length; got %u, expected %lu\n", format->u.audio_wma.codec_data_len, codec_data_len);
+    wave_format->nBlockAlign = format->u.audio_wma.block_align;
+    wave_format->nAvgBytesPerSec = format->u.audio_wma.bitrate / 8;
+    wave_format->cbSize = sizeof(*wave_format) + format->u.audio_wma.codec_data_len - sizeof(WAVEFORMATEX);
     return true;
 }
 
 #define ALIGN(n, alignment) (((n) + (alignment) - 1) & ~((alignment) - 1))
-
-static unsigned int wg_format_get_max_size_video_raw(enum wg_video_format format, unsigned int width, unsigned int height)
-{
-    switch (format)
-    {
-        case WG_VIDEO_FORMAT_BGRA:
-        case WG_VIDEO_FORMAT_BGRx:
-        case WG_VIDEO_FORMAT_AYUV:
-            return width * height * 4;
-
-        case WG_VIDEO_FORMAT_BGR:
-            return ALIGN(width * 3, 4) * height;
-
-        case WG_VIDEO_FORMAT_RGB15:
-        case WG_VIDEO_FORMAT_RGB16:
-        case WG_VIDEO_FORMAT_UYVY:
-        case WG_VIDEO_FORMAT_YUY2:
-        case WG_VIDEO_FORMAT_YVYU:
-            return ALIGN(width * 2, 4) * height;
-
-        case WG_VIDEO_FORMAT_I420:
-        case WG_VIDEO_FORMAT_YV12:
-            return ALIGN(width, 4) * ALIGN(height, 2) /* Y plane */
-                    + 2 * ALIGN((width + 1) / 2, 4) * ((height + 1) / 2); /* U and V planes */
-
-        case WG_VIDEO_FORMAT_NV12:
-            return ALIGN(width, 4) * ALIGN(height, 2) /* Y plane */
-                    + ALIGN(width, 4) * ((height + 1) / 2); /* U/V plane */
-
-        case WG_VIDEO_FORMAT_UNKNOWN:
-            FIXME("Cannot guess maximum sample size for unknown video format.\n");
-            return 0;
-    }
-
-    assert(0);
-    return 0;
-}
 
 unsigned int wg_format_get_max_size(const struct wg_format *format)
 {
     switch (format->major_type)
     {
         case WG_MAJOR_TYPE_VIDEO:
-            return wg_format_get_max_size_video_raw(format->u.video.format,
-                    format->u.video.width, abs(format->u.video.height));
+        {
+            unsigned int width = format->u.video.width, height = abs(format->u.video.height);
+
+            switch (format->u.video.format)
+            {
+                case WG_VIDEO_FORMAT_BGRA:
+                case WG_VIDEO_FORMAT_BGRx:
+                case WG_VIDEO_FORMAT_RGBA:
+                case WG_VIDEO_FORMAT_AYUV:
+                    return width * height * 4;
+
+                case WG_VIDEO_FORMAT_BGR:
+                    return ALIGN(width * 3, 4) * height;
+
+                case WG_VIDEO_FORMAT_RGB15:
+                case WG_VIDEO_FORMAT_RGB16:
+                case WG_VIDEO_FORMAT_UYVY:
+                case WG_VIDEO_FORMAT_YUY2:
+                case WG_VIDEO_FORMAT_YVYU:
+                    return ALIGN(width * 2, 4) * height;
+
+                case WG_VIDEO_FORMAT_I420:
+                case WG_VIDEO_FORMAT_YV12:
+                    return ALIGN(width, 4) * ALIGN(height, 2) /* Y plane */
+                            + 2 * ALIGN((width + 1) / 2, 4) * ((height + 1) / 2); /* U and V planes */
+
+                case WG_VIDEO_FORMAT_NV12:
+                    return ALIGN(width, 4) * ALIGN(height, 2) /* Y plane */
+                            + ALIGN(width, 4) * ((height + 1) / 2); /* U/V plane */
+
+                case WG_VIDEO_FORMAT_UNKNOWN:
+                    FIXME("Cannot guess maximum sample size for unknown video format.\n");
+                    return 0;
+            }
+            break;
+        }
 
         case WG_MAJOR_TYPE_VIDEO_CINEPAK:
             /* Both ffmpeg's encoder and a Cinepak file seen in the wild report
              * 24 bpp. ffmpeg sets biSizeImage as below; others may be smaller,
              * but as long as every sample fits into our allocator, we're fine. */
             return format->u.video_cinepak.width * format->u.video_cinepak.height * 3;
-
-        case WG_MAJOR_TYPE_VIDEO_MPEG1:
-            /* Estimated max size of a compressed video frame.
-             * There's no way to no way to know the real upper bound,
-             * so let's just use the decompressed size and hope it works. */
-            return wg_format_get_max_size_video_raw(WG_VIDEO_FORMAT_YV12,
-                    format->u.video_mpeg1.width, format->u.video_mpeg1.height);
-
-        case WG_MAJOR_TYPE_VIDEO_WMV:
-            return wg_format_get_max_size_video_raw(WG_VIDEO_FORMAT_YV12,
-                    format->u.video_wmv.width, format->u.video_wmv.height);
 
         case WG_MAJOR_TYPE_AUDIO:
         {
@@ -450,14 +431,10 @@ unsigned int wg_format_get_max_size(const struct wg_format *format)
             }
             break;
 
-        case WG_MAJOR_TYPE_AUDIO_WMA:
-            /* Estimated max size of a compressed audio frame.
-             * There's no way to no way to know the real upper bound,
-             * so let's just use one second of decompressed size and hope it works. */
-            return format->u.audio_wma.rate * format->u.audio_wma.channels * format->u.audio_wma.depth / 8;
-
         case WG_MAJOR_TYPE_AUDIO_MPEG4:
+        case WG_MAJOR_TYPE_AUDIO_WMA:
         case WG_MAJOR_TYPE_VIDEO_H264:
+        case WG_MAJOR_TYPE_VIDEO_WMV:
         case WG_MAJOR_TYPE_VIDEO_INDEO:
             FIXME("Format %u not implemented!\n", format->major_type);
             return 0;
@@ -479,6 +456,7 @@ static const GUID *wg_video_format_get_mediasubtype(enum wg_video_format format)
         case WG_VIDEO_FORMAT_BGRA: return &MEDIASUBTYPE_ARGB32;
         case WG_VIDEO_FORMAT_BGRx: return &MEDIASUBTYPE_RGB32;
         case WG_VIDEO_FORMAT_BGR: return &MEDIASUBTYPE_RGB24;
+        case WG_VIDEO_FORMAT_RGBA: return &MFVideoFormat_ABGR32;
         case WG_VIDEO_FORMAT_RGB15: return &MEDIASUBTYPE_RGB555;
         case WG_VIDEO_FORMAT_RGB16: return &MEDIASUBTYPE_RGB565;
         case WG_VIDEO_FORMAT_AYUV: return &MEDIASUBTYPE_AYUV;
@@ -502,6 +480,7 @@ static DWORD wg_video_format_get_compression(enum wg_video_format format)
         case WG_VIDEO_FORMAT_BGRA: return BI_RGB;
         case WG_VIDEO_FORMAT_BGRx: return BI_RGB;
         case WG_VIDEO_FORMAT_BGR: return BI_RGB;
+        case WG_VIDEO_FORMAT_RGBA: return BI_RGB;
         case WG_VIDEO_FORMAT_RGB15: return BI_RGB;
         case WG_VIDEO_FORMAT_RGB16: return BI_BITFIELDS;
         case WG_VIDEO_FORMAT_AYUV: return mmioFOURCC('A','Y','U','V');
@@ -525,6 +504,7 @@ static WORD wg_video_format_get_depth(enum wg_video_format format)
         case WG_VIDEO_FORMAT_BGRA: return 32;
         case WG_VIDEO_FORMAT_BGRx: return 32;
         case WG_VIDEO_FORMAT_BGR: return 24;
+        case WG_VIDEO_FORMAT_RGBA: return 32;
         case WG_VIDEO_FORMAT_RGB15: return 16;
         case WG_VIDEO_FORMAT_RGB16: return 16;
         case WG_VIDEO_FORMAT_AYUV: return 32;
@@ -594,7 +574,7 @@ static bool amt_from_wg_format_video(AM_MEDIA_TYPE *mt, const struct wg_format *
 
 static bool amt_from_wg_format_video_cinepak(AM_MEDIA_TYPE *mt, const struct wg_format *format)
 {
-    VIDEOINFOHEADER *video_format;
+    VIDEOINFO *video_format;
     uint32_t frame_time;
 
     if (!(video_format = CoTaskMemAlloc(sizeof(*video_format))))
@@ -605,7 +585,7 @@ static bool amt_from_wg_format_video_cinepak(AM_MEDIA_TYPE *mt, const struct wg_
     mt->bTemporalCompression = TRUE;
     mt->lSampleSize = 1;
     mt->formattype = FORMAT_VideoInfo;
-    mt->cbFormat = sizeof(*video_format);
+    mt->cbFormat = sizeof(VIDEOINFOHEADER);
     mt->pbFormat = (BYTE *)video_format;
 
     memset(video_format, 0, sizeof(*video_format));
@@ -622,93 +602,6 @@ static bool amt_from_wg_format_video_cinepak(AM_MEDIA_TYPE *mt, const struct wg_
     return true;
 }
 
-static bool amt_from_wg_format_video_wmv(AM_MEDIA_TYPE *mt, const struct wg_format *format)
-{
-    VIDEOINFOHEADER *video_format;
-    uint32_t frame_time;
-    const GUID *subtype;
-
-    switch (format->u.video_wmv.format)
-    {
-        case WG_WMV_VIDEO_FORMAT_WMV1:
-            subtype = &MEDIASUBTYPE_WMV1;
-            break;
-        case WG_WMV_VIDEO_FORMAT_WMV2:
-            subtype = &MEDIASUBTYPE_WMV2;
-            break;
-        case WG_WMV_VIDEO_FORMAT_WMV3:
-            subtype = &MEDIASUBTYPE_WMV3;
-            break;
-        case WG_WMV_VIDEO_FORMAT_WMVA:
-            subtype = &MEDIASUBTYPE_WMVA;
-            break;
-        case WG_WMV_VIDEO_FORMAT_WVC1:
-            subtype = &MEDIASUBTYPE_WVC1;
-            break;
-        default:
-            WARN("Invalid WMV format %u.\n", format->u.video_wmv.format);
-            return false;
-    }
-
-    if (!(video_format = CoTaskMemAlloc(sizeof(*video_format) + format->u.video_wmv.codec_data_len)))
-        return false;
-
-    mt->majortype = MEDIATYPE_Video;
-    mt->subtype = *subtype;
-    mt->bFixedSizeSamples = FALSE;
-    mt->bTemporalCompression = TRUE;
-    mt->lSampleSize = 0;
-    mt->formattype = FORMAT_VideoInfo;
-    mt->cbFormat = sizeof(*video_format) + format->u.video_wmv.codec_data_len;
-    mt->pbFormat = (BYTE *)video_format;
-
-    memset(video_format, 0, sizeof(*video_format));
-    SetRect(&video_format->rcSource, 0, 0, format->u.video_wmv.width, format->u.video_wmv.height);
-    video_format->rcTarget = video_format->rcSource;
-    if ((frame_time = MulDiv(10000000, format->u.video_wmv.fps_d, format->u.video_wmv.fps_n)) != -1)
-        video_format->AvgTimePerFrame = frame_time;
-    video_format->bmiHeader.biSize = sizeof(BITMAPINFOHEADER) + format->u.video_wmv.codec_data_len;
-    video_format->bmiHeader.biWidth = format->u.video_wmv.width;
-    video_format->bmiHeader.biHeight = format->u.video_wmv.height;
-    video_format->bmiHeader.biPlanes = 1;
-    video_format->bmiHeader.biCompression = mt->subtype.Data1;
-    video_format->bmiHeader.biBitCount = 24;
-    video_format->dwBitRate = 0;
-    memcpy(video_format+1, format->u.video_wmv.codec_data, format->u.video_wmv.codec_data_len);
-
-    return true;
-}
-
-static bool amt_from_wg_format_video_mpeg1(AM_MEDIA_TYPE *mt, const struct wg_format *format)
-{
-    MPEG1VIDEOINFO *video_format;
-    uint32_t frame_time;
-
-    if (!(video_format = CoTaskMemAlloc(sizeof(*video_format))))
-        return false;
-
-    mt->majortype = MEDIATYPE_Video;
-    mt->subtype = MEDIASUBTYPE_MPEG1Payload;
-    mt->bTemporalCompression = TRUE;
-    mt->lSampleSize = 1;
-    mt->formattype = FORMAT_MPEGVideo;
-    mt->cbFormat = sizeof(MPEG1VIDEOINFO);
-    mt->pbFormat = (BYTE *)video_format;
-
-    memset(video_format, 0, sizeof(*video_format));
-    if ((frame_time = MulDiv(10000000, format->u.video_mpeg1.fps_d, format->u.video_mpeg1.fps_n)) != -1)
-        video_format->hdr.AvgTimePerFrame = frame_time;
-    video_format->hdr.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-    video_format->hdr.bmiHeader.biWidth = format->u.video_mpeg1.width;
-    video_format->hdr.bmiHeader.biHeight = format->u.video_mpeg1.height;
-    video_format->hdr.bmiHeader.biPlanes = 1;
-    video_format->hdr.bmiHeader.biBitCount = 12;
-    video_format->hdr.bmiHeader.biCompression = mt->subtype.Data1;
-    video_format->hdr.bmiHeader.biSizeImage = wg_format_get_max_size(format);
-
-    return true;
-}
-
 bool amt_from_wg_format(AM_MEDIA_TYPE *mt, const struct wg_format *format, bool wm)
 {
     memset(mt, 0, sizeof(*mt));
@@ -717,6 +610,7 @@ bool amt_from_wg_format(AM_MEDIA_TYPE *mt, const struct wg_format *format, bool 
     {
     case WG_MAJOR_TYPE_AUDIO_MPEG4:
     case WG_MAJOR_TYPE_VIDEO_H264:
+    case WG_MAJOR_TYPE_VIDEO_WMV:
     case WG_MAJOR_TYPE_VIDEO_INDEO:
         FIXME("Format %u not implemented!\n", format->major_type);
         /* fallthrough */
@@ -730,19 +624,13 @@ bool amt_from_wg_format(AM_MEDIA_TYPE *mt, const struct wg_format *format, bool 
         return amt_from_wg_format_audio_mpeg1(mt, format);
 
     case WG_MAJOR_TYPE_AUDIO_WMA:
-        return amt_from_wg_format_audio_wma(mt, format);
+        return amt_from_wg_format_wma(mt, format);
 
     case WG_MAJOR_TYPE_VIDEO:
         return amt_from_wg_format_video(mt, format, wm);
 
     case WG_MAJOR_TYPE_VIDEO_CINEPAK:
         return amt_from_wg_format_video_cinepak(mt, format);
-
-    case WG_MAJOR_TYPE_VIDEO_WMV:
-        return amt_from_wg_format_video_wmv(mt, format);
-
-    case WG_MAJOR_TYPE_VIDEO_MPEG1:
-        return amt_from_wg_format_video_mpeg1(mt, format);
     }
 
     assert(0);
@@ -862,7 +750,8 @@ static bool amt_to_wg_format_audio_mpeg1_layer3(const AM_MEDIA_TYPE *mt, struct 
     return true;
 }
 
-static bool amt_to_wg_format_audio_wma(const AM_MEDIA_TYPE *mt, struct wg_format *format)
+static bool amt_to_wg_format_audio_wma(const AM_MEDIA_TYPE *mt, struct wg_format *format,
+        uint32_t version, bool is_xma)
 {
     const WAVEFORMATEX *audio_format = (const WAVEFORMATEX *)mt->pbFormat;
 
@@ -877,37 +766,16 @@ static bool amt_to_wg_format_audio_wma(const AM_MEDIA_TYPE *mt, struct wg_format
         return false;
     }
 
-    if (IsEqualGUID(&mt->subtype, &MEDIASUBTYPE_MSAUDIO1))
-        format->u.audio_wma.version = 1;
-    else if (IsEqualGUID(&mt->subtype, &MEDIASUBTYPE_WMAUDIO2))
-        format->u.audio_wma.version = 2;
-    else if (IsEqualGUID(&mt->subtype, &MEDIASUBTYPE_WMAUDIO3))
-        format->u.audio_wma.version = 3;
-    else if (IsEqualGUID(&mt->subtype, &MEDIASUBTYPE_WMAUDIO_LOSSLESS))
-        format->u.audio_wma.version = 4;
-    else
-        assert(false);
     format->major_type = WG_MAJOR_TYPE_AUDIO_WMA;
+    format->u.audio_wma.version = version;
+    format->u.audio_wma.is_xma = is_xma;
+    format->u.audio_wma.channels = audio_format->nChannels;
+    format->u.audio_wma.depth = audio_format->wBitsPerSample;
+    format->u.audio_wma.block_align = audio_format->nBlockAlign;
     format->u.audio_wma.bitrate = audio_format->nAvgBytesPerSec * 8;
     format->u.audio_wma.rate = audio_format->nSamplesPerSec;
-    format->u.audio_wma.depth = audio_format->wBitsPerSample;
-    format->u.audio_wma.channels = audio_format->nChannels;
-    format->u.audio_wma.block_align = audio_format->nBlockAlign;
-
-    format->u.audio_wma.codec_data_len = 0;
-    if (format->u.audio_wma.version == 1)
-        format->u.audio_wma.codec_data_len = 4;
-    if (format->u.audio_wma.version == 2)
-        format->u.audio_wma.codec_data_len = 10;
-    if (format->u.audio_wma.version == 3)
-        format->u.audio_wma.codec_data_len = 18;
-    if (format->u.audio_wma.version == 4)
-        format->u.audio_wma.codec_data_len = 18;
-    if (mt->cbFormat >= sizeof(WAVEFORMATEX) + format->u.audio_wma.codec_data_len)
-        memcpy(format->u.audio_wma.codec_data, audio_format+1, format->u.audio_wma.codec_data_len);
-    else
-        FIXME("Too small format block, can't copy codec data\n");
-
+    format->u.audio_wma.codec_data_len = mt->cbFormat - sizeof(*audio_format);
+    memcpy(format->u.audio_wma.codec_data, audio_format + 1, format->u.audio_wma.codec_data_len);
     return true;
 }
 
@@ -923,6 +791,7 @@ static bool amt_to_wg_format_video(const AM_MEDIA_TYPE *mt, struct wg_format *fo
         {&MEDIASUBTYPE_ARGB32,  WG_VIDEO_FORMAT_BGRA},
         {&MEDIASUBTYPE_RGB32,   WG_VIDEO_FORMAT_BGRx},
         {&MEDIASUBTYPE_RGB24,   WG_VIDEO_FORMAT_BGR},
+        {&MFVideoFormat_ABGR32, WG_VIDEO_FORMAT_RGBA},
         {&MEDIASUBTYPE_RGB555,  WG_VIDEO_FORMAT_RGB15},
         {&MEDIASUBTYPE_RGB565,  WG_VIDEO_FORMAT_RGB16},
         {&MEDIASUBTYPE_AYUV,    WG_VIDEO_FORMAT_AYUV},
@@ -991,48 +860,11 @@ static bool amt_to_wg_format_video_wmv(const AM_MEDIA_TYPE *mt, struct wg_format
     format->u.video_wmv.fps_d = video_format->AvgTimePerFrame;
 
     if (IsEqualGUID(&mt->subtype, &MEDIASUBTYPE_WMV1))
-        format->u.video_wmv.format = WG_WMV_VIDEO_FORMAT_WMV1;
+        format->u.video_wmv.version = 1;
     else if (IsEqualGUID(&mt->subtype, &MEDIASUBTYPE_WMV2))
-        format->u.video_wmv.format = WG_WMV_VIDEO_FORMAT_WMV2;
-    else if (IsEqualGUID(&mt->subtype, &MEDIASUBTYPE_WMV3))
-        format->u.video_wmv.format = WG_WMV_VIDEO_FORMAT_WMV3;
-    else if (IsEqualGUID(&mt->subtype, &MEDIASUBTYPE_WMVA))
-        format->u.video_wmv.format = WG_WMV_VIDEO_FORMAT_WMVA;
-    else if (IsEqualGUID(&mt->subtype, &MEDIASUBTYPE_WVC1))
-        format->u.video_wmv.format = WG_WMV_VIDEO_FORMAT_WVC1;
+        format->u.video_wmv.version = 2;
     else
-        format->u.video_wmv.format = WG_WMV_VIDEO_FORMAT_UNKNOWN;
-
-    format->u.video_wmv.codec_data_len = mt->cbFormat - sizeof(VIDEOINFOHEADER);
-    if (format->u.video_wmv.codec_data_len > sizeof(format->u.video_wmv.codec_data))
-    {
-        ERR("Too big codec_data value (%u).\n", format->u.video_wmv.codec_data_len);
-        format->u.video_wmv.codec_data_len = 0;
-    }
-    memcpy(format->u.video_wmv.codec_data, video_format+1, format->u.video_wmv.codec_data_len);
-    return true;
-}
-
-static bool amt_to_wg_format_video_mpeg1(const AM_MEDIA_TYPE *mt, struct wg_format *format)
-{
-    const MPEG1VIDEOINFO *video_format = (const MPEG1VIDEOINFO *)mt->pbFormat;
-
-    if (!IsEqualGUID(&mt->formattype, &FORMAT_MPEGVideo))
-    {
-        FIXME("Unknown format type %s.\n", debugstr_guid(&mt->formattype));
-        return false;
-    }
-    if (mt->cbFormat < sizeof(VIDEOINFOHEADER) || !mt->pbFormat)
-    {
-        ERR("Unexpected format size %lu.\n", mt->cbFormat);
-        return false;
-    }
-
-    format->major_type = WG_MAJOR_TYPE_VIDEO_MPEG1;
-    format->u.video_mpeg1.width = video_format->hdr.bmiHeader.biWidth;
-    format->u.video_mpeg1.height = video_format->hdr.bmiHeader.biHeight;
-    format->u.video_mpeg1.fps_n = 10000000;
-    format->u.video_mpeg1.fps_d = video_format->hdr.AvgTimePerFrame;
+        format->u.video_wmv.version = 3;
 
     return true;
 }
@@ -1053,8 +885,6 @@ bool amt_to_wg_format(const AM_MEDIA_TYPE *mt, struct wg_format *format)
                 || IsEqualGUID(&mt->subtype, &MEDIASUBTYPE_WMV3)
                 || IsEqualGUID(&mt->subtype, &MEDIASUBTYPE_VC1S))
             return amt_to_wg_format_video_wmv(mt, format);
-        if (IsEqualGUID(&mt->subtype, &MEDIASUBTYPE_MPEG1Payload))
-            return amt_to_wg_format_video_mpeg1(mt, format);
         return amt_to_wg_format_video(mt, format);
     }
     if (IsEqualGUID(&mt->majortype, &MEDIATYPE_Audio))
@@ -1063,11 +893,16 @@ bool amt_to_wg_format(const AM_MEDIA_TYPE *mt, struct wg_format *format)
             return amt_to_wg_format_audio_mpeg1(mt, format);
         if (IsEqualGUID(&mt->subtype, &MEDIASUBTYPE_MP3))
             return amt_to_wg_format_audio_mpeg1_layer3(mt, format);
-        if (IsEqualGUID(&mt->subtype, &MEDIASUBTYPE_MSAUDIO1)
-                || IsEqualGUID(&mt->subtype, &MEDIASUBTYPE_WMAUDIO2)
-                || IsEqualGUID(&mt->subtype, &MEDIASUBTYPE_WMAUDIO3)
-                || IsEqualGUID(&mt->subtype, &MEDIASUBTYPE_WMAUDIO_LOSSLESS))
-            return amt_to_wg_format_audio_wma(mt, format);
+        if (IsEqualGUID(&mt->subtype, &MEDIASUBTYPE_MSAUDIO1))
+            return amt_to_wg_format_audio_wma(mt, format, 1, false);
+        if (IsEqualGUID(&mt->subtype, &MEDIASUBTYPE_WMAUDIO2))
+            return amt_to_wg_format_audio_wma(mt, format, 2, false);
+        if (IsEqualGUID(&mt->subtype, &MEDIASUBTYPE_WMAUDIO3))
+            return amt_to_wg_format_audio_wma(mt, format, 3, false);
+        if (IsEqualGUID(&mt->subtype, &MEDIASUBTYPE_WMAUDIO_LOSSLESS))
+            return amt_to_wg_format_audio_wma(mt, format, 4, false);
+        if (IsEqualGUID(&mt->subtype, &MEDIASUBTYPE_XMAUDIO2))
+            return amt_to_wg_format_audio_wma(mt, format, 2, true);
         return amt_to_wg_format_audio(mt, format);
     }
 
@@ -1424,7 +1259,7 @@ static HRESULT parser_init_stream(struct strmbase_filter *iface)
         {
             ret = amt_to_wg_format(&source->pin.pin.mt, &format);
             assert(ret);
-            wg_parser_stream_enable(source->wg_stream, &format);
+            wg_parser_stream_enable(source->wg_stream, &format, STREAM_ENABLE_FLAG_FLIP_RGB);
         }
         else
         {
@@ -1527,7 +1362,7 @@ static HRESULT parser_sink_connect(struct strmbase_sink *iface, IPin *peer, cons
     filter->sink_connected = true;
     filter->read_thread = CreateThread(NULL, 0, read_thread, filter, 0, NULL);
 
-    if (FAILED(hr = wg_parser_connect(filter->wg_parser, file_size)))
+    if (FAILED(hr = wg_parser_connect(filter->wg_parser, file_size, NULL)))
         goto err;
 
     if (!filter->init_gst(filter))
@@ -1571,14 +1406,21 @@ static const struct strmbase_sink_ops sink_ops =
 
 static BOOL decodebin_parser_filter_init_gst(struct parser *filter)
 {
-    wg_parser_t parser = filter->wg_parser;
+    struct wg_parser *parser = filter->wg_parser;
+    const char *sgi = getenv("SteamGameId");
+    const WCHAR *format;
     unsigned int i, stream_count;
     WCHAR source_name[20];
+
+    /* King of Fighters XIII requests the WMV decoder filter pins by name
+     * to connect them to a Sample Grabber filter.
+     */
+    format = (sgi && !strcmp(sgi, "222940")) ? L"out%u" : L"Stream %02u";
 
     stream_count = wg_parser_get_stream_count(parser);
     for (i = 0; i < stream_count; ++i)
     {
-        swprintf(source_name, ARRAY_SIZE(source_name), L"Stream %02u", i);
+        swprintf(source_name, ARRAY_SIZE(source_name), format, i);
         if (!create_pin(filter, wg_parser_get_stream(parser, i), source_name))
             return FALSE;
     }
@@ -1650,20 +1492,20 @@ static HRESULT decodebin_parser_source_get_media_type(struct parser_source *pin,
     return VFW_S_NO_MORE_ITEMS;
 }
 
-static HRESULT parser_create(enum wg_parser_type type, BOOL output_compressed, struct parser **parser)
+static HRESULT parser_create(enum wg_parser_type type, struct parser **parser)
 {
     struct parser *object;
 
     if (!(object = calloc(1, sizeof(*object))))
         return E_OUTOFMEMORY;
 
-    if (!(object->wg_parser = wg_parser_create(type, output_compressed)))
+    if (!(object->wg_parser = wg_parser_create(type, false)))
     {
         free(object);
         return E_OUTOFMEMORY;
     }
 
-    InitializeCriticalSectionEx(&object->streaming_cs, 0, RTL_CRITICAL_SECTION_FLAG_FORCE_DEBUG_INFO);
+    InitializeCriticalSection(&object->streaming_cs);
     object->streaming_cs.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": parser.streaming_cs");
 
     InitializeConditionVariable(&object->flushing_cv);
@@ -1677,7 +1519,7 @@ HRESULT decodebin_parser_create(IUnknown *outer, IUnknown **out)
     struct parser *object;
     HRESULT hr;
 
-    if (FAILED(hr = parser_create(WG_PARSER_DECODEBIN, FALSE, &object)))
+    if (FAILED(hr = parser_create(WG_PARSER_DECODEBIN, &object)))
         return hr;
 
     strmbase_filter_init(&object->filter, outer, &CLSID_decodebin_parser, &filter_ops);
@@ -1717,56 +1559,17 @@ static ULONG WINAPI stream_select_Release(IAMStreamSelect *iface)
 
 static HRESULT WINAPI stream_select_Count(IAMStreamSelect *iface, DWORD *count)
 {
-    struct parser *filter = impl_from_IAMStreamSelect(iface);
-    TRACE("filter %p, count %p\n", filter, count);
-    EnterCriticalSection(&filter->filter.filter_cs);
-    if (filter->sink.pin.peer)
-        *count = wg_parser_get_stream_count(filter->wg_parser);
-    else
-        *count = 0;
-    LeaveCriticalSection(&filter->filter.filter_cs);
-    return S_OK;
+    FIXME("iface %p, count %p, stub!\n", iface, count);
+    return E_NOTIMPL;
 }
 
 static HRESULT WINAPI stream_select_Info(IAMStreamSelect *iface, LONG index,
         AM_MEDIA_TYPE **mt, DWORD *flags, LCID *lcid, DWORD *group, WCHAR **name,
         IUnknown **object, IUnknown **unknown)
 {
-    struct parser *filter = impl_from_IAMStreamSelect(iface);
-    HRESULT hr = S_OK;
-
-    FIXME("filter %p, index %ld, mt %p, flags %p, lcid %p, group %p, name %p, object %p, unknown %p, semi-stub!\n",
-            filter, index, mt, flags, lcid, group, name, object, unknown);
-    EnterCriticalSection(&filter->filter.filter_cs);
-
-    if (!filter->sink.pin.peer)
-    {
-        LeaveCriticalSection(&filter->filter.filter_cs);
-        return VFW_E_NOT_CONNECTED;
-    }
-    if (index < 0 || index >= filter->source_count)
-    {
-        LeaveCriticalSection(&filter->filter.filter_cs);
-        return S_FALSE;
-    }
-
-    if (mt)
-        *mt = CreateMediaType(&filter->sources[index]->pin.pin.mt);
-    if (flags) /* todo */
-        *flags = 0;
-    if (lcid) /* todo */
-        *lcid = 0;
-    if (group) /* todo */
-        *group = 0;
-    if (name) /* todo */
-        *name = NULL;
-    if (object) /* todo */
-        *object = NULL;
-    if (unknown)
-        *unknown = NULL;
-
-    LeaveCriticalSection(&filter->filter.filter_cs);
-    return hr;
+    FIXME("iface %p, index %ld, mt %p, flags %p, lcid %p, group %p, name %p, object %p, unknown %p, stub!\n",
+            iface, index, mt, flags, lcid, group, name, object, unknown);
+    return E_NOTIMPL;
 }
 
 static HRESULT WINAPI stream_select_Enable(IAMStreamSelect *iface, LONG index, DWORD flags)
@@ -1908,7 +1711,7 @@ static HRESULT WINAPI GST_Seeking_SetPositions(IMediaSeeking *iface,
     EnterCriticalSection(&filter->streaming_cs);
     filter->flushing = false;
     LeaveCriticalSection(&filter->streaming_cs);
-    WakeAllConditionVariable(&filter->flushing_cv);
+    WakeConditionVariable(&filter->flushing_cv);
 
     return S_OK;
 }
@@ -2069,12 +1872,6 @@ static HRESULT WINAPI GSTOutPin_DecideBufferSize(struct strmbase_source *iface,
         VIDEOINFOHEADER *format = (VIDEOINFOHEADER *)pin->pin.pin.mt.pbFormat;
         buffer_size = format->bmiHeader.biSizeImage;
     }
-    else if (IsEqualGUID(&pin->pin.pin.mt.formattype, &FORMAT_MPEGVideo))
-    {
-        MPEG1VIDEOINFO *format = (MPEG1VIDEOINFO *)pin->pin.pin.mt.pbFormat;
-        buffer_size = format->hdr.bmiHeader.biSizeImage;
-        buffer_count = 8;
-    }
     else if (IsEqualGUID(&pin->pin.pin.mt.formattype, &FORMAT_WaveFormatEx)
             && (IsEqualGUID(&pin->pin.pin.mt.subtype, &MEDIASUBTYPE_PCM)
             || IsEqualGUID(&pin->pin.pin.mt.subtype, &MEDIASUBTYPE_IEEE_FLOAT)))
@@ -2127,7 +1924,7 @@ static const struct strmbase_source_ops source_ops =
 };
 
 static struct parser_source *create_pin(struct parser *filter,
-        wg_parser_stream_t stream, const WCHAR *name)
+        struct wg_parser_stream *stream, const WCHAR *name)
 {
     struct parser_source *pin, **new_array;
 
@@ -2145,7 +1942,7 @@ static struct parser_source *create_pin(struct parser *filter,
             GST_ChangeCurrent, GST_ChangeRate);
     BaseFilterImpl_IncrementPinVersion(&filter->filter);
 
-    InitializeCriticalSectionEx(&pin->flushing_cs, 0, RTL_CRITICAL_SECTION_FLAG_FORCE_DEBUG_INFO);
+    InitializeCriticalSection(&pin->flushing_cs);
     pin->flushing_cs.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": pin.flushing_cs");
     InitializeConditionVariable(&pin->eos_cv);
 
@@ -2213,7 +2010,9 @@ static const struct strmbase_sink_ops wave_parser_sink_ops =
 
 static BOOL wave_parser_filter_init_gst(struct parser *filter)
 {
-    if (!create_pin(filter, wg_parser_get_stream(filter->wg_parser, 0), L"output"))
+    struct wg_parser *parser = filter->wg_parser;
+
+    if (!create_pin(filter, wg_parser_get_stream(parser, 0), L"output"))
         return FALSE;
 
     return TRUE;
@@ -2251,7 +2050,7 @@ HRESULT wave_parser_create(IUnknown *outer, IUnknown **out)
     struct parser *object;
     HRESULT hr;
 
-    if (FAILED(hr = parser_create(WG_PARSER_WAVPARSE, FALSE, &object)))
+    if (FAILED(hr = parser_create(WG_PARSER_WAVPARSE, &object)))
         return hr;
 
     strmbase_filter_init(&object->filter, outer, &CLSID_WAVEParser, &filter_ops);
@@ -2282,7 +2081,7 @@ static const struct strmbase_sink_ops avi_splitter_sink_ops =
 
 static BOOL avi_splitter_filter_init_gst(struct parser *filter)
 {
-    wg_parser_t parser = filter->wg_parser;
+    struct wg_parser *parser = filter->wg_parser;
     uint32_t i, stream_count;
     WCHAR source_name[20];
 
@@ -2329,7 +2128,7 @@ HRESULT avi_splitter_create(IUnknown *outer, IUnknown **out)
     struct parser *object;
     HRESULT hr;
 
-    if (FAILED(hr = parser_create(WG_PARSER_AVIDEMUX, FALSE, &object)))
+    if (FAILED(hr = parser_create(WG_PARSER_AVIDEMUX, &object)))
         return hr;
 
     strmbase_filter_init(&object->filter, outer, &CLSID_AviSplitter, &filter_ops);
@@ -2347,10 +2146,10 @@ static HRESULT mpeg_splitter_sink_query_accept(struct strmbase_pin *iface, const
 {
     if (!IsEqualGUID(&mt->majortype, &MEDIATYPE_Stream))
         return S_FALSE;
-    if (IsEqualGUID(&mt->subtype, &MEDIASUBTYPE_MPEG1Audio)
-            || IsEqualGUID(&mt->subtype, &MEDIASUBTYPE_MPEG1System))
+    if (IsEqualGUID(&mt->subtype, &MEDIASUBTYPE_MPEG1Audio))
         return S_OK;
     if (IsEqualGUID(&mt->subtype, &MEDIASUBTYPE_MPEG1Video)
+            || IsEqualGUID(&mt->subtype, &MEDIASUBTYPE_MPEG1System)
             || IsEqualGUID(&mt->subtype, &MEDIASUBTYPE_MPEG1VideoCD))
         FIXME("Unsupported subtype %s.\n", wine_dbgstr_guid(&mt->subtype));
     return S_FALSE;
@@ -2365,28 +2164,10 @@ static const struct strmbase_sink_ops mpeg_splitter_sink_ops =
 
 static BOOL mpeg_splitter_filter_init_gst(struct parser *filter)
 {
-    wg_parser_t parser = filter->wg_parser;
-    unsigned int i, stream_count;
-    wg_parser_stream_t stream;
-    struct wg_format fmt;
+    struct wg_parser *parser = filter->wg_parser;
 
-    stream_count = wg_parser_get_stream_count(parser);
-    for (i = 0; i < stream_count; ++i)
-    {
-        stream = wg_parser_get_stream(parser, i);
-        wg_parser_stream_get_preferred_format(stream, &fmt);
-        if (fmt.major_type == WG_MAJOR_TYPE_VIDEO_MPEG1)
-        {
-            if (!create_pin(filter, wg_parser_get_stream(parser, i), L"Video"))
-                return FALSE;
-        }
-        else if (fmt.major_type == WG_MAJOR_TYPE_AUDIO_MPEG1)
-        {
-            if (!create_pin(filter, wg_parser_get_stream(parser, i), L"Audio"))
-                return FALSE;
-        }
-        else FIXME("unexpected format %u\n", fmt.major_type);
-    }
+    if (!create_pin(filter, wg_parser_get_stream(parser, 0), L"Audio"))
+        return FALSE;
 
     return TRUE;
 }
@@ -2446,7 +2227,7 @@ HRESULT mpeg_splitter_create(IUnknown *outer, IUnknown **out)
     struct parser *object;
     HRESULT hr;
 
-    if (FAILED(hr = parser_create(WG_PARSER_DECODEBIN, TRUE, &object)))
+    if (FAILED(hr = parser_create(WG_PARSER_MPEGAUDIOPARSE, &object)))
         return hr;
 
     strmbase_filter_init(&object->filter, outer, &CLSID_MPEG1Splitter, &mpeg_splitter_ops);

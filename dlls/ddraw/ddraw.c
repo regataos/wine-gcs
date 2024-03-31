@@ -44,80 +44,37 @@ static const DDDEVICEIDENTIFIER2 deviceidentifier =
     0
 };
 
-#define D3D_VERSION(x) (1 << (x))
-
 static struct enum_device_entry
 {
-    unsigned int version_mask;
-    /* Some games (Motoracer 2 demo) have the bad idea to modify the device
-     * name/description strings. Let's put the strings in sufficiently sized
-     * arrays in static-lifetime writable memory. */
-    char device_desc[100];
+    char interface_name[100];
     char device_name[100];
     const GUID *device_guid;
     DWORD unsupported_caps;
-} device_list[] =
+} device_list7[] =
 {
-    /* Ramp Emulation (D3D 1&2 only) */
+    /* T&L HAL device */
     {
-        D3D_VERSION(1) | D3D_VERSION(2),
-        "WineD3D Ramp Software Emulation",
-        "Ramp Emulation",
-        &IID_IDirect3DRampDevice,
+        "WINE Direct3D7 Hardware Transform and Lighting acceleration using WineD3D",
+        "Wine D3D7 T&L HAL",
+        &IID_IDirect3DTnLHalDevice,
         0,
     },
 
-    /* RGB Emulation (D3D 1-7) */
+    /* HAL device */
     {
-        D3D_VERSION(1) | D3D_VERSION(2) | D3D_VERSION(3) | D3D_VERSION(7),
-        "WineD3D RGB Software Emulation",
-        "RGB Emulation",
-        &IID_IDirect3DRGBDevice,
-        D3DDEVCAPS_HWTRANSFORMANDLIGHT | D3DDEVCAPS_DRAWPRIMITIVES2EX | D3DDEVCAPS_HWRASTERIZATION,
-    },
-
-    /* Direct3D HAL (D3D 1-7) */
-    {
-        D3D_VERSION(1) | D3D_VERSION(2) | D3D_VERSION(3) | D3D_VERSION(7),
-        "WineD3D Hardware Acceleration",
+        "WINE Direct3D7 Hardware acceleration using WineD3D",
         "Direct3D HAL",
         &IID_IDirect3DHALDevice,
         D3DDEVCAPS_HWTRANSFORMANDLIGHT,
     },
 
-    /* MMX Emulation (D3D2 only) */
+    /* RGB device */
     {
-        D3D_VERSION(2),
-        "WineD3D MMX Software Emulation",
-        "MMX Emulation",
-        &IID_IDirect3DMMXDevice,
-        0,
+        "WINE Direct3D7 RGB Software Emulation using WineD3D",
+        "Wine D3D7 RGB",
+        &IID_IDirect3DRGBDevice,
+        D3DDEVCAPS_HWTRANSFORMANDLIGHT | D3DDEVCAPS_DRAWPRIMITIVES2EX | D3DDEVCAPS_HWRASTERIZATION,
     },
-
-    /* Direct3D T&L HAL (D3D7 only) */
-    {
-        D3D_VERSION(7),
-        "WineD3D Hardware Transform and Lighting Acceleration",
-        "Direct3D T&L HAL",
-        &IID_IDirect3DTnLHalDevice,
-        0,
-    },
-
-    /* In the future, we may wish to add the "Reference Rasterizer" and
-     * "Null device", which are only available in DX6-8 and must be explicitly
-     * enabled by the registry values:
-     * * EnumReference
-     * * EnumNullDevice,
-     * which are DWORD values which must be created under
-     * HKLM\Software\Microsoft\Direct3D\Drivers and set to any nonzero value.
-     * (Refer to enablerefrast.reg/disablerefrast.reg in the DX6/7 SDKs and
-     * KB249579 for more information.)
-     *
-     * DirectX 9.0 and higher appear to no longer recognize these settings,
-     * so apparently these devices were removed starting with DX9.
-     *
-     * Some games (AvP, Motoracer 2) break if these devices are enumerated.
-     */
 };
 
 static void STDMETHODCALLTYPE ddraw_null_wined3d_object_destroyed(void *parent) {}
@@ -430,7 +387,7 @@ static void ddraw_destroy_swapchain(struct ddraw *ddraw)
     {
         wined3d_vertex_declaration_decref(ddraw->decls[i].decl);
     }
-    free(ddraw->decls);
+    heap_free(ddraw->decls);
     ddraw->numConvertedDecls = 0;
 
     wined3d_swapchain_decref(ddraw->wined3d_swapchain);
@@ -488,7 +445,7 @@ static void ddraw_destroy(struct ddraw *This)
         This->d3ddevice->ddraw = NULL;
 
     /* Now free the object */
-    free(This);
+    heap_free(This);
 }
 
 /*****************************************************************************
@@ -630,7 +587,7 @@ static HRESULT ddraw_attach_d3d_device(struct ddraw *ddraw, HWND window,
     swapchain_desc.swap_effect = WINED3D_SWAP_EFFECT_DISCARD;
     swapchain_desc.device_window = window;
     swapchain_desc.windowed = !(cooplevel & DDSCL_FULLSCREEN);
-    swapchain_desc.flags = DDRAW_WINED3D_SWAPCHAIN_FLAGS;
+    swapchain_desc.flags = WINED3D_SWAPCHAIN_ALLOW_MODE_SWITCH | WINED3D_SWAPCHAIN_IMPLICIT;
 
     if ((cooplevel & DDSCL_NOWINDOWCHANGES) || window != GetForegroundWindow())
         swapchain_desc.flags |= WINED3D_SWAPCHAIN_NO_WINDOW_CHANGES;
@@ -674,7 +631,7 @@ static HRESULT ddraw_attach_d3d_device(struct ddraw *ddraw, HWND window,
     }
 
     ddraw->declArraySize = 2;
-    if (!(ddraw->decls = calloc(ddraw->declArraySize, sizeof(*ddraw->decls))))
+    if (!(ddraw->decls = heap_alloc_zero(ddraw->declArraySize * sizeof(*ddraw->decls))))
     {
         ERR("Error allocating an array for the converted vertex decls.\n");
         ddraw->declArraySize = 0;
@@ -981,7 +938,7 @@ static HRESULT ddraw_set_cooperative_level(struct ddraw *ddraw, HWND window,
             }
 
             rtv = wined3d_device_context_get_rendertarget_view(ddraw->immediate_context, 0);
-            /* Rendering to the wined3d frontbuffer. */
+            /* Rendering to ddraw->wined3d_frontbuffer. */
             if (rtv && !wined3d_rendertarget_view_get_sub_resource_parent(rtv))
                 rtv = NULL;
             else if (rtv)
@@ -1021,7 +978,7 @@ static HRESULT ddraw_set_cooperative_level(struct ddraw *ddraw, HWND window,
            topmost bit unless the DDSCL_NOWINDOWCHANGES flag is set in
            this call that sets it to normal, not in the old coop level. */
         if (!(cooplevel & DDSCL_NOWINDOWCHANGES))
-            SetWindowPos(window, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+            SetWindowPos(ddraw->dest_window, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 
         if (restore_mode_on_normal && FAILED(ddraw7_RestoreDisplayMode(&ddraw->IDirectDraw7_iface)))
             ERR("RestoreDisplayMode failed\n");
@@ -1199,7 +1156,7 @@ static HRESULT WINAPI ddraw7_SetDisplayMode(IDirectDraw7 *iface, DWORD width, DW
                     surface_desc->dwWidth, surface_desc->dwHeight, mode.format_id, WINED3D_MULTISAMPLE_NONE, 0)))
                 ERR("Failed to resize buffers, hr %#lx.\n", hr);
             else
-                ddrawformat_from_wined3dformat(&ddraw->primary->surface_desc.ddpfPixelFormat, mode.format_id);
+                ddrawformat_from_wined3dformat(&ddraw->primary->surface_desc.u4.ddpfPixelFormat, mode.format_id);
         }
         ddraw->flags |= DDRAW_RESTORE_MODE;
 
@@ -1458,6 +1415,15 @@ HRESULT ddraw_get_d3dcaps(const struct ddraw *ddraw, D3DDEVICEDESC7 *caps)
         D3DPTADDRESSCAPS_WRAP            | D3DPTADDRESSCAPS_MIRROR             | D3DPTADDRESSCAPS_CLAMP              |
         D3DPTADDRESSCAPS_BORDER          | D3DPTADDRESSCAPS_INDEPENDENTUV);
 
+    if (!(caps->dpcLineCaps.dwTextureCaps & D3DPTEXTURECAPS_POW2))
+    {
+        /* DirectX7 always has the np2 flag set, no matter what the card
+         * supports. Some old games (Rollcage) check the caps incorrectly.
+         * If wined3d supports nonpow2 textures it also has np2 conditional
+         * support. */
+        caps->dpcLineCaps.dwTextureCaps |= D3DPTEXTURECAPS_POW2 | D3DPTEXTURECAPS_NONPOW2CONDITIONAL;
+    }
+
     /* Fill the missing members, and do some fixup */
     caps->dpcLineCaps.dwSize = sizeof(caps->dpcLineCaps);
     caps->dpcLineCaps.dwTextureBlendCaps = D3DPTBLENDCAPS_ADD
@@ -1492,28 +1458,6 @@ HRESULT ddraw_get_d3dcaps(const struct ddraw *ddraw, D3DDEVICEDESC7 *caps)
     caps->dwReserved4 = 0;
 
     return DD_OK;
-}
-
-HRESULT CALLBACK enum_zbuffer(DDPIXELFORMAT *format, void *ctx)
-{
-    DDCAPS *caps = ctx;
-
-    switch (format->dwZBufferBitDepth)
-    {
-        case 8:
-            caps->dwZBufferBitDepths |= DDBD_8;
-            break;
-        case 16:
-            caps->dwZBufferBitDepths |= DDBD_16;
-            break;
-        case 24:
-            caps->dwZBufferBitDepths |= DDBD_24;
-            break;
-        case 32:
-            caps->dwZBufferBitDepths |= DDBD_32;
-            break;
-    }
-    return D3DENUMRET_OK;
 }
 
 /*****************************************************************************
@@ -1595,8 +1539,6 @@ static HRESULT WINAPI ddraw7_GetCaps(IDirectDraw7 *iface, DDCAPS *DriverCaps, DD
 
     caps.dwCaps |= DDCAPS_ALIGNSTRIDE;
     caps.dwAlignStrideAlign = DDRAW_STRIDE_ALIGNMENT;
-
-    IDirect3D7_EnumZBufferFormats(&ddraw->IDirect3D7_iface, &IID_IDirect3DHALDevice, enum_zbuffer, &caps);
 
     caps.ddsOldCaps.dwCaps = caps.ddsCaps.dwCaps;
 
@@ -1733,10 +1675,10 @@ static HRESULT WINAPI ddraw7_GetDisplayMode(IDirectDraw7 *iface, DDSURFACEDESC2 
     DDSD->dwFlags = DDSD_HEIGHT | DDSD_WIDTH | DDSD_PIXELFORMAT | DDSD_PITCH | DDSD_REFRESHRATE;
     DDSD->dwWidth = mode.width;
     DDSD->dwHeight = mode.height;
-    DDSD->dwRefreshRate = mode.refresh_rate;
-    DDSD->ddpfPixelFormat.dwSize = sizeof(DDSD->ddpfPixelFormat);
-    ddrawformat_from_wined3dformat(&DDSD->ddpfPixelFormat, mode.format_id);
-    DDSD->lPitch = mode.width * DDSD->ddpfPixelFormat.dwRGBBitCount / 8;
+    DDSD->u2.dwRefreshRate = mode.refresh_rate;
+    DDSD->u4.ddpfPixelFormat.dwSize = sizeof(DDSD->u4.ddpfPixelFormat);
+    ddrawformat_from_wined3dformat(&DDSD->u4.ddpfPixelFormat, mode.format_id);
+    DDSD->u1.lPitch = mode.width * DDSD->u4.ddpfPixelFormat.u1.dwRGBBitCount / 8;
 
     if(TRACE_ON(ddraw))
     {
@@ -2499,7 +2441,7 @@ static HRESULT WINAPI ddraw7_EnumDisplayModes(IDirectDraw7 *iface, DWORD Flags,
     if (!cb)
         return DDERR_INVALIDPARAMS;
 
-    if (!(enum_modes = malloc(enum_mode_array_size * sizeof(*enum_modes))))
+    if (!(enum_modes = heap_alloc(enum_mode_array_size * sizeof(*enum_modes))))
         return DDERR_OUTOFMEMORY;
 
     wined3d_mutex_lock();
@@ -2521,10 +2463,10 @@ static HRESULT WINAPI ddraw7_EnumDisplayModes(IDirectDraw7 *iface, DWORD Flags,
                     continue;
                 if (DDSD->dwFlags & DDSD_HEIGHT && mode.height != DDSD->dwHeight)
                     continue;
-                if (DDSD->dwFlags & DDSD_REFRESHRATE && mode.refresh_rate != DDSD->dwRefreshRate)
+                if (DDSD->dwFlags & DDSD_REFRESHRATE && mode.refresh_rate != DDSD->u2.dwRefreshRate)
                     continue;
                 if (DDSD->dwFlags & DDSD_PIXELFORMAT
-                        && pixelformat.dwRGBBitCount != DDSD->ddpfPixelFormat.dwRGBBitCount)
+                        && pixelformat.u1.dwRGBBitCount != DDSD->u4.ddpfPixelFormat.u1.dwRGBBitCount)
                     continue;
             }
 
@@ -2543,28 +2485,28 @@ static HRESULT WINAPI ddraw7_EnumDisplayModes(IDirectDraw7 *iface, DWORD Flags,
 
             memset(&callback_sd, 0, sizeof(callback_sd));
             callback_sd.dwSize = sizeof(callback_sd);
-            callback_sd.ddpfPixelFormat.dwSize = sizeof(DDPIXELFORMAT);
+            callback_sd.u4.ddpfPixelFormat.dwSize = sizeof(DDPIXELFORMAT);
 
             callback_sd.dwFlags = DDSD_HEIGHT|DDSD_WIDTH|DDSD_PIXELFORMAT|DDSD_PITCH|DDSD_REFRESHRATE;
             if (Flags & DDEDM_REFRESHRATES)
-                callback_sd.dwRefreshRate = mode.refresh_rate;
+                callback_sd.u2.dwRefreshRate = mode.refresh_rate;
 
             callback_sd.dwWidth = mode.width;
             callback_sd.dwHeight = mode.height;
 
-            callback_sd.ddpfPixelFormat=pixelformat;
+            callback_sd.u4.ddpfPixelFormat=pixelformat;
 
             /* Calc pitch and DWORD align like MSDN says */
-            callback_sd.lPitch = (callback_sd.ddpfPixelFormat.dwRGBBitCount / 8) * mode.width;
-            callback_sd.lPitch = (callback_sd.lPitch + 3) & ~3;
+            callback_sd.u1.lPitch = (callback_sd.u4.ddpfPixelFormat.u1.dwRGBBitCount / 8) * mode.width;
+            callback_sd.u1.lPitch = (callback_sd.u1.lPitch + 3) & ~3;
 
-            TRACE("Enumerating %lux%lux%lu @%lu\n", callback_sd.dwWidth, callback_sd.dwHeight, callback_sd.ddpfPixelFormat.dwRGBBitCount,
-              callback_sd.dwRefreshRate);
+            TRACE("Enumerating %lux%lux%lu @%lu\n", callback_sd.dwWidth, callback_sd.dwHeight, callback_sd.u4.ddpfPixelFormat.u1.dwRGBBitCount,
+              callback_sd.u2.dwRefreshRate);
 
             if(cb(&callback_sd, Context) == DDENUMRET_CANCEL)
             {
                 TRACE("Application asked to terminate the enumeration\n");
-                free(enum_modes);
+                heap_free(enum_modes);
                 wined3d_mutex_unlock();
                 return DD_OK;
             }
@@ -2574,9 +2516,9 @@ static HRESULT WINAPI ddraw7_EnumDisplayModes(IDirectDraw7 *iface, DWORD Flags,
                 struct wined3d_display_mode *new_enum_modes;
 
                 enum_mode_array_size *= 2;
-                if (!(new_enum_modes = realloc(enum_modes, enum_mode_array_size * sizeof(*new_enum_modes))))
+                if (!(new_enum_modes = heap_realloc(enum_modes, enum_mode_array_size * sizeof(*new_enum_modes))))
                 {
-                    free(enum_modes);
+                    heap_free(enum_modes);
                     wined3d_mutex_unlock();
                     return DDERR_OUTOFMEMORY;
                 }
@@ -2588,7 +2530,7 @@ static HRESULT WINAPI ddraw7_EnumDisplayModes(IDirectDraw7 *iface, DWORD Flags,
     }
 
     TRACE("End of enumeration\n");
-    free(enum_modes);
+    heap_free(enum_modes);
     wined3d_mutex_unlock();
 
     return DD_OK;
@@ -3154,26 +3096,26 @@ Main_DirectDraw_DDPIXELFORMAT_Match(const DDPIXELFORMAT *requested,
 
     if (requested->dwFlags & (DDPF_RGB|DDPF_YUV|DDPF_ZBUFFER|DDPF_ALPHA
                               |DDPF_LUMINANCE|DDPF_BUMPDUDV))
-        if (requested->dwRGBBitCount != provided->dwRGBBitCount)
+        if (requested->u1.dwRGBBitCount != provided->u1.dwRGBBitCount)
             return FALSE;
 
     if (requested->dwFlags & (DDPF_RGB|DDPF_YUV|DDPF_STENCILBUFFER
                               |DDPF_LUMINANCE|DDPF_BUMPDUDV))
-        if (requested->dwRBitMask != provided->dwRBitMask)
+        if (requested->u2.dwRBitMask != provided->u2.dwRBitMask)
             return FALSE;
 
     if (requested->dwFlags & (DDPF_RGB|DDPF_YUV|DDPF_ZBUFFER|DDPF_BUMPDUDV))
-        if (requested->dwGBitMask != provided->dwGBitMask)
+        if (requested->u3.dwGBitMask != provided->u3.dwGBitMask)
             return FALSE;
 
     /* I could be wrong about the bumpmapping. MSDN docs are vague. */
     if (requested->dwFlags & (DDPF_RGB|DDPF_YUV|DDPF_STENCILBUFFER
                               |DDPF_BUMPDUDV))
-        if (requested->dwBBitMask != provided->dwBBitMask)
+        if (requested->u4.dwBBitMask != provided->u4.dwBBitMask)
             return FALSE;
 
     if (requested->dwFlags & (DDPF_ALPHAPIXELS|DDPF_ZPIXELS))
-        if (requested->dwRGBAlphaBitMask != provided->dwRGBAlphaBitMask)
+        if (requested->u5.dwRGBAlphaBitMask != provided->u5.dwRGBAlphaBitMask)
             return FALSE;
 
     return TRUE;
@@ -3195,19 +3137,19 @@ static BOOL ddraw_match_surface_desc(const DDSURFACEDESC2 *requested, const DDSU
     static const struct compare_info compare[] =
     {
         CMP(ALPHABITDEPTH, dwAlphaBitDepth),
-        CMP(BACKBUFFERCOUNT, dwBackBufferCount),
+        CMP(BACKBUFFERCOUNT, u5.dwBackBufferCount),
         CMP(CAPS, ddsCaps),
         CMP(CKDESTBLT, ddckCKDestBlt),
-        CMP(CKDESTOVERLAY, ddckCKDestOverlay),
+        CMP(CKDESTOVERLAY, u3 /* ddckCKDestOverlay */),
         CMP(CKSRCBLT, ddckCKSrcBlt),
         CMP(CKSRCOVERLAY, ddckCKSrcOverlay),
         CMP(HEIGHT, dwHeight),
-        CMP(LINEARSIZE, dwLinearSize),
+        CMP(LINEARSIZE, u1 /* dwLinearSize */),
         CMP(LPSURFACE, lpSurface),
-        CMP(MIPMAPCOUNT, dwMipMapCount),
-        CMP(PITCH, lPitch),
+        CMP(MIPMAPCOUNT, u2 /* dwMipMapCount */),
+        CMP(PITCH, u1 /* lPitch */),
         /* PIXELFORMAT: manual */
-        CMP(REFRESHRATE, dwRefreshRate),
+        CMP(REFRESHRATE, u2 /* dwRefreshRate */),
         CMP(TEXTURESTAGE, dwTextureStage),
         CMP(WIDTH, dwWidth),
         /* ZBUFFERBITDEPTH: "obsolete" */
@@ -3231,8 +3173,8 @@ static BOOL ddraw_match_surface_desc(const DDSURFACEDESC2 *requested, const DDSU
 
     if (requested->dwFlags & DDSD_PIXELFORMAT)
     {
-        if (!Main_DirectDraw_DDPIXELFORMAT_Match(&requested->ddpfPixelFormat,
-                                                &provided->ddpfPixelFormat))
+        if (!Main_DirectDraw_DDPIXELFORMAT_Match(&requested->u4.ddpfPixelFormat,
+                                                &provided->u4.ddpfPixelFormat))
             return FALSE;
     }
 
@@ -3300,8 +3242,8 @@ static HRESULT CALLBACK enum_surface_mode_callback(DDSURFACEDESC2 *surface_desc,
     desc.dwFlags |= DDSD_WIDTH | DDSD_HEIGHT | DDSD_PITCH | DDSD_PIXELFORMAT;
     desc.dwWidth = surface_desc->dwWidth;
     desc.dwHeight = surface_desc->dwHeight;
-    desc.lPitch = surface_desc->lPitch;
-    desc.ddpfPixelFormat = surface_desc->ddpfPixelFormat;
+    desc.u1.lPitch = surface_desc->u1.lPitch;
+    desc.u4.ddpfPixelFormat = surface_desc->u4.ddpfPixelFormat;
 
     if (SUCCEEDED(ddraw7_CreateSurface(params->ddraw, &desc, &surface, NULL)))
     {
@@ -3366,7 +3308,7 @@ static HRESULT WINAPI ddraw7_EnumSurfaces(IDirectDraw7 *iface, DWORD flags,
             {
                 .dwSize = sizeof(desc),
                 .dwFlags = DDSD_PIXELFORMAT,
-                .ddpfPixelFormat.dwSize = sizeof(DDPIXELFORMAT),
+                .u4.ddpfPixelFormat.dwSize = sizeof(DDPIXELFORMAT),
             };
             struct enum_surface_mode_params params =
             {
@@ -3384,7 +3326,7 @@ static HRESULT WINAPI ddraw7_EnumSurfaces(IDirectDraw7 *iface, DWORD flags,
                 return hr_ddraw_from_wined3d(hr);
             }
 
-            ddrawformat_from_wined3dformat(&desc.ddpfPixelFormat, mode.format_id);
+            ddrawformat_from_wined3dformat(&desc.u4.ddpfPixelFormat, mode.format_id);
             hr = ddraw7_EnumDisplayModes(iface, 0, &desc, &params, enum_surface_mode_callback);
         }
 
@@ -3508,7 +3450,7 @@ HRESULT WINAPI DirectDrawCreateClipper(DWORD flags, IDirectDrawClipper **clipper
 
     wined3d_mutex_lock();
 
-    if (!(object = calloc(1, sizeof(*object))))
+    if (!(object = heap_alloc_zero(sizeof(*object))))
     {
         wined3d_mutex_unlock();
         return E_OUTOFMEMORY;
@@ -3518,7 +3460,7 @@ HRESULT WINAPI DirectDrawCreateClipper(DWORD flags, IDirectDrawClipper **clipper
     if (FAILED(hr))
     {
         WARN("Failed to initialize clipper, hr %#lx.\n", hr);
-        free(object);
+        heap_free(object);
         wined3d_mutex_unlock();
         return hr;
     }
@@ -3618,7 +3560,7 @@ static HRESULT WINAPI ddraw7_CreatePalette(IDirectDraw7 *iface, DWORD Flags,
         return DDERR_NOCOOPERATIVELEVELSET;
     }
 
-    if (!(object = malloc(sizeof(*object))))
+    if (!(object = heap_alloc(sizeof(*object))))
     {
         ERR("Out of memory when allocating memory for a palette implementation\n");
         wined3d_mutex_unlock();
@@ -3629,7 +3571,7 @@ static HRESULT WINAPI ddraw7_CreatePalette(IDirectDraw7 *iface, DWORD Flags,
     if (FAILED(hr))
     {
         WARN("Failed to initialize palette, hr %#lx.\n", hr);
-        free(object);
+        heap_free(object);
         wined3d_mutex_unlock();
         return hr;
     }
@@ -3804,7 +3746,8 @@ static HRESULT WINAPI ddraw1_DuplicateSurface(IDirectDraw *iface, IDirectDrawSur
 /*****************************************************************************
  * IDirect3D7::EnumDevices
  *
- * The EnumDevices method for IDirect3D7. It enumerates all D3D7 devices.
+ * The EnumDevices method for IDirect3D7. It enumerates all supported
+ * D3D7 devices. Currently the T&L, HAL and RGB devices are enumerated.
  *
  * Params:
  *  callback: Function to call for each enumerated device
@@ -3836,16 +3779,13 @@ static HRESULT WINAPI d3d7_EnumDevices(IDirect3D7 *iface, LPD3DENUMDEVICESCALLBA
     }
     dev_caps = device_desc7.dwDevCaps;
 
-    for (i = 0; i < ARRAY_SIZE(device_list); i++)
+    for (i = 0; i < ARRAY_SIZE(device_list7); i++)
     {
         HRESULT ret;
 
-        if (!(device_list[i].version_mask & D3D_VERSION(ddraw->d3dversion)))
-            continue;
-
-        device_desc7.deviceGUID = *device_list[i].device_guid;
-        device_desc7.dwDevCaps = dev_caps & ~device_list[i].unsupported_caps;
-        ret = callback(device_list[i].device_name, device_list[i].device_name, &device_desc7, context);
+        device_desc7.deviceGUID = *device_list7[i].device_guid;
+        device_desc7.dwDevCaps = dev_caps & ~device_list7[i].unsupported_caps;
+        ret = callback(device_list7[i].interface_name, device_list7[i].device_name, &device_desc7, context);
         if (ret != DDENUMRET_OK)
         {
             TRACE("Application cancelled the enumeration.\n");
@@ -3861,21 +3801,11 @@ static HRESULT WINAPI d3d7_EnumDevices(IDirect3D7 *iface, LPD3DENUMDEVICESCALLBA
     return D3D_OK;
 }
 
-static void clear_device_desc(D3DDEVICEDESC *device_desc)
-{
-    memset(device_desc, 0, sizeof(*device_desc));
-    device_desc->dwSize = sizeof(*device_desc);
-    device_desc->dtcTransformCaps.dwSize = sizeof(device_desc->dtcTransformCaps);
-    device_desc->dlcLightingCaps.dwSize = sizeof(device_desc->dlcLightingCaps);
-    device_desc->dpcLineCaps.dwSize = sizeof(device_desc->dpcLineCaps);
-    device_desc->dpcTriCaps.dwSize = sizeof(device_desc->dpcTriCaps);
-}
-
 /*****************************************************************************
  * IDirect3D3::EnumDevices
  *
- * Enumerates all Direct3DDevice interfaces. This is the implementation for
- * Direct3D 1 to Direct3D 3; Version 7 has its own.
+ * Enumerates all supported Direct3DDevice interfaces. This is the
+ * implementation for Direct3D 1 to Direc3D 3, Version 7 has its own.
  *
  * Versions 1, 2 and 3
  *
@@ -3890,18 +3820,18 @@ static void clear_device_desc(D3DDEVICEDESC *device_desc)
  *****************************************************************************/
 static HRESULT WINAPI d3d3_EnumDevices(IDirect3D3 *iface, LPD3DENUMDEVICESCALLBACK callback, void *context)
 {
-/* Size of D3DDEVICEDESC in Direct3D 1-3 */
-enum {
-    D3D1_DESC_SIZE = FIELD_OFFSET(D3DDEVICEDESC, dwMinTextureWidth), /* 172 */
-    D3D2_DESC_SIZE = FIELD_OFFSET(D3DDEVICEDESC, dwMaxTextureRepeat), /* 204 */
-    D3D3_DESC_SIZE = sizeof(D3DDEVICEDESC) /* 252 */
-};
+    static CHAR wined3d_description[] = "Wine D3DDevice using WineD3D and OpenGL";
+
     struct ddraw *ddraw = impl_from_IDirect3D3(iface);
-    DWORD desc_size;
-    D3DDEVICEDESC device_desc1, empty_desc1, hal_desc, hel_desc;
+    D3DDEVICEDESC device_desc1, hal_desc, hel_desc;
     D3DDEVICEDESC7 device_desc7;
     HRESULT hr;
-    size_t i;
+
+    /* Some games (Motoracer 2 demo) have the bad idea to modify the device
+     * name string. Let's put the string in a sufficiently sized array in
+     * writable memory. */
+    char device_name[50];
+    strcpy(device_name,"Direct3D HEL");
 
     TRACE("iface %p, callback %p, context %p.\n", iface, callback, context);
 
@@ -3910,65 +3840,85 @@ enum {
 
     wined3d_mutex_lock();
 
-    switch (ddraw->d3dversion)
-    {
-        case 1:  desc_size = D3D1_DESC_SIZE; break;
-        case 2:  desc_size = D3D2_DESC_SIZE; break;
-        default: desc_size = D3D3_DESC_SIZE; break;
-    }
-
     if (FAILED(hr = ddraw_get_d3dcaps(ddraw, &device_desc7)))
     {
         wined3d_mutex_unlock();
         return hr;
     }
-
     ddraw_d3dcaps1_from_7(&device_desc1, &device_desc7);
-    device_desc1.dwSize = desc_size;
 
-    clear_device_desc(&empty_desc1);
-    empty_desc1.dwSize = desc_size;
-
-    for (i = 0; i < ARRAY_SIZE(device_list); i++)
+    /* Do I have to enumerate the reference id? Note from old d3d7:
+     * "It seems that enumerating the reference IID on Direct3D 1 games
+     * (AvP / Motoracer2) breaks them". So do not enumerate this iid in V1
+     *
+     * There's a registry key HKLM\Software\Microsoft\Direct3D\Drivers,
+     * EnumReference which enables / disables enumerating the reference
+     * rasterizer. It's a DWORD, 0 means disabled, 2 means enabled. The
+     * enablerefrast.reg and disablerefrast.reg files in the DirectX 7.0 sdk
+     * demo directory suggest this.
+     *
+     * Some games(GTA 2) seem to use the second enumerated device, so I have
+     * to enumerate at least 2 devices. So enumerate the reference device to
+     * have 2 devices.
+     *
+     * Other games (Rollcage) tell emulation and hal device apart by certain
+     * flags. Rollcage expects D3DPTEXTURECAPS_POW2 to be set (yeah, it is a
+     * limitation flag), and it refuses all devices that have the perspective
+     * flag set. This way it refuses the emulation device, and HAL devices
+     * never have POW2 unset in d3d7 on windows. */
+    if (ddraw->d3dversion != 1)
     {
-        if (!(device_list[i].version_mask & D3D_VERSION(ddraw->d3dversion)))
-            continue;
+        static CHAR reference_description[] = "RGB Direct3D emulation";
 
-        if (IsEqualGUID(&IID_IDirect3DHALDevice, device_list[i].device_guid))
-        {
-            hal_desc = device_desc1;
+        TRACE("Enumerating WineD3D D3DDevice interface.\n");
+        hal_desc = device_desc1;
+        hel_desc = device_desc1;
+        /* The rgb device has the pow2 flag set in the hel caps, but not in the hal caps. */
+        hal_desc.dpcLineCaps.dwTextureCaps &= ~(D3DPTEXTURECAPS_POW2
+                | D3DPTEXTURECAPS_NONPOW2CONDITIONAL | D3DPTEXTURECAPS_PERSPECTIVE);
+        hal_desc.dpcTriCaps.dwTextureCaps &= ~(D3DPTEXTURECAPS_POW2
+                | D3DPTEXTURECAPS_NONPOW2CONDITIONAL | D3DPTEXTURECAPS_PERSPECTIVE);
+        /* RGB, RAMP and MMX devices have a HAL dcmColorModel of 0 */
+        hal_desc.dcmColorModel = 0;
+        /* RGB, RAMP and MMX devices cannot report HAL hardware flags */
+        hal_desc.dwFlags = 0;
+        /* RGB, REF, RAMP and MMX devices don't report hardware transform and lighting capability */
+        hal_desc.dwDevCaps &= ~(D3DDEVCAPS_HWTRANSFORMANDLIGHT | D3DDEVCAPS_DRAWPRIMITIVES2EX | D3DDEVCAPS_HWRASTERIZATION);
+        hel_desc.dwDevCaps &= ~(D3DDEVCAPS_HWTRANSFORMANDLIGHT | D3DDEVCAPS_DRAWPRIMITIVES2EX | D3DDEVCAPS_HWRASTERIZATION);
 
-            /* The HAL device's hel_desc is almost empty -- but not completely */
-            hel_desc = empty_desc1;
-            hel_desc.dwFlags = D3DDD_COLORMODEL | D3DDD_DEVCAPS | D3DDD_TRANSFORMCAPS
-                | D3DDD_LIGHTINGCAPS | D3DDD_BCLIPPING;
-            hel_desc.dcmColorModel = 0;
-            hel_desc.dwDevCaps = D3DDEVCAPS_FLOATTLVERTEX;
-            hel_desc.dtcTransformCaps.dwCaps = hal_desc.dtcTransformCaps.dwCaps;
-            hel_desc.dlcLightingCaps = hal_desc.dlcLightingCaps;
-            hel_desc.bClipping = hal_desc.bClipping;
-            hel_desc.dwMaxVertexCount = hal_desc.dwMaxVertexCount;
-        }
-        else
-        {
-            hal_desc = empty_desc1;
-
-            hel_desc = device_desc1;
-            /* Ramp device supports grayscale only */
-            if (IsEqualGUID(&IID_IDirect3DRampDevice, device_list[i].device_guid))
-                hel_desc.dcmColorModel = D3DCOLOR_MONO;
-            /* RGB, REF, RAMP and MMX devices don't report hardware transform and lighting capability */
-            hel_desc.dwDevCaps &= ~(D3DDEVCAPS_HWTRANSFORMANDLIGHT | D3DDEVCAPS_DRAWPRIMITIVES2EX | D3DDEVCAPS_HWRASTERIZATION);
-        }
-
-        hr = callback((GUID *)device_list[i].device_guid, device_list[i].device_desc,
-                device_list[i].device_name, &hal_desc, &hel_desc, context);
-        if (hr != DDENUMRET_OK)
+        hr = callback((GUID *)&IID_IDirect3DRGBDevice, reference_description,
+                device_name, &hal_desc, &hel_desc, context);
+        if (hr != D3DENUMRET_OK)
         {
             TRACE("Application cancelled the enumeration.\n");
             wined3d_mutex_unlock();
             return D3D_OK;
         }
+    }
+
+    strcpy(device_name,"Direct3D HAL");
+
+    TRACE("Enumerating HAL Direct3D device.\n");
+    hal_desc = device_desc1;
+    hel_desc = device_desc1;
+
+    /* The hal device does not have the pow2 flag set in hel, but in hal. */
+    hel_desc.dpcLineCaps.dwTextureCaps &= ~(D3DPTEXTURECAPS_POW2
+            | D3DPTEXTURECAPS_NONPOW2CONDITIONAL | D3DPTEXTURECAPS_PERSPECTIVE);
+    hel_desc.dpcTriCaps.dwTextureCaps &= ~(D3DPTEXTURECAPS_POW2
+            | D3DPTEXTURECAPS_NONPOW2CONDITIONAL | D3DPTEXTURECAPS_PERSPECTIVE);
+    /* HAL devices have a HEL dcmColorModel of 0 */
+    hel_desc.dcmColorModel = 0;
+    /* HAL devices report hardware transform and lighting capability, but not in hel */
+    hel_desc.dwDevCaps &= ~(D3DDEVCAPS_HWTRANSFORMANDLIGHT | D3DDEVCAPS_DRAWPRIMITIVES2EX);
+
+    hr = callback((GUID *)&IID_IDirect3DHALDevice, wined3d_description,
+            device_name, &hal_desc, &hel_desc, context);
+    if (hr != D3DENUMRET_OK)
+    {
+        TRACE("Application cancelled the enumeration.\n");
+        wined3d_mutex_unlock();
+        return D3D_OK;
     }
 
     TRACE("End of enumeration.\n");
@@ -4028,7 +3978,7 @@ static HRESULT WINAPI d3d3_CreateLight(IDirect3D3 *iface, IDirect3DLight **light
     if (outer_unknown)
         return CLASS_E_NOAGGREGATION;
 
-    if (!(object = calloc(1, sizeof(*object))))
+    if (!(object = heap_alloc_zero(sizeof(*object))))
     {
         ERR("Failed to allocate light memory.\n");
         return DDERR_OUTOFMEMORY;
@@ -4175,7 +4125,7 @@ static HRESULT WINAPI d3d3_CreateViewport(IDirect3D3 *iface, IDirect3DViewport3 
 
     if (outer_unknown) return CLASS_E_NOAGGREGATION;
 
-    if (!(object = calloc(1, sizeof(*object))))
+    if (!(object = heap_alloc_zero(sizeof(*object))))
     {
         ERR("Failed to allocate viewport memory.\n");
         return DDERR_OUTOFMEMORY;
@@ -4971,7 +4921,7 @@ struct wined3d_vertex_declaration *ddraw_find_decl(struct ddraw *This, DWORD fvf
     {
         unsigned int grow = max(This->declArraySize / 2, 8);
 
-        if (!(convertedDecls = realloc(convertedDecls,
+        if (!(convertedDecls = heap_realloc(convertedDecls,
                 (This->numConvertedDecls + grow) * sizeof(*convertedDecls))))
         {
             wined3d_vertex_declaration_decref(pDecl);
@@ -5083,13 +5033,77 @@ static HRESULT CDECL device_parent_texture_sub_resource_created(struct wined3d_d
         enum wined3d_resource_type type, struct wined3d_texture *wined3d_texture, unsigned int sub_resource_idx,
         void **parent, const struct wined3d_parent_ops **parent_ops)
 {
+    struct ddraw *ddraw = ddraw_from_device_parent(device_parent);
+    struct ddraw_surface *ddraw_surface;
+
     TRACE("device_parent %p, type %#x, wined3d_texture %p, sub_resource_idx %u, parent %p, parent_ops %p.\n",
             device_parent, type, wined3d_texture, sub_resource_idx, parent, parent_ops);
 
-    *parent = NULL;
-    *parent_ops = &ddraw_null_wined3d_parent_ops;
+    /* We have a swapchain or wined3d internal texture. */
+    if (type != WINED3D_RTYPE_TEXTURE_2D || !wined3d_texture_get_parent(wined3d_texture)
+            || wined3d_texture_get_parent(wined3d_texture) == ddraw)
+    {
+        *parent = NULL;
+        *parent_ops = &ddraw_null_wined3d_parent_ops;
+
+        return DD_OK;
+    }
+
+    if (!(ddraw_surface = heap_alloc_zero(sizeof(*ddraw_surface))))
+    {
+        ERR("Failed to allocate surface memory.\n");
+        return DDERR_OUTOFVIDEOMEMORY;
+    }
+
+    ddraw_surface_init(ddraw_surface, ddraw, wined3d_texture, sub_resource_idx, parent_ops);
+    *parent = ddraw_surface;
+
+    ddraw_update_lost_surfaces(ddraw);
+    list_add_head(&ddraw->surface_list, &ddraw_surface->surface_list_entry);
+
+    TRACE("Created ddraw surface %p.\n", ddraw_surface);
 
     return DD_OK;
+}
+
+static void STDMETHODCALLTYPE ddraw_frontbuffer_destroyed(void *parent)
+{
+    struct ddraw *ddraw = parent;
+    ddraw->wined3d_frontbuffer = NULL;
+}
+
+static const struct wined3d_parent_ops ddraw_frontbuffer_parent_ops =
+{
+    ddraw_frontbuffer_destroyed,
+};
+
+static HRESULT CDECL device_parent_create_swapchain_texture(struct wined3d_device_parent *device_parent,
+        void *container_parent, const struct wined3d_resource_desc *desc, DWORD texture_flags,
+        struct wined3d_texture **texture)
+{
+    struct ddraw *ddraw = ddraw_from_device_parent(device_parent);
+    const struct wined3d_parent_ops *parent_ops;
+    HRESULT hr;
+
+    TRACE("device_parent %p, container_parent %p, desc %p, texture flags %#lx, texture %p.\n",
+            device_parent, container_parent, desc, texture_flags, texture);
+
+    if (!ddraw->wined3d_frontbuffer)
+        parent_ops = &ddraw_frontbuffer_parent_ops;
+    else
+        parent_ops = &ddraw_null_wined3d_parent_ops;
+
+    if (FAILED(hr = wined3d_texture_create(ddraw->wined3d_device, desc, 1, 1,
+            texture_flags, NULL, ddraw, parent_ops, texture)))
+    {
+        WARN("Failed to create texture, hr %#lx.\n", hr);
+        return hr;
+    }
+
+    if (!ddraw->wined3d_frontbuffer)
+        ddraw->wined3d_frontbuffer = *texture;
+
+    return hr;
 }
 
 static const struct wined3d_device_parent_ops ddraw_wined3d_device_parent_ops =
@@ -5098,6 +5112,7 @@ static const struct wined3d_device_parent_ops ddraw_wined3d_device_parent_ops =
     device_parent_mode_changed,
     device_parent_activate,
     device_parent_texture_sub_resource_created,
+    device_parent_create_swapchain_texture,
 };
 
 HRESULT ddraw_init(struct ddraw *ddraw, DWORD flags, enum wined3d_device_type device_type)

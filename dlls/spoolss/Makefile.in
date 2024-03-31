@@ -4,6 +4,6 @@ IMPORTS     = winspool
 
 EXTRADLLFLAGS = -Wb,--prefer-native
 
-SOURCES = \
+C_SRCS = \
 	router.c \
 	spoolss_main.c

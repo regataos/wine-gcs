@@ -11,38 +11,38 @@
 @ stub BluetoothEnumerateInstalledServicesEx
 @ stub BluetoothFindBrowseGroupClose
 @ stub BluetoothFindClassIdClose
-@ stdcall -import BluetoothFindDeviceClose(ptr)
+@ stdcall BluetoothFindDeviceClose(ptr)
 @ stub BluetoothFindFirstBrowseGroup
 @ stub BluetoothFindFirstClassId
-@ stdcall -import BluetoothFindFirstDevice(ptr ptr)
+@ stdcall BluetoothFindFirstDevice(ptr ptr)
 @ stub BluetoothFindFirstProfileDescriptor
 @ stub BluetoothFindFirstProtocolDescriptorStack
 @ stub BluetoothFindFirstProtocolEntry
-@ stdcall -import BluetoothFindFirstRadio(ptr ptr)
+@ stdcall BluetoothFindFirstRadio(ptr ptr)
 @ stub BluetoothFindFirstService
 @ stub BluetoothFindFirstServiceEx
 @ stub BluetoothFindNextBrowseGroup
 @ stub BluetoothFindNextClassId
-@ stdcall -import BluetoothFindNextDevice(ptr ptr)
+@ stdcall BluetoothFindNextDevice(ptr ptr)
 @ stub BluetoothFindNextProfileDescriptor
 @ stub BluetoothFindNextProtocolDescriptorStack
 @ stub BluetoothFindNextProtocolEntry
-@ stdcall -import BluetoothFindNextRadio(ptr ptr)
+@ stdcall BluetoothFindNextRadio(ptr ptr)
 @ stub BluetoothFindNextService
 @ stub BluetoothFindProfileDescriptorClose
 @ stub BluetoothFindProtocolDescriptorStackClose
 @ stub BluetoothFindProtocolEntryClose
-@ stdcall -import BluetoothFindRadioClose(ptr)
+@ stdcall BluetoothFindRadioClose(ptr)
 @ stub BluetoothFindServiceClose
 @ stub BluetoothGetDeviceInfo
-@ stdcall -import BluetoothGetRadioInfo(ptr ptr)
+@ stdcall BluetoothGetRadioInfo(ptr ptr)
 @ stub BluetoothIsConnectable
 @ stub BluetoothIsDiscoverable
 @ stub BluetoothIsVersionAvailable
 @ stub BluetoothMapClassOfDeviceToImageIndex
 @ stub BluetoothMapClassOfDeviceToString
 @ stub BluetoothRegisterForAuthentication
-@ stdcall -import BluetoothRegisterForAuthenticationEx(ptr ptr ptr ptr)
+@ stub BluetoothRegisterForAuthenticationEx
 @ stub BluetoothRemoveDevice
 @ stub BluetoothSdpEnumAttributes
 @ stub BluetoothSdpGetAttributeValue
@@ -55,7 +55,7 @@
 @ stub BluetoothSendAuthenticationResponseEx
 @ stub BluetoothSetLocalServiceInfo
 @ stub BluetoothSetServiceState
-@ stdcall -import BluetoothUnregisterAuthentication(long)
+@ stub BluetoothUnregisterAuthentication
 @ stub BluetoothUpdateDeviceRecord
 @ stub BthpEnableAllServices
 @ stub BthpFindPnpInfo

@@ -30,6 +30,15 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(combase);
 
+static const char *debugstr_hstring(HSTRING hstr)
+{
+    const WCHAR *str;
+    UINT32 len;
+    if (hstr && !((ULONG_PTR)hstr >> 16)) return "(invalid)";
+    str = WindowsGetStringRawBuffer(hstr, &len);
+    return wine_dbgstr_wn(str, len);
+}
+
 struct activatable_class_data
 {
     ULONG size;
@@ -143,7 +152,7 @@ void WINAPI RoUninitialize(void)
 /***********************************************************************
  *      RoGetActivationFactory (combase.@)
  */
-HRESULT WINAPI DECLSPEC_HOTPATCH RoGetActivationFactory(HSTRING classid, REFIID iid, void **class_factory)
+HRESULT WINAPI RoGetActivationFactory(HSTRING classid, REFIID iid, void **class_factory)
 {
     PFNGETACTIVATIONFACTORY pDllGetActivationFactory;
     IActivationFactory *factory;

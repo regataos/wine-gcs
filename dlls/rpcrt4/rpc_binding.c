@@ -43,6 +43,19 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(rpc);
 
+LPSTR RPCRT4_strndupA(LPCSTR src, INT slen)
+{
+  DWORD len;
+  LPSTR s;
+  if (!src) return NULL;
+  if (slen == -1) slen = strlen(src);
+  len = slen;
+  s = malloc(len + 1);
+  memcpy(s, src, len);
+  s[len] = 0;
+  return s;
+}
+
 LPSTR RPCRT4_strdupWtoA(LPCWSTR src)
 {
   DWORD len;
@@ -979,9 +992,9 @@ RPC_STATUS RPC_ENTRY RpcBindingCopy(
 
   DestBinding->ObjectUuid = SrcBinding->ObjectUuid;
   DestBinding->BlockingFn = SrcBinding->BlockingFn;
-  DestBinding->Protseq = strdup(SrcBinding->Protseq);
-  DestBinding->NetworkAddr = strdup(SrcBinding->NetworkAddr);
-  DestBinding->Endpoint = strdup(SrcBinding->Endpoint);
+  DestBinding->Protseq = RPCRT4_strndupA(SrcBinding->Protseq, -1);
+  DestBinding->NetworkAddr = RPCRT4_strndupA(SrcBinding->NetworkAddr, -1);
+  DestBinding->Endpoint = RPCRT4_strndupA(SrcBinding->Endpoint, -1);
   DestBinding->NetworkOptions = wcsdup(SrcBinding->NetworkOptions);
   DestBinding->CookieAuth = wcsdup(SrcBinding->CookieAuth);
   if (SrcBinding->Assoc) SrcBinding->Assoc->refs++;

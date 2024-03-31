@@ -1,5 +1,5 @@
 MODULE    = ifsmgr.vxd
 IMPORTS   = kernel
 
-SOURCES = \
+C_SRCS = \
 	ifsmgr.c

@@ -28,8 +28,8 @@
 #include <stdarg.h>
 #include <sys/types.h>
 #include <unistd.h>
-#ifdef HAVE_SYS_SYSCTL_H
-#include <sys/sysctl.h>
+#ifdef HAVE_SYS_SYSCALL_H
+#include <sys/syscall.h>
 #endif
 
 #include "ntstatus.h"
@@ -74,44 +74,23 @@ static mach_port_t get_process_port( struct process *process )
     return process->trace_data;
 }
 
-static int is_rosetta( void )
-{
-    static int rosetta_status, did_check = 0;
-    if (!did_check)
-    {
-        /* returns 0 for native process or on error, 1 for translated */
-        int ret = 0;
-        size_t size = sizeof(ret);
-        if (sysctlbyname( "sysctl.proc_translated", &ret, &size, NULL, 0 ) == -1)
-            rosetta_status = 0;
-        else
-            rosetta_status = ret;
-
-        did_check = 1;
-    }
-
-    return rosetta_status;
-}
-
-extern kern_return_t bootstrap_register2( mach_port_t bp, name_t service_name, mach_port_t sp, uint64_t flags );
-
 /* initialize the process control mechanism */
 void init_tracing_mechanism(void)
 {
     mach_port_t bp;
 
-    if (task_get_bootstrap_port( mach_task_self(), &bp ) != KERN_SUCCESS)
-        fatal_error( "Can't find bootstrap port\n" );
-    if (mach_port_allocate( mach_task_self(), MACH_PORT_RIGHT_RECEIVE, &server_mach_port ) != KERN_SUCCESS)
-        fatal_error( "Can't allocate port\n" );
+    if (task_get_bootstrap_port(mach_task_self(), &bp) != KERN_SUCCESS)
+        fatal_error("Can't find bootstrap port\n");
+    if (mach_port_allocate(mach_task_self(), MACH_PORT_RIGHT_RECEIVE, &server_mach_port) != KERN_SUCCESS)
+        fatal_error("Can't allocate port\n");
     if  (mach_port_insert_right( mach_task_self(),
                                  server_mach_port,
                                  server_mach_port,
                                  MACH_MSG_TYPE_MAKE_SEND ) != KERN_SUCCESS)
-            fatal_error( "Error inserting rights\n" );
-    if (bootstrap_register2( bp, server_dir, server_mach_port, 0 ) != KERN_SUCCESS)
-        fatal_error( "Can't check in server_mach_port\n" );
-    mach_port_deallocate( mach_task_self(), bp );
+            fatal_error("Error inserting rights\n");
+    if (bootstrap_register(bp, server_dir, server_mach_port) != KERN_SUCCESS)
+        fatal_error("Can't check in server_mach_port\n");
+    mach_port_deallocate(mach_task_self(), bp);
 }
 
 /* initialize the per-process tracing mechanism */
@@ -185,14 +164,6 @@ void get_thread_context( struct thread *thread, context_t *context, unsigned int
 
     /* all other regs are handled on the client side */
     assert( flags == SERVER_CTX_DEBUG_REGISTERS );
-
-    if (is_rosetta())
-    {
-        /* getting debug registers of a translated process is not supported cross-process, return all zeroes */
-        memset( &context->debug, 0, sizeof(context->debug) );
-        context->flags |= SERVER_CTX_DEBUG_REGISTERS;
-        return;
-    }
 
     if (thread->unix_pid == -1 || !process_port ||
         mach_port_extract_right( process_port, thread->unix_tid,
@@ -272,15 +243,6 @@ void set_thread_context( struct thread *thread, const context_t *context, unsign
     /* all other regs are handled on the client side */
     assert( flags == SERVER_CTX_DEBUG_REGISTERS );
 
-    if (is_rosetta())
-    {
-        /* Setting debug registers of a translated process is not supported cross-process
-         * (and even in-process, setting debug registers never has the desired effect).
-         */
-        set_error( STATUS_UNSUCCESSFUL );
-        return;
-    }
-
     if (thread->unix_pid == -1 || !process_port ||
         mach_port_extract_right( process_port, thread->unix_tid,
                                  MACH_MSG_TYPE_COPY_SEND, &port, &type ))
@@ -357,8 +319,6 @@ done:
 #endif
 }
 
-extern int __pthread_kill( mach_port_t, int );
-
 int send_thread_signal( struct thread *thread, int sig )
 {
     int ret = -1;
@@ -372,7 +332,7 @@ int send_thread_signal( struct thread *thread, int sig )
         if (!mach_port_extract_right( process_port, thread->unix_tid,
                                       MACH_MSG_TYPE_COPY_SEND, &port, &type ))
         {
-            ret = __pthread_kill( port, sig );
+            ret = syscall( SYS___pthread_kill, port, sig );
             mach_port_deallocate( mach_task_self(), port );
         }
         else errno = ESRCH;

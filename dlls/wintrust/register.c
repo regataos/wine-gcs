@@ -92,8 +92,10 @@ static void WINTRUST_InitRegStructs(void)
 {
 #define WINTRUST_INITREGENTRY( action, dllname, functionname ) \
     action.cbStruct = sizeof(CRYPT_TRUST_REG_ENTRY); \
-    action.pwszDLLName = wcsdup(dllname); \
-    action.pwszFunctionName = wcsdup(functionname);
+    action.pwszDLLName = WINTRUST_Alloc(sizeof(dllname)); \
+    lstrcpyW(action.pwszDLLName, dllname); \
+    action.pwszFunctionName = WINTRUST_Alloc(sizeof(functionname)); \
+    lstrcpyW(action.pwszFunctionName, functionname);
 
     WINTRUST_INITREGENTRY(SoftpubInitialization, SP_POLICY_PROVIDER_DLL_NAME, SP_INIT_FUNCTION)
     WINTRUST_INITREGENTRY(SoftpubMessage, SP_POLICY_PROVIDER_DLL_NAME, SP_OBJTRUST_FUNCTION)
@@ -126,8 +128,8 @@ static void WINTRUST_InitRegStructs(void)
 static void WINTRUST_FreeRegStructs(void)
 {
 #define WINTRUST_FREEREGENTRY( action ) \
-    free(action.pwszDLLName); \
-    free(action.pwszFunctionName);
+    WINTRUST_Free(action.pwszDLLName); \
+    WINTRUST_Free(action.pwszFunctionName);
 
     WINTRUST_FREEREGENTRY(SoftpubInitialization);
     WINTRUST_FREEREGENTRY(SoftpubMessage);
@@ -381,11 +383,11 @@ static LONG WINTRUST_WriteSingleUsageEntry(LPCSTR OID,
 
     /* Turn OID into a wide-character string */
     Len = MultiByteToWideChar( CP_ACP, 0, OID, -1, NULL, 0 );
-    OIDW = malloc( Len * sizeof(WCHAR) );
+    OIDW = WINTRUST_Alloc( Len * sizeof(WCHAR) );
     MultiByteToWideChar( CP_ACP, 0, OID, -1, OIDW, Len );
 
     /* Allocate the needed space for UsageKey */
-    UsageKey = malloc((wcslen(Trust) + wcslen(Usages) + Len) * sizeof(WCHAR));
+    UsageKey = WINTRUST_Alloc((lstrlenW(Trust) + lstrlenW(Usages) + Len) * sizeof(WCHAR));
     /* Create the key string */
     lstrcpyW(UsageKey, Trust);
     lstrcatW(UsageKey, Usages);
@@ -400,8 +402,8 @@ static LONG WINTRUST_WriteSingleUsageEntry(LPCSTR OID,
     }
     RegCloseKey(Key);
 
-    free(OIDW);
-    free(UsageKey);
+    WINTRUST_Free(OIDW);
+    WINTRUST_Free(UsageKey);
 
     return Res;
 }
@@ -599,7 +601,8 @@ static BOOL WINTRUST_RegisterHttpsProv(void)
     ProvInfo.sTestPolicyProvider        = NullCTRE; /* No diagnostic policy */
     ProvInfo.sCleanupProvider           = SoftpubCleanup;
 
-    DefUsage.pwszDllName = wcsdup(SP_POLICY_PROVIDER_DLL_NAME);
+    DefUsage.pwszDllName = WINTRUST_Alloc(sizeof(SP_POLICY_PROVIDER_DLL_NAME));
+    lstrcpyW(DefUsage.pwszDllName, SP_POLICY_PROVIDER_DLL_NAME);
 
     if (!WintrustAddDefaultForUsage(szOID_PKIX_KP_SERVER_AUTH, &DefUsage))
         RegisteredOK = FALSE;
@@ -610,7 +613,7 @@ static BOOL WINTRUST_RegisterHttpsProv(void)
     if (!WintrustAddDefaultForUsage(szOID_SGC_NETSCAPE, &DefUsage))
         RegisteredOK = FALSE;
 
-    free(DefUsage.pwszDllName);
+    WINTRUST_Free(DefUsage.pwszDllName);
 
     if (!WintrustAddActionID(&ProvGUID, 0, &ProvInfo))
         RegisteredOK = FALSE;
@@ -759,26 +762,26 @@ BOOL WINAPI WintrustAddDefaultForUsage(const char *pszUsageOID,
         WCHAR* CallbackW;
 
         Len = MultiByteToWideChar( CP_ACP, 0, psDefUsage->pwszLoadCallbackDataFunctionName, -1, NULL, 0 );
-        CallbackW = malloc( Len * sizeof(WCHAR) );
+        CallbackW = WINTRUST_Alloc( Len * sizeof(WCHAR) );
         MultiByteToWideChar( CP_ACP, 0, psDefUsage->pwszLoadCallbackDataFunctionName, -1, CallbackW, Len );
 
         Res = WINTRUST_WriteSingleUsageEntry(pszUsageOID, CBAlloc, CallbackW);
         if (Res != ERROR_SUCCESS) WriteUsageError = Res;
 
-        free(CallbackW);
+        WINTRUST_Free(CallbackW);
     }
     if (psDefUsage->pwszFreeCallbackDataFunctionName)
     {
         WCHAR* CallbackW;
 
         Len = MultiByteToWideChar( CP_ACP, 0, psDefUsage->pwszFreeCallbackDataFunctionName, -1, NULL, 0 );
-        CallbackW = malloc( Len * sizeof(WCHAR) );
+        CallbackW = WINTRUST_Alloc( Len * sizeof(WCHAR) );
         MultiByteToWideChar( CP_ACP, 0, psDefUsage->pwszFreeCallbackDataFunctionName, -1, CallbackW, Len );
 
         Res = WINTRUST_WriteSingleUsageEntry(pszUsageOID, CBFree, CallbackW);
         if (Res != ERROR_SUCCESS) WriteUsageError = Res;
 
-        free(CallbackW);
+        WINTRUST_Free(CallbackW);
     }
 
     WINTRUST_Guid2Wstr(psDefUsage->pgActionID, GuidString);
@@ -848,16 +851,6 @@ static struct provider_cache_entry
 }
 *provider_cache;
 static unsigned int provider_cache_size;
-
-static void * WINAPI WINTRUST_Alloc(DWORD cb)
-{
-    return calloc(1, cb);
-}
-
-static void WINAPI WINTRUST_Free(void *p)
-{
-    free(p);
-}
 
 /***********************************************************************
  *              WintrustLoadFunctionPointers (WINTRUST.@)
@@ -958,9 +951,10 @@ static BOOL WINTRUST_SIPPAddProvider(GUID* Subject, WCHAR* MagicNumber)
     /* Clear and initialize the structure */
     memset(&NewProv, 0, sizeof(SIP_ADD_NEWPROVIDER));
     NewProv.cbStruct = sizeof(SIP_ADD_NEWPROVIDER);
-    NewProv.pwszDLLFileName = wcsdup(SP_POLICY_PROVIDER_DLL_NAME);
+    NewProv.pwszDLLFileName = WINTRUST_Alloc(sizeof(SP_POLICY_PROVIDER_DLL_NAME));
     /* Fill the structure */
     NewProv.pgSubject              = Subject;
+    lstrcpyW(NewProv.pwszDLLFileName, SP_POLICY_PROVIDER_DLL_NAME);
     NewProv.pwszMagicNumber        = MagicNumber;
     NewProv.pwszIsFunctionName     = NULL;
     NewProv.pwszGetFuncName        = CryptSIPGetSignedDataMsg;
@@ -973,8 +967,8 @@ static BOOL WINTRUST_SIPPAddProvider(GUID* Subject, WCHAR* MagicNumber)
 
     Ret = CryptSIPAddProvider(&NewProv);
 
-    free(NewProv.pwszDLLFileName);
-
+    WINTRUST_Free(NewProv.pwszDLLFileName);
+ 
     return Ret;
 }
 

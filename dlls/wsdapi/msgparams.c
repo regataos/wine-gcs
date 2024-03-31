@@ -81,7 +81,7 @@ static ULONG IWSDMessageParametersImpl_Release(IWSDMessageParameters *iface)
             IWSDAddress_Release(This->remoteAddress);
         }
 
-        free(This);
+        HeapFree(GetProcessHeap(), 0, This);
     }
 
     return ref;
@@ -310,7 +310,7 @@ HRESULT WINAPI WSDCreateUdpMessageParameters(IWSDUdpMessageParameters **ppTxPara
 
     *ppTxParams = NULL;
 
-    obj = calloc(1, sizeof(*obj));
+    obj = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*obj));
     if (!obj) return E_OUTOFMEMORY;
 
     obj->base.IWSDMessageParameters_iface.lpVtbl = (IWSDMessageParametersVtbl *)&udpMsgParamsVtbl;

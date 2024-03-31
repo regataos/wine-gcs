@@ -1,4 +1,4 @@
 TESTDLL = virtdisk.dll
 
-SOURCES = \
+C_SRCS = \
 	virtdisk.c

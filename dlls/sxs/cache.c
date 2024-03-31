@@ -35,7 +35,12 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(sxs);
 
-static const WCHAR cache_mutex_nameW[] = L"__WINE_SXS_CACHE_MUTEX__";
+static const WCHAR cache_mutex_nameW[] =
+    {'_','_','W','I','N','E','_','S','X','S','_','C','A','C','H','E','_','M','U','T','E','X','_','_',0};
+
+static const WCHAR win32W[] = {'w','i','n','3','2',0};
+static const WCHAR win32_policyW[] = {'w','i','n','3','2','-','p','o','l','i','c','y',0};
+static const WCHAR backslashW[] = {'\\',0};
 
 struct cache
 {
@@ -91,7 +96,7 @@ static ULONG WINAPI cache_Release( IAssemblyCache *iface )
 
 static unsigned int build_sxs_path( WCHAR *path )
 {
-    static const WCHAR winsxsW[] = L"\\winsxs\\";
+    static const WCHAR winsxsW[] = {'\\','w','i','n','s','x','s','\\',0};
     unsigned int len = GetWindowsDirectoryW( path, MAX_PATH );
 
     memcpy( path + len, winsxsW, sizeof(winsxsW) );
@@ -101,7 +106,8 @@ static unsigned int build_sxs_path( WCHAR *path )
 static WCHAR *build_assembly_name( const WCHAR *arch, const WCHAR *name, const WCHAR *token,
                                    const WCHAR *version, unsigned int *len )
 {
-    static const WCHAR fmtW[] = L"%s_%s_%s_%s_none_deadbeef";
+    static const WCHAR fmtW[] =
+        {'%','s','_','%','s','_','%','s','_','%','s','_','n','o','n','e','_','d','e','a','d','b','e','e','f',0};
     unsigned int buflen = ARRAY_SIZE(fmtW);
     WCHAR *ret;
 
@@ -137,7 +143,8 @@ static WCHAR *build_dll_path( const WCHAR *arch, const WCHAR *name, const WCHAR 
 static WCHAR *build_policy_name( const WCHAR *arch, const WCHAR *name, const WCHAR *token,
                                  unsigned int *len )
 {
-    static const WCHAR fmtW[] = L"%s_%s_%s_none_deadbeef";
+    static const WCHAR fmtW[] =
+        {'%','s','_','%','s','_','%','s','_','n','o','n','e','_','d','e','a','d','b','e','e','f',0};
     unsigned int buflen = ARRAY_SIZE(fmtW);
     WCHAR *ret;
 
@@ -152,7 +159,8 @@ static WCHAR *build_policy_name( const WCHAR *arch, const WCHAR *name, const WCH
 static WCHAR *build_policy_path( const WCHAR *arch, const WCHAR *name, const WCHAR *token,
                                  const WCHAR *version )
 {
-    static const WCHAR fmtW[] = L"%spolicies\\%s\\%s.policy";
+    static const WCHAR fmtW[] =
+        {'%','s','p','o','l','i','c','i','e','s','\\','%','s','\\','%','s','.','p','o','l','i','c','y',0};
     WCHAR *path = NULL, *ret, sxsdir[MAX_PATH];
     unsigned int len;
 
@@ -221,8 +229,8 @@ static HRESULT WINAPI cache_QueryAssemblyInfo(
     }
     cache_lock( cache );
 
-    if (!wcscmp( type, L"win32" )) path = build_dll_path( arch, name, token, version );
-    else if (!wcscmp( type, L"win32-policy" )) path = build_policy_path( arch, name, token, version );
+    if (!wcscmp( type, win32W )) path = build_dll_path( arch, name, token, version );
+    else if (!wcscmp( type, win32_policyW )) path = build_policy_path( arch, name, token, version );
     else
     {
         hr = HRESULT_FROM_WIN32( ERROR_SXS_INVALID_IDENTITY_ATTRIBUTE_VALUE );
@@ -338,6 +346,8 @@ static void free_assembly( struct assembly *assembly )
 
 static HRESULT parse_files( IXMLDOMDocument *doc, struct assembly *assembly )
 {
+    static const WCHAR fileW[] = {'f','i','l','e',0};
+    static const WCHAR nameW[] = {'n','a','m','e',0};
     IXMLDOMNamedNodeMap *attrs;
     IXMLDOMNodeList *list;
     IXMLDOMNode *node;
@@ -346,7 +356,7 @@ static HRESULT parse_files( IXMLDOMDocument *doc, struct assembly *assembly )
     HRESULT hr;
     LONG len;
 
-    str = SysAllocString( L"file" );
+    str = SysAllocString( fileW );
     hr = IXMLDOMDocument_getElementsByTagName( doc, str, &list );
     SysFreeString( str );
     if (hr != S_OK) return hr;
@@ -383,7 +393,7 @@ static HRESULT parse_files( IXMLDOMDocument *doc, struct assembly *assembly )
             goto done;
         }
 
-        f->name = get_attribute_value( attrs, L"name" );
+        f->name = get_attribute_value( attrs, nameW );
         IXMLDOMNamedNodeMap_Release( attrs );
         if (!f->name)
         {
@@ -407,6 +417,12 @@ done:
 
 static HRESULT parse_assembly( IXMLDOMDocument *doc, struct assembly **assembly )
 {
+    static const WCHAR identityW[] = {'a','s','s','e','m','b','l','y','I','d','e','n','t','i','t','y',0};
+    static const WCHAR typeW[] = {'t','y','p','e',0};
+    static const WCHAR nameW[] = {'n','a','m','e',0};
+    static const WCHAR versionW[] = {'v','e','r','s','i','o','n',0};
+    static const WCHAR architectureW[] = {'p','r','o','c','e','s','s','o','r','A','r','c','h','i','t','e','c','t','u','r','e',0};
+    static const WCHAR tokenW[] = {'p','u','b','l','i','c','K','e','y','T','o','k','e','n',0};
     IXMLDOMNodeList *list = NULL;
     IXMLDOMNode *node = NULL;
     IXMLDOMNamedNodeMap *attrs = NULL;
@@ -415,7 +431,7 @@ static HRESULT parse_assembly( IXMLDOMDocument *doc, struct assembly **assembly 
     HRESULT hr;
     LONG len;
 
-    str = SysAllocString( L"assemblyIdentity" );
+    str = SysAllocString( identityW );
     hr = IXMLDOMDocument_getElementsByTagName( doc, str, &list );
     SysFreeString( str );
     if (hr != S_OK) goto done;
@@ -444,20 +460,20 @@ static HRESULT parse_assembly( IXMLDOMDocument *doc, struct assembly **assembly 
     hr = IXMLDOMNode_get_attributes( node, &attrs );
     if (hr != S_OK) goto done;
 
-    a->type    = get_attribute_value( attrs, L"type" );
-    a->name    = get_attribute_value( attrs, L"name" );
-    a->version = get_attribute_value( attrs, L"version" );
-    a->arch    = get_attribute_value( attrs, L"processorArchitecture" );
-    a->token   = get_attribute_value( attrs, L"publicKeyToken" );
+    a->type    = get_attribute_value( attrs, typeW );
+    a->name    = get_attribute_value( attrs, nameW );
+    a->version = get_attribute_value( attrs, versionW );
+    a->arch    = get_attribute_value( attrs, architectureW );
+    a->token   = get_attribute_value( attrs, tokenW );
 
-    if (!a->type || (wcscmp( a->type, L"win32" ) && wcscmp( a->type, L"win32-policy" )) ||
+    if (!a->type || (wcscmp( a->type, win32W ) && wcscmp( a->type, win32_policyW )) ||
         !a->name || !a->version || !a->arch || !a->token)
     {
         WARN("invalid win32 assembly\n");
         hr = ERROR_SXS_MANIFEST_FORMAT_ERROR;
         goto done;
     }
-    if (!wcscmp( a->type, L"win32" )) hr = parse_files( doc, a );
+    if (!wcscmp( a->type, win32W )) hr = parse_files( doc, a );
 
 done:
     if (attrs) IXMLDOMNamedNodeMap_Release( attrs );
@@ -471,8 +487,8 @@ done:
 static WCHAR *build_policy_filename( const WCHAR *arch, const WCHAR *name, const WCHAR *token,
                                      const WCHAR *version )
 {
-    static const WCHAR policiesW[] = L"policies\\";
-    static const WCHAR suffixW[] = L".policy";
+    static const WCHAR policiesW[] = {'p','o','l','i','c','i','e','s','\\',0};
+    static const WCHAR suffixW[] = {'.','p','o','l','i','c','y',0};
     WCHAR sxsdir[MAX_PATH], *ret, *fullname;
     unsigned int len;
 
@@ -491,7 +507,7 @@ static WCHAR *build_policy_filename( const WCHAR *arch, const WCHAR *name, const
     CreateDirectoryW( ret, NULL );
     lstrcatW( ret, name );
     CreateDirectoryW( ret, NULL );
-    lstrcatW( ret, L"\\" );
+    lstrcatW( ret, backslashW );
     lstrcatW( ret, version );
     lstrcatW( ret, suffixW );
 
@@ -542,8 +558,8 @@ static WCHAR *build_source_filename( const WCHAR *manifest, struct file *file )
 static WCHAR *build_manifest_filename( const WCHAR *arch, const WCHAR *name, const WCHAR *token,
                                        const WCHAR *version )
 {
-    static const WCHAR manifestsW[] = L"manifests\\";
-    static const WCHAR suffixW[] = L".manifest";
+    static const WCHAR manifestsW[] = {'m','a','n','i','f','e','s','t','s','\\',0};
+    static const WCHAR suffixW[] = {'.','m','a','n','i','f','e','s','t',0};
     WCHAR sxsdir[MAX_PATH], *ret, *fullname;
     unsigned int len;
 
@@ -598,13 +614,6 @@ static HRESULT install_assembly( const WCHAR *manifest, struct assembly *assembl
     dst = build_manifest_filename( assembly->arch, assembly->name, assembly->token, assembly->version );
     if (!dst) return E_OUTOFMEMORY;
 
-    if (GetFileAttributesW( dst ) != INVALID_FILE_ATTRIBUTES)
-    {
-        free( dst );
-        TRACE("manifest exists, skipping install\n");
-        return S_OK;
-    }
-
     ret = CopyFileW( manifest, dst, FALSE );
     free( dst );
     if (!ret)
@@ -633,7 +642,7 @@ static HRESULT install_assembly( const WCHAR *manifest, struct assembly *assembl
         lstrcatW( dst, name );
         CreateDirectoryW( dst, NULL );
 
-        lstrcatW( dst, L"\\" );
+        lstrcatW( dst, backslashW );
         lstrcatW( dst, file->name );
         for (p = dst; *p; p++) *p = towlower( *p );
 
@@ -679,7 +688,7 @@ static HRESULT WINAPI cache_InstallAssembly(
 
     /* FIXME: verify name attributes */
 
-    if (!wcscmp( assembly->type, L"win32-policy" ))
+    if (!wcscmp( assembly->type, win32_policyW ))
         hr = install_policy( path, assembly );
     else
         hr = install_assembly( path, assembly );
@@ -712,7 +721,7 @@ static HRESULT uninstall_assembly( struct assembly *assembly )
         len = len_sxsdir + len_name + 1 + lstrlenW( file->name );
         if (!(filename = malloc( (len + 1) * sizeof(WCHAR) ))) goto done;
         lstrcpyW( filename, dirname );
-        lstrcatW( filename, L"\\" );
+        lstrcatW( filename, backslashW );
         lstrcatW( filename, file->name );
 
         if (!DeleteFileW( filename )) WARN( "failed to delete file %lu\n", GetLastError() );
@@ -766,8 +775,8 @@ static HRESULT WINAPI cache_UninstallAssembly(
         hr = E_INVALIDARG;
         goto done;
     }
-    if (!wcscmp( type, L"win32" )) path = build_manifest_filename( arch, name, token, version );
-    else if (!wcscmp( type, L"win32-policy" )) path = build_policy_filename( arch, name, token, version );
+    if (!wcscmp( type, win32W )) path = build_manifest_filename( arch, name, token, version );
+    else if (!wcscmp( type, win32_policyW )) path = build_policy_filename( arch, name, token, version );
     else
     {
         hr = E_INVALIDARG;
@@ -787,7 +796,7 @@ static HRESULT WINAPI cache_UninstallAssembly(
         *p = 0;
         RemoveDirectoryW( path );
     }
-    if (!wcscmp( assembly->type, L"win32" )) hr = uninstall_assembly( assembly );
+    if (!wcscmp( assembly->type, win32W )) hr = uninstall_assembly( assembly );
 
 done:
     if (name_obj) IAssemblyName_Release( name_obj );

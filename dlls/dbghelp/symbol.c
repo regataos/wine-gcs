@@ -19,6 +19,8 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#define NONAMELESSUNION
+
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -1148,7 +1150,7 @@ static BOOL symt_enum_locals(struct process* pcs, const WCHAR* mask,
     se->sym_info->MaxNameLen = sizeof(se->buffer) - sizeof(SYMBOL_INFO);
 
     pair.pcs = pcs;
-    pair.requested = module_find_by_addr(pair.pcs, pcs->localscope_pc);
+    pair.requested = module_find_by_addr(pair.pcs, pcs->localscope_pc, DMT_UNKNOWN);
     if (!module_get_debug(&pair)) return FALSE;
 
     if (symt_check_tag(pcs->localscope_symt, SymTagFunction) ||
@@ -1318,7 +1320,7 @@ static BOOL sym_enum(HANDLE hProcess, ULONG64 BaseOfDll, PCWSTR Mask,
         HeapFree(GetProcessHeap(), 0, mod);
         return TRUE;
     }
-    pair.requested = module_find_by_addr(pair.pcs, BaseOfDll);
+    pair.requested = module_find_by_addr(pair.pcs, BaseOfDll, DMT_UNKNOWN);
     if (!module_get_debug(&pair))
         return FALSE;
 
@@ -1624,7 +1626,7 @@ BOOL WINAPI SymFromName(HANDLE hProcess, PCSTR Name, PSYMBOL_INFO Symbol)
 
     /* search first in local context */
     pair.pcs = pcs;
-    pair.requested = module_find_by_addr(pair.pcs, pcs->localscope_pc);
+    pair.requested = module_find_by_addr(pair.pcs, pcs->localscope_pc, DMT_UNKNOWN);
     if (module_get_debug(&pair) &&
         (symt_check_tag(pcs->localscope_symt, SymTagFunction) ||
          symt_check_tag(pcs->localscope_symt, SymTagInlineSite)))
@@ -1880,7 +1882,7 @@ static BOOL get_line_from_function(struct module_pair* pair, struct symt_functio
         if (found_dli)
         {
             BOOL ret;
-            if (dbghelp_opt_source_actual_path)
+            if (dbghelp_opt_native)
             {
                 /* Return native file paths when using winedbg */
                 ret = internal_line_set_nameA(pair->pcs, intl, (char*)source_get(pair->effective, dli->u.source_file), FALSE);
@@ -2614,16 +2616,10 @@ BOOL WINAPI SymGetLineFromNameW64(HANDLE hProcess, PCWSTR ModuleName, PCWSTR Fil
  */
 BOOL WINAPI SymFromIndex(HANDLE hProcess, ULONG64 BaseOfDll, DWORD index, PSYMBOL_INFO symbol)
 {
-    struct module_pair  pair;
-    struct symt*        sym;
-
-    TRACE("hProcess = %p, BaseOfDll = %I64x, index = %ld, symbol = %p\n",
+    FIXME("hProcess = %p, BaseOfDll = %I64x, index = %ld, symbol = %p\n",
           hProcess, BaseOfDll, index, symbol);
 
-    if (!module_init_pair(&pair, hProcess, BaseOfDll)) return FALSE;
-    if ((sym = symt_index2ptr(pair.effective, index)) == NULL) return FALSE;
-    symt_fill_sym_info(&pair, NULL, sym, symbol);
-    return TRUE;
+    return FALSE;
 }
 
 /******************************************************************
@@ -2632,21 +2628,10 @@ BOOL WINAPI SymFromIndex(HANDLE hProcess, ULONG64 BaseOfDll, DWORD index, PSYMBO
  */
 BOOL WINAPI SymFromIndexW(HANDLE hProcess, ULONG64 BaseOfDll, DWORD index, PSYMBOL_INFOW symbol)
 {
-    PSYMBOL_INFO        si;
-    BOOL                ret;
-
-    TRACE("hProcess = %p, BaseOfDll = %I64x, index = %ld, symbol = %p\n",
+    FIXME("hProcess = %p, BaseOfDll = %I64x, index = %ld, symbol = %p\n",
           hProcess, BaseOfDll, index, symbol);
 
-    si = HeapAlloc(GetProcessHeap(), 0, sizeof(*si) + symbol->MaxNameLen * sizeof(WCHAR));
-    if (!si) return FALSE;
-
-    si->SizeOfStruct = sizeof(*si);
-    si->MaxNameLen = symbol->MaxNameLen;
-    if ((ret = SymFromIndex(hProcess, BaseOfDll, index, si)))
-        copy_symbolW(symbol, si);
-    HeapFree(GetProcessHeap(), 0, si);
-    return ret;
+    return FALSE;
 }
 
 /******************************************************************
@@ -2865,4 +2850,15 @@ BOOL WINAPI SymQueryInlineTrace(HANDLE hProcess, DWORD64 StartAddress, DWORD Sta
         *CurFrameIndex = 0;
     }
     return TRUE;
+}
+
+/******************************************************************
+ *      SymSrvGetFileIndexInfo (DBGHELP.@)
+ *
+ */
+BOOL WINAPI SymSrvGetFileIndexInfo(const char *file, SYMSRV_INDEX_INFO* info, DWORD flags)
+{
+    FIXME("(%s, %p, 0x%08lx): stub!\n", debugstr_a(file), info, flags);
+    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
+    return FALSE;
 }

@@ -193,10 +193,7 @@ static HRESULT WINAPI d3d8_vertexbuffer_Lock(IDirect3DVertexBuffer8 *iface, UINT
             iface, offset, size, data, flags);
 
     if (buffer->discarded)
-    {
-        WARN("Filtering out redundant discard of %p.\n", buffer);
-        flags = (flags & ~D3DLOCK_DISCARD) | D3DLOCK_NOOVERWRITE;
-    }
+        flags &= ~D3DLOCK_DISCARD;
     if (flags & D3DLOCK_DISCARD)
         buffer->discarded = true;
 
@@ -273,7 +270,7 @@ static void STDMETHODCALLTYPE d3d8_vertexbuffer_wined3d_object_destroyed(void *p
     if (buffer->draw_buffer)
         wined3d_buffer_decref(buffer->wined3d_buffer);
     d3d8_resource_cleanup(&buffer->resource);
-    free(buffer);
+    heap_free(buffer);
 }
 
 static const struct wined3d_parent_ops d3d8_vertexbuffer_wined3d_parent_ops =
@@ -517,10 +514,7 @@ static HRESULT WINAPI d3d8_indexbuffer_Lock(IDirect3DIndexBuffer8 *iface, UINT o
             iface, offset, size, data, flags);
 
     if (buffer->discarded)
-    {
-        WARN("Filtering out redundant discard of %p.\n", buffer);
-        flags = (flags & ~D3DLOCK_DISCARD) | D3DLOCK_NOOVERWRITE;
-    }
+        flags &= ~D3DLOCK_DISCARD;
     if (flags & D3DLOCK_DISCARD)
         buffer->discarded = true;
 
@@ -594,7 +588,7 @@ static void STDMETHODCALLTYPE d3d8_indexbuffer_wined3d_object_destroyed(void *pa
     struct d3d8_indexbuffer *buffer = parent;
 
     d3d8_resource_cleanup(&buffer->resource);
-    free(buffer);
+    heap_free(buffer);
 }
 
 static const struct wined3d_parent_ops d3d8_indexbuffer_wined3d_parent_ops =

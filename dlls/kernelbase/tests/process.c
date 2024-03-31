@@ -50,7 +50,7 @@ static void test_CompareObjectHandles(void)
 
     if (!pCompareObjectHandles)
     {
-        win_skip("CompareObjectHandles is not available.\n");
+        skip("CompareObjectHandles is not available.\n");
         return;
     }
 
@@ -106,11 +106,6 @@ static void test_MapViewOfFile3(void)
     HANDLE file, mapping;
     void *ptr;
     BOOL ret;
-    SYSTEM_INFO system_info;
-    size_t file_size = 1024 * 1024;
-    void *allocation;
-    void *map_start, *map_end, *map_start_offset;
-    void *view;
 
     if (!pMapViewOfFile3)
     {
@@ -129,7 +124,7 @@ static void test_MapViewOfFile3(void)
     ok( mapping != 0, "CreateFileMapping error %lu\n", GetLastError() );
 
     SetLastError(0xdeadbeef);
-    ptr = pMapViewOfFile3( mapping, NULL, NULL, 0, 4096, 0, PAGE_READONLY, NULL, 0);
+    ptr = pMapViewOfFile3( mapping, GetCurrentProcess(), NULL, 0, 4096, 0, PAGE_READONLY, NULL, 0);
     ok( ptr != NULL, "MapViewOfFile FILE_MAP_READ error %lu\n", GetLastError() );
     UnmapViewOfFile( ptr );
 
@@ -137,83 +132,6 @@ static void test_MapViewOfFile3(void)
     CloseHandle( file );
     ret = DeleteFileA( testfile );
     ok(ret, "Failed to delete a test file.\n");
-
-    /* Tests for using MapViewOfFile3 together with MEM_RESERVE_PLACEHOLDER/MEM_REPLACE_PLACEHOLDER */
-    /* like self pe-loading programs do (e.g. .net pe-loader). */
-    /* With MEM_REPLACE_PLACEHOLDER, MapViewOfFile3/NtMapViewOfSection(Ex) shall relax alignment from 64k to pagesize */
-    GetSystemInfo(&system_info);
-    mapping = CreateFileMappingA(NULL, NULL, PAGE_READWRITE, 0, (DWORD)file_size, NULL);
-    ok(mapping != NULL, "CreateFileMapping did not return a handle %lu\n", GetLastError());
-
-    allocation = pVirtualAlloc2(GetCurrentProcess(), NULL, file_size,
-                                MEM_RESERVE | MEM_RESERVE_PLACEHOLDER, PAGE_NOACCESS, NULL, 0);
-    ok(allocation != NULL, "VirtualAlloc2 returned NULL %lu\n", GetLastError());
-
-    map_start = (void*)((ULONG_PTR)allocation + system_info.dwPageSize);
-    map_end = (void*)((ULONG_PTR)map_start + system_info.dwPageSize);
-    ret = VirtualFree(map_start, system_info.dwPageSize, MEM_RELEASE | MEM_PRESERVE_PLACEHOLDER);
-    ok(ret, "VirtualFree failed to split the placeholder %lu\n", GetLastError());
-
-    view = pMapViewOfFile3(mapping, GetCurrentProcess(), map_start, system_info.dwPageSize,
-                           system_info.dwPageSize, MEM_REPLACE_PLACEHOLDER, PAGE_READWRITE, NULL, 0);
-    ok(view != NULL, "MapViewOfFile3 did not map the file mapping %lu\n", GetLastError());
-
-    ret = UnmapViewOfFile(view);
-    ok(ret, "UnmapViewOfFile failed %lu\n", GetLastError());
-
-    map_start_offset = (void*)((ULONG_PTR)map_start - 1);
-    SetLastError(0xdeadbeef);
-    view = pMapViewOfFile3(mapping, GetCurrentProcess(), map_start_offset, system_info.dwPageSize,
-                           system_info.dwPageSize, MEM_REPLACE_PLACEHOLDER, PAGE_READWRITE, NULL, 0);
-    ok(view == NULL, "MapViewOfFile3 did map the file mapping, though baseaddr was not pagesize aligned\n");
-    ok(GetLastError() == ERROR_MAPPED_ALIGNMENT, "MapViewOfFile3 did not return ERROR_MAPPED_ALIGNMENT(%u), instead it returned %lu\n",
-       ERROR_MAPPED_ALIGNMENT, GetLastError());
-
-    SetLastError(0xdeadbeef);
-    view = pMapViewOfFile3(mapping, GetCurrentProcess(), map_start, system_info.dwPageSize-1,
-                           system_info.dwPageSize, MEM_REPLACE_PLACEHOLDER, PAGE_READWRITE, NULL, 0);
-    ok(view == NULL, "MapViewOfFile3 did map the file mapping, though offset was not pagesize aligned\n");
-    ok(GetLastError() == ERROR_MAPPED_ALIGNMENT,
-       "MapViewOfFile3 did not return ERROR_MAPPED_ALIGNMENT(%u), instead it returned %lu\n",
-       ERROR_MAPPED_ALIGNMENT, GetLastError());
-
-    ret = VirtualFree(allocation, 0, MEM_RELEASE);
-    ok(ret, "VirtualFree of first remaining region failed: %lu\n", GetLastError());
-
-    ret = VirtualFree(map_end, 0, MEM_RELEASE);
-    ok(ret, "VirtualFree of remaining region failed: %lu\n", GetLastError());
-
-    SetLastError(0xdeadbeef);
-    view = pMapViewOfFile3(mapping, GetCurrentProcess(), map_end, system_info.dwPageSize, 0, 0, PAGE_READWRITE, NULL, 0);
-    ok(view == NULL, "MapViewOfFile3 did map the file mapping, though baseaddr was not 64k aligned\n");
-    ok(GetLastError() == ERROR_MAPPED_ALIGNMENT,
-       "MapViewOfFile3 did not return ERROR_MAPPED_ALIGNMENT(%u), instead it returned %lu\n",
-       ERROR_MAPPED_ALIGNMENT, GetLastError());
-
-    SetLastError(0xdeadbeef);
-    map_start = (void*)(((ULONG_PTR)allocation + system_info.dwAllocationGranularity) & ~((ULONG_PTR)system_info.dwAllocationGranularity-1));
-    view = pMapViewOfFile3(mapping, GetCurrentProcess(), map_end,
-                           system_info.dwPageSize, system_info.dwPageSize, 0, PAGE_READWRITE, NULL, 0);
-    ok(view == NULL, "MapViewOfFile3 did map the file mapping, though offset was not 64k aligned\n");
-    ok(GetLastError() == ERROR_MAPPED_ALIGNMENT,
-       "MapViewOfFile3 did not return ERROR_MAPPED_ALIGNMENT(%u), instead it returned %lu\n",
-       ERROR_MAPPED_ALIGNMENT, GetLastError());
-
-    view = pMapViewOfFile3(mapping, GetCurrentProcess(), map_start, 0,
-                           system_info.dwPageSize, 0, PAGE_READWRITE, NULL, 0);
-    ok(view != NULL, "MapViewOfFile3 failed though both baseaddr and offset were 64k aligned %lu\n", GetLastError());
-
-    ret = UnmapViewOfFile(view);
-    ok(ret, "UnmapViewOfFile failed %lu\n", GetLastError());
-
-    view = pMapViewOfFile3(mapping, GetCurrentProcess(), map_start,
-                           4*system_info.dwAllocationGranularity, system_info.dwPageSize, 0, PAGE_READWRITE, NULL, 0);
-    ok(view != NULL, "MapViewOfFile3 failed though both baseaddr and offset were 64k aligned %lu\n", GetLastError());
-
-    ret = UnmapViewOfFile(view);
-    ok(ret, "UnmapViewOfFile failed %lu\n", GetLastError());
-
-    ok(CloseHandle(mapping), "CloseHandle failed on mapping\n");
 }
 
 #define check_region_size(p, s) check_region_size_(p, s, __LINE__)
@@ -259,6 +177,7 @@ static void test_VirtualAlloc2(void)
     /* Placeholder splitting functionality */
     placeholder1 = pVirtualAlloc2(NULL, NULL, 2 * size, MEM_RESERVE_PLACEHOLDER | MEM_RESERVE, PAGE_NOACCESS, NULL, 0);
     ok(!!placeholder1, "Failed to create a placeholder range.\n");
+    if (!placeholder1) return;
 
     memset(&info, 0, sizeof(info));
     VirtualQuery(placeholder1, &info, sizeof(info));
@@ -317,17 +236,15 @@ static void test_VirtualAlloc2(void)
     ok(info.Type == MEM_MAPPED, "Unexpected type %#lx.\n", info.Type);
     ok(info.RegionSize == size, "Unexpected size.\n");
 
+    CloseHandle(section);
     ret = pUnmapViewOfFile2(NULL, view1, MEM_PRESERVE_PLACEHOLDER);
     ok(!ret && GetLastError() == ERROR_INVALID_HANDLE, "Got error %lu.\n", GetLastError());
 
     ret = VirtualFree( placeholder1, size, MEM_RELEASE | MEM_PRESERVE_PLACEHOLDER );
     ok(!ret && GetLastError() == ERROR_INVALID_PARAMETER, "Got ret %d, error %lu.\n", ret, GetLastError());
 
-    ret = pUnmapViewOfFile2(GetCurrentProcess(), view1, MEM_RELEASE | MEM_PRESERVE_PLACEHOLDER);
-    ok(!ret && GetLastError() == ERROR_INVALID_PARAMETER, "Got ret %d, error %lu.\n", ret, GetLastError());
     ret = pUnmapViewOfFile2(GetCurrentProcess(), view1, MEM_PRESERVE_PLACEHOLDER);
     ok(ret, "Got error %lu.\n", GetLastError());
-
     memset(&info, 0, sizeof(info));
     VirtualQuery(placeholder1, &info, sizeof(info));
     ok(info.AllocationProtect == PAGE_NOACCESS, "Unexpected protection %#lx.\n", info.AllocationProtect);
@@ -340,16 +257,6 @@ static void test_VirtualAlloc2(void)
 
     ret = UnmapViewOfFile(view1);
     ok(!ret && GetLastError() == ERROR_INVALID_ADDRESS, "Got error %lu.\n", GetLastError());
-
-    view1 = pMapViewOfFile3(section, NULL, placeholder1, 0, size, MEM_REPLACE_PLACEHOLDER, PAGE_READWRITE, NULL, 0);
-    ok(view1 == placeholder1, "Address does not match.\n");
-    CloseHandle(section);
-
-    ret = VirtualFree( view1, size, MEM_RELEASE | MEM_PRESERVE_PLACEHOLDER );
-    ok(!ret && GetLastError() == ERROR_INVALID_PARAMETER, "Got ret %d, error %lu.\n", ret, GetLastError());
-
-    ret = pUnmapViewOfFile2(GetCurrentProcess(), view1, MEM_UNMAP_WITH_TRANSIENT_BOOST | MEM_PRESERVE_PLACEHOLDER);
-    ok(ret, "Got error %lu.\n", GetLastError());
 
     ret = VirtualFree( placeholder1, size, MEM_RELEASE | MEM_PRESERVE_PLACEHOLDER );
     ok(!ret && GetLastError() == ERROR_INVALID_ADDRESS, "Got ret %d, error %lu.\n", ret, GetLastError());
@@ -573,21 +480,6 @@ static void test_MapViewOfFileFromApp(void)
     ok(ret, "Failed to delete a test file.\n");
 }
 
-static void test_QueryProcessCycleTime(void)
-{
-    ULONG64 cycles1, cycles2;
-    BOOL ret;
-
-    ret = QueryProcessCycleTime( GetCurrentProcess(), &cycles1 );
-    ok( ret, "QueryProcessCycleTime failed, error %lu.\n", GetLastError() );
-
-    ret = QueryProcessCycleTime( GetCurrentProcess(), &cycles2 );
-    ok( ret, "QueryProcessCycleTime failed, error %lu.\n", GetLastError() );
-
-    todo_wine
-    ok( cycles2 > cycles1, "CPU cycles used by process should be increasing.\n" );
-}
-
 static void init_funcs(void)
 {
     HMODULE hmod = GetModuleHandleA("kernelbase.dll");
@@ -621,5 +513,4 @@ START_TEST(process)
     test_OpenFileMappingFromApp();
     test_CreateFileMappingFromApp();
     test_MapViewOfFileFromApp();
-    test_QueryProcessCycleTime();
 }

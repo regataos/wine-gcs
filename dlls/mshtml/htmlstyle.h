@@ -147,23 +147,22 @@ typedef enum {
     STYLEID_MAX_VALUE
 } styleid_t;
 
-HRESULT HTMLStyle_Create(HTMLElement*,HTMLStyle**);
-HRESULT create_computed_style(nsIDOMCSSStyleDeclaration*,compat_mode_t,IHTMLCSSStyleDeclaration**);
-void init_css_style(CSSStyle*,nsIDOMCSSStyleDeclaration*,dispex_static_data_t*,compat_mode_t);
+HRESULT HTMLStyle_Create(HTMLElement*,HTMLStyle**) DECLSPEC_HIDDEN;
+HRESULT create_computed_style(nsIDOMCSSStyleDeclaration*,HTMLInnerWindow*,compat_mode_t,IHTMLCSSStyleDeclaration**) DECLSPEC_HIDDEN;
+void init_css_style(CSSStyle*,nsIDOMCSSStyleDeclaration*,dispex_static_data_t*,HTMLInnerWindow*,compat_mode_t) DECLSPEC_HIDDEN;
 
-void *CSSStyle_query_interface(DispatchEx*,REFIID);
-void CSSStyle_traverse(DispatchEx*,nsCycleCollectionTraversalCallback*);
-void CSSStyle_unlink(DispatchEx*);
-void CSSStyle_destructor(DispatchEx*);
-HRESULT CSSStyle_get_dispid(DispatchEx*,BSTR,DWORD,DISPID*);
-void CSSStyle_init_dispex_info(dispex_data_t *info, compat_mode_t mode);
+void *CSSStyle_query_interface(DispatchEx*,REFIID) DECLSPEC_HIDDEN;
+void CSSStyle_traverse(DispatchEx*,nsCycleCollectionTraversalCallback*) DECLSPEC_HIDDEN;
+void CSSStyle_unlink(DispatchEx*) DECLSPEC_HIDDEN;
+void CSSStyle_destructor(DispatchEx*) DECLSPEC_HIDDEN;
+HRESULT CSSStyle_get_static_dispid(compat_mode_t,BSTR,DWORD,DISPID*) DECLSPEC_HIDDEN;
+void CSSStyle_init_dispex_info(dispex_data_t *info, compat_mode_t mode) DECLSPEC_HIDDEN;
 
-HRESULT get_style_property(CSSStyle*,styleid_t,BSTR*);
-HRESULT get_style_property_var(CSSStyle*,styleid_t,VARIANT*);
+HRESULT get_style_property(CSSStyle*,styleid_t,BSTR*) DECLSPEC_HIDDEN;
+HRESULT get_style_property_var(CSSStyle*,styleid_t,VARIANT*) DECLSPEC_HIDDEN;
 
-HRESULT get_elem_style(HTMLElement*,styleid_t,BSTR*);
-HRESULT set_elem_style(HTMLElement*,styleid_t,const WCHAR*);
+HRESULT get_elem_style(HTMLElement*,styleid_t,BSTR*) DECLSPEC_HIDDEN;
+HRESULT set_elem_style(HTMLElement*,styleid_t,const WCHAR*) DECLSPEC_HIDDEN;
 
-#define CSSSTYLE_DISPEX_VTBL_ENTRIES           \
-    .destructor        = CSSStyle_destructor,  \
-    .get_dispid        = CSSStyle_get_dispid
+#define CSSSTYLE_DISPEX_VTBL_ENTRIES                \
+    .destructor        = CSSStyle_destructor

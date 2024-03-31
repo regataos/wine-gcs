@@ -2,6 +2,7 @@ MODULE    = fltlib.dll
 
 EXTRADLLFLAGS = -Wb,--prefer-native
 
-SOURCES = \
-	fltlib.c \
-	rsrc.rc
+C_SRCS = \
+	fltlib.c
+
+RC_SRCS = rsrc.rc

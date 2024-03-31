@@ -113,7 +113,7 @@ static inline BOOL is_broadcast( HWND hwnd )
  */
 HWND WIN_IsCurrentProcess( HWND hwnd )
 {
-    return UlongToHandle( NtUserCallHwnd( hwnd, NtUserIsCurrentProcessWindow ));
+    return UlongToHandle( NtUserCallHwnd( hwnd, NtUserIsCurrehtProcessWindow ));
 }
 
 
@@ -124,7 +124,7 @@ HWND WIN_IsCurrentProcess( HWND hwnd )
  */
 HWND WIN_IsCurrentThread( HWND hwnd )
 {
-    return UlongToHandle( NtUserCallHwnd( hwnd, NtUserIsCurrentThreadWindow ));
+    return UlongToHandle( NtUserCallHwnd( hwnd, NtUserIsCurrehtThreadWindow ));
 }
 
 
@@ -613,16 +613,6 @@ BOOL WINAPI IsWindowUnicode( HWND hwnd )
 DPI_AWARENESS_CONTEXT WINAPI GetWindowDpiAwarenessContext( HWND hwnd )
 {
     return NtUserGetWindowDpiAwarenessContext( hwnd );
-}
-
-
-/***********************************************************************
- *		GetWindowDpiHostingBehavior  (USER32.@)
- */
-DPI_HOSTING_BEHAVIOR WINAPI GetWindowDpiHostingBehavior( HWND hwnd )
-{
-    FIXME("(%p): stub\n", hwnd);
-    return DPI_HOSTING_BEHAVIOR_DEFAULT;
 }
 
 
@@ -1570,6 +1560,18 @@ BOOL WINAPI DECLSPEC_HOTPATCH GetWindowInfo( HWND hwnd, WINDOWINFO *info )
 {
     return NtUserGetWindowInfo( hwnd, info );
 }
+
+/******************************************************************************
+ *              SwitchDesktop (USER32.@)
+ *
+ * NOTES: Sets the current input or interactive desktop.
+ */
+BOOL WINAPI SwitchDesktop( HDESK hDesktop)
+{
+    FIXME("(hwnd %p) stub!\n", hDesktop);
+    return TRUE;
+}
+
 
 /*****************************************************************************
  *              UpdateLayeredWindowIndirect  (USER32.@)

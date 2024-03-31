@@ -108,12 +108,13 @@ struct __wine_debug_channel
 #define WINE_FIXME_(ch) WINE_FIXME
 #endif
 
-NTSYSAPI int WINAPI __wine_dbg_write( const char *str, unsigned int len );
-extern DECLSPEC_EXPORT unsigned char __cdecl __wine_dbg_get_channel_flags( struct __wine_debug_channel *channel );
-extern DECLSPEC_EXPORT const char * __cdecl __wine_dbg_strdup( const char *str );
-extern DECLSPEC_EXPORT int __cdecl __wine_dbg_output( const char *str );
-extern DECLSPEC_EXPORT int __cdecl __wine_dbg_header( enum __wine_debug_class cls, struct __wine_debug_channel *channel,
-                                                      const char *function );
+extern int WINAPI __wine_dbg_write( const char *str, unsigned int len );
+extern unsigned char __cdecl __wine_dbg_get_channel_flags( struct __wine_debug_channel *channel );
+extern const char * __cdecl __wine_dbg_strdup( const char *str );
+extern int __cdecl __wine_dbg_output( const char *str );
+extern int __cdecl __wine_dbg_header( enum __wine_debug_class cls, struct __wine_debug_channel *channel,
+                                      const char *function );
+extern unsigned int WINAPI __wine_dbg_ftrace( char *str, unsigned int str_size, unsigned int ctx );
 
 /*
  * Exported definitions and macros
@@ -128,6 +129,18 @@ extern DECLSPEC_EXPORT int __cdecl __wine_dbg_header( enum __wine_debug_class cl
 #else
 # define __wine_dbg_cdecl
 #endif
+
+static inline unsigned int __wine_dbg_cdecl __wine_dbg_ftrace_printf( unsigned int ctx, const char *format, ...)
+{
+    char buffer[256];
+
+    va_list args;
+
+    va_start( args, format );
+    vsnprintf( buffer, sizeof(buffer), format, args );
+    va_end( args );
+    return __wine_dbg_ftrace(buffer, sizeof(buffer), ctx);
+}
 
 static const char * __wine_dbg_cdecl wine_dbg_vsprintf( const char *format, va_list args ) __WINE_PRINTF_ATTR(1,0);
 static inline const char * __wine_dbg_cdecl wine_dbg_vsprintf( const char *format, va_list args )
@@ -304,15 +317,6 @@ static inline const char *wine_dbgstr_w( const WCHAR *s )
 {
     return wine_dbgstr_wn( s, -1 );
 }
-
-#if defined(__hstring_h__) && defined(__WINSTRING_H_)
-static inline const char *wine_dbgstr_hstring( HSTRING hstr )
-{
-    UINT32 len;
-    const WCHAR *str = WindowsGetStringRawBuffer( hstr, &len );
-    return wine_dbgstr_wn( str, len );
-}
-#endif
 
 static inline const char *wine_dbgstr_guid( const GUID *id )
 {
@@ -501,11 +505,9 @@ static inline const char *wine_dbgstr_variant( const VARIANT *v )
 #define WINE_ERR_ON(ch)            __WINE_IS_DEBUG_ON(_ERR,&__wine_dbch_##ch)
 
 #define WINE_DECLARE_DEBUG_CHANNEL(ch) \
-    static struct __wine_debug_channel __wine_dbch_##ch = { 0xff, #ch }; \
-    C_ASSERT(sizeof(#ch) <= sizeof(__wine_dbch_##ch.name))
+    static struct __wine_debug_channel __wine_dbch_##ch = { 0xff, #ch }
 #define WINE_DEFAULT_DEBUG_CHANNEL(ch) \
     static struct __wine_debug_channel __wine_dbch_##ch = { 0xff, #ch }; \
-    C_ASSERT(sizeof(#ch) <= sizeof(__wine_dbch_##ch.name)); \
     static struct __wine_debug_channel * const __wine_dbch___default = &__wine_dbch_##ch
 
 #define WINE_MESSAGE               wine_dbg_printf
@@ -519,10 +521,6 @@ static inline const char *debugstr_guid( const struct _GUID *id ) { return wine_
 static inline const char *debugstr_fourcc( unsigned int cc ) { return wine_dbgstr_fourcc( cc ); }
 static inline const char *debugstr_a( const char *s )  { return wine_dbgstr_an( s, -1 ); }
 static inline const char *debugstr_w( const WCHAR *s ) { return wine_dbgstr_wn( s, -1 ); }
-
-#if defined(__hstring_h__) && defined(__WINSTRING_H_)
-static inline const char *debugstr_hstring( struct HSTRING__ *s ) { return wine_dbgstr_hstring( s ); }
-#endif
 
 #if defined(__oaidl_h__) && defined(V_VT)
 static inline const char *debugstr_vt( VARTYPE vt ) { return wine_dbgstr_vt( vt ); }
@@ -547,6 +545,16 @@ static inline const char *debugstr_variant( const VARIANT *v ) { return wine_dbg
 #define ERR_ON(ch)                 WINE_ERR_ON(ch)
 
 #define MESSAGE                    WINE_MESSAGE
+
+#define FTRACE(...)                do { if (TRACE_ON(ftrace)) __wine_dbg_ftrace_printf( -1, __VA_ARGS__ ); } while (0)
+
+#define FTRACE_BLOCK_START(...) do { \
+                                    unsigned int ctx = TRACE_ON(ftrace) ? __wine_dbg_ftrace_printf( 0, __VA_ARGS__ ) : 0; \
+                                    do {
+
+#define FTRACE_BLOCK_END()          } while (0); \
+                                    if (TRACE_ON(ftrace)) __wine_dbg_ftrace_printf( ctx, "" ); \
+                                } while (0);
 
 #endif /* __WINESRC__ */
 

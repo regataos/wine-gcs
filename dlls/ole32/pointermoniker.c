@@ -23,6 +23,8 @@
 #include <string.h>
 
 #define COBJMACROS
+#define NONAMELESSUNION
+
 #include "windef.h"
 #include "winbase.h"
 #include "winerror.h"
@@ -30,6 +32,7 @@
 #include "objbase.h"
 #include "oleidl.h"
 #include "wine/debug.h"
+#include "wine/heap.h"
 #include "moniker.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(ole);
@@ -107,7 +110,7 @@ static ULONG WINAPI PointerMonikerImpl_Release(IMoniker *iface)
     if (!refcount)
     {
         if (moniker->pObject) IUnknown_Release(moniker->pObject);
-        free(moniker);
+        heap_free(moniker);
     }
 
     return refcount;
@@ -597,7 +600,8 @@ HRESULT WINAPI CreatePointerMoniker(IUnknown *object, IMoniker **ret)
     if (!ret)
         return E_INVALIDARG;
 
-    if (!(moniker = calloc(1, sizeof(*moniker))))
+    moniker = heap_alloc(sizeof(*moniker));
+    if (!moniker)
     {
         *ret = NULL;
         return E_OUTOFMEMORY;
@@ -710,7 +714,7 @@ static ULONG WINAPI ObjrefMonikerImpl_Release(IMoniker *iface)
     if (!refcount)
     {
         if (moniker->pObject) IUnknown_Release(moniker->pObject);
-        free(moniker);
+        heap_free(moniker);
     }
 
     return refcount;
@@ -1013,7 +1017,8 @@ HRESULT WINAPI CreateObjrefMoniker(IUnknown *obj, IMoniker **ret)
     if (!ret)
         return E_INVALIDARG;
 
-    if (!(moniker = calloc(1, sizeof(*moniker))))
+    moniker = heap_alloc(sizeof(*moniker));
+    if (!moniker)
     {
         *ret = NULL;
         return E_OUTOFMEMORY;

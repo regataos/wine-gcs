@@ -29,10 +29,6 @@
 # error You cannot use config.h with msvcrt
 #endif
 
-#ifdef WINE_UNIX_LIB
-# error msvcrt headers cannot be used in Unix code
-#endif
-
 #ifndef _WIN32
 # define _WIN32
 #endif
@@ -86,7 +82,7 @@
 #define __has_attribute(x) 0
 #endif
 
-#if !defined(_MSC_VER) && !defined(__MINGW32__)
+#ifndef _MSC_VER
 # undef __stdcall
 # ifdef __i386__
 #  ifdef __GNUC__
@@ -104,13 +100,16 @@
 #  else
 #   define __stdcall __attribute__((ms_abi))
 #  endif
-# elif defined(__arm__) && defined (__GNUC__) && !defined(__SOFTFP__) && !defined(__CYGWIN__)
+# elif defined(__arm__) && defined (__GNUC__) && !defined(__SOFTFP__) && !defined(__MINGW32__) && !defined(__CYGWIN__)
 #   define __stdcall __attribute__((pcs("aapcs-vfp")))
 # elif defined(__aarch64__) && defined (__GNUC__) && __has_attribute(ms_abi)
 #  define __stdcall __attribute__((ms_abi))
 # else  /* __i386__ */
 #  define __stdcall
 # endif  /* __i386__ */
+#endif /* __stdcall */
+
+#ifndef _MSC_VER
 # undef __cdecl
 # if defined(__i386__) && defined(__GNUC__)
 #  if (__GNUC__ > 4) || ((__GNUC__ == 4) && (__GNUC_MINOR__ >= 2)) || defined(__APPLE__)
@@ -121,7 +120,19 @@
 # else
 #  define __cdecl __stdcall
 # endif
-#endif  /* _MSC_VER || __MINGW32__ */
+#endif
+
+#if (defined(__x86_64__) || (defined(__aarch64__) && __has_attribute(ms_abi))) && defined (__GNUC__)
+# include <stdarg.h>
+# undef va_list
+# undef va_start
+# undef va_end
+# undef va_copy
+# define va_list __builtin_ms_va_list
+# define va_start(list,arg) __builtin_ms_va_start(list,arg)
+# define va_end(list) __builtin_ms_va_end(list)
+# define va_copy(dest,src) __builtin_ms_va_copy(dest,src)
+#endif
 
 #ifndef WINAPIV
 # if defined(__arm__) && defined (__GNUC__) && !defined(__SOFTFP__) && !defined(__MINGW32__) && !defined(__CYGWIN__)
@@ -323,30 +334,12 @@ typedef struct threadlocaleinfostruct {
 #define _THREADLOCALEINFO
 #endif
 
-#ifdef __MINGW32__
+#if !defined(__WINE_USE_MSVCRT) || defined(__MINGW32__)
 #define __WINE_CRT_PRINTF_ATTR(fmt,args) __attribute__((format (printf,fmt,args)))
 #define __WINE_CRT_SCANF_ATTR(fmt,args)  __attribute__((format (scanf,fmt,args)))
 #else
 #define __WINE_CRT_PRINTF_ATTR(fmt,args)
 #define __WINE_CRT_SCANF_ATTR(fmt,args)
-#endif
-
-#if defined(__GNUC__) && ((__GNUC__ > 4) || ((__GNUC__ == 4) && (__GNUC_MINOR__ >= 3)))
-#define __WINE_ALLOC_SIZE(...) __attribute__((__alloc_size__(__VA_ARGS__)))
-#else
-#define __WINE_ALLOC_SIZE(...)
-#endif
-
-#if defined(__GNUC__) && (__GNUC__ > 10)
-#define __WINE_DEALLOC(...) __attribute__((malloc (__VA_ARGS__)))
-#else
-#define __WINE_DEALLOC(...)
-#endif
-
-#if defined(__GNUC__) && (__GNUC__ > 2)
-#define __WINE_MALLOC __attribute__((malloc))
-#else
-#define __WINE_MALLOC
 #endif
 
 #endif /* __WINE_CORECRT_H */

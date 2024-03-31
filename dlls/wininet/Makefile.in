@@ -5,7 +5,7 @@ IMPORTS   = $(ZLIB_PE_LIBS) mpr shlwapi shell32 user32 ws2_32 advapi32
 EXTRAINCL = $(ZLIB_PE_CFLAGS)
 DELAYIMPORTS = secur32 crypt32 cryptui dhcpcsvc iphlpapi
 
-SOURCES = \
+C_SRCS = \
 	cookie.c \
 	dialogs.c \
 	ftp.c \
@@ -14,6 +14,9 @@ SOURCES = \
 	internet.c \
 	netconnection.c \
 	urlcache.c \
-	utility.c \
-	wininet.rc \
+	utility.c
+
+RC_SRCS = wininet.rc
+
+MC_SRCS = \
 	winineterror.mc

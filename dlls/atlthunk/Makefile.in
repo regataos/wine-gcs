@@ -1,5 +1,5 @@
 MODULE    = atlthunk.dll
 IMPORTLIB = atlthunk
 
-SOURCES = \
+C_SRCS = \
 	atlthunk.c

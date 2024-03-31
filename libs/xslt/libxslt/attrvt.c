@@ -154,9 +154,12 @@ xsltSetAttrVTsegment(xsltAttrVTPtr avt, void *val) {
     if (avt->nb_seg >= avt->max_seg) {
         size_t size = sizeof(xsltAttrVT) +
                       (avt->max_seg + MAX_AVT_SEG) * sizeof(void *);
-	avt = (xsltAttrVTPtr) xmlRealloc(avt, size);
-	if (avt == NULL)
+	xsltAttrVTPtr tmp = (xsltAttrVTPtr) xmlRealloc(avt, size);
+	if (tmp == NULL) {
+            xsltFreeAttrVT(avt);
 	    return NULL;
+	}
+        avt = tmp;
 	memset(&avt->segments[avt->nb_seg], 0, MAX_AVT_SEG*sizeof(void *));
 	avt->max_seg += MAX_AVT_SEG;
     }
@@ -179,8 +182,7 @@ xsltCompileAttr(xsltStylesheetPtr style, xmlAttrPtr attr) {
     const xmlChar *cur;
     xmlChar *ret = NULL;
     xmlChar *expr = NULL;
-    xmlXPathCompExprPtr comp = NULL;
-    xsltAttrVTPtr avt, tmp;
+    xsltAttrVTPtr avt;
     int i = 0, lastavt = 0;
 
     if ((style == NULL) || (attr == NULL) || (attr->children == NULL))
@@ -244,9 +246,8 @@ xsltCompileAttr(xsltStylesheetPtr style, xmlAttrPtr attr) {
 		str = cur;
 		if (avt->nb_seg == 0)
 		    avt->strstart = 1;
-		if ((tmp = xsltSetAttrVTsegment(avt, (void *) ret)) == NULL)
+		if ((avt = xsltSetAttrVTsegment(avt, (void *) ret)) == NULL)
 		    goto error;
-                avt = tmp;
 		ret = NULL;
 		lastavt = 0;
 	    }
@@ -279,6 +280,8 @@ xsltCompileAttr(xsltStylesheetPtr style, xmlAttrPtr attr) {
 	        XSLT_TODO
 		goto error;
 	    } else {
+		xmlXPathCompExprPtr comp;
+
 		comp = xsltXPathCompile(style, expr);
 		if (comp == NULL) {
 		    xsltTransformError(NULL, style, attr->parent,
@@ -290,23 +293,14 @@ xsltCompileAttr(xsltStylesheetPtr style, xmlAttrPtr attr) {
 		if (avt->nb_seg == 0)
 		    avt->strstart = 0;
 		if (lastavt == 1) {
-		    if ((tmp = xsltSetAttrVTsegment(avt, NULL)) == NULL) {
-                        xsltTransformError(NULL, style, attr->parent,
-                                           "out of memory\n");
+		    if ((avt = xsltSetAttrVTsegment(avt, NULL)) == NULL)
 		        goto error;
-                    }
-                    avt = tmp;
 		}
-		if ((tmp = xsltSetAttrVTsegment(avt, (void *) comp)) == NULL) {
-                    xsltTransformError(NULL, style, attr->parent,
-                                       "out of memory\n");
+		if ((avt = xsltSetAttrVTsegment(avt, (void *) comp)) == NULL)
 		    goto error;
-                }
-                avt = tmp;
 		lastavt = 1;
 		xmlFree(expr);
 		expr = NULL;
-                comp = NULL;
 	    }
 	    cur++;
 	    str = cur;
@@ -331,9 +325,8 @@ xsltCompileAttr(xsltStylesheetPtr style, xmlAttrPtr attr) {
 	str = cur;
 	if (avt->nb_seg == 0)
 	    avt->strstart = 1;
-	if ((tmp = xsltSetAttrVTsegment(avt, (void *) ret)) == NULL)
+	if ((avt = xsltSetAttrVTsegment(avt, (void *) ret)) == NULL)
 	    goto error;
-        avt = tmp;
 	ret = NULL;
     }
 
@@ -357,8 +350,6 @@ error:
 	xmlFree(ret);
     if (expr != NULL)
 	xmlFree(expr);
-    if (comp != NULL)
-        xmlXPathFreeCompExpr(comp);
 }
 
 

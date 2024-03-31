@@ -22,6 +22,8 @@
 #pragma makedep unix
 #endif
 
+#define NONAMELESSSTRUCT
+#define NONAMELESSUNION
 #include "config.h"
 
 #include <stdarg.h>
@@ -221,7 +223,8 @@ static ANDROID_PDEVICE *create_android_physdev(void)
 /**********************************************************************
  *           ANDROID_CreateDC
  */
-static BOOL ANDROID_CreateDC( PHYSDEV *pdev, LPCWSTR device, LPCWSTR output, const DEVMODEW *initData )
+static BOOL CDECL ANDROID_CreateDC( PHYSDEV *pdev, LPCWSTR device, LPCWSTR output,
+                                    const DEVMODEW *initData )
 {
     ANDROID_PDEVICE *physdev = create_android_physdev();
 
@@ -235,7 +238,7 @@ static BOOL ANDROID_CreateDC( PHYSDEV *pdev, LPCWSTR device, LPCWSTR output, con
 /**********************************************************************
  *           ANDROID_CreateCompatibleDC
  */
-static BOOL ANDROID_CreateCompatibleDC( PHYSDEV orig, PHYSDEV *pdev )
+static BOOL CDECL ANDROID_CreateCompatibleDC( PHYSDEV orig, PHYSDEV *pdev )
 {
     ANDROID_PDEVICE *physdev = create_android_physdev();
 
@@ -249,7 +252,7 @@ static BOOL ANDROID_CreateCompatibleDC( PHYSDEV orig, PHYSDEV *pdev )
 /**********************************************************************
  *           ANDROID_DeleteDC
  */
-static BOOL ANDROID_DeleteDC( PHYSDEV dev )
+static BOOL CDECL ANDROID_DeleteDC( PHYSDEV dev )
 {
     free( dev );
     return TRUE;
@@ -282,17 +285,17 @@ BOOL ANDROID_UpdateDisplayDevices( const struct gdi_device_manager *device_manag
         {
             .rc_monitor = virtual_screen_rect,
             .rc_work = monitor_rc_work,
+            .state_flags = DISPLAY_DEVICE_ACTIVE | DISPLAY_DEVICE_ATTACHED,
         };
         const DEVMODEW mode =
         {
-            .dmFields = DM_DISPLAYORIENTATION | DM_PELSWIDTH | DM_PELSHEIGHT | DM_BITSPERPEL |
-                        DM_DISPLAYFLAGS | DM_DISPLAYFREQUENCY | DM_POSITION,
+            .dmFields = DM_DISPLAYORIENTATION | DM_PELSWIDTH | DM_PELSHEIGHT | DM_BITSPERPEL | DM_DISPLAYFLAGS | DM_DISPLAYFREQUENCY,
             .dmBitsPerPel = screen_bpp, .dmPelsWidth = screen_width, .dmPelsHeight = screen_height, .dmDisplayFrequency = 60,
         };
         device_manager->add_gpu( &gpu, param );
         device_manager->add_adapter( &adapter, param );
         device_manager->add_monitor( &gdi_monitor, param );
-        device_manager->add_mode( &mode, TRUE, param );
+        device_manager->add_mode( &mode, param );
         force_display_devices_refresh = FALSE;
     }
 
@@ -305,11 +308,11 @@ BOOL ANDROID_UpdateDisplayDevices( const struct gdi_device_manager *device_manag
  */
 BOOL ANDROID_GetCurrentDisplaySettings( LPCWSTR name, BOOL is_primary, LPDEVMODEW devmode )
 {
-    devmode->dmDisplayFlags = 0;
-    devmode->dmPosition.x = 0;
-    devmode->dmPosition.y = 0;
-    devmode->dmDisplayOrientation = 0;
-    devmode->dmDisplayFixedOutput = 0;
+    devmode->u2.dmDisplayFlags = 0;
+    devmode->u1.s2.dmPosition.x = 0;
+    devmode->u1.s2.dmPosition.y = 0;
+    devmode->u1.s2.dmDisplayOrientation = 0;
+    devmode->u1.s2.dmDisplayFixedOutput = 0;
     devmode->dmPelsWidth = screen_width;
     devmode->dmPelsHeight = screen_height;
     devmode->dmBitsPerPel = screen_bpp;

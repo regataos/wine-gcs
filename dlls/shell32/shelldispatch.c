@@ -1682,7 +1682,6 @@ static HRESULT FolderItems_Constructor(FolderImpl *folder, FolderItems **ret)
     return S_OK;
 
 failed:
-    FolderItemsImpl_Release(&This->FolderItems3_iface);
     if (enumidlist)
         IEnumIDList_Release(enumidlist);
     return hr;

@@ -148,7 +148,6 @@ ULONG CDECL ldap_parse_resultA( LDAP *ld, WLDAP32_LDAPMessage *result, ULONG *re
            free );
 
     if (!ld) return WLDAP32_LDAP_PARAM_ERROR;
-    if (!result) return WLDAP32_LDAP_NO_RESULTS_RETURNED;
 
     ret = ldap_parse_resultW( ld, result, retcode, &matchedW, &errorW, &referralsW, &serverctrlsW, free );
 
@@ -178,7 +177,6 @@ ULONG CDECL ldap_parse_resultW( LDAP *ld, WLDAP32_LDAPMessage *result, ULONG *re
            free );
 
     if (!ld) return WLDAP32_LDAP_PARAM_ERROR;
-    if (!result) return WLDAP32_LDAP_NO_RESULTS_RETURNED;
 
     ret = map_error( ldap_parse_result( CTX(ld), MSG(result), (int *)retcode, &matchedU, &errorU, &referralsU,
                                         &serverctrlsU, free ) );
@@ -188,7 +186,6 @@ ULONG CDECL ldap_parse_resultW( LDAP *ld, WLDAP32_LDAPMessage *result, ULONG *re
     if (referrals) *referrals = strarrayUtoW( referralsU );
     if (serverctrls) *serverctrls = controlarrayUtoW( serverctrlsU );
 
-    if (free) ldap_msgfree( result );
     ldap_memfree( matchedU );
     ldap_memfree( errorU );
     ldap_memfree( referralsU );

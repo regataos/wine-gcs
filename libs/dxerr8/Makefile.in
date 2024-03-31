@@ -1,4 +1,4 @@
 STATICLIB = libdxerr8.a
 
-SOURCES = \
+C_SRCS = \
 	dxerr8.c

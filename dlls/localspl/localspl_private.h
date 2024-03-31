@@ -25,7 +25,7 @@
 #include "winternl.h"
 #include "wine/unixlib.h"
 
-extern HINSTANCE localspl_instance;
+extern HINSTANCE localspl_instance DECLSPEC_HIDDEN;
 
 /* ## Resource-ID ## */
 #define IDS_FORM_LETTER 200
@@ -195,7 +195,6 @@ enum cups_funcs
     unix_start_doc,
     unix_write_doc,
     unix_end_doc,
-    unix_funcs_count
 };
 
 #endif /* __WINE_LOCALSPL_PRIVATE__ */

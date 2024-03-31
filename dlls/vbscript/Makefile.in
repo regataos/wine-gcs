@@ -3,20 +3,25 @@ IMPORTS   = oleaut32 ole32 user32
 
 EXTRADLLFLAGS = -Wb,--prefer-native
 
-SOURCES = \
+C_SRCS = \
 	compile.c \
 	global.c \
 	interp.c \
 	lex.c \
-	parser.y \
 	regexp.c \
 	utils.c \
 	vbdisp.c \
 	vbregexp.c \
 	vbscript.c \
-	vbscript.rc \
+	vbscript_main.c
+
+BISON_SRCS = \
+	parser.y
+
+RC_SRCS = vbscript.rc
+
+IDL_SRCS = \
 	vbscript_classes.idl \
-	vbscript_main.c \
 	vbsglobal.idl \
 	vbsregexp10.idl \
 	vbsregexp55.idl

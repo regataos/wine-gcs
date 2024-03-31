@@ -37,6 +37,14 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(ntdll);
 
+/* Bits set from LSB to MSB; used as mask for runs < 8 bits */
+static const BYTE NTDLL_maskBits[8] = { 0, 1, 3, 7, 15, 31, 63, 127 };
+
+/* Number of set bits for each value of a nibble; used for counting */
+static const BYTE NTDLL_nibbleBitCount[16] = {
+  0, 1, 1, 2, 1, 2, 2, 3, 1, 2, 2, 3, 2, 3, 3, 4
+};
+
 /* First set bit in a nibble; used for determining least significant bit */
 static const BYTE NTDLL_leastSignificant[16] = {
   0, 0, 1, 0, 2, 0, 1, 0, 3, 0, 1, 0, 2, 0, 1, 0
@@ -46,22 +54,6 @@ static const BYTE NTDLL_leastSignificant[16] = {
 static const signed char NTDLL_mostSignificant[16] = {
   -1, 0, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3
 };
-
-static inline ULONG maskbits( ULONG idx )
-{
-    return ~0u << (idx & 31);
-}
-
-static ULONG popcount( ULONG val )
-{
-#if defined(__MINGW32__)
-    return __builtin_popcount( val );
-#else
-    val -= val >> 1 & 0x55555555;
-    val = (val & 0x33333333) + (val >> 2 & 0x33333333);
-    return ((val + (val >> 4)) & 0x0f0f0f0f) * 0x01010101 >> 24;
-#endif
-}
 
 /*************************************************************************
  * RtlInitializeBitMap	[NTDLL.@]
@@ -123,90 +115,267 @@ VOID WINAPI RtlClearAllBits(PRTL_BITMAP lpBits)
 
 /*************************************************************************
  * RtlSetBits	[NTDLL.@]
+ *
+ * Set a range of bits in a bitmap.
+ *
+ * PARAMS
+ *  lpBits  [I] Bitmap pointer
+ *  ulStart [I] First bit to set
+ *  ulCount [I] Number of consecutive bits to set
+ *
+ * RETURNS
+ *  Nothing.
  */
-void WINAPI RtlSetBits( RTL_BITMAP *bitmap, ULONG start, ULONG count )
+VOID WINAPI RtlSetBits(PRTL_BITMAP lpBits, ULONG ulStart, ULONG ulCount)
 {
-    ULONG end = start + count;
-    ULONG pos = start / 32;
-    ULONG end_pos = end / 32;
+  LPBYTE lpOut;
 
-    TRACE( "(%p,%lu,%lu)\n", bitmap, start, count );
+  TRACE("(%p,%lu,%lu)\n", lpBits, ulStart, ulCount);
 
-    if (!count || start >= bitmap->SizeOfBitMap || count > bitmap->SizeOfBitMap - start) return;
+  if (!lpBits || !ulCount ||
+      ulStart >= lpBits->SizeOfBitMap ||
+      ulCount > lpBits->SizeOfBitMap - ulStart)
+    return;
 
-    if (end_pos > pos)
+  /* FIXME: It might be more efficient/cleaner to manipulate four bytes
+   * at a time. But beware of the pointer arithmetics...
+   */
+  lpOut = ((BYTE*)lpBits->Buffer) + (ulStart >> 3u);
+
+  /* Set bits in first byte, if ulStart isn't a byte boundary */
+  if (ulStart & 7)
+  {
+    if (ulCount > 7)
     {
-        bitmap->Buffer[pos++] |= maskbits( start );
-        while (pos < end_pos) bitmap->Buffer[pos++] = ~0u;
-        if (end & 31) bitmap->Buffer[pos] |= ~maskbits( end );
+      /* Set from start bit to the end of the byte */
+      *lpOut++ |= 0xff << (ulStart & 7);
+      ulCount -= (8 - (ulStart & 7));
     }
-    else bitmap->Buffer[pos] |= maskbits( start ) & ~maskbits( end );
+    else
+    {
+      /* Set from the start bit, possibly into the next byte also */
+      USHORT initialWord = NTDLL_maskBits[ulCount] << (ulStart & 7);
+
+      *lpOut |= (initialWord & 0xff);
+      if (initialWord >> 8) lpOut[1] |= (initialWord >> 8);
+      return;
+    }
+  }
+
+  /* Set bits up to complete byte count */
+  if (ulCount >> 3)
+  {
+    memset(lpOut, 0xff, ulCount >> 3);
+    lpOut = lpOut + (ulCount >> 3);
+  }
+
+  /* Set remaining bits, if any */
+  if (ulCount & 0x7)
+    *lpOut |= NTDLL_maskBits[ulCount & 0x7];
 }
 
 /*************************************************************************
  * RtlClearBits	[NTDLL.@]
+ *
+ * Clear bits in a bitmap.
+ *
+ * PARAMS
+ *  lpBits  [I] Bitmap pointer
+ *  ulStart [I] First bit to set
+ *  ulCount [I] Number of consecutive bits to clear
+ *
+ * RETURNS
+ *  Nothing.
  */
-void WINAPI RtlClearBits( RTL_BITMAP *bitmap, ULONG start, ULONG count)
+VOID WINAPI RtlClearBits(PRTL_BITMAP lpBits, ULONG ulStart, ULONG ulCount)
 {
-    ULONG end = start + count;
-    ULONG pos = start / 32;
-    ULONG end_pos = end / 32;
+  LPBYTE lpOut;
 
-    TRACE( "(%p,%lu,%lu)\n", bitmap, start, count );
+  TRACE("(%p,%lu,%lu)\n", lpBits, ulStart, ulCount);
 
-    if (!count || start >= bitmap->SizeOfBitMap || count > bitmap->SizeOfBitMap - start) return;
+  if (!lpBits || !ulCount ||
+      ulStart >= lpBits->SizeOfBitMap ||
+      ulCount > lpBits->SizeOfBitMap - ulStart)
+    return;
 
-    if (end_pos > pos)
+  /* FIXME: It might be more efficient/cleaner to manipulate four bytes
+   * at a time. But beware of the pointer arithmetics...
+   */
+  lpOut = ((BYTE*)lpBits->Buffer) + (ulStart >> 3u);
+
+  /* Clear bits in first byte, if ulStart isn't a byte boundary */
+  if (ulStart & 7)
+  {
+    if (ulCount > 7)
     {
-        bitmap->Buffer[pos++] &= ~maskbits( start );
-        while (pos < end_pos) bitmap->Buffer[pos++] = 0;
-        if (end & 31) bitmap->Buffer[pos] &= maskbits( end );
+      /* Clear from start bit to the end of the byte */
+      *lpOut++ &= ~(0xff << (ulStart & 7));
+      ulCount -= (8 - (ulStart & 7));
     }
-    else bitmap->Buffer[pos] &= ~maskbits( start ) | maskbits( end );
+    else
+    {
+      /* Clear from the start bit, possibly into the next byte also */
+      USHORT initialWord = ~(NTDLL_maskBits[ulCount] << (ulStart & 7));
+
+      *lpOut &= (initialWord & 0xff);
+      if ((initialWord >> 8) != 0xff) lpOut[1] &= (initialWord >> 8);
+      return;
+    }
+  }
+
+  /* Clear bits (in blocks of 8) on whole byte boundaries */
+  if (ulCount >> 3)
+  {
+    memset(lpOut, 0, ulCount >> 3);
+    lpOut = lpOut + (ulCount >> 3);
+  }
+
+  /* Clear remaining bits, if any */
+  if (ulCount & 0x7)
+    *lpOut &= ~NTDLL_maskBits[ulCount & 0x7];
 }
 
 /*************************************************************************
  * RtlAreBitsSet	[NTDLL.@]
+ *
+ * Determine if part of a bitmap is set.
+ *
+ * PARAMS
+ *  lpBits  [I] Bitmap pointer
+ *  ulStart [I] First bit to check from
+ *  ulCount [I] Number of consecutive bits to check
+ *
+ * RETURNS
+ *  TRUE,  If ulCount bits from ulStart are set.
+ *  FALSE, Otherwise.
  */
-BOOLEAN WINAPI RtlAreBitsSet( const RTL_BITMAP *bitmap, ULONG start, ULONG count )
+BOOLEAN WINAPI RtlAreBitsSet(PCRTL_BITMAP lpBits, ULONG ulStart, ULONG ulCount)
 {
-    ULONG end = start + count;
-    ULONG pos = start / 32;
-    ULONG end_pos = end / 32;
+  LPBYTE lpOut;
+  ULONG ulRemainder;
 
-    TRACE( "(%p,%lu,%lu)\n", bitmap, start, count );
+  TRACE("(%p,%lu,%lu)\n", lpBits, ulStart, ulCount);
 
-    if (!count || start >= bitmap->SizeOfBitMap || count > bitmap->SizeOfBitMap - start)
+  if (!lpBits || !ulCount ||
+      ulStart >= lpBits->SizeOfBitMap ||
+      ulCount > lpBits->SizeOfBitMap - ulStart)
+    return FALSE;
+
+  /* FIXME: It might be more efficient/cleaner to manipulate four bytes
+   * at a time. But beware of the pointer arithmetics...
+   */
+  lpOut = ((BYTE*)lpBits->Buffer) + (ulStart >> 3u);
+
+  /* Check bits in first byte, if ulStart isn't a byte boundary */
+  if (ulStart & 7)
+  {
+    if (ulCount > 7)
+    {
+      /* Check from start bit to the end of the byte */
+      if ((*lpOut &
+          ((0xff << (ulStart & 7))) & 0xff) != ((0xff << (ulStart & 7) & 0xff)))
         return FALSE;
+      lpOut++;
+      ulCount -= (8 - (ulStart & 7));
+    }
+    else
+    {
+      /* Check from the start bit, possibly into the next byte also */
+      USHORT initialWord = NTDLL_maskBits[ulCount] << (ulStart & 7);
 
-    if (end_pos == pos) return (bitmap->Buffer[pos] | ~maskbits( start ) | maskbits( end )) == ~0u;
+      if ((*lpOut & (initialWord & 0xff)) != (initialWord & 0xff))
+        return FALSE;
+      if ((initialWord & 0xff00) &&
+          ((lpOut[1] & (initialWord >> 8)) != (initialWord >> 8)))
+        return FALSE;
+      return TRUE;
+    }
+  }
 
-    if ((bitmap->Buffer[pos++] | ~maskbits( start )) != ~0u) return FALSE;
-    while (pos < end_pos) if (bitmap->Buffer[pos++] != ~0u) return FALSE;
-    if (!(end & 31)) return TRUE;
-    return (bitmap->Buffer[pos] | maskbits( end )) == ~0u;
+  /* Check bits in blocks of 8 bytes */
+  ulRemainder = ulCount & 7;
+  ulCount >>= 3;
+  while (ulCount--)
+  {
+    if (*lpOut++ != 0xff)
+      return FALSE;
+  }
+
+  /* Check remaining bits, if any */
+  if (ulRemainder &&
+      (*lpOut & NTDLL_maskBits[ulRemainder]) != NTDLL_maskBits[ulRemainder])
+    return FALSE;
+  return TRUE;
 }
 
 /*************************************************************************
  * RtlAreBitsClear	[NTDLL.@]
+ *
+ * Determine if part of a bitmap is clear.
+ *
+ * PARAMS
+ *  lpBits  [I] Bitmap pointer
+ *  ulStart [I] First bit to check from
+ *  ulCount [I] Number of consecutive bits to check
+ *
+ * RETURNS
+ *  TRUE,  If ulCount bits from ulStart are clear.
+ *  FALSE, Otherwise.
  */
-BOOLEAN WINAPI RtlAreBitsClear( const RTL_BITMAP *bitmap, ULONG start, ULONG count )
+BOOLEAN WINAPI RtlAreBitsClear(PCRTL_BITMAP lpBits, ULONG ulStart, ULONG ulCount)
 {
-    ULONG end = start + count;
-    ULONG pos = start / 32;
-    ULONG end_pos = end / 32;
+  LPBYTE lpOut;
+  ULONG ulRemainder;
 
-    TRACE( "(%p,%lu,%lu)\n", bitmap, start, count );
+  TRACE("(%p,%lu,%lu)\n", lpBits, ulStart, ulCount);
 
-    if (!count || start >= bitmap->SizeOfBitMap || count > bitmap->SizeOfBitMap - start)
+  if (!lpBits || !ulCount ||
+      ulStart >= lpBits->SizeOfBitMap ||
+      ulCount > lpBits->SizeOfBitMap - ulStart)
+    return FALSE;
+
+  /* FIXME: It might be more efficient/cleaner to manipulate four bytes
+   * at a time. But beware of the pointer arithmetics...
+   */
+  lpOut = ((BYTE*)lpBits->Buffer) + (ulStart >> 3u);
+
+  /* Check bits in first byte, if ulStart isn't a byte boundary */
+  if (ulStart & 7)
+  {
+    if (ulCount > 7)
+    {
+      /* Check from start bit to the end of the byte */
+      if (*lpOut & ((0xff << (ulStart & 7)) & 0xff))
         return FALSE;
+      lpOut++;
+      ulCount -= (8 - (ulStart & 7));
+    }
+    else
+    {
+      /* Check from the start bit, possibly into the next byte also */
+      USHORT initialWord = NTDLL_maskBits[ulCount] << (ulStart & 7);
 
-    if (end_pos == pos) return !(bitmap->Buffer[pos] & maskbits( start ) & ~maskbits( end ));
+      if (*lpOut & (initialWord & 0xff))
+        return FALSE;
+      if ((initialWord & 0xff00) && (lpOut[1] & (initialWord >> 8)))
+        return FALSE;
+      return TRUE;
+    }
+  }
 
-    if (bitmap->Buffer[pos++] & maskbits( start )) return FALSE;
-    while (pos < end_pos) if (bitmap->Buffer[pos++]) return FALSE;
-    if (!(end & 31)) return TRUE;
-    return !(bitmap->Buffer[pos] & ~maskbits( end ));
+  /* Check bits in blocks of 8 bytes */
+  ulRemainder = ulCount & 7;
+  ulCount >>= 3;
+  while (ulCount--)
+  {
+    if (*lpOut++)
+      return FALSE;
+  }
+
+  /* Check remaining bits, if any */
+  if (ulRemainder && *lpOut & NTDLL_maskBits[ulRemainder])
+    return FALSE;
+  return TRUE;
 }
 
 /*************************************************************************
@@ -355,16 +524,45 @@ ULONG WINAPI RtlFindClearBitsAndSet(PRTL_BITMAP lpBits, ULONG ulCount, ULONG ulH
 
 /*************************************************************************
  * RtlNumberOfSetBits	[NTDLL.@]
+ *
+ * Find the number of set bits in a bitmap.
+ *
+ * PARAMS
+ *  lpBits [I] Bitmap pointer
+ *
+ * RETURNS
+ *  The number of set bits.
  */
-ULONG WINAPI RtlNumberOfSetBits( const RTL_BITMAP *bitmap )
+ULONG WINAPI RtlNumberOfSetBits(PCRTL_BITMAP lpBits)
 {
-    ULONG i, ret = 0;
+  ULONG ulSet = 0;
 
-    for (i = 0; i < bitmap->SizeOfBitMap / 32; i++) ret += popcount( bitmap->Buffer[i] );
-    if (bitmap->SizeOfBitMap & 31) ret += popcount( bitmap->Buffer[i] & ~maskbits( bitmap->SizeOfBitMap ));
+  TRACE("(%p)\n", lpBits);
 
-    TRACE( "%p -> %lu\n", bitmap, ret );
-    return ret;
+  if (lpBits)
+  {
+    LPBYTE lpOut = (BYTE *)lpBits->Buffer;
+    ULONG ulCount, ulRemainder;
+    BYTE bMasked;
+
+    ulCount = lpBits->SizeOfBitMap >> 3;
+    ulRemainder = lpBits->SizeOfBitMap & 0x7;
+
+    while (ulCount--)
+    {
+      ulSet += NTDLL_nibbleBitCount[*lpOut >> 4];
+      ulSet += NTDLL_nibbleBitCount[*lpOut & 0xf];
+      lpOut++;
+    }
+
+    if (ulRemainder)
+    {
+      bMasked = *lpOut & NTDLL_maskBits[ulRemainder];
+      ulSet += NTDLL_nibbleBitCount[bMasked >> 4];
+      ulSet += NTDLL_nibbleBitCount[bMasked & 0xf];
+    }
+  }
+  return ulSet;
 }
 
 /*************************************************************************

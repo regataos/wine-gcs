@@ -19,8 +19,10 @@
 #ifndef __WINESCSI_H__
 #define __WINESCSI_H__
 
-int ASPI_GetNumControllers(void);
+int
+ASPI_GetNumControllers(void) DECLSPEC_HIDDEN;
 
-DWORD ASPI_GetHCforController( int controller );
+DWORD
+ASPI_GetHCforController( int controller ) DECLSPEC_HIDDEN;
 
 #endif /* #ifndef __WINESCSI_H */

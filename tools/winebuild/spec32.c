@@ -94,24 +94,22 @@ static int is_float_arg( const ORDDEF *odp, int arg )
 }
 
 /* check if dll will output relay thunks */
-static int has_relays( struct exports *exports )
+static int has_relays( DLLSPEC *spec )
 {
     int i;
 
-    if (target.cpu == CPU_ARM64EC) return 0;
-
-    for (i = exports->base; i <= exports->limit; i++)
+    for (i = spec->base; i <= spec->limit; i++)
     {
-        ORDDEF *odp = exports->ordinals[i];
+        ORDDEF *odp = spec->ordinals[i];
         if (needs_relay( odp )) return 1;
     }
     return 0;
 }
 
-static int get_exports_count( struct exports *exports )
+static int get_exports_count( DLLSPEC *spec )
 {
-    if (exports->base > exports->limit) return 0;
-    return exports->limit - exports->base + 1;
+    if (spec->base > spec->limit) return 0;
+    return spec->limit - spec->base + 1;
 }
 
 static int cmp_func_args( const void *p1, const void *p2 )
@@ -177,17 +175,17 @@ static void output_data_directories( const char *names[16] )
 /*******************************************************************
  *         build_args_string
  */
-static char *build_args_string( struct exports *exports )
+static char *build_args_string( DLLSPEC *spec )
 {
     int i, count = 0, len = 1;
     char *p, *buffer;
     char str[MAX_ARGUMENTS + 2];
     ORDDEF **funcs;
 
-    funcs = xmalloc( (exports->limit + 1 - exports->base) * sizeof(*funcs) );
-    for (i = exports->base; i <= exports->limit; i++)
+    funcs = xmalloc( (spec->limit + 1 - spec->base) * sizeof(*funcs) );
+    for (i = spec->base; i <= spec->limit; i++)
     {
-        ORDDEF *odp = exports->ordinals[i];
+        ORDDEF *odp = spec->ordinals[i];
 
         if (!needs_relay( odp )) continue;
         funcs[count++] = odp;
@@ -217,19 +215,19 @@ static char *build_args_string( struct exports *exports )
  *
  * Output entry points for relay debugging
  */
-static void output_relay_debug( struct exports *exports )
+static void output_relay_debug( DLLSPEC *spec )
 {
     int i;
 
     /* first the table of entry point offsets */
 
     output( "\t%s\n", get_asm_rodata_section() );
-    output( "\t.balign 4\n" );
+    output( "\t.align %d\n", get_alignment(4) );
     output( ".L__wine_spec_relay_entry_point_offsets:\n" );
 
-    for (i = exports->base; i <= exports->limit; i++)
+    for (i = spec->base; i <= spec->limit; i++)
     {
-        ORDDEF *odp = exports->ordinals[i];
+        ORDDEF *odp = spec->ordinals[i];
 
         if (needs_relay( odp ))
             output( "\t.long __wine_spec_relay_entry_point_%d-__wine_spec_relay_entry_points\n", i );
@@ -240,24 +238,25 @@ static void output_relay_debug( struct exports *exports )
     /* then the strings of argument types */
 
     output( ".L__wine_spec_relay_args_string:\n" );
-    output( "\t%s \"%s\"\n", get_asm_string_keyword(), build_args_string( exports ));
+    output( "\t%s \"%s\"\n", get_asm_string_keyword(), build_args_string( spec ));
 
     /* then the relay thunks */
 
     output( "\t.text\n" );
+    if (thumb_mode) output( "\t.thumb_func\n" );
     output( "__wine_spec_relay_entry_points:\n" );
     output( "\tnop\n" );  /* to avoid 0 offset */
 
-    for (i = exports->base; i <= exports->limit; i++)
+    for (i = spec->base; i <= spec->limit; i++)
     {
-        ORDDEF *odp = exports->ordinals[i];
+        ORDDEF *odp = spec->ordinals[i];
 
         if (!needs_relay( odp )) continue;
 
         switch (target.cpu)
         {
         case CPU_i386:
-            output( "\t.balign 4\n" );
+            output( "\t.align %d\n", get_alignment(4) );
             output( "\t.long 0x90909090,0x90909090\n" );
             output( "__wine_spec_relay_entry_point_%d:\n", i );
             output_cfi( ".cfi_startproc" );
@@ -269,7 +268,7 @@ static void output_relay_debug( struct exports *exports )
                 output( "\tpushl %%ecx\n" );
                 output( "\tpushl %%eax\n" );
             }
-            output( "\tpushl $%u\n", (odp->u.func.args_str_offset << 16) | (i - exports->base) );
+            output( "\tpushl $%u\n", (odp->u.func.args_str_offset << 16) | (i - spec->base) );
             output_cfi( ".cfi_adjust_cfa_offset 4" );
 
             if (UsePIC)
@@ -295,80 +294,83 @@ static void output_relay_debug( struct exports *exports )
         {
             int j, has_float = 0;
 
-            for (j = 0; j < odp->u.func.nb_args && !has_float; j++)
-                has_float = is_float_arg( odp, j );
+            if (strcmp( float_abi_option, "soft" ))
+                for (j = 0; j < odp->u.func.nb_args && !has_float; j++)
+                    has_float = is_float_arg( odp, j );
 
-            output( "\t.balign 4\n" );
+            output( "\t.align %d\n", get_alignment(4) );
             output( "__wine_spec_relay_entry_point_%d:\n", i );
-            output( "\t.seh_proc __wine_spec_relay_entry_point_%d\n", i );
+            output_cfi( ".cfi_startproc" );
             output( "\tpush {r0-r3}\n" );
-            output( "\t.seh_save_regs {r0-r3}\n" );
-            if (has_float)
-            {
-                output( "\tvpush {d0-d7}\n" );
-                output( "\t.seh_save_fregs {d0-d7}\n" );
-            }
-            output( "\tpush {r4,lr}\n" );
-            output( "\t.seh_save_regs {r4,lr}\n" );
-            output( "\t.seh_endprologue\n" );
-            output( "\tmovw r1,#%u\n", i - exports->base );
+            output( "\tmov r2, SP\n");
+            if (has_float) output( "\tvpush {s0-s15}\n" );
+            output( "\tpush {LR}\n" );
+            output( "\tsub SP, #4\n");
+            output( "\tmovw r1,#%u\n", i - spec->base );
             output( "\tmovt r1,#%u\n", odp->u.func.args_str_offset );
-            output( "\tmovw r0, :lower16:.L__wine_spec_relay_descr\n" );
-            output( "\tmovt r0, :upper16:.L__wine_spec_relay_descr\n" );
+            if (UsePIC)
+            {
+                output( "\tldr r0, 2f\n");
+                output( "1:\tadd r0, PC\n");
+            }
+            else
+            {
+                output( "\tmovw r0, :lower16:.L__wine_spec_relay_descr\n" );
+                output( "\tmovt r0, :upper16:.L__wine_spec_relay_descr\n" );
+            }
             output( "\tldr IP, [r0, #4]\n");
             output( "\tblx IP\n");
             output( "\tldr IP, [SP, #4]\n" );
             output( "\tadd SP, #%u\n", 24 + (has_float ? 64 : 0) );
             output( "\tbx IP\n");
-            output( "\t.seh_endproc\n" );
+            if (UsePIC) output( "2:\t.long .L__wine_spec_relay_descr-1b-%u\n", thumb_mode ? 4 : 8 );
+            output_cfi( ".cfi_endproc" );
             break;
         }
 
         case CPU_ARM64:
-        {
-            int stack_size = 16 * ((min(odp->u.func.nb_args, 8) + 1) / 2);
-
-            output( "\t.balign 4\n" );
+            output( "\t.align %d\n", get_alignment(4) );
             output( "__wine_spec_relay_entry_point_%d:\n", i );
-            output( "\t.seh_proc __wine_spec_relay_entry_point_%d\n", i );
-            output( "\tstp x29, x30, [sp, #-%u]!\n", stack_size + 16 );
-            output( "\t.seh_save_fplr_x %u\n", stack_size + 16 );
-            output( "\tmov x29, sp\n" );
-            output( "\t.seh_set_fp\n" );
-            output( "\t.seh_endprologue\n" );
-            switch (stack_size)
+            output_cfi( ".cfi_startproc" );
+            switch (odp->u.func.nb_args)
             {
-            case 64: output( "\tstp x6, x7, [sp, #64]\n" );
+            default:
+            case 8:
+            case 7:  output( "\tstp x6, x7, [SP,#-16]!\n" );
             /* fall through */
-            case 48: output( "\tstp x4, x5, [sp, #48]\n" );
+            case 6:
+            case 5:  output( "\tstp x4, x5, [SP,#-16]!\n" );
             /* fall through */
-            case 32: output( "\tstp x2, x3, [sp, #32]\n" );
+            case 4:
+            case 3:  output( "\tstp x2, x3, [SP,#-16]!\n" );
             /* fall through */
-            case 16: output( "\tstp x0, x1, [sp, #16]\n" );
+            case 2:
+            case 1:  output( "\tstp x0, x1, [SP,#-16]!\n" );
             /* fall through */
-            default: break;
+            case 0:  break;
             }
-            output( "\tadd x2, sp, #16\n");
+            output( "\tmov x2, SP\n");
+            output( "\tstp x29, x30, [SP,#-16]!\n" );
             output( "\tstp x8, x9, [SP,#-16]!\n" );
             output( "\tmov w1, #%u\n", odp->u.func.args_str_offset << 16 );
-            if (i - exports->base) output( "\tadd w1, w1, #%u\n", i - exports->base );
-            output( "\tadrp x0, .L__wine_spec_relay_descr\n" );
-            output( "\tadd x0, x0, #:lo12:.L__wine_spec_relay_descr\n" );
+            if (i - spec->base) output( "\tadd w1, w1, #%u\n", i - spec->base );
+            output( "\tadrp x0, %s\n", arm64_page(".L__wine_spec_relay_descr") );
+            output( "\tadd x0, x0, #%s\n", arm64_pageoff(".L__wine_spec_relay_descr") );
             output( "\tldr x3, [x0, #8]\n");
             output( "\tblr x3\n");
-            output( "\tmov sp, x29\n" );
-            output( "\tldp x29, x30, [sp], #%u\n", stack_size + 16 );
+            output( "\tadd SP, SP, #16\n" );
+            output( "\tldp x29, x30, [SP], #16\n" );
+            if (odp->u.func.nb_args)
+                output( "\tadd SP, SP, #%u\n", 8 * ((min(odp->u.func.nb_args, 8) + 1) & ~1) );
             output( "\tret\n");
-            output( "\t.seh_endproc\n" );
+            output_cfi( ".cfi_endproc" );
             break;
-        }
 
         case CPU_x86_64:
-            output( "\t.balign 4\n" );
+            output( "\t.align %d\n", get_alignment(4) );
             output( "\t.long 0x90909090,0x90909090\n" );
             output( "__wine_spec_relay_entry_point_%d:\n", i );
-            output_seh( ".seh_proc __wine_spec_relay_entry_point_%d", i );
-            output_seh( ".seh_endprologue" );
+            output_cfi( ".cfi_startproc" );
             switch (odp->u.func.nb_args)
             {
             default: output( "\tmovq %%%s,32(%%rsp)\n", is_float_arg( odp, 3 ) ? "xmm3" : "r9" );
@@ -381,11 +383,11 @@ static void output_relay_debug( struct exports *exports )
             /* fall through */
             case 0:  break;
             }
-            output( "\tmovl $%u,%%edx\n", (odp->u.func.args_str_offset << 16) | (i - exports->base) );
+            output( "\tmovl $%u,%%edx\n", (odp->u.func.args_str_offset << 16) | (i - spec->base) );
             output( "\tleaq .L__wine_spec_relay_descr(%%rip),%%rcx\n" );
             output( "\tcallq *8(%%rcx)\n" );
             output( "\tret\n" );
-            output_seh( ".seh_endproc" );
+            output_cfi( ".cfi_endproc" );
             break;
 
         default:
@@ -401,11 +403,10 @@ static void output_relay_debug( struct exports *exports )
  */
 void output_exports( DLLSPEC *spec )
 {
-    struct exports *exports = &spec->exports;
     int i, fwd_size = 0;
     int needs_imports = 0;
-    int needs_relay = has_relays( exports );
-    int nr_exports = get_exports_count( exports );
+    int needs_relay = has_relays( spec );
+    int nr_exports = get_exports_count( spec );
     const char *func_ptr = is_pe() ? ".rva" : get_asm_ptr_keyword();
     const char *name;
 
@@ -413,7 +414,7 @@ void output_exports( DLLSPEC *spec )
 
     output( "\n/* export table */\n\n" );
     output( "\t%s\n", get_asm_export_section() );
-    output( "\t.balign 4\n" );
+    output( "\t.align %d\n", get_alignment(4) );
     output( ".L__wine_spec_exports:\n" );
 
     /* export directory header */
@@ -422,11 +423,11 @@ void output_exports( DLLSPEC *spec )
     output( "\t.long %u\n", hash_filename(spec->file_name) ); /* TimeDateStamp */
     output( "\t.long 0\n" );                       /* MajorVersion/MinorVersion */
     output_rva( ".L__wine_spec_exp_names" );       /* Name */
-    output( "\t.long %u\n", exports->base );       /* Base */
+    output( "\t.long %u\n", spec->base );          /* Base */
     output( "\t.long %u\n", nr_exports );          /* NumberOfFunctions */
-    output( "\t.long %u\n", exports->nb_names );   /* NumberOfNames */
+    output( "\t.long %u\n", spec->nb_names );      /* NumberOfNames */
     output_rva( ".L__wine_spec_exports_funcs " );  /* AddressOfFunctions */
-    if (exports->nb_names)
+    if (spec->nb_names)
     {
         output_rva( ".L__wine_spec_exp_name_ptrs" ); /* AddressOfNames */
         output_rva( ".L__wine_spec_exp_ordinals" );  /* AddressOfNameOrdinals */
@@ -440,9 +441,9 @@ void output_exports( DLLSPEC *spec )
     /* output the function pointers */
 
     output( "\n.L__wine_spec_exports_funcs:\n" );
-    for (i = exports->base; i <= exports->limit; i++)
+    for (i = spec->base; i <= spec->limit; i++)
     {
-        ORDDEF *odp = exports->ordinals[i];
+        ORDDEF *odp = spec->ordinals[i];
         if (!odp) output( "\t%s 0\n", is_pe() ? ".long" : get_asm_ptr_keyword() );
         else switch(odp->type)
         {
@@ -479,27 +480,27 @@ void output_exports( DLLSPEC *spec )
         }
     }
 
-    if (exports->nb_names)
+    if (spec->nb_names)
     {
         /* output the function name pointers */
 
         int namepos = strlen(spec->file_name) + 1;
 
         output( "\n.L__wine_spec_exp_name_ptrs:\n" );
-        for (i = 0; i < exports->nb_names; i++)
+        for (i = 0; i < spec->nb_names; i++)
         {
             output_rva( ".L__wine_spec_exp_names + %u", namepos );
-            namepos += strlen(exports->names[i]->name) + 1;
+            namepos += strlen(spec->names[i]->name) + 1;
         }
 
         /* output the function ordinals */
 
         output( "\n.L__wine_spec_exp_ordinals:\n" );
-        for (i = 0; i < exports->nb_names; i++)
+        for (i = 0; i < spec->nb_names; i++)
         {
-            output( "\t.short %d\n", exports->names[i]->ordinal - exports->base );
+            output( "\t.short %d\n", spec->names[i]->ordinal - spec->base );
         }
-        if (exports->nb_names % 2)
+        if (spec->nb_names % 2)
         {
             output( "\t.short 0\n" );
         }
@@ -516,18 +517,18 @@ void output_exports( DLLSPEC *spec )
 
     output( "\n.L__wine_spec_exp_names:\n" );
     output( "\t%s \"%s\"\n", get_asm_string_keyword(), spec->file_name );
-    for (i = 0; i < exports->nb_names; i++)
+    for (i = 0; i < spec->nb_names; i++)
         output( "\t%s \"%s\"\n",
-                 get_asm_string_keyword(), exports->names[i]->name );
+                 get_asm_string_keyword(), spec->names[i]->name );
 
     /* output forward strings */
 
     if (fwd_size)
     {
         output( "\n.L__wine_spec_forwards:\n" );
-        for (i = exports->base; i <= exports->limit; i++)
+        for (i = spec->base; i <= spec->limit; i++)
         {
-            ORDDEF *odp = exports->ordinals[i];
+            ORDDEF *odp = spec->ordinals[i];
             if (odp && (odp->flags & FLAG_FORWARD))
                 output( "\t%s \"%s\"\n", get_asm_string_keyword(), odp->link_name );
         }
@@ -540,11 +541,11 @@ void output_exports( DLLSPEC *spec )
         if (is_pe())
         {
             output( "\t.data\n" );
-            output( "\t.balign %u\n", get_ptr_size() );
+            output( "\t.align %d\n", get_alignment(get_ptr_size()) );
         }
         else
         {
-            output( "\t.balign %u\n", get_ptr_size() );
+            output( "\t.align %d\n", get_alignment(get_ptr_size()) );
             output( ".L__wine_spec_exports_end:\n" );
         }
 
@@ -556,11 +557,11 @@ void output_exports( DLLSPEC *spec )
         output( "\t%s .L__wine_spec_relay_entry_point_offsets\n", get_asm_ptr_keyword() );
         output( "\t%s .L__wine_spec_relay_args_string\n", get_asm_ptr_keyword() );
 
-        output_relay_debug( exports );
+        output_relay_debug( spec );
     }
     else if (!is_pe())
     {
-            output( "\t.balign %u\n", get_ptr_size() );
+            output( "\t.align %d\n", get_alignment(get_ptr_size()) );
             output( ".L__wine_spec_exports_end:\n" );
             output( "\t%s 0\n", get_asm_ptr_keyword() );
     }
@@ -569,18 +570,19 @@ void output_exports( DLLSPEC *spec )
 
     if (!needs_imports) return;
     output( "\t.text\n" );
-    for (i = exports->base; i <= exports->limit; i++)
+    for (i = spec->base; i <= spec->limit; i++)
     {
-        ORDDEF *odp = exports->ordinals[i];
+        ORDDEF *odp = spec->ordinals[i];
         if (!odp) continue;
         if (!(odp->flags & FLAG_IMPORT)) continue;
 
         name = odp->name ? odp->name : odp->export_name;
 
-        output( "\t.balign 4\n" );
+        output( "\t.align %d\n", get_alignment(4) );
         output( "\t.long 0x90909090,0x90909090\n" );
         if (name) output( "%s_%s:\n", asm_name("__wine_spec_imp"), name );
         else output( "%s_%u:\n", asm_name("__wine_spec_imp"), i );
+        output_cfi( ".cfi_startproc" );
 
         switch (target.cpu)
         {
@@ -601,90 +603,8 @@ void output_exports( DLLSPEC *spec )
         default:
             assert(0);
         }
+        output_cfi( ".cfi_endproc" );
     }
-}
-
-
-/*******************************************************************
- *         output_load_config
- *
- * Output the load configuration structure.
- */
-static void output_load_config(void)
-{
-    if (!is_pe()) return;
-
-    output( "\n/* load_config */\n\n" );
-    output( "\t%s\n", get_asm_rodata_section() );
-    output( "\t.globl %s\n", asm_name( "_load_config_used" ));
-    output( "\t.balign %u\n", get_ptr_size() );
-    output( "%s:\n", asm_name( "_load_config_used" ));
-    output( "\t.long %u\n", get_ptr_size() == 8 ? 0x140 : 0xc0 ); /* Size */
-    output( "\t.long 0\n" );                          /* TimeDateStamp */
-    output( "\t.short 0\n" );                         /* MajorVersion */
-    output( "\t.short 0\n" );                         /* MinorVersion */
-    output( "\t.long 0\n" );                          /* GlobalFlagsClear */
-    output( "\t.long 0\n" );                          /* GlobalFlagsSet */
-    output( "\t.long 0\n" );                          /* CriticalSectionDefaultTimeout */
-    output( "\t%s 0\n", get_asm_ptr_keyword() );      /* DeCommitFreeBlockThreshold */
-    output( "\t%s 0\n", get_asm_ptr_keyword() );      /* DeCommitTotalFreeThreshold */
-    output( "\t%s 0\n", get_asm_ptr_keyword() );      /* LockPrefixTable */
-    output( "\t%s 0\n", get_asm_ptr_keyword() );      /* MaximumAllocationSize */
-    output( "\t%s 0\n", get_asm_ptr_keyword() );      /* VirtualMemoryThreshold */
-    output( "\t%s 0\n", get_asm_ptr_keyword() );      /* ProcessAffinityMask */
-    output( "\t.long 0\n" );                          /* ProcessHeapFlags */
-    output( "\t.short 0\n" );                         /* CSDVersion */
-    output( "\t.short 0\n" );                         /* DependentLoadFlags */
-    output( "\t%s 0\n", get_asm_ptr_keyword() );      /* EditList */
-    output( "\t%s 0\n", get_asm_ptr_keyword() );      /* SecurityCookie */
-    output( "\t%s 0\n", get_asm_ptr_keyword() );      /* SEHandlerTable */
-    output( "\t%s 0\n", get_asm_ptr_keyword() );      /* SEHandlerCount */
-    if (target.cpu == CPU_ARM64EC)
-    {
-        output( "\t%s %s\n", get_asm_ptr_keyword(), asm_name( "__guard_check_icall_fptr" ));
-        output( "\t%s %s\n", get_asm_ptr_keyword(), asm_name( "__guard_dispatch_icall_fptr" ));
-    }
-    else
-    {
-        output( "\t%s 0\n", get_asm_ptr_keyword() );  /* GuardCFCheckFunctionPointer */
-        output( "\t%s 0\n", get_asm_ptr_keyword() );  /* GuardCFDispatchFunctionPointer */
-    }
-    output( "\t%s 0\n", get_asm_ptr_keyword() );      /* GuardCFFunctionTable */
-    output( "\t%s 0\n", get_asm_ptr_keyword() );      /* GuardCFFunctionCount */
-    if (target.cpu == CPU_ARM64EC)
-        output( "\t.long %s\n", asm_name( "__guard_flags" ));
-    else
-        output( "\t.long 0\n" );                      /* GuardFlags */
-    output( "\t.short 0\n" );                         /* CodeIntegrity.Flags */
-    output( "\t.short 0\n" );                         /* CodeIntegrity.Catalog */
-    output( "\t.long  0\n" );                         /* CodeIntegrity.CatalogOffset */
-    output( "\t.long  0\n" );                         /* CodeIntegrity.Reserved */
-    output( "\t%s 0\n", get_asm_ptr_keyword() );      /* GuardAddressTakenIatEntryTable */
-    output( "\t%s 0\n", get_asm_ptr_keyword() );      /* GuardAddressTakenIatEntryCount */
-    output( "\t%s 0\n", get_asm_ptr_keyword() );      /* GuardLongJumpTargetTable */
-    output( "\t%s 0\n", get_asm_ptr_keyword() );      /* GuardLongJumpTargetCount */
-    output( "\t%s 0\n", get_asm_ptr_keyword() );      /* DynamicValueRelocTable */
-    if (target.cpu == CPU_ARM64EC)
-        output( "\t%s %s\n", get_asm_ptr_keyword(), asm_name( "__chpe_metadata" ));
-     else
-        output( "\t%s  0\n", get_asm_ptr_keyword() ); /* CHPEMetadataPointer */
-    output( "\t%s 0\n", get_asm_ptr_keyword() );      /* GuardRFFailureRoutine */
-    output( "\t%s 0\n", get_asm_ptr_keyword() );      /* GuardRFFailureRoutineFunctionPointer */
-    output( "\t.long  0\n" );                         /* DynamicValueRelocTableOffset */
-    output( "\t.short 0\n" );                         /* DynamicValueRelocTableSection */
-    output( "\t.short 0\n" );                         /* Reserved2 */
-    output( "\t%s 0\n", get_asm_ptr_keyword() );      /* GuardRFVerifyStackPointerFunctionPointer */
-    output( "\t.long  0\n" );                         /* HotPatchTableOffset */
-    output( "\t.long  0\n" );                         /* Reserved3 */
-    output( "\t%s 0\n", get_asm_ptr_keyword() );      /* EnclaveConfigurationPointer */
-    output( "\t%s 0\n", get_asm_ptr_keyword() );      /* VolatileMetadataPointer */
-    output( "\t%s 0\n", get_asm_ptr_keyword() );      /* GuardEHContinuationTable */
-    output( "\t%s 0\n", get_asm_ptr_keyword() );      /* GuardEHContinuationCount */
-    output( "\t%s 0\n", get_asm_ptr_keyword() );      /* GuardXFGCheckFunctionPointer */
-    output( "\t%s 0\n", get_asm_ptr_keyword() );      /* GuardXFGDispatchFunctionPointer */
-    output( "\t%s 0\n", get_asm_ptr_keyword() );      /* GuardXFGTableDispatchFunctionPointer */
-    output( "\t%s 0\n", get_asm_ptr_keyword() );      /* CastGuardOsDeterminedFailureMode */
-    output( "\t%s 0\n", get_asm_ptr_keyword() );      /* GuardMemcpyFunctionPointer */
 }
 
 
@@ -709,7 +629,7 @@ void output_module( DLLSPEC *spec )
         return;  /* nothing to do */
     case PLATFORM_APPLE:
         output( "\t.text\n" );
-        output( "\t.balign %u\n", page_size );
+        output( "\t.align %d\n", get_alignment(page_size) );
         output( "__wine_spec_pe_header:\n" );
         output( "\t.space 65536\n" );
         break;
@@ -719,8 +639,22 @@ void output_module( DLLSPEC *spec )
         output( "\t.skip %u\n", 65536 + page_size );
         break;
     default:
-        output( "\n\t.section \".init\",\"ax\"\n" );
-        output( "\tjmp 1f\n" );
+        switch (target.cpu)
+        {
+        case CPU_i386:
+        case CPU_x86_64:
+            output( "\n\t.section \".init\",\"ax\"\n" );
+            output( "\tjmp 1f\n" );
+            break;
+        case CPU_ARM:
+            output( "\n\t.section \".text\",\"ax\"\n" );
+            output( "\tb 1f\n" );
+            break;
+        case CPU_ARM64:
+            output( "\n\t.section \".init\",\"ax\"\n" );
+            output( "\tb 1f\n" );
+            break;
+        }
         output( "__wine_spec_pe_header:\n" );
         output( "\t.skip %u\n", 65536 + page_size );
         output( "1:\n" );
@@ -730,7 +664,7 @@ void output_module( DLLSPEC *spec )
     /* Output the NT header */
 
     output( "\n\t.data\n" );
-    output( "\t.balign %u\n", get_ptr_size() );
+    output( "\t.align %d\n", get_alignment(get_ptr_size()) );
     output( "\t.globl %s\n", asm_name("__wine_spec_nt_header") );
     output( "%s:\n", asm_name("__wine_spec_nt_header") );
     output( ".L__wine_spec_rva_base:\n" );
@@ -739,7 +673,6 @@ void output_module( DLLSPEC *spec )
     switch (target.cpu)
     {
     case CPU_i386:    machine = IMAGE_FILE_MACHINE_I386; break;
-    case CPU_ARM64EC:
     case CPU_x86_64:  machine = IMAGE_FILE_MACHINE_AMD64; break;
     case CPU_ARM:     machine = IMAGE_FILE_MACHINE_ARMNT; break;
     case CPU_ARM64:   machine = IMAGE_FILE_MACHINE_ARM64; break;
@@ -796,7 +729,7 @@ void output_module( DLLSPEC *spec )
     output( "\t.long 0\n" );              /* LoaderFlags */
     output( "\t.long 16\n" );             /* NumberOfRvaAndSizes */
 
-    if (get_exports_count( &spec->exports ))
+    if (get_exports_count( spec ))
         data_dirs[0] = ".L__wine_spec_exports";   /* DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT] */
     if (has_imports())
         data_dirs[1] = ".L__wine_spec_imports";   /* DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT] */
@@ -826,8 +759,8 @@ void output_spec32_file( DLLSPEC *spec )
     output_stubs( spec );
     output_exports( spec );
     output_imports( spec );
+    output_syscalls( spec );
     if (needs_get_pc_thunk) output_get_pc_thunk();
-    output_load_config();
     output_resources( spec );
     output_gnu_stack_note();
     close_output_file();
@@ -916,12 +849,11 @@ static unsigned int flush_output_to_section( const char *name, int dir_idx, unsi
 
 static void output_pe_exports( DLLSPEC *spec )
 {
-    struct exports *exports = &spec->exports;
-    unsigned int i, exp_count = get_exports_count( exports );
+    unsigned int i, exp_count = get_exports_count( spec );
     unsigned int exp_rva = current_rva() + 40; /* sizeof(IMAGE_EXPORT_DIRECTORY) */
-    unsigned int pos, str_rva = exp_rva + 4 * exp_count + 6 * exports->nb_names;
+    unsigned int pos, str_rva = exp_rva + 4 * exp_count + 6 * spec->nb_names;
 
-    if (!exports->nb_entry_points) return;
+    if (!spec->nb_entry_points) return;
 
     init_output_buffer();
     put_dword( 0 );               /* Characteristics */
@@ -929,14 +861,14 @@ static void output_pe_exports( DLLSPEC *spec )
     put_word( 0 );                /* MajorVersion */
     put_word( 0 );                /* MinorVersion */
     put_dword( str_rva );         /* Name */
-    put_dword( exports->base );   /* Base */
+    put_dword( spec->base );      /* Base */
     put_dword( exp_count );       /* NumberOfFunctions */
-    put_dword( exports->nb_names );  /* NumberOfNames */
+    put_dword( spec->nb_names );  /* NumberOfNames */
     put_dword( exp_rva );         /* AddressOfFunctions */
-    if (exports->nb_names)
+    if (spec->nb_names)
     {
         put_dword( exp_rva + 4 * exp_count );                       /* AddressOfNames */
-        put_dword( exp_rva + 4 * exp_count + 4 * exports->nb_names );  /* AddressOfNameOrdinals */
+        put_dword( exp_rva + 4 * exp_count + 4 * spec->nb_names );  /* AddressOfNameOrdinals */
     }
     else
     {
@@ -945,11 +877,11 @@ static void output_pe_exports( DLLSPEC *spec )
     }
 
     /* functions */
-    for (i = 0, pos = str_rva + strlen(spec->file_name) + 1; i < exports->nb_names; i++)
-        pos += strlen( exports->names[i]->name ) + 1;
-    for (i = exports->base; i <= exports->limit; i++)
+    for (i = 0, pos = str_rva + strlen(spec->file_name) + 1; i < spec->nb_names; i++)
+        pos += strlen( spec->names[i]->name ) + 1;
+    for (i = spec->base; i <= spec->limit; i++)
     {
-        ORDDEF *odp = exports->ordinals[i];
+        ORDDEF *odp = spec->ordinals[i];
         if (odp && (odp->flags & FLAG_FORWARD))
         {
             put_dword( pos );
@@ -959,23 +891,23 @@ static void output_pe_exports( DLLSPEC *spec )
     }
 
     /* names */
-    for (i = 0, pos = str_rva + strlen(spec->file_name) + 1; i < exports->nb_names; i++)
+    for (i = 0, pos = str_rva + strlen(spec->file_name) + 1; i < spec->nb_names; i++)
     {
         put_dword( pos );
-        pos += strlen(exports->names[i]->name) + 1;
+        pos += strlen(spec->names[i]->name) + 1;
     }
 
     /* ordinals */
-    for (i = 0; i < exports->nb_names; i++) put_word( exports->names[i]->ordinal - exports->base );
+    for (i = 0; i < spec->nb_names; i++) put_word( spec->names[i]->ordinal - spec->base );
 
     /* strings */
     put_data( spec->file_name, strlen(spec->file_name) + 1 );
-    for (i = 0; i < exports->nb_names; i++)
-        put_data( exports->names[i]->name, strlen(exports->names[i]->name) + 1 );
+    for (i = 0; i < spec->nb_names; i++)
+        put_data( spec->names[i]->name, strlen(spec->names[i]->name) + 1 );
 
-    for (i = exports->base; i <= exports->limit; i++)
+    for (i = spec->base; i <= spec->limit; i++)
     {
-        ORDDEF *odp = exports->ordinals[i];
+        ORDDEF *odp = spec->ordinals[i];
         if (odp && (odp->flags & FLAG_FORWARD)) put_data( odp->link_name, strlen(odp->link_name) + 1 );
     }
 
@@ -1159,7 +1091,6 @@ static void output_pe_file( DLLSPEC *spec, const char signature[32] )
     switch (target.cpu)
     {
     case CPU_i386:    put_word( IMAGE_FILE_MACHINE_I386 ); break;
-    case CPU_ARM64EC:
     case CPU_x86_64:  put_word( IMAGE_FILE_MACHINE_AMD64 ); break;
     case CPU_ARM:     put_word( IMAGE_FILE_MACHINE_ARMNT ); break;
     case CPU_ARM64:   put_word( IMAGE_FILE_MACHINE_ARM64 ); break;
@@ -1182,16 +1113,8 @@ static void output_pe_file( DLLSPEC *spec, const char signature[32] )
     put_dword( 0 );                                  /* SizeOfUninitializedData */
     put_dword( code_size ? pe.sec[0].rva : 0 );      /* AddressOfEntryPoint */
     put_dword( code_size ? pe.sec[0].rva : 0 );      /* BaseOfCode */
-    if (get_ptr_size() == 4)
-    {
-        put_dword( 0 );                              /* BaseOfData */
-        put_dword( 0x10000000 );                     /* ImageBase */
-    }
-    else
-    {
-        put_dword( 0x80000000 );                     /* ImageBase */
-        put_dword( 0x00000001 );
-    }
+    if (get_ptr_size() == 4) put_dword( 0 );         /* BaseOfData */
+    put_pword( 0x10000000 );                         /* ImageBase */
     put_dword( pe.section_align );                   /* SectionAlignment */
     put_dword( pe.file_align );                      /* FileAlignment */
     put_word( 1 );                                   /* MajorOperatingSystemVersion */
@@ -1345,7 +1268,6 @@ void output_data_module( DLLSPEC *spec )
  */
 void output_def_file( DLLSPEC *spec, int import_only )
 {
-    struct exports *exports;
     DLLSPEC *spec32 = NULL;
     const char *name;
     int i, total;
@@ -1356,7 +1278,6 @@ void output_def_file( DLLSPEC *spec, int import_only )
         add_16bit_exports( spec32, spec );
         spec = spec32;
     }
-    exports = &spec->exports;
 
     if (spec_file_name)
         output( "; File generated automatically from %s; do not edit!\n\n",
@@ -1369,9 +1290,9 @@ void output_def_file( DLLSPEC *spec, int import_only )
 
     /* Output the exports and relay entry points */
 
-    for (i = total = 0; i < exports->nb_entry_points; i++)
+    for (i = total = 0; i < spec->nb_entry_points; i++)
     {
-        const ORDDEF *odp = exports->entry_points[i];
+        const ORDDEF *odp = &spec->entry_points[i];
         int is_data = 0, is_private = odp->flags & FLAG_PRIVATE;
 
         if (odp->name) name = odp->name;

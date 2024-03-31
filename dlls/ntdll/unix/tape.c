@@ -55,6 +55,7 @@
 
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
+#define NONAMELESSUNION
 #include "windef.h"
 #include "winternl.h"
 #include "winioctl.h"
@@ -84,7 +85,7 @@ static const char *io2str( unsigned int io )
     X(IOCTL_TAPE_SET_POSITION);
     X(IOCTL_TAPE_WRITE_MARKS);
 #undef X
-    default: return wine_dbg_sprintf("IOCTL_TAPE_%d\n", io);
+    default: { static char tmp[32]; sprintf(tmp, "IOCTL_TAPE_%d\n", io); return tmp; }
     }
 }
 
@@ -581,7 +582,7 @@ NTSTATUS tape_DeviceIoControl( HANDLE device, HANDLE event, PIO_APC_ROUTINE apc,
     if (needs_close) close( fd );
 
 error:
-    io->Status = status;
+    io->u.Status = status;
     io->Information = sz;
     if (event) NtSetEvent( event, NULL );
     return status;

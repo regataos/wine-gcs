@@ -18,6 +18,7 @@
 
 #include <stdarg.h>
 
+#define NONAMELESSUNION
 #define COBJMACROS
 
 #include "windef.h"
@@ -130,7 +131,7 @@ static ULONG WINAPI CommonEncoderFrame_Release(IWICBitmapFrameEncode *iface)
     if (ref == 0)
     {
         IWICBitmapEncoder_Release(&This->parent->IWICBitmapEncoder_iface);
-        free(This);
+        HeapFree(GetProcessHeap(), 0, This);
     }
 
     return ref;
@@ -546,7 +547,7 @@ static ULONG WINAPI CommonEncoder_Release(IWICBitmapEncoder *iface)
         if (This->stream)
             IStream_Release(This->stream);
         encoder_destroy(This->encoder);
-        free(This);
+        HeapFree(GetProcessHeap(), 0, This);
     }
 
     return ref;
@@ -779,7 +780,7 @@ static HRESULT WINAPI CommonEncoder_CreateNewFrame(IWICBitmapEncoder *iface,
         return WINCODEC_ERR_NOTINITIALIZED;
     }
 
-    result = calloc(1, sizeof(*result));
+    result = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*result));
     if (!result)
     {
         LeaveCriticalSection(&This->lock);
@@ -802,7 +803,7 @@ static HRESULT WINAPI CommonEncoder_CreateNewFrame(IWICBitmapEncoder *iface,
         if (FAILED(hr))
         {
             LeaveCriticalSection(&This->lock);
-            free(result);
+            HeapFree(GetProcessHeap(), 0, result);
             return hr;
         }
     }
@@ -874,7 +875,7 @@ HRESULT CommonEncoder_CreateInstance(struct encoder *encoder,
 
     *ppv = NULL;
 
-    This = malloc(sizeof(CommonEncoder));
+    This = HeapAlloc(GetProcessHeap(), 0, sizeof(CommonEncoder));
     if (!This)
     {
         encoder_destroy(encoder);
@@ -889,7 +890,7 @@ HRESULT CommonEncoder_CreateInstance(struct encoder *encoder,
     This->frame_count = 0;
     This->uncommitted_frame = FALSE;
     This->committed = FALSE;
-    InitializeCriticalSectionEx(&This->lock, 0, RTL_CRITICAL_SECTION_FLAG_FORCE_DEBUG_INFO);
+    InitializeCriticalSection(&This->lock);
     This->lock.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": CommonEncoder.lock");
 
     ret = IWICBitmapEncoder_QueryInterface(&This->IWICBitmapEncoder_iface, iid, ppv);

@@ -23,14 +23,15 @@
 #include "ntsecapi.h"
 #include "winsvc.h"
 #include "winnls.h"
+#include "wine/heap.h"
 
-const char * debugstr_sid(PSID sid);
-BOOL ADVAPI_IsLocalComputer(LPCWSTR ServerName);
-BOOL ADVAPI_GetComputerSid(PSID sid);
+const char * debugstr_sid(PSID sid) DECLSPEC_HIDDEN;
+BOOL ADVAPI_IsLocalComputer(LPCWSTR ServerName) DECLSPEC_HIDDEN;
+BOOL ADVAPI_GetComputerSid(PSID sid) DECLSPEC_HIDDEN;
 
-BOOL lookup_local_wellknown_name(const LSA_UNICODE_STRING*, PSID, LPDWORD, LPWSTR, LPDWORD, PSID_NAME_USE, BOOL*);
-BOOL lookup_local_user_name(const LSA_UNICODE_STRING*, PSID, LPDWORD, LPWSTR, LPDWORD, PSID_NAME_USE, BOOL*);
-const WCHAR *get_wellknown_privilege_name(const LUID *);
+BOOL lookup_local_wellknown_name(const LSA_UNICODE_STRING*, PSID, LPDWORD, LPWSTR, LPDWORD, PSID_NAME_USE, BOOL*) DECLSPEC_HIDDEN;
+BOOL lookup_local_user_name(const LSA_UNICODE_STRING*, PSID, LPDWORD, LPWSTR, LPDWORD, PSID_NAME_USE, BOOL*) DECLSPEC_HIDDEN;
+const WCHAR *get_wellknown_privilege_name(const LUID *) DECLSPEC_HIDDEN;
 
 /* memory allocation functions */
 
@@ -40,7 +41,7 @@ static inline WCHAR *strdupAW( const char *src )
     if (src)
     {
         DWORD len = MultiByteToWideChar( CP_ACP, 0, src, -1, NULL, 0 );
-        if ((dst = malloc( len * sizeof(WCHAR) ))) MultiByteToWideChar( CP_ACP, 0, src, -1, dst, len );
+        if ((dst = heap_alloc( len * sizeof(WCHAR) ))) MultiByteToWideChar( CP_ACP, 0, src, -1, dst, len );
     }
     return dst;
 }

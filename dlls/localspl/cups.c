@@ -44,9 +44,6 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(localspl);
 
-/* cups.h before version 1.7.0 doesn't have HTTP_STATUS_CONTINUE */
-#define HTTP_STATUS_CONTINUE 100
-
 #ifdef SONAME_LIBCUPS
 
 static void *libcups_handle;
@@ -222,15 +219,12 @@ static BOOL lpr_start_doc(doc_t *doc, const WCHAR *printer_name)
     static const WCHAR quote[] = { '\'',0 };
     int printer_len = wcslen(printer_name);
     WCHAR *cmd;
-    BOOL ret;
 
     cmd = malloc(printer_len * sizeof(WCHAR) + sizeof(lpr) + sizeof(quote));
     memcpy(cmd, lpr, sizeof(lpr));
     memcpy(cmd + ARRAY_SIZE(lpr), printer_name, printer_len * sizeof(WCHAR));
     memcpy(cmd + ARRAY_SIZE(lpr) + printer_len, quote, sizeof(quote));
-    ret = pipe_start_doc(doc, cmd);
-    free(cmd);
-    return ret;
+    return pipe_start_doc(doc, cmd);
 }
 
 #ifdef SONAME_LIBCUPS
@@ -368,7 +362,7 @@ static BOOL cups_write_doc(doc_t *doc, const BYTE *buf, unsigned int size)
         }
 
         if (pcupsStartDocument(CUPS_HTTP_DEFAULT, doc->cups.queue, job_id,
-                    NULL, format, TRUE) != HTTP_STATUS_CONTINUE)
+                    doc->cups.doc_title, format, TRUE) != HTTP_STATUS_CONTINUE)
         {
             if (pcupsLastErrorString)
                 WARN("cupsStartDocument failed: %s\n", debugstr_a(pcupsLastErrorString()));
@@ -517,8 +511,6 @@ const unixlib_entry_t __wine_unix_call_funcs[] =
     end_doc,
 };
 
-C_ASSERT( ARRAYSIZE(__wine_unix_call_funcs) == unix_funcs_count );
-
 #ifdef _WIN64
 
 typedef ULONG PTR32;
@@ -528,9 +520,9 @@ static NTSTATUS wow64_start_doc(void *args)
     struct
     {
         unsigned int type;
-        PTR32 port;
-        PTR32 document_title;
-        PTR32 doc;
+        const PTR32 port;
+        const PTR32 document_title;
+        INT64 *doc;
     } const *params32 = args;
 
     struct start_doc_params params =
@@ -538,7 +530,7 @@ static NTSTATUS wow64_start_doc(void *args)
         params32->type,
         ULongToPtr(params32->port),
         ULongToPtr(params32->document_title),
-        ULongToPtr(params32->doc),
+        params32->doc,
     };
 
     return start_doc(&params);
@@ -549,7 +541,7 @@ static NTSTATUS wow64_write_doc(void *args)
     struct
     {
         INT64 doc;
-        PTR32 buf;
+        const PTR32 buf;
         unsigned int size;
     } const *params32 = args;
 
@@ -570,7 +562,5 @@ const unixlib_entry_t __wine_unix_call_wow64_funcs[] =
     wow64_write_doc,
     end_doc,
 };
-
-C_ASSERT( ARRAYSIZE(__wine_unix_call_wow64_funcs) == unix_funcs_count );
 
 #endif  /* _WIN64 */

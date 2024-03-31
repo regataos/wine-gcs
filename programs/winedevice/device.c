@@ -30,7 +30,7 @@
 #include "wine/debug.h"
 #include "wine/heap.h"
 
-WINE_DEFAULT_DEBUG_CHANNEL(ntoskrnl);
+WINE_DEFAULT_DEBUG_CHANNEL(winedevice);
 
 static const WCHAR servicesW[] = L"\\Registry\\Machine\\System\\CurrentControlSet\\Services\\";
 

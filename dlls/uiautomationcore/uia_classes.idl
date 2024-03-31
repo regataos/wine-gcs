@@ -19,7 +19,6 @@
 #pragma makedep regtypelib
 
 import "oaidl.idl";
-import "uiautomationcore.idl";
 
 struct uia_prop_info {
     const GUID *guid;
@@ -41,11 +40,6 @@ struct uia_pattern_info {
     const GUID *pattern_iid;
 };
 
-struct uia_control_type_info {
-    const GUID *guid;
-    int control_type_id;
-};
-
 [
    version(1.0),
    uuid(8a9ca8eb-856b-43d9-abd7-4a590054064f),
@@ -57,26 +51,26 @@ library UIA_wine_private
 
     [
         object,
-        uuid(9a754e12-e570-49ab-b223-6f6871007d28),
-        pointer_default(unique),
-    ]
-    interface IWineUiaEventAdviser : IUnknown
-    {
-        HRESULT advise([in]BOOL advise_added, [in]LONG_PTR huiaevent);
-    }
-
-    [
-        object,
         uuid(5e60162c-ab0e-4e22-a61d-3a3acd442aba),
         pointer_default(unique),
         oleautomation,
     ]
     interface IWineUiaEvent : IUnknown
     {
-        HRESULT advise_events([in]BOOL advise_added, [in]long adviser_start_idx);
-        HRESULT set_event_data([in]const GUID *event_guid, [in]long scope, [in]VARIANT runtime_id,
-                               [in]IWineUiaEvent *event_iface);
-        HRESULT raise_event([in]VARIANT in_node, [in]VARIANT in_nav_start_node);
+        HRESULT detach();
+        HRESULT get_event_data([out, retval]GUID *event_guid, [out, retval]VARIANT *runtime_id,
+                [out, retval]long *scope);
+        HRESULT raise_event([in]VARIANT node, [in]BOOL needs_clientside);
+    }
+
+    [
+        object,
+        uuid(9a754e12-e570-49ab-b223-6f6871007d28),
+        pointer_default(unique),
+    ]
+    interface IWineUiaAdviseEvents : IUnknown
+    {
+        HRESULT advise_events([in]BOOL advise_removed, [in]long event_id, [in]SAFEARRAY *prop_ids);
     }
 
     [
@@ -91,11 +85,8 @@ library UIA_wine_private
         HRESULT get_prov_opts([out, retval]int *out_opts);
         HRESULT has_parent([out, retval]BOOL *out_val);
         HRESULT navigate([in]int nav_dir, [out, retval]VARIANT *ret_val);
-        HRESULT get_focus([in]long flags, [out, retval]VARIANT *ret_val);
         HRESULT attach_event([in]LONG_PTR huiaevent);
-        HRESULT respond_to_win_event([in]DWORD win_event, [in]ULONG hwnd, [in]LONG obj_id, [in]LONG child_id,
-                                    [in]IProxyProviderWinEventSink *sink);
-        HRESULT create_node_from_prov([in]long flags, [out, retval]VARIANT *ret_val);
+        HRESULT get_focus([out, retval]VARIANT *ret_val);
     }
 
     [
@@ -110,6 +101,7 @@ library UIA_wine_private
         HRESULT get_prop_val([in]const GUID *prop_guid, [out, retval]VARIANT *ret_val);
         HRESULT disconnect();
         HRESULT get_hwnd([out, retval]ULONG *out_hwnd);
-        HRESULT attach_event([in]long proc_id, [in]long event_cookie, [out, retval]IWineUiaEvent **ret_event);
+        HRESULT add_event([in]IWineUiaEvent *event_iface, [in]long proc_id, [in]long event_cookie,
+                [out, retval]IWineUiaEvent **ret_event);
     }
 }

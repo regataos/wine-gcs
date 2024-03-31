@@ -66,11 +66,11 @@ void init_generic_string_formats(void)
 
 void free_generic_string_formats(void)
 {
-    free(generic_default_format.character_ranges);
-    free(generic_default_format.tabs);
+    heap_free(generic_default_format.character_ranges);
+    heap_free(generic_default_format.tabs);
 
-    free(generic_typographic_format.character_ranges);
-    free(generic_typographic_format.tabs);
+    heap_free(generic_typographic_format.character_ranges);
+    heap_free(generic_typographic_format.tabs);
 }
 
 GpStatus WINGDIPAPI GdipCreateStringFormat(INT attr, LANGID lang,
@@ -81,8 +81,8 @@ GpStatus WINGDIPAPI GdipCreateStringFormat(INT attr, LANGID lang,
     if(!format)
         return InvalidParameter;
 
-    *format = calloc(1, sizeof(GpStringFormat));
-    if(!*format) return OutOfMemory;
+    *format = heap_alloc_zero(sizeof(GpStringFormat));
+    if(!*format)   return OutOfMemory;
 
     (*format)->attr = attr;
     (*format)->lang = lang;
@@ -110,9 +110,9 @@ GpStatus WINGDIPAPI GdipDeleteStringFormat(GpStringFormat *format)
     if (format == &generic_default_format || format == &generic_typographic_format)
         return Ok;
 
-    free(format->character_ranges);
-    free(format->tabs);
-    free(format);
+    heap_free(format->character_ranges);
+    heap_free(format->tabs);
+    heap_free(format);
 
     return Ok;
 }
@@ -297,11 +297,11 @@ GpStatus WINGDIPAPI GdipSetStringFormatMeasurableCharacterRanges(
 
     TRACE("%p, %d, %p\n", format, rangeCount, ranges);
 
-    new_ranges = malloc(rangeCount * sizeof(CharacterRange));
+    new_ranges = heap_alloc_zero(rangeCount * sizeof(CharacterRange));
     if (!new_ranges)
         return OutOfMemory;
 
-    free(format->character_ranges);
+    heap_free(format->character_ranges);
     format->character_ranges = new_ranges;
     memcpy(format->character_ranges, ranges, sizeof(CharacterRange) * rangeCount);
     format->range_count = rangeCount;
@@ -319,9 +319,16 @@ GpStatus WINGDIPAPI GdipSetStringFormatTabStops(GpStringFormat *format, REAL fir
 
     if(count > 0){
         if(firsttab < 0.0)  return NotImplemented;
-        if(format->tabcount < count){
+        /* first time allocation */
+        if(format->tabcount == 0){
+            format->tabs = heap_alloc_zero(sizeof(REAL)*count);
+            if(!format->tabs)
+                return OutOfMemory;
+        }
+        /* reallocation */
+        if((format->tabcount < count) && (format->tabcount > 0)){
             REAL *ptr;
-            ptr = realloc(format->tabs, sizeof(REAL) * count);
+            ptr = heap_realloc(format->tabs, sizeof(REAL)*count);
             if(!ptr)
                 return OutOfMemory;
             format->tabs = ptr;
@@ -364,15 +371,15 @@ GpStatus WINGDIPAPI GdipCloneStringFormat(GDIPCONST GpStringFormat *format, GpSt
     if(!format || !newFormat)
         return InvalidParameter;
 
-    *newFormat = malloc(sizeof(GpStringFormat));
-    if(!*newFormat) return OutOfMemory;
+    *newFormat = heap_alloc_zero(sizeof(GpStringFormat));
+    if(!*newFormat)    return OutOfMemory;
 
     **newFormat = *format;
 
     if(format->tabcount > 0){
-        (*newFormat)->tabs = malloc(sizeof(REAL) * format->tabcount);
+        (*newFormat)->tabs = heap_alloc_zero(sizeof(REAL) * format->tabcount);
         if(!(*newFormat)->tabs){
-            free(*newFormat);
+            heap_free(*newFormat);
             return OutOfMemory;
         }
         memcpy((*newFormat)->tabs, format->tabs, sizeof(REAL) * format->tabcount);
@@ -381,10 +388,10 @@ GpStatus WINGDIPAPI GdipCloneStringFormat(GDIPCONST GpStringFormat *format, GpSt
         (*newFormat)->tabs = NULL;
 
     if(format->range_count > 0){
-        (*newFormat)->character_ranges = malloc(sizeof(CharacterRange) * format->range_count);
+        (*newFormat)->character_ranges = heap_alloc_zero(sizeof(CharacterRange) * format->range_count);
         if(!(*newFormat)->character_ranges){
-            free((*newFormat)->tabs);
-            free(*newFormat);
+            heap_free((*newFormat)->tabs);
+            heap_free(*newFormat);
             return OutOfMemory;
         }
         memcpy((*newFormat)->character_ranges, format->character_ranges,

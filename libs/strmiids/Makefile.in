@@ -1,5 +1,5 @@
 STATICLIB = libstrmiids.a
 
-SOURCES = \
+C_SRCS = \
 	evr.c \
 	strmiids.c

@@ -22,7 +22,7 @@
 #include <stdlib.h>
 #include "hid.h"
 #include "winreg.h"
-#include "ntuser.h"
+#include "winuser.h"
 
 #include "ddk/hidsdi.h"
 #include "ddk/hidtypes.h"
@@ -223,37 +223,43 @@ static void hid_device_queue_input( DEVICE_OBJECT *device, HID_XFER_PACKET *pack
     const BOOL polled = ext->u.pdo.information.Polled;
     ULONG size, report_len = polled ? packet->reportBufferLen : desc->InputLength;
     struct hid_report *last_report, *report;
+    BOOL steam_overlay_open = FALSE;
     struct hid_queue *queue;
     LIST_ENTRY completed, *entry;
+    RAWINPUT *rawinput;
     KIRQL irql;
     IRP *irp;
 
     TRACE("device %p, packet %p\n", device, packet);
 
-    if (IsEqualGUID( ext->class_guid, &GUID_DEVINTERFACE_HID ))
-    {
-        struct hid_packet *hid;
+    if (WaitForSingleObject(ext->steam_overlay_event, 0) == WAIT_OBJECT_0 || /* steam overlay is open */
+        WaitForSingleObject(ext->steam_keyboard_event, 0) == WAIT_OBJECT_0) /* steam keyboard is open */
+        steam_overlay_open = TRUE;
 
-        size = offsetof( struct hid_packet, data[report_len] );
-        if (!(hid = malloc( size ))) ERR( "Failed to allocate rawinput data!\n" );
+    if (IsEqualGUID( ext->class_guid, &GUID_DEVINTERFACE_HID ) && !steam_overlay_open)
+    {
+        size = offsetof( RAWINPUT, data.hid.bRawData[report_len] );
+        if (!(rawinput = malloc( size ))) ERR( "Failed to allocate rawinput data!\n" );
         else
         {
-            INPUT input = {.type = INPUT_HARDWARE};
+            INPUT input;
 
+            rawinput->header.dwType = RIM_TYPEHID;
+            rawinput->header.dwSize = size;
+            rawinput->header.hDevice = ULongToHandle( ext->u.pdo.rawinput_handle );
+            rawinput->header.wParam = RIM_INPUT;
+            rawinput->data.hid.dwCount = 1;
+            rawinput->data.hid.dwSizeHid = report_len;
+            memcpy( rawinput->data.hid.bRawData, packet->reportBuffer, packet->reportBufferLen );
+            memset( rawinput->data.hid.bRawData + packet->reportBufferLen, 0, report_len - packet->reportBufferLen );
+
+            input.type = INPUT_HARDWARE;
             input.hi.uMsg = WM_INPUT;
-            input.hi.wParamH = HIWORD(RIM_INPUT);
-            input.hi.wParamL = LOWORD(RIM_INPUT);
+            input.hi.wParamH = 0;
+            input.hi.wParamL = 0;
+            __wine_send_input( 0, &input, rawinput );
 
-            hid->head.device = ext->u.pdo.rawinput_handle;
-            hid->head.usage = MAKELONG(desc->Usage, desc->UsagePage);
-
-            hid->head.count = 1;
-            hid->head.length = report_len;
-            memcpy( hid->data, packet->reportBuffer, packet->reportBufferLen );
-            memset( hid->data + packet->reportBufferLen, 0, report_len - packet->reportBufferLen );
-            NtUserSendHardwareInput( 0, 0, &input, (LPARAM)hid );
-
-            free( hid );
+            free( rawinput );
         }
     }
 
@@ -384,6 +390,8 @@ struct device_strings
 
 static const struct device_strings device_strings[] =
 {
+    /* CW-Bug-Id: #23185 Emulate Steam Input native hooks for native SDL */
+    { .id = L"VID_28DE&PID_11FF", .product = L"Controller (XBOX 360 For Windows)" },
     /* Microsoft controllers */
     { .id = L"VID_045E&PID_028E", .product = L"Controller (XBOX 360 For Windows)" },
     { .id = L"VID_045E&PID_028F", .product = L"Controller (XBOX 360 For Windows)" },
@@ -402,7 +410,6 @@ static const struct device_strings device_strings[] =
     { .id = L"VID_054C&PID_09CC", .product = L"Wireless Controller" },
     { .id = L"VID_054C&PID_0BA0", .product = L"Wireless Controller" },
     { .id = L"VID_054C&PID_0CE6", .product = L"Wireless Controller" },
-    { .id = L"VID_054C&PID_0DF2", .product = L"Wireless Controller" },
 };
 
 static const WCHAR *find_device_string( const WCHAR *device_id, ULONG index )
@@ -526,6 +533,7 @@ static NTSTATUS hid_device_xfer_report( BASE_DEVICE_EXTENSION *ext, ULONG code, 
 
 NTSTATUS WINAPI pdo_ioctl(DEVICE_OBJECT *device, IRP *irp)
 {
+    struct hid_queue *queue = irp->Tail.Overlay.OriginalFileObject->FsContext;
     IO_STACK_LOCATION *irpsp = IoGetCurrentIrpStackLocation( irp );
     BASE_DEVICE_EXTENSION *ext = device->DeviceExtension;
     NTSTATUS status = irp->IoStatus.Status;
@@ -635,10 +643,7 @@ NTSTATUS WINAPI pdo_ioctl(DEVICE_OBJECT *device, IRP *irp)
             if (irpsp->Parameters.DeviceIoControl.InputBufferLength != sizeof(ULONG))
                 status = STATUS_BUFFER_OVERFLOW;
             else
-            {
-                struct hid_queue *queue = irp->Tail.Overlay.OriginalFileObject->FsContext;
                 status = hid_queue_resize( queue, *(ULONG *)irp->AssociatedIrp.SystemBuffer );
-            }
             break;
         }
         case IOCTL_GET_NUM_DEVICE_INPUT_BUFFERS:
@@ -647,7 +652,6 @@ NTSTATUS WINAPI pdo_ioctl(DEVICE_OBJECT *device, IRP *irp)
                 status = STATUS_BUFFER_TOO_SMALL;
             else
             {
-                struct hid_queue *queue = irp->Tail.Overlay.OriginalFileObject->FsContext;
                 *(ULONG *)irp->AssociatedIrp.SystemBuffer = queue->length;
                 irp->IoStatus.Information = sizeof(ULONG);
                 status = STATUS_SUCCESS;

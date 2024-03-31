@@ -294,8 +294,6 @@ xsltAddKey(xsltStylesheetPtr style, const xmlChar *name,
 #endif
 
     key = xsltNewKeyDef(name, nameURI);
-    if (key == NULL)
-        return(-1);
     key->match = xmlStrdup(match);
     key->use = xmlStrdup(use);
     key->inst = inst;
@@ -829,17 +827,31 @@ fprintf(stderr, "xsltInitCtxtKey %s : %d\n", keyDef->name, ctxt->keyInitLevel);
 		keylist = xmlXPathNodeSetCreate(cur);
 		if (keylist == NULL)
 		    goto error;
-		if (xmlHashAddEntry(table->keys, str, keylist) < 0) {
-                    xmlXPathFreeNodeSet(keylist);
-                    goto error;
-                }
+		xmlHashAddEntry(table->keys, str, keylist);
 	    } else {
 		/*
 		* TODO: How do we know if this function failed?
 		*/
 		xmlXPathNodeSetAdd(keylist, cur);
 	    }
-            xsltSetSourceNodeFlags(ctxt, cur, XSLT_SOURCE_NODE_HAS_KEY);
+	    switch (cur->type) {
+		case XML_ELEMENT_NODE:
+		case XML_TEXT_NODE:
+		case XML_CDATA_SECTION_NODE:
+		case XML_PI_NODE:
+		case XML_COMMENT_NODE:
+		    cur->psvi = keyDef;
+		    break;
+		case XML_ATTRIBUTE_NODE:
+		    ((xmlAttrPtr) cur)->psvi = keyDef;
+		    break;
+		case XML_DOCUMENT_NODE:
+		case XML_HTML_DOCUMENT_NODE:
+		    ((xmlDocPtr) cur)->psvi = keyDef;
+		    break;
+		default:
+		    break;
+	    }
 	    xmlFree(str);
 	    str = NULL;
 

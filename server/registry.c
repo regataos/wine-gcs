@@ -258,7 +258,7 @@ static void dump_value( const struct key_value *value, FILE *f )
         if (((WCHAR *)value->data)[value->len / sizeof(WCHAR) - 1]) break;
         if (value->type != REG_SZ) fprintf( f, "str(%x):", value->type );
         fputc( '\"', f );
-        dump_strW( (WCHAR *)value->data, value->len - sizeof(WCHAR), f, "\"\"" );
+        dump_strW( (WCHAR *)value->data, value->len, f, "\"\"" );
         fprintf( f, "\"\n" );
         return;
 
@@ -1863,8 +1863,8 @@ static void init_supported_machines(void)
     {
         supported_machines[count++] = IMAGE_FILE_MACHINE_ARM64;
         supported_machines[count++] = IMAGE_FILE_MACHINE_I386;
-        /* supported_machines[count++] = IMAGE_FILE_MACHINE_ARMNT;  not supported yet */
     }
+    supported_machines[count++] = IMAGE_FILE_MACHINE_ARMNT;
 #else
 #error Unsupported machine
 #endif
@@ -1881,9 +1881,15 @@ void init_registry(void)
     static const WCHAR classes_i386[] = {'S','o','f','t','w','a','r','e','\\',
                                          'C','l','a','s','s','e','s','\\',
                                          'W','o','w','6','4','3','2','N','o','d','e'};
+    static const WCHAR classes_amd64[] = {'S','o','f','t','w','a','r','e','\\',
+                                          'C','l','a','s','s','e','s','\\',
+                                          'W','o','w','6','4','6','4','N','o','d','e'};
     static const WCHAR classes_arm[] = {'S','o','f','t','w','a','r','e','\\',
                                         'C','l','a','s','s','e','s','\\',
                                         'W','o','w','A','A','3','2','N','o','d','e'};
+    static const WCHAR classes_arm64[] = {'S','o','f','t','w','a','r','e','\\',
+                                          'C','l','a','s','s','e','s','\\',
+                                          'W','o','w','A','A','6','4','N','o','d','e'};
     static const WCHAR perflib[] = {'S','o','f','t','w','a','r','e','\\',
                                     'M','i','c','r','o','s','o','f','t','\\',
                                     'W','i','n','d','o','w','s',' ','N','T','\\',
@@ -1954,7 +1960,8 @@ void init_registry(void)
         {
         case IMAGE_FILE_MACHINE_I386:  name.str = classes_i386;  name.len = sizeof(classes_i386);  break;
         case IMAGE_FILE_MACHINE_ARMNT: name.str = classes_arm;   name.len = sizeof(classes_arm);   break;
-        default: continue;
+        case IMAGE_FILE_MACHINE_AMD64: name.str = classes_amd64; name.len = sizeof(classes_amd64); break;
+        case IMAGE_FILE_MACHINE_ARM64: name.str = classes_arm64; name.len = sizeof(classes_arm64); break;
         }
         if ((key = create_key_recursive( hklm, &name, current_time )))
         {
@@ -1984,6 +1991,8 @@ void init_registry(void)
             {
             case IMAGE_FILE_MACHINE_I386:  mkdir( "drive_c/windows/syswow64", 0777 ); break;
             case IMAGE_FILE_MACHINE_ARMNT: mkdir( "drive_c/windows/sysarm32", 0777 ); break;
+            case IMAGE_FILE_MACHINE_AMD64: mkdir( "drive_c/windows/sysx8664", 0777 ); break;
+            case IMAGE_FILE_MACHINE_ARM64: mkdir( "drive_c/windows/sysarm64", 0777 ); break;
             }
         }
     }
@@ -2478,8 +2487,6 @@ DECL_HANDLER(unload_registry)
     {
         if (key->obj.handle_count)
             set_error( STATUS_CANNOT_DELETE );
-        else if (key->obj.is_permanent)
-            set_error( STATUS_ACCESS_DENIED );
         else
             delete_key( key, 1 );     /* FIXME */
         release_object( key );

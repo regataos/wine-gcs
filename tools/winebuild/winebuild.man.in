@@ -179,7 +179,7 @@ option.
 .B \-m16, -m32, -m64
 Generate respectively 16-bit, 32-bit or 64-bit code.
 .TP
-.BI \-march= option ,\ \-mcpu= option ,\ \-mfpu= option
+.BI \-marm,\ \-mthumb,\ \-march= option ,\ \-mcpu= option ,\ \-mfpu= option ,\ \-mfloat-abi= option
 Set code generation options for the assembler.
 .TP
 .B \-mno-cygwin

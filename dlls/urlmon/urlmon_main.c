@@ -20,6 +20,8 @@
 
 #include <stdarg.h>
 
+#define NONAMELESSUNION
+
 #include "urlmon_main.h"
 
 #include "winreg.h"
@@ -596,32 +598,32 @@ HRESULT WINAPI CopyStgMedium(const STGMEDIUM *src, STGMEDIUM *dst)
     case TYMED_NULL:
         break;
     case TYMED_FILE:
-        if(src->lpszFileName && !src->pUnkForRelease) {
-            DWORD size = (lstrlenW(src->lpszFileName)+1)*sizeof(WCHAR);
-            dst->lpszFileName = CoTaskMemAlloc(size);
-            if(!dst->lpszFileName)
+        if(src->u.lpszFileName && !src->pUnkForRelease) {
+            DWORD size = (lstrlenW(src->u.lpszFileName)+1)*sizeof(WCHAR);
+            dst->u.lpszFileName = CoTaskMemAlloc(size);
+            if(!dst->u.lpszFileName)
                 return E_OUTOFMEMORY;
-            memcpy(dst->lpszFileName, src->lpszFileName, size);
+            memcpy(dst->u.lpszFileName, src->u.lpszFileName, size);
         }
         break;
     case TYMED_ISTREAM:
-        if(dst->pstm)
-            IStream_AddRef(dst->pstm);
+        if(dst->u.pstm)
+            IStream_AddRef(dst->u.pstm);
         break;
     case TYMED_ISTORAGE:
-        if(dst->pstg)
-            IStorage_AddRef(dst->pstg);
+        if(dst->u.pstg)
+            IStorage_AddRef(dst->u.pstg);
         break;
     case TYMED_HGLOBAL:
-        if(dst->hGlobal) {
-            SIZE_T size = GlobalSize(src->hGlobal);
+        if(dst->u.hGlobal) {
+            SIZE_T size = GlobalSize(src->u.hGlobal);
             char *src_ptr, *dst_ptr;
 
-            dst->hGlobal = GlobalAlloc(GMEM_FIXED, size);
-            if(!dst->hGlobal)
+            dst->u.hGlobal = GlobalAlloc(GMEM_FIXED, size);
+            if(!dst->u.hGlobal)
                 return E_OUTOFMEMORY;
-            dst_ptr = GlobalLock(dst->hGlobal);
-            src_ptr = GlobalLock(src->hGlobal);
+            dst_ptr = GlobalLock(dst->u.hGlobal);
+            src_ptr = GlobalLock(src->u.hGlobal);
             memcpy(dst_ptr, src_ptr, size);
             GlobalUnlock(src_ptr);
             GlobalUnlock(dst_ptr);

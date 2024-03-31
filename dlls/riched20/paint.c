@@ -123,8 +123,7 @@ void ME_Repaint(ME_TextEditor *editor)
     ME_UpdateScrollBar(editor);
     FIXME("ME_Repaint had to call ME_WrapMarkedParagraphs\n");
   }
-  if (!editor->freeze_count)
-    ITextHost_TxViewChange(editor->texthost, TRUE);
+  ITextHost_TxViewChange(editor->texthost, TRUE);
 }
 
 void ME_UpdateRepaint(ME_TextEditor *editor, BOOL update_now)
@@ -141,8 +140,7 @@ void ME_UpdateRepaint(ME_TextEditor *editor, BOOL update_now)
 
   update_caret( editor );
 
-  if (!editor->freeze_count)
-    ITextHost_TxViewChange(editor->texthost, update_now);
+  ITextHost_TxViewChange(editor->texthost, update_now);
 
   ME_SendSelChange(editor);
 

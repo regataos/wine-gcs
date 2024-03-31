@@ -3,13 +3,15 @@ IMPORTS   = uuid winhttp ole32 advapi32
 
 EXTRADLLFLAGS = -Wb,--prefer-native
 
-SOURCES = \
+C_SRCS = \
 	enum_files.c \
 	enum_jobs.c \
 	factory.c \
 	file.c \
 	job.c \
 	qmgr.c \
-	qmgr_local.idl \
-	rsrc.rc \
 	service.c
+
+RC_SRCS = rsrc.rc
+
+IDL_SRCS = qmgr_local.idl

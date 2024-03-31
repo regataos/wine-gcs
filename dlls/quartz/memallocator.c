@@ -162,12 +162,17 @@ static ULONG WINAPI BaseMemAllocator_Release(IMemAllocator * iface)
 static HRESULT WINAPI BaseMemAllocator_SetProperties(IMemAllocator * iface, ALLOCATOR_PROPERTIES *pRequest, ALLOCATOR_PROPERTIES *pActual)
 {
     BaseMemAllocator *This = impl_from_IMemAllocator(iface);
+    const char *sgi;
     HRESULT hr;
 
     TRACE("(%p)->(%p, %p)\n", This, pRequest, pActual);
 
     TRACE("Requested %ld buffers, size %ld, alignment %ld, prefix %ld.\n",
             pRequest->cBuffers, pRequest->cbBuffer, pRequest->cbAlign, pRequest->cbPrefix);
+
+    sgi = getenv("SteamGameId");
+    if (sgi && (!strcmp(sgi, "1113000")))
+        pRequest->cBuffers = min(8, pRequest->cBuffers);
 
     EnterCriticalSection(This->pCritSect);
     {
@@ -920,7 +925,7 @@ HRESULT mem_allocator_create(IUnknown *lpUnkOuter, IUnknown **out)
     if (!(pMemAlloc = CoTaskMemAlloc(sizeof(*pMemAlloc))))
         return E_OUTOFMEMORY;
 
-    InitializeCriticalSectionEx(&pMemAlloc->csState, 0, RTL_CRITICAL_SECTION_FLAG_FORCE_DEBUG_INFO);
+    InitializeCriticalSection(&pMemAlloc->csState);
     pMemAlloc->csState.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": StdMemAllocator.csState");
 
     pMemAlloc->pMemory = NULL;

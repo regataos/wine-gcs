@@ -10,7 +10,7 @@
 
 #include "mpg123lib_intern.h"
 #include "getbits.h"
-#include "../common/debug.h"
+#include "debug.h"
 
 /*
 	Allocation value is not allowed to be 15. Initially, libmad showed me the
@@ -208,7 +208,7 @@ static int I_step_two(real fraction[2][SBLIMIT],unsigned int balloc[2*SBLIMIT], 
 	return 0;
 }
 
-int INT123_do_layer1(mpg123_handle *fr)
+int do_layer1(mpg123_handle *fr)
 {
 	int clip=0;
 	int i,stereo = fr->stereo;
@@ -246,3 +246,5 @@ int INT123_do_layer1(mpg123_handle *fr)
 
 	return clip;
 }
+
+

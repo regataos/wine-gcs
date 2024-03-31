@@ -221,11 +221,6 @@ static void test_gmtime64(void)
     t = -1;
     memset(&tm, 0xcc, sizeof(tm));
     ptm = p_gmtime64(&t);
-    if (!ptm)
-    {
-        skip("Old gmtime64 limits, skipping tests.\n");
-        return;
-    }
     ok(!!ptm, "got NULL.\n");
     ret = p_gmtime64_s(&tm, &t);
     ok(!ret, "got %d.\n", ret);
@@ -240,27 +235,12 @@ static void test_gmtime64(void)
     ok(!ret, "got %d.\n", ret);
     ok(tm.tm_year == 69 && tm.tm_hour == 12 && tm.tm_min == 0 && tm.tm_sec == 0, "got %d, %d, %d, %d.\n",
             tm.tm_year, tm.tm_hour, tm.tm_min, tm.tm_sec);
-    ptm = p_gmtime32((__time32_t *)&t);
-    ok(!!ptm, "got NULL.\n");
-    memset(&tm, 0xcc, sizeof(tm));
-    ret = p_gmtime32_s(&tm, (__time32_t *)&t);
-    ok(!ret, "got %d.\n", ret);
-    todo_wine_if(tm.tm_year == 69 && tm.tm_hour == 12)
-    ok(tm.tm_year == 70 && tm.tm_hour == -12 && tm.tm_min == 0 && tm.tm_sec == 0, "got %d, %d, %d, %d.\n",
-            tm.tm_year, tm.tm_hour, tm.tm_min, tm.tm_sec);
 
     t = -43201;
     ptm = p_gmtime64(&t);
     ok(!ptm, "got non-NULL.\n");
     memset(&tm, 0xcc, sizeof(tm));
     ret = p_gmtime64_s(&tm, &t);
-    ok(ret == EINVAL, "got %d.\n", ret);
-    ok(tm.tm_year == -1 && tm.tm_hour == -1 && tm.tm_min == -1 && tm.tm_sec == -1, "got %d, %d, %d, %d.\n",
-            tm.tm_year, tm.tm_hour, tm.tm_min, tm.tm_sec);
-    ptm = p_gmtime32((__time32_t *)&t);
-    ok(!ptm, "got NULL.\n");
-    memset(&tm, 0xcc, sizeof(tm));
-    ret = p_gmtime32_s(&tm, (__time32_t *)&t);
     ok(ret == EINVAL, "got %d.\n", ret);
     ok(tm.tm_year == -1 && tm.tm_hour == -1 && tm.tm_min == -1 && tm.tm_sec == -1, "got %d, %d, %d, %d.\n",
             tm.tm_year, tm.tm_hour, tm.tm_min, tm.tm_sec);
@@ -666,15 +646,15 @@ static void test_daylight(void)
         return;
     }
 
-    /* Examine the returned pointer from __p__environ(), if available. */
-    if (sizeof(void*) != sizeof(int))
-        ok( !p___p__daylight, "___p__daylight() should be 32-bit only\n");
-    else
+    if (!p___p__daylight)
     {
-        ret1 = p__daylight();
-        ret2 = p___p__daylight();
-        ok(ret1 && ret1 == ret2, "got %p\n", ret1);
+        skip("__p__daylight not available\n");
+        return;
     }
+
+    ret1 = p__daylight();
+    ret2 = p___p__daylight();
+    ok(ret1 && ret1 == ret2, "got %p\n", ret1);
 }
 
 static void test_strftime(void)
@@ -983,11 +963,8 @@ static void test__tzset(void)
     char TZ_env[256];
     int ret;
 
-    if (sizeof(void*) != sizeof(int))
-    {
-        ok(!p___p__daylight, "___p__daylight() should be 32-bit only\n");
-        ok(!p___p__timezone, "___p__timezone() should be 32-bit only\n");
-        ok(!p___p__dstbias, "___p__dstbias() should be 32-bit only\n");
+    if(!p___p__daylight || !p___p__timezone || !p___p__dstbias) {
+        skip("__p__daylight, __p__timezone or __p__dstbias is not available\n");
         return;
     }
 

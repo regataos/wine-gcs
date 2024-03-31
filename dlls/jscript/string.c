@@ -89,7 +89,7 @@ static HRESULT stringobj_to_string(jsval_t vthis, jsval_t *r)
 
     if(!(string = string_this(vthis))) {
         WARN("this is not a string object\n");
-        return E_FAIL;
+        return JS_E_STRING_EXPECTED;
     }
 
     if(r)
@@ -627,7 +627,10 @@ static BOOL strbuf_ensure_size(strbuf_t *buf, unsigned len)
     new_size = buf->size ? buf->size<<1 : 16;
     if(new_size < len)
         new_size = len;
-    new_buf = realloc(buf->buf, new_size * sizeof(WCHAR));
+    if(buf->buf)
+        new_buf = realloc(buf->buf, new_size*sizeof(WCHAR));
+    else
+        new_buf = malloc(new_size*sizeof(WCHAR));
     if(!new_buf)
         return FALSE;
 
@@ -699,7 +702,7 @@ static HRESULT rep_call(script_ctx_t *ctx, jsdisp_t *func,
     }
 
     if(SUCCEEDED(hres))
-        hres = jsdisp_call_value(func, jsval_undefined(), DISPATCH_METHOD, argc, argv, &val);
+        hres = jsdisp_call_value(func, jsval_undefined(), DISPATCH_METHOD, argc, argv, &val, &ctx->jscaller->IServiceProvider_iface);
 
     for(i=0; i <= match->paren_count; i++)
         jsstr_release(get_string(argv[i]));
@@ -923,10 +926,8 @@ static HRESULT String_replace(script_ctx_t *ctx, jsval_t vthis, WORD flags, unsi
         jsstr_t *ret_str;
 
         ret_str = jsstr_alloc_len(ret.buf, ret.len);
-        if(!ret_str) {
-            free(ret.buf);
+        if(!ret_str)
             return E_OUTOFMEMORY;
-        }
 
         TRACE("= %s\n", debugstr_jsstr(ret_str));
         *r = jsval_string(ret_str);

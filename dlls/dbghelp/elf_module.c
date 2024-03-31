@@ -39,7 +39,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(dbghelp);
 struct elf_info
 {
     unsigned                    flags;          /* IN  one (or several) of the ELF_INFO constants */
-    DWORD64                     dbg_hdr_addr;   /* OUT address of debug header (if ELF_INFO_DEBUG_HEADER is set) */
+    DWORD_PTR                   dbg_hdr_addr;   /* OUT address of debug header (if ELF_INFO_DEBUG_HEADER is set) */
     struct module*              module;         /* OUT loaded module (if ELF_INFO_MODULE is set) */
     const WCHAR*                module_name;    /* OUT found module name (if ELF_INFO_NAME is set) */
 };
@@ -1082,8 +1082,11 @@ static BOOL elf_load_debug_info_from_map(struct module* module,
         }
         lret = dwarf2_parse(module, module->reloc_delta, thunks, fmap);
         ret = ret || lret;
+    }
+    if (wcsstr(module->modulename, S_ElfW) || !wcscmp(module->modulename, S_WineLoaderW))
+    {
         /* add the thunks for native libraries */
-        if (module->is_wine_builtin)
+        if (!(dbghelp_options & SYMOPT_PUBLICS_ONLY))
             elf_new_wine_thunks(module, ht_symtab, thunks);
     }
     /* add all the public symbols from symtab */
@@ -1238,8 +1241,7 @@ static BOOL elf_load_file_from_fmap(struct process* pcs, const WCHAR* filename,
         modfmt = HeapAlloc(GetProcessHeap(), 0,
                           sizeof(struct module_format) + sizeof(struct elf_module_info));
         if (!modfmt) return FALSE;
-        elf_info->module = module_new(pcs, filename, DMT_ELF,
-                                      module_is_wine_host(filename, L".so"), FALSE, modbase,
+        elf_info->module = module_new(pcs, filename, DMT_ELF, FALSE, modbase,
                                       fmap->u.elf.elf_size, 0, calc_crc32(fmap->u.elf.handle),
                                       elf_get_machine(fmap->u.elf.elfhdr.e_machine));
         if (!elf_info->module)
@@ -1337,53 +1339,41 @@ static BOOL elf_load_file_cb(void *param, HANDLE handle, const WCHAR *filename)
 /******************************************************************
  *		elf_search_auxv
  *
- * Locate a value from the debuggee auxiliary vector
+ * locate some a value from the debuggee auxiliary vector
  */
 static BOOL elf_search_auxv(const struct process* pcs, unsigned type, ULONG_PTR* val)
 {
     char        buffer[sizeof(SYMBOL_INFO) + MAX_SYM_NAME];
     SYMBOL_INFO*si = (SYMBOL_INFO*)buffer;
-    const unsigned ptr_size = pcs->is_host_64bit ? 8 : 4;
-    UINT64      envp;
-    UINT64      addr;
-    UINT64      str;
-    UINT64      str_max;
+    BYTE*       addr;
+    BYTE*       str;
+    BYTE*       str_max;
 
     si->SizeOfStruct = sizeof(*si);
     si->MaxNameLen = MAX_SYM_NAME;
-    if (!SymFromName(pcs->handle, "ntdll.so!main_envp", si) ||
-        !si->Address ||
-        !read_process_integral_value(pcs, si->Address, &envp, ptr_size) ||
-        !envp)
+    if (!SymFromName(pcs->handle, "libwine.so.1!__wine_main_environ", si) ||
+        !(addr = (void*)(DWORD_PTR)si->Address) ||
+        !ReadProcessMemory(pcs->handle, addr, &addr, sizeof(addr), NULL) ||
+        !addr)
     {
         FIXME("can't find symbol in module\n");
         return FALSE;
     }
     /* walk through envp[] */
     /* envp[] strings are located after the auxiliary vector, so protect the walk */
-    str_max = ~(UINT64)0u;
-    addr = envp;
-    for (;;)
-    {
-        if (!read_process_integral_value(pcs, addr, &str, ptr_size) || (addr += ptr_size) <= ptr_size)
-            return FALSE;
-        if (!str) break;
-        /* It can be some env vars have been changed, pointing to a different location */
-        if (str >= envp)
-            str_max = min(str_max, str);
-    }
+    str_max = (void*)(DWORD_PTR)~0L;
+    while (ReadProcessMemory(pcs->handle, addr, &str, sizeof(str), NULL) &&
+           (addr = (void*)((DWORD_PTR)addr + sizeof(str))) != NULL && str != NULL)
+        str_max = min(str_max, str);
 
     /* Walk through the end of envp[] array.
      * Actually, there can be several NULLs at the end of envp[]. This happens when an env variable is
      * deleted, the last entry is replaced by an extra NULL.
      */
-    for (; addr < str_max; addr += ptr_size)
-    {
-        if (!read_process_integral_value(pcs, addr, &str, ptr_size)) return FALSE;
-        if (str) break;
-    }
+    while (addr < str_max && ReadProcessMemory(pcs->handle, addr, &str, sizeof(str), NULL) && str == NULL)
+        addr = (void*)((DWORD_PTR)addr + sizeof(str));
 
-    if (pcs->is_host_64bit)
+    if (pcs->is_64bit)
     {
         struct
         {
@@ -1391,7 +1381,7 @@ static BOOL elf_search_auxv(const struct process* pcs, unsigned type, ULONG_PTR*
             UINT64 a_val;
         } auxv;
 
-        while (read_process_memory(pcs, addr, &auxv, sizeof(auxv)) && auxv.a_type)
+        while (ReadProcessMemory(pcs->handle, addr, &auxv, sizeof(auxv), NULL) && auxv.a_type)
         {
             if (auxv.a_type == type)
             {
@@ -1409,7 +1399,7 @@ static BOOL elf_search_auxv(const struct process* pcs, unsigned type, ULONG_PTR*
             UINT32 a_val;
         } auxv;
 
-        while (read_process_memory(pcs, addr, &auxv, sizeof(auxv)) && auxv.a_type)
+        while (ReadProcessMemory(pcs->handle, addr, &auxv, sizeof(auxv), NULL) && auxv.a_type)
         {
             if (auxv.a_type == type)
             {
@@ -1455,8 +1445,7 @@ static BOOL elf_search_and_load_file(struct process* pcs, const WCHAR* filename,
         load_elf.elf_info    = elf_info;
 
         ret = search_unix_path(filename, process_getenv(pcs, L"LD_LIBRARY_PATH"), elf_load_file_cb, &load_elf)
-            || search_unix_path(filename, BINDIR, elf_load_file_cb, &load_elf)
-            || search_dll_path(pcs, filename, IMAGE_FILE_MACHINE_UNKNOWN, elf_load_file_cb, &load_elf);
+            || search_dll_path(pcs, filename, elf_load_file_cb, &load_elf);
     }
 
     return ret;
@@ -1464,6 +1453,59 @@ static BOOL elf_search_and_load_file(struct process* pcs, const WCHAR* filename,
 
 typedef BOOL (*enum_elf_modules_cb)(const WCHAR*, ULONG_PTR load_addr,
                                     ULONG_PTR dyn_addr, BOOL is_system, void* user);
+
+static BOOL elf_linkmap_validate_entry(const struct process* pcs, DWORD64 base, DWORD64 name_addr, WCHAR* buffer, SIZE_T buflen)
+{
+    static DWORD page_size;
+    MEMORY_BASIC_INFORMATION mem_info;
+    char bufstr[MAX_PATH];
+
+    if (!page_size)
+    {
+        SYSTEM_INFO sys_info;
+        GetSystemInfo(&sys_info);
+        page_size = sys_info.dwPageSize;
+    }
+    if (base & (page_size - 1))
+    {
+        WARN("Unaligned base addr=%I64x page_size=%lx\n", base, page_size);
+        return FALSE;
+    }
+    if (VirtualQueryEx(pcs->handle, (void*)(ULONG_PTR)base, &mem_info, sizeof(mem_info)))
+    {
+        if (mem_info.BaseAddress != (void*)(ULONG_PTR)base)
+        {
+            WARN("Invalid base addr %I64x (beg map at %p)\n", base, mem_info.BaseAddress);
+            return FALSE;
+        }
+    }
+    else
+    {
+        /* Some ELF modules are loaded in 32bit mode above 2G limit,
+         * and virtual query will fail on these addresses when process is not large address aware.
+         * Don't consider this as an error for a 32bit debuggee.
+         */
+        if (pcs->is_64bit)
+        {
+            WARN("Invalid base addr %I64x\n", base);
+            return FALSE;
+        }
+    }
+
+    memset(bufstr, ' ', sizeof(bufstr));
+    if (!read_process_memory(pcs, name_addr, bufstr, sizeof(bufstr)))
+    {
+        WARN("Invalid name_address %I64x\n", name_addr);
+        return FALSE;
+    }
+    if (!memchr(bufstr, '\0', sizeof(bufstr)))
+    {
+        WARN("Unterminated string %s\n", wine_dbgstr_an(bufstr, sizeof(bufstr)));
+        return FALSE;
+    }
+    MultiByteToWideChar(CP_UNIXCP, 0, bufstr, -1, buffer, buflen);
+    return TRUE;
+}
 
 /******************************************************************
  *		elf_enum_modules_internal
@@ -1474,11 +1516,10 @@ static BOOL elf_enum_modules_internal(const struct process* pcs,
                                       const WCHAR* main_name,
                                       enum_elf_modules_cb cb, void* user)
 {
-    WCHAR bufstrW[MAX_PATH];
-    char bufstr[256];
+    WCHAR bufstr[MAX_PATH];
     ULONG_PTR lm_addr;
 
-    if (pcs->is_host_64bit)
+    if (pcs->is_64bit)
     {
         struct
         {
@@ -1509,15 +1550,16 @@ static BOOL elf_enum_modules_internal(const struct process* pcs,
             if (!read_process_memory(pcs, lm_addr, &lm, sizeof(lm)))
                 return FALSE;
 
-            if (lm.l_prev && /* skip first entry, normally debuggee itself */
-                lm.l_name && read_process_memory(pcs, lm.l_name, bufstr, sizeof(bufstr)))
+            /* skip first entry(normally debuggee itself) and entries without names */
+            if (!lm.l_prev || !lm.l_name) continue;
+            if (!elf_linkmap_validate_entry(pcs, lm.l_addr, lm.l_name, bufstr, ARRAY_SIZE(bufstr)))
             {
-                bufstr[sizeof(bufstr) - 1] = '\0';
-                MultiByteToWideChar(CP_UNIXCP, 0, bufstr, -1, bufstrW, ARRAY_SIZE(bufstrW));
-                if (main_name && !bufstrW[0]) lstrcpyW(bufstrW, main_name);
-                if (!cb(bufstrW, (ULONG_PTR)lm.l_addr, (ULONG_PTR)lm.l_ld, FALSE, user))
-                    break;
+                FIXME("Incorrect link_map entry, bailing out\n");
+                return FALSE;
             }
+            if (main_name && !bufstr[0]) lstrcpyW(bufstr, main_name);
+            if (!cb(bufstr, (ULONG_PTR)lm.l_addr, (ULONG_PTR)lm.l_ld, FALSE, user))
+                break;
         }
     }
     else
@@ -1551,15 +1593,16 @@ static BOOL elf_enum_modules_internal(const struct process* pcs,
             if (!read_process_memory(pcs, lm_addr, &lm, sizeof(lm)))
                 return FALSE;
 
-            if (lm.l_prev && /* skip first entry, normally debuggee itself */
-                lm.l_name && read_process_memory(pcs, lm.l_name, bufstr, sizeof(bufstr)))
+            /* skip first entry(normally debuggee itself) and entries without names */
+            if (!lm.l_prev || !lm.l_name) continue;
+            if (!elf_linkmap_validate_entry(pcs, lm.l_addr, lm.l_name, bufstr, ARRAY_SIZE(bufstr)))
             {
-                bufstr[sizeof(bufstr) - 1] = '\0';
-                MultiByteToWideChar(CP_UNIXCP, 0, bufstr, -1, bufstrW, ARRAY_SIZE(bufstrW));
-                if (main_name && !bufstrW[0]) lstrcpyW(bufstrW, main_name);
-                if (!cb(bufstrW, (ULONG_PTR)lm.l_addr, (ULONG_PTR)lm.l_ld, FALSE, user))
-                    break;
+                FIXME("Incorrect link_map entry, bailing out\n");
+                return FALSE;
             }
+            if (main_name && !bufstr[0]) lstrcpyW(bufstr, main_name);
+            if (!cb(bufstr, (ULONG_PTR)lm.l_addr, (ULONG_PTR)lm.l_ld, FALSE, user))
+                break;
         }
     }
 
@@ -1780,14 +1823,8 @@ BOOL elf_read_wine_loader_dbg_info(struct process* pcs, ULONG_PTR addr)
         HeapFree(GetProcessHeap(), 0, loader);
     }
     if (!ret || !elf_info.dbg_hdr_addr) return FALSE;
-    if (elf_info.dbg_hdr_addr != (ULONG_PTR)elf_info.dbg_hdr_addr)
-    {
-        ERR("Unable to access ELF libraries (outside 32bit limit)\n");
-        module_remove(pcs, elf_info.module);
-        pcs->loader = &empty_loader_ops;
-        return FALSE;
-    }
-    TRACE("Found ELF debug header %#I64x\n", elf_info.dbg_hdr_addr);
+
+    TRACE("Found ELF debug header %#Ix\n", elf_info.dbg_hdr_addr);
     elf_info.module->format_info[DFI_ELF]->u.elf_info->elf_loader = 1;
     module_set_module(elf_info.module, S_WineLoaderW);
     pcs->dbg_hdr_addr = elf_info.dbg_hdr_addr;

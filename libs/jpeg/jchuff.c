@@ -2,7 +2,7 @@
  * jchuff.c
  *
  * Copyright (C) 1991-1997, Thomas G. Lane.
- * Modified 2006-2023 by Guido Vollbeding.
+ * Modified 2006-2020 by Guido Vollbeding.
  * This file is part of the Independent JPEG Group's software.
  * For conditions of distribution and use, see the accompanying README file.
  *
@@ -26,10 +26,16 @@
 
 
 /* The legal range of a DCT coefficient is
- *  -1024 .. +1023  for 8-bit sample data precision;
- * -16384 .. +16383 for 12-bit sample data precision.
- * Hence the magnitude should always fit in sample data precision + 2 bits.
+ *  -1024 .. +1023  for 8-bit data;
+ * -16384 .. +16383 for 12-bit data.
+ * Hence the magnitude should always fit in 10 or 14 bits respectively.
  */
+
+#if BITS_IN_JSAMPLE == 8
+#define MAX_COEF_BITS 10
+#else
+#define MAX_COEF_BITS 14
+#endif
 
 /* Derived data constructed for each Huffman table */
 
@@ -541,7 +547,6 @@ encode_mcu_DC_first (j_compress_ptr cinfo, JBLOCKARRAY MCU_data)
   huff_entropy_ptr entropy = (huff_entropy_ptr) cinfo->entropy;
   register int temp, temp2;
   register int nbits;
-  int max_coef_bits;
   int blkn, ci, tbl;
   ISHIFT_TEMPS
 
@@ -552,9 +557,6 @@ encode_mcu_DC_first (j_compress_ptr cinfo, JBLOCKARRAY MCU_data)
   if (cinfo->restart_interval)
     if (entropy->restarts_to_go == 0)
       emit_restart_e(entropy, entropy->next_restart_num);
-
-  /* Since we're encoding a difference, the range limit is twice as much. */
-  max_coef_bits = cinfo->data_precision + 3;
 
   /* Encode the MCU data blocks */
   for (blkn = 0; blkn < cinfo->blocks_in_MCU; blkn++) {
@@ -567,17 +569,12 @@ encode_mcu_DC_first (j_compress_ptr cinfo, JBLOCKARRAY MCU_data)
     temp = IRIGHT_SHIFT((int) (MCU_data[blkn][0][0]), cinfo->Al);
 
     /* DC differences are figured on the point-transformed values. */
-    if ((temp2 = temp - entropy->saved.last_dc_val[ci]) == 0) {
-      /* Count/emit the Huffman-coded symbol for the number of bits */
-      emit_dc_symbol(entropy, tbl, 0);
-
-      continue;
-    }
-
+    temp2 = temp - entropy->saved.last_dc_val[ci];
     entropy->saved.last_dc_val[ci] = temp;
 
     /* Encode the DC coefficient difference per section G.1.2.1 */
-    if ((temp = temp2) < 0) {
+    temp = temp2;
+    if (temp < 0) {
       temp = -temp;		/* temp is abs value of input */
       /* For a negative input, want temp2 = bitwise complement of abs(input) */
       /* This code assumes we are on a two's complement machine */
@@ -586,10 +583,14 @@ encode_mcu_DC_first (j_compress_ptr cinfo, JBLOCKARRAY MCU_data)
 
     /* Find the number of bits needed for the magnitude of the coefficient */
     nbits = 0;
-    do nbits++;			/* there must be at least one 1 bit */
-    while ((temp >>= 1));
-    /* Check for out-of-range coefficient values */
-    if (nbits > max_coef_bits)
+    while (temp) {
+      nbits++;
+      temp >>= 1;
+    }
+    /* Check for out-of-range coefficient values.
+     * Since we're encoding a difference, the range limit is twice as much.
+     */
+    if (nbits > MAX_COEF_BITS+1)
       ERREXIT(cinfo, JERR_BAD_DCT_COEF);
 
     /* Count/emit the Huffman-coded symbol for the number of bits */
@@ -597,7 +598,8 @@ encode_mcu_DC_first (j_compress_ptr cinfo, JBLOCKARRAY MCU_data)
 
     /* Emit that number of bits of the value, if positive, */
     /* or the complement of its magnitude, if negative. */
-    emit_bits_e(entropy, (unsigned int) temp2, nbits);
+    if (nbits)			/* emit_bits rejects calls with size 0 */
+      emit_bits_e(entropy, (unsigned int) temp2, nbits);
   }
 
   cinfo->dest->next_output_byte = entropy->next_output_byte;
@@ -631,7 +633,7 @@ encode_mcu_AC_first (j_compress_ptr cinfo, JBLOCKARRAY MCU_data)
   register int temp, temp2;
   register int nbits;
   register int r, k;
-  int Se, Al, max_coef_bits;
+  int Se, Al;
 
   entropy->next_output_byte = cinfo->dest->next_output_byte;
   entropy->free_in_buffer = cinfo->dest->free_in_buffer;
@@ -644,7 +646,6 @@ encode_mcu_AC_first (j_compress_ptr cinfo, JBLOCKARRAY MCU_data)
   Se = cinfo->Se;
   Al = cinfo->Al;
   natural_order = cinfo->natural_order;
-  max_coef_bits = cinfo->data_precision + 2;
 
   /* Encode the MCU data block */
   block = MCU_data[0];
@@ -665,22 +666,17 @@ encode_mcu_AC_first (j_compress_ptr cinfo, JBLOCKARRAY MCU_data)
      */
     if (temp < 0) {
       temp = -temp;		/* temp is abs value of input */
-      /* Apply the point transform, and watch out for case */
-      /* that nonzero coef is zero after point transform. */
-      if ((temp >>= Al) == 0) {
-	r++;
-	continue;
-      }
+      temp >>= Al;		/* apply the point transform */
       /* For a negative coef, want temp2 = bitwise complement of abs(coef) */
       temp2 = ~temp;
     } else {
-      /* Apply the point transform, and watch out for case */
-      /* that nonzero coef is zero after point transform. */
-      if ((temp >>= Al) == 0) {
-	r++;
-	continue;
-      }
+      temp >>= Al;		/* apply the point transform */
       temp2 = temp;
+    }
+    /* Watch out for case that nonzero coef is zero after point transform */
+    if (temp == 0) {
+      r++;
+      continue;
     }
 
     /* Emit any pending EOBRUN */
@@ -693,11 +689,11 @@ encode_mcu_AC_first (j_compress_ptr cinfo, JBLOCKARRAY MCU_data)
     }
 
     /* Find the number of bits needed for the magnitude of the coefficient */
-    nbits = 0;
-    do nbits++;			/* there must be at least one 1 bit */
-    while ((temp >>= 1));
+    nbits = 1;			/* there must be at least one 1 bit */
+    while ((temp >>= 1))
+      nbits++;
     /* Check for out-of-range coefficient values */
-    if (nbits > max_coef_bits)
+    if (nbits > MAX_COEF_BITS)
       ERREXIT(cinfo, JERR_BAD_DCT_COEF);
 
     /* Count/emit Huffman symbol for run length / number of bits */
@@ -920,89 +916,83 @@ encode_one_block (working_state * state, JCOEFPTR block, int last_dc_val,
   register int nbits;
   register int r, k;
   int Se = state->cinfo->lim_Se;
-  int max_coef_bits = state->cinfo->data_precision + 3;
   const int * natural_order = state->cinfo->natural_order;
 
   /* Encode the DC coefficient difference per section F.1.2.1 */
 
-  if ((temp = block[0] - last_dc_val) == 0) {
-    /* Emit the Huffman-coded symbol for the number of bits */
-    if (! emit_bits_s(state, dctbl->ehufco[0], dctbl->ehufsi[0]))
-      return FALSE;
-  } else {
-    if ((temp2 = temp) < 0) {
-      temp = -temp;		/* temp is abs value of input */
-      /* For a negative input, want temp2 = bitwise complement of abs(input) */
-      /* This code assumes we are on a two's complement machine */
-      temp2--;
-    }
+  temp = temp2 = block[0] - last_dc_val;
 
-    /* Find the number of bits needed for the magnitude of the coefficient */
-    nbits = 0;
-    do nbits++;			/* there must be at least one 1 bit */
-    while ((temp >>= 1));
-    /* Check for out-of-range coefficient values.
-     * Since we're encoding a difference, the range limit is twice as much.
-     */
-    if (nbits > max_coef_bits)
-      ERREXIT(state->cinfo, JERR_BAD_DCT_COEF);
+  if (temp < 0) {
+    temp = -temp;		/* temp is abs value of input */
+    /* For a negative input, want temp2 = bitwise complement of abs(input) */
+    /* This code assumes we are on a two's complement machine */
+    temp2--;
+  }
 
-    /* Emit the Huffman-coded symbol for the number of bits */
-    if (! emit_bits_s(state, dctbl->ehufco[nbits], dctbl->ehufsi[nbits]))
-      return FALSE;
+  /* Find the number of bits needed for the magnitude of the coefficient */
+  nbits = 0;
+  while (temp) {
+    nbits++;
+    temp >>= 1;
+  }
+  /* Check for out-of-range coefficient values.
+   * Since we're encoding a difference, the range limit is twice as much.
+   */
+  if (nbits > MAX_COEF_BITS+1)
+    ERREXIT(state->cinfo, JERR_BAD_DCT_COEF);
 
-    /* Emit that number of bits of the value, if positive, */
-    /* or the complement of its magnitude, if negative. */
+  /* Emit the Huffman-coded symbol for the number of bits */
+  if (! emit_bits_s(state, dctbl->ehufco[nbits], dctbl->ehufsi[nbits]))
+    return FALSE;
+
+  /* Emit that number of bits of the value, if positive, */
+  /* or the complement of its magnitude, if negative. */
+  if (nbits)			/* emit_bits rejects calls with size 0 */
     if (! emit_bits_s(state, (unsigned int) temp2, nbits))
       return FALSE;
-  }
 
   /* Encode the AC coefficients per section F.1.2.2 */
 
   r = 0;			/* r = run length of zeros */
 
   for (k = 1; k <= Se; k++) {
-    if ((temp = block[natural_order[k]]) == 0) {
+    if ((temp2 = block[natural_order[k]]) == 0) {
       r++;
-      continue;
-    }
+    } else {
+      /* if run length > 15, must emit special run-length-16 codes (0xF0) */
+      while (r > 15) {
+	if (! emit_bits_s(state, actbl->ehufco[0xF0], actbl->ehufsi[0xF0]))
+	  return FALSE;
+	r -= 16;
+      }
 
-    /* if run length > 15, must emit special run-length-16 codes (0xF0) */
-    while (r > 15) {
-      if (! emit_bits_s(state, actbl->ehufco[0xF0], actbl->ehufsi[0xF0]))
+      temp = temp2;
+      if (temp < 0) {
+	temp = -temp;		/* temp is abs value of input */
+	/* This code assumes we are on a two's complement machine */
+	temp2--;
+      }
+
+      /* Find the number of bits needed for the magnitude of the coefficient */
+      nbits = 1;		/* there must be at least one 1 bit */
+      while ((temp >>= 1))
+	nbits++;
+      /* Check for out-of-range coefficient values */
+      if (nbits > MAX_COEF_BITS)
+	ERREXIT(state->cinfo, JERR_BAD_DCT_COEF);
+
+      /* Emit Huffman symbol for run length / number of bits */
+      temp = (r << 4) + nbits;
+      if (! emit_bits_s(state, actbl->ehufco[temp], actbl->ehufsi[temp]))
 	return FALSE;
-      r -= 16;
+
+      /* Emit that number of bits of the value, if positive, */
+      /* or the complement of its magnitude, if negative. */
+      if (! emit_bits_s(state, (unsigned int) temp2, nbits))
+	return FALSE;
+
+      r = 0;
     }
-
-    if ((temp2 = temp) < 0) {
-      temp = -temp;		/* temp is abs value of input */
-      /* For a negative coef, want temp2 = bitwise complement of abs(coef) */
-      /* This code assumes we are on a two's complement machine */
-      temp2--;
-    }
-
-    /* Find the number of bits needed for the magnitude of the coefficient */
-    nbits = 0;
-    do nbits++;			/* there must be at least one 1 bit */
-    while ((temp >>= 1));
-    /* Check for out-of-range coefficient values.
-     * Use ">=" instead of ">" so can use the
-     * same one larger limit from DC check here.
-     */
-    if (nbits >= max_coef_bits)
-      ERREXIT(state->cinfo, JERR_BAD_DCT_COEF);
-
-    /* Emit Huffman symbol for run length / number of bits */
-    temp = (r << 4) + nbits;
-    if (! emit_bits_s(state, actbl->ehufco[temp], actbl->ehufsi[temp]))
-      return FALSE;
-
-    /* Emit that number of bits of the value, if positive, */
-    /* or the complement of its magnitude, if negative. */
-    if (! emit_bits_s(state, (unsigned int) temp2, nbits))
-      return FALSE;
-
-    r = 0;			/* reset zero run length */
   }
 
   /* If the last coef(s) were zero, emit an end-of-block code */
@@ -1132,31 +1122,28 @@ htest_one_block (j_compress_ptr cinfo, JCOEFPTR block, int last_dc_val,
   register int nbits;
   register int r, k;
   int Se = cinfo->lim_Se;
-  int max_coef_bits = cinfo->data_precision + 3;
   const int * natural_order = cinfo->natural_order;
 
   /* Encode the DC coefficient difference per section F.1.2.1 */
 
-  if ((temp = block[0] - last_dc_val) == 0) {
-    /* Count the Huffman symbol for the number of bits */
-    dc_counts[0]++;
-  } else {
-    if (temp < 0)
-      temp = -temp;		/* temp is abs value of input */
+  temp = block[0] - last_dc_val;
+  if (temp < 0)
+    temp = -temp;
 
-    /* Find the number of bits needed for the magnitude of the coefficient */
-    nbits = 0;
-    do nbits++;			/* there must be at least one 1 bit */
-    while ((temp >>= 1));
-    /* Check for out-of-range coefficient values.
-     * Since we're encoding a difference, the range limit is twice as much.
-     */
-    if (nbits > max_coef_bits)
-      ERREXIT(cinfo, JERR_BAD_DCT_COEF);
-
-    /* Count the Huffman symbol for the number of bits */
-    dc_counts[nbits]++;
+  /* Find the number of bits needed for the magnitude of the coefficient */
+  nbits = 0;
+  while (temp) {
+    nbits++;
+    temp >>= 1;
   }
+  /* Check for out-of-range coefficient values.
+   * Since we're encoding a difference, the range limit is twice as much.
+   */
+  if (nbits > MAX_COEF_BITS+1)
+    ERREXIT(cinfo, JERR_BAD_DCT_COEF);
+
+  /* Count the Huffman symbol for the number of bits */
+  dc_counts[nbits]++;
 
   /* Encode the AC coefficients per section F.1.2.2 */
 
@@ -1165,33 +1152,30 @@ htest_one_block (j_compress_ptr cinfo, JCOEFPTR block, int last_dc_val,
   for (k = 1; k <= Se; k++) {
     if ((temp = block[natural_order[k]]) == 0) {
       r++;
-      continue;
+    } else {
+      /* if run length > 15, must emit special run-length-16 codes (0xF0) */
+      while (r > 15) {
+	ac_counts[0xF0]++;
+	r -= 16;
+      }
+
+      /* Find the number of bits needed for the magnitude of the coefficient */
+      if (temp < 0)
+	temp = -temp;
+
+      /* Find the number of bits needed for the magnitude of the coefficient */
+      nbits = 1;		/* there must be at least one 1 bit */
+      while ((temp >>= 1))
+	nbits++;
+      /* Check for out-of-range coefficient values */
+      if (nbits > MAX_COEF_BITS)
+	ERREXIT(cinfo, JERR_BAD_DCT_COEF);
+
+      /* Count Huffman symbol for run length / number of bits */
+      ac_counts[(r << 4) + nbits]++;
+
+      r = 0;
     }
-
-    /* if run length > 15, must emit special run-length-16 codes (0xF0) */
-    while (r > 15) {
-      ac_counts[0xF0]++;
-      r -= 16;
-    }
-
-    if (temp < 0)
-      temp = -temp;		/* temp is abs value of input */
-
-    /* Find the number of bits needed for the magnitude of the coefficient */
-    nbits = 0;
-    do nbits++;			/* there must be at least one 1 bit */
-    while ((temp >>= 1));
-    /* Check for out-of-range coefficient values.
-     * Use ">=" instead of ">" so can use the
-     * same one larger limit from DC check here.
-     */
-    if (nbits >= max_coef_bits)
-      ERREXIT(cinfo, JERR_BAD_DCT_COEF);
-
-    /* Count Huffman symbol for run length / number of bits */
-    ac_counts[(r << 4) + nbits]++;
-
-    r = 0;			/* reset zero run length */
   }
 
   /* If the last coef(s) were zero, emit an end-of-block code */

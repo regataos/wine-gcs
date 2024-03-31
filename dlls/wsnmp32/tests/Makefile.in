@@ -1,5 +1,5 @@
 TESTDLL   = wsnmp32.dll
 IMPORTS   = wsnmp32
 
-SOURCES = \
+C_SRCS = \
 	wsnmp.c

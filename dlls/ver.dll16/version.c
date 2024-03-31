@@ -25,6 +25,8 @@
 #include <string.h>
 #include <sys/types.h>
 
+#define NONAMELESSUNION
+#define NONAMELESSSTRUCT
 #include "windef.h"
 #include "wine/winbase16.h"
 #include "winternl.h"
@@ -53,9 +55,9 @@ static const IMAGE_RESOURCE_DIRECTORY *find_entry_by_id( const IMAGE_RESOURCE_DI
     while (min <= max)
     {
         pos = (min + max) / 2;
-        if (entry[pos].Id == id)
-            return (const IMAGE_RESOURCE_DIRECTORY *)((const char *)root + entry[pos].OffsetToDirectory);
-        if (entry[pos].Id > id) max = pos - 1;
+        if (entry[pos].u.Id == id)
+            return (const IMAGE_RESOURCE_DIRECTORY *)((const char *)root + entry[pos].u2.s2.OffsetToDirectory);
+        if (entry[pos].u.Id > id) max = pos - 1;
         else min = pos + 1;
     }
     return NULL;
@@ -74,7 +76,7 @@ static const IMAGE_RESOURCE_DIRECTORY *find_entry_default( const IMAGE_RESOURCE_
     const IMAGE_RESOURCE_DIRECTORY_ENTRY *entry;
 
     entry = (const IMAGE_RESOURCE_DIRECTORY_ENTRY *)(dir + 1);
-    return (const IMAGE_RESOURCE_DIRECTORY *)((const char *)root + entry->OffsetToDirectory);
+    return (const IMAGE_RESOURCE_DIRECTORY *)((const char *)root + entry->u2.s2.OffsetToDirectory);
 }
 
 
@@ -112,11 +114,11 @@ static const IMAGE_RESOURCE_DIRECTORY *find_entry_by_name( const IMAGE_RESOURCE_
         while (min <= max)
         {
             pos = (min + max) / 2;
-            str = (const IMAGE_RESOURCE_DIR_STRING_U *)((const char *)root + entry[pos].NameOffset);
+            str = (const IMAGE_RESOURCE_DIR_STRING_U *)((const char *)root + entry[pos].u.s.NameOffset);
             res = wcsnicmp( nameW, str->NameString, str->Length );
             if (!res && namelen == str->Length)
             {
-                ret = (const IMAGE_RESOURCE_DIRECTORY *)((const char *)root + entry[pos].OffsetToDirectory);
+                ret = (const IMAGE_RESOURCE_DIRECTORY *)((const char *)root + entry[pos].u2.s2.OffsetToDirectory);
                 break;
             }
             if (res < 0) max = pos - 1;

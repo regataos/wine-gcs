@@ -47,7 +47,7 @@ BOOL is_virtual_desktop(void)
     DWORD len;
 
     if (!NtUserGetObjectInformation( desktop, UOI_FLAGS, &flags, sizeof(flags), &len )) return FALSE;
-    return !!(flags.dwFlags & DF_WINE_VIRTUAL_DESKTOP);
+    return !!(flags.dwFlags & DF_WINE_CREATE_DESKTOP);
 }
 
 /***********************************************************************
@@ -154,7 +154,7 @@ HDESK WINAPI NtUserCreateDesktopEx( OBJECT_ATTRIBUTES *attr, UNICODE_STRING *dev
     WCHAR buffer[MAX_PATH];
     HANDLE ret;
 
-    if ((device && device->Length) || (devmode && !(flags & DF_WINE_VIRTUAL_DESKTOP)))
+    if ((device && device->Length) || (devmode && !(flags & DF_WINE_CREATE_DESKTOP)))
     {
         RtlSetLastWin32Error( ERROR_INVALID_PARAMETER );
         return 0;
@@ -183,8 +183,6 @@ HDESK WINAPI NtUserCreateDesktopEx( OBJECT_ATTRIBUTES *attr, UNICODE_STRING *dev
         return 0;
     }
 
-    /* force update display cache to use virtual desktop display settings */
-    if (flags & DF_WINE_VIRTUAL_DESKTOP) update_display_cache( TRUE );
     return ret;
 }
 
@@ -248,7 +246,7 @@ HDESK WINAPI NtUserGetThreadDesktop( DWORD thread )
  */
 BOOL WINAPI NtUserSetThreadDesktop( HDESK handle )
 {
-    BOOL ret, was_virtual_desktop = is_virtual_desktop();
+    BOOL ret;
 
     SERVER_START_REQ( set_thread_desktop )
     {
@@ -260,11 +258,13 @@ BOOL WINAPI NtUserSetThreadDesktop( HDESK handle )
     if (ret)  /* reset the desktop windows */
     {
         struct user_thread_info *thread_info = get_user_thread_info();
-        struct user_key_state_info *key_state_info = thread_info->key_state;
         thread_info->client_info.top_window = 0;
         thread_info->client_info.msg_window = 0;
-        if (key_state_info) key_state_info->time = 0;
-        if (was_virtual_desktop != is_virtual_desktop()) update_display_cache( TRUE );
+        if (thread_info->desktop_shared_memory)
+        {
+            NtUnmapViewOfSection( GetCurrentProcess(), thread_info->desktop_shared_memory );
+            thread_info->desktop_shared_memory = NULL;
+        }
     }
     return ret;
 }
@@ -291,20 +291,6 @@ HDESK WINAPI NtUserOpenInputDesktop( DWORD flags, BOOL inherit, ACCESS_MASK acce
     SERVER_END_REQ;
 
     return ret;
-}
-
-BOOL WINAPI NtUserSwitchDesktop( HDESK desktop )
-{
-    TRACE( "desktop %p\n", desktop );
-
-    SERVER_START_REQ( set_input_desktop )
-    {
-        req->handle = wine_server_obj_handle( desktop );
-        if (wine_server_call_err( req )) return FALSE;
-    }
-    SERVER_END_REQ;
-
-    return TRUE;
 }
 
 /***********************************************************************
@@ -401,6 +387,8 @@ BOOL WINAPI NtUserGetObjectInformation( HANDLE handle, INT index, void *info,
     }
 }
 
+#define TICKSPERSEC  10000000
+
 /***********************************************************************
  *           NtUserSetObjectInformation   (win32u.@)
  */
@@ -408,8 +396,19 @@ BOOL WINAPI NtUserSetObjectInformation( HANDLE handle, INT index, void *info, DW
 {
     BOOL ret;
     const USEROBJECTFLAGS *obj_flags = info;
+    LONG64 close_timeout = 0;
 
-    if (index != UOI_FLAGS || !info || len < sizeof(*obj_flags))
+    if (index == 1000)
+    {
+        /* Wine specific: set desktop close timeout. */
+        if (!info || len < sizeof(DWORD))
+        {
+            RtlSetLastWin32Error( ERROR_INVALID_PARAMETER );
+            return FALSE;
+        }
+        close_timeout = -(*(DWORD *)info * (ULONG64)TICKSPERSEC / 1000);
+    }
+    else if (index != UOI_FLAGS || !info || len < sizeof(*obj_flags))
     {
         RtlSetLastWin32Error( ERROR_INVALID_PARAMETER );
         return FALSE;
@@ -418,8 +417,16 @@ BOOL WINAPI NtUserSetObjectInformation( HANDLE handle, INT index, void *info, DW
     SERVER_START_REQ( set_user_object_info )
     {
         req->handle    = wine_server_obj_handle( handle );
-        req->flags     = SET_USER_OBJECT_SET_FLAGS;
-        req->obj_flags = obj_flags->dwFlags;
+        if (index == 1000)
+        {
+            req->flags = SET_USER_OBJECT_SET_CLOSE_TIMEOUT;
+            req->close_timeout = close_timeout;
+        }
+        else
+        {
+            req->flags     = SET_USER_OBJECT_SET_FLAGS;
+            req->obj_flags = obj_flags->dwFlags;
+        }
         ret = !wine_server_call_err( req );
     }
     SERVER_END_REQ;
@@ -434,24 +441,14 @@ static inline TEB64 *NtCurrentTeb64(void) { return (TEB64 *)NtCurrentTeb()->GdiB
 
 HWND get_desktop_window(void)
 {
-    static const WCHAR wine_service_station_name[] =
-        {'_','_','w','i','n','e','s','e','r','v','i','c','e','_','w','i','n','s','t','a','t','i','o','n',0};
     struct ntuser_thread_info *thread_info = NtUserGetThreadInfo();
-    WCHAR name[MAX_PATH];
-    BOOL is_service;
 
     if (thread_info->top_window) return UlongToHandle( thread_info->top_window );
 
-    /* don't create an actual explorer desktop window for services */
-    if (NtUserGetObjectInformation( NtUserGetProcessWindowStation(), UOI_NAME, name, sizeof(name), NULL )
-        && !wcscmp( name, wine_service_station_name ))
-        is_service = TRUE;
-    else
-        is_service = FALSE;
 
     SERVER_START_REQ( get_desktop_window )
     {
-        req->force = is_service;
+        req->force = 0;
         if (!wine_server_call( req ))
         {
             thread_info->top_window = reply->top_window;
@@ -470,8 +467,7 @@ HWND get_desktop_window(void)
         static const WCHAR system_dir[] = {'C',':','\\','w','i','n','d','o','w','s','\\',
             's','y','s','t','e','m','3','2','\\',0};
         RTL_USER_PROCESS_PARAMETERS params = { sizeof(params), sizeof(params) };
-        ULONG_PTR buffer[offsetof( PS_ATTRIBUTE_LIST, Attributes[2] ) / sizeof(ULONG_PTR)];
-        PS_ATTRIBUTE_LIST *ps_attr = (PS_ATTRIBUTE_LIST *)buffer;
+        PS_ATTRIBUTE_LIST ps_attr;
         PS_CREATE_INFO create_info;
         WCHAR desktop[MAX_PATH];
         PEB *peb = NtCurrentTeb()->Peb;
@@ -504,30 +500,24 @@ HWND get_desktop_window(void)
         RtlInitUnicodeString( &params.WindowTitle, appnameW + 4 );
         RtlInitUnicodeString( &params.Desktop, desktop );
 
-        ps_attr->Attributes[0].Attribute    = PS_ATTRIBUTE_IMAGE_NAME;
-        ps_attr->Attributes[0].Size         = sizeof(appnameW) - sizeof(WCHAR);
-        ps_attr->Attributes[0].ValuePtr     = (WCHAR *)appnameW;
-        ps_attr->Attributes[0].ReturnLength = NULL;
-
-        ps_attr->Attributes[1].Attribute    = PS_ATTRIBUTE_TOKEN;
-        ps_attr->Attributes[1].Size         = sizeof(HANDLE);
-        ps_attr->Attributes[1].ValuePtr     = GetCurrentThreadEffectiveToken();
-        ps_attr->Attributes[1].ReturnLength = NULL;
-
-        ps_attr->TotalLength = offsetof( PS_ATTRIBUTE_LIST, Attributes[2] );
+        ps_attr.TotalLength = sizeof(ps_attr);
+        ps_attr.Attributes[0].Attribute    = PS_ATTRIBUTE_IMAGE_NAME;
+        ps_attr.Attributes[0].Size         = sizeof(appnameW) - sizeof(WCHAR);
+        ps_attr.Attributes[0].ValuePtr     = (WCHAR *)appnameW;
+        ps_attr.Attributes[0].ReturnLength = NULL;
 
         if (NtCurrentTeb64() && !NtCurrentTeb64()->TlsSlots[WOW64_TLS_FILESYSREDIR])
         {
             NtCurrentTeb64()->TlsSlots[WOW64_TLS_FILESYSREDIR] = TRUE;
             status = NtCreateUserProcess( &process, &thread, PROCESS_ALL_ACCESS, THREAD_ALL_ACCESS,
                                           NULL, NULL, 0, THREAD_CREATE_FLAGS_CREATE_SUSPENDED, &params,
-                                          &create_info, ps_attr );
+                                          &create_info, &ps_attr );
             NtCurrentTeb64()->TlsSlots[WOW64_TLS_FILESYSREDIR] = FALSE;
         }
         else
             status = NtCreateUserProcess( &process, &thread, PROCESS_ALL_ACCESS, THREAD_ALL_ACCESS,
                                           NULL, NULL, 0, THREAD_CREATE_FLAGS_CREATE_SUSPENDED, &params,
-                                          &create_info, ps_attr );
+                                          &create_info, &ps_attr );
         if (!status)
         {
             NtResumeThread( thread, NULL );
@@ -568,8 +558,7 @@ static HANDLE get_winstations_dir_handle(void)
 
     sprintf( bufferA, "\\Sessions\\%u\\Windows\\WindowStations", (int)NtCurrentTeb()->Peb->SessionId );
     str.Buffer = buffer;
-    str.MaximumLength = asciiz_to_unicode( buffer, bufferA );
-    str.Length = str.MaximumLength - sizeof(WCHAR);
+    str.Length = str.MaximumLength = asciiz_to_unicode( buffer, bufferA ) - sizeof(WCHAR);
     InitializeObjectAttributes( &attr, &str, 0, 0, NULL );
     status = NtOpenDirectoryObject( &dir, DIRECTORY_CREATE_OBJECT | DIRECTORY_TRAVERSE, &attr );
     return status ? 0 : dir;
@@ -619,6 +608,179 @@ static const WCHAR *get_default_desktop( void *buf, size_t buf_size )
     }
 
     return defaultW;
+}
+
+static void map_shared_memory_section( const WCHAR *name, SIZE_T size, HANDLE root, void **ptr )
+{
+    OBJECT_ATTRIBUTES attr;
+    UNICODE_STRING section_str;
+    unsigned int status;
+    HANDLE handle;
+
+    RtlInitUnicodeString( &section_str, name );
+    InitializeObjectAttributes( &attr, &section_str, 0, root, NULL );
+    status = NtOpenSection( &handle, SECTION_ALL_ACCESS, &attr );
+    if (status)
+    {
+        ERR( "failed to open section %s: %08x\n", debugstr_w(name), status );
+        *ptr = NULL;
+        return;
+    }
+
+    *ptr = NULL;
+    status = NtMapViewOfSection( handle, GetCurrentProcess(), ptr, 0, 0, NULL,
+                                 &size, ViewUnmap, 0, PAGE_READONLY );
+    NtClose( handle );
+    if (status)
+    {
+        ERR( "failed to map view of section %s: %08x\n", debugstr_w(name), status );
+        *ptr = NULL;
+    }
+}
+
+volatile struct global_shared_memory *get_global_shared_memory( void )
+{
+    static const WCHAR global_mappingW[] =
+    {
+        '\\','?','?','\\','_','_','w','i','n','e','_','w','i','n','3','2','u','_','m','a','p','p','i','n','g',0
+    };
+    static struct global_shared_memory *global_shared;
+    struct global_shared_memory *ret;
+    UNICODE_STRING section_str;
+    OBJECT_ATTRIBUTES attr;
+    LARGE_INTEGER size_l;
+    unsigned int status;
+    HANDLE handle;
+    SIZE_T size;
+
+    __WINE_ATOMIC_LOAD_RELAXED( &global_shared, &ret );
+    if (ret) return ret;
+
+    RtlInitUnicodeString( &section_str, global_mappingW );
+    InitializeObjectAttributes( &attr, &section_str, OBJ_CASE_INSENSITIVE | OBJ_OPENIF | OBJ_PERMANENT, NULL, NULL );
+    size_l.QuadPart = sizeof(struct global_shared_memory);
+    status = NtCreateSection( &handle, SECTION_ALL_ACCESS, &attr, &size_l, PAGE_READWRITE, SEC_COMMIT, NULL );
+    if (status && status != STATUS_OBJECT_NAME_EXISTS)
+    {
+        static int once;
+        if (!once++)
+            ERR( "Failed to get global shared memory, status %#x.\n", status );
+    }
+    size = sizeof(struct global_shared_memory);
+    status = NtMapViewOfSection( handle, GetCurrentProcess(), (void **)&ret, 0, 0, NULL,
+                                 &size, ViewUnmap, 0, PAGE_READWRITE );
+    NtClose( handle );
+    if (status)
+    {
+        ERR( "failed to map view of section, status %#x\n", status );
+        return NULL;
+    }
+    if (InterlockedCompareExchangePointer( (void **)&global_shared, ret, NULL ))
+    {
+        if (NtUnmapViewOfSection( GetCurrentProcess(), ret ))
+            ERR( "NtUnmapViewOfSection failed.\n" );
+        ret = global_shared;
+    }
+
+    return ret;
+}
+
+volatile struct desktop_shared_memory *get_desktop_shared_memory( void )
+{
+    static const WCHAR dir_desktop_maps[] =
+    {
+        '_','_','w','i','n','e','_','d','e','s','k','t','o','p','_','m','a','p','p','i','n','g','s','\\',0
+    };
+    struct user_thread_info *thread_info = get_user_thread_info();
+    HANDLE root, handles[2];
+    WCHAR buf[MAX_PATH], *ptr;
+    DWORD i, needed;
+
+    if (thread_info->desktop_shared_memory) return thread_info->desktop_shared_memory;
+
+    handles[0] = NtUserGetProcessWindowStation();
+    handles[1] = NtUserGetThreadDesktop( GetCurrentThreadId() );
+
+    memcpy( buf, dir_desktop_maps, wcslen(dir_desktop_maps) * sizeof(WCHAR) );
+    ptr = buf + wcslen(dir_desktop_maps);
+
+    for (i = 0; i < 2; i++)
+    {
+        NtUserGetObjectInformation( handles[i], UOI_NAME, (void *)ptr, sizeof(buf) - (ptr - buf) * sizeof(WCHAR), &needed );
+        ptr += needed / sizeof(WCHAR);
+        if (i == 0) *(ptr - 1) = '\\';
+    }
+
+    root = get_winstations_dir_handle();
+    map_shared_memory_section( buf, sizeof(struct desktop_shared_memory), root,
+                               (void **)&thread_info->desktop_shared_memory );
+    NtClose( root );
+
+    return thread_info->desktop_shared_memory;
+}
+
+volatile struct queue_shared_memory *get_queue_shared_memory( void )
+{
+    struct user_thread_info *thread_info = get_user_thread_info();
+    UINT tid = GetCurrentThreadId();
+    WCHAR bufferW[MAX_PATH];
+    char buffer[MAX_PATH];
+
+    if (thread_info->queue_shared_memory) return thread_info->queue_shared_memory;
+
+    snprintf( buffer, ARRAY_SIZE(buffer), "\\KernelObjects\\__wine_thread_mappings\\%08x-queue", tid );
+    asciiz_to_unicode( bufferW, buffer );
+    map_shared_memory_section( bufferW, sizeof(struct queue_shared_memory), NULL,
+                               (void **)&thread_info->queue_shared_memory );
+    return thread_info->queue_shared_memory;
+}
+
+static volatile struct input_shared_memory *get_thread_input_shared_memory( UINT tid, struct input_shared_memory **ptr )
+{
+    WCHAR bufferW[MAX_PATH];
+    char buffer[MAX_PATH];
+
+    if (*ptr && (*ptr)->tid == tid) return *ptr;
+    if (*ptr) NtUnmapViewOfSection( GetCurrentProcess(), *ptr );
+
+    snprintf( buffer, ARRAY_SIZE(buffer), "\\KernelObjects\\__wine_thread_mappings\\%08x-input", tid );
+    asciiz_to_unicode( bufferW, buffer );
+    map_shared_memory_section( bufferW, sizeof(struct input_shared_memory), NULL,
+                               (void **)ptr );
+    return *ptr;
+}
+
+volatile struct input_shared_memory *get_input_shared_memory( void )
+{
+    volatile struct queue_shared_memory *queue = get_queue_shared_memory();
+    struct user_thread_info *thread_info = get_user_thread_info();
+    UINT tid;
+
+    if (!queue) return NULL;
+    SHARED_READ_BEGIN( &queue->seq )
+    {
+        tid = queue->input_tid;
+    }
+    SHARED_READ_END( &queue->seq );
+
+    return get_thread_input_shared_memory( tid, &thread_info->input_shared_memory );
+}
+
+volatile struct input_shared_memory *get_foreground_shared_memory( void )
+{
+    volatile struct desktop_shared_memory *desktop = get_desktop_shared_memory();
+    struct user_thread_info *thread_info = get_user_thread_info();
+    UINT tid;
+
+    if (!desktop) return NULL;
+    SHARED_READ_BEGIN( &desktop->seq )
+    {
+        tid = desktop->foreground_tid;
+    }
+    SHARED_READ_END( &desktop->seq );
+
+    if (!tid) return NULL;
+    return get_thread_input_shared_memory( tid, &thread_info->foreground_shared_memory );
 }
 
 /***********************************************************************

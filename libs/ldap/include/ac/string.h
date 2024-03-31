@@ -58,7 +58,7 @@ LDAP_F(char *) ldap_pvt_strtok LDAP_P(( char *str,
 #elif !defined(_WIN32)
 	/* some systems fail to declare strdup */
 	/* Windows does not require this declaration */
-	LDAP_LIBC_F(char *) (strdup) LDAP_P((const char *s));
+	LDAP_LIBC_F(char *) (strdup)();
 #endif
 
 /*
@@ -68,8 +68,8 @@ LDAP_F(char *) ldap_pvt_strtok LDAP_P(( char *str,
 
 /* we don't want these declared for Windows or Mingw */
 #ifndef _WIN32
-LDAP_LIBC_F(int) (strcasecmp) LDAP_P((const char *s1, const char *s2));
-LDAP_LIBC_F(int) (strncasecmp) LDAP_P((const char *s1, const char *s2, size_t n));
+int (strcasecmp)();
+int (strncasecmp)();
 #endif
 
 #ifndef SAFEMEMCPY

@@ -342,9 +342,10 @@ static const tid_t HTMLSelectionObject_iface_tids[] = {
     IHTMLSelectionObject2_tid,
     0
 };
-static dispex_static_data_t HTMLSelectionObject_dispex = {
+dispex_static_data_t HTMLSelectionObject_dispex = {
     "MSSelection",
     &HTMLSelectionObject_dispex_vtbl,
+    PROTO_ID_HTMLSelectionObject,
     IHTMLSelectionObject_tid, /* FIXME: We have a test for that, but it doesn't expose IHTMLSelectionObject2 iface. */
     HTMLSelectionObject_iface_tids
 };
@@ -357,14 +358,14 @@ HRESULT HTMLSelectionObject_Create(HTMLDocumentNode *doc, nsISelection *nsselect
     if(!selection)
         return E_OUTOFMEMORY;
 
-    init_dispatch(&selection->dispex, &HTMLSelectionObject_dispex, dispex_compat_mode(&doc->node.event_target.dispex));
-
     selection->IHTMLSelectionObject_iface.lpVtbl = &HTMLSelectionObjectVtbl;
     selection->IHTMLSelectionObject2_iface.lpVtbl = &HTMLSelectionObject2Vtbl;
     selection->nsselection = nsselection; /* We shouldn't call AddRef here */
 
     selection->doc = doc;
     list_add_head(&doc->selection_list, &selection->entry);
+
+    init_dispatch(&selection->dispex, &HTMLSelectionObject_dispex, get_inner_window(doc), dispex_compat_mode(&doc->node.event_target.dispex));
 
     *ret = &selection->IHTMLSelectionObject_iface;
     return S_OK;

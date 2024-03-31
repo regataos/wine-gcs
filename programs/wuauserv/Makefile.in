@@ -3,5 +3,5 @@ IMPORTS   = advapi32
 
 EXTRADLLFLAGS = -mconsole
 
-SOURCES = \
+C_SRCS = \
 	main.c

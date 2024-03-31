@@ -74,16 +74,11 @@ _ACRTIMP void        __cdecl _tzset(void);
 _ACRTIMP char*       __cdecl asctime(const struct tm*);
 _ACRTIMP clock_t     __cdecl clock(void);
 _ACRTIMP char*       __cdecl _ctime32(const __time32_t*);
-_ACRTIMP errno_t     __cdecl _ctime32_s(char*,size_t,const __time32_t*);
 _ACRTIMP char*       __cdecl _ctime64(const __time64_t*);
-_ACRTIMP errno_t     __cdecl _ctime64_s(char*,size_t,const __time64_t*);
 _ACRTIMP double      __cdecl _difftime32(__time32_t,__time32_t);
 _ACRTIMP double      __cdecl _difftime64(__time64_t,__time64_t);
 _ACRTIMP struct tm*  __cdecl _gmtime32(const __time32_t*);
-_ACRTIMP int         __cdecl _gmtime32_s(struct tm *res, const __time32_t *secs);
 _ACRTIMP struct tm*  __cdecl _gmtime64(const __time64_t*);
-_ACRTIMP int         __cdecl _gmtime64_s(struct tm *res, const __time64_t *secs);
-
 _ACRTIMP struct tm*  __cdecl _localtime32(const __time32_t*);
 _ACRTIMP errno_t     __cdecl _localtime32_s(struct tm*, const __time32_t*);
 _ACRTIMP struct tm*  __cdecl _localtime64(const __time64_t*);
@@ -91,26 +86,21 @@ _ACRTIMP errno_t     __cdecl _localtime64_s(struct tm*, const __time64_t*);
 _ACRTIMP __time32_t  __cdecl _mktime32(struct tm*);
 _ACRTIMP __time64_t  __cdecl _mktime64(struct tm*);
 _ACRTIMP size_t      __cdecl strftime(char*,size_t,const char*,const struct tm*);
-_ACRTIMP size_t      __cdecl _strftime_l(char*,size_t,const char*,const struct tm*,_locale_t);
 _ACRTIMP __time32_t  __cdecl _time32(__time32_t*);
 _ACRTIMP __time64_t  __cdecl _time64(__time64_t*);
 
 #ifndef _USE_32BIT_TIME_T
 static inline char* ctime(const time_t *t) { return _ctime64(t); }
-static inline errno_t ctime_s(char *res, size_t len, const __time64_t *t) { return _ctime64_s(res, len, t); }
 static inline double difftime(time_t t1, time_t t2) { return _difftime64(t1, t2); }
 static inline struct tm* gmtime(const time_t *t) { return _gmtime64(t); }
 static inline struct tm* localtime(const time_t *t) { return _localtime64(t); }
-static inline errno_t localtime_s(struct tm *res, const time_t *t) { return _localtime64_s(res, t); }
 static inline time_t mktime(struct tm *tm) { return _mktime64(tm); }
 static inline time_t time(time_t *t) { return _time64(t); }
 #elif defined(_UCRT)
 static inline char* ctime(const time_t *t) { return _ctime32(t); }
-static inline errno_t ctime_s(char *res, size_t len, const __time32_t *t) { return _ctime32_s(res, len, t); }
 static inline double difftime(time_t t1, time_t t2) { return _difftime32(t1, t2); }
 static inline struct tm* gmtime(const time_t *t) { return _gmtime32(t); }
 static inline struct tm* localtime(const time_t *t) { return _localtime32(t); }
-static inline errno_t localtime_s(struct tm *res, const time_t *t) { return _localtime32_s(res, t); }
 static inline time_t mktime(struct tm *tm) { return _mktime32(tm); }
 static inline time_t time(time_t *t) { return _time32(t); }
 #endif

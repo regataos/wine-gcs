@@ -20,6 +20,7 @@
  */
 
 #define COBJMACROS
+#define NONAMELESSUNION
 
 #include <stdarg.h>
 
@@ -181,7 +182,7 @@ static void free_response_headers(httprequest *This)
         list_remove(&header->entry);
         SysFreeString(header->header);
         SysFreeString(header->value);
-        free(header);
+        heap_free(header);
     }
 
     SysFreeString(This->raw_respheaders);
@@ -197,7 +198,7 @@ static void free_request_headers(httprequest *This)
         list_remove(&header->entry);
         SysFreeString(header->header);
         SysFreeString(header->value);
-        free(header);
+        heap_free(header);
     }
 }
 
@@ -307,7 +308,7 @@ static ULONG WINAPI BindStatusCallback_Release(IBindStatusCallback *iface)
         if (This->binding) IBinding_Release(This->binding);
         if (This->stream) IStream_Release(This->stream);
         if (This->body) GlobalFree(This->body);
-        free(This);
+        heap_free(This);
     }
 
     return ref;
@@ -391,7 +392,7 @@ static HRESULT WINAPI BindStatusCallback_GetBindInfo(IBindStatusCallback *iface,
     if (This->request->verb != BINDVERB_GET && This->body)
     {
         pbindinfo->stgmedData.tymed = TYMED_HGLOBAL;
-        pbindinfo->stgmedData.hGlobal = This->body;
+        pbindinfo->stgmedData.u.hGlobal = This->body;
         pbindinfo->cbstgmedData = GlobalSize(This->body);
         /* callback owns passed body pointer */
         IBindStatusCallback_QueryInterface(iface, &IID_IUnknown, (void**)&pbindinfo->stgmedData.pUnkForRelease);
@@ -419,7 +420,7 @@ static HRESULT WINAPI BindStatusCallback_OnDataAvailable(IBindStatusCallback *if
 
     do
     {
-        hr = IStream_Read(stgmed->pstm, buf, sizeof(buf), &read);
+        hr = IStream_Read(stgmed->u.pstm, buf, sizeof(buf), &read);
         if (hr != S_OK) break;
 
         hr = IStream_Write(This->stream, buf, read, &written);
@@ -577,7 +578,7 @@ static void add_response_header(httprequest *This, const WCHAR *data, int len)
     /* new header */
     TRACE("got header %s:%s\n", debugstr_w(header), debugstr_w(value));
 
-    entry = malloc(sizeof(*entry));
+    entry = heap_alloc(sizeof(*entry));
     entry->header = header;
     entry->value  = value;
     list_add_head(&This->respheaders, &entry->entry);
@@ -697,12 +698,19 @@ static const IAuthenticateVtbl AuthenticateVtbl = {
 static HRESULT BindStatusCallback_create(httprequest* This, BindStatusCallback **obj, const VARIANT *body)
 {
     BindStatusCallback *bsc;
-    IBindCtx *pbc = NULL;
+    IBindCtx *pbc;
     HRESULT hr;
     LONG size;
 
-    if (!(bsc = malloc(sizeof(*bsc))))
+    hr = CreateBindCtx(0, &pbc);
+    if (hr != S_OK) return hr;
+
+    bsc = heap_alloc(sizeof(*bsc));
+    if (!bsc)
+    {
+        IBindCtx_Release(pbc);
         return E_OUTOFMEMORY;
+    }
 
     bsc->IBindStatusCallback_iface.lpVtbl = &BindStatusCallbackVtbl;
     bsc->IHttpNegotiate_iface.lpVtbl = &BSCHttpNegotiateVtbl;
@@ -743,9 +751,9 @@ static HRESULT BindStatusCallback_create(httprequest* This, BindStatusCallback *
             }
 
             size = WideCharToMultiByte(cp, 0, str, len, NULL, 0, NULL, NULL);
-            if (!(ptr = malloc(size)))
+            if (!(ptr = heap_alloc(size)))
             {
-                free(bsc);
+                heap_free(bsc);
                 return E_OUTOFMEMORY;
             }
             WideCharToMultiByte(cp, 0, str, len, ptr, size, NULL, NULL);
@@ -757,13 +765,13 @@ static HRESULT BindStatusCallback_create(httprequest* This, BindStatusCallback *
             sa = V_ARRAY(body);
             if ((hr = SafeArrayAccessData(sa, &ptr)) != S_OK)
             {
-                free(bsc);
+                heap_free(bsc);
                 return hr;
             }
             if ((hr = SafeArrayGetUBound(sa, 1, &size)) != S_OK)
             {
                 SafeArrayUnaccessData(sa);
-                free(bsc);
+                heap_free(bsc);
                 return hr;
             }
             size++;
@@ -786,11 +794,11 @@ static HRESULT BindStatusCallback_create(httprequest* This, BindStatusCallback *
             if (!bsc->body)
             {
                 if (V_VT(body) == VT_BSTR)
-                    free(ptr);
+                    heap_free(ptr);
                 else if (V_VT(body) == (VT_ARRAY|VT_UI1))
                     SafeArrayUnaccessData(sa);
 
-                free(bsc);
+                heap_free(bsc);
                 return E_OUTOFMEMORY;
             }
 
@@ -800,14 +808,12 @@ static HRESULT BindStatusCallback_create(httprequest* This, BindStatusCallback *
         }
 
         if (V_VT(body) == VT_BSTR)
-            free(ptr);
+            heap_free(ptr);
         else if (V_VT(body) == (VT_ARRAY|VT_UI1))
             SafeArrayUnaccessData(sa);
     }
 
-    hr = CreateBindCtx(0, &pbc);
-    if (hr == S_OK)
-        hr = RegisterBindStatusCallback(pbc, &bsc->IBindStatusCallback_iface, NULL, 0);
+    hr = RegisterBindStatusCallback(pbc, &bsc->IBindStatusCallback_iface, NULL, 0);
     if (hr == S_OK)
     {
         IMoniker *moniker;
@@ -821,10 +827,8 @@ static HRESULT BindStatusCallback_create(httprequest* This, BindStatusCallback *
             IMoniker_Release(moniker);
             if (stream) IStream_Release(stream);
         }
-    }
-
-    if (pbc)
         IBindCtx_Release(pbc);
+    }
 
     if (FAILED(hr))
     {
@@ -1022,7 +1026,7 @@ static HRESULT httprequest_setRequestHeader(httprequest *This, BSTR header, BSTR
         }
     }
 
-    entry = malloc(sizeof(*entry));
+    entry = heap_alloc(sizeof(*entry));
     if (!entry) return E_OUTOFMEMORY;
 
     /* new header */
@@ -1421,7 +1425,7 @@ static ULONG WINAPI XMLHTTPRequest_Release(IXMLHTTPRequest *iface)
     if (!ref)
     {
         httprequest_release(request);
-        free(request);
+        heap_free(request);
     }
 
     return ref;
@@ -1848,7 +1852,7 @@ static ULONG WINAPI ServerXMLHTTPRequest_Release(IServerXMLHTTPRequest *iface)
     if (!ref)
     {
         httprequest_release(&request->req);
-        free(request);
+        heap_free(request);
     }
 
     return ref;
@@ -2144,7 +2148,7 @@ static ULONG WINAPI xml_http_request_2_Release(IXMLHTTPRequest3 *iface)
         if (This->request_body) ISequentialStream_Release(This->request_body);
         if (This->callback3) IXMLHTTPRequest3Callback_Release(This->callback3);
         if (This->callback) IXMLHTTPRequest2Callback_Release(This->callback);
-        free(This);
+        heap_free(This);
         RtwqShutdown();
     }
 
@@ -2669,7 +2673,7 @@ HRESULT XMLHTTPRequest_create(void **obj)
 
     TRACE("(%p)\n", obj);
 
-    req = malloc(sizeof(*req));
+    req = heap_alloc( sizeof (*req) );
     if( !req )
         return E_OUTOFMEMORY;
 
@@ -2686,7 +2690,7 @@ HRESULT XMLHTTPRequest2_create(void **obj)
     struct xml_http_request_2 *xhr2;
     TRACE("(%p)\n", obj);
 
-    if (!(xhr2 = malloc(sizeof(*xhr2)))) return E_OUTOFMEMORY;
+    if (!(xhr2 = heap_alloc(sizeof(*xhr2)))) return E_OUTOFMEMORY;
 
     init_httprequest(&xhr2->req);
     xhr2->IXMLHTTPRequest3_iface.lpVtbl = &XMLHTTPRequest3Vtbl;
@@ -2716,7 +2720,7 @@ HRESULT ServerXMLHTTP_create(void **obj)
 
     TRACE("(%p)\n", obj);
 
-    req = malloc(sizeof(*req));
+    req = heap_alloc( sizeof (*req) );
     if( !req )
         return E_OUTOFMEMORY;
 

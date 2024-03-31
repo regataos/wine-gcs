@@ -53,7 +53,6 @@ static struct menu_item public_startmenu;
 static struct menu_item user_startmenu;
 
 #define MENU_ID_RUN 1
-#define MENU_ID_EXIT 2
 
 static ULONG copy_pidls(struct menu_item* item, LPITEMIDLIST dest)
 {
@@ -186,7 +185,7 @@ static struct menu_item* add_shell_item(struct menu_item* parent, LPITEMIDLIST p
     BOOL match = FALSE;
     SFGAOF flags;
 
-    item = calloc( 1, sizeof(struct menu_item) );
+    item = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(struct menu_item));
 
     if (parent->pidl == NULL)
     {
@@ -209,8 +208,8 @@ static struct menu_item* add_shell_item(struct menu_item* parent, LPITEMIDLIST p
     if (item->folder && shell_folder_is_empty(item->folder))
     {
         IShellFolder_Release(item->folder);
-        free( item->displayname );
-        free( item );
+        HeapFree(GetProcessHeap(), 0, item->displayname);
+        HeapFree(GetProcessHeap(), 0, item);
         CoTaskMemFree(pidl);
         return NULL;
     }
@@ -304,8 +303,8 @@ static struct menu_item* add_shell_item(struct menu_item* parent, LPITEMIDLIST p
     }
     else {
         /* duplicate shortcut, do nothing */
-        free( item->displayname );
-        free( item );
+        HeapFree(GetProcessHeap(), 0, item->displayname);
+        HeapFree(GetProcessHeap(), 0, item);
         CoTaskMemFree(pidl);
         item = NULL;
     }
@@ -351,7 +350,7 @@ static void destroy_menus(void)
         CoTaskMemFree(item->displayname);
 
         list_remove(&item->entry);
-        free( item );
+        HeapFree(GetProcessHeap(), 0, item);
     }
 }
 
@@ -382,17 +381,6 @@ static void run_dialog(void)
     pRunFileDlg(NULL, NULL, NULL, NULL, NULL, 0);
 
     FreeLibrary(hShell32);
-}
-
-static void shut_down(HWND hwnd)
-{
-    WCHAR prompt[256];
-    int ret;
-
-    LoadStringW(NULL, IDS_EXIT_PROMPT, prompt, ARRAY_SIZE(prompt));
-    ret = MessageBoxW(hwnd, prompt, L"Wine", MB_YESNO|MB_ICONQUESTION|MB_SYSTEMMODAL);
-    if (ret == IDYES)
-        ExitWindows(0, 0);
 }
 
 LRESULT menu_wndproc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
@@ -431,8 +419,6 @@ LRESULT menu_wndproc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
                 exec_item(item);
             else if (mii.wID == MENU_ID_RUN)
                 run_dialog();
-            else if (mii.wID == MENU_ID_EXIT)
-                shut_down(hwnd);
 
             destroy_menus();
 
@@ -450,11 +436,11 @@ void do_startmenu(HWND hwnd)
     MENUITEMINFOW mii;
     RECT rc={0,0,0,0};
     TPMPARAMS tpm;
-    WCHAR label[64];
+    WCHAR run_label[50];
 
     destroy_menus();
 
-    TRACE( "creating start menu\n" );
+    WINE_TRACE("creating start menu\n");
 
     root_menu.menuhandle = public_startmenu.menuhandle = user_startmenu.menuhandle = CreatePopupMenu();
     if (!root_menu.menuhandle)
@@ -489,21 +475,13 @@ void do_startmenu(HWND hwnd)
     if (SUCCEEDED(SHGetSpecialFolderLocation(NULL, CSIDL_CONTROLS, &pidl)))
         add_shell_item(&root_menu, pidl);
 
-    LoadStringW(NULL, IDS_RUN, label, ARRAY_SIZE(label));
+    LoadStringW(NULL, IDS_RUN, run_label, ARRAY_SIZE(run_label));
+
     mii.cbSize = sizeof(mii);
     mii.fMask = MIIM_STRING|MIIM_ID;
-    mii.dwTypeData = label;
+    mii.dwTypeData = run_label;
     mii.wID = MENU_ID_RUN;
-    InsertMenuItemW(root_menu.menuhandle, -1, TRUE, &mii);
 
-    mii.fMask = MIIM_FTYPE;
-    mii.fType = MFT_SEPARATOR;
-    InsertMenuItemW(root_menu.menuhandle, -1, TRUE, &mii);
-
-    LoadStringW(NULL, IDS_EXIT_LABEL, label, ARRAY_SIZE(label));
-    mii.fMask = MIIM_STRING|MIIM_ID;
-    mii.dwTypeData = label;
-    mii.wID = MENU_ID_EXIT;
     InsertMenuItemW(root_menu.menuhandle, -1, TRUE, &mii);
 
     mi.cbSize = sizeof(mi);
@@ -520,6 +498,6 @@ void do_startmenu(HWND hwnd)
         TPM_LEFTALIGN|TPM_BOTTOMALIGN|TPM_VERTICAL,
         rc.left, rc.top, hwnd, &tpm))
     {
-        ERR( "couldn't display menu\n" );
+        WINE_ERR("couldn't display menu\n");
     }
 }

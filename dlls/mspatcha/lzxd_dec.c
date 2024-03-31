@@ -25,6 +25,7 @@
 #include <assert.h>
 
 #include "windef.h"
+#include "wine/heap.h"
 #include "wine/debug.h"
 
 #include "patchapi.h"
@@ -682,7 +683,7 @@ DWORD decode_lzxd_stream(const BYTE *src, const size_t input_size,
     if (progress_fn != NULL && !progress_fn(progress_ctx, 0, (ULONG)output_size))
         return ERROR_CANCELLED;
 
-    dec = malloc(sizeof(*dec));
+    dec = heap_alloc(sizeof(*dec));
     if (dec == NULL)
         return ERROR_OUTOFMEMORY;
 
@@ -764,7 +765,7 @@ DWORD decode_lzxd_stream(const BYTE *src, const size_t input_size,
         reverse_e8_transform(dst + predef_size, output_size, e8_file_size);
 
 free_dec:
-    free(dec);
+    heap_free(dec);
 
     return err;
 }

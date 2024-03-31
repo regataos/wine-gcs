@@ -1,4 +1,4 @@
 MODULE = difxapi.dll
 
-SOURCES = \
+C_SRCS = \
 	main.c

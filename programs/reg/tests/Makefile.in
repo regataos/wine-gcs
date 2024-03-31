@@ -1,7 +1,7 @@
 TESTDLL   = reg.exe
 IMPORTS   = advapi32
 
-SOURCES = \
+C_SRCS = \
 	add.c \
 	copy.c \
 	delete.c \

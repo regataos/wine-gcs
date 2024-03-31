@@ -1659,9 +1659,9 @@ static void check_matrix_(int line, const D3DXMATRIX *got, const D3DXMATRIX *exp
     int i, j;
     for (i = 0; i < 4; i++) {
         for (j = 0; j < 4; j++) {
-            ok_(__FILE__,line)(compare(expected->m[i][j], got->m[i][j]),
+            ok_(__FILE__,line)(compare(U(*expected).m[i][j], U(*got).m[i][j]),
                     "matrix[%u][%u]: expected %g, got %g\n",
-                    i, j, expected->m[i][j], got->m[i][j]);
+                    i, j, U(*expected).m[i][j], U(*got).m[i][j]);
         }
     }
 }
@@ -1843,8 +1843,8 @@ static HRESULT destroy_mesh_container(LPD3DXMESHCONTAINER mesh_container)
     if (!mesh_container)
         return D3D_OK;
     free(mesh_container->Name);
-    if (mesh_container->MeshData.pMesh)
-        IUnknown_Release(mesh_container->MeshData.pMesh);
+    if (U(mesh_container->MeshData).pMesh)
+        IUnknown_Release(U(mesh_container->MeshData).pMesh);
     if (mesh_container->pMaterials) {
         for (i = 0; i < mesh_container->NumMaterials; i++)
             free(mesh_container->pMaterials[i].pTextureFilename);
@@ -1886,7 +1886,7 @@ static HRESULT CALLBACK ID3DXAllocateHierarchyImpl_CreateMeshContainer(ID3DXAllo
     int i;
 
     TRACECALLBACK("ID3DXAllocateHierarchyImpl_CreateMeshContainer(%p, '%s', %u, %p, %p, %p, %ld, %p, %p, %p)\n",
-            iface, name, mesh_data->Type, mesh_data->pMesh, materials, effects,
+            iface, name, mesh_data->Type, U(*mesh_data).pMesh, materials, effects,
             num_materials, adjacency, skin_info, *new_mesh_container);
 
     mesh_container = calloc(1, sizeof(*mesh_container));
@@ -1953,7 +1953,7 @@ static HRESULT CALLBACK ID3DXAllocateHierarchyImpl_CreateMeshContainer(ID3DXAllo
     ok(adjacency != NULL, "Expected non-NULL adjacency, got NULL\n");
     if (adjacency) {
         if (mesh_data->Type == D3DXMESHTYPE_MESH || mesh_data->Type == D3DXMESHTYPE_PMESH) {
-            ID3DXBaseMesh *basemesh = (ID3DXBaseMesh*)mesh_data->pMesh;
+            ID3DXBaseMesh *basemesh = (ID3DXBaseMesh*)U(*mesh_data).pMesh;
             DWORD num_faces = basemesh->lpVtbl->GetNumFaces(basemesh);
             size_t size = num_faces * sizeof(DWORD) * 3;
             mesh_container->pAdjacency = malloc(size);
@@ -1968,8 +1968,8 @@ static HRESULT CALLBACK ID3DXAllocateHierarchyImpl_CreateMeshContainer(ID3DXAllo
     }
 
     memcpy(&mesh_container->MeshData, mesh_data, sizeof(*mesh_data));
-    if (mesh_data->pMesh)
-        IUnknown_AddRef(mesh_data->pMesh);
+    if (U(*mesh_data).pMesh)
+        IUnknown_AddRef(U(*mesh_data).pMesh);
     if (skin_info) {
         mesh_container->pSkinInfo = skin_info;
         skin_info->lpVtbl->AddRef(skin_info);
@@ -2574,8 +2574,6 @@ static void D3DXLoadMeshTest(void)
     D3DXMATRIX transform;
     struct test_context *test_context;
     ID3DXAnimationController *controller;
-    D3DXMESHCONTAINER *container;
-    unsigned int i;
     struct test_load_user_data load_user_data;
 
     if (!(test_context = new_test_context()))
@@ -2612,24 +2610,26 @@ static void D3DXLoadMeshTest(void)
     hr = D3DXLoadMeshHierarchyFromXInMemory(simple_xfile, sizeof(simple_xfile) - 1,
             D3DXMESH_MANAGED, device, &alloc_hier, NULL, &frame_hier, NULL);
     ok(hr == D3D_OK, "Expected D3D_OK, got %#lx\n", hr);
-    container = frame_hier->pMeshContainer;
+    if (SUCCEEDED(hr)) {
+        D3DXMESHCONTAINER *container = frame_hier->pMeshContainer;
 
-    ok(frame_hier->Name == NULL, "Expected NULL, got '%s'\n", frame_hier->Name);
-    D3DXMatrixIdentity(&transform);
-    check_matrix(&frame_hier->TransformationMatrix, &transform);
+        ok(frame_hier->Name == NULL, "Expected NULL, got '%s'\n", frame_hier->Name);
+        D3DXMatrixIdentity(&transform);
+        check_matrix(&frame_hier->TransformationMatrix, &transform);
 
-    ok(!strcmp(container->Name, ""), "Expected '', got '%s'\n", container->Name);
-    ok(container->MeshData.Type == D3DXMESHTYPE_MESH, "Expected %d, got %d\n",
-            D3DXMESHTYPE_MESH, container->MeshData.Type);
-    mesh = container->MeshData.pMesh;
-    check_vertex_buffer(mesh, simple_vertex_buffer, ARRAY_SIZE(simple_vertex_buffer), simple_fvf);
-    check_index_buffer(mesh, simple_index_buffer, ARRAY_SIZE(simple_index_buffer), sizeof(*simple_index_buffer));
-    check_materials(container->pMaterials, container->NumMaterials, NULL, 0);
-    check_generated_effects(container->pMaterials, container->NumMaterials, container->pEffects);
-    check_generated_adjacency(mesh, container->pAdjacency, 0.0f);
-    hr = D3DXFrameDestroy(frame_hier, &alloc_hier);
-    ok(hr == D3D_OK, "Expected D3D_OK, got %#lx\n", hr);
-    frame_hier = NULL;
+        ok(!strcmp(container->Name, ""), "Expected '', got '%s'\n", container->Name);
+        ok(container->MeshData.Type == D3DXMESHTYPE_MESH, "Expected %d, got %d\n",
+           D3DXMESHTYPE_MESH, container->MeshData.Type);
+        mesh = U(container->MeshData).pMesh;
+        check_vertex_buffer(mesh, simple_vertex_buffer, ARRAY_SIZE(simple_vertex_buffer), simple_fvf);
+        check_index_buffer(mesh, simple_index_buffer, ARRAY_SIZE(simple_index_buffer), sizeof(*simple_index_buffer));
+        check_materials(container->pMaterials, container->NumMaterials, NULL, 0);
+        check_generated_effects(container->pMaterials, container->NumMaterials, container->pEffects);
+        check_generated_adjacency(mesh, container->pAdjacency, 0.0f);
+        hr = D3DXFrameDestroy(frame_hier, &alloc_hier);
+        ok(hr == D3D_OK, "Expected D3D_OK, got %#lx\n", hr);
+        frame_hier = NULL;
+    }
 
     controller = (ID3DXAnimationController *)0xdeadbeef;
     hr = D3DXLoadMeshHierarchyFromXInMemory(box_anim_xfile, sizeof(box_anim_xfile) - 1,
@@ -2651,25 +2651,28 @@ static void D3DXLoadMeshTest(void)
     hr = D3DXLoadMeshHierarchyFromXInMemory(box_xfile, sizeof(box_xfile) - 1,
             D3DXMESH_MANAGED, device, &alloc_hier, NULL, &frame_hier, &controller);
     ok(hr == D3D_OK, "Expected D3D_OK, got %#lx\n", hr);
-    container = frame_hier->pMeshContainer;
+    if (SUCCEEDED(hr))
+    {
+        D3DXMESHCONTAINER *container = frame_hier->pMeshContainer;
 
-    ok(!controller, "Animation Controller returned.\n");
-    ok(frame_hier->Name == NULL, "Expected NULL, got '%s'\n", frame_hier->Name);
-    D3DXMatrixIdentity(&transform);
-    check_matrix(&frame_hier->TransformationMatrix, &transform);
+        ok(!controller, "Animation Controller returned.\n");
+        ok(frame_hier->Name == NULL, "Expected NULL, got '%s'\n", frame_hier->Name);
+        D3DXMatrixIdentity(&transform);
+        check_matrix(&frame_hier->TransformationMatrix, &transform);
 
-    ok(!strcmp(container->Name, ""), "Expected '', got '%s'\n", container->Name);
-    ok(container->MeshData.Type == D3DXMESHTYPE_MESH, "Expected %d, got %d\n",
-            D3DXMESHTYPE_MESH, container->MeshData.Type);
-    mesh = container->MeshData.pMesh;
-    check_vertex_buffer(mesh, box_vertex_buffer, ARRAY_SIZE(box_vertex_buffer), box_fvf);
-    check_index_buffer(mesh, box_index_buffer, ARRAY_SIZE(box_index_buffer), sizeof(*box_index_buffer));
-    check_materials(container->pMaterials, container->NumMaterials, box_materials, ARRAY_SIZE(box_materials));
-    check_generated_effects(container->pMaterials, container->NumMaterials, container->pEffects);
-    check_generated_adjacency(mesh, container->pAdjacency, 0.0f);
-    hr = D3DXFrameDestroy(frame_hier, &alloc_hier);
-    ok(hr == D3D_OK, "Expected D3D_OK, got %#lx\n", hr);
-    frame_hier = NULL;
+        ok(!strcmp(container->Name, ""), "Expected '', got '%s'\n", container->Name);
+        ok(container->MeshData.Type == D3DXMESHTYPE_MESH, "Expected %d, got %d\n",
+           D3DXMESHTYPE_MESH, container->MeshData.Type);
+        mesh = U(container->MeshData).pMesh;
+        check_vertex_buffer(mesh, box_vertex_buffer, ARRAY_SIZE(box_vertex_buffer), box_fvf);
+        check_index_buffer(mesh, box_index_buffer, ARRAY_SIZE(box_index_buffer), sizeof(*box_index_buffer));
+        check_materials(container->pMaterials, container->NumMaterials, box_materials, ARRAY_SIZE(box_materials));
+        check_generated_effects(container->pMaterials, container->NumMaterials, container->pEffects);
+        check_generated_adjacency(mesh, container->pAdjacency, 0.0f);
+        hr = D3DXFrameDestroy(frame_hier, &alloc_hier);
+        ok(hr == D3D_OK, "Expected D3D_OK, got %#lx\n", hr);
+        frame_hier = NULL;
+    }
 
     init_load_user_data(&load_user_data);
     hr = D3DXLoadMeshHierarchyFromXInMemory(box_xfile, sizeof(box_xfile) - 1,
@@ -2685,26 +2688,32 @@ static void D3DXLoadMeshTest(void)
     hr = D3DXLoadMeshHierarchyFromXInMemory(framed_xfile, sizeof(framed_xfile) - 1,
             D3DXMESH_MANAGED, device, &alloc_hier, NULL, &frame_hier, NULL);
     ok(hr == D3D_OK, "Expected D3D_OK, got %#lx\n", hr);
-    container = frame_hier->pMeshContainer;
+    if (SUCCEEDED(hr)) {
+        D3DXMESHCONTAINER *container = frame_hier->pMeshContainer;
+        int i;
 
-    ok(!strcmp(frame_hier->Name, ""), "Expected '', got '%s'\n", frame_hier->Name);
-    /* last frame transform replaces the first */
-    D3DXMatrixIdentity(&transform);
-    transform.m[3][2] = 3.0;
-    check_matrix(&frame_hier->TransformationMatrix, &transform);
+        ok(!strcmp(frame_hier->Name, ""), "Expected '', got '%s'\n", frame_hier->Name);
+        /* last frame transform replaces the first */
+        D3DXMatrixIdentity(&transform);
+        U(transform).m[3][2] = 3.0;
+        check_matrix(&frame_hier->TransformationMatrix, &transform);
 
-    for (i = 0; i < 3; ++i)
-    {
-        ok(!strcmp(container->Name, ""), "Expected '', got '%s'\n", container->Name);
-        ok(container->MeshData.Type == D3DXMESHTYPE_MESH, "Expected %d, got %d\n",
-                D3DXMESHTYPE_MESH, container->MeshData.Type);
-        mesh = container->MeshData.pMesh;
-        check_vertex_buffer(mesh, framed_vertex_buffers[i], ARRAY_SIZE(framed_vertex_buffers[0]), framed_fvf);
-        check_index_buffer(mesh, framed_index_buffer, ARRAY_SIZE(framed_index_buffer), sizeof(*framed_index_buffer));
-        check_materials(container->pMaterials, container->NumMaterials, NULL, 0);
-        check_generated_effects(container->pMaterials, container->NumMaterials, container->pEffects);
-        check_generated_adjacency(mesh, container->pAdjacency, 0.0f);
-        container = container->pNextMeshContainer;
+        for (i = 0; i < 3; i++) {
+            ok(!strcmp(container->Name, ""), "Expected '', got '%s'\n", container->Name);
+            ok(container->MeshData.Type == D3DXMESHTYPE_MESH, "Expected %d, got %d\n",
+               D3DXMESHTYPE_MESH, container->MeshData.Type);
+            mesh = U(container->MeshData).pMesh;
+            check_vertex_buffer(mesh, framed_vertex_buffers[i], ARRAY_SIZE(framed_vertex_buffers[0]), framed_fvf);
+            check_index_buffer(mesh, framed_index_buffer, ARRAY_SIZE(framed_index_buffer), sizeof(*framed_index_buffer));
+            check_materials(container->pMaterials, container->NumMaterials, NULL, 0);
+            check_generated_effects(container->pMaterials, container->NumMaterials, container->pEffects);
+            check_generated_adjacency(mesh, container->pAdjacency, 0.0f);
+            container = container->pNextMeshContainer;
+        }
+        ok(container == NULL, "Expected NULL, got %p\n", container);
+        hr = D3DXFrameDestroy(frame_hier, &alloc_hier);
+        ok(hr == D3D_OK, "Expected D3D_OK, got %#lx\n", hr);
+        frame_hier = NULL;
     }
     ok(container == NULL, "Expected NULL, got %p\n", container);
     hr = D3DXFrameDestroy(frame_hier, &alloc_hier);
@@ -2760,7 +2769,8 @@ static void D3DXLoadMeshTest(void)
     hr = D3DXLoadMeshFromXInMemory(simple_xfile, sizeof(simple_xfile) - 1, D3DXMESH_MANAGED,
                                    device, NULL, NULL, NULL, NULL, &mesh);
     ok(hr == D3D_OK, "Expected D3D_OK, got %#lx\n", hr);
-    IUnknown_Release(mesh);
+    if (SUCCEEDED(hr))
+        IUnknown_Release(mesh);
 
     test_LoadMeshFromX(device, simple_xfile, simple_vertex_buffer, simple_fvf, simple_index_buffer, default_materials, TRUE);
     test_LoadMeshFromX(device, box_xfile, box_vertex_buffer, box_fvf, box_index_buffer, box_materials, TRUE);
@@ -5511,18 +5521,18 @@ static void test_update_skinned_mesh(void)
     }
 
     hr = D3DXCreateSkinInfoFVF(4, D3DFVF_XYZ | D3DFVF_NORMAL, 2, &skin_info);
-    ok(hr == D3D_OK, "Expected D3D_OK, got %#lx\n", hr);
+    ok(hr == D3D_OK, "Expected D3D_OK, got %#x\n", hr);
 
     skin_info->lpVtbl->SetBoneInfluence(skin_info, 0, 2, bone0_vertices, bone0_weights);
-    ok(hr == D3D_OK, "Expected D3D_OK, got %#lx\n", hr);
+    ok(hr == D3D_OK, "Expected D3D_OK, got %#x\n", hr);
     skin_info->lpVtbl->SetBoneOffsetMatrix(skin_info, 0, &matrix);
-    ok(hr == D3D_OK, "Expected D3D_OK, got %#lx\n", hr);
+    ok(hr == D3D_OK, "Expected D3D_OK, got %#x\n", hr);
     skin_info->lpVtbl->SetBoneInfluence(skin_info, 1, 2, bone1_vertices, bone1_weights);
-    ok(hr == D3D_OK, "Expected D3D_OK, got %#lx\n", hr);
+    ok(hr == D3D_OK, "Expected D3D_OK, got %#x\n", hr);
     skin_info->lpVtbl->SetBoneOffsetMatrix(skin_info, 1, &matrix);
-    ok(hr == D3D_OK, "Expected D3D_OK, got %#lx\n", hr);
+    ok(hr == D3D_OK, "Expected D3D_OK, got %#x\n", hr);
     skin_info->lpVtbl->UpdateSkinnedMesh(skin_info, bones_matrix, NULL, vertices_src, vertices_dest);
-    ok(hr == D3D_OK, "Expected D3D_OK, got %#lx\n", hr);
+    ok(hr == D3D_OK, "Expected D3D_OK, got %#x\n", hr);
     for (i = 0; i < 4; i++)
     {
         ok(compare(vertices_dest[i*2].x, vertices_ref[i*2].x), "Vertex[%d].position.x: got %g, expected %g\n",
@@ -10692,14 +10702,14 @@ static void test_optimize_vertices(void)
     hr = D3DXOptimizeVertices(indices, num_faces,
                               num_vertices, FALSE,
                               vertex_remap);
-    ok(hr == D3D_OK, "D3DXOptimizeVertices failed. Got %lx, expected D3D_OK.\n", hr);
+    ok(hr == D3D_OK, "D3DXOptimizeVertices failed. Got %x, expected D3D_OK.\n", hr);
 
     /* vertex_remap must not be NULL */
     hr = D3DXOptimizeVertices(indices, num_faces,
                               num_vertices, FALSE,
                               NULL);
     ok(hr == D3DERR_INVALIDCALL, "D3DXOptimizeVertices passed NULL vertex_remap "
-            "pointer. Got %lx, expected D3DERR_INVALIDCALL.\n", hr);
+            "pointer. Got %x, expected D3DERR_INVALIDCALL.\n", hr);
 }
 
 static void test_optimize_faces(void)

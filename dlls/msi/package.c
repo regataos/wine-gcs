@@ -18,6 +18,8 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#define NONAMELESSUNION
+#define NONAMELESSSTRUCT
 #define COBJMACROS
 
 #include <stdarg.h>
@@ -571,11 +573,11 @@ static LPWSTR get_fusion_filename(MSIPACKAGE *package)
     return filename;
 }
 
-struct lang_codepage
+typedef struct tagLANGANDCODEPAGE
 {
   WORD wLanguage;
   WORD wCodePage;
-};
+} LANGANDCODEPAGE;
 
 static void set_msi_assembly_prop(MSIPACKAGE *package)
 {
@@ -584,7 +586,7 @@ static void set_msi_assembly_prop(MSIPACKAGE *package)
     LPVOID version = NULL;
     WCHAR buf[MAX_PATH];
     LPWSTR fusion, verstr;
-    struct lang_codepage *translate;
+    LANGANDCODEPAGE *translate;
 
     fusion = get_fusion_filename(package);
     if (!fusion)
@@ -774,7 +776,7 @@ static VOID set_installer_properties(MSIPACKAGE *package)
     GetNativeSystemInfo( &sys_info );
     len = swprintf( bufstr, ARRAY_SIZE(bufstr), L"%d", sys_info.wProcessorLevel );
     msi_set_property( package->db, L"Intel", bufstr, len );
-    if (sys_info.wProcessorArchitecture == PROCESSOR_ARCHITECTURE_INTEL)
+    if (sys_info.u.s.wProcessorArchitecture == PROCESSOR_ARCHITECTURE_INTEL)
     {
         GetSystemDirectoryW( pth, MAX_PATH );
         PathAddBackslashW( pth );
@@ -790,7 +792,7 @@ static VOID set_installer_properties(MSIPACKAGE *package)
         PathAddBackslashW( pth );
         msi_set_property( package->db, L"CommonFilesFolder", pth, -1 );
     }
-    else if (sys_info.wProcessorArchitecture == PROCESSOR_ARCHITECTURE_AMD64)
+    else if (sys_info.u.s.wProcessorArchitecture == PROCESSOR_ARCHITECTURE_AMD64)
     {
         msi_set_property( package->db, L"MsiAMD64", bufstr, -1 );
         msi_set_property( package->db, L"Msix64", bufstr, -1 );
@@ -938,7 +940,7 @@ static MSIPACKAGE *alloc_package( void )
     return package;
 }
 
-static UINT load_admin_properties(MSIPACKAGE *package)
+static UINT msi_load_admin_properties(MSIPACKAGE *package)
 {
     BYTE *data;
     UINT r, sz;
@@ -1007,7 +1009,7 @@ MSIPACKAGE *MSI_CreatePackage( MSIDATABASE *db )
         }
 
         if (package->WordCount & msidbSumInfoSourceTypeAdminImage)
-            load_admin_properties( package );
+            msi_load_admin_properties( package );
 
         package->log_file = INVALID_HANDLE_VALUE;
         package->script = SCRIPT_NONE;
@@ -1409,10 +1411,7 @@ UINT MSI_OpenPackageW(LPCWSTR szPackage, DWORD dwOptions, MSIPACKAGE **pPackage)
         TRACE("opening package %s\n", debugstr_w( localfile ));
         r = MSI_OpenDatabaseW( localfile, MSIDBOPEN_TRANSACT, &db );
         if (r != ERROR_SUCCESS)
-        {
-            free( product_version );
             return r;
-        }
 
         if (product_version)
         {
@@ -1502,6 +1501,13 @@ UINT MSI_OpenPackageW(LPCWSTR szPackage, DWORD dwOptions, MSIPACKAGE **pPackage)
     if (gszLogFile)
         package->log_file = CreateFileW( gszLogFile, GENERIC_WRITE, FILE_SHARE_WRITE, NULL,
                                          OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL );
+
+    if (!msi_init_assembly_caches( package ))
+    {
+        ERR("can't initialize assembly caches\n");
+        msiobj_release( &package->hdr );
+        return ERROR_FUNCTION_FAILED;
+    }
 
     /* FIXME: when should these messages be sent? */
     data_row = MSI_CreateRecord(3);
@@ -1898,12 +1904,7 @@ INT MSI_ProcessMessage( MSIPACKAGE *package, INSTALLMESSAGE eMessageType, MSIREC
             }
 
             template = malloc((wcslen(template_rec) + wcslen(template_prefix) + 1) * sizeof(WCHAR));
-            if (!template)
-            {
-                free(template_prefix);
-                free(template_rec);
-                return ERROR_OUTOFMEMORY;
-            }
+            if (!template) return ERROR_OUTOFMEMORY;
 
             lstrcpyW(template, template_prefix);
             lstrcatW(template, template_rec);
@@ -2116,7 +2117,7 @@ UINT WINAPI MsiSetPropertyW( MSIHANDLE hInstall, LPCWSTR szName, LPCWSTR szValue
     return ret;
 }
 
-static MSIRECORD *get_property_row( MSIDATABASE *db, const WCHAR *name )
+static MSIRECORD *msi_get_property_row( MSIDATABASE *db, LPCWSTR name )
 {
     MSIRECORD *rec, *row = NULL;
     MSIQUERY *view;
@@ -2191,7 +2192,7 @@ UINT msi_get_property( MSIDATABASE *db, LPCWSTR szName,
 
     TRACE("%p %s %p %p\n", db, debugstr_w(szName), szValueBuf, pchValueBuf);
 
-    row = get_property_row( db, szName );
+    row = msi_get_property_row( db, szName );
 
     if (*pchValueBuf > 0)
         szValueBuf[0] = 0;
@@ -2306,7 +2307,7 @@ UINT WINAPI MsiGetPropertyA(MSIHANDLE hinst, const char *name, char *buf, DWORD 
         return r;
     }
 
-    row = get_property_row(package->db, nameW);
+    row = msi_get_property_row(package->db, nameW);
     if (row)
         value = msi_record_get_string(row, 1, &len);
 
@@ -2369,7 +2370,7 @@ UINT WINAPI MsiGetPropertyW(MSIHANDLE hinst, const WCHAR *name, WCHAR *buf, DWOR
         return r;
     }
 
-    row = get_property_row(package->db, name);
+    row = msi_get_property_row(package->db, name);
     if (row)
         value = msi_record_get_string(row, 1, &len);
 

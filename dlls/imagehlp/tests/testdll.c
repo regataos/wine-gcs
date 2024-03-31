@@ -16,10 +16,6 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#if 0
-#pragma makedep testdll
-#endif
-
 #include <oaidl.h>
 #include <commdlg.h>
 #include <shlwapi.h>

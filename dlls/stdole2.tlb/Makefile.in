@@ -2,6 +2,5 @@ MODULE    = stdole2.tlb
 
 EXTRADLLFLAGS = -Wb,--data-only
 
-SOURCES = \
-	rsrc.rc \
-	stdole2.idl
+RC_SRCS = rsrc.rc
+IDL_SRCS = stdole2.idl

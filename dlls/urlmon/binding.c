@@ -16,6 +16,8 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#define NONAMELESSUNION
+
 #include "urlmon_main.h"
 #include "winreg.h"
 #include "shlwapi.h"
@@ -141,7 +143,7 @@ static void dump_BINDINFO(BINDINFO *bi)
             "}\n",
 
             bi->cbSize, debugstr_w(bi->szExtraInfo),
-            bi->stgmedData.tymed, bi->stgmedData.hGlobal, bi->stgmedData.pUnkForRelease,
+            bi->stgmedData.tymed, bi->stgmedData.u.hGlobal, bi->stgmedData.pUnkForRelease,
             bi->grfBindInfoF > BINDINFOF_URLENCODEDEXTRAINFO
                 ? "unknown" : BINDINFOF_str[bi->grfBindInfoF],
             bi->dwBindVerb > BINDVERB_CUSTOM
@@ -520,7 +522,7 @@ static HRESULT WINAPI ProtocolStream_Seek(IStream *iface, LARGE_INTEGER dlibMove
     LARGE_INTEGER new_pos;
     DWORD method;
 
-    TRACE("(%p)->(%ld %08lx %p)\n", This, dlibMove.LowPart, dwOrigin, plibNewPosition);
+    TRACE("(%p)->(%ld %08lx %p)\n", This, dlibMove.u.LowPart, dwOrigin, plibNewPosition);
 
     if(This->buf->file == INVALID_HANDLE_VALUE) {
         /* We should probably call protocol handler's Seek. */
@@ -556,7 +558,7 @@ static HRESULT WINAPI ProtocolStream_Seek(IStream *iface, LARGE_INTEGER dlibMove
 static HRESULT WINAPI ProtocolStream_SetSize(IStream *iface, ULARGE_INTEGER libNewSize)
 {
     ProtocolStream *This = impl_from_IStream(iface);
-    FIXME("(%p)->(%ld)\n", This, libNewSize.LowPart);
+    FIXME("(%p)->(%ld)\n", This, libNewSize.u.LowPart);
     return E_NOTIMPL;
 }
 
@@ -564,7 +566,7 @@ static HRESULT WINAPI ProtocolStream_CopyTo(IStream *iface, IStream *pstm,
         ULARGE_INTEGER cb, ULARGE_INTEGER *pcbRead, ULARGE_INTEGER *pcbWritten)
 {
     ProtocolStream *This = impl_from_IStream(iface);
-    FIXME("(%p)->(%p %ld %p %p)\n", This, pstm, cb.LowPart, pcbRead, pcbWritten);
+    FIXME("(%p)->(%p %ld %p %p)\n", This, pstm, cb.u.LowPart, pcbRead, pcbWritten);
     return E_NOTIMPL;
 }
 
@@ -590,7 +592,7 @@ static HRESULT WINAPI ProtocolStream_LockRegion(IStream *iface, ULARGE_INTEGER l
                                                ULARGE_INTEGER cb, DWORD dwLockType)
 {
     ProtocolStream *This = impl_from_IStream(iface);
-    FIXME("(%p)->(%ld %ld %ld)\n", This, libOffset.LowPart, cb.LowPart, dwLockType);
+    FIXME("(%p)->(%ld %ld %ld)\n", This, libOffset.u.LowPart, cb.u.LowPart, dwLockType);
     return E_NOTIMPL;
 }
 
@@ -598,7 +600,7 @@ static HRESULT WINAPI ProtocolStream_UnlockRegion(IStream *iface,
         ULARGE_INTEGER libOffset, ULARGE_INTEGER cb, DWORD dwLockType)
 {
     ProtocolStream *This = impl_from_IStream(iface);
-    FIXME("(%p)->(%ld %ld %ld)\n", This, libOffset.LowPart, cb.LowPart, dwLockType);
+    FIXME("(%p)->(%ld %ld %ld)\n", This, libOffset.u.LowPart, cb.u.LowPart, dwLockType);
     return E_NOTIMPL;
 }
 
@@ -667,7 +669,7 @@ static HRESULT stgmed_stream_fill_stgmed(stgmed_obj_t *obj, STGMEDIUM *stgmed)
     ProtocolStream *stream = (ProtocolStream*)obj;
 
     stgmed->tymed = TYMED_ISTREAM;
-    stgmed->pstm = &stream->IStream_iface;
+    stgmed->u.pstm = &stream->IStream_iface;
     stgmed->pUnkForRelease = &stream->buf->IUnknown_iface;
 
     return S_OK;
@@ -733,7 +735,7 @@ static HRESULT stgmed_file_fill_stgmed(stgmed_obj_t *obj, STGMEDIUM *stgmed)
     read_protocol_data(file_obj->buf);
 
     stgmed->tymed = TYMED_FILE;
-    stgmed->lpszFileName = file_obj->buf->cache_file;
+    stgmed->u.lpszFileName = file_obj->buf->cache_file;
     stgmed->pUnkForRelease = &file_obj->buf->IUnknown_iface;
 
     return S_OK;
@@ -1474,7 +1476,7 @@ static HRESULT Binding_Create(IMoniker *mon, Binding *binding_ctx, IUri *uri, IB
 
     ret->bindinfo.cbSize = sizeof(BINDINFO);
 
-    InitializeCriticalSectionEx(&ret->section, 0, RTL_CRITICAL_SECTION_FLAG_FORCE_DEBUG_INFO);
+    InitializeCriticalSection(&ret->section);
     ret->section.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": Binding.section");
 
     hres = get_callback(pbc, &ret->callback);

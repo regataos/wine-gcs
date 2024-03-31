@@ -2,5 +2,4 @@ MODULE    = winhelp.exe16
 
 EXTRADLLFLAGS = -mconsole -m16
 
-SOURCES = \
-	winhelp.c
+C_SRCS = winhelp.c

@@ -226,50 +226,7 @@ static void test_fileops( void )
     ok(fread(buffer, sizeof(buffer), 1, file) == 0, "fread test failed\n");
     /* feof should be set now */
     ok(feof(file), "feof after fread failed\n");
-    clearerr(file);
-    ok(!feof(file), "feof after clearerr failed\n");
-    fclose(file);
-
-    file = fopen("fdopen.tst", "rb");
-    ok( file != NULL, "fopen failed\n");
-    /* sizeof(buffer) > content of file */
-    ok(fread(buffer, sizeof(buffer), 1, file) == 0, "fread test failed\n");
-    /* feof should be set now */
-    ok(feof(file), "feof after fread failed\n");
-    rewind(file);
-    ok(!feof(file), "feof after rewind failed\n");
-    fclose(file);
-
-    file = fopen("fdopen.tst", "rb");
-    ok( file != NULL, "fopen failed\n");
-    /* sizeof(buffer) > content of file */
-    ok(fread(buffer, sizeof(buffer), 1, file) == 0, "fread test failed\n");
-    /* feof should be set now */
-    ok(feof(file), "feof after fread failed\n");
-    fseek(file, 0, SEEK_SET);
-    ok(!feof(file), "feof after fseek failed\n");
-    fclose(file);
-
-    file = fopen("fdopen.tst", "rb");
-    ok( file != NULL, "fopen failed\n");
-    /* sizeof(buffer) > content of file */
-    ok(fread(buffer, sizeof(buffer), 1, file) == 0, "fread test failed\n");
-    /* feof should be set now */
-    ok(feof(file), "feof after fread failed\n");
-    fgetpos(file, &pos);
-    fsetpos(file, &pos);
-    ok(!feof(file), "feof after fsetpos failed\n");
-    fclose(file);
-
-    file = fopen("fdopen.tst", "rb");
-    ok( file != NULL, "fopen failed\n");
-    /* sizeof(buffer) > content of file */
-    ok(fread(buffer, sizeof(buffer), 1, file) == 0, "fread test failed\n");
-    /* feof should be set now */
-    ok(feof(file), "feof after fread failed\n");
-    fsetpos(file, &pos);
-    ok(!feof(file), "feof after fsetpos failed\n");
-    fclose(file);
+    fclose (file);
 
     unlink ("fdopen.tst");
 }
@@ -1896,8 +1853,6 @@ static void test_invalid_stdin_child( void )
     handle = (HANDLE)_get_osfhandle(STDIN_FILENO);
     ok(handle == (HANDLE)-2, "handle = %p\n", handle);
     ok(errno == 0xdeadbeef, "errno = %d\n", errno);
-    handle = GetStdHandle(STD_INPUT_HANDLE);
-    ok((LONG_PTR)handle > 0, "Expecting passed handle to be untouched\n");
 
     info = &__pioinfo[STDIN_FILENO/MSVCRT_FD_BLOCK_SIZE][STDIN_FILENO%MSVCRT_FD_BLOCK_SIZE];
     ok(info->handle == (HANDLE)-2, "info->handle = %p\n", info->handle);
@@ -1973,10 +1928,6 @@ static void test_invalid_stdin( const char* selfname )
 
     ret = RegOpenCurrentUser(KEY_READ, &key);
     ok(!ret, "RegOpenCurrentUser failed: %lx\n", ret);
-
-    ret = DuplicateHandle(GetCurrentProcess(), key, GetCurrentProcess(),
-            (HANDLE *)&key, GENERIC_READ, TRUE, DUPLICATE_CLOSE_SOURCE);
-    ok(ret, "DuplicateHandle failed: %lx\n", GetLastError());
 
     sa.nLength = sizeof(sa);
     sa.lpSecurityDescriptor = NULL;

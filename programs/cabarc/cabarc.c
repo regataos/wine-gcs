@@ -47,12 +47,12 @@ static WCHAR **opt_files;
 
 static void * CDECL cab_alloc( ULONG size )
 {
-    return malloc( size );
+    return HeapAlloc( GetProcessHeap(), 0, size );
 }
 
 static void CDECL cab_free( void *ptr )
 {
-    free( ptr );
+    HeapFree( GetProcessHeap(), 0, ptr );
 }
 
 static WCHAR *strdupAtoW( UINT cp, const char *str )
@@ -61,7 +61,7 @@ static WCHAR *strdupAtoW( UINT cp, const char *str )
     if (str)
     {
         DWORD len = MultiByteToWideChar( cp, 0, str, -1, NULL, 0 );
-        if ((ret = malloc( len * sizeof(WCHAR) )))
+        if ((ret = cab_alloc( len * sizeof(WCHAR) )))
             MultiByteToWideChar( cp, 0, str, -1, ret, len );
     }
     return ret;
@@ -73,7 +73,7 @@ static char *strdupWtoA( UINT cp, const WCHAR *str )
     if (str)
     {
         DWORD len = WideCharToMultiByte( cp, 0, str, -1, NULL, 0, NULL, NULL );
-        if ((ret = malloc( len )))
+        if ((ret = cab_alloc( len )))
             WideCharToMultiByte( cp, 0, str, -1, ret, len, NULL, NULL );
     }
     return ret;
@@ -236,21 +236,21 @@ static INT_PTR CDECL fci_get_open_info( char *name, USHORT *date, USHORT *time,
     {
         *err = GetLastError();
         WINE_ERR( "failed to open %s: error %u\n", wine_dbgstr_w(nameW), *err );
-        free( nameW );
+        cab_free( nameW );
         return -1;
     }
     if (!GetFileInformationByHandle( handle, &info ))
     {
         *err = GetLastError();
         CloseHandle( handle );
-        free( nameW );
+        cab_free( nameW );
         return -1;
     }
     FileTimeToDosDateTime( &info.ftLastWriteTime, date, time );
     *attribs = info.dwFileAttributes & (_A_RDONLY | _A_HIDDEN | _A_SYSTEM | _A_ARCH);
     for (p = nameW; *p; p++) if (*p >= 0x80) break;
     if (*p) *attribs |= _A_NAME_IS_UTF;
-    free( nameW );
+    cab_free( nameW );
     return (INT_PTR)handle;
 }
 
@@ -291,7 +291,8 @@ static void create_directories( const WCHAR *name )
     WCHAR *path, *p;
 
     /* create the directory/directories */
-    path = wcsdup( name );
+    path = cab_alloc( (lstrlenW(name) + 1) * sizeof(WCHAR) );
+    lstrcpyW(path, name);
 
     p = wcschr(path, '\\');
     while (p != NULL)
@@ -302,7 +303,7 @@ static void create_directories( const WCHAR *name )
         *p = '\\';
         p = wcschr(p+1, '\\');
     }
-    free( path );
+    cab_free( path );
 }
 
 /* check if file name matches against one of the files specification */
@@ -348,7 +349,7 @@ static INT_PTR CDECL list_notify( FDINOTIFICATIONTYPE fdint, PFDINOTIFICATION pf
             }
             wprintf( L"%s\n", nameW );
         }
-        free( nameW );
+        cab_free( nameW );
         return 0;
     default:
         WINE_FIXME( "Unexpected notification type %d.\n", fdint );
@@ -393,7 +394,7 @@ static INT_PTR CDECL extract_notify( FDINOTIFICATIONTYPE fdint, PFDINOTIFICATION
 
         if (opt_dest_dir)
         {
-            path = malloc( (wcslen(opt_dest_dir) + wcslen(file) + 1) * sizeof(WCHAR) );
+            path = cab_alloc( (lstrlenW(opt_dest_dir) + lstrlenW(file) + 1) * sizeof(WCHAR) );
             lstrcpyW( path, opt_dest_dir );
             lstrcatW( path, file );
         }
@@ -409,8 +410,8 @@ static INT_PTR CDECL extract_notify( FDINOTIFICATIONTYPE fdint, PFDINOTIFICATION
         }
         else ret = 0;
 
-        free( nameW );
-        if (path != file) free( path );
+        cab_free( nameW );
+        if (path != file) cab_free( path );
         return ret;
 
     case fdintCLOSE_FILE_INFO:
@@ -463,7 +464,7 @@ static BOOL add_file( HFCI fci, WCHAR *name )
     }
     ret = FCIAddFile( fci, path, filename, FALSE,
                       fci_get_next_cab, fci_status, fci_get_open_info, opt_compression );
-    free( path );
+    cab_free( path );
     return ret;
 }
 
@@ -474,7 +475,7 @@ static BOOL add_directory( HFCI fci, WCHAR *dir )
     WIN32_FIND_DATAW data;
     BOOL ret = TRUE;
 
-    if (!(buffer = malloc( (wcslen(dir) + MAX_PATH + 2) * sizeof(WCHAR) ))) return FALSE;
+    if (!(buffer = cab_alloc( (lstrlenW(dir) + MAX_PATH + 2) * sizeof(WCHAR) ))) return FALSE;
     lstrcpyW( buffer, dir );
     p = buffer + lstrlenW( buffer );
     if (p > buffer && p[-1] != '\\') *p++ = '\\';
@@ -497,7 +498,7 @@ static BOOL add_directory( HFCI fci, WCHAR *dir )
         } while (FindNextFileW( handle, &data ));
         FindClose( handle );
     }
-    free( buffer );
+    cab_free( buffer );
     return TRUE;
 }
 

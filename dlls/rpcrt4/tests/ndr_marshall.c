@@ -34,6 +34,7 @@
 #include "midles.h"
 #include "ndrtypes.h"
 
+#include "wine/heap.h"
 #include "wine/test.h"
 
 static int my_alloc_called;
@@ -41,13 +42,13 @@ static int my_free_called;
 static void * CALLBACK my_alloc(SIZE_T size)
 {
     my_alloc_called++;
-    return malloc(size);
+    return NdrOleAllocate(size);
 }
 
 static void CALLBACK my_free(void *ptr)
 {
     my_free_called++;
-    free(ptr);
+    NdrOleFree(ptr);
 }
 
 static const MIDL_STUB_DESC Object_StubDesc = 
@@ -125,14 +126,14 @@ static void determine_pointer_marshalling_style(void)
                            0);
 
     StubMsg.BufferLength = 8;
-    StubMsg.RpcMsg->Buffer = StubMsg.BufferStart = StubMsg.Buffer = malloc(StubMsg.BufferLength);
+    StubMsg.RpcMsg->Buffer = StubMsg.BufferStart = StubMsg.Buffer = HeapAlloc(GetProcessHeap(), 0, StubMsg.BufferLength);
     NdrPointerMarshall(&StubMsg, (unsigned char*)&ch, fmtstr_up_char);
     ok(StubMsg.Buffer == StubMsg.BufferStart + 5, "%p %p\n", StubMsg.Buffer, StubMsg.BufferStart);
 
     use_pointer_ids = (*(unsigned int *)StubMsg.BufferStart != (UINT_PTR)&ch);
     trace("Pointer marshalling using %s\n", use_pointer_ids ? "pointer ids" : "pointer value");
 
-    free(StubMsg.BufferStart);
+    HeapFree(GetProcessHeap(), 0, StubMsg.BufferStart);
 }
 
 static void test_ndr_simple_type(void)
@@ -152,7 +153,7 @@ static void test_ndr_simple_type(void)
                            0);
 
     StubMsg.BufferLength = 16;
-    StubMsg.RpcMsg->Buffer = StubMsg.BufferStart = StubMsg.Buffer = malloc(StubMsg.BufferLength);
+    StubMsg.RpcMsg->Buffer = StubMsg.BufferStart = StubMsg.Buffer = HeapAlloc(GetProcessHeap(), 0, StubMsg.BufferLength);
     StubMsg.BufferEnd = StubMsg.Buffer + StubMsg.BufferLength;
     l = 0xcafebabe;
     NdrSimpleTypeMarshall(&StubMsg, (unsigned char*)&l, FC_LONG);
@@ -169,7 +170,7 @@ static void test_ndr_simple_type(void)
     ok(StubMsg.Buffer == StubMsg.BufferStart + 8, "%p %p\n", StubMsg.Buffer, StubMsg.BufferStart);
     ok(l2 == l, "%ld\n", l2);
 
-    free(StubMsg.BufferStart);
+    HeapFree(GetProcessHeap(), 0, StubMsg.BufferStart);
 }
 
 static void test_pointer_marshal(const unsigned char *formattypes,
@@ -206,7 +207,7 @@ static void test_pointer_marshal(const unsigned char *formattypes,
     ok(StubMsg.BufferLength >= wiredatalen, "%s: length %ld\n", msgpfx, StubMsg.BufferLength);
 
     /*NdrGetBuffer(&_StubMsg, _StubMsg.BufferLength, NULL);*/
-    StubMsg.RpcMsg->Buffer = StubMsg.BufferStart = StubMsg.Buffer = malloc(StubMsg.BufferLength);
+    StubMsg.RpcMsg->Buffer = StubMsg.BufferStart = StubMsg.Buffer = HeapAlloc(GetProcessHeap(), 0, StubMsg.BufferLength);
     StubMsg.BufferEnd = StubMsg.BufferStart + StubMsg.BufferLength;
 
     memset(StubMsg.BufferStart, 0x0, StubMsg.BufferLength); /* This is a hack to clear the padding between the ptr and longlong/double */
@@ -281,7 +282,7 @@ static void test_pointer_marshal(const unsigned char *formattypes,
     {
         /* In this case the top-level pointer is not freed. */
         ok(my_free_called == num_additional_allocs, "%s: my_free got called %d times\n", msgpfx, my_free_called);
-        free(mem);
+        HeapFree(GetProcessHeap(), 0, mem);
     }
     else
         ok(my_free_called == 1 + num_additional_allocs, "%s: my_free got called %d times\n", msgpfx, my_free_called);
@@ -289,7 +290,7 @@ static void test_pointer_marshal(const unsigned char *formattypes,
     /* reset the buffer and call with must alloc */
     my_alloc_called = my_free_called = 0;
     StubMsg.Buffer = StubMsg.BufferStart;
-    mem_orig = mem = calloc(1, size);
+    mem_orig = mem = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, size);
     if (formattypes[1] & FC_POINTER_DEREF)
         *(void**)mem = NULL;
     ptr = NdrPointerUnmarshall( &StubMsg, &mem, formattypes, 1 );
@@ -307,7 +308,7 @@ static void test_pointer_marshal(const unsigned char *formattypes,
     {
         /* In this case the top-level pointer is not freed. */
         ok(my_free_called == num_additional_allocs, "%s: my_free got called %d times\n", msgpfx, my_free_called);
-        free(mem);
+        HeapFree(GetProcessHeap(), 0, mem);
     }
     else
         ok(my_free_called == 1 + num_additional_allocs, "%s: my_free got called %d times\n", msgpfx, my_free_called);
@@ -382,7 +383,7 @@ static void test_pointer_marshal(const unsigned char *formattypes,
          * stack memory. In practice it always *is* stack memory if ON_STACK is
          * set, so this leak isn't a concern. */
         ok(my_free_called == 0, "%s: my_free got called %d times\n", msgpfx, my_free_called);
-        free(mem);
+        HeapFree(GetProcessHeap(), 0, mem);
     }
     else
         ok(my_free_called == num_additional_allocs, "%s: my_free got called %d times\n", msgpfx, my_free_called);
@@ -409,7 +410,7 @@ static void test_pointer_marshal(const unsigned char *formattypes,
     else if ((formattypes[1] & FC_ALLOCED_ON_STACK) && (formattypes[1] & FC_POINTER_DEREF))
     {
         ok(my_free_called == 0, "%s: my_free got called %d times\n", msgpfx, my_free_called);
-        free(mem);
+        HeapFree(GetProcessHeap(), 0, mem);
     }
     else
         ok(my_free_called == num_additional_allocs, "%s: my_free got called %d times\n", msgpfx, my_free_called);
@@ -420,7 +421,7 @@ static void test_pointer_marshal(const unsigned char *formattypes,
 
     my_alloc_called = my_free_called = 0;
     StubMsg.Buffer = StubMsg.BufferStart;
-    mem_orig = mem = calloc(1, size);
+    mem_orig = mem = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, size);
     if (formattypes[1] & FC_POINTER_DEREF)
         *(void**)mem = NULL;
     ptr = NdrPointerUnmarshall( &StubMsg, &mem, formattypes, 0 );
@@ -430,7 +431,7 @@ static void test_pointer_marshal(const unsigned char *formattypes,
     else
     {
         ok(mem != mem_orig, "%s: mem has not changed\n", msgpfx);
-        free(mem_orig);
+        HeapFree(GetProcessHeap(), 0, mem_orig);
     }
     ok(!cmp(mem, memsrc, srcsize), "%s: incorrectly unmarshaled\n", msgpfx);
     ok(StubMsg.Buffer - StubMsg.BufferStart == wiredatalen, "%s: Buffer %p Start %p len %ld\n", msgpfx, StubMsg.Buffer, StubMsg.BufferStart, wiredatalen);
@@ -449,7 +450,7 @@ static void test_pointer_marshal(const unsigned char *formattypes,
     else if ((formattypes[1] & FC_ALLOCED_ON_STACK) && (formattypes[1] & FC_POINTER_DEREF))
     {
         ok(my_free_called == 0, "%s: my_free got called %d times\n", msgpfx, my_free_called);
-        free(mem);
+        HeapFree(GetProcessHeap(), 0, mem);
     }
     else
         ok(my_free_called == num_additional_allocs, "%s: my_free got called %d times\n", msgpfx, my_free_called);
@@ -457,7 +458,7 @@ static void test_pointer_marshal(const unsigned char *formattypes,
     /* reset the buffer and call with must alloc */
     my_alloc_called = my_free_called = 0;
     StubMsg.Buffer = StubMsg.BufferStart;
-    mem_orig = mem = calloc(1, size);
+    mem_orig = mem = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, size);
     if (formattypes[1] & FC_POINTER_DEREF)
         *(void**)mem = NULL;
     ptr = NdrPointerUnmarshall( &StubMsg, &mem, formattypes, 1 );
@@ -467,7 +468,7 @@ static void test_pointer_marshal(const unsigned char *formattypes,
     else
     {
         ok(mem != mem_orig, "%s: mem has not changed\n", msgpfx);
-        free(mem_orig);
+        HeapFree(GetProcessHeap(), 0, mem_orig);
     }
     ok(!cmp(mem, memsrc, srcsize), "%s: incorrectly unmarshaled\n", msgpfx);
     ok(StubMsg.Buffer - StubMsg.BufferStart == wiredatalen, "%s: Buffer %p Start %p len %ld\n", msgpfx, StubMsg.Buffer, StubMsg.BufferStart, wiredatalen);
@@ -486,12 +487,12 @@ static void test_pointer_marshal(const unsigned char *formattypes,
     else if ((formattypes[1] & FC_ALLOCED_ON_STACK) && (formattypes[1] & FC_POINTER_DEREF))
     {
         ok(my_free_called == 0, "%s: my_free got called %d times\n", msgpfx, my_free_called);
-        free(mem);
+        HeapFree(GetProcessHeap(), 0, mem);
     }
     else
         ok(my_free_called == num_additional_allocs, "%s: my_free got called %d times\n", msgpfx, my_free_called);
 
-    free(StubMsg.BufferStart);
+    HeapFree(GetProcessHeap(), 0, StubMsg.BufferStart);
 }
 
 static int deref_cmp(const void *s1, const void *s2, size_t num)
@@ -756,7 +757,7 @@ static void test_nontrivial_pointer_types(void)
     ok(StubMsg.BufferLength >= 5, "length %ld\n", StubMsg.BufferLength);
 
     /*NdrGetBuffer(&_StubMsg, _StubMsg.BufferLength, NULL);*/
-    StubMsg.RpcMsg->Buffer = StubMsg.BufferStart = StubMsg.Buffer = malloc(StubMsg.BufferLength);
+    StubMsg.RpcMsg->Buffer = StubMsg.BufferStart = StubMsg.Buffer = HeapAlloc(GetProcessHeap(), 0, StubMsg.BufferLength);
     StubMsg.BufferEnd = StubMsg.BufferStart + StubMsg.BufferLength;
 
     ptr = NdrPointerMarshall( &StubMsg, (unsigned char *)p1, &fmtstr_ref_unique_out[4] );
@@ -774,7 +775,7 @@ static void test_nontrivial_pointer_types(void)
     /* Client */
     my_alloc_called = 0;
     StubMsg.Buffer = StubMsg.BufferStart;
-    mem = mem_orig = malloc(sizeof(void *));
+    mem = mem_orig = HeapAlloc(GetProcessHeap(), 0, sizeof(void *));
     *(void **)mem = NULL;
     NdrPointerUnmarshall( &StubMsg, &mem, &fmtstr_ref_unique_out[4], 0);
     ok(mem == mem_orig, "mem alloced\n");
@@ -863,8 +864,8 @@ static void test_nontrivial_pointer_types(void)
     ok(my_free_called == 1, "free called %d\n", my_free_called);
     my_free(mem);
 
-    free(mem_orig);
-    free(StubMsg.RpcMsg->Buffer);
+    HeapFree(GetProcessHeap(), 0, mem_orig);
+    HeapFree(GetProcessHeap(), 0, StubMsg.RpcMsg->Buffer);
 }
 
 static void test_simple_struct_marshal(const unsigned char *formattypes,
@@ -894,7 +895,7 @@ static void test_simple_struct_marshal(const unsigned char *formattypes,
     StubMsg.BufferLength = 0;
     NdrSimpleStructBufferSize( &StubMsg, memsrc, formattypes );
     ok(StubMsg.BufferLength >= wiredatalen, "%s: length %ld\n", msgpfx, StubMsg.BufferLength);
-    StubMsg.RpcMsg->Buffer = StubMsg.BufferStart = StubMsg.Buffer = malloc(StubMsg.BufferLength);
+    StubMsg.RpcMsg->Buffer = StubMsg.BufferStart = StubMsg.Buffer = HeapAlloc(GetProcessHeap(), 0, StubMsg.BufferLength);
     StubMsg.BufferEnd = StubMsg.BufferStart + StubMsg.BufferLength;
     ptr = NdrSimpleStructMarshall( &StubMsg,  memsrc, formattypes );
     ok(ptr == NULL, "%s: ret %p\n", msgpfx, ptr);
@@ -918,7 +919,7 @@ static void test_simple_struct_marshal(const unsigned char *formattypes,
 
     StubMsg.Buffer = StubMsg.BufferStart;
     StubMsg.MemorySize = 0;
-    mem_orig = mem = calloc(1, srcsize);
+    mem_orig = mem = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, srcsize);
     ptr = NdrSimpleStructUnmarshall( &StubMsg, &mem, formattypes, 0 );
     ok(ptr == NULL, "%s: ret %p\n", msgpfx, ptr);
     ok(StubMsg.Buffer - StubMsg.BufferStart == wiredatalen, "%s: Buffer %p Start %p\n", msgpfx, StubMsg.Buffer, StubMsg.BufferStart);
@@ -1031,8 +1032,8 @@ static void test_simple_struct_marshal(const unsigned char *formattypes,
     ok(my_free_called == num_additional_allocs, "free called %d\n", my_free_called);
     my_free(mem);
 
-    free(mem_orig);
-    free(StubMsg.BufferStart);
+    HeapFree(GetProcessHeap(), 0, mem_orig);
+    HeapFree(GetProcessHeap(), 0, StubMsg.BufferStart);
 }
 
 typedef struct
@@ -1237,7 +1238,7 @@ static void test_struct_align(void)
         0x5b,   /* FC_END */
     };
 
-    memsrc_orig = calloc(1, sizeof(struct aligned) + 8);
+    memsrc_orig = heap_alloc_zero(sizeof(struct aligned) + 8);
     /* intentionally mis-align memsrc */
     memsrc = (struct aligned *)((((ULONG_PTR)memsrc_orig + 7) & ~7) + 4);
 
@@ -1251,7 +1252,7 @@ static void test_struct_align(void)
     StubMsg.BufferLength = 0;
     NdrComplexStructBufferSize(&StubMsg, (unsigned char *)memsrc, fmtstr);
 
-    StubMsg.RpcMsg->Buffer = StubMsg.BufferStart = StubMsg.Buffer = malloc(StubMsg.BufferLength);
+    StubMsg.RpcMsg->Buffer = StubMsg.BufferStart = StubMsg.Buffer = heap_alloc(StubMsg.BufferLength);
     StubMsg.BufferEnd = StubMsg.BufferStart + StubMsg.BufferLength;
 
     ptr = NdrComplexStructMarshall(&StubMsg, (unsigned char *)memsrc, fmtstr);
@@ -1266,8 +1267,8 @@ static void test_struct_align(void)
     ok(!memcmp(mem, memsrc, sizeof(*memsrc)), "struct wasn't unmarshalled correctly\n");
     StubMsg.pfnFree(mem);
 
-    free(StubMsg.RpcMsg->Buffer);
-    free(memsrc_orig);
+    heap_free(StubMsg.RpcMsg->Buffer);
+    heap_free(memsrc_orig);
 }
 
 struct testiface
@@ -1359,7 +1360,7 @@ static void test_iface_ptr(void)
     StubMsg.BufferLength = 0;
     NdrInterfacePointerBufferSize(&StubMsg, (unsigned char *)&client_obj.IPersist_iface, fmtstr_ip);
 
-    StubMsg.RpcMsg->Buffer = StubMsg.BufferStart = StubMsg.Buffer = malloc(StubMsg.BufferLength);
+    StubMsg.RpcMsg->Buffer = StubMsg.BufferStart = StubMsg.Buffer = HeapAlloc(GetProcessHeap(), 0, StubMsg.BufferLength);
     StubMsg.BufferEnd = StubMsg.BufferStart + StubMsg.BufferLength;
 
     /* server -> client */
@@ -1539,7 +1540,7 @@ static void test_iface_ptr(void)
     NdrInterfacePointerFree(&StubMsg, (unsigned char *)proxy, fmtstr_ip);
     ok(client_obj.ref == 1, "got %ld references\n", client_obj.ref);
 
-    free(StubMsg.BufferStart);
+    HeapFree(GetProcessHeap(), 0, StubMsg.BufferStart);
 
     CoUninitialize();
 }
@@ -1947,7 +1948,7 @@ static void test_conformant_array(void)
     ok(StubMsg.BufferLength >= 20, "length %ld\n", StubMsg.BufferLength);
 
     /*NdrGetBuffer(&_StubMsg, _StubMsg.BufferLength, NULL);*/
-    StubMsg.RpcMsg->Buffer = StubMsg.BufferStart = StubMsg.Buffer = malloc(StubMsg.BufferLength);
+    StubMsg.RpcMsg->Buffer = StubMsg.BufferStart = StubMsg.Buffer = HeapAlloc(GetProcessHeap(), 0, StubMsg.BufferLength);
     StubMsg.BufferEnd = StubMsg.BufferStart + StubMsg.BufferLength;
 
     ptr = NdrConformantArrayMarshall( &StubMsg,  memsrc, fmtstr_conf_array );
@@ -2021,7 +2022,7 @@ static void test_conformant_array(void)
     StubMsg.pfnFree(mem);
     StubMsg.pfnFree(mem_orig);
 
-    free(StubMsg.RpcMsg->Buffer);
+    HeapFree(GetProcessHeap(), 0, StubMsg.RpcMsg->Buffer);
 }
 
 static void test_conformant_string(void)
@@ -2058,7 +2059,7 @@ static void test_conformant_string(void)
     ok(StubMsg.BufferLength >= sizeof(memsrc) + 12, "length %ld\n", StubMsg.BufferLength);
 
     /*NdrGetBuffer(&_StubMsg, _StubMsg.BufferLength, NULL);*/
-    StubMsg.RpcMsg->Buffer = StubMsg.BufferStart = StubMsg.Buffer = malloc(StubMsg.BufferLength);
+    StubMsg.RpcMsg->Buffer = StubMsg.BufferStart = StubMsg.Buffer = HeapAlloc(GetProcessHeap(), 0, StubMsg.BufferLength);
     StubMsg.BufferEnd = StubMsg.BufferStart + StubMsg.BufferLength;
 
     ptr = NdrPointerMarshall( &StubMsg, (unsigned char *)memsrc, fmtstr_conf_str );
@@ -2075,7 +2076,7 @@ static void test_conformant_string(void)
     /* Client */
     my_alloc_called = 0;
     StubMsg.Buffer = StubMsg.BufferStart;
-    mem = mem_orig = malloc(sizeof(memsrc));
+    mem = mem_orig = HeapAlloc(GetProcessHeap(), 0, sizeof(memsrc));
     /* Windows apparently checks string length on the output buffer to determine its size... */
     memset( mem, 'x', sizeof(memsrc) - 1 );
     mem[sizeof(memsrc) - 1] = 0;
@@ -2092,7 +2093,7 @@ static void test_conformant_string(void)
     /* Prevent a memory leak when running with Wine.
        Remove once the todo_wine block above is fixed. */
     if (mem != mem_orig)
-        free(mem_orig);
+        HeapFree(GetProcessHeap(), 0, mem_orig);
 
     my_free_called = 0;
     StubMsg.Buffer = StubMsg.BufferStart;
@@ -2124,7 +2125,7 @@ static void test_conformant_string(void)
     ok(my_alloc_called == 0, "alloc called %d\n", my_alloc_called);
 
     my_alloc_called = 0;
-    mem = mem_orig = malloc(sizeof(memsrc));
+    mem = mem_orig = HeapAlloc(GetProcessHeap(), 0, sizeof(memsrc));
     StubMsg.Buffer = StubMsg.BufferStart;
     NdrPointerUnmarshall( &StubMsg, &mem, fmtstr_conf_str, 0);
     ok(mem == StubMsg.BufferStart + 12 || broken(!mem), /* win9x, nt4 */
@@ -2145,8 +2146,8 @@ static void test_conformant_string(void)
     NdrPointerFree( &StubMsg, mem, fmtstr_conf_str );
     ok(my_free_called == 1, "free called %d\n", my_free_called);
 
-    free(mem_orig);
-    free(StubMsg.RpcMsg->Buffer);
+    HeapFree(GetProcessHeap(), 0, mem_orig);
+    HeapFree(GetProcessHeap(), 0, StubMsg.RpcMsg->Buffer);
 }
 
 static void test_nonconformant_string(void)
@@ -2183,7 +2184,7 @@ static void test_nonconformant_string(void)
     ok(StubMsg.BufferLength >= strlen((char *)memsrc) + 1 + 8, "length %ld\n", StubMsg.BufferLength);
 
     /*NdrGetBuffer(&_StubMsg, _StubMsg.BufferLength, NULL);*/
-    StubMsg.RpcMsg->Buffer = StubMsg.BufferStart = StubMsg.Buffer = malloc(StubMsg.BufferLength);
+    StubMsg.RpcMsg->Buffer = StubMsg.BufferStart = StubMsg.Buffer = HeapAlloc(GetProcessHeap(), 0, StubMsg.BufferLength);
     StubMsg.BufferEnd = StubMsg.BufferStart + StubMsg.BufferLength;
 
     ptr = NdrNonConformantStringMarshall( &StubMsg, memsrc, fmtstr_nonconf_str );
@@ -2200,7 +2201,7 @@ static void test_nonconformant_string(void)
     /* Client */
     my_alloc_called = 0;
     StubMsg.Buffer = StubMsg.BufferStart;
-    mem = mem_orig = malloc(sizeof(memsrc));
+    mem = mem_orig = HeapAlloc(GetProcessHeap(), 0, sizeof(memsrc));
     NdrNonConformantStringUnmarshall( &StubMsg, &mem, fmtstr_nonconf_str, 0);
     ok(mem == mem_orig, "mem alloced\n");
     ok(my_alloc_called == 0, "alloc called %d\n", my_alloc_called);
@@ -2222,7 +2223,7 @@ static void test_nonconformant_string(void)
     ok(mem != mem_orig, "mem not alloced\n");
     ok(mem != StubMsg.BufferStart + 8, "mem pointing at buffer\n");
     ok(my_alloc_called == 1, "alloc called %d\n", my_alloc_called);
-    free(mem);
+    NdrOleFree(mem);
 
     my_alloc_called = 0;
     mem = mem_orig;
@@ -2240,8 +2241,8 @@ static void test_nonconformant_string(void)
     todo_wine
     ok(my_alloc_called == 0, "alloc called %d\n", my_alloc_called);
 
-    free(mem_orig);
-    free(StubMsg.RpcMsg->Buffer);
+    HeapFree(GetProcessHeap(), 0, mem_orig);
+    HeapFree(GetProcessHeap(), 0, StubMsg.RpcMsg->Buffer);
 
     /* length = size */
     NdrClientInitializeNew(
@@ -2256,7 +2257,7 @@ static void test_nonconformant_string(void)
     ok(StubMsg.BufferLength >= strlen((char *)memsrc2) + 1 + 8, "length %ld\n", StubMsg.BufferLength);
 
     /*NdrGetBuffer(&_StubMsg, _StubMsg.BufferLength, NULL);*/
-    StubMsg.RpcMsg->Buffer = StubMsg.BufferStart = StubMsg.Buffer = malloc(StubMsg.BufferLength);
+    StubMsg.RpcMsg->Buffer = StubMsg.BufferStart = StubMsg.Buffer = HeapAlloc(GetProcessHeap(), 0, StubMsg.BufferLength);
     StubMsg.BufferEnd = StubMsg.BufferStart + StubMsg.BufferLength;
 
     ptr = NdrNonConformantStringMarshall( &StubMsg, memsrc2, fmtstr_nonconf_str );
@@ -2273,7 +2274,7 @@ static void test_nonconformant_string(void)
     /* Client */
     my_alloc_called = 0;
     StubMsg.Buffer = StubMsg.BufferStart;
-    mem = mem_orig = malloc(sizeof(memsrc));
+    mem = mem_orig = HeapAlloc(GetProcessHeap(), 0, sizeof(memsrc));
     NdrNonConformantStringUnmarshall( &StubMsg, &mem, fmtstr_nonconf_str, 0);
     ok(mem == mem_orig, "mem alloced\n");
     ok(my_alloc_called == 0, "alloc called %d\n", my_alloc_called);
@@ -2295,7 +2296,7 @@ static void test_nonconformant_string(void)
     ok(mem != mem_orig, "mem not alloced\n");
     ok(mem != StubMsg.BufferStart + 8, "mem pointing at buffer\n");
     ok(my_alloc_called == 1, "alloc called %d\n", my_alloc_called);
-    free(mem);
+    NdrOleFree(mem);
 
     my_alloc_called = 0;
     mem = mem_orig;
@@ -2313,8 +2314,8 @@ static void test_nonconformant_string(void)
     todo_wine
     ok(my_alloc_called == 0, "alloc called %d\n", my_alloc_called);
 
-    free(mem_orig);
-    free(StubMsg.RpcMsg->Buffer);
+    HeapFree(GetProcessHeap(), 0, mem_orig);
+    HeapFree(GetProcessHeap(), 0, StubMsg.RpcMsg->Buffer);
 }
 
 static void test_conf_complex_struct(void)
@@ -2365,7 +2366,8 @@ static void test_conf_complex_struct(void)
         0x5b,	/* FC_END */
     };
 
-    memsrc = calloc(1, FIELD_OFFSET(struct conf_complex, array[20]));
+    memsrc = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY,
+                       FIELD_OFFSET(struct conf_complex, array[20]));
     memsrc->size = 20;
 
     StubDesc = Object_StubDesc;
@@ -2382,7 +2384,7 @@ static void test_conf_complex_struct(void)
     ok(StubMsg.BufferLength >= 92, "length %ld\n", StubMsg.BufferLength);
 
     /*NdrGetBuffer(&_StubMsg, _StubMsg.BufferLength, NULL);*/
-    StubMsg.RpcMsg->Buffer = StubMsg.BufferStart = StubMsg.Buffer = malloc(StubMsg.BufferLength);
+    StubMsg.RpcMsg->Buffer = StubMsg.BufferStart = StubMsg.Buffer = HeapAlloc(GetProcessHeap(), 0, StubMsg.BufferLength);
     StubMsg.BufferEnd = StubMsg.BufferStart + StubMsg.BufferLength;
 
     ptr = NdrComplexStructMarshall(&StubMsg, (unsigned char *)memsrc, &fmtstr_complex_struct[12]);
@@ -2408,8 +2410,8 @@ static void test_conf_complex_struct(void)
     ok(mem->array[0] == 0, "mem->array[0] wasn't unmarshalled correctly (%u)\n", mem->array[0]);
     StubMsg.pfnFree(mem);
 
-    free(StubMsg.RpcMsg->Buffer);
-    free(memsrc);
+    HeapFree(GetProcessHeap(), 0, StubMsg.RpcMsg->Buffer);
+    HeapFree(GetProcessHeap(), 0, memsrc);
 }
 
 
@@ -2491,11 +2493,11 @@ static void test_conf_complex_array(void)
     memsrc.dim1 = 5;
     memsrc.dim2 = 3;
 
-    memsrc.array = calloc(memsrc.dim1, sizeof(DWORD *));
+    memsrc.array = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, memsrc.dim1 * sizeof(DWORD*));
 
     for(i = 0; i < memsrc.dim1; i++)
     {
-        memsrc.array[i] = calloc(memsrc.dim2, sizeof(DWORD));
+        memsrc.array[i] = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, memsrc.dim2 * sizeof(DWORD));
         for(j = 0; j < memsrc.dim2; j++)
             memsrc.array[i][j] = i * memsrc.dim2 + j;
     }
@@ -2525,7 +2527,7 @@ static void test_conf_complex_array(void)
     ok(StubMsg.BufferLength >= expected_length, "length %ld\n", StubMsg.BufferLength);
 
     /*NdrGetBuffer(&_StubMsg, _StubMsg.BufferLength, NULL);*/
-    StubMsg.RpcMsg->Buffer = StubMsg.BufferStart = StubMsg.Buffer = malloc(StubMsg.BufferLength);
+    StubMsg.RpcMsg->Buffer = StubMsg.BufferStart = StubMsg.Buffer = HeapAlloc(GetProcessHeap(), 0, StubMsg.BufferLength);
     StubMsg.BufferEnd = StubMsg.BufferStart + StubMsg.BufferLength;
 
 #ifdef _WIN64
@@ -2589,11 +2591,11 @@ static void test_conf_complex_array(void)
     NdrSimpleStructFree( &StubMsg, (unsigned char*)mem, &fmtstr_complex_array[32]);
 #endif
 
-    free(StubMsg.RpcMsg->Buffer);
+    HeapFree(GetProcessHeap(), 0, StubMsg.RpcMsg->Buffer);
 
     for(i = 0; i < memsrc.dim1; i++)
-        free(memsrc.array[i]);
-    free(memsrc.array);
+        HeapFree(GetProcessHeap(), 0, memsrc.array[i]);
+    HeapFree(GetProcessHeap(), 0, memsrc.array);
 }
 
 static void test_ndr_buffer(void)
@@ -2758,21 +2760,21 @@ static void test_NdrGetUserMarshalInfo(void)
     ok( umi.InformationLevel == 1,
        "umi.InformationLevel was %lu instead of 1\n",
         umi.InformationLevel);
-    ok( umi.Level1.Buffer == buffer + 15,
+    ok( U1(umi).Level1.Buffer == buffer + 15,
        "umi.Level1.Buffer was %p instead of %p\n",
-        umi.Level1.Buffer, buffer);
-    ok( umi.Level1.BufferSize == 1,
+        U1(umi).Level1.Buffer, buffer);
+    ok( U1(umi).Level1.BufferSize == 1,
        "umi.Level1.BufferSize was %lu instead of 1\n",
-        umi.Level1.BufferSize);
-    ok( umi.Level1.pfnAllocate == my_alloc,
+        U1(umi).Level1.BufferSize);
+    ok( U1(umi).Level1.pfnAllocate == my_alloc,
        "umi.Level1.pfnAllocate was %p instead of %p\n",
-        umi.Level1.pfnAllocate, my_alloc);
-    ok( umi.Level1.pfnFree == my_free,
+        U1(umi).Level1.pfnAllocate, my_alloc);
+    ok( U1(umi).Level1.pfnFree == my_free,
        "umi.Level1.pfnFree was %p instead of %p\n",
-        umi.Level1.pfnFree, my_free);
-    ok( umi.Level1.pRpcChannelBuffer == rpc_channel_buffer,
+        U1(umi).Level1.pfnFree, my_free);
+    ok( U1(umi).Level1.pRpcChannelBuffer == rpc_channel_buffer,
        "umi.Level1.pRpcChannelBuffer was %p instead of %p\n",
-        umi.Level1.pRpcChannelBuffer, rpc_channel_buffer);
+        U1(umi).Level1.pRpcChannelBuffer, rpc_channel_buffer);
 
     /* buffer size */
 
@@ -2792,21 +2794,21 @@ static void test_NdrGetUserMarshalInfo(void)
     ok( umi.InformationLevel == 1,
        "umi.InformationLevel was %lu instead of 1\n",
         umi.InformationLevel);
-    ok( umi.Level1.Buffer == NULL,
+    ok( U1(umi).Level1.Buffer == NULL,
        "umi.Level1.Buffer was %p instead of NULL\n",
-        umi.Level1.Buffer);
-    ok( umi.Level1.BufferSize == 0,
+        U1(umi).Level1.Buffer);
+    ok( U1(umi).Level1.BufferSize == 0,
        "umi.Level1.BufferSize was %lu instead of 0\n",
-        umi.Level1.BufferSize);
-    ok( umi.Level1.pfnAllocate == my_alloc,
+        U1(umi).Level1.BufferSize);
+    ok( U1(umi).Level1.pfnAllocate == my_alloc,
        "umi.Level1.pfnAllocate was %p instead of %p\n",
-        umi.Level1.pfnAllocate, my_alloc);
-    ok( umi.Level1.pfnFree == my_free,
+        U1(umi).Level1.pfnAllocate, my_alloc);
+    ok( U1(umi).Level1.pfnFree == my_free,
        "umi.Level1.pfnFree was %p instead of %p\n",
-        umi.Level1.pfnFree, my_free);
-    ok( umi.Level1.pRpcChannelBuffer == rpc_channel_buffer,
+        U1(umi).Level1.pfnFree, my_free);
+    ok( U1(umi).Level1.pRpcChannelBuffer == rpc_channel_buffer,
        "umi.Level1.pRpcChannelBuffer was %p instead of %p\n",
-        umi.Level1.pRpcChannelBuffer, rpc_channel_buffer);
+        U1(umi).Level1.pRpcChannelBuffer, rpc_channel_buffer);
 
     /* marshall */
 
@@ -2826,21 +2828,21 @@ static void test_NdrGetUserMarshalInfo(void)
     ok( umi.InformationLevel == 1,
        "umi.InformationLevel was %lu instead of 1\n",
         umi.InformationLevel);
-    ok( umi.Level1.Buffer == buffer + 15,
+    ok( U1(umi).Level1.Buffer == buffer + 15,
        "umi.Level1.Buffer was %p instead of %p\n",
-        umi.Level1.Buffer, buffer);
-    ok( umi.Level1.BufferSize == 1,
+        U1(umi).Level1.Buffer, buffer);
+    ok( U1(umi).Level1.BufferSize == 1,
        "umi.Level1.BufferSize was %lu instead of 1\n",
-        umi.Level1.BufferSize);
-    ok( umi.Level1.pfnAllocate == my_alloc,
+        U1(umi).Level1.BufferSize);
+    ok( U1(umi).Level1.pfnAllocate == my_alloc,
        "umi.Level1.pfnAllocate was %p instead of %p\n",
-        umi.Level1.pfnAllocate, my_alloc);
-    ok( umi.Level1.pfnFree == my_free,
+        U1(umi).Level1.pfnAllocate, my_alloc);
+    ok( U1(umi).Level1.pfnFree == my_free,
        "umi.Level1.pfnFree was %p instead of %p\n",
-        umi.Level1.pfnFree, my_free);
-    ok( umi.Level1.pRpcChannelBuffer == rpc_channel_buffer,
+        U1(umi).Level1.pfnFree, my_free);
+    ok( U1(umi).Level1.pRpcChannelBuffer == rpc_channel_buffer,
        "umi.Level1.pRpcChannelBuffer was %p instead of %p\n",
-        umi.Level1.pRpcChannelBuffer, rpc_channel_buffer);
+        U1(umi).Level1.pRpcChannelBuffer, rpc_channel_buffer);
 
     /* free */
 
@@ -2860,21 +2862,21 @@ static void test_NdrGetUserMarshalInfo(void)
     ok( umi.InformationLevel == 1,
        "umi.InformationLevel was %lu instead of 1\n",
         umi.InformationLevel);
-    ok( umi.Level1.Buffer == NULL,
+    ok( U1(umi).Level1.Buffer == NULL,
        "umi.Level1.Buffer was %p instead of NULL\n",
-        umi.Level1.Buffer);
-    ok( umi.Level1.BufferSize == 0,
+        U1(umi).Level1.Buffer);
+    ok( U1(umi).Level1.BufferSize == 0,
        "umi.Level1.BufferSize was %lu instead of 0\n",
-        umi.Level1.BufferSize);
-    ok( umi.Level1.pfnAllocate == my_alloc,
+        U1(umi).Level1.BufferSize);
+    ok( U1(umi).Level1.pfnAllocate == my_alloc,
        "umi.Level1.pfnAllocate was %p instead of %p\n",
-        umi.Level1.pfnAllocate, my_alloc);
-    ok( umi.Level1.pfnFree == my_free,
+        U1(umi).Level1.pfnAllocate, my_alloc);
+    ok( U1(umi).Level1.pfnFree == my_free,
        "umi.Level1.pfnFree was %p instead of %p\n",
-        umi.Level1.pfnFree, my_free);
-    ok( umi.Level1.pRpcChannelBuffer == rpc_channel_buffer,
+        U1(umi).Level1.pfnFree, my_free);
+    ok( U1(umi).Level1.pRpcChannelBuffer == rpc_channel_buffer,
        "umi.Level1.pRpcChannelBuffer was %p instead of %p\n",
-        umi.Level1.pRpcChannelBuffer, rpc_channel_buffer);
+        U1(umi).Level1.pRpcChannelBuffer, rpc_channel_buffer);
 
     /* boundary test */
 
@@ -2889,9 +2891,9 @@ static void test_NdrGetUserMarshalInfo(void)
 
     status = NdrGetUserMarshalInfo(&umcb.Flags, 1, &umi);
     ok(status == RPC_S_OK, "NdrGetUserMarshalInfo failed with error %ld\n", status);
-    ok( umi.Level1.BufferSize == 0,
+    ok( U1(umi).Level1.BufferSize == 0,
        "umi.Level1.BufferSize was %lu instead of 0\n",
-        umi.Level1.BufferSize);
+        U1(umi).Level1.BufferSize);
 
     /* error conditions */
 

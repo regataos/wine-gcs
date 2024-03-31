@@ -29,6 +29,8 @@
 #include <stdarg.h>
 #include <string.h>
 
+#define NONAMELESSUNION
+
 #include "windef.h"
 #include "winbase.h"
 #include "mmsystem.h"
@@ -469,8 +471,8 @@ UINT16 WINAPI mixerGetLineControls16(HMIXEROBJ16 hmix,
 
     mlcA.cbStruct = sizeof(mlcA);
     mlcA.dwLineID = lpmlc16->dwLineID;
-    mlcA.dwControlID = lpmlc16->u.dwControlID;
-    mlcA.dwControlType = lpmlc16->u.dwControlType;
+    mlcA.u.dwControlID = lpmlc16->u.dwControlID;
+    mlcA.u.dwControlType = lpmlc16->u.dwControlType;
     mlcA.cControls = lpmlc16->cControls;
     mlcA.cbmxctrl = sizeof(MIXERCONTROLA);
     mlcA.pamxctrl = HeapAlloc(GetProcessHeap(), 0,
@@ -480,8 +482,8 @@ UINT16 WINAPI mixerGetLineControls16(HMIXEROBJ16 hmix,
 
     if (ret == MMSYSERR_NOERROR) {
 	lpmlc16->dwLineID = mlcA.dwLineID;
-	lpmlc16->u.dwControlID = mlcA.dwControlID;
-	lpmlc16->u.dwControlType = mlcA.dwControlType;
+	lpmlc16->u.dwControlID = mlcA.u.dwControlID;
+	lpmlc16->u.dwControlType = mlcA.u.dwControlType;
 	lpmlc16->cControls = mlcA.cControls;
 
 	lpmc16 = MapSL(lpmlc16->pamxctrl);

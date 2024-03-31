@@ -1,7 +1,9 @@
 MODULE  = windows.media.dll
 IMPORTS = combase
 
-SOURCES = \
+C_SRCS = \
 	captions.c \
-	classes.idl \
 	main.c
+
+IDL_SRCS = \
+	classes.idl

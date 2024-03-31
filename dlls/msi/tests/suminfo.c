@@ -343,45 +343,45 @@ static void test_create_database_binary(void)
     ok( r == S_OK, "failed to set class\n");
 
     propspec[0].ulKind = PRSPEC_PROPID;
-    propspec[0].propid = PID_TITLE;
+    U(propspec[0]).propid = PID_TITLE;
     propvar[0].vt = VT_LPSTR;
-    propvar[0].pszVal = LOSE_CONST("test title");
+    U(propvar[0]).pszVal = LOSE_CONST("test title");
 
     propspec[1].ulKind = PRSPEC_PROPID;
-    propspec[1].propid = PID_SUBJECT;
+    U(propspec[1]).propid = PID_SUBJECT;
     propvar[1].vt = VT_LPSTR;
-    propvar[1].pszVal = LOSE_CONST("msi suminfo / property storage test");
+    U(propvar[1]).pszVal = LOSE_CONST("msi suminfo / property storage test");
 
     propspec[2].ulKind = PRSPEC_PROPID;
-    propspec[2].propid = PID_AUTHOR;
+    U(propspec[2]).propid = PID_AUTHOR;
     propvar[2].vt = VT_LPSTR;
-    propvar[2].pszVal = LOSE_CONST("mike_m");
+    U(propvar[2]).pszVal = LOSE_CONST("mike_m");
 
     propspec[3].ulKind = PRSPEC_PROPID;
-    propspec[3].propid = PID_TEMPLATE;
+    U(propspec[3]).propid = PID_TEMPLATE;
     propvar[3].vt = VT_LPSTR;
-    propvar[3].pszVal = LOSE_CONST(";1033");  /* actually the string table's codepage */
+    U(propvar[3]).pszVal = LOSE_CONST(";1033");  /* actually the string table's codepage */
 
     propspec[4].ulKind = PRSPEC_PROPID;
-    propspec[4].propid = PID_REVNUMBER;
+    U(propspec[4]).propid = PID_REVNUMBER;
     propvar[4].vt = VT_LPSTR;
-    propvar[4].pszVal = LOSE_CONST("{913B8D18-FBB6-4CAC-A239-C74C11E3FA74}");
+    U(propvar[4]).pszVal = LOSE_CONST("{913B8D18-FBB6-4CAC-A239-C74C11E3FA74}");
 
     propspec[5].ulKind = PRSPEC_PROPID;
-    propspec[5].propid = PID_PAGECOUNT;
+    U(propspec[5]).propid = PID_PAGECOUNT;
     propvar[5].vt = VT_I4;
-    propvar[5].lVal = 100;
+    U(propvar[5]).lVal = 100;
 
     propspec[6].ulKind = PRSPEC_PROPID;
-    propspec[6].propid = PID_WORDCOUNT;
+    U(propspec[6]).propid = PID_WORDCOUNT;
     propvar[6].vt = VT_I4;
-    propvar[6].lVal = 0;
+    U(propvar[6]).lVal = 0;
 
     /* MSDN says that PID_LASTPRINTED should be a VT_FILETIME... */
     propspec[7].ulKind = PRSPEC_PROPID;
-    propspec[7].propid = PID_LASTPRINTED;
+    U(propspec[7]).propid = PID_LASTPRINTED;
     propvar[7].vt = VT_LPSTR;
-    propvar[7].pszVal = LOSE_CONST("7/1/1999 5:17");
+    U(propvar[7]).pszVal = LOSE_CONST("7/1/1999 5:17");
 
     r = IPropertyStorage_WriteMultiple( ps, 8, propspec, propvar, PID_FIRST_USABLE );
     ok( r == S_OK, "failed to write properties\n");

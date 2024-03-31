@@ -27,8 +27,9 @@
  */
 
 #include "config.h"
+#include "intsym.h"
 /* Includes string and stdlib headers... */
-#include "../compat/compat.h"
+#include "compat.h"
 
 /* ThOr: too lazy for this type check; also we use char/short all around anyway.
    Of cource, it would be the proper way to use _these_ kind of types all around. */
@@ -374,7 +375,7 @@ is_utf8(const char* src)
    ICY in CP-1252 (or UTF-8 alreay) to UTF-8 encoded string.
    If force is applied, it will always encode to UTF-8, without checking. */
 char *
-INT123_icy2utf8(const char *src, int force)
+icy2utf8(const char *src, int force)
 {
 	const uint8_t *s = (const uint8_t *)src;
 	size_t srclen, dstlen, i, k;
@@ -383,7 +384,7 @@ INT123_icy2utf8(const char *src, int force)
 
 	/* Some funny streams from Apple/iTunes give ICY info in UTF-8 already.
 	   So, be prepared and don't try to re-encode such. Unless forced. */
-	if(!force && is_utf8(src)) return (INT123_compat_strdup(src));
+	if(!force && is_utf8(src)) return (compat_strdup(src));
 
 	srclen = strlen(src) + 1;
 	/* allocate conservatively */
@@ -418,13 +419,13 @@ main(void)
 {
 	char *t, *t2;
 
-	if ((t = INT123_icy2utf8(intext, 0)) == NULL) {
+	if ((t = icy2utf8(intext, 0)) == NULL) {
 		fprintf(stderr, "out of memory\n");
 		return (1);
 	}
 
 	/* make sure it won't be converted twice */
-	if ((t2 = INT123_icy2utf8(t), 0) == NULL) {
+	if ((t2 = icy2utf8(t), 0) == NULL) {
 		fprintf(stderr, "out of memory\n");
 		return (1);
 	}

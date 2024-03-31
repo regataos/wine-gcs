@@ -69,15 +69,6 @@ struct cache_entry
     unsigned int has_bitmap : 1;
 };
 
-/* Ignore dx and dy because FreeType doesn't actually use it */
-static inline void matrix_2x2_from_dwrite_matrix(MATRIX_2X2 *m1, const DWRITE_MATRIX *m2)
-{
-    m1->m11 = m2->m11;
-    m1->m12 = m2->m12;
-    m1->m21 = m2->m21;
-    m1->m22 = m2->m22;
-}
-
 static void fontface_release_cache_entry(struct cache_entry *entry)
 {
     free(entry->bitmap);
@@ -107,7 +98,7 @@ static struct cache_entry * fontface_get_cache_entry(struct dwrite_fontface *fon
             fontface_release_cache_entry(old_entry);
         }
 
-        if (wine_rb_put(&fontface->cache.tree, key, &entry->entry) == -1)
+        if (wine_rb_put(&fontface->cache.tree, &key, &entry->entry) == -1)
         {
             WARN("Failed to add cache entry.\n");
             free(entry);
@@ -166,11 +157,11 @@ void dwrite_fontface_get_glyph_bbox(IDWriteFontFace *iface, struct dwrite_glyphb
     params.simulations = bitmap->simulations;
     params.glyph = bitmap->glyph;
     params.emsize = bitmap->emsize;
-    matrix_2x2_from_dwrite_matrix(&params.m, bitmap->m ? bitmap->m : &identity);
+    params.m = bitmap->m ? *bitmap->m : identity;
 
     EnterCriticalSection(&fontface->cs);
     /* For now bypass cache for transformed cases. */
-    if (bitmap->m && memcmp(&params.m, &identity_2x2, sizeof(params.m)))
+    if (bitmap->m && memcmp(bitmap->m, &identity, sizeof(*bitmap->m)))
     {
         params.bbox = &bitmap->bbox;
         UNIX_CALL(get_glyph_bbox, &params);
@@ -193,7 +184,7 @@ static unsigned int get_glyph_bitmap_pitch(DWRITE_RENDERING_MODE1 rendering_mode
     return rendering_mode == DWRITE_RENDERING_MODE1_ALIASED ? ((width + 31) >> 5) << 2 : (width + 3) / 4 * 4;
 }
 
-static HRESULT dwrite_fontface_get_glyph_bitmap(struct dwrite_fontface *fontface, DWRITE_RENDERING_MODE1 rendering_mode,
+static HRESULT dwrite_fontface_get_glyph_bitmap(struct dwrite_fontface *fontface, DWRITE_RENDERING_MODE rendering_mode,
         unsigned int *is_1bpp, struct dwrite_glyphbitmap *bitmap)
 {
     struct cache_key key = { .size = bitmap->emsize, .glyph = bitmap->glyph, .mode = DWRITE_MEASURING_MODE_NATURAL };
@@ -211,15 +202,15 @@ static HRESULT dwrite_fontface_get_glyph_bitmap(struct dwrite_fontface *fontface
     params.glyph = bitmap->glyph;
     params.mode = rendering_mode;
     params.emsize = bitmap->emsize;
+    params.m = bitmap->m ? *bitmap->m : identity;
     params.bbox = bitmap->bbox;
     params.pitch = bitmap->pitch;
     params.bitmap = bitmap->buf;
     params.is_1bpp = is_1bpp;
-    matrix_2x2_from_dwrite_matrix(&params.m, bitmap->m ? bitmap->m : &identity);
 
     EnterCriticalSection(&fontface->cs);
     /* For now bypass cache for transformed cases. */
-    if (bitmap->m && memcmp(&params.m, &identity_2x2, sizeof(params.m)))
+    if (memcmp(&params.m, &identity, sizeof(params.m)))
     {
         UNIX_CALL(get_glyph_bitmap, &params);
     }
@@ -674,7 +665,7 @@ const void* get_fontface_table(IDWriteFontFace5 *fontface, UINT32 tag, struct dw
     hr = IDWriteFontFace5_TryGetFontTable(fontface, tag, (const void **)&table->data, &table->size, &table->context,
         &table->exists);
     if (FAILED(hr) || !table->exists) {
-        TRACE("Font does not have %s table\n", debugstr_fourcc(tag));
+        TRACE("Font does not have %s table\n", debugstr_tag(tag));
         return NULL;
     }
 
@@ -685,7 +676,7 @@ static void init_font_prop_vec(DWRITE_FONT_WEIGHT weight, DWRITE_FONT_STRETCH st
     struct dwrite_font_propvec *vec)
 {
     vec->stretch = ((INT32)stretch - DWRITE_FONT_STRETCH_NORMAL) * 11.0f;
-    vec->style = (float)style * 7.0f;
+    vec->style = style * 7.0f;
     vec->weight = ((INT32)weight - DWRITE_FONT_WEIGHT_NORMAL) / 100.0f * 5.0f;
 }
 
@@ -1050,7 +1041,7 @@ static HRESULT WINAPI dwritefontface_TryGetFontTable(IDWriteFontFace5 *iface, UI
     struct dwrite_fontface *fontface = impl_from_IDWriteFontFace5(iface);
     struct file_stream_desc stream_desc;
 
-    TRACE("%p, %s, %p, %p, %p, %p.\n", iface, debugstr_fourcc(table_tag), table_data, table_size, context, exists);
+    TRACE("%p, %s, %p, %p, %p, %p.\n", iface, debugstr_tag(table_tag), table_data, table_size, context, exists);
 
     stream_desc.stream = fontface->stream;
     stream_desc.face_type = fontface->type;
@@ -1798,7 +1789,7 @@ static HRESULT WINAPI dwritefontface3_GetRecommendedRenderingMode(IDWriteFontFac
     IDWriteRenderingParams *params, DWRITE_RENDERING_MODE1 *rendering_mode, DWRITE_GRID_FIT_MODE *gridfit_mode)
 {
     struct dwrite_fontface *fontface = impl_from_IDWriteFontFace5(iface);
-    unsigned int flags, mode;
+    unsigned int flags;
     FLOAT emthreshold;
 
     TRACE("%p, %.8e, %.8e, %.8e, %p, %d, %d, %d, %p, %p, %p.\n", iface, emSize, dpiX, dpiY, m, is_sideways, threshold,
@@ -1821,12 +1812,11 @@ static HRESULT WINAPI dwritefontface3_GetRecommendedRenderingMode(IDWriteFontFac
         hr = IDWriteRenderingParams_QueryInterface(params, &IID_IDWriteRenderingParams3, (void**)&params3);
         if (hr == S_OK) {
             *rendering_mode = IDWriteRenderingParams3_GetRenderingMode1(params3);
-            mode = IDWriteRenderingParams3_GetGridFitMode(params3);
+            *gridfit_mode = IDWriteRenderingParams3_GetGridFitMode(params3);
             IDWriteRenderingParams3_Release(params3);
         }
         else
-            mode = IDWriteRenderingParams_GetRenderingMode(params);
-        *rendering_mode = mode;
+            *rendering_mode = IDWriteRenderingParams_GetRenderingMode(params);
     }
 
     emthreshold = threshold == DWRITE_OUTLINE_THRESHOLD_ANTIALIASED ? RECOMMENDED_OUTLINE_AA_THRESHOLD : RECOMMENDED_OUTLINE_A_THRESHOLD;
@@ -1835,10 +1825,9 @@ static HRESULT WINAPI dwritefontface3_GetRecommendedRenderingMode(IDWriteFontFac
 
     if (*rendering_mode == DWRITE_RENDERING_MODE1_DEFAULT) {
         if (emSize >= emthreshold)
-            mode = DWRITE_RENDERING_MODE1_OUTLINE;
+            *rendering_mode = DWRITE_RENDERING_MODE1_OUTLINE;
         else
-            mode = fontface_renderingmode_from_measuringmode(measuring_mode, emSize, flags);
-        *rendering_mode = mode;
+            *rendering_mode = fontface_renderingmode_from_measuringmode(measuring_mode, emSize, flags);
     }
 
     if (*gridfit_mode == DWRITE_GRID_FIT_MODE_DEFAULT) {
@@ -4785,7 +4774,11 @@ HRESULT create_font_collection(IDWriteFactory7 *factory, IDWriteFontFileEnumerat
             }
         }
 
-        IDWriteFontFileStream_Release(stream);
+        const char *sgi = getenv("SteamGameId");
+
+        if ((!sgi) | (sgi && strcmp(sgi, "244210"))) {
+            IDWriteFontFileStream_Release(stream);
+        }
     }
 
     LIST_FOR_EACH_ENTRY_SAFE(fileenum, fileenum2, &scannedfiles, struct fontfile_enum, entry)
@@ -5993,7 +5986,7 @@ void init_local_fontfile_loader(void)
     local_fontfile_loader.IDWriteLocalFontFileLoader_iface.lpVtbl = &localfontfileloadervtbl;
     local_fontfile_loader.refcount = 1;
     list_init(&local_fontfile_loader.streams);
-    InitializeCriticalSectionEx(&local_fontfile_loader.cs, 0, RTL_CRITICAL_SECTION_FLAG_FORCE_DEBUG_INFO);
+    InitializeCriticalSection(&local_fontfile_loader.cs);
     local_fontfile_loader.cs.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": localfileloader.lock");
 }
 
@@ -8101,7 +8094,7 @@ static struct dwrite_fontset *unsafe_impl_from_IDWriteFontSet(IDWriteFontSet *if
     if (!iface)
         return NULL;
     assert(iface->lpVtbl == (IDWriteFontSetVtbl *)&fontsetvtbl);
-    return CONTAINING_RECORD((IDWriteFontSet3*)iface, struct dwrite_fontset, IDWriteFontSet3_iface);
+    return CONTAINING_RECORD(iface, struct dwrite_fontset, IDWriteFontSet3_iface);
 }
 
 static HRESULT fontset_create_entry(IDWriteFontFile *file, DWRITE_FONT_FACE_TYPE face_type,

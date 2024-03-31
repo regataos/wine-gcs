@@ -583,7 +583,6 @@ static void print_language(void)
         xprintf ("    UserDefaultUILanguage=%04x\n", pGetUserDefaultUILanguage());
     if (pGetThreadUILanguage)
         xprintf ("    ThreadUILanguage=%04x\n", pGetThreadUILanguage());
-    xprintf ("    KeyboardLayout=%p\n", GetKeyboardLayout(0));
     xprintf ("    Country=%d\n", GetUserGeoID(GEOCLASS_NATION));
     xprintf ("    ACP=%d\n", GetACP());
 }
@@ -687,21 +686,6 @@ extract_test (struct wine_test *test, const char *dir, LPSTR res_name)
     CloseHandle(hfile);
 }
 
-static HANDLE get_admin_token(void)
-{
-    TOKEN_ELEVATION_TYPE type;
-    TOKEN_LINKED_TOKEN linked;
-    DWORD size;
-
-    if (!GetTokenInformation(GetCurrentThreadEffectiveToken(), TokenElevationType, &type, sizeof(type), &size)
-            || type == TokenElevationTypeFull)
-        return NULL;
-
-    if (!GetTokenInformation(GetCurrentThreadEffectiveToken(), TokenLinkedToken, &linked, sizeof(linked), &size))
-        return NULL;
-    return linked.LinkedToken;
-}
-
 static DWORD wait_process( HANDLE process, DWORD timeout )
 {
     DWORD wait, diff = 0, start = GetTickCount();
@@ -737,7 +721,6 @@ run_ex (char *cmd, HANDLE out_file, const char *tempdir, DWORD ms, BOOL nocritic
     PROCESS_INFORMATION pi;
     DWORD wait, status, flags;
     UINT old_errmode;
-    HANDLE token = NULL;
 
     GetStartupInfoA (&si);
     si.dwFlags    = STARTF_USESTDHANDLES;
@@ -753,16 +736,8 @@ run_ex (char *cmd, HANDLE out_file, const char *tempdir, DWORD ms, BOOL nocritic
     else
         flags = CREATE_DEFAULT_ERROR_MODE;
 
-    /* Some tests cause a UAC prompt on Windows if the user is not elevated,
-     * so to allow them to run unattended the relevant test units need to skip
-     * the tests if so.
-     *
-     * However, we still want Wine to run as many tests as possible, so always
-     * elevate ourselves. On Wine elevation isn't interactive. */
-    if (running_under_wine())
-        token = get_admin_token();
-
-    if (!CreateProcessAsUserA(token, NULL, cmd, NULL, NULL, TRUE, flags, NULL, tempdir, &si, &pi))
+    if (!CreateProcessA (NULL, cmd, NULL, NULL, TRUE, flags,
+                         NULL, tempdir, &si, &pi))
     {
         if (nocritical) SetErrorMode(old_errmode);
         if (pid) *pid = 0;
@@ -1147,7 +1122,7 @@ run_tests (char *logname, char *outdir)
         logfile = create_temp_file( tmpname );
         logname = tmpname;
     }
-    report (R_OUT, "%s", logname);
+    report (R_OUT, logname);
 
     if (logfile == INVALID_HANDLE_VALUE)
         report (R_FATAL, "Could not open logfile: %u", GetLastError());
@@ -1173,7 +1148,7 @@ run_tests (char *logname, char *outdir)
     if (!newdir && (!outdir || GetLastError() != ERROR_ALREADY_EXISTS))
         report (R_FATAL, "Could not create directory %s (%d)", tempdir, GetLastError());
 
-    report (R_DIR, "%s", tempdir);
+    report (R_DIR, tempdir);
 
     xprintf ("Version 4\n");
     xprintf ("Tests from build %s\n", build_id[0] ? build_id : "-" );

@@ -2,7 +2,9 @@ MODULE    = msdmo.dll
 IMPORTLIB = msdmo
 IMPORTS   = dmoguids uuid ole32 user32 advapi32
 
-SOURCES = \
+C_SRCS = \
 	dmoreg.c \
-	dmort.c \
+	dmort.c
+
+RC_SRCS = \
 	rsrc.rc

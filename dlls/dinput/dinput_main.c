@@ -26,6 +26,8 @@
 #include <string.h>
 
 #define COBJMACROS
+#define NONAMELESSUNION
+
 #include "windef.h"
 #include "winbase.h"
 #include "winuser.h"
@@ -363,8 +365,6 @@ static DWORD WINAPI dinput_thread_proc( void *params )
     DWORD ret;
     MSG msg;
 
-    SetThreadDescription( GetCurrentThread(), L"wine_dinput_worker" );
-
     di_em_win = CreateWindowW( L"DIEmWin", L"DIEmWin", 0, 0, 0, 0, 0, HWND_MESSAGE, 0, DINPUT_instance, NULL );
     input_thread_state = &state;
     SetEvent( start_event );
@@ -488,6 +488,9 @@ void check_dinput_events(void)
     MsgWaitForMultipleObjectsEx(0, NULL, 0, QS_ALLINPUT, 0);
 }
 
+HANDLE steam_overlay_event;
+HANDLE steam_keyboard_event;
+
 BOOL WINAPI DllMain( HINSTANCE inst, DWORD reason, void *reserved )
 {
     TRACE( "inst %p, reason %lu, reserved %p.\n", inst, reason, reserved );
@@ -496,12 +499,16 @@ BOOL WINAPI DllMain( HINSTANCE inst, DWORD reason, void *reserved )
     {
       case DLL_PROCESS_ATTACH:
         DisableThreadLibraryCalls(inst);
+        steam_overlay_event = CreateEventA(NULL, TRUE, FALSE, "__wine_steamclient_GameOverlayActivated");
+        steam_keyboard_event = CreateEventA(NULL, TRUE, FALSE, "__wine_steamclient_KeyboardActivated");
         DINPUT_instance = inst;
         register_di_em_win_class();
         break;
       case DLL_PROCESS_DETACH:
         if (reserved) break;
         unregister_di_em_win_class();
+        CloseHandle(steam_overlay_event);
+        CloseHandle(steam_keyboard_event);
         break;
     }
     return TRUE;

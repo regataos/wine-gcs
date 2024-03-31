@@ -2,7 +2,8 @@ MODULE    = hidclass.sys
 IMPORTLIB = hidclass
 IMPORTS   = hal ntoskrnl user32 hidparse win32u
 
-SOURCES = \
+C_SRCS = \
 	device.c \
-	hidclass.rc \
 	pnp.c
+
+RC_SRCS = hidclass.rc

@@ -3,7 +3,8 @@ IMPORTS   = uuid imm32
 
 EXTRADLLFLAGS = -Wb,--prefer-native
 
-SOURCES = \
+C_SRCS = \
 	activeimmapp.c \
-	main.c \
-	msimtf.idl
+	main.c
+
+IDL_SRCS = msimtf.idl

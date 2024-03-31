@@ -1,10 +1,11 @@
 MODULE    = services.exe
 IMPORTS   = rpcrt4 advapi32 userenv setupapi
 
-EXTRADLLFLAGS = -mwindows
+EXTRADLLFLAGS = -mconsole
 
-SOURCES = \
+C_SRCS = \
 	rpc.c \
 	services.c \
-	svcctl.idl \
 	utils.c
+
+IDL_SRCS = svcctl.idl

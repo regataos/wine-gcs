@@ -145,19 +145,12 @@ void free_brush_pattern( struct brush_pattern *pattern )
 }
 
 /**********************************************************************
- *           NtGdiIcmBrushInfo    (win32u.@)
+ *           __wine_get_brush_bitmap_info    (win32u.@)
  */
-BOOL WINAPI NtGdiIcmBrushInfo( HDC hdc, HBRUSH handle, BITMAPINFO *info, void *bits,
-                               ULONG *bits_size, UINT *usage, BOOL *unk, UINT mode )
+BOOL CDECL __wine_get_brush_bitmap_info( HBRUSH handle, BITMAPINFO *info, void *bits, UINT *usage )
 {
     BRUSHOBJ *brush;
     BOOL ret = FALSE;
-
-    if (mode)
-    {
-        FIXME( "unsupported mode %u\n", mode );
-        return FALSE;
-    }
 
     if (!(brush = GDI_GetObjPtr( handle, NTGDI_OBJ_BRUSH ))) return FALSE;
 
@@ -190,7 +183,6 @@ BOOL WINAPI NtGdiIcmBrushInfo( HDC hdc, HBRUSH handle, BITMAPINFO *info, void *b
             else memcpy( bits, brush->pattern.bits.ptr,
                          brush->pattern.info->bmiHeader.biSizeImage );
         }
-        if (bits_size) *bits_size = brush->pattern.info->bmiHeader.biSizeImage;
         if (usage) *usage = brush->pattern.usage;
         ret = TRUE;
     }

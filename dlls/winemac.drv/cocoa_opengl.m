@@ -26,8 +26,6 @@
 #include "cocoa_app.h"
 #include "cocoa_event.h"
 
-#pragma GCC diagnostic ignored "-Wdeclaration-after-statement"
-
 
 @interface WineOpenGLContext ()
 @property (retain, nonatomic) NSView* latentView;
@@ -244,14 +242,13 @@
  */
 macdrv_opengl_context macdrv_create_opengl_context(void* cglctx)
 {
-@autoreleasepool
-{
+    NSAutoreleasePool* pool = [[NSAutoreleasePool alloc] init];
     WineOpenGLContext *context;
 
     context = [[WineOpenGLContext alloc] initWithCGLContextObj:cglctx];
 
+    [pool release];
     return (macdrv_opengl_context)context;
-}
 }
 
 /***********************************************************************
@@ -262,13 +259,13 @@ macdrv_opengl_context macdrv_create_opengl_context(void* cglctx)
  */
 void macdrv_dispose_opengl_context(macdrv_opengl_context c)
 {
-@autoreleasepool
-{
+    NSAutoreleasePool* pool = [[NSAutoreleasePool alloc] init];
     WineOpenGLContext *context = (WineOpenGLContext*)c;
 
     [context removeFromViews:YES];
     [context release];
-}
+
+    [pool release];
 }
 
 /***********************************************************************
@@ -276,8 +273,7 @@ void macdrv_dispose_opengl_context(macdrv_opengl_context c)
  */
 void macdrv_make_context_current(macdrv_opengl_context c, macdrv_view v, CGRect r)
 {
-@autoreleasepool
-{
+    NSAutoreleasePool* pool = [[NSAutoreleasePool alloc] init];
     WineOpenGLContext *context = (WineOpenGLContext*)c;
     NSView* view = (NSView*)v;
 
@@ -332,7 +328,8 @@ void macdrv_make_context_current(macdrv_opengl_context c, macdrv_view v, CGRect 
         if (context)
             [context removeFromViews:YES];
     }
-}
+
+    [pool release];
 }
 
 /***********************************************************************
@@ -340,8 +337,7 @@ void macdrv_make_context_current(macdrv_opengl_context c, macdrv_view v, CGRect 
  */
 void macdrv_update_opengl_context(macdrv_opengl_context c)
 {
-@autoreleasepool
-{
+    NSAutoreleasePool* pool = [[NSAutoreleasePool alloc] init];
     WineOpenGLContext *context = (WineOpenGLContext*)c;
 
     if (context.needsUpdate)
@@ -371,7 +367,8 @@ void macdrv_update_opengl_context(macdrv_opengl_context c)
             [context resetSurfaceIfBackingSizeChanged];
         }
     }
-}
+
+    [pool release];
 }
 
 /***********************************************************************
@@ -382,11 +379,11 @@ void macdrv_update_opengl_context(macdrv_opengl_context c)
  */
 void macdrv_flush_opengl_context(macdrv_opengl_context c)
 {
-@autoreleasepool
-{
+    NSAutoreleasePool* pool = [[NSAutoreleasePool alloc] init];
     WineOpenGLContext *context = (WineOpenGLContext*)c;
 
     macdrv_update_opengl_context(c);
     [context flushBuffer];
-}
+
+    [pool release];
 }

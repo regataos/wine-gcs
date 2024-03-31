@@ -19,6 +19,9 @@
  */
 
 #define COBJMACROS
+#define NONAMELESSUNION
+#define NONAMELESSSTRUCT
+
 #include "wine/debug.h"
 #include "winbase.h"
 #include "winuser.h"
@@ -30,7 +33,7 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(variant);
 
-extern HMODULE hProxyDll;
+extern HMODULE hProxyDll DECLSPEC_HIDDEN;
 
 #define CY_MULTIPLIER   10000             /* 4 dp of precision */
 #define CY_MULTIPLIER_F 10000.0
@@ -2173,9 +2176,9 @@ HRESULT WINAPI VarI8FromCy(CY cyIn, LONG64* pi64Out)
     (*pi64Out)--; /* Mimic Win32 bug */
   else
   {
-    cyIn.int64 -= *pi64Out * CY_MULTIPLIER; /* cyIn.Lo now holds fractional remainder */
+    cyIn.int64 -= *pi64Out * CY_MULTIPLIER; /* cyIn.s.Lo now holds fractional remainder */
 
-    if (cyIn.Lo > CY_HALF || (cyIn.Lo == CY_HALF && (*pi64Out & 0x1)))
+    if (cyIn.s.Lo > CY_HALF || (cyIn.s.Lo == CY_HALF && (*pi64Out & 0x1)))
       (*pi64Out)++;
   }
   return S_OK;
@@ -2328,19 +2331,19 @@ HRESULT WINAPI VarI8FromUI4(ULONG ulIn, LONG64* pi64Out)
  */
 HRESULT WINAPI VarI8FromDec(const DECIMAL *pdecIn, LONG64* pi64Out)
 {
-  if (!pdecIn->scale)
+  if (!DEC_SCALE(pdecIn))
   {
     /* This decimal is just a 96 bit integer */
-    if (pdecIn->sign & ~DECIMAL_NEG)
+    if (DEC_SIGN(pdecIn) & ~DECIMAL_NEG)
       return E_INVALIDARG;
 
-    if (pdecIn->Hi32 || pdecIn->Mid32 & 0x80000000)
+    if (DEC_HI32(pdecIn) || DEC_MID32(pdecIn) & 0x80000000)
       return DISP_E_OVERFLOW;
 
-    if (pdecIn->sign)
-      *pi64Out = -pdecIn->Lo64;
+    if (DEC_SIGN(pdecIn))
+      *pi64Out = -DEC_LO64(pdecIn);
     else
-      *pi64Out = pdecIn->Lo64;
+      *pi64Out = DEC_LO64(pdecIn);
     return S_OK;
   }
   else
@@ -2501,9 +2504,9 @@ HRESULT WINAPI VarUI8FromCy(CY cyIn, ULONG64* pui64Out)
   {
     *pui64Out = cyIn.int64 / CY_MULTIPLIER;
 
-    cyIn.int64 -= *pui64Out * CY_MULTIPLIER; /* cyIn.Lo now holds fractional remainder */
+    cyIn.int64 -= *pui64Out * CY_MULTIPLIER; /* cyIn.s.Lo now holds fractional remainder */
 
-    if (cyIn.Lo > CY_HALF || (cyIn.Lo == CY_HALF && (*pui64Out & 0x1)))
+    if (cyIn.s.Lo > CY_HALF || (cyIn.s.Lo == CY_HALF && (*pui64Out & 0x1)))
       (*pui64Out)++;
   }
   return S_OK;
@@ -2663,22 +2666,22 @@ HRESULT WINAPI VarUI8FromUI4(ULONG ulIn, ULONG64* pui64Out)
  */
 HRESULT WINAPI VarUI8FromDec(const DECIMAL *pdecIn, ULONG64* pui64Out)
 {
-  if (!pdecIn->scale)
+  if (!DEC_SCALE(pdecIn))
   {
     /* This decimal is just a 96 bit integer */
-    if (pdecIn->sign & ~DECIMAL_NEG)
+    if (DEC_SIGN(pdecIn) & ~DECIMAL_NEG)
       return E_INVALIDARG;
 
-    if (pdecIn->Hi32)
+    if (DEC_HI32(pdecIn))
       return DISP_E_OVERFLOW;
 
-    if (pdecIn->sign)
+    if (DEC_SIGN(pdecIn))
     {
       WARN("Sign would be ignored under Win32!\n");
       return DISP_E_OVERFLOW;
     }
 
-    *pui64Out = pdecIn->Lo64;
+    *pui64Out = DEC_LO64(pdecIn);
     return S_OK;
   }
   else
@@ -2939,29 +2942,29 @@ HRESULT WINAPI VarR4FromUI4(ULONG ulIn, float *pFltOut)
  */
 HRESULT WINAPI VarR4FromDec(const DECIMAL* pDecIn, float *pFltOut)
 {
-  BYTE scale = pDecIn->scale;
+  BYTE scale = DEC_SCALE(pDecIn);
   double divisor = 1.0;
   double highPart;
 
-  if (scale > DEC_MAX_SCALE || pDecIn->sign & ~DECIMAL_NEG)
+  if (scale > DEC_MAX_SCALE || DEC_SIGN(pDecIn) & ~DECIMAL_NEG)
     return E_INVALIDARG;
 
   while (scale--)
     divisor *= 10.0;
 
-  if (pDecIn->sign)
+  if (DEC_SIGN(pDecIn))
     divisor = -divisor;
 
-  if (pDecIn->Hi32)
+  if (DEC_HI32(pDecIn))
   {
-    highPart = (double)pDecIn->Hi32 / divisor;
+    highPart = (double)DEC_HI32(pDecIn) / divisor;
     highPart *= 4294967296.0F;
     highPart *= 4294967296.0F;
   }
   else
     highPart = 0.0;
 
-  *pFltOut = (double)pDecIn->Lo64 / divisor + highPart;
+  *pFltOut = (double)DEC_LO64(pDecIn) / divisor + highPart;
   return S_OK;
 }
 
@@ -3260,28 +3263,28 @@ HRESULT WINAPI VarR8FromUI4(ULONG ulIn, double *pDblOut)
  */
 HRESULT WINAPI VarR8FromDec(const DECIMAL* pDecIn, double *pDblOut)
 {
-  BYTE scale = pDecIn->scale;
+  BYTE scale = DEC_SCALE(pDecIn);
   double divisor = 1.0, highPart;
 
-  if (scale > DEC_MAX_SCALE || pDecIn->sign & ~DECIMAL_NEG)
+  if (scale > DEC_MAX_SCALE || DEC_SIGN(pDecIn) & ~DECIMAL_NEG)
     return E_INVALIDARG;
 
   while (scale--)
     divisor *= 10;
 
-  if (pDecIn->sign)
+  if (DEC_SIGN(pDecIn))
     divisor = -divisor;
 
-  if (pDecIn->Hi32)
+  if (DEC_HI32(pDecIn))
   {
-    highPart = (double)pDecIn->Hi32 / divisor;
+    highPart = (double)DEC_HI32(pDecIn) / divisor;
     highPart *= 4294967296.0F;
     highPart *= 4294967296.0F;
   }
   else
     highPart = 0.0;
 
-  *pDblOut = (double)pDecIn->Lo64 / divisor + highPart;
+  *pDblOut = (double)DEC_LO64(pDecIn) / divisor + highPart;
   return S_OK;
 }
 
@@ -3379,7 +3382,7 @@ HRESULT WINAPI VarR8Round(double dblIn, int nDig, double *pDblOut)
   else if (fract >= 0.0)
     dblIn = whole;
   else if (fract == -0.5)
-    dblIn = whole + fmod(whole, 2.0);
+    dblIn = whole - fmod(whole, 2.0);
   else if (fract > -0.5)
     dblIn = whole;
   else
@@ -3706,12 +3709,12 @@ HRESULT WINAPI VarCyFromDec(const DECIMAL* pdecIn, CY* pCyOut)
   {
     double d;
 
-    if (rounded.Hi32)
+    if (DEC_HI32(&rounded))
       return DISP_E_OVERFLOW;
 
     /* Note: Without the casts this promotes to int64 which loses precision */
-    d = (double)rounded.Lo64 / (double)CY_Divisors[rounded.scale];
-    if (rounded.sign)
+    d = (double)DEC_LO64(&rounded) / (double)CY_Divisors[DEC_SCALE(&rounded)];
+    if (DEC_SIGN(&rounded))
       d = -d;
     return VarCyFromR8(d, pCyOut);
   }
@@ -3869,7 +3872,7 @@ HRESULT WINAPI VarCySub(CY cyLeft, CY cyRight, CY* pCyOut)
  */
 HRESULT WINAPI VarCyAbs(CY cyIn, CY* pCyOut)
 {
-  if (cyIn.Hi == 0x80000000 && !cyIn.Lo)
+  if (cyIn.s.Hi == 0x80000000 && !cyIn.s.Lo)
     return DISP_E_OVERFLOW;
 
   pCyOut->int64 = cyIn.int64 < 0 ? -cyIn.int64 : cyIn.int64;
@@ -3944,7 +3947,7 @@ HRESULT WINAPI VarCyInt(CY cyIn, CY* pCyOut)
  */
 HRESULT WINAPI VarCyNeg(CY cyIn, CY* pCyOut)
 {
-  if (cyIn.Hi == 0x80000000 && !cyIn.Lo)
+  if (cyIn.s.Hi == 0x80000000 && !cyIn.s.Lo)
     return DISP_E_OVERFLOW;
 
   pCyOut->int64 = -cyIn.int64;
@@ -4124,19 +4127,18 @@ HRESULT WINAPI VarDecFromI2(SHORT sIn, DECIMAL* pDecOut)
  */
 HRESULT WINAPI VarDecFromI4(LONG lIn, DECIMAL* pDecOut)
 {
-  pDecOut->Hi32 = 0;
-  pDecOut->Mid32 = 0;
-  pDecOut->scale = 0;
+  DEC_HI32(pDecOut) = 0;
+  DEC_MID32(pDecOut) = 0;
 
   if (lIn < 0)
   {
-      pDecOut->sign = DECIMAL_NEG;
-      pDecOut->Lo32 = -lIn;
+    DEC_SIGNSCALE(pDecOut) = SIGNSCALE(DECIMAL_NEG,0);
+    DEC_LO32(pDecOut) = -lIn;
   }
   else
   {
-      pDecOut->sign = DECIMAL_POS;
-      pDecOut->Lo32 = lIn;
+    DEC_SIGNSCALE(pDecOut) = SIGNSCALE(DECIMAL_POS,0);
+    DEC_LO32(pDecOut) = lIn;
   }
   return S_OK;
 }
@@ -4233,18 +4235,19 @@ HRESULT WINAPI VarDecFromDate(DATE dateIn, DECIMAL* pDecOut)
  */
 HRESULT WINAPI VarDecFromCy(CY cyIn, DECIMAL* pDecOut)
 {
-  pDecOut->Hi32 = 0;
-  pDecOut->scale = 4;
+  DEC_HI32(pDecOut) = 0;
 
-  if (cyIn.int64 < 0)
+  /* Note: This assumes 2s complement integer representation */
+  if (cyIn.s.Hi & 0x80000000)
   {
-      pDecOut->sign = DECIMAL_NEG;
-      pDecOut->Lo64 = -cyIn.int64;
+    DEC_SIGNSCALE(pDecOut) = SIGNSCALE(DECIMAL_NEG,4);
+    DEC_LO64(pDecOut) = -cyIn.int64;
   }
   else
   {
-      pDecOut->sign = DECIMAL_POS;
-      pDecOut->Lo64 = cyIn.int64;
+    DEC_SIGNSCALE(pDecOut) = SIGNSCALE(DECIMAL_POS,4);
+    DEC_MID32(pDecOut) = cyIn.s.Hi;
+    DEC_LO32(pDecOut) = cyIn.s.Lo;
   }
   return S_OK;
 }
@@ -4305,17 +4308,17 @@ HRESULT WINAPI VarDecFromDisp(IDispatch* pdispIn, LCID lcid, DECIMAL* pDecOut)
  */
 HRESULT WINAPI VarDecFromBool(VARIANT_BOOL bIn, DECIMAL* pDecOut)
 {
-  pDecOut->Hi32 = 0;
-  pDecOut->scale = 0;
+  DEC_HI32(pDecOut) = 0;
+  DEC_MID32(pDecOut) = 0;
   if (bIn)
   {
-      pDecOut->sign = DECIMAL_NEG;
-      pDecOut->Lo64 = 1;
+    DEC_SIGNSCALE(pDecOut) = SIGNSCALE(DECIMAL_NEG,0);
+    DEC_LO32(pDecOut) = 1;
   }
   else
   {
-      pDecOut->sign = DECIMAL_POS;
-      pDecOut->Lo64 = 0;
+    DEC_SIGNSCALE(pDecOut) = SIGNSCALE(DECIMAL_POS,0);
+    DEC_LO32(pDecOut) = 0;
   }
   return S_OK;
 }
@@ -4368,11 +4371,11 @@ HRESULT WINAPI VarDecFromUI2(USHORT usIn, DECIMAL* pDecOut)
  */
 HRESULT WINAPI VarDecFromUI4(ULONG ulIn, DECIMAL* pDecOut)
 {
-    pDecOut->sign = DECIMAL_POS;
-    pDecOut->scale = 0;
-    pDecOut->Hi32 = 0;
-    pDecOut->Lo64 = ulIn;
-    return S_OK;
+  DEC_SIGNSCALE(pDecOut) = SIGNSCALE(DECIMAL_POS,0);
+  DEC_HI32(pDecOut) = 0;
+  DEC_MID32(pDecOut) = 0;
+  DEC_LO32(pDecOut) = ulIn;
+  return S_OK;
 }
 
 /************************************************************************
@@ -4389,20 +4392,23 @@ HRESULT WINAPI VarDecFromUI4(ULONG ulIn, DECIMAL* pDecOut)
  */
 HRESULT WINAPI VarDecFromI8(LONG64 llIn, DECIMAL* pDecOut)
 {
-    pDecOut->Hi32 = 0;
-    pDecOut->scale = 0;
+  PULARGE_INTEGER pLi = (PULARGE_INTEGER)&llIn;
 
-    if (llIn < 0)
-    {
-        pDecOut->sign = DECIMAL_NEG;
-        pDecOut->Lo64 = -llIn;
-    }
-    else
-    {
-        pDecOut->sign = DECIMAL_POS;
-        pDecOut->Lo64 = llIn;
-    }
-    return S_OK;
+  DEC_HI32(pDecOut) = 0;
+
+  /* Note: This assumes 2s complement integer representation */
+  if (pLi->u.HighPart & 0x80000000)
+  {
+    DEC_SIGNSCALE(pDecOut) = SIGNSCALE(DECIMAL_NEG,0);
+    DEC_LO64(pDecOut) = -pLi->QuadPart;
+  }
+  else
+  {
+    DEC_SIGNSCALE(pDecOut) = SIGNSCALE(DECIMAL_POS,0);
+    DEC_MID32(pDecOut) = pLi->u.HighPart;
+    DEC_LO32(pDecOut) = pLi->u.LowPart;
+  }
+  return S_OK;
 }
 
 /************************************************************************
@@ -4419,11 +4425,10 @@ HRESULT WINAPI VarDecFromI8(LONG64 llIn, DECIMAL* pDecOut)
  */
 HRESULT WINAPI VarDecFromUI8(ULONG64 ullIn, DECIMAL* pDecOut)
 {
-    pDecOut->sign = DECIMAL_POS;
-    pDecOut->scale = 0;
-    pDecOut->Hi32 = 0;
-    pDecOut->Lo64 = ullIn;
-    return S_OK;
+  DEC_SIGNSCALE(pDecOut) = SIGNSCALE(DECIMAL_POS,0);
+  DEC_HI32(pDecOut) = 0;
+  DEC_LO64(pDecOut) = ullIn;
+  return S_OK;
 }
 
 /* Make two DECIMALS the same scale; used by math functions below */
@@ -4437,12 +4442,12 @@ static HRESULT VARIANT_DecScale(const DECIMAL** ppDecLeft,
   VARIANT_DI di;
   int scaleAmount, i;
 
-  if ((*ppDecLeft)->sign & ~DECIMAL_NEG || (*ppDecRight)->sign & ~DECIMAL_NEG)
+  if (DEC_SIGN(*ppDecLeft) & ~DECIMAL_NEG || DEC_SIGN(*ppDecRight) & ~DECIMAL_NEG)
     return E_INVALIDARG;
 
-  scaleFactor.Lo32 = 10;
+  DEC_LO32(&scaleFactor) = 10;
 
-  i = scaleAmount = (*ppDecLeft)->scale - (*ppDecRight)->scale;
+  i = scaleAmount = DEC_SCALE(*ppDecLeft) - DEC_SCALE(*ppDecRight);
 
   if (!scaleAmount)
     return S_OK; /* Same scale */
@@ -4468,7 +4473,7 @@ static HRESULT VARIANT_DecScale(const DECIMAL** ppDecLeft,
 
   if (!i)
   {
-    pDecOut[0].scale += (scaleAmount > 0) ? scaleAmount : (-scaleAmount);
+    DEC_SCALE(&pDecOut[0]) += (scaleAmount > 0) ? scaleAmount : (-scaleAmount);
     return S_OK; /* Same scale */
   }
 
@@ -4476,13 +4481,13 @@ static HRESULT VARIANT_DecScale(const DECIMAL** ppDecLeft,
   pDecOut[0] = decTemp;
   if (scaleAmount > 0)
   {
-    pDecOut[0].scale += scaleAmount - i;
+    DEC_SCALE(&pDecOut[0]) += scaleAmount - i;
     VARIANT_DIFromDec(*ppDecLeft, &di);
     *ppDecLeft = &pDecOut[1];
   }
   else
   {
-    pDecOut[0].scale += (-scaleAmount) - i;
+    DEC_SCALE(&pDecOut[0]) += (-scaleAmount) - i;
     VARIANT_DIFromDec(*ppDecRight, &di);
     *ppDecRight = &pDecOut[1];
   }
@@ -4514,8 +4519,8 @@ static ULONG VARIANT_Add(ULONG ulLeft, ULONG ulRight, ULONG* pulHigh)
   ULARGE_INTEGER ul64;
 
   ul64.QuadPart = (ULONG64)ulLeft + (ULONG64)ulRight + (ULONG64)*pulHigh;
-  *pulHigh = ul64.HighPart;
-  return ul64.LowPart;
+  *pulHigh = ul64.u.HighPart;
+  return ul64.u.LowPart;
 }
 
 /* Subtract two unsigned 32 bit values with underflow */
@@ -4536,10 +4541,10 @@ static ULONG VARIANT_Sub(ULONG ulLeft, ULONG ulRight, ULONG* pulHigh)
     invert = TRUE;
   }
   if (invert)
-    ul64.HighPart = -ul64.HighPart ;
+    ul64.u.HighPart = -ul64.u.HighPart ;
 
-  *pulHigh = ul64.HighPart;
-  return ul64.LowPart;
+  *pulHigh = ul64.u.HighPart;
+  return ul64.u.LowPart;
 }
 
 /* Multiply two unsigned 32 bit values with overflow */
@@ -4548,17 +4553,17 @@ static ULONG VARIANT_Mul(ULONG ulLeft, ULONG ulRight, ULONG* pulHigh)
   ULARGE_INTEGER ul64;
 
   ul64.QuadPart = (ULONG64)ulLeft * (ULONG64)ulRight + (ULONG64)*pulHigh;
-  *pulHigh = ul64.HighPart;
-  return ul64.LowPart;
+  *pulHigh = ul64.u.HighPart;
+  return ul64.u.LowPart;
 }
 
 /* Compare two decimals that have the same scale */
 static inline int VARIANT_DecCmp(const DECIMAL *pDecLeft, const DECIMAL *pDecRight)
 {
-  if ( pDecLeft->Hi32 < pDecRight->Hi32 ||
-      (pDecLeft->Hi32 <= pDecRight->Hi32 && pDecLeft->Lo64 < pDecRight->Lo64))
+  if ( DEC_HI32(pDecLeft) < DEC_HI32(pDecRight) ||
+      (DEC_HI32(pDecLeft) <= DEC_HI32(pDecRight) && DEC_LO64(pDecLeft) < DEC_LO64(pDecRight)))
     return -1;
-  else if (pDecLeft->Hi32 == pDecRight->Hi32 && pDecLeft->Lo64 == pDecRight->Lo64)
+  else if (DEC_HI32(pDecLeft) == DEC_HI32(pDecRight) && DEC_LO64(pDecLeft) == DEC_LO64(pDecRight))
     return 0;
   return 1;
 }
@@ -4592,13 +4597,13 @@ HRESULT WINAPI VarDecAdd(const DECIMAL* pDecLeft, const DECIMAL* pDecRight, DECI
     int cmp;
 
     /* Correct for the sign of the result */
-    if (pDecLeft->sign && pDecRight->sign)
+    if (DEC_SIGN(pDecLeft) && DEC_SIGN(pDecRight))
     {
       /* -x + -y : Negative */
       sign = DECIMAL_NEG;
       goto VarDecAdd_AsPositive;
     }
-    else if (pDecLeft->sign && !pDecRight->sign)
+    else if (DEC_SIGN(pDecLeft) && !DEC_SIGN(pDecRight))
     {
       cmp = VARIANT_DecCmp(pDecLeft, pDecRight);
 
@@ -4607,19 +4612,19 @@ HRESULT WINAPI VarDecAdd(const DECIMAL* pDecLeft, const DECIMAL* pDecRight, DECI
       {
         sign = DECIMAL_NEG;
 VarDecAdd_AsNegative:
-        pDecOut->Lo32  = VARIANT_Sub(pDecLeft->Lo32,  pDecRight->Lo32,  &overflow);
-        pDecOut->Mid32 = VARIANT_Sub(pDecLeft->Mid32, pDecRight->Mid32, &overflow);
-        pDecOut->Hi32  = VARIANT_Sub(pDecLeft->Hi32,  pDecRight->Hi32,  &overflow);
+        DEC_LO32(pDecOut)  = VARIANT_Sub(DEC_LO32(pDecLeft),  DEC_LO32(pDecRight),  &overflow);
+        DEC_MID32(pDecOut) = VARIANT_Sub(DEC_MID32(pDecLeft), DEC_MID32(pDecRight), &overflow);
+        DEC_HI32(pDecOut)  = VARIANT_Sub(DEC_HI32(pDecLeft),  DEC_HI32(pDecRight),  &overflow);
       }
       else
       {
 VarDecAdd_AsInvertedNegative:
-        pDecOut->Lo32  = VARIANT_Sub(pDecRight->Lo32,  pDecLeft->Lo32,  &overflow);
-        pDecOut->Mid32 = VARIANT_Sub(pDecRight->Mid32, pDecLeft->Mid32, &overflow);
-        pDecOut->Hi32  = VARIANT_Sub(pDecRight->Hi32,  pDecLeft->Hi32,  &overflow);
+        DEC_LO32(pDecOut)  = VARIANT_Sub(DEC_LO32(pDecRight),  DEC_LO32(pDecLeft),  &overflow);
+        DEC_MID32(pDecOut) = VARIANT_Sub(DEC_MID32(pDecRight), DEC_MID32(pDecLeft), &overflow);
+        DEC_HI32(pDecOut)  = VARIANT_Sub(DEC_HI32(pDecRight),  DEC_HI32(pDecLeft),  &overflow);
       }
     }
-    else if (!pDecLeft->sign && pDecRight->sign)
+    else if (!DEC_SIGN(pDecLeft) && DEC_SIGN(pDecRight))
     {
       cmp = VARIANT_DecCmp(pDecLeft, pDecRight);
 
@@ -4635,9 +4640,9 @@ VarDecAdd_AsInvertedNegative:
     {
       /* x + y : Positive */
 VarDecAdd_AsPositive:
-      pDecOut->Lo32  = VARIANT_Add(pDecLeft->Lo32,  pDecRight->Lo32,  &overflow);
-      pDecOut->Mid32 = VARIANT_Add(pDecLeft->Mid32, pDecRight->Mid32, &overflow);
-      pDecOut->Hi32  = VARIANT_Add(pDecLeft->Hi32,  pDecRight->Hi32,  &overflow);
+      DEC_LO32(pDecOut)  = VARIANT_Add(DEC_LO32(pDecLeft),  DEC_LO32(pDecRight),  &overflow);
+      DEC_MID32(pDecOut) = VARIANT_Add(DEC_MID32(pDecLeft), DEC_MID32(pDecRight), &overflow);
+      DEC_HI32(pDecOut)  = VARIANT_Add(DEC_HI32(pDecLeft),  DEC_HI32(pDecRight),  &overflow);
 
       if (overflow)
       {
@@ -4645,15 +4650,15 @@ VarDecAdd_AsPositive:
         DWORD n[4];
         unsigned char remainder;
 
-        if (!pDecLeft->scale)
+        if (!DEC_SCALE(pDecLeft))
           return DISP_E_OVERFLOW;
 
-        pDecOut->scale = pDecLeft->scale - 1;
-        pDecOut->sign = sign;
+        DEC_SCALE(pDecOut) = DEC_SCALE(pDecLeft) - 1;
+        DEC_SIGN(pDecOut) = sign;
 
-        n[0] = pDecOut->Lo32;
-        n[1] = pDecOut->Mid32;
-        n[2] = pDecOut->Hi32;
+        n[0] = DEC_LO32(pDecOut);
+        n[1] = DEC_MID32(pDecOut);
+        n[2] = DEC_HI32(pDecOut);
         n[3] = overflow;
 
         remainder = VARIANT_int_divbychar(n,4,10);
@@ -4669,9 +4674,9 @@ VarDecAdd_AsPositive:
           }
         }
 
-        pDecOut->Lo32 = n[0] ;
-        pDecOut->Mid32 = n[1];
-        pDecOut->Hi32 = n[2];
+        DEC_LO32(pDecOut) = n[0] ;
+        DEC_MID32(pDecOut) = n[1];
+        DEC_HI32(pDecOut) = n[2];
 
         return S_OK;
       }
@@ -4680,8 +4685,8 @@ VarDecAdd_AsPositive:
     if (overflow)
       return DISP_E_OVERFLOW; /* overflowed */
 
-    pDecOut->scale = pDecLeft->scale;
-    pDecOut->sign = sign;
+    DEC_SCALE(pDecOut) = DEC_SCALE(pDecLeft);
+    DEC_SIGN(pDecOut) = sign;
   }
   return hRet;
 }
@@ -4689,21 +4694,25 @@ VarDecAdd_AsPositive:
 /* translate from external DECIMAL format into an internal representation */
 static void VARIANT_DIFromDec(const DECIMAL * from, VARIANT_DI * to)
 {
-    to->scale = from->scale;
-    to->sign = from->sign ? 1 : 0;
+    to->scale = DEC_SCALE(from);
+    to->sign = DEC_SIGN(from) ? 1 : 0;
 
-    to->bitsnum[0] = from->Lo32;
-    to->bitsnum[1] = from->Mid32;
-    to->bitsnum[2] = from->Hi32;
+    to->bitsnum[0] = DEC_LO32(from);
+    to->bitsnum[1] = DEC_MID32(from);
+    to->bitsnum[2] = DEC_HI32(from);
 }
 
 static void VARIANT_DecFromDI(const VARIANT_DI * from, DECIMAL * to)
 {
-    to->sign = from->sign ? DECIMAL_NEG : DECIMAL_POS;
-    to->scale = from->scale;
-    to->Lo32 = from->bitsnum[0];
-    to->Mid32 = from->bitsnum[1];
-    to->Hi32 = from->bitsnum[2];
+    if (from->sign) {
+        DEC_SIGNSCALE(to) = SIGNSCALE(DECIMAL_NEG, from->scale);
+    } else {
+        DEC_SIGNSCALE(to) = SIGNSCALE(DECIMAL_POS, from->scale);
+    }
+
+    DEC_LO32(to) = from->bitsnum[0];
+    DEC_MID32(to) = from->bitsnum[1];
+    DEC_HI32(to) = from->bitsnum[2];
 }
 
 /* clear an internal representation of a DECIMAL */
@@ -5723,7 +5732,7 @@ HRESULT WINAPI VarDecSub(const DECIMAL* pDecLeft, const DECIMAL* pDecRight, DECI
 HRESULT WINAPI VarDecAbs(const DECIMAL* pDecIn, DECIMAL* pDecOut)
 {
   *pDecOut = *pDecIn;
-  pDecOut->sign &= ~DECIMAL_NEG;
+  DEC_SIGN(pDecOut) &= ~DECIMAL_NEG;
   return S_OK;
 }
 
@@ -5749,10 +5758,10 @@ HRESULT WINAPI VarDecFix(const DECIMAL* pDecIn, DECIMAL* pDecOut)
   double dbl;
   HRESULT hr;
 
-  if (pDecIn->sign & ~DECIMAL_NEG)
+  if (DEC_SIGN(pDecIn) & ~DECIMAL_NEG)
     return E_INVALIDARG;
 
-  if (!pDecIn->scale)
+  if (!DEC_SCALE(pDecIn))
   {
     *pDecOut = *pDecIn; /* Already an integer */
     return S_OK;
@@ -5789,10 +5798,10 @@ HRESULT WINAPI VarDecInt(const DECIMAL* pDecIn, DECIMAL* pDecOut)
   double dbl;
   HRESULT hr;
 
-  if (pDecIn->sign & ~DECIMAL_NEG)
+  if (DEC_SIGN(pDecIn) & ~DECIMAL_NEG)
     return E_INVALIDARG;
 
-  if (!(pDecIn->sign & DECIMAL_NEG) || !pDecIn->scale)
+  if (!(DEC_SIGN(pDecIn) & DECIMAL_NEG) || !DEC_SCALE(pDecIn))
     return VarDecFix(pDecIn, pDecOut); /* The same, if +ve or no fractionals */
 
   hr = VarR8FromDec(pDecIn, &dbl);
@@ -5819,7 +5828,7 @@ HRESULT WINAPI VarDecInt(const DECIMAL* pDecIn, DECIMAL* pDecOut)
 HRESULT WINAPI VarDecNeg(const DECIMAL* pDecIn, DECIMAL* pDecOut)
 {
   *pDecOut = *pDecIn;
-  pDecOut->sign ^= DECIMAL_NEG;
+  DEC_SIGN(pDecOut) ^= DECIMAL_NEG;
   return S_OK;
 }
 
@@ -5843,10 +5852,10 @@ HRESULT WINAPI VarDecRound(const DECIMAL* pDecIn, int cDecimals, DECIMAL* pDecOu
   HRESULT hr;
   unsigned int i;
 
-  if (cDecimals < 0 || (pDecIn->sign & ~DECIMAL_NEG) || pDecIn->scale > DEC_MAX_SCALE)
+  if (cDecimals < 0 || (DEC_SIGN(pDecIn) & ~DECIMAL_NEG) || DEC_SCALE(pDecIn) > DEC_MAX_SCALE)
     return E_INVALIDARG;
 
-  if (cDecimals >= pDecIn->scale)
+  if (cDecimals >= DEC_SCALE(pDecIn))
   {
     *pDecOut = *pDecIn; /* More precision than we have */
     return S_OK;
@@ -5854,11 +5863,11 @@ HRESULT WINAPI VarDecRound(const DECIMAL* pDecIn, int cDecimals, DECIMAL* pDecOu
 
   /* truncate significant digits and rescale */
   memset(&divisor, 0, sizeof(divisor));
-  divisor.Lo64 = 1;
+  DEC_LO64(&divisor) = 1;
 
   memset(&tmp, 0, sizeof(tmp));
-  tmp.Lo64 = 10;
-  for (i = 0; i < pDecIn->scale - cDecimals; ++i)
+  DEC_LO64(&tmp) = 10;
+  for (i = 0; i < DEC_SCALE(pDecIn) - cDecimals; ++i)
   {
     hr = VarDecMul(&divisor, &tmp, &divisor);
     if (FAILED(hr))
@@ -5869,7 +5878,7 @@ HRESULT WINAPI VarDecRound(const DECIMAL* pDecIn, int cDecimals, DECIMAL* pDecOu
   if (FAILED(hr))
     return hr;
 
-  pDecOut->scale = cDecimals;
+  DEC_SCALE(pDecOut) = cDecimals;
 
   return S_OK;
 }
@@ -5896,11 +5905,11 @@ HRESULT WINAPI VarDecCmp(const DECIMAL* pDecLeft, const DECIMAL* pDecRight)
   if (!pDecLeft || !pDecRight)
     return VARCMP_NULL;
 
-  if ((!(pDecLeft->sign & DECIMAL_NEG)) && (pDecRight->sign & DECIMAL_NEG) &&
-      (pDecLeft->Hi32 || pDecLeft->Lo64))
+  if ((!(DEC_SIGN(pDecLeft) & DECIMAL_NEG)) && (DEC_SIGN(pDecRight) & DECIMAL_NEG) &&
+      (DEC_HI32(pDecLeft) | DEC_MID32(pDecLeft) | DEC_LO32(pDecLeft)))
     return VARCMP_GT;
-  else if ((pDecLeft->sign & DECIMAL_NEG) && (!(pDecRight->sign & DECIMAL_NEG)) &&
-      (pDecLeft->Hi32 || pDecLeft->Lo64))
+  else if ((DEC_SIGN(pDecLeft) & DECIMAL_NEG) && (!(DEC_SIGN(pDecRight) & DECIMAL_NEG)) &&
+      (DEC_HI32(pDecLeft) | DEC_MID32(pDecLeft) | DEC_LO32(pDecLeft)))
     return VARCMP_LT;
 
   /* Subtract right from left, and compare the result to 0 */
@@ -5908,9 +5917,9 @@ HRESULT WINAPI VarDecCmp(const DECIMAL* pDecLeft, const DECIMAL* pDecRight)
 
   if (SUCCEEDED(hRet))
   {
-    int non_zero = result.Hi32 || result.Lo64;
+    int non_zero = DEC_HI32(&result) | DEC_MID32(&result) | DEC_LO32(&result);
 
-    if ((result.sign & DECIMAL_NEG) && non_zero)
+    if ((DEC_SIGN(&result) & DECIMAL_NEG) && non_zero)
       hRet = (HRESULT)VARCMP_LT;
     else if (non_zero)
       hRet = (HRESULT)VARCMP_GT;
@@ -6299,10 +6308,10 @@ HRESULT WINAPI VarBoolFromUI4(ULONG ulIn, VARIANT_BOOL *pBoolOut)
  */
 HRESULT WINAPI VarBoolFromDec(const DECIMAL* pDecIn, VARIANT_BOOL *pBoolOut)
 {
-  if (pDecIn->scale > DEC_MAX_SCALE || (pDecIn->sign & ~DECIMAL_NEG))
+  if (DEC_SCALE(pDecIn) > DEC_MAX_SCALE || (DEC_SIGN(pDecIn) & ~DECIMAL_NEG))
     return E_INVALIDARG;
 
-  if (pDecIn->Hi32 || pDecIn->Lo64)
+  if (DEC_HI32(pDecIn) || DEC_MID32(pDecIn) || DEC_LO32(pDecIn))
     *pBoolOut = VARIANT_TRUE;
   else
     *pBoolOut = VARIANT_FALSE;
@@ -6497,7 +6506,7 @@ static BSTR VARIANT_BstrReplaceDecimal(const WCHAR * buff, LCID lcid, ULONG dwFl
   }
   else
   {
-    WCHAR *p, *e;
+    WCHAR *p;
     WCHAR numbuff[256];
     WCHAR empty[] = L"";
     NUMBERFMTW minFormat;
@@ -6512,11 +6521,9 @@ static BSTR VARIANT_BstrReplaceDecimal(const WCHAR * buff, LCID lcid, ULONG dwFl
                    (WCHAR *)&minFormat.LeadingZero, sizeof(DWORD)/sizeof(WCHAR) );
 
     /* count number of decimal digits in string */
-    p = wcschr(buff, '.');
-    e = wcschr(p ? ++p : buff, 'E');
-    if (p) minFormat.NumDigits = e ? e - p : lstrlenW(p);
+    p = wcschr( buff, '.' );
+    if (p) minFormat.NumDigits = lstrlenW(p + 1);
 
-    if (e) *e = '\0';
     numbuff[0] = '\0';
     if (!GetNumberFormatW(lcid, 0, buff, &minFormat, numbuff, ARRAY_SIZE(numbuff)))
     {
@@ -6525,11 +6532,6 @@ static BSTR VARIANT_BstrReplaceDecimal(const WCHAR * buff, LCID lcid, ULONG dwFl
     }
     else
     {
-      if (e)
-      {
-        *e = 'E';
-        wcscat(numbuff, e);
-      }
       TRACE("created minimal NLS string %s\n", debugstr_w(numbuff));
       bstrOut = SysAllocString(numbuff);
     }
@@ -6538,32 +6540,16 @@ static BSTR VARIANT_BstrReplaceDecimal(const WCHAR * buff, LCID lcid, ULONG dwFl
 }
 
 static HRESULT VARIANT_BstrFromReal(DOUBLE dblIn, LCID lcid, ULONG dwFlags,
-                                    BSTR* pbstrOut, int ndigits)
+                                    BSTR* pbstrOut, LPCWSTR lpszFormat)
 {
   _locale_t locale;
-  WCHAR *e, buff[256];
-  int len;
+  WCHAR buff[256];
 
   if (!pbstrOut)
     return E_INVALIDARG;
 
   if (!(locale = _create_locale(LC_ALL, "C"))) return E_OUTOFMEMORY;
-  len = _swprintf_l(buff, ARRAY_SIZE(buff), L"%.*G", locale, ndigits, dblIn);
-  e = wcschr(buff, 'E');
-  if (e)
-  {
-      int extra_decimals;
-      WCHAR *dot;
-
-      dot = wcschr(buff, '.');
-      extra_decimals = dot ? e - dot - 2 : 0;
-      if (labs(wcstol(e+1, NULL, 10)) + extra_decimals < ndigits)
-      {
-          len = _swprintf_l(buff, ARRAY_SIZE(buff), L"%.*f", locale, ndigits, dblIn);
-          while (len > 0 && (buff[len-1] == '0')) len--;
-      }
-  }
-  buff[len] = 0;
+  _swprintf_l(buff, ARRAY_SIZE(buff), lpszFormat, locale, dblIn);
   _free_locale(locale);
 
   /* Negative zeroes are disallowed (some applications depend on this).
@@ -6614,7 +6600,7 @@ static HRESULT VARIANT_BstrFromReal(DOUBLE dblIn, LCID lcid, ULONG dwFlags,
  */
 HRESULT WINAPI VarBstrFromR4(FLOAT fltIn, LCID lcid, ULONG dwFlags, BSTR* pbstrOut)
 {
-    return VARIANT_BstrFromReal(fltIn, lcid, dwFlags, pbstrOut, 7);
+    return VARIANT_BstrFromReal(fltIn, lcid, dwFlags, pbstrOut, L"%.7G");
 }
 
 /******************************************************************************
@@ -6635,7 +6621,7 @@ HRESULT WINAPI VarBstrFromR4(FLOAT fltIn, LCID lcid, ULONG dwFlags, BSTR* pbstrO
  */
 HRESULT WINAPI VarBstrFromR8(double dblIn, LCID lcid, ULONG dwFlags, BSTR* pbstrOut)
 {
-    return VARIANT_BstrFromReal(dblIn, lcid, dwFlags, pbstrOut, 15);
+    return VARIANT_BstrFromReal(dblIn, lcid, dwFlags, pbstrOut, L"%.15G");
 }
 
 /******************************************************************************
@@ -6664,9 +6650,9 @@ HRESULT WINAPI VarBstrFromCy(CY cyIn, LCID lcid, ULONG dwFlags, BSTR *pbstrOut)
 
   decVal.scale = 4;
   decVal.sign = 0;
-  decVal.bitsnum[0] = cyIn.Lo;
-  decVal.bitsnum[1] = cyIn.Hi;
-  if (cyIn.Hi & 0x80000000UL) {
+  decVal.bitsnum[0] = cyIn.s.Lo;
+  decVal.bitsnum[1] = cyIn.s.Hi;
+  if (cyIn.s.Hi & 0x80000000UL) {
     DWORD one = 1;
 
     /* Negative number! */

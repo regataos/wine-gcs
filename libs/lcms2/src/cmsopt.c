@@ -1,7 +1,7 @@
 //---------------------------------------------------------------------------------
 //
 //  Little Color Management System
-//  Copyright (c) 1998-2023 Marti Maria Saguer
+//  Copyright (c) 1998-2022 Marti Maria Saguer
 //
 // Permission is hereby granted, free of charge, to any person obtaining
 // a copy of this software and associated documentation files (the "Software"),
@@ -183,7 +183,6 @@ cmsBool  isFloatMatrixIdentity(const cmsMAT3* a)
 
        return TRUE;
 }
-
 // if two adjacent matrices are found, multiply them. 
 static
 cmsBool _MultiplyMatrix(cmsPipeline* Lut)
@@ -1114,17 +1113,14 @@ cmsBool OptimizeByComputingLinearization(cmsPipeline** Lut, cmsUInt32Number Inte
 
         // Store result in curve
         for (t=0; t < OriginalLut ->InputChannels; t++)
-        {
-            if (Trans[t]->Table16 != NULL)
-                Trans[t] ->Table16[i] = _cmsQuickSaturateWord(Out[t] * 65535.0);
-        }
+            Trans[t] ->Table16[i] = _cmsQuickSaturateWord(Out[t] * 65535.0);
     }
 
     // Slope-limit the obtained curves
     for (t = 0; t < OriginalLut ->InputChannels; t++)
         SlopeLimiting(Trans[t]);
 
-    // Check for validity. lIsLinear is here for debug purposes
+    // Check for validity
     lIsSuitable = TRUE;
     lIsLinear   = TRUE;
     for (t=0; (lIsSuitable && (t < OriginalLut ->InputChannels)); t++) {
@@ -1699,10 +1695,6 @@ cmsBool OptimizeMatrixShaper(cmsPipeline** Lut, cmsUInt32Number Intent, cmsUInt3
               _cmsStageMatrixData* Data1 = (_cmsStageMatrixData*)cmsStageData(Matrix1);
               _cmsStageMatrixData* Data2 = (_cmsStageMatrixData*)cmsStageData(Matrix2);
 
-              // Only RGB to RGB
-              if (Matrix1->InputChannels != 3 || Matrix1->OutputChannels != 3 ||
-                  Matrix2->InputChannels != 3 || Matrix2->OutputChannels != 3) return FALSE;
-
               // Input offset should be zero
               if (Data1->Offset != NULL) return FALSE;
 
@@ -1727,8 +1719,6 @@ cmsBool OptimizeMatrixShaper(cmsPipeline** Lut, cmsUInt32Number Intent, cmsUInt3
                      &Curve1, &Matrix1, &Curve2)) {
 
                      _cmsStageMatrixData* Data = (_cmsStageMatrixData*)cmsStageData(Matrix1);
-
-                     if (Matrix1->InputChannels != 3 || Matrix1->OutputChannels != 3) return FALSE;
 
                      // Copy the matrix to our result
                      memcpy(&res, Data->Double, sizeof(res));
@@ -1774,7 +1764,7 @@ cmsBool OptimizeMatrixShaper(cmsPipeline** Lut, cmsUInt32Number Intent, cmsUInt3
         _cmsStageToneCurvesData* mpeC2 = (_cmsStageToneCurvesData*) cmsStageData(Curve2);
 
         // In this particular optimization, cache does not help as it takes more time to deal with
-        // the cache than with the pixel handling
+        // the cache that with the pixel handling
         *dwFlags |= cmsFLAGS_NOCACHE;
 
         // Setup the optimizarion routines
@@ -1931,7 +1921,7 @@ cmsBool CMSEXPORT _cmsOptimizePipeline(cmsContext ContextID,
     for (mpe = cmsPipelineGetPtrToFirstStage(*PtrLut);
         mpe != NULL;
         mpe = cmsStageNext(mpe)) {
-            if (cmsStageType(mpe) == cmsSigNamedColorElemType) return FALSE;
+        if (cmsStageType(mpe) == cmsSigNamedColorElemType) return FALSE;
     }
 
     // Try to get rid of identities and trivial conversions.
@@ -1973,3 +1963,6 @@ cmsBool CMSEXPORT _cmsOptimizePipeline(cmsContext ContextID,
     // Only simple optimizations succeeded
     return AnySuccess;
 }
+
+
+

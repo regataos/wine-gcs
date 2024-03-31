@@ -478,22 +478,18 @@ static LONG create_property_sheetW(struct propsheet *ps, PROPSHEETUI_INFO_HEADER
             (!header->titleW || !(header->flags & PSUIHDRF_EXACT_PTITLE)))
     {
         len = wcslen(title);
-        if (len < ARRAY_SIZE(title) - 1)
-        {
+        if (len < ARRAY_SIZE(title))
             title[len++] = ' ';
-            LoadStringW(compstui_hmod, IDS_CPSUI_DEFAULT, title + len, ARRAY_SIZE(title) - len);
-        }
+        LoadStringW(compstui_hmod, IDS_CPSUI_DEFAULT, title + len, ARRAY_SIZE(title) - len);
     }
 
     if ((header->flags & PSUIHDRF_PROPTITLE) &&
             (!header->titleW || !(header->flags & PSUIHDRF_EXACT_PTITLE)))
     {
         len = wcslen(title);
-        if (len < ARRAY_SIZE(title) - 1)
-        {
+        if (len < ARRAY_SIZE(title))
             title[len++] = ' ';
-            LoadStringW(compstui_hmod, IDS_CPSUI_PROPERTIES, title + len, ARRAY_SIZE(title) - len);
-        }
+        LoadStringW(compstui_hmod, IDS_CPSUI_PROPERTIES, title + len, ARRAY_SIZE(title) - len);
     }
 
     psh.nPages = ps->pages_cnt;

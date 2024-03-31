@@ -420,7 +420,7 @@ HRESULT force_feedback_effect_create( enum WineForceFeedbackEffectType type, IIn
     impl->axes[1] = DIJOFS_Y;
     impl->axes[2] = DIJOFS_Z;
 
-    InitializeCriticalSectionEx( &impl->cs, 0, RTL_CRITICAL_SECTION_FLAG_FORCE_DEBUG_INFO );
+    InitializeCriticalSection( &impl->cs );
     impl->cs.DebugInfo->Spare[0] = (DWORD_PTR)( __FILE__ ": effect.cs" );
 
     *out = &impl->IWineForceFeedbackEffectImpl_iface;
@@ -646,6 +646,7 @@ static HRESULT WINAPI motor_load_effect_async( IUnknown *invoker, IUnknown *para
     {
         if (effect->effect) IDirectInputEffect_Release( effect->effect );
         effect->effect = dinput_effect;
+        IDirectInputEffect_AddRef( effect->effect );
     }
 
     LeaveCriticalSection( &effect->cs );

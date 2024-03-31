@@ -1,5 +1,5 @@
 MODULE    = olesvr32.dll
 IMPORTLIB = olesvr32
 
-SOURCES = \
+C_SRCS = \
 	olesvr_main.c

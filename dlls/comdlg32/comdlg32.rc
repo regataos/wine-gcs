@@ -602,6 +602,3 @@ NETWORK ICON network.ico
 
 /* @makedep: fontpics.bmp */
 38 BITMAP fontpics.bmp
-
-/* @makedep: comdlg32.manifest */
-123 RT_MANIFEST comdlg32.manifest

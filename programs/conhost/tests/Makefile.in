@@ -1,5 +1,6 @@
 TESTDLL   = conhost.exe
 IMPORTS   = user32
 
-SOURCES = \
+
+C_SRCS = \
 	tty.c

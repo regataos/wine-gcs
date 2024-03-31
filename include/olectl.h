@@ -27,13 +27,7 @@
 extern "C" {
 #endif
 
-#ifdef _OLEAUT32_
-#define WINOLECTLAPI        STDAPI
-#define WINOLECTLAPI_(type) STDAPI_(type)
-#else
-#define WINOLECTLAPI        DECLSPEC_IMPORT STDAPI
-#define WINOLECTLAPI_(type) DECLSPEC_IMPORT STDAPI_(type)
-#endif
+
 
 /*
  * Ole Control Interfaces
@@ -189,33 +183,44 @@ typedef VARIANT_BOOL OLE_ENABLEDEFAULTBOOL;
 #define LP_VGACOLOR     0x2
 #define LP_COLOR        0x4
 
-HRESULT WINAPI DllRegisterServer(void);
-HRESULT WINAPI DllUnregisterServer(void);
+HRESULT WINAPI DllRegisterServer(void) DECLSPEC_HIDDEN;
+HRESULT WINAPI DllUnregisterServer(void) DECLSPEC_HIDDEN;
 
-WINOLECTLAPI_(HCURSOR) OleIconToCursor( HINSTANCE hinstExe, HICON hicon);
-WINOLECTLAPI OleCreatePropertyFrameIndirect( LPOCPFIPARAMS lpParams);
-WINOLECTLAPI OleCreatePropertyFrame(
+HCURSOR WINAPI OleIconToCursor( HINSTANCE hinstExe, HICON hicon);
+
+HRESULT WINAPI OleCreatePropertyFrameIndirect( LPOCPFIPARAMS lpParams);
+
+HRESULT WINAPI OleCreatePropertyFrame(
 	HWND hwndOwner, UINT x, UINT y,
 	LPCOLESTR lpszCaption, ULONG cObjects, LPUNKNOWN* ppUnk,
 	ULONG cPages, LPCLSID pPageClsID, LCID lcid, DWORD dwReserved,
 	LPVOID pvReserved );
-WINOLECTLAPI OleLoadPicture(	LPSTREAM lpstream, LONG lSize, BOOL fRunmode,
+
+HRESULT WINAPI OleLoadPicture(	LPSTREAM lpstream, LONG lSize, BOOL fRunmode,
 		REFIID riid, LPVOID *lplpvObj );
-WINOLECTLAPI OleLoadPictureEx( LPSTREAM lpstream, LONG lSize, BOOL fRunMode,
+
+HRESULT WINAPI OleLoadPictureEx( LPSTREAM lpstream, LONG lSize, BOOL fRunMode,
                 REFIID riid, DWORD xSizeDesired, DWORD ySizeDesired,
                 DWORD dwFlags, LPVOID *lplpvObj );
-WINOLECTLAPI OleLoadPictureFile( VARIANT varFilename, IDispatch **ppdispPicture );
-WINOLECTLAPI OleLoadPictureFileEx( VARIANT varFilename, DWORD xSizeDesired,
+
+HRESULT WINAPI OleLoadPictureFile( VARIANT varFilename, IDispatch **ppdispPicture );
+
+HRESULT WINAPI OleLoadPictureFileEx( VARIANT varFilename, DWORD xSizeDesired,
                 DWORD ySizeDesired, DWORD dwFlags, IDispatch **ppdispPicture );
-WINOLECTLAPI OleSavePictureFile( IDispatch *pdispPicture, BSTR bstrFilename );
-WINOLECTLAPI OleLoadPicturePath( LPOLESTR szURLorPath, LPUNKNOWN punkCaller,
+
+HRESULT WINAPI OleSavePictureFile( IDispatch *pdispPicture, BSTR bstrFilename );
+
+HRESULT WINAPI OleLoadPicturePath( LPOLESTR szURLorPath, LPUNKNOWN punkCaller,
 		DWORD dwReserved, OLE_COLOR clrReserved, REFIID riid,
 		LPVOID *ppvRet );
-WINOLECTLAPI OleCreatePictureIndirect(LPPICTDESC lpPictDesc, REFIID riid,
+
+HRESULT WINAPI OleCreatePictureIndirect(LPPICTDESC lpPictDesc, REFIID riid,
 		BOOL fOwn, LPVOID * lplpvObj );
-WINOLECTLAPI OleCreateFontIndirect(LPFONTDESC lpFontDesc, REFIID riid,
+
+HRESULT WINAPI OleCreateFontIndirect(LPFONTDESC lpFontDesc, REFIID riid,
 		LPVOID* lplpvObj);
-WINOLECTLAPI OleTranslateColor( OLE_COLOR clr, HPALETTE hpal,
+
+HRESULT WINAPI OleTranslateColor( OLE_COLOR clr, HPALETTE hpal,
 		COLORREF* lpcolorref);
 
 /* Reflected Window Message IDs */

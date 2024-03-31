@@ -2,5 +2,5 @@ MODULE    = virtdisk.dll
 
 EXTRADLLFLAGS = -Wb,--prefer-native
 
-SOURCES = \
+C_SRCS = \
 	virtdisk_main.c

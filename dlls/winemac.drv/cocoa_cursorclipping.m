@@ -23,8 +23,6 @@
 #import "cocoa_cursorclipping.h"
 #import "cocoa_window.h"
 
-#pragma GCC diagnostic ignored "-Wdeclaration-after-statement"
-
 
 /* Neither Quartz nor Cocoa has an exact analog for Win32 cursor clipping.
  *
@@ -232,7 +230,7 @@ static void scale_rect_for_retina_mode(int mode, CGRect *cursorClipRect)
 
             for (i = 0; i < warpsFinished; i++)
             {
-                WarpRecord* warpRecord = warpRecords[0];
+                WarpRecord* warpRecord = [warpRecords objectAtIndex:0];
                 deltaX -= warpRecord.to.x - warpRecord.from.x;
                 deltaY -= warpRecord.to.y - warpRecord.from.y;
                 [warpRecords removeObjectAtIndex:0];

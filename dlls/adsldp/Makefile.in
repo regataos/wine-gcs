@@ -4,9 +4,12 @@ DELAYIMPORTS = netapi32 wldap32
 
 EXTRADLLFLAGS = -Wb,--prefer-native
 
-SOURCES = \
+C_SRCS = \
 	adsldp.c \
-	adsldp.idl \
 	ldap.c \
-	rsrc.rc \
 	schema.c
+
+IDL_SRCS = \
+	adsldp.idl
+
+RC_SRCS = rsrc.rc

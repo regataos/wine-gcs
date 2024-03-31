@@ -4,8 +4,12 @@ IMPORTS   = $(FAUDIO_PE_LIBS) advapi32 ole32 user32 uuid
 EXTRAINCL = $(FAUDIO_PE_CFLAGS)
 PARENTSRC = ../xaudio2_7
 
-SOURCES = \
+EXTRADLLFLAGS = -Wb,--prefer-native
+
+C_SRCS = \
+	compat.c \
 	xapo.c \
 	xaudio_allocator.c \
-	xaudio_classes.idl \
 	xaudio_dll.c
+
+IDL_SRCS = xaudio_classes.idl

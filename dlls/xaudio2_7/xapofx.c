@@ -19,6 +19,7 @@
 
 #include <stdarg.h>
 
+#define NONAMELESSUNION
 #define COBJMACROS
 
 #ifdef XAPOFX1_VER

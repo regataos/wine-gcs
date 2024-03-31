@@ -819,15 +819,9 @@ static int stabs_pts_read_type_def(struct ParseTypedefData* ptd, const char* typ
 	    PTS_ABORTIF(ptd, stabs_pts_read_array(ptd, &new_dt) == -1);
 	    break;
 	case 'r':
-            {
-                struct symt**       prev_dt;
-                PTS_ABORTIF(ptd, stabs_pts_read_range(ptd, typename, &new_dt) == -1);
-
-                prev_dt = stabs_find_ref(filenr1, subnr1);
-                /* allow redefining with same base type */
-                if (*prev_dt && *prev_dt != new_dt) WARN("Multiple range def in %ls\n", ptd->module->module.ModuleName);
-                else *prev_dt = new_dt;
-            }
+	    PTS_ABORTIF(ptd, stabs_pts_read_range(ptd, typename, &new_dt) == -1);
+	    assert(!*stabs_find_ref(filenr1, subnr1));
+	    *stabs_find_ref(filenr1, subnr1) = new_dt;
 	    break;
 	case 'f':
 	    PTS_ABORTIF(ptd, stabs_pts_read_type_def(ptd, NULL, &ref_dt) == -1);
@@ -1670,7 +1664,7 @@ BOOL stabs_parse(struct module* module, ULONG_PTR load_offset,
               stab_ptr->n_type, (ULONG_PTR)n_value, debugstr_a(strs + stab_ptr->n_strx));
     }
     module->module.SymType = SymDia;
-    module->debug_format_bitmask |= DHEXT_FORMAT_STABS;
+    module->module.CVSig = 'S' | ('T' << 8) | ('A' << 16) | ('B' << 24);
     /* FIXME: we could have a finer grain here */
     module->module.LineNumbers = TRUE;
     module->module.GlobalSymbols = TRUE;

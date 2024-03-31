@@ -1,4 +1,4 @@
-SOURCES = \
+PO_SRCS = \
 	ar.po \
 	ast.po \
 	bg.po \
@@ -20,7 +20,6 @@ SOURCES = \
 	hu.po \
 	it.po \
 	ja.po \
-	ka.po \
 	ko.po \
 	lt.po \
 	ml.po \

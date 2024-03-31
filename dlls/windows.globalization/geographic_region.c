@@ -17,7 +17,7 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "private.h"
+#include "winewinrt_classes.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(locale);
 
@@ -175,13 +175,15 @@ static HRESULT WINAPI activation_factory_QueryInterface( IActivationFactory *ifa
         IsEqualGUID( iid, &IID_IAgileObject ) ||
         IsEqualGUID( iid, &IID_IActivationFactory ))
     {
-        IActivationFactory_AddRef( (*out = &factory->IActivationFactory_iface) );
+        IUnknown_AddRef( iface );
+        *out = iface;
         return S_OK;
     }
 
     if (IsEqualGUID( iid, &IID_IGeographicRegionFactory ))
     {
-        IGeographicRegionFactory_AddRef( (*out = &factory->IGeographicRegionFactory_iface) );
+        IUnknown_AddRef( iface );
+        *out = &factory->IGeographicRegionFactory_iface;
         return S_OK;
     }
 
@@ -231,6 +233,7 @@ static HRESULT WINAPI activation_factory_ActivateInstance( IActivationFactory *i
     TRACE( "iface %p, out %p.\n", iface, out );
 
     if (!(region = calloc( 1, sizeof(*region) ))) return E_OUTOFMEMORY;
+
     region->IGeographicRegion_iface.lpVtbl = &geographic_region_vtbl;
     region->ref = 1;
 
@@ -277,7 +280,7 @@ static struct geographic_region_factory factory =
 {
     {&activation_factory_vtbl},
     {&geographic_region_factory_vtbl},
-    1,
+    0,
 };
 
-IActivationFactory *geographic_region_factory = &factory.IActivationFactory_iface;
+IInspectable *globalization_geographic_region_factory = (IInspectable *)&factory.IActivationFactory_iface;

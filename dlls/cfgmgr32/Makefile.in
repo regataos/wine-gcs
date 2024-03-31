@@ -2,5 +2,5 @@ MODULE    = cfgmgr32.dll
 IMPORTLIB = cfgmgr32
 IMPORTS   = setupapi
 
-SOURCES = \
+C_SRCS = \
 	main.c

@@ -23,6 +23,7 @@
 #include <assert.h>
 #include <ctype.h>
 #include <errno.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -911,7 +912,11 @@ int main(int argc, char **argv)
     font_off = (fontdir_off + fontdir_len + 15) & ~0x0f;
 
     atexit( cleanup );
-    init_signals( exit_on_signal );
+    signal( SIGTERM, exit_on_signal );
+    signal( SIGINT, exit_on_signal );
+#ifdef SIGHUP
+    signal( SIGHUP, exit_on_signal );
+#endif
 
     if (!output_name)  /* build a default output name */
         output_name = strmake( "%s%s", get_basename_noext( input_file ),

@@ -2,5 +2,4 @@ MODULE    = netsh.exe
 
 EXTRADLLFLAGS = -mconsole -municode
 
-SOURCES = \
-	netsh.c
+C_SRCS = netsh.c

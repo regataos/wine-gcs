@@ -111,9 +111,9 @@ static HRESULT WINAPI UIRibbonFrameworkImpl_GetUICommandProperty(IUIFramework *i
     return E_NOTIMPL;
 }
 
-static HRESULT WINAPI UIRibbonFrameworkImpl_SetUICommandProperty(IUIFramework *iface, UINT32 commandId, REFPROPERTYKEY key, REFPROPVARIANT value)
+static HRESULT WINAPI UIRibbonFrameworkImpl_SetUICommandProperty(IUIFramework *iface, UINT32 commandId, REFPROPERTYKEY key, PROPVARIANT value)
 {
-    FIXME("(%u, %p, %p): stub!\n", commandId, key, value);
+    FIXME("(%u, %p): stub!\n", commandId, key);
 
     return E_NOTIMPL;
 }

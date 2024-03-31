@@ -2,11 +2,11 @@ EXTRADEFS = -DD3DX_SDK_VERSION=34
 MODULE    = d3dx9_34.dll
 IMPORTS   = d3d9 d3dcompiler dxguid d3dxof ole32 gdi32 user32
 PARENTSRC = ../d3dx9_36
-DELAYIMPORTS = windowscodecs
+DELAYIMPORTS = windowscodecs usp10
 
 EXTRADLLFLAGS = -Wb,--prefer-native
 
-SOURCES = \
+C_SRCS = \
 	animation.c \
 	core.c \
 	effect.c \
@@ -25,6 +25,7 @@ SOURCES = \
 	txc_compress_dxtn.c \
 	txc_fetch_dxtn.c \
 	util.c \
-	version.rc \
 	volume.c \
 	xfile.c
+
+RC_SRCS = version.rc

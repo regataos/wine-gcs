@@ -1,5 +1,6 @@
 TESTDLL   = atlthunk.dll
 IMPORTS   = atlthunk
 
-SOURCES = \
+
+C_SRCS = \
 	atlthunk.c

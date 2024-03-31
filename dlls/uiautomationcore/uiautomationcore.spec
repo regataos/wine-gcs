@@ -65,13 +65,13 @@
 @ stdcall UiaGetPropertyValue(ptr long ptr)
 @ stdcall UiaGetReservedMixedAttributeValue(ptr)
 @ stdcall UiaGetReservedNotSupportedValue(ptr)
-@ stdcall UiaGetRootNode(ptr)
+@ stub UiaGetRootNode
 @ stdcall UiaGetRuntimeId(ptr ptr)
 @ stdcall UiaGetUpdatedCache(ptr ptr long ptr ptr ptr)
 @ stub UiaHPatternObjectFromVariant
 @ stub UiaHTextRangeFromVariant
 @ stdcall UiaHUiaNodeFromVariant(ptr ptr)
-@ stdcall UiaHasServerSideProvider(long)
+@ stub UiaHasServerSideProvider
 @ stdcall UiaHostProviderFromHwnd(long ptr)
 #@ stub UiaIAccessibleFromProvider
 @ stdcall UiaLookupId(long ptr)
@@ -82,7 +82,7 @@
 @ stdcall UiaNodeFromProvider(ptr ptr)
 @ stdcall UiaNodeRelease(ptr)
 @ stub UiaPatternRelease
-#@ stub UiaProviderForNonClient
+@ stdcall UiaProviderForNonClient(ptr long long ptr)
 @ stdcall UiaProviderFromIAccessible(ptr long long ptr)
 @ stdcall UiaRaiseAsyncContentLoadedEvent(ptr long double)
 @ stdcall UiaRaiseAutomationEvent(ptr long)

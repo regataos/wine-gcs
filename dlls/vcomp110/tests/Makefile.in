@@ -1,4 +1,4 @@
 TESTDLL = vcomp110.dll
 
-SOURCES = \
+C_SRCS = \
 	vcomp110.c

@@ -82,7 +82,7 @@ static ULONG WINAPI IClassFactory_fnRelease(IClassFactory *iface)
     TRACE("(%p) ref = %lu\n", This, ref);
 
     if(!ref)
-        free(This);
+        HeapFree(GetProcessHeap(), 0, This);
 
     return ref;
 }
@@ -140,7 +140,7 @@ static HRESULT AVIFILE_CreateClassFactory(const CLSID *clsid, const IID *riid, v
 
     *ppv = NULL;
 
-    cf = malloc(sizeof(*cf));
+    cf = HeapAlloc(GetProcessHeap(), 0, sizeof(*cf));
     if (!cf)
         return E_OUTOFMEMORY;
 

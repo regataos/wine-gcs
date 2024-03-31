@@ -3,7 +3,8 @@ IMPORTS   = iphlpapi
 
 EXTRADLLFLAGS = -Wb,--prefer-native
 
-SOURCES = \
+C_SRCS = \
 	list.c \
-	main.c \
-	netprofm.idl
+	main.c
+
+IDL_SRCS = netprofm.idl

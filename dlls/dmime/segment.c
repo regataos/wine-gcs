@@ -49,6 +49,10 @@ struct segment
     DMUS_IO_SEGMENT_HEADER header;
     IDirectMusicGraph *pGraph;
     struct list tracks;
+
+    PCMWAVEFORMAT wave_format;
+    void *wave_data;
+    int data_size;
 };
 
 static struct segment *segment_create(void);
@@ -108,6 +112,10 @@ static ULONG WINAPI segment_Release(IDirectMusicSegment8 *iface)
             list_remove(&entry->entry);
             track_entry_destroy(entry);
         }
+
+        if (This->wave_data)
+            free(This->wave_data);
+
         free(This);
     }
 
@@ -368,10 +376,7 @@ static HRESULT WINAPI segment_GetParam(IDirectMusicSegment8 *iface, REFGUID type
     for (i = 0, count = 0; i < DMUS_SEG_ANYTRACK && count <= index; i++) {
         if (FAILED(segment_GetTrack(iface, &GUID_NULL, group, i, &track))) break;
         if (FAILED(IDirectMusicTrack_IsParamSupported(track, type)))
-        {
-            IDirectMusicTrack_Release(track);
             continue;
-        }
         if (index == count || index == DMUS_SEG_ANYTRACK)
             hr = IDirectMusicTrack_GetParam(track, type, time, next, param);
         IDirectMusicTrack_Release(track);
@@ -437,9 +442,7 @@ static HRESULT WINAPI segment_Clone(IDirectMusicSegment8 *iface, MUSIC_TIME star
     LIST_FOR_EACH_ENTRY(entry, &This->tracks, struct track_entry, entry)
     {
         if (FAILED(hr = IDirectMusicTrack_Clone(entry->pTrack, start, end, &track))) break;
-        hr = segment_append_track(clone, track, entry->dwGroupBits, entry->flags);
-        IDirectMusicTrack_Release(track);
-        if (FAILED(hr)) break;
+        if (FAILED(hr = segment_append_track(clone, track, entry->dwGroupBits, entry->flags))) break;
     }
 
     *segment = (IDirectMusicSegment *)&clone->IDirectMusicSegment8_iface;
@@ -807,7 +810,7 @@ static HRESULT WINAPI segment_persist_stream_Load(IPersistStream *iface, IStream
             break;
 
         case mmioFOURCC('M','T','h','d'):
-            hr = parse_midi(stream, &This->IDirectMusicSegment8_iface);
+            FIXME("MIDI file loading not supported\n");
             break;
 
         case MAKE_IDTYPE(FOURCC_RIFF, mmioFOURCC('W','A','V','E')):
@@ -819,7 +822,6 @@ static HRESULT WINAPI segment_persist_stream_Load(IPersistStream *iface, IStream
             This->header.mtLength = 1;
             if (FAILED(hr = wave_track_create_from_chunk(stream, &chunk, &track))) break;
             hr = segment_append_track(This, (IDirectMusicTrack *)track, 1, 0);
-            IDirectMusicTrack8_Release(track);
             break;
         }
 
@@ -830,9 +832,7 @@ static HRESULT WINAPI segment_persist_stream_Load(IPersistStream *iface, IStream
         }
     }
 
-    if (chunk.id != mmioFOURCC('M', 'T', 'h', 'd'))
-        stream_skip_chunk(stream, &chunk);
-
+    stream_skip_chunk(stream, &chunk);
     if (FAILED(hr))
     {
         WARN("Failed to load segment from stream %p, hr %#lx\n", stream, hr);

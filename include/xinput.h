@@ -213,10 +213,10 @@ typedef struct _XINPUT_CAPABILITIES {
 typedef struct _XINPUT_CAPABILITIES_EX
 {
     XINPUT_CAPABILITIES Capabilities;
-    WORD  VendorId;
-    WORD  ProductId;
-    WORD  VersionNumber;
-    WORD  unk1;
+    WORD VendorId;
+    WORD ProductId;
+    WORD VersionNumber;
+    WORD unk1;
     DWORD unk2;
 } XINPUT_CAPABILITIES_EX, *PXINPUT_CAPABILITIES_EX;
 

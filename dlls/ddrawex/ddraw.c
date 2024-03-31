@@ -17,6 +17,7 @@
  */
 
 #define COBJMACROS
+#define NONAMELESSUNION
 
 #include <stdarg.h>
 #include "windef.h"
@@ -165,7 +166,7 @@ static ULONG WINAPI ddrawex4_Release(IDirectDraw4 *iface)
     if (!refcount)
     {
         IDirectDraw4_Release(ddrawex->parent);
-        free(ddrawex);
+        heap_free(ddrawex);
     }
 
     return refcount;
@@ -386,21 +387,21 @@ void DDSD_to_DDSD2(const DDSURFACEDESC *in, DDSURFACEDESC2 *out)
     out->dwFlags = in->dwFlags;
     if(in->dwFlags & DDSD_WIDTH) out->dwWidth = in->dwWidth;
     if(in->dwFlags & DDSD_HEIGHT) out->dwHeight = in->dwHeight;
-    if(in->dwFlags & DDSD_PIXELFORMAT) out->ddpfPixelFormat = in->ddpfPixelFormat;
+    if(in->dwFlags & DDSD_PIXELFORMAT) out->u4.ddpfPixelFormat = in->ddpfPixelFormat;
     if(in->dwFlags & DDSD_CAPS) out->ddsCaps.dwCaps = in->ddsCaps.dwCaps;
-    if(in->dwFlags & DDSD_PITCH) out->lPitch = in->lPitch;
-    if(in->dwFlags & DDSD_BACKBUFFERCOUNT) out->dwBackBufferCount = in->dwBackBufferCount;
-    if(in->dwFlags & DDSD_ZBUFFERBITDEPTH) out->dwMipMapCount = in->dwZBufferBitDepth; /* same union */
+    if(in->dwFlags & DDSD_PITCH) out->u1.lPitch = in->u1.lPitch;
+    if(in->dwFlags & DDSD_BACKBUFFERCOUNT) out->u5.dwBackBufferCount = in->dwBackBufferCount;
+    if(in->dwFlags & DDSD_ZBUFFERBITDEPTH) out->u2.dwMipMapCount = in->u2.dwZBufferBitDepth; /* same union */
     if(in->dwFlags & DDSD_ALPHABITDEPTH) out->dwAlphaBitDepth = in->dwAlphaBitDepth;
     /* DDraw(native, and wine) does not set the DDSD_LPSURFACE, so always copy */
     out->lpSurface = in->lpSurface;
-    if(in->dwFlags & DDSD_CKDESTOVERLAY) out->ddckCKDestOverlay = in->ddckCKDestOverlay;
+    if(in->dwFlags & DDSD_CKDESTOVERLAY) out->u3.ddckCKDestOverlay = in->ddckCKDestOverlay;
     if(in->dwFlags & DDSD_CKDESTBLT) out->ddckCKDestBlt = in->ddckCKDestBlt;
     if(in->dwFlags & DDSD_CKSRCOVERLAY) out->ddckCKSrcOverlay = in->ddckCKSrcOverlay;
     if(in->dwFlags & DDSD_CKSRCBLT) out->ddckCKSrcBlt = in->ddckCKSrcBlt;
-    if(in->dwFlags & DDSD_MIPMAPCOUNT) out->dwMipMapCount = in->dwMipMapCount;
-    if(in->dwFlags & DDSD_REFRESHRATE) out->dwRefreshRate = in->dwRefreshRate;
-    if(in->dwFlags & DDSD_LINEARSIZE) out->dwLinearSize = in->dwLinearSize;
+    if(in->dwFlags & DDSD_MIPMAPCOUNT) out->u2.dwMipMapCount = in->u2.dwMipMapCount;
+    if(in->dwFlags & DDSD_REFRESHRATE) out->u2.dwRefreshRate = in->u2.dwRefreshRate;
+    if(in->dwFlags & DDSD_LINEARSIZE) out->u1.dwLinearSize = in->u1.dwLinearSize;
     /* Does not exist in DDSURFACEDESC:
      * DDSD_TEXTURESTAGE, DDSD_FVF, DDSD_SRCVBHANDLE,
      */
@@ -413,21 +414,21 @@ void DDSD2_to_DDSD(const DDSURFACEDESC2 *in, DDSURFACEDESC *out)
     out->dwFlags = in->dwFlags;
     if(in->dwFlags & DDSD_WIDTH) out->dwWidth = in->dwWidth;
     if(in->dwFlags & DDSD_HEIGHT) out->dwHeight = in->dwHeight;
-    if(in->dwFlags & DDSD_PIXELFORMAT) out->ddpfPixelFormat = in->ddpfPixelFormat;
+    if(in->dwFlags & DDSD_PIXELFORMAT) out->ddpfPixelFormat = in->u4.ddpfPixelFormat;
     if(in->dwFlags & DDSD_CAPS) out->ddsCaps.dwCaps = in->ddsCaps.dwCaps;
-    if(in->dwFlags & DDSD_PITCH) out->lPitch = in->lPitch;
-    if(in->dwFlags & DDSD_BACKBUFFERCOUNT) out->dwBackBufferCount = in->dwBackBufferCount;
-    if(in->dwFlags & DDSD_ZBUFFERBITDEPTH) out->dwZBufferBitDepth = in->dwMipMapCount; /* same union */
+    if(in->dwFlags & DDSD_PITCH) out->u1.lPitch = in->u1.lPitch;
+    if(in->dwFlags & DDSD_BACKBUFFERCOUNT) out->dwBackBufferCount = in->u5.dwBackBufferCount;
+    if(in->dwFlags & DDSD_ZBUFFERBITDEPTH) out->u2.dwZBufferBitDepth = in->u2.dwMipMapCount; /* same union */
     if(in->dwFlags & DDSD_ALPHABITDEPTH) out->dwAlphaBitDepth = in->dwAlphaBitDepth;
     /* DDraw(native, and wine) does not set the DDSD_LPSURFACE, so always copy */
     out->lpSurface = in->lpSurface;
-    if(in->dwFlags & DDSD_CKDESTOVERLAY) out->ddckCKDestOverlay = in->ddckCKDestOverlay;
+    if(in->dwFlags & DDSD_CKDESTOVERLAY) out->ddckCKDestOverlay = in->u3.ddckCKDestOverlay;
     if(in->dwFlags & DDSD_CKDESTBLT) out->ddckCKDestBlt = in->ddckCKDestBlt;
     if(in->dwFlags & DDSD_CKSRCOVERLAY) out->ddckCKSrcOverlay = in->ddckCKSrcOverlay;
     if(in->dwFlags & DDSD_CKSRCBLT) out->ddckCKSrcBlt = in->ddckCKSrcBlt;
-    if(in->dwFlags & DDSD_MIPMAPCOUNT) out->dwMipMapCount = in->dwMipMapCount;
-    if(in->dwFlags & DDSD_REFRESHRATE) out->dwRefreshRate = in->dwRefreshRate;
-    if(in->dwFlags & DDSD_LINEARSIZE) out->dwLinearSize = in->dwLinearSize;
+    if(in->dwFlags & DDSD_MIPMAPCOUNT) out->u2.dwMipMapCount = in->u2.dwMipMapCount;
+    if(in->dwFlags & DDSD_REFRESHRATE) out->u2.dwRefreshRate = in->u2.dwRefreshRate;
+    if(in->dwFlags & DDSD_LINEARSIZE) out->u1.dwLinearSize = in->u1.dwLinearSize;
     /* Does not exist in DDSURFACEDESC:
      * DDSD_TEXTURESTAGE, DDSD_FVF, DDSD_SRCVBHANDLE,
      */
@@ -1425,7 +1426,7 @@ HRESULT WINAPI ddrawex_factory_CreateDirectDraw(IDirectDrawFactory *iface, GUID 
     if (outer_unknown)
         FIXME("Implement aggregation in ddrawex's IDirectDraw interface.\n");
 
-    if (!(object = calloc(1, sizeof(*object))))
+    if (!(object = heap_alloc_zero(sizeof(*object))))
         return E_OUTOFMEMORY;
 
     object->ref = 1;
@@ -1450,7 +1451,7 @@ err:
         IDirectDraw4_Release(object->parent);
     if (parent)
         IDirectDraw_Release(parent);
-    free(object);
+    heap_free(object);
     *ddraw = NULL;
     return hr;
 }

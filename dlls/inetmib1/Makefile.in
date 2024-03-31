@@ -1,6 +1,6 @@
 MODULE    = inetmib1.dll
-IMPORTS   = snmpapi ws2_32
+IMPORTS   = snmpapi
 DELAYIMPORTS = iphlpapi
 
-SOURCES = \
+C_SRCS = \
 	main.c

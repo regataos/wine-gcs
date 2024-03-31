@@ -3,6 +3,6 @@ IMPORTS   = user32
 
 EXTRADLLFLAGS = -m16
 
-SOURCES = \
-	display.c \
-	display.rc
+C_SRCS = display.c
+
+RC_SRCS = display.rc

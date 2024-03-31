@@ -1,6 +1,6 @@
 MODULE    = xmllite.dll
 IMPORTLIB = xmllite
 
-SOURCES = \
+C_SRCS = \
 	reader.c \
 	writer.c

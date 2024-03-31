@@ -1,7 +1,7 @@
 TESTDLL   = advpack.dll
 IMPORTS   = cabinet advapi32 advpack
 
-SOURCES = \
+C_SRCS = \
 	advpack.c \
 	files.c \
 	install.c

@@ -1,7 +1,7 @@
 TESTDLL   = wininet.dll
 IMPORTS   = wininet crypt32 ws2_32 user32 advapi32 shell32
 
-SOURCES = \
+C_SRCS = \
 	ftp.c \
 	generated.c \
 	http.c \

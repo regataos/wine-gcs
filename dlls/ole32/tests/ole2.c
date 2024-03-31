@@ -208,17 +208,17 @@ static void create_dib( STGMEDIUM *med )
     void *ptr;
 
     med->tymed = TYMED_HGLOBAL;
-    med->hGlobal = GlobalAlloc(GMEM_MOVEABLE, sizeof(dib_white));
-    ptr = GlobalLock( med->hGlobal );
+    U(med)->hGlobal = GlobalAlloc(GMEM_MOVEABLE, sizeof(dib_white));
+    ptr = GlobalLock( U(med)->hGlobal );
     memcpy(ptr, dib_white, sizeof(dib_white));
-    GlobalUnlock( med->hGlobal );
+    GlobalUnlock( U(med)->hGlobal );
     med->pUnkForRelease = NULL;
 }
 
 static void create_bitmap( STGMEDIUM *med )
 {
     med->tymed = TYMED_GDI;
-    med->hBitmap = CreateBitmap( 1, 1, 1, 1, NULL );
+    U(med)->hBitmap = CreateBitmap( 1, 1, 1, 1, NULL );
     med->pUnkForRelease = NULL;
 }
 
@@ -228,7 +228,7 @@ static void create_emf(STGMEDIUM *med)
 
     Rectangle(hdc, 0, 0, 150, 300);
     med->tymed = TYMED_ENHMF;
-    med->hEnhMetaFile = CloseEnhMetaFile(hdc);
+    U(med)->hEnhMetaFile = CloseEnhMetaFile(hdc);
     med->pUnkForRelease = NULL;
 }
 
@@ -240,13 +240,13 @@ static void create_mfpict(STGMEDIUM *med)
     Rectangle(hdc, 0, 0, 100, 200);
 
     med->tymed = TYMED_MFPICT;
-    med->hMetaFilePict = GlobalAlloc(GMEM_MOVEABLE, sizeof(METAFILEPICT));
-    mf = GlobalLock(med->hMetaFilePict);
+    U(med)->hMetaFilePict = GlobalAlloc(GMEM_MOVEABLE, sizeof(METAFILEPICT));
+    mf = GlobalLock(U(med)->hMetaFilePict);
     mf->mm = MM_ANISOTROPIC;
     mf->xExt = 100;
     mf->yExt = 200;
     mf->hMF = CloseMetaFile(hdc);
-    GlobalUnlock(med->hMetaFilePict);
+    GlobalUnlock(U(med)->hMetaFilePict);
     med->pUnkForRelease = NULL;
 }
 
@@ -261,7 +261,7 @@ static void create_text(STGMEDIUM *med)
     GlobalUnlock(handle);
 
     med->tymed = TYMED_HGLOBAL;
-    med->hGlobal = handle;
+    U(med)->hGlobal = handle;
     med->pUnkForRelease = NULL;
 }
 
@@ -1372,9 +1372,9 @@ static HRESULT WINAPI DataObject_GetData(IDataObject *iface, FORMATETC *format, 
         case CF_DIB:
             medium->tymed = TYMED_HGLOBAL;
             medium->pUnkForRelease = NULL;
-            medium->hGlobal = GlobalAlloc(GMEM_MOVEABLE, sizeof(dib_white));
-            memcpy(GlobalLock(medium->hGlobal), data_object_dib, sizeof(dib_white));
-            GlobalUnlock(medium->hGlobal);
+            U(*medium).hGlobal = GlobalAlloc(GMEM_MOVEABLE, sizeof(dib_white));
+            memcpy(GlobalLock(U(*medium).hGlobal), data_object_dib, sizeof(dib_white));
+            GlobalUnlock(U(*medium).hGlobal);
             return S_OK;
         case CF_BITMAP:
             create_bitmap(medium);
@@ -1454,7 +1454,7 @@ static HRESULT WINAPI DataObject_DAdvise(
     {
         ok(pformatetc->cfFormat == cf_test_2, "got %04x\n", pformatetc->cfFormat);
         stgmedium.tymed = TYMED_HGLOBAL;
-        stgmedium.hGlobal = GlobalAlloc(GMEM_MOVEABLE | GMEM_ZEROINIT, 4);
+        U(stgmedium).hGlobal = GlobalAlloc(GMEM_MOVEABLE | GMEM_ZEROINIT, 4);
         stgmedium.pUnkForRelease = NULL;
         IAdviseSink_OnDataChange(pAdvSink, pformatetc, &stgmedium);
     }
@@ -1752,7 +1752,7 @@ static void test_data_cache(void)
 
     fmtetc.cfFormat = CF_METAFILEPICT;
     stgmedium.tymed = TYMED_MFPICT;
-    stgmedium.hMetaFilePict = OleMetafilePictFromIconAndLabel(
+    U(stgmedium).hMetaFilePict = OleMetafilePictFromIconAndLabel(
         LoadIconA(NULL, (LPSTR)IDI_APPLICATION), wszPath, wszPath, 0);
     stgmedium.pUnkForRelease = NULL;
 
@@ -2032,9 +2032,9 @@ static void test_data_cache_dib_contents_stream(int num)
     hr = IDataObject_GetData( data, &fmt, &med );
     ok( SUCCEEDED(hr), "got %08lx\n", hr );
     ok( med.tymed == TYMED_HGLOBAL, "got %lx\n", med.tymed );
-    ok( GlobalSize( med.hGlobal ) >= sizeof(dib_white) - sizeof(BITMAPFILEHEADER),
-        "got %Iu\n", GlobalSize( med.hGlobal ) );
-    ptr = GlobalLock( med.hGlobal );
+    ok( GlobalSize( U(med).hGlobal ) >= sizeof(dib_white) - sizeof(BITMAPFILEHEADER),
+        "got %Iu\n", GlobalSize( U(med).hGlobal ) );
+    ptr = GlobalLock( U(med).hGlobal );
 
     expect_info = *(BITMAPINFOHEADER *)(file_dib + sizeof(BITMAPFILEHEADER));
     if (expect_info.biXPelsPerMeter == 0 || expect_info.biYPelsPerMeter == 0)
@@ -2047,7 +2047,7 @@ static void test_data_cache_dib_contents_stream(int num)
     ok( !memcmp( ptr, &expect_info, sizeof(expect_info) ), "mismatch\n" );
     ok( !memcmp( ptr + sizeof(expect_info), file_dib + sizeof(BITMAPFILEHEADER) + sizeof(expect_info),
                  sizeof(file_dib) - sizeof(BITMAPFILEHEADER) - sizeof(expect_info) ), "mismatch\n" );
-    GlobalUnlock( med.hGlobal );
+    GlobalUnlock( U(med).hGlobal );
     ReleaseStgMedium( &med );
 
     check_enum_cache( cache, enum_expect, 2 );
@@ -2202,7 +2202,7 @@ static void test_data_cache_cache(void)
     hr = IDataObject_GetData( data, &fmt, &med );
     ok( hr == S_OK, "got %08lx\n", hr );
     ok( med.tymed == TYMED_GDI, "got %ld\n", med.tymed );
-    check_bitmap_size( med.hBitmap, 1, 1 );
+    check_bitmap_size( U(med).hBitmap, 1, 1 );
     ReleaseStgMedium( &med );
 
     fmt.cfFormat = CF_DIB;
@@ -2210,7 +2210,7 @@ static void test_data_cache_cache(void)
     hr = IDataObject_GetData( data, &fmt, &med );
     ok( hr == S_OK, "got %08lx\n", hr );
     ok( med.tymed == TYMED_HGLOBAL, "got %ld\n", med.tymed );
-    check_dib_size( med.hGlobal, 1, 1 );
+    check_dib_size( U(med).hGlobal, 1, 1 );
     ReleaseStgMedium( &med );
 
     /* Now set a 2x1 dib */
@@ -2226,7 +2226,7 @@ static void test_data_cache_cache(void)
     hr = IDataObject_GetData( data, &fmt, &med );
     ok( hr == S_OK, "got %08lx\n", hr );
     ok( med.tymed == TYMED_GDI, "got %ld\n", med.tymed );
-    check_bitmap_size( med.hBitmap, 2, 1 );
+    check_bitmap_size( U(med).hBitmap, 2, 1 );
     ReleaseStgMedium( &med );
 
     fmt.cfFormat = CF_DIB;
@@ -2234,7 +2234,7 @@ static void test_data_cache_cache(void)
     hr = IDataObject_GetData( data, &fmt, &med );
     ok( hr == S_OK, "got %08lx\n", hr );
     ok( med.tymed == TYMED_HGLOBAL, "got %ld\n", med.tymed );
-    check_dib_size( med.hGlobal, 2, 1 );
+    check_dib_size( U(med).hGlobal, 2, 1 );
     ReleaseStgMedium( &med );
 
     /* uncache everything */
@@ -2563,7 +2563,7 @@ static void test_data_cache_updatecache( void )
     hr = IDataObject_GetData(data, &dib_fmt, &medium);
     ok(hr == S_OK, "Got hr %#lx.\n", hr);
     ok(medium.tymed == TYMED_HGLOBAL, "Got unexpected tymed %lu.\n", medium.tymed);
-    ok(compare_global(medium.hGlobal, dib_white, sizeof(dib_white)), "Media didn't match.\n");
+    ok(compare_global(U(medium).hGlobal, dib_white, sizeof(dib_white)), "Media didn't match.\n");
 
     hr = IOleCache2_Cache(cache, &emf_fmt, 0, &conn[1]);
     ok( hr == S_OK, "got %08lx\n", hr );
@@ -2575,7 +2575,7 @@ static void test_data_cache_updatecache( void )
     hr = IDataObject_GetData(data, &dib_fmt, &medium);
     ok(hr == S_OK, "Got hr %#lx.\n", hr);
     ok(medium.tymed == TYMED_HGLOBAL, "Got unexpected tymed %lu.\n", medium.tymed);
-    ok(compare_global(medium.hGlobal, dib_black, sizeof(dib_black)), "Media didn't match.\n");
+    ok(compare_global(U(medium).hGlobal, dib_black, sizeof(dib_black)), "Media didn't match.\n");
 
     hr = IDataObject_GetData(data, &emf_fmt, &medium);
     ok(hr == OLE_E_BLANK, "Got hr %#lx.\n", hr);
@@ -2680,7 +2680,7 @@ static void test_data_cache_updatecache( void )
     hr = IDataObject_GetData(data, &dib_fmt, &medium);
     ok(hr == S_OK, "Got hr %#lx.\n", hr);
     ok(medium.tymed == TYMED_HGLOBAL, "Got unexpected tymed %lu.\n", medium.tymed);
-    ok(compare_global(medium.hGlobal, dib_white, sizeof(dib_white)), "Media didn't match.\n");
+    ok(compare_global(U(medium).hGlobal, dib_white, sizeof(dib_white)), "Media didn't match.\n");
     hr = IDataObject_GetData(data, &emf_fmt, &medium);
     ok(hr == OLE_E_BLANK, "Got hr %#lx.\n", hr);
     hr = IDataObject_GetData(data, &view_fmt, &medium);
@@ -2714,7 +2714,7 @@ static void test_data_cache_updatecache( void )
     hr = IDataObject_GetData(data, &dib_fmt, &medium);
     ok(hr == S_OK, "Got hr %#lx.\n", hr);
     ok(medium.tymed == TYMED_HGLOBAL, "Got unexpected tymed %lu.\n", medium.tymed);
-    ok(compare_global(medium.hGlobal, dib_white, sizeof(dib_white)), "Media didn't match.\n");
+    ok(compare_global(U(medium).hGlobal, dib_white, sizeof(dib_white)), "Media didn't match.\n");
     hr = IDataObject_GetData(data, &emf_fmt, &medium);
     ok(hr == OLE_E_BLANK, "Got hr %#lx.\n", hr);
 
@@ -2725,7 +2725,7 @@ static void test_data_cache_updatecache( void )
     hr = IDataObject_GetData(data, &dib_fmt, &medium);
     ok(hr == S_OK, "Got hr %#lx.\n", hr);
     ok(medium.tymed == TYMED_HGLOBAL, "Got unexpected tymed %lu.\n", medium.tymed);
-    ok(compare_global(medium.hGlobal, dib_white, sizeof(dib_white)), "Media didn't match.\n");
+    ok(compare_global(U(medium).hGlobal, dib_white, sizeof(dib_white)), "Media didn't match.\n");
     hr = IDataObject_GetData(data, &emf_fmt, &medium);
     ok(hr == OLE_E_BLANK, "Got hr %#lx.\n", hr);
 
@@ -2736,7 +2736,7 @@ static void test_data_cache_updatecache( void )
     hr = IDataObject_GetData(data, &dib_fmt, &medium);
     ok(hr == S_OK, "Got hr %#lx.\n", hr);
     ok(medium.tymed == TYMED_HGLOBAL, "Got unexpected tymed %lu.\n", medium.tymed);
-    ok(compare_global(medium.hGlobal, dib_white, sizeof(dib_white)), "Media didn't match.\n");
+    ok(compare_global(U(medium).hGlobal, dib_white, sizeof(dib_white)), "Media didn't match.\n");
     hr = IDataObject_GetData(data, &emf_fmt, &medium);
     ok(hr == OLE_E_BLANK, "Got hr %#lx.\n", hr);
 
@@ -3968,15 +3968,15 @@ static HRESULT stgmedium_cmp(const STGMEDIUM *med1, STGMEDIUM *med2)
 
     if (med1->tymed == TYMED_MFPICT)
     {
-        METAFILEPICT *mfpict1 = GlobalLock(med1->hMetaFilePict);
-        METAFILEPICT *mfpict2 = GlobalLock(med2->hMetaFilePict);
+        METAFILEPICT *mfpict1 = GlobalLock(U(med1)->hMetaFilePict);
+        METAFILEPICT *mfpict2 = GlobalLock(U(med2)->hMetaFilePict);
 
         datasize1 = GetMetaFileBitsEx(mfpict1->hMF, 0, NULL);
         datasize2 = GetMetaFileBitsEx(mfpict2->hMF, 0, NULL);
         if (datasize1 == datasize2)
         {
-            data1 = malloc(datasize1);
-            data2 = malloc(datasize2);
+            data1 = HeapAlloc(GetProcessHeap(), 0, datasize1);
+            data2 = HeapAlloc(GetProcessHeap(), 0, datasize2);
             GetMetaFileBitsEx(mfpict1->hMF, datasize1, data1);
             GetMetaFileBitsEx(mfpict2->hMF, datasize2, data2);
         }
@@ -3988,8 +3988,8 @@ static HRESULT stgmedium_cmp(const STGMEDIUM *med1, STGMEDIUM *med2)
         datasize2 = GetEnhMetaFileBits(med2->hEnhMetaFile, 0, NULL);
         if (datasize1 == datasize2)
         {
-            data1 = malloc(datasize1);
-            data2 = malloc(datasize2);
+            data1 = HeapAlloc(GetProcessHeap(), 0, datasize1);
+            data2 = HeapAlloc(GetProcessHeap(), 0, datasize2);
             GetEnhMetaFileBits(med1->hEnhMetaFile, datasize1, data1);
             GetEnhMetaFileBits(med2->hEnhMetaFile, datasize2, data2);
         }
@@ -4016,20 +4016,20 @@ static HRESULT stgmedium_cmp(const STGMEDIUM *med1, STGMEDIUM *med2)
 
     if (med1->tymed == TYMED_HGLOBAL)
     {
-        GlobalUnlock(med1->hGlobal);
-        GlobalUnlock(med2->hGlobal);
+        GlobalUnlock(U(med1)->hGlobal);
+        GlobalUnlock(U(med2)->hGlobal);
     }
     else if (med1->tymed == TYMED_MFPICT)
     {
-        free(data1);
-        free(data2);
-        GlobalUnlock(med1->hMetaFilePict);
-        GlobalUnlock(med2->hMetaFilePict);
+        HeapFree(GetProcessHeap(), 0, data1);
+        HeapFree(GetProcessHeap(), 0, data2);
+        GlobalUnlock(U(med1)->hMetaFilePict);
+        GlobalUnlock(U(med2)->hMetaFilePict);
     }
     else
     {
-        free(data1);
-        free(data2);
+        HeapFree(GetProcessHeap(), 0, data1);
+        HeapFree(GetProcessHeap(), 0, data2);
     }
 
     return S_OK;
@@ -4125,53 +4125,53 @@ static void get_stgdef(struct storage_def *stg_def, CLIPFORMAT cf, STGMEDIUM *st
         if (!strcmp(stg_def->stream[stm_idx].name, "CONTENTS"))
         {
             data_size += sizeof(dib_inf);
-            data = malloc(data_size);
+            data = HeapAlloc(GetProcessHeap(), 0, data_size);
             memcpy(data, dib_inf, sizeof(dib_inf));
             memcpy(data + sizeof(dib_inf), dib_white, sizeof(dib_white));
         }
         else
         {
-            data = malloc(data_size);
+            data = HeapAlloc(GetProcessHeap(), 0, data_size);
             memcpy(data, dib_white, sizeof(dib_white));
         }
         stg_def->stream[stm_idx].data = data;
         stg_def->stream[stm_idx].data_size = data_size;
         break;
     case CF_METAFILEPICT:
-        mfpict = GlobalLock(stg_med->hMetaFilePict);
+        mfpict = GlobalLock(U(stg_med)->hMetaFilePict);
         data_size = GetMetaFileBitsEx(mfpict->hMF, 0, NULL);
         if (!strcmp(stg_def->stream[stm_idx].name, "CONTENTS"))
         {
-            data = malloc(data_size + sizeof(mf_rec));
+            data = HeapAlloc(GetProcessHeap(), 0, data_size + sizeof(mf_rec));
             memcpy(data, mf_rec, sizeof(mf_rec));
             GetMetaFileBitsEx(mfpict->hMF, data_size, data + sizeof(mf_rec));
             data_size += sizeof(mf_rec);
         }
         else
         {
-            data = malloc(data_size);
+            data = HeapAlloc(GetProcessHeap(), 0, data_size);
             GetMetaFileBitsEx(mfpict->hMF, data_size, data);
         }
-        GlobalUnlock(stg_med->hMetaFilePict);
+        GlobalUnlock(U(stg_med)->hMetaFilePict);
         stg_def->stream[stm_idx].data_size = data_size;
         stg_def->stream[stm_idx].data = data;
         break;
     case CF_ENHMETAFILE:
         if (!strcmp(stg_def->stream[stm_idx].name, "CONTENTS"))
         {
-            data_size = GetEnhMetaFileBits(stg_med->hEnhMetaFile, 0, NULL);
-            data = malloc(sizeof(DWORD) + sizeof(ENHMETAHEADER) + data_size);
+            data_size = GetEnhMetaFileBits(U(stg_med)->hEnhMetaFile, 0, NULL);
+            data = HeapAlloc(GetProcessHeap(), 0, sizeof(DWORD) + sizeof(ENHMETAHEADER) + data_size);
             *((DWORD *)data) = sizeof(ENHMETAHEADER);
-            GetEnhMetaFileBits(stg_med->hEnhMetaFile, data_size, data + sizeof(DWORD) + sizeof(ENHMETAHEADER));
+            GetEnhMetaFileBits(U(stg_med)->hEnhMetaFile, data_size, data + sizeof(DWORD) + sizeof(ENHMETAHEADER));
             memcpy(data + sizeof(DWORD), data + sizeof(DWORD) + sizeof(ENHMETAHEADER), sizeof(ENHMETAHEADER));
             data_size += sizeof(DWORD) + sizeof(ENHMETAHEADER);
         }
         else
         {
             hdc = GetDC(NULL);
-            data_size = GetWinMetaFileBits(stg_med->hEnhMetaFile, 0, NULL, MM_ANISOTROPIC, hdc);
-            data = malloc(data_size);
-            GetWinMetaFileBits(stg_med->hEnhMetaFile, data_size, data, MM_ANISOTROPIC, hdc);
+            data_size = GetWinMetaFileBits(U(stg_med)->hEnhMetaFile, 0, NULL, MM_ANISOTROPIC, hdc);
+            data = HeapAlloc(GetProcessHeap(), 0, data_size);
+            GetWinMetaFileBits(U(stg_med)->hEnhMetaFile, data_size, data, MM_ANISOTROPIC, hdc);
             ReleaseDC(NULL, hdc);
         }
         stg_def->stream[stm_idx].data_size = data_size;
@@ -4389,7 +4389,7 @@ static void test_data_cache_save_data(void)
         IStorage_Release(doc);
         IOleCache2_Release(cache);
         for (i = 0; i < pdata->num_set; i++)
-            free((void *)pdata->stg_def.stream[i].data);
+            HeapFree(GetProcessHeap(), 0, (void *)pdata->stg_def.stream[i].data);
 
     }
 }
@@ -4549,7 +4549,6 @@ static void test_OleCreateStaticFromData(void)
     IPersist_Release(persist);
     IStorage_Release(storage);
     IOleObject_Release(ole_obj);
-    free((void *)stg_def_dib.stream[2].data);
 
     /* CF_ENHMETAFILE */
     hr = CreateILockBytesOnHGlobal(NULL, TRUE, &ilb);
@@ -4583,7 +4582,6 @@ static void test_OleCreateStaticFromData(void)
     IPersist_Release(persist);
     IStorage_Release(storage);
     IOleObject_Release(ole_obj);
-    free((void *)stg_def_emf.stream[2].data);
 
     /* CF_TEXT */
     hr = CreateILockBytesOnHGlobal(NULL, TRUE, &ilb);

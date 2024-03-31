@@ -19,4 +19,3 @@
 #pragma makedep register
 
 #include "windows.security.cryptography.idl"
-#include "windows.security.credentials.idl"

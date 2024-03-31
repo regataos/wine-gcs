@@ -372,7 +372,7 @@ static HRESULT WINAPI constraint_factory_CreateWithTag( ISpeechRecognitionListCo
 
 error:
     if (impl->commands) IVector_HSTRING_Release(impl->commands);
-    free(impl);
+    if (impl) free(impl);
     return hr;
 }
 

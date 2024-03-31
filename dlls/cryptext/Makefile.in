@@ -3,5 +3,5 @@ IMPORTS = crypt32 cryptui user32
 
 EXTRADLLFLAGS = -Wb,--prefer-native
 
-SOURCES = \
+C_SRCS = \
 	cryptext_main.c

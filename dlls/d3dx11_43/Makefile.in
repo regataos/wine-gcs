@@ -6,8 +6,9 @@ DELAYIMPORTS = windowscodecs
 
 EXTRADLLFLAGS = -Wb,--prefer-native
 
-SOURCES = \
+C_SRCS = \
 	async.c \
 	main.c \
-	texture.c \
-	version.rc
+	texture.c
+
+RC_SRCS = version.rc

@@ -203,14 +203,24 @@ static struct d3dcompiler_shader_reflection_variable null_variable =
 
 static BOOL copy_name(const char *ptr, char **name)
 {
-    if (!ptr || !ptr[0]) return TRUE;
+    size_t name_len;
 
-    *name = strdup(ptr);
+    if (!ptr) return TRUE;
+
+    name_len = strlen(ptr) + 1;
+    if (name_len == 1)
+    {
+        return TRUE;
+    }
+
+    *name = HeapAlloc(GetProcessHeap(), 0, name_len);
     if (!*name)
     {
         ERR("Failed to allocate name memory.\n");
         return FALSE;
     }
+
+    memcpy(*name, ptr, name_len);
 
     return TRUE;
 }
@@ -219,7 +229,7 @@ static BOOL copy_value(const char *ptr, void **value, uint32_t size)
 {
     if (!ptr || !size) return TRUE;
 
-    *value = malloc(size);
+    *value = HeapAlloc(GetProcessHeap(), 0, size);
     if (!*value)
     {
         ERR("Failed to allocate value memory.\n");
@@ -243,7 +253,7 @@ static void free_type_member(struct d3dcompiler_shader_reflection_type_member *m
 {
     if (member)
     {
-        free(member->name);
+        HeapFree(GetProcessHeap(), 0, member->name);
     }
 }
 
@@ -260,27 +270,27 @@ static void d3dcompiler_shader_reflection_type_destroy(struct wine_rb_entry *ent
         {
             free_type_member(&t->members[i]);
         }
-        free(t->members);
+        HeapFree(GetProcessHeap(), 0, t->members);
     }
 
-    free(t->name);
-    free(t);
+    heap_free(t->name);
+    HeapFree(GetProcessHeap(), 0, t);
 }
 
 static void free_signature(struct d3dcompiler_shader_signature *sig)
 {
     TRACE("Free signature %p\n", sig);
 
-    free(sig->elements);
-    free(sig->string_data);
+    HeapFree(GetProcessHeap(), 0, sig->elements);
+    HeapFree(GetProcessHeap(), 0, sig->string_data);
 }
 
 static void free_variable(struct d3dcompiler_shader_reflection_variable *var)
 {
     if (var)
     {
-        free(var->name);
-        free(var->default_value);
+        HeapFree(GetProcessHeap(), 0, var->name);
+        HeapFree(GetProcessHeap(), 0, var->default_value);
     }
 }
 
@@ -294,10 +304,10 @@ static void free_constant_buffer(struct d3dcompiler_shader_reflection_constant_b
         {
             free_variable(&cb->variables[i]);
         }
-        free(cb->variables);
+        HeapFree(GetProcessHeap(), 0, cb->variables);
     }
 
-    free(cb->name);
+    HeapFree(GetProcessHeap(), 0, cb->name);
 }
 
 static void reflection_cleanup(struct d3dcompiler_shader_reflection *ref)
@@ -307,19 +317,19 @@ static void reflection_cleanup(struct d3dcompiler_shader_reflection *ref)
     if (ref->isgn)
     {
         free_signature(ref->isgn);
-        free(ref->isgn);
+        HeapFree(GetProcessHeap(), 0, ref->isgn);
     }
 
     if (ref->osgn)
     {
         free_signature(ref->osgn);
-        free(ref->osgn);
+        HeapFree(GetProcessHeap(), 0, ref->osgn);
     }
 
     if (ref->pcsg)
     {
         free_signature(ref->pcsg);
-        free(ref->pcsg);
+        HeapFree(GetProcessHeap(), 0, ref->pcsg);
     }
 
     if (ref->constant_buffers)
@@ -333,10 +343,10 @@ static void reflection_cleanup(struct d3dcompiler_shader_reflection *ref)
     }
 
     wine_rb_destroy(&ref->types, d3dcompiler_shader_reflection_type_destroy, NULL);
-    free(ref->constant_buffers);
-    free(ref->bound_resources);
-    free(ref->resource_string);
-    free(ref->creator);
+    HeapFree(GetProcessHeap(), 0, ref->constant_buffers);
+    HeapFree(GetProcessHeap(), 0, ref->bound_resources);
+    HeapFree(GetProcessHeap(), 0, ref->resource_string);
+    HeapFree(GetProcessHeap(), 0, ref->creator);
 }
 
 /* IUnknown methods */
@@ -385,7 +395,7 @@ static ULONG STDMETHODCALLTYPE d3dcompiler_shader_reflection_Release(ID3D11Shade
     if (!refcount)
     {
         reflection_cleanup(This);
-        free(This);
+        HeapFree(GetProcessHeap(), 0, This);
     }
 
     return refcount;
@@ -1260,7 +1270,7 @@ static HRESULT d3dcompiler_parse_type_members(struct d3dcompiler_shader_reflecti
     if (!member->type)
     {
         ERR("Failed to get member type\n");
-        free(member->name);
+        HeapFree(GetProcessHeap(), 0, member->name);
         return E_FAIL;
     }
 
@@ -1308,7 +1318,7 @@ static HRESULT d3dcompiler_parse_type(struct d3dcompiler_shader_reflection_type 
     {
         const char *ptr2 = data + member_offset;
 
-        members = calloc(desc->Members, sizeof(*members));
+        members = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*members) * desc->Members);
         if (!members)
         {
             ERR("Failed to allocate type memory.\n");
@@ -1333,7 +1343,7 @@ static HRESULT d3dcompiler_parse_type(struct d3dcompiler_shader_reflection_type 
         if (!copy_name(data + offset, &type->name))
         {
             ERR("Failed to copy name.\n");
-            free(members);
+            heap_free(members);
             return E_OUTOFMEMORY;
         }
         desc->Name = type->name;
@@ -1350,7 +1360,7 @@ err_out:
     {
         free_type_member(&members[i]);
     }
-    free(members);
+    HeapFree(GetProcessHeap(), 0, members);
     return hr;
 }
 
@@ -1367,7 +1377,7 @@ static struct d3dcompiler_shader_reflection_type *get_reflection_type(struct d3d
         return WINE_RB_ENTRY_VALUE(entry, struct d3dcompiler_shader_reflection_type, entry);
     }
 
-    type = calloc(1, sizeof(*type));
+    type = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*type));
     if (!type)
         return NULL;
 
@@ -1379,14 +1389,14 @@ static struct d3dcompiler_shader_reflection_type *get_reflection_type(struct d3d
     if (FAILED(hr))
     {
         ERR("Failed to parse type info, hr %#lx.\n", hr);
-        free(type);
+        HeapFree(GetProcessHeap(), 0, type);
         return NULL;
     }
 
     if (wine_rb_put(&reflection->types, &offset, &type->entry) == -1)
     {
         ERR("Failed to insert type entry.\n");
-        free(type);
+        HeapFree(GetProcessHeap(), 0, type);
         return NULL;
     }
 
@@ -1400,7 +1410,7 @@ static HRESULT d3dcompiler_parse_variables(struct d3dcompiler_shader_reflection_
     unsigned int i;
     HRESULT hr;
 
-    variables = calloc(cb->variable_count, sizeof(*variables));
+    variables = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, cb->variable_count * sizeof(*variables));
     if (!variables)
     {
         ERR("Failed to allocate variables memory.\n");
@@ -1465,7 +1475,7 @@ err_out:
     {
         free_variable(&variables[i]);
     }
-    free(variables);
+    HeapFree(GetProcessHeap(), 0, variables);
     return hr;
 }
 
@@ -1538,7 +1548,7 @@ static HRESULT d3dcompiler_parse_rdef(struct d3dcompiler_shader_reflection *r, c
         string_data_offset = resource_offset + r->bound_resource_count * 8 * sizeof(uint32_t);
         string_data_size = (cbuffer_offset ? cbuffer_offset : creator_offset) - string_data_offset;
 
-        string_data = malloc(string_data_size);
+        string_data = HeapAlloc(GetProcessHeap(), 0, string_data_size);
         if (!string_data)
         {
             ERR("Failed to allocate string data memory.\n");
@@ -1547,7 +1557,7 @@ static HRESULT d3dcompiler_parse_rdef(struct d3dcompiler_shader_reflection *r, c
         }
         memcpy(string_data, data + string_data_offset, string_data_size);
 
-        bound_resources = calloc(r->bound_resource_count, sizeof(*bound_resources));
+        bound_resources = HeapAlloc(GetProcessHeap(), 0, r->bound_resource_count * sizeof(*bound_resources));
         if (!bound_resources)
         {
             ERR("Failed to allocate resources memory.\n");
@@ -1594,6 +1604,7 @@ static HRESULT d3dcompiler_parse_rdef(struct d3dcompiler_shader_reflection *r, c
             }
             else
             {
+                desc->Space = 0;
                 desc->uID = desc->BindPoint;
             }
         }
@@ -1601,7 +1612,7 @@ static HRESULT d3dcompiler_parse_rdef(struct d3dcompiler_shader_reflection *r, c
 
     if (r->constant_buffer_count)
     {
-        constant_buffers = calloc(r->constant_buffer_count, sizeof(*constant_buffers));
+        constant_buffers = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, r->constant_buffer_count * sizeof(*constant_buffers));
         if (!constant_buffers)
         {
             ERR("Failed to allocate constant buffer memory.\n");
@@ -1662,21 +1673,20 @@ err_out:
     {
         free_constant_buffer(&constant_buffers[i]);
     }
-    free(constant_buffers);
-    free(bound_resources);
-    free(string_data);
-    free(creator);
+    HeapFree(GetProcessHeap(), 0, constant_buffers);
+    HeapFree(GetProcessHeap(), 0, bound_resources);
+    HeapFree(GetProcessHeap(), 0, string_data);
+    HeapFree(GetProcessHeap(), 0, creator);
 
     return hr;
 }
 
-static HRESULT d3dcompiler_parse_signature(struct d3dcompiler_shader_signature *s,
-        const struct vkd3d_shader_dxbc_section_desc *section)
+static HRESULT d3dcompiler_parse_signature(struct d3dcompiler_shader_signature *s, struct dxbc_section *section)
 {
     enum D3DCOMPILER_SIGNATURE_ELEMENT_SIZE element_size;
-    const char *ptr = section->data.code;
     D3D11_SIGNATURE_PARAMETER_DESC *d;
     unsigned int string_data_offset;
+    const char *ptr = section->data;
     unsigned int string_data_size;
     unsigned int i, count;
     char *string_data;
@@ -1694,7 +1704,7 @@ static HRESULT d3dcompiler_parse_signature(struct d3dcompiler_shader_signature *
             break;
 
         default:
-            FIXME("Unhandled section %s!\n", debugstr_fourcc(section->tag));
+            FIXME("Unhandled section %s!\n", debugstr_an((const char *)&section->tag, 4));
             element_size = D3DCOMPILER_SIGNATURE_ELEMENT_SIZE6;
             break;
     }
@@ -1704,7 +1714,7 @@ static HRESULT d3dcompiler_parse_signature(struct d3dcompiler_shader_signature *
 
     skip_u32_unknown(&ptr, 1);
 
-    d = calloc(count, sizeof(*d));
+    d = HeapAlloc(GetProcessHeap(), 0, count * sizeof(*d));
     if (!d)
     {
         ERR("Failed to allocate signature memory.\n");
@@ -1713,16 +1723,16 @@ static HRESULT d3dcompiler_parse_signature(struct d3dcompiler_shader_signature *
 
     /* 2 u32s for the header, element_size for each element. */
     string_data_offset = 2 * sizeof(uint32_t) + count * element_size * sizeof(uint32_t);
-    string_data_size = section->data.size - string_data_offset;
+    string_data_size = section->data_size - string_data_offset;
 
-    string_data = malloc(string_data_size);
+    string_data = HeapAlloc(GetProcessHeap(), 0, string_data_size);
     if (!string_data)
     {
         ERR("Failed to allocate string data memory.\n");
-        free(d);
+        HeapFree(GetProcessHeap(), 0, d);
         return E_OUTOFMEMORY;
     }
-    memcpy(string_data, (const char *)section->data.code + string_data_offset, string_data_size);
+    memcpy(string_data, section->data + string_data_offset, string_data_size);
 
     for (i = 0; i < count; ++i)
     {
@@ -1736,6 +1746,10 @@ static HRESULT d3dcompiler_parse_signature(struct d3dcompiler_shader_signature *
         if (element_size == D3DCOMPILER_SIGNATURE_ELEMENT_SIZE7)
         {
             d[i].Stream = read_u32(&ptr);
+        }
+        else
+        {
+            d[i].Stream = 0;
         }
 #endif
 
@@ -1847,28 +1861,27 @@ static HRESULT d3dcompiler_parse_shdr(struct d3dcompiler_shader_reflection *r, c
 static HRESULT d3dcompiler_shader_reflection_init(struct d3dcompiler_shader_reflection *reflection,
         const void *data, SIZE_T data_size)
 {
-    const struct vkd3d_shader_code src_dxbc = {.code = data, .size = data_size};
-    struct vkd3d_shader_dxbc_desc src_dxbc_desc;
-    HRESULT hr = S_OK;
+    struct dxbc src_dxbc;
+    HRESULT hr;
     unsigned int i;
-    int ret;
 
     wine_rb_init(&reflection->types, d3dcompiler_shader_reflection_type_compare);
 
-    if ((ret = vkd3d_shader_parse_dxbc(&src_dxbc, 0, &src_dxbc_desc, NULL)) < 0)
+    hr = dxbc_parse(data, data_size, &src_dxbc);
+    if (FAILED(hr))
     {
-        WARN("Failed to parse reflection, ret %d.\n", ret);
-        return E_FAIL;
+        WARN("Failed to parse reflection\n");
+        return hr;
     }
 
-    for (i = 0; i < src_dxbc_desc.section_count; ++i)
+    for (i = 0; i < src_dxbc.count; ++i)
     {
-        const struct vkd3d_shader_dxbc_section_desc *section = &src_dxbc_desc.sections[i];
+        struct dxbc_section *section = &src_dxbc.sections[i];
 
         switch (section->tag)
         {
             case TAG_RDEF:
-                hr = d3dcompiler_parse_rdef(reflection, section->data.code, section->data.size);
+                hr = d3dcompiler_parse_rdef(reflection, section->data, section->data_size);
                 if (FAILED(hr))
                 {
                     WARN("Failed to parse RDEF section.\n");
@@ -1877,7 +1890,7 @@ static HRESULT d3dcompiler_shader_reflection_init(struct d3dcompiler_shader_refl
                 break;
 
             case TAG_ISGN:
-                reflection->isgn = calloc(1, sizeof(*reflection->isgn));
+                reflection->isgn = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*reflection->isgn));
                 if (!reflection->isgn)
                 {
                     ERR("Failed to allocate ISGN memory.\n");
@@ -1895,7 +1908,7 @@ static HRESULT d3dcompiler_shader_reflection_init(struct d3dcompiler_shader_refl
 
             case TAG_OSG5:
             case TAG_OSGN:
-                reflection->osgn = calloc(1, sizeof(*reflection->osgn));
+                reflection->osgn = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*reflection->osgn));
                 if (!reflection->osgn)
                 {
                     ERR("Failed to allocate OSGN memory.\n");
@@ -1912,7 +1925,7 @@ static HRESULT d3dcompiler_shader_reflection_init(struct d3dcompiler_shader_refl
                 break;
 
             case TAG_PCSG:
-                reflection->pcsg = calloc(1, sizeof(*reflection->pcsg));
+                reflection->pcsg = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*reflection->pcsg));
                 if (!reflection->pcsg)
                 {
                     ERR("Failed to allocate PCSG memory.\n");
@@ -1930,7 +1943,7 @@ static HRESULT d3dcompiler_shader_reflection_init(struct d3dcompiler_shader_refl
 
             case TAG_SHEX:
             case TAG_SHDR:
-                hr = d3dcompiler_parse_shdr(reflection, section->data.code, section->data.size);
+                hr = d3dcompiler_parse_shdr(reflection, section->data, section->data_size);
                 if (FAILED(hr))
                 {
                     WARN("Failed to parse SHDR section.\n");
@@ -1939,7 +1952,7 @@ static HRESULT d3dcompiler_shader_reflection_init(struct d3dcompiler_shader_refl
                 break;
 
             case TAG_STAT:
-                hr = d3dcompiler_parse_stat(reflection, section->data.code, section->data.size);
+                hr = d3dcompiler_parse_stat(reflection, section->data, section->data_size);
                 if (FAILED(hr))
                 {
                     WARN("Failed to parse section STAT.\n");
@@ -1948,18 +1961,18 @@ static HRESULT d3dcompiler_shader_reflection_init(struct d3dcompiler_shader_refl
                 break;
 
             default:
-                FIXME("Unhandled section %s!\n", debugstr_fourcc(section->tag));
+                FIXME("Unhandled section %s!\n", debugstr_an((const char *)&section->tag, 4));
                 break;
         }
     }
 
-    vkd3d_shader_free_dxbc(&src_dxbc_desc);
+    dxbc_destroy(&src_dxbc);
 
     return hr;
 
 err_out:
     reflection_cleanup(reflection);
-    vkd3d_shader_free_dxbc(&src_dxbc_desc);
+    dxbc_destroy(&src_dxbc);
 
     return hr;
 }
@@ -1973,7 +1986,7 @@ HRESULT WINAPI D3D10ReflectShader(const void *data, SIZE_T data_size, ID3D10Shad
 
     TRACE("data %p, data_size %Iu, reflector %p.\n", data, data_size, reflector);
 
-    if (!(object = calloc(1, sizeof(*object))))
+    if (!(object = heap_alloc_zero(sizeof(*object))))
     {
         ERR("Failed to allocate D3D10 shader reflection object memory.\n");
         return E_OUTOFMEMORY;
@@ -1987,7 +2000,7 @@ HRESULT WINAPI D3D10ReflectShader(const void *data, SIZE_T data_size, ID3D10Shad
     if (FAILED(hr))
     {
         WARN("Failed to initialize shader reflection.\n");
-        free(object);
+        HeapFree(GetProcessHeap(), 0, object);
         return hr;
     }
 
@@ -2033,7 +2046,7 @@ HRESULT WINAPI D3DReflect(const void *data, SIZE_T data_size, REFIID riid, void 
 #endif
     }
 
-    object = calloc(1, sizeof(*object));
+    object = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*object));
     if (!object)
         return E_OUTOFMEMORY;
 
@@ -2046,7 +2059,7 @@ HRESULT WINAPI D3DReflect(const void *data, SIZE_T data_size, REFIID riid, void 
     if (FAILED(hr))
     {
         WARN("Failed to initialize shader reflection\n");
-        free(object);
+        HeapFree(GetProcessHeap(), 0, object);
         return hr;
     }
 

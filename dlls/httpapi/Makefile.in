@@ -2,5 +2,5 @@ MODULE    = httpapi.dll
 IMPORTLIB = httpapi
 IMPORTS   = advapi32
 
-SOURCES = \
+C_SRCS = \
 	httpapi_main.c

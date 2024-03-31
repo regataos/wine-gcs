@@ -72,17 +72,17 @@ DWORD WINAPI NetrJobGetInfo_wrapper(ATSVC_HANDLE server_name, DWORD jobid, LPAT_
     return NetrJobGetInfo(server_name, jobid, info);
 }
 
-void __RPC_FAR *__RPC_USER MIDL_user_allocate(SIZE_T n)
+DECLSPEC_HIDDEN void __RPC_FAR *__RPC_USER MIDL_user_allocate(SIZE_T n)
 {
-    return malloc(n);
+    return HeapAlloc(GetProcessHeap(), 0, n);
 }
 
-void __RPC_USER MIDL_user_free(void __RPC_FAR *p)
+DECLSPEC_HIDDEN void __RPC_USER MIDL_user_free(void __RPC_FAR *p)
 {
-    free(p);
+    HeapFree(GetProcessHeap(), 0, p);
 }
 
-handle_t __RPC_USER ATSVC_HANDLE_bind(ATSVC_HANDLE str)
+DECLSPEC_HIDDEN handle_t __RPC_USER ATSVC_HANDLE_bind(ATSVC_HANDLE str)
 {
     static unsigned char ncalrpc[] = "ncalrpc";
     unsigned char *binding_str;
@@ -96,7 +96,7 @@ handle_t __RPC_USER ATSVC_HANDLE_bind(ATSVC_HANDLE str)
     return rpc_handle;
 }
 
-void __RPC_USER ATSVC_HANDLE_unbind(ATSVC_HANDLE ServerName, handle_t rpc_handle)
+DECLSPEC_HIDDEN void __RPC_USER ATSVC_HANDLE_unbind(ATSVC_HANDLE ServerName, handle_t rpc_handle)
 {
     RpcBindingFree(&rpc_handle);
 }

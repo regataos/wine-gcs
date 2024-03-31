@@ -34,18 +34,19 @@
 #include "shlobj.h"
 #include "exdisp.h"
 
+#include "wine/heap.h"
 #include "wine/list.h"
 
 /**********************************************************************
  * Shell Instance Objects
  */
 extern HRESULT SHDOCVW_GetShellInstanceObjectClassObject(REFCLSID rclsid, 
-    REFIID riid, LPVOID *ppvClassObj);
+    REFIID riid, LPVOID *ppvClassObj) DECLSPEC_HIDDEN;
 
 /**********************************************************************
  * Dll lifetime tracking declaration for shdocvw.dll
  */
-extern LONG SHDOCVW_refCount;
+extern LONG SHDOCVW_refCount DECLSPEC_HIDDEN;
 static inline void SHDOCVW_LockModule(void) { InterlockedIncrement( &SHDOCVW_refCount ); }
 static inline void SHDOCVW_UnlockModule(void) { InterlockedDecrement( &SHDOCVW_refCount ); }
 

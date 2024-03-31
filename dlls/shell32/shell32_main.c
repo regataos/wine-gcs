@@ -453,8 +453,8 @@ DWORD_PTR WINAPI SHGetFileInfoW(LPCWSTR path,DWORD dwFileAttributes,
 
                     while ((hr = SIC_get_location( psfi->iIcon, file, &size, &icon_idx )) == E_NOT_SUFFICIENT_BUFFER)
                     {
-                        if (file == buf) file = malloc( size );
-                        else file = realloc( file, size );
+                        if (file == buf) file = heap_alloc( size );
+                        else file = heap_realloc( file, size );
                         if (!file) break;
                     }
                     if (SUCCEEDED(hr))
@@ -462,7 +462,7 @@ DWORD_PTR WINAPI SHGetFileInfoW(LPCWSTR path,DWORD dwFileAttributes,
                         ret = PrivateExtractIconsW( file, icon_idx, width, height, &psfi->hIcon, 0, 1, 0);
                         if (ret == 0 || ret == (UINT)-1) hr = E_FAIL;
                     }
-                    if (file != buf) free( file );
+                    if (file != buf) heap_free( file );
                 }
             }
         }
@@ -513,7 +513,7 @@ DWORD_PTR WINAPI SHGetFileInfoA(LPCSTR path,DWORD dwFileAttributes,
     else
     {
         len = MultiByteToWideChar(CP_ACP, 0, path, -1, NULL, 0);
-        temppath = malloc(len * sizeof(WCHAR));
+        temppath = heap_alloc(len*sizeof(WCHAR));
         MultiByteToWideChar(CP_ACP, 0, path, -1, temppath, len);
         pathW = temppath;
     }
@@ -546,7 +546,7 @@ DWORD_PTR WINAPI SHGetFileInfoA(LPCSTR path,DWORD dwFileAttributes,
         }
     }
 
-    free(temppath);
+    heap_free(temppath);
 
     return ret;
 }
@@ -585,7 +585,7 @@ HICON WINAPI ExtractIconA(HINSTANCE hInstance, const char *file, UINT nIconIndex
 
     fileW = strdupAtoW(file);
     ret = ExtractIconW(hInstance, fileW, nIconIndex);
-    free(fileW);
+    heap_free(fileW);
 
     return ret;
 }
@@ -701,7 +701,7 @@ static ULONG WINAPI window_prop_store_Release(IPropertyStore *iface)
 {
     struct window_prop_store *store = impl_from_IPropertyStore(iface);
     LONG ref = InterlockedDecrement(&store->ref);
-    if (!ref) free(store);
+    if (!ref) heap_free(store);
     TRACE("returning %ld\n", ref);
     return ref;
 }
@@ -773,7 +773,7 @@ static HRESULT create_window_prop_store(IPropertyStore **obj)
 {
     struct window_prop_store *store;
 
-    if (!(store = malloc(sizeof(*store)))) return E_OUTOFMEMORY;
+    if (!(store = heap_alloc(sizeof(*store)))) return E_OUTOFMEMORY;
     store->IPropertyStore_iface.lpVtbl = &window_prop_store_vtbl;
     store->ref = 1;
 
@@ -872,7 +872,7 @@ static void add_authors( HWND list )
 
     if (!strA) return;
     sizeW = MultiByteToWideChar( CP_UTF8, 0, strA, sizeA, NULL, 0 ) + 1;
-    if (!(strW = malloc( sizeW * sizeof(WCHAR) ))) return;
+    if (!(strW = heap_alloc( sizeW * sizeof(WCHAR) ))) return;
     MultiByteToWideChar( CP_UTF8, 0, strA, sizeA, strW, sizeW );
     strW[sizeW - 1] = 0;
 
@@ -886,7 +886,7 @@ static void add_authors( HWND list )
         SendMessageW( list, LB_ADDSTRING, -1, (LPARAM)start );
         start = end;
     }
-    free( strW );
+    heap_free( strW );
 }
 
 /*************************************************************************
@@ -987,20 +987,20 @@ BOOL WINAPI ShellAboutA( HWND hWnd, LPCSTR szApp, LPCSTR szOtherStuff, HICON hIc
     if (szApp)
     {
         len = MultiByteToWideChar(CP_ACP, 0, szApp, -1, NULL, 0);
-        appW = malloc(len * sizeof(WCHAR));
+        appW = heap_alloc( len * sizeof(WCHAR));
         MultiByteToWideChar(CP_ACP, 0, szApp, -1, appW, len);
     }
     if (szOtherStuff)
     {
         len = MultiByteToWideChar(CP_ACP, 0, szOtherStuff, -1, NULL, 0);
-        otherW = malloc(len * sizeof(WCHAR));
+        otherW = heap_alloc( len * sizeof(WCHAR));
         MultiByteToWideChar(CP_ACP, 0, szOtherStuff, -1, otherW, len);
     }
 
     ret = ShellAboutW(hWnd, appW, otherW, hIcon);
 
-    free(otherW);
-    free(appW);
+    heap_free(otherW);
+    heap_free(appW);
     return ret;
 }
 
@@ -1135,19 +1135,6 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID fImpLoad)
         break;
     }
     return TRUE;
-}
-
-WCHAR *shell_get_resource_string(UINT id)
-{
-    const WCHAR *resource;
-    unsigned int size;
-    WCHAR *ret;
-
-    size = LoadStringW(shell32_hInstance, id, (WCHAR *)&resource, 0);
-    ret = malloc((size + 1) * sizeof(WCHAR));
-    memcpy(ret, resource, size * sizeof(WCHAR));
-    ret[size] = 0;
-    return ret;
 }
 
 /*************************************************************************

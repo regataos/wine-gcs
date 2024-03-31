@@ -42,7 +42,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(gdi);
  *           null driver fallback implementations
  */
 
-BOOL nulldrv_AngleArc( PHYSDEV dev, INT x, INT y, DWORD radius, FLOAT start, FLOAT sweep )
+BOOL CDECL nulldrv_AngleArc( PHYSDEV dev, INT x, INT y, DWORD radius, FLOAT start, FLOAT sweep )
 {
     DC *dc = get_physdev_dc( dev );
     INT x1 = GDI_ROUND( x + cos( start * M_PI / 180 ) * radius );
@@ -58,8 +58,8 @@ BOOL nulldrv_AngleArc( PHYSDEV dev, INT x, INT y, DWORD radius, FLOAT start, FLO
     return ret;
 }
 
-BOOL nulldrv_ArcTo( PHYSDEV dev, INT left, INT top, INT right, INT bottom,
-                    INT xstart, INT ystart, INT xend, INT yend )
+BOOL CDECL nulldrv_ArcTo( PHYSDEV dev, INT left, INT top, INT right, INT bottom,
+                          INT xstart, INT ystart, INT xend, INT yend )
 {
     INT width = abs( right - left );
     INT height = abs( bottom - top );
@@ -78,7 +78,7 @@ BOOL nulldrv_ArcTo( PHYSDEV dev, INT left, INT top, INT right, INT bottom,
                              xstart, ystart, xend, yend );
 }
 
-BOOL nulldrv_FillRgn( PHYSDEV dev, HRGN rgn, HBRUSH brush )
+BOOL CDECL nulldrv_FillRgn( PHYSDEV dev, HRGN rgn, HBRUSH brush )
 {
     BOOL ret = FALSE;
     HBRUSH prev;
@@ -92,7 +92,7 @@ BOOL nulldrv_FillRgn( PHYSDEV dev, HRGN rgn, HBRUSH brush )
     return ret;
 }
 
-BOOL nulldrv_FrameRgn( PHYSDEV dev, HRGN rgn, HBRUSH brush, INT width, INT height )
+BOOL CDECL nulldrv_FrameRgn( PHYSDEV dev, HRGN rgn, HBRUSH brush, INT width, INT height )
 {
     BOOL ret = FALSE;
     HRGN tmp = NtGdiCreateRectRgn( 0, 0, 0, 0 );
@@ -106,7 +106,7 @@ BOOL nulldrv_FrameRgn( PHYSDEV dev, HRGN rgn, HBRUSH brush, INT width, INT heigh
     return ret;
 }
 
-BOOL nulldrv_InvertRgn( PHYSDEV dev, HRGN rgn )
+BOOL CDECL nulldrv_InvertRgn( PHYSDEV dev, HRGN rgn )
 {
     DC *dc = get_physdev_dc( dev );
     INT prev_rop = dc->attr->rop_mode;
@@ -122,7 +122,7 @@ static BOOL polyline( HDC hdc, const POINT *points, ULONG count )
     return NtGdiPolyPolyDraw( hdc, points, &count, 1, NtGdiPolyPolyline );
 }
 
-BOOL nulldrv_PolyBezier( PHYSDEV dev, const POINT *points, DWORD count )
+BOOL CDECL nulldrv_PolyBezier( PHYSDEV dev, const POINT *points, DWORD count )
 {
     BOOL ret = FALSE;
     POINT *pts;
@@ -136,7 +136,7 @@ BOOL nulldrv_PolyBezier( PHYSDEV dev, const POINT *points, DWORD count )
     return ret;
 }
 
-BOOL nulldrv_PolyBezierTo( PHYSDEV dev, const POINT *points, DWORD count )
+BOOL CDECL nulldrv_PolyBezierTo( PHYSDEV dev, const POINT *points, DWORD count )
 {
     DC *dc = get_nulldrv_dc( dev );
     BOOL ret = FALSE;
@@ -153,7 +153,7 @@ BOOL nulldrv_PolyBezierTo( PHYSDEV dev, const POINT *points, DWORD count )
     return ret;
 }
 
-BOOL nulldrv_PolyDraw( PHYSDEV dev, const POINT *points, const BYTE *types, DWORD count )
+BOOL CDECL nulldrv_PolyDraw( PHYSDEV dev, const POINT *points, const BYTE *types, DWORD count )
 {
     DC *dc = get_nulldrv_dc( dev );
     POINT *line_pts = NULL, *new_line_pts, *bzr_pts = NULL, bzr[4];
@@ -234,7 +234,7 @@ BOOL nulldrv_PolyDraw( PHYSDEV dev, const POINT *points, const BYTE *types, DWOR
     return TRUE;
 }
 
-BOOL nulldrv_PolylineTo( PHYSDEV dev, const POINT *points, INT count )
+BOOL CDECL nulldrv_PolylineTo( PHYSDEV dev, const POINT *points, INT count )
 {
     DC *dc = get_nulldrv_dc( dev );
     BOOL ret = FALSE;
@@ -637,10 +637,8 @@ BOOL WINAPI NtGdiExtFloodFill( HDC hdc, INT x, INT y, COLORREF color, UINT fill_
 /***********************************************************************
  *      NtGdiAngleArc (win32u.@)
  */
-BOOL WINAPI NtGdiAngleArc( HDC hdc, INT x, INT y, DWORD dwRadius, DWORD start_angle, DWORD sweep_angle )
+BOOL WINAPI NtGdiAngleArc( HDC hdc, INT x, INT y, DWORD dwRadius, FLOAT eStartAngle, FLOAT eSweepAngle )
 {
-    FLOAT eStartAngle = *(FLOAT *)&start_angle;
-    FLOAT eSweepAngle = *(FLOAT *)&sweep_angle;
     PHYSDEV physdev;
     BOOL result;
     DC *dc;

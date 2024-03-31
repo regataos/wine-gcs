@@ -26,6 +26,8 @@
 #include <stdio.h>
 
 #define COBJMACROS
+#define NONAMELESSUNION
+
 #include "winerror.h"
 #include "windef.h"
 #include "winbase.h"
@@ -345,7 +347,7 @@ IShellFolder_fnParseDisplayName (IShellFolder2 * iface,
         /* Special case for the root folder. */
         if (!wcsicmp( szPath, L"\\\\?\\unix\\" ))
         {
-            *ppidl = SHAlloc(sizeof(**ppidl));
+            *ppidl = SHAlloc(sizeof(USHORT));
             if (!*ppidl) return E_FAIL;
             (*ppidl)->mkid.cb = 0; /* Terminate the ITEMIDLIST */
             return S_OK;
@@ -710,12 +712,12 @@ IShellFolder_fnGetUIObjectOf (IShellFolder2 * iface,
         } else if (IsEqualIID (riid, &IID_IExtractIconA) && (cidl == 1)) {
             pidl = ILCombine (This->pidlRoot, apidl[0]);
             pObj = (LPUNKNOWN) IExtractIconA_Constructor (pidl);
-            ILFree(pidl);
+            SHFree (pidl);
             hr = S_OK;
         } else if (IsEqualIID (riid, &IID_IExtractIconW) && (cidl == 1)) {
             pidl = ILCombine (This->pidlRoot, apidl[0]);
             pObj = (LPUNKNOWN) IExtractIconW_Constructor (pidl);
-            ILFree(pidl);
+            SHFree (pidl);
             hr = S_OK;
         } else if (IsEqualIID (riid, &IID_IDropTarget) && (cidl >= 1)) {
             hr = IShellFolder2_QueryInterface (iface, &IID_IDropTarget,
@@ -724,7 +726,7 @@ IShellFolder_fnGetUIObjectOf (IShellFolder2 * iface,
          IsEqualIID(riid,&IID_IShellLinkA)) && (cidl == 1)) {
             pidl = ILCombine (This->pidlRoot, apidl[0]);
             hr = IShellLink_ConstructFromFile(NULL, riid, pidl, &pObj);
-            ILFree(pidl);
+            SHFree (pidl);
         } else {
             hr = E_NOINTERFACE;
         }
@@ -807,7 +809,7 @@ static void get_display_name( WCHAR dest[MAX_PATH], const WCHAR *path, LPCITEMID
         if (!is_unix)
         {
             len = WideCharToMultiByte( CP_UNIXCP, 0, path + 8, -1, NULL, 0, NULL, NULL );
-            buffer = malloc( len );
+            buffer = heap_alloc( len );
             len = WideCharToMultiByte( CP_UNIXCP, 0, path + 8, -1, buffer, len, NULL, NULL );
             for (i = 0; i < len; i++) if (buffer[i] == '\\') buffer[i] = '/';
             if ((res = wine_get_dos_file_name( buffer )))
@@ -889,18 +891,18 @@ IShellFolder_fnGetDisplayNameOf (IShellFolder2 * iface, LPCITEMIDLIST pidl,
         /* Win9x always returns ANSI strings, NT always returns Unicode strings */
         if (GetVersion() & 0x80000000) {
             strRet->uType = STRRET_CSTR;
-            if (!WideCharToMultiByte(CP_ACP, 0, pszPath, -1, strRet->cStr, MAX_PATH,
+            if (!WideCharToMultiByte(CP_ACP, 0, pszPath, -1, strRet->u.cStr, MAX_PATH,
                  NULL, NULL))
-                strRet->cStr[0] = '\0';
+                strRet->u.cStr[0] = '\0';
             CoTaskMemFree(pszPath);
         } else {
             strRet->uType = STRRET_WSTR;
-            strRet->pOleStr = pszPath;
+            strRet->u.pOleStr = pszPath;
         }
     } else
         CoTaskMemFree(pszPath);
 
-    TRACE ("-- (%p)->(%s)\n", This, strRet->uType == STRRET_CSTR ? strRet->cStr : debugstr_w(strRet->pOleStr));
+    TRACE ("-- (%p)->(%s)\n", This, strRet->uType == STRRET_CSTR ? strRet->u.cStr : debugstr_w(strRet->u.pOleStr));
     return hr;
 }
 
@@ -1232,7 +1234,7 @@ static WCHAR *build_paths_list(LPCWSTR wszBasePath, int cidl, const LPCITEMIDLIS
     int i;
     
     iPathLen = lstrlenW(wszBasePath);
-    wszPathsList = malloc(MAX_PATH * sizeof(WCHAR) * cidl + 1);
+    wszPathsList = heap_alloc(MAX_PATH*sizeof(WCHAR)*cidl+1);
     wszListPos = wszPathsList;
     
     for (i = 0; i < cidl; i++) {
@@ -1254,7 +1256,7 @@ static WCHAR *build_paths_list(LPCWSTR wszBasePath, int cidl, const LPCITEMIDLIS
  * deletes items in folder
  */
 static HRESULT WINAPI
-ISFHelper_fnDeleteItems (ISFHelper * iface, UINT cidl, LPCITEMIDLIST * apidl)
+ISFHelper_fnDeleteItems (ISFHelper *iface, UINT cidl, LPCITEMIDLIST *apidl, BOOL confirm)
 {
     IGenericSFImpl *This = impl_from_ISFHelper(iface);
     UINT i;
@@ -1279,6 +1281,7 @@ ISFHelper_fnDeleteItems (ISFHelper * iface, UINT cidl, LPCITEMIDLIST * apidl)
     op.wFunc = FO_DELETE;
     op.pFrom = wszPathsList;
     op.fFlags = FOF_ALLOWUNDO;
+    if (!confirm) op.fFlags |= FOF_NOCONFIRMATION;
     if (SHFileOperationW(&op))
     {
         WARN("SHFileOperation failed\n");
@@ -1305,12 +1308,66 @@ ISFHelper_fnDeleteItems (ISFHelper * iface, UINT cidl, LPCITEMIDLIST * apidl)
         {
             LPITEMIDLIST pidl = ILCombine(This->pidlRoot, apidl[i]);
             SHChangeNotify(wEventId, SHCNF_IDLIST, pidl, NULL);
-            ILFree(pidl);
+            SHFree(pidl);
         }
 
         wszCurrentPath += lstrlenW(wszCurrentPath)+1;
     }
-    free(wszPathsList);
+    heap_free(wszPathsList);
+    return ret;
+}
+
+/****************************************************************************
+ * ISFHelper_fnCopyItems
+ *
+ * copies items to this folder
+ */
+static HRESULT WINAPI
+ISFHelper_fnCopyItems (ISFHelper * iface, IShellFolder * pSFFrom, UINT cidl,
+                       LPCITEMIDLIST * apidl)
+{
+    HRESULT ret=E_FAIL;
+    IPersistFolder2 *ppf2 = NULL;
+    WCHAR wszSrcPathRoot[MAX_PATH],
+      wszDstPath[MAX_PATH+1];
+    WCHAR *wszSrcPathsList;
+    IGenericSFImpl *This = impl_from_ISFHelper(iface);
+
+    SHFILEOPSTRUCTW fop;
+
+    TRACE ("(%p)->(%p,%u,%p)\n", This, pSFFrom, cidl, apidl);
+
+    IShellFolder_QueryInterface (pSFFrom, &IID_IPersistFolder2,
+     (LPVOID *) & ppf2);
+    if (ppf2) {
+        LPITEMIDLIST pidl;
+
+        if (SUCCEEDED (IPersistFolder2_GetCurFolder (ppf2, &pidl))) {
+            SHGetPathFromIDListW (pidl, wszSrcPathRoot);
+            if (This->sPathTarget)
+                lstrcpynW(wszDstPath, This->sPathTarget, MAX_PATH);
+            else
+                wszDstPath[0] = 0;
+            PathAddBackslashW(wszSrcPathRoot);
+            PathAddBackslashW(wszDstPath);
+            wszSrcPathsList = build_paths_list(wszSrcPathRoot, cidl, apidl);
+            ZeroMemory(&fop, sizeof(fop));
+            fop.hwnd = GetActiveWindow();
+            fop.wFunc = FO_COPY;
+            fop.pFrom = wszSrcPathsList;
+            fop.pTo = wszDstPath;
+            fop.fFlags = FOF_ALLOWUNDO;
+            ret = S_OK;
+            if(SHFileOperationW(&fop))
+            {
+                WARN("Copy failed\n");
+                ret = E_FAIL;
+            }
+            heap_free(wszSrcPathsList);
+        }
+        SHFree(pidl);
+        IPersistFolder2_Release(ppf2);
+    }
     return ret;
 }
 
@@ -1322,6 +1379,7 @@ static const ISFHelperVtbl shvt =
     ISFHelper_fnGetUniqueName,
     ISFHelper_fnAddFolder,
     ISFHelper_fnDeleteItems,
+    ISFHelper_fnCopyItems
 };
 
 /************************************************************************
@@ -1673,13 +1731,13 @@ ISFDropTarget_DragEnter (IDropTarget * iface, IDataObject * pDataObject,
     if (_ILIsFolder(ILFindLastID(This->pidlRoot)) && /* Only drop to folders, not to files */
         SUCCEEDED(IDataObject_GetData(pDataObject, &format, &medium))) /* Only ShellIDList format */
     {
-        LPIDA pidaShellIDList = GlobalLock(medium.hGlobal);
+        LPIDA pidaShellIDList = GlobalLock(medium.u.hGlobal);
         This->drop_effects_mask |= DROPEFFECT_COPY|DROPEFFECT_LINK;
 
         if (pidaShellIDList) { /* Files can only be moved between two different folders */
             if (!ILIsEqual(HIDA_GetPIDLFolder(pidaShellIDList), This->pidlRoot))
                 This->drop_effects_mask |= DROPEFFECT_MOVE;
-            GlobalUnlock(medium.hGlobal);
+            GlobalUnlock(medium.u.hGlobal);
         }
     }
 
@@ -1733,7 +1791,7 @@ ISFDropTarget_Drop (IDropTarget * iface, IDataObject * pDataObject,
 
     if (medium.tymed == TYMED_HGLOBAL) {
         IShellFolder *psfSourceFolder, *psfDesktopFolder;
-        LPIDA pidaShellIDList = GlobalLock(medium.hGlobal);
+        LPIDA pidaShellIDList = GlobalLock(medium.u.hGlobal);
         STRRET strret;
         UINT i;
 
@@ -1742,7 +1800,7 @@ ISFDropTarget_Drop (IDropTarget * iface, IDataObject * pDataObject,
 
         hr = SHGetDesktopFolder(&psfDesktopFolder);
         if (FAILED(hr)) {
-            GlobalUnlock(medium.hGlobal);
+            GlobalUnlock(medium.u.hGlobal);
             return hr;
         }
 
@@ -1750,7 +1808,7 @@ ISFDropTarget_Drop (IDropTarget * iface, IDataObject * pDataObject,
                                        &IID_IShellFolder, (LPVOID*)&psfSourceFolder);
         IShellFolder_Release(psfDesktopFolder);
         if (FAILED(hr)) {
-            GlobalUnlock(medium.hGlobal);
+            GlobalUnlock(medium.u.hGlobal);
             return hr;
         }
 
@@ -1780,7 +1838,7 @@ ISFDropTarget_Drop (IDropTarget * iface, IDataObject * pDataObject,
         }
 
         IShellFolder_Release(psfSourceFolder);
-        GlobalUnlock(medium.hGlobal);
+        GlobalUnlock(medium.u.hGlobal);
         return hr;
     }
 

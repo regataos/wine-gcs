@@ -3,7 +3,7 @@
 @ stub SnmpMgrGetTrap
 @ stub SnmpMgrGetTrapEx
 @ stub SnmpMgrOidToStr
-@ stdcall SnmpMgrOpen(str str long long)
+@ stub SnmpMgrOpen
 @ stub SnmpMgrRequest
 @ stub SnmpMgrStrToOid
 @ stdcall SnmpMgrTrapListen(ptr)

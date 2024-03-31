@@ -109,7 +109,7 @@ static struct writer *alloc_writer(void)
     if (!(ret = calloc( 1, size ))) return NULL;
 
     ret->magic      = WRITER_MAGIC;
-    InitializeCriticalSectionEx( &ret->cs, 0, RTL_CRITICAL_SECTION_FLAG_FORCE_DEBUG_INFO );
+    InitializeCriticalSection( &ret->cs );
     ret->cs.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": writer.cs");
 
     prop_init( writer_props, count, ret->prop, &ret[1] );
@@ -896,7 +896,7 @@ static ULONG format_double( const double *ptr, unsigned char *buf )
     static const double precision = 0.0000000000000001;
     unsigned char *p = buf;
     double val = *ptr;
-    int neg, mag, mag2 = 0, use_exp;
+    int neg, mag, mag2, use_exp;
 
     if (isnan( val ))
     {

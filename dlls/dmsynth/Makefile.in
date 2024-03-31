@@ -3,9 +3,11 @@ IMPORTS   = $(FLUIDSYNTH_PE_LIBS) dxguid uuid ole32 advapi32 user32
 EXTRAINCL = $(FLUIDSYNTH_PE_CFLAGS)
 PARENTSRC = ../dmusic
 
-SOURCES = \
-	dmsynth.idl \
+C_SRCS = \
 	dmsynth_main.c \
 	synth.c \
-	synthsink.c \
-	version.rc
+	synthsink.c
+
+IDL_SRCS = dmsynth.idl
+
+RC_SRCS = version.rc

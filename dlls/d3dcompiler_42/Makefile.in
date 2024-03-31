@@ -6,13 +6,18 @@ EXTRAINCL = $(VKD3D_PE_CFLAGS)
 
 EXTRADLLFLAGS = -Wb,--prefer-native
 
-SOURCES = \
+C_SRCS = \
 	asmparser.c \
-	asmshader.l \
-	asmshader.y \
 	blob.c \
 	bytecodewriter.c \
 	compiler.c \
 	reflection.c \
-	utils.c \
-	version.rc
+	utils.c
+
+LEX_SRCS = \
+	asmshader.l
+
+BISON_SRCS = \
+	asmshader.y
+
+RC_SRCS = version.rc

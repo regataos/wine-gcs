@@ -1,7 +1,10 @@
 MODULE = windows.globalization.dll
 IMPORTS = combase uuid
 
-SOURCES = \
-	classes.idl \
+C_SRCS = \
+	analytics_info.c \
+	advertising_manager.c \
 	geographic_region.c \
 	main.c
+
+IDL_SRCS = classes.idl

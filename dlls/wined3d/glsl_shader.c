@@ -33,7 +33,6 @@
 #include <stdio.h>
 
 #include "wined3d_private.h"
-#include "wined3d_gl.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(d3d_shader);
 WINE_DECLARE_DEBUG_CHANNEL(d3d);
@@ -137,6 +136,7 @@ struct shader_glsl_priv
     const struct wined3d_fragment_pipe_ops *fragment_pipe;
     struct wine_rb_tree ffp_vertex_shaders;
     struct wine_rb_tree ffp_fragment_shaders;
+    BOOL ffp_proj_control;
     BOOL legacy_lighting;
 };
 
@@ -154,7 +154,7 @@ struct glsl_vs_program
     GLint modelview_matrix_location[MAX_VERTEX_BLENDS];
     GLint projection_matrix_location;
     GLint normal_matrix_location;
-    GLint texture_matrix_location[WINED3D_MAX_FFP_TEXTURES];
+    GLint texture_matrix_location[WINED3D_MAX_TEXTURES];
     GLint material_ambient_location;
     GLint material_diffuse_location;
     GLint material_specular_location;
@@ -214,10 +214,10 @@ struct glsl_ps_program
     GLint uniform_f_locations[WINED3D_MAX_PS_CONSTS_F];
     GLint uniform_i_locations[WINED3D_MAX_CONSTS_I];
     GLint uniform_b_locations[WINED3D_MAX_CONSTS_B];
-    GLint bumpenv_mat_location[WINED3D_MAX_FFP_TEXTURES];
-    GLint bumpenv_lum_scale_location[WINED3D_MAX_FFP_TEXTURES];
-    GLint bumpenv_lum_offset_location[WINED3D_MAX_FFP_TEXTURES];
-    GLint tss_constant_location[WINED3D_MAX_FFP_TEXTURES];
+    GLint bumpenv_mat_location[WINED3D_MAX_TEXTURES];
+    GLint bumpenv_lum_scale_location[WINED3D_MAX_TEXTURES];
+    GLint bumpenv_lum_offset_location[WINED3D_MAX_TEXTURES];
+    GLint tss_constant_location[WINED3D_MAX_TEXTURES];
     GLint tex_factor_location;
     GLint specular_enable_location;
     GLint fog_color_location;
@@ -421,7 +421,7 @@ static unsigned int shader_glsl_full_ffp_varyings(const struct wined3d_gl_info *
     /* On core profile we have to also count diffuse and specular colours and
      * the fog coordinate. */
     return gl_info->limits.glsl_varyings >= (gl_info->supported[WINED3D_GL_LEGACY_CONTEXT]
-            ? WINED3D_MAX_FFP_TEXTURES * 4 : (WINED3D_MAX_FFP_TEXTURES + 2) * 4 + 1);
+            ? WINED3D_MAX_TEXTURES * 4 : (WINED3D_MAX_TEXTURES + 2) * 4 + 1);
 }
 
 static void shader_glsl_append_imm_vec(struct wined3d_string_buffer *buffer,
@@ -484,6 +484,22 @@ static void shader_glsl_append_imm_ivec(struct wined3d_string_buffer *buffer,
         shader_addline(buffer, ")");
 }
 
+static const char *get_info_log_line(const char **ptr)
+{
+    const char *p, *q;
+
+    p = *ptr;
+    if (!(q = strstr(p, "\n")))
+    {
+        if (!*p) return NULL;
+        *ptr += strlen(p);
+        return p;
+    }
+    *ptr = q + 1;
+
+    return p;
+}
+
 /* Context activation is done by the caller. */
 void print_glsl_info_log(const struct wined3d_gl_info *gl_info, GLuint id, BOOL program)
 {
@@ -502,55 +518,45 @@ void print_glsl_info_log(const struct wined3d_gl_info *gl_info, GLuint id, BOOL 
      * that if there are errors. */
     if (length > 1)
     {
-        const char *ptr, *end, *line;
+        const char *ptr, *line;
 
-        log = malloc(length);
+        log = heap_alloc(length);
+        /* The info log is supposed to be zero-terminated, but at least some
+         * versions of fglrx don't terminate the string properly. The reported
+         * length does include the terminator, so explicitly set it to zero
+         * here. */
+        log[length - 1] = 0;
         if (program)
             GL_EXTCALL(glGetProgramInfoLog(id, length, NULL, log));
         else
             GL_EXTCALL(glGetShaderInfoLog(id, length, NULL, log));
 
         ptr = log;
-        /* The info log is supposed to be zero-terminated. Note that at least
-         * some versions of fglrx don't terminate the string properly. The
-         * reported length does include the supposed terminator though, so we
-         * don't care here. */
-        end = &ptr[length - 1];
         if (gl_info->quirks & WINED3D_QUIRK_INFO_LOG_SPAM)
         {
             WARN("Info log received from GLSL shader #%u:\n", id);
-            while ((line = wined3d_get_line(&ptr, end)))
-            {
-                WARN("    %.*s", (int)(ptr - line), line);
-            }
+            while ((line = get_info_log_line(&ptr))) WARN("    %.*s", (int)(ptr - line), line);
         }
         else
         {
             FIXME("Info log received from GLSL shader #%u:\n", id);
-            while ((line = wined3d_get_line(&ptr, end)))
-            {
-                FIXME("    %.*s", (int)(ptr - line), line);
-            }
+            while ((line = get_info_log_line(&ptr))) FIXME("    %.*s", (int)(ptr - line), line);
         }
-        free(log);
+        heap_free(log);
     }
 }
 
 /* Context activation is done by the caller. */
 static void shader_glsl_compile(const struct wined3d_gl_info *gl_info, GLuint shader, const char *src)
 {
-    const char *ptr, *end, *line;
+    const char *ptr, *line;
 
     TRACE("Compiling shader object %u.\n", shader);
 
     if (TRACE_ON(d3d_shader))
     {
         ptr = src;
-        end = ptr + strlen(ptr);
-        while ((line = wined3d_get_line(&ptr, end)))
-        {
-            TRACE_(d3d_shader)("    %.*s", (int)(ptr - line), line);
-        }
+        while ((line = get_info_log_line(&ptr))) TRACE_(d3d_shader)("    %.*s", (int)(ptr - line), line);
     }
 
     GL_EXTCALL(glShaderSource(shader, 1, &src, NULL));
@@ -568,7 +574,7 @@ static void shader_glsl_dump_program_source(const struct wined3d_gl_info *gl_inf
     char *source = NULL;
 
     GL_EXTCALL(glGetProgramiv(program, GL_ATTACHED_SHADERS, &shader_count));
-    if (!(shaders = calloc(shader_count, sizeof(*shaders))))
+    if (!(shaders = heap_calloc(shader_count, sizeof(*shaders))))
     {
         ERR("Failed to allocate shader array memory.\n");
         return;
@@ -577,27 +583,23 @@ static void shader_glsl_dump_program_source(const struct wined3d_gl_info *gl_inf
     GL_EXTCALL(glGetAttachedShaders(program, shader_count, NULL, shaders));
     for (i = 0; i < shader_count; ++i)
     {
-        const char *ptr, *end, *line;
+        const char *ptr, *line;
         GLint tmp;
 
         GL_EXTCALL(glGetShaderiv(shaders[i], GL_SHADER_SOURCE_LENGTH, &tmp));
 
         if (source_size < tmp)
         {
-            free(source);
+            heap_free(source);
 
-            if (!(source = malloc(tmp)))
+            if (!(source = heap_alloc_zero(tmp)))
             {
                 ERR("Failed to allocate %d bytes for shader source.\n", tmp);
-                free(shaders);
+                heap_free(shaders);
                 return;
             }
             source_size = tmp;
         }
-
-        GL_EXTCALL(glGetShaderSource(shaders[i], source_size, NULL, source));
-        ptr = source;
-        end = &ptr[tmp - 1];
 
         FIXME("Shader %u:\n", shaders[i]);
         GL_EXTCALL(glGetShaderiv(shaders[i], GL_SHADER_TYPE, &tmp));
@@ -605,15 +607,15 @@ static void shader_glsl_dump_program_source(const struct wined3d_gl_info *gl_inf
         GL_EXTCALL(glGetShaderiv(shaders[i], GL_COMPILE_STATUS, &tmp));
         FIXME("    GL_COMPILE_STATUS: %d.\n", tmp);
         FIXME("\n");
-        while ((line = wined3d_get_line(&ptr, end)))
-        {
-            FIXME("    %.*s", (int)(ptr - line), line);
-        }
+
+        ptr = source;
+        GL_EXTCALL(glGetShaderSource(shaders[i], source_size, NULL, source));
+        while ((line = get_info_log_line(&ptr))) FIXME("    %.*s", (int)(ptr - line), line);
         FIXME("\n");
     }
 
-    free(source);
-    free(shaders);
+    heap_free(source);
+    heap_free(shaders);
 }
 
 /* Context activation is done by the caller. */
@@ -742,7 +744,7 @@ static BOOL shader_glsl_use_bindless_texture(const struct wined3d_gl_info *gl_in
 static GLuint64 shader_glsl_dummy_sampler_handle(const struct wined3d_context *context,
         enum wined3d_shader_resource_type type)
 {
-    const struct wined3d_device_gl *device = wined3d_device_gl(context->device);
+    const struct wined3d_device *device = context->device;
 
     switch (type)
     {
@@ -772,10 +774,10 @@ static GLuint64 shader_glsl_dummy_sampler_handle(const struct wined3d_context *c
     }
 }
 
-static void shader_glsl_load_sampler_handles(void *shader_priv, struct wined3d_context *context,
+static void shader_glsl_load_sampler_handles(void *shader_priv, struct wined3d_context_gl *context_gl,
         const struct wined3d_state *state, const struct wined3d_shader *shader)
 {
-    struct wined3d_context_gl *context_gl = wined3d_context_gl(context);
+    const struct wined3d_context *context = &context_gl->c;
     const struct glsl_context_data *ctx_data = context->shader_backend_data;
     const struct wined3d_device *device = context->device;
     const struct wined3d_gl_info *gl_info = context_gl->gl_info;
@@ -800,7 +802,7 @@ static void shader_glsl_load_sampler_handles(void *shader_priv, struct wined3d_c
             sampler = device->null_sampler;
 
         string_buffer_sprintf(sampler_name, "%s_sampler%u", prefix, entry->bind_idx);
-        name_loc = GL_EXTCALL(glGetUniformLocation(ctx_data->glsl_program ? ctx_data->glsl_program->id : 0, sampler_name->buffer));
+        name_loc = GL_EXTCALL(glGetUniformLocation(ctx_data->glsl_program->id, sampler_name->buffer));
         if (name_loc == -1)
         {
             ERR("No uniform location at %u, %s\n", i, sampler_name->buffer);
@@ -815,7 +817,7 @@ static void shader_glsl_load_sampler_handles(void *shader_priv, struct wined3d_c
             GLuint64 handle;
             if (view)
             {
-                handle = wined3d_shader_resource_view_gl_handle(wined3d_shader_resource_view_gl(view), sampler, context_gl);
+                handle = wined3d_shader_resource_view_handle(view, sampler, context_gl);
             }
             else
             {
@@ -1112,16 +1114,16 @@ static void shader_glsl_init_transform_feedback(const struct wined3d_context_gl 
         return;
     }
 
-    if (!(varyings = calloc(count, sizeof(*varyings))))
+    if (!(varyings = heap_calloc(count, sizeof(*varyings))))
     {
         ERR("Out of memory.\n");
         string_buffer_release(&priv->string_buffers, buffer);
         return;
     }
-    if (!(strings = calloc(length, sizeof(*strings))))
+    if (!(strings = heap_calloc(length, sizeof(*strings))))
     {
         ERR("Out of memory.\n");
-        free(varyings);
+        heap_free(varyings);
         string_buffer_release(&priv->string_buffers, buffer);
         return;
     }
@@ -1130,8 +1132,8 @@ static void shader_glsl_init_transform_feedback(const struct wined3d_context_gl 
     GL_EXTCALL(glTransformFeedbackVaryings(program_id, count, varyings, mode));
     checkGLcall("glTransformFeedbackVaryings");
 
-    free(varyings);
-    free(strings);
+    heap_free(varyings);
+    heap_free(strings);
     string_buffer_release(&priv->string_buffers, buffer);
 }
 
@@ -1285,24 +1287,18 @@ static void walk_constant_heap_clamped(const struct wined3d_gl_info *gl_info,
 }
 
 /* Context activation is done by the caller. */
-static void shader_glsl_load_constants_f(const struct wined3d_shader *shader, struct wined3d_context_gl *context_gl,
-        struct wined3d_buffer *constant_buffer, const GLint *constant_locations, const struct constant_heap *heap,
+static void shader_glsl_load_constants_f(const struct wined3d_shader *shader, const struct wined3d_gl_info *gl_info,
+        const struct wined3d_vec4 *constants, const GLint *constant_locations, const struct constant_heap *heap,
         unsigned char *stack, unsigned int version)
 {
-    const struct wined3d_gl_info *gl_info = context_gl->gl_info;
     const struct wined3d_shader_lconst *lconst;
 
-    if (constant_buffer)
-    {
-        const struct wined3d_vec4 *constants = wined3d_buffer_load_sysmem(constant_buffer, &context_gl->c);
-
-        /* 1.X pshaders have the constants clamped to [-1;1] implicitly. */
-        if (shader->reg_maps.shader_version.major == 1
-                && shader->reg_maps.shader_version.type == WINED3D_SHADER_TYPE_PIXEL)
-            walk_constant_heap_clamped(gl_info, constants, constant_locations, heap, stack, version);
-        else
-            walk_constant_heap(gl_info, constants, constant_locations, heap, stack, version);
-    }
+    /* 1.X pshaders have the constants clamped to [-1;1] implicitly. */
+    if (shader->reg_maps.shader_version.major == 1
+            && shader->reg_maps.shader_version.type == WINED3D_SHADER_TYPE_PIXEL)
+        walk_constant_heap_clamped(gl_info, constants, constant_locations, heap, stack, version);
+    else
+        walk_constant_heap(gl_info, constants, constant_locations, heap, stack, version);
 
     if (!shader->load_local_constsF)
     {
@@ -1319,23 +1315,17 @@ static void shader_glsl_load_constants_f(const struct wined3d_shader *shader, st
 }
 
 /* Context activation is done by the caller. */
-static void shader_glsl_load_constants_i(const struct wined3d_shader *shader, struct wined3d_context_gl *context_gl,
-        struct wined3d_buffer *constant_buffer, const GLint locations[WINED3D_MAX_CONSTS_I], uint32_t constants_set)
+static void shader_glsl_load_constants_i(const struct wined3d_shader *shader, const struct wined3d_gl_info *gl_info,
+        const struct wined3d_ivec4 *constants, const GLint locations[WINED3D_MAX_CONSTS_I], uint32_t constants_set)
 {
-    const struct wined3d_gl_info *gl_info = context_gl->gl_info;
     unsigned int i;
     struct list* ptr;
 
-    if (constant_buffer)
+    while (constants_set)
     {
-        const struct wined3d_ivec4 *constants = wined3d_buffer_load_sysmem(constant_buffer, &context_gl->c);
-
-        while (constants_set)
-        {
-            /* We found this uniform name in the program - go ahead and send the data */
-            i = wined3d_bit_scan(&constants_set);
-            GL_EXTCALL(glUniform4iv(locations[i], 1, &constants[i].x));
-        }
+        /* We found this uniform name in the program - go ahead and send the data */
+        i = wined3d_bit_scan(&constants_set);
+        GL_EXTCALL(glUniform4iv(locations[i], 1, &constants[i].x));
     }
 
     /* Load immediate constants */
@@ -1354,22 +1344,16 @@ static void shader_glsl_load_constants_i(const struct wined3d_shader *shader, st
 }
 
 /* Context activation is done by the caller. */
-static void shader_glsl_load_constants_b(const struct wined3d_shader *shader, struct wined3d_context_gl *context_gl,
-        struct wined3d_buffer *constant_buffer, const GLint locations[WINED3D_MAX_CONSTS_B], uint32_t constants_set)
+static void shader_glsl_load_constants_b(const struct wined3d_shader *shader, const struct wined3d_gl_info *gl_info,
+        const BOOL *constants, const GLint locations[WINED3D_MAX_CONSTS_B], uint32_t constants_set)
 {
-    const struct wined3d_gl_info *gl_info = context_gl->gl_info;
     unsigned int i;
     struct list* ptr;
 
-    if (constant_buffer)
+    while (constants_set)
     {
-        const BOOL *constants = wined3d_buffer_load_sysmem(constant_buffer, &context_gl->c);
-
-        while (constants_set)
-        {
-            i = wined3d_bit_scan(&constants_set);
-            GL_EXTCALL(glUniform1iv(locations[i], 1, &constants[i]));
-        }
+        i = wined3d_bit_scan(&constants_set);
+        GL_EXTCALL(glUniform1iv(locations[i], 1, &constants[i]));
     }
 
     /* Load immediate constants */
@@ -1405,10 +1389,15 @@ static void shader_glsl_load_np2fixup_constants(const struct glsl_ps_program *ps
 
     for (i = 0; fixup; fixup >>= 1, ++i)
     {
+        const struct wined3d_texture *tex = state->textures[i];
         unsigned char idx = ps->np2_fixup_info->idx[i];
-        const struct wined3d_texture *tex;
 
-        tex = texture_from_resource(state->shader_resource_view[WINED3D_SHADER_TYPE_PIXEL][i]->resource);
+        if (!tex)
+        {
+            ERR("Nonexistent texture is flagged for NP2 texcoord fixup.\n");
+            continue;
+        }
+
         np2fixup_constants[idx].sx = tex->pow2_matrix[0];
         np2fixup_constants[idx].sy = tex->pow2_matrix[5];
     }
@@ -1451,7 +1440,7 @@ static void shader_glsl_ffp_vertex_texmatrix_uniform(const struct wined3d_contex
     const struct wined3d_gl_info *gl_info = context_gl->gl_info;
     struct wined3d_matrix mat;
 
-    if (tex >= WINED3D_MAX_FFP_TEXTURES)
+    if (tex >= WINED3D_MAX_TEXTURES)
         return;
     if (prog->vs.texture_matrix_location[tex] == -1)
         return;
@@ -1466,8 +1455,17 @@ static void shader_glsl_ffp_vertex_material_uniform(const struct wined3d_context
 {
     const struct wined3d_gl_info *gl_info = context_gl->gl_info;
 
-    GL_EXTCALL(glUniform4fv(prog->vs.material_specular_location, 1, &state->material.specular.r));
-    GL_EXTCALL(glUniform1f(prog->vs.material_shininess_location, state->material.power));
+    if (state->render_states[WINED3D_RS_SPECULARENABLE])
+    {
+        GL_EXTCALL(glUniform4fv(prog->vs.material_specular_location, 1, &state->material.specular.r));
+        GL_EXTCALL(glUniform1f(prog->vs.material_shininess_location, state->material.power));
+    }
+    else
+    {
+        static const float black[] = {0.0f, 0.0f, 0.0f, 0.0f};
+
+        GL_EXTCALL(glUniform4fv(prog->vs.material_specular_location, 1, black));
+    }
     GL_EXTCALL(glUniform4fv(prog->vs.material_ambient_location, 1, &state->material.ambient.r));
     GL_EXTCALL(glUniform4fv(prog->vs.material_diffuse_location, 1, &state->material.diffuse.r));
     GL_EXTCALL(glUniform4fv(prog->vs.material_emissive_location, 1, &state->material.emissive.r));
@@ -1614,14 +1612,15 @@ static void shader_glsl_load_color_key_constant(const struct glsl_ps_program *ps
         const struct wined3d_gl_info *gl_info, const struct wined3d_state *state)
 {
     struct wined3d_color float_key[2];
-    const struct wined3d_texture *texture = wined3d_state_get_ffp_texture(state, 0);
+    const struct wined3d_texture *texture = state->textures[0];
 
     wined3d_format_get_float_color_key(texture->resource.format, &texture->async.src_blt_color_key, float_key);
     GL_EXTCALL(glUniform4fv(ps->color_key_location, 2, &float_key[0].r));
 }
 
-static void shader_glsl_load_constants(struct shader_glsl_priv *priv,
-        struct wined3d_context *context, const struct wined3d_state *state)
+/* Context activation is done by the caller (state handler). */
+static void shader_glsl_load_constants(void *shader_priv, struct wined3d_context *context,
+        const struct wined3d_state *state)
 {
     const struct wined3d_shader *vshader = state->shader[WINED3D_SHADER_TYPE_VERTEX];
     const struct wined3d_shader *pshader = state->shader[WINED3D_SHADER_TYPE_PIXEL];
@@ -1630,7 +1629,7 @@ static void shader_glsl_load_constants(struct shader_glsl_priv *priv,
     struct glsl_shader_prog_link *prog = ctx_data->glsl_program;
     const struct wined3d_gl_info *gl_info = context_gl->gl_info;
     float position_fixup[4 * WINED3D_MAX_VIEWPORTS];
-    struct wined3d_device *device = context->device;
+    struct shader_glsl_priv *priv = shader_priv;
     unsigned int constant_version;
     DWORD update_mask;
     int i;
@@ -1643,15 +1642,15 @@ static void shader_glsl_load_constants(struct shader_glsl_priv *priv,
     update_mask = context->constant_update_mask & prog->constant_update_mask;
 
     if (update_mask & WINED3D_SHADER_CONST_VS_F)
-        shader_glsl_load_constants_f(vshader, context_gl, device->push_constants[WINED3D_PUSH_CONSTANTS_VS_F],
+        shader_glsl_load_constants_f(vshader, gl_info, state->vs_consts_f,
                 prog->vs.uniform_f_locations, &priv->vconst_heap, priv->stack, constant_version);
 
     if (update_mask & WINED3D_SHADER_CONST_VS_I)
-        shader_glsl_load_constants_i(vshader, context_gl, device->push_constants[WINED3D_PUSH_CONSTANTS_VS_I],
+        shader_glsl_load_constants_i(vshader, gl_info, state->vs_consts_i,
                 prog->vs.uniform_i_locations, vshader->reg_maps.integer_constants);
 
     if (update_mask & WINED3D_SHADER_CONST_VS_B)
-        shader_glsl_load_constants_b(vshader, context_gl, device->push_constants[WINED3D_PUSH_CONSTANTS_VS_B],
+        shader_glsl_load_constants_b(vshader, gl_info, state->vs_consts_b,
                 prog->vs.uniform_b_locations, vshader->reg_maps.boolean_constants);
 
     if (update_mask & WINED3D_SHADER_CONST_VS_CLIP_PLANES)
@@ -1720,7 +1719,7 @@ static void shader_glsl_load_constants(struct shader_glsl_priv *priv,
 
     if (update_mask & WINED3D_SHADER_CONST_FFP_TEXMATRIX)
     {
-        for (i = 0; i < WINED3D_MAX_FFP_TEXTURES; ++i)
+        for (i = 0; i < WINED3D_MAX_TEXTURES; ++i)
             shader_glsl_ffp_vertex_texmatrix_uniform(context_gl, state, i, prog);
     }
 
@@ -1733,6 +1732,7 @@ static void shader_glsl_load_constants(struct shader_glsl_priv *priv,
         DWORD point_count = 0;
         DWORD spot_count = 0;
         DWORD directional_count = 0;
+        DWORD parallel_point_count = 0;
 
         for (i = 0; i < WINED3D_MAX_ACTIVE_LIGHTS; ++i)
         {
@@ -1751,6 +1751,7 @@ static void shader_glsl_load_constants(struct shader_glsl_priv *priv,
                     ++directional_count;
                     break;
                 case WINED3D_LIGHT_PARALLELPOINT:
+                    ++parallel_point_count;
                     break;
                 default:
                     FIXME("Unhandled light type %#x.\n", state->light_state.lights[i]->OriginalParms.type);
@@ -1794,20 +1795,20 @@ static void shader_glsl_load_constants(struct shader_glsl_priv *priv,
     }
 
     if (update_mask & WINED3D_SHADER_CONST_PS_F)
-        shader_glsl_load_constants_f(pshader, context_gl, device->push_constants[WINED3D_PUSH_CONSTANTS_PS_F],
+        shader_glsl_load_constants_f(pshader, gl_info, state->ps_consts_f,
                 prog->ps.uniform_f_locations, &priv->pconst_heap, priv->stack, constant_version);
 
     if (update_mask & WINED3D_SHADER_CONST_PS_I)
-        shader_glsl_load_constants_i(pshader, context_gl, device->push_constants[WINED3D_PUSH_CONSTANTS_PS_I],
+        shader_glsl_load_constants_i(pshader, gl_info, state->ps_consts_i,
                 prog->ps.uniform_i_locations, pshader->reg_maps.integer_constants);
 
     if (update_mask & WINED3D_SHADER_CONST_PS_B)
-        shader_glsl_load_constants_b(pshader, context_gl, device->push_constants[WINED3D_PUSH_CONSTANTS_PS_B],
+        shader_glsl_load_constants_b(pshader, gl_info, state->ps_consts_b,
                 prog->ps.uniform_b_locations, pshader->reg_maps.boolean_constants);
 
     if (update_mask & WINED3D_SHADER_CONST_PS_BUMP_ENV)
     {
-        for (i = 0; i < WINED3D_MAX_FFP_TEXTURES; ++i)
+        for (i = 0; i < WINED3D_MAX_TEXTURES; ++i)
         {
             if (prog->ps.bumpenv_mat_location[i] == -1)
                 continue;
@@ -1861,7 +1862,7 @@ static void shader_glsl_load_constants(struct shader_glsl_priv *priv,
         else
             GL_EXTCALL(glUniform4f(prog->ps.specular_enable_location, 0.0f, 0.0f, 0.0f, 0.0f));
 
-        for (i = 0; i < WINED3D_MAX_FFP_TEXTURES; ++i)
+        for (i = 0; i < WINED3D_MAX_TEXTURES; ++i)
         {
             if (prog->ps.tss_constant_location[i] == -1)
                 continue;
@@ -2198,6 +2199,17 @@ static BOOL glsl_is_color_reg_read(const struct wined3d_shader *shader, unsigned
     return FALSE;
 }
 
+static BOOL glsl_is_shadow_sampler(const struct wined3d_shader *shader,
+        const struct ps_compile_args *ps_args, unsigned int resource_idx, unsigned int sampler_idx)
+{
+    const struct wined3d_shader_version *version = &shader->reg_maps.shader_version;
+
+    if (version->major >= 4)
+        return shader->reg_maps.sampler_comparison_mode & (1u << sampler_idx);
+    else
+        return version->type == WINED3D_SHADER_TYPE_PIXEL && (ps_args->shadow & (1u << resource_idx));
+}
+
 static void shader_glsl_declare_typed_vertex_attribute(struct wined3d_string_buffer *buffer,
         const struct wined3d_gl_info *gl_info, const char *vector_type, const char *scalar_type,
         unsigned int index)
@@ -2265,19 +2277,6 @@ static void shader_generate_glsl_declarations(const struct wined3d_context_gl *c
 
     if (wined3d_settings.strict_shader_math)
         shader_addline(buffer, "#pragma optionNV(fastmath off)\n");
-
-    if (wined3d_settings.multiply_special == 2 && version->major < 4)
-    {
-        shader_addline(buffer, "float dot1(float v1, float v2) {return abs(v1) == 0.0 || abs(v2) == 0.0 ? 0.0 : v1 * v2;}\n");
-        shader_addline(buffer, "float dot2(vec2 v1, vec2 v2) {return dot1(v1.x, v2.x) + dot1(v1.y, v2.y);}\n");
-        shader_addline(buffer, "float dot3(vec3 v1, vec3 v2) {return dot2(v1.xy, v2.xy) + dot1(v1.z, v2.z);}\n");
-        shader_addline(buffer, "float dot4(vec4 v1, vec4 v2) {return dot2(v1.xy, v2.xy) + dot2(v1.zw, v2.zw);}\n");
-
-        shader_addline(buffer, "float mul1(float v1, float v2) {return abs(v1) == 0.0 || abs(v2) == 0.0 ? 0.0 : v1 * v2;}\n");
-        shader_addline(buffer, "vec2 mul2(vec2 v1, vec2 v2) {return vec2(mul1(v1.x, v2.x), mul1(v1.y, v2.y));}\n");
-        shader_addline(buffer, "vec3 mul3(vec3 v1, vec3 v2) {return vec3(mul2(v1.xy, v2.xy), mul1(v1.z, v2.z));}\n");
-        shader_addline(buffer, "vec4 mul4(vec4 v1, vec4 v2) {return vec4(mul2(v1.xy, v2.xy), mul2(v1.zw, v2.zw));}\n");
-    }
 
     prefix = shader_glsl_get_prefix(version->type);
 
@@ -2435,7 +2434,7 @@ static void shader_generate_glsl_declarations(const struct wined3d_context_gl *c
                 break;
         }
 
-        shadow_sampler = shader_sampler_is_shadow(shader, ps_args, entry->resource_idx, entry->sampler_idx);
+        shadow_sampler = glsl_is_shadow_sampler(shader, ps_args, entry->resource_idx, entry->sampler_idx);
         resource_type = version->type == WINED3D_SHADER_TYPE_PIXEL
                 ? pixelshader_get_resource_type(reg_maps, entry->resource_idx, ps_args->tex_types)
                 : reg_maps->resource_info[entry->resource_idx].type;
@@ -2672,6 +2671,7 @@ static void shader_generate_glsl_declarations(const struct wined3d_context_gl *c
             shader_addline(buffer, ";\n");
         }
     }
+    shader_addline(buffer, "const float FLT_MAX = 1e38;\n");
 }
 
 /* Prototypes */
@@ -3163,10 +3163,6 @@ static void shader_glsl_get_register_name(const struct wined3d_shader_register *
             string_buffer_sprintf(register_name, "sample_mask");
             break;
 
-        case WINED3DSPR_STENCILREF:
-            string_buffer_sprintf(register_name, "stencil_ref");
-            break;
-
         default:
             FIXME("Unhandled register type %#x.\n", reg->type);
             string_buffer_sprintf(register_name, "unrecognised_register");
@@ -3520,7 +3516,7 @@ static void shader_glsl_get_sample_function(const struct wined3d_shader_context 
     enum wined3d_shader_resource_type resource_type;
     struct shader_glsl_ctx_priv *priv = ctx->backend_data;
     const struct wined3d_gl_info *gl_info = priv->gl_info;
-    BOOL shadow = shader_sampler_is_shadow(ctx->shader, priv->cur_ps_args, resource_idx, sampler_idx);
+    BOOL shadow = glsl_is_shadow_sampler(ctx->shader, priv->cur_ps_args, resource_idx, sampler_idx);
     BOOL projected = flags & WINED3D_GLSL_SAMPLE_PROJECTED;
     BOOL texrect = ctx->reg_maps->shader_version.type == WINED3D_SHADER_TYPE_PIXEL
             && priv->cur_ps_args->np2_fixup & (1u << resource_idx)
@@ -3864,12 +3860,7 @@ static void shader_glsl_binop(const struct wined3d_shader_instruction *ins)
     write_mask = shader_glsl_append_dst(buffer, ins);
     shader_glsl_add_src_param(ins, &ins->src[0], write_mask, &src0_param);
     shader_glsl_add_src_param(ins, &ins->src[1], write_mask, &src1_param);
-    if (wined3d_settings.multiply_special == 2 && ins->ctx->reg_maps->shader_version.major < 4
-            && ins->handler_idx == WINED3DSIH_MUL)
-        shader_addline(buffer, "mul%d(%s, %s));\n", shader_glsl_get_write_mask_size(write_mask),
-                src0_param.param_str, src1_param.param_str);
-    else
-        shader_addline(buffer, "%s %s %s);\n", src0_param.param_str, op, src1_param.param_str);
+    shader_addline(buffer, "%s %s %s);\n", src0_param.param_str, op, src1_param.param_str);
 }
 
 static void shader_glsl_relop(const struct wined3d_shader_instruction *ins)
@@ -4082,45 +4073,26 @@ static void shader_glsl_dot(const struct wined3d_shader_instruction *ins)
     struct glsl_src_param src0_param;
     struct glsl_src_param src1_param;
     DWORD dst_write_mask, src_write_mask;
-    unsigned int dst_size, src_size;
+    unsigned int dst_size;
 
     dst_write_mask = shader_glsl_append_dst(buffer, ins);
     dst_size = shader_glsl_get_write_mask_size(dst_write_mask);
 
     /* dp4 works on vec4, dp3 on vec3, etc. */
     if (ins->handler_idx == WINED3DSIH_DP4)
-    {
         src_write_mask = WINED3DSP_WRITEMASK_ALL;
-        src_size = 4;
-    }
     else if (ins->handler_idx == WINED3DSIH_DP3)
-    {
         src_write_mask = WINED3DSP_WRITEMASK_0 | WINED3DSP_WRITEMASK_1 | WINED3DSP_WRITEMASK_2;
-        src_size = 3;
-    }
     else
-    {
         src_write_mask = WINED3DSP_WRITEMASK_0 | WINED3DSP_WRITEMASK_1;
-        src_size = 2;
-    }
+
     shader_glsl_add_src_param(ins, &ins->src[0], src_write_mask, &src0_param);
     shader_glsl_add_src_param(ins, &ins->src[1], src_write_mask, &src1_param);
 
-    if (dst_size > 1)
-    {
-        if (wined3d_settings.multiply_special == 2 && ins->ctx->reg_maps->shader_version.major < 4)
-            shader_addline(buffer, "vec%d(dot%d(%s, %s)));\n", dst_size, src_size,
-                    src0_param.param_str, src1_param.param_str);
-        else
-            shader_addline(buffer, "vec%d(dot(%s, %s)));\n", dst_size,
-                    src0_param.param_str, src1_param.param_str);
-    }
-    else
-    {
-        if (wined3d_settings.multiply_special == 2 && ins->ctx->reg_maps->shader_version.major < 4)
-            shader_addline(buffer, "dot%d(%s, %s));\n", src_size, src0_param.param_str, src1_param.param_str);
-        else
-            shader_addline(buffer, "dot(%s, %s));\n", src0_param.param_str, src1_param.param_str);
+    if (dst_size > 1) {
+        shader_addline(buffer, "vec%d(dot(%s, %s)));\n", dst_size, src0_param.param_str, src1_param.param_str);
+    } else {
+        shader_addline(buffer, "dot(%s, %s));\n", src0_param.param_str, src1_param.param_str);
     }
 }
 
@@ -4156,15 +4128,10 @@ static void shader_glsl_cut(const struct wined3d_shader_instruction *ins)
 static void shader_glsl_pow(const struct wined3d_shader_instruction *ins)
 {
     struct wined3d_string_buffer *buffer = ins->ctx->buffer;
-    const struct shader_glsl_ctx_priv *priv = ins->ctx->backend_data;
-    static const float max_float = FLT_MAX;
     struct glsl_src_param src0_param;
     struct glsl_src_param src1_param;
     DWORD dst_write_mask;
     unsigned int dst_size;
-    BOOL guard_inf;
-
-    guard_inf = wined3d_settings.multiply_special == 1 && ins->ctx->reg_maps->shader_version.major < 4;
 
     dst_write_mask = shader_glsl_append_dst(buffer, ins);
     dst_size = shader_glsl_get_write_mask_size(dst_write_mask);
@@ -4174,33 +4141,13 @@ static void shader_glsl_pow(const struct wined3d_shader_instruction *ins)
 
     if (dst_size > 1)
     {
-        if (guard_inf)
-        {
-            shader_addline(buffer, "vec%u(%s == 0.0 ? 1.0 : min(pow(abs(%s), %s), ",
-                    dst_size, src1_param.param_str, src0_param.param_str, src1_param.param_str);
-            shader_glsl_append_imm_vec(buffer, &max_float, 1, priv->gl_info);
-            shader_addline(buffer, ")));\n");
-        }
-        else
-        {
-            shader_addline(buffer, "vec%u(%s == 0.0 ? 1.0 : pow(abs(%s), %s)));\n",
-                    dst_size, src1_param.param_str, src0_param.param_str, src1_param.param_str);
-        }
+        shader_addline(buffer, "vec%u(%s == 0.0 ? 1.0 : pow(abs(%s), %s)));\n",
+                dst_size, src1_param.param_str, src0_param.param_str, src1_param.param_str);
     }
     else
     {
-        if (guard_inf)
-        {
-            shader_addline(buffer, "%s == 0.0 ? 1.0 : min(pow(abs(%s), %s), ",
-                    src1_param.param_str, src0_param.param_str, src1_param.param_str);
-            shader_glsl_append_imm_vec(buffer, &max_float, 1, priv->gl_info);
-            shader_addline(buffer, "));\n");
-        }
-        else
-        {
-            shader_addline(buffer, "%s == 0.0 ? 1.0 : pow(abs(%s), %s));\n",
-                    src1_param.param_str, src0_param.param_str, src1_param.param_str);
-        }
+        shader_addline(buffer, "%s == 0.0 ? 1.0 : pow(abs(%s), %s));\n",
+                src1_param.param_str, src0_param.param_str, src1_param.param_str);
     }
 }
 
@@ -4378,15 +4325,12 @@ static void shader_glsl_scalar_op(const struct wined3d_shader_instruction *ins)
 {
     DWORD shader_version = WINED3D_SHADER_VERSION(ins->ctx->reg_maps->shader_version.major,
             ins->ctx->reg_maps->shader_version.minor);
-    static const float max_float = FLT_MAX, min_float = -FLT_MAX;
     struct shader_glsl_ctx_priv *priv = ins->ctx->backend_data;
     struct wined3d_string_buffer *buffer = ins->ctx->buffer;
-    struct wined3d_string_buffer *suffix;
+    struct wined3d_string_buffer *prefix, *suffix;
     struct glsl_src_param src0_param;
     unsigned int dst_size;
     DWORD dst_write_mask;
-    const char *prefix;
-    BOOL guard_inf;
 
     dst_write_mask = shader_glsl_append_dst(buffer, ins);
     dst_size = shader_glsl_get_write_mask_size(dst_write_mask);
@@ -4396,77 +4340,52 @@ static void shader_glsl_scalar_op(const struct wined3d_shader_instruction *ins)
 
     shader_glsl_add_src_param(ins, &ins->src[0], dst_write_mask, &src0_param);
 
-    guard_inf = wined3d_settings.multiply_special == 1 && shader_version < WINED3D_SHADER_VERSION(4, 0);
+    prefix = string_buffer_get(priv->string_buffers);
     suffix = string_buffer_get(priv->string_buffers);
 
     switch (ins->handler_idx)
     {
         case WINED3DSIH_EXP:
         case WINED3DSIH_EXPP:
-            prefix = "exp2(";
+            string_buffer_sprintf(prefix, "exp2(");
             string_buffer_sprintf(suffix, ")");
             break;
 
         case WINED3DSIH_LOG:
         case WINED3DSIH_LOGP:
-            if (guard_inf)
-            {
-                prefix = "max(log2(abs(";
-                string_buffer_sprintf(suffix, ")), ");
-                shader_glsl_append_imm_vec(suffix, &min_float, 1, priv->gl_info);
-                shader_addline(suffix, ")");
-            }
+            if (shader_version <= WINED3D_SHADER_VERSION(3, 0))
+                string_buffer_sprintf(prefix, "%s == 0.0 ? -FLT_MAX : log2(abs(", src0_param.param_str);
             else
-            {
-                prefix = "log2(abs(";
-                string_buffer_sprintf(suffix, "))");
-            }
+                string_buffer_sprintf(prefix, "log2(abs(");
+            string_buffer_sprintf(suffix, "))");
             break;
 
         case WINED3DSIH_RCP:
-            if (guard_inf)
-            {
-                prefix = "clamp(1.0 / ";
-                string_buffer_sprintf(suffix, ", ");
-                shader_glsl_append_imm_vec(suffix, &min_float, 1, priv->gl_info);
-                shader_addline(suffix, ", ");
-                shader_glsl_append_imm_vec(suffix, &max_float, 1, priv->gl_info);
-                shader_addline(suffix, ")");
-            }
+            if (shader_version <= WINED3D_SHADER_VERSION(3, 0))
+                string_buffer_sprintf(prefix, "%s == 0.0 ? FLT_MAX : 1.0 / ", src0_param.param_str);
             else
-            {
-                prefix = "1.0 / ";
-                string_buffer_clear(suffix);
-            }
+                string_buffer_sprintf(prefix, "1.0 / ");
             break;
 
         case WINED3DSIH_RSQ:
-            if (guard_inf)
-            {
-                prefix = "min(inversesqrt(abs(";
-                string_buffer_sprintf(suffix, ")), ");
-                shader_glsl_append_imm_vec(suffix, &max_float, 1, priv->gl_info);
-                shader_addline(suffix, ")");
-            }
+            if (shader_version <= WINED3D_SHADER_VERSION(3, 0))
+                string_buffer_sprintf(prefix, "%s == 0.0 ? FLT_MAX : inversesqrt(abs(", src0_param.param_str);
             else
-            {
-                prefix = "inversesqrt(abs(";
-                string_buffer_sprintf(suffix, "))");
-            }
+                string_buffer_sprintf(prefix, "inversesqrt(abs(");
+            string_buffer_sprintf(suffix, "))");
             break;
 
         default:
-            prefix = "";
-            string_buffer_clear(suffix);
             FIXME("Unhandled instruction %#x.\n", ins->handler_idx);
             break;
     }
 
     if (dst_size > 1 && shader_version < WINED3D_SHADER_VERSION(4, 0))
-        shader_addline(buffer, "vec%u(%s%s%s));\n", dst_size, prefix, src0_param.param_str, suffix->buffer);
+        shader_addline(buffer, "vec%u(%s%s%s));\n", dst_size, prefix->buffer, src0_param.param_str, suffix->buffer);
     else
-        shader_addline(buffer, "%s%s%s);\n", prefix, src0_param.param_str, suffix->buffer);
+        shader_addline(buffer, "%s%s%s);\n", prefix->buffer, src0_param.param_str, suffix->buffer);
 
+    string_buffer_release(priv->string_buffers, prefix);
     string_buffer_release(priv->string_buffers, suffix);
 }
 
@@ -4522,40 +4441,12 @@ static void shader_glsl_cast(const struct wined3d_shader_instruction *ins,
 
 static void shader_glsl_to_int(const struct wined3d_shader_instruction *ins)
 {
-    struct wined3d_string_buffer *buffer = ins->ctx->buffer;
-    struct glsl_src_param src_param;
-    unsigned int mask_size;
-    DWORD write_mask;
-
-    write_mask = shader_glsl_append_dst(buffer, ins);
-    mask_size = shader_glsl_get_write_mask_size(write_mask);
-    shader_glsl_add_src_param(ins, &ins->src[0], write_mask, &src_param);
-
-    if (mask_size > 1)
-        shader_addline(buffer, "mix(mix(ivec%u(max(%s, vec%u(-2147483648.0))), ivec%u(0x7fffffff), greaterThanEqual(%s, vec%u(2147483648.0))), ivec%u(0), isnan(%s)));\n",
-                mask_size, src_param.param_str, mask_size, mask_size, src_param.param_str, mask_size, mask_size, src_param.param_str);
-    else
-        shader_addline(buffer, "mix(mix(int(max(%s, -2147483648.0)), 0x7fffffff, %s >= 2147483648.0), 0, isnan(%s)));\n",
-                src_param.param_str, src_param.param_str, src_param.param_str);
+    shader_glsl_cast(ins, "ivec", "int");
 }
 
 static void shader_glsl_to_uint(const struct wined3d_shader_instruction *ins)
 {
-    struct wined3d_string_buffer *buffer = ins->ctx->buffer;
-    struct glsl_src_param src_param;
-    unsigned int mask_size;
-    DWORD write_mask;
-
-    write_mask = shader_glsl_append_dst(buffer, ins);
-    mask_size = shader_glsl_get_write_mask_size(write_mask);
-    shader_glsl_add_src_param(ins, &ins->src[0], write_mask, &src_param);
-
-    if (mask_size > 1)
-        shader_addline(buffer, "mix(uvec%u(max(%s, vec%u(0.0))), uvec%u(0xffffffffu), greaterThanEqual(%s, vec%u(4294967296.0))));\n",
-                mask_size, src_param.param_str, mask_size, mask_size, src_param.param_str, mask_size);
-    else
-        shader_addline(buffer, "mix(uint(max(%s, 0.0)), 0xffffffffu, %s >= 4294967296.0));\n",
-                src_param.param_str, src_param.param_str);
+    shader_glsl_cast(ins, "uvec", "uint");
 }
 
 static void shader_glsl_to_float(const struct wined3d_shader_instruction *ins)
@@ -4812,13 +4703,8 @@ static void shader_glsl_mad(const struct wined3d_shader_instruction *ins)
     shader_glsl_add_src_param(ins, &ins->src[0], write_mask, &src0_param);
     shader_glsl_add_src_param(ins, &ins->src[1], write_mask, &src1_param);
     shader_glsl_add_src_param(ins, &ins->src[2], write_mask, &src2_param);
-    if (wined3d_settings.multiply_special == 2 && ins->ctx->reg_maps->shader_version.major < 4)
-        shader_addline(ins->ctx->buffer, "mul%d(%s, %s) + %s);\n",
-                shader_glsl_get_write_mask_size(write_mask), src0_param.param_str,
-                src1_param.param_str, src2_param.param_str);
-    else
-        shader_addline(ins->ctx->buffer, "(%s * %s) + %s);\n",
-                src0_param.param_str, src1_param.param_str, src2_param.param_str);
+    shader_addline(ins->ctx->buffer, "(%s * %s) + %s);\n",
+            src0_param.param_str, src1_param.param_str, src2_param.param_str);
 }
 
 /* Handles transforming all WINED3DSIO_M?x? opcodes for
@@ -5627,30 +5513,26 @@ static void shader_glsl_atomic(const struct wined3d_shader_instruction *ins)
                 op = "imageAtomicAdd";
             break;
         case WINED3DSIH_ATOMIC_IMAX:
-        case WINED3DSIH_ATOMIC_UMAX:
         case WINED3DSIH_IMM_ATOMIC_IMAX:
-        case WINED3DSIH_IMM_ATOMIC_UMAX:
             if (is_tgsm)
                 op = "atomicMax";
             else
                 op = "imageAtomicMax";
-            if (data_type != WINED3D_DATA_INT && data_type != WINED3D_DATA_UINT)
+            if (data_type != WINED3D_DATA_INT)
             {
-                FIXME("Unhandled opcode %#x for integers.\n", ins->handler_idx);
+                FIXME("Unhandled opcode %#x for unsigned integers.\n", ins->handler_idx);
                 return;
             }
             break;
         case WINED3DSIH_ATOMIC_IMIN:
-        case WINED3DSIH_ATOMIC_UMIN:
         case WINED3DSIH_IMM_ATOMIC_IMIN:
-        case WINED3DSIH_IMM_ATOMIC_UMIN:
             if (is_tgsm)
                 op = "atomicMin";
             else
                 op = "imageAtomicMin";
-            if (data_type != WINED3D_DATA_INT && data_type != WINED3D_DATA_UINT)
+            if (data_type != WINED3D_DATA_INT)
             {
-                FIXME("Unhandled opcode %#x for integers.\n", ins->handler_idx);
+                FIXME("Unhandled opcode %#x for unsigned integers.\n", ins->handler_idx);
                 return;
             }
             break;
@@ -5660,6 +5542,30 @@ static void shader_glsl_atomic(const struct wined3d_shader_instruction *ins)
                 op = "atomicOr";
             else
                 op = "imageAtomicOr";
+            break;
+        case WINED3DSIH_ATOMIC_UMAX:
+        case WINED3DSIH_IMM_ATOMIC_UMAX:
+            if (is_tgsm)
+                op = "atomicMax";
+            else
+                op = "imageAtomicMax";
+            if (data_type != WINED3D_DATA_UINT)
+            {
+                FIXME("Unhandled opcode %#x for signed integers.\n", ins->handler_idx);
+                return;
+            }
+            break;
+        case WINED3DSIH_ATOMIC_UMIN:
+        case WINED3DSIH_IMM_ATOMIC_UMIN:
+            if (is_tgsm)
+                op = "atomicMin";
+            else
+                op = "imageAtomicMin";
+            if (data_type != WINED3D_DATA_UINT)
+            {
+                FIXME("Unhandled opcode %#x for signed integers.\n", ins->handler_idx);
+                return;
+            }
             break;
         case WINED3DSIH_ATOMIC_XOR:
         case WINED3DSIH_IMM_ATOMIC_XOR:
@@ -7103,7 +7009,7 @@ static void delete_glsl_program_entry(struct shader_glsl_priv *priv, const struc
         list_remove(&entry->ps.shader_entry);
     if (entry->cs.id)
         list_remove(&entry->cs.shader_entry);
-    free(entry);
+    heap_free(entry);
 }
 
 static void shader_glsl_setup_vs3_output(struct shader_glsl_priv *priv,
@@ -7123,7 +7029,7 @@ static void shader_glsl_setup_vs3_output(struct shader_glsl_priv *priv,
     unsigned int i, j;
     char reg_mask[6];
 
-    set = calloc(max_varyings, sizeof(*set));
+    set = heap_calloc(max_varyings, sizeof(*set));
 
     for (i = 0; i < input_signature->element_count; ++i)
     {
@@ -7207,7 +7113,7 @@ static void shader_glsl_setup_vs3_output(struct shader_glsl_priv *priv,
             shader_addline(buffer, "%s.%s = vec%u(0.0);\n", destination->buffer, reg_mask, size);
     }
 
-    free(set);
+    heap_free(set);
     string_buffer_release(&priv->string_buffers, destination);
 }
 
@@ -7364,13 +7270,13 @@ static GLuint shader_glsl_generate_vs3_rasterizer_input_setup(struct shader_glsl
     if (ps_major < 3)
     {
         DWORD colors_written_mask[2] = {0};
-        DWORD texcoords_written_mask[WINED3D_MAX_FFP_TEXTURES] = {0};
+        DWORD texcoords_written_mask[WINED3D_MAX_TEXTURES] = {0};
 
         if (!legacy_syntax)
         {
             declare_out_varying(gl_info, buffer, flatshading, "vec4 ffp_varying_diffuse;\n");
             declare_out_varying(gl_info, buffer, flatshading, "vec4 ffp_varying_specular;\n");
-            declare_out_varying(gl_info, buffer, FALSE, "vec4 ffp_varying_texcoord[%u];\n", WINED3D_MAX_FFP_TEXTURES);
+            declare_out_varying(gl_info, buffer, FALSE, "vec4 ffp_varying_texcoord[%u];\n", WINED3D_MAX_TEXTURES);
             declare_out_varying(gl_info, buffer, FALSE, "float ffp_varying_fogcoord;\n");
         }
 
@@ -7407,7 +7313,7 @@ static GLuint shader_glsl_generate_vs3_rasterizer_input_setup(struct shader_glsl
             }
             else if (shader_match_semantic(semantic_name, WINED3D_DECL_USAGE_TEXCOORD))
             {
-                if (semantic_idx < WINED3D_MAX_FFP_TEXTURES)
+                if (semantic_idx < WINED3D_MAX_TEXTURES)
                 {
                     shader_addline(buffer, "%s[%u]%s = outputs[%u]%s;\n",
                             legacy_syntax ? "gl_TexCoord" : "ffp_varying_texcoord",
@@ -7443,7 +7349,7 @@ static GLuint shader_glsl_generate_vs3_rasterizer_input_setup(struct shader_glsl
                             reg_mask, reg_mask);
             }
         }
-        for (i = 0; i < WINED3D_MAX_FFP_TEXTURES; ++i)
+        for (i = 0; i < WINED3D_MAX_TEXTURES; ++i)
         {
             if (ps && !(ps->reg_maps.texcoord & (1u << i)))
                 continue;
@@ -7746,8 +7652,6 @@ static void shader_glsl_enable_extensions(struct wined3d_string_buffer *buffer,
         shader_addline(buffer, "#extension GL_ARB_shader_image_load_store : enable\n");
     if (gl_info->supported[ARB_SHADER_IMAGE_SIZE])
         shader_addline(buffer, "#extension GL_ARB_shader_image_size : enable\n");
-    if (gl_info->supported[ARB_SHADER_STENCIL_EXPORT])
-        shader_addline(buffer, "#extension GL_ARB_shader_stencil_export : enable\n");
     if (gl_info->supported[ARB_SHADER_STORAGE_BUFFER_OBJECT])
         shader_addline(buffer, "#extension GL_ARB_shader_storage_buffer_object : enable\n");
     if (gl_info->supported[ARB_SHADER_TEXTURE_IMAGE_SAMPLES])
@@ -7768,8 +7672,6 @@ static void shader_glsl_enable_extensions(struct wined3d_string_buffer *buffer,
         shader_addline(buffer, "#extension GL_ARB_viewport_array : enable\n");
     if (gl_info->supported[EXT_GPU_SHADER4])
         shader_addline(buffer, "#extension GL_EXT_gpu_shader4 : enable\n");
-    if (gl_info->supported[EXT_SHADER_INTEGER_MIX])
-        shader_addline(buffer, "#extension GL_EXT_shader_integer_mix : enable\n");
     if (gl_info->supported[EXT_TEXTURE_ARRAY])
         shader_addline(buffer, "#extension GL_EXT_texture_array : enable\n");
     if (gl_info->supported[EXT_TEXTURE_SHADOW_LOD])
@@ -7846,9 +7748,6 @@ static void shader_glsl_generate_ps_epilogue(const struct wined3d_gl_info *gl_in
 
     if (reg_maps->sample_mask)
         shader_addline(buffer, "gl_SampleMask[0] = floatBitsToInt(sample_mask);\n");
-
-    if (reg_maps->stencil_ref)
-        shader_addline(buffer, "gl_FragStencilRefARB = floatBitsToInt(stencil_ref);\n");
 
     if (!use_legacy_fragment_output(gl_info))
         shader_glsl_generate_color_output(buffer, gl_info, shader, args, string_buffers);
@@ -7962,7 +7861,7 @@ static GLuint shader_glsl_generate_fragment_shader(const struct wined3d_context_
                 shader_addline(buffer, "vec4 ffp_varying_diffuse;\n");
             if (glsl_is_color_reg_read(shader, 1))
                 shader_addline(buffer, "vec4 ffp_varying_specular;\n");
-            shader_addline(buffer, "vec4 ffp_texcoord[%u];\n", WINED3D_MAX_FFP_TEXTURES);
+            shader_addline(buffer, "vec4 ffp_texcoord[%u];\n", WINED3D_MAX_TEXTURES);
             shader_addline(buffer, "float ffp_varying_fogcoord;\n");
         }
         else
@@ -7971,8 +7870,8 @@ static GLuint shader_glsl_generate_fragment_shader(const struct wined3d_context_
                 declare_in_varying(gl_info, buffer, args->flatshading, "vec4 ffp_varying_diffuse;\n");
             if (glsl_is_color_reg_read(shader, 1))
                 declare_in_varying(gl_info, buffer, args->flatshading, "vec4 ffp_varying_specular;\n");
-            declare_in_varying(gl_info, buffer, FALSE, "vec4 ffp_varying_texcoord[%u];\n", WINED3D_MAX_FFP_TEXTURES);
-            shader_addline(buffer, "vec4 ffp_texcoord[%u];\n", WINED3D_MAX_FFP_TEXTURES);
+            declare_in_varying(gl_info, buffer, FALSE, "vec4 ffp_varying_texcoord[%u];\n", WINED3D_MAX_TEXTURES);
+            shader_addline(buffer, "vec4 ffp_texcoord[%u];\n", WINED3D_MAX_TEXTURES);
             declare_in_varying(gl_info, buffer, FALSE, "float ffp_varying_fogcoord;\n");
         }
     }
@@ -8095,9 +7994,6 @@ static GLuint shader_glsl_generate_fragment_shader(const struct wined3d_context_
 
     if (reg_maps->sample_mask)
         shader_addline(buffer, "float sample_mask = uintBitsToFloat(0xffffffffu);\n");
-
-    if (reg_maps->stencil_ref)
-        shader_addline(buffer, "float stencil_ref = uintBitsToFloat(0xffffffffu);\n");
 
     /* Direct3D applications expect integer vPos values, while OpenGL drivers
      * add approximately 0.5. This causes off-by-one problems as spotted by
@@ -8274,7 +8170,7 @@ static GLuint shader_glsl_generate_vertex_shader(const struct wined3d_context_gl
         {
             declare_out_varying(gl_info, buffer, args->flatshading, "vec4 ffp_varying_diffuse;\n");
             declare_out_varying(gl_info, buffer, args->flatshading, "vec4 ffp_varying_specular;\n");
-            declare_out_varying(gl_info, buffer, FALSE, "vec4 ffp_varying_texcoord[%u];\n", WINED3D_MAX_FFP_TEXTURES);
+            declare_out_varying(gl_info, buffer, FALSE, "vec4 ffp_varying_texcoord[%u];\n", WINED3D_MAX_TEXTURES);
             declare_out_varying(gl_info, buffer, FALSE, "float ffp_varying_fogcoord;\n");
         }
     }
@@ -8745,7 +8641,7 @@ static GLuint find_glsl_fragment_shader(const struct wined3d_context_gl *context
 
     if (!shader->backend_data)
     {
-        if (!(shader->backend_data = calloc(1, sizeof(*shader_data))))
+        if (!(shader->backend_data = heap_alloc_zero(sizeof(*shader_data))))
         {
             ERR("Failed to allocate backend data.\n");
             return 0;
@@ -8774,11 +8670,11 @@ static GLuint find_glsl_fragment_shader(const struct wined3d_context_gl *context
         if (shader_data->num_gl_shaders)
         {
             new_size = shader_data->shader_array_size + max(1, shader_data->shader_array_size / 2);
-            new_array = realloc(shader_data->gl_shaders.ps, new_size * sizeof(*gl_shaders));
+            new_array = heap_realloc(shader_data->gl_shaders.ps, new_size * sizeof(*gl_shaders));
         }
         else
         {
-            new_array = malloc(sizeof(*gl_shaders));
+            new_array = heap_alloc(sizeof(*gl_shaders));
             new_size = 1;
         }
 
@@ -8837,7 +8733,7 @@ static GLuint find_glsl_vertex_shader(const struct wined3d_context_gl *context_g
 
     if (!shader->backend_data)
     {
-        if (!(shader->backend_data = calloc(1, sizeof(*shader_data))))
+        if (!(shader->backend_data = heap_alloc_zero(sizeof(*shader_data))))
         {
             ERR("Failed to allocate backend data.\n");
             return 0;
@@ -8863,11 +8759,11 @@ static GLuint find_glsl_vertex_shader(const struct wined3d_context_gl *context_g
         if (shader_data->num_gl_shaders)
         {
             new_size = shader_data->shader_array_size + max(1, shader_data->shader_array_size / 2);
-            new_array = realloc(shader_data->gl_shaders.vs, new_size * sizeof(*gl_shaders));
+            new_array = heap_realloc(shader_data->gl_shaders.vs, new_size * sizeof(*gl_shaders));
         }
         else
         {
-            new_array = malloc(sizeof(*gl_shaders));
+            new_array = heap_alloc(sizeof(*gl_shaders));
             new_size = 1;
         }
 
@@ -8899,7 +8795,7 @@ static GLuint find_glsl_hull_shader(const struct wined3d_context_gl *context_gl,
 
     if (!shader->backend_data)
     {
-        if (!(shader->backend_data = calloc(1, sizeof(*shader_data))))
+        if (!(shader->backend_data = heap_alloc_zero(sizeof(*shader_data))))
         {
             ERR("Failed to allocate backend data.\n");
             return 0;
@@ -8918,7 +8814,7 @@ static GLuint find_glsl_hull_shader(const struct wined3d_context_gl *context_gl,
 
     assert(!shader_data->gl_shaders.hs);
     new_size = 1;
-    if (!(new_array = malloc(sizeof(*new_array))))
+    if (!(new_array = heap_alloc(sizeof(*new_array))))
     {
         ERR("Failed to allocate GL shaders array.\n");
         return 0;
@@ -8944,7 +8840,7 @@ static GLuint find_glsl_domain_shader(const struct wined3d_context_gl *context_g
 
     if (!shader->backend_data)
     {
-        if (!(shader->backend_data = calloc(1, sizeof(*shader_data))))
+        if (!(shader->backend_data = heap_alloc_zero(sizeof(*shader_data))))
         {
             ERR("Failed to allocate backend data.\n");
             return 0;
@@ -8964,11 +8860,11 @@ static GLuint find_glsl_domain_shader(const struct wined3d_context_gl *context_g
     if (shader_data->num_gl_shaders)
     {
         new_size = shader_data->shader_array_size + 1;
-        new_array = realloc(shader_data->gl_shaders.ds, new_size * sizeof(*new_array));
+        new_array = heap_realloc(shader_data->gl_shaders.ds, new_size * sizeof(*new_array));
     }
     else
     {
-        new_array = malloc(sizeof(*new_array));
+        new_array = heap_alloc(sizeof(*new_array));
         new_size = 1;
     }
 
@@ -8999,7 +8895,7 @@ static GLuint find_glsl_geometry_shader(const struct wined3d_context_gl *context
 
     if (!shader->backend_data)
     {
-        if (!(shader->backend_data = calloc(1, sizeof(*shader_data))))
+        if (!(shader->backend_data = heap_alloc_zero(sizeof(*shader_data))))
         {
             ERR("Failed to allocate backend data.\n");
             return 0;
@@ -9019,11 +8915,11 @@ static GLuint find_glsl_geometry_shader(const struct wined3d_context_gl *context
     if (shader_data->num_gl_shaders)
     {
         new_size = shader_data->shader_array_size + 1;
-        new_array = realloc(shader_data->gl_shaders.gs, new_size * sizeof(*new_array));
+        new_array = heap_realloc(shader_data->gl_shaders.gs, new_size * sizeof(*new_array));
     }
     else
     {
-        new_array = malloc(sizeof(*new_array));
+        new_array = heap_alloc(sizeof(*new_array));
         new_size = 1;
     }
 
@@ -9066,13 +8962,12 @@ static void shader_glsl_ffp_vertex_lighting_footer(struct wined3d_string_buffer 
     shader_addline(buffer, "diffuse += clamp(dot(dir, normal), 0.0, 1.0)"
             " * ffp_light[%u].diffuse.xyz * att;\n", idx);
     if (settings->localviewer)
-        shader_addline(buffer, "t = dot(normal, ffp_normalize(dir - ffp_normalize(ec_pos.xyz)));\n");
+        shader_addline(buffer, "t = dot(normal, normalize(dir - normalize(ec_pos.xyz)));\n");
     else
-        shader_addline(buffer, "t = dot(normal, ffp_normalize(dir + vec3(0.0, 0.0, -1.0)));\n");
-    if (settings->specular_enable)
-        shader_addline(buffer, "if (dot(dir, normal) > 0.0 && t > 0.0%s) specular +="
-                " pow(t, ffp_material.shininess) * ffp_light[%u].specular * att;\n",
-                legacy_lighting ? " && ffp_material.shininess > 0.0" : "", idx);
+        shader_addline(buffer, "t = dot(normal, normalize(dir + vec3(0.0, 0.0, -1.0)));\n");
+    shader_addline(buffer, "if (dot(dir, normal) > 0.0 && t > 0.0%s) specular +="
+            " pow(t, ffp_material.shininess) * ffp_light[%u].specular * att;\n",
+            legacy_lighting ? " && ffp_material.shininess > 0.0" : "", idx);
 }
 
 static void shader_glsl_ffp_vertex_lighting(struct wined3d_string_buffer *buffer,
@@ -9090,11 +8985,9 @@ static void shader_glsl_ffp_vertex_lighting(struct wined3d_string_buffer *buffer
 
     shader_addline(buffer, "vec3 ambient = ffp_light_ambient;\n");
     shader_addline(buffer, "vec3 diffuse = vec3(0.0);\n");
+    shader_addline(buffer, "vec4 specular = vec4(0.0);\n");
     shader_addline(buffer, "vec3 dir, dst;\n");
     shader_addline(buffer, "float att, t;\n");
-
-    if (settings->specular_enable)
-        shader_addline(buffer, "vec4 specular = vec4(0.0);\n");
 
     ambient = shader_glsl_ffp_mcs(settings->ambient_source, "ffp_material.ambient");
     diffuse = shader_glsl_ffp_mcs(settings->diffuse_source, "ffp_material.diffuse");
@@ -9128,7 +9021,7 @@ static void shader_glsl_ffp_vertex_lighting(struct wined3d_string_buffer *buffer
             shader_addline(buffer, "}\n");
             continue;
         }
-        shader_addline(buffer, "dir = ffp_normalize(dir);\n");
+        shader_addline(buffer, "dir = normalize(dir);\n");
         shader_glsl_ffp_vertex_lighting_footer(buffer, settings, idx, legacy_lighting);
         shader_addline(buffer, "}\n");
     }
@@ -9149,8 +9042,8 @@ static void shader_glsl_ffp_vertex_lighting(struct wined3d_string_buffer *buffer
         {
             shader_addline(buffer, "if (dst.y <= ffp_light[%u].range)\n{\n", idx);
         }
-        shader_addline(buffer, "dir = ffp_normalize(dir);\n");
-        shader_addline(buffer, "t = dot(-dir, ffp_normalize(ffp_light[%u].direction));\n", idx);
+        shader_addline(buffer, "dir = normalize(dir);\n");
+        shader_addline(buffer, "t = dot(-dir, normalize(ffp_light[%u].direction));\n", idx);
         shader_addline(buffer, "if (t > ffp_light[%u].cos_htheta) att = 1.0;\n", idx);
         shader_addline(buffer, "else if (t <= ffp_light[%u].cos_hphi) att = 0.0;\n", idx);
         shader_addline(buffer, "else att = pow((t - ffp_light[%u].cos_hphi)"
@@ -9180,7 +9073,7 @@ static void shader_glsl_ffp_vertex_lighting(struct wined3d_string_buffer *buffer
         if (!settings->normal)
             continue;
         shader_addline(buffer, "att = 1.0;\n");
-        shader_addline(buffer, "dir = ffp_normalize(ffp_light[%u].direction.xyz);\n", idx);
+        shader_addline(buffer, "dir = normalize(ffp_light[%u].direction.xyz);\n", idx);
         shader_glsl_ffp_vertex_lighting_footer(buffer, settings, idx, legacy_lighting);
     }
 
@@ -9190,17 +9083,14 @@ static void shader_glsl_ffp_vertex_lighting(struct wined3d_string_buffer *buffer
         if (!settings->normal)
             continue;
         shader_addline(buffer, "att = 1.0;\n");
-        shader_addline(buffer, "dir = ffp_normalize(ffp_light[%u].position.xyz);\n", idx);
+        shader_addline(buffer, "dir = normalize(ffp_light[%u].position.xyz);\n", idx);
         shader_glsl_ffp_vertex_lighting_footer(buffer, settings, idx, legacy_lighting);
     }
 
     shader_addline(buffer, "ffp_varying_diffuse.xyz = %s.xyz * ambient + %s.xyz * diffuse + %s.xyz;\n",
             ambient, diffuse, emissive);
     shader_addline(buffer, "ffp_varying_diffuse.w = %s.w;\n", diffuse);
-    if (settings->specular_enable)
-        shader_addline(buffer, "ffp_varying_specular = %s * specular;\n", specular);
-    else
-        shader_addline(buffer, "ffp_varying_specular = ffp_attrib_specular;\n");
+    shader_addline(buffer, "ffp_varying_specular = %s * specular;\n", specular);
 }
 
 /* Context activation is done by the caller. */
@@ -9252,7 +9142,7 @@ static GLuint shader_glsl_generate_ffp_vertex_shader(struct shader_glsl_priv *pr
     shader_addline(buffer, "uniform mat4 ffp_modelview_matrix[%u];\n", MAX_VERTEX_BLENDS);
     shader_addline(buffer, "uniform mat4 ffp_projection_matrix;\n");
     shader_addline(buffer, "uniform mat3 ffp_normal_matrix;\n");
-    shader_addline(buffer, "uniform mat4 ffp_texture_matrix[%u];\n", WINED3D_MAX_FFP_TEXTURES);
+    shader_addline(buffer, "uniform mat4 ffp_texture_matrix[%u];\n", WINED3D_MAX_TEXTURES);
 
     shader_addline(buffer, "uniform struct\n{\n");
     shader_addline(buffer, "    vec4 emissive;\n");
@@ -9294,7 +9184,7 @@ static GLuint shader_glsl_generate_ffp_vertex_shader(struct shader_glsl_priv *pr
     {
         shader_addline(buffer, "vec4 ffp_varying_diffuse;\n");
         shader_addline(buffer, "vec4 ffp_varying_specular;\n");
-        shader_addline(buffer, "vec4 ffp_varying_texcoord[%u];\n", WINED3D_MAX_FFP_TEXTURES);
+        shader_addline(buffer, "vec4 ffp_varying_texcoord[%u];\n", WINED3D_MAX_TEXTURES);
         shader_addline(buffer, "float ffp_varying_fogcoord;\n");
     }
     else
@@ -9304,14 +9194,9 @@ static GLuint shader_glsl_generate_ffp_vertex_shader(struct shader_glsl_priv *pr
 
         declare_out_varying(gl_info, buffer, settings->flatshading, "vec4 ffp_varying_diffuse;\n");
         declare_out_varying(gl_info, buffer, settings->flatshading, "vec4 ffp_varying_specular;\n");
-        declare_out_varying(gl_info, buffer, FALSE, "vec4 ffp_varying_texcoord[%u];\n", WINED3D_MAX_FFP_TEXTURES);
+        declare_out_varying(gl_info, buffer, FALSE, "vec4 ffp_varying_texcoord[%u];\n", WINED3D_MAX_TEXTURES);
         declare_out_varying(gl_info, buffer, FALSE, "float ffp_varying_fogcoord;\n");
     }
-
-    shader_addline(buffer, "\nvec3 ffp_normalize(vec3 n)\n{\n");
-    shader_addline(buffer, "    float lensq = dot(n, n);\n");
-    shader_addline(buffer, "    return lensq == 0.0 ? n : (n * inversesqrt(lensq));\n");
-    shader_addline(buffer, "}\n");
 
     shader_addline(buffer, "\nvoid main()\n{\n");
     shader_addline(buffer, "float m;\n");
@@ -9323,7 +9208,7 @@ static GLuint shader_glsl_generate_ffp_vertex_shader(struct shader_glsl_priv *pr
             shader_addline(buffer, "%s %s = vs_in%u%s;\n", attrib_info[i].type, attrib_info[i].name,
                     i, settings->swizzle_map & (1u << i) ? ".zyxw" : "");
     }
-    for (i = 0; i < WINED3D_MAX_FFP_TEXTURES; ++i)
+    for (i = 0; i < WINED3D_MAX_TEXTURES; ++i)
     {
         unsigned int coord_idx = settings->texgen[i] & 0x0000ffff;
         if ((settings->texgen[i] & 0xffff0000) == WINED3DTSS_TCI_PASSTHRU
@@ -9374,7 +9259,7 @@ static GLuint shader_glsl_generate_ffp_vertex_shader(struct shader_glsl_priv *pr
         }
 
         if (settings->normalize)
-            shader_addline(buffer, "normal = ffp_normalize(normal);\n");
+            shader_addline(buffer, "normal = normalize(normal);\n");
     }
 
     shader_glsl_ffp_vertex_lighting(buffer, settings, legacy_lighting);
@@ -9389,7 +9274,7 @@ static GLuint shader_glsl_generate_ffp_vertex_shader(struct shader_glsl_priv *pr
         shader_addline(buffer, "ffp_varying_specular = clamp(ffp_varying_specular, 0.0, 1.0);\n");
     }
 
-    for (i = 0; i < WINED3D_MAX_FFP_TEXTURES; ++i)
+    for (i = 0; i < WINED3D_MAX_TEXTURES; ++i)
     {
         BOOL output_legacy_texcoord = legacy_syntax;
 
@@ -9415,11 +9300,11 @@ static GLuint shader_glsl_generate_ffp_vertex_shader(struct shader_glsl_priv *pr
 
             case WINED3DTSS_TCI_CAMERASPACEREFLECTIONVECTOR:
                 shader_addline(buffer, "ffp_varying_texcoord[%u] = ffp_texture_matrix[%u]"
-                        " * vec4(reflect(ffp_normalize(ec_pos.xyz), normal), 1.0);\n", i, i);
+                        " * vec4(reflect(normalize(ec_pos.xyz), normal), 1.0);\n", i, i);
                 break;
 
             case WINED3DTSS_TCI_SPHEREMAP:
-                shader_addline(buffer, "r = reflect(ffp_normalize(ec_pos.xyz), normal);\n");
+                shader_addline(buffer, "r = reflect(normalize(ec_pos.xyz), normal);\n");
                 shader_addline(buffer, "m = 2.0 * length(vec3(r.x, r.y, r.z + 1.0));\n");
                 shader_addline(buffer, "ffp_varying_texcoord[%u] = ffp_texture_matrix[%u]"
                         " * vec4(r.x / m + 0.5, r.y / m + 0.5, 0.0, 1.0);\n", i, i);
@@ -9748,7 +9633,7 @@ static GLuint shader_glsl_generate_ffp_fragment_shader(struct shader_glsl_priv *
     string_buffer_clear(buffer);
 
     /* Find out which textures are read */
-    for (stage = 0; stage < WINED3D_MAX_FFP_TEXTURES; ++stage)
+    for (stage = 0; stage < WINED3D_MAX_TEXTURES; ++stage)
     {
         if (settings->op[stage].cop == WINED3D_TOP_DISABLE)
             break;
@@ -9831,7 +9716,7 @@ static GLuint shader_glsl_generate_ffp_fragment_shader(struct shader_glsl_priv *
         shader_addline(buffer, "vec4 temp_reg = vec4(0.0);\n");
     shader_addline(buffer, "vec4 arg0, arg1, arg2;\n");
 
-    for (stage = 0; stage < WINED3D_MAX_FFP_TEXTURES; ++stage)
+    for (stage = 0; stage < WINED3D_MAX_TEXTURES; ++stage)
     {
         const char *sampler_type;
 
@@ -9911,16 +9796,16 @@ static GLuint shader_glsl_generate_ffp_fragment_shader(struct shader_glsl_priv *
     {
         shader_addline(buffer, "vec4 ffp_varying_diffuse;\n");
         shader_addline(buffer, "vec4 ffp_varying_specular;\n");
-        shader_addline(buffer, "vec4 ffp_varying_texcoord[%u];\n", WINED3D_MAX_FFP_TEXTURES);
-        shader_addline(buffer, "vec4 ffp_texcoord[%u];\n", WINED3D_MAX_FFP_TEXTURES);
+        shader_addline(buffer, "vec4 ffp_varying_texcoord[%u];\n", WINED3D_MAX_TEXTURES);
+        shader_addline(buffer, "vec4 ffp_texcoord[%u];\n", WINED3D_MAX_TEXTURES);
         shader_addline(buffer, "float ffp_varying_fogcoord;\n");
     }
     else
     {
         declare_in_varying(gl_info, buffer, settings->flatshading, "vec4 ffp_varying_diffuse;\n");
         declare_in_varying(gl_info, buffer, settings->flatshading, "vec4 ffp_varying_specular;\n");
-        declare_in_varying(gl_info, buffer, FALSE, "vec4 ffp_varying_texcoord[%u];\n", WINED3D_MAX_FFP_TEXTURES);
-        shader_addline(buffer, "vec4 ffp_texcoord[%u];\n", WINED3D_MAX_FFP_TEXTURES);
+        declare_in_varying(gl_info, buffer, FALSE, "vec4 ffp_varying_texcoord[%u];\n", WINED3D_MAX_TEXTURES);
+        shader_addline(buffer, "vec4 ffp_texcoord[%u];\n", WINED3D_MAX_TEXTURES);
         declare_in_varying(gl_info, buffer, FALSE, "float ffp_varying_fogcoord;\n");
     }
 
@@ -9932,7 +9817,7 @@ static GLuint shader_glsl_generate_ffp_fragment_shader(struct shader_glsl_priv *
         shader_addline(buffer, "ffp_varying_specular = gl_SecondaryColor;\n");
     }
 
-    for (stage = 0; stage < WINED3D_MAX_FFP_TEXTURES; ++stage)
+    for (stage = 0; stage < WINED3D_MAX_TEXTURES; ++stage)
     {
         if (tex_map & (1u << stage))
         {
@@ -9953,7 +9838,7 @@ static GLuint shader_glsl_generate_ffp_fragment_shader(struct shader_glsl_priv *
         shader_addline(buffer, "if (any(lessThan(ffp_texcoord[7], vec4(0.0)))) discard;\n");
 
     /* Generate texture sampling instructions */
-    for (stage = 0; stage < WINED3D_MAX_FFP_TEXTURES && settings->op[stage].cop != WINED3D_TOP_DISABLE; ++stage)
+    for (stage = 0; stage < WINED3D_MAX_TEXTURES && settings->op[stage].cop != WINED3D_TOP_DISABLE; ++stage)
     {
         const char *texture_function, *coord_mask;
         BOOL proj;
@@ -10070,7 +9955,7 @@ static GLuint shader_glsl_generate_ffp_fragment_shader(struct shader_glsl_priv *
     shader_addline(buffer, "ret = ffp_varying_diffuse;\n");
 
     /* Generate the main shader */
-    for (stage = 0; stage < WINED3D_MAX_FFP_TEXTURES; ++stage)
+    for (stage = 0; stage < WINED3D_MAX_TEXTURES; ++stage)
     {
         BOOL op_equal;
 
@@ -10149,7 +10034,7 @@ static struct glsl_ffp_vertex_shader *shader_glsl_find_ffp_vertex_shader(struct 
     if ((entry = wine_rb_get(&priv->ffp_vertex_shaders, settings)))
         return WINE_RB_ENTRY_VALUE(entry, struct glsl_ffp_vertex_shader, desc.entry);
 
-    if (!(shader = malloc(sizeof(*shader))))
+    if (!(shader = heap_alloc(sizeof(*shader))))
         return NULL;
 
     shader->desc.settings = *settings;
@@ -10170,7 +10055,7 @@ static struct glsl_ffp_fragment_shader *shader_glsl_find_ffp_fragment_shader(str
     if ((desc = find_ffp_frag_shader(&priv->ffp_fragment_shaders, args)))
         return CONTAINING_RECORD(desc, struct glsl_ffp_fragment_shader, entry);
 
-    if (!(glsl_desc = malloc(sizeof(*glsl_desc))))
+    if (!(glsl_desc = heap_alloc(sizeof(*glsl_desc))))
         return NULL;
 
     glsl_desc->entry.settings = *args;
@@ -10217,7 +10102,7 @@ static void shader_glsl_init_vs_uniform_locations(const struct wined3d_gl_info *
     }
     vs->projection_matrix_location = GL_EXTCALL(glGetUniformLocation(program_id, "ffp_projection_matrix"));
     vs->normal_matrix_location = GL_EXTCALL(glGetUniformLocation(program_id, "ffp_normal_matrix"));
-    for (i = 0; i < WINED3D_MAX_FFP_TEXTURES; ++i)
+    for (i = 0; i < WINED3D_MAX_TEXTURES; ++i)
     {
         string_buffer_sprintf(name, "ffp_texture_matrix[%u]", i);
         vs->texture_matrix_location[i] = GL_EXTCALL(glGetUniformLocation(program_id, name->buffer));
@@ -10303,7 +10188,7 @@ static void shader_glsl_init_ps_uniform_locations(const struct wined3d_gl_info *
         ps->uniform_b_locations[i] = GL_EXTCALL(glGetUniformLocation(program_id, name->buffer));
     }
 
-    for (i = 0; i < WINED3D_MAX_FFP_TEXTURES; ++i)
+    for (i = 0; i < WINED3D_MAX_TEXTURES; ++i)
     {
         string_buffer_sprintf(name, "bumpenv_mat%u", i);
         ps->bumpenv_mat_location[i] = GL_EXTCALL(glGetUniformLocation(program_id, name->buffer));
@@ -10343,25 +10228,25 @@ static HRESULT shader_glsl_compile_compute_shader(struct shader_glsl_priv *priv,
     struct glsl_shader_prog_link *entry;
     GLuint shader_id, program_id;
 
-    if (!(entry = malloc(sizeof(*entry))))
+    if (!(entry = heap_alloc(sizeof(*entry))))
     {
         ERR("Out of memory.\n");
         return E_OUTOFMEMORY;
     }
 
-    if (!(shader->backend_data = calloc(1, sizeof(*shader_data))))
+    if (!(shader->backend_data = heap_alloc_zero(sizeof(*shader_data))))
     {
         ERR("Failed to allocate backend data.\n");
-        free(entry);
+        heap_free(entry);
         return E_OUTOFMEMORY;
     }
     shader_data = shader->backend_data;
 
-    if (!(shader_data->gl_shaders.cs = malloc(sizeof(*gl_shaders))))
+    if (!(shader_data->gl_shaders.cs = heap_alloc(sizeof(*gl_shaders))))
     {
         ERR("Failed to allocate GL shader array.\n");
-        free(entry);
-        free(shader->backend_data);
+        heap_free(entry);
+        heap_free(shader->backend_data);
         shader->backend_data = NULL;
         return E_OUTOFMEMORY;
     }
@@ -10595,7 +10480,7 @@ static void set_glsl_shader_program(const struct wined3d_context_gl *context_gl,
     TRACE("Created new GLSL shader program %u.\n", program_id);
 
     /* Create the entry */
-    entry = malloc(sizeof(*entry));
+    entry = heap_alloc(sizeof(*entry));
     entry->id = program_id;
     entry->vs.id = vs_id;
     entry->hs.id = hs_id;
@@ -10789,7 +10674,7 @@ static void set_glsl_shader_program(const struct wined3d_context_gl *context_gl,
     else
     {
         entry->constant_update_mask |= WINED3D_SHADER_CONST_FFP_MODELVIEW
-                | WINED3D_SHADER_CONST_FFP_PROJ | WINED3D_SHADER_CONST_FFP_LIGHTS;
+                | WINED3D_SHADER_CONST_FFP_PROJ;
 
         for (i = 1; i < MAX_VERTEX_BLENDS; ++i)
         {
@@ -10800,7 +10685,7 @@ static void set_glsl_shader_program(const struct wined3d_context_gl *context_gl,
             }
         }
 
-        for (i = 0; i < WINED3D_MAX_FFP_TEXTURES; ++i)
+        for (i = 0; i < WINED3D_MAX_TEXTURES; ++i)
         {
             if (entry->vs.texture_matrix_location[i] != -1)
             {
@@ -10813,6 +10698,8 @@ static void set_glsl_shader_program(const struct wined3d_context_gl *context_gl,
                 || entry->vs.material_emissive_location != -1
                 || entry->vs.material_shininess_location != -1)
             entry->constant_update_mask |= WINED3D_SHADER_CONST_FFP_MATERIAL;
+        if (entry->vs.light_ambient_location != -1)
+            entry->constant_update_mask |= WINED3D_SHADER_CONST_FFP_LIGHTS;
     }
     if (entry->vs.clip_planes_location != -1)
         entry->constant_update_mask |= WINED3D_SHADER_CONST_VS_CLIP_PLANES;
@@ -10860,7 +10747,7 @@ static void set_glsl_shader_program(const struct wined3d_context_gl *context_gl,
             shader_glsl_load_samplers(&context_gl->c, priv, program_id, NULL);
         }
 
-        for (i = 0; i < WINED3D_MAX_FFP_TEXTURES; ++i)
+        for (i = 0; i < WINED3D_MAX_TEXTURES; ++i)
         {
             if (entry->ps.bumpenv_mat_location[i] != -1)
             {
@@ -10894,17 +10781,19 @@ static void shader_glsl_precompile(void *shader_priv, struct wined3d_shader *sha
 }
 
 /* Context activation is done by the caller. */
-static void shader_glsl_update_graphics_program(struct shader_glsl_priv *priv,
-        struct wined3d_context_gl *context_gl, const struct wined3d_state *state)
+static void shader_glsl_select(void *shader_priv, struct wined3d_context *context,
+        const struct wined3d_state *state)
 {
-    struct glsl_context_data *ctx_data = context_gl->c.shader_backend_data;
+    struct wined3d_context_gl *context_gl = wined3d_context_gl(context);
+    struct glsl_context_data *ctx_data = context->shader_backend_data;
     const struct wined3d_gl_info *gl_info = context_gl->gl_info;
+    struct shader_glsl_priv *priv = shader_priv;
     struct glsl_shader_prog_link *glsl_program;
     GLenum current_vertex_color_clamp;
     GLuint program_id, prev_id;
 
-    priv->vertex_pipe->vp_apply_draw_state(&context_gl->c, state);
-    priv->fragment_pipe->fp_apply_draw_state(&context_gl->c, state);
+    priv->vertex_pipe->vp_enable(context, !use_vs(state));
+    priv->fragment_pipe->fp_enable(context, !use_ps(state));
 
     prev_id = ctx_data->glsl_program ? ctx_data->glsl_program->id : 0;
     set_glsl_shader_program(context_gl, state, priv, ctx_data);
@@ -10945,23 +10834,10 @@ static void shader_glsl_update_graphics_program(struct shader_glsl_priv *priv,
         checkGLcall("glUseProgram");
 
         if (glsl_program)
-            context_gl->c.constant_update_mask |= glsl_program->constant_update_mask;
+            context->constant_update_mask |= glsl_program->constant_update_mask;
     }
 
-    context_gl->c.shader_update_mask |= (1u << WINED3D_SHADER_TYPE_COMPUTE);
-}
-
-static void shader_glsl_apply_draw_state(void *shader_priv, struct wined3d_context *context,
-        const struct wined3d_state *state)
-{
-    struct wined3d_context_gl *context_gl = wined3d_context_gl(context);
-    struct shader_glsl_priv *priv = shader_priv;
-
-    if (context->shader_update_mask & ~(1u << WINED3D_SHADER_TYPE_COMPUTE))
-        shader_glsl_update_graphics_program(priv, context_gl, state);
-
-    if (context->constant_update_mask)
-        shader_glsl_load_constants(priv, context, state);
+    context->shader_update_mask |= (1u << WINED3D_SHADER_TYPE_COMPUTE);
 }
 
 /* Context activation is done by the caller. */
@@ -11019,8 +10895,8 @@ static void shader_glsl_disable(void *shader_priv, struct wined3d_context *conte
     GL_EXTCALL(glUseProgram(0));
     checkGLcall("glUseProgram");
 
-    priv->vertex_pipe->vp_disable(context);
-    priv->fragment_pipe->fp_disable(context);
+    priv->vertex_pipe->vp_enable(context, FALSE);
+    priv->fragment_pipe->fp_enable(context, FALSE);
 
     if (needs_legacy_glsl_syntax(gl_info) && gl_info->supported[ARB_COLOR_BUFFER_FLOAT])
     {
@@ -11058,7 +10934,7 @@ static void shader_glsl_destroy(struct wined3d_shader *shader)
 
     if (!shader_data || !shader_data->num_gl_shaders)
     {
-        free(shader_data);
+        heap_free(shader_data);
         shader->backend_data = NULL;
         return;
     }
@@ -11085,7 +10961,7 @@ static void shader_glsl_destroy(struct wined3d_shader *shader)
                     GL_EXTCALL(glDeleteShader(gl_shaders[i].id));
                     checkGLcall("glDeleteShader");
                 }
-                free(shader_data->gl_shaders.ps);
+                heap_free(shader_data->gl_shaders.ps);
 
                 LIST_FOR_EACH_ENTRY_SAFE(entry, entry2, linked_programs,
                         struct glsl_shader_prog_link, ps.shader_entry)
@@ -11107,7 +10983,7 @@ static void shader_glsl_destroy(struct wined3d_shader *shader)
                     GL_EXTCALL(glDeleteShader(gl_shaders[i].id));
                     checkGLcall("glDeleteShader");
                 }
-                free(shader_data->gl_shaders.vs);
+                heap_free(shader_data->gl_shaders.vs);
 
                 LIST_FOR_EACH_ENTRY_SAFE(entry, entry2, linked_programs,
                         struct glsl_shader_prog_link, vs.shader_entry)
@@ -11129,7 +11005,7 @@ static void shader_glsl_destroy(struct wined3d_shader *shader)
                     GL_EXTCALL(glDeleteShader(gl_shaders[i].id));
                     checkGLcall("glDeleteShader");
                 }
-                free(shader_data->gl_shaders.hs);
+                heap_free(shader_data->gl_shaders.hs);
 
                 LIST_FOR_EACH_ENTRY_SAFE(entry, entry2, linked_programs,
                         struct glsl_shader_prog_link, hs.shader_entry)
@@ -11151,7 +11027,7 @@ static void shader_glsl_destroy(struct wined3d_shader *shader)
                     GL_EXTCALL(glDeleteShader(gl_shaders[i].id));
                     checkGLcall("glDeleteShader");
                 }
-                free(shader_data->gl_shaders.ds);
+                heap_free(shader_data->gl_shaders.ds);
 
                 LIST_FOR_EACH_ENTRY_SAFE(entry, entry2, linked_programs,
                         struct glsl_shader_prog_link, ds.shader_entry)
@@ -11173,7 +11049,7 @@ static void shader_glsl_destroy(struct wined3d_shader *shader)
                     GL_EXTCALL(glDeleteShader(gl_shaders[i].id));
                     checkGLcall("glDeleteShader");
                 }
-                free(shader_data->gl_shaders.gs);
+                heap_free(shader_data->gl_shaders.gs);
 
                 LIST_FOR_EACH_ENTRY_SAFE(entry, entry2, linked_programs,
                         struct glsl_shader_prog_link, gs.shader_entry)
@@ -11195,7 +11071,7 @@ static void shader_glsl_destroy(struct wined3d_shader *shader)
                     GL_EXTCALL(glDeleteShader(gl_shaders[i].id));
                     checkGLcall("glDeleteShader");
                 }
-                free(shader_data->gl_shaders.cs);
+                heap_free(shader_data->gl_shaders.cs);
 
                 LIST_FOR_EACH_ENTRY_SAFE(entry, entry2, linked_programs,
                         struct glsl_shader_prog_link, cs.shader_entry)
@@ -11213,7 +11089,7 @@ static void shader_glsl_destroy(struct wined3d_shader *shader)
         }
     }
 
-    free(shader->backend_data);
+    heap_free(shader->backend_data);
     shader->backend_data = NULL;
 
     context_release(context);
@@ -11249,7 +11125,7 @@ static BOOL constant_heap_init(struct constant_heap *heap, unsigned int constant
             + constant_count * sizeof(*heap->positions);
     void *mem;
 
-    if (!(mem = malloc(size)))
+    if (!(mem = heap_alloc(size)))
     {
         ERR("Failed to allocate memory\n");
         return FALSE;
@@ -11265,19 +11141,20 @@ static BOOL constant_heap_init(struct constant_heap *heap, unsigned int constant
     return TRUE;
 }
 
-static void constant_free(struct constant_heap *heap)
+static void constant_heap_free(struct constant_heap *heap)
 {
-    free(heap->entries);
+    heap_free(heap->entries);
 }
 
 static HRESULT shader_glsl_alloc(struct wined3d_device *device, const struct wined3d_vertex_pipe_ops *vertex_pipe,
         const struct wined3d_fragment_pipe_ops *fragment_pipe)
 {
     SIZE_T stack_size = wined3d_log2i(max(WINED3D_MAX_VS_CONSTS_F, WINED3D_MAX_PS_CONSTS_F)) + 1;
+    struct fragment_caps fragment_caps;
     void *vertex_priv, *fragment_priv;
     struct shader_glsl_priv *priv;
 
-    if (!(priv = calloc(1, sizeof(*priv))))
+    if (!(priv = heap_alloc_zero(sizeof(*priv))))
         return E_OUTOFMEMORY;
 
     string_buffer_list_init(&priv->string_buffers);
@@ -11285,7 +11162,7 @@ static HRESULT shader_glsl_alloc(struct wined3d_device *device, const struct win
     if (!(vertex_priv = vertex_pipe->vp_alloc(&glsl_shader_backend, priv)))
     {
         ERR("Failed to initialize vertex pipe.\n");
-        free(priv);
+        heap_free(priv);
         return E_FAIL;
     }
 
@@ -11293,7 +11170,7 @@ static HRESULT shader_glsl_alloc(struct wined3d_device *device, const struct win
     {
         ERR("Failed to initialize fragment pipe.\n");
         vertex_pipe->vp_free(device, NULL);
-        free(priv);
+        heap_free(priv);
         return E_FAIL;
     }
 
@@ -11303,7 +11180,7 @@ static HRESULT shader_glsl_alloc(struct wined3d_device *device, const struct win
         goto fail;
     }
 
-    if (!(priv->stack = calloc(stack_size, sizeof(*priv->stack))))
+    if (!(priv->stack = heap_calloc(stack_size, sizeof(*priv->stack))))
     {
         ERR("Failed to allocate memory.\n");
         goto fail;
@@ -11326,6 +11203,8 @@ static HRESULT shader_glsl_alloc(struct wined3d_device *device, const struct win
     priv->next_constant_version = 1;
     priv->vertex_pipe = vertex_pipe;
     priv->fragment_pipe = fragment_pipe;
+    fragment_pipe->get_caps(device->adapter, &fragment_caps);
+    priv->ffp_proj_control = fragment_caps.wined3d_caps & WINED3D_FRAGMENT_CAP_PROJ_CONTROL;
     priv->legacy_lighting = device->wined3d->flags & WINED3D_LEGACY_FFP_LIGHTING;
 
     device->vertex_priv = vertex_priv;
@@ -11335,13 +11214,13 @@ static HRESULT shader_glsl_alloc(struct wined3d_device *device, const struct win
     return WINED3D_OK;
 
 fail:
-    constant_free(&priv->pconst_heap);
-    constant_free(&priv->vconst_heap);
-    free(priv->stack);
+    constant_heap_free(&priv->pconst_heap);
+    constant_heap_free(&priv->vconst_heap);
+    heap_free(priv->stack);
     string_buffer_free(&priv->shader_buffer);
     fragment_pipe->free_private(device, NULL);
     vertex_pipe->vp_free(device, NULL);
-    free(priv);
+    heap_free(priv);
     return E_OUTOFMEMORY;
 }
 
@@ -11351,15 +11230,15 @@ static void shader_glsl_free(struct wined3d_device *device, struct wined3d_conte
     struct shader_glsl_priv *priv = device->shader_priv;
 
     wine_rb_destroy(&priv->program_lookup, NULL, NULL);
-    constant_free(&priv->pconst_heap);
-    constant_free(&priv->vconst_heap);
-    free(priv->stack);
+    constant_heap_free(&priv->pconst_heap);
+    constant_heap_free(&priv->vconst_heap);
+    heap_free(priv->stack);
     string_buffer_list_cleanup(&priv->string_buffers);
     string_buffer_free(&priv->shader_buffer);
     priv->fragment_pipe->free_private(device, context);
     priv->vertex_pipe->vp_free(device, context);
 
-    free(device->shader_priv);
+    heap_free(device->shader_priv);
     device->shader_priv = NULL;
 }
 
@@ -11367,7 +11246,7 @@ static BOOL shader_glsl_allocate_context_data(struct wined3d_context *context)
 {
     struct glsl_context_data *ctx_data;
 
-    if (!(ctx_data = calloc(1, sizeof(*ctx_data))))
+    if (!(ctx_data = heap_alloc_zero(sizeof(*ctx_data))))
         return FALSE;
     ctx_data->vertex_color_clamp = GL_FIXED_ONLY_ARB;
     context->shader_backend_data = ctx_data;
@@ -11376,7 +11255,7 @@ static BOOL shader_glsl_allocate_context_data(struct wined3d_context *context)
 
 static void shader_glsl_free_context_data(struct wined3d_context *context)
 {
-    free(context->shader_backend_data);
+    heap_free(context->shader_backend_data);
 }
 
 static void shader_glsl_init_context_state(struct wined3d_context *context)
@@ -11392,8 +11271,7 @@ static unsigned int shader_glsl_get_shader_model(const struct wined3d_gl_info *g
 {
     BOOL shader_model_4 = gl_info->glsl_version >= MAKEDWORD_VERSION(1, 50)
             && gl_info->supported[ARB_SHADER_BIT_ENCODING]
-            && gl_info->supported[ARB_TEXTURE_SWIZZLE]
-            && gl_info->supported[EXT_SHADER_INTEGER_MIX];
+            && gl_info->supported[ARB_TEXTURE_SWIZZLE];
 
     if (shader_model_4
             && gl_info->supported[ARB_COMPUTE_SHADER]
@@ -11422,7 +11300,7 @@ static unsigned int shader_glsl_get_shader_model(const struct wined3d_gl_info *g
 
 static void shader_glsl_get_caps(const struct wined3d_adapter *adapter, struct shader_caps *caps)
 {
-    const struct wined3d_gl_info *gl_info = &wined3d_adapter_gl_const(adapter)->gl_info;
+    const struct wined3d_gl_info *gl_info = &adapter->gl_info;
     unsigned int shader_model = shader_glsl_get_shader_model(gl_info);
 
     TRACE("Shader model %u.\n", shader_model);
@@ -11735,6 +11613,13 @@ static void shader_glsl_handle_instruction(const struct wined3d_shader_instructi
     shader_glsl_add_instruction_modifiers(ins);
 }
 
+static BOOL shader_glsl_has_ffp_proj_control(void *shader_priv)
+{
+    struct shader_glsl_priv *priv = shader_priv;
+
+    return priv->ffp_proj_control;
+}
+
 static uint64_t shader_glsl_shader_compile(struct wined3d_context *context, const struct wined3d_shader_desc *shader_desc,
         enum wined3d_shader_type shader_type)
 {
@@ -11746,11 +11631,12 @@ const struct wined3d_shader_backend_ops glsl_shader_backend =
 {
     shader_glsl_handle_instruction,
     shader_glsl_precompile,
-    shader_glsl_apply_draw_state,
+    shader_glsl_select,
     shader_glsl_select_compute,
     shader_glsl_disable,
     shader_glsl_update_float_vertex_constants,
     shader_glsl_update_float_pixel_constants,
+    shader_glsl_load_constants,
     shader_glsl_destroy,
     shader_glsl_alloc,
     shader_glsl_free,
@@ -11759,17 +11645,16 @@ const struct wined3d_shader_backend_ops glsl_shader_backend =
     shader_glsl_init_context_state,
     shader_glsl_get_caps,
     shader_glsl_color_fixup_supported,
+    shader_glsl_has_ffp_proj_control,
     shader_glsl_load_sampler_handles,
     shader_glsl_shader_compile,
 };
 
-static void glsl_vertex_pipe_vp_apply_draw_state(struct wined3d_context *context, const struct wined3d_state *state) {}
-
-static void glsl_vertex_pipe_vp_disable(const struct wined3d_context *context) {}
+static void glsl_vertex_pipe_vp_enable(const struct wined3d_context *context, BOOL enable) {}
 
 static void glsl_vertex_pipe_vp_get_caps(const struct wined3d_adapter *adapter, struct wined3d_vertex_caps *caps)
 {
-    const struct wined3d_gl_info *gl_info = &wined3d_adapter_gl_const(adapter)->gl_info;
+    const struct wined3d_gl_info *gl_info = &adapter->gl_info;
 
     caps->xyzrhw = TRUE;
     caps->emulated_flatshading = !needs_legacy_glsl_syntax(gl_info);
@@ -11789,9 +11674,9 @@ static void glsl_vertex_pipe_vp_get_caps(const struct wined3d_adapter *adapter, 
     caps->raster_caps = WINED3DPRASTERCAPS_FOGRANGE;
 }
 
-static unsigned int glsl_vertex_pipe_vp_get_emul_mask(const struct wined3d_adapter *adapter)
+static unsigned int glsl_vertex_pipe_vp_get_emul_mask(const struct wined3d_gl_info *gl_info)
 {
-    if (wined3d_adapter_gl_const(adapter)->gl_info.supported[WINED3D_GL_LEGACY_CONTEXT])
+    if (gl_info->supported[WINED3D_GL_LEGACY_CONTEXT])
         return GL_EXT_EMUL_ARB_MULTITEXTURE;
     return 0;
 }
@@ -11827,7 +11712,7 @@ static void shader_glsl_free_ffp_vertex_shader(struct wine_rb_entry *entry, void
         delete_glsl_program_entry(ctx->priv, gl_info, program);
     }
     GL_EXTCALL(glDeleteShader(shader->id));
-    free(shader);
+    heap_free(shader);
 }
 
 /* Context activation is done by the caller. */
@@ -12042,13 +11927,13 @@ static void glsl_vertex_pipe_texmatrix_np2(struct wined3d_context *context,
         const struct wined3d_state *state, DWORD state_id)
 {
     DWORD sampler = state_id - STATE_SAMPLER(0);
-    const struct wined3d_texture *texture = wined3d_state_get_ffp_texture(state, sampler);
+    const struct wined3d_texture *texture = state->textures[sampler];
     BOOL np2;
 
     if (!texture)
         return;
 
-    if (sampler >= WINED3D_MAX_FFP_TEXTURES)
+    if (sampler >= WINED3D_MAX_TEXTURES)
         return;
 
     if ((np2 = !(texture->flags & WINED3D_TEXTURE_POW2_MAT_IDENT))
@@ -12124,7 +12009,8 @@ static const struct wined3d_state_entry_template glsl_vertex_pipe_vp_states[] =
     {STATE_SHADER(WINED3D_SHADER_TYPE_HULL),                     {STATE_SHADER(WINED3D_SHADER_TYPE_HULL),                     glsl_vertex_pipe_hs    }, WINED3D_GL_EXT_NONE          },
     {STATE_SHADER(WINED3D_SHADER_TYPE_GEOMETRY),                 {STATE_SHADER(WINED3D_SHADER_TYPE_GEOMETRY),                 glsl_vertex_pipe_geometry_shader}, WINED3D_GL_EXT_NONE },
     {STATE_SHADER(WINED3D_SHADER_TYPE_PIXEL),                    {STATE_SHADER(WINED3D_SHADER_TYPE_PIXEL),                    glsl_vertex_pipe_pixel_shader}, WINED3D_GL_EXT_NONE    },
-    {STATE_MATERIAL,                                             {STATE_MATERIAL,                                             glsl_vertex_pipe_material}, WINED3D_GL_EXT_NONE        },
+    {STATE_MATERIAL,                                             {STATE_RENDER(WINED3D_RS_SPECULARENABLE),                    NULL                   }, WINED3D_GL_EXT_NONE          },
+    {STATE_RENDER(WINED3D_RS_SPECULARENABLE),                    {STATE_RENDER(WINED3D_RS_SPECULARENABLE),                    glsl_vertex_pipe_material}, WINED3D_GL_EXT_NONE        },
     /* Clip planes */
     {STATE_CLIPPLANE(0),                                         {STATE_CLIPPLANE(0),                                         glsl_vertex_pipe_clip_plane}, WINED3D_GLSL_130         },
     {STATE_CLIPPLANE(0),                                         {STATE_CLIPPLANE(0),                                         clipplane              }, WINED3D_GL_EXT_NONE          },
@@ -12202,7 +12088,6 @@ static const struct wined3d_state_entry_template glsl_vertex_pipe_vp_states[] =
     {STATE_RENDER(WINED3D_RS_AMBIENTMATERIALSOURCE),             {STATE_SHADER(WINED3D_SHADER_TYPE_VERTEX),                   NULL                   }, WINED3D_GL_EXT_NONE          },
     {STATE_RENDER(WINED3D_RS_EMISSIVEMATERIALSOURCE),            {STATE_SHADER(WINED3D_SHADER_TYPE_VERTEX),                   NULL                   }, WINED3D_GL_EXT_NONE          },
     {STATE_RENDER(WINED3D_RS_VERTEXBLEND),                       {STATE_SHADER(WINED3D_SHADER_TYPE_VERTEX),                   NULL                   }, WINED3D_GL_EXT_NONE          },
-    {STATE_RENDER(WINED3D_RS_SPECULARENABLE),                    {STATE_RENDER(WINED3D_RS_SPECULARENABLE),                    glsl_vertex_pipe_shader}, WINED3D_GL_EXT_NONE          },
     {STATE_RENDER(WINED3D_RS_POINTSIZE),                         {STATE_RENDER(WINED3D_RS_POINTSIZE_MIN),                     NULL                   }, WINED3D_GL_EXT_NONE          },
     {STATE_RENDER(WINED3D_RS_POINTSIZE_MIN),                     {STATE_RENDER(WINED3D_RS_POINTSIZE_MIN),                     glsl_vertex_pipe_pointsize}, WINED3D_GL_EXT_NONE       },
     {STATE_RENDER(WINED3D_RS_POINTSPRITEENABLE),                 {STATE_RENDER(WINED3D_RS_POINTSPRITEENABLE),                 state_pointsprite      }, ARB_POINT_SPRITE             },
@@ -12213,6 +12098,8 @@ static const struct wined3d_state_entry_template glsl_vertex_pipe_vp_states[] =
     {STATE_RENDER(WINED3D_RS_POINTSCALE_B),                      {STATE_RENDER(WINED3D_RS_POINTSCALEENABLE),                  NULL                   }, WINED3D_GL_EXT_NONE          },
     {STATE_RENDER(WINED3D_RS_POINTSCALE_C),                      {STATE_RENDER(WINED3D_RS_POINTSCALEENABLE),                  NULL                   }, WINED3D_GL_EXT_NONE          },
     {STATE_RENDER(WINED3D_RS_POINTSIZE_MAX),                     {STATE_RENDER(WINED3D_RS_POINTSIZE_MIN),                     NULL                   }, WINED3D_GL_EXT_NONE          },
+    {STATE_RENDER(WINED3D_RS_TWEENFACTOR),                       {STATE_SHADER(WINED3D_SHADER_TYPE_VERTEX),                   NULL                   }, WINED3D_GL_EXT_NONE          },
+    {STATE_RENDER(WINED3D_RS_INDEXEDVERTEXBLENDENABLE),          {STATE_SHADER(WINED3D_SHADER_TYPE_VERTEX),                   NULL                   }, WINED3D_GL_EXT_NONE          },
     /* NP2 texture matrix fixups. They are not needed if
      * GL_ARB_texture_non_power_of_two is supported. Otherwise, register
      * glsl_vertex_pipe_texmatrix(), which takes care of updating the texture
@@ -12251,32 +12138,26 @@ static const struct wined3d_state_entry_template glsl_vertex_pipe_vp_states[] =
  *   - Implement vertex tweening. */
 const struct wined3d_vertex_pipe_ops glsl_vertex_pipe =
 {
-    .vp_apply_draw_state = glsl_vertex_pipe_vp_apply_draw_state,
-    .vp_disable = glsl_vertex_pipe_vp_disable,
-    .vp_get_caps = glsl_vertex_pipe_vp_get_caps,
-    .vp_get_emul_mask = glsl_vertex_pipe_vp_get_emul_mask,
-    .vp_alloc = glsl_vertex_pipe_vp_alloc,
-    .vp_free = glsl_vertex_pipe_vp_free,
-    .vp_states = glsl_vertex_pipe_vp_states,
+    glsl_vertex_pipe_vp_enable,
+    glsl_vertex_pipe_vp_get_caps,
+    glsl_vertex_pipe_vp_get_emul_mask,
+    glsl_vertex_pipe_vp_alloc,
+    glsl_vertex_pipe_vp_free,
+    glsl_vertex_pipe_vp_states,
 };
 
-static void glsl_fragment_pipe_apply_draw_state(struct wined3d_context *context, const struct wined3d_state *state)
+static void glsl_fragment_pipe_enable(const struct wined3d_context *context, BOOL enable)
 {
     /* Nothing to do. */
 }
 
-static void glsl_fragment_pipe_disable(const struct wined3d_context *context)
-{
-}
-
 static void glsl_fragment_pipe_get_caps(const struct wined3d_adapter *adapter, struct fragment_caps *caps)
 {
-    const struct wined3d_gl_info *gl_info = &wined3d_adapter_gl_const(adapter)->gl_info;
+    const struct wined3d_gl_info *gl_info = &adapter->gl_info;
 
-    memset(caps, 0, sizeof(*caps));
-    caps->proj_control = true;
-    caps->srgb_write = true;
-    caps->color_key = true;
+    caps->wined3d_caps = WINED3D_FRAGMENT_CAP_PROJ_CONTROL
+            | WINED3D_FRAGMENT_CAP_SRGB_WRITE
+            | WINED3D_FRAGMENT_CAP_COLOR_KEY;
     caps->PrimitiveMiscCaps = WINED3DPMISCCAPS_TSSARGTEMP
             | WINED3DPMISCCAPS_PERSTAGECONSTANT;
     caps->TextureOpCaps = WINED3DTEXOPCAPS_DISABLE
@@ -12304,13 +12185,13 @@ static void glsl_fragment_pipe_get_caps(const struct wined3d_adapter *adapter, s
             | WINED3DTEXOPCAPS_LERP
             | WINED3DTEXOPCAPS_BUMPENVMAP
             | WINED3DTEXOPCAPS_BUMPENVMAPLUMINANCE;
-    caps->max_blend_stages = WINED3D_MAX_FFP_TEXTURES;
-    caps->max_textures = min(gl_info->limits.samplers[WINED3D_SHADER_TYPE_PIXEL], WINED3D_MAX_FFP_TEXTURES);
+    caps->MaxTextureBlendStages = WINED3D_MAX_TEXTURES;
+    caps->MaxSimultaneousTextures = min(gl_info->limits.samplers[WINED3D_SHADER_TYPE_PIXEL], WINED3D_MAX_TEXTURES);
 }
 
-static unsigned int glsl_fragment_pipe_get_emul_mask(const struct wined3d_adapter *adapter)
+static unsigned int glsl_fragment_pipe_get_emul_mask(const struct wined3d_gl_info *gl_info)
 {
-    if (wined3d_adapter_gl_const(adapter)->gl_info.supported[WINED3D_GL_LEGACY_CONTEXT])
+    if (gl_info->supported[WINED3D_GL_LEGACY_CONTEXT])
         return GL_EXT_EMUL_ARB_MULTITEXTURE;
     return 0;
 }
@@ -12346,7 +12227,7 @@ static void shader_glsl_free_ffp_fragment_shader(struct wine_rb_entry *entry, vo
         delete_glsl_program_entry(ctx->priv, gl_info, program);
     }
     GL_EXTCALL(glDeleteShader(shader->id));
-    free(shader);
+    heap_free(shader);
 }
 
 /* Context activation is done by the caller. */
@@ -12364,6 +12245,8 @@ static void glsl_fragment_pipe_free(struct wined3d_device *device, struct wined3
 static void glsl_fragment_pipe_shader(struct wined3d_context *context,
         const struct wined3d_state *state, DWORD state_id)
 {
+    context->last_was_pshader = use_ps(state);
+
     context->shader_update_mask |= 1u << WINED3D_SHADER_TYPE_PIXEL;
 }
 
@@ -12628,16 +12511,15 @@ static void glsl_fragment_pipe_free_context_data(struct wined3d_context *context
 
 const struct wined3d_fragment_pipe_ops glsl_fragment_pipe =
 {
-    .fp_apply_draw_state = glsl_fragment_pipe_apply_draw_state,
-    .fp_disable = glsl_fragment_pipe_disable,
-    .get_caps = glsl_fragment_pipe_get_caps,
-    .get_emul_mask = glsl_fragment_pipe_get_emul_mask,
-    .alloc_private = glsl_fragment_pipe_alloc,
-    .free_private = glsl_fragment_pipe_free,
-    .allocate_context_data = glsl_fragment_pipe_alloc_context_data,
-    .free_context_data = glsl_fragment_pipe_free_context_data,
-    .color_fixup_supported = shader_glsl_color_fixup_supported,
-    .states = glsl_fragment_pipe_state_template,
+    glsl_fragment_pipe_enable,
+    glsl_fragment_pipe_get_caps,
+    glsl_fragment_pipe_get_emul_mask,
+    glsl_fragment_pipe_alloc,
+    glsl_fragment_pipe_free,
+    glsl_fragment_pipe_alloc_context_data,
+    glsl_fragment_pipe_free_context_data,
+    shader_glsl_color_fixup_supported,
+    glsl_fragment_pipe_state_template,
 };
 
 struct glsl_blitter_args
@@ -12680,7 +12562,7 @@ static void glsl_free_blitter_program(struct wine_rb_entry *entry, void *ctx)
     gl_info = context_gl->gl_info;
     GL_EXTCALL(glDeleteProgram(program->id));
     checkGLcall("glDeleteProgram()");
-    free(program);
+    heap_free(program);
 }
 
 /* Context activation is done by the caller. */
@@ -12702,7 +12584,7 @@ static void glsl_blitter_destroy(struct wined3d_blitter *blitter, struct wined3d
     wine_rb_destroy(&glsl_blitter->programs, glsl_free_blitter_program, context_gl);
     string_buffer_list_cleanup(&glsl_blitter->string_buffers);
 
-    free(glsl_blitter);
+    heap_free(glsl_blitter);
 }
 
 static void glsl_blitter_generate_p8_shader(struct wined3d_string_buffer *buffer,
@@ -13230,7 +13112,7 @@ static struct glsl_blitter_program *glsl_blitter_get_program(struct wined3d_glsl
     if ((entry = wine_rb_get(&blitter->programs, &args)))
         return WINE_RB_ENTRY_VALUE(entry, struct glsl_blitter_program, entry);
 
-    if (!(program = malloc(sizeof(*program))))
+    if (!(program = heap_alloc(sizeof(*program))))
     {
         ERR("Failed to allocate blitter program memory.\n");
         return NULL;
@@ -13240,7 +13122,7 @@ static struct glsl_blitter_program *glsl_blitter_get_program(struct wined3d_glsl
     if (!(program->id = glsl_blitter_generate_program(blitter, gl_info, &args)))
     {
         WARN("Failed to generate blitter program.\n");
-        free(program);
+        heap_free(program);
         return NULL;
     }
 
@@ -13248,7 +13130,7 @@ static struct glsl_blitter_program *glsl_blitter_get_program(struct wined3d_glsl
     {
         ERR("Failed to store blitter program.\n");
         GL_EXTCALL(glDeleteProgram(program->id));
-        free(program);
+        heap_free(program);
         return NULL;
     }
 
@@ -13442,7 +13324,6 @@ static DWORD glsl_blitter_blit(struct wined3d_blitter *blitter, enum wined3d_bli
     else
         wined3d_texture_load_location(dst_texture, dst_sub_resource_idx, context, dst_location);
 
-    context_gl_apply_texture_draw_state(context_gl, dst_texture, dst_sub_resource_idx, dst_location);
     wined3d_context_gl_apply_blit_state(context_gl, device);
 
     if (dst_location == WINED3D_LOCATION_DRAWABLE)
@@ -13451,6 +13332,8 @@ static DWORD glsl_blitter_blit(struct wined3d_blitter *blitter, enum wined3d_bli
         wined3d_texture_translate_drawable_coords(dst_texture, context_gl->window, &d);
         dst_rect = &d;
     }
+
+    context_gl_apply_texture_draw_state(context_gl, dst_texture, dst_sub_resource_idx, dst_location);
 
     if (op == WINED3D_BLIT_OP_COLOR_BLIT_ALPHATEST)
     {
@@ -13534,7 +13417,7 @@ static const struct wined3d_blitter_ops glsl_blitter_ops =
 struct wined3d_blitter *wined3d_glsl_blitter_create(struct wined3d_blitter **next,
         const struct wined3d_device *device)
 {
-    const struct wined3d_gl_info *gl_info = &wined3d_adapter_gl(device->adapter)->gl_info;
+    const struct wined3d_gl_info *gl_info = &device->adapter->gl_info;
     struct wined3d_glsl_blitter *blitter;
 
     if (device->shader_backend != &glsl_shader_backend)
@@ -13543,7 +13426,7 @@ struct wined3d_blitter *wined3d_glsl_blitter_create(struct wined3d_blitter **nex
     if (!gl_info->supported[ARB_VERTEX_SHADER] || !gl_info->supported[ARB_FRAGMENT_SHADER])
         return NULL;
 
-    if (!(blitter = malloc(sizeof(*blitter))))
+    if (!(blitter = heap_alloc(sizeof(*blitter))))
     {
         ERR("Failed to allocate blitter.\n");
         return NULL;

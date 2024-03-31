@@ -406,7 +406,7 @@ static UINT WTInfoT(UINT wCategory, UINT nIndex, LPVOID lpOutput, BOOL bUnicode)
             pWTInfoW(wCategory, nIndex, &buf);
 
             /*  Handle system extents here, as we can use user32.dll code to set them */
-            if(wCategory == WTI_DEFSYSCTX || wCategory == WTI_DDCTXS)
+            if(wCategory == WTI_DEFSYSCTX)
             {
                 buf.lcSysExtX = GetSystemMetrics(SM_CXSCREEN);
                 buf.lcSysExtY = GetSystemMetrics(SM_CYSCREEN);
@@ -423,10 +423,10 @@ static UINT WTInfoT(UINT wCategory, UINT nIndex, LPVOID lpOutput, BOOL bUnicode)
     else if (is_string_field(wCategory, nIndex) && !bUnicode)
     {
         int size = pWTInfoW(wCategory, nIndex, NULL);
-        WCHAR *buf = malloc(size);
+        WCHAR *buf = HeapAlloc(GetProcessHeap(), 0, size);
         pWTInfoW(wCategory, nIndex, buf);
         result = WideCharToMultiByte(CP_ACP, 0, buf, size/sizeof(WCHAR), lpOutput, lpOutput ? 2*size : 0, NULL, NULL);
-        free(buf);
+        HeapFree(GetProcessHeap(), 0, buf);
     }
     else
         result =  pWTInfoW(wCategory, nIndex, lpOutput);
@@ -464,13 +464,13 @@ HCTX WINAPI WTOpenW(HWND hWnd, LPLOGCONTEXTW lpLogCtx, BOOL fEnable)
     TRACE("hWnd=%p, lpLogCtx=%p, fEnable=%u\n", hWnd, lpLogCtx, fEnable);
     DUMPCONTEXT(*lpLogCtx);
 
-    newcontext = malloc(sizeof(OPENCONTEXT));
+    newcontext = HeapAlloc(GetProcessHeap(), 0 , sizeof(OPENCONTEXT));
     newcontext->context = *lpLogCtx;
     newcontext->hwndOwner = hWnd;
     newcontext->ActiveCursor = -1;
     newcontext->QueueSize = 10;
     newcontext->PacketsQueued = 0;
-    newcontext->PacketQueue = malloc(sizeof(WTPACKET) * 10);
+    newcontext->PacketQueue=HeapAlloc(GetProcessHeap(),0,sizeof(WTPACKET)*10);
 
     EnterCriticalSection(&csTablet);
     newcontext->handle = gTopContext++;
@@ -547,8 +547,8 @@ BOOL WINAPI WTClose(HCTX hCtx)
     TABLET_PostTabletMessage(context, _WT_CTXCLOSE(context->context.lcMsgBase), (WPARAM)context->handle,
                       context->context.lcStatus,TRUE);
 
-    free(context->PacketQueue);
-    free(context);
+    HeapFree(GetProcessHeap(),0,context->PacketQueue);
+    HeapFree(GetProcessHeap(),0,context);
 
     return TRUE;
 }
@@ -1124,7 +1124,8 @@ BOOL WINAPI WTQueueSizeSet(HCTX hCtx, int nPkts)
         return FALSE;
     }
 
-    context->PacketQueue = realloc(context->PacketQueue, sizeof(WTPACKET) * nPkts);
+    context->PacketQueue = HeapReAlloc(GetProcessHeap(), 0,
+                        context->PacketQueue, sizeof(WTPACKET)*nPkts);
 
     context->QueueSize = nPkts;
     LeaveCriticalSection(&csTablet);

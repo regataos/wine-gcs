@@ -564,7 +564,8 @@ UINT WINAPI MsiViewExecute( MSIHANDLE hView, MSIHANDLE hRec )
     return ret;
 }
 
-static UINT set_record_type_string( MSIRECORD *rec, UINT field, UINT type, BOOL temporary )
+static UINT msi_set_record_type_string( MSIRECORD *rec, UINT field,
+                                        UINT type, BOOL temporary )
 {
     WCHAR szType[0x10];
 
@@ -632,7 +633,7 @@ UINT MSI_ViewGetColumnInfo( MSIQUERY *query, MSICOLINFO info, MSIRECORD **prec )
         if (info == MSICOLINFO_NAMES)
             MSI_RecordSetStringW( rec, i+1, name );
         else
-            set_record_type_string( rec, i+1, type, temporary );
+            msi_set_record_type_string( rec, i+1, type, temporary );
     }
     *prec = rec;
     return ERROR_SUCCESS;
@@ -1008,15 +1009,15 @@ UINT WINAPI MsiDatabaseCommit( MSIHANDLE hdb )
     return r;
 }
 
-struct primary_key_record_info
+struct msi_primary_key_record_info
 {
     DWORD n;
     MSIRECORD *rec;
 };
 
-static UINT primary_key_iterator( MSIRECORD *rec, void *param )
+static UINT msi_primary_key_iterator( MSIRECORD *rec, LPVOID param )
 {
-    struct primary_key_record_info *info = param;
+    struct msi_primary_key_record_info *info = param;
     LPCWSTR name, table;
     DWORD type;
 
@@ -1040,9 +1041,10 @@ static UINT primary_key_iterator( MSIRECORD *rec, void *param )
     return ERROR_SUCCESS;
 }
 
-UINT MSI_DatabaseGetPrimaryKeys( MSIDATABASE *db, const WCHAR *table, MSIRECORD **prec )
+UINT MSI_DatabaseGetPrimaryKeys( MSIDATABASE *db,
+                LPCWSTR table, MSIRECORD **prec )
 {
-    struct primary_key_record_info info;
+    struct msi_primary_key_record_info info;
     MSIQUERY *query = NULL;
     UINT r;
 
@@ -1056,7 +1058,7 @@ UINT MSI_DatabaseGetPrimaryKeys( MSIDATABASE *db, const WCHAR *table, MSIRECORD 
     /* count the number of primary key records */
     info.n = 0;
     info.rec = 0;
-    r = MSI_IterateRecords( query, 0, primary_key_iterator, &info );
+    r = MSI_IterateRecords( query, 0, msi_primary_key_iterator, &info );
     if( r == ERROR_SUCCESS )
     {
         TRACE( "found %lu primary keys\n", info.n );
@@ -1064,7 +1066,7 @@ UINT MSI_DatabaseGetPrimaryKeys( MSIDATABASE *db, const WCHAR *table, MSIRECORD 
         /* allocate a record and fill in the names of the tables */
         info.rec = MSI_CreateRecord( info.n );
         info.n = 0;
-        r = MSI_IterateRecords( query, 0, primary_key_iterator, &info );
+        r = MSI_IterateRecords( query, 0, msi_primary_key_iterator, &info );
         if( r == ERROR_SUCCESS )
             *prec = info.rec;
         else

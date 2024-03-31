@@ -4,7 +4,7 @@ IMPORTLIB = sxs
 
 EXTRADLLFLAGS = -Wb,--prefer-native
 
-SOURCES = \
+C_SRCS = \
 	cache.c \
 	name.c \
 	sxs.c

@@ -28,6 +28,7 @@
 #include "iads.h"
 #include "dsclient.h"
 
+#include "wine/heap.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(dsuiext);
@@ -75,7 +76,7 @@ static ULONG WINAPI dispspec_Release(IDsDisplaySpecifier *iface)
     if (!ref)
     {
         TRACE("destroying %p\n", iface);
-        free(dispspec);
+        heap_free(dispspec);
     }
 
     return ref;
@@ -179,7 +180,7 @@ static HRESULT DsDisplaySpecifier_create(REFIID iid, void **obj)
     DisplaySpec *dispspec;
     HRESULT hr;
 
-    dispspec = malloc(sizeof(*dispspec));
+    dispspec = heap_alloc(sizeof(*dispspec));
     if (!dispspec) return E_OUTOFMEMORY;
 
     dispspec->IDsDisplaySpecifier_iface.lpVtbl = &IDsDisplaySpecifier_vtbl;
@@ -249,7 +250,7 @@ static ULONG WINAPI factory_Release(IClassFactory *iface)
     TRACE("(%p) ref %lu\n", iface, ref);
 
     if (!ref)
-        free(factory);
+        heap_free(factory);
 
     return ref;
 }
@@ -288,7 +289,7 @@ static HRESULT factory_constructor(const struct class_info *info, REFIID riid, v
     class_factory *factory;
     HRESULT hr;
 
-    factory = malloc(sizeof(*factory));
+    factory = heap_alloc(sizeof(*factory));
     if (!factory) return E_OUTOFMEMORY;
 
     factory->IClassFactory_iface.lpVtbl = &factory_vtbl;

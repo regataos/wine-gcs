@@ -19,6 +19,8 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#define NONAMELESSUNION
+#define NONAMELESSSTRUCT
 #include <stdarg.h>
 
 #include "windef.h"
@@ -373,7 +375,7 @@ struct REG_RF
 
 struct REG_RFP
 {
-    DWORD signature; /* e.g. '0pi3' */
+    BYTE signature[4]; /* e.g. "0pi3" */
     DWORD dwFlags;
     DWORD dwInstances;
     DWORD dwMediaTypes;
@@ -384,7 +386,7 @@ struct REG_RFP
 
 struct REG_TYPE
 {
-    DWORD signature; /* e.g. '0ty3' */
+    BYTE signature[4]; /* e.g. "0ty3" */
     DWORD dwUnused;
     DWORD dwOffsetMajor;
     DWORD dwOffsetMinor;
@@ -423,7 +425,7 @@ static int add_data(struct Vector *v, const void *pData, int size)
 static int find_data(const struct Vector *v, const void *pData, int size)
 {
     int index;
-    for (index = 0; index + size <= v->current; index++)
+    for (index = 0; index < v->current; index++)
         if (!memcmp(v->pData + index, pData, size))
             return index;
     /* not found */
@@ -613,7 +615,11 @@ static HRESULT FM2_WriteFilterData(const REGFILTER2 * prf2, BYTE **ppData, ULONG
         REGFILTERPINS2 rgPin2 = prf2->rgPins2[i];
         unsigned int j;
 
-        rrfp.signature = MAKEFOURCC('0'+i,'p','i','3');
+        rrfp.signature[0] = '0';
+        rrfp.signature[1] = 'p';
+        rrfp.signature[2] = 'i';
+        rrfp.signature[3] = '3';
+        rrfp.signature[0] += i;
         rrfp.dwFlags = rgPin2.dwFlags;
         rrfp.dwInstances = rgPin2.cInstances;
         rrfp.dwMediaTypes = rgPin2.nMediaTypes;
@@ -635,7 +641,11 @@ static HRESULT FM2_WriteFilterData(const REGFILTER2 * prf2, BYTE **ppData, ULONG
         {
             struct REG_TYPE rt;
             const CLSID * clsMinorType = rgPin2.lpMediaType[j].clsMinorType ? rgPin2.lpMediaType[j].clsMinorType : &MEDIASUBTYPE_NULL;
-            rt.signature = MAKEFOURCC('0'+j,'t','y','3');
+            rt.signature[0] = '0';
+            rt.signature[1] = 't';
+            rt.signature[2] = 'y';
+            rt.signature[3] = '3';
+            rt.signature[0] += j;
             rt.dwUnused = 0;
             rt.dwOffsetMajor = find_data(&clsidStore, rgPin2.lpMediaType[j].clsMajorType, sizeof(CLSID));
             if (rt.dwOffsetMajor == -1)
@@ -718,7 +728,7 @@ static HRESULT FM2_ReadFilterData(BYTE *pData, REGFILTER2 * prf2)
 
             /* FIXME: check signature */
 
-            TRACE("\tsignature = %s\n", debugstr_fourcc(prrfp->signature));
+            TRACE("\tsignature = %s\n", debugstr_an((const char*)prrfp->signature, 4));
 
             TRACE("\tPin %lu: dwFlags %#lx, dwInstances %lu, dwMediaTypes %lu, dwMediums %lu.\n",
                 i, prrfp->dwFlags, prrfp->dwInstances, prrfp->dwMediaTypes, prrfp->dwMediums);
@@ -752,7 +762,7 @@ static HRESULT FM2_ReadFilterData(BYTE *pData, REGFILTER2 * prf2)
                 CLSID * clsMinor = CoTaskMemAlloc(sizeof(CLSID));
 
                 /* FIXME: check signature */
-                TRACE("\t\tsignature = %s\n", debugstr_fourcc(prt->signature));
+                TRACE("\t\tsignature = %s\n", debugstr_an((const char*)prt->signature, 4));
 
                 memcpy(clsMajor, pData + prt->dwOffsetMajor, sizeof(CLSID));
                 memcpy(clsMinor, pData + prt->dwOffsetMinor, sizeof(CLSID));

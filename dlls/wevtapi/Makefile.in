@@ -3,5 +3,5 @@ IMPORTLIB = wevtapi
 
 EXTRADLLFLAGS = -Wb,--prefer-native
 
-SOURCES = \
+C_SRCS = \
 	main.c

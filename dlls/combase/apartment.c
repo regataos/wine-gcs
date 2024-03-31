@@ -27,6 +27,8 @@
 #include <assert.h>
 
 #define COBJMACROS
+#define NONAMELESSUNION
+
 #include "windef.h"
 #include "winbase.h"
 #include "servprov.h"
@@ -376,7 +378,7 @@ static struct apartment *apartment_construct(DWORD model)
     apt->refs = 1;
     apt->remunk_exported = FALSE;
     apt->oidc = 1;
-    InitializeCriticalSectionEx(&apt->cs, 0, RTL_CRITICAL_SECTION_FLAG_FORCE_DEBUG_INFO);
+    InitializeCriticalSection(&apt->cs);
     apt->cs.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": apartment");
 
     apt->multi_threaded = !(model & COINIT_APARTMENTTHREADED);
@@ -719,7 +721,7 @@ static BOOL get_object_dll_path(const struct class_reg_data *regdata, WCHAR *dst
         WCHAR src[MAX_PATH];
         DWORD dwLength = dstlen * sizeof(WCHAR);
 
-        if ((ret = RegQueryValueExW(regdata->u.hkey, NULL, NULL, &keytype, (BYTE*)src, &dwLength)) == ERROR_SUCCESS)
+        if ((ret = RegQueryValueExW(regdata->u.hkey, L"", NULL, &keytype, (BYTE*)src, &dwLength)) == ERROR_SUCCESS)
         {
             if (keytype == REG_EXPAND_SZ)
             {

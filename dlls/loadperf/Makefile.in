@@ -3,5 +3,5 @@ IMPORTLIB = loadperf
 
 EXTRADLLFLAGS = -Wb,--prefer-native
 
-SOURCES = \
+C_SRCS = \
 	loadperf_main.c

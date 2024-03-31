@@ -24,7 +24,6 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <winternl.h>
-#include <winnls.h>
 #include <ole2.h>
 #include "regsvr32.h"
 #include "wine/debug.h"
@@ -35,50 +34,51 @@ typedef HRESULT (WINAPI *DLLREGISTER)   (void);
 typedef HRESULT (WINAPI *DLLUNREGISTER) (void);
 typedef HRESULT (WINAPI *DLLINSTALL)    (BOOL,LPCWSTR);
 
-static BOOL Silent;
+static BOOL Silent = FALSE;
 
-static void WINAPIV output_write(BOOL with_usage, UINT id, ...)
+static void WINAPIV output_write(UINT id, ...)
 {
-    WCHAR buffer[4096];
     WCHAR fmt[1024];
     va_list va_args;
-    DWORD len;
-    LCID current_lcid;
+    WCHAR *str;
+    DWORD len, nOut;
 
-    current_lcid = GetThreadLocale();
-    if (Silent) /* force en-US not to have localized strings */
-        SetThreadLocale(MAKELCID(MAKELANGID(LANG_ENGLISH, SUBLANG_ENGLISH_US), SORT_DEFAULT));
+    if (Silent) return;
 
     if (!LoadStringW(GetModuleHandleW(NULL), id, fmt, ARRAY_SIZE(fmt)))
     {
         WINE_FIXME("LoadString failed with %ld\n", GetLastError());
-        SetThreadLocale(current_lcid);
         return;
     }
 
     va_start(va_args, id);
-    len = FormatMessageW(FORMAT_MESSAGE_FROM_STRING,
-                         fmt, 0, 0, buffer, ARRAY_SIZE(buffer), &va_args);
+    len = FormatMessageW(FORMAT_MESSAGE_FROM_STRING|FORMAT_MESSAGE_ALLOCATE_BUFFER,
+                         fmt, 0, 0, (LPWSTR)&str, 0, &va_args);
     va_end(va_args);
     if (len == 0 && GetLastError() != ERROR_NO_WORK_DONE)
     {
         WINE_FIXME("Could not format string: le=%lu, fmt=%s\n", GetLastError(), wine_dbgstr_w(fmt));
-        SetThreadLocale(current_lcid);
         return;
     }
-    if (with_usage &&
-        !LoadStringW(GetModuleHandleW(NULL), STRING_USAGE,
-                     &buffer[wcslen(buffer)], ARRAY_SIZE(buffer) - wcslen(buffer)))
+
+    /* WriteConsole fails if its output is redirected to a file.
+     * If this occurs, we should use an OEM codepage and call WriteFile.
+     */
+    if (!WriteConsoleW(GetStdHandle(STD_OUTPUT_HANDLE), str, len, &nOut, NULL))
     {
-        WINE_FIXME("LoadString failed with %ld\n", GetLastError());
-        SetThreadLocale(current_lcid);
-        return;
+        DWORD lenA;
+        char *strA;
+
+        lenA = WideCharToMultiByte(GetOEMCP(), 0, str, len, NULL, 0, NULL, NULL);
+        strA = HeapAlloc(GetProcessHeap(), 0, lenA);
+        if (strA)
+        {
+            WideCharToMultiByte(GetOEMCP(), 0, str, len, strA, lenA, NULL, NULL);
+            WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), strA, lenA, &nOut, FALSE);
+            HeapFree(GetProcessHeap(), 0, strA);
+        }
     }
-    if (Silent)
-        MESSAGE("%ls", buffer);
-    else
-        MessageBoxW(NULL, buffer, L"RegSvr32", MB_OK);
-    SetThreadLocale(current_lcid);
+    LocalFree(str);
 }
 
 static LPCWSTR find_arg_start(LPCWSTR cmdline)
@@ -112,21 +112,20 @@ static LPCWSTR find_arg_start(LPCWSTR cmdline)
 
 static void reexec_self( WORD machine )
 {
-    SYSTEM_SUPPORTED_PROCESSOR_ARCHITECTURES_INFORMATION machines[8];
     WCHAR app[MAX_PATH];
     LPCWSTR args;
     WCHAR *cmdline;
+    ULONG i, machines[8];
     HANDLE process = 0;
     STARTUPINFOW si = {0};
     PROCESS_INFORMATION pi;
     void *cookie;
-    ULONG i;
 
     NtQuerySystemInformationEx( SystemSupportedProcessorArchitectures, &process, sizeof(process),
                                 machines, sizeof(machines), NULL );
-    for (i = 0; machines[i].Machine; i++) if (machines[i].Machine == machine) break;
-    if (!machines[i].Machine) return;
-    if (machines[i].Native) machine = IMAGE_FILE_MACHINE_TARGET_HOST;
+    for (i = 0; machines[i]; i++) if (LOWORD(machines[i]) == machine) break;
+    if (!machines[i]) return;
+    if (HIWORD(machines[i]) & 4 /* native machine */) machine = IMAGE_FILE_MACHINE_TARGET_HOST;
     if (!GetSystemWow64Directory2W( app, MAX_PATH, machine )) return;
     wcscat( app, L"\\regsvr32.exe" );
 
@@ -181,13 +180,13 @@ static VOID *LoadProc(const WCHAR* strDll, const char* procName, HMODULE* DllHan
             IMAGE_NT_HEADERS *nt = RtlImageNtHeader( (HMODULE)((ULONG_PTR)module & ~3) );
             reexec_self( nt->FileHeader.Machine );
         }
-        output_write(FALSE, STRING_DLL_LOAD_FAILED, strDll);
+        output_write(STRING_DLL_LOAD_FAILED, strDll);
         ExitProcess(LOADLIBRARY_FAILED);
     }
     proc = (VOID *) GetProcAddress(*DllHandle, procName);
     if(!proc)
     {
-        output_write(FALSE, STRING_PROC_NOT_IMPLEMENTED, procName, strDll);
+        output_write(STRING_PROC_NOT_IMPLEMENTED, procName, strDll);
         FreeLibrary(*DllHandle);
         return NULL;
     }
@@ -207,10 +206,10 @@ static int RegisterDll(const WCHAR* strDll, BOOL firstDll)
     hr = pfRegister();
     if(FAILED(hr))
     {
-        output_write(FALSE, STRING_REGISTER_FAILED, strDll);
+        output_write(STRING_REGISTER_FAILED, strDll);
         return DLLSERVER_FAILED;
     }
-    output_write(FALSE, STRING_REGISTER_SUCCESSFUL, strDll);
+    output_write(STRING_REGISTER_SUCCESSFUL, strDll);
 
     if(DllHandle)
         FreeLibrary(DllHandle);
@@ -230,10 +229,10 @@ static int UnregisterDll(const WCHAR* strDll, BOOL firstDll)
     hr = pfUnregister();
     if(FAILED(hr))
     {
-        output_write(FALSE, STRING_UNREGISTER_FAILED, strDll);
+        output_write(STRING_UNREGISTER_FAILED, strDll);
         return DLLSERVER_FAILED;
     }
-    output_write(FALSE, STRING_UNREGISTER_SUCCESSFUL, strDll);
+    output_write(STRING_UNREGISTER_SUCCESSFUL, strDll);
 
     if(DllHandle)
         FreeLibrary(DllHandle);
@@ -254,15 +253,15 @@ static int InstallDll(BOOL install, const WCHAR *strDll, const WCHAR *command_li
     if(FAILED(hr))
     {
         if (install)
-            output_write(FALSE, STRING_INSTALL_FAILED, strDll);
+            output_write(STRING_INSTALL_FAILED, strDll);
         else
-            output_write(FALSE, STRING_UNINSTALL_FAILED, strDll);
+            output_write(STRING_UNINSTALL_FAILED, strDll);
         return DLLSERVER_FAILED;
     }
     if (install)
-        output_write(FALSE, STRING_INSTALL_SUCCESSFUL, strDll);
+        output_write(STRING_INSTALL_SUCCESSFUL, strDll);
     else
-        output_write(FALSE, STRING_UNINSTALL_SUCCESSFUL, strDll);
+        output_write(STRING_UNINSTALL_SUCCESSFUL, strDll);
 
     if(DllHandle)
         FreeLibrary(DllHandle);
@@ -341,8 +340,12 @@ int __cdecl wmain(int argc, WCHAR* argv[])
             case 'n':
                 CallRegister = FALSE;
                 break;
+            case 'c':
+                /* console output */;
+                break;
             default:
-                output_write(TRUE, STRING_UNRECOGNIZED_SWITCH, argv[i]);
+                output_write(STRING_UNRECOGNIZED_SWITCH, argv[i]);
+                output_write(STRING_USAGE);
                 return INVALID_ARG;
             }
             argv[i] = NULL;
@@ -398,7 +401,8 @@ int __cdecl wmain(int argc, WCHAR* argv[])
 
     if (!DllFound)
     {
-        output_write(TRUE, STRING_HEADER);
+        output_write(STRING_HEADER);
+        output_write(STRING_USAGE);
         return INVALID_ARG;
     }
 

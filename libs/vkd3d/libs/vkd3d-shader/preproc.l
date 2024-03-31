@@ -30,13 +30,6 @@
 
 #define YY_DECL static int preproc_lexer_lex(YYSTYPE *yylval_param, YYLTYPE *yylloc_param, yyscan_t yyscanner)
 
-static struct preproc_macro *preproc_get_top_macro(struct preproc_ctx *ctx)
-{
-    if (!ctx->expansion_count)
-        return NULL;
-    return ctx->expansion_stack[ctx->expansion_count - 1].macro;
-}
-
 static void update_location(struct preproc_ctx *ctx);
 
 #define YY_USER_ACTION update_location(yyget_extra(yyscanner));
@@ -48,7 +41,6 @@ static void update_location(struct preproc_ctx *ctx);
 %option bison-locations
 %option extra-type="struct preproc_ctx *"
 %option never-interactive
-%option nodefault
 %option noinput
 %option nounput
 %option noyy_top_state
@@ -83,7 +75,6 @@ INT_SUFFIX      [uUlL]{0,2}
 <C_COMMENT>"*/"                     {yy_pop_state(yyscanner);}
 <C_COMMENT,CXX_COMMENT><<EOF>>      {yy_pop_state(yyscanner);}
 <C_COMMENT,CXX_COMMENT>.            {}
-<C_COMMENT>\n                       {}
 
 <ERROR>(\\{NEWLINE}|[^\n])*         {return T_STRING;}
 
@@ -132,20 +123,7 @@ INT_SUFFIX      [uUlL]{0,2}
         const char *p;
 
         if (!ctx->last_was_newline)
-        {
-            struct preproc_macro *macro;
-
-            /* Stringification is only done for function-like macro bodies.
-             * Anywhere else, we need to parse it as two separate tokens.
-             * We could use a state for this, but yyless() is easier and cheap.
-             */
-
-            if ((macro = preproc_get_top_macro(ctx)) && macro->arg_count)
-                return T_HASHSTRING;
-
-            yyless(1);
-            return T_TEXT;
-        }
+            return T_HASHSTRING;
 
         for (p = yytext + 1; strchr(" \t", *p); ++p)
             ;
@@ -198,9 +176,9 @@ INT_SUFFIX      [uUlL]{0,2}
         return T_NEWLINE;
     }
 
-<INITIAL,INCLUDE,LINE>{WS}+         {}
+<INITIAL>{WS}+                      {}
 <INITIAL>[-()\[\]{},+!*/<>&|^?:]    {return yytext[0];}
-<INITIAL,INCLUDE,LINE>.             {return T_TEXT;}
+<INITIAL>.                          {return T_TEXT;}
 
 %%
 
@@ -237,6 +215,13 @@ static bool preproc_is_writing(struct preproc_ctx *ctx)
     if (!file->if_count)
         return true;
     return file->if_stack[file->if_count - 1].current_true;
+}
+
+static struct preproc_macro *preproc_get_top_macro(struct preproc_ctx *ctx)
+{
+    if (!ctx->expansion_count)
+        return NULL;
+    return ctx->expansion_stack[ctx->expansion_count - 1].macro;
 }
 
 /* Concatenation is not done for object-like macros, but is done for both
@@ -347,43 +332,6 @@ static bool preproc_push_expansion(struct preproc_ctx *ctx,
     return true;
 }
 
-static void preproc_stringify(struct preproc_ctx *ctx, struct vkd3d_string_buffer *buffer, const char *text)
-{
-    const struct preproc_text *expansion;
-    const char *p = text + 1;
-    unsigned int i;
-
-    while (*p == ' ' || *p == '\t')
-        ++p;
-
-    vkd3d_string_buffer_printf(buffer, "\"");
-    if ((expansion = find_arg_expansion(ctx, p)))
-    {
-        size_t len = expansion->text.content_size;
-        size_t start = 0;
-
-        while (len && strchr(" \t\r\n", expansion->text.buffer[len - 1]))
-            --len;
-
-        while (start < len && strchr(" \t\r\n", expansion->text.buffer[start]))
-            ++start;
-
-        for (i = start; i < len; ++i)
-        {
-            char c = expansion->text.buffer[i];
-
-            if (c == '\\' || c == '"')
-                vkd3d_string_buffer_printf(buffer, "\\");
-            vkd3d_string_buffer_printf(buffer, "%c", c);
-        }
-    }
-    else
-    {
-        vkd3d_string_buffer_printf(buffer, "%s", p);
-    }
-    vkd3d_string_buffer_printf(buffer, "\"");
-}
-
 int yylex(YYSTYPE *lval, YYLTYPE *lloc, yyscan_t scanner)
 {
     struct preproc_ctx *ctx = yyget_extra(scanner);
@@ -491,6 +439,9 @@ int yylex(YYSTYPE *lval, YYLTYPE *lloc, yyscan_t scanner)
         switch (func_state->state)
         {
             case STATE_NONE:
+            {
+                struct preproc_macro *macro;
+
                 if (token == T_CONCAT && should_concat(ctx))
                 {
                     while (ctx->buffer.content_size
@@ -499,17 +450,37 @@ int yylex(YYSTYPE *lval, YYLTYPE *lloc, yyscan_t scanner)
                     break;
                 }
 
-                if (token == T_HASHSTRING)
+                /* Stringification, however, is only done for function-like
+                 * macro bodies. */
+                if (token == T_HASHSTRING && (macro = preproc_get_top_macro(ctx)) && macro->arg_count)
                 {
-                    struct vkd3d_string_buffer buffer;
+                    const struct preproc_text *expansion;
+                    const char *p = text + 1;
+                    unsigned int i;
 
                     if (ctx->current_directive)
                         return return_token(token, lval, text);
 
-                    vkd3d_string_buffer_init(&buffer);
-                    preproc_stringify(ctx, &buffer, text);
-                    vkd3d_string_buffer_printf(&ctx->buffer, "%s", buffer.buffer);
-                    vkd3d_string_buffer_cleanup(&buffer);
+                    while (*p == ' ' || *p == '\t')
+                        ++p;
+
+                    vkd3d_string_buffer_printf(&ctx->buffer, "\"");
+                    if ((expansion = find_arg_expansion(ctx, p)))
+                    {
+                        for (i = 0; i < expansion->text.content_size; ++i)
+                        {
+                            char c = expansion->text.buffer[i];
+
+                            if (c == '\\' || c == '"')
+                                vkd3d_string_buffer_printf(&ctx->buffer, "\\");
+                            vkd3d_string_buffer_printf(&ctx->buffer, "%c", c);
+                        }
+                    }
+                    else
+                    {
+                        vkd3d_string_buffer_printf(&ctx->buffer, "%s", p);
+                    }
+                    vkd3d_string_buffer_printf(&ctx->buffer, "\"");
                     break;
                 }
 
@@ -613,6 +584,7 @@ int yylex(YYSTYPE *lval, YYLTYPE *lloc, yyscan_t scanner)
                 else
                     vkd3d_string_buffer_printf(&ctx->buffer, "%s ", text);
                 break;
+            }
 
             case STATE_IDENTIFIER:
                 if (token == '(')
@@ -654,41 +626,6 @@ int yylex(YYSTYPE *lval, YYLTYPE *lloc, yyscan_t scanner)
 
                 switch (token)
                 {
-                    /* Most text gets left alone (e.g. if it contains macros,
-                     * the macros should be evaluated later).
-                     * Arguments are a special case, and are replaced with
-                     * their values immediately. */
-                    case T_IDENTIFIER:
-                    case T_IDENTIFIER_PAREN:
-                    {
-                        const struct preproc_text *expansion;
-
-                        if ((expansion = find_arg_expansion(ctx, text)))
-                        {
-                            preproc_push_expansion(ctx, expansion, NULL);
-                            continue;
-                        }
-
-                        if (current_arg)
-                            preproc_text_add(current_arg, text);
-                        break;
-                    }
-
-                    /* Stringification is another special case. Unsurprisingly,
-                     * we need to stringify if this is an argument. More
-                     * surprisingly, we need to stringify even if it's not. */
-                    case T_HASHSTRING:
-                    {
-                        struct vkd3d_string_buffer buffer;
-
-                        vkd3d_string_buffer_init(&buffer);
-                        preproc_stringify(ctx, &buffer, text);
-                        if (current_arg)
-                            preproc_text_add(current_arg, buffer.buffer);
-                        vkd3d_string_buffer_cleanup(&buffer);
-                        break;
-                    }
-
                     case T_NEWLINE:
                         if (current_arg)
                             preproc_text_add(current_arg, " ");
@@ -747,9 +684,6 @@ int yylex(YYSTYPE *lval, YYLTYPE *lloc, yyscan_t scanner)
                         if (current_arg)
                             preproc_text_add(current_arg, text);
                 }
-
-                if (current_arg)
-                    preproc_text_add(current_arg, " ");
                 break;
             }
         }

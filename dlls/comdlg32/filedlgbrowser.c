@@ -24,6 +24,8 @@
 #include <string.h>
 
 #define COBJMACROS
+#define NONAMELESSUNION
+
 #include "windef.h"
 #include "winbase.h"
 #include "winnls.h"
@@ -153,19 +155,19 @@ static BOOL COMDLG32_StrRetToStrNW (LPVOID dest, DWORD len, LPSTRRET src, LPCITE
 	switch (src->uType)
 	{
 	  case STRRET_WSTR:
-            lstrcpynW(dest, src->pOleStr, len);
-	    CoTaskMemFree(src->pOleStr);
+            lstrcpynW(dest, src->u.pOleStr, len);
+	    CoTaskMemFree(src->u.pOleStr);
 	    break;
 
 	  case STRRET_CSTR:
-            if (len && !MultiByteToWideChar( CP_ACP, 0, src->cStr, -1, dest, len ))
+            if (len && !MultiByteToWideChar( CP_ACP, 0, src->u.cStr, -1, dest, len ))
                 ((LPWSTR)dest)[len-1] = 0;
 	    break;
 
 	  case STRRET_OFFSET:
 	    if (pidl)
 	    {
-                if (len && !MultiByteToWideChar( CP_ACP, 0, ((LPCSTR)&pidl->mkid)+src->uOffset,
+                if (len && !MultiByteToWideChar( CP_ACP, 0, ((LPCSTR)&pidl->mkid)+src->u.uOffset,
                                                  -1, dest, len ))
                     ((LPWSTR)dest)[len-1] = 0;
 	    }

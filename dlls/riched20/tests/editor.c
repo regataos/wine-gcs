@@ -1405,48 +1405,10 @@ static void test_EM_SETCHARFORMAT(void)
   DestroyWindow(hwndRichEdit);
 }
 
-/* As the clipboard is a shared resource, it happens (on Windows) that the WM_PASTE
- * is a no-op; likely because another app has opened the clipboard for inspection.
- * In this case, WM_PASTE does nothing, and doesn't return an error code.
- * So retry pasting a couple of times.
- * Don't use this function if the paste operation shouldn't change the content of the
- * editor (clipboard is empty without selection, edit control is read only...).
- * Also impact on undo stack is not managed.
- */
-#define send_paste(a) _send_paste(__LINE__, (a))
-static void _send_paste(unsigned int line, HWND wnd)
-{
-    int retries;
-
-    SendMessageA(wnd, EM_SETMODIFY, FALSE, 0);
-
-    for (retries = 0; retries < 7; retries++)
-    {
-        if (retries) Sleep(15);
-        SendMessageA(wnd, WM_PASTE, 0, 0);
-        if (SendMessageA(wnd, EM_GETMODIFY, 0, 0)) return;
-    }
-    ok_(__FILE__, line)(0, "Failed to paste clipboard content\n");
-    {
-        char classname[256];
-        HWND clipwnd = GetOpenClipboardWindow();
-        /* Provide a hint as to the source of interference:
-         * - The class name would typically be CLIPBRDWNDCLASS if the
-         *   clipboard was opened by a Windows application using the
-         *   ole32 API.
-         * - And it would be __wine_clipboard_manager if it was opened in
-         *   response to a native application.
-         */
-        GetClassNameA(clipwnd, classname, ARRAY_SIZE(classname));
-        trace("%p (%s) opened the clipboard\n", clipwnd, classname);
-    }
-}
-
 static void test_EM_SETTEXTMODE(void)
 {
   HWND hwndRichEdit = new_richedit(NULL);
   CHARFORMAT2A cf2, cf2test;
-  unsigned int len;
   CHARRANGE cr;
   int rc = 0;
 
@@ -1516,10 +1478,7 @@ static void test_EM_SETTEXTMODE(void)
   SendMessageA(hwndRichEdit, WM_SETTEXT, 0, (LPARAM)"wine");
 
   /*Paste the italicized "wine" into the control*/
-  send_paste(hwndRichEdit);
-
-  len = SendMessageA(hwndRichEdit, WM_GETTEXTLENGTH, 0, 0);
-  ok(len == 8 /*winewine*/, "Unexpected text length %u\n", len);
+  SendMessageA(hwndRichEdit, WM_PASTE, 0, 0);
 
   /*Select a character from the first "wine" string*/
   cr.cpMin = 2;
@@ -1562,7 +1521,7 @@ static void test_EM_SETTEXTMODE(void)
   SendMessageA(hwndRichEdit, WM_SETTEXT, 0, (LPARAM)"wine");
 
   /*Paste italicized "wine" into the control*/
-  send_paste(hwndRichEdit);
+  SendMessageA(hwndRichEdit, WM_PASTE, 0, 0);
 
   /*Select text from the first "wine" string*/
   cr.cpMin = 1;
@@ -1708,7 +1667,7 @@ static void test_TM_PLAINTEXT(void)
   /*Paste the plain text "wine" string, which should take the insert
    formatting, which at the moment is bold italics*/
 
-  send_paste(hwndRichEdit);
+  SendMessageA(hwndRichEdit, WM_PASTE, 0, 0);
 
   /*Select the first "wine" string and retrieve its formatting*/
 
@@ -1891,41 +1850,20 @@ static void test_EM_GETSELTEXT(void)
     const char * expect = "bar\rfoo";
     char buffer[1024] = {0};
     LRESULT result;
-    BOOL bad_getsel;
-    DWORD gle;
-
-    SendMessageA(hwndRichEdit, WM_SETTEXT, 0, (LPARAM)"a");
-    SendMessageA(hwndRichEdit, EM_SETSEL, 0, -1);
-    SetLastError(0xdeadbeef);
-    result = SendMessageA(hwndRichEdit, EM_GETSELTEXT, 0, (LPARAM)buffer);
-    gle = GetLastError();
-    ok((result > 0 && gle == 0xdeadbeef) ||
-       broken(result == 0 && gle == ERROR_INVALID_PARAMETER /* Hindi */),
-       "EM_GETSELTEXT returned %Id gle=%lu\n", result, gle);
-    bad_getsel = (gle != 0xdeadbeef);
-    if (bad_getsel)
-        trace("EM_GETSELTEXT is broken, some tests will be ignored\n");
 
     SendMessageA(hwndRichEdit, WM_SETTEXT, 0, (LPARAM)text1);
 
     SendMessageA(hwndRichEdit, EM_SETSEL, 4, 11);
-    SetLastError(0xdeadbeef);
     result = SendMessageA(hwndRichEdit, EM_GETSELTEXT, 0, (LPARAM)buffer);
-    gle = GetLastError();
-    ok(result == 7 || broken(bad_getsel && result == 0),
-       "EM_GETSELTEXT returned %Id gle=%lu\n", result, gle);
-    ok(!strcmp(expect, buffer) || broken(bad_getsel &&  !*buffer),
-       "EM_GETSELTEXT filled %s gle=%lu\n", buffer, gle);
+    ok(result == 7, "EM_GETSELTEXT returned %Id\n", result);
+    ok(!strcmp(expect, buffer), "EM_GETSELTEXT filled %s\n", buffer);
 
     SendMessageA(hwndRichEdit, WM_SETTEXT, 0, (LPARAM)text2);
 
     SendMessageA(hwndRichEdit, EM_SETSEL, 4, 11);
-    SetLastError(0xdeadbeef);
     result = SendMessageA(hwndRichEdit, EM_GETSELTEXT, 0, (LPARAM)buffer);
-    ok(result == 7 || broken(bad_getsel && result == 0),
-       "EM_GETSELTEXT returned %Id gle=%lu\n", result, gle);
-    ok(!strcmp(expect, buffer) || broken(bad_getsel &&  !*buffer),
-       "EM_GETSELTEXT filled %s gle=%lu\n", buffer, gle);
+    ok(result == 7, "EM_GETSELTEXT returned %Id\n", result);
+    ok(!strcmp(expect, buffer), "EM_GETSELTEXT filled %s\n", buffer);
 
     /* Test with multibyte character */
     if (!is_lang_japanese)
@@ -4812,36 +4750,6 @@ static DWORD CALLBACK test_EM_GETMODIFY_esCallback(DWORD_PTR dwCookie,
   return 0;
 }
 
-#define open_clipboard(hwnd) open_clipboard_(__LINE__, hwnd)
-static BOOL open_clipboard_(int line, HWND hwnd)
-{
-    DWORD start = GetTickCount();
-    while (1)
-    {
-        BOOL ret = OpenClipboard(hwnd);
-        if (ret || GetLastError() != ERROR_ACCESS_DENIED)
-            return ret;
-        if (GetTickCount() - start > 100)
-        {
-            char classname[256];
-            DWORD le = GetLastError();
-            HWND clipwnd = GetOpenClipboardWindow();
-            /* Provide a hint as to the source of interference:
-             * - The class name would typically be CLIPBRDWNDCLASS if the
-             *   clipboard was opened by a Windows application using the
-             *   ole32 API.
-             * - And it would be __wine_clipboard_manager if it was opened in
-             *   response to a native application.
-             */
-            GetClassNameA(clipwnd, classname, ARRAY_SIZE(classname));
-            trace_(__FILE__, line)("%p (%s) opened the clipboard\n", clipwnd, classname);
-            SetLastError(le);
-            return ret;
-        }
-        Sleep(15);
-    }
-}
-
 static void test_EM_GETMODIFY(void)
 {
   HWND hwndRichEdit = new_richedit(NULL);
@@ -4858,8 +4766,6 @@ static void test_EM_GETMODIFY(void)
   CHARFORMAT2A cf2;
   PARAFORMAT2 pf2;
   EDITSTREAM es;
-  BOOL r;
-  HANDLE hclip;
   
   HFONT testFont = CreateFontA (0,0,0,0,FW_LIGHT, 0, 0, 0, ANSI_CHARSET, 
     OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY, DEFAULT_PITCH | 
@@ -4941,7 +4847,7 @@ static void test_EM_GETMODIFY(void)
   SendMessageA(hwndRichEdit, EM_SETMODIFY, FALSE, 0);
   SendMessageA(hwndRichEdit, EM_SETSEL, 0, 2);
   SendMessageA(hwndRichEdit, WM_COPY, 0, 0);
-  send_paste(hwndRichEdit);
+  SendMessageA(hwndRichEdit, WM_PASTE, 0, 0);
   result = SendMessageA(hwndRichEdit, EM_GETMODIFY, 0, 0);
   ok (result != 0,
       "EM_GETMODIFY returned zero, instead of non-zero when pasting identical text\n");
@@ -4951,7 +4857,7 @@ static void test_EM_GETMODIFY(void)
   SendMessageA(hwndRichEdit, EM_SETSEL, 0, 2);
   SendMessageA(hwndRichEdit, WM_COPY, 0, 0);
   SendMessageA(hwndRichEdit, EM_SETSEL, 0, 3);
-  send_paste(hwndRichEdit);
+  SendMessageA(hwndRichEdit, WM_PASTE, 0, 0);
   result = SendMessageA(hwndRichEdit, EM_GETMODIFY, 0, 0);
   ok (result != 0,
       "EM_GETMODIFY returned zero, instead of non-zero when pasting different text\n");
@@ -5006,28 +4912,7 @@ static void test_EM_GETMODIFY(void)
   ok (result != 0,
       "EM_GETMODIFY returned zero, instead of non-zero for EM_STREAM\n");
 
-  /* Check that the clipboard data is still available after destroying the
-   * editor window.
-   */
-  SendMessageA(hwndRichEdit, WM_SETTEXT, 0, (LPARAM)"Stayin' alive");
-  SendMessageA(hwndRichEdit, EM_SETSEL, 8, -1);
-  SendMessageA(hwndRichEdit, WM_COPY, 0, 0);
-
   DestroyWindow(hwndRichEdit);
-
-  r = open_clipboard(NULL);
-  ok(r, "OpenClipboard failed le=%lu\n", GetLastError());
-
-  hclip = GetClipboardData(CF_TEXT);
-  todo_wine ok(hclip != NULL, "GetClipboardData() failed le=%lu\n", GetLastError());
-  if (hclip)
-  {
-      const char* str = GlobalLock(hclip);
-      ok(strcmp(str, "alive") == 0, "unexpected clipboard content: %s\n", str);
-      GlobalUnlock(hclip);
-  }
-
-  CloseClipboard();
 }
 
 struct exsetsel_s {
@@ -5115,7 +5000,7 @@ static void test_EM_EXSETSEL(void)
         cr.cpMin = 4; cr.cpMax = 8;
         result =  SendMessageA(hwndRichEdit, EM_EXSETSEL, 0, (LPARAM)&cr);
         ok(result == 8, "EM_EXSETSEL return %Id expected 8\n", result);
-        result = SendMessageA(hwndRichEdit, EM_GETSELTEXT, 0, (LPARAM)bufA);
+        result = SendMessageA(hwndRichEdit, EM_GETSELTEXT, sizeof(bufA), (LPARAM)bufA);
         ok(!strcmp(bufA, "ef\x8e\xf0g"), "EM_GETSELTEXT return incorrect string\n");
         SendMessageA(hwndRichEdit, EM_EXGETSEL, 0, (LPARAM)&cr);
         ok(cr.cpMin == 4, "Selection start incorrectly: %ld expected 4\n", cr.cpMin);
@@ -5190,7 +5075,7 @@ static void test_EM_SETSEL(void)
         /*                                                 012345     6  78901 */
         result =  SendMessageA(hwndRichEdit, EM_SETSEL, 4, 8);
         ok(result == 8, "EM_SETSEL return %Id expected 8\n", result);
-        result = SendMessageA(hwndRichEdit, EM_GETSELTEXT, 0, (LPARAM)buffA);
+        result = SendMessageA(hwndRichEdit, EM_GETSELTEXT, sizeof(buffA), (LPARAM)buffA);
         ok(!strcmp(buffA, "ef\x8e\xf0g"), "EM_GETSELTEXT return incorrect string\n");
         result = SendMessageA(hwndRichEdit, EM_GETSEL, (WPARAM)&sel_start, (LPARAM)&sel_end);
         ok(sel_start == 4, "Selection start incorrectly: %d expected 4\n", sel_start);
@@ -5606,12 +5491,16 @@ static void test_WM_PASTE(void)
     send_ctrl_key(hwndRichEdit, 'V');   /* Paste */
     SendMessageA(hwndRichEdit, WM_GETTEXT, 1024, (LPARAM)buffer);
     /* Pasted text should be visible at this step */
-    ok(strcmp(text1_step1, buffer) == 0, "1:Ctrl-V %s\n", wine_dbgstr_a(buffer));
+    result = strcmp(text1_step1, buffer);
+    ok(result == 0,
+        "test paste: strcmp = %i, text='%s'\n", result, buffer);
 
     send_ctrl_key(hwndRichEdit, 'Z');   /* Undo */
     SendMessageA(hwndRichEdit, WM_GETTEXT, 1024, (LPARAM)buffer);
     /* Text should be the same as before (except for \r -> \r\n conversion) */
-    ok(strcmp(text1_after, buffer) == 0, "1:Ctrl-Z %s\n", wine_dbgstr_a(buffer));
+    result = strcmp(text1_after, buffer);
+    ok(result == 0,
+        "test paste: strcmp = %i, text='%s'\n", result, buffer);
 
     SendMessageA(hwndRichEdit, WM_SETTEXT, 0, (LPARAM)text2);
     SendMessageA(hwndRichEdit, EM_SETSEL, 8, 13);
@@ -5620,15 +5509,21 @@ static void test_WM_PASTE(void)
     send_ctrl_key(hwndRichEdit, 'V');   /* Paste */
     SendMessageA(hwndRichEdit, WM_GETTEXT, 1024, (LPARAM)buffer);
     /* Pasted text should be visible at this step */
-    ok(strcmp(text3, buffer) == 0, "2:Ctrl-V %s\n", wine_dbgstr_a(buffer));
+    result = strcmp(text3, buffer);
+    ok(result == 0,
+        "test paste: strcmp = %i\n", result);
     send_ctrl_key(hwndRichEdit, 'Z');   /* Undo */
     SendMessageA(hwndRichEdit, WM_GETTEXT, 1024, (LPARAM)buffer);
     /* Text should be the same as before (except for \r -> \r\n conversion) */
-    ok(strcmp(text2_after, buffer) == 0, "2:Ctrl-Z %s\n", wine_dbgstr_a(buffer));
+    result = strcmp(text2_after, buffer);
+    ok(result == 0,
+        "test paste: strcmp = %i\n", result);
     send_ctrl_key(hwndRichEdit, 'Y');   /* Redo */
     SendMessageA(hwndRichEdit, WM_GETTEXT, 1024, (LPARAM)buffer);
     /* Text should revert to post-paste state */
-    ok(strcmp(buffer,text3) == 0, "2:Ctrl-Y %s\n", wine_dbgstr_a(buffer));
+    result = strcmp(buffer,text3);
+    ok(result == 0,
+        "test paste: strcmp = %i\n", result);
 
     SendMessageA(hwndRichEdit, WM_SETTEXT, 0, 0);
     /* Send WM_CHAR to simulate Ctrl-V */
@@ -5636,7 +5531,9 @@ static void test_WM_PASTE(void)
                 (MapVirtualKeyA('V', MAPVK_VK_TO_VSC) << 16) | 1);
     SendMessageA(hwndRichEdit, WM_GETTEXT, 1024, (LPARAM)buffer);
     /* Shouldn't paste because pasting is handled by WM_KEYDOWN */
-    ok(strcmp(buffer, "") == 0, "3:Ctrl-V %s\n", wine_dbgstr_a(buffer));
+    result = strcmp(buffer,"");
+    ok(result == 0,
+        "test paste: strcmp = %i, actual = '%s'\n", result, buffer);
 
     /* Send keystrokes with WM_KEYDOWN after setting the modifiers
      * with SetKeyboard state. */
@@ -5648,7 +5545,9 @@ static void test_WM_PASTE(void)
                 (MapVirtualKeyA('V', MAPVK_VK_TO_VSC) << 16) | 1);
     release_key(VK_CONTROL);
     SendMessageA(hwndRichEdit, WM_GETTEXT, 1024, (LPARAM)buffer);
-    ok(strcmp(buffer, "paste") == 0, "VK:Ctrl-V %s\n", wine_dbgstr_a(buffer));
+    result = strcmp(buffer,"paste");
+    ok(result == 0,
+        "test paste: strcmp = %i, actual = '%s'\n", result, buffer);
 
     SendMessageA(hwndRichEdit, WM_SETTEXT, 0, (LPARAM)text1);
     SendMessageA(hwndRichEdit, EM_SETSEL, 0, 7);
@@ -5658,9 +5557,11 @@ static void test_WM_PASTE(void)
                 (MapVirtualKeyA('C', MAPVK_VK_TO_VSC) << 16) | 1);
     release_key(VK_CONTROL);
     SendMessageA(hwndRichEdit, WM_SETTEXT, 0, 0);
-    send_paste(hwndRichEdit);
+    SendMessageA(hwndRichEdit, WM_PASTE, 0, 0);
     SendMessageA(hwndRichEdit, WM_GETTEXT, 1024, (LPARAM)buffer);
-    ok(strcmp(buffer, "testing") == 0, "VK:Ctrl-C %s\n", wine_dbgstr_a(buffer));
+    result = strcmp(buffer,"testing");
+    ok(result == 0,
+        "test paste: strcmp = %i, actual = '%s'\n", result, buffer);
 
     /* Cut with WM_KEYDOWN to simulate Ctrl-X */
     SendMessageA(hwndRichEdit, WM_SETTEXT, 0, (LPARAM)"cut");
@@ -5673,22 +5574,30 @@ static void test_WM_PASTE(void)
                 (MapVirtualKeyA('X', MAPVK_VK_TO_VSC) << 16) | 1);
     release_key(VK_CONTROL);
     SendMessageA(hwndRichEdit, WM_GETTEXT, 1024, (LPARAM)buffer);
-    ok(strcmp(buffer, "") == 0, "VK:Ctrl-A,X %s\n", wine_dbgstr_a(buffer));
+    result = strcmp(buffer,"");
+    ok(result == 0,
+        "test paste: strcmp = %i, actual = '%s'\n", result, buffer);
     SendMessageA(hwndRichEdit, WM_SETTEXT, 0, 0);
-    send_paste(hwndRichEdit);
+    SendMessageA(hwndRichEdit, WM_PASTE, 0, 0);
     SendMessageA(hwndRichEdit, WM_GETTEXT, 1024, (LPARAM)buffer);
-    ok(strcmp(buffer, "cut\r\n") == 0, "VK:paste %s\n", wine_dbgstr_a(buffer));
+    result = strcmp(buffer,"cut\r\n");
+    ok(result == 0,
+        "test paste: strcmp = %i, actual = '%s'\n", result, buffer);
     /* Simulates undo (Ctrl-Z) */
     hold_key(VK_CONTROL);
     SendMessageA(hwndRichEdit, WM_KEYDOWN, 'Z',
                 (MapVirtualKeyA('Z', MAPVK_VK_TO_VSC) << 16) | 1);
     SendMessageA(hwndRichEdit, WM_GETTEXT, 1024, (LPARAM)buffer);
-    ok(strcmp(buffer, "") == 0, "VK:Ctrl-Z %s\n", wine_dbgstr_a(buffer));
+    result = strcmp(buffer,"");
+    ok(result == 0,
+        "test paste: strcmp = %i, actual = '%s'\n", result, buffer);
     /* Simulates redo (Ctrl-Y) */
     SendMessageA(hwndRichEdit, WM_KEYDOWN, 'Y',
                 (MapVirtualKeyA('Y', MAPVK_VK_TO_VSC) << 16) | 1);
     SendMessageA(hwndRichEdit, WM_GETTEXT, 1024, (LPARAM)buffer);
-    ok(strcmp(buffer, "cut\r\n") == 0, "VK:Ctrl-Y %s\n", wine_dbgstr_a(buffer));
+    result = strcmp(buffer,"cut\r\n");
+    ok(result == 0,
+        "test paste: strcmp = %i, actual = '%s'\n", result, buffer);
     release_key(VK_CONTROL);
 
     /* Copy multiline text to clipboard for future use */
@@ -5699,16 +5608,19 @@ static void test_WM_PASTE(void)
 
     /* Paste into read-only control */
     result = SendMessageA(hwndRichEdit, EM_SETREADONLY, TRUE, 0);
-    ok(result, "ro:set failed\n");
     SendMessageA(hwndRichEdit, WM_PASTE, 0, 0);
     SendMessageA(hwndRichEdit, WM_GETTEXT, 1024, (LPARAM)buffer);
-    ok(strcmp(buffer, text3) == 0, "ro:paste %s\n", wine_dbgstr_a(buffer));
+    result = strcmp(buffer, text3);
+    ok(result == 0,
+        "test paste: strcmp = %i, actual = '%s'\n", result, buffer);
 
     /* Cut from read-only control */
     SendMessageA(hwndRichEdit, EM_SETSEL, 0, -1);
     SendMessageA(hwndRichEdit, WM_CUT, 0, 0);
     SendMessageA(hwndRichEdit, WM_GETTEXT, 1024, (LPARAM)buffer);
-    ok(strcmp(buffer, text3) == 0, "ro:cut %s\n", wine_dbgstr_a(buffer));
+    result = strcmp(buffer, text3);
+    ok(result == 0,
+        "test paste: strcmp = %i, actual = '%s'\n", result, buffer);
 
     /* FIXME: Wine doesn't flush Ole clipboard when window is destroyed so do it manually */
     OleFlushClipboard();
@@ -5716,9 +5628,11 @@ static void test_WM_PASTE(void)
 
     /* Paste multi-line text into single-line control */
     hwndRichEdit = new_richedit_with_style(NULL, 0);
-    send_paste(hwndRichEdit);
+    SendMessageA(hwndRichEdit, WM_PASTE, 0, 0);
     SendMessageA(hwndRichEdit, WM_GETTEXT, 1024, (LPARAM)buffer);
-    ok(strcmp(buffer, "testing paste") == 0, "multi:paste %s\n", wine_dbgstr_a(buffer));
+    result = strcmp(buffer, "testing paste");
+    ok(result == 0,
+        "test paste: strcmp = %i, actual = '%s'\n", result, buffer);
     DestroyWindow(hwndRichEdit);
 }
 
@@ -5776,7 +5690,6 @@ static void test_EM_FORMATRANGE(void)
     SIZE stringsize;
     int len;
 
-    winetest_push_context("%d", i);
     SendMessageA(hwndRichEdit, WM_SETTEXT, 0, (LPARAM)fmtstrings[i].string);
 
     gtl.flags = GTL_NUMCHARS | GTL_PRECISE;
@@ -5827,13 +5740,12 @@ static void test_EM_FORMATRANGE(void)
     else if (! skip_non_english)
       ok (r < len, "Expected < %d, got %d\n", len, r);
 
-    /* There is at least one more page, but we don't care */
+    /* There is at least on more page, but we don't care */
 
     r = SendMessageA(hwndRichEdit, EM_FORMATRANGE, TRUE, 0);
     todo_wine {
     ok(r == len, "Expected %d, got %d\n", len, r);
     }
-    winetest_pop_context();
   }
 
   ReleaseDC(NULL, hdc);
@@ -7289,51 +7201,6 @@ static void test_word_movement(void)
     SendMessageW(hwnd, EM_GETSEL, (WPARAM)&sel_start, (LPARAM)&sel_end);
     ok(sel_start == sel_end, "Selection should be empty\n");
     ok(sel_start == 8, "Cursor is at %d instead of %d\n", sel_start, 8);
-
-    DestroyWindow(hwnd);
-}
-
-static void test_word_movement_multiline(void)
-{
-    DWORD sel_start, sel_end;
-    LRESULT result;
-    HWND hwnd;
-
-    /* multi-line control inserts CR normally */
-    hwnd = new_richedit(NULL);
-
-    result = SendMessageA(hwnd, WM_SETTEXT, 0, (LPARAM)"Lorem ipsum\rdolor sit\rnamet");
-    ok(result == TRUE, "WM_SETTEXT returned %Iu.\n", result);
-    SendMessageA(hwnd, EM_SETSEL, 0, 0);
-    /* [|Lorem ipsum] [dolor sit] [amet] */
-
-    send_ctrl_key(hwnd, VK_RIGHT);
-    /* [Lorem |ipsum] [dolor sit] [amet] */
-    sel_start = sel_end = 0xdeadbeefUL;
-    SendMessageA(hwnd, EM_GETSEL, (WPARAM)&sel_start, (LPARAM)&sel_end);
-    ok(sel_start == sel_end, "expected sel length to be 0, got %lu.\n", sel_end - sel_start);
-    ok(sel_start == 6, "expected sel_start to be %u, got %lu.\n", 6, sel_start);
-
-    send_ctrl_key(hwnd, VK_RIGHT);
-    /* [Lorem ipsum|] [dolor sit] [amet] */
-    sel_start = sel_end = 0xdeadbeefUL;
-    SendMessageA(hwnd, EM_GETSEL, (WPARAM)&sel_start, (LPARAM)&sel_end);
-    ok(sel_start == sel_end, "expected sel length to be 0, got %lu.\n", sel_end - sel_start);
-    ok(sel_start == 11, "expected sel_start to be %u, got %lu.\n", 11, sel_start);
-
-    send_ctrl_key(hwnd, VK_RIGHT);
-    /* [Lorem ipsum] [|dolor sit] [amet] */
-    sel_start = sel_end = 0xdeadbeefUL;
-    SendMessageA(hwnd, EM_GETSEL, (WPARAM)&sel_start, (LPARAM)&sel_end);
-    ok(sel_start == sel_end, "expected sel length to be 0, got %lu.\n", sel_end - sel_start);
-    ok(sel_start == 12, "expected sel_start to be %u, got %lu.\n", 12, sel_start);
-
-    send_ctrl_key(hwnd, VK_LEFT);
-    /* [Lorem ipsum|] [dolor sit] [amet] */
-    sel_start = sel_end = 0xdeadbeefUL;
-    SendMessageA(hwnd, EM_GETSEL, (WPARAM)&sel_start, (LPARAM)&sel_end);
-    ok(sel_start == sel_end, "expected sel length to be 0, got %lu.\n", sel_end - sel_start);
-    ok(sel_start == 11, "expected sel_start to be %u, got %lu.\n", 11, sel_start);
 
     DestroyWindow(hwnd);
 }
@@ -8860,8 +8727,6 @@ static void test_rtf(void)
                                      0x201d,0x200e,0x200f,0x200d,0x200c};
     const char *pard = "{\\rtf1 ABC\\rtlpar\\par DEF\\par HIJ\\pard\\par}";
     const char *highlight = "{\\rtf1{\\colortbl;\\red0\\green0\\blue0;\\red128\\green128\\blue128;\\red192\\green192\\blue192;}\\cf2\\highlight3 foo\\par}";
-    const char *crash = "{\\rtf2 {\\par \\pard \\trowd \\cellx6000 \\intbl \\cell \\row \\par \\pard \\li300 \\bullet packages... \\par }";
-    const char *crash2 = "{\\rtf1 \\trowd row1 \\intbl \\cell \\row \\par \\trowd row2 \\intbl \\cell \\row}";
 
     HWND edit = new_richeditW( NULL );
     EDITSTREAM es;
@@ -8912,15 +8777,6 @@ static void test_rtf(void)
     ok( (cf.dwEffects & (CFE_AUTOCOLOR | CFE_AUTOBACKCOLOR)) == 0, "got %08lx\n", cf.dwEffects );
     ok( cf.crTextColor == RGB(128,128,128), "got %08lx\n", cf.crTextColor );
     ok( cf.crBackColor == RGB(192,192,192), "got %08lx\n", cf.crBackColor );
-
-    /* Test cases that crash */
-    es.dwCookie = (DWORD_PTR)&crash;
-    es.dwError = 0;
-    SendMessageA( edit, EM_STREAMIN, SF_RTF, (LPARAM)&es );
-
-    es.dwCookie = (DWORD_PTR)&crash2;
-    es.dwError = 0;
-    SendMessageA( edit, EM_STREAMIN, SF_RTF, (LPARAM)&es );
 
     DestroyWindow( edit );
 }
@@ -9257,7 +9113,6 @@ START_TEST( editor )
   test_eventMask();
   test_undo_coalescing();
   test_word_movement();
-  test_word_movement_multiline();
   test_EM_CHARFROMPOS();
   test_SETPARAFORMAT();
   test_word_wrap();

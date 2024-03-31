@@ -79,7 +79,7 @@ EnumServicesStatusA( SC_HANDLE hmngr, DWORD type, DWORD state, LPENUM_SERVICE_ST
     }
 
     sz = max( 2 * size, sizeof(*servicesW) );
-    if (!(servicesW = malloc( sz )))
+    if (!(servicesW = heap_alloc( sz )))
     {
         SetLastError( ERROR_NOT_ENOUGH_MEMORY );
         return FALSE;
@@ -113,7 +113,7 @@ EnumServicesStatusA( SC_HANDLE hmngr, DWORD type, DWORD state, LPENUM_SERVICE_ST
     ret = TRUE;
 
 done:
-    free( servicesW );
+    heap_free( servicesW );
     return ret;
 }
 
@@ -150,7 +150,7 @@ EnumServicesStatusW( SC_HANDLE manager, DWORD type, DWORD state, ENUM_SERVICE_ST
             && GetLastError() != ERROR_MORE_DATA)
         return FALSE;
 
-    if (!(status_ex = malloc( alloc_size )))
+    if (!(status_ex = heap_alloc( alloc_size )))
     {
         SetLastError( ERROR_NOT_ENOUGH_MEMORY );
         return FALSE;
@@ -160,7 +160,7 @@ EnumServicesStatusW( SC_HANDLE manager, DWORD type, DWORD state, ENUM_SERVICE_ST
                                 alloc_size, &alloc_size, &count, resume_handle, NULL )
             && GetLastError() != ERROR_MORE_DATA)
     {
-        free( status_ex );
+        heap_free( status_ex );
         return FALSE;
     }
 
@@ -198,7 +198,7 @@ EnumServicesStatusW( SC_HANDLE manager, DWORD type, DWORD state, ENUM_SERVICE_ST
         status[i].ServiceStatus.dwWaitHint                = status_ex[i].ServiceStatusProcess.dwWaitHint;
     }
 
-    free( status_ex );
+    heap_free( status_ex );
     if (*ret_size > size)
     {
         SetLastError( ERROR_MORE_DATA );
@@ -229,7 +229,7 @@ EnumServicesStatusExA( SC_HANDLE hmngr, SC_ENUM_TYPE level, DWORD type, DWORD st
           size, needed, returned, resume_handle, debugstr_a(group));
 
     sz = max( 2 * size, sizeof(*servicesW) );
-    if (!(servicesW = malloc( sz )))
+    if (!(servicesW = heap_alloc( sz )))
     {
         SetLastError( ERROR_NOT_ENOUGH_MEMORY );
         return FALSE;
@@ -237,10 +237,10 @@ EnumServicesStatusExA( SC_HANDLE hmngr, SC_ENUM_TYPE level, DWORD type, DWORD st
     if (group)
     {
         int len = MultiByteToWideChar( CP_ACP, 0, group, -1, NULL, 0 );
-        if (!(groupW = malloc( len * sizeof(WCHAR) )))
+        if (!(groupW = heap_alloc( len * sizeof(WCHAR) )))
         {
             SetLastError( ERROR_NOT_ENOUGH_MEMORY );
-            free( servicesW );
+            heap_free( servicesW );
             return FALSE;
         }
         MultiByteToWideChar( CP_ACP, 0, group, -1, groupW, len * sizeof(WCHAR) );
@@ -275,8 +275,8 @@ EnumServicesStatusExA( SC_HANDLE hmngr, SC_ENUM_TYPE level, DWORD type, DWORD st
     ret = TRUE;
 
 done:
-    free( servicesW );
-    free( groupW );
+    heap_free( servicesW );
+    heap_free( groupW );
     return ret;
 }
 
@@ -295,7 +295,7 @@ BOOL WINAPI GetServiceKeyNameA( SC_HANDLE hSCManager, LPCSTR lpDisplayName,
 
     lpDisplayNameW = strdupAW(lpDisplayName);
     if (lpServiceName)
-        lpServiceNameW = malloc(*lpcchBuffer * sizeof(WCHAR));
+        lpServiceNameW = heap_alloc(*lpcchBuffer * sizeof(WCHAR));
     else
         lpServiceNameW = NULL;
 
@@ -321,8 +321,8 @@ BOOL WINAPI GetServiceKeyNameA( SC_HANDLE hSCManager, LPCSTR lpDisplayName,
     ret = TRUE;
 
 cleanup:
-    free(lpServiceNameW);
-    free(lpDisplayNameW);
+    heap_free(lpServiceNameW);
+    heap_free(lpDisplayNameW);
     return ret;
 }
 
@@ -365,7 +365,7 @@ BOOL WINAPI GetServiceDisplayNameA( SC_HANDLE hSCManager, LPCSTR lpServiceName,
 
     lpServiceNameW = strdupAW(lpServiceName);
     if (lpDisplayName)
-        lpDisplayNameW = malloc(*lpcchBuffer * sizeof(WCHAR));
+        lpDisplayNameW = heap_alloc(*lpcchBuffer * sizeof(WCHAR));
     else
         lpDisplayNameW = NULL;
 
@@ -392,8 +392,8 @@ BOOL WINAPI GetServiceDisplayNameA( SC_HANDLE hSCManager, LPCSTR lpServiceName,
     ret = TRUE;
 
 cleanup:
-    free(lpDisplayNameW);
-    free(lpServiceNameW);
+    heap_free(lpDisplayNameW);
+    heap_free(lpServiceNameW);
     return ret;
 }
 

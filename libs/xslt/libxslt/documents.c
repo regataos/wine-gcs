@@ -399,8 +399,6 @@ xsltLoadStyleDocument(xsltStylesheetPtr style, const xmlChar *URI) {
 	return(NULL);
 
     ret = xsltNewStyleDocument(style, doc);
-    if (ret == NULL)
-        xmlFreeDoc(doc);
     return(ret);
 }
 

@@ -224,6 +224,8 @@
  *
  */
 
+#define NONAMELESSUNION
+
 #include "editor.h"
 #include "commdlg.h"
 #include "winreg.h"
@@ -246,7 +248,7 @@ HINSTANCE dll_instance = NULL;
 BOOL me_debug = FALSE;
 
 static ME_TextBuffer *ME_MakeText(void) {
-  ME_TextBuffer *buf = malloc(sizeof(*buf));
+  ME_TextBuffer *buf = heap_alloc(sizeof(*buf));
   ME_DisplayItem *p1 = ME_MakeDI(diTextStart);
   ME_DisplayItem *p2 = ME_MakeDI(diTextEnd);
   
@@ -607,7 +609,7 @@ void ME_RTFParAttrHook(RTF_Info *info)
     {
       while (info->rtfParam > info->nestingLevel)
       {
-        RTFTable *tableDef = calloc(1, sizeof(*tableDef));
+        RTFTable *tableDef = heap_alloc_zero(sizeof(*tableDef));
         tableDef->parent = info->tableDef;
         info->tableDef = tableDef;
 
@@ -641,7 +643,7 @@ void ME_RTFParAttrHook(RTF_Info *info)
         ME_Paragraph *para;
 
         if (!info->tableDef)
-            info->tableDef = calloc(1, sizeof(*info->tableDef));
+            info->tableDef = heap_alloc_zero(sizeof(*info->tableDef));
         tableDef = info->tableDef;
         RTFFlushOutputBuffer(info);
         if (tableDef->row_start && tableDef->row_start->nFlags & MEPF_ROWEND)
@@ -1059,14 +1061,14 @@ void ME_RTFSpecialCharHook(RTF_Info *info)
             {
               tableDef = info->tableDef;
               info->tableDef = tableDef->parent;
-              free(tableDef);
+              heap_free(tableDef);
             }
           }
         }
         else
         {
           info->tableDef = tableDef->parent;
-          free(tableDef);
+          heap_free(tableDef);
         }
       }
       else /* v1.0 - v3.0 */
@@ -1127,13 +1129,13 @@ static HRESULT insert_static_object(ME_TextEditor *editor, HENHMETAFILE hemf, HB
   if (hemf)
   {
       stgm.tymed = TYMED_ENHMF;
-      stgm.hEnhMetaFile = hemf;
+      stgm.u.hEnhMetaFile = hemf;
       fm.cfFormat = CF_ENHMETAFILE;
   }
   else if (hbmp)
   {
       stgm.tymed = TYMED_GDI;
-      stgm.hBitmap = hbmp;
+      stgm.u.hBitmap = hbmp;
       fm.cfFormat = CF_BITMAP;
   }
   else return E_FAIL;
@@ -1224,7 +1226,7 @@ static DWORD read_hex_data( RTF_Info *info, BYTE **out )
         return 0;
     }
 
-    buf = malloc(size);
+    buf = HeapAlloc( GetProcessHeap(), 0, size );
     if (!buf) return 0;
 
     val = info->rtfMajor;
@@ -1233,7 +1235,7 @@ static DWORD read_hex_data( RTF_Info *info, BYTE **out )
         RTFGetToken( info );
         if (info->rtfClass == rtfEOF)
         {
-            free(buf);
+            HeapFree( GetProcessHeap(), 0, buf );
             return 0;
         }
         if (info->rtfClass != rtfText) break;
@@ -1242,7 +1244,7 @@ static DWORD read_hex_data( RTF_Info *info, BYTE **out )
             if (read >= size)
             {
                 size *= 2;
-                buf = realloc(buf, size);
+                buf = HeapReAlloc( GetProcessHeap(), 0, buf, size );
                 if (!buf) return 0;
             }
             buf[read++] = RTFCharToHex(val) * 16 + RTFCharToHex(info->rtfMajor);
@@ -1363,7 +1365,7 @@ static void ME_RTFReadPictGroup(RTF_Info *info)
             break;
         }
     }
-    free( buffer );
+    HeapFree( GetProcessHeap(), 0, buffer );
     RTFRouteToken( info ); /* feed "}" back to router */
     return;
 }
@@ -1607,17 +1609,9 @@ static LRESULT ME_StreamIn(ME_TextEditor *editor, DWORD format, EDITSTREAM *stre
   {
     style = editor->pBuffer->pDefaultStyle;
     ME_AddRefStyle(style);
-    if (format & SFF_SELECTION)
-    {
-      ME_GetSelection(editor, &selStart, &selEnd);
-      ME_InternalDeleteText(editor, selStart, to - from, FALSE);
-    }
-    else
-    {
-      set_selection_cursors(editor, 0, 0);
-      ME_InternalDeleteText(editor, &editor->pCursors[1],
-                            ME_GetTextLength(editor), FALSE);
-    }
+    set_selection_cursors(editor, 0, 0);
+    ME_InternalDeleteText(editor, &editor->pCursors[1],
+                          ME_GetTextLength(editor), FALSE);
     from = to = 0;
     ME_ClearTempStyle(editor);
     editor_set_default_para_fmt( editor, &editor->pCursors[0].para->fmt );
@@ -2121,14 +2115,14 @@ static int ME_GetTextEx(ME_TextEditor *editor, GETTEXTEX *ex, LPARAM pText)
       LRESULT rc;
 
       buflen = min(crlfmul * nChars, ex->cb - 1);
-      buffer = malloc((buflen + 1) * sizeof(WCHAR));
+      buffer = heap_alloc((buflen + 1) * sizeof(WCHAR));
 
       nChars = ME_GetTextW(editor, buffer, buflen, &start, nChars, ex->flags & GT_USECRLF, FALSE);
       rc = WideCharToMultiByte(ex->codepage, 0, buffer, nChars + 1,
                                (LPSTR)pText, ex->cb, ex->lpDefaultChar, ex->lpUsedDefChar);
       if (rc) rc--; /* do not count 0 terminator */
 
-      free(buffer);
+      heap_free(buffer);
       return rc;
     }
 }
@@ -2151,7 +2145,6 @@ int set_selection( ME_TextEditor *editor, int to, int from )
     editor_ensure_visible( editor, &editor->pCursors[0] );
     if (!editor->bHideSelection) ME_InvalidateSelection( editor );
     update_caret( editor );
-    ME_Repaint( editor );
     ME_SendSelChange( editor );
 
     return end;
@@ -2204,7 +2197,7 @@ static HRESULT paste_rtf(ME_TextEditor *editor, FORMATETC *fmt, STGMEDIUM *med)
     ME_GlobalDestStruct gds;
     HRESULT hr;
 
-    gds.hData = med->hGlobal;
+    gds.hData = med->u.hGlobal;
     gds.nLength = 0;
     es.dwCookie = (DWORD_PTR)&gds;
     es.pfnCallback = ME_ReadFromHGLOBALRTF;
@@ -2219,7 +2212,7 @@ static HRESULT paste_text(ME_TextEditor *editor, FORMATETC *fmt, STGMEDIUM *med)
     ME_GlobalDestStruct gds;
     HRESULT hr;
 
-    gds.hData = med->hGlobal;
+    gds.hData = med->u.hGlobal;
     gds.nLength = 0;
     es.dwCookie = (DWORD_PTR)&gds;
     es.pfnCallback = ME_ReadFromHGLOBALUnicode;
@@ -2233,7 +2226,7 @@ static HRESULT paste_emf(ME_TextEditor *editor, FORMATETC *fmt, STGMEDIUM *med)
     HRESULT hr;
     SIZEL sz = {0, 0};
 
-    hr = insert_static_object( editor, med->hEnhMetaFile, NULL, &sz );
+    hr = insert_static_object( editor, med->u.hEnhMetaFile, NULL, &sz );
     if (SUCCEEDED(hr))
     {
         ME_CommitUndo( editor );
@@ -2927,11 +2920,10 @@ static BOOL ME_ShowContextMenu(ME_TextEditor *editor, int x, int y)
 
 ME_TextEditor *ME_MakeEditor(ITextHost *texthost, BOOL bEmulateVersion10)
 {
-  ME_TextEditor *ed = malloc( sizeof(*ed) );
+  ME_TextEditor *ed = heap_alloc(sizeof(*ed));
   int i;
   LONG selbarwidth;
   HRESULT hr;
-  HDC hdc;
 
   ed->sizeWindow.cx = ed->sizeWindow.cy = 0;
   if (ITextHost_QueryInterface( texthost, &IID_ITextHost2, (void **)&ed->texthost ) == S_OK)
@@ -2958,9 +2950,7 @@ ME_TextEditor *ME_MakeEditor(ITextHost *texthost, BOOL bEmulateVersion10)
   ed->nZoomNumerator = ed->nZoomDenominator = 0;
   ed->nAvailWidth = 0; /* wrap to client area */
   list_init( &ed->style_list );
-
-  hdc = ITextHost_TxGetDC( ed->texthost );
-  ME_MakeFirstParagraph( ed, hdc );
+  ME_MakeFirstParagraph(ed);
   /* The four cursors are for:
    * 0 - The position where the caret is shown
    * 1 - The anchored end of the selection (for normal selection)
@@ -2968,7 +2958,7 @@ ME_TextEditor *ME_MakeEditor(ITextHost *texthost, BOOL bEmulateVersion10)
    * or paragraph selection.
    */
   ed->nCursors = 4;
-  ed->pCursors = malloc( ed->nCursors * sizeof(*ed->pCursors) );
+  ed->pCursors = heap_alloc(ed->nCursors * sizeof(*ed->pCursors));
   ME_SetCursorToStart(ed, &ed->pCursors[0]);
   ed->pCursors[1] = ed->pCursors[0];
   ed->pCursors[2] = ed->pCursors[0];
@@ -2996,7 +2986,6 @@ ME_TextEditor *ME_MakeEditor(ITextHost *texthost, BOOL bEmulateVersion10)
   ed->mode |= (ed->props & TXTBIT_RICHTEXT) ? TM_RICHTEXT : TM_PLAINTEXT;
   ed->AutoURLDetect_bEnable = FALSE;
   ed->bHaveFocus = FALSE;
-  ed->freeze_count = 0;
   ed->bMouseCaptured = FALSE;
   ed->caret_hidden = FALSE;
   ed->caret_height = 0;
@@ -3060,9 +3049,6 @@ ME_TextEditor *ME_MakeEditor(ITextHost *texthost, BOOL bEmulateVersion10)
   list_init( &ed->reobj_list );
   OleInitialize(NULL);
 
-  wrap_marked_paras_dc( ed, hdc, FALSE );
-  ITextHost_TxReleaseDC( ed->texthost, hdc );
-
   return ed;
 }
 
@@ -3099,9 +3085,9 @@ void ME_DestroyEditor(ME_TextEditor *editor)
 
   OleUninitialize();
 
-  free(editor->pBuffer);
-  free(editor->pCursors);
-  free(editor);
+  heap_free(editor->pBuffer);
+  heap_free(editor->pCursors);
+  heap_free(editor);
 }
 
 static inline int get_default_line_height( ME_TextEditor *editor )
@@ -3590,6 +3576,20 @@ LRESULT editor_handle_message( ME_TextEditor *editor, UINT msg, WPARAM wParam,
     CHARFORMAT2W fmt;
     HDC hDC;
     BOOL bRepaint = LOWORD(lParam);
+    const char *sgi = getenv("STEAM_COMPAT_APP_ID");
+
+    /* Grand Theft Auto V installer tries to set font for license
+     * richedit to Arial, which breaks CJK languages. Given that the
+     * RTF already has reasonable fonts set, we can just ignore the
+     * message. This can be removed once our richedit is able to do
+     * font substitution properly. CW bug #19917.
+     *
+     * It's important that STEAM_COMPAT_APP_ID environment variable is
+     * used instead of the usual SteamGameId, because the latter is
+     * not available during the configuration stage, when the
+     * installer is run. */
+    if (sgi && strcmp(sgi, "271590") == 0)
+        return 0;
 
     if (!wParam)
       wParam = (WPARAM)GetStockObject(SYSTEM_FONT);
@@ -4113,8 +4113,8 @@ LRESULT editor_handle_message( ME_TextEditor *editor, UINT msg, WPARAM wParam,
     return 0;
   case WM_IME_STARTCOMPOSITION:
   {
+    editor->imeStartIndex=ME_GetCursorOfs(&editor->pCursors[0]);
     ME_DeleteSelection(editor);
-    editor->imeStartIndex = ME_GetCursorOfs(&editor->pCursors[0]);
     ME_CommitUndo(editor);
     ME_UpdateRepaint(editor, FALSE);
     return 0;
@@ -4136,11 +4136,11 @@ LRESULT editor_handle_message( ME_TextEditor *editor, UINT msg, WPARAM wParam,
           dwIndex = GCS_COMPSTR;
 
         dwBufLen = ImmGetCompositionStringW(hIMC, dwIndex, NULL, 0);
-        lpCompStr = malloc(dwBufLen + sizeof(WCHAR));
+        lpCompStr = HeapAlloc(GetProcessHeap(),0,dwBufLen + sizeof(WCHAR));
         ImmGetCompositionStringW(hIMC, dwIndex, lpCompStr, dwBufLen);
         lpCompStr[dwBufLen/sizeof(WCHAR)] = 0;
         ME_InsertTextFromCursor(editor,0,lpCompStr,dwBufLen/sizeof(WCHAR),style);
-        free(lpCompStr);
+        HeapFree(GetProcessHeap(), 0, lpCompStr);
 
         if (dwIndex == GCS_COMPSTR)
           set_selection_cursors(editor,editor->imeStartIndex,
@@ -4309,7 +4309,7 @@ int ME_GetTextW(ME_TextEditor *editor, WCHAR *buffer, int buflen,
     str = get_text( run, 0 );
   }
   /* append '\r' to the last paragraph. */
-  if (run == para_end_run( para_prev( editor_end_para( editor ) ) ) && bEOP && buflen)
+  if (run == para_end_run( para_prev( editor_end_para( editor ) ) ) && bEOP)
   {
     *buffer = '\r';
     buffer ++;

@@ -4,6 +4,7 @@ IMPORTS   = comctl32 user32
 
 EXTRADLLFLAGS = -Wb,--prefer-native
 
-SOURCES = \
-	compstui.rc \
+C_SRCS = \
 	compstui_main.c
+
+RC_SRCS = compstui.rc

@@ -2,6 +2,8 @@ MODULE    = setx.exe
 
 EXTRADLLFLAGS = -mconsole -municode
 
-SOURCES = \
-	main.c \
+C_SRCS = \
+	main.c
+
+RC_SRCS = \
 	version.rc

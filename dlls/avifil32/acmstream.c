@@ -86,7 +86,7 @@ static HRESULT AVIFILE_OpenCompressor(IAVIStreamImpl *This)
     hr = AVIStreamFormatSize(This->pStream, This->sInfo.dwStart, &This->cbInFormat);
     if (FAILED(hr))
       return hr;
-    This->lpInFormat = malloc(This->cbInFormat);
+    This->lpInFormat = HeapAlloc(GetProcessHeap(), 0, This->cbInFormat);
     if (This->lpInFormat == NULL)
       return AVIERR_MEMORY;
 
@@ -98,7 +98,7 @@ static HRESULT AVIFILE_OpenCompressor(IAVIStreamImpl *This)
     if (This->lpOutFormat == NULL) {
       /* we must decode to default format */
       This->cbOutFormat = sizeof(WAVEFORMATEX);
-      This->lpOutFormat = malloc(This->cbOutFormat);
+      This->lpOutFormat = HeapAlloc(GetProcessHeap(), 0, This->cbOutFormat);
       if (This->lpOutFormat == NULL)
         return AVIERR_MEMORY;
 
@@ -181,17 +181,17 @@ static ULONG WINAPI ACMStream_fnRelease(IAVIStream* iface)
       acmStreamClose(This->has, 0);
       This->has = NULL;
     }
-    free(This->acmStreamHdr.pbSrc);
+    HeapFree(GetProcessHeap(), 0, This->acmStreamHdr.pbSrc);
     This->acmStreamHdr.pbSrc = NULL;
-    free(This->acmStreamHdr.pbDst);
+    HeapFree(GetProcessHeap(), 0, This->acmStreamHdr.pbDst);
     This->acmStreamHdr.pbDst = NULL;
     if (This->lpInFormat != NULL) {
-      free(This->lpInFormat);
+      HeapFree(GetProcessHeap(), 0, This->lpInFormat);
       This->lpInFormat = NULL;
       This->cbInFormat = 0;
     }
     if (This->lpOutFormat != NULL) {
-      free(This->lpOutFormat);
+      HeapFree(GetProcessHeap(), 0, This->lpOutFormat);
       This->lpOutFormat = NULL;
       This->cbOutFormat = 0;
     }
@@ -199,7 +199,7 @@ static ULONG WINAPI ACMStream_fnRelease(IAVIStream* iface)
       IAVIStream_Release(This->pStream);
       This->pStream = NULL;
     }
-    free(This);
+    HeapFree(GetProcessHeap(), 0, This);
 
     return 0;
   }
@@ -251,7 +251,7 @@ static HRESULT WINAPI ACMStream_fnCreate(IAVIStream *iface, LPARAM lParam1,
     else
       This->cbOutFormat = sizeof(WAVEFORMATEX);
 
-    This->lpOutFormat = malloc(This->cbOutFormat);
+    This->lpOutFormat = HeapAlloc(GetProcessHeap(), 0, This->cbOutFormat);
     if (This->lpOutFormat == NULL)
       return AVIERR_MEMORY;
 
@@ -384,7 +384,7 @@ static HRESULT WINAPI ACMStream_fnSetFormat(IAVIStream *iface, LONG pos,
   if ((This->sInfo.dwCaps & AVIFILECAPS_CANWRITE) == 0)
     return AVIERR_READONLY;
 
-  This->lpInFormat = malloc(formatsize);
+  This->lpInFormat = HeapAlloc(GetProcessHeap(), 0, formatsize);
   if (This->lpInFormat == NULL)
     return AVIERR_MEMORY;
   This->cbInFormat = formatsize;
@@ -464,7 +464,7 @@ static HRESULT WINAPI ACMStream_fnRead(IAVIStream *iface, LONG start,
 
   /* Need to free destination buffer used for writing? */
   if (This->acmStreamHdr.pbDst != NULL) {
-    free(This->acmStreamHdr.pbDst);
+    HeapFree(GetProcessHeap(), 0, This->acmStreamHdr.pbDst);
     This->acmStreamHdr.pbDst     = NULL;
     This->acmStreamHdr.dwDstUser = 0;
   }
@@ -472,7 +472,10 @@ static HRESULT WINAPI ACMStream_fnRead(IAVIStream *iface, LONG start,
   /* need bigger source buffer? */
   if (This->acmStreamHdr.pbSrc == NULL ||
       This->acmStreamHdr.dwSrcUser < size) {
-    This->acmStreamHdr.pbSrc = realloc(This->acmStreamHdr.pbSrc, size);
+    if (This->acmStreamHdr.pbSrc == NULL)
+      This->acmStreamHdr.pbSrc = HeapAlloc(GetProcessHeap(), 0, size);
+    else
+      This->acmStreamHdr.pbSrc = HeapReAlloc(GetProcessHeap(), 0, This->acmStreamHdr.pbSrc, size);
     if (This->acmStreamHdr.pbSrc == NULL)
       return AVIERR_MEMORY;
     This->acmStreamHdr.dwSrcUser = size;
@@ -564,7 +567,7 @@ static HRESULT WINAPI ACMStream_fnWrite(IAVIStream *iface, LONG start,
 
   /* Need to free source buffer used for reading? */
   if (This->acmStreamHdr.pbSrc != NULL) {
-    free(This->acmStreamHdr.pbSrc);
+    HeapFree(GetProcessHeap(), 0, This->acmStreamHdr.pbSrc);
     This->acmStreamHdr.pbSrc     = NULL;
     This->acmStreamHdr.dwSrcUser = 0;
   }
@@ -572,7 +575,10 @@ static HRESULT WINAPI ACMStream_fnWrite(IAVIStream *iface, LONG start,
   /* Need bigger destination buffer? */
   if (This->acmStreamHdr.pbDst == NULL ||
       This->acmStreamHdr.dwDstUser < size) {
-    This->acmStreamHdr.pbDst = realloc(This->acmStreamHdr.pbDst, size);
+    if (This->acmStreamHdr.pbDst == NULL)
+      This->acmStreamHdr.pbDst = HeapAlloc(GetProcessHeap(), 0, size);
+    else
+      This->acmStreamHdr.pbDst = HeapReAlloc(GetProcessHeap(), 0, This->acmStreamHdr.pbDst, size);
     if (This->acmStreamHdr.pbDst == NULL)
       return AVIERR_MEMORY;
     This->acmStreamHdr.dwDstUser = size;
@@ -704,7 +710,7 @@ HRESULT AVIFILE_CreateACMStream(REFIID riid, LPVOID *ppv)
 
   *ppv = NULL;
 
-  pstream = calloc(1, sizeof(IAVIStreamImpl));
+  pstream = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(IAVIStreamImpl));
   if (pstream == NULL)
     return AVIERR_MEMORY;
 
@@ -712,7 +718,7 @@ HRESULT AVIFILE_CreateACMStream(REFIID riid, LPVOID *ppv)
 
   hr = IAVIStream_QueryInterface(&pstream->IAVIStream_iface, riid, ppv);
   if (FAILED(hr))
-    free(pstream);
+    HeapFree(GetProcessHeap(), 0, pstream);
 
   return hr;
 }

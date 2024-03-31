@@ -22,6 +22,8 @@
 
 
 #define COBJMACROS
+#define NONAMELESSUNION
+#define NONAMELESSSTRUCT
 #include "dxdiag_private.h"
 #include "winver.h"
 #include "objidl.h"
@@ -68,7 +70,7 @@ static HRESULT WINAPI IDxDiagProviderImpl_QueryInterface(IDxDiagProvider *iface,
     if (IsEqualGUID(riid, &IID_IUnknown)
         || IsEqualGUID(riid, &IID_IDxDiagProvider)) {
         IUnknown_AddRef(iface);
-        *ppobj = &This->IDxDiagProvider_iface;
+        *ppobj = This;
         return S_OK;
     }
 
@@ -612,7 +614,7 @@ static HRESULT build_systeminfo_tree(IDxDiagContainerImpl_Container *node)
     WCHAR buffer[MAX_PATH], computer_name[MAX_COMPUTERNAME_LENGTH + 1], print_buf[200], localized_pagefile_fmt[200];
     DWORD_PTR args[2];
 
-    hr = add_ui4_property(node, L"dwDirectXVersionMajor", 9);
+    hr = add_ui4_property(node, L"dwDirectXVersionMajor", 12);
     if (FAILED(hr))
         return hr;
 
@@ -620,15 +622,15 @@ static HRESULT build_systeminfo_tree(IDxDiagContainerImpl_Container *node)
     if (FAILED(hr))
         return hr;
 
-    hr = add_bstr_property(node, L"szDirectXVersionLetter", L"c");
+    hr = add_bstr_property(node, L"szDirectXVersionLetter", L" ");
     if (FAILED(hr))
         return hr;
 
-    hr = add_bstr_property(node, L"szDirectXVersionEnglish", L"4.09.0000.0904");
+    hr = add_bstr_property(node, L"szDirectXVersionEnglish", L"");
     if (FAILED(hr))
         return hr;
 
-    hr = add_bstr_property(node, L"szDirectXVersionLongEnglish", L"= \"DirectX 9.0c (4.09.0000.0904)");
+    hr = add_bstr_property(node, L"szDirectXVersionLongEnglish", L"DirectX 12");
     if (FAILED(hr))
         return hr;
 
@@ -695,7 +697,7 @@ static HRESULT build_systeminfo_tree(IDxDiagContainerImpl_Container *node)
     args[0] = usedpage_mb;
     args[1] = availpage_mb;
     FormatMessageW(FORMAT_MESSAGE_FROM_STRING|FORMAT_MESSAGE_ARGUMENT_ARRAY, localized_pagefile_fmt,
-                   0, 0, print_buf, ARRAY_SIZE(print_buf), (va_list *)args);
+                   0, 0, print_buf, ARRAY_SIZE(print_buf), (__ms_va_list*)args);
 
     hr = add_bstr_property(node, L"szPageFileLocalized", print_buf);
     if (FAILED(hr))
@@ -790,7 +792,7 @@ static BOOL get_texture_memory(GUID *adapter, DWORD *available_mem)
     if (SUCCEEDED(hr))
     {
         dd_caps.dwCaps = DDSCAPS_LOCALVIDMEM | DDSCAPS_VIDEOMEMORY;
-        dd_caps.dwCaps2 = dd_caps.dwCaps3 = dd_caps.dwCaps4 = 0;
+        dd_caps.dwCaps2 = dd_caps.dwCaps3 = dd_caps.u1.dwCaps4 = 0;
         hr = IDirectDraw7_GetAvailableVidMem(pDirectDraw, &dd_caps, available_mem, NULL);
         IDirectDraw7_Release(pDirectDraw);
         if (SUCCEEDED(hr))
@@ -885,8 +887,8 @@ static HRESULT fill_display_information_d3d(IDxDiagContainerImpl_Container *node
                 goto cleanup;
 
             swprintf(buffer, ARRAY_SIZE(buffer), L"%u.%u.%04u.%04u",
-                    HIWORD(adapter_info.DriverVersion.HighPart), LOWORD(adapter_info.DriverVersion.HighPart),
-                    HIWORD(adapter_info.DriverVersion.LowPart), LOWORD(adapter_info.DriverVersion.LowPart));
+                    HIWORD(adapter_info.DriverVersion.u.HighPart), LOWORD(adapter_info.DriverVersion.u.HighPart),
+                    HIWORD(adapter_info.DriverVersion.u.LowPart), LOWORD(adapter_info.DriverVersion.u.LowPart));
 
             hr = add_bstr_property(display_adapter, L"szDriverVersion", buffer);
             if (FAILED(hr))
@@ -1152,7 +1154,7 @@ static HRESULT fill_display_information_fallback(IDxDiagContainerImpl_Container 
         return S_OK;
 
     dd_caps.dwCaps = DDSCAPS_LOCALVIDMEM | DDSCAPS_VIDEOMEMORY;
-    dd_caps.dwCaps2 = dd_caps.dwCaps3 = dd_caps.dwCaps4 = 0;
+    dd_caps.dwCaps2 = dd_caps.dwCaps3 = dd_caps.u1.dwCaps4 = 0;
     hr = IDirectDraw7_GetAvailableVidMem(pDirectDraw, &dd_caps, &tmp, NULL);
     if (SUCCEEDED(hr))
     {
@@ -1188,7 +1190,7 @@ static HRESULT fill_display_information_fallback(IDxDiagContainerImpl_Container 
         if (surface_descr.dwFlags & DDSD_PIXELFORMAT)
         {
             hr = add_ui4_property(display_adapter, L"dwBpp",
-                    surface_descr.ddpfPixelFormat.dwRGBBitCount);
+                    surface_descr.u4.ddpfPixelFormat.u1.dwRGBBitCount);
             if (FAILED(hr))
                 goto cleanup;
         }
@@ -1652,7 +1654,7 @@ static HRESULT build_directshowfilters_tree(IDxDiagContainerImpl_Container *node
         return hr;
 
     hr = ICreateDevEnum_CreateClassEnumerator(pCreateDevEnum, &CLSID_ActiveMovieCategories, &pEmCat, 0);
-    if (hr != S_OK)
+    if (FAILED(hr))
         goto cleanup;
 
     while (IEnumMoniker_Next(pEmCat, 1, &pMCat, NULL) == S_OK)

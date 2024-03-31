@@ -1,7 +1,7 @@
 MODULE    = wbemprox.dll
 IMPORTS   = winspool version iphlpapi dxgi oleaut32 ole32 advapi32 user32 gdi32 ws2_32 rpcrt4 setupapi
 
-SOURCES = \
+C_SRCS = \
 	builtin.c \
 	class.c \
 	main.c \
@@ -14,6 +14,8 @@ SOURCES = \
 	services.c \
 	sysrestore.c \
 	table.c \
-	wbemlocator.c \
-	wbemprox.idl \
-	wql.y
+	wbemlocator.c
+
+IDL_SRCS = wbemprox.idl
+
+BISON_SRCS = wql.y

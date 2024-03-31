@@ -292,43 +292,17 @@ Call ok(Lbound(arr2) = 0, "Lbound(x) = " & Lbound(x))
 Call ok(Lbound(arr2, 1) = 0, "Lbound(x) = " & Lbound(x))
 Call ok(Lbound(arr2, 2) = 0, "Lbound(x) = " & Lbound(x))
 
-sub testLBoundError()
-    on error resume next
-    call Err.clear()
-    call LBound()
-    call ok(Err.number = 450, "Err.number = " & Err.number)
-    call Err.clear()
-    call LBound(Empty)
-    call ok(Err.number = 13, "Err.number = " & Err.number)
-    call Err.clear()
-    call LBound(Null)
-    call ok(Err.number = 13, "Err.number = " & Err.number)
-    call Err.clear()
-    call LBound(arr, 1, 2)
-    call ok(Err.number = 450, "Err.number = " & Err.number)
-    if isEnglishLang then call ok(Err.description = "Wrong number of arguments or invalid property assignment", _
-                                  "Err.description = " & Err.description)
-end sub
-
 sub testUBoundError()
     on error resume next
     call Err.clear()
     call UBound()
     call ok(Err.number = 450, "Err.number = " & Err.number)
     call Err.clear()
-    call UBound(Empty)
-    call ok(Err.number = 13, "Err.number = " & Err.number)
-    call Err.clear()
-    call UBound(Null)
-    call ok(Err.number = 13, "Err.number = " & Err.number)
-    call Err.clear()
     call UBound(arr, 1, 2)
     call ok(Err.number = 450, "Err.number = " & Err.number)
     if isEnglishLang then call ok(Err.description = "Wrong number of arguments or invalid property assignment", _
                                   "Err.description = " & Err.description)
 end sub
-
-call testLBoundError()
 call testUBoundError()
 
 Dim newObject
@@ -1090,29 +1064,6 @@ TestRound "2", 2, "VT_R8"
 TestRound true, true, "VT_BOOL"
 TestRound false, false, "VT_BOOL"
 
-Sub TestRound2(val, decnum, exval, vt)
-    Call ok(Round(val, decnum) = exval, "Round(" & val & " , " & decnum & ") = " & Round(val, decnum))
-    Call ok(getVT(Round(val, decnum)) = vt, "getVT(Round(" & val & " , " & decnum & ")) = " & getVT(Round(val, decnum)))
-End Sub
-
-TestRound2 3, 0, 3, "VT_I2"
-TestRound2 3, 1, 3, "VT_I2"
-TestRound2 3.3, 0, 3, "VT_R8"
-TestRound2 3.8, 0, 4, "VT_R8"
-TestRound2 3.5, 0, 4, "VT_R8"
-TestRound2 -3.3, 0, -3, "VT_R8"
-TestRound2 -3.5, 0, -4, "VT_R8"
-TestRound2 3.3, 1, 3.3, "VT_R8"
-TestRound2 3.8, 1, 3.8, "VT_R8"
-TestRound2 3.5, 1, 3.5, "VT_R8"
-TestRound2 -3.3, 1, -3.3, "VT_R8"
-TestRound2 -3.5, 1, -3.5, "VT_R8"
-TestRound2 "2", 1, 2, "VT_R8"
-TestRound2 true, 0, true, "VT_BOOL"
-TestRound2 false, 0, false, "VT_BOOL"
-TestRound2 true, 1, true, "VT_BOOL"
-TestRound2 false, 1, false, "VT_BOOL"
-
 if isEnglishLang then
     Call ok(WeekDayName(1) = "Sunday", "WeekDayName(1) = " & WeekDayName(1))
     Call ok(WeekDayName(3) = "Tuesday", "WeekDayName(3) = " & WeekDayName(3))
@@ -1589,9 +1540,7 @@ MyObject.myval = 0
 Call ok(CSng(MyObject) = 0, "CSng(MyObject) = " & CSng(MyObject))
 Call ok(getVT(CSng(MyObject)) = "VT_R4", "getVT(CSng(MyObject)) = " & getVT(CSng(MyObject)))
 
-Call ok(TypeName(Nothing) = "Nothing", "TypeName(Nothing) = " & TypeName(Nothing))
-Call ok(getVT(TypeName(Nothing)) = "VT_BSTR", "getVT(TypeName(Nothing)) = " & getVT(TypeName(Nothing)))
-Call ok(TypeName(Empty) = "Empty", "TypeName(Empty) = " & TypeName(Empty))
+Call ok(TypeName(Empty) = "Empty", "TypeName(MyEmpty) = " & TypeName(Empty))
 Call ok(getVT(TypeName(Empty)) = "VT_BSTR", "getVT(TypeName(Empty)) = " & getVT(TypeName(Empty)))
 Call ok(TypeName(Null) = "Null", "TypeName(Null) = " & TypeName(Null))
 Call ok(getVT(TypeName(Null)) = "VT_BSTR", "getVT(TypeName(Null)) = " & getVT(TypeName(Null)))
@@ -1697,7 +1646,6 @@ Call ok(Abs(True) = 1, "Abs(True) = " & Abs(True))
 Call ok(getVT(Abs(True)) = "VT_I2", "getVT(Abs(True)) = " & getVT(Abs(True)))
 Call ok(Abs(CByte(1)) = 1, "Abs(CByte(1)) = " & Abs(CByte(1)))
 Call ok(getVT(Abs(CByte(1))) = "VT_UI1", "getVT(Abs(CByte(1))) = " & getVT(Abs(CByte(1))))
-Call ok(Abs("30000") = 30000, "Abs(""30000"") = " & Abs("30000"))
 
 Sub testAbsError(strings, error_num1, error_num2)
     on error resume next

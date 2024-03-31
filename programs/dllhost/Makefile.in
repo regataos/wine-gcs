@@ -3,5 +3,5 @@ IMPORTS   = ole32 uuid
 
 EXTRADLLFLAGS = -mwindows -municode
 
-SOURCES = \
+C_SRCS = \
 	dllhost.c

@@ -66,61 +66,62 @@ bool array_reserve(void **elements, size_t *capacity, size_t count, size_t size)
     return TRUE;
 }
 
-wg_parser_t wg_parser_create(enum wg_parser_type type, bool output_compressed)
+struct wg_parser *wg_parser_create(enum wg_parser_type type, bool use_opengl)
 {
     struct wg_parser_create_params params =
     {
         .type = type,
-        .output_compressed = output_compressed,
+        .use_opengl = use_opengl,
         .err_on = ERR_ON(quartz),
         .warn_on = WARN_ON(quartz),
     };
 
-    TRACE("type %#x.\n", type);
+    TRACE("type %#x, use_opengl %u.\n", type, use_opengl);
 
     if (WINE_UNIX_CALL(unix_wg_parser_create, &params))
-        return 0;
+        return NULL;
 
-    TRACE("Returning parser %#I64x.\n", params.parser);
+    TRACE("Returning parser %p.\n", params.parser);
 
     return params.parser;
 }
 
-void wg_parser_destroy(wg_parser_t parser)
+void wg_parser_destroy(struct wg_parser *parser)
 {
-    TRACE("parser %#I64x.\n", parser);
+    TRACE("parser %p.\n", parser);
 
-    WINE_UNIX_CALL(unix_wg_parser_destroy, &parser);
+    WINE_UNIX_CALL(unix_wg_parser_destroy, parser);
 }
 
-HRESULT wg_parser_connect(wg_parser_t parser, uint64_t file_size)
+HRESULT wg_parser_connect(struct wg_parser *parser, uint64_t file_size, const WCHAR *uri)
 {
     struct wg_parser_connect_params params =
     {
         .parser = parser,
         .file_size = file_size,
+        .uri = uri,
     };
 
-    TRACE("parser %#I64x, file_size %I64u.\n", parser, file_size);
+    TRACE("parser %p, file_size %I64u.\n", parser, file_size);
 
     return WINE_UNIX_CALL(unix_wg_parser_connect, &params);
 }
 
-void wg_parser_disconnect(wg_parser_t parser)
+void wg_parser_disconnect(struct wg_parser *parser)
 {
-    TRACE("parser %#I64x.\n", parser);
+    TRACE("parser %p.\n", parser);
 
-    WINE_UNIX_CALL(unix_wg_parser_disconnect, &parser);
+    WINE_UNIX_CALL(unix_wg_parser_disconnect, parser);
 }
 
-bool wg_parser_get_next_read_offset(wg_parser_t parser, uint64_t *offset, uint32_t *size)
+bool wg_parser_get_next_read_offset(struct wg_parser *parser, uint64_t *offset, uint32_t *size)
 {
     struct wg_parser_get_next_read_offset_params params =
     {
         .parser = parser,
     };
 
-    TRACE("parser %#I64x, offset %p, size %p.\n", parser, offset, size);
+    TRACE("parser %p, offset %p, size %p.\n", parser, offset, size);
 
     if (WINE_UNIX_CALL(unix_wg_parser_get_next_read_offset, &params))
         return false;
@@ -129,7 +130,7 @@ bool wg_parser_get_next_read_offset(wg_parser_t parser, uint64_t *offset, uint32
     return true;
 }
 
-void wg_parser_push_data(wg_parser_t parser, const void *data, uint32_t size)
+void wg_parser_push_data(struct wg_parser *parser, const void *data, uint32_t size)
 {
     struct wg_parser_push_data_params params =
     {
@@ -138,25 +139,25 @@ void wg_parser_push_data(wg_parser_t parser, const void *data, uint32_t size)
         .size = size,
     };
 
-    TRACE("parser %#I64x, data %p, size %u.\n", parser, data, size);
+    TRACE("parser %p, data %p, size %u.\n", parser, data, size);
 
     WINE_UNIX_CALL(unix_wg_parser_push_data, &params);
 }
 
-uint32_t wg_parser_get_stream_count(wg_parser_t parser)
+uint32_t wg_parser_get_stream_count(struct wg_parser *parser)
 {
     struct wg_parser_get_stream_count_params params =
     {
         .parser = parser,
     };
 
-    TRACE("parser %#I64x.\n", parser);
+    TRACE("parser %p.\n", parser);
 
     WINE_UNIX_CALL(unix_wg_parser_get_stream_count, &params);
     return params.count;
 }
 
-wg_parser_stream_t wg_parser_get_stream(wg_parser_t parser, uint32_t index)
+struct wg_parser_stream *wg_parser_get_stream(struct wg_parser *parser, uint32_t index)
 {
     struct wg_parser_get_stream_params params =
     {
@@ -164,15 +165,15 @@ wg_parser_stream_t wg_parser_get_stream(wg_parser_t parser, uint32_t index)
         .index = index,
     };
 
-    TRACE("parser %#I64x, index %u.\n", parser, index);
+    TRACE("parser %p, index %u.\n", parser, index);
 
     WINE_UNIX_CALL(unix_wg_parser_get_stream, &params);
 
-    TRACE("Returning stream %#I64x.\n", params.stream);
+    TRACE("Returning stream %p.\n", params.stream);
     return params.stream;
 }
 
-void wg_parser_stream_get_preferred_format(wg_parser_stream_t stream, struct wg_format *format)
+void wg_parser_stream_get_preferred_format(struct wg_parser_stream *stream, struct wg_format *format)
 {
     struct wg_parser_stream_get_preferred_format_params params =
     {
@@ -180,45 +181,33 @@ void wg_parser_stream_get_preferred_format(wg_parser_stream_t stream, struct wg_
         .format = format,
     };
 
-    TRACE("stream %#I64x, format %p.\n", stream, format);
+    TRACE("stream %p, format %p.\n", stream, format);
 
     WINE_UNIX_CALL(unix_wg_parser_stream_get_preferred_format, &params);
 }
 
-void wg_parser_stream_get_codec_format(wg_parser_stream_t stream, struct wg_format *format)
-{
-    struct wg_parser_stream_get_codec_format_params params =
-    {
-        .stream = stream,
-        .format = format,
-    };
-
-    TRACE("stream %#I64x, format %p.\n", stream, format);
-
-    WINE_UNIX_CALL(unix_wg_parser_stream_get_codec_format, &params);
-}
-
-void wg_parser_stream_enable(wg_parser_stream_t stream, const struct wg_format *format)
+void wg_parser_stream_enable(struct wg_parser_stream *stream, const struct wg_format *format, uint32_t flags)
 {
     struct wg_parser_stream_enable_params params =
     {
         .stream = stream,
         .format = format,
+        .flags = flags,
     };
 
-    TRACE("stream %#I64x, format %p.\n", stream, format);
+    TRACE("stream %p, format %p.\n", stream, format);
 
     WINE_UNIX_CALL(unix_wg_parser_stream_enable, &params);
 }
 
-void wg_parser_stream_disable(wg_parser_stream_t stream)
+void wg_parser_stream_disable(struct wg_parser_stream *stream)
 {
-    TRACE("stream %#I64x.\n", stream);
+    TRACE("stream %p.\n", stream);
 
-    WINE_UNIX_CALL(unix_wg_parser_stream_disable, &stream);
+    WINE_UNIX_CALL(unix_wg_parser_stream_disable, stream);
 }
 
-bool wg_parser_stream_get_buffer(wg_parser_t parser, wg_parser_stream_t stream,
+bool wg_parser_stream_get_buffer(struct wg_parser *parser, struct wg_parser_stream *stream,
         struct wg_parser_buffer *buffer)
 {
     struct wg_parser_stream_get_buffer_params params =
@@ -228,12 +217,12 @@ bool wg_parser_stream_get_buffer(wg_parser_t parser, wg_parser_stream_t stream,
         .buffer = buffer,
     };
 
-    TRACE("parser %#I64x, stream %#I64x, buffer %p.\n", parser, stream, buffer);
+    TRACE("parser %p, stream %p, buffer %p.\n", parser, stream, buffer);
 
     return !WINE_UNIX_CALL(unix_wg_parser_stream_get_buffer, &params);
 }
 
-bool wg_parser_stream_copy_buffer(wg_parser_stream_t stream,
+bool wg_parser_stream_copy_buffer(struct wg_parser_stream *stream,
         void *data, uint32_t offset, uint32_t size)
 {
     struct wg_parser_stream_copy_buffer_params params =
@@ -244,19 +233,19 @@ bool wg_parser_stream_copy_buffer(wg_parser_stream_t stream,
         .size = size,
     };
 
-    TRACE("stream %#I64x, data %p, offset %u, size %u.\n", stream, data, offset, size);
+    TRACE("stream %p, data %p, offset %u, size %u.\n", stream, data, offset, size);
 
     return !WINE_UNIX_CALL(unix_wg_parser_stream_copy_buffer, &params);
 }
 
-void wg_parser_stream_release_buffer(wg_parser_stream_t stream)
+void wg_parser_stream_release_buffer(struct wg_parser_stream *stream)
 {
-    TRACE("stream %#I64x.\n", stream);
+    TRACE("stream %p.\n", stream);
 
-    WINE_UNIX_CALL(unix_wg_parser_stream_release_buffer, &stream);
+    WINE_UNIX_CALL(unix_wg_parser_stream_release_buffer, stream);
 }
 
-void wg_parser_stream_notify_qos(wg_parser_stream_t stream,
+void wg_parser_stream_notify_qos(struct wg_parser_stream *stream,
         bool underflow, double proportion, int64_t diff, uint64_t timestamp)
 {
     struct wg_parser_stream_notify_qos_params params =
@@ -268,20 +257,20 @@ void wg_parser_stream_notify_qos(wg_parser_stream_t stream,
         .timestamp = timestamp,
     };
 
-    TRACE("stream %#I64x, underflow %d, proportion %.16e, diff %I64d, timestamp %I64u.\n",
+    TRACE("stream %p, underflow %d, proportion %.16e, diff %I64d, timestamp %I64u.\n",
             stream, underflow, proportion, diff, timestamp);
 
     WINE_UNIX_CALL(unix_wg_parser_stream_notify_qos, &params);
 }
 
-uint64_t wg_parser_stream_get_duration(wg_parser_stream_t stream)
+uint64_t wg_parser_stream_get_duration(struct wg_parser_stream *stream)
 {
     struct wg_parser_stream_get_duration_params params =
     {
         .stream = stream,
     };
 
-    TRACE("stream %#I64x.\n", stream);
+    TRACE("stream %p.\n", stream);
 
     WINE_UNIX_CALL(unix_wg_parser_stream_get_duration, &params);
 
@@ -289,7 +278,7 @@ uint64_t wg_parser_stream_get_duration(wg_parser_stream_t stream)
     return params.duration;
 }
 
-char *wg_parser_stream_get_tag(wg_parser_stream_t stream, enum wg_parser_tag tag)
+char *wg_parser_stream_get_tag(struct wg_parser_stream *stream, enum wg_parser_tag tag)
 {
     uint32_t size = 0;
     struct wg_parser_stream_get_tag_params params =
@@ -317,7 +306,7 @@ char *wg_parser_stream_get_tag(wg_parser_stream_t stream, enum wg_parser_tag tag
     return buffer;
 }
 
-void wg_parser_stream_seek(wg_parser_stream_t stream, double rate,
+void wg_parser_stream_seek(struct wg_parser_stream *stream, double rate,
         uint64_t start_pos, uint64_t stop_pos, DWORD start_flags, DWORD stop_flags)
 {
     struct wg_parser_stream_seek_params params =
@@ -330,13 +319,13 @@ void wg_parser_stream_seek(wg_parser_stream_t stream, double rate,
         .stop_flags = stop_flags,
     };
 
-    TRACE("stream %#I64x, rate %.16e, start_pos %I64u, stop_pos %I64u, start_flags %#lx, stop_flags %#lx.\n",
+    TRACE("stream %p, rate %.16e, start_pos %I64u, stop_pos %I64u, start_flags %#lx, stop_flags %#lx.\n",
             stream, rate, start_pos, stop_pos, start_flags, stop_flags);
 
     WINE_UNIX_CALL(unix_wg_parser_stream_seek, &params);
 }
 
-wg_transform_t wg_transform_create(const struct wg_format *input_format,
+struct wg_transform *wg_transform_create(const struct wg_format *input_format,
         const struct wg_format *output_format, const struct wg_transform_attrs *attrs)
 {
     struct wg_transform_create_params params =
@@ -349,20 +338,20 @@ wg_transform_t wg_transform_create(const struct wg_format *input_format,
     TRACE("input_format %p, output_format %p.\n", input_format, output_format);
 
     if (WINE_UNIX_CALL(unix_wg_transform_create, &params))
-        return 0;
+        return NULL;
 
-    TRACE("Returning transform %#I64x.\n", params.transform);
+    TRACE("Returning transform %p.\n", params.transform);
     return params.transform;
 }
 
-void wg_transform_destroy(wg_transform_t transform)
+void wg_transform_destroy(struct wg_transform *transform)
 {
-    TRACE("transform %#I64x.\n", transform);
+    TRACE("transform %p.\n", transform);
 
-    WINE_UNIX_CALL(unix_wg_transform_destroy, &transform);
+    WINE_UNIX_CALL(unix_wg_transform_destroy, transform);
 }
 
-HRESULT wg_transform_push_data(wg_transform_t transform, struct wg_sample *sample)
+HRESULT wg_transform_push_data(struct wg_transform *transform, struct wg_sample *sample)
 {
     struct wg_transform_push_data_params params =
     {
@@ -371,7 +360,7 @@ HRESULT wg_transform_push_data(wg_transform_t transform, struct wg_sample *sampl
     };
     NTSTATUS status;
 
-    TRACE("transform %#I64x, sample %p.\n", transform, sample);
+    TRACE("transform %p, sample %p.\n", transform, sample);
 
     if ((status = WINE_UNIX_CALL(unix_wg_transform_push_data, &params)))
         return HRESULT_FROM_NT(status);
@@ -379,7 +368,7 @@ HRESULT wg_transform_push_data(wg_transform_t transform, struct wg_sample *sampl
     return params.result;
 }
 
-HRESULT wg_transform_read_data(wg_transform_t transform, struct wg_sample *sample,
+HRESULT wg_transform_read_data(struct wg_transform *transform, struct wg_sample *sample,
         struct wg_format *format)
 {
     struct wg_transform_read_data_params params =
@@ -390,7 +379,7 @@ HRESULT wg_transform_read_data(wg_transform_t transform, struct wg_sample *sampl
     };
     NTSTATUS status;
 
-    TRACE("transform %#I64x, sample %p, format %p.\n", transform, sample, format);
+    TRACE("transform %p, sample %p, format %p.\n", transform, sample, format);
 
     if ((status = WINE_UNIX_CALL(unix_wg_transform_read_data, &params)))
         return HRESULT_FROM_NT(status);
@@ -398,14 +387,14 @@ HRESULT wg_transform_read_data(wg_transform_t transform, struct wg_sample *sampl
     return params.result;
 }
 
-bool wg_transform_get_status(wg_transform_t transform, bool *accepts_input)
+bool wg_transform_get_status(struct wg_transform *transform, bool *accepts_input)
 {
     struct wg_transform_get_status_params params =
     {
         .transform = transform,
     };
 
-    TRACE("transform %#I64x, accepts_input %p.\n", transform, accepts_input);
+    TRACE("transform %p, accepts_input %p.\n", transform, accepts_input);
 
     if (WINE_UNIX_CALL(unix_wg_transform_get_status, &params))
         return false;
@@ -414,7 +403,7 @@ bool wg_transform_get_status(wg_transform_t transform, bool *accepts_input)
     return true;
 }
 
-bool wg_transform_set_output_format(wg_transform_t transform, struct wg_format *format)
+bool wg_transform_set_output_format(struct wg_transform *transform, struct wg_format *format)
 {
     struct wg_transform_set_output_format_params params =
     {
@@ -422,18 +411,18 @@ bool wg_transform_set_output_format(wg_transform_t transform, struct wg_format *
         .format = format,
     };
 
-    TRACE("transform %#I64x, format %p.\n", transform, format);
+    TRACE("transform %p, format %p.\n", transform, format);
 
     return !WINE_UNIX_CALL(unix_wg_transform_set_output_format, &params);
 }
 
-HRESULT wg_transform_drain(wg_transform_t transform)
+HRESULT wg_transform_drain(struct wg_transform *transform)
 {
     NTSTATUS status;
 
-    TRACE("transform %#I64x.\n", transform);
+    TRACE("transform %p.\n", transform);
 
-    if ((status = WINE_UNIX_CALL(unix_wg_transform_drain, &transform)))
+    if ((status = WINE_UNIX_CALL(unix_wg_transform_drain, transform)))
     {
         WARN("wg_transform_drain returned status %#lx\n", status);
         return HRESULT_FROM_NT(status);
@@ -442,13 +431,13 @@ HRESULT wg_transform_drain(wg_transform_t transform)
     return S_OK;
 }
 
-HRESULT wg_transform_flush(wg_transform_t transform)
+HRESULT wg_transform_flush(struct wg_transform *transform)
 {
     NTSTATUS status;
 
-    TRACE("transform %#I64x.\n", transform);
+    TRACE("transform %p.\n", transform);
 
-    if ((status = WINE_UNIX_CALL(unix_wg_transform_flush, &transform)))
+    if ((status = WINE_UNIX_CALL(unix_wg_transform_flush, transform)))
     {
         WARN("wg_transform_flush returned status %#lx\n", status);
         return HRESULT_FROM_NT(status);
@@ -457,147 +446,120 @@ HRESULT wg_transform_flush(wg_transform_t transform)
     return S_OK;
 }
 
-void wg_transform_notify_qos(wg_transform_t transform,
-        bool underflow, double proportion, int64_t diff, uint64_t timestamp)
+struct wg_source *wg_source_create(const WCHAR *url, uint64_t file_size,
+        const void *data, uint32_t size, WCHAR mime_type[256])
 {
-    struct wg_transform_notify_qos_params params =
+    struct wg_source_create_params params =
     {
-        .transform = transform,
-        .underflow = underflow,
-        .proportion = proportion,
-        .diff = diff,
-        .timestamp = timestamp,
+        .file_size = file_size,
+        .data = data, .size = size,
     };
+    UINT len = url ? WideCharToMultiByte(CP_ACP, 0, url, -1, NULL, 0, NULL, NULL) : 0;
+    char *tmp = url ? malloc(len) : NULL;
 
-    TRACE("transform %#I64x, underflow %d, proportion %.16e, diff %I64d, timestamp %I64u.\n",
-            transform, underflow, proportion, diff, timestamp);
+    TRACE("url %s, file_size %#I64x, data %p, size %#x, mime_type %p\n", debugstr_w(url),
+            file_size, data, size, mime_type);
 
-    WINE_UNIX_CALL(unix_wg_transform_notify_qos, &params);
-}
+    if ((params.url = tmp))
+        WideCharToMultiByte(CP_ACP, 0, url, -1, tmp, len, NULL, NULL);
 
-HRESULT wg_muxer_create(const char *format, wg_muxer_t *muxer)
-{
-    struct wg_muxer_create_params params =
+    if (!WINE_UNIX_CALL(unix_wg_source_create, &params))
     {
-        .format = format,
-    };
-    NTSTATUS status;
-
-    TRACE("format %p, muxer %p.\n", format, muxer);
-
-    if (!(status = WINE_UNIX_CALL(unix_wg_muxer_create, &params)))
-    {
-        *muxer = params.muxer;
-        TRACE("Created wg_muxer %#I64x.\n", params.muxer);
-    }
-    else
-    {
-        WARN("Failed to create muxer, status %#lx.\n", status);
+        MultiByteToWideChar(CP_ACP, 0, params.mime_type, -1, mime_type, 256);
+        TRACE("Returning source %p.\n", params.source);
     }
 
-    return HRESULT_FROM_NT(status);
+    free(tmp);
+    return params.source;
 }
 
-void wg_muxer_destroy(wg_muxer_t muxer)
+void wg_source_destroy(struct wg_source *source)
 {
-    TRACE("muxer %#I64x.\n", muxer);
+    TRACE("source %p.\n", source);
 
-    WINE_UNIX_CALL(unix_wg_muxer_destroy, &muxer);
+    WINE_UNIX_CALL(unix_wg_source_destroy, source);
 }
 
-HRESULT wg_muxer_add_stream(wg_muxer_t muxer, UINT32 stream_id, const struct wg_format *format)
+bool wg_source_get_status(struct wg_source *source, uint32_t *stream_count,
+        uint64_t *duration, uint64_t *read_offset)
 {
-    struct wg_muxer_add_stream_params params =
+    struct wg_source_get_status_params params =
     {
-        .muxer = muxer,
-        .stream_id = stream_id,
-        .format = format,
+        .source = source,
     };
     NTSTATUS status;
 
-    TRACE("muxer %#I64x, stream_id %u, format %p.\n", muxer, stream_id, format);
+    TRACE("source %p, stream_count %p, duration %p, read_offset %p\n",
+            source, stream_count, duration, read_offset);
 
-    if ((status = WINE_UNIX_CALL(unix_wg_muxer_add_stream, &params)))
-    {
-        WARN("Failed to add stream, status %#lx.\n", status);
-        return HRESULT_FROM_NT(status);
-    }
+    if ((status = WINE_UNIX_CALL(unix_wg_source_get_status, &params))
+            && status != STATUS_PENDING)
+        return false;
 
-    return S_OK;
+    *stream_count = params.stream_count;
+    *duration = params.duration;
+    *read_offset = params.read_offset;
+    TRACE("source %p, stream_count %u, duration %s, read_offset %#I64x\n",
+            source, *stream_count, debugstr_time(*duration), *read_offset);
+    return true;
 }
 
-HRESULT wg_muxer_start(wg_muxer_t muxer)
+HRESULT wg_source_push_data(struct wg_source *source, const void *data, uint32_t size)
 {
-    NTSTATUS status;
-
-    TRACE("muxer %#I64x.\n",  muxer);
-
-    if ((status = WINE_UNIX_CALL(unix_wg_muxer_start, &muxer)))
+    struct wg_source_push_data_params params =
     {
-        WARN("Failed to start muxer, status %#lx.\n", status);
-        return HRESULT_FROM_NT(status);
-    }
-
-    return S_OK;
-}
-
-HRESULT wg_muxer_push_sample(wg_muxer_t muxer, struct wg_sample *sample, UINT32 steam_id)
-{
-    struct wg_muxer_push_sample_params params =
-    {
-        .muxer = muxer,
-        .sample = sample,
-        .stream_id = steam_id,
+        .source = source,
+        .data = data,
+        .size = size,
     };
-    NTSTATUS status;
-
-    TRACE("muxer %#I64x, sample %p.\n", muxer, sample);
-
-    if ((status = WINE_UNIX_CALL(unix_wg_muxer_push_sample, &params)))
-    {
-        WARN("Failed to push sample, status %#lx.\n", status);
-        return HRESULT_FROM_NT(status);
-    }
-
-    return S_OK;
+    TRACE("source %p, data %p, size %#x\n", source, data, size);
+    return HRESULT_FROM_NT(WINE_UNIX_CALL(unix_wg_source_push_data, &params));
 }
 
-HRESULT wg_muxer_read_data(wg_muxer_t muxer, void *buffer, UINT32 *size, UINT64 *offset)
+bool wg_source_get_stream_format(struct wg_source *source, UINT32 index,
+        struct wg_format *format)
 {
-    struct wg_muxer_read_data_params params =
+    struct wg_source_get_stream_format_params params =
     {
-        .muxer = muxer,
-        .buffer = buffer,
-        .size = *size,
-        .offset = UINT64_MAX,
+        .source = source,
+        .index = index,
     };
-    NTSTATUS status;
 
-    TRACE("muxer %#I64x, buffer %p, size %u.\n", muxer, buffer, *size);
+    TRACE("source %p, index %u, format %p\n", source,
+            index, format);
 
-    if (SUCCEEDED(status = WINE_UNIX_CALL(unix_wg_muxer_read_data, &params)))
-    {
-        *size = params.size;
-        *offset = params.offset;
-        TRACE("Read %u bytes, offset %#I64x.\n", *size, *offset);
-    }
+    if (WINE_UNIX_CALL(unix_wg_source_get_stream_format, &params))
+        return false;
 
-    return HRESULT_FROM_NT(status);
+    *format = params.format;
+    return true;
 }
 
-HRESULT wg_muxer_finalize(wg_muxer_t muxer)
+char *wg_source_get_stream_tag(struct wg_source *source, UINT32 index, enum wg_parser_tag tag)
 {
-    NTSTATUS status;
-
-    TRACE("muxer %#I64x.\n", muxer);
-
-    if ((status = WINE_UNIX_CALL(unix_wg_muxer_finalize, &muxer)))
+    struct wg_source_get_stream_tag_params params =
     {
-        WARN("Failed to finalize, status %#lx.\n", status);
-        return HRESULT_FROM_NT(status);
-    }
+        .source = source,
+        .index = index,
+        .tag = tag,
+    };
+    char *buffer;
 
-    return S_OK;
+    if (WINE_UNIX_CALL(unix_wg_source_get_stream_tag, &params) != STATUS_BUFFER_TOO_SMALL)
+        return NULL;
+    if (!(buffer = malloc(params.size)))
+    {
+        ERR("No memory.\n");
+        return NULL;
+    }
+    params.buffer = buffer;
+    if (WINE_UNIX_CALL(unix_wg_source_get_stream_tag, &params))
+    {
+        ERR("wg_source_get_stream_tag failed unexpectedly.\n");
+        free(buffer);
+        return NULL;
+    }
+    return buffer;
 }
 
 #define ALIGN(n, alignment) (((n) + (alignment) - 1) & ~((alignment) - 1))
@@ -613,6 +575,7 @@ unsigned int wg_format_get_stride(const struct wg_format *format)
 
         case WG_VIDEO_FORMAT_BGRA:
         case WG_VIDEO_FORMAT_BGRx:
+        case WG_VIDEO_FORMAT_RGBA:
             return width * 4;
 
         case WG_VIDEO_FORMAT_BGR:
@@ -645,6 +608,7 @@ bool wg_video_format_is_rgb(enum wg_video_format format)
     {
         case WG_VIDEO_FORMAT_BGRA:
         case WG_VIDEO_FORMAT_BGRx:
+        case WG_VIDEO_FORMAT_RGBA:
         case WG_VIDEO_FORMAT_BGR:
         case WG_VIDEO_FORMAT_RGB15:
         case WG_VIDEO_FORMAT_RGB16:
@@ -749,7 +713,6 @@ static const IClassFactoryVtbl class_factory_vtbl =
 static struct class_factory avi_splitter_cf = {{&class_factory_vtbl}, avi_splitter_create};
 static struct class_factory decodebin_parser_cf = {{&class_factory_vtbl}, decodebin_parser_create};
 static struct class_factory mpeg_audio_codec_cf = {{&class_factory_vtbl}, mpeg_audio_codec_create};
-static struct class_factory mpeg_video_codec_cf = {{&class_factory_vtbl}, mpeg_video_codec_create};
 static struct class_factory mpeg_layer3_decoder_cf = {{&class_factory_vtbl}, mpeg_layer3_decoder_create};
 static struct class_factory mpeg_splitter_cf = {{&class_factory_vtbl}, mpeg_splitter_create};
 static struct class_factory wave_parser_cf = {{&class_factory_vtbl}, wave_parser_create};
@@ -757,8 +720,6 @@ static struct class_factory wma_decoder_cf = {{&class_factory_vtbl}, wma_decoder
 static struct class_factory wmv_decoder_cf = {{&class_factory_vtbl}, wmv_decoder_create};
 static struct class_factory resampler_cf = {{&class_factory_vtbl}, resampler_create};
 static struct class_factory color_convert_cf = {{&class_factory_vtbl}, color_convert_create};
-static struct class_factory mp3_sink_class_factory_cf = {{&class_factory_vtbl}, mp3_sink_class_factory_create};
-static struct class_factory mpeg4_sink_class_factory_cf = {{&class_factory_vtbl}, mpeg4_sink_class_factory_create};
 
 HRESULT WINAPI DllGetClassObject(REFCLSID clsid, REFIID iid, void **out)
 {
@@ -779,8 +740,6 @@ HRESULT WINAPI DllGetClassObject(REFCLSID clsid, REFIID iid, void **out)
         factory = &decodebin_parser_cf;
     else if (IsEqualGUID(clsid, &CLSID_CMpegAudioCodec))
         factory = &mpeg_audio_codec_cf;
-    else if (IsEqualGUID(clsid, &CLSID_CMpegVideoCodec))
-        factory = &mpeg_video_codec_cf;
     else if (IsEqualGUID(clsid, &CLSID_mpeg_layer3_decoder))
         factory = &mpeg_layer3_decoder_cf;
     else if (IsEqualGUID(clsid, &CLSID_MPEG1Splitter))
@@ -795,10 +754,6 @@ HRESULT WINAPI DllGetClassObject(REFCLSID clsid, REFIID iid, void **out)
         factory = &resampler_cf;
     else if (IsEqualGUID(clsid, &CLSID_CColorConvertDMO))
         factory = &color_convert_cf;
-    else if (IsEqualGUID(clsid, &CLSID_MFMP3SinkClassFactory))
-        factory = &mp3_sink_class_factory_cf;
-    else if (IsEqualGUID(clsid, &CLSID_MFMPEG4SinkClassFactory))
-        factory = &mpeg4_sink_class_factory_cf;
     else
     {
         FIXME("%s not implemented, returning CLASS_E_CLASSNOTAVAILABLE.\n", debugstr_guid(clsid));
@@ -892,38 +847,6 @@ static const REGFILTER2 reg_mpeg_audio_codec =
     .dwMerit = 0x03680001,
     .u.s2.cPins2 = 2,
     .u.s2.rgPins2 = reg_mpeg_audio_codec_pins,
-};
-
-static const REGPINTYPES reg_mpeg_video_codec_sink_mts[2] =
-{
-    {&MEDIATYPE_Video, &MEDIASUBTYPE_MPEG1Packet},
-    {&MEDIATYPE_Video, &MEDIASUBTYPE_MPEG1Payload},
-};
-
-static const REGPINTYPES reg_mpeg_video_codec_source_mts[1] =
-{
-    {&MEDIATYPE_Video, &GUID_NULL},
-};
-
-static const REGFILTERPINS2 reg_mpeg_video_codec_pins[2] =
-{
-    {
-        .nMediaTypes = 2,
-        .lpMediaType = reg_mpeg_video_codec_sink_mts,
-    },
-    {
-        .dwFlags = REG_PINFLAG_B_OUTPUT,
-        .nMediaTypes = 1,
-        .lpMediaType = reg_mpeg_video_codec_source_mts,
-    },
-};
-
-static const REGFILTER2 reg_mpeg_video_codec =
-{
-    .dwVersion = 2,
-    .dwMerit = 0x40000001,
-    .u.s2.cPins2 = 2,
-    .u.s2.rgPins2 = reg_mpeg_video_codec_pins,
 };
 
 static const REGPINTYPES reg_mpeg_layer3_decoder_sink_mts[1] =
@@ -1149,6 +1072,8 @@ HRESULT WINAPI DllRegisterServer(void)
 
     TRACE(".\n");
 
+    init_gstreamer();
+
     if (FAILED(hr = __wine_register_resources()))
         return hr;
 
@@ -1161,8 +1086,6 @@ HRESULT WINAPI DllRegisterServer(void)
             L"GStreamer splitter filter", NULL, NULL, NULL, &reg_decodebin_parser);
     IFilterMapper2_RegisterFilter(mapper, &CLSID_CMpegAudioCodec,
             L"MPEG Audio Decoder", NULL, NULL, NULL, &reg_mpeg_audio_codec);
-    IFilterMapper2_RegisterFilter(mapper, &CLSID_CMpegVideoCodec,
-            L"MPEG Video Decoder", NULL, NULL, NULL, &reg_mpeg_video_codec);
     IFilterMapper2_RegisterFilter(mapper, &CLSID_mpeg_layer3_decoder,
             L"MPEG Layer-3 Decoder", NULL, NULL, NULL, &reg_mpeg_layer3_decoder);
     IFilterMapper2_RegisterFilter(mapper, &CLSID_MPEG1Splitter,
@@ -1204,7 +1127,6 @@ HRESULT WINAPI DllUnregisterServer(void)
     IFilterMapper2_UnregisterFilter(mapper, NULL, NULL, &CLSID_AviSplitter);
     IFilterMapper2_UnregisterFilter(mapper, NULL, NULL, &CLSID_decodebin_parser);
     IFilterMapper2_UnregisterFilter(mapper, NULL, NULL, &CLSID_CMpegAudioCodec);
-    IFilterMapper2_UnregisterFilter(mapper, NULL, NULL, &CLSID_CMpegVideoCodec);
     IFilterMapper2_UnregisterFilter(mapper, NULL, NULL, &CLSID_mpeg_layer3_decoder);
     IFilterMapper2_UnregisterFilter(mapper, NULL, NULL, &CLSID_MPEG1Splitter);
     IFilterMapper2_UnregisterFilter(mapper, NULL, NULL, &CLSID_WAVEParser);

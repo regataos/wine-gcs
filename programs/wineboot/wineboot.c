@@ -68,6 +68,7 @@
 #include <winternl.h>
 #include <ddk/wdm.h>
 #include <sddl.h>
+#include <ntsecapi.h>
 #include <wine/svcctl.h>
 #include <wine/asm.h>
 #include <wine/debug.h>
@@ -79,9 +80,12 @@
 #include <setupapi.h>
 #include <wininet.h>
 #include <newdev.h>
+#include <wincrypt.h>
 #include "resource.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(wineboot);
+
+#define TICKSPERSEC        10000000
 
 extern BOOL shutdown_close_windows( BOOL force );
 extern BOOL shutdown_all_desktops( BOOL force );
@@ -97,14 +101,15 @@ static WCHAR *get_wine_inf_path(void)
 
     if ((dir = _wgetenv( L"WINEBUILDDIR" )))
     {
-        if (!(name = malloc( sizeof(L"\\loader\\wine.inf") + wcslen(dir) * sizeof(WCHAR) )))
+        if (!(name = HeapAlloc( GetProcessHeap(), 0,
+                                sizeof(L"\\loader\\wine.inf") + lstrlenW(dir) * sizeof(WCHAR) )))
             return NULL;
         lstrcpyW( name, dir );
         lstrcatW( name, L"\\loader" );
     }
     else if ((dir = _wgetenv( L"WINEDATADIR" )))
     {
-        if (!(name = malloc( sizeof(L"\\wine.inf") + wcslen(dir) * sizeof(WCHAR) )))
+        if (!(name = HeapAlloc( GetProcessHeap(), 0, sizeof(L"\\wine.inf") + lstrlenW(dir) * sizeof(WCHAR) )))
             return NULL;
         lstrcpyW( name, dir );
     }
@@ -121,7 +126,7 @@ static BOOL update_timestamp( const WCHAR *config_dir, unsigned long timestamp )
     BOOL ret = FALSE;
     int fd, count;
     char buffer[100];
-    WCHAR *file = malloc( wcslen(config_dir) * sizeof(WCHAR) + sizeof(L"\\.update-timestamp") );
+    WCHAR *file = HeapAlloc( GetProcessHeap(), 0, lstrlenW(config_dir) * sizeof(WCHAR) + sizeof(L"\\.update-timestamp") );
 
     if (!file) return FALSE;
     lstrcpyW( file, config_dir );
@@ -154,7 +159,7 @@ static BOOL update_timestamp( const WCHAR *config_dir, unsigned long timestamp )
 
 done:
     if (fd != -1) close( fd );
-    free( file );
+    HeapFree( GetProcessHeap(), 0, file );
     return ret;
 }
 
@@ -241,18 +246,106 @@ static void initialize_xstate_features(struct _KUSER_SHARED_DATA *data)
     TRACE("XSAVE feature 2 %#x, %#x, %#x, %#x.\n", regs[0], regs[1], regs[2], regs[3]);
 }
 
+static UINT64 read_tsc_frequency( BOOL has_rdtscp )
+{
+    UINT64 freq = 0;
+
+/* FIXME: Intel provides TSC freq in some CPUID but it's been slightly broken,
+   fix it properly and test it on real Intel hardware */
+
+#if 0
+    int regs[4], cpuid_level, tmp;
+    UINT64 denom, numer;
+
+    __cpuid( regs, 0 );
+    tmp = regs[2];
+    regs[2] = regs[3];
+    regs[3] = tmp;
+
+    /* only available on some intel CPUs */
+    if (memcmp( regs + 1, "GenuineIntel", 12 )) freq = 0;
+    else if ((cpuid_level = regs[0]) < 0x15) freq = 0;
+    else
+    {
+        __cpuid( regs, 0x15 );
+        if (!(denom = regs[0]) || !(numer = regs[1])) freq = 0;
+        else
+        {
+            if ((freq = regs[2])) freq = freq * numer / denom;
+            else if (cpuid_level >= 0x16)
+            {
+                __cpuid( regs, 0x16 ); /* eax is base freq in MHz */
+                freq = regs[0] * (UINT64)1000000;
+            }
+            else freq = 0;
+        }
+
+        if (!freq) WARN( "Failed to read TSC frequency from CPUID, falling back to calibration.\n" );
+        else TRACE( "TSC frequency read from CPUID, found %I64u Hz\n", freq );
+    }
+#endif
+
+    if (freq == 0)
+    {
+        LONGLONG time0, time1, tsc0, tsc1, tsc2, tsc3, freq0, freq1, error;
+        unsigned int aux;
+        UINT retries = 50;
+        int regs[4];
+
+        do
+        {
+            if (has_rdtscp)
+            {
+                tsc0 = __rdtscp( &aux );
+                time0 = RtlGetSystemTimePrecise();
+                tsc1 = __rdtscp( &aux );
+                Sleep( 1 );
+                tsc2 = __rdtscp( &aux );
+                time1 = RtlGetSystemTimePrecise();
+                tsc3 = __rdtscp( &aux );
+            }
+            else
+            {
+                tsc0 = __rdtsc(); __cpuid( regs, 0 );
+                time0 = RtlGetSystemTimePrecise();
+                tsc1 = __rdtsc(); __cpuid( regs, 0 );
+                Sleep(1);
+                tsc2 = __rdtsc(); __cpuid( regs, 0 );
+                time1 = RtlGetSystemTimePrecise();
+                tsc3 = __rdtsc(); __cpuid( regs, 0 );
+            }
+
+            freq0 = (tsc2 - tsc0) * 10000000 / (time1 - time0);
+            freq1 = (tsc3 - tsc1) * 10000000 / (time1 - time0);
+            error = llabs( (freq1 - freq0) * 1000000 / min( freq1, freq0 ) );
+        }
+        while (error > 500 && --retries);
+
+        if (!retries)
+        {
+            FIXME( "TSC frequency calibration failed, unstable TSC?");
+            FIXME( "time0 %I64u ns, time1 %I64u ns\n", time0 * 100, time1 * 100 );
+            FIXME( "tsc2 - tsc0 %I64u, tsc3 - tsc1 %I64u\n", tsc2 - tsc0, tsc3 - tsc1 );
+            FIXME( "freq0 %I64u Hz, freq2 %I64u Hz, error %I64u ppm\n", freq0, freq1, error );
+        }
+        else
+        {
+            freq = (freq0 + freq1) / 2;
+            TRACE( "TSC frequency calibration complete, found %I64u Hz\n", freq );
+        }
+    }
+
+    return freq;
+}
+
 static BOOL is_tsc_trusted_by_the_kernel(void)
 {
-    char buf[4] = {0};
+    char buf[4] = {};
     DWORD num_read;
     HANDLE handle;
     BOOL ret = TRUE;
 
-    /* Darwin for x86-64 uses the TSC internally for timekeeping, so it can always
-     * be trusted.
-     * For BSDs there seems to be no unified interface to query TSC quality.
-     * If there is a sysfs entry with clocksource information, use it to check though. */
-    handle = CreateFileW( L"\\??\\unix\\sys\\bus\\clocksource\\devices\\clocksource0\\current_clocksource",
+    handle = CreateFileA( "\\??\\unix\\sys\\bus\\clocksource\\devices\\clocksource0\\current_clocksource",
                           GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, 0 );
     if (handle == INVALID_HANDLE_VALUE) return TRUE;
 
@@ -263,33 +356,34 @@ static BOOL is_tsc_trusted_by_the_kernel(void)
     return ret;
 }
 
-static UINT64 read_tsc_frequency(void)
+static void initialize_qpc_features( struct _KUSER_SHARED_DATA *data, UINT64 *tsc_frequency )
 {
-    UINT64 freq = 0;
-    LONGLONG time0, time1, tsc0, tsc1, tsc2, tsc3, freq0, freq1, error;
     BOOL has_rdtscp = FALSE;
-    unsigned int aux;
-    UINT retries = 50;
     int regs[4];
+
+    data->QpcBypassEnabled = 0;
+    data->QpcFrequency = TICKSPERSEC;
+    data->QpcShift = 0;
+    data->QpcBias = 0;
+    *tsc_frequency = 0;
 
     if (!is_tsc_trusted_by_the_kernel())
     {
         WARN( "Failed to compute TSC frequency, not trusted by the kernel.\n" );
-        return 0;
+        return;
     }
 
-    __cpuid(regs, 1);
-    if (!(regs[3] & (1 << 4)))
+    if (!data->ProcessorFeatures[PF_RDTSC_INSTRUCTION_AVAILABLE])
     {
         WARN( "Failed to compute TSC frequency, RDTSC instruction not supported.\n" );
-        return 0;
+        return;
     }
 
     __cpuid( regs, 0x80000000 );
     if (regs[0] < 0x80000007)
     {
         WARN( "Failed to compute TSC frequency, unable to check invariant TSC.\n" );
-        return 0;
+        return;
     }
 
     /* check for invariant tsc bit */
@@ -297,50 +391,14 @@ static UINT64 read_tsc_frequency(void)
     if (!(regs[3] & (1 << 8)))
     {
         WARN( "Failed to compute TSC frequency, no invariant TSC.\n" );
-        return 0;
+        return;
     }
 
     /* check for rdtscp support bit */
     __cpuid( regs, 0x80000001 );
     if ((regs[3] & (1 << 27))) has_rdtscp = TRUE;
 
-    do
-    {
-        if (has_rdtscp)
-        {
-            tsc0 = __rdtscp( &aux );
-            time0 = RtlGetSystemTimePrecise();
-            tsc1 = __rdtscp( &aux );
-            Sleep( 1 );
-            tsc2 = __rdtscp( &aux );
-            time1 = RtlGetSystemTimePrecise();
-            tsc3 = __rdtscp( &aux );
-        }
-        else
-        {
-            tsc0 = __rdtsc(); __cpuid( regs, 0 );
-            time0 = RtlGetSystemTimePrecise();
-            tsc1 = __rdtsc(); __cpuid( regs, 0 );
-            Sleep( 1 );
-            tsc2 = __rdtsc(); __cpuid( regs, 0 );
-            time1 = RtlGetSystemTimePrecise();
-            tsc3 = __rdtsc(); __cpuid( regs, 0 );
-        }
-
-        freq0 = (tsc2 - tsc0) * 10000000 / (time1 - time0);
-        freq1 = (tsc3 - tsc1) * 10000000 / (time1 - time0);
-        error = llabs( (freq1 - freq0) * 1000000 / min( freq1, freq0 ) );
-    }
-    while (error > 500 && --retries);
-
-    if (!retries) WARN( "TSC frequency calibration failed, unstable TSC?\n" );
-    else
-    {
-        freq = (freq0 + freq1) / 2;
-        TRACE( "TSC frequency calibration complete, found %I64u Hz\n", freq );
-    }
-
-    return freq;
+    *tsc_frequency = read_tsc_frequency( has_rdtscp );
 }
 
 #else
@@ -349,28 +407,30 @@ static void initialize_xstate_features(struct _KUSER_SHARED_DATA *data)
 {
 }
 
-static UINT64 read_tsc_frequency(void)
+static void initialize_qpc_features( struct _KUSER_SHARED_DATA *data, UINT64 *tsc_frequency )
 {
-    return 0;
+    data->QpcBypassEnabled = 0;
+    data->QpcFrequency = TICKSPERSEC;
+    data->QpcShift = 0;
+    data->QpcBias = 0;
+    *tsc_frequency = 0;
 }
 
 #endif
 
-static void create_user_shared_data(void)
+static void create_user_shared_data( UINT64 *tsc_frequency )
 {
-    SYSTEM_SUPPORTED_PROCESSOR_ARCHITECTURES_INFORMATION machines[8];
     struct _KUSER_SHARED_DATA *data;
     RTL_OSVERSIONINFOEXW version;
     SYSTEM_CPU_INFORMATION sci;
     SYSTEM_BASIC_INFORMATION sbi;
     BOOLEAN *features;
     OBJECT_ATTRIBUTES attr = {sizeof(attr)};
-    UNICODE_STRING name = RTL_CONSTANT_STRING( L"\\KernelObjects\\__wine_user_shared_data" );
+    UNICODE_STRING name;
     NTSTATUS status;
     HANDLE handle;
-    ULONG i;
-    HANDLE process = 0;
 
+    RtlInitUnicodeString( &name, L"\\KernelObjects\\__wine_user_shared_data" );
     InitializeObjectAttributes( &attr, &name, OBJ_OPENIF, NULL, NULL );
     if ((status = NtOpenSection( &handle, SECTION_ALL_ACCESS, &attr )))
     {
@@ -430,56 +490,22 @@ static void create_user_shared_data(void)
         features[PF_AVX_INSTRUCTIONS_AVAILABLE]           = !!(sci.ProcessorFeatureBits & CPU_FEATURE_AVX);
         features[PF_AVX2_INSTRUCTIONS_AVAILABLE]          = !!(sci.ProcessorFeatureBits & CPU_FEATURE_AVX2);
         break;
-
     case PROCESSOR_ARCHITECTURE_ARM:
         features[PF_ARM_VFP_32_REGISTERS_AVAILABLE]       = !!(sci.ProcessorFeatureBits & CPU_FEATURE_ARM_VFP_32);
         features[PF_ARM_NEON_INSTRUCTIONS_AVAILABLE]      = !!(sci.ProcessorFeatureBits & CPU_FEATURE_ARM_NEON);
         features[PF_ARM_V8_INSTRUCTIONS_AVAILABLE]        = (sci.ProcessorLevel >= 8);
         break;
-
     case PROCESSOR_ARCHITECTURE_ARM64:
         features[PF_ARM_V8_INSTRUCTIONS_AVAILABLE]        = TRUE;
         features[PF_ARM_V8_CRC32_INSTRUCTIONS_AVAILABLE]  = !!(sci.ProcessorFeatureBits & CPU_FEATURE_ARM_V8_CRC32);
         features[PF_ARM_V8_CRYPTO_INSTRUCTIONS_AVAILABLE] = !!(sci.ProcessorFeatureBits & CPU_FEATURE_ARM_V8_CRYPTO);
-        features[PF_ARM_V81_ATOMIC_INSTRUCTIONS_AVAILABLE]= !!(sci.ProcessorFeatureBits & CPU_FEATURE_ARM_V81_ATOMIC);
-        features[PF_ARM_V82_DP_INSTRUCTIONS_AVAILABLE]    = !!(sci.ProcessorFeatureBits & CPU_FEATURE_ARM_V82_DP);
-        features[PF_ARM_V83_JSCVT_INSTRUCTIONS_AVAILABLE] = !!(sci.ProcessorFeatureBits & CPU_FEATURE_ARM_V83_JSCVT);
-        features[PF_ARM_V83_LRCPC_INSTRUCTIONS_AVAILABLE] = !!(sci.ProcessorFeatureBits & CPU_FEATURE_ARM_V83_LRCPC);
-        features[PF_COMPARE_EXCHANGE_DOUBLE]              = TRUE;
-        features[PF_NX_ENABLED]                           = TRUE;
-        features[PF_FASTFAIL_AVAILABLE]                   = TRUE;
-        /* add features for other architectures supported by wow64 */
-        if (!NtQuerySystemInformationEx( SystemSupportedProcessorArchitectures, &process, sizeof(process),
-                                         machines, sizeof(machines), NULL ))
-        {
-            for (i = 0; machines[i].Machine; i++)
-            {
-                switch (machines[i].Machine)
-                {
-                case IMAGE_FILE_MACHINE_ARMNT:
-                    features[PF_ARM_VFP_32_REGISTERS_AVAILABLE]  = TRUE;
-                    features[PF_ARM_NEON_INSTRUCTIONS_AVAILABLE] = TRUE;
-                    break;
-                case IMAGE_FILE_MACHINE_I386:
-                    features[PF_MMX_INSTRUCTIONS_AVAILABLE]    = TRUE;
-                    features[PF_XMMI_INSTRUCTIONS_AVAILABLE]   = TRUE;
-                    features[PF_RDTSC_INSTRUCTION_AVAILABLE]   = TRUE;
-                    features[PF_XMMI64_INSTRUCTIONS_AVAILABLE] = TRUE;
-                    features[PF_SSE3_INSTRUCTIONS_AVAILABLE]   = TRUE;
-                    features[PF_RDTSCP_INSTRUCTION_AVAILABLE]  = TRUE;
-                    features[PF_SSSE3_INSTRUCTIONS_AVAILABLE]  = TRUE;
-                    features[PF_SSE4_1_INSTRUCTIONS_AVAILABLE] = TRUE;
-                    features[PF_SSE4_2_INSTRUCTIONS_AVAILABLE] = TRUE;
-                    break;
-                }
-            }
-        }
         break;
     }
     data->ActiveProcessorCount = NtCurrentTeb()->Peb->NumberOfProcessors;
     data->ActiveGroupCount = 1;
 
     initialize_xstate_features( data );
+    initialize_qpc_features( data, tsc_frequency );
 
     UnmapViewOfFile( data );
 }
@@ -531,10 +557,29 @@ static void get_vendorid( WCHAR *buf )
     regs_to_str( regs + 1, 12, buf );
 }
 
+static void get_namestring( WCHAR *buf )
+{
+    int regs[4] = {0, 0, 0, 0};
+    int i;
+
+    __cpuid( regs, 0x80000000 );
+    if (regs[0] >= 0x80000004)
+    {
+        __cpuid( regs, 0x80000002 );
+        regs_to_str( regs, 16, buf );
+        __cpuid( regs, 0x80000003 );
+        regs_to_str( regs, 16, buf + 16 );
+        __cpuid( regs, 0x80000004 );
+        regs_to_str( regs, 16, buf + 32 );
+    }
+    for (i = lstrlenW(buf) - 1; i >= 0 && buf[i] == ' '; i--) buf[i] = 0;
+}
+
 #else  /* __i386__ || __x86_64__ */
 
 static void get_identifier( WCHAR *buf, size_t size, const WCHAR *arch ) { }
 static void get_vendorid( WCHAR *buf ) { }
+static void get_namestring( WCHAR *buf ) { }
 
 #endif  /* __i386__ || __x86_64__ */
 
@@ -651,7 +696,7 @@ static inline WCHAR *heap_strdupAW( const char *src )
     WCHAR *dst;
     if (!src) return NULL;
     len = MultiByteToWideChar( CP_ACP, 0, src, -1, NULL, 0 );
-    if ((dst = malloc( len * sizeof(*dst) ))) MultiByteToWideChar( CP_ACP, 0, src, -1, dst, len );
+    if ((dst = HeapAlloc( GetProcessHeap(), 0, len * sizeof(*dst) ))) MultiByteToWideChar( CP_ACP, 0, src, -1, dst, len );
     return dst;
 }
 
@@ -674,7 +719,7 @@ static void set_value_from_smbios_string( HKEY key, const WCHAR *value, BYTE id,
     WCHAR *str;
     str = get_smbios_string( id, buf, offset, buflen );
     set_reg_value( key, value, str ? str : L"" );
-    free( str );
+    HeapFree( GetProcessHeap(), 0, str );
 }
 
 static void create_bios_baseboard_values( HKEY bios_key, const char *buf, UINT len )
@@ -759,7 +804,7 @@ static void create_bios_key( HKEY system_key )
         return;
 
     len = GetSystemFirmwareTable( RSMB, 0, NULL, 0 );
-    if (!(buf = malloc( len ))) goto done;
+    if (!(buf = HeapAlloc( GetProcessHeap(), 0, len ))) goto done;
     len = GetSystemFirmwareTable( RSMB, 0, buf, len );
 
     create_bios_baseboard_values( bios_key, buf, len );
@@ -767,28 +812,25 @@ static void create_bios_key( HKEY system_key )
     create_bios_system_values( bios_key, buf, len );
 
 done:
-    free( buf );
+    HeapFree( GetProcessHeap(), 0, buf );
     RegCloseKey( bios_key );
 }
 
 /* create the volatile hardware registry keys */
-static void create_hardware_registry_keys(void)
+static void create_hardware_registry_keys( UINT64 tsc_frequency )
 {
     unsigned int i;
     HKEY hkey, system_key, cpu_key, fpu_key;
     SYSTEM_CPU_INFORMATION sci;
     PROCESSOR_POWER_INFORMATION* power_info;
     ULONG sizeof_power_info = sizeof(PROCESSOR_POWER_INFORMATION) * NtCurrentTeb()->Peb->NumberOfProcessors;
-    UINT64 tsc_frequency = read_tsc_frequency();
-    ULONG name_buffer[16];
-    WCHAR id[60], vendorid[13];
+    WCHAR id[60], namestr[49], vendorid[13];
 
+    get_namestring( namestr );
     get_vendorid( vendorid );
     NtQuerySystemInformation( SystemCpuInformation, &sci, sizeof(sci), NULL );
-    if (NtQuerySystemInformation( SystemProcessorBrandString, name_buffer, sizeof(name_buffer), NULL ))
-        name_buffer[0] = 0;
 
-    power_info = malloc( sizeof_power_info );
+    power_info = HeapAlloc( GetProcessHeap(), 0, sizeof_power_info );
     if (power_info == NULL)
         return;
     if (NtPowerInformation( ProcessorInformation, NULL, 0, power_info, sizeof_power_info ))
@@ -815,7 +857,7 @@ static void create_hardware_registry_keys(void)
     if (RegCreateKeyExW( HKEY_LOCAL_MACHINE, L"Hardware\\Description\\System", 0, NULL,
                          REG_OPTION_VOLATILE, KEY_ALL_ACCESS, NULL, &system_key, NULL ))
     {
-        free( power_info );
+        HeapFree( GetProcessHeap(), 0, power_info );
         return;
     }
 
@@ -856,8 +898,7 @@ static void create_hardware_registry_keys(void)
             RegSetValueExW( hkey, L"FeatureSet", 0, REG_DWORD, (BYTE *)&sci.ProcessorFeatureBits, sizeof(DWORD) );
             set_reg_value( hkey, L"Identifier", id );
             /* TODO: report ARM properly */
-            RegSetValueExA( hkey, "ProcessorNameString", 0, REG_SZ, (const BYTE *)name_buffer,
-                            strlen( (char *)name_buffer ) + 1 );
+            set_reg_value( hkey, L"ProcessorNameString", namestr );
             set_reg_value( hkey, L"VendorIdentifier", vendorid );
             RegSetValueExW( hkey, L"~MHz", 0, REG_DWORD, (BYTE *)&tsc_freq_mhz, sizeof(DWORD) );
             RegCloseKey( hkey );
@@ -877,7 +918,7 @@ static void create_hardware_registry_keys(void)
     RegCloseKey( fpu_key );
     RegCloseKey( cpu_key );
     RegCloseKey( system_key );
-    free( power_info );
+    HeapFree( GetProcessHeap(), 0, power_info );
 }
 
 struct dyndata_enum_key{
@@ -1157,9 +1198,9 @@ static BOOL wininit(void)
     {
         if (!(res = GetPrivateProfileSectionW( L"rename", buffer, size, L"wininit.ini" ))) return TRUE;
         if (res < size - 2) break;
-        if (buffer != initial_buffer) free( buffer );
+        if (buffer != initial_buffer) HeapFree( GetProcessHeap(), 0, buffer );
         size *= 2;
-        if (!(buffer = malloc( size * sizeof(WCHAR) ))) return FALSE;
+        if (!(buffer = HeapAlloc( GetProcessHeap(), 0, size * sizeof(WCHAR) ))) return FALSE;
     }
 
     for (str = buffer; *str; str += lstrlenW(str) + 1)
@@ -1188,7 +1229,7 @@ static BOOL wininit(void)
         str = value;
     }
 
-    if (buffer != initial_buffer) free( buffer );
+    if (buffer != initial_buffer) HeapFree( GetProcessHeap(), 0, buffer );
 
     if( !MoveFileExW( L"wininit.ini", L"wininit.bak", MOVEFILE_REPLACE_EXISTING) )
     {
@@ -1213,7 +1254,7 @@ static void pendingRename(void)
 
     if (RegQueryValueExW( hSession, L"PendingFileRenameOperations", NULL, NULL, NULL, &dataLength ))
         goto end;
-    if (!(buffer = malloc( dataLength ))) goto end;
+    if (!(buffer = HeapAlloc( GetProcessHeap(), 0, dataLength ))) goto end;
 
     if (RegQueryValueExW( hSession, L"PendingFileRenameOperations", NULL, NULL,
                           (LPBYTE)buffer, &dataLength ))
@@ -1261,7 +1302,7 @@ static void pendingRename(void)
     RegDeleteValueW(hSession, L"PendingFileRenameOperations");
 
 end:
-    free( buffer );
+    HeapFree(GetProcessHeap(), 0, buffer);
     RegCloseKey( hSession );
 }
 
@@ -1335,12 +1376,12 @@ static void process_run_key( HKEY key, const WCHAR *keyname, BOOL delete, BOOL s
         WINE_TRACE( "No commands to execute.\n" );
         goto end;
     }
-    if (!(cmdline = malloc( max_cmdline )))
+    if (!(cmdline = HeapAlloc( GetProcessHeap(), 0, max_cmdline )))
     {
         WINE_ERR( "Couldn't allocate memory for the commands to be executed.\n" );
         goto end;
     }
-    if (!(value = malloc( ++max_value * sizeof(*value) )))
+    if (!(value = HeapAlloc( GetProcessHeap(), 0, ++max_value * sizeof(*value) )))
     {
         WINE_ERR( "Couldn't allocate memory for the value names.\n" );
         goto end;
@@ -1372,8 +1413,8 @@ static void process_run_key( HKEY key, const WCHAR *keyname, BOOL delete, BOOL s
     }
 
 end:
-    free( value );
-    free( cmdline );
+    HeapFree( GetProcessHeap(), 0, value );
+    HeapFree( GetProcessHeap(), 0, cmdline );
     RegCloseKey( runkey );
     WINE_TRACE( "Done.\n" );
 }
@@ -1443,7 +1484,7 @@ static int ProcessWindowsFileProtection(void)
         if (!RegQueryValueExW( hkey, L"SFCDllCacheDir", 0, NULL, NULL, &sz))
         {
             sz += sizeof(WCHAR);
-            dllcache = malloc( sz + sizeof(L"\\*") );
+            dllcache = HeapAlloc(GetProcessHeap(),0,sz + sizeof(L"\\*"));
             RegQueryValueExW( hkey, L"SFCDllCacheDir", 0, NULL, (LPBYTE)dllcache, &sz);
             lstrcatW( dllcache, L"\\*" );
         }
@@ -1453,7 +1494,7 @@ static int ProcessWindowsFileProtection(void)
     if (!dllcache)
     {
         DWORD sz = GetSystemDirectoryW( NULL, 0 );
-        dllcache = malloc( sz * sizeof(WCHAR) + sizeof(L"\\dllcache\\*") );
+        dllcache = HeapAlloc( GetProcessHeap(), 0, sz * sizeof(WCHAR) + sizeof(L"\\dllcache\\*"));
         GetSystemDirectoryW( dllcache, sz );
         lstrcatW( dllcache, L"\\dllcache\\*" );
     }
@@ -1499,7 +1540,7 @@ static int ProcessWindowsFileProtection(void)
         find_rc = FindNextFileW(find_handle,&finddata);
     }
     FindClose(find_handle);
-    free(dllcache);
+    HeapFree(GetProcessHeap(),0,dllcache);
     return 1;
 }
 
@@ -1550,10 +1591,10 @@ static INT_PTR CALLBACK wait_dlgproc( HWND hwnd, UINT msg, WPARAM wp, LPARAM lp 
             SendDlgItemMessageW( hwnd, IDC_WAITICON, STM_SETICON, (WPARAM)icon, 0 );
             SendDlgItemMessageW( hwnd, IDC_WAITTEXT, WM_GETTEXT, 1024, (LPARAM)text );
             len = lstrlenW(text) + lstrlenW(name) + 1;
-            buffer = malloc( len * sizeof(WCHAR) );
+            buffer = HeapAlloc( GetProcessHeap(), 0, len * sizeof(WCHAR) );
             swprintf( buffer, len, text, name );
             SendDlgItemMessageW( hwnd, IDC_WAITTEXT, WM_SETTEXT, 0, (LPARAM)buffer );
-            free( buffer );
+            HeapFree( GetProcessHeap(), 0, buffer );
         }
         break;
     }
@@ -1587,7 +1628,7 @@ static HANDLE start_rundll32( const WCHAR *inf_path, const WCHAR *install, WORD 
 
     len = lstrlenW(app) + ARRAY_SIZE(L" setupapi,InstallHinfSection DefaultInstall 128 ") + lstrlenW(inf_path);
 
-    if (!(buffer = malloc( len * sizeof(WCHAR) ))) return 0;
+    if (!(buffer = HeapAlloc( GetProcessHeap(), 0, len * sizeof(WCHAR) ))) return 0;
     swprintf( buffer, len, L"%s setupapi,InstallHinfSection %s 128 %s", app, install, inf_path );
 
     if (CreateProcessW( app, buffer, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi ))
@@ -1595,7 +1636,7 @@ static HANDLE start_rundll32( const WCHAR *inf_path, const WCHAR *install, WORD 
     else
         pi.hProcess = 0;
 
-    free( buffer );
+    HeapFree( GetProcessHeap(), 0, buffer );
     return pi.hProcess;
 }
 
@@ -1687,6 +1728,52 @@ static void update_user_profile(void)
     LocalFree(sid);
 }
 
+static void update_win_version(void)
+{
+    static const WCHAR win10_buildW[] = L"19043";
+
+    HKEY cv_h;
+    DWORD type, sz;
+    WCHAR current_version[256];
+
+    if(RegOpenKeyExW(HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\Windows NT\\CurrentVersion",
+                0, KEY_ALL_ACCESS, &cv_h) == ERROR_SUCCESS){
+        /* get the current windows version */
+        sz = sizeof(current_version);
+        if(RegQueryValueExW(cv_h, L"CurrentVersion", NULL, &type, (BYTE *)current_version, &sz) == ERROR_SUCCESS &&
+                type == REG_SZ){
+            if(!wcscmp(current_version, L"10.0")){
+                RegSetValueExW(cv_h, L"CurrentBuild", 0, REG_SZ, (const BYTE *)win10_buildW, sizeof(win10_buildW));
+                RegSetValueExW(cv_h, L"CurrentBuildNumber", 0, REG_SZ, (const BYTE *)win10_buildW, sizeof(win10_buildW));
+            }
+        }
+        RegCloseKey(cv_h);
+    }
+
+    if(RegOpenKeyExW(HKEY_LOCAL_MACHINE, L"Software\\Wow6432Node\\Microsoft\\Windows NT\\CurrentVersion",
+                0, KEY_ALL_ACCESS, &cv_h) == ERROR_SUCCESS){
+        /* get the current windows version */
+        sz = sizeof(current_version);
+        if(RegQueryValueExW(cv_h, L"CurrentVersion", NULL, &type, (BYTE *)current_version, &sz) == ERROR_SUCCESS &&
+                type == REG_SZ){
+            if(!wcscmp(current_version, L"10.0")){
+                RegSetValueExW(cv_h, L"CurrentBuild", 0, REG_SZ, (const BYTE *)win10_buildW, sizeof(win10_buildW));
+                RegSetValueExW(cv_h, L"CurrentBuildNumber", 0, REG_SZ, (const BYTE *)win10_buildW, sizeof(win10_buildW));
+            }
+        }
+        RegCloseKey(cv_h);
+    }
+}
+
+static void update_root_certs(void)
+{
+    HCERTSTORE store;
+
+    store = CertOpenStore( CERT_STORE_PROV_SYSTEM_REGISTRY_W, 0, 0, CERT_STORE_OPEN_EXISTING_FLAG
+                           | CERT_STORE_READONLY_FLAG | CERT_SYSTEM_STORE_LOCAL_MACHINE, L"Root");
+    CertCloseStore( store, 0 );
+}
+
 /* execute rundll32 on the wine.inf file if necessary */
 static void update_wineprefix( BOOL force )
 {
@@ -1711,46 +1798,45 @@ static void update_wineprefix( BOOL force )
 
     if (update_timestamp( config_dir, st.st_mtime ) || force)
     {
-        SYSTEM_SUPPORTED_PROCESSOR_ARCHITECTURES_INFORMATION machines[8];
+        ULONG machines[8];
         HANDLE process = 0;
         DWORD count = 0;
 
         if (NtQuerySystemInformationEx( SystemSupportedProcessorArchitectures, &process, sizeof(process),
-                                        machines, sizeof(machines), NULL )) machines[0].Machine = 0;
+                                        machines, sizeof(machines), NULL )) machines[0] = 0;
 
         if ((process = start_rundll32( inf_path, L"PreInstall", IMAGE_FILE_MACHINE_TARGET_HOST )))
         {
             /* HWND hwnd = show_wait_window(); */
             for (;;)
             {
-                if (process)
+                MSG msg;
+                DWORD res = MsgWaitForMultipleObjects( 1, &process, FALSE, INFINITE, QS_ALLINPUT );
+                if (res == WAIT_OBJECT_0)
                 {
-                    MSG msg;
-                    DWORD res = MsgWaitForMultipleObjects( 1, &process, FALSE, INFINITE, QS_ALLINPUT );
-                    if (res != WAIT_OBJECT_0)
-                    {
-                        while (PeekMessageW( &msg, 0, 0, 0, PM_REMOVE )) DispatchMessageW( &msg );
-                        continue;
-                    }
                     CloseHandle( process );
+                    if (!machines[count]) break;
+                    if (HIWORD(machines[count]) & 4 /* native machine */)
+                        process = start_rundll32( inf_path, L"DefaultInstall", IMAGE_FILE_MACHINE_TARGET_HOST );
+                    else
+                        process = start_rundll32( inf_path, L"Wow64Install", LOWORD(machines[count]) );
+                    count++;
+                    if (!process) break;
                 }
-                if (!machines[count].Machine) break;
-                if (machines[count].Native)
-                    process = start_rundll32( inf_path, L"DefaultInstall", IMAGE_FILE_MACHINE_TARGET_HOST );
-                else
-                    process = start_rundll32( inf_path, L"Wow64Install", machines[count].Machine );
-                count++;
+                else while (PeekMessageW( &msg, 0, 0, 0, PM_REMOVE )) DispatchMessageW( &msg );
             }
             /* DestroyWindow( hwnd ); */
         }
         install_root_pnp_devices();
         update_user_profile();
+        update_win_version();
+        update_root_certs();
 
         WINE_MESSAGE( "wine: configuration in %s has been updated.\n", debugstr_w(prettyprint_configdir()) );
     }
 
 done:
-    free( inf_path );
+    HeapFree( GetProcessHeap(), 0, inf_path );
 }
 
 /* Process items in the StartUp group of the user's Programs under the Start Menu. Some installers put
@@ -1846,6 +1932,52 @@ static void usage( int status )
     exit( status );
 }
 
+static void create_digitalproductid(void)
+{
+    BYTE digital_product_id[0xa4];
+    char product_id[256];
+    LSTATUS status;
+    unsigned int i;
+    DWORD size;
+    DWORD type;
+    HKEY key;
+
+    if ((status = RegOpenKeyExW( HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\Windows NT\\CurrentVersion",
+                       0, KEY_ALL_ACCESS, &key )))
+        return;
+    size = sizeof(product_id);
+    status = RegQueryValueExA( key, "ProductId", NULL, &type, (BYTE *)product_id, &size );
+    if (status) goto done;
+    if (!size) goto done;
+    if (product_id[size - 1])
+    {
+        if (size == sizeof(product_id)) goto done;
+        product_id[size++] = 0;
+    }
+
+    if (!RegQueryValueExA( key, "DigitalProductId", NULL, &type, NULL, &size ) && size == sizeof(digital_product_id))
+    {
+        if (RegQueryValueExA( key, "DigitalProductId", NULL, &type, digital_product_id, &size ))
+            goto done;
+        for (i = 0; i < size; ++i)
+            if (digital_product_id[i]) break;
+        if (i < size) goto done;
+    }
+
+    memset( digital_product_id, 0, sizeof(digital_product_id) );
+    *(DWORD *)digital_product_id = sizeof(digital_product_id);
+    digital_product_id[4] = 3;
+    strcpy( (char *)digital_product_id + 8, product_id );
+    *(DWORD *)(digital_product_id + 0x20) = 0x0cec;
+    *(DWORD *)(digital_product_id + 0x34) = 0x0cec;
+    strcpy( (char *)digital_product_id + 0x24, "[TH] X19-99481" );
+    digital_product_id[0x42] = 8;
+    RtlGenRandom( digital_product_id + 0x38, 0x18 );
+    RegSetValueExA( key, "DigitalProductId", 0, REG_BINARY, digital_product_id, sizeof(digital_product_id) );
+done:
+    RegCloseKey( key );
+}
+
 int __cdecl main( int argc, char *argv[] )
 {
     /* First, set the current directory to SystemRoot */
@@ -1853,7 +1985,8 @@ int __cdecl main( int argc, char *argv[] )
     BOOL end_session, force, init, kill, restart, shutdown, update;
     HANDLE event;
     OBJECT_ATTRIBUTES attr;
-    UNICODE_STRING nameW = RTL_CONSTANT_STRING( L"\\KernelObjects\\__wineboot_event" );
+    UINT64 tsc_frequency = 0;
+    UNICODE_STRING nameW;
     BOOL is_wow64;
 
     end_session = force = init = kill = restart = shutdown = update = FALSE;
@@ -1934,12 +2067,13 @@ int __cdecl main( int argc, char *argv[] )
 
     /* create event to be inherited by services.exe */
     InitializeObjectAttributes( &attr, &nameW, OBJ_OPENIF | OBJ_INHERIT, 0, NULL );
+    RtlInitUnicodeString( &nameW, L"\\KernelObjects\\__wineboot_event" );
     NtCreateEvent( &event, EVENT_ALL_ACCESS, &attr, NotificationEvent, 0 );
 
     ResetEvent( event );  /* in case this is a restart */
 
-    create_user_shared_data();
-    create_hardware_registry_keys();
+    create_user_shared_data( &tsc_frequency );
+    create_hardware_registry_keys( tsc_frequency );
     create_dynamic_registry_keys();
     create_environment_registry_keys();
     create_computer_name_keys();
@@ -1956,6 +2090,7 @@ int __cdecl main( int argc, char *argv[] )
     }
     if (init || update) update_wineprefix( update );
 
+    create_digitalproductid();
     create_volatile_environment_registry_key();
     create_proxy_settings();
 

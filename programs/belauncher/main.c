@@ -10,7 +10,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(belauncher);
 
 int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE hPrevInst, LPWSTR cmdline, int cmdshow)
 {
-    char *configs, *config, *arch_32_exe = NULL, *arch_64_exe = NULL, *game_exe = NULL, *be_arg = NULL;
+    char *configs, *config, *arch_32_exe = NULL, *arch_64_exe = NULL, *game_exe, *be_arg = NULL;
     WCHAR path[MAX_PATH], *p, config_path[MAX_PATH], game_exeW[MAX_PATH], **argvW;
     LARGE_INTEGER launcher_cfg_size;
     unsigned char battleye_status;
@@ -84,7 +84,6 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE hPrevInst, LPWSTR cmdline, int cm
     while ((config = strchr(config, '\n')) && *(config++));
 
     *game_exeW = 0;
-    game_exe_len = 0;
 
     if ((argvW = CommandLineToArgvW(cmdline, &argc)))
     {

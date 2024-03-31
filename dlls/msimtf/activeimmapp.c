@@ -887,7 +887,7 @@ static const IActiveIMMMessagePumpOwnerVtbl ActiveIMMMessagePumpOwnerVtbl =
     ActiveIMMMessagePumpOwner_Resume,
 };
 
-HRESULT ActiveIMMApp_Constructor(IUnknown *pUnkOuter, IUnknown **ppOut)
+DECLSPEC_HIDDEN HRESULT ActiveIMMApp_Constructor(IUnknown *pUnkOuter, IUnknown **ppOut)
 {
     ActiveIMMApp *This;
     if (pUnkOuter)

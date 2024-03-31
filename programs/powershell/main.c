@@ -24,25 +24,10 @@ int __cdecl wmain(int argc, WCHAR *argv[])
 {
     int i;
 
-    WINE_FIXME("stub.\n");
+    WINE_FIXME("stub:");
     for (i = 0; i < argc; i++)
-    {
-        WINE_FIXME("argv[%d] %s\n", i, wine_dbgstr_w(argv[i]));
-        if (!wcsicmp(argv[i], L"-command") && i < argc - 1 && !wcscmp(argv[i + 1], L"-"))
-        {
-            char command[4096], *p;
+        WINE_FIXME(" %s", wine_dbgstr_w(argv[i]));
+    WINE_FIXME("\n");
 
-            ++i;
-            while (fgets(command, sizeof(command), stdin))
-            {
-                WINE_FIXME("command %s.\n", debugstr_a(command));
-                p = command;
-                while (*p && !isspace(*p)) ++p;
-                *p = 0;
-                if (!stricmp(command, "exit"))
-                    break;
-            }
-        }
-    }
     return 0;
 }

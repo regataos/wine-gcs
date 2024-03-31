@@ -23,8 +23,6 @@
 #import "cocoa_event.h"
 #import "cocoa_window.h"
 
-#pragma GCC diagnostic ignored "-Wdeclaration-after-statement"
-
 #if !defined(MAC_OS_X_VERSION_10_14) || MAC_OS_X_VERSION_MAX_ALLOWED < MAC_OS_X_VERSION_10_14
 /* For older SDKs, #define the new names of constants deprecated/renamed in macOS 10.14. */
 #define NSBitmapImageFileTypeBMP        NSBMPFileType
@@ -37,7 +35,8 @@
 static int owned_change_count = -1;
 static int change_count = -1;
 
-static NSDictionary<NSString *, NSNumber *> *BitmapOutputTypeMap;
+static NSArray* BitmapOutputTypes;
+static NSDictionary* BitmapOutputTypeMap;
 static dispatch_once_t BitmapOutputTypesInitOnce;
 
 static NSString* const OwnershipSentinel = @"org.winehq.wine.winemac.pasteboard-ownership-sentinel";
@@ -89,20 +88,24 @@ int macdrv_has_pasteboard_changed(void)
  */
 CFArrayRef macdrv_copy_pasteboard_types(CFTypeRef pasteboard)
 {
-@autoreleasepool
-{
     NSPasteboard* pb = (NSPasteboard*)pasteboard;
     __block CFArrayRef ret = NULL;
+    NSAutoreleasePool* pool = [[NSAutoreleasePool alloc] init];
 
     dispatch_once(&BitmapOutputTypesInitOnce, ^{
-        BitmapOutputTypeMap =
-        @{
-                   @"public.tiff" : @(NSBitmapImageFileTypeTIFF),
-                    @"public.png" : @(NSBitmapImageFileTypePNG),
-             @"com.microsoft.bmp" : @(NSBitmapImageFileTypeBMP),
-            @"com.compuserve.gif" : @(NSBitmapImageFileTypeGIF),
-                   @"public.jpeg" : @(NSBitmapImageFileTypeJPEG),
-        };
+        NSArray* bitmapFileTypes = [NSArray arrayWithObjects:
+                                    [NSNumber numberWithUnsignedInteger:NSBitmapImageFileTypeTIFF],
+                                    [NSNumber numberWithUnsignedInteger:NSBitmapImageFileTypePNG],
+                                    [NSNumber numberWithUnsignedInteger:NSBitmapImageFileTypeBMP],
+                                    [NSNumber numberWithUnsignedInteger:NSBitmapImageFileTypeGIF],
+                                    [NSNumber numberWithUnsignedInteger:NSBitmapImageFileTypeJPEG],
+                                    nil];
+
+        BitmapOutputTypes = [[NSArray alloc] initWithObjects:@"public.tiff", @"public.png",
+                             @"com.microsoft.bmp", @"com.compuserve.gif", @"public.jpeg", nil];
+
+        BitmapOutputTypeMap = [[NSDictionary alloc] initWithObjects:bitmapFileTypes
+                                                            forKeys:BitmapOutputTypes];
     });
 
     OnMainThread(^{
@@ -121,7 +124,7 @@ CFArrayRef macdrv_copy_pasteboard_types(CFTypeRef pasteboard)
             if ([types firstObjectCommonWithArray:[NSBitmapImageRep imageTypes]] ||
                 [types firstObjectCommonWithArray:[NSBitmapImageRep imagePasteboardTypes]])
             {
-                NSMutableArray<NSString *> *newTypes = [[BitmapOutputTypeMap allKeys] mutableCopy];
+                NSMutableArray* newTypes = [BitmapOutputTypes mutableCopy];
                 [newTypes removeObjectsInArray:types];
                 types = [types arrayByAddingObjectsFromArray:newTypes];
                 [newTypes release];
@@ -135,8 +138,8 @@ CFArrayRef macdrv_copy_pasteboard_types(CFTypeRef pasteboard)
         }
     });
 
+    [pool release];
     return ret;
-}
 }
 
 
@@ -157,11 +160,11 @@ CFDataRef macdrv_copy_pasteboard_data(CFTypeRef pasteboard, CFStringRef type)
         {
             NSPasteboard* local_pb = pb;
             if (!local_pb) local_pb = [NSPasteboard generalPasteboard];
-            if ([local_pb availableTypeFromArray:@[(NSString*)type]])
+            if ([local_pb availableTypeFromArray:[NSArray arrayWithObject:(NSString*)type]])
                 ret = [[local_pb dataForType:(NSString*)type] copy];
             else
             {
-                NSNumber* bitmapType = BitmapOutputTypeMap[(NSString*)type];
+                NSNumber* bitmapType = [BitmapOutputTypeMap objectForKey:(NSString*)type];
                 if (bitmapType)
                 {
                     NSArray* reps = [NSBitmapImageRep imageRepsWithPasteboard:local_pb];
@@ -195,7 +198,7 @@ void macdrv_clear_pasteboard(macdrv_window w)
         @try
         {
             NSPasteboard* pb = [NSPasteboard generalPasteboard];
-            owned_change_count = [pb declareTypes:@[OwnershipSentinel]
+            owned_change_count = [pb declareTypes:[NSArray arrayWithObject:OwnershipSentinel]
                                             owner:window];
             [window.queue discardEventsMatchingMask:event_mask_for_type(LOST_PASTEBOARD_OWNERSHIP)
                                           forWindow:window];
@@ -226,7 +229,7 @@ int macdrv_set_pasteboard_data(CFStringRef type, CFDataRef data, macdrv_window w
         @try
         {
             NSPasteboard* pb = [NSPasteboard generalPasteboard];
-            NSInteger change_count = [pb addTypes:@[(NSString*)type]
+            NSInteger change_count = [pb addTypes:[NSArray arrayWithObject:(NSString*)type]
                                             owner:window];
             if (change_count)
             {

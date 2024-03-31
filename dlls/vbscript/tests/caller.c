@@ -76,8 +76,8 @@ extern const CLSID CLSID_VBScript;
 DEFINE_EXPECT(sp_caller_QI_NULL);
 DEFINE_EXPECT(site_QI_NULL);
 DEFINE_EXPECT(testGetCaller);
-DEFINE_EXPECT(testGetCallerVBS);
-DEFINE_EXPECT(testGetCallerNested);
+DEFINE_EXPECT(testGetCaller_no_args);
+DEFINE_EXPECT(testGetCaller_two_args);
 DEFINE_EXPECT(OnEnterScript);
 DEFINE_EXPECT(OnLeaveScript);
 
@@ -85,8 +85,6 @@ static IActiveScript *active_script;
 static IServiceProvider *test_get_caller_sp;
 
 #define DISPID_TEST_TESTGETCALLER    0x1000
-#define DISPID_TEST_TESTGETCALLERVBS 0x1001
-#define DISPID_TEST_TESTGETCALLERNESTED 0x1002
 
 #define parse_script(a,s) _parse_script(__LINE__,a,s)
 static void _parse_script(unsigned line, IActiveScript *active_script, const WCHAR *script)
@@ -245,16 +243,6 @@ static HRESULT WINAPI Test_GetDispID(IDispatchEx *iface, BSTR bstrName, DWORD gr
         *pid = DISPID_TEST_TESTGETCALLER;
         return S_OK;
     }
-    if(!lstrcmpW(bstrName, L"testGetCallerVBS")) {
-        ok(grfdex == fdexNameCaseInsensitive, "grfdex = %lx\n", grfdex);
-        *pid = DISPID_TEST_TESTGETCALLERVBS;
-        return S_OK;
-    }
-    if(!lstrcmpW(bstrName, L"testGetCallerNested")) {
-        ok(grfdex == fdexNameCaseInsensitive, "grfdex = %lx\n", grfdex);
-        *pid = DISPID_TEST_TESTGETCALLERNESTED;
-        return S_OK;
-    }
 
     return E_NOTIMPL;
 }
@@ -268,85 +256,69 @@ static HRESULT WINAPI Test_InvokeEx(IDispatchEx *iface, DISPID id, LCID lcid, WO
     ok(pspCaller != NULL, "pspCaller == NULL\n");
 
     switch(id) {
-    case DISPID_TEST_TESTGETCALLER: {
-        void *iface = (void*)0xdeadbeef;
-
-        CHECK_EXPECT(testGetCaller);
-        CHECK_CALLED(OnEnterScript);
-
+    case DISPID_TEST_TESTGETCALLER:
         ok(wFlags == DISPATCH_METHOD, "wFlags = %x\n", wFlags);
         ok(pdp != NULL, "pdp == NULL\n");
         ok(!pdp->rgdispidNamedArgs, "rgdispidNamedArgs != NULL\n");
         ok(!pvarRes, "pvarRes != NULL\n");
         ok(pei != NULL, "pei == NULL\n");
 
-        SET_EXPECT(OnEnterScript);
-        SET_EXPECT(OnLeaveScript);
-        SET_EXPECT(testGetCallerNested);
-        parse_script(active_script, L"Call testGetCallerNested(1,2)");
-        CHECK_CALLED(testGetCallerNested);
-        CHECK_CALLED(OnLeaveScript);
-        CHECK_CALLED(OnEnterScript);
-        SET_EXPECT(OnLeaveScript);
+        if(pdp->cArgs == 0) {
+            void *iface = (void*)0xdeadbeef;
 
-        hres = IServiceProvider_QueryService(pspCaller, &SID_GetCaller, &IID_IServiceProvider, (void**)&caller);
-        ok(hres == S_OK, "Could not get SID_GetCaller service: %08lx\n", hres);
-        ok(caller == test_get_caller_sp, "caller != test_get_caller_sp\n");
-        if(caller) IServiceProvider_Release(caller);
+            CHECK_EXPECT(testGetCaller_no_args);
+            CHECK_CALLED(OnEnterScript);
 
-        if(test_get_caller_sp)
-            SET_EXPECT(sp_caller_QI_NULL);
-        hres = IServiceProvider_QueryService(pspCaller, &SID_GetCaller, &IID_NULL, &iface);
-        ok(hres == (test_get_caller_sp ? E_NOINTERFACE : S_OK), "Could not query SID_GetCaller with IID_NULL: %08lx\n", hres);
-        ok(iface == NULL, "iface != NULL\n");
-        if(test_get_caller_sp)
-            CHECK_CALLED(sp_caller_QI_NULL);
-        break;
-    }
+            SET_EXPECT(OnEnterScript);
+            SET_EXPECT(OnLeaveScript);
+            SET_EXPECT(testGetCaller_two_args);
+            parse_script(active_script, L"Call testGetCaller(1,2)");
+            CHECK_CALLED(testGetCaller_two_args);
+            CHECK_CALLED(OnLeaveScript);
+            CHECK_CALLED(OnEnterScript);
+            SET_EXPECT(OnLeaveScript);
 
-    case DISPID_TEST_TESTGETCALLERVBS: {
-        IUnknown *unk;
+            hres = IServiceProvider_QueryService(pspCaller, &SID_GetCaller, &IID_IServiceProvider, (void**)&caller);
+            ok(hres == S_OK, "Could not get SID_GetCaller service: %08lx\n", hres);
+            ok(caller == test_get_caller_sp, "caller != test_get_caller_sp\n");
+            if(caller) IServiceProvider_Release(caller);
 
-        CHECK_EXPECT(testGetCallerVBS);
+            if(test_get_caller_sp)
+                SET_EXPECT(sp_caller_QI_NULL);
+            hres = IServiceProvider_QueryService(pspCaller, &SID_GetCaller, &IID_NULL, &iface);
+            ok(hres == (test_get_caller_sp ? E_NOINTERFACE : S_OK), "Could not query SID_GetCaller with IID_NULL: %08lx\n", hres);
+            ok(iface == NULL, "iface != NULL\n");
+            if(test_get_caller_sp)
+                CHECK_CALLED(sp_caller_QI_NULL);
+        }else if(pdp->cArgs == 1) {
+            IUnknown *unk;
 
-        ok(wFlags == DISPATCH_METHOD, "wFlags = %x\n", wFlags);
-        ok(pdp != NULL, "pdp == NULL\n");
-        ok(pdp->cArgs == 1, "cArgs = %d\n", pdp->cArgs);
-        ok(!pdp->rgdispidNamedArgs, "rgdispidNamedArgs != NULL\n");
-        ok(!pvarRes, "pvarRes != NULL\n");
-        ok(pei != NULL, "pei == NULL\n");
-        ok(V_VT(pdp->rgvarg) == VT_I2, "V_VT(rgvarg) = %d\n", V_VT(pdp->rgvarg));
-        ok(V_I2(pdp->rgvarg) == 42, "V_I2(rgvarg) = %d\n", V_I2(pdp->rgvarg));
+            CHECK_EXPECT(testGetCaller);
+            ok(pdp->cArgs == 1, "cArgs = %d\n", pdp->cArgs);
+            ok(V_VT(pdp->rgvarg) == VT_I2, "V_VT(rgvarg) = %d\n", V_VT(pdp->rgvarg));
+            ok(V_I2(pdp->rgvarg) == 42, "V_I2(rgvarg) = %d\n", V_I2(pdp->rgvarg));
 
-        hres = IServiceProvider_QueryService(pspCaller, &SID_GetCaller, &IID_IServiceProvider, (void**)&caller);
-        ok(hres == E_NOINTERFACE, "QueryService(SID_GetCaller) returned: %08lx\n", hres);
-        ok(caller == NULL, "caller != NULL\n");
+            hres = IServiceProvider_QueryService(pspCaller, &SID_GetCaller, &IID_IServiceProvider, (void**)&caller);
+            ok(hres == E_NOINTERFACE, "QueryService(SID_GetCaller) returned: %08lx\n", hres);
+            ok(caller == NULL, "caller != NULL\n");
 
-        SET_EXPECT(site_QI_NULL);
-        hres = IServiceProvider_QueryService(pspCaller, &IID_IActiveScriptSite, &IID_NULL, (void**)&unk);
-        ok(hres == E_NOINTERFACE, "QueryService(IActiveScriptSite->NULL) returned: %08lx\n", hres);
-        ok(!unk, "unk != NULL\n");
-        CHECK_CALLED(site_QI_NULL);
-        break;
-    }
+            SET_EXPECT(site_QI_NULL);
+            hres = IServiceProvider_QueryService(pspCaller, &IID_IActiveScriptSite, &IID_NULL, (void**)&unk);
+            ok(hres == E_NOINTERFACE, "QueryService(IActiveScriptSite->NULL) returned: %08lx\n", hres);
+            ok(!unk, "unk != NULL\n");
+            CHECK_CALLED(site_QI_NULL);
+        }else {
+            CHECK_EXPECT(testGetCaller_two_args);
+            ok(pdp->cArgs == 2, "cArgs = %d\n", pdp->cArgs);
+            ok(V_VT(&pdp->rgvarg[0]) == VT_I2, "V_VT(rgvarg[0]) = %d\n", V_VT(&pdp->rgvarg[0]));
+            ok(V_VT(&pdp->rgvarg[1]) == VT_I2, "V_VT(rgvarg[1]) = %d\n", V_VT(&pdp->rgvarg[1]));
+            ok(V_I2(&pdp->rgvarg[0]) == 2, "V_I2(rgvarg[0]) = %d\n", V_I2(&pdp->rgvarg[0]));
+            ok(V_I2(&pdp->rgvarg[1]) == 1, "V_I2(rgvarg[1]) = %d\n", V_I2(&pdp->rgvarg[1]));
 
-    case DISPID_TEST_TESTGETCALLERNESTED:
-        CHECK_EXPECT(testGetCallerNested);
-
-        ok(wFlags == DISPATCH_METHOD, "wFlags = %x\n", wFlags);
-        ok(pdp != NULL, "pdp == NULL\n");
-        ok(pdp->cArgs == 2, "cArgs = %d\n", pdp->cArgs);
-        ok(!pdp->rgdispidNamedArgs, "rgdispidNamedArgs != NULL\n");
-        ok(!pvarRes, "pvarRes != NULL\n");
-        ok(pei != NULL, "pei == NULL\n");
-        ok(V_VT(&pdp->rgvarg[0]) == VT_I2, "V_VT(rgvarg[0]) = %d\n", V_VT(&pdp->rgvarg[0]));
-        ok(V_VT(&pdp->rgvarg[1]) == VT_I2, "V_VT(rgvarg[1]) = %d\n", V_VT(&pdp->rgvarg[1]));
-        ok(V_I2(&pdp->rgvarg[0]) == 2, "V_I2(rgvarg[0]) = %d\n", V_I2(&pdp->rgvarg[0]));
-        ok(V_I2(&pdp->rgvarg[1]) == 1, "V_I2(rgvarg[1]) = %d\n", V_I2(&pdp->rgvarg[1]));
-
-        hres = IServiceProvider_QueryService(pspCaller, &SID_GetCaller, &IID_IServiceProvider, (void**)&caller);
-        ok(hres == E_NOINTERFACE, "QueryService(SID_GetCaller) returned: %08lx\n", hres);
-        ok(caller == NULL, "caller != NULL\n");
+            hres = IServiceProvider_QueryService(pspCaller, &SID_GetCaller, &IID_IServiceProvider, (void**)&caller);
+            ok(hres == E_NOINTERFACE, "QueryService(SID_GetCaller) returned: %08lx\n", hres);
+            ok(caller == NULL, "caller != NULL\n");
+        }
         break;
 
     default:
@@ -514,11 +486,11 @@ static void run_scripts(void)
 
     SET_EXPECT(OnEnterScript);
     SET_EXPECT(OnLeaveScript);
-    SET_EXPECT(testGetCallerVBS);
+    SET_EXPECT(testGetCaller);
     parse_script(active_script,
                  L"Sub testGetCallerFunc\nCall testGetCaller\nEnd Sub\n"
-                 L"Call testGetCallerVBS(42)");
-    CHECK_CALLED(testGetCallerVBS);
+                 L"Call testGetCaller(42)");
+    CHECK_CALLED(testGetCaller);
     CHECK_CALLED(OnLeaveScript);
     CHECK_CALLED(OnEnterScript);
 
@@ -534,18 +506,18 @@ static void run_scripts(void)
 
     SET_EXPECT(OnEnterScript);
     SET_EXPECT(OnLeaveScript);
-    SET_EXPECT(testGetCaller);
+    SET_EXPECT(testGetCaller_no_args);
     hres = IDispatchEx_InvokeEx(dispex, dispid, 0, DISPATCH_METHOD, &dp, NULL, NULL, NULL);
     ok(hres == S_OK, "InvokeEx failed: %08lx\n", hres);
-    CHECK_CALLED(testGetCaller);
+    CHECK_CALLED(testGetCaller_no_args);
     CHECK_CALLED(OnLeaveScript);
     test_get_caller_sp = &sp_caller_obj;
     SET_EXPECT(OnEnterScript);
     SET_EXPECT(OnLeaveScript);
-    SET_EXPECT(testGetCaller);
+    SET_EXPECT(testGetCaller_no_args);
     hres = IDispatchEx_InvokeEx(dispex, dispid, 0, DISPATCH_METHOD, &dp, NULL, NULL, test_get_caller_sp);
     ok(hres == S_OK, "InvokeEx failed: %08lx\n", hres);
-    CHECK_CALLED(testGetCaller);
+    CHECK_CALLED(testGetCaller_no_args);
     CHECK_CALLED(OnLeaveScript);
     IDispatchEx_Release(dispex);
 

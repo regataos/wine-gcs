@@ -176,11 +176,11 @@
 @ stub SymSrvDeltaName
 @ stub SymSrvDeltaNameW
 @ stdcall SymSrvGetFileIndexInfo(str ptr long)
-@ stdcall SymSrvGetFileIndexInfoW(wstr ptr long)
+@ stub SymSrvGetFileIndexInfoW
 @ stub SymSrvGetFileIndexString
 @ stub SymSrvGetFileIndexStringW
-@ stdcall SymSrvGetFileIndexes(str ptr ptr ptr long)
-@ stdcall SymSrvGetFileIndexesW(wstr ptr ptr ptr long)
+@ stub SymSrvGetFileIndexes
+@ stub SymSrvGetFileIndexesW
 @ stub SymSrvGetSupplement
 @ stub SymSrvGetSupplementW
 @ stub SymSrvIsStore
@@ -215,6 +215,3 @@
 #@ stub sym
 #@ stub symsrv
 #@ stub vc7fpo
-
-# wine extensions
-@ stdcall wine_get_module_information(long int64 ptr long)

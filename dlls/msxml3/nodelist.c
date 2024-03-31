@@ -134,7 +134,7 @@ static ULONG WINAPI xmlnodelist_Release(
     {
         xmldoc_release( This->parent->doc );
         if (This->enumvariant) IEnumVARIANT_Release(This->enumvariant);
-        free( This );
+        heap_free( This );
     }
 
     return ref;
@@ -406,7 +406,7 @@ IXMLDOMNodeList* create_children_nodelist( xmlNodePtr node )
 {
     xmlnodelist *This;
 
-    This = malloc(sizeof(*This));
+    This = heap_alloc( sizeof *This );
     if ( !This )
         return NULL;
 

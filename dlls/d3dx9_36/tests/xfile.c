@@ -335,7 +335,7 @@ static void test_dump(void)
     if (file == INVALID_HANDLE_VALUE)
         return;
 
-    data = calloc(1, 10000);
+    data = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, 10000);
 
     if (!ReadFile(file, data, 10000, &size, NULL))
     {
@@ -376,7 +376,7 @@ static void test_dump(void)
 
 exit:
     CloseHandle(file);
-    free(data);
+    HeapFree(GetProcessHeap(), 0, data);
 }
 
 START_TEST(xfile)

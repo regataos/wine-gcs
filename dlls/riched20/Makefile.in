@@ -1,20 +1,18 @@
 MODULE    = riched20.dll
 IMPORTLIB = riched20
-IMPORTS   = uuid ole32 oleaut32 imm32 user32 gdi32
+IMPORTS   = uuid usp10 ole32 oleaut32 imm32 user32 gdi32
 
 EXTRADLLFLAGS = -Wl,--image-base,0x7ac00000
 
-SOURCES = \
+C_SRCS = \
 	caret.c \
 	clipboard.c \
 	context.c \
 	editor.c \
 	list.c \
-	ocr_reverse.svg \
 	paint.c \
 	para.c \
 	reader.c \
-	riched_tom.idl \
 	richole.c \
 	row.c \
 	run.c \
@@ -24,6 +22,13 @@ SOURCES = \
 	txthost.c \
 	txtsrv.c \
 	undo.c \
-	version.rc \
 	wrap.c \
 	writer.c
+
+RC_SRCS = version.rc
+
+IDL_SRCS = \
+	riched_tom.idl
+
+SVG_SRCS = \
+	ocr_reverse.svg

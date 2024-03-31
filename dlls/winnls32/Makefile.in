@@ -3,5 +3,5 @@ IMPORTLIB = winnls32
 
 EXTRADLLFLAGS = -Wb,--prefer-native
 
-SOURCES = \
+C_SRCS = \
 	winnls.c

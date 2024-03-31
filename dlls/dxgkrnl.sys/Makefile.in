@@ -2,5 +2,5 @@ MODULE    = dxgkrnl.sys
 IMPORTS   = ntoskrnl
 EXTRADLLFLAGS = -mno-cygwin -Wb,--subsystem,native
 
-SOURCES = \
+C_SRCS = \
 	main.c

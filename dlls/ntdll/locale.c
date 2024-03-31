@@ -18,6 +18,8 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#define NONAMELESSUNION
+
 #include <stdarg.h>
 #include <string.h>
 #include <stdlib.h>
@@ -89,13 +91,6 @@ invalid:
     return STATUS_INVALID_PARAMETER;
 }
 
-static PEB64 *get_peb64( void )
-{
-    TEB64 *teb64 = NtCurrentTeb64();
-
-    if (!teb64) return NULL;
-    return (PEB64 *)(UINT_PTR)teb64->Peb;
-}
 
 void locale_init(void)
 {
@@ -108,7 +103,6 @@ void locale_init(void)
     void *ansi_ptr = utf8, *oem_ptr = utf8, *case_ptr;
     NTSTATUS status;
     const struct locale_nls_header *header;
-    PEB64 *peb64 = get_peb64();
 
     status = RtlGetLocaleFileMappingAddress( (void **)&header, &system_lcid, &unused );
     if (status)
@@ -166,18 +160,15 @@ void locale_init(void)
 
     NtGetNlsSectionPtr( 10, 0, NULL, &case_ptr, &size );
     NtCurrentTeb()->Peb->UnicodeCaseTableData = case_ptr;
-    if (peb64) peb64->UnicodeCaseTableData = PtrToUlong( case_ptr );
     if (ansi_cp != CP_UTF8)
     {
         NtGetNlsSectionPtr( 11, ansi_cp, NULL, &ansi_ptr, &size );
         NtCurrentTeb()->Peb->AnsiCodePageData = ansi_ptr;
-        if (peb64) peb64->AnsiCodePageData = PtrToUlong( ansi_ptr );
     }
     if (oem_cp != CP_UTF8)
     {
         NtGetNlsSectionPtr( 11, oem_cp, NULL, &oem_ptr, &size );
         NtCurrentTeb()->Peb->OemCodePageData = oem_ptr;
-        if (peb64) peb64->OemCodePageData = PtrToUlong( oem_ptr );
     }
     RtlInitNlsTables( ansi_ptr, oem_ptr, case_ptr, &nls_info );
     NlsAnsiCodePage     = nls_info.AnsiTableInfo.CodePage;
@@ -1338,7 +1329,7 @@ NTSTATUS WINAPI RtlIdnToUnicode( DWORD flags, const WCHAR *src, INT srclen, WCHA
     int i, buflen, start, end, out_label, out = 0;
     NTSTATUS status;
     UINT buffer[64];
-    WCHAR ch = 0;
+    WCHAR ch;
 
     if (!src || srclen < -1) return STATUS_INVALID_PARAMETER;
     if (srclen == -1) srclen = wcslen( src ) + 1;

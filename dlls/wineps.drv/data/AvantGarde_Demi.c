@@ -257,9 +257,9 @@ static const AFMMETRICS metrics[228] =
 const AFM PSDRV_AvantGarde_Demi =
 {
     "AvantGarde-Demi",			    /* FontName */
-    L"ITC Avant Garde Gothic Demi",	    /* FullName */
-    L"ITC Avant Garde Gothic",		    /* FamilyName */
-    L"AdobeStandardEncoding",		    /* EncodingScheme */
+    "ITC Avant Garde Gothic Demi",	    /* FullName */
+    "ITC Avant Garde Gothic",		    /* FamilyName */
+    "AdobeStandardEncoding",		    /* EncodingScheme */
     FW_BOLD,				    /* Weight */
     0,					    /* ItalicAngle */
     FALSE,				    /* IsFixedPitch */

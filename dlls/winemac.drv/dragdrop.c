@@ -20,6 +20,8 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#define NONAMELESSUNION
+
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
 #include "macdrv_dll.h"
@@ -165,9 +167,9 @@ static HRESULT WINAPI dddo_GetData(IDataObject* iface, FORMATETC* formatEtc, STG
     if (SUCCEEDED(hr))
     {
         medium->tymed = TYMED_HGLOBAL;
-        medium->hGlobal = get_pasteboard_data(This->pasteboard, formatEtc->cfFormat);
+        medium->u.hGlobal = get_pasteboard_data(This->pasteboard, formatEtc->cfFormat);
         medium->pUnkForRelease = NULL;
-        hr = medium->hGlobal ? S_OK : E_OUTOFMEMORY;
+        hr = medium->u.hGlobal ? S_OK : E_OUTOFMEMORY;
     }
 
     return hr;
@@ -499,7 +501,7 @@ NTSTATUS WINAPI macdrv_dnd_query_drop(void *arg, ULONG size)
     if (active_data_object) IDataObject_Release(active_data_object);
     active_data_object = NULL;
     last_droptarget_hwnd = NULL;
-    return NtCallbackReturn( &ret, sizeof(ret), STATUS_SUCCESS );
+    return ret;
 }
 
 
@@ -511,7 +513,6 @@ NTSTATUS WINAPI macdrv_dnd_query_exited(void *arg, ULONG size)
     struct dnd_query_exited_params *params = arg;
     HWND hwnd = UlongToHandle(params->hwnd);
     IDropTarget *droptarget;
-    BOOL ret = TRUE;
 
     TRACE("win %p\n", hwnd);
 
@@ -530,7 +531,8 @@ NTSTATUS WINAPI macdrv_dnd_query_exited(void *arg, ULONG size)
     if (active_data_object) IDataObject_Release(active_data_object);
     active_data_object = NULL;
     last_droptarget_hwnd = NULL;
-    return NtCallbackReturn( &ret, sizeof(ret), STATUS_SUCCESS );
+
+    return TRUE;
 }
 
 
@@ -643,6 +645,5 @@ NTSTATUS WINAPI macdrv_dnd_query_drag(void *arg, ULONG size)
     }
 
     TRACE(" -> %s\n", ret ? "TRUE" : "FALSE");
-    if (!ret) effect = 0;
-    return NtCallbackReturn( &effect, sizeof(effect), STATUS_SUCCESS );
+    return ret ? effect : 0;
 }

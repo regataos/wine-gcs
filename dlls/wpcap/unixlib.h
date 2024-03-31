@@ -35,15 +35,6 @@ struct pcap_interface
     unsigned int flags;
 };
 
-struct pcap_interface_offsets
-{
-    unsigned int name_offset;
-    unsigned int name_len;
-    unsigned int description_offset;
-    unsigned int description_len;
-    unsigned int flags;
-};
-
 struct pcap_pkthdr_win32
 {
     struct
@@ -55,61 +46,26 @@ struct pcap_pkthdr_win32
     unsigned int len;
 };
 
-struct pcap_stat_win32
+struct pcap
 {
-    unsigned int ps_recv;
-    unsigned int ps_drop;
-    unsigned int ps_ifdrop;
-    unsigned int ps_capt;
-    unsigned int ps_sent;
-    unsigned int ps_netdrop;
-};
-
-struct activate_params
-{
-    UINT64 handle;
-};
-
-struct breakloop_params
-{
-    UINT64 handle;
-};
-
-struct bufsize_params
-{
-    UINT64 handle;
-};
-
-struct can_set_rfmon_params
-{
-    UINT64 handle;
-};
-
-struct close_params
-{
-    UINT64 handle;
+    void *handle;
+    struct pcap_pkthdr_win32 hdr;
 };
 
 struct compile_params
 {
-    UINT64 handle;
-    unsigned int *program_len;
-    struct bpf_insn *program_insns;
-    const char *str;
+    struct pcap *pcap;
+    void *program;
+    const char *buf;
     int optimize;
     unsigned int mask;
 };
 
 struct create_params
 {
-    char *source;
+    const char *src;
     char *errbuf;
-    UINT64 *handle;
-};
-
-struct datalink_params
-{
-    UINT64 handle;
+    struct pcap **ret;
 };
 
 struct datalink_name_to_val_params
@@ -120,15 +76,13 @@ struct datalink_name_to_val_params
 struct datalink_val_to_description_params
 {
     int link;
-    char *buf;
-    unsigned int *buflen;
+    const char **ret;
 };
 
 struct datalink_val_to_name_params
 {
     int link;
-    char *buf;
-    unsigned int *buflen;
+    const char **ret;
 };
 
 struct dump_params
@@ -138,45 +92,28 @@ struct dump_params
     const unsigned char *packet;
 };
 
-struct dump_close_params
-{
-    UINT64 handle;
-};
-
 struct dump_open_params
 {
-    UINT64 handle;
-    char *name;
-    UINT64 *ret_handle;
+    struct pcap *pcap;
+    const char *name;
+    void **ret;
 };
 
 struct findalldevs_params
 {
-    char *buf;
-    unsigned int *buflen;
+    struct pcap_interface **devs;
     char *errbuf;
 };
 
 struct geterr_params
 {
-    UINT64 handle;
-    char *errbuf;
+    struct pcap *pcap;
+    char **ret;
 };
 
 struct getnonblock_params
 {
-    UINT64 handle;
-    char *errbuf;
-};
-
-struct get_tstamp_precision_params
-{
-    UINT64 handle;
-};
-
-struct init_params
-{
-    int opt;
+    struct pcap *pcap;
     char *errbuf;
 };
 
@@ -188,131 +125,119 @@ struct lib_version_params
 
 struct list_datalinks_params
 {
-    UINT64 handle;
-    int *links;
-    int *count;
+    struct pcap *pcap;
+    int **buf;
 };
 
 struct list_tstamp_types_params
 {
-    UINT64 handle;
-    int *types;
-    int *count;
+    struct pcap *pcap;
+    int **types;
 };
 
 struct lookupnet_params
 {
-    char *device;
+    const char *device;
     unsigned int *net;
     unsigned int *mask;
     char *errbuf;
 };
 
-struct major_version_params
-{
-    UINT64 handle;
-};
-
-struct minor_version_params
-{
-    UINT64 handle;
-};
-
 struct next_ex_params
 {
-    UINT64 handle;
-    struct pcap_pkthdr_win32 *hdr;
+    struct pcap *pcap;
+    struct pcap_pkthdr_win32 **hdr;
     const unsigned char **data;
 };
 
 struct open_live_params
 {
-    char *source;
+    const char *source;
     int snaplen;
     int promisc;
-    int timeout;
+    int to_ms;
     char *errbuf;
-    UINT64 *handle;
+    struct pcap **ret;
 };
 
 struct sendpacket_params
 {
-    UINT64 handle;
+    struct pcap *pcap;
     const unsigned char *buf;
     int size;
 };
 
 struct set_buffer_size_params
 {
-    UINT64 handle;
+    struct pcap *pcap;
     int size;
 };
 
 struct set_datalink_params
 {
-    UINT64 handle;
+    struct pcap *pcap;
     int link;
 };
 
 struct set_promisc_params
 {
-    UINT64 handle;
+    struct pcap *pcap;
     int enable;
 };
 
 struct set_rfmon_params
 {
-    UINT64 handle;
+    struct pcap *pcap;
     int enable;
 };
 
 struct set_snaplen_params
 {
-    UINT64 handle;
+    struct pcap *pcap;
     int len;
 };
 
 struct set_timeout_params
 {
-    UINT64 handle;
+    struct pcap *pcap;
     int timeout;
 };
 
 struct set_tstamp_precision_params
 {
-    UINT64 handle;
+    struct pcap *pcap;
     int precision;
 };
 
 struct set_tstamp_type_params
 {
-    UINT64 handle;
+    struct pcap *pcap;
     int type;
 };
 
 struct setfilter_params
 {
-    UINT64 handle;
-    unsigned int program_len;
-    struct bpf_insn *program_insns;
+    struct pcap *pcap;
+    void *program;
 };
 
 struct setnonblock_params
 {
-    UINT64 handle;
+    struct pcap *pcap;
     int nonblock;
     char *errbuf;
 };
 
-struct snapshot_params
-{
-    UINT64 handle;
-};
-
 struct stats_params
 {
-    UINT64 handle;
-    struct pcap_stat_win32 stat;
+    struct pcap *pcap;
+    void *stats;
+};
+
+struct statustostr_params
+{
+    int status;
+    const char **ret;
 };
 
 struct tstamp_type_name_to_val_params
@@ -322,23 +247,20 @@ struct tstamp_type_name_to_val_params
 
 struct tstamp_type_val_to_description_params
 {
-    int type;
-    char *buf;
-    unsigned int *buflen;
+    int val;
+    const char **ret;
 };
 
 struct tstamp_type_val_to_name_params
 {
-    int type;
-    char *buf;
-    unsigned int *buflen;
+    int val;
+    const char **ret;
 };
 
 enum pcap_funcs
 {
     unix_activate,
     unix_breakloop,
-    unix_bufsize,
     unix_can_set_rfmon,
     unix_close,
     unix_compile,
@@ -347,18 +269,22 @@ enum pcap_funcs
     unix_datalink_name_to_val,
     unix_datalink_val_to_description,
     unix_datalink_val_to_name,
+    /* unix_dispatch, */
     unix_dump,
-    unix_dump_close,
     unix_dump_open,
     unix_findalldevs,
+    unix_free_datalinks,
+    unix_free_tstamp_types,
+    unix_freealldevs,
+    unix_freecode,
     unix_get_tstamp_precision,
     unix_geterr,
     unix_getnonblock,
-    unix_init,
     unix_lib_version,
     unix_list_datalinks,
     unix_list_tstamp_types,
     unix_lookupnet,
+    /* unix_loop, */
     unix_major_version,
     unix_minor_version,
     unix_next_ex,
@@ -376,8 +302,8 @@ enum pcap_funcs
     unix_setnonblock,
     unix_snapshot,
     unix_stats,
+    unix_statustostr,
     unix_tstamp_type_name_to_val,
     unix_tstamp_type_val_to_description,
     unix_tstamp_type_val_to_name,
-    unix_funcs_count
 };

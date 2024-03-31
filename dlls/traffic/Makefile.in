@@ -2,5 +2,5 @@ MODULE    = traffic.dll
 
 EXTRADLLFLAGS = -Wb,--prefer-native
 
-SOURCES = \
+C_SRCS = \
 	traffic_main.c

@@ -54,7 +54,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(msi);
 
 #define left_type(x) (x & 0xF0)
 
-struct format
+typedef struct _tagFORMAT
 {
     MSIPACKAGE *package;
     MSIRECORD *record;
@@ -64,9 +64,9 @@ struct format
     BOOL propfailed;
     BOOL groupfailed;
     int groups;
-};
+} FORMAT;
 
-struct form_str
+typedef struct _tagFORMSTR
 {
     struct list entry;
     int n;
@@ -74,25 +74,25 @@ struct form_str
     int type;
     BOOL propfound;
     BOOL nonprop;
-};
+} FORMSTR;
 
-struct stack
+typedef struct _tagSTACK
 {
     struct list items;
-};
+} STACK;
 
-static struct stack *create_stack(void)
+static STACK *create_stack(void)
 {
-    struct stack *stack = malloc(sizeof(*stack));
+    STACK *stack = malloc(sizeof(STACK));
     list_init(&stack->items);
     return stack;
 }
 
-static void free_stack(struct stack *stack)
+static void free_stack(STACK *stack)
 {
     while (!list_empty(&stack->items))
     {
-        struct form_str *str = LIST_ENTRY(list_head(&stack->items), struct form_str, entry);
+        FORMSTR *str = LIST_ENTRY(list_head(&stack->items), FORMSTR, entry);
         list_remove(&str->entry);
         free(str);
     }
@@ -100,28 +100,28 @@ static void free_stack(struct stack *stack)
     free(stack);
 }
 
-static void stack_push(struct stack *stack, struct form_str *str)
+static void stack_push(STACK *stack, FORMSTR *str)
 {
     list_add_head(&stack->items, &str->entry);
 }
 
-static struct form_str *stack_pop(struct stack *stack)
+static FORMSTR *stack_pop(STACK *stack)
 {
-    struct form_str *ret;
+    FORMSTR *ret;
 
     if (list_empty(&stack->items))
         return NULL;
 
-    ret = LIST_ENTRY(list_head(&stack->items), struct form_str, entry);
+    ret = LIST_ENTRY(list_head(&stack->items), FORMSTR, entry);
     list_remove(&ret->entry);
     return ret;
 }
 
-static struct form_str *stack_find(struct stack *stack, int type)
+static FORMSTR *stack_find(STACK *stack, int type)
 {
-    struct form_str *str;
+    FORMSTR *str;
 
-    LIST_FOR_EACH_ENTRY(str, &stack->items, struct form_str, entry)
+    LIST_FOR_EACH_ENTRY(str, &stack->items, FORMSTR, entry)
     {
         if (str->type == type)
             return str;
@@ -130,17 +130,17 @@ static struct form_str *stack_find(struct stack *stack, int type)
     return NULL;
 }
 
-static struct form_str *stack_peek(struct stack *stack)
+static FORMSTR *stack_peek(STACK *stack)
 {
-    return LIST_ENTRY(list_head(&stack->items), struct form_str, entry);
+    return LIST_ENTRY(list_head(&stack->items), FORMSTR, entry);
 }
 
-static const WCHAR *get_formstr_data(struct format *format, struct form_str *str)
+static LPCWSTR get_formstr_data(FORMAT *format, FORMSTR *str)
 {
     return &format->deformatted[str->n];
 }
 
-static WCHAR *dup_formstr( struct format *format, struct form_str *str, int *ret_len )
+static WCHAR *dup_formstr( FORMAT *format, FORMSTR *str, int *ret_len )
 {
     WCHAR *val;
 
@@ -154,7 +154,7 @@ static WCHAR *dup_formstr( struct format *format, struct form_str *str, int *ret
     return val;
 }
 
-static WCHAR *deformat_index( struct format *format, struct form_str *str, int *ret_len )
+static WCHAR *deformat_index( FORMAT *format, FORMSTR *str, int *ret_len )
 {
     WCHAR *val, *ret;
     DWORD len;
@@ -180,7 +180,7 @@ static WCHAR *deformat_index( struct format *format, struct form_str *str, int *
     return ret;
 }
 
-static WCHAR *deformat_property( struct format *format, struct form_str *str, int *ret_len )
+static WCHAR *deformat_property( FORMAT *format, FORMSTR *str, int *ret_len )
 {
     WCHAR *prop, *ret;
     DWORD len = 0;
@@ -203,7 +203,7 @@ static WCHAR *deformat_property( struct format *format, struct form_str *str, in
     return ret;
 }
 
-static WCHAR *deformat_component( struct format *format, struct form_str *str, int *ret_len )
+static WCHAR *deformat_component( FORMAT *format, FORMSTR *str, int *ret_len )
 {
     WCHAR *key, *ret;
     MSICOMPONENT *comp;
@@ -227,7 +227,7 @@ static WCHAR *deformat_component( struct format *format, struct form_str *str, i
     return ret;
 }
 
-static WCHAR *deformat_file( struct format *format, struct form_str *str, BOOL shortname, int *ret_len )
+static WCHAR *deformat_file( FORMAT *format, FORMSTR *str, BOOL shortname, int *ret_len )
 {
     WCHAR *key, *ret = NULL;
     const MSIFILE *file;
@@ -257,7 +257,7 @@ done:
     return ret;
 }
 
-static WCHAR *deformat_environment( struct format *format, struct form_str *str, int *ret_len )
+static WCHAR *deformat_environment( FORMAT *format, FORMSTR *str, int *ret_len )
 {
     WCHAR *key, *ret = NULL;
     DWORD len;
@@ -275,7 +275,7 @@ static WCHAR *deformat_environment( struct format *format, struct form_str *str,
     return ret;
 }
 
-static WCHAR *deformat_literal( struct format *format, struct form_str *str, BOOL *propfound,
+static WCHAR *deformat_literal( FORMAT *format, FORMSTR *str, BOOL *propfound,
                                 int *type, int *len )
 {
     LPCWSTR data = get_formstr_data(format, str);
@@ -389,10 +389,10 @@ static BOOL format_is_literal(WCHAR x)
     return (format_is_alpha(x) || format_is_number(x));
 }
 
-static int format_lex(struct format *format, struct form_str **out)
+static int format_lex(FORMAT *format, FORMSTR **out)
 {
     int type, len = 1;
-    struct form_str *str;
+    FORMSTR *str;
     LPCWSTR data;
     WCHAR ch;
 
@@ -401,7 +401,7 @@ static int format_lex(struct format *format, struct form_str **out)
     if (!format->deformatted)
         return FORMAT_NULL;
 
-    *out = calloc(1, sizeof(**out));
+    *out = calloc(1, sizeof(FORMSTR));
     if (!*out)
         return FORMAT_FAIL;
 
@@ -473,10 +473,10 @@ static int format_lex(struct format *format, struct form_str **out)
     return type;
 }
 
-static struct form_str *format_replace( struct format *format, BOOL propfound, BOOL nonprop,
-                                        int oldsize, int type, WCHAR *replace, int len )
+static FORMSTR *format_replace( FORMAT *format, BOOL propfound, BOOL nonprop,
+                                int oldsize, int type, WCHAR *replace, int len )
 {
-    struct form_str *ret;
+    FORMSTR *ret;
     LPWSTR str, ptr;
     DWORD size = 0;
     int n;
@@ -533,7 +533,7 @@ static struct form_str *format_replace( struct format *format, BOOL propfound, B
     if (!replace)
         return NULL;
 
-    ret = calloc(1, sizeof(*ret));
+    ret = calloc(1, sizeof(FORMSTR));
     if (!ret)
         return NULL;
 
@@ -546,12 +546,12 @@ static struct form_str *format_replace( struct format *format, BOOL propfound, B
     return ret;
 }
 
-static WCHAR *replace_stack_group( struct format *format, struct stack *values,
+static WCHAR *replace_stack_group( FORMAT *format, STACK *values,
                                    BOOL *propfound, BOOL *nonprop,
                                    int *oldsize, int *type, int *len )
 {
     WCHAR *replaced;
-    struct form_str *content, *node;
+    FORMSTR *content, *node;
     int n;
 
     *nonprop = FALSE;
@@ -575,7 +575,7 @@ static WCHAR *replace_stack_group( struct format *format, struct stack *values,
         free(node);
     }
 
-    content = calloc(1, sizeof(*content));
+    content = calloc(1, sizeof(FORMSTR));
     content->n = n;
     content->len = *oldsize;
     content->type = FORMAT_LITERAL;
@@ -616,12 +616,12 @@ static WCHAR *replace_stack_group( struct format *format, struct stack *values,
     return replaced;
 }
 
-static WCHAR *replace_stack_prop( struct format *format, struct stack *values,
+static WCHAR *replace_stack_prop( FORMAT *format, STACK *values,
                                   BOOL *propfound, BOOL *nonprop,
                                   int *oldsize, int *type, int *len )
 {
     WCHAR *replaced;
-    struct form_str *content, *node;
+    FORMSTR *content, *node;
     int n;
 
     *propfound = FALSE;
@@ -644,7 +644,7 @@ static WCHAR *replace_stack_prop( struct format *format, struct stack *values,
         free(node);
     }
 
-    content = calloc(1, sizeof(*content));
+    content = calloc(1, sizeof(FORMSTR));
     content->n = n + 1;
     content->len = *oldsize - 2;
     content->type = *type;
@@ -676,10 +676,10 @@ static WCHAR *replace_stack_prop( struct format *format, struct stack *values,
     return replaced;
 }
 
-static UINT replace_stack(struct format *format, struct stack *stack, struct stack *values)
+static UINT replace_stack(FORMAT *format, STACK *stack, STACK *values)
 {
     WCHAR *replaced = NULL;
-    struct form_str *beg, *top, *node;
+    FORMSTR *beg, *top, *node;
     BOOL propfound = FALSE, nonprop = FALSE, group = FALSE;
     int type, n, len = 0, oldsize = 0;
 
@@ -757,10 +757,10 @@ static DWORD deformat_string_internal(MSIPACKAGE *package, LPCWSTR ptr,
                                       WCHAR** data, DWORD *len,
                                       MSIRECORD* record)
 {
-    struct format format;
-    struct form_str *str = NULL;
-    struct stack *stack, *temp;
-    struct form_str *node;
+    FORMAT format;
+    FORMSTR *str = NULL;
+    STACK *stack, *temp;
+    FORMSTR *node;
     int type;
 
     if (!ptr)
@@ -773,7 +773,7 @@ static DWORD deformat_string_internal(MSIPACKAGE *package, LPCWSTR ptr,
     *data = wcsdup(ptr);
     *len = lstrlenW(ptr);
 
-    ZeroMemory(&format, sizeof(format));
+    ZeroMemory(&format, sizeof(FORMAT));
     format.package = package;
     format.record = record;
     format.deformatted = *data;

@@ -186,7 +186,7 @@ static BOOL DIALOG_CreateControls16( HWND hwnd, LPCSTR template,
         SEGPTR segptr;
 
         template = DIALOG_GetControl16( template, &info );
-        segptr = MapLS( (void *)info.data );
+        segptr = MapLS( info.data );
 
         caption = (char *)info.windowName;
         if (caption && IS_INTRESOURCE(caption))

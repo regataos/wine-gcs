@@ -4,6 +4,6 @@ IMPORTS   = winspool ole32 oleaut32
 
 EXTRADLLFLAGS = -Wb,--prefer-native
 
-SOURCES = \
+C_SRCS = \
 	main.c \
 	ticket.c

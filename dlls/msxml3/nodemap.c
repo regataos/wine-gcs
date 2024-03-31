@@ -138,7 +138,7 @@ static ULONG WINAPI xmlnodemap_Release(
         xmlnode_release( This->node );
         xmldoc_release( This->node->doc );
         if (This->enumvariant) IEnumVARIANT_Release(This->enumvariant);
-        free( This );
+        heap_free( This );
     }
 
     return ref;
@@ -432,7 +432,7 @@ IXMLDOMNamedNodeMap *create_nodemap(xmlNodePtr node, const struct nodemap_funcs 
 {
     xmlnodemap *This;
 
-    This = malloc(sizeof(*This));
+    This = heap_alloc( sizeof *This );
     if ( !This )
         return NULL;
 

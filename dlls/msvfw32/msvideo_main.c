@@ -41,6 +41,7 @@
 #include "vfw.h"
 #include "msvideo_private.h"
 #include "wine/debug.h"
+#include "wine/heap.h"
 #include "wine/list.h"
 
 /* Drivers32 settings */
@@ -352,7 +353,7 @@ BOOL VFWAPI ICInstall(DWORD type, DWORD handler, LPARAM lparam, char *desc, UINT
     switch (flags)
     {
     case ICINSTALL_FUNCTION:
-        if (!(driver = calloc(1, sizeof(*driver))))
+        if (!(driver = heap_alloc_zero(sizeof(*driver))))
             return FALSE;
         driver->fccType = type;
         driver->fccHandler = handler;
@@ -401,7 +402,7 @@ BOOL VFWAPI ICRemove(DWORD type, DWORD handler, UINT flags)
                 && !compare_fourcc(handler, driver->fccHandler))
         {
             list_remove(&driver->entry);
-            free(driver);
+            heap_free(driver);
             return TRUE;
         }
     }
@@ -498,7 +499,7 @@ HIC VFWAPI ICOpen(DWORD fccType, DWORD fccHandler, UINT wMode)
             return 0;
     }
 
-    if (!(whic = malloc(sizeof(*whic))))
+    if (!(whic = heap_alloc(sizeof(*whic))))
     {
         CloseDriver(hdrv, 0, 0);
         return FALSE;
@@ -537,7 +538,7 @@ HIC VFWAPI ICOpenFunction(DWORD fccType, DWORD fccHandler, UINT wMode, DRIVERPRO
     icopen.pV2Reserved = NULL;
     icopen.dnDevNode   = 0; /* FIXME */
 
-    if (!(whic = malloc(sizeof(*whic))))
+    if (!(whic = heap_alloc(sizeof(*whic))))
         return NULL;
 
     whic->driverproc   = lpfnHandler;
@@ -553,7 +554,7 @@ HIC VFWAPI ICOpenFunction(DWORD fccType, DWORD fccHandler, UINT wMode, DRIVERPRO
     {
         WARN("DRV_LOAD failed for hic %p\n", whic->hic);
         MSVIDEO_FirstHic = whic->next;
-        free(whic);
+        heap_free(whic);
         return 0;
     }
     /* return value is not checked */
@@ -567,7 +568,7 @@ HIC VFWAPI ICOpenFunction(DWORD fccType, DWORD fccHandler, UINT wMode, DRIVERPRO
     {
         WARN("DRV_OPEN failed for hic %p\n", whic->hic);
         MSVIDEO_FirstHic = whic->next;
-        free(whic);
+        heap_free(whic);
         return 0;
     }
 
@@ -885,7 +886,7 @@ static BOOL enum_compressors(HWND list, COMPVARS *pcv, BOOL enum_all)
 
             idx = SendMessageW(list, CB_ADDSTRING, 0, (LPARAM)icinfo.szDescription);
 
-            ic = malloc(sizeof(*ic));
+            ic = heap_alloc(sizeof(*ic));
             ic->icinfo = icinfo;
             ic->hic = hic;
             SendMessageW(list, CB_SETITEMDATA, idx, (LPARAM)ic);
@@ -938,7 +939,7 @@ static INT_PTR CALLBACK icm_choose_compressor_dlgproc(HWND hdlg, UINT msg, WPARA
         LoadStringW(MSVFW32_hModule, IDS_FULLFRAMES, buf, 128);
         SendDlgItemMessageW(hdlg, IDC_COMP_LIST, CB_ADDSTRING, 0, (LPARAM)buf);
 
-        ic = malloc(sizeof(*ic));
+        ic = heap_alloc(sizeof(*ic));
         ic->icinfo.fccType = streamtypeVIDEO;
         ic->icinfo.fccHandler = comptypeDIB;
         ic->hic = 0;
@@ -1059,7 +1060,7 @@ static INT_PTR CALLBACK icm_choose_compressor_dlgproc(HWND hdlg, UINT msg, WPARA
                 if (!ic || (LONG_PTR)ic == CB_ERR) break;
 
                 if (ic->hic) ICClose(ic->hic);
-                free(ic);
+                heap_free(ic);
             }
 
             EndDialog(hdlg, LOWORD(wparam) == IDOK);
@@ -1140,13 +1141,13 @@ void VFWAPI ICCompressorFree(PCOMPVARS pc)
             ICClose(pc->hic);
             pc->hic = NULL;
         }
-        free(pc->lpbiIn);
+        heap_free(pc->lpbiIn);
         pc->lpbiIn = NULL;
-        free(pc->lpBitsOut);
+        heap_free(pc->lpBitsOut);
         pc->lpBitsOut = NULL;
-        free(pc->lpBitsPrev);
+        heap_free(pc->lpBitsPrev);
         pc->lpBitsPrev = NULL;
-        free(pc->lpState);
+        heap_free(pc->lpState);
         pc->lpState = NULL;
         pc->dwFlags = 0;
     }
@@ -1259,7 +1260,7 @@ LRESULT WINAPI ICClose(HIC hic)
         }
     }
 
-    free(whic);
+    heap_free(whic);
     return 0;
 }
 
@@ -1344,7 +1345,7 @@ HANDLE VFWAPI ICImageDecompress(
 		cbHdr = ICDecompressGetFormatSize(hic,lpbiIn);
 		if ( cbHdr < sizeof(BITMAPINFOHEADER) )
 			goto err;
-		if (!(pHdr = calloc(1, cbHdr + sizeof(RGBQUAD) * 256)))
+		if (!(pHdr = heap_alloc_zero(cbHdr + sizeof(RGBQUAD) * 256)))
 			goto err;
 		if ( ICDecompressGetFormat( hic, lpbiIn, pHdr ) != ICERR_OK )
 			goto err;
@@ -1399,7 +1400,7 @@ err:
 		ICDecompressEnd( hic );
 	if ( bReleaseIC )
 		ICClose(hic);
-        free(pHdr);
+        heap_free(pHdr);
 	if ( pMem != NULL )
 		GlobalUnlock( hMem );
 	if ( !bSucceeded && hMem != NULL )
@@ -1470,14 +1471,14 @@ LPVOID VFWAPI ICSeqCompressFrame(PCOMPVARS pc, UINT uiFlags, LPVOID lpBits, BOOL
 
 static void clear_compvars(PCOMPVARS pc)
 {
-    free(pc->lpbiIn);
-    free(pc->lpBitsPrev);
-    free(pc->lpBitsOut);
-    free(pc->lpState);
+    heap_free(pc->lpbiIn);
+    heap_free(pc->lpBitsPrev);
+    heap_free(pc->lpBitsOut);
+    heap_free(pc->lpState);
     pc->lpbiIn = pc->lpBitsPrev = pc->lpBitsOut = pc->lpState = NULL;
     if (pc->dwFlags & 0x80000000)
     {
-        free(pc->lpbiOut);
+        heap_free(pc->lpbiOut);
         pc->lpbiOut = NULL;
         pc->dwFlags &= ~0x80000000;
     }
@@ -1508,7 +1509,7 @@ static BITMAPINFO *copy_bitmapinfo(const BITMAPINFO *src)
     if (src->bmiHeader.biCompression == BI_BITFIELDS)
         size += 3 * sizeof(DWORD);
 
-    if (!(dst = malloc(size)))
+    if (!(dst = heap_alloc(size)))
         return NULL;
 
     memcpy(dst, src, size);
@@ -1529,7 +1530,7 @@ BOOL VFWAPI ICSeqCompressFrameStart(PCOMPVARS pc, LPBITMAPINFO lpbiIn)
     if (!(pc->lpbiIn = copy_bitmapinfo(lpbiIn)))
         return FALSE;
 
-    if (!(pc->lpState = malloc(sizeof(ICCOMPRESS) + sizeof(*icComp->lpckid) + sizeof(*icComp->lpdwFlags))))
+    if (!(pc->lpState = heap_alloc(sizeof(ICCOMPRESS) + sizeof(*icComp->lpckid) + sizeof(*icComp->lpdwFlags))))
         goto error;
 
     pc->cbState = sizeof(ICCOMPRESS);
@@ -1542,7 +1543,7 @@ BOOL VFWAPI ICSeqCompressFrameStart(PCOMPVARS pc, LPBITMAPINFO lpbiIn)
         if (size <= 0)
             goto error;
 
-        if (!(pc->lpbiOut = calloc(1, size)))
+        if (!(pc->lpbiOut = heap_alloc_zero(size)))
             goto error;
         /* Flag to show that we allocated lpbiOut for proper cleanup */
         pc->dwFlags |= 0x80000000;
@@ -1578,11 +1579,11 @@ BOOL VFWAPI ICSeqCompressFrameStart(PCOMPVARS pc, LPBITMAPINFO lpbiIn)
           pc->lpbiOut->bmiHeader.biSizeImage);
 
     /* Buffer for compressed frame data */
-    if (!(pc->lpBitsOut = malloc(pc->lpbiOut->bmiHeader.biSizeImage)))
+    if (!(pc->lpBitsOut = heap_alloc(pc->lpbiOut->bmiHeader.biSizeImage)))
         goto error;
 
     /* Buffer for previous compressed frame data */
-    if (!(pc->lpBitsPrev = malloc(pc->lpbiOut->bmiHeader.biSizeImage)))
+    if (!(pc->lpBitsPrev = heap_alloc(pc->lpbiOut->bmiHeader.biSizeImage)))
         goto error;
 
     TRACE("Compvars:\n"

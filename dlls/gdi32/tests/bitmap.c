@@ -281,7 +281,7 @@ static void test_dib_info(HBITMAP hbm, const void *bits, const BITMAPINFOHEADER 
     ok(bm.bmBitsPixel == bmih->biBitCount, "bm.bmBitsPixel %d != %d\n", bm.bmBitsPixel, bmih->biBitCount);
     ok(bm.bmBits == bits, "wrong bm.bmBits %p != %p\n", bm.bmBits, bits);
 
-    buf = malloc(bm.bmWidthBytes * bm.bmHeight + 4096);
+    buf = HeapAlloc(GetProcessHeap(), 0, bm.bmWidthBytes * bm.bmHeight + 4096);
 
     /* GetBitmapBits returns not 32-bit aligned data */
     SetLastError(0xdeadbeef);
@@ -293,7 +293,7 @@ static void test_dib_info(HBITMAP hbm, const void *bits, const BITMAPINFOHEADER 
     ret = GetBitmapBits(hbm, bm.bmWidthBytes * bm.bmHeight + 4096, buf);
     ok(ret == bm_width_bytes * bm.bmHeight, "%d != %d\n", ret, bm_width_bytes * bm.bmHeight);
 
-    free(buf);
+    HeapFree(GetProcessHeap(), 0, buf);
 
     /* test various buffer sizes for GetObject */
     memset(&ds, 0xAA, sizeof(ds));
@@ -915,16 +915,15 @@ static void test_dib_formats(void)
     char data[2048];  /* 2 x 2 pixels, max 64 bits-per-pixel, max 64 planes */
     void *bits;
     int planes, bpp, compr, format;
-    HBITMAP hdib, hbmp, hbmp_mono;
+    HBITMAP hdib, hbmp;
     HDC hdc, memdc;
     UINT ret;
     BOOL format_ok, expect_ok;
 
-    bi = malloc( FIELD_OFFSET( BITMAPINFO, bmiColors[256] ) );
+    bi = HeapAlloc( GetProcessHeap(), 0, FIELD_OFFSET( BITMAPINFO, bmiColors[256] ) );
     hdc = GetDC( 0 );
     memdc = CreateCompatibleDC( 0 );
     hbmp = CreateCompatibleBitmap( hdc, 10, 10 );
-    hbmp_mono = CreateBitmap( 10, 10, 1, 1, NULL );
 
     memset( data, 0xaa, sizeof(data) );
 
@@ -1204,8 +1203,6 @@ static void test_dib_formats(void)
     DeleteObject( hdib );
     ret = SetDIBits(hdc, hbmp, 0, 1, data, bi, DIB_PAL_COLORS+1);
     ok( !ret, "SetDIBits succeeded with DIB_PAL_COLORS+1\n" );
-    ret = SetDIBits(hdc, hbmp_mono, 0, 1, data, bi, DIB_PAL_COLORS+1);
-    ok( ret, "SetDIBits failed with DIB_PAL_COLORS+1\n" );
     ret = SetDIBitsToDevice( memdc, 0, 0, 1, 1, 0, 0, 0, 1, data, bi, DIB_PAL_COLORS+1 );
     ok( ret, "SetDIBitsToDevice failed with DIB_PAL_COLORS+1\n" );
     ret = StretchDIBits( memdc, 0, 0, 1, 1, 0, 0, 1, 1, data, bi, DIB_PAL_COLORS+1, SRCCOPY );
@@ -1229,8 +1226,6 @@ static void test_dib_formats(void)
     ok( hdib == NULL, "CreateDIBitmap succeeded with DIB_PAL_COLORS+2\n" );
     DeleteObject( hdib );
     ret = SetDIBits(hdc, hbmp, 0, 1, data, bi, DIB_PAL_COLORS+2);
-    ok( !ret, "SetDIBits succeeded with DIB_PAL_COLORS+2\n" );
-    ret = SetDIBits(hdc, hbmp_mono, 0, 1, data, bi, DIB_PAL_COLORS+2);
     ok( !ret, "SetDIBits succeeded with DIB_PAL_COLORS+2\n" );
     ret = SetDIBitsToDevice( memdc, 0, 0, 1, 1, 0, 0, 0, 1, data, bi, DIB_PAL_COLORS+2 );
     ok( !ret, "SetDIBitsToDevice succeeded with DIB_PAL_COLORS+2\n" );
@@ -1290,9 +1285,8 @@ static void test_dib_formats(void)
 
     DeleteDC( memdc );
     DeleteObject( hbmp );
-    DeleteObject( hbmp_mono );
     ReleaseDC( 0, hdc );
-    free( bi );
+    HeapFree( GetProcessHeap(), 0, bi );
 }
 
 static void test_mono_dibsection(void)
@@ -1807,8 +1801,8 @@ static void test_GetDIBits_selected_DIB(UINT bpp)
     UINT i;
     int res;
 
-    info = malloc(FIELD_OFFSET(BITMAPINFO, bmiColors[256]));
-    info2 = malloc(FIELD_OFFSET(BITMAPINFO, bmiColors[256]));
+    info = HeapAlloc(GetProcessHeap(), 0, FIELD_OFFSET(BITMAPINFO, bmiColors[256]));
+    info2 = HeapAlloc(GetProcessHeap(), 0, FIELD_OFFSET(BITMAPINFO, bmiColors[256]));
 
     /* Create a DIB section with a color table */
 
@@ -1846,7 +1840,7 @@ static void test_GetDIBits_selected_DIB(UINT bpp)
     dib_dc = CreateCompatibleDC(NULL);
     old_bmp = SelectObject(dib_dc, dib);
     dc = CreateCompatibleDC(NULL);
-    bits2 = calloc(1, dib32_size);
+    bits2 = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, dib32_size);
 
     /* Copy the DIB attributes but not the color table */
     memcpy(info2, info, sizeof(BITMAPINFOHEADER));
@@ -1892,14 +1886,14 @@ static void test_GetDIBits_selected_DIB(UINT bpp)
     pixel = ((DWORD *)bits2)[info->bmiHeader.biWidth * info->bmiHeader.biHeight - 1];
     ok(pixel != 0, "Pixel: 0x%08lx\n", pixel);
 
-    free(bits2);
+    HeapFree(GetProcessHeap(), 0, bits2);
     DeleteDC(dc);
 
     SelectObject(dib_dc, old_bmp);
     DeleteDC(dib_dc);
     DeleteObject(dib);
-    free(info2);
-    free(info);
+    HeapFree(GetProcessHeap(), 0, info2);
+    HeapFree(GetProcessHeap(), 0, info);
 }
 
 static void test_GetDIBits_selected_DDB(BOOL monochrome)
@@ -1916,8 +1910,8 @@ static void test_GetDIBits_selected_DDB(BOOL monochrome)
     UINT i, j;
     int res;
 
-    info = malloc(FIELD_OFFSET(BITMAPINFO, bmiColors[256]));
-    info2 = malloc(FIELD_OFFSET(BITMAPINFO, bmiColors[256]));
+    info = HeapAlloc(GetProcessHeap(), 0, FIELD_OFFSET(BITMAPINFO, bmiColors[256]));
+    info2 = HeapAlloc(GetProcessHeap(), 0, FIELD_OFFSET(BITMAPINFO, bmiColors[256]));
 
     width = height = 16;
 
@@ -1961,8 +1955,8 @@ static void test_GetDIBits_selected_DDB(BOOL monochrome)
     GetDIBits(dc, ddb, 0, height, NULL, info, DIB_RGB_COLORS);
     ok(info->bmiHeader.biSizeImage != 0, "GetDIBits failed to get the DIB attributes\n");
 
-    bits = calloc(1, info->bmiHeader.biSizeImage);
-    bits2 = calloc(1, info->bmiHeader.biSizeImage);
+    bits = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, info->bmiHeader.biSizeImage);
+    bits2 = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, info->bmiHeader.biSizeImage);
 
     /* Get the bits */
     res = GetDIBits(dc, ddb, 0, height, bits, info, DIB_RGB_COLORS);
@@ -2004,15 +1998,15 @@ static void test_GetDIBits_selected_DDB(BOOL monochrome)
             ok( colors[i] == i, "%d: got %d (bpp %d)\n", i, colors[i], bpp );
     }
 
-    free(bits2);
-    free(bits);
+    HeapFree(GetProcessHeap(), 0, bits2);
+    HeapFree(GetProcessHeap(), 0, bits);
     DeleteDC(dc);
 
     SelectObject(ddb_dc, old_bmp);
     DeleteDC(ddb_dc);
     DeleteObject(ddb);
-    free(info2);
-    free(info);
+    HeapFree(GetProcessHeap(), 0, info2);
+    HeapFree(GetProcessHeap(), 0, info);
 }
 
 static void test_GetDIBits(void)
@@ -2983,7 +2977,7 @@ static void test_get16dibits(void)
     hbmp = CreateBitmap(2, 2, 1, 16, bits);
     ok(hbmp != NULL, "CreateBitmap failed\n");
 
-    info  = calloc(1, info_len);
+    info  = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, info_len);
     assert(info);
 
     memset(info, '!', info_len);
@@ -3003,7 +2997,7 @@ static void test_get16dibits(void)
             overwritten_bytes++;
     ok(overwritten_bytes == 0, "GetDIBits wrote past the buffer given\n");
 
-    free(info);
+    HeapFree(GetProcessHeap(), 0, info);
     DeleteObject(hbmp);
     ReleaseDC(NULL, screen_dc);
 }
@@ -3655,7 +3649,7 @@ static void test_GdiAlphaBlend(void)
     bmpDst = CreateCompatibleBitmap(hdcNull, 100, 100);
     hdcSrc = CreateCompatibleDC(hdcNull);
 
-    bmi = calloc(1, FIELD_OFFSET(BITMAPINFO, bmiColors[3]));
+    bmi = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, FIELD_OFFSET( BITMAPINFO, bmiColors[3] ));
     bmi->bmiHeader.biSize = sizeof(bmi->bmiHeader);
     bmi->bmiHeader.biHeight = 20;
     bmi->bmiHeader.biWidth = 20;
@@ -3853,7 +3847,7 @@ static void test_GdiAlphaBlend(void)
     DeleteObject(bmpDst);
 
     ReleaseDC(NULL, hdcNull);
-    free(bmi);
+    HeapFree(GetProcessHeap(), 0, bmi);
 }
 
 static void test_GdiGradientFill(void)
@@ -3876,7 +3870,7 @@ static void test_GdiGradientFill(void)
     }
 
     hdc = CreateCompatibleDC( NULL );
-    bmi = calloc( 1, FIELD_OFFSET(BITMAPINFO, bmiColors[3]) );
+    bmi = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, FIELD_OFFSET( BITMAPINFO, bmiColors[3] ));
     bmi->bmiHeader.biSize = sizeof(bmi->bmiHeader);
     bmi->bmiHeader.biHeight = 20;
     bmi->bmiHeader.biWidth = 20;
@@ -3966,7 +3960,7 @@ static void test_GdiGradientFill(void)
 
     DeleteDC( hdc );
     DeleteObject( bmp );
-    free( bmi );
+    HeapFree(GetProcessHeap(), 0, bmi);
 }
 
 static void test_clipping(void)
@@ -4288,7 +4282,7 @@ static void test_GetDIBits_scanlines(void)
     DWORD data[128], inverted_bits[64];
     int i, ret;
 
-    info = calloc( 1, FIELD_OFFSET( BITMAPINFO, bmiColors[256] ) );
+    info = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, FIELD_OFFSET( BITMAPINFO, bmiColors[256] ) );
 
     info->bmiHeader.biSize        = sizeof(info->bmiHeader);
     info->bmiHeader.biWidth       = 8;
@@ -4594,7 +4588,7 @@ static void test_GetDIBits_scanlines(void)
     DeleteObject( dib );
 
     ReleaseDC( NULL, hdc );
-    free( info );
+    HeapFree( GetProcessHeap(), 0, info );
 }
 
 
@@ -4611,7 +4605,7 @@ static void test_SetDIBits(void)
     HBITMAP dib;
     int i, ret;
 
-    info = calloc( 1, FIELD_OFFSET( BITMAPINFO, bmiColors[256] ) );
+    info = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, FIELD_OFFSET( BITMAPINFO, bmiColors[256] ) );
 
     info->bmiHeader.biSize        = sizeof(info->bmiHeader);
     info->bmiHeader.biWidth       = 8;
@@ -4828,7 +4822,7 @@ static void test_SetDIBits(void)
     ReleaseDC( NULL, hdc );
     DeleteObject( dib );
     DeleteObject( palette );
-    free( info );
+    HeapFree( GetProcessHeap(), 0, info );
 }
 
 static void test_SetDIBits_RLE4(void)
@@ -4852,7 +4846,7 @@ static void test_SetDIBits_RLE4(void)
                             0xaaaaaaaa, 0xaaaaaaaa, 0xaaaaaaaa, 0xaaaaaaaa, 0xaaaaaaaa, 0xaaaaaaaa, 0xaaaaaaaa, 0xaaaaaaaa,
                             0xaaaaaaaa, 0xaaaaaaaa, 0xaaaaaaaa, 0xaaaaaaaa, 0xaaaaaaaa, 0xaaaaaaaa, 0xaaaaaaaa, 0xaaaaaaaa };
 
-    info = calloc( 1, FIELD_OFFSET( BITMAPINFO, bmiColors[256] ) );
+    info = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, FIELD_OFFSET( BITMAPINFO, bmiColors[256] ) );
 
     info->bmiHeader.biSize        = sizeof(info->bmiHeader);
     info->bmiHeader.biWidth       = 8;
@@ -4883,7 +4877,7 @@ static void test_SetDIBits_RLE4(void)
 
     DeleteObject( dib );
     ReleaseDC( NULL, hdc );
-    free( info );
+    HeapFree( GetProcessHeap(), 0, info );
 }
 
 static void test_SetDIBits_RLE8(void)
@@ -4914,7 +4908,7 @@ static void test_SetDIBits_RLE8(void)
                             0x00040404, 0x00050505, 0x00060606, 0xaaaaaaaa, 0xaaaaaaaa, 0xaaaaaaaa, 0xaaaaaaaa, 0xaaaaaaaa,
                             0x00020202, 0x00020202, 0x00020202, 0x00f0f0f0, 0x00f0f0f0, 0x00f0f0f0, 0x00f0f0f0, 0xaaaaaaaa };
 
-    info = calloc( 1, FIELD_OFFSET( BITMAPINFO, bmiColors[256] ) );
+    info = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, FIELD_OFFSET( BITMAPINFO, bmiColors[256] ) );
 
     info->bmiHeader.biSize        = sizeof(info->bmiHeader);
     info->bmiHeader.biWidth       = 8;
@@ -5033,7 +5027,7 @@ static void test_SetDIBits_RLE8(void)
 
     DeleteObject( dib );
     ReleaseDC( NULL, hdc );
-    free( info );
+    HeapFree( GetProcessHeap(), 0, info );
 }
 
 static void test_SetDIBitsToDevice(void)
@@ -5049,7 +5043,7 @@ static void test_SetDIBitsToDevice(void)
     HBITMAP dib;
     int i, ret;
 
-    info = calloc( 1, FIELD_OFFSET( BITMAPINFO, bmiColors[256] ) );
+    info = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, FIELD_OFFSET( BITMAPINFO, bmiColors[256] ) );
 
     info->bmiHeader.biSize        = sizeof(info->bmiHeader);
     info->bmiHeader.biWidth       = 8;
@@ -5453,7 +5447,7 @@ static void test_SetDIBitsToDevice(void)
     DeleteDC( hdc );
     DeleteObject( dib );
     DeleteObject( palette );
-    free( info );
+    HeapFree( GetProcessHeap(), 0, info );
 }
 
 static void test_SetDIBitsToDevice_RLE8(void)
@@ -5484,7 +5478,7 @@ static void test_SetDIBitsToDevice_RLE8(void)
                             0x00040404, 0x00050505, 0x00060606, 0xaaaaaaaa, 0xaaaaaaaa, 0xaaaaaaaa, 0xaaaaaaaa, 0xaaaaaaaa,
                             0x00020202, 0x00020202, 0x00020202, 0x00020202, 0x00f0f0f0, 0x00f0f0f0, 0x00f0f0f0, 0xaaaaaaaa };
 
-    info = calloc( 1, FIELD_OFFSET( BITMAPINFO, bmiColors[256] ) );
+    info = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, FIELD_OFFSET( BITMAPINFO, bmiColors[256] ) );
 
     info->bmiHeader.biSize        = sizeof(info->bmiHeader);
     info->bmiHeader.biWidth       = 8;
@@ -5684,7 +5678,7 @@ static void test_SetDIBitsToDevice_RLE8(void)
 cleanup:
     DeleteDC( hdc );
     DeleteObject( dib );
-    free( info );
+    HeapFree( GetProcessHeap(), 0, info );
 }
 
 static void test_D3DKMTCreateDCFromMemory( void )

@@ -1,4 +1,4 @@
-SOURCES = \
+FONT_SRCS = \
 	arial.sfd \
 	cour.sfd \
 	courier.sfd \
@@ -13,6 +13,6 @@ SOURCES = \
 	system.sfd \
 	tahoma.sfd \
 	tahomabd.sfd \
-	times.sfd \
 	webdings.sfd \
+	times.sfd \
 	wingding.sfd

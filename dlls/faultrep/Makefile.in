@@ -4,5 +4,4 @@ IMPORTS   = advapi32
 
 EXTRADLLFLAGS = -Wb,--prefer-native
 
-SOURCES = \
-	faultrep.c
+C_SRCS = faultrep.c

@@ -3,7 +3,7 @@ IMPORTLIB = mshtml
 IMPORTS   = strmiids uuid urlmon shlwapi shell32 ole32 oleaut32 user32 gdi32 advapi32
 DELAYIMPORTS = wininet inetcomm
 
-SOURCES = \
+C_SRCS = \
 	conpoint.c \
 	dispex.c \
 	editor.c \
@@ -40,15 +40,11 @@ SOURCES = \
 	ifacewrap.c \
 	loadopts.c \
 	main.c \
-	mshtml.rc \
-	mshtml_classes.idl \
-	mshtml_private_iface.idl \
 	mutation.c \
 	navigate.c \
 	npplugin.c \
 	nsembed.c \
 	nsevents.c \
-	nsiface.idl \
 	nsio.c \
 	nsservice.c \
 	olecmd.c \
@@ -68,3 +64,10 @@ SOURCES = \
 	xmlhttprequest.c
 
 nsembed_EXTRADEFS = -DINSTALL_DATADIR="\"${datadir}\""
+
+RC_SRCS = mshtml.rc
+
+IDL_SRCS = \
+	mshtml_classes.idl \
+	mshtml_private_iface.idl \
+	nsiface.idl

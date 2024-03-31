@@ -82,8 +82,8 @@ HDRAWDIB VFWAPI DrawDibOpen(void)
     WINE_HDD*   whdd;
 
     TRACE("(void)\n");
-
-    whdd = calloc(1, sizeof(WINE_HDD));
+	
+    whdd = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(WINE_HDD));
     TRACE("=> %p\n", whdd);
 
     while (MSVIDEO_GetHddPtr((HDRAWDIB)HDD_HandleRef) != NULL) HDD_HandleRef++;
@@ -118,7 +118,7 @@ BOOL VFWAPI DrawDibClose(HDRAWDIB hdd)
         }
     }
 
-    free(whdd);
+    HeapFree(GetProcessHeap(), 0, whdd);
 
     return TRUE;
 }
@@ -137,15 +137,15 @@ BOOL VFWAPI DrawDibEnd(HDRAWDIB hdd)
 
     whdd->hpal = 0; /* Do not free this */
     whdd->hdc = 0;
-    free(whdd->lpbi);
+    HeapFree(GetProcessHeap(), 0, whdd->lpbi);
     whdd->lpbi = NULL;
-    free(whdd->lpbiOut);
+    HeapFree(GetProcessHeap(), 0, whdd->lpbiOut);
     whdd->lpbiOut = NULL;
 
     whdd->begun = FALSE;
 
     /*if (whdd->lpvbits)
-      free(whdd->lpvbuf);*/
+      HeapFree(GetProcessHeap(), 0, whdd->lpvbuf);*/
 
     if (whdd->hMemDC) 
     {
@@ -224,7 +224,7 @@ BOOL VFWAPI DrawDibBegin(HDRAWDIB hdd,
 
         if (ret) 
         {
-            whdd->lpbiOut = malloc(size);
+            whdd->lpbiOut = HeapAlloc(GetProcessHeap(), 0, size);
 
             if (ICDecompressGetFormat(whdd->hic, lpbi, whdd->lpbiOut) != ICERR_OK)
                 ret = FALSE;
@@ -255,14 +255,14 @@ BOOL VFWAPI DrawDibBegin(HDRAWDIB hdd,
         else
         {
             dwSize = lpbi->biSize + num_colours(lpbi)*sizeof(RGBQUAD);
-            whdd->lpbiOut = malloc(dwSize);
+            whdd->lpbiOut = HeapAlloc(GetProcessHeap(), 0, dwSize);
             memcpy(whdd->lpbiOut, lpbi, dwSize);
         }
     }
 
     if (ret) 
     {
-        /*whdd->lpvbuf = malloc(whdd->lpbiOut->biSizeImage);*/
+        /*whdd->lpvbuf = HeapAlloc(GetProcessHeap(), 0, whdd->lpbiOut->biSizeImage);*/
 
         whdd->hMemDC = CreateCompatibleDC(hdc);
         TRACE("Creating: %ld, %p\n", whdd->lpbiOut->biSize, whdd->lpvbits);
@@ -284,7 +284,7 @@ BOOL VFWAPI DrawDibBegin(HDRAWDIB hdd,
         whdd->hdc = hdc;
         whdd->dxDst = dxDst;
         whdd->dyDst = dyDst;
-        whdd->lpbi = malloc(lpbi->biSize);
+        whdd->lpbi = HeapAlloc(GetProcessHeap(), 0, lpbi->biSize);
         memcpy(whdd->lpbi, lpbi, lpbi->biSize);
         whdd->dxSrc = dxSrc;
         whdd->dySrc = dySrc;
@@ -295,7 +295,7 @@ BOOL VFWAPI DrawDibBegin(HDRAWDIB hdd,
     {
         if (whdd->hic)
             ICClose(whdd->hic);
-        free(whdd->lpbiOut);
+        HeapFree(GetProcessHeap(), 0, whdd->lpbiOut);
         whdd->lpbiOut = NULL;
     }
 

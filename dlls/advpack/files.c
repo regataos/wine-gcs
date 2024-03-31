@@ -46,7 +46,7 @@ static LPWSTR ansi_to_unicode_list(LPCSTR ansi_list)
     while (*ptr) ptr += lstrlenA(ptr) + 1;
     len = ptr + 1 - ansi_list;
     wlen = MultiByteToWideChar(CP_ACP, 0, ansi_list, len, NULL, 0);
-    list = malloc(wlen * sizeof(WCHAR));
+    list = HeapAlloc(GetProcessHeap(), 0, wlen * sizeof(WCHAR));
     MultiByteToWideChar(CP_ACP, 0, ansi_list, len, list, wlen);
     return list;
 }
@@ -82,7 +82,7 @@ HRESULT WINAPI AddDelBackupEntryA(LPCSTR lpcszFileList, LPCSTR lpcszBackupDir,
 
     res = AddDelBackupEntryW(filelist, backup, basename.Buffer, dwFlags);
 
-    free(filelist);
+    HeapFree(GetProcessHeap(), 0, filelist);
 
     RtlFreeUnicodeString(&backupdir);
     RtlFreeUnicodeString(&basename);
@@ -246,7 +246,7 @@ HRESULT WINAPI AdvInstallFileW(HWND hwnd, LPCWSTR lpszSourceDir, LPCWSTR lpszSou
     LPWSTR szDestFilename;
     LPCWSTR szPath;
     WCHAR szRootPath[ROOT_LENGTH];
-    DWORD dwLastError;
+    DWORD dwLen, dwLastError;
     HSPFILEQ fileQueue;
     PVOID pContext;
 
@@ -268,7 +268,18 @@ HRESULT WINAPI AdvInstallFileW(HWND hwnd, LPCWSTR lpszSourceDir, LPCWSTR lpszSou
     szPath = lpszSourceDir + ROOT_LENGTH;
 
     /* use lpszSourceFile as destination filename if lpszDestFile is NULL */
-    szDestFilename = wcsdup(lpszDestFile ? lpszDestFile : lpszSourceFile);
+    if (lpszDestFile)
+    {
+        dwLen = lstrlenW(lpszDestFile);
+        szDestFilename = HeapAlloc(GetProcessHeap(), 0, (dwLen+1) * sizeof(WCHAR));
+        lstrcpyW(szDestFilename, lpszDestFile);
+    }
+    else
+    {
+        dwLen = lstrlenW(lpszSourceFile);
+        szDestFilename = HeapAlloc(GetProcessHeap(), 0, (dwLen+1) * sizeof(WCHAR));
+        lstrcpyW(szDestFilename, lpszSourceFile);
+    }
 
     /* add the file copy operation to the setup queue */
     if (!SetupQueueCopyW(fileQueue, szRootPath, szPath, lpszSourceFile, NULL,
@@ -302,9 +313,9 @@ HRESULT WINAPI AdvInstallFileW(HWND hwnd, LPCWSTR lpszSourceDir, LPCWSTR lpszSou
 done:
     SetupTermDefaultQueueCallback(pContext);
     SetupCloseFileQueue(fileQueue);
-
-    free(szDestFilename);
-
+    
+    HeapFree(GetProcessHeap(), 0, szDestFilename);
+    
     return HRESULT_FROM_WIN32(dwLastError);
 }
 
@@ -472,8 +483,9 @@ HRESULT WINAPI DelNodeRunDLL32W(HWND hWnd, HINSTANCE hInst, LPWSTR cmdline, INT 
 
     TRACE("(%p, %p, %s, %i)\n", hWnd, hInst, debugstr_w(cmdline), show);
 
-    cmdline_copy = wcsdup(cmdline);
+    cmdline_copy = HeapAlloc(GetProcessHeap(), 0, (lstrlenW(cmdline) + 1) * sizeof(WCHAR));
     cmdline_ptr = cmdline_copy;
+    lstrcpyW(cmdline_copy, cmdline);
 
     /* get the parameters at indexes 0 and 1 respectively */
     szFilename = get_parameter(&cmdline_ptr, ',', TRUE);
@@ -484,7 +496,7 @@ HRESULT WINAPI DelNodeRunDLL32W(HWND hWnd, HINSTANCE hInst, LPWSTR cmdline, INT 
 
     res = DelNodeW(szFilename, dwFlags);
 
-    free(cmdline_copy);
+    HeapFree(GetProcessHeap(), 0, cmdline_copy);
 
     return res;
 }
@@ -537,14 +549,14 @@ static LPSTR convert_file_list(LPCSTR FileList, DWORD *dwNumFiles)
         return NULL;
 
     dwLen = last - first + 3; /* room for double-null termination */
-    szConvertedList = malloc(dwLen);
+    szConvertedList = HeapAlloc(GetProcessHeap(), 0, dwLen);
     lstrcpynA(szConvertedList, first, dwLen - 1);
     szConvertedList[dwLen - 1] = '\0';
 
     /* empty list */
     if (!szConvertedList[0])
     {
-        free(szConvertedList);
+        HeapFree(GetProcessHeap(), 0, szConvertedList);
         return NULL;
     }
         
@@ -568,8 +580,8 @@ static LPSTR convert_file_list(LPCSTR FileList, DWORD *dwNumFiles)
 
 static void free_file_node(struct FILELIST *pNode)
 {
-    free(pNode->FileName);
-    free(pNode);
+    HeapFree(GetProcessHeap(), 0, pNode->FileName);
+    HeapFree(GetProcessHeap(), 0, pNode);
 }
 
 /* determines whether szFile is in the NULL-separated szFileList */
@@ -719,7 +731,7 @@ HRESULT WINAPI ExtractFilesA(LPCSTR CabName, LPCSTR ExpandDir, DWORD Flags,
 done:
     free_file_list(&session);
     FreeLibrary(hCabinet);
-    free(szConvertedList);
+    HeapFree(GetProcessHeap(), 0, szConvertedList);
 
     return res;
 }
@@ -762,19 +774,19 @@ HRESULT WINAPI ExtractFilesW(LPCWSTR CabName, LPCWSTR ExpandDir, DWORD Flags,
           Flags, debugstr_w(FileList), LReserved, Reserved);
 
     if(CabName) {
-        cab_name = strdupWtoA(CabName);
+        cab_name = heap_strdupWtoA(CabName);
         if(!cab_name)
             return E_OUTOFMEMORY;
     }
 
     if(ExpandDir) {
-        expand_dir = strdupWtoA(ExpandDir);
+        expand_dir = heap_strdupWtoA(ExpandDir);
         if(!expand_dir)
             hres = E_OUTOFMEMORY;
     }
 
     if(SUCCEEDED(hres) && FileList) {
-        file_list = strdupWtoA(FileList);
+        file_list = heap_strdupWtoA(FileList);
         if(!file_list)
             hres = E_OUTOFMEMORY;
     }
@@ -784,9 +796,9 @@ HRESULT WINAPI ExtractFilesW(LPCWSTR CabName, LPCWSTR ExpandDir, DWORD Flags,
     if(SUCCEEDED(hres))
         hres = ExtractFilesA(cab_name, expand_dir, Flags, file_list, LReserved, Reserved);
 
-    free(cab_name);
-    free(expand_dir);
-    free(file_list);
+    heap_free(cab_name);
+    heap_free(expand_dir);
+    heap_free(file_list);
     return hres;
 }
 
@@ -1066,7 +1078,7 @@ HRESULT WINAPI GetVersionFromFileExW(LPCWSTR lpszFilename, LPDWORD pdwMSVer,
             goto done;
     }
 
-    pVersionInfo = malloc(dwInfoSize);
+    pVersionInfo = HeapAlloc(GetProcessHeap(), 0, dwInfoSize);
     if (!pVersionInfo)
         goto done;
 
@@ -1098,7 +1110,7 @@ HRESULT WINAPI GetVersionFromFileExW(LPCWSTR lpszFilename, LPDWORD pdwMSVer,
     }
 
 done:
-    free(pVersionInfo);
+    HeapFree(GetProcessHeap(), 0, pVersionInfo);
 
     if (bFileCopied)
         DeleteFileW(szFile);

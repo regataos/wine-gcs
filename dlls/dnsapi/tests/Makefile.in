@@ -1,7 +1,7 @@
 TESTDLL   = dnsapi.dll
 IMPORTS   = dnsapi ws2_32 iphlpapi
 
-SOURCES = \
+C_SRCS = \
 	cache.c \
 	name.c \
 	query.c \

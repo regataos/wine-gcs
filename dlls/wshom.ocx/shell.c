@@ -1311,7 +1311,8 @@ static WCHAR *split_command( BSTR cmd, WCHAR **params )
     WCHAR *ret, *ptr;
     BOOL in_quotes = FALSE;
 
-    if (!(ret = wcsdup(cmd))) return NULL;
+    if (!(ret = malloc((lstrlenW(cmd) + 1) * sizeof(WCHAR)))) return NULL;
+    lstrcpyW( ret, cmd );
 
     *params = NULL;
     for (ptr = ret; *ptr; ptr++)

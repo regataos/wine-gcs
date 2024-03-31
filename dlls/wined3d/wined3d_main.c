@@ -26,10 +26,7 @@
 #define VKD3D_NO_WIN32_TYPES
 #include "initguid.h"
 #include "wined3d_private.h"
-#include "wined3d_gl.h"
 #include "d3d12.h"
-#define VK_NO_PROTOTYPES
-#include "wine/vulkan.h"
 #include <vkd3d.h>
 
 WINE_DEFAULT_DEBUG_CHANNEL(d3d);
@@ -42,6 +39,8 @@ struct wined3d_wndproc
     HWND window;
     BOOL unicode;
     BOOL filter;
+    BOOL activate_processed;
+    BOOL inside_mode_change;
     WNDPROC proc;
     struct wined3d_device *device;
     uint32_t flags;
@@ -132,20 +131,12 @@ struct wined3d_settings wined3d_settings =
     .shader_backend = WINED3D_SHADER_BACKEND_AUTO,
 };
 
-enum wined3d_renderer CDECL wined3d_get_renderer(void)
-{
-    if (wined3d_settings.renderer == WINED3D_RENDERER_AUTO)
-        return WINED3D_RENDERER_OPENGL;
-
-    return wined3d_settings.renderer;
-}
-
 struct wined3d * CDECL wined3d_create(uint32_t flags)
 {
     struct wined3d *object;
     HRESULT hr;
 
-    if (!(object = calloc(1, FIELD_OFFSET(struct wined3d, adapters[1]))))
+    if (!(object = heap_alloc_zero(FIELD_OFFSET(struct wined3d, adapters[1]))))
     {
         ERR("Failed to allocate wined3d object memory.\n");
         return NULL;
@@ -157,7 +148,7 @@ struct wined3d * CDECL wined3d_create(uint32_t flags)
     if (FAILED(hr = wined3d_init(object, flags)))
     {
         WARN("Failed to initialize wined3d object, hr %#lx.\n", hr);
-        free(object);
+        heap_free(object);
         return NULL;
     }
 
@@ -425,7 +416,7 @@ static BOOL wined3d_dll_init(HINSTANCE hInstDLL)
         {
             size_t len = strlen(buffer) + 1;
 
-            if (!(wined3d_settings.logo = malloc(len)))
+            if (!(wined3d_settings.logo = heap_alloc(len)))
                 ERR("Failed to allocate logo path memory.\n");
             else
                 memcpy(wined3d_settings.logo, buffer, len);
@@ -445,8 +436,6 @@ static BOOL wined3d_dll_init(HINSTANCE hInstDLL)
             ERR_(winediag)("Setting strict shader math to %#x.\n", wined3d_settings.strict_shader_math);
         if (!get_config_key_dword(hkey, appkey, env, "MaxShaderModelVS", &wined3d_settings.max_sm_vs))
             TRACE("Limiting VS shader model to %u.\n", wined3d_settings.max_sm_vs);
-        if (!get_config_key_dword(hkey, appkey, env, "multiply_special", &wined3d_settings.multiply_special))
-            ERR_(winediag)("Setting multiply special to %#x.\n", wined3d_settings.multiply_special);
         if (!get_config_key_dword(hkey, appkey, env, "MaxShaderModelHS", &wined3d_settings.max_sm_hs))
             TRACE("Limiting HS shader model to %u.\n", wined3d_settings.max_sm_hs);
         if (!get_config_key_dword(hkey, appkey, env, "MaxShaderModelDS", &wined3d_settings.max_sm_ds))
@@ -528,17 +517,17 @@ static BOOL wined3d_dll_destroy(HINSTANCE hInstDLL)
          * these entries. */
         WARN("Leftover wndproc table entry %p.\n", &wndproc_table.entries[i]);
     }
-    free(wndproc_table.entries);
+    heap_free(wndproc_table.entries);
 
-    free(swapchain_state_table.states);
+    heap_free(swapchain_state_table.states);
     for (i = 0; i < swapchain_state_table.hook_count; ++i)
     {
         WARN("Leftover swapchain state hook %p.\n", &swapchain_state_table.hooks[i]);
         UnhookWindowsHookEx(swapchain_state_table.hooks[i].hook);
     }
-    free(swapchain_state_table.hooks);
+    heap_free(swapchain_state_table.hooks);
 
-    free(wined3d_settings.logo);
+    heap_free(wined3d_settings.logo);
     UnregisterClassA(WINED3D_OPENGL_WINDOW_CLASS_NAME, hInstDLL);
 
     DeleteCriticalSection(&wined3d_command_cs);
@@ -632,6 +621,73 @@ BOOL wined3d_filter_messages(HWND window, BOOL filter)
 
     wined3d_wndproc_mutex_unlock();
 
+    return ret;
+}
+
+BOOL wined3d_get_activate_processed(HWND window)
+{
+    struct wined3d_wndproc *entry;
+    BOOL ret;
+
+    wined3d_wndproc_mutex_lock();
+
+    if (!(entry = wined3d_find_wndproc(window, NULL)))
+    {
+        wined3d_wndproc_mutex_unlock();
+        return FALSE;
+    }
+    ret = entry->activate_processed;
+    wined3d_wndproc_mutex_unlock();
+    return ret;
+}
+
+void wined3d_set_activate_processed(HWND window, BOOL activate_processed)
+{
+    struct wined3d_wndproc *entry;
+
+    wined3d_wndproc_mutex_lock();
+
+    if (!(entry = wined3d_find_wndproc(window, NULL)))
+    {
+        wined3d_wndproc_mutex_unlock();
+        return;
+    }
+    entry->activate_processed = activate_processed;
+    wined3d_wndproc_mutex_unlock();
+}
+
+BOOL wined3d_get_inside_mode_change(HWND window)
+{
+    struct wined3d_wndproc *entry;
+    BOOL ret;
+
+    wined3d_wndproc_mutex_lock();
+
+    if (!(entry = wined3d_find_wndproc(window, NULL)))
+    {
+        wined3d_wndproc_mutex_unlock();
+        return FALSE;
+    }
+    ret = entry->inside_mode_change;
+    wined3d_wndproc_mutex_unlock();
+    return ret;
+}
+
+BOOL wined3d_set_inside_mode_change(HWND window, BOOL inside_mode_change)
+{
+    struct wined3d_wndproc *entry;
+    BOOL ret;
+
+    wined3d_wndproc_mutex_lock();
+
+    if (!(entry = wined3d_find_wndproc(window, NULL)))
+    {
+        wined3d_wndproc_mutex_unlock();
+        return FALSE;
+    }
+    ret = entry->inside_mode_change;
+    entry->inside_mode_change = inside_mode_change;
+    wined3d_wndproc_mutex_unlock();
     return ret;
 }
 
@@ -771,6 +827,8 @@ BOOL CDECL wined3d_register_window(struct wined3d *wined3d, HWND window,
     entry->device = device;
     entry->wined3d = wined3d;
     entry->flags = flags;
+    entry->activate_processed = FALSE;
+    entry->inside_mode_change = FALSE;
 
     wined3d_wndproc_mutex_unlock();
 

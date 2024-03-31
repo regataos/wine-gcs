@@ -21,6 +21,7 @@
 #include "windef.h"
 #include "winbase.h"
 #include "wine/debug.h"
+#include "wine/heap.h"
 
 #include "interactioncontext.h"
 
@@ -45,7 +46,7 @@ HRESULT WINAPI CreateInteractionContext(HINTERACTIONCONTEXT *handle)
     if (!handle)
         return E_POINTER;
 
-    if (!(context = malloc(sizeof(*context))))
+    if (!(context = heap_alloc(sizeof(*context))))
         return E_OUTOFMEMORY;
 
     context->filter_pointers = TRUE;
@@ -66,7 +67,7 @@ HRESULT WINAPI DestroyInteractionContext(HINTERACTIONCONTEXT handle)
     if (!context)
         return E_HANDLE;
 
-    free(context);
+    heap_free(context);
     return S_OK;
 }
 

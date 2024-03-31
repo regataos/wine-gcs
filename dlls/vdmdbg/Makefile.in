@@ -3,5 +3,5 @@ IMPORTLIB = vdmdbg
 
 EXTRADLLFLAGS = -Wb,--prefer-native
 
-SOURCES = \
+C_SRCS = \
 	vdmdbg.c

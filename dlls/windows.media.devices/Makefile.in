@@ -1,6 +1,7 @@
 MODULE = windows.media.devices.dll
 IMPORTS = combase
 
-SOURCES = \
-	classes.idl \
+C_SRCS = \
 	main.c
+
+IDL_SRCS = classes.idl

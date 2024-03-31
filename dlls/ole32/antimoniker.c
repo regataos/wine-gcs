@@ -18,14 +18,19 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#include <assert.h>
 #include <stdarg.h>
 #include <string.h>
 
 #define COBJMACROS
+#define NONAMELESSUNION
+
 #include "windef.h"
 #include "winbase.h"
+#include "winerror.h"
 #include "objbase.h"
 #include "wine/debug.h"
+#include "wine/heap.h"
 #include "moniker.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(ole);
@@ -135,7 +140,7 @@ static ULONG WINAPI AntiMonikerImpl_Release(IMoniker *iface)
     if (!refcount)
     {
         if (moniker->pMarshal) IUnknown_Release(moniker->pMarshal);
-        free(moniker);
+        heap_free(moniker);
     }
 
     return refcount;
@@ -292,12 +297,16 @@ AntiMonikerImpl_ComposeWith(IMoniker* iface, IMoniker* pmkRight,
         return CreateGenericComposite(iface,pmkRight,ppmkComposite);
 }
 
-static HRESULT WINAPI AntiMonikerImpl_Enum(IMoniker *iface, BOOL forward, IEnumMoniker **ppenumMoniker)
+/******************************************************************************
+ *        AntiMoniker_Enum
+ ******************************************************************************/
+static HRESULT WINAPI
+AntiMonikerImpl_Enum(IMoniker* iface,BOOL fForward, IEnumMoniker** ppenumMoniker)
 {
-    TRACE("%p, %d, %p.\n", iface, forward, ppenumMoniker);
+    TRACE("(%p,%d,%p)\n",iface,fForward,ppenumMoniker);
 
     if (ppenumMoniker == NULL)
-        return E_INVALIDARG;
+        return E_POINTER;
 
     *ppenumMoniker = NULL;
 
@@ -607,7 +616,8 @@ HRESULT create_anti_moniker(DWORD order, IMoniker **ret)
 {
     AntiMonikerImpl *moniker;
 
-    if (!(moniker = calloc(1, sizeof(*moniker))))
+    moniker = heap_alloc_zero(sizeof(*moniker));
+    if (!moniker)
         return E_OUTOFMEMORY;
 
     moniker->IMoniker_iface.lpVtbl = &VT_AntiMonikerImpl;

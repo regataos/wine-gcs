@@ -81,18 +81,18 @@ struct video_processor
     IMFMediaType *output_type;
     MFT_OUTPUT_STREAM_INFO output_info;
 
-    wg_transform_t wg_transform;
+    struct wg_transform *wg_transform;
     struct wg_sample_queue *wg_sample_queue;
 };
 
 static HRESULT try_create_wg_transform(struct video_processor *impl)
 {
     struct wg_format input_format, output_format;
-    struct wg_transform_attrs attrs = {0};
+    struct wg_transform_attrs attrs = {.input_queue_length = 15};
 
     if (impl->wg_transform)
         wg_transform_destroy(impl->wg_transform);
-    impl->wg_transform = 0;
+    impl->wg_transform = NULL;
 
     mf_media_type_to_wg_format(impl->input_type, &input_format);
     if (input_format.major_type == WG_MAJOR_TYPE_UNKNOWN)
@@ -506,7 +506,18 @@ static HRESULT WINAPI video_processor_ProcessEvent(IMFTransform *iface, DWORD id
 
 static HRESULT WINAPI video_processor_ProcessMessage(IMFTransform *iface, MFT_MESSAGE_TYPE message, ULONG_PTR param)
 {
-    FIXME("iface %p, message %#x, param %#Ix stub!\n", iface, message, param);
+    struct video_processor *impl = impl_from_IMFTransform(iface);
+
+    TRACE("iface %p, message %#x, param %p.\n", iface, message, (void *)param);
+
+    if (!impl->wg_transform)
+        return MF_E_TRANSFORM_TYPE_NOT_SET;
+
+    if (message == MFT_MESSAGE_COMMAND_DRAIN)
+        return wg_transform_drain(impl->wg_transform);
+
+    FIXME("Ignoring message %#x.\n", message);
+
     return S_OK;
 }
 
@@ -604,7 +615,7 @@ HRESULT video_processor_create(REFIID riid, void **ret)
         },
     };
     struct wg_transform_attrs attrs = {0};
-    wg_transform_t transform;
+    struct wg_transform *transform;
     struct video_processor *impl;
     HRESULT hr;
 

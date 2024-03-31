@@ -4,6 +4,9 @@ EXTRAINCL = $(FAUDIO_PE_CFLAGS)
 EXTRADEFS = -DXACT3_VER=0x0200
 PARENTSRC = ../xactengine3_7
 
-SOURCES = \
-	xact_classes.idl \
+EXTRADLLFLAGS = -Wb,--prefer-native
+
+C_SRCS = \
 	xact_dll.c
+
+IDL_SRCS = xact_classes.idl

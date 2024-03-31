@@ -53,12 +53,12 @@ WINE_DEFAULT_DEBUG_CHANNEL(setupapi);
 
 static void * CDECL sc_cb_alloc(ULONG cb)
 {
-  return malloc(cb);
+  return HeapAlloc(GetProcessHeap(), 0, cb);
 }
 
 static void CDECL sc_cb_free(void *pv)
 {
-  free(pv);
+  HeapFree(GetProcessHeap(), 0, pv);
 }
 
 static INT_PTR CDECL sc_cb_open(char *pszFile, int oflag, int pmode)

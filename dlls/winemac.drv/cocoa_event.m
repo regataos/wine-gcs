@@ -29,8 +29,6 @@
 #import "cocoa_app.h"
 #import "cocoa_window.h"
 
-#pragma GCC diagnostic ignored "-Wdeclaration-after-statement"
-
 
 static NSString* const WineEventQueueThreadDictionaryKey = @"WineEventQueueThreadDictionaryKey";
 
@@ -164,8 +162,8 @@ static const OSType WineHotKeySignature = 'Wine';
 
         for (hotKeyMacID in hotKeysByMacID)
         {
-            NSDictionary<NSString *, id> *hotKeyDict = hotKeysByMacID[hotKeyMacID];
-            EventHotKeyRef hotKeyRef = [hotKeyDict[WineHotKeyCarbonRefKey] pointerValue];
+            NSDictionary* hotKeyDict = [hotKeysByMacID objectForKey:hotKeyMacID];
+            EventHotKeyRef hotKeyRef = [[hotKeyDict objectForKey:WineHotKeyCarbonRefKey] pointerValue];
             UnregisterEventHotKey(hotKeyRef);
         }
         [hotKeysByMacID release];
@@ -271,7 +269,7 @@ static const OSType WineHotKeySignature = 'Wine';
         index = 0;
         while (index < [events count])
         {
-            MacDrvEvent* event = events[index];
+            MacDrvEvent* event = [events objectAtIndex:index];
             if (event_mask_for_type(event->event->type) & mask)
             {
                 [[event retain] autorelease];
@@ -294,8 +292,7 @@ static const OSType WineHotKeySignature = 'Wine';
 
     - (void) discardEventsPassingTest:(BOOL (^)(macdrv_event* event))block
     {
-    @autoreleasepool
-    {
+        NSAutoreleasePool* pool = [[NSAutoreleasePool alloc] init];
         NSIndexSet* indexes;
 
         [eventsLock lock];
@@ -308,7 +305,8 @@ static const OSType WineHotKeySignature = 'Wine';
         [events removeObjectsAtIndexes:indexes];
 
         [eventsLock unlock];
-    }
+
+        [pool release];
     }
 
     - (void) discardEventsMatchingMask:(macdrv_event_mask)mask forWindow:(NSWindow*)window
@@ -371,15 +369,15 @@ static const OSType WineHotKeySignature = 'Wine';
 
     - (BOOL) postHotKeyEvent:(UInt32)hotKeyNumber time:(double)time
     {
-        NSDictionary<NSString *, id> *hotKeyDict = hotKeysByMacID[@(hotKeyNumber)];
+        NSDictionary* hotKeyDict = [hotKeysByMacID objectForKey:[NSNumber numberWithUnsignedInt:hotKeyNumber]];
         if (hotKeyDict)
         {
             macdrv_event* event;
 
             event = macdrv_create_event(HOTKEY_PRESS, nil);
-            event->hotkey_press.vkey        = [hotKeyDict[WineHotKeyVkeyKey] unsignedIntValue];
-            event->hotkey_press.mod_flags   = [hotKeyDict[WineHotKeyModFlagsKey] unsignedIntValue];
-            event->hotkey_press.keycode     = [hotKeyDict[WineHotKeyKeyCodeKey] unsignedIntValue];
+            event->hotkey_press.vkey        = [[hotKeyDict objectForKey:WineHotKeyVkeyKey] unsignedIntValue];
+            event->hotkey_press.mod_flags   = [[hotKeyDict objectForKey:WineHotKeyModFlagsKey] unsignedIntValue];
+            event->hotkey_press.keycode     = [[hotKeyDict objectForKey:WineHotKeyKeyCodeKey] unsignedIntValue];
             event->hotkey_press.time_ms     = [[WineApplicationController sharedController] ticksForEventTime:time];
 
             [self postEvent:event];
@@ -410,12 +408,14 @@ static const OSType WineHotKeySignature = 'Wine';
 
     - (void) unregisterHotKey:(unsigned int)vkey modFlags:(unsigned int)modFlags
     {
-        NSArray<NSNumber *> *winIDPair = @[@(vkey), @(modFlags)];
-        NSDictionary<NSString *, id> *hotKeyDict = hotKeysByWinID[winIDPair];
+        NSNumber* vkeyNumber = [NSNumber numberWithUnsignedInt:vkey];
+        NSNumber* modFlagsNumber = [NSNumber numberWithUnsignedInt:modFlags];
+        NSArray* winIDPair = [NSArray arrayWithObjects:vkeyNumber, modFlagsNumber, nil];
+        NSDictionary* hotKeyDict = [hotKeysByWinID objectForKey:winIDPair];
         if (hotKeyDict)
         {
-            EventHotKeyRef hotKeyRef = [hotKeyDict[WineHotKeyCarbonRefKey] pointerValue];
-            NSNumber* macID = hotKeyDict[WineHotKeyMacIDKey];
+            EventHotKeyRef hotKeyRef = [[hotKeyDict objectForKey:WineHotKeyCarbonRefKey] pointerValue];
+            NSNumber* macID = [hotKeyDict objectForKey:WineHotKeyMacIDKey];
 
             UnregisterEventHotKey(hotKeyRef);
             [hotKeysByMacID removeObjectForKey:macID];
@@ -428,10 +428,13 @@ static const OSType WineHotKeySignature = 'Wine';
         static EventHandlerRef handler;
         static UInt32 hotKeyNumber;
         OSStatus status;
-        NSArray<NSNumber *> *winIDPair;
+        NSNumber* vkeyNumber;
+        NSNumber* modFlagsNumber;
+        NSArray* winIDPair;
         EventHotKeyID hotKeyID;
         EventHotKeyRef hotKeyRef;
-        NSDictionary<NSString *, id> *hotKeyDict;
+        NSNumber* macIDNumber;
+        NSDictionary* hotKeyDict;
 
         if (!handler)
         {
@@ -450,8 +453,10 @@ static const OSType WineHotKeySignature = 'Wine';
         if (!hotKeysByWinID && !(hotKeysByWinID = [[NSMutableDictionary alloc] init]))
             return MACDRV_HOTKEY_FAILURE;
 
-        winIDPair = @[@(vkey), @(modFlags)];
-        if (hotKeysByWinID[winIDPair])
+        vkeyNumber = [NSNumber numberWithUnsignedInt:vkey];
+        modFlagsNumber = [NSNumber numberWithUnsignedInt:modFlags];
+        winIDPair = [NSArray arrayWithObjects:vkeyNumber, modFlagsNumber, nil];
+        if ([hotKeysByWinID objectForKey:winIDPair])
             return MACDRV_HOTKEY_ALREADY_REGISTERED;
 
         hotKeyID.signature  = WineHotKeySignature;
@@ -467,16 +472,16 @@ static const OSType WineHotKeySignature = 'Wine';
             return MACDRV_HOTKEY_FAILURE;
         }
 
-        hotKeyDict =
-        @{
-                WineHotKeyMacIDKey : @(hotKeyID.id),
-                 WineHotKeyVkeyKey : @(vkey),
-             WineHotKeyModFlagsKey : @(modFlags),
-              WineHotKeyKeyCodeKey : @(keyCode),
-            WineHotKeyCarbonRefKey : [NSValue valueWithPointer:hotKeyRef]
-        };
-        hotKeysByMacID[@(hotKeyID.id)] = hotKeyDict;
-        hotKeysByWinID[winIDPair] = hotKeyDict;
+        macIDNumber = [NSNumber numberWithUnsignedInt:hotKeyID.id];
+        hotKeyDict = [NSDictionary dictionaryWithObjectsAndKeys:
+                      macIDNumber, WineHotKeyMacIDKey,
+                      vkeyNumber, WineHotKeyVkeyKey,
+                      modFlagsNumber, WineHotKeyModFlagsKey,
+                      [NSNumber numberWithUnsignedInt:keyCode], WineHotKeyKeyCodeKey,
+                      [NSValue valueWithPointer:hotKeyRef], WineHotKeyCarbonRefKey,
+                      nil];
+        [hotKeysByMacID setObject:hotKeyDict forKey:macIDNumber];
+        [hotKeysByWinID setObject:hotKeyDict forKey:winIDPair];
 
         return MACDRV_HOTKEY_SUCCESS;
     }
@@ -489,10 +494,9 @@ static const OSType WineHotKeySignature = 'Wine';
  */
 void OnMainThread(dispatch_block_t block)
 {
-@autoreleasepool
-{
+    NSAutoreleasePool* pool = [[NSAutoreleasePool alloc] init];
     NSMutableDictionary* threadDict = [[NSThread currentThread] threadDictionary];
-    WineEventQueue* queue = threadDict[WineEventQueueThreadDictionaryKey];
+    WineEventQueue* queue = [threadDict objectForKey:WineEventQueueThreadDictionaryKey];
     dispatch_semaphore_t semaphore = NULL;
     __block BOOL finished;
 
@@ -519,19 +523,21 @@ void OnMainThread(dispatch_block_t block)
     {
         while (!finished)
         {
-            @autoreleasepool
+            MacDrvEvent* macDrvEvent;
+            struct kevent kev;
+
+            while (!finished &&
+                   (macDrvEvent = [queue getEventMatchingMask:event_mask_for_type(QUERY_EVENT)]))
             {
-                MacDrvEvent* macDrvEvent;
-                struct kevent kev;
+                queue->event_handler(macDrvEvent->event);
+            }
 
-                while (!finished &&
-                       (macDrvEvent = [queue getEventMatchingMask:event_mask_for_type(QUERY_EVENT)]))
-                {
-                    queue->event_handler(macDrvEvent->event);
-                }
+            if (!finished)
+            {
+                [pool release];
+                pool = [[NSAutoreleasePool alloc] init];
 
-                if (!finished)
-                    kevent(queue->kq, NULL, 0, &kev, 1, NULL);
+                kevent(queue->kq, NULL, 0, &kev, 1, NULL);
             }
         }
     }
@@ -540,7 +546,8 @@ void OnMainThread(dispatch_block_t block)
         dispatch_semaphore_wait(semaphore, DISPATCH_TIME_FOREVER);
         dispatch_release(semaphore);
     }
-}
+
+    [pool release];
 }
 
 
@@ -552,11 +559,10 @@ void OnMainThread(dispatch_block_t block)
  */
 macdrv_event_queue macdrv_create_event_queue(macdrv_event_handler handler)
 {
-@autoreleasepool
-{
+    NSAutoreleasePool* pool = [[NSAutoreleasePool alloc] init];
     NSMutableDictionary* threadDict = [[NSThread currentThread] threadDictionary];
 
-    WineEventQueue* queue = threadDict[WineEventQueueThreadDictionaryKey];
+    WineEventQueue* queue = [threadDict objectForKey:WineEventQueueThreadDictionaryKey];
     if (!queue)
     {
         queue = [[[WineEventQueue alloc] initWithEventHandler:handler] autorelease];
@@ -569,8 +575,8 @@ macdrv_event_queue macdrv_create_event_queue(macdrv_event_handler handler)
         }
     }
 
+    [pool release];
     return (macdrv_event_queue)queue;
-}
 }
 
 /***********************************************************************
@@ -581,14 +587,14 @@ macdrv_event_queue macdrv_create_event_queue(macdrv_event_handler handler)
  */
 void macdrv_destroy_event_queue(macdrv_event_queue queue)
 {
-@autoreleasepool
-{
+    NSAutoreleasePool* pool = [[NSAutoreleasePool alloc] init];
     WineEventQueue* q = (WineEventQueue*)queue;
     NSMutableDictionary* threadDict = [[NSThread currentThread] threadDictionary];
 
     [[WineApplicationController sharedController] unregisterEventQueue:q];
     [threadDict removeObjectForKey:WineEventQueueThreadDictionaryKey];
-}
+
+    [pool release];
 }
 
 /***********************************************************************
@@ -616,16 +622,15 @@ int macdrv_get_event_queue_fd(macdrv_event_queue queue)
 int macdrv_copy_event_from_queue(macdrv_event_queue queue,
         macdrv_event_mask mask, macdrv_event **event)
 {
-@autoreleasepool
-{
+    NSAutoreleasePool* pool = [[NSAutoreleasePool alloc] init];
     WineEventQueue* q = (WineEventQueue*)queue;
 
     MacDrvEvent* macDrvEvent = [q getEventMatchingMask:mask];
     if (macDrvEvent)
         *event = macdrv_retain_event(macDrvEvent->event);
 
+    [pool release];
     return (macDrvEvent != nil);
-}
 }
 
 /***********************************************************************
@@ -661,10 +666,10 @@ macdrv_event* macdrv_retain_event(macdrv_event *event)
  */
 void macdrv_release_event(macdrv_event *event)
 {
-@autoreleasepool
-{
     if (OSAtomicDecrement32Barrier(&event->refs) <= 0)
     {
+        NSAutoreleasePool* pool = [[NSAutoreleasePool alloc] init];
+
         switch (event->type)
         {
             case IM_SET_TEXT:
@@ -686,8 +691,9 @@ void macdrv_release_event(macdrv_event *event)
 
         [(WineWindow*)event->window release];
         free(event);
+
+        [pool release];
     }
-}
 }
 
 /***********************************************************************

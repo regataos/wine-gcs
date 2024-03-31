@@ -5,10 +5,11 @@ IMPORTLIB = ws2_32
 DELAYIMPORTS = dnsapi advapi32 iphlpapi user32
 UNIX_LIBS    = $(PTHREAD_LIBS)
 
-SOURCES = \
+C_SRCS = \
 	async.c \
 	inaddr.c \
 	protocol.c \
 	socket.c \
-	unixlib.c \
-	version.rc
+	unixlib.c
+
+RC_SRCS = version.rc

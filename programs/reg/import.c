@@ -377,7 +377,10 @@ static LONG open_key(struct parser *parser, WCHAR *path)
                           KEY_ALL_ACCESS|parser->sam, NULL, &parser->hkey, NULL);
 
     if (res == ERROR_SUCCESS)
-        parser->key_name = wcsdup(path);
+    {
+        parser->key_name = malloc((lstrlenW(path) + 1) * sizeof(WCHAR));
+        lstrcpyW(parser->key_name, path);
+    }
     else
         parser->hkey = NULL;
 
@@ -633,7 +636,8 @@ static WCHAR *quoted_value_name_state(struct parser *parser, WCHAR *pos)
         goto invalid;
 
     /* copy the value name in case we need to parse multiple lines and the buffer is overwritten */
-    parser->value_name = wcsdup(val_name);
+    parser->value_name = malloc((lstrlenW(val_name) + 1) * sizeof(WCHAR));
+    lstrcpyW(parser->value_name, val_name);
 
     set_state(parser, DATA_START);
     return p;

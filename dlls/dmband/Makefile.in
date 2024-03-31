@@ -2,10 +2,12 @@ MODULE    = dmband.dll
 IMPORTS   = dxguid uuid ole32 advapi32
 PARENTSRC = ../dmusic
 
-SOURCES = \
+C_SRCS = \
 	band.c \
 	bandtrack.c \
-	dmband.idl \
 	dmband_main.c \
-	dmobject.c \
-	version.rc
+	dmobject.c
+
+IDL_SRCS = dmband.idl
+
+RC_SRCS = version.rc

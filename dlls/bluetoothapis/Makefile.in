@@ -1,7 +1,3 @@
 MODULE    = bluetoothapis.dll
-IMPORTLIB = bluetoothapis
 
 EXTRADLLFLAGS = -Wb,--prefer-native
-
-SOURCES = \
-	main.c

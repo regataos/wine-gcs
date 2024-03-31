@@ -1,19 +1,18 @@
 MODULE    = winedbg.exe
-IMPORTS   = $(ZYDIS_PE_LIBS) dbghelp advapi32
-EXTRAINCL = $(ZYDIS_PE_CFLAGS)
+IMPORTS   = dbghelp advapi32
 DELAYIMPORTS = comdlg32 shell32 comctl32 user32 gdi32 ws2_32
 
 EXTRADLLFLAGS = -mconsole
 
-SOURCES = \
+C_SRCS = \
 	be_arm.c \
 	be_arm64.c \
 	be_i386.c \
 	be_x86_64.c \
 	break.c \
 	crashdlg.c \
-	dbg.y \
-	debug.l \
+	db_disasm.c \
+	db_disasm64.c \
 	display.c \
 	expr.c \
 	gdbproxy.c \
@@ -26,6 +25,11 @@ SOURCES = \
 	tgt_minidump.c \
 	tgt_module.c \
 	types.c \
-	winedbg.c \
-	winedbg.man.in \
-	winedbg.rc
+	winedbg.c
+
+RC_SRCS = winedbg.rc
+
+LEX_SRCS   = debug.l
+BISON_SRCS = dbg.y
+
+MANPAGES = winedbg.man.in

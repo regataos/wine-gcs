@@ -1,5 +1,5 @@
 TESTDLL   = msasn1.dll
 IMPORTS   = msasn1
 
-SOURCES = \
+C_SRCS = \
 	asn1.c

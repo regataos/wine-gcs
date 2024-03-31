@@ -37,6 +37,7 @@ struct uuid
 #define TRUE 1
 #define FALSE 0
 
+typedef struct _loc_info_t loc_info_t;
 typedef struct _attr_t attr_t;
 typedef struct _attr_custdata_t attr_custdata_t;
 typedef struct _expr_t expr_t;
@@ -84,7 +85,6 @@ enum attr_type
     ATTR_CASE,
     ATTR_CODE,
     ATTR_COMMSTATUS,
-    ATTR_COMPOSABLE,
     ATTR_CONTEXTHANDLE,
     ATTR_CONTRACT,
     ATTR_CONTRACTVERSION,
@@ -92,12 +92,10 @@ enum attr_type
     ATTR_CUSTOM,
     ATTR_DECODE,
     ATTR_DEFAULT,
-    ATTR_DEFAULT_OVERLOAD,
     ATTR_DEFAULTBIND,
     ATTR_DEFAULTCOLLELEM,
     ATTR_DEFAULTVALUE,
     ATTR_DEFAULTVTABLE,
-    ATTR_DEPRECATED,
     ATTR_DISABLECONSISTENCYCHECK,
     ATTR_DISPINTERFACE,
     ATTR_DISPLAYBIND,
@@ -157,7 +155,6 @@ enum attr_type
     ATTR_PROPGET,
     ATTR_PROPPUT,
     ATTR_PROPPUTREF,
-    ATTR_PROTECTED,
     ATTR_PROXY,
     ATTR_PUBLIC,
     ATTR_RANGE,
@@ -314,13 +311,11 @@ enum type_basic_type
 #define TYPE_BASIC_INT_MIN TYPE_BASIC_INT8
 #define TYPE_BASIC_INT_MAX TYPE_BASIC_HYPER
 
-struct location
+struct _loc_info_t
 {
     const char *input_name;
-    int first_line;
-    int last_line;
-    int first_column;
-    int last_column;
+    int line_number;
+    const char *near_text;
 };
 
 struct str_list_entry_t
@@ -345,7 +340,6 @@ struct _attr_t {
   } u;
   /* parser-internal */
   struct list entry;
-  struct location where;
 };
 
 struct _expr_t {
@@ -519,7 +513,7 @@ struct _type_t {
   unsigned int typestring_offset;
   unsigned int ptrdesc;           /* used for complex structs */
   int typelib_idx;
-  struct location where;
+  loc_info_t loc_info;
   unsigned int ignore : 1;
   unsigned int defined : 1;
   unsigned int written : 1;
@@ -539,7 +533,7 @@ struct _var_t {
   /* fields specific to functions */
   unsigned int procstring_offset, func_idx;
 
-  struct location where;
+  struct _loc_info_t loc_info;
 
   unsigned int declonly : 1;
 
@@ -659,6 +653,8 @@ type_t *reg_type(type_t *type, const char *name, struct namespace *namespace, in
 
 var_t *make_var(char *name);
 var_list_t *append_var(var_list_t *list, var_t *var);
+
+void init_loc_info(loc_info_t *);
 
 char *format_namespace(struct namespace *namespace, const char *prefix, const char *separator, const char *suffix,
                        const char *abi_prefix);

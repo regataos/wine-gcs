@@ -45,7 +45,7 @@ GpStatus WINGDIPAPI GdipCloneImageAttributes(GDIPCONST GpImageAttributes *imagea
         {
             remap_tables[i].enabled = TRUE;
             remap_tables[i].mapsize = imageattr->colorremaptables[i].mapsize;
-            remap_tables[i].colormap = malloc(sizeof(ColorMap) * remap_tables[i].mapsize);
+            remap_tables[i].colormap = heap_alloc(sizeof(ColorMap) * remap_tables[i].mapsize);
 
             if (remap_tables[i].colormap)
             {
@@ -73,7 +73,7 @@ GpStatus WINGDIPAPI GdipCloneImageAttributes(GDIPCONST GpImageAttributes *imagea
     if (stat != Ok)
     {
         for (i=0; i<ColorAdjustTypeCount; i++)
-            free(remap_tables[i].colormap);
+            heap_free(remap_tables[i].colormap);
     }
 
     return stat;
@@ -84,8 +84,8 @@ GpStatus WINGDIPAPI GdipCreateImageAttributes(GpImageAttributes **imageattr)
     if(!imageattr)
         return InvalidParameter;
 
-    *imageattr = calloc(1, sizeof(GpImageAttributes));
-    if(!*imageattr) return OutOfMemory;
+    *imageattr = heap_alloc_zero(sizeof(GpImageAttributes));
+    if(!*imageattr)    return OutOfMemory;
 
     (*imageattr)->wrap = WrapModeClamp;
 
@@ -104,9 +104,9 @@ GpStatus WINGDIPAPI GdipDisposeImageAttributes(GpImageAttributes *imageattr)
         return InvalidParameter;
 
     for (i=0; i<ColorAdjustTypeCount; i++)
-        free(imageattr->colorremaptables[i].colormap);
+        heap_free(imageattr->colorremaptables[i].colormap);
 
-    free(imageattr);
+    heap_free(imageattr);
 
     return Ok;
 }
@@ -271,21 +271,21 @@ GpStatus WINGDIPAPI GdipSetImageAttributesRemapTable(GpImageAttributes *imageAtt
         if(!map || !mapSize)
 	    return InvalidParameter;
 
-        new_map = malloc(sizeof(*map) * mapSize);
+        new_map = heap_alloc_zero(sizeof(*map) * mapSize);
 
         if (!new_map)
             return OutOfMemory;
 
         memcpy(new_map, map, sizeof(*map) * mapSize);
 
-        free(imageAttr->colorremaptables[type].colormap);
+        heap_free(imageAttr->colorremaptables[type].colormap);
 
         imageAttr->colorremaptables[type].mapsize = mapSize;
         imageAttr->colorremaptables[type].colormap = new_map;
     }
     else
     {
-        free(imageAttr->colorremaptables[type].colormap);
+        heap_free(imageAttr->colorremaptables[type].colormap);
         imageAttr->colorremaptables[type].colormap = NULL;
     }
 

@@ -25,6 +25,7 @@
 
 #include "wsdapi_internal.h"
 #include "wine/debug.h"
+#include "wine/heap.h"
 #include "guiddef.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(wsdapi);
@@ -94,20 +95,20 @@ static ULONG WINAPI IWSDiscoveryPublisherImpl_Release(IWSDiscoveryPublisher *ifa
         {
             IWSDiscoveryPublisherNotify_Release(sink->notificationSink);
             list_remove(&sink->entry);
-            free(sink);
+            HeapFree(GetProcessHeap(), 0, sink);
         }
 
         DeleteCriticalSection(&This->notification_sink_critical_section);
 
         LIST_FOR_EACH_ENTRY_SAFE(msg_id, msg_id_cursor, &This->message_ids, struct message_id, entry)
         {
-            free(msg_id->id);
+            heap_free(msg_id->id);
             list_remove(&msg_id->entry);
-            free(msg_id);
+            heap_free(msg_id);
         }
 
         DeleteCriticalSection(&This->message_ids_critical_section);
-        free(This);
+        HeapFree(GetProcessHeap(), 0, This);
     }
 
     return ref;
@@ -148,7 +149,7 @@ static HRESULT WINAPI IWSDiscoveryPublisherImpl_RegisterNotificationSink(IWSDisc
         return E_INVALIDARG;
     }
 
-    sink = calloc(1, sizeof(*sink));
+    sink = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*sink));
 
     if (!sink)
     {
@@ -188,7 +189,7 @@ static HRESULT WINAPI IWSDiscoveryPublisherImpl_UnRegisterNotificationSink(IWSDi
         {
             IWSDiscoveryPublisherNotify_Release(pSink);
             list_remove(&sink->entry);
-            free(sink);
+            HeapFree(GetProcessHeap(), 0, sink);
 
             LeaveCriticalSection(&impl->notification_sink_critical_section);
             return S_OK;
@@ -420,7 +421,7 @@ HRESULT WINAPI WSDCreateDiscoveryPublisher(IWSDXMLContext *pContext, IWSDiscover
 
     *ppPublisher = NULL;
 
-    obj = calloc(1, sizeof(*obj));
+    obj = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*obj));
 
     if (!obj)
     {
@@ -438,7 +439,7 @@ HRESULT WINAPI WSDCreateDiscoveryPublisher(IWSDXMLContext *pContext, IWSDiscover
         if (FAILED(ret))
         {
             WARN("Unable to create XML context\n");
-            free(obj);
+            heap_free(obj);
             return ret;
         }
     }
@@ -453,7 +454,7 @@ HRESULT WINAPI WSDCreateDiscoveryPublisher(IWSDXMLContext *pContext, IWSDiscover
     if (FAILED(ret))
     {
         WARN("Unable to register default namespaces\n");
-        free(obj);
+        heap_free(obj);
 
         return ret;
     }

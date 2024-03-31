@@ -144,7 +144,6 @@ static DWORD WINAPI SystemClockAdviseThread(void *param)
     REFERENCE_TIME current_time;
 
     TRACE("Starting advise thread for clock %p.\n", clock);
-    SetThreadDescription(GetCurrentThread(), L"wine_qz_clock_advise");
 
     for (;;)
     {
@@ -341,7 +340,7 @@ HRESULT system_clock_create(IUnknown *outer, IUnknown **out)
     object->outer_unk = outer ? outer : &object->IUnknown_inner;
     object->refcount = 1;
     list_init(&object->sinks);
-    InitializeCriticalSectionEx(&object->cs, 0, RTL_CRITICAL_SECTION_FLAG_FORCE_DEBUG_INFO);
+    InitializeCriticalSection(&object->cs);
     object->cs.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": SystemClockImpl.cs");
 
     TRACE("Created system clock %p.\n", object);

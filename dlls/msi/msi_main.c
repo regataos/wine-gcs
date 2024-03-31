@@ -87,21 +87,20 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
     return TRUE;
 }
 
-struct class_factory
-{
+typedef struct tagIClassFactoryImpl {
     IClassFactory IClassFactory_iface;
-    HRESULT (*create_object)( IUnknown *, void ** );
-};
+    HRESULT (*create_object)( IUnknown*, LPVOID* );
+} IClassFactoryImpl;
 
-static inline struct class_factory *impl_from_IClassFactory(IClassFactory *iface)
+static inline IClassFactoryImpl *impl_from_IClassFactory(IClassFactory *iface)
 {
-    return CONTAINING_RECORD(iface, struct class_factory, IClassFactory_iface);
+    return CONTAINING_RECORD(iface, IClassFactoryImpl, IClassFactory_iface);
 }
 
 static HRESULT WINAPI MsiCF_QueryInterface(LPCLASSFACTORY iface,
                 REFIID riid,LPVOID *ppobj)
 {
-    struct class_factory *This = impl_from_IClassFactory(iface);
+    IClassFactoryImpl *This = impl_from_IClassFactory(iface);
 
     TRACE("%p %s %p\n",This,debugstr_guid(riid),ppobj);
 
@@ -130,7 +129,7 @@ static ULONG WINAPI MsiCF_Release(LPCLASSFACTORY iface)
 static HRESULT WINAPI MsiCF_CreateInstance(LPCLASSFACTORY iface,
     LPUNKNOWN pOuter, REFIID riid, LPVOID *ppobj)
 {
-    struct class_factory *This = impl_from_IClassFactory(iface);
+    IClassFactoryImpl *This = impl_from_IClassFactory(iface);
     IUnknown *unk = NULL;
     HRESULT r;
 
@@ -166,7 +165,7 @@ static const IClassFactoryVtbl MsiCF_Vtbl =
     MsiCF_LockServer
 };
 
-static struct class_factory MsiServer_CF = { { &MsiCF_Vtbl }, create_msiserver };
+static IClassFactoryImpl MsiServer_CF = { { &MsiCF_Vtbl }, create_msiserver };
 
 /******************************************************************
  * DllGetClassObject          [MSI.@]

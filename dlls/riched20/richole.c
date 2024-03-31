@@ -21,6 +21,7 @@
 
 #include <stdarg.h>
 
+#define NONAMELESSUNION
 #define COBJMACROS
 
 #include "windef.h"
@@ -1005,7 +1006,7 @@ static ULONG WINAPI IOleClientSite_fnRelease(IOleClientSite *iface)
             list_remove(&This->child.entry);
             This->child.reole = NULL;
         }
-        free(This);
+        heap_free(This);
     }
     return ref;
 }
@@ -1218,7 +1219,7 @@ static const IOleInPlaceSiteVtbl olestvt =
 
 static HRESULT CreateOleClientSite( struct text_services *services, IOleClientSite **ret )
 {
-    IOleClientSiteImpl *clientSite = malloc(sizeof *clientSite);
+    IOleClientSiteImpl *clientSite = heap_alloc(sizeof *clientSite);
 
     if (!clientSite)
         return E_OUTOFMEMORY;
@@ -1481,7 +1482,7 @@ static ULONG WINAPI ITextRange_fnRelease(ITextRange *me)
             list_remove(&This->child.entry);
             This->child.reole = NULL;
         }
-        free(This);
+        heap_free(This);
     }
     return ref;
 }
@@ -2775,7 +2776,7 @@ static ULONG WINAPI TextFont_Release(ITextFont *iface)
         if (This->range)
             ITextRange_Release(This->range);
         SysFreeString(This->props[FONT_NAME].str);
-        free(This);
+        heap_free(This);
     }
 
     return ref;
@@ -3489,7 +3490,7 @@ static HRESULT create_textfont(ITextRange *range, const ITextFontImpl *src, ITex
     ITextFontImpl *font;
 
     *ret = NULL;
-    font = malloc(sizeof(*font));
+    font = heap_alloc(sizeof(*font));
     if (!font)
         return E_OUTOFMEMORY;
 
@@ -3556,7 +3557,7 @@ static ULONG WINAPI TextPara_Release(ITextPara *iface)
     if (!ref)
     {
         ITextRange_Release(This->range);
-        free(This);
+        heap_free(This);
     }
 
     return ref;
@@ -3715,7 +3716,9 @@ static HRESULT WINAPI TextPara_SetStyle(ITextPara *iface, LONG value)
 static HRESULT WINAPI TextPara_GetAlignment(ITextPara *iface, LONG *value)
 {
     ITextParaImpl *This = impl_from_ITextPara(iface);
-    FIXME("(%p)->(%p)\n", This, value);
+    static int once;
+
+    if (!once++) FIXME("(%p)->(%p)\n", This, value);
 
     if (!para_get_reole(This))
         return CO_E_RELEASED;
@@ -4226,7 +4229,7 @@ static HRESULT create_textpara(ITextRange *range, ITextPara **ret)
     ITextParaImpl *para;
 
     *ret = NULL;
-    para = malloc(sizeof(*para));
+    para = heap_alloc(sizeof(*para));
     if (!para)
         return E_OUTOFMEMORY;
 
@@ -4418,22 +4421,15 @@ static HRESULT WINAPI ITextDocument2Old_fnSave(ITextDocument2Old *iface, VARIANT
 static HRESULT WINAPI ITextDocument2Old_fnFreeze(ITextDocument2Old *iface, LONG *pCount)
 {
     struct text_services *services = impl_from_ITextDocument2Old(iface);
-
-    if (services->editor->freeze_count < LONG_MAX) services->editor->freeze_count++;
-
-    if (pCount) *pCount = services->editor->freeze_count;
-    return services->editor->freeze_count != 0 ? S_OK : S_FALSE;
+    FIXME("stub %p\n", services);
+    return E_NOTIMPL;
 }
 
 static HRESULT WINAPI ITextDocument2Old_fnUnfreeze(ITextDocument2Old *iface, LONG *pCount)
 {
     struct text_services *services = impl_from_ITextDocument2Old(iface);
-
-    if (services->editor->freeze_count && !--services->editor->freeze_count)
-        ME_RewrapRepaint(services->editor);
-
-    if (pCount) *pCount = services->editor->freeze_count;
-    return services->editor->freeze_count == 0 ? S_OK : S_FALSE;
+    FIXME("stub %p\n", services);
+    return E_NOTIMPL;
 }
 
 static HRESULT WINAPI ITextDocument2Old_fnBeginEditCollection(ITextDocument2Old *iface)
@@ -4506,7 +4502,7 @@ static HRESULT WINAPI ITextDocument2Old_fnRedo(ITextDocument2Old *iface, LONG Co
 
 static HRESULT CreateITextRange(struct text_services *services, LONG start, LONG end, ITextRange** ppRange)
 {
-    ITextRangeImpl *txtRge = malloc(sizeof(ITextRangeImpl));
+    ITextRangeImpl *txtRge = heap_alloc(sizeof(ITextRangeImpl));
 
     if (!txtRge)
         return E_OUTOFMEMORY;
@@ -4815,7 +4811,7 @@ static ULONG WINAPI ITextSelection_fnRelease(ITextSelection *me)
     struct text_selection *This = impl_from_ITextSelection(me);
     ULONG ref = InterlockedDecrement(&This->ref);
     if (ref == 0)
-        free(This);
+        heap_free(This);
     return ref;
 }
 
@@ -5885,7 +5881,7 @@ static const ITextSelectionVtbl tsvt = {
 
 static struct text_selection *text_selection_create(struct text_services *services)
 {
-    struct text_selection *txtSel = malloc(sizeof *txtSel);
+    struct text_selection *txtSel = heap_alloc(sizeof *txtSel);
     if (!txtSel)
         return NULL;
 
@@ -5963,12 +5959,12 @@ void ME_GetOLEObjectSize(const ME_Context *c, ME_Run *run, SIZE *pSize)
   switch (stgm.tymed)
   {
   case TYMED_GDI:
-    GetObjectW(stgm.hBitmap, sizeof(dibsect), &dibsect);
+    GetObjectW(stgm.u.hBitmap, sizeof(dibsect), &dibsect);
     pSize->cx = dibsect.dsBm.bmWidth;
     pSize->cy = dibsect.dsBm.bmHeight;
     break;
   case TYMED_ENHMF:
-    GetEnhMetaFileHeader(stgm.hEnhMetaFile, sizeof(emh), &emh);
+    GetEnhMetaFileHeader(stgm.u.hEnhMetaFile, sizeof(emh), &emh);
     pSize->cx = emh.rclBounds.right - emh.rclBounds.left;
     pSize->cy = emh.rclBounds.bottom - emh.rclBounds.top;
     break;
@@ -6000,8 +5996,6 @@ void draw_ole( ME_Context *c, int x, int y, ME_Run *run, BOOL selected )
 
   assert(run->nFlags & MERF_GRAPHICS);
   assert(run->reobj);
-
-  if (!run->reobj->obj.poleobj) return;
 
   if (SUCCEEDED(IOleObject_QueryInterface(run->reobj->obj.poleobj, &IID_IViewObject, (void**)&ivo)))
   {
@@ -6057,9 +6051,9 @@ void draw_ole( ME_Context *c, int x, int y, ME_Run *run, BOOL selected )
   switch (stgm.tymed)
   {
   case TYMED_GDI:
-    GetObjectW(stgm.hBitmap, sizeof(dibsect), &dibsect);
+    GetObjectW(stgm.u.hBitmap, sizeof(dibsect), &dibsect);
     hMemDC = CreateCompatibleDC(c->hDC);
-    old_bm = SelectObject(hMemDC, stgm.hBitmap);
+    old_bm = SelectObject(hMemDC, stgm.u.hBitmap);
     if (has_size)
     {
       convert_sizel(c, &run->reobj->obj.sizel, &sz);
@@ -6079,7 +6073,7 @@ void draw_ole( ME_Context *c, int x, int y, ME_Run *run, BOOL selected )
     DeleteDC(hMemDC);
     break;
   case TYMED_ENHMF:
-    GetEnhMetaFileHeader(stgm.hEnhMetaFile, sizeof(emh), &emh);
+    GetEnhMetaFileHeader(stgm.u.hEnhMetaFile, sizeof(emh), &emh);
     if (has_size)
     {
       convert_sizel(c, &run->reobj->obj.sizel, &sz);
@@ -6097,7 +6091,7 @@ void draw_ole( ME_Context *c, int x, int y, ME_Run *run, BOOL selected )
     rc.top = y - sz.cy;
     rc.right = x + sz.cx;
     rc.bottom = y;
-    PlayEnhMetaFile(c->hDC, stgm.hEnhMetaFile, &rc);
+    PlayEnhMetaFile(c->hDC, stgm.u.hEnhMetaFile, &rc);
     break;
   default:
     FIXME("Unsupported tymed %ld\n", stgm.tymed);
@@ -6115,7 +6109,7 @@ void ME_DeleteReObject(struct re_object *reobj)
     if (reobj->obj.poleobj)   IOleObject_Release(reobj->obj.poleobj);
     if (reobj->obj.pstg)      IStorage_Release(reobj->obj.pstg);
     if (reobj->obj.polesite)  IOleClientSite_Release(reobj->obj.polesite);
-    free(reobj);
+    heap_free(reobj);
 }
 
 void ME_CopyReObject(REOBJECT *dst, const REOBJECT *src, DWORD flags)

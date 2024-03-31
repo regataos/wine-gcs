@@ -42,9 +42,7 @@ struct cpuflags
 #endif
 };
 
-unsigned int INT123_getcpuflags(struct cpuflags* cf);
-
-#if ((defined OPT_X86) || (defined OPT_X86_64) || (defined OPT_NEON) || (defined OPT_NEON64)) && (defined OPT_MULTI)
+unsigned int getcpuflags(struct cpuflags* cf);
 
 #ifdef WANT_GETCPUFLAGS
 #include <string.h>
@@ -53,9 +51,15 @@ unsigned int INT123_getcpuflags(struct cpuflags* cf);
 static unsigned int wrap_getcpuflags(struct cpuflags* cf)
 {
 	memset(cf, 0, sizeof(*cf));
-	return INT123_getcpuflags(cf);
+#if ((defined OPT_X86) || (defined OPT_X86_64) || (defined OPT_NEON) || (defined OPT_NEON64)) && (defined OPT_MULTI)
+	return getcpuflags(cf);
+#else
+        return 0;
+#endif
 }
 #endif
+
+#if ((defined OPT_X86) || (defined OPT_X86_64) || (defined OPT_NEON) || (defined OPT_NEON64)) && (defined OPT_MULTI)
 
 // We really evaluate the CPU flags.
 #define OPT_CPU_FLAGS

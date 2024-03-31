@@ -202,15 +202,11 @@ static const IWbemLocatorVtbl wbem_locator_vtbl =
     wbem_locator_ConnectServer
 };
 
-HRESULT WbemLocator_create( LPVOID *ppObj, REFIID riid )
+HRESULT WbemLocator_create( LPVOID *ppObj )
 {
     wbem_locator *wl;
 
     TRACE("(%p)\n", ppObj);
-
-    if ( !IsEqualGUID( riid, &IID_IWbemLocator ) &&
-         !IsEqualGUID( riid, &IID_IUnknown ) )
-        return E_NOINTERFACE;
 
     if (!(wl = malloc( sizeof(*wl) ))) return E_OUTOFMEMORY;
 

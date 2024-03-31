@@ -31,6 +31,7 @@
 
 #include "oledb_private.h"
 
+#include "wine/heap.h"
 #include "wine/list.h"
 
 #include "wine/debug.h"
@@ -123,8 +124,8 @@ static ULONG WINAPI errorrecords_Release(IErrorInfo* iface)
             CoTaskMemFree(dispparams->rgvarg);
             CoTaskMemFree(dispparams->rgdispidNamedArgs);
         }
-        free(This->records);
-        free(This);
+        heap_free(This->records);
+        heap_free(This);
     }
     return ref;
 }
@@ -275,7 +276,7 @@ static HRESULT WINAPI errorrec_AddErrorRecord(IErrorRecords *iface, ERRORINFO *p
     if (!This->records)
     {
         const unsigned int initial_size = 16;
-        if (!(This->records = malloc(initial_size * sizeof(*This->records))))
+        if (!(This->records = heap_alloc(initial_size * sizeof(*This->records))))
             return E_OUTOFMEMORY;
 
         This->allocated = initial_size;
@@ -284,7 +285,7 @@ static HRESULT WINAPI errorrec_AddErrorRecord(IErrorRecords *iface, ERRORINFO *p
     {
         struct ErrorEntry *new_ptr;
 
-        new_ptr = realloc(This->records, 2 * This->allocated * sizeof(*This->records));
+        new_ptr = heap_realloc(This->records, 2 * This->allocated * sizeof(*This->records));
         if (!new_ptr)
             return E_OUTOFMEMORY;
 
@@ -418,7 +419,7 @@ HRESULT create_error_info(IUnknown *outer, void **obj)
 
     if(outer) return CLASS_E_NOAGGREGATION;
 
-    This = malloc(sizeof(*This));
+    This = heap_alloc(sizeof(*This));
     if(!This) return E_OUTOFMEMORY;
 
     This->IErrorInfo_iface.lpVtbl = &ErrorInfoVtbl;

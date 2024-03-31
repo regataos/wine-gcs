@@ -29,6 +29,8 @@
 #include <stdlib.h>
 #include <sys/types.h>
 
+#define NONAMELESSUNION
+#define NONAMELESSSTRUCT
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
 #include "windef.h"
@@ -82,8 +84,8 @@ static const IMAGE_RESOURCE_DIRECTORY *find_first_entry( const IMAGE_RESOURCE_DI
 
     for (pos = 0; pos < dir->NumberOfNamedEntries + dir->NumberOfIdEntries; pos++)
     {
-        if (!entry[pos].DataIsDirectory == !want_dir)
-            return (const IMAGE_RESOURCE_DIRECTORY *)((const char *)root + entry[pos].OffsetToDirectory);
+        if (!entry[pos].u2.s2.DataIsDirectory == !want_dir)
+            return (const IMAGE_RESOURCE_DIRECTORY *)((const char *)root + entry[pos].u2.s2.OffsetToDirectory);
     }
     return NULL;
 }
@@ -106,17 +108,17 @@ static const IMAGE_RESOURCE_DIRECTORY *find_entry_by_id( const IMAGE_RESOURCE_DI
     while (min <= max)
     {
         pos = (min + max) / 2;
-        if (entry[pos].Id == id)
+        if (entry[pos].u.Id == id)
         {
-            if (!entry[pos].DataIsDirectory == !want_dir)
+            if (!entry[pos].u2.s2.DataIsDirectory == !want_dir)
             {
                 TRACE("root %p dir %p id %04x ret %p\n",
-                      root, dir, id, (const char*)root + entry[pos].OffsetToDirectory);
-                return (const IMAGE_RESOURCE_DIRECTORY *)((const char *)root + entry[pos].OffsetToDirectory);
+                      root, dir, id, (const char*)root + entry[pos].u2.s2.OffsetToDirectory);
+                return (const IMAGE_RESOURCE_DIRECTORY *)((const char *)root + entry[pos].u2.s2.OffsetToDirectory);
             }
             break;
         }
-        if (entry[pos].Id > id) max = pos - 1;
+        if (entry[pos].u.Id > id) max = pos - 1;
         else min = pos + 1;
     }
     TRACE("root %p dir %p id %04x not found\n", root, dir, id );
@@ -145,15 +147,15 @@ static const IMAGE_RESOURCE_DIRECTORY *find_entry_by_name( const IMAGE_RESOURCE_
     while (min <= max)
     {
         pos = (min + max) / 2;
-        str = (const IMAGE_RESOURCE_DIR_STRING_U *)((const char *)root + entry[pos].NameOffset);
+        str = (const IMAGE_RESOURCE_DIR_STRING_U *)((const char *)root + entry[pos].u.s.NameOffset);
         res = wcsncmp( name, str->NameString, str->Length );
         if (!res && namelen == str->Length)
         {
-            if (!entry[pos].DataIsDirectory == !want_dir)
+            if (!entry[pos].u2.s2.DataIsDirectory == !want_dir)
             {
                 TRACE("root %p dir %p name %s ret %p\n",
-                      root, dir, debugstr_w(name), (const char*)root + entry[pos].OffsetToDirectory);
-                return (const IMAGE_RESOURCE_DIRECTORY *)((const char *)root + entry[pos].OffsetToDirectory);
+                      root, dir, debugstr_w(name), (const char*)root + entry[pos].u2.s2.OffsetToDirectory);
+                return (const IMAGE_RESOURCE_DIRECTORY *)((const char *)root + entry[pos].u2.s2.OffsetToDirectory);
             }
             break;
         }
@@ -309,8 +311,8 @@ NTSTATUS WINAPI DECLSPEC_HOTPATCH LdrFindResource_U( HMODULE hmod, const LDR_RES
 
 /* don't penalize other platforms with stuff needed on i386 for compatibility */
 #ifdef __i386__
-NTSTATUS WINAPI access_resource( HMODULE hmod, const IMAGE_RESOURCE_DATA_ENTRY *entry,
-                                 void **ptr, ULONG *size )
+NTSTATUS WINAPI DECLSPEC_HIDDEN access_resource( HMODULE hmod, const IMAGE_RESOURCE_DATA_ENTRY *entry,
+                                                 void **ptr, ULONG *size )
 #else
 static inline NTSTATUS access_resource( HMODULE hmod, const IMAGE_RESOURCE_DATA_ENTRY *entry,
                                         void **ptr, ULONG *size )

@@ -3,6 +3,5 @@ IMPORTS   = ntoskrnl
 
 EXTRADLLFLAGS = -Wl,--subsystem,native
 
-SOURCES = \
-	scsiport.c \
-	scsiport.sys.spec
+C_SRCS = \
+	scsiport.c

@@ -69,8 +69,6 @@ static ULONG WINAPI d3d8_surface_AddRef(IDirect3DSurface8 *iface)
         if (surface->wined3d_rtv)
             wined3d_rendertarget_view_incref(surface->wined3d_rtv);
         wined3d_texture_incref(surface->wined3d_texture);
-        if (surface->swapchain)
-            wined3d_swapchain_incref(surface->swapchain);
     }
 
     return refcount;
@@ -104,10 +102,6 @@ static ULONG WINAPI d3d8_surface_Release(IDirect3DSurface8 *iface)
 
         if (surface->wined3d_rtv)
             wined3d_rendertarget_view_decref(surface->wined3d_rtv);
-        if (surface->swapchain)
-           wined3d_swapchain_decref(surface->swapchain);
-        /* Releasing the texture may free the d3d8 object, so do not access it
-         * after releasing the texture. */
         wined3d_texture_decref(surface->wined3d_texture);
 
         if (parent_device)
@@ -307,7 +301,7 @@ static void STDMETHODCALLTYPE surface_wined3d_object_destroyed(void *parent)
 {
     struct d3d8_surface *surface = parent;
     d3d8_resource_cleanup(&surface->resource);
-    free(surface);
+    heap_free(surface);
 }
 
 static const struct wined3d_parent_ops d3d8_surface_wined3d_parent_ops =
@@ -315,23 +309,18 @@ static const struct wined3d_parent_ops d3d8_surface_wined3d_parent_ops =
     surface_wined3d_object_destroyed,
 };
 
-struct d3d8_surface *d3d8_surface_create(struct wined3d_texture *wined3d_texture,
-        unsigned int sub_resource_idx, IUnknown *container)
+void surface_init(struct d3d8_surface *surface, struct wined3d_texture *wined3d_texture, unsigned int sub_resource_idx,
+        const struct wined3d_parent_ops **parent_ops)
 {
     IDirect3DBaseTexture8 *texture;
-    struct d3d8_surface *surface;
-
-    if (!(surface = calloc(1, sizeof(*surface))))
-        return NULL;
 
     surface->IDirect3DSurface8_iface.lpVtbl = &d3d8_surface_vtbl;
     d3d8_resource_init(&surface->resource);
     surface->resource.refcount = 0;
     list_init(&surface->rtv_entry);
-    surface->container = container;
+    surface->container = wined3d_texture_get_parent(wined3d_texture);
     surface->wined3d_texture = wined3d_texture;
     surface->sub_resource_idx = sub_resource_idx;
-    surface->swapchain = wined3d_texture_get_swapchain(wined3d_texture);
 
     if (surface->container && SUCCEEDED(IUnknown_QueryInterface(surface->container,
             &IID_IDirect3DBaseTexture8, (void **)&texture)))
@@ -340,11 +329,7 @@ struct d3d8_surface *d3d8_surface_create(struct wined3d_texture *wined3d_texture
         IDirect3DBaseTexture8_Release(texture);
     }
 
-    wined3d_texture_set_sub_resource_parent(wined3d_texture, sub_resource_idx,
-            surface, &d3d8_surface_wined3d_parent_ops);
-
-    TRACE("Created surface %p.\n", surface);
-    return surface;
+    *parent_ops = &d3d8_surface_wined3d_parent_ops;
 }
 
 static void STDMETHODCALLTYPE view_wined3d_object_destroyed(void *parent)
@@ -372,7 +357,7 @@ static const struct wined3d_parent_ops d3d8_view_wined3d_parent_ops =
 struct d3d8_device *d3d8_surface_get_device(const struct d3d8_surface *surface)
 {
     IDirect3DDevice8 *device;
-    device = surface->texture ? &surface->texture->parent_device->IDirect3DDevice8_iface : surface->parent_device;
+    device = surface->texture ? surface->texture->parent_device : surface->parent_device;
     return impl_from_IDirect3DDevice8(device);
 }
 

@@ -45,7 +45,8 @@ static inline LangBarMgr *impl_from_ITfLangBarMgr(ITfLangBarMgr *iface)
 static void LangBarMgr_Destructor(LangBarMgr *This)
 {
     TRACE("destroying %p\n", This);
-    free(This);
+
+    HeapFree(GetProcessHeap(),0,This);
 }
 
 static HRESULT WINAPI LangBarMgr_QueryInterface(ITfLangBarMgr *iface, REFIID iid, LPVOID *ppvOut)
@@ -184,7 +185,7 @@ HRESULT LangBarMgr_Constructor(IUnknown *pUnkOuter, IUnknown **ppOut)
     if (pUnkOuter)
         return CLASS_E_NOAGGREGATION;
 
-    This = malloc(sizeof(LangBarMgr));
+    This = HeapAlloc(GetProcessHeap(),0,sizeof(LangBarMgr));
     if (This == NULL)
         return E_OUTOFMEMORY;
 

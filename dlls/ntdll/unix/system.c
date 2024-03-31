@@ -33,6 +33,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 #include <errno.h>
+#include <assert.h>
 #include <sys/time.h>
 #include <time.h>
 #include <dirent.h>
@@ -57,7 +58,8 @@
 #ifdef __APPLE__
 # include <CoreFoundation/CoreFoundation.h>
 # include <IOKit/IOKitLib.h>
-# include <IOKit/ps/IOPSKeys.h>
+# include <IOKit/pwr_mgt/IOPM.h>
+# include <IOKit/pwr_mgt/IOPMLib.h>
 # include <IOKit/ps/IOPowerSources.h>
 # include <mach/mach.h>
 # include <mach/machine.h>
@@ -66,6 +68,7 @@
 # include <mach/vm_map.h>
 #endif
 
+#define NONAMELESSUNION
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
 #include "windef.h"
@@ -227,16 +230,19 @@ struct smbios_chassis_args
 #define RSMB 0x52534D42
 
 SYSTEM_CPU_INFORMATION cpu_info = { 0 };
-static SYSTEM_PROCESSOR_FEATURES_INFORMATION cpu_features;
-static char cpu_name[49];
-static ULONG *performance_cores;
-static unsigned int performance_cores_capacity = 0;
 static SYSTEM_LOGICAL_PROCESSOR_INFORMATION *logical_proc_info;
 static unsigned int logical_proc_info_len, logical_proc_info_alloc_len;
 static SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX *logical_proc_info_ex;
 static unsigned int logical_proc_info_ex_size, logical_proc_info_ex_alloc_size;
 
 static pthread_mutex_t timezone_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+static struct
+{
+    struct cpu_topology_override mapping;
+    BOOL smt;
+}
+cpu_override;
 
 /*******************************************************************************
  * Architecture specific feature detection for CPUs
@@ -247,24 +253,6 @@ static pthread_mutex_t timezone_mutex = PTHREAD_MUTEX_INITIALIZER;
 #if defined(__i386__) || defined(__x86_64__)
 
 BOOL xstate_compaction_enabled = FALSE;
-UINT64 xstate_supported_features_mask;
-UINT64 xstate_features_size;
-
-unsigned int xstate_get_size( UINT64 compaction_mask, UINT64 mask )
-{
-    if (!(mask & ((UINT64)1 << XSTATE_AVX))) return sizeof(XSAVE_AREA_HEADER);
-    return sizeof(XSAVE_AREA_HEADER) + sizeof(YMMCONTEXT);
-}
-
-void copy_xstate( XSAVE_AREA_HEADER *dst, XSAVE_AREA_HEADER *src, UINT64 mask )
-{
-    mask &= xstate_extended_features() & src->Mask;
-    if (src->CompactionMask) mask &= src->CompactionMask;
-    if (dst->CompactionMask) mask &= dst->CompactionMask;
-    dst->Mask = (dst->Mask & ~xstate_extended_features()) | mask;
-    if (mask & ((UINT64)1 << XSTATE_AVX))
-        *(YMMCONTEXT *)(dst + 1) = *(YMMCONTEXT *)(src + 1);
-}
 
 #define AUTH	0x68747541	/* "Auth" */
 #define ENTI	0x69746e65	/* "enti" */
@@ -274,7 +262,7 @@ void copy_xstate( XSAVE_AREA_HEADER *dst, XSAVE_AREA_HEADER *src, UINT64 mask )
 #define INEI	0x49656e69	/* "ineI" */
 #define NTEL	0x6c65746e	/* "ntel" */
 
-extern void do_cpuid( unsigned int ax, unsigned int cx, unsigned int *p );
+extern void do_cpuid( unsigned int ax, unsigned int cx, unsigned int *p ) DECLSPEC_HIDDEN;
 #ifdef __i386__
 __ASM_GLOBAL_FUNC( do_cpuid,
                    "pushl %esi\n\t"
@@ -306,7 +294,7 @@ __ASM_GLOBAL_FUNC( do_cpuid,
 #endif
 
 #ifdef __i386__
-extern int have_cpuid(void);
+extern int have_cpuid(void) DECLSPEC_HIDDEN;
 __ASM_GLOBAL_FUNC( have_cpuid,
                    "pushfl\n\t"
                    "pushfl\n\t"
@@ -345,26 +333,9 @@ static inline BOOL have_sse_daz_mode(void)
 #endif
 }
 
-static void get_cpuid_name( char *buffer )
-{
-    unsigned int regs[4];
-
-    do_cpuid( 0x80000002, 0, regs );
-    memcpy( buffer, regs, sizeof(regs) );
-    buffer += sizeof(regs);
-    do_cpuid( 0x80000003, 0, regs );
-    memcpy( buffer, regs, sizeof(regs) );
-    buffer += sizeof(regs);
-    do_cpuid( 0x80000004, 0, regs );
-    memcpy( buffer, regs, sizeof(regs) );
-    buffer += sizeof(regs);
-    *buffer = 0;
-}
-
 static void get_cpuinfo( SYSTEM_CPU_INFORMATION *info )
 {
     unsigned int regs[4], regs2[4], regs3[4];
-    ULONGLONG features;
 
 #if defined(__i386__)
     info->ProcessorArchitecture = PROCESSOR_ARCHITECTURE_INTEL;
@@ -373,7 +344,7 @@ static void get_cpuinfo( SYSTEM_CPU_INFORMATION *info )
 #endif
 
     /* We're at least a 386 */
-    features = CPU_FEATURE_VME | CPU_FEATURE_X86 | CPU_FEATURE_PGE;
+    info->ProcessorFeatureBits = CPU_FEATURE_VME | CPU_FEATURE_X86 | CPU_FEATURE_PGE;
     info->ProcessorLevel = 3;
 
     if (!have_cpuid()) return;
@@ -382,45 +353,38 @@ static void get_cpuinfo( SYSTEM_CPU_INFORMATION *info )
     if (regs[0]>=0x00000001)   /* Check for supported cpuid version */
     {
         do_cpuid( 0x00000001, 0, regs2 ); /* get cpu features */
-        if (regs2[3] & (1 << 3 )) features |= CPU_FEATURE_PSE;
-        if (regs2[3] & (1 << 4 )) features |= CPU_FEATURE_TSC;
-        if (regs2[3] & (1 << 6 )) features |= CPU_FEATURE_PAE;
-        if (regs2[3] & (1 << 8 )) features |= CPU_FEATURE_CX8;
-        if (regs2[3] & (1 << 11)) features |= CPU_FEATURE_SEP;
-        if (regs2[3] & (1 << 12)) features |= CPU_FEATURE_MTRR;
-        if (regs2[3] & (1 << 15)) features |= CPU_FEATURE_CMOV;
-        if (regs2[3] & (1 << 16)) features |= CPU_FEATURE_PAT;
-        if (regs2[3] & (1 << 23)) features |= CPU_FEATURE_MMX;
-        if (regs2[3] & (1 << 24)) features |= CPU_FEATURE_FXSR;
-        if (regs2[3] & (1 << 25)) features |= CPU_FEATURE_SSE;
-        if (regs2[3] & (1 << 26)) features |= CPU_FEATURE_SSE2;
-        if (regs2[2] & (1 << 0 )) features |= CPU_FEATURE_SSE3;
-        if (regs2[2] & (1 << 9 )) features |= CPU_FEATURE_SSSE3;
-        if (regs2[2] & (1 << 13)) features |= CPU_FEATURE_CX128;
-        if (regs2[2] & (1 << 19)) features |= CPU_FEATURE_SSE41;
-        if (regs2[2] & (1 << 20)) features |= CPU_FEATURE_SSE42;
-        if (regs2[2] & (1 << 27)) features |= CPU_FEATURE_XSAVE;
-        if (regs2[2] & (1 << 28)) features |= CPU_FEATURE_AVX;
+        if (regs2[3] & (1 << 3 )) info->ProcessorFeatureBits |= CPU_FEATURE_PSE;
+        if (regs2[3] & (1 << 4 )) info->ProcessorFeatureBits |= CPU_FEATURE_TSC;
+        if (regs2[3] & (1 << 6 )) info->ProcessorFeatureBits |= CPU_FEATURE_PAE;
+        if (regs2[3] & (1 << 8 )) info->ProcessorFeatureBits |= CPU_FEATURE_CX8;
+        if (regs2[3] & (1 << 11)) info->ProcessorFeatureBits |= CPU_FEATURE_SEP;
+        if (regs2[3] & (1 << 12)) info->ProcessorFeatureBits |= CPU_FEATURE_MTRR;
+        if (regs2[3] & (1 << 15)) info->ProcessorFeatureBits |= CPU_FEATURE_CMOV;
+        if (regs2[3] & (1 << 16)) info->ProcessorFeatureBits |= CPU_FEATURE_PAT;
+        if (regs2[3] & (1 << 23)) info->ProcessorFeatureBits |= CPU_FEATURE_MMX;
+        if (regs2[3] & (1 << 24)) info->ProcessorFeatureBits |= CPU_FEATURE_FXSR;
+        if (regs2[3] & (1 << 25)) info->ProcessorFeatureBits |= CPU_FEATURE_SSE;
+        if (regs2[3] & (1 << 26)) info->ProcessorFeatureBits |= CPU_FEATURE_SSE2;
+        if (regs2[2] & (1 << 0 )) info->ProcessorFeatureBits |= CPU_FEATURE_SSE3;
+        if (regs2[2] & (1 << 9 )) info->ProcessorFeatureBits |= CPU_FEATURE_SSSE3;
+        if (regs2[2] & (1 << 13)) info->ProcessorFeatureBits |= CPU_FEATURE_CX128;
+        if (regs2[2] & (1 << 19)) info->ProcessorFeatureBits |= CPU_FEATURE_SSE41;
+        if (regs2[2] & (1 << 20)) info->ProcessorFeatureBits |= CPU_FEATURE_SSE42;
+        if (regs2[2] & (1 << 27)) info->ProcessorFeatureBits |= CPU_FEATURE_XSAVE;
+        if (regs2[2] & (1 << 28)) info->ProcessorFeatureBits |= CPU_FEATURE_AVX;
         if((regs2[3] & (1 << 26)) && (regs2[3] & (1 << 24)) && have_sse_daz_mode()) /* has SSE2 and FXSAVE/FXRSTOR */
-            features |= CPU_FEATURE_DAZ;
+            info->ProcessorFeatureBits |= CPU_FEATURE_DAZ;
 
         if (regs[0] >= 0x00000007)
         {
             do_cpuid( 0x00000007, 0, regs3 ); /* get extended features */
-            if (regs3[1] & (1 << 5)) features |= CPU_FEATURE_AVX2;
+            if (regs3[1] & (1 << 5)) info->ProcessorFeatureBits |= CPU_FEATURE_AVX2;
         }
 
-        if (features & CPU_FEATURE_XSAVE)
+        if (info->ProcessorFeatureBits & CPU_FEATURE_XSAVE)
         {
             do_cpuid( 0x0000000d, 1, regs3 ); /* get XSAVE details */
             if (regs3[0] & 2) xstate_compaction_enabled = TRUE;
-            xstate_supported_features_mask = 3;
-            if (features & CPU_FEATURE_AVX)
-                xstate_supported_features_mask |= (UINT64)1 << XSTATE_AVX;
-            xstate_features_size = xstate_get_size( xstate_compaction_enabled ? 0x8000000000000000
-                                   | xstate_supported_features_mask : 0, xstate_supported_features_mask )
-                                   - sizeof(XSAVE_AREA_HEADER);
-            xstate_features_size = (xstate_features_size + 15) & ~15;
         }
 
         if (regs[1] == AUTH && regs[3] == ENTI && regs[2] == CAMD)
@@ -438,12 +402,11 @@ static void get_cpuinfo( SYSTEM_CPU_INFORMATION *info )
             if (regs[0] >= 0x80000001)
             {
                 do_cpuid( 0x80000001, 0, regs2 );  /* get vendor features */
-                if (regs2[2] & (1 << 2))   features |= CPU_FEATURE_VIRT;
-                if (regs2[3] & (1 << 20))  features |= CPU_FEATURE_NX;
-                if (regs2[3] & (1 << 27))  features |= CPU_FEATURE_TSC;
-                if (regs2[3] & (1u << 31)) features |= CPU_FEATURE_3DNOW;
+                if (regs2[2] & (1 << 2))   info->ProcessorFeatureBits |= CPU_FEATURE_VIRT;
+                if (regs2[3] & (1 << 20))  info->ProcessorFeatureBits |= CPU_FEATURE_NX;
+                if (regs2[3] & (1 << 27))  info->ProcessorFeatureBits |= CPU_FEATURE_TSC;
+                if (regs2[3] & (1u << 31)) info->ProcessorFeatureBits |= CPU_FEATURE_3DNOW;
             }
-            if (regs[0] >= 0x80000004) get_cpuid_name( cpu_name );
         }
         else if (regs[1] == GENU && regs[3] == INEI && regs[2] == NTEL)
         {
@@ -455,17 +418,16 @@ static void get_cpuinfo( SYSTEM_CPU_INFORMATION *info )
             info->ProcessorRevision |= ((regs2[0] >> 4 ) & 0xf) << 8;  /* model          */
             info->ProcessorRevision |= regs2[0] & 0xf;                 /* stepping       */
 
-            if(regs2[2] & (1 << 5))  features |= CPU_FEATURE_VIRT;
-            if(regs2[3] & (1 << 21)) features |= CPU_FEATURE_DS;
+            if(regs2[2] & (1 << 5))  info->ProcessorFeatureBits |= CPU_FEATURE_VIRT;
+            if(regs2[3] & (1 << 21)) info->ProcessorFeatureBits |= CPU_FEATURE_DS;
 
             do_cpuid( 0x80000000, 0, regs );  /* get vendor cpuid level */
             if (regs[0] >= 0x80000001)
             {
                 do_cpuid( 0x80000001, 0, regs2 );  /* get vendor features */
-                if (regs2[3] & (1 << 20)) features |= CPU_FEATURE_NX;
-                if (regs2[3] & (1 << 27)) features |= CPU_FEATURE_TSC;
+                if (regs2[3] & (1 << 20)) info->ProcessorFeatureBits |= CPU_FEATURE_NX;
+                if (regs2[3] & (1 << 27)) info->ProcessorFeatureBits |= CPU_FEATURE_TSC;
             }
-            if (regs[0] >= 0x80000004) get_cpuid_name( cpu_name );
         }
         else
         {
@@ -476,14 +438,12 @@ static void get_cpuinfo( SYSTEM_CPU_INFORMATION *info )
             info->ProcessorRevision |= regs2[0] & 0xf;                /* stepping */
         }
     }
-    info->ProcessorFeatureBits = cpu_features.ProcessorFeatureBits = features;
 }
 
 #elif defined(__arm__)
 
 static inline void get_cpuinfo( SYSTEM_CPU_INFORMATION *info )
 {
-    ULONGLONG features = 0;
 #ifdef linux
     char line[512];
     char *s, *value;
@@ -514,8 +474,8 @@ static inline void get_cpuinfo( SYSTEM_CPU_INFORMATION *info )
             }
             if (!strcmp( line, "Features" ))
             {
-                if (strstr(value, "crc32")) features |= CPU_FEATURE_ARM_V8_CRC32;
-                if (strstr(value, "aes"))   features |= CPU_FEATURE_ARM_V8_CRYPTO;
+                if (strstr(value, "crc32")) info->ProcessorFeatureBits |= CPU_FEATURE_ARM_V8_CRC32;
+                if (strstr(value, "aes"))   info->ProcessorFeatureBits |= CPU_FEATURE_ARM_V8_CRYPTO;
                 continue;
             }
         }
@@ -531,19 +491,18 @@ static inline void get_cpuinfo( SYSTEM_CPU_INFORMATION *info )
         info->ProcessorLevel = value;
 
     valsize = sizeof(value);
-    if (!sysctlbyname("hw.floatingpoint", &value, &valsize, NULL, 0)) features |= CPU_FEATURE_ARM_VFP_32;
+    if (!sysctlbyname("hw.floatingpoint", &value, &valsize, NULL, 0))
+        info->ProcessorFeatureBits |= CPU_FEATURE_ARM_VFP_32;
 #else
     FIXME("CPU Feature detection not implemented.\n");
 #endif
     info->ProcessorArchitecture = PROCESSOR_ARCHITECTURE_ARM;
-    info->ProcessorFeatureBits = cpu_features.ProcessorFeatureBits = features;
 }
 
 #elif defined(__aarch64__)
 
 static void get_cpuinfo( SYSTEM_CPU_INFORMATION *info )
 {
-    ULONGLONG features = 0;
 #ifdef linux
     char line[512];
     char *s, *value;
@@ -574,12 +533,8 @@ static void get_cpuinfo( SYSTEM_CPU_INFORMATION *info )
             }
             if (!strcmp( line, "Features" ))
             {
-                if (strstr(value, "crc32"))   features |= CPU_FEATURE_ARM_V8_CRC32;
-                if (strstr(value, "aes"))     features |= CPU_FEATURE_ARM_V8_CRYPTO;
-                if (strstr(value, "atomics")) features |= CPU_FEATURE_ARM_V81_ATOMIC;
-                if (strstr(value, "asimddp")) features |= CPU_FEATURE_ARM_V82_DP;
-                if (strstr(value, "jscvt"))   features |= CPU_FEATURE_ARM_V83_JSCVT;
-                if (strstr(value, "lrcpc"))   features |= CPU_FEATURE_ARM_V83_LRCPC;
+                if (strstr(value, "crc32")) info->ProcessorFeatureBits |= CPU_FEATURE_ARM_V8_CRC32;
+                if (strstr(value, "aes"))   info->ProcessorFeatureBits |= CPU_FEATURE_ARM_V8_CRYPTO;
                 continue;
             }
         }
@@ -590,10 +545,94 @@ static void get_cpuinfo( SYSTEM_CPU_INFORMATION *info )
 #endif
     info->ProcessorLevel = max(info->ProcessorLevel, 8);
     info->ProcessorArchitecture = PROCESSOR_ARCHITECTURE_ARM64;
-    info->ProcessorFeatureBits = cpu_features.ProcessorFeatureBits = features;
 }
 
 #endif /* End architecture specific feature detection for CPUs */
+
+static void fill_cpu_override(unsigned int host_cpu_count)
+{
+    const char *env_override = getenv("WINE_CPU_TOPOLOGY");
+    unsigned int i;
+    char *s;
+
+    if (!env_override)
+        return;
+
+    cpu_override.mapping.cpu_count = strtol(env_override, &s, 10);
+    if (s == env_override)
+        goto error;
+
+    if (!cpu_override.mapping.cpu_count || cpu_override.mapping.cpu_count > MAXIMUM_PROCESSORS)
+    {
+        ERR("Invalid logical CPU count %u, limit %u.\n", cpu_override.mapping.cpu_count, MAXIMUM_PROCESSORS);
+        goto error;
+    }
+
+    if (tolower(*s) == 's')
+    {
+        cpu_override.mapping.cpu_count *= 2;
+        if (cpu_override.mapping.cpu_count > MAXIMUM_PROCESSORS)
+        {
+            ERR("Logical CPU count exceeds limit %u.\n", MAXIMUM_PROCESSORS);
+            goto error;
+        }
+        cpu_override.smt = TRUE;
+        ++s;
+    }
+    if (*s != ':')
+        goto error;
+    ++s;
+    for (i = 0; i < cpu_override.mapping.cpu_count; ++i)
+    {
+        char *next;
+
+        if (i)
+        {
+            if (*s != ',')
+            {
+                if (!*s)
+                    ERR("Incomplete host CPU mapping string, %u CPUs mapping required.\n",
+                            cpu_override.mapping.cpu_count);
+                goto error;
+            }
+            ++s;
+        }
+
+        cpu_override.mapping.host_cpu_id[i] = strtol(s, &next, 10);
+        if (next == s)
+            goto error;
+        if (cpu_override.mapping.host_cpu_id[i] >= host_cpu_count)
+        {
+            ERR("Invalid host CPU index %u (host_cpu_count %u).\n",
+                    cpu_override.mapping.host_cpu_id[i], host_cpu_count);
+            goto error;
+        }
+        s = next;
+    }
+    if (*s)
+        goto error;
+
+    if (ERR_ON(ntdll))
+    {
+        MESSAGE("wine: overriding CPU configuration, %u logical CPUs, host CPUs ", cpu_override.mapping.cpu_count);
+        for (i = 0; i < cpu_override.mapping.cpu_count; ++i)
+        {
+            if (i)
+                MESSAGE(",");
+            MESSAGE("%u", cpu_override.mapping.host_cpu_id[i]);
+        }
+        MESSAGE(".\n");
+    }
+    return;
+error:
+    cpu_override.mapping.cpu_count = 0;
+    ERR("Invalid WINE_CPU_TOPOLOGY string %s (%s).\n", debugstr_a(env_override), debugstr_a(s));
+}
+
+struct cpu_topology_override *get_cpu_topology_override(void)
+{
+    return cpu_override.mapping.cpu_count ? &cpu_override.mapping : NULL;
+}
 
 static BOOL grow_logical_proc_buf(void)
 {
@@ -651,12 +690,12 @@ static BOOL logical_proc_info_ex_add_by_id( LOGICAL_PROCESSOR_RELATIONSHIP rel, 
     while (ofs < logical_proc_info_ex_size)
     {
         dataex = (SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX *)((char *)logical_proc_info_ex + ofs);
-        if (rel == RelationProcessorPackage && dataex->Relationship == rel && dataex->Processor.Reserved[1] == id)
+        if (rel == RelationProcessorPackage && dataex->Relationship == rel && dataex->u.Processor.Reserved[1] == id)
         {
-            dataex->Processor.GroupMask[0].Mask |= mask;
+            dataex->u.Processor.GroupMask[0].Mask |= mask;
             return TRUE;
         }
-        else if (rel == RelationProcessorCore && dataex->Relationship == rel && dataex->Processor.Reserved[1] == id)
+        else if (rel == RelationProcessorCore && dataex->Relationship == rel && dataex->u.Processor.Reserved[1] == id)
         {
             return TRUE;
         }
@@ -672,19 +711,16 @@ static BOOL logical_proc_info_ex_add_by_id( LOGICAL_PROCESSOR_RELATIONSHIP rel, 
     dataex->Relationship = rel;
     dataex->Size = log_proc_ex_size_plus( sizeof(PROCESSOR_RELATIONSHIP) );
     if (rel == RelationProcessorCore)
-        dataex->Processor.Flags = count_bits( mask ) > 1 ? LTP_PC_SMT : 0;
+        dataex->u.Processor.Flags = count_bits( mask ) > 1 ? LTP_PC_SMT : 0;
     else
-        dataex->Processor.Flags = 0;
-    if (rel == RelationProcessorCore && id / 32 < performance_cores_capacity)
-        dataex->Processor.EfficiencyClass = (performance_cores[id / 32] >> (id % 32)) & 1;
-    else
-        dataex->Processor.EfficiencyClass = 0;
-    dataex->Processor.GroupCount = 1;
-    dataex->Processor.GroupMask[0].Mask = mask;
-    dataex->Processor.GroupMask[0].Group = 0;
+        dataex->u.Processor.Flags = 0;
+    dataex->u.Processor.EfficiencyClass = 0;
+    dataex->u.Processor.GroupCount = 1;
+    dataex->u.Processor.GroupMask[0].Mask = mask;
+    dataex->u.Processor.GroupMask[0].Group = 0;
     /* mark for future lookup */
-    dataex->Processor.Reserved[0] = 0;
-    dataex->Processor.Reserved[1] = id;
+    dataex->u.Processor.Reserved[0] = 0;
+    dataex->u.Processor.Reserved[1] = id;
 
     logical_proc_info_ex_size += dataex->Size;
     return TRUE;
@@ -703,13 +739,13 @@ static BOOL logical_proc_info_add_by_id( LOGICAL_PROCESSOR_RELATIONSHIP rel, DWO
     for (i = 0; i < logical_proc_info_len; i++)
     {
         if (rel == RelationProcessorPackage && logical_proc_info[i].Relationship == rel
-            && logical_proc_info[i].Reserved[1] == id)
+            && logical_proc_info[i].u.Reserved[1] == id)
         {
             logical_proc_info[i].ProcessorMask |= mask;
             return logical_proc_info_ex_add_by_id( rel, id, mask );
         }
         else if (rel == RelationProcessorCore && logical_proc_info[i].Relationship == rel
-                 && logical_proc_info[i].Reserved[1] == id)
+                 && logical_proc_info[i].u.Reserved[1] == id)
             return logical_proc_info_ex_add_by_id( rel, id, mask );
     }
 
@@ -718,9 +754,9 @@ static BOOL logical_proc_info_add_by_id( LOGICAL_PROCESSOR_RELATIONSHIP rel, DWO
     logical_proc_info[i].Relationship = rel;
     logical_proc_info[i].ProcessorMask = mask;
     if (rel == RelationProcessorCore)
-        logical_proc_info[i].ProcessorCore.Flags = count_bits( mask ) > 1 ? LTP_PC_SMT : 0;
-    logical_proc_info[i].Reserved[0] = 0;
-    logical_proc_info[i].Reserved[1] = id;
+        logical_proc_info[i].u.ProcessorCore.Flags = count_bits( mask ) > 1 ? LTP_PC_SMT : 0;
+    logical_proc_info[i].u.Reserved[0] = 0;
+    logical_proc_info[i].u.Reserved[1] = id;
     logical_proc_info_len = i + 1;
 
     return logical_proc_info_ex_add_by_id( rel, id, mask );
@@ -734,7 +770,7 @@ static BOOL logical_proc_info_add_cache( ULONG_PTR mask, CACHE_DESCRIPTOR *cache
     for (i = 0; i < logical_proc_info_len; i++)
     {
         if (logical_proc_info[i].Relationship==RelationCache && logical_proc_info[i].ProcessorMask==mask
-            && logical_proc_info[i].Cache.Level==cache->Level && logical_proc_info[i].Cache.Type==cache->Type)
+            && logical_proc_info[i].u.Cache.Level==cache->Level && logical_proc_info[i].u.Cache.Type==cache->Type)
             return TRUE;
     }
 
@@ -742,14 +778,14 @@ static BOOL logical_proc_info_add_cache( ULONG_PTR mask, CACHE_DESCRIPTOR *cache
 
     logical_proc_info[i].Relationship = RelationCache;
     logical_proc_info[i].ProcessorMask = mask;
-    logical_proc_info[i].Cache = *cache;
+    logical_proc_info[i].u.Cache = *cache;
     logical_proc_info_len = i + 1;
 
     for (ofs = 0; ofs < logical_proc_info_ex_size; )
     {
         dataex = (SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX *)((char *)logical_proc_info_ex + ofs);
-        if (dataex->Relationship == RelationCache && dataex->Cache.GroupMask.Mask == mask
-            && dataex->Cache.Level == cache->Level && dataex->Cache.Type == cache->Type)
+        if (dataex->Relationship == RelationCache && dataex->u.Cache.GroupMask.Mask == mask
+            && dataex->u.Cache.Level == cache->Level && dataex->u.Cache.Type == cache->Type)
             return TRUE;
         ofs += dataex->Size;
     }
@@ -760,13 +796,13 @@ static BOOL logical_proc_info_add_cache( ULONG_PTR mask, CACHE_DESCRIPTOR *cache
 
     dataex->Relationship = RelationCache;
     dataex->Size = log_proc_ex_size_plus( sizeof(CACHE_RELATIONSHIP) );
-    dataex->Cache.Level = cache->Level;
-    dataex->Cache.Associativity = cache->Associativity;
-    dataex->Cache.LineSize = cache->LineSize;
-    dataex->Cache.CacheSize = cache->Size;
-    dataex->Cache.Type = cache->Type;
-    dataex->Cache.GroupMask.Mask = mask;
-    dataex->Cache.GroupMask.Group = 0;
+    dataex->u.Cache.Level = cache->Level;
+    dataex->u.Cache.Associativity = cache->Associativity;
+    dataex->u.Cache.LineSize = cache->LineSize;
+    dataex->u.Cache.CacheSize = cache->Size;
+    dataex->u.Cache.Type = cache->Type;
+    dataex->u.Cache.GroupMask.Mask = mask;
+    dataex->u.Cache.GroupMask.Group = 0;
 
     logical_proc_info_ex_size += dataex->Size;
 
@@ -781,7 +817,7 @@ static BOOL logical_proc_info_add_numa_node( ULONG_PTR mask, DWORD node_id )
 
     logical_proc_info[logical_proc_info_len].Relationship = RelationNumaNode;
     logical_proc_info[logical_proc_info_len].ProcessorMask = mask;
-    logical_proc_info[logical_proc_info_len].NumaNode.NodeNumber = node_id;
+    logical_proc_info[logical_proc_info_len].u.NumaNode.NodeNumber = node_id;
     ++logical_proc_info_len;
 
     if (!grow_logical_proc_ex_buf( log_proc_ex_size_plus( sizeof(NUMA_NODE_RELATIONSHIP) ))) return FALSE;
@@ -790,9 +826,9 @@ static BOOL logical_proc_info_add_numa_node( ULONG_PTR mask, DWORD node_id )
 
     dataex->Relationship = RelationNumaNode;
     dataex->Size = log_proc_ex_size_plus( sizeof(NUMA_NODE_RELATIONSHIP) );
-    dataex->NumaNode.NodeNumber = node_id;
-    dataex->NumaNode.GroupMask.Mask = mask;
-    dataex->NumaNode.GroupMask.Group = 0;
+    dataex->u.NumaNode.NodeNumber = node_id;
+    dataex->u.NumaNode.GroupMask.Mask = mask;
+    dataex->u.NumaNode.GroupMask.Group = 0;
 
     logical_proc_info_ex_size += dataex->Size;
 
@@ -809,11 +845,11 @@ static BOOL logical_proc_info_add_group( DWORD num_cpus, ULONG_PTR mask )
 
     dataex->Relationship = RelationGroup;
     dataex->Size = log_proc_ex_size_plus( sizeof(GROUP_RELATIONSHIP) );
-    dataex->Group.MaximumGroupCount = 1;
-    dataex->Group.ActiveGroupCount = 1;
-    dataex->Group.GroupInfo[0].MaximumProcessorCount = num_cpus;
-    dataex->Group.GroupInfo[0].ActiveProcessorCount = num_cpus;
-    dataex->Group.GroupInfo[0].ActiveProcessorMask = mask;
+    dataex->u.Group.MaximumGroupCount = 1;
+    dataex->u.Group.ActiveGroupCount = 1;
+    dataex->u.Group.GroupInfo[0].MaximumProcessorCount = num_cpus;
+    dataex->u.Group.GroupInfo[0].ActiveProcessorCount = num_cpus;
+    dataex->u.Group.GroupInfo[0].ActiveProcessorMask = mask;
 
     logical_proc_info_ex_size += dataex->Size;
     return TRUE;
@@ -881,54 +917,19 @@ static BOOL sysfs_count_list_elements(const char *filename, unsigned int *result
     return TRUE;
 }
 
-static void fill_performance_core_info(void)
-{
-    FILE *fpcore_list;
-    unsigned int beg, end, i;
-    char op = ',';
-    ULONG *p;
-
-    fpcore_list = fopen("/sys/devices/cpu_core/cpus", "r");
-    if (!fpcore_list) return;
-
-    performance_cores = calloc(16, sizeof(ULONG));
-    if (!performance_cores) goto done;
-    performance_cores_capacity = 16;
-
-    while (!feof(fpcore_list) && op == ',')
-    {
-        if (!fscanf(fpcore_list, "%u %c ", &beg, &op)) break;
-        if (op == '-') fscanf(fpcore_list, "%u %c ", &end, &op);
-        else end = beg;
-
-        for(i = beg; i <= end; i++)
-        {
-            if (i / 32 >= performance_cores_capacity)
-            {
-                p = realloc(performance_cores, performance_cores_capacity * 2 * sizeof(ULONG));
-                if (!p) goto done;
-                memset(p + performance_cores_capacity, 0, performance_cores_capacity * sizeof(ULONG));
-                performance_cores = p;
-                performance_cores_capacity *= 2;
-            }
-            performance_cores[i / 32] |= 1 << (i % 32);
-        }
-    }
-done:
-    fclose(fpcore_list);
-}
-
 /* for 'data', max_len is the array count. for 'dataex', max_len is in bytes */
 static NTSTATUS create_logical_proc_info(void)
 {
     static const char core_info[] = "/sys/devices/system/cpu/cpu%u/topology/%s";
     static const char cache_info[] = "/sys/devices/system/cpu/cpu%u/cache/index%u/%s";
     static const char numa_info[] = "/sys/devices/system/node/node%u/cpumap";
-
+    const char *env_fake_logical_cores = getenv("WINE_LOGICAL_CPUS_AS_CORES");
+    BOOL fake_logical_cpus_as_cores = env_fake_logical_cores && atoi(env_fake_logical_cores);
     FILE *fcpu_list, *fnuma_list, *f;
     unsigned int beg, end, i, j, r, num_cpus = 0, max_cpus = 0;
     char op, name[MAX_PATH];
     ULONG_PTR all_cpus_mask = 0;
+    unsigned int cpu_id;
 
     /* On systems with a large number of CPU cores (32 or 64 depending on 32-bit or 64-bit),
      * we have issues parsing processor information:
@@ -944,8 +945,6 @@ static NTSTATUS create_logical_proc_info(void)
                 max_cpus, MAXIMUM_PROCESSORS);
     }
 
-    fill_performance_core_info();
-
     fcpu_list = fopen("/sys/devices/system/cpu/online", "r");
     if (!fcpu_list) return STATUS_NOT_IMPLEMENTED;
 
@@ -955,14 +954,24 @@ static NTSTATUS create_logical_proc_info(void)
         if (op == '-') fscanf(fcpu_list, "%u%c ", &end, &op);
         else end = beg;
 
+        if (cpu_override.mapping.cpu_count)
+        {
+            beg = 0;
+            end = cpu_override.mapping.cpu_count - 1;
+        }
+
         for(i = beg; i <= end; i++)
         {
             unsigned int phys_core = 0;
             ULONG_PTR thread_mask = 0;
 
-            if (i > 8 * sizeof(ULONG_PTR)) break;
+            if (i > 8 * sizeof(ULONG_PTR))
+            {
+                FIXME("skipping logical processor %d\n", i);
+                continue;
+            }
 
-            snprintf(name, sizeof(name), core_info, i, "physical_package_id");
+            sprintf(name, core_info, cpu_override.mapping.cpu_count ? cpu_override.mapping.host_cpu_id[i] : i, "physical_package_id");
             f = fopen(name, "r");
             if (f)
             {
@@ -988,20 +997,33 @@ static NTSTATUS create_logical_proc_info(void)
              */
 
             /* Mask of logical threads sharing same physical core in kernel core numbering. */
-            snprintf(name, sizeof(name), core_info, i, "thread_siblings");
-            if(!sysfs_parse_bitmap(name, &thread_mask)) thread_mask = 1<<i;
-
+            sprintf(name, core_info, i, "thread_siblings");
+            if (cpu_override.mapping.cpu_count)
+            {
+                thread_mask = cpu_override.smt ? (ULONG_PTR)0x3 << (i & ~1) : (ULONG_PTR)1 << i;
+            }
+            else
+            {
+                if(fake_logical_cpus_as_cores || !sysfs_parse_bitmap(name, &thread_mask)) thread_mask = (ULONG_PTR)1<<i;
+            }
             /* Needed later for NumaNode and Group. */
             all_cpus_mask |= thread_mask;
 
-            snprintf(name, sizeof(name), core_info, i, "thread_siblings_list");
-            f = fopen(name, "r");
-            if (f)
+            if (cpu_override.mapping.cpu_count)
             {
-                fscanf(f, "%d%c", &phys_core, &op);
-                fclose(f);
+                phys_core = cpu_override.smt ? i / 2 : i;
             }
-            else phys_core = i;
+            else
+            {
+                sprintf(name, core_info, i, "thread_siblings_list");
+                f = fake_logical_cpus_as_cores ? NULL : fopen(name, "r");
+                if (f)
+                {
+                    fscanf(f, "%d%c", &phys_core, &op);
+                    fclose(f);
+                }
+                else phys_core = i;
+            }
 
             if (!logical_proc_info_add_by_id( RelationProcessorCore, phys_core, thread_mask ))
             {
@@ -1009,36 +1031,38 @@ static NTSTATUS create_logical_proc_info(void)
                 return STATUS_NO_MEMORY;
             }
 
-            for (j = 0; j < 4; j++)
+            cpu_id = cpu_override.mapping.cpu_count ? cpu_override.mapping.host_cpu_id[i] : i;
+
+            for(j = 0; j < 4; j++)
             {
                 CACHE_DESCRIPTOR cache;
                 ULONG_PTR mask = 0;
 
-                snprintf(name, sizeof(name), cache_info, i, j, "shared_cpu_map");
+                sprintf(name, cache_info, cpu_id, j, "shared_cpu_map");
                 if(!sysfs_parse_bitmap(name, &mask)) continue;
 
-                snprintf(name, sizeof(name), cache_info, i, j, "level");
+                sprintf(name, cache_info, cpu_id, j, "level");
                 f = fopen(name, "r");
                 if(!f) continue;
                 fscanf(f, "%u", &r);
                 fclose(f);
                 cache.Level = r;
 
-                snprintf(name, sizeof(name), cache_info, i, j, "ways_of_associativity");
+                sprintf(name, cache_info, cpu_id, j, "ways_of_associativity");
                 f = fopen(name, "r");
                 if(!f) continue;
                 fscanf(f, "%u", &r);
                 fclose(f);
                 cache.Associativity = r;
 
-                snprintf(name, sizeof(name), cache_info, i, j, "coherency_line_size");
+                sprintf(name, cache_info, cpu_id, j, "coherency_line_size");
                 f = fopen(name, "r");
                 if(!f) continue;
                 fscanf(f, "%u", &r);
                 fclose(f);
                 cache.LineSize = r;
 
-                snprintf(name, sizeof(name), cache_info, i, j, "size");
+                sprintf(name, cache_info, cpu_id, j, "size");
                 f = fopen(name, "r");
                 if(!f) continue;
                 fscanf(f, "%u%c", &r, &op);
@@ -1047,7 +1071,7 @@ static NTSTATUS create_logical_proc_info(void)
                     WARN("unknown cache size %u%c\n", r, op);
                 cache.Size = (op=='K' ? r*1024 : r);
 
-                snprintf(name, sizeof(name), cache_info, i, j, "type");
+                sprintf(name, cache_info, cpu_id, j, "type");
                 f = fopen(name, "r");
                 if(!f) continue;
                 fscanf(f, "%s", name);
@@ -1059,6 +1083,19 @@ static NTSTATUS create_logical_proc_info(void)
                 else
                     cache.Type = CacheUnified;
 
+                if (cpu_override.mapping.cpu_count)
+                {
+                    ULONG_PTR host_mask = mask;
+                    unsigned int id;
+
+                    mask = 0;
+                    for (id = 0; id < cpu_override.mapping.cpu_count; ++id)
+                        if (host_mask & ((ULONG_PTR)1 << cpu_override.mapping.host_cpu_id[id]))
+                            mask |= (ULONG_PTR)1 << id;
+
+                    assert(mask);
+                }
+
                 if (!logical_proc_info_add_cache( mask, &cache ))
                 {
                     fclose(fcpu_list);
@@ -1066,6 +1103,9 @@ static NTSTATUS create_logical_proc_info(void)
                 }
             }
         }
+
+        if (cpu_override.mapping.cpu_count)
+            break;
     }
     fclose(fcpu_list);
 
@@ -1090,7 +1130,7 @@ static NTSTATUS create_logical_proc_info(void)
             {
                 ULONG_PTR mask = 0;
 
-                snprintf(name, sizeof(name), numa_info, i);
+                sprintf(name, numa_info, i);
                 if (!sysfs_parse_bitmap( name, &mask )) continue;
 
                 if (!logical_proc_info_add_numa_node( mask, i ))
@@ -1104,10 +1144,6 @@ static NTSTATUS create_logical_proc_info(void)
     }
 
     logical_proc_info_add_group( num_cpus, all_cpus_mask );
-
-    performance_cores_capacity = 0;
-    free(performance_cores);
-    performance_cores = NULL;
 
     return STATUS_SUCCESS;
 }
@@ -1289,7 +1325,11 @@ void init_cpu_info(void)
     num = 1;
     FIXME("Detecting the number of processors is not supported.\n");
 #endif
-    peb->NumberOfProcessors = num;
+
+    fill_cpu_override(num);
+
+    peb->NumberOfProcessors = cpu_override.mapping.cpu_count
+            ? cpu_override.mapping.cpu_count : num;
     get_cpuinfo( &cpu_info );
     TRACE( "<- CPU arch %d, level %d, rev %d, features 0x%x\n",
            (int)cpu_info.ProcessorArchitecture, (int)cpu_info.ProcessorLevel,
@@ -1333,8 +1373,8 @@ static NTSTATUS create_cpuset_info(SYSTEM_CPU_SET_INFORMATION *info)
     {
         if (proc_info->Relationship == RelationCache)
         {
-            if (max_cache_level < proc_info->Cache.Level)
-                max_cache_level = proc_info->Cache.Level;
+            if (max_cache_level < proc_info->u.Cache.Level)
+                max_cache_level = proc_info->u.Cache.Level;
         }
         proc_info = (SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX *)((BYTE *)proc_info + proc_info->Size);
     }
@@ -1348,45 +1388,45 @@ static NTSTATUS create_cpuset_info(SYSTEM_CPU_SET_INFORMATION *info)
     {
         info[i].Size = sizeof(*info);
         info[i].Type = CpuSetInformation;
-        info[i].CpuSet.Id = 0x100 + i;
-        info[i].CpuSet.LogicalProcessorIndex = i;
+        info[i].u.CpuSet.Id = 0x100 + i;
+        info[i].u.CpuSet.LogicalProcessorIndex = i;
     }
 
     for (i = 0; (char *)proc_info != (char *)logical_proc_info_ex + cpu_info_size; ++i)
     {
         if (proc_info->Relationship == RelationProcessorCore)
         {
-            if (proc_info->Processor.GroupCount != 1)
+            if (proc_info->u.Processor.GroupCount != 1)
             {
-                FIXME("Unsupported group count %u.\n", proc_info->Processor.GroupCount);
+                FIXME("Unsupported group count %u.\n", proc_info->u.Processor.GroupCount);
                 continue;
             }
-            cpu_mask = proc_info->Processor.GroupMask[0].Mask;
+            cpu_mask = proc_info->u.Processor.GroupMask[0].Mask;
             for (j = 0; j < count; ++j)
                 if (((ULONG64)1 << j) & cpu_mask)
                 {
-                    info[j].CpuSet.CoreIndex = core_index;
-                    info[j].CpuSet.EfficiencyClass = proc_info->Processor.EfficiencyClass;
+                    info[j].u.CpuSet.CoreIndex = core_index;
+                    info[j].u.CpuSet.EfficiencyClass = proc_info->u.Processor.EfficiencyClass;
                 }
             ++core_index;
         }
         else if (proc_info->Relationship == RelationCache)
         {
-            if (proc_info->Cache.Level == max_cache_level)
+            if (proc_info->u.Cache.Level == max_cache_level)
             {
-                cpu_mask = proc_info->Cache.GroupMask.Mask;
+                cpu_mask = proc_info->u.Cache.GroupMask.Mask;
                 for (j = 0; j < count; ++j)
                     if (((ULONG64)1 << j) & cpu_mask)
-                        info[j].CpuSet.LastLevelCacheIndex = cache_index;
+                        info[j].u.CpuSet.LastLevelCacheIndex = cache_index;
             }
             ++cache_index;
         }
         else if (proc_info->Relationship == RelationNumaNode)
         {
-            cpu_mask = proc_info->NumaNode.GroupMask.Mask;
+            cpu_mask = proc_info->u.NumaNode.GroupMask.Mask;
             for (j = 0; j < count; ++j)
                 if (((ULONG64)1 << j) & cpu_mask)
-                    info[j].CpuSet.NumaNodeIndex = proc_info->NumaNode.NodeNumber;
+                    info[j].u.CpuSet.NumaNodeIndex = proc_info->u.NumaNode.NodeNumber;
         }
         proc_info = (SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX *)((char *)proc_info + proc_info->Size);
     }
@@ -2002,7 +2042,15 @@ static void get_performance_info( SYSTEM_PERFORMANCE_INFORMATION *info )
                     mem_available = value * 1024;
             }
             fclose(fp);
+            totalram -= min( totalram, ram_reporting_bias );
             if (mem_available) freeram = mem_available;
+            if ((long long)freeram >= ram_reporting_bias) freeram -= ram_reporting_bias;
+            else
+            {
+                long long bias = ram_reporting_bias - freeram;
+                freeswap -= min( bias, freeswap );
+                freeram = 0;
+            }
         }
     }
 #elif defined(__FreeBSD__) || defined(__FreeBSD_kernel__) || defined(__NetBSD__) || \
@@ -2242,7 +2290,7 @@ static void find_reg_tz_info(RTL_DYNAMIC_TIME_ZONE_INFORMATION *tzi, const char*
     char buffer[128];
     KEY_BASIC_INFORMATION *info = (KEY_BASIC_INFORMATION *)buffer;
 
-    snprintf( buffer, sizeof(buffer), "%u", year );
+    sprintf( buffer, "%u", year );
     ascii_to_unicode( yearW, buffer, strlen(buffer) + 1 );
     init_unicode_string( &nameW, Time_ZonesW );
     InitializeObjectAttributes( &attr, &nameW, 0, 0, NULL );
@@ -2642,7 +2690,11 @@ NTSTATUS WINAPI NtQuerySystemInformation( SYSTEM_INFORMATION_CLASS class,
     }
 
     case SystemCpuInformation:  /* 1 */
-        if (size >= (len = sizeof(cpu_info))) memcpy(info, &cpu_info, len);
+        if (size >= (len = sizeof(cpu_info)))
+        {
+            if (!info) ret = STATUS_ACCESS_VIOLATION;
+            else memcpy(info, &cpu_info, len);
+        }
         else ret = STATUS_INFO_LENGTH_MISMATCH;
         break;
 
@@ -2943,7 +2995,7 @@ NTSTATUS WINAPI NtQuerySystemInformation( SYSTEM_INFORMATION_CLASS class,
         len = peb->NumberOfProcessors * sizeof(SYSTEM_INTERRUPT_INFORMATION);
         if (size >= len)
         {
-            if (!info || !virtual_check_buffer_for_write( info, len )) ret = STATUS_ACCESS_VIOLATION;
+            if (!info) ret = STATUS_ACCESS_VIOLATION;
             else
             {
 #ifdef HAVE_GETRANDOM
@@ -3050,8 +3102,6 @@ NTSTATUS WINAPI NtQuerySystemInformation( SYSTEM_INFORMATION_CLASS class,
             {
 #ifdef __arm__
                 *((DWORD *)info) = 32;
-#elif defined __aarch64__
-                *((DWORD *)info) = 128;
 #else
                 *((DWORD *)info) = 64;
 #endif
@@ -3065,7 +3115,7 @@ NTSTATUS WINAPI NtQuerySystemInformation( SYSTEM_INFORMATION_CLASS class,
     {
         SYSTEM_BASIC_INFORMATION sbi;
 
-        virtual_get_system_info( &sbi, is_wow64() );
+        virtual_get_system_info( &sbi, !!NtCurrentTeb()->WowTebOffset );
         len = sizeof(sbi);
         if (size == len)
         {
@@ -3249,16 +3299,6 @@ NTSTATUS WINAPI NtQuerySystemInformation( SYSTEM_INFORMATION_CLASS class,
         break;
     }
 
-    case SystemProcessorBrandString:  /* 105 */
-        if (!cpu_name[0]) return STATUS_NOT_SUPPORTED;
-        if ((ULONG_PTR)info & 3) return STATUS_DATATYPE_MISALIGNMENT;
-        len = sizeof(cpu_name);
-        if (size >= len)
-            memcpy( info, cpu_name, len );
-        else
-            ret = STATUS_INFO_LENGTH_MISMATCH;
-        break;
-
     case SystemKernelDebuggerInformationEx:  /* 149 */
     {
         SYSTEM_KERNEL_DEBUGGER_INFORMATION_EX skdi;
@@ -3276,12 +3316,6 @@ NTSTATUS WINAPI NtQuerySystemInformation( SYSTEM_INFORMATION_CLASS class,
         else ret = STATUS_INFO_LENGTH_MISMATCH;
         break;
     }
-
-    case SystemProcessorFeaturesInformation:  /* 154 */
-        len = sizeof(cpu_features);
-        if (size >= len) memcpy( info, &cpu_features, len );
-        else ret = STATUS_INFO_LENGTH_MISMATCH;
-        break;
 
     case SystemCpuSetInformation:  /* 175 */
         return NtQuerySystemInformationEx(class, NULL, 0, info, size, ret_size);
@@ -3390,7 +3424,6 @@ NTSTATUS WINAPI NtQuerySystemInformationEx( SYSTEM_INFORMATION_CLASS class,
 
     case SystemSupportedProcessorArchitectures:
     {
-        SYSTEM_SUPPORTED_PROCESSOR_ARCHITECTURES_INFORMATION *machines = info;
         HANDLE process;
         ULONG i;
         USHORT machine = 0;
@@ -3408,30 +3441,20 @@ NTSTATUS WINAPI NtQuerySystemInformationEx( SYSTEM_INFORMATION_CLASS class,
             if (ret) return ret;
         }
 
-        len = (supported_machines_count + 1) * sizeof(*machines);
+        len = (supported_machines_count + 1) * sizeof(ULONG);
         if (size < len)
         {
             ret = STATUS_BUFFER_TOO_SMALL;
             break;
         }
-        memset( machines, 0, len );
-
-        /* native machine */
-        machines[0].Machine = supported_machines[0];
-        machines[0].UserMode = 1;
-        machines[0].KernelMode = 1;
-        machines[0].Native = 1;
-        machines[0].Process = (supported_machines[0] == machine || is_machine_64bit( machine ));
-        machines[0].WoW64Container = 0;
-        machines[0].ReservedZero0 = 0;
-        /* wow64 machines */
-        for (i = 1; i < supported_machines_count; i++)
+        for (i = 0; i < supported_machines_count; i++)
         {
-            machines[i].Machine = supported_machines[i];
-            machines[i].UserMode = 1;
-            machines[i].Process = supported_machines[i] == machine;
-            machines[i].WoW64Container = 1;
+            USHORT flags = 2;  /* supported (?) */
+            if (!i) flags |= 5;  /* native machine (?) */
+            if (supported_machines[i] == machine) flags |= 8;  /* current machine */
+            ((DWORD *)info)[i] = MAKELONG( supported_machines[i], flags );
         }
+        ((DWORD *)info)[i] = 0;
         ret = STATUS_SUCCESS;
         break;
     }
@@ -3486,7 +3509,6 @@ NTSTATUS WINAPI NtSystemDebugControl( SYSDBG_COMMAND command, void *in_buff, ULO
 {
     FIXME( "(%d, %p, %d, %p, %d, %p), stub\n",
            command, in_buff, (int)in_len, out_buff, (int)out_len, retlen );
-
     return STATUS_DEBUGGER_INACTIVE;
 }
 
@@ -3616,106 +3638,66 @@ static NTSTATUS fill_battery_state( SYSTEM_BATTERY_STATE *bs )
 
 static NTSTATUS fill_battery_state( SYSTEM_BATTERY_STATE *bs )
 {
-    CFTypeRef blob = IOPSCopyPowerSourcesInfo();
-    CFArrayRef sources = IOPSCopyPowerSourcesList( blob );
-    CFIndex count, i;
-    CFDictionaryRef source = NULL;
-    CFTypeRef prop;
-    Boolean is_charging, is_internal, is_present;
-    int32_t value, voltage;
+    CFArrayRef batteries;
+    CFDictionaryRef battery;
+    CFNumberRef prop;
+    uint32_t value, voltage;
+    CFTimeInterval remain;
 
-    if (!sources)
-    {
-        if (blob) CFRelease( blob );
+    if (IOPMCopyBatteryInfo( 0, &batteries ) != kIOReturnSuccess)
         return STATUS_ACCESS_DENIED;
-    }
 
-    count = CFArrayGetCount( sources );
-
-    for (i = 0; i < count; i++)
+    if (CFArrayGetCount( batteries ) == 0)
     {
-        source = IOPSGetPowerSourceDescription( blob, CFArrayGetValueAtIndex( sources, i ) );
-
-        if (!source)
-            continue;
-
-        prop = CFDictionaryGetValue( source, CFSTR(kIOPSTransportTypeKey) );
-        is_internal = !CFStringCompare( prop, CFSTR(kIOPSInternalType), 0 );
-
-        prop = CFDictionaryGetValue( source, CFSTR(kIOPSIsPresentKey) );
-        is_present = CFBooleanGetValue( prop );
-
-        if (is_internal && is_present)
-            break;
-    }
-
-    CFRelease( blob );
-
-    if (!source)
-    {
-        /* Just assume we're on AC with no internal power source. */
+        /* Just assume we're on AC with no battery. */
         bs->AcOnLine = TRUE;
-        CFRelease( sources );
         return STATUS_SUCCESS;
     }
+    /* Just use the first battery. */
+    battery = CFArrayGetValueAtIndex( batteries, 0 );
 
-    bs->BatteryPresent = TRUE;
+    prop = CFDictionaryGetValue( battery, CFSTR(kIOBatteryFlagsKey) );
+    CFNumberGetValue( prop, kCFNumberSInt32Type, &value );
 
-    prop = CFDictionaryGetValue( source, CFSTR(kIOPSIsChargingKey) );
-    is_charging = CFBooleanGetValue( prop );
-
-    prop = CFDictionaryGetValue( source, CFSTR(kIOPSPowerSourceStateKey) );
-
-    if (!CFStringCompare( prop, CFSTR(kIOPSACPowerValue), 0 ))
+    if (value & kIOBatteryInstalled)
+        bs->BatteryPresent = TRUE;
+    else
+        /* Since we are executing code, we must have AC power. */
+        bs->AcOnLine = TRUE;
+    if (value & kIOBatteryChargerConnect)
     {
         bs->AcOnLine = TRUE;
-        if (is_charging)
+        if (value & kIOBatteryCharge)
             bs->Charging = TRUE;
     }
     else
         bs->Discharging = TRUE;
 
     /* We'll need the voltage to be able to interpret the other values. */
-    prop = CFDictionaryGetValue( source, CFSTR(kIOPSVoltageKey) );
-    if (prop)
-        CFNumberGetValue( prop, kCFNumberIntType, &voltage );
-    else
-        /* kIOPSVoltageKey is optional and might not be populated.
-         * Assume 11.4 V then, which is a common value for Apple laptops. */
-        voltage = 11400;
+    prop = CFDictionaryGetValue( battery, CFSTR(kIOBatteryVoltageKey) );
+    CFNumberGetValue( prop, kCFNumberSInt32Type, &voltage );
 
-    prop = CFDictionaryGetValue( source, CFSTR(kIOPSMaxCapacityKey) );
-    CFNumberGetValue( prop, kCFNumberIntType, &value );
+    prop = CFDictionaryGetValue( battery, CFSTR(kIOBatteryCapacityKey) );
+    CFNumberGetValue( prop, kCFNumberSInt32Type, &value );
     bs->MaxCapacity = value * voltage;
     /* Apple uses "estimated time < 10:00" and "22%" for these, but we'll follow
      * Windows for now (5% and 33%). */
     bs->DefaultAlert1 = bs->MaxCapacity / 20;
     bs->DefaultAlert2 = bs->MaxCapacity / 3;
 
-    prop = CFDictionaryGetValue( source, CFSTR(kIOPSCurrentCapacityKey) );
-    CFNumberGetValue( prop, kCFNumberIntType, &value );
+    prop = CFDictionaryGetValue( battery, CFSTR(kIOBatteryCurrentChargeKey) );
+    CFNumberGetValue( prop, kCFNumberSInt32Type, &value );
     bs->RemainingCapacity = value * voltage;
 
-    prop = CFDictionaryGetValue( source, CFSTR(kIOPSCurrentKey) );
-    if (prop)
-        CFNumberGetValue( prop, kCFNumberIntType, &value );
-    else
-        /* kIOPSCurrentKey is optional and might not be populated. */
-        value = 0;
+    prop = CFDictionaryGetValue( battery, CFSTR(kIOBatteryAmperageKey) );
+    CFNumberGetValue( prop, kCFNumberSInt32Type, &value );
+    bs->Rate = value * voltage;
 
-    bs->Rate = value * voltage / 1000;
+    remain = IOPSGetTimeRemainingEstimate();
+    if (remain != kIOPSTimeRemainingUnknown && remain != kIOPSTimeRemainingUnlimited)
+        bs->EstimatedTime = (ULONG)remain;
 
-    prop = CFDictionaryGetValue( source, CFSTR(kIOPSTimeToEmptyKey) );
-    if (prop)
-    {
-        CFNumberGetValue( prop, kCFNumberIntType, &value );
-        if (value > 0)
-            /*  A value of -1 indicates "Still Calculating the Time",
-             * otherwise estimated minutes left on the battery. */
-            bs->EstimatedTime = value * 60;
-    }
-
-    CFRelease( sources );
+    CFRelease( batteries );
     return STATUS_SUCCESS;
 }
 
@@ -3856,7 +3838,7 @@ NTSTATUS WINAPI NtPowerInformation( POWER_INFORMATION_LEVEL level, void *input, 
             FILE* f;
 
             for(i = 0; i < out_cpus; i++) {
-                snprintf(filename, sizeof(filename), "/sys/devices/system/cpu/cpu%d/cpufreq/cpuinfo_max_freq", i);
+                sprintf(filename, "/sys/devices/system/cpu/cpu%d/cpufreq/cpuinfo_max_freq", i);
                 f = fopen(filename, "r");
                 if (f && (fscanf(f, "%u", &val) == 1)) {
                     cpu_power[i].MaxMhz = val / 1000;
@@ -3875,7 +3857,7 @@ NTSTATUS WINAPI NtPowerInformation( POWER_INFORMATION_LEVEL level, void *input, 
                     if(f) fclose(f);
                 }
 
-                snprintf(filename, sizeof(filename), "/sys/devices/system/cpu/cpu%d/cpufreq/scaling_max_freq", i);
+                sprintf(filename, "/sys/devices/system/cpu/cpu%d/cpufreq/scaling_max_freq", i);
                 f = fopen(filename, "r");
                 if(f && (fscanf(f, "%u", &val) == 1)) {
                     cpu_power[i].MhzLimit = val / 1000;

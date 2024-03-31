@@ -174,6 +174,7 @@ unsigned long dump_emfrecord(const char *pfx, unsigned long offset)
     EMRCASE(EMR_ARCTO);
     EMRCASE(EMR_POLYDRAW);
     EMRCASE(EMR_SETARCDIRECTION);
+    EMRCASE(EMR_SETMITERLIMIT);
     EMRCASE(EMR_BEGINPATH);
     EMRCASE(EMR_ENDPATH);
     EMRCASE(EMR_CLOSEFIGURE);
@@ -184,15 +185,6 @@ unsigned long dump_emfrecord(const char *pfx, unsigned long offset)
     EMRCASE(EMR_WIDENPATH);
     EMRCASE(EMR_SELECTCLIPPATH);
     EMRCASE(EMR_ABORTPATH);
-
-    case EMR_SETMITERLIMIT:
-    {
-        const EMRSETMITERLIMIT *record = PRD(offset, sizeof(*record));
-
-        printf("%s%-20s %08x\n", pfx, "EMR_SETMITERLIMIT", length);
-        printf("%s miter limit %u\n", pfx, *(unsigned int *)&record->eMiterLimit);
-        break;
-    }
 
     case EMR_GDICOMMENT:
     {
@@ -384,7 +376,6 @@ unsigned long dump_emfrecord(const char *pfx, unsigned long offset)
     {
         const EMREXTTEXTOUTW *etoW = PRD(offset, sizeof(*etoW));
         const int *dx = (const int *)((const BYTE *)etoW + etoW->emrtext.offDx);
-        int dx_size;
 
         printf("%s%-20s %08x\n", pfx, "EMR_EXTTEXTOUTW", length);
         printf("%sbounds (%s) mode %#x x_scale %f y_scale %f pt (%d,%d) rect (%s) flags %#x, %s\n",
@@ -393,13 +384,10 @@ unsigned long dump_emfrecord(const char *pfx, unsigned long offset)
                debugstr_rect( &etoW->emrtext.rcl ), (UINT)etoW->emrtext.fOptions,
                debugstr_wn((LPCWSTR)((const BYTE *)etoW + etoW->emrtext.offString), etoW->emrtext.nChars));
         printf("%sdx_offset %u {", pfx, (UINT)etoW->emrtext.offDx);
-        dx_size = etoW->emrtext.nChars;
-        if (etoW->emrtext.fOptions & ETO_PDY)
-            dx_size *= 2;
-        for (i = 0; i < dx_size; ++i)
+        for (i = 0; i < etoW->emrtext.nChars; ++i)
         {
             printf("%d", dx[i]);
-            if (i != dx_size - 1)
+            if (i != etoW->emrtext.nChars - 1)
                 putchar(',');
         }
         printf("}\n");

@@ -24,6 +24,34 @@
 WINE_DEFAULT_DEBUG_CHANNEL(psdrv);
 
 
+/**********************************************************************
+ *	     PSDRV_CopyColor
+ *
+ * Copies col2 into col1. Return FALSE on error.
+ */
+BOOL PSDRV_CopyColor(PSCOLOR *col1, PSCOLOR *col2)
+{
+
+    switch(col2->type) {
+    case PSCOLOR_GRAY:
+        col1->value.gray.i = col2->value.gray.i;
+	break;
+
+    case PSCOLOR_RGB:
+        col1->value.rgb.r = col2->value.rgb.r;
+	col1->value.rgb.g = col2->value.rgb.g;
+	col1->value.rgb.b = col2->value.rgb.b;
+	break;
+
+    default:
+        ERR("Unknown colour type %d\n", col1->type);
+	return FALSE;
+    }
+
+    col1->type = col2->type;
+    return TRUE;
+}
+
 PSRGB rgb_to_grayscale_scale( void )
 {
     static const PSRGB scale = {0.3, 0.59, 0.11};
@@ -38,8 +66,9 @@ PSRGB rgb_to_grayscale_scale( void )
  * Result is grey scale if ColorDevice field of ppd is CD_False else an
  * rgb colour is produced.
  */
-void PSDRV_CreateColor( print_ctx *ctx, PSCOLOR *pscolor, COLORREF wincolor )
+void PSDRV_CreateColor( PHYSDEV dev, PSCOLOR *pscolor, COLORREF wincolor )
 {
+    PSDRV_PDEVICE *physDev = get_psdrv_dev( dev );
     int ctype = wincolor >> 24;
     float r, g, b;
 
@@ -50,7 +79,7 @@ void PSDRV_CreateColor( print_ctx *ctx, PSCOLOR *pscolor, COLORREF wincolor )
     g = ((wincolor >> 8) & 0xff) / 256.0;
     b = ((wincolor >> 16) & 0xff) / 256.0;
 
-    if(ctx->pi->ppd->ColorDevice != CD_False) {
+    if(physDev->pi->ppd->ColorDevice != CD_False) {
         pscolor->type = PSCOLOR_RGB;
 	pscolor->value.rgb.r = r;
 	pscolor->value.rgb.g = g;
@@ -67,9 +96,10 @@ void PSDRV_CreateColor( print_ctx *ctx, PSCOLOR *pscolor, COLORREF wincolor )
 /***********************************************************************
  *           PSDRV_SetBkColor
  */
-COLORREF PSDRV_SetBkColor( print_ctx *ctx, COLORREF color )
+COLORREF CDECL PSDRV_SetBkColor( PHYSDEV dev, COLORREF color )
 {
-    PSDRV_CreateColor(ctx, &ctx->bkColor, color);
+    PSDRV_PDEVICE *physDev = get_psdrv_dev( dev );
+    PSDRV_CreateColor(dev, &physDev->bkColor, color);
     return color;
 }
 
@@ -77,9 +107,10 @@ COLORREF PSDRV_SetBkColor( print_ctx *ctx, COLORREF color )
 /***********************************************************************
  *           PSDRV_SetTextColor
  */
-COLORREF PSDRV_SetTextColor( print_ctx *ctx, COLORREF color )
+COLORREF CDECL PSDRV_SetTextColor( PHYSDEV dev, COLORREF color )
 {
-    PSDRV_CreateColor(ctx, &ctx->font.color, color);
-    ctx->font.set = FALSE;
+    PSDRV_PDEVICE *physDev = get_psdrv_dev( dev );
+    PSDRV_CreateColor(dev, &physDev->font.color, color);
+    physDev->font.set = FALSE;
     return color;
 }

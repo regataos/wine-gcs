@@ -48,6 +48,7 @@ typedef struct {
 static nsresult handle_blur(HTMLDocumentNode*,nsIDOMEvent*);
 static nsresult handle_focus(HTMLDocumentNode*,nsIDOMEvent*);
 static nsresult handle_keypress(HTMLDocumentNode*,nsIDOMEvent*);
+static nsresult handle_dom_content_loaded(HTMLDocumentNode*,nsIDOMEvent*);
 static nsresult handle_pageshow(HTMLDocumentNode*,nsIDOMEvent*);
 static nsresult handle_pagehide(HTMLDocumentNode*,nsIDOMEvent*);
 static nsresult handle_load(HTMLDocumentNode*,nsIDOMEvent*);
@@ -67,6 +68,7 @@ static const struct {
     { EVENTID_BLUR,             0,                  handle_blur },
     { EVENTID_FOCUS,            0,                  handle_focus },
     { EVENTID_KEYPRESS,         BUBBLES,            handle_keypress },
+    { EVENTID_DOMCONTENTLOADED, OVERRIDE,           handle_dom_content_loaded },
     { EVENTID_PAGESHOW,         OVERRIDE,           handle_pageshow },
     { EVENTID_PAGEHIDE,         OVERRIDE,           handle_pagehide },
     { EVENTID_LOAD,             OVERRIDE,           handle_load },
@@ -206,8 +208,6 @@ static nsresult handle_focus(HTMLDocumentNode *doc, nsIDOMEvent *event)
 
     TRACE("(%p)\n", doc);
 
-    if(!doc->doc_obj)
-        return NS_ERROR_FAILURE;
     doc_obj = doc->doc_obj;
 
     if(!doc_obj->focus) {
@@ -220,7 +220,7 @@ static nsresult handle_focus(HTMLDocumentNode *doc, nsIDOMEvent *event)
 
 static nsresult handle_keypress(HTMLDocumentNode *doc, nsIDOMEvent *event)
 {
-    if(!doc->browser || !doc->browser->doc)
+    if(!doc->browser)
         return NS_ERROR_FAILURE;
 
     TRACE("(%p)->(%p)\n", doc, event);
@@ -228,6 +228,26 @@ static nsresult handle_keypress(HTMLDocumentNode *doc, nsIDOMEvent *event)
     update_doc(doc->browser->doc, UPDATE_UI);
     if(doc->browser->usermode == EDITMODE)
         handle_edit_event(doc, event);
+
+    return NS_OK;
+}
+
+static nsresult handle_dom_content_loaded(HTMLDocumentNode *doc, nsIDOMEvent *nsevent)
+{
+    DOMEvent *event;
+    HRESULT hres;
+
+    if(doc->window)
+        doc->window->dom_content_loaded_event_start_time = get_time_stamp();
+
+    hres = create_event_from_nsevent(nsevent, get_inner_window(doc), dispex_compat_mode(&doc->node.event_target.dispex), &event);
+    if(SUCCEEDED(hres)) {
+        dispatch_event(&doc->node.event_target, event);
+        IDOMEvent_Release(&event->IDOMEvent_iface);
+    }
+
+    if(doc->window)
+        doc->window->dom_content_loaded_event_end_time = get_time_stamp();
 
     return NS_OK;
 }
@@ -314,7 +334,7 @@ static nsresult handle_load(HTMLDocumentNode *doc, nsIDOMEvent *event)
 
     TRACE("(%p)\n", doc);
 
-    if(!doc->window || !doc->window->base.outer_window)
+    if(!doc->outer_window)
         return NS_ERROR_FAILURE;
     if(doc->doc_obj && doc->doc_obj->doc_node == doc) {
         doc_obj = doc->doc_obj;
@@ -326,8 +346,7 @@ static nsresult handle_load(HTMLDocumentNode *doc, nsIDOMEvent *event)
         handle_docobj_load(doc_obj);
 
     doc->window->dom_complete_time = get_time_stamp();
-    if(doc->window->base.outer_window)
-        set_ready_state(doc->window->base.outer_window, READYSTATE_COMPLETE);
+    set_ready_state(doc->outer_window, READYSTATE_COMPLETE);
 
     if(doc_obj) {
         if(doc_obj->view_sink)
@@ -337,9 +356,9 @@ static nsresult handle_load(HTMLDocumentNode *doc, nsIDOMEvent *event)
 
         update_title(doc_obj);
 
-        if(doc_obj->doc_object_service && doc->window->base.outer_window && !(doc->window->base.outer_window->load_flags & BINDING_REFRESH))
+        if(doc_obj->doc_object_service && !(doc->outer_window->load_flags & BINDING_REFRESH))
             IDocObjectService_FireDocumentComplete(doc_obj->doc_object_service,
-                    &doc->window->base.outer_window->base.IHTMLWindow2_iface, 0);
+                    &doc->outer_window->base.IHTMLWindow2_iface, 0);
 
         IUnknown_Release(doc_obj->outer_unk);
     }
@@ -356,7 +375,7 @@ static nsresult handle_load(HTMLDocumentNode *doc, nsIDOMEvent *event)
         WARN("no dom_document\n");
     }
 
-    hres = create_event_from_nsevent(event, dispex_compat_mode(&doc->node.event_target.dispex), &load_event);
+    hres = create_event_from_nsevent(event, doc->window, dispex_compat_mode(&doc->node.event_target.dispex), &load_event);
     if(SUCCEEDED(hres)) {
         dispatch_event(&doc->window->event_target, load_event);
         IDOMEvent_Release(&load_event->IDOMEvent_iface);
@@ -372,11 +391,11 @@ static nsresult handle_beforeunload(HTMLDocumentNode *doc, nsIDOMEvent *nsevent)
     DOMEvent *event;
     HRESULT hres;
 
-    if(!(window = doc->window) || doc->unload_sent)
+    if(!(window = doc->window))
         return NS_OK;
 
     /* Gecko dispatches this to the document, but IE dispatches it to the window */
-    hres = create_event_from_nsevent(nsevent, dispex_compat_mode(&doc->node.event_target.dispex), &event);
+    hres = create_event_from_nsevent(nsevent, window, dispex_compat_mode(&doc->node.event_target.dispex), &event);
     if(SUCCEEDED(hres)) {
         dispatch_event(&window->event_target, event);
         IDOMEvent_Release(&event->IDOMEvent_iface);
@@ -399,7 +418,7 @@ static nsresult handle_unload(HTMLDocumentNode *doc, nsIDOMEvent *nsevent)
     if(pending_window)
         pending_window->unload_event_start_time = get_time_stamp();
 
-    hres = create_event_from_nsevent(nsevent, dispex_compat_mode(&doc->node.event_target.dispex), &event);
+    hres = create_event_from_nsevent(nsevent, window, dispex_compat_mode(&doc->node.event_target.dispex), &event);
     if(SUCCEEDED(hres)) {
         dispatch_event(&window->event_target, event);
         IDOMEvent_Release(&event->IDOMEvent_iface);
@@ -416,7 +435,6 @@ static nsresult handle_htmlevent(HTMLDocumentNode *doc, nsIDOMEvent *nsevent)
     nsIDOMEventTarget *event_target;
     EventTarget *target;
     nsIDOMNode *nsnode;
-    HTMLDOMNode *node = NULL;
     DOMEvent *event;
     nsresult nsres;
     HRESULT hres;
@@ -437,6 +455,7 @@ static nsresult handle_htmlevent(HTMLDocumentNode *doc, nsIDOMEvent *nsevent)
         target = &doc->window->event_target;
         IHTMLWindow2_AddRef(&doc->window->base.IHTMLWindow2_iface);
     }else {
+        HTMLDOMNode *node;
         hres = get_node(nsnode, TRUE, &node);
         nsIDOMNode_Release(nsnode);
         if(FAILED(hres))
@@ -444,14 +463,14 @@ static nsresult handle_htmlevent(HTMLDocumentNode *doc, nsIDOMEvent *nsevent)
         target = &node->event_target;
     }
 
-    hres = create_event_from_nsevent(nsevent, dispex_compat_mode(&target->dispex), &event);
+    hres = create_event_from_nsevent(nsevent, get_inner_window(doc), dispex_compat_mode(&doc->node.event_target.dispex), &event);
     if(FAILED(hres)) {
         IEventTarget_Release(&target->IEventTarget_iface);
         return NS_OK;
     }
 
     /* If we fine need for more special cases here, we may consider handling it in a more generic way. */
-    if((!node || doc == node->doc) && (event->event_id == EVENTID_FOCUS || event->event_id == EVENTID_BLUR)) {
+    if(event->event_id == EVENTID_FOCUS || event->event_id == EVENTID_BLUR) {
         DOMEvent *focus_event;
 
         hres = create_document_event(doc, event->event_id == EVENTID_FOCUS ? EVENTID_FOCUSIN : EVENTID_FOCUSOUT, &focus_event);
@@ -495,7 +514,7 @@ static nsIDOMEventTarget *get_default_document_target(HTMLDocumentNode *doc)
     nsISupports *target_iface;
     nsresult nsres;
 
-    target_iface = doc->window && doc->window->base.outer_window ? (nsISupports*)doc->window->base.outer_window->nswindow : (nsISupports*)doc->dom_document;
+    target_iface = doc->window ? (nsISupports*)doc->outer_window->nswindow : (nsISupports*)doc->dom_document;
     nsres = nsISupports_QueryInterface(target_iface, &IID_nsIDOMEventTarget, (void**)&target);
     return NS_SUCCEEDED(nsres) ? target : NULL;
 }

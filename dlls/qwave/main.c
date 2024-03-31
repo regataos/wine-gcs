@@ -43,9 +43,3 @@ BOOL WINAPI QOSAddSocketToFlow(HANDLE handle, SOCKET socket, PSOCKADDR addr,
     SetLastError(ERROR_NOT_SUPPORTED);
     return FALSE;
 }
-
-BOOL WINAPI QOSCloseHandle(HANDLE handle)
-{
-    FIXME("%p stub!\n", handle);
-    return FALSE;
-}

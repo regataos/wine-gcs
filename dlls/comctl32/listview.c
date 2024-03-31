@@ -5590,7 +5590,6 @@ static BOOL LISTVIEW_DeleteAllItems(LISTVIEW_INFO *infoPtr, BOOL destroy)
         LISTVIEW_UpdateScroll(infoPtr);
     }
     LISTVIEW_InvalidateList(infoPtr);
-    infoPtr->bNoItemMetrics = TRUE;
     
     return TRUE;
 }
@@ -10832,9 +10831,17 @@ static inline LRESULT LISTVIEW_WMPaint(LISTVIEW_INFO *infoPtr, HDC hdc)
  */
 static LRESULT LISTVIEW_PrintClient(LISTVIEW_INFO *infoPtr, HDC hdc, DWORD options)
 {
-    FIXME("(hdc=%p options=%#lx) partial stub\n", hdc, options);
+    if ((options & PRF_CHECKVISIBLE) && !IsWindowVisible(infoPtr->hwndSelf))
+        return 0;
 
-    LISTVIEW_Paint(infoPtr, hdc);
+    if (options & ~(PRF_ERASEBKGND|PRF_CLIENT))
+        FIXME("(hdc=%p options %#lx) partial stub\n", hdc, options);
+
+    if (options & PRF_ERASEBKGND)
+        LISTVIEW_EraseBkgnd(infoPtr, hdc);
+
+    if (options & PRF_CLIENT)
+        LISTVIEW_Paint(infoPtr, hdc);
 
     return 0;
 }
@@ -11177,7 +11184,7 @@ static void LISTVIEW_UpdateSize(LISTVIEW_INFO *infoPtr)
 	    wp.cy = 0;
 	}
 
-	SetWindowPos(infoPtr->hwndHeader, wp.hwndInsertAfter, wp.x, wp.y, wp.cx, wp.cy, wp.flags);
+	SetWindowPos(wp.hwnd, wp.hwndInsertAfter, wp.x, wp.y, wp.cx, wp.cy, wp.flags);
 	TRACE("  after SWP wp=%d,%d (%dx%d)\n", wp.x, wp.y, wp.cx, wp.cy);
 
 	infoPtr->rcList.top = max(wp.cy, 0);
@@ -11205,7 +11212,6 @@ static INT LISTVIEW_StyleChanged(LISTVIEW_INFO *infoPtr, WPARAM wStyleType,
                                  const STYLESTRUCT *lpss)
 {
     UINT uNewView, uOldView;
-    BOOL repaint = FALSE;
     UINT style;
 
     TRACE("styletype %Ix, styleOld %#lx, styleNew %#lx\n",
@@ -11229,8 +11235,6 @@ static INT LISTVIEW_StyleChanged(LISTVIEW_INFO *infoPtr, WPARAM wStyleType,
     if (uNewView != uOldView)
     {
     	HIMAGELIST himl;
-
-        repaint = TRUE;
 
         /* LVM_SETVIEW doesn't change window style bits within LVS_TYPEMASK,
            changing style updates current view only when view bits change. */
@@ -11292,9 +11296,6 @@ static INT LISTVIEW_StyleChanged(LISTVIEW_INFO *infoPtr, WPARAM wStyleType,
 
     /* add scrollbars if needed */
     LISTVIEW_UpdateScroll(infoPtr);
-
-    if (repaint)
-        LISTVIEW_InvalidateList(infoPtr);
 
     return 0;
 }

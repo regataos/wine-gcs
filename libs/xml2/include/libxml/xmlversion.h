@@ -21,7 +21,7 @@ extern "C" {
  * your library and includes mismatch
  */
 #ifndef LIBXML2_COMPILING_MSCCDEF
-XMLPUBFUN void xmlCheckVersion(int version);
+XMLPUBFUN void XMLCALL xmlCheckVersion(int version);
 #endif /* LIBXML2_COMPILING_MSCCDEF */
 
 /**
@@ -29,21 +29,21 @@ XMLPUBFUN void xmlCheckVersion(int version);
  *
  * the version string like "1.2.3"
  */
-#define LIBXML_DOTTED_VERSION "2.11.7"
+#define LIBXML_DOTTED_VERSION "2.10.0"
 
 /**
  * LIBXML_VERSION:
  *
  * the version number: 1.2.3 value is 10203
  */
-#define LIBXML_VERSION 21107
+#define LIBXML_VERSION 21000
 
 /**
  * LIBXML_VERSION_STRING:
  *
  * the version number string, 1.2.3 value is "10203"
  */
-#define LIBXML_VERSION_STRING "21107"
+#define LIBXML_VERSION_STRING "21000"
 
 /**
  * LIBXML_VERSION_EXTRA:
@@ -58,7 +58,7 @@ XMLPUBFUN void xmlCheckVersion(int version);
  * Macro to check that the libxml version in use is compatible with
  * the version the software has been compiled against
  */
-#define LIBXML_TEST_VERSION xmlCheckVersion(21107);
+#define LIBXML_TEST_VERSION xmlCheckVersion(21000);
 
 #ifndef VMS
 #if 0
@@ -313,7 +313,7 @@ XMLPUBFUN void xmlCheckVersion(int version);
 /**
  * LIBXML_DEBUG_RUNTIME:
  *
- * Removed
+ * Whether the runtime debugging is configured in
  */
 #if 0
 #define LIBXML_DEBUG_RUNTIME
@@ -409,7 +409,12 @@ XMLPUBFUN void xmlCheckVersion(int version);
 #endif
 
 #ifdef __GNUC__
-/** DOC_DISABLE */
+
+/**
+ * ATTRIBUTE_UNUSED:
+ *
+ * Macro used to signal to GCC unused function parameters
+ */
 
 #ifndef ATTRIBUTE_UNUSED
 # if ((__GNUC__ > 2) || ((__GNUC__ == 2) && (__GNUC_MINOR__ >= 7)))
@@ -418,6 +423,12 @@ XMLPUBFUN void xmlCheckVersion(int version);
 #  define ATTRIBUTE_UNUSED
 # endif
 #endif
+
+/**
+ * LIBXML_ATTR_ALLOC_SIZE:
+ *
+ * Macro used to indicate to GCC this is an allocator function
+ */
 
 #ifndef LIBXML_ATTR_ALLOC_SIZE
 # if (!defined(__clang__) && ((__GNUC__ > 4) || ((__GNUC__ == 4) && (__GNUC_MINOR__ >= 3))))
@@ -428,6 +439,12 @@ XMLPUBFUN void xmlCheckVersion(int version);
 #else
 # define LIBXML_ATTR_ALLOC_SIZE(x)
 #endif
+
+/**
+ * LIBXML_ATTR_FORMAT:
+ *
+ * Macro used to indicate to GCC the parameter are printf like
+ */
 
 #ifndef LIBXML_ATTR_FORMAT
 # if ((__GNUC__ > 3) || ((__GNUC__ == 3) && (__GNUC_MINOR__ >= 3)))
@@ -440,27 +457,14 @@ XMLPUBFUN void xmlCheckVersion(int version);
 #endif
 
 #ifndef XML_DEPRECATED
-#  if defined (IN_LIBXML) || (__GNUC__ * 100 + __GNUC_MINOR__ < 301)
+#  ifdef IN_LIBXML
 #    define XML_DEPRECATED
-/* Available since at least GCC 3.1 */
 #  else
+/* Available since at least GCC 3.1 */
 #    define XML_DEPRECATED __attribute__((deprecated))
 #  endif
 #endif
 
-#if defined(__clang__) || (__GNUC__ * 100 + __GNUC_MINOR__ >= 406)
-#define XML_IGNORE_FPTR_CAST_WARNINGS \
-    _Pragma("GCC diagnostic push") \
-    _Pragma("GCC diagnostic ignored \"-Wpedantic\"") \
-    _Pragma("GCC diagnostic ignored \"-Wcast-function-type\"")
-#define XML_POP_WARNINGS \
-    _Pragma("GCC diagnostic pop")
-#else
-#define XML_IGNORE_FPTR_CAST_WARNINGS
-#define XML_POP_WARNINGS
-#endif
-
-/** DOC_ENABLE */
 #else /* ! __GNUC__ */
 /**
  * ATTRIBUTE_UNUSED:
@@ -487,34 +491,7 @@ XMLPUBFUN void xmlCheckVersion(int version);
  * is deprecated.
  */
 #ifndef XML_DEPRECATED
-#  if defined (IN_LIBXML) || !defined (_MSC_VER)
-#    define XML_DEPRECATED
-/* Available since Visual Studio 2005 */
-#  elif defined (_MSC_VER) && (_MSC_VER >= 1400)
-#    define XML_DEPRECATED __declspec(deprecated)
-#  endif
-#endif
-/**
- * LIBXML_IGNORE_FPTR_CAST_WARNINGS:
- *
- * Macro used to ignore pointer cast warnings that can't be worked around.
- */
-#if defined (_MSC_VER) && (_MSC_VER >= 1400)
-#  define XML_IGNORE_FPTR_CAST_WARNINGS __pragma(warning(push))
-#else
-#  define XML_IGNORE_FPTR_CAST_WARNINGS
-#endif
-/**
- * XML_POP_WARNINGS:
- *
- * Macro used to restore warnings state.
- */
-#ifndef XML_POP_WARNINGS
-#  if defined (_MSC_VER) && (_MSC_VER >= 1400)
-#    define XML_POP_WARNINGS __pragma(warning(pop))
-#  else
-#    define XML_POP_WARNINGS
-#  endif
+#define XML_DEPRECATED
 #endif
 #endif /* __GNUC__ */
 
@@ -522,3 +499,5 @@ XMLPUBFUN void xmlCheckVersion(int version);
 }
 #endif /* __cplusplus */
 #endif
+
+

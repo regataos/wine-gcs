@@ -1,2 +1,4 @@
-MODULE  = bthprops.cpl
-IMPORTS = bluetoothapis
+MODULE    = bthprops.cpl
+
+C_SRCS = \
+	main.c

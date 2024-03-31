@@ -95,6 +95,13 @@ static HRESULT Enumerator_gc_traverse(struct gc_ctx *gc_ctx, enum gc_traverse_op
     return gc_process_linked_val(gc_ctx, op, dispex, &enumerator_from_jsdisp(dispex)->item);
 }
 
+static void Enumerator_cc_traverse(jsdisp_t *dispex, nsCycleCollectionTraversalCallback *cb)
+{
+    EnumeratorInstance *This = enumerator_from_jsdisp(dispex);
+    if(is_object_instance(This->item))
+        cc_api.note_edge((nsISupports*)get_object(This->item), "item", cb);
+}
+
 static HRESULT Enumerator_atEnd(script_ctx_t *ctx, jsval_t vthis, WORD flags, unsigned argc, jsval_t *argv,
         jsval_t *r)
 {
@@ -200,7 +207,8 @@ static const builtin_info_t EnumeratorInst_info = {
     NULL,
     NULL,
     NULL,
-    Enumerator_gc_traverse
+    Enumerator_gc_traverse,
+    Enumerator_cc_traverse
 };
 
 static HRESULT alloc_enumerator(script_ctx_t *ctx, jsdisp_t *object_prototype, EnumeratorInstance **ret)
@@ -251,11 +259,11 @@ static HRESULT create_enumerator(script_ctx_t *ctx, jsval_t *argv, jsdisp_t **re
         /* Try to get a IEnumVARIANT by _NewEnum */
         VariantInit(&varresult);
         hres = IDispatch_Invoke(obj, DISPID_NEWENUM, &IID_NULL, LOCALE_NEUTRAL,
-                DISPATCH_METHOD, &dispparams, &varresult, NULL, NULL);
+                DISPATCH_PROPERTYGET, &dispparams, &varresult, NULL, NULL);
         if (FAILED(hres))
         {
             WARN("Enumerator: no DISPID_NEWENUM.\n");
-            return E_INVALIDARG;
+            return JS_E_OBJECT_NOT_COLLECTION;
         }
 
         if ((V_VT(&varresult) == VT_DISPATCH) || (V_VT(&varresult) == VT_UNKNOWN))
@@ -266,7 +274,7 @@ static HRESULT create_enumerator(script_ctx_t *ctx, jsval_t *argv, jsdisp_t **re
         else
         {
             FIXME("Enumerator: NewEnum unexpected type of varresult (%d).\n", V_VT(&varresult));
-            hres = E_INVALIDARG;
+            hres = JS_E_OBJECT_NOT_COLLECTION;
         }
         VariantClear(&varresult);
         if (FAILED(hres))

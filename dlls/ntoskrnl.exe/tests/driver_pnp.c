@@ -18,10 +18,6 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#if 0
-#pragma makedep testdll
-#endif
-
 #include <stdarg.h>
 #include <stdio.h>
 
@@ -37,19 +33,6 @@
 
 #include "driver.h"
 #include "utils.h"
-
-/* memcmp() isn't exported from ntoskrnl on i386 */
-static int kmemcmp( const void *ptr1, const void *ptr2, size_t n )
-{
-    const unsigned char *p1, *p2;
-
-    for (p1 = ptr1, p2 = ptr2; n; n--, p1++, p2++)
-    {
-        if (*p1 < *p2) return -1;
-        if (*p1 > *p2) return 1;
-    }
-    return 0;
-}
 
 static const GUID bus_class     = {0xdeadbeef, 0x29ef, 0x4538, {0xa5, 0xfd, 0xb6, 0x95, 0x73, 0xa3, 0x62, 0xc1}};
 static const GUID child_class   = {0xdeadbeef, 0x29ef, 0x4538, {0xa5, 0xfd, 0xb6, 0x95, 0x73, 0xa3, 0x62, 0xc2}};
@@ -195,7 +178,7 @@ static NTSTATUS fdo_pnp(IRP *irp)
 
 static NTSTATUS query_id(struct device *device, IRP *irp, BUS_QUERY_ID_TYPE type)
 {
-    static const WCHAR device_id[] = L"Wine\\Test";
+    static const WCHAR device_id[] = L"wine\\test";
     WCHAR *id = NULL;
 
     irp->IoStatus.Information = 0;
@@ -273,7 +256,6 @@ static NTSTATUS pdo_pnp(DEVICE_OBJECT *device_obj, IRP *irp)
 
         case IRP_MN_START_DEVICE:
         {
-            static const WCHAR expect_symlink[] = L"\\??\\Wine#Test#1#{deadbeef-29ef-4538-a5fd-b69573a362c2}";
             static const LARGE_INTEGER wait_time = {.QuadPart = -500 * 10000};
             POWER_STATE state = {.DeviceState = PowerDeviceD0};
             NTSTATUS status;
@@ -285,12 +267,6 @@ static NTSTATUS pdo_pnp(DEVICE_OBJECT *device_obj, IRP *irp)
 
             status = IoRegisterDeviceInterface(device_obj, &child_class, NULL, &device->child_symlink);
             ok(!status, "Failed to register interface, status %#lx.\n", status);
-            ok(device->child_symlink.Length == sizeof(expect_symlink) - sizeof(WCHAR),
-                    "Got length %u.\n", device->child_symlink.Length);
-            ok(device->child_symlink.MaximumLength == sizeof(expect_symlink),
-                    "Got maximum length %u.\n", device->child_symlink.MaximumLength);
-            ok(!kmemcmp(device->child_symlink.Buffer, expect_symlink, device->child_symlink.MaximumLength),
-                    "Got symlink \"%ls\".\n", device->child_symlink.Buffer);
 
             IoSetDeviceInterfaceState(&device->child_symlink, TRUE);
 
@@ -299,11 +275,11 @@ static NTSTATUS pdo_pnp(DEVICE_OBJECT *device_obj, IRP *irp)
             device->power_state = PowerDeviceD0;
 
             status = ZwWaitForSingleObject(device->plug_event, TRUE, &wait_time);
-            ok(!status, "Failed to wait for child plug event, status %#lx.\n", status);
+            todo_wine ok(!status, "Failed to wait for child plug event, status %#lx.\n", status);
             status = ZwSetEvent(device->plug_event2, NULL);
             ok(!status, "Failed to set event, status %#lx.\n", status);
             status = ZwWaitForSingleObject(device->plug_event, TRUE, &wait_time);
-            ok(!status, "Failed to wait for child plug event, status %#lx.\n", status);
+            todo_wine ok(!status, "Failed to wait for child plug event, status %#lx.\n", status);
 
             ret = STATUS_SUCCESS;
             break;
@@ -719,16 +695,15 @@ static NTSTATUS fdo_ioctl(IRP *irp, IO_STACK_LOCATION *stack, ULONG code)
              * for the other. */
 
             status = ZwSetEvent(plug_event, NULL);
-            ok(!status, "Failed to set event, status %#lx.\n", status);
+            todo_wine ok(!status, "Failed to set event, status %#lx.\n", status);
             status = ZwWaitForSingleObject(plug_event2, TRUE, &wait_time);
-            ok(!status, "Failed to wait for child plug event, status %#lx.\n", status);
+            todo_wine ok(!status, "Failed to wait for child plug event, status %#lx.\n", status);
             ok(surprise_removal_count == 1, "Got %u surprise removal events.\n", surprise_removal_count);
             /* We shouldn't get IRP_MN_REMOVE_DEVICE until all user-space
              * handles to the device are closed (and the user-space thread is
              * currently blocked in this ioctl and won't close its handle
              * yet.) */
-            todo_wine_if (remove_device_count)
-                ok(!remove_device_count, "Got %u remove events.\n", remove_device_count);
+            todo_wine ok(!remove_device_count, "Got %u remove events.\n", remove_device_count);
 
             return STATUS_SUCCESS;
         }

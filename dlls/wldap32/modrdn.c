@@ -33,7 +33,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(wldap32);
  */
 ULONG CDECL ldap_modrdnA( LDAP *ld, char *dn, char *newdn )
 {
-    ULONG ret = ~0u;
+    ULONG ret = WLDAP32_LDAP_NO_MEMORY;
     WCHAR *dnW = NULL, *newdnW = NULL;
 
     TRACE( "(%p, %s, %s)\n", ld, debugstr_a(dn), debugstr_a(newdn) );
@@ -65,7 +65,7 @@ ULONG CDECL ldap_modrdnW( LDAP *ld, WCHAR *dn, WCHAR *newdn )
  */
 ULONG CDECL ldap_modrdn2A( LDAP *ld, char *dn, char *newdn, int delete )
 {
-    ULONG ret = ~0u;
+    ULONG ret = WLDAP32_LDAP_NO_MEMORY;
     WCHAR *dnW = NULL, *newdnW = NULL;
 
     TRACE( "(%p, %s, %p, 0x%02x)\n", ld, debugstr_a(dn), newdn, delete );
@@ -88,21 +88,23 @@ exit:
  */
 ULONG CDECL ldap_modrdn2W( LDAP *ld, WCHAR *dn, WCHAR *newdn, int delete )
 {
-    ULONG ret = ~0u;
+    ULONG ret = WLDAP32_LDAP_NO_MEMORY;
     char *dnU = NULL, *newdnU = NULL;
     int msg;
 
     TRACE( "(%p, %s, %p, 0x%02x)\n", ld, debugstr_w(dn), newdn, delete );
 
     if (!ld || !newdn) return ~0u;
-    if (WLDAP32_ldap_connect( ld, NULL ) != WLDAP32_LDAP_SUCCESS) return ~0u;
 
-    if (dn && !(dnU = strWtoU( dn ))) return ~0u;
+    if (dn && !(dnU = strWtoU( dn ))) return WLDAP32_LDAP_NO_MEMORY;
 
     if ((newdnU = strWtoU( newdn )))
     {
-        if (ldap_rename( CTX(ld), dnU, newdnU, NULL, delete, NULL, NULL, &msg ) == LDAP_SUCCESS)
+        ret = ldap_rename( CTX(ld), dnU, newdnU, NULL, delete, NULL, NULL, &msg );
+        if (ret == WLDAP32_LDAP_SUCCESS)
             ret = msg;
+        else
+            ret = ~0u;
         free( newdnU );
     }
     free( dnU );
@@ -137,17 +139,15 @@ exit:
  */
 ULONG CDECL ldap_modrdn2_sW( LDAP *ld, WCHAR *dn, WCHAR *newdn, int delete )
 {
-    ULONG ret;
+    ULONG ret = WLDAP32_LDAP_NO_MEMORY;
     char *dnU = NULL, *newdnU = NULL;
 
     TRACE( "(%p, %s, %p, 0x%02x)\n", ld, debugstr_w(dn), newdn, delete );
 
     if (!ld || !newdn) return WLDAP32_LDAP_PARAM_ERROR;
-    if ((ret = WLDAP32_ldap_connect( ld, NULL ))) return ret;
 
     if (dn && !(dnU = strWtoU( dn ))) return WLDAP32_LDAP_NO_MEMORY;
 
-    ret = WLDAP32_LDAP_NO_MEMORY;
     if ((newdnU = strWtoU( newdn )))
     {
         ret = map_error( ldap_rename_s( CTX(ld), dnU, newdnU, NULL, delete, NULL, NULL ) );

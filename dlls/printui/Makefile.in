@@ -3,6 +3,7 @@ IMPORTS   = shell32
 
 EXTRADLLFLAGS = -Wb,--prefer-native
 
-SOURCES = \
-	printui.c \
-	printui.rc
+C_SRCS = \
+	printui.c
+
+RC_SRCS = printui.rc

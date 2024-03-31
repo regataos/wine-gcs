@@ -3,8 +3,11 @@ IMPORTLIB = shdocvw
 IMPORTS   = uuid shlwapi advapi32
 DELAYIMPORTS = version ole32 oleaut32 ieframe
 
-SOURCES = \
-	shdocvw.rc \
+C_SRCS = \
 	shdocvw_main.c \
-	shdocvw_v1.idl \
 	shlinstobj.c
+
+RC_SRCS = \
+	shdocvw.rc
+
+IDL_SRCS = shdocvw_v1.idl

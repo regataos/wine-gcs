@@ -1,7 +1,7 @@
 TESTDLL   = netapi32.dll
 IMPORTS   = advapi32 netapi32
 
-SOURCES = \
+C_SRCS = \
 	access.c \
 	apibuf.c \
 	ds.c \

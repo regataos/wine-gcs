@@ -1,9 +1,9 @@
 MODULE    = wow64win.dll
 IMPORTS   = wow64 win32u ntdll winecrt0
 
-EXTRADLLFLAGS = -nodefaultlibs
+EXTRADLLFLAGS = -nodefaultlibs -Wl,--image-base,0x6f200000
 
-SOURCES = \
+C_SRCS = \
 	gdi.c \
 	syscall.c \
 	user.c

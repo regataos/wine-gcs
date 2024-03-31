@@ -18,6 +18,7 @@
 
 #include <stdarg.h>
 
+#define NONAMELESSUNION
 #define COBJMACROS
 
 #include "windef.h"
@@ -92,7 +93,7 @@ static ULONG WINAPI CommonDecoder_Release(IWICBitmapDecoder *iface)
         This->lock.DebugInfo->Spare[0] = 0;
         DeleteCriticalSection(&This->lock);
         decoder_destroy(This->decoder);
-        free(This);
+        HeapFree(GetProcessHeap(), 0, This);
     }
 
     return ref;
@@ -310,8 +311,8 @@ static ULONG WINAPI CommonDecoderFrame_Release(IWICBitmapFrameDecode *iface)
     if (ref == 0)
     {
         IWICBitmapDecoder_Release(&This->parent->IWICBitmapDecoder_iface);
-        free(This->metadata_blocks);
-        free(This);
+        HeapFree(GetProcessHeap(), 0, This->metadata_blocks);
+        HeapFree(GetProcessHeap(), 0, This);
     }
 
     return ref;
@@ -493,7 +494,7 @@ static HRESULT WINAPI CommonDecoderFrame_GetColorContexts(IWICBitmapFrameDecode 
                 {
                     hr = IWICColorContext_InitializeFromMemory(ppIColorContexts[i], profile, profile_len);
 
-                    free(profile);
+                    HeapFree(GetProcessHeap(), 0, profile);
                 }
 
                 if (FAILED(hr))
@@ -732,7 +733,7 @@ static HRESULT WINAPI CommonDecoder_GetFrame(IWICBitmapDecoder *iface,
 
     if (SUCCEEDED(hr))
     {
-        result = malloc(sizeof(*result));
+        result = HeapAlloc(GetProcessHeap(), 0, sizeof(*result));
         if (!result)
             hr = E_OUTOFMEMORY;
     }
@@ -754,7 +755,7 @@ static HRESULT WINAPI CommonDecoder_GetFrame(IWICBitmapDecoder *iface,
             hr = CommonDecoderFrame_InitializeMetadata(result);
 
         if (FAILED(hr))
-            free(result);
+            HeapFree(GetProcessHeap(), 0, result);
     }
 
     LeaveCriticalSection(&This->lock);
@@ -785,7 +786,7 @@ HRESULT CommonDecoder_CreateInstance(struct decoder *decoder,
 
     TRACE("(%s,%s,%p)\n", debugstr_guid(&decoder_info->clsid), debugstr_guid(iid), ppv);
 
-    This = malloc(sizeof(*This));
+    This = HeapAlloc(GetProcessHeap(), 0, sizeof(*This));
     if (!This)
     {
         decoder_destroy(decoder);
@@ -797,7 +798,7 @@ HRESULT CommonDecoder_CreateInstance(struct decoder *decoder,
     This->stream = NULL;
     This->decoder = decoder;
     This->decoder_info = *decoder_info;
-    InitializeCriticalSectionEx(&This->lock, 0, RTL_CRITICAL_SECTION_FLAG_FORCE_DEBUG_INFO);
+    InitializeCriticalSection(&This->lock);
     This->lock.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": CommonDecoder.lock");
 
     hr = IWICBitmapDecoder_QueryInterface(&This->IWICBitmapDecoder_iface, iid, ppv);

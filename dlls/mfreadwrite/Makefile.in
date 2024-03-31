@@ -5,7 +5,8 @@ DELAYIMPORTS = mf
 
 EXTRADLLFLAGS = -Wb,--prefer-native
 
-SOURCES = \
-	mf_classes.idl \
+C_SRCS = \
 	reader.c \
 	writer.c
+
+IDL_SRCS = mf_classes.idl

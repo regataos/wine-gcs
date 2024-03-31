@@ -19,14 +19,14 @@
 #ifndef __WINE_TASKSCHD_PRIVATE_H__
 #define __WINE_TASKSCHD_PRIVATE_H__
 
-HRESULT TaskService_create(void **obj);
-HRESULT TaskDefinition_create(ITaskDefinition **obj);
-HRESULT TaskFolder_create(const WCHAR *parent, const WCHAR *path, ITaskFolder **obj, BOOL create);
-HRESULT TaskFolderCollection_create(const WCHAR *path, ITaskFolderCollection **obj);
+HRESULT TaskService_create(void **obj) DECLSPEC_HIDDEN;
+HRESULT TaskDefinition_create(ITaskDefinition **obj) DECLSPEC_HIDDEN;
+HRESULT TaskFolder_create(const WCHAR *parent, const WCHAR *path, ITaskFolder **obj, BOOL create) DECLSPEC_HIDDEN;
+HRESULT TaskFolderCollection_create(const WCHAR *path, ITaskFolderCollection **obj) DECLSPEC_HIDDEN;
 HRESULT RegisteredTask_create(const WCHAR *path, const WCHAR *name, ITaskDefinition *definition, LONG flags,
-                              TASK_LOGON_TYPE logon, IRegisteredTask **obj, BOOL create);
-HRESULT RegisteredTaskCollection_create(const WCHAR *path, IRegisteredTaskCollection **obj);
+                              TASK_LOGON_TYPE logon, IRegisteredTask **obj, BOOL create) DECLSPEC_HIDDEN;
+HRESULT RegisteredTaskCollection_create(const WCHAR *path, IRegisteredTaskCollection **obj) DECLSPEC_HIDDEN;
 
-WCHAR *get_full_path(const WCHAR *parent, const WCHAR *path);
+WCHAR *get_full_path(const WCHAR *parent, const WCHAR *path) DECLSPEC_HIDDEN;
 
 #endif /* __WINE_TASKSCHD_PRIVATE_H__ */

@@ -49,6 +49,7 @@
 
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
+#define NONAMELESSUNION
 #include "windef.h"
 #include "winternl.h"
 #include "winioctl.h"
@@ -113,7 +114,7 @@ static const char* iocode2str(UINT ioc)
         X(IOCTL_SERIAL_WAIT_ON_MASK);
         X(IOCTL_SERIAL_XOFF_COUNTER);
 #undef X
-    default: return wine_dbg_sprintf("IOCTL_SERIAL_%d\n", ioc);
+    default: { static char tmp[32]; sprintf(tmp, "IOCTL_SERIAL_%d\n", ioc); return tmp; }
     }
 }
 
@@ -1309,7 +1310,7 @@ static NTSTATUS io_control( HANDLE device, HANDLE event, PIO_APC_ROUTINE apc, vo
     }
     if (needs_close) close( fd );
  error:
-    io->Status = status;
+    io->u.Status = status;
     io->Information = sz;
     if (event && status != STATUS_PENDING) NtSetEvent(event, NULL);
     return status;

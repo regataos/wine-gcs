@@ -3,6 +3,7 @@ IMPORTS   = dxguid ws2_32
 
 EXTRADLLFLAGS = -Wb,--prefer-native
 
-SOURCES = \
-	dpwsockx_main.c \
-	version.rc
+C_SRCS = \
+	dpwsockx_main.c
+
+RC_SRCS = version.rc

@@ -398,8 +398,8 @@ static HRESULT HTMLDOMChildrenCollection_get_name(DispatchEx *dispex, DISPID id,
     return (*name = SysAllocStringLen(buf, len)) ? S_OK : E_OUTOFMEMORY;
 }
 
-static HRESULT HTMLDOMChildrenCollection_invoke(DispatchEx *dispex, DISPID id, LCID lcid, WORD flags, DISPPARAMS *params,
-        VARIANT *res, EXCEPINFO *ei, IServiceProvider *caller)
+static HRESULT HTMLDOMChildrenCollection_invoke(DispatchEx *dispex, IDispatch *this_obj, DISPID id, LCID lcid, WORD flags,
+        DISPPARAMS *params, VARIANT *res, EXCEPINFO *ei, IServiceProvider *caller)
 {
     HTMLDOMChildrenCollection *This = impl_from_DispatchEx(dispex);
 
@@ -443,15 +443,16 @@ static const tid_t HTMLDOMChildrenCollection_iface_tids[] = {
     0
 };
 
-static dispex_static_data_t HTMLDOMChildrenCollection_dispex = {
+dispex_static_data_t HTMLDOMChildrenCollection_dispex = {
     "NodeList",
     &HTMLDOMChildrenCollection_dispex_vtbl,
+    PROTO_ID_HTMLDOMChildrenCollection,
     DispDOMChildrenCollection_tid,
     HTMLDOMChildrenCollection_iface_tids,
     HTMLDOMNode_init_dispex_info
 };
 
-HRESULT create_child_collection(nsIDOMNodeList *nslist, compat_mode_t compat_mode, IHTMLDOMChildrenCollection **ret)
+HRESULT create_child_collection(nsIDOMNodeList *nslist, HTMLDocumentNode *doc, IHTMLDOMChildrenCollection **ret)
 {
     HTMLDOMChildrenCollection *collection;
 
@@ -463,7 +464,8 @@ HRESULT create_child_collection(nsIDOMNodeList *nslist, compat_mode_t compat_mod
     nsIDOMNodeList_AddRef(nslist);
     collection->nslist = nslist;
 
-    init_dispatch(&collection->dispex, &HTMLDOMChildrenCollection_dispex, compat_mode);
+    init_dispatch(&collection->dispex, &HTMLDOMChildrenCollection_dispex, get_inner_window(doc),
+                  dispex_compat_mode(&doc->node.event_target.dispex));
 
     *ret = &collection->IHTMLDOMChildrenCollection_iface;
     return S_OK;
@@ -623,8 +625,7 @@ static HRESULT WINAPI HTMLDOMNode_get_childNodes(IHTMLDOMNode *iface, IDispatch 
         return hres;
     }
 
-    hres = create_child_collection(nslist, dispex_compat_mode(&This->event_target.dispex),
-                                   (IHTMLDOMChildrenCollection**)p);
+    hres = create_child_collection(nslist, This->doc, (IHTMLDOMChildrenCollection**)p);
     nsIDOMNodeList_Release(nslist);
     return hres;
 }
@@ -1460,8 +1461,10 @@ static HRESULT HTMLDOMNode_clone(HTMLDOMNode *This, nsIDOMNode *nsnode, HTMLDOMN
 
 void HTMLDOMNode_init_dispex_info(dispex_data_t *info, compat_mode_t mode)
 {
-    if(mode >= COMPAT_MODE_IE9)
+    if(mode >= COMPAT_MODE_IE9) {
+        dispex_info_add_interface(info, IHTMLDOMNode2_tid, NULL);
         dispex_info_add_interface(info, IHTMLDOMNode3_tid, NULL);
+    }
 
     EventTarget_init_dispex_info(info, mode);
 }
@@ -1475,17 +1478,20 @@ static const NodeImplVtbl HTMLDOMNodeImplVtbl = {
 
 void HTMLDOMNode_Init(HTMLDocumentNode *doc, HTMLDOMNode *node, nsIDOMNode *nsnode, dispex_static_data_t *dispex_data)
 {
+    HTMLInnerWindow *window = NULL;
     nsresult nsres;
 
     node->IHTMLDOMNode_iface.lpVtbl = &HTMLDOMNodeVtbl;
     node->IHTMLDOMNode2_iface.lpVtbl = &HTMLDOMNode2Vtbl;
     node->IHTMLDOMNode3_iface.lpVtbl = &HTMLDOMNode3Vtbl;
 
-    EventTarget_Init(&node->event_target, dispex_data, doc->document_mode);
-
-    if(&doc->node != node)
+    if(&doc->node != node) {
         IHTMLDOMNode_AddRef(&doc->node.IHTMLDOMNode_iface);
+        window = get_inner_window(doc);
+    }
     node->doc = doc;
+
+    EventTarget_Init(&node->event_target, dispex_data, window);
 
     nsIDOMNode_AddRef(nsnode);
     node->nsnode = nsnode;
@@ -1505,9 +1511,10 @@ static const tid_t HTMLDOMNode_iface_tids[] = {
     IHTMLDOMNode_tid,
     0
 };
-static dispex_static_data_t HTMLDOMNode_dispex = {
+dispex_static_data_t HTMLDOMNode_dispex = {
     "Node",
     &HTMLDOMNode_dispex_vtbl,
+    PROTO_ID_HTMLDOMNode,
     IHTMLDOMNode_tid,
     HTMLDOMNode_iface_tids,
     HTMLDOMNode_init_dispex_info

@@ -28,6 +28,7 @@
 
 #include "wine/mscvpdb.h"
 #include "wine/debug.h"
+#include "wine/heap.h"
 
 #include "diasymreader_private.h"
 
@@ -106,7 +107,7 @@ static ULONG WINAPI SymDocumentWriter_Release(ISymUnmanagedDocumentWriter *iface
 
     if (ref == 0)
     {
-        free(This);
+        heap_free(This);
     }
 
     return ref;
@@ -186,7 +187,7 @@ static ULONG WINAPI SymWriter_Release(ISymUnmanagedWriter5 *iface)
     {
         This->lock.DebugInfo->Spare[0] = 0;
         DeleteCriticalSection(&This->lock);
-        free(This);
+        heap_free(This);
     }
 
     return ref;
@@ -204,7 +205,7 @@ static HRESULT WINAPI SymWriter_DefineDocument(ISymUnmanagedWriter5 *iface, cons
     if (!pRetVal)
         return E_POINTER;
 
-    result = malloc(sizeof(*result));
+    result = heap_alloc(sizeof(*result));
     if (!result)
         return E_OUTOFMEMORY;
 
@@ -595,7 +596,7 @@ HRESULT SymWriter_CreateInstance(REFIID iid, void **ppv)
     SymWriter *This;
     HRESULT hr;
 
-    This = malloc(sizeof(*This));
+    This = heap_alloc(sizeof(*This));
     if (!This)
         return E_OUTOFMEMORY;
 

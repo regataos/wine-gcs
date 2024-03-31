@@ -25,4 +25,4 @@ enum name_attr_id
     NAME_ATTR_ID_VERSION
 };
 
-const WCHAR *get_name_attribute( IAssemblyName *, enum name_attr_id );
+const WCHAR *get_name_attribute( IAssemblyName *, enum name_attr_id ) DECLSPEC_HIDDEN;

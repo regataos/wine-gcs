@@ -1436,12 +1436,12 @@ static HMENU copy_sys_popup( BOOL mdi )
     struct menu *menu;
     void *ret_ptr;
     ULONG ret_len;
-    NTSTATUS status;
-    HMENU handle = 0;
+    HMENU handle;
 
     params.mdi = mdi;
-    status = KeUserModeCallback( NtUserLoadSysMenu, &params, sizeof(params), &ret_ptr, &ret_len );
-    if (!status && ret_len == sizeof(HMENU)) handle = *(HMENU *)ret_ptr;
+    handle = UlongToHandle( KeUserModeCallback( NtUserLoadSysMenu, &params, sizeof(params),
+                                                &ret_ptr, &ret_len ));
+
     if (!handle || !(menu = grab_menu_ptr( handle )))
     {
         ERR("Unable to load default system menu\n" );

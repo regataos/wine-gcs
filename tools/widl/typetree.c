@@ -65,7 +65,7 @@ type_t *make_type(enum type_type type)
     t->tfswrite = FALSE;
     t->checked = FALSE;
     t->typelib_idx = -1;
-    init_location( &t->where, NULL, NULL );
+    init_loc_info(&t->loc_info);
     return t;
 }
 
@@ -172,8 +172,8 @@ static size_t append_type_signature(char **buf, size_t *len, size_t pos, type_t 
         else if (type->signature) n += strappend(buf, len, pos + n, "%s", type->signature);
         else
         {
-            if (!(uuid = get_attrp( type->attrs, ATTR_UUID )))
-                error_at( &type->where, "cannot compute type signature, no uuid found for type %s.\n", type->name );
+            if (!(uuid = get_attrp(type->attrs, ATTR_UUID)))
+                error_loc_info(&type->loc_info, "cannot compute type signature, no uuid found for type %s.\n", type->name);
 
             n += strappend(buf, len, pos + n, "{%08x-%04x-%04x-%02x%02x-%02x%02x%02x%02x%02x%02x}",
                            uuid->Data1, uuid->Data2, uuid->Data3,
@@ -198,7 +198,6 @@ static size_t append_type_signature(char **buf, size_t *len, size_t pos, type_t 
         return n;
     case TYPE_ALIAS:
         if (!strcmp(type->name, "boolean")) n += strappend(buf, len, pos + n, "b1");
-        else if (!strcmp(type->name, "GUID")) n += strappend(buf, len, pos + n, "g16");
         else if (!strcmp(type->name, "HSTRING")) n += strappend(buf, len, pos + n, "string");
         else n += append_type_signature(buf, len, pos + n, type->details.alias.aliasee.type);
         return n;
@@ -211,12 +210,8 @@ static size_t append_type_signature(char **buf, size_t *len, size_t pos, type_t 
     case TYPE_BASIC:
         switch (type_basic_get_type(type))
         {
-        case TYPE_BASIC_INT16:
-            n += strappend(buf, len, pos + n, type_basic_get_sign(type) <= 0 ? "i2" : "u2");
-            return n;
         case TYPE_BASIC_INT:
         case TYPE_BASIC_INT32:
-        case TYPE_BASIC_LONG:
             n += strappend(buf, len, pos + n, type_basic_get_sign(type) <= 0 ? "i4" : "u4");
             return n;
         case TYPE_BASIC_INT64:
@@ -235,14 +230,15 @@ static size_t append_type_signature(char **buf, size_t *len, size_t pos, type_t 
         case TYPE_BASIC_BYTE:
             n += strappend(buf, len, pos + n, "u1");
             return n;
+        case TYPE_BASIC_INT16:
         case TYPE_BASIC_INT3264:
+        case TYPE_BASIC_LONG:
         case TYPE_BASIC_CHAR:
         case TYPE_BASIC_HYPER:
         case TYPE_BASIC_WCHAR:
         case TYPE_BASIC_ERROR_STATUS_T:
         case TYPE_BASIC_HANDLE:
-            error_at( &type->where, "unimplemented type signature for basic type %d.\n",
-                      type_basic_get_type( type ) );
+            error_loc_info(&type->loc_info, "unimplemented type signature for basic type %d.\n", type_basic_get_type(type));
             break;
         }
     case TYPE_ENUM:
@@ -261,8 +257,7 @@ static size_t append_type_signature(char **buf, size_t *len, size_t pos, type_t 
     case TYPE_BITFIELD:
     case TYPE_MODULE:
     case TYPE_APICONTRACT:
-        error_at( &type->where, "unimplemented type signature for type %s of type %d.\n",
-                  type->name, type->type_type );
+        error_loc_info(&type->loc_info, "unimplemented type signature for type %s of type %d.\n", type->name, type->type_type);
         break;
     case TYPE_PARAMETERIZED_TYPE:
     case TYPE_PARAMETER:
@@ -348,8 +343,8 @@ static char *format_parameterized_type_signature(type_t *type, typeref_list_t *p
     typeref_t *ref;
     const struct uuid *uuid;
 
-    if (!(uuid = get_attrp( type->attrs, ATTR_UUID )))
-        error_at( &type->where, "cannot compute type signature, no uuid found for type %s.\n", type->name );
+     if (!(uuid = get_attrp(type->attrs, ATTR_UUID)))
+        error_loc_info(&type->loc_info, "cannot compute type signature, no uuid found for type %s.\n", type->name);
 
     pos += strappend(&buf, &len, pos, "pinterface({%08x-%04x-%04x-%02x%02x-%02x%02x%02x%02x%02x%02x}",
                      uuid->Data1, uuid->Data2, uuid->Data3,
@@ -478,7 +473,7 @@ type_t *type_new_alias(const decl_spec_t *t, const char *name)
     a->name = xstrdup(name);
     a->attrs = NULL;
     a->details.alias.aliasee = *t;
-    init_location( &a->where, NULL, NULL );
+    init_loc_info(&a->loc_info);
 
     return a;
 }
@@ -724,17 +719,17 @@ static unsigned int compute_method_indexes(type_t *iface)
 type_t *type_interface_declare(char *name, struct namespace *namespace)
 {
     type_t *type = get_type(TYPE_INTERFACE, name, namespace, 0);
-    if (type_get_type_detect_alias( type ) != TYPE_INTERFACE)
-        error_loc( "interface %s previously not declared an interface at %s:%d\n", type->name,
-                   type->where.input_name, type->where.first_line );
+    if (type_get_type_detect_alias(type) != TYPE_INTERFACE)
+        error_loc("interface %s previously not declared an interface at %s:%d\n",
+                  type->name, type->loc_info.input_name, type->loc_info.line_number);
     return type;
 }
 
 type_t *type_interface_define(type_t *iface, attr_list_t *attrs, type_t *inherit, statement_list_t *stmts, typeref_list_t *requires)
 {
     if (iface->defined)
-        error_loc( "interface %s already defined at %s:%d\n", iface->name,
-                   iface->where.input_name, iface->where.first_line );
+        error_loc("interface %s already defined at %s:%d\n",
+                  iface->name, iface->loc_info.input_name, iface->loc_info.line_number);
     if (iface == inherit)
         error_loc("interface %s can't inherit from itself\n",
                   iface->name);
@@ -755,17 +750,17 @@ type_t *type_interface_define(type_t *iface, attr_list_t *attrs, type_t *inherit
 type_t *type_dispinterface_declare(char *name)
 {
     type_t *type = get_type(TYPE_INTERFACE, name, NULL, 0);
-    if (type_get_type_detect_alias( type ) != TYPE_INTERFACE)
-        error_loc( "dispinterface %s previously not declared a dispinterface at %s:%d\n",
-                   type->name, type->where.input_name, type->where.first_line );
+    if (type_get_type_detect_alias(type) != TYPE_INTERFACE)
+        error_loc("dispinterface %s previously not declared a dispinterface at %s:%d\n",
+                  type->name, type->loc_info.input_name, type->loc_info.line_number);
     return type;
 }
 
 type_t *type_dispinterface_define(type_t *iface, attr_list_t *attrs, var_list_t *props, var_list_t *methods)
 {
     if (iface->defined)
-        error_loc( "dispinterface %s already defined at %s:%d\n", iface->name,
-                   iface->where.input_name, iface->where.first_line );
+        error_loc("dispinterface %s already defined at %s:%d\n",
+                  iface->name, iface->loc_info.input_name, iface->loc_info.line_number);
     iface->attrs = check_dispiface_attrs(iface->name, attrs);
     iface->details.iface = xmalloc(sizeof(*iface->details.iface));
     iface->details.iface->disp_props = props;
@@ -784,8 +779,8 @@ type_t *type_dispinterface_define(type_t *iface, attr_list_t *attrs, var_list_t 
 type_t *type_dispinterface_define_from_iface(type_t *dispiface, attr_list_t *attrs, type_t *iface)
 {
     if (dispiface->defined)
-        error_loc( "dispinterface %s already defined at %s:%d\n", dispiface->name,
-                   dispiface->where.input_name, dispiface->where.first_line );
+        error_loc("dispinterface %s already defined at %s:%d\n",
+                  dispiface->name, dispiface->loc_info.input_name, dispiface->loc_info.line_number);
     dispiface->attrs = check_dispiface_attrs(dispiface->name, attrs);
     dispiface->details.iface = xmalloc(sizeof(*dispiface->details.iface));
     dispiface->details.iface->disp_props = NULL;
@@ -804,17 +799,17 @@ type_t *type_dispinterface_define_from_iface(type_t *dispiface, attr_list_t *att
 type_t *type_module_declare(char *name)
 {
     type_t *type = get_type(TYPE_MODULE, name, NULL, 0);
-    if (type_get_type_detect_alias( type ) != TYPE_MODULE)
-        error_loc( "module %s previously not declared a module at %s:%d\n", type->name,
-                   type->where.input_name, type->where.first_line );
+    if (type_get_type_detect_alias(type) != TYPE_MODULE)
+        error_loc("module %s previously not declared a module at %s:%d\n",
+                  type->name, type->loc_info.input_name, type->loc_info.line_number);
     return type;
 }
 
 type_t *type_module_define(type_t* module, attr_list_t *attrs, statement_list_t *stmts)
 {
     if (module->defined)
-        error_loc( "module %s already defined at %s:%d\n", module->name,
-                   module->where.input_name, module->where.first_line );
+        error_loc("module %s already defined at %s:%d\n",
+                  module->name, module->loc_info.input_name, module->loc_info.line_number);
     module->attrs = check_module_attrs(module->name, attrs);
     module->details.module = xmalloc(sizeof(*module->details.module));
     module->details.module->stmts = stmts;
@@ -825,17 +820,17 @@ type_t *type_module_define(type_t* module, attr_list_t *attrs, statement_list_t 
 type_t *type_coclass_declare(char *name)
 {
     type_t *type = get_type(TYPE_COCLASS, name, NULL, 0);
-    if (type_get_type_detect_alias( type ) != TYPE_COCLASS)
-        error_loc( "coclass %s previously not declared a coclass at %s:%d\n", type->name,
-                   type->where.input_name, type->where.first_line );
+    if (type_get_type_detect_alias(type) != TYPE_COCLASS)
+        error_loc("coclass %s previously not declared a coclass at %s:%d\n",
+                  type->name, type->loc_info.input_name, type->loc_info.line_number);
     return type;
 }
 
 type_t *type_coclass_define(type_t *coclass, attr_list_t *attrs, typeref_list_t *ifaces)
 {
     if (coclass->defined)
-        error_loc( "coclass %s already defined at %s:%d\n", coclass->name,
-                   coclass->where.input_name, coclass->where.first_line );
+        error_loc("coclass %s already defined at %s:%d\n",
+                  coclass->name, coclass->loc_info.input_name, coclass->loc_info.line_number);
     coclass->attrs = check_coclass_attrs(coclass->name, attrs);
     coclass->details.coclass.ifaces = ifaces;
     coclass->defined = TRUE;
@@ -845,9 +840,9 @@ type_t *type_coclass_define(type_t *coclass, attr_list_t *attrs, typeref_list_t 
 type_t *type_runtimeclass_declare(char *name, struct namespace *namespace)
 {
     type_t *type = get_type(TYPE_RUNTIMECLASS, name, namespace, 0);
-    if (type_get_type_detect_alias( type ) != TYPE_RUNTIMECLASS)
-        error_loc( "runtimeclass %s previously not declared a runtimeclass at %s:%d\n", type->name,
-                   type->where.input_name, type->where.first_line );
+    if (type_get_type_detect_alias(type) != TYPE_RUNTIMECLASS)
+        error_loc("runtimeclass %s previously not declared a runtimeclass at %s:%d\n",
+                  type->name, type->loc_info.input_name, type->loc_info.line_number);
     return type;
 }
 
@@ -857,8 +852,8 @@ type_t *type_runtimeclass_define(type_t *runtimeclass, attr_list_t *attrs, typer
     typeref_list_t *requires;
 
     if (runtimeclass->defined)
-        error_loc( "runtimeclass %s already defined at %s:%d\n", runtimeclass->name,
-                   runtimeclass->where.input_name, runtimeclass->where.first_line );
+        error_loc("runtimeclass %s already defined at %s:%d\n",
+                  runtimeclass->name, runtimeclass->loc_info.input_name, runtimeclass->loc_info.line_number);
     runtimeclass->attrs = check_runtimeclass_attrs(runtimeclass->name, attrs);
     runtimeclass->details.runtimeclass.ifaces = ifaces;
     runtimeclass->defined = TRUE;
@@ -893,17 +888,17 @@ type_t *type_runtimeclass_define(type_t *runtimeclass, attr_list_t *attrs, typer
 type_t *type_apicontract_declare(char *name, struct namespace *namespace)
 {
     type_t *type = get_type(TYPE_APICONTRACT, name, namespace, 0);
-    if (type_get_type_detect_alias( type ) != TYPE_APICONTRACT)
-        error_loc( "apicontract %s previously not declared a apicontract at %s:%d\n", type->name,
-                   type->where.input_name, type->where.first_line );
+    if (type_get_type_detect_alias(type) != TYPE_APICONTRACT)
+        error_loc("apicontract %s previously not declared a apicontract at %s:%d\n",
+                  type->name, type->loc_info.input_name, type->loc_info.line_number);
     return type;
 }
 
 type_t *type_apicontract_define(type_t *apicontract, attr_list_t *attrs)
 {
     if (apicontract->defined)
-        error_loc( "apicontract %s already defined at %s:%d\n", apicontract->name,
-                   apicontract->where.input_name, apicontract->where.first_line );
+        error_loc("apicontract %s already defined at %s:%d\n",
+                  apicontract->name, apicontract->loc_info.input_name, apicontract->loc_info.line_number);
     apicontract->attrs = check_apicontract_attrs(apicontract->name, attrs);
     apicontract->defined = TRUE;
     return apicontract;
@@ -924,9 +919,9 @@ static void compute_delegate_iface_names(type_t *delegate, type_t *type, typeref
 type_t *type_delegate_declare(char *name, struct namespace *namespace)
 {
     type_t *type = get_type(TYPE_DELEGATE, name, namespace, 0);
-    if (type_get_type_detect_alias( type ) != TYPE_DELEGATE)
-        error_loc( "delegate %s previously not declared a delegate at %s:%d\n", type->name,
-                   type->where.input_name, type->where.first_line );
+    if (type_get_type_detect_alias(type) != TYPE_DELEGATE)
+        error_loc("delegate %s previously not declared a delegate at %s:%d\n",
+                  type->name, type->loc_info.input_name, type->loc_info.line_number);
     return type;
 }
 
@@ -935,8 +930,8 @@ type_t *type_delegate_define(type_t *delegate, attr_list_t *attrs, statement_lis
     type_t *iface;
 
     if (delegate->defined)
-        error_loc( "delegate %s already defined at %s:%d\n", delegate->name,
-                   delegate->where.input_name, delegate->where.first_line );
+        error_loc("delegate %s already defined at %s:%d\n",
+                  delegate->name, delegate->loc_info.input_name, delegate->loc_info.line_number);
 
     delegate->attrs = check_interface_attrs(delegate->name, attrs);
 
@@ -964,9 +959,9 @@ type_t *type_delegate_define(type_t *delegate, attr_list_t *attrs, statement_lis
 type_t *type_parameterized_interface_declare(char *name, struct namespace *namespace, typeref_list_t *params)
 {
     type_t *type = get_type(TYPE_PARAMETERIZED_TYPE, name, namespace, 0);
-    if (type_get_type_detect_alias( type ) != TYPE_PARAMETERIZED_TYPE)
-        error_loc( "pinterface %s previously not declared a pinterface at %s:%d\n", type->name,
-                   type->where.input_name, type->where.first_line );
+    if (type_get_type_detect_alias(type) != TYPE_PARAMETERIZED_TYPE)
+        error_loc("pinterface %s previously not declared a pinterface at %s:%d\n",
+                  type->name, type->loc_info.input_name, type->loc_info.line_number);
     type->details.parameterized.type = make_type(TYPE_INTERFACE);
     type->details.parameterized.params = params;
     return type;
@@ -976,8 +971,8 @@ type_t *type_parameterized_interface_define(type_t *type, attr_list_t *attrs, ty
 {
     type_t *iface;
     if (type->defined)
-        error_loc( "pinterface %s already defined at %s:%d\n", type->name,
-                   type->where.input_name, type->where.first_line );
+        error_loc("pinterface %s already defined at %s:%d\n",
+                  type->name, type->loc_info.input_name, type->loc_info.line_number);
 
     /* The parameterized type UUID is actually a PIID that is then used as a seed to generate
      * a new type GUID with the rules described in:
@@ -1005,9 +1000,9 @@ type_t *type_parameterized_interface_define(type_t *type, attr_list_t *attrs, ty
 type_t *type_parameterized_delegate_declare(char *name, struct namespace *namespace, typeref_list_t *params)
 {
     type_t *type = get_type(TYPE_PARAMETERIZED_TYPE, name, namespace, 0);
-    if (type_get_type_detect_alias( type ) != TYPE_PARAMETERIZED_TYPE)
-        error_loc( "pdelegate %s previously not declared a pdelegate at %s:%d\n", type->name,
-                   type->where.input_name, type->where.first_line );
+    if (type_get_type_detect_alias(type) != TYPE_PARAMETERIZED_TYPE)
+        error_loc("pdelegate %s previously not declared a pdelegate at %s:%d\n",
+                  type->name, type->loc_info.input_name, type->loc_info.line_number);
     type->details.parameterized.type = make_type(TYPE_DELEGATE);
     type->details.parameterized.params = params;
     return type;
@@ -1018,8 +1013,8 @@ type_t *type_parameterized_delegate_define(type_t *type, attr_list_t *attrs, sta
     type_t *iface, *delegate;
 
     if (type->defined)
-        error_loc( "pdelegate %s already defined at %s:%d\n", type->name,
-                   type->where.input_name, type->where.first_line );
+        error_loc("pdelegate %s already defined at %s:%d\n",
+                  type->name, type->loc_info.input_name, type->loc_info.line_number);
 
     type->attrs = check_interface_attrs(type->name, attrs);
 
@@ -1099,8 +1094,7 @@ static var_list_t *replace_type_parameters_in_var_list(var_list_t *var_list, typ
     return new_var_list;
 }
 
-static statement_t *replace_type_parameters_in_statement( statement_t *stmt, typeref_list_t *orig,
-                                                          typeref_list_t *repl, struct location *where )
+static statement_t *replace_type_parameters_in_statement(statement_t *stmt, typeref_list_t *orig, typeref_list_t *repl, loc_info_t *loc)
 {
     statement_t *new_stmt = xmalloc(sizeof(*new_stmt));
     *new_stmt = *stmt;
@@ -1124,15 +1118,14 @@ static statement_t *replace_type_parameters_in_statement( statement_t *stmt, typ
     case STMT_IMPORTLIB:
     case STMT_PRAGMA:
     case STMT_CPPQUOTE:
-        error_at( where, "unimplemented parameterized type replacement for statement type %d.\n", stmt->type );
+        error_loc_info(loc, "unimplemented parameterized type replacement for statement type %d.\n", stmt->type);
         break;
     }
 
     return new_stmt;
 }
 
-static statement_list_t *replace_type_parameters_in_statement_list( statement_list_t *stmt_list, typeref_list_t *orig,
-                                                                    typeref_list_t *repl, struct location *where )
+static statement_list_t *replace_type_parameters_in_statement_list(statement_list_t *stmt_list, typeref_list_t *orig, typeref_list_t *repl, loc_info_t *loc)
 {
     statement_list_t *new_stmt_list;
     statement_t *stmt, *new_stmt;
@@ -1144,7 +1137,7 @@ static statement_list_t *replace_type_parameters_in_statement_list( statement_li
 
     LIST_FOR_EACH_ENTRY(stmt, stmt_list, statement_t, entry)
     {
-        new_stmt = replace_type_parameters_in_statement( stmt, orig, repl, where );
+        new_stmt = replace_type_parameters_in_statement(stmt, orig, repl, loc);
         list_add_tail(new_stmt_list, &new_stmt->entry);
     }
 
@@ -1209,8 +1202,7 @@ static type_t *replace_type_parameters_in_type(type_t *type, typeref_list_t *ori
     case TYPE_MODULE:
     case TYPE_COCLASS:
     case TYPE_APICONTRACT:
-        error_at( &type->where, "unimplemented parameterized type replacement for type %s of type %d.\n",
-                  type->name, type->type_type );
+        error_loc_info(&type->loc_info, "unimplemented parameterized type replacement for type %s of type %d.\n", type->name, type->type_type);
         break;
     }
 
@@ -1222,8 +1214,7 @@ static void type_parameterized_interface_specialize(type_t *tmpl, type_t *iface,
     iface->details.iface = xmalloc(sizeof(*iface->details.iface));
     iface->details.iface->disp_methods = NULL;
     iface->details.iface->disp_props = NULL;
-    iface->details.iface->stmts = replace_type_parameters_in_statement_list( tmpl->details.iface->stmts,
-                                                                             orig, repl, &tmpl->where );
+    iface->details.iface->stmts = replace_type_parameters_in_statement_list(tmpl->details.iface->stmts, orig, repl, &tmpl->loc_info);
     iface->details.iface->inherit = replace_type_parameters_in_type(tmpl->details.iface->inherit, orig, repl);
     iface->details.iface->disp_inherit = NULL;
     iface->details.iface->async_iface = NULL;
@@ -1268,7 +1259,7 @@ static void compute_interface_signature_uuid(type_t *iface)
     if (!(uuid = get_attrp(iface->attrs, ATTR_UUID)))
     {
         uuid = xmalloc(sizeof(*uuid));
-        iface->attrs = append_attr( iface->attrs, attr_ptr( iface->where, ATTR_UUID, uuid ) );
+        iface->attrs = append_attr(iface->attrs, make_attrp(ATTR_UUID, uuid));
     }
 
     sha1_init(&ctx);
@@ -1304,8 +1295,8 @@ type_t *type_parameterized_type_specialize_define(type_t *type)
 
     if (type_get_type_detect_alias(type) != TYPE_PARAMETERIZED_TYPE ||
         type_get_type_detect_alias(tmpl) != TYPE_PARAMETERIZED_TYPE)
-        error_loc( "cannot define non-parameterized type %s, declared at %s:%d\n", type->name,
-                   type->where.input_name, type->where.first_line );
+        error_loc("cannot define non-parameterized type %s, declared at %s:%d\n",
+                  type->name, type->loc_info.input_name, type->loc_info.line_number);
 
     if (type_get_type_detect_alias(tmpl->details.parameterized.type) == TYPE_INTERFACE &&
         type_get_type_detect_alias(iface) == TYPE_INTERFACE)
@@ -1315,7 +1306,7 @@ type_t *type_parameterized_type_specialize_define(type_t *type)
         type_parameterized_delegate_specialize(tmpl->details.parameterized.type, iface, orig, repl);
     else
         error_loc("pinterface/pdelegate %s previously not declared a pinterface/pdelegate at %s:%d\n",
-                  iface->name, iface->where.input_name, iface->where.first_line);
+                  iface->name, iface->loc_info.input_name, iface->loc_info.line_number);
 
     iface->impl_name = format_parameterized_type_impl_name(type, repl, "");
     iface->signature = format_parameterized_type_signature(type, repl);

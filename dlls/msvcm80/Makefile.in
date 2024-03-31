@@ -2,5 +2,5 @@ MODULE    = msvcm80.dll
 
 EXTRADLLFLAGS = -Wb,--prefer-native
 
-SOURCES = \
+C_SRCS = \
 	msvcm_main.c

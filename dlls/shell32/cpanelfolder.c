@@ -24,6 +24,8 @@
 #include <stdio.h>
 
 #define COBJMACROS
+#define NONAMELESSUNION
+
 #include "winerror.h"
 #include "windef.h"
 #include "winbase.h"
@@ -636,18 +638,18 @@ static HRESULT WINAPI ISF_ControlPanel_fnGetUIObjectOf(IShellFolder2 *iface, HWN
 	} else if (IsEqualIID(riid, &IID_IExtractIconA) &&(cidl == 1)) {
 	    pidl = ILCombine(This->pidlRoot, apidl[0]);
 	    pObj = (LPUNKNOWN) IExtractIconA_Constructor(pidl);
-	    ILFree(pidl);
+	    SHFree(pidl);
 	    hr = S_OK;
 	} else if (IsEqualIID(riid, &IID_IExtractIconW) &&(cidl == 1)) {
 	    pidl = ILCombine(This->pidlRoot, apidl[0]);
 	    pObj = (LPUNKNOWN) IExtractIconW_Constructor(pidl);
-	    ILFree(pidl);
+	    SHFree(pidl);
 	    hr = S_OK;
 	} else if ((IsEqualIID(riid,&IID_IShellLinkW) || IsEqualIID(riid,&IID_IShellLinkA))
 				&& (cidl == 1)) {
 	    pidl = ILCombine(This->pidlRoot, apidl[0]);
 	    hr = IShellLink_ConstructFromFile(NULL, riid, pidl, &pObj);
-	    ILFree(pidl);
+	    SHFree(pidl);
 	} else {
 	    hr = E_NOINTERFACE;
 	}
@@ -713,7 +715,7 @@ static HRESULT WINAPI ISF_ControlPanel_fnGetDisplayNameOf(IShellFolder2 *iface, 
     }
 
     strRet->uType = STRRET_CSTR;
-    lstrcpynA(strRet->cStr, szPath, MAX_PATH);
+    lstrcpynA(strRet->u.cStr, szPath, MAX_PATH);
 
     TRACE("--(%p)->(%s)\n", This, szPath);
     return S_OK;
@@ -797,7 +799,7 @@ static HRESULT WINAPI ISF_ControlPanel_fnGetDetailsOf(IShellFolder2 *iface, LPCI
     if (!pidl)
         return SHELL32_GetColumnDetails(ControlPanelSFHeader, iColumn, psd);
 
-    psd->str.cStr[0] = 0x00;
+    psd->str.u.cStr[0] = 0x00;
     psd->str.uType = STRRET_CSTR;
     switch(iColumn)
     {
@@ -805,9 +807,9 @@ static HRESULT WINAPI ISF_ControlPanel_fnGetDetailsOf(IShellFolder2 *iface, LPCI
         pcpanel = _ILGetCPanelPointer(pidl);
 
         if (pcpanel)
-            lstrcpyA(psd->str.cStr, pcpanel->szName+pcpanel->offsComment);
+            lstrcpyA(psd->str.u.cStr, pcpanel->szName+pcpanel->offsComment);
         else
-            _ILGetFileType(pidl, psd->str.cStr, MAX_PATH);
+            _ILGetFileType(pidl, psd->str.u.cStr, MAX_PATH);
         break;
 
     default:

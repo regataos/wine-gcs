@@ -22,8 +22,6 @@
 #include <stdarg.h>
 #include <string.h>
 
-#include "ntstatus.h"
-#define WIN32_NO_STATUS
 #include "wine/winuser16.h"
 #include "wownt32.h"
 #include "winerror.h"
@@ -947,15 +945,15 @@ LRESULT WINPROC_CallProc32ATo16( winproc_callback16_t callback, HWND hwnd, UINT 
             BOOL mdi_child = (GetWindowLongW(hwnd, GWL_EXSTYLE) & WS_EX_MDICHILD);
 
             CREATESTRUCT32Ato16( cs32, &cs );
-            cs.lpszName  = MapLS( (void *)cs32->lpszName );
-            cs.lpszClass = MapLS( (void *)cs32->lpszClass );
+            cs.lpszName  = MapLS( cs32->lpszName );
+            cs.lpszClass = MapLS( cs32->lpszClass );
 
             if (mdi_child)
             {
                 MDICREATESTRUCTA *mdi_cs = cs32->lpCreateParams;
                 MDICREATESTRUCT32Ato16( mdi_cs, &mdi_cs16 );
-                mdi_cs16.szTitle = MapLS( (void *)mdi_cs->szTitle );
-                mdi_cs16.szClass = MapLS( (void *)mdi_cs->szClass );
+                mdi_cs16.szTitle = MapLS( mdi_cs->szTitle );
+                mdi_cs16.szClass = MapLS( mdi_cs->szClass );
                 cs.lpCreateParams = MapLS( &mdi_cs16 );
             }
             lParam = MapLS( &cs );
@@ -977,8 +975,8 @@ LRESULT WINPROC_CallProc32ATo16( winproc_callback16_t callback, HWND hwnd, UINT 
             MDICREATESTRUCT16 cs;
 
             MDICREATESTRUCT32Ato16( cs32, &cs );
-            cs.szTitle = MapLS( (void *)cs32->szTitle );
-            cs.szClass = MapLS( (void *)cs32->szClass );
+            cs.szTitle = MapLS( cs32->szTitle );
+            cs.szClass = MapLS( cs32->szClass );
             lParam = MapLS( &cs );
             ret = callback( HWND_16(hwnd), msg, wParam, lParam, result, arg );
             UnMapLS( lParam );
@@ -2583,31 +2581,28 @@ HWND create_window16( CREATESTRUCTW *cs, LPCWSTR className, HINSTANCE instance, 
 }
 
 
-static NTSTATUS WINAPI User16CallFreeIcon( void *args, ULONG size )
+static void WINAPI User16CallFreeIcon( ULONG *param, ULONG size )
 {
-    ULONG *param = args;
     GlobalFree16( LOWORD(*param) );
-    return STATUS_SUCCESS;
 }
 
 
-static NTSTATUS WINAPI User16ThunkLock( void *args, ULONG size )
+static DWORD WINAPI User16ThunkLock( DWORD *param, ULONG size )
 {
-    DWORD *param = args;
     if (size != sizeof(DWORD))
     {
         DWORD lock;
         ReleaseThunkLock( &lock );
-        return NtCallbackReturn( &lock, sizeof(lock), STATUS_SUCCESS );
+        return lock;
     }
     RestoreThunkLock( *param );
-    return STATUS_SUCCESS;
+    return 0;
 }
 
 
 void register_wow_handlers(void)
 {
-    KERNEL_CALLBACK_PROC *callback_table = NtCurrentTeb()->Peb->KernelCallbackTable;
+    void **callback_table = NtCurrentTeb()->Peb->KernelCallbackTable;
     static const struct wow_handlers16 handlers16 =
     {
         button_proc16,

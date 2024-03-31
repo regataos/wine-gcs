@@ -1,4 +1,4 @@
 STATICLIB = libwbemuuid.a
 
-SOURCES = \
+C_SRCS = \
 	wbemuuid.c

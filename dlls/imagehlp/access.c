@@ -188,7 +188,9 @@ BOOL WINAPI MapAndLoad(PCSTR pszImageName, PCSTR pszDllPath, PLOADED_IMAGE pLoad
     pLoadedImage->hFile            = hFile;
     pLoadedImage->MappedAddress    = mapping;
     pLoadedImage->FileHeader       = pNtHeader;
-    pLoadedImage->Sections         = IMAGE_FIRST_SECTION(pNtHeader);
+    pLoadedImage->Sections         = (PIMAGE_SECTION_HEADER)
+        ((LPBYTE) &pNtHeader->OptionalHeader +
+         pNtHeader->FileHeader.SizeOfOptionalHeader);
     pLoadedImage->NumberOfSections = pNtHeader->FileHeader.NumberOfSections;
     pLoadedImage->SizeOfImage      = GetFileSize(hFile, NULL);
     pLoadedImage->Characteristics  = pNtHeader->FileHeader.Characteristics;

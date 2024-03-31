@@ -1,7 +1,9 @@
 MODULE    = mciqtz32.dll
 IMPORTS   = strmiids oleaut32 ole32 winmm user32 gdi32
 
-SOURCES = \
+C_SRCS = \
+	mciqtz.c
+
+RC_SRCS = \
 	mciavi_res.rc \
-	mciqtz.c \
 	version.rc

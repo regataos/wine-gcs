@@ -1,11 +1,13 @@
 MODULE    = qedit.dll
 IMPORTS   = strmiids strmbase uuid oleaut32 ole32 advapi32
 
-SOURCES = \
+C_SRCS = \
 	main.c \
 	mediadet.c \
 	nullrenderer.c \
-	qedit_classes.idl \
 	samplegrabber.c \
-	timeline.c \
-	version.rc
+	timeline.c
+
+IDL_SRCS = qedit_classes.idl
+
+RC_SRCS = version.rc

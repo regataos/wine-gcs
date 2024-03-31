@@ -3,7 +3,7 @@
  * This file is generated from Vulkan vk.xml file covered
  * by the following copyright and permission notice:
  *
- * Copyright 2015-2024 The Khronos Group Inc.
+ * Copyright 2015-2023 The Khronos Group Inc.
  *
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  *
@@ -45,11 +45,9 @@ enum unix_call
     unix_vkCmdBeginRendering,
     unix_vkCmdBeginRenderingKHR,
     unix_vkCmdBeginTransformFeedbackEXT,
-    unix_vkCmdBindDescriptorBufferEmbeddedSamplers2EXT,
     unix_vkCmdBindDescriptorBufferEmbeddedSamplersEXT,
     unix_vkCmdBindDescriptorBuffersEXT,
     unix_vkCmdBindDescriptorSets,
-    unix_vkCmdBindDescriptorSets2KHR,
     unix_vkCmdBindIndexBuffer,
     unix_vkCmdBindIndexBuffer2KHR,
     unix_vkCmdBindInvocationMaskHUAWEI,
@@ -94,7 +92,6 @@ enum unix_call
     unix_vkCmdCopyMicromapToMemoryEXT,
     unix_vkCmdCopyQueryPoolResults,
     unix_vkCmdCuLaunchKernelNVX,
-    unix_vkCmdCudaLaunchKernelNV,
     unix_vkCmdDebugMarkerBeginEXT,
     unix_vkCmdDebugMarkerEndEXT,
     unix_vkCmdDebugMarkerInsertEXT,
@@ -148,10 +145,7 @@ enum unix_call
     unix_vkCmdPipelineBarrier2KHR,
     unix_vkCmdPreprocessGeneratedCommandsNV,
     unix_vkCmdPushConstants,
-    unix_vkCmdPushConstants2KHR,
-    unix_vkCmdPushDescriptorSet2KHR,
     unix_vkCmdPushDescriptorSetKHR,
-    unix_vkCmdPushDescriptorSetWithTemplate2KHR,
     unix_vkCmdPushDescriptorSetWithTemplateKHR,
     unix_vkCmdResetEvent,
     unix_vkCmdResetEvent2,
@@ -196,7 +190,6 @@ enum unix_call
     unix_vkCmdSetDepthTestEnableEXT,
     unix_vkCmdSetDepthWriteEnable,
     unix_vkCmdSetDepthWriteEnableEXT,
-    unix_vkCmdSetDescriptorBufferOffsets2EXT,
     unix_vkCmdSetDescriptorBufferOffsetsEXT,
     unix_vkCmdSetDeviceMask,
     unix_vkCmdSetDeviceMaskKHR,
@@ -216,7 +209,6 @@ enum unix_call
     unix_vkCmdSetLineRasterizationModeEXT,
     unix_vkCmdSetLineStippleEXT,
     unix_vkCmdSetLineStippleEnableEXT,
-    unix_vkCmdSetLineStippleKHR,
     unix_vkCmdSetLineWidth,
     unix_vkCmdSetLogicOpEXT,
     unix_vkCmdSetLogicOpEnableEXT,
@@ -235,8 +227,6 @@ enum unix_call
     unix_vkCmdSetRasterizerDiscardEnable,
     unix_vkCmdSetRasterizerDiscardEnableEXT,
     unix_vkCmdSetRayTracingPipelineStackSizeKHR,
-    unix_vkCmdSetRenderingAttachmentLocationsKHR,
-    unix_vkCmdSetRenderingInputAttachmentIndicesKHR,
     unix_vkCmdSetRepresentativeFragmentTestEnableNV,
     unix_vkCmdSetSampleLocationsEXT,
     unix_vkCmdSetSampleLocationsEnableEXT,
@@ -297,8 +287,6 @@ enum unix_call
     unix_vkCreateComputePipelines,
     unix_vkCreateCuFunctionNVX,
     unix_vkCreateCuModuleNVX,
-    unix_vkCreateCudaFunctionNV,
-    unix_vkCreateCudaModuleNV,
     unix_vkCreateDebugReportCallbackEXT,
     unix_vkCreateDebugUtilsMessengerEXT,
     unix_vkCreateDeferredOperationKHR,
@@ -347,8 +335,6 @@ enum unix_call
     unix_vkDestroyCommandPool,
     unix_vkDestroyCuFunctionNVX,
     unix_vkDestroyCuModuleNVX,
-    unix_vkDestroyCudaFunctionNV,
-    unix_vkDestroyCudaModuleNV,
     unix_vkDestroyDebugReportCallbackEXT,
     unix_vkDestroyDebugUtilsMessengerEXT,
     unix_vkDestroyDeferredOperationKHR,
@@ -411,8 +397,6 @@ enum unix_call
     unix_vkGetBufferOpaqueCaptureAddressKHR,
     unix_vkGetBufferOpaqueCaptureDescriptorDataEXT,
     unix_vkGetCalibratedTimestampsEXT,
-    unix_vkGetCalibratedTimestampsKHR,
-    unix_vkGetCudaModuleCacheNV,
     unix_vkGetDeferredOperationMaxConcurrencyKHR,
     unix_vkGetDeferredOperationResultKHR,
     unix_vkGetDescriptorEXT,
@@ -461,11 +445,14 @@ enum unix_call
     unix_vkGetImageViewHandleNVX,
     unix_vkGetImageViewOpaqueCaptureDescriptorDataEXT,
     unix_vkGetLatencyTimingsNV,
+    unix_vkGetMemoryFdKHR,
+    unix_vkGetMemoryFdPropertiesKHR,
     unix_vkGetMemoryHostPointerPropertiesEXT,
+    unix_vkGetMemoryWin32HandleKHR,
+    unix_vkGetMemoryWin32HandlePropertiesKHR,
     unix_vkGetMicromapBuildSizesEXT,
     unix_vkGetPerformanceParameterINTEL,
     unix_vkGetPhysicalDeviceCalibrateableTimeDomainsEXT,
-    unix_vkGetPhysicalDeviceCalibrateableTimeDomainsKHR,
     unix_vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR,
     unix_vkGetPhysicalDeviceCooperativeMatrixPropertiesNV,
     unix_vkGetPhysicalDeviceExternalBufferProperties,
@@ -531,12 +518,16 @@ enum unix_call
     unix_vkGetSamplerOpaqueCaptureDescriptorDataEXT,
     unix_vkGetSemaphoreCounterValue,
     unix_vkGetSemaphoreCounterValueKHR,
+    unix_vkGetSemaphoreFdKHR,
+    unix_vkGetSemaphoreWin32HandleKHR,
     unix_vkGetShaderBinaryDataEXT,
     unix_vkGetShaderInfoAMD,
     unix_vkGetShaderModuleCreateInfoIdentifierEXT,
     unix_vkGetShaderModuleIdentifierEXT,
     unix_vkGetSwapchainImagesKHR,
     unix_vkGetValidationCacheDataEXT,
+    unix_vkImportSemaphoreFdKHR,
+    unix_vkImportSemaphoreWin32HandleKHR,
     unix_vkInitializePerformanceApiINTEL,
     unix_vkInvalidateMappedMemoryRanges,
     unix_vkLatencySleepNV,
@@ -592,6 +583,8 @@ enum unix_call
     unix_vkWaitSemaphoresKHR,
     unix_vkWriteAccelerationStructuresPropertiesKHR,
     unix_vkWriteMicromapsPropertiesEXT,
+    unix_wine_vkAcquireKeyedMutex,
+    unix_wine_vkReleaseKeyedMutex,
     unix_count,
 };
 
@@ -819,12 +812,6 @@ struct vkCmdBeginTransformFeedbackEXT_params
     const VkDeviceSize *pCounterBufferOffsets;
 };
 
-struct vkCmdBindDescriptorBufferEmbeddedSamplers2EXT_params
-{
-    VkCommandBuffer commandBuffer;
-    const VkBindDescriptorBufferEmbeddedSamplersInfoEXT *pBindDescriptorBufferEmbeddedSamplersInfo;
-};
-
 struct vkCmdBindDescriptorBufferEmbeddedSamplersEXT_params
 {
     VkCommandBuffer commandBuffer;
@@ -850,12 +837,6 @@ struct vkCmdBindDescriptorSets_params
     const VkDescriptorSet *pDescriptorSets;
     uint32_t dynamicOffsetCount;
     const uint32_t *pDynamicOffsets;
-};
-
-struct vkCmdBindDescriptorSets2KHR_params
-{
-    VkCommandBuffer commandBuffer;
-    const VkBindDescriptorSetsInfoKHR *pBindDescriptorSetsInfo;
 };
 
 struct vkCmdBindIndexBuffer_params
@@ -1211,12 +1192,6 @@ struct vkCmdCuLaunchKernelNVX_params
 {
     VkCommandBuffer commandBuffer;
     const VkCuLaunchInfoNVX *pLaunchInfo;
-};
-
-struct vkCmdCudaLaunchKernelNV_params
-{
-    VkCommandBuffer commandBuffer;
-    const VkCudaLaunchInfoNV *pLaunchInfo;
 };
 
 struct vkCmdDebugMarkerBeginEXT_params
@@ -1652,18 +1627,6 @@ struct vkCmdPushConstants_params
     const void *pValues;
 };
 
-struct vkCmdPushConstants2KHR_params
-{
-    VkCommandBuffer commandBuffer;
-    const VkPushConstantsInfoKHR *pPushConstantsInfo;
-};
-
-struct vkCmdPushDescriptorSet2KHR_params
-{
-    VkCommandBuffer commandBuffer;
-    const VkPushDescriptorSetInfoKHR *pPushDescriptorSetInfo;
-};
-
 struct vkCmdPushDescriptorSetKHR_params
 {
     VkCommandBuffer commandBuffer;
@@ -1672,12 +1635,6 @@ struct vkCmdPushDescriptorSetKHR_params
     uint32_t set;
     uint32_t descriptorWriteCount;
     const VkWriteDescriptorSet *pDescriptorWrites;
-};
-
-struct vkCmdPushDescriptorSetWithTemplate2KHR_params
-{
-    VkCommandBuffer commandBuffer;
-    const VkPushDescriptorSetWithTemplateInfoKHR *pPushDescriptorSetWithTemplateInfo;
 };
 
 struct vkCmdPushDescriptorSetWithTemplateKHR_params
@@ -1972,12 +1929,6 @@ struct vkCmdSetDepthWriteEnableEXT_params
     VkBool32 depthWriteEnable;
 };
 
-struct vkCmdSetDescriptorBufferOffsets2EXT_params
-{
-    VkCommandBuffer commandBuffer;
-    const VkSetDescriptorBufferOffsetsInfoEXT *pSetDescriptorBufferOffsetsInfo;
-};
-
 struct vkCmdSetDescriptorBufferOffsetsEXT_params
 {
     VkCommandBuffer commandBuffer;
@@ -2109,13 +2060,6 @@ struct vkCmdSetLineStippleEnableEXT_params
     VkBool32 stippledLineEnable;
 };
 
-struct vkCmdSetLineStippleKHR_params
-{
-    VkCommandBuffer commandBuffer;
-    uint32_t lineStippleFactor;
-    uint16_t lineStipplePattern;
-};
-
 struct vkCmdSetLineWidth_params
 {
     VkCommandBuffer commandBuffer;
@@ -2225,18 +2169,6 @@ struct vkCmdSetRayTracingPipelineStackSizeKHR_params
 {
     VkCommandBuffer commandBuffer;
     uint32_t pipelineStackSize;
-};
-
-struct vkCmdSetRenderingAttachmentLocationsKHR_params
-{
-    VkCommandBuffer commandBuffer;
-    const VkRenderingAttachmentLocationInfoKHR *pLocationInfo;
-};
-
-struct vkCmdSetRenderingInputAttachmentIndicesKHR_params
-{
-    VkCommandBuffer commandBuffer;
-    const VkRenderingInputAttachmentIndexInfoKHR *pLocationInfo;
 };
 
 struct vkCmdSetRepresentativeFragmentTestEnableNV_params
@@ -2735,24 +2667,6 @@ struct vkCreateCuModuleNVX_params
     VkResult result;
 };
 
-struct vkCreateCudaFunctionNV_params
-{
-    VkDevice device;
-    const VkCudaFunctionCreateInfoNV *pCreateInfo;
-    const VkAllocationCallbacks *pAllocator;
-    VkCudaFunctionNV *pFunction;
-    VkResult result;
-};
-
-struct vkCreateCudaModuleNV_params
-{
-    VkDevice device;
-    const VkCudaModuleCreateInfoNV *pCreateInfo;
-    const VkAllocationCallbacks *pAllocator;
-    VkCudaModuleNV *pModule;
-    VkResult result;
-};
-
 struct vkCreateDebugReportCallbackEXT_params
 {
     VkInstance instance;
@@ -3073,6 +2987,7 @@ struct vkCreateSwapchainKHR_params
     const VkSwapchainCreateInfoKHR *pCreateInfo;
     const VkAllocationCallbacks *pAllocator;
     VkSwapchainKHR *pSwapchain;
+    void *client_ptr;
     VkResult result;
 };
 
@@ -3173,20 +3088,6 @@ struct vkDestroyCuModuleNVX_params
 {
     VkDevice device;
     VkCuModuleNVX DECLSPEC_ALIGN(8) module;
-    const VkAllocationCallbacks *pAllocator;
-};
-
-struct vkDestroyCudaFunctionNV_params
-{
-    VkDevice device;
-    VkCudaFunctionNV DECLSPEC_ALIGN(8) function;
-    const VkAllocationCallbacks *pAllocator;
-};
-
-struct vkDestroyCudaModuleNV_params
-{
-    VkDevice device;
-    VkCudaModuleNV DECLSPEC_ALIGN(8) module;
     const VkAllocationCallbacks *pAllocator;
 };
 
@@ -3636,28 +3537,9 @@ struct vkGetCalibratedTimestampsEXT_params
 {
     VkDevice device;
     uint32_t timestampCount;
-    const VkCalibratedTimestampInfoKHR *pTimestampInfos;
+    const VkCalibratedTimestampInfoEXT *pTimestampInfos;
     uint64_t *pTimestamps;
     uint64_t *pMaxDeviation;
-    VkResult result;
-};
-
-struct vkGetCalibratedTimestampsKHR_params
-{
-    VkDevice device;
-    uint32_t timestampCount;
-    const VkCalibratedTimestampInfoKHR *pTimestampInfos;
-    uint64_t *pTimestamps;
-    uint64_t *pMaxDeviation;
-    VkResult result;
-};
-
-struct vkGetCudaModuleCacheNV_params
-{
-    VkDevice device;
-    VkCudaModuleNV DECLSPEC_ALIGN(8) module;
-    size_t *pCacheSize;
-    void *pCacheData;
     VkResult result;
 };
 
@@ -4018,7 +3900,25 @@ struct vkGetLatencyTimingsNV_params
 {
     VkDevice device;
     VkSwapchainKHR DECLSPEC_ALIGN(8) swapchain;
+    uint32_t *pTimingCount;
     VkGetLatencyMarkerInfoNV *pLatencyMarkerInfo;
+};
+
+struct vkGetMemoryFdKHR_params
+{
+    VkDevice device;
+    const VkMemoryGetFdInfoKHR *pGetFdInfo;
+    int *pFd;
+    VkResult result;
+};
+
+struct vkGetMemoryFdPropertiesKHR_params
+{
+    VkDevice device;
+    VkExternalMemoryHandleTypeFlagBits handleType;
+    int fd;
+    VkMemoryFdPropertiesKHR *pMemoryFdProperties;
+    VkResult result;
 };
 
 struct vkGetMemoryHostPointerPropertiesEXT_params
@@ -4027,6 +3927,23 @@ struct vkGetMemoryHostPointerPropertiesEXT_params
     VkExternalMemoryHandleTypeFlagBits handleType;
     const void *pHostPointer;
     VkMemoryHostPointerPropertiesEXT *pMemoryHostPointerProperties;
+    VkResult result;
+};
+
+struct vkGetMemoryWin32HandleKHR_params
+{
+    VkDevice device;
+    const VkMemoryGetWin32HandleInfoKHR *pGetWin32HandleInfo;
+    HANDLE *pHandle;
+    VkResult result;
+};
+
+struct vkGetMemoryWin32HandlePropertiesKHR_params
+{
+    VkDevice device;
+    VkExternalMemoryHandleTypeFlagBits handleType;
+    HANDLE handle;
+    VkMemoryWin32HandlePropertiesKHR *pMemoryWin32HandleProperties;
     VkResult result;
 };
 
@@ -4050,15 +3967,7 @@ struct vkGetPhysicalDeviceCalibrateableTimeDomainsEXT_params
 {
     VkPhysicalDevice physicalDevice;
     uint32_t *pTimeDomainCount;
-    VkTimeDomainKHR *pTimeDomains;
-    VkResult result;
-};
-
-struct vkGetPhysicalDeviceCalibrateableTimeDomainsKHR_params
-{
-    VkPhysicalDevice physicalDevice;
-    uint32_t *pTimeDomainCount;
-    VkTimeDomainKHR *pTimeDomains;
+    VkTimeDomainEXT *pTimeDomains;
     VkResult result;
 };
 
@@ -4578,6 +4487,22 @@ struct vkGetSemaphoreCounterValueKHR_params
     VkResult result;
 };
 
+struct vkGetSemaphoreFdKHR_params
+{
+    VkDevice device;
+    const VkSemaphoreGetFdInfoKHR *pGetFdInfo;
+    int *pFd;
+    VkResult result;
+};
+
+struct vkGetSemaphoreWin32HandleKHR_params
+{
+    VkDevice device;
+    const VkSemaphoreGetWin32HandleInfoKHR *pGetWin32HandleInfo;
+    HANDLE *pHandle;
+    VkResult result;
+};
+
 struct vkGetShaderBinaryDataEXT_params
 {
     VkDevice device;
@@ -4627,6 +4552,20 @@ struct vkGetValidationCacheDataEXT_params
     VkValidationCacheEXT DECLSPEC_ALIGN(8) validationCache;
     size_t *pDataSize;
     void *pData;
+    VkResult result;
+};
+
+struct vkImportSemaphoreFdKHR_params
+{
+    VkDevice device;
+    const VkImportSemaphoreFdInfoKHR *pImportSemaphoreFdInfo;
+    VkResult result;
+};
+
+struct vkImportSemaphoreWin32HandleKHR_params
+{
+    VkDevice device;
+    const VkImportSemaphoreWin32HandleInfoKHR *pImportSemaphoreWin32HandleInfo;
     VkResult result;
 };
 
@@ -5056,6 +4995,23 @@ struct vkWriteMicromapsPropertiesEXT_params
     size_t dataSize;
     void *pData;
     size_t stride;
+    VkResult result;
+};
+
+struct wine_vkAcquireKeyedMutex_params
+{
+    VkDevice device;
+    VkDeviceMemory DECLSPEC_ALIGN(8) memory;
+    uint64_t DECLSPEC_ALIGN(8) key;
+    uint32_t timeout_ms;
+    VkResult result;
+};
+
+struct wine_vkReleaseKeyedMutex_params
+{
+    VkDevice device;
+    VkDeviceMemory DECLSPEC_ALIGN(8) memory;
+    uint64_t DECLSPEC_ALIGN(8) key;
     VkResult result;
 };
 

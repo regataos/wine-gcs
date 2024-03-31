@@ -3,6 +3,6 @@ IMPORTS   = user32 gdi32 shell32
 
 EXTRADLLFLAGS = -mwindows
 
-SOURCES = \
-	write.c \
-	write.rc
+C_SRCS = write.c
+
+RC_SRCS = write.rc

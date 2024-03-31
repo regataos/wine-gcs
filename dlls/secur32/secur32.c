@@ -501,6 +501,10 @@ static void SECUR32_initializeProviders(void)
     SECUR32_initSchannelSP();
     /* Load SSP/AP packages (Kerberos and others) */
     load_auth_packages();
+    /* Load the Negotiate provider last so apps stumble over the working NTLM
+     * provider first. Attempting to fix bug #16905 while keeping the
+     * application reported on wine-users on 2006-09-12 working. */
+    SECUR32_initNegotiateSP();
     /* Now load providers from registry */
     apiRet = RegOpenKeyExW(HKEY_LOCAL_MACHINE, L"SYSTEM\\CurrentControlSet\\Control\\SecurityProviders", 0,
                            KEY_READ, &key);
@@ -816,33 +820,6 @@ SECURITY_STATUS WINAPI EnumerateSecurityPackagesA(PULONG pcPackages,
     return ret;
 }
 
-
-static const char *debugstr_NameFormat( EXTENDED_NAME_FORMAT format )
-{
-    static const char * const names[] =
-    {
-        "NameUnknown",
-        "NameFullyQualifiedDN",
-        "NameSamCompatible",
-        "NameDisplay",
-        NULL,
-        NULL,
-        "NameUniqueId",
-        "NameCanonical",
-        "NameUserPrincipal",
-        "NameCanonicalEx",
-        "NameServicePrincipal",
-        NULL,
-        "NameDnsDomain",
-        "NameGivenName",
-        "NameSurname"
-    };
-
-    if (format < ARRAY_SIZE(names) && names[format]) return names[format];
-    return wine_dbg_sprintf( "%u", format );
-}
-
-
 /***********************************************************************
  *		GetComputerObjectNameA (SECUR32.@)
  *
@@ -874,7 +851,7 @@ BOOLEAN WINAPI GetComputerObjectNameA(
     LPWSTR bufferW = NULL;
     ULONG sizeW = *nSize;
 
-    TRACE("(%s %p %p)\n", debugstr_NameFormat(NameFormat), lpNameBuffer, nSize);
+    TRACE("(%d %p %p)\n", NameFormat, lpNameBuffer, nSize);
 
     if (lpNameBuffer) {
         if (!(bufferW = malloc(sizeW * sizeof(WCHAR)))) {
@@ -906,7 +883,7 @@ BOOLEAN WINAPI GetComputerObjectNameW(
     NTSTATUS ntStatus;
     BOOLEAN status;
 
-    TRACE("(%s %p %p)\n", debugstr_NameFormat(NameFormat), lpNameBuffer, nSize);
+    TRACE("(%d %p %p)\n", NameFormat, lpNameBuffer, nSize);
 
     if (NameFormat == NameUnknown)
     {
@@ -1093,7 +1070,7 @@ BOOLEAN WINAPI GetUserNameExA(
     BOOLEAN rc;
     LPWSTR bufferW = NULL;
     ULONG sizeW = *nSize;
-    TRACE("(%s %p %p)\n", debugstr_NameFormat(NameFormat), lpNameBuffer, nSize);
+    TRACE("(%d %p %p)\n", NameFormat, lpNameBuffer, nSize);
     if (lpNameBuffer) {
         bufferW = malloc(sizeW * sizeof(WCHAR));
         if (bufferW == NULL) {
@@ -1125,7 +1102,7 @@ BOOLEAN WINAPI GetUserNameExA(
 BOOLEAN WINAPI GetUserNameExW(
   EXTENDED_NAME_FORMAT NameFormat, LPWSTR lpNameBuffer, PULONG nSize)
 {
-    TRACE("(%s %p %p)\n", debugstr_NameFormat(NameFormat), lpNameBuffer, nSize);
+    TRACE("(%d %p %p)\n", NameFormat, lpNameBuffer, nSize);
 
     switch (NameFormat)
     {
@@ -1158,16 +1135,28 @@ BOOLEAN WINAPI GetUserNameExW(
             return FALSE;
         }
 
+    case NameDisplay:
+        {
+            static const WCHAR wineusernameW[] = {'W','I','N','E','U','S','E','R','N','A','M','E',0};
+
+            DWORD needed = GetEnvironmentVariableW(wineusernameW, NULL, 0);
+            if (*nSize < needed) {
+                *nSize = needed;
+                SetLastError(ERROR_MORE_DATA);
+                return FALSE;
+            }
+            *nSize = GetEnvironmentVariableW(wineusernameW, lpNameBuffer, *nSize);
+            return TRUE;
+        }
+
     case NameUnknown:
     case NameFullyQualifiedDN:
-    case NameDisplay:
     case NameUniqueId:
     case NameCanonical:
     case NameUserPrincipal:
     case NameCanonicalEx:
     case NameServicePrincipal:
     case NameDnsDomain:
-        FIXME("NameFormat %d not implemented\n", NameFormat);
         SetLastError(ERROR_NONE_MAPPED);
         return FALSE;
 
@@ -1182,8 +1171,8 @@ BOOLEAN WINAPI TranslateNameA(
   EXTENDED_NAME_FORMAT DesiredNameFormat, LPSTR lpTranslatedName,
   PULONG nSize)
 {
-    FIXME("%p %s %s %p %p\n", lpAccountName, debugstr_NameFormat(AccountNameFormat),
-          debugstr_NameFormat(DesiredNameFormat), lpTranslatedName, nSize);
+    FIXME("%p %d %d %p %p\n", lpAccountName, AccountNameFormat,
+          DesiredNameFormat, lpTranslatedName, nSize);
     return FALSE;
 }
 
@@ -1192,8 +1181,8 @@ BOOLEAN WINAPI TranslateNameW(
   EXTENDED_NAME_FORMAT DesiredNameFormat, LPWSTR lpTranslatedName,
   PULONG nSize)
 {
-    FIXME("%p %s %s %p %p\n", lpAccountName, debugstr_NameFormat(AccountNameFormat),
-          debugstr_NameFormat(DesiredNameFormat), lpTranslatedName, nSize);
+    FIXME("%p %d %d %p %p\n", lpAccountName, AccountNameFormat,
+          DesiredNameFormat, lpTranslatedName, nSize);
     return FALSE;
 }
 

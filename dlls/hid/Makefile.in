@@ -3,7 +3,8 @@ IMPORTLIB = hid
 
 EXTRADLLFLAGS = -Wb,--prefer-native
 
-SOURCES = \
+C_SRCS = \
 	hidd.c \
-	hidp.c \
-	version.rc
+	hidp.c
+
+RC_SRCS = version.rc

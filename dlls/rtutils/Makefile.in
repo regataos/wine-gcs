@@ -3,5 +3,5 @@ IMPORTLIB = rtutils
 
 EXTRADLLFLAGS = -Wb,--prefer-native
 
-SOURCES = \
+C_SRCS = \
 	tracing.c

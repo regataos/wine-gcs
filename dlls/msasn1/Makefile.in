@@ -3,5 +3,5 @@ IMPORTLIB = msasn1
 
 EXTRADLLFLAGS = -Wb,--prefer-native
 
-SOURCES = \
+C_SRCS = \
 	main.c

@@ -34,7 +34,7 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(relay);
 
-#if (defined(__i386__) || defined(__x86_64__) || defined(__arm__) || defined(__aarch64__)) && !defined(__arm64ec__)
+#if defined(__i386__) || defined(__x86_64__) || defined(__arm__) || defined(__aarch64__)
 
 struct relay_descr  /* descriptor for a module */
 {
@@ -165,7 +165,7 @@ static const WCHAR **load_list( HKEY hkey, const WCHAR *value )
 static DWORD WINAPI init_debug_lists( RTL_RUN_ONCE *once, void *param, void **context )
 {
     OBJECT_ATTRIBUTES attr;
-    UNICODE_STRING name = RTL_CONSTANT_STRING( L"Software\\Wine\\Debug" );
+    UNICODE_STRING name;
     HANDLE root, hkey;
 
     RtlOpenCurrentUser( KEY_ALL_ACCESS, &root );
@@ -175,6 +175,7 @@ static DWORD WINAPI init_debug_lists( RTL_RUN_ONCE *once, void *param, void **co
     attr.Attributes = 0;
     attr.SecurityDescriptor = NULL;
     attr.SecurityQualityOfService = NULL;
+    RtlInitUnicodeString( &name, L"Software\\Wine\\Debug" );
 
     /* @@ Wine registry key: HKCU\Software\Wine\Debug */
     if (NtOpenKey( &hkey, KEY_ALL_ACCESS, &attr )) hkey = 0;
@@ -307,8 +308,8 @@ static void trace_string_w( INT_PTR ptr )
 /***********************************************************************
  *           relay_trace_entry
  */
-void * WINAPI relay_trace_entry( struct relay_descr *descr, unsigned int idx,
-                                 const DWORD *stack, unsigned int *nb_args )
+DECLSPEC_HIDDEN void * WINAPI relay_trace_entry( struct relay_descr *descr, unsigned int idx,
+                                                 const DWORD *stack, unsigned int *nb_args )
 {
     WORD ordinal = LOWORD(idx);
     const char *arg_types = descr->args_string + HIWORD(idx);
@@ -363,8 +364,8 @@ void * WINAPI relay_trace_entry( struct relay_descr *descr, unsigned int idx,
 /***********************************************************************
  *           relay_trace_exit
  */
-void WINAPI relay_trace_exit( struct relay_descr *descr, unsigned int idx,
-                              void *retaddr, LONGLONG retval )
+DECLSPEC_HIDDEN void WINAPI relay_trace_exit( struct relay_descr *descr, unsigned int idx,
+                                              void *retaddr, LONGLONG retval )
 {
     const char *arg_types = descr->args_string + HIWORD(idx);
 
@@ -446,8 +447,8 @@ __ASM_STDCALL_FUNC( relay_call, 8,
 /***********************************************************************
  *           relay_trace_entry
  */
-void * WINAPI relay_trace_entry( struct relay_descr *descr, unsigned int idx,
-                                 const DWORD *stack, unsigned int *nb_args )
+DECLSPEC_HIDDEN void * WINAPI relay_trace_entry( struct relay_descr *descr, unsigned int idx,
+                                                 const DWORD *stack, unsigned int *nb_args )
 {
     WORD ordinal = LOWORD(idx);
     const char *arg_types = descr->args_string + HIWORD(idx);
@@ -527,8 +528,8 @@ void * WINAPI relay_trace_entry( struct relay_descr *descr, unsigned int idx,
 /***********************************************************************
  *           relay_trace_exit
  */
-void WINAPI relay_trace_exit( struct relay_descr *descr, unsigned int idx,
-                              DWORD retaddr, LONGLONG retval )
+DECLSPEC_HIDDEN void WINAPI relay_trace_exit( struct relay_descr *descr, unsigned int idx,
+                                              DWORD retaddr, LONGLONG retval )
 {
     const char *arg_types = descr->args_string + HIWORD(idx);
 
@@ -600,8 +601,8 @@ __ASM_GLOBAL_FUNC( relay_call,
 /***********************************************************************
  *           relay_trace_entry
  */
-void * WINAPI relay_trace_entry( struct relay_descr *descr, unsigned int idx,
-                                 const INT_PTR *stack, unsigned int *nb_args )
+DECLSPEC_HIDDEN void * WINAPI relay_trace_entry( struct relay_descr *descr, unsigned int idx,
+                                                 const INT_PTR *stack, unsigned int *nb_args )
 {
     WORD ordinal = LOWORD(idx);
     const char *arg_types = descr->args_string + HIWORD(idx);
@@ -636,8 +637,8 @@ void * WINAPI relay_trace_entry( struct relay_descr *descr, unsigned int idx,
 /***********************************************************************
  *           relay_trace_exit
  */
-void WINAPI relay_trace_exit( struct relay_descr *descr, unsigned int idx,
-                              INT_PTR retaddr, INT_PTR retval )
+DECLSPEC_HIDDEN void WINAPI relay_trace_exit( struct relay_descr *descr, unsigned int idx,
+                                              INT_PTR retaddr, INT_PTR retval )
 {
     TRACE( "\1Ret  %s() retval=%08Ix ret=%08Ix\n",
            func_name( descr->private, LOWORD(idx) ), retval, retaddr );
@@ -646,11 +647,10 @@ void WINAPI relay_trace_exit( struct relay_descr *descr, unsigned int idx,
 extern LONGLONG CDECL call_entry_point( void *func, int nb_args, const INT_PTR *args );
 __ASM_GLOBAL_FUNC( call_entry_point,
                    "stp x29, x30, [SP,#-16]!\n\t"
-                   __ASM_SEH(".seh_save_fplr_x 16\n\t")
+                   "stp x19, x20, [SP,#-16]!\n\t"
                    "mov x29, SP\n\t"
-                   __ASM_SEH(".seh_set_fp\n\t")
-                   __ASM_SEH(".seh_endprologue\n\t")
-                   "ldr x8, [x2, #-32]\n\t"
+                   "mov x19, x2\n\t"
+                   "ldp x8, x9, [x19, #-32]\n\t"
                    "mov x9, x0\n\t"
                    "cbz w1, 2f\n\t"
                    "mov w10, w1\n\t"
@@ -683,6 +683,7 @@ __ASM_GLOBAL_FUNC( call_entry_point,
                    "cbnz w12, 1b\n\t"
                    "2: blr x9\n\t"
                    "mov SP, x29\n\t"
+                   "ldp x19, x20, [SP], #16\n\t"
                    "ldp x29, x30, [SP], #16\n\t"
                    "ret\n" )
 
@@ -700,8 +701,8 @@ static LONGLONG WINAPI relay_call( struct relay_descr *descr, unsigned int idx, 
 /***********************************************************************
  *           relay_trace_entry
  */
-void * WINAPI relay_trace_entry( struct relay_descr *descr, unsigned int idx,
-                                 const INT_PTR *stack, unsigned int *nb_args )
+DECLSPEC_HIDDEN void * WINAPI relay_trace_entry( struct relay_descr *descr, unsigned int idx,
+                                                 const INT_PTR *stack, unsigned int *nb_args )
 {
     WORD ordinal = LOWORD(idx);
     const char *arg_types = descr->args_string + HIWORD(idx);
@@ -742,8 +743,8 @@ void * WINAPI relay_trace_entry( struct relay_descr *descr, unsigned int idx,
 /***********************************************************************
  *           relay_trace_exit
  */
-void WINAPI relay_trace_exit( struct relay_descr *descr, unsigned int idx,
-                              INT_PTR retaddr, INT_PTR retval )
+DECLSPEC_HIDDEN void WINAPI relay_trace_exit( struct relay_descr *descr, unsigned int idx,
+                                              INT_PTR retaddr, INT_PTR retval )
 {
     TRACE( "\1Ret  %s() retval=%08Ix ret=%08Ix\n",
            func_name( descr->private, LOWORD(idx) ), retval, retaddr );
@@ -1189,7 +1190,7 @@ static void SNOOP_PrintArg(DWORD x)
     __ENDTRY
 }
 
-void WINAPI __regs_SNOOP_Entry( void **stack )
+void WINAPI DECLSPEC_HIDDEN __regs_SNOOP_Entry( void **stack )
 {
 	SNOOP_DLL *dll;
 	SNOOP_FUN *fun = (SNOOP_FUN *)((char *)stack[0] - 5);
@@ -1273,7 +1274,7 @@ void WINAPI __regs_SNOOP_Entry( void **stack )
 	TRACE_(snoop)(") ret=%08lx\n",(DWORD)ret->origreturn);
 }
 
-void WINAPI __regs_SNOOP_Return( void **stack )
+void WINAPI DECLSPEC_HIDDEN __regs_SNOOP_Return( void **stack )
 {
 	SNOOP_RETURNENTRY *ret = (SNOOP_RETURNENTRY*)((char *)stack[0] - 5);
         SNOOP_FUN *fun = &ret->dll->funs[ret->ordinal];

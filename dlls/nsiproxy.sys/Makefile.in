@@ -5,7 +5,7 @@ UNIX_LIBS = $(PROCSTAT_LIBS)
 
 EXTRADLLFLAGS = -Wl,--subsystem,native
 
-SOURCES = \
+C_SRCS = \
 	device.c \
 	icmp_echo.c \
 	ip.c \

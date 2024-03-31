@@ -23,6 +23,7 @@
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
 #include "windef.h"
+#include "winbase.h"
 #include "winternl.h"
 #include "ddk/fltkernel.h"
 
@@ -97,34 +98,28 @@ NTSTATUS WINAPI FltBuildDefaultSecurityDescriptor(PSECURITY_DESCRIPTOR *descript
 {
     PACL dacl;
     NTSTATUS ret = STATUS_INSUFFICIENT_RESOURCES;
-    DWORD sid_len;
-    SID *sid;
-    SID *sid_system = NULL;
+    ULONG sid_len;
+    PSID sid;
+    PSID sid_system;
     PSECURITY_DESCRIPTOR sec_desc = NULL;
     SID_IDENTIFIER_AUTHORITY auth = { SECURITY_NULL_SID_AUTHORITY };
 
     *descriptor = NULL;
 
-    sid_len = RtlLengthRequiredSid(2);
-    sid = ExAllocatePool(PagedPool, sid_len);
-    if (!sid)
+    ret = RtlAllocateAndInitializeSid(&auth, 2, SECURITY_BUILTIN_DOMAIN_RID, DOMAIN_GROUP_RID_ADMINS,
+                                         0, 0, 0, 0, 0, 0, &sid);
+    if (ret != STATUS_SUCCESS)
         goto done;
-    RtlInitializeSid(sid, &auth, 2);
-    sid->SubAuthority[1] = DOMAIN_GROUP_RID_ADMINS;
-    sid->SubAuthority[0] = SECURITY_BUILTIN_DOMAIN_RID;
 
-    sid_len = RtlLengthRequiredSid(1);
-    sid_system = ExAllocatePool(PagedPool, sid_len);
-    if (!sid_system)
+    ret = RtlAllocateAndInitializeSid(&auth, 1, SECURITY_LOCAL_SYSTEM_RID, 0, 0, 0, 0, 0, 0, 0, &sid_system);
+    if (ret != STATUS_SUCCESS)
         goto done;
-    RtlInitializeSid(sid_system, &auth, 1);
-    sid_system->SubAuthority[0] = SECURITY_LOCAL_SYSTEM_RID;
 
     sid_len = SECURITY_DESCRIPTOR_MIN_LENGTH + sizeof(ACL) +
             sizeof(ACCESS_ALLOWED_ACE) + RtlLengthSid(sid) +
             sizeof(ACCESS_ALLOWED_ACE) + RtlLengthSid(sid_system);
 
-    sec_desc = ExAllocatePool(PagedPool, sid_len);
+    sec_desc = RtlAllocateHeap(GetProcessHeap(), HEAP_ZERO_MEMORY, sid_len);
     if (!sec_desc)
     {
         ret = STATUS_NO_MEMORY;
@@ -153,16 +148,19 @@ NTSTATUS WINAPI FltBuildDefaultSecurityDescriptor(PSECURITY_DESCRIPTOR *descript
         *descriptor = sec_desc;
 
 done:
-    if (ret != STATUS_SUCCESS)
-        ExFreePool(sec_desc);
+    if (ret != STATUS_SUCCESS && sec_desc != NULL)
+        RtlFreeHeap(GetProcessHeap(), 0, sec_desc);
 
-    ExFreePool(sid);
-    ExFreePool(sid_system);
+    if (sid != NULL)
+        RtlFreeHeap(GetProcessHeap(), 0, sid);
+
+    if (sid_system != NULL)
+        RtlFreeHeap(GetProcessHeap(), 0, sid_system);
 
     return ret;
 }
 
 void WINAPI FltFreeSecurityDescriptor(PSECURITY_DESCRIPTOR descriptor)
 {
-    ExFreePool(descriptor);
+    RtlFreeHeap(GetProcessHeap(), 0, descriptor);
 }

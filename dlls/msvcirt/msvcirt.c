@@ -38,6 +38,9 @@ WINE_DEFAULT_DEBUG_CHANNEL(msvcirt);
 #define RESERVE_SIZE 512
 #define STATEBUF_SIZE 8
 
+void* (__cdecl *operator_new)(SIZE_T);
+void (__cdecl *operator_delete)(void*);
+
 /* ?sh_none@filebuf@@2HB */
 const int filebuf_sh_none = 0x800;
 /* ?sh_read@filebuf@@2HB */
@@ -5129,32 +5132,19 @@ void __cdecl _mtunlock(CRITICAL_SECTION *crit)
     LeaveCriticalSection(crit);
 }
 
-static void* (__cdecl *MSVCRT_operator_new)(SIZE_T);
-static void (__cdecl *MSVCRT_operator_delete)(void*);
-
-void* __cdecl operator_new(SIZE_T size)
-{
-    return MSVCRT_operator_new(size);
-}
-
-void __cdecl operator_delete(void *mem)
-{
-    MSVCRT_operator_delete(mem);
-}
-
 static void init_cxx_funcs(void)
 {
     HMODULE hmod = GetModuleHandleA("msvcrt.dll");
 
     if (sizeof(void *) > sizeof(int))  /* 64-bit has different names */
     {
-        MSVCRT_operator_new = (void*)GetProcAddress(hmod, "??2@YAPEAX_K@Z");
-        MSVCRT_operator_delete = (void*)GetProcAddress(hmod, "??3@YAXPEAX@Z");
+        operator_new = (void*)GetProcAddress(hmod, "??2@YAPEAX_K@Z");
+        operator_delete = (void*)GetProcAddress(hmod, "??3@YAXPEAX@Z");
     }
     else
     {
-        MSVCRT_operator_new = (void*)GetProcAddress(hmod, "??2@YAPAXI@Z");
-        MSVCRT_operator_delete = (void*)GetProcAddress(hmod, "??3@YAXPAX@Z");
+        operator_new = (void*)GetProcAddress(hmod, "??2@YAPAXI@Z");
+        operator_delete = (void*)GetProcAddress(hmod, "??3@YAXPAX@Z");
     }
 }
 

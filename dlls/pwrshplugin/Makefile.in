@@ -1,4 +1,3 @@
 MODULE    = pwrshplugin.dll
 
-SOURCES = \
-	version.rc
+RC_SRCS = version.rc

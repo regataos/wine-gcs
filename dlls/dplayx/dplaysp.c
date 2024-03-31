@@ -96,9 +96,9 @@ static ULONG WINAPI IDirectPlaySPImpl_Release( IDirectPlaySP *iface )
 
   if( !ref )
   {
-    free( This->remote_data );
-    free( This->local_data );
-    free( This );
+    HeapFree( GetProcessHeap(), 0, This->remote_data );
+    HeapFree( GetProcessHeap(), 0, This->local_data );
+    HeapFree( GetProcessHeap(), 0, This );
   }
 
   return ref;
@@ -531,7 +531,7 @@ static HRESULT WINAPI IDirectPlaySPImpl_SetSPPlayerData( IDirectPlaySP *iface, D
     return DPERR_INVALIDPLAYER;
   }
 
-  lpPlayerData = malloc( dwDataSize );
+  lpPlayerData = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, dwDataSize );
   CopyMemory( lpPlayerData, lpData, dwDataSize );
 
   if( dwFlags == DPSET_LOCAL )
@@ -635,19 +635,19 @@ static HRESULT WINAPI IDirectPlaySPImpl_SetSPData( IDirectPlaySP *iface, void *l
   }
 #endif
 
-  lpSpData = malloc( dwDataSize );
+  lpSpData = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, dwDataSize );
   CopyMemory( lpSpData, lpData, dwDataSize );
 
   /* If we have data already allocated, free it and replace it */
   if( dwFlags == DPSET_REMOTE )
   {
-    free( This->remote_data );
+    HeapFree( GetProcessHeap(), 0, This->remote_data );
     This->remote_data_size = dwDataSize;
     This->remote_data = lpSpData;
   }
   else if ( dwFlags == DPSET_LOCAL )
   {
-    free( This->local_data );
+    HeapFree( GetProcessHeap(), 0, This->local_data );
     This->local_data = lpSpData;
     This->local_data_size = dwDataSize;
   }
@@ -691,7 +691,7 @@ HRESULT dplaysp_create( REFIID riid, void **ppv, IDirectPlayImpl *dp )
   TRACE( "(%s, %p)\n", debugstr_guid( riid ), ppv );
 
   *ppv = NULL;
-  obj = calloc( 1, sizeof( *obj ) );
+  obj = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof( *obj ) );
   if ( !obj )
     return DPERR_OUTOFMEMORY;
 
@@ -711,5 +711,6 @@ HRESULT dplaysp_create( REFIID riid, void **ppv, IDirectPlayImpl *dp )
 LPVOID DPSP_CreateSPPlayerData(void)
 {
   TRACE( "Creating SPPlayer data struct\n" );
-  return calloc( 1, sizeof( DP_SPPLAYERDATA ) );
+  return HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY,
+                    sizeof( DP_SPPLAYERDATA ) );
 }

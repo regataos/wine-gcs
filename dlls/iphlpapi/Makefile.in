@@ -1,7 +1,8 @@
 MODULE    = iphlpapi.dll
 IMPORTLIB = iphlpapi
-IMPORTS   = advapi32 dnsapi nsi uuid ws2_32
+IMPORTS   = advapi32 dnsapi nsi uuid
 
-SOURCES = \
-	iphlpapi_main.c \
-	version.rc
+C_SRCS = \
+	iphlpapi_main.c
+
+RC_SRCS = version.rc

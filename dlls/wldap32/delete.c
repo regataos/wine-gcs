@@ -72,7 +72,7 @@ ULONG CDECL ldap_delete_extA( LDAP *ld, char *dn, LDAPControlA **serverctrls, LD
 
     TRACE( "(%p, %s, %p, %p, %p)\n", ld, debugstr_a(dn), serverctrls, clientctrls, message );
 
-    if (!ld || !message) return WLDAP32_LDAP_PARAM_ERROR;
+    if (!ld) return WLDAP32_LDAP_PARAM_ERROR;
 
     if (dn && !(dnW = strAtoW( dn ))) goto exit;
     if (serverctrls && !(serverctrlsW = controlarrayAtoW( serverctrls ))) goto exit;
@@ -93,17 +93,15 @@ exit:
 ULONG CDECL ldap_delete_extW( LDAP *ld, WCHAR *dn, LDAPControlW **serverctrls, LDAPControlW **clientctrls,
                               ULONG *message )
 {
-    ULONG ret;
+    ULONG ret = WLDAP32_LDAP_NO_MEMORY;
     char *dnU = NULL;
     LDAPControl **serverctrlsU = NULL, **clientctrlsU = NULL;
 
     TRACE( "(%p, %s, %p, %p, %p)\n", ld, debugstr_w(dn), serverctrls, clientctrls, message );
 
-    if (!ld || !message) return WLDAP32_LDAP_PARAM_ERROR;
-    if ((ret = WLDAP32_ldap_connect( ld, NULL ))) return ret;
+    if (!ld) return WLDAP32_LDAP_PARAM_ERROR;
 
-    ret = WLDAP32_LDAP_NO_MEMORY;
-    if (!(dnU = dn ? strWtoU( dn ) : strdup( "" ))) goto exit;
+    if (dn && !(dnU = strWtoU( dn ))) goto exit;
     if (serverctrls && !(serverctrlsU = controlarrayWtoU( serverctrls ))) goto exit;
     if (clientctrls && !(clientctrlsU = controlarrayWtoU( clientctrls ))) goto exit;
     else
@@ -149,17 +147,15 @@ exit:
  */
 ULONG CDECL ldap_delete_ext_sW( LDAP *ld, WCHAR *dn, LDAPControlW **serverctrls, LDAPControlW **clientctrls )
 {
-    ULONG ret;
+    ULONG ret = WLDAP32_LDAP_NO_MEMORY;
     char *dnU = NULL;
     LDAPControl **serverctrlsU = NULL, **clientctrlsU = NULL;
 
     TRACE( "(%p, %s, %p, %p)\n", ld, debugstr_w(dn), serverctrls, clientctrls );
 
     if (!ld) return WLDAP32_LDAP_PARAM_ERROR;
-    if ((ret = WLDAP32_ldap_connect( ld, NULL ))) return ret;
 
-    ret = WLDAP32_LDAP_NO_MEMORY;
-    if (!(dnU = dn ? strWtoU( dn ) : strdup( "" ))) goto exit;
+    if (dn && !(dnU = strWtoU( dn ))) goto exit;
     if (serverctrls && !(serverctrlsU = controlarrayWtoU( serverctrls ))) goto exit;
     if (clientctrls && !(clientctrlsU = controlarrayWtoU( clientctrls ))) goto exit;
     else

@@ -22,6 +22,8 @@
 #include <stdarg.h>
 
 #define COBJMACROS
+#define NONAMELESSUNION
+
 #include "windef.h"
 #include "winbase.h"
 #include "winuser.h"
@@ -90,7 +92,7 @@ static ULONG WINAPI IKsPrivatePropertySetImpl_Release(LPKSPROPERTYSET iface)
 
     if (!ref) {
         TRACE("(%p) released\n", This);
-        free(This);
+        HeapFree(GetProcessHeap(), 0, This);
     }
     return ref;
 }
@@ -172,13 +174,13 @@ static HRESULT DSPROPERTY_WaveDeviceMappingA(
 
     data.DataFlow = ppd->DataFlow;
     len = MultiByteToWideChar(CP_ACP, 0, ppd->DeviceName, -1, NULL, 0);
-    data.DeviceName = malloc(len * sizeof(WCHAR));
+    data.DeviceName = HeapAlloc(GetProcessHeap(), 0, len * sizeof(WCHAR));
     if (!data.DeviceName)
         return E_OUTOFMEMORY;
     MultiByteToWideChar(CP_ACP, 0, ppd->DeviceName, -1, data.DeviceName, len);
 
     hr = DSPROPERTY_WaveDeviceMappingW(&data, cbPropData, pcbReturned);
-    free(data.DeviceName);
+    HeapFree(GetProcessHeap(), 0, data.DeviceName);
     ppd->DeviceId = data.DeviceId;
 
     if (pcbReturned)
@@ -244,9 +246,9 @@ static HRESULT DSPROPERTY_DescriptionW(
         return hr;
     }
 
-    ppd->Description = wcsdup(pv.pwszVal);
-    ppd->Module = wcsdup(wine_vxd_drv);
-    ppd->Interface = wcsdup(wInterface);
+    ppd->Description = strdupW(pv.pwszVal);
+    ppd->Module = strdupW(wine_vxd_drv);
+    ppd->Interface = strdupW(wInterface);
     ppd->Type = DIRECTSOUNDDEVICE_TYPE_VXD;
 
     PropVariantClear(&pv);
@@ -279,19 +281,19 @@ BOOL CALLBACK enum_callback(GUID *guid, const WCHAR *desc, const WCHAR *module,
     data.DeviceId = *guid;
 
     len = lstrlenW(module) + 1;
-    data.Module = malloc(len * sizeof(WCHAR));
+    data.Module = HeapAlloc(GetProcessHeap(), 0, len * sizeof(WCHAR));
     memcpy(data.Module, module, len * sizeof(WCHAR));
 
     len = lstrlenW(desc) + 1;
-    data.Description = malloc(len * sizeof(WCHAR));
+    data.Description = HeapAlloc(GetProcessHeap(), 0, len * sizeof(WCHAR));
     memcpy(data.Description, desc, len * sizeof(WCHAR));
 
     data.Interface = wInterface;
 
     ret = ppd->Callback(&data, ppd->Context);
 
-    free(data.Module);
-    free(data.Description);
+    HeapFree(GetProcessHeap(), 0, data.Module);
+    HeapFree(GetProcessHeap(), 0, data.Description);
 
     return ret;
 }
@@ -339,12 +341,12 @@ static BOOL DSPROPERTY_descWtoA(const DSPROPERTY_DIRECTSOUNDDEVICE_DESCRIPTION_W
     dataA->DeviceId = dataW->DeviceId;
     dataA->WaveDeviceId = dataW->WaveDeviceId;
     dataA->Interface = Interface;
-    dataA->Module = malloc(modlen);
-    dataA->Description = malloc(desclen);
+    dataA->Module = HeapAlloc(GetProcessHeap(), 0, modlen);
+    dataA->Description = HeapAlloc(GetProcessHeap(), 0, desclen);
     if (!dataA->Module || !dataA->Description)
     {
-        free(dataA->Module);
-        free(dataA->Description);
+        HeapFree(GetProcessHeap(), 0, dataA->Module);
+        HeapFree(GetProcessHeap(), 0, dataA->Description);
         dataA->Module = dataA->Description = NULL;
         return FALSE;
     }
@@ -379,8 +381,8 @@ static BOOL CALLBACK DSPROPERTY_enumWtoA(DSPROPERTY_DIRECTSOUNDDEVICE_DESCRIPTIO
     if (!ret)
         return FALSE;
     ret = ppd->Callback(&descA, ppd->Context);
-    free(descA.Module);
-    free(descA.Description);
+    HeapFree(GetProcessHeap(), 0, descA.Module);
+    HeapFree(GetProcessHeap(), 0, descA.Description);
     return ret;
 }
 
@@ -456,9 +458,9 @@ static HRESULT DSPROPERTY_DescriptionA(
         return hr;
     if (!DSPROPERTY_descWtoA(&data, ppd))
         hr = E_OUTOFMEMORY;
-    free(data.Description);
-    free(data.Module);
-    free(data.Interface);
+    HeapFree(GetProcessHeap(), 0, data.Description);
+    HeapFree(GetProcessHeap(), 0, data.Module);
+    HeapFree(GetProcessHeap(), 0, data.Interface);
     return hr;
 }
 
@@ -482,9 +484,9 @@ static HRESULT DSPROPERTY_Description1(
     if (FAILED(hr))
         return hr;
     DSPROPERTY_descWto1(&data, ppd);
-    free(data.Description);
-    free(data.Module);
-    free(data.Interface);
+    HeapFree(GetProcessHeap(), 0, data.Description);
+    HeapFree(GetProcessHeap(), 0, data.Module);
+    HeapFree(GetProcessHeap(), 0, data.Interface);
     return hr;
 }
 
@@ -613,7 +615,7 @@ HRESULT IKsPrivatePropertySetImpl_Create(REFIID riid, void **ppv)
 
     TRACE("(%s, %p)\n", debugstr_guid(riid), ppv);
 
-    iks = malloc(sizeof(*iks));
+    iks = HeapAlloc(GetProcessHeap(), 0, sizeof(*iks));
     if (!iks) {
         WARN("out of memory\n");
         return DSERR_OUTOFMEMORY;

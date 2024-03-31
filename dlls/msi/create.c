@@ -38,7 +38,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(msidb);
 
 /* below is the query interface to a table */
 
-struct create_view
+typedef struct tagMSICREATEVIEW
 {
     MSIVIEW          view;
     MSIDATABASE     *db;
@@ -46,11 +46,11 @@ struct create_view
     BOOL             bIsTemp;
     BOOL             hold;
     column_info     *col_info;
-};
+} MSICREATEVIEW;
 
 static UINT CREATE_fetch_int( struct tagMSIVIEW *view, UINT row, UINT col, UINT *val )
 {
-    struct create_view *cv = (struct create_view *)view;
+    MSICREATEVIEW *cv = (MSICREATEVIEW*)view;
 
     TRACE("%p %d %d %p\n", cv, row, col, val );
 
@@ -59,7 +59,7 @@ static UINT CREATE_fetch_int( struct tagMSIVIEW *view, UINT row, UINT col, UINT 
 
 static UINT CREATE_execute( struct tagMSIVIEW *view, MSIRECORD *record )
 {
-    struct create_view *cv = (struct create_view *)view;
+    MSICREATEVIEW *cv = (MSICREATEVIEW*)view;
     BOOL persist = (cv->bIsTemp) ? MSICONDITION_FALSE : MSICONDITION_TRUE;
 
     TRACE("%p Table %s (%s)\n", cv, debugstr_w(cv->name),
@@ -73,7 +73,7 @@ static UINT CREATE_execute( struct tagMSIVIEW *view, MSIRECORD *record )
 
 static UINT CREATE_close( struct tagMSIVIEW *view )
 {
-    struct create_view *cv = (struct create_view *)view;
+    MSICREATEVIEW *cv = (MSICREATEVIEW*)view;
 
     TRACE("%p\n", cv);
 
@@ -82,7 +82,7 @@ static UINT CREATE_close( struct tagMSIVIEW *view )
 
 static UINT CREATE_get_dimensions( struct tagMSIVIEW *view, UINT *rows, UINT *cols )
 {
-    struct create_view *cv = (struct create_view *)view;
+    MSICREATEVIEW *cv = (MSICREATEVIEW*)view;
 
     TRACE("%p %p %p\n", cv, rows, cols );
 
@@ -92,7 +92,7 @@ static UINT CREATE_get_dimensions( struct tagMSIVIEW *view, UINT *rows, UINT *co
 static UINT CREATE_get_column_info( struct tagMSIVIEW *view, UINT n, LPCWSTR *name,
                                     UINT *type, BOOL *temporary, LPCWSTR *table_name )
 {
-    struct create_view *cv = (struct create_view *)view;
+    MSICREATEVIEW *cv = (MSICREATEVIEW*)view;
 
     TRACE("%p %d %p %p %p %p\n", cv, n, name, type, temporary, table_name );
 
@@ -102,7 +102,7 @@ static UINT CREATE_get_column_info( struct tagMSIVIEW *view, UINT n, LPCWSTR *na
 static UINT CREATE_modify( struct tagMSIVIEW *view, MSIMODIFY eModifyMode,
                            MSIRECORD *rec, UINT row)
 {
-    struct create_view *cv = (struct create_view *)view;
+    MSICREATEVIEW *cv = (MSICREATEVIEW*)view;
 
     TRACE("%p %d %p\n", cv, eModifyMode, rec );
 
@@ -111,7 +111,7 @@ static UINT CREATE_modify( struct tagMSIVIEW *view, MSIMODIFY eModifyMode,
 
 static UINT CREATE_delete( struct tagMSIVIEW *view )
 {
-    struct create_view *cv = (struct create_view *)view;
+    MSICREATEVIEW *cv = (MSICREATEVIEW*)view;
 
     TRACE("%p\n", cv );
 
@@ -160,7 +160,7 @@ static UINT check_columns( const column_info *col_info )
 UINT CREATE_CreateView( MSIDATABASE *db, MSIVIEW **view, LPCWSTR table,
                         column_info *col_info, BOOL hold )
 {
-    struct create_view *cv = NULL;
+    MSICREATEVIEW *cv = NULL;
     UINT r;
     column_info *col;
     BOOL temp = TRUE;

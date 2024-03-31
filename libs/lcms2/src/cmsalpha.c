@@ -1,7 +1,7 @@
 //---------------------------------------------------------------------------------
 //
 //  Little Color Management System
-//  Copyright (c) 1998-2023 Marti Maria Saguer
+//  Copyright (c) 1998-2022 Marti Maria Saguer
 //
 // Permission is hereby granted, free of charge, to any person obtaining
 // a copy of this software and associated documentation files (the "Software"),
@@ -402,7 +402,7 @@ static cmsFormatterAlphaFn FormattersAlpha[6][6] = {
 
 // This function computes the distance from each component to the next one in bytes. 
 static
-cmsBool ComputeIncrementsForChunky(cmsUInt32Number Format,
+void ComputeIncrementsForChunky(cmsUInt32Number Format,                                 
                                 cmsUInt32Number ComponentStartingOrder[], 
                                 cmsUInt32Number ComponentPointerIncrements[])
 {
@@ -416,7 +416,7 @@ cmsBool ComputeIncrementsForChunky(cmsUInt32Number Format,
        
        // Sanity check
        if (total_chans <= 0 || total_chans >= cmsMAXCHANNELS)
-           return FALSE;
+           return;
 
         memset(channels, 0, sizeof(channels));
 
@@ -453,15 +453,13 @@ cmsBool ComputeIncrementsForChunky(cmsUInt32Number Format,
 
        for (i = 0; i < extra; i++)
               ComponentStartingOrder[i] = channels[i + nchannels];
-
-       return TRUE;
 }
 
 
 
 //  On planar configurations, the distance is the stride added to any non-negative
 static
-cmsBool ComputeIncrementsForPlanar(cmsUInt32Number Format,
+void ComputeIncrementsForPlanar(cmsUInt32Number Format, 
                                 cmsUInt32Number BytesPerPlane,
                                 cmsUInt32Number ComponentStartingOrder[], 
                                 cmsUInt32Number ComponentPointerIncrements[])
@@ -475,7 +473,7 @@ cmsBool ComputeIncrementsForPlanar(cmsUInt32Number Format,
       
        // Sanity check
        if (total_chans <= 0 || total_chans >= cmsMAXCHANNELS)
-           return FALSE;
+           return;
 
        memset(channels, 0, sizeof(channels));
 
@@ -511,28 +509,28 @@ cmsBool ComputeIncrementsForPlanar(cmsUInt32Number Format,
 
        for (i = 0; i < extra; i++)
               ComponentStartingOrder[i] = channels[i + nchannels];
-
-       return TRUE;
 }
 
 
 
 // Dispatcher por chunky and planar RGB
 static
-cmsBool ComputeComponentIncrements(cmsUInt32Number Format,
+void  ComputeComponentIncrements(cmsUInt32Number Format,
                                  cmsUInt32Number BytesPerPlane,
                                  cmsUInt32Number ComponentStartingOrder[], 
                                  cmsUInt32Number ComponentPointerIncrements[])
 {
        if (T_PLANAR(Format)) {
 
-              return ComputeIncrementsForPlanar(Format,  BytesPerPlane, ComponentStartingOrder, ComponentPointerIncrements);
+              ComputeIncrementsForPlanar(Format,  BytesPerPlane, ComponentStartingOrder, ComponentPointerIncrements);
        }
        else {
-              return ComputeIncrementsForChunky(Format,  ComponentStartingOrder, ComponentPointerIncrements);
+              ComputeIncrementsForChunky(Format,  ComponentStartingOrder, ComponentPointerIncrements);
        }
 
 }
+
+
 
 // Handles extra channels copying alpha if requested by the flags
 void _cmsHandleExtraChannels(_cmsTRANSFORM* p, const void* in,
@@ -567,11 +565,9 @@ void _cmsHandleExtraChannels(_cmsTRANSFORM* p, const void* in,
     if (nExtra == 0)
         return;
 
-    // Compute the increments
-    if (!ComputeComponentIncrements(p->InputFormat, Stride->BytesPerPlaneIn, SourceStartingOrder, SourceIncrements))
-        return;
-    if (!ComputeComponentIncrements(p->OutputFormat, Stride->BytesPerPlaneOut, DestStartingOrder, DestIncrements))
-        return;
+    // Compute the increments 
+    ComputeComponentIncrements(p->InputFormat, Stride->BytesPerPlaneIn, SourceStartingOrder, SourceIncrements);
+    ComputeComponentIncrements(p->OutputFormat, Stride->BytesPerPlaneOut, DestStartingOrder, DestIncrements);
 
     // Check for conversions 8, 16, half, float, dbl
     copyValueFn = _cmsGetFormatterAlpha(p->ContextID, p->InputFormat, p->OutputFormat);
@@ -646,3 +642,5 @@ void _cmsHandleExtraChannels(_cmsTRANSFORM* p, const void* in,
         }
     }
 }
+
+

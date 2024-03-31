@@ -121,7 +121,7 @@ static ULONG WINAPI d3dx9_sprite_Release(ID3DXSprite *iface)
                 }
             }
 
-            free(sprite->sprites);
+            HeapFree(GetProcessHeap(), 0, sprite->sprites);
         }
 
         if (sprite->stateblock)
@@ -130,7 +130,7 @@ static ULONG WINAPI d3dx9_sprite_Release(ID3DXSprite *iface)
             IDirect3DVertexDeclaration9_Release(sprite->vdecl);
         if (sprite->device)
             IDirect3DDevice9_Release(sprite->device);
-        free(sprite);
+        HeapFree(GetProcessHeap(), 0, sprite);
     }
 
     return refcount;
@@ -193,7 +193,7 @@ static HRESULT WINAPI d3dx9_sprite_SetWorldViewLH(ID3DXSprite *iface,
 }
 
 /* Helper function */
-static void set_states(struct d3dx9_sprite *object, DWORD flags)
+static void set_states(struct d3dx9_sprite *object)
 {
     D3DXMATRIX mat;
     D3DVIEWPORT9 vp;
@@ -204,35 +204,32 @@ static void set_states(struct d3dx9_sprite *object, DWORD flags)
     IDirect3DDevice9_SetNPatchMode(object->device, 0.0f);
 
     /* Render states */
-    if (!(flags & D3DXSPRITE_DONOTMODIFY_RENDERSTATE))
-    {
-      IDirect3DDevice9_SetRenderState(object->device, D3DRS_ALPHABLENDENABLE, TRUE);
-      IDirect3DDevice9_SetRenderState(object->device, D3DRS_ALPHAFUNC, D3DCMP_GREATER);
-      IDirect3DDevice9_SetRenderState(object->device, D3DRS_ALPHAREF, 0x00);
-      IDirect3DDevice9_SetRenderState(object->device, D3DRS_ALPHATESTENABLE, object->alphacmp_caps);
-      IDirect3DDevice9_SetRenderState(object->device, D3DRS_BLENDOP, D3DBLENDOP_ADD);
-      IDirect3DDevice9_SetRenderState(object->device, D3DRS_CLIPPING, TRUE);
-      IDirect3DDevice9_SetRenderState(object->device, D3DRS_CLIPPLANEENABLE, 0);
-      IDirect3DDevice9_SetRenderState(object->device, D3DRS_COLORWRITEENABLE, D3DCOLORWRITEENABLE_ALPHA | D3DCOLORWRITEENABLE_BLUE |
-                                      D3DCOLORWRITEENABLE_GREEN | D3DCOLORWRITEENABLE_RED);
-      IDirect3DDevice9_SetRenderState(object->device, D3DRS_CULLMODE, D3DCULL_NONE);
-      IDirect3DDevice9_SetRenderState(object->device, D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
-      IDirect3DDevice9_SetRenderState(object->device, D3DRS_DIFFUSEMATERIALSOURCE, D3DMCS_COLOR1);
-      IDirect3DDevice9_SetRenderState(object->device, D3DRS_ENABLEADAPTIVETESSELLATION, FALSE);
-      IDirect3DDevice9_SetRenderState(object->device, D3DRS_FILLMODE, D3DFILL_SOLID);
-      IDirect3DDevice9_SetRenderState(object->device, D3DRS_FOGENABLE, FALSE);
-      IDirect3DDevice9_SetRenderState(object->device, D3DRS_INDEXEDVERTEXBLENDENABLE, FALSE);
-      IDirect3DDevice9_SetRenderState(object->device, D3DRS_LIGHTING, FALSE);
-      IDirect3DDevice9_SetRenderState(object->device, D3DRS_RANGEFOGENABLE, FALSE);
-      IDirect3DDevice9_SetRenderState(object->device, D3DRS_SEPARATEALPHABLENDENABLE, FALSE);
-      IDirect3DDevice9_SetRenderState(object->device, D3DRS_SHADEMODE, D3DSHADE_GOURAUD);
-      IDirect3DDevice9_SetRenderState(object->device, D3DRS_SPECULARENABLE, FALSE);
-      IDirect3DDevice9_SetRenderState(object->device, D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
-      IDirect3DDevice9_SetRenderState(object->device, D3DRS_SRGBWRITEENABLE, FALSE);
-      IDirect3DDevice9_SetRenderState(object->device, D3DRS_STENCILENABLE, FALSE);
-      IDirect3DDevice9_SetRenderState(object->device, D3DRS_VERTEXBLEND, FALSE);
-      IDirect3DDevice9_SetRenderState(object->device, D3DRS_WRAP0, 0);
-    }
+    IDirect3DDevice9_SetRenderState(object->device, D3DRS_ALPHABLENDENABLE, TRUE);
+    IDirect3DDevice9_SetRenderState(object->device, D3DRS_ALPHAFUNC, D3DCMP_GREATER);
+    IDirect3DDevice9_SetRenderState(object->device, D3DRS_ALPHAREF, 0x00);
+    IDirect3DDevice9_SetRenderState(object->device, D3DRS_ALPHATESTENABLE, object->alphacmp_caps);
+    IDirect3DDevice9_SetRenderState(object->device, D3DRS_BLENDOP, D3DBLENDOP_ADD);
+    IDirect3DDevice9_SetRenderState(object->device, D3DRS_CLIPPING, TRUE);
+    IDirect3DDevice9_SetRenderState(object->device, D3DRS_CLIPPLANEENABLE, 0);
+    IDirect3DDevice9_SetRenderState(object->device, D3DRS_COLORWRITEENABLE, D3DCOLORWRITEENABLE_ALPHA | D3DCOLORWRITEENABLE_BLUE |
+                                    D3DCOLORWRITEENABLE_GREEN | D3DCOLORWRITEENABLE_RED);
+    IDirect3DDevice9_SetRenderState(object->device, D3DRS_CULLMODE, D3DCULL_NONE);
+    IDirect3DDevice9_SetRenderState(object->device, D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
+    IDirect3DDevice9_SetRenderState(object->device, D3DRS_DIFFUSEMATERIALSOURCE, D3DMCS_COLOR1);
+    IDirect3DDevice9_SetRenderState(object->device, D3DRS_ENABLEADAPTIVETESSELLATION, FALSE);
+    IDirect3DDevice9_SetRenderState(object->device, D3DRS_FILLMODE, D3DFILL_SOLID);
+    IDirect3DDevice9_SetRenderState(object->device, D3DRS_FOGENABLE, FALSE);
+    IDirect3DDevice9_SetRenderState(object->device, D3DRS_INDEXEDVERTEXBLENDENABLE, FALSE);
+    IDirect3DDevice9_SetRenderState(object->device, D3DRS_LIGHTING, FALSE);
+    IDirect3DDevice9_SetRenderState(object->device, D3DRS_RANGEFOGENABLE, FALSE);
+    IDirect3DDevice9_SetRenderState(object->device, D3DRS_SEPARATEALPHABLENDENABLE, FALSE);
+    IDirect3DDevice9_SetRenderState(object->device, D3DRS_SHADEMODE, D3DSHADE_GOURAUD);
+    IDirect3DDevice9_SetRenderState(object->device, D3DRS_SPECULARENABLE, FALSE);
+    IDirect3DDevice9_SetRenderState(object->device, D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
+    IDirect3DDevice9_SetRenderState(object->device, D3DRS_SRGBWRITEENABLE, FALSE);
+    IDirect3DDevice9_SetRenderState(object->device, D3DRS_STENCILENABLE, FALSE);
+    IDirect3DDevice9_SetRenderState(object->device, D3DRS_VERTEXBLEND, FALSE);
+    IDirect3DDevice9_SetRenderState(object->device, D3DRS_WRAP0, 0);
 
     /* Texture stage states */
     IDirect3DDevice9_SetTextureStageState(object->device, 0, D3DTSS_ALPHAARG1, D3DTA_TEXTURE);
@@ -269,15 +266,12 @@ static void set_states(struct d3dx9_sprite *object, DWORD flags)
     IDirect3DDevice9_SetSamplerState(object->device, 0, D3DSAMP_SRGBTEXTURE, 0);
 
     /* Matrices */
-    if (!(flags & D3DXSPRITE_OBJECTSPACE))
-    {
-      D3DXMatrixIdentity(&mat);
-      IDirect3DDevice9_SetTransform(object->device, D3DTS_WORLD, &mat);
-      IDirect3DDevice9_SetTransform(object->device, D3DTS_VIEW, &object->view);
-      IDirect3DDevice9_GetViewport(object->device, &vp);
-      D3DXMatrixOrthoOffCenterLH(&mat, vp.X+0.5f, (float)vp.Width+vp.X+0.5f, (float)vp.Height+vp.Y+0.5f, vp.Y+0.5f, vp.MinZ, vp.MaxZ);
-      IDirect3DDevice9_SetTransform(object->device, D3DTS_PROJECTION, &mat);
-    }
+    D3DXMatrixIdentity(&mat);
+    IDirect3DDevice9_SetTransform(object->device, D3DTS_WORLD, &mat);
+    IDirect3DDevice9_SetTransform(object->device, D3DTS_VIEW, &object->view);
+    IDirect3DDevice9_GetViewport(object->device, &vp);
+    D3DXMatrixOrthoOffCenterLH(&mat, vp.X+0.5f, (float)vp.Width+vp.X+0.5f, (float)vp.Height+vp.Y+0.5f, vp.Y+0.5f, vp.MinZ, vp.MaxZ);
+    IDirect3DDevice9_SetTransform(object->device, D3DTS_PROJECTION, &mat);
 }
 
 static HRESULT WINAPI d3dx9_sprite_Begin(ID3DXSprite *iface, DWORD flags)
@@ -323,7 +317,7 @@ D3DXSPRITE_SORT_TEXTURE: sort by texture (so that it doesn't change too often)
             hr=IDirect3DDevice9_BeginStateBlock(This->device);
             if(hr!=D3D_OK) return hr;
 
-            set_states(This, flags);
+            set_states(This);
 
             IDirect3DDevice9_SetVertexDeclaration(This->device, This->vdecl);
             IDirect3DDevice9_SetStreamSource(This->device, 0, NULL, 0, sizeof(struct sprite_vertex));
@@ -336,7 +330,7 @@ D3DXSPRITE_SORT_TEXTURE: sort by texture (so that it doesn't change too often)
     }
 
     /* Apply device state */
-    set_states(This, flags);
+    set_states(This);
 
     This->flags=flags;
     This->ready=TRUE;
@@ -350,7 +344,6 @@ static HRESULT WINAPI d3dx9_sprite_Draw(ID3DXSprite *iface, IDirect3DTexture9 *t
     struct d3dx9_sprite *This = impl_from_ID3DXSprite(iface);
     struct sprite *new_sprites;
     D3DSURFACE_DESC texdesc;
-    int new_size;
 
     TRACE("iface %p, texture %p, rect %s, center %p, position %p, color 0x%08lx.\n",
             iface, texture, wine_dbgstr_rect(rect), center, position, color);
@@ -358,14 +351,19 @@ static HRESULT WINAPI d3dx9_sprite_Draw(ID3DXSprite *iface, IDirect3DTexture9 *t
     if(texture==NULL) return D3DERR_INVALIDCALL;
     if(!This->ready) return D3DERR_INVALIDCALL;
 
-    if (This->allocated_sprites <= This->sprite_count)
+    if (!This->allocated_sprites)
     {
-        new_size = This->allocated_sprites ? This->allocated_sprites * 2 : 32;
-        new_sprites = realloc(This->sprites, new_size * sizeof(*This->sprites));
+        This->sprites = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, 32 * sizeof(*This->sprites));
+        This->allocated_sprites = 32;
+    }
+    else if (This->allocated_sprites <= This->sprite_count)
+    {
+        new_sprites = HeapReAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY,
+                This->sprites, This->allocated_sprites * 2 * sizeof(*This->sprites));
         if (!new_sprites)
             return E_OUTOFMEMORY;
         This->sprites = new_sprites;
-        This->allocated_sprites = new_size;
+        This->allocated_sprites *= 2;
     }
     This->sprites[This->sprite_count].texture=texture;
     if(!(This->flags & D3DXSPRITE_DO_NOT_ADDREF_TEXTURE))
@@ -420,7 +418,7 @@ static HRESULT WINAPI d3dx9_sprite_Flush(ID3DXSprite *iface)
     if(!This->sprite_count) return D3D_OK;
 
 /* TODO: use of a vertex buffer here */
-    vertices = malloc(sizeof(*vertices) * 6 * This->sprite_count);
+    vertices = HeapAlloc(GetProcessHeap(), 0, sizeof(*vertices) * 6 * This->sprite_count);
 
     for(start=0;start<This->sprite_count;start+=count,count=0) {
         i=start;
@@ -469,7 +467,7 @@ static HRESULT WINAPI d3dx9_sprite_Flush(ID3DXSprite *iface)
         IDirect3DDevice9_DrawPrimitiveUP(This->device, D3DPT_TRIANGLELIST,
                 2 * count, vertices + 6 * start, sizeof(*vertices));
     }
-    free(vertices);
+    HeapFree(GetProcessHeap(), 0, vertices);
 
     if(!(This->flags & D3DXSPRITE_DO_NOT_ADDREF_TEXTURE))
         for(i=0;i<This->sprite_count;i++)
@@ -573,7 +571,7 @@ HRESULT WINAPI D3DXCreateSprite(struct IDirect3DDevice9 *device, struct ID3DXSpr
 
     if(device==NULL || sprite==NULL) return D3DERR_INVALIDCALL;
 
-    if (!(object = calloc(1, sizeof(*object))))
+    if (!(object=HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*object))))
     {
         *sprite = NULL;
         return E_OUTOFMEMORY;

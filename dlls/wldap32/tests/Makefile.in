@@ -1,6 +1,6 @@
 TESTDLL   = wldap32.dll
-IMPORTS   = crypt32 wldap32
+IMPORTS   = wldap32
 
-SOURCES = \
+C_SRCS = \
 	ber.c \
 	parse.c

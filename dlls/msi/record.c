@@ -497,7 +497,7 @@ UINT WINAPI MsiRecordGetStringW( MSIHANDLE handle, UINT iField, WCHAR *szValue, 
     return ret;
 }
 
-static UINT get_stream_size( IStream *stm )
+static UINT msi_get_stream_size( IStream *stm )
 {
     STATSTG stat;
     HRESULT r;
@@ -524,7 +524,7 @@ static UINT MSI_RecordDataSize(MSIRECORD *rec, UINT iField)
     case MSIFIELD_NULL:
         break;
     case MSIFIELD_STREAM:
-        return get_stream_size( rec->fields[iField].u.stream );
+        return msi_get_stream_size( rec->fields[iField].u.stream );
     }
     return 0;
 }
@@ -865,7 +865,7 @@ UINT MSI_RecordGetIStream( MSIRECORD *rec, UINT iField, IStream **pstm)
     return ERROR_SUCCESS;
 }
 
-static UINT dump_stream_to_file( IStream *stm, const WCHAR *name )
+static UINT msi_dump_stream_to_file( IStream *stm, LPCWSTR name )
 {
     ULARGE_INTEGER size;
     LARGE_INTEGER pos;
@@ -909,7 +909,7 @@ UINT MSI_RecordStreamToFile( MSIRECORD *rec, UINT iField, LPCWSTR name )
     r = MSI_RecordGetIStream( rec, iField, &stm );
     if( r == ERROR_SUCCESS )
     {
-        r = dump_stream_to_file( stm, name );
+        r = msi_dump_stream_to_file( stm, name );
         IStream_Release( stm );
     }
 

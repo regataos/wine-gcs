@@ -1,4 +1,3 @@
 MODULE = msxml2.dll
 
-SOURCES = \
-	msxml2_tlb.idl
+IDL_SRCS = msxml2_tlb.idl

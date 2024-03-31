@@ -22,59 +22,39 @@
 
 #include "windef.h"
 #include "winbase.h"
-#include "winternl.h"
+#include "wine/debug.h"
 
-static inline BOOL set_ntstatus( NTSTATUS status )
-{
-    if (status) RtlSetLastWin32Error( RtlNtStatusToDosError( status ));
-    return !status;
-}
+WINE_DEFAULT_DEBUG_CHANNEL(ktmw32);
 
-static inline LARGE_INTEGER *get_nt_timeout( LARGE_INTEGER *time, DWORD timeout )
-{
-    if (timeout == INFINITE) return NULL;
-    time->QuadPart = (ULONGLONG)timeout * -10000;
-    return time;
-}
 
 /***********************************************************************
  * CommitTransaction (ktmw32.@)
  */
 BOOL WINAPI CommitTransaction(HANDLE transaction)
 {
-    return set_ntstatus( NtCommitTransaction( transaction, TRUE ));
+    FIXME("(%p): stub\n", transaction);
+    return TRUE;
 }
 
 /***********************************************************************
  * CreateTransaction (ktmw32.@)
  */
-HANDLE WINAPI CreateTransaction( SECURITY_ATTRIBUTES *sa, GUID *guid, DWORD options, DWORD level, DWORD flags,
-        DWORD timeout, WCHAR *desc )
+HANDLE WINAPI CreateTransaction(LPSECURITY_ATTRIBUTES pattr, LPGUID pguid, DWORD options,
+                                DWORD level, DWORD flags, DWORD timeout, LPWSTR description)
 {
-    ULONG obj_flags = OBJ_CASE_INSENSITIVE;
-    UNICODE_STRING desc_str;
-    OBJECT_ATTRIBUTES attr;
-    LARGE_INTEGER time;
-    HANDLE handle;
 
-    if (sa && sa->bInheritHandle) obj_flags |= OBJ_INHERIT;
-    InitializeObjectAttributes( &attr, NULL, obj_flags, 0, sa ? sa->lpSecurityDescriptor : NULL );
+    FIXME("(%p %p 0x%lx 0x%lx 0x%lx, %lu, %s): stub\n",
+            pattr, pguid, options, level, flags, timeout, debugstr_w(description));
 
-    RtlInitUnicodeString( &desc_str, desc );
-
-    if (!set_ntstatus( NtCreateTransaction( &handle, 0 /* FIXME */, &attr, guid, NULL, options, level, flags,
-            get_nt_timeout( &time, timeout ), &desc_str )))
-    {
-        return INVALID_HANDLE_VALUE;
-    }
-
-    return handle;
+    return (HANDLE) 1;
 }
 
 /***********************************************************************
- * RollbackTransaction (ktmw32.@)
+ * Rollback Transaction (ktmw32.@)
  */
 BOOL WINAPI RollbackTransaction(HANDLE transaction)
 {
-    return set_ntstatus( NtRollbackTransaction( transaction, TRUE ));
+    FIXME("stub: %p\n", transaction);
+    SetLastError(ERROR_ACCESS_DENIED);
+    return FALSE;
 }

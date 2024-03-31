@@ -4,11 +4,10 @@ IMPORTLIB = gdi32
 IMPORTS   = user32 advapi32 win32u
 DELAYIMPORTS = setupapi winspool
 
-SOURCES = \
+C_SRCS = \
 	dc.c \
 	emfdc.c \
 	enhmetafile.c \
-	gdi32.rc \
 	icm.c \
 	metadc.c \
 	metafile.c \
@@ -27,3 +26,6 @@ SOURCES = \
 	uniscribe/shape.c \
 	uniscribe/shaping.c \
 	uniscribe/usp10.c
+
+
+RC_SRCS = gdi32.rc

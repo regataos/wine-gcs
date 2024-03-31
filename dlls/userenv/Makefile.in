@@ -1,9 +1,8 @@
-EXTRADEFS = -D_USERENV_
 MODULE    = userenv.dll
 IMPORTS   = advapi32
 IMPORTLIB = userenv
 
 EXTRADLLFLAGS = -Wb,--prefer-native
 
-SOURCES = \
+C_SRCS = \
 	userenv_main.c

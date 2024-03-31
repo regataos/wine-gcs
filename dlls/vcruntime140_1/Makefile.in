@@ -1,7 +1,5 @@
 MODULE  = vcruntime140_1.dll
 IMPORTS = vcruntime140
-PARENTSRC = ../msvcrt
 
-SOURCES = \
-	handler4.c \
-	main.c
+C_SRCS = \
+	except_x86_64.c

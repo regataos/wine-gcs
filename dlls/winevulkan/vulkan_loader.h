@@ -20,6 +20,9 @@
 #ifndef __WINE_VULKAN_LOADER_H
 #define __WINE_VULKAN_LOADER_H
 
+#include <stdarg.h>
+#include <stdlib.h>
+
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
 #include <stdarg.h>
@@ -39,6 +42,8 @@
 #define VULKAN_ICD_MAGIC_VALUE 0x01CDC0DE
 
 #define WINEVULKAN_QUIRK_GET_DEVICE_PROC_ADDR 0x00000001
+#define WINEVULKAN_QUIRK_ADJUST_MAX_IMAGE_COUNT 0x00000002
+#define WINEVULKAN_QUIRK_IGNORE_EXPLICIT_LAYERS 0x00000004
 
 /* Base 'class' for our Vulkan dispatchable objects such as VkDevice and VkInstance.
  * This structure MUST be the first element of a dispatchable object as the ICD
@@ -78,6 +83,16 @@ struct VkDevice_T
     struct VkQueue_T queues[1];
 };
 
+struct vk_swapchain
+{
+    UINT64 unix_handle;
+};
+
+static inline struct vk_swapchain *swapchain_from_handle(VkSwapchainKHR handle)
+{
+    return (struct vk_swapchain *)(uintptr_t)handle;
+}
+
 struct vk_command_pool
 {
     UINT64 unix_handle;
@@ -101,9 +116,9 @@ struct vulkan_func
     void *func;
 };
 
-void *wine_vk_get_device_proc_addr(const char *name);
-void *wine_vk_get_phys_dev_proc_addr(const char *name);
-void *wine_vk_get_instance_proc_addr(const char *name);
+void *wine_vk_get_device_proc_addr(const char *name) DECLSPEC_HIDDEN;
+void *wine_vk_get_phys_dev_proc_addr(const char *name) DECLSPEC_HIDDEN;
+void *wine_vk_get_instance_proc_addr(const char *name) DECLSPEC_HIDDEN;
 
 /* debug callbacks params */
 
@@ -142,6 +157,20 @@ struct is_available_device_function_params
     VkDevice device;
     const char *name;
 };
+
+#define wine_vk_find_struct(s, t) wine_vk_find_struct_((void *)s, VK_STRUCTURE_TYPE_##t)
+static inline void *wine_vk_find_struct_(void *s, VkStructureType t)
+{
+    VkBaseOutStructure *header;
+
+    for (header = s; header; header = header->pNext)
+    {
+        if (header->sType == t)
+            return header;
+    }
+
+    return NULL;
+}
 
 #define UNIX_CALL(code, params) WINE_UNIX_CALL(unix_ ## code, params)
 

@@ -40,7 +40,8 @@ static HRESULT device_state_init(IDirect3DDevice9 *device, struct device_state *
     if (FAILED(hr)) return hr;
 
     state->num_render_targets = caps.NumSimultaneousRTs;
-    state->render_targets = malloc(state->num_render_targets * sizeof(IDirect3DSurface9 *));
+    state->render_targets = HeapAlloc(GetProcessHeap(), 0,
+        state->num_render_targets * sizeof(IDirect3DSurface9 *));
     if (!state->render_targets)
         return E_OUTOFMEMORY;
 
@@ -99,7 +100,7 @@ static void device_state_release(struct device_state *state)
             IDirect3DSurface9_Release(state->render_targets[i]);
     }
 
-    free(state->render_targets);
+    HeapFree(GetProcessHeap(), 0, state->render_targets);
 
     if (state->depth_stencil) IDirect3DSurface9_Release(state->depth_stencil);
 }
@@ -173,7 +174,7 @@ static ULONG WINAPI D3DXRenderToSurface_Release(ID3DXRenderToSurface *iface)
 
         IDirect3DDevice9_Release(render->device);
 
-        free(render);
+        HeapFree(GetProcessHeap(), 0, render);
     }
 
     return ref;
@@ -385,7 +386,7 @@ HRESULT WINAPI D3DXCreateRenderToSurface(IDirect3DDevice9 *device,
 
     if (!device || !out) return D3DERR_INVALIDCALL;
 
-    render = malloc(sizeof(struct render_to_surface));
+    render = HeapAlloc(GetProcessHeap(), 0, sizeof(struct render_to_surface));
     if (!render) return E_OUTOFMEMORY;
 
     render->ID3DXRenderToSurface_iface.lpVtbl = &render_to_surface_vtbl;
@@ -404,7 +405,7 @@ HRESULT WINAPI D3DXCreateRenderToSurface(IDirect3DDevice9 *device,
     hr = device_state_init(device, &render->previous_state);
     if (FAILED(hr))
     {
-        free(render);
+        HeapFree(GetProcessHeap(), 0, render);
         return hr;
     }
 
@@ -512,7 +513,7 @@ static ULONG WINAPI D3DXRenderToEnvMap_Release(ID3DXRenderToEnvMap *iface)
 
         IDirect3DDevice9_Release(render->device);
 
-        free(render);
+        HeapFree(GetProcessHeap(), 0, render);
     }
 
     return ref;
@@ -763,7 +764,7 @@ HRESULT WINAPI D3DXCreateRenderToEnvMap(IDirect3DDevice9 *device,
             D3DUSAGE_RENDERTARGET, &format, D3DPOOL_DEFAULT);
     if (FAILED(hr)) return hr;
 
-    render = malloc(sizeof(*render));
+    render = HeapAlloc(GetProcessHeap(), 0, sizeof(struct render_to_envmap));
     if (!render) return E_OUTOFMEMORY;
 
     render->ID3DXRenderToEnvMap_iface.lpVtbl = &render_to_envmap_vtbl;
@@ -783,7 +784,7 @@ HRESULT WINAPI D3DXCreateRenderToEnvMap(IDirect3DDevice9 *device,
     hr = device_state_init(device, &render->previous_device_state);
     if (FAILED(hr))
     {
-        free(render);
+        HeapFree(GetProcessHeap(), 0, render);
         return hr;
     }
 

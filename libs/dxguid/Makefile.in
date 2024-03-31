@@ -1,6 +1,6 @@
 STATICLIB = libdxguid.a
 
-SOURCES = \
+C_SRCS = \
 	dx10guid.c \
 	dx8guid.c \
 	dx9guid.c \

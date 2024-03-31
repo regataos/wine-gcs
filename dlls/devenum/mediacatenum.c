@@ -124,9 +124,8 @@ static HRESULT WINAPI property_bag_Read(IPropertyBag *iface,
     if (!name || !var)
         return E_POINTER;
 
-    switch (moniker->type)
+    if (moniker->type == DEVICE_DMO)
     {
-    case DEVICE_DMO:
         if (!wcscmp(name, L"FriendlyName"))
         {
             if (SUCCEEDED(hr = DMOGetName(&moniker->clsid, dmo_name)))
@@ -136,7 +135,7 @@ static HRESULT WINAPI property_bag_Read(IPropertyBag *iface,
             }
             return hr;
         }
-        if (!wcscmp(name, L"FilterData"))
+        else if (!wcscmp(name, L"FilterData"))
         {
             DMO_PARTIAL_MEDIATYPE *types = NULL, *new_array;
             ULONG count = 1, input_count, output_count, i;
@@ -197,8 +196,10 @@ static HRESULT WINAPI property_bag_Read(IPropertyBag *iface,
             return hr;
         }
         return HRESULT_FROM_WIN32(ERROR_NOT_FOUND);
+    }
 
-    case DEVICE_FILTER:
+    if (moniker->type == DEVICE_FILTER)
+    {
         wcscpy(path, L"CLSID\\");
         if (moniker->has_class)
         {
@@ -207,19 +208,15 @@ static HRESULT WINAPI property_bag_Read(IPropertyBag *iface,
         }
         if ((ret = RegOpenKeyExW(HKEY_CLASSES_ROOT, path, 0, 0, &parent)))
             return HRESULT_FROM_WIN32(ret);
-        break;
-
-    case DEVICE_CODEC:
+    }
+    else if (moniker->type == DEVICE_CODEC)
+    {
         wcscpy(path, L"Software\\Microsoft\\ActiveMovie\\devenum\\");
         if (moniker->has_class)
             StringFromGUID2(&moniker->class, path + wcslen(path), CHARS_IN_GUID);
         if ((ret = RegOpenKeyExW(HKEY_CURRENT_USER, path, 0, 0, &parent)))
             return HRESULT_FROM_WIN32(ret);
-        break;
-
-    DEFAULT_UNREACHABLE;
     }
-
     ret = RegOpenKeyExW(parent, moniker->name, 0, KEY_READ, &key);
     RegCloseKey(parent);
     if (ret)
@@ -305,12 +302,11 @@ static HRESULT WINAPI property_bag_Write(IPropertyBag *iface, const WCHAR *name,
 
     TRACE("moniker %p, name %s, var %s.\n", moniker, debugstr_w(name), debugstr_variant(var));
 
-    switch (moniker->type)
-    {
-    case DEVICE_DMO:
+    if (moniker->type == DEVICE_DMO)
         return E_ACCESSDENIED;
 
-    case DEVICE_FILTER:
+    if (moniker->type == DEVICE_FILTER)
+    {
         wcscpy(path, L"CLSID\\");
         if (moniker->has_class)
         {
@@ -319,17 +315,14 @@ static HRESULT WINAPI property_bag_Write(IPropertyBag *iface, const WCHAR *name,
         }
         if ((ret = RegCreateKeyExW(HKEY_CLASSES_ROOT, path, 0, NULL, 0, 0, NULL, &parent, NULL)))
             return HRESULT_FROM_WIN32(ret);
-        break;
-
-    case DEVICE_CODEC:
+    }
+    else if (moniker->type == DEVICE_CODEC)
+    {
         wcscpy(path, L"Software\\Microsoft\\ActiveMovie\\devenum\\");
         if (moniker->has_class)
             StringFromGUID2(&moniker->class, path + wcslen(path), CHARS_IN_GUID);
         if ((ret = RegCreateKeyExW(HKEY_CURRENT_USER, path, 0, NULL, 0, 0, NULL, &parent, NULL)))
             return HRESULT_FROM_WIN32(ret);
-        break;
-
-    DEFAULT_UNREACHABLE;
     }
     ret = RegCreateKeyExW(parent, moniker->name, 0, NULL, 0, KEY_WRITE, NULL, &key, NULL);
     RegCloseKey(parent);

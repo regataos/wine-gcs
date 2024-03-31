@@ -1,9 +1,10 @@
 TESTDLL   = jscript.dll
 IMPORTS   = oleaut32 ole32 advapi32
 
-SOURCES = \
+C_SRCS = \
 	activex.c \
 	caller.c \
 	jscript.c \
-	rsrc.rc \
 	run.c
+
+RC_SRCS = rsrc.rc

@@ -77,10 +77,10 @@ static inline IGetFrameImpl *impl_from_IGetFrame(IGetFrame *iface)
 static void AVIFILE_CloseCompressor(IGetFrameImpl *This)
 {
   if (This->lpInFormat != This->lpOutFormat) {
-    free(This->lpOutFormat);
+    HeapFree(GetProcessHeap(), 0, This->lpOutFormat);
     This->lpOutFormat = NULL;
   }
-  free(This->lpInFormat);
+  HeapFree(GetProcessHeap(), 0, This->lpInFormat);
   This->lpInFormat = NULL;
   if (This->hic != NULL) {
     if (This->bResize)
@@ -133,7 +133,7 @@ static ULONG   WINAPI IGetFrame_fnRelease(IGetFrame *iface)
       This->pStream = NULL;
     }
 
-    free(iface);
+    HeapFree(GetProcessHeap(), 0, iface);
   }
 
   return ref;
@@ -222,7 +222,7 @@ static LPVOID  WINAPI IGetFrame_fnGetFrame(IGetFrame *iface, LONG lPos)
 	if (This->cbInBuffer >= readBytes)
 	  break;
 	This->cbInBuffer = This->cbInFormat + readBytes;
-	This->lpInFormat = realloc(This->lpInFormat, This->cbInBuffer);
+	This->lpInFormat = HeapReAlloc(GetProcessHeap(), 0, This->lpInFormat, This->cbInBuffer);
 	if (This->lpInFormat == NULL)
 	  return NULL; /* out of memory */
 	This->lpInBuffer = (BYTE*)This->lpInFormat + This->cbInFormat;
@@ -322,7 +322,7 @@ static HRESULT WINAPI IGetFrame_fnSetFormat(IGetFrame *iface,
     IAVIStream_ReadFormat(This->pStream, sInfo.dwStart,
 			  NULL, &This->cbInFormat);
 
-    This->lpInFormat = malloc(This->cbInFormat + This->cbInBuffer);
+    This->lpInFormat = HeapAlloc(GetProcessHeap(), 0, This->cbInFormat + This->cbInBuffer);
     if (This->lpInFormat == NULL) {
       AVIFILE_CloseCompressor(This);
       return AVIERR_MEMORY;
@@ -361,7 +361,8 @@ static HRESULT WINAPI IGetFrame_fnSetFormat(IGetFrame *iface,
 
   /* need memory for output format? */
   if (This->lpOutFormat == NULL) {
-    This->lpOutFormat = malloc(sizeof(BITMAPINFOHEADER) + 256 * sizeof(RGBQUAD));
+    This->lpOutFormat =
+      HeapAlloc(GetProcessHeap(), 0, sizeof(BITMAPINFOHEADER) + 256 * sizeof(RGBQUAD));
     if (This->lpOutFormat == NULL) {
       AVIFILE_CloseCompressor(This);
       return AVIERR_MEMORY;
@@ -429,7 +430,7 @@ static HRESULT WINAPI IGetFrame_fnSetFormat(IGetFrame *iface,
     DWORD size = This->lpOutFormat->biClrUsed * sizeof(RGBQUAD);
 
     size += This->lpOutFormat->biSize + This->lpOutFormat->biSizeImage;
-    This->lpOutFormat = realloc(This->lpOutFormat, size);
+    This->lpOutFormat = HeapReAlloc(GetProcessHeap(), 0, This->lpOutFormat, size);
     if (This->lpOutFormat == NULL) {
       AVIFILE_CloseCompressor(This);
       return AVIERR_MEMORY;
@@ -491,7 +492,7 @@ PGETFRAME AVIFILE_CreateGetFrame(PAVISTREAM pStream)
   if (pStream == NULL)
     return NULL;
 
-  pg = calloc(1, sizeof(IGetFrameImpl));
+  pg = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(IGetFrameImpl));
   if (pg != NULL) {
     pg->IGetFrame_iface.lpVtbl = &igetframeVtbl;
     pg->ref           = 1;

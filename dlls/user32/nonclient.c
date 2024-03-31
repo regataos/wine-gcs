@@ -21,6 +21,7 @@
 #include "user_private.h"
 #include "controls.h"
 #include "wine/debug.h"
+#include "wine/gdi_driver.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(nonclient);
 
@@ -30,6 +31,9 @@ WINE_DEFAULT_DEBUG_CHANNEL(nonclient);
 static void adjust_window_rect( RECT *rect, DWORD style, BOOL menu, DWORD exStyle, NONCLIENTMETRICSW *ncm )
 {
     int adjust = 0;
+
+    if (__wine_get_window_manager() == WINE_WM_X11_STEAMCOMPMGR && !((style & WS_POPUP) && (exStyle & WS_EX_TOOLWINDOW)))
+        return;
 
     if ((exStyle & (WS_EX_STATICEDGE|WS_EX_DLGMODALFRAME)) == WS_EX_STATICEDGE)
         adjust = 1; /* for the outer frame always present */
@@ -159,16 +163,12 @@ LRESULT NC_HandleSysCommand( HWND hwnd, WPARAM wParam, LPARAM lParam )
             if (hmodule)
             {
                 BOOL (WINAPI *aboutproc)(HWND, LPCSTR, LPCSTR, HICON);
-                const char * (CDECL *p_wine_get_version)(void);
+                extern const char * CDECL wine_get_version(void);
                 char app[256];
 
-                p_wine_get_version = (void *)GetProcAddress( GetModuleHandleW(L"ntdll.dll"), "wine_get_version" );
+                sprintf( app, "Wine %s", wine_get_version() );
                 aboutproc = (void *)GetProcAddress( hmodule, "ShellAboutA" );
-                if (p_wine_get_version && aboutproc)
-                {
-                    snprintf( app, ARRAY_SIZE(app), "Wine %s", p_wine_get_version() );
-                    aboutproc( hwnd, app, NULL, 0 );
-                }
+                if (aboutproc) aboutproc( hwnd, app, NULL, 0 );
                 FreeLibrary( hmodule );
             }
         }

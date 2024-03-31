@@ -21,6 +21,8 @@
 #include <stdarg.h>
 
 #define COBJMACROS
+#define NONAMELESSUNION
+
 #include "stdio.h"
 #include "windef.h"
 #include "winbase.h"
@@ -42,35 +44,30 @@ WINE_DEFAULT_DEBUG_CHANNEL(msi);
 
 #include "pshpack1.h"
 
-struct property_set_header
-{
+typedef struct {
     WORD wByteOrder;
     WORD wFormat;
     DWORD dwOSVer;
     CLSID clsID;
     DWORD reserved;
-};
+} PROPERTYSETHEADER;
 
-struct format_id_offset
-{
+typedef struct {
     FMTID fmtid;
     DWORD dwOffset;
-};
+} FORMATIDOFFSET;
 
-struct property_section_header
-{
+typedef struct {
     DWORD cbSection;
     DWORD cProperties;
-};
+} PROPERTYSECTIONHEADER;
 
-struct property_id_offset
-{
+typedef struct {
     DWORD propid;
     DWORD dwOffset;
-};
+} PROPERTYIDOFFSET;
 
-struct property_data
-{
+typedef struct {
     DWORD type;
     union {
         INT i4;
@@ -81,7 +78,7 @@ struct property_data
             BYTE str[1];
         } str;
     } u;
-};
+} PROPERTY_DATA;
 
 #include "poppack.h"
 
@@ -89,7 +86,7 @@ static HRESULT (WINAPI *pPropVariantChangeType)
     (PROPVARIANT *ppropvarDest, REFPROPVARIANT propvarSrc,
      PROPVAR_CHANGE_FLAGS flags, VARTYPE vt);
 
-#define SECT_HDR_SIZE (sizeof(struct property_section_header))
+#define SECT_HDR_SIZE (sizeof(PROPERTYSECTIONHEADER))
 
 static void free_prop( PROPVARIANT *prop )
 {
@@ -173,14 +170,14 @@ static void read_properties_from_data( PROPVARIANT *prop, LPBYTE data, DWORD sz 
 {
     UINT type;
     DWORD i, size;
-    struct property_data *propdata;
+    PROPERTY_DATA *propdata;
     PROPVARIANT property, *ptr;
     PROPVARIANT changed;
-    struct property_id_offset *idofs;
-    struct property_section_header *section_hdr;
+    PROPERTYIDOFFSET *idofs;
+    PROPERTYSECTIONHEADER *section_hdr;
 
-    section_hdr = (struct property_section_header *) &data[0];
-    idofs = (struct property_id_offset *)&data[SECT_HDR_SIZE];
+    section_hdr = (PROPERTYSECTIONHEADER*) &data[0];
+    idofs = (PROPERTYIDOFFSET*) &data[SECT_HDR_SIZE];
 
     /* now set all the properties */
     for( i = 0; i < section_hdr->cProperties; i++ )
@@ -198,7 +195,7 @@ static void read_properties_from_data( PROPVARIANT *prop, LPBYTE data, DWORD sz 
             break;
         }
 
-        propdata = (struct property_data *)&data[ idofs[i].dwOffset ];
+        propdata = (PROPERTY_DATA*) &data[ idofs[i].dwOffset ];
 
         /* check we don't run off the end of the data */
         size = sz - idofs[i].dwOffset - sizeof(DWORD);
@@ -240,9 +237,9 @@ static void read_properties_from_data( PROPVARIANT *prop, LPBYTE data, DWORD sz 
 
 static UINT load_summary_info( MSISUMMARYINFO *si, IStream *stm )
 {
-    struct property_set_header set_hdr;
-    struct format_id_offset format_hdr;
-    struct property_section_header section_hdr;
+    PROPERTYSETHEADER set_hdr;
+    FORMATIDOFFSET format_hdr;
+    PROPERTYSECTIONHEADER section_hdr;
     LPBYTE data = NULL;
     LARGE_INTEGER ofs;
     ULONG count, sz;
@@ -365,10 +362,10 @@ static UINT write_property_to_data( const PROPVARIANT *prop, LPBYTE data )
 static UINT save_summary_info( const MSISUMMARYINFO * si, IStream *stm )
 {
     UINT ret = ERROR_FUNCTION_FAILED;
-    struct property_set_header set_hdr;
-    struct format_id_offset format_hdr;
-    struct property_section_header section_hdr;
-    struct property_id_offset idofs[MSI_MAX_PROPS];
+    PROPERTYSETHEADER set_hdr;
+    FORMATIDOFFSET format_hdr;
+    PROPERTYSECTIONHEADER section_hdr;
+    PROPERTYIDOFFSET idofs[MSI_MAX_PROPS];
     LPBYTE data = NULL;
     ULONG count, sz;
     HRESULT r;
@@ -878,8 +875,8 @@ static UINT set_prop( MSISUMMARYINFO *si, UINT uiProperty, UINT type,
     return ERROR_SUCCESS;
 }
 
-static UINT suminfo_set_prop( MSISUMMARYINFO *si, UINT uiProperty, UINT uiDataType, INT iValue, FILETIME *pftValue,
-                              awcstring *str )
+static UINT msi_set_prop( MSISUMMARYINFO *si, UINT uiProperty, UINT uiDataType,
+                          INT iValue, FILETIME *pftValue, awcstring *str )
 {
     UINT type = get_type( uiProperty );
     if( type == VT_EMPTY || type != uiDataType )
@@ -919,7 +916,7 @@ UINT WINAPI MsiSummaryInfoSetPropertyW( MSIHANDLE handle, UINT uiProperty, UINT 
     str.unicode = TRUE;
     str.str.w = szValue;
 
-    ret = suminfo_set_prop( si, uiProperty, uiDataType, iValue, pftValue, &str );
+    ret = msi_set_prop( si, uiProperty, uiDataType, iValue, pftValue, &str );
     msiobj_release( &si->hdr );
     return ret;
 }
@@ -949,7 +946,7 @@ UINT WINAPI MsiSummaryInfoSetPropertyA( MSIHANDLE handle, UINT uiProperty, UINT 
     str.unicode = FALSE;
     str.str.a = szValue;
 
-    ret = suminfo_set_prop( si, uiProperty, uiDataType, iValue, pftValue, &str );
+    ret = msi_set_prop( si, uiProperty, uiDataType, iValue, pftValue, &str );
     msiobj_release( &si->hdr );
     return ret;
 }

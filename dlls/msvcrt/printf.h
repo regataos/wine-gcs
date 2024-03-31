@@ -135,20 +135,6 @@ static inline int mbstowcs_len(wchar_t *wcstr, const char *mbstr,
     }
     return wlen;
 }
-
-static inline unsigned int log2i(unsigned int x)
-{
-    ULONG result;
-    _BitScanReverse(&result, x);
-    return result;
-}
-
-static inline unsigned int log10i(unsigned int x)
-{
-    unsigned int t = ((log2i(x) + 1) * 1233) / 4096;
-    return t - (x < p10s[t]);
-}
-
 #endif
 
 static inline int FUNC_NAME(pf_output_wstr)(FUNC_NAME(puts_clbk) pf_puts, void *puts_ctx,
@@ -649,7 +635,7 @@ static inline int FUNC_NAME(pf_output_fp)(FUNC_NAME(puts_clbk) pf_puts, void *pu
     if(!b->data[bnum_idx(b, b->e-1)])
         first_limb_len = 1;
     else
-        first_limb_len = log10i(b->data[bnum_idx(b, b->e - 1)]) + 1;
+        first_limb_len = floor(log10(b->data[bnum_idx(b, b->e - 1)])) + 1;
     radix_pos = first_limb_len + LIMB_DIGITS + e10;
 
     round_pos = flags->Precision;
@@ -714,7 +700,7 @@ static inline int FUNC_NAME(pf_output_fp)(FUNC_NAME(puts_clbk) pf_puts, void *pu
                 if(!b->data[bnum_idx(b, b->e-1)])
                     i = 1;
                 else
-                    i = log10i(b->data[bnum_idx(b, b->e-1)]) + 1;
+                    i = floor(log10(b->data[bnum_idx(b, b->e-1)])) + 1;
                 if(i != first_limb_len) {
                     first_limb_len = i;
                     radix_pos++;

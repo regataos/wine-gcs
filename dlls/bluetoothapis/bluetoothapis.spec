@@ -7,28 +7,28 @@
 @ stub BluetoothEnumerateLocalServices
 @ stub BluetoothFindBrowseGroupClose
 @ stub BluetoothFindClassIdClose
-@ stdcall BluetoothFindDeviceClose(ptr)
+@ stub BluetoothFindDeviceClose
 @ stub BluetoothFindFirstBrowseGroup
 @ stub BluetoothFindFirstClassId
-@ stdcall BluetoothFindFirstDevice(ptr ptr)
+@ stub BluetoothFindFirstDevice
 @ stub BluetoothFindFirstProfileDescriptor
 @ stub BluetoothFindFirstProtocolDescriptorStack
 @ stub BluetoothFindFirstProtocolEntry
-@ stdcall BluetoothFindFirstRadio(ptr ptr)
+@ stub BluetoothFindFirstRadio
 @ stub BluetoothFindFirstService
 @ stub BluetoothFindFirstServiceEx
 @ stub BluetoothFindNextBrowseGroup
 @ stub BluetoothFindNextClassId
-@ stdcall BluetoothFindNextDevice(ptr ptr)
+@ stub BluetoothFindNextDevice
 @ stub BluetoothFindNextProfileDescriptor
 @ stub BluetoothFindNextProtocolDescriptorStack
 @ stub BluetoothFindNextProtocolEntry
-@ stdcall BluetoothFindNextRadio(ptr ptr)
+@ stub BluetoothFindNextRadio
 @ stub BluetoothFindNextService
 @ stub BluetoothFindProfileDescriptorClose
 @ stub BluetoothFindProtocolDescriptorStackClose
 @ stub BluetoothFindProtocolEntryClose
-@ stdcall BluetoothFindRadioClose(ptr)
+@ stub BluetoothFindRadioClose
 @ stub BluetoothFindServiceClose
 @ stub BluetoothGATTAbortReliableWrite
 @ stub BluetoothGATTBeginReliableWrite
@@ -45,13 +45,13 @@
 @ stub BluetoothGATTUnregisterEvent
 @ stub BluetoothGetDeviceInfo
 @ stub BluetoothGetLocalServiceInfo
-@ stdcall BluetoothGetRadioInfo(ptr ptr)
+@ stub BluetoothGetRadioInfo
 @ stub BluetoothGetServicePnpInstance
 @ stub BluetoothIsConnectable
 @ stub BluetoothIsDiscoverable
 @ stub BluetoothIsVersionAvailable
 @ stub BluetoothRegisterForAuthentication
-@ stdcall BluetoothRegisterForAuthenticationEx(ptr ptr ptr ptr)
+@ stub BluetoothRegisterForAuthenticationEx
 @ stub BluetoothRemoveDevice
 @ stub BluetoothSdpEnumAttributes
 @ stub BluetoothSdpGetAttributeValue
@@ -63,7 +63,7 @@
 @ stub BluetoothSetLocalServiceInfo
 @ stub BluetoothSetServiceState
 @ stub BluetoothSetServiceStateEx
-@ stdcall BluetoothUnregisterAuthentication(long)
+@ stub BluetoothUnregisterAuthentication
 @ stub BluetoothUpdateDeviceRecord
 @ stub BthpCheckForUnsupportedGuid
 @ stub BthpCleanupBRDeviceNode

@@ -29,6 +29,8 @@
 #include <string.h>
 
 #define COBJMACROS
+#define NONAMELESSUNION
+
 #include "windef.h"
 #include "winbase.h"
 #include "winerror.h"
@@ -270,7 +272,7 @@ static HRESULT WINAPI StgStreamImpl_Seek(
   DirEntry currentEntry;
   HRESULT hr;
 
-  TRACE("%p, %ld, %ld, %p.\n", iface, dlibMove.LowPart, dwOrigin, plibNewPosition);
+  TRACE("%p, %ld, %ld, %p.\n", iface, dlibMove.u.LowPart, dwOrigin, plibNewPosition);
 
   /*
    * fail if the stream has no parent (as does windows)
@@ -340,7 +342,7 @@ static HRESULT WINAPI StgStreamImpl_SetSize(
 
   HRESULT      hr;
 
-  TRACE("%p, %ld.\n", iface, libNewSize.LowPart);
+  TRACE("%p, %ld.\n", iface, libNewSize.u.LowPart);
 
   if(!This->parentStorage)
   {
@@ -351,9 +353,9 @@ static HRESULT WINAPI StgStreamImpl_SetSize(
   /*
    * As documented.
    */
-  if (libNewSize.HighPart != 0)
+  if (libNewSize.u.HighPart != 0)
   {
-    WARN("invalid value for libNewSize.HighPart %ld\n", libNewSize.HighPart);
+    WARN("invalid value for libNewSize.u.HighPart %ld\n", libNewSize.u.HighPart);
     return STG_E_INVALIDFUNCTION;
   }
 
@@ -395,7 +397,7 @@ static HRESULT WINAPI StgStreamImpl_CopyTo(
   ULARGE_INTEGER totalBytesRead;
   ULARGE_INTEGER totalBytesWritten;
 
-  TRACE("%p, %p, %ld, %p, %p.\n", iface, pstm, cb.LowPart, pcbRead, pcbWritten);
+  TRACE("%p, %p, %ld, %p, %p.\n", iface, pstm, cb.u.LowPart, pcbRead, pcbWritten);
 
   /*
    * Sanity check
@@ -418,7 +420,7 @@ static HRESULT WINAPI StgStreamImpl_CopyTo(
     if ( cb.QuadPart >= sizeof(tmpBuffer) )
       copySize = sizeof(tmpBuffer);
     else
-      copySize = cb.LowPart;
+      copySize = cb.u.LowPart;
 
     IStream_Read(iface, tmpBuffer, copySize, &bytesRead);
 
@@ -694,8 +696,8 @@ StgStreamImpl* StgStreamImpl_Construct(
     /*
      * Start the stream at the beginning.
      */
-    newStream->currentPosition.HighPart = 0;
-    newStream->currentPosition.LowPart = 0;
+    newStream->currentPosition.u.HighPart = 0;
+    newStream->currentPosition.u.LowPart = 0;
 
     /* add us to the storage's list of active streams */
     StorageBaseImpl_AddStream(parentStorage, newStream);

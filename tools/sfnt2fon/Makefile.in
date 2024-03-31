@@ -2,5 +2,4 @@ PROGRAMS = sfnt2fon
 UNIX_LIBS   = $(FREETYPE_LIBS)
 UNIX_CFLAGS = $(FREETYPE_CFLAGS)
 
-SOURCES = \
-	sfnt2fon.c
+C_SRCS = sfnt2fon.c

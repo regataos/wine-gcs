@@ -1,4 +1,0 @@
-MODULE = dxcore.dll
-
-SOURCES = \
-	main.c

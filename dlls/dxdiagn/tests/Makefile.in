@@ -1,6 +1,6 @@
 TESTDLL   = dxdiagn.dll
 IMPORTS   = oleaut32 ole32
 
-SOURCES = \
+C_SRCS = \
 	container.c \
 	provider.c

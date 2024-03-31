@@ -31,6 +31,7 @@
 #include "winnls.h"
 #include "sqlext.h"
 #include "wine/debug.h"
+#include "wine/heap.h"
 
 #include "odbcinst.h"
 
@@ -87,7 +88,7 @@ static void clear_errors(void)
     num_errors = 0;
 }
 
-static inline WCHAR *strdupAtoW(const char *str)
+static inline WCHAR *heap_strdupAtoW(const char *str)
 {
     LPWSTR ret = NULL;
 
@@ -95,7 +96,7 @@ static inline WCHAR *strdupAtoW(const char *str)
         DWORD len;
 
         len = MultiByteToWideChar(CP_ACP, 0, str, -1, NULL, 0);
-        ret = malloc(len * sizeof(WCHAR));
+        ret = heap_alloc(len*sizeof(WCHAR));
         if(ret)
             MultiByteToWideChar(CP_ACP, 0, str, -1, ret, len);
     }
@@ -124,7 +125,7 @@ static LPWSTR SQLInstall_strdup_multi(LPCSTR str)
         ;
 
     len = MultiByteToWideChar(CP_ACP, 0, str, p - str, NULL, 0 );
-    ret = malloc((len + 1) * sizeof(WCHAR));
+    ret = HeapAlloc(GetProcessHeap(), 0, (len+1)*sizeof(WCHAR));
     MultiByteToWideChar(CP_ACP, 0, str, p - str, ret, len );
     ret[len] = 0;
 
@@ -140,7 +141,7 @@ static LPWSTR SQLInstall_strdup(LPCSTR str)
         return ret;
 
     len = MultiByteToWideChar(CP_ACP, 0, str, -1, NULL, 0 );
-    ret = malloc(len * sizeof(WCHAR));
+    ret = HeapAlloc(GetProcessHeap(), 0, len*sizeof(WCHAR));
     MultiByteToWideChar(CP_ACP, 0, str, -1, ret, len );
 
     return ret;
@@ -181,7 +182,7 @@ static BOOL SQLInstall_narrow(int mode, LPSTR buffer, LPCWSTR str, WORD str_leng
     {
         if (len > buffer_length)
         {
-            pbuf = malloc(len);
+            pbuf = HeapAlloc(GetProcessHeap(), 0, len);
         }
         else
         {
@@ -211,7 +212,7 @@ static BOOL SQLInstall_narrow(int mode, LPSTR buffer, LPCWSTR str, WORD str_leng
         }
         if (pbuf != buffer)
         {
-            free(pbuf);
+            HeapFree(GetProcessHeap(), 0, pbuf);
         }
     }
     else
@@ -246,7 +247,7 @@ static HMODULE load_config_driver(const WCHAR *driver)
                 return NULL;
             }
 
-            filename = malloc(size);
+            filename = HeapAlloc(GetProcessHeap(), 0, size);
             if(!filename)
             {
                 RegCloseKey(hkeydriver);
@@ -265,13 +266,13 @@ static HMODULE load_config_driver(const WCHAR *driver)
 
     if(ret != ERROR_SUCCESS)
     {
-        free(filename);
+        HeapFree(GetProcessHeap(), 0, filename);
         push_error(ODBC_ERROR_COMPONENT_NOT_FOUND, odbc_error_component_not_found);
         return NULL;
     }
 
-    hmod = LoadLibraryExW(filename, NULL, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
-    free(filename);
+    hmod = LoadLibraryW(filename);
+    HeapFree(GetProcessHeap(), 0, filename);
 
     if(!hmod)
         push_error(ODBC_ERROR_LOAD_LIB_FAILED, odbc_error_load_lib_failed);
@@ -294,7 +295,7 @@ static BOOL write_config_value(const WCHAR *driver, const WCHAR *args)
         {
             WCHAR *divider, *value;
 
-            name = malloc((wcslen(args) + 1) * sizeof(WCHAR));
+            name = heap_alloc( (lstrlenW(args) + 1) * sizeof(WCHAR));
             if(!name)
             {
                 push_error(ODBC_ERROR_OUT_OF_MEM, odbc_error_out_of_mem);
@@ -316,7 +317,7 @@ static BOOL write_config_value(const WCHAR *driver, const WCHAR *args)
             if(RegSetValueExW(hkeydriver, name, 0, REG_SZ, (BYTE*)value,
                                (lstrlenW(value)+1) * sizeof(WCHAR)) != ERROR_SUCCESS)
                 ERR("Failed to write registry installed key\n");
-            free(name);
+            heap_free(name);
 
             RegCloseKey(hkeydriver);
         }
@@ -332,7 +333,7 @@ static BOOL write_config_value(const WCHAR *driver, const WCHAR *args)
 fail:
     RegCloseKey(hkeydriver);
     RegCloseKey(hkey);
-    free(name);
+    heap_free(name);
 
     return FALSE;
 }
@@ -431,7 +432,7 @@ BOOL WINAPI SQLConfigDataSource(HWND hwnd, WORD request, LPCSTR driver, LPCSTR a
     if (!mapped_request)
         return FALSE;
 
-    driverW = strdupAtoW(driver);
+    driverW = heap_strdupAtoW(driver);
     if (!driverW)
     {
         push_error(ODBC_ERROR_OUT_OF_MEM, odbc_error_out_of_mem);
@@ -441,7 +442,7 @@ BOOL WINAPI SQLConfigDataSource(HWND hwnd, WORD request, LPCSTR driver, LPCSTR a
     mod = load_config_driver(driverW);
     if (!mod)
     {
-        free(driverW);
+        heap_free(driverW);
         return FALSE;
     }
 
@@ -464,7 +465,7 @@ BOOL WINAPI SQLConfigDataSource(HWND hwnd, WORD request, LPCSTR driver, LPCSTR a
             attr = SQLInstall_strdup_multi(attributes);
             if(attr)
                 ret = pConfigDSNW(hwnd, mapped_request, driverW, attr);
-            free(attr);
+            heap_free(attr);
         }
     }
 
@@ -473,7 +474,7 @@ BOOL WINAPI SQLConfigDataSource(HWND hwnd, WORD request, LPCSTR driver, LPCSTR a
     if (!ret)
         push_error(ODBC_ERROR_REQUEST_FAILED, odbc_error_request_failed);
 
-    free(driverW);
+    heap_free(driverW);
     FreeLibrary(mod);
 
     return ret;
@@ -523,7 +524,7 @@ BOOL WINAPI SQLConfigDriver(HWND hwnd, WORD request, LPCSTR driver,
     TRACE("(%p %d %s %s %p %d %p)\n", hwnd, request, debugstr_a(driver),
           debugstr_a(args), msg, msgmax, msgout);
 
-    driverW = strdupAtoW(driver);
+    driverW = heap_strdupAtoW(driver);
     if(!driverW)
     {
         push_error(ODBC_ERROR_OUT_OF_MEM, odbc_error_out_of_mem);
@@ -532,24 +533,24 @@ BOOL WINAPI SQLConfigDriver(HWND hwnd, WORD request, LPCSTR driver,
     if(request == ODBC_CONFIG_DRIVER)
     {
         BOOL ret = FALSE;
-        WCHAR *argsW = strdupAtoW(args);
+        WCHAR *argsW = heap_strdupAtoW(args);
         if(argsW)
         {
             ret = write_config_value(driverW, argsW);
-            free(argsW);
+            HeapFree(GetProcessHeap(), 0, argsW);
         }
         else
         {
             push_error(ODBC_ERROR_OUT_OF_MEM, odbc_error_out_of_mem);
         }
 
-        free(driverW);
+        HeapFree(GetProcessHeap(), 0, driverW);
 
         return ret;
     }
 
     hmod = load_config_driver(driverW);
-    free(driverW);
+    HeapFree(GetProcessHeap(), 0, driverW);
     if(!hmod)
         return FALSE;
 
@@ -637,7 +638,7 @@ BOOL WINAPI SQLGetInstalledDriversW(WCHAR *buf, WORD size, WORD *sizeout)
     }
 
     valuelen = 256;
-    value = malloc(valuelen * sizeof(WCHAR));
+    value = heap_alloc(valuelen * sizeof(WCHAR));
 
     size--;
 
@@ -647,7 +648,7 @@ BOOL WINAPI SQLGetInstalledDriversW(WCHAR *buf, WORD size, WORD *sizeout)
         res = RegEnumValueW(drivers, index, value, &len, NULL, NULL, NULL, NULL);
         while (res == ERROR_MORE_DATA)
         {
-            value = realloc(value, ++len * sizeof(WCHAR));
+            value = heap_realloc(value, ++len * sizeof(WCHAR));
             res = RegEnumValueW(drivers, index, value, &len, NULL, NULL, NULL, NULL);
         }
         if (res == ERROR_SUCCESS)
@@ -668,7 +669,7 @@ BOOL WINAPI SQLGetInstalledDriversW(WCHAR *buf, WORD size, WORD *sizeout)
 
     buf[written++] = 0;
 
-    free(value);
+    heap_free(value);
     RegCloseKey(drivers);
     if (sizeout)
         *sizeout = written;
@@ -689,7 +690,7 @@ BOOL WINAPI SQLGetInstalledDrivers(char *buf, WORD size, WORD *sizeout)
         return FALSE;
     }
 
-    wbuf = malloc(size * sizeof(WCHAR));
+    wbuf = heap_alloc(size * sizeof(WCHAR));
     if (!wbuf)
     {
         push_error(ODBC_ERROR_OUT_OF_MEM, odbc_error_out_of_mem);
@@ -699,7 +700,7 @@ BOOL WINAPI SQLGetInstalledDrivers(char *buf, WORD size, WORD *sizeout)
     ret = SQLGetInstalledDriversW(wbuf, size, &written);
     if (!ret)
     {
-        free(wbuf);
+        heap_free(wbuf);
         return FALSE;
     }
 
@@ -707,7 +708,7 @@ BOOL WINAPI SQLGetInstalledDrivers(char *buf, WORD size, WORD *sizeout)
         *sizeout = WideCharToMultiByte(CP_ACP, 0, wbuf, written, NULL, 0, NULL, NULL);
     WideCharToMultiByte(CP_ACP, 0, wbuf, written, buf, size, NULL, NULL);
 
-    free(wbuf);
+    heap_free(wbuf);
     return TRUE;
 }
 
@@ -824,13 +825,13 @@ int WINAPI SQLGetPrivateProfileString(LPCSTR section, LPCSTR entry,
     if (!section || !defvalue || !buff)
         return 0;
 
-    sectionW = strdupAtoW(section);
-    filenameW = strdupAtoW(filename);
+    sectionW = heap_strdupAtoW(section);
+    filenameW = heap_strdupAtoW(filename);
 
     sectionkey = get_privateprofile_sectionkey(sectionW, filenameW);
 
-    free(sectionW);
-    free(filenameW);
+    heap_free(sectionW);
+    heap_free(filenameW);
 
     if (sectionkey)
     {
@@ -998,7 +999,7 @@ static void write_registry_values(const WCHAR *regkey, const WCHAR *driver, cons
                        lstrcmpiW(translator, entry) == 0)
                     {
                         len = lstrlenW(path) + lstrlenW(slash) + lstrlenW(divider) + 1;
-                        value = malloc(len * sizeof(WCHAR));
+                        value = heap_alloc(len * sizeof(WCHAR));
                         if(!value)
                         {
                             ERR("Out of memory\n");
@@ -1012,14 +1013,14 @@ static void write_registry_values(const WCHAR *regkey, const WCHAR *driver, cons
                     else
                     {
                         len = lstrlenW(divider) + 1;
-                        value = malloc(len * sizeof(WCHAR));
+                        value = heap_alloc(len * sizeof(WCHAR));
                         lstrcpyW(value, divider);
                     }
 
                     if (RegSetValueExW(hkeydriver, entry, 0, REG_SZ, (BYTE*)value,
                                     (lstrlenW(value)+1)*sizeof(WCHAR)) != ERROR_SUCCESS)
                         ERR("Failed to write registry data %s %s\n", debugstr_w(entry), debugstr_w(value));
-                    free(value);
+                    heap_free(value);
                 }
                 else
                 {
@@ -1109,8 +1110,8 @@ BOOL WINAPI SQLInstallDriverEx(LPCSTR lpszDriver, LPCSTR lpszPathIn,
     }
 
 out:
-    free(driver);
-    free(pathin);
+    HeapFree(GetProcessHeap(), 0, driver);
+    HeapFree(GetProcessHeap(), 0, pathin);
     return ret;
 }
 
@@ -1265,7 +1266,7 @@ SQLRETURN WINAPI SQLInstallerError(WORD iError, DWORD *pfErrorCode,
     wbuf = 0;
     if (lpszErrorMsg && cbErrorMsgMax)
     {
-        wbuf = malloc(cbErrorMsgMax * sizeof(WCHAR));
+        wbuf = HeapAlloc(GetProcessHeap(), 0, cbErrorMsgMax*sizeof(WCHAR));
         if (!wbuf)
             return SQL_ERROR;
     }
@@ -1274,7 +1275,7 @@ SQLRETURN WINAPI SQLInstallerError(WORD iError, DWORD *pfErrorCode,
     {
         WORD cbBuf = 0;
         SQLInstall_narrow(1, lpszErrorMsg, wbuf, cbwbuf+1, cbErrorMsgMax, &cbBuf);
-        free(wbuf);
+        HeapFree(GetProcessHeap(), 0, wbuf);
         if (pcbErrorMsg)
             *pcbErrorMsg = cbBuf-1;
     }
@@ -1351,8 +1352,8 @@ BOOL WINAPI SQLInstallTranslatorEx(LPCSTR lpszTranslator, LPCSTR lpszPathIn,
     }
 
 out:
-    free(translator);
-    free(pathin);
+    HeapFree(GetProcessHeap(), 0, translator);
+    HeapFree(GetProcessHeap(), 0, pathin);
     return ret;
 }
 
@@ -1508,7 +1509,7 @@ BOOL WINAPI SQLRemoveDriver(LPCSTR lpszDriver, BOOL fRemoveDSN,
 
     ret =  SQLRemoveDriverW(driver, fRemoveDSN, lpdwUsageCount);
 
-    free(driver);
+    HeapFree(GetProcessHeap(), 0, driver);
     return ret;
 }
 
@@ -1558,7 +1559,7 @@ BOOL WINAPI SQLRemoveDSNFromIni(LPCSTR lpszDSN)
     else
         push_error(ODBC_ERROR_OUT_OF_MEM, odbc_error_out_of_mem);
 
-    free(dsn);
+    heap_free(dsn);
 
     return ret;
 }
@@ -1639,7 +1640,7 @@ BOOL WINAPI SQLRemoveTranslator(LPCSTR lpszTranslator, LPDWORD lpdwUsageCount)
     translator = SQLInstall_strdup(lpszTranslator);
     ret =  SQLRemoveTranslatorW(translator, lpdwUsageCount);
 
-    free(translator);
+    HeapFree(GetProcessHeap(), 0, translator);
     return ret;
 }
 
@@ -1758,8 +1759,8 @@ BOOL WINAPI SQLWriteDSNToIni(LPCSTR lpszDSN, LPCSTR lpszDriver)
     else
         push_error(ODBC_ERROR_OUT_OF_MEM, odbc_error_out_of_mem);
 
-    free(dsn);
-    free(driver);
+    heap_free(dsn);
+    heap_free(driver);
 
     return ret;
 }
@@ -1835,17 +1836,17 @@ BOOL WINAPI SQLWritePrivateProfileString(LPCSTR lpszSection, LPCSTR lpszEntry,
     clear_errors();
     TRACE("%s %s %s %s\n", lpszSection, lpszEntry, lpszString, lpszFilename);
 
-    sect = strdupAtoW(lpszSection);
-    entry = strdupAtoW(lpszEntry);
-    string = strdupAtoW(lpszString);
-    file = strdupAtoW(lpszFilename);
+    sect = heap_strdupAtoW(lpszSection);
+    entry = heap_strdupAtoW(lpszEntry);
+    string = heap_strdupAtoW(lpszString);
+    file = heap_strdupAtoW(lpszFilename);
 
     ret = SQLWritePrivateProfileStringW(sect, entry, string, file);
 
-    free(sect);
-    free(entry);
-    free(string);
-    free(file);
+    heap_free(sect);
+    heap_free(entry);
+    heap_free(string);
+    heap_free(file);
 
     return ret;
 }

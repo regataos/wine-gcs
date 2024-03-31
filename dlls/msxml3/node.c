@@ -119,7 +119,7 @@ static ULONG WINAPI SupportErrorInfo_Release(ISupportErrorInfo *iface)
     TRACE("%p, refcount %ld.\n", iface, ref);
 
     if (!ref)
-        free(This);
+        heap_free(This);
 
     return ref;
 }
@@ -153,7 +153,7 @@ HRESULT node_create_supporterrorinfo(enum tid_t const *iids, void **obj)
 {
     SupportErrorInfo *This;
 
-    This = malloc(sizeof(*This));
+    This = heap_alloc(sizeof(*This));
     if (!This) return E_OUTOFMEMORY;
 
     This->ISupportErrorInfo_iface.lpVtbl = &SupportErrorInfoVtbl;
@@ -186,13 +186,6 @@ HRESULT node_get_nodeName(xmlnode *This, BSTR *name)
     hr = node_get_base_name(This, &base);
     if (hr != S_OK) return hr;
 
-    if (!base[0] && xmldoc_version(This->node->doc) != MSXML6)
-    {
-        SysFreeString(base);
-        *name = SysAllocString(L"xmlns");
-        return S_OK;
-    }
-
     hr = node_get_prefix(This, &prefix);
     if (hr == S_OK)
     {
@@ -201,17 +194,10 @@ HRESULT node_get_nodeName(xmlnode *This, BSTR *name)
 
         /* +1 for ':' */
         ptr = *name = SysAllocStringLen(NULL, SysStringLen(base) + SysStringLen(prefix) + 1);
-        if (SysStringByteLen(prefix))
-        {
-            memcpy(ptr, prefix, SysStringByteLen(prefix));
-            ptr += SysStringLen(prefix);
-        }
-        if (SysStringByteLen(base))
-        {
-            if (SysStringByteLen(prefix))
-                memcpy(ptr++, &colW, sizeof(WCHAR));
-            memcpy(ptr, base, SysStringByteLen(base));
-        }
+        memcpy(ptr, prefix, SysStringByteLen(prefix));
+        ptr += SysStringLen(prefix);
+        memcpy(ptr++, &colW, sizeof(WCHAR));
+        memcpy(ptr, base, SysStringByteLen(base));
 
         SysFreeString(base);
         SysFreeString(prefix);
@@ -248,7 +234,7 @@ HRESULT node_set_content(xmlnode *This, LPCWSTR value)
         return E_OUTOFMEMORY;
 
     xmlNodeSetContent(This->node, str);
-    free(str);
+    heap_free(str);
     return S_OK;
 }
 
@@ -264,13 +250,13 @@ static HRESULT node_set_content_escaped(xmlnode *This, LPCWSTR value)
     escaped = xmlEncodeSpecialChars(NULL, str);
     if(!escaped)
     {
-        free(str);
+        heap_free(str);
         return E_OUTOFMEMORY;
     }
 
     xmlNodeSetContent(This->node, escaped);
 
-    free(str);
+    heap_free(str);
     xmlFree(escaped);
 
     return S_OK;
@@ -874,7 +860,7 @@ HRESULT node_put_text(xmlnode *This, BSTR text)
 
     /* Escape the string. */
     str2 = xmlEncodeEntitiesReentrant(This->node->doc, str);
-    free(str);
+    heap_free(str);
 
     xmlNodeSetContent(This->node, str2);
     xmlFree(str2);
@@ -1323,8 +1309,8 @@ static int XMLCALL import_loader_io_close(void * context)
 
     TRACE("%p\n", context);
 
-    free(buffer->data);
-    free(buffer);
+    heap_free(buffer->data);
+    heap_free(buffer);
     return 0;
 }
 
@@ -1334,9 +1320,9 @@ static HRESULT import_loader_onDataAvailable(void *ctxt, char *ptr, DWORD len)
     xmlParserInputBufferPtr inputbuffer;
     struct import_buffer *buffer;
 
-    buffer = malloc(sizeof(*buffer));
+    buffer = heap_alloc(sizeof(*buffer));
 
-    buffer->data = malloc(len);
+    buffer->data = heap_alloc(len);
     memcpy(buffer->data, ptr, len);
     buffer->cur = 0;
     buffer->len = len;
@@ -1506,7 +1492,7 @@ HRESULT node_transform_node_params(const xmlnode *This, IXMLDOMNode *stylesheet,
             struct xslprocessor_par *par;
 
             i = 0;
-            xslparams = malloc((params->count * 2 + 1) * sizeof(char*));
+            xslparams = heap_alloc((params->count*2 + 1)*sizeof(char*));
             LIST_FOR_EACH_ENTRY(par, &params->list, struct xslprocessor_par, entry)
             {
                 xslparams[i++] = (char*)xmlchar_from_wchar(par->name);
@@ -1525,8 +1511,8 @@ HRESULT node_transform_node_params(const xmlnode *This, IXMLDOMNode *stylesheet,
             xsltFreeTransformContext(ctxt);
 
             for (i = 0; i < params->count*2; i++)
-                free((char*)xslparams[i]);
-            free(xslparams);
+                heap_free((char*)xslparams[i]);
+            heap_free(xslparams);
         }
         else
             result = xsltApplyStylesheet(xsltSS, This->node->doc, NULL);
@@ -1564,7 +1550,7 @@ HRESULT node_select_nodes(const xmlnode *This, BSTR query, IXMLDOMNodeList **nod
 
     str = xmlchar_from_wchar(query);
     hr = create_selection(This->node, str, nodes);
-    free(str);
+    heap_free(str);
 
     return hr;
 }
@@ -1573,9 +1559,6 @@ HRESULT node_select_singlenode(const xmlnode *This, BSTR query, IXMLDOMNode **no
 {
     IXMLDOMNodeList *list;
     HRESULT hr;
-
-    if (node)
-        *node = NULL;
 
     hr = node_select_nodes(This, query, &list);
     if (hr == S_OK)
@@ -1623,11 +1606,7 @@ HRESULT node_get_base_name(xmlnode *This, BSTR *name)
 {
     if (!name) return E_INVALIDARG;
 
-    if (xmldoc_version(This->node->doc) != MSXML6 &&
-        xmlStrEqual(This->node->name, BAD_CAST "xmlns"))
-        *name = SysAllocString(L"");
-    else
-        *name = bstr_from_xmlChar(This->node->name);
+    *name = bstr_from_xmlChar(This->node->name);
     if (!*name) return E_OUTOFMEMORY;
 
     TRACE("returning %s\n", debugstr_w(*name));
@@ -1713,7 +1692,7 @@ static ULONG WINAPI unknode_Release(
     ref = InterlockedDecrement( &This->ref );
     if(!ref) {
         destroy_xmlnode(&This->node);
-        free(This);
+        heap_free(This);
     }
 
     return ref;
@@ -2271,7 +2250,7 @@ IXMLDOMNode *create_node( xmlNodePtr node )
 
         FIXME("only creating basic node for type %d\n", node->type);
 
-        new_node = malloc(sizeof(unknode));
+        new_node = heap_alloc(sizeof(unknode));
         if(!new_node)
             return NULL;
 

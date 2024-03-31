@@ -1,6 +1,8 @@
 TESTDLL   = scrobj.dll
 IMPORTS   = oleaut32 ole32 advapi32 uuid
 
-SOURCES = \
-	rsrc.rc \
+C_SRCS = \
 	scrobj.c
+
+RC_SRCS = \
+	rsrc.rc

@@ -2,7 +2,7 @@ EXTLIB    = libgsm.a
 EXTRAINCL = $(GSM_PE_CFLAGS)
 EXTRADEFS = -DWAV49
 
-SOURCES = \
+C_SRCS = \
 	src/add.c \
 	src/code.c \
 	src/decode.c \

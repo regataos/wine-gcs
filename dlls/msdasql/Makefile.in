@@ -3,8 +3,10 @@ IMPORTS   = uuid ole32 oleaut32 odbc32
 
 EXTRADLLFLAGS = -Wb,--prefer-native
 
-SOURCES = \
-	msdasql.rc \
-	msdasql_classes.idl \
+C_SRCS = \
 	msdasql_main.c \
 	session.c
+
+RC_SRCS = msdasql.rc
+
+IDL_SRCS = msdasql_classes.idl

@@ -3,7 +3,7 @@ IMPORTLIB = d3d11
 IMPORTS   = dxguid uuid dxgi wined3d
 EXTRAINCL = $(VKD3D_PE_CFLAGS)
 
-SOURCES = \
+C_SRCS = \
 	async.c \
 	buffer.c \
 	d3d11_main.c \
@@ -13,5 +13,6 @@ SOURCES = \
 	state.c \
 	texture.c \
 	utils.c \
-	version.rc \
 	view.c
+
+RC_SRCS = version.rc

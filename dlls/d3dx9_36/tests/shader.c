@@ -458,7 +458,7 @@ static void test_get_shader_constant_table_ex(void)
     ok(constant_table != NULL, "D3DXGetShaderConstantTableEx() failed, got NULL\n");
 
     size = ID3DXConstantTable_GetBufferSize(constant_table);
-    ok(size == 28, "Unexpected size %lu.\n", size);
+    ok(size == 28, "Got result %lx, expected 28\n", size);
 
     data = ID3DXConstantTable_GetBufferPointer(constant_table);
     ok(!memcmp(data, shader_with_ctab + 6, size), "Retrieved wrong CTAB data\n");
@@ -471,7 +471,7 @@ static void test_get_shader_constant_table_ex(void)
     ok(desc.Creator == (const char *)data + 0x10, "Got result %p, expected %p\n",
             desc.Creator, (const char *)data + 0x10);
     ok(desc.Version == D3DVS_VERSION(3, 0), "Got result %lx, expected %x\n", desc.Version, D3DVS_VERSION(3, 0));
-    ok(desc.Constants == 0, "Unexpected Constants %u.\n", desc.Constants);
+    ok(desc.Constants == 0, "Got result %x, expected 0\n", desc.Constants);
 
     ID3DXConstantTable_Release(constant_table);
 
@@ -724,18 +724,18 @@ static void test_setting_basic_table(IDirect3DDevice9 *device)
 
     /* Get constants back and validate */
     IDirect3DDevice9_GetVertexShaderConstantF(device, 0, out, 4);
-    ok(out[0] == mvp._11 && out[4] == mvp._12 && out[8] == mvp._13 && out[12] == mvp._14,
+    ok(out[0] == S(U(mvp))._11 && out[4] == S(U(mvp))._12 && out[8] == S(U(mvp))._13 && out[12] == S(U(mvp))._14,
             "The first row of mvp was not set correctly, got {%f, %f, %f, %f}, should be {%f, %f, %f, %f}\n",
-            out[0], out[4], out[8], out[12], mvp._11, mvp._12, mvp._13, mvp._14);
-    ok(out[1] == mvp._21 && out[5] == mvp._22 && out[9] == mvp._23 && out[13] == mvp._24,
+            out[0], out[4], out[8], out[12], S(U(mvp))._11, S(U(mvp))._12, S(U(mvp))._13, S(U(mvp))._14);
+    ok(out[1] == S(U(mvp))._21 && out[5] == S(U(mvp))._22 && out[9] == S(U(mvp))._23 && out[13] == S(U(mvp))._24,
             "The second row of mvp was not set correctly, got {%f, %f, %f, %f}, should be {%f, %f, %f, %f}\n",
-            out[1], out[5], out[9], out[13], mvp._21, mvp._22, mvp._23, mvp._24);
-    ok(out[2] == mvp._31 && out[6] == mvp._32 && out[10] == mvp._33 && out[14] == mvp._34,
+            out[1], out[5], out[9], out[13], S(U(mvp))._21, S(U(mvp))._22, S(U(mvp))._23, S(U(mvp))._24);
+    ok(out[2] == S(U(mvp))._31 && out[6] == S(U(mvp))._32 && out[10] == S(U(mvp))._33 && out[14] == S(U(mvp))._34,
             "The third row of mvp was not set correctly, got {%f, %f, %f, %f}, should be {%f, %f, %f, %f}\n",
-            out[2], out[6], out[10], out[14], mvp._31, mvp._32, mvp._33, mvp._34);
-    ok(out[3] == mvp._41 && out[7] == mvp._42 && out[11] == mvp._43 && out[15] == mvp._44,
+            out[2], out[6], out[10], out[14], S(U(mvp))._31, S(U(mvp))._32, S(U(mvp))._33, S(U(mvp))._34);
+    ok(out[3] == S(U(mvp))._41 && out[7] == S(U(mvp))._42 && out[11] == S(U(mvp))._43 && out[15] == S(U(mvp))._44,
             "The fourth row of mvp was not set correctly, got {%f, %f, %f, %f}, should be {%f, %f, %f, %f}\n",
-            out[3], out[7], out[11], out[15], mvp._41, mvp._42, mvp._43, mvp._44);
+            out[3], out[7], out[11], out[15], S(U(mvp))._41, S(U(mvp))._42, S(U(mvp))._43, S(U(mvp))._44);
 
     IDirect3DDevice9_GetVertexShaderConstantF(device, 4, out, 1);
     ok(out[0] == (float)i && out[1] == 0.0f && out[2] == 0.0f && out[3] == 0.0f,
@@ -767,9 +767,9 @@ static void test_setting_basic_table(IDirect3DDevice9 *device)
     ok(res == D3D_OK, "ID3DXConstantTable_SetMatrix failed on variable f: 0x%08lx\n", res);
 
     IDirect3DDevice9_GetVertexShaderConstantF(device, 6, out, 1);
-    ok(out[0] == mvp._11 && out[1] == 0.0f && out[2] == 0.0f && out[3] == 0.0f,
+    ok(out[0] == S(U(mvp))._11 && out[1] == 0.0f && out[2] == 0.0f && out[3] == 0.0f,
             "The variable f was not set correctly by ID3DXConstantTable_SetMatrix, got %f, should be %f\n",
-            out[0], mvp._11);
+            out[0], S(U(mvp))._11);
 
     /* Clear registers */
     memset(out, 0, sizeof(out));
@@ -823,19 +823,19 @@ static void test_setting_basic_table(IDirect3DDevice9 *device)
     ok(res == D3D_OK, "ID3DXConstantTable_SetMatrixTranspose failed on variable f: 0x%08lx\n", res);
 
     IDirect3DDevice9_GetVertexShaderConstantF(device, 6, out, 1);
-    ok(out[0] == mvp._11 && out[1] == 0.0f && out[2] == 0.0f && out[3] == 0.0f,
+    ok(out[0] == S(U(mvp))._11 && out[1] == 0.0f && out[2] == 0.0f && out[3] == 0.0f,
             "The variable f was not set correctly by ID3DXConstantTable_SetMatrixTranspose, got %f, should be %f\n",
-            out[0], mvp._11);
+            out[0], S(U(mvp))._11);
 
     res = ID3DXConstantTable_SetMatrixTranspose(ctable, device, "f4", &mvp);
     ok(res == D3D_OK, "ID3DXConstantTable_SetMatrixTranspose failed on variable f4: 0x%08lx\n", res);
 
     IDirect3DDevice9_GetVertexShaderConstantF(device, 7, out, 1);
-    ok(out[0] == mvp._11 && out[1] == mvp._21 && out[2] == mvp._31 && out[3] == mvp._41,
+    ok(out[0] == S(U(mvp))._11 && out[1] == S(U(mvp))._21 && out[2] == S(U(mvp))._31 && out[3] == S(U(mvp))._41,
             "The variable f4 was not set correctly by ID3DXConstantTable_SetMatrixTranspose, "
             "got {%f, %f, %f, %f}, should be {%f, %f, %f, %f}\n",
             out[0], out[1], out[2], out[3],
-            mvp._11, mvp._21, mvp._31, mvp._41);
+            S(U(mvp))._11, S(U(mvp))._21, S(U(mvp))._31, S(U(mvp))._41);
 
     memset(out, 0, sizeof(out));
     IDirect3DDevice9_SetVertexShaderConstantF(device, 6, out, 1);
@@ -843,20 +843,20 @@ static void test_setting_basic_table(IDirect3DDevice9 *device)
     ok(res == D3D_OK, "ID3DXConstantTable_SetMatrixPointerArray failed on variable f: got %#lx\n", res);
 
     IDirect3DDevice9_GetVertexShaderConstantF(device, 6, out, 1);
-    ok(out[0] == mvp._11 && out[1] == 0.0f && out[2] == 0.0f && out[3] == 0.0f,
+    ok(out[0] == S(U(mvp))._11 && out[1] == 0.0f && out[2] == 0.0f && out[3] == 0.0f,
             "The variable f was not set correctly by ID3DXConstantTable_SetMatrixPointerArray, "
             "got %f, should be %f\n",
-            out[0], mvp._11);
+            out[0], S(U(mvp))._11);
 
     res = ID3DXConstantTable_SetMatrixPointerArray(ctable, device, "f4", matrix_pointer, 1);
     ok(res == D3D_OK, "ID3DXConstantTable_SetMatrixPointerArray failed on variable f4: got %#lx\n", res);
 
     IDirect3DDevice9_GetVertexShaderConstantF(device, 7, out, 1);
-    ok(out[0] == mvp._11 && out[1] == mvp._12 && out[2] == mvp._13 && out[3] == mvp._14,
+    ok(out[0] == S(U(mvp))._11 && out[1] == S(U(mvp))._12 && out[2] == S(U(mvp))._13 && out[3] == S(U(mvp))._14,
             "The variable f4 was not set correctly by ID3DXConstantTable_SetMatrixPointerArray, "
             "got {%f, %f, %f, %f}, should be {%f, %f, %f, %f}\n",
             out[0], out[1], out[2], out[3],
-            mvp._11, mvp._12, mvp._13, mvp._14);
+            S(U(mvp))._11, S(U(mvp))._12, S(U(mvp))._13, S(U(mvp))._14);
 
     memset(out, 0, sizeof(out));
     IDirect3DDevice9_SetVertexShaderConstantF(device, 6, out, 1);
@@ -864,20 +864,20 @@ static void test_setting_basic_table(IDirect3DDevice9 *device)
     ok(res == D3D_OK, "ID3DXConstantTable_SetMatrixTransposePointerArray failed on variable f: got %#lx\n", res);
 
     IDirect3DDevice9_GetVertexShaderConstantF(device, 6, out, 1);
-    ok(out[0] == mvp._11 && out[1] == 0.0f && out[2] == 0.0f && out[3] == 0.0f,
+    ok(out[0] == S(U(mvp))._11 && out[1] == 0.0f && out[2] == 0.0f && out[3] == 0.0f,
             "The variable f was not set correctly by ID3DXConstantTable_SetMatrixTransposePointerArray, "
             "got %f, should be %f\n",
-            out[0], mvp._11);
+            out[0], S(U(mvp))._11);
 
     res = ID3DXConstantTable_SetMatrixTransposePointerArray(ctable, device, "f4", matrix_pointer, 1);
     ok(res == D3D_OK, "ID3DXConstantTable_SetMatrixTransposePointerArray failed on variable f4: got %#lx\n", res);
 
     IDirect3DDevice9_GetVertexShaderConstantF(device, 7, out, 1);
-    ok(out[0] == mvp._11 && out[1] == mvp._21 && out[2] == mvp._31 && out[3] == mvp._41,
+    ok(out[0] == S(U(mvp))._11 && out[1] == S(U(mvp))._21 && out[2] == S(U(mvp))._31 && out[3] == S(U(mvp))._41,
             "The variable f4 was not set correctly by ID3DXConstantTable_SetMatrixTransposePointerArray, "
             "got {%f, %f, %f, %f}, should be {%f, %f, %f, %f}\n",
             out[0], out[1], out[2], out[3],
-            mvp._11, mvp._21, mvp._31, mvp._41);
+            S(U(mvp))._11, S(U(mvp))._21, S(U(mvp))._31, S(U(mvp))._41);
 
     refcnt = ID3DXConstantTable_Release(ctable);
     ok(refcnt == 0, "The constant table reference count was %lu, should be 0\n", refcnt);
@@ -907,21 +907,21 @@ static void test_setting_matrices_table(IDirect3DDevice9 *device)
     ok(res == D3D_OK, "ID3DXConstantTable_SetMatrix failed on variable fmatrix3x1: got %#lx\n", res);
 
     IDirect3DDevice9_GetVertexShaderConstantF(device, 4, out, 2);
-    ok(out[0] == (int)fmatrix._11 && out[1] == (int)fmatrix._12 && out[2] == (int)fmatrix._13
+    ok(out[0] == (int)S(U(fmatrix))._11 && out[1] == (int)S(U(fmatrix))._12 && out[2] == (int)S(U(fmatrix))._13
             && out[3] == 0
-            && out[4] == (int)fmatrix._21 && out[5] == (int)fmatrix._22 && out[6] == (int)fmatrix._23
+            && out[4] == (int)S(U(fmatrix))._21 && out[5] == (int)S(U(fmatrix))._22 && out[6] == (int)S(U(fmatrix))._23
             && out[7] == 0,
             "The variable imatrix2x3 was not set correctly, out={%f, %f, %f, %f; %f, %f, %f, %f}, "
             "should be {%d, %d, %d, %d; %d, %d, %d, %d}\n",
             out[0], out[1], out[2], out[3], out[4], out[5], out[6], out[7],
-            (int)fmatrix._11, (int)fmatrix._12, (int)fmatrix._13, 0,
-            (int)fmatrix._21, (int)fmatrix._22, (int)fmatrix._23, 0);
+            (int)S(U(fmatrix))._11, (int)S(U(fmatrix))._12, (int)S(U(fmatrix))._13, 0,
+            (int)S(U(fmatrix))._21, (int)S(U(fmatrix))._22, (int)S(U(fmatrix))._23, 0);
 
     IDirect3DDevice9_GetVertexShaderConstantF(device, 7, out, 1);
-    ok(out[0] == fmatrix._11 && out[1] == fmatrix._21 && out[2] == fmatrix._31 && out[3] == 0.0f,
+    ok(out[0] == S(U(fmatrix))._11 && out[1] == S(U(fmatrix))._21 && out[2] == S(U(fmatrix))._31 && out[3] == 0.0f,
             "The variable fmatrix3x1 was not set correctly, out={%f, %f, %f, %f}, should be {%f, %f, %f, %f}\n",
             out[0], out[1], out[2], out[3],
-            fmatrix._11, fmatrix._21, fmatrix._31, 0.0f);
+            S(U(fmatrix))._11, S(U(fmatrix))._21, S(U(fmatrix))._31, 0.0f);
 
     ID3DXConstantTable_Release(ctable);
 
@@ -945,74 +945,74 @@ static void test_setting_matrices_table(IDirect3DDevice9 *device)
     ok(res == D3D_OK, "ID3DXConstantTable_SetMatrix failed on variable c3x3: got %#lx\n", res);
 
     IDirect3DDevice9_GetVertexShaderConstantF(device, 7, out, 3);
-    ok(out[0] == fmatrix._11 && out[1] == fmatrix._21 && out[2] == 0.0f && out[3] == 0.0f
-            && out[4] == fmatrix._12 && out[5] == fmatrix._22 && out[6] == 0.0f && out[7] == 0.0f
-            && out[8] == fmatrix._13 && out[9] == fmatrix._23 && out[10] == 0.0f && out[11] == 0.0f,
+    ok(out[0] == S(U(fmatrix))._11 && out[1] == S(U(fmatrix))._21 && out[2] == 0.0f && out[3] == 0.0f
+            && out[4] == S(U(fmatrix))._12 && out[5] == S(U(fmatrix))._22 && out[6] == 0.0f && out[7] == 0.0f
+            && out[8] == S(U(fmatrix))._13 && out[9] == S(U(fmatrix))._23 && out[10] == 0.0f && out[11] == 0.0f,
             "The variable c2x3 was not set correctly, out={%f, %f, %f, %f; %f, %f, %f, %f; %f, %f, %f, %f}, "
             "should be {%f, %f, %f, %f; %f, %f, %f, %f; %f, %f, %f, %f}\n",
             out[0], out[1], out[2], out[3],
             out[4], out[5], out[6], out[7],
             out[8], out[9], out[10], out[11],
-            fmatrix._11, fmatrix._21, 0.0f, 0.0f,
-            fmatrix._12, fmatrix._22, 0.0f, 0.0f,
-            fmatrix._13, fmatrix._23, 0.0f, 0.0f);
+            S(U(fmatrix))._11, S(U(fmatrix))._21, 0.0f, 0.0f,
+            S(U(fmatrix))._12, S(U(fmatrix))._22, 0.0f, 0.0f,
+            S(U(fmatrix))._13, S(U(fmatrix))._23, 0.0f, 0.0f);
 
     res = ID3DXConstantTable_SetMatrix(ctable, device, "r4x4", &fmatrix);
     ok(res == D3D_OK, "ID3DXConstantTable_SetMatrix failed on variable r4x4: got %#lx\n", res);
 
     IDirect3DDevice9_GetVertexShaderConstantF(device, 15, out, 2);
-    ok(out[0] == fmatrix._11 && out[1] == fmatrix._12 && out[2] == fmatrix._13 && out[3] == 0.0f
-            && out[4] == fmatrix._21 && out[5] == fmatrix._22 && out[6] == fmatrix._23 && out[7] == 0.0f,
+    ok(out[0] == S(U(fmatrix))._11 && out[1] == S(U(fmatrix))._12 && out[2] == S(U(fmatrix))._13 && out[3] == 0.0f
+            && out[4] == S(U(fmatrix))._21 && out[5] == S(U(fmatrix))._22 && out[6] == S(U(fmatrix))._23 && out[7] == 0.0f,
             "The variable r2x3 was not set correctly, out={%f, %f, %f, %f; %f, %f, %f, %f}, "
             "should be {%f, %f, %f, %f; %f, %f, %f, %f}\n",
             out[0], out[1], out[2], out[3], out[4], out[5], out[6], out[7],
-            fmatrix._11, fmatrix._12, fmatrix._13, 0.0f,
-            fmatrix._21, fmatrix._22, fmatrix._23, 0.0f);
+            S(U(fmatrix))._11, S(U(fmatrix))._12, S(U(fmatrix))._13, 0.0f,
+            S(U(fmatrix))._21, S(U(fmatrix))._22, S(U(fmatrix))._23, 0.0f);
 
     IDirect3DDevice9_GetVertexShaderConstantF(device, 13, out, 2);
-    ok(out[0] == fmatrix._11 && out[1] == fmatrix._21 && out[2] == fmatrix._31 && out[3] == 0.0f
-            && out[4] == fmatrix._12 && out[5] == fmatrix._22 && out[6] == fmatrix._32 && out[7] == 0.0f,
+    ok(out[0] == S(U(fmatrix))._11 && out[1] == S(U(fmatrix))._21 && out[2] == S(U(fmatrix))._31 && out[3] == 0.0f
+            && out[4] == S(U(fmatrix))._12 && out[5] == S(U(fmatrix))._22 && out[6] == S(U(fmatrix))._32 && out[7] == 0.0f,
             "The variable c3x2 was not set correctly, out={%f, %f, %f, %f; %f, %f, %f, %f}, "
             "should be {%f, %f, %f, %f; %f, %f, %f, %f}\n",
             out[0], out[1], out[2], out[3], out[4], out[5], out[6], out[7],
-            fmatrix._11, fmatrix._21, fmatrix._31, 0.0f,
-            fmatrix._12, fmatrix._22, fmatrix._32, 0.0f);
+            S(U(fmatrix))._11, S(U(fmatrix))._21, S(U(fmatrix))._31, 0.0f,
+            S(U(fmatrix))._12, S(U(fmatrix))._22, S(U(fmatrix))._32, 0.0f);
 
     IDirect3DDevice9_GetVertexShaderConstantF(device, 4, out, 3);
-    ok(out[0] == fmatrix._11 && out[1] == fmatrix._12 && out[2] == 0.0f && out[3] == 0.0f
-            && out[4] == fmatrix._21 && out[5] == fmatrix._22 && out[6] == 0.0f && out[7] == 0.0f
-            && out[8] == fmatrix._31 && out[9] == fmatrix._32 && out[10] == 0.0f && out[11] == 0.0f,
+    ok(out[0] == S(U(fmatrix))._11 && out[1] == S(U(fmatrix))._12 && out[2] == 0.0f && out[3] == 0.0f
+            && out[4] == S(U(fmatrix))._21 && out[5] == S(U(fmatrix))._22 && out[6] == 0.0f && out[7] == 0.0f
+            && out[8] == S(U(fmatrix))._31 && out[9] == S(U(fmatrix))._32 && out[10] == 0.0f && out[11] == 0.0f,
             "The variable r3x2 was not set correctly, out={%f, %f, %f, %f; %f, %f, %f, %f; %f, %f, %f, %f}, "
             "should be {%f, %f, %f, %f; %f, %f, %f, %f; %f, %f, %f, %f}\n",
             out[0], out[1], out[2], out[3], out[4], out[5], out[6], out[7], out[8], out[9], out[10], out[11],
-            fmatrix._11, fmatrix._12, 0.0f, 0.0f,
-            fmatrix._21, fmatrix._22, 0.0f, 0.0f,
-            fmatrix._31, fmatrix._32, 0.0f, 0.0f);
+            S(U(fmatrix))._11, S(U(fmatrix))._12, 0.0f, 0.0f,
+            S(U(fmatrix))._21, S(U(fmatrix))._22, 0.0f, 0.0f,
+            S(U(fmatrix))._31, S(U(fmatrix))._32, 0.0f, 0.0f);
 
     IDirect3DDevice9_GetVertexShaderConstantF(device, 10, out, 3);
-    ok(out[0] == fmatrix._11 && out[1] == fmatrix._21 && out[2] == fmatrix._31 && out[3] == 0.0f
-            && out[4] == fmatrix._12 && out[5] == fmatrix._22 && out[6] == fmatrix._32 && out[7] == 0.0f
-            && out[8] == fmatrix._13 && out[9] == fmatrix._23 && out[10] == fmatrix._33 && out[11] == 0.0f,
+    ok(out[0] == S(U(fmatrix))._11 && out[1] == S(U(fmatrix))._21 && out[2] == S(U(fmatrix))._31 && out[3] == 0.0f
+            && out[4] == S(U(fmatrix))._12 && out[5] == S(U(fmatrix))._22 && out[6] == S(U(fmatrix))._32 && out[7] == 0.0f
+            && out[8] == S(U(fmatrix))._13 && out[9] == S(U(fmatrix))._23 && out[10] == S(U(fmatrix))._33 && out[11] == 0.0f,
             "The variable c3x3 was not set correctly, out={%f, %f, %f, %f; %f, %f, %f, %f; %f, %f, %f, %f}, "
             "should be {%f, %f, %f, %f; %f, %f, %f, %f; %f, %f, %f, %f}\n",
             out[0], out[1], out[2], out[3], out[4], out[5], out[6], out[7], out[8], out[9], out[10], out[11],
-            fmatrix._11, fmatrix._21, fmatrix._31, 0.0f,
-            fmatrix._12, fmatrix._22, fmatrix._32, 0.0f,
-            fmatrix._13, fmatrix._23, fmatrix._33, 0.0f);
+            S(U(fmatrix))._11, S(U(fmatrix))._21, S(U(fmatrix))._31, 0.0f,
+            S(U(fmatrix))._12, S(U(fmatrix))._22, S(U(fmatrix))._32, 0.0f,
+            S(U(fmatrix))._13, S(U(fmatrix))._23, S(U(fmatrix))._33, 0.0f);
 
     IDirect3DDevice9_GetVertexShaderConstantF(device, 0, out, 4);
-    ok(out[0] == fmatrix._11 && out[1] == fmatrix._12 && out[2] == fmatrix._13 && out[3] == fmatrix._14
-            && out[4] == fmatrix._21 && out[5] == fmatrix._22 && out[6] == fmatrix._23 && out[7] == fmatrix._24
-            && out[8] == fmatrix._31 && out[9] == fmatrix._32 && out[10] == fmatrix._33 && out[11] == fmatrix._34
-            && out[12] == fmatrix._41 && out[13] == fmatrix._42 && out[14] == fmatrix._43 && out[15] == fmatrix._44,
+    ok(out[0] == S(U(fmatrix))._11 && out[1] == S(U(fmatrix))._12 && out[2] == S(U(fmatrix))._13 && out[3] == S(U(fmatrix))._14
+            && out[4] == S(U(fmatrix))._21 && out[5] == S(U(fmatrix))._22 && out[6] == S(U(fmatrix))._23 && out[7] == S(U(fmatrix))._24
+            && out[8] == S(U(fmatrix))._31 && out[9] == S(U(fmatrix))._32 && out[10] == S(U(fmatrix))._33 && out[11] == S(U(fmatrix))._34
+            && out[12] == S(U(fmatrix))._41 && out[13] == S(U(fmatrix))._42 && out[14] == S(U(fmatrix))._43 && out[15] == S(U(fmatrix))._44,
             "The variable r4x4 was not set correctly, out={%f, %f, %f, %f; %f, %f, %f, %f; %f, %f, %f, %f; %f, %f, %f, %f}, "
             "should be {%f, %f, %f, %f; %f, %f, %f, %f; %f, %f, %f, %f; %f, %f, %f, %f}\n",
             out[0], out[1], out[2], out[3], out[4], out[5], out[6], out[7],
             out[8], out[9], out[10], out[11], out[12], out[13], out[14], out[15],
-            fmatrix._11, fmatrix._12, fmatrix._13, fmatrix._14,
-            fmatrix._21, fmatrix._22, fmatrix._23, fmatrix._24,
-            fmatrix._31, fmatrix._32, fmatrix._33, fmatrix._34,
-            fmatrix._41, fmatrix._42, fmatrix._43, fmatrix._44);
+            S(U(fmatrix))._11, S(U(fmatrix))._12, S(U(fmatrix))._13, S(U(fmatrix))._14,
+            S(U(fmatrix))._21, S(U(fmatrix))._22, S(U(fmatrix))._23, S(U(fmatrix))._24,
+            S(U(fmatrix))._31, S(U(fmatrix))._32, S(U(fmatrix))._33, S(U(fmatrix))._34,
+            S(U(fmatrix))._41, S(U(fmatrix))._42, S(U(fmatrix))._43, S(U(fmatrix))._44);
 
     /* SetMatrixTranspose */
     res = ID3DXConstantTable_SetMatrixTranspose(ctable, device, "c2x3", &fmatrix);
@@ -1022,26 +1022,26 @@ static void test_setting_matrices_table(IDirect3DDevice9 *device)
     ok(res == D3D_OK, "ID3DXConstantTable_SetMatrixTranspose failed on variable r2x3: got %#lx\n", res);
 
     IDirect3DDevice9_GetVertexShaderConstantF(device, 7, out, 3);
-    ok(out[0] == fmatrix._11 && out[1] == fmatrix._12 && out[2] == 0.0f && out[3] == 0.0f
-            && out[4] == fmatrix._21 && out[5] == fmatrix._22 && out[6] == 0.0f && out[7] == 0.0f
-            && out[8] == fmatrix._31 && out[9] == fmatrix._32 && out[10] == 0.0f && out[11] == 0.0f,
+    ok(out[0] == S(U(fmatrix))._11 && out[1] == S(U(fmatrix))._12 && out[2] == 0.0f && out[3] == 0.0f
+            && out[4] == S(U(fmatrix))._21 && out[5] == S(U(fmatrix))._22 && out[6] == 0.0f && out[7] == 0.0f
+            && out[8] == S(U(fmatrix))._31 && out[9] == S(U(fmatrix))._32 && out[10] == 0.0f && out[11] == 0.0f,
             "The variable c2x3 was not set correctly, out={%f, %f, %f, %f; %f, %f, %f, %f; %f, %f, %f, %f}, "
             "should be {%f, %f, %f, %f; %f, %f, %f, %f; %f, %f, %f, %f}\n",
             out[0], out[1], out[2], out[3],
             out[4], out[5], out[6], out[7],
             out[8], out[9], out[10], out[11],
-            fmatrix._11, fmatrix._12, 0.0f, 0.0f,
-            fmatrix._21, fmatrix._22, 0.0f, 0.0f,
-            fmatrix._31, fmatrix._32, 0.0f, 0.0f);
+            S(U(fmatrix))._11, S(U(fmatrix))._12, 0.0f, 0.0f,
+            S(U(fmatrix))._21, S(U(fmatrix))._22, 0.0f, 0.0f,
+            S(U(fmatrix))._31, S(U(fmatrix))._32, 0.0f, 0.0f);
 
     IDirect3DDevice9_GetVertexShaderConstantF(device, 15, out, 2);
-    ok(out[0] == fmatrix._11 && out[1] == fmatrix._21 && out[2] == fmatrix._31 && out[3] == 0.0f
-            && out[4] == fmatrix._12 && out[5] == fmatrix._22 && out[6] == fmatrix._32 && out[7] == 0.0f,
+    ok(out[0] == S(U(fmatrix))._11 && out[1] == S(U(fmatrix))._21 && out[2] == S(U(fmatrix))._31 && out[3] == 0.0f
+            && out[4] == S(U(fmatrix))._12 && out[5] == S(U(fmatrix))._22 && out[6] == S(U(fmatrix))._32 && out[7] == 0.0f,
             "The variable r2x3 was not set correctly, out={%f, %f, %f, %f; %f, %f, %f, %f}, "
             "should be {%f, %f, %f, %f; %f, %f, %f, %f}\n",
             out[0], out[1], out[2], out[3], out[4], out[5], out[6], out[7],
-            fmatrix._11, fmatrix._21, fmatrix._31, 0.0f,
-            fmatrix._12, fmatrix._22, fmatrix._32, 0.0f);
+            S(U(fmatrix))._11, S(U(fmatrix))._21, S(U(fmatrix))._31, 0.0f,
+            S(U(fmatrix))._12, S(U(fmatrix))._22, S(U(fmatrix))._32, 0.0f);
 
     /* SetMatrixPointerArray */
     res = ID3DXConstantTable_SetMatrixPointerArray(ctable, device, "c2x3", matrix_pointer, 1);
@@ -1051,26 +1051,26 @@ static void test_setting_matrices_table(IDirect3DDevice9 *device)
     ok(res == D3D_OK, "ID3DXConstantTable_SetMatrixPointerArray failed on variable r2x3: got %#lx\n", res);
 
     IDirect3DDevice9_GetVertexShaderConstantF(device, 7, out, 3);
-    ok(out[0] == fmatrix._11 && out[1] == fmatrix._21 && out[2] == 0.0f && out[3] == 0.0f
-            && out[4] == fmatrix._12 && out[5] == fmatrix._22 && out[6] == 0.0f && out[7] == 0.0f
-            && out[8] == fmatrix._13 && out[9] == fmatrix._23 && out[10] == 0.0f && out[11] == 0.0f,
+    ok(out[0] == S(U(fmatrix))._11 && out[1] == S(U(fmatrix))._21 && out[2] == 0.0f && out[3] == 0.0f
+            && out[4] == S(U(fmatrix))._12 && out[5] == S(U(fmatrix))._22 && out[6] == 0.0f && out[7] == 0.0f
+            && out[8] == S(U(fmatrix))._13 && out[9] == S(U(fmatrix))._23 && out[10] == 0.0f && out[11] == 0.0f,
             "The variable c2x3 was not set correctly, out={%f, %f, %f, %f; %f, %f, %f, %f; %f, %f, %f, %f}, "
             "should be {%f, %f, %f, %f; %f, %f, %f, %f; %f, %f, %f, %f}\n",
             out[0], out[1], out[2], out[3],
             out[4], out[5], out[6], out[7],
             out[8], out[9], out[10], out[11],
-            fmatrix._11, fmatrix._21, 0.0f, 0.0f,
-            fmatrix._12, fmatrix._22, 0.0f, 0.0f,
-            fmatrix._13, fmatrix._23, 0.0f, 0.0f);
+            S(U(fmatrix))._11, S(U(fmatrix))._21, 0.0f, 0.0f,
+            S(U(fmatrix))._12, S(U(fmatrix))._22, 0.0f, 0.0f,
+            S(U(fmatrix))._13, S(U(fmatrix))._23, 0.0f, 0.0f);
 
     IDirect3DDevice9_GetVertexShaderConstantF(device, 15, out, 2);
-    ok(out[0] == fmatrix._11 && out[1] == fmatrix._12 && out[2] == fmatrix._13 && out[3] == 0.0f
-            && out[4] == fmatrix._21 && out[5] == fmatrix._22 && out[6] == fmatrix._23 && out[7] == 0.0f,
+    ok(out[0] == S(U(fmatrix))._11 && out[1] == S(U(fmatrix))._12 && out[2] == S(U(fmatrix))._13 && out[3] == 0.0f
+            && out[4] == S(U(fmatrix))._21 && out[5] == S(U(fmatrix))._22 && out[6] == S(U(fmatrix))._23 && out[7] == 0.0f,
             "The variable r2x3 was not set correctly, out={%f, %f, %f, %f; %f, %f, %f, %f}, "
             "should be {%f, %f, %f, %f; %f, %f, %f, %f}\n",
             out[0], out[1], out[2], out[3], out[4], out[5], out[6], out[7],
-            fmatrix._11, fmatrix._12, fmatrix._13, 0.0f,
-            fmatrix._21, fmatrix._22, fmatrix._23, 0.0f);
+            S(U(fmatrix))._11, S(U(fmatrix))._12, S(U(fmatrix))._13, 0.0f,
+            S(U(fmatrix))._21, S(U(fmatrix))._22, S(U(fmatrix))._23, 0.0f);
 
     /* SetMatrixTransposePointerArray */
     res = ID3DXConstantTable_SetMatrixTransposePointerArray(ctable, device, "c2x3", matrix_pointer, 1);
@@ -1080,26 +1080,26 @@ static void test_setting_matrices_table(IDirect3DDevice9 *device)
     ok(res == D3D_OK, "ID3DXConstantTable_SetMatrixTransposePointerArray failed on variable r2x3: got %#lx\n", res);
 
     IDirect3DDevice9_GetVertexShaderConstantF(device, 7, out, 3);
-    ok(out[0] == fmatrix._11 && out[1] == fmatrix._12 && out[2] == 0.0f && out[3] == 0.0f
-            && out[4] == fmatrix._21 && out[5] == fmatrix._22 && out[6] == 0.0f && out[7] == 0.0f
-            && out[8] == fmatrix._31 && out[9] == fmatrix._32 && out[10] == 0.0f && out[11] == 0.0f,
+    ok(out[0] == S(U(fmatrix))._11 && out[1] == S(U(fmatrix))._12 && out[2] == 0.0f && out[3] == 0.0f
+            && out[4] == S(U(fmatrix))._21 && out[5] == S(U(fmatrix))._22 && out[6] == 0.0f && out[7] == 0.0f
+            && out[8] == S(U(fmatrix))._31 && out[9] == S(U(fmatrix))._32 && out[10] == 0.0f && out[11] == 0.0f,
             "The variable c2x3 was not set correctly, out={%f, %f, %f, %f; %f, %f, %f, %f; %f, %f, %f, %f}, "
             "should be {%f, %f, %f, %f; %f, %f, %f, %f; %f, %f, %f, %f}\n",
             out[0], out[1], out[2], out[3],
             out[4], out[5], out[6], out[7],
             out[8], out[9], out[10], out[11],
-            fmatrix._11, fmatrix._12, 0.0f, 0.0f,
-            fmatrix._21, fmatrix._22, 0.0f, 0.0f,
-            fmatrix._31, fmatrix._32, 0.0f, 0.0f);
+            S(U(fmatrix))._11, S(U(fmatrix))._12, 0.0f, 0.0f,
+            S(U(fmatrix))._21, S(U(fmatrix))._22, 0.0f, 0.0f,
+            S(U(fmatrix))._31, S(U(fmatrix))._32, 0.0f, 0.0f);
 
     IDirect3DDevice9_GetVertexShaderConstantF(device, 15, out, 2);
-    ok(out[0] == fmatrix._11 && out[1] == fmatrix._21 && out[2] == fmatrix._31 && out[3] == 0.0f
-            && out[4] == fmatrix._12 && out[5] == fmatrix._22 && out[6] == fmatrix._32 && out[7] == 0.0f,
+    ok(out[0] == S(U(fmatrix))._11 && out[1] == S(U(fmatrix))._21 && out[2] == S(U(fmatrix))._31 && out[3] == 0.0f
+            && out[4] == S(U(fmatrix))._12 && out[5] == S(U(fmatrix))._22 && out[6] == S(U(fmatrix))._32 && out[7] == 0.0f,
             "The variable r2x3 was not set correctly, out={%f, %f, %f, %f; %f, %f, %f, %f}, "
             "should be {%f, %f, %f, %f; %f, %f, %f, %f}\n",
             out[0], out[1], out[2], out[3], out[4], out[5], out[6], out[7],
-            fmatrix._11, fmatrix._21, fmatrix._31, 0.0f,
-            fmatrix._12, fmatrix._22, fmatrix._32, 0.0f);
+            S(U(fmatrix))._11, S(U(fmatrix))._21, S(U(fmatrix))._31, 0.0f,
+            S(U(fmatrix))._12, S(U(fmatrix))._22, S(U(fmatrix))._32, 0.0f);
 
     ID3DXConstantTable_Release(ctable);
 }
@@ -1205,12 +1205,12 @@ static void test_setting_arrays_table(IDirect3DDevice9 *device)
 
     IDirect3DDevice9_GetVertexShaderConstantF(device, 0, out, 8);
     /* Just check a few elements in each matrix to make sure fmtxarray was set row-major */
-    ok(out[0] == fmtxarray[0]._11 && out[1] == fmtxarray[0]._12 && out[2] == fmtxarray[0]._13 && out[3] == fmtxarray[0]._14,
+    ok(out[0] == S(U(fmtxarray[0]))._11 && out[1] == S(U(fmtxarray[0]))._12 && out[2] == S(U(fmtxarray[0]))._13 && out[3] == S(U(fmtxarray[0]))._14,
            "The variable fmtxarray was not set row-major, out={%f, %f, %f, %f}, should be {%f, %f, %f, %f}\n",
-           out[0], out[1], out[2], out[3], fmtxarray[0]._11, fmtxarray[0]._12, fmtxarray[0]._13, fmtxarray[0]._14);
-    ok(out[16] == fmtxarray[1]._11 && out[17] == fmtxarray[1]._12 && out[18] == fmtxarray[1]._13 && out[19] == fmtxarray[1]._14,
+           out[0], out[1], out[2], out[3], S(U(fmtxarray[0]))._11, S(U(fmtxarray[0]))._12, S(U(fmtxarray[0]))._13, S(U(fmtxarray[0]))._14);
+    ok(out[16] == S(U(fmtxarray[1]))._11 && out[17] == S(U(fmtxarray[1]))._12 && out[18] == S(U(fmtxarray[1]))._13 && out[19] == S(U(fmtxarray[1]))._14,
            "The variable fmtxarray was not set row-major, out={%f, %f, %f, %f}, should be {%f, %f, %f, %f}\n",
-           out[16], out[17], out[18], out[19], fmtxarray[1]._11, fmtxarray[1]._12, fmtxarray[1]._13, fmtxarray[1]._14);
+           out[16], out[17], out[18], out[19], S(U(fmtxarray[1]))._11, S(U(fmtxarray[1]))._12, S(U(fmtxarray[1]))._13, S(U(fmtxarray[1]))._14);
 
     refcnt = ID3DXConstantTable_Release(ctable);
     ok(refcnt == 0, "The constant table reference count was %lu, should be 0\n", refcnt);
@@ -1244,18 +1244,18 @@ static void test_SetDefaults(IDirect3DDevice9 *device)
 
     /* SetDefaults doesn't change constants without default values */
     IDirect3DDevice9_GetVertexShaderConstantF(device, 0, out, 4);
-    ok(out[0] == mvp._11 && out[4] == mvp._12 && out[8] == mvp._13 && out[12] == mvp._14,
+    ok(out[0] == S(U(mvp))._11 && out[4] == S(U(mvp))._12 && out[8] == S(U(mvp))._13 && out[12] == S(U(mvp))._14,
             "The first row of mvp was not set correctly, got {%f, %f, %f, %f}, should be {%f, %f, %f, %f}\n",
-            out[0], out[4], out[8], out[12], mvp._11, mvp._12, mvp._13, mvp._14);
-    ok(out[1] == mvp._21 && out[5] == mvp._22 && out[9] == mvp._23 && out[13] == mvp._24,
+            out[0], out[4], out[8], out[12], S(U(mvp))._11, S(U(mvp))._12, S(U(mvp))._13, S(U(mvp))._14);
+    ok(out[1] == S(U(mvp))._21 && out[5] == S(U(mvp))._22 && out[9] == S(U(mvp))._23 && out[13] == S(U(mvp))._24,
             "The second row of mvp was not set correctly, got {%f, %f, %f, %f}, should be {%f, %f, %f, %f}\n",
-            out[1], out[5], out[9], out[13], mvp._21, mvp._22, mvp._23, mvp._24);
-    ok(out[2] == mvp._31 && out[6] == mvp._32 && out[10] == mvp._33 && out[14] == mvp._34,
+            out[1], out[5], out[9], out[13], S(U(mvp))._21, S(U(mvp))._22, S(U(mvp))._23, S(U(mvp))._24);
+    ok(out[2] == S(U(mvp))._31 && out[6] == S(U(mvp))._32 && out[10] == S(U(mvp))._33 && out[14] == S(U(mvp))._34,
             "The third row of mvp was not set correctly, got {%f, %f, %f, %f}, should be {%f, %f, %f, %f}\n",
-            out[2], out[6], out[10], out[14], mvp._31, mvp._32, mvp._33, mvp._34);
-    ok(out[3] == mvp._41 && out[7] == mvp._42 && out[11] == mvp._43 && out[15] == mvp._44,
+            out[2], out[6], out[10], out[14], S(U(mvp))._31, S(U(mvp))._32, S(U(mvp))._33, S(U(mvp))._34);
+    ok(out[3] == S(U(mvp))._41 && out[7] == S(U(mvp))._42 && out[11] == S(U(mvp))._43 && out[15] == S(U(mvp))._44,
             "The fourth row of mvp was not set correctly, got {%f, %f, %f, %f}, should be {%f, %f, %f, %f}\n",
-            out[3], out[7], out[11], out[15], mvp._41, mvp._42, mvp._43, mvp._44);
+            out[3], out[7], out[11], out[15], S(U(mvp))._41, S(U(mvp))._42, S(U(mvp))._43, S(U(mvp))._44);
 
     IDirect3DDevice9_GetVertexShaderConstantF(device, 7, out, 1);
     ok(memcmp(out, &f4, sizeof(f4)) == 0,
@@ -1364,18 +1364,18 @@ static void test_SetValue(IDirect3DDevice9 *device)
     ok(res == D3D_OK, "ID3DXConstantTable_SetValue failed: got %08lx\n", res);
 
     IDirect3DDevice9_GetVertexShaderConstantF(device, 0, out, 4);
-    ok(out[0] == mvp._11 && out[4] == mvp._12 && out[8] == mvp._13 && out[12] == mvp._14,
+    ok(out[0] == S(U(mvp))._11 && out[4] == S(U(mvp))._12 && out[8] == S(U(mvp))._13 && out[12] == S(U(mvp))._14,
             "The first row of mvp was not set correctly, got {%f, %f, %f, %f}, should be {%f, %f, %f, %f}\n",
-            out[0], out[4], out[8], out[12], mvp._11, mvp._12, mvp._13, mvp._14);
-    ok(out[1] == mvp._21 && out[5] == mvp._22 && out[9] == mvp._23 && out[13] == mvp._24,
+            out[0], out[4], out[8], out[12], S(U(mvp))._11, S(U(mvp))._12, S(U(mvp))._13, S(U(mvp))._14);
+    ok(out[1] == S(U(mvp))._21 && out[5] == S(U(mvp))._22 && out[9] == S(U(mvp))._23 && out[13] == S(U(mvp))._24,
             "The second row of mvp was not set correctly, got {%f, %f, %f, %f}, should be {%f, %f, %f, %f}\n",
-            out[1], out[5], out[9], out[13], mvp._21, mvp._22, mvp._23, mvp._24);
-    ok(out[2] == mvp._31 && out[6] == mvp._32 && out[10] == mvp._33 && out[14] == mvp._34,
+            out[1], out[5], out[9], out[13], S(U(mvp))._21, S(U(mvp))._22, S(U(mvp))._23, S(U(mvp))._24);
+    ok(out[2] == S(U(mvp))._31 && out[6] == S(U(mvp))._32 && out[10] == S(U(mvp))._33 && out[14] == S(U(mvp))._34,
             "The third row of mvp was not set correctly, got {%f, %f, %f, %f}, should be {%f, %f, %f, %f}\n",
-            out[2], out[6], out[10], out[14], mvp._31, mvp._32, mvp._33, mvp._34);
-    ok(out[3] == mvp._41 && out[7] == mvp._42 && out[11] == mvp._43 && out[15] == mvp._44,
+            out[2], out[6], out[10], out[14], S(U(mvp))._31, S(U(mvp))._32, S(U(mvp))._33, S(U(mvp))._34);
+    ok(out[3] == S(U(mvp))._41 && out[7] == S(U(mvp))._42 && out[11] == S(U(mvp))._43 && out[15] == S(U(mvp))._44,
             "The fourth row of mvp was not set correctly, got {%f, %f, %f, %f}, should be {%f, %f, %f, %f}\n",
-            out[3], out[7], out[11], out[15], mvp._41, mvp._42, mvp._43, mvp._44);
+            out[3], out[7], out[11], out[15], S(U(mvp))._41, S(U(mvp))._42, S(U(mvp))._43, S(U(mvp))._44);
 
     ID3DXConstantTable_Release(ctable);
 
@@ -6644,6 +6644,214 @@ static void test_fragment_linker(void)
     DestroyWindow(window);
 }
 
+static const DWORD ps_tex[] = {
+    0xffff0103,                                                             /* ps_1_3                       */
+    0x00000042, 0xb00f0000,                                                 /* tex t0                       */
+    0x00000000,                                                             /* nop                          */
+    0x0000ffff};
+
+static const DWORD ps_texld_1_4[] = {
+    0xffff0104,                                                             /* ps_1_4                       */
+    0x00000042, 0xb00f0000, 0xa0e40000,                                     /* texld t0, c0                 */
+    0x00000000,                                                             /* nop                          */
+    0x0000ffff};
+
+static const DWORD ps_texld_2_0[] = {
+    0xffff0200,                                                             /* ps_2_0                       */
+    0x00000042, 0xb00f0000, 0xa0e40000, 0xa0e40001,                         /* texld t0, c0, c1             */
+    0x00000000,                                                             /* nop                          */
+    0x0000ffff};
+
+static const DWORD ps_texcoord[] = {
+    0xffff0103,                                                             /* ps_1_4                       */
+    0x00000040, 0xb00f0000,                                                 /* texcoord t0                  */
+    0x00000000,                                                             /* nop                          */
+    0x0000ffff};
+
+static const DWORD ps_texcrd[] = {
+    0xffff0104,                                                             /* ps_2_0                       */
+    0x00000040, 0xb00f0000, 0xa0e40000,                                     /* texcrd t0, c0                */
+    0x00000000,                                                             /* nop                          */
+    0x0000ffff};
+
+static const DWORD ps_sincos_2_0[] = {
+    0xffff0200,                                                             /* ps_2_0                       */
+    0x00000025, 0xb00f0000, 0xa0e40000, 0xa0e40001, 0xa0e40002,             /* sincos t0, c0, c1, c2        */
+    0x00000000,                                                             /* nop                          */
+    0x0000ffff};
+
+static const DWORD ps_sincos_3_0[] = {
+    0xffff0300,                                                             /* ps_3_0                       */
+    0x00000025, 0xb00f0000, 0xa0e40000,                                     /* sincos t0, c0                */
+    0x00000000,                                                             /* nop                          */
+    0x0000ffff};
+
+static const DWORD vs_sincos_2_0[] = {
+    0xfffe0200,                                                             /* vs_2_0                       */
+    0x00000025, 0xb00f0000, 0xa0e40000, 0xa0e40001, 0xa0e40002,             /* sincos a0, c0, c1, c2        */
+    0x00000000,                                                             /* nop                          */
+    0x0000ffff};
+
+static const DWORD vs_sincos_3_0[] = {
+    0xfffe0300,                                                             /* vs_3_0                       */
+    0x00000025, 0xb00f0000, 0xa0e40000,                                     /* sincos a0, c0                */
+    0x00000000,                                                             /* nop                          */
+    0x0000ffff};
+
+static void test_disassemble_shader(void)
+{
+    static const char disasm_vs[] = "    vs_1_1\n"
+                                    "    dcl_position v0\n"
+                                    "    dp4 oPos.x, v0, c0\n"
+                                    "    dp4 oPos.y, v0, c1\n"
+                                    "    dp4 oPos.z, v0, c2\n"
+                                    "    dp4 oPos.w, v0, c3\n";
+    static const char disasm_ps[] = "    ps_1_1\n"
+                                    "    def c1, 1, 0, 0, 0\n"
+                                    "    tex t0\n"
+                                    "    dp3 r0, c1, c0\n"
+                                    "    mul r0, v0, r0\n"
+                                    "    mul r0, t0, r0\n";
+    static const char disasm_ps_tex[] =        "    ps_1_3\n"
+                                               "    tex t0\n"
+                                               "    nop\n";
+    static const char disasm_ps_texld_1_4[] =  "    ps_1_4\n"
+                                               "    texld t0, c0\n"
+                                               "    nop\n";
+    static const char disasm_ps_texld_2_0[] =  "    ps_2_0\n"
+                                               "    texld t0, c0, c1\n"
+                                               "    nop\n";
+    static const char disasm_ps_texcoord[] =   "    ps_1_3\n"
+                                               "    texcoord t0\n"
+                                               "    nop\n";
+    static const char disasm_ps_texcrd[] =     "    ps_1_4\n"
+                                               "    texcrd t0, c0\n"
+                                               "    nop\n";
+    static const char disasm_ps_sincos_2_0[] = "    ps_2_0\n"
+                                               "    sincos t0, c0, c1, c2\n"
+                                               "    nop\n";
+    static const char disasm_ps_sincos_3_0[] = "    ps_3_0\n"
+                                               "    sincos t0, c0\n"
+                                               "    nop\n";
+    static const char disasm_vs_sincos_2_0[] = "    vs_2_0\n"
+                                               "    sincos a0, c0, c1, c2\n"
+                                               "    nop\n";
+    static const char disasm_vs_sincos_3_0[] = "    vs_3_0\n"
+                                               "    sincos a0, c0\n"
+                                               "    nop\n";
+    ID3DXBuffer *disassembly;
+    HRESULT ret;
+    char *ptr;
+
+    /* Check wrong parameters */
+    ret = D3DXDisassembleShader(NULL, FALSE, NULL, NULL);
+    ok(ret == D3DERR_INVALIDCALL, "Returned %#x, expected %#x\n", ret, D3DERR_INVALIDCALL);
+    ret = D3DXDisassembleShader(NULL, FALSE, NULL, &disassembly);
+    ok(ret == D3DERR_INVALIDCALL, "Returned %#x, expected %#x\n", ret, D3DERR_INVALIDCALL);
+    ret = D3DXDisassembleShader(simple_vs, FALSE, NULL, NULL);
+    ok(ret == D3DERR_INVALIDCALL, "Returned %#x, expected %#x\n", ret, D3DERR_INVALIDCALL);
+
+    /* Test with vertex shader */
+    disassembly = (void *)0xdeadbeef;
+    ret = D3DXDisassembleShader(simple_vs, FALSE, NULL, &disassembly);
+    ok(ret == D3D_OK, "Failed with %#x\n", ret);
+    ptr = ID3DXBuffer_GetBufferPointer(disassembly);
+    ok(!memcmp(ptr, disasm_vs, sizeof(disasm_vs) - 1), /* compare beginning */
+       "Returned '%s', expected '%s'\n", ptr, disasm_vs);
+    ID3DXBuffer_Release(disassembly);
+
+    /* Test with pixel shader */
+    disassembly = (void *)0xdeadbeef;
+    ret = D3DXDisassembleShader(simple_ps, FALSE, NULL, &disassembly);
+    ok(ret == D3D_OK, "Failed with %#x\n", ret);
+    ptr = ID3DXBuffer_GetBufferPointer(disassembly);
+    ok(!memcmp(ptr, disasm_ps, sizeof(disasm_ps) - 1), /* compare beginning */
+       "Returned '%s', expected '%s'\n", ptr, disasm_ps);
+    ID3DXBuffer_Release(disassembly);
+
+    /* Test tex instruction with pixel shader 1.3 */
+    disassembly = (void *)0xdeadbeef;
+    ret = D3DXDisassembleShader(ps_tex, FALSE, NULL, &disassembly);
+    ok(ret == D3D_OK, "Failed with %#x\n", ret);
+    ptr = ID3DXBuffer_GetBufferPointer(disassembly);
+    ok(!memcmp(ptr, disasm_ps_tex, sizeof(disasm_ps_tex) - 1), /* compare beginning */
+       "Returned '%s', expected '%s'\n", ptr, disasm_ps_tex);
+    ID3DXBuffer_Release(disassembly);
+
+    /* Test texld instruction with pixel shader 1.4 */
+    disassembly = (void *)0xdeadbeef;
+    ret = D3DXDisassembleShader(ps_texld_1_4, FALSE, NULL, &disassembly);
+    ok(ret == D3D_OK, "Failed with %#x\n", ret);
+    ptr = ID3DXBuffer_GetBufferPointer(disassembly);
+    ok(!memcmp(ptr, disasm_ps_texld_1_4, sizeof(disasm_ps_texld_1_4) - 1), /* compare beginning */
+       "Returned '%s', expected '%s'\n", ptr, disasm_ps_texld_1_4);
+    ID3DXBuffer_Release(disassembly);
+
+    /* Test texld instruction with pixel shader 2.0 */
+    disassembly = (void *)0xdeadbeef;
+    ret = D3DXDisassembleShader(ps_texld_2_0, FALSE, NULL, &disassembly);
+    ok(ret == D3D_OK, "Failed with %#x\n", ret);
+    ptr = ID3DXBuffer_GetBufferPointer(disassembly);
+    ok(!memcmp(ptr, disasm_ps_texld_2_0, sizeof(disasm_ps_texld_2_0) - 1), /* compare beginning */
+       "Returned '%s', expected '%s'\n", ptr, disasm_ps_texld_2_0);
+    ID3DXBuffer_Release(disassembly);
+
+    /* Test texcoord instruction with pixel shader 1.3 */
+    disassembly = (void *)0xdeadbeef;
+    ret = D3DXDisassembleShader(ps_texcoord, FALSE, NULL, &disassembly);
+    ok(ret == D3D_OK, "Failed with %#x\n", ret);
+    ptr = ID3DXBuffer_GetBufferPointer(disassembly);
+    ok(!memcmp(ptr, disasm_ps_texcoord, sizeof(disasm_ps_texcoord) - 1), /* compare beginning */
+       "Returned '%s', expected '%s'\n", ptr, disasm_ps_texcoord);
+    ID3DXBuffer_Release(disassembly);
+
+    /* Test texcrd instruction with pixel shader 1.4 */
+    disassembly = (void *)0xdeadbeef;
+    ret = D3DXDisassembleShader(ps_texcrd, FALSE, NULL, &disassembly);
+    ok(ret == D3D_OK, "Failed with %#x\n", ret);
+    ptr = ID3DXBuffer_GetBufferPointer(disassembly);
+    ok(!memcmp(ptr, disasm_ps_texcrd, sizeof(disasm_ps_texcrd) - 1), /* compare beginning */
+       "Returned '%s', expected '%s'\n", ptr, disasm_ps_texcrd);
+    ID3DXBuffer_Release(disassembly);
+
+    /* Test sincos instruction pixel shader 2.0 */
+    disassembly = (void *)0xdeadbeef;
+    ret = D3DXDisassembleShader(ps_sincos_2_0, FALSE, NULL, &disassembly);
+    ok(ret == D3D_OK, "Failed with %#x\n", ret);
+    ptr = ID3DXBuffer_GetBufferPointer(disassembly);
+    ok(!memcmp(ptr, disasm_ps_sincos_2_0, sizeof(disasm_ps_sincos_2_0) - 1), /* compare beginning */
+       "Returned '%s', expected '%s'\n", ptr, disasm_ps_sincos_2_0);
+    ID3DXBuffer_Release(disassembly);
+
+    /* Test sincos instruction with pixel shader 3.0 */
+    disassembly = (void *)0xdeadbeef;
+    ret = D3DXDisassembleShader(ps_sincos_3_0, FALSE, NULL, &disassembly);
+    ok(ret == D3D_OK, "Failed with %#x\n", ret);
+    ptr = ID3DXBuffer_GetBufferPointer(disassembly);
+    ok(!memcmp(ptr, disasm_ps_sincos_3_0, sizeof(disasm_ps_sincos_3_0) - 1), /* compare beginning */
+       "Returned '%s', expected '%s'\n", ptr, disasm_ps_sincos_3_0);
+    ID3DXBuffer_Release(disassembly);
+
+    /* Test sincos instruction with pixel shader 2.0 */
+    disassembly = (void *)0xdeadbeef;
+    ret = D3DXDisassembleShader(vs_sincos_2_0, FALSE, NULL, &disassembly);
+    ok(ret == D3D_OK, "Failed with %#x\n", ret);
+    ptr = ID3DXBuffer_GetBufferPointer(disassembly);
+    ok(!memcmp(ptr, disasm_vs_sincos_2_0, sizeof(disasm_vs_sincos_2_0) - 1), /* compare beginning */
+       "Returned '%s', expected '%s'\n", ptr, disasm_vs_sincos_2_0);
+    ID3DXBuffer_Release(disassembly);
+
+    /* Test sincos instruction with pixel shader 3.0 */
+    disassembly = (void *)0xdeadbeef;
+    ret = D3DXDisassembleShader(vs_sincos_3_0, FALSE, NULL, &disassembly);
+    ok(ret == D3D_OK, "Failed with %#x\n", ret);
+    ptr = ID3DXBuffer_GetBufferPointer(disassembly);
+    ok(!memcmp(ptr, disasm_vs_sincos_3_0, sizeof(disasm_vs_sincos_3_0) - 1), /* compare beginning */
+       "Returned '%s', expected '%s'\n", ptr, disasm_vs_sincos_3_0);
+    ID3DXBuffer_Release(disassembly);
+
+}
+
 START_TEST(shader)
 {
     test_get_shader_size();
@@ -6659,4 +6867,5 @@ START_TEST(shader)
     test_registerset_defaults();
     test_shader_semantics();
     test_fragment_linker();
+    test_disassemble_shader();
 }

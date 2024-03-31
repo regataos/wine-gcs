@@ -98,7 +98,7 @@ static ULONG WINAPI domdoctype_Release(IXMLDOMDocumentType *iface)
     if (!ref)
     {
         destroy_xmlnode(&doctype->node);
-        free(doctype);
+        heap_free(doctype);
     }
 
     return ref;
@@ -570,7 +570,7 @@ IUnknown* create_doc_type( xmlNodePtr doctype )
 {
     domdoctype *This;
 
-    This = malloc(sizeof(*This));
+    This = heap_alloc( sizeof *This );
     if ( !This )
         return NULL;
 

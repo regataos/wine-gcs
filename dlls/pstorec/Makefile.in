@@ -3,6 +3,7 @@ IMPORTS   = uuid
 
 EXTRADLLFLAGS = -Wb,--prefer-native
 
-SOURCES = \
-	pstorec.c \
-	pstorec_tlb.idl
+C_SRCS = \
+	pstorec.c
+
+IDL_SRCS = pstorec_tlb.idl

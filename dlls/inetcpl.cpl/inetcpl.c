@@ -19,6 +19,7 @@
  *
  */
 
+#define NONAMELESSUNION
 #define COBJMACROS
 #define CONST_VTABLE
 
@@ -38,7 +39,7 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(inetcpl);
 
-HMODULE hcpl;
+DECLSPEC_HIDDEN HMODULE hcpl;
 
 /*********************************************************************
  *  DllMain (inetcpl.@)
@@ -107,25 +108,25 @@ static void display_cpl_sheets(HWND parent)
     /* Fill out all PROPSHEETPAGE */
     psp[id].dwSize = sizeof (PROPSHEETPAGEW);
     psp[id].hInstance = hcpl;
-    psp[id].pszTemplate = MAKEINTRESOURCEW(IDD_GENERAL);
+    psp[id].u.pszTemplate = MAKEINTRESOURCEW(IDD_GENERAL);
     psp[id].pfnDlgProc = general_dlgproc;
     id++;
 
     psp[id].dwSize = sizeof (PROPSHEETPAGEW);
     psp[id].hInstance = hcpl;
-    psp[id].pszTemplate = MAKEINTRESOURCEW(IDD_SECURITY);
+    psp[id].u.pszTemplate = MAKEINTRESOURCEW(IDD_SECURITY);
     psp[id].pfnDlgProc = security_dlgproc;
     id++;
 
     psp[id].dwSize = sizeof (PROPSHEETPAGEW);
     psp[id].hInstance = hcpl;
-    psp[id].pszTemplate = MAKEINTRESOURCEW(IDD_CONTENT);
+    psp[id].u.pszTemplate = MAKEINTRESOURCEW(IDD_CONTENT);
     psp[id].pfnDlgProc = content_dlgproc;
     id++;
 
     psp[id].dwSize = sizeof (PROPSHEETPAGEW);
     psp[id].hInstance = hcpl;
-    psp[id].pszTemplate = MAKEINTRESOURCEW(IDD_CONNECTIONS);
+    psp[id].u.pszTemplate = MAKEINTRESOURCEW(IDD_CONNECTIONS);
     psp[id].pfnDlgProc = connections_dlgproc;
     id++;
 
@@ -134,10 +135,10 @@ static void display_cpl_sheets(HWND parent)
     psh.dwFlags = PSH_PROPSHEETPAGE | PSH_USEICONID | PSH_USECALLBACK;
     psh.hwndParent = parent;
     psh.hInstance = hcpl;
-    psh.pszIcon = MAKEINTRESOURCEW(ICO_MAIN);
+    psh.u.pszIcon = MAKEINTRESOURCEW(ICO_MAIN);
     psh.pszCaption = MAKEINTRESOURCEW(IDS_CPL_NAME);
     psh.nPages = id;
-    psh.ppsp = psp;
+    psh.u3.ppsp = psp;
     psh.pfnCallback = propsheet_callback;
 
     /* display the dialog */

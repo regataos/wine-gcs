@@ -1,4 +1,4 @@
 MODULE    = vtdapi.vxd
 
-SOURCES = \
+C_SRCS = \
 	vtdapi.c

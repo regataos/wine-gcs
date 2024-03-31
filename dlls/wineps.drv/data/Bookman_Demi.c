@@ -257,9 +257,9 @@ static const AFMMETRICS metrics[228] =
 const AFM PSDRV_Bookman_Demi =
 {
     "Bookman-Demi",			    /* FontName */
-    L"ITC Bookman Demi",		    /* FullName */
-    L"ITC Bookman",			    /* FamilyName */
-    L"AdobeStandardEncoding",		    /* EncodingScheme */
+    "ITC Bookman Demi",			    /* FullName */
+    "ITC Bookman",			    /* FamilyName */
+    "AdobeStandardEncoding",		    /* EncodingScheme */
     FW_BOLD,				    /* Weight */
     0,					    /* ItalicAngle */
     FALSE,				    /* IsFixedPitch */

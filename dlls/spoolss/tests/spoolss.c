@@ -208,7 +208,7 @@ START_TEST(spoolss)
 {
     LPCSTR ptr;
 
-    /* The tests fail on Win7 (see comments in load_functions() */
+    /* The tests fail on Win7 (see comments in load_function() */
     ptr = load_functions();
     if (ptr) {
         win_skip("%s not found\n", ptr);

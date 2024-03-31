@@ -40,6 +40,7 @@ extern "C" {
 #ifndef EXTERN_GUID
 #ifdef __cplusplus
 #define EXTERN_GUID(name, l, w1, w2, b1, b2, b3, b4, b5, b6, b7, b8) \
+        EXTERN_C const GUID DECLSPEC_SELECTANY name DECLSPEC_HIDDEN; \
         EXTERN_C const GUID DECLSPEC_SELECTANY name = \
 	{ l, w1, w2, { b1, b2,  b3,  b4,  b5,  b6,  b7,  b8 } }
 #else
@@ -81,8 +82,8 @@ typedef unsigned char boolean;
 #define midl_user_free MIDL_user_free
 #define midl_user_allocate MIDL_user_allocate
 
+void * __RPC_USER MIDL_user_allocate(SIZE_T);
 void __RPC_USER MIDL_user_free(void *);
-void * __RPC_USER MIDL_user_allocate(SIZE_T) __WINE_ALLOC_SIZE(1) __WINE_DEALLOC(MIDL_user_free) __WINE_MALLOC;
 
 #define NdrFcShort(s) (unsigned char)(s & 0xff), (unsigned char)(s >> 8)
 #define NdrFcLong(s)  (unsigned char)(s & 0xff), (unsigned char)((s & 0x0000ff00) >> 8), \
@@ -356,7 +357,7 @@ typedef struct _MIDL_SYNTAX_INFO
 
 typedef void (__RPC_API *STUB_THUNK)( PMIDL_STUB_MESSAGE );
 
-#ifndef WINE_NO_STRICT_PROTOTYPES
+#ifdef WINE_STRICT_PROTOTYPES
 typedef LONG (__RPC_API *SERVER_ROUTINE)(void);
 #else
 typedef LONG (__RPC_API *SERVER_ROUTINE)();
@@ -692,8 +693,7 @@ RPCRTAPI void RPC_ENTRY
                        PMIDL_STUB_MESSAGE pStubMsg, PMIDL_STUB_DESC pStubDesc,
                        PFORMAT_STRING pFormat, void *pParamList );
 RPCRTAPI unsigned char* RPC_ENTRY
-  NdrGetBuffer( PMIDL_STUB_MESSAGE stubmsg, ULONG buflen, RPC_BINDING_HANDLE handle )
-  __WINE_ALLOC_SIZE(2) __WINE_MALLOC;
+  NdrGetBuffer( PMIDL_STUB_MESSAGE stubmsg, ULONG buflen, RPC_BINDING_HANDLE handle );
 RPCRTAPI void RPC_ENTRY
   NdrFreeBuffer( PMIDL_STUB_MESSAGE pStubMsg );
 RPCRTAPI unsigned char* RPC_ENTRY

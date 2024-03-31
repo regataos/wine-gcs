@@ -21,6 +21,7 @@
 
 #include <stdarg.h>
 
+#define NONAMELESSUNION
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
 #include "windef.h"
@@ -47,7 +48,7 @@ static void query_global_stats(IRP *irp, const MIB_IF_ROW2 *netdev)
 
     if (irpsp->Parameters.DeviceIoControl.InputBufferLength != sizeof(oid))
     {
-        irp->IoStatus.Status = STATUS_INVALID_PARAMETER;
+        irp->IoStatus.u.Status = STATUS_INVALID_PARAMETER;
         return;
     }
     oid = *(DWORD *)irp->AssociatedIrp.SystemBuffer;
@@ -59,19 +60,19 @@ static void query_global_stats(IRP *irp, const MIB_IF_ROW2 *netdev)
     {
         if (len < sizeof(NDIS_MEDIUM))
         {
-            irp->IoStatus.Status = STATUS_INVALID_PARAMETER;
+            irp->IoStatus.u.Status = STATUS_INVALID_PARAMETER;
             break;
         }
         *(NDIS_MEDIUM *)response = netdev->MediaType;
         irp->IoStatus.Information = sizeof(netdev->MediaType);
-        irp->IoStatus.Status = STATUS_SUCCESS;
+        irp->IoStatus.u.Status = STATUS_SUCCESS;
         break;
     }
     case OID_802_3_PERMANENT_ADDRESS:
     {
         irp->IoStatus.Information = netdev->PhysicalAddressLength;
         if (len < netdev->PhysicalAddressLength)
-            irp->IoStatus.Status = STATUS_INVALID_PARAMETER;
+            irp->IoStatus.u.Status = STATUS_INVALID_PARAMETER;
         else
             memcpy( response, netdev->PermanentPhysicalAddress, sizeof(netdev->PermanentPhysicalAddress) );
         break;
@@ -80,7 +81,7 @@ static void query_global_stats(IRP *irp, const MIB_IF_ROW2 *netdev)
     {
         irp->IoStatus.Information = netdev->PhysicalAddressLength;
         if (len < netdev->PhysicalAddressLength)
-            irp->IoStatus.Status = STATUS_INVALID_PARAMETER;
+            irp->IoStatus.u.Status = STATUS_INVALID_PARAMETER;
         else
             memcpy( response, netdev->PhysicalAddress, sizeof(netdev->PhysicalAddress) );
         break;
@@ -88,7 +89,7 @@ static void query_global_stats(IRP *irp, const MIB_IF_ROW2 *netdev)
     }
     default:
         FIXME( "Unsupported OID %lx\n", oid );
-        irp->IoStatus.Status = STATUS_INVALID_PARAMETER;
+        irp->IoStatus.u.Status = STATUS_INVALID_PARAMETER;
         break;
     }
 }
@@ -111,11 +112,11 @@ static NTSTATUS WINAPI ndis_ioctl(DEVICE_OBJECT *device, IRP *irp)
         break;
     default:
         FIXME( "ioctl %lx not supported\n", irpsp->Parameters.DeviceIoControl.IoControlCode );
-        irp->IoStatus.Status = STATUS_NOT_SUPPORTED;
+        irp->IoStatus.u.Status = STATUS_NOT_SUPPORTED;
         break;
     }
 
-    status = irp->IoStatus.Status;
+    status = irp->IoStatus.u.Status;
     IoCompleteRequest( irp, IO_NO_INCREMENT );
     return status;
 }

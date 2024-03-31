@@ -27,7 +27,6 @@
 #include "winerror.h"
 #include "winternl.h"
 #include "wmistr.h"
-#define _WMI_SOURCE_
 #include "evntrace.h"
 #include "evntprov.h"
 
@@ -59,7 +58,7 @@ BOOL WINAPI BackupEventLogA( HANDLE hEventLog, LPCSTR lpBackupFileName )
 
     backupW = strdupAW(lpBackupFileName);
     ret = BackupEventLogW(hEventLog, backupW);
-    free(backupW);
+    heap_free(backupW);
 
     return ret;
 }
@@ -116,7 +115,7 @@ BOOL WINAPI ClearEventLogA( HANDLE hEventLog, LPCSTR lpBackupFileName )
 
     backupW = strdupAW(lpBackupFileName);
     ret = ClearEventLogW(hEventLog, backupW);
-    free(backupW);
+    heap_free(backupW);
 
     return ret;
 }
@@ -395,8 +394,8 @@ HANDLE WINAPI OpenBackupEventLogA( LPCSTR lpUNCServerName, LPCSTR lpFileName )
     uncnameW = strdupAW(lpUNCServerName);
     filenameW = strdupAW(lpFileName);
     handle = OpenBackupEventLogW(uncnameW, filenameW);
-    free(uncnameW);
-    free(filenameW);
+    heap_free(uncnameW);
+    heap_free(filenameW);
 
     return handle;
 }
@@ -454,8 +453,8 @@ HANDLE WINAPI OpenEventLogA( LPCSTR uncname, LPCSTR source )
     uncnameW = strdupAW(uncname);
     sourceW = strdupAW(source);
     handle = OpenEventLogW(uncnameW, sourceW);
-    free(uncnameW);
-    free(sourceW);
+    heap_free(uncnameW);
+    heap_free(sourceW);
 
     return handle;
 }
@@ -609,7 +608,7 @@ BOOL WINAPI ReportEventA ( HANDLE hEventLog, WORD wType, WORD wCategory, DWORD d
     if (wNumStrings == 0) return TRUE;
     if (!lpStrings) return TRUE;
 
-    wideStrArray = malloc(sizeof(WCHAR *) * wNumStrings);
+    wideStrArray = heap_alloc(sizeof(LPWSTR) * wNumStrings);
     for (i = 0; i < wNumStrings; i++)
     {
         RtlCreateUnicodeStringFromAsciiz(&str, lpStrings[i]);
@@ -618,8 +617,8 @@ BOOL WINAPI ReportEventA ( HANDLE hEventLog, WORD wType, WORD wCategory, DWORD d
     ret = ReportEventW(hEventLog, wType, wCategory, dwEventID, lpUserSid,
                        wNumStrings, dwDataSize, (LPCWSTR *)wideStrArray, lpRawData);
     for (i = 0; i < wNumStrings; i++)
-        free(wideStrArray[i]);
-    free(wideStrArray);
+        heap_free( wideStrArray[i] );
+    heap_free(wideStrArray);
     return ret;
 }
 
@@ -643,34 +642,20 @@ BOOL WINAPI ReportEventW( HANDLE hEventLog, WORD wType, WORD wCategory, DWORD dw
 
     for (i = 0; i < wNumStrings; i++)
     {
-        const WCHAR *line = lpStrings[i];
-
-        while (*line)
+        switch (wType)
         {
-            const WCHAR *next = wcschr( line, '\n' );
-
-            if (next)
-                ++next;
-            else
-                next = line + wcslen( line );
-
-            switch (wType)
-            {
-            case EVENTLOG_SUCCESS:
-                TRACE_(eventlog)("%s\n", debugstr_wn(line, next - line));
-                break;
-            case EVENTLOG_ERROR_TYPE:
-                ERR_(eventlog)("%s\n", debugstr_wn(line, next - line));
-                break;
-            case EVENTLOG_WARNING_TYPE:
-                WARN_(eventlog)("%s\n", debugstr_wn(line, next - line));
-                break;
-            default:
-                TRACE_(eventlog)("%s\n", debugstr_wn(line, next - line));
-                break;
-            }
-
-            line = next;
+        case EVENTLOG_SUCCESS:
+            TRACE_(eventlog)("%s\n", debugstr_w(lpStrings[i]));
+            break;
+        case EVENTLOG_ERROR_TYPE:
+            ERR_(eventlog)("%s\n", debugstr_w(lpStrings[i]));
+            break;
+        case EVENTLOG_WARNING_TYPE:
+            WARN_(eventlog)("%s\n", debugstr_w(lpStrings[i]));
+            break;
+        default:
+            TRACE_(eventlog)("%s\n", debugstr_w(lpStrings[i]));
+            break;
         }
     }
     return TRUE;

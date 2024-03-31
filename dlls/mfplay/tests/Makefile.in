@@ -1,6 +1,7 @@
 TESTDLL   = mfplay.dll
 IMPORTS   = mfplay user32 uuid mfuuid mfplat ole32
 
-SOURCES = \
-	mfplay.c \
-	resource.rc
+C_SRCS = \
+	mfplay.c
+
+RC_SRCS = resource.rc

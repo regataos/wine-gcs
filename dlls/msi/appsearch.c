@@ -34,7 +34,7 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(msi);
 
-struct signature
+typedef struct tagMSISIGNATURE
 {
     LPCWSTR  Name;     /* NOT owned by this structure */
     LPWSTR   File;
@@ -47,7 +47,7 @@ struct signature
     FILETIME MinTime;
     FILETIME MaxTime;
     LPWSTR   Languages;
-};
+}MSISIGNATURE;
 
 void msi_parse_version_string(LPCWSTR verStr, PDWORD ms, PDWORD ls)
 {
@@ -80,7 +80,7 @@ void msi_parse_version_string(LPCWSTR verStr, PDWORD ms, PDWORD ls)
  * Returns ERROR_SUCCESS upon success (where not finding the record counts as
  * success), something else on error.
  */
-static UINT get_signature( MSIPACKAGE *package, struct signature *sig, const WCHAR *name )
+static UINT get_signature( MSIPACKAGE *package, MSISIGNATURE *sig, const WCHAR *name )
 {
     WCHAR *minVersion, *maxVersion, *p;
     MSIRECORD *row;
@@ -148,13 +148,13 @@ static UINT get_signature( MSIPACKAGE *package, struct signature *sig, const WCH
 }
 
 /* Frees any memory allocated in sig */
-static void free_signature( struct signature *sig )
+static void free_signature( MSISIGNATURE *sig )
 {
     free(sig->File);
     free(sig->Languages);
 }
 
-static WCHAR *search_file( MSIPACKAGE *package, WCHAR *path, struct signature *sig )
+static WCHAR *search_file( MSIPACKAGE *package, WCHAR *path, MSISIGNATURE *sig )
 {
     VS_FIXEDFILEINFO *info;
     DWORD attr;
@@ -220,7 +220,7 @@ done:
     return val;
 }
 
-static UINT search_components( MSIPACKAGE *package, WCHAR **appValue, struct signature *sig )
+static UINT search_components( MSIPACKAGE *package, WCHAR **appValue, MSISIGNATURE *sig )
 {
     MSIRECORD *row, *rec;
     LPCWSTR signature, guid;
@@ -341,9 +341,9 @@ static void convert_reg_value( DWORD regType, const BYTE *value, DWORD sz, WCHAR
     }
 }
 
-static UINT search_directory( MSIPACKAGE *, struct signature *, const WCHAR *, int, WCHAR ** );
+static UINT search_directory( MSIPACKAGE *, MSISIGNATURE *, const WCHAR *, int, WCHAR ** );
 
-static UINT search_reg( MSIPACKAGE *package, WCHAR **appValue, struct signature *sig )
+static UINT search_reg( MSIPACKAGE *package, WCHAR **appValue, MSISIGNATURE *sig )
 {
     const WCHAR *keyPath, *valueName;
     WCHAR *deformatted = NULL, *ptr = NULL, *end;
@@ -494,7 +494,7 @@ static LPWSTR get_ini_field(LPWSTR buf, int field)
     return wcsdup(beg);
 }
 
-static UINT search_ini( MSIPACKAGE *package, WCHAR **appValue, struct signature *sig )
+static UINT search_ini( MSIPACKAGE *package, WCHAR **appValue, MSISIGNATURE *sig )
 {
     MSIRECORD *row;
     LPWSTR fileName, section, key;
@@ -652,7 +652,7 @@ done:
  * Return ERROR_SUCCESS in case of success (whether or not the file matches),
  * something else if an install-halting error occurs.
  */
-static UINT file_version_matches( MSIPACKAGE *package, const struct signature *sig, const WCHAR *filePath,
+static UINT file_version_matches( MSIPACKAGE *package, const MSISIGNATURE *sig, const WCHAR *filePath,
                                   BOOL *matches )
 {
     UINT len;
@@ -712,7 +712,7 @@ static UINT file_version_matches( MSIPACKAGE *package, const struct signature *s
  * Return ERROR_SUCCESS in case of success (whether or not the file matches),
  * something else if an install-halting error occurs.
  */
-static UINT file_matches_sig( MSIPACKAGE *package, const struct signature *sig, const WIN32_FIND_DATAW *findData,
+static UINT file_matches_sig( MSIPACKAGE *package, const MSISIGNATURE *sig, const WIN32_FIND_DATAW *findData,
                               const WCHAR *fullFilePath, BOOL *matches )
 {
     UINT rc = ERROR_SUCCESS;
@@ -757,7 +757,7 @@ static UINT file_matches_sig( MSIPACKAGE *package, const struct signature *sig, 
  * Returns ERROR_SUCCESS on success (which may include non-critical errors),
  * something else on failures which should halt the install.
  */
-static UINT recurse_search_directory( MSIPACKAGE *package, WCHAR **appValue, struct signature *sig, const WCHAR *dir,
+static UINT recurse_search_directory( MSIPACKAGE *package, WCHAR **appValue, MSISIGNATURE *sig, const WCHAR *dir,
                                       int depth )
 {
     HANDLE hFind;
@@ -871,11 +871,11 @@ static BOOL is_full_path( const WCHAR *path )
     return ret;
 }
 
-static UINT search_directory( MSIPACKAGE *package, struct signature *sig, const WCHAR *path, int depth, WCHAR **appValue )
+static UINT search_directory( MSIPACKAGE *package, MSISIGNATURE *sig, const WCHAR *path, int depth, WCHAR **appValue )
 {
     UINT rc;
     DWORD attr;
-    WCHAR *val = NULL, *new_val;
+    LPWSTR val = NULL;
 
     TRACE("%p, %p, %s, %d, %p\n", package, sig, debugstr_w(path), depth, appValue);
 
@@ -920,18 +920,11 @@ static UINT search_directory( MSIPACKAGE *package, struct signature *sig, const 
     if (attr != INVALID_FILE_ATTRIBUTES && (attr & FILE_ATTRIBUTE_DIRECTORY) &&
         val && val[lstrlenW(val) - 1] != '\\')
     {
-        new_val = realloc(val, (wcslen(val) + 2) * sizeof(WCHAR));
-        if (!new_val)
-        {
-            free(val);
-            val = NULL;
+        val = realloc(val, (wcslen(val) + 2) * sizeof(WCHAR));
+        if (!val)
             rc = ERROR_OUTOFMEMORY;
-        }
         else
-        {
-            val = new_val;
             PathAddBackslashW(val);
-        }
     }
 
     *appValue = val;
@@ -940,9 +933,9 @@ static UINT search_directory( MSIPACKAGE *package, struct signature *sig, const 
     return rc;
 }
 
-static UINT search_sig_name( MSIPACKAGE *, const WCHAR *, struct signature *, WCHAR ** );
+static UINT search_sig_name( MSIPACKAGE *, const WCHAR *, MSISIGNATURE *, WCHAR ** );
 
-static UINT search_dr( MSIPACKAGE *package, WCHAR **appValue, struct signature *sig )
+static UINT search_dr( MSIPACKAGE *package, WCHAR **appValue, MSISIGNATURE *sig )
 {
     LPWSTR parent = NULL;
     LPCWSTR parentName;
@@ -968,7 +961,7 @@ static UINT search_dr( MSIPACKAGE *package, WCHAR **appValue, struct signature *
     parentName = MSI_RecordGetString(row, 2);
     if (parentName)
     {
-        struct signature parentSig;
+        MSISIGNATURE parentSig;
 
         search_sig_name( package, parentName, &parentSig, &parent );
         free_signature( &parentSig );
@@ -1017,7 +1010,7 @@ static UINT search_dr( MSIPACKAGE *package, WCHAR **appValue, struct signature *
     return rc;
 }
 
-static UINT search_sig_name( MSIPACKAGE *package, const WCHAR *sigName, struct signature *sig, WCHAR **appValue )
+static UINT search_sig_name( MSIPACKAGE *package, const WCHAR *sigName, MSISIGNATURE *sig, WCHAR **appValue )
 {
     UINT rc;
 
@@ -1045,7 +1038,7 @@ static UINT ITERATE_AppSearch(MSIRECORD *row, LPVOID param)
     MSIPACKAGE *package = param;
     LPCWSTR propName, sigName;
     LPWSTR value = NULL;
-    struct signature sig;
+    MSISIGNATURE sig;
     MSIRECORD *uirow;
     UINT r;
 
@@ -1102,7 +1095,7 @@ static UINT ITERATE_CCPSearch(MSIRECORD *row, LPVOID param)
     MSIPACKAGE *package = param;
     LPCWSTR signature;
     LPWSTR value = NULL;
-    struct signature sig;
+    MSISIGNATURE sig;
     UINT r = ERROR_SUCCESS;
 
     signature = MSI_RecordGetString(row, 1);

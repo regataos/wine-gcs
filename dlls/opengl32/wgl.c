@@ -145,25 +145,10 @@ INT WINAPI wglChoosePixelFormat(HDC hdc, const PIXELFORMATDESCRIPTOR* ppfd)
             continue;
         }
 
-        if ((ppfd->dwFlags & PFD_DRAW_TO_BITMAP) && !(format.dwFlags & PFD_DRAW_TO_BITMAP))
+        /* only use bitmap capable for formats for bitmap rendering */
+        if( (ppfd->dwFlags & PFD_DRAW_TO_BITMAP) != (format.dwFlags & PFD_DRAW_TO_BITMAP))
         {
-            TRACE( "PFD_DRAW_TO_BITMAP required but not found for iPixelFormat=%d\n", i );
-            continue;
-        }
-        if ((ppfd->dwFlags & PFD_DRAW_TO_WINDOW) && !(format.dwFlags & PFD_DRAW_TO_WINDOW))
-        {
-            TRACE( "PFD_DRAW_TO_WINDOW required but not found for iPixelFormat=%d\n", i );
-            continue;
-        }
-
-        if ((ppfd->dwFlags & PFD_SUPPORT_GDI) && !(format.dwFlags & PFD_SUPPORT_GDI))
-        {
-            TRACE( "PFD_SUPPORT_GDI required but not found for iPixelFormat=%d\n", i );
-            continue;
-        }
-        if ((ppfd->dwFlags & PFD_SUPPORT_OPENGL) && !(format.dwFlags & PFD_SUPPORT_OPENGL))
-        {
-            TRACE( "PFD_SUPPORT_OPENGL required but not found for iPixelFormat=%d\n", i );
+            TRACE( "PFD_DRAW_TO_BITMAP mismatch for iPixelFormat=%d\n", i );
             continue;
         }
 
@@ -438,8 +423,8 @@ PROC WINAPI wglGetDefaultProcAddress( LPCSTR name )
 /***********************************************************************
  *		wglSwapLayerBuffers (OPENGL32.@)
  */
-BOOL WINAPI DECLSPEC_HOTPATCH wglSwapLayerBuffers(HDC hdc, UINT fuPlanes)
-{
+BOOL WINAPI wglSwapLayerBuffers(HDC hdc,
+				UINT fuPlanes) {
   TRACE("(%p, %08x)\n", hdc, fuPlanes);
 
   if (fuPlanes & WGL_SWAP_MAIN_PLANE) {
@@ -1285,20 +1270,113 @@ GLboolean WINAPI glUnmapNamedBufferEXT( GLuint buffer )
     return gl_unmap_named_buffer( unix_glUnmapNamedBufferEXT, buffer );
 }
 
-static NTSTATUS WINAPI call_opengl_debug_message_callback( void *args, ULONG size )
+static BOOL WINAPI call_opengl_debug_message_callback( struct wine_gl_debug_message_params *params, ULONG size )
 {
-    struct wine_gl_debug_message_params *params = args;
     params->user_callback( params->source, params->type, params->id, params->severity,
                            params->length, params->message, params->user_data );
-    return STATUS_SUCCESS;
+    return TRUE;
 }
+
+static char *fixup_shader( GLsizei count, const GLchar *const*string, const GLint *length )
+{
+    static int needs_fixup = -1;
+    static unsigned int once;
+
+    const char add_ext[] = "#version 120\r\n"
+                         "#extension GL_ARB_explicit_uniform_location : enable\r\n"
+                         "#extension GL_ARB_explicit_attrib_location : enable\r\n";
+    const char search_str[] = "uniform mat4 boneMatrices[NBONES];";
+    const char prepend_str[] = "layout(location = 2) ";
+    unsigned int search_len, new_len;
+    const char *p, *next;
+    BOOL found = FALSE;
+    char *new, *out;
+
+    if (needs_fixup == -1)
+    {
+      const char *sgi = getenv("SteamGameId");
+
+      needs_fixup = sgi && !strcmp( sgi, "333420" );
+    }
+
+    if (!needs_fixup) return NULL;
+
+    if (length || count != 1) return NULL;
+
+    if (!once++)
+      FIXME( "HACK: Fixing up shader.\n" );
+
+    TRACE( "Appending extension string.\n" );
+    new_len = strlen( *string ) + sizeof(prepend_str) - 1 + sizeof(add_ext);
+    new = out = malloc( new_len );
+    memcpy( out, add_ext, sizeof(add_ext) - 1 );
+    out += sizeof(add_ext) - 1;
+
+    search_len = sizeof(search_str) - 1;
+    next = *string;
+    while (*(p = next))
+    {
+      while (*next && *next != '\r' && *next != '\n') ++next;
+
+      if (next - p == search_len && !memcmp( p, search_str, search_len ))
+      {
+          TRACE( "Adding explicit location.\n" );
+          memcpy( out, *string, p - *string );
+          out += p - *string;
+          memcpy( out, prepend_str, sizeof(prepend_str) - 1 );
+          out += sizeof(prepend_str) - 1;
+          strcpy( out, p );
+          found = TRUE;
+          break;
+      }
+
+      while (*next == '\n' || *next == '\r') ++next;
+    }
+    if (!found)
+      strcpy( out, *string );
+
+    return new;
+}
+
+void WINAPI glShaderSource( GLuint shader, GLsizei count, const GLchar *const*string, const GLint *length )
+{
+    struct glShaderSource_params args = { .teb = NtCurrentTeb(), .shader = shader, .count = count, .string = string, .length = length };
+    NTSTATUS status;
+    char *new;
+    TRACE( "shader %d, count %d, string %p, length %p\n", shader, count, string, length );
+    if ((new = fixup_shader( count, string, length )))
+    {
+        args.string = (const GLchar **)&new;
+        args.count = 1;
+        args.length = NULL;
+    }
+    if ((status = UNIX_CALL( glShaderSource, &args ))) WARN( "glShaderSource returned %#lx\n", status );
+    free( new );
+}
+
+void WINAPI glShaderSourceARB( GLhandleARB shaderObj, GLsizei count, const GLcharARB **string, const GLint *length )
+{
+    struct glShaderSourceARB_params args = { .teb = NtCurrentTeb(), .shaderObj = shaderObj, .count = count, .string = string, .length = length };
+    NTSTATUS status;
+    char *new;
+    TRACE( "shaderObj %d, count %d, string %p, length %p\n", shaderObj, count, string, length );
+    if ((new = fixup_shader( count, string, length )))
+    {
+        args.string = (const GLcharARB **)&new;
+        args.count = 1;
+        args.length = NULL;
+    }
+    if ((status = UNIX_CALL( glShaderSourceARB, &args ))) WARN( "glShaderSourceARB returned %#lx\n", status );
+    free( new );
+}
+
 
 /***********************************************************************
  *           OpenGL initialisation routine
  */
 BOOL WINAPI DllMain( HINSTANCE hinst, DWORD reason, LPVOID reserved )
 {
-    KERNEL_CALLBACK_PROC *kernel_callback_table;
+    void **kernel_callback_table;
     NTSTATUS status;
 
     switch(reason)

@@ -2,5 +2,4 @@ MODULE    = wuaueng.dll
 
 EXTRADLLFLAGS = -Wb,--prefer-native
 
-SOURCES = \
-	version.rc
+RC_SRCS = version.rc

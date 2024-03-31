@@ -1,15 +1,16 @@
 PROGRAMS = wmc
+MANPAGES = wmc.man.in
 UNIX_LIBS = $(GETTEXTPO_LIBS)
 
-SOURCES = \
+C_SRCS = \
 	lang.c \
 	mcl.c \
-	mcy.y \
 	po.c \
 	utils.c \
 	wmc.c \
-	wmc.man.in \
 	write.c
+
+BISON_SRCS = mcy.y
 
 wmc_EXTRADEFS = \
 	-DNLSDIR="\"${nlsdir}\"" \

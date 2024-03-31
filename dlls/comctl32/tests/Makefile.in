@@ -1,7 +1,7 @@
 TESTDLL   = comctl32.dll
 IMPORTS   = ole32 user32 gdi32 advapi32 imm32
 
-SOURCES = \
+C_SRCS = \
 	animate.c \
 	button.c \
 	combo.c \
@@ -20,7 +20,6 @@ SOURCES = \
 	progress.c \
 	propsheet.c \
 	rebar.c \
-	rsrc.rc \
 	static.c \
 	status.c \
 	subclass.c \
@@ -32,3 +31,5 @@ SOURCES = \
 	trackbar.c \
 	treeview.c \
 	updown.c
+
+RC_SRCS = rsrc.rc

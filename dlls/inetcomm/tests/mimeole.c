@@ -19,6 +19,8 @@
  */
 
 #define COBJMACROS
+#define NONAMELESSUNION
+
 #include "initguid.h"
 #include "windows.h"
 #include "ole2.h"
@@ -202,7 +204,7 @@ static void test_CreateBody(void)
     ok(hr == S_OK, "ret %08lx\n", hr);
     off.QuadPart = 0;
     IStream_Seek(in, off, STREAM_SEEK_CUR, &pos);
-    ok(pos.LowPart == 359, "pos %lu\n", pos.LowPart);
+    ok(pos.u.LowPart == 359, "pos %lu\n", pos.u.LowPart);
 
     hr = IMimeBody_IsContentType(body, "multipart", "mixed");
     ok(hr == S_OK, "ret %08lx\n", hr);
@@ -345,7 +347,7 @@ static HRESULT WINAPI Stream_Seek(IStream *iface, LARGE_INTEGER dlibMove, DWORD 
 
     if(dwOrigin == STREAM_SEEK_END) {
         CHECK_EXPECT(Stream_Seek_END);
-        ok(dlibMove.QuadPart == expect_seek_pos, "unexpected seek pos %lu\n", dlibMove.LowPart);
+        ok(dlibMove.QuadPart == expect_seek_pos, "unexpected seek pos %lu\n", dlibMove.u.LowPart);
         if(plibNewPosition)
             plibNewPosition->QuadPart = 10;
         return S_OK;
@@ -353,7 +355,7 @@ static HRESULT WINAPI Stream_Seek(IStream *iface, LARGE_INTEGER dlibMove, DWORD 
 
     CHECK_EXPECT(Stream_Seek);
 
-    ok(dlibMove.QuadPart == expect_seek_pos, "unexpected seek pos %lu\n", dlibMove.LowPart);
+    ok(dlibMove.QuadPart == expect_seek_pos, "unexpected seek pos %lu\n", dlibMove.u.LowPart);
     ok(dwOrigin == STREAM_SEEK_SET, "dwOrigin = %ld\n", dwOrigin);
     This->pos = dlibMove.QuadPart;
     if(plibNewPosition)

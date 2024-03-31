@@ -28,6 +28,7 @@
 #include "iads.h"
 #include "adserr.h"
 
+#include "wine/heap.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(activeds);
@@ -83,7 +84,7 @@ static ULONG WINAPI path_Release(IADsPathname *iface)
         SysFreeString(path->provider);
         SysFreeString(path->server);
         SysFreeString(path->dn);
-        free(path);
+        heap_free(path);
     }
 
     return ref;
@@ -135,10 +136,7 @@ static HRESULT parse_path(BSTR path, BSTR *provider, BSTR *server, BSTR *dn)
     if (!*p) return S_OK;
 
     if (*p++ != '/' || *p++ != '/' || !*p)
-    {
-        SysFreeString(*provider);
         return E_ADS_BAD_PATHNAME;
-    }
 
     p_server = p;
     server_len = 0;
@@ -147,11 +145,7 @@ static HRESULT parse_path(BSTR path, BSTR *provider, BSTR *server, BSTR *dn)
         p++;
         server_len++;
     }
-    if (server_len == 0)
-    {
-        SysFreeString(*provider);
-        return E_ADS_BAD_PATHNAME;
-    }
+    if (server_len == 0) return E_ADS_BAD_PATHNAME;
 
     *server = SysAllocStringLen(p_server, server_len);
     if (!*server)
@@ -415,7 +409,7 @@ static HRESULT Pathname_create(REFIID riid, void **obj)
     Pathname *path;
     HRESULT hr;
 
-    path = malloc(sizeof(*path));
+    path = heap_alloc(sizeof(*path));
     if (!path) return E_OUTOFMEMORY;
 
     path->IADsPathname_iface.lpVtbl = &IADsPathname_vtbl;
@@ -488,7 +482,7 @@ static ULONG WINAPI factory_Release(IClassFactory *iface)
     TRACE("(%p) ref %lu\n", iface, ref);
 
     if (!ref)
-        free(factory);
+        heap_free(factory);
 
     return ref;
 }
@@ -527,7 +521,7 @@ static HRESULT factory_constructor(const struct class_info *info, REFIID riid, v
     class_factory *factory;
     HRESULT hr;
 
-    factory = malloc(sizeof(*factory));
+    factory = heap_alloc(sizeof(*factory));
     if (!factory) return E_OUTOFMEMORY;
 
     factory->IClassFactory_iface.lpVtbl = &factory_vtbl;

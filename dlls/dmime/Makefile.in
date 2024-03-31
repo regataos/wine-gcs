@@ -2,16 +2,13 @@ MODULE    = dmime.dll
 IMPORTS   = dxguid uuid dsound ole32 user32 advapi32
 PARENTSRC = ../dmusic
 
-SOURCES = \
+C_SRCS = \
 	audiopath.c \
-	band.c \
-	dmime.idl \
 	dmime_main.c \
 	dmobject.c \
 	graph.c \
 	lyricstrack.c \
 	markertrack.c \
-	midi.c \
 	paramcontroltrack.c \
 	performance.c \
 	segment.c \
@@ -21,6 +18,9 @@ SOURCES = \
 	sysextrack.c \
 	tempotrack.c \
 	timesigtrack.c \
-	version.rc \
 	wave.c \
 	wavetrack.c
+
+IDL_SRCS = dmime.idl
+
+RC_SRCS = version.rc

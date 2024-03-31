@@ -349,9 +349,6 @@ static ULONG WINAPI d3d_device_inner_Release(IUnknown *iface)
             IDirect3DDevice3_DeleteViewport(&This->IDirect3DDevice3_iface, &vp->IDirect3DViewport3_iface);
         }
 
-        if (This->pick_record_size > 0)
-            free(This->pick_records);
-
         TRACE("Releasing render target %p.\n", This->rt_iface);
         rt_iface = This->rt_iface;
         This->rt_iface = NULL;
@@ -365,7 +362,7 @@ static ULONG WINAPI d3d_device_inner_Release(IUnknown *iface)
             This->ddraw->d3ddevice = NULL;
 
         /* Now free the structure */
-        free(This);
+        heap_free(This);
         wined3d_mutex_unlock();
     }
 
@@ -706,7 +703,7 @@ static HRESULT WINAPI d3d_device1_CreateExecuteBuffer(IDirect3DDevice *iface,
         return CLASS_E_NOAGGREGATION;
 
     /* Allocate the new Execute Buffer */
-    if (!(object = calloc(1, sizeof(*object))))
+    if (!(object = heap_alloc_zero(sizeof(*object))))
     {
         ERR("Failed to allocate execute buffer memory.\n");
         return DDERR_OUTOFMEMORY;
@@ -716,7 +713,7 @@ static HRESULT WINAPI d3d_device1_CreateExecuteBuffer(IDirect3DDevice *iface,
     if (FAILED(hr))
     {
         WARN("Failed to initialize execute buffer, hr %#lx.\n", hr);
-        free(object);
+        heap_free(object);
         return hr;
     }
 
@@ -761,7 +758,7 @@ static HRESULT WINAPI d3d_device1_Execute(IDirect3DDevice *iface,
 
     /* Execute... */
     wined3d_mutex_lock();
-    hr = d3d_execute_buffer_execute(buffer, device, NULL);
+    hr = d3d_execute_buffer_execute(buffer, device);
     wined3d_mutex_unlock();
 
     return hr;
@@ -1028,44 +1025,16 @@ static HRESULT WINAPI d3d_device1_NextViewport(IDirect3DDevice *iface,
  *        x2 and y2 are ignored.
  *
  * Returns:
- *  D3D_OK on success
- *  DDERR_INVALIDPARAMS if any of the parameters == NULL
+ *  D3D_OK because it's a stub
  *
  *****************************************************************************/
 static HRESULT WINAPI d3d_device1_Pick(IDirect3DDevice *iface, IDirect3DExecuteBuffer *buffer,
         IDirect3DViewport *viewport, DWORD flags, D3DRECT *rect)
 {
-    struct d3d_device *device = impl_from_IDirect3DDevice(iface);
-    struct d3d_execute_buffer *buffer_impl = unsafe_impl_from_IDirect3DExecuteBuffer(buffer);
-    struct d3d_viewport *viewport_impl = unsafe_impl_from_IDirect3DViewport(viewport);
-    HRESULT hr;
+    FIXME("iface %p, buffer %p, viewport %p, flags %#lx, rect %s stub!\n",
+            iface, buffer, viewport, flags, wine_dbgstr_rect((RECT *)rect));
 
-    TRACE("iface %p, buffer %p, viewport %p, flags %#lx, rect %s.\n",
-             iface, buffer, viewport, flags, wine_dbgstr_rect((RECT *)rect));
-
-    /* Sanity checks */
-    if (!buffer)
-    {
-        WARN("NULL buffer, returning DDERR_INVALIDPARAMS\n");
-        return DDERR_INVALIDPARAMS;
-    }
-
-    if (!viewport)
-    {
-        WARN("NULL viewport, returning DDERR_INVALIDPARAMS\n");
-        return DDERR_INVALIDPARAMS;
-    }
-
-    if (FAILED(hr = IDirect3DDevice3_SetCurrentViewport
-            (&device->IDirect3DDevice3_iface, &viewport_impl->IDirect3DViewport3_iface)))
-        return hr;
-
-    /* Execute the pick */
-    wined3d_mutex_lock();
-    hr = d3d_execute_buffer_execute(buffer_impl, device, rect);
-    wined3d_mutex_unlock();
-
-    return hr;
+    return D3D_OK;
 }
 
 /*****************************************************************************
@@ -1081,35 +1050,13 @@ static HRESULT WINAPI d3d_device1_Pick(IDirect3DDevice *iface, IDirect3DExecuteB
  *  D3DPickRec: Address to store the resulting D3DPICKRECORD array.
  *
  * Returns:
- *  D3D_OK always
+ *  D3D_OK, because it's a stub
  *
  *****************************************************************************/
 static HRESULT WINAPI d3d_device1_GetPickRecords(IDirect3DDevice *iface,
         DWORD *count, D3DPICKRECORD *records)
 {
-    struct d3d_device *device;
-
-    TRACE("iface %p, count %p, records %p.\n", iface, count, records);
-
-    /* Windows doesn't check if count is non-NULL */
-
-    wined3d_mutex_lock();
-
-    device = impl_from_IDirect3DDevice(iface);
-
-    /* Set count to the number of pick records we have */
-    *count = device->pick_record_count;
-
-    /* It is correct usage according to documentation to call this function with records == NULL
-       to retrieve _just_ the record count, which the caller can then use to allocate an
-       appropriately sized array, then call this function again to fill that array with data. */
-    if (records && count)
-    {
-        /* If we have a destination array and records to copy, copy them now */
-        memcpy(records, device->pick_records, sizeof(*device->pick_records) * device->pick_record_count);
-    }
-
-    wined3d_mutex_unlock();
+    FIXME("iface %p, count %p, records %p stub!\n", iface, count, records);
 
     return D3D_OK;
 }
@@ -1382,7 +1329,7 @@ static HRESULT WINAPI d3d_device1_CreateMatrix(IDirect3DDevice *iface, D3DMATRIX
     if(!D3DMatHandle)
         return DDERR_INVALIDPARAMS;
 
-    if (!(matrix = calloc(1, sizeof(*matrix))))
+    if (!(matrix = heap_alloc_zero(sizeof(*matrix))))
     {
         ERR("Out of memory when allocating a D3DMATRIX\n");
         return DDERR_OUTOFMEMORY;
@@ -1394,7 +1341,7 @@ static HRESULT WINAPI d3d_device1_CreateMatrix(IDirect3DDevice *iface, D3DMATRIX
     if (h == DDRAW_INVALID_HANDLE)
     {
         ERR("Failed to allocate a matrix handle.\n");
-        free(matrix);
+        heap_free(matrix);
         wined3d_mutex_unlock();
         return DDERR_OUTOFMEMORY;
     }
@@ -1546,7 +1493,7 @@ static HRESULT WINAPI d3d_device1_DeleteMatrix(IDirect3DDevice *iface, D3DMATRIX
 
     wined3d_mutex_unlock();
 
-    free(m);
+    heap_free(m);
 
     return D3D_OK;
 }
@@ -1893,7 +1840,7 @@ static HRESULT WINAPI d3d_device2_GetCurrentViewport(IDirect3DDevice2 *iface, ID
 
 static BOOL validate_surface_palette(struct ddraw_surface *surface)
 {
-    return !format_is_paletteindexed(&surface->surface_desc.ddpfPixelFormat)
+    return !format_is_paletteindexed(&surface->surface_desc.u4.ddpfPixelFormat)
             || surface->palette;
 }
 
@@ -2313,11 +2260,11 @@ static HRESULT WINAPI d3d_device3_Vertex(IDirect3DDevice3 *iface, void *vertex)
 
         device->buffer_size = device->buffer_size ? device->buffer_size * 2 : device->vertex_size * 3;
         old_buffer = device->sysmem_vertex_buffer;
-        device->sysmem_vertex_buffer = malloc(device->buffer_size);
+        device->sysmem_vertex_buffer = heap_alloc(device->buffer_size);
         if (old_buffer)
         {
             memcpy(device->sysmem_vertex_buffer, old_buffer, device->nb_vertices * device->vertex_size);
-            free(old_buffer);
+            heap_free(old_buffer);
         }
     }
 
@@ -2765,7 +2712,7 @@ static void fixup_texture_alpha_op(struct d3d_device *device)
         wined3d_resource_get_desc(wined3d_texture_get_resource(tex), &desc);
         ddfmt.dwSize = sizeof(ddfmt);
         ddrawformat_from_wined3dformat(&ddfmt, desc.format);
-        if (!ddfmt.dwRGBAlphaBitMask)
+        if (!ddfmt.u5.dwRGBAlphaBitMask)
             tex_alpha = FALSE;
     }
 
@@ -4428,7 +4375,7 @@ static DWORD in_plane(UINT idx, struct wined3d_vec4 p, D3DVECTOR center, D3DVALU
     float distance, norm;
 
     norm = sqrtf(p.x * p.x + p.y * p.y + p.z * p.z);
-    distance = (p.x * center.x + p.y * center.y + p.z * center.z + p.w) / norm;
+    distance = (p.x * center.u1.x + p.y * center.u2.y + p.z * center.u3.z + p.w) / norm;
 
     if (equality)
     {
@@ -4776,31 +4723,31 @@ static const struct tss_lookup
 }
 tss_lookup[] =
 {
-    {FALSE, .u.texture_state = WINED3D_TSS_INVALID},                   /*  0, unused */
-    {FALSE, .u.texture_state = WINED3D_TSS_COLOR_OP},                  /*  1, D3DTSS_COLOROP */
-    {FALSE, .u.texture_state = WINED3D_TSS_COLOR_ARG1},                /*  2, D3DTSS_COLORARG1 */
-    {FALSE, .u.texture_state = WINED3D_TSS_COLOR_ARG2},                /*  3, D3DTSS_COLORARG2 */
-    {FALSE, .u.texture_state = WINED3D_TSS_ALPHA_OP},                  /*  4, D3DTSS_ALPHAOP */
-    {FALSE, .u.texture_state = WINED3D_TSS_ALPHA_ARG1},                /*  5, D3DTSS_ALPHAARG1 */
-    {FALSE, .u.texture_state = WINED3D_TSS_ALPHA_ARG2},                /*  6, D3DTSS_ALPHAARG2 */
-    {FALSE, .u.texture_state = WINED3D_TSS_BUMPENV_MAT00},             /*  7, D3DTSS_BUMPENVMAT00 */
-    {FALSE, .u.texture_state = WINED3D_TSS_BUMPENV_MAT01},             /*  8, D3DTSS_BUMPENVMAT01 */
-    {FALSE, .u.texture_state = WINED3D_TSS_BUMPENV_MAT10},             /*  9, D3DTSS_BUMPENVMAT10 */
-    {FALSE, .u.texture_state = WINED3D_TSS_BUMPENV_MAT11},             /* 10, D3DTSS_BUMPENVMAT11 */
-    {FALSE, .u.texture_state = WINED3D_TSS_TEXCOORD_INDEX},            /* 11, D3DTSS_TEXCOORDINDEX */
-    {TRUE,  .u.sampler_state = WINED3D_SAMP_ADDRESS_U},                /* 12, D3DTSS_ADDRESS */
-    {TRUE,  .u.sampler_state = WINED3D_SAMP_ADDRESS_U},                /* 13, D3DTSS_ADDRESSU */
-    {TRUE,  .u.sampler_state = WINED3D_SAMP_ADDRESS_V},                /* 14, D3DTSS_ADDRESSV */
-    {TRUE,  .u.sampler_state = WINED3D_SAMP_BORDER_COLOR},             /* 15, D3DTSS_BORDERCOLOR */
-    {TRUE,  .u.sampler_state = WINED3D_SAMP_MAG_FILTER},               /* 16, D3DTSS_MAGFILTER */
-    {TRUE,  .u.sampler_state = WINED3D_SAMP_MIN_FILTER},               /* 17, D3DTSS_MINFILTER */
-    {TRUE,  .u.sampler_state = WINED3D_SAMP_MIP_FILTER},               /* 18, D3DTSS_MIPFILTER */
-    {TRUE,  .u.sampler_state = WINED3D_SAMP_MIPMAP_LOD_BIAS},          /* 19, D3DTSS_MIPMAPLODBIAS */
-    {TRUE,  .u.sampler_state = WINED3D_SAMP_MAX_MIP_LEVEL},            /* 20, D3DTSS_MAXMIPLEVEL */
-    {TRUE,  .u.sampler_state = WINED3D_SAMP_MAX_ANISOTROPY},           /* 21, D3DTSS_MAXANISOTROPY */
-    {FALSE, .u.texture_state = WINED3D_TSS_BUMPENV_LSCALE},            /* 22, D3DTSS_BUMPENVLSCALE */
-    {FALSE, .u.texture_state = WINED3D_TSS_BUMPENV_LOFFSET},           /* 23, D3DTSS_BUMPENVLOFFSET */
-    {FALSE, .u.texture_state = WINED3D_TSS_TEXTURE_TRANSFORM_FLAGS},   /* 24, D3DTSS_TEXTURETRANSFORMFLAGS */
+    {FALSE, {WINED3D_TSS_INVALID}},                   /*  0, unused */
+    {FALSE, {WINED3D_TSS_COLOR_OP}},                  /*  1, D3DTSS_COLOROP */
+    {FALSE, {WINED3D_TSS_COLOR_ARG1}},                /*  2, D3DTSS_COLORARG1 */
+    {FALSE, {WINED3D_TSS_COLOR_ARG2}},                /*  3, D3DTSS_COLORARG2 */
+    {FALSE, {WINED3D_TSS_ALPHA_OP}},                  /*  4, D3DTSS_ALPHAOP */
+    {FALSE, {WINED3D_TSS_ALPHA_ARG1}},                /*  5, D3DTSS_ALPHAARG1 */
+    {FALSE, {WINED3D_TSS_ALPHA_ARG2}},                /*  6, D3DTSS_ALPHAARG2 */
+    {FALSE, {WINED3D_TSS_BUMPENV_MAT00}},             /*  7, D3DTSS_BUMPENVMAT00 */
+    {FALSE, {WINED3D_TSS_BUMPENV_MAT01}},             /*  8, D3DTSS_BUMPENVMAT01 */
+    {FALSE, {WINED3D_TSS_BUMPENV_MAT10}},             /*  9, D3DTSS_BUMPENVMAT10 */
+    {FALSE, {WINED3D_TSS_BUMPENV_MAT11}},             /* 10, D3DTSS_BUMPENVMAT11 */
+    {FALSE, {WINED3D_TSS_TEXCOORD_INDEX}},            /* 11, D3DTSS_TEXCOORDINDEX */
+    {TRUE,  {WINED3D_SAMP_ADDRESS_U}},                /* 12, D3DTSS_ADDRESS */
+    {TRUE,  {WINED3D_SAMP_ADDRESS_U}},                /* 13, D3DTSS_ADDRESSU */
+    {TRUE,  {WINED3D_SAMP_ADDRESS_V}},                /* 14, D3DTSS_ADDRESSV */
+    {TRUE,  {WINED3D_SAMP_BORDER_COLOR}},             /* 15, D3DTSS_BORDERCOLOR */
+    {TRUE,  {WINED3D_SAMP_MAG_FILTER}},               /* 16, D3DTSS_MAGFILTER */
+    {TRUE,  {WINED3D_SAMP_MIN_FILTER}},               /* 17, D3DTSS_MINFILTER */
+    {TRUE,  {WINED3D_SAMP_MIP_FILTER}},               /* 18, D3DTSS_MIPFILTER */
+    {TRUE,  {WINED3D_SAMP_MIPMAP_LOD_BIAS}},          /* 19, D3DTSS_MIPMAPLODBIAS */
+    {TRUE,  {WINED3D_SAMP_MAX_MIP_LEVEL}},            /* 20, D3DTSS_MAXMIPLEVEL */
+    {TRUE,  {WINED3D_SAMP_MAX_ANISOTROPY}},           /* 21, D3DTSS_MAXANISOTROPY */
+    {FALSE, {WINED3D_TSS_BUMPENV_LSCALE}},            /* 22, D3DTSS_BUMPENVLSCALE */
+    {FALSE, {WINED3D_TSS_BUMPENV_LOFFSET}},           /* 23, D3DTSS_BUMPENVLOFFSET */
+    {FALSE, {WINED3D_TSS_TEXTURE_TRANSFORM_FLAGS}},   /* 24, D3DTSS_TEXTURETRANSFORMFLAGS */
 };
 
 /*****************************************************************************
@@ -5132,7 +5079,8 @@ static HRESULT d3d_device7_ValidateDevice(IDirect3DDevice7 *iface, DWORD *pass_c
     TRACE("iface %p, pass_count %p.\n", iface, pass_count);
 
     wined3d_mutex_lock();
-    hr = wined3d_device_validate_device(device->wined3d_device, device->stateblock_state, pass_count);
+    wined3d_device_apply_stateblock(device->wined3d_device, device->state);
+    hr = wined3d_device_validate_device(device->wined3d_device, pass_count);
     wined3d_mutex_unlock();
 
     return hr;
@@ -6997,7 +6945,7 @@ HRESULT d3d_device_create(struct ddraw *ddraw, const GUID *guid, struct ddraw_su
         return DDERR_INVALIDPARAMS;
     }
 
-    if (!(object = calloc(1, sizeof(*object))))
+    if (!(object = heap_alloc_zero(sizeof(*object))))
     {
         ERR("Failed to allocate device memory.\n");
         return DDERR_OUTOFMEMORY;
@@ -7006,7 +6954,7 @@ HRESULT d3d_device_create(struct ddraw *ddraw, const GUID *guid, struct ddraw_su
     if (FAILED(hr = d3d_device_init(object, ddraw, guid, target, rt_iface, version, outer_unknown)))
     {
         WARN("Failed to initialize device, hr %#lx.\n", hr);
-        free(object);
+        heap_free(object);
         return hr;
     }
 

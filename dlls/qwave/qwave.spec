@@ -2,7 +2,7 @@
 @ stub QDLHStartDiagnosingPath
 @ stdcall QOSAddSocketToFlow(ptr long ptr long long ptr)
 @ stub QOSCancel
-@ stdcall QOSCloseHandle(ptr)
+@ stub QOSCloseHandle
 @ stdcall QOSCreateHandle(ptr ptr)
 @ stub QOSEnumerateFlows
 @ stub QOSNotifyFlow

@@ -1,4 +1,4 @@
 MODULE = vcomp.dll
 
-SOURCES = \
+C_SRCS = \
 	main.c

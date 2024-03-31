@@ -30,6 +30,8 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(win);
 
+#define WINE_MOUSE_HANDLE       ((HANDLE)1)
+#define WINE_KEYBOARD_HANDLE    ((HANDLE)2)
 
 #define DRAG_FILE  0x454c4946
 
@@ -480,8 +482,16 @@ static LONG handle_window_pos_changing( HWND hwnd, WINDOWPOS *winpos )
     if ((style & WS_THICKFRAME) || ((style & (WS_POPUP | WS_CHILD)) == 0))
     {
         MINMAXINFO info = get_min_max_info( hwnd );
-        winpos->cx = min( winpos->cx, info.ptMaxTrackSize.x );
-        winpos->cy = min( winpos->cy, info.ptMaxTrackSize.y );
+
+        /* HACK: This code changes the window's size to fit the display. However,
+         * some games (Bayonetta, Dragon's Dogma) will then have the incorrect
+         * render size. So just let windows be too big to fit the display. */
+        if (__wine_get_window_manager() != WINE_WM_X11_STEAMCOMPMGR)
+        {
+            winpos->cx = min( winpos->cx, info.ptMaxTrackSize.x );
+            winpos->cy = min( winpos->cy, info.ptMaxTrackSize.y );
+        }
+
         if (!(style & WS_MINIMIZE))
         {
             winpos->cx = max( winpos->cx, info.ptMinTrackSize.x );
@@ -788,17 +798,6 @@ static void sys_command_size_move( HWND hwnd, WPARAM wparam )
         {
             NtUserTranslateMessage( &msg, 0 );
             NtUserDispatchMessage( &msg );
-
-            /* It's possible that the window proc that handled the dispatch consumed a
-             * WM_LBUTTONUP. Detect that and terminate the loop as if we'd gotten it. */
-            if (!(NtUserGetKeyState( VK_LBUTTON ) & 0x8000))
-            {
-                DWORD last_pos = NtUserGetThreadInfo()->message_pos;
-                pt.x = ((int)(short)LOWORD( last_pos ));
-                pt.y = ((int)(short)HIWORD( last_pos ));
-                break;
-            }
-
             continue;  /* We are not interested in other messages */
         }
 
@@ -1362,7 +1361,8 @@ static BOOL draw_frame_caption( HDC dc, RECT *r, UINT flags )
     return TRUE;
 }
 
-void draw_menu_button( HWND hwnd, HDC dc, RECT *r, enum NONCLIENT_BUTTON_TYPE type, BOOL down, BOOL grayed )
+BOOL draw_menu_button( HWND hwnd, HDC dc, RECT *r, enum NONCLIENT_BUTTON_TYPE type, BOOL down,
+                       BOOL grayed )
 {
     struct draw_non_client_button_params params;
     void *ret_ptr;
@@ -1374,7 +1374,7 @@ void draw_menu_button( HWND hwnd, HDC dc, RECT *r, enum NONCLIENT_BUTTON_TYPE ty
     params.rect = *r;
     params.down = down;
     params.grayed = grayed;
-    KeUserModeCallback( NtUserDrawNonClientButton, &params, sizeof(params), &ret_ptr, &ret_len );
+    return KeUserModeCallback( NtUserDrawNonClientButton, &params, sizeof(params), &ret_ptr, &ret_len );
 }
 
 BOOL draw_frame_menu( HDC dc, RECT *r, UINT flags )
@@ -1853,6 +1853,9 @@ static void handle_nc_calc_size( HWND hwnd, WPARAM wparam, RECT *win_rect )
     LONG ex_style = get_window_long( hwnd, GWL_EXSTYLE );
 
     if (!win_rect) return;
+
+    if (__wine_get_window_manager() == WINE_WM_X11_STEAMCOMPMGR && !((style & WS_POPUP) && (ex_style & WS_EX_TOOLWINDOW)))
+        return;
 
     if (!(style & WS_MINIMIZE))
     {
@@ -2383,6 +2386,14 @@ static LRESULT handle_nc_mouse_leave( HWND hwnd )
     return 0;
 }
 
+static struct touchinput_thread_data *touch_input_thread_data(void)
+{
+    struct user_thread_info *thread_info = get_user_thread_info();
+    struct touchinput_thread_data *data = thread_info->touchinput;
+
+    if (!data) data = thread_info->touchinput = calloc( 1, sizeof(struct touchinput_thread_data) );
+    return data;
+}
 
 LRESULT default_window_proc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam, BOOL ansi )
 {
@@ -2572,9 +2583,8 @@ LRESULT default_window_proc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam, 
         break;
 
     case WM_MOUSEWHEEL:
-    case WM_MOUSEHWHEEL:
         if (get_window_long( hwnd, GWL_STYLE ) & WS_CHILD)
-            result = send_message( get_parent( hwnd ), msg, wparam, lparam );
+            result = send_message( get_parent( hwnd ), WM_MOUSEWHEEL, wparam, lparam );
         break;
 
     case WM_ERASEBKGND:
@@ -2941,6 +2951,68 @@ LRESULT default_window_proc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam, 
                                             0, NtUserSendMessage, ansi );
         }
         break;
+
+    case WM_POINTERDOWN:
+    case WM_POINTERUP:
+    case WM_POINTERUPDATE:
+    {
+        TOUCHINPUT *touches, *end, *touch, *match = NULL;
+        struct touchinput_thread_data *thread_data;
+        UINT i;
+
+        if (!NtUserIsTouchWindow( hwnd, NULL )) return 0;
+        if (!(thread_data = touch_input_thread_data())) return 0;
+
+        touches = thread_data->current;
+        end = touches + ARRAY_SIZE(thread_data->current);
+        for (touch = touches; touch < end && touch->dwID; touch++)
+        {
+            if (touch->dwID == GET_POINTERID_WPARAM( wparam )) match = touch;
+            touch->dwFlags &= ~TOUCHEVENTF_DOWN;
+            touch->dwFlags |= TOUCHEVENTF_MOVE;
+        }
+        if (match) touch = match;
+
+        if (touch == end || (msg != WM_POINTERDOWN && !touch->dwID))
+        {
+            if (msg != WM_POINTERDOWN) FIXME("Touch point not found!\n");
+            else FIXME("Unsupported number of touch points!\n");
+            break;
+        }
+
+        while (end > (touch + 1) && !(end - 1)->dwID) end--;
+
+        touch->x = LOWORD( lparam ) * 100;
+        touch->y = HIWORD( lparam ) * 100;
+        touch->hSource = WINE_MOUSE_HANDLE;
+        touch->dwID = GET_POINTERID_WPARAM( wparam );
+        touch->dwFlags = 0;
+        if (msg == WM_POINTERUP) touch->dwFlags |= TOUCHEVENTF_UP;
+        if (msg == WM_POINTERDOWN) touch->dwFlags |= TOUCHEVENTF_INRANGE | TOUCHEVENTF_DOWN;
+        if (msg == WM_POINTERUPDATE) touch->dwFlags |= TOUCHEVENTF_INRANGE | TOUCHEVENTF_MOVE;
+        if (IS_POINTER_PRIMARY_WPARAM( wparam )) touch->dwFlags |= TOUCHEVENTF_PRIMARY;
+        touch->dwMask = 0;
+        touch->dwTime = NtGetTickCount();
+        touch->dwExtraInfo = 0;
+        touch->cxContact = 0;
+        touch->cyContact = 0;
+
+        i = thread_data->index++ % ARRAY_SIZE(thread_data->history);
+        memcpy( thread_data->history + i, thread_data->current, sizeof(thread_data->current) );
+
+        send_message( hwnd, WM_TOUCH, MAKELONG(end - touches, 0), (LPARAM)i );
+
+        if (msg == WM_POINTERUP)
+        {
+            while (++touch < end) *(touch - 1) = *touch;
+            memset( touch - 1, 0, sizeof(*touch) );
+        }
+        break;
+    }
+
+    case WM_TOUCH:
+        /* FIXME: CloseTouchInputHandle( (HTOUCHINPUT)lparam ); */
+        return 0;
     }
 
     return result;

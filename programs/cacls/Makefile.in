@@ -2,5 +2,5 @@ MODULE    = cacls.exe
 
 EXTRADLLFLAGS = -mconsole
 
-SOURCES = \
+C_SRCS = \
 	cacls_main.c

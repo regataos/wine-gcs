@@ -39,9 +39,9 @@ typedef struct
     UCHAR buf[64];
 } SHA256_CTX;
 
-void sha256_init(SHA256_CTX *ctx);
-void sha256_update(SHA256_CTX *ctx, const UCHAR *buffer, ULONG len);
-void sha256_finalize(SHA256_CTX *ctx, UCHAR *buffer);
+void sha256_init(SHA256_CTX *ctx) DECLSPEC_HIDDEN;
+void sha256_update(SHA256_CTX *ctx, const UCHAR *buffer, ULONG len) DECLSPEC_HIDDEN;
+void sha256_finalize(SHA256_CTX *ctx, UCHAR *buffer) DECLSPEC_HIDDEN;
 
 typedef struct
 {
@@ -50,22 +50,22 @@ typedef struct
   UCHAR buf[128];
 } SHA512_CTX;
 
-void sha512_init(SHA512_CTX *ctx);
-void sha512_update(SHA512_CTX *ctx, const UCHAR *buffer, ULONG len);
-void sha512_finalize(SHA512_CTX *ctx, UCHAR *buffer);
+void sha512_init(SHA512_CTX *ctx) DECLSPEC_HIDDEN;
+void sha512_update(SHA512_CTX *ctx, const UCHAR *buffer, ULONG len) DECLSPEC_HIDDEN;
+void sha512_finalize(SHA512_CTX *ctx, UCHAR *buffer) DECLSPEC_HIDDEN;
 
-void sha384_init(SHA512_CTX *ctx);
+void sha384_init(SHA512_CTX *ctx) DECLSPEC_HIDDEN;
 #define sha384_update sha512_update
-void sha384_finalize(SHA512_CTX *ctx, UCHAR *buffer);
+void sha384_finalize(SHA512_CTX *ctx, UCHAR *buffer) DECLSPEC_HIDDEN;
 
 typedef struct {
     unsigned char chksum[16], X[48], buf[16];
     unsigned long curlen;
 } MD2_CTX;
 
-void md2_init(MD2_CTX *ctx);
-void md2_update(MD2_CTX *ctx, const unsigned char *buf, ULONG len);
-void md2_finalize(MD2_CTX *ctx, unsigned char *hash);
+void md2_init(MD2_CTX *ctx) DECLSPEC_HIDDEN;
+void md2_update(MD2_CTX *ctx, const unsigned char *buf, ULONG len) DECLSPEC_HIDDEN;
+void md2_finalize(MD2_CTX *ctx, unsigned char *hash) DECLSPEC_HIDDEN;
 
 /* Definitions from advapi32 */
 typedef struct tagMD4_CTX {
@@ -117,7 +117,6 @@ enum alg_id
     /* cipher */
     ALG_ID_3DES,
     ALG_ID_AES,
-    ALG_ID_RC4,
 
     /* hash */
     ALG_ID_SHA256,
@@ -175,7 +174,8 @@ struct key_symmetric
 };
 
 #define KEY_FLAG_LEGACY_DSA_V2  0x00000001
-#define KEY_FLAG_FINALIZED      0x00000002
+#define KEY_FLAG_DH_PARAMS_SET  0x00000002
+#define KEY_FLAG_FINALIZED      0x00000004
 
 struct key_asymmetric
 {
@@ -184,12 +184,11 @@ struct key_asymmetric
     DSSSEED           dss_seed;
 };
 
-#define PRIVATE_DATA_SIZE 3
 struct key
 {
     struct object hdr;
     enum alg_id   alg_id;
-    UINT64        private[PRIVATE_DATA_SIZE];  /* private data for backend */
+    UINT64        private[2];  /* private data for backend */
     union
     {
         struct key_symmetric s;
@@ -200,8 +199,8 @@ struct key
 struct secret
 {
     struct object hdr;
-    struct key *privkey;
-    struct key *pubkey;
+    UCHAR *data;
+    ULONG  data_len;
 };
 
 struct key_symmetric_set_auth_data_params
@@ -254,12 +253,14 @@ struct key_asymmetric_encrypt_params
     UCHAR       *output;
     ULONG       output_len;
     ULONG       *ret_len;
+    void        *padding;
+    ULONG        flags;
 };
 
 struct key_asymmetric_duplicate_params
 {
-    struct key *key_orig;
-    struct key *key_copy;
+    struct key  *key_orig;
+    struct key  *key_copy;
 };
 
 struct key_asymmetric_sign_params
@@ -285,9 +286,10 @@ struct key_asymmetric_verify_params
     unsigned    flags;
 };
 
-#define KEY_EXPORT_FLAG_PUBLIC        0x00000001
-#define KEY_EXPORT_FLAG_RSA_FULL      0x00000002
-#define KEY_EXPORT_FLAG_DH_PARAMETERS 0x00000004
+#define KEY_EXPORT_FLAG_PUBLIC   0x00000001
+#define KEY_EXPORT_FLAG_RSA_FULL 0x00000002
+#define KEY_EXPORT_FLAG_DH_FULL  0x00000004
+#define KEY_EXPORT_FLAG_DH_PARAMETERS 0x00000008
 
 struct key_asymmetric_export_params
 {
@@ -298,9 +300,9 @@ struct key_asymmetric_export_params
     ULONG       *ret_len;
 };
 
-#define KEY_IMPORT_FLAG_PUBLIC        0x00000001
-#define KEY_IMPORT_FLAG_DH_PARAMETERS 0x00000002
-
+#define KEY_IMPORT_FLAG_PUBLIC   0x00000001
+#define KEY_IMPORT_FLAG_DH_FULL  0x00000004
+#define KEY_IMPORT_FLAG_DH_PARAMETERS 0x00000008
 struct key_asymmetric_import_params
 {
     struct key  *key;
@@ -309,13 +311,11 @@ struct key_asymmetric_import_params
     ULONG        len;
 };
 
-struct key_asymmetric_derive_key_params
+struct key_secret_agreement_params
 {
     struct key *privkey;
     struct key *pubkey;
-    UCHAR      *output;
-    ULONG       output_len;
-    ULONG      *ret_len;
+    struct secret *secret;
 };
 
 enum key_funcs
@@ -337,8 +337,7 @@ enum key_funcs
     unix_key_asymmetric_destroy,
     unix_key_asymmetric_export,
     unix_key_asymmetric_import,
-    unix_key_asymmetric_derive_key,
-    unix_funcs_count,
+    unix_key_secret_agreement,
 };
 
 #endif /* __BCRYPT_INTERNAL_H */

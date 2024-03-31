@@ -20,6 +20,7 @@
 #define CONST_VTABLE
 
 #include <wine/test.h>
+#include <wine/heap.h>
 #include <stdarg.h>
 #include <stdio.h>
 
@@ -32,8 +33,6 @@
 static HRESULT (WINAPI *pCoInternetGetSession)(DWORD, IInternetSession **, DWORD);
 static HRESULT (WINAPI *pReleaseBindInfo)(BINDINFO*);
 static HRESULT (WINAPI *pCreateUri)(LPCWSTR, DWORD, DWORD_PTR, IUri**);
-
-#define CHARS_IN_GUID 39
 
 #define DEFINE_EXPECT(func) \
     static BOOL expect_ ## func = FALSE, called_ ## func = FALSE
@@ -144,9 +143,6 @@ static const WCHAR winehq_ipW[] = {'2','0','9','.','4','6','.','2','5','.','1','
 static const WCHAR emptyW[] = {0};
 static const WCHAR pjpegW[] = {'i','m','a','g','e','/','p','j','p','e','g',0};
 static const WCHAR gifW[] = {'i','m','a','g','e','/','g','i','f',0};
-static const WCHAR null_guid[] = {'{','0','0','0','0','0','0','0','0','-','0','0','0','0','-',
-    '0','0','0','0','-','0','0','0','0','-','0','0','0','0','0','0','0','0','0','0','0','0','}',0};
-static WCHAR protocol_clsid[CHARS_IN_GUID];
 
 static HRESULT expect_hrResult;
 static LPCWSTR file_name, http_url, expect_wsz;
@@ -363,7 +359,7 @@ static HRESULT WINAPI HttpNegotiate_GetRootSecurityId(IHttpNegotiate2 *iface,
         BYTE *pbSecurityId, DWORD *pcbSecurityId, DWORD_PTR dwReserved)
 {
     static const BYTE sec_id[] = {'h','t','t','p',':','t','e','s','t',1,0,0,0};
-
+    
     CHECK_EXPECT(GetRootSecurityId);
 
     ok(!dwReserved, "dwReserved=%Id, expected 0\n", dwReserved);
@@ -826,6 +822,8 @@ static const char *status_names[] =
 static HRESULT WINAPI ProtocolSink_ReportProgress(IInternetProtocolSink *iface, ULONG ulStatusCode,
         LPCWSTR szStatusText)
 {
+    static const WCHAR null_guid[] = {'{','0','0','0','0','0','0','0','0','-','0','0','0','0','-',
+        '0','0','0','0','-','0','0','0','0','-','0','0','0','0','0','0','0','0','0','0','0','0','}',0};
     static const WCHAR text_plain[] = {'t','e','x','t','/','p','l','a','i','n',0};
 
     if (winetest_debug > 1)
@@ -915,7 +913,7 @@ static HRESULT WINAPI ProtocolSink_ReportProgress(IInternetProtocolSink *iface, 
     case BINDSTATUS_PROTOCOLCLASSID:
         CHECK_EXPECT(ReportProgress_PROTOCOLCLASSID);
         ok(szStatusText != NULL, "szStatusText == NULL\n");
-        ok(!lstrcmpW(szStatusText, protocol_clsid), "unexpected classid %s\n", wine_dbgstr_w(szStatusText));
+        ok(!lstrcmpW(szStatusText, null_guid), "unexpected classid %s\n", wine_dbgstr_w(szStatusText));
         break;
     case BINDSTATUS_COOKIE_SENT:
         CHECK_EXPECT2(ReportProgress_COOKIE_SENT);
@@ -1450,9 +1448,9 @@ static HRESULT WINAPI BindInfo_GetBindInfo(IInternetBindInfo *iface, DWORD *grfB
             /* Must be GMEM_FIXED, GMEM_MOVABLE does not work properly */
             data = GlobalAlloc(GPTR, sizeof(post_data));
             memcpy(data, post_data, sizeof(post_data));
-            pbindinfo->stgmedData.hGlobal = data;
+            U(pbindinfo->stgmedData).hGlobal = data;
         }else {
-            pbindinfo->stgmedData.pstm = &Stream;
+            U(pbindinfo->stgmedData).pstm = &Stream;
         }
     }
 
@@ -2330,7 +2328,7 @@ static ULONG WINAPI ProtocolUnk_Release(IUnknown *iface)
         if(This->outer_ref)
             trace("outer_ref %ld\n", This->outer_ref);
         CHECK_EXPECT(Protocol_destructor);
-        free(This);
+        heap_free(This);
     }
     return ref;
 }
@@ -2642,7 +2640,7 @@ static HRESULT WINAPI ClassFactory_CreateInstance(IClassFactory *iface, IUnknown
         }
     }
 
-    ret = malloc(sizeof(*ret));
+    ret = heap_alloc(sizeof(*ret));
     ret->IUnknown_inner.lpVtbl = &ProtocolUnkVtbl;
     ret->IInternetProtocolEx_iface.lpVtbl = &ProtocolVtbl;
     ret->IInternetPriority_iface.lpVtbl = &InternetPriorityVtbl;
@@ -2712,7 +2710,6 @@ static IClassFactory mimefilter_cf = { &MimeFilterCFVtbl };
 #define TEST_FROMCACHE   0x4000
 #define TEST_DISABLEAUTOREDIRECT  0x8000
 #define TEST_RESULTFROMLOCK      0x10000
-#define TEST_USEBINDING  0x20000
 
 static void register_filter(BOOL do_register)
 {
@@ -2773,7 +2770,6 @@ static void init_test(int prot, DWORD flags)
     file_with_hash = FALSE;
     security_problem = FALSE;
     reuse_protocol_thread = FALSE;
-    memcpy(protocol_clsid, null_guid, sizeof(null_guid));
 
     bindinfo_options = 0;
     if(flags & TEST_DISABLEAUTOREDIRECT)
@@ -3361,7 +3357,6 @@ static void test_http_protocol_url(LPCWSTR url, int prot, DWORD flags, DWORD tym
 {
     IInternetProtocolInfo *protocol_info;
     IClassFactory *factory;
-    IInternetSession *session;
     IUnknown *unk;
     HRESULT hres;
 
@@ -3388,13 +3383,8 @@ static void test_http_protocol_url(LPCWSTR url, int prot, DWORD flags, DWORD tym
     if(FAILED(hres))
         return;
 
-    if (flags & TEST_USEBINDING) {
-        hres = pCoInternetGetSession(0, &session, 0);
-        ok(hres == S_OK, "CoInternetGetSession failed: %08lx\n", hres);
-        hres = IInternetSession_CreateBinding(session, NULL, url, NULL, NULL, &async_protocol, 0);
-    } else
-        hres = IClassFactory_CreateInstance(factory, NULL, &IID_IInternetProtocol,
-                                            (void**)&async_protocol);
+    hres = IClassFactory_CreateInstance(factory, NULL, &IID_IInternetProtocol,
+                                        (void**)&async_protocol);
     ok(hres == S_OK, "Could not get IInternetProtocol: %08lx\n", hres);
     if(SUCCEEDED(hres)) {
         BYTE buf[3600];
@@ -3402,14 +3392,6 @@ static void test_http_protocol_url(LPCWSTR url, int prot, DWORD flags, DWORD tym
         ULONG ref;
 
         test_priority(async_protocol);
-
-        if (flags & TEST_USEBINDING) {
-            SET_EXPECT(QueryService_InternetProtocol);
-            SET_EXPECT(ReportProgress_PROTOCOLCLASSID);
-            StringFromGUID2(&CLSID_HttpProtocol, protocol_clsid, ARRAY_SIZE(protocol_clsid));
-            if (flags & TEST_DISABLEAUTOREDIRECT)
-                SET_EXPECT(QueryService_IBindCallbackRedirect);
-        }
 
         SET_EXPECT(ReportProgress_COOKIE_SENT);
         if(http_is_first) {
@@ -3438,13 +3420,6 @@ static void test_http_protocol_url(LPCWSTR url, int prot, DWORD flags, DWORD tym
             IInternetProtocol_Abort(async_protocol, E_ABORT, 0);
             IInternetProtocol_Release(async_protocol);
             return;
-        }
-
-        if (flags & TEST_USEBINDING) {
-            todo_wine CHECK_NOT_CALLED(QueryService_InternetProtocol);
-            todo_wine CHECK_NOT_CALLED(ReportProgress_PROTOCOLCLASSID);
-            if (flags & TEST_DISABLEAUTOREDIRECT)
-                CHECK_CALLED(QueryService_IBindCallbackRedirect);
         }
 
         if(!direct_read && !bind_from_cache)
@@ -3613,10 +3588,6 @@ static void test_http_protocol(void)
     trace("Testing http protocol empty file...\n");
     bindf = BINDF_ASYNCHRONOUS | BINDF_ASYNCSTORAGE | BINDF_PULLDATA | BINDF_FROMURLMON | BINDF_NOWRITECACHE;
     test_http_protocol_url(empty_url, HTTP_TEST, TEST_EMPTY, TYMED_NULL);
-
-    trace("Testing http protocol (redirected, binding)...\n");
-    bindf = BINDF_ASYNCHRONOUS | BINDF_ASYNCSTORAGE | BINDF_PULLDATA | BINDF_FROMURLMON | BINDF_NOWRITECACHE;
-    test_http_protocol_url(redirect_url, HTTP_TEST, TEST_REDIRECT|TEST_USEBINDING, TYMED_NULL);
 
     /* This is a bit ugly. We unconditionally disable this test on Wine. This won't work until we have
      * support for reading from cache via HTTP layer in wininet. Until then, Wine will fail badly, affecting

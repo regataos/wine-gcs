@@ -22,9 +22,9 @@
 #include "wine/list.h"
 #include "wine/unixlib.h"
 
-BOOL CNG_ImportPubKey(CERT_PUBLIC_KEY_INFO *pubKeyInfo, BCRYPT_KEY_HANDLE *key);
+BOOL CNG_ImportPubKey(CERT_PUBLIC_KEY_INFO *pubKeyInfo, BCRYPT_KEY_HANDLE *key) DECLSPEC_HIDDEN;
 BOOL cng_prepare_signature(const char *alg_oid, BYTE *encoded_sig, DWORD encoded_sig_len,
-    BYTE **sig_value, DWORD *sig_len);
+    BYTE **sig_value, DWORD *sig_len) DECLSPEC_HIDDEN;
 
 /* a few asn.1 tags we need */
 #define ASN_BOOL            (ASN_UNIVERSAL | ASN_PRIMITIVE | 0x01)
@@ -50,7 +50,7 @@ BOOL cng_prepare_signature(const char *alg_oid, BYTE *encoded_sig, DWORD encoded
  */
 void CRYPT_CopyReversed(BYTE *dst, const BYTE *src, size_t len);
 
-BOOL CRYPT_EncodeLen(DWORD len, BYTE *pbEncoded, DWORD *pcbEncoded);
+BOOL CRYPT_EncodeLen(DWORD len, BYTE *pbEncoded, DWORD *pcbEncoded) DECLSPEC_HIDDEN;
 
 typedef BOOL (WINAPI *CryptEncodeObjectExFunc)(DWORD, LPCSTR, const void *,
  DWORD, PCRYPT_ENCODE_PARA, BYTE *, DWORD *);
@@ -64,7 +64,7 @@ struct AsnEncodeSequenceItem
 
 BOOL WINAPI CRYPT_AsnEncodeSequence(DWORD dwCertEncodingType,
  struct AsnEncodeSequenceItem items[], DWORD cItem, DWORD dwFlags,
- PCRYPT_ENCODE_PARA pEncodePara, BYTE *pbEncoded, DWORD *pcbEncoded);
+ PCRYPT_ENCODE_PARA pEncodePara, BYTE *pbEncoded, DWORD *pcbEncoded) DECLSPEC_HIDDEN;
 
 struct AsnConstructedItem
 {
@@ -75,13 +75,13 @@ struct AsnConstructedItem
 
 BOOL WINAPI CRYPT_AsnEncodeConstructed(DWORD dwCertEncodingType,
  LPCSTR lpszStructType, const void *pvStructInfo, DWORD dwFlags,
- PCRYPT_ENCODE_PARA pEncodePara, BYTE *pbEncoded, DWORD *pcbEncoded);
+ PCRYPT_ENCODE_PARA pEncodePara, BYTE *pbEncoded, DWORD *pcbEncoded) DECLSPEC_HIDDEN;
 BOOL WINAPI CRYPT_AsnEncodeOid(DWORD dwCertEncodingType,
  LPCSTR lpszStructType, const void *pvStructInfo, DWORD dwFlags,
- PCRYPT_ENCODE_PARA pEncodePara, BYTE *pbEncoded, DWORD *pcbEncoded);
+ PCRYPT_ENCODE_PARA pEncodePara, BYTE *pbEncoded, DWORD *pcbEncoded) DECLSPEC_HIDDEN;
 BOOL WINAPI CRYPT_AsnEncodeOctets(DWORD dwCertEncodingType,
  LPCSTR lpszStructType, const void *pvStructInfo, DWORD dwFlags,
- PCRYPT_ENCODE_PARA pEncodePara, BYTE *pbEncoded, DWORD *pcbEncoded);
+ PCRYPT_ENCODE_PARA pEncodePara, BYTE *pbEncoded, DWORD *pcbEncoded) DECLSPEC_HIDDEN;
 
 typedef struct _CRYPT_DIGESTED_DATA
 {
@@ -92,7 +92,7 @@ typedef struct _CRYPT_DIGESTED_DATA
 } CRYPT_DIGESTED_DATA;
 
 BOOL CRYPT_AsnEncodePKCSDigestedData(const CRYPT_DIGESTED_DATA *digestedData,
- void *pvData, DWORD *pcbData);
+ void *pvData, DWORD *pcbData) DECLSPEC_HIDDEN;
 
 typedef struct _CRYPT_ENCRYPTED_CONTENT_INFO
 {
@@ -110,11 +110,11 @@ typedef struct _CRYPT_ENVELOPED_DATA
 } CRYPT_ENVELOPED_DATA;
 
 BOOL CRYPT_AsnEncodePKCSEnvelopedData(const CRYPT_ENVELOPED_DATA *envelopedData,
- void *pvData, DWORD *pcbData);
+ void *pvData, DWORD *pcbData) DECLSPEC_HIDDEN;
 
 BOOL CRYPT_AsnDecodePKCSEnvelopedData(const BYTE *pbEncoded, DWORD cbEncoded,
  DWORD dwFlags, PCRYPT_DECODE_PARA pDecodePara,
- CRYPT_ENVELOPED_DATA *envelopedData, DWORD *pcbEnvelopedData);
+ CRYPT_ENVELOPED_DATA *envelopedData, DWORD *pcbEnvelopedData) DECLSPEC_HIDDEN;
 
 typedef struct _CRYPT_SIGNED_INFO
 {
@@ -130,11 +130,11 @@ typedef struct _CRYPT_SIGNED_INFO
 } CRYPT_SIGNED_INFO;
 
 BOOL CRYPT_AsnEncodeCMSSignedInfo(CRYPT_SIGNED_INFO *, void *pvData,
- DWORD *pcbData);
+ DWORD *pcbData) DECLSPEC_HIDDEN;
 
 BOOL CRYPT_AsnDecodeCMSSignedInfo(const BYTE *pbEncoded, DWORD cbEncoded,
  DWORD dwFlags, PCRYPT_DECODE_PARA pDecodePara,
- CRYPT_SIGNED_INFO *signedInfo, DWORD *pcbSignedInfo);
+ CRYPT_SIGNED_INFO *signedInfo, DWORD *pcbSignedInfo) DECLSPEC_HIDDEN;
 
 /* Helper function to check *pcbEncoded, set it to the required size, and
  * optionally to allocate memory.  Assumes pbEncoded is not NULL.
@@ -142,15 +142,15 @@ BOOL CRYPT_AsnDecodeCMSSignedInfo(const BYTE *pbEncoded, DWORD cbEncoded,
  * pointer to the newly allocated memory.
  */
 BOOL CRYPT_EncodeEnsureSpace(DWORD dwFlags, const CRYPT_ENCODE_PARA *pEncodePara,
- BYTE *pbEncoded, DWORD *pcbEncoded, DWORD bytesNeeded);
+ BYTE *pbEncoded, DWORD *pcbEncoded, DWORD bytesNeeded) DECLSPEC_HIDDEN;
 
 BOOL CRYPT_AsnDecodePKCSDigestedData(const BYTE *pbEncoded, DWORD cbEncoded,
  DWORD dwFlags, PCRYPT_DECODE_PARA pDecodePara,
- CRYPT_DIGESTED_DATA *digestedData, DWORD *pcbDigestedData);
+ CRYPT_DIGESTED_DATA *digestedData, DWORD *pcbDigestedData) DECLSPEC_HIDDEN;
 
 BOOL WINAPI CRYPT_AsnEncodePubKeyInfoNoNull(DWORD dwCertEncodingType,
  LPCSTR lpszStructType, const void *pvStructInfo, DWORD dwFlags,
- PCRYPT_ENCODE_PARA pEncodePara, BYTE *pbEncoded, DWORD *pcbEncoded);
+ PCRYPT_ENCODE_PARA pEncodePara, BYTE *pbEncoded, DWORD *pcbEncoded) DECLSPEC_HIDDEN;
 
 /* The following aren't defined in wincrypt.h, as they're "reserved" */
 #define CERT_CERT_PROP_ID 32
@@ -162,13 +162,13 @@ BOOL WINAPI CRYPT_AsnEncodePubKeyInfoNoNull(DWORD dwCertEncodingType,
  */
 HCRYPTPROV WINAPI I_CryptGetDefaultCryptProv(ALG_ID);
 
-extern HINSTANCE hInstance;
+extern HINSTANCE hInstance DECLSPEC_HIDDEN;
 
-void crypt_oid_init(void);
-void crypt_oid_free(void);
-void crypt_sip_free(void);
-void root_store_free(void);
-void default_chain_engine_free(void);
+void crypt_oid_init(void) DECLSPEC_HIDDEN;
+void crypt_oid_free(void) DECLSPEC_HIDDEN;
+void crypt_sip_free(void) DECLSPEC_HIDDEN;
+void root_store_free(void) DECLSPEC_HIDDEN;
+void default_chain_engine_free(void) DECLSPEC_HIDDEN;
 
 /* (Internal) certificate store types and functions */
 struct WINE_CRYPTCERTSTORE;
@@ -269,9 +269,9 @@ typedef struct _WINE_CONTEXT_INTERFACE
     DeleteContextFunc            deleteFromStore;
 } WINE_CONTEXT_INTERFACE;
 
-extern const WINE_CONTEXT_INTERFACE *pCertInterface;
-extern const WINE_CONTEXT_INTERFACE *pCRLInterface;
-extern const WINE_CONTEXT_INTERFACE *pCTLInterface;
+extern const WINE_CONTEXT_INTERFACE *pCertInterface DECLSPEC_HIDDEN;
+extern const WINE_CONTEXT_INTERFACE *pCRLInterface DECLSPEC_HIDDEN;
+extern const WINE_CONTEXT_INTERFACE *pCTLInterface DECLSPEC_HIDDEN;
 
 typedef struct WINE_CRYPTCERTSTORE * (*StoreOpenFunc)(HCRYPTPROV hCryptProv,
  DWORD dwFlags, const void *pvPara);
@@ -327,40 +327,40 @@ typedef struct WINE_CRYPTCERTSTORE
 } WINECRYPT_CERTSTORE;
 
 void CRYPT_InitStore(WINECRYPT_CERTSTORE *store, DWORD dwFlags,
- CertStoreType type, const store_vtbl_t*);
-void CRYPT_FreeStore(WINECRYPT_CERTSTORE *store);
+ CertStoreType type, const store_vtbl_t*) DECLSPEC_HIDDEN;
+void CRYPT_FreeStore(WINECRYPT_CERTSTORE *store) DECLSPEC_HIDDEN;
 BOOL WINAPI I_CertUpdateStore(HCERTSTORE store1, HCERTSTORE store2, DWORD unk0,
- DWORD unk1);
+ DWORD unk1) DECLSPEC_HIDDEN;
 
 WINECRYPT_CERTSTORE *CRYPT_CollectionOpenStore(HCRYPTPROV hCryptProv,
- DWORD dwFlags, const void *pvPara);
+ DWORD dwFlags, const void *pvPara) DECLSPEC_HIDDEN;
 WINECRYPT_CERTSTORE *CRYPT_ProvCreateStore(DWORD dwFlags,
- WINECRYPT_CERTSTORE *memStore, const CERT_STORE_PROV_INFO *pProvInfo);
+ WINECRYPT_CERTSTORE *memStore, const CERT_STORE_PROV_INFO *pProvInfo) DECLSPEC_HIDDEN;
 WINECRYPT_CERTSTORE *CRYPT_ProvOpenStore(LPCSTR lpszStoreProvider,
  DWORD dwEncodingType, HCRYPTPROV hCryptProv, DWORD dwFlags,
- const void *pvPara);
+ const void *pvPara) DECLSPEC_HIDDEN;
 WINECRYPT_CERTSTORE *CRYPT_RegOpenStore(HCRYPTPROV hCryptProv, DWORD dwFlags,
- const void *pvPara);
+ const void *pvPara) DECLSPEC_HIDDEN;
 WINECRYPT_CERTSTORE *CRYPT_FileOpenStore(HCRYPTPROV hCryptProv, DWORD dwFlags,
- const void *pvPara);
+ const void *pvPara) DECLSPEC_HIDDEN;
 WINECRYPT_CERTSTORE *CRYPT_FileNameOpenStoreA(HCRYPTPROV hCryptProv,
- DWORD dwFlags, const void *pvPara);
+ DWORD dwFlags, const void *pvPara) DECLSPEC_HIDDEN;
 WINECRYPT_CERTSTORE *CRYPT_FileNameOpenStoreW(HCRYPTPROV hCryptProv,
- DWORD dwFlags, const void *pvPara);
+ DWORD dwFlags, const void *pvPara) DECLSPEC_HIDDEN;
 
-void CRYPT_ImportSystemRootCertsToReg(void);
+void CRYPT_ImportSystemRootCertsToReg(void) DECLSPEC_HIDDEN;
 BOOL CRYPT_SerializeContextsToReg(HKEY key, DWORD flags, const WINE_CONTEXT_INTERFACE *contextInterface,
-    HCERTSTORE memStore);
+    HCERTSTORE memStore) DECLSPEC_HIDDEN;
 void CRYPT_RegReadSerializedFromReg(HKEY key, DWORD contextType,
-    HCERTSTORE store, DWORD disposition);
+    HCERTSTORE store, DWORD disposition) DECLSPEC_HIDDEN;
 
-DWORD CRYPT_IsCertificateSelfSigned(const CERT_CONTEXT *cert);
+DWORD CRYPT_IsCertificateSelfSigned(const CERT_CONTEXT *cert) DECLSPEC_HIDDEN;
 
 /* Allocates and initializes a certificate chain engine, but without creating
  * the root store.  Instead, it uses root, and assumes the caller has done any
  * checking necessary.
  */
-HCERTCHAINENGINE CRYPT_CreateChainEngine(HCERTSTORE, DWORD, const CERT_CHAIN_ENGINE_CONFIG*);
+HCERTCHAINENGINE CRYPT_CreateChainEngine(HCERTSTORE, DWORD, const CERT_CHAIN_ENGINE_CONFIG*) DECLSPEC_HIDDEN;
 
 /* Helper function for store reading functions and
  * CertAddSerializedElementToStore.  Returns a context of the appropriate type
@@ -369,18 +369,18 @@ HCERTCHAINENGINE CRYPT_CreateChainEngine(HCERTSTORE, DWORD, const CERT_CHAIN_ENG
  * *pdwContentType is set to the type of the returned context.
  */
 const void *CRYPT_ReadSerializedElement(const BYTE *pbElement,
- DWORD cbElement, DWORD dwContextTypeFlags, DWORD *pdwContentType);
+ DWORD cbElement, DWORD dwContextTypeFlags, DWORD *pdwContentType) DECLSPEC_HIDDEN;
 
 /* Reads contexts serialized in the file into the memory store.  Returns FALSE
  * if the file is not of the expected format.
  */
-BOOL CRYPT_ReadSerializedStoreFromFile(HANDLE file, HCERTSTORE store);
+BOOL CRYPT_ReadSerializedStoreFromFile(HANDLE file, HCERTSTORE store) DECLSPEC_HIDDEN;
 
 /* Reads contexts serialized in the blob into the memory store.  Returns FALSE
  * if the file is not of the expected format.
  */
 BOOL CRYPT_ReadSerializedStoreFromBlob(const CRYPT_DATA_BLOB *blob,
- HCERTSTORE store);
+ HCERTSTORE store) DECLSPEC_HIDDEN;
 
 struct store_CERT_KEY_CONTEXT
 {
@@ -388,14 +388,14 @@ struct store_CERT_KEY_CONTEXT
     DWORD64 hCryptProv;
     DWORD   dwKeySpec;
 };
-void CRYPT_ConvertKeyContext(const struct store_CERT_KEY_CONTEXT *src, CERT_KEY_CONTEXT *dst);
+void CRYPT_ConvertKeyContext(const struct store_CERT_KEY_CONTEXT *src, CERT_KEY_CONTEXT *dst) DECLSPEC_HIDDEN;
 
 /**
  *  String functions
  */
 
 DWORD cert_name_to_str_with_indent(DWORD dwCertEncodingType, DWORD indent,
- const CERT_NAME_BLOB *pName, DWORD dwStrType, LPWSTR psz, DWORD csz);
+ const CERT_NAME_BLOB *pName, DWORD dwStrType, LPWSTR psz, DWORD csz) DECLSPEC_HIDDEN;
 
 /**
  *  Context functions
@@ -406,49 +406,49 @@ DWORD cert_name_to_str_with_indent(DWORD dwCertEncodingType, DWORD indent,
  * which should be one of CERT_CONTEXT, CRL_CONTEXT, or CTL_CONTEXT.
  * Free with Context_Release.
  */
-context_t *Context_CreateDataContext(size_t contextSize, const context_vtbl_t *vtbl, struct WINE_CRYPTCERTSTORE*);
+context_t *Context_CreateDataContext(size_t contextSize, const context_vtbl_t *vtbl, struct WINE_CRYPTCERTSTORE*) DECLSPEC_HIDDEN;
 
 /* Creates a new link context.  The context refers to linked
  * rather than owning its own properties.  If addRef is TRUE (which ordinarily
  * it should be) linked is addref'd.
  * Free with Context_Release.
  */
-context_t *Context_CreateLinkContext(unsigned contextSize, context_t *linked, struct WINE_CRYPTCERTSTORE*);
+context_t *Context_CreateLinkContext(unsigned contextSize, context_t *linked, struct WINE_CRYPTCERTSTORE*) DECLSPEC_HIDDEN;
 
 /* Copies properties from fromContext to toContext. */
-void Context_CopyProperties(const void *to, const void *from);
+void Context_CopyProperties(const void *to, const void *from) DECLSPEC_HIDDEN;
 
-void Context_AddRef(context_t*);
-void Context_Release(context_t *context);
-void Context_Free(context_t*);
+void Context_AddRef(context_t*) DECLSPEC_HIDDEN;
+void Context_Release(context_t *context) DECLSPEC_HIDDEN;
+void Context_Free(context_t*) DECLSPEC_HIDDEN;
 
 /**
  *  Context property list functions
  */
 
-CONTEXT_PROPERTY_LIST *ContextPropertyList_Create(void);
+CONTEXT_PROPERTY_LIST *ContextPropertyList_Create(void) DECLSPEC_HIDDEN;
 
 /* Searches for the property with ID id in the context.  Returns TRUE if found,
  * and copies the property's length and a pointer to its data to blob.
  * Otherwise returns FALSE.
  */
 BOOL ContextPropertyList_FindProperty(CONTEXT_PROPERTY_LIST *list, DWORD id,
- PCRYPT_DATA_BLOB blob);
+ PCRYPT_DATA_BLOB blob) DECLSPEC_HIDDEN;
 
 BOOL ContextPropertyList_SetProperty(CONTEXT_PROPERTY_LIST *list, DWORD id,
- const BYTE *pbData, size_t cbData);
+ const BYTE *pbData, size_t cbData) DECLSPEC_HIDDEN;
 
-void ContextPropertyList_RemoveProperty(CONTEXT_PROPERTY_LIST *list, DWORD id);
+void ContextPropertyList_RemoveProperty(CONTEXT_PROPERTY_LIST *list, DWORD id) DECLSPEC_HIDDEN;
 
-DWORD ContextPropertyList_EnumPropIDs(CONTEXT_PROPERTY_LIST *list, DWORD id);
+DWORD ContextPropertyList_EnumPropIDs(CONTEXT_PROPERTY_LIST *list, DWORD id) DECLSPEC_HIDDEN;
 
 void ContextPropertyList_Copy(CONTEXT_PROPERTY_LIST *to,
- CONTEXT_PROPERTY_LIST *from);
+ CONTEXT_PROPERTY_LIST *from) DECLSPEC_HIDDEN;
 
-void ContextPropertyList_Free(CONTEXT_PROPERTY_LIST *list);
+void ContextPropertyList_Free(CONTEXT_PROPERTY_LIST *list) DECLSPEC_HIDDEN;
 
-extern WINECRYPT_CERTSTORE empty_store;
-void init_empty_store(void);
+extern WINECRYPT_CERTSTORE empty_store DECLSPEC_HIDDEN;
+void init_empty_store(void) DECLSPEC_HIDDEN;
 
 /**
  *  Utilities.
@@ -510,7 +510,6 @@ enum unix_funcs
     unix_import_store_cert,
     unix_close_cert_store,
     unix_enum_root_certs,
-    unix_funcs_count,
 };
 
 #define CRYPT32_CALL( func, params ) WINE_UNIX_CALL( unix_ ## func, params )

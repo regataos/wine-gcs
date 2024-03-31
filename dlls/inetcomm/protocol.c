@@ -17,6 +17,7 @@
  */
 
 #define COBJMACROS
+#define NONAMELESSUNION
 
 #include <assert.h>
 
@@ -315,7 +316,7 @@ static HRESULT WINAPI BindStatusCallback_OnDataAvailable(IBindStatusCallback *if
     assert(pstgmed->tymed == TYMED_ISTREAM);
 
     while(1) {
-        hres = IStream_Read(pstgmed->pstm, buf, sizeof(buf), &read);
+        hres = IStream_Read(pstgmed->u.pstm, buf, sizeof(buf), &read);
         if(FAILED(hres))
             return hres;
         if(!read)
@@ -566,7 +567,7 @@ static HRESULT WINAPI MimeHtmlProtocol_Seek(IInternetProtocol *iface, LARGE_INTE
         DWORD dwOrigin, ULARGE_INTEGER* plibNewPosition)
 {
     MimeHtmlProtocol *This = impl_from_IInternetProtocol(iface);
-    FIXME("(%p)->(%ld %ld %p)\n", This, dlibMove.LowPart, dwOrigin, plibNewPosition);
+    FIXME("(%p)->(%ld %ld %p)\n", This, dlibMove.u.LowPart, dwOrigin, plibNewPosition);
     return E_NOTIMPL;
 }
 

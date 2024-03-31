@@ -23,6 +23,7 @@
 #include <windows.h>
 #include <vfw.h>
 
+#include "wine/heap.h"
 #include "wine/test.h"
 
 static const DWORD file_header[] = /* file_header */
@@ -135,7 +136,7 @@ static BOOL create_avi_file(char *fname)
     if (hFile == INVALID_HANDLE_VALUE) return FALSE;
 
     buffer_length = padding[1];
-    buffer = calloc(1, buffer_length);
+    buffer = heap_alloc_zero(buffer_length);
 
     WriteFile(hFile, file_header, sizeof(file_header), &written, NULL);
     WriteFile(hFile, &main_avi_header, sizeof(MainAVIHeader), &written, NULL);
@@ -146,7 +147,7 @@ static BOOL create_avi_file(char *fname)
     WriteFile(hFile, buffer, buffer_length, &written, NULL);
     WriteFile(hFile, data, sizeof(data), &written, NULL);
 
-    free(buffer);
+    heap_free(buffer);
 
     CloseHandle(hFile);
     return ret;

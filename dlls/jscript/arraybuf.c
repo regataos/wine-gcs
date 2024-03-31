@@ -1,5 +1,5 @@
 /*
- * Copyright 2024 Gabriel Ivăncescu for CodeWeavers
+ * Copyright 2023 Gabriel Ivăncescu for CodeWeavers
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -17,8 +17,17 @@
  */
 
 
+#include <math.h>
 #include <limits.h>
+#include <assert.h>
+#include <stdarg.h>
+#include <stdlib.h>
 
+#include "ntstatus.h"
+#define WIN32_NO_STATUS
+#include "windef.h"
+#include "winbase.h"
+#include "ntsecapi.h"
 #include "jscript.h"
 
 #include "wine/debug.h"
@@ -34,10 +43,18 @@ typedef struct {
 typedef struct {
     jsdisp_t dispex;
 
-    ArrayBufferInstance *buffer;
+    jsdisp_t *buffer;
     DWORD offset;
     DWORD size;
 } DataViewInstance;
+
+typedef struct {
+    jsdisp_t dispex;
+
+    jsdisp_t *buffer;
+    DWORD offset;
+    DWORD length;
+} TypedArrayInstance;
 
 static inline ArrayBufferInstance *arraybuf_from_jsdisp(jsdisp_t *jsdisp)
 {
@@ -49,13 +66,18 @@ static inline DataViewInstance *dataview_from_jsdisp(jsdisp_t *jsdisp)
     return CONTAINING_RECORD(jsdisp, DataViewInstance, dispex);
 }
 
+static inline TypedArrayInstance *typedarr_from_jsdisp(jsdisp_t *jsdisp)
+{
+    return CONTAINING_RECORD(jsdisp, TypedArrayInstance, dispex);
+}
+
 static inline ArrayBufferInstance *arraybuf_this(jsval_t vthis)
 {
     jsdisp_t *jsdisp = is_object_instance(vthis) ? to_jsdisp(get_object(vthis)) : NULL;
     return (jsdisp && is_class(jsdisp, JSCLASS_ARRAYBUFFER)) ? arraybuf_from_jsdisp(jsdisp) : NULL;
 }
 
-static HRESULT create_arraybuf(script_ctx_t*,DWORD,ArrayBufferInstance**);
+static HRESULT create_arraybuf(script_ctx_t*,DWORD,jsdisp_t**);
 
 static HRESULT ArrayBuffer_get_byteLength(script_ctx_t *ctx, jsdisp_t *jsthis, jsval_t *r)
 {
@@ -68,8 +90,9 @@ static HRESULT ArrayBuffer_get_byteLength(script_ctx_t *ctx, jsdisp_t *jsthis, j
 static HRESULT ArrayBuffer_slice(script_ctx_t *ctx, jsval_t vthis, WORD flags, unsigned argc, jsval_t *argv,
         jsval_t *r)
 {
-    ArrayBufferInstance *arraybuf, *ret;
+    ArrayBufferInstance *arraybuf;
     DWORD begin = 0, end, size;
+    jsdisp_t *obj;
     HRESULT hres;
     double n;
 
@@ -106,12 +129,12 @@ static HRESULT ArrayBuffer_slice(script_ctx_t *ctx, jsval_t vthis, WORD flags, u
     }
 
     size = end - begin;
-    hres = create_arraybuf(ctx, size, &ret);
+    hres = create_arraybuf(ctx, size, &obj);
     if(FAILED(hres))
         return hres;
-    memcpy(ret->buf, arraybuf->buf + begin, size);
+    memcpy(arraybuf_from_jsdisp(obj)->buf, arraybuf->buf + begin, size);
 
-    *r = jsval_obj(&ret->dispex);
+    *r = jsval_obj(obj);
     return S_OK;
 }
 
@@ -142,7 +165,7 @@ static const builtin_info_t ArrayBufferInst_info = {
     NULL
 };
 
-static HRESULT create_arraybuf(script_ctx_t *ctx, DWORD size, ArrayBufferInstance **ret)
+static HRESULT create_arraybuf(script_ctx_t *ctx, DWORD size, jsdisp_t **ret)
 {
     ArrayBufferInstance *arraybuf;
     HRESULT hres;
@@ -155,25 +178,37 @@ static HRESULT create_arraybuf(script_ctx_t *ctx, DWORD size, ArrayBufferInstanc
         free(arraybuf);
         return hres;
     }
+
     arraybuf->size = size;
 
-    *ret = arraybuf;
+    *ret = &arraybuf->dispex;
     return S_OK;
 }
 
 static HRESULT ArrayBufferConstr_isView(script_ctx_t *ctx, jsval_t vthis, WORD flags, unsigned argc, jsval_t *argv,
         jsval_t *r)
 {
-    FIXME("not implemented\n");
+    BOOL ret = FALSE;
+    jsdisp_t *obj;
 
-    return E_NOTIMPL;
+    TRACE("\n");
+
+    if(!r)
+        return S_OK;
+
+    if(argc && is_object_instance(argv[0]) && (obj = to_jsdisp(get_object(argv[0]))) &&
+       obj->builtin_info->class >= FIRST_VIEW_JSCLASS && obj->builtin_info->class <= LAST_VIEW_JSCLASS)
+        ret = TRUE;
+
+    *r = jsval_bool(ret);
+    return S_OK;
 }
 
 static HRESULT ArrayBufferConstr_value(script_ctx_t *ctx, jsval_t vthis, WORD flags, unsigned argc, jsval_t *argv,
         jsval_t *r)
 {
-    ArrayBufferInstance *arraybuf;
     DWORD size = 0;
+    jsdisp_t *obj;
     HRESULT hres;
 
     TRACE("\n");
@@ -194,10 +229,10 @@ static HRESULT ArrayBufferConstr_value(script_ctx_t *ctx, jsval_t vthis, WORD fl
         }
 
         if(r) {
-            hres = create_arraybuf(ctx, size, &arraybuf);
+            hres = create_arraybuf(ctx, size, &obj);
             if(FAILED(hres))
                 return hres;
-            *r = jsval_obj(&arraybuf->dispex);
+            *r = jsval_obj(obj);
         }
         break;
     }
@@ -237,7 +272,7 @@ static HRESULT DataView_get_buffer(script_ctx_t *ctx, jsval_t vthis, WORD flags,
 
     if(!(view = dataview_this(vthis)))
         return JS_E_NOT_DATAVIEW;
-    if(r) *r = jsval_obj(jsdisp_addref(&view->buffer->dispex));
+    if(r) *r = jsval_obj(jsdisp_addref(view->buffer));
     return S_OK;
 }
 
@@ -269,15 +304,20 @@ static HRESULT DataView_get_byteOffset(script_ctx_t *ctx, jsval_t vthis, WORD fl
 
 static inline void copy_type_data(void *dst, const void *src, unsigned type_size, BOOL little_endian)
 {
+#ifdef WORDS_BIGENDIAN
+    BOOL swap = little_endian;
+#else
+    BOOL swap = !little_endian;
+#endif
     const BYTE *in = src;
     BYTE *out = dst;
     unsigned i;
 
-    if(little_endian)
-        memcpy(out, in, type_size);
-    else
+    if(swap)
         for(i = 0; i < type_size; i++)
             out[i] = in[type_size - i - 1];
+    else
+        memcpy(out, in, type_size);
 }
 
 static HRESULT get_data(script_ctx_t *ctx, jsval_t vthis, unsigned argc, jsval_t *argv, unsigned type_size, void *ret)
@@ -298,11 +338,13 @@ static HRESULT get_data(script_ctx_t *ctx, jsval_t vthis, unsigned argc, jsval_t
     if(FAILED(hres))
         return hres;
 
-    if(n < 0.0 || n + type_size > view->size)
+    if(n < 0.0 || n >= view->size)
         return JS_E_DATAVIEW_INVALID_ACCESS;
 
     offset = n;
-    data = &view->buffer->buf[view->offset + offset];
+    if(view->size - offset < type_size)
+        return JS_E_DATAVIEW_INVALID_ACCESS;
+    data = &arraybuf_from_jsdisp(view->buffer)->buf[view->offset + offset];
 
     if(type_size == 1) {
         *(BYTE*)ret = data[0];
@@ -337,11 +379,13 @@ static HRESULT set_data(script_ctx_t *ctx, jsval_t vthis, unsigned argc, jsval_t
     if(FAILED(hres))
         return hres;
 
-    if(n < 0.0 || n + type_size > view->size)
+    if(n < 0.0 || n >= view->size)
         return JS_E_DATAVIEW_INVALID_ACCESS;
 
     offset = n;
-    data = &view->buffer->buf[view->offset + offset];
+    if(view->size - offset < type_size)
+        return JS_E_DATAVIEW_INVALID_ACCESS;
+    data = &arraybuf_from_jsdisp(view->buffer)->buf[view->offset + offset];
 
     if(type_size == 1) {
         data[0] = *(const BYTE*)val;
@@ -599,14 +643,21 @@ static void DataView_destructor(jsdisp_t *dispex)
 {
     DataViewInstance *view = dataview_from_jsdisp(dispex);
     if(view->buffer)
-        jsdisp_release(&view->buffer->dispex);
+        jsdisp_release(view->buffer);
     free(view);
 }
 
 static HRESULT DataView_gc_traverse(struct gc_ctx *gc_ctx, enum gc_traverse_op op, jsdisp_t *dispex)
 {
     DataViewInstance *view = dataview_from_jsdisp(dispex);
-    return gc_process_linked_obj(gc_ctx, op, dispex, &view->buffer->dispex, (void**)&view->buffer);
+    return gc_process_linked_obj(gc_ctx, op, dispex, view->buffer, (void**)&view->buffer);
+}
+
+static void DataView_cc_traverse(jsdisp_t *dispex, nsCycleCollectionTraversalCallback *cb)
+{
+    DataViewInstance *view = dataview_from_jsdisp(dispex);
+    if(view->buffer)
+        cc_api.note_edge((nsISupports*)&view->buffer->IDispatchEx_iface, "buffer", cb);
 }
 
 static const builtin_info_t DataView_info = {
@@ -619,7 +670,8 @@ static const builtin_info_t DataView_info = {
     NULL,
     NULL,
     NULL,
-    DataView_gc_traverse
+    DataView_gc_traverse,
+    DataView_cc_traverse
 };
 
 static const builtin_info_t DataViewInst_info = {
@@ -632,7 +684,8 @@ static const builtin_info_t DataViewInst_info = {
     NULL,
     NULL,
     NULL,
-    DataView_gc_traverse
+    DataView_gc_traverse,
+    DataView_cc_traverse
 };
 
 static HRESULT DataViewConstr_value(script_ctx_t *ctx, jsval_t vthis, WORD flags, unsigned argc, jsval_t *argv,
@@ -684,8 +737,7 @@ static HRESULT DataViewConstr_value(script_ctx_t *ctx, jsval_t vthis, WORD flags
             return hres;
         }
 
-        jsdisp_addref(&arraybuf->dispex);
-        view->buffer = arraybuf;
+        view->buffer = jsdisp_addref(&arraybuf->dispex);
         view->offset = offset;
         view->size = size;
 
@@ -709,6 +761,587 @@ static const builtin_info_t DataViewConstr_info = {
     NULL
 };
 
+static HRESULT clamped_u8(script_ctx_t *ctx, jsval_t v, UINT8 *ret)
+{
+    HRESULT hres;
+    double n;
+
+    hres = to_number(ctx, v, &n);
+    if(FAILED(hres))
+        return hres;
+
+    if(!isfinite(n))
+        *ret = (n == INFINITY ? 255 : 0);
+    else
+        *ret = (n >= 255.0 ? 255 : n <= 0 ? 0 : lround(n));
+    return S_OK;
+}
+
+#define TYPEDARRAY_LIST \
+X(Int8Array,            JSCLASS_INT8ARRAY,          INT8,   to_int32,   INT)    \
+X(Int16Array,           JSCLASS_INT16ARRAY,         INT16,  to_int32,   INT)    \
+X(Int32Array,           JSCLASS_INT32ARRAY,         INT32,  to_int32,   INT)    \
+X(Uint8Array,           JSCLASS_UINT8ARRAY,         UINT8,  to_int32,   INT)    \
+X(Uint8ClampedArray,    JSCLASS_UINT8CLAMPEDARRAY,  UINT8,  clamped_u8, UINT8)  \
+X(Uint16Array,          JSCLASS_UINT16ARRAY,        UINT16, to_int32,   INT)    \
+X(Uint32Array,          JSCLASS_UINT32ARRAY,        UINT32, to_int32,   INT)    \
+X(Float32Array,         JSCLASS_FLOAT32ARRAY,       float,  to_number,  double) \
+X(Float64Array,         JSCLASS_FLOAT64ARRAY,       double, to_number,  double)
+
+#define TYPEDARRAY_INDEX(JSCLASS) ((JSCLASS) - FIRST_TYPEDARRAY_JSCLASS)
+
+#define X(NAME, JSCLASS, TYPE, CONVERT, NUM_TYPE) [TYPEDARRAY_INDEX(JSCLASS)] = L"" #NAME,
+static const WCHAR *const TypedArray_name[] = { TYPEDARRAY_LIST };
+#undef X
+
+#define X(NAME, JSCLASS, TYPE, CONVERT, NUM_TYPE) [TYPEDARRAY_INDEX(JSCLASS)] = sizeof(TYPE),
+static const unsigned TypedArray_elem_size[] = { TYPEDARRAY_LIST };
+#undef X
+
+static inline TypedArrayInstance *typedarr_this(jsval_t vthis, jsclass_t jsclass)
+{
+    jsdisp_t *jsdisp = is_object_instance(vthis) ? to_jsdisp(get_object(vthis)) : NULL;
+    return (jsdisp && is_class(jsdisp, jsclass)) ? typedarr_from_jsdisp(jsdisp) : NULL;
+}
+
+static HRESULT create_typedarr(script_ctx_t*,jsclass_t,jsdisp_t*,DWORD,DWORD,jsdisp_t**);
+
+static HRESULT TypedArray_get_buffer(script_ctx_t *ctx, jsdisp_t *jsthis, jsval_t *r)
+{
+    TRACE("%p\n", jsthis);
+
+    *r = jsval_obj(jsdisp_addref(typedarr_from_jsdisp(jsthis)->buffer));
+    return S_OK;
+}
+
+static HRESULT TypedArray_get_byteLength(script_ctx_t *ctx, jsdisp_t *jsthis, jsval_t *r)
+{
+    TRACE("%p\n", jsthis);
+
+    *r = jsval_number(typedarr_from_jsdisp(jsthis)->length * TypedArray_elem_size[TYPEDARRAY_INDEX(jsthis->builtin_info->class)]);
+    return S_OK;
+}
+
+static HRESULT TypedArray_get_byteOffset(script_ctx_t *ctx, jsdisp_t *jsthis, jsval_t *r)
+{
+    TRACE("%p\n", jsthis);
+
+    *r = jsval_number(typedarr_from_jsdisp(jsthis)->offset);
+    return S_OK;
+}
+
+static HRESULT TypedArray_get_length(script_ctx_t *ctx, jsdisp_t *jsthis, jsval_t *r)
+{
+    TRACE("%p\n", jsthis);
+
+    *r = jsval_number(typedarr_from_jsdisp(jsthis)->length);
+    return S_OK;
+}
+
+static HRESULT fill_typedarr_data_from_object(script_ctx_t *ctx, BYTE *data, jsdisp_t *obj, DWORD length, jsclass_t jsclass)
+{
+    HRESULT hres = S_OK;
+    jsval_t val;
+    UINT32 i;
+
+    switch(jsclass) {
+#define X(NAME, JSCLASS, TYPE, CONVERT, NUM_TYPE)   \
+    case JSCLASS:                                   \
+        for(i = 0; i < length; i++) {               \
+            NUM_TYPE n;                             \
+                                                    \
+            hres = jsdisp_get_idx(obj, i, &val);    \
+            if(FAILED(hres)) {                      \
+                if(hres != DISP_E_UNKNOWNNAME)      \
+                    break;                          \
+                val = jsval_undefined();            \
+            }                                       \
+                                                    \
+            hres = CONVERT(ctx, val, &n);           \
+            jsval_release(val);                     \
+            if(FAILED(hres))                        \
+                break;                              \
+            *(TYPE*)&data[i * sizeof(TYPE)] = n;    \
+        }                                           \
+        break;
+        TYPEDARRAY_LIST
+    DEFAULT_UNREACHABLE;
+#undef X
+    }
+
+    return hres;
+}
+
+static HRESULT TypedArray_set(script_ctx_t *ctx, jsval_t vthis, WORD flags, unsigned argc, jsval_t *argv,
+        jsval_t *r, jsclass_t jsclass)
+{
+    const unsigned elem_size = TypedArray_elem_size[TYPEDARRAY_INDEX(jsclass)];
+    TypedArrayInstance *typedarr;
+    DWORD begin = 0, size;
+    BYTE *dest, *data;
+    IDispatch *disp;
+    jsdisp_t *obj;
+    HRESULT hres;
+    jsval_t val;
+    UINT32 len;
+    double n;
+
+    TRACE("\n");
+
+    if(!(typedarr = typedarr_this(vthis, jsclass)))
+        return JS_E_NOT_TYPEDARRAY;
+    if(!argc)
+        return JS_E_TYPEDARRAY_INVALID_SOURCE;
+
+    hres = to_object(ctx, argv[0], &disp);
+    if(FAILED(hres))
+        return JS_E_TYPEDARRAY_INVALID_SOURCE;
+
+    if(!(obj = to_jsdisp(disp))) {
+        FIXME("Non-JS array object\n");
+        hres = JS_E_TYPEDARRAY_INVALID_SOURCE;
+        goto done;
+    }
+
+    hres = jsdisp_propget_name(obj, L"length", &val);
+    if(FAILED(hres))
+        goto done;
+
+    hres = to_uint32(ctx, val, &len);
+    jsval_release(val);
+    if(FAILED(hres))
+        goto done;
+
+    if(argc > 1) {
+        hres = to_integer(ctx, argv[1], &n);
+        if(FAILED(hres))
+            goto done;
+        if(n < 0.0 || n > typedarr->length) {
+            hres = JS_E_TYPEDARRAY_INVALID_OFFSLEN;
+            goto done;
+        }
+        begin = n;
+    }
+
+    if(len > typedarr->length - begin) {
+        hres = JS_E_TYPEDARRAY_INVALID_OFFSLEN;
+        goto done;
+    }
+    size = len * elem_size;
+    dest = data = &arraybuf_from_jsdisp(typedarr->buffer)->buf[typedarr->offset + begin * elem_size];
+
+    /* If they overlap, make a temporary copy */
+    if(obj->builtin_info->class >= FIRST_TYPEDARRAY_JSCLASS && obj->builtin_info->class <= LAST_TYPEDARRAY_JSCLASS) {
+        TypedArrayInstance *src_arr = typedarr_from_jsdisp(obj);
+        const BYTE *src = arraybuf_from_jsdisp(src_arr->buffer)->buf + src_arr->offset;
+
+        if(dest < src + len * TypedArray_elem_size[TYPEDARRAY_INDEX(obj->builtin_info->class)] &&
+           dest + size > src) {
+            if(!(data = malloc(size))) {
+                hres = E_OUTOFMEMORY;
+                goto done;
+            }
+        }
+    }
+
+    hres = fill_typedarr_data_from_object(ctx, data, obj, len, jsclass);
+    if(SUCCEEDED(hres) && dest != data) {
+        memcpy(dest, data, size);
+        free(data);
+    }
+
+done:
+    IDispatch_Release(disp);
+    return hres;
+}
+
+static HRESULT TypedArray_subarray(script_ctx_t *ctx, jsval_t vthis, WORD flags, unsigned argc, jsval_t *argv,
+        jsval_t *r, jsclass_t jsclass)
+{
+    TypedArrayInstance *typedarr;
+    DWORD begin = 0, end;
+    jsdisp_t *obj;
+    HRESULT hres;
+    double n;
+
+    TRACE("\n");
+
+    if(!(typedarr = typedarr_this(vthis, jsclass)))
+        return JS_E_NOT_TYPEDARRAY;
+    if(!argc)
+        return JS_E_TYPEDARRAY_INVALID_SUBARRAY;
+    if(!r)
+        return S_OK;
+
+    hres = to_integer(ctx, argv[0], &n);
+    if(FAILED(hres))
+        return hres;
+    end = typedarr->length;
+    if(n < 0.0)
+        n += typedarr->length;
+    if(n >= 0.0)
+        begin = n < typedarr->length ? n : typedarr->length;
+
+    if(argc > 1 && !is_undefined(argv[1])) {
+        hres = to_integer(ctx, argv[1], &n);
+        if(FAILED(hres))
+            return hres;
+        if(n < 0.0)
+            n += typedarr->length;
+        if(n >= 0.0) {
+            end = n < typedarr->length ? n : typedarr->length;
+            end = end < begin ? begin : end;
+        }else
+            end = begin;
+    }
+
+    hres = create_typedarr(ctx, jsclass, typedarr->buffer,
+                           typedarr->offset + begin * TypedArray_elem_size[TYPEDARRAY_INDEX(jsclass)],
+                           end - begin, &obj);
+    if(FAILED(hres))
+        return hres;
+
+    *r = jsval_obj(obj);
+    return S_OK;
+}
+
+static unsigned TypedArray_idx_length(jsdisp_t *jsdisp)
+{
+    TypedArrayInstance *typedarr = typedarr_from_jsdisp(jsdisp);
+    return typedarr->length;
+}
+
+static void TypedArray_destructor(jsdisp_t *dispex)
+{
+    TypedArrayInstance *typedarr = typedarr_from_jsdisp(dispex);
+    if(typedarr->buffer)
+        jsdisp_release(typedarr->buffer);
+    free(typedarr);
+}
+
+static HRESULT TypedArray_gc_traverse(struct gc_ctx *gc_ctx, enum gc_traverse_op op, jsdisp_t *dispex)
+{
+    TypedArrayInstance *typedarr = typedarr_from_jsdisp(dispex);
+    return gc_process_linked_obj(gc_ctx, op, dispex, typedarr->buffer, (void**)&typedarr->buffer);
+}
+
+static void TypedArray_cc_traverse(jsdisp_t *dispex, nsCycleCollectionTraversalCallback *cb)
+{
+    TypedArrayInstance *typedarr = typedarr_from_jsdisp(dispex);
+    if(typedarr->buffer)
+        cc_api.note_edge((nsISupports*)&typedarr->buffer->IDispatchEx_iface, "buffer", cb);
+}
+
+static const builtin_prop_t TypedArrayInst_props[] = {
+    {L"buffer",                NULL, 0,                    TypedArray_get_buffer},
+    {L"byteLength",            NULL, 0,                    TypedArray_get_byteLength},
+    {L"byteOffset",            NULL, 0,                    TypedArray_get_byteOffset},
+    {L"length",                NULL, 0,                    TypedArray_get_length},
+};
+
+#define X(NAME, JSCLASS, TYPE, CONVERT, NUM_TYPE) \
+static HRESULT NAME ##_idx_get(jsdisp_t *jsdisp, unsigned idx, jsval_t *r)              \
+{                                                                                       \
+    TypedArrayInstance *typedarr = typedarr_from_jsdisp(jsdisp);                        \
+                                                                                        \
+    TRACE("%p[%u]\n", typedarr, idx);                                                   \
+                                                                                        \
+    if(idx >= typedarr->length)                                                         \
+        *r = jsval_undefined();                                                         \
+    else                                                                                \
+        *r = jsval_number(*(TYPE*)&arraybuf_from_jsdisp(typedarr->buffer)->buf[typedarr->offset + idx * sizeof(TYPE)]); \
+    return S_OK;                                                                        \
+}                                                                                       \
+                                                                                        \
+static HRESULT NAME ##_idx_put(jsdisp_t *jsdisp, unsigned idx, jsval_t val)             \
+{                                                                                       \
+    TypedArrayInstance *typedarr = typedarr_from_jsdisp(jsdisp);                        \
+    HRESULT hres;                                                                       \
+    NUM_TYPE n;                                                                         \
+                                                                                        \
+    TRACE("%p[%u] = %s\n", typedarr, idx, debugstr_jsval(val));                         \
+                                                                                        \
+    if(idx >= typedarr->length)                                                         \
+        return S_OK;                                                                    \
+                                                                                        \
+    hres = CONVERT(jsdisp->ctx, val, &n);                                               \
+    if(SUCCEEDED(hres))                                                                 \
+        *(TYPE*)&arraybuf_from_jsdisp(typedarr->buffer)->buf[typedarr->offset + idx * sizeof(TYPE)] = n; \
+    return hres;                                                                        \
+}                                                                                       \
+                                                                                        \
+static HRESULT NAME ##_set(script_ctx_t *ctx, jsval_t vthis, WORD flags, unsigned argc, jsval_t *argv, \
+        jsval_t *r)                                                                     \
+{                                                                                       \
+    return TypedArray_set(ctx, vthis, flags, argc, argv, r, JSCLASS);                   \
+}                                                                                       \
+                                                                                        \
+static HRESULT NAME ##_subarray(script_ctx_t *ctx, jsval_t vthis, WORD flags, unsigned argc, jsval_t *argv, \
+        jsval_t *r)                                                                     \
+{                                                                                       \
+    return TypedArray_subarray(ctx, vthis, flags, argc, argv, r, JSCLASS);              \
+}                                                                                       \
+                                                                                        \
+static const builtin_prop_t NAME ##_props[] = {                                         \
+    {L"buffer",                NULL, 0,                    TypedArray_get_buffer},      \
+    {L"byteLength",            NULL, 0,                    TypedArray_get_byteLength},  \
+    {L"byteOffset",            NULL, 0,                    TypedArray_get_byteOffset},  \
+    {L"length",                NULL, 0,                    TypedArray_get_length},      \
+    {L"set",                   NAME ##_set,                PROPF_METHOD|2},             \
+    {L"subarray",              NAME ##_subarray,           PROPF_METHOD|2},             \
+};
+TYPEDARRAY_LIST
+#undef X
+
+#define X(NAME, JSCLASS, TYPE, CONVERT, NUM_TYPE) \
+[TYPEDARRAY_INDEX(JSCLASS)] =           \
+{                                       \
+    JSCLASS,                            \
+    NULL,                               \
+    ARRAY_SIZE(NAME ##_props),          \
+    NAME ##_props,                      \
+    TypedArray_destructor,              \
+    NULL,                               \
+    TypedArray_idx_length,              \
+    NAME ##_idx_get,                    \
+    NAME ##_idx_put,                    \
+    TypedArray_gc_traverse,             \
+    TypedArray_cc_traverse              \
+},
+static const builtin_info_t TypedArray_info[] = { TYPEDARRAY_LIST };
+#undef X
+
+#define X(NAME, JSCLASS, TYPE, CONVERT, NUM_TYPE) \
+[TYPEDARRAY_INDEX(JSCLASS)] =           \
+{                                       \
+    JSCLASS,                            \
+    NULL,                               \
+    ARRAY_SIZE(TypedArrayInst_props),   \
+    TypedArrayInst_props,               \
+    TypedArray_destructor,              \
+    NULL,                               \
+    TypedArray_idx_length,              \
+    NAME ##_idx_get,                    \
+    NAME ##_idx_put,                    \
+    TypedArray_gc_traverse,             \
+    TypedArray_cc_traverse              \
+},
+static const builtin_info_t TypedArrayInst_info[] = { TYPEDARRAY_LIST };
+#undef X
+
+static HRESULT create_typedarr(script_ctx_t *ctx, jsclass_t jsclass, jsdisp_t *buffer, DWORD offset, DWORD length,
+        jsdisp_t **ret)
+{
+    TypedArrayInstance *typedarr;
+    HRESULT hres;
+
+    if(!(typedarr = calloc(1, sizeof(TypedArrayInstance))))
+        return E_OUTOFMEMORY;
+
+    hres = init_dispex_from_constr(&typedarr->dispex, ctx, &TypedArrayInst_info[TYPEDARRAY_INDEX(jsclass)],
+                                   ctx->typedarr_constr[TYPEDARRAY_INDEX(jsclass)]);
+    if(FAILED(hres)) {
+        free(typedarr);
+        return hres;
+    }
+
+    typedarr->buffer = jsdisp_addref(buffer);
+    typedarr->offset = offset;
+    typedarr->length = length;
+
+    *ret = &typedarr->dispex;
+    return S_OK;
+}
+
+static HRESULT TypedArrayConstr_value(script_ctx_t *ctx, jsval_t vthis, WORD flags, unsigned argc, jsval_t *argv,
+        jsval_t *r, jsclass_t jsclass)
+{
+    const unsigned typedarr_idx = TYPEDARRAY_INDEX(jsclass);
+    unsigned elem_size = TypedArray_elem_size[typedarr_idx];
+    jsdisp_t *typedarr, *buffer = NULL;
+    DWORD offset = 0, length = 0;
+    HRESULT hres;
+    double n;
+
+    TRACE("\n");
+
+    switch(flags) {
+    case DISPATCH_METHOD:
+    case DISPATCH_CONSTRUCT: {
+        if(argc) {
+            if(is_object_instance(argv[0])) {
+                jsdisp_t *obj = to_jsdisp(get_object(argv[0]));
+
+                if(!obj)
+                    return JS_E_TYPEDARRAY_BAD_CTOR_ARG;
+
+                if(obj->builtin_info->class == JSCLASS_ARRAYBUFFER) {
+                    ArrayBufferInstance *arraybuf = arraybuf_from_jsdisp(obj);
+
+                    if(argc > 1) {
+                        hres = to_integer(ctx, argv[1], &n);
+                        if(FAILED(hres))
+                            return hres;
+                        if(n < 0.0 || n > arraybuf->size)
+                            return JS_E_TYPEDARRAY_INVALID_OFFSLEN;
+                        offset = n;
+                        if(offset % elem_size)
+                            return JS_E_TYPEDARRAY_INVALID_OFFSLEN;
+                    }
+                    if(argc > 2 && !is_undefined(argv[2])) {
+                        hres = to_integer(ctx, argv[2], &n);
+                        if(FAILED(hres))
+                            return hres;
+                        if(n < 0.0 || n > UINT_MAX)
+                            return JS_E_TYPEDARRAY_INVALID_OFFSLEN;
+                        length = n;
+                        if(offset + length * elem_size > arraybuf->size)
+                            return JS_E_TYPEDARRAY_INVALID_OFFSLEN;
+                    }else {
+                        length = arraybuf->size - offset;
+                        if(length % elem_size)
+                            return JS_E_TYPEDARRAY_INVALID_OFFSLEN;
+                        length /= elem_size;
+                    }
+                    buffer = jsdisp_addref(&arraybuf->dispex);
+                }else {
+                    jsval_t val;
+                    UINT32 len;
+                    DWORD size;
+
+                    hres = jsdisp_propget_name(obj, L"length", &val);
+                    if(FAILED(hres))
+                        return hres;
+                    if(is_undefined(val))
+                        return JS_E_TYPEDARRAY_BAD_CTOR_ARG;
+
+                    hres = to_uint32(ctx, val, &len);
+                    jsval_release(val);
+                    if(FAILED(hres))
+                        return hres;
+
+                    length = len;
+                    size = length * elem_size;
+                    if(size < length || size > (UINT_MAX - FIELD_OFFSET(ArrayBufferInstance, buf[0])))
+                        return E_OUTOFMEMORY;
+
+                    hres = create_arraybuf(ctx, size, &buffer);
+                    if(FAILED(hres))
+                        return hres;
+
+                    hres = fill_typedarr_data_from_object(ctx, arraybuf_from_jsdisp(buffer)->buf,
+                                                          obj, length, jsclass);
+                    if(FAILED(hres)) {
+                        jsdisp_release(buffer);
+                        return hres;
+                    }
+                }
+            }else if(is_number(argv[0])) {
+                hres = to_integer(ctx, argv[0], &n);
+                if(FAILED(hres))
+                    return hres;
+                if(n < 0.0)
+                    return JS_E_TYPEDARRAY_INVALID_OFFSLEN;
+                if(n * elem_size > (UINT_MAX - FIELD_OFFSET(ArrayBufferInstance, buf[0])))
+                    return E_OUTOFMEMORY;
+                length = n;
+            }else
+                return JS_E_TYPEDARRAY_BAD_CTOR_ARG;
+        }
+
+        if(!r)
+            return S_OK;
+
+        if(!buffer) {
+            hres = create_arraybuf(ctx, length * elem_size, &buffer);
+            if(FAILED(hres))
+                return hres;
+        }
+
+        hres = create_typedarr(ctx, jsclass, buffer, offset, length, &typedarr);
+        jsdisp_release(buffer);
+        if(FAILED(hres))
+            return hres;
+
+        *r = jsval_obj(typedarr);
+        break;
+    }
+    default:
+        FIXME("unimplemented flags: %x\n", flags);
+        return E_NOTIMPL;
+    }
+
+    return S_OK;
+}
+
+#define X(NAME, JSCLASS, TYPE, CONVERT, NUM_TYPE) \
+static HRESULT NAME ## Constr_value(script_ctx_t *ctx, jsval_t vthis, WORD flags, unsigned argc, jsval_t *argv, jsval_t *r) \
+{ \
+    return TypedArrayConstr_value(ctx, vthis, flags, argc, argv, r, JSCLASS); \
+}
+TYPEDARRAY_LIST
+#undef X
+
+#define X(NAME, JSCLASS, TYPE, CONVERT, NUM_TYPE) [TYPEDARRAY_INDEX(JSCLASS)] = NAME ## Constr_value,
+static const builtin_invoke_t TypedArray_constr[] = { TYPEDARRAY_LIST };
+#undef X
+
+static const builtin_info_t TypedArrayConstr_info = {
+    JSCLASS_FUNCTION,
+    Function_value,
+    0,
+    NULL,
+    NULL,
+    NULL
+};
+
+static inline jsdisp_t *impl_from_IWineDispatchProxyCbPrivate(IWineDispatchProxyCbPrivate *iface)
+{
+    return CONTAINING_RECORD((IDispatchEx*)iface, jsdisp_t, IDispatchEx_iface);
+}
+
+HRESULT WINAPI WineDispatchProxyCbPrivate_CreateArrayBuffer(IWineDispatchProxyCbPrivate *iface, DWORD size, IDispatch **arraybuf, void **data)
+{
+    jsdisp_t *This = impl_from_IWineDispatchProxyCbPrivate(iface);
+    jsdisp_t *obj;
+    HRESULT hres;
+
+    hres = create_arraybuf(This->ctx, size, &obj);
+    if(FAILED(hres))
+        return hres;
+
+    *arraybuf = (IDispatch*)&obj->IDispatchEx_iface;
+    *data = arraybuf_from_jsdisp(obj)->buf;
+    return S_OK;
+}
+
+HRESULT WINAPI WineDispatchProxyCbPrivate_GetRandomValues(IDispatch *disp)
+{
+    jsdisp_t *obj = to_jsdisp(disp);
+    TypedArrayInstance *typedarr;
+    DWORD size;
+
+    if(!obj || obj->builtin_info->class < FIRST_TYPEDARRAY_JSCLASS || obj->builtin_info->class > LAST_TYPEDARRAY_JSCLASS)
+        return E_INVALIDARG;
+
+    if(obj->builtin_info->class == JSCLASS_FLOAT32ARRAY || obj->builtin_info->class == JSCLASS_FLOAT64ARRAY) {
+        /* FIXME: Return TypeMismatchError */
+        return E_FAIL;
+    }
+
+    typedarr = typedarr_from_jsdisp(obj);
+    size = typedarr->length * TypedArray_elem_size[TYPEDARRAY_INDEX(obj->builtin_info->class)];
+    if(size > 65536) {
+        /* FIXME: Return QuotaExceededError */
+        return E_FAIL;
+    }
+
+    if(!RtlGenRandom(&arraybuf_from_jsdisp(typedarr->buffer)->buf[typedarr->offset], size))
+        return HRESULT_FROM_WIN32(GetLastError());
+
+    return S_OK;
+}
+
 HRESULT init_arraybuf_constructors(script_ctx_t *ctx)
 {
     static const struct {
@@ -720,6 +1353,7 @@ HRESULT init_arraybuf_constructors(script_ctx_t *ctx)
         { L"byteOffset",    DataView_get_byteOffset },
     };
     ArrayBufferInstance *arraybuf;
+    TypedArrayInstance *typedarr;
     DataViewInstance *view;
     property_desc_t desc;
     HRESULT hres;
@@ -759,7 +1393,7 @@ HRESULT init_arraybuf_constructors(script_ctx_t *ctx)
 
     hres = init_dispex(&view->dispex, ctx, &DataView_info, ctx->object_prototype);
     if(FAILED(hres)) {
-        jsdisp_release(&view->buffer->dispex);
+        jsdisp_release(view->buffer);
         free(view);
         return hres;
     }
@@ -770,7 +1404,6 @@ HRESULT init_arraybuf_constructors(script_ctx_t *ctx)
     desc.explicit_value = FALSE;
     desc.setter = NULL;
 
-    /* FIXME: If we find we need builtin accessors in other places, we should consider a more generic solution */
     for(i = 0; i < ARRAY_SIZE(DataView_getters); i++) {
         hres = create_builtin_function(ctx, DataView_getters[i].get, NULL, NULL, PROPF_METHOD, NULL, &desc.getter);
         if(SUCCEEDED(hres)) {
@@ -791,6 +1424,42 @@ HRESULT init_arraybuf_constructors(script_ctx_t *ctx)
 
     hres = jsdisp_define_data_property(ctx->global, L"DataView", PROPF_CONFIGURABLE | PROPF_WRITABLE,
                                        jsval_obj(ctx->dataview_constr));
+    if(FAILED(hres))
+        return hres;
+
+    for(i = 0; i < ARRAY_SIZE(TypedArray_info); i++) {
+        if(!(typedarr = calloc(1, sizeof(TypedArrayInstance))))
+            return E_OUTOFMEMORY;
+
+        hres = create_arraybuf(ctx, 0, &typedarr->buffer);
+        if(FAILED(hres)) {
+            free(typedarr);
+            return hres;
+        }
+
+        hres = init_dispex(&typedarr->dispex, ctx, &TypedArray_info[i], ctx->object_prototype);
+        if(FAILED(hres)) {
+            jsdisp_release(typedarr->buffer);
+            free(typedarr);
+            return hres;
+        }
+
+        hres = create_builtin_constructor(ctx, TypedArray_constr[i], TypedArray_name[i], &TypedArrayConstr_info,
+                                          PROPF_CONSTR|1, &typedarr->dispex, &ctx->typedarr_constr[i]);
+        jsdisp_release(&typedarr->dispex);
+        if(FAILED(hres))
+            return hres;
+
+        hres = jsdisp_define_data_property(ctx->typedarr_constr[i], L"BYTES_PER_ELEMENT", 0,
+                                           jsval_number(TypedArray_elem_size[i]));
+        if(FAILED(hres))
+            return hres;
+
+        hres = jsdisp_define_data_property(ctx->global, TypedArray_name[i], PROPF_CONFIGURABLE | PROPF_WRITABLE,
+                                           jsval_obj(ctx->typedarr_constr[i]));
+        if(FAILED(hres))
+            return hres;
+    }
 
     return hres;
 }

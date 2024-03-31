@@ -129,7 +129,7 @@ static IndexItem *parse_index_sitemap_object(HHInfo *info, stream_t *stream)
 
     item = calloc(1, sizeof(IndexItem));
     item->nItems = 0;
-    item->items = NULL;
+    item->items = calloc(2, sizeof(void *));
     item->itemFlags = 0x11;
 
     while(next_node(stream, &node)) {

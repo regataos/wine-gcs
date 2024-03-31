@@ -1,5 +1,4 @@
 MODULE    = msisys.ocx
 IMPORTS   = uuid
 
-SOURCES = \
-	msisys.c
+C_SRCS = msisys.c

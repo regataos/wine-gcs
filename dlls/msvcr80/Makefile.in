@@ -1,11 +1,11 @@
 EXTRADEFS = -D_CRTIMP=
 MODULE    = msvcr80.dll
 IMPORTLIB = msvcr80
-IMPORTS   = $(MUSL_PE_LIBS) ntdll
+IMPORTS   = ntdll
 DELAYIMPORTS = advapi32 user32
 PARENTSRC = ../msvcrt
 
-SOURCES = \
+C_SRCS = \
 	console.c \
 	cpp.c \
 	ctype.c \
@@ -16,7 +16,6 @@ SOURCES = \
 	except.c \
 	except_arm.c \
 	except_arm64.c \
-	except_arm64ec.c \
 	except_i386.c \
 	except_x86_64.c \
 	exception_ptr.c \
@@ -31,7 +30,6 @@ SOURCES = \
 	mathf.c \
 	mbcs.c \
 	misc.c \
-	msvcr80.rc \
 	onexit.c \
 	process.c \
 	scanf.c \
@@ -41,3 +39,5 @@ SOURCES = \
 	time.c \
 	undname.c \
 	wcs.c
+
+RC_SRCS = msvcr80.rc

@@ -59,7 +59,7 @@ DWORD CreateLobbyMessageReceptionThread( HANDLE hNotifyEvent, HANDLE hStart,
   LPMSGTHREADINFO lpThreadInfo;
   HANDLE          hThread;
 
-  lpThreadInfo = malloc( sizeof( *lpThreadInfo ) );
+  lpThreadInfo = HeapAlloc( GetProcessHeap(), 0, sizeof( *lpThreadInfo ) );
   if( lpThreadInfo == NULL )
   {
     return 0;
@@ -102,7 +102,7 @@ DWORD CreateLobbyMessageReceptionThread( HANDLE hNotifyEvent, HANDLE hStart,
 
 error:
 
-  free( lpThreadInfo );
+  HeapFree( GetProcessHeap(), 0, lpThreadInfo );
 
   return 0;
 }
@@ -147,7 +147,7 @@ static DWORD CALLBACK DPL_MSG_ThreadMain( LPVOID lpContext )
 
 end_of_thread:
   TRACE( "Msg thread exiting!\n" );
-  free( lpThreadInfo );
+  HeapFree( GetProcessHeap(), 0, lpThreadInfo );
 
   return 0;
 }
@@ -190,7 +190,7 @@ HRESULT DP_MSG_SendRequestPlayerId( IDirectPlayImpl *This, DWORD dwFlags, DPID *
 
   dwMsgSize = This->dp2->spData.dwSPHeaderSize + sizeof( *lpMsgBody );
 
-  lpMsg = calloc( 1, dwMsgSize );
+  lpMsg = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, dwMsgSize );
 
   lpMsgBody = (LPDPMSG_REQUESTNEWPLAYERID)( (BYTE*)lpMsg +
                                              This->dp2->spData.dwSPHeaderSize );
@@ -241,7 +241,7 @@ HRESULT DP_MSG_SendRequestPlayerId( IDirectPlayImpl *This, DWORD dwFlags, DPID *
      *        for several different messages?
      */
 
-    free( lpMsg );
+    HeapFree( GetProcessHeap(), 0, lpMsg );
   }
 
   return hr;
@@ -256,7 +256,7 @@ HRESULT DP_MSG_ForwardPlayerCreation( IDirectPlayImpl *This, DPID dpidServer )
 
   dwMsgSize = This->dp2->spData.dwSPHeaderSize + sizeof( *lpMsgBody );
 
-  lpMsg = calloc( 1, dwMsgSize );
+  lpMsg = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, dwMsgSize );
 
   lpMsgBody = (LPDPMSG_FORWARDADDPLAYER)( (BYTE*)lpMsg +
                                           This->dp2->spData.dwSPHeaderSize );
@@ -428,7 +428,9 @@ void DP_MSG_ReplyReceived( IDirectPlayImpl *This, WORD wCommandId, const void *l
   if( lpReplyList != NULL )
   {
     lpReplyList->replyExpected.dwMsgBodySize = dwMsgBodySize;
-    lpReplyList->replyExpected.lpReplyMsg = malloc( dwMsgBodySize );
+    lpReplyList->replyExpected.lpReplyMsg = HeapAlloc( GetProcessHeap(),
+                                                       HEAP_ZERO_MEMORY,
+                                                       dwMsgBodySize );
     CopyMemory( lpReplyList->replyExpected.lpReplyMsg,
                 lpcMsgBody, dwMsgBodySize );
 
@@ -450,7 +452,7 @@ void DP_MSG_ToSelf( IDirectPlayImpl *This, DPID dpidSelf )
 
   dwMsgSize = This->dp2->spData.dwSPHeaderSize + sizeof( *lpMsgBody );
 
-  lpMsg = calloc( 1, dwMsgSize );
+  lpMsg = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, dwMsgSize );
 
   lpMsgBody = (LPDPMSG_SENDENVELOPE)( (BYTE*)lpMsg +
                                       This->dp2->spData.dwSPHeaderSize );

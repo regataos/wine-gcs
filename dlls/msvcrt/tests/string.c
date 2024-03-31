@@ -264,7 +264,6 @@ static void test_mbcp(void)
     unsigned char *mbstring2 = (unsigned char *)"\xb0\xb1\xb2\xb3Q\xb4\xb5"; /* correct string */
     unsigned char *mbsonlylead = (unsigned char *)"\xb0\0\xb1\xb2 \xb3";
     unsigned char buf[16];
-    unsigned char *ret;
     int step;
     CPINFO cp_info;
 
@@ -336,7 +335,6 @@ static void test_mbcp(void)
     expect_eq(_ismbstrail(mbsonlylead, &mbsonlylead[5]), FALSE, int, "%d");
 
     /* _mbsbtype */
-    expect_eq(_mbsbtype(NULL, 0), _MBC_ILLEGAL, int, "%d");
     expect_eq(_mbsbtype(mbstring, 0), _MBC_LEAD, int, "%d");
     expect_eq(_mbsbtype(mbstring, 1), _MBC_TRAIL, int, "%d");
     expect_eq(_mbsbtype(mbstring, 2), _MBC_LEAD, int, "%d");
@@ -462,53 +460,6 @@ static void test_mbcp(void)
         ok(copied == 1, "copied = %d\n", copied);
         expect_bin(buf, "\x00\xff", 2);
     }
-
-    errno = 0xdeadbeef;
-    ret = _mbsncpy(NULL, mbstring, 1);
-    ok(ret == NULL, "_mbsncpy returned %p, expected NULL\n", ret);
-    ok(errno == EINVAL, "_mbsncpy returned %d\n", errno);
-
-    memset(buf, 0xff, sizeof(buf));
-    errno = 0xdeadbeef;
-    ret = _mbsncpy(buf, NULL, 1);
-    ok(ret == NULL, "_mbsncpy returned %p, expected NULL\n", ret);
-    ok(errno == EINVAL, "_mbsncpy returned %d\n", errno);
-    expect_bin(buf, "\xff\xff\xff", 3);
-
-    errno = 0xdeadbeef;
-    ret = _mbsncpy(NULL, mbstring, 0);
-    ok(ret == NULL, "_mbsncpy returned %p, expected NULL\n", ret);
-    ok(errno == 0xdeadbeef, "_mbsncpy should not change errno\n");
-
-    memset(buf, 0xff, sizeof(buf));
-    errno = 0xdeadbeef;
-    ret = _mbsncpy(buf, NULL, 0);
-    ok(ret == buf, "_mbsncpy returned %p, expected %sp\n", ret, buf);
-    ok(errno == 0xdeadbeef, "_mbsncpy should not change errno\n");
-
-    memset(buf, 0xff, sizeof(buf));
-    errno = 0xdeadbeef;
-    ret = _mbsncpy(NULL, mbstring, 1);
-    ok(ret == NULL, "_mbsncpy returned %p, expected NULL\n", ret);
-    ok(errno == EINVAL, "_mbsncpy returned %d\n", errno);
-
-    memset(buf, 0xff, sizeof(buf));
-    errno = 0xdeadbeef;
-    ret = _mbsncpy(buf, NULL, 1);
-    ok(ret == NULL, "_mbsncpy returned %p, expected NULL\n", ret);
-    ok(errno == EINVAL, "_mbsncpy returned %d\n", errno);
-
-    memset(buf, 0xff, sizeof(buf));
-    ret = _mbsncpy(NULL, mbstring, 0);
-    ok(ret == NULL, "_mbsncpy returned %p, expected %p\n", ret, buf);
-
-    memset(buf, 0xff, sizeof(buf));
-    ret = _mbsncpy(buf, NULL, 0);
-    ok(ret == buf, "_mbsncpy returned %p, expected %sp\n", ret, buf);
-
-    memset(buf, 0xff, sizeof(buf));
-    ret = _mbsncpy(buf, mbstring, 0);
-    ok(ret == buf, "_mbsncpy returned %p, expected %p\n", ret, buf);
 
     memset(buf, 0xff, sizeof(buf));
     _mbsncpy(buf, mbstring, 1);
@@ -691,20 +642,10 @@ static void test_mbsspnp( void)
 
 static void test_strdup(void)
 {
-    char *str;
-    errno = 0xdeadbeef;
-    str = strdup(0);
-    ok(str == 0, "strdup returned %s, expected NULL\n", wine_dbgstr_a(str));
-    ok(errno == 0xdeadbeef, "errno is %d, expected 0xdeadbeef\n", errno);
-}
-
-static void test_wcsdup(void)
-{
-    WCHAR *str;
-    errno = 0xdeadbeef;
-    str = wcsdup(0);
-    ok(str == 0, "wcsdup returned %s, expected NULL\n", wine_dbgstr_w(str));
-    ok(errno == 0xdeadbeef, "errno is %d, expected 0xdeadbeef\n", errno);
+   char *str;
+   str = _strdup( 0 );
+   ok( str == 0, "strdup returns %s should be 0\n", str);
+   free( str );
 }
 
 static void test_strcmp(void)
@@ -4154,9 +4095,6 @@ static void test__tcsncoll(void)
         { "English", "ABCe", "ABCf",  3,  0 },
         { "English", "abcd", "ABCD", 10, -1 },
 
-        { "English", "AB D", "AB-D",  4,  1 },
-        { "English", "AB D", "AB'D",  4,  1 },
-
         { "C",       "ABCD", "ABCD",  4,  0 },
         { "C",       "ABCD", "ABCD", 10,  0 },
 
@@ -4168,9 +4106,6 @@ static void test__tcsncoll(void)
 
         { "C",       "ABCe", "ABCf",  3,  0 },
         { "C",       "abcd", "ABCD", 10,  1 },
-
-        { "C",       "AB D", "AB-D",  4,  -1 },
-        { "C",       "AB D", "AB'D",  4,  -1 },
     };
     WCHAR str1W[16];
     WCHAR str2W[16];
@@ -4197,14 +4132,11 @@ static void test__tcsncoll(void)
 
         ret = _strncoll(str1, str2, tests[i].count);
         if (!tests[i].exp)
-            ok(!ret, "expected 0, got %d for %s, %s, %d for locale %s\n",
-               ret, str1, str2, (int)tests[i].count, tests[i].locale);
+            ok(!ret, "expected 0, got %d for %s, %s, %d\n", ret, str1, str2, (int)tests[i].count);
         else if (tests[i].exp < 0)
-            ok(ret < 0, "expected < 0, got %d for %s, %s, %d for locale %s\n",
-               ret, str1, str2, (int)tests[i].count, tests[i].locale);
+            ok(ret < 0, "expected < 0, got %d for %s, %s, %d\n", ret, str1, str2, (int)tests[i].count);
         else
-            ok(ret > 0, "expected > 0, got %d for %s, %s, %d for locale %s\n",
-               ret, str1, str2, (int)tests[i].count, tests[i].locale);
+            ok(ret > 0, "expected > 0, got %d for %s, %s, %d\n", ret, str1, str2, (int)tests[i].count);
 
         memset(str1W, 0xee, sizeof(str1W));
         len = mbstowcs(str1W, str1, ARRAY_SIZE(str1W));
@@ -4216,94 +4148,11 @@ static void test__tcsncoll(void)
 
         ret = _wcsncoll(str1W, str2W, tests[i].count);
         if (!tests[i].exp)
-            ok(!ret, "expected 0, got %d for %s, %s, %d for locale %s\n",
-               ret, str1, str2, (int)tests[i].count, tests[i].locale);
+            ok(!ret, "expected 0, got %d for %s, %s, %d\n", ret, str1, str2, (int)tests[i].count);
         else if (tests[i].exp < 0)
-            ok(ret < 0, "expected < 0, got %d for %s, %s, %d for locale %s\n",
-               ret, str1, str2, (int)tests[i].count, tests[i].locale);
+            ok(ret < 0, "expected < 0, got %d for %s, %s, %d\n", ret, str1, str2, (int)tests[i].count);
         else
-            ok(ret > 0, "expected > 0, got %d for %s, %s, %d for locale %s\n",
-               ret, str1, str2, (int)tests[i].count, tests[i].locale);
-    }
-}
-
-static void test__tcscoll(void)
-{
-    struct test {
-        const char *locale;
-        const char *str1;
-        const char *str2;
-        int exp;
-    };
-    static const struct test tests[] = {
-        { "English", "ABCD", "ABCD",  0 },
-        { "English", "ABC",  "ABCD", -1 },
-        { "English", "ABCD",  "ABC",  1 },
-        { "English", "ABCe", "ABCf", -1 },
-        { "English", "abcd", "ABCD", -1 },
-        { "English", "AB D", "AB-D",  1 },
-        { "English", "AB D", "AB'D",  1 },
-
-        { "C",       "ABCD", "ABCD",  0 },
-        { "C",       "ABC",  "ABCD", -1 },
-        { "C",       "ABCD",  "ABC",  1 },
-        { "C",       "ABCe", "ABCf", -1 },
-        { "C",       "abcd", "ABCD",  1 },
-        { "C",       "AB D", "AB-D", -1 },
-        { "C",       "AB D", "AB'D", -1 },
-    };
-    WCHAR str1W[16];
-    WCHAR str2W[16];
-    char str1[16];
-    char str2[16];
-    size_t len;
-    int i, ret;
-
-    for (i = 0; i < ARRAY_SIZE(tests); i++)
-    {
-        if (!setlocale(LC_ALL, tests[i].locale))
-        {
-            win_skip("%s locale _tcsncoll tests\n", tests[i].locale);
-            for (; i+1 < ARRAY_SIZE(tests); i++)
-                if (strcmp(tests[i].locale, tests[i+1].locale)) break;
-            continue;
-        }
-
-        memset(str1, 0xee, sizeof(str1));
-        strcpy(str1, tests[i].str1);
-
-        memset(str2, 0xff, sizeof(str2));
-        strcpy(str2, tests[i].str2);
-
-        ret = strcoll(str1, str2);
-        if (!tests[i].exp)
-            ok(!ret, "expected 0, got %d for %s, %s for locale %s\n",
-               ret, str1, str2, tests[i].locale);
-        else if (tests[i].exp < 0)
-            ok(ret < 0, "expected < 0, got %d for %s, %s for locale %s\n",
-               ret, str1, str2, tests[i].locale);
-        else
-            ok(ret > 0, "expected > 0, got %d for %s, %s for locale %s\n",
-               ret, str1, str2, tests[i].locale);
-
-        memset(str1W, 0xee, sizeof(str1W));
-        len = mbstowcs(str1W, str1, ARRAY_SIZE(str1W));
-        str1W[len] = 0;
-
-        memset(str2W, 0xff, sizeof(str2W));
-        len = mbstowcs(str2W, str2, ARRAY_SIZE(str2W));
-        str2W[len] = 0;
-
-        ret = wcscoll(str1W, str2W);
-        if (!tests[i].exp)
-            ok(!ret, "expected 0, got %d for %s, %s for locale %s\n",
-               ret, str1, str2, tests[i].locale);
-        else if (tests[i].exp < 0)
-            ok(ret < 0, "expected < 0, got %d for %s, %s for locale %s\n",
-               ret, str1, str2, tests[i].locale);
-        else
-            ok(ret > 0, "expected > 0, got %d for %s, %s for locale %s\n",
-               ret, str1, str2, tests[i].locale);
+            ok(ret > 0, "expected > 0, got %d for %s, %s, %d\n", ret, str1, str2, (int)tests[i].count);
     }
 }
 
@@ -4763,27 +4612,6 @@ static void test_wcsncpy(void)
             wine_dbgstr_wn(dst, ARRAY_SIZE(dst)));
 }
 
-static void test_mbsrev(void)
-{
-    unsigned char buf[64], *ret;
-    int cp = _getmbcp();
-
-    _setmbcp(932);
-
-    strcpy((char *)buf, "\x36\x8c\x8e");
-    ret = _mbsrev(buf);
-    ok(ret == buf, "ret = %p, expected %p\n", ret, buf);
-    ok(!memcmp(buf, "\x8c\x8e\x36", 4), "buf = %s\n", wine_dbgstr_a((char *)buf));
-
-    /* test string that ends with leading byte */
-    strcpy((char *)buf, "\x36\x8c");
-    ret = _mbsrev(buf);
-    ok(ret == buf, "ret = %p, expected %p\n", ret, buf);
-    ok(!memcmp(buf, "\x36", 2), "buf = %s\n", wine_dbgstr_a((char *)buf));
-
-    _setmbcp(cp);
-}
-
 START_TEST(string)
 {
     char mem[100];
@@ -4876,7 +4704,6 @@ START_TEST(string)
     test_mbsspn();
     test_mbsspnp();
     test_strdup();
-    test_wcsdup();
     test_strcmp();
     test_strcpy_s();
     test_memcpy_s();
@@ -4934,7 +4761,6 @@ START_TEST(string)
     test__memicmp_l();
     test__strupr();
     test__tcsncoll();
-    test__tcscoll();
     test__tcsnicoll();
     test___strncnt();
     test_C_locale();
@@ -4945,5 +4771,4 @@ START_TEST(string)
     test_SpecialCasing();
     test__mbbtype();
     test_wcsncpy();
-    test_mbsrev();
 }

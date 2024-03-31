@@ -2,6 +2,7 @@ MODULE        = winexinput.sys
 IMPORTS       = ntoskrnl hidparse
 EXTRADLLFLAGS = -Wl,--subsystem,native
 
-SOURCES = \
-	main.c \
-	winexinput.rc
+C_SRCS = \
+	main.c
+
+RC_SRCS = winexinput.rc

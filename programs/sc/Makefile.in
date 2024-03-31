@@ -3,5 +3,4 @@ IMPORTS   = advapi32
 
 EXTRADLLFLAGS = -mconsole -municode
 
-SOURCES = \
-	sc.c
+C_SRCS = sc.c

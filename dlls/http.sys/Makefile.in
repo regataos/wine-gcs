@@ -3,5 +3,5 @@ IMPORTS   = ntoskrnl ws2_32
 
 EXTRADLLFLAGS = -Wl,--subsystem,native
 
-SOURCES = \
+C_SRCS = \
 	http.c

@@ -55,7 +55,7 @@ static LPSTR MPR_GetValueName( LPCSTR pbResource, WORD cbResource, BYTE nType )
     LPSTR name;
     DWORD  i;
 
-    name = malloc( 6 + cbResource * 2 );
+    name = HeapAlloc( GetProcessHeap(), 0, 6+cbResource*2 );
     if( !name ) return NULL;
 
     sprintf( name, "X-%02X-", nType );
@@ -114,7 +114,7 @@ DWORD WINAPI WNetCachePassword(
             r = WN_CANCEL;
         else
             r = WN_SUCCESS;
-        free( valname );
+        HeapFree( GetProcessHeap(), 0, valname );
     }
     else
         r = WN_OUT_OF_MEMORY;
@@ -152,7 +152,7 @@ UINT WINAPI WNetRemoveCachedPassword(
             r = WN_ACCESS_DENIED;
         else
             r = WN_SUCCESS;
-        free( valname );
+        HeapFree( GetProcessHeap(), 0, valname );
     }
     else
         r = WN_OUT_OF_MEMORY;
@@ -209,7 +209,7 @@ DWORD WINAPI WNetGetCachedPassword(
             r = WN_CANCEL;
         else
             r = WN_SUCCESS;
-        free( valname );
+        HeapFree( GetProcessHeap(), 0, valname );
     }
     else
         r = WN_OUT_OF_MEMORY;
@@ -299,7 +299,7 @@ UINT WINAPI WNetEnumCachedPasswords(
 
         /* read the value data */
         size = offsetof( PASSWORD_CACHE_ENTRY, abResource[val_sz + data_sz] );
-        entry = malloc( size );
+        entry = HeapAlloc( GetProcessHeap(), 0, size );
         memcpy( entry->abResource, val, val_sz );
         entry->cbEntry = size;
         entry->cbResource = val_sz;
@@ -311,7 +311,7 @@ UINT WINAPI WNetEnumCachedPasswords(
                            &entry->abResource[val_sz], &data_sz );
         if( r == ERROR_SUCCESS )
             enumPasswordProc( entry, param );
-        free( entry );
+        HeapFree( GetProcessHeap(), 0, entry );
     }
 
     RegCloseKey( hkey );

@@ -29,6 +29,7 @@
 
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
+#define NONAMELESSUNION
 #include "windef.h"
 #include "winnt.h"
 #include "winternl.h"
@@ -328,6 +329,8 @@ C_ASSERT( HEAP_MIN_LARGE_BLOCK_SIZE <= HEAP_INITIAL_GROW_SIZE );
 #define HEAP_VALIDATE_PARAMS  0x40000000
 #define HEAP_CHECKING_ENABLED 0x80000000
 
+BOOL delay_heap_free = FALSE;
+
 static struct heap *process_heap;  /* main process heap */
 
 static NTSTATUS heap_free_block_lfh( struct heap *heap, ULONG flags, struct block *block );
@@ -460,6 +463,16 @@ static inline void valgrind_make_noaccess( void const *ptr, SIZE_T size )
 #endif
 }
 
+/* mark a block of memory as initialized for debugging purposes */
+static inline void valgrind_make_readable( void const *ptr, SIZE_T size )
+{
+#if defined(VALGRIND_MAKE_MEM_DEFINED)
+    VALGRIND_DISCARD( VALGRIND_MAKE_MEM_DEFINED( ptr, size ) );
+#elif defined(VALGRIND_MAKE_READABLE)
+    VALGRIND_DISCARD( VALGRIND_MAKE_READABLE( ptr, size ) );
+#endif
+}
+
 /* mark a block of memory as uninitialized for debugging purposes */
 static inline void valgrind_make_writable( void const *ptr, SIZE_T size )
 {
@@ -583,13 +596,13 @@ static inline ULONG heap_get_flags( const struct heap *heap, ULONG flags )
 static inline void heap_lock( struct heap *heap, ULONG flags )
 {
     if (flags & HEAP_NO_SERIALIZE) return;
-    enter_critical_section( &heap->cs );
+    RtlEnterCriticalSection( &heap->cs );
 }
 
 static inline void heap_unlock( struct heap *heap, ULONG flags )
 {
     if (flags & HEAP_NO_SERIALIZE) return;
-    leave_critical_section( &heap->cs );
+    RtlLeaveCriticalSection( &heap->cs );
 }
 
 static void heap_set_status( const struct heap *heap, ULONG flags, NTSTATUS status )
@@ -1478,8 +1491,8 @@ static void heap_set_debug_flags( HANDLE handle )
         }
     }
 
-    if ((heap->flags & HEAP_GROWABLE) && !heap->pending_free &&
-        ((flags & HEAP_FREE_CHECKING_ENABLED) || RUNNING_ON_VALGRIND))
+    if (delay_heap_free || ((heap->flags & HEAP_GROWABLE) && !heap->pending_free &&
+        ((flags & HEAP_FREE_CHECKING_ENABLED) || RUNNING_ON_VALGRIND)))
     {
         heap->pending_free = RtlAllocateHeap( handle, HEAP_ZERO_MEMORY,
                                               MAX_FREE_PENDING * sizeof(*heap->pending_free) );
@@ -1490,9 +1503,23 @@ static void heap_set_debug_flags( HANDLE handle )
 
 /***********************************************************************
  *           RtlCreateHeap   (NTDLL.@)
+ *
+ * Create a new Heap.
+ *
+ * PARAMS
+ *  flags      [I] HEAP_ flags from "winnt.h"
+ *  addr       [I] Desired base address
+ *  totalSize  [I] Total size of the heap, or 0 for a growable heap
+ *  commitSize [I] Amount of heap space to commit
+ *  unknown    [I] Not yet understood
+ *  definition [I] Heap definition
+ *
+ * RETURNS
+ *  Success: A HANDLE to the newly created heap.
+ *  Failure: a NULL HANDLE.
  */
 HANDLE WINAPI RtlCreateHeap( ULONG flags, void *addr, SIZE_T total_size, SIZE_T commit_size,
-                             void *lock, RTL_HEAP_PARAMETERS *params )
+                             void *unknown, RTL_HEAP_DEFINITION *definition )
 {
     struct entry *entry;
     struct heap *heap;
@@ -1500,8 +1527,8 @@ HANDLE WINAPI RtlCreateHeap( ULONG flags, void *addr, SIZE_T total_size, SIZE_T 
     SUBHEAP *subheap;
     unsigned int i;
 
-    TRACE( "flags %#lx, addr %p, total_size %#Ix, commit_size %#Ix, lock %p, params %p\n",
-           flags, addr, total_size, commit_size, lock, params );
+    TRACE( "flags %#lx, addr %p, total_size %#Ix, commit_size %#Ix, unknown %p, definition %p\n",
+           flags, addr, total_size, commit_size, unknown, definition );
 
     flags &= ~(HEAP_TAIL_CHECKING_ENABLED|HEAP_FREE_CHECKING_ENABLED);
     if (process_heap) flags |= HEAP_PRIVATE;
@@ -1548,7 +1575,7 @@ HANDLE WINAPI RtlCreateHeap( ULONG flags, void *addr, SIZE_T total_size, SIZE_T 
     }
     else
     {
-        RtlInitializeCriticalSectionEx( &heap->cs, 0, RTL_CRITICAL_SECTION_FLAG_FORCE_DEBUG_INFO );
+        RtlInitializeCriticalSection( &heap->cs );
         heap->cs.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": heap.cs");
     }
 
@@ -1580,9 +1607,9 @@ HANDLE WINAPI RtlCreateHeap( ULONG flags, void *addr, SIZE_T total_size, SIZE_T 
     /* link it into the per-process heap list */
     if (process_heap)
     {
-        enter_critical_section( &process_heap->cs );
+        RtlEnterCriticalSection( &process_heap->cs );
         list_add_head( &process_heap->entry, &heap->entry );
-        leave_critical_section( &process_heap->cs );
+        RtlLeaveCriticalSection( &process_heap->cs );
     }
     else if (!addr)
     {
@@ -1641,9 +1668,9 @@ HANDLE WINAPI RtlDestroyHeap( HANDLE handle )
     if (heap == process_heap) return handle; /* cannot delete the main process heap */
 
     /* remove it from the per-process list */
-    enter_critical_section( &process_heap->cs );
+    RtlEnterCriticalSection( &process_heap->cs );
     list_remove( &heap->entry );
-    leave_critical_section( &process_heap->cs );
+    RtlLeaveCriticalSection( &process_heap->cs );
 
     heap->cs.DebugInfo->Spare[0] = 0;
     RtlDeleteCriticalSection( &heap->cs );
@@ -2037,8 +2064,9 @@ void *WINAPI DECLSPEC_HOTPATCH RtlAllocateHeap( HANDLE handle, ULONG flags, SIZE
     ULONG heap_flags;
     NTSTATUS status;
 
-    heap = unsafe_heap_from_handle( handle, flags, &heap_flags );
-    if ((block_size = heap_get_block_size( heap, heap_flags, size )) == ~0U)
+    if (!(heap = unsafe_heap_from_handle( handle, flags, &heap_flags )))
+        status = STATUS_INVALID_HANDLE;
+    else if ((block_size = heap_get_block_size( heap, heap_flags, size )) == ~0U)
         status = STATUS_NO_MEMORY;
     else if (block_size >= HEAP_MIN_LARGE_BLOCK_SIZE)
         status = heap_allocate_large( heap, heap_flags, block_size, size, &ptr );
@@ -2113,6 +2141,7 @@ static NTSTATUS heap_resize_large( struct heap *heap, ULONG flags, struct block 
     SIZE_T old_block_size = large->block_size;
     *old_size = large->data_size;
 
+    if (block_size < HEAP_MIN_LARGE_BLOCK_SIZE / 4) return STATUS_NO_MEMORY;  /* shrinking large block to small block */
     if (old_block_size < block_size) return STATUS_NO_MEMORY;
 
     /* FIXME: we could remap zero-pages instead */
@@ -2534,7 +2563,7 @@ ULONG WINAPI RtlGetProcessHeaps( ULONG count, HANDLE *heaps )
     ULONG total = 1;  /* main heap */
     struct list *ptr;
 
-    enter_critical_section( &process_heap->cs );
+    RtlEnterCriticalSection( &process_heap->cs );
     LIST_FOR_EACH( ptr, &process_heap->entry ) total++;
     if (total <= count)
     {
@@ -2542,7 +2571,7 @@ ULONG WINAPI RtlGetProcessHeaps( ULONG count, HANDLE *heaps )
         LIST_FOR_EACH( ptr, &process_heap->entry )
             *heaps++ = LIST_ENTRY( ptr, struct heap, entry );
     }
-    leave_critical_section( &process_heap->cs );
+    RtlLeaveCriticalSection( &process_heap->cs );
     return total;
 }
 

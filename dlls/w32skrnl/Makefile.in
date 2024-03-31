@@ -1,5 +1,4 @@
 MODULE    = w32skrnl.dll
 IMPORTS   = kernel
 
-SOURCES = \
-	w32skernel.c
+C_SRCS = w32skernel.c

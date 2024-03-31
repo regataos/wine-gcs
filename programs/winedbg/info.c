@@ -116,34 +116,9 @@ void info_help(void)
     while (infotext[i]) dbg_printf("%s\n", infotext[i++]);
 }
 
-struct info_module
+static const char* get_symtype_str(const IMAGEHLP_MODULE64* mi)
 {
-    IMAGEHLP_MODULEW64                  mi;
-    struct dhext_module_information     ext_module_info;
-    char                                name[64];
-};
-
-struct info_modules
-{
-    struct info_module *modules;
-    unsigned            num_alloc;
-    unsigned            num_used;
-};
-
-static const char* get_module_type(const struct info_module* im, BOOL is_embedded)
-{
-    switch (im->ext_module_info.type)
-    {
-    case DMT_ELF:       return "ELF";
-    case DMT_MACHO:     return "Mach-O";
-    case DMT_PE:        return !is_embedded && im->ext_module_info.is_wine_builtin ? "PE-Wine" : "PE";
-    default:            return "----";
-    }
-}
-
-static const char* get_symtype_str(const struct info_module* im)
-{
-    switch (im->mi.SymType)
+    switch (mi->SymType)
     {
     default:
     case SymNone:       return "--none--";
@@ -154,61 +129,49 @@ static const char* get_symtype_str(const struct info_module* im)
     case SymDeferred:   return "Deferred";
     case SymSym:        return "Sym";
     case SymDia:
-        if (im->ext_module_info.debug_format_bitmask)
+        switch (mi->CVSig)
         {
-            static char tmp[64];
-            tmp[0] = '\0';
-            if (im->ext_module_info.debug_format_bitmask & DHEXT_FORMAT_STABS) strcpy(tmp, "stabs");
-            if (im->ext_module_info.debug_format_bitmask & (DHEXT_FORMAT_DWARF2 | DHEXT_FORMAT_DWARF3 | DHEXT_FORMAT_DWARF4 | DHEXT_FORMAT_DWARF5))
+        case 'S' | ('T' << 8) | ('A' << 16) | ('B' << 24):
+            return "Stabs";
+        case 'D' | ('W' << 8) | ('A' << 16) | ('R' << 24):
+            /* previous versions of dbghelp used to report this... */
+            return "Dwarf";
+        default:
+            if ((mi->CVSig & 0x00FFFFFF) == ('D' | ('W' << 8) | ('F' << 16)))
             {
-                if (tmp[0]) strcat(tmp, ", ");
-                strcat(tmp, "Dwarf");
-                if (im->ext_module_info.debug_format_bitmask & DHEXT_FORMAT_DWARF2) strcat(tmp, "-2");
-                if (im->ext_module_info.debug_format_bitmask & DHEXT_FORMAT_DWARF3) strcat(tmp, "-3");
-                if (im->ext_module_info.debug_format_bitmask & DHEXT_FORMAT_DWARF4) strcat(tmp, "-4");
-                if (im->ext_module_info.debug_format_bitmask & DHEXT_FORMAT_DWARF5) strcat(tmp, "-5");
+                static char tmp[64];
+                DWORD versbit = mi->CVSig >> 24;
+                strcpy(tmp, "Dwarf");
+                if (versbit & 1) strcat(tmp, "-2");
+                if (versbit & 2) strcat(tmp, "-3");
+                if (versbit & 4) strcat(tmp, "-4");
+                if (versbit & 8) strcat(tmp, "-5");
+                return tmp;
             }
-            return tmp;
+            return "DIA";
         }
-        return "DIA";
     }
 }
 
-static const char* get_machine_str(DWORD machine)
+struct info_module
 {
-    static char tmp[32];
-    switch (machine)
-    {
-    case IMAGE_FILE_MACHINE_AMD64: return "x86_64";
-    case IMAGE_FILE_MACHINE_I386:  return "i386";
-    case IMAGE_FILE_MACHINE_ARM64: return "arm64";
-    case IMAGE_FILE_MACHINE_ARM:
-    case IMAGE_FILE_MACHINE_ARMNT: return "arm";
-    default: sprintf(tmp, "<%lx>", machine); return tmp;
-    }
-}
+    IMAGEHLP_MODULE64 mi;
+    char              name[64];
+};
 
-static void module_print_info(const struct info_module *module, BOOL is_embedded, BOOL multi_machine)
+struct info_modules
 {
-    char buffer[9];
-    snprintf(buffer, sizeof(buffer), "%s%s%s",
-             is_embedded ? "  \\-" : "",
-             get_module_type(module, is_embedded),
-             module->ext_module_info.has_file_image ? "" : "^");
+    struct info_module *modules;
+    unsigned            num_alloc;
+    unsigned            num_used;
+};
 
-    if (multi_machine)
-        dbg_printf("%-8s%16I64x-%16I64x       %-16s%-16s%s\n",
-                   buffer,
-                   module->mi.BaseOfImage,
-                   module->mi.BaseOfImage + module->mi.ImageSize,
-                   get_machine_str(module->mi.MachineType),
-                   is_embedded ? "\\" : get_symtype_str(module), module->name);
-    else
-        dbg_printf("%-8s%*I64x-%*I64x       %-16s%s\n",
-                   buffer,
-                   ADDRWIDTH, module->mi.BaseOfImage,
-                   ADDRWIDTH, module->mi.BaseOfImage + module->mi.ImageSize,
-                   is_embedded ? "\\" : get_symtype_str(module), module->name);
+static void module_print_info(const struct info_module *module, BOOL is_embedded)
+{
+    dbg_printf("%*.*I64x-%*.*I64x\t%-16s%s\n",
+               ADDRWIDTH, ADDRWIDTH, module->mi.BaseOfImage,
+               ADDRWIDTH, ADDRWIDTH, module->mi.BaseOfImage + module->mi.ImageSize,
+               is_embedded ? "\\" : get_symtype_str(&module->mi), module->name);
 }
 
 static int __cdecl module_compare(const void* p1, const void* p2)
@@ -225,9 +188,7 @@ static int __cdecl module_compare(const void* p1, const void* p2)
 static inline BOOL module_is_container(const struct info_module *wmod_cntnr,
         const struct info_module *wmod_child)
 {
-    return (wmod_cntnr->ext_module_info.type == DMT_ELF || wmod_cntnr->ext_module_info.type == DMT_MACHO) &&
-        (wmod_child->ext_module_info.type == DMT_PE) &&
-        wmod_cntnr->mi.BaseOfImage <= wmod_child->mi.BaseOfImage &&
+    return wmod_cntnr->mi.BaseOfImage <= wmod_child->mi.BaseOfImage &&
         wmod_cntnr->mi.BaseOfImage + wmod_cntnr->mi.ImageSize >=
         wmod_child->mi.BaseOfImage + wmod_child->mi.ImageSize;
 }
@@ -244,9 +205,7 @@ static BOOL CALLBACK info_mod_cb(PCSTR mod_name, DWORD64 base, PVOID ctx)
         im->modules = new;
     }
     im->modules[im->num_used].mi.SizeOfStruct = sizeof(im->modules[im->num_used].mi);
-    if (SymGetModuleInfoW64(dbg_curr_process->handle, base, &im->modules[im->num_used].mi) &&
-        wine_get_module_information(dbg_curr_process->handle, base, &im->modules[im->num_used].ext_module_info,
-                                    sizeof(im->modules[im->num_used].ext_module_info)))
+    if (SymGetModuleInfo64(dbg_curr_process->handle, base, &im->modules[im->num_used].mi))
     {
         const int dst_len = sizeof(im->modules[im->num_used].name);
         lstrcpynA(im->modules[im->num_used].name, mod_name, dst_len - 1);
@@ -261,13 +220,11 @@ static BOOL CALLBACK info_mod_cb(PCSTR mod_name, DWORD64 base, PVOID ctx)
  *
  * Display information about a given module (DLL or EXE), or about all modules
  */
-void info_win32_module(DWORD64 base, BOOL multi_machine)
+void info_win32_module(DWORD64 base)
 {
     struct info_modules im;
     UINT                i, j, num_printed = 0;
     BOOL                opt;
-    DWORD               machine;
-    BOOL                has_missing_filename = FALSE;
 
     if (!dbg_curr_process)
     {
@@ -285,59 +242,44 @@ void info_win32_module(DWORD64 base, BOOL multi_machine)
     SymEnumerateModules64(dbg_curr_process->handle, info_mod_cb, &im);
     SymSetExtendedOption(SYMOPT_EX_WINE_NATIVE_MODULES, opt);
 
-    if (!im.num_used) return;
-
-    /* main module is the first PE module in enumeration */
-    for (i = 0; i < im.num_used; i++)
-        if (im.modules[i].ext_module_info.type == DMT_PE)
-        {
-            machine = im.modules[i].mi.MachineType;
-            break;
-        }
-    if (i == im.num_used) machine = IMAGE_FILE_MACHINE_UNKNOWN;
     qsort(im.modules, im.num_used, sizeof(im.modules[0]), module_compare);
 
-    if (multi_machine)
-        dbg_printf("%-8s%-40s%-16s%-16sName (%d modules)\n", "Module", "Address", "Machine", "Debug info", im.num_used);
-    else
-    {
-        unsigned same_machine = 0;
-        for (i = 0; i < im.num_used; i++)
-            if (machine == im.modules[i].mi.MachineType) same_machine++;
-        dbg_printf("%-8s%-*s%-16sName (%d modules",
-                   "Module", ADDRWIDTH == 16 ? 40 : 24, "Address", "Debug info", same_machine);
-        if (same_machine != im.num_used)
-            dbg_printf(", %u for wow64 not listed", im.num_used - same_machine);
-        dbg_printf(")\n");
-    }
+    dbg_printf("Module\tAddress\t\t\t%sDebug info\tName (%d modules)\n",
+	       ADDRWIDTH == 16 ? "\t\t" : "", im.num_used);
 
     for (i = 0; i < im.num_used; i++)
     {
-        if (base &&
+        if (base && 
             (base < im.modules[i].mi.BaseOfImage || base >= im.modules[i].mi.BaseOfImage + im.modules[i].mi.ImageSize))
             continue;
-        if (!multi_machine && machine != im.modules[i].mi.MachineType) continue;
-        if (!im.modules[i].ext_module_info.has_file_image) has_missing_filename = TRUE;
-        if (im.modules[i].ext_module_info.type == DMT_ELF || im.modules[i].ext_module_info.type == DMT_MACHO)
+        if (strstr(im.modules[i].name, "<elf>"))
         {
-            module_print_info(&im.modules[i], FALSE, multi_machine);
+            dbg_printf("ELF\t");
+            module_print_info(&im.modules[i], FALSE);
             /* print all modules embedded in this one */
             for (j = 0; j < im.num_used; j++)
             {
-                if (module_is_container(&im.modules[i], &im.modules[j]))
-                    module_print_info(&im.modules[j], TRUE, multi_machine);
+                if (!strstr(im.modules[j].name, "<elf>") && module_is_container(&im.modules[i], &im.modules[j]))
+                {
+                    dbg_printf("  \\-PE\t");
+                    module_print_info(&im.modules[j], TRUE);
+                }
             }
         }
         else
         {
             /* check module is not embedded in another module */
-            for (j = 0; j < im.num_used; j++)
+            for (j = 0; j < im.num_used; j++) 
             {
-                if (module_is_container(&im.modules[j], &im.modules[i]))
+                if (strstr(im.modules[j].name, "<elf>") && module_is_container(&im.modules[j], &im.modules[i]))
                     break;
             }
             if (j < im.num_used) continue;
-            module_print_info(&im.modules[i], FALSE, multi_machine);
+            if (strstr(im.modules[i].name, ".so") || strchr(im.modules[i].name, '<'))
+                dbg_printf("ELF\t");
+            else
+                dbg_printf("PE\t");
+            module_print_info(&im.modules[i], FALSE);
         }
         num_printed++;
     }
@@ -345,8 +287,6 @@ void info_win32_module(DWORD64 base, BOOL multi_machine)
 
     if (base && !num_printed)
         dbg_printf("'0x%0*I64x' is not a valid module address\n", ADDRWIDTH, base);
-    if (has_missing_filename)
-        dbg_printf("^ denotes modules for which image file couldn't be found\n");
 }
 
 struct class_walker
@@ -1198,14 +1138,13 @@ void info_win32_exception(void)
         dbg_printf("0x%08lx", rec->ExceptionCode);
         break;
     }
-    if (rec->ExceptionFlags & EXCEPTION_STACK_INVALID)
+    if (rec->ExceptionFlags & EH_STACK_INVALID)
         dbg_printf(", invalid program stack");
 
     switch (addr.Mode)
     {
     case AddrModeFlat:
-        dbg_printf(" in %s%ld-bit code (%s)",
-                   dbg_curr_process->is_wow64 ? "wow64 " : "",
+        dbg_printf(" in %ld-bit code (%s)",
                    dbg_curr_process->be_cpu->pointer_size * 8,
                    memory_offset_to_string(hexbuf, addr.Offset, 0));
         break;
@@ -1221,109 +1160,4 @@ void info_win32_exception(void)
     default: dbg_printf(" bad address");
     }
     dbg_printf(".\n");
-}
-
-static const struct
-{
-    int type;
-    int platform;
-    int major;
-    int minor;
-    const char *str;
-}
-version_table[] =
-{
-    { 0,                   VER_PLATFORM_WIN32s,        2,  0, "2.0" },
-    { 0,                   VER_PLATFORM_WIN32s,        3,  0, "3.0" },
-    { 0,                   VER_PLATFORM_WIN32s,        3, 10, "3.1" },
-    { 0,                   VER_PLATFORM_WIN32_WINDOWS, 4,  0, "95" },
-    { 0,                   VER_PLATFORM_WIN32_WINDOWS, 4, 10, "98" },
-    { 0,                   VER_PLATFORM_WIN32_WINDOWS, 4, 90, "ME" },
-    { VER_NT_WORKSTATION,  VER_PLATFORM_WIN32_NT,      3, 51, "NT 3.51" },
-    { VER_NT_WORKSTATION,  VER_PLATFORM_WIN32_NT,      4,  0, "NT 4.0" },
-    { VER_NT_WORKSTATION,  VER_PLATFORM_WIN32_NT,      5,  0, "2000" },
-    { VER_NT_WORKSTATION,  VER_PLATFORM_WIN32_NT,      5,  1, "XP" },
-    { VER_NT_WORKSTATION,  VER_PLATFORM_WIN32_NT,      5,  2, "XP" },
-    { VER_NT_SERVER,       VER_PLATFORM_WIN32_NT,      5,  2, "Server 2003" },
-    { VER_NT_WORKSTATION,  VER_PLATFORM_WIN32_NT,      6,  0, "Vista" },
-    { VER_NT_SERVER,       VER_PLATFORM_WIN32_NT,      6,  0, "Server 2008" },
-    { VER_NT_WORKSTATION,  VER_PLATFORM_WIN32_NT,      6,  1, "7" },
-    { VER_NT_SERVER,       VER_PLATFORM_WIN32_NT,      6,  1, "Server 2008 R2" },
-    { VER_NT_WORKSTATION,  VER_PLATFORM_WIN32_NT,      6,  2, "8" },
-    { VER_NT_SERVER,       VER_PLATFORM_WIN32_NT,      6,  2, "Server 2012" },
-    { VER_NT_WORKSTATION,  VER_PLATFORM_WIN32_NT,      6,  3, "8.1" },
-    { VER_NT_SERVER,       VER_PLATFORM_WIN32_NT,      6,  3, "Server 2012 R2" },
-    { VER_NT_WORKSTATION,  VER_PLATFORM_WIN32_NT,     10,  0, "10" },
-};
-
-static const char *get_windows_version(void)
-{
-    RTL_OSVERSIONINFOEXW info = { sizeof(RTL_OSVERSIONINFOEXW) };
-    static char str[64];
-    int i;
-
-    RtlGetVersion( &info );
-
-    for (i = 0; i < ARRAY_SIZE(version_table); i++)
-    {
-        if (version_table[i].type == info.wProductType &&
-            version_table[i].platform == info.dwPlatformId &&
-            version_table[i].major == info.dwMajorVersion &&
-            version_table[i].minor == info.dwMinorVersion)
-        {
-            return version_table[i].str;
-        }
-    }
-
-    snprintf( str, sizeof(str), "%ld.%ld (%d)", info.dwMajorVersion,
-              info.dwMinorVersion, info.wProductType );
-    return str;
-}
-
-static BOOL is_guest(USHORT native, USHORT guest)
-{
-    BOOLEAN supported;
-
-    return native != guest && !RtlWow64IsWowGuestMachineSupported(guest, &supported) && supported;
-}
-
-void info_win32_system(void)
-{
-    USHORT current, native;
-    int i, count;
-
-    const char *(CDECL *wine_get_build_id)(void);
-    void (CDECL *wine_get_host_version)( const char **sysname, const char **release );
-
-    static USHORT guest_machines[] =
-    {
-        IMAGE_FILE_MACHINE_I386, IMAGE_FILE_MACHINE_ARM, IMAGE_FILE_MACHINE_ARMNT,
-    };
-
-    wine_get_build_id = (void *)GetProcAddress(GetModuleHandleA("ntdll.dll"), "wine_get_build_id");
-    wine_get_host_version = (void *)GetProcAddress(GetModuleHandleA("ntdll.dll"), "wine_get_host_version");
-
-    RtlWow64GetProcessMachines( GetCurrentProcess(), &current, &native );
-
-    dbg_printf( "System information:\n" );
-    if (wine_get_build_id) dbg_printf( "    Wine build: %s\n", wine_get_build_id() );
-    dbg_printf( "    Platform: %s", get_machine_str(native));
-    for (count = i = 0; i < ARRAY_SIZE(guest_machines); i++)
-    {
-        if (is_guest(native, guest_machines[i]))
-        {
-            if (!count++) dbg_printf(" (guest:");
-            dbg_printf(" %s", get_machine_str(guest_machines[i]));
-        }
-    }
-    dbg_printf("%s\n", count ? ")" : "");
-
-    dbg_printf( "    Version: Windows %s\n", get_windows_version() );
-    if (wine_get_host_version)
-    {
-        const char *sysname, *release;
-        wine_get_host_version( &sysname, &release );
-        dbg_printf( "    Host system: %s\n", sysname );
-        dbg_printf( "    Host version: %s\n", release );
-    }
 }

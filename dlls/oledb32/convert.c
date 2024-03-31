@@ -31,6 +31,7 @@
 #include "oledb_private.h"
 
 #include "wine/debug.h"
+#include "wine/heap.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(oledb);
 
@@ -101,7 +102,7 @@ static ULONG WINAPI convert_Release(IDataConvert* iface)
 
     ref = InterlockedDecrement(&This->ref);
     if(ref == 0)
-        free(This);
+        heap_free(This);
 
     return ref;
 }
@@ -825,11 +826,6 @@ static HRESULT WINAPI convert_DataConvert(IDataConvert* iface,
         case DBTYPE_UI4:         hr = VarUI8FromUI4(*(DWORD*)src, d);            break;
         case DBTYPE_I8:          hr = VarUI8FromI8(*(LONGLONG*)src, d);          break;
         case DBTYPE_UI8:         *d = *(ULONGLONG*)src; hr = S_OK;               break;
-        case DBTYPE_VARIANT:
-            VariantInit(&tmp);
-            if ((hr = VariantChangeType(&tmp, src, 0, VT_UI8)) == S_OK)
-                *d = V_UI8(&tmp);
-            break;
         default: FIXME("Unimplemented conversion %04x -> UI8\n", src_type); return E_NOTIMPL;
         }
         break;
@@ -854,17 +850,6 @@ static HRESULT WINAPI convert_DataConvert(IDataConvert* iface,
         {
         case DBTYPE_EMPTY:       *d = GUID_NULL; hr = S_OK; break;
         case DBTYPE_GUID:        *d = *(GUID*)src; hr = S_OK; break;
-        case DBTYPE_VARIANT:
-            if (V_VT((VARIANT *)src) == VT_BSTR)
-            {
-                hr = CLSIDFromString(V_BSTR((VARIANT *)src), d);
-                if (FAILED(hr))
-                {
-                    *dst_len = sizeof(GUID);
-                    *dst_status = DBSTATUS_E_CANTCONVERTVALUE;
-                }
-                break;
-            }
         default: FIXME("Unimplemented conversion %04x -> GUID\n", src_type); return E_NOTIMPL;
         }
         break;
@@ -1090,12 +1075,6 @@ static HRESULT WINAPI convert_DataConvert(IDataConvert* iface,
             V_VT(v) = VT_ARRAY|VT_UI1;
             V_ARRAY(v) = psa;
             hr = S_OK;
-            break;
-        }
-        case DBTYPE_VARIANT:
-        {
-            VariantInit(v);
-            hr = VariantCopy(v, (VARIANT *)src);
             break;
         }
         default: FIXME("Unimplemented conversion %04x -> VARIANT\n", src_type); return E_NOTIMPL;
@@ -1704,7 +1683,7 @@ HRESULT create_oledb_convert(IUnknown *outer, void **obj)
 
     if(outer) return CLASS_E_NOAGGREGATION;
 
-    This = malloc(sizeof(*This));
+    This = heap_alloc(sizeof(*This));
     if(!This) return E_OUTOFMEMORY;
 
     This->IDataConvert_iface.lpVtbl = &convert_vtbl;

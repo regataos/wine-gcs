@@ -24,6 +24,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#define NONAMELESSUNION
+
 #include "mountmgr.h"
 #include "winreg.h"
 #include "winnls.h"
@@ -175,36 +177,6 @@ static void get_filesystem_serial( struct volume *volume )
 
     buffer[size] = 0;
     volume->serial = strtoul( buffer, NULL, 16 );
-}
-
-/* get the flags for the volume by looking at the type of underlying filesystem */
-static DWORD get_filesystem_flags( struct volume *volume )
-{
-    char fstypename[256];
-    ULONG size = sizeof(fstypename);
-    struct get_volume_filesystem_params params = { volume->device->unix_mount, fstypename, &size };
-
-    if (!volume->device->unix_mount) return 0;
-    if (MOUNTMGR_CALL( get_volume_filesystem, &params )) return 0;
-
-    if (!strcmp("apfs", fstypename) ||
-        !strcmp("nfs", fstypename) ||
-        !strcmp("cifs", fstypename) ||
-        !strcmp("ncpfs", fstypename) ||
-        !strcmp("tmpfs", fstypename) ||
-        !strcmp("cramfs", fstypename) ||
-        !strcmp("devfs", fstypename) ||
-        !strcmp("procfs", fstypename) ||
-        !strcmp("ext2", fstypename) ||
-        !strcmp("ext3", fstypename) ||
-        !strcmp("ext4", fstypename) ||
-        !strcmp("hfs", fstypename) ||
-        !strcmp("hpfs", fstypename) ||
-        !strcmp("ntfs", fstypename))
-    {
-        return FILE_SUPPORTS_REPARSE_POINTS;
-    }
-    return 0;
 }
 
 
@@ -927,14 +899,6 @@ static BOOL get_volume_device_info( struct volume *volume )
     }
     else
     {
-        if(GetLastError() == ERROR_NOT_READY)
-        {
-            TRACE( "%s: removable drive with no inserted media\n", debugstr_a(unix_device) );
-            volume->fs_type = FS_UNKNOWN;
-            CloseHandle( handle );
-            return TRUE;
-        }
-
         volume->fs_type = VOLUME_ReadFATSuperblock( handle, superblock );
         if (volume->fs_type == FS_UNKNOWN) volume->fs_type = VOLUME_ReadCDSuperblock( handle, superblock );
     }
@@ -1734,8 +1698,7 @@ static NTSTATUS WINAPI harddisk_query_volume( DEVICE_OBJECT *device, IRP *irp )
             break;
         default:
             fsname = L"NTFS";
-            info->FileSystemAttributes = FILE_CASE_PRESERVED_NAMES | FILE_PERSISTENT_ACLS
-                                         | get_filesystem_flags( volume );
+            info->FileSystemAttributes = FILE_CASE_PRESERVED_NAMES | FILE_PERSISTENT_ACLS;
             info->MaximumComponentNameLength = 255;
             break;
         }
@@ -1778,7 +1741,7 @@ static NTSTATUS WINAPI harddisk_query_volume( DEVICE_OBJECT *device, IRP *irp )
     }
 
 done:
-    io->Status = status;
+    io->u.Status = status;
     LeaveCriticalSection( &device_section );
     IoCompleteRequest( irp, IO_NO_INCREMENT );
     return status;
@@ -1870,7 +1833,7 @@ static NTSTATUS WINAPI harddisk_ioctl( DEVICE_OBJECT *device, IRP *irp )
     }
     }
 
-    irp->IoStatus.Status = status;
+    irp->IoStatus.u.Status = status;
     LeaveCriticalSection( &device_section );
     IoCompleteRequest( irp, IO_NO_INCREMENT );
     return status;

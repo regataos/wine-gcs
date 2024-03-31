@@ -1,4 +1,4 @@
 TESTDLL   = concrt140.dll
 
-SOURCES = \
+C_SRCS = \
 	concrt140.c

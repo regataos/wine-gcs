@@ -3,6 +3,8 @@ IMPORTS   = user32
 
 EXTRADLLFLAGS = -mconsole -municode
 
-SOURCES = \
-	fsutil.mc \
+C_SRCS = \
 	main.c
+
+MC_SRCS = \
+	fsutil.mc

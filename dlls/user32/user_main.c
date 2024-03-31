@@ -18,8 +18,6 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "ntstatus.h"
-#define WIN32_NO_STATUS
 #include "user_private.h"
 #include "controls.h"
 #include "imm.h"
@@ -100,122 +98,108 @@ static void dpiaware_init(void)
     }
 }
 
-static NTSTATUS WINAPI User32CopyImage( void *args, ULONG size )
+static NTSTATUS WINAPI User32CopyImage( const struct copy_image_params *params, ULONG size )
 {
-    const struct copy_image_params *params = args;
     HANDLE ret = CopyImage( params->hwnd, params->type, params->dx, params->dy, params->flags );
-    if (!ret) return STATUS_NO_MEMORY;
-    return NtCallbackReturn( &ret, sizeof(ret), STATUS_SUCCESS );
+    return HandleToUlong( ret );
 }
 
-static NTSTATUS WINAPI User32DrawNonClientButton( void *args, ULONG size )
+static NTSTATUS WINAPI User32DrawNonClientButton( const struct draw_non_client_button_params *params, ULONG size )
 {
-    const struct draw_non_client_button_params *params = args;
     user_api->pNonClientButtonDraw( params->hwnd, params->hdc, params->type, params->rect,
                                     params->down, params->grayed );
-    return STATUS_SUCCESS;
+    return 0;
 }
 
-static NTSTATUS WINAPI User32DrawScrollBar( void *args, ULONG size )
+static NTSTATUS WINAPI User32DrawScrollBar( const struct draw_scroll_bar_params *params, ULONG size )
 {
-    const struct draw_scroll_bar_params *params = args;
     RECT rect = params->rect;
     user_api->pScrollBarDraw( params->hwnd, params->hdc, params->bar, params->hit_test,
                               &params->tracking_info, params->arrows, params->interior,
                               &rect, params->enable_flags, params->arrow_size, params->thumb_pos,
                               params->thumb_size, params->vertical );
-    return STATUS_SUCCESS;
+    return 0;
 }
 
-static NTSTATUS WINAPI User32DrawText( void *args, ULONG size )
+static NTSTATUS WINAPI User32DrawText( const struct draw_text_params *params, ULONG size )
 {
-    const struct draw_text_params *params = args;
-    struct draw_text_result result;
+    RECT rect = params->rect;
+    int ret;
 
     size -= FIELD_OFFSET( struct draw_text_params, str );
-    result.rect = params->rect;
-    result.height = DrawTextW( params->hdc, params->str, size / sizeof(WCHAR), &result.rect, params->flags );
-    return NtCallbackReturn( &result, sizeof(result), STATUS_SUCCESS );
+    ret = DrawTextW( params->hdc, params->str, size / sizeof(WCHAR), &rect, params->flags );
+    if (params->ret_rect)
+    {
+        *params->ret_rect = rect;
+        return ret;
+    }
+    return NtCallbackReturn( &rect, sizeof(rect), ret );
 }
 
-static NTSTATUS WINAPI User32ImmProcessKey( void *args, ULONG size )
+static NTSTATUS WINAPI User32ImmProcessKey( const struct imm_process_key_params *params, ULONG size )
 {
-    const struct imm_process_key_params *params = args;
-    if (ImmProcessKey( params->hwnd, params->hkl, params->vkey, params->key_data, 0 ))
-        return STATUS_SUCCESS;
-    return STATUS_INVALID_PARAMETER;
+    return ImmProcessKey( params->hwnd, params->hkl, params->vkey, params->key_data, 0 );
 }
 
-static NTSTATUS WINAPI User32ImmTranslateMessage( void *args, ULONG size )
+static NTSTATUS WINAPI User32ImmTranslateMessage( const struct imm_translate_message_params *params,
+                                                  ULONG size )
 {
-    const struct imm_translate_message_params *params = args;
-    if (ImmTranslateMessage( params->hwnd, params->msg, params->wparam, params->key_data ))
-        return STATUS_SUCCESS;
-    return STATUS_INVALID_PARAMETER;
+    return ImmTranslateMessage( params->hwnd, params->msg, params->wparam, params->key_data );
 }
 
-static NTSTATUS WINAPI User32LoadImage( void *args, ULONG size )
+static NTSTATUS WINAPI User32LoadImage( const struct load_image_params *params, ULONG size )
 {
-    const struct load_image_params *params = args;
     HANDLE ret = LoadImageW( params->hinst, params->name, params->type,
                              params->dx, params->dy, params->flags );
-    if (!ret) return STATUS_NO_MEMORY;
-    return NtCallbackReturn( &ret, sizeof(ret), STATUS_SUCCESS );
+    return HandleToUlong( ret );
 }
 
-static NTSTATUS WINAPI User32LoadSysMenu( void *args, ULONG size )
+static NTSTATUS WINAPI User32LoadSysMenu( const struct load_sys_menu_params *params, ULONG size )
 {
-    const struct load_sys_menu_params *params = args;
     HMENU ret = LoadMenuW( user32_module, params->mdi ? L"SYSMENUMDI" : L"SYSMENU" );
-    if (!ret) return STATUS_NO_MEMORY;
-    return NtCallbackReturn( &ret, sizeof(ret), STATUS_SUCCESS );
+    return HandleToUlong( ret );
 }
 
-static NTSTATUS WINAPI User32FreeCachedClipboardData( void *args, ULONG size )
+static NTSTATUS WINAPI User32FreeCachedClipboardData( const struct free_cached_data_params *params,
+                                                      ULONG size )
 {
-    const struct free_cached_data_params *params = args;
     free_cached_data( params->format, params->handle );
-    return STATUS_SUCCESS;
+    return 0;
 }
 
-static NTSTATUS WINAPI User32PostDDEMessage( void *args, ULONG size )
+static NTSTATUS WINAPI User32PostDDEMessage( const struct post_dde_message_params *params, ULONG size )
 {
-    const struct post_dde_message_params *params = args;
     return post_dde_message( params->hwnd, params->msg, params->wparam, params->lparam,
                              params->dest_tid, params->type );
 }
 
-static NTSTATUS WINAPI User32RenderSsynthesizedFormat( void *args, ULONG size )
+static NTSTATUS WINAPI User32RenderSsynthesizedFormat( const struct render_synthesized_format_params *params,
+                                                       ULONG size )
 {
-    const struct render_synthesized_format_params *params = args;
     render_synthesized_format( params->format, params->from );
-    return STATUS_SUCCESS;
+    return 0;
 }
 
-static NTSTATUS WINAPI User32LoadDriver( void *args, ULONG size )
+static BOOL WINAPI User32LoadDriver( const WCHAR *path, ULONG size )
 {
-    const WCHAR *path = args;
-    UNICODE_STRING str;
-    HMODULE module;
-
-    RtlInitUnicodeString( &str, path );
-    return LdrLoadDll( L"c:\\windows\\system32", 0, &str, &module );
+    return LoadLibraryW( path ) != NULL;
 }
 
-static NTSTATUS WINAPI User32UnpackDDEMessage( void *args, ULONG size )
+static NTSTATUS WINAPI User32UnpackDDEMessage( const struct unpack_dde_message_params *params, ULONG size )
 {
-    const struct unpack_dde_message_params *params = args;
     struct unpack_dde_message_result result = { .wparam = params->wparam, .lparam = params->lparam };
 
     size -= FIELD_OFFSET( struct unpack_dde_message_params, data );
     if (!unpack_dde_message( params->hwnd, params->message, &result.wparam, &result.lparam,
                              params->data, size ))
-        return STATUS_NO_MEMORY;
+        return FALSE;
 
-    return NtCallbackReturn( &result, sizeof(result), STATUS_SUCCESS );
+    if (params->result) *params->result = result;
+    else NtCallbackReturn( &result, sizeof(result), TRUE );
+    return TRUE;
 }
 
-static KERNEL_CALLBACK_PROC kernel_callback_table[NtUserCallCount] =
+static const void *kernel_callback_table[NtUserCallCount] =
 {
     User32CallEnumDisplayMonitor,
     User32CallSendAsyncCallback,

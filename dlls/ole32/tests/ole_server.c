@@ -126,7 +126,7 @@ static ULONG WINAPI UnknownImpl_Release(IUnknown *iface)
     InterlockedDecrement(&obj_ref);
 
     trace("server: unknown_Release: %p, ref %lu\n", iface, ref);
-    if (ref == 0) free(This);
+    if (ref == 0) HeapFree(GetProcessHeap(), 0, This);
     return ref;
 }
 
@@ -201,7 +201,7 @@ static HRESULT WINAPI ClassFactoryImpl_CreateInstance(IClassFactory *iface,
 
     if (punkouter) return CLASS_E_NOAGGREGATION;
 
-    unknown = malloc(sizeof(*unknown));
+    unknown = HeapAlloc(GetProcessHeap(), 0, sizeof(*unknown));
     if (!unknown) return E_OUTOFMEMORY;
 
     unknown->IUnknown_iface.lpVtbl = &UnknownImpl_Vtbl;

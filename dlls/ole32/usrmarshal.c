@@ -23,6 +23,8 @@
 #include <string.h>
 
 #define COBJMACROS
+#define NONAMELESSUNION
+
 #include "windef.h"
 #include "winbase.h"
 #include "wingdi.h"
@@ -734,52 +736,52 @@ ULONG __RPC_USER STGMEDIUM_UserSize(ULONG *pFlags, ULONG StartingSize, STGMEDIUM
         break;
     case TYMED_HGLOBAL:
         TRACE("TYMED_HGLOBAL\n");
-        if (pStgMedium->hGlobal)
-            size = HGLOBAL_UserSize(pFlags, size, &pStgMedium->hGlobal);
+        if (pStgMedium->u.hGlobal)
+            size = HGLOBAL_UserSize(pFlags, size, &pStgMedium->u.hGlobal);
         break;
     case TYMED_FILE:
         TRACE("TYMED_FILE\n");
-        if (pStgMedium->lpszFileName)
+        if (pStgMedium->u.lpszFileName)
         {
-            TRACE("file name is %s\n", debugstr_w(pStgMedium->lpszFileName));
+            TRACE("file name is %s\n", debugstr_w(pStgMedium->u.lpszFileName));
             size += 3 * sizeof(DWORD) +
-                (lstrlenW(pStgMedium->lpszFileName) + 1) * sizeof(WCHAR);
+                (lstrlenW(pStgMedium->u.lpszFileName) + 1) * sizeof(WCHAR);
         }
         break;
     case TYMED_ISTREAM:
         TRACE("TYMED_ISTREAM\n");
-        if (pStgMedium->pstm)
+        if (pStgMedium->u.pstm)
         {
             IUnknown *unk;
-            IStream_QueryInterface(pStgMedium->pstm, &IID_IUnknown, (void**)&unk);
+            IStream_QueryInterface(pStgMedium->u.pstm, &IID_IUnknown, (void**)&unk);
             size = WdtpInterfacePointer_UserSize(pFlags, LOWORD(*pFlags), size, unk, &IID_IStream);
             IUnknown_Release(unk);
         }
         break;
     case TYMED_ISTORAGE:
         TRACE("TYMED_ISTORAGE\n");
-        if (pStgMedium->pstg)
+        if (pStgMedium->u.pstg)
         {
             IUnknown *unk;
-            IStorage_QueryInterface(pStgMedium->pstg, &IID_IUnknown, (void**)&unk);
+            IStorage_QueryInterface(pStgMedium->u.pstg, &IID_IUnknown, (void**)&unk);
             size = WdtpInterfacePointer_UserSize(pFlags, LOWORD(*pFlags), size, unk, &IID_IStorage);
             IUnknown_Release(unk);
         }
         break;
     case TYMED_GDI:
         TRACE("TYMED_GDI\n");
-        if (pStgMedium->hBitmap)
-            size = HBITMAP_UserSize(pFlags, size, &pStgMedium->hBitmap);
+        if (pStgMedium->u.hBitmap)
+            size = HBITMAP_UserSize(pFlags, size, &pStgMedium->u.hBitmap);
         break;
     case TYMED_MFPICT:
         TRACE("TYMED_MFPICT\n");
-        if (pStgMedium->hMetaFilePict)
-            size = HMETAFILEPICT_UserSize(pFlags, size, &pStgMedium->hMetaFilePict);
+        if (pStgMedium->u.hMetaFilePict)
+            size = HMETAFILEPICT_UserSize(pFlags, size, &pStgMedium->u.hMetaFilePict);
         break;
     case TYMED_ENHMF:
         TRACE("TYMED_ENHMF\n");
-        if (pStgMedium->hEnhMetaFile)
-            size = HENHMETAFILE_UserSize(pFlags, size, &pStgMedium->hEnhMetaFile);
+        if (pStgMedium->u.hEnhMetaFile)
+            size = HENHMETAFILE_UserSize(pFlags, size, &pStgMedium->u.hEnhMetaFile);
         break;
     default:
         RaiseException(DV_E_TYMED, 0, 0, NULL);
@@ -820,7 +822,7 @@ unsigned char * __RPC_USER STGMEDIUM_UserMarshal(ULONG *pFlags, unsigned char *p
     pBuffer += sizeof(DWORD);
     if (pStgMedium->tymed != TYMED_NULL)
     {
-        *(DWORD *)pBuffer = (DWORD)(DWORD_PTR)pStgMedium->pstg;
+        *(DWORD *)pBuffer = (DWORD)(DWORD_PTR)pStgMedium->u.pstg;
         pBuffer += sizeof(DWORD);
     }
     *(DWORD *)pBuffer = (DWORD)(DWORD_PTR)pStgMedium->pUnkForRelease;
@@ -833,15 +835,15 @@ unsigned char * __RPC_USER STGMEDIUM_UserMarshal(ULONG *pFlags, unsigned char *p
         break;
     case TYMED_HGLOBAL:
         TRACE("TYMED_HGLOBAL\n");
-        if (pStgMedium->hGlobal)
-            pBuffer = HGLOBAL_UserMarshal(pFlags, pBuffer, &pStgMedium->hGlobal);
+        if (pStgMedium->u.hGlobal)
+            pBuffer = HGLOBAL_UserMarshal(pFlags, pBuffer, &pStgMedium->u.hGlobal);
         break;
     case TYMED_FILE:
         TRACE("TYMED_FILE\n");
-        if (pStgMedium->lpszFileName)
+        if (pStgMedium->u.lpszFileName)
         {
             DWORD len;
-            len = lstrlenW(pStgMedium->lpszFileName);
+            len = lstrlenW(pStgMedium->u.lpszFileName);
             /* conformance */
             *(DWORD *)pBuffer = len + 1;
             pBuffer += sizeof(DWORD);
@@ -852,44 +854,44 @@ unsigned char * __RPC_USER STGMEDIUM_UserMarshal(ULONG *pFlags, unsigned char *p
             *(DWORD *)pBuffer = len + 1;
             pBuffer += sizeof(DWORD);
 
-            TRACE("file name is %s\n", debugstr_w(pStgMedium->lpszFileName));
-            memcpy(pBuffer, pStgMedium->lpszFileName, (len + 1) * sizeof(WCHAR));
+            TRACE("file name is %s\n", debugstr_w(pStgMedium->u.lpszFileName));
+            memcpy(pBuffer, pStgMedium->u.lpszFileName, (len + 1) * sizeof(WCHAR));
         }
         break;
     case TYMED_ISTREAM:
         TRACE("TYMED_ISTREAM\n");
-        if (pStgMedium->pstm)
+        if (pStgMedium->u.pstm)
         {
             IUnknown *unk;
-            IStream_QueryInterface(pStgMedium->pstm, &IID_IUnknown, (void**)&unk);
+            IStream_QueryInterface(pStgMedium->u.pstm, &IID_IUnknown, (void**)&unk);
             pBuffer = WdtpInterfacePointer_UserMarshal(pFlags, LOWORD(*pFlags), pBuffer, unk, &IID_IStream);
             IUnknown_Release(unk);
         }
         break;
     case TYMED_ISTORAGE:
         TRACE("TYMED_ISTORAGE\n");
-        if (pStgMedium->pstg)
+        if (pStgMedium->u.pstg)
         {
             IUnknown *unk;
-            IStorage_QueryInterface(pStgMedium->pstg, &IID_IUnknown, (void**)&unk);
+            IStorage_QueryInterface(pStgMedium->u.pstg, &IID_IUnknown, (void**)&unk);
             pBuffer = WdtpInterfacePointer_UserMarshal(pFlags, LOWORD(*pFlags), pBuffer, unk, &IID_IStorage);
             IUnknown_Release(unk);
         }
         break;
     case TYMED_GDI:
         TRACE("TYMED_GDI\n");
-        if (pStgMedium->hBitmap)
-            pBuffer = HBITMAP_UserMarshal(pFlags, pBuffer, &pStgMedium->hBitmap);
+        if (pStgMedium->u.hBitmap)
+            pBuffer = HBITMAP_UserMarshal(pFlags, pBuffer, &pStgMedium->u.hBitmap);
         break;
     case TYMED_MFPICT:
         TRACE("TYMED_MFPICT\n");
-        if (pStgMedium->hMetaFilePict)
-            pBuffer = HMETAFILEPICT_UserMarshal(pFlags, pBuffer, &pStgMedium->hMetaFilePict);
+        if (pStgMedium->u.hMetaFilePict)
+            pBuffer = HMETAFILEPICT_UserMarshal(pFlags, pBuffer, &pStgMedium->u.hMetaFilePict);
         break;
     case TYMED_ENHMF:
         TRACE("TYMED_ENHMF\n");
-        if (pStgMedium->hEnhMetaFile)
-            pBuffer = HENHMETAFILE_UserMarshal(pFlags, pBuffer, &pStgMedium->hEnhMetaFile);
+        if (pStgMedium->u.hEnhMetaFile)
+            pBuffer = HENHMETAFILE_UserMarshal(pFlags, pBuffer, &pStgMedium->u.hEnhMetaFile);
         break;
     default:
         RaiseException(DV_E_TYMED, 0, 0, NULL);
@@ -947,7 +949,7 @@ unsigned char * __RPC_USER STGMEDIUM_UserUnmarshal(ULONG *pFlags, unsigned char 
     case TYMED_HGLOBAL:
         TRACE("TYMED_HGLOBAL\n");
         if (content)
-            pBuffer = HGLOBAL_UserUnmarshal(pFlags, pBuffer, &pStgMedium->hGlobal);
+            pBuffer = HGLOBAL_UserUnmarshal(pFlags, pBuffer, &pStgMedium->u.hGlobal);
         break;
     case TYMED_FILE:
         TRACE("TYMED_FILE\n");
@@ -978,59 +980,59 @@ unsigned char * __RPC_USER STGMEDIUM_UserUnmarshal(ULONG *pFlags, unsigned char 
                 RpcRaiseException(RPC_S_INVALID_BOUND);
                 return NULL;
             }
-            pStgMedium->lpszFileName = CoTaskMemAlloc(conformance * sizeof(WCHAR));
-            if (!pStgMedium->lpszFileName) RpcRaiseException(ERROR_OUTOFMEMORY);
+            pStgMedium->u.lpszFileName = CoTaskMemAlloc(conformance * sizeof(WCHAR));
+            if (!pStgMedium->u.lpszFileName) RpcRaiseException(ERROR_OUTOFMEMORY);
             TRACE("unmarshalled file name is %s\n", debugstr_wn((const WCHAR *)pBuffer, variance));
-            memcpy(pStgMedium->lpszFileName, pBuffer, variance * sizeof(WCHAR));
+            memcpy(pStgMedium->u.lpszFileName, pBuffer, variance * sizeof(WCHAR));
             pBuffer += variance * sizeof(WCHAR);
         }
         else
-            pStgMedium->lpszFileName = NULL;
+            pStgMedium->u.lpszFileName = NULL;
         break;
     case TYMED_ISTREAM:
         TRACE("TYMED_ISTREAM\n");
         if (content)
         {
-            pBuffer = WdtpInterfacePointer_UserUnmarshal(pFlags, pBuffer, (IUnknown**)&pStgMedium->pstm, &IID_IStream);
+            pBuffer = WdtpInterfacePointer_UserUnmarshal(pFlags, pBuffer, (IUnknown**)&pStgMedium->u.pstm, &IID_IStream);
         }
         else
         {
-            if (pStgMedium->pstm) IStream_Release( pStgMedium->pstm );
-            pStgMedium->pstm = NULL;
+            if (pStgMedium->u.pstm) IStream_Release( pStgMedium->u.pstm );
+            pStgMedium->u.pstm = NULL;
         }
         break;
     case TYMED_ISTORAGE:
         TRACE("TYMED_ISTORAGE\n");
         if (content)
         {
-            pBuffer = WdtpInterfacePointer_UserUnmarshal(pFlags, pBuffer, (IUnknown**)&pStgMedium->pstg, &IID_IStorage);
+            pBuffer = WdtpInterfacePointer_UserUnmarshal(pFlags, pBuffer, (IUnknown**)&pStgMedium->u.pstg, &IID_IStorage);
         }
         else
         {
-            if (pStgMedium->pstg) IStorage_Release( pStgMedium->pstg );
-            pStgMedium->pstg = NULL;
+            if (pStgMedium->u.pstg) IStorage_Release( pStgMedium->u.pstg );
+            pStgMedium->u.pstg = NULL;
         }
         break;
     case TYMED_GDI:
         TRACE("TYMED_GDI\n");
         if (content)
-            pBuffer = HBITMAP_UserUnmarshal(pFlags, pBuffer, &pStgMedium->hBitmap);
+            pBuffer = HBITMAP_UserUnmarshal(pFlags, pBuffer, &pStgMedium->u.hBitmap);
         else
-            pStgMedium->hBitmap = NULL;
+            pStgMedium->u.hBitmap = NULL;
         break;
     case TYMED_MFPICT:
         TRACE("TYMED_MFPICT\n");
         if (content)
-            pBuffer = HMETAFILEPICT_UserUnmarshal(pFlags, pBuffer, &pStgMedium->hMetaFilePict);
+            pBuffer = HMETAFILEPICT_UserUnmarshal(pFlags, pBuffer, &pStgMedium->u.hMetaFilePict);
         else
-            pStgMedium->hMetaFilePict = NULL;
+            pStgMedium->u.hMetaFilePict = NULL;
         break;
     case TYMED_ENHMF:
         TRACE("TYMED_ENHMF\n");
         if (content)
-            pBuffer = HENHMETAFILE_UserUnmarshal(pFlags, pBuffer, &pStgMedium->hEnhMetaFile);
+            pBuffer = HENHMETAFILE_UserUnmarshal(pFlags, pBuffer, &pStgMedium->u.hEnhMetaFile);
         else
-            pStgMedium->hEnhMetaFile = NULL;
+            pStgMedium->u.hEnhMetaFile = NULL;
         break;
     default:
         RaiseException(DV_E_TYMED, 0, 0, NULL);
@@ -1961,7 +1963,7 @@ HRESULT CALLBACK IDataObject_GetDataHere_Proxy(IDataObject *iface, FORMATETC *fm
 
     if (med->tymed == TYMED_ISTREAM || med->tymed == TYMED_ISTORAGE)
     {
-        stg = med->pstg; /* This may actually be a stream, but that's ok */
+        stg = med->u.pstg; /* This may actually be a stream, but that's ok */
         if (stg) IStorage_AddRef( stg );
     }
 
@@ -1970,9 +1972,9 @@ HRESULT CALLBACK IDataObject_GetDataHere_Proxy(IDataObject *iface, FORMATETC *fm
     med->pUnkForRelease = release;
     if (stg)
     {
-        if (med->pstg)
-            IStorage_Release( med->pstg );
-        med->pstg = stg;
+        if (med->u.pstg)
+            IStorage_Release( med->u.pstg );
+        med->u.pstg = stg;
     }
 
     return hr;

@@ -3,5 +3,5 @@ IMPORTLIB = clusapi
 
 EXTRADLLFLAGS = -Wb,--prefer-native
 
-SOURCES = \
+C_SRCS = \
 	clusapi.c

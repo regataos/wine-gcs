@@ -21,6 +21,7 @@
 extern int do_fsync(void);
 extern void fsync_init(void);
 extern unsigned int fsync_alloc_shm( int low, int high );
+extern void fsync_free_shm_idx( int shm_idx );
 extern void fsync_wake_futex( unsigned int shm_idx );
 extern void fsync_clear_futex( unsigned int shm_idx );
 extern void fsync_wake_up( struct object *obj );
@@ -32,3 +33,4 @@ extern const struct object_ops fsync_ops;
 extern void fsync_set_event( struct fsync *fsync );
 extern void fsync_reset_event( struct fsync *fsync );
 extern void fsync_abandon_mutexes( struct thread *thread );
+extern void fsync_cleanup_process_shm_indices( process_id_t id );

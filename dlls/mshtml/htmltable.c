@@ -497,9 +497,10 @@ static const tid_t HTMLTableCell_iface_tids[] = {
     0
 };
 
-static dispex_static_data_t HTMLTableCell_dispex = {
+dispex_static_data_t HTMLTableCell_dispex = {
     "HTMLTableDataCellElement",
     &HTMLTableCell_event_target_vtbl.dispex_vtbl,
+    PROTO_ID_HTMLTableCellElement,
     DispHTMLTableCell_tid,
     HTMLTableCell_iface_tids,
     HTMLElement_init_dispex_info
@@ -525,6 +526,21 @@ HRESULT HTMLTableCell_Create(HTMLDocumentNode *doc, nsIDOMElement *nselem, HTMLE
     *elem = &ret->element;
     return S_OK;
 }
+
+/* dummy dispex used only for HTMLTableCellElementPrototype in prototype chain */
+static void HTMLTableCellProt_init_dispex_info(dispex_data_t *info, compat_mode_t mode)
+{
+    dispex_info_add_interface(info, IHTMLTableCell_tid, NULL);
+}
+
+dispex_static_data_t HTMLTableCellProt_dispex = {
+    "HTMLTableCellElement",
+    &no_dispex_vtbl,
+    PROTO_ID_HTMLTableCellProt,
+    NULL_tid,
+    no_iface_tids,
+    HTMLTableCellProt_init_dispex_info
+};
 
 struct HTMLTableRow {
     HTMLElement element;
@@ -793,7 +809,7 @@ static HRESULT WINAPI HTMLTableRow_get_cells(IHTMLTableRow *iface, IHTMLElementC
         return E_FAIL;
     }
 
-    *p = create_collection_from_htmlcol(nscol, dispex_compat_mode(&This->element.node.event_target.dispex));
+    *p = create_collection_from_htmlcol(nscol, This->element.node.doc, dispex_compat_mode(&This->element.node.event_target.dispex));
 
     nsIDOMHTMLCollection_Release(nscol);
     return S_OK;
@@ -922,9 +938,10 @@ static const tid_t HTMLTableRow_iface_tids[] = {
     0
 };
 
-static dispex_static_data_t HTMLTableRow_dispex = {
+dispex_static_data_t HTMLTableRow_dispex = {
     "HTMLTableRowElement",
     &HTMLTableRow_event_target_vtbl.dispex_vtbl,
+    PROTO_ID_HTMLTableRowElement,
     DispHTMLTableRow_tid,
     HTMLTableRow_iface_tids,
     HTMLElement_init_dispex_info
@@ -1376,7 +1393,7 @@ static HRESULT WINAPI HTMLTable_get_rows(IHTMLTable *iface, IHTMLElementCollecti
         return E_FAIL;
     }
 
-    *p = create_collection_from_htmlcol(nscol, dispex_compat_mode(&This->element.node.event_target.dispex));
+    *p = create_collection_from_htmlcol(nscol, This->element.node.doc, dispex_compat_mode(&This->element.node.event_target.dispex));
 
     nsIDOMHTMLCollection_Release(nscol);
     return S_OK;
@@ -1491,7 +1508,7 @@ static HRESULT WINAPI HTMLTable_get_tBodies(IHTMLTable *iface, IHTMLElementColle
         return E_FAIL;
     }
 
-    *p = create_collection_from_htmlcol(nscol, dispex_compat_mode(&This->element.node.event_target.dispex));
+    *p = create_collection_from_htmlcol(nscol, This->element.node.doc, dispex_compat_mode(&This->element.node.event_target.dispex));
 
     nsIDOMHTMLCollection_Release(nscol);
     return S_OK;
@@ -1933,9 +1950,10 @@ static const tid_t HTMLTable_iface_tids[] = {
     0
 };
 
-static dispex_static_data_t HTMLTable_dispex = {
+dispex_static_data_t HTMLTable_dispex = {
     "HTMLTableElement",
     &HTMLTable_event_target_vtbl.dispex_vtbl,
+    PROTO_ID_HTMLTableElement,
     DispHTMLTable_tid,
     HTMLTable_iface_tids,
     HTMLElement_init_dispex_info

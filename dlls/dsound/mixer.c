@@ -96,7 +96,6 @@ void DSOUND_RecalcFormat(IDirectSoundBufferImpl *dsb)
 {
 	DWORD ichannels = dsb->pwfx->nChannels;
 	DWORD ochannels = dsb->device->pwfx->nChannels;
-	LONG64 oldFreqAdjustDen = dsb->freqAdjustDen;
 	WAVEFORMATEXTENSIBLE *pwfxe;
 	BOOL ieee = FALSE;
 
@@ -130,10 +129,8 @@ void DSOUND_RecalcFormat(IDirectSoundBufferImpl *dsb)
 
 	/* calculate the 10ms write lead */
 	dsb->writelead = (dsb->freq / 100) * dsb->pwfx->nBlockAlign;
-	dsb->maxwritelead = (DSBFREQUENCY_MAX / 100) * dsb->pwfx->nBlockAlign;
 
-	if (oldFreqAdjustDen)
-		dsb->freqAccNum = (dsb->freqAccNum * dsb->freqAdjustDen + oldFreqAdjustDen / 2) / oldFreqAdjustDen;
+	dsb->freqAccNum = 0;
 
 	dsb->get_aux = ieee ? getbpp[4] : getbpp[dsb->pwfx->wBitsPerSample/8 - 1];
 	dsb->put_aux = putieee32;
@@ -379,10 +376,10 @@ static UINT cp_fields_resample_hq(IDirectSoundBufferImpl *dsb, bitsputfunc put,
         return max_ipos;
 
     if (!dsb->device->cp_buffer) {
-        dsb->device->cp_buffer = malloc(len);
+        dsb->device->cp_buffer = HeapAlloc(GetProcessHeap(), 0, len);
         dsb->device->cp_buffer_len = len;
     } else if (len > dsb->device->cp_buffer_len) {
-        dsb->device->cp_buffer = realloc(dsb->device->cp_buffer, len);
+        dsb->device->cp_buffer = HeapReAlloc(GetProcessHeap(), 0, dsb->device->cp_buffer, len);
         dsb->device->cp_buffer_len = len;
     }
 
@@ -524,11 +521,13 @@ static void DSOUND_MixToTemporary(IDirectSoundBufferImpl *dsb, DWORD frames)
     ostride = dsb->device->pwfx->nChannels * sizeof(float);
     size_bytes = frames * ostride;
 
-    if (dsb->device->tmp_buffer_len < size_bytes || !dsb->device->tmp_buffer)
-    {
+    if (dsb->device->tmp_buffer_len < size_bytes || !dsb->device->tmp_buffer) {
+		if (dsb->device->tmp_buffer)
+			dsb->device->tmp_buffer = HeapReAlloc(GetProcessHeap(), 0, dsb->device->tmp_buffer, size_bytes);
+		else
+			dsb->device->tmp_buffer = HeapAlloc(GetProcessHeap(), 0, size_bytes);
         dsb->device->tmp_buffer_len = size_bytes;
-        dsb->device->tmp_buffer = realloc(dsb->device->tmp_buffer, size_bytes);
-    }
+	}
     if(dsb->put_aux == putieee32_sum)
         memset(dsb->device->tmp_buffer, 0, dsb->device->tmp_buffer_len);
 

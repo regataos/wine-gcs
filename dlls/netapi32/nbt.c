@@ -1036,7 +1036,7 @@ static UCHAR NetBTCall(void *adapt, PNCB ncb, void **sess)
                     if (session)
                     {
                         session->fd = fd;
-                        InitializeCriticalSectionEx(&session->cs, 0, RTL_CRITICAL_SECTION_FLAG_FORCE_DEBUG_INFO);
+                        InitializeCriticalSection(&session->cs);
                         session->cs.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": NetBTSession.cs");
                         *sess = session;
                     }

@@ -26,6 +26,7 @@
 #include "lmcons.h"
 #include "wtsapi32.h"
 #include "wine/debug.h"
+#include "wine/heap.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(wtsapi);
 
@@ -148,7 +149,7 @@ BOOL WINAPI WTSEnumerateProcessesExW(HANDLE server, DWORD *level, DWORD session_
         nt_process = (SYSTEM_PROCESS_INFORMATION *)((char *)nt_process + nt_process->NextEntryOffset);
     }
 
-    if (!(info = malloc(size)))
+    if (!(info = heap_alloc(size)))
     {
         free(nt_info);
         SetLastError(ERROR_OUTOFMEMORY);
@@ -314,7 +315,7 @@ BOOL WINAPI WTSEnumerateSessionsA(HANDLE server, DWORD reserved, DWORD version,
         size += sizeof(**session_info) + len;
     }
 
-    if (!(*session_info = malloc(size)))
+    if (!(*session_info = heap_alloc(size)))
     {
         WTSFreeMemory(infoW);
         SetLastError(ERROR_OUTOFMEMORY);
@@ -354,7 +355,7 @@ BOOL WINAPI WTSEnumerateSessionsW(HANDLE server, DWORD reserved, DWORD version,
 
     if (!session_info || !count) return FALSE;
 
-    if (!(*session_info = malloc(sizeof(**session_info) + sizeof(session_name))))
+    if (!(*session_info = heap_alloc(sizeof(**session_info) + sizeof(session_name))))
     {
         SetLastError(ERROR_OUTOFMEMORY);
         return FALSE;
@@ -377,7 +378,7 @@ BOOL WINAPI WTSEnumerateSessionsW(HANDLE server, DWORD reserved, DWORD version,
  */
 void WINAPI WTSFreeMemory(PVOID pMemory)
 {
-    free(pMemory);
+    heap_free(pMemory);
 }
 
 /************************************************************
@@ -386,7 +387,7 @@ void WINAPI WTSFreeMemory(PVOID pMemory)
 BOOL WINAPI WTSFreeMemoryExA(WTS_TYPE_CLASS type, void *ptr, ULONG nmemb)
 {
     TRACE("%d %p %ld\n", type, ptr, nmemb);
-    free(ptr);
+    heap_free(ptr);
     return TRUE;
 }
 
@@ -396,7 +397,7 @@ BOOL WINAPI WTSFreeMemoryExA(WTS_TYPE_CLASS type, void *ptr, ULONG nmemb)
 BOOL WINAPI WTSFreeMemoryExW(WTS_TYPE_CLASS type, void *ptr, ULONG nmemb)
 {
     TRACE("%d %p %ld\n", type, ptr, nmemb);
-    free(ptr);
+    heap_free(ptr);
     return TRUE;
 }
 
@@ -480,7 +481,7 @@ BOOL WINAPI WTSQuerySessionInformationA(HANDLE server, DWORD session_id, WTS_INF
         return FALSE;
     }
 
-    if (!(*buffer = malloc(*count)))
+    if (!(*buffer = heap_alloc(*count)))
     {
         WTSFreeMemory(bufferW);
         return FALSE;
@@ -489,7 +490,7 @@ BOOL WINAPI WTSQuerySessionInformationA(HANDLE server, DWORD session_id, WTS_INF
     if (!(*count = WideCharToMultiByte(CP_ACP, 0, bufferW, -1, *buffer, *count, NULL, NULL)))
     {
         WTSFreeMemory(bufferW);
-        free(*buffer);
+        heap_free(*buffer);
         return FALSE;
     }
 
@@ -514,7 +515,7 @@ BOOL WINAPI WTSQuerySessionInformationW(HANDLE server, DWORD session_id, WTS_INF
     {
         WTS_CONNECTSTATE_CLASS *state;
 
-        if (!(state = malloc(sizeof(*state)))) return FALSE;
+        if (!(state = heap_alloc(sizeof(*state)))) return FALSE;
         *state = WTSActive;
         *buffer = (WCHAR *)state;
         *count = sizeof(*state);
@@ -525,7 +526,7 @@ BOOL WINAPI WTSQuerySessionInformationW(HANDLE server, DWORD session_id, WTS_INF
     {
         USHORT *protocol;
 
-        if (!(protocol = malloc(sizeof(*protocol)))) return FALSE;
+        if (!(protocol = heap_alloc(sizeof(*protocol)))) return FALSE;
         FIXME("returning 0 protocol type\n");
         *protocol = 0;
         *buffer = (WCHAR *)protocol;
@@ -538,7 +539,7 @@ BOOL WINAPI WTSQuerySessionInformationW(HANDLE server, DWORD session_id, WTS_INF
         DWORD size = UNLEN + 1;
         WCHAR *username;
 
-        if (!(username = malloc(size * sizeof(WCHAR)))) return FALSE;
+        if (!(username = heap_alloc(size * sizeof(WCHAR)))) return FALSE;
         GetUserNameW(username, &size);
         *buffer = username;
         *count = size * sizeof(WCHAR);
@@ -550,7 +551,7 @@ BOOL WINAPI WTSQuerySessionInformationW(HANDLE server, DWORD session_id, WTS_INF
         DWORD size = MAX_COMPUTERNAME_LENGTH + 1;
         WCHAR *computername;
 
-        if (!(computername = malloc(size * sizeof(WCHAR)))) return FALSE;
+        if (!(computername = heap_alloc(size * sizeof(WCHAR)))) return FALSE;
         GetComputerNameW(computername, &size);
         *buffer = computername;
         /* GetComputerNameW() return size doesn't include terminator */

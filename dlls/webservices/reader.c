@@ -422,7 +422,7 @@ static struct reader *alloc_reader(void)
     ret->nb_prefixes = ret->nb_prefixes_allocated = 1;
 
     ret->magic       = READER_MAGIC;
-    InitializeCriticalSectionEx( &ret->cs, 0, RTL_CRITICAL_SECTION_FLAG_FORCE_DEBUG_INFO );
+    InitializeCriticalSection( &ret->cs );
     ret->cs.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": reader.cs");
 
     prop_init( reader_props, count, ret->prop, &ret[1] );
@@ -914,7 +914,7 @@ WS_XML_UINT64_TEXT *alloc_uint64_text( UINT64 value )
     return ret;
 }
 
-static WS_XML_FLOAT_TEXT *alloc_float_text( float value )
+WS_XML_FLOAT_TEXT *alloc_float_text( float value )
 {
     WS_XML_FLOAT_TEXT *ret;
 
@@ -6184,7 +6184,6 @@ static WS_READ_OPTION get_field_read_option( WS_TYPE type, ULONG options )
     case WS_BYTES_TYPE:
     case WS_XML_STRING_TYPE:
     case WS_XML_QNAME_TYPE:
-    case WS_XML_BUFFER_TYPE:
     case WS_STRUCT_TYPE:
     case WS_ENUM_TYPE:
     case WS_UNION_TYPE:

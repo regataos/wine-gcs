@@ -439,13 +439,13 @@ static void HTMLAreaElement_unlink(DispatchEx *dispex)
     unlink_ref(&This->nsarea);
 }
 
-static HRESULT HTMLAreaElement_handle_event(DispatchEx *dispex, DOMEvent *event, BOOL *prevent_default)
+static HRESULT HTMLAreaElement_handle_event(DispatchEx *dispex, eventid_t eid, nsIDOMEvent *event, BOOL *prevent_default)
 {
     HTMLAreaElement *This = impl_from_DispatchEx(dispex);
     nsAString href_str, target_str;
     nsresult nsres;
 
-    if(event->event_id == EVENTID_CLICK) {
+    if(eid == EVENTID_CLICK) {
         nsAString_Init(&href_str, NULL);
         nsres = nsIDOMHTMLAreaElement_GetHref(This->nsarea, &href_str);
         if (NS_FAILED(nsres)) {
@@ -460,14 +460,14 @@ static HRESULT HTMLAreaElement_handle_event(DispatchEx *dispex, DOMEvent *event,
             goto fallback;
         }
 
-        return handle_link_click_event(&This->element, &href_str, &target_str, event->nsevent, prevent_default);
+        return handle_link_click_event(&This->element, &href_str, &target_str, event, prevent_default);
 
 fallback:
         nsAString_Finish(&href_str);
         nsAString_Finish(&target_str);
     }
 
-    return HTMLElement_handle_event(&This->element.node.event_target.dispex, event, prevent_default);
+    return HTMLElement_handle_event(&This->element.node.event_target.dispex, eid, event, prevent_default);
 }
 
 static const NodeImplVtbl HTMLAreaElementImplVtbl = {
@@ -494,9 +494,10 @@ static const tid_t HTMLAreaElement_iface_tids[] = {
     IHTMLAreaElement_tid,
     0
 };
-static dispex_static_data_t HTMLAreaElement_dispex = {
+dispex_static_data_t HTMLAreaElement_dispex = {
     "HTMLAreaElement",
     &HTMLAreaElement_event_target_vtbl.dispex_vtbl,
+    PROTO_ID_HTMLAreaElement,
     DispHTMLAreaElement_tid,
     HTMLAreaElement_iface_tids,
     HTMLElement_init_dispex_info

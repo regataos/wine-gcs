@@ -60,7 +60,7 @@ udostępnia zmienne środowiskowe z powłoki, z której wystartował
 programom windowsowym/dosowym, więc używaj odpowiedniej składni
 twojej powłoki, aby wpisać zmienne środowiskowe, których potrzebujesz.
 .TP
-.B WINEPREFIX
+.I WINEPREFIX
 Jeżeli ta zmienna jest ustawiona, to jej zawartość jest brana jako nazwa katalogu gdzie
 .B wine
 przechowuje swoje dane (domyślny katalog to
@@ -81,20 +81,24 @@ na inne wartości dla różnych procesów
 jest możliwe uruchamianie kilka prawdziwie niezależnych procesów
 .BR wine .
 .TP
-.B WINESERVER
+.I WINESERVER
 Określa ścieżkę i nazwę programu binarnego
 .B wineserver
-Jeżeli nie ustawione, Wine będzie szukał pliku o nazwie "wineserver" w
-podanej ścieżce i kilku innych miejscach prawdopodobnego występowania.
+Jeżeli nie ustawione, Wine będzie próbował załadować
+.BR @bindir@/wineserver
+i jeśli zakończy się to niepowodzeniem to będzie szukał pliku o nazwie
+"wineserver" w podanej ścieżce i kilku innych miejscach prawdopodobnego występowania.
 .TP
-.B WINELOADER
+.I WINELOADER
 Określa ścieżkę i nazwę programu binarnego
 .B wine
-używanej do uruchamiania nowych procesów Windowsowych. Jeżeli
-nieustawione, Wine będzie szukał pliku o nazwie "wine" w podanej
-ścieżce i kilku innych miejscach prawdopodobnego występowania.
+używanej do uruchamiania nowych procesów Windowsowych. Jeżeli nieustawione, Wine będzie
+próbowało załadować
+.BR @bindir@/wine
+i jeśli zakończy się to niepowodzeniem to będzie szukał pliku o nazwie "wine" w
+podanej ścieżce i kilku innych miejscach prawdopodobnego występowania.
 .TP
-.B WINEDEBUG
+.I WINEDEBUG
 Włącza lub wyłącza wiadomości debuggera. Składnia zmiennej
 wygląda następująco
 .RI [ klasa ][+/-] kanał [,[ klasa2 ][+/-] kanał2 ].
@@ -144,14 +148,15 @@ Informacji na temat wiadomości debugera szukaj w rozdziale
 z Przewodnika użytkownika Wine.
 .RE
 .TP
-.B WINEDLLPATH
+.I WINEDLLPATH
 Określa ścieżkę/ki, w których należy szukać wbudowanych bibliotek dll i programów
 Winelib. To lista katalogów oddzielonych znakiem ":". W dodatku do
 każdego katalogu określonego w
 .IR WINEDLLPATH ,
-Wine będzie także szukał w katalogu instalacyjnym.
+Wine będzie także szukał w katalogu
+.BR @dlldir@ .
 .TP
-.B WINEDLLOVERRIDES
+.I WINEDLLOVERRIDES
 Definiuje typ nadpisania i kolejność ładowania bibliotek dll użytych do ładowania
 procesu dla jakiejkolwiek biblioteki dll. Obecnie istnieją dwa typy bibliotek, które można załadować
 do przestrzeni adresowej procesu: natywne biblioteki Windowsa
@@ -197,7 +202,7 @@ wbudowane zawiodą; zawsze ładuj shell32 jako wbudowaną i comctl32
 jako natywną. Oleaut32 pozostaw wyłączone.
 .RE
 .TP
-.B WINEARCH
+.I WINEARCH
 Określa jaką architekturę Windowsa wspierać. Może to być zarówno
 .B win32
 (wsparcie tylko 32-bitowych programów), lub
@@ -210,40 +215,44 @@ prefiksem, Wine odmówi uruchomienie jeżeli
 .I WINEARCH
 nie zgadza się z architekturą prefiksu.
 .TP
-.B DISPLAY
+.I DISPLAY
 Określa, którego wyświetlacza X11 użyć.
 .TP
 Zmienne konfiguracyjne sterownika dźwięku OSS
 .TP
-.B AUDIODEV
+.I AUDIODEV
 Ustaw urządzenie dla wejścia / wyjścia dźwięku. Domyślnie
 .BR /dev/dsp .
 .TP
-.B MIXERDEV
+.I MIXERDEV
 Ustaw urządzenie dla suwaków miksera. Domyślnie
 .BR /dev/mixer .
 .TP
-.B MIDIDEV
+.I MIDIDEV
 Ustaw urządzanie MIDI (sekwencer). Domyślnie
 .BR /dev/sequencer .
 .SH FILES
 .TP
-.I wine
+.I @bindir@/wine
 Ładowarka programów
 .B wine
 .TP
-.I wineconsole
+.I @bindir@/wineconsole
 Ładowarka programów
 .B wine
 dla aplikacji CUI (konsolowych).
 .TP
-.I wineserver
+.I @bindir@/wineserver
 Serwer
 .B wine
 .TP
-.I winedbg
+.I @bindir@/winedbg
 Debugger
 .B wine
+.TP
+.I @dlldir@
+Katalog zawierający współdzielone biblioteki
+.BR wine
 .TP
 .I $WINEPREFIX/dosdevices
 Katalog zawierający mapowania urządzeń DOS. Każdy plik w tym

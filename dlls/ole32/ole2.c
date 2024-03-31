@@ -31,6 +31,8 @@
 #include <string.h>
 
 #define COBJMACROS
+#define NONAMELESSUNION
+
 #include "windef.h"
 #include "winbase.h"
 #include "winerror.h"
@@ -2008,64 +2010,64 @@ void WINAPI ReleaseStgMedium(
     case TYMED_HGLOBAL:
     {
       if ( (pmedium->pUnkForRelease==0) &&
-	   (pmedium->hGlobal!=0) )
-	GlobalFree(pmedium->hGlobal);
+	   (pmedium->u.hGlobal!=0) )
+	GlobalFree(pmedium->u.hGlobal);
       break;
     }
     case TYMED_FILE:
     {
-      if (pmedium->lpszFileName!=0)
+      if (pmedium->u.lpszFileName!=0)
       {
 	if (pmedium->pUnkForRelease==0)
 	{
-	  DeleteFileW(pmedium->lpszFileName);
+	  DeleteFileW(pmedium->u.lpszFileName);
 	}
 
-	CoTaskMemFree(pmedium->lpszFileName);
+	CoTaskMemFree(pmedium->u.lpszFileName);
       }
       break;
     }
     case TYMED_ISTREAM:
     {
-      if (pmedium->pstm!=0)
+      if (pmedium->u.pstm!=0)
       {
-	IStream_Release(pmedium->pstm);
+	IStream_Release(pmedium->u.pstm);
       }
       break;
     }
     case TYMED_ISTORAGE:
     {
-      if (pmedium->pstg!=0)
+      if (pmedium->u.pstg!=0)
       {
-	IStorage_Release(pmedium->pstg);
+	IStorage_Release(pmedium->u.pstg);
       }
       break;
     }
     case TYMED_GDI:
     {
       if ( (pmedium->pUnkForRelease==0) &&
-	   (pmedium->hBitmap!=0) )
-	DeleteObject(pmedium->hBitmap);
+	   (pmedium->u.hBitmap!=0) )
+	DeleteObject(pmedium->u.hBitmap);
       break;
     }
     case TYMED_MFPICT:
     {
       if ( (pmedium->pUnkForRelease==0) &&
-	   (pmedium->hMetaFilePict!=0) )
+	   (pmedium->u.hMetaFilePict!=0) )
       {
-	LPMETAFILEPICT pMP = GlobalLock(pmedium->hMetaFilePict);
+	LPMETAFILEPICT pMP = GlobalLock(pmedium->u.hMetaFilePict);
 	DeleteMetaFile(pMP->hMF);
-	GlobalUnlock(pmedium->hMetaFilePict);
-	GlobalFree(pmedium->hMetaFilePict);
+	GlobalUnlock(pmedium->u.hMetaFilePict);
+	GlobalFree(pmedium->u.hMetaFilePict);
       }
       break;
     }
     case TYMED_ENHMF:
     {
       if ( (pmedium->pUnkForRelease==0) &&
-	   (pmedium->hEnhMetaFile!=0) )
+	   (pmedium->u.hEnhMetaFile!=0) )
       {
-	DeleteEnhMetaFile(pmedium->hEnhMetaFile);
+	DeleteEnhMetaFile(pmedium->u.hEnhMetaFile);
       }
       break;
     }
@@ -2780,7 +2782,7 @@ static HRESULT get_storage(IDataObject *data, IStorage *stg, UINT *src_cf, BOOL 
     /* CF_EMBEDEDOBJECT */
     init_fmtetc(&fmt, embedded_object_clipboard_format, TYMED_ISTORAGE);
     med.tymed = TYMED_ISTORAGE;
-    med.pstg = stg;
+    med.u.pstg = stg;
     med.pUnkForRelease = NULL;
     hr = IDataObject_GetDataHere(data, &fmt, &med);
     if(SUCCEEDED(hr))
@@ -2792,7 +2794,7 @@ static HRESULT get_storage(IDataObject *data, IStorage *stg, UINT *src_cf, BOOL 
     /* CF_EMBEDSOURCE */
     init_fmtetc(&fmt, embed_source_clipboard_format, TYMED_ISTORAGE);
     med.tymed = TYMED_ISTORAGE;
-    med.pstg = stg;
+    med.u.pstg = stg;
     med.pUnkForRelease = NULL;
     hr = IDataObject_GetDataHere(data, &fmt, &med);
     if(SUCCEEDED(hr))

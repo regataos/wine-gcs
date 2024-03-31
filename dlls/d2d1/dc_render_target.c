@@ -673,32 +673,10 @@ static BOOL STDMETHODCALLTYPE d2d_dc_render_target_IsSupported(ID2D1DCRenderTarg
         const D2D1_RENDER_TARGET_PROPERTIES *desc)
 {
     struct d2d_dc_render_target *render_target = impl_from_ID2D1DCRenderTarget(iface);
-    const D2D1_RENDER_TARGET_PROPERTIES *target_desc = &render_target->desc;
-    D2D1_PIXEL_FORMAT pixel_format;
 
     TRACE("iface %p, desc %p.\n", iface, desc);
 
-    if (desc->type != D2D1_RENDER_TARGET_TYPE_DEFAULT
-            && target_desc->type != desc->type)
-    {
-        return FALSE;
-    }
-
-    pixel_format = ID2D1RenderTarget_GetPixelFormat(render_target->dxgi_target);
-
-    if (desc->pixelFormat.format != DXGI_FORMAT_UNKNOWN
-            && pixel_format.format != desc->pixelFormat.format)
-    {
-        return FALSE;
-    }
-
-    if (desc->pixelFormat.alphaMode != D2D1_ALPHA_MODE_UNKNOWN
-            && pixel_format.alphaMode != desc->pixelFormat.alphaMode)
-    {
-        return FALSE;
-    }
-
-    return (target_desc->usage & desc->usage) == desc->usage;
+    return ID2D1RenderTarget_IsSupported(render_target->dxgi_target, desc);
 }
 
 static HRESULT STDMETHODCALLTYPE d2d_dc_render_target_BindDC(ID2D1DCRenderTarget *iface,
@@ -727,7 +705,7 @@ static HRESULT STDMETHODCALLTYPE d2d_dc_render_target_BindDC(ID2D1DCRenderTarget
     bitmap_size.height = rect->bottom - rect->top;
 
     memset(&bitmap_desc, 0, sizeof(bitmap_desc));
-    bitmap_desc.pixelFormat = render_target->desc.pixelFormat;
+    bitmap_desc.pixelFormat = render_target->pixel_format;
     bitmap_desc.bitmapOptions = D2D1_BITMAP_OPTIONS_TARGET | D2D1_BITMAP_OPTIONS_CANNOT_DRAW |
             D2D1_BITMAP_OPTIONS_GDI_COMPATIBLE;
     if (FAILED(hr = ID2D1DeviceContext_CreateBitmap(context, bitmap_size, NULL, 0, &bitmap_desc,
@@ -835,9 +813,7 @@ HRESULT d2d_dc_render_target_init(struct d2d_dc_render_target *render_target, ID
     SetRectEmpty(&render_target->dst_rect);
     render_target->hdc = NULL;
 
-    render_target->desc = *desc;
-    render_target->desc.usage |= D2D1_RENDER_TARGET_USAGE_GDI_COMPATIBLE;
-
+    render_target->pixel_format = desc->pixelFormat;
     switch (desc->pixelFormat.format)
     {
         case DXGI_FORMAT_B8G8R8A8_UNORM:
@@ -864,9 +840,8 @@ HRESULT d2d_dc_render_target_init(struct d2d_dc_render_target *render_target, ID
         return hr;
     }
 
-    hr = d2d_d3d_create_render_target(unsafe_impl_from_ID2D1Device((ID2D1Device1* )device), NULL,
-            (IUnknown *)&render_target->ID2D1DCRenderTarget_iface, &d2d_dc_render_target_ops,
-            desc, (void **)&render_target->dxgi_inner);
+    hr = d2d_d3d_create_render_target(device, NULL, (IUnknown *)&render_target->ID2D1DCRenderTarget_iface,
+            &d2d_dc_render_target_ops, desc, (void **)&render_target->dxgi_inner);
     ID2D1Device_Release(device);
     if (FAILED(hr))
     {

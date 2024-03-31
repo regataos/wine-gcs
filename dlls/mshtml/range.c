@@ -1287,12 +1287,7 @@ static HRESULT WINAPI HTMLTxtRange_select(IHTMLTxtRange *iface)
 
     TRACE("(%p)\n", This);
 
-    if(!This->doc->window) {
-        FIXME("no window\n");
-        return E_FAIL;
-    }
-
-    nsres = nsIDOMWindow_GetSelection(This->doc->window->dom_window, &nsselection);
+    nsres = nsIDOMWindow_GetSelection(This->doc->outer_window->nswindow, &nsselection);
     if(NS_FAILED(nsres)) {
         ERR("GetSelection failed: %08lx\n", nsres);
         return E_FAIL;
@@ -1735,9 +1730,10 @@ static const tid_t HTMLTxtRange_iface_tids[] = {
     IHTMLTxtRange_tid,
     0
 };
-static dispex_static_data_t HTMLTxtRange_dispex = {
+dispex_static_data_t HTMLTxtRange_dispex = {
     "TextRange",
     &HTMLTxtRange_dispex_vtbl,
+    PROTO_ID_HTMLTextRange,
     IHTMLTxtRange_tid,
     HTMLTxtRange_iface_tids
 };
@@ -1750,10 +1746,10 @@ HRESULT HTMLTxtRange_Create(HTMLDocumentNode *doc, nsIDOMRange *nsrange, IHTMLTx
     if(!ret)
         return E_OUTOFMEMORY;
 
-    init_dispatch(&ret->dispex, &HTMLTxtRange_dispex, dispex_compat_mode(&doc->node.event_target.dispex));
-
     ret->IHTMLTxtRange_iface.lpVtbl = &HTMLTxtRangeVtbl;
     ret->IOleCommandTarget_iface.lpVtbl = &OleCommandTargetVtbl;
+
+    init_dispatch(&ret->dispex, &HTMLTxtRange_dispex, get_inner_window(doc), dispex_compat_mode(&doc->node.event_target.dispex));
 
     if(nsrange)
         nsIDOMRange_AddRef(nsrange);
@@ -2091,14 +2087,15 @@ static const tid_t HTMLDOMRange_iface_tids[] = {
     0
 };
 
-static dispex_static_data_t HTMLDOMRange_dispex = {
+dispex_static_data_t HTMLDOMRange_dispex = {
     "Range",
     &HTMLDOMRange_dispex_vtbl,
+    PROTO_ID_HTMLDOMRange,
     DispHTMLDOMRange_tid,
     HTMLDOMRange_iface_tids
 };
 
-HRESULT create_dom_range(nsIDOMRange *nsrange, compat_mode_t compat_mode, IHTMLDOMRange **p)
+HRESULT create_dom_range(nsIDOMRange *nsrange, HTMLDocumentNode *doc, IHTMLDOMRange **p)
 {
     HTMLDOMRange *ret;
 
@@ -2106,9 +2103,9 @@ HRESULT create_dom_range(nsIDOMRange *nsrange, compat_mode_t compat_mode, IHTMLD
     if(!ret)
         return E_OUTOFMEMORY;
 
-    init_dispatch(&ret->dispex, &HTMLDOMRange_dispex, compat_mode);
-
     ret->IHTMLDOMRange_iface.lpVtbl = &HTMLDOMRangeVtbl;
+
+    init_dispatch(&ret->dispex, &HTMLDOMRange_dispex, get_inner_window(doc), dispex_compat_mode(&doc->node.event_target.dispex));
 
     if(nsrange)
         nsIDOMRange_AddRef(nsrange);

@@ -1,4 +1,3 @@
 MODULE    = ksproxy.ax
 
-SOURCES = \
-	version.rc
+RC_SRCS = version.rc

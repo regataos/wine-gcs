@@ -469,7 +469,6 @@ static void test_monthcal(void)
     ok(limits == GDTR_MIN, "got 0x%08lx\n", limits);
 
     GetSystemTime(st);
-    st[0].wDay = 25;
     st[1] = st[0];
     st[1].wYear++;
     r = SendMessageA(hwnd, MCM_SETRANGE, 0, (LPARAM)st);
@@ -481,7 +480,6 @@ static void test_monthcal(void)
 
     /* flags are 0, set min limit */
     GetSystemTime(st);
-    st[0].wDay = 25;
     st[1] = st[0];
     st[1].wYear++;
 

@@ -21,9 +21,12 @@
 
 #include <stdarg.h>
 
+#include "ntstatus.h"
+#define WIN32_NO_STATUS
 #define COBJMACROS
 #include "windef.h"
 #include "winbase.h"
+#include "winternl.h"
 #include "winuser.h"
 #include "winnls.h"
 #include "winreg.h"
@@ -67,7 +70,7 @@ char *WtoA(LPCWSTR wstr)
 
     length = WideCharToMultiByte(CP_UTF8, 0, wstr, -1, NULL, 0, NULL, NULL);
 
-    result = malloc(length);
+    result = HeapAlloc(GetProcessHeap(), 0, length);
 
     if (result)
         WideCharToMultiByte(CP_UTF8, 0, wstr, -1, result, length, NULL, NULL);
@@ -147,7 +150,7 @@ static ULONG WINAPI mscorecf_Release(IClassFactory *iface )
 
     if (ref == 0)
     {
-        free(This);
+        HeapFree(GetProcessHeap(), 0, This);
     }
 
     return ref;
@@ -228,7 +231,7 @@ void CDECL mono_print_handler_fn(const char *string, INT is_stdout)
 
     if (!tls)
     {
-        tls = malloc(sizeof(*tls));
+        tls = HeapAlloc(GetProcessHeap(), 0, sizeof(*tls));
         tls->length = 0;
         TlsSetValue(print_tls_index, tls);
     }
@@ -279,7 +282,7 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
         break;
     case DLL_THREAD_DETACH:
         if (print_tls_index != TLS_OUT_OF_INDEXES)
-            free(TlsGetValue(print_tls_index));
+            HeapFree(GetProcessHeap(), 0, TlsGetValue(print_tls_index));
         break;
     case DLL_PROCESS_DETACH:
         expect_no_runtimes();
@@ -287,7 +290,7 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
         runtimehost_uninit();
         if (print_tls_index != TLS_OUT_OF_INDEXES)
         {
-            free(TlsGetValue(print_tls_index));
+            HeapFree(GetProcessHeap(), 0, TlsGetValue(print_tls_index));
             TlsFree(print_tls_index);
         }
         break;
@@ -315,8 +318,76 @@ VOID WINAPI _CorImageUnloading(PVOID imageBase)
 
 HRESULT WINAPI _CorValidateImage(PVOID* imageBase, LPCWSTR imageName)
 {
-    TRACE("(%p, %s): stub\n", imageBase, debugstr_w(imageName));
-    return E_FAIL;
+    IMAGE_COR20_HEADER *cliheader;
+    IMAGE_NT_HEADERS *nt;
+    ULONG size;
+
+    TRACE("(%p, %s)\n", imageBase, debugstr_w(imageName));
+
+    if (!imageBase)
+        return E_INVALIDARG;
+
+    nt = RtlImageNtHeader(*imageBase);
+    if (!nt)
+        return STATUS_INVALID_IMAGE_FORMAT;
+
+    cliheader = RtlImageDirectoryEntryToData(*imageBase, TRUE, IMAGE_DIRECTORY_ENTRY_COM_DESCRIPTOR, &size);
+    if (!cliheader || size < sizeof(*cliheader))
+        return STATUS_INVALID_IMAGE_FORMAT;
+
+#ifdef _WIN64
+    if (cliheader->Flags & COMIMAGE_FLAGS_32BITREQUIRED)
+        return STATUS_INVALID_IMAGE_FORMAT;
+
+    if (nt->OptionalHeader.Magic == IMAGE_NT_OPTIONAL_HDR64_MAGIC)
+    {
+        if (cliheader->Flags & COMIMAGE_FLAGS_ILONLY)
+        {
+            DWORD *entry = &nt->OptionalHeader.AddressOfEntryPoint;
+            DWORD old_protect;
+
+            if (!VirtualProtect(entry, sizeof(*entry), PAGE_READWRITE, &old_protect))
+                return E_UNEXPECTED;
+            *entry = 0;
+            if (!VirtualProtect(entry, sizeof(*entry), old_protect, &old_protect))
+                return E_UNEXPECTED;
+        }
+
+        return STATUS_SUCCESS;
+    }
+
+    if (nt->OptionalHeader.Magic == IMAGE_NT_OPTIONAL_HDR32_MAGIC)
+    {
+        if (!(cliheader->Flags & COMIMAGE_FLAGS_ILONLY))
+            return STATUS_INVALID_IMAGE_FORMAT;
+
+        FIXME("conversion of IMAGE_NT_HEADERS32 -> IMAGE_NT_HEADERS64 not implemented\n");
+        return STATUS_NOT_IMPLEMENTED;
+    }
+
+#else
+    if (nt->OptionalHeader.Magic == IMAGE_NT_OPTIONAL_HDR32_MAGIC)
+    {
+        if (cliheader->Flags & COMIMAGE_FLAGS_ILONLY)
+        {
+            DWORD *entry = &nt->OptionalHeader.AddressOfEntryPoint;
+            DWORD old_protect;
+
+            if (!VirtualProtect(entry, sizeof(*entry), PAGE_READWRITE, &old_protect))
+                return E_UNEXPECTED;
+            *entry = (nt->FileHeader.Characteristics & IMAGE_FILE_DLL) ?
+                ((DWORD_PTR)&_CorDllMain - (DWORD_PTR)*imageBase) :
+                ((DWORD_PTR)&_CorExeMain - (DWORD_PTR)*imageBase);
+            if (!VirtualProtect(entry, sizeof(*entry), old_protect, &old_protect))
+                return E_UNEXPECTED;
+        }
+
+        return STATUS_SUCCESS;
+    }
+
+#endif
+
+    return STATUS_INVALID_IMAGE_FORMAT;
 }
 
 HRESULT WINAPI GetCORSystemDirectory(LPWSTR pbuffer, DWORD cchBuffer, DWORD *dwLength)
@@ -701,7 +772,7 @@ HRESULT WINAPI DllGetClassObject(REFCLSID rclsid, REFIID riid, LPVOID* ppv)
     if(!ppv)
         return E_INVALIDARG;
 
-    This = malloc(sizeof(mscorecf));
+    This = HeapAlloc(GetProcessHeap(), 0, sizeof(mscorecf));
 
     This->IClassFactory_iface.lpVtbl = &mscorecf_vtbl;
     This->pfnCreateInstance = create_monodata;
@@ -764,7 +835,7 @@ static BOOL invoke_appwiz(void)
     len = GetSystemDirectoryW(app, MAX_PATH - ARRAY_SIZE(controlW));
     memcpy(app+len, controlW, sizeof(controlW));
 
-    args = malloc(len * sizeof(WCHAR) + sizeof(controlW) + sizeof(argsW));
+    args = HeapAlloc(GetProcessHeap(), 0, (len*sizeof(WCHAR) + sizeof(controlW) + sizeof(argsW)));
     if(!args)
         return FALSE;
 
@@ -776,7 +847,7 @@ static BOOL invoke_appwiz(void)
     memset(&si, 0, sizeof(si));
     si.cb = sizeof(si);
     ret = CreateProcessW(app, args, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi);
-    free(args);
+    HeapFree(GetProcessHeap(), 0, args);
     if (ret) {
         CloseHandle(pi.hThread);
         WaitForSingleObject(pi.hProcess, INFINITE);

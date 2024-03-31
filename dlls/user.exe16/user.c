@@ -1824,11 +1824,11 @@ WORD WINAPI GetFreeSystemResources16( WORD resType )
 
 
 /***********************************************************************
- *           SetDeskWallpaper   (USER.285)
+ *           SetDeskWallPaper   (USER.285)
  */
-BOOL16 WINAPI SetDeskWallpaper16( const char *filename )
+BOOL16 WINAPI SetDeskWallPaper16( LPCSTR filename )
 {
-    return SetDeskWallpaper( filename );
+    return SetDeskWallPaper( filename );
 }
 
 

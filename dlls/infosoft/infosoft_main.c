@@ -37,7 +37,7 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(infosoft);
 
-extern HRESULT WINAPI wb_Constructor(IUnknown*, REFIID, LPVOID *);
+DECLSPEC_HIDDEN extern HRESULT WINAPI wb_Constructor(IUnknown*, REFIID, LPVOID *);
 
 typedef HRESULT (CALLBACK *LPFNCREATEINSTANCE)(IUnknown*, REFIID, LPVOID*);
 

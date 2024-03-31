@@ -170,7 +170,8 @@ static MACDRV_PDEVICE *create_mac_physdev(void)
 /**********************************************************************
  *              CreateDC (MACDRV.@)
  */
-static BOOL macdrv_CreateDC(PHYSDEV *pdev, LPCWSTR device, LPCWSTR output, const DEVMODEW* initData)
+static BOOL CDECL macdrv_CreateDC(PHYSDEV *pdev, LPCWSTR device, LPCWSTR output,
+                                  const DEVMODEW* initData)
 {
     MACDRV_PDEVICE *physDev = create_mac_physdev();
 
@@ -187,7 +188,7 @@ static BOOL macdrv_CreateDC(PHYSDEV *pdev, LPCWSTR device, LPCWSTR output, const
 /**********************************************************************
  *              CreateCompatibleDC (MACDRV.@)
  */
-static BOOL macdrv_CreateCompatibleDC(PHYSDEV orig, PHYSDEV *pdev)
+static BOOL CDECL macdrv_CreateCompatibleDC(PHYSDEV orig, PHYSDEV *pdev)
 {
     MACDRV_PDEVICE *physDev = create_mac_physdev();
 
@@ -204,7 +205,7 @@ static BOOL macdrv_CreateCompatibleDC(PHYSDEV orig, PHYSDEV *pdev)
 /**********************************************************************
  *              DeleteDC (MACDRV.@)
  */
-static BOOL macdrv_DeleteDC(PHYSDEV dev)
+static BOOL CDECL macdrv_DeleteDC(PHYSDEV dev)
 {
     MACDRV_PDEVICE *physDev = get_macdrv_dev(dev);
 
@@ -218,7 +219,7 @@ static BOOL macdrv_DeleteDC(PHYSDEV dev)
 /***********************************************************************
  *              GetDeviceCaps (MACDRV.@)
  */
-static INT macdrv_GetDeviceCaps(PHYSDEV dev, INT cap)
+static INT CDECL macdrv_GetDeviceCaps(PHYSDEV dev, INT cap)
 {
     INT ret;
 
@@ -269,8 +270,6 @@ static const struct user_driver_funcs macdrv_funcs =
     .pBeep = macdrv_Beep,
     .pChangeDisplaySettings = macdrv_ChangeDisplaySettings,
     .pClipCursor = macdrv_ClipCursor,
-    .pNotifyIcon = macdrv_NotifyIcon,
-    .pCleanupIcons = macdrv_CleanupIcons,
     .pClipboardWindowProc = macdrv_ClipboardWindowProc,
     .pDesktopWindowProc = macdrv_DesktopWindowProc,
     .pDestroyCursorIcon = macdrv_DestroyCursorIcon,
@@ -304,6 +303,7 @@ static const struct user_driver_funcs macdrv_funcs =
     .pUpdateLayeredWindow = macdrv_UpdateLayeredWindow,
     .pVkKeyScanEx = macdrv_VkKeyScanEx,
     .pImeProcessKey = macdrv_ImeProcessKey,
+    .pImeToAsciiEx = macdrv_ImeToAsciiEx,
     .pNotifyIMEStatus = macdrv_NotifyIMEStatus,
     .pWindowMessage = macdrv_WindowMessage,
     .pWindowPosChanged = macdrv_WindowPosChanged,

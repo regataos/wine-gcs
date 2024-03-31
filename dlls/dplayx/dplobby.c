@@ -20,6 +20,8 @@
 #include <string.h>
 
 #define COBJMACROS
+#define NONAMELESSUNION
+
 #include "windef.h"
 #include "winbase.h"
 #include "winerror.h"
@@ -36,7 +38,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(dplay);
 
 /* Forward declarations for this module helper methods */
 HRESULT DPL_CreateCompoundAddress ( LPCDPCOMPOUNDADDRESSELEMENT lpElements, DWORD dwElementCount,
-                                    LPVOID lpAddress, LPDWORD lpdwAddressSize, BOOL bAnsiInterface );
+                                    LPVOID lpAddress, LPDWORD lpdwAddressSize, BOOL bAnsiInterface )DECLSPEC_HIDDEN;
 
 static HRESULT DPL_CreateAddress( REFGUID guidSP, REFGUID guidDataType, LPCVOID lpData, DWORD dwDataSize,
                            LPVOID lpAddress, LPDWORD lpdwAddressSize, BOOL bAnsiInterface );
@@ -115,7 +117,7 @@ static void dplobby_destroy(IDirectPlayLobbyImpl *obj)
     DPQ_DELETEQ( obj->msgs, msgs, LPDPLMSG, cbDeleteElemFromHeap );
     obj->lock.DebugInfo->Spare[0] = 0;
     DeleteCriticalSection( &obj->lock );
-    free( obj );
+    HeapFree( GetProcessHeap(), 0, obj );
 }
 
 static HRESULT WINAPI IDirectPlayLobbyAImpl_QueryInterface( IDirectPlayLobbyA *iface, REFIID riid,
@@ -405,7 +407,7 @@ static HRESULT DPL_ConnectEx( IDirectPlayLobbyImpl *This, DWORD dwFlags, REFIID 
     return hr;
   }
 
-  lpConn = calloc( 1, dwConnSize );
+  lpConn = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, dwConnSize );
 
   if( lpConn == NULL )
   {
@@ -417,7 +419,7 @@ static HRESULT DPL_ConnectEx( IDirectPlayLobbyImpl *This, DWORD dwFlags, REFIID 
                                                0, lpConn, &dwConnSize );
   if( FAILED( hr ) )
   {
-    free( lpConn );
+    HeapFree( GetProcessHeap(), 0, lpConn );
     return hr;
   }
 
@@ -442,7 +444,7 @@ static HRESULT DPL_ConnectEx( IDirectPlayLobbyImpl *This, DWORD dwFlags, REFIID 
   hr = IDirectPlayX_Open( (*(LPDIRECTPLAY2*)lplpDP), lpConn->lpSessionDesc,
                           dwOpenFlags );
 
-  free( lpConn );
+  HeapFree( GetProcessHeap(), 0, lpConn );
 
   return hr;
 }
@@ -952,9 +954,9 @@ static HRESULT WINAPI IDirectPlayLobby3AImpl_EnumLocalApplications( IDirectPlayL
     CLSIDFromString( buff, &serviceProviderGUID );
     /* FIXME: Have I got a memory leak on the serviceProviderGUID? */
 
-    dplAppInfo.dwSize          = sizeof( dplAppInfo );
-    dplAppInfo.guidApplication = serviceProviderGUID;
-    dplAppInfo.lpszAppNameA    = subKeyName;
+    dplAppInfo.dwSize               = sizeof( dplAppInfo );
+    dplAppInfo.guidApplication      = serviceProviderGUID;
+    dplAppInfo.u.lpszAppNameA = subKeyName;
 
     EnterCriticalSection( &This->lock );
 
@@ -1153,7 +1155,8 @@ static BOOL CALLBACK RunApplicationA_EnumLocalApplications
     }
     else
     {
-        lpData->lpszCommandLine = strdup( returnBuffer );
+        if ((lpData->lpszCommandLine = HeapAlloc( GetProcessHeap(), 0, strlen(returnBuffer)+1 )))
+            strcpy( lpData->lpszCommandLine, returnBuffer );
     }
 
     sizeOfReturnBuffer = 200;
@@ -1166,7 +1169,8 @@ static BOOL CALLBACK RunApplicationA_EnumLocalApplications
     }
     else
     {
-        lpData->lpszCurrentDirectory = strdup( returnBuffer );
+        if ((lpData->lpszCurrentDirectory = HeapAlloc( GetProcessHeap(), 0, strlen(returnBuffer)+1 )))
+            strcpy( lpData->lpszCurrentDirectory, returnBuffer );
     }
 
     sizeOfReturnBuffer = 200;
@@ -1179,7 +1183,8 @@ static BOOL CALLBACK RunApplicationA_EnumLocalApplications
     }
     else
     {
-        lpData->lpszFileName = strdup( returnBuffer );
+        if ((lpData->lpszFileName = HeapAlloc( GetProcessHeap(), 0, strlen(returnBuffer)+1 )))
+            strcpy( lpData->lpszFileName, returnBuffer );
     }
 
     sizeOfReturnBuffer = 200;
@@ -1192,7 +1197,8 @@ static BOOL CALLBACK RunApplicationA_EnumLocalApplications
     }
     else
     {
-        lpData->lpszPath = strdup( returnBuffer );
+        if ((lpData->lpszPath = HeapAlloc( GetProcessHeap(), 0, strlen(returnBuffer)+1 )))
+            strcpy( lpData->lpszPath, returnBuffer );
     }
 
     return FALSE; /* No need to keep going as we found what we wanted */
@@ -1326,15 +1332,16 @@ static HRESULT WINAPI IDirectPlayLobby3AImpl_RunApplication( IDirectPlayLobby3A 
   strcpy( temp, enumData.lpszPath );
   strcat( temp, "\\" );
   strcat( temp, enumData.lpszFileName );
-  free( enumData.lpszPath );
-  free( enumData.lpszFileName );
-  appName = strdup( temp );
+  HeapFree( GetProcessHeap(), 0, enumData.lpszPath );
+  HeapFree( GetProcessHeap(), 0, enumData.lpszFileName );
+  if ((appName = HeapAlloc( GetProcessHeap(), 0, strlen(temp)+1 ))) strcpy( appName, temp );
 
   /* Now the command line */
   strcat( temp, " " );
   strcat( temp, enumData.lpszCommandLine );
-  free( enumData.lpszCommandLine );
-  enumData.lpszCommandLine = strdup( temp );
+  HeapFree( GetProcessHeap(), 0, enumData.lpszCommandLine );
+  if ((enumData.lpszCommandLine = HeapAlloc( GetProcessHeap(), 0, strlen(temp)+1 )))
+      strcpy( enumData.lpszCommandLine, temp );
 
   ZeroMemory( &startupInfo, sizeof( startupInfo ) );
   startupInfo.cb = sizeof( startupInfo );
@@ -1357,17 +1364,17 @@ static HRESULT WINAPI IDirectPlayLobby3AImpl_RunApplication( IDirectPlayLobby3A 
   {
     ERR( "Failed to create process for app %s\n", appName );
 
-    free( appName );
-    free( enumData.lpszCommandLine );
-    free( enumData.lpszCurrentDirectory );
+    HeapFree( GetProcessHeap(), 0, appName );
+    HeapFree( GetProcessHeap(), 0, enumData.lpszCommandLine );
+    HeapFree( GetProcessHeap(), 0, enumData.lpszCurrentDirectory );
 
     LeaveCriticalSection( &This->lock );
     return DPERR_CANTCREATEPROCESS;
   }
 
-  free( appName );
-  free( enumData.lpszCommandLine );
-  free( enumData.lpszCurrentDirectory );
+  HeapFree( GetProcessHeap(), 0, appName );
+  HeapFree( GetProcessHeap(), 0, enumData.lpszCommandLine );
+  HeapFree( GetProcessHeap(), 0, enumData.lpszCurrentDirectory );
 
   /* Reserve this global application id! */
   if( !DPLAYX_CreateLobbyApplication( newProcessInfo.dwProcessId ) )
@@ -2024,7 +2031,7 @@ HRESULT dplobby_create( REFIID riid, void **ppv )
     TRACE( "(%s, %p)\n", debugstr_guid( riid ), ppv );
 
     *ppv = NULL;
-    obj = malloc( sizeof( *obj ) );
+    obj = HeapAlloc( GetProcessHeap(), 0, sizeof( *obj ) );
     if ( !obj )
         return DPERR_OUTOFMEMORY;
 
@@ -2043,7 +2050,7 @@ HRESULT dplobby_create( REFIID riid, void **ppv )
     obj->ref3 = 1;
     obj->ref3A = 0;
 
-    InitializeCriticalSectionEx( &obj->lock, 0, RTL_CRITICAL_SECTION_FLAG_FORCE_DEBUG_INFO );
+    InitializeCriticalSection( &obj->lock );
     obj->lock.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": IDirectPlayLobbyImpl.lock");
     DPQ_INIT( obj->msgs );
 

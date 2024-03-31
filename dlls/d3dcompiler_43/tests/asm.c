@@ -27,7 +27,7 @@
    perhaps with a different name? */
 #define D3DXERR_INVALIDDATA                      0x88760b59
 
-static HRESULT (WINAPI *pD3DAssemble)(const void *data, SIZE_T datasize, const char *filename,
+HRESULT WINAPI D3DAssemble(const void *data, SIZE_T datasize, const char *filename,
         const D3D_SHADER_MACRO *defines, ID3DInclude *include, UINT flags,
         ID3DBlob **shader, ID3DBlob **error_messages);
 
@@ -57,7 +57,7 @@ static void exec_tests(const char *name, struct shader_test tests[], unsigned in
     for(i = 0; i < count; i++) {
         /* D3DAssemble sets messages to 0 if there aren't error messages */
         messages = NULL;
-        hr = pD3DAssemble(tests[i].text, strlen(tests[i].text), NULL, NULL,
+        hr = D3DAssemble(tests[i].text, strlen(tests[i].text), NULL, NULL,
                 NULL, D3DCOMPILE_SKIP_VALIDATION, &shader, &messages);
         ok(hr == S_OK, "Test %s, shader %u: D3DAssemble failed with error %#lx - %ld.\n", name, i, hr, hr & 0xffff);
         if(messages) {
@@ -1431,7 +1431,7 @@ static void failure_test(void) {
     {
         shader = NULL;
         messages = NULL;
-        hr = pD3DAssemble(tests[i], strlen(tests[i]), NULL, NULL, NULL, D3DCOMPILE_SKIP_VALIDATION, &shader, &messages);
+        hr = D3DAssemble(tests[i], strlen(tests[i]), NULL, NULL, NULL, D3DCOMPILE_SKIP_VALIDATION, &shader, &messages);
         ok(hr == D3DXERR_INVALIDDATA, "Test %u: Got unexpected hr %#lx.\n", i, hr);
         if (messages)
         {
@@ -1460,20 +1460,23 @@ static HRESULT WINAPI testD3DInclude_open(ID3DInclude *iface, D3D_INCLUDE_TYPE i
 
     if (!strcmp(filename, "incl.vsh"))
     {
-        buffer = strdup(include);
+        buffer = HeapAlloc(GetProcessHeap(), 0, sizeof(include));
+        CopyMemory(buffer, include, sizeof(include));
         *bytes = sizeof(include);
         ok(!parent_data, "Wrong parent_data value.\n");
     }
     else if (!strcmp(filename, "incl2.vsh"))
     {
-        buffer = strdup(include2);
+        buffer = HeapAlloc(GetProcessHeap(), 0, sizeof(include2));
+        CopyMemory(buffer, include2, sizeof(include2));
         *bytes = sizeof(include2);
         ok(!parent_data, "Wrong parent_data value.\n");
         ok(include_type == D3D_INCLUDE_LOCAL, "Wrong include type %d.\n", include_type);
     }
     else if (!strcmp(filename, "incl3.vsh"))
     {
-        buffer = strdup(include3);
+        buffer = HeapAlloc(GetProcessHeap(), 0, sizeof(include3));
+        CopyMemory(buffer, include3, sizeof(include3));
         *bytes = sizeof(include3);
         /* Also check for the correct parent_data content */
         ok(parent_data != NULL
@@ -1483,14 +1486,16 @@ static HRESULT WINAPI testD3DInclude_open(ID3DInclude *iface, D3D_INCLUDE_TYPE i
     }
     else if (!strcmp(filename, "incl4.vsh"))
     {
-        buffer = strdup(include4);
+        buffer = HeapAlloc(GetProcessHeap(), 0, sizeof(include4));
+        CopyMemory(buffer, include4, sizeof(include4));
         *bytes = sizeof(include4);
         ok(parent_data == NULL, "Wrong parent_data value.\n");
         ok(include_type == D3D_INCLUDE_SYSTEM, "Wrong include type %d.\n", include_type);
     }
     else if (!strcmp(filename, "includes/incl.vsh"))
     {
-        buffer = strdup(include);
+        buffer = HeapAlloc(GetProcessHeap(), 0, sizeof(include));
+        CopyMemory(buffer, include, sizeof(include));
         *bytes = sizeof(include);
         ok(!parent_data, "Wrong parent_data value.\n");
     }
@@ -1507,7 +1512,7 @@ static HRESULT WINAPI testD3DInclude_open(ID3DInclude *iface, D3D_INCLUDE_TYPE i
 
 static HRESULT WINAPI testD3DInclude_close(ID3DInclude *iface, const void *data)
 {
-    free((void *)data);
+    HeapFree(GetProcessHeap(), 0, (void *)data);
     return S_OK;
 }
 
@@ -1551,7 +1556,7 @@ static void assembleshader_test(void) {
     /* defines test */
     shader = NULL;
     messages = NULL;
-    hr = pD3DAssemble(test1, strlen(test1), NULL, defines, NULL, D3DCOMPILE_SKIP_VALIDATION, &shader, &messages);
+    hr = D3DAssemble(test1, strlen(test1), NULL, defines, NULL, D3DCOMPILE_SKIP_VALIDATION, &shader, &messages);
     ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     if (messages)
     {
@@ -1562,14 +1567,14 @@ static void assembleshader_test(void) {
 
     /* NULL messages test */
     shader = NULL;
-    hr = pD3DAssemble(test1, strlen(test1), NULL, defines, NULL, D3DCOMPILE_SKIP_VALIDATION, &shader, NULL);
+    hr = D3DAssemble(test1, strlen(test1), NULL, defines, NULL, D3DCOMPILE_SKIP_VALIDATION, &shader, NULL);
     ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     if (shader)
         ID3D10Blob_Release(shader);
 
     /* NULL shader test */
     messages = NULL;
-    hr = pD3DAssemble(test1, strlen(test1), NULL, defines, NULL, D3DCOMPILE_SKIP_VALIDATION, NULL, &messages);
+    hr = D3DAssemble(test1, strlen(test1), NULL, defines, NULL, D3DCOMPILE_SKIP_VALIDATION, NULL, &messages);
     ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     if (messages)
     {
@@ -1581,7 +1586,7 @@ static void assembleshader_test(void) {
     shader = NULL;
     messages = NULL;
     include.ID3DInclude_iface.lpVtbl = &D3DInclude_Vtbl;
-    hr = pD3DAssemble(testshader, strlen(testshader), NULL, NULL,
+    hr = D3DAssemble(testshader, strlen(testshader), NULL, NULL,
             &include.ID3DInclude_iface, D3DCOMPILE_SKIP_VALIDATION, &shader, &messages);
     ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
     if (messages)
@@ -1594,7 +1599,7 @@ static void assembleshader_test(void) {
     /* NULL shader tests */
     shader = NULL;
     messages = NULL;
-    hr = pD3DAssemble(NULL, 0, NULL, NULL, NULL, D3DCOMPILE_SKIP_VALIDATION, &shader, &messages);
+    hr = D3DAssemble(NULL, 0, NULL, NULL, NULL, D3DCOMPILE_SKIP_VALIDATION, &shader, &messages);
     ok(hr == D3DXERR_INVALIDDATA, "Got unexpected hr %#lx.\n", hr);
     if (messages)
     {
@@ -1757,13 +1762,6 @@ static void test_disassemble_shader(void)
 
 START_TEST(asm)
 {
-    HMODULE d3dcompiler;
-    char buffer[20];
-
-    sprintf(buffer, "d3dcompiler_%d", D3D_COMPILER_VERSION);
-    d3dcompiler = GetModuleHandleA(buffer);
-    pD3DAssemble = (void *)GetProcAddress(d3dcompiler, "D3DAssemble");
-
     preproc_test();
     ps_1_1_test();
     vs_1_1_test();

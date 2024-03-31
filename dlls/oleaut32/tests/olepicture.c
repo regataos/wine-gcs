@@ -26,6 +26,7 @@
 
 #define COBJMACROS
 #define CONST_VTABLE
+#define NONAMELESSUNION
 
 #include "wine/test.h"
 #include <windef.h>
@@ -417,7 +418,7 @@ static void test_empty_image_2(void) {
 	ok (hres == S_OK, "CreatestreamOnHGlobal failed? doubt it... hres 0x%08lx\n", hres);
 
 	memset(&seekto,0,sizeof(seekto));
-	seekto.LowPart = 42;
+	seekto.u.LowPart = 42;
 	hres = IStream_Seek(stream,seekto,SEEK_CUR,&newpos1);
 	ok (hres == S_OK, "istream seek failed? doubt it... hres 0x%08lx\n", hres);
 
@@ -563,27 +564,27 @@ static HRESULT create_picture(short type, IPicture **pict)
         break;
 
     case PICTYPE_BITMAP:
-        desc.bmp.hbitmap = CreateBitmap(1, 1, 1, 1, NULL);
-        desc.bmp.hpal = (HPALETTE)0xbeefdead;
+        desc.u.bmp.hbitmap = CreateBitmap(1, 1, 1, 1, NULL);
+        desc.u.bmp.hpal = (HPALETTE)0xbeefdead;
         break;
 
     case PICTYPE_ICON:
-        desc.icon.hicon = LoadIconA(NULL, (LPCSTR)IDI_APPLICATION);
+        desc.u.icon.hicon = LoadIconA(NULL, (LPCSTR)IDI_APPLICATION);
         break;
 
     case PICTYPE_METAFILE:
     {
         HDC hdc = CreateMetaFileA(NULL);
-        desc.wmf.hmeta = CloseMetaFile(hdc);
-        desc.wmf.xExt = 1;
-        desc.wmf.yExt = 1;
+        desc.u.wmf.hmeta = CloseMetaFile(hdc);
+        desc.u.wmf.xExt = 1;
+        desc.u.wmf.yExt = 1;
         break;
     }
 
     case PICTYPE_ENHMETAFILE:
     {
         HDC hdc = CreateEnhMetaFileA(0, NULL, NULL, NULL);
-        desc.emf.hemf = CloseEnhMetaFile(hdc);
+        desc.u.emf.hemf = CloseEnhMetaFile(hdc);
         break;
     }
 
@@ -838,8 +839,8 @@ static void test_Render(void)
 
     desc.cbSizeofstruct = sizeof(PICTDESC);
     desc.picType = PICTYPE_ICON;
-    desc.icon.hicon = LoadIconA(NULL, (LPCSTR)IDI_APPLICATION);
-    if(!desc.icon.hicon){
+    desc.u.icon.hicon = LoadIconA(NULL, (LPCSTR)IDI_APPLICATION);
+    if(!desc.u.icon.hicon){
         win_skip("LoadIcon failed. Skipping...\n");
         delete_render_dc(hdc);
         return;
@@ -1028,7 +1029,7 @@ static void test_OleLoadPicturePath(void)
     V_VT(&var) = VT_BSTR;
     V_BSTR(&var) = SysAllocString(temp_fileW + 8);
     hres = OleLoadPictureFile(var, (IDispatch **)&pic);
-    ok(hres == S_OK, "OleLoadPictureFile error %#lx\n", hres);
+    ok(hres == S_OK, "OleLoadPictureFile error %#x\n", hres);
     IPicture_Release(pic);
     VariantClear(&var);
 
@@ -1044,7 +1045,7 @@ static void test_OleLoadPicturePath(void)
     V_VT(&var) = VT_BSTR;
     V_BSTR(&var) = SysAllocString(temp_fileW);
     hres = OleLoadPictureFile(var, (IDispatch **)&pic);
-    ok(hres == CTL_E_PATHFILEACCESSERROR, "wrong error %#lx\n", hres);
+    ok(hres == CTL_E_PATHFILEACCESSERROR, "wrong error %#x\n", hres);
     VariantClear(&var);
 
     DeleteFileA(temp_file);
@@ -1060,7 +1061,7 @@ static void test_OleLoadPicturePath(void)
     V_VT(&var) = VT_BSTR;
     V_BSTR(&var) = SysAllocString(temp_fileW + 8);
     hres = OleLoadPictureFile(var, (IDispatch **)&pic);
-    ok(hres == CTL_E_FILENOTFOUND, "wrong error %#lx\n", hres);
+    ok(hres == CTL_E_FILENOTFOUND, "wrong error %#x\n", hres);
     VariantClear(&var);
 
     hres = OleLoadPicturePath(temp_fileW, NULL, 0, 0, &IID_IPicture, (void **)&pic);
@@ -1073,7 +1074,7 @@ static void test_OleLoadPicturePath(void)
     V_VT(&var) = VT_BSTR;
     V_BSTR(&var) = SysAllocString(temp_fileW);
     hres = OleLoadPictureFile(var, (IDispatch **)&pic);
-    ok(hres == CTL_E_PATHFILEACCESSERROR, "wrong error %#lx\n", hres);
+    ok(hres == CTL_E_PATHFILEACCESSERROR, "wrong error %#x\n", hres);
     VariantClear(&var);
 
     file = CreateFileA(temp_file, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS,
@@ -1101,7 +1102,7 @@ static void test_OleLoadPicturePath(void)
     V_VT(&var) = VT_BSTR;
     V_BSTR(&var) = SysAllocString(temp_fileW);
     hres = OleLoadPictureFile(var, (IDispatch **)&pic);
-    ok(hres == CTL_E_PATHFILEACCESSERROR, "wrong error %#lx\n", hres);
+    ok(hres == CTL_E_PATHFILEACCESSERROR, "wrong error %#x\n", hres);
     VariantClear(&var);
 
     DeleteFileA(temp_file);
@@ -1126,7 +1127,7 @@ static void test_OleLoadPicturePath(void)
     hres = OleLoadPictureFile(var, (IDispatch **)&pic);
     ok(hres == CTL_E_FILENOTFOUND, "wrong error %#lx\n", hres);
 
-    if (0) /* crashes under Windows */
+if (0) /* crashes under Windows */
     hres = OleLoadPictureFile(var, NULL);
 }
 
@@ -1145,14 +1146,14 @@ static void test_himetric(void)
 
     desc.cbSizeofstruct = sizeof(desc);
     desc.picType = PICTYPE_BITMAP;
-    desc.bmp.hpal = NULL;
+    desc.u.bmp.hpal = NULL;
 
     hdc = CreateCompatibleDC(0);
 
     bmp = CreateBitmap(1.9 * GetDeviceCaps(hdc, LOGPIXELSX),
                        1.9 * GetDeviceCaps(hdc, LOGPIXELSY), 1, 1, NULL);
 
-    desc.bmp.hbitmap = bmp;
+    desc.u.bmp.hbitmap = bmp;
 
     /* size in himetric units reported rounded up to next integer value */
     hr = OleCreatePictureIndirect(&desc, &IID_IPicture, FALSE, (void**)&pic);
@@ -1179,7 +1180,7 @@ static void test_himetric(void)
     ok(icon != NULL, "failed to create icon\n");
 
     desc.picType = PICTYPE_ICON;
-    desc.icon.hicon = icon;
+    desc.u.icon.hicon = icon;
 
     hr = OleCreatePictureIndirect(&desc, &IID_IPicture, FALSE, (void**)&pic);
     ok(hr == S_OK, "got 0x%08lx\n", hr);
@@ -1215,12 +1216,11 @@ static void test_load_save_bmp(void)
     LARGE_INTEGER offset;
     HRESULT hr;
     LONG size;
-    ULARGE_INTEGER maxsize;
 
     desc.cbSizeofstruct = sizeof(desc);
     desc.picType = PICTYPE_BITMAP;
-    desc.bmp.hpal = 0;
-    desc.bmp.hbitmap = CreateBitmap(1, 1, 1, 1, NULL);
+    desc.u.bmp.hpal = 0;
+    desc.u.bmp.hbitmap = CreateBitmap(1, 1, 1, 1, NULL);
     hr = OleCreatePictureIndirect(&desc, &IID_IPicture, FALSE, (void**)&pic);
     ok(hr == S_OK, "OleCreatePictureIndirect error %#lx\n", hr);
 
@@ -1231,7 +1231,7 @@ static void test_load_save_bmp(void)
 
     hr = IPicture_get_Handle(pic, &handle);
     ok(hr == S_OK,"get_Handle error %#8lx\n", hr);
-    ok(IntToPtr(handle) == desc.bmp.hbitmap, "get_Handle returned wrong handle %#x\n", handle);
+    ok(IntToPtr(handle) == desc.u.bmp.hbitmap, "get_Handle returned wrong handle %#x\n", handle);
 
     hmem = GlobalAlloc(GMEM_ZEROINIT, 4096);
     hr = CreateStreamOnHGlobal(hmem, FALSE, &dst_stream);
@@ -1257,11 +1257,6 @@ static void test_load_save_bmp(void)
     hr = IPicture_QueryInterface(pic, &IID_IPersistStream, (void **)&src_stream);
     ok(hr == S_OK, "QueryInterface error %#lx\n", hr);
 
-    maxsize.QuadPart = 0;
-    hr = IPersistStream_GetSizeMax(src_stream, &maxsize);
-    ok(hr == S_OK, "GetSizeMax error %#lx\n", hr);
-    ok(maxsize.QuadPart == 74, "expected 74, got %s\n", wine_dbgstr_longlong(maxsize.QuadPart));
-
     hr = IPersistStream_Save(src_stream, dst_stream, TRUE);
     ok(hr == S_OK, "Save error %#lx\n", hr);
 
@@ -1276,7 +1271,7 @@ static void test_load_save_bmp(void)
     GlobalUnlock(hmem);
     GlobalFree(hmem);
 
-    DeleteObject(desc.bmp.hbitmap);
+    DeleteObject(desc.u.bmp.hbitmap);
     IPicture_Release(pic);
 }
 
@@ -1293,11 +1288,10 @@ static void test_load_save_icon(void)
     LARGE_INTEGER offset;
     HRESULT hr;
     LONG size;
-    ULARGE_INTEGER maxsize;
 
     desc.cbSizeofstruct = sizeof(desc);
     desc.picType = PICTYPE_ICON;
-    desc.icon.hicon = LoadIconA(NULL, (LPCSTR)IDI_APPLICATION);
+    desc.u.icon.hicon = LoadIconA(NULL, (LPCSTR)IDI_APPLICATION);
     hr = OleCreatePictureIndirect(&desc, &IID_IPicture, FALSE, (void**)&pic);
     ok(hr == S_OK, "OleCreatePictureIndirect error %#lx\n", hr);
 
@@ -1308,7 +1302,7 @@ static void test_load_save_icon(void)
 
     hr = IPicture_get_Handle(pic, &handle);
     ok(hr == S_OK,"get_Handle error %#8lx\n", hr);
-    ok(IntToPtr(handle) == desc.icon.hicon, "get_Handle returned wrong handle %#x\n", handle);
+    ok(IntToPtr(handle) == desc.u.icon.hicon, "get_Handle returned wrong handle %#x\n", handle);
 
     hmem = GlobalAlloc(GMEM_ZEROINIT, 8192);
     hr = CreateStreamOnHGlobal(hmem, FALSE, &dst_stream);
@@ -1335,13 +1329,6 @@ static void test_load_save_icon(void)
     hr = IPicture_QueryInterface(pic, &IID_IPersistStream, (void **)&src_stream);
     ok(hr == S_OK, "QueryInterface error %#lx\n", hr);
 
-    maxsize.QuadPart = 0;
-    hr = IPersistStream_GetSizeMax(src_stream, &maxsize);
-    todo_wine
-    ok(hr == S_OK, "GetSizeMax error %#lx\n", hr);
-    todo_wine
-    ok(maxsize.QuadPart == 774, "expected 774, got %s\n", wine_dbgstr_longlong(maxsize.QuadPart));
-
     hr = IPersistStream_Save(src_stream, dst_stream, TRUE);
     ok(hr == S_OK, "Saveerror %#lx\n", hr);
 
@@ -1357,7 +1344,7 @@ static void test_load_save_icon(void)
     GlobalUnlock(hmem);
     GlobalFree(hmem);
 
-    DestroyIcon(desc.icon.hicon);
+    DestroyIcon(desc.u.icon.hicon);
     IPicture_Release(pic);
 }
 
@@ -1374,7 +1361,6 @@ static void test_load_save_empty_picture(void)
     LARGE_INTEGER offset;
     HRESULT hr;
     LONG size;
-    ULARGE_INTEGER maxsize;
 
     memset(&pic, 0, sizeof(pic));
     desc.cbSizeofstruct = sizeof(desc);
@@ -1408,14 +1394,6 @@ static void test_load_save_empty_picture(void)
 
     hr = IPicture_QueryInterface(pic, &IID_IPersistStream, (void **)&src_stream);
     ok(hr == S_OK, "QueryInterface error %#lx\n", hr);
-
-    maxsize.QuadPart = 0;
-    hr = IPersistStream_GetSizeMax(src_stream, &maxsize);
-    ok(hr == S_OK, "GetSizeMax error %#lx\n", hr);
-    ok(maxsize.QuadPart == 8, "expected 8, got %s\n", wine_dbgstr_longlong(maxsize.QuadPart));
-
-    hr = IPersistStream_GetSizeMax(src_stream, NULL);
-    ole_expect(hr, E_INVALIDARG);
 
     hr = IPersistStream_Save(src_stream, dst_stream, TRUE);
     ok(hr == S_OK, "Save error %#lx\n", hr);
@@ -1500,8 +1478,8 @@ static void test_load_save_emf(void)
 
     desc.cbSizeofstruct = sizeof(desc);
     desc.picType = PICTYPE_ENHMETAFILE;
-    desc.emf.hemf = CloseEnhMetaFile(hdc);
-    ok(desc.emf.hemf != 0, "CloseEnhMetaFile failed\n");
+    desc.u.emf.hemf = CloseEnhMetaFile(hdc);
+    ok(desc.u.emf.hemf != 0, "CloseEnhMetaFile failed\n");
     hr = OleCreatePictureIndirect(&desc, &IID_IPicture, FALSE, (void**)&pic);
     ok(hr == S_OK, "OleCreatePictureIndirect error %#x\n", hr);
 
@@ -1512,7 +1490,7 @@ static void test_load_save_emf(void)
 
     hr = IPicture_get_Handle(pic, &handle);
     ok(hr == S_OK,"get_Handle error %#8x\n", hr);
-    ok(IntToPtr(handle) == desc.emf.hemf, "get_Handle returned wrong handle %#x\n", handle);
+    ok(IntToPtr(handle) == desc.u.emf.hemf, "get_Handle returned wrong handle %#x\n", handle);
 
     hmem = GlobalAlloc(GMEM_MOVEABLE, 0);
     hr = CreateStreamOnHGlobal(hmem, FALSE, &dst_stream);
@@ -1558,7 +1536,7 @@ if (size)
     GlobalUnlock(hmem);
     GlobalFree(hmem);
 
-    DeleteEnhMetaFile(desc.emf.hemf);
+    DeleteEnhMetaFile(desc.u.emf.hemf);
     IPicture_Release(pic);
 }
 
@@ -1669,10 +1647,10 @@ static HRESULT WINAPI NoStatStreamImpl_Read(
 
   if (pcbRead==0)
     pcbRead = &bytesReadBuffer;
-  bytesToReadFromBuffer = min( This->streamSize.LowPart - This->currentPosition.LowPart, cb);
+  bytesToReadFromBuffer = min( This->streamSize.u.LowPart - This->currentPosition.u.LowPart, cb);
   supportBuffer = GlobalLock(This->supportHandle);
-  memcpy(pv, (char *) supportBuffer+This->currentPosition.LowPart, bytesToReadFromBuffer);
-  This->currentPosition.LowPart+=bytesToReadFromBuffer;
+  memcpy(pv, (char *) supportBuffer+This->currentPosition.u.LowPart, bytesToReadFromBuffer);
+  This->currentPosition.u.LowPart+=bytesToReadFromBuffer;
   *pcbRead = bytesToReadFromBuffer;
   GlobalUnlock(This->supportHandle);
   if(*pcbRead == cb)
@@ -1695,14 +1673,14 @@ static HRESULT WINAPI NoStatStreamImpl_Write(
     pcbWritten = &bytesWritten;
   if (cb == 0)
     return S_OK;
-  newSize.HighPart = 0;
-  newSize.LowPart = This->currentPosition.LowPart + cb;
-  if (newSize.LowPart > This->streamSize.LowPart)
+  newSize.u.HighPart = 0;
+  newSize.u.LowPart = This->currentPosition.u.LowPart + cb;
+  if (newSize.u.LowPart > This->streamSize.u.LowPart)
    IStream_SetSize(iface, newSize);
 
   supportBuffer = GlobalLock(This->supportHandle);
-  memcpy((char *) supportBuffer+This->currentPosition.LowPart, pv, cb);
-  This->currentPosition.LowPart+=cb;
+  memcpy((char *) supportBuffer+This->currentPosition.u.LowPart, pv, cb);
+  This->currentPosition.u.LowPart+=cb;
   *pcbWritten = cb;
   GlobalUnlock(This->supportHandle);
   return S_OK;
@@ -1719,8 +1697,8 @@ static HRESULT WINAPI NoStatStreamImpl_Seek(
   switch (dwOrigin)
   {
     case STREAM_SEEK_SET:
-      newPosition.HighPart = 0;
-      newPosition.LowPart = 0;
+      newPosition.u.HighPart = 0;
+      newPosition.u.LowPart = 0;
       break;
     case STREAM_SEEK_CUR:
       newPosition = This->currentPosition;
@@ -1745,15 +1723,15 @@ static HRESULT WINAPI NoStatStreamImpl_SetSize(
 {
   NoStatStreamImpl* const This = impl_from_IStream(iface);
   HGLOBAL supportHandle;
-  if (libNewSize.HighPart != 0)
+  if (libNewSize.u.HighPart != 0)
     return STG_E_INVALIDFUNCTION;
-  if (This->streamSize.LowPart == libNewSize.LowPart)
+  if (This->streamSize.u.LowPart == libNewSize.u.LowPart)
     return S_OK;
-  supportHandle = GlobalReAlloc(This->supportHandle, libNewSize.LowPart, 0);
+  supportHandle = GlobalReAlloc(This->supportHandle, libNewSize.u.LowPart, 0);
   if (supportHandle == 0)
     return STG_E_MEDIUMFULL;
   This->supportHandle = supportHandle;
-  This->streamSize.LowPart = libNewSize.LowPart;
+  This->streamSize.u.LowPart = libNewSize.u.LowPart;
   return S_OK;
 }
 
@@ -1772,39 +1750,39 @@ static HRESULT WINAPI NoStatStreamImpl_CopyTo(
 
   if ( pstm == 0 )
     return STG_E_INVALIDPOINTER;
-  totalBytesRead.LowPart = totalBytesRead.HighPart = 0;
-  totalBytesWritten.LowPart = totalBytesWritten.HighPart = 0;
+  totalBytesRead.u.LowPart = totalBytesRead.u.HighPart = 0;
+  totalBytesWritten.u.LowPart = totalBytesWritten.u.HighPart = 0;
 
-  while ( cb.LowPart > 0 )
+  while ( cb.u.LowPart > 0 )
   {
-    if ( cb.LowPart >= 128 )
+    if ( cb.u.LowPart >= 128 )
       copySize = 128;
     else
-      copySize = cb.LowPart;
+      copySize = cb.u.LowPart;
     IStream_Read(iface, tmpBuffer, copySize, &bytesRead);
-    totalBytesRead.LowPart += bytesRead;
+    totalBytesRead.u.LowPart += bytesRead;
     IStream_Write(pstm, tmpBuffer, bytesRead, &bytesWritten);
-    totalBytesWritten.LowPart += bytesWritten;
+    totalBytesWritten.u.LowPart += bytesWritten;
     if (bytesRead != bytesWritten)
     {
       hr = STG_E_MEDIUMFULL;
       break;
     }
     if (bytesRead!=copySize)
-      cb.LowPart = 0;
+      cb.u.LowPart = 0;
     else
-      cb.LowPart -= bytesRead;
+      cb.u.LowPart -= bytesRead;
   }
   if (pcbRead)
   {
-    pcbRead->u.LowPart = totalBytesRead.LowPart;
-    pcbRead->u.HighPart = totalBytesRead.HighPart;
+    pcbRead->u.LowPart = totalBytesRead.u.LowPart;
+    pcbRead->u.HighPart = totalBytesRead.u.HighPart;
   }
 
   if (pcbWritten)
   {
-    pcbWritten->u.LowPart = totalBytesWritten.LowPart;
-    pcbWritten->u.HighPart = totalBytesWritten.HighPart;
+    pcbWritten->u.LowPart = totalBytesWritten.u.LowPart;
+    pcbWritten->u.HighPart = totalBytesWritten.u.HighPart;
   }
   return hr;
 }
@@ -1870,10 +1848,10 @@ static IStream* NoStatStream_Construct(HGLOBAL hGlobal)
     if (!newStream->supportHandle)
       newStream->supportHandle = GlobalAlloc(GMEM_MOVEABLE | GMEM_NODISCARD |
 					     GMEM_SHARE, 0);
-    newStream->currentPosition.HighPart = 0;
-    newStream->currentPosition.LowPart = 0;
-    newStream->streamSize.HighPart = 0;
-    newStream->streamSize.LowPart  = GlobalSize(newStream->supportHandle);
+    newStream->currentPosition.u.HighPart = 0;
+    newStream->currentPosition.u.LowPart = 0;
+    newStream->streamSize.u.HighPart = 0;
+    newStream->streamSize.u.LowPart  = GlobalSize(newStream->supportHandle);
   }
   return &newStream->IStream_iface;
 }

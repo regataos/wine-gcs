@@ -786,7 +786,7 @@ static void test_ax_win(void)
 
         /* test file:// scheme on non-existent file */
         ret = DeleteFileW(pathW);
-        ok(ret, "DeleteFile failed (gle=%lu)\n", GetLastError());
+        ok(ret, "DeleteFile failed!\n");
         hwnd = CreateWindowW(cls_names[i], file_uri1W, 0, 100, 100, 100, 100, NULL, NULL, NULL, NULL);
         ok(hwnd != NULL, "CreateWindow failed!\n");
         control = NULL;
@@ -1048,7 +1048,7 @@ static void test_AtlAxCreateControl(void)
 
     /* test file:// scheme on non-existent file. */
     ret = DeleteFileW(pathW);
-    ok(ret, "DeleteFile failed (gle=%lu)\n", GetLastError());
+    ok(ret, "DeleteFile failed!\n");
     container = NULL;
     control = NULL;
     hwnd = create_container_window();

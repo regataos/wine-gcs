@@ -3,5 +3,4 @@ IMPORTS   = setupapi
 
 EXTRADLLFLAGS = -mconsole
 
-SOURCES = \
-	expand.c
+C_SRCS = expand.c

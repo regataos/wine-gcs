@@ -22,6 +22,8 @@
  * upon which full support for datatype handling will eventually be built.
  */
 
+#define NONAMELESSUNION
+
 #include <stdlib.h>
 #include <stdarg.h>
 #include <assert.h>

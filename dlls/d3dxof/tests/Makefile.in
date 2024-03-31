@@ -1,5 +1,5 @@
 TESTDLL   = d3dxof.dll
 IMPORTS   = d3dxof
 
-SOURCES = \
+C_SRCS = \
 	d3dxof.c

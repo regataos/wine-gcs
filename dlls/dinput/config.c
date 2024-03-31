@@ -16,6 +16,8 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#define NONAMELESSUNION
+
 #include "objbase.h"
 
 #include "dinput_private.h"
@@ -136,7 +138,7 @@ static void lv_set_action(HWND dialog, int item, int action, LPDIACTIONFORMATW l
     if (item < 0) return;
 
     if (action != -1)
-        action_text = lpdiaf->rgoAction[action].lptszActionName;
+        action_text = lpdiaf->rgoAction[action].u.lptszActionName;
 
     /* Keep the action and text in the listview item */
     lvItem.iItem = item;
@@ -278,7 +280,7 @@ static void show_suitable_actions(HWND dialog)
         /* Add action string and index in the action format to the list entry */
         if (DIDFT_GETINSTANCE(lpdiaf->rgoAction[i].dwSemantic) & DIDFT_GETTYPE(device->ddo[obj].dwType))
         {
-            SendDlgItemMessageW(dialog, IDC_ACTIONLIST, LB_ADDSTRING, 0, (LPARAM)lpdiaf->rgoAction[i].lptszActionName);
+            SendDlgItemMessageW(dialog, IDC_ACTIONLIST, LB_ADDSTRING, 0, (LPARAM)lpdiaf->rgoAction[i].u.lptszActionName);
             SendDlgItemMessageW(dialog, IDC_ACTIONLIST, LB_SETITEMDATA, added, (LPARAM) i);
             added++;
         }
@@ -334,7 +336,7 @@ static void copy_actions(LPDIACTIONFORMATW to, LPDIACTIONFORMATW from)
         to->rgoAction[i].guidInstance = from->rgoAction[i].guidInstance;
         to->rgoAction[i].dwObjID = from->rgoAction[i].dwObjID;
         to->rgoAction[i].dwHow = from->rgoAction[i].dwHow;
-        to->rgoAction[i].lptszActionName = from->rgoAction[i].lptszActionName;
+        to->rgoAction[i].u.lptszActionName = from->rgoAction[i].u.lptszActionName;
     }
 }
 

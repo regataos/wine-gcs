@@ -3,6 +3,6 @@ IMPORTLIB = hidparse
 IMPORTS = ntoskrnl
 PARENTSRC = ../hid
 
-SOURCES = \
+C_SRCS = \
 	hidp.c \
 	main.c

@@ -485,14 +485,14 @@ static void fill_tree(HWND hTree)
 
     ins.hParent = TVI_ROOT;
     ins.hInsertAfter = TVI_ROOT;
-    ins.item.mask = TVIF_TEXT;
-    ins.item.pszText = root;
+    U(ins).item.mask = TVIF_TEXT;
+    U(ins).item.pszText = root;
     hRoot = TreeView_InsertItemA(hTree, &ins);
 
     ins.hParent = hRoot;
     ins.hInsertAfter = TVI_FIRST;
-    ins.item.mask = TVIF_TEXT;
-    ins.item.pszText = child;
+    U(ins).item.mask = TVIF_TEXT;
+    U(ins).item.pszText = child;
     hChild = TreeView_InsertItemA(hTree, &ins);
 }
 
@@ -544,8 +544,8 @@ static void test_callback(void)
     expect(TRUE, ret);
     ins.hParent = TVI_ROOT;
     ins.hInsertAfter = TVI_ROOT;
-    ins.item.mask = TVIF_TEXT;
-    ins.item.pszText = LPSTR_TEXTCALLBACKA;
+    U(ins).item.mask = TVIF_TEXT;
+    U(ins).item.pszText = LPSTR_TEXTCALLBACKA;
     hRoot = TreeView_InsertItemA(hTree, &ins);
     ok(hRoot != NULL, "failed to set root\n");
 
@@ -560,8 +560,8 @@ static void test_callback(void)
 
     ins.hParent = hRoot;
     ins.hInsertAfter = TVI_FIRST;
-    ins.item.mask = TVIF_TEXT;
-    ins.item.pszText = test_string;
+    U(ins).item.mask = TVIF_TEXT;
+    U(ins).item.pszText = test_string;
     hItem1 = TreeView_InsertItemA(hTree, &ins);
     ok(hItem1 != NULL, "failed to set Item1\n");
 
@@ -581,7 +581,7 @@ static void test_callback(void)
     ok(strcmp(tvi.pszText, TEST_CALLBACK_TEXT) == 0, "Item text mismatch %s vs %s\n",
         tvi.pszText, TEST_CALLBACK_TEXT);
 
-    ins.item.pszText = NULL;
+    U(ins).item.pszText = NULL;
     hItem2 = TreeView_InsertItemA(hTree, &ins);
     ok(hItem2 != NULL, "failed to set Item2\n");
     tvi.hItem = hItem2;
@@ -741,9 +741,9 @@ static void test_getitemtext(void)
     /* add an item without TVIF_TEXT mask and pszText == NULL */
     ins.hParent = hRoot;
     ins.hInsertAfter = TVI_ROOT;
-    ins.item.mask = 0;
-    ins.item.pszText = NULL;
-    ins.item.cchTextMax = 0;
+    U(ins).item.mask = 0;
+    U(ins).item.pszText = NULL;
+    U(ins).item.cchTextMax = 0;
     hChild = TreeView_InsertItemA(hTree, &ins);
     ok(hChild != NULL, "failed to set hChild\n");
 
@@ -782,13 +782,13 @@ static void test_focus(void)
      */
     ins.hParent = hRoot;
     ins.hInsertAfter = hChild;
-    ins.item.mask = TVIF_TEXT;
-    ins.item.pszText = child1;
+    U(ins).item.mask = TVIF_TEXT;
+    U(ins).item.pszText = child1;
     hChild1 = TreeView_InsertItemA(hTree, &ins);
     ok(hChild1 != NULL, "failed to set hChild1\n");
     ins.hInsertAfter = hChild1;
-    ins.item.mask = TVIF_TEXT;
-    ins.item.pszText = child2;
+    U(ins).item.mask = TVIF_TEXT;
+    U(ins).item.pszText = child2;
     hChild2 = TreeView_InsertItemA(hTree, &ins);
     ok(hChild2 != NULL, "failed to set hChild2\n");
 
@@ -1510,28 +1510,28 @@ static void test_expandinvisible(void)
     ok(ret == TRUE, "ret\n");
     ins.hParent = TVI_ROOT;
     ins.hInsertAfter = TVI_ROOT;
-    ins.item.mask = TVIF_TEXT;
-    ins.item.pszText = nodeText[0];
+    U(ins).item.mask = TVIF_TEXT;
+    U(ins).item.pszText = nodeText[0];
     node[0] = TreeView_InsertItemA(hTree, &ins);
     ok(node[0] != NULL, "failed to set node[0]\n");
 
     ins.hInsertAfter = TVI_LAST;
-    ins.item.mask = TVIF_TEXT;
+    U(ins).item.mask = TVIF_TEXT;
     ins.hParent = node[0];
 
-    ins.item.pszText = nodeText[1];
+    U(ins).item.pszText = nodeText[1];
     node[1] = TreeView_InsertItemA(hTree, &ins);
     ok(node[1] != NULL, "failed to set node[1]\n");
-    ins.item.pszText = nodeText[4];
+    U(ins).item.pszText = nodeText[4];
     node[4] = TreeView_InsertItemA(hTree, &ins);
     ok(node[4] != NULL, "failed to set node[4]\n");
 
     ins.hParent = node[1];
 
-    ins.item.pszText = nodeText[2];
+    U(ins).item.pszText = nodeText[2];
     node[2] = TreeView_InsertItemA(hTree, &ins);
     ok(node[2] != NULL, "failed to set node[2]\n");
-    ins.item.pszText = nodeText[3];
+    U(ins).item.pszText = nodeText[3];
     node[3] = TreeView_InsertItemA(hTree, &ins);
     ok(node[3] != NULL, "failed to set node[3]\n");
 
@@ -1579,7 +1579,7 @@ static void test_expand(void)
 
     ins.hParent = TVI_ROOT;
     ins.hInsertAfter = TVI_LAST;
-    ins.item.mask = 0;
+    U(ins).item.mask = 0;
     first = TreeView_InsertItemA(tv, &ins);
     ok(first != NULL, "failed to insert first node\n");
     second = TreeView_InsertItemA(tv, &ins);
@@ -2111,8 +2111,8 @@ static void test_TVS_SINGLEEXPAND(void)
     {
         ins.hParent = items[i].parent ? *items[i].parent : TVI_ROOT;
         ins.hInsertAfter = TVI_FIRST;
-        ins.item.mask = TVIF_TEXT;
-        ins.item.pszText = foo;
+        U(ins).item.mask = TVIF_TEXT;
+        U(ins).item.pszText = foo;
         *items[i].handle = TreeView_InsertItemA(hTree, &ins);
     }
 
@@ -2181,66 +2181,6 @@ static void test_WM_PAINT(void)
     DestroyWindow(hTree);
 }
 
-static void test_WM_PRINTCLIENT(void)
-{
-    static const LPARAM params[] = {0, PRF_CHECKVISIBLE, PRF_NONCLIENT, PRF_CLIENT, PRF_ERASEBKGND,
-                                    PRF_CHILDREN, PRF_OWNED};
-    BOOL glyph_is_transparent;
-    HTHEME hTheme;
-    HWND hTree;
-    COLORREF clr;
-    LONG ret;
-    RECT rc;
-    HDC hdc;
-    int i;
-
-    hTree = create_treeview_control(0);
-
-    clr = SendMessageA(hTree, TVM_SETBKCOLOR, 0, RGB(255, 0, 0));
-    ok(clr == CLR_NONE, "got 0x%lx, expected 0x%lx\n", clr, CLR_NONE);
-
-    hdc = GetDC(hMainWnd);
-    GetClientRect(hMainWnd, &rc);
-
-    hTheme = pGetWindowTheme(hTree);
-    glyph_is_transparent = hTheme && pIsThemeBackgroundPartiallyTransparent(hTheme, TVP_GLYPH, 0);
-
-    /* test parameters when the treeview is visible */
-    for (i = 0; i < ARRAY_SIZE(params); i++)
-    {
-        winetest_push_context("lParam=0x%Ix", params[i]);
-        FillRect(hdc, &rc, GetStockObject(BLACK_BRUSH));
-        clr = GetPixel(hdc, 1, 1);
-        ok(clr == RGB(0, 0, 0), "got 0x%lx\n", clr);
-        ret = SendMessageA(hTree, WM_PRINTCLIENT, (WPARAM)hdc, params[i]);
-        ok(ret == 0, "got %ld\n", ret);
-        clr = GetPixel(hdc, 1, 1);
-        ok(clr == RGB(255, 0, 0) || (glyph_is_transparent && clr == GetSysColor(COLOR_WINDOW)),
-           "got 0x%lx\n", clr);
-        winetest_pop_context();
-    }
-
-    /* test parameters when the treeview is hidden */
-    ShowWindow(hTree, SW_HIDE);
-    for (i = 0; i < ARRAY_SIZE(params); i++)
-    {
-        winetest_push_context("lParam=0x%Ix", params[i]);
-        FillRect(hdc, &rc, GetStockObject(BLACK_BRUSH));
-        clr = GetPixel(hdc, 1, 1);
-        ok(clr == RGB(0, 0, 0), "got 0x%lx\n", clr);
-        ret = SendMessageA(hTree, WM_PRINTCLIENT, (WPARAM)hdc, params[i]);
-        ok(ret == 0, "got %ld\n", ret);
-        clr = GetPixel(hdc, 1, 1);
-        ok(clr == RGB(255, 0, 0) || (glyph_is_transparent && clr == GetSysColor(COLOR_WINDOW)),
-           "got 0x%lx\n", clr);
-        winetest_pop_context();
-    }
-    ShowWindow(hTree, SW_SHOW);
-
-    ReleaseDC(hMainWnd, hdc);
-    DestroyWindow(hTree);
-}
-
 static void test_delete_items(void)
 {
     const struct message *msg;
@@ -2282,15 +2222,15 @@ static void test_delete_items(void)
 
     ins.hParent = TVI_ROOT;
     ins.hInsertAfter = TVI_ROOT;
-    ins.item.mask = TVIF_TEXT;
-    ins.item.pszText = item1;
+    U(ins).item.mask = TVIF_TEXT;
+    U(ins).item.pszText = item1;
     hItem1 = TreeView_InsertItemA(hTree, &ins);
     ok(hItem1 != NULL, "InsertItem failed\n");
 
     ins.hParent = TVI_ROOT;
     ins.hInsertAfter = hItem1;
-    ins.item.mask = TVIF_TEXT;
-    ins.item.pszText = item2;
+    U(ins).item.mask = TVIF_TEXT;
+    U(ins).item.pszText = item2;
     hItem2 = TreeView_InsertItemA(hTree, &ins);
     ok(hItem2 != NULL, "InsertItem failed\n");
 
@@ -2429,14 +2369,14 @@ static void test_htreeitem_layout(BOOL is_version_6)
 
     ins.hParent = hChild;
     ins.hInsertAfter = TVI_FIRST;
-    ins.item.mask = 0;
+    U(ins).item.mask = 0;
     item1 = TreeView_InsertItemA(hTree, &ins);
 
     CHECK_ITEM(hTree, item1);
 
     ins.hParent = hRoot;
     ins.hInsertAfter = TVI_FIRST;
-    ins.item.mask = 0;
+    U(ins).item.mask = 0;
     item2 = TreeView_InsertItemA(hTree, &ins);
 
     CHECK_ITEM(hTree, item2);
@@ -2760,8 +2700,8 @@ static void test_WM_KEYDOWN(void)
 
     ins.hParent = TVI_ROOT;
     ins.hInsertAfter = TVI_ROOT;
-    ins.item.mask = TVIF_TEXT;
-    ins.item.pszText = (char*)rootA;
+    U(ins).item.mask = TVIF_TEXT;
+    U(ins).item.pszText = (char*)rootA;
     hRoot = TreeView_InsertItemA(hwnd, &ins);
     ok(hRoot != NULL, "got %p\n", hRoot);
 
@@ -2841,31 +2781,31 @@ static void fill_treeview_sort_test(HWND hwnd)
     /* root, two children, with two children each */
     ins.hParent = TVI_ROOT;
     ins.hInsertAfter = TVI_ROOT;
-    ins.item.mask = TVIF_TEXT;
-    ins.item.pszText = (char *)itemnames[i++];
+    U(ins).item.mask = TVIF_TEXT;
+    U(ins).item.pszText = (char *)itemnames[i++];
     root = (HTREEITEM)SendMessageA(hwnd, TVM_INSERTITEMA, 0, (LPARAM)&ins);
 
     ins.hParent = root;
     ins.hInsertAfter = TVI_LAST;
-    ins.item.mask = TVIF_TEXT;
-    ins.item.pszText = (char *)itemnames[i++];
+    U(ins).item.mask = TVIF_TEXT;
+    U(ins).item.pszText = (char *)itemnames[i++];
     children[0] = (HTREEITEM)SendMessageA(hwnd, TVM_INSERTITEMA, 0, (LPARAM)&ins);
 
-    ins.item.pszText = (char *)itemnames[i++];
+    U(ins).item.pszText = (char *)itemnames[i++];
     children[1] = (HTREEITEM)SendMessageA(hwnd, TVM_INSERTITEMA, 0, (LPARAM)&ins);
 
     ins.hParent = children[0];
-    ins.item.pszText = (char *)itemnames[i++];
+    U(ins).item.pszText = (char *)itemnames[i++];
     SendMessageA(hwnd, TVM_INSERTITEMA, 0, (LPARAM)&ins);
 
-    ins.item.pszText = (char *)itemnames[i++];
+    U(ins).item.pszText = (char *)itemnames[i++];
     SendMessageA(hwnd, TVM_INSERTITEMA, 0, (LPARAM)&ins);
 
     ins.hParent = children[1];
-    ins.item.pszText = (char *)itemnames[i++];
+    U(ins).item.pszText = (char *)itemnames[i++];
     SendMessageA(hwnd, TVM_INSERTITEMA, 0, (LPARAM)&ins);
 
-    ins.item.pszText = (char *)itemnames[i++];
+    U(ins).item.pszText = (char *)itemnames[i++];
     SendMessageA(hwnd, TVM_INSERTITEMA, 0, (LPARAM)&ins);
 }
 
@@ -2891,8 +2831,8 @@ static void test_TVM_SORTCHILDREN(void)
     /* add only root, sort from it */
     ins.hParent = TVI_ROOT;
     ins.hInsertAfter = TVI_ROOT;
-    ins.item.mask = TVIF_TEXT;
-    ins.item.pszText = (char *)"root";
+    U(ins).item.mask = TVIF_TEXT;
+    U(ins).item.pszText = (char *)"root";
     root = (HTREEITEM)SendMessageA(hwnd, TVM_INSERTITEMA, 0, (LPARAM)&ins);
     ok(root != NULL, "Expected root node\n");
 
@@ -2962,19 +2902,19 @@ static void test_TVM_SORTCHILDREN(void)
 
     ins.hParent = TVI_ROOT;
     ins.hInsertAfter = TVI_ROOT;
-    ins.item.mask = TVIF_TEXT;
-    ins.item.pszText = (char *)"root";
+    U(ins).item.mask = TVIF_TEXT;
+    U(ins).item.pszText = (char *)"root";
     root = (HTREEITEM)SendMessageA(hwnd, TVM_INSERTITEMA, 0, (LPARAM)&ins);
     ok(root != NULL, "Expected root node\n");
 
     ins.hParent = root;
     ins.hInsertAfter = TVI_LAST;
-    ins.item.pszText = (char *)"I1";
+    U(ins).item.pszText = (char *)"I1";
     SendMessageA(hwnd, TVM_INSERTITEMA, 0, (LPARAM)&ins);
 
     ins.hParent = root;
     ins.hInsertAfter = TVI_LAST;
-    ins.item.pszText = (char *)"i1";
+    U(ins).item.pszText = (char *)"i1";
     SendMessageA(hwnd, TVM_INSERTITEMA, 0, (LPARAM)&ins);
 
     ret = SendMessageA(hwnd, TVM_SORTCHILDREN, TRUE, (LPARAM)root);
@@ -3102,7 +3042,6 @@ START_TEST(treeview)
     test_expandnotify();
     test_TVS_SINGLEEXPAND();
     test_WM_PAINT();
-    test_WM_PRINTCLIENT();
     test_delete_items();
     test_cchildren();
     test_htreeitem_layout(FALSE);

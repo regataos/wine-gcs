@@ -637,7 +637,8 @@ BOOL RenameKey(HWND hwnd, HKEY hRootKey, LPCWSTR keyPath, LPCWSTR newName)
     } else {
 	LPWSTR srcSubKey_copy;
 
-	parentPath = wcsdup(keyPath);
+	parentPath = malloc((lstrlenW(keyPath) + 1) * sizeof(WCHAR));
+	lstrcpyW(parentPath, keyPath);
 	srcSubKey_copy = wcsrchr(parentPath, '\\');
 	*srcSubKey_copy = 0;
 	srcSubKey = srcSubKey_copy + 1;
@@ -679,7 +680,9 @@ BOOL RenameKey(HWND hwnd, HKEY hRootKey, LPCWSTR keyPath, LPCWSTR newName)
 
 done:
     RegCloseKey(destKey);
-    RegCloseKey(parentKey);
-    free(parentPath);
+    if (parentKey) {
+        RegCloseKey(parentKey); 
+        free(parentPath);
+    }
     return result;
 }

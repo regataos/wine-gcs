@@ -34,6 +34,7 @@
 #include "rpcdce.h"
 #include "rpcproxy.h"
 
+#include "wine/heap.h"
 #include "wine/test.h"
 
 #include "cstub.h"
@@ -62,13 +63,13 @@ static int my_free_called;
 static void * CALLBACK my_alloc(SIZE_T size)
 {
     my_alloc_called++;
-    return malloc(size);
+    return NdrOleAllocate(size);
 }
 
 static void CALLBACK my_free(void *ptr)
 {
     my_free_called++;
-    free(ptr);
+    NdrOleFree(ptr);
 }
 
 typedef struct _MIDL_PROC_FORMAT_STRING
@@ -1081,7 +1082,7 @@ static HRESULT WINAPI delegating_invoke_chan_get_buffer(IRpcChannelBuffer *pchan
                                                         RPCOLEMESSAGE *msg,
                                                         REFIID iid)
 {
-    msg->Buffer = malloc(msg->cbBuffer);
+    msg->Buffer = HeapAlloc(GetProcessHeap(), 0, msg->cbBuffer);
     return S_OK;
 }
 
@@ -1148,7 +1149,7 @@ static void test_delegating_Invoke(IPSFactoryBuffer *ppsf)
         ok(*((DWORD*)msg.Buffer + 1) == S_OK, "buf[1] %08lx\n", *((DWORD*)msg.Buffer + 1));
     }
     /* free the buffer allocated by delegating_invoke_chan_get_buffer */
-    free(msg.Buffer);
+    HeapFree(GetProcessHeap(), 0, msg.Buffer);
     IRpcStubBuffer_Release(pstub);
 }
 static const CInterfaceProxyVtbl *cstub_ProxyVtblList2[] =
@@ -1299,7 +1300,7 @@ static ULONG WINAPI test_cf_Release(IClassFactory *iface)
 
 static HRESULT WINAPI test_cf_CreateInstance(IClassFactory *iface, IUnknown *outer, REFIID iid, void **out)
 {
-    ITest1 *obj = malloc(sizeof(*obj));
+    ITest1 *obj = heap_alloc(sizeof(*obj));
 
     obj->lpVtbl = &test1_vtbl;
 

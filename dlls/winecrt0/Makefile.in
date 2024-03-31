@@ -1,7 +1,6 @@
 STATICLIB = libwinecrt0.a
 
-SOURCES = \
-	arm64ec.c \
+C_SRCS = \
 	crt_dllmain.c \
 	crt_fltused.c \
 	debug.c \

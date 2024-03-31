@@ -78,7 +78,7 @@ static HRESULT WINAPI enum_class_object_QueryInterface(
     if ( IsEqualGUID( riid, &IID_IEnumWbemClassObject ) ||
          IsEqualGUID( riid, &IID_IUnknown ) )
     {
-        *ppvObject = &ec->IEnumWbemClassObject_iface;
+        *ppvObject = ec;
     }
     else if ( IsEqualGUID( riid, &IID_IClientSecurity ) )
     {
@@ -236,7 +236,7 @@ static struct record *create_record( struct table *table )
         record->fields[i].u.ival  = 0;
     }
     record->count = table->num_cols;
-    record->table = grab_table( table );
+    record->table = addref_table( table );
     return record;
 }
 
@@ -324,7 +324,7 @@ static HRESULT WINAPI class_object_QueryInterface(
     if ( IsEqualGUID( riid, &IID_IWbemClassObject ) ||
          IsEqualGUID( riid, &IID_IUnknown ) )
     {
-        *ppvObject = &co->IWbemClassObject_iface;
+        *ppvObject = co;
     }
     else if (IsEqualGUID( riid, &IID_IClientSecurity ))
     {

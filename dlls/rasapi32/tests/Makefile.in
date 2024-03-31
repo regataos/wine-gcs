@@ -1,4 +1,4 @@
 TESTDLL   = rasapi32.dll
 
-SOURCES = \
+C_SRCS = \
 	rasapi.c

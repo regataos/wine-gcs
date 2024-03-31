@@ -3,7 +3,8 @@ IMPORTS   = uuid advapi32
 
 EXTRADLLFLAGS = -Wb,--prefer-native
 
-SOURCES = \
-	infosoft.idl \
+C_SRCS = \
 	infosoft_main.c \
 	wordbreaker.c
+
+IDL_SRCS = infosoft.idl

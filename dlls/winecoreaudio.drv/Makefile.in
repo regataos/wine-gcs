@@ -4,7 +4,7 @@ IMPORTS   = uuid ole32 user32 advapi32
 DELAYIMPORTS = winmm
 UNIX_LIBS    = $(COREAUDIO_LIBS)
 
-SOURCES = \
+C_SRCS = \
 	coreaudio.c \
 	coremidi.c \
 	midi.c \

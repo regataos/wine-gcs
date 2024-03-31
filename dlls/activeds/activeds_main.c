@@ -233,7 +233,7 @@ HRESULT WINAPI ADsGetLastError(LPDWORD perror, LPWSTR errorbuf, DWORD errorbufle
  */
 LPVOID WINAPI AllocADsMem(DWORD cb)
 {
-    return malloc(cb);
+    return HeapAlloc(GetProcessHeap(), 0, cb);
 }
 
 /*****************************************************
@@ -241,8 +241,7 @@ LPVOID WINAPI AllocADsMem(DWORD cb)
  */
 BOOL WINAPI FreeADsMem(LPVOID pMem)
 {
-    free(pMem);
-    return TRUE;
+    return HeapFree(GetProcessHeap(), 0, pMem);
 }
 
 /*****************************************************
@@ -250,7 +249,7 @@ BOOL WINAPI FreeADsMem(LPVOID pMem)
  */
 LPVOID WINAPI ReallocADsMem(LPVOID pOldMem, DWORD cbOld, DWORD cbNew)
 {
-    return realloc(pOldMem, cbNew);
+    return HeapReAlloc(GetProcessHeap(), 0, pOldMem, cbNew);
 }
 
 /*****************************************************
@@ -258,8 +257,18 @@ LPVOID WINAPI ReallocADsMem(LPVOID pOldMem, DWORD cbOld, DWORD cbNew)
  */
 LPWSTR WINAPI AllocADsStr(LPWSTR pStr)
 {
+    LPWSTR ret;
+    SIZE_T len;
+
     TRACE("(%p)\n", pStr);
-    return wcsdup(pStr);
+
+    if (!pStr) return NULL;
+
+    len = (wcslen(pStr) + 1) * sizeof(WCHAR);
+    ret = AllocADsMem(len);
+    if (ret) memcpy(ret, pStr, len);
+
+    return ret;
 }
 
 /*****************************************************

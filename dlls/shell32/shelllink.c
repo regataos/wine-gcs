@@ -33,6 +33,8 @@
  */
 
 #define COBJMACROS
+#define NONAMELESSUNION
+
 #include "wine/debug.h"
 #include "winerror.h"
 #include "windef.h"
@@ -201,6 +203,17 @@ static inline IShellLinkImpl *impl_from_IPropertyStore(IPropertyStore *iface)
 }
 
 static HRESULT ShellLink_UpdatePath(LPCWSTR sPathRel, LPCWSTR path, LPCWSTR sWorkDir, LPWSTR* psPath);
+
+/* strdup on the process heap */
+static inline LPWSTR heap_strdupAtoW( LPCSTR str)
+{
+    INT len = MultiByteToWideChar( CP_ACP, 0, str, -1, NULL, 0 );
+    WCHAR *p = malloc( len * sizeof(WCHAR) );
+    if( !p )
+        return p;
+    MultiByteToWideChar( CP_ACP, 0, str, -1, p, len );
+    return p;
+}
 
 /**************************************************************************
  *  IPersistFile_QueryInterface
@@ -705,7 +718,8 @@ static HRESULT Stream_LoadAdvertiseInfo( IStream* stm, LPWSTR *str )
         return E_FAIL;
     }
 
-    *str = wcsdup( buffer.szwDarwinID );
+    *str = malloc( (lstrlenW(buffer.szwDarwinID) + 1) * sizeof(WCHAR) );
+    lstrcpyW( *str, buffer.szwDarwinID );
 
     return S_OK;
 }
@@ -1160,9 +1174,11 @@ static HRESULT ShellLink_UpdatePath(LPCWSTR sPathRel, LPCWSTR path, LPCWSTR sWor
 	if (!*abs_path)
 	    lstrcpyW(abs_path, sPathRel);
 
-	*psPath = wcsdup(abs_path);
+	*psPath = malloc((lstrlenW(abs_path) + 1) * sizeof(WCHAR));
 	if (!*psPath)
 	    return E_OUTOFMEMORY;
+
+	lstrcpyW(*psPath, abs_path);
     }
 
     return S_OK;
@@ -1328,7 +1344,7 @@ static HRESULT WINAPI IShellLinkA_fnSetDescription(IShellLinkA *iface, LPCSTR ps
 
     if (pszName)
     {
-        descrW = strdupAtoW(pszName);
+        descrW = heap_strdupAtoW(pszName);
         if (!descrW) return E_OUTOFMEMORY;
     }
     else
@@ -1364,7 +1380,7 @@ static HRESULT WINAPI IShellLinkA_fnSetWorkingDirectory(IShellLinkA *iface, LPCS
 
     TRACE("(%p)->(dir=%s)\n",This, pszDir);
 
-    dirW = strdupAtoW(pszDir);
+    dirW = heap_strdupAtoW(pszDir);
     if (!dirW) return E_OUTOFMEMORY;
 
     hr = IShellLinkW_SetWorkingDirectory(&This->IShellLinkW_iface, dirW);
@@ -1398,7 +1414,7 @@ static HRESULT WINAPI IShellLinkA_fnSetArguments(IShellLinkA *iface, LPCSTR pszA
 
     if (pszArgs)
     {
-        argsW = strdupAtoW(pszArgs);
+        argsW = heap_strdupAtoW(pszArgs);
         if (!argsW) return E_OUTOFMEMORY;
     }
     else
@@ -1461,7 +1477,7 @@ static HRESULT WINAPI IShellLinkA_fnSetIconLocation(IShellLinkA *iface, LPCSTR p
 
     if (path)
     {
-        pathW = strdupAtoW(path);
+        pathW = heap_strdupAtoW(path);
         if (!pathW)
             return E_OUTOFMEMORY;
     }
@@ -1481,7 +1497,7 @@ static HRESULT WINAPI IShellLinkA_fnSetRelativePath(IShellLinkA *iface, LPCSTR p
 
     TRACE("(%p)->(path=%s %lx)\n",This, pszPathRel, dwReserved);
 
-    pathW = strdupAtoW(pszPathRel);
+    pathW = heap_strdupAtoW(pszPathRel);
     if (!pathW) return E_OUTOFMEMORY;
 
     hr = IShellLinkW_SetRelativePath(&This->IShellLinkW_iface, pathW, dwReserved);
@@ -1509,11 +1525,12 @@ static HRESULT WINAPI IShellLinkA_fnSetPath(IShellLinkA *iface, LPCSTR pszFile)
 
     if (!pszFile) return E_INVALIDARG;
 
-    str = strdupAtoW(pszFile);
-    if (!str) return E_OUTOFMEMORY;
+    str = heap_strdupAtoW(pszFile);
+    if( !str ) 
+        return E_OUTOFMEMORY;
 
     r = IShellLinkW_SetPath(&This->IShellLinkW_iface, str);
-    free(str);
+    free( str );
 
     return r;
 }
@@ -1742,9 +1759,11 @@ static HRESULT WINAPI IShellLinkW_fnSetIDList(IShellLinkW * iface, LPCITEMIDLIST
 
     if ( SHGetPathFromIDListW( pidl, path ) )
     {
-        This->sPath = wcsdup(path);
+        This->sPath = malloc((lstrlenW(path) + 1) * sizeof(WCHAR));
         if (!This->sPath)
             return E_OUTOFMEMORY;
+
+        lstrcpyW(This->sPath, path);
     }
 
     This->bDirty = TRUE;
@@ -1774,9 +1793,11 @@ static HRESULT WINAPI IShellLinkW_fnSetDescription(IShellLinkW * iface, LPCWSTR 
     free(This->sDescription);
     if (pszName)
     {
-        This->sDescription = wcsdup(pszName);
+        This->sDescription = malloc( (lstrlenW( pszName ) + 1) * sizeof(WCHAR) );
         if ( !This->sDescription )
             return E_OUTOFMEMORY;
+
+        lstrcpyW( This->sDescription, pszName );
     }
     else
         This->sDescription = NULL;
@@ -1806,9 +1827,10 @@ static HRESULT WINAPI IShellLinkW_fnSetWorkingDirectory(IShellLinkW * iface, LPC
     TRACE("(%p)->(dir=%s)\n",This, debugstr_w(pszDir));
 
     free(This->sWorkDir);
-    This->sWorkDir = wcsdup(pszDir);
+    This->sWorkDir = malloc( (lstrlenW( pszDir ) + 1) * sizeof(WCHAR) );
     if ( !This->sWorkDir )
         return E_OUTOFMEMORY;
+    lstrcpyW( This->sWorkDir, pszDir );
     This->bDirty = TRUE;
 
     return S_OK;
@@ -1837,9 +1859,10 @@ static HRESULT WINAPI IShellLinkW_fnSetArguments(IShellLinkW * iface, LPCWSTR ps
     free(This->sArgs);
     if (pszArgs)
     {
-        This->sArgs = wcsdup(pszArgs);
+        This->sArgs = malloc( (lstrlenW( pszArgs ) + 1) * sizeof(WCHAR) );
         if ( !This->sArgs )
             return E_OUTOFMEMORY;
+        lstrcpyW( This->sArgs, pszArgs );
     }
     else This->sArgs = NULL;
 
@@ -1919,9 +1942,11 @@ static HRESULT WINAPI IShellLinkW_fnSetIconLocation(IShellLinkW * iface, const W
     free(This->sIcoPath);
     if (path)
     {
-        This->sIcoPath = wcsdup(path);
+        size_t len = (lstrlenW(path) + 1) * sizeof(WCHAR);
+        This->sIcoPath = malloc(len);
         if (!This->sIcoPath)
             return E_OUTOFMEMORY;
+        memcpy(This->sIcoPath, path, len);
     }
     else
         This->sIcoPath = NULL;
@@ -1938,9 +1963,10 @@ static HRESULT WINAPI IShellLinkW_fnSetRelativePath(IShellLinkW * iface, LPCWSTR
     TRACE("(%p)->(path=%s %lx)\n",This, debugstr_w(pszPathRel), dwReserved);
 
     free(This->sPathRel);
-    This->sPathRel = wcsdup(pszPathRel);
+    This->sPathRel = malloc( (lstrlenW( pszPathRel ) + 1) * sizeof(WCHAR) );
     if ( !This->sPathRel )
         return E_OUTOFMEMORY;
+    lstrcpyW( This->sPathRel, pszPathRel );
     This->bDirty = TRUE;
 
     return ShellLink_UpdatePath(This->sPathRel, This->sPath, This->sWorkDir, &This->sPath);
@@ -1963,9 +1989,11 @@ static HRESULT WINAPI IShellLinkW_fnResolve(IShellLinkW * iface, HWND hwnd, DWOR
 	bSuccess = SHGetPathFromIDListW(This->pPidl, buffer);
 
 	if (bSuccess && *buffer) {
-	    This->sPath = wcsdup(buffer);
+	    This->sPath = malloc((lstrlenW(buffer) + 1) * sizeof(WCHAR));
 	    if (!This->sPath)
 		return E_OUTOFMEMORY;
+
+	    lstrcpyW(This->sPath, buffer);
 
 	    This->bDirty = TRUE;
 	} else
@@ -1973,10 +2001,11 @@ static HRESULT WINAPI IShellLinkW_fnResolve(IShellLinkW * iface, HWND hwnd, DWOR
     }
 
     if (!This->sIcoPath && This->sPath) {
-	This->sIcoPath = wcsdup(This->sPath);
+	This->sIcoPath = malloc((lstrlenW(This->sPath) + 1) * sizeof(WCHAR));
 	if (!This->sIcoPath)
 	    return E_OUTOFMEMORY;
 
+	lstrcpyW(This->sIcoPath, This->sPath);
 	This->iIcoNdx = 0;
 
 	This->bDirty = TRUE;
@@ -2136,12 +2165,14 @@ static HRESULT WINAPI IShellLinkW_fnSetPath(IShellLinkW * iface, LPCWSTR pszFile
         This->pPidl = SHSimpleIDListFromPathW(pszFile);
         ShellLink_GetVolumeInfo(buffer, &This->volume);
 
-        This->sPath = wcsdup(buffer);
+        This->sPath = malloc( (lstrlenW( buffer ) + 1) * sizeof(WCHAR) );
         if (!This->sPath)
         {
             free(unquoted);
             return E_OUTOFMEMORY;
         }
+
+        lstrcpyW(This->sPath, buffer);
     }
     This->bDirty = TRUE;
     free(unquoted);
@@ -2338,19 +2369,19 @@ ShellLink_ExtInit_Initialize( IShellExtInit* iface, LPCITEMIDLIST pidlFolder,
     if( FAILED( IDataObject_GetData( pdtobj, &format, &stgm ) ) )
         return r;
 
-    count = DragQueryFileW( stgm.hGlobal, -1, NULL, 0 );
+    count = DragQueryFileW( stgm.u.hGlobal, -1, NULL, 0 );
     if( count == 1 )
     {
         LPWSTR path;
 
-        count = DragQueryFileW( stgm.hGlobal, 0, NULL, 0 );
+        count = DragQueryFileW( stgm.u.hGlobal, 0, NULL, 0 );
         count++;
         path = malloc( count * sizeof(WCHAR) );
         if( path )
         {
             IPersistFile *pf = &This->IPersistFile_iface;
 
-            count = DragQueryFileW( stgm.hGlobal, 0, path, count );
+            count = DragQueryFileW( stgm.u.hGlobal, 0, path, count );
             r = IPersistFile_Load( pf, path, 0 );
             free( path );
         }

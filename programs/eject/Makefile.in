@@ -2,5 +2,4 @@ MODULE    = eject.exe
 
 EXTRADLLFLAGS = -mconsole
 
-SOURCES = \
-	eject.c
+C_SRCS = eject.c

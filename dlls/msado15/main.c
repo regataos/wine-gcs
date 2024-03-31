@@ -26,6 +26,7 @@
 #include "msado15_backcompat.h"
 
 #include "wine/debug.h"
+#include "wine/heap.h"
 
 #include "msado15_private.h"
 
@@ -146,7 +147,6 @@ static REFIID tid_ids[] = {
     &IID_Field,
     &IID_Fields,
     &IID_Properties,
-    &IID_Property,
     &IID__Recordset,
     &IID__Stream,
 };

@@ -24,6 +24,7 @@
 
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
+#define NONAMELESSUNION
 #include "windef.h"
 #include "winbase.h"
 #include "wincon.h"
@@ -182,7 +183,7 @@ BOOL WINAPI DECLSPEC_HOTPATCH GetSystemTimes( FILETIME *idle, FILETIME *kernel, 
 ULONG WINAPI DECLSPEC_HOTPATCH GetTickCount(void)
 {
     /* note: we ignore TickCountMultiplier */
-    return user_shared_data->TickCount.LowPart;
+    return user_shared_data->u.TickCount.LowPart;
 }
 
 
@@ -195,53 +196,12 @@ ULONGLONG WINAPI DECLSPEC_HOTPATCH GetTickCount64(void)
 
     do
     {
-        high = user_shared_data->TickCount.High1Time;
-        low = user_shared_data->TickCount.LowPart;
+        high = user_shared_data->u.TickCount.High1Time;
+        low = user_shared_data->u.TickCount.LowPart;
     }
-    while (high != user_shared_data->TickCount.High2Time);
+    while (high != user_shared_data->u.TickCount.High2Time);
     /* note: we ignore TickCountMultiplier */
     return (ULONGLONG)high << 32 | low;
-}
-
-
-/******************************************************************************
- *           QueryInterruptTime  (kernelbase.@)
- */
-void WINAPI DECLSPEC_HOTPATCH QueryInterruptTime( ULONGLONG *time )
-{
-    ULONG high, low;
-
-    do
-    {
-        high = user_shared_data->InterruptTime.High1Time;
-        low = user_shared_data->InterruptTime.LowPart;
-    }
-    while (high != user_shared_data->InterruptTime.High2Time);
-    *time = (ULONGLONG)high << 32 | low;
-}
-
-
-/******************************************************************************
- *           QueryInterruptTimePrecise  (kernelbase.@)
- */
-void WINAPI DECLSPEC_HOTPATCH QueryInterruptTimePrecise( ULONGLONG *time )
-{
-    static int once;
-    if (!once++) FIXME( "(%p) semi-stub\n", time );
-
-    QueryInterruptTime( time );
-}
-
-
-/***********************************************************************
- *           QueryUnbiasedInterruptTimePrecise  (kernelbase.@)
- */
-void WINAPI DECLSPEC_HOTPATCH QueryUnbiasedInterruptTimePrecise( ULONGLONG *time )
-{
-    static int once;
-    if (!once++) FIXME( "(%p): semi-stub.\n", time );
-
-    RtlQueryUnbiasedInterruptTime( time );
 }
 
 
@@ -1166,12 +1126,13 @@ BOOL WINAPI DECLSPEC_HOTPATCH GetQueuedCompletionStatus( HANDLE port, LPDWORD co
     if (status == STATUS_SUCCESS)
     {
         *count = iosb.Information;
-        if (iosb.Status >= 0) return TRUE;
-        SetLastError( RtlNtStatusToDosError(iosb.Status) );
+        if (iosb.u.Status >= 0) return TRUE;
+        SetLastError( RtlNtStatusToDosError(iosb.u.Status) );
         return FALSE;
     }
 
     if (status == STATUS_TIMEOUT) SetLastError( WAIT_TIMEOUT );
+    else if (status == ERROR_WAIT_NO_CHILDREN) SetLastError( ERROR_ABANDONED_WAIT_0 );
     else SetLastError( RtlNtStatusToDosError(status) );
     return FALSE;
 }
@@ -1193,6 +1154,7 @@ BOOL WINAPI DECLSPEC_HOTPATCH GetQueuedCompletionStatusEx( HANDLE port, OVERLAPP
     if (ret == STATUS_SUCCESS) return TRUE;
     else if (ret == STATUS_TIMEOUT) SetLastError( WAIT_TIMEOUT );
     else if (ret == STATUS_USER_APC) SetLastError( WAIT_IO_COMPLETION );
+    else if (ret == ERROR_WAIT_NO_CHILDREN) SetLastError( ERROR_ABANDONED_WAIT_0 );
     else SetLastError( RtlNtStatusToDosError(ret) );
     return FALSE;
 }
@@ -1269,7 +1231,7 @@ BOOL WINAPI DECLSPEC_HOTPATCH ConnectNamedPipe( HANDLE pipe, LPOVERLAPPED overla
     if (status == STATUS_PENDING && !overlapped)
     {
         WaitForSingleObject( pipe, INFINITE );
-        status = status_block.Status;
+        status = status_block.u.Status;
     }
     return set_ntstatus( status );
 }
@@ -1343,12 +1305,12 @@ HANDLE WINAPI DECLSPEC_HOTPATCH CreateNamedPipeW( LPCWSTR name, DWORD open_mode,
     if (instances >= PIPE_UNLIMITED_INSTANCES) instances = ~0U;
 
     time.QuadPart = (ULONGLONG)timeout * -10000;
+    SetLastError( 0 );
     status = NtCreateNamedPipeFile( &handle, access, &attr, &iosb, sharing,
-                                    FILE_OPEN_IF, options, pipe_type,
+                                    FILE_OVERWRITE_IF, options, pipe_type,
                                     read_mode, non_block, instances, in_buff, out_buff, &time );
     RtlFreeUnicodeString( &nt_name );
     if (!set_ntstatus( status )) return INVALID_HANDLE_VALUE;
-    SetLastError( iosb.Information == FILE_CREATED ? ERROR_SUCCESS : ERROR_ALREADY_EXISTS );
     return handle;
 }
 
@@ -1386,7 +1348,7 @@ BOOL WINAPI DECLSPEC_HOTPATCH CreatePipe( HANDLE *read_pipe, HANDLE *write_pipe,
                   GetCurrentProcessId(), ++index );
         RtlInitUnicodeString( &nt_name, name );
         if (!NtCreateNamedPipeFile( read_pipe, GENERIC_READ | FILE_WRITE_ATTRIBUTES | SYNCHRONIZE,
-                                    &attr, &iosb, FILE_SHARE_WRITE, FILE_OPEN_IF,
+                                    &attr, &iosb, FILE_SHARE_WRITE, FILE_OVERWRITE_IF,
                                     FILE_SYNCHRONOUS_IO_NONALERT,
                                     FALSE, FALSE, FALSE, 1, size, size, &timeout ))
             break;
@@ -1571,7 +1533,7 @@ BOOL WINAPI DECLSPEC_HOTPATCH TransactNamedPipe( HANDLE handle, LPVOID write_buf
     if (status == STATUS_PENDING && !overlapped)
     {
         WaitForSingleObject(handle, INFINITE);
-        status = iosb->Status;
+        status = iosb->u.Status;
     }
 
     if (bytes_read) *bytes_read = overlapped && status ? 0 : iosb->Information;

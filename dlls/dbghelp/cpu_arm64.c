@@ -21,6 +21,8 @@
 
 #include <assert.h>
 
+#define NONAMELESSUNION
+#define NONAMELESSSTRUCT
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
 #include "dbghelp_private.h"
@@ -37,9 +39,9 @@ static BOOL arm64_get_addr(HANDLE hThread, const CONTEXT* ctx,
     switch (ca)
     {
 #ifdef __aarch64__
-    case cpu_addr_pc:    addr->Offset = ctx->Pc; return TRUE;
-    case cpu_addr_stack: addr->Offset = ctx->Sp; return TRUE;
-    case cpu_addr_frame: addr->Offset = ctx->Fp; return TRUE;
+    case cpu_addr_pc:    addr->Offset = ctx->Pc;  return TRUE;
+    case cpu_addr_stack: addr->Offset = ctx->Sp;  return TRUE;
+    case cpu_addr_frame: addr->Offset = ctx->u.s.Fp; return TRUE;
 #endif
     default: addr->Mode = -1;
         return FALSE;
@@ -68,7 +70,7 @@ static BOOL fetch_next_frame(struct cpu_stack_walk* csw, union ctx *pcontext,
 {
     DWORD64 xframe;
     CONTEXT *context = &pcontext->ctx;
-    DWORD_PTR               oldReturn = context->Lr;
+    DWORD_PTR               oldReturn = context->u.s.Lr;
 
     if (dwarf2_virtual_unwind(csw, curr_pc, pcontext, &xframe))
     {
@@ -77,7 +79,7 @@ static BOOL fetch_next_frame(struct cpu_stack_walk* csw, union ctx *pcontext,
         return TRUE;
     }
 
-    if (context->Pc == context->Lr) return FALSE;
+    if (context->Pc == context->u.s.Lr) return FALSE;
     context->Pc = oldReturn;
 
     return TRUE;
@@ -123,8 +125,8 @@ static BOOL arm64_stack_walk(struct cpu_stack_walk *csw, STACKFRAME64 *frame,
 
     /* set frame information */
     frame->AddrStack.Offset = context->ctx.Sp;
-    frame->AddrReturn.Offset = context->ctx.Lr;
-    frame->AddrFrame.Offset = context->ctx.Fp;
+    frame->AddrReturn.Offset = context->ctx.u.s.Lr;
+    frame->AddrFrame.Offset = context->ctx.u.s.Fp;
     frame->AddrPC.Offset = context->ctx.Pc;
 
     frame->Far = TRUE;
@@ -168,7 +170,7 @@ static unsigned arm64_map_dwarf_register(unsigned regno, const struct module* mo
 static void *arm64_fetch_context_reg(union ctx *pctx, unsigned regno, unsigned *size)
 {
 #ifdef __aarch64__
-    CONTEXT *ctx = &pctx->ctx;
+    CONTEXT *ctx = pctx;
 
     switch (regno)
     {
@@ -200,12 +202,12 @@ static void *arm64_fetch_context_reg(union ctx *pctx, unsigned regno, unsigned *
     case CV_ARM64_X0 + 25:
     case CV_ARM64_X0 + 26:
     case CV_ARM64_X0 + 27:
-    case CV_ARM64_X0 + 28: *size = sizeof(ctx->X[0]); return &ctx->X[regno - CV_ARM64_X0];
-    case CV_ARM64_PSTATE:  *size = sizeof(ctx->Cpsr); return &ctx->Cpsr;
-    case CV_ARM64_FP:      *size = sizeof(ctx->Fp);   return &ctx->Fp;
-    case CV_ARM64_LR:      *size = sizeof(ctx->Lr);   return &ctx->Lr;
-    case CV_ARM64_SP:      *size = sizeof(ctx->Sp);   return &ctx->Sp;
-    case CV_ARM64_PC:      *size = sizeof(ctx->Pc);   return &ctx->Pc;
+    case CV_ARM64_X0 + 28: *size = sizeof(ctx->u.X[0]); return &ctx->u.X[regno - CV_ARM64_X0];
+    case CV_ARM64_PSTATE:  *size = sizeof(ctx->Cpsr);   return &ctx->Cpsr;
+    case CV_ARM64_FP:      *size = sizeof(ctx->u.s.Fp); return &ctx->u.s.Fp;
+    case CV_ARM64_LR:      *size = sizeof(ctx->u.s.Lr); return &ctx->u.s.Lr;
+    case CV_ARM64_SP:      *size = sizeof(ctx->Sp);     return &ctx->Sp;
+    case CV_ARM64_PC:      *size = sizeof(ctx->Pc);     return &ctx->Pc;
     }
 #endif
     FIXME("Unknown register %x\n", regno);
@@ -278,7 +280,7 @@ static BOOL arm64_fetch_minidump_module(struct dump_context* dc, unsigned index,
     return FALSE;
 }
 
-struct cpu cpu_arm64 = {
+DECLSPEC_HIDDEN struct cpu cpu_arm64 = {
     IMAGE_FILE_MACHINE_ARM64,
     8,
     CV_ARM64_FP,

@@ -20,6 +20,7 @@
 #define __WINE_DXGI_PRIVATE_H
 
 #include "wine/debug.h"
+#include "wine/heap.h"
 
 #include <assert.h>
 
@@ -77,36 +78,36 @@ struct dxgi_device_layer
 };
 
 /* TRACE helper functions */
-const char *debug_dxgi_format(DXGI_FORMAT format);
-const char *debug_dxgi_mode(const DXGI_MODE_DESC *desc);
-const char *debug_dxgi_mode1(const DXGI_MODE_DESC1 *desc);
-void dump_feature_levels(const D3D_FEATURE_LEVEL *feature_levels, unsigned int level_count);
+const char *debug_dxgi_format(DXGI_FORMAT format) DECLSPEC_HIDDEN;
+const char *debug_dxgi_mode(const DXGI_MODE_DESC *desc) DECLSPEC_HIDDEN;
+const char *debug_dxgi_mode1(const DXGI_MODE_DESC1 *desc) DECLSPEC_HIDDEN;
+void dump_feature_levels(const D3D_FEATURE_LEVEL *feature_levels, unsigned int level_count) DECLSPEC_HIDDEN;
 
-DXGI_FORMAT dxgi_format_from_wined3dformat(enum wined3d_format_id format);
-enum wined3d_format_id wined3dformat_from_dxgi_format(DXGI_FORMAT format);
+DXGI_FORMAT dxgi_format_from_wined3dformat(enum wined3d_format_id format) DECLSPEC_HIDDEN;
+enum wined3d_format_id wined3dformat_from_dxgi_format(DXGI_FORMAT format) DECLSPEC_HIDDEN;
 void dxgi_sample_desc_from_wined3d(DXGI_SAMPLE_DESC *desc,
-        enum wined3d_multisample_type wined3d_type, unsigned int wined3d_quality);
+        enum wined3d_multisample_type wined3d_type, unsigned int wined3d_quality) DECLSPEC_HIDDEN;
 void wined3d_sample_desc_from_dxgi(enum wined3d_multisample_type *wined3d_type,
-        unsigned int *wined3d_quality, const DXGI_SAMPLE_DESC *dxgi_desc);
+        unsigned int *wined3d_quality, const DXGI_SAMPLE_DESC *dxgi_desc) DECLSPEC_HIDDEN;
 void wined3d_display_mode_from_dxgi(struct wined3d_display_mode *wined3d_mode,
-        const DXGI_MODE_DESC *mode);
+        const DXGI_MODE_DESC *mode) DECLSPEC_HIDDEN;
 void wined3d_display_mode_from_dxgi1(struct wined3d_display_mode *wined3d_mode,
-        const DXGI_MODE_DESC1 *mode);
-DXGI_USAGE dxgi_usage_from_wined3d_bind_flags(unsigned int wined3d_bind_flags);
-unsigned int wined3d_bind_flags_from_dxgi_usage(DXGI_USAGE usage);
-unsigned int dxgi_swapchain_flags_from_wined3d(unsigned int wined3d_flags);
+        const DXGI_MODE_DESC1 *mode) DECLSPEC_HIDDEN;
+DXGI_USAGE dxgi_usage_from_wined3d_bind_flags(unsigned int wined3d_bind_flags) DECLSPEC_HIDDEN;
+unsigned int wined3d_bind_flags_from_dxgi_usage(DXGI_USAGE usage) DECLSPEC_HIDDEN;
+unsigned int dxgi_swapchain_flags_from_wined3d(unsigned int wined3d_flags) DECLSPEC_HIDDEN;
 HRESULT dxgi_get_output_from_window(IWineDXGIFactory *factory, HWND window, IDXGIOutput **dxgi_output)
-       ;
+        DECLSPEC_HIDDEN;
 HRESULT wined3d_swapchain_desc_from_dxgi(struct wined3d_swapchain_desc *wined3d_desc,
         IDXGIOutput *dxgi_containing_output, HWND window, const DXGI_SWAP_CHAIN_DESC1 *dxgi_desc,
-        const DXGI_SWAP_CHAIN_FULLSCREEN_DESC *dxgi_fullscreen_desc);
+        const DXGI_SWAP_CHAIN_FULLSCREEN_DESC *dxgi_fullscreen_desc) DECLSPEC_HIDDEN;
 
 HRESULT dxgi_get_private_data(struct wined3d_private_store *store,
-        REFGUID guid, UINT *data_size, void *data);
+        REFGUID guid, UINT *data_size, void *data) DECLSPEC_HIDDEN;
 HRESULT dxgi_set_private_data(struct wined3d_private_store *store,
-        REFGUID guid, UINT data_size, const void *data);
+        REFGUID guid, UINT data_size, const void *data) DECLSPEC_HIDDEN;
 HRESULT dxgi_set_private_data_interface(struct wined3d_private_store *store,
-        REFGUID guid, const IUnknown *object);
+        REFGUID guid, const IUnknown *object) DECLSPEC_HIDDEN;
 
 /* IDXGIFactory */
 struct dxgi_factory
@@ -119,9 +120,9 @@ struct dxgi_factory
     HWND device_window;
 };
 
-HRESULT dxgi_factory_create(REFIID riid, void **factory, BOOL extended);
-HWND dxgi_factory_get_device_window(struct dxgi_factory *factory);
-struct dxgi_factory *unsafe_impl_from_IDXGIFactory(IDXGIFactory *iface);
+HRESULT dxgi_factory_create(REFIID riid, void **factory, BOOL extended) DECLSPEC_HIDDEN;
+HWND dxgi_factory_get_device_window(struct dxgi_factory *factory) DECLSPEC_HIDDEN;
+struct dxgi_factory *unsafe_impl_from_IDXGIFactory(IDXGIFactory *iface) DECLSPEC_HIDDEN;
 
 /* IDXGIDevice */
 struct dxgi_device
@@ -138,7 +139,7 @@ struct dxgi_device
 
 HRESULT dxgi_device_init(struct dxgi_device *device, struct dxgi_device_layer *layer,
         IDXGIFactory *factory, IDXGIAdapter *adapter,
-        const D3D_FEATURE_LEVEL *feature_levels, unsigned int level_count);
+        const D3D_FEATURE_LEVEL *feature_levels, unsigned int level_count) DECLSPEC_HIDDEN;
 
 /* IDXGIOutput */
 struct dxgi_output
@@ -151,8 +152,8 @@ struct dxgi_output
 };
 
 HRESULT dxgi_output_create(struct dxgi_adapter *adapter, unsigned int output_idx,
-        struct dxgi_output **output);
-struct dxgi_output *unsafe_impl_from_IDXGIOutput(IDXGIOutput *iface);
+        struct dxgi_output **output) DECLSPEC_HIDDEN;
+struct dxgi_output *unsafe_impl_from_IDXGIOutput(IDXGIOutput *iface) DECLSPEC_HIDDEN;
 
 /* IDXGIAdapter */
 struct dxgi_adapter
@@ -166,8 +167,8 @@ struct dxgi_adapter
 };
 
 HRESULT dxgi_adapter_create(struct dxgi_factory *factory, UINT ordinal,
-        struct dxgi_adapter **adapter);
-struct dxgi_adapter *unsafe_impl_from_IDXGIAdapter(IDXGIAdapter *iface);
+        struct dxgi_adapter **adapter) DECLSPEC_HIDDEN;
+struct dxgi_adapter *unsafe_impl_from_IDXGIAdapter(IDXGIAdapter *iface) DECLSPEC_HIDDEN;
 
 /* IDXGISwapChain */
 struct d3d11_swapchain
@@ -182,17 +183,16 @@ struct d3d11_swapchain
 
     IDXGIOutput *target;
     LONG present_count;
-    LONG in_set_fullscreen_state;
 };
 
 HRESULT d3d11_swapchain_init(struct d3d11_swapchain *swapchain, struct dxgi_device *device,
-        struct wined3d_swapchain_desc *desc);
+        struct wined3d_swapchain_desc *desc) DECLSPEC_HIDDEN;
 
 HRESULT d3d12_swapchain_create(IWineDXGIFactory *factory, ID3D12CommandQueue *queue, HWND window,
         const DXGI_SWAP_CHAIN_DESC1 *swapchain_desc, const DXGI_SWAP_CHAIN_FULLSCREEN_DESC *fullscreen_desc,
-        IDXGISwapChain1 **swapchain);
+        IDXGISwapChain1 **swapchain) DECLSPEC_HIDDEN;
 
-BOOL dxgi_validate_swapchain_desc(const DXGI_SWAP_CHAIN_DESC1 *desc);
+BOOL dxgi_validate_swapchain_desc(const DXGI_SWAP_CHAIN_DESC1 *desc) DECLSPEC_HIDDEN;
 
 /* IDXGISurface/IDXGIResource */
 struct dxgi_resource
@@ -209,6 +209,6 @@ struct dxgi_resource
 };
 
 HRESULT dxgi_resource_init(struct dxgi_resource *resource, IDXGIDevice *device,
-        IUnknown *outer, BOOL needs_surface, struct wined3d_resource *wined3d_resource);
+        IUnknown *outer, BOOL needs_surface, struct wined3d_resource *wined3d_resource) DECLSPEC_HIDDEN;
 
 #endif /* __WINE_DXGI_PRIVATE_H */

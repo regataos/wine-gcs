@@ -1,5 +1,5 @@
 TESTDLL   = mpr.dll
 IMPORTS   = mpr
 
-SOURCES = \
+C_SRCS = \
 	mpr.c

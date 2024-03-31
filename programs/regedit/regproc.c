@@ -447,7 +447,10 @@ static LONG open_key(struct parser *parser, WCHAR *path)
                           KEY_ALL_ACCESS, NULL, &parser->hkey, NULL);
 
     if (res == ERROR_SUCCESS)
-        parser->key_name = wcsdup(path);
+    {
+        parser->key_name = malloc((lstrlenW(path) + 1) * sizeof(WCHAR));
+        lstrcpyW(parser->key_name, path);
+    }
     else
         parser->hkey = NULL;
 
@@ -696,7 +699,8 @@ static WCHAR *quoted_value_name_state(struct parser *parser, WCHAR *pos)
         goto invalid;
 
     /* copy the value name in case we need to parse multiple lines and the buffer is overwritten */
-    parser->value_name = wcsdup(val_name);
+    parser->value_name = malloc((lstrlenW(val_name) + 1) * sizeof(WCHAR));
+    lstrcpyW(parser->value_name, val_name);
 
     set_state(parser, DATA_START);
     return p;
@@ -1091,15 +1095,11 @@ void delete_registry_key(WCHAR *reg_key_name)
     if (!(key_class = parse_key_name(reg_key_name, &key_name)))
     {
         if (key_name) *(key_name - 1) = 0;
-        output_message(STRING_INVALID_SYSTEM_KEY, reg_key_name);
-        error_exit();
+        error_exit(STRING_INVALID_SYSTEM_KEY, reg_key_name);
     }
 
     if (!key_name || !*key_name)
-    {
-        output_message(STRING_DELETE_FAILED, reg_key_name);
-        error_exit();
-    }
+        error_exit(STRING_DELETE_FAILED, reg_key_name);
 
     RegDeleteTreeW(key_class, key_name);
 }
@@ -1282,7 +1282,7 @@ static void export_data(FILE *fp, WCHAR *value_name, DWORD value_len, DWORD type
         export_string_data(&buf, data, size);
         break;
     case REG_DWORD:
-        if (size == sizeof(DWORD))
+        if (size)
         {
             export_dword_data(&buf, data);
             break;
@@ -1328,7 +1328,7 @@ static void export_key_name(FILE *fp, WCHAR *name, BOOL unicode)
 
 #define MAX_SUBKEY_LEN   257
 
-static void export_registry_data(FILE *fp, HKEY key, WCHAR *path, BOOL unicode)
+static int export_registry_data(FILE *fp, HKEY key, WCHAR *path, BOOL unicode)
 {
     LONG rc;
     DWORD max_value_len = 256, value_len;
@@ -1398,6 +1398,7 @@ static void export_registry_data(FILE *fp, HKEY key, WCHAR *path, BOOL unicode)
     }
 
     free(subkey_name);
+    return 0;
 }
 
 static FILE *REGPROC_open_export_file(WCHAR *file_name, BOOL unicode)
@@ -1415,8 +1416,7 @@ static FILE *REGPROC_open_export_file(WCHAR *file_name, BOOL unicode)
         if (!file)
         {
             _wperror(L"regedit");
-            output_message(STRING_CANNOT_OPEN_FILE, file_name);
-            error_exit();
+            error_exit(STRING_CANNOT_OPEN_FILE, file_name);
         }
     }
 
@@ -1450,6 +1450,7 @@ static BOOL export_key(WCHAR *file_name, WCHAR *path, BOOL unicode)
     HKEY key_class, key;
     WCHAR *subkey;
     FILE *fp;
+    BOOL ret;
 
     if (!(key_class = parse_key_name(path, &subkey)))
     {
@@ -1462,12 +1463,12 @@ static BOOL export_key(WCHAR *file_name, WCHAR *path, BOOL unicode)
         return FALSE;
 
     fp = REGPROC_open_export_file(file_name, unicode);
-    export_registry_data(fp, key, path, unicode);
+    ret = export_registry_data(fp, key, path, unicode);
     export_newline(fp, unicode);
     fclose(fp);
 
     RegCloseKey(key);
-    return TRUE;
+    return ret;
 }
 
 static BOOL export_all(WCHAR *file_name, WCHAR *path, BOOL unicode)
@@ -1487,7 +1488,8 @@ static BOOL export_all(WCHAR *file_name, WCHAR *path, BOOL unicode)
             return FALSE;
         }
 
-        class_name = wcsdup(reg_class_namesW[i]);
+        class_name = malloc((lstrlenW(reg_class_namesW[i]) + 1) * sizeof(WCHAR));
+        lstrcpyW(class_name, reg_class_namesW[i]);
 
         export_registry_data(fp, classes[i], class_name, unicode);
 

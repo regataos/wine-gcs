@@ -31,6 +31,7 @@
 #include "dispex.h"
 #include "activscp.h"
 #include "wine/debug.h"
+#include "wine/heap.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(jsproxy);
 
@@ -49,7 +50,7 @@ static inline WCHAR *strdupAW( const char *src, int len )
     if (src)
     {
         int dst_len = MultiByteToWideChar( CP_ACP, 0, src, len, NULL, 0 );
-        if ((dst = malloc( (dst_len + 1) * sizeof(WCHAR) )))
+        if ((dst = heap_alloc( (dst_len + 1) * sizeof(WCHAR) )))
         {
             len = MultiByteToWideChar( CP_ACP, 0, src, len, dst, dst_len );
             dst[dst_len] = 0;
@@ -64,7 +65,7 @@ static inline char *strdupWA( const WCHAR *src )
     if (src)
     {
         int len = WideCharToMultiByte( CP_ACP, 0, src, -1, NULL, 0, NULL, NULL );
-        if ((dst = malloc( len ))) WideCharToMultiByte( CP_ACP, 0, src, -1, dst, len, NULL, NULL );
+        if ((dst = heap_alloc( len ))) WideCharToMultiByte( CP_ACP, 0, src, -1, dst, len, NULL, NULL );
     }
     return dst;
 }
@@ -84,7 +85,7 @@ BOOL WINAPI InternetDeInitializeAutoProxyDll( LPSTR mime, DWORD reserved )
 
     EnterCriticalSection( &cs_jsproxy );
 
-    free( global_script->text );
+    heap_free( global_script->text );
     global_script->text = NULL;
 
     LeaveCriticalSection( &cs_jsproxy );
@@ -103,17 +104,17 @@ static WCHAR *load_script( const char *filename )
     if (handle == INVALID_HANDLE_VALUE) return NULL;
 
     size = GetFileSize( handle, NULL );
-    if (!(buffer = malloc( size ))) goto done;
+    if (!(buffer = heap_alloc( size ))) goto done;
     if (!ReadFile( handle, buffer, size, &bytes_read, NULL ) || bytes_read != size) goto done;
 
     len = MultiByteToWideChar( CP_ACP, 0, buffer, size, NULL, 0 );
-    if (!(script = malloc( (len + 1) * sizeof(WCHAR) ))) goto done;
+    if (!(script = heap_alloc( (len + 1) * sizeof(WCHAR) ))) goto done;
     MultiByteToWideChar( CP_ACP, 0, buffer, size, script, len );
     script[len] = 0;
 
 done:
     CloseHandle( handle );
-    free( buffer );
+    heap_free( buffer );
     return script;
 }
 
@@ -140,13 +141,13 @@ BOOL WINAPI JSPROXY_InternetInitializeAutoProxyDll( DWORD version, LPSTR tmpfile
             LeaveCriticalSection( &cs_jsproxy );
             return FALSE;
         }
-        free( global_script->text );
+        heap_free( global_script->text );
         if ((global_script->text = strdupAW( buffer->lpszScriptBuffer,
                         buffer->dwScriptBufferSize ))) ret = TRUE;
     }
     else
     {
-        free( global_script->text );
+        heap_free( global_script->text );
         if ((global_script->text = load_script( tmpfile ))) ret = TRUE;
     }
 
@@ -262,10 +263,10 @@ static char *get_computer_name( COMPUTER_NAME_FORMAT format )
 
     GetComputerNameExA( format, NULL, &size );
     if (GetLastError() != ERROR_MORE_DATA) return NULL;
-    if (!(ret = malloc( size ))) return NULL;
+    if (!(ret = heap_alloc( size ))) return NULL;
     if (!GetComputerNameExA( format, ret, &size ))
     {
-        free( ret );
+        heap_free( ret );
         return NULL;
     }
     return ret;
@@ -294,7 +295,7 @@ static HRESULT dns_resolve( const WCHAR *hostname, VARIANT *result )
 
         if (!hostnameA) return E_OUTOFMEMORY;
         res = getaddrinfo( hostnameA, NULL, NULL, &ai );
-        free( hostnameA );
+        heap_free( hostnameA );
         if (res) return S_FALSE;
 
         elem = ai;
@@ -576,15 +577,20 @@ BOOL WINAPI InternetGetProxyInfo( LPCSTR url, DWORD len_url, LPCSTR hostname, DW
         SetLastError( ERROR_CAN_NOT_COMPLETE );
         goto done;
     }
-    if (!(urlW = strdupAW( url, len_url ))) goto done;
-    if (hostname && !(hostnameW = strdupAW( hostname, len_hostname ))) goto done;
+    if (hostname && len_hostname < strlen( hostname ))
+    {
+        SetLastError( ERROR_INSUFFICIENT_BUFFER );
+        goto done;
+    }
+    if (!(urlW = strdupAW( url, -1 ))) goto done;
+    if (hostname && !(hostnameW = strdupAW( hostname, -1 ))) goto done;
 
     TRACE( "%s\n", debugstr_w(global_script->text) );
     ret = run_script( global_script->text, urlW, hostnameW, proxy, len_proxy );
 
 done:
-    free( hostnameW );
-    free( urlW );
+    heap_free( hostnameW );
+    heap_free( urlW );
     LeaveCriticalSection( &cs_jsproxy );
     return ret;
 }

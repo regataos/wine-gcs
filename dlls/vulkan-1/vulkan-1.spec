@@ -3,7 +3,7 @@
 # This file is generated from Vulkan vk.xml file covered
 # by the following copyright and permission notice:
 #
-# Copyright 2015-2024 The Khronos Group Inc.
+# Copyright 2015-2023 The Khronos Group Inc.
 #
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 #
@@ -251,3 +251,5 @@
 @ stdcall vkUpdateDescriptorSets(ptr long ptr long ptr) winevulkan.vkUpdateDescriptorSets
 @ stdcall vkWaitForFences(ptr long ptr long int64) winevulkan.vkWaitForFences
 @ stdcall vkWaitSemaphores(ptr ptr int64) winevulkan.vkWaitSemaphores
+@ stdcall wine_vkAcquireKeyedMutex(ptr int64 int64 long) winevulkan.wine_vkAcquireKeyedMutex
+@ stdcall wine_vkReleaseKeyedMutex(ptr int64 int64) winevulkan.wine_vkReleaseKeyedMutex

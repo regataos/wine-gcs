@@ -27,6 +27,7 @@
 #include "wmsdk.h"
 
 #include "wine/debug.h"
+#include "wine/heap.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(wmvcore);
 
@@ -145,7 +146,7 @@ static ULONG WINAPI WMProfileManager_Release(IWMProfileManager2 *iface)
     TRACE("(%p) ref=%ld\n", This, ref);
 
     if(!ref)
-        free(This);
+        heap_free(This);
 
     return ref;
 }
@@ -226,7 +227,7 @@ HRESULT WINAPI WMCreateProfileManager(IWMProfileManager **ret)
 
     TRACE("(%p)\n", ret);
 
-    profile_mgr = malloc(sizeof(*profile_mgr));
+    profile_mgr = heap_alloc(sizeof(*profile_mgr));
     if(!profile_mgr)
         return E_OUTOFMEMORY;
 

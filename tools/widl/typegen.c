@@ -185,6 +185,19 @@ static const char *string_of_type(unsigned char type)
     }
 }
 
+static void *get_aliaschain_attrp(const type_t *type, enum attr_type attr)
+{
+    const type_t *t = type;
+    for (;;)
+    {
+        if (is_attr(t->attrs, attr))
+            return get_attrp(t->attrs, attr);
+        else if (type_is_alias(t))
+            t = type_alias_get_aliasee_type(t);
+        else return NULL;
+    }
+}
+
 unsigned char get_basic_fc(const type_t *type)
 {
     int sign = type_basic_get_sign(type);
@@ -234,6 +247,7 @@ static unsigned char get_basic_fc_signed(const type_t *type)
 
 static inline unsigned int clamp_align(unsigned int align)
 {
+    unsigned int packing = (pointer_size == 4) ? win32_packing : win64_packing;
     if(align > packing) align = packing;
     return align;
 }
@@ -745,41 +759,8 @@ static int type_has_pointers(const type_t *type)
     return FALSE;
 }
 
-struct visited_struct_array
-{
-    const type_t **structs;
-    size_t count;
-    size_t capacity;
-};
-
-static inline int array_reserve(void **elements, size_t *capacity, size_t count, size_t size)
-{
-    size_t new_capacity, max_capacity;
-    void *new_elements;
-
-    if (count <= *capacity)
-        return TRUE;
-
-    max_capacity = ~(size_t)0 / size;
-    if (count > max_capacity)
-        return FALSE;
-
-    new_capacity = max(4, *capacity);
-    while (new_capacity < count && new_capacity <= max_capacity / 2)
-        new_capacity *= 2;
-    if (new_capacity < count)
-        new_capacity = max_capacity;
-
-    if (!(new_elements = realloc(*elements, new_capacity * size)))
-        return FALSE;
-
-    *elements = new_elements;
-    *capacity = new_capacity;
-    return TRUE;
-}
-
-static int type_has_full_pointer_recurse(const type_t *type, const attr_list_t *attrs,
-                                 int toplevel_param, struct visited_struct_array *visited_structs)
+static int type_has_full_pointer(const type_t *type, const attr_list_t *attrs,
+                                 int toplevel_param)
 {
     switch (typegen_detect_type(type, NULL, TDT_IGNORE_STRINGS))
     {
@@ -789,43 +770,22 @@ static int type_has_full_pointer_recurse(const type_t *type, const attr_list_t *
         if (get_pointer_fc(type, attrs, toplevel_param) == FC_FP)
             return TRUE;
         else
-            return type_has_full_pointer_recurse(type_pointer_get_ref_type(type), NULL, FALSE, visited_structs);
+            return FALSE;
     case TGT_ARRAY:
         if (get_pointer_fc(type, attrs, toplevel_param) == FC_FP)
             return TRUE;
         else
-            return type_has_full_pointer_recurse(type_array_get_element_type(type), NULL, FALSE, visited_structs);
+            return type_has_full_pointer(type_array_get_element_type(type), NULL, FALSE);
     case TGT_STRUCT:
     {
-        unsigned int i;
-        int ret = FALSE;
         var_list_t *fields = type_struct_get_fields(type);
         const var_t *field;
-
-        for (i = 0; i < visited_structs->count; i++)
-        {
-            if (visited_structs->structs[i] == type)
-            {
-                /* Found struct we visited already, abort to prevent infinite loop.
-                 * Can't be at the first struct we visit, so we can skip cleanup and just return */
-               return FALSE;
-            }
-        }
-
-        array_reserve((void**)&visited_structs->structs, &visited_structs->capacity, visited_structs->count + 1, sizeof(struct type_t*));
-        visited_structs->structs[visited_structs->count] = type;
-
-        visited_structs->count++;
         if (fields) LIST_FOR_EACH_ENTRY( field, fields, const var_t, entry )
         {
-            if (type_has_full_pointer_recurse(field->declspec.type, field->attrs, FALSE, visited_structs))
-            {
-                ret = TRUE;
-                break;
-            }
+            if (type_has_full_pointer(field->declspec.type, field->attrs, FALSE))
+                return TRUE;
         }
-        visited_structs->count--;
-        return ret;
+        break;
     }
     case TGT_UNION:
     {
@@ -834,7 +794,7 @@ static int type_has_full_pointer_recurse(const type_t *type, const attr_list_t *
         fields = type_union_get_cases(type);
         if (fields) LIST_FOR_EACH_ENTRY( field, fields, const var_t, entry )
         {
-            if (field->declspec.type && type_has_full_pointer_recurse(field->declspec.type, field->attrs, FALSE, visited_structs))
+            if (field->declspec.type && type_has_full_pointer(field->declspec.type, field->attrs, FALSE))
                 return TRUE;
         }
         break;
@@ -851,15 +811,6 @@ static int type_has_full_pointer_recurse(const type_t *type, const attr_list_t *
     }
 
     return FALSE;
-}
-
-static int type_has_full_pointer(const type_t *type, const attr_list_t *attrs, int toplevel_param)
-{
-    int ret;
-    struct visited_struct_array visited_structs = {0};
-    ret = type_has_full_pointer_recurse(type, attrs, toplevel_param, &visited_structs);
-    free(visited_structs.structs);
-    return ret;
 }
 
 static unsigned short user_type_offset(const char *name)
@@ -5147,9 +5098,9 @@ void write_exceptions( FILE *file )
     fprintf( file, "{\n");
     fprintf( file, "    struct __exception_frame *exc_frame = (struct __exception_frame *)frame;\n");
     fprintf( file, "\n");
-    fprintf( file, "    if (record->ExceptionFlags & (EXCEPTION_UNWINDING | EXCEPTION_EXIT_UNWIND | EXCEPTION_NESTED_CALL))\n");
+    fprintf( file, "    if (record->ExceptionFlags & (EH_UNWINDING | EH_EXIT_UNWIND | EH_NESTED_CALL))\n");
     fprintf( file, "    {\n" );
-    fprintf( file, "        if (exc_frame->finally_level && (record->ExceptionFlags & (EXCEPTION_UNWINDING | EXCEPTION_EXIT_UNWIND)))\n");
+    fprintf( file, "        if (exc_frame->finally_level && (record->ExceptionFlags & (EH_UNWINDING | EH_EXIT_UNWIND)))\n");
     fprintf( file, "        {\n" );
     fprintf( file, "            exc_frame->abnormal_termination = 1;\n");
     fprintf( file, "            exc_frame->finally( exc_frame );\n");

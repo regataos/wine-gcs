@@ -38,6 +38,8 @@
 #include <stdarg.h>
 #include <string.h>
 
+#define NONAMELESSUNION
+
 #include "windef.h"
 #include "winbase.h"
 #include "winreg.h"
@@ -55,7 +57,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(shell);
  *
  * creates a CF_HDROP structure
  */
-HGLOBAL RenderHDROP(const ITEMIDLIST *pidlRoot, const ITEMIDLIST **apidl, unsigned int cidl)
+HGLOBAL RenderHDROP(LPITEMIDLIST pidlRoot, LPITEMIDLIST * apidl, UINT cidl)
 {
 	UINT i;
 	int rootlen = 0,size = 0;
@@ -107,7 +109,7 @@ HGLOBAL RenderHDROP(const ITEMIDLIST *pidlRoot, const ITEMIDLIST **apidl, unsign
 	return hGlobal;
 }
 
-HGLOBAL RenderSHELLIDLIST(const ITEMIDLIST *pidlRoot, const ITEMIDLIST **apidl, unsigned int cidl)
+HGLOBAL RenderSHELLIDLIST (LPITEMIDLIST pidlRoot, LPITEMIDLIST * apidl, UINT cidl)
 {
 	UINT i;
 	int offset = 0, sizePidl, size;
@@ -149,7 +151,7 @@ HGLOBAL RenderSHELLIDLIST(const ITEMIDLIST *pidlRoot, const ITEMIDLIST **apidl, 
 	return hGlobal;
 }
 
-HGLOBAL RenderFILENAMEA(const ITEMIDLIST *pidlRoot, const ITEMIDLIST **apidl, unsigned int cidl)
+HGLOBAL RenderFILENAMEA (LPITEMIDLIST pidlRoot, LPITEMIDLIST * apidl, UINT cidl)
 {
 	int size = 0;
 	char szTemp[MAX_PATH], *szFileName;
@@ -165,7 +167,7 @@ HGLOBAL RenderFILENAMEA(const ITEMIDLIST *pidlRoot, const ITEMIDLIST **apidl, un
 		return 0;
 
 	bSuccess = SHGetPathFromIDListA(pidl, szTemp);
-	ILFree(pidl);
+	SHFree(pidl);
 	if (!bSuccess)
 		return 0;
 
@@ -181,7 +183,7 @@ HGLOBAL RenderFILENAMEA(const ITEMIDLIST *pidlRoot, const ITEMIDLIST **apidl, un
 	return hGlobal;
 }
 
-HGLOBAL RenderFILENAMEW(const ITEMIDLIST *pidlRoot, const ITEMIDLIST **apidl, unsigned int cidl)
+HGLOBAL RenderFILENAMEW (LPITEMIDLIST pidlRoot, LPITEMIDLIST * apidl, UINT cidl)
 {
 	int size = 0;
 	WCHAR szTemp[MAX_PATH], *szFileName;
@@ -197,7 +199,7 @@ HGLOBAL RenderFILENAMEW(const ITEMIDLIST *pidlRoot, const ITEMIDLIST **apidl, un
 		return 0;
 
 	bSuccess = SHGetPathFromIDListW(pidl, szTemp);
-	ILFree(pidl);
+	SHFree(pidl);
 	if (!bSuccess)
 		return 0;
 
@@ -211,4 +213,42 @@ HGLOBAL RenderFILENAMEW(const ITEMIDLIST *pidlRoot, const ITEMIDLIST **apidl, un
 	GlobalUnlock(hGlobal);
 
 	return hGlobal;
+}
+
+HGLOBAL RenderPREFERREDDROPEFFECT (DWORD value)
+{
+    DWORD *pEffect;
+    HGLOBAL hGlobal;
+
+    TRACE("(%ld)\n", value);
+
+    hGlobal = GlobalAlloc(GHND|GMEM_SHARE, sizeof(DWORD));
+    if(!hGlobal) return hGlobal;
+
+    pEffect = GlobalLock(hGlobal);
+    if (pEffect)
+    {
+        *pEffect = value;
+        GlobalUnlock(hGlobal);
+    }
+
+    return hGlobal;
+}
+
+HRESULT GetPREFERREDDROPEFFECT (STGMEDIUM *pmedium, DWORD *value)
+{
+    DWORD *pEffect;
+    BOOL result = E_OUTOFMEMORY;
+
+    TRACE("(%p, %p)\n", pmedium, value);
+
+    pEffect = GlobalLock(pmedium->u.hGlobal);
+    if (pEffect)
+    {
+        *value = *pEffect;
+        result = S_OK;
+        GlobalUnlock(pmedium->u.hGlobal);
+    }
+
+    return result;
 }

@@ -25,6 +25,7 @@
 
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
+#define NONAMELESSUNION
 #include "wine/winbase16.h"
 #include "wine/debug.h"
 #include "winternl.h"

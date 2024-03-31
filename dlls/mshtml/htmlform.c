@@ -37,6 +37,7 @@ struct HTMLFormElement {
     HTMLElement element;
 
     IHTMLFormElement IHTMLFormElement_iface;
+    IWineHTMLFormPrivate IWineHTMLFormPrivate_iface;
 
     nsIDOMHTMLFormElement *nsform;
 };
@@ -452,7 +453,8 @@ static HRESULT WINAPI HTMLFormElement_get_elements(IHTMLFormElement *iface, IDis
         return E_FAIL;
     }
 
-    *p = (IDispatch*)create_collection_from_htmlcol(elements, dispex_compat_mode(&This->element.node.event_target.dispex));
+    *p = (IDispatch*)create_collection_from_htmlcol(elements, This->element.node.doc,
+                                                    dispex_compat_mode(&This->element.node.event_target.dispex));
     nsIDOMHTMLCollection_Release(elements);
     return S_OK;
 }
@@ -570,7 +572,7 @@ static HRESULT WINAPI HTMLFormElement_submit(IHTMLFormElement *iface)
 
     if(This->element.node.doc) {
         HTMLDocumentNode *doc = This->element.node.doc;
-        if(doc->window && doc->window->base.outer_window)
+        if(doc->window)
             this_window = doc->window->base.outer_window;
     }
     if(!this_window) {
@@ -768,6 +770,119 @@ static const IHTMLFormElementVtbl HTMLFormElementVtbl = {
     HTMLFormElement_tags
 };
 
+static inline HTMLFormElement *impl_from_IWineHTMLFormPrivateVtbl(IWineHTMLFormPrivate *iface)
+{
+    return CONTAINING_RECORD(iface, HTMLFormElement, IWineHTMLFormPrivate_iface);
+}
+
+static HRESULT WINAPI HTMLFormElement_private_QueryInterface(IWineHTMLFormPrivate *iface,
+        REFIID riid, void **ppv)
+{
+    HTMLFormElement *This = impl_from_IWineHTMLFormPrivateVtbl(iface);
+
+    return IHTMLDOMNode_QueryInterface(&This->element.node.IHTMLDOMNode_iface, riid, ppv);
+}
+
+static ULONG WINAPI HTMLFormElement_private_AddRef(IWineHTMLFormPrivate *iface)
+{
+    HTMLFormElement *This = impl_from_IWineHTMLFormPrivateVtbl(iface);
+
+    return IHTMLDOMNode_AddRef(&This->element.node.IHTMLDOMNode_iface);
+}
+
+static ULONG WINAPI HTMLFormElement_private_Release(IWineHTMLFormPrivate *iface)
+{
+    HTMLFormElement *This = impl_from_IWineHTMLFormPrivateVtbl(iface);
+
+    return IHTMLDOMNode_Release(&This->element.node.IHTMLDOMNode_iface);
+}
+
+static HRESULT WINAPI HTMLFormElement_private_GetTypeInfoCount(IWineHTMLFormPrivate *iface, UINT *pctinfo)
+{
+    HTMLFormElement *This = impl_from_IWineHTMLFormPrivateVtbl(iface);
+    return IDispatchEx_GetTypeInfoCount(&This->element.node.event_target.dispex.IDispatchEx_iface, pctinfo);
+}
+
+static HRESULT WINAPI HTMLFormElement_private_GetTypeInfo(IWineHTMLFormPrivate *iface, UINT iTInfo,
+                                              LCID lcid, ITypeInfo **ppTInfo)
+{
+    HTMLFormElement *This = impl_from_IWineHTMLFormPrivateVtbl(iface);
+    return IDispatchEx_GetTypeInfo(&This->element.node.event_target.dispex.IDispatchEx_iface, iTInfo, lcid,
+            ppTInfo);
+}
+
+static HRESULT WINAPI HTMLFormElement_private_GetIDsOfNames(IWineHTMLFormPrivate *iface, REFIID riid,
+                                                LPOLESTR *rgszNames, UINT cNames,
+                                                LCID lcid, DISPID *rgDispId)
+{
+    HTMLFormElement *This = impl_from_IWineHTMLFormPrivateVtbl(iface);
+    return IDispatchEx_GetIDsOfNames(&This->element.node.event_target.dispex.IDispatchEx_iface, riid, rgszNames,
+            cNames, lcid, rgDispId);
+}
+
+static HRESULT WINAPI HTMLFormElement_private_Invoke(IWineHTMLFormPrivate *iface, DISPID dispIdMember,
+                            REFIID riid, LCID lcid, WORD wFlags, DISPPARAMS *pDispParams,
+                            VARIANT *pVarResult, EXCEPINFO *pExcepInfo, UINT *puArgErr)
+{
+    HTMLFormElement *This = impl_from_IWineHTMLFormPrivateVtbl(iface);
+    return IDispatchEx_Invoke(&This->element.node.event_target.dispex.IDispatchEx_iface, dispIdMember, riid,
+            lcid, wFlags, pDispParams, pVarResult, pExcepInfo, puArgErr);
+}
+
+static HRESULT WINAPI HTMLFormElement_private_put_enctype(IWineHTMLFormPrivate *iface, BSTR v)
+{
+    HTMLFormElement *This = impl_from_IWineHTMLFormPrivateVtbl(iface);
+
+    TRACE("(%p)->(%s)\n", This, debugstr_w(v));
+
+    return IHTMLFormElement_put_encoding(&This->IHTMLFormElement_iface, v);
+}
+
+static HRESULT WINAPI HTMLFormElement_private_get_enctype(IWineHTMLFormPrivate *iface, BSTR *ret)
+{
+    HTMLFormElement *This = impl_from_IWineHTMLFormPrivateVtbl(iface);
+
+    TRACE("(%p)->(%p)\n", This, ret);
+
+    return IHTMLFormElement_get_encoding(&This->IHTMLFormElement_iface, ret);
+}
+
+static HRESULT WINAPI HTMLFormElement_private_put_noValidate(IWineHTMLFormPrivate *iface, VARIANT_BOOL v)
+{
+    HTMLFormElement *This = impl_from_IWineHTMLFormPrivateVtbl(iface);
+    FIXME("(%p)->(%x)\n", This, v);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI HTMLFormElement_private_get_noValidate(IWineHTMLFormPrivate *iface, VARIANT_BOOL *ret)
+{
+    HTMLFormElement *This = impl_from_IWineHTMLFormPrivateVtbl(iface);
+    FIXME("(%p)->(%p)\n", This, ret);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI HTMLFormElement_private_checkValidity(IWineHTMLFormPrivate *iface, VARIANT_BOOL *ret)
+{
+    HTMLFormElement *This = impl_from_IWineHTMLFormPrivateVtbl(iface);
+    FIXME("(%p)->(%p)\n", This, ret);
+    return E_NOTIMPL;
+}
+
+static const IWineHTMLFormPrivateVtbl WineHTMLFormPrivateVtbl = {
+    HTMLFormElement_private_QueryInterface,
+    HTMLFormElement_private_AddRef,
+    HTMLFormElement_private_Release,
+    HTMLFormElement_private_GetTypeInfoCount,
+    HTMLFormElement_private_GetTypeInfo,
+    HTMLFormElement_private_GetIDsOfNames,
+    HTMLFormElement_private_Invoke,
+    HTMLFormElement_private_put_enctype,
+    HTMLFormElement_private_get_enctype,
+    HTMLFormElement_private_put_noValidate,
+    HTMLFormElement_private_get_noValidate,
+    HTMLFormElement_private_checkValidity,
+};
+
 static inline HTMLFormElement *impl_from_DispatchEx(DispatchEx *iface)
 {
     return CONTAINING_RECORD(iface, HTMLFormElement, element.node.event_target.dispex);
@@ -781,6 +896,8 @@ static void *HTMLFormElement_query_interface(DispatchEx *dispex, REFIID riid)
         return &This->IHTMLFormElement_iface;
     if(IsEqualGUID(&DIID_DispHTMLFormElement, riid))
         return &This->IHTMLFormElement_iface;
+    if(IsEqualGUID(&IID_IWineHTMLFormPrivate, riid))
+        return &This->IWineHTMLFormPrivate_iface;
 
     return HTMLElement_query_interface(&This->element.node.event_target.dispex, riid);
 }
@@ -801,7 +918,7 @@ static void HTMLFormElement_unlink(DispatchEx *dispex)
     unlink_ref(&This->nsform);
 }
 
-static HRESULT HTMLFormElement_get_dispid(DispatchEx *dispex, BSTR name, DWORD grfdex, DISPID *dispid)
+static HRESULT HTMLFormElement_get_dispid(DispatchEx *dispex, BSTR name, DWORD grfdex, DISPID *pid)
 {
     HTMLFormElement *This = impl_from_DispatchEx(dispex);
     nsIDOMHTMLCollection *elements;
@@ -810,7 +927,7 @@ static HRESULT HTMLFormElement_get_dispid(DispatchEx *dispex, BSTR name, DWORD g
     nsresult nsres;
     HRESULT hres = DISP_E_UNKNOWNNAME;
 
-    TRACE("(%p)->(%s %lx %p)\n", This, wine_dbgstr_w(name), grfdex, dispid);
+    TRACE("(%p)->(%s %lx %p)\n", This, wine_dbgstr_w(name), grfdex, pid);
 
     nsres = nsIDOMHTMLFormElement_GetElements(This->nsform, &elements);
     if(NS_FAILED(nsres)) {
@@ -834,7 +951,7 @@ static HRESULT HTMLFormElement_get_dispid(DispatchEx *dispex, BSTR name, DWORD g
 
         i = wcstoul(name, &end_ptr, 10);
         if(!*end_ptr && i < len) {
-            *dispid = MSHTML_DISPID_CUSTOM_MIN + i;
+            *pid = MSHTML_DISPID_CUSTOM_MIN + i;
             return S_OK;
         }
     }
@@ -872,7 +989,7 @@ static HRESULT HTMLFormElement_get_dispid(DispatchEx *dispex, BSTR name, DWORD g
         if(!wcsicmp(str, name)) {
             nsIDOMElement_Release(elem);
             /* FIXME: using index for dispid */
-            *dispid = MSHTML_DISPID_CUSTOM_MIN + i;
+            *pid = MSHTML_DISPID_CUSTOM_MIN + i;
             hres = S_OK;
             break;
         }
@@ -884,7 +1001,7 @@ static HRESULT HTMLFormElement_get_dispid(DispatchEx *dispex, BSTR name, DWORD g
             if(!wcsicmp(str, name)) {
                 nsAString_Finish(&name_str);
                 /* FIXME: using index for dispid */
-                *dispid = MSHTML_DISPID_CUSTOM_MIN + i;
+                *pid = MSHTML_DISPID_CUSTOM_MIN + i;
                 hres = S_OK;
                 break;
             }
@@ -922,8 +1039,8 @@ static HRESULT HTMLFormElement_dispex_get_name(DispatchEx *dispex, DISPID id, BS
     return (*name = SysAllocStringLen(buf, len)) ? S_OK : E_OUTOFMEMORY;
 }
 
-static HRESULT HTMLFormElement_invoke(DispatchEx *dispex, DISPID id, LCID lcid, WORD flags, DISPPARAMS *params,
-        VARIANT *res, EXCEPINFO *ei, IServiceProvider *caller)
+static HRESULT HTMLFormElement_invoke(DispatchEx *dispex, IDispatch *this_obj, DISPID id, LCID lcid, WORD flags,
+        DISPPARAMS *params, VARIANT *res, EXCEPINFO *ei, IServiceProvider *caller)
 {
     HTMLFormElement *This = impl_from_DispatchEx(dispex);
     IDispatch *ret;
@@ -944,16 +1061,16 @@ static HRESULT HTMLFormElement_invoke(DispatchEx *dispex, DISPID id, LCID lcid, 
     return S_OK;
 }
 
-static HRESULT HTMLFormElement_handle_event(DispatchEx *dispex, DOMEvent *event, BOOL *prevent_default)
+static HRESULT HTMLFormElement_handle_event(DispatchEx *dispex, eventid_t eid, nsIDOMEvent *event, BOOL *prevent_default)
 {
     HTMLFormElement *This = impl_from_DispatchEx(dispex);
 
-    if(event->event_id == EVENTID_SUBMIT) {
+    if(eid == EVENTID_SUBMIT) {
         *prevent_default = TRUE;
         return IHTMLFormElement_submit(&This->IHTMLFormElement_iface);
     }
 
-    return HTMLElement_handle_event(&This->element.node.event_target.dispex, event, prevent_default);
+    return HTMLElement_handle_event(&This->element.node.event_target.dispex, eid, event, prevent_default);
 }
 
 static const NodeImplVtbl HTMLFormElementImplVtbl = {
@@ -984,12 +1101,26 @@ static const tid_t HTMLFormElement_iface_tids[] = {
     0
 };
 
-static dispex_static_data_t HTMLFormElement_dispex = {
+static void HTMLFormElement_init_dispex_info(dispex_data_t *info, compat_mode_t mode)
+{
+    static const dispex_hook_t form_private_ie9_hooks[] = {
+        {DISPID_IWINEHTMLFORMPRIVATE_NOVALIDATE},
+        {DISPID_IWINEHTMLFORMPRIVATE_CHECKVALIDITY},
+        {DISPID_UNKNOWN}
+    };
+    HTMLElement_init_dispex_info(info, mode);
+
+    if(mode >= COMPAT_MODE_IE9)
+        dispex_info_add_interface(info, IWineHTMLFormPrivate_tid, mode < COMPAT_MODE_IE10 ? form_private_ie9_hooks : NULL);
+}
+
+dispex_static_data_t HTMLFormElement_dispex = {
     "HTMLFormElement",
     &HTMLFormElement_event_target_vtbl.dispex_vtbl,
+    PROTO_ID_HTMLFormElement,
     DispHTMLFormElement_tid,
     HTMLFormElement_iface_tids,
-    HTMLElement_init_dispex_info
+    HTMLFormElement_init_dispex_info
 };
 
 HRESULT HTMLFormElement_Create(HTMLDocumentNode *doc, nsIDOMElement *nselem, HTMLElement **elem)
@@ -1002,6 +1133,7 @@ HRESULT HTMLFormElement_Create(HTMLDocumentNode *doc, nsIDOMElement *nselem, HTM
         return E_OUTOFMEMORY;
 
     ret->IHTMLFormElement_iface.lpVtbl = &HTMLFormElementVtbl;
+    ret->IWineHTMLFormPrivate_iface.lpVtbl = &WineHTMLFormPrivateVtbl;
     ret->element.node.vtbl = &HTMLFormElementImplVtbl;
 
     HTMLElement_Init(&ret->element, doc, nselem, &HTMLFormElement_dispex);

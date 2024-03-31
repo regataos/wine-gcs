@@ -31,7 +31,6 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
-#include <libgen.h>
 #include <poll.h>
 #ifdef HAVE_LINUX_MAJOR_H
 #include <linux/major.h>
@@ -104,14 +103,49 @@
 #include "winioctl.h"
 #include "ddk/wdm.h"
 
-#if !defined(O_SYMLINK) && defined(O_PATH)
-# define O_SYMLINK (O_NOFOLLOW | O_PATH)
-#endif
-
 #if defined(HAVE_SYS_EPOLL_H) && defined(HAVE_EPOLL_CREATE)
 # include <sys/epoll.h>
 # define USE_EPOLL
-#endif /* HAVE_SYS_EPOLL_H && HAVE_EPOLL_CREATE */
+#elif defined(linux) && defined(__i386__) && defined(HAVE_STDINT_H)
+# define USE_EPOLL
+# define EPOLLIN POLLIN
+# define EPOLLOUT POLLOUT
+# define EPOLLERR POLLERR
+# define EPOLLHUP POLLHUP
+# define EPOLL_CTL_ADD 1
+# define EPOLL_CTL_DEL 2
+# define EPOLL_CTL_MOD 3
+
+typedef union epoll_data
+{
+  void *ptr;
+  int fd;
+  uint32_t u32;
+  uint64_t u64;
+} epoll_data_t;
+
+struct epoll_event
+{
+  uint32_t events;
+  epoll_data_t data;
+};
+
+static inline int epoll_create( int size )
+{
+    return syscall( 254 /*NR_epoll_create*/, size );
+}
+
+static inline int epoll_ctl( int epfd, int op, int fd, const struct epoll_event *event )
+{
+    return syscall( 255 /*NR_epoll_ctl*/, epfd, op, fd, event );
+}
+
+static inline int epoll_wait( int epfd, struct epoll_event *events, int maxevents, int timeout )
+{
+    return syscall( 256 /*NR_epoll_wait*/, epfd, events, maxevents, timeout );
+}
+
+#endif /* linux && __i386__ && HAVE_STDINT_H */
 
 #if defined(HAVE_PORT_H) && defined(HAVE_PORT_CREATE)
 # include <port.h>
@@ -128,10 +162,10 @@
 /* closed_fd is used to keep track of the unix fd belonging to a closed fd object */
 struct closed_fd
 {
-    struct list     entry;      /* entry in inode closed list */
-    int             unix_fd;    /* the unix file descriptor */
-    unsigned int    disp_flags; /* the disposition flags */
-    char           *unix_name;  /* name to unlink on close, points to parent fd unix_name */
+    struct list entry;       /* entry in inode closed list */
+    int         unix_fd;     /* the unix file descriptor */
+    int         unlink;      /* whether to unlink on close: -1 - implicit FILE_DELETE_ON_CLOSE, 1 - explicit disposition */
+    char       *unix_name;   /* name to unlink on close, points to parent fd unix_name */
 };
 
 struct fd
@@ -143,8 +177,6 @@ struct fd
     struct closed_fd    *closed;      /* structure to store the unix fd at destroy time */
     struct object       *user;        /* object using this file descriptor */
     struct list          locks;       /* list of locks on this fd */
-    client_ptr_t         map_addr;    /* default mapping address for PE files */
-    mem_size_t           map_size;    /* mapping size for PE files */
     unsigned int         access;      /* file access (FILE_READ_DATA etc.) */
     unsigned int         options;     /* file options (FILE_DELETE_ON_CLOSE, FILE_SYNCHRONOUS...) */
     unsigned int         sharing;     /* file sharing mode */
@@ -1083,41 +1115,9 @@ static void device_destroy( struct object *obj )
     list_remove( &device->entry );  /* remove it from the hash table */
 }
 
-static int is_reparse_dir( const char *path, int *is_dir );
-static int rmdir_recursive( int dir_fd, const char *pathname );
 
 /****************************************************************/
 /* inode functions */
-
-static void unlink_closed_fd( struct inode *inode, struct closed_fd *fd )
-{
-    /* make sure it is still the same file */
-    struct stat st;
-    if (!lstat( fd->unix_name, &st ) && st.st_dev == inode->device->dev && st.st_ino == inode->ino)
-    {
-        int is_reparse_point = (is_reparse_dir( fd->unix_name, NULL ) == 0);
-        if (S_ISDIR(st.st_mode)) rmdir( fd->unix_name );
-        else unlink( fd->unix_name );
-        /* remove reparse point metadata (if applicable) */
-        if (is_reparse_point)
-        {
-            char tmp[PATH_MAX], metadata_path[PATH_MAX], *p;
-
-            strcpy( tmp, fd->unix_name );
-            p = dirname( tmp );
-            if (p != tmp ) strcpy( tmp, p );
-            strcpy( metadata_path, tmp );
-            strcat( metadata_path, "/.REPARSE_POINT/" );
-            strcpy( tmp, fd->unix_name );
-            p = basename( tmp );
-            if (p != tmp) strcpy( tmp, p );
-            strcat( metadata_path, tmp );
-
-            rmdir_recursive( AT_FDCWD, metadata_path );
-            rmdir( dirname( metadata_path ) );
-        }
-    }
-}
 
 /* close all pending file descriptors in the closed list */
 static void inode_close_pending( struct inode *inode, int keep_unlinks )
@@ -1134,9 +1134,7 @@ static void inode_close_pending( struct inode *inode, int keep_unlinks )
             close( fd->unix_fd );
             fd->unix_fd = -1;
         }
-
-        /* get rid of it unless there's an unlink pending on that file */
-        if (!keep_unlinks || !(fd->disp_flags & FILE_DISPOSITION_DELETE))
+        if (!keep_unlinks || !fd->unlink)  /* get rid of it unless there's an unlink pending on that file */
         {
             list_remove( ptr );
             free( fd->unix_name );
@@ -1154,59 +1152,6 @@ static void inode_dump( struct object *obj, int verbose )
     fprintf( stderr, "\n" );
 }
 
-/* recursively delete everything in a directory */
-static int rmdir_recursive( int dir_fd, const char *pathname )
-{
-    int ret = 0, tmp_fd;
-    struct dirent *p;
-    struct stat st;
-    DIR *d;
-
-    tmp_fd = openat( dir_fd, pathname, O_DIRECTORY|O_RDONLY|O_NONBLOCK|O_CLOEXEC );
-    d = fdopendir( tmp_fd );
-    if (!d)
-    {
-        close( tmp_fd );
-        return -1;
-    }
-
-    while (!ret && (p = readdir( d )))
-    {
-        if (!strcmp( p->d_name, "." ) || !strcmp( p->d_name, ".." ))
-            continue;
-        if (!fstatat( dirfd(d), p->d_name, &st, AT_SYMLINK_NOFOLLOW ))
-        {
-            if (S_ISDIR( st.st_mode ))
-                ret = rmdir_recursive( dirfd(d), p->d_name );
-            else
-                ret = unlinkat( dirfd(d), p->d_name, 0 );
-        }
-    }
-    closedir( d );
-    return unlinkat( dir_fd, pathname, AT_REMOVEDIR );
-}
-
-/* determine whether a reparse point is meant to be a directory or a file */
-static int is_reparse_dir( const char *path, int *is_dir )
-{
-    char link_path[PATH_MAX], *p;
-    int ret;
-
-    if ((ret = readlink( path, link_path, sizeof(link_path) )) < 0)
-        return ret;
-    /* confirm that this file is a reparse point */
-    if (strncmp( link_path, ".REPARSE_POINT/", 15) != 0)
-        return -1;
-    /* skip past the reparse point indicator and the filename */
-    p = &link_path[15];
-    if ((p = strchr( p, '/' )) == NULL)
-        return -1;
-    p++;
-    /* read the flag indicating whether this reparse point is a directory */
-    if (is_dir) *is_dir = (*p == '.');
-    return 0;
-}
-
 static void inode_destroy( struct object *obj )
 {
     struct inode *inode = (struct inode *)obj;
@@ -1222,8 +1167,16 @@ static void inode_destroy( struct object *obj )
         struct closed_fd *fd = LIST_ENTRY( ptr, struct closed_fd, entry );
         list_remove( ptr );
         if (fd->unix_fd != -1) close( fd->unix_fd );
-        if (fd->disp_flags & FILE_DISPOSITION_DELETE)
-            unlink_closed_fd( inode, fd );
+        if (fd->unlink)
+        {
+            /* make sure it is still the same file */
+            struct stat st;
+            if (!stat( fd->unix_name, &st ) && st.st_dev == inode->device->dev && st.st_ino == inode->ino)
+            {
+                if (S_ISDIR(st.st_mode)) rmdir( fd->unix_name );
+                else unlink( fd->unix_name );
+            }
+        }
         free( fd->unix_name );
         free( fd );
     }
@@ -1270,18 +1223,8 @@ static void inode_add_closed_fd( struct inode *inode, struct closed_fd *fd )
     {
         list_add_head( &inode->closed, &fd->entry );
     }
-    else if ((fd->disp_flags & FILE_DISPOSITION_DELETE) &&
-        (fd->disp_flags & FILE_DISPOSITION_POSIX_SEMANTICS))
+    else if (fd->unlink)  /* close the fd but keep the structure around for unlink */
     {
-        /* close the fd and unlink it at once */
-        if (fd->unix_fd != -1) close( fd->unix_fd );
-        unlink_closed_fd( inode, fd );
-        free( fd->unix_name );
-        free( fd );
-    }
-    else if (fd->disp_flags & FILE_DISPOSITION_DELETE)
-    {
-        /* close the fd but keep the structure around for unlink */
         if (fd->unix_fd != -1) close( fd->unix_fd );
         fd->unix_fd = -1;
         list_add_head( &inode->closed, &fd->entry );
@@ -1629,7 +1572,7 @@ static void fd_dump( struct object *obj, int verbose )
 {
     struct fd *fd = (struct fd *)obj;
     fprintf( stderr, "Fd unix_fd=%d user=%p options=%08x", fd->unix_fd, fd->user, fd->options );
-    if (fd->inode) fprintf( stderr, " inode=%p disp_flags=%x", fd->inode, fd->closed->disp_flags );
+    if (fd->inode) fprintf( stderr, " inode=%p unlink=%d", fd->inode, fd->closed->unlink );
     fprintf( stderr, "\n" );
 }
 
@@ -1641,7 +1584,6 @@ static void fd_destroy( struct object *obj )
     free_async_queue( &fd->write_q );
     free_async_queue( &fd->wait_q );
 
-    if (fd->map_addr) free_map_addr( fd->map_addr, fd->map_size );
     if (fd->completion) release_object( fd->completion );
     remove_fd_locks( fd );
     list_remove( &fd->inode_entry );
@@ -1660,6 +1602,7 @@ static void fd_destroy( struct object *obj )
 
     if (do_esync())
         close( fd->esync_fd );
+    if (fd->fsync_idx) fsync_free_shm_idx( fd->fsync_idx );
 }
 
 /* check if the desired access is possible without violating */
@@ -1746,7 +1689,7 @@ static inline void unmount_fd( struct fd *fd )
     fd->unix_fd = -1;
     fd->no_fd_status = STATUS_VOLUME_DISMOUNTED;
     fd->closed->unix_fd = -1;
-    fd->closed->disp_flags = 0;
+    fd->closed->unlink = 0;
 
     /* stop using Unix locks on this fd (existing locks have been removed by close) */
     fd->fs_locks = 0;
@@ -1763,8 +1706,6 @@ static struct fd *alloc_fd_object(void)
     fd->user       = NULL;
     fd->inode      = NULL;
     fd->closed     = NULL;
-    fd->map_addr   = 0;
-    fd->map_size   = 0;
     fd->access     = 0;
     fd->options    = 0;
     fd->sharing    = 0;
@@ -1811,8 +1752,6 @@ struct fd *alloc_pseudo_fd( const struct fd_ops *fd_user_ops, struct object *use
     fd->user       = user;
     fd->inode      = NULL;
     fd->closed     = NULL;
-    fd->map_addr   = 0;
-    fd->map_size   = 0;
     fd->access     = 0;
     fd->options    = options;
     fd->sharing    = 0;
@@ -1877,7 +1816,7 @@ struct fd *dup_fd_object( struct fd *orig, unsigned int access, unsigned int sha
             goto failed;
         }
         closed->unix_fd = fd->unix_fd;
-        closed->disp_flags = 0;
+        closed->unlink = 0;
         closed->unix_name = fd->unix_name;
         fd->closed = closed;
         fd->inode = (struct inode *)grab_object( orig->inode );
@@ -1982,38 +1921,6 @@ void get_nt_name( struct fd *fd, struct unicode_str *name )
     name->len = fd->nt_namelen;
 }
 
-/* check whether a file is a symlink */
-int check_symlink( char *name )
-{
-    struct stat st;
-
-    lstat( name, &st );
-    return S_ISLNK( st.st_mode );
-}
-
-/* if flags does not contain O_SYMLINK then just use realpath */
-/* otherwise return the real path of the parent and append the filename of the symlink */
-char *normalize_path( const char *path, int flags )
-{
-    char tmp[PATH_MAX], resolved_path[PATH_MAX], *p;
-
-#if defined(O_SYMLINK)
-    if ((flags & O_SYMLINK) != O_SYMLINK)
-        return realpath( path, NULL );
-#endif
-
-    strcpy( tmp, path );
-    p = dirname( tmp );
-    if (p != tmp ) strcpy( tmp, p );
-    realpath( tmp, resolved_path );
-    strcat( resolved_path, "/" );
-    strcpy( tmp, path );
-    p = basename( tmp );
-    if (p != tmp) strcpy( tmp, p );
-    strcat( resolved_path, tmp );
-    return strdup( resolved_path );
-}
-
 /* open() wrapper that returns a struct fd with no fd user set */
 struct fd *open_fd( struct fd *root, const char *name, struct unicode_str nt_name,
                     int flags, mode_t *mode, unsigned int access,
@@ -2025,6 +1932,8 @@ struct fd *open_fd( struct fd *root, const char *name, struct unicode_str nt_nam
     int root_fd = -1;
     int rw_mode;
     char *path;
+    int do_chmod = 0;
+    int created = (flags & O_CREAT);
 
     if (((options & FILE_DELETE_ON_CLOSE) && !(access & DELETE)) ||
         ((options & FILE_DIRECTORY_FILE) && (flags & O_TRUNC)))
@@ -2056,13 +1965,19 @@ struct fd *open_fd( struct fd *root, const char *name, struct unicode_str nt_nam
     /* create the directory if needed */
     if ((options & FILE_DIRECTORY_FILE) && (flags & O_CREAT))
     {
-        if (mkdir( name, *mode ) == -1)
+        if (mkdir( name, *mode | S_IRUSR ) != -1)
+        {
+            /* remove S_IRUSR later, after we have opened the directory */
+            do_chmod = !(*mode & S_IRUSR);
+        }
+        else
         {
             if (errno != EEXIST || (flags & O_EXCL))
             {
                 file_set_error();
                 goto error;
             }
+            created = 0;
         }
         flags &= ~(O_CREAT | O_EXCL | O_TRUNC);
     }
@@ -2074,15 +1989,6 @@ struct fd *open_fd( struct fd *root, const char *name, struct unicode_str nt_nam
     }
     else rw_mode = O_RDONLY;
 
-    if ((path = dup_fd_name( root, name )))
-    {
-#if defined(O_SYMLINK)
-        if (check_symlink( path ) && (options & FILE_OPEN_REPARSE_POINT) && !(flags & O_CREAT))
-            flags |= O_SYMLINK;
-#endif
-        free( path );
-    }
-
     if ((fd->unix_fd = open( name, rw_mode | (flags & ~O_TRUNC), *mode )) == -1)
     {
         /* if we tried to open a directory for write access, retry read-only */
@@ -2090,6 +1996,23 @@ struct fd *open_fd( struct fd *root, const char *name, struct unicode_str nt_nam
         {
             if ((access & FILE_UNIX_WRITE_ACCESS) || (flags & O_CREAT))
                 fd->unix_fd = open( name, O_RDONLY | (flags & ~(O_TRUNC | O_CREAT | O_EXCL)), *mode );
+        }
+        else if (errno == EACCES)
+        {
+            /* try to change permissions temporarily to open a file descriptor */
+            if (!(access & ((FILE_UNIX_WRITE_ACCESS | FILE_UNIX_READ_ACCESS | DELETE) & ~FILE_WRITE_ATTRIBUTES)) &&
+                !stat( name, &st ) && st.st_uid == getuid() &&
+                !chmod( name, st.st_mode | S_IRUSR ))
+            {
+                fd->unix_fd = open( name, O_RDONLY | (flags & ~(O_TRUNC | O_CREAT | O_EXCL)), *mode );
+                *mode = st.st_mode;
+                do_chmod = 1;
+            }
+            else
+            {
+                set_error( STATUS_ACCESS_DENIED );
+                goto error;
+            }
         }
 
         if (fd->unix_fd == -1)
@@ -2099,6 +2022,8 @@ struct fd *open_fd( struct fd *root, const char *name, struct unicode_str nt_nam
                 set_error( STATUS_OBJECT_NAME_INVALID );
             else
                 file_set_error();
+
+            if (do_chmod) chmod( name, *mode );
             goto error;
         }
     }
@@ -2107,22 +2032,22 @@ struct fd *open_fd( struct fd *root, const char *name, struct unicode_str nt_nam
     fd->unix_name = NULL;
     if ((path = dup_fd_name( root, name )))
     {
-        fd->unix_name = normalize_path( path, flags );
+        fd->unix_name = realpath( path, NULL );
         free( path );
     }
 
     closed_fd->unix_fd = fd->unix_fd;
-    closed_fd->disp_flags = 0;
+    closed_fd->unlink = 0;
     closed_fd->unix_name = fd->unix_name;
+    if (do_chmod) chmod( name, *mode );
     fstat( fd->unix_fd, &st );
     *mode = st.st_mode;
 
     /* only bother with an inode for normal files and directories */
-    if (S_ISREG(st.st_mode) || S_ISDIR(st.st_mode) || S_ISLNK(st.st_mode))
+    if (S_ISREG(st.st_mode) || S_ISDIR(st.st_mode))
     {
         unsigned int err;
         struct inode *inode = get_inode( st.st_dev, st.st_ino, fd->unix_fd );
-        int is_link = S_ISLNK(st.st_mode), is_dir;
 
         if (!inode)
         {
@@ -2137,17 +2062,13 @@ struct fd *open_fd( struct fd *root, const char *name, struct unicode_str nt_nam
         list_add_head( &inode->open, &fd->inode_entry );
         closed_fd = NULL;
 
-        is_dir = S_ISDIR(st.st_mode);
-        if (is_link)
-            is_reparse_dir(fd->unix_name, &is_dir);
-
         /* check directory options */
-        if ((options & FILE_DIRECTORY_FILE) && !is_dir)
+        if ((options & FILE_DIRECTORY_FILE) && !S_ISDIR(st.st_mode))
         {
             set_error( STATUS_NOT_A_DIRECTORY );
             goto error;
         }
-        if ((options & FILE_NON_DIRECTORY_FILE) && is_dir)
+        if ((options & FILE_NON_DIRECTORY_FILE) && S_ISDIR(st.st_mode))
         {
             set_error( STATUS_FILE_IS_A_DIRECTORY );
             goto error;
@@ -2159,15 +2080,14 @@ struct fd *open_fd( struct fd *root, const char *name, struct unicode_str nt_nam
         }
 
         /* can't unlink files if we don't have permission to access */
-        if ((options & FILE_DELETE_ON_CLOSE) && !(flags & O_CREAT) &&
+        if ((options & FILE_DELETE_ON_CLOSE) && !created &&
             !(st.st_mode & (S_IWUSR | S_IWGRP | S_IWOTH)))
         {
             set_error( STATUS_CANNOT_DELETE );
             goto error;
         }
 
-        fd->closed->disp_flags = (options & FILE_DELETE_ON_CLOSE) ?
-            FILE_DISPOSITION_DELETE : 0;
+        fd->closed->unlink = (options & FILE_DELETE_ON_CLOSE) ? -1 : 0;
         if (flags & O_TRUNC)
         {
             if (S_ISDIR(st.st_mode))
@@ -2229,6 +2149,45 @@ struct fd *create_anonymous_fd( const struct fd_ops *fd_user_ops, int unix_fd, s
     return NULL;
 }
 
+void set_unix_name_of_fd( struct fd *fd, const struct stat *fd_st )
+{
+#ifdef __linux__
+    static const char procfs_fmt[] = "/proc/self/fd/%d";
+
+    char path[PATH_MAX], procfs_path[sizeof(procfs_fmt) - 2 /* %d */ + 11];
+    struct stat path_st;
+    ssize_t len;
+
+    sprintf( procfs_path, procfs_fmt, fd->unix_fd );
+    len = readlink( procfs_path, path, sizeof(path) );
+    if (len == -1 || len >= sizeof(path) )
+        return;
+    path[len] = '\0';
+
+    /* Make sure it's an absolute path, has at least one hardlink, and the same inode */
+    if (path[0] != '/' || stat( path, &path_st ) || path_st.st_nlink < 1 ||
+        path_st.st_dev != fd_st->st_dev || path_st.st_ino != fd_st->st_ino)
+        return;
+
+    if (!(fd->unix_name = mem_alloc( len + 1 )))
+        return;
+    memcpy( fd->unix_name, path, len + 1 );
+
+#elif defined(F_GETPATH)
+    char path[PATH_MAX];
+    size_t size;
+
+    if (fcntl( fd->unix_fd, F_GETPATH, path ) == -1 || path[0] != '/')
+        return;
+
+    size = strlen(path) + 1;
+    if (!(fd->unix_name = mem_alloc( size )))
+        return;
+    memcpy( fd->unix_name, path, size );
+
+#endif
+}
+
 /* retrieve the object that is using an fd */
 void *get_fd_user( struct fd *fd )
 {
@@ -2258,20 +2217,6 @@ int get_unix_fd( struct fd *fd )
 {
     if (fd->unix_fd == -1) set_error( fd->no_fd_status );
     return fd->unix_fd;
-}
-
-/* retrieve the suggested mapping address for the fd */
-client_ptr_t get_fd_map_address( struct fd *fd )
-{
-    return fd->map_addr;
-}
-
-/* set the suggested mapping address for the fd */
-void set_fd_map_address( struct fd *fd, client_ptr_t addr, mem_size_t size )
-{
-    assert( !fd->map_addr );
-    fd->map_addr = addr;
-    fd->map_size = size;
 }
 
 /* check if two file descriptors point to the same file */
@@ -2618,7 +2563,6 @@ static struct fd *get_handle_fd_obj( struct process *process, obj_handle_t handl
 
 static int is_dir_empty( int fd )
 {
-    int dir_fd;
     DIR *dir;
     int empty;
     struct dirent *de;
@@ -2626,13 +2570,8 @@ static int is_dir_empty( int fd )
     if ((fd = dup( fd )) == -1)
         return -1;
 
-    /* use openat() so that if 'fd' was opened with O_SYMLINK we can still check the contents */
-    dir_fd = openat( fd, ".", O_RDONLY | O_DIRECTORY | O_NONBLOCK );
-    if (dir_fd == -1)
-        return -1;
-    if (!(dir = fdopendir( dir_fd )))
+    if (!(dir = fdopendir( fd )))
     {
-        close( dir_fd );
         close( fd );
         return -1;
     }
@@ -2644,12 +2583,11 @@ static int is_dir_empty( int fd )
         empty = 0;
     }
     closedir( dir );
-    close( dir_fd );
     return empty;
 }
 
 /* set disposition for the fd */
-static void set_fd_disposition( struct fd *fd, unsigned int flags )
+static void set_fd_disposition( struct fd *fd, int unlink )
 {
     struct stat st;
 
@@ -2665,7 +2603,7 @@ static void set_fd_disposition( struct fd *fd, unsigned int flags )
         return;
     }
 
-    if (flags & FILE_DISPOSITION_DELETE)
+    if (unlink)
     {
         struct fd *fd_ptr;
 
@@ -2683,10 +2621,9 @@ static void set_fd_disposition( struct fd *fd, unsigned int flags )
             file_set_error();
             return;
         }
-        if (S_ISREG( st.st_mode ) || S_ISLNK( st.st_mode ))  /* can't unlink files we don't have permission to write */
+        if (S_ISREG( st.st_mode ))  /* can't unlink files we don't have permission to write */
         {
-            if (!(flags & FILE_DISPOSITION_IGNORE_READONLY_ATTRIBUTE) &&
-                !(st.st_mode & (S_IWUSR | S_IWGRP | S_IWOTH)))
+            if (!(st.st_mode & (S_IWUSR | S_IWGRP | S_IWOTH)))
             {
                 set_error( STATUS_CANNOT_DELETE );
                 return;
@@ -2711,22 +2648,18 @@ static void set_fd_disposition( struct fd *fd, unsigned int flags )
         }
     }
 
-    if (flags & FILE_DISPOSITION_ON_CLOSE)
-        fd->options &= ~FILE_DELETE_ON_CLOSE;
-
-    fd->closed->disp_flags =
-        (flags & (FILE_DISPOSITION_DELETE | FILE_DISPOSITION_POSIX_SEMANTICS)) |
-        ((fd->options & FILE_DELETE_ON_CLOSE) ? FILE_DISPOSITION_DELETE : 0);
+    fd->closed->unlink = unlink ? 1 : 0;
+    if (fd->options & FILE_DELETE_ON_CLOSE)
+        fd->closed->unlink = -1;
 }
 
 /* set new name for the fd */
 static void set_fd_name( struct fd *fd, struct fd *root, const char *nameptr, data_size_t len,
-                         struct unicode_str nt_name, int create_link, unsigned int flags )
+                         struct unicode_str nt_name, int create_link, int replace )
 {
     struct inode *inode;
     struct stat st, st2;
     char *name;
-    const unsigned int replace = flags & FILE_RENAME_REPLACE_IF_EXISTS;
 
     if (!fd->inode || !fd->unix_name)
     {
@@ -2767,7 +2700,7 @@ static void set_fd_name( struct fd *fd, struct fd *root, const char *nameptr, da
         goto failed;
     }
 
-    if (!lstat( name, &st ))
+    if (!stat( name, &st ))
     {
         if (!fstat( fd->unix_fd, &st2 ) && st.st_ino == st2.st_ino && st.st_dev == st2.st_dev)
         {
@@ -2783,15 +2716,7 @@ static void set_fd_name( struct fd *fd, struct fd *root, const char *nameptr, da
         }
 
         /* can't replace directories or special files */
-        if (!S_ISREG( st.st_mode ) && !S_ISLNK( st.st_mode ))
-        {
-            set_error( STATUS_ACCESS_DENIED );
-            goto failed;
-        }
-
-        /* read-only files cannot be replaced */
-        if (!(st.st_mode & (S_IWUSR | S_IWGRP | S_IWOTH)) &&
-            !(flags & FILE_RENAME_IGNORE_READONLY_ATTRIBUTE))
+        if (!S_ISREG( st.st_mode ))
         {
             set_error( STATUS_ACCESS_DENIED );
             goto failed;
@@ -2849,8 +2774,6 @@ static void set_fd_name( struct fd *fd, struct fd *root, const char *nameptr, da
     fd->nt_name = dup_nt_name( root, nt_name, &fd->nt_namelen );
     free( fd->unix_name );
     fd->closed->unix_name = fd->unix_name = realpath( name, NULL );
-    if (!fd->unix_name)
-        fd->closed->unix_name = fd->unix_name = dup_fd_name( root, name ); /* dangling symlink */
     free( name );
     if (!fd->unix_name)
         set_error( STATUS_NO_MEMORY );
@@ -3156,7 +3079,7 @@ DECL_HANDLER(set_fd_disp_info)
     struct fd *fd = get_handle_fd_obj( current->process, req->handle, DELETE );
     if (fd)
     {
-        set_fd_disposition( fd, req->flags );
+        set_fd_disposition( fd, req->unlink );
         release_object( fd );
     }
 }
@@ -3188,7 +3111,7 @@ DECL_HANDLER(set_fd_name_info)
     if ((fd = get_handle_fd_obj( current->process, req->handle, 0 )))
     {
         set_fd_name( fd, root_fd, (const char *)get_req_data() + req->namelen,
-                     get_req_data_size() - req->namelen, nt_name, req->link, req->flags );
+                     get_req_data_size() - req->namelen, nt_name, req->link, req->replace );
         release_object( fd );
     }
     if (root_fd) release_object( root_fd );

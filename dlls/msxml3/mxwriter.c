@@ -189,7 +189,6 @@ typedef struct
     BSTR element;
 
     IStream *dest;
-    IXMLDOMDocument *dest_doc;
 
     output_buffer buffer;
 } mxwriter;
@@ -238,7 +237,7 @@ static HRESULT mxattributes_grow(mxattributes *This)
     if (This->length < This->allocated) return S_OK;
 
     This->allocated *= 2;
-    This->attr = realloc(This->attr, This->allocated * sizeof(mxattribute));
+    This->attr = heap_realloc(This->attr, This->allocated*sizeof(mxattribute));
 
     return This->attr ? S_OK : E_OUTOFMEMORY;
 }
@@ -270,7 +269,7 @@ static xml_encoding parse_encoding_name(const WCHAR *encoding)
 static HRESULT init_encoded_buffer(encoded_buffer *buffer)
 {
     const int initial_len = 0x1000;
-    buffer->data = malloc(initial_len);
+    buffer->data = heap_alloc(initial_len);
     if (!buffer->data) return E_OUTOFMEMORY;
 
     memset(buffer->data, 0, 4);
@@ -282,7 +281,7 @@ static HRESULT init_encoded_buffer(encoded_buffer *buffer)
 
 static void free_encoded_buffer(encoded_buffer *buffer)
 {
-    free(buffer->data);
+    heap_free(buffer->data);
 }
 
 static HRESULT get_code_page(xml_encoding encoding, UINT *cp)
@@ -329,7 +328,7 @@ static void free_output_buffer(output_buffer *buffer)
     {
         list_remove(&cur->entry);
         free_encoded_buffer(cur);
-        free(cur);
+        heap_free(cur);
     }
 }
 
@@ -409,13 +408,13 @@ static HRESULT write_output_buffer(mxwriter *writer, const WCHAR *data, int len)
                     char *mb;
 
                     /* if current chunk is larger than total buffer size, convert it at once using temporary allocated buffer */
-                    mb = malloc(length);
+                    mb = heap_alloc(length);
                     if (!mb)
                         return E_OUTOFMEMORY;
 
                     length = WideCharToMultiByte(buffer->code_page, 0, data, src_len, mb, length, NULL, NULL);
                     IStream_Write(writer->dest, mb, length, &written);
-                    free(mb);
+                    heap_free(mb);
                 }
             }
         }
@@ -453,11 +452,11 @@ static HRESULT write_output_buffer(mxwriter *writer, const WCHAR *data, int len)
             /* alloc new block if needed and retry */
             if (src_len)
             {
-                encoded_buffer *next = malloc(sizeof(*next));
+                encoded_buffer *next = heap_alloc(sizeof(*next));
                 HRESULT hr;
 
                 if (FAILED(hr = init_encoded_buffer(next))) {
-                    free(next);
+                    heap_free(next);
                     return hr;
                 }
 
@@ -484,13 +483,13 @@ static void close_output_buffer(mxwriter *writer)
 {
     encoded_buffer *cur, *cur2;
 
-    free(writer->buffer.encoded.data);
+    heap_free(writer->buffer.encoded.data);
 
     LIST_FOR_EACH_ENTRY_SAFE(cur, cur2, &writer->buffer.blocks, encoded_buffer, entry)
     {
         list_remove(&cur->entry);
         free_encoded_buffer(cur);
-        free(cur);
+        heap_free(cur);
     }
 
     init_encoded_buffer(&writer->buffer.encoded);
@@ -522,7 +521,7 @@ static WCHAR *get_escaped_string(const WCHAR *str, escape_mode mode, int *len)
 
     /* default buffer size to something if length is unknown */
     conv_len = max(2**len, default_alloc);
-    ptr = ret = malloc(conv_len * sizeof(WCHAR));
+    ptr = ret = heap_alloc(conv_len*sizeof(WCHAR));
 
     while (p)
     {
@@ -530,7 +529,7 @@ static WCHAR *get_escaped_string(const WCHAR *str, escape_mode mode, int *len)
         {
             int written = ptr - ret;
             conv_len *= 2;
-            ptr = ret = realloc(ret, conv_len * sizeof(WCHAR));
+            ptr = ret = heap_realloc(ret, conv_len*sizeof(WCHAR));
             ptr += written;
         }
 
@@ -851,12 +850,11 @@ static ULONG WINAPI mxwriter_Release(IMXWriter *iface)
         free_output_buffer(&This->buffer);
 
         if (This->dest) IStream_Release(This->dest);
-        if (This->dest_doc) IXMLDOMDocument_Release(This->dest_doc);
         SysFreeString(This->version);
         SysFreeString(This->encoding);
 
         SysFreeString(This->element);
-        free(This);
+        heap_free(This);
     }
 
     return ref;
@@ -916,8 +914,6 @@ static HRESULT WINAPI mxwriter_put_output(IMXWriter *iface, VARIANT dest)
     {
         if (This->dest) IStream_Release(This->dest);
         This->dest = NULL;
-        if (This->dest_doc) IXMLDOMDocument_Release(This->dest_doc);
-        This->dest_doc = NULL;
         close_output_buffer(This);
         break;
     }
@@ -933,31 +929,10 @@ static HRESULT WINAPI mxwriter_put_output(IMXWriter *iface, VARIANT dest)
 
             if (This->dest) IStream_Release(This->dest);
             This->dest = stream;
-            if (This->dest_doc) IXMLDOMDocument_Release(This->dest_doc);
-            This->dest_doc = NULL;
             break;
         }
 
         FIXME("unhandled interface type for VT_UNKNOWN destination\n");
-        return E_NOTIMPL;
-    }
-    case VT_DISPATCH:
-    {
-        IXMLDOMDocument *doc;
-
-        hr = IDispatch_QueryInterface(V_DISPATCH(&dest), &IID_IXMLDOMDocument, (void**)&doc);
-        if (hr == S_OK)
-        {
-            close_output_buffer(This);
-
-            if (This->dest) IStream_Release(This->dest);
-            This->dest = NULL;
-            if (This->dest_doc) IXMLDOMDocument_Release(This->dest_doc);
-            This->dest_doc = doc;
-            break;
-        }
-
-        FIXME("unhandled interface type for VT_DISPATCH destination\n");
         return E_NOTIMPL;
     }
     default:
@@ -1226,7 +1201,7 @@ static HRESULT WINAPI SAXContentHandler_putDocumentLocator(
 {
     mxwriter *This = impl_from_ISAXContentHandler( iface );
     FIXME("(%p)->(%p)\n", This, locator);
-    return S_OK;
+    return E_NOTIMPL;
 }
 
 static HRESULT WINAPI SAXContentHandler_startDocument(ISAXContentHandler *iface)
@@ -1264,21 +1239,10 @@ static HRESULT WINAPI SAXContentHandler_startDocument(ISAXContentHandler *iface)
 
 static HRESULT WINAPI SAXContentHandler_endDocument(ISAXContentHandler *iface)
 {
-    HRESULT hr;
-    VARIANT dest;
-    VARIANT_BOOL success;
     mxwriter *This = impl_from_ISAXContentHandler( iface );
     TRACE("(%p)\n", This);
     This->prop_changed = FALSE;
-
-    hr = flush_output_buffer(This);
-    if (FAILED(hr)) return hr;
-
-    if (This->dest_doc) {
-        mxwriter_get_output(&This->IMXWriter_iface, &dest);
-        return IXMLDOMDocument_loadXML(This->dest_doc, V_BSTR(&dest), &success);
-    }
-    return S_OK;
+    return flush_output_buffer(This);
 }
 
 static HRESULT WINAPI SAXContentHandler_startPrefixMapping(
@@ -1317,7 +1281,7 @@ static void mxwriter_write_attribute(mxwriter *writer, const WCHAR *qname, int q
     {
         WCHAR *escaped = get_escaped_string(value, EscapeValue, &value_len);
         write_output_buffer_quoted(writer, escaped, value_len);
-        free(escaped);
+        heap_free(escaped);
     }
     else
         write_output_buffer_quoted(writer, value, value_len);
@@ -1456,7 +1420,7 @@ static HRESULT WINAPI SAXContentHandler_characters(
 
             escaped = get_escaped_string(chars, EscapeText, &len);
             write_output_buffer(This, escaped, len);
-            free(escaped);
+            heap_free(escaped);
         }
     }
 
@@ -2631,7 +2595,7 @@ HRESULT MXWriter_create(MSXML_VERSION version, void **ppObj)
 
     TRACE("(%p)\n", ppObj);
 
-    This = malloc(sizeof(*This));
+    This = heap_alloc( sizeof (*This) );
     if(!This)
         return E_OUTOFMEMORY;
 
@@ -2666,13 +2630,12 @@ HRESULT MXWriter_create(MSXML_VERSION version, void **ppObj)
     This->newline = FALSE;
 
     This->dest = NULL;
-    This->dest_doc = NULL;
 
     hr = init_output_buffer(This->xml_enc, &This->buffer);
     if (hr != S_OK) {
         SysFreeString(This->encoding);
         SysFreeString(This->version);
-        free(This);
+        heap_free(This);
         return hr;
     }
 
@@ -2750,8 +2713,8 @@ static ULONG WINAPI MXAttributes_Release(IMXAttributes *iface)
             SysFreeString(This->attr[i].value);
         }
 
-        free(This->attr);
-        free(This);
+        heap_free(This->attr);
+        heap_free(This);
     }
 
     return ref;
@@ -3596,7 +3559,7 @@ HRESULT SAXAttributes_create(MSXML_VERSION version, void **ppObj)
 
     TRACE("(%p)\n", ppObj);
 
-    This = malloc(sizeof(*This));
+    This = heap_alloc( sizeof (*This) );
     if( !This )
         return E_OUTOFMEMORY;
 
@@ -3607,7 +3570,7 @@ HRESULT SAXAttributes_create(MSXML_VERSION version, void **ppObj)
 
     This->class_version = version;
 
-    This->attr = malloc(default_count * sizeof(mxattribute));
+    This->attr = heap_alloc(default_count*sizeof(mxattribute));
     This->length = 0;
     This->allocated = default_count;
 

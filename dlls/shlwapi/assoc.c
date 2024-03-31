@@ -55,7 +55,8 @@ static BOOL SHLWAPI_ParamAToW(LPCSTR lpszParam, LPWSTR lpszBuff, DWORD dwLen,
     else
     {
       /* Create a new buffer big enough for the string */
-      *lpszOut = malloc(dwStrLen * sizeof(WCHAR));
+      *lpszOut = HeapAlloc(GetProcessHeap(), 0,
+                                   dwStrLen * sizeof(WCHAR));
       if (!*lpszOut)
         return FALSE;
     }
@@ -409,10 +410,10 @@ HRESULT WINAPI AssocQueryKeyA(ASSOCF cfFlags, ASSOCKEY assockey, LPCSTR pszAssoc
   }
 
   if (lpszAssocW != szAssocW)
-    free(lpszAssocW);
+    HeapFree(GetProcessHeap(), 0, lpszAssocW);
 
   if (lpszExtraW != szExtraW)
-    free(lpszExtraW);
+    HeapFree(GetProcessHeap(), 0, lpszExtraW);
 
   return hRet;
 }
@@ -484,7 +485,8 @@ HRESULT WINAPI AssocQueryStringA(ASSOCF cfFlags, ASSOCSTR str, LPCSTR pszAssoc,
     DWORD dwLenOut = *pcchOut;
 
     if (dwLenOut >= MAX_PATH)
-      lpszReturnW = malloc((dwLenOut + 1) * sizeof(WCHAR));
+      lpszReturnW = HeapAlloc(GetProcessHeap(), 0,
+                                      (dwLenOut + 1) * sizeof(WCHAR));
     else
       dwLenOut = ARRAY_SIZE(szReturnW);
 
@@ -501,14 +503,14 @@ HRESULT WINAPI AssocQueryStringA(ASSOCF cfFlags, ASSOCSTR str, LPCSTR pszAssoc,
 
       *pcchOut = dwLenOut;
       if (lpszReturnW != szReturnW)
-        free(lpszReturnW);
+        HeapFree(GetProcessHeap(), 0, lpszReturnW);
     }
   }
 
   if (lpszAssocW != szAssocW)
-    free(lpszAssocW);
+    HeapFree(GetProcessHeap(), 0, lpszAssocW);
   if (lpszExtraW != szExtraW)
-    free(lpszExtraW);
+    HeapFree(GetProcessHeap(), 0, lpszExtraW);
   return hRet;
 }
 
@@ -575,7 +577,8 @@ HRESULT WINAPI AssocQueryStringByKeyA(ASSOCF cfFlags, ASSOCSTR str, HKEY hkAssoc
   {
     DWORD dwLenOut = *pcchOut;
     if (dwLenOut >= MAX_PATH)
-      lpszReturnW = malloc((dwLenOut + 1) * sizeof(WCHAR));
+      lpszReturnW = HeapAlloc(GetProcessHeap(), 0,
+                                      (dwLenOut + 1) * sizeof(WCHAR));
 
     if (lpszReturnW)
     {
@@ -587,12 +590,12 @@ HRESULT WINAPI AssocQueryStringByKeyA(ASSOCF cfFlags, ASSOCSTR str, HKEY hkAssoc
       *pcchOut = dwLenOut;
 
       if (lpszReturnW != szReturnW)
-        free(lpszReturnW);
+        HeapFree(GetProcessHeap(), 0, lpszReturnW);
     }
   }
 
   if (lpszExtraW != szExtraW)
-    free(lpszExtraW);
+    HeapFree(GetProcessHeap(), 0, lpszExtraW);
   return hRet;
 }
 

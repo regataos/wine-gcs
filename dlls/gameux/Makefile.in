@@ -1,9 +1,11 @@
 MODULE    = gameux.dll
 IMPORTS   = uuid shell32 oleaut32 ole32 user32 advapi32 shlwapi
 
-SOURCES = \
+C_SRCS = \
 	factory.c \
 	gameexplorer.c \
-	gamestatistics.c \
-	gameux_tlb.idl \
-	rsrc.rc
+	gamestatistics.c
+
+IDL_SRCS = gameux_tlb.idl
+
+RC_SRCS = rsrc.rc

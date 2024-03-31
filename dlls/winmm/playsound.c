@@ -201,8 +201,8 @@ static void     PlaySound_Free(WINE_PLAYSOUND* wps)
     PlaySoundCurrent = NULL;
     SetEvent(psLastEvent);
     LeaveCriticalSection(&WINMM_cs);
-    if (wps->bAlloc) free((void*)wps->pszSound);
-    free(wps);
+    if (wps->bAlloc) HeapFree(GetProcessHeap(), 0, (void*)wps->pszSound);
+    HeapFree(GetProcessHeap(), 0, wps);
 }
 
 static WINE_PLAYSOUND*  PlaySound_Alloc(const void* pszSound, HMODULE hmod,
@@ -210,7 +210,7 @@ static WINE_PLAYSOUND*  PlaySound_Alloc(const void* pszSound, HMODULE hmod,
 {
     WINE_PLAYSOUND* wps;
 
-    wps = calloc(1, sizeof(*wps));
+    wps = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*wps));
     if (!wps) return NULL;
 
     wps->hMod = hmod;
@@ -221,8 +221,10 @@ static WINE_PLAYSOUND*  PlaySound_Alloc(const void* pszSound, HMODULE hmod,
         {
             if (fdwSound & SND_ASYNC)
             {
-                wps->pszSound = wcsdup(pszSound);
-                if (!wps->pszSound) goto oom_error;
+                LPWSTR sound = HeapAlloc(GetProcessHeap(), 0,
+                                         (lstrlenW(pszSound)+1) * sizeof(WCHAR));
+                if (!sound) goto oom_error;
+                wps->pszSound = lstrcpyW(sound, pszSound);
                 wps->bAlloc = TRUE;
             }
             else
@@ -231,9 +233,8 @@ static WINE_PLAYSOUND*  PlaySound_Alloc(const void* pszSound, HMODULE hmod,
         else
         {
             UNICODE_STRING usBuffer;
-            if (!RtlCreateUnicodeStringFromAsciiz(&usBuffer, pszSound)) goto oom_error;
-            wps->pszSound = wcsdup(usBuffer.Buffer);
-            RtlFreeUnicodeString(&usBuffer);
+            RtlCreateUnicodeStringFromAsciiz(&usBuffer, pszSound);
+            wps->pszSound = usBuffer.Buffer;
             if (!wps->pszSound) goto oom_error;
             wps->bAlloc = TRUE;
         }
@@ -243,8 +244,8 @@ static WINE_PLAYSOUND*  PlaySound_Alloc(const void* pszSound, HMODULE hmod,
 
     return wps;
  oom_error:
-    if (wps->bAlloc) free((void*)wps->pszSound);
-    free(wps);
+    if (wps->bAlloc) HeapFree(GetProcessHeap(), 0, (void*)wps->pszSound);
+    HeapFree(GetProcessHeap(), 0, wps);
     return NULL;
 }
 
@@ -358,7 +359,7 @@ static DWORD WINAPI proc_PlaySound(LPVOID arg)
     TRACE("Chunk Found ckid=%.4s fccType=%08lx cksize=%08lX\n",
 	  (LPSTR)&mmckInfo.ckid, mmckInfo.fccType, mmckInfo.cksize);
 
-    lpWaveFormat = malloc(mmckInfo.cksize);
+    lpWaveFormat = HeapAlloc(GetProcessHeap(), 0, mmckInfo.cksize);
     if (!lpWaveFormat)
 	goto errCleanUp;
     r = mmioRead(hmmio, (HPSTR)lpWaveFormat, mmckInfo.cksize);
@@ -393,7 +394,7 @@ static DWORD WINAPI proc_PlaySound(LPVOID arg)
     /* make it so that 3 buffers per second are needed */
     bufsize = (((lpWaveFormat->nAvgBytesPerSec / 3) - 1) / lpWaveFormat->nBlockAlign + 1) *
 	lpWaveFormat->nBlockAlign;
-    waveHdr = malloc(2 * sizeof(WAVEHDR) + 2 * bufsize);
+    waveHdr = HeapAlloc(GetProcessHeap(), 0, 2 * sizeof(WAVEHDR) + 2 * bufsize);
     if (!waveHdr)
 	goto errCleanUp;
     waveHdr[0].lpData = (char*)waveHdr + 2 * sizeof(WAVEHDR);
@@ -447,7 +448,7 @@ static DWORD WINAPI proc_PlaySound(LPVOID arg)
 
 errCleanUp:
     TRACE("Done playing=%s => %s!\n", debugstr_w(wps->pszSound), bRet ? "ok" : "ko");
-    free(lpWaveFormat);
+    HeapFree(GetProcessHeap(), 0, lpWaveFormat);
     if (hWave)
     {
         EnterCriticalSection(&WINMM_cs);
@@ -458,7 +459,7 @@ errCleanUp:
             Sleep(100);
     }
     CloseHandle(s.hEvent);
-    free(waveHdr);
+    HeapFree(GetProcessHeap(), 0, waveHdr);
     if (hmmio) 		mmioClose(hmmio, 0);
 
     PlaySound_Free(wps);

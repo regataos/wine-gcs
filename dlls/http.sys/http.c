@@ -19,13 +19,13 @@
  */
 
 #include <assert.h>
-#include <stdbool.h>
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
 #include "wine/http.h"
 #include "winternl.h"
 #include "ddk/wdm.h"
 #include "wine/debug.h"
+#include "wine/heap.h"
 #include "wine/list.h"
 
 static HANDLE directory_obj;
@@ -55,7 +55,6 @@ struct connection
 
     char *buffer;
     unsigned int len, size;
-    bool shutdown;
 
     /* If there is a request fully received and waiting to be read, the
      * "available" parameter will be TRUE. Either there is no queue matching
@@ -113,48 +112,41 @@ static struct list request_queues = LIST_INIT(request_queues);
 static void accept_connection(SOCKET socket)
 {
     struct connection *conn;
-    ULONG one = 1;
+    ULONG true = 1;
     SOCKET peer;
 
     if ((peer = accept(socket, NULL, NULL)) == INVALID_SOCKET)
         return;
 
-    if (!(conn = calloc(1, sizeof(*conn))))
+    if (!(conn = heap_alloc_zero(sizeof(*conn))))
     {
         ERR("Failed to allocate memory.\n");
         shutdown(peer, SD_BOTH);
         closesocket(peer);
         return;
     }
-    if (!(conn->buffer = malloc(8192)))
+    if (!(conn->buffer = heap_alloc(8192)))
     {
         ERR("Failed to allocate buffer memory.\n");
-        free(conn);
+        heap_free(conn);
         shutdown(peer, SD_BOTH);
         closesocket(peer);
         return;
     }
     conn->size = 8192;
     WSAEventSelect(peer, request_event, FD_READ | FD_CLOSE);
-    ioctlsocket(peer, FIONBIO, &one);
+    ioctlsocket(peer, FIONBIO, &true);
     conn->socket = peer;
     list_add_head(&connections, &conn->entry);
 }
 
-static void shutdown_connection(struct connection *conn)
-{
-    free(conn->buffer);
-    shutdown(conn->socket, SD_BOTH);
-    conn->shutdown = true;
-}
-
 static void close_connection(struct connection *conn)
 {
-    if (!conn->shutdown)
-        shutdown_connection(conn);
+    heap_free(conn->buffer);
+    shutdown(conn->socket, SD_BOTH);
     closesocket(conn->socket);
     list_remove(&conn->entry);
-    free(conn);
+    heap_free(conn);
 }
 
 static HTTP_VERB parse_verb(const char *verb, int len)
@@ -602,23 +594,11 @@ static void send_400(struct connection *conn)
     strcat(buffer, response_body);
     if (send(conn->socket, buffer, strlen(buffer), 0) < 0)
         ERR("Failed to send 400 response, error %u.\n", WSAGetLastError());
-    shutdown_connection(conn);
 }
 
 static void receive_data(struct connection *conn)
 {
     int len, ret;
-
-    if (conn->shutdown)
-    {
-        WSANETWORKEVENTS events;
-
-        if ((ret = WSAEnumNetworkEvents(conn->socket, NULL, &events)) < 0)
-            ERR("Failed to enumerate network events, error %u.\n", WSAGetLastError());
-        if (events.lNetworkEvents & FD_CLOSE)
-            close_connection(conn);
-        return;
-    }
 
     /* We might be waiting for an IRP, but always call recv() anyway, since we
      * might have been woken up by the socket closing. */
@@ -649,7 +629,7 @@ static void receive_data(struct connection *conn)
         if (available)
         {
             TRACE("%lu more bytes of data available, trying with larger buffer.\n", available);
-            if (!(conn->buffer = realloc(conn->buffer, conn->len + available)))
+            if (!(conn->buffer = heap_realloc(conn->buffer, conn->len + available)))
             {
                 ERR("Failed to allocate %lu bytes of memory.\n", conn->len + available);
                 close_connection(conn);
@@ -674,6 +654,7 @@ static void receive_data(struct connection *conn)
     {
         WARN("Failed to parse request; shutting down connection.\n");
         send_400(conn);
+        close_connection(conn);
     }
 }
 
@@ -734,7 +715,7 @@ static NTSTATUS http_add_url(struct request_queue *queue, IRP *irp)
     struct listening_socket *listening_sock;
     char *url, *endptr;
     size_t queue_url_len, new_url_len;
-    ULONG one = 1, value;
+    ULONG true = 1, value;
     SOCKET s = INVALID_SOCKET;
 
     TRACE("host %s, context %s.\n", debugstr_a(params->url), wine_dbgstr_longlong(params->context));
@@ -751,8 +732,9 @@ static NTSTATUS http_add_url(struct request_queue *queue, IRP *irp)
     if (strchr(params->url, '?'))
         return STATUS_INVALID_PARAMETER;
 
-    if (!(url = strdup(params->url)))
+    if (!(url = malloc(strlen(params->url)+1)))
         return STATUS_NO_MEMORY;
+    strcpy(url, params->url);
 
     if (!(new_entry = malloc(sizeof(struct url))))
     {
@@ -843,7 +825,7 @@ static NTSTATUS http_add_url(struct request_queue *queue, IRP *irp)
         listening_sock->socket = s;
         list_add_head(&listening_sockets, &listening_sock->entry);
 
-        ioctlsocket(s, FIONBIO, &one);
+        ioctlsocket(s, FIONBIO, &true);
         WSAEventSelect(s, request_event, FD_ACCEPT);
     }
 
@@ -1022,6 +1004,7 @@ static NTSTATUS http_send_response(struct request_queue *queue, IRP *irp)
             {
                 WARN("Failed to parse request; shutting down connection.\n");
                 send_400(conn);
+                close_connection(conn);
             }
         }
         else
@@ -1216,18 +1199,19 @@ static void WINAPI unload(DRIVER_OBJECT *driver)
 NTSTATUS WINAPI DriverEntry(DRIVER_OBJECT *driver, UNICODE_STRING *path)
 {
     OBJECT_ATTRIBUTES attr = {sizeof(attr)};
-    UNICODE_STRING device_http = RTL_CONSTANT_STRING(L"\\Device\\Http");
-    UNICODE_STRING device_http_req_queue = RTL_CONSTANT_STRING(L"\\Device\\Http\\ReqQueue");
+    UNICODE_STRING string;
     WSADATA wsadata;
     NTSTATUS ret;
 
     TRACE("driver %p, path %s.\n", driver, debugstr_w(path->Buffer));
 
-    attr.ObjectName = &device_http;
+    RtlInitUnicodeString(&string, L"\\Device\\Http");
+    attr.ObjectName = &string;
     if ((ret = NtCreateDirectoryObject(&directory_obj, 0, &attr)) && ret != STATUS_OBJECT_NAME_COLLISION)
         ERR("Failed to create \\Device\\Http directory, status %#lx.\n", ret);
 
-    if ((ret = IoCreateDevice(driver, 0, &device_http_req_queue, FILE_DEVICE_UNKNOWN, 0, FALSE, &device_obj)))
+    RtlInitUnicodeString(&string, L"\\Device\\Http\\ReqQueue");
+    if ((ret = IoCreateDevice(driver, 0, &string, FILE_DEVICE_UNKNOWN, 0, FALSE, &device_obj)))
     {
         ERR("Failed to create request queue device, status %#lx.\n", ret);
         NtClose(directory_obj);

@@ -157,18 +157,13 @@ struct object *create_symlink( struct object *root, const struct unicode_str *na
         set_error( STATUS_INVALID_PARAMETER );
         return NULL;
     }
-    if (!(symlink = create_named_object( root, &symlink_ops, name, attr | OBJ_OPENLINK, sd ))) return NULL;
-    if (get_error() != STATUS_OBJECT_NAME_EXISTS)
+    if (!(symlink = create_named_object( root, &symlink_ops, name, attr, sd ))) return NULL;
+    if (get_error() != STATUS_OBJECT_NAME_EXISTS && !(symlink->target = memdup( target->str, target->len )))
     {
-        symlink->len = target->len;
-        if (!(symlink->target = memdup( target->str, target->len )))
-        {
-            release_object( symlink );
-            return NULL;
-        }
+        release_object( symlink );
+        return NULL;
     }
-    else clear_error();
-
+    symlink->len = target->len;
     return &symlink->obj;
 }
 

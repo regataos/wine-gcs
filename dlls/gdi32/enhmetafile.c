@@ -768,12 +768,6 @@ static BOOL emr_produces_output(int type)
     }
 }
 
-static HGDIOBJ get_object_handle(HANDLETABLE *handletable, DWORD i)
-{
-    if (i & 0x80000000)
-        return GetStockObject( i & 0x7fffffff );
-    return handletable->objectHandle[i];
-}
 
 /*****************************************************************************
  *           PlayEnhMetaFileRecord  (GDI32.@)
@@ -905,7 +899,19 @@ BOOL WINAPI PlayEnhMetaFileRecord(
     case EMR_SELECTOBJECT:
       {
 	const EMRSELECTOBJECT *pSelectObject = (const EMRSELECTOBJECT *)mr;
-	SelectObject( hdc, get_object_handle(handletable, pSelectObject->ihObject) );
+	if( pSelectObject->ihObject & 0x80000000 ) {
+	  /* High order bit is set - it's a stock object
+	   * Strip the high bit to get the index.
+	   * See MSDN article Q142319
+	   */
+	  SelectObject( hdc, GetStockObject( pSelectObject->ihObject &
+					     0x7fffffff ) );
+	} else {
+	  /* High order bit wasn't set - not a stock object
+	   */
+	      SelectObject( hdc,
+			(handletable->objectHandle)[pSelectObject->ihObject] );
+	}
 	break;
       }
     case EMR_DELETEOBJECT:
@@ -1291,7 +1297,11 @@ BOOL WINAPI PlayEnhMetaFileRecord(
       {
 	const EMRSELECTPALETTE *lpSelectPal = (const EMRSELECTPALETTE *)mr;
 
-	SelectPalette( hdc, get_object_handle(handletable, lpSelectPal->ihPal), TRUE );
+	if( lpSelectPal->ihPal & 0x80000000 ) {
+		SelectPalette( hdc, GetStockObject(lpSelectPal->ihPal & 0x7fffffff), TRUE);
+	} else {
+		SelectPalette( hdc, (handletable->objectHandle)[lpSelectPal->ihPal], TRUE);
+	}
 	break;
       }
 
@@ -1680,7 +1690,7 @@ BOOL WINAPI PlayEnhMetaFileRecord(
 
     case EMR_SETMITERLIMIT:
       {
-        const struct emr_set_miter_limit *lpSetMiterLimit = (const struct emr_set_miter_limit *)mr;
+        const EMRSETMITERLIMIT *lpSetMiterLimit = (const EMRSETMITERLIMIT *)mr;
         SetMiterLimit( hdc, lpSetMiterLimit->eMiterLimit, NULL );
         break;
       }
@@ -1815,6 +1825,7 @@ BOOL WINAPI PlayEnhMetaFileRecord(
     case EMR_CREATEDIBPATTERNBRUSHPT:
       {
         const EMRCREATEDIBPATTERNBRUSHPT *lpCreate = (const EMRCREATEDIBPATTERNBRUSHPT *)mr;
+        LPVOID lpPackedStruct;
 
         /* Check that offsets and data are contained within the record
          * (including checking for wrap-arounds).
@@ -1828,15 +1839,28 @@ BOOL WINAPI PlayEnhMetaFileRecord(
             break;
         }
 
-        if (lpCreate->offBmi + lpCreate->cbBmi != lpCreate->offBits)
+        /* This is a BITMAPINFO struct followed directly by bitmap bits */
+        lpPackedStruct = HeapAlloc( GetProcessHeap(), 0,
+                                    lpCreate->cbBmi + lpCreate->cbBits );
+        if(!lpPackedStruct)
         {
-            ERR("Invalid data in EMR_CREATEDIBPATTERNBRUSHPT record\n");
+            SetLastError(ERROR_NOT_ENOUGH_MEMORY);
             break;
         }
 
+        /* Now pack this structure */
+        memcpy( lpPackedStruct,
+                ((const BYTE *)lpCreate) + lpCreate->offBmi,
+                lpCreate->cbBmi );
+        memcpy( ((BYTE*)lpPackedStruct) + lpCreate->cbBmi,
+                ((const BYTE *)lpCreate) + lpCreate->offBits,
+                lpCreate->cbBits );
+
         (handletable->objectHandle)[lpCreate->ihBrush] =
-           CreateDIBPatternBrushPt( (const BYTE *)lpCreate + lpCreate->offBmi,
+           CreateDIBPatternBrushPt( lpPackedStruct,
                                     (UINT)lpCreate->iUsage );
+
+        HeapFree(GetProcessHeap(), 0, lpPackedStruct);
         break;
       }
 
@@ -1848,7 +1872,23 @@ BOOL WINAPI PlayEnhMetaFileRecord(
 
         /* Need to check if the bitmap is monochrome, and if the
            two colors are really black and white */
-        if (pCreateMonoBrush->iUsage == DIB_PAL_INDICES || is_dib_monochrome(pbi))
+        if (pCreateMonoBrush->iUsage == DIB_PAL_MONO)
+        {
+            BITMAP bm;
+
+            /* Undocumented iUsage indicates a mono bitmap with no palette table,
+             * aligned to 32 rather than 16 bits.
+             */
+            bm.bmType = 0;
+            bm.bmWidth = pbi->bmiHeader.biWidth;
+            bm.bmHeight = abs(pbi->bmiHeader.biHeight);
+            bm.bmWidthBytes = 4 * ((pbi->bmiHeader.biWidth + 31) / 32);
+            bm.bmPlanes = pbi->bmiHeader.biPlanes;
+            bm.bmBitsPixel = pbi->bmiHeader.biBitCount;
+            bm.bmBits = (BYTE *)mr + pCreateMonoBrush->offBits;
+            hBmp = CreateBitmapIndirect(&bm);
+        }
+        else if (is_dib_monochrome(pbi))
         {
           /* Top-down DIBs have a negative height */
           LONG height = pbi->bmiHeader.biHeight;
@@ -2191,7 +2231,9 @@ BOOL WINAPI PlayEnhMetaFileRecord(
     {
 	const EMRFILLRGN *pFillRgn = (const EMRFILLRGN *)mr;
 	HRGN hRgn = ExtCreateRegion(NULL, pFillRgn->cbRgnData, (const RGNDATA *)pFillRgn->RgnData);
-	FillRgn(hdc, hRgn, get_object_handle(handletable, pFillRgn->ihBrush));
+	FillRgn(hdc,
+		hRgn,
+		(handletable->objectHandle)[pFillRgn->ihBrush]);
 	DeleteObject(hRgn);
 	break;
     }
@@ -2200,8 +2242,11 @@ BOOL WINAPI PlayEnhMetaFileRecord(
     {
 	const EMRFRAMERGN *pFrameRgn = (const EMRFRAMERGN *)mr;
 	HRGN hRgn = ExtCreateRegion(NULL, pFrameRgn->cbRgnData, (const RGNDATA *)pFrameRgn->RgnData);
-	FrameRgn(hdc, hRgn, get_object_handle(handletable, pFrameRgn->ihBrush),
-		 pFrameRgn->szlStroke.cx, pFrameRgn->szlStroke.cy);
+	FrameRgn(hdc,
+		 hRgn,
+		 (handletable->objectHandle)[pFrameRgn->ihBrush],
+		 pFrameRgn->szlStroke.cx,
+		 pFrameRgn->szlStroke.cy);
 	DeleteObject(hRgn);
 	break;
     }
@@ -2238,53 +2283,6 @@ BOOL WINAPI PlayEnhMetaFileRecord(
 	break;
     }
 
-    case EMR_TRANSPARENTBLT:
-    {
-        const EMRTRANSPARENTBLT *pTransparentBlt = (const EMRTRANSPARENTBLT *)mr;
-
-        TRACE("EMR_TRANSPARENTBLT: %ld, %ld %ldx%ld -> %ld, %ld %ldx%ld color %08lx offBitsSrc %ld\n",
-               pTransparentBlt->xSrc, pTransparentBlt->ySrc, pTransparentBlt->cxSrc,
-               pTransparentBlt->cySrc, pTransparentBlt->xDest, pTransparentBlt->yDest,
-               pTransparentBlt->cxDest, pTransparentBlt->cyDest,
-               pTransparentBlt->dwRop, pTransparentBlt->offBitsSrc);
-
-        if(pTransparentBlt->offBmiSrc == 0) {
-            FIXME("EMR_TRANSPARENTBLT: offBmiSrc == 0\n");
-        } else {
-            HDC hdcSrc = NtGdiCreateCompatibleDC( hdc );
-            HBRUSH hBrush, hBrushOld;
-            HBITMAP hBmp = 0, hBmpOld = 0;
-            const BITMAPINFO *pbi = (const BITMAPINFO *)((const BYTE *)mr + pTransparentBlt->offBmiSrc);
-
-            SetGraphicsMode(hdcSrc, GM_ADVANCED);
-            SetWorldTransform(hdcSrc, &pTransparentBlt->xformSrc);
-
-            hBrush = CreateSolidBrush(pTransparentBlt->crBkColorSrc);
-            hBrushOld = SelectObject(hdcSrc, hBrush);
-            PatBlt(hdcSrc, pTransparentBlt->rclBounds.left, pTransparentBlt->rclBounds.top,
-                   pTransparentBlt->rclBounds.right - pTransparentBlt->rclBounds.left,
-                   pTransparentBlt->rclBounds.bottom - pTransparentBlt->rclBounds.top, PATCOPY);
-            SelectObject(hdcSrc, hBrushOld);
-            DeleteObject(hBrush);
-
-            hBmp = CreateDIBitmap(hdc, (const BITMAPINFOHEADER *)pbi, CBM_INIT,
-                                  (const BYTE *)mr + pTransparentBlt->offBitsSrc,
-                                  pbi, pTransparentBlt->iUsageSrc);
-            hBmpOld = SelectObject(hdcSrc, hBmp);
-
-            GdiTransparentBlt(hdc, pTransparentBlt->xDest, pTransparentBlt->yDest,
-                              pTransparentBlt->cxDest, pTransparentBlt->cyDest,
-                              hdcSrc, pTransparentBlt->xSrc, pTransparentBlt->ySrc,
-                              pTransparentBlt->cxSrc, pTransparentBlt->cySrc,
-                              pTransparentBlt->dwRop);
-
-            SelectObject(hdcSrc, hBmpOld);
-            DeleteObject(hBmp);
-            DeleteDC(hdcSrc);
-        }
-        break;
-    }
-
     case EMR_GRADIENTFILL:
     {
         EMRGRADIENTFILL *grad = (EMRGRADIENTFILL *)mr;
@@ -2304,6 +2302,7 @@ BOOL WINAPI PlayEnhMetaFileRecord(
     case EMR_COLORCORRECTPALETTE:
     case EMR_SETICMPROFILEA:
     case EMR_SETICMPROFILEW:
+    case EMR_TRANSPARENTBLT:
     case EMR_SETLINKEDUFI:
     case EMR_COLORMATCHTOTARGETW:
     case EMR_CREATECOLORSPACEW:

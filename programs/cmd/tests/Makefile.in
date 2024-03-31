@@ -1,6 +1,6 @@
 TESTDLL   = cmd.exe
 
-SOURCES = \
-	batch.c \
-	directory.c \
-	rsrc.rc
+C_SRCS = \
+	batch.c
+
+RC_SRCS   = rsrc.rc

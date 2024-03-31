@@ -20,6 +20,9 @@
  */
 
 #define COBJMACROS
+
+#define NONAMELESSUNION
+#define NONAMELESSSTRUCT
 #include "objbase.h"
 #include "initguid.h"
 #include "dmksctrl.h"
@@ -277,6 +280,7 @@ static void region_destroy(struct region *region)
 struct instrument
 {
     struct list entry;
+    LONG ref;
     UINT id;
 
     UINT patch;
@@ -287,25 +291,35 @@ struct instrument
     struct synth *synth;
 };
 
-static void instrument_destroy(struct instrument *instrument)
+static void instrument_addref(struct instrument *instrument)
 {
-    struct articulation *articulation;
-    struct region *region;
-    void *next;
+    InterlockedIncrement(&instrument->ref);
+}
 
-    LIST_FOR_EACH_ENTRY_SAFE(region, next, &instrument->regions, struct region, entry)
+static void instrument_release(struct instrument *instrument)
+{
+    ULONG ref = InterlockedDecrement(&instrument->ref);
+
+    if (!ref)
     {
-        list_remove(&region->entry);
-        region_destroy(region);
-    }
+        struct articulation *articulation;
+        struct region *region;
+        void *next;
 
-    LIST_FOR_EACH_ENTRY_SAFE(articulation, next, &instrument->articulations, struct articulation, entry)
-    {
-        list_remove(&articulation->entry);
-        free(articulation);
-    }
+        LIST_FOR_EACH_ENTRY_SAFE(region, next, &instrument->regions, struct region, entry)
+        {
+            list_remove(&region->entry);
+            region_destroy(region);
+        }
 
-    free(instrument);
+        LIST_FOR_EACH_ENTRY_SAFE(articulation, next, &instrument->articulations, struct articulation, entry)
+        {
+            list_remove(&articulation->entry);
+            free(articulation);
+        }
+
+        free(instrument);
+    }
 }
 
 struct preset
@@ -316,13 +330,12 @@ struct preset
 
     fluid_preset_t *fluid_preset;
 
-    struct synth *synth;
+    struct instrument *instrument;
 };
 
 struct event
 {
     struct list entry;
-    REFERENCE_TIME time;
     LONGLONG position;
     BYTE midi[3];
 };
@@ -419,7 +432,7 @@ static ULONG WINAPI synth_Release(IDirectMusicSynth8 *iface)
         LIST_FOR_EACH_ENTRY_SAFE(instrument, next, &This->instruments, struct instrument, entry)
         {
             list_remove(&instrument->entry);
-            instrument_destroy(instrument);
+            instrument_release(instrument);
         }
 
         LIST_FOR_EACH_ENTRY_SAFE(wave, next, &This->waves, struct wave, entry)
@@ -585,11 +598,7 @@ static HRESULT WINAPI synth_Open(IDirectMusicSynth8 *iface, DMUS_PORTPARAMS *par
             !!(actual.dwEffectFlags & DMUS_EFFECT_REVERB));
     fluid_settings_setint(This->fluid_settings, "synth.chorus.active",
             !!(actual.dwEffectFlags & DMUS_EFFECT_CHORUS));
-    if (!(This->fluid_synth = new_fluid_synth(This->fluid_settings)))
-    {
-        LeaveCriticalSection(&This->cs);
-        return E_OUTOFMEMORY;
-    }
+    if (!(This->fluid_synth = new_fluid_synth(This->fluid_settings))) return E_OUTOFMEMORY;
     if ((id = fluid_synth_add_sfont(This->fluid_synth, This->fluid_sfont)) == FLUID_FAILED)
         WARN("Failed to add fluid_sfont to fluid_synth\n");
     synth_reset_default_values(This);
@@ -631,6 +640,7 @@ static HRESULT WINAPI synth_Close(IDirectMusicSynth8 *iface)
     LIST_FOR_EACH_ENTRY_SAFE(preset, next, &This->presets, struct preset, entry)
     {
         list_remove(&preset->entry);
+        instrument_release(preset->instrument);
         delete_fluid_preset(preset->fluid_preset);
         free(preset);
     }
@@ -735,6 +745,7 @@ static HRESULT synth_download_instrument(struct synth *This, DMUS_DOWNLOADINFO *
     if (instrument_info->ulFirstExtCkIdx) FIXME("Instrument extensions not implemented\n");
 
     if (!(instrument = calloc(1, sizeof(*instrument)))) return E_OUTOFMEMORY;
+    instrument->ref = 1;
     instrument->id = info->dwDLId;
     instrument->patch = instrument_info->ulPatch;
     instrument->flags = instrument_info->ulFlags;
@@ -761,7 +772,7 @@ static HRESULT synth_download_instrument(struct synth *This, DMUS_DOWNLOADINFO *
         if (!(region->wave = synth_find_wave_from_id(This, region->wave_link.ulTableIndex)))
         {
             free(region);
-            instrument_destroy(instrument);
+            instrument_release(instrument);
             return DMUS_E_BADWAVELINK;
         }
 
@@ -784,7 +795,7 @@ static HRESULT synth_download_instrument(struct synth *This, DMUS_DOWNLOADINFO *
     return S_OK;
 
 error:
-    instrument_destroy(instrument);
+    instrument_release(instrument);
     return E_OUTOFMEMORY;
 }
 
@@ -928,7 +939,7 @@ static HRESULT WINAPI synth_Unload(IDirectMusicSynth8 *iface, HANDLE handle,
             list_remove(&instrument->entry);
             LeaveCriticalSection(&This->cs);
 
-            instrument_destroy(instrument);
+            instrument_release(instrument);
             return S_OK;
         }
     }
@@ -978,12 +989,11 @@ static HRESULT WINAPI synth_PlayBuffer(IDirectMusicSynth8 *iface,
         {
             if (!(event = calloc(1, sizeof(*event)))) return E_OUTOFMEMORY;
             memcpy(event->midi, data, head->cbEvent);
-            event->time = time + head->rtDelta;
             event->position = position;
 
             EnterCriticalSection(&This->cs);
             LIST_FOR_EACH_ENTRY(next_event, &This->events, struct event, entry)
-                if (next_event->time > event->time) break;
+                if (next_event->position >= event->position) break;
             list_add_before(&next_event->entry, &event->entry);
             LeaveCriticalSection(&This->cs);
         }
@@ -1324,45 +1334,45 @@ static HRESULT WINAPI synth_control_KsProperty(IKsControl* iface, PKSPROPERTY Pr
 {
     TRACE("(%p, %p, %lu, %p, %lu, %p)\n", iface, Property, PropertyLength, PropertyData, DataLength, BytesReturned);
 
-    TRACE("Property = %s - %lu - %lu\n", debugstr_guid(&Property->Set), Property->Id, Property->Flags);
+    TRACE("Property = %s - %lu - %lu\n", debugstr_guid(&Property->u.s.Set), Property->u.s.Id, Property->u.s.Flags);
 
-    if (Property->Flags != KSPROPERTY_TYPE_GET)
+    if (Property->u.s.Flags != KSPROPERTY_TYPE_GET)
     {
-        FIXME("Property flags %lu not yet supported\n", Property->Flags);
+        FIXME("Property flags %lu not yet supported\n", Property->u.s.Flags);
         return S_FALSE;
     }
 
     if (DataLength <  sizeof(DWORD))
         return E_NOT_SUFFICIENT_BUFFER;
 
-    if (IsEqualGUID(&Property->Set, &GUID_DMUS_PROP_INSTRUMENT2))
+    if (IsEqualGUID(&Property->u.s.Set, &GUID_DMUS_PROP_INSTRUMENT2))
     {
         *(DWORD*)PropertyData = TRUE;
         *BytesReturned = sizeof(DWORD);
     }
-    else if (IsEqualGUID(&Property->Set, &GUID_DMUS_PROP_DLS2))
+    else if (IsEqualGUID(&Property->u.s.Set, &GUID_DMUS_PROP_DLS2))
     {
         *(DWORD*)PropertyData = TRUE;
         *BytesReturned = sizeof(DWORD);
     }
-    else if (IsEqualGUID(&Property->Set, &GUID_DMUS_PROP_GM_Hardware))
+    else if (IsEqualGUID(&Property->u.s.Set, &GUID_DMUS_PROP_GM_Hardware))
     {
         *(DWORD*)PropertyData = FALSE;
         *BytesReturned = sizeof(DWORD);
     }
-    else if (IsEqualGUID(&Property->Set, &GUID_DMUS_PROP_GS_Hardware))
+    else if (IsEqualGUID(&Property->u.s.Set, &GUID_DMUS_PROP_GS_Hardware))
     {
         *(DWORD*)PropertyData = FALSE;
         *BytesReturned = sizeof(DWORD);
     }
-    else if (IsEqualGUID(&Property->Set, &GUID_DMUS_PROP_XG_Hardware))
+    else if (IsEqualGUID(&Property->u.s.Set, &GUID_DMUS_PROP_XG_Hardware))
     {
         *(DWORD*)PropertyData = FALSE;
         *BytesReturned = sizeof(DWORD);
     }
     else
     {
-        FIXME("Unknown property %s\n", debugstr_guid(&Property->Set));
+        FIXME("Unknown property %s\n", debugstr_guid(&Property->u.s.Set));
         *(DWORD*)PropertyData = FALSE;
         *BytesReturned = sizeof(DWORD);
     }
@@ -1417,35 +1427,6 @@ static int synth_preset_get_num(fluid_preset_t *fluid_preset)
     return preset->patch;
 }
 
-static void find_region(struct synth *synth, int bank, int patch, int key, int vel,
-        struct instrument **out_instrument, struct region **out_region)
-{
-    struct instrument *instrument;
-    struct region *region;
-
-    *out_instrument = NULL;
-    *out_region = NULL;
-
-    LIST_FOR_EACH_ENTRY(instrument, &synth->instruments, struct instrument, entry)
-    {
-        if (bank == 128 && instrument->patch == (0x80000000 | patch)) break;
-        else if (instrument->patch == ((bank << 8) | patch)) break;
-    }
-
-    if (&instrument->entry == &synth->instruments)
-        return;
-
-    *out_instrument = instrument;
-
-    LIST_FOR_EACH_ENTRY(region, &instrument->regions, struct region, entry)
-    {
-        if (key < region->key_range.usLow || key > region->key_range.usHigh) continue;
-        if (vel < region->vel_range.usLow || vel > region->vel_range.usHigh) continue;
-        *out_region = region;
-        break;
-    }
-}
-
 static BOOL gen_from_connection(const CONNECTION *conn, UINT *gen)
 {
     switch (conn->usDestination)
@@ -1488,6 +1469,17 @@ static BOOL set_gen_from_connection(fluid_voice_t *fluid_voice, const CONNECTION
     if (conn->usSource == CONN_SRC_NONE)
     {
         if (!gen_from_connection(conn, &gen)) return FALSE;
+    }
+    else if (conn->usSource == CONN_SRC_KEYNUMBER)
+    {
+        switch (conn->usDestination)
+        {
+        case CONN_DST_EG2_HOLDTIME: gen = GEN_KEYTOMODENVHOLD; break;
+        case CONN_DST_EG2_DECAYTIME: gen = GEN_KEYTOMODENVDECAY; break;
+        case CONN_DST_EG1_HOLDTIME: gen = GEN_KEYTOVOLENVHOLD; break;
+        case CONN_DST_EG1_DECAYTIME: gen = GEN_KEYTOVOLENVDECAY; break;
+        default: return FALSE;
+        }
     }
     else if (conn->usSource == CONN_SRC_LFO)
     {
@@ -1583,6 +1575,10 @@ static void add_mod_from_connection(fluid_voice_t *fluid_voice, const CONNECTION
     case MAKELONG(CONN_SRC_LFO, CONN_DST_FILTER_CUTOFF): gen = GEN_MODLFOTOFILTERFC; break;
     case MAKELONG(CONN_SRC_EG2, CONN_DST_FILTER_CUTOFF): gen = GEN_MODENVTOFILTERFC; break;
     case MAKELONG(CONN_SRC_LFO, CONN_DST_GAIN): gen = GEN_MODLFOTOVOL; break;
+    case MAKELONG(CONN_SRC_KEYNUMBER, CONN_DST_EG2_HOLDTIME): gen = GEN_KEYTOMODENVHOLD; break;
+    case MAKELONG(CONN_SRC_KEYNUMBER, CONN_DST_EG2_DECAYTIME): gen = GEN_KEYTOMODENVDECAY; break;
+    case MAKELONG(CONN_SRC_KEYNUMBER, CONN_DST_EG1_HOLDTIME): gen = GEN_KEYTOVOLENVHOLD; break;
+    case MAKELONG(CONN_SRC_KEYNUMBER, CONN_DST_EG1_DECAYTIME): gen = GEN_KEYTOVOLENVDECAY; break;
     }
 
     if (conn->usControl != CONN_SRC_NONE && gen != -1)
@@ -1792,96 +1788,78 @@ static void set_default_voice_connections(fluid_voice_t *fluid_voice)
 static int synth_preset_noteon(fluid_preset_t *fluid_preset, fluid_synth_t *fluid_synth, int chan, int key, int vel)
 {
     struct preset *preset = fluid_preset_get_data(fluid_preset);
-    struct synth *synth = preset->synth;
-    struct articulation *articulation;
-    struct instrument *instrument;
+    struct instrument *instrument = preset->instrument;
+    struct synth *synth = instrument->synth;
     fluid_voice_t *fluid_voice;
     struct region *region;
-    struct voice *voice;
-    struct wave *wave;
 
     TRACE("(%p, %p, %u, %u, %u)\n", fluid_preset, fluid_synth, chan, key, vel);
 
-    EnterCriticalSection(&synth->cs);
-
-    find_region(synth, preset->bank, preset->patch, key, vel, &instrument, &region);
-    if (!region && preset->bank == 128)
-        find_region(synth, preset->bank, 0, key, vel, &instrument, &region);
-
-    if (!instrument)
+    LIST_FOR_EACH_ENTRY(region, &instrument->regions, struct region, entry)
     {
-        WARN("Could not find instrument with patch %#x\n", preset->patch);
-        LeaveCriticalSection(&synth->cs);
-        return FLUID_FAILED;
-    }
-    if (!region)
-    {
-        WARN("Failed to find instrument matching note / velocity\n");
-        LeaveCriticalSection(&synth->cs);
-        return FLUID_FAILED;
-    }
+        struct articulation *articulation;
+        struct wave *wave = region->wave;
+        struct voice *voice;
 
-    wave = region->wave;
+        if (key < region->key_range.usLow || key > region->key_range.usHigh) continue;
+        if (vel < region->vel_range.usLow || vel > region->vel_range.usHigh) continue;
 
-    if (!(fluid_voice = fluid_synth_alloc_voice(synth->fluid_synth, wave->fluid_sample, chan, key, vel)))
-    {
-        WARN("Failed to allocate FluidSynth voice\n");
-        LeaveCriticalSection(&synth->cs);
-        return FLUID_FAILED;
-    }
-
-    LIST_FOR_EACH_ENTRY(voice, &synth->voices, struct voice, entry)
-    {
-        if (voice->fluid_voice == fluid_voice)
+        if (!(fluid_voice = fluid_synth_alloc_voice(synth->fluid_synth, wave->fluid_sample, chan, key, vel)))
         {
-            wave_release(voice->wave);
-            break;
-        }
-    }
-
-    if (&voice->entry == &synth->voices)
-    {
-        if (!(voice = calloc(1, sizeof(struct voice))))
-        {
-            LeaveCriticalSection(&synth->cs);
+            WARN("Failed to allocate FluidSynth voice\n");
             return FLUID_FAILED;
         }
-        voice->fluid_voice = fluid_voice;
-        list_add_tail(&synth->voices, &voice->entry);
+
+        LIST_FOR_EACH_ENTRY(voice, &synth->voices, struct voice, entry)
+        {
+            if (voice->fluid_voice == fluid_voice)
+            {
+                wave_release(voice->wave);
+                break;
+            }
+        }
+
+        if (&voice->entry == &synth->voices)
+        {
+            if (!(voice = calloc(1, sizeof(struct voice))))
+                return FLUID_FAILED;
+            voice->fluid_voice = fluid_voice;
+            list_add_tail(&synth->voices, &voice->entry);
+        }
+
+        voice->wave = wave;
+        wave_addref(voice->wave);
+
+        set_default_voice_connections(fluid_voice);
+        if (region->wave_sample.cSampleLoops)
+        {
+            WLOOP *loop = region->wave_loops;
+
+            if (loop->ulType == WLOOP_TYPE_FORWARD)
+                fluid_voice_gen_set(fluid_voice, GEN_SAMPLEMODE, FLUID_LOOP_DURING_RELEASE);
+            else if (loop->ulType == WLOOP_TYPE_RELEASE)
+                fluid_voice_gen_set(fluid_voice, GEN_SAMPLEMODE, FLUID_LOOP_UNTIL_RELEASE);
+            else
+                FIXME("Unsupported loop type %lu\n", loop->ulType);
+
+            /* When copy_data is TRUE, fluid_sample_set_sound_data() adds
+             * 8-frame padding around the sample data. Offset the loop points
+             * to compensate for this. */
+            fluid_voice_gen_set(fluid_voice, GEN_STARTLOOPADDROFS, 8 + loop->ulStart);
+            fluid_voice_gen_set(fluid_voice, GEN_ENDLOOPADDROFS, 8 + loop->ulStart + loop->ulLength);
+        }
+        fluid_voice_gen_set(fluid_voice, GEN_OVERRIDEROOTKEY, region->wave_sample.usUnityNote);
+        fluid_voice_gen_set(fluid_voice, GEN_FINETUNE, region->wave_sample.sFineTune);
+        LIST_FOR_EACH_ENTRY(articulation, &instrument->articulations, struct articulation, entry)
+            add_voice_connections(fluid_voice, &articulation->list, articulation->connections);
+        LIST_FOR_EACH_ENTRY(articulation, &region->articulations, struct articulation, entry)
+            add_voice_connections(fluid_voice, &articulation->list, articulation->connections);
+        fluid_synth_start_voice(synth->fluid_synth, fluid_voice);
+        return FLUID_OK;
     }
 
-    voice->wave = wave;
-    wave_addref(voice->wave);
-
-    set_default_voice_connections(fluid_voice);
-    if (region->wave_sample.cSampleLoops)
-    {
-        WLOOP *loop = region->wave_loops;
-
-        if (loop->ulType == WLOOP_TYPE_FORWARD)
-            fluid_voice_gen_set(fluid_voice, GEN_SAMPLEMODE, FLUID_LOOP_DURING_RELEASE);
-        else if (loop->ulType == WLOOP_TYPE_RELEASE)
-            fluid_voice_gen_set(fluid_voice, GEN_SAMPLEMODE, FLUID_LOOP_UNTIL_RELEASE);
-        else
-            FIXME("Unsupported loop type %lu\n", loop->ulType);
-
-        /* When copy_data is TRUE, fluid_sample_set_sound_data() adds
-            * 8-frame padding around the sample data. Offset the loop points
-            * to compensate for this. */
-        fluid_voice_gen_set(fluid_voice, GEN_STARTLOOPADDROFS, 8 + loop->ulStart);
-        fluid_voice_gen_set(fluid_voice, GEN_ENDLOOPADDROFS, 8 + loop->ulStart + loop->ulLength);
-    }
-    fluid_voice_gen_set(fluid_voice, GEN_OVERRIDEROOTKEY, region->wave_sample.usUnityNote);
-    fluid_voice_gen_set(fluid_voice, GEN_FINETUNE, region->wave_sample.sFineTune);
-    LIST_FOR_EACH_ENTRY(articulation, &instrument->articulations, struct articulation, entry)
-        add_voice_connections(fluid_voice, &articulation->list, articulation->connections);
-    LIST_FOR_EACH_ENTRY(articulation, &region->articulations, struct articulation, entry)
-        add_voice_connections(fluid_voice, &articulation->list, articulation->connections);
-    fluid_synth_start_voice(synth->fluid_synth, fluid_voice);
-
-    LeaveCriticalSection(&synth->cs);
-
-    return FLUID_OK;
+    WARN("Failed to find instrument matching note / velocity\n");
+    return FLUID_FAILED;
 }
 
 static void synth_preset_free(fluid_preset_t *fluid_preset)
@@ -1896,6 +1874,7 @@ static const char *synth_sfont_get_name(fluid_sfont_t *fluid_sfont)
 static fluid_preset_t *synth_sfont_get_preset(fluid_sfont_t *fluid_sfont, int bank, int patch)
 {
     struct synth *synth = fluid_sfont_get_data(fluid_sfont);
+    struct instrument *instrument;
     fluid_preset_t *fluid_preset;
     struct preset *preset;
 
@@ -1910,6 +1889,19 @@ static fluid_preset_t *synth_sfont_get_preset(fluid_sfont_t *fluid_sfont, int ba
             LeaveCriticalSection(&synth->cs);
             return preset->fluid_preset;
         }
+    }
+
+    LIST_FOR_EACH_ENTRY(instrument, &synth->instruments, struct instrument, entry)
+    {
+        if (bank == 128 && instrument->patch == (0x80000000 | patch)) break;
+        else if (instrument->patch == ((bank << 8) | patch)) break;
+    }
+
+    if (&instrument->entry == &synth->instruments)
+    {
+        WARN("Could not find instrument with patch %#x\n", patch);
+        LeaveCriticalSection(&synth->cs);
+        return NULL;
     }
 
     if (!(fluid_preset = new_fluid_preset(fluid_sfont, synth_preset_get_name, synth_preset_get_bank,
@@ -1929,11 +1921,12 @@ static fluid_preset_t *synth_sfont_get_preset(fluid_sfont_t *fluid_sfont, int ba
     preset->bank = bank;
     preset->patch = patch;
     preset->fluid_preset = fluid_preset;
-    preset->synth = synth;
+    preset->instrument = instrument;
     fluid_preset_set_data(fluid_preset, preset);
+    instrument_addref(instrument);
     list_add_tail(&synth->presets, &preset->entry);
 
-    TRACE("Created fluid_preset %p\n", fluid_preset);
+    TRACE("Created fluid_preset %p for instrument %p\n", fluid_preset, instrument);
 
     LeaveCriticalSection(&synth->cs);
 
@@ -1992,7 +1985,7 @@ HRESULT synth_create(IUnknown **ret_iface)
         goto failed;
     fluid_sfont_set_data(obj->fluid_sfont, obj);
 
-    InitializeCriticalSectionEx(&obj->cs, 0, RTL_CRITICAL_SECTION_FLAG_FORCE_DEBUG_INFO);
+    InitializeCriticalSection(&obj->cs);
     obj->cs.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": cs");
 
     TRACE("Created DirectMusicSynth %p\n", obj);

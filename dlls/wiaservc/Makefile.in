@@ -3,9 +3,11 @@ IMPORTS   = uuid ole32 advapi32
 
 EXTRADLLFLAGS = -Wb,--prefer-native
 
-SOURCES = \
+C_SRCS = \
 	factory.c \
-	rsrc.rc \
 	service.c \
-	wiadevmgr.c \
-	wiaservc.idl
+	wiadevmgr.c
+
+IDL_SRCS = wiaservc.idl
+
+RC_SRCS = rsrc.rc

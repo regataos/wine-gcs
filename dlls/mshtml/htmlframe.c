@@ -48,20 +48,19 @@ static HRESULT set_frame_doc(HTMLFrameBase *frame, nsIDOMDocument *nsdoc)
         return E_FAIL;
 
     window = mozwindow_to_window(mozwindow);
-    if(!window && frame->element.node.doc->browser) {
+    if(window)
+        IHTMLWindow2_AddRef(&window->base.IHTMLWindow2_iface);
+    else if(frame->element.node.doc->browser)
         hres = create_outer_window(frame->element.node.doc->browser, mozwindow,
-                frame->element.node.doc->window->base.outer_window, &window);
+                frame->element.node.doc->outer_window, &window);
 
-        /* Don't hold ref to the created window; the parent keeps ref to it */
-        if(SUCCEEDED(hres))
-            IHTMLWindow2_Release(&window->base.IHTMLWindow2_iface);
-    }
     mozIDOMWindowProxy_Release(mozwindow);
     if(FAILED(hres))
         return hres;
 
     frame->content_window = window;
     window->frame_element = frame;
+    IHTMLDOMNode_AddRef(&frame->element.node.IHTMLDOMNode_iface);
     return S_OK;
 }
 
@@ -132,7 +131,7 @@ static HRESULT WINAPI HTMLFrameBase_put_src(IHTMLFrameBase *iface, BSTR v)
 
     TRACE("(%p)->(%s)\n", This, debugstr_w(v));
 
-    if(!This->content_window || !This->element.node.doc || !This->element.node.doc->window || !This->element.node.doc->window->base.outer_window) {
+    if(!This->content_window || !This->element.node.doc || !This->element.node.doc->outer_window) {
         nsAString nsstr;
         nsresult nsres;
 
@@ -150,7 +149,7 @@ static HRESULT WINAPI HTMLFrameBase_put_src(IHTMLFrameBase *iface, BSTR v)
         return S_OK;
     }
 
-    return navigate_url(This->content_window, v, This->element.node.doc->window->base.outer_window->uri, BINDING_NAVIGATED);
+    return navigate_url(This->content_window, v, This->element.node.doc->outer_window->uri, BINDING_NAVIGATED);
 }
 
 static HRESULT WINAPI HTMLFrameBase_get_src(IHTMLFrameBase *iface, BSTR *p)
@@ -710,12 +709,23 @@ static void *HTMLFrameBase_QI(HTMLFrameBase *This, REFIID riid)
     return HTMLElement_query_interface(&This->element.node.event_target.dispex, riid);
 }
 
-static void HTMLFrameBase_destructor(HTMLFrameBase *This)
+static void HTMLFrameBase_traverse(HTMLFrameBase *This, nsCycleCollectionTraversalCallback *cb)
 {
-    if(This->content_window)
-        This->content_window->frame_element = NULL;
+    HTMLElement_traverse(&This->element.node.event_target.dispex, cb);
 
-    HTMLElement_destructor(&This->element.node.event_target.dispex);
+    if(This->content_window)
+        note_cc_edge((nsISupports*)&This->content_window->base.IHTMLWindow2_iface, "content_window", cb);
+}
+
+static void HTMLFrameBase_unlink(HTMLFrameBase *This)
+{
+    HTMLElement_unlink(&This->element.node.event_target.dispex);
+
+    if(This->content_window) {
+        HTMLOuterWindow *content_window = This->content_window;
+        This->content_window = NULL;
+        IHTMLWindow2_Release(&content_window->base.IHTMLWindow2_iface);
+    }
 }
 
 static void HTMLFrameBase_Init(HTMLFrameBase *This, HTMLDocumentNode *doc, nsIDOMElement *nselem,
@@ -944,7 +954,7 @@ static void *HTMLFrameElement_query_interface(DispatchEx *dispex, REFIID riid)
 static void HTMLFrameElement_traverse(DispatchEx *dispex, nsCycleCollectionTraversalCallback *cb)
 {
     HTMLFrameElement *This = frame_from_DispatchEx(dispex);
-    HTMLElement_traverse(dispex, cb);
+    HTMLFrameBase_traverse(&This->framebase, cb);
 
     if(This->framebase.nsframe)
         note_cc_edge((nsISupports*)This->framebase.nsframe, "nsframe", cb);
@@ -953,15 +963,8 @@ static void HTMLFrameElement_traverse(DispatchEx *dispex, nsCycleCollectionTrave
 static void HTMLFrameElement_unlink(DispatchEx *dispex)
 {
     HTMLFrameElement *This = frame_from_DispatchEx(dispex);
-    HTMLDOMNode_unlink(dispex);
+    HTMLFrameBase_unlink(&This->framebase);
     unlink_ref(&This->framebase.nsframe);
-}
-
-static void HTMLFrameElement_destructor(DispatchEx *dispex)
-{
-    HTMLFrameElement *This = frame_from_DispatchEx(dispex);
-
-    HTMLFrameBase_destructor(&This->framebase);
 }
 
 static HRESULT HTMLFrameElement_get_dispid(DispatchEx *dispex, BSTR name, DWORD grfdex, DISPID *dispid)
@@ -987,8 +990,8 @@ static HRESULT HTMLFrameElement_get_name(DispatchEx *dispex, DISPID id, BSTR *na
     return *name ? S_OK : E_OUTOFMEMORY;
 }
 
-static HRESULT HTMLFrameElement_invoke(DispatchEx *dispex, DISPID id, LCID lcid, WORD flags, DISPPARAMS *params,
-        VARIANT *res, EXCEPINFO *ei, IServiceProvider *caller)
+static HRESULT HTMLFrameElement_invoke(DispatchEx *dispex, IDispatch *this_obj, DISPID id, LCID lcid, WORD flags,
+        DISPPARAMS *params, VARIANT *res, EXCEPINFO *ei, IServiceProvider *caller)
 {
     HTMLFrameElement *This = frame_from_DispatchEx(dispex);
 
@@ -997,8 +1000,8 @@ static HRESULT HTMLFrameElement_invoke(DispatchEx *dispex, DISPID id, LCID lcid,
         return E_FAIL;
     }
 
-    return IDispatchEx_InvokeEx(&This->framebase.content_window->base.IDispatchEx_iface, id, lcid,
-            flags, params, res, ei, caller);
+    return dispex_invoke(&This->framebase.content_window->base.inner_window->event_target.dispex,
+                         this_obj, id, lcid, flags, params, res, ei, caller);
 }
 
 static const NodeImplVtbl HTMLFrameElementImplVtbl = {
@@ -1015,7 +1018,7 @@ static const event_target_vtbl_t HTMLFrameElement_event_target_vtbl = {
     {
         HTMLELEMENT_DISPEX_VTBL_ENTRIES,
         .query_interface= HTMLFrameElement_query_interface,
-        .destructor     = HTMLFrameElement_destructor,
+        .destructor     = HTMLElement_destructor,
         .traverse       = HTMLFrameElement_traverse,
         .unlink         = HTMLFrameElement_unlink,
         .get_dispid     = HTMLFrameElement_get_dispid,
@@ -1034,9 +1037,10 @@ static const tid_t HTMLFrameElement_iface_tids[] = {
     0
 };
 
-static dispex_static_data_t HTMLFrameElement_dispex = {
+dispex_static_data_t HTMLFrameElement_dispex = {
     "HTMLFrameElement",
     &HTMLFrameElement_event_target_vtbl.dispex_vtbl,
+    PROTO_ID_HTMLFrameElement,
     DispHTMLFrameElement_tid,
     HTMLFrameElement_iface_tids,
     HTMLElement_init_dispex_info
@@ -1534,7 +1538,7 @@ static void *HTMLIFrame_query_interface(DispatchEx *dispex, REFIID riid)
 static void HTMLIFrame_traverse(DispatchEx *dispex, nsCycleCollectionTraversalCallback *cb)
 {
     HTMLIFrame *This = iframe_from_DispatchEx(dispex);
-    HTMLElement_traverse(dispex, cb);
+    HTMLFrameBase_traverse(&This->framebase, cb);
 
     if(This->framebase.nsiframe)
         note_cc_edge((nsISupports*)This->framebase.nsiframe, "nsiframe", cb);
@@ -1543,15 +1547,8 @@ static void HTMLIFrame_traverse(DispatchEx *dispex, nsCycleCollectionTraversalCa
 static void HTMLIFrame_unlink(DispatchEx *dispex)
 {
     HTMLIFrame *This = iframe_from_DispatchEx(dispex);
-    HTMLDOMNode_unlink(dispex);
+    HTMLFrameBase_unlink(&This->framebase);
     unlink_ref(&This->framebase.nsiframe);
-}
-
-static void HTMLIFrame_destructor(DispatchEx *dispex)
-{
-    HTMLIFrame *This = iframe_from_DispatchEx(dispex);
-
-    HTMLFrameBase_destructor(&This->framebase);
 }
 
 static HRESULT HTMLIFrame_get_dispid(DispatchEx *dispex, BSTR name, DWORD grfdex, DISPID *dispid)
@@ -1577,8 +1574,8 @@ static HRESULT HTMLIFrame_get_name(DispatchEx *dispex, DISPID id, BSTR *name)
     return *name ? S_OK : E_OUTOFMEMORY;
 }
 
-static HRESULT HTMLIFrame_invoke(DispatchEx *dispex, DISPID id, LCID lcid, WORD flags, DISPPARAMS *params,
-        VARIANT *res, EXCEPINFO *ei, IServiceProvider *caller)
+static HRESULT HTMLIFrame_invoke(DispatchEx *dispex, IDispatch *this_obj, DISPID id, LCID lcid, WORD flags,
+        DISPPARAMS *params, VARIANT *res, EXCEPINFO *ei, IServiceProvider *caller)
 {
     HTMLIFrame *This = iframe_from_DispatchEx(dispex);
 
@@ -1587,8 +1584,8 @@ static HRESULT HTMLIFrame_invoke(DispatchEx *dispex, DISPID id, LCID lcid, WORD 
         return E_FAIL;
     }
 
-    return IDispatchEx_InvokeEx(&This->framebase.content_window->base.IDispatchEx_iface, id, lcid,
-            flags, params, res, ei, caller);
+    return dispex_invoke(&This->framebase.content_window->base.inner_window->event_target.dispex,
+                         this_obj, id, lcid, flags, params, res, ei, caller);
 }
 
 static const NodeImplVtbl HTMLIFrameImplVtbl = {
@@ -1605,7 +1602,7 @@ static const event_target_vtbl_t HTMLIFrame_event_target_vtbl = {
     {
         HTMLELEMENT_DISPEX_VTBL_ENTRIES,
         .query_interface= HTMLIFrame_query_interface,
-        .destructor     = HTMLIFrame_destructor,
+        .destructor     = HTMLElement_destructor,
         .traverse       = HTMLIFrame_traverse,
         .unlink         = HTMLIFrame_unlink,
         .get_dispid     = HTMLIFrame_get_dispid,
@@ -1626,9 +1623,10 @@ static const tid_t HTMLIFrame_iface_tids[] = {
     0
 };
 
-static dispex_static_data_t HTMLIFrame_dispex = {
+dispex_static_data_t HTMLIFrame_dispex = {
     "HTMLIFrameElement",
     &HTMLIFrame_event_target_vtbl.dispex_vtbl,
+    PROTO_ID_HTMLIFrameElement,
     DispHTMLIFrame_tid,
     HTMLIFrame_iface_tids,
     HTMLElement_init_dispex_info

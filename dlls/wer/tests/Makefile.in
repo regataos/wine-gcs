@@ -1,5 +1,5 @@
 TESTDLL   = wer.dll
 IMPORTS   = wer
 
-SOURCES = \
+C_SRCS = \
 	main.c

@@ -19,6 +19,8 @@
 #include <stdarg.h>
 
 #define COBJMACROS
+#define NONAMELESSUNION
+
 #include "windef.h"
 #include "winbase.h"
 #include "objbase.h"
@@ -177,9 +179,9 @@ static ULONG WINAPI IRecordInfoImpl_Release(IRecordInfo *iface)
         for(i=0; i<This->n_vars; i++)
             SysFreeString(This->fields[i].name);
         SysFreeString(This->name);
-        free(This->fields);
+        HeapFree(GetProcessHeap(), 0, This->fields);
         ITypeInfo_Release(This->pTypeInfo);
-        free(This);
+        HeapFree(GetProcessHeap(), 0, This);
     }
     return ref;
 }
@@ -522,7 +524,7 @@ static PVOID WINAPI IRecordInfoImpl_RecordCreate(IRecordInfo *iface)
 
     TRACE("(%p)\n", This);
 
-    record = CoTaskMemAlloc(This->size);
+    record = HeapAlloc(GetProcessHeap(), 0, This->size);
     IRecordInfo_RecordInit(iface, record);
     TRACE("created record at %p\n", record);
     return record;
@@ -553,7 +555,9 @@ static HRESULT WINAPI IRecordInfoImpl_RecordDestroy(IRecordInfo *iface, PVOID pv
     if(FAILED(hres))
         return hres;
 
-    CoTaskMemFree(pvRecord);
+    if(!HeapFree(GetProcessHeap(), 0, pvRecord))
+        return E_INVALIDARG;
+
     return S_OK;
 }
 
@@ -593,7 +597,7 @@ HRESULT WINAPI GetRecordInfoFromGuids(REFGUID rGuidTypeLib, ULONG uVerMajor,
     ITypeLib *pTypeLib;
     HRESULT hres;
 
-    TRACE("%s, %lu, %lu, %#lx, %s, %p.\n", debugstr_guid(rGuidTypeLib), uVerMajor, uVerMinor,
+    TRACE("%p, %lu, %lu, %#lx, %s, %p.\n", rGuidTypeLib, uVerMajor, uVerMinor,
             lcid, debugstr_guid(rGuidTypeInfo), ppRecInfo);
 
     hres = LoadRegTypeLib(rGuidTypeLib, uVerMajor, uVerMinor, lcid, &pTypeLib);
@@ -637,7 +641,7 @@ HRESULT WINAPI GetRecordInfoFromTypeInfo(ITypeInfo* pTI, IRecordInfo** ppRecInfo
     }
 
     if(typeattr->typekind == TKIND_ALIAS) {
-        hres = ITypeInfo_GetRefTypeInfo(pTI, typeattr->tdescAlias.hreftype, &pTypeInfo);
+        hres = ITypeInfo_GetRefTypeInfo(pTI, typeattr->tdescAlias.u.hreftype, &pTypeInfo);
         guid = typeattr->guid;
         ITypeInfo_ReleaseTypeAttr(pTI, typeattr);
         if(FAILED(hres)) {
@@ -663,7 +667,7 @@ HRESULT WINAPI GetRecordInfoFromTypeInfo(ITypeInfo* pTI, IRecordInfo** ppRecInfo
         return E_INVALIDARG;
     }
 
-    ret = calloc(1, sizeof(*ret));
+    ret = HeapAlloc(GetProcessHeap(), 0, sizeof(*ret));
     ret->IRecordInfo_iface.lpVtbl = &IRecordInfoImplVtbl;
     ret->ref = 1;
     ret->pTypeInfo = pTypeInfo;
@@ -683,7 +687,7 @@ HRESULT WINAPI GetRecordInfoFromTypeInfo(ITypeInfo* pTI, IRecordInfo** ppRecInfo
         ret->name = NULL;
     }
 
-    ret->fields = calloc(ret->n_vars, sizeof(fieldstr));
+    ret->fields = HeapAlloc(GetProcessHeap(), 0, ret->n_vars*sizeof(fieldstr));
     for(i = 0; i<ret->n_vars; i++) {
         VARDESC *vardesc;
         hres = ITypeInfo_GetVarDesc(pTypeInfo, i, &vardesc);
@@ -693,7 +697,7 @@ HRESULT WINAPI GetRecordInfoFromTypeInfo(ITypeInfo* pTI, IRecordInfo** ppRecInfo
         }
         ret->fields[i].vt = vardesc->elemdescVar.tdesc.vt;
         ret->fields[i].varkind = vardesc->varkind;
-        ret->fields[i].offset = vardesc->oInst;
+        ret->fields[i].offset = vardesc->u.oInst;
         hres = ITypeInfo_GetDocumentation(pTypeInfo, vardesc->memid, &ret->fields[i].name,
                 NULL, NULL, NULL);
         if(FAILED(hres))

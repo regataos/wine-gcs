@@ -2,6 +2,7 @@ MODULE    = wmplayer.exe
 
 EXTRADLLFLAGS = -mwindows -municode
 
-SOURCES = \
-	main.c \
-	version.rc
+RC_SRCS = version.rc
+
+C_SRCS = \
+	main.c

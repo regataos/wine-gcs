@@ -8,30 +8,30 @@
 @ stub BluetoothEnumerateInstalledServices
 @ stub BluetoothFindBrowseGroupClose
 @ stub BluetoothFindClassIdClose
-@ stdcall -import BluetoothFindDeviceClose(ptr)
+@ stdcall BluetoothFindDeviceClose(ptr) bthprops.cpl.BluetoothFindDeviceClose
 @ stub BluetoothFindFirstBrowseGroup
 @ stub BluetoothFindFirstClassId
-@ stdcall -import BluetoothFindFirstDevice(ptr ptr)
+@ stdcall BluetoothFindFirstDevice(ptr ptr) bthprops.cpl.BluetoothFindFirstDevice
 @ stub BluetoothFindFirstProfileDescriptor
 @ stub BluetoothFindFirstProtocolDescriptorStack
 @ stub BluetoothFindFirstProtocolEntry
-@ stdcall -import BluetoothFindFirstRadio(ptr ptr)
+@ stdcall BluetoothFindFirstRadio(ptr ptr) bthprops.cpl.BluetoothFindFirstRadio
 @ stub BluetoothFindFirstService
 @ stub BluetoothFindNextBrowseGroup
 @ stub BluetoothFindNextClassId
-@ stdcall -import BluetoothFindNextDevice(ptr ptr)
+@ stdcall BluetoothFindNextDevice(ptr ptr) bthprops.cpl.BluetoothFindNextDevice
 @ stub BluetoothFindNextProfileDescriptor
 @ stub BluetoothFindNextProtocolDescriptorStack
 @ stub BluetoothFindNextProtocolEntry
-@ stdcall -import BluetoothFindNextRadio(ptr ptr)
+@ stdcall BluetoothFindNextRadio(ptr ptr) bthprops.cpl.BluetoothFindNextRadio
 @ stub BluetoothFindNextService
 @ stub BluetoothFindProfileDescriptorClose
 @ stub BluetoothFindProtocolDescriptorStackClose
 @ stub BluetoothFindProtocolEntryClose
-@ stdcall -import BluetoothFindRadioClose(ptr)
+@ stdcall BluetoothFindRadioClose(ptr) bthprops.cpl.BluetoothFindRadioClose
 @ stub BluetoothFindServiceClose
 @ stub BluetoothGetDeviceInfo
-@ stdcall -import BluetoothGetRadioInfo(ptr ptr)
+@ stdcall BluetoothGetRadioInfo(ptr ptr) bthprops.cpl.BluetoothGetRadioInfo
 @ stub BluetoothIsConnectable
 @ stub BluetoothIsDiscoverable
 @ stub BluetoothMapClassOfDeviceToImageIndex
@@ -47,6 +47,6 @@
 @ stub BluetoothSelectDevicesFree
 @ stub BluetoothSendAuthenticationResponse
 @ stub BluetoothSetServiceState
-@ stdcall -import BluetoothUnregisterAuthentication(long)
+@ stub BluetoothUnregisterAuthentication
 @ stub BluetoothUpdateDeviceRecord
 #@ stub CPlApplet

@@ -493,7 +493,6 @@ static BOOL ExportRegistryFile(HWND hWnd)
     InitOpenFileName(hWnd, &ofn);
     LoadStringW(hInst, IDS_FILEDIALOG_EXPORT_TITLE, title, ARRAY_SIZE(title));
     ofn.lpstrTitle = title;
-    ofn.lpstrDefExt = L"reg";
     ofn.Flags = OFN_ENABLETEMPLATE | OFN_ENABLEHOOK | OFN_EXPLORER | OFN_HIDEREADONLY | OFN_OVERWRITEPROMPT;
     ofn.lpfnHook = ExportRegistryFile_OFNHookProc;
     ofn.lpTemplateName = MAKEINTRESOURCEW(IDD_EXPORT_TEMPLATE);
@@ -501,7 +500,7 @@ static BOOL ExportRegistryFile(HWND hWnd)
         BOOL result;
         result = export_registry_key(ofn.lpstrFile, (LPWSTR)ofn.lCustData, ofn.nFilterIndex);
         if (!result) {
-            FIXME("Registry export failed.\n");
+            /*printf("Can't open file \"%s\"\n", ofn.lpstrFile);*/
             return FALSE;
         }
     } else {

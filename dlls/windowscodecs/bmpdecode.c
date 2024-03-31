@@ -224,9 +224,9 @@ static HRESULT WINAPI BmpFrameDecode_CopyPalette(IWICBitmapFrameDecode *iface,
             int i;
 
             count = 1 << bch->bcBitCount;
-            wiccolors = malloc(sizeof(WICColor) * count);
+            wiccolors = HeapAlloc(GetProcessHeap(), 0, sizeof(WICColor) * count);
             tablesize = sizeof(RGBTRIPLE) * count;
-            bgrcolors = malloc(tablesize);
+            bgrcolors = HeapAlloc(GetProcessHeap(), 0, tablesize);
             if (!wiccolors || !bgrcolors)
             {
                 hr = E_OUTOFMEMORY;
@@ -272,7 +272,7 @@ static HRESULT WINAPI BmpFrameDecode_CopyPalette(IWICBitmapFrameDecode *iface,
                 count = min(This->bih.bV5ClrUsed, 1 << This->bih.bV5BitCount);
 
             tablesize = sizeof(WICColor) * count;
-            wiccolors = malloc(tablesize);
+            wiccolors = HeapAlloc(GetProcessHeap(), 0, tablesize);
             if (!wiccolors)
             {
                 hr = E_OUTOFMEMORY;
@@ -308,8 +308,8 @@ end:
     if (SUCCEEDED(hr))
         hr = IWICPalette_InitializeCustom(pIPalette, wiccolors, count);
 
-    free(wiccolors);
-    free(bgrcolors);
+    HeapFree(GetProcessHeap(), 0, wiccolors);
+    HeapFree(GetProcessHeap(), 0, bgrcolors);
     return hr;
 }
 
@@ -386,7 +386,7 @@ static HRESULT BmpFrameDecode_ReadUncompressed(BmpDecoder* This)
     bytesperrow = (((width * This->bitsperpixel)+31)/32)*4;
     datasize = bytesperrow * height;
 
-    This->imagedata = malloc(datasize);
+    This->imagedata = HeapAlloc(GetProcessHeap(), 0, datasize);
     if (!This->imagedata) return E_OUTOFMEMORY;
 
     offbits.QuadPart = This->image_offset;
@@ -409,7 +409,7 @@ static HRESULT BmpFrameDecode_ReadUncompressed(BmpDecoder* This)
     return S_OK;
 
 fail:
-    free(This->imagedata);
+    HeapFree(GetProcessHeap(), 0, This->imagedata);
     This->imagedata = NULL;
     if (SUCCEEDED(hr)) hr = E_FAIL;
     return hr;
@@ -480,7 +480,7 @@ static HRESULT BmpFrameDecode_ReadRLE8(BmpDecoder* This)
     else
         palettesize = 4 * 256;
 
-    This->imagedata = malloc(datasize);
+    This->imagedata = HeapAlloc(GetProcessHeap(), 0, datasize);
     if (!This->imagedata)
     {
         hr = E_OUTOFMEMORY;
@@ -576,7 +576,7 @@ end:
     return S_OK;
 
 fail:
-    free(This->imagedata);
+    HeapFree(GetProcessHeap(), 0, This->imagedata);
     This->imagedata = NULL;
     if (SUCCEEDED(hr)) hr = E_FAIL;
     return hr;
@@ -604,7 +604,7 @@ static HRESULT BmpFrameDecode_ReadRLE4(BmpDecoder* This)
     else
         palettesize = 4 * 16;
 
-    This->imagedata = malloc(datasize);
+    This->imagedata = HeapAlloc(GetProcessHeap(), 0, datasize);
     if (!This->imagedata)
     {
         hr = E_OUTOFMEMORY;
@@ -716,7 +716,7 @@ end:
     return S_OK;
 
 fail:
-    free(This->imagedata);
+    HeapFree(GetProcessHeap(), 0, This->imagedata);
     This->imagedata = NULL;
     if (SUCCEEDED(hr)) hr = E_FAIL;
     return hr;
@@ -1011,10 +1011,10 @@ static ULONG WINAPI BmpDecoder_Release(IWICBitmapDecoder *iface)
     if (ref == 0)
     {
         if (This->stream) IStream_Release(This->stream);
-        free(This->imagedata);
+        HeapFree(GetProcessHeap(), 0, This->imagedata);
         This->lock.DebugInfo->Spare[0] = 0;
         DeleteCriticalSection(&This->lock);
-        free(This);
+        HeapFree(GetProcessHeap(), 0, This);
     }
 
     return ref;
@@ -1152,7 +1152,7 @@ static HRESULT BmpDecoder_Create(int packed, int icoframe, BmpDecoder **ppDecode
 {
     BmpDecoder *This;
 
-    This = malloc(sizeof(BmpDecoder));
+    This = HeapAlloc(GetProcessHeap(), 0, sizeof(BmpDecoder));
     if (!This) return E_OUTOFMEMORY;
 
     This->IWICBitmapDecoder_iface.lpVtbl = &BmpDecoder_Vtbl;
@@ -1161,7 +1161,7 @@ static HRESULT BmpDecoder_Create(int packed, int icoframe, BmpDecoder **ppDecode
     This->initialized = FALSE;
     This->stream = NULL;
     This->imagedata = NULL;
-    InitializeCriticalSectionEx(&This->lock, 0, RTL_CRITICAL_SECTION_FLAG_FORCE_DEBUG_INFO);
+    InitializeCriticalSection(&This->lock);
     This->lock.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": BmpDecoder.lock");
     This->packed = packed;
     This->icoframe = icoframe;

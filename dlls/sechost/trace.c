@@ -24,7 +24,6 @@
 #include "windef.h"
 #include "winbase.h"
 #include "wmistr.h"
-#define _WMI_SOURCE_
 #include "evntrace.h"
 
 #include "wine/debug.h"

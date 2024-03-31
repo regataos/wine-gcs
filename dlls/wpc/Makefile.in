@@ -2,6 +2,7 @@ MODULE = wpc.dll
 
 EXTRADLLFLAGS = -Wb,--prefer-native
 
-SOURCES = \
-	wpc.c \
-	wpc_classes.idl
+C_SRCS = \
+	wpc.c
+
+IDL_SRCS = wpc_classes.idl

@@ -20,6 +20,9 @@
 
 #include <stdarg.h>
 
+#define NONAMELESSUNION
+#define NONAMELESSSTRUCT
+
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
 #include "windef.h"
@@ -30,6 +33,8 @@
 #include "wine/debug.h"
 #include "winsock2.h"
 #include "ws2tcpip.h"
+
+#include "wine/heap.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(netio);
 
@@ -150,9 +155,9 @@ static void socket_init(struct wsk_socket_internal *socket)
 
 static void dispatch_irp(IRP *irp, NTSTATUS status)
 {
-    irp->IoStatus.Status = status;
+    irp->IoStatus.u.Status = status;
     --irp->CurrentLocation;
-    --irp->Tail.Overlay.CurrentStackLocation;
+    --irp->Tail.Overlay.s.u2.CurrentStackLocation;
     IoCompleteRequest(irp, IO_NO_INCREMENT);
 }
 
@@ -268,7 +273,7 @@ static NTSTATUS WINAPI wsk_close_socket(WSK_SOCKET *socket, IRP *irp)
 
     unlock_socket(s);
     DeleteCriticalSection(&s->cs_socket);
-    free(socket);
+    heap_free(socket);
 
     irp->IoStatus.Information = 0;
     dispatch_irp(irp, status);
@@ -311,7 +316,7 @@ static void create_accept_socket(struct wsk_socket_internal *socket, struct wsk_
     SOCKADDR *local_address, *remote_address;
     struct wsk_socket_internal *accept_socket;
 
-    if (!(accept_socket = calloc(1, sizeof(*accept_socket))))
+    if (!(accept_socket = heap_alloc_zero(sizeof(*accept_socket))))
     {
         ERR("No memory.\n");
         dispatch_pending_io(io, STATUS_NO_MEMORY, 0);
@@ -759,7 +764,7 @@ static NTSTATUS WINAPI wsk_socket(WSK_CLIENT *client, ADDRESS_FAMILY address_fam
         goto done;
     }
 
-    if (!(socket = calloc(1, sizeof(*socket))))
+    if (!(socket = heap_alloc_zero(sizeof(*socket))))
     {
         status = STATUS_NO_MEMORY;
         closesocket(s);
@@ -787,7 +792,7 @@ static NTSTATUS WINAPI wsk_socket(WSK_CLIENT *client, ADDRESS_FAMILY address_fam
         default:
             FIXME("Flags %#lx not implemented.\n", flags);
             closesocket(s);
-            free(socket);
+            heap_free(socket);
             status = STATUS_NOT_IMPLEMENTED;
             goto done;
     }
@@ -853,7 +858,7 @@ static void WINAPI get_address_info_callback(TP_CALLBACK_INSTANCE *instance, voi
 
     context->irp->IoStatus.Information = 0;
     dispatch_irp(context->irp, sock_error_to_ntstatus(ret));
-    free(context);
+    heap_free(context);
 }
 
 static NTSTATUS WINAPI wsk_get_address_info(WSK_CLIENT *client, UNICODE_STRING *node_name,
@@ -871,7 +876,7 @@ static NTSTATUS WINAPI wsk_get_address_info(WSK_CLIENT *client, UNICODE_STRING *
     if (!irp)
         return STATUS_INVALID_PARAMETER;
 
-    if (!(context = malloc(sizeof(*context))))
+    if (!(context = heap_alloc(sizeof(*context))))
     {
         ERR("No memory.\n");
         status = STATUS_NO_MEMORY;
@@ -892,7 +897,7 @@ static NTSTATUS WINAPI wsk_get_address_info(WSK_CLIENT *client, UNICODE_STRING *
         ERR("Could not submit thread pool callback.\n");
         status = STATUS_UNSUCCESSFUL;
         dispatch_irp(irp, status);
-        free(context);
+        heap_free(context);
         return status;
     }
     TRACE("Submitted threadpool callback, context %p.\n", context);
@@ -957,7 +962,7 @@ NTSTATUS WINAPI WskRegister(WSK_CLIENT_NPI *wsk_client_npi, WSK_REGISTRATION *ws
 
     TRACE("wsk_client_npi %p, wsk_registration %p.\n", wsk_client_npi, wsk_registration);
 
-    if (!(client = malloc(sizeof(*client))))
+    if (!(client = heap_alloc(sizeof(*client))))
     {
         ERR("No memory.\n");
         return STATUS_NO_MEMORY;
@@ -977,7 +982,7 @@ void WINAPI WskDeregister(WSK_REGISTRATION *wsk_registration)
 {
     TRACE("wsk_registration %p.\n", wsk_registration);
 
-    free(wsk_registration->ReservedRegistrationContext);
+    heap_free(wsk_registration->ReservedRegistrationContext);
 }
 
 static void WINAPI driver_unload(DRIVER_OBJECT *driver)

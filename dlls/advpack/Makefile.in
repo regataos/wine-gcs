@@ -2,7 +2,7 @@ MODULE    = advpack.dll
 IMPORTLIB = advpack
 IMPORTS   = ole32 setupapi version advapi32
 
-SOURCES = \
+C_SRCS = \
 	advpack.c \
 	files.c \
 	install.c \

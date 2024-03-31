@@ -3,12 +3,13 @@ IMPORTS   = uuid ole32 advapi32
 
 EXTRADLLFLAGS = -Wb,--prefer-native
 
-SOURCES = \
+C_SRCS = \
 	downloader.c \
 	installer.c \
 	main.c \
 	searcher.c \
 	session.c \
 	systeminfo.c \
-	updates.c \
-	wuapi_tlb.idl
+	updates.c
+
+IDL_SRCS = wuapi_tlb.idl

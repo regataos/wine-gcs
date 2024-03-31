@@ -3,5 +3,4 @@ IMPORTS   = msi ole32
 
 EXTRADLLFLAGS = -mconsole -municode
 
-SOURCES = \
-	main.c
+C_SRCS = main.c

@@ -22,6 +22,8 @@
 #include <stdarg.h>
 #include <stdio.h>
 
+#define NONAMELESSUNION
+
 #include "sane_i.h"
 #include "winuser.h"
 #include "winnls.h"
@@ -255,7 +257,7 @@ static int create_item(HDC hdc, const struct option_descriptor *opt,
     tpl->style=styles;
     tpl->dwExtendedStyle = 0;
     if (lead_static)
-        tpl->x = rc->x + rc->cx + 1;
+        tpl->x = lead_static->x + lead_static->cx + 1;
     else if (opt->type == TYPE_GROUP)
         tpl->x = 2;
     else
@@ -272,7 +274,7 @@ static int create_item(HDC hdc, const struct option_descriptor *opt,
     else
     {
         if (lead_static)
-            tpl->cy = rc->cy;
+            tpl->cy = lead_static->cy;
         else
             tpl->cy = 15;
 
@@ -489,7 +491,7 @@ BOOL DoScannerUI(void)
     {
         struct option_descriptor opt;
 
-        psp[page_count].pResource = create_options_page(hdc, &index,
+        psp[page_count].u.pResource = create_options_page(hdc, &index,
                 optcount, TRUE);
         opt.optno = index;
         SANE_CALL( option_get_descriptor, &opt );
@@ -499,7 +501,7 @@ BOOL DoScannerUI(void)
             psp[page_count].pszTitle = wcsdup( opt.title );
         }
 
-        if (psp[page_count].pResource)
+        if (psp[page_count].u.pResource)
         {
             psp[page_count].dwSize = sizeof(PROPSHEETPAGEW);
             psp[page_count].dwFlags =  PSP_DLGINDIRECT | PSP_USETITLE;
@@ -524,18 +526,18 @@ BOOL DoScannerUI(void)
     psh.dwFlags = PSH_PROPSHEETPAGE|PSH_PROPTITLE|PSH_USECALLBACK;
     psh.hwndParent = activeDS.hwndOwner;
     psh.hInstance = SANE_instance;
-    psh.pszIcon = 0;
+    psh.u.pszIcon = 0;
     psh.pszCaption = szCaption;
     psh.nPages = page_count;
-    psh.nStartPage = 0;
-    psh.ppsp = (LPCPROPSHEETPAGEW)psp;
+    psh.u2.nStartPage = 0;
+    psh.u3.ppsp = (LPCPROPSHEETPAGEW)psp;
     psh.pfnCallback = PropSheetProc;
 
     psrc = PropertySheetW(&psh);
 
     for(index = 0; index < page_count; index ++)
     {
-        free((LPBYTE)psp[index].pResource);
+        free((LPBYTE)psp[index].u.pResource);
         free((LPBYTE)psp[index].pszTitle);
     }
     free(szCaption);

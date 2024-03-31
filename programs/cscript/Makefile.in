@@ -3,10 +3,11 @@ IMPORTS   = uuid shell32 oleaut32 ole32 user32 advapi32
 EXTRADEFS = -DCSCRIPT_BUILD
 PARENTSRC = ../wscript
 
-EXTRADLLFLAGS = -mconsole -municode
+EXTRADLLFLAGS = -mwindows -municode
 
-SOURCES = \
+C_SRCS = \
 	arguments.c \
 	host.c \
-	ihost.idl \
 	main.c
+
+IDL_SRCS = ihost.idl

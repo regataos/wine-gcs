@@ -1,6 +1,7 @@
 TESTDLL   = itss.dll
 IMPORTS   = ole32
 
-SOURCES = \
-	protocol.c \
-	rsrc.rc
+C_SRCS = \
+	protocol.c
+
+RC_SRCS = rsrc.rc

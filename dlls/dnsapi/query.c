@@ -81,7 +81,6 @@ static DNS_STATUS do_query_netbios( PCSTR name, DNS_RECORDA **recp )
             if (!record->pName)
             {
                 status = ERROR_NOT_ENOUGH_MEMORY;
-                free( record );
                 goto exit;
             }
 
@@ -329,9 +328,9 @@ static DNS_STATUS get_hostname_w( COMPUTER_NAME_FORMAT format, PWSTR buffer, PDW
 static DNS_STATUS get_dns_server_list( IP4_ARRAY *out, DWORD *len )
 {
     char buf[FIELD_OFFSET(DNS_ADDR_ARRAY, AddrArray[3])];
+    DNS_ADDR_ARRAY *servers = (DNS_ADDR_ARRAY *)buf;
     DWORD ret, needed, i, num, array_len = sizeof(buf);
-    struct get_serverlist_params params = { AF_INET, (DNS_ADDR_ARRAY *)buf, &array_len };
-
+    struct get_serverlist_params params = { AF_INET, servers, &array_len };
     for (;;)
     {
         ret = RESOLV_CALL( get_serverlist, &params );
@@ -346,9 +345,9 @@ static DNS_STATUS get_dns_server_list( IP4_ARRAY *out, DWORD *len )
         }
         if (!ret) break;
 
-        if ((char *)params.addrs != buf) free( params.addrs );
-        params.addrs = malloc( array_len );
-        if (!params.addrs)
+        if ((char *)servers != buf) free( servers );
+        servers = malloc( array_len );
+        if (!servers)
         {
             ret = ERROR_NOT_ENOUGH_MEMORY;
             goto err;
@@ -357,12 +356,12 @@ static DNS_STATUS get_dns_server_list( IP4_ARRAY *out, DWORD *len )
 
     out->AddrCount = num;
     for (i = 0; i < num; i++)
-        out->AddrArray[i] = ((SOCKADDR_IN *)params.addrs->AddrArray[i].MaxSa)->sin_addr.s_addr;
+        out->AddrArray[i] = ((SOCKADDR_IN *)servers->AddrArray[i].MaxSa)->sin_addr.s_addr;
     *len = needed;
     ret = ERROR_SUCCESS;
 
 err:
-    if ((char *)params.addrs != buf) free( params.addrs );
+    if ((char *)servers != buf) free( servers );
     return ret;
 }
 

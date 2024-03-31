@@ -45,10 +45,11 @@ static DWORD runcmd(const char* cmd)
     DWORD rc;
 
     /* Create a writable copy for CreateProcessA() */
-    wcmd = strdup(cmd);
+    wcmd = HeapAlloc(GetProcessHeap(), 0, strlen(cmd) + 1);
+    strcpy(wcmd, cmd);
 
     rc = CreateProcessA(NULL, wcmd, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi);
-    free(wcmd);
+    HeapFree(GetProcessHeap(), 0, wcmd);
 
     if (!rc)
         return 260;

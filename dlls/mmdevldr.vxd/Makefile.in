@@ -1,4 +1,4 @@
 MODULE    = mmdevldr.vxd
 
-SOURCES = \
+C_SRCS = \
 	mmdevldr.c

@@ -3,6 +3,7 @@ IMPORTS   = shell32 setupapi shlwapi user32 comctl32
 
 EXTRADLLFLAGS = -mwindows -municode
 
-SOURCES = \
-	extrac32.c \
-	extrac32.rc
+C_SRCS = \
+	extrac32.c
+
+RC_SRCS = extrac32.rc

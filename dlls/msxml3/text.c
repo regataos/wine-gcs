@@ -105,7 +105,7 @@ static ULONG WINAPI domtext_Release(
     if ( ref == 0 )
     {
         destroy_xmlnode(&This->node);
-        free(This);
+        heap_free( This );
     }
 
     return ref;
@@ -941,7 +941,7 @@ IUnknown* create_text( xmlNodePtr text )
 {
     domtext *This;
 
-    This = malloc(sizeof(*This));
+    This = heap_alloc( sizeof *This );
     if ( !This )
         return NULL;
 

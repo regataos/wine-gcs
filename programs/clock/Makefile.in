@@ -3,7 +3,8 @@ IMPORTS   = comdlg32 shell32 user32 gdi32 comctl32
 
 EXTRADLLFLAGS = -mwindows
 
-SOURCES = \
-	clock.rc \
+C_SRCS = \
 	main.c \
 	winclock.c
+
+RC_SRCS = clock.rc

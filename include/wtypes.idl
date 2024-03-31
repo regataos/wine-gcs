@@ -110,9 +110,7 @@ typedef struct _SID {
   UCHAR SubAuthorityCount;
   SID_IDENTIFIER_AUTHORITY IdentifierAuthority;
   [size_is(SubAuthorityCount)] ULONG SubAuthority[*];
-} SID, *PISID;
-
-typedef void *PSID;
+} SID, *PSID;
 
 typedef USHORT SECURITY_DESCRIPTOR_CONTROL, *PSECURITY_DESCRIPTOR_CONTROL;
 
@@ -133,7 +131,7 @@ typedef struct _SECURITY_DESCRIPTOR {
   PSID Group;
   PACL Sacl;
   PACL Dacl;
-} SECURITY_DESCRIPTOR, *PISECURITY_DESCRIPTOR;
+} SECURITY_DESCRIPTOR, *PSECURITY_DESCRIPTOR;
 
 typedef struct _SECURITY_ATTRIBUTES
 {
@@ -565,7 +563,6 @@ typedef [unique] RemotableHandle *wireHFONT;
 typedef [unique] RemotableHandle *wireHICON;
 typedef [unique] RemotableHandle *wireHMENU;
 typedef [unique] RemotableHandle *wireHWND;
-typedef [unique] RemotableHandle *wireHMONITOR;
 
 cpp_quote("#if 0") /* for IDL only (C/C++ defs are in windef.h) */
 DECLARE_WIREM_HANDLE(HACCEL);
@@ -575,7 +572,6 @@ DECLARE_WIREM_HANDLE(HFONT);
 DECLARE_WIREM_HANDLE(HICON);
 DECLARE_WIREM_HANDLE(HMENU);
 DECLARE_WIREM_HANDLE(HWND);
-DECLARE_WIREM_HANDLE(HMONITOR);
 
 typedef HICON HCURSOR;
 
@@ -646,8 +642,13 @@ cpp_quote("#ifndef _tagCY_DEFINED")
 cpp_quote("#define _tagCY_DEFINED")
 cpp_quote("typedef union tagCY {")
 cpp_quote("    struct {")
+cpp_quote("#ifdef WORDS_BIGENDIAN")
+cpp_quote("        LONG  Hi;")
+cpp_quote("        ULONG Lo;")
+cpp_quote("#else")
 cpp_quote("        ULONG Lo;")
 cpp_quote("        LONG  Hi;")
+cpp_quote("#endif")
 cpp_quote("    } DUMMYSTRUCTNAME;")
 cpp_quote("    LONGLONG int64;")
 cpp_quote("} CY;")
@@ -677,8 +678,13 @@ cpp_quote("  } DUMMYUNIONNAME;")
 cpp_quote("  ULONG Hi32;")
 cpp_quote("  union {")
 cpp_quote("    struct {")
+cpp_quote("#ifdef WORDS_BIGENDIAN")
+cpp_quote("      ULONG Mid32;")
+cpp_quote("      ULONG Lo32;")
+cpp_quote("#else")
 cpp_quote("      ULONG Lo32;")
 cpp_quote("      ULONG Mid32;")
+cpp_quote("#endif")
 cpp_quote("    } DUMMYSTRUCTNAME1;")
 cpp_quote("    ULONGLONG Lo64;")
 cpp_quote("  } DUMMYUNIONNAME1;")

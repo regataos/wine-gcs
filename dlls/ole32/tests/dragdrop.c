@@ -72,7 +72,7 @@ struct method_call
     HRESULT set_ret;
     DWORD set_param;
 
-    BOOL called_todo;
+    int called_todo : 1;
 };
 
 const struct method_call *call_ptr;

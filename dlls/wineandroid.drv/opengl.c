@@ -208,10 +208,11 @@ void update_gl_drawable( HWND hwnd )
     }
 }
 
-static BOOL set_pixel_format( HDC hdc, int format, BOOL internal )
+static BOOL set_pixel_format( HDC hdc, int format, BOOL allow_change )
 {
     struct gl_drawable *gl;
     HWND hwnd = NtUserWindowFromDC( hdc );
+    int prev = 0;
 
     if (!hwnd || hwnd == NtUserGetDesktopWindow())
     {
@@ -225,18 +226,10 @@ static BOOL set_pixel_format( HDC hdc, int format, BOOL internal )
     }
     TRACE( "%p/%p format %d\n", hdc, hwnd, format );
 
-    if (!internal)
-    {
-        /* cannot change it if already set */
-        int prev = win32u_get_window_pixel_format( hwnd );
-
-        if (prev)
-            return prev == format;
-    }
-
     if ((gl = get_gl_drawable( hwnd, 0 )))
     {
-        if (internal)
+        prev = gl->format;
+        if (allow_change)
         {
             EGLint pf;
             p_eglGetConfigAttrib( display, pixel_formats[format - 1].config, EGL_NATIVE_VISUAL_ID, &pf );
@@ -248,7 +241,8 @@ static BOOL set_pixel_format( HDC hdc, int format, BOOL internal )
 
     release_gl_drawable( gl );
 
-    if (win32u_set_window_pixel_format( hwnd, format, internal )) return TRUE;
+    if (prev && prev != format && !allow_change) return FALSE;
+    if (NtUserSetWindowPixelFormat( hwnd, format )) return TRUE;
     destroy_gl_drawable( hwnd );
     return FALSE;
 }
@@ -466,7 +460,7 @@ static int android_wglDescribePixelFormat( HDC hdc, int fmt, UINT size, PIXELFOR
     memset( pfd, 0, sizeof(*pfd) );
     pfd->nSize = sizeof(*pfd);
     pfd->nVersion = 1;
-    pfd->dwFlags = PFD_SUPPORT_OPENGL | PFD_DRAW_TO_WINDOW | PFD_DOUBLEBUFFER | PFD_SUPPORT_COMPOSITION;
+    pfd->dwFlags = PFD_SUPPORT_OPENGL | PFD_DRAW_TO_WINDOW | PFD_DOUBLEBUFFER;
     pfd->iPixelType = PFD_TYPE_RGBA;
     pfd->iLayerType = PFD_MAIN_PLANE;
 
@@ -503,14 +497,8 @@ static int android_wglGetPixelFormat( HDC hdc )
 {
     struct gl_drawable *gl;
     int ret = 0;
-    HWND hwnd;
 
-    if ((hwnd = NtUserWindowFromDC( hdc )))
-        return win32u_get_window_pixel_format( hwnd );
-
-    /* This code is currently dead, but will be necessary if WGL_ARB_pbuffer
-     * support is introduced. */
-    if ((gl = get_gl_drawable( NULL, hdc )))
+    if ((gl = get_gl_drawable( NtUserWindowFromDC( hdc ), hdc )))
     {
         ret = gl->format;
         /* offscreen formats can't be used with traditional WGL calls */

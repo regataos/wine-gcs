@@ -1,10 +1,8 @@
-EXTRADEFS = -D_CONTRACT_GEN
-MODULE    = twinapi.appcore.dll
-IMPORTS   = combase advapi32
+EXTRADEFS = -DWINE_NO_LONG_TYPES -D_CONTRACT_GEN
+MODULE = twinapi.appcore.dll
+IMPORTS = combase
 
-SOURCES = \
-	advertising_manager.c \
-	analytics_info.c \
-	classes.idl \
-	client_device_information.c \
-	main.c
+C_SRCS = \
+       main.c
+
+IDL_SRCS = classes.idl

@@ -94,7 +94,7 @@ static HRESULT WINAPI enum_pins_Next(IEnumPins *iface, ULONG count, IPin **pins,
 
     for (i = 0; i < count && enum_pins->index < enum_pins->count; ++i)
     {
-        IPin_AddRef(pins[i] = enum_pins->pins[enum_pins->index]);
+        IPin_AddRef(pins[i] = enum_pins->pins[i]);
         enum_pins->index++;
     }
 
@@ -254,8 +254,6 @@ static ULONG WINAPI filter_Release(IMediaStreamFilter *iface)
         free(filter->streams);
         if (filter->clock)
             IReferenceClock_Release(filter->clock);
-        if (filter->cs.DebugInfo)
-            filter->cs.DebugInfo->Spare[0] = 0;
         DeleteCriticalSection(&filter->cs);
         free(filter);
     }
@@ -1102,7 +1100,7 @@ HRESULT filter_create(IUnknown *outer, void **out)
     object->refcount = 1;
     list_init(&object->free_events);
     list_init(&object->used_events);
-    InitializeCriticalSectionEx(&object->cs, 0, RTL_CRITICAL_SECTION_FLAG_FORCE_DEBUG_INFO);
+    InitializeCriticalSection(&object->cs);
     object->cs.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": MediaStreamFilter.cs");
 
     TRACE("Created media stream filter %p.\n", object);

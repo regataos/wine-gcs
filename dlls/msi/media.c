@@ -60,7 +60,7 @@ static BOOL source_matches_volume(MSIMEDIAINFO *mi, LPCWSTR source_root)
     return !wcsicmp( mi->volume_label, p );
 }
 
-static UINT change_media(MSIPACKAGE *package, MSIMEDIAINFO *mi)
+static UINT msi_change_media(MSIPACKAGE *package, MSIMEDIAINFO *mi)
 {
     MSIRECORD *record;
     LPWSTR source_dir;
@@ -83,7 +83,7 @@ static UINT change_media(MSIPACKAGE *package, MSIMEDIAINFO *mi)
     return r == IDRETRY ? ERROR_SUCCESS : ERROR_INSTALL_SOURCE_ABSENT;
 }
 
-static MSICABINETSTREAM *get_cabinet_stream( MSIPACKAGE *package, UINT disk_id )
+static MSICABINETSTREAM *msi_get_cabinet_stream( MSIPACKAGE *package, UINT disk_id )
 {
     MSICABINETSTREAM *cab;
 
@@ -109,8 +109,6 @@ static INT_PTR CDECL cabinet_open(char *pszFile, int oflag, int pmode)
     DWORD dwAccess = 0;
     DWORD dwShareMode = 0;
     DWORD dwCreateDisposition = OPEN_EXISTING;
-    HANDLE handle;
-    WCHAR *path;
 
     switch (oflag & _O_ACCMODE)
     {
@@ -133,10 +131,8 @@ static INT_PTR CDECL cabinet_open(char *pszFile, int oflag, int pmode)
     else if (oflag & _O_CREAT)
         dwCreateDisposition = CREATE_ALWAYS;
 
-    path = strdupUtoW(pszFile);
-    handle = CreateFileW(path, dwAccess, dwShareMode, NULL, dwCreateDisposition, 0, NULL);
-    free(path);
-    return (INT_PTR)handle;
+    return (INT_PTR)CreateFileA(pszFile, dwAccess, dwShareMode, NULL,
+                                dwCreateDisposition, 0, NULL);
 }
 
 static UINT CDECL cabinet_read(INT_PTR hf, void *pv, UINT cb)
@@ -187,7 +183,7 @@ static INT_PTR CDECL cabinet_open_stream( char *pszFile, int oflag, int pmode )
     MSICABINETSTREAM *cab;
     IStream *stream;
 
-    if (!(cab = get_cabinet_stream( package_disk.package, package_disk.id )))
+    if (!(cab = msi_get_cabinet_stream( package_disk.package, package_disk.id )))
     {
         WARN("failed to get cabinet stream\n");
         return -1;
@@ -259,7 +255,7 @@ static LONG CDECL cabinet_seek_stream( INT_PTR hf, LONG dist, int seektype )
     return -1;
 }
 
-static UINT media_get_disk_info(MSIPACKAGE *package, MSIMEDIAINFO *mi)
+static UINT msi_media_get_disk_info(MSIPACKAGE *package, MSIMEDIAINFO *mi)
 {
     MSIRECORD *row;
 
@@ -317,7 +313,7 @@ static INT_PTR cabinet_next_cabinet(FDINOTIFICATIONTYPE fdint,
     mi->disk_id++;
     mi->is_continuous = TRUE;
 
-    rc = media_get_disk_info(data->package, mi);
+    rc = msi_media_get_disk_info(data->package, mi);
     if (rc != ERROR_SUCCESS)
     {
         ERR("Failed to get next cabinet information: %d\n", rc);
@@ -359,7 +355,7 @@ static INT_PTR cabinet_next_cabinet(FDINOTIFICATIONTYPE fdint,
     res = 0;
     if (GetFileAttributesW(cabinet_file) == INVALID_FILE_ATTRIBUTES)
     {
-        if (change_media(data->package, mi) != ERROR_SUCCESS)
+        if (msi_change_media(data->package, mi) != ERROR_SUCCESS)
             res = -1;
     }
 
@@ -386,7 +382,7 @@ static INT_PTR cabinet_next_cabinet_stream( FDINOTIFICATIONTYPE fdint,
     mi->disk_id++;
     mi->is_continuous = TRUE;
 
-    rc = media_get_disk_info( data->package, mi );
+    rc = msi_media_get_disk_info( data->package, mi );
     if (rc != ERROR_SUCCESS)
     {
         ERR("Failed to get next cabinet information: %u\n", rc);
@@ -581,11 +577,11 @@ static BOOL extract_cabinet( MSIPACKAGE* package, MSIMEDIAINFO *mi, LPVOID data 
         return FALSE;
     }
 
-    cabinet = strdupWtoU( mi->cabinet );
+    cabinet = strdupWtoA( mi->cabinet );
     if (!cabinet)
         goto done;
 
-    cab_path = strdupWtoU( mi->sourcedir );
+    cab_path = strdupWtoA( mi->sourcedir );
     if (!cab_path)
         goto done;
 
@@ -859,11 +855,11 @@ UINT ready_media( MSIPACKAGE *package, BOOL compressed, MSIMEDIAINFO *mi )
             WCHAR temppath[MAX_PATH], *p, *url;
 
             free( cabinet_file );
-            if (!(url = realloc( base_url, (wcslen( base_url ) + wcslen( mi->cabinet ) + 1) * sizeof(WCHAR) )))
+            if (!(url = malloc( (wcslen( base_url ) + wcslen( mi->cabinet ) + 1) * sizeof(WCHAR) )))
             {
-                free( base_url );
                 return ERROR_OUTOFMEMORY;
             }
+            lstrcpyW( url, base_url );
             lstrcatW( url, mi->cabinet );
             if ((rc = msi_download_file( url, temppath )) != ERROR_SUCCESS)
             {
@@ -893,7 +889,7 @@ UINT ready_media( MSIPACKAGE *package, BOOL compressed, MSIMEDIAINFO *mi )
 
             if (!match && (mi->type == DRIVE_CDROM || mi->type == DRIVE_REMOVABLE))
             {
-                if ((rc = change_media( package, mi )) != ERROR_SUCCESS)
+                if ((rc = msi_change_media( package, mi )) != ERROR_SUCCESS)
                 {
                     free( cabinet_file );
                     return rc;

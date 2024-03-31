@@ -13,31 +13,31 @@
 #include "frame.h"
 
 #ifdef NO_ID3V2
-# ifdef INT123_init_id3
-#  undef INT123_init_id3
+# ifdef init_id3
+#  undef init_id3
 # endif
-# define INT123_init_id3(fr)
-# ifdef INT123_exit_id3
-#  undef INT123_exit_id3
+# define init_id3(fr)
+# ifdef exit_id3
+#  undef exit_id3
 # endif
-# define INT123_exit_id3(fr)
-# ifdef INT123_reset_id3
-#  undef INT123_reset_id3
+# define exit_id3(fr)
+# ifdef reset_id3
+#  undef reset_id3
 # endif
-# define INT123_reset_id3(fr)
-# ifdef INT123_id3_link
-#  undef INT123_id3_link
+# define reset_id3(fr)
+# ifdef id3_link
+#  undef id3_link
 # endif
-# define INT123_id3_link(fr)
+# define id3_link(fr)
 #else
-void INT123_init_id3(mpg123_handle *fr);
-void INT123_exit_id3(mpg123_handle *fr);
-void INT123_reset_id3(mpg123_handle *fr);
-void INT123_id3_link(mpg123_handle *fr);
+void init_id3(mpg123_handle *fr);
+void exit_id3(mpg123_handle *fr);
+void reset_id3(mpg123_handle *fr);
+void id3_link(mpg123_handle *fr);
 #endif
-int  INT123_parse_new_id3(mpg123_handle *fr, unsigned long first4bytes);
+int  parse_new_id3(mpg123_handle *fr, unsigned long first4bytes);
 /* Convert text from some ID3 encoding to UTf-8.
    On error, sb->fill is 0. The noquiet flag enables warning/error messages. */
-void INT123_id3_to_utf8(mpg123_string *sb, unsigned char encoding, const unsigned char *source, size_t source_size, int noquiet);
+void id3_to_utf8(mpg123_string *sb, unsigned char encoding, const unsigned char *source, size_t source_size, int noquiet);
 
 #endif

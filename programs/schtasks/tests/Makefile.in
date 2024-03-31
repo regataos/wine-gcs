@@ -1,5 +1,6 @@
 TESTDLL   = schtasks.exe
-IMPORTS   = advapi32 ole32
+IMPORTS   = ole32
 
-SOURCES = \
+
+C_SRCS = \
 	schtasks.c

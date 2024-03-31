@@ -35,6 +35,7 @@
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(msvcrt);
+WINE_DECLARE_DEBUG_CHANNEL(time);
 
 #undef _ctime32
 #undef _difftime32
@@ -64,17 +65,6 @@ static const int MonthLengths[2][12] =
 static const int MAX_SECONDS = 60;
 #else
 static const int MAX_SECONDS = 59;
-#endif
-
-#if _MSVCR_VER == 0
-#define MIN_GMTIME64_TIME 0
-#define MAX_GMTIME64_TIME _MAX__TIME64_T
-#elif _MSVCR_VER >= 140
-#define MIN_GMTIME64_TIME -43200
-#define MAX_GMTIME64_TIME (_MAX__TIME64_T + 1605600)
-#else
-#define MIN_GMTIME64_TIME -43200
-#define MAX_GMTIME64_TIME (_MAX__TIME64_T + 46800)
 #endif
 
 static inline BOOL IsLeapYear(int Year)
@@ -468,9 +458,7 @@ int CDECL _gmtime64_s(struct tm *res, const __time64_t *secs)
     SYSTEMTIME st;
     ULONGLONG time;
 
-    TRACE("res %p, secs %p (%I64d).\n", res, secs, secs ? *secs : 0);
-
-    if (!res || !secs || *secs < MIN_GMTIME64_TIME || *secs > MAX_GMTIME64_TIME) {
+    if (!res || !secs || *secs < -43200 || *secs > _MAX__TIME64_T + 46800) {
         if (res) {
             write_invalid_msvcrt_tm(res);
         }
@@ -510,6 +498,8 @@ struct tm* CDECL _gmtime64(const __time64_t *secs)
 {
     thread_data_t * const data = msvcrt_get_thread_data();
 
+    TRACE_(time)("secs %p, %I64d.\n", secs, secs ? *secs : 0);
+
     if(!data->time_buffer)
         data->time_buffer = malloc(sizeof(struct tm));
 
@@ -526,6 +516,13 @@ int CDECL _gmtime32_s(struct tm *res, const __time32_t *secs)
     __time64_t secs64;
 
     if(secs) {
+        if (*secs < 0)
+        {
+            if (res)
+                write_invalid_msvcrt_tm(res);
+            *_errno() = EINVAL;
+            return EINVAL;
+        }
         secs64 = *secs;
         return _gmtime64_s(res, &secs64);
     }
@@ -541,6 +538,12 @@ struct tm* CDECL _gmtime32(const __time32_t* secs)
 
     if(!secs)
         return NULL;
+
+    if (*secs < 0)
+    {
+        *_errno() = EINVAL;
+        return NULL;
+    }
 
     secs64 = *secs;
     return _gmtime64( &secs64 );
@@ -1728,7 +1731,7 @@ char * CDECL _ctime64(const __time64_t *time)
 /*********************************************************************
  *		_ctime64_s (MSVCRT.@)
  */
-errno_t CDECL _ctime64_s(char *res, size_t len, const __time64_t *time)
+int CDECL _ctime64_s(char *res, size_t len, const __time64_t *time)
 {
     struct tm *t;
 
@@ -1757,7 +1760,7 @@ char * CDECL _ctime32(const __time32_t *time)
 /*********************************************************************
  *		_ctime32_s (MSVCRT.@)
  */
-errno_t CDECL _ctime32_s(char *res, size_t len, const __time32_t *time)
+int CDECL _ctime32_s(char *res, size_t len, const __time32_t *time)
 {
     struct tm *t;
 

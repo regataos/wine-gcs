@@ -2,5 +2,5 @@ MODULE    = servicemodelreg.exe
 
 EXTRADLLFLAGS = -mconsole -municode
 
-SOURCES = \
+C_SRCS = \
 	main.c

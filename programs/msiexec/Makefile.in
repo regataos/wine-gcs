@@ -3,9 +3,12 @@ IMPORTS   = msi ole32 advapi32 user32 comctl32
 
 EXTRADLLFLAGS = -mwindows
 
-SOURCES = \
+C_SRCS = \
 	msiexec.c \
-	msiexec.man.in \
-	msiexec.svg \
-	rsrc.rc \
 	service.c
+
+RC_SRCS = rsrc.rc
+
+MANPAGES = msiexec.man.in
+
+SVG_SRCS = msiexec.svg

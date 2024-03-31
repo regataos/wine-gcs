@@ -23,6 +23,8 @@
  *
  */
 
+#define NONAMELESSUNION
+
 #include <string.h>
 #include <stdlib.h>
 #include <stdarg.h>
@@ -452,7 +454,13 @@ static void InstallProgram(HWND hWnd)
     }
 }
 
-static HANDLE run_uninstaller(int id, DWORD button)
+/******************************************************************************
+ * Name       : UninstallProgram
+ * Description: Executes the specified program's installer.
+ * Parameters : id      - the internal ID of the installer to remove
+ * Parameters : button  - ID of button pressed (Modify or Remove)
+ */
+static void UninstallProgram(int id, DWORD button)
 {
     APPINFO *iter;
     STARTUPINFOW si;
@@ -481,7 +489,10 @@ static HANDLE run_uninstaller(int id, DWORD button)
             if (res)
             {
                 CloseHandle(info.hThread);
-                return info.hProcess;
+
+                /* wait for the process to exit */
+                WaitForSingleObject(info.hProcess, INFINITE);
+                CloseHandle(info.hProcess);
             }
             else
             {
@@ -499,8 +510,6 @@ static HANDLE run_uninstaller(int id, DWORD button)
             break;
         }
     }
-
-    return NULL;
 }
 
 /**********************************************************************************
@@ -606,14 +615,9 @@ static INT_PTR CALLBACK SupportInfoDlgProc(HWND hWnd, UINT msg, WPARAM wParam, L
         case WM_DESTROY:
             return 0;
 
-        case WM_CLOSE:
-            EndDialog(hWnd, TRUE);
-            return TRUE;
-
         case WM_COMMAND:
             switch (LOWORD(wParam))
             {
-                case IDCANCEL:
                 case IDOK:
                     EndDialog(hWnd, TRUE);
                     break;
@@ -777,7 +781,6 @@ static HIMAGELIST ResetApplicationList(BOOL bFirstRun, HWND hWnd, HIMAGELIST hIm
 static INT_PTR CALLBACK MainDlgProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
     int selitem;
-    static HANDLE uninstaller = NULL;
     static HIMAGELIST hImageList;
     LPNMHDR nmh;
     LVITEMW lvItem;
@@ -829,16 +832,6 @@ static INT_PTR CALLBACK MainDlgProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM l
 
                 case IDC_ADDREMOVE:
                 case IDC_MODIFY:
-                    if (uninstaller)
-                    {
-                        WCHAR titleW[MAX_STRING_LEN], wait_tip[MAX_STRING_LEN];
-
-                        LoadStringW(hInst, IDS_CPL_TITLE, titleW, ARRAY_SIZE(titleW));
-                        LoadStringW(hInst, IDS_WAIT_COMPLETE, wait_tip, ARRAY_SIZE(wait_tip));
-                        MessageBoxW(hWnd, wait_tip, titleW, MB_OK | MB_ICONWARNING);
-                        break;
-                    }
-
                     selitem = SendDlgItemMessageW(hWnd, IDL_PROGRAMS,
                         LVM_GETNEXTITEM, -1, LVNI_FOCUSED|LVNI_SELECTED);
 
@@ -847,22 +840,9 @@ static INT_PTR CALLBACK MainDlgProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM l
                         lvItem.iItem = selitem;
                         lvItem.mask = LVIF_PARAM;
 
-                        if (SendDlgItemMessageW(hWnd, IDL_PROGRAMS, LVM_GETITEMW, 0, (LPARAM)&lvItem))
-                        {
-                            uninstaller = run_uninstaller(lvItem.lParam, LOWORD(wParam));
-                            while (MsgWaitForMultipleObjects(1, &uninstaller, FALSE, INFINITE, QS_ALLINPUT) == 1)
-                            {
-                                MSG message;
-
-                                while (PeekMessageW(&message, 0, 0, 0, PM_REMOVE))
-                                {
-                                    TranslateMessage(&message);
-                                    DispatchMessageW(&message);
-                                }
-                            }
-                            CloseHandle(uninstaller);
-                            uninstaller = NULL;
-                        }
+                        if (SendDlgItemMessageW(hWnd, IDL_PROGRAMS, LVM_GETITEMW,
+                          0, (LPARAM) &lvItem))
+                            UninstallProgram(lvItem.lParam, LOWORD(wParam));
                     }
 
                     hImageList = ResetApplicationList(FALSE, hWnd, hImageList);
@@ -924,8 +904,8 @@ static void StartApplet(HWND hWnd)
     psp.dwSize = sizeof (PROPSHEETPAGEW);
     psp.dwFlags = PSP_USETITLE;
     psp.hInstance = hInst;
-    psp.pszTemplate = MAKEINTRESOURCEW (IDD_MAIN);
-    psp.pszIcon = NULL;
+    psp.u.pszTemplate = MAKEINTRESOURCEW (IDD_MAIN);
+    psp.u2.pszIcon = NULL;
     psp.pfnDlgProc = MainDlgProc;
     psp.pszTitle = tab_title;
     psp.lParam = 0;
@@ -935,12 +915,12 @@ static void StartApplet(HWND hWnd)
     psh.dwFlags = PSH_PROPSHEETPAGE | PSH_USEICONID | PSH_USECALLBACK;
     psh.hwndParent = hWnd;
     psh.hInstance = hInst;
-    psh.pszIcon = MAKEINTRESOURCEW(ICO_MAIN);
+    psh.u.pszIcon = MAKEINTRESOURCEW(ICO_MAIN);
     psh.pszCaption = app_title;
     psh.nPages = 1;
-    psh.ppsp = &psp;
+    psh.u3.ppsp = &psp;
     psh.pfnCallback = propsheet_callback;
-    psh.nStartPage = 0;
+    psh.u2.nStartPage = 0;
 
     /* Display the property sheet */
     PropertySheetW (&psh);

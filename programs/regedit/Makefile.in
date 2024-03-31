@@ -4,7 +4,7 @@ DELAYIMPORTS = shlwapi shell32 comdlg32 comctl32 user32 gdi32
 
 EXTRADLLFLAGS = -mwindows -municode
 
-SOURCES = \
+C_SRCS = \
 	about.c \
 	childwnd.c \
 	edit.c \
@@ -13,8 +13,11 @@ SOURCES = \
 	listview.c \
 	main.c \
 	regedit.c \
-	regedit.man.in \
-	regedit.rc \
-	regedit.svg \
 	regproc.c \
 	treeview.c
+
+RC_SRCS = regedit.rc
+
+MANPAGES = regedit.man.in
+
+SVG_SRCS = regedit.svg

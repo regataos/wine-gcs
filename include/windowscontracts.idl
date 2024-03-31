@@ -30,9 +30,4 @@ namespace Windows {
         apicontract UniversalApiContract
         {};
     }
-    namespace Phone {
-        [contractversion(1)]
-        apicontract PhoneContract
-        {};
-    }
 }

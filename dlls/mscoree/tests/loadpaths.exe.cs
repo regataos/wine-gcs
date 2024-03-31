@@ -16,28 +16,13 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-using System;
-
 namespace LoadPaths
 {
     public static class Test
     {
-        public static int RunExternal()
-        {
-            return new Test2().Foo();
-        }
-    }
-
-    public static class MainClass
-    {
         static int Main(string[] args)
         {
-            try {
-                return Test.RunExternal();
-            }
-            catch {
-                return 1;
-            }
+	     return new Test2().Foo();
         }
     }
 }

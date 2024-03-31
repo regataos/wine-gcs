@@ -359,7 +359,7 @@ static char *build_command_line( char **argv )
         return NULL;
 
     p = cmd_line;
-    *p++ = (len < 256) ? len : '\xff';
+    *p++ = (len < 256) ? len : 255;
     for (arg = argv; *arg; arg++)
     {
         BOOL has_space,has_quote;

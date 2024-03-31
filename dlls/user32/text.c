@@ -384,9 +384,9 @@ static void TEXT_WordBreak (HDC hdc, WCHAR *str, unsigned int max_str,
     }
     else
     {
-        while (i > 0 && !sla[(--i)+1].fWhiteSpace) p--;
+        while (i > 0 && !sla[(--i)+1].fSoftBreak) p--;
         p--;
-        word_fits = (i != 0 || sla[i+1].fWhiteSpace );
+        word_fits = (i != 0 || sla[i+1].fSoftBreak );
     }
 
     /* If there was one. */
@@ -874,7 +874,8 @@ INT WINAPI DrawTextExW( HDC hdc, LPWSTR str, INT i_count,
     int len, lh, count=i_count;
     TEXTMETRICW tm;
     int lmargin = 0, rmargin = 0;
-    int x, y, width;
+    int x = rect->left, y = rect->top;
+    int width = rect->right - rect->left;
     int max_width = 0;
     int last_line;
     int tabwidth /* to keep gcc happy */ = 0;
@@ -896,13 +897,7 @@ INT WINAPI DrawTextExW( HDC hdc, LPWSTR str, INT i_count,
     if (flags & DT_SINGLELINE)
         flags &= ~DT_WORDBREAK;
 
-    if (!GetTextMetricsW(hdc, &tm))
-        return 0;
-
-    x = rect->left;
-    y = rect->top;
-    width = rect->right - rect->left;
-
+    GetTextMetricsW(hdc, &tm);
     if (flags & DT_EXTERNALLEADING)
 	lh = tm.tmHeight + tm.tmExternalLeading;
     else
@@ -1089,24 +1084,18 @@ INT WINAPI DrawTextExA( HDC hdc, LPSTR str, INT count,
    DWORD wmax;
    DWORD amax;
    UINT cp;
-   TEXTMETRICA tm;
-
-   if (!GetTextMetricsA(hdc, &tm))
-   {
-       SetLastError(ERROR_INVALID_HANDLE);
-       return 0;
-   }
 
    if (!count) return 0;
    if (!str && count > 0) return 0;
    if( !str || ((count == -1) && !(count = strlen(str))))
    {
         int lh;
+        TEXTMETRICA tm;
 
         if (dtp && dtp->cbSize != sizeof(DRAWTEXTPARAMS))
             return 0;
 
-
+        GetTextMetricsA(hdc, &tm);
         if (flags & DT_EXTERNALLEADING)
             lh = tm.tmHeight + tm.tmExternalLeading;
         else

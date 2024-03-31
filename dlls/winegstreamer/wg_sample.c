@@ -50,6 +50,10 @@ struct sample
     {
         struct
         {
+            IMediaBuffer *buffer;
+        } dmo;
+        struct
+        {
             IMFSample *sample;
             IMFMediaBuffer *buffer;
         } mf;
@@ -57,10 +61,6 @@ struct sample
         {
             IMediaSample *sample;
         } quartz;
-        struct
-        {
-            IMediaBuffer *buffer;
-        } dmo;
     } u;
 };
 
@@ -104,7 +104,7 @@ HRESULT wg_sample_create_mf(IMFSample *mf_sample, struct wg_sample **out)
         goto fail;
 
     IMFSample_AddRef((sample->u.mf.sample = mf_sample));
-    sample->wg_sample.data = (UINT_PTR)buffer;
+    sample->wg_sample.data = buffer;
     sample->wg_sample.size = current_length;
     sample->wg_sample.max_size = max_length;
     sample->ops = &mf_sample_ops;
@@ -159,7 +159,7 @@ HRESULT wg_sample_create_quartz(IMediaSample *media_sample, struct wg_sample **o
         return E_OUTOFMEMORY;
 
     IMediaSample_AddRef((sample->u.quartz.sample = media_sample));
-    sample->wg_sample.data = (UINT_PTR)buffer;
+    sample->wg_sample.data = buffer;
     sample->wg_sample.size = current_length;
     sample->wg_sample.max_size = max_length;
     sample->ops = &quartz_sample_ops;
@@ -182,7 +182,7 @@ static void dmo_sample_destroy(struct wg_sample *wg_sample)
 {
     struct sample *sample = unsafe_dmo_from_wg_sample(wg_sample);
 
-    TRACE_(mfplat)("wg_sample %p.\n", wg_sample);
+    TRACE_(quartz)("wg_sample %p.\n", wg_sample);
 
     IMediaBuffer_Release(sample->u.dmo.buffer);
 }
@@ -194,33 +194,28 @@ static const struct wg_sample_ops dmo_sample_ops =
 
 HRESULT wg_sample_create_dmo(IMediaBuffer *media_buffer, struct wg_sample **out)
 {
-    DWORD length, max_length;
+    DWORD current_length, max_length;
     struct sample *sample;
     BYTE *buffer;
     HRESULT hr;
 
+    if (FAILED(hr = IMediaBuffer_GetBufferAndLength(media_buffer, &buffer, &current_length)))
+        return hr;
+    if (FAILED(hr = IMediaBuffer_GetMaxLength(media_buffer, &max_length)))
+        return hr;
+
     if (!(sample = calloc(1, sizeof(*sample))))
         return E_OUTOFMEMORY;
-    if (FAILED(hr = IMediaBuffer_GetBufferAndLength(media_buffer, &buffer, &length)))
-        goto fail;
-    if (FAILED(hr = IMediaBuffer_GetMaxLength(media_buffer, &max_length)))
-        goto fail;
 
     IMediaBuffer_AddRef((sample->u.dmo.buffer = media_buffer));
-    sample->wg_sample.data = (UINT_PTR)buffer;
-    sample->wg_sample.size = length;
+    sample->wg_sample.data = buffer;
+    sample->wg_sample.size = current_length;
     sample->wg_sample.max_size = max_length;
     sample->ops = &dmo_sample_ops;
 
+    TRACE_(quartz)("Created wg_sample %p for IMediaBuffer %p.\n", &sample->wg_sample, media_buffer);
     *out = &sample->wg_sample;
-    TRACE_(mfplat)("Created wg_sample %p for IMediaBuffer %p.\n", *out, media_buffer);
     return S_OK;
-
-fail:
-    if (sample->u.dmo.buffer)
-        IMediaBuffer_Release(sample->u.dmo.buffer);
-    free(sample);
-    return hr;
 }
 
 void wg_sample_release(struct wg_sample *wg_sample)
@@ -283,7 +278,7 @@ HRESULT wg_sample_queue_create(struct wg_sample_queue **out)
     if (!(queue = calloc(1, sizeof(*queue))))
         return E_OUTOFMEMORY;
 
-    InitializeCriticalSectionEx(&queue->cs, 0, RTL_CRITICAL_SECTION_FLAG_FORCE_DEBUG_INFO);
+    InitializeCriticalSection(&queue->cs);
     queue->cs.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": cs");
     list_init(&queue->samples);
 
@@ -306,11 +301,11 @@ void wg_sample_queue_destroy(struct wg_sample_queue *queue)
 /* These unixlib entry points should not be used directly, they assume samples
  * to be queued and zero-copy support, use the helpers below instead.
  */
-HRESULT wg_transform_push_data(wg_transform_t transform, struct wg_sample *sample);
-HRESULT wg_transform_read_data(wg_transform_t transform, struct wg_sample *sample,
+HRESULT wg_transform_push_data(struct wg_transform *transform, struct wg_sample *sample);
+HRESULT wg_transform_read_data(struct wg_transform *transform, struct wg_sample *sample,
         struct wg_format *format);
 
-HRESULT wg_transform_push_mf(wg_transform_t transform, IMFSample *sample,
+HRESULT wg_transform_push_mf(struct wg_transform *transform, IMFSample *sample,
         struct wg_sample_queue *queue)
 {
     struct wg_sample *wg_sample;
@@ -318,7 +313,7 @@ HRESULT wg_transform_push_mf(wg_transform_t transform, IMFSample *sample,
     UINT32 value;
     HRESULT hr;
 
-    TRACE_(mfplat)("transform %#I64x, sample %p, queue %p.\n", transform, sample, queue);
+    TRACE_(mfplat)("transform %p, sample %p, queue %p.\n", transform, sample, queue);
 
     if (FAILED(hr = wg_sample_create_mf(sample, &wg_sample)))
         return hr;
@@ -345,14 +340,14 @@ HRESULT wg_transform_push_mf(wg_transform_t transform, IMFSample *sample,
     return hr;
 }
 
-HRESULT wg_transform_read_mf(wg_transform_t transform, IMFSample *sample,
+HRESULT wg_transform_read_mf(struct wg_transform *transform, IMFSample *sample,
         DWORD sample_size, struct wg_format *format, DWORD *flags)
 {
     struct wg_sample *wg_sample;
     IMFMediaBuffer *buffer;
     HRESULT hr;
 
-    TRACE_(mfplat)("transform %#I64x, sample %p, format %p, flags %p.\n", transform, sample, format, flags);
+    TRACE_(mfplat)("transform %p, sample %p, format %p, flags %p.\n", transform, sample, format, flags);
 
     if (FAILED(hr = wg_sample_create_mf(sample, &wg_sample)))
         return hr;
@@ -388,14 +383,14 @@ HRESULT wg_transform_read_mf(wg_transform_t transform, IMFSample *sample,
     return hr;
 }
 
-HRESULT wg_transform_push_quartz(wg_transform_t transform, struct wg_sample *wg_sample,
+HRESULT wg_transform_push_quartz(struct wg_transform *transform, struct wg_sample *wg_sample,
         struct wg_sample_queue *queue)
 {
     struct sample *sample = unsafe_quartz_from_wg_sample(wg_sample);
     REFERENCE_TIME start_time, end_time;
     HRESULT hr;
 
-    TRACE_(quartz)("transform %#I64x, wg_sample %p, queue %p.\n", transform, wg_sample, queue);
+    TRACE_(quartz)("transform %p, wg_sample %p, queue %p.\n", transform, wg_sample, queue);
 
     hr = IMediaSample_GetTime(sample->u.quartz.sample, &start_time, &end_time);
     if (SUCCEEDED(hr))
@@ -421,14 +416,14 @@ HRESULT wg_transform_push_quartz(wg_transform_t transform, struct wg_sample *wg_
     return hr;
 }
 
-HRESULT wg_transform_read_quartz(wg_transform_t transform, struct wg_sample *wg_sample)
+HRESULT wg_transform_read_quartz(struct wg_transform *transform, struct wg_sample *wg_sample)
 {
     struct sample *sample = unsafe_quartz_from_wg_sample(wg_sample);
     REFERENCE_TIME start_time, end_time;
     HRESULT hr;
     BOOL value;
 
-    TRACE_(mfplat)("transform %#I64x, wg_sample %p.\n", transform, wg_sample);
+    TRACE_(quartz)("transform %p, wg_sample %p.\n", transform, wg_sample);
 
     if (FAILED(hr = wg_transform_read_data(transform, wg_sample, NULL)))
     {
@@ -462,30 +457,18 @@ HRESULT wg_transform_read_quartz(wg_transform_t transform, struct wg_sample *wg_
     return S_OK;
 }
 
-HRESULT wg_transform_push_dmo(wg_transform_t transform, IMediaBuffer *media_buffer,
-        DWORD flags, REFERENCE_TIME time_stamp, REFERENCE_TIME time_length, struct wg_sample_queue *queue)
+HRESULT wg_transform_push_dmo(struct wg_transform *transform, struct wg_sample *wg_sample,
+        struct wg_sample_queue *queue, REFERENCE_TIME pts, REFERENCE_TIME duration)
 {
-    struct wg_sample *wg_sample;
     HRESULT hr;
 
-    TRACE_(mfplat)("transform %#I64x, media_buffer %p, flags %#lx, time_stamp %s, time_length %s, queue %p.\n",
-            transform, media_buffer, flags, wine_dbgstr_longlong(time_stamp), wine_dbgstr_longlong(time_length), queue);
+    TRACE_(quartz)("transform %p, wg_sample %p, queue %p, pts %I64u, duration %I64u.\n",
+            transform, wg_sample, queue, pts, duration);
 
-    if (FAILED(hr = wg_sample_create_dmo(media_buffer, &wg_sample)))
-        return hr;
-
-    if (flags & DMO_INPUT_DATA_BUFFERF_SYNCPOINT)
-        wg_sample->flags |= WG_SAMPLE_FLAG_SYNC_POINT;
-    if (flags & DMO_INPUT_DATA_BUFFERF_TIME)
-    {
-        wg_sample->flags |= WG_SAMPLE_FLAG_HAS_PTS;
-        wg_sample->pts = time_stamp;
-    }
-    if (flags & DMO_INPUT_DATA_BUFFERF_TIMELENGTH)
-    {
-        wg_sample->flags |= WG_SAMPLE_FLAG_HAS_DURATION;
-        wg_sample->duration = time_length;
-    }
+    wg_sample->pts = pts;
+    wg_sample->flags |= WG_SAMPLE_FLAG_HAS_PTS;
+    wg_sample->duration = duration;
+    wg_sample->flags |= WG_SAMPLE_FLAG_HAS_DURATION;
 
     wg_sample_queue_begin_append(queue, wg_sample);
     hr = wg_transform_push_data(transform, wg_sample);
@@ -494,43 +477,38 @@ HRESULT wg_transform_push_dmo(wg_transform_t transform, IMediaBuffer *media_buff
     return hr;
 }
 
-HRESULT wg_transform_read_dmo(wg_transform_t transform, DMO_OUTPUT_DATA_BUFFER *buffer)
+HRESULT wg_transform_read_dmo(struct wg_transform *transform, struct wg_sample *wg_sample,
+        DWORD *flags, REFERENCE_TIME *pts, REFERENCE_TIME *duration)
 {
-    struct wg_sample *wg_sample;
+    struct sample *sample = unsafe_dmo_from_wg_sample(wg_sample);
     HRESULT hr;
 
-    TRACE_(mfplat)("transform %#I64x, buffer %p.\n", transform, buffer);
-
-    if (FAILED(hr = wg_sample_create_dmo(buffer->pBuffer, &wg_sample)))
-        return hr;
-    wg_sample->size = 0;
+    TRACE_(quartz)("transform %p, wg_sample %p, flags %p, pts %p, duration %p.\n",
+            transform, wg_sample, flags, pts, duration);
 
     if (FAILED(hr = wg_transform_read_data(transform, wg_sample, NULL)))
     {
         if (hr == MF_E_TRANSFORM_STREAM_CHANGE)
-            TRACE_(mfplat)("Stream format changed.\n");
-        wg_sample_release(wg_sample);
+            FIXME("Unexpected stream format change!\n");
         return hr;
     }
 
-    buffer->dwStatus = 0;
+    if (FAILED(hr = IMediaBuffer_SetLength(sample->u.dmo.buffer, wg_sample->size)))
+        return hr;
+
+    *flags = 0;
     if (wg_sample->flags & WG_SAMPLE_FLAG_INCOMPLETE)
-        buffer->dwStatus |= DMO_OUTPUT_DATA_BUFFERF_INCOMPLETE;
+        *flags |= DMO_OUTPUT_DATA_BUFFERF_INCOMPLETE;
     if (wg_sample->flags & WG_SAMPLE_FLAG_HAS_PTS)
     {
-        buffer->dwStatus |= DMO_OUTPUT_DATA_BUFFERF_TIME;
-        buffer->rtTimestamp = wg_sample->pts;
+        *pts = wg_sample->pts;
+        *flags = DMO_OUTPUT_DATA_BUFFERF_TIME;
     }
     if (wg_sample->flags & WG_SAMPLE_FLAG_HAS_DURATION)
     {
-        buffer->dwStatus |= DMO_OUTPUT_DATA_BUFFERF_TIMELENGTH;
-        buffer->rtTimelength = wg_sample->duration;
+        *duration = wg_sample->duration;
+        *flags = DMO_OUTPUT_DATA_BUFFERF_TIMELENGTH;
     }
-    if (wg_sample->flags & WG_SAMPLE_FLAG_SYNC_POINT)
-        buffer->dwStatus |= DMO_OUTPUT_DATA_BUFFERF_SYNCPOINT;
 
-    IMediaBuffer_SetLength(buffer->pBuffer, wg_sample->size);
-
-    wg_sample_release(wg_sample);
-    return hr;
+    return S_OK;
 }

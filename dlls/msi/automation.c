@@ -41,30 +41,33 @@ WINE_DEFAULT_DEBUG_CHANNEL(msi);
 #define REG_INDEX_CLASSES_ROOT 0
 #define REG_INDEX_DYN_DATA 6
 
-struct automation_object;
+typedef struct AutomationObject AutomationObject;
 
-struct tid_id
-{
+/* function that is called from AutomationObject::Invoke, specific to this type of object */
+typedef HRESULT (*auto_invoke_func)(AutomationObject* This,
+    DISPID dispIdMember, REFIID riid, LCID lcid, WORD flags, DISPPARAMS* pDispParams,
+    VARIANT* result, EXCEPINFO* ei, UINT* arg_err);
+/* function that is called from AutomationObject::Release when the object is being freed
+   to free any private data structures (or NULL) */
+typedef void (*auto_free_func)(AutomationObject* This);
+
+typedef struct {
     REFIID riid;
-    /* function that is called from AutomationObject::Invoke, specific to this type of object */
-    HRESULT (*fn_invoke)(struct automation_object *, DISPID, REFIID, LCID, WORD, DISPPARAMS *, VARIANT *,
-                         EXCEPINFO *, UINT *);
-    /* function that is called from AutomationObject::Release when the object is being freed
-       to free any private data structures (or NULL) */
-    void (*fn_free)(struct automation_object *);
-};
+    auto_invoke_func fn_invoke;
+    auto_free_func fn_free;
+} tid_id_t;
 
-static HRESULT database_invoke(struct automation_object*,DISPID,REFIID,LCID,WORD,DISPPARAMS*,VARIANT*,EXCEPINFO*,UINT*);
-static HRESULT installer_invoke(struct automation_object*,DISPID,REFIID,LCID,WORD,DISPPARAMS*,VARIANT*,EXCEPINFO*,UINT*);
-static HRESULT record_invoke(struct automation_object*,DISPID,REFIID,LCID,WORD,DISPPARAMS*,VARIANT*,EXCEPINFO*,UINT*);
-static HRESULT session_invoke(struct automation_object*,DISPID,REFIID,LCID,WORD,DISPPARAMS*,VARIANT*,EXCEPINFO*,UINT*);
-static HRESULT list_invoke(struct automation_object*,DISPID,REFIID,LCID,WORD,DISPPARAMS*,VARIANT*,EXCEPINFO*,UINT*);
-static void    list_free(struct automation_object*);
-static HRESULT summaryinfo_invoke(struct automation_object*,DISPID,REFIID,LCID,WORD,DISPPARAMS*,VARIANT*,EXCEPINFO*,UINT*);
-static HRESULT view_invoke(struct automation_object*,DISPID,REFIID,LCID,WORD,DISPPARAMS*,VARIANT*,EXCEPINFO*,UINT*);
 
-static struct tid_id tid_ids[] =
-{
+static HRESULT database_invoke(AutomationObject*,DISPID,REFIID,LCID,WORD,DISPPARAMS*,VARIANT*,EXCEPINFO*,UINT*);
+static HRESULT installer_invoke(AutomationObject*,DISPID,REFIID,LCID,WORD,DISPPARAMS*,VARIANT*,EXCEPINFO*,UINT*);
+static HRESULT record_invoke(AutomationObject*,DISPID,REFIID,LCID,WORD,DISPPARAMS*,VARIANT*,EXCEPINFO*,UINT*);
+static HRESULT session_invoke(AutomationObject*,DISPID,REFIID,LCID,WORD,DISPPARAMS*,VARIANT*,EXCEPINFO*,UINT*);
+static HRESULT list_invoke(AutomationObject*,DISPID,REFIID,LCID,WORD,DISPPARAMS*,VARIANT*,EXCEPINFO*,UINT*);
+static void    list_free(AutomationObject*);
+static HRESULT summaryinfo_invoke(AutomationObject*,DISPID,REFIID,LCID,WORD,DISPPARAMS*,VARIANT*,EXCEPINFO*,UINT*);
+static HRESULT view_invoke(AutomationObject*,DISPID,REFIID,LCID,WORD,DISPPARAMS*,VARIANT*,EXCEPINFO*,UINT*);
+
+static tid_id_t tid_ids[] = {
     { &DIID_Database,    database_invoke },
     { &DIID_Installer,   installer_invoke },
     { &DIID_Record,      record_invoke },
@@ -134,11 +137,10 @@ void release_typelib(void)
 }
 
 /*
- * struct automation_object - "base" class for all automation objects. For each interface, we implement Invoke
- * function called from AutomationObject::Invoke.
+ * AutomationObject - "base" class for all automation objects. For each interface, we implement Invoke function
+ *                    called from AutomationObject::Invoke.
  */
-struct automation_object
-{
+struct AutomationObject {
     IDispatch IDispatch_iface;
     IProvideMultipleClassInfo IProvideMultipleClassInfo_iface;
     LONG ref;
@@ -150,49 +152,46 @@ struct automation_object
     MSIHANDLE msiHandle;
 };
 
-struct list_object
-{
-    struct automation_object autoobj;
+typedef struct {
+    AutomationObject autoobj;
     int count;
     VARIANT *data;
-};
+} ListObject;
 
 static HRESULT create_database(MSIHANDLE, IDispatch**);
-static HRESULT create_list_enumerator(struct list_object *, void **);
+static HRESULT create_list_enumerator(ListObject*, void**);
 static HRESULT create_summaryinfo(MSIHANDLE, IDispatch**);
 static HRESULT create_view(MSIHANDLE, IDispatch**);
 
-/* struct list_enumerator - IEnumVARIANT implementation for MSI automation lists */
-struct list_enumerator
-{
+/* ListEnumerator - IEnumVARIANT implementation for MSI automation lists */
+typedef struct {
     IEnumVARIANT IEnumVARIANT_iface;
     LONG ref;
 
-    /* Current position and pointer to struct automation_object that stores actual data */
+    /* Current position and pointer to AutomationObject that stores actual data */
     ULONG pos;
-    struct list_object *list;
-};
+    ListObject *list;
+} ListEnumerator;
 
-struct session_object
-{
-    struct automation_object autoobj;
+typedef struct {
+    AutomationObject autoobj;
     IDispatch *installer;
-};
+} SessionObject;
 
-static inline struct automation_object *impl_from_IProvideMultipleClassInfo( IProvideMultipleClassInfo *iface )
+static inline AutomationObject *impl_from_IProvideMultipleClassInfo( IProvideMultipleClassInfo *iface )
 {
-    return CONTAINING_RECORD(iface, struct automation_object, IProvideMultipleClassInfo_iface);
+    return CONTAINING_RECORD(iface, AutomationObject, IProvideMultipleClassInfo_iface);
 }
 
-static inline struct automation_object *impl_from_IDispatch( IDispatch *iface )
+static inline AutomationObject *impl_from_IDispatch( IDispatch *iface )
 {
-    return CONTAINING_RECORD(iface, struct automation_object, IDispatch_iface);
+    return CONTAINING_RECORD(iface, AutomationObject, IDispatch_iface);
 }
 
 /* AutomationObject methods */
 static HRESULT WINAPI AutomationObject_QueryInterface(IDispatch* iface, REFIID riid, void** ppvObject)
 {
-    struct automation_object *This = impl_from_IDispatch(iface);
+    AutomationObject *This = impl_from_IDispatch(iface);
 
     TRACE("(%p/%p)->(%s,%p)\n", iface, This, debugstr_guid(riid), ppvObject);
 
@@ -222,7 +221,7 @@ static HRESULT WINAPI AutomationObject_QueryInterface(IDispatch* iface, REFIID r
 
 static ULONG WINAPI AutomationObject_AddRef(IDispatch* iface)
 {
-    struct automation_object *This = impl_from_IDispatch(iface);
+    AutomationObject *This = impl_from_IDispatch(iface);
 
     TRACE("(%p/%p)\n", iface, This);
 
@@ -231,7 +230,7 @@ static ULONG WINAPI AutomationObject_AddRef(IDispatch* iface)
 
 static ULONG WINAPI AutomationObject_Release(IDispatch* iface)
 {
-    struct automation_object *This = impl_from_IDispatch(iface);
+    AutomationObject *This = impl_from_IDispatch(iface);
     ULONG ref = InterlockedDecrement(&This->ref);
 
     TRACE("(%p/%p)\n", iface, This);
@@ -250,7 +249,7 @@ static HRESULT WINAPI AutomationObject_GetTypeInfoCount(
         IDispatch* iface,
         UINT* pctinfo)
 {
-    struct automation_object *This = impl_from_IDispatch(iface);
+    AutomationObject *This = impl_from_IDispatch(iface);
 
     TRACE("(%p/%p)->(%p)\n", iface, This, pctinfo);
     *pctinfo = 1;
@@ -263,7 +262,7 @@ static HRESULT WINAPI AutomationObject_GetTypeInfo(
         LCID lcid,
         ITypeInfo** ppTInfo)
 {
-    struct automation_object *This = impl_from_IDispatch(iface);
+    AutomationObject *This = impl_from_IDispatch(iface);
     HRESULT hr;
 
     TRACE( "(%p/%p)->(%u, %ld, %p)\n", iface, This, iTInfo, lcid, ppTInfo );
@@ -284,7 +283,7 @@ static HRESULT WINAPI AutomationObject_GetIDsOfNames(
         LCID lcid,
         DISPID* rgDispId)
 {
-    struct automation_object *This = impl_from_IDispatch(iface);
+    AutomationObject *This = impl_from_IDispatch(iface);
     ITypeInfo *ti;
     HRESULT hr;
 
@@ -325,7 +324,7 @@ static HRESULT WINAPI AutomationObject_Invoke(
         EXCEPINFO* pExcepInfo,
         UINT* puArgErr)
 {
-    struct automation_object *This = impl_from_IDispatch(iface);
+    AutomationObject *This = impl_from_IDispatch(iface);
     HRESULT hr;
     unsigned int uArgErr;
     VARIANT varResultDummy;
@@ -438,25 +437,25 @@ static HRESULT WINAPI ProvideMultipleClassInfo_QueryInterface(
   REFIID     riid,
   VOID**     ppvoid)
 {
-    struct automation_object *This = impl_from_IProvideMultipleClassInfo(iface);
+    AutomationObject *This = impl_from_IProvideMultipleClassInfo(iface);
     return IDispatch_QueryInterface(&This->IDispatch_iface, riid, ppvoid);
 }
 
 static ULONG WINAPI ProvideMultipleClassInfo_AddRef(IProvideMultipleClassInfo* iface)
 {
-    struct automation_object *This = impl_from_IProvideMultipleClassInfo(iface);
+    AutomationObject *This = impl_from_IProvideMultipleClassInfo(iface);
     return IDispatch_AddRef(&This->IDispatch_iface);
 }
 
 static ULONG WINAPI ProvideMultipleClassInfo_Release(IProvideMultipleClassInfo* iface)
 {
-    struct automation_object *This = impl_from_IProvideMultipleClassInfo(iface);
+    AutomationObject *This = impl_from_IProvideMultipleClassInfo(iface);
     return IDispatch_Release(&This->IDispatch_iface);
 }
 
 static HRESULT WINAPI ProvideMultipleClassInfo_GetClassInfo(IProvideMultipleClassInfo* iface, ITypeInfo** ppTI)
 {
-    struct automation_object *This = impl_from_IProvideMultipleClassInfo(iface);
+    AutomationObject *This = impl_from_IProvideMultipleClassInfo(iface);
     HRESULT hr;
 
     TRACE("(%p/%p)->(%p)\n", iface, This, ppTI);
@@ -470,7 +469,7 @@ static HRESULT WINAPI ProvideMultipleClassInfo_GetClassInfo(IProvideMultipleClas
 
 static HRESULT WINAPI ProvideMultipleClassInfo_GetGUID(IProvideMultipleClassInfo* iface, DWORD dwGuidKind, GUID* pGUID)
 {
-    struct automation_object *This = impl_from_IProvideMultipleClassInfo(iface);
+    AutomationObject *This = impl_from_IProvideMultipleClassInfo(iface);
     TRACE("(%p/%p)->(%lu, %s)\n", iface, This, dwGuidKind, debugstr_guid(pGUID));
 
     if (dwGuidKind != GUIDKIND_DEFAULT_SOURCE_DISP_IID)
@@ -483,7 +482,7 @@ static HRESULT WINAPI ProvideMultipleClassInfo_GetGUID(IProvideMultipleClassInfo
 
 static HRESULT WINAPI ProvideMultipleClassInfo_GetMultiTypeInfoCount(IProvideMultipleClassInfo* iface, ULONG* pcti)
 {
-    struct automation_object *This = impl_from_IProvideMultipleClassInfo(iface);
+    AutomationObject *This = impl_from_IProvideMultipleClassInfo(iface);
 
     TRACE("(%p/%p)->(%p)\n", iface, This, pcti);
     *pcti = 1;
@@ -499,7 +498,7 @@ static HRESULT WINAPI ProvideMultipleClassInfo_GetInfoOfIndex(IProvideMultipleCl
         IID* piidPrimary,
         IID* piidSource)
 {
-    struct automation_object *This = impl_from_IProvideMultipleClassInfo(iface);
+    AutomationObject *This = impl_from_IProvideMultipleClassInfo(iface);
 
     TRACE("(%p/%p)->(%lu, %#lx, %p, %p, %p, %p, %p)\n", iface, This, iti, dwFlags, ti, pdwTIFlags, pcdispidReserved,
           piidPrimary, piidSource);
@@ -542,7 +541,7 @@ static const IProvideMultipleClassInfoVtbl ProvideMultipleClassInfoVtbl =
     ProvideMultipleClassInfo_GetInfoOfIndex
 };
 
-static void init_automation_object(struct automation_object *This, MSIHANDLE msiHandle, tid_t tid)
+static void init_automation_object(AutomationObject *This, MSIHANDLE msiHandle, tid_t tid)
 {
     TRACE("%p, %lu, %s\n", This, msiHandle, debugstr_guid(get_riid_from_tid(tid)));
 
@@ -557,15 +556,15 @@ static void init_automation_object(struct automation_object *This, MSIHANDLE msi
  * ListEnumerator methods
  */
 
-static inline struct list_enumerator *impl_from_IEnumVARIANT(IEnumVARIANT* iface)
+static inline ListEnumerator *impl_from_IEnumVARIANT(IEnumVARIANT* iface)
 {
-    return CONTAINING_RECORD(iface, struct list_enumerator, IEnumVARIANT_iface);
+    return CONTAINING_RECORD(iface, ListEnumerator, IEnumVARIANT_iface);
 }
 
 static HRESULT WINAPI ListEnumerator_QueryInterface(IEnumVARIANT* iface, REFIID riid,
         void** ppvObject)
 {
-    struct list_enumerator *This = impl_from_IEnumVARIANT(iface);
+    ListEnumerator *This = impl_from_IEnumVARIANT(iface);
 
     TRACE("(%p/%p)->(%s,%p)\n", iface, This, debugstr_guid(riid), ppvObject);
 
@@ -591,7 +590,7 @@ static HRESULT WINAPI ListEnumerator_QueryInterface(IEnumVARIANT* iface, REFIID 
 
 static ULONG WINAPI ListEnumerator_AddRef(IEnumVARIANT* iface)
 {
-    struct list_enumerator *This = impl_from_IEnumVARIANT(iface);
+    ListEnumerator *This = impl_from_IEnumVARIANT(iface);
 
     TRACE("(%p/%p)\n", iface, This);
 
@@ -600,7 +599,7 @@ static ULONG WINAPI ListEnumerator_AddRef(IEnumVARIANT* iface)
 
 static ULONG WINAPI ListEnumerator_Release(IEnumVARIANT* iface)
 {
-    struct list_enumerator *This = impl_from_IEnumVARIANT(iface);
+    ListEnumerator *This = impl_from_IEnumVARIANT(iface);
     ULONG ref = InterlockedDecrement(&This->ref);
 
     TRACE("(%p/%p)\n", iface, This);
@@ -617,7 +616,7 @@ static ULONG WINAPI ListEnumerator_Release(IEnumVARIANT* iface)
 static HRESULT WINAPI ListEnumerator_Next(IEnumVARIANT* iface, ULONG celt, VARIANT* rgVar,
         ULONG* fetched)
 {
-    struct list_enumerator *This = impl_from_IEnumVARIANT(iface);
+    ListEnumerator *This = impl_from_IEnumVARIANT(iface);
     ULONG i, local;
 
     TRACE("%p, %lu, %p, %p\n", iface, celt, rgVar, fetched);
@@ -641,7 +640,7 @@ static HRESULT WINAPI ListEnumerator_Next(IEnumVARIANT* iface, ULONG celt, VARIA
 
 static HRESULT WINAPI ListEnumerator_Skip(IEnumVARIANT* iface, ULONG celt)
 {
-    struct list_enumerator *This = impl_from_IEnumVARIANT(iface);
+    ListEnumerator *This = impl_from_IEnumVARIANT(iface);
 
     TRACE("%p, %lu\n", iface, celt);
 
@@ -657,7 +656,7 @@ static HRESULT WINAPI ListEnumerator_Skip(IEnumVARIANT* iface, ULONG celt)
 
 static HRESULT WINAPI ListEnumerator_Reset(IEnumVARIANT* iface)
 {
-    struct list_enumerator *This = impl_from_IEnumVARIANT(iface);
+    ListEnumerator *This = impl_from_IEnumVARIANT(iface);
 
     TRACE("(%p)\n", iface);
 
@@ -667,7 +666,7 @@ static HRESULT WINAPI ListEnumerator_Reset(IEnumVARIANT* iface)
 
 static HRESULT WINAPI ListEnumerator_Clone(IEnumVARIANT* iface, IEnumVARIANT **ppEnum)
 {
-    struct list_enumerator *This = impl_from_IEnumVARIANT(iface);
+    ListEnumerator *This = impl_from_IEnumVARIANT(iface);
     HRESULT hr;
 
     TRACE("(%p,%p)\n", iface, ppEnum);
@@ -698,13 +697,13 @@ static const struct IEnumVARIANTVtbl ListEnumerator_Vtbl =
 };
 
 /* Create a list enumerator, placing the result in the pointer ppObj.  */
-static HRESULT create_list_enumerator(struct list_object *list, void **ppObj)
+static HRESULT create_list_enumerator(ListObject *list, void **ppObj)
 {
-    struct list_enumerator *object;
+    ListEnumerator *object;
 
     TRACE("(%p, %p)\n", list, ppObj);
 
-    object = malloc(sizeof(*object));
+    object = malloc(sizeof(ListEnumerator));
 
     /* Set all the VTable references */
     object->IEnumVARIANT_iface.lpVtbl = &ListEnumerator_Vtbl;
@@ -753,7 +752,7 @@ static HRESULT DispGetParam_CopyOnly(
 }
 
 static HRESULT summaryinfo_invoke(
-        struct automation_object *This,
+        AutomationObject* This,
         DISPID dispIdMember,
         REFIID riid,
         LCID lcid,
@@ -905,7 +904,7 @@ static HRESULT summaryinfo_invoke(
 }
 
 static HRESULT record_invoke(
-        struct automation_object *This,
+        AutomationObject* This,
         DISPID dispIdMember,
         REFIID riid,
         LCID lcid,
@@ -997,7 +996,7 @@ static HRESULT record_invoke(
 
 static HRESULT create_record(MSIHANDLE msiHandle, IDispatch **disp)
 {
-    struct automation_object *record;
+    AutomationObject *record;
 
     record = malloc(sizeof(*record));
     if (!record) return E_OUTOFMEMORY;
@@ -1010,7 +1009,7 @@ static HRESULT create_record(MSIHANDLE msiHandle, IDispatch **disp)
 }
 
 static HRESULT list_invoke(
-        struct automation_object *This,
+        AutomationObject* This,
         DISPID dispIdMember,
         REFIID riid,
         LCID lcid,
@@ -1020,7 +1019,7 @@ static HRESULT list_invoke(
         EXCEPINFO* pExcepInfo,
         UINT* puArgErr)
 {
-    struct list_object *list = CONTAINING_RECORD(This, struct list_object, autoobj);
+    ListObject *list = CONTAINING_RECORD(This, ListObject, autoobj);
     IUnknown *pUnk = NULL;
     HRESULT hr;
 
@@ -1066,9 +1065,9 @@ static HRESULT list_invoke(
     return S_OK;
 }
 
-static void list_free(struct automation_object *This)
+static void list_free(AutomationObject *This)
 {
-    struct list_object *list = CONTAINING_RECORD(This, struct list_object, autoobj);
+    ListObject *list = CONTAINING_RECORD(This, ListObject, autoobj);
     int i;
 
     for (i = 0; i < list->count; i++)
@@ -1106,11 +1105,11 @@ static HRESULT get_products_count(const WCHAR *product, int *len)
 
 static HRESULT create_list(const WCHAR *product, IDispatch **dispatch)
 {
-    struct list_object *list;
+    ListObject *list;
     HRESULT hr;
     int i;
 
-    list = calloc(1, sizeof(*list));
+    list = calloc(1, sizeof(ListObject));
     if (!list) return E_OUTOFMEMORY;
 
     init_automation_object(&list->autoobj, 0, StringList_tid);
@@ -1152,7 +1151,7 @@ static HRESULT create_list(const WCHAR *product, IDispatch **dispatch)
 }
 
 static HRESULT view_invoke(
-        struct automation_object *This,
+        AutomationObject* This,
         DISPID dispIdMember,
         REFIID riid,
         LCID lcid,
@@ -1177,7 +1176,7 @@ static HRESULT view_invoke(
             {
                 hr = DispGetParam(pDispParams, 0, VT_DISPATCH, &varg0, puArgErr);
                 if (SUCCEEDED(hr) && V_DISPATCH(&varg0) != NULL)
-                    MsiViewExecute(This->msiHandle, ((struct automation_object *)V_DISPATCH(&varg0))->msiHandle);
+                    MsiViewExecute(This->msiHandle, ((AutomationObject *)V_DISPATCH(&varg0))->msiHandle);
                 else
                     MsiViewExecute(This->msiHandle, 0);
             }
@@ -1212,8 +1211,7 @@ static HRESULT view_invoke(
                 hr = DispGetParam(pDispParams, 1, VT_DISPATCH, &varg1, puArgErr);
                 if (FAILED(hr)) return hr;
                 if (!V_DISPATCH(&varg1)) return DISP_E_EXCEPTION;
-                if ((ret = MsiViewModify(This->msiHandle, V_I4(&varg0),
-                                         ((struct automation_object *)V_DISPATCH(&varg1))->msiHandle)) != ERROR_SUCCESS)
+                if ((ret = MsiViewModify(This->msiHandle, V_I4(&varg0), ((AutomationObject *)V_DISPATCH(&varg1))->msiHandle)) != ERROR_SUCCESS)
                 {
                     VariantClear(&varg1);
                     ERR("MsiViewModify returned %d\n", ret);
@@ -1257,7 +1255,7 @@ static HRESULT DatabaseImpl_LastErrorRecord(WORD wFlags,
 }
 
 HRESULT database_invoke(
-        struct automation_object *This,
+        AutomationObject* This,
         DISPID dispIdMember,
         REFIID riid,
         LCID lcid,
@@ -1342,7 +1340,7 @@ HRESULT database_invoke(
 }
 
 static HRESULT session_invoke(
-        struct automation_object *This,
+        AutomationObject* This,
         DISPID dispIdMember,
         REFIID riid,
         LCID lcid,
@@ -1352,7 +1350,7 @@ static HRESULT session_invoke(
         EXCEPINFO* pExcepInfo,
         UINT* puArgErr)
 {
-    struct session_object *session = CONTAINING_RECORD(This, struct session_object, autoobj);
+    SessionObject *session = CONTAINING_RECORD(This, SessionObject, autoobj);
     WCHAR *szString;
     DWORD dwLen = 0;
     MSIHANDLE msiHandle;
@@ -1523,7 +1521,7 @@ static HRESULT session_invoke(
 
             V_VT(pVarResult) = VT_I4;
             V_I4(pVarResult) =
-                MsiProcessMessage(This->msiHandle, V_I4(&varg0), ((struct automation_object *)V_DISPATCH(&varg1))->msiHandle);
+                MsiProcessMessage(This->msiHandle, V_I4(&varg0), ((AutomationObject *)V_DISPATCH(&varg1))->msiHandle);
             break;
 
         case DISPID_SESSION_SETINSTALLLEVEL:
@@ -1684,7 +1682,7 @@ static HRESULT InstallerImpl_CreateRecord(WORD wFlags,
     return create_record(hrec, &V_DISPATCH(pVarResult));
 }
 
-static HRESULT InstallerImpl_OpenPackage(struct automation_object *This,
+static HRESULT InstallerImpl_OpenPackage(AutomationObject* This,
                                          WORD wFlags,
                                          DISPPARAMS* pDispParams,
                                          VARIANT* pVarResult,
@@ -2321,7 +2319,7 @@ static HRESULT InstallerImpl_RelatedProducts(WORD flags,
 }
 
 static HRESULT installer_invoke(
-        struct automation_object *This,
+        AutomationObject* This,
         DISPID dispIdMember,
         REFIID riid,
         LCID lcid,
@@ -2422,14 +2420,14 @@ static HRESULT installer_invoke(
 
 HRESULT create_msiserver(IUnknown *outer, void **ppObj)
 {
-    struct automation_object *installer;
+    AutomationObject *installer;
 
     TRACE("(%p %p)\n", outer, ppObj);
 
     if (outer)
         return CLASS_E_NOAGGREGATION;
 
-    installer = malloc(sizeof(*installer));
+    installer = malloc(sizeof(AutomationObject));
     if (!installer) return E_OUTOFMEMORY;
 
     init_automation_object(installer, 0, Installer_tid);
@@ -2441,9 +2439,9 @@ HRESULT create_msiserver(IUnknown *outer, void **ppObj)
 
 HRESULT create_session(MSIHANDLE msiHandle, IDispatch *installer, IDispatch **disp)
 {
-    struct session_object *session;
+    SessionObject *session;
 
-    session = malloc(sizeof(*session));
+    session = malloc(sizeof(SessionObject));
     if (!session) return E_OUTOFMEMORY;
 
     init_automation_object(&session->autoobj, msiHandle, Session_tid);
@@ -2456,11 +2454,11 @@ HRESULT create_session(MSIHANDLE msiHandle, IDispatch *installer, IDispatch **di
 
 static HRESULT create_database(MSIHANDLE msiHandle, IDispatch **dispatch)
 {
-    struct automation_object *database;
+    AutomationObject *database;
 
     TRACE("%lu %p\n", msiHandle, dispatch);
 
-    database = malloc(sizeof(*database));
+    database = malloc(sizeof(AutomationObject));
     if (!database) return E_OUTOFMEMORY;
 
     init_automation_object(database, msiHandle, Database_tid);
@@ -2472,11 +2470,11 @@ static HRESULT create_database(MSIHANDLE msiHandle, IDispatch **dispatch)
 
 static HRESULT create_view(MSIHANDLE msiHandle, IDispatch **dispatch)
 {
-    struct automation_object *view;
+    AutomationObject *view;
 
     TRACE("%lu %p\n", msiHandle, dispatch);
 
-    view = malloc(sizeof(*view));
+    view = malloc(sizeof(AutomationObject));
     if (!view) return E_OUTOFMEMORY;
 
     init_automation_object(view, msiHandle, View_tid);
@@ -2488,7 +2486,7 @@ static HRESULT create_view(MSIHANDLE msiHandle, IDispatch **dispatch)
 
 static HRESULT create_summaryinfo(MSIHANDLE msiHandle, IDispatch **disp)
 {
-    struct automation_object *info;
+    AutomationObject *info;
 
     info = malloc(sizeof(*info));
     if (!info) return E_OUTOFMEMORY;

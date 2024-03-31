@@ -366,7 +366,7 @@ HRESULT async_action_create( IInspectable *invoker, async_action_callback callba
 
     if (invoker) IInspectable_AddRef((impl->invoker = invoker));
 
-    InitializeCriticalSectionEx(&impl->cs, 0, RTL_CRITICAL_SECTION_FLAG_FORCE_DEBUG_INFO);
+    InitializeCriticalSection(&impl->cs);
     impl->cs.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": async_action.cs");
 
     /* AddRef to keep the obj alive in the callback. */
@@ -490,9 +490,18 @@ static HRESULT WINAPI async_inspectable_put_Completed( IAsyncOperation_IInspecta
                                                        IAsyncOperationCompletedHandler_IInspectable *handler )
 {
     struct async_inspectable *impl = impl_from_IAsyncOperation_IInspectable(iface);
+    const char *var = getenv("SteamAppId");
     HRESULT hr = S_OK;
 
     TRACE("iface %p, handler %p.\n", iface, handler);
+
+    /*
+     * HACK: Forza Horizon 5 will segfault when trying to get an interface if
+     * we invoke the handler, so we should just return S_OK and let it hang
+     * indefinitely.
+     */
+    if (var && !strcmp(var, "1551360"))
+        return S_OK;
 
     EnterCriticalSection(&impl->cs);
     if (impl->status == Closed)
@@ -745,7 +754,7 @@ HRESULT async_operation_inspectable_create( const GUID *iid,
 
     if (invoker) IInspectable_AddRef((impl->invoker = invoker));
 
-    InitializeCriticalSectionEx(&impl->cs, 0, RTL_CRITICAL_SECTION_FLAG_FORCE_DEBUG_INFO);
+    InitializeCriticalSection(&impl->cs);
     impl->cs.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": async_operation.cs");
 
     /* AddRef to keep the obj alive in the callback. */

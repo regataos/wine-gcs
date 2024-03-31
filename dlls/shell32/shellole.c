@@ -24,6 +24,8 @@
 #include <string.h>
 
 #define COBJMACROS
+#define NONAMELESSUNION
+
 #include "windef.h"
 #include "winbase.h"
 #include "shellapi.h"
@@ -70,7 +72,7 @@ static const struct {
 	{&CLSID_MyComputer,	ISF_MyComputer_Constructor},
 	{&CLSID_MyDocuments,    MyDocuments_Constructor},
 	{&CLSID_NetworkPlaces,  ISF_NetworkPlaces_Constructor},
-	{&CLSID_NewMenu,        new_menu_create},
+	{&CLSID_NewMenu,        NewMenu_Constructor},
 	{&CLSID_Printers,       Printers_Constructor},
 	{&CLSID_QueryAssociations, QueryAssociations_Constructor},
 	{&CLSID_RecycleBin,     RecycleBin_Constructor},
@@ -698,7 +700,7 @@ HRESULT WINAPI SHPropStgCreate(IPropertySetStorage *psstg, REFFMTID fmtid,
 
         if(puCodePage) {
             prop.ulKind = PRSPEC_PROPID;
-            prop.propid = PID_CODEPAGE;
+            prop.u.propid = PID_CODEPAGE;
             hres = IPropertyStorage_ReadMultiple(*ppstg, 1, &prop, &ret);
             if(FAILED(hres) || ret.vt!=VT_I2)
                 *puCodePage = 0;
@@ -731,7 +733,7 @@ HRESULT WINAPI SHPropStgReadMultiple(IPropertyStorage *pps, UINT uCodePage,
         PROPVARIANT ret;
 
         prop.ulKind = PRSPEC_PROPID;
-        prop.propid = PID_CODEPAGE;
+        prop.u.propid = PID_CODEPAGE;
         hres = IPropertyStorage_ReadMultiple(pps, 1, &prop, &ret);
         if(FAILED(hres) || ret.vt!=VT_I2)
             return S_OK;
@@ -770,7 +772,7 @@ HRESULT WINAPI SHPropStgWriteMultiple(IPropertyStorage *pps, UINT *uCodePage,
         PROPVARIANT ret;
 
         prop.ulKind = PRSPEC_PROPID;
-        prop.propid = PID_CODEPAGE;
+        prop.u.propid = PID_CODEPAGE;
         hres = IPropertyStorage_ReadMultiple(pps, 1, &prop, &ret);
         if(FAILED(hres))
             return hres;

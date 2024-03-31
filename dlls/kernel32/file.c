@@ -24,6 +24,8 @@
 #include <stdio.h>
 #include <errno.h>
 
+#define NONAMELESSUNION
+#define NONAMELESSSTRUCT
 #include "winerror.h"
 #include "ntstatus.h"
 #define WIN32_NO_STATUS

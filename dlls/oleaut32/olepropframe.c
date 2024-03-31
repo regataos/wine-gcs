@@ -22,6 +22,8 @@
 #include <stdarg.h>
 
 #define COBJMACROS
+#define NONAMELESSUNION
+
 #include "windef.h"
 #include "winbase.h"
 #include "wingdi.h"
@@ -242,14 +244,14 @@ HRESULT WINAPI OleCreatePropertyFrameIndirect(LPOCPFIPARAMS lpParams)
         property_sheet.pszCaption = lpParams->lpszCaption;
     }
 
-    property_sheet.phpage = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY,
+    property_sheet.u3.phpage = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY,
             lpParams->cPages*sizeof(HPROPSHEETPAGE));
     property_page = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY,
             lpParams->cPages*sizeof(IPropertyPage*));
     dialogs = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY,
             lpParams->cPages*sizeof(*dialogs));
-    if(!property_sheet.phpage || !property_page || !dialogs) {
-        HeapFree(GetProcessHeap(), 0, property_sheet.phpage);
+    if(!property_sheet.u3.phpage || !property_page || !dialogs) {
+        HeapFree(GetProcessHeap(), 0, property_sheet.u3.phpage);
         HeapFree(GetProcessHeap(), 0, property_page);
         HeapFree(GetProcessHeap(), 0, dialogs);
         return E_OUTOFMEMORY;
@@ -293,11 +295,11 @@ HRESULT WINAPI OleCreatePropertyFrameIndirect(LPOCPFIPARAMS lpParams)
         dialogs[i].template.cx = MulDiv(page_info.size.cx, 4, font_width);
         dialogs[i].template.cy = MulDiv(page_info.size.cy, 8, font_height);
 
-        property_sheet_page.pResource = &dialogs[i].template;
+        property_sheet_page.u.pResource = &dialogs[i].template;
         property_sheet_page.lParam = (LPARAM)property_page[i];
         property_sheet_page.pszTitle = page_info.pszTitle;
 
-        property_sheet.phpage[property_sheet.nPages++] =
+        property_sheet.u3.phpage[property_sheet.nPages++] =
             CreatePropertySheetPageW(&property_sheet_page);
     }
 
@@ -310,7 +312,7 @@ HRESULT WINAPI OleCreatePropertyFrameIndirect(LPOCPFIPARAMS lpParams)
 
     HeapFree(GetProcessHeap(), 0, dialogs);
     HeapFree(GetProcessHeap(), 0, property_page);
-    HeapFree(GetProcessHeap(), 0, property_sheet.phpage);
+    HeapFree(GetProcessHeap(), 0, property_sheet.u3.phpage);
     return S_OK;
 }
 

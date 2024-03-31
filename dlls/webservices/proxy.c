@@ -62,7 +62,7 @@ static struct proxy *alloc_proxy(void)
     if (!(ret = calloc( 1, size ))) return NULL;
 
     ret->magic      = PROXY_MAGIC;
-    InitializeCriticalSectionEx( &ret->cs, 0, RTL_CRITICAL_SECTION_FLAG_FORCE_DEBUG_INFO );
+    InitializeCriticalSection( &ret->cs );
     ret->cs.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": proxy.cs");
 
     prop_init( proxy_props, count, ret->prop, &ret[1] );

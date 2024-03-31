@@ -3,5 +3,4 @@ IMPORTS   = msvfw32
 
 EXTRADLLFLAGS = -mconsole -municode
 
-SOURCES = \
-	icinfo.c
+C_SRCS = icinfo.c

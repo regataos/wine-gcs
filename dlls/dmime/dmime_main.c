@@ -120,7 +120,7 @@ static IClassFactoryImpl ParamControlTrack_CF = {{&classfactory_vtbl}, create_dm
 static IClassFactoryImpl MarkerTrack_CF = {{&classfactory_vtbl}, create_dmmarkertrack};
 static IClassFactoryImpl LyricsTrack_CF = {{&classfactory_vtbl}, create_dmlyricstrack};
 static IClassFactoryImpl SegTriggerTrack_CF = {{&classfactory_vtbl}, create_dmsegtriggertrack};
-static IClassFactoryImpl AudioPathConfig_CF = {{&classfactory_vtbl}, create_dmaudiopath_config};
+static IClassFactoryImpl AudioPath_CF = {{&classfactory_vtbl}, create_dmaudiopath};
 static IClassFactoryImpl WaveTrack_CF = {{&classfactory_vtbl}, create_dmwavetrack};
 
 
@@ -182,7 +182,7 @@ HRESULT WINAPI DllGetClassObject(REFCLSID rclsid, REFIID riid, LPVOID *ppv)
 		return S_OK;
         } else if (IsEqualCLSID (rclsid, &CLSID_DirectMusicAudioPathConfig) &&
                    IsEqualIID (riid, &IID_IClassFactory)) {
-                *ppv = &AudioPathConfig_CF;
+                *ppv = &AudioPath_CF;
 		IClassFactory_AddRef((IClassFactory*)*ppv);
 		return S_OK;
 	} else if (IsEqualCLSID (rclsid, &CLSID_DirectMusicWaveTrack) && IsEqualIID (riid, &IID_IClassFactory)) {

@@ -1,7 +1,7 @@
 1 stub -noname SHCreateReadOnlySharedMemoryStream
 @ stdcall CommandLineToArgvW(wstr ptr)
 @ stub CreateRandomAccessStreamOnFile
-@ stdcall CreateRandomAccessStreamOverStream(ptr long ptr ptr)
+@ stub CreateRandomAccessStreamOverStream
 @ stub CreateStreamOverRandomAccessStream
 @ stdcall -private DllCanUnloadNow()
 @ stub DllGetActivationFactory
@@ -32,8 +32,8 @@
 # @ stub IsProcessInWDAGContainer
 # @ stub RecordFeatureError
 # @ stub RecordFeatureUsage
-@ stdcall RegisterScaleChangeEvent(ptr ptr)
-@ stdcall RegisterScaleChangeNotifications(long ptr long ptr)
+@ stub RegisterScaleChangeEvent
+@ stub RegisterScaleChangeNotifications
 @ stub RevokeScaleChangeNotifications
 @ stdcall SHAnsiToAnsi(str ptr long)
 @ stdcall SHAnsiToUnicode(str ptr long)

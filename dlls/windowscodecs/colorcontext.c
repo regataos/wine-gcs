@@ -86,8 +86,8 @@ static ULONG WINAPI ColorContext_Release(IWICColorContext *iface)
 
     if (ref == 0)
     {
-        free(This->profile);
-        free(This);
+        HeapFree(GetProcessHeap(), 0, This->profile);
+        HeapFree(GetProcessHeap(), 0, This);
     }
 
     return ref;
@@ -116,7 +116,7 @@ static HRESULT load_profile(const WCHAR *filename, BYTE **profile, UINT *len)
         CloseHandle(handle);
         return E_FAIL;
     }
-    if (!(*profile = malloc(size.u.LowPart)))
+    if (!(*profile = HeapAlloc(GetProcessHeap(), 0, size.u.LowPart)))
     {
         CloseHandle(handle);
         return E_OUTOFMEMORY;
@@ -124,12 +124,12 @@ static HRESULT load_profile(const WCHAR *filename, BYTE **profile, UINT *len)
     ret = ReadFile(handle, *profile, size.u.LowPart, &count, NULL);
     CloseHandle(handle);
     if (!ret) {
-        free(*profile);
+        HeapFree (GetProcessHeap(),0,*profile);
         *profile = NULL;
         return HRESULT_FROM_WIN32(GetLastError());
     }
     if (count != size.u.LowPart) {
-        free(*profile);
+        HeapFree (GetProcessHeap(),0,*profile);
         *profile = NULL;
         return E_FAIL;
     }
@@ -154,7 +154,7 @@ static HRESULT WINAPI ColorContext_InitializeFromFilename(IWICColorContext *ifac
     hr = load_profile(wzFilename, &profile, &len);
     if (FAILED(hr)) return hr;
 
-    free(This->profile);
+    HeapFree(GetProcessHeap(), 0, This->profile);
     This->profile = profile;
     This->profile_len = len;
     This->type = WICColorContextProfile;
@@ -172,10 +172,10 @@ static HRESULT WINAPI ColorContext_InitializeFromMemory(IWICColorContext *iface,
     if (This->type != WICColorContextUninitialized && This->type != WICColorContextProfile)
         return WINCODEC_ERR_WRONGSTATE;
 
-    if (!(profile = malloc(cbBufferSize))) return E_OUTOFMEMORY;
+    if (!(profile = HeapAlloc(GetProcessHeap(), 0, cbBufferSize))) return E_OUTOFMEMORY;
     memcpy(profile, pbBuffer, cbBufferSize);
 
-    free(This->profile);
+    HeapFree(GetProcessHeap(), 0, This->profile);
     This->profile = profile;
     This->profile_len = cbBufferSize;
     This->type = WICColorContextProfile;
@@ -259,7 +259,7 @@ HRESULT ColorContext_Create(IWICColorContext **colorcontext)
 
     if (!colorcontext) return E_INVALIDARG;
 
-    This = malloc(sizeof(ColorContext));
+    This = HeapAlloc(GetProcessHeap(), 0, sizeof(ColorContext));
     if (!This) return E_OUTOFMEMORY;
 
     This->IWICColorContext_iface.lpVtbl = &ColorContext_Vtbl;

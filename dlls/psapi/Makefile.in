@@ -1,5 +1,4 @@
 MODULE    = psapi.dll
 IMPORTLIB = psapi
 
-SOURCES = \
-	version.rc
+RC_SRCS = version.rc

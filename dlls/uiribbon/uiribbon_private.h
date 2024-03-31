@@ -26,7 +26,7 @@ typedef struct {
     LONG ref;
 } UIRibbonFrameworkImpl;
 
-HRESULT UIRibbonFrameworkImpl_Create(IUnknown *pUnkOuter, void **ppObj);
+HRESULT UIRibbonFrameworkImpl_Create(IUnknown *pUnkOuter, void **ppObj) DECLSPEC_HIDDEN;
 
 
 #endif /* __UIRIBBON_PRIVATE_INCLUDED__ */

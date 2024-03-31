@@ -143,50 +143,32 @@ static TW_UINT16 msg_get_range(pTW_CAPABILITY pCapability, TW_UINT16 type,
     return TWCC_SUCCESS;
 }
 
-static TW_UINT16 msg_get_array(pTW_CAPABILITY pCapability, TW_UINT16 type, const int *values, int value_count)
+static TW_UINT16 TWAIN_GetSupportedCaps(pTW_CAPABILITY pCapability)
 {
     TW_ARRAY *a;
-    TW_UINT32 *p32;
-    TW_UINT16 *p16;
+    static const UINT16 supported_caps[] = { CAP_SUPPORTEDCAPS, CAP_XFERCOUNT, CAP_UICONTROLLABLE,
+                    CAP_AUTOFEED, CAP_FEEDERENABLED,
+                    ICAP_XFERMECH, ICAP_PIXELTYPE, ICAP_UNITS, ICAP_BITDEPTH, ICAP_COMPRESSION, ICAP_PIXELFLAVOR,
+                    ICAP_XRESOLUTION, ICAP_YRESOLUTION, ICAP_PHYSICALHEIGHT, ICAP_PHYSICALWIDTH, ICAP_SUPPORTEDSIZES };
 
-    pCapability->hContainer = 0;
+    pCapability->hContainer = GlobalAlloc (0, FIELD_OFFSET( TW_ARRAY, ItemList[sizeof(supported_caps)] ));
     pCapability->ConType = TWON_ARRAY;
-
-    if (type == TWTY_INT16 || type == TWTY_UINT16)
-        pCapability->hContainer = GlobalAlloc (0, FIELD_OFFSET( TW_ARRAY, ItemList[value_count * sizeof(TW_UINT16)]));
-    else if (type == TWTY_INT32 || type == TWTY_UINT32)
-        pCapability->hContainer = GlobalAlloc (0, FIELD_OFFSET( TW_ARRAY, ItemList[value_count * sizeof(TW_UINT32)]));
 
     if (pCapability->hContainer)
     {
+        UINT16 *u;
         TW_UINT32 i;
         a = GlobalLock (pCapability->hContainer);
-        a->ItemType = type;
-        a->NumItems = value_count;
-        p16 = (TW_UINT16 *) a->ItemList;
-        p32 = (TW_UINT32 *) a->ItemList;
+        a->ItemType = TWTY_UINT16;
+        a->NumItems = ARRAY_SIZE(supported_caps);
+        u = (UINT16 *) a->ItemList;
         for (i = 0; i < a->NumItems; i++)
-        {
-            if (type == TWTY_INT16 || type == TWTY_UINT16)
-                p16[i] = values[i];
-            else if (type == TWTY_INT32 || type == TWTY_UINT32)
-                p32[i] = values[i];
-        }
+            u[i] = supported_caps[i];
         GlobalUnlock (pCapability->hContainer);
         return TWCC_SUCCESS;
     }
     else
         return TWCC_LOWMEMORY;
-}
-
-static TW_UINT16 TWAIN_GetSupportedCaps(pTW_CAPABILITY pCapability)
-{
-    static const int supported_caps[] = { CAP_SUPPORTEDCAPS, CAP_XFERCOUNT, CAP_UICONTROLLABLE,
-                    CAP_AUTOFEED, CAP_FEEDERENABLED,
-                    ICAP_XFERMECH, ICAP_PIXELTYPE, ICAP_UNITS, ICAP_BITDEPTH, ICAP_COMPRESSION, ICAP_PIXELFLAVOR,
-                    ICAP_XRESOLUTION, ICAP_YRESOLUTION, ICAP_PHYSICALHEIGHT, ICAP_PHYSICALWIDTH, ICAP_SUPPORTEDSIZES };
-
-    return msg_get_array(pCapability, TWTY_UINT16, supported_caps, ARRAY_SIZE(supported_caps));
 }
 
 
@@ -536,7 +518,7 @@ static TW_UINT16 SANE_ICAPResolution (pTW_CAPABILITY pCapability, TW_UINT16 acti
     int current_resolution;
     TW_FIX32 *default_res;
     const char *best_option_name;
-    struct option_descriptor opt;
+    int minval, maxval, quantval;
 
     TRACE("ICAP_%cRESOLUTION\n", cap == ICAP_XRESOLUTION ? 'X' : 'Y');
 
@@ -583,20 +565,10 @@ static TW_UINT16 SANE_ICAPResolution (pTW_CAPABILITY pCapability, TW_UINT16 acti
             break;
 
         case MSG_GET:
-            twCC = sane_option_probe_resolution(best_option_name, &opt);
+            twCC = sane_option_probe_resolution(best_option_name, &minval, &maxval, &quantval);
             if (twCC == TWCC_SUCCESS)
-            {
-                if (opt.constraint_type == CONSTRAINT_RANGE)
-                    twCC = msg_get_range(pCapability, TWTY_FIX32,
-                            opt.constraint.range.min, opt.constraint.range.max,
-                            opt.constraint.range.quant == 0 ? 1 : opt.constraint.range.quant,
-                            default_res->Whole, current_resolution);
-                else if (opt.constraint_type == CONSTRAINT_WORD_LIST)
-                    twCC = msg_get_array(pCapability, TWTY_UINT32, &(opt.constraint.word_list[1]),
-                            opt.constraint.word_list[0]);
-                else
-                    twCC = TWCC_CAPUNSUPPORTED;
-            }
+                twCC = msg_get_range(pCapability, TWTY_FIX32,
+                                minval, maxval, quantval == 0 ? 1 : quantval, default_res->Whole, current_resolution);
             break;
 
         case MSG_SET:
@@ -823,7 +795,6 @@ static TW_UINT16 SANE_ICAPSupportedSizes (pTW_CAPABILITY pCapability, TW_UINT16 
     static TW_UINT32 possible_values[ARRAY_SIZE(supported_sizes)];
     unsigned int i;
     TW_UINT32 val;
-    double max_width, max_height;
     TW_UINT16 default_size = get_default_paper_size(supported_sizes, ARRAY_SIZE(supported_sizes));
     TW_UINT16 current_size = get_current_paper_size(supported_sizes, ARRAY_SIZE(supported_sizes));
 
@@ -850,10 +821,7 @@ static TW_UINT16 SANE_ICAPSupportedSizes (pTW_CAPABILITY pCapability, TW_UINT16 
                 for (i = 1; i < ARRAY_SIZE(supported_sizes); i++)
                     if (supported_sizes[i].size == val)
                         return set_width_height(supported_sizes[i].x, supported_sizes[i].y);
-            /* TWAIN: For devices that support physical dimensions TWSS_NONE indicates that the maximum
-               image size supported by the device is to be used. */
-            if (val == TWSS_NONE && get_width_height(&max_width, &max_height, TRUE) == TWCC_SUCCESS)
-                return set_width_height(max_width, max_height);
+
             ERR("Unsupported size %ld\n", val);
             twCC = TWCC_BADCAP;
             break;

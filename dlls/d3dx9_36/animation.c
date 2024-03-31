@@ -75,7 +75,7 @@ static ULONG WINAPI d3dx9_animation_controller_Release(ID3DXAnimationController 
 
     if (!refcount)
     {
-        free(animation);
+        HeapFree(GetProcessHeap(), 0, animation);
     }
 
     return refcount;
@@ -452,7 +452,7 @@ HRESULT WINAPI D3DXCreateAnimationController(UINT max_outputs, UINT max_sets,
     if (!max_outputs || !max_sets || !max_tracks || !max_events || !controller)
         return D3D_OK;
 
-    object = calloc(1, sizeof(*object));
+    object = HeapAlloc(GetProcessHeap(), 0, sizeof(*object));
     if (!object)
         return E_OUTOFMEMORY;
 
@@ -524,8 +524,8 @@ static ULONG WINAPI d3dx9_keyframed_animation_Release(ID3DXKeyframedAnimationSet
 
     if (!refcount)
     {
-        free((char *)set->name);
-        free(set);
+        heap_free((char *)set->name);
+        heap_free(set);
     }
 
     return refcount;
@@ -860,6 +860,7 @@ HRESULT WINAPI D3DXCreateKeyframedAnimationSet(const char *name, double ticks_pe
         const D3DXKEY_CALLBACK *callback_keys, ID3DXKeyframedAnimationSet **animation_set)
 {
     struct d3dx9_keyframed_animation_set *object;
+    char *string;
 
     TRACE("name %s, ticks_per_second %.16e, playback_type %u, animation_count %u, "
             "callback_key_count %u, callback_keys %p, animation_set %p.\n",
@@ -869,16 +870,18 @@ HRESULT WINAPI D3DXCreateKeyframedAnimationSet(const char *name, double ticks_pe
     if (!animation_count)
         return D3DERR_INVALIDCALL;
 
-    if (!(object = calloc(1, sizeof(*object))))
+    if (!(object = heap_alloc(sizeof(*object))))
         return E_OUTOFMEMORY;
 
     object->ID3DXKeyframedAnimationSet_iface.lpVtbl = &d3dx9_keyframed_animation_vtbl;
     object->ref = 1;
-    if (!(object->name = strdup(name)))
+    if (!(string = heap_alloc(strlen(name) + 1)))
     {
-        free(object);
+        heap_free(object);
         return E_OUTOFMEMORY;
     }
+    strcpy(string, name);
+    object->name = string;
     object->ticks_per_second = ticks_per_second;
     object->playback_type = playback_type;
     object->animation_count = animation_count;

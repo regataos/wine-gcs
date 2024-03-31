@@ -27,6 +27,7 @@
  * parameter than usual.
  */
 
+#define NONAMELESSUNION
 #include <stdlib.h>
 #include <string.h>
 #include "wine/winbase16.h"
@@ -2159,9 +2160,9 @@ BOOL16 WINAPI Local32Info16( LOCAL32INFO *pLocal32Info, HGLOBAL16 handle )
     {
         if (entry.wFlags & PROCESS_HEAP_REGION)
         {
-            pLocal32Info->dwMemReserved += entry.Region.dwCommittedSize
-                                           + entry.Region.dwUnCommittedSize;
-            pLocal32Info->dwMemCommitted = entry.Region.dwCommittedSize;
+            pLocal32Info->dwMemReserved += entry.u.Region.dwCommittedSize
+                                           + entry.u.Region.dwUnCommittedSize;
+            pLocal32Info->dwMemCommitted = entry.u.Region.dwCommittedSize;
         }
         else if (!(entry.wFlags & PROCESS_HEAP_ENTRY_BUSY))
         {

@@ -135,21 +135,21 @@ BOOL WINAPI GetPS2ColorSpaceArray( HPROFILE profile, DWORD intent, DWORD type, P
 
 BOOL WINAPI RegisterCMMA( PCSTR machine, DWORD id, PCSTR dll )
 {
-    FIXME( "( %p, %s, %p ) stub\n", machine, debugstr_fourcc(id), dll );
+    FIXME( "( %p, %s, %p ) stub\n", machine, dbgstr_tag(id), dll );
 
     return TRUE;
 }
 
 BOOL WINAPI RegisterCMMW( PCWSTR machine, DWORD id, PCWSTR dll )
 {
-    FIXME( "( %p, %s, %p ) stub\n", machine, debugstr_fourcc(id), dll );
+    FIXME( "( %p, %s, %p ) stub\n", machine, dbgstr_tag(id), dll );
 
     return TRUE;
 }
 
 BOOL WINAPI SelectCMM( DWORD id )
 {
-    FIXME( "(%s) stub\n", debugstr_fourcc(id) );
+    FIXME( "(%s) stub\n", dbgstr_tag(id) );
 
     return TRUE;
 }
@@ -188,14 +188,14 @@ BOOL WINAPI SpoolerCopyFileEvent( LPWSTR printer, LPWSTR key, DWORD event )
 
 BOOL WINAPI UnregisterCMMA( PCSTR machine, DWORD id )
 {
-    FIXME( "( %p, %s ) stub\n", machine, debugstr_fourcc(id) );
+    FIXME( "( %p, %s ) stub\n", machine, dbgstr_tag(id) );
 
     return TRUE;
 }
 
 BOOL WINAPI UnregisterCMMW( PCWSTR machine, DWORD id )
 {
-    FIXME( "( %p, %s ) stub\n", machine, debugstr_fourcc(id) );
+    FIXME( "( %p, %s ) stub\n", machine, dbgstr_tag(id) );
 
     return TRUE;
 }

@@ -74,6 +74,7 @@ struct filter
     struct list entry;
     IBaseFilter *filter;
     IMediaSeeking *seeking;
+    IMediaPosition *position;
     WCHAR *name;
     BOOL sorting;
 };
@@ -486,9 +487,8 @@ static ULONG WINAPI FilterGraphInner_Release(IUnknown *iface)
         }
         LeaveCriticalSection(&message_cs);
 
-        This->event_cs.DebugInfo->Spare[0] = 0;
-        DeleteCriticalSection(&This->event_cs);
         This->cs.DebugInfo->Spare[0] = 0;
+        DeleteCriticalSection(&This->event_cs);
 	DeleteCriticalSection(&This->cs);
         free(This);
     }
@@ -521,6 +521,13 @@ static ULONG WINAPI FilterGraph2_Release(IFilterGraph2 *iface)
 static IBaseFilter *find_filter_by_name(struct filter_graph *graph, const WCHAR *name)
 {
     struct filter *filter;
+
+    /* King of Fighters XIII requests the WMV decoder filter by name to
+     * connect it to a Sample Grabber filter, return our custom decoder
+     * filter instance instead.
+     */
+    if (!wcscmp(name, L"WMVideo Decoder DMO"))
+        name = L"GStreamer splitter filter";
 
     LIST_FOR_EACH_ENTRY(filter, &graph->filters, struct filter, entry)
     {
@@ -557,6 +564,7 @@ static BOOL has_output_pins(IBaseFilter *filter)
 
 static void update_seeking(struct filter *filter)
 {
+    IMediaPosition *position;
     IMediaSeeking *seeking;
 
     if (!filter->seeking)
@@ -575,11 +583,19 @@ static void update_seeking(struct filter *filter)
                 IMediaSeeking_Release(seeking);
         }
     }
+
+    if (!filter->position)
+    {
+        /* Tokyo Xanadu eX+, same as above, same developer, destroys its filter when
+         * its IMediaPosition interface is released, so cache the interface instead
+         * of querying for it every time. */
+        if (SUCCEEDED(IBaseFilter_QueryInterface(filter->filter, &IID_IMediaPosition, (void **)&position)))
+            filter->position = position;
+    }
 }
 
 static BOOL is_renderer(struct filter *filter)
 {
-    IMediaPosition *media_position;
     IAMFilterMiscFlags *flags;
     BOOL ret = FALSE;
 
@@ -589,16 +605,11 @@ static BOOL is_renderer(struct filter *filter)
             ret = TRUE;
         IAMFilterMiscFlags_Release(flags);
     }
-    else if (SUCCEEDED(IBaseFilter_QueryInterface(filter->filter, &IID_IMediaPosition, (void **)&media_position)))
-    {
-        if (!has_output_pins(filter->filter))
-            ret = TRUE;
-        IMediaPosition_Release(media_position);
-    }
     else
     {
         update_seeking(filter);
-        if (filter->seeking && !has_output_pins(filter->filter))
+        if ((filter->seeking || filter->position) &&
+            !has_output_pins(filter->filter))
             ret = TRUE;
     }
     return ret;
@@ -671,6 +682,7 @@ static HRESULT WINAPI FilterGraph2_AddFilter(IFilterGraph2 *iface,
     list_add_head(&graph->filters, &entry->entry);
     entry->sorting = FALSE;
     entry->seeking = NULL;
+    entry->position = NULL;
     ++graph->version;
 
     return duplicate_name ? VFW_S_DUPLICATE_NAME : hr;
@@ -738,6 +750,8 @@ static HRESULT WINAPI FilterGraph2_RemoveFilter(IFilterGraph2 *iface, IBaseFilte
             {
                 IBaseFilter_SetSyncSource(pFilter, NULL);
                 IBaseFilter_Release(pFilter);
+                if (entry->position)
+                    IMediaPosition_Release(entry->position);
                 if (entry->seeking)
                     IMediaSeeking_Release(entry->seeking);
                 list_remove(&entry->entry);
@@ -1033,8 +1047,6 @@ static DWORD WINAPI message_thread_run(void *ctx)
 {
     MSG msg;
 
-    SetThreadDescription(GetCurrentThread(), L"wine_qz_graph_worker");
-
     /* Make sure we have a message queue. */
     PeekMessageW(&msg, NULL, 0, 0, PM_NOREMOVE);
     SetEvent(message_thread_ret);
@@ -1198,79 +1210,16 @@ static HRESULT autoplug_through_filter(struct filter_graph *graph, IPin *source,
     return VFW_E_CANNOT_CONNECT;
 }
 
-static HRESULT get_autoplug_types(IPin *source, unsigned int *ret_count, GUID **ret_types)
-{
-    unsigned int i, mt_count = 0, mt_capacity = 16;
-    AM_MEDIA_TYPE **mts = NULL;
-    IEnumMediaTypes *enummt;
-    GUID *types = NULL;
-    HRESULT hr;
-
-    if (FAILED(hr = IPin_EnumMediaTypes(source, &enummt)))
-    {
-        ERR("Failed to enumerate media types, hr %#lx.\n", hr);
-        return hr;
-    }
-
-    for (;;)
-    {
-        ULONG count;
-
-        if (!(mts = realloc(mts, mt_capacity * sizeof(*mts))))
-        {
-            hr = E_OUTOFMEMORY;
-            goto out;
-        }
-
-        if (FAILED(hr = IEnumMediaTypes_Next(enummt, mt_capacity - mt_count, mts + mt_count, &count)))
-        {
-            ERR("Failed to get media types, hr %#lx.\n", hr);
-            goto out;
-        }
-
-        mt_count += count;
-        if (hr == S_FALSE)
-            break;
-
-        mt_capacity *= 2;
-    }
-
-    if (!(types = malloc(mt_count * 2 * sizeof(*types))))
-    {
-        hr = E_OUTOFMEMORY;
-        goto out;
-    }
-
-    for (i = 0; i < mt_count; ++i)
-    {
-        types[i * 2] = mts[i]->majortype;
-        types[i * 2 + 1] = mts[i]->subtype;
-        DeleteMediaType(mts[i]);
-    }
-
-    *ret_count = mt_count;
-    *ret_types = types;
-
-    hr = S_OK;
-out:
-    free(mts);
-    IEnumMediaTypes_Release(enummt);
-    return hr;
-}
-
 /* Common helper for IGraphBuilder::Connect() and IGraphBuilder::Render(), which
  * share most of the same code. Render() calls this with a NULL sink. */
 static HRESULT autoplug(struct filter_graph *graph, IPin *source, IPin *sink,
         BOOL render_to_existing, unsigned int recursion_depth)
 {
     IAMGraphBuilderCallback *callback = NULL;
-    struct filter *graph_filter;
-    IEnumMoniker *enummoniker;
-    unsigned int type_count;
+    IEnumMediaTypes *enummt;
     IFilterMapper2 *mapper;
-    IBaseFilter *filter;
-    GUID *types = NULL;
-    IMoniker *moniker;
+    struct filter *filter;
+    AM_MEDIA_TYPE *mt;
     HRESULT hr;
 
     TRACE("Trying to autoplug %p to %p, recursion depth %u.\n", source, sink, recursion_depth);
@@ -1294,16 +1243,16 @@ static HRESULT autoplug(struct filter_graph *graph, IPin *source, IPin *sink,
     }
 
     /* Always prefer filters in the graph. */
-    LIST_FOR_EACH_ENTRY(graph_filter, &graph->filters, struct filter, entry)
+    LIST_FOR_EACH_ENTRY(filter, &graph->filters, struct filter, entry)
     {
-        if (SUCCEEDED(hr = autoplug_through_filter(graph, source, graph_filter->filter,
+        if (SUCCEEDED(hr = autoplug_through_filter(graph, source, filter->filter,
                 sink, render_to_existing, recursion_depth)))
             return hr;
     }
 
     IUnknown_QueryInterface(graph->punkFilterMapper2, &IID_IFilterMapper2, (void **)&mapper);
 
-    if (FAILED(hr = get_autoplug_types(source, &type_count, &types)))
+    if (FAILED(hr = IPin_EnumMediaTypes(source, &enummt)))
     {
         IFilterMapper2_Release(mapper);
         return hr;
@@ -1312,75 +1261,85 @@ static HRESULT autoplug(struct filter_graph *graph, IPin *source, IPin *sink,
     if (graph->pSite)
         IUnknown_QueryInterface(graph->pSite, &IID_IAMGraphBuilderCallback, (void **)&callback);
 
-    if (FAILED(hr = IFilterMapper2_EnumMatchingFilters(mapper, &enummoniker,
-            0, FALSE, MERIT_UNLIKELY, TRUE, type_count, types, NULL, NULL, FALSE,
-            render_to_existing, 0, NULL, NULL, NULL)))
-        goto out;
-
-    while (IEnumMoniker_Next(enummoniker, 1, &moniker, NULL) == S_OK)
+    while (IEnumMediaTypes_Next(enummt, 1, &mt, NULL) == S_OK)
     {
-        IPropertyBag *bag;
-        VARIANT var;
+        GUID types[2] = {mt->majortype, mt->subtype};
+        IEnumMoniker *enummoniker;
+        IBaseFilter *filter;
+        IMoniker *moniker;
 
-        VariantInit(&var);
-        IMoniker_BindToStorage(moniker, NULL, NULL, &IID_IPropertyBag, (void **)&bag);
-        hr = IPropertyBag_Read(bag, L"FriendlyName", &var, NULL);
-        IPropertyBag_Release(bag);
-        if (FAILED(hr))
-        {
-            IMoniker_Release(moniker);
-            continue;
-        }
+        DeleteMediaType(mt);
 
-        if (callback && FAILED(hr = IAMGraphBuilderCallback_SelectedFilter(callback, moniker)))
-        {
-            TRACE("Filter rejected by IAMGraphBuilderCallback::SelectedFilter(), hr %#lx.\n", hr);
-            IMoniker_Release(moniker);
-            continue;
-        }
-
-        hr = create_filter(graph, moniker, &filter);
-        IMoniker_Release(moniker);
-        if (FAILED(hr))
-        {
-            ERR("Failed to create filter for %s, hr %#lx.\n", debugstr_w(V_BSTR(&var)), hr);
-            VariantClear(&var);
-            continue;
-        }
-
-        if (callback && FAILED(hr = IAMGraphBuilderCallback_CreatedFilter(callback, filter)))
-        {
-            TRACE("Filter rejected by IAMGraphBuilderCallback::CreatedFilter(), hr %#lx.\n", hr);
-            IBaseFilter_Release(filter);
-            continue;
-        }
-
-        hr = IFilterGraph2_AddFilter(&graph->IFilterGraph2_iface, filter, V_BSTR(&var));
-        VariantClear(&var);
-        if (FAILED(hr))
-        {
-            ERR("Failed to add filter, hr %#lx.\n", hr);
-            IBaseFilter_Release(filter);
-            continue;
-        }
-
-        hr = autoplug_through_filter(graph, source, filter, sink, render_to_existing, recursion_depth);
-        if (SUCCEEDED(hr))
-        {
-            IBaseFilter_Release(filter);
+        if (FAILED(hr = IFilterMapper2_EnumMatchingFilters(mapper, &enummoniker,
+                0, FALSE, MERIT_UNLIKELY, TRUE, 1, types, NULL, NULL, FALSE,
+                render_to_existing, 0, NULL, NULL, NULL)))
             goto out;
-        }
 
-        IFilterGraph2_RemoveFilter(&graph->IFilterGraph2_iface, filter);
-        IBaseFilter_Release(filter);
+        while (IEnumMoniker_Next(enummoniker, 1, &moniker, NULL) == S_OK)
+        {
+            IPropertyBag *bag;
+            VARIANT var;
+
+            VariantInit(&var);
+            IMoniker_BindToStorage(moniker, NULL, NULL, &IID_IPropertyBag, (void **)&bag);
+            hr = IPropertyBag_Read(bag, L"FriendlyName", &var, NULL);
+            IPropertyBag_Release(bag);
+            if (FAILED(hr))
+            {
+                IMoniker_Release(moniker);
+                continue;
+            }
+
+            if (callback && FAILED(hr = IAMGraphBuilderCallback_SelectedFilter(callback, moniker)))
+            {
+                TRACE("Filter rejected by IAMGraphBuilderCallback::SelectedFilter(), hr %#lx.\n", hr);
+                IMoniker_Release(moniker);
+                continue;
+            }
+
+            hr = create_filter(graph, moniker, &filter);
+            IMoniker_Release(moniker);
+            if (FAILED(hr))
+            {
+                ERR("Failed to create filter for %s, hr %#lx.\n", debugstr_w(V_BSTR(&var)), hr);
+                VariantClear(&var);
+                continue;
+            }
+
+            if (callback && FAILED(hr = IAMGraphBuilderCallback_CreatedFilter(callback, filter)))
+            {
+                TRACE("Filter rejected by IAMGraphBuilderCallback::CreatedFilter(), hr %#lx.\n", hr);
+                IBaseFilter_Release(filter);
+                continue;
+            }
+
+            hr = IFilterGraph2_AddFilter(&graph->IFilterGraph2_iface, filter, V_BSTR(&var));
+            VariantClear(&var);
+            if (FAILED(hr))
+            {
+                ERR("Failed to add filter, hr %#lx.\n", hr);
+                IBaseFilter_Release(filter);
+                continue;
+            }
+
+            hr = autoplug_through_filter(graph, source, filter, sink, render_to_existing, recursion_depth);
+            if (SUCCEEDED(hr))
+            {
+                IBaseFilter_Release(filter);
+                goto out;
+            }
+
+            IFilterGraph2_RemoveFilter(&graph->IFilterGraph2_iface, filter);
+            IBaseFilter_Release(filter);
+        }
+        IEnumMoniker_Release(enummoniker);
     }
-    IEnumMoniker_Release(enummoniker);
 
     hr = VFW_E_CANNOT_CONNECT;
 
 out:
-    free(types);
     if (callback) IAMGraphBuilderCallback_Release(callback);
+    IEnumMediaTypes_Release(enummt);
     IFilterMapper2_Release(mapper);
     return hr;
 }
@@ -5668,10 +5627,27 @@ static const IUnknownVtbl IInner_VTable =
     FilterGraphInner_Release
 };
 
+static BOOL CALLBACK register_winegstreamer_proc(INIT_ONCE *once, void *param, void **ctx)
+{
+    HMODULE mod = LoadLibraryW(L"winegstreamer.dll");
+    if (mod)
+    {
+        HRESULT (WINAPI *proc)(void) = (void *)GetProcAddress(mod, "DllRegisterServer");
+        proc();
+        FreeLibrary(mod);
+    }
+    return TRUE;
+}
+
 static HRESULT filter_graph_common_create(IUnknown *outer, IUnknown **out, BOOL threaded)
 {
+    static INIT_ONCE once = INIT_ONCE_STATIC_INIT;
     struct filter_graph *object;
     HRESULT hr;
+
+    /* HACK: our build system makes it difficult to load gstreamer on prefix
+     * creation, so it won't get registered. Do that here instead. */
+    InitOnceExecuteOnce(&once, register_winegstreamer_proc, NULL, NULL);
 
     *out = NULL;
 
@@ -5704,9 +5680,9 @@ static HRESULT filter_graph_common_create(IUnknown *outer, IUnknown **out, BOOL 
         return hr;
     }
 
-    InitializeCriticalSectionEx(&object->cs, 0, RTL_CRITICAL_SECTION_FLAG_FORCE_DEBUG_INFO);
+    InitializeCriticalSection(&object->cs);
     object->cs.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": filter_graph.cs");
-    InitializeCriticalSectionEx(&object->event_cs, 0, RTL_CRITICAL_SECTION_FLAG_FORCE_DEBUG_INFO);
+    InitializeCriticalSection(&object->event_cs);
     object->event_cs.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": filter_graph.event_cs");
 
     object->defaultclock = TRUE;

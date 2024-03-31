@@ -1,7 +1,8 @@
 MODULE    = uiribbon.dll
 IMPORTS   = uuid ole32
 
-SOURCES = \
+C_SRCS = \
 	main.c \
-	uiribbon.c \
-	uiribbon_classes.idl
+	uiribbon.c
+
+IDL_SRCS = uiribbon_classes.idl

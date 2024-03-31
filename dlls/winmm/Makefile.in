@@ -1,10 +1,9 @@
-EXTRADEFS = -D_WINMM_
 MODULE    = winmm.dll
 IMPORTLIB = winmm
 IMPORTS   = uuid user32 advapi32 ole32 msacm32
 DELAYIMPORTS = dinput8
 
-SOURCES = \
+C_SRCS = \
 	driver.c \
 	joystick.c \
 	lolvldrv.c \
@@ -13,6 +12,8 @@ SOURCES = \
 	playsound.c \
 	time.c \
 	waveform.c \
-	winmm.c \
+	winmm.c
+
+RC_SRCS = \
 	winmm.rc \
 	winmm_res.rc

@@ -1,6 +1,6 @@
 TESTDLL   = ddrawex.dll
 IMPORTS   = user32 gdi32
 
-SOURCES = \
+C_SRCS = \
 	ddrawex.c \
 	surface.c

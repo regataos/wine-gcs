@@ -164,8 +164,8 @@ static BOOL SHELL_ArgifyW(WCHAR* out, int len, const WCHAR* fmt, const WCHAR* lp
             case 'l':
             case 'L':
 		if (lpFile) {
-		    size = SearchPathW(NULL, lpFile, L".exe", ARRAY_SIZE(xlpFile), xlpFile, NULL);
-		    if (size && size <= ARRAY_SIZE(xlpFile))
+		    if ((size = SearchPathW(NULL, lpFile, L".exe", ARRAY_SIZE(xlpFile), xlpFile, NULL)
+                    && size <= ARRAY_SIZE(xlpFile)))
 		        cmd = xlpFile;
 		    else
 		        cmd = lpFile;
@@ -293,21 +293,6 @@ static HRESULT SHELL_GetPathFromIDListForExecuteW(LPCITEMIDLIST pidl, LPWSTR psz
     return hr;
 }
 
-static HANDLE get_admin_token(void)
-{
-    TOKEN_ELEVATION_TYPE type;
-    TOKEN_LINKED_TOKEN linked;
-    DWORD size;
-
-    if (!GetTokenInformation(GetCurrentThreadEffectiveToken(), TokenElevationType, &type, sizeof(type), &size)
-            || type == TokenElevationTypeFull)
-        return NULL;
-
-    if (!GetTokenInformation(GetCurrentThreadEffectiveToken(), TokenLinkedToken, &linked, sizeof(linked), &size))
-        return NULL;
-    return linked.LinkedToken;
-}
-
 /*************************************************************************
  *	SHELL_ExecuteW [Internal]
  *
@@ -321,7 +306,6 @@ static UINT_PTR SHELL_ExecuteW(const WCHAR *lpCmd, WCHAR *env, BOOL shWait,
     UINT gcdret = 0;
     WCHAR curdir[MAX_PATH];
     DWORD dwCreationFlags;
-    HANDLE token = NULL;
 
     TRACE("Execute %s from directory %s\n", debugstr_w(lpCmd), debugstr_w(psei->lpDirectory));
 
@@ -343,12 +327,8 @@ static UINT_PTR SHELL_ExecuteW(const WCHAR *lpCmd, WCHAR *env, BOOL shWait,
     dwCreationFlags = CREATE_UNICODE_ENVIRONMENT;
     if (!(psei->fMask & SEE_MASK_NO_CONSOLE))
         dwCreationFlags |= CREATE_NEW_CONSOLE;
-
-    if (psei->lpVerb && !wcsicmp(psei->lpVerb, L"runas"))
-        token = get_admin_token();
-
-    if (CreateProcessAsUserW(token, NULL, (LPWSTR)lpCmd, NULL, NULL, FALSE,
-            dwCreationFlags, env, NULL, &startup, &info))
+    if (CreateProcessW(NULL, (LPWSTR)lpCmd, NULL, NULL, FALSE, dwCreationFlags, env,
+                       NULL, &startup, &info))
     {
         /* Give 30 seconds to the app to come up, if desired. Probably only needed
            when starting app immediately before making a DDE connection. */
@@ -367,8 +347,6 @@ static UINT_PTR SHELL_ExecuteW(const WCHAR *lpCmd, WCHAR *env, BOOL shWait,
         TRACE("CreateProcess returned error %Id\n", retval);
         retval = ERROR_BAD_FORMAT;
     }
-
-    CloseHandle(token);
 
     TRACE("returning %Iu\n", retval);
 
@@ -406,7 +384,7 @@ static void *SHELL_BuildEnvW( const WCHAR *path )
     if (!got_path) total += 5;  /* we need to create PATH */
     total++;  /* terminating null */
 
-    if (!(new_env = malloc( total * sizeof(WCHAR) )))
+    if (!(new_env = heap_alloc( total * sizeof(WCHAR) )))
     {
         FreeEnvironmentStringsW( strings );
         return NULL;
@@ -949,7 +927,7 @@ static unsigned dde_connect(const WCHAR* key, const WCHAR* start, WCHAR* ddeexec
     SHELL_ArgifyW(static_res, ARRAY_SIZE(static_res), exec, lpFile, pidl, szCommandline, &resultLen);
     if (resultLen > ARRAY_SIZE(static_res))
     {
-        res = dynamic_res = malloc(resultLen * sizeof(WCHAR));
+        res = dynamic_res = heap_alloc(resultLen * sizeof(WCHAR));
         SHELL_ArgifyW(dynamic_res, resultLen, exec, lpFile, pidl, szCommandline, NULL);
     }
     else
@@ -965,11 +943,11 @@ static unsigned dde_connect(const WCHAR* key, const WCHAR* start, WCHAR* ddeexec
     else
     {
         DWORD lenA = WideCharToMultiByte(CP_ACP, 0, res, -1, NULL, 0, NULL, NULL);
-        char *resA = malloc(lenA);
+        char *resA = heap_alloc(lenA);
         WideCharToMultiByte(CP_ACP, 0, res, -1, resA, lenA, NULL, NULL);
         hDdeData = DdeClientTransaction( (LPBYTE)resA, lenA, hConv, 0L, 0,
                                          XTYP_EXECUTE, 10000, &tid );
-        free(resA);
+        heap_free(resA);
     }
     if (hDdeData)
         DdeFreeDataHandle(hDdeData);
@@ -977,7 +955,7 @@ static unsigned dde_connect(const WCHAR* key, const WCHAR* start, WCHAR* ddeexec
         WARN("DdeClientTransaction failed with error %04x\n", DdeGetLastError(ddeInst));
     ret = 33;
 
-    free(dynamic_res);
+    heap_free(dynamic_res);
 
     DdeDisconnect(hConv);
 
@@ -1149,13 +1127,13 @@ static HKEY ShellExecute_GetClassKey( const SHELLEXECUTEINFOW *sei )
         if (r != ERROR_SUCCESS )
             return hkey;
 
-        r = RegQueryValueExW( hkey, NULL, 0, &type, NULL, &sz );
+        r = RegQueryValueExW( hkey, L"", 0, &type, NULL, &sz );
         if ( r == ERROR_SUCCESS && type == REG_SZ )
         {
             sz += sizeof (WCHAR);
-            cls = malloc( sz );
+            cls = heap_alloc( sz );
             cls[0] = 0;
-            RegQueryValueExW( hkey, NULL, 0, &type, (LPBYTE) cls, &sz );
+            RegQueryValueExW( hkey, L"", 0, &type, (LPBYTE) cls, &sz );
         }
 
         RegCloseKey( hkey );
@@ -1168,7 +1146,7 @@ static HKEY ShellExecute_GetClassKey( const SHELLEXECUTEINFOW *sei )
     if ( lpClass )
         RegOpenKeyW( HKEY_CLASSES_ROOT, lpClass, &hkey );
 
-    free( cls );
+    heap_free( cls );
 
     return hkey;
 }
@@ -1488,7 +1466,7 @@ static UINT_PTR SHELL_quote_and_execute( LPCWSTR wcmd, LPCWSTR wszParameters, LP
         /* Length of space plus length of parameters */
         len += 1 + lstrlenW(wszParameters);
     }
-    wszQuotedCmd = malloc(len * sizeof(WCHAR));
+    wszQuotedCmd = heap_alloc(len * sizeof(WCHAR));
     /* Must quote to handle case where cmd contains spaces,
      * else security hole if malicious user creates executable file "C:\\Program"
      */
@@ -1504,7 +1482,7 @@ static UINT_PTR SHELL_quote_and_execute( LPCWSTR wcmd, LPCWSTR wszParameters, LP
         retval = execute_from_key(wszKeyname, wszApplicationName, env, psei->lpParameters, wcmd, execfunc, psei, psei_out);
     else
         retval = execfunc(wszQuotedCmd, env, FALSE, psei, psei_out);
-    free(wszQuotedCmd);
+    heap_free(wszQuotedCmd);
     return retval;
 }
 
@@ -1529,7 +1507,7 @@ static UINT_PTR SHELL_execute_url( LPCWSTR lpFile, LPCWSTR wcmd, LPSHELLEXECUTEI
         len += lstrlenW(psei->lpVerb);
     else
         len += lstrlenW(L"open");
-    lpstrProtocol = malloc(len * sizeof(WCHAR));
+    lpstrProtocol = heap_alloc(len * sizeof(WCHAR));
     memcpy(lpstrProtocol, lpFile, iSize*sizeof(WCHAR));
     lpstrProtocol[iSize] = '\0';
     lstrcatW(lpstrProtocol, L"\\shell\\");
@@ -1538,7 +1516,7 @@ static UINT_PTR SHELL_execute_url( LPCWSTR lpFile, LPCWSTR wcmd, LPSHELLEXECUTEI
 
     retval = execute_from_key(lpstrProtocol, lpFile, NULL, psei->lpParameters,
                               wcmd, execfunc, psei, psei_out);
-    free(lpstrProtocol);
+    heap_free(lpstrProtocol);
     return retval;
 }
 
@@ -1563,13 +1541,13 @@ static WCHAR *expand_environment( const WCHAR *str )
     len = ExpandEnvironmentStringsW(str, NULL, 0);
     if (!len) return NULL;
 
-    buf = malloc(len * sizeof(WCHAR));
+    buf = heap_alloc(len * sizeof(WCHAR));
     if (!buf) return NULL;
 
     len = ExpandEnvironmentStringsW(str, buf, len);
     if (!len)
     {
-        free(buf);
+        heap_free(buf);
         return NULL;
     }
     return buf;
@@ -1612,13 +1590,13 @@ static BOOL SHELL_execute( LPSHELLEXECUTEINFOW sei, SHELL_ExecuteW32 execfunc )
     /* make copies of all path/command strings */
     if (!sei_tmp.lpFile)
     {
-        wszApplicationName = malloc(dwApplicationNameLen * sizeof(WCHAR));
+        wszApplicationName = heap_alloc(dwApplicationNameLen*sizeof(WCHAR));
         *wszApplicationName = '\0';
     }
     else if (*sei_tmp.lpFile == '\"' && sei_tmp.lpFile[(len = lstrlenW(sei_tmp.lpFile))-1] == '\"')
     {
         if(len-1 >= dwApplicationNameLen) dwApplicationNameLen = len;
-        wszApplicationName = malloc(dwApplicationNameLen * sizeof(WCHAR));
+        wszApplicationName = heap_alloc(dwApplicationNameLen*sizeof(WCHAR));
         memcpy(wszApplicationName, sei_tmp.lpFile+1, len*sizeof(WCHAR));
         if(len > 2)
             wszApplicationName[len-2] = '\0';
@@ -1626,7 +1604,7 @@ static BOOL SHELL_execute( LPSHELLEXECUTEINFOW sei, SHELL_ExecuteW32 execfunc )
     } else {
         DWORD l = lstrlenW(sei_tmp.lpFile)+1;
         if(l > dwApplicationNameLen) dwApplicationNameLen = l+1;
-        wszApplicationName = malloc(dwApplicationNameLen * sizeof(WCHAR));
+        wszApplicationName = heap_alloc(dwApplicationNameLen*sizeof(WCHAR));
         memcpy(wszApplicationName, sei_tmp.lpFile, l*sizeof(WCHAR));
     }
 
@@ -1636,7 +1614,7 @@ static BOOL SHELL_execute( LPSHELLEXECUTEINFOW sei, SHELL_ExecuteW32 execfunc )
         len = lstrlenW(sei_tmp.lpParameters) + 1;
         if (len > parametersLen)
         {
-            wszParameters = malloc(len * sizeof(WCHAR));
+            wszParameters = heap_alloc(len * sizeof(WCHAR));
             parametersLen = len;
         }
 	lstrcpyW(wszParameters, sei_tmp.lpParameters);
@@ -1649,7 +1627,7 @@ static BOOL SHELL_execute( LPSHELLEXECUTEINFOW sei, SHELL_ExecuteW32 execfunc )
     {
         len = lstrlenW(sei_tmp.lpDirectory) + 1;
         if (len > ARRAY_SIZE(dirBuffer))
-            wszDir = malloc(len * sizeof(WCHAR));
+            wszDir = heap_alloc(len * sizeof(WCHAR));
 	lstrcpyW(wszDir, sei_tmp.lpDirectory);
     }
     else
@@ -1679,11 +1657,11 @@ static BOOL SHELL_execute( LPSHELLEXECUTEINFOW sei, SHELL_ExecuteW32 execfunc )
 	    IShellExecuteHookW_Release(pSEH);
 
 	    if (hr == S_OK) {
-                free(wszApplicationName);
+                heap_free(wszApplicationName);
                 if (wszParameters != parametersBuffer)
-                    free(wszParameters);
+                    heap_free(wszParameters);
                 if (wszDir != dirBuffer)
-                    free(wszDir);
+                    heap_free(wszDir);
 		return TRUE;
             }
 	}
@@ -1702,7 +1680,7 @@ static BOOL SHELL_execute( LPSHELLEXECUTEINFOW sei, SHELL_ExecuteW32 execfunc )
             retval = SE_ERR_OOM;
             goto end;
         }
-        free(wszApplicationName);
+        heap_free(wszApplicationName);
         sei_tmp.lpFile = wszApplicationName = tmp;
 
         tmp = expand_environment(sei_tmp.lpDirectory);
@@ -1712,18 +1690,18 @@ static BOOL SHELL_execute( LPSHELLEXECUTEINFOW sei, SHELL_ExecuteW32 execfunc )
             goto end;
         }
         if (wszDir != dirBuffer)
-            free(wszDir);
+            heap_free(wszDir);
         sei_tmp.lpDirectory = wszDir = tmp;
     }
 
     if ( ERROR_SUCCESS == ShellExecute_FromContextMenu( &sei_tmp ) )
     {
         sei->hInstApp = (HINSTANCE) 33;
-        free(wszApplicationName);
+        heap_free(wszApplicationName);
         if (wszParameters != parametersBuffer)
-            free(wszParameters);
+            heap_free(wszParameters);
         if (wszDir != dirBuffer)
-            free(wszDir);
+            heap_free(wszDir);
         return TRUE;
     }
 
@@ -1733,11 +1711,11 @@ static BOOL SHELL_execute( LPSHELLEXECUTEINFOW sei, SHELL_ExecuteW32 execfunc )
                                       execfunc );
         if (retval <= 32 && !(sei_tmp.fMask & SEE_MASK_FLAG_NO_UI))
             do_error_dialog(retval, sei_tmp.hwnd);
-        free(wszApplicationName);
+        heap_free(wszApplicationName);
         if (wszParameters != parametersBuffer)
-            free(wszParameters);
+            heap_free(wszParameters);
         if (wszDir != dirBuffer)
-            free(wszDir);
+            heap_free(wszDir);
         return retval > 32;
     }
 
@@ -1757,14 +1735,14 @@ static BOOL SHELL_execute( LPSHELLEXECUTEINFOW sei, SHELL_ExecuteW32 execfunc )
         DWORD size;
 
         size = MAX_PATH;
-        buf = malloc(size * sizeof(WCHAR));
+        buf = heap_alloc(size * sizeof(WCHAR));
         if (!buf || FAILED(PathCreateFromUrlW(sei_tmp.lpFile, buf, &size, 0))) {
-            free(buf);
+            heap_free(buf);
             retval = SE_ERR_OOM;
             goto end;
         }
 
-        free(wszApplicationName);
+        heap_free(wszApplicationName);
         wszApplicationName = buf;
         sei_tmp.lpFile = wszApplicationName;
     }
@@ -1774,10 +1752,10 @@ static BOOL SHELL_execute( LPSHELLEXECUTEINFOW sei, SHELL_ExecuteW32 execfunc )
         if (len>0)
         {
             LPWSTR buf;
-            buf = malloc((len + 1) * sizeof(WCHAR));
+            buf = heap_alloc((len + 1) * sizeof(WCHAR));
 
             ExpandEnvironmentStringsW(sei_tmp.lpFile, buf, len + 1);
-            free(wszApplicationName);
+            heap_free(wszApplicationName);
             wszApplicationName = buf;
 
             sei_tmp.lpFile = wszApplicationName;
@@ -1791,10 +1769,10 @@ static BOOL SHELL_execute( LPSHELLEXECUTEINFOW sei, SHELL_ExecuteW32 execfunc )
         {
             LPWSTR buf;
             len++;
-            buf = malloc(len * sizeof(WCHAR));
+            buf = heap_alloc(len * sizeof(WCHAR));
             ExpandEnvironmentStringsW(sei_tmp.lpDirectory, buf, len);
             if (wszDir != dirBuffer)
-                free(wszDir);
+                heap_free(wszDir);
             wszDir = buf;
             sei_tmp.lpDirectory = wszDir;
         }
@@ -1809,7 +1787,7 @@ static BOOL SHELL_execute( LPSHELLEXECUTEINFOW sei, SHELL_ExecuteW32 execfunc )
         len += 1 + lstrlenW(wszParameters);
     if (len > wcmdLen)
     {
-        wcmd = malloc(len * sizeof(WCHAR));
+        wcmd = heap_alloc(len * sizeof(WCHAR));
         wcmdLen = len;
     }
     lstrcpyW(wcmd, wszApplicationName);
@@ -1825,13 +1803,13 @@ static BOOL SHELL_execute( LPSHELLEXECUTEINFOW sei, SHELL_ExecuteW32 execfunc )
                                       wszApplicationName, NULL, &sei_tmp,
                                       sei, execfunc );
     if (retval > 32) {
-        free(wszApplicationName);
+        heap_free(wszApplicationName);
         if (wszParameters != parametersBuffer)
-            free(wszParameters);
+            heap_free(wszParameters);
         if (wszDir != dirBuffer)
-            free(wszDir);
+            heap_free(wszDir);
         if (wcmd != wcmdBuffer)
-            free(wcmd);
+            heap_free(wcmd);
         return TRUE;
     }
 
@@ -1843,12 +1821,12 @@ static BOOL SHELL_execute( LPSHELLEXECUTEINFOW sei, SHELL_ExecuteW32 execfunc )
         retval = SHELL_quote_and_execute( wcmd, wszParameters, wszKeyname,
                                           wszApplicationName, env, &sei_tmp,
                                           sei, execfunc );
-        free( env );
+        heap_free( env );
     }
     else if (PathIsDirectoryW(lpFile))
     {
         WCHAR wExec[MAX_PATH];
-        WCHAR * lpQuotedFile = malloc( sizeof(WCHAR) * (lstrlenW(lpFile) + 3) );
+        WCHAR * lpQuotedFile = heap_alloc( sizeof(WCHAR) * (lstrlenW(lpFile) + 3) );
 
         if (lpQuotedFile)
         {
@@ -1864,9 +1842,9 @@ static BOOL SHELL_execute( LPSHELLEXECUTEINFOW sei, SHELL_ExecuteW32 execfunc )
                                                   wszKeyname,
                                                   wszApplicationName, env,
                                                   &sei_tmp, sei, execfunc );
-                free( env );
+                heap_free( env );
             }
-            free( lpQuotedFile );
+            heap_free( lpQuotedFile );
         }
         else
             retval = 0; /* Out of memory */
@@ -1888,13 +1866,13 @@ static BOOL SHELL_execute( LPSHELLEXECUTEINFOW sei, SHELL_ExecuteW32 execfunc )
 end:
     TRACE("retval %Iu\n", retval);
 
-    free(wszApplicationName);
+    heap_free(wszApplicationName);
     if (wszParameters != parametersBuffer)
-        free(wszParameters);
+        heap_free(wszParameters);
     if (wszDir != dirBuffer)
-        free(wszDir);
+        heap_free(wszDir);
     if (wcmd != wcmdBuffer)
-        free(wcmd);
+        heap_free(wcmd);
 
     sei->hInstApp = (HINSTANCE)(retval > 32 ? 33 : retval);
 

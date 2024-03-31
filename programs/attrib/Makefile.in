@@ -3,6 +3,6 @@ IMPORTS   = user32
 
 EXTRADLLFLAGS = -mconsole -municode
 
-SOURCES = \
-	attrib.c \
-	attrib.rc
+C_SRCS = attrib.c
+
+RC_SRCS = attrib.rc

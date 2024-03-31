@@ -19,6 +19,8 @@
 #include <stdarg.h>
 
 #define COBJMACROS
+#define NONAMELESSUNION
+
 #include "windef.h"
 #include "winbase.h"
 #include "ole2.h"
@@ -114,7 +116,7 @@ static ULONG WINAPI XMLView_Binding_Release(IBinding *iface)
 
     if(!ref) {
         IBinding_Release(This->binding);
-        free(This);
+        heap_free(This);
     }
     return ref;
 }
@@ -185,7 +187,7 @@ static inline HRESULT XMLView_Binding_Create(IBinding *binding, IBinding **ret)
 {
     Binding *bind;
 
-    bind = calloc(1, sizeof(Binding));
+    bind = heap_alloc_zero(sizeof(Binding));
     if(!bind)
         return E_OUTOFMEMORY;
 
@@ -247,7 +249,7 @@ static ULONG WINAPI XMLView_BindStatusCallback_Release(
             IStream_Release(This->stream);
         IBindStatusCallback_Release(This->bsc);
         IMoniker_Release(This->mon);
-        free(This);
+        heap_free(This);
     }
     return ref;
 }
@@ -346,7 +348,7 @@ static inline HRESULT report_data(BindStatusCallback *This)
         return hres;
 
     stgmedium.tymed = TYMED_ISTREAM;
-    stgmedium.pstm = This->stream;
+    stgmedium.u.pstm = This->stream;
     stgmedium.pUnkForRelease = NULL;
 
     hres = IBindStatusCallback_OnDataAvailable(This->bsc,
@@ -516,7 +518,7 @@ static HRESULT WINAPI XMLView_BindStatusCallback_OnDataAvailable(
         return E_FAIL;
 
     do {
-        hres = IStream_Read(pstgmed->pstm, buf, sizeof(buf), &size);
+        hres = IStream_Read(pstgmed->u.pstm, buf, sizeof(buf), &size);
         IStream_Write(This->stream, buf, size, &size);
     } while(hres==S_OK && size);
 
@@ -555,7 +557,7 @@ static inline HRESULT XMLView_BindStatusCallback_Create(IBindStatusCallback *bsc
 {
     BindStatusCallback *bsc;
 
-    bsc = calloc(1, sizeof(BindStatusCallback));
+    bsc = heap_alloc_zero(sizeof(BindStatusCallback));
     if(!bsc)
         return E_OUTOFMEMORY;
 
@@ -615,7 +617,7 @@ static ULONG WINAPI XMLView_Moniker_Release(IMoniker *iface)
 
     if(!ref) {
         IMoniker_Release(This->mon);
-        free(This);
+        heap_free(This);
     }
     return ref;
 }
@@ -819,7 +821,7 @@ static inline HRESULT XMLView_Moniker_Create(IMoniker *mon,
 {
     Moniker *wrap;
 
-    wrap = calloc(1, sizeof(Moniker));
+    wrap = heap_alloc_zero(sizeof(Moniker));
     if(!wrap)
         return E_OUTOFMEMORY;
 
@@ -884,7 +886,7 @@ static ULONG WINAPI XMLView_PersistMoniker_Release(IPersistMoniker *iface)
         if(This->mon)
             IMoniker_Release(This->mon);
         IUnknown_Release(This->html_doc);
-        free(This);
+        heap_free(This);
     }
     return ref;
 }
@@ -1405,7 +1407,7 @@ HRESULT XMLView_create(void **ppObj)
 
     TRACE("(%p)\n", ppObj);
 
-    This = calloc(1, sizeof(*This));
+    This = heap_alloc_zero(sizeof(*This));
     if(!This)
         return E_OUTOFMEMORY;
 
@@ -1418,7 +1420,7 @@ HRESULT XMLView_create(void **ppObj)
     hres = CoCreateInstance(&CLSID_HTMLDocument, (IUnknown*)&This->IPersistMoniker_iface,
             CLSCTX_INPROC_SERVER, &IID_IUnknown, (void**)&This->html_doc);
     if(FAILED(hres)) {
-        free(This);
+        heap_free(This);
         return hres;
     }
 

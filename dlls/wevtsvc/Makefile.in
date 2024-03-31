@@ -1,5 +1,5 @@
 MODULE    = wevtsvc.dll
 IMPORTS   = rpcrt4 advapi32
 
-SOURCES = \
+C_SRCS = \
 	wevtsvc.c

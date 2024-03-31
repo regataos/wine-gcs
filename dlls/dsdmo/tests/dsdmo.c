@@ -308,14 +308,11 @@ static void test_chorus_parameters(void)
 
     hr = CoCreateInstance(&GUID_DSFX_STANDARD_CHORUS, NULL, CLSCTX_INPROC_SERVER,
             &IID_IDirectSoundFXChorus, (void **)&chorus);
-    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+    todo_wine ok(hr == S_OK, "Got hr %#lx.\n", hr);
     if (hr != S_OK)
         return;
 
     hr = IDirectSoundFXChorus_GetAllParameters(chorus, &params);
-    todo_wine ok(hr == S_OK, "Got hr %#lx.\n", hr);
-    if (hr != S_OK)
-        return;
     ok(hr == S_OK, "Got hr %#lx.\n", hr);
     ok(params.fWetDryMix == 50.0f, "Got wetness %.8e%%.\n", params.fWetDryMix);
     ok(params.fDepth == 10.0f, "Got depth %.8e.\n", params.fDepth);
@@ -363,14 +360,12 @@ static void test_distortion_parameters(void)
 
     hr = CoCreateInstance(&GUID_DSFX_STANDARD_DISTORTION, NULL, CLSCTX_INPROC_SERVER,
             &IID_IDirectSoundFXDistortion, (void **)&distortion);
-    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+    todo_wine ok(hr == S_OK, "Got hr %#lx.\n", hr);
     if (hr != S_OK)
         return;
 
     hr = IDirectSoundFXDistortion_GetAllParameters(distortion, &params);
-    todo_wine ok(hr == S_OK, "Got hr %#lx.\n", hr);
-    if (hr != S_OK)
-        return;
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
     ok(params.fGain == -18.0f, "Got gain %.8e dB.\n", params.fGain);
     ok(params.fEdge == 15.0f, "Got edge %.8e%%.\n", params.fEdge);
     ok(params.fPostEQCenterFrequency == 2400.0f, "Got center frequency %.8e Hz.\n", params.fPostEQCenterFrequency);
@@ -417,14 +412,11 @@ static void test_flanger_parameters(void)
 
     hr = CoCreateInstance(&GUID_DSFX_STANDARD_FLANGER, NULL, CLSCTX_INPROC_SERVER,
             &IID_IDirectSoundFXFlanger, (void **)&flanger);
-    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+    todo_wine ok(hr == S_OK, "Got hr %#lx.\n", hr);
     if (hr != S_OK)
         return;
 
     hr = IDirectSoundFXFlanger_GetAllParameters(flanger, &params);
-    todo_wine ok(hr == S_OK, "Got hr %#lx.\n", hr);
-    if (hr != S_OK)
-        return;
     ok(hr == S_OK, "Got hr %#lx.\n", hr);
     ok(params.fWetDryMix == 50.0f, "Got %.8e%% wetness.\n", params.fWetDryMix);
     ok(params.fDepth == 100.0f, "Got %.8e * 0.01%% depth.\n", params.fDepth);
@@ -446,14 +438,12 @@ static void test_gargle_parameters(void)
 
     hr = CoCreateInstance(&GUID_DSFX_STANDARD_GARGLE, NULL, CLSCTX_INPROC_SERVER,
             &IID_IDirectSoundFXGargle, (void **)&gargle);
-    ok(hr == S_OK, "Got hr %#lx.\n", hr);
+    todo_wine ok(hr == S_OK, "Got hr %#lx.\n", hr);
     if (hr != S_OK)
         return;
 
     hr = IDirectSoundFXGargle_GetAllParameters(gargle, &params);
-    todo_wine ok(hr == S_OK, "Got hr %#lx.\n", hr);
-    if (hr != S_OK)
-        return;
+    ok(hr == S_OK, "Got hr %#lx.\n", hr);
     ok(params.dwRateHz == 20, "Got rate %lu Hz.\n", params.dwRateHz);
     ok(params.dwWaveShape == DSFXGARGLE_WAVE_TRIANGLE, "Got wave shape %lu.\n", params.dwWaveShape);
 
@@ -550,15 +540,16 @@ START_TEST(dsdmo)
     {
         const GUID *clsid;
         const GUID *iid;
+        BOOL todo;
     }
     tests[] =
     {
-        {&GUID_DSFX_STANDARD_CHORUS,        &IID_IDirectSoundFXChorus},
+        {&GUID_DSFX_STANDARD_CHORUS,        &IID_IDirectSoundFXChorus, TRUE},
         {&GUID_DSFX_STANDARD_COMPRESSOR,    &IID_IDirectSoundFXCompressor},
-        {&GUID_DSFX_STANDARD_DISTORTION,    &IID_IDirectSoundFXDistortion},
+        {&GUID_DSFX_STANDARD_DISTORTION,    &IID_IDirectSoundFXDistortion, TRUE},
         {&GUID_DSFX_STANDARD_ECHO,          &IID_IDirectSoundFXEcho},
-        {&GUID_DSFX_STANDARD_FLANGER,       &IID_IDirectSoundFXFlanger},
-        {&GUID_DSFX_STANDARD_GARGLE,        &IID_IDirectSoundFXGargle},
+        {&GUID_DSFX_STANDARD_FLANGER,       &IID_IDirectSoundFXFlanger, TRUE},
+        {&GUID_DSFX_STANDARD_GARGLE,        &IID_IDirectSoundFXGargle, TRUE},
         {&GUID_DSFX_STANDARD_I3DL2REVERB,   &IID_IDirectSoundFXI3DL2Reverb},
         {&GUID_DSFX_STANDARD_PARAMEQ,       &IID_IDirectSoundFXParamEq},
         {&GUID_DSFX_WAVES_REVERB,           &IID_IDirectSoundFXWavesReverb},
@@ -573,7 +564,8 @@ START_TEST(dsdmo)
         HRESULT hr;
 
         hr = CoCreateInstance(tests[i].clsid, NULL, CLSCTX_INPROC_SERVER, tests[i].iid, (void **)&unk);
-        ok(hr == S_OK, "For clsid %s, got hr %#lx.\n", debugstr_guid(tests[i].clsid), hr);
+        todo_wine_if(tests[i].todo) ok(hr == S_OK, "Failed to create %s, hr %#lx.\n",
+                debugstr_guid(tests[i].clsid), hr);
         if (hr == S_OK)
             IUnknown_Release(unk);
         else

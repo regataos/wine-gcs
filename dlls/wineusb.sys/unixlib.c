@@ -362,7 +362,6 @@ static void LIBUSB_CALL transfer_cb(struct libusb_transfer *transfer)
                 break;
             }
 
-            case URB_FUNCTION_VENDOR_DEVICE:
             case URB_FUNCTION_VENDOR_INTERFACE:
             {
                 struct _URB_CONTROL_VENDOR_OR_CLASS_REQUEST *req = &urb->UrbControlVendorClassRequest;
@@ -450,10 +449,7 @@ static NTSTATUS usb_submit_urb(void *args)
             transfer_ctx->transfer_buffer = params->transfer_buffer;
 
             if (!(transfer = libusb_alloc_transfer(0)))
-            {
-                free(transfer_ctx);
                 return STATUS_NO_MEMORY;
-            }
             irp->Tail.Overlay.DriverContext[0] = transfer;
 
             if (pipe.type == UsbdPipeTypeBulk)
@@ -469,7 +465,6 @@ static NTSTATUS usb_submit_urb(void *args)
             else
             {
                 WARN("Invalid pipe type %#x.\n", pipe.type);
-                free(transfer_ctx);
                 libusb_free_transfer(transfer);
                 return USBD_STATUS_INVALID_PIPE_HANDLE;
             }
@@ -494,15 +489,11 @@ static NTSTATUS usb_submit_urb(void *args)
             transfer_ctx->transfer_buffer = params->transfer_buffer;
 
             if (!(transfer = libusb_alloc_transfer(0)))
-            {
-                free(transfer_ctx);
                 return STATUS_NO_MEMORY;
-            }
             irp->Tail.Overlay.DriverContext[0] = transfer;
 
             if (!(buffer = malloc(sizeof(struct libusb_control_setup) + req->TransferBufferLength)))
             {
-                free(transfer_ctx);
                 libusb_free_transfer(transfer);
                 return STATUS_NO_MEMORY;
             }
@@ -540,11 +531,10 @@ static NTSTATUS usb_submit_urb(void *args)
             return STATUS_SUCCESS;
         }
 
-        case URB_FUNCTION_VENDOR_DEVICE:
         case URB_FUNCTION_VENDOR_INTERFACE:
         {
             struct _URB_CONTROL_VENDOR_OR_CLASS_REQUEST *req = &urb->UrbControlVendorClassRequest;
-            uint8_t req_type = LIBUSB_REQUEST_TYPE_VENDOR;
+            uint8_t req_type = LIBUSB_REQUEST_TYPE_VENDOR | LIBUSB_RECIPIENT_INTERFACE;
             struct transfer_ctx *transfer_ctx;
             unsigned char *buffer;
 
@@ -553,26 +543,17 @@ static NTSTATUS usb_submit_urb(void *args)
             transfer_ctx->irp = irp;
             transfer_ctx->transfer_buffer = params->transfer_buffer;
 
-            if (urb->UrbHeader.Function == URB_FUNCTION_VENDOR_DEVICE)
-                req_type |= LIBUSB_RECIPIENT_DEVICE;
-            else
-                req_type |= LIBUSB_RECIPIENT_INTERFACE;
-
             if (req->TransferFlags & USBD_TRANSFER_DIRECTION_IN)
                 req_type |= LIBUSB_ENDPOINT_IN;
             if (req->TransferFlags & ~USBD_TRANSFER_DIRECTION_IN)
                 FIXME("Unhandled flags %#x.\n", (int)req->TransferFlags);
 
             if (!(transfer = libusb_alloc_transfer(0)))
-            {
-                free(transfer_ctx);
                 return STATUS_NO_MEMORY;
-            }
             irp->Tail.Overlay.DriverContext[0] = transfer;
 
             if (!(buffer = malloc(sizeof(struct libusb_control_setup) + req->TransferBufferLength)))
             {
-                free(transfer_ctx);
                 libusb_free_transfer(transfer);
                 return STATUS_NO_MEMORY;
             }

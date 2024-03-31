@@ -2113,8 +2113,7 @@ void WDML_RemoveConv(WDML_CONV* pRef, WDML_SIDE side)
 	    {
 		pPrev->next = pCurrent->next;
 	    }
-            /* Ensure compiler doesn't optimize out the assignment with 0. */
-	    SecureZeroMemory(&pCurrent->magic, sizeof(pCurrent->magic));
+	    pCurrent->magic = 0;
 	    HeapFree(GetProcessHeap(), 0, pCurrent);
 	    break;
 	}

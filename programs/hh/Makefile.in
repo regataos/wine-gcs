@@ -2,7 +2,9 @@ MODULE    = hh.exe
 
 EXTRADLLFLAGS = -mwindows
 
-SOURCES = \
-	hh.rc \
-	main.c \
-	winhelp.svg
+C_SRCS = \
+	main.c
+
+RC_SRCS = hh.rc
+
+SVG_SRCS = winhelp.svg

@@ -626,11 +626,11 @@ BOOL WINAPI NtUserDrawIconEx( HDC hdc, INT x0, INT y0, HICON icon, INT width,
         }
         if (alpha_blend)
         {
+            BLENDFUNCTION pixelblend = { AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
             NtGdiSelectBitmap( mem_dc, obj->frame.alpha );
             if (NtGdiAlphaBlend( hdc_dest, x, y, width, height, mem_dc,
                                  0, 0, obj->frame.width, obj->frame.height,
-                                 MAKEFOURCC( AC_SRC_OVER, 0, 255, AC_SRC_ALPHA ), 0 ))
-                goto done;
+                                 pixelblend, 0 )) goto done;
         }
     }
 
@@ -718,8 +718,7 @@ HANDLE WINAPI CopyImage( HANDLE hwnd, UINT type, INT dx, INT dy, UINT flags )
         { .hwnd = hwnd, .type = type, .dx = dx, .dy = dy, .flags = flags };
 
     ret = KeUserModeCallback( NtUserCopyImage, &params, sizeof(params), &ret_ptr, &ret_len );
-    if (!ret && ret_len == sizeof(HANDLE)) return *(HANDLE *)ret_ptr;
-    return 0;
+    return UlongToHandle( ret );
 }
 
 /******************************************************************************
@@ -740,6 +739,5 @@ HANDLE WINAPI LoadImageW( HINSTANCE hinst, const WCHAR *name, UINT type,
         return 0;
     }
     ret = KeUserModeCallback( NtUserLoadImage, &params, sizeof(params), &ret_ptr, &ret_len );
-    if (!ret && ret_len == sizeof(HANDLE)) return *(HANDLE *)ret_ptr;
-    return 0;
+    return UlongToHandle( ret );
 }

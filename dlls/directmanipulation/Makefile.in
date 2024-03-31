@@ -3,6 +3,7 @@ IMPORTS   = uuid
 
 EXTRADLLFLAGS = -Wb,--prefer-native
 
-SOURCES = \
-	directmanip.idl \
+IDL_SRCS = directmanip.idl
+
+C_SRCS = \
 	directmanipulation.c

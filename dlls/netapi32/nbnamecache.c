@@ -100,7 +100,7 @@ struct NBNameCache *NBNameCacheCreate(HANDLE heap, DWORD entryExpireTimeMS)
     if (cache)
     {
         cache->heap = heap;
-        InitializeCriticalSectionEx(&cache->cs, 0, RTL_CRITICAL_SECTION_FLAG_FORCE_DEBUG_INFO);
+        InitializeCriticalSection(&cache->cs);
         cache->cs.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": NBNameCache.cs");
         cache->entryExpireTimeMS = entryExpireTimeMS;
         cache->head = NULL;

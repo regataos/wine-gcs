@@ -19,6 +19,7 @@
 #include <stdarg.h>
 #include <FACT.h>
 
+#define NONAMELESSUNION
 #define COBJMACROS
 #include "objbase.h"
 
@@ -35,7 +36,7 @@
 #include "wine/debug.h"
 #include "wine/rbtree.h"
 
-WINE_DEFAULT_DEBUG_CHANNEL(xaudio2);
+WINE_DEFAULT_DEBUG_CHANNEL(xact3);
 
 #if XACT3_VER < 0x0300
 #define IID_IXACT3Engine IID_IXACTEngine
@@ -52,7 +53,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(xaudio2);
 #define IXACT3WaveBankVtbl IXACTWaveBankVtbl
 #endif
 
-#define XACTNOTIFICATIONTYPE_MAX 19  /* XACTNOTIFICATIONTYPE_WAVEBANKSTREAMING_INVALIDCONTENT + 1 */
+#define XACTNOTIFICATIONTYPE_MAX 18  /* XACTNOTIFICATIONTYPE_WAVEBANKSTREAMING_INVALIDCONTENT + 1 */
 
 struct wrapper_lookup
 {
@@ -315,7 +316,7 @@ static HRESULT WINAPI IXACT3CueImpl_GetProperties(IXACT3Cue *iface,
 }
 #endif
 
-#if XACT3_VER >= 0x0305
+#if XACT3_VER >= 0x0300
 static HRESULT WINAPI IXACT3CueImpl_SetOutputVoices(IXACT3Cue *iface,
         const XAUDIO2_VOICE_SENDS *pSendList)
 {
@@ -329,17 +330,9 @@ static HRESULT WINAPI IXACT3CueImpl_SetOutputVoiceMatrix(IXACT3Cue *iface,
         UINT32 DestinationChannels, const float *pLevelMatrix)
 {
     XACT3CueImpl *This = impl_from_IXACT3Cue(iface);
-    uint32_t ret;
-
-    TRACE("(%p)->(%p %u %u %p)\n", This, pDestinationVoice, SourceChannels,
+    FIXME("(%p)->(%p %u %u %p): stub!\n", This, pDestinationVoice, SourceChannels,
             DestinationChannels, pLevelMatrix);
-    if (pDestinationVoice)
-        WARN("pDestinationVoice currently not supported\n");
-
-    ret = FACTCue_SetOutputVoiceMatrix(This->fact_cue, NULL, SourceChannels,
-        DestinationChannels, pLevelMatrix);
-
-    return ret ? E_FAIL : S_OK;
+    return S_OK;
 }
 #endif
 
@@ -363,7 +356,7 @@ static const IXACT3CueVtbl XACT3Cue_Vtbl =
 #if XACT3_VER >= 0x0205
     IXACT3CueImpl_GetProperties,
 #endif
-#if XACT3_VER >= 0x0305
+#if XACT3_VER >= 0x0300
     IXACT3CueImpl_SetOutputVoices,
     IXACT3CueImpl_SetOutputVoiceMatrix
 #endif
@@ -421,7 +414,6 @@ static HRESULT WINAPI IXACT3SoundBankImpl_Prepare(IXACT3SoundBank *iface,
     XACT3SoundBankImpl *This = impl_from_IXACT3SoundBank(iface);
     XACT3CueImpl *cue;
     FACTCue *fcue;
-
     UINT ret;
     HRESULT hr;
 
@@ -1178,7 +1170,7 @@ static HRESULT WINAPI IXACT3EngineImpl_CreateSoundBank(IXACT3Engine *iface,
     UINT ret;
     HRESULT hr;
 
-    TRACE("(%p)->(%p, %lu, 0x%lx, 0x%lx, %p)\n", This, pvBuffer, dwSize, dwFlags,
+    TRACE("(%p)->(%p, %lu, 0x%lx, 0x%lx, %p): stub!\n", This, pvBuffer, dwSize, dwFlags,
             dwAllocAttributes, ppSoundBank);
 
     ret = FACTAudioEngine_CreateSoundBank(This->fact_engine, pvBuffer, dwSize,

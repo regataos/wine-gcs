@@ -31,6 +31,9 @@
 #include <math.h>
 #include <dlfcn.h>
 
+#define NONAMELESSSTRUCT
+#define NONAMELESSUNION
+
 #include "x11drv.h"
 
 #ifdef HAVE_X11_EXTENSIONS_XF86VMODE_H
@@ -82,12 +85,12 @@ static int XVidModeErrorHandler(Display *dpy, XErrorEvent *event, void *arg)
 }
 
 /* XF86VidMode display settings handler */
-static BOOL xf86vm_get_id(const WCHAR *device_name, BOOL is_primary, x11drv_settings_id *id)
+static BOOL xf86vm_get_id(const WCHAR *device_name, BOOL is_primary, ULONG_PTR *id)
 {
     /* XVidMode only supports changing the primary adapter settings.
      * For non-primary adapters, an id is still provided but getting
      * and changing non-primary adapters' settings will be ignored. */
-    id->id = is_primary ? 1 : 0;
+    *id = is_primary ? 1 : 0;
     return TRUE;
 }
 
@@ -101,15 +104,15 @@ static void add_xf86vm_mode(DEVMODEW *mode, DWORD depth, const XF86VidModeModeIn
         mode->dmFields |= DM_DISPLAYFREQUENCY;
         mode->dmDisplayFrequency = mode_info->dotclock * 1000 / (mode_info->htotal * mode_info->vtotal);
     }
-    mode->dmDisplayOrientation = DMDO_DEFAULT;
+    mode->u1.s2.dmDisplayOrientation = DMDO_DEFAULT;
     mode->dmBitsPerPel = depth;
     mode->dmPelsWidth = mode_info->hdisplay;
     mode->dmPelsHeight = mode_info->vdisplay;
-    mode->dmDisplayFlags = 0;
+    mode->u2.dmDisplayFlags = 0;
     memcpy((BYTE *)mode + sizeof(*mode), &mode_info, sizeof(mode_info));
 }
 
-static BOOL xf86vm_get_modes(x11drv_settings_id id, DWORD flags, DEVMODEW **new_modes, UINT *mode_count)
+static BOOL xf86vm_get_modes(ULONG_PTR id, DWORD flags, DEVMODEW **new_modes, UINT *mode_count)
 {
     INT xf86vm_mode_idx, xf86vm_mode_count;
     XF86VidModeModeInfo **xf86vm_modes;
@@ -159,15 +162,14 @@ static void xf86vm_free_modes(DEVMODEW *modes)
 
     if (modes)
     {
-        BYTE *ptr = (BYTE *)modes - sizeof(xf86vm_modes);
         assert(modes[0].dmDriverExtra == sizeof(XF86VidModeModeInfo *));
-        memcpy(&xf86vm_modes, ptr, sizeof(xf86vm_modes));
+        memcpy(&xf86vm_modes, (BYTE *)modes - sizeof(xf86vm_modes), sizeof(xf86vm_modes));
         XFree(xf86vm_modes);
-        free(ptr);
     }
+    free(modes);
 }
 
-static BOOL xf86vm_get_current_mode(x11drv_settings_id id, DEVMODEW *mode)
+static BOOL xf86vm_get_current_mode(ULONG_PTR id, DEVMODEW *mode)
 {
     XF86VidModeModeLine xf86vm_mode;
     INT dotclock;
@@ -175,12 +177,12 @@ static BOOL xf86vm_get_current_mode(x11drv_settings_id id, DEVMODEW *mode)
 
     mode->dmFields = DM_DISPLAYORIENTATION | DM_BITSPERPEL | DM_PELSWIDTH | DM_PELSHEIGHT |
                      DM_DISPLAYFLAGS | DM_DISPLAYFREQUENCY | DM_POSITION;
-    mode->dmDisplayOrientation = DMDO_DEFAULT;
-    mode->dmDisplayFlags = 0;
-    mode->dmPosition.x = 0;
-    mode->dmPosition.y = 0;
+    mode->u1.s2.dmDisplayOrientation = DMDO_DEFAULT;
+    mode->u2.dmDisplayFlags = 0;
+    mode->u1.s2.dmPosition.x = 0;
+    mode->u1.s2.dmPosition.y = 0;
 
-    if (id.id != 1)
+    if (id != 1)
     {
         FIXME("Non-primary adapters are unsupported.\n");
         mode->dmBitsPerPel = 0;
@@ -208,12 +210,12 @@ static BOOL xf86vm_get_current_mode(x11drv_settings_id id, DEVMODEW *mode)
     return TRUE;
 }
 
-static LONG xf86vm_set_current_mode(x11drv_settings_id id, const DEVMODEW *mode)
+static LONG xf86vm_set_current_mode(ULONG_PTR id, const DEVMODEW *mode)
 {
     XF86VidModeModeInfo *xf86vm_mode;
     Bool ret;
 
-    if (id.id != 1)
+    if (id != 1)
     {
         FIXME("Non-primary adapters are unsupported.\n");
         return DISP_CHANGE_SUCCESSFUL;
@@ -550,10 +552,33 @@ void X11DRV_XF86VM_Init(void)
 
 #endif /* SONAME_LIBXXF86VM */
 
+static BOOL CALLBACK gammahack_UpdateWindowGamma( HWND hwnd, LPARAM lparam )
+{
+    /* XXX: Technically, the ramp should only apply to windows on the given
+     * device, but I can't think of a situation in which that would matter. */
+
+    sync_gl_drawable( hwnd, FALSE );
+
+    return TRUE;
+}
+
+static BOOL gamma_hack_SetGammaRamp( PHYSDEV dev, const WORD *ramp )
+{
+    fs_hack_set_gamma_ramp( ramp );
+
+    NtUserEnumChildWindows( NtUserGetDesktopWindow(), gammahack_UpdateWindowGamma, 0 );
+
+    return TRUE;
+}
+
 /***********************************************************************
- *		GetDeviceGammaRamp
+ *		GetDeviceGammaRamp (X11DRV.@)
+ *
+ * FIXME: should move to somewhere appropriate, but probably not before
+ * the stuff in graphics/x11drv/ has been moved to dlls/x11drv, so that
+ * they can include xvidmode.h directly
  */
-BOOL X11DRV_GetDeviceGammaRamp(PHYSDEV dev, LPVOID ramp)
+BOOL CDECL X11DRV_GetDeviceGammaRamp(PHYSDEV dev, LPVOID ramp)
 {
 #ifdef SONAME_LIBXXF86VM
   return X11DRV_XF86VM_GetGammaRamp(ramp);
@@ -563,12 +588,17 @@ BOOL X11DRV_GetDeviceGammaRamp(PHYSDEV dev, LPVOID ramp)
 }
 
 /***********************************************************************
- *		SetDeviceGammaRamp
+ *		SetDeviceGammaRamp (X11DRV.@)
+ *
+ * FIXME: should move to somewhere appropriate, but probably not before
+ * the stuff in graphics/x11drv/ has been moved to dlls/x11drv, so that
+ * they can include xvidmode.h directly
  */
-BOOL X11DRV_SetDeviceGammaRamp(PHYSDEV dev, LPVOID ramp)
+BOOL CDECL X11DRV_SetDeviceGammaRamp(PHYSDEV dev, LPVOID ramp)
 {
 #ifdef SONAME_LIBXXF86VM
-  return X11DRV_XF86VM_SetGammaRamp(ramp);
+  if (!X11DRV_XF86VM_SetGammaRamp(ramp)) return gamma_hack_SetGammaRamp(dev, ramp);
+  return TRUE;
 #else
   return FALSE;
 #endif

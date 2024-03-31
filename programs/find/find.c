@@ -20,6 +20,7 @@
 #include <stdlib.h>
 #include <shlwapi.h>
 
+#include "wine/heap.h"
 #include "wine/debug.h"
 #include "resources.h"
 
@@ -52,7 +53,7 @@ static WCHAR* read_line_from_handle(HANDLE handle)
     WCHAR *line_converted;
     int line_converted_length;
     BOOL success;
-    char *line = malloc(line_max);
+    char *line = heap_alloc(line_max);
 
     for (;;)
     {
@@ -75,7 +76,7 @@ static WCHAR* read_line_from_handle(HANDLE handle)
         if (length + 1 >= line_max)
         {
             line_max *= 2;
-            line = realloc(line, line_max);
+            line = heap_realloc(line, line_max);
         }
 
         line[length++] = c;
@@ -86,10 +87,10 @@ static WCHAR* read_line_from_handle(HANDLE handle)
         line[length - 1] = 0;
 
     line_converted_length = MultiByteToWideChar(CP_ACP, 0, line, -1, 0, 0);
-    line_converted = malloc(line_converted_length * sizeof(WCHAR));
+    line_converted = heap_alloc(line_converted_length * sizeof(WCHAR));
     MultiByteToWideChar(CP_ACP, 0, line, -1, line_converted, line_converted_length);
 
-    free(line);
+    heap_free(line);
 
     return line_converted;
 }
@@ -103,14 +104,14 @@ static void write_to_stdout(const WCHAR *str)
     int codepage = CP_ACP;
 
     str_converted_length = WideCharToMultiByte(codepage, 0, str, str_length, NULL, 0, NULL, NULL);
-    str_converted = malloc(str_converted_length);
+    str_converted = heap_alloc(str_converted_length);
     WideCharToMultiByte(codepage, 0, str, str_length, str_converted, str_converted_length, NULL, NULL);
 
     WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), str_converted, str_converted_length, &bytes_written, NULL);
     if (bytes_written < str_converted_length)
         ERR("Failed to write output\n");
 
-    free(str_converted);
+    heap_free(str_converted);
 }
 
 static BOOL run_find_for_line(const WCHAR *line, const WCHAR *tofind)
@@ -172,7 +173,7 @@ int __cdecl wmain(int argc, WCHAR *argv[])
             if (file_paths_len >= file_paths_max)
             {
                 file_paths_max = file_paths_max ? file_paths_max * 2 : 2;
-                file_paths = realloc(file_paths, sizeof(WCHAR*) * file_paths_max);
+                file_paths = heap_realloc(file_paths, sizeof(WCHAR*) * file_paths_max);
             }
             file_paths[file_paths_len++] = argv[i];
         }
@@ -218,7 +219,7 @@ int __cdecl wmain(int argc, WCHAR *argv[])
                 if (run_find_for_line(line, tofind))
                     exitcode = 0;
 
-                free(line);
+                heap_free(line);
             }
             CloseHandle(input);
         }
@@ -231,10 +232,10 @@ int __cdecl wmain(int argc, WCHAR *argv[])
             if (run_find_for_line(line, tofind))
                 exitcode = 0;
 
-            free(line);
+            heap_free(line);
         }
     }
 
-    free(file_paths);
+    heap_free(file_paths);
     return exitcode;
 }

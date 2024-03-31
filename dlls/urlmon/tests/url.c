@@ -23,6 +23,7 @@
 #include <stdio.h>
 
 #define COBJMACROS
+#define NONAMELESSUNION
 #define CONST_VTABLE
 
 #include "windef.h"
@@ -1997,9 +1998,9 @@ static HRESULT WINAPI statusclb_OnDataAvailable(IBindStatusCallbackEx *iface, DW
 
     switch(pstgmed->tymed) {
     case TYMED_ISTREAM: {
-        IStream *stream = pstgmed->pstm;
+        IStream *stream = U(*pstgmed).pstm;
 
-        ok(stream != NULL, "pstgmed->pstm == NULL\n");
+        ok(stream != NULL, "U(*pstgmed).pstm == NULL\n");
 
         if(grfBSCF & BSCF_FIRSTDATANOTIFICATION) {
             STATSTG stat;
@@ -2023,8 +2024,8 @@ static HRESULT WINAPI statusclb_OnDataAvailable(IBindStatusCallbackEx *iface, DW
                         "stat.pwcsName = %s, cache_file_name = %s\n",
                         wine_dbgstr_w(stat.pwcsName), wine_dbgstr_w(cache_file_name));
                 CoTaskMemFree(stat.pwcsName);
-                ok(stat.cbSize.LowPart == (bindf&BINDF_ASYNCHRONOUS?0:6500),
-                        "stat.cbSize.LowPart = %lu\n", stat.cbSize.LowPart);
+                ok(U(stat.cbSize).LowPart == (bindf&BINDF_ASYNCHRONOUS?0:6500),
+                        "stat.cbSize.LowPart = %lu\n", U(stat.cbSize).LowPart);
             } else {
                 hres = IStream_Stat(stream, &stat, STATFLAG_NONAME);
                 ok(hres == S_OK, "hres = %lx\n", hres);
@@ -2032,8 +2033,8 @@ static HRESULT WINAPI statusclb_OnDataAvailable(IBindStatusCallbackEx *iface, DW
                         "stat.pwcsName = %s\n", wine_dbgstr_w(stat.pwcsName));
             }
             ok(stat.type == STGTY_STREAM, "stat.type = %lx\n", stat.type);
-            ok(stat.cbSize.HighPart == 0, "stat.cbSize.HighPart != 0\n");
-            ok(stat.grfMode == (stat.cbSize.LowPart?GENERIC_READ:0), "stat.grfMode = %lx\n", stat.grfMode);
+            ok(U(stat.cbSize).HighPart == 0, "stat.cbSize.HighPart != 0\n");
+            ok(stat.grfMode == (U(stat.cbSize).LowPart?GENERIC_READ:0), "stat.grfMode = %lx\n", stat.grfMode);
             ok(stat.grfLocksSupported == 0, "stat.grfLocksSupported = %lx\n", stat.grfLocksSupported);
             ok(stat.grfStateBits == 0, "stat.grfStateBits = %lx\n", stat.grfStateBits);
             ok(stat.reserved == 0, "stat.reserved = %lx\n", stat.reserved);
@@ -2054,15 +2055,15 @@ static HRESULT WINAPI statusclb_OnDataAvailable(IBindStatusCallbackEx *iface, DW
     }
     case TYMED_FILE:
         if(test_protocol == FILE_TEST)
-            ok(!lstrcmpW(pstgmed->lpszFileName, file_url+7),
-               "unexpected file name %s\n", wine_dbgstr_w(pstgmed->lpszFileName));
+            ok(!lstrcmpW(pstgmed->u.lpszFileName, file_url+7),
+               "unexpected file name %s\n", wine_dbgstr_w(pstgmed->u.lpszFileName));
         else if(emulate_protocol)
-            ok(!lstrcmpW(pstgmed->lpszFileName, cache_fileW),
-               "unexpected file name %s\n", wine_dbgstr_w(pstgmed->lpszFileName));
+            ok(!lstrcmpW(pstgmed->u.lpszFileName, cache_fileW),
+               "unexpected file name %s\n", wine_dbgstr_w(pstgmed->u.lpszFileName));
         else if(test_protocol == HTTP_TEST)
-            lstrcpyW(http_cache_file, pstgmed->lpszFileName);
+            lstrcpyW(http_cache_file, pstgmed->u.lpszFileName);
         else
-            ok(pstgmed->lpszFileName != NULL, "lpszFileName == NULL\n");
+            ok(pstgmed->u.lpszFileName != NULL, "lpszFileName == NULL\n");
     }
 
     if((test_protocol == HTTP_TEST || test_protocol == HTTPS_TEST || test_protocol == WINETEST_TEST)

@@ -24,6 +24,7 @@
 #include "rpcproxy.h"
 
 #include "wine/debug.h"
+#include "wine/heap.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(msident);
 
@@ -75,7 +76,7 @@ static ULONG WINAPI EnumUserIdentity_Release(IEnumUserIdentity *iface)
     TRACE("(%p) ref=%ld\n", This, ref);
 
     if(!ref)
-        free(This);
+        heap_free(This);
 
     return ref;
 }
@@ -165,7 +166,7 @@ static HRESULT WINAPI UserIdentityManager_EnumIdentities(IUserIdentityManager *i
 
     TRACE("(%p)\n", ppEnumUser);
 
-    ret = malloc(sizeof(*ret));
+    ret = heap_alloc(sizeof(*ret));
     if(!ret)
         return E_OUTOFMEMORY;
 

@@ -1,5 +1,5 @@
 STATICLIB = libmfuuid.a
 
-SOURCES = \
+C_SRCS = \
 	mfplay.c \
 	mfuuid.c

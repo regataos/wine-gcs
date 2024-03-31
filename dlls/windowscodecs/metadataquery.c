@@ -21,6 +21,8 @@
 #include <wchar.h>
 
 #define COBJMACROS
+#define NONAMELESSUNION
+
 #include "windef.h"
 #include "winbase.h"
 #include "objbase.h"
@@ -841,7 +843,7 @@ static HRESULT WINAPI mqw_SetMetadataByName(IWICMetadataQueryWriter *iface, LPCW
 {
     FIXME("iface %p, name %s, value %p stub.\n", iface, debugstr_w(name), value);
 
-    return S_OK;
+    return E_NOTIMPL;
 }
 
 static HRESULT WINAPI mqw_RemoveMetadataByName(IWICMetadataQueryWriter *iface, LPCWSTR name)

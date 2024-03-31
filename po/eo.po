@@ -40,11 +40,11 @@ msgstr ""
 msgid "Permissions for %1"
 msgstr "Ecoj laŭ %s"
 
-#: dlls/appwiz.cpl/appwiz.rc:59
+#: dlls/appwiz.cpl/appwiz.rc:58
 msgid "Install/Uninstall"
 msgstr "Instali/Malinstali"
 
-#: dlls/appwiz.cpl/appwiz.rc:62
+#: dlls/appwiz.cpl/appwiz.rc:61
 msgid ""
 "To install a new program from a floppy disk, CD-ROM drive, or your hard "
 "drive, click Install."
@@ -52,11 +52,11 @@ msgstr ""
 "Por instali novan programon de fleksa disko, lumdisko, aŭ via diskaparato "
 "klaku sur \"Instali\"."
 
-#: dlls/appwiz.cpl/appwiz.rc:63
+#: dlls/appwiz.cpl/appwiz.rc:62
 msgid "&Install..."
 msgstr "&Instali..."
 
-#: dlls/appwiz.cpl/appwiz.rc:66
+#: dlls/appwiz.cpl/appwiz.rc:65
 #, fuzzy
 #| msgid ""
 #| "The following software can be automatically removed. To remove a program "
@@ -71,27 +71,27 @@ msgstr ""
 "ĝiajn instalitajn komponantojn elekti ĝin el la listo kaj klaku sur \"Ŝanĝi/"
 "Forigi\"."
 
-#: dlls/appwiz.cpl/appwiz.rc:68
+#: dlls/appwiz.cpl/appwiz.rc:67
 msgid "&Support Information"
 msgstr "Por &Helpo"
 
-#: dlls/appwiz.cpl/appwiz.rc:69 programs/regedit/regedit.rc:136
+#: dlls/appwiz.cpl/appwiz.rc:68 programs/regedit/regedit.rc:136
 #: programs/regedit/regedit.rc:237
 msgid "&Modify..."
 msgstr "&Modifi..."
 
-#: dlls/appwiz.cpl/appwiz.rc:70 dlls/appwiz.cpl/appwiz.rc:45
+#: dlls/appwiz.cpl/appwiz.rc:69 dlls/appwiz.cpl/appwiz.rc:45
 #: dlls/cryptui/cryptui.rc:351 dlls/msacm32/msacm32.rc:40
-#: programs/winecfg/winecfg.rc:205 programs/winecfg/winecfg.rc:242
+#: programs/winecfg/winecfg.rc:199 programs/winecfg/winecfg.rc:236
 #: programs/wordpad/wordpad.rc:256
 msgid "&Remove"
 msgstr "&Forigi"
 
-#: dlls/appwiz.cpl/appwiz.rc:76
+#: dlls/appwiz.cpl/appwiz.rc:75
 msgid "Support Information"
 msgstr "Informoj pri Helpo"
 
-#: dlls/appwiz.cpl/appwiz.rc:79 dlls/avifil32/avifil32.rc:54
+#: dlls/appwiz.cpl/appwiz.rc:78 dlls/avifil32/avifil32.rc:54
 #: dlls/comctl32/comctl32.rc:71 dlls/comctl32/comctl32.rc:55
 #: dlls/comdlg32/comdlg32.rc:233 dlls/comdlg32/comdlg32.rc:263
 #: dlls/comdlg32/comdlg32.rc:307 dlls/comdlg32/comdlg32.rc:390
@@ -104,71 +104,71 @@ msgstr "Informoj pri Helpo"
 #: dlls/mshtml/mshtml.rc:47 dlls/mshtml/mshtml.rc:57 dlls/msvfw32/msvfw32.rc:36
 #: dlls/oledlg/oledlg.rc:62 dlls/oledlg/oledlg.rc:94
 #: dlls/serialui/serialui.rc:41 dlls/setupapi/setupapi.rc:59
-#: dlls/shell32/shell32.rc:278 dlls/shell32/shell32.rc:302
-#: dlls/shell32/shell32.rc:324 dlls/shell32/shell32.rc:343
+#: dlls/shell32/shell32.rc:274 dlls/shell32/shell32.rc:298
+#: dlls/shell32/shell32.rc:320 dlls/shell32/shell32.rc:339
 #: dlls/shlwapi/shlwapi.rc:44 dlls/twain_32/twain.rc:32
-#: dlls/user32/user32.rc:94 dlls/user32/user32.rc:109 dlls/user32/user32.rc:73
-#: dlls/wininet/wininet.rc:62 dlls/wininet/wininet.rc:82
-#: dlls/winspool.drv/winspool.rc:42 programs/net/net.rc:48
-#: programs/notepad/notepad.rc:124 programs/oleview/oleview.rc:161
-#: programs/oleview/oleview.rc:174 programs/progman/progman.rc:106
-#: programs/progman/progman.rc:124 programs/progman/progman.rc:142
-#: programs/progman/progman.rc:158 programs/progman/progman.rc:180
-#: programs/progman/progman.rc:199 programs/progman/progman.rc:216
-#: programs/regedit/regedit.rc:301 programs/regedit/regedit.rc:312
-#: programs/regedit/regedit.rc:325 programs/regedit/regedit.rc:341
-#: programs/regedit/regedit.rc:354 programs/regedit/regedit.rc:367
-#: programs/taskmgr/taskmgr.rc:442 programs/taskmgr/taskmgr.rc:517
-#: programs/winecfg/winecfg.rc:219 programs/winecfg/winecfg.rc:229
-#: programs/winefile/winefile.rc:127 programs/winefile/winefile.rc:150
-#: programs/winefile/winefile.rc:180 programs/winemine/winemine.rc:73
-#: programs/winemine/winemine.rc:84 programs/winemine/winemine.rc:98
-#: programs/wordpad/wordpad.rc:215 programs/wordpad/wordpad.rc:226
-#: programs/wordpad/wordpad.rc:244 programs/wordpad/wordpad.rc:257
+#: dlls/user32/user32.rc:83 dlls/user32/user32.rc:98 dlls/wininet/wininet.rc:62
+#: dlls/wininet/wininet.rc:82 dlls/winspool.drv/winspool.rc:42
+#: programs/net/net.rc:47 programs/notepad/notepad.rc:124
+#: programs/oleview/oleview.rc:161 programs/oleview/oleview.rc:174
+#: programs/progman/progman.rc:106 programs/progman/progman.rc:124
+#: programs/progman/progman.rc:142 programs/progman/progman.rc:158
+#: programs/progman/progman.rc:180 programs/progman/progman.rc:199
+#: programs/progman/progman.rc:216 programs/regedit/regedit.rc:301
+#: programs/regedit/regedit.rc:312 programs/regedit/regedit.rc:325
+#: programs/regedit/regedit.rc:341 programs/regedit/regedit.rc:354
+#: programs/regedit/regedit.rc:367 programs/taskmgr/taskmgr.rc:442
+#: programs/taskmgr/taskmgr.rc:517 programs/winecfg/winecfg.rc:213
+#: programs/winecfg/winecfg.rc:223 programs/winefile/winefile.rc:127
+#: programs/winefile/winefile.rc:150 programs/winefile/winefile.rc:180
+#: programs/winemine/winemine.rc:73 programs/winemine/winemine.rc:84
+#: programs/winemine/winemine.rc:98 programs/wordpad/wordpad.rc:215
+#: programs/wordpad/wordpad.rc:226 programs/wordpad/wordpad.rc:244
+#: programs/wordpad/wordpad.rc:257
 msgid "OK"
 msgstr "Bone"
 
-#: dlls/appwiz.cpl/appwiz.rc:80
+#: dlls/appwiz.cpl/appwiz.rc:79
 msgid "The following information can be used to get technical support for %s:"
 msgstr "La jenaj informoj povas uziĝi por atingi teknikan helpon por %s:"
 
-#: dlls/appwiz.cpl/appwiz.rc:81
+#: dlls/appwiz.cpl/appwiz.rc:80
 msgid "Publisher:"
 msgstr "Eldonisto:"
 
-#: dlls/appwiz.cpl/appwiz.rc:82 programs/winefile/winefile.rc:165
+#: dlls/appwiz.cpl/appwiz.rc:81 programs/winefile/winefile.rc:165
 msgid "Version:"
 msgstr "Eldono:"
 
-#: dlls/appwiz.cpl/appwiz.rc:83
+#: dlls/appwiz.cpl/appwiz.rc:82
 msgid "Contact:"
 msgstr "Kontakti:"
 
-#: dlls/appwiz.cpl/appwiz.rc:84
+#: dlls/appwiz.cpl/appwiz.rc:83
 msgid "Support Information:"
 msgstr "Por Helpo:"
 
-#: dlls/appwiz.cpl/appwiz.rc:85
+#: dlls/appwiz.cpl/appwiz.rc:84
 msgid "Support Telephone:"
 msgstr "Helpa telefonnumero:"
 
-#: dlls/appwiz.cpl/appwiz.rc:86
+#: dlls/appwiz.cpl/appwiz.rc:85
 msgid "Readme:"
 msgstr "Legumin:"
 
-#: dlls/appwiz.cpl/appwiz.rc:87
+#: dlls/appwiz.cpl/appwiz.rc:86
 msgid "Product Updates:"
 msgstr "Produktaĵaj ĝisdatigoj:"
 
-#: dlls/appwiz.cpl/appwiz.rc:88
+#: dlls/appwiz.cpl/appwiz.rc:87
 msgid "Comments:"
 msgstr "Komentoj:"
 
-#: dlls/appwiz.cpl/appwiz.rc:101
+#: dlls/appwiz.cpl/appwiz.rc:100
 msgid "Wine Gecko Installer"
 msgstr "Instalilo de Wine-Gecko"
 
-#: dlls/appwiz.cpl/appwiz.rc:104
+#: dlls/appwiz.cpl/appwiz.rc:103
 msgid ""
 "Wine could not find a Gecko package which is needed for applications "
 "embedding HTML to work correctly. Wine can automatically download and "
@@ -179,11 +179,11 @@ msgid ""
 "details."
 msgstr ""
 
-#: dlls/appwiz.cpl/appwiz.rc:110 dlls/appwiz.cpl/appwiz.rc:125
+#: dlls/appwiz.cpl/appwiz.rc:109 dlls/appwiz.cpl/appwiz.rc:124
 msgid "&Install"
 msgstr "&Instali"
 
-#: dlls/appwiz.cpl/appwiz.rc:111 dlls/appwiz.cpl/appwiz.rc:126
+#: dlls/appwiz.cpl/appwiz.rc:110 dlls/appwiz.cpl/appwiz.rc:125
 #: dlls/avifil32/avifil32.rc:55 dlls/browseui/browseui.rc:45
 #: dlls/comctl32/comctl32.rc:72 dlls/comctl32/comctl32.rc:87
 #: dlls/comctl32/comctl32.rc:56 dlls/comdlg32/comdlg32.rc:172
@@ -202,37 +202,37 @@ msgstr "&Instali"
 #: dlls/mshtml/mshtml.rc:48 dlls/mshtml/mshtml.rc:58 dlls/msvfw32/msvfw32.rc:37
 #: dlls/oledlg/oledlg.rc:63 dlls/oledlg/oledlg.rc:95
 #: dlls/serialui/serialui.rc:42 dlls/setupapi/setupapi.rc:42
-#: dlls/setupapi/setupapi.rc:60 dlls/shell32/shell32.rc:279
-#: dlls/shell32/shell32.rc:303 dlls/shell32/shell32.rc:314
-#: dlls/shell32/shell32.rc:344 dlls/shlwapi/shlwapi.rc:45
-#: dlls/twain_32/twain.rc:33 dlls/user32/user32.rc:95 dlls/user32/user32.rc:110
-#: dlls/user32/user32.rc:74 dlls/wininet/wininet.rc:63
-#: dlls/wininet/wininet.rc:83 dlls/winspool.drv/winspool.rc:43
-#: programs/notepad/notepad.rc:125 programs/notepad/notepad.rc:138
-#: programs/oleview/oleview.rc:162 programs/oleview/oleview.rc:175
-#: programs/progman/progman.rc:107 programs/progman/progman.rc:125
-#: programs/progman/progman.rc:143 programs/progman/progman.rc:159
-#: programs/progman/progman.rc:181 programs/progman/progman.rc:200
-#: programs/progman/progman.rc:217 programs/regedit/regedit.rc:302
-#: programs/regedit/regedit.rc:313 programs/regedit/regedit.rc:326
-#: programs/regedit/regedit.rc:342 programs/regedit/regedit.rc:355
-#: programs/regedit/regedit.rc:368 programs/taskmgr/taskmgr.rc:443
-#: programs/taskmgr/taskmgr.rc:518 programs/wineboot/wineboot.rc:34
-#: programs/winecfg/winecfg.rc:220 programs/winecfg/winecfg.rc:230
-#: programs/winefile/winefile.rc:128 programs/winefile/winefile.rc:151
-#: programs/winefile/winefile.rc:181 programs/winemine/winemine.rc:99
-#: programs/wordpad/wordpad.rc:216 programs/wordpad/wordpad.rc:227
-#: programs/wordpad/wordpad.rc:245 programs/wordpad/wordpad.rc:258
+#: dlls/setupapi/setupapi.rc:60 dlls/shell32/shell32.rc:275
+#: dlls/shell32/shell32.rc:299 dlls/shell32/shell32.rc:310
+#: dlls/shell32/shell32.rc:340 dlls/shlwapi/shlwapi.rc:45
+#: dlls/twain_32/twain.rc:33 dlls/user32/user32.rc:84 dlls/user32/user32.rc:99
+#: dlls/wininet/wininet.rc:63 dlls/wininet/wininet.rc:83
+#: dlls/winspool.drv/winspool.rc:43 programs/notepad/notepad.rc:125
+#: programs/notepad/notepad.rc:138 programs/oleview/oleview.rc:162
+#: programs/oleview/oleview.rc:175 programs/progman/progman.rc:107
+#: programs/progman/progman.rc:125 programs/progman/progman.rc:143
+#: programs/progman/progman.rc:159 programs/progman/progman.rc:181
+#: programs/progman/progman.rc:200 programs/progman/progman.rc:217
+#: programs/regedit/regedit.rc:302 programs/regedit/regedit.rc:313
+#: programs/regedit/regedit.rc:326 programs/regedit/regedit.rc:342
+#: programs/regedit/regedit.rc:355 programs/regedit/regedit.rc:368
+#: programs/taskmgr/taskmgr.rc:443 programs/taskmgr/taskmgr.rc:518
+#: programs/wineboot/wineboot.rc:34 programs/winecfg/winecfg.rc:214
+#: programs/winecfg/winecfg.rc:224 programs/winefile/winefile.rc:128
+#: programs/winefile/winefile.rc:151 programs/winefile/winefile.rc:181
+#: programs/winemine/winemine.rc:99 programs/wordpad/wordpad.rc:216
+#: programs/wordpad/wordpad.rc:227 programs/wordpad/wordpad.rc:245
+#: programs/wordpad/wordpad.rc:258
 msgid "Cancel"
 msgstr "Rezigni"
 
-#: dlls/appwiz.cpl/appwiz.rc:116
+#: dlls/appwiz.cpl/appwiz.rc:115
 #, fuzzy
 #| msgid "Wine Gecko Installer"
 msgid "Wine Mono Installer"
 msgstr "Instalilo de Wine-Gecko"
 
-#: dlls/appwiz.cpl/appwiz.rc:119
+#: dlls/appwiz.cpl/appwiz.rc:118
 msgid ""
 "Wine could not find a wine-mono package which is needed for .NET "
 "applications to work correctly. Wine can automatically download and install "
@@ -272,7 +272,7 @@ msgid "Not specified"
 msgstr "Ne specifita"
 
 #: dlls/appwiz.cpl/appwiz.rc:38 dlls/oledb32/version.rc:38
-#: dlls/shell32/shell32.rc:141 dlls/shell32/shell32.rc:243
+#: dlls/shell32/shell32.rc:144 dlls/shell32/shell32.rc:239
 #: programs/regedit/regedit.rc:150 programs/winefile/winefile.rc:106
 msgid "Name"
 msgstr "Nomo"
@@ -294,7 +294,7 @@ msgid "Programs (*.exe)"
 msgstr "Programoj (*.exe)"
 
 #: dlls/appwiz.cpl/appwiz.rc:43 dlls/avifil32/avifil32.rc:33
-#: dlls/cryptui/cryptui.rc:83 dlls/shell32/shell32.rc:199
+#: dlls/cryptui/cryptui.rc:83 dlls/shell32/shell32.rc:197
 #: programs/notepad/notepad.rc:81 programs/oleview/oleview.rc:103
 #: programs/progman/progman.rc:82 programs/regedit/regedit.rc:230
 #: programs/winedbg/winedbg.rc:43 programs/winhlp32/winhlp32.rc:90
@@ -305,22 +305,18 @@ msgstr "Ĉiuj dosieroj (*.*)"
 msgid "&Modify/Remove"
 msgstr "&Modifi/Forigi"
 
-#: dlls/appwiz.cpl/appwiz.rc:52
+#: dlls/appwiz.cpl/appwiz.rc:51
 msgid "Downloading..."
 msgstr "Elŝutante..."
 
-#: dlls/appwiz.cpl/appwiz.rc:53
+#: dlls/appwiz.cpl/appwiz.rc:52
 msgid "Installing..."
 msgstr "Instalante..."
 
-#: dlls/appwiz.cpl/appwiz.rc:54
+#: dlls/appwiz.cpl/appwiz.rc:53
 msgid ""
 "Unexpected checksum of downloaded file. Aborting installation of corrupted "
 "file."
-msgstr ""
-
-#: dlls/appwiz.cpl/appwiz.rc:47
-msgid "Please wait until the current uninstall/modify process is complete."
 msgstr ""
 
 #: dlls/avifil32/avifil32.rc:42
@@ -410,8 +406,7 @@ msgid "&Apply"
 msgstr "&Apliki"
 
 #: dlls/comctl32/comctl32.rc:74 dlls/comctl32/comctl32.rc:88
-#: dlls/comdlg32/comdlg32.rc:309 dlls/user32/user32.rc:99
-#: dlls/user32/user32.rc:81
+#: dlls/comdlg32/comdlg32.rc:309 dlls/user32/user32.rc:88
 msgid "Help"
 msgstr "Helpo"
 
@@ -437,9 +432,9 @@ msgstr "Agordi ilobreton"
 
 #: dlls/comctl32/comctl32.rc:100 dlls/comctl32/comctl32.rc:57
 #: dlls/cryptui/cryptui.rc:356 dlls/ieframe/ieframe.rc:43
-#: dlls/user32/user32.rc:80 programs/oleview/oleview.rc:83
-#: programs/oleview/oleview.rc:187 programs/oleview/oleview.rc:200
-#: programs/oleview/oleview.rc:212 programs/taskmgr/taskmgr.rc:139
+#: programs/oleview/oleview.rc:83 programs/oleview/oleview.rc:187
+#: programs/oleview/oleview.rc:200 programs/oleview/oleview.rc:212
+#: programs/taskmgr/taskmgr.rc:139
 msgid "&Close"
 msgstr "&Fermi"
 
@@ -454,7 +449,7 @@ msgstr "R&estarigi"
 #: dlls/comdlg32/comdlg32.rc:482 dlls/comdlg32/comdlg32.rc:508
 #: dlls/comdlg32/comdlg32.rc:531 dlls/ieframe/ieframe.rc:58
 #: dlls/msacm32/msacm32.rc:52 dlls/oledlg/oledlg.rc:96
-#: dlls/shell32/shell32.rc:125 programs/clock/clock.rc:44
+#: dlls/shell32/shell32.rc:128 programs/clock/clock.rc:44
 #: programs/notepad/notepad.rc:65 programs/notepad/notepad.rc:126
 #: programs/oleview/oleview.rc:72 programs/progman/progman.rc:55
 #: programs/progman/progman.rc:108 programs/progman/progman.rc:126
@@ -500,18 +495,17 @@ msgctxt "hotkey"
 msgid "None"
 msgstr "Neniu"
 
-#: dlls/comctl32/comctl32.rc:52 dlls/shell32/shell32.rc:311
-#: dlls/shlwapi/shlwapi.rc:46 dlls/user32/user32.rc:90 dlls/user32/user32.rc:78
+#: dlls/comctl32/comctl32.rc:52 dlls/shell32/shell32.rc:307
+#: dlls/shlwapi/shlwapi.rc:46 dlls/user32/user32.rc:79
 msgid "&Yes"
 msgstr "&Jes"
 
-#: dlls/comctl32/comctl32.rc:53 dlls/shell32/shell32.rc:313
-#: dlls/shlwapi/shlwapi.rc:47 dlls/user32/user32.rc:91 dlls/user32/user32.rc:79
+#: dlls/comctl32/comctl32.rc:53 dlls/shell32/shell32.rc:309
+#: dlls/shlwapi/shlwapi.rc:47 dlls/user32/user32.rc:80
 msgid "&No"
 msgstr "&Ne"
 
-#: dlls/comctl32/comctl32.rc:54 dlls/user32/user32.rc:93
-#: dlls/user32/user32.rc:76
+#: dlls/comctl32/comctl32.rc:54 dlls/user32/user32.rc:82
 msgid "&Retry"
 msgstr "&Reprovi"
 
@@ -544,7 +538,8 @@ msgstr "Iri a la hodiaŭa"
 
 #: dlls/comdlg32/comdlg32.rc:158 dlls/comdlg32/comdlg32.rc:171
 #: dlls/comdlg32/comdlg32.rc:462 dlls/comdlg32/comdlg32.rc:487
-#: dlls/comdlg32/comdlg32.rc:514 programs/oleview/oleview.rc:101
+#: dlls/comdlg32/comdlg32.rc:514 dlls/shell32/shell32.rc:165
+#: programs/oleview/oleview.rc:101
 msgid "Open"
 msgstr "Malfermi"
 
@@ -565,7 +560,7 @@ msgid "Dri&ves:"
 msgstr "&Aparatoj:"
 
 #: dlls/comdlg32/comdlg32.rc:174 dlls/comdlg32/comdlg32.rc:196
-#: dlls/shell32/shell32.rc:372 dlls/shell32/shell32.rc:409
+#: dlls/shell32/shell32.rc:368 dlls/shell32/shell32.rc:405
 #: programs/winefile/winefile.rc:172
 msgid "&Read Only"
 msgstr "Nur &legebla"
@@ -690,7 +685,7 @@ msgid "Font St&yle:"
 msgstr "Tipara St&ilo:"
 
 #: dlls/comdlg32/comdlg32.rc:260 dlls/comdlg32/comdlg32.rc:439
-#: programs/winecfg/winecfg.rc:300
+#: programs/winecfg/winecfg.rc:292
 msgid "&Size:"
 msgstr "&Dimensio:"
 
@@ -706,7 +701,7 @@ msgstr "Stre&ko"
 msgid "&Underline"
 msgstr "S&ubstreko"
 
-#: dlls/comdlg32/comdlg32.rc:270 programs/winecfg/winecfg.rc:298
+#: dlls/comdlg32/comdlg32.rc:270 programs/winecfg/winecfg.rc:290
 msgid "&Color:"
 msgstr "&Koloro:"
 
@@ -826,7 +821,7 @@ msgstr "Anstataŭigi ĉ&iujn"
 
 #: dlls/comdlg32/comdlg32.rc:363 dlls/comdlg32/comdlg32.rc:403
 #: dlls/ieframe/ieframe.rc:42 dlls/shdoclc/shdoclc.rc:61
-#: dlls/shell32/shell32.rc:105 programs/clock/clock.rc:31
+#: dlls/shell32/shell32.rc:108 programs/clock/clock.rc:31
 #: programs/conhost/conhost.rc:34
 msgid "&Properties"
 msgstr "&Ecoj"
@@ -884,7 +879,7 @@ msgstr "Nombro da &ekzempleroj:"
 msgid "C&ollate"
 msgstr "Laŭ&kajere"
 
-#: dlls/comdlg32/comdlg32.rc:414 programs/winecfg/winecfg.rc:306
+#: dlls/comdlg32/comdlg32.rc:414 programs/winecfg/winecfg.rc:298
 msgid "Si&ze:"
 msgstr "&Dimensio:"
 
@@ -950,7 +945,7 @@ msgstr "Nur &legebla"
 
 #: dlls/comdlg32/comdlg32.rc:480 dlls/comdlg32/comdlg32.rc:506
 #: dlls/comdlg32/comdlg32.rc:524 dlls/shdoclc/shdoclc.rc:127
-#: dlls/shell32/shell32.rc:165
+#: dlls/shell32/shell32.rc:99
 msgid "&Open"
 msgstr "&Malfermi"
 
@@ -2252,8 +2247,8 @@ msgid "Notice Text="
 msgstr ""
 
 #: dlls/cryptui/cryptui.rc:185 dlls/cryptui/cryptui.rc:240
-#: dlls/inetcpl.cpl/inetcpl.rc:46 dlls/shell32/shell32.rc:350
-#: dlls/shell32/shell32.rc:379
+#: dlls/inetcpl.cpl/inetcpl.rc:46 dlls/shell32/shell32.rc:346
+#: dlls/shell32/shell32.rc:375
 msgid "General"
 msgstr ""
 
@@ -2379,7 +2374,7 @@ msgid "&File name:"
 msgstr "&Dosiernomo:"
 
 #: dlls/cryptui/cryptui.rc:301 dlls/cryptui/cryptui.rc:323
-#: dlls/cryptui/cryptui.rc:437 programs/winecfg/winecfg.rc:319
+#: dlls/cryptui/cryptui.rc:437 programs/winecfg/winecfg.rc:311
 msgid "B&rowse..."
 msgstr "&Foliumi..."
 
@@ -2455,7 +2450,7 @@ msgid "Certificate intended purposes"
 msgstr "Intenca celo de atestilo"
 
 #: dlls/cryptui/cryptui.rc:355 dlls/ieframe/ieframe.rc:45
-#: dlls/shell32/shell32.rc:43 dlls/shell32/shell32.rc:117
+#: dlls/shell32/shell32.rc:43 dlls/shell32/shell32.rc:120
 #: programs/notepad/notepad.rc:61 programs/oleview/oleview.rc:59
 #: programs/oleview/oleview.rc:61 programs/oleview/oleview.rc:85
 #: programs/regedit/regedit.rc:65 programs/taskmgr/taskmgr.rc:52
@@ -2721,7 +2716,7 @@ msgstr ""
 msgid "Friendly name"
 msgstr ""
 
-#: dlls/cryptui/cryptui.rc:65 dlls/shell32/shell32.rc:244
+#: dlls/cryptui/cryptui.rc:65 dlls/shell32/shell32.rc:240
 #: programs/ipconfig/ipconfig.rc:45
 msgid "Description"
 msgstr "Priskribo"
@@ -2814,7 +2809,7 @@ msgstr ""
 msgid "Automatically determined by the program"
 msgstr ""
 
-#: dlls/cryptui/cryptui.rc:91 dlls/shell32/shell32.rc:134
+#: dlls/cryptui/cryptui.rc:91 dlls/shell32/shell32.rc:137
 msgid "File"
 msgstr "Dosiero"
 
@@ -3074,7 +3069,7 @@ msgstr ""
 msgid "Intended Use"
 msgstr ""
 
-#: dlls/cryptui/cryptui.rc:178 dlls/shell32/shell32.rc:147
+#: dlls/cryptui/cryptui.rc:178 dlls/shell32/shell32.rc:150
 msgid "Location"
 msgstr "Loko"
 
@@ -3304,7 +3299,7 @@ msgstr "El&tondu"
 #: dlls/hhctrl.ocx/hhctrl.rc:88 dlls/shdoclc/shdoclc.rc:80
 #: dlls/shdoclc/shdoclc.rc:94 dlls/shdoclc/shdoclc.rc:118
 #: dlls/shdoclc/shdoclc.rc:133 dlls/shdoclc/shdoclc.rc:160
-#: dlls/shdoclc/shdoclc.rc:184 dlls/shell32/shell32.rc:98
+#: dlls/shdoclc/shdoclc.rc:184 dlls/shell32/shell32.rc:102
 #: dlls/user32/user32.rc:61 programs/conhost/conhost.rc:36
 #: programs/winhlp32/winhlp32.rc:40 programs/wordpad/wordpad.rc:113
 msgid "&Copy"
@@ -3316,7 +3311,6 @@ msgid "Paste"
 msgstr "Enmetu"
 
 #: dlls/hhctrl.ocx/hhctrl.rc:91 dlls/shdoclc/shdoclc.rc:121
-#: dlls/shell32/shell32.rc:166
 msgid "&Print"
 msgstr "&Presu"
 
@@ -3383,7 +3377,7 @@ msgstr ""
 msgid "Cinepak Video codec"
 msgstr ""
 
-#: dlls/ieframe/ieframe.rc:28 dlls/shell32/shell32.rc:111
+#: dlls/ieframe/ieframe.rc:28 dlls/shell32/shell32.rc:114
 #: programs/notepad/notepad.rc:29 programs/oleview/oleview.rc:30
 #: programs/oleview/oleview.rc:80 programs/progman/progman.rc:32
 #: programs/taskmgr/taskmgr.rc:35 programs/view/view.rc:31
@@ -3669,7 +3663,7 @@ msgstr ""
 msgid "Joysticks"
 msgstr ""
 
-#: dlls/joy.cpl/joy.rc:40 programs/winecfg/winecfg.rc:218
+#: dlls/joy.cpl/joy.rc:40 programs/winecfg/winecfg.rc:212
 msgid "&Disable"
 msgstr "&Malaktivigi"
 
@@ -3910,15 +3904,15 @@ msgstr ""
 msgid "Expected '@'"
 msgstr ""
 
-#: dlls/jscript/jscript.rc:89
+#: dlls/jscript/jscript.rc:82
 msgid "Microsoft JScript compilation error"
 msgstr ""
 
-#: dlls/jscript/jscript.rc:90
+#: dlls/jscript/jscript.rc:83
 msgid "Microsoft JScript runtime error"
 msgstr ""
 
-#: dlls/jscript/jscript.rc:91 dlls/vbscript/vbscript.rc:64
+#: dlls/jscript/jscript.rc:84 dlls/vbscript/vbscript.rc:64
 #, fuzzy
 #| msgid "Unknown printer driver."
 msgid "Unknown runtime error"
@@ -3977,94 +3971,66 @@ msgid "Syntax error in regular expression"
 msgstr ""
 
 #: dlls/jscript/jscript.rc:66
-msgid "Unexpected quantifier"
-msgstr ""
-
-#: dlls/jscript/jscript.rc:67
 msgid "Exception thrown and not caught"
 msgstr ""
 
-#: dlls/jscript/jscript.rc:69
+#: dlls/jscript/jscript.rc:68
 msgid "URI to be encoded contains invalid characters"
 msgstr ""
 
-#: dlls/jscript/jscript.rc:68
+#: dlls/jscript/jscript.rc:67
 msgid "URI to be decoded is incorrect"
 msgstr ""
 
-#: dlls/jscript/jscript.rc:70
+#: dlls/jscript/jscript.rc:69
 msgid "Number of fraction digits is out of range"
 msgstr ""
 
-#: dlls/jscript/jscript.rc:71
+#: dlls/jscript/jscript.rc:70
 #, fuzzy
 #| msgid "Print range"
 msgid "Precision is out of range"
 msgstr "Etendiĝon"
 
-#: dlls/jscript/jscript.rc:72
+#: dlls/jscript/jscript.rc:71
 msgid "Array length must be a finite positive integer"
 msgstr ""
 
-#: dlls/jscript/jscript.rc:73
+#: dlls/jscript/jscript.rc:72
 msgid "Array object expected"
 msgstr ""
 
-#: dlls/jscript/jscript.rc:74
+#: dlls/jscript/jscript.rc:73
 msgid ""
 "'writable' attribute on the property descriptor cannot be set to 'true' on "
 "this object"
 msgstr ""
 
-#: dlls/jscript/jscript.rc:75
+#: dlls/jscript/jscript.rc:74
 msgid "Cyclic __proto__ value"
 msgstr ""
 
-#: dlls/jscript/jscript.rc:76
+#: dlls/jscript/jscript.rc:75
 msgid "Cannot create property for a non-extensible object"
 msgstr ""
 
-#: dlls/jscript/jscript.rc:77
+#: dlls/jscript/jscript.rc:76
 msgid "Cannot define property '|': object is not extensible"
 msgstr ""
 
-#: dlls/jscript/jscript.rc:78
+#: dlls/jscript/jscript.rc:77
 msgid "Cannot redefine non-configurable property '|'"
 msgstr ""
 
-#: dlls/jscript/jscript.rc:79
+#: dlls/jscript/jscript.rc:78
 msgid "Cannot modify non-writable property '|'"
 msgstr ""
 
-#: dlls/jscript/jscript.rc:80
-msgid "'this' is not a DataView object"
-msgstr ""
-
-#: dlls/jscript/jscript.rc:81
-msgid "Required argument offset or value in DataView method is not specified"
-msgstr ""
-
-#: dlls/jscript/jscript.rc:82
-msgid "DataView operation access beyond specified buffer length"
-msgstr ""
-
-#: dlls/jscript/jscript.rc:83
-msgid "DataView constructor argument offset is invalid"
-msgstr ""
-
-#: dlls/jscript/jscript.rc:84
+#: dlls/jscript/jscript.rc:79
 msgid "'this' is not a | object"
 msgstr ""
 
-#: dlls/jscript/jscript.rc:85
-msgid "'key' is not an object"
-msgstr ""
-
-#: dlls/jscript/jscript.rc:86
-msgid "ArrayBuffer object expected"
-msgstr ""
-
-#: dlls/jscript/jscript.rc:87
+#: dlls/jscript/jscript.rc:80
 msgid "Property cannot have both accessors and a value"
 msgstr ""
 
@@ -4073,7 +4039,7 @@ msgid "Wine kernel DLL"
 msgstr ""
 
 #: include/wine/wine_common_ver.rc:143 dlls/winemac.drv/winemac.rc:32
-#: programs/wineboot/wineboot.rc:42 programs/winecfg/winecfg.rc:143
+#: programs/wineboot/wineboot.rc:42 programs/winecfg/winecfg.rc:137
 msgid "Wine"
 msgstr "Wine"
 
@@ -5491,7 +5457,7 @@ msgstr "Operacio nuligita de uzanto.\n"
 msgid "File has a user-mapped section.\n"
 msgstr ""
 
-#: dlls/kernelbase/winerror.mc:1758 dlls/kernelbase/winerror.mc:3788
+#: dlls/kernelbase/winerror.mc:1758 dlls/kernelbase/winerror.mc:3783
 msgid "Connection refused.\n"
 msgstr "Konekto rifuzita.\n"
 
@@ -7104,60 +7070,56 @@ msgid "Invalid argument.\n"
 msgstr "Nevalida parametro.\n"
 
 #: dlls/kernelbase/winerror.mc:3778
-msgid "Cannot assign requested address.\n"
-msgstr ""
-
-#: dlls/kernelbase/winerror.mc:3783
 #, fuzzy
 #| msgid "Connection refused.\n"
 msgid "Connection reset by peer.\n"
 msgstr "Konekto rifuzita.\n"
 
-#: dlls/kernelbase/winerror.mc:3793
+#: dlls/kernelbase/winerror.mc:3788
 #, fuzzy
 #| msgid "Point not found.\n"
 msgid "Host not found.\n"
 msgstr "Punkto ne troviĝis.\n"
 
-#: dlls/kernelbase/winerror.mc:3798
+#: dlls/kernelbase/winerror.mc:3793
 #, fuzzy
 #| msgid "File not found.\n"
 msgid "Nonauthoritative host not found.\n"
 msgstr "Dosiero ne estis trovita.\n"
 
-#: dlls/kernelbase/winerror.mc:3803
+#: dlls/kernelbase/winerror.mc:3798
 #, fuzzy
 #| msgid "A printer error occurred."
 msgid "Nonrecoverable error.\n"
 msgstr "Okazis printila eraro."
 
-#: dlls/kernelbase/winerror.mc:3808
+#: dlls/kernelbase/winerror.mc:3803
 msgid "Name valid, no data record.\n"
 msgstr ""
 
-#: dlls/kernelbase/winerror.mc:3822
+#: dlls/kernelbase/winerror.mc:3817
 #, fuzzy
 #| msgid "Not implemented"
 msgid "Not implemented.\n"
 msgstr "Ne realigita"
 
-#: dlls/kernelbase/winerror.mc:3843
+#: dlls/kernelbase/winerror.mc:3838
 #, fuzzy
 #| msgid "Creation failed.\n"
 msgid "Call failed.\n"
 msgstr "Kreado malsukcesis.\n"
 
-#: dlls/kernelbase/winerror.mc:3815
+#: dlls/kernelbase/winerror.mc:3810
 msgid "No Signature found in file.\n"
 msgstr ""
 
-#: dlls/kernelbase/winerror.mc:3829
+#: dlls/kernelbase/winerror.mc:3824
 #, fuzzy
 #| msgid "Invalid table.\n"
 msgid "Invalid call.\n"
 msgstr "Nevalida tabelo.\n"
 
-#: dlls/kernelbase/winerror.mc:3836
+#: dlls/kernelbase/winerror.mc:3831
 #, fuzzy
 #| msgid "Name service unavailable.\n"
 msgid "Resource is not currently available.\n"
@@ -8257,7 +8219,7 @@ msgstr ""
 msgid "Hyperlink Information"
 msgstr "Ligilaj informoj"
 
-#: dlls/mshtml/mshtml.rc:43 programs/winecfg/winecfg.rc:249
+#: dlls/mshtml/mshtml.rc:43 programs/winecfg/winecfg.rc:243
 msgid "&Type:"
 msgstr "&Tipo:"
 
@@ -8344,7 +8306,7 @@ msgstr "taŭgeco el:"
 msgid "choose which folder contains %s"
 msgstr "elekti la dosierujo kiu enhavas %s"
 
-#: dlls/msi/msi.rc:66 dlls/shell32/shell32.rc:238
+#: dlls/msi/msi.rc:66 dlls/shell32/shell32.rc:236
 msgid "New Folder"
 msgstr ""
 
@@ -9580,9 +9542,8 @@ msgstr "Fonto:"
 #: dlls/oledlg/oledlg.rc:86 dlls/shdoclc/shdoclc.rc:50
 #: dlls/shdoclc/shdoclc.rc:82 dlls/shdoclc/shdoclc.rc:95
 #: dlls/shdoclc/shdoclc.rc:135 dlls/shdoclc/shdoclc.rc:162
-#: dlls/shdoclc/shdoclc.rc:186 dlls/shell32/shell32.rc:99
-#: dlls/user32/user32.rc:62 programs/conhost/conhost.rc:37
-#: programs/wordpad/wordpad.rc:114
+#: dlls/shdoclc/shdoclc.rc:186 dlls/user32/user32.rc:62
+#: programs/conhost/conhost.rc:37 programs/wordpad/wordpad.rc:114
 msgid "&Paste"
 msgstr "&Alglui"
 
@@ -9612,7 +9573,7 @@ msgid ""
 "may activate it using the program which created it."
 msgstr ""
 
-#: dlls/oledlg/oledlg.rc:30 dlls/shell32/shell32.rc:197
+#: dlls/oledlg/oledlg.rc:30 dlls/shell32/shell32.rc:195
 msgid "Browse"
 msgstr ""
 
@@ -9715,8 +9676,8 @@ msgctxt "unit: bits"
 msgid "b"
 msgstr ""
 
-#: dlls/sane.ds/sane.rc:34 dlls/wineps.drv/wineps.rc:52
-#: programs/winecfg/winecfg.rc:188
+#: dlls/sane.ds/sane.rc:34 dlls/wineps.drv/wineps.rc:49
+#: programs/winecfg/winecfg.rc:182
 msgctxt "unit: dots/inch"
 msgid "dpi"
 msgstr ""
@@ -9896,12 +9857,12 @@ msgstr "&Ecoj"
 msgid "&Undo"
 msgstr "&Nuligu"
 
-#: dlls/shdoclc/shdoclc.rc:96 dlls/shell32/shell32.rc:102
+#: dlls/shdoclc/shdoclc.rc:96 dlls/shell32/shell32.rc:105
 #: dlls/user32/user32.rc:63
 msgid "&Delete"
 msgstr "&Forigi"
 
-#: dlls/shdoclc/shdoclc.rc:103
+#: dlls/shdoclc/shdoclc.rc:103 dlls/shell32/shell32.rc:97
 msgid "&Select"
 msgstr ""
 
@@ -10070,26 +10031,26 @@ msgid "&w&bPage &p"
 msgstr ""
 
 #: dlls/shell32/shell32.rc:30 dlls/shell32/shell32.rc:45
-#: dlls/shell32/shell32.rc:119 dlls/shell32/shell32.rc:157
+#: dlls/shell32/shell32.rc:122 dlls/shell32/shell32.rc:160
 #: programs/taskmgr/taskmgr.rc:65 programs/taskmgr/taskmgr.rc:110
 #: programs/taskmgr/taskmgr.rc:252
 msgid "Lar&ge Icons"
 msgstr "&Grandaj piktogramoj"
 
 #: dlls/shell32/shell32.rc:31 dlls/shell32/shell32.rc:46
-#: dlls/shell32/shell32.rc:120 dlls/shell32/shell32.rc:158
+#: dlls/shell32/shell32.rc:123 dlls/shell32/shell32.rc:161
 #: programs/taskmgr/taskmgr.rc:66 programs/taskmgr/taskmgr.rc:111
 #: programs/taskmgr/taskmgr.rc:253
 msgid "S&mall Icons"
 msgstr "Malgrandaj piktogramoj"
 
 #: dlls/shell32/shell32.rc:32 dlls/shell32/shell32.rc:47
-#: dlls/shell32/shell32.rc:121 dlls/shell32/shell32.rc:159
+#: dlls/shell32/shell32.rc:124 dlls/shell32/shell32.rc:162
 msgid "&List"
 msgstr "&Listo"
 
 #: dlls/shell32/shell32.rc:33 dlls/shell32/shell32.rc:48
-#: dlls/shell32/shell32.rc:122 dlls/shell32/shell32.rc:160
+#: dlls/shell32/shell32.rc:125 dlls/shell32/shell32.rc:163
 #: programs/taskmgr/taskmgr.rc:67 programs/taskmgr/taskmgr.rc:112
 #: programs/taskmgr/taskmgr.rc:254
 msgid "&Details"
@@ -10132,7 +10093,7 @@ msgstr "Enmetu kiel Ligo"
 msgid "New"
 msgstr "Nova"
 
-#: dlls/shell32/shell32.rc:69 dlls/shell32/shell32.rc:240
+#: dlls/shell32/shell32.rc:69
 msgid "New &Folder"
 msgstr "Nova &Dosierujo"
 
@@ -10149,19 +10110,23 @@ msgstr "&Restarigi"
 msgid "&Erase"
 msgstr ""
 
-#: dlls/shell32/shell32.rc:97
+#: dlls/shell32/shell32.rc:98
+msgid "E&xplore"
+msgstr "E&splori"
+
+#: dlls/shell32/shell32.rc:101
 msgid "C&ut"
 msgstr "Enmeti"
 
-#: dlls/shell32/shell32.rc:101
+#: dlls/shell32/shell32.rc:104
 msgid "Create &Link"
 msgstr "Krei &ligilon"
 
-#: dlls/shell32/shell32.rc:103
+#: dlls/shell32/shell32.rc:106
 msgid "&Rename"
 msgstr "Alinomi"
 
-#: dlls/shell32/shell32.rc:114 programs/notepad/notepad.rc:39
+#: dlls/shell32/shell32.rc:117 programs/notepad/notepad.rc:39
 #: programs/oleview/oleview.rc:38 programs/regedit/regedit.rc:41
 #: programs/view/view.rc:34 programs/winefile/winefile.rc:40
 #: programs/winemine/winemine.rc:51 programs/winhlp32/winhlp32.rc:37
@@ -10169,51 +10134,51 @@ msgstr "Alinomi"
 msgid "E&xit"
 msgstr "&Eliri"
 
-#: dlls/shell32/shell32.rc:127
+#: dlls/shell32/shell32.rc:130
 msgid "&About Control Panel"
 msgstr "&Pri Regilo"
 
-#: dlls/shell32/shell32.rc:275 dlls/shell32/shell32.rc:290
+#: dlls/shell32/shell32.rc:271 dlls/shell32/shell32.rc:286
 msgid "Browse for Folder"
 msgstr "Foliumi por dosierujo"
 
-#: dlls/shell32/shell32.rc:295
+#: dlls/shell32/shell32.rc:291
 msgid "Folder:"
 msgstr "Dosierujon:"
 
-#: dlls/shell32/shell32.rc:301
+#: dlls/shell32/shell32.rc:297
 msgid "&Make New Folder"
 msgstr "&Krei Novan Dosierujon"
 
-#: dlls/shell32/shell32.rc:308
+#: dlls/shell32/shell32.rc:304
 msgid "Message"
 msgstr "Mesaĝo"
 
-#: dlls/shell32/shell32.rc:312
+#: dlls/shell32/shell32.rc:308
 msgid "Yes to &all"
 msgstr "Jes al &ĉio"
 
-#: dlls/shell32/shell32.rc:321
+#: dlls/shell32/shell32.rc:317
 msgid "About %s"
 msgstr "Pri %s"
 
-#: dlls/shell32/shell32.rc:325
+#: dlls/shell32/shell32.rc:321
 msgid "Wine &license"
 msgstr "Wine-&permesilo"
 
-#: dlls/shell32/shell32.rc:330
+#: dlls/shell32/shell32.rc:326
 msgid "Running on %s"
 msgstr "Rulante en %s"
 
-#: dlls/shell32/shell32.rc:331
+#: dlls/shell32/shell32.rc:327
 msgid "Wine was brought to you by:"
 msgstr "Wine estas disponebla danke al:"
 
-#: dlls/shell32/shell32.rc:336
+#: dlls/shell32/shell32.rc:332
 msgid "Run"
 msgstr ""
 
-#: dlls/shell32/shell32.rc:340
+#: dlls/shell32/shell32.rc:336
 msgid ""
 "Type the name of a program, folder, document, or Internet resource, and Wine "
 "will open it for you."
@@ -10221,335 +10186,327 @@ msgstr ""
 "Skribi nomon de programo, de dosierujo, de documento aŭ de Interreta fonto, "
 "kaj Wine malfermos ĝin."
 
-#: dlls/shell32/shell32.rc:341
+#: dlls/shell32/shell32.rc:337
 msgid "&Open:"
 msgstr "&Malfermi:"
 
-#: dlls/shell32/shell32.rc:345 programs/progman/progman.rc:182
+#: dlls/shell32/shell32.rc:341 programs/progman/progman.rc:182
 #: programs/progman/progman.rc:201 programs/progman/progman.rc:218
-#: programs/winecfg/winecfg.rc:247 programs/winefile/winefile.rc:129
+#: programs/winecfg/winecfg.rc:241 programs/winefile/winefile.rc:129
 msgid "&Browse..."
 msgstr "&Foliumi..."
 
-#: dlls/shell32/shell32.rc:357 dlls/shell32/shell32.rc:386
+#: dlls/shell32/shell32.rc:353 dlls/shell32/shell32.rc:382
 #, fuzzy
 #| msgid "File type"
 msgid "File type:"
 msgstr "Dosiertipo"
 
-#: dlls/shell32/shell32.rc:361 dlls/shell32/shell32.rc:394
+#: dlls/shell32/shell32.rc:357 dlls/shell32/shell32.rc:390
 #: dlls/urlmon/urlmon.rc:37 programs/explorer/explorer.rc:33
 msgid "Location:"
 msgstr "Loko:"
 
-#: dlls/shell32/shell32.rc:363 dlls/shell32/shell32.rc:396
+#: dlls/shell32/shell32.rc:359 dlls/shell32/shell32.rc:392
 #: programs/winefile/winefile.rc:169
 msgid "Size:"
 msgstr "Grando:"
 
-#: dlls/shell32/shell32.rc:367 dlls/shell32/shell32.rc:400
+#: dlls/shell32/shell32.rc:363 dlls/shell32/shell32.rc:396
 #, fuzzy
 #| msgid "Creation failed.\n"
 msgid "Creation date:"
 msgstr "Kreado malsukcesis.\n"
 
-#: dlls/shell32/shell32.rc:371 dlls/shell32/shell32.rc:408
+#: dlls/shell32/shell32.rc:367 dlls/shell32/shell32.rc:404
 #, fuzzy
 #| msgid "&Attributes:"
 msgid "Attributes:"
 msgstr "&Atributoj:"
 
-#: dlls/shell32/shell32.rc:373 dlls/shell32/shell32.rc:410
+#: dlls/shell32/shell32.rc:369 dlls/shell32/shell32.rc:406
 #: programs/winefile/winefile.rc:173
 msgid "H&idden"
 msgstr ""
 
-#: dlls/shell32/shell32.rc:374 dlls/shell32/shell32.rc:411
+#: dlls/shell32/shell32.rc:370 dlls/shell32/shell32.rc:407
 #: programs/winefile/winefile.rc:174
 msgid "&Archive"
 msgstr ""
 
-#: dlls/shell32/shell32.rc:388
+#: dlls/shell32/shell32.rc:384
 #, fuzzy
 #| msgid "Open:"
 msgid "Open with:"
 msgstr "Malfermi:"
 
-#: dlls/shell32/shell32.rc:391
+#: dlls/shell32/shell32.rc:387
 #, fuzzy
 #| msgid "Change &Icon..."
 msgid "&Change..."
 msgstr "Ŝanĝi &piktogramon..."
 
-#: dlls/shell32/shell32.rc:402
+#: dlls/shell32/shell32.rc:398
 #, fuzzy
 #| msgid "Modified"
 msgid "Last modified:"
 msgstr "Modifita"
 
-#: dlls/shell32/shell32.rc:404
+#: dlls/shell32/shell32.rc:400
 msgid "Last accessed:"
 msgstr ""
 
-#: dlls/shell32/shell32.rc:135 dlls/shell32/shell32.rc:139
+#: dlls/shell32/shell32.rc:138 dlls/shell32/shell32.rc:142
 #: programs/winefile/winefile.rc:107
 msgid "Size"
 msgstr "Grando"
 
-#: dlls/shell32/shell32.rc:136 programs/regedit/regedit.rc:151
+#: dlls/shell32/shell32.rc:139 programs/regedit/regedit.rc:151
 msgid "Type"
 msgstr "Tipo"
 
-#: dlls/shell32/shell32.rc:137
+#: dlls/shell32/shell32.rc:140
 msgid "Modified"
 msgstr "Modifita"
 
-#: dlls/shell32/shell32.rc:138 programs/winefile/winefile.rc:171
+#: dlls/shell32/shell32.rc:141 programs/winefile/winefile.rc:171
 #: programs/winefile/winefile.rc:113
 msgid "Attributes"
 msgstr "Atributoj"
 
-#: dlls/shell32/shell32.rc:140
+#: dlls/shell32/shell32.rc:143
 msgid "Size available"
 msgstr "Disponebla Spaco"
 
-#: dlls/shell32/shell32.rc:142
+#: dlls/shell32/shell32.rc:145
 msgid "Comments"
 msgstr "Komentoj"
 
-#: dlls/shell32/shell32.rc:143
+#: dlls/shell32/shell32.rc:146
 msgid "Original location"
 msgstr "Komenca loko"
 
-#: dlls/shell32/shell32.rc:144
+#: dlls/shell32/shell32.rc:147
 msgid "Date deleted"
 msgstr "Dato forigita"
 
-#: dlls/shell32/shell32.rc:151 programs/winecfg/winecfg.rc:106
+#: dlls/shell32/shell32.rc:154 programs/winecfg/winecfg.rc:100
 #: programs/winefile/winefile.rc:99
 msgctxt "display name"
 msgid "Desktop"
 msgstr "Labortablo"
 
-#: dlls/shell32/shell32.rc:152 programs/regedit/regedit.rc:243
+#: dlls/shell32/shell32.rc:155 programs/regedit/regedit.rc:243
 msgid "My Computer"
 msgstr "Mia komputilo"
 
-#: dlls/shell32/shell32.rc:154
+#: dlls/shell32/shell32.rc:157
 msgid "Control Panel"
 msgstr "Regilo"
 
-#: dlls/shell32/shell32.rc:162
-msgid "Ne&w"
-msgstr ""
-
 #: dlls/shell32/shell32.rc:164
-msgid "E&xplore"
-msgstr "E&splori"
+msgid "Select"
+msgstr "Elekti"
 
-#: dlls/shell32/shell32.rc:167
-msgid "Run as &Administrator"
-msgstr ""
-
-#: dlls/shell32/shell32.rc:189
+#: dlls/shell32/shell32.rc:187
 msgid "Restart"
 msgstr "Restartigi"
 
-#: dlls/shell32/shell32.rc:190
+#: dlls/shell32/shell32.rc:188
 msgid "Do you want to simulate a Windows reboot?"
 msgstr "Ĉu vi volas simuli Vindozan restartigon?"
 
-#: dlls/shell32/shell32.rc:191
+#: dlls/shell32/shell32.rc:189
 msgid "Shutdown"
 msgstr "Adiaŭi"
 
-#: dlls/shell32/shell32.rc:192
+#: dlls/shell32/shell32.rc:190
 msgid "Do you want to shutdown your Wine session?"
 msgstr "Ĉu vi volas adiaŭi Wine?"
 
-#: dlls/shell32/shell32.rc:203 programs/progman/progman.rc:83
+#: dlls/shell32/shell32.rc:201 programs/progman/progman.rc:83
 msgid "Programs"
 msgstr "Programoj"
 
-#: dlls/shell32/shell32.rc:204 dlls/shell32/shell32.rc:219
-#: dlls/shell32/shell32.rc:145 dlls/shell32/shell32.rc:235
+#: dlls/shell32/shell32.rc:202 dlls/shell32/shell32.rc:217
+#: dlls/shell32/shell32.rc:148 dlls/shell32/shell32.rc:233
 msgid "Documents"
 msgstr "Dokumentoj"
 
-#: dlls/shell32/shell32.rc:205
+#: dlls/shell32/shell32.rc:203
 msgid "Favorites"
 msgstr "Favoratoj"
 
-#: dlls/shell32/shell32.rc:206
+#: dlls/shell32/shell32.rc:204
 msgid "StartUp"
 msgstr "Starto"
 
-#: dlls/shell32/shell32.rc:207
+#: dlls/shell32/shell32.rc:205
 msgid "Start Menu"
 msgstr "Starta menuo"
 
-#: dlls/shell32/shell32.rc:208 dlls/shell32/shell32.rc:221
+#: dlls/shell32/shell32.rc:206 dlls/shell32/shell32.rc:219
 msgid "Music"
 msgstr "Muziko"
 
-#: dlls/shell32/shell32.rc:209 dlls/shell32/shell32.rc:223
+#: dlls/shell32/shell32.rc:207 dlls/shell32/shell32.rc:221
 msgid "Videos"
 msgstr "Videoj"
 
-#: dlls/shell32/shell32.rc:210
+#: dlls/shell32/shell32.rc:208
 msgctxt "directory"
 msgid "Desktop"
 msgstr "Labortablo"
 
-#: dlls/shell32/shell32.rc:211
+#: dlls/shell32/shell32.rc:209
 msgid "NetHood"
 msgstr "Retoj"
 
-#: dlls/shell32/shell32.rc:212
+#: dlls/shell32/shell32.rc:210
 msgid "Templates"
 msgstr "Ŝablonoj"
 
-#: dlls/shell32/shell32.rc:213
+#: dlls/shell32/shell32.rc:211
 msgid "PrintHood"
 msgstr "Printiloj"
 
-#: dlls/shell32/shell32.rc:214 programs/winhlp32/winhlp32.rc:49
+#: dlls/shell32/shell32.rc:212 programs/winhlp32/winhlp32.rc:49
 msgid "History"
 msgstr "Historio"
 
-#: dlls/shell32/shell32.rc:215
+#: dlls/shell32/shell32.rc:213
 msgid "Program Files"
 msgstr "Programaj Dosieroj"
 
-#: dlls/shell32/shell32.rc:217 dlls/shell32/shell32.rc:222
+#: dlls/shell32/shell32.rc:215 dlls/shell32/shell32.rc:220
 msgid "Pictures"
 msgstr "Bildoj"
 
-#: dlls/shell32/shell32.rc:218
+#: dlls/shell32/shell32.rc:216
 msgid "Common Files"
 msgstr "Komunaj dosieroj"
 
-#: dlls/shell32/shell32.rc:220
+#: dlls/shell32/shell32.rc:218
 msgid "Administrative Tools"
 msgstr "Administriloj"
 
-#: dlls/shell32/shell32.rc:216
+#: dlls/shell32/shell32.rc:214
 msgid "Program Files (x86)"
 msgstr "Programaj dosieroj (x86)"
 
-#: dlls/shell32/shell32.rc:224
+#: dlls/shell32/shell32.rc:222
 msgid "Contacts"
 msgstr "Kontaktoj"
 
-#: dlls/shell32/shell32.rc:225 programs/winefile/winefile.rc:112
+#: dlls/shell32/shell32.rc:223 programs/winefile/winefile.rc:112
 msgid "Links"
 msgstr "Ligiloj"
 
-#: dlls/shell32/shell32.rc:226
+#: dlls/shell32/shell32.rc:224
 msgid "Slide Shows"
 msgstr ""
 
-#: dlls/shell32/shell32.rc:227
+#: dlls/shell32/shell32.rc:225
 msgid "Playlists"
 msgstr "Leglistoj"
 
-#: dlls/shell32/shell32.rc:146 programs/taskmgr/taskmgr.rc:326
+#: dlls/shell32/shell32.rc:149 programs/taskmgr/taskmgr.rc:326
 msgid "Status"
 msgstr "Stato"
 
-#: dlls/shell32/shell32.rc:148
+#: dlls/shell32/shell32.rc:151
 msgid "Model"
 msgstr "Modelo"
 
-#: dlls/shell32/shell32.rc:228
+#: dlls/shell32/shell32.rc:226
 msgid "Sample Music"
 msgstr "Ekzemplaj muzikaĵoj"
 
-#: dlls/shell32/shell32.rc:229
+#: dlls/shell32/shell32.rc:227
 msgid "Sample Pictures"
 msgstr "Ekzemplaj bildoj"
 
-#: dlls/shell32/shell32.rc:230
+#: dlls/shell32/shell32.rc:228
 msgid "Sample Playlists"
 msgstr "Ekzemplaj Ludlistoj"
 
-#: dlls/shell32/shell32.rc:231
+#: dlls/shell32/shell32.rc:229
 msgid "Sample Videos"
 msgstr "Ekzemplaj videoj"
 
-#: dlls/shell32/shell32.rc:232
+#: dlls/shell32/shell32.rc:230
 msgid "Saved Games"
 msgstr "Konservitaj ludoj"
 
-#: dlls/shell32/shell32.rc:233
+#: dlls/shell32/shell32.rc:231
 msgid "Searches"
 msgstr "Serĉoj"
 
-#: dlls/shell32/shell32.rc:234
+#: dlls/shell32/shell32.rc:232
 msgid "Users"
 msgstr "Uzantoj"
 
-#: dlls/shell32/shell32.rc:236
+#: dlls/shell32/shell32.rc:234
 msgid "Downloads"
 msgstr "Elŝutaĵoj"
 
-#: dlls/shell32/shell32.rc:169
+#: dlls/shell32/shell32.rc:167
 msgid "Unable to create new Folder: Permission denied."
 msgstr "Mi ne povas krei novan Dosierujon: Aliro rifuzita."
 
-#: dlls/shell32/shell32.rc:170
+#: dlls/shell32/shell32.rc:168
 msgid "Error during creation of a new folder"
 msgstr "Eraro dum kreiĝo de dosierujo"
 
-#: dlls/shell32/shell32.rc:171
+#: dlls/shell32/shell32.rc:169
 msgid "Confirm file deletion"
 msgstr "Konfirmi forigon de dosiero"
 
-#: dlls/shell32/shell32.rc:172
+#: dlls/shell32/shell32.rc:170
 msgid "Confirm folder deletion"
 msgstr "Konfirmi forigon de dosierujo"
 
-#: dlls/shell32/shell32.rc:173
+#: dlls/shell32/shell32.rc:171
 msgid "Are you sure you want to delete '%1'?"
 msgstr "Ĉu vi estas certa pri forigo de '%1'?"
 
-#: dlls/shell32/shell32.rc:174
+#: dlls/shell32/shell32.rc:172
 msgid "Are you sure you want to delete these %1 items?"
 msgstr "Ĉu vi estas certa pri forigo de ĉi tiuj %1 komponantoj?"
 
-#: dlls/shell32/shell32.rc:181
+#: dlls/shell32/shell32.rc:179
 msgid "Confirm file overwrite"
 msgstr "Konfirmi anstataŭon de dosiero"
 
-#: dlls/shell32/shell32.rc:180
+#: dlls/shell32/shell32.rc:178
 msgid ""
 "This folder already contains a file called '%1'.\n"
 "\n"
 "Do you want to replace it?"
 msgstr ""
 
-#: dlls/shell32/shell32.rc:175
+#: dlls/shell32/shell32.rc:173
 msgid "Are you sure you want to delete the selected item(s)?"
 msgstr ""
 
-#: dlls/shell32/shell32.rc:177
+#: dlls/shell32/shell32.rc:175
 msgid ""
 "Are you sure that you want to send '%1' and all its content to the Trash?"
 msgstr ""
 
-#: dlls/shell32/shell32.rc:176
+#: dlls/shell32/shell32.rc:174
 msgid "Are you sure that you want to send '%1' to the Trash?"
 msgstr ""
 
-#: dlls/shell32/shell32.rc:178
+#: dlls/shell32/shell32.rc:176
 msgid "Are you sure that you want to send these %1 items to the Trash?"
 msgstr ""
 
-#: dlls/shell32/shell32.rc:179
+#: dlls/shell32/shell32.rc:177
 msgid "The item '%1' can't be sent to Trash. Do you want to delete it instead?"
 msgstr ""
 
-#: dlls/shell32/shell32.rc:186
+#: dlls/shell32/shell32.rc:184
 msgid ""
 "This folder already contains a folder named '%1'.\n"
 "\n"
@@ -10558,39 +10515,39 @@ msgid ""
 "the folder?"
 msgstr ""
 
-#: dlls/shell32/shell32.rc:242
+#: dlls/shell32/shell32.rc:238
 msgid "Wine Control Panel"
 msgstr ""
 
-#: dlls/shell32/shell32.rc:195
+#: dlls/shell32/shell32.rc:193
 msgid "Unable to display Run dialog box (internal error)"
 msgstr ""
 
-#: dlls/shell32/shell32.rc:196
+#: dlls/shell32/shell32.rc:194
 msgid "Unable to display Browse dialog box (internal error)"
 msgstr ""
 
-#: dlls/shell32/shell32.rc:198
+#: dlls/shell32/shell32.rc:196
 msgid "Executable files (*.exe)"
 msgstr "Plenumeblaj dosieroj (*.exe)"
 
-#: dlls/shell32/shell32.rc:246
+#: dlls/shell32/shell32.rc:242
 msgid "There is no Windows program configured to open this type of file."
 msgstr ""
 
-#: dlls/shell32/shell32.rc:248
+#: dlls/shell32/shell32.rc:244
 msgid "Are you sure you wish to permanently delete '%1'?"
 msgstr "Ĉu vi estas certa pri forigo de '%1'?"
 
-#: dlls/shell32/shell32.rc:249
+#: dlls/shell32/shell32.rc:245
 msgid "Are you sure you wish to permanently delete these %1 items?"
 msgstr "Ĉu vi estas certa pri forigo de ĉi tiuj %1 eroj?"
 
-#: dlls/shell32/shell32.rc:250
+#: dlls/shell32/shell32.rc:246
 msgid "Confirm deletion"
 msgstr "Konfirmi forigon"
 
-#: dlls/shell32/shell32.rc:251
+#: dlls/shell32/shell32.rc:247
 msgid ""
 "A file already exists at the path %1.\n"
 "\n"
@@ -10600,7 +10557,7 @@ msgstr ""
 "\n"
 "Ĉu vi volas anstataŭi ĝin?"
 
-#: dlls/shell32/shell32.rc:252
+#: dlls/shell32/shell32.rc:248
 msgid ""
 "A folder already exists at the path %1.\n"
 "\n"
@@ -10610,11 +10567,11 @@ msgstr ""
 "\n"
 "Ĉu vi volas anstataŭi ĝin?"
 
-#: dlls/shell32/shell32.rc:253
+#: dlls/shell32/shell32.rc:249
 msgid "Confirm overwrite"
 msgstr "Konfirmi anstataŭon"
 
-#: dlls/shell32/shell32.rc:270
+#: dlls/shell32/shell32.rc:266
 msgid ""
 "Wine is free software; you can redistribute it and/or modify it under the "
 "terms of the GNU Lesser General Public License as published by the Free "
@@ -10631,11 +10588,11 @@ msgid ""
 "Franklin St, Fifth Floor, Boston, MA 02110-1301, USA."
 msgstr ""
 
-#: dlls/shell32/shell32.rc:258
+#: dlls/shell32/shell32.rc:254
 msgid "Wine License"
 msgstr "Wine-permesilo"
 
-#: dlls/shell32/shell32.rc:153
+#: dlls/shell32/shell32.rc:156
 msgid "Trash"
 msgstr "Rubujo"
 
@@ -13167,23 +13124,23 @@ msgstr "&Fermi\tStir+F4"
 msgid "Nex&t\tCtrl+F6"
 msgstr "&Sekva\tStir+F6"
 
-#: dlls/user32/user32.rc:92 dlls/user32/user32.rc:75
+#: dlls/user32/user32.rc:81
 msgid "&Abort"
 msgstr "&Nuligi"
 
-#: dlls/user32/user32.rc:96 dlls/user32/user32.rc:77
+#: dlls/user32/user32.rc:85
 msgid "&Ignore"
 msgstr "&Ignori"
 
-#: dlls/user32/user32.rc:97 dlls/user32/user32.rc:82
+#: dlls/user32/user32.rc:86
 msgid "&Try Again"
 msgstr "&Reprovi"
 
-#: dlls/user32/user32.rc:98 dlls/user32/user32.rc:83
+#: dlls/user32/user32.rc:87
 msgid "&Continue"
 msgstr "&Daŭrigi"
 
-#: dlls/user32/user32.rc:105
+#: dlls/user32/user32.rc:94
 msgid "Select Window"
 msgstr "Elekti Fenestron"
 
@@ -13371,12 +13328,6 @@ msgstr "Papera &Grando:"
 msgid "Duplex:"
 msgstr "Duobla:"
 
-#: dlls/wineps.drv/wineps.rc:45
-#, fuzzy
-#| msgid "&Tray:"
-msgid "Paper &Tray:"
-msgstr "P&leto:"
-
 #: dlls/wininet/wininet.rc:53 dlls/wininet/wininet.rc:73
 msgid "Realm"
 msgstr "Regno"
@@ -13385,7 +13336,7 @@ msgstr "Regno"
 msgid "Authentication Required"
 msgstr ""
 
-#: dlls/wininet/wininet.rc:72 programs/klist/klist.rc:35
+#: dlls/wininet/wininet.rc:72
 msgid "Server"
 msgstr ""
 
@@ -14319,7 +14270,7 @@ msgid "Digi&tal"
 msgstr "&Cifereca"
 
 #: programs/clock/clock.rc:35 programs/notepad/notepad.rc:53
-#: programs/winecfg/winecfg.rc:313 programs/winefile/winefile.rc:63
+#: programs/winecfg/winecfg.rc:305 programs/winefile/winefile.rc:63
 #: programs/wordpad/wordpad.rc:84
 msgid "&Font..."
 msgstr "&Tiparo..."
@@ -15127,39 +15078,6 @@ msgstr "Starto"
 msgid "&Run..."
 msgstr ""
 
-#: programs/explorer/explorer.rc:36
-#, fuzzy
-#| msgid "E&xit Windows"
-msgid "E&xit desktop"
-msgstr "Eliri Vindozon"
-
-#: programs/explorer/explorer.rc:37
-#, fuzzy
-#| msgid "Are you sure you want to delete these values?"
-msgid ""
-"Are you sure you want to close all programs and exit the virtual desktop?"
-msgstr "Ĉu vi certas pri forigo de ĉi tiuj valoroj?"
-
-#: programs/findstr/findstr.rc:28
-#, fuzzy
-#| msgid "LAN Connection"
-msgid "Usage: findstr /options string\n"
-msgstr "LAN konektiĝo"
-
-#: programs/findstr/findstr.rc:29
-#, fuzzy
-#| msgid "Invalid command line.\n"
-msgid "FINDSTR: Bad command line\n"
-msgstr "Nevalida komandlinio.\n"
-
-#: programs/findstr/findstr.rc:30
-msgid "FINDSTR: Cannot open %s\n"
-msgstr ""
-
-#: programs/findstr/findstr.rc:31
-msgid "FINDSTR: /%c ignored\n"
-msgstr ""
-
 #: programs/fsutil/fsutil.mc:28
 msgid ""
 "- Supported Commands -\n"
@@ -15268,50 +15186,6 @@ msgstr ""
 msgid "Primary DNS suffix"
 msgstr ""
 
-#: programs/klist/klist.rc:28
-msgid "Usage: klist <tickets | tgt | purge | get [service principal name]>\n"
-msgstr ""
-
-#: programs/klist/klist.rc:29
-#, fuzzy
-#| msgid "Unknown port.\n"
-msgid "Unknown error\n"
-msgstr "Nekonata pordo.\n"
-
-#: programs/klist/klist.rc:30
-#, fuzzy
-#| msgid "Start Menu"
-msgid "Start Time"
-msgstr "Starta menuo"
-
-#: programs/klist/klist.rc:31
-#, fuzzy
-#| msgid "&Standard bar"
-msgid "End Time"
-msgstr "&Ordinara zono"
-
-#: programs/klist/klist.rc:32
-msgid "Renew Time"
-msgstr ""
-
-#: programs/klist/klist.rc:33
-msgid "Ticket Flags"
-msgstr ""
-
-#: programs/klist/klist.rc:34
-msgid "Cached Tickets"
-msgstr ""
-
-#: programs/klist/klist.rc:36
-msgid "KerbTicket Encryption Type"
-msgstr ""
-
-#: programs/klist/klist.rc:37
-#, fuzzy
-#| msgid "LAN Connection"
-msgid "Current LogonId is"
-msgstr "LAN konektiĝo"
-
 #: programs/msinfo32/msinfo32.rc:28
 #, fuzzy
 #| msgid "System Configuration"
@@ -15388,47 +15262,43 @@ msgstr ""
 msgid "The %1 service failed to stop.\n"
 msgstr "La servo %1 malsukcesis ĉesi.\n"
 
-#: programs/net/net.rc:45
+#: programs/net/net.rc:44
 msgid "There are no entries in the list.\n"
 msgstr ""
 
-#: programs/net/net.rc:46
+#: programs/net/net.rc:45
 msgid ""
 "\n"
 "Status  Local   Remote\n"
 "---------------------------------------------------------------\n"
 msgstr ""
 
-#: programs/net/net.rc:47
+#: programs/net/net.rc:46
 msgid "%1      %2      %3      Open resources: %4!u!\n"
 msgstr ""
 
-#: programs/net/net.rc:49
+#: programs/net/net.rc:48
 msgid "Paused"
 msgstr "Paŭzinta"
 
-#: programs/net/net.rc:50
+#: programs/net/net.rc:49
 msgid "Disconnected"
 msgstr "Malkonektita"
 
-#: programs/net/net.rc:51
+#: programs/net/net.rc:50
 msgid "A network error occurred"
 msgstr "Okazis reta eraro"
 
-#: programs/net/net.rc:52
+#: programs/net/net.rc:51
 msgid "Connection is being made"
 msgstr "Konekto fariĝas"
 
-#: programs/net/net.rc:53
+#: programs/net/net.rc:52
 msgid "Reconnecting"
 msgstr "Rekonektante"
 
 #: programs/net/net.rc:43
 msgid "The following services are running:\n"
-msgstr ""
-
-#: programs/net/net.rc:44
-msgid "A command was used with conflicting switches.\n"
 msgstr ""
 
 #: programs/netstat/netstat.rc:30
@@ -17461,7 +17331,7 @@ msgstr ""
 msgid "regsvr32: Successfully uninstalled DLL '%1'\n"
 msgstr ""
 
-#: programs/start/start.rc:56
+#: programs/start/start.rc:57
 msgid ""
 "Start a program, or open a document in the program normally used for files\n"
 "with that suffix.\n"
@@ -17484,24 +17354,23 @@ msgid ""
 "/belownormal   Start the program in the belownormal priority class.\n"
 "/node n        Start the program on the specified NUMA node.\n"
 "/affinity mask Start the program with the specified affinity mask.\n"
-"/machine arch  Force using a specific architecture (x86,arm,amd64,arm64).\n"
-"/wait          Wait for the program to finish, then exit with its exit "
-"code.\n"
-"/unix          Use a Unix filename and start the file like Windows "
+"/wait          Wait for the started program to finish, then exit with its\n"
+"exit code.\n"
+"/unix          Use a Unix filename and start the file like Windows\n"
 "Explorer.\n"
 "/exec          Exec the specified file (for internal Wine usage).\n"
 "/ProgIDOpen    Open a document using the specified progID.\n"
 "/?             Display this help and exit.\n"
 msgstr ""
 
-#: programs/start/start.rc:58
+#: programs/start/start.rc:59
 msgid ""
 "Application could not be started, or no application associated with the "
 "specified file.\n"
 "ShellExecuteEx failed"
 msgstr ""
 
-#: programs/start/start.rc:60
+#: programs/start/start.rc:61
 msgid "Could not translate the specified Unix filename to a DOS filename."
 msgstr ""
 
@@ -17572,58 +17441,6 @@ msgstr ""
 msgid ""
 "Sent termination signal to process with PID %1!u!, child of PID %2!u!.\n"
 msgstr ""
-
-#: include/wine/wine_common_ver.rc:138
-#, fuzzy
-#| msgid "Wine &license"
-msgid "Wine tasklist"
-msgstr "Wine-&permesilo"
-
-#: programs/tasklist/tasklist.rc:29
-msgid "Usage: tasklist [/?]\n"
-msgstr ""
-
-#: programs/tasklist/tasklist.rc:30 programs/taskmgr/taskmgr.rc:272
-msgid "Image Name"
-msgstr ""
-
-#: programs/tasklist/tasklist.rc:31 programs/taskmgr/taskmgr.rc:273
-msgid "PID"
-msgstr ""
-
-#: programs/tasklist/tasklist.rc:32
-#, fuzzy
-#| msgid "Session canceled.\n"
-msgid "Session Name"
-msgstr "Seanco nuligita.\n"
-
-#: programs/tasklist/tasklist.rc:33
-#, fuzzy
-#| msgid "Version"
-msgid "Session#"
-msgstr "Eldono"
-
-#: programs/tasklist/tasklist.rc:34 programs/taskmgr/taskmgr.rc:276
-msgid "Mem Usage"
-msgstr ""
-
-#: programs/tasklist/tasklist.rc:35
-#, fuzzy
-#| msgid "OK"
-msgid "K"
-msgstr "Bone"
-
-#: programs/tasklist/tasklist.rc:36
-#, fuzzy
-#| msgid "Invalid share name.\n"
-msgid "ERROR: Invalid syntax\n"
-msgstr "Nevalida nomo de kunuzata aparato.\n"
-
-#: programs/tasklist/tasklist.rc:37
-#, fuzzy
-#| msgid "The filename cannot be resolved.\n"
-msgid "ERROR: The search filter cannot be recognized.\n"
-msgstr "La dosiernomo ne eblas solvi.\n"
 
 #: programs/taskmgr/taskmgr.rc:37 programs/taskmgr/taskmgr.rc:108
 msgid "&New Task (Run...)"
@@ -18283,12 +18100,24 @@ msgstr ""
 msgid "Mem Usage: %1!u!kB / %2!u!kB"
 msgstr ""
 
+#: programs/taskmgr/taskmgr.rc:272
+msgid "Image Name"
+msgstr ""
+
+#: programs/taskmgr/taskmgr.rc:273
+msgid "PID"
+msgstr ""
+
 #: programs/taskmgr/taskmgr.rc:274
 msgid "CPU"
 msgstr ""
 
 #: programs/taskmgr/taskmgr.rc:275
 msgid "CPU Time"
+msgstr ""
+
+#: programs/taskmgr/taskmgr.rc:276
+msgid "Mem Usage"
 msgstr ""
 
 #: programs/taskmgr/taskmgr.rc:277
@@ -18493,7 +18322,7 @@ msgstr ""
 msgid "The Wine configuration in %s is being updated, please wait..."
 msgstr "La Wine-agordo en %s aktualiĝas, bonvolu atendi..."
 
-#: programs/winecfg/winecfg.rc:146
+#: programs/winecfg/winecfg.rc:140
 msgid ""
 "This program is free software; you can redistribute it and/or modify it "
 "under the terms of the GNU Lesser General Public License as published by the "
@@ -18501,23 +18330,23 @@ msgid ""
 "option) any later version."
 msgstr ""
 
-#: programs/winecfg/winecfg.rc:148
+#: programs/winecfg/winecfg.rc:142
 msgid "Windows registration information"
 msgstr "Informoj pri vindoza registriĝo"
 
-#: programs/winecfg/winecfg.rc:149
+#: programs/winecfg/winecfg.rc:143
 msgid "&Owner:"
 msgstr "&Estro:"
 
-#: programs/winecfg/winecfg.rc:151
+#: programs/winecfg/winecfg.rc:145
 msgid "Organi&zation:"
 msgstr "Organi&zaĵo:"
 
-#: programs/winecfg/winecfg.rc:159
+#: programs/winecfg/winecfg.rc:153
 msgid "Application settings"
 msgstr "Programa agordo"
 
-#: programs/winecfg/winecfg.rc:160
+#: programs/winecfg/winecfg.rc:154
 msgid ""
 "Wine can mimic different Windows versions for each application. This tab is "
 "linked to the Libraries and Graphics tabs to allow you to change system-wide "
@@ -18527,236 +18356,230 @@ msgstr ""
 "langeto estas kunligata al la langetoj Bibliotekoj kaj Grafikaĵoj por "
 "permesi, ke vi ŝanĝu agordaĵojn tutsisteme aŭ ĉiuprograme."
 
-#: programs/winecfg/winecfg.rc:164
+#: programs/winecfg/winecfg.rc:158
 #, fuzzy
 #| msgid "&Add application..."
 msgid "Add appli&cation..."
 msgstr "&Aldoni programon..."
 
-#: programs/winecfg/winecfg.rc:165
+#: programs/winecfg/winecfg.rc:159
 msgid "&Remove application"
 msgstr "&Forigi programon"
 
-#: programs/winecfg/winecfg.rc:166
+#: programs/winecfg/winecfg.rc:160
 msgid "&Windows Version:"
 msgstr "&Vindoza eldono:"
 
-#: programs/winecfg/winecfg.rc:174
+#: programs/winecfg/winecfg.rc:168
 msgid "Window settings"
 msgstr "Fenestra agordo"
 
-#: programs/winecfg/winecfg.rc:175
+#: programs/winecfg/winecfg.rc:169
 msgid "Automatically capture the &mouse in full-screen windows"
 msgstr "Aŭtomate kapti la &muson en tutekranaj fenestroj"
 
-#: programs/winecfg/winecfg.rc:176
+#: programs/winecfg/winecfg.rc:170
 msgid "Allow the window manager to &decorate the windows"
 msgstr "Permesi la fenestroadministrol &ornami la fenestrojn"
 
-#: programs/winecfg/winecfg.rc:177
+#: programs/winecfg/winecfg.rc:171
 msgid "Allow the &window manager to control the windows"
 msgstr "Permesi la &fenestroadministrilon regi la fenestrojn"
 
-#: programs/winecfg/winecfg.rc:178
+#: programs/winecfg/winecfg.rc:172
 msgid "&Emulate a virtual desktop"
 msgstr "&Simuli virtualan labortablon"
 
-#: programs/winecfg/winecfg.rc:180
+#: programs/winecfg/winecfg.rc:174
 msgid "Desktop &size:"
 msgstr "Labortabla &grando:"
 
-#: programs/winecfg/winecfg.rc:185
+#: programs/winecfg/winecfg.rc:179
 msgid "Screen resolution"
 msgstr "Ekrana distingivo"
 
-#: programs/winecfg/winecfg.rc:189
+#: programs/winecfg/winecfg.rc:183
 msgid "This is a sample text using 10 point Tahoma"
 msgstr "Jen ekzempla teksto kun 10-punkta Tahoma"
 
-#: programs/winecfg/winecfg.rc:196
+#: programs/winecfg/winecfg.rc:190
 msgid "DLL overrides"
 msgstr "DLL superregoj"
 
-#: programs/winecfg/winecfg.rc:197
+#: programs/winecfg/winecfg.rc:191
 msgid ""
 "Dynamic Link Libraries can be specified individually to be either builtin "
 "(provided by Wine) or native (taken from Windows or provided by the "
 "application)."
 msgstr ""
 
-#: programs/winecfg/winecfg.rc:199
+#: programs/winecfg/winecfg.rc:193
 msgid "&New override for library:"
 msgstr ""
 
-#: programs/winecfg/winecfg.rc:201
+#: programs/winecfg/winecfg.rc:195
 msgid "A&dd"
 msgstr ""
 
-#: programs/winecfg/winecfg.rc:202
+#: programs/winecfg/winecfg.rc:196
 msgid "Existing &overrides:"
 msgstr ""
 
-#: programs/winecfg/winecfg.rc:204
+#: programs/winecfg/winecfg.rc:198
 msgid "&Edit..."
 msgstr "&Redakti..."
 
-#: programs/winecfg/winecfg.rc:210
+#: programs/winecfg/winecfg.rc:204
 msgid "Edit Override"
 msgstr ""
 
-#: programs/winecfg/winecfg.rc:213
+#: programs/winecfg/winecfg.rc:207
 msgid "Load order"
 msgstr ""
 
-#: programs/winecfg/winecfg.rc:214
+#: programs/winecfg/winecfg.rc:208
 msgid "&Builtin (Wine)"
 msgstr "&Ena (Wino)"
 
-#: programs/winecfg/winecfg.rc:215
+#: programs/winecfg/winecfg.rc:209
 msgid "&Native (Windows)"
 msgstr "&Indiĝena (Vindozo)"
 
-#: programs/winecfg/winecfg.rc:216
+#: programs/winecfg/winecfg.rc:210
 #, fuzzy
 #| msgid "Bui&ltin then Native"
 msgid "Buil&tin then Native"
 msgstr "&Post ena indiĝena"
 
-#: programs/winecfg/winecfg.rc:217
+#: programs/winecfg/winecfg.rc:211
 msgid "Nati&ve then Builtin"
 msgstr "&Antaŭ ena indiĝena"
 
-#: programs/winecfg/winecfg.rc:225
+#: programs/winecfg/winecfg.rc:219
 msgid "Select Drive Letter"
 msgstr "Elekti aparatajn literojn"
 
-#: programs/winecfg/winecfg.rc:237
+#: programs/winecfg/winecfg.rc:231
 #, fuzzy
 #| msgid "Wine configuration"
 msgid "Drive configuration"
 msgstr "Wine-agordo"
 
-#: programs/winecfg/winecfg.rc:238
+#: programs/winecfg/winecfg.rc:232
 msgid ""
 "Failed to connect to the mount manager; the drive configuration cannot be "
 "edited."
 msgstr ""
 
-#: programs/winecfg/winecfg.rc:241
+#: programs/winecfg/winecfg.rc:235
 #, fuzzy
 #| msgid "&Add..."
 msgid "A&dd..."
 msgstr "&Aldoni..."
 
-#: programs/winecfg/winecfg.rc:245
+#: programs/winecfg/winecfg.rc:239
 msgid "&Path:"
 msgstr "&Vojo:"
 
-#: programs/winecfg/winecfg.rc:252 programs/winecfg/winecfg.rc:37
+#: programs/winecfg/winecfg.rc:246 programs/winecfg/winecfg.rc:37
 #, fuzzy
 #| msgid "Show &Advanced"
 msgid "Show Advan&ced"
 msgstr "Montri &Altnivele"
 
-#: programs/winecfg/winecfg.rc:253
+#: programs/winecfg/winecfg.rc:247
 msgid "De&vice:"
 msgstr "&Aparato:"
 
-#: programs/winecfg/winecfg.rc:255
+#: programs/winecfg/winecfg.rc:249
 msgid "Bro&wse..."
 msgstr "&Foliumi..."
 
-#: programs/winecfg/winecfg.rc:257
+#: programs/winecfg/winecfg.rc:251
 msgid "&Label:"
 msgstr "&Etikedo:"
 
-#: programs/winecfg/winecfg.rc:259
+#: programs/winecfg/winecfg.rc:253
 msgid "S&erial:"
 msgstr "&Seria:"
 
-#: programs/winecfg/winecfg.rc:262
+#: programs/winecfg/winecfg.rc:256
 #, fuzzy
 #| msgid "Show &dot files"
 msgid "&Show dot files"
 msgstr "Montri &punktajn dosierojn"
 
-#: programs/winecfg/winecfg.rc:269
+#: programs/winecfg/winecfg.rc:263
 msgid "Driver diagnostics"
 msgstr ""
 
-#: programs/winecfg/winecfg.rc:271
+#: programs/winecfg/winecfg.rc:265
 msgid "Defaults"
 msgstr "Defaŭltojn"
 
-#: programs/winecfg/winecfg.rc:272
+#: programs/winecfg/winecfg.rc:266
 msgid "Output device:"
 msgstr "&Eliga dosiernomo:"
 
-#: programs/winecfg/winecfg.rc:273
+#: programs/winecfg/winecfg.rc:267
 msgid "Voice output device:"
 msgstr ""
 
-#: programs/winecfg/winecfg.rc:274
+#: programs/winecfg/winecfg.rc:268
 msgid "Input device:"
 msgstr "Ena aparato:"
 
-#: programs/winecfg/winecfg.rc:275
+#: programs/winecfg/winecfg.rc:269
 msgid "Voice input device:"
 msgstr ""
 
-#: programs/winecfg/winecfg.rc:280
+#: programs/winecfg/winecfg.rc:274
 msgid "&Test Sound"
 msgstr "&Provo sona"
 
-#: programs/winecfg/winecfg.rc:281 programs/winecfg/winecfg.rc:89
+#: programs/winecfg/winecfg.rc:275 programs/winecfg/winecfg.rc:89
 #, fuzzy
 #| msgid "Wine configuration"
 msgid "Speaker configuration"
 msgstr "Wine-agordo"
 
-#: programs/winecfg/winecfg.rc:284
+#: programs/winecfg/winecfg.rc:278
 msgid "Speakers:"
 msgstr ""
 
-#: programs/winecfg/winecfg.rc:292
+#: programs/winecfg/winecfg.rc:286
 msgid "Appearance"
 msgstr "Aspekto"
 
-#: programs/winecfg/winecfg.rc:293
+#: programs/winecfg/winecfg.rc:287
 msgid "&Theme:"
 msgstr "&Etoso:"
 
-#: programs/winecfg/winecfg.rc:295
-#, fuzzy
-#| msgid "&Theme:"
-msgid "&WinRT theme:"
-msgstr "&Etoso:"
-
-#: programs/winecfg/winecfg.rc:297
+#: programs/winecfg/winecfg.rc:289
 msgid "&Install theme..."
 msgstr "&Instali etoson..."
 
-#: programs/winecfg/winecfg.rc:302
+#: programs/winecfg/winecfg.rc:294
 msgid "It&em:"
 msgstr ""
 
-#: programs/winecfg/winecfg.rc:304
+#: programs/winecfg/winecfg.rc:296
 msgid "C&olor:"
 msgstr "&Koloro:"
 
-#: programs/winecfg/winecfg.rc:310
+#: programs/winecfg/winecfg.rc:302
 msgid "MIME types"
 msgstr ""
 
-#: programs/winecfg/winecfg.rc:311
-msgid "Manage file and protocol &associations"
+#: programs/winecfg/winecfg.rc:303
+msgid "Manage file &associations"
 msgstr ""
 
-#: programs/winecfg/winecfg.rc:314
+#: programs/winecfg/winecfg.rc:306
 msgid "Folders"
 msgstr "Dosierujoj"
 
-#: programs/winecfg/winecfg.rc:317
+#: programs/winecfg/winecfg.rc:309
 msgid "&Link to:"
 msgstr ""
 
@@ -18854,16 +18677,6 @@ msgstr ""
 
 #: programs/winecfg/winecfg.rc:93
 msgid "Mono"
-msgstr ""
-
-#: programs/winecfg/winecfg.rc:98
-#, fuzzy
-#| msgid "Right"
-msgid "Light"
-msgstr "Dekstre"
-
-#: programs/winecfg/winecfg.rc:99
-msgid "Dark"
 msgstr ""
 
 #: programs/winecfg/winecfg.rc:53
@@ -18969,127 +18782,127 @@ msgid ""
 "Remember to click 'Add' in the Drives tab to create one!\n"
 msgstr ""
 
-#: programs/winecfg/winecfg.rc:104
+#: programs/winecfg/winecfg.rc:98
 msgid "Controls Background"
 msgstr "Fenestraĵa fono"
 
-#: programs/winecfg/winecfg.rc:105
+#: programs/winecfg/winecfg.rc:99
 msgid "Controls Text"
 msgstr "Fenestraĵa teksto"
 
-#: programs/winecfg/winecfg.rc:107
+#: programs/winecfg/winecfg.rc:101
 msgid "Menu Background"
 msgstr ""
 
-#: programs/winecfg/winecfg.rc:108
+#: programs/winecfg/winecfg.rc:102
 msgid "Menu Text"
 msgstr ""
 
-#: programs/winecfg/winecfg.rc:109
+#: programs/winecfg/winecfg.rc:103
 msgid "Scrollbar"
 msgstr "Rulumilo"
 
-#: programs/winecfg/winecfg.rc:110
+#: programs/winecfg/winecfg.rc:104
 msgid "Selection Background"
 msgstr ""
 
-#: programs/winecfg/winecfg.rc:111
+#: programs/winecfg/winecfg.rc:105
 msgid "Selection Text"
 msgstr "Elektita teksto"
 
-#: programs/winecfg/winecfg.rc:112
+#: programs/winecfg/winecfg.rc:106
 msgid "Tooltip Background"
 msgstr ""
 
-#: programs/winecfg/winecfg.rc:113
+#: programs/winecfg/winecfg.rc:107
 msgid "Tooltip Text"
 msgstr ""
 
-#: programs/winecfg/winecfg.rc:114
+#: programs/winecfg/winecfg.rc:108
 msgid "Window Background"
 msgstr ""
 
-#: programs/winecfg/winecfg.rc:115
+#: programs/winecfg/winecfg.rc:109
 msgid "Window Text"
 msgstr "Fenestra teksto"
 
-#: programs/winecfg/winecfg.rc:116
+#: programs/winecfg/winecfg.rc:110
 msgid "Active Title Bar"
 msgstr "Aktiva titolzono"
 
-#: programs/winecfg/winecfg.rc:117
+#: programs/winecfg/winecfg.rc:111
 msgid "Active Title Text"
 msgstr ""
 
-#: programs/winecfg/winecfg.rc:118
+#: programs/winecfg/winecfg.rc:112
 msgid "Inactive Title Bar"
 msgstr ""
 
-#: programs/winecfg/winecfg.rc:119
+#: programs/winecfg/winecfg.rc:113
 msgid "Inactive Title Text"
 msgstr ""
 
-#: programs/winecfg/winecfg.rc:120
+#: programs/winecfg/winecfg.rc:114
 msgid "Message Box Text"
 msgstr ""
 
-#: programs/winecfg/winecfg.rc:121
+#: programs/winecfg/winecfg.rc:115
 msgid "Application Workspace"
 msgstr "Programa laborspaco"
 
-#: programs/winecfg/winecfg.rc:122
+#: programs/winecfg/winecfg.rc:116
 msgid "Window Frame"
 msgstr "Fenestra kadro"
 
-#: programs/winecfg/winecfg.rc:123
+#: programs/winecfg/winecfg.rc:117
 msgid "Active Border"
 msgstr ""
 
-#: programs/winecfg/winecfg.rc:124
+#: programs/winecfg/winecfg.rc:118
 msgid "Inactive Border"
 msgstr ""
 
-#: programs/winecfg/winecfg.rc:125
+#: programs/winecfg/winecfg.rc:119
 msgid "Controls Shadow"
 msgstr "Regas ombrojn"
 
-#: programs/winecfg/winecfg.rc:126
+#: programs/winecfg/winecfg.rc:120
 msgid "Gray Text"
 msgstr ""
 
-#: programs/winecfg/winecfg.rc:127
+#: programs/winecfg/winecfg.rc:121
 msgid "Controls Highlight"
 msgstr ""
 
-#: programs/winecfg/winecfg.rc:128
+#: programs/winecfg/winecfg.rc:122
 msgid "Controls Dark Shadow"
 msgstr ""
 
-#: programs/winecfg/winecfg.rc:129
+#: programs/winecfg/winecfg.rc:123
 msgid "Controls Light"
 msgstr ""
 
-#: programs/winecfg/winecfg.rc:130
+#: programs/winecfg/winecfg.rc:124
 msgid "Controls Alternate Background"
 msgstr ""
 
-#: programs/winecfg/winecfg.rc:131
+#: programs/winecfg/winecfg.rc:125
 msgid "Hot Tracked Item"
 msgstr ""
 
-#: programs/winecfg/winecfg.rc:132
+#: programs/winecfg/winecfg.rc:126
 msgid "Active Title Bar Gradient"
 msgstr ""
 
-#: programs/winecfg/winecfg.rc:133
+#: programs/winecfg/winecfg.rc:127
 msgid "Inactive Title Bar Gradient"
 msgstr ""
 
-#: programs/winecfg/winecfg.rc:134
+#: programs/winecfg/winecfg.rc:128
 msgid "Menu Highlight"
 msgstr ""
 
-#: programs/winecfg/winecfg.rc:135
+#: programs/winecfg/winecfg.rc:129
 msgid "Menu Bar"
 msgstr "Menuzono"
 

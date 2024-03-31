@@ -57,14 +57,14 @@ static HDC get_printer_ic(void)
     if (info_size == 0)
         return NULL;
 
-    info = malloc(info_size);
+    info = HeapAlloc(GetProcessHeap(), 0, info_size);
 
     ret = EnumPrintersA(PRINTER_ENUM_LOCAL, NULL, 2, (LPBYTE)info, info_size, &info_size, &num_printers);
 
     if (ret)
         result = CreateICA(info->pDriverName, info->pPrinterName, NULL, NULL);
 
-    free(info);
+    HeapFree(GetProcessHeap(), 0, info);
 
     return result;
 }

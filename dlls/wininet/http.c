@@ -329,7 +329,6 @@ static void reset_data_stream(http_request_t *req)
     destroy_data_stream(req->data_stream);
     req->data_stream = &req->netconn_stream.data_stream;
     req->read_pos = req->read_size = req->netconn_stream.content_read = 0;
-    req->content_pos = 0;
     req->read_gzip = FALSE;
 }
 
@@ -1283,7 +1282,7 @@ BOOL WINAPI HttpAddRequestHeadersW(HINTERNET hHttpRequest,
 
     TRACE("%p, %s, %lu, %08lx\n", hHttpRequest, debugstr_wn(lpszHeader, dwHeaderLength), dwHeaderLength, dwModifier);
 
-    if (!lpszHeader)
+    if (!lpszHeader) 
       return TRUE;
 
     request = (http_request_t*) get_handle_object( hHttpRequest );
@@ -2509,8 +2508,6 @@ static void create_cache_entry(http_request_t *req)
 
     create_req_file(file_name, &req->req_file);
     req->req_file->url = url;
-    req->content_pos = 0;
-    req->cache_size = 0;
 
     req->hCacheFile = CreateFileW(file_name, GENERIC_WRITE, FILE_SHARE_READ|FILE_SHARE_WRITE,
               NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
@@ -2524,9 +2521,7 @@ static void create_cache_entry(http_request_t *req)
         DWORD written;
 
         b = WriteFile(req->hCacheFile, req->read_buf+req->read_pos, req->read_size, &written, NULL);
-        if(b)
-            req->cache_size += written;
-        else
+        if(!b)
             FIXME("WriteFile failed: %lu\n", GetLastError());
 
         if(req->data_stream->vtbl->end_of_data(req->data_stream, req))
@@ -2635,9 +2630,7 @@ static DWORD read_http_stream(http_request_t *req, BYTE *buf, DWORD size, DWORD 
             DWORD written;
 
             bres = WriteFile(req->hCacheFile, buf, *read, &written, NULL);
-            if(bres)
-                req->cache_size += written;
-            else
+            if(!bres)
                 FIXME("WriteFile failed: %lu\n", GetLastError());
         }
 
@@ -3049,35 +3042,6 @@ static void HTTP_ReceiveRequestData(http_request_t *req)
     send_request_complete(req, req->session->hdr.dwInternalFlags & INET_OPENURL ? (DWORD_PTR)req->hdr.hInternet : 1, 0);
 }
 
-static DWORD read_req_file(http_request_t *req, BYTE *buffer, DWORD size, DWORD *read, BOOL allow_blocking)
-{
-    DWORD ret_read = 0, res;
-    LARGE_INTEGER off;
-    BYTE buf[1024];
-
-    while (req->content_pos > req->cache_size) {
-        res = read_http_stream(req, (BYTE*)buf, min(sizeof(buf), req->content_pos - req->cache_size),
-                               &ret_read, allow_blocking);
-        if (res != ERROR_SUCCESS)
-            return res;
-        if (!ret_read) {
-            *read = 0;
-            return ERROR_SUCCESS;
-        }
-    }
-
-    if (req->content_pos < req->cache_size) {
-        off.QuadPart = req->content_pos;
-        if (!SetFilePointerEx(req->req_file->file_handle, off, NULL, FILE_BEGIN))
-            return GetLastError();
-        if (!ReadFile(req->req_file->file_handle, buffer, size, &ret_read, NULL))
-            return GetLastError();
-    }
-
-    *read = ret_read;
-    return ERROR_SUCCESS;
-}
-
 /* read data from the http connection (the read section must be held) */
 static DWORD HTTPREQ_Read(http_request_t *req, void *buffer, DWORD size, DWORD *read, BOOL allow_blocking)
 {
@@ -3091,16 +3055,13 @@ static DWORD HTTPREQ_Read(http_request_t *req, void *buffer, DWORD size, DWORD *
         memcpy(buffer, req->read_buf+req->read_pos, ret_read);
         req->read_size -= ret_read;
         req->read_pos += ret_read;
-        req->content_pos += ret_read;
         allow_blocking = FALSE;
     }
 
     if(ret_read < size) {
         res = read_http_stream(req, (BYTE*)buffer+ret_read, size-ret_read, &current_read, allow_blocking);
-        if(res == ERROR_SUCCESS) {
+        if(res == ERROR_SUCCESS)
             ret_read += current_read;
-            req->content_pos += current_read;
-        }
         else if(res == WSAEWOULDBLOCK && ret_read)
             res = ERROR_SUCCESS;
     }
@@ -3154,17 +3115,6 @@ static void async_read_file_proc(task_header_t *hdr)
 
     TRACE("req %p buf %p size %lu read_pos %lu ret_read %p\n", req, task->buf, task->size, task->read_pos, task->ret_read);
 
-    if(req->req_file && req->req_file->file_handle) {
-        DWORD ret, ret_read;
-        BYTE buf[1024];
-        while (req->content_pos > req->cache_size) {
-            ret = read_http_stream(req, (BYTE*)buf, min(sizeof(buf), req->content_pos - req->cache_size),
-                                   &ret_read, TRUE);
-            if(ret != ERROR_SUCCESS || !ret_read)
-                break;
-        }
-    }
-
     if(task->buf) {
         DWORD read_bytes;
         while (read < task->size) {
@@ -3214,47 +3164,6 @@ static DWORD async_read(http_request_t *req, void *buf, DWORD size, DWORD read_p
     return ERROR_IO_PENDING;
 }
 
-static DWORD HTTPREQ_SetFilePointer(object_header_t *hdr, LONG lDistanceToMove, DWORD dwMoveContext)
-{
-    http_request_t *req = (http_request_t*)hdr;
-    DWORD res = INVALID_SET_FILE_POINTER, err = ERROR_SUCCESS;
-
-    if(req->hdr.dwFlags & (INTERNET_FLAG_DONT_CACHE|INTERNET_FLAG_NO_CACHE_WRITE)) {
-        SetLastError(ERROR_INTERNET_INVALID_OPERATION);
-        return INVALID_SET_FILE_POINTER;
-    }
-
-    EnterCriticalSection(&req->read_section);
-
-    switch (dwMoveContext) {
-        case FILE_BEGIN:
-            res = lDistanceToMove;
-            break;
-        case FILE_CURRENT:
-            if(req->content_pos && lDistanceToMove < 0) {
-                err = ERROR_NEGATIVE_SEEK;
-                break;
-            }
-            res = req->content_pos + lDistanceToMove;
-            break;
-        case FILE_END:
-            FIXME("dwMoveContext FILE_END not implemented\n");
-            /* fallthrough */
-        default:
-            err = ERROR_INTERNET_INVALID_OPERATION;
-            break;
-    }
-
-    if(err == ERROR_SUCCESS) {
-        req->content_pos = res;
-        req->read_pos = req->read_size = 0;
-    }
-
-    LeaveCriticalSection(&req->read_section);
-    SetLastError(err);
-    return res;
-}
-
 static DWORD HTTPREQ_ReadFile(object_header_t *hdr, void *buf, DWORD size, DWORD *ret_read,
         DWORD flags, DWORD_PTR context)
 {
@@ -3282,18 +3191,9 @@ static DWORD HTTPREQ_ReadFile(object_header_t *hdr, void *buf, DWORD size, DWORD
             memcpy(buf, req->read_buf + req->read_pos, read);
             req->read_size -= read;
             req->read_pos += read;
-            req->content_pos += read;
         }
 
-        if(read < size && req->req_file && req->req_file->file_handle) {
-            res = read_req_file(req, (BYTE*)buf + read, size - read, &cread, allow_blocking);
-            if(res == ERROR_SUCCESS) {
-                read += cread;
-                req->content_pos += cread;
-            }
-        }
-
-        if(res == ERROR_SUCCESS && read < size && (!read || !(flags & IRF_NO_WAIT)) && !end_of_read_data(req)) {
+        if(read < size && (!read || !(flags & IRF_NO_WAIT)) && !end_of_read_data(req)) {
             LeaveCriticalSection(&req->read_section);
             INTERNET_SendCallback(&req->hdr, req->hdr.dwContext, INTERNET_STATUS_RECEIVING_RESPONSE, NULL, 0);
             EnterCriticalSection( &req->read_section );
@@ -3374,8 +3274,6 @@ static DWORD HTTPREQ_QueryDataAvailable(object_header_t *hdr, DWORD *available, 
             hdr->dwError = ERROR_INTERNET_INTERNAL_ERROR;
 
         avail = req->read_size;
-        if(req->cache_size > req->content_pos)
-            avail = max(avail, req->cache_size - req->content_pos);
 
         if(!avail && !end_of_read_data(req)) {
             LeaveCriticalSection(&req->read_section);
@@ -3429,7 +3327,6 @@ static const object_vtbl_t HTTPREQVtbl = {
     HTTPREQ_CloseConnection,
     HTTPREQ_QueryOption,
     HTTPREQ_SetOption,
-    HTTPREQ_SetFilePointer,
     HTTPREQ_ReadFile,
     HTTPREQ_WriteFile,
     HTTPREQ_QueryDataAvailable,
@@ -3474,10 +3371,10 @@ static DWORD HTTP_HttpOpenRequestW(http_session_t *session,
     request->send_timeout = session->send_timeout;
     request->receive_timeout = session->receive_timeout;
 
-    InitializeCriticalSectionEx( &request->headers_section, 0, RTL_CRITICAL_SECTION_FLAG_FORCE_DEBUG_INFO );
+    InitializeCriticalSection( &request->headers_section );
     request->headers_section.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": http_request_t.headers_section");
 
-    InitializeCriticalSectionEx( &request->read_section, 0, RTL_CRITICAL_SECTION_FLAG_FORCE_DEBUG_INFO );
+    InitializeCriticalSection( &request->read_section );
     request->read_section.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": http_request_t.read_section");
 
     WININET_AddRef( &session->hdr );
@@ -4072,13 +3969,13 @@ BOOL WINAPI HttpQueryInfoW(HINTERNET hHttpRequest, DWORD dwInfoLevel,
 		info_mod &= ~ modifier_flags[i].val;
 	    }
 	}
-
+	
 	if (info_mod) {
 	    TRACE(" Unknown (%08lx)", info_mod);
 	}
 	TRACE("\n");
     }
-
+    
     request = (http_request_t*) get_handle_object( hHttpRequest );
     if (NULL == request ||  request->hdr.htype != WH_HHTTPREQ)
     {
@@ -5052,13 +4949,8 @@ static DWORD HTTP_HttpSendRequestW(http_request_t *request, LPCWSTR lpszHeaders,
     }
 
     /* add the headers the caller supplied */
-    if (lpszHeaders)
-    {
-        if (dwHeaderLength == 0)
-            dwHeaderLength = lstrlenW(lpszHeaders);
-
+    if( lpszHeaders && dwHeaderLength )
         HTTP_HttpAddRequestHeadersW(request, lpszHeaders, dwHeaderLength, HTTP_ADDREQ_FLAG_ADD | HTTP_ADDREQ_FLAG_REPLACE);
-    }
 
     do
     {
@@ -5565,12 +5457,6 @@ BOOL WINAPI HttpSendRequestExA(HINTERNET hRequest,
         BuffersInW.dwStructSize = sizeof(LPINTERNET_BUFFERSW);
         if (lpBuffersIn->lpcszHeader)
         {
-            if (lpBuffersIn->dwHeadersLength == 0 && *lpBuffersIn->lpcszHeader != '\0')
-            {
-                SetLastError(ERROR_INVALID_PARAMETER);
-                return FALSE;
-            }
-
             headerlen = MultiByteToWideChar(CP_ACP,0,lpBuffersIn->lpcszHeader,
                     lpBuffersIn->dwHeadersLength,0,0);
             header = malloc(headerlen * sizeof(WCHAR));
@@ -5793,12 +5679,6 @@ BOOL WINAPI HttpSendRequestA(HINTERNET hHttpRequest, LPCSTR lpszHeaders,
     DWORD nLen=dwHeaderLength;
     if(lpszHeaders!=NULL)
     {
-        if (dwHeaderLength == 0 && *lpszHeaders != '\0')
-        {
-            SetLastError(ERROR_INVALID_PARAMETER);
-            return FALSE;
-        }
-
         nLen=MultiByteToWideChar(CP_ACP,0,lpszHeaders,dwHeaderLength,NULL,0);
         szHeaders = malloc(nLen * sizeof(WCHAR));
         MultiByteToWideChar(CP_ACP,0,lpszHeaders,dwHeaderLength,szHeaders,nLen);
@@ -5933,7 +5813,6 @@ static const object_vtbl_t HTTPSESSIONVtbl = {
     NULL,
     HTTPSESSION_QueryOption,
     HTTPSESSION_SetOption,
-    NULL,
     NULL,
     NULL,
     NULL,

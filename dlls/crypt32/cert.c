@@ -20,6 +20,7 @@
 #include <assert.h>
 #include <stdarg.h>
 
+#define NONAMELESSUNION
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
 #include "windef.h"
@@ -1402,9 +1403,9 @@ DWORD WINAPI CertGetPublicKeyLength(DWORD dwCertEncodingType,
         {
             HCRYPTKEY key;
 
-            TRACE("public key algid %#x (%s)\n", info->Algid, debugstr_a(pPublicKey->Algorithm.pszObjId));
+            TRACE("public key algid %#x (%s)\n", info->u.Algid, debugstr_a(pPublicKey->Algorithm.pszObjId));
 
-            ret = CryptImportPublicKeyInfo(I_CryptGetDefaultCryptProv(info->Algid), dwCertEncodingType, pPublicKey, &key);
+            ret = CryptImportPublicKeyInfo(I_CryptGetDefaultCryptProv(info->u.Algid), dwCertEncodingType, pPublicKey, &key);
             if (ret)
             {
                 size = sizeof(len);
@@ -1537,14 +1538,14 @@ static BOOL compare_cert_by_cert_id(PCCERT_CONTEXT pCertContext, DWORD dwType,
     {
     case CERT_ID_ISSUER_SERIAL_NUMBER:
         ret = CertCompareCertificateName(pCertContext->dwCertEncodingType,
-         &pCertContext->pCertInfo->Issuer, &id->IssuerSerialNumber.Issuer);
+         &pCertContext->pCertInfo->Issuer, &id->u.IssuerSerialNumber.Issuer);
         if (ret)
             ret = CertCompareIntegerBlob(&pCertContext->pCertInfo->SerialNumber,
-             &id->IssuerSerialNumber.SerialNumber);
+             &id->u.IssuerSerialNumber.SerialNumber);
         break;
     case CERT_ID_SHA1_HASH:
         ret = compare_cert_by_sha1_hash(pCertContext, dwType, dwFlags,
-         &id->HashId);
+         &id->u.HashId);
         break;
     case CERT_ID_KEY_IDENTIFIER:
     {
@@ -1552,7 +1553,7 @@ static BOOL compare_cert_by_cert_id(PCCERT_CONTEXT pCertContext, DWORD dwType,
 
         ret = CertGetCertificateContextProperty(pCertContext,
          CERT_KEY_IDENTIFIER_PROP_ID, NULL, &size);
-        if (ret && size == id->KeyId.cbData)
+        if (ret && size == id->u.KeyId.cbData)
         {
             LPBYTE buf = CryptMemAlloc(size);
 
@@ -1560,7 +1561,7 @@ static BOOL compare_cert_by_cert_id(PCCERT_CONTEXT pCertContext, DWORD dwType,
             {
                 CertGetCertificateContextProperty(pCertContext,
                  CERT_KEY_IDENTIFIER_PROP_ID, buf, &size);
-                ret = !memcmp(buf, id->KeyId.pbData, size);
+                ret = !memcmp(buf, id->u.KeyId.pbData, size);
                 CryptMemFree(buf);
             }
             else
@@ -1662,15 +1663,15 @@ static PCCERT_CONTEXT find_cert_by_issuer(HCERTSTORE store, DWORD dwType,
             if (info->CertIssuer.cbData && info->CertSerialNumber.cbData)
             {
                 id.dwIdChoice = CERT_ID_ISSUER_SERIAL_NUMBER;
-                memcpy(&id.IssuerSerialNumber.Issuer, &info->CertIssuer,
+                memcpy(&id.u.IssuerSerialNumber.Issuer, &info->CertIssuer,
                  sizeof(CERT_NAME_BLOB));
-                memcpy(&id.IssuerSerialNumber.SerialNumber,
+                memcpy(&id.u.IssuerSerialNumber.SerialNumber,
                  &info->CertSerialNumber, sizeof(CRYPT_INTEGER_BLOB));
             }
             else if (info->KeyId.cbData)
             {
                 id.dwIdChoice = CERT_ID_KEY_IDENTIFIER;
-                memcpy(&id.KeyId, &info->KeyId, sizeof(CRYPT_HASH_BLOB));
+                memcpy(&id.u.KeyId, &info->KeyId, sizeof(CRYPT_HASH_BLOB));
             }
             else
                 ret = FALSE;
@@ -1708,9 +1709,9 @@ static PCCERT_CONTEXT find_cert_by_issuer(HCERTSTORE store, DWORD dwType,
                 if (directoryName)
                 {
                     id.dwIdChoice = CERT_ID_ISSUER_SERIAL_NUMBER;
-                    memcpy(&id.IssuerSerialNumber.Issuer,
-                     &directoryName->DirectoryName, sizeof(CERT_NAME_BLOB));
-                    memcpy(&id.IssuerSerialNumber.SerialNumber,
+                    memcpy(&id.u.IssuerSerialNumber.Issuer,
+                     &directoryName->u.DirectoryName, sizeof(CERT_NAME_BLOB));
+                    memcpy(&id.u.IssuerSerialNumber.SerialNumber,
                      &info->AuthorityCertSerialNumber,
                      sizeof(CRYPT_INTEGER_BLOB));
                 }
@@ -1723,7 +1724,7 @@ static PCCERT_CONTEXT find_cert_by_issuer(HCERTSTORE store, DWORD dwType,
             else if (info->KeyId.cbData)
             {
                 id.dwIdChoice = CERT_ID_KEY_IDENTIFIER;
-                memcpy(&id.KeyId, &info->KeyId, sizeof(CRYPT_HASH_BLOB));
+                memcpy(&id.u.KeyId, &info->KeyId, sizeof(CRYPT_HASH_BLOB));
             }
             else
                 ret = FALSE;
@@ -1862,7 +1863,7 @@ PCCERT_CONTEXT WINAPI CertFindCertificateInStore(HCERTSTORE hCertStore,
         break;
     case CERT_COMPARE_KEY_IDENTIFIER:
         cert_id.dwIdChoice = CERT_ID_KEY_IDENTIFIER;
-        cert_id.KeyId = *(const CRYPT_HASH_BLOB *)pvPara;
+        cert_id.u.KeyId = *(const CRYPT_HASH_BLOB *)pvPara;
         pvPara = &cert_id;
         /* fall through */
     case CERT_COMPARE_CERT_ID:
@@ -2405,7 +2406,7 @@ BOOL WINAPI CryptHashToBeSigned(HCRYPTPROV_LEGACY hCryptProv,
         }
         else
         {
-            ret = CryptCreateHash(hCryptProv, oidInfo->Algid, 0, 0, &hHash);
+            ret = CryptCreateHash(hCryptProv, oidInfo->u.Algid, 0, 0, &hHash);
             if (ret)
             {
                 ret = CryptHashData(hHash, info->ToBeSigned.pbData,
@@ -2445,7 +2446,7 @@ BOOL WINAPI CryptSignCertificate(HCRYPTPROV_OR_NCRYPT_KEY_HANDLE hCryptProv,
     {
         if (!hCryptProv)
             hCryptProv = I_CryptGetDefaultCryptProv(0);
-        ret = CryptCreateHash(hCryptProv, info->Algid, 0, 0, &hHash);
+        ret = CryptCreateHash(hCryptProv, info->u.Algid, 0, 0, &hHash);
         if (ret)
         {
             ret = CryptHashData(hHash, pbEncodedToBeSigned,
@@ -2465,7 +2466,7 @@ BOOL WINAPI CryptSignCertificate(HCRYPTPROV_OR_NCRYPT_KEY_HANDLE hCryptProv,
         }
         else
         {
-            ret = CryptCreateHash(hCryptProv, info->Algid, 0, 0, &hHash);
+            ret = CryptCreateHash(hCryptProv, info->u.Algid, 0, 0, &hHash);
             if (ret)
             {
                 ret = CryptHashData(hHash, pbEncodedToBeSigned,
@@ -2561,7 +2562,7 @@ static BOOL CRYPT_VerifySignature(HCRYPTPROV_LEGACY hCryptProv, DWORD dwCertEnco
     HCRYPTKEY key;
     ALG_ID pubKeyID, hashID;
 
-    hashID = info->Algid;
+    hashID = info->u.Algid;
     if (info->ExtraInfo.cbData >= sizeof(ALG_ID))
         pubKeyID = *(ALG_ID *)info->ExtraInfo.pbData;
     else
@@ -2778,37 +2779,32 @@ BOOL CNG_ImportPubKey(CERT_PUBLIC_KEY_INFO *pubKeyInfo, BCRYPT_KEY_HANDLE *key)
 static BOOL CNG_PrepareSignatureECC(BYTE *encoded_sig, DWORD encoded_size, BYTE **sig_value, DWORD *sig_len)
 {
     CERT_ECC_SIGNATURE *ecc_sig;
-    DWORD size, r_size, s_size, r_offset, s_offset;
+    DWORD size;
     int i;
 
     if (!CryptDecodeObjectEx(X509_ASN_ENCODING, X509_ECC_SIGNATURE, encoded_sig, encoded_size,
             CRYPT_DECODE_ALLOC_FLAG, NULL, &ecc_sig, &size))
         return FALSE;
 
-    if (!(r_size = ecc_sig->r.cbData) || !(s_size = ecc_sig->s.cbData))
+    if (!ecc_sig->r.cbData || !ecc_sig->s.cbData)
     {
         LocalFree(ecc_sig);
         SetLastError(ERROR_INVALID_DATA);
         return FALSE;
     }
-    r_size = s_size = max( r_size, s_size );
 
-    *sig_len = r_size + s_size;
+    *sig_len = ecc_sig->r.cbData + ecc_sig->s.cbData;
     if (!(*sig_value = CryptMemAlloc(*sig_len)))
     {
         LocalFree(ecc_sig);
         SetLastError(ERROR_OUTOFMEMORY);
         return FALSE;
     }
-    memset( *sig_value, 0, *sig_len );
-
-    r_offset = r_size - ecc_sig->r.cbData;
-    s_offset = s_size - ecc_sig->s.cbData;
 
     for (i = 0; i < ecc_sig->r.cbData; i++)
-        (*sig_value)[i + r_offset] = ecc_sig->r.pbData[ecc_sig->r.cbData - i - 1];
+        (*sig_value)[i] = ecc_sig->r.pbData[ecc_sig->r.cbData - i - 1];
     for (i = 0; i < ecc_sig->s.cbData; i++)
-        (*sig_value)[r_size + i + s_offset] = ecc_sig->s.pbData[ecc_sig->s.cbData - i - 1];
+        (*sig_value)[ecc_sig->r.cbData + i] = ecc_sig->s.pbData[ecc_sig->s.cbData - i - 1];
 
     LocalFree(ecc_sig);
     return TRUE;
@@ -2900,7 +2896,7 @@ static BOOL CRYPT_VerifyCertSignatureFromPublicKeyInfo(HCRYPTPROV_LEGACY hCryptP
         return FALSE;
     }
 
-    if (info->Algid == CALG_OID_INFO_CNG_ONLY)
+    if (info->u.Algid == CALG_OID_INFO_CNG_ONLY)
         return CNG_VerifySignature(hCryptProv, dwCertEncodingType, pubKeyInfo, signedCert, info);
     else
         return CRYPT_VerifySignature(hCryptProv, dwCertEncodingType, pubKeyInfo, signedCert, info);

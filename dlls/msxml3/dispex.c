@@ -25,6 +25,7 @@
 #include "dispex.h"
 
 #include "wine/debug.h"
+#include "wine/heap.h"
 
 #include "msxml_dispex.h"
 
@@ -81,7 +82,7 @@ static lib_id_t lib_ids[] = {
 };
 
 static tid_id_t tid_ids[] = {
-    { &IID_NULL, LibXml2 },
+    { &IID_NULL, LibXml_Last },
     { &IID_IXMLDOMAttribute, LibXml2 },
     { &IID_IXMLDOMCDATASection, LibXml2 },
     { &IID_IXMLDOMComment, LibXml2 },
@@ -199,9 +200,9 @@ void release_typelib(void)
         for(i=0; i < iter->func_cnt; i++)
             SysFreeString(iter->funcs[i].name);
 
-        free(iter->funcs);
-        free(iter->name_table);
-        free(iter);
+        heap_free(iter->funcs);
+        heap_free(iter->name_table);
+        heap_free(iter);
     }
 
     for(i=0; i < ARRAY_SIZE(typeinfos); i++)
@@ -223,7 +224,7 @@ static void add_func_info(dispex_data_t *data, DWORD *size, tid_t tid, DISPID id
         return;
 
     if(data->func_cnt == *size)
-        data->funcs = realloc(data->funcs, (*size <<= 1) * sizeof(func_info_t));
+        data->funcs = heap_realloc(data->funcs, (*size <<= 1)*sizeof(func_info_t));
 
     hres = ITypeInfo_GetDocumentation(dti, id, &data->funcs[data->func_cnt].name, NULL, NULL, NULL);
     if(FAILED(hres))
@@ -262,9 +263,9 @@ static dispex_data_t *preprocess_dispex_data(DispatchEx *This)
         return NULL;
     }
 
-    data = malloc(sizeof(dispex_data_t));
+    data = heap_alloc(sizeof(dispex_data_t));
     data->func_cnt = 0;
-    data->funcs = malloc(size * sizeof(func_info_t));
+    data->funcs = heap_alloc(size*sizeof(func_info_t));
     list_add_tail(&dispex_data_list, &data->entry);
 
     while(*tid) {
@@ -287,16 +288,16 @@ static dispex_data_t *preprocess_dispex_data(DispatchEx *This)
     }
 
     if(!data->func_cnt) {
-        free(data->funcs);
+        heap_free(data->funcs);
         data->funcs = NULL;
     }else if(data->func_cnt != size) {
-        data->funcs = realloc(data->funcs, data->func_cnt * sizeof(func_info_t));
+        data->funcs = heap_realloc(data->funcs, data->func_cnt * sizeof(func_info_t));
     }
 
-    if(data->funcs) {
-        qsort(data->funcs, data->func_cnt, sizeof(func_info_t), dispid_cmp);
+    qsort(data->funcs, data->func_cnt, sizeof(func_info_t), dispid_cmp);
 
-        data->name_table = malloc(data->func_cnt * sizeof(func_info_t*));
+    if(data->funcs) {
+        data->name_table = heap_alloc(data->func_cnt * sizeof(func_info_t*));
         for(i=0; i < data->func_cnt; i++)
             data->name_table[i] = data->funcs+i;
         qsort(data->name_table, data->func_cnt, sizeof(func_info_t*), func_name_cmp);

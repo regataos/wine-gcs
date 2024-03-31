@@ -1,5 +1,4 @@
 MODULE    = dplay.dll
 IMPORTS   = dplayx
 
-SOURCES = \
-	version.rc
+RC_SRCS = version.rc

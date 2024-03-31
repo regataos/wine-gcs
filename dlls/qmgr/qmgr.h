@@ -96,23 +96,23 @@ typedef struct
     IClassFactory IClassFactory_iface;
 } ClassFactoryImpl;
 
-extern HANDLE stop_event;
-extern ClassFactoryImpl BITS_ClassFactory;
-extern BackgroundCopyManagerImpl globalMgr;
+extern HANDLE stop_event DECLSPEC_HIDDEN;
+extern ClassFactoryImpl BITS_ClassFactory DECLSPEC_HIDDEN;
+extern BackgroundCopyManagerImpl globalMgr DECLSPEC_HIDDEN;
 
-HRESULT BackgroundCopyManagerConstructor(LPVOID *ppObj);
+HRESULT BackgroundCopyManagerConstructor(LPVOID *ppObj) DECLSPEC_HIDDEN;
 HRESULT BackgroundCopyJobConstructor(LPCWSTR displayName, BG_JOB_TYPE type,
-                                     GUID *pJobId, BackgroundCopyJobImpl **job);
+                                     GUID *pJobId, BackgroundCopyJobImpl **job) DECLSPEC_HIDDEN;
 HRESULT enum_copy_job_create(BackgroundCopyManagerImpl *qmgr,
-        IEnumBackgroundCopyJobs **enumjob);
+        IEnumBackgroundCopyJobs **enumjob) DECLSPEC_HIDDEN;
 HRESULT BackgroundCopyFileConstructor(BackgroundCopyJobImpl *owner,
                                       LPCWSTR remoteName, LPCWSTR localName,
-                                      BackgroundCopyFileImpl **file);
-HRESULT EnumBackgroundCopyFilesConstructor(BackgroundCopyJobImpl*, IEnumBackgroundCopyFiles**);
-DWORD WINAPI fileTransfer(void *param);
-void processJob(BackgroundCopyJobImpl *job);
-BOOL processFile(BackgroundCopyFileImpl *file, BackgroundCopyJobImpl *job);
-BOOL transitionJobState(BackgroundCopyJobImpl *job, BG_JOB_STATE from, BG_JOB_STATE to);
+                                      BackgroundCopyFileImpl **file) DECLSPEC_HIDDEN;
+HRESULT EnumBackgroundCopyFilesConstructor(BackgroundCopyJobImpl*, IEnumBackgroundCopyFiles**) DECLSPEC_HIDDEN;
+DWORD WINAPI fileTransfer(void *param) DECLSPEC_HIDDEN;
+void processJob(BackgroundCopyJobImpl *job) DECLSPEC_HIDDEN;
+BOOL processFile(BackgroundCopyFileImpl *file, BackgroundCopyJobImpl *job) DECLSPEC_HIDDEN;
+BOOL transitionJobState(BackgroundCopyJobImpl *job, BG_JOB_STATE from, BG_JOB_STATE to) DECLSPEC_HIDDEN;
 
 /* Little helper functions */
 static inline WCHAR *co_strdupW(const WCHAR *src)

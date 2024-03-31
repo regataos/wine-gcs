@@ -21,6 +21,9 @@
 #include <stdarg.h>
 
 #define COBJMACROS
+#define NONAMELESSUNION
+#define NONAMELESSSTRUCT
+
 #include "windef.h"
 #include "winbase.h"
 #include "winuser.h"
@@ -406,7 +409,7 @@ static HRESULT enumerate_gac(IAssemblyEnumImpl *asmenum, IAssemblyName *pName)
 
     lstrcpyW(path, buf);
     GetNativeSystemInfo(&info);
-    if (info.wProcessorArchitecture == PROCESSOR_ARCHITECTURE_AMD64)
+    if (info.u.s.wProcessorArchitecture == PROCESSOR_ARCHITECTURE_AMD64)
     {
         lstrcpyW(path + size - 1, gac_64);
         hr = enum_gac_assemblies(&asmenum->assemblies, pName, 0, v40, path);
@@ -429,7 +432,7 @@ static HRESULT enumerate_gac(IAssemblyEnumImpl *asmenum, IAssemblyName *pName)
         return hr;
 
     lstrcpyW(path, buf);
-    if (info.wProcessorArchitecture == PROCESSOR_ARCHITECTURE_AMD64)
+    if (info.u.s.wProcessorArchitecture == PROCESSOR_ARCHITECTURE_AMD64)
     {
         lstrcpyW(path + size - 1, gac_64);
         hr = enum_gac_assemblies(&asmenum->assemblies, pName, 0, NULL, path);

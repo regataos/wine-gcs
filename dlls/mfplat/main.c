@@ -22,6 +22,8 @@
 #include <limits.h>
 
 #define COBJMACROS
+#define NONAMELESSUNION
+
 #include "windef.h"
 #include "winbase.h"
 #include "winuser.h"
@@ -979,7 +981,7 @@ MFTIME WINAPI MFGetSystemTime(void)
         QueryPerformanceFrequency(&frequency);
     QueryPerformanceCounter(&counter);
 
-    return counter.QuadPart * 10000000 / frequency.QuadPart;
+    return (counter.QuadPart * 1000) / frequency.QuadPart * 10000;
 }
 
 static BOOL mft_is_type_info_match(struct mft_registration *mft, const GUID *category, UINT32 flags,
@@ -1585,6 +1587,18 @@ HRESULT WINAPI MFTGetInfo(CLSID clsid, WCHAR **name, MFT_REGISTER_TYPE_INFO **in
     return hr;
 }
 
+static BOOL CALLBACK register_winegstreamer_proc(INIT_ONCE *once, void *param, void **ctx)
+{
+    HMODULE mod = LoadLibraryW(L"winegstreamer.dll");
+    if (mod)
+    {
+        HRESULT (WINAPI *proc)(void) = (void *)GetProcAddress(mod, "DllRegisterServer");
+        proc();
+        FreeLibrary(mod);
+    }
+    return TRUE;
+}
+
 /***********************************************************************
  *      MFStartup (mfplat.@)
  */
@@ -1592,8 +1606,11 @@ HRESULT WINAPI MFStartup(ULONG version, DWORD flags)
 {
 #define MF_VERSION_XP   MAKELONG( MF_API_VERSION, 1 )
 #define MF_VERSION_WIN7 MAKELONG( MF_API_VERSION, 2 )
+    static INIT_ONCE once = INIT_ONCE_STATIC_INIT;
 
     TRACE("%#lx, %#lx.\n", version, flags);
+
+    InitOnceExecuteOnce(&once, register_winegstreamer_proc, NULL, NULL);
 
     if (version != MF_VERSION_XP && version != MF_VERSION_WIN7)
         return MF_E_BAD_STARTUP_VERSION;
@@ -9211,8 +9228,15 @@ static const IMFDXGIDeviceManagerVtbl dxgi_device_manager_vtbl =
 HRESULT WINAPI MFCreateDXGIDeviceManager(UINT *token, IMFDXGIDeviceManager **manager)
 {
     struct dxgi_device_manager *object;
+    const char *do_not_create = getenv("WINE_DO_NOT_CREATE_DXGI_DEVICE_MANAGER");
 
     TRACE("%p, %p.\n", token, manager);
+
+    if (do_not_create && do_not_create[0] != '\0')
+    {
+        FIXME("stubbing out\n");
+        return E_NOTIMPL;
+    }
 
     if (!token || !manager)
         return E_POINTER;
@@ -9464,29 +9488,4 @@ LONGLONG WINAPI MFllMulDiv(LONGLONG val, LONGLONG num, LONGLONG denom, LONGLONG 
     if (ret >= I64_MAX) return LLOVERFLOW;
     return sign ? -(LONGLONG)ret : ret;
 #undef LLOVERFLOW
-}
-
-/***********************************************************************
- *      MFCreatePathFromURL (mfplat.@)
- */
-HRESULT WINAPI MFCreatePathFromURL(const WCHAR *url, WCHAR **ret_path)
-{
-    WCHAR path[MAX_PATH];
-    DWORD length;
-    HRESULT hr;
-
-    TRACE("%s, %p.\n", debugstr_w(url), ret_path);
-
-    if (!url || !ret_path)
-        return E_POINTER;
-
-    length = ARRAY_SIZE(path);
-    if (FAILED(hr = PathCreateFromUrlW(url, path, &length, 0)))
-        return hr;
-
-    if (!(*ret_path = CoTaskMemAlloc((length + 1) * sizeof(*path))))
-        return E_OUTOFMEMORY;
-
-    memcpy(*ret_path, path, (length + 1) * sizeof(*path));
-    return S_OK;
 }

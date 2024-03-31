@@ -216,7 +216,6 @@ _ACRTIMP ldiv_t __cdecl ldiv(__msvcrt_long,__msvcrt_long);
 _ACRTIMP lldiv_t       __cdecl lldiv(__int64,__int64);
 _ACRTIMP DECLSPEC_NORETURN void __cdecl exit(int);
 _ACRTIMP char*         __cdecl getenv(const char*);
-_ACRTIMP errno_t       __cdecl getenv_s(size_t*,char*,size_t,const char*);
 _ACRTIMP __msvcrt_long __cdecl labs(__msvcrt_long);
 _ACRTIMP __int64       __cdecl llabs(__int64);
 _ACRTIMP int           __cdecl mblen(const char*,size_t);
@@ -225,7 +224,6 @@ _ACRTIMP int           __cdecl rand(void);
 _ACRTIMP errno_t       __cdecl rand_s(unsigned int*);
 _ACRTIMP void          __cdecl srand(unsigned int);
 _ACRTIMP float         __cdecl strtof(const char*,char**);
-_ACRTIMP float         __cdecl _strtof_l(const char*,char**,_locale_t);
 _ACRTIMP double        __cdecl strtod(const char*,char**);
 _ACRTIMP __msvcrt_long __cdecl strtol(const char*,char**,int);
 _ACRTIMP __msvcrt_ulong __cdecl strtoul(const char*,char**,int);
@@ -257,16 +255,6 @@ static inline long double strtold(const char *string, char **endptr) { return _s
 #endif /* _UCRT */
 
 #ifdef __cplusplus
-extern "C++" {
-
-template <size_t size>
-inline errno_t getenv_s(size_t *ret, char (&buf)[size], const char *var)
-{
-    return getenv_s(ret, buf, size, var);
-}
-
-} /* extern "C++" */
-
 }
 #endif
 

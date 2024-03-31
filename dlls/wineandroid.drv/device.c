@@ -31,6 +31,9 @@
 #include <sys/ioctl.h>
 #include <unistd.h>
 
+#define NONAMELESSUNION
+#define NONAMELESSSTRUCT
+
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
 #include "windef.h"
@@ -1135,17 +1138,17 @@ NTSTATUS android_dispatch_ioctl( void *arg )
         {
             irp->IoStatus.Information = 0;
             NtUserGetThreadInfo()->driver_data = params->client_id;
-            irp->IoStatus.Status = func( irp->AssociatedIrp.SystemBuffer, in_size,
-                                         irpsp->Parameters.DeviceIoControl.OutputBufferLength,
-                                         &irp->IoStatus.Information );
+            irp->IoStatus.u.Status = func( irp->AssociatedIrp.SystemBuffer, in_size,
+                                           irpsp->Parameters.DeviceIoControl.OutputBufferLength,
+                                           &irp->IoStatus.Information );
             NtUserGetThreadInfo()->driver_data = 0;
         }
-        else irp->IoStatus.Status = STATUS_INVALID_PARAMETER;
+        else irp->IoStatus.u.Status = STATUS_INVALID_PARAMETER;
     }
     else
     {
         FIXME( "ioctl %x not supported\n", (int)irpsp->Parameters.DeviceIoControl.IoControlCode );
-        irp->IoStatus.Status = STATUS_NOT_SUPPORTED;
+        irp->IoStatus.u.Status = STATUS_NOT_SUPPORTED;
     }
     return STATUS_SUCCESS;
 }
@@ -1177,8 +1180,7 @@ void start_android_device(void)
 {
     void *ret_ptr;
     ULONG ret_len;
-    KeUserModeCallback( client_start_device, NULL, 0, &ret_ptr, &ret_len );
-    if (ret_len == sizeof(thread)) thread = *(HANDLE *)ret_ptr;
+    thread = ULongToHandle( KeUserModeCallback( client_start_device, NULL, 0, &ret_ptr, &ret_len ));
 }
 
 

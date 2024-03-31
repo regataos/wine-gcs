@@ -25,6 +25,8 @@
 #include <string.h>
 
 #define COBJMACROS
+#define NONAMELESSUNION
+
 #include "wine/debug.h"
 #include "pidl.h"
 #include "shell32_main.h"
@@ -382,7 +384,7 @@ static HTREEITEM InsertTreeViewItem( browse_info *info, IShellFolder * lpsf,
 	lptvid->pEnumIL = pEnumIL;
 	GetNormalAndSelectedIcons(lptvid->lpifq, &tvi);
 
-	tvins.item         = tvi;
+	tvins.u.item       = tvi;
 	tvins.hInsertAfter = NULL;
 	tvins.hParent      = hParent;
 
@@ -648,7 +650,7 @@ static LRESULT BrsFolder_Treeview_Keydown(browse_info *info, LPNMTVKEYDOWN keydo
                 return 0;
 
             /* perform the item deletion - tree view gets updated over shell notification */
-            ISFHelper_DeleteItems(psfhlp, 1, &item_id);
+            ISFHelper_DeleteItems(psfhlp, 1, &item_id, TRUE);
             ISFHelper_Release(psfhlp);
         }
         break;
@@ -1000,13 +1002,13 @@ static BOOL BrsFolder_OnSetSelectionA(browse_info *info, LPVOID selection, BOOL 
         return BrsFolder_OnSetSelectionW(info, selection, is_str);
 
     if ((length = MultiByteToWideChar(CP_ACP, 0, selection, -1, NULL, 0)) &&
-        (selectionW = malloc(length * sizeof(WCHAR))) &&
+        (selectionW = heap_alloc(length * sizeof(WCHAR))) &&
         MultiByteToWideChar(CP_ACP, 0, selection, -1, selectionW, length))
     {
         result = BrsFolder_OnSetSelectionW(info, selectionW, is_str);
     }
 
-    free(selectionW);
+    heap_free(selectionW);
     return result;
 }
 
@@ -1173,14 +1175,14 @@ LPITEMIDLIST WINAPI SHBrowseForFolderA (LPBROWSEINFOA lpbi)
     bi.hwndOwner = lpbi->hwndOwner;
     bi.pidlRoot = lpbi->pidlRoot;
     if (lpbi->pszDisplayName)
-        bi.pszDisplayName = malloc( MAX_PATH * sizeof(WCHAR) );
+        bi.pszDisplayName = heap_alloc( MAX_PATH * sizeof(WCHAR) );
     else
         bi.pszDisplayName = NULL;
 
     if (lpbi->lpszTitle)
     {
         len = MultiByteToWideChar( CP_ACP, 0, lpbi->lpszTitle, -1, NULL, 0 );
-        title = malloc( len * sizeof(WCHAR) );
+        title = heap_alloc( len * sizeof(WCHAR) );
         MultiByteToWideChar( CP_ACP, 0, lpbi->lpszTitle, -1, title, len );
     }
     else
@@ -1196,9 +1198,9 @@ LPITEMIDLIST WINAPI SHBrowseForFolderA (LPBROWSEINFOA lpbi)
     {
         WideCharToMultiByte( CP_ACP, 0, bi.pszDisplayName, -1,
                              lpbi->pszDisplayName, MAX_PATH, 0, NULL);
-        free( bi.pszDisplayName );
+        heap_free( bi.pszDisplayName );
     }
-    free( title );
+    heap_free(title);
     lpbi->iImage = bi.iImage;
     return lpid;
 }

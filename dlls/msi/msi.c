@@ -21,6 +21,8 @@
 #include <stdarg.h>
 
 #define COBJMACROS
+#define NONAMELESSUNION
+
 #include "windef.h"
 #include "winbase.h"
 #include "winreg.h"
@@ -1363,7 +1365,7 @@ done:
     return r;
 }
 
-static UINT copy_outval(const WCHAR *val, WCHAR *out, DWORD *size)
+static UINT msi_copy_outval(LPWSTR val, LPWSTR out, LPDWORD size)
 {
     UINT r = ERROR_SUCCESS;
 
@@ -1488,7 +1490,7 @@ UINT WINAPI MsiGetProductInfoExW(LPCWSTR szProductCode, LPCWSTR szUserSid,
         if (!val)
             val = wcsdup(L"");
 
-        r = copy_outval(val, szValue, pcchValue);
+        r = msi_copy_outval(val, szValue, pcchValue);
     }
     else if (!wcscmp( szProperty, INSTALLPROPERTY_TRANSFORMSW ) ||
              !wcscmp( szProperty, INSTALLPROPERTY_LANGUAGEW ) ||
@@ -1513,7 +1515,7 @@ UINT WINAPI MsiGetProductInfoExW(LPCWSTR szProductCode, LPCWSTR szUserSid,
         if (!val)
             val = wcsdup(L"");
 
-        r = copy_outval(val, szValue, pcchValue);
+        r = msi_copy_outval(val, szValue, pcchValue);
     }
     else if (!wcscmp( szProperty, INSTALLPROPERTY_PRODUCTSTATEW ))
     {
@@ -1531,14 +1533,14 @@ UINT WINAPI MsiGetProductInfoExW(LPCWSTR szProductCode, LPCWSTR szUserSid,
             else
                 val = wcsdup(L"1");
 
-            r = copy_outval(val, szValue, pcchValue);
+            r = msi_copy_outval(val, szValue, pcchValue);
             goto done;
         }
         else if (props && (val = reg_get_value(props, package, &type)))
         {
             free(val);
             val = wcsdup(L"5");
-            r = copy_outval(val, szValue, pcchValue);
+            r = msi_copy_outval(val, szValue, pcchValue);
             goto done;
         }
 
@@ -1547,7 +1549,7 @@ UINT WINAPI MsiGetProductInfoExW(LPCWSTR szProductCode, LPCWSTR szUserSid,
         else
             goto done;
 
-        r = copy_outval(val, szValue, pcchValue);
+        r = msi_copy_outval(val, szValue, pcchValue);
     }
     else if (!wcscmp( szProperty, INSTALLPROPERTY_ASSIGNMENTTYPEW ))
     {
@@ -1556,7 +1558,7 @@ UINT WINAPI MsiGetProductInfoExW(LPCWSTR szProductCode, LPCWSTR szUserSid,
 
         /* FIXME */
         val = wcsdup(L"");
-        r = copy_outval(val, szValue, pcchValue);
+        r = msi_copy_outval(val, szValue, pcchValue);
     }
     else
         r = ERROR_UNKNOWN_PROPERTY;
@@ -2028,7 +2030,7 @@ UINT WINAPI MsiEnumComponentCostsW( MSIHANDLE handle, const WCHAR *component, DW
     GetWindowsDirectoryW( path, MAX_PATH );
     if (component && component[0])
     {
-        if (msi_is_global_assembly( comp )) *temp = comp->cost;
+        if (msi_is_global_assembly( comp )) *temp = comp->Cost;
         if (!comp->Enabled || !comp->KeyPath)
         {
             *cost = 0;
@@ -2037,14 +2039,14 @@ UINT WINAPI MsiEnumComponentCostsW( MSIHANDLE handle, const WCHAR *component, DW
         }
         else if ((file = msi_get_loaded_file( package, comp->KeyPath )))
         {
-            *cost = comp->cost;
+            *cost = max( 8, comp->Cost / 512 );
             *buflen = set_drive( drive, file->TargetPath[0] );
             r = ERROR_SUCCESS;
         }
     }
     else if (IStorage_Stat( package->db->storage, &stat, STATFLAG_NONAME ) == S_OK)
     {
-        *temp = cost_from_size( stat.cbSize.QuadPart );
+        *temp = max( 8, stat.cbSize.QuadPart / 512 );
         *buflen = set_drive( drive, path[0] );
         r = ERROR_SUCCESS;
     }
@@ -2080,7 +2082,7 @@ UINT WINAPI MsiQueryComponentStateA(LPCSTR szProductCode,
     return r;
 }
 
-static BOOL comp_find_prod_key(const WCHAR *prodcode, MSIINSTALLCONTEXT context)
+static BOOL msi_comp_find_prod_key(LPCWSTR prodcode, MSIINSTALLCONTEXT context)
 {
     UINT r;
     HKEY hkey = NULL;
@@ -2090,7 +2092,7 @@ static BOOL comp_find_prod_key(const WCHAR *prodcode, MSIINSTALLCONTEXT context)
     return (r == ERROR_SUCCESS);
 }
 
-static BOOL comp_find_package(const WCHAR *prodcode, MSIINSTALLCONTEXT context)
+static BOOL msi_comp_find_package(LPCWSTR prodcode, MSIINSTALLCONTEXT context)
 {
     LPCWSTR package;
     HKEY hkey;
@@ -2114,8 +2116,9 @@ static BOOL comp_find_package(const WCHAR *prodcode, MSIINSTALLCONTEXT context)
     return (res == ERROR_SUCCESS);
 }
 
-static UINT comp_find_prodcode(const WCHAR *squashed_pc, MSIINSTALLCONTEXT context, const WCHAR *comp, WCHAR *val,
-                               DWORD *sz)
+static UINT msi_comp_find_prodcode(WCHAR *squashed_pc,
+                                   MSIINSTALLCONTEXT context,
+                                   LPCWSTR comp, LPWSTR val, DWORD *sz)
 {
     HKEY hkey;
     LONG res;
@@ -2157,9 +2160,9 @@ UINT WINAPI MsiQueryComponentStateW(LPCWSTR szProductCode,
     if (!squash_guid( szProductCode, squashed_pc ))
         return ERROR_INVALID_PARAMETER;
 
-    found = comp_find_prod_key(szProductCode, dwContext);
+    found = msi_comp_find_prod_key(szProductCode, dwContext);
 
-    if (!comp_find_package(szProductCode, dwContext))
+    if (!msi_comp_find_package(szProductCode, dwContext))
     {
         if (found)
         {
@@ -2173,7 +2176,7 @@ UINT WINAPI MsiQueryComponentStateW(LPCWSTR szProductCode,
     *pdwState = INSTALLSTATE_UNKNOWN;
 
     sz = 0;
-    if (comp_find_prodcode( squashed_pc, dwContext, szComponent, NULL, &sz ))
+    if (msi_comp_find_prodcode( squashed_pc, dwContext, szComponent, NULL, &sz ))
         return ERROR_UNKNOWN_COMPONENT;
 
     if (sz == 0)
@@ -2184,7 +2187,7 @@ UINT WINAPI MsiQueryComponentStateW(LPCWSTR szProductCode,
         UINT r;
 
         if (!(val = malloc( sz ))) return ERROR_OUTOFMEMORY;
-        if ((r = comp_find_prodcode( squashed_pc, dwContext, szComponent, val, &sz )))
+        if ((r = msi_comp_find_prodcode( squashed_pc, dwContext, szComponent, val, &sz )))
         {
             free(val);
             return r;
@@ -2546,7 +2549,7 @@ HRESULT WINAPI MsiGetFileSignatureInformationW( const WCHAR *path, DWORD flags, 
     data.dwUIChoice          = WTD_UI_NONE;
     data.fdwRevocationChecks = WTD_REVOKE_WHOLECHAIN;
     data.dwUnionChoice       = WTD_CHOICE_FILE;
-    data.pFile               = &info;
+    data.u.pFile             = &info;
     data.dwStateAction       = WTD_STATEACTION_VERIFY;
     data.dwUIContext         = WTD_UICONTEXT_INSTALL;
 
@@ -4003,17 +4006,17 @@ UINT WINAPI MsiReinstallFeatureA( const char *szProduct, const char *szFeature, 
     return rc;
 }
 
-struct md5_ctx
+typedef struct
 {
     unsigned int i[2];
     unsigned int buf[4];
     unsigned char in[64];
     unsigned char digest[16];
-};
+} MD5_CTX;
 
-extern void WINAPI MD5Init( struct md5_ctx * );
-extern void WINAPI MD5Update( struct md5_ctx *, const unsigned char *, unsigned int );
-extern void WINAPI MD5Final( struct md5_ctx * );
+extern VOID WINAPI MD5Init( MD5_CTX *);
+extern VOID WINAPI MD5Update( MD5_CTX *, const unsigned char *, unsigned int );
+extern VOID WINAPI MD5Final( MD5_CTX *);
 
 UINT msi_get_filehash( MSIPACKAGE *package, const WCHAR *path, MSIFILEHASHINFO *hash )
 {
@@ -4037,7 +4040,7 @@ UINT msi_get_filehash( MSIPACKAGE *package, const WCHAR *path, MSIFILEHASHINFO *
         {
             if ((p = MapViewOfFile( mapping, FILE_MAP_READ, 0, 0, length )))
             {
-                struct md5_ctx ctx;
+                MD5_CTX ctx;
 
                 MD5Init( &ctx );
                 MD5Update( &ctx, p, length );

@@ -1,5 +1,4 @@
 MODULE    = toolhelp.dll16
 EXTRADLLFLAGS = -m16
 
-SOURCES = \
-	toolhelp.c
+C_SRCS = toolhelp.c

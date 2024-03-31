@@ -55,7 +55,7 @@ void init_handle_table(struct handle_table *lpTable)
     lpTable->paEntries = NULL;
     lpTable->iEntries = 0;
     lpTable->iFirstFree = 0;
-    InitializeCriticalSectionEx(&lpTable->mutex, 0, RTL_CRITICAL_SECTION_FLAG_FORCE_DEBUG_INFO);
+    InitializeCriticalSection(&lpTable->mutex);
     lpTable->mutex.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": HANDLETABLE.mutex");
 }
 

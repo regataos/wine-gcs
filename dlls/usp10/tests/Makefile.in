@@ -1,5 +1,5 @@
 TESTDLL   = usp10.dll
 IMPORTS   = usp10 user32 gdi32
 
-SOURCES = \
+C_SRCS = \
 	usp10.c

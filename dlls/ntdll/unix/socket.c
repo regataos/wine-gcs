@@ -45,7 +45,6 @@
 
 #ifdef HAVE_NETIPX_IPX_H
 # include <netipx/ipx.h>
-# define HAS_IPX
 #elif defined(HAVE_LINUX_IPX_H)
 # ifdef HAVE_ASM_TYPES_H
 #  include <asm/types.h>
@@ -54,9 +53,9 @@
 #  include <linux/types.h>
 # endif
 # include <linux/ipx.h>
-# ifdef SOL_IPX
-#  define HAS_IPX
-# endif
+#endif
+#if defined(SOL_IPX) || defined(SO_DEFAULT_HEADERS)
+# define HAS_IPX
 #endif
 
 #ifdef HAVE_LINUX_IRDA_H
@@ -152,6 +151,8 @@ struct async_transmit_ioctl
     unsigned int tail_len;
     LARGE_INTEGER offset;
 };
+
+static int get_sock_type( HANDLE handle );
 
 static NTSTATUS sock_errno_to_status( int err )
 {
@@ -986,14 +987,10 @@ static NTSTATUS try_send( int fd, struct async_send_ioctl *async )
     union unix_sockaddr unix_addr;
     struct msghdr hdr;
     int attempt = 0;
-    int sock_type;
-    socklen_t len = sizeof(sock_type);
     ssize_t ret;
 
-    getsockopt(fd, SOL_SOCKET, SO_TYPE, &sock_type, &len);
-
     memset( &hdr, 0, sizeof(hdr) );
-    if (async->addr && sock_type != SOCK_STREAM)
+    if (async->addr)
     {
         hdr.msg_name = &unix_addr;
         hdr.msg_namelen = sockaddr_to_unix( async->addr, async->addr_len, &unix_addr );
@@ -1062,6 +1059,21 @@ static NTSTATUS try_send( int fd, struct async_send_ioctl *async )
     return STATUS_SUCCESS;
 }
 
+static void hack_update_status( HANDLE handle, unsigned int *status )
+{
+    /* HACK: VRChat relies on send() reporting STATUS_SUCCESS for dropped UDP sockets when the
+     * network is actually lost but network adapters are still up on Windows. Fix VRChat internal
+     * error bug when resuming from sleep */
+    const char *appid;
+
+    if (*status == STATUS_NETWORK_UNREACHABLE && get_sock_type( handle ) == SOCK_DGRAM
+        && (appid = getenv( "SteamAppId" )) && !strcmp( appid, "438100" ))
+    {
+        WARN( "Replacing STATUS_NETWORK_UNREACHABLE with STATUS_SUCCESS for VRChat.\n" );
+        *status = STATUS_SUCCESS;
+    }
+}
+
 static BOOL async_send_proc( void *user, ULONG_PTR *info, unsigned int *status )
 {
     struct async_send_ioctl *async = user;
@@ -1076,6 +1088,7 @@ static BOOL async_send_proc( void *user, ULONG_PTR *info, unsigned int *status )
 
         *status = try_send( fd, async );
         TRACE( "got status %#x\n", *status );
+        hack_update_status( async->io.handle, status );
 
         if (needs_close) close( fd );
 
@@ -1142,6 +1155,8 @@ static NTSTATUS sock_send( HANDLE handle, HANDLE event, PIO_APC_ROUTINE apc, voi
         ULONG_PTR information;
 
         status = try_send( fd, async );
+        hack_update_status( handle, &status );
+
         if (status == STATUS_DEVICE_NOT_READY && (force_async || !nonblocking))
             status = STATUS_PENDING;
 
@@ -1211,7 +1226,6 @@ static NTSTATUS sock_ioctl_send( HANDLE handle, HANDLE event, PIO_APC_ROUTINE ap
 
     return sock_send( handle, event, apc, apc_user, io, fd, async, force_async );
 }
-
 
 NTSTATUS sock_write( HANDLE handle, int fd, HANDLE event, PIO_APC_ROUTINE apc,
                      void *apc_user, IO_STATUS_BLOCK *io, const void *buffer, ULONG length )
@@ -1554,32 +1568,10 @@ NTSTATUS sock_ioctl( HANDLE handle, HANDLE event, PIO_APC_ROUTINE apc, void *apc
         }
 
         case IOCTL_AFD_GET_EVENTS:
-        {
-            struct afd_get_events_params *params = out_buffer;
-            HANDLE reset_event = in_buffer; /* sic */
-
-            TRACE( "reset_event %p\n", reset_event );
             if (in_size) FIXME( "unexpected input size %u\n", in_size );
 
-            if (out_size < sizeof(*params))
-            {
-                status = STATUS_INVALID_PARAMETER;
-                break;
-            }
-
-            SERVER_START_REQ( socket_get_events )
-            {
-                req->handle = wine_server_obj_handle( handle );
-                req->event = wine_server_obj_handle( reset_event );
-                wine_server_set_reply( req, params->status, sizeof(params->status) );
-                if (!(status = wine_server_call( req )))
-                    params->flags = reply->flags;
-            }
-            SERVER_END_REQ;
-
-            complete_async( handle, event, apc, apc_user, io, status, 0 );
-            return status;
-        }
+            status = STATUS_BAD_DEVICE_TYPE;
+            break;
 
         case IOCTL_AFD_POLL:
             status = STATUS_BAD_DEVICE_TYPE;
@@ -1939,10 +1931,30 @@ NTSTATUS sock_ioctl( HANDLE handle, HANDLE event, PIO_APC_ROUTINE apc, void *apc
         }
 
         case IOCTL_AFD_WINE_GETPEERNAME:
-            if (in_size) FIXME( "unexpected input size %u\n", in_size );
+        {
+            union unix_sockaddr unix_addr;
+            socklen_t unix_len = sizeof(unix_addr);
+            int len;
 
-            status = STATUS_BAD_DEVICE_TYPE;
+            if ((status = server_get_unix_fd( handle, 0, &fd, &needs_close, NULL, NULL )))
+                return status;
+
+            if (getpeername( fd, &unix_addr.addr, &unix_len ) < 0)
+            {
+                status = sock_errno_to_status( errno );
+                break;
+            }
+
+            len = sockaddr_from_unix( &unix_addr, out_buffer, out_size );
+            if (out_size < len)
+            {
+                status = STATUS_BUFFER_TOO_SMALL;
+                break;
+            }
+            io->Information = len;
+            status = STATUS_SUCCESS;
             break;
+        }
 
         case IOCTL_AFD_WINE_GET_SO_BROADCAST:
             return do_getsockopt( handle, io, SOL_SOCKET, SO_BROADCAST, out_buffer, out_size );
@@ -1998,15 +2010,11 @@ NTSTATUS sock_ioctl( HANDLE handle, HANDLE event, PIO_APC_ROUTINE apc, void *apc
         case IOCTL_AFD_WINE_SET_IP_ADD_MEMBERSHIP:
             return do_setsockopt( handle, io, IPPROTO_IP, IP_ADD_MEMBERSHIP, in_buffer, in_size );
 
-#ifdef IP_ADD_SOURCE_MEMBERSHIP
         case IOCTL_AFD_WINE_SET_IP_ADD_SOURCE_MEMBERSHIP:
             return do_setsockopt( handle, io, IPPROTO_IP, IP_ADD_SOURCE_MEMBERSHIP, in_buffer, in_size );
-#endif
 
-#ifdef IP_BLOCK_SOURCE
         case IOCTL_AFD_WINE_SET_IP_BLOCK_SOURCE:
             return do_setsockopt( handle, io, IPPROTO_IP, IP_BLOCK_SOURCE, in_buffer, in_size );
-#endif
 
         case IOCTL_AFD_WINE_GET_IP_DONTFRAGMENT:
         {
@@ -2070,10 +2078,8 @@ NTSTATUS sock_ioctl( HANDLE handle, HANDLE event, PIO_APC_ROUTINE apc, void *apc
         case IOCTL_AFD_WINE_SET_IP_DROP_MEMBERSHIP:
             return do_setsockopt( handle, io, IPPROTO_IP, IP_DROP_MEMBERSHIP, in_buffer, in_size );
 
-#ifdef IP_ADD_SOURCE_MEMBERSHIP
         case IOCTL_AFD_WINE_SET_IP_DROP_SOURCE_MEMBERSHIP:
             return do_setsockopt( handle, io, IPPROTO_IP, IP_DROP_SOURCE_MEMBERSHIP, in_buffer, in_size );
-#endif
 
 #ifdef IP_HDRINCL
         case IOCTL_AFD_WINE_GET_IP_HDRINCL:
@@ -2207,10 +2213,8 @@ NTSTATUS sock_ioctl( HANDLE handle, HANDLE event, PIO_APC_ROUTINE apc, void *apc
         case IOCTL_AFD_WINE_SET_IP_TTL:
             return do_setsockopt( handle, io, IPPROTO_IP, IP_TTL, in_buffer, in_size );
 
-#ifdef IP_UNBLOCK_SOURCE
         case IOCTL_AFD_WINE_SET_IP_UNBLOCK_SOURCE:
             return do_setsockopt( handle, io, IPPROTO_IP, IP_UNBLOCK_SOURCE, in_buffer, in_size );
-#endif
 
 #ifdef IP_UNICAST_IF
         case IOCTL_AFD_WINE_GET_IP_UNICAST_IF:
@@ -2417,7 +2421,6 @@ NTSTATUS sock_ioctl( HANDLE handle, HANDLE event, PIO_APC_ROUTINE apc, void *apc
             break;
         }
 
-#ifdef HAS_IPX
 #ifdef SOL_IPX
         case IOCTL_AFD_WINE_GET_IPX_PTYPE:
             return do_getsockopt( handle, io, SOL_IPX, IPX_TYPE, out_buffer, out_size );
@@ -2455,7 +2458,6 @@ NTSTATUS sock_ioctl( HANDLE handle, HANDLE event, PIO_APC_ROUTINE apc, void *apc
             value.ipx_pt = *(DWORD *)in_buffer;
             return do_setsockopt( handle, io, 0, SO_DEFAULT_HEADERS, &value, sizeof(value) );
         }
-#endif
 #endif
 
 #ifdef HAS_IRDA
@@ -2506,34 +2508,6 @@ NTSTATUS sock_ioctl( HANDLE handle, HANDLE event, PIO_APC_ROUTINE apc, void *apc
 
         case IOCTL_AFD_WINE_SET_TCP_NODELAY:
             return do_setsockopt( handle, io, IPPROTO_TCP, TCP_NODELAY, in_buffer, in_size );
-
-#if defined(TCP_KEEPIDLE)
-        /* TCP_KEEPALIVE on Windows is often called TCP_KEEPIDLE on Unix */
-        case IOCTL_AFD_WINE_GET_TCP_KEEPALIVE:
-            return do_getsockopt( handle, io, IPPROTO_TCP, TCP_KEEPIDLE, out_buffer, out_size );
-
-        case IOCTL_AFD_WINE_SET_TCP_KEEPALIVE:
-            return do_setsockopt( handle, io, IPPROTO_TCP, TCP_KEEPIDLE, in_buffer, in_size );
-#elif defined(TCP_KEEPALIVE)
-        /* Mac */
-        case IOCTL_AFD_WINE_GET_TCP_KEEPALIVE:
-            return do_getsockopt( handle, io, IPPROTO_TCP, TCP_KEEPALIVE, out_buffer, out_size );
-
-        case IOCTL_AFD_WINE_SET_TCP_KEEPALIVE:
-            return do_setsockopt( handle, io, IPPROTO_TCP, TCP_KEEPALIVE, in_buffer, in_size );
-#endif
-
-        case IOCTL_AFD_WINE_GET_TCP_KEEPINTVL:
-            return do_getsockopt( handle, io, IPPROTO_TCP, TCP_KEEPINTVL, out_buffer, out_size );
-
-        case IOCTL_AFD_WINE_SET_TCP_KEEPINTVL:
-            return do_setsockopt( handle, io, IPPROTO_TCP, TCP_KEEPINTVL, in_buffer, in_size );
-
-        case IOCTL_AFD_WINE_GET_TCP_KEEPCNT:
-            return do_getsockopt( handle, io, IPPROTO_TCP, TCP_KEEPCNT, out_buffer, out_size );
-
-        case IOCTL_AFD_WINE_SET_TCP_KEEPCNT:
-            return do_setsockopt( handle, io, IPPROTO_TCP, TCP_KEEPCNT, in_buffer, in_size );
 
         default:
         {

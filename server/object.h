@@ -143,12 +143,12 @@ struct wait_queue_entry
     struct thread_wait *wait;
 };
 
-extern void *mem_alloc( size_t size ) __WINE_ALLOC_SIZE(1) __WINE_DEALLOC(free) __WINE_MALLOC;
-extern void *memdup( const void *data, size_t len ) __WINE_ALLOC_SIZE(2) __WINE_DEALLOC(free);
+extern void *mem_alloc( size_t size );  /* malloc wrapper */
+extern void *memdup( const void *data, size_t len );
 extern void *alloc_object( const struct object_ops *ops );
 extern void namespace_add( struct namespace *namespace, struct object_name *ptr );
 extern const WCHAR *get_object_name( struct object *obj, data_size_t *len );
-extern WCHAR *default_get_full_name( struct object *obj, data_size_t *ret_len ) __WINE_DEALLOC(free) __WINE_MALLOC;
+extern WCHAR *default_get_full_name( struct object *obj, data_size_t *ret_len );
 extern void dump_object_name( struct object *obj );
 extern struct object *lookup_named_object( struct object *root, const struct unicode_str *name,
                                            unsigned int attr, struct unicode_str *name_left );
@@ -260,7 +260,6 @@ static inline int is_machine_supported( unsigned short machine )
 {
     unsigned int i;
     for (i = 0; i < supported_machines_count; i++) if (supported_machines[i] == machine) return 1;
-    if (native_machine == IMAGE_FILE_MACHINE_ARM64) return machine == IMAGE_FILE_MACHINE_AMD64;
     return 0;
 }
 
@@ -284,6 +283,10 @@ extern struct object *get_root_directory(void);
 extern struct object *get_directory_obj( struct process *process, obj_handle_t handle );
 extern int directory_link_name( struct object *obj, struct object_name *name, struct object *parent );
 extern void init_directories( struct fd *intl_fd );
+
+/* thread functions */
+
+extern void init_threading(void);
 
 /* symbolic link functions */
 

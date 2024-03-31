@@ -1,7 +1,7 @@
 MODULE    = winemapi.dll
 IMPORTS   = shlwapi shell32 mapi32
 
-SOURCES = \
+C_SRCS = \
 	main.c \
 	sendmail.c \
 	xdg-email.c

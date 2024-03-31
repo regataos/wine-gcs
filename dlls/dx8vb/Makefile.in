@@ -3,7 +3,9 @@ IMPORTS   = uuid ole32
 
 EXTRADLLFLAGS = -Wb,--prefer-native
 
-SOURCES = \
-	dx8vb.idl \
-	main.c \
-	version.rc
+C_SRCS = \
+	main.c
+
+IDL_SRCS = dx8vb.idl
+
+RC_SRCS = version.rc

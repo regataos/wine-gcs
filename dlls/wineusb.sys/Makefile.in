@@ -6,7 +6,8 @@ UNIX_CFLAGS  = $(USB_CFLAGS)
 
 EXTRADLLFLAGS = -Wl,--subsystem,native
 
-SOURCES = \
+C_SRCS = \
 	unixlib.c \
-	wineusb.c \
-	wineusb.rc
+	wineusb.c
+
+RC_SRCS = wineusb.rc

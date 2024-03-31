@@ -20,6 +20,7 @@
 
 #include <stdarg.h>
 
+#define NONAMELESSUNION
 #include "windef.h"
 #include "atsvc.h"
 #include "mstask.h"

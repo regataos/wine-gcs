@@ -813,7 +813,7 @@ static BOOL ANIMATE_Create(HWND hWnd, const CREATESTRUCTW *lpcs)
 
     TRACE("Animate style %#lx, parent %p\n", infoPtr->dwStyle, infoPtr->hwndNotify);
 
-    InitializeCriticalSectionEx(&infoPtr->cs, 0, RTL_CRITICAL_SECTION_FLAG_FORCE_DEBUG_INFO);
+    InitializeCriticalSection(&infoPtr->cs);
     infoPtr->cs.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": ANIMATE_INFO*->cs");
 
     return TRUE;

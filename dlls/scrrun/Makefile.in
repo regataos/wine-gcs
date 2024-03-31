@@ -4,9 +4,11 @@ IMPORTS   = uuid oleaut32 version advapi32
 
 EXTRADLLFLAGS = -Wb,--prefer-native
 
-SOURCES = \
+C_SRCS = \
 	dictionary.c \
 	filesystem.c \
-	scrrun.c \
-	scrrun.idl \
-	scrrun.rc
+	scrrun.c
+
+RC_SRCS = scrrun.rc
+
+IDL_SRCS = scrrun.idl

@@ -91,13 +91,6 @@ XSLTPUBFUN const xmlChar * XSLTCALL
 XSLTPUBFUN int XSLTCALL
 		xsltGetUTF8Char	(const unsigned char *utf,
 				 int *len);
-#ifdef IN_LIBXSLT
-/** DOC_DISABLE */
-XSLTPUBFUN int XSLTCALL
-		xsltGetUTF8CharZ (const unsigned char *utf,
-				  int *len);
-/** DOC_ENABLE */
-#endif
 
 /*
  * XSLT Debug Tracing Tracing Types
@@ -164,7 +157,7 @@ XSLTPUBFUN void XSLTCALL
 		xsltSetTransformErrorFunc	(xsltTransformContextPtr ctxt,
 						 void *ctx,
 						 xmlGenericErrorFunc handler);
-XSLTPUBFUN void XSLTCALL
+XSLTPUBFUN void WINAPIV
 		xsltTransformError		(xsltTransformContextPtr ctxt,
 						 xsltStylesheetPtr style,
 						 xmlNodePtr node,
@@ -185,11 +178,6 @@ XSLTPUBFUN void XSLTCALL
 XSLTPUBFUN void XSLTCALL
 		xsltSetCtxtSortFunc		(xsltTransformContextPtr ctxt,
 						 xsltSortFunc handler);
-XSLTPUBFUN void XSLTCALL
-		xsltSetCtxtLocaleHandlers	(xsltTransformContextPtr ctxt,
-						 xsltNewLocaleFunc newLocale,
-						 xsltFreeLocaleFunc freeLocale,
-						 xsltGenSortKeyFunc genSortKey);
 XSLTPUBFUN void XSLTCALL
 		xsltDefaultSortFunction		(xsltTransformContextPtr ctxt,
 						 xmlNodePtr *sorts,
@@ -256,24 +244,6 @@ XSLTPUBFUN xmlXPathCompExprPtr XSLTCALL
 						 const xmlChar *str,
 						 int flags);
 
-#ifdef IN_LIBXSLT
-/** DOC_DISABLE */
-#define XSLT_SOURCE_NODE_MASK       15u
-#define XSLT_SOURCE_NODE_HAS_KEY    1u
-#define XSLT_SOURCE_NODE_HAS_ID     2u
-int
-xsltGetSourceNodeFlags(xmlNodePtr node);
-int
-xsltSetSourceNodeFlags(xsltTransformContextPtr ctxt, xmlNodePtr node,
-                       int flags);
-int
-xsltClearSourceNodeFlags(xmlNodePtr node, int flags);
-void **
-xsltGetPSVIPtr(xmlNodePtr cur);
-/** DOC_ENABLE */
-#endif
-
-#ifdef WITH_PROFILER
 /*
  * Profiling.
  */
@@ -287,7 +257,6 @@ XSLTPUBFUN long XSLTCALL
 		xsltTimestamp			(void);
 XSLTPUBFUN void XSLTCALL
 		xsltCalibrateAdjust		(long delta);
-#endif
 
 /**
  * XSLT_TIMESTAMP_TICS_PER_SEC:
@@ -320,11 +289,10 @@ typedef void (*xsltHandleDebuggerCallback) (xmlNodePtr cur, xmlNodePtr node,
 typedef int (*xsltAddCallCallback) (xsltTemplatePtr templ, xmlNodePtr source);
 typedef void (*xsltDropCallCallback) (void);
 
-XSLTPUBFUN int XSLTCALL
-		xsltGetDebuggerStatus		(void);
-#ifdef WITH_DEBUGGER
 XSLTPUBFUN void XSLTCALL
 		xsltSetDebuggerStatus		(int value);
+XSLTPUBFUN int XSLTCALL
+		xsltGetDebuggerStatus		(void);
 XSLTPUBFUN int XSLTCALL
 		xsltSetDebuggerCallbacks	(int no, void *block);
 XSLTPUBFUN int XSLTCALL
@@ -332,10 +300,11 @@ XSLTPUBFUN int XSLTCALL
 						 xmlNodePtr source);
 XSLTPUBFUN void XSLTCALL
 		xslDropCall			(void);
-#endif
 
 #ifdef __cplusplus
 }
 #endif
 
 #endif /* __XML_XSLTUTILS_H__ */
+
+

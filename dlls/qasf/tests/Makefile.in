@@ -1,7 +1,8 @@
 TESTDLL   = qasf.dll
 IMPORTS   = strmbase dmoguids strmiids uuid msdmo ole32
 
-SOURCES = \
+C_SRCS = \
 	asfreader.c \
-	dmowrapper.c \
-	resource.rc
+	dmowrapper.c
+
+RC_SRCS = resource.rc

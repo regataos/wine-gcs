@@ -30,7 +30,6 @@
 #define SKIP_TYPE_DECLS
 #include "server_interp.h"
 #include "server_defines.h"
-#include "explicit_handle.h"
 
 #include <stddef.h>
 #include <stdio.h>
@@ -285,13 +284,21 @@ static void InitFunctionPointers(void)
 void __RPC_FAR *__RPC_USER
 midl_user_allocate(SIZE_T n)
 {
-  return malloc(n);
+  return HeapAlloc(GetProcessHeap(), 0, n);
 }
 
 void __RPC_USER
 midl_user_free(void __RPC_FAR *p)
 {
-  free(p);
+  HeapFree(GetProcessHeap(), 0, p);
+}
+
+static char *
+xstrdup(const char *s)
+{
+  char *d = HeapAlloc(GetProcessHeap(), 0, strlen(s) + 1);
+  strcpy(d, s);
+  return d;
 }
 
 int __cdecl s_int_return(void)
@@ -793,7 +800,7 @@ void __cdecl s_get_a_bstr(bstr_t *b)
 {
   bstr_t bstr;
   short str[] = {5, 'W', 'i', 'n', 'e', 0};
-  bstr = malloc(sizeof(str));
+  bstr = HeapAlloc(GetProcessHeap(), 0, sizeof(str));
   memcpy(bstr, str, sizeof(str));
   *b = bstr + 1;
 }
@@ -1195,30 +1202,6 @@ void __cdecl s_test_I_RpcBindingInqLocalClientPID(unsigned int protseq, RPC_BIND
     winetest_pop_context();
 }
 
-int __cdecl s_add(handle_t binding, int a, int b)
-{
-  ok(binding != NULL, "explicit handle is NULL\n");
-  return a + b;
-}
-
-int __cdecl s_getNum(int a, handle_t binding)
-{
-  ok(binding != NULL, "explicit handle is NULL\n");
-  return a + 2;
-}
-
-void __cdecl s_Shutdown(handle_t binding)
-{
-    RPC_STATUS status;
-    ULONG pid = 0;
-    ok(binding != NULL, "explicit handle is NULL\n");
-
-    status = I_RpcBindingInqLocalClientPID(binding, &pid);
-    ok(status == RPC_S_OK, "Got unexpected %ld.\n", status);
-    ok(pid == client_info.dwProcessId, "Got unexpected pid: %ld client pid: %ld.\n", pid, client_info.dwProcessId);
-    ok(SetEvent(stop_event), "SetEvent\n");
-}
-
 void __RPC_USER ctx_handle_t_rundown(ctx_handle_t ctx_handle)
 {
     ok(ctx_handle == (ctx_handle_t)0xdeadbeef, "Unexpected ctx_handle %p\n", ctx_handle);
@@ -1482,7 +1465,7 @@ union_tests(void)
 static test_list_t *
 null_list(void)
 {
-  test_list_t *n = malloc(sizeof *n);
+  test_list_t *n = HeapAlloc(GetProcessHeap(), 0, sizeof *n);
   n->t = TL_NULL;
   n->u.x = 0;
   return n;
@@ -1491,7 +1474,7 @@ null_list(void)
 static test_list_t *
 make_list(test_list_t *tail)
 {
-  test_list_t *n = malloc(sizeof *n);
+  test_list_t *n = HeapAlloc(GetProcessHeap(), 0, sizeof *n);
   n->t = TL_LIST;
   n->u.tail = tail;
   return n;
@@ -1502,7 +1485,7 @@ free_list(test_list_t *list)
 {
   if (list->t == TL_LIST)
     free_list(list->u.tail);
-  free(list);
+  HeapFree(GetProcessHeap(), 0, list);
 }
 
 ULONG __RPC_USER
@@ -1524,7 +1507,7 @@ puint_t_UserUnmarshal(ULONG *flags, unsigned char *buffer, puint_t *p)
 {
   int n;
   memcpy(&n, buffer, sizeof n);
-  *p = malloc(10);
+  *p = HeapAlloc(GetProcessHeap(), 0, 10);
   sprintf(*p, "%d", n);
   return buffer + sizeof n;
 }
@@ -1532,7 +1515,7 @@ puint_t_UserUnmarshal(ULONG *flags, unsigned char *buffer, puint_t *p)
 void __RPC_USER
 puint_t_UserFree(ULONG *flags, puint_t *p)
 {
-  free(*p);
+  HeapFree(GetProcessHeap(), 0, *p);
 }
 
 ULONG __RPC_USER
@@ -1555,7 +1538,7 @@ us_t_UserUnmarshal(ULONG *flags, unsigned char *buffer, us_t *pus)
 {
   struct wire_us wus;
   memcpy(&wus, buffer, sizeof wus);
-  pus->x = malloc(10);
+  pus->x = HeapAlloc(GetProcessHeap(), 0, 10);
   sprintf(pus->x, "%d", wus.x);
   return buffer + sizeof wus;
 }
@@ -1563,7 +1546,7 @@ us_t_UserUnmarshal(ULONG *flags, unsigned char *buffer, us_t *pus)
 void __RPC_USER
 us_t_UserFree(ULONG *flags, us_t *pus)
 {
-  free(pus->x);
+  HeapFree(GetProcessHeap(), 0, pus->x);
 }
 
 ULONG __RPC_USER
@@ -1585,7 +1568,7 @@ unsigned char * __RPC_USER
 bstr_t_UserUnmarshal(ULONG *flags, unsigned char *buffer, bstr_t *b)
 {
   wire_bstr_t wb = (wire_bstr_t) buffer;
-  short *data = malloc((wb->n + 1) * sizeof *data);
+  short *data = HeapAlloc(GetProcessHeap(), 0, (wb->n + 1) * sizeof *data);
   data[0] = wb->n;
   memcpy(&data[1], wb->data, wb->n * sizeof data[1]);
   *b = &data[1];
@@ -1595,7 +1578,7 @@ bstr_t_UserUnmarshal(ULONG *flags, unsigned char *buffer, bstr_t *b)
 void __RPC_USER
 bstr_t_UserFree(ULONG *flags, bstr_t *b)
 {
-  free(&((*b)[-1]));
+  HeapFree(GetProcessHeap(), 0, &((*b)[-1]));
 }
 
 static void
@@ -1619,29 +1602,29 @@ pointer_tests(void)
   ok(test_list_length(list) == 3, "RPC test_list_length\n");
   ok(square_puint(p1) == 121, "RPC square_puint\n");
   pus.n = 4;
-  pus.ps = malloc(pus.n * sizeof pus.ps[0]);
-  pus.ps[0] = strdup("5");
-  pus.ps[1] = strdup("6");
-  pus.ps[2] = strdup("7");
-  pus.ps[3] = strdup("8");
+  pus.ps = HeapAlloc(GetProcessHeap(), 0, pus.n * sizeof pus.ps[0]);
+  pus.ps[0] = xstrdup("5");
+  pus.ps[1] = xstrdup("6");
+  pus.ps[2] = xstrdup("7");
+  pus.ps[3] = xstrdup("8");
   ok(sum_puints(&pus) == 26, "RPC sum_puints\n");
-  free(pus.ps[0]);
-  free(pus.ps[1]);
-  free(pus.ps[2]);
-  free(pus.ps[3]);
-  free(pus.ps);
+  HeapFree(GetProcessHeap(), 0, pus.ps[0]);
+  HeapFree(GetProcessHeap(), 0, pus.ps[1]);
+  HeapFree(GetProcessHeap(), 0, pus.ps[2]);
+  HeapFree(GetProcessHeap(), 0, pus.ps[3]);
+  HeapFree(GetProcessHeap(), 0, pus.ps);
   cpus.n = 4;
-  cpus.ps = malloc(cpus.n * sizeof cpus.ps[0]);
-  cpus.ps[0] = strdup("5");
-  cpus.ps[1] = strdup("6");
-  cpus.ps[2] = strdup("7");
-  cpus.ps[3] = strdup("8");
+  cpus.ps = HeapAlloc(GetProcessHeap(), 0, cpus.n * sizeof cpus.ps[0]);
+  cpus.ps[0] = xstrdup("5");
+  cpus.ps[1] = xstrdup("6");
+  cpus.ps[2] = xstrdup("7");
+  cpus.ps[3] = xstrdup("8");
   ok(sum_cpuints(&cpus) == 26, "RPC sum_puints\n");
-  free(cpus.ps[0]);
-  free(cpus.ps[1]);
-  free(cpus.ps[2]);
-  free(cpus.ps[3]);
-  free(cpus.ps);
+  HeapFree(GetProcessHeap(), 0, cpus.ps[0]);
+  HeapFree(GetProcessHeap(), 0, cpus.ps[1]);
+  HeapFree(GetProcessHeap(), 0, cpus.ps[2]);
+  HeapFree(GetProcessHeap(), 0, cpus.ps[3]);
+  HeapFree(GetProcessHeap(), 0, cpus.ps);
   ok(square_test_us(&tus) == 121, "RPC square_test_us\n");
 
   pa[0] = &a[0];
@@ -1660,8 +1643,8 @@ pointer_tests(void)
   get_a_bstr(&bstr);
   s_get_a_bstr(&bstr2);
   ok(!lstrcmpW((LPCWSTR)bstr, (LPCWSTR)bstr2), "bstr mismatch\n");
-  free(bstr - 1);
-  free(bstr2 - 1);
+  HeapFree(GetProcessHeap(), 0, bstr - 1);
+  HeapFree(GetProcessHeap(), 0, bstr2 - 1);
 
   free_list(list);
 
@@ -1672,11 +1655,11 @@ pointer_tests(void)
       wstr_array_t namesw;
 
       name.size = 10;
-      name.name = buffer = calloc(1, name.size);
+      name.name = buffer = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, name.size);
       get_name(&name);
       ok(name.name == buffer, "[in,out] pointer should have stayed as %p but instead changed to %p\n", name.name, buffer);
       ok(!strcmp(name.name, "Jeremy Wh"), "name didn't unmarshall properly, expected \"Jeremy Wh\", but got \"%s\"\n", name.name);
-      free(name.name);
+      HeapFree(GetProcessHeap(), 0, name.name);
 
       if (!is_interp) { /* broken in widl */
       n = -1;
@@ -1795,7 +1778,7 @@ array_tests(void)
   ok(sum_var_array(&c[2], 0) == 0, "RPC sum_conf_array\n");
 
   ok(dot_two_vectors(vs) == -4, "RPC dot_two_vectors\n");
-  cs = malloc(FIELD_OFFSET(cs_t, ca[5]));
+  cs = HeapAlloc(GetProcessHeap(), 0, FIELD_OFFSET(cs_t, ca[5]));
   cs->n = 5;
   cs->ca[0] = 3;
   cs->ca[1] = 5;
@@ -1803,7 +1786,7 @@ array_tests(void)
   cs->ca[3] = -1;
   cs->ca[4] = -4;
   ok(sum_cs(cs) == 1, "RPC sum_cs\n");
-  free(cs);
+  HeapFree(GetProcessHeap(), 0, cs);
 
   n = 5;
   cps.pn = &n;
@@ -1839,21 +1822,21 @@ array_tests(void)
   ok(sum_toplev_conf_cond(c, 5, 6, 1) == 10, "RPC sum_toplev_conf_cond\n");
   ok(sum_toplev_conf_cond(c, 5, 6, 0) == 15, "RPC sum_toplev_conf_cond\n");
 
-  dc = malloc(FIELD_OFFSET(doub_carr_t, a[2]));
+  dc = HeapAlloc(GetProcessHeap(), 0, FIELD_OFFSET(doub_carr_t, a[2]));
   dc->n = 2;
-  dc->a[0] = malloc(sizeof(doub_carr_1_t) + 3);
+  dc->a[0] = HeapAlloc(GetProcessHeap(), 0, FIELD_OFFSET(doub_carr_1_t, a[3]));
   dc->a[0]->n = 3;
   dc->a[0]->a[0] = 5;
   dc->a[0]->a[1] = 1;
   dc->a[0]->a[2] = 8;
-  dc->a[1] = malloc(sizeof(doub_carr_1_t) + 2);
+  dc->a[1] = HeapAlloc(GetProcessHeap(), 0, FIELD_OFFSET(doub_carr_1_t, a[2]));
   dc->a[1]->n = 2;
   dc->a[1]->a[0] = 2;
   dc->a[1]->a[1] = 3;
   ok(sum_doub_carr(dc) == 19, "RPC sum_doub_carr\n");
-  free(dc->a[0]);
-  free(dc->a[1]);
-  free(dc);
+  HeapFree(GetProcessHeap(), 0, dc->a[0]);
+  HeapFree(GetProcessHeap(), 0, dc->a[1]);
+  HeapFree(GetProcessHeap(), 0, dc);
 
   dc = NULL;
   make_pyramid_doub_carr(4, &dc);
@@ -1863,7 +1846,7 @@ array_tests(void)
   ok(sum_L1_norms(2, vs) == 21, "RPC sum_L1_norms\n");
 
   memset(api, 0, sizeof(api));
-  pi = malloc(sizeof(*pi));
+  pi = HeapAlloc(GetProcessHeap(), 0, sizeof(*pi));
   *pi = -1;
   api[0].pi = pi;
   get_numbers(1, 1, api);
@@ -1872,25 +1855,25 @@ array_tests(void)
 
   if (!old_windows_version)
   {
-      ns = calloc(1, FIELD_OFFSET(numbers_struct_t, numbers[5]));
+      ns = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, FIELD_OFFSET(numbers_struct_t, numbers[5]));
       ns->length = 5;
       ns->size = 5;
       ns->numbers[0].pi = pi;
       get_numbers_struct(&ns);
       ok(ns->numbers[0].pi == pi, "RPC conformant varying struct embedded pointer changed from %p to %p\n", pi, ns->numbers[0].pi);
       ok(*ns->numbers[0].pi == 5, "pi unmarshalled incorrectly %d\n", *ns->numbers[0].pi);
-      free(ns);
+      HeapFree(GetProcessHeap(), 0, ns);
   }
-  free(pi);
+  HeapFree(GetProcessHeap(), 0, pi);
 
-  pi = malloc(5 * sizeof(*pi));
+  pi = HeapAlloc(GetProcessHeap(), 0, 5 * sizeof(*pi));
   pi[0] = 3;  rpi[0] = &pi[0];
   pi[1] = 5;  rpi[1] = &pi[1];
   pi[2] = -2; rpi[2] = &pi[2];
   pi[3] = -1; rpi[3] = &pi[3];
   pi[4] = -4; rpi[4] = &pi[4];
   ok(sum_complex_array(5, rpi) == 1, "RPC sum_complex_array\n");
-  free(pi);
+  HeapFree(GetProcessHeap(), 0, pi);
 
   ok(sum_ptr_array(ptr_array) == 3, "RPC sum_ptr_array\n");
   ok(sum_array_ptr(&array) == 7, "RPC sum_array_ptr\n");
@@ -1948,11 +1931,11 @@ void __cdecl s_authinfo_test(unsigned int protseq, int secure)
             char *spn;
 
             len = WideCharToMultiByte(CP_ACP, 0, (const WCHAR *)privs, -1, NULL, 0, NULL, NULL);
-            spn = malloc(len);
+            spn = HeapAlloc( GetProcessHeap(), 0, len );
             WideCharToMultiByte(CP_ACP, 0, (const WCHAR *)privs, -1, spn, len, NULL, NULL);
 
             ok(!strcmp(domain_and_user, spn), "expected %s got %s\n", domain_and_user, spn);
-            free(spn);
+            HeapFree( GetProcessHeap(), 0, spn );
         }
         ok(level == RPC_C_AUTHN_LEVEL_PKT_PRIVACY, "level unchanged\n");
         ok(authnsvc == RPC_C_AUTHN_WINNT, "authnsvc unchanged\n");
@@ -2051,7 +2034,6 @@ client(const char *test)
   static unsigned char port[] = PORT;
   static unsigned char pipe[] = PIPE;
   static unsigned char guid[] = "00000000-4114-0704-2301-000000000000";
-  static unsigned char explicit_handle_guid[] = "00000000-4114-0704-2301-000000000002";
 
   unsigned char *binding;
 
@@ -2156,21 +2138,6 @@ client(const char *test)
     ok(RPC_S_OK == RpcStringFreeA(&binding), "RpcStringFree\n");
     ok(RPC_S_OK == RpcBindingFree(&IInterpServer_IfHandle), "RpcBindingFree\n");
   }
-  else if (strcmp(test, "explicit_handle") == 0)
-  {
-    IMixedServer_IfHandle = NULL;
-    ok(RPC_S_OK == RpcStringBindingComposeA(NULL, ncalrpc, NULL, explicit_handle_guid, NULL, &binding), "RpcStringBindingCompose\n");
-    ok(RPC_S_OK == RpcBindingFromStringBindingA(binding, &IMixedServer_IfHandle), "RpcBindingFromStringBinding\n");
-
-    test_is_server_listening(IMixedServer_IfHandle, RPC_S_OK);
-
-    ok(add(IMixedServer_IfHandle, 2, 3) == 5, "RPC add\n");
-    ok(getNum(7, IMixedServer_IfHandle) == 9, "RPC getNum\n");
-    Shutdown(IMixedServer_IfHandle);
-
-    ok(RPC_S_OK == RpcStringFreeA(&binding), "RpcStringFree\n");
-    ok(RPC_S_OK == RpcBindingFree(&IMixedServer_IfHandle), "RpcBindingFree\n");
-  }
 }
 
 static void
@@ -2182,7 +2149,6 @@ server(void)
   static unsigned char pipe[] = PIPE;
   static unsigned char ncalrpc[] = "ncalrpc";
   static unsigned char guid[] = "00000000-4114-0704-2301-000000000000";
-  static unsigned char explicit_handle_guid[] = "00000000-4114-0704-2301-000000000002";
   RPC_STATUS status, iptcp_status, np_status, ncalrpc_status;
   DWORD ret;
 
@@ -2280,51 +2246,6 @@ server(void)
     status = RpcServerUnregisterIf(s_IMixedServer_v0_0_s_ifspec, NULL, TRUE);
     ok(status == RPC_S_OK, "RpcServerUnregisterIf() failed: %lu\n", status);
   }
-
-  /* explicit handle */
-  stop_event = CreateEventW(NULL, FALSE, FALSE, NULL);
-  ok(stop_event != NULL, "CreateEvent failed with error %ld\n", GetLastError());
-
-  ncalrpc_status = RpcServerUseProtseqEpA(ncalrpc, 0, explicit_handle_guid, NULL);
-  if (ncalrpc_status == RPC_S_PROTSEQ_NOT_SUPPORTED)
-    skip("Protocol sequence ncacn_np is not supported\n");
-  else
-    ok(ncalrpc_status == RPC_S_OK, "RpcServerUseProtseqEp(ncacn_np) failed with status %ld\n", ncalrpc_status);
-
-  if (pRpcServerRegisterIfEx)
-  {
-    trace("Using RpcServerRegisterIfEx\n");
-    status = pRpcServerRegisterIfEx(s_RPCExplicitHandle_v0_0_s_ifspec, NULL, NULL,
-                                    RPC_IF_ALLOW_CALLBACKS_WITH_NO_AUTH,
-                                    RPC_C_LISTEN_MAX_CALLS_DEFAULT, NULL);
-    ok(status == RPC_S_OK, "RpcServerRegisterIfEx failed with status %ld\n", status);
-    test_is_server_listening(NULL, RPC_S_NOT_LISTENING);
-    status = RpcServerListen(1, RPC_C_LISTEN_MAX_CALLS_DEFAULT, TRUE);
-    ok(status == RPC_S_OK, "RpcServerListen failed with status %ld\n", status);
-  }
-  else
-  {
-    status = RpcServerRegisterIf(s_RPCExplicitHandle_v0_0_s_ifspec, NULL, NULL);
-    ok(status == RPC_S_OK, "RpcServerRegisterIf failed with status %ld\n", status);
-    status = RpcServerListen(1, RPC_C_LISTEN_MAX_CALLS_DEFAULT, TRUE);
-    ok(status == RPC_S_OK, "RpcServerListen failed with status %ld\n", status);
-  }
-
-  test_is_server_listening(NULL, RPC_S_OK);
-
-  run_client("explicit_handle");
-
-  ret = WaitForSingleObject(stop_event, 1000);
-  ok(WAIT_OBJECT_0 == ret, "WaitForSingleObject\n");
-
-  if (pRpcServerRegisterIfEx)
-  {
-    status = RpcServerUnregisterIf(s_RPCExplicitHandle_v0_0_s_ifspec, NULL, TRUE);
-    ok(status == RPC_S_OK, "RpcServerUnregisterIf() failed: %lu\n", status);
-  }
-
-  CloseHandle(stop_event);
-  stop_event = NULL;
 
   CoUninitialize();
 }
@@ -2701,7 +2622,7 @@ START_TEST(server)
   set_mixed_interface();
 
   ok(!GetUserNameExA(NameSamCompatible, NULL, &size), "GetUserNameExA\n");
-  domain_and_user = malloc(size);
+  domain_and_user = HeapAlloc(GetProcessHeap(), 0, size);
   ok(GetUserNameExA(NameSamCompatible, domain_and_user, &size), "GetUserNameExA\n");
 
   argc = winetest_get_mainargs(&argv);
@@ -2767,5 +2688,5 @@ START_TEST(server)
     if (firewall_disabled) set_firewall(APP_REMOVE);
   }
 
-  free(domain_and_user);
+  HeapFree(GetProcessHeap(), 0, domain_and_user);
 }

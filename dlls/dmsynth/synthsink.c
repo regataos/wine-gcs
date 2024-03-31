@@ -19,6 +19,8 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#define NONAMELESSUNION
+#define NONAMELESSSTRUCT
 #include "dmsynth_private.h"
 #include "initguid.h"
 #include "uuids.h"
@@ -320,7 +322,7 @@ static HRESULT synth_sink_activate(struct synth_sink *This)
     else
     {
         synth_sink_get_format(This, &format);
-        desc.lpwfxFormat = &format;
+        desc.lpwfxFormat = (WAVEFORMATEX *)&format;
         desc.dwBufferBytes = format.nAvgBytesPerSec;
         if (FAILED(hr = IDirectMusicSynthSink_GetDesiredBufferSize(iface, &desc.dwBufferBytes)))
             ERR("Failed to get desired buffer size, hr %#lx\n", hr);
@@ -606,25 +608,25 @@ static HRESULT WINAPI synth_sink_control_KsProperty(IKsControl* iface, PKSPROPER
 {
     TRACE("(%p, %p, %lu, %p, %lu, %p)\n", iface, Property, PropertyLength, PropertyData, DataLength, BytesReturned);
 
-    TRACE("Property = %s - %lu - %lu\n", debugstr_guid(&Property->Set), Property->Id, Property->Flags);
+    TRACE("Property = %s - %lu - %lu\n", debugstr_guid(&Property->u.s.Set), Property->u.s.Id, Property->u.s.Flags);
 
-    if (Property->Flags != KSPROPERTY_TYPE_GET)
+    if (Property->u.s.Flags != KSPROPERTY_TYPE_GET)
     {
-        FIXME("Property flags %lu not yet supported\n", Property->Flags);
+        FIXME("Property flags %lu not yet supported\n", Property->u.s.Flags);
         return S_FALSE;
     }
 
     if (DataLength <  sizeof(DWORD))
         return E_NOT_SUFFICIENT_BUFFER;
 
-    if (IsEqualGUID(&Property->Set, &GUID_DMUS_PROP_SinkUsesDSound))
+    if (IsEqualGUID(&Property->u.s.Set, &GUID_DMUS_PROP_SinkUsesDSound))
     {
         *(DWORD*)PropertyData = TRUE;
         *BytesReturned = sizeof(DWORD);
     }
     else
     {
-        FIXME("Unknown property %s\n", debugstr_guid(&Property->Set));
+        FIXME("Unknown property %s\n", debugstr_guid(&Property->u.s.Set));
         *(DWORD*)PropertyData = FALSE;
         *BytesReturned = sizeof(DWORD);
     }
@@ -754,7 +756,7 @@ HRESULT synth_sink_create(IUnknown **ret_iface)
     obj->ref = 1;
 
     obj->stop_event = CreateEventW(NULL, FALSE, FALSE, NULL);
-    InitializeCriticalSectionEx(&obj->cs, 0, RTL_CRITICAL_SECTION_FLAG_FORCE_DEBUG_INFO);
+    InitializeCriticalSection(&obj->cs);
     obj->cs.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": cs");
 
     TRACE("Created DirectMusicSynthSink %p\n", obj);

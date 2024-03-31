@@ -1,4 +1,4 @@
 TESTDLL = cryptext.dll
 
-SOURCES = \
+C_SRCS = \
 	cryptext.c

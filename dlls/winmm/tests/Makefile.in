@@ -1,7 +1,7 @@
 TESTDLL   = winmm.dll
 IMPORTS   = winmm ole32 user32 advapi32
 
-SOURCES = \
+C_SRCS = \
 	capture.c \
 	generated.c \
 	joystick.c \
@@ -10,6 +10,8 @@ SOURCES = \
 	midi.c \
 	mixer.c \
 	mmio.c \
-	rsrc.rc \
 	timer.c \
 	wave.c
+
+RC_SRCS = \
+	rsrc.rc

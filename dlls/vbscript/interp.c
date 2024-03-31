@@ -413,30 +413,43 @@ static HRESULT stack_assume_val(exec_ctx_t *ctx, unsigned n)
     return S_OK;
 }
 
-static HRESULT stack_pop_bool(exec_ctx_t *ctx, BOOL *b)
+static int stack_pop_bool(exec_ctx_t *ctx, BOOL *b)
 {
     variant_val_t val;
     HRESULT hres;
-    VARIANT v;
+    VARIANT_BOOL vb;
 
     hres = stack_pop_val(ctx, &val);
     if(FAILED(hres))
         return hres;
 
-    if (V_VT(val.v) == VT_NULL)
+    switch (V_VT(val.v))
     {
+    case VT_BOOL:
+        *b = V_BOOL(val.v);
+        break;
+    case VT_NULL:
+    case VT_EMPTY:
         *b = FALSE;
+        break;
+    case VT_I2:
+        *b = V_I2(val.v);
+        break;
+    case VT_I4:
+        *b = V_I4(val.v);
+        break;
+    case VT_BSTR:
+        hres = VarBoolFromStr(V_BSTR(val.v), ctx->script->lcid, 0, &vb);
+        if(FAILED(hres))
+            return hres;
+        *b=vb;
+        break;
+    default:
+        FIXME("unsupported for %s\n", debugstr_variant(val.v));
+        release_val(&val);
+        return E_NOTIMPL;
     }
-    else
-    {
-        V_VT(&v) = VT_EMPTY;
-        if (SUCCEEDED(hres = VariantChangeType(&v, val.v, VARIANT_LOCALBOOL, VT_BOOL)))
-            *b = !!V_BOOL(&v);
-    }
-
-    release_val(&val);
-
-    return hres;
+    return S_OK;
 }
 
 static HRESULT stack_pop_disp(exec_ctx_t *ctx, IDispatch **ret)
@@ -1088,37 +1101,6 @@ static HRESULT interp_val(exec_ctx_t *ctx)
     return stack_push(ctx, val.owned ? val.v : &v);
 }
 
-static HRESULT interp_numval(exec_ctx_t *ctx)
-{
-    variant_val_t val;
-    VARIANT v;
-    HRESULT hres;
-
-    TRACE("\n");
-
-    hres = stack_pop_val(ctx, &val);
-    if(FAILED(hres))
-        return hres;
-
-    if (V_VT(val.v) == VT_BSTR) {
-        V_VT(&v) = VT_EMPTY;
-        hres = VariantChangeType(&v, val.v, 0, VT_R8);
-        if(FAILED(hres))
-            return hres;
-        release_val(&val);
-        return stack_push(ctx, &v);
-    }
-
-    if(!val.owned) {
-        V_VT(&v) = VT_EMPTY;
-        hres = VariantCopy(&v, val.v);
-        if(FAILED(hres))
-            return hres;
-    }
-
-    return stack_push(ctx, val.owned ? val.v : &v);
-}
-
 static HRESULT interp_pop(exec_ctx_t *ctx)
 {
     const unsigned n = ctx->instr->arg1.uint;
@@ -1393,31 +1375,24 @@ static HRESULT interp_redim_preserve(exec_ctx_t *ctx)
     if(array == NULL || array->cDims == 0) {
         /* can initially allocate the array */
         array = SafeArrayCreate(VT_VARIANT, dim_cnt, bounds);
-        if(!array)
-            hres = E_OUTOFMEMORY;
-	else {
-            VariantClear(v);
-            V_VT(v) = VT_ARRAY|VT_VARIANT;
-            V_ARRAY(v) = array;
-        }
+        VariantClear(v);
+        V_VT(v) = VT_ARRAY|VT_VARIANT;
+        V_ARRAY(v) = array;
+        return S_OK;
     } else if(array->cDims != dim_cnt) {
         /* can't otherwise change the number of dimensions */
         TRACE("Can't resize %s, cDims %d != %d\n", debugstr_w(identifier), array->cDims, dim_cnt);
-        hres = MAKE_VBSERROR(VBSE_OUT_OF_BOUNDS);
+        return MAKE_VBSERROR(VBSE_OUT_OF_BOUNDS);
     } else {
         /* can resize the last dimensions (if others match */
         for(i = 0; i+1 < dim_cnt; ++i) {
             if(array->rgsabound[array->cDims - 1 - i].cElements != bounds[i].cElements) {
                 TRACE("Can't resize %s, bound[%d] %ld != %ld\n", debugstr_w(identifier), i, array->rgsabound[i].cElements, bounds[i].cElements);
-                hres = MAKE_VBSERROR(VBSE_OUT_OF_BOUNDS);
-                break;
+                return MAKE_VBSERROR(VBSE_OUT_OF_BOUNDS);
             }
         }
-        if(SUCCEEDED(hres))
-            hres = SafeArrayRedim(array, &bounds[dim_cnt-1]);
+        return SafeArrayRedim(array, &bounds[dim_cnt-1]);
     }
-    free(bounds);
-    return hres;
 }
 
 static HRESULT interp_step(exec_ctx_t *ctx)
@@ -1506,7 +1481,7 @@ static HRESULT interp_newenum(exec_ctx_t *ctx)
     case VT_VARIANT|VT_ARRAY|VT_BYREF: {
         IEnumVARIANT *iter;
 
-        hres = create_safearray_iter(V_ISBYREF(v.v) ? *V_ARRAYREF(v.v) : V_ARRAY(v.v), v.owned && !V_ISBYREF(v.v), &iter);
+        hres = create_safearray_iter(V_ISBYREF(v.v) ? *V_ARRAYREF(v.v) : V_ARRAY(v.v), &iter);
         if(FAILED(hres))
             return hres;
 

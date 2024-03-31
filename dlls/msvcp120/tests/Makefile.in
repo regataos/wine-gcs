@@ -1,4 +1,4 @@
 TESTDLL   = msvcp120.dll
 
-SOURCES = \
+C_SRCS = \
 	msvcp120.c

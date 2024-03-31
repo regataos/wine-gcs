@@ -1,7 +1,7 @@
 TESTDLL   = wintrust.dll
 IMPORTS   = wintrust crypt32 advapi32
 
-SOURCES = \
+C_SRCS = \
 	asn.c \
 	crypt.c \
 	register.c \

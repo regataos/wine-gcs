@@ -330,16 +330,12 @@ NTSTATUS WINAPI wow64_NtQuerySystemInformation( UINT *args )
     case SystemCodeIntegrityInformation:  /* SYSTEM_CODEINTEGRITY_INFORMATION */
     case SystemKernelDebuggerInformationEx:  /* SYSTEM_KERNEL_DEBUGGER_INFORMATION_EX */
     case SystemCpuSetInformation:  /* SYSTEM_CPU_SET_INFORMATION */
-    case SystemProcessorBrandString:  /* char[] */
-    case SystemProcessorFeaturesInformation:  /* SYSTEM_PROCESSOR_FEATURES_INFORMATION */
     case SystemWineVersionInformation:  /* char[] */
         return NtQuerySystemInformation( class, ptr, len, retlen );
 
     case SystemCpuInformation:  /* SYSTEM_CPU_INFORMATION */
     case SystemEmulationProcessorInformation:  /* SYSTEM_CPU_INFORMATION */
-        status = NtQuerySystemInformation( SystemEmulationProcessorInformation, ptr, len, retlen );
-        if (!status && pBTCpuUpdateProcessorInformation) pBTCpuUpdateProcessorInformation( ptr );
-        return status;
+        return NtQuerySystemInformation( SystemEmulationProcessorInformation, ptr, len, retlen );
 
     case SystemBasicInformation:  /* SYSTEM_BASIC_INFORMATION */
     case SystemEmulationBasicInformation:  /* SYSTEM_BASIC_INFORMATION */
@@ -393,7 +389,7 @@ NTSTATUS WINAPI wow64_NtQuerySystemInformation( UINT *args )
                     info32->Modules[i].InitOrderIndex    = info->Modules[i].InitOrderIndex;
                     info32->Modules[i].LoadCount         = info->Modules[i].LoadCount;
                     info32->Modules[i].NameOffset        = info->Modules[i].NameOffset;
-                    strcpy( (char *)info32->Modules[i].Name, (char *)info->Modules[i].Name );
+                    strcpy( (char *)info->Modules[i].Name, (char *)info32->Modules[i].Name );
                 }
             }
         }
@@ -657,7 +653,7 @@ NTSTATUS WINAPI wow64_NtQuerySystemInformationEx( UINT *args )
     }
 
     case SystemCpuSetInformation:  /* SYSTEM_CPU_SET_INFORMATION */
-    case SystemSupportedProcessorArchitectures:  /* SYSTEM_SUPPORTED_PROCESSOR_ARCHITECTURES_INFORMATION */
+    case SystemSupportedProcessorArchitectures:  /* ULONG */
         return NtQuerySystemInformationEx( class, &handle, sizeof(handle), ptr, len, retlen );
 
     default:
@@ -755,30 +751,7 @@ NTSTATUS WINAPI wow64_NtSystemDebugControl( UINT *args )
     ULONG out_len = get_ulong( &args );
     ULONG *retlen = get_ptr( &args );
 
-    switch (command)
-    {
-    case SysDbgBreakPoint:
-    case SysDbgEnableKernelDebugger:
-    case SysDbgDisableKernelDebugger:
-    case SysDbgGetAutoKdEnable:
-    case SysDbgSetAutoKdEnable:
-    case SysDbgGetPrintBufferSize:
-    case SysDbgSetPrintBufferSize:
-    case SysDbgGetKdUmExceptionEnable:
-    case SysDbgSetKdUmExceptionEnable:
-    case SysDbgGetTriageDump:
-    case SysDbgGetKdBlockEnable:
-    case SysDbgSetKdBlockEnable:
-    case SysDbgRegisterForUmBreakInfo:
-    case SysDbgGetUmBreakPid:
-    case SysDbgClearUmBreakPid:
-    case SysDbgGetUmAttachPid:
-    case SysDbgClearUmAttachPid:
-        return NtSystemDebugControl( command, in_buf, in_len, out_buf, out_len, retlen );
-
-    default:
-        return STATUS_NOT_IMPLEMENTED;  /* not implemented on Windows either */
-    }
+    return NtSystemDebugControl( command, in_buf, in_len, out_buf, out_len, retlen );
 }
 
 

@@ -2,6 +2,7 @@ MODULE    = dpvsetup.exe
 
 EXTRADLLFLAGS = -mwindows -municode
 
-SOURCES = \
-	main.c \
-	version.rc
+C_SRCS = \
+	main.c
+
+RC_SRCS = version.rc
