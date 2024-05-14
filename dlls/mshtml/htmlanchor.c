@@ -48,12 +48,15 @@ static HRESULT navigate_href_new_window(HTMLElement *element, nsAString *href_st
     IUri *uri;
     HRESULT hres;
 
+    if(!element->node.doc->window->base.outer_window)
+        return S_OK;
+
     nsAString_GetData(href_str, &href);
-    hres = create_relative_uri(element->node.doc->outer_window, href, &uri);
+    hres = create_relative_uri(element->node.doc->window->base.outer_window, href, &uri);
     if(FAILED(hres))
         return hres;
 
-    hres = navigate_new_window(element->node.doc->outer_window, uri, target, NULL, NULL);
+    hres = navigate_new_window(element->node.doc->window->base.outer_window, uri, target, NULL, NULL);
     IUri_Release(uri);
     return hres;
 }
@@ -110,7 +113,10 @@ static HRESULT navigate_href(HTMLElement *element, nsAString *href_str, nsAStrin
     const PRUnichar *href;
     HRESULT hres;
 
-    window = get_target_window(element->node.doc->outer_window, target_str, &use_new_window);
+    if(!element->node.doc->window->base.outer_window)
+        return S_OK;
+
+    window = get_target_window(element->node.doc->window->base.outer_window, target_str, &use_new_window);
     if(!window) {
         if(use_new_window) {
             const PRUnichar *target;
@@ -823,13 +829,13 @@ static void HTMLAnchorElement_unlink(DispatchEx *dispex)
     unlink_ref(&This->nsanchor);
 }
 
-static HRESULT HTMLAnchorElement_handle_event(DispatchEx *dispex, eventid_t eid, nsIDOMEvent *event, BOOL *prevent_default)
+static HRESULT HTMLAnchorElement_handle_event(DispatchEx *dispex, DOMEvent *event, BOOL *prevent_default)
 {
     HTMLAnchorElement *This = impl_from_DispatchEx(dispex);
     nsAString href_str, target_str;
     nsresult nsres;
 
-    if(eid == EVENTID_CLICK) {
+    if(event->event_id == EVENTID_CLICK) {
         nsAString_Init(&href_str, NULL);
         nsres = nsIDOMHTMLAnchorElement_GetHref(This->nsanchor, &href_str);
         if (NS_FAILED(nsres)) {
@@ -844,14 +850,14 @@ static HRESULT HTMLAnchorElement_handle_event(DispatchEx *dispex, eventid_t eid,
             goto fallback;
         }
 
-        return handle_link_click_event(&This->element, &href_str, &target_str, event, prevent_default);
+        return handle_link_click_event(&This->element, &href_str, &target_str, event->nsevent, prevent_default);
 
 fallback:
         nsAString_Finish(&href_str);
         nsAString_Finish(&target_str);
     }
 
-    return HTMLElement_handle_event(&This->element.node.event_target.dispex, eid, event, prevent_default);
+    return HTMLElement_handle_event(&This->element.node.event_target.dispex, event, prevent_default);
 }
 
 static const NodeImplVtbl HTMLAnchorElementImplVtbl = {

@@ -377,6 +377,7 @@ sync_test("builtin_toString", function() {
     if(v >= 11) {
         test("crypto", window.msCrypto, "Crypto");
         test("crypto.subtle", window.msCrypto.subtle, "SubtleCrypto");
+        test("MutationObserver", new window.MutationObserver(function() {}), "MutationObserver", null, "Function");
     }
     if(v >= 9) {
         document.body.innerHTML = "<!--...-->";
@@ -456,20 +457,15 @@ sync_test("builtin_obj", function() {
     ok(e === (v < 9 ? 0xa01b6 : 0x0ffff) - 0x80000000, "[new f()] e = " + e);
 
     if(v < 9) {
-        e = 0;
-        try {
-            elem = f.call.call(f, document, "div");
-        }catch(ex) {
-            e = ex.number;
-        }
-        ok(e === 0xa01b6 - 0x80000000, "[elem = f.call.call(f, document, 'div')] e = " + e);
-        e = 0;
-        try {
-            f = f.bind(document);
-        }catch(ex) {
-            e = ex.number;
-        }
-        ok(e === 0xa01b6 - 0x80000000, "[f.bind(document)] e = " + e);
+        ok(!("call" in f.call), "call in f.call");
+        ok(!("apply" in f.call), "apply in f.call");
+        ok(!("call" in f.apply), "call in f.apply");
+        ok(!("apply" in f.apply), "apply in f.apply");
+        ok(f.call+"" === "\nfunction call() {\n    [native code]\n}\n", "f.call = " + f.call);
+        ok(f.apply+"" === "\nfunction apply() {\n    [native code]\n}\n", "f.apply = " + f.apply);
+        ok(external.getVT(f.call) === "VT_DISPATCH", "f.call not VT_DISPATCH");
+        ok(external.getVT(f.apply) === "VT_DISPATCH", "f.apply not VT_DISPATCH");
+
         elem = f.apply(document, ["style"]);
         document.body.appendChild(elem);
 
@@ -495,9 +491,12 @@ sync_test("builtin_obj", function() {
         }
         ok(e === 0xa01b6 - 0x80000000, "[f.call = function() { }] e = " + e);
 
+        ok(f.apply !== f.apply, "f.apply == f.apply");
         f = f.apply;
         ok(!("arguments" in f), "arguments in f.apply");
         ok(!("length" in f), "length in f.apply");
+        ok(!("call" in f), "call in f.apply");
+        ok(!("apply" in f), "apply in f.apply");
         e = 0;
         try {
             f.toString();
@@ -645,68 +644,18 @@ sync_test("builtin_obj", function() {
 sync_test("builtin_prototypes", function() {
     var v = document.documentMode, r, obj, name, proto;
 
-    var special_ctors = [
-        [ "DOMParser",          [ "prototype", "arguments" ], [ "create", "length" ], 9 ],
-        [ "Image",              [ "prototype", "arguments" ], [ "create", "length" ] ],
-        [ "Option",             [ "prototype", "arguments" ], [ "create", "length" ] ],
-        [ "XDomainRequest",     [ "prototype", "arguments", "create" ], [ "length" ], 0, 10 ],
-        [ "XMLHttpRequest",     [ "prototype", "arguments", "create" ], [ "length" ] ]
-    ];
-    for(var i = 0; i < special_ctors.length; i++) {
-        if((special_ctors[i].length > 3 && v < special_ctors[i][3]) ||
-           (special_ctors[i].length > 4 && v > special_ctors[i][4]))
-            continue;
-        name = special_ctors[i][0];
-        ok(Object.prototype.hasOwnProperty.call(window, name), name + " not a property of window.");
-        eval("obj = window." + name + ";");
-        if(v < 9) {
-            ok(!Object.prototype.hasOwnProperty.call(obj, "arguments"), "arguments is a property of " + name + " constructor.");
-            ok(Object.prototype.hasOwnProperty.call(obj, "create"), "create not a property of " + name + " constructor.");
-            ok(!Object.prototype.hasOwnProperty.call(obj, "length"), "length is a property of " + name + " constructor.");
-            ok(Object.prototype.hasOwnProperty.call(obj, "prototype"), "prototype not a property of " + name + " constructor.");
-            ok(!("length" in obj), "length in " + name + " constructor.");
-            if(window.Window)
-                ok(!Object.prototype.hasOwnProperty.call(window.Window.prototype, name), name + " is a property of window's prototype.");
-        }else {
-            if(special_ctors[i][1]) for(var j = 0; j < special_ctors[i][1].length; j++)
-                ok(Object.prototype.hasOwnProperty.call(obj, special_ctors[i][1][j]), special_ctors[i][1][j] + " not a property of " + name + " constructor.");
-
-            if(special_ctors[i][2]) for(var j = 0; j < special_ctors[i][2].length; j++)
-                ok(!Object.prototype.hasOwnProperty.call(obj, special_ctors[i][2][j]), special_ctors[i][2][j] + " is a property of " + name + " constructor.");
-
-            ok(Object.getPrototypeOf(obj) === Function.prototype, "getPrototypeOf(" + name + " constructor) = " + Object.getPrototypeOf(obj));
-            ok(!Object.prototype.hasOwnProperty.call(Object.getPrototypeOf(window), name), name + " is a property of window's prototype.");
-
-            if(obj.create) {
-                proto = obj.prototype;
-                var func = obj.create;
-                var s = Object.prototype.toString.call(func);
-                ok(s === "[object Function]", "obj.create toString = " + s);
-                ok(Object.getPrototypeOf(func) === Function.prototype, "getPrototypeOf(" + name + ".create) = " + Object.getPrototypeOf(func));
-                ok(Object.prototype.hasOwnProperty.call(func, "arguments"), "arguments not a property of " + name + ".create");
-                ok(!Object.prototype.hasOwnProperty.call(func, "length"), "length is a property of " + name + ".create");
-                ok(Object.prototype.hasOwnProperty.call(func, "prototype"), "prototype not a property of " + name + ".create");
-
-                obj = func();
-                ok(Object.getPrototypeOf(obj) === proto, "getPrototypeOf(obj.create()) = " + Object.getPrototypeOf(obj));
-                obj = func.call(Object);
-                ok(Object.getPrototypeOf(obj) === proto, "getPrototypeOf(obj.create() on Object) = " + Object.getPrototypeOf(obj));
-            }
-        }
-    }
-
     function set_obj(n, o) {
         name = n;
         proto = null;
         if(o) {
-            eval("proto = window." + n + ".prototype;");
+            proto = window[n]["prototype"];
             if(typeof o !== "boolean") {
                 obj = o;
                 return;
             }
         }
         try {
-            eval("obj = new window." + n + "();");
+            obj = new window[n]();
             ok(o, "expected exception when creating " + name + ".");
         }catch(ex) {
             obj = null;
@@ -1134,6 +1083,232 @@ sync_test("builtin_prototypes", function() {
         }
     }
 
+    if(v >= 9) {
+        var protos = [
+            [ "Attr",                           "Node" ],
+            [ "CharacterData",                  "Node" ],
+            [ "ClientRect",                     "Object" ],
+            [ "ClientRectList",                 "Object" ],
+            [ "Comment",                        "CharacterData" ],
+            [ "Console",                        "Object" ],
+            [ "Crypto",                         "Object" ],
+            [ "CSSRule",                        "Object" ],
+            [ "CSSStyleDeclaration",            "Object" ],
+            [ "CSSStyleRule",                   "CSSRule" ],
+            [ "CSSStyleSheet",                  "StyleSheet" ],
+            [ "CustomEvent",                    "Event" ],
+            [ "Document",                       "Node" ],
+            [ "DocumentType",                   "Node" ],
+            [ "DOMImplementation",              "Object" ],
+            [ "DOMParser",                      "Object" ],
+            [ "DOMTokenList",                   "Object" ],
+            [ "Element",                        "Node" ],
+            [ "Event",                          "Object" ],
+            [ "History",                        "Object" ],
+            [ "HTMLAnchorElement",              "HTMLElement" ],
+            [ "HTMLAreaElement",                "HTMLElement" ],
+            [ "HTMLBodyElement",                "HTMLElement" ],
+            [ "HTMLButtonElement",              "HTMLElement" ],
+            [ "HTMLCollection",                 "Object" ],
+            [ "HTMLDocument",                   "Document" ],
+            [ "HTMLElement",                    "Element" ],
+            [ "HTMLEmbedElement",               "HTMLElement" ],
+            [ "HTMLFormElement",                "HTMLElement" ],
+            [ "HTMLFrameElement",               "HTMLElement" ],
+            [ "HTMLHeadElement",                "HTMLElement" ],
+            [ "HTMLHtmlElement",                "HTMLElement" ],
+            [ "HTMLIFrameElement",              "HTMLElement" ],
+            [ "HTMLImgElement",                 "HTMLElement" ],
+            [ "HTMLInputElement",               "HTMLElement" ],
+            [ "HTMLLabelElement",               "HTMLElement" ],
+            [ "HTMLLinkElement",                "HTMLElement" ],
+            [ "HTMLMetaElement",                "HTMLElement" ],
+            [ "HTMLObjectElement",              "HTMLElement" ],
+            [ "HTMLOptionElement",              "HTMLElement" ],
+            [ "HTMLScriptElement",              "HTMLElement" ],
+            [ "HTMLSelectElement",              "HTMLElement" ],
+            [ "HTMLStyleElement",               "HTMLElement" ],
+            [ "HTMLTableCellElement",           "HTMLElement" ],
+            [ "HTMLTableDataCellElement",       "HTMLTableCellElement" ],
+            [ "HTMLTableElement",               "HTMLElement" ],
+            [ "HTMLTableRowElement",            "HTMLElement" ],
+            [ "HTMLTextAreaElement",            "HTMLElement" ],
+            [ "HTMLTitleElement",               "HTMLElement" ],
+            [ "HTMLUnknownElement",             "HTMLElement" ],
+            [ "Image",                          "HTMLElement" ],
+            [ "KeyboardEvent",                  "UIEvent" ],
+            [ "MediaQueryList",                 "Object" ],
+            [ "MessageEvent",                   "Event" ],
+            [ "MimeTypeArray",                  "Object" ],
+            [ "MouseEvent",                     "UIEvent" ],
+            [ "MSCSSProperties",                "CSSStyleDeclaration" ],
+            [ "MSCSSRuleList",                  "Object" ],
+            [ "MSCurrentStyleCSSProperties",    "MSCSSProperties" ],
+            [ "MSEventObj",                     "Object" ],
+            [ "MSMimeTypesCollection",          "Object" ],
+            [ "MSNamespaceInfoCollection",      "Object" ],
+            [ "MSPluginsCollection",            "Object" ],
+            [ "MSSelection",                    "Object" ],
+            [ "MSStyleCSSProperties",           "MSCSSProperties" ],
+            [ "MutationObserver",               "Object" ],
+            [ "NamedNodeMap",                   "Object" ],
+            [ "Navigator",                      "Object" ],
+            [ "Node",                           "Object" ],
+            [ "NodeList",                       "Object" ],
+            [ "Option",                         "HTMLElement" ],
+            [ "PageTransitionEvent",            "Event" ],
+            [ "Performance",                    "Object" ],
+            [ "PerformanceNavigation",          "Object" ],
+            [ "PerformanceTiming",              "Object" ],
+            [ "PluginArray",                    "Object" ],
+            [ "ProgressEvent",                  "Event" ],
+            [ "Screen",                         "Object" ],
+            [ "Storage",                        "Object" ],
+            [ "StorageEvent",                   "Event" ],
+            [ "StyleSheet",                     "Object" ],
+            [ "StyleSheetList",                 "Object" ],
+            [ "SubtleCrypto",                   "Object" ],
+            [ "Text",                           "CharacterData" ],
+            [ "TextRange",                      "Object" ],
+            [ "UIEvent",                        "Event" ],
+            [ "Window",                         "Object" ],
+            [ "XDomainRequest",                 "Object" ],
+            [ "XMLDocument",                    "Document" ],
+            [ "XMLHttpRequest",                 "Object" ]
+        ];
+
+        for(var i = 0; i < protos.length; i++) {
+            if(!(protos[i][0] in window))
+                continue;
+            var a, b;
+            eval("a = Object.getPrototypeOf(" + protos[i][0] + ".prototype); b = " + protos[i][1] + ".prototype;");
+            ok(a === b, "getPrototypeOf(" + protos[i][0] + ".prototype) = " + a);
+        }
+
+        var CSS_props = [ "accelerator","backgroundPositionX","backgroundPositionY","getAttribute","imeMode","layoutFlow","layoutGrid","layoutGridChar",
+                          "layoutGridLine","layoutGridMode","layoutGridType","lineBreak","msBlockProgression","msInterpolationMode","removeAttribute",
+                          "scrollbar3dLightColor","scrollbarArrowColor","scrollbarBaseColor","scrollbarDarkShadowColor","scrollbarFaceColor",
+                          "scrollbarHighlightColor","scrollbarShadowColor","scrollbarTrackColor","setAttribute","styleFloat","textAutospace",
+                          "textJustifyTrim","textKashida","textKashidaSpace","writingMode","zoom" ];
+        var Elem_props = [ "clientHeight","clientLeft","clientTop","clientWidth","firstElementChild","getAttribute","getAttributeNode","getAttributeNodeNS",
+                           "getAttributeNS","getBoundingClientRect","getClientRects","getElementsByTagName","getElementsByTagNameNS","hasAttribute",
+                           "hasAttributeNS","lastElementChild","msMatchesSelector","nextElementSibling","previousElementSibling","querySelector",
+                           "removeAttribute","removeAttributeNode","removeAttributeNS","scrollHeight","scrollLeft","scrollTop","scrollWidth","setAttribute",
+                           "setAttributeNode","setAttributeNodeNS","setAttributeNS","tagName" ];
+        var Event_props = [ "bubbles","cancelable","cancelBubble","currentTarget","defaultPrevented","eventPhase","initEvent","isTrusted",
+                            "preventDefault","srcElement","stopImmediatePropagation","stopPropagation","target","timeStamp","type" ];
+        var HtmlElem_props = [ "accessKey","applyElement","blur","canHaveHTML","children","className","clearAttributes","click","componentFromPoint",
+                               "contains","contentEditable","createControlRange","currentStyle","dir","disabled","dragDrop","focus","getAdjacentText",
+                               "getElementsByClassName","hideFocus","id","innerHTML","innerText","insertAdjacentElement","insertAdjacentHTML",
+                               "insertAdjacentText","isContentEditable","isDisabled","isMultiLine","isTextEdit","lang","language","mergeAttributes",
+                               "offsetHeight","offsetLeft","offsetParent","offsetTop","offsetWidth","onabort","onactivate","onbeforeactivate","onbeforecopy",
+                               "onbeforecut","onbeforedeactivate","onbeforepaste","onblur","oncanplay","oncanplaythrough","onchange","onclick",
+                               "oncontextmenu","oncopy","oncut","ondblclick","ondeactivate","ondrag","ondragend","ondragenter","ondragleave","ondragover",
+                               "ondragstart","ondrop","ondurationchange","onemptied","onended","onerror","onfocus","onfocusin","onfocusout","onhelp",
+                               "oninput","onkeydown","onkeypress","onkeyup","onload","onloadeddata","onloadedmetadata","onloadstart","onmousedown",
+                               "onmouseleave","onmousemove","onmouseout","onmouseover","onmouseup","onmousewheel","onpaste","onpause","onplay","onplaying",
+                               "onprogress","onratechange","onreset","onscroll","onseeked","onseeking","onselect","onselectstart","onstalled","onsubmit",
+                               "onsuspend","ontimeupdate","onvolumechange","onwaiting","outerHTML","outerText","parentElement","parentTextEdit",
+                               "recordNumber","releaseCapture","replaceAdjacentText","runtimeStyle","scrollIntoView","setActive","setCapture","sourceIndex",
+                               "style","tabIndex","title","uniqueID","uniqueNumber" ];
+        var Node_props = [ "addEventListener","appendChild","attributes","childNodes","cloneNode","compareDocumentPosition","dispatchEvent","firstChild",
+                           "hasChildNodes","insertBefore","isDefaultNamespace","isEqualNode","isSameNode","isSupported","lastChild","localName",
+                           "lookupNamespaceURI","lookupPrefix","namespaceURI","nextSibling","nodeName","nodeType","nodeValue","ownerDocument",
+                           "parentNode","prefix","previousSibling","removeChild","removeEventListener","replaceChild","textContent" ];
+        var TableCell_props = [ "align","background","bgColor","borderColor","borderColorDark","borderColorLight","cellIndex","colSpan","height","noWrap",
+                                "rowSpan","vAlign","width" ];
+
+        protos = [
+            [ "Attr", ["expando","name","specified","value"], Node_props ],
+            [ "CharacterData", ["data","length","appendData"], Node_props ],
+            [ "Comment", ["text"], ["insertData","replaceData","substringData"] ],
+            [ "CSSStyleRule", ["readOnly","selectorText","style"], ["cssText","parentRule","parentStyleSheet","type" ] ],
+            [ "CSSStyleSheet", ["addRule","cssRules","ownerRule","rules"], ["disabled","media","ownerNode","parentStyleSheet","title","type"] ],
+            [ "CustomEvent", ["detail","initCustomEvent"], Event_props ],
+            [ "Document", ["body","doctype","documentMode","onactivate","parentWindow","styleSheets","title"], Node_props ],
+            [ "DocumentType", ["entities","internalSubset","name","notations","publicId","systemId"], Node_props ],
+            [ "Element", Elem_props, Node_props ],
+            [ "HTMLElement", HtmlElem_props, Elem_props ],
+            [ "HTMLTableCellElement", TableCell_props, HtmlElem_props ],
+            [ "HTMLTableDataCellElement", [], TableCell_props ],
+            [ "HTMLUnknownElement", ["recordset","namedRecordset"], HtmlElem_props ],
+            [ "KeyboardEvent", ["altKey","ctrlKey","getModifierState","initKeyboardEvent","key","metaKey"], ["detail","initUIEvent","view"] ],
+            [ "MessageEvent", ["data","initMessageEvent","origin","source"], Event_props ],
+            [ "MouseEvent", ["button","clientX","initMouseEvent","offsetY","pageX","shiftKey","x","y"], ["detail","initUIEvent","view"] ],
+            [ "MSCSSProperties", CSS_props, ["background","border","clip","fontWeight","listStyle","quotes","setProperty","zIndex"] ],
+            [ "MSCurrentStyleCSSProperties", ["blockDirection","clipBottom","clipLeft","clipRight","clipTop","hasLayout"], CSS_props ],
+            [ "MSStyleCSSProperties", ["pixelTop","pixelWidth","posHeight","posLeft","textDecorationBlink","textDecorationNone"], CSS_props ],
+            [ "ProgressEvent", ["initProgressEvent","lengthComputable","loaded","total"], Event_props ],
+            [ "StorageEvent", ["initStorageEvent","key","newValue","oldValue","storageArea"], Event_props ],
+            [ "Text", ["splitText"], ["data","length","appendData","deleteData","insertData","replaceData","substringData"] ],
+            [ "UIEvent", ["detail","initUIEvent","view"], Event_props ]
+        ];
+
+        for(var i = 0; i < protos.length; i++) {
+            if(!(protos[i][0] in window))
+                continue;
+            eval("r = " + protos[i][0] + ".prototype");
+            for(var j = 0; j < protos[i][1].length; j++)
+                ok(Object.prototype.hasOwnProperty.call(r, protos[i][1][j]), protos[i][1][j] + " not a property of " + protos[i][0] + ".prototype");
+            for(var j = 0; j < protos[i][2].length; j++) {
+                ok(!Object.prototype.hasOwnProperty.call(r, protos[i][2][j]), protos[i][2][j] + " is a property of " + protos[i][0] + ".prototype");
+                ok(protos[i][2][j] in r, protos[i][2][j] + " not in " + protos[i][0] + ".prototype");
+            }
+        }
+    }
+});
+
+sync_test("builtin_constructors", function() {
+    var v = document.documentMode;
+
+    var special_ctors = [
+        [ "DOMParser",          [ "prototype", "arguments" ], [ "create", "length" ], 9 ],
+        [ "Image",              [ "prototype", "arguments" ], [ "create", "length" ] ],
+        [ "MutationObserver",   [ "prototype", "arguments" ], [ "create", "length" ], 11 ],
+        [ "Option",             [ "prototype", "arguments" ], [ "create", "length" ] ],
+        [ "XDomainRequest",     [ "prototype", "arguments", "create" ], [ "length" ], 0, 10 ],
+        [ "XMLHttpRequest",     [ "prototype", "arguments", "create" ], [ "length" ] ]
+    ];
+    for(var i = 0; i < special_ctors.length; i++) {
+        if((special_ctors[i].length > 3 && v < special_ctors[i][3]) ||
+           (special_ctors[i].length > 4 && v > special_ctors[i][4]))
+            continue;
+        var name = special_ctors[i][0];
+        ok(Object.prototype.hasOwnProperty.call(window, name), name + " not a property of window.");
+        var obj = window[name];
+        if(v < 9) {
+            ok(!Object.prototype.hasOwnProperty.call(obj, "arguments"), "arguments is a property of " + name + " constructor.");
+            ok(Object.prototype.hasOwnProperty.call(obj, "create"), "create not a property of " + name + " constructor.");
+            ok(!Object.prototype.hasOwnProperty.call(obj, "length"), "length is a property of " + name + " constructor.");
+            ok(Object.prototype.hasOwnProperty.call(obj, "prototype"), "prototype not a property of " + name + " constructor.");
+            ok(!("length" in obj), "length in " + name + " constructor.");
+            if(window.Window)
+                ok(!Object.prototype.hasOwnProperty.call(window.Window.prototype, name), name + " is a property of window's prototype.");
+        }else {
+            for(var j = 0; j < special_ctors[i][1].length; j++)
+                ok(Object.prototype.hasOwnProperty.call(obj, special_ctors[i][1][j]), special_ctors[i][1][j] + " not a property of " + name + " constructor.");
+
+            for(var j = 0; j < special_ctors[i][2].length; j++)
+                ok(!Object.prototype.hasOwnProperty.call(obj, special_ctors[i][2][j]), special_ctors[i][2][j] + " is a property of " + name + " constructor.");
+
+            ok(Object.getPrototypeOf(obj) === Function.prototype, "getPrototypeOf(" + name + " constructor) = " + Object.getPrototypeOf(obj));
+            ok(!Object.prototype.hasOwnProperty.call(Object.getPrototypeOf(window), name), name + " is a property of window's prototype.");
+
+            if(obj.create) {
+                var proto = obj.prototype, func = obj.create, s = Object.prototype.toString.call(func);
+                ok(s === "[object Function]", "obj.create toString = " + s);
+                ok(Object.getPrototypeOf(func) === Function.prototype, "getPrototypeOf(" + name + ".create) = " + Object.getPrototypeOf(func));
+                ok(Object.prototype.hasOwnProperty.call(func, "arguments"), "arguments not a property of " + name + ".create");
+                ok(!Object.prototype.hasOwnProperty.call(func, "length"), "length is a property of " + name + ".create");
+                ok(Object.prototype.hasOwnProperty.call(func, "prototype"), "prototype not a property of " + name + ".create");
+
+                obj = func();
+                ok(Object.getPrototypeOf(obj) === proto, "getPrototypeOf(obj.create()) = " + Object.getPrototypeOf(obj));
+                obj = func.call(Object);
+                ok(Object.getPrototypeOf(obj) === proto, "getPrototypeOf(obj.create() on Object) = " + Object.getPrototypeOf(obj));
+            }
+        }
+    }
 
     if(v < 9) {
         // IHTMLDOMConstructorCollection props
@@ -1250,8 +1425,7 @@ sync_test("builtin_prototypes", function() {
                 todo_wine.ok(false, ctors[i][0] + " not implemented");
                 continue;
             }
-            var a, b;
-            r = 0;
+            var a, b, r = 0;
             try {
                 eval("a = " + ctors[i][0] + "; b = window." + ctors[i][0] + ";");
             }catch(ex) {
@@ -1296,175 +1470,95 @@ sync_test("builtin_prototypes", function() {
             }
         }
     }else {
-        var protos = [
-            [ "Attr",                           "Node" ],
-            [ "CharacterData",                  "Node" ],
-            [ "ClientRect",                     "Object" ],
-            [ "ClientRectList",                 "Object" ],
-            [ "Comment",                        "CharacterData" ],
-            [ "Console",                        "Object" ],
-            [ "Crypto",                         "Object" ],
-            [ "CSSRule",                        "Object" ],
-            [ "CSSStyleDeclaration",            "Object" ],
-            [ "CSSStyleRule",                   "CSSRule" ],
-            [ "CSSStyleSheet",                  "StyleSheet" ],
-            [ "CustomEvent",                    "Event" ],
-            [ "Document",                       "Node" ],
-            [ "DocumentType",                   "Node" ],
-            [ "DOMImplementation",              "Object" ],
-            [ "DOMParser",                      "Object" ],
-            [ "DOMTokenList",                   "Object" ],
-            [ "Element",                        "Node" ],
-            [ "Event",                          "Object" ],
-            [ "History",                        "Object" ],
-            [ "HTMLAnchorElement",              "HTMLElement" ],
-            [ "HTMLAreaElement",                "HTMLElement" ],
-            [ "HTMLBodyElement",                "HTMLElement" ],
-            [ "HTMLButtonElement",              "HTMLElement" ],
-            [ "HTMLCollection",                 "Object" ],
-            [ "HTMLDocument",                   "Document" ],
-            [ "HTMLElement",                    "Element" ],
-            [ "HTMLEmbedElement",               "HTMLElement" ],
-            [ "HTMLFormElement",                "HTMLElement" ],
-            [ "HTMLFrameElement",               "HTMLElement" ],
-            [ "HTMLHeadElement",                "HTMLElement" ],
-            [ "HTMLHtmlElement",                "HTMLElement" ],
-            [ "HTMLIFrameElement",              "HTMLElement" ],
-            [ "HTMLImgElement",                 "HTMLElement" ],
-            [ "HTMLInputElement",               "HTMLElement" ],
-            [ "HTMLLabelElement",               "HTMLElement" ],
-            [ "HTMLLinkElement",                "HTMLElement" ],
-            [ "HTMLMetaElement",                "HTMLElement" ],
-            [ "HTMLObjectElement",              "HTMLElement" ],
-            [ "HTMLOptionElement",              "HTMLElement" ],
-            [ "HTMLScriptElement",              "HTMLElement" ],
-            [ "HTMLSelectElement",              "HTMLElement" ],
-            [ "HTMLStyleElement",               "HTMLElement" ],
-            [ "HTMLTableCellElement",           "HTMLElement" ],
-            [ "HTMLTableDataCellElement",       "HTMLTableCellElement" ],
-            [ "HTMLTableElement",               "HTMLElement" ],
-            [ "HTMLTableRowElement",            "HTMLElement" ],
-            [ "HTMLTextAreaElement",            "HTMLElement" ],
-            [ "HTMLTitleElement",               "HTMLElement" ],
-            [ "HTMLUnknownElement",             "HTMLElement" ],
-            [ "Image",                          "HTMLElement" ],
-            [ "KeyboardEvent",                  "UIEvent" ],
-            [ "MediaQueryList",                 "Object" ],
-            [ "MessageEvent",                   "Event" ],
-            [ "MimeTypeArray",                  "Object" ],
-            [ "MouseEvent",                     "UIEvent" ],
-            [ "MSCSSProperties",                "CSSStyleDeclaration" ],
-            [ "MSCSSRuleList",                  "Object" ],
-            [ "MSCurrentStyleCSSProperties",    "MSCSSProperties" ],
-            [ "MSEventObj",                     "Object" ],
-            [ "MSMimeTypesCollection",          "Object" ],
-            [ "MSNamespaceInfoCollection",      "Object" ],
-            [ "MSPluginsCollection",            "Object" ],
-            [ "MSSelection",                    "Object" ],
-            [ "MSStyleCSSProperties",           "MSCSSProperties" ],
-            [ "NamedNodeMap",                   "Object" ],
-            [ "Navigator",                      "Object" ],
-            [ "Node",                           "Object" ],
-            [ "NodeList",                       "Object" ],
-            [ "Option",                         "HTMLElement" ],
-            [ "PageTransitionEvent",            "Event" ],
-            [ "Performance",                    "Object" ],
-            [ "PerformanceNavigation",          "Object" ],
-            [ "PerformanceTiming",              "Object" ],
-            [ "PluginArray",                    "Object" ],
-            [ "ProgressEvent",                  "Event" ],
-            [ "Screen",                         "Object" ],
-            [ "Storage",                        "Object" ],
-            [ "StorageEvent",                   "Event" ],
-            [ "StyleSheet",                     "Object" ],
-            [ "StyleSheetList",                 "Object" ],
-            [ "SubtleCrypto",                   "Object" ],
-            [ "Text",                           "CharacterData" ],
-            [ "TextRange",                      "Object" ],
-            [ "UIEvent",                        "Event" ],
-            [ "Window",                         "Object" ],
-            [ "XDomainRequest",                 "Object" ],
-            [ "XMLDocument",                    "Document" ],
-            [ "XMLHttpRequest",                 "Object" ]
+        var ctors = [
+            [ "Attr" ],
+            [ "CharacterData" ],
+            [ "ClientRect" ],
+            [ "ClientRectList" ],
+            [ "Comment" ],
+            [ "Console", 10 ],
+            [ "Crypto", 11 ],
+            [ "CSSRule" ],
+            [ "CSSStyleDeclaration" ],
+            [ "CSSStyleRule" ],
+            [ "CSSStyleSheet" ],
+            [ "CustomEvent" ],
+            [ "Document" ],
+            [ "DocumentType" ],
+            [ "DOMImplementation" ],
+            [ "DOMTokenList", 10 ],
+            [ "Element" ],
+            [ "Event" ],
+            [ "History" ],
+            [ "HTMLAnchorElement" ],
+            [ "HTMLAreaElement" ],
+            [ "HTMLBodyElement" ],
+            [ "HTMLButtonElement" ],
+            [ "HTMLCollection" ],
+            [ "HTMLDocument", 11 ],
+            [ "HTMLElement" ],
+            [ "HTMLEmbedElement" ],
+            [ "HTMLFormElement" ],
+            [ "HTMLFrameElement" ],
+            [ "HTMLHeadElement" ],
+            [ "HTMLHtmlElement" ],
+            [ "HTMLIFrameElement" ],
+            [ "HTMLImageElement" ],
+            [ "HTMLInputElement" ],
+            [ "HTMLLabelElement" ],
+            [ "HTMLLinkElement" ],
+            [ "HTMLObjectElement" ],
+            [ "HTMLOptionElement" ],
+            [ "HTMLScriptElement" ],
+            [ "HTMLSelectElement" ],
+            [ "HTMLStyleElement" ],
+            [ "HTMLTableCellElement" ],
+            [ "HTMLTableDataCellElement" ],
+            [ "HTMLTableElement" ],
+            [ "HTMLTableRowElement" ],
+            [ "HTMLTextAreaElement" ],
+            [ "HTMLTitleElement" ],
+            [ "HTMLUnknownElement" ],
+            [ "KeyboardEvent" ],
+            [ "MediaQueryList", 10 ],
+            [ "MessageEvent" ],
+            [ "MimeTypeArray", 11 ],
+            [ "MouseEvent" ],
+            [ "MSCSSProperties" ],
+            [ "MSCSSRuleList" ],
+            [ "MSCurrentStyleCSSProperties" ],
+            [ "MSEventObj" ],
+            [ "MSNamespaceInfoCollection", 0, 9 ],
+            [ "MSSelection", 0, 10 ],
+            [ "MSStyleCSSProperties" ],
+            [ "MutationObserver", 11 ],
+            [ "NamedNodeMap" ],
+            [ "Navigator" ],
+            [ "Node" ],
+            [ "NodeList" ],
+            [ "PageTransitionEvent", 11 ],
+            [ "Performance" ],
+            [ "PerformanceNavigation" ],
+            [ "PerformanceTiming" ],
+            [ "PluginArray", 11 ],
+            [ "ProgressEvent", 10 ],
+            [ "Range" ],
+            [ "Screen" ],
+            [ "Storage" ],
+            [ "StorageEvent" ],
+            [ "StyleSheet" ],
+            [ "StyleSheetList" ],
+            [ "Text" ],
+            [ "TextRange" ],
+            [ "UIEvent" ],
+            [ "Window" ],
+            [ "XMLHttpRequest" ]
         ];
-
-        for(var i = 0; i < protos.length; i++) {
-            if(!(protos[i][0] in window))
-                continue;
-            var a, b;
-            eval("a = Object.getPrototypeOf(" + protos[i][0] + ".prototype); b = " + protos[i][1] + ".prototype;");
-            ok(a === b, "getPrototypeOf(" + protos[i][0] + ".prototype) = " + a);
-        }
-
-        var CSS_props = [ "accelerator","backgroundPositionX","backgroundPositionY","getAttribute","imeMode","layoutFlow","layoutGrid","layoutGridChar",
-                          "layoutGridLine","layoutGridMode","layoutGridType","lineBreak","msBlockProgression","msInterpolationMode","removeAttribute",
-                          "scrollbar3dLightColor","scrollbarArrowColor","scrollbarBaseColor","scrollbarDarkShadowColor","scrollbarFaceColor",
-                          "scrollbarHighlightColor","scrollbarShadowColor","scrollbarTrackColor","setAttribute","styleFloat","textAutospace",
-                          "textJustifyTrim","textKashida","textKashidaSpace","writingMode","zoom" ];
-        var Elem_props = [ "clientHeight","clientLeft","clientTop","clientWidth","firstElementChild","getAttribute","getAttributeNode","getAttributeNodeNS",
-                           "getAttributeNS","getBoundingClientRect","getClientRects","getElementsByTagName","getElementsByTagNameNS","hasAttribute",
-                           "hasAttributeNS","lastElementChild","msMatchesSelector","nextElementSibling","previousElementSibling","querySelector",
-                           "removeAttribute","removeAttributeNode","removeAttributeNS","scrollHeight","scrollLeft","scrollTop","scrollWidth","setAttribute",
-                           "setAttributeNode","setAttributeNodeNS","setAttributeNS","tagName" ];
-        var Event_props = [ "bubbles","cancelable","cancelBubble","currentTarget","defaultPrevented","eventPhase","initEvent","isTrusted",
-                            "preventDefault","srcElement","stopImmediatePropagation","stopPropagation","target","timeStamp","type" ];
-        var HtmlElem_props = [ "accessKey","applyElement","blur","canHaveHTML","children","className","clearAttributes","click","componentFromPoint",
-                               "contains","contentEditable","createControlRange","currentStyle","dir","disabled","dragDrop","focus","getAdjacentText",
-                               "getElementsByClassName","hideFocus","id","innerHTML","innerText","insertAdjacentElement","insertAdjacentHTML",
-                               "insertAdjacentText","isContentEditable","isDisabled","isMultiLine","isTextEdit","lang","language","mergeAttributes",
-                               "offsetHeight","offsetLeft","offsetParent","offsetTop","offsetWidth","onabort","onactivate","onbeforeactivate","onbeforecopy",
-                               "onbeforecut","onbeforedeactivate","onbeforepaste","onblur","oncanplay","oncanplaythrough","onchange","onclick",
-                               "oncontextmenu","oncopy","oncut","ondblclick","ondeactivate","ondrag","ondragend","ondragenter","ondragleave","ondragover",
-                               "ondragstart","ondrop","ondurationchange","onemptied","onended","onerror","onfocus","onfocusin","onfocusout","onhelp",
-                               "oninput","onkeydown","onkeypress","onkeyup","onload","onloadeddata","onloadedmetadata","onloadstart","onmousedown",
-                               "onmouseleave","onmousemove","onmouseout","onmouseover","onmouseup","onmousewheel","onpaste","onpause","onplay","onplaying",
-                               "onprogress","onratechange","onreset","onscroll","onseeked","onseeking","onselect","onselectstart","onstalled","onsubmit",
-                               "onsuspend","ontimeupdate","onvolumechange","onwaiting","outerHTML","outerText","parentElement","parentTextEdit",
-                               "recordNumber","releaseCapture","replaceAdjacentText","runtimeStyle","scrollIntoView","setActive","setCapture","sourceIndex",
-                               "style","tabIndex","title","uniqueID","uniqueNumber" ];
-        var Node_props = [ "addEventListener","appendChild","attributes","childNodes","cloneNode","compareDocumentPosition","dispatchEvent","firstChild",
-                           "hasChildNodes","insertBefore","isDefaultNamespace","isEqualNode","isSameNode","isSupported","lastChild","localName",
-                           "lookupNamespaceURI","lookupPrefix","namespaceURI","nextSibling","nodeName","nodeType","nodeValue","ownerDocument",
-                           "parentNode","prefix","previousSibling","removeChild","removeEventListener","replaceChild","textContent" ];
-        var TableCell_props = [ "align","background","bgColor","borderColor","borderColorDark","borderColorLight","cellIndex","colSpan","height","noWrap",
-                                "rowSpan","vAlign","width" ];
-
-        protos = [
-            [ "Attr", ["expando","name","specified","value"], Node_props ],
-            [ "CharacterData", ["data","length","appendData"], Node_props ],
-            [ "Comment", ["text"], ["insertData","replaceData","substringData"] ],
-            [ "CSSStyleRule", ["readOnly","selectorText","style"], ["cssText","parentRule","parentStyleSheet","type" ] ],
-            [ "CSSStyleSheet", ["addRule","cssRules","ownerRule","rules"], ["disabled","media","ownerNode","parentStyleSheet","title","type"] ],
-            [ "CustomEvent", ["detail","initCustomEvent"], Event_props ],
-            [ "Document", ["body","doctype","documentMode","onactivate","parentWindow","styleSheets","title"], Node_props ],
-            [ "DocumentType", ["entities","internalSubset","name","notations","publicId","systemId"], Node_props ],
-            [ "Element", Elem_props, Node_props ],
-            [ "HTMLElement", HtmlElem_props, Elem_props ],
-            [ "HTMLTableCellElement", TableCell_props, HtmlElem_props ],
-            [ "HTMLTableDataCellElement", [], TableCell_props ],
-            [ "HTMLUnknownElement", ["recordset","namedRecordset"], HtmlElem_props ],
-            [ "KeyboardEvent", ["altKey","ctrlKey","getModifierState","initKeyboardEvent","key","metaKey"], ["detail","initUIEvent","view"] ],
-            [ "MessageEvent", ["data","initMessageEvent","origin","source"], Event_props ],
-            [ "MouseEvent", ["button","clientX","initMouseEvent","offsetY","pageX","shiftKey","x","y"], ["detail","initUIEvent","view"] ],
-            [ "MSCSSProperties", CSS_props, ["background","border","clip","fontWeight","listStyle","quotes","setProperty","zIndex"] ],
-            [ "MSCurrentStyleCSSProperties", ["blockDirection","clipBottom","clipLeft","clipRight","clipTop","hasLayout"], CSS_props ],
-            [ "MSStyleCSSProperties", ["pixelTop","pixelWidth","posHeight","posLeft","textDecorationBlink","textDecorationNone"], CSS_props ],
-            [ "ProgressEvent", ["initProgressEvent","lengthComputable","loaded","total"], Event_props ],
-            [ "StorageEvent", ["initStorageEvent","key","newValue","oldValue","storageArea"], Event_props ],
-            [ "Text", ["splitText"], ["data","length","appendData","deleteData","insertData","replaceData","substringData"] ],
-            [ "UIEvent", ["detail","initUIEvent","view"], Event_props ]
-        ];
-
-        for(var i = 0; i < protos.length; i++) {
-            if(!(protos[i][0] in window))
-                continue;
-            eval("r = " + protos[i][0] + ".prototype");
-            for(var j = 0; j < protos[i][1].length; j++)
-                ok(Object.prototype.hasOwnProperty.call(r, protos[i][1][j]), protos[i][1][j] + " not a property of " + protos[i][0] + ".prototype");
-            for(var j = 0; j < protos[i][2].length; j++) {
-                ok(!Object.prototype.hasOwnProperty.call(r, protos[i][2][j]), protos[i][2][j] + " is a property of " + protos[i][0] + ".prototype");
-                ok(protos[i][2][j] in r, protos[i][2][j] + " not in " + protos[i][0] + ".prototype");
-            }
+        for(var i = 0; i < ctors.length; i++) {
+            if((ctors[i].length > 1 && v < ctors[i][1]) || (ctors[i].length > 2 && v > ctors[i][2]))
+                ok(!(ctors[i][0] in window), ctors[i][0] + " in window.");
+            else
+                ok(Object.prototype.hasOwnProperty.call(window, ctors[i][0]), ctors[i][0] + " not a property of window.");
         }
     }
 });
@@ -1667,11 +1761,14 @@ sync_test("window_props", function() {
     test_exposed("requestAnimationFrame", v >= 10);
     test_exposed("Map", v >= 11);
     test_exposed("Set", v >= 11);
+    test_exposed("WeakMap", v >= 11);
+    test_exposed("WeakSet", false);
     test_exposed("performance", true);
     test_exposed("console", v >= 10);
     test_exposed("DOMParser", v >= 9);
     test_exposed("matchMedia", v >= 10);
     test_exposed("msCrypto", v >= 11);
+    test_exposed("MutationObserver", v >= 11);
     test_exposed("XDomainRequest", v < 11);
 });
 
@@ -2973,6 +3070,134 @@ sync_test("map_obj", function() {
     ok(r === 1, "r = " + r);
 });
 
+async_test("weakmap_obj", function() {
+    if(!("WeakMap" in window)) { next_test(); return; }
+
+    try {
+        var s = WeakMap();
+        ok(false, "expected exception calling constructor as method");
+    }catch(e) {
+        ok(e.number === 0xa13fc - 0x80000000, "calling constructor as method threw " + e.number);
+    }
+
+    var s = new WeakMap, r, o, o2;
+    ok(Object.getPrototypeOf(s) === WeakMap.prototype, "unexpected WeakMap prototype");
+
+    function test_length(name, len) {
+        ok(WeakMap.prototype[name].length === len, "WeakMap.prototype." + name + " = " + WeakMap.prototype[name].length);
+    }
+    test_length("clear", 0);
+    test_length("delete", 1);
+    test_length("get", 1);
+    test_length("has", 1);
+    test_length("set", 2);
+    ok(!("entries" in s), "entries is in WeakMap");
+    ok(!("forEach" in s), "forEach is in WeakMap");
+    ok(!("keys" in s), "keys is in WeakMap");
+    ok(!("size" in s), "size is in WeakMap");
+    ok(!("values" in s), "values is in WeakMap");
+
+    r = Object.prototype.toString.call(s);
+    ok(r === "[object Object]", "toString returned " + r);
+
+    r = s.get("test");
+    ok(r === undefined, "get('test') returned " + r);
+    r = s.has("test");
+    ok(r === false, "has('test') returned " + r);
+
+    try {
+        r = s.set("test", 1);
+        ok(false, "set('test') did not throw");
+    }catch(e) {
+        ok(e.number === 0xa13fd - 0x80000000, "set('test') threw " + e.number);
+    }
+    try {
+        r = s.set(external.testHostContext(true), 1);
+        ok(false, "set(host_obj) did not throw");
+    }catch(e) {
+        ok(e.number === 0xa13fd - 0x80000000, "set(host_obj) threw " + e.number);
+    }
+
+    r = s.set({}, 1);
+    ok(r === undefined, "set({}, 1) returned " + r);
+
+    o = {}, o2 = {};
+    r = s.get({});
+    ok(r === undefined, "get({}) returned " + r);
+    r = s.has({});
+    ok(r === false, "has({}) returned " + r);
+
+    r = s.set(o, 2);
+    ok(r === undefined, "set(o, 2) returned " + r);
+    r = s.get(o);
+    ok(r === 2, "get(o) returned " + r);
+    r = s.has(o);
+    ok(r === true, "has(o) returned " + r);
+    r = s.get(o2);
+    ok(r === undefined, "get(o2) before set returned " + r);
+    r = s.has(o2);
+    ok(r === false, "has(o2) before set returned " + r);
+    r = s.set(o2, "test");
+    ok(r === undefined, "set(o2, 'test') returned " + r);
+    r = s.get(o2);
+    ok(r === "test", "get(o2) returned " + r);
+    r = s.has(o2);
+    ok(r === true, "has(o2) returned " + r);
+
+    r = s["delete"]("test"); /* using s.delete() would break parsing in quirks mode */
+    ok(r === false, "delete('test') returned " + r);
+    r = s["delete"]({});
+    ok(r === false, "delete({}) returned " + r);
+    r = s["delete"](o);
+    ok(r === true, "delete(o) returned " + r);
+
+    r = s.get(o);
+    ok(r === undefined, "get(o) after delete returned " + r);
+    r = s.has(o);
+    ok(r === false, "has(o) after delete returned " + r);
+    r = s.get(o2);
+    ok(r === "test", "get(o2) after delete returned " + r);
+    r = s.has(o2);
+    ok(r === true, "has(o2) after delete returned " + r);
+
+    r = s.set(o, undefined);
+    ok(r === undefined, "set(o, undefined) returned " + r);
+    r = s.get(o);
+    ok(r === undefined, "get(o) after re-set returned " + r);
+    r = s.has(o);
+    ok(r === true, "has(o) after re-set returned " + r);
+
+    r = s.clear();
+    ok(r === undefined, "clear() returned " + r);
+    r = s.get(o);
+    ok(r === undefined, "get(o) after clear returned " + r);
+    r = s.has(o);
+    ok(r === false, "has(o) after clear returned " + r);
+    r = s.get(o2);
+    ok(r === undefined, "get(o2) after clear returned " + r);
+    r = s.has(o2);
+    ok(r === false, "has(o2) after clear returned " + r);
+
+    r = external.newRefTest();
+    ok(r.ref === 1, "wrong ref after newRefTest: " + r.ref);
+    o = { val: r.get(), map: s };
+    s.set(o, o);
+    ok(r.ref > 1, "map entry released");
+
+    o = Date.now();
+    CollectGarbage();
+    function retry() {
+        if(r.ref > 1 && Date.now() - o < 5000) {
+            CollectGarbage();
+            window.setTimeout(retry);
+            return;
+        }
+        ok(r.ref === 1, "map entry not released");
+        next_test();
+    }
+    window.setTimeout(retry);
+});
+
 sync_test("storage", function() {
     var v = document.documentMode, i, r, list;
 
@@ -4091,6 +4316,158 @@ sync_test("__defineSetter__", function() {
     x.bar = 10;
     ok(x.bar === undefined, "x.bar with setter = " + x.bar);
     ok(x.setterVal === 9, "x.setterVal after setting bar = " + x.setterVal);
+});
+
+sync_test("Crypto", function() {
+    var crypto = window.msCrypto, arr, r;
+    if(!crypto) return;
+
+    ok(Object.prototype.hasOwnProperty.call(Object.getPrototypeOf(window), "msCrypto"), "msCrypto not a property of window's prototype.");
+    r = Object.getPrototypeOf(crypto);
+    ok(r === window.Crypto.prototype, "getPrototypeOf(crypto) = " + r);
+
+    ok("subtle" in crypto, "subtle not in crypto");
+    ok("getRandomValues" in crypto, "getRandomValues not in crypto");
+    ok(!("randomUUID" in crypto), "randomUUID is in crypto");
+
+    var list = [ "decrypt", "deriveKey", "digest", "encrypt", "exportKey", "generateKey", "importKey", "sign", "unwrapKey", "verify", "wrapKey" ];
+    for(var i = 0; i < list.length; i++)
+        ok(list[i] in crypto.subtle, list[i] + " not in crypto.subtle");
+    ok(!("deriveBits" in crypto.subtle), "deriveBits is in crypto.subtle");
+
+    list = [
+        [ "Int8Array",    65536 ],
+        [ "Uint8Array",   65536 ],
+        [ "Int16Array",   32768 ],
+        [ "Uint16Array",  32768 ],
+        [ "Int32Array",   16384 ],
+        [ "Uint32Array",  16384 ]
+    ];
+    for(var i = 0; i < list.length; i++) {
+        var arrType = list[i][0];
+        arr = eval(arrType + "(" + list[i][1] + ")");
+
+        ok(arr[0] === 0, arrType + "[0] = " + arr[0]);
+        ok(arr[1] === 0, arrType + "[1] = " + arr[1]);
+        r = crypto.getRandomValues(arr);
+        ok(r === arr, "getRandomValues returned " + r);
+
+        arr = eval(arrType + "(" + (list[i][1]+1) + ")");
+        try {
+            crypto.getRandomValues(arr);
+        }catch(ex) {
+            var n = ex.number >>> 0;
+            todo_wine.
+            ok(ex.name === "QuotaExceededError", "getRandomValues(oversized " + arrType + ") threw " + ex.name);
+            todo_wine.
+            ok(n === 0, "getRandomValues(oversized " + arrType + ") threw code " + n);
+            todo_wine.
+            ok(ex.message === "QuotaExceededError", "getRandomValues(oversized " + arrType + ") threw message " + ex.message);
+        }
+    }
+
+    try {
+        crypto.getRandomValues(null);
+        ok(false, "getRandomValues(null) did not throw exception");
+    }catch(e) {
+        ok(e.number === 0x70057 - 0x80000000, "getRandomValues(null) threw " + e.number);
+    }
+    try {
+        crypto.getRandomValues(external.nullDisp);
+        ok(false, "getRandomValues(nullDisp) did not throw exception");
+    }catch(e) {
+        ok(e.number === 0x70057 - 0x80000000, "getRandomValues(nullDisp) threw " + e.number);
+    }
+    try {
+        crypto.getRandomValues([1,2,3]);
+        ok(false, "getRandomValues([1,2,3]) did not throw exception");
+    }catch(e) {
+        ok(e.number === 0x70057 - 0x80000000, "getRandomValues([1,2,3]) threw " + e.number);
+    }
+    arr = Float32Array(2);
+    try {
+        crypto.getRandomValues(arr);
+        ok(false, "getRandomValues(Float32Array) did not throw exception");
+    }catch(ex) {
+        var n = ex.number >>> 0;
+        todo_wine.
+        ok(ex.name === "TypeMismatchError", "getRandomValues(Float32Array) threw " + ex.name);
+        todo_wine.
+        ok(n === 0, "getRandomValues(Float32Array) threw code " + n);
+    }
+    arr = Float64Array(2);
+    try {
+        crypto.getRandomValues(arr);
+        ok(false, "getRandomValues(Float64Array) did not throw exception");
+    }catch(ex) {
+        var n = ex.number >>> 0;
+        todo_wine.
+        ok(ex.name === "TypeMismatchError", "getRandomValues(Float64Array) threw " + ex.name);
+        todo_wine.
+        ok(n === 0, "getRandomValues(Float64Array) threw code " + n);
+    }
+});
+
+sync_test("MutationObserver", function() {
+    if (!window.MutationObserver) {
+        return;
+    }
+
+    try {
+        window.MutationObserver();
+        ok(false, "MutationObserver without args should fail");
+    } catch(e) {
+        ok(e.number == 0xffff - 0x80000000, "MutationObserver without new threw exception " + e.number);
+    }
+
+    try {
+        window.MutationObserver(42);
+        ok(false, "MutationObserver with non-function should fail");
+    } catch(e) {
+        todo_wine.
+        ok(e.name == "TypeMismatchError", "MutationObserver with non-function arg threw exception " + e.name);
+    }
+
+    try {
+        window.MutationObserver(function() {});
+    } catch(e) {
+        ok(false, "MutationObserver without new threw exception " + e.number);
+    }
+
+    try {
+        new window.MutationObserver();
+        ok(false, "MutationObserver with no args should fail");
+    } catch(e) {
+        ok(e.number == 0xffff - 0x80000000, "MutationObserver with no args threw exception " + e.number);
+    }
+
+    try {
+        new window.MutationObserver(1);
+        ok(false, "MutationObserver with non-function arg should fail");
+    } catch(e) {
+        todo_wine.
+        ok(e.name == "TypeMismatchError", "MutationObserver with non-function arg threw exception " + e.name);
+    }
+
+    try {
+        new window.MutationObserver(function() {});
+    } catch(e) {
+        ok(false, "MutationObserver threw exception " + e.number);
+    }
+
+    try {
+        new window.MutationObserver(function() {}, 1);
+    } catch(e) {
+        ok(false, "MutationObserver with extra args threw exception " + e.number);
+    }
+
+    var mutation_observer = new MutationObserver(function() {});
+    function test_exposed(prop) {
+        ok(prop in mutation_observer, prop + " not found in MutationObserver.");
+    }
+    test_exposed("observe");
+    test_exposed("disconnect");
+    test_exposed("takeRecords");
 });
 
 sync_test("initMessageEvent", function() {

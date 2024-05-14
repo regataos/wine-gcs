@@ -81,18 +81,18 @@ struct video_processor
     IMFMediaType *output_type;
     MFT_OUTPUT_STREAM_INFO output_info;
 
-    struct wg_transform *wg_transform;
+    wg_transform_t wg_transform;
     struct wg_sample_queue *wg_sample_queue;
 };
 
 static HRESULT try_create_wg_transform(struct video_processor *impl)
 {
     struct wg_format input_format, output_format;
-    struct wg_transform_attrs attrs = {.input_queue_length = 15};
+    struct wg_transform_attrs attrs = {0};
 
     if (impl->wg_transform)
         wg_transform_destroy(impl->wg_transform);
-    impl->wg_transform = NULL;
+    impl->wg_transform = 0;
 
     mf_media_type_to_wg_format(impl->input_type, &input_format);
     if (input_format.major_type == WG_MAJOR_TYPE_UNKNOWN)
@@ -101,6 +101,13 @@ static HRESULT try_create_wg_transform(struct video_processor *impl)
     mf_media_type_to_wg_format(impl->output_type, &output_format);
     if (output_format.major_type == WG_MAJOR_TYPE_UNKNOWN)
         return MF_E_INVALIDMEDIATYPE;
+
+    /* prevent fps differences from failing to connect the elements */
+    if (output_format.u.video.fps_d || output_format.u.video.fps_n)
+    {
+        input_format.u.video.fps_d = output_format.u.video.fps_d;
+        input_format.u.video.fps_n = output_format.u.video.fps_n;
+    }
 
     if (!(impl->wg_transform = wg_transform_create(&input_format, &output_format, &attrs)))
         return E_FAIL;
@@ -506,18 +513,7 @@ static HRESULT WINAPI video_processor_ProcessEvent(IMFTransform *iface, DWORD id
 
 static HRESULT WINAPI video_processor_ProcessMessage(IMFTransform *iface, MFT_MESSAGE_TYPE message, ULONG_PTR param)
 {
-    struct video_processor *impl = impl_from_IMFTransform(iface);
-
-    TRACE("iface %p, message %#x, param %p.\n", iface, message, (void *)param);
-
-    if (!impl->wg_transform)
-        return MF_E_TRANSFORM_TYPE_NOT_SET;
-
-    if (message == MFT_MESSAGE_COMMAND_DRAIN)
-        return wg_transform_drain(impl->wg_transform);
-
-    FIXME("Ignoring message %#x.\n", message);
-
+    FIXME("iface %p, message %#x, param %#Ix stub!\n", iface, message, param);
     return S_OK;
 }
 
@@ -615,7 +611,7 @@ HRESULT video_processor_create(REFIID riid, void **ret)
         },
     };
     struct wg_transform_attrs attrs = {0};
-    struct wg_transform *transform;
+    wg_transform_t transform;
     struct video_processor *impl;
     HRESULT hr;
 

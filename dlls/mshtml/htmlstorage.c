@@ -330,6 +330,11 @@ static HRESULT send_storage_event(HTMLStorage *storage, BSTR key, BSTR old_value
     HRESULT hres = S_OK;
 
     ctx.url = NULL;
+
+    /* FIXME: Events are actually sent to the current window on native, even if we're detached. */
+    if(!window->base.outer_window)
+        goto done;
+
     if(window->base.outer_window->uri_nofrag) {
         hres = IUri_GetDisplayUri(window->base.outer_window->uri_nofrag, &ctx.url);
         if(hres != S_OK)
@@ -1353,7 +1358,7 @@ static const dispex_static_data_vtbl_t HTMLStorage_dispex_vtbl = {
     .invoke           = HTMLStorage_invoke,
     .delete           = HTMLStorage_delete,
     .next_dispid      = HTMLStorage_next_dispid,
-    .override         = HTMLStorage_override,
+    .override         = HTMLStorage_override
 };
 
 static const tid_t HTMLStorage_iface_tids[] = {

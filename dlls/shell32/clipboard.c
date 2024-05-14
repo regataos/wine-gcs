@@ -38,8 +38,6 @@
 #include <stdarg.h>
 #include <string.h>
 
-#define NONAMELESSUNION
-
 #include "windef.h"
 #include "winbase.h"
 #include "winreg.h"
@@ -167,7 +165,7 @@ HGLOBAL RenderFILENAMEA (LPITEMIDLIST pidlRoot, LPITEMIDLIST * apidl, UINT cidl)
 		return 0;
 
 	bSuccess = SHGetPathFromIDListA(pidl, szTemp);
-	SHFree(pidl);
+	ILFree(pidl);
 	if (!bSuccess)
 		return 0;
 
@@ -199,7 +197,7 @@ HGLOBAL RenderFILENAMEW (LPITEMIDLIST pidlRoot, LPITEMIDLIST * apidl, UINT cidl)
 		return 0;
 
 	bSuccess = SHGetPathFromIDListW(pidl, szTemp);
-	SHFree(pidl);
+	ILFree(pidl);
 	if (!bSuccess)
 		return 0;
 
@@ -242,12 +240,12 @@ HRESULT GetPREFERREDDROPEFFECT (STGMEDIUM *pmedium, DWORD *value)
 
     TRACE("(%p, %p)\n", pmedium, value);
 
-    pEffect = GlobalLock(pmedium->u.hGlobal);
+    pEffect = GlobalLock(pmedium->hGlobal);
     if (pEffect)
     {
         *value = *pEffect;
         result = S_OK;
-        GlobalUnlock(pmedium->u.hGlobal);
+        GlobalUnlock(pmedium->hGlobal);
     }
 
     return result;

@@ -406,6 +406,43 @@ static void test_choosepixelformat(void)
     pfd.cDepthBits = 0;
 }
 
+static void test_choosepixelformat_flag_is_ignored_when_unset(DWORD flag)
+{
+    PIXELFORMATDESCRIPTOR pfd = {
+        sizeof(PIXELFORMATDESCRIPTOR),
+        1,                     /* version */
+        flag,
+        PFD_TYPE_RGBA,
+        0,                     /* color depth */
+        0, 0, 0, 0, 0, 0,      /* color bits */
+        0,                     /* alpha buffer */
+        0,                     /* shift bit */
+        0,                     /* accumulation buffer */
+        0, 0, 0, 0,            /* accum bits */
+        0,                     /* z-buffer */
+        0,                     /* stencil buffer */
+        0,                     /* auxiliary buffer */
+        PFD_MAIN_PLANE,        /* main layer */
+        0,                     /* reserved */
+        0, 0, 0                /* layer masks */
+    };
+    PIXELFORMATDESCRIPTOR ret_fmt;
+    int set_idx;
+    int clear_idx;
+
+    set_idx = test_pfd(&pfd, &ret_fmt);
+    if (set_idx > 0)
+    {
+        ok( ret_fmt.dwFlags & flag, "flag 0x%08lu not set\n", flag );
+        /* now search for that pixel format with the flag cleared: */
+        pfd = ret_fmt;
+        pfd.dwFlags &= ~flag;
+        clear_idx = test_pfd(&pfd, &ret_fmt);
+        ok( set_idx == clear_idx, "flag 0x%08lu matched different pixel formats when set vs cleared\n", flag );
+        ok( ret_fmt.dwFlags & flag, "flag 0x%08lu not still set\n", flag );
+    } else skip( "couldn't find a pixel format with flag 0x%08lu\n", flag );
+}
+
 static void WINAPI gl_debug_message_callback(GLenum source, GLenum type, GLuint id, GLenum severity,
                                              GLsizei length, const GLchar *message, const void *userParam)
 {
@@ -554,54 +591,83 @@ static void test_setpixelformat(HDC winhdc)
 
 static void test_sharelists(HDC winhdc)
 {
-    HGLRC hglrc1, hglrc2, hglrc3;
-    BOOL res;
+    BOOL res, nvidia, amd, source_current, source_sharing, dest_current, dest_sharing;
+    HGLRC source, dest, other;
 
-    hglrc1 = wglCreateContext(winhdc);
-    res = wglShareLists(0, 0);
-    ok(res == FALSE, "Sharing display lists for no contexts passed!\n");
+    res = wglShareLists(NULL, NULL);
+    ok(!res, "Sharing display lists for no contexts passed!\n");
 
-    /* Test 1: Create a context and just share lists without doing anything special */
-    hglrc2 = wglCreateContext(winhdc);
-    if(hglrc2)
+    nvidia = !!strstr((const char*)glGetString(GL_VENDOR), "NVIDIA");
+    amd = strstr((const char*)glGetString(GL_VENDOR), "AMD") ||
+          strstr((const char*)glGetString(GL_VENDOR), "ATI");
+
+    for (source_current = FALSE; source_current <= TRUE; source_current++)
     {
-        res = wglShareLists(hglrc1, hglrc2);
-        ok(res, "Sharing of display lists failed\n");
-        wglDeleteContext(hglrc2);
-    }
+        for (source_sharing = FALSE; source_sharing <= TRUE; source_sharing++)
+        {
+            for (dest_current = FALSE; dest_current <= TRUE; dest_current++)
+            {
+                for (dest_sharing = FALSE; dest_sharing <= TRUE; dest_sharing++)
+                {
+                    winetest_push_context("source_current=%d source_sharing=%d dest_current=%d dest_sharing=%d",
+                                          source_current, source_sharing, dest_current, dest_sharing);
 
-    /* Test 2: Share display lists with a 'destination' context which has been made current */
-    hglrc2 = wglCreateContext(winhdc);
-    if(hglrc2)
-    {
-        res = wglMakeCurrent(winhdc, hglrc2);
-        ok(res, "Make current failed\n");
-        res = wglShareLists(hglrc1, hglrc2);
-        todo_wine ok(res, "Sharing display lists with a destination context which has been made current failed\n");
-        wglMakeCurrent(0, 0);
-        wglDeleteContext(hglrc2);
-    }
+                    source = wglCreateContext(winhdc);
+                    ok(!!source, "Create source context failed\n");
+                    dest = wglCreateContext(winhdc);
+                    ok(!!dest, "Create dest context failed\n");
+                    other = wglCreateContext(winhdc);
+                    ok(!!other, "Create other context failed\n");
 
-    /* Test 3: Share display lists with a context which already shares display lists with another context.
-     * According to MSDN the second parameter cannot share any display lists but some buggy drivers might allow it */
-    hglrc3 = wglCreateContext(winhdc);
-    if(hglrc3)
-    {
-        res = wglShareLists(hglrc3, hglrc1);
-        ok(res == FALSE, "Sharing of display lists passed for a context which already shared lists before\n");
-        wglDeleteContext(hglrc3);
-    }
+                    if (source_current)
+                    {
+                        res = wglMakeCurrent(winhdc, source);
+                        ok(res, "Make source current failed\n");
+                    }
+                    if (source_sharing)
+                    {
+                        res = wglShareLists(other, source);
+                        ok(res, "Sharing of display lists from other to source failed\n");
+                    }
+                    if (dest_current)
+                    {
+                        res = wglMakeCurrent(winhdc, dest);
+                        ok(res, "Make dest current failed\n");
+                    }
+                    if (dest_sharing)
+                    {
+                        res = wglShareLists(other, dest);
+                        todo_wine_if(source_sharing && dest_current)
+                        ok(res, "Sharing of display lists from other to dest failed\n");
+                    }
 
-    /* Test 4: Share display lists with a 'source' context which has been made current */
-    hglrc2 = wglCreateContext(winhdc);
-    if(hglrc2)
-    {
-        res = wglMakeCurrent(winhdc, hglrc1);
-        ok(res, "Make current failed\n");
-        res = wglShareLists(hglrc1, hglrc2);
-        ok(res, "Sharing display lists with a source context which has been made current failed\n");
-        wglMakeCurrent(0, 0);
-        wglDeleteContext(hglrc2);
+                    res = wglShareLists(source, dest);
+                    todo_wine_if((source_current || source_sharing) && (dest_current || dest_sharing))
+                    ok(res || broken(nvidia && !source_sharing && dest_sharing),
+                       "Sharing of display lists from source to dest failed\n");
+
+                    if (source_current || dest_current)
+                    {
+                        res = wglMakeCurrent(NULL, NULL);
+                        ok(res, "Make none current failed\n");
+                    }
+                    res = wglDeleteContext(source);
+                    ok(res, "Delete source context failed\n");
+                    res = wglDeleteContext(dest);
+                    ok(res, "Delete dest context failed\n");
+                    if (!strcmp(winetest_platform, "wine") || !amd || source_sharing || !dest_sharing)
+                    {
+                        /* If source_sharing=FALSE and dest_sharing=TRUE, wglShareLists succeeds on AMD, but
+                         * sometimes wglDeleteContext crashes afterwards. On Wine, both functions should always
+                         * succeed in this case. */
+                        res = wglDeleteContext(other);
+                        ok(res, "Delete other context failed\n");
+                    }
+
+                    winetest_pop_context();
+                }
+            }
+        }
     }
 }
 
@@ -659,7 +725,8 @@ static void test_makecurrent(HDC winhdc)
 static void test_colorbits(HDC hdc)
 {
     const int iAttribList[] = { WGL_COLOR_BITS_ARB, WGL_RED_BITS_ARB, WGL_GREEN_BITS_ARB,
-                                WGL_BLUE_BITS_ARB, WGL_ALPHA_BITS_ARB };
+                                WGL_BLUE_BITS_ARB, WGL_ALPHA_BITS_ARB, WGL_BLUE_SHIFT_ARB, WGL_GREEN_SHIFT_ARB,
+                                WGL_RED_SHIFT_ARB, WGL_ALPHA_SHIFT_ARB, };
     int iAttribRet[ARRAY_SIZE(iAttribList)];
     const int iAttribs[] = { WGL_ALPHA_BITS_ARB, 1, 0 };
     unsigned int nFormats;
@@ -687,6 +754,11 @@ static void test_colorbits(HDC hdc)
         skip("wglGetPixelFormatAttribivARB failed\n");
         return;
     }
+    ok(!iAttribRet[5], "got %d.\n", iAttribRet[5]);
+    ok(iAttribRet[6] == iAttribRet[3], "got %d.\n", iAttribRet[6]);
+    ok(iAttribRet[7] == iAttribRet[6] + iAttribRet[2], "got %d.\n", iAttribRet[7]);
+    ok(iAttribRet[8] == iAttribRet[7] + iAttribRet[1], "got %d.\n", iAttribRet[8]);
+
     iAttribRet[1] += iAttribRet[2]+iAttribRet[3]+iAttribRet[4];
     ok(iAttribRet[0] == iAttribRet[1], "WGL_COLOR_BITS_ARB (%d) does not equal R+G+B+A (%d)!\n",
                                        iAttribRet[0], iAttribRet[1]);
@@ -1912,11 +1984,16 @@ static void test_wglChoosePixelFormatARB(HDC hdc)
 
 static void test_copy_context(HDC hdc)
 {
-    HGLRC ctx, ctx2;
+    HGLRC ctx, ctx2, old_ctx;
     BOOL ret;
+
+    old_ctx = wglGetCurrentContext();
+    ok(!!old_ctx, "wglGetCurrentContext failed, last error %#lx.\n", GetLastError());
 
     ctx = wglCreateContext(hdc);
     ok(!!ctx, "Failed to create GL context, last error %#lx.\n", GetLastError());
+    ret = wglMakeCurrent(hdc, ctx);
+    ok(ret, "wglMakeCurrent failed, last error %#lx.\n", GetLastError());
     ctx2 = wglCreateContext(hdc);
     ok(!!ctx2, "Failed to create GL context, last error %#lx.\n", GetLastError());
 
@@ -1924,10 +2001,64 @@ static void test_copy_context(HDC hdc)
     todo_wine
     ok(ret, "Failed to copy GL context, last error %#lx.\n", GetLastError());
 
+    ret = wglMakeCurrent(NULL, NULL);
+    ok(ret, "wglMakeCurrent failed, last error %#lx.\n", GetLastError());
     ret = wglDeleteContext(ctx2);
     ok(ret, "Failed to delete GL context, last error %#lx.\n", GetLastError());
     ret = wglDeleteContext(ctx);
     ok(ret, "Failed to delete GL context, last error %#lx.\n", GetLastError());
+
+    ret = wglMakeCurrent(hdc, old_ctx);
+    ok(ret, "wglMakeCurrent failed, last error %#lx.\n", GetLastError());
+}
+
+static void test_child_window(HWND hwnd, PIXELFORMATDESCRIPTOR *pfd)
+{
+    int pixel_format;
+    DWORD t1, t;
+    HGLRC hglrc;
+    HWND child;
+    HDC hdc;
+    int res;
+
+    child = CreateWindowA("static", "Title", WS_CHILDWINDOW | WS_VISIBLE, 50, 50, 100, 100, hwnd, NULL, NULL, NULL);
+    ok(!!child, "got error %lu.\n", GetLastError());
+
+    hdc = GetDC(child);
+    pixel_format = ChoosePixelFormat(hdc, pfd);
+    res = SetPixelFormat(hdc, pixel_format, pfd);
+    ok(res, "got error %lu.\n", GetLastError());
+
+    hglrc = wglCreateContext(hdc);
+    ok(!!hglrc, "got error %lu.\n", GetLastError());
+
+    /* Test SwapBuffers with NULL context. */
+
+    glDrawBuffer(GL_BACK);
+
+    /* Currently blit happening for child window in winex11 may not be updated with the latest GL frame
+     * even on glXWaitForSbcOML() path. So simulate continuous present for the test purpose. */
+    trace("Child window rectangle should turn from red to green now.\n");
+    t1 = GetTickCount();
+    while ((t = GetTickCount()) - t1 < 3000)
+    {
+        res = wglMakeCurrent(hdc, hglrc);
+        ok(res, "got error %lu.\n", GetLastError());
+        if (t - t1 > 1500)
+            glClearColor(0.0f, 1.0f, 0.0f, 1.0f);
+        else
+            glClearColor(1.0f, 0.0f, 0.0f, 1.0f);
+        glClear(GL_COLOR_BUFFER_BIT);
+        res = wglMakeCurrent(NULL, NULL);
+        ok(res, "got error %lu.\n", GetLastError());
+        SwapBuffers(hdc);
+    }
+
+    res = wglDeleteContext(hglrc);
+    ok(res, "got error %lu.\n", GetLastError());
+
+    ReleaseDC(child, hdc);
+    DestroyWindow(child);
 }
 
 START_TEST(opengl)
@@ -2025,6 +2156,10 @@ START_TEST(opengl)
         }
 
         test_choosepixelformat();
+        test_choosepixelformat_flag_is_ignored_when_unset(PFD_DRAW_TO_WINDOW);
+        test_choosepixelformat_flag_is_ignored_when_unset(PFD_DRAW_TO_BITMAP);
+        test_choosepixelformat_flag_is_ignored_when_unset(PFD_SUPPORT_GDI);
+        test_choosepixelformat_flag_is_ignored_when_unset(PFD_SUPPORT_OPENGL);
         test_wglChoosePixelFormatARB(hdc);
         test_debug_message_callback();
         test_setpixelformat(hdc);
@@ -2057,6 +2192,9 @@ START_TEST(opengl)
             test_swap_control(hdc);
         else
             skip("WGL_EXT_swap_control not supported, skipping test\n");
+
+        if (winetest_interactive)
+            test_child_window(hwnd, &pfd);
 
 cleanup:
         ReleaseDC(hwnd, hdc);

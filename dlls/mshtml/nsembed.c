@@ -1299,7 +1299,7 @@ BOOL is_gecko_path(const char *path)
             *ptr = '/';
     }
 
-    UrlUnescapeW(buf, NULL, NULL, URL_UNESCAPE_INPLACE);
+    UrlUnescapeW(buf, NULL, NULL, URL_UNESCAPE_INPLACE | URL_UNESCAPE_AS_UTF8);
     buf[gecko_path_len] = 0;
 
     ret = !wcsicmp(buf, gecko_path);
@@ -2174,21 +2174,13 @@ static const nsISupportsWeakReferenceVtbl nsSupportsWeakReferenceVtbl = {
     nsSupportsWeakReference_GetWeakReference
 };
 
-void cycle_collect(nsIDOMWindowUtils *window_utils, BOOL force)
+void cycle_collect(nsIDOMWindowUtils *window_utils)
 {
     thread_data_t *thread_data = get_thread_data(TRUE);
-
     if(thread_data) {
-        DWORD current_tick = GetTickCount();
-
-        /* Since this is thread-wide, don't perform it too often, unless forced */
-        if(force || current_tick - thread_data->cc_last_tick > 60000) {
-            thread_data->cc_last_tick = current_tick;
-            thread_data->full_cc_in_progress++;
-            nsIDOMWindowUtils_CycleCollect(window_utils, NULL, 0);
-            thread_data->full_cc_in_progress--;
-            thread_data->cc_last_tick = GetTickCount();
-        }
+        thread_data->full_cc_in_progress++;
+        nsIDOMWindowUtils_CycleCollect(window_utils, NULL, 0);
+        thread_data->full_cc_in_progress--;
     }
 }
 
@@ -2415,7 +2407,7 @@ void detach_gecko_browser(GeckoBrowser *This)
 
     /* Force cycle collection */
     if(window_utils) {
-        cycle_collect(window_utils, TRUE);
+        cycle_collect(window_utils);
         nsIDOMWindowUtils_Release(window_utils);
     }
 }
@@ -2444,9 +2436,7 @@ nsIDOMParser *create_nsdomparser(HTMLDocumentNode *doc_node)
     nsIPrincipal *nspri;
     nsresult nsres;
 
-    outer_window = doc_node->outer_window;
-    if(!outer_window)
-        outer_window = doc_node->doc_obj->window;
+    outer_window = doc_node->window && doc_node->window->base.outer_window ? doc_node->window->base.outer_window : doc_node->doc_obj->window;
 
     nsres = nsIDOMWindow_GetInnerWindow(outer_window->nswindow, &inner_window);
     if(NS_FAILED(nsres)) {

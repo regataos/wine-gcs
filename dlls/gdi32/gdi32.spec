@@ -178,7 +178,7 @@
 @ stub GdiDciSetDestination
 @ stub GdiDeleteLocalDC
 @ stub GdiDeleteLocalObject
-# @ stub GdiDeleteSpoolFileHandle
+@ stdcall GdiDeleteSpoolFileHandle(ptr)
 @ stdcall GdiDescribePixelFormat(long long long ptr) NtGdiDescribePixelFormat
 @ stdcall GdiDllInitialize(ptr long ptr)
 @ stdcall GdiDrawStream(long long ptr) NtGdiDrawStream
@@ -192,14 +192,14 @@
 @ stdcall GdiGetCharDimensions(long ptr ptr)
 @ stdcall GdiGetCodePage(long)
 # @ stub GdiGetDC
-# @ stub GdiGetDevmodeForPage
+@ stdcall GdiGetDevmodeForPage(ptr long ptr ptr)
 @ stub GdiGetLocalBitmap
 @ stub GdiGetLocalBrush
 @ stub GdiGetLocalDC
 @ stub GdiGetLocalFont
 # @ stub GdiGetPageCount
 # @ stub GdiGetPageHandle
-# @ stub GdiGetSpoolFileHandle
+@ stdcall GdiGetSpoolFileHandle(wstr ptr wstr)
 @ stdcall GdiGetSpoolMessage(ptr long ptr long) NtGdiGetSpoolMessage
 @ stdcall GdiGradientFill(long ptr long ptr long long) 
 @ stdcall GdiInitSpool() NtGdiInitSpool

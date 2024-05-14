@@ -258,7 +258,7 @@ static void dump_value( const struct key_value *value, FILE *f )
         if (((WCHAR *)value->data)[value->len / sizeof(WCHAR) - 1]) break;
         if (value->type != REG_SZ) fprintf( f, "str(%x):", value->type );
         fputc( '\"', f );
-        dump_strW( (WCHAR *)value->data, value->len, f, "\"\"" );
+        dump_strW( (WCHAR *)value->data, value->len - sizeof(WCHAR), f, "\"\"" );
         fprintf( f, "\"\n" );
         return;
 
@@ -1862,6 +1862,7 @@ static void init_supported_machines(void)
     if (prefix_type == PREFIX_64BIT)
     {
         supported_machines[count++] = IMAGE_FILE_MACHINE_ARM64;
+        supported_machines[count++] = IMAGE_FILE_MACHINE_AMD64;
         supported_machines[count++] = IMAGE_FILE_MACHINE_I386;
     }
     supported_machines[count++] = IMAGE_FILE_MACHINE_ARMNT;
@@ -1991,8 +1992,6 @@ void init_registry(void)
             {
             case IMAGE_FILE_MACHINE_I386:  mkdir( "drive_c/windows/syswow64", 0777 ); break;
             case IMAGE_FILE_MACHINE_ARMNT: mkdir( "drive_c/windows/sysarm32", 0777 ); break;
-            case IMAGE_FILE_MACHINE_AMD64: mkdir( "drive_c/windows/sysx8664", 0777 ); break;
-            case IMAGE_FILE_MACHINE_ARM64: mkdir( "drive_c/windows/sysarm64", 0777 ); break;
             }
         }
     }

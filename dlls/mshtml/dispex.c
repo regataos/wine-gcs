@@ -19,8 +19,6 @@
 #include <stdarg.h>
 
 #define COBJMACROS
-#define NONAMELESSUNION
-
 #include "windef.h"
 #include "winbase.h"
 #include "winuser.h"
@@ -216,6 +214,7 @@ static unsigned char proxy_ctor_mode_unavailable[PROTO_ID_TOTAL_COUNT - LEGACY_P
     [PROTO_ID_HTMLSelectionObject              - LEGACY_PROTOTYPE_COUNT] = (1<<COMPAT_MODE_IE11),
     [PROTO_ID_HTMLXDomainRequest               - LEGACY_PROTOTYPE_COUNT] = (1<<COMPAT_MODE_IE11),
     [PROTO_ID_MediaQueryList                   - LEGACY_PROTOTYPE_COUNT] = (1<<COMPAT_MODE_IE9),
+    [PROTO_ID_MutationObserver                 - LEGACY_PROTOTYPE_COUNT] = ~0,  /* FIXME HACK: Not exposed as FFXIV Launcher breaks with MutationObserver stub */
 };
 
 static inline dispex_data_t *proxy_prototype_object_info(struct proxy_prototype *prot)
@@ -467,11 +466,11 @@ static void add_func_info(dispex_data_t *data, tid_t tid, const FUNCDESC *desc, 
 
         for(i=0; i < info->argc; i++) {
             TYPEDESC *tdesc = &desc->lprgelemdescParam[i].tdesc;
-            if(tdesc->vt == VT_PTR && tdesc->u.lptdesc->vt == VT_USERDEFINED) {
+            if(tdesc->vt == VT_PTR && tdesc->lptdesc->vt == VT_USERDEFINED) {
                 ITypeInfo *ref_type_info;
                 TYPEATTR *attr;
 
-                hres = ITypeInfo_GetRefTypeInfo(dti, tdesc->u.lptdesc->u.hreftype, &ref_type_info);
+                hres = ITypeInfo_GetRefTypeInfo(dti, tdesc->lptdesc->hreftype, &ref_type_info);
                 if(FAILED(hres)) {
                     ERR("Could not get referenced type info: %08lx\n", hres);
                     return;
@@ -494,9 +493,9 @@ static void add_func_info(dispex_data_t *data, tid_t tid, const FUNCDESC *desc, 
                 return; /* Fallback to ITypeInfo for unsupported arg types */
             }
 
-            if(desc->lprgelemdescParam[i].u.paramdesc.wParamFlags & PARAMFLAG_FHASDEFAULT) {
+            if(desc->lprgelemdescParam[i].paramdesc.wParamFlags & PARAMFLAG_FHASDEFAULT) {
                 hres = VariantCopy(&info->arg_info[i].default_value,
-                                   &desc->lprgelemdescParam[i].u.paramdesc.pparamdescex->varDefaultValue);
+                                   &desc->lprgelemdescParam[i].paramdesc.pparamdescex->varDefaultValue);
                 if(FAILED(hres)) {
                     ERR("Could not copy default value: %08lx\n", hres);
                     return;
@@ -959,6 +958,51 @@ static HRESULT typeinfo_invoke(IUnknown *iface, func_info_t *func, WORD flags, D
     return ITypeInfo_Invoke(ti, iface, func->id, flags, &params, res, ei, &argerr);
 }
 
+static HRESULT get_disp_prop(IDispatch *disp, IDispatchEx *dispex, const WCHAR *name, LCID lcid, VARIANT *res,
+        EXCEPINFO *ei, IServiceProvider *caller)
+{
+    DISPPARAMS dp = { 0 };
+    DISPID dispid;
+    HRESULT hres;
+    UINT err = 0;
+    BSTR bstr;
+
+    if(!(bstr = SysAllocString(name)))
+        return E_OUTOFMEMORY;
+
+    if(dispex)
+        hres = IDispatchEx_GetDispID(dispex, bstr, fdexNameCaseSensitive, &dispid);
+    else
+        hres = IDispatch_GetIDsOfNames(disp, &IID_NULL, &bstr, 1, 0, &dispid);
+    SysFreeString(bstr);
+    if(FAILED(hres))
+        return hres;
+    if(dispid == DISPID_UNKNOWN)
+        return DISP_E_UNKNOWNNAME;
+
+    if(dispex)
+        hres = IDispatchEx_InvokeEx(dispex, dispid, lcid, DISPATCH_PROPERTYGET, &dp, res, ei, caller);
+    else
+        hres = IDispatch_Invoke(disp, dispid, &IID_NULL, lcid, DISPATCH_PROPERTYGET, &dp, res, ei, &err);
+    return hres;
+}
+
+static HRESULT get_disp_prop_vt(IDispatch *disp, IDispatchEx *dispex, const WCHAR *name, LCID lcid, VARIANT *res,
+        VARTYPE vt, EXCEPINFO *ei, IServiceProvider *caller)
+{
+    HRESULT hres;
+
+    hres = get_disp_prop(disp, dispex, name, lcid, res, ei, caller);
+    if(FAILED(hres))
+        return hres;
+    if(V_VT(res) != vt) {
+        VARIANT tmp = *res;
+        hres = change_type(res, &tmp, vt, caller);
+        VariantClear(&tmp);
+    }
+    return hres;
+}
+
 static HRESULT format_func_disp_string(const WCHAR *name, IServiceProvider *caller, VARIANT *res)
 {
     unsigned name_len;
@@ -998,10 +1042,8 @@ static HRESULT function_apply(func_disp_t *func, DISPPARAMS *dp, LCID lcid, VARI
     DISPPARAMS params = { 0 };
     HRESULT hres, errcode;
     IDispatch *this_obj;
-    DISPID dispid;
     UINT argc = 0;
     VARIANT *arg;
-    VARIANT var;
 
     arg = dp->rgvarg + dp->cArgs - 1;
     if(dp->cArgs < 1 || V_VT(arg) != VT_DISPATCH || !V_DISPATCH(arg))
@@ -1011,51 +1053,29 @@ static HRESULT function_apply(func_disp_t *func, DISPPARAMS *dp, LCID lcid, VARI
     errcode = is_legacy_prototype(this_obj) ? MSHTML_E_INVALID_PROPERTY : CTL_E_ILLEGALFUNCTIONCALL;
 
     if(dp->cArgs >= 2) {
-        UINT i, err = 0;
         IDispatch *disp;
-        BSTR name;
+        UINT i;
 
         arg--;
         if((V_VT(arg) & ~VT_BYREF) != VT_DISPATCH)
             return errcode;
         disp = (V_VT(arg) & VT_BYREF) ? *(IDispatch**)(V_BYREF(arg)) : V_DISPATCH(arg);
 
-        /* get the array length */
-        if(!(name = SysAllocString(L"length")))
-            return E_OUTOFMEMORY;
-
-        hres = IDispatch_QueryInterface(disp, &IID_IDispatchEx, (void**)&dispex);
-        if(SUCCEEDED(hres) && dispex)
-            hres = IDispatchEx_GetDispID(dispex, name, fdexNameCaseSensitive, &dispid);
-        else {
-            hres = IDispatch_GetIDsOfNames(disp, &IID_NULL, &name, 1, 0, &dispid);
-            dispex = NULL;
+        /* FIXME: Native doesn't seem to detect jscript arrays by querying for length or indexed props,
+           and it doesn't QI nor call any other IDispatchEx methods (except AddRef) on external disps.
+           Array-like JS objects don't work either, they all return 0x800a01ae. So how does it do it?! */
+        IDispatch_QueryInterface(disp, &IID_IDispatchEx, (void**)&dispex);
+        hres = get_disp_prop_vt(disp, dispex, L"length", lcid, res, VT_I4, ei, caller);
+        if(FAILED(hres)) {
+            if(hres == DISP_E_UNKNOWNNAME)
+                hres = errcode;
+            goto fail;
         }
-        SysFreeString(name);
-        if(FAILED(hres) || dispid == DISPID_UNKNOWN) {
+        if(V_I4(res) < 0) {
             hres = errcode;
             goto fail;
         }
-
-        if(dispex)
-            hres = IDispatchEx_InvokeEx(dispex, dispid, lcid, DISPATCH_PROPERTYGET, &params, res, ei, caller);
-        else
-            hres = IDispatch_Invoke(disp, dispid, &IID_NULL, lcid, DISPATCH_PROPERTYGET, &params, res, ei, &err);
-        if(FAILED(hres))
-            goto fail;
-
-        if(V_VT(res) == VT_I4)
-            V_I4(&var) = V_I4(res);
-        else {
-            V_VT(&var) = VT_EMPTY;
-            hres = change_type(&var, res, VT_I4, caller);
-        }
-        VariantClear(res);
-        if(FAILED(hres) || V_I4(&var) < 0) {
-            hres = errcode;
-            goto fail;
-        }
-        params.cArgs = V_I4(&var);
+        params.cArgs = V_I4(res);
 
         /* alloc new params */
         if(params.cArgs) {
@@ -1068,29 +1088,14 @@ static HRESULT function_apply(func_disp_t *func, DISPPARAMS *dp, LCID lcid, VARI
 
                 arg = params.rgvarg + params.cArgs - i - 1;
                 swprintf(buf, ARRAY_SIZE(buf), L"%u", i);
-                if(!(name = SysAllocString(buf))) {
-                    hres = E_OUTOFMEMORY;
-                    break;
-                }
-                if(dispex)
-                    hres = IDispatchEx_GetDispID(dispex, name, fdexNameCaseSensitive, &dispid);
-                else
-                    hres = IDispatch_GetIDsOfNames(disp, &IID_NULL, &name, 1, 0, &dispid);
-                SysFreeString(name);
+                hres = get_disp_prop(disp, dispex, buf, lcid, arg, ei, caller);
                 if(FAILED(hres)) {
                     if(hres == DISP_E_UNKNOWNNAME) {
                         V_VT(arg) = VT_EMPTY;
                         continue;
                     }
-                    hres = errcode;
                     break;
                 }
-                if(dispex)
-                    hres = IDispatchEx_InvokeEx(dispex, dispid, lcid, DISPATCH_PROPERTYGET, NULL, arg, ei, caller);
-                else
-                    hres = IDispatch_Invoke(disp, dispid, &IID_NULL, lcid, DISPATCH_PROPERTYGET, NULL, arg, ei, &err);
-                if(FAILED(hres))
-                    break;
             }
             argc = i;
             if(argc < params.cArgs)
@@ -1307,9 +1312,9 @@ static func_disp_t *create_func_disp(DispatchEx *obj, func_info_t *info)
     if(!ret)
         return NULL;
 
+    init_dispatch(&ret->dispex, &function_dispex, NULL, dispex_compat_mode(obj));
     ret->obj = obj;
     ret->info = info;
-    init_dispatch(&ret->dispex, &function_dispex, NULL, dispex_compat_mode(obj));
 
     return ret;
 }
@@ -2297,22 +2302,22 @@ static void legacy_prototype_init_dispex_info(dispex_data_t *info, compat_mode_t
     memset(func, 0, (info->func_size - info->func_cnt) * sizeof(*func));
 }
 
-static inline struct legacy_ctor *legacy_ctor_from_DispatchEx(DispatchEx *iface)
+static inline struct global_ctor *global_ctor_from_DispatchEx(DispatchEx *iface)
 {
-    return CONTAINING_RECORD(iface, struct legacy_ctor, dispex);
+    return CONTAINING_RECORD(iface, struct global_ctor, dispex);
 }
 
-void legacy_ctor_traverse(DispatchEx *dispex, nsCycleCollectionTraversalCallback *cb)
+void global_ctor_traverse(DispatchEx *dispex, nsCycleCollectionTraversalCallback *cb)
 {
-    struct legacy_ctor *This = legacy_ctor_from_DispatchEx(dispex);
+    struct global_ctor *This = global_ctor_from_DispatchEx(dispex);
 
     if(This->window)
         note_cc_edge((nsISupports*)&This->window->base.IHTMLWindow2_iface, "window", cb);
 }
 
-void legacy_ctor_unlink(DispatchEx *dispex)
+void global_ctor_unlink(DispatchEx *dispex)
 {
-    struct legacy_ctor *This = legacy_ctor_from_DispatchEx(dispex);
+    struct global_ctor *This = global_ctor_from_DispatchEx(dispex);
 
     if(This->window) {
         HTMLInnerWindow *window = This->window;
@@ -2321,13 +2326,13 @@ void legacy_ctor_unlink(DispatchEx *dispex)
     }
 }
 
-void legacy_ctor_destructor(DispatchEx *dispex)
+void global_ctor_destructor(DispatchEx *dispex)
 {
-    struct legacy_ctor *This = legacy_ctor_from_DispatchEx(dispex);
+    struct global_ctor *This = global_ctor_from_DispatchEx(dispex);
     free(This);
 }
 
-HRESULT legacy_ctor_value(DispatchEx *dispex, LCID lcid, WORD flags, DISPPARAMS *params,
+HRESULT global_ctor_value(DispatchEx *dispex, LCID lcid, WORD flags, DISPPARAMS *params,
         VARIANT *res, EXCEPINFO *ei, IServiceProvider *caller)
 {
     switch(flags) {
@@ -2386,7 +2391,7 @@ HRESULT legacy_ctor_get_name(DispatchEx *dispex, DISPID id, BSTR *name)
 HRESULT legacy_ctor_invoke(DispatchEx *dispex, IDispatch *this_obj, DISPID id, LCID lcid, WORD flags,
         DISPPARAMS *params, VARIANT *res, EXCEPINFO *ei, IServiceProvider *caller)
 {
-    struct legacy_ctor *This = CONTAINING_RECORD(dispex, struct legacy_ctor, dispex);
+    struct global_ctor *This = CONTAINING_RECORD(dispex, struct global_ctor, dispex);
     DWORD idx = id - MSHTML_DISPID_CUSTOM_MIN;
     struct legacy_prototype *prot;
 
@@ -2556,12 +2561,13 @@ static IDispatch *get_proxy_constructor_disp(HTMLInnerWindow *window, prototype_
         const void *vtbl;
     } ctors[] = {
         { PROTO_ID_DOMParser,           &DOMParserCtor_dispex },
+        { PROTO_ID_MutationObserver,    &mutation_observer_ctor_dispex },
         { PROTO_ID_HTMLImgElement,      &HTMLImageCtor_dispex,              &HTMLImageElementFactoryVtbl },
         { PROTO_ID_HTMLOptionElement,   &HTMLOptionCtor_dispex,             &HTMLOptionElementFactoryVtbl },
         { PROTO_ID_HTMLXMLHttpRequest,  &HTMLXMLHttpRequestFactory_dispex,  &HTMLXMLHttpRequestFactoryVtbl },
         { PROTO_ID_HTMLXDomainRequest,  &HTMLXDomainRequestFactory_dispex,  &HTMLXDomainRequestFactoryVtbl }
     };
-    struct legacy_ctor *ctor;
+    struct global_ctor *ctor;
     unsigned i;
 
     for(i = 0; i < ARRAY_SIZE(ctors); i++)
@@ -3152,6 +3158,7 @@ static HRESULT WINAPI WineDispatchProxyPrivate_GetDefaultConstructor(IWineDispat
 {
     static const prototype_id_t special_ctors[] = {
         PROTO_ID_DOMParser,
+        PROTO_ID_MutationObserver,
         PROTO_ID_HTMLXMLHttpRequest,
         PROTO_ID_HTMLXDomainRequest
     };

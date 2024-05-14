@@ -1796,7 +1796,7 @@ static void test_shell_window(void)
 
     WaitForSingleObject(hthread, INFINITE);
 
-    DeleteObject(hthread);
+    CloseHandle(hthread);
 
     CloseDesktop(hdesk);
 }
@@ -7380,6 +7380,15 @@ static void test_SetWindowLong(void)
             "SetWindowLongPtr on invalid window proc shouldn't have changed the value returned by GetWindowLongPtr, instead of changing it to 0x%Ix\n", retval);
         ok(IsWindowUnicode(hwndMain), "hwndMain should now be Unicode\n");
 
+        /* Make sure nothing changes if we set the same proc */
+        retval = SetWindowLongPtrW(hwndMain, GWLP_WNDPROC, (LONG_PTR)old_window_procW);
+        todo_wine
+        ok((WNDPROC)retval == main_window_procA, "unexpected proc 0x%Ix\n", retval);
+        retval = GetWindowLongPtrW(hwndMain, GWLP_WNDPROC);
+        ok((WNDPROC)retval == old_window_procW, "unexpected proc 0x%Ix\n", retval);
+        retval = GetWindowLongPtrA(hwndMain, GWLP_WNDPROC);
+        ok((WNDPROC)retval == main_window_procA, "unexpected proc 0x%Ix\n", retval);
+
         /* set it back to ANSI */
         SetWindowLongPtrA(hwndMain, GWLP_WNDPROC, 0);
     }
@@ -8855,27 +8864,12 @@ static void test_GetWindowModuleFileName(void)
 
     DestroyWindow(hwnd);
 
-    buf2[0] = 0;
     hwnd = (HWND)0xdeadbeef;
     SetLastError(0xdeadbeef);
     ret1 = pGetWindowModuleFileNameA(hwnd, buf1, sizeof(buf1));
     ok(!ret1, "expected 0, got %u\n", ret1);
     ok(GetLastError() == ERROR_INVALID_WINDOW_HANDLE,
        "expected ERROR_INVALID_WINDOW_HANDLE, got %lu\n", GetLastError());
-
-    hwnd = FindWindowA("Shell_TrayWnd", NULL);
-    ok(IsWindow(hwnd) || broken(!hwnd), "got invalid tray window %p\n", hwnd);
-    SetLastError(0xdeadbeef);
-    ret1 = pGetWindowModuleFileNameA(hwnd, buf1, sizeof(buf1));
-    ok(!ret1, "expected 0, got %u\n", ret1);
-    ret1 = GetModuleFileNameA(0, buf1, sizeof(buf1));
-    hwnd = GetDesktopWindow();
-    ok(IsWindow(hwnd), "got invalid desktop window %p\n", hwnd);
-    SetLastError(0xdeadbeef);
-    ret2 = pGetWindowModuleFileNameA(hwnd, buf2, sizeof(buf2));
-    ok(!ret2 ||
-       ret1 == ret2, /* vista */
-       "expected 0 or %u, got %u %s\n", ret1, ret2, buf2);
 }
 
 static void test_hwnd_message(void)
@@ -10279,13 +10273,13 @@ static void simulate_click(int x, int y)
     SetCursorPos(x, y);
     memset(input, 0, sizeof(input));
     input[0].type = INPUT_MOUSE;
-    U(input[0]).mi.dx = x;
-    U(input[0]).mi.dy = y;
-    U(input[0]).mi.dwFlags = MOUSEEVENTF_LEFTDOWN;
+    input[0].mi.dx = x;
+    input[0].mi.dy = y;
+    input[0].mi.dwFlags = MOUSEEVENTF_LEFTDOWN;
     input[1].type = INPUT_MOUSE;
-    U(input[1]).mi.dx = x;
-    U(input[1]).mi.dy = y;
-    U(input[1]).mi.dwFlags = MOUSEEVENTF_LEFTUP;
+    input[1].mi.dx = x;
+    input[1].mi.dy = y;
+    input[1].mi.dwFlags = MOUSEEVENTF_LEFTUP;
     events_no = SendInput(2, input, sizeof(input[0]));
     ok(events_no == 2, "SendInput returned %d\n", events_no);
     SetCursorPos(pt.x, pt.y);
@@ -13123,6 +13117,111 @@ static void test_WM_NCCALCSIZE(void)
     DestroyWindow(hwnd);
 }
 
+#define TRAY_MINIMIZE_ALL 419
+#define TRAY_MINIMIZE_ALL_UNDO 416
+
+static void test_shell_tray(void)
+{
+    HWND hwnd, traywnd;
+
+    if (!(traywnd = FindWindowA( "Shell_TrayWnd", NULL )))
+    {
+        skip( "Shell_TrayWnd not found, skipping tests.\n" );
+        return;
+    }
+
+    hwnd = CreateWindowW( L"static", L"parent", WS_OVERLAPPEDWINDOW|WS_VISIBLE,
+                                  100, 100, 200, 200, 0, 0, 0, NULL );
+    ok( !!hwnd, "failed, error %lu.\n", GetLastError() );
+    flush_events( TRUE );
+
+    ok( !IsIconic( hwnd ), "window is minimized.\n" );
+
+    SendMessageA( traywnd, WM_COMMAND, TRAY_MINIMIZE_ALL, 0xdeadbeef );
+    flush_events( TRUE );
+    todo_wine ok( IsIconic( hwnd ), "window is not minimized.\n" );
+
+    SendMessageA( traywnd, WM_COMMAND, TRAY_MINIMIZE_ALL_UNDO, 0xdeadbeef );
+    flush_events( TRUE );
+    ok( !IsIconic( hwnd ), "window is minimized.\n" );
+
+    DestroyWindow(hwnd);
+}
+
+static int wm_mousemove_count;
+static BOOL do_release_capture;
+
+static LRESULT WINAPI test_ReleaseCapture_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
+{
+    if (msg == WM_MOUSEMOVE)
+    {
+        wm_mousemove_count++;
+        if (wm_mousemove_count >= 100)
+            return 1;
+
+        if (do_release_capture)
+            ReleaseCapture();
+        return 0;
+    }
+    return DefWindowProcA(hwnd, msg, wp, lp);
+}
+
+static void test_ReleaseCapture(void)
+{
+    WNDCLASSA cls = {0};
+    ATOM atom;
+    HWND hwnd;
+    POINT pt;
+    BOOL ret;
+
+    cls.lpfnWndProc = test_ReleaseCapture_proc;
+    cls.hInstance = GetModuleHandleA(0);
+    cls.hCursor = LoadCursorA(0, (LPCSTR)IDC_ARROW);
+    cls.hbrBackground = GetStockObject(BLACK_BRUSH);
+    cls.lpszClassName = "test_ReleaseCapture_class";
+    atom = RegisterClassA(&cls);
+    ok(!!atom, "RegisterClassA failed, error %#lx.\n", GetLastError());
+
+    hwnd = CreateWindowExA(WS_EX_TOPMOST, cls.lpszClassName, "", WS_POPUP | WS_VISIBLE, 100, 100,
+                           100, 100, NULL, NULL, 0, NULL);
+    ok(!!hwnd, "CreateWindowA failed, error %#lx.\n", GetLastError());
+    ret = SetForegroundWindow(hwnd);
+    ok(ret, "SetForegroundWindow failed, error %#lx.\n", GetLastError());
+    GetCursorPos(&pt);
+    ret = SetCursorPos(150, 150);
+    ok(ret, "SetCursorPos failed, error %#lx.\n", GetLastError());
+    flush_events(TRUE);
+
+    /* Test a Wine bug that WM_MOUSEMOVE is post too many times when calling ReleaseCapture() during
+     * handling WM_MOUSEMOVE and the cursor is on the window */
+    do_release_capture = TRUE;
+    ret = ReleaseCapture();
+    ok(ret, "ReleaseCapture failed, error %#lx.\n", GetLastError());
+    flush_events(TRUE);
+    do_release_capture = FALSE;
+    ok(wm_mousemove_count < 10, "Got too many WM_MOUSEMOVE.\n");
+
+    /* Test that ReleaseCapture() should send a WM_MOUSEMOVE if a window is captured */
+    SetCapture(hwnd);
+    wm_mousemove_count = 0;
+    ret = ReleaseCapture();
+    ok(ret, "ReleaseCapture failed, error %#lx.\n", GetLastError());
+    flush_events(TRUE);
+    ok(wm_mousemove_count == 1, "Got no WM_MOUSEMOVE.\n");
+
+    /* Test that ReleaseCapture() shouldn't send WM_MOUSEMOVE if no window is captured */
+    wm_mousemove_count = 0;
+    ret = ReleaseCapture();
+    ok(ret, "ReleaseCapture failed, error %#lx.\n", GetLastError());
+    flush_events(TRUE);
+    ok(wm_mousemove_count == 0, "Got WM_MOUSEMOVE.\n");
+
+    ret = SetCursorPos(pt.x, pt.y);
+    ok(ret, "SetCursorPos failed, error %#lx.\n", GetLastError());
+    DestroyWindow(hwnd);
+    UnregisterClassA(cls.lpszClassName, GetModuleHandleA(0));
+}
+
 START_TEST(win)
 {
     char **argv;
@@ -13305,6 +13404,7 @@ START_TEST(win)
     test_cancel_mode();
     test_DragDetect();
     test_WM_NCCALCSIZE();
+    test_ReleaseCapture();
 
     /* add the tests above this line */
     if (hhook) UnhookWindowsHookEx(hhook);
@@ -13319,4 +13419,5 @@ START_TEST(win)
     test_topmost();
 
     test_shell_window();
+    test_shell_tray();
 }

@@ -455,50 +455,66 @@ BOOL WINAPI User32CallWinEventHook( const struct win_event_hook_params *params, 
 BOOL WINAPI User32CallWindowsHook( struct win_hook_params *params, ULONG size )
 {
     HOOKPROC proc = params->proc;
-    const WCHAR *module = NULL;
     HMODULE free_module = 0;
-    void *ret_lparam = NULL;
+    void *ret_ptr = NULL;
     CBT_CREATEWNDW cbtc;
-    UINT ret_lparam_size = 0;
+    UINT ret_size = 0;
+    size_t lparam_offset;
     LRESULT ret;
 
-    if (size > sizeof(*params) + params->lparam_size)
-        module = (const WCHAR *)((const char *)(params + 1) + params->lparam_size);
+    lparam_offset = FIELD_OFFSET( struct win_hook_params, module[wcslen( params->module ) + 1]);
 
-    if (params->lparam_size)
+    if (lparam_offset < size)
     {
-        ret_lparam = (void *)params->lparam;
-        ret_lparam_size = params->lparam_size;
-        params->lparam = (LPARAM)(params + 1);
+        lparam_offset = (lparam_offset + 15) & ~15; /* align */
+        ret_size = size - lparam_offset;
+        ret_ptr = (char *)params + lparam_offset;
+        params->lparam = (LPARAM)ret_ptr;
 
-        if (params->id == WH_CBT && params->code == HCBT_CREATEWND)
+        switch (params->id)
         {
-            CREATESTRUCTW *cs = (CREATESTRUCTW *)params->lparam;
-            const WCHAR *ptr = (const WCHAR *)(cs + 1);
-
-            if (!IS_INTRESOURCE(cs->lpszName))
+        case WH_CBT:
+            if (params->code == HCBT_CREATEWND)
             {
-                cs->lpszName = ptr;
-                ptr += wcslen( ptr ) + 1;
+                cbtc.hwndInsertAfter = HWND_TOP;
+                unpack_message( (HWND)params->wparam, WM_CREATE, NULL, (LPARAM *)&cbtc.lpcs,
+                                ret_ptr, FALSE );
+                params->lparam = (LPARAM)&cbtc;
+                ret_size = sizeof(*cbtc.lpcs);
             }
-            if (!IS_INTRESOURCE(cs->lpszClass))
-                cs->lpszClass = ptr;
+            break;
+        case WH_CALLWNDPROC:
+            if (ret_size > sizeof(CWPSTRUCT))
+            {
+                CWPSTRUCT *cwp = (CWPSTRUCT *)params->lparam;
+                size_t offset = (lparam_offset + sizeof(*cwp) + 15) & ~15;
 
-            cbtc.hwndInsertAfter = HWND_TOP;
-            cbtc.lpcs = cs;
-            params->lparam = (LPARAM)&cbtc;
-            ret_lparam_size = sizeof(*cs);
+                unpack_message( cwp->hwnd, cwp->message, &cwp->wParam, &cwp->lParam,
+                                (char *)params + offset, !params->prev_unicode );
+                ret_size = 0;
+                break;
+            }
+        case WH_CALLWNDPROCRET:
+            if (ret_size > sizeof(CWPRETSTRUCT))
+            {
+                CWPRETSTRUCT *cwpret = (CWPRETSTRUCT *)params->lparam;
+                size_t offset = (lparam_offset + sizeof(*cwpret) + 15) & ~15;
+
+                unpack_message( cwpret->hwnd, cwpret->message, &cwpret->wParam, &cwpret->lParam,
+                                (char *)params + offset, !params->prev_unicode );
+                ret_size = 0;
+                break;
+            }
         }
     }
-    if (module && !(proc = get_hook_proc( proc, module, &free_module ))) return FALSE;
+    if (params->module[0] && !(proc = get_hook_proc( proc, params->module, &free_module )))
+        return FALSE;
 
     ret = call_hook_proc( proc, params->id, params->code, params->wparam, params->lparam,
                           params->prev_unicode, params->next_unicode );
 
     if (free_module) FreeLibrary( free_module );
-    if (ret_lparam) memcpy( ret_lparam, params + 1, ret_lparam_size );
-    else if (ret_lparam_size) NtCallbackReturn( params + 1, ret_lparam_size, ret );
-    return ret;
+    return NtCallbackReturn( ret_ptr, ret_size, ret );
 }
 
 /***********************************************************************

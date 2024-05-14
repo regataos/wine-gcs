@@ -30,10 +30,6 @@
 
 #define GLIB_VERSION_MIN_REQUIRED GLIB_VERSION_2_30
 #include <gst/gst.h>
-#include <gst/video/video.h>
-#include <gst/audio/audio.h>
-#include <gst/base/base.h>
-#include <gst/tag/tag.h>
 #include <gst/gl/gl.h>
 
 #include "ntstatus.h"
@@ -49,6 +45,8 @@
  * any use of Wine debug logging in this entire file. */
 
 GST_DEBUG_CATEGORY(wine);
+
+extern bool media_converter_init(void);
 
 GstGLDisplay *gl_display;
 
@@ -83,26 +81,63 @@ GstElement *create_element(const char *name, const char *plugin_set)
     return element;
 }
 
-GstElement *find_element(GstElementFactoryListType type, GstCaps *src_caps, GstCaps *sink_caps)
+GstElement *factory_create_element(GstElementFactory *factory)
+{
+    GstElement *element;
+
+    if ((element = gst_element_factory_create(factory, NULL)))
+        GST_INFO("Created element %"GST_PTR_FORMAT" from factory %"GST_PTR_FORMAT".",
+                element, factory);
+    else
+        GST_WARNING("Failed to create element from factory %"GST_PTR_FORMAT".", factory);
+
+    return element;
+}
+
+GList *find_element_factories(GstElementFactoryListType type, GstRank min_rank,
+        GstCaps *element_sink_caps, GstCaps *element_src_caps)
+{
+    GList *tmp, *factories = NULL;
+
+    if (!(factories = gst_element_factory_list_get_elements(type, min_rank)))
+        goto done;
+
+    if (element_sink_caps)
+    {
+        tmp = gst_element_factory_list_filter(factories, element_sink_caps, GST_PAD_SINK, FALSE);
+        gst_plugin_feature_list_free(factories);
+        if (!(factories = tmp))
+            goto done;
+    }
+
+    if (element_src_caps)
+    {
+        tmp = gst_element_factory_list_filter(factories, element_src_caps, GST_PAD_SRC, FALSE);
+        gst_plugin_feature_list_free(factories);
+        if (!(factories = tmp))
+            goto done;
+    }
+
+    factories = g_list_sort(factories, gst_plugin_feature_rank_compare_func);
+
+done:
+    if (!factories)
+        GST_WARNING("Failed to find any element factory matching "
+                "type %"G_GUINT64_FORMAT"x, caps %"GST_PTR_FORMAT" / %"GST_PTR_FORMAT".",
+                type, element_sink_caps, element_src_caps);
+
+    return factories;
+}
+
+GstElement *find_element(GstElementFactoryListType type, GstCaps *element_sink_caps, GstCaps *element_src_caps)
 {
     GstElement *element = NULL;
     GList *tmp, *transforms;
     const gchar *name;
 
-    if (!(transforms = gst_element_factory_list_get_elements(type, GST_RANK_MARGINAL)))
-        goto done;
+    if (!(transforms = find_element_factories(type, GST_RANK_MARGINAL, element_sink_caps, element_src_caps)))
+        return NULL;
 
-    tmp = gst_element_factory_list_filter(transforms, src_caps, GST_PAD_SINK, FALSE);
-    gst_plugin_feature_list_free(transforms);
-    if (!(transforms = tmp))
-        goto done;
-
-    tmp = gst_element_factory_list_filter(transforms, sink_caps, GST_PAD_SRC, FALSE);
-    gst_plugin_feature_list_free(transforms);
-    if (!(transforms = tmp))
-        goto done;
-
-    transforms = g_list_sort(transforms, gst_plugin_feature_rank_compare_func);
     for (tmp = transforms; tmp != NULL && element == NULL; tmp = tmp->next)
     {
         name = gst_plugin_feature_get_name(GST_PLUGIN_FEATURE(tmp->data));
@@ -116,23 +151,14 @@ GstElement *find_element(GstElementFactoryListType type, GstCaps *src_caps, GstC
             continue;
         }
 
-        if (!(element = gst_element_factory_create(GST_ELEMENT_FACTORY(tmp->data), NULL)))
-            GST_WARNING("Failed to create %s element.", name);
+        element = factory_create_element(GST_ELEMENT_FACTORY(tmp->data));
     }
+
     gst_plugin_feature_list_free(transforms);
 
-done:
-    if (element)
-    {
-        GST_DEBUG("Created %s element %p.", name, element);
-    }
-    else
-    {
-        gchar *src_str = gst_caps_to_string(src_caps), *sink_str = gst_caps_to_string(sink_caps);
-        GST_WARNING("Failed to create element matching caps %s / %s.", src_str, sink_str);
-        g_free(sink_str);
-        g_free(src_str);
-    }
+    if (!element)
+        GST_WARNING("Failed to create element matching caps %"GST_PTR_FORMAT" / %"GST_PTR_FORMAT".",
+                element_sink_caps, element_src_caps);
 
     return element;
 }
@@ -161,27 +187,34 @@ bool append_element(GstElement *container, GstElement *element, GstElement **fir
     return success;
 }
 
+bool link_src_to_sink(GstPad *src_pad, GstPad *sink_pad)
+{
+    GstPadLinkReturn ret;
+
+    if ((ret = gst_pad_link(src_pad, sink_pad)) != GST_PAD_LINK_OK)
+    {
+        GST_ERROR("Failed to link src pad %"GST_PTR_FORMAT" to sink pad %"GST_PTR_FORMAT", reason: %s",
+                src_pad, sink_pad, gst_pad_link_get_name(ret));
+        return false;
+    }
+
+    return true;
+}
+
 bool link_src_to_element(GstPad *src_pad, GstElement *element)
 {
     GstPadLinkReturn ret;
     GstPad *sink_pad;
 
-    if (!(sink_pad = gst_element_get_static_pad(element, "sink")))
+    if (!(sink_pad = gst_element_get_compatible_pad(element, src_pad, NULL)))
     {
-        gchar *name = gst_element_get_name(element);
-        GST_ERROR("Failed to find sink pad on %s", name);
-        g_free(name);
+        GST_ERROR("Failed to find sink pad compatible to %"GST_PTR_FORMAT" on %"GST_PTR_FORMAT".",
+                src_pad, element);
         return false;
     }
-    if ((ret = gst_pad_link(src_pad, sink_pad)))
-    {
-        gchar *src_name = gst_pad_get_name(src_pad), *sink_name = gst_pad_get_name(sink_pad);
-        GST_ERROR("Failed to link element pad %s with pad %s", src_name, sink_name);
-        g_free(sink_name);
-        g_free(src_name);
-    }
+    ret = link_src_to_sink(src_pad, sink_pad);
     gst_object_unref(sink_pad);
-    return !ret;
+    return ret;
 }
 
 bool link_element_to_sink(GstElement *element, GstPad *sink_pad)
@@ -189,132 +222,34 @@ bool link_element_to_sink(GstElement *element, GstPad *sink_pad)
     GstPadLinkReturn ret;
     GstPad *src_pad;
 
-    if (!(src_pad = gst_element_get_static_pad(element, "src")))
+    if (!(src_pad = gst_element_get_compatible_pad(element, sink_pad, NULL)))
     {
-        gchar *name = gst_element_get_name(element);
-        GST_ERROR("Failed to find src pad on %s", name);
-        g_free(name);
+        GST_ERROR("Failed to find src pad compatible to %"GST_PTR_FORMAT" on %"GST_PTR_FORMAT".",
+                sink_pad, element);
         return false;
     }
-    if ((ret = gst_pad_link(src_pad, sink_pad)))
-    {
-        gchar *src_name = gst_pad_get_name(src_pad), *sink_name = gst_pad_get_name(sink_pad);
-        GST_ERROR("Failed to link pad %s with element pad %s", src_name, sink_name);
-        g_free(sink_name);
-        g_free(src_name);
-    }
+    ret = link_src_to_sink(src_pad, sink_pad);
     gst_object_unref(src_pad);
-    return !ret;
+    return ret;
 }
 
-GstCaps *detect_caps_from_data(const char *url, const void *data, guint size)
+bool push_event(GstPad *pad, GstEvent *event)
 {
-    const char *extension = url ? strrchr(url, '.') : NULL;
-    GstTypeFindProbability probability;
-    GstCaps *caps;
-    gchar *str;
-
-    if (!(caps = gst_type_find_helper_for_data_with_extension(NULL, data, size,
-            extension ? extension + 1 : NULL, &probability)))
+    if (!gst_pad_push_event(pad, event))
     {
-        GST_ERROR("Failed to detect caps for url %s, data %p, size %u", url, data, size);
-        return NULL;
+        const gchar *type_name = gst_event_type_get_name(GST_EVENT_TYPE(event));
+        gchar *pad_name = gst_pad_get_name(pad);
+
+        GST_ERROR("Failed to push %s event %p to pad %s.", type_name, event, pad_name);
+        g_free(pad_name);
+        return false;
     }
-
-    str = gst_caps_to_string(caps);
-    if (probability > GST_TYPE_FIND_POSSIBLE)
-        GST_INFO("Detected caps %s with probability %u for url %s, data %p, size %u",
-                str, probability, url, data, size);
-    else
-        GST_FIXME("Detected caps %s with probability %u for url %s, data %p, size %u",
-                str, probability, url, data, size);
-    g_free(str);
-
-    return caps;
-}
-
-GstPad *create_pad_with_caps(GstPadDirection direction, GstCaps *caps)
-{
-    GstCaps *pad_caps = caps ? gst_caps_ref(caps) : gst_caps_new_any();
-    const char *name = direction == GST_PAD_SRC ? "src" : "sink";
-    GstPadTemplate *template;
-    GstPad *pad;
-
-    if (!pad_caps || !(template = gst_pad_template_new(name, direction, GST_PAD_ALWAYS, pad_caps)))
-        return NULL;
-    pad = gst_pad_new_from_template(template, "src");
-    g_object_unref(template);
-    gst_caps_unref(pad_caps);
-    return pad;
-}
-
-GstBuffer *create_buffer_from_bytes(const void *data, guint size)
-{
-    GstBuffer *buffer;
-
-    if (!(buffer = gst_buffer_new_and_alloc(size)))
-        GST_ERROR("Failed to allocate buffer for %#x bytes\n", size);
-    else
-    {
-        gst_buffer_fill(buffer, 0, data, size);
-        gst_buffer_set_size(buffer, size);
-    }
-
-    return buffer;
-}
-
-gchar *stream_lang_from_tags(GstTagList *tags, GstCaps *caps)
-{
-    gchar *value;
-
-    if (!gst_tag_list_get_string(tags, GST_TAG_LANGUAGE_CODE, &value) || !value)
-        return NULL;
-
-    return value;
-}
-
-gchar *stream_name_from_tags(GstTagList *tags)
-{
-    /* Extract stream name from Quick Time demuxer private tag where it puts unrecognized chunks. */
-    guint i, tag_count = gst_tag_list_get_tag_size(tags, "private-qt-tag");
-    gchar *value = NULL;
-
-    for (i = 0; !value && i < tag_count; ++i)
-    {
-        const gchar *name;
-        const GValue *val;
-        GstSample *sample;
-        GstBuffer *buf;
-        gsize size;
-
-        if (!(val = gst_tag_list_get_value_index(tags, "private-qt-tag", i)))
-            continue;
-        if (!GST_VALUE_HOLDS_SAMPLE(val) || !(sample = gst_value_get_sample(val)))
-            continue;
-        name = gst_structure_get_name(gst_sample_get_info(sample));
-        if (!name || strcmp(name, "application/x-gst-qt-name-tag"))
-            continue;
-        if (!(buf = gst_sample_get_buffer(sample)))
-            continue;
-        if ((size = gst_buffer_get_size(buf)) < 8)
-            continue;
-        size -= 8;
-        if (!(value = g_malloc(size + 1)))
-            return NULL;
-        if (gst_buffer_extract(buf, 8, value, size) != size)
-        {
-            g_free(value);
-            value = NULL;
-            continue;
-        }
-        value[size] = 0;
-    }
-
-    return value;
+    return true;
 }
 
 NTSTATUS wg_init_gstreamer(void *arg)
 {
+    struct wg_init_gstreamer_params *params = arg;
     static GstGLContext *gl_context;
 
     char arg0[] = "wine";
@@ -341,6 +276,19 @@ NTSTATUS wg_init_gstreamer(void *arg)
         setenv("GST_REGISTRY_1_0", gst_reg, 1);
     }
 
+    if (params->trace_on)
+        setenv("GST_DEBUG", "WINE:9,protonmediaconverter:9,4", FALSE);
+    if (params->warn_on)
+        setenv("GST_DEBUG", "WINE:3,protonmediaconverter:3,3", FALSE);
+    if (params->err_on)
+        setenv("GST_DEBUG", "WINE:1,protonmediaconverter:1,1", FALSE);
+    setenv("GST_DEBUG_NO_COLOR", "1", FALSE);
+
+    /* GStreamer installs a temporary SEGV handler when it loads plugins
+     * to initialize its registry calling exit(-1) when any fault is caught.
+     * We need to make sure any signal reaches our signal handlers to catch
+     * and handle them, or eventually propagate the exceptions to the user.
+     */
     gst_segtrap_set_enabled(false);
 
     if (!gst_init_check(&argc, &argv, &err))
@@ -375,6 +323,13 @@ NTSTATUS wg_init_gstreamer(void *arg)
             gst_object_unref(gl_display);
             gl_display = NULL;
         }
+    }
+
+    if (!media_converter_init())
+    {
+        GST_ERROR("Failed to init media converter.");
+        gst_object_unref(gl_display);
+        return STATUS_UNSUCCESSFUL;
     }
 
     return STATUS_SUCCESS;

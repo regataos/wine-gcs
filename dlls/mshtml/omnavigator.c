@@ -607,7 +607,7 @@ dispex_static_data_t DOMParser_dispex = {
 static HRESULT DOMParserCtor_value(DispatchEx *iface, LCID lcid, WORD flags, DISPPARAMS *params,
         VARIANT *res, EXCEPINFO *ei, IServiceProvider *caller)
 {
-    struct legacy_ctor *This = CONTAINING_RECORD(iface, struct legacy_ctor, dispex);
+    struct global_ctor *This = CONTAINING_RECORD(iface, struct global_ctor, dispex);
     struct dom_parser *ret;
 
     TRACE("\n");
@@ -621,7 +621,7 @@ static HRESULT DOMParserCtor_value(DispatchEx *iface, LCID lcid, WORD flags, DIS
     case DISPATCH_CONSTRUCT:
         break;
     default:
-        return legacy_ctor_value(iface, lcid, flags, params, res, ei, caller);
+        return global_ctor_value(iface, lcid, flags, params, res, ei, caller);
     }
 
     if(!(ret = calloc(1, sizeof(*ret))))
@@ -639,9 +639,9 @@ static HRESULT DOMParserCtor_value(DispatchEx *iface, LCID lcid, WORD flags, DIS
 }
 
 static const dispex_static_data_vtbl_t DOMParserCtor_dispex_vtbl = {
-    .destructor       = legacy_ctor_destructor,
-    .traverse         = legacy_ctor_traverse,
-    .unlink           = legacy_ctor_unlink,
+    .destructor       = global_ctor_destructor,
+    .traverse         = global_ctor_traverse,
+    .unlink           = global_ctor_unlink,
     .value            = DOMParserCtor_value,
     .get_dispid       = legacy_ctor_get_dispid,
     .get_name         = legacy_ctor_get_name,
@@ -947,7 +947,8 @@ static HRESULT WINAPI OmHistory_get_length(IOmHistory *iface, short *p)
 
     TRACE("(%p)->(%p)\n", This, p);
 
-    browser = This->window->base.outer_window->browser;
+    if(This->window->base.outer_window)
+        browser = This->window->base.outer_window->browser;
 
     *p = browser && browser->doc->travel_log
         ? ITravelLog_CountEntries(browser->doc->travel_log, browser->doc->browser_service)
@@ -3465,9 +3466,6 @@ static ULONG WINAPI crypto_subtle_Release(IWineMSHTMLSubtleCrypto *iface)
 static HRESULT WINAPI crypto_subtle_GetTypeInfoCount(IWineMSHTMLSubtleCrypto *iface, UINT *pctinfo)
 {
     struct crypto_subtle *subtle = impl_from_IWineMSHTMLSubtleCrypto(iface);
-
-    TRACE("(%p)->(%p)\n", subtle, pctinfo);
-
     return IDispatchEx_GetTypeInfoCount(&subtle->dispex.IDispatchEx_iface, pctinfo);
 }
 
@@ -3475,7 +3473,6 @@ static HRESULT WINAPI crypto_subtle_GetTypeInfo(IWineMSHTMLSubtleCrypto *iface, 
         LCID lcid, ITypeInfo **ppTInfo)
 {
     struct crypto_subtle *subtle = impl_from_IWineMSHTMLSubtleCrypto(iface);
-
     return IDispatchEx_GetTypeInfo(&subtle->dispex.IDispatchEx_iface, iTInfo, lcid, ppTInfo);
 }
 
@@ -3483,7 +3480,6 @@ static HRESULT WINAPI crypto_subtle_GetIDsOfNames(IWineMSHTMLSubtleCrypto *iface
         LPOLESTR *rgszNames, UINT cNames, LCID lcid, DISPID *rgDispId)
 {
     struct crypto_subtle *subtle = impl_from_IWineMSHTMLSubtleCrypto(iface);
-
     return IDispatchEx_GetIDsOfNames(&subtle->dispex.IDispatchEx_iface, riid, rgszNames, cNames,
             lcid, rgDispId);
 }
@@ -3493,7 +3489,6 @@ static HRESULT WINAPI crypto_subtle_Invoke(IWineMSHTMLSubtleCrypto *iface, DISPI
         VARIANT *pVarResult, EXCEPINFO *pExcepInfo, UINT *puArgErr)
 {
     struct crypto_subtle *subtle = impl_from_IWineMSHTMLSubtleCrypto(iface);
-
     return IDispatchEx_Invoke(&subtle->dispex.IDispatchEx_iface, dispIdMember, riid, lcid, wFlags,
             pDispParams, pVarResult, pExcepInfo, puArgErr);
 }

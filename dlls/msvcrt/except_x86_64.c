@@ -18,7 +18,7 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#ifdef __x86_64__
+#if defined(__x86_64__) && !defined(__arm64ec__)
 
 #include <setjmp.h>
 #include <stdarg.h>
@@ -579,14 +579,14 @@ static DWORD cxx_frame_handler(EXCEPTION_RECORD *rec, ULONG64 frame,
         return ExceptionContinueSearch;
     }
 
+    if (rec->ExceptionCode == CXX_EXCEPTION &&
+        (!rec->ExceptionInformation[1] && !rec->ExceptionInformation[2]))
+    {
+        TRACE("rethrow detected.\n");
+        *rec = *msvcrt_get_thread_data()->exc_record;
+    }
     if (rec->ExceptionCode == CXX_EXCEPTION)
     {
-        if (!rec->ExceptionInformation[1] && !rec->ExceptionInformation[2])
-        {
-            TRACE("rethrow detected.\n");
-            *rec = *msvcrt_get_thread_data()->exc_record;
-        }
-
         exc_type = (cxx_exception_type *)rec->ExceptionInformation[2];
 
         if (TRACE_ON(seh))

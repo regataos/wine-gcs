@@ -184,40 +184,64 @@ BOOL WINAPI DwmDefWindowProc(HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam, 
  */
 HRESULT WINAPI DwmGetWindowAttribute(HWND hwnd, DWORD attribute, PVOID pv_attribute, DWORD size)
 {
-    FIXME("(%p %ld %p %ld) stub\n", hwnd, attribute, pv_attribute, size);
+    BOOL enabled = FALSE;
+    HRESULT hr;
 
-    if (!hwnd) return E_HANDLE;
-    if (!pv_attribute) return E_INVALIDARG;
+    TRACE("(%p %ld %p %ld)\n", hwnd, attribute, pv_attribute, size);
 
-    switch (attribute)
-    {
+    if (DwmIsCompositionEnabled(&enabled) == S_OK && !enabled)
+        return E_HANDLE;
+    if (!IsWindow(hwnd))
+        return E_HANDLE;
+    if (!pv_attribute)
+        return E_INVALIDARG;
+
+    switch (attribute) {
     case DWMWA_NCRENDERING_ENABLED:
-        if (size < sizeof(BOOL)) return E_INVALIDARG;
+        if (size < sizeof(BOOL))
+            return E_INVALIDARG;
 
         WARN("DWMWA_NCRENDERING_ENABLED: always returning FALSE.\n");
         *(BOOL*)(pv_attribute) = FALSE;
+        hr = S_OK;
         break;
 
     case DWMWA_EXTENDED_FRAME_BOUNDS:
-        if (size < sizeof(RECT)) return HRESULT_FROM_WIN32(ERROR_INSUFFICIENT_BUFFER);
+    {
+        RECT *rect = (RECT *)pv_attribute;
+        DPI_AWARENESS_CONTEXT context;
 
-        WARN("DWMWA_EXTENDED_FRAME_BOUNDS: returning window rect.\n");
-        GetWindowRect(hwnd, pv_attribute);
+        if (size < sizeof(*rect))
+            return E_NOT_SUFFICIENT_BUFFER;
+        if (GetWindowLongW(hwnd, GWL_STYLE) & WS_CHILD)
+            return E_HANDLE;
+
+        /* DWM frame bounds are always in physical coords */
+        context = SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE);
+        if (GetWindowRect(hwnd, rect))
+            hr = S_OK;
+        else
+            hr = HRESULT_FROM_WIN32(GetLastError());
+
+        SetThreadDpiAwarenessContext(context);
         break;
-
+    }
     case DWMWA_CLOAKED:
-        if (size < sizeof(DWORD)) return E_INVALIDARG;
+        if (size < sizeof(DWORD))
+            return E_INVALIDARG;
 
-        WARN("DWMWA_CLOAKED: always returning 0.\n");
+        FIXME("DWMWA_CLOAKED: always returning 0.\n");
         *(DWORD*)(pv_attribute) = 0;
+        hr = S_OK;
         break;
 
     default:
-        FIXME("unimplemented attribute %ld, size %lu, for hwnd %p.\n", attribute, size, hwnd);
-        return E_INVALIDARG;
+        FIXME("attribute %ld not implemented.\n", attribute);
+        hr = E_NOTIMPL;
+        break;
     }
 
-    return S_OK;
+    return hr;
 }
 
 /**********************************************************************

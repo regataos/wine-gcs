@@ -43,7 +43,6 @@
 
 #define WINEVULKAN_QUIRK_GET_DEVICE_PROC_ADDR 0x00000001
 #define WINEVULKAN_QUIRK_ADJUST_MAX_IMAGE_COUNT 0x00000002
-#define WINEVULKAN_QUIRK_IGNORE_EXPLICIT_LAYERS 0x00000004
 
 /* Base 'class' for our Vulkan dispatchable objects such as VkDevice and VkInstance.
  * This structure MUST be the first element of a dispatchable object as the ICD
@@ -83,16 +82,6 @@ struct VkDevice_T
     struct VkQueue_T queues[1];
 };
 
-struct vk_swapchain
-{
-    UINT64 unix_handle;
-};
-
-static inline struct vk_swapchain *swapchain_from_handle(VkSwapchainKHR handle)
-{
-    return (struct vk_swapchain *)(uintptr_t)handle;
-}
-
 struct vk_command_pool
 {
     UINT64 unix_handle;
@@ -116,9 +105,9 @@ struct vulkan_func
     void *func;
 };
 
-void *wine_vk_get_device_proc_addr(const char *name) DECLSPEC_HIDDEN;
-void *wine_vk_get_phys_dev_proc_addr(const char *name) DECLSPEC_HIDDEN;
-void *wine_vk_get_instance_proc_addr(const char *name) DECLSPEC_HIDDEN;
+void *wine_vk_get_device_proc_addr(const char *name);
+void *wine_vk_get_phys_dev_proc_addr(const char *name);
+void *wine_vk_get_instance_proc_addr(const char *name);
 
 /* debug callbacks params */
 

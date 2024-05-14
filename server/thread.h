@@ -84,7 +84,6 @@ struct thread
     client_ptr_t           entry_point;   /* entry point (in client address space) */
     affinity_t             affinity;      /* affinity mask */
     int                    priority;      /* priority level */
-    struct timeout_user   *delay_priority;/* delayed set_thread_priority */
     int                    suspend;       /* suspend count */
     int                    dbg_hidden;    /* hidden from debugger */
     obj_handle_t           desktop;       /* desktop handle */
@@ -97,9 +96,9 @@ struct thread
     WCHAR                 *desc;          /* thread description string */
     struct object         *locked_completion; /* completion port wait object successfully waited by the thread */
     struct object         *queue_shared_mapping; /* thread queue shared memory mapping */
-    volatile struct queue_shared_memory *queue_shared;  /* thread queue shared memory ptr */
+    queue_shm_t           *queue_shared;  /* thread queue shared memory ptr */
     struct object         *input_shared_mapping; /* thread input shared memory mapping */
-    volatile struct input_shared_memory *input_shared;  /* thread input shared memory ptr */
+    input_shm_t           *input_shared;  /* thread input shared memory ptr */
 };
 
 extern struct thread *current;

@@ -26,6 +26,7 @@
 #endif
 
 #include <winreg.h>
+#include <devpropdef.h>
 
 /* cfgmgr32 doesn't use the normal convention, it adds an underscore before A/W */
 #ifdef WINE_NO_UNICODE_MACROS
@@ -211,7 +212,7 @@ typedef enum _PNP_VETO_TYPE
 
 typedef enum _CM_NOTIFY_FILTER_TYPE
 {
-    CM_NOTIFY_FILTER_TYPE_DEVICEINTERFACE = 0,
+    CM_NOTIFY_FILTER_TYPE_DEVICEINTERFACE,
     CM_NOTIFY_FILTER_TYPE_DEVICEHANDLE,
     CM_NOTIFY_FILTER_TYPE_DEVICEINSTANCE,
     CM_NOTIFY_FILTER_TYPE_MAX
@@ -219,7 +220,7 @@ typedef enum _CM_NOTIFY_FILTER_TYPE
 
 typedef enum _CM_NOTIFY_ACTION
 {
-    CM_NOTIFY_ACTION_DEVICEINTERFACEARRIVAL = 0,
+    CM_NOTIFY_ACTION_DEVICEINTERFACEARRIVAL,
     CM_NOTIFY_ACTION_DEVICEINTERFACEREMOVAL,
     CM_NOTIFY_ACTION_DEVICEQUERYREMOVE,
     CM_NOTIFY_ACTION_DEVICEQUERYREMOVEFAILED,
@@ -234,18 +235,22 @@ typedef enum _CM_NOTIFY_ACTION
 
 typedef struct _CM_NOTIFY_FILTER
 {
-    DWORD                 cbSize;
-    DWORD                 Flags;
+    DWORD cbSize;
+    DWORD Flags;
     CM_NOTIFY_FILTER_TYPE FilterType;
-    DWORD                 Reserved;
-    union {
-        struct {
+    DWORD Reserved;
+    union
+    {
+        struct
+        {
             GUID ClassGuid;
         } DeviceInterface;
-        struct {
+        struct
+        {
             HANDLE hTarget;
         } DeviceHandle;
-        struct {
+        struct
+        {
             WCHAR InstanceId[MAX_DEVICE_ID_LEN];
         } DeviceInstance;
     } u;
@@ -253,32 +258,30 @@ typedef struct _CM_NOTIFY_FILTER
 
 typedef struct _CM_NOTIFY_EVENT_DATA
 {
-    CM_NOTIFY_FILTER_TYPE    FilterType;
-    DWORD                    Reserved;
-    union {
-        struct {
-            GUID    ClassGuid;
-            WCHAR   SymbolicLink[ANYSIZE_ARRAY];
+    CM_NOTIFY_FILTER_TYPE FilterType;
+    DWORD Reserved;
+    union
+    {
+        struct
+        {
+            GUID  ClassGuid;
+            WCHAR SymbolicLink[ANYSIZE_ARRAY];
         } DeviceInterface;
-        struct {
-            GUID    EventGuid;
-            LONG    NameOffset;
-            DWORD   DataSize;
-            BYTE    Data[ANYSIZE_ARRAY];
+        struct
+        {
+            GUID  EventGuid;
+            LONG  NameOffset;
+            DWORD DataSize;
+            BYTE  Data[ANYSIZE_ARRAY];
         } DeviceHandle;
-        struct {
-            WCHAR   InstanceId[ANYSIZE_ARRAY];
+        struct
+        {
+            WCHAR InstanceId[ANYSIZE_ARRAY];
         } DeviceInstance;
     } u;
 } CM_NOTIFY_EVENT_DATA, *PCM_NOTIFY_EVENT_DATA;
 
-typedef DWORD (WINAPI *PCM_NOTIFY_CALLBACK)(
-    HCMNOTIFICATION Notify,
-    void *Context,
-    CM_NOTIFY_ACTION Action,
-    CM_NOTIFY_EVENT_DATA *EventData,
-    DWORD EventDataSize
-);
+typedef DWORD (WINAPI *PCM_NOTIFY_CALLBACK)(HCMNOTIFICATION,void*,CM_NOTIFY_ACTION,CM_NOTIFY_EVENT_DATA*,DWORD);
 
 DECL_WINELIB_CFGMGR32_TYPE_AW(DEVNODEID)
 DECL_WINELIB_CFGMGR32_TYPE_AW(DEVINSTID)
@@ -310,6 +313,7 @@ CMAPI CONFIGRET WINAPI CM_Get_Device_ID_List_ExW(PCWSTR,PWCHAR,ULONG,ULONG,HMACH
 #define     CM_Get_Device_ID_List_Ex WINELIB_NAME_AW(CM_Get_Device_ID_List_Ex)
 CMAPI CONFIGRET WINAPI CM_Get_Device_ID_Size(PULONG,DEVINST,ULONG);
 CMAPI CONFIGRET WINAPI CM_Get_Device_ID_Size_Ex(PULONG,DEVINST,ULONG,HMACHINE);
+CMAPI CONFIGRET WINAPI CM_Get_Device_Interface_PropertyW(LPCWSTR,const DEVPROPKEY*,DEVPROPTYPE*,PBYTE,PULONG,ULONG);
 CMAPI CONFIGRET WINAPI CM_Get_DevNode_Status(PULONG,PULONG,DEVINST,ULONG);
 CMAPI CONFIGRET WINAPI CM_Get_DevNode_Status_Ex(PULONG,PULONG,DEVINST,ULONG,HMACHINE);
 CMAPI CONFIGRET WINAPI CM_Get_Sibling(PDEVINST,DEVINST,ULONG);
@@ -321,6 +325,7 @@ CMAPI CONFIGRET WINAPI CM_Locate_DevNodeW(PDEVINST,DEVINSTID_W,ULONG);
 CMAPI DWORD     WINAPI CM_MapCrToWin32Err(CONFIGRET,DWORD);
 CMAPI CONFIGRET WINAPI CM_Open_DevNode_Key(DEVINST dnDevInst, REGSAM access, ULONG ulHardwareProfile,
                                            REGDISPOSITION disposition, PHKEY phkDevice, ULONG ulFlags);
+CMAPI CONFIGRET WINAPI CM_Register_Notification(PCM_NOTIFY_FILTER,PVOID,PCM_NOTIFY_CALLBACK,PHCMNOTIFICATION);
 CMAPI CONFIGRET WINAPI CM_Request_Device_EjectA(DEVINST dev, PPNP_VETO_TYPE type, LPSTR name, ULONG length, ULONG flags);
 CMAPI CONFIGRET WINAPI CM_Request_Device_EjectW(DEVINST dev, PPNP_VETO_TYPE type, LPWSTR name, ULONG length, ULONG flags);
 #define     CM_Request_Device_Eject WINELIB_NAME_AW(CM_Get_Device_ID_List_Ex)

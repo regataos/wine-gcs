@@ -115,7 +115,7 @@ MAKE_FUNCPTR(SDL_RegisterEvents);
 MAKE_FUNCPTR(SDL_PushEvent);
 MAKE_FUNCPTR(SDL_GetTicks);
 MAKE_FUNCPTR(SDL_LogSetPriority);
-MAKE_FUNCPTR(SDL_SetHint);
+MAKE_FUNCPTR(SDL_SetHintWithPriority);
 static int (*pSDL_JoystickRumble)(SDL_Joystick *joystick, Uint16 low_frequency_rumble, Uint16 high_frequency_rumble, Uint32 duration_ms);
 static int (*pSDL_JoystickRumbleTriggers)(SDL_Joystick *joystick, Uint16 left_rumble, Uint16 right_rumble, Uint32 duration_ms);
 static Uint16 (*pSDL_JoystickGetProduct)(SDL_Joystick * joystick);
@@ -255,8 +255,7 @@ static const USAGE_AND_PAGE g920_absolute_usages[] =
     {.UsagePage = HID_USAGE_PAGE_GENERIC, .Usage = HID_USAGE_GENERIC_Z},  /* brake */
     {.UsagePage = HID_USAGE_PAGE_GENERIC, .Usage = HID_USAGE_GENERIC_RZ}, /* clutch */
 };
-
-static const USAGE_AND_PAGE generic_absolute_usages[] =
+static const USAGE_AND_PAGE absolute_axis_usages[] =
 {
     {.UsagePage = HID_USAGE_PAGE_GENERIC, .Usage = HID_USAGE_GENERIC_X},
     {.UsagePage = HID_USAGE_PAGE_GENERIC, .Usage = HID_USAGE_GENERIC_Y},
@@ -267,6 +266,18 @@ static const USAGE_AND_PAGE generic_absolute_usages[] =
     {.UsagePage = HID_USAGE_PAGE_GENERIC, .Usage = HID_USAGE_GENERIC_SLIDER},
     {.UsagePage = HID_USAGE_PAGE_GENERIC, .Usage = HID_USAGE_GENERIC_DIAL},
 };
+static const USAGE_AND_PAGE relative_axis_usages[] =
+{
+    {.UsagePage = HID_USAGE_PAGE_GENERIC, .Usage = HID_USAGE_GENERIC_X},
+    {.UsagePage = HID_USAGE_PAGE_GENERIC, .Usage = HID_USAGE_GENERIC_Y},
+    {.UsagePage = HID_USAGE_PAGE_GENERIC, .Usage = HID_USAGE_GENERIC_RX},
+    {.UsagePage = HID_USAGE_PAGE_GENERIC, .Usage = HID_USAGE_GENERIC_RY},
+    {.UsagePage = HID_USAGE_PAGE_GENERIC, .Usage = HID_USAGE_GENERIC_Z},
+    {.UsagePage = HID_USAGE_PAGE_GENERIC, .Usage = HID_USAGE_GENERIC_RZ},
+    {.UsagePage = HID_USAGE_PAGE_GENERIC, .Usage = HID_USAGE_GENERIC_SLIDER},
+    {.UsagePage = HID_USAGE_PAGE_GENERIC, .Usage = HID_USAGE_GENERIC_DIAL},
+    {.UsagePage = HID_USAGE_PAGE_GENERIC, .Usage = HID_USAGE_GENERIC_WHEEL},
+};
 
 static int get_absolute_usages(struct sdl_device *impl, const USAGE_AND_PAGE **absolute_usages)
 {
@@ -276,32 +287,19 @@ static int get_absolute_usages(struct sdl_device *impl, const USAGE_AND_PAGE **a
         return ARRAY_SIZE(g920_absolute_usages);
     }
 
-    *absolute_usages = generic_absolute_usages;
-    return ARRAY_SIZE(generic_absolute_usages);
+    *absolute_usages = absolute_axis_usages;
+    return ARRAY_SIZE(absolute_axis_usages);
 }
 
 static NTSTATUS build_joystick_report_descriptor(struct unix_device *iface)
 {
     const USAGE_AND_PAGE device_usage = {.UsagePage = HID_USAGE_PAGE_GENERIC, .Usage = HID_USAGE_GENERIC_JOYSTICK};
-    static const USAGE_AND_PAGE relative_usages[] =
-    {
-        {.UsagePage = HID_USAGE_PAGE_GENERIC, .Usage = HID_USAGE_GENERIC_X},
-        {.UsagePage = HID_USAGE_PAGE_GENERIC, .Usage = HID_USAGE_GENERIC_Y},
-        {.UsagePage = HID_USAGE_PAGE_GENERIC, .Usage = HID_USAGE_GENERIC_RX},
-        {.UsagePage = HID_USAGE_PAGE_GENERIC, .Usage = HID_USAGE_GENERIC_RY},
-        {.UsagePage = HID_USAGE_PAGE_GENERIC, .Usage = HID_USAGE_GENERIC_Z},
-        {.UsagePage = HID_USAGE_PAGE_GENERIC, .Usage = HID_USAGE_GENERIC_RZ},
-        {.UsagePage = HID_USAGE_PAGE_GENERIC, .Usage = HID_USAGE_GENERIC_SLIDER},
-        {.UsagePage = HID_USAGE_PAGE_GENERIC, .Usage = HID_USAGE_GENERIC_DIAL},
-        {.UsagePage = HID_USAGE_PAGE_GENERIC, .Usage = HID_USAGE_GENERIC_WHEEL},
-    };
-    const USAGE_AND_PAGE *absolute_usages = NULL;
     struct sdl_device *impl = impl_from_unix_device(iface);
     int i, button_count, axis_count, ball_count, hat_count;
     USAGE_AND_PAGE physical_usage;
-    size_t absolute_usages_count;
 
-    absolute_usages_count = get_absolute_usages(impl, &absolute_usages);
+    const USAGE_AND_PAGE *absolute_usages = NULL;
+    size_t absolute_usages_count = get_absolute_usages(impl, &absolute_usages);
 
     axis_count = pSDL_JoystickNumAxes(impl->sdl_joystick);
     if (options.split_controllers) axis_count = min(6, axis_count - impl->axis_offset);
@@ -312,10 +310,10 @@ static NTSTATUS build_joystick_report_descriptor(struct unix_device *iface)
     }
 
     ball_count = pSDL_JoystickNumBalls(impl->sdl_joystick);
-    if (ball_count > ARRAY_SIZE(relative_usages) / 2)
+    if (ball_count > ARRAY_SIZE(relative_axis_usages) / 2)
     {
-        FIXME("More than %zu relative axes found, ignoring.\n", ARRAY_SIZE(relative_usages));
-        ball_count = ARRAY_SIZE(relative_usages) / 2;
+        FIXME("More than %zu relative axes found, ignoring.\n", ARRAY_SIZE(relative_axis_usages));
+        ball_count = ARRAY_SIZE(relative_axis_usages) / 2;
     }
 
     if (impl->axis_offset == 0)
@@ -371,8 +369,8 @@ static NTSTATUS build_joystick_report_descriptor(struct unix_device *iface)
 
     for (i = 0; i < ball_count; i++)
     {
-        if (!hid_device_add_axes(iface, 2, relative_usages[2 * i].UsagePage,
-                                 &relative_usages[2 * i].Usage, TRUE, INT32_MIN, INT32_MAX))
+        if (!hid_device_add_axes(iface, 2, relative_axis_usages[2 * i].UsagePage,
+                                 &relative_axis_usages[2 * i].Usage, TRUE, INT32_MIN, INT32_MAX))
             return STATUS_NO_MEMORY;
     }
 
@@ -1199,7 +1197,7 @@ NTSTATUS sdl_bus_init(void *args)
     LOAD_FUNCPTR(SDL_PushEvent);
     LOAD_FUNCPTR(SDL_GetTicks);
     LOAD_FUNCPTR(SDL_LogSetPriority);
-    LOAD_FUNCPTR(SDL_SetHint);
+    LOAD_FUNCPTR(SDL_SetHintWithPriority);
 #undef LOAD_FUNCPTR
     pSDL_JoystickRumble = dlsym(sdl_handle, "SDL_JoystickRumble");
     pSDL_JoystickRumbleTriggers = dlsym(sdl_handle, "SDL_JoystickRumbleTriggers");
@@ -1211,7 +1209,7 @@ NTSTATUS sdl_bus_init(void *args)
 
     /* CW-Bug-Id: #23185: Disable SDL 2.30 new behavior, we need the steam virtual
      * controller name to figure which slot number it represents. */
-    pSDL_SetHint("SteamVirtualGamepadInfo", "");
+    pSDL_SetHintWithPriority("SteamVirtualGamepadInfo", "", SDL_HINT_OVERRIDE);
 
     if (pSDL_Init(SDL_INIT_GAMECONTROLLER | SDL_INIT_HAPTIC) < 0)
     {

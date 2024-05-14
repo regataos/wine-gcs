@@ -29,7 +29,6 @@
 
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
-#define NONAMELESSUNION
 #include "windef.h"
 #include "winnt.h"
 #include "winternl.h"
@@ -330,6 +329,7 @@ C_ASSERT( HEAP_MIN_LARGE_BLOCK_SIZE <= HEAP_INITIAL_GROW_SIZE );
 #define HEAP_CHECKING_ENABLED 0x80000000
 
 BOOL delay_heap_free = FALSE;
+BOOL heap_zero_hack = FALSE;
 
 static struct heap *process_heap;  /* main process heap */
 
@@ -460,16 +460,6 @@ static inline void valgrind_make_noaccess( void const *ptr, SIZE_T size )
     VALGRIND_DISCARD( VALGRIND_MAKE_MEM_NOACCESS( ptr, size ) );
 #elif defined(VALGRIND_MAKE_NOACCESS)
     VALGRIND_DISCARD( VALGRIND_MAKE_NOACCESS( ptr, size ) );
-#endif
-}
-
-/* mark a block of memory as initialized for debugging purposes */
-static inline void valgrind_make_readable( void const *ptr, SIZE_T size )
-{
-#if defined(VALGRIND_MAKE_MEM_DEFINED)
-    VALGRIND_DISCARD( VALGRIND_MAKE_MEM_DEFINED( ptr, size ) );
-#elif defined(VALGRIND_MAKE_READABLE)
-    VALGRIND_DISCARD( VALGRIND_MAKE_READABLE( ptr, size ) );
 #endif
 }
 
@@ -1530,6 +1520,9 @@ HANDLE WINAPI RtlCreateHeap( ULONG flags, void *addr, SIZE_T total_size, SIZE_T 
     TRACE( "flags %#lx, addr %p, total_size %#Ix, commit_size %#Ix, unknown %p, definition %p\n",
            flags, addr, total_size, commit_size, unknown, definition );
 
+    if (heap_zero_hack)
+        flags |= HEAP_ZERO_MEMORY;
+
     flags &= ~(HEAP_TAIL_CHECKING_ENABLED|HEAP_FREE_CHECKING_ENABLED);
     if (process_heap) flags |= HEAP_PRIVATE;
     if (!process_heap || !total_size || (flags & HEAP_SHARED)) flags |= HEAP_GROWABLE;
@@ -2064,9 +2057,8 @@ void *WINAPI DECLSPEC_HOTPATCH RtlAllocateHeap( HANDLE handle, ULONG flags, SIZE
     ULONG heap_flags;
     NTSTATUS status;
 
-    if (!(heap = unsafe_heap_from_handle( handle, flags, &heap_flags )))
-        status = STATUS_INVALID_HANDLE;
-    else if ((block_size = heap_get_block_size( heap, heap_flags, size )) == ~0U)
+    heap = unsafe_heap_from_handle( handle, flags, &heap_flags );
+    if ((block_size = heap_get_block_size( heap, heap_flags, size )) == ~0U)
         status = STATUS_NO_MEMORY;
     else if (block_size >= HEAP_MIN_LARGE_BLOCK_SIZE)
         status = heap_allocate_large( heap, heap_flags, block_size, size, &ptr );
@@ -2141,7 +2133,6 @@ static NTSTATUS heap_resize_large( struct heap *heap, ULONG flags, struct block 
     SIZE_T old_block_size = large->block_size;
     *old_size = large->data_size;
 
-    if (block_size < HEAP_MIN_LARGE_BLOCK_SIZE / 4) return STATUS_NO_MEMORY;  /* shrinking large block to small block */
     if (old_block_size < block_size) return STATUS_NO_MEMORY;
 
     /* FIXME: we could remap zero-pages instead */
@@ -2627,7 +2618,7 @@ NTSTATUS WINAPI RtlSetHeapInformation( HANDLE handle, HEAP_INFORMATION_CLASS inf
             FIXME( "HeapCompatibilityInformation %lu not implemented!\n", compat_info );
             return STATUS_UNSUCCESSFUL;
         }
-        if (InterlockedCompareExchange( &heap->compat_info, compat_info, HEAP_STD ) != HEAP_STD)
+        if (!delay_heap_free && InterlockedCompareExchange( &heap->compat_info, compat_info, HEAP_STD ) != HEAP_STD)
             return STATUS_UNSUCCESSFUL;
         return STATUS_SUCCESS;
     }

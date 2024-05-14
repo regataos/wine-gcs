@@ -850,12 +850,6 @@ static const IHTMLRect2Vtbl HTMLRect2Vtbl = {
     HTMLRect2_get_height,
 };
 
-void HTMLRect_init_dispex_info(dispex_data_t *info, compat_mode_t mode)
-{
-    if (mode >= COMPAT_MODE_IE9)
-        dispex_info_add_interface(info, IHTMLRect2_tid, NULL);
-}
-
 static inline HTMLRect *HTMLRect_from_DispatchEx(DispatchEx *iface)
 {
     return CONTAINING_RECORD(iface, HTMLRect, dispex);
@@ -890,6 +884,12 @@ static void HTMLRect_destructor(DispatchEx *dispex)
 {
     HTMLRect *This = HTMLRect_from_DispatchEx(dispex);
     free(This);
+}
+
+void HTMLRect_init_dispex_info(dispex_data_t *info, compat_mode_t mode)
+{
+    if (mode >= COMPAT_MODE_IE9)
+        dispex_info_add_interface(info, IHTMLRect2_tid, NULL);
 }
 
 static const dispex_static_data_vtbl_t HTMLRect_dispex_vtbl = {
@@ -7083,16 +7083,16 @@ void HTMLElement_bind_event(DispatchEx *dispex, eventid_t eid)
     ensure_doc_nsevent_handler(This->node.doc, This->node.nsnode, eid);
 }
 
-HRESULT HTMLElement_handle_event(DispatchEx *dispex, eventid_t eid, nsIDOMEvent *event, BOOL *prevent_default)
+HRESULT HTMLElement_handle_event(DispatchEx *dispex, DOMEvent *event, BOOL *prevent_default)
 {
     HTMLElement *This = impl_from_DispatchEx(dispex);
 
-    switch(eid) {
+    switch(event->event_id) {
     case EVENTID_KEYDOWN: {
         nsIDOMKeyEvent *key_event;
         nsresult nsres;
 
-        nsres = nsIDOMEvent_QueryInterface(event, &IID_nsIDOMKeyEvent, (void**)&key_event);
+        nsres = nsIDOMEvent_QueryInterface(event->nsevent, &IID_nsIDOMKeyEvent, (void**)&key_event);
         if(NS_SUCCEEDED(nsres)) {
             UINT32 code = 0;
 
@@ -8087,7 +8087,7 @@ static const tid_t token_list_iface_tids[] = {
     IWineDOMTokenList_tid,
     0
 };
-dispex_static_data_t DOMTokenList_dispex = {
+dispex_static_data_t token_list_dispex = {
     "DOMTokenList",
     &token_list_dispex_vtbl,
     PROTO_ID_DOMTokenList,
@@ -8108,7 +8108,7 @@ static HRESULT create_token_list(compat_mode_t compat_mode, HTMLElement *element
 
     obj->IWineDOMTokenList_iface.lpVtbl = &WineDOMTokenListVtbl;
 
-    init_dispatch(&obj->dispex, &DOMTokenList_dispex, get_inner_window(element->node.doc), compat_mode);
+    init_dispatch(&obj->dispex, &token_list_dispex, get_inner_window(element->node.doc), compat_mode);
     IHTMLElement_AddRef(&element->IHTMLElement_iface);
     obj->element = &element->IHTMLElement_iface;
 

@@ -110,6 +110,14 @@ typedef union
 } debug_event_t;
 
 
+enum context_exec_space
+{
+    EXEC_SPACE_USERMODE,
+    EXEC_SPACE_SYSCALL,
+    EXEC_SPACE_EXCEPTION,
+};
+
+
 typedef struct
 {
     unsigned int     machine;
@@ -156,6 +164,10 @@ typedef struct
     } ext;
     union
     {
+        struct { enum context_exec_space space; int __pad; } space;
+    } exec_space;
+    union
+    {
         struct { struct { unsigned __int64 low, high; } ymm_high[16]; } regs;
     } ymm;
 } context_t;
@@ -167,6 +179,7 @@ typedef struct
 #define SERVER_CTX_DEBUG_REGISTERS    0x10
 #define SERVER_CTX_EXTENDED_REGISTERS 0x20
 #define SERVER_CTX_YMM_REGISTERS      0x40
+#define SERVER_CTX_EXEC_SPACE         0x80
 
 
 struct send_fd
@@ -208,6 +221,7 @@ typedef struct
     unsigned int attribute;
     unsigned int flags;
     unsigned int show;
+    process_id_t process_group_id;
     data_size_t  curdir_len;
     data_size_t  dllpath_len;
     data_size_t  imagepath_len;
@@ -456,6 +470,7 @@ typedef union
     {
         enum select_op  op;
         obj_handle_t    handles[MAXIMUM_WAIT_OBJECTS];
+        int             __pad;
     } wait;
     struct
     {
@@ -485,6 +500,7 @@ enum apc_type
     APC_VIRTUAL_LOCK,
     APC_VIRTUAL_UNLOCK,
     APC_MAP_VIEW,
+    APC_MAP_VIEW_EX,
     APC_UNMAP_VIEW,
     APC_CREATE_THREAD,
     APC_DUP_HANDLE
@@ -525,9 +541,11 @@ typedef union
         unsigned int     op_type;
         client_ptr_t     addr;
         mem_size_t       size;
-        mem_size_t       limit;
+        mem_size_t       limit_low;
+        mem_size_t       limit_high;
         mem_size_t       align;
         unsigned int     prot;
+        unsigned int     attributes;
     } virtual_alloc_ex;
     struct
     {
@@ -584,9 +602,22 @@ typedef union
     struct
     {
         enum apc_type    type;
-        int              __pad;
+        obj_handle_t     handle;
         client_ptr_t     addr;
+        mem_size_t       size;
+        file_pos_t       offset;
+        mem_size_t       limit_low;
+        mem_size_t       limit_high;
+        unsigned int     alloc_type;
+        unsigned int     prot;
+        unsigned short   machine;
+        unsigned short   __pad[3];
+    } map_view_ex;
+    struct
+    {
+        enum apc_type    type;
         unsigned int     flags;
+        client_ptr_t     addr;
     } unmap_view;
     struct
     {
@@ -687,6 +718,13 @@ typedef union
         client_ptr_t     addr;
         mem_size_t       size;
     } map_view;
+    struct
+    {
+        enum apc_type    type;
+        unsigned int     status;
+        client_ptr_t     addr;
+        mem_size_t       size;
+    } map_view_ex;
     struct
     {
         enum apc_type    type;
@@ -802,6 +840,7 @@ typedef union
 typedef struct
 {
     client_ptr_t   base;
+    client_ptr_t   map_addr;
     mem_size_t     stack_size;
     mem_size_t     stack_commit;
     unsigned int   entry_point;
@@ -815,7 +854,10 @@ typedef struct
     unsigned short image_charact;
     unsigned short dll_charact;
     unsigned short machine;
-    unsigned char  contains_code;
+    unsigned char  contains_code : 1;
+    unsigned char  wine_builtin : 1;
+    unsigned char  wine_fakedll : 1;
+    unsigned char  padding : 5;
     unsigned char  image_flags;
     unsigned int   loader_flags;
     unsigned int   header_size;
@@ -830,8 +872,6 @@ typedef struct
 #define IMAGE_FLAGS_ImageMappedFlat           0x08
 #define IMAGE_FLAGS_BaseBelow4gb              0x10
 #define IMAGE_FLAGS_ComPlusPrefer32bit        0x20
-#define IMAGE_FLAGS_WineBuiltin               0x40
-#define IMAGE_FLAGS_WineFakeDll               0x80
 
 struct rawinput_device
 {
@@ -871,7 +911,9 @@ struct desktop_shared_memory
     unsigned char        keystate[256];
     thread_id_t          foreground_tid;
     __int64              update_serial;
+    unsigned int         flags;
 };
+typedef volatile struct desktop_shared_memory desktop_shm_t;
 
 struct queue_shared_memory
 {
@@ -883,6 +925,7 @@ struct queue_shared_memory
     unsigned int         changed_mask;
     thread_id_t          input_tid;
 };
+typedef volatile struct queue_shared_memory queue_shm_t;
 
 struct input_shared_memory
 {
@@ -902,10 +945,7 @@ struct input_shared_memory
     int                  keystate_lock;
     __int64              sync_serial;
 };
-
-
-#define SEQUENCE_MASK_BITS  4
-#define SEQUENCE_MASK ((1UL << SEQUENCE_MASK_BITS) - 1)
+typedef volatile struct input_shared_memory input_shm_t;
 
 
 
@@ -985,9 +1025,10 @@ struct get_startup_info_reply
 {
     struct reply_header __header;
     data_size_t  info_size;
+    unsigned short machine;
     /* VARARG(info,startup_info,info_size); */
     /* VARARG(env,unicode_str); */
-    char __pad_12[4];
+    char __pad_14[2];
 };
 
 
@@ -1019,8 +1060,6 @@ struct init_first_thread_request
     int          debug_level;
     int          reply_fd;
     int          wait_fd;
-    char         nice_limit;
-    char __pad_33[7];
 };
 struct init_first_thread_reply
 {
@@ -1128,8 +1167,8 @@ struct get_process_image_name_request
 {
     struct request_header __header;
     obj_handle_t handle;
+    process_id_t pid;
     int          win32;
-    char __pad_20[4];
 };
 struct get_process_image_name_reply
 {
@@ -1195,10 +1234,12 @@ struct get_thread_info_reply
     int          priority;
     int          last;
     int          suspend_count;
-    int          dbg_hidden;
+    unsigned int flags;
     data_size_t  desc_len;
     /* VARARG(desc,unicode_str); */
 };
+#define GET_THREAD_INFO_FLAG_DBG_HIDDEN 0x01
+#define GET_THREAD_INFO_FLAG_TERMINATED 0x02
 
 
 
@@ -1247,12 +1288,14 @@ struct suspend_thread_request
 {
     struct request_header __header;
     obj_handle_t handle;
+    obj_handle_t waited_handle;
+    char __pad_20[4];
 };
 struct suspend_thread_reply
 {
     struct reply_header __header;
     int          count;
-    char __pad_12[4];
+    obj_handle_t wait_handle;
 };
 
 
@@ -1275,7 +1318,7 @@ struct queue_apc_request
 {
     struct request_header __header;
     obj_handle_t handle;
-    apc_call_t   call;
+    /* VARARG(call,apc_call); */
 };
 struct queue_apc_reply
 {
@@ -1420,9 +1463,9 @@ struct select_request
 struct select_reply
 {
     struct reply_header __header;
-    apc_call_t   call;
     obj_handle_t apc_handle;
     int          signaled;
+    /* VARARG(call,apc_call); */
     /* VARARG(contexts,contexts); */
 };
 #define SELECT_ALERTABLE     1
@@ -1876,6 +1919,23 @@ struct send_socket_reply
 
 
 
+struct socket_get_events_request
+{
+    struct request_header __header;
+    obj_handle_t handle;
+    obj_handle_t event;
+    char __pad_20[4];
+};
+struct socket_get_events_reply
+{
+    struct reply_header __header;
+    unsigned int flags;
+    /* VARARG(status,uints); */
+    char __pad_12[4];
+};
+
+
+
 struct socket_send_icmp_id_request
 {
     struct request_header __header;
@@ -2014,6 +2074,19 @@ struct get_mapping_info_reply
 
 
 
+struct get_image_map_address_request
+{
+    struct request_header __header;
+    obj_handle_t handle;
+};
+struct get_image_map_address_reply
+{
+    struct reply_header __header;
+    client_ptr_t addr;
+};
+
+
+
 struct map_view_request
 {
     struct request_header __header;
@@ -2023,12 +2096,56 @@ struct map_view_request
     client_ptr_t base;
     mem_size_t   size;
     file_pos_t   start;
-    /* VARARG(image,pe_image_info); */
-    /* VARARG(name,unicode_str); */
 };
 struct map_view_reply
 {
     struct reply_header __header;
+};
+
+
+
+struct map_image_view_request
+{
+    struct request_header __header;
+    obj_handle_t mapping;
+    client_ptr_t base;
+    mem_size_t   size;
+    unsigned int entry;
+    unsigned short machine;
+    char __pad_38[2];
+};
+struct map_image_view_reply
+{
+    struct reply_header __header;
+};
+
+
+
+struct map_builtin_view_request
+{
+    struct request_header __header;
+    /* VARARG(image,pe_image_info); */
+    /* VARARG(name,unicode_str); */
+    char __pad_12[4];
+};
+struct map_builtin_view_reply
+{
+    struct reply_header __header;
+};
+
+
+
+struct get_image_view_info_request
+{
+    struct request_header __header;
+    obj_handle_t process;
+    client_ptr_t addr;
+};
+struct get_image_view_info_reply
+{
+    struct reply_header __header;
+    client_ptr_t base;
+    mem_size_t   size;
 };
 
 
@@ -2620,8 +2737,9 @@ struct get_thread_context_request
     obj_handle_t handle;
     obj_handle_t context;
     unsigned int flags;
+    unsigned int native_flags;
     unsigned short machine;
-    char __pad_26[6];
+    char __pad_30[2];
 };
 struct get_thread_context_reply
 {
@@ -2637,7 +2755,9 @@ struct set_thread_context_request
 {
     struct request_header __header;
     obj_handle_t handle;
+    unsigned int native_flags;
     /* VARARG(contexts,contexts); */
+    char __pad_20[4];
 };
 struct set_thread_context_reply
 {
@@ -3162,10 +3282,10 @@ struct create_named_pipe_request
     unsigned int   access;
     unsigned int   options;
     unsigned int   sharing;
+    unsigned int   disposition;
     unsigned int   maxinstances;
     unsigned int   outsize;
     unsigned int   insize;
-    char __pad_36[4];
     timeout_t      timeout;
     unsigned int   flags;
     /* VARARG(objattr,object_attributes); */
@@ -3175,7 +3295,7 @@ struct create_named_pipe_reply
 {
     struct reply_header __header;
     obj_handle_t   handle;
-    char __pad_12[4];
+    int            created;
 };
 
 
@@ -4495,6 +4615,33 @@ struct remove_clipboard_listener_reply
 
 
 
+struct create_token_request
+{
+    struct request_header __header;
+    struct luid    token_id;
+    unsigned int   access;
+    int            primary;
+    int            impersonation_level;
+    abstime_t      expire;
+    int            group_count;
+    int            primary_group;
+    int            priv_count;
+
+
+
+
+
+    char __pad_52[4];
+};
+struct create_token_reply
+{
+    struct reply_header __header;
+    obj_handle_t   token;
+    char __pad_12[4];
+};
+
+
+
 struct open_token_request
 {
     struct request_header __header;
@@ -5279,7 +5426,7 @@ struct set_fd_disp_info_request
 {
     struct request_header __header;
     obj_handle_t handle;
-    int          unlink;
+    unsigned int flags;
     char __pad_20[4];
 };
 struct set_fd_disp_info_reply
@@ -5296,7 +5443,7 @@ struct set_fd_name_info_request
     obj_handle_t rootdir;
     data_size_t  namelen;
     int          link;
-    int          replace;
+    unsigned int flags;
     /* VARARG(name,unicode_str,namelen); */
     /* VARARG(filename,string); */
 };
@@ -5427,14 +5574,18 @@ struct get_rawinput_buffer_request
     struct request_header __header;
     data_size_t rawinput_size;
     data_size_t buffer_size;
-    char __pad_20[4];
+    int         clear_qs_rawinput;
+    int         __pad;
+    char __pad_28[4];
 };
 struct get_rawinput_buffer_reply
 {
     struct reply_header __header;
     data_size_t next_size;
     unsigned int count;
+    unsigned int last_message_time;
     /* VARARG(data,bytes); */
+    char __pad_20[4];
 };
 
 
@@ -5849,6 +6000,7 @@ enum request
     REQ_unlock_file,
     REQ_recv_socket,
     REQ_send_socket,
+    REQ_socket_get_events,
     REQ_socket_send_icmp_id,
     REQ_socket_get_icmp_id,
     REQ_get_next_console_request,
@@ -5857,7 +6009,11 @@ enum request
     REQ_create_mapping,
     REQ_open_mapping,
     REQ_get_mapping_info,
+    REQ_get_image_map_address,
     REQ_map_view,
+    REQ_map_image_view,
+    REQ_map_builtin_view,
+    REQ_get_image_view_info,
     REQ_unmap_view,
     REQ_get_mapping_committed_range,
     REQ_add_mapping_committed_range,
@@ -6003,6 +6159,7 @@ enum request
     REQ_set_clipboard_viewer,
     REQ_add_clipboard_listener,
     REQ_remove_clipboard_listener,
+    REQ_create_token,
     REQ_open_token,
     REQ_set_global_windows,
     REQ_adjust_token_privileges,
@@ -6147,6 +6304,7 @@ union generic_request
     struct unlock_file_request unlock_file_request;
     struct recv_socket_request recv_socket_request;
     struct send_socket_request send_socket_request;
+    struct socket_get_events_request socket_get_events_request;
     struct socket_send_icmp_id_request socket_send_icmp_id_request;
     struct socket_get_icmp_id_request socket_get_icmp_id_request;
     struct get_next_console_request_request get_next_console_request_request;
@@ -6155,7 +6313,11 @@ union generic_request
     struct create_mapping_request create_mapping_request;
     struct open_mapping_request open_mapping_request;
     struct get_mapping_info_request get_mapping_info_request;
+    struct get_image_map_address_request get_image_map_address_request;
     struct map_view_request map_view_request;
+    struct map_image_view_request map_image_view_request;
+    struct map_builtin_view_request map_builtin_view_request;
+    struct get_image_view_info_request get_image_view_info_request;
     struct unmap_view_request unmap_view_request;
     struct get_mapping_committed_range_request get_mapping_committed_range_request;
     struct add_mapping_committed_range_request add_mapping_committed_range_request;
@@ -6301,6 +6463,7 @@ union generic_request
     struct set_clipboard_viewer_request set_clipboard_viewer_request;
     struct add_clipboard_listener_request add_clipboard_listener_request;
     struct remove_clipboard_listener_request remove_clipboard_listener_request;
+    struct create_token_request create_token_request;
     struct open_token_request open_token_request;
     struct set_global_windows_request set_global_windows_request;
     struct adjust_token_privileges_request adjust_token_privileges_request;
@@ -6443,6 +6606,7 @@ union generic_reply
     struct unlock_file_reply unlock_file_reply;
     struct recv_socket_reply recv_socket_reply;
     struct send_socket_reply send_socket_reply;
+    struct socket_get_events_reply socket_get_events_reply;
     struct socket_send_icmp_id_reply socket_send_icmp_id_reply;
     struct socket_get_icmp_id_reply socket_get_icmp_id_reply;
     struct get_next_console_request_reply get_next_console_request_reply;
@@ -6451,7 +6615,11 @@ union generic_reply
     struct create_mapping_reply create_mapping_reply;
     struct open_mapping_reply open_mapping_reply;
     struct get_mapping_info_reply get_mapping_info_reply;
+    struct get_image_map_address_reply get_image_map_address_reply;
     struct map_view_reply map_view_reply;
+    struct map_image_view_reply map_image_view_reply;
+    struct map_builtin_view_reply map_builtin_view_reply;
+    struct get_image_view_info_reply get_image_view_info_reply;
     struct unmap_view_reply unmap_view_reply;
     struct get_mapping_committed_range_reply get_mapping_committed_range_reply;
     struct add_mapping_committed_range_reply add_mapping_committed_range_reply;
@@ -6597,6 +6765,7 @@ union generic_reply
     struct set_clipboard_viewer_reply set_clipboard_viewer_reply;
     struct add_clipboard_listener_reply add_clipboard_listener_reply;
     struct remove_clipboard_listener_reply remove_clipboard_listener_reply;
+    struct create_token_reply create_token_reply;
     struct open_token_reply open_token_reply;
     struct set_global_windows_reply set_global_windows_reply;
     struct adjust_token_privileges_reply adjust_token_privileges_reply;
@@ -6682,7 +6851,7 @@ union generic_reply
 
 /* ### protocol_version begin ### */
 
-#define SERVER_PROTOCOL_VERSION 759
+#define SERVER_PROTOCOL_VERSION 787
 
 /* ### protocol_version end ### */
 

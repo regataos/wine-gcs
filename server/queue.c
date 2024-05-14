@@ -109,7 +109,7 @@ struct thread_input
     struct list            msg_list;      /* list of hardware messages */
     unsigned char          desktop_keystate[256]; /* desktop keystate when keystate was synced */
     struct object         *shared_mapping; /* thread input shared memory mapping */
-    volatile struct input_shared_memory *shared;  /* thread input shared memory ptr */
+    const input_shm_t     *shared;        /* thread input shared memory ptr */
 };
 
 struct msg_queue
@@ -138,11 +138,11 @@ struct msg_queue
     struct hook_table     *hooks;           /* hook table */
     timeout_t              last_get_msg;    /* time of last get message call */
     int                    keystate_lock;   /* owns an input keystate lock */
+    const queue_shm_t     *shared;          /* thread queue shared memory ptr */
     int                    esync_fd;        /* esync file descriptor (signalled on message) */
     int                    esync_in_msgwait; /* our thread is currently waiting on us */
     unsigned int           fsync_idx;
     int                    fsync_in_msgwait; /* our thread is currently waiting on us */
-    volatile struct queue_shared_memory *shared;  /* thread queue shared memory ptr */
 };
 
 struct hotkey
@@ -240,63 +240,41 @@ static cursor_pos_t cursor_history[64];
 static unsigned int cursor_history_latest;
 
 #if defined(__i386__) || defined(__x86_64__)
-
-#define SHARED_WRITE_BEGIN( x )                                  \
-    do {                                                         \
-        volatile unsigned int __seq = *(x);                      \
-        assert( (__seq & SEQUENCE_MASK) != SEQUENCE_MASK );      \
-        *(x) = ++__seq;                                          \
-    } while(0)
-
-#define SHARED_WRITE_END( x )                                    \
-    do {                                                         \
-        volatile unsigned int __seq = *(x);                      \
-        assert( (__seq & SEQUENCE_MASK) != 0 );                  \
-        if ((__seq & SEQUENCE_MASK) > 1) __seq--;                \
-        else __seq += SEQUENCE_MASK;                             \
-        *(x) = __seq;                                            \
-    } while(0)
-
+#define __SHARED_INCREMENT_SEQ( x ) ++(x)
 #else
-
-#define SHARED_WRITE_BEGIN( x )                                         \
-    do {                                                                \
-        assert( (*(x) & SEQUENCE_MASK) != SEQUENCE_MASK );              \
-        if ((__atomic_add_fetch( x, 1, __ATOMIC_RELAXED ) & SEQUENCE_MASK) == 1) \
-            __atomic_thread_fence( __ATOMIC_RELEASE );                  \
-    } while(0)
-
-#define SHARED_WRITE_END( x )                                           \
-    do {                                                                \
-        assert( (*(x) & SEQUENCE_MASK) != 0 );                          \
-        if ((*(x) & SEQUENCE_MASK) > 1)                                 \
-            __atomic_sub_fetch( x, 1, __ATOMIC_RELAXED );               \
-        else {                                                          \
-            __atomic_thread_fence( __ATOMIC_RELEASE );                  \
-            __atomic_add_fetch( x, SEQUENCE_MASK, __ATOMIC_RELAXED );   \
-        }                                                               \
-    } while(0)
-
+#define __SHARED_INCREMENT_SEQ( x ) __atomic_add_fetch( &(x), 1, __ATOMIC_RELEASE )
 #endif
+
+#define SHARED_WRITE_BEGIN( object, type )                           \
+    do {                                                             \
+        const type *__shared = (object)->shared;                     \
+        type *shared = (type *)__shared;                             \
+        unsigned int __seq = __SHARED_INCREMENT_SEQ( shared->seq );  \
+        assert( (__seq & 1) != 0 );                                  \
+        do
+
+#define SHARED_WRITE_END                                             \
+        while(0);                                                    \
+        __seq = __SHARED_INCREMENT_SEQ( shared->seq ) - __seq;       \
+        assert( __seq == 1 );                                        \
+    } while(0);
 
 static void queue_hardware_message( struct desktop *desktop, struct message *msg, int always_queue );
 static void free_message( struct message *msg );
 
-/* set the caret window in a given thread input */
-static void set_caret_window( struct thread_input *input, user_handle_t win )
+/* set the caret window in a given thread input, requires write lock on the thread input shared member */
+static void set_caret_window( struct thread_input *input, input_shm_t *shared, user_handle_t win )
 {
-    SHARED_WRITE_BEGIN( &input->shared->seq );
-    if (!win || win != input->shared->caret)
+    if (!win || win != shared->caret)
     {
-        input->shared->caret_rect.left   = 0;
-        input->shared->caret_rect.top    = 0;
-        input->shared->caret_rect.right  = 0;
-        input->shared->caret_rect.bottom = 0;
+        shared->caret_rect.left   = 0;
+        shared->caret_rect.top    = 0;
+        shared->caret_rect.right  = 0;
+        shared->caret_rect.bottom = 0;
     }
-    input->shared->caret     = win;
+    shared->caret     = win;
     input->caret_hide        = 1;
     input->caret_state       = 0;
-    SHARED_WRITE_END( &input->shared->seq );
 }
 
 /* create a thread input object */
@@ -308,19 +286,7 @@ static struct thread_input *create_thread_input( struct thread *thread )
     {
         input->shared_mapping = grab_object( thread->input_shared_mapping );
         input->shared = thread->input_shared;
-        SHARED_WRITE_BEGIN( &input->shared->seq );
-        input->shared->focus        = 0;
-        input->shared->capture      = 0;
-        input->shared->active       = 0;
-        input->shared->menu_owner   = 0;
-        input->shared->move_size    = 0;
-        input->shared->cursor       = 0;
-        input->shared->cursor_count = 0;
-        input->shared->keystate_lock = 0;
-        memset( (void *)input->shared->keystate, 0, sizeof(input->shared->keystate) );
-        SHARED_WRITE_END( &input->shared->seq );
         list_init( &input->msg_list );
-        set_caret_window( input, 0 );
 
         if (!(input->desktop = get_thread_desktop( thread, 0 /* FIXME: access rights */ )))
         {
@@ -330,9 +296,21 @@ static struct thread_input *create_thread_input( struct thread *thread )
         memcpy( input->desktop_keystate, (void *)input->desktop->shared->keystate,
                 sizeof(input->desktop_keystate) );
 
-        SHARED_WRITE_BEGIN( &input->shared->seq );
-        input->shared->created = TRUE;
-        SHARED_WRITE_END( &input->shared->seq );
+        SHARED_WRITE_BEGIN( input, input_shm_t )
+        {
+            shared->focus = 0;
+            shared->active = 0;
+            shared->capture = 0;
+            shared->menu_owner = 0;
+            shared->move_size = 0;
+            shared->cursor = 0;
+            shared->cursor_count = 0;
+            set_caret_window( input, shared, 0 );
+            shared->keystate_lock = 0;
+            memset( (void *)shared->keystate, 0, sizeof(shared->keystate) );
+            shared->created = TRUE;
+        }
+        SHARED_WRITE_END
     }
     return input;
 }
@@ -369,11 +347,11 @@ static struct msg_queue *create_msg_queue( struct thread *thread, struct thread_
         queue->hooks           = NULL;
         queue->last_get_msg    = current_time;
         queue->keystate_lock   = 0;
+        queue->shared          = thread->queue_shared;
         queue->esync_fd        = -1;
         queue->esync_in_msgwait = 0;
         queue->fsync_idx       = 0;
         queue->fsync_in_msgwait = 0;
-        queue->shared          = thread->queue_shared;
         list_init( &queue->send_result );
         list_init( &queue->callback_result );
         list_init( &queue->pending_timers );
@@ -386,16 +364,22 @@ static struct msg_queue *create_msg_queue( struct thread *thread, struct thread_
         if (do_esync())
             queue->esync_fd = esync_create_fd( 0, 0 );
 
-        SHARED_WRITE_BEGIN( &queue->shared->seq );
-        queue->shared->created = TRUE;
-        SHARED_WRITE_END( &queue->shared->seq );
+        SHARED_WRITE_BEGIN( queue, queue_shm_t )
+        {
+            shared->created = TRUE;
+        }
+        SHARED_WRITE_END
+
         thread->queue = queue;
     }
     if (new_input)
     {
-        SHARED_WRITE_BEGIN( &queue->shared->seq );
-        queue->shared->input_tid = new_input->shared->tid;
-        SHARED_WRITE_END( &queue->shared->seq );
+        SHARED_WRITE_BEGIN( queue, queue_shm_t )
+        {
+            shared->input_tid = new_input->shared->tid;
+        }
+        SHARED_WRITE_END
+
         release_object( new_input );
     }
     return queue;
@@ -406,30 +390,38 @@ static void sync_input_keystate( struct thread_input *input )
 {
     int i;
     if (!input->desktop || input->shared->keystate_lock) return;
-    SHARED_WRITE_BEGIN( &input->shared->seq );
-    for (i = 0; i < sizeof(input->shared->keystate); ++i)
+
+    SHARED_WRITE_BEGIN( input, input_shm_t )
     {
-        if (input->desktop_keystate[i] == input->desktop->shared->keystate[i]) continue;
-        input->shared->keystate[i] = input->desktop_keystate[i] = input->desktop->shared->keystate[i];
+        for (i = 0; i < sizeof(shared->keystate); ++i)
+        {
+            if (input->desktop_keystate[i] == input->desktop->shared->keystate[i]) continue;
+            shared->keystate[i] = input->desktop_keystate[i] = input->desktop->shared->keystate[i];
+        }
+        shared->sync_serial = input->desktop->shared->update_serial;
     }
-    input->shared->sync_serial = input->desktop->shared->update_serial;
-    SHARED_WRITE_END( &input->shared->seq );
+    SHARED_WRITE_END;
 }
 
 /* locks thread input keystate to prevent synchronization */
 static void lock_input_keystate( struct thread_input *input )
 {
-    SHARED_WRITE_BEGIN( &input->shared->seq );
-    input->shared->keystate_lock++;
-    SHARED_WRITE_END( &input->shared->seq );
+    SHARED_WRITE_BEGIN( input, input_shm_t )
+    {
+        shared->keystate_lock++;
+    }
+    SHARED_WRITE_END
 }
 
 /* unlock the thread input keystate and synchronize it again */
 static void unlock_input_keystate( struct thread_input *input )
 {
-    SHARED_WRITE_BEGIN( &input->shared->seq );
-    input->shared->keystate_lock--;
-    SHARED_WRITE_END( &input->shared->seq );
+    SHARED_WRITE_BEGIN( input, input_shm_t )
+    {
+        shared->keystate_lock--;
+    }
+    SHARED_WRITE_END
+
     if (!input->shared->keystate_lock) sync_input_keystate( input );
 }
 
@@ -445,21 +437,30 @@ static int assign_thread_input( struct thread *thread, struct thread_input *new_
     }
     if (queue->input)
     {
-        SHARED_WRITE_BEGIN( &queue->input->shared->seq );
-        queue->input->shared->cursor_count -= queue->cursor_count;
-        SHARED_WRITE_END( &queue->input->shared->seq );
+        SHARED_WRITE_BEGIN( queue->input, input_shm_t )
+        {
+            shared->cursor_count -= queue->cursor_count;
+        }
+        SHARED_WRITE_END
+
         if (queue->keystate_lock) unlock_input_keystate( queue->input );
         release_object( queue->input );
     }
     queue->input = (struct thread_input *)grab_object( new_input );
     if (queue->keystate_lock) lock_input_keystate( queue->input );
-    SHARED_WRITE_BEGIN( &new_input->shared->seq );
-    new_input->shared->cursor_count += queue->cursor_count;
-    SHARED_WRITE_END( &new_input->shared->seq );
 
-    SHARED_WRITE_BEGIN( &queue->shared->seq );
-    queue->shared->input_tid = queue->input->shared->tid;
-    SHARED_WRITE_END( &queue->shared->seq );
+    SHARED_WRITE_BEGIN( new_input, input_shm_t )
+    {
+        shared->cursor_count += queue->cursor_count;
+    }
+    SHARED_WRITE_END
+
+    SHARED_WRITE_BEGIN( queue, queue_shm_t )
+    {
+        shared->input_tid = queue->input->shared->tid;
+    }
+    SHARED_WRITE_END
+
     return 1;
 }
 
@@ -514,32 +515,39 @@ static void queue_cursor_message( struct desktop *desktop, user_handle_t win, un
     queue_hardware_message( desktop, msg, 1 );
 }
 
-static int update_desktop_cursor_window( struct desktop *desktop, user_handle_t win, int x, int y )
+static struct thread_input *get_desktop_cursor_thread_input( struct desktop *desktop )
+{
+    struct thread_input *input = NULL;
+    struct thread *thread;
+
+    if ((thread = get_window_thread( desktop->cursor_win )))
+    {
+        if (thread->queue) input = thread->queue->input;
+        release_object( thread );
+    }
+
+    return input;
+}
+
+static int update_desktop_cursor_window( struct desktop *desktop, user_handle_t win )
 {
     int updated = win != desktop->cursor_win;
-    user_handle_t handle = desktop->cursor_handle;
+    struct thread_input *input;
     desktop->cursor_win = win;
-    if (updated)
+
+    if (updated && (input = get_desktop_cursor_thread_input( desktop )))
     {
-        struct thread *thread;
-
-        if ((thread = window_thread_from_point( win, x, y )))
-        {
-            struct thread_input *input = thread->queue->input;
-            if (input) handle = input->shared->cursor_count < 0 ? 0 : input->shared->cursor;
-            release_object( thread );
-        }
-
+        user_handle_t handle = input->shared->cursor_count < 0 ? 0 : input->shared->cursor;
         /* when clipping send the message to the foreground window as well, as some driver have an artificial overlay window */
         if (is_cursor_clipped( desktop )) queue_cursor_message( desktop, 0, WM_WINE_SETCURSOR, win, handle );
         queue_cursor_message( desktop, win, WM_WINE_SETCURSOR, win, handle );
     }
+
     return updated;
 }
 
 static int update_desktop_cursor_pos( struct desktop *desktop, user_handle_t win, int x, int y )
 {
-    struct thread_input *input;
     int updated;
     unsigned int time = get_tick_count();
 
@@ -547,27 +555,26 @@ static int update_desktop_cursor_pos( struct desktop *desktop, user_handle_t win
     y = max( min( y, desktop->shared->cursor.clip.bottom - 1 ), desktop->shared->cursor.clip.top );
     updated = (desktop->shared->cursor.x != x || desktop->shared->cursor.y != y);
 
-    SHARED_WRITE_BEGIN( &desktop->shared->seq );
-    desktop->shared->cursor.x = x;
-    desktop->shared->cursor.y = y;
-    desktop->shared->cursor.last_change = time;
-    SHARED_WRITE_END( &desktop->shared->seq );
+    SHARED_WRITE_BEGIN( desktop, desktop_shm_t )
+    {
+        shared->cursor.x = x;
+        shared->cursor.y = y;
+        shared->cursor.last_change = time;
+    }
+    SHARED_WRITE_END
 
-    if (!win && (input = desktop->foreground_input)) win = input->shared->capture;
     if (!win || !is_window_visible( win ) || is_window_transparent( win ))
         win = shallow_window_from_point( desktop, x, y );
-    if (update_desktop_cursor_window( desktop, win, x, y )) updated = 1;
+    if (update_desktop_cursor_window( desktop, win )) updated = 1;
 
     return updated;
 }
 
-static void update_desktop_cursor_handle( struct desktop *desktop, user_handle_t handle )
+static void update_desktop_cursor_handle( struct desktop *desktop, struct thread_input *input, user_handle_t handle )
 {
-    int updated = desktop->cursor_handle != handle;
-    user_handle_t win = desktop->cursor_win;
-    desktop->cursor_handle = handle;
-    if (updated)
+    if (input == get_desktop_cursor_thread_input( desktop ))
     {
+        user_handle_t win = desktop->cursor_win;
         /* when clipping send the message to the foreground window as well, as some driver have an artificial overlay window */
         if (is_cursor_clipped( desktop )) queue_cursor_message( desktop, 0, WM_WINE_SETCURSOR, win, handle );
         queue_cursor_message( desktop, win, WM_WINE_SETCURSOR, win, handle );
@@ -609,6 +616,7 @@ static void get_message_defaults( struct msg_queue *queue, int *x, int *y, unsig
 void set_clip_rectangle( struct desktop *desktop, const rectangle_t *rect, unsigned int flags, int reset )
 {
     rectangle_t top_rect, new_rect;
+    unsigned int old_flags;
     int x, y;
 
     get_top_window_rectangle( desktop, &top_rect );
@@ -623,20 +631,26 @@ void set_clip_rectangle( struct desktop *desktop, const rectangle_t *rect, unsig
     }
     else new_rect = top_rect;
 
-    SHARED_WRITE_BEGIN( &desktop->shared->seq );
-    desktop->shared->cursor.clip = new_rect;
+    SHARED_WRITE_BEGIN( desktop, desktop_shm_t )
+    {
+        shared->cursor.clip = new_rect;
+    }
+    SHARED_WRITE_END
+
+    old_flags = desktop->cursor_clip_flags;
+    desktop->cursor_clip_flags = flags;
 
     /* warp the mouse to be inside the clip rect */
-    x = max( min( desktop->shared->cursor.x, desktop->shared->cursor.clip.right - 1 ), desktop->shared->cursor.clip.left );
-    y = max( min( desktop->shared->cursor.y, desktop->shared->cursor.clip.bottom - 1 ), desktop->shared->cursor.clip.top );
+    x = max( min( desktop->shared->cursor.x, new_rect.right - 1 ), new_rect.left );
+    y = max( min( desktop->shared->cursor.y, new_rect.bottom - 1 ), new_rect.top );
     if (x != desktop->shared->cursor.x || y != desktop->shared->cursor.y) set_cursor_pos( desktop, x, y );
-    SHARED_WRITE_END( &desktop->shared->seq );
 
     /* request clip cursor rectangle reset to the desktop thread */
     if (reset) post_desktop_message( desktop, WM_WINE_CLIPCURSOR, flags, FALSE );
 
-    /* notify foreground thread, of reset, or to apply new cursor clipping rect */
-    queue_cursor_message( desktop, 0, WM_WINE_CLIPCURSOR, flags, reset );
+    /* notify foreground thread of reset, clipped, or released cursor rect */
+    if (reset || flags != SET_CURSOR_NOCLIP || old_flags != SET_CURSOR_NOCLIP)
+        queue_cursor_message( desktop, 0, WM_WINE_CLIPCURSOR, flags, reset );
 }
 
 /* change the foreground input and reset the cursor clip rect */
@@ -645,9 +659,11 @@ static void set_foreground_input( struct desktop *desktop, struct thread_input *
     if (desktop->foreground_input == input) return;
     set_clip_rectangle( desktop, NULL, SET_CURSOR_NOCLIP, 1 );
     desktop->foreground_input = input;
-    SHARED_WRITE_BEGIN( &desktop->shared->seq );
-    desktop->shared->foreground_tid = input ? input->shared->tid : 0;
-    SHARED_WRITE_END( &desktop->shared->seq );
+    SHARED_WRITE_BEGIN( desktop, desktop_shm_t )
+    {
+        shared->foreground_tid = input ? input->shared->tid : 0;
+    }
+    SHARED_WRITE_END
 }
 
 /* get the hook table for a given thread */
@@ -683,10 +699,12 @@ static inline void set_queue_bits( struct msg_queue *queue, unsigned int bits )
     queue->wake_bits |= bits;
     queue->changed_bits |= bits;
 
-    SHARED_WRITE_BEGIN( &queue->shared->seq );
-    queue->shared->wake_bits = queue->wake_bits;
-    queue->shared->changed_bits = queue->changed_bits;
-    SHARED_WRITE_END( &queue->shared->seq );
+    SHARED_WRITE_BEGIN( queue, queue_shm_t )
+    {
+        shared->wake_bits = queue->wake_bits;
+        shared->changed_bits = queue->changed_bits;
+    }
+    SHARED_WRITE_END
 
     if (is_signaled( queue )) wake_up( &queue->obj, 0 );
 }
@@ -708,10 +726,12 @@ static inline void clear_queue_bits( struct msg_queue *queue, unsigned int bits 
     if (do_esync() && !is_signaled( queue ))
         esync_clear( queue->esync_fd );
 
-    SHARED_WRITE_BEGIN( &queue->shared->seq );
-    queue->shared->wake_bits = queue->wake_bits;
-    queue->shared->changed_bits = queue->changed_bits;
-    SHARED_WRITE_END( &queue->shared->seq );
+    SHARED_WRITE_BEGIN( queue, queue_shm_t )
+    {
+        shared->wake_bits = queue->wake_bits;
+        shared->changed_bits = queue->changed_bits;
+    }
+    SHARED_WRITE_END
 }
 
 /* check if message is matched by the filter */
@@ -741,10 +761,9 @@ static inline int get_hardware_msg_bit( unsigned int message )
     if (message == WM_INPUT_DEVICE_CHANGE || message == WM_INPUT) return QS_RAWINPUT;
     if (message == WM_MOUSEMOVE || message == WM_NCMOUSEMOVE) return QS_MOUSEMOVE;
     if (message >= WM_KEYFIRST && message <= WM_KEYLAST) return QS_KEY;
-    if (message == WM_POINTERDOWN || message == WM_POINTERUP ||
-        message == WM_POINTERUPDATE) return QS_POINTER;
     if (message == WM_WINE_CLIPCURSOR) return QS_RAWINPUT;
     if (message == WM_WINE_SETCURSOR) return QS_RAWINPUT;
+    if (message == WM_POINTERDOWN || message == WM_POINTERUP || message == WM_POINTERUPDATE) return QS_POINTER;
     return QS_MOUSEBUTTON;
 }
 
@@ -855,10 +874,10 @@ static int merge_unique_message( struct thread_input *input, unsigned int messag
 /* try to merge a message with the messages in the list; return 1 if successful */
 static int merge_message( struct thread_input *input, const struct message *msg )
 {
-    if (msg->msg == WM_POINTERUPDATE) return merge_pointer_update_message( input, msg );
     if (msg->msg == WM_MOUSEMOVE) return merge_mousemove( input, msg );
     if (msg->msg == WM_WINE_CLIPCURSOR) return merge_unique_message( input, WM_WINE_CLIPCURSOR, msg );
     if (msg->msg == WM_WINE_SETCURSOR) return merge_unique_message( input, WM_WINE_SETCURSOR, msg );
+    if (msg->msg == WM_POINTERUPDATE) return merge_pointer_update_message( input, msg );
     return 0;
 }
 
@@ -1315,10 +1334,12 @@ static void msg_queue_satisfied( struct object *obj, struct wait_queue_entry *en
     queue->wake_mask = 0;
     queue->changed_mask = 0;
 
-    SHARED_WRITE_BEGIN( &queue->shared->seq );
-    queue->shared->wake_mask = queue->wake_mask;
-    queue->shared->changed_mask = queue->changed_mask;
-    SHARED_WRITE_END( &queue->shared->seq );
+    SHARED_WRITE_BEGIN( queue, queue_shm_t )
+    {
+        shared->wake_mask = queue->wake_mask;
+        shared->changed_mask = queue->changed_mask;
+    }
+    SHARED_WRITE_END
 }
 
 static void cleanup_msg_queue( struct msg_queue *queue )
@@ -1352,15 +1373,18 @@ static void cleanup_msg_queue( struct msg_queue *queue )
         free( timer );
     }
     if (queue->timeout) remove_timeout_user( queue->timeout );
-    SHARED_WRITE_BEGIN( &queue->input->shared->seq );
-    queue->input->shared->cursor_count -= queue->cursor_count;
-    SHARED_WRITE_END( &queue->input->shared->seq );
+    SHARED_WRITE_BEGIN( queue->input, input_shm_t )
+    {
+        shared->cursor_count -= queue->cursor_count;
+    }
+    SHARED_WRITE_END
+
     if (queue->keystate_lock) unlock_input_keystate( queue->input );
     release_object( queue->input );
     if (queue->hooks) release_object( queue->hooks );
     if (queue->fd) release_object( queue->fd );
-    if (do_esync()) close( queue->esync_fd );
     queue->destroyed = 1;
+    if (do_esync()) close( queue->esync_fd );
 }
 
 static void msg_queue_destroy( struct object *obj )
@@ -1416,14 +1440,17 @@ static inline void thread_input_cleanup_window( struct msg_queue *queue, user_ha
 {
     struct thread_input *input = queue->input;
 
-    SHARED_WRITE_BEGIN( &input->shared->seq );
-    if (window == input->shared->focus) input->shared->focus = 0;
-    if (window == input->shared->capture) input->shared->capture = 0;
-    if (window == input->shared->active) input->shared->active = 0;
-    if (window == input->shared->menu_owner) input->shared->menu_owner = 0;
-    if (window == input->shared->move_size) input->shared->move_size = 0;
-    if (window == input->shared->caret) set_caret_window( input, 0 );
-    SHARED_WRITE_END( &input->shared->seq );
+    SHARED_WRITE_BEGIN( input, input_shm_t )
+    {
+        if (window == shared->focus) shared->focus = 0;
+        if (window == shared->capture) shared->capture = 0;
+        if (window == shared->active) shared->active = 0;
+        if (window == shared->menu_owner) shared->menu_owner = 0;
+        if (window == shared->move_size) shared->move_size = 0;
+        if (window == shared->caret) set_caret_window( input, shared, 0 );
+    }
+    SHARED_WRITE_END
+
 }
 
 /* check if the specified window can be set in the input data of a given queue */
@@ -1473,19 +1500,24 @@ int attach_thread_input( struct thread *thread_from, struct thread *thread_to )
 
     if (thread_from->queue)
     {
-        SHARED_WRITE_BEGIN( &input->shared->seq );
         old_input = thread_from->queue->input;
-        if (!input->shared->focus) input->shared->focus = old_input->shared->focus;
-        if (!input->shared->active) input->shared->active = old_input->shared->active;
-        SHARED_WRITE_END( &input->shared->seq );
+
+        SHARED_WRITE_BEGIN( input, input_shm_t )
+        {
+            if (!shared->focus) shared->focus = old_input->shared->focus;
+            if (!shared->active) shared->active = old_input->shared->active;
+        }
+        SHARED_WRITE_END
     }
 
     ret = assign_thread_input( thread_from, input );
     if (ret)
     {
-        SHARED_WRITE_BEGIN( &input->shared->seq );
-        memset( (void *)input->shared->keystate, 0, sizeof(input->shared->keystate) );
-        SHARED_WRITE_END( &input->shared->seq );
+        SHARED_WRITE_BEGIN( input, input_shm_t )
+        {
+            memset( (void *)shared->keystate, 0, sizeof(shared->keystate) );
+        }
+        SHARED_WRITE_END
     }
     release_object( input );
     return ret;
@@ -1503,12 +1535,17 @@ void detach_thread_input( struct thread *thread_from )
         {
             if (thread == thread_from)
             {
-                SHARED_WRITE_BEGIN( &input->shared->seq );
-                input->shared->focus = old_input->shared->focus;
-                SHARED_WRITE_END( &input->shared->seq );
-                SHARED_WRITE_BEGIN( &old_input->shared->seq );
-                old_input->shared->focus = 0;
-                SHARED_WRITE_END( &old_input->shared->seq );
+                SHARED_WRITE_BEGIN( input, input_shm_t )
+                {
+                    shared->focus = old_input->shared->focus;
+                }
+                SHARED_WRITE_END
+
+                SHARED_WRITE_BEGIN( old_input, input_shm_t )
+                {
+                    shared->focus = 0;
+                }
+                SHARED_WRITE_END
             }
             release_object( thread );
         }
@@ -1516,12 +1553,17 @@ void detach_thread_input( struct thread *thread_from )
         {
             if (thread == thread_from)
             {
-                SHARED_WRITE_BEGIN( &input->shared->seq );
-                input->shared->active = old_input->shared->active;
-                SHARED_WRITE_END( &input->shared->seq );
-                SHARED_WRITE_BEGIN( &old_input->shared->seq );
-                old_input->shared->active = 0;
-                SHARED_WRITE_END( &old_input->shared->seq );
+                SHARED_WRITE_BEGIN( input, input_shm_t )
+                {
+                    shared->active = old_input->shared->active;
+                }
+                SHARED_WRITE_END
+
+                SHARED_WRITE_BEGIN( old_input, input_shm_t )
+                {
+                    shared->active = 0;
+                }
+                SHARED_WRITE_END
             }
             release_object( thread );
         }
@@ -1729,17 +1771,21 @@ static void update_key_state( volatile unsigned char *keystate, unsigned int msg
 
 static void update_input_key_state( struct thread_input *input, unsigned int msg, lparam_t wparam )
 {
-    SHARED_WRITE_BEGIN( &input->shared->seq );
-    update_key_state( input->shared->keystate, msg, wparam, 0 );
-    SHARED_WRITE_END( &input->shared->seq );
+    SHARED_WRITE_BEGIN( input, input_shm_t )
+    {
+        update_key_state( shared->keystate, msg, wparam, 0 );
+    }
+    SHARED_WRITE_END
 }
 
 static void update_desktop_key_state( struct desktop *desktop, unsigned int msg, lparam_t wparam )
 {
-    SHARED_WRITE_BEGIN( &desktop->shared->seq );
-    ++desktop->shared->update_serial;
-    update_key_state( desktop->shared->keystate, msg, wparam, 1 );
-    SHARED_WRITE_END( &desktop->shared->seq );
+    SHARED_WRITE_BEGIN( desktop, desktop_shm_t )
+    {
+        ++shared->update_serial;
+        update_key_state( shared->keystate, msg, wparam, 1 );
+    }
+    SHARED_WRITE_END
 }
 
 /* update the desktop key state according to a mouse message flags */
@@ -1921,9 +1967,9 @@ static void queue_hardware_message( struct desktop *desktop, struct message *msg
         break;
     case QS_MOUSEMOVE:
         prepend_cursor_history( msg->x, msg->y, msg->time, msg_data->info );
-        if (update_desktop_cursor_pos( desktop, msg->win, msg->x, msg->y )) always_queue = 1;
         /* fallthrough */
     case QS_MOUSEBUTTON:
+        if (update_desktop_cursor_pos( desktop, msg->win, msg->x, msg->y )) always_queue = 1;
         if (desktop->shared->keystate[VK_LBUTTON] & 0x80)  msg->wparam |= MK_LBUTTON;
         if (desktop->shared->keystate[VK_MBUTTON] & 0x80)  msg->wparam |= MK_MBUTTON;
         if (desktop->shared->keystate[VK_RBUTTON] & 0x80)  msg->wparam |= MK_RBUTTON;
@@ -1952,6 +1998,7 @@ static void queue_hardware_message( struct desktop *desktop, struct message *msg
     }
     input = thread->queue->input;
 
+    if (win != msg->win) always_queue = 1;
     if (!always_queue || merge_message( input, msg )) free_message( msg );
     else
     {
@@ -2128,7 +2175,9 @@ static int queue_mouse_message( struct desktop *desktop, user_handle_t win, cons
 
     if ((input->mouse.info & 0xffffff00) == 0xff515700) source.origin = IMDT_TOUCH;
 
-    update_desktop_cursor_pos( desktop, desktop->cursor_win, desktop->shared->cursor.x, desktop->shared->cursor.y ); /* Update last change time */
+    /* update last desktop cursor change time */
+    update_desktop_cursor_pos( desktop, desktop->cursor_win, desktop->shared->cursor.x, desktop->shared->cursor.y );
+
     flags = input->mouse.flags;
     time  = input->mouse.time;
     if (!time) time = desktop->shared->cursor.last_change;
@@ -2524,6 +2573,11 @@ static int check_hw_message_filter( user_handle_t win, unsigned int msg_code,
     }
 }
 
+/* is this message an internal driver notification message */
+static inline BOOL is_internal_hardware_message( unsigned int message )
+{
+    return (message >= WM_WINE_FIRST_DRIVER_MSG && message <= WM_WINE_LAST_DRIVER_MSG);
+}
 
 /* find a hardware message for the given queue */
 static int get_hardware_message( struct thread *thread, unsigned int hw_id, user_handle_t filter_win,
@@ -2618,7 +2672,8 @@ static int get_hardware_message( struct thread *thread, unsigned int hw_id, user
 
         data->hw_id = msg->unique_id;
         set_reply_data( msg->data, msg->data_size );
-        if ((get_hardware_msg_bit( msg->msg ) & (QS_POINTER | QS_RAWINPUT)) && (flags & PM_REMOVE))
+        if ((get_hardware_msg_bit( msg->msg ) & (QS_RAWINPUT | QS_POINTER) && (flags & PM_REMOVE)) ||
+            is_internal_hardware_message( msg->msg ))
             release_hardware_message( current->queue, data->hw_id );
         return 1;
     }
@@ -2888,10 +2943,12 @@ DECL_HANDLER(set_queue_mask)
         reply->wake_bits    = queue->wake_bits;
         reply->changed_bits = queue->changed_bits;
 
-        SHARED_WRITE_BEGIN( &queue->shared->seq );
-        queue->shared->wake_mask = queue->wake_mask;
-        queue->shared->changed_mask = queue->changed_mask;
-        SHARED_WRITE_END( &queue->shared->seq );
+        SHARED_WRITE_BEGIN( queue, queue_shm_t )
+        {
+            shared->wake_mask = queue->wake_mask;
+            shared->changed_mask = queue->changed_mask;
+        }
+        SHARED_WRITE_END
 
         if (is_signaled( queue ))
         {
@@ -2899,10 +2956,12 @@ DECL_HANDLER(set_queue_mask)
             if (req->skip_wait)
             {
                 queue->wake_mask = queue->changed_mask = 0;
-                SHARED_WRITE_BEGIN( &queue->shared->seq );
-                queue->shared->wake_mask = queue->wake_mask;
-                queue->shared->changed_mask = queue->changed_mask;
-                SHARED_WRITE_END( &queue->shared->seq );
+                SHARED_WRITE_BEGIN( queue, queue_shm_t )
+                {
+                    shared->wake_mask = queue->wake_mask;
+                    shared->changed_mask = queue->changed_mask;
+                }
+                SHARED_WRITE_END
             }
             else wake_up( &queue->obj, 0 );
         }
@@ -2932,9 +2991,11 @@ DECL_HANDLER(get_queue_status)
         if (do_esync() && !is_signaled( queue ))
             esync_clear( queue->esync_fd );
 
-        SHARED_WRITE_BEGIN( &queue->shared->seq );
-        queue->shared->changed_bits = queue->changed_bits;
-        SHARED_WRITE_END( &queue->shared->seq );
+        SHARED_WRITE_BEGIN( queue, queue_shm_t )
+        {
+            shared->changed_bits = queue->changed_bits;
+        }
+        SHARED_WRITE_END
     }
     else reply->wake_bits = reply->changed_bits = 0;
 }
@@ -3114,9 +3175,11 @@ DECL_HANDLER(get_message)
     if (filter & QS_INPUT) queue->changed_bits &= ~QS_INPUT;
     if (filter & QS_PAINT) queue->changed_bits &= ~QS_PAINT;
 
-    SHARED_WRITE_BEGIN( &queue->shared->seq );
-    queue->shared->changed_bits = queue->changed_bits;
-    SHARED_WRITE_END( &queue->shared->seq );
+    SHARED_WRITE_BEGIN( queue, queue_shm_t )
+    {
+        shared->changed_bits = queue->changed_bits;
+    }
+    SHARED_WRITE_END
 
     /* then check for posted messages */
     if ((filter & QS_POSTMESSAGE) &&
@@ -3136,6 +3199,11 @@ DECL_HANDLER(get_message)
     if ((filter & QS_INPUT) &&
         filter_contains_hw_range( req->get_first, req->get_last ) &&
         get_hardware_message( current, req->hw_id, get_win, req->get_first, req->get_last, req->flags, reply ))
+        return;
+
+    /* check for any internal driver message */
+    if (get_hardware_message( current, req->hw_id, get_win, WM_WINE_FIRST_DRIVER_MSG,
+                              WM_WINE_LAST_DRIVER_MSG, req->flags, reply ))
         return;
 
     /* now check for WM_PAINT */
@@ -3172,10 +3240,12 @@ DECL_HANDLER(get_message)
     queue->wake_mask = req->wake_mask;
     queue->changed_mask = req->changed_mask;
 
-    SHARED_WRITE_BEGIN( &queue->shared->seq );
-    queue->shared->wake_mask = queue->wake_mask;
-    queue->shared->changed_mask = queue->changed_mask;
-    SHARED_WRITE_END( &queue->shared->seq );
+    SHARED_WRITE_BEGIN( queue, queue_shm_t )
+    {
+        shared->wake_mask = queue->wake_mask;
+        shared->changed_mask = queue->changed_mask;
+    }
+    SHARED_WRITE_END
 
     set_error( STATUS_PENDING );  /* FIXME */
 
@@ -3554,10 +3624,12 @@ DECL_HANDLER(get_key_state)
         if (req->key >= 0)
         {
             reply->state = desktop->shared->keystate[req->key & 0xff];
-            SHARED_WRITE_BEGIN( &desktop->shared->seq );
-            ++desktop->shared->update_serial;
-            desktop->shared->keystate[req->key & 0xff] &= ~0x40;
-            SHARED_WRITE_END( &desktop->shared->seq );
+            SHARED_WRITE_BEGIN( desktop, desktop_shm_t )
+            {
+                ++shared->update_serial;
+                shared->keystate[req->key & 0xff] &= ~0x40;
+            }
+            SHARED_WRITE_END
         }
         else set_reply_data( (void *)desktop->shared->keystate, size );
         release_object( desktop );
@@ -3583,17 +3655,23 @@ DECL_HANDLER(set_key_state)
     struct msg_queue *queue = get_current_queue();
     data_size_t size = min( 256, get_req_data_size() );
 
-    SHARED_WRITE_BEGIN( &queue->input->shared->seq );
-    memcpy( (void *)queue->input->shared->keystate, get_req_data(), size );
-    SHARED_WRITE_END( &queue->input->shared->seq );
+    SHARED_WRITE_BEGIN( queue->input, input_shm_t )
+    {
+        memcpy( (void *)shared->keystate, get_req_data(), size );
+    }
+    SHARED_WRITE_END
+
     memcpy( queue->input->desktop_keystate, (void *)queue->input->desktop->shared->keystate,
             sizeof(queue->input->desktop_keystate) );
     if (req->async && (desktop = get_thread_desktop( current, 0 )))
     {
-        SHARED_WRITE_BEGIN( &desktop->shared->seq );
-        ++desktop->shared->update_serial;
-        memcpy( (void *)desktop->shared->keystate, get_req_data(), size );
-        SHARED_WRITE_END( &desktop->shared->seq );
+        SHARED_WRITE_BEGIN( desktop, desktop_shm_t )
+        {
+            ++shared->update_serial;
+            memcpy( (void *)shared->keystate, get_req_data(), size );
+        }
+        SHARED_WRITE_END
+
         release_object( desktop );
     }
 }
@@ -3633,10 +3711,13 @@ DECL_HANDLER(set_focus_window)
     reply->previous = 0;
     if (queue && check_queue_input_window( queue, req->handle ))
     {
+        user_handle_t focus = get_user_full_handle( req->handle );
         reply->previous = queue->input->shared->focus;
-        SHARED_WRITE_BEGIN( &queue->input->shared->seq );
-        queue->input->shared->focus = get_user_full_handle( req->handle );
-        SHARED_WRITE_END( &queue->input->shared->seq );
+        SHARED_WRITE_BEGIN( queue->input, input_shm_t )
+        {
+            shared->focus = focus;
+        }
+        SHARED_WRITE_END
     }
 }
 
@@ -3655,10 +3736,13 @@ DECL_HANDLER(set_active_window)
     {
         if (!req->handle || make_window_active( req->handle ))
         {
+            user_handle_t active = get_user_full_handle( req->handle );
             reply->previous = queue->input->shared->active;
-            SHARED_WRITE_BEGIN( &queue->input->shared->seq );
-            queue->input->shared->active = get_user_full_handle( req->handle );
-            SHARED_WRITE_END( &queue->input->shared->seq );
+            SHARED_WRITE_BEGIN( queue->input, input_shm_t )
+            {
+                shared->active = active;
+            }
+            SHARED_WRITE_END
 
             if (desktop->foreground_input == queue->input && req->handle != reply->previous)
             {
@@ -3682,6 +3766,7 @@ DECL_HANDLER(set_capture_window)
     if (queue && check_queue_input_window( queue, req->handle ))
     {
         struct thread_input *input = queue->input;
+        user_handle_t capture = get_user_full_handle( req->handle );
 
         /* if in menu mode, reject all requests to change focus, except if the menu bit is set */
         if (input->shared->menu_owner && !(req->flags & CAPTURE_MENU))
@@ -3690,11 +3775,14 @@ DECL_HANDLER(set_capture_window)
             return;
         }
         reply->previous = input->shared->capture;
-        SHARED_WRITE_BEGIN( &input->shared->seq );
-        input->shared->capture = get_user_full_handle( req->handle );
-        input->shared->menu_owner = (req->flags & CAPTURE_MENU) ? input->shared->capture : 0;
-        input->shared->move_size = (req->flags & CAPTURE_MOVESIZE) ? input->shared->capture : 0;
-        SHARED_WRITE_END( &input->shared->seq );
+        SHARED_WRITE_BEGIN( input, input_shm_t )
+        {
+            shared->capture = capture;
+            shared->menu_owner = (req->flags & CAPTURE_MENU) ? shared->capture : 0;
+            shared->move_size = (req->flags & CAPTURE_MOVESIZE) ? shared->capture : 0;
+        }
+        SHARED_WRITE_END
+
         reply->full_handle = input->shared->capture;
     }
 }
@@ -3709,17 +3797,20 @@ DECL_HANDLER(set_caret_window)
     if (queue && check_queue_input_window( queue, req->handle ))
     {
         struct thread_input *input = queue->input;
+        user_handle_t caret = get_user_full_handle(req->handle);
 
         reply->previous  = input->shared->caret;
         reply->old_rect  = input->shared->caret_rect;
         reply->old_hide  = input->caret_hide;
         reply->old_state = input->caret_state;
 
-        SHARED_WRITE_BEGIN( &input->shared->seq );
-        set_caret_window( input, get_user_full_handle(req->handle) );
-        input->shared->caret_rect.right  = input->shared->caret_rect.left + req->width;
-        input->shared->caret_rect.bottom = input->shared->caret_rect.top + req->height;
-        SHARED_WRITE_END( &input->shared->seq );
+        SHARED_WRITE_BEGIN( input, input_shm_t )
+        {
+            set_caret_window( input, shared, caret );
+            shared->caret_rect.right  = shared->caret_rect.left + req->width;
+            shared->caret_rect.bottom = shared->caret_rect.top + req->height;
+        }
+        SHARED_WRITE_END
     }
 }
 
@@ -3744,12 +3835,14 @@ DECL_HANDLER(set_caret_info)
     }
     if (req->flags & SET_CARET_POS)
     {
-        SHARED_WRITE_BEGIN( &input->shared->seq );
-        input->shared->caret_rect.right  += req->x - input->shared->caret_rect.left;
-        input->shared->caret_rect.bottom += req->y - input->shared->caret_rect.top;
-        input->shared->caret_rect.left = req->x;
-        input->shared->caret_rect.top  = req->y;
-        SHARED_WRITE_END( &input->shared->seq );
+        SHARED_WRITE_BEGIN( input, input_shm_t )
+        {
+            shared->caret_rect.right  += req->x - shared->caret_rect.left;
+            shared->caret_rect.bottom += req->y - shared->caret_rect.top;
+            shared->caret_rect.left = req->x;
+            shared->caret_rect.top  = req->y;
+        }
+        SHARED_WRITE_END
     }
     if (req->flags & SET_CARET_HIDE)
     {
@@ -3781,12 +3874,14 @@ DECL_HANDLER(get_last_input_time)
 DECL_HANDLER(set_cursor)
 {
     struct msg_queue *queue = get_current_queue();
+    user_handle_t prev_cursor, new_cursor;
     struct thread_input *input;
     struct desktop *desktop;
 
     if (!queue) return;
     input = queue->input;
     desktop = input->desktop;
+    prev_cursor = input->shared->cursor_count < 0 ? 0 : input->shared->cursor;
 
     reply->prev_handle = input->shared->cursor;
     reply->prev_count  = input->shared->cursor_count;
@@ -3800,26 +3895,26 @@ DECL_HANDLER(set_cursor)
         return;
     }
 
-    SHARED_WRITE_BEGIN( &input->shared->seq );
-    if (req->flags & SET_CURSOR_HANDLE)
+    SHARED_WRITE_BEGIN( input, input_shm_t )
     {
-        input->shared->cursor = req->handle;
+        if (req->flags & SET_CURSOR_HANDLE)
+        {
+            shared->cursor = req->handle;
+        }
+        if (req->flags & SET_CURSOR_COUNT)
+        {
+            queue->cursor_count += req->show_count;
+            shared->cursor_count += req->show_count;
+        }
     }
-    if (req->flags & SET_CURSOR_COUNT)
-    {
-        queue->cursor_count += req->show_count;
-        input->shared->cursor_count += req->show_count;
-    }
-    SHARED_WRITE_END( &input->shared->seq );
+    SHARED_WRITE_END
+
     if (req->flags & SET_CURSOR_POS) set_cursor_pos( desktop, req->x, req->y );
     if (req->flags & SET_CURSOR_CLIP) set_clip_rectangle( desktop, &req->clip, req->flags, 0 );
     if (req->flags & SET_CURSOR_NOCLIP) set_clip_rectangle( desktop, NULL, SET_CURSOR_NOCLIP, 0 );
 
-    if (req->flags & (SET_CURSOR_HANDLE | SET_CURSOR_COUNT))
-    {
-        if (input->shared->cursor_count < 0) update_desktop_cursor_handle( desktop, 0 );
-        else update_desktop_cursor_handle( desktop, input->shared->cursor );
-    }
+    new_cursor = input->shared->cursor_count < 0 ? 0 : input->shared->cursor;
+    if (prev_cursor != new_cursor) update_desktop_cursor_handle( desktop, input, new_cursor );
 
     reply->new_x       = desktop->shared->cursor.x;
     reply->new_y       = desktop->shared->cursor.y;
@@ -3875,6 +3970,7 @@ DECL_HANDLER(get_rawinput_buffer)
         }
 
         memcpy( buf + pos, data, data->size );
+        reply->last_message_time = msg->time;
         list_remove( &msg->entry );
         free_message( msg );
 
@@ -3882,6 +3978,8 @@ DECL_HANDLER(get_rawinput_buffer)
         pos += sizeof(*data) + extra_size;
         count++;
     }
+
+    if (req->clear_qs_rawinput && !ptr) clear_queue_bits( current->queue, QS_RAWINPUT );
 
     reply->next_size = next_size;
     reply->count = count;

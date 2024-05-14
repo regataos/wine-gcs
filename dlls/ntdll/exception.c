@@ -24,8 +24,6 @@
 #include <signal.h>
 #include <stdarg.h>
 
-#define NONAMELESSUNION
-#define NONAMELESSSTRUCT
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
 #include "windef.h"
@@ -94,6 +92,7 @@ const char *debugstr_exception_code( DWORD code )
     case EXCEPTION_WINE_CXX_EXCEPTION: return "EXCEPTION_WINE_CXX_EXCEPTION";
     case EXCEPTION_WINE_NAME_THREAD: return "EXCEPTION_WINE_NAME_THREAD";
     case EXCEPTION_WINE_STUB: return "EXCEPTION_WINE_STUB";
+    case RPC_S_SERVER_UNAVAILABLE: return "RPC_S_SERVER_UNAVAILABLE";
     }
     return "unknown";
 }
@@ -191,7 +190,7 @@ LONG call_vectored_handlers( EXCEPTION_RECORD *rec, CONTEXT *context )
  *
  * Implementation of RtlRaiseStatus with a specific exception record.
  */
-void raise_status( NTSTATUS status, EXCEPTION_RECORD *rec )
+void DECLSPEC_NORETURN raise_status( NTSTATUS status, EXCEPTION_RECORD *rec )
 {
     EXCEPTION_RECORD ExceptionRec;
 
@@ -208,7 +207,7 @@ void raise_status( NTSTATUS status, EXCEPTION_RECORD *rec )
  *
  * Raise an exception with ExceptionCode = status
  */
-void WINAPI RtlRaiseStatus( NTSTATUS status )
+void DECLSPEC_NORETURN WINAPI RtlRaiseStatus( NTSTATUS status )
 {
     raise_status( status, NULL );
 }
@@ -280,6 +279,27 @@ LONG WINAPI call_unhandled_exception_filter( PEXCEPTION_POINTERS eptr )
     return unhandled_exception_filter( eptr );
 }
 
+/*******************************************************************
+ *         call_unhandled_exception_handler
+ */
+EXCEPTION_DISPOSITION WINAPI call_unhandled_exception_handler( EXCEPTION_RECORD *rec, void *frame,
+                                                               CONTEXT *context, void *dispatch )
+{
+    EXCEPTION_POINTERS ep = { rec, context };
+
+    switch (call_unhandled_exception_filter( &ep ))
+    {
+    case EXCEPTION_CONTINUE_SEARCH:
+        return ExceptionContinueSearch;
+    case EXCEPTION_CONTINUE_EXECUTION:
+        return ExceptionContinueExecution;
+    case EXCEPTION_EXECUTE_HANDLER:
+        break;
+    }
+    NtTerminateProcess( GetCurrentProcess(), rec->ExceptionCode );
+    return ExceptionContinueExecution;
+}
+
 
 #if defined(__x86_64__) || defined(__arm__) || defined(__aarch64__)
 
@@ -311,7 +331,7 @@ static ULONG_PTR get_runtime_function_end( RUNTIME_FUNCTION *func, ULONG_PTR add
 #ifdef __x86_64__
     return func->EndAddress;
 #elif defined(__arm__)
-    if (func->u.s.Flag) return func->BeginAddress + func->u.s.FunctionLength * 2;
+    if (func->Flag) return func->BeginAddress + func->FunctionLength * 2;
     else
     {
         struct unwind_info
@@ -323,11 +343,11 @@ static ULONG_PTR get_runtime_function_end( RUNTIME_FUNCTION *func, ULONG_PTR add
             DWORD f : 1;
             DWORD count : 5;
             DWORD words : 4;
-        } *info = (struct unwind_info *)(addr + func->u.UnwindData);
+        } *info = (struct unwind_info *)(addr + func->UnwindData);
         return func->BeginAddress + info->function_length * 2;
     }
 #else  /* __aarch64__ */
-    if (func->u.s.Flag) return func->BeginAddress + func->u.s.FunctionLength * 4;
+    if (func->Flag) return func->BeginAddress + func->FunctionLength * 4;
     else
     {
         struct unwind_info
@@ -338,7 +358,7 @@ static ULONG_PTR get_runtime_function_end( RUNTIME_FUNCTION *func, ULONG_PTR add
             DWORD e : 1;
             DWORD epilog : 5;
             DWORD codes : 5;
-        } *info = (struct unwind_info *)(addr + func->u.UnwindData);
+        } *info = (struct unwind_info *)(addr + func->UnwindData);
         return func->BeginAddress + info->function_length * 4;
     }
 #endif
@@ -623,7 +643,7 @@ PRUNTIME_FUNCTION WINAPI RtlLookupFunctionEntry( ULONG_PTR pc, ULONG_PTR *base,
 /*************************************************************
  *            _assert
  */
-void __cdecl _assert( const char *str, const char *file, unsigned int line )
+void DECLSPEC_NORETURN __cdecl _assert( const char *str, const char *file, unsigned int line )
 {
     ERR( "%s:%u: Assertion failed %s\n", file, line, debugstr_a(str) );
     RtlRaiseStatus( EXCEPTION_WINE_ASSERTION );
@@ -671,7 +691,6 @@ BOOL WINAPI IsBadStringPtrA( LPCSTR str, UINT_PTR max )
     __ENDTRY
     return FALSE;
 }
-__ASM_STDCALL_IMPORT(IsBadStringPtrA,8)
 
 /*************************************************************
  *            IsBadStringPtrW
@@ -693,8 +712,14 @@ BOOL WINAPI IsBadStringPtrW( LPCWSTR str, UINT_PTR max )
     __ENDTRY
     return FALSE;
 }
-__ASM_STDCALL_IMPORT(IsBadStringPtrW,8)
 
+#ifdef __i386__
+__ASM_STDCALL_IMPORT(IsBadStringPtrA,8)
+__ASM_STDCALL_IMPORT(IsBadStringPtrW,8)
+#else
+__ASM_GLOBAL_IMPORT(IsBadStringPtrA)
+__ASM_GLOBAL_IMPORT(IsBadStringPtrW)
+#endif
 
 /**********************************************************************
  *              RtlGetEnabledExtendedFeatures   (NTDLL.@)
@@ -772,6 +797,52 @@ static const struct context_parameters *context_get_parameters( ULONG context_fl
     return NULL;
 }
 
+/* offset is from the start of XSAVE_AREA_HEADER. */
+static int next_compacted_xstate_offset( int off, UINT64 compaction_mask, int feature_idx )
+{
+    const UINT64 feature_mask = (UINT64)1 << feature_idx;
+
+    if (compaction_mask & feature_mask) off += user_shared_data->XState.Features[feature_idx].Size;
+    if (user_shared_data->XState.AlignedFeatures & (feature_mask << 1))
+        off = (off + 63) & ~63;
+    return off;
+}
+
+/* size includes XSAVE_AREA_HEADER but not XSAVE_FORMAT (legacy save area). */
+static int xstate_get_compacted_size( UINT64 mask )
+{
+    UINT64 compaction_mask;
+    unsigned int i;
+    int off;
+
+    compaction_mask = ((UINT64)1 << 63) | mask;
+    mask >>= 2;
+    off = sizeof(XSAVE_AREA_HEADER);
+    i = 2;
+    while (mask)
+    {
+        if (mask == 1) return off + user_shared_data->XState.Features[i].Size;
+        off = next_compacted_xstate_offset( off, compaction_mask, i );
+        mask >>= 1;
+        ++i;
+    }
+    return off;
+}
+
+static int xstate_get_size( UINT64 mask )
+{
+    unsigned int i;
+
+    mask >>= 2;
+    if (!mask) return sizeof(XSAVE_AREA_HEADER);
+    i = 2;
+    while (mask != 1)
+    {
+        mask >>= 1;
+        ++i;
+    }
+    return user_shared_data->XState.Features[i].Offset + user_shared_data->XState.Features[i].Size - sizeof(XSAVE_FORMAT);
+}
 
 /**********************************************************************
  *              RtlGetExtendedContextLength2    (NTDLL.@)
@@ -797,12 +868,12 @@ NTSTATUS WINAPI RtlGetExtendedContextLength2( ULONG context_flags, ULONG *length
     if (!(supported_mask = RtlGetEnabledExtendedFeatures( ~(ULONG64)0) ))
         return STATUS_NOT_SUPPORTED;
 
-    compaction_mask &= supported_mask;
+    size = p->context_size + p->context_ex_size + 63;
 
-    size = p->context_size + p->context_ex_size + offsetof(XSTATE, YmmContext) + 63;
-
-    if (compaction_mask & supported_mask & (1 << XSTATE_AVX))
-        size += sizeof(YMMCONTEXT);
+    compaction_mask &= supported_mask & ~(ULONG64)3;
+    if (user_shared_data->XState.CompactionEnabled) size += xstate_get_compacted_size( compaction_mask );
+    else if (compaction_mask)                       size += xstate_get_size( compaction_mask );
+    else                                            size += sizeof(XSAVE_AREA_HEADER);
 
     *length = size;
     return STATUS_SUCCESS;
@@ -853,11 +924,11 @@ NTSTATUS WINAPI RtlInitializeExtendedContext2( void *context, ULONG context_flag
         xs = (XSTATE *)(((ULONG_PTR)c_ex + p->context_ex_size + 63) & ~(ULONG_PTR)63);
 
         c_ex->XState.Offset = (ULONG_PTR)xs - (ULONG_PTR)c_ex;
-        c_ex->XState.Length = offsetof(XSTATE, YmmContext);
         compaction_mask &= supported_mask;
 
-        if (compaction_mask & (1 << XSTATE_AVX))
-            c_ex->XState.Length += sizeof(YMMCONTEXT);
+        if (user_shared_data->XState.CompactionEnabled) c_ex->XState.Length = xstate_get_compacted_size( compaction_mask );
+        else if (compaction_mask & ~(ULONG64)3)         c_ex->XState.Length = xstate_get_size( compaction_mask );
+        else                                            c_ex->XState.Length = sizeof(XSAVE_AREA_HEADER);
 
         memset( xs, 0, c_ex->XState.Length );
         if (user_shared_data->XState.CompactionEnabled)
@@ -891,6 +962,10 @@ NTSTATUS WINAPI RtlInitializeExtendedContext( void *context, ULONG context_flags
 void * WINAPI RtlLocateExtendedFeature2( CONTEXT_EX *context_ex, ULONG feature_id,
         XSTATE_CONFIGURATION *xstate_config, ULONG *length )
 {
+    UINT64 feature_mask = (ULONG64)1 << feature_id;
+    XSAVE_AREA_HEADER *xs;
+    unsigned int offset, i;
+
     TRACE( "context_ex %p, feature_id %lu, xstate_config %p, length %p.\n",
             context_ex, feature_id, xstate_config, length );
 
@@ -906,16 +981,31 @@ void * WINAPI RtlLocateExtendedFeature2( CONTEXT_EX *context_ex, ULONG feature_i
         return NULL;
     }
 
-    if (feature_id != XSTATE_AVX)
+    if (feature_id < 2 || feature_id >= 64)
         return NULL;
+
+    xs = (XSAVE_AREA_HEADER *)((BYTE *)context_ex + context_ex->XState.Offset);
 
     if (length)
-        *length = sizeof(YMMCONTEXT);
+        *length = xstate_config->Features[feature_id].Size;
 
-    if (context_ex->XState.Length < sizeof(XSTATE))
+    if (xstate_config->CompactionEnabled)
+    {
+        if (!(xs->CompactionMask & feature_mask)) return NULL;
+        offset = sizeof(XSAVE_AREA_HEADER);
+        for (i = 2; i < feature_id; ++i)
+            offset = next_compacted_xstate_offset( offset, xs->CompactionMask, i );
+    }
+    else
+    {
+        if (!(feature_mask & xstate_config->EnabledFeatures)) return NULL;
+        offset = xstate_config->Features[feature_id].Offset - sizeof(XSAVE_FORMAT);
+    }
+
+    if (context_ex->XState.Length < offset + xstate_config->Features[feature_id].Size)
         return NULL;
 
-    return (BYTE *)context_ex + context_ex->XState.Offset + offsetof(XSTATE, YmmContext);
+    return (BYTE *)xs + offset;
 }
 
 
@@ -961,6 +1051,32 @@ ULONG64 WINAPI RtlGetExtendedFeaturesMask( CONTEXT_EX *context_ex )
 }
 
 
+static void context_copy_ranges( BYTE *d, DWORD context_flags, BYTE *s, const struct context_parameters *p )
+{
+    const struct context_copy_range *range;
+    unsigned int start;
+
+    *((ULONG *)(d + p->flags_offset)) |= context_flags;
+
+    start = 0;
+    range = p->copy_ranges;
+    do
+    {
+        if (range->flag & context_flags)
+        {
+            if (!start)
+                start = range->start;
+        }
+        else if (start)
+        {
+            memcpy( d + start, s + start, range->start - start );
+            start = 0;
+        }
+    }
+    while (range++->start != p->context_size);
+}
+
+
 /***********************************************************************
  *              RtlCopyContext  (NTDLL.@)
  */
@@ -968,6 +1084,7 @@ NTSTATUS WINAPI RtlCopyContext( CONTEXT *dst, DWORD context_flags, CONTEXT *src 
 {
     DWORD context_size, arch_flag, flags_offset, dst_flags, src_flags;
     static const DWORD arch_mask = CONTEXT_i386 | CONTEXT_AMD64;
+    const struct context_parameters *p;
     BYTE *d, *s;
 
     TRACE("dst %p, context_flags %#lx, src %p.\n", dst, context_flags, src);
@@ -1000,8 +1117,15 @@ NTSTATUS WINAPI RtlCopyContext( CONTEXT *dst, DWORD context_flags, CONTEXT *src 
     context_flags &= src_flags;
     if (context_flags & ~dst_flags & 0x40) return STATUS_BUFFER_OVERFLOW;
 
-    return RtlCopyExtendedContext( (CONTEXT_EX *)(d + context_size), context_flags,
-                                   (CONTEXT_EX *)(s + context_size) );
+    if (context_flags & 0x40)
+        return RtlCopyExtendedContext( (CONTEXT_EX *)(d + context_size), context_flags,
+                                       (CONTEXT_EX *)(s + context_size) );
+
+    if (!(p = context_get_parameters( context_flags )))
+        return STATUS_INVALID_PARAMETER;
+
+    context_copy_ranges( d, context_flags, s, p );
+    return STATUS_SUCCESS;
 }
 
 
@@ -1010,12 +1134,10 @@ NTSTATUS WINAPI RtlCopyContext( CONTEXT *dst, DWORD context_flags, CONTEXT *src 
  */
 NTSTATUS WINAPI RtlCopyExtendedContext( CONTEXT_EX *dst, ULONG context_flags, CONTEXT_EX *src )
 {
-    const struct context_copy_range *range;
     const struct context_parameters *p;
-    XSTATE *dst_xs, *src_xs;
+    XSAVE_AREA_HEADER *dst_xs, *src_xs;
     ULONG64 feature_mask;
-    unsigned int start;
-    BYTE *d, *s;
+    unsigned int i, off, size;
 
     TRACE( "dst %p, context_flags %#lx, src %p.\n", dst, context_flags, src );
 
@@ -1025,43 +1147,40 @@ NTSTATUS WINAPI RtlCopyExtendedContext( CONTEXT_EX *dst, ULONG context_flags, CO
     if (!(feature_mask = RtlGetEnabledExtendedFeatures( ~(ULONG64)0 )) && context_flags & 0x40)
         return STATUS_NOT_SUPPORTED;
 
-    d = RtlLocateLegacyContext( dst, NULL );
-    s = RtlLocateLegacyContext( src, NULL );
-
-    *((ULONG *)(d + p->flags_offset)) |= context_flags;
-
-    start = 0;
-    range = p->copy_ranges;
-    do
-    {
-        if (range->flag & context_flags)
-        {
-            if (!start)
-                start = range->start;
-        }
-        else if (start)
-        {
-            memcpy( d + start, s + start, range->start - start );
-            start = 0;
-        }
-    }
-    while (range++->start != p->context_size);
+    context_copy_ranges( RtlLocateLegacyContext( dst, NULL ), context_flags, RtlLocateLegacyContext( src, NULL ), p );
 
     if (!(context_flags & 0x40))
         return STATUS_SUCCESS;
 
-    if (dst->XState.Length < offsetof(XSTATE, YmmContext))
+    if (dst->XState.Length < sizeof(XSAVE_AREA_HEADER))
         return STATUS_BUFFER_OVERFLOW;
 
-    dst_xs = (XSTATE *)((BYTE *)dst + dst->XState.Offset);
-    src_xs = (XSTATE *)((BYTE *)src + src->XState.Offset);
+    dst_xs = (XSAVE_AREA_HEADER *)((BYTE *)dst + dst->XState.Offset);
+    src_xs = (XSAVE_AREA_HEADER *)((BYTE *)src + src->XState.Offset);
 
-    memset(dst_xs, 0, offsetof(XSTATE, YmmContext));
+    memset(dst_xs, 0, sizeof(XSAVE_AREA_HEADER));
     dst_xs->Mask = (src_xs->Mask & ~(ULONG64)3) & feature_mask;
     dst_xs->CompactionMask = user_shared_data->XState.CompactionEnabled
             ? ((ULONG64)1 << 63) | (src_xs->CompactionMask & feature_mask) : 0;
 
-    if (dst_xs->Mask & 4 && src->XState.Length >= sizeof(XSTATE) && dst->XState.Length >= sizeof(XSTATE))
-        memcpy( &dst_xs->YmmContext, &src_xs->YmmContext, sizeof(dst_xs->YmmContext) );
+
+    if (dst_xs->CompactionMask) feature_mask &= dst_xs->CompactionMask;
+    feature_mask = dst_xs->Mask >> 2;
+
+    i = 2;
+    off = sizeof(XSAVE_AREA_HEADER);
+    while (1)
+    {
+        if (feature_mask & 1)
+        {
+            if (!dst_xs->CompactionMask) off = user_shared_data->XState.Features[i].Offset - sizeof(XSAVE_FORMAT);
+            size = user_shared_data->XState.Features[i].Size;
+            if (src->XState.Length < off + size || dst->XState.Length < off + size) break;
+            memcpy( (BYTE *)dst_xs + off, (BYTE *)src_xs + off, size );
+        }
+        if (!(feature_mask >>= 1)) break;
+        if (dst_xs->CompactionMask) off = next_compacted_xstate_offset( off, dst_xs->CompactionMask, i);
+        ++i;
+    }
     return STATUS_SUCCESS;
 }

@@ -1,6 +1,6 @@
 /* FAudio - XAudio Reimplementation for FNA
  *
- * Copyright (c) 2011-2022 Ethan Lee, Luigi Auriemma, and the MonoGame Team
+ * Copyright (c) 2011-2023 Ethan Lee, Luigi Auriemma, and the MonoGame Team
  *
  * This software is provided 'as-is', without any express or implied warranty.
  * In no event will the authors be held liable for any damages arising from
@@ -278,6 +278,7 @@ uint32_t FAudio_CreateSourceVoice(
 	(*ppSourceVoice)->filter.Type = FAUDIO_DEFAULT_FILTER_TYPE;
 	(*ppSourceVoice)->filter.Frequency = FAUDIO_DEFAULT_FILTER_FREQUENCY;
 	(*ppSourceVoice)->filter.OneOverQ = FAUDIO_DEFAULT_FILTER_ONEOVERQ;
+	(*ppSourceVoice)->filter.WetDryMix = FAUDIO_DEFAULT_FILTER_WETDRYMIX_EXT;
 	(*ppSourceVoice)->sendLock = FAudio_PlatformCreateMutex();
 	LOG_MUTEX_CREATE(audio, (*ppSourceVoice)->sendLock)
 	(*ppSourceVoice)->effectLock = FAudio_PlatformCreateMutex();
@@ -591,6 +592,7 @@ uint32_t FAudio_CreateSubmixVoice(
 	(*ppSubmixVoice)->filter.Type = FAUDIO_DEFAULT_FILTER_TYPE;
 	(*ppSubmixVoice)->filter.Frequency = FAUDIO_DEFAULT_FILTER_FREQUENCY;
 	(*ppSubmixVoice)->filter.OneOverQ = FAUDIO_DEFAULT_FILTER_ONEOVERQ;
+	(*ppSubmixVoice)->filter.WetDryMix = FAUDIO_DEFAULT_FILTER_WETDRYMIX_EXT;
 	(*ppSubmixVoice)->sendLock = FAudio_PlatformCreateMutex();
 	LOG_MUTEX_CREATE(audio, (*ppSubmixVoice)->sendLock)
 	(*ppSubmixVoice)->effectLock = FAudio_PlatformCreateMutex();
@@ -1301,8 +1303,8 @@ uint32_t FAudioVoice_SetOutputVoices(
 			/* Allocate the whole send filter array if needed... */
 			if (voice->sendFilter == NULL)
 			{
-				voice->sendFilter = (FAudioFilterParameters*) voice->audio->pMalloc(
-					sizeof(FAudioFilterParameters) * pSendList->SendCount
+				voice->sendFilter = (FAudioFilterParametersEXT*) voice->audio->pMalloc(
+					sizeof(FAudioFilterParametersEXT) * pSendList->SendCount
 				);
 			}
 			if (voice->sendFilterState == NULL)
@@ -1320,6 +1322,7 @@ uint32_t FAudioVoice_SetOutputVoices(
 			voice->sendFilter[i].Type = FAUDIO_DEFAULT_FILTER_TYPE;
 			voice->sendFilter[i].Frequency = FAUDIO_DEFAULT_FILTER_FREQUENCY;
 			voice->sendFilter[i].OneOverQ = FAUDIO_DEFAULT_FILTER_ONEOVERQ;
+			voice->sendFilter[i].WetDryMix = FAUDIO_DEFAULT_FILTER_WETDRYMIX_EXT;
 			voice->sendFilterState[i] = (FAudioFilterState*) voice->audio->pMalloc(
 				sizeof(FAudioFilterState) * outChannels
 			);
@@ -1645,9 +1648,9 @@ uint32_t FAudioVoice_GetEffectParameters(
 	return 0;
 }
 
-uint32_t FAudioVoice_SetFilterParameters(
+uint32_t FAudioVoice_SetFilterParametersEXT(
 	FAudioVoice *voice,
-	const FAudioFilterParameters *pParameters,
+	const FAudioFilterParametersEXT *pParameters,
 	uint32_t OperationSet
 ) {
 	LOG_API_ENTER(voice->audio)
@@ -1683,7 +1686,7 @@ uint32_t FAudioVoice_SetFilterParameters(
 	FAudio_memcpy(
 		&voice->filter,
 		pParameters,
-		sizeof(FAudioFilterParameters)
+		sizeof(FAudioFilterParametersEXT)
 	);
 	FAudio_PlatformUnlockMutex(voice->filterLock);
 	LOG_MUTEX_UNLOCK(voice->audio, voice->filterLock)
@@ -1692,9 +1695,23 @@ uint32_t FAudioVoice_SetFilterParameters(
 	return 0;
 }
 
-void FAudioVoice_GetFilterParameters(
+uint32_t FAudioVoice_SetFilterParameters(
+	FAudioVoice* voice,
+	const FAudioFilterParameters* pParameters,
+	uint32_t OperationSet
+) {
+	FAudioFilterParametersEXT ext_parameters;
+	ext_parameters.Type = pParameters->Type;
+	ext_parameters.OneOverQ = pParameters->OneOverQ;
+	ext_parameters.Frequency = pParameters->Frequency;
+	ext_parameters.WetDryMix = FAUDIO_DEFAULT_FILTER_WETDRYMIX_EXT;
+
+	return FAudioVoice_SetFilterParametersEXT(voice, &ext_parameters, OperationSet);
+}
+
+void FAudioVoice_GetFilterParametersEXT(
 	FAudioVoice *voice,
-	FAudioFilterParameters *pParameters
+	FAudioFilterParametersEXT *pParameters
 ) {
 	LOG_API_ENTER(voice->audio)
 
@@ -1718,17 +1735,34 @@ void FAudioVoice_GetFilterParameters(
 	FAudio_memcpy(
 		pParameters,
 		&voice->filter,
-		sizeof(FAudioFilterParameters)
+		sizeof(FAudioFilterParametersEXT)
 	);
 	FAudio_PlatformUnlockMutex(voice->filterLock);
 	LOG_MUTEX_UNLOCK(voice->audio, voice->filterLock)
 	LOG_API_EXIT(voice->audio)
 }
 
-uint32_t FAudioVoice_SetOutputFilterParameters(
+void FAudioVoice_GetFilterParameters(
+	FAudioVoice* voice,
+	FAudioFilterParameters* pParameters
+) {
+	FAudioFilterParametersEXT ext_parameters;
+	ext_parameters.Type = pParameters->Type;
+	ext_parameters.OneOverQ = pParameters->OneOverQ;
+	ext_parameters.Frequency = pParameters->Frequency;
+	ext_parameters.WetDryMix = FAUDIO_DEFAULT_FILTER_WETDRYMIX_EXT;
+
+	FAudioVoice_GetFilterParametersEXT(voice, &ext_parameters);
+
+	pParameters->Type = ext_parameters.Type;
+	pParameters->Frequency = ext_parameters.Frequency;
+	pParameters->OneOverQ = ext_parameters.OneOverQ;
+}
+
+uint32_t FAudioVoice_SetOutputFilterParametersEXT(
 	FAudioVoice *voice,
 	FAudioVoice *pDestinationVoice,
-	const FAudioFilterParameters *pParameters,
+	const FAudioFilterParametersEXT *pParameters,
 	uint32_t OperationSet
 ) {
 	uint32_t i;
@@ -1796,7 +1830,7 @@ uint32_t FAudioVoice_SetOutputFilterParameters(
 	FAudio_memcpy(
 		&voice->sendFilter[i],
 		pParameters,
-		sizeof(FAudioFilterParameters)
+		sizeof(FAudioFilterParametersEXT)
 	);
 
 	FAudio_PlatformUnlockMutex(voice->sendLock);
@@ -1805,10 +1839,25 @@ uint32_t FAudioVoice_SetOutputFilterParameters(
 	return 0;
 }
 
-void FAudioVoice_GetOutputFilterParameters(
+uint32_t FAudioVoice_SetOutputFilterParameters(
+	FAudioVoice* voice,
+	FAudioVoice* pDestinationVoice,
+	const FAudioFilterParameters* pParameters,
+	uint32_t OperationSet
+) {
+	FAudioFilterParametersEXT ext_parameters;
+	ext_parameters.Type = pParameters->Type;
+	ext_parameters.OneOverQ = pParameters->OneOverQ;
+	ext_parameters.Frequency = pParameters->Frequency;
+	ext_parameters.WetDryMix = FAUDIO_DEFAULT_FILTER_WETDRYMIX_EXT;
+
+	return FAudioVoice_SetOutputFilterParametersEXT(voice, pDestinationVoice, &ext_parameters, OperationSet);
+}
+
+void FAudioVoice_GetOutputFilterParametersEXT(
 	FAudioVoice *voice,
 	FAudioVoice *pDestinationVoice,
-	FAudioFilterParameters *pParameters
+	FAudioFilterParametersEXT *pParameters
 ) {
 	uint32_t i;
 
@@ -1864,7 +1913,7 @@ void FAudioVoice_GetOutputFilterParameters(
 	FAudio_memcpy(
 		pParameters,
 		&voice->sendFilter[i],
-		sizeof(FAudioFilterParameters)
+		sizeof(FAudioFilterParametersEXT)
 	);
 
 	FAudio_PlatformUnlockMutex(voice->sendLock);
@@ -1917,6 +1966,24 @@ uint32_t FAudioVoice_SetVolume(
 
 	LOG_API_EXIT(voice->audio)
 	return 0;
+}
+
+void FAudioVoice_GetOutputFilterParameters(
+	FAudioVoice* voice,
+	FAudioVoice* pDestinationVoice,
+	FAudioFilterParameters* pParameters
+) {
+	FAudioFilterParametersEXT ext_parameters;
+	ext_parameters.Type = pParameters->Type;
+	ext_parameters.OneOverQ = pParameters->OneOverQ;
+	ext_parameters.Frequency = pParameters->Frequency;
+	ext_parameters.WetDryMix = FAUDIO_DEFAULT_FILTER_WETDRYMIX_EXT;
+
+	FAudioVoice_GetOutputFilterParametersEXT(voice, pDestinationVoice, &ext_parameters);
+
+	pParameters->Type = ext_parameters.Type;
+	pParameters->Frequency = ext_parameters.Frequency;
+	pParameters->OneOverQ = ext_parameters.OneOverQ;
 }
 
 void FAudioVoice_GetVolume(
@@ -2198,10 +2265,70 @@ void FAudioVoice_GetOutputMatrix(
 	LOG_API_EXIT(voice->audio)
 }
 
-void FAudioVoice_DestroyVoice(FAudioVoice *voice)
+static uint32_t check_for_sends_to_voice(FAudioVoice *voice)
 {
+	FAudio *audio = voice->audio;
+	uint32_t ret = 0;
+	FAudioSourceVoice *source;
+	FAudioSubmixVoice *submix;
+	LinkedList *list;
 	uint32_t i;
+
+	FAudio_PlatformLockMutex(audio->sourceLock);
+	list = audio->sources;
+	while (list != NULL)
+	{
+		source = (FAudioSourceVoice*) list->entry;
+		for (i = 0; i < source->sends.SendCount; i += 1)
+			if (source->sends.pSends[i].pOutputVoice == voice)
+			{
+				ret = 0x80004005; /* E_FAIL */
+				break;
+			}
+		if (ret)
+			break;
+		list = list->next;
+	}
+	FAudio_PlatformUnlockMutex(audio->sourceLock);
+
+	if (ret)
+		return ret;
+
+	FAudio_PlatformLockMutex(audio->submixLock);
+	list = audio->submixes;
+	while (list != NULL)
+	{
+		submix = (FAudioSubmixVoice*) list->entry;
+		for (i = 0; i < submix->sends.SendCount; i += 1)
+			if (submix->sends.pSends[i].pOutputVoice == voice)
+			{
+				ret = 0x80004005; /* E_FAIL */
+				break;
+			}
+		if (ret)
+			break;
+		list = list->next;
+	}
+	FAudio_PlatformUnlockMutex(audio->submixLock);
+
+	return ret;
+}
+
+uint32_t FAudioVoice_DestroyVoiceSafeEXT(FAudioVoice *voice)
+{
+	uint32_t i, ret;
 	LOG_API_ENTER(voice->audio)
+
+	if ((ret = check_for_sends_to_voice(voice)))
+	{
+		LOG_ERROR(
+			voice->audio,
+			"Voice %p is an output for other voice(s)",
+			voice
+		)
+		LOG_API_EXIT(voice->audio)
+		return ret;
+	}
 
 	/* TODO: Check for dependencies and remove from audio graph first! */
 	FAudio_OPERATIONSET_ClearAllForVoice(voice);
@@ -2376,6 +2503,12 @@ void FAudioVoice_DestroyVoice(FAudioVoice *voice)
 	LOG_API_EXIT(voice->audio)
 	FAudio_Release(voice->audio);
 	voice->audio->pFree(voice);
+	return 0;
+}
+
+void FAudioVoice_DestroyVoice(FAudioVoice *voice)
+{
+	FAudioVoice_DestroyVoiceSafeEXT(voice);
 }
 
 /* FAudioSourceVoice Interface */

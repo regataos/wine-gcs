@@ -37,9 +37,6 @@
 #define _WITH_CPU_SET_T
 #include <sched.h>
 #endif
-#ifdef HAVE_SYS_TIME_H
-#include <sys/time.h>
-#endif
 #ifdef HAVE_SYS_RESOURCE_H
 #include <sys/resource.h>
 #endif
@@ -56,8 +53,8 @@
 #include "request.h"
 #include "user.h"
 #include "security.h"
-#include "esync.h"
 #include "unicode.h"
+#include "esync.h"
 #include "fsync.h"
 
 
@@ -130,16 +127,13 @@ struct context
 {
     struct object   obj;        /* object header */
     unsigned int    status;     /* status of the context */
-    context_t       regs[3];    /* context data */
+    context_t       regs[2];    /* context data */
 };
 #define CTX_NATIVE  0  /* context for native machine */
 #define CTX_WOW     1  /* context if thread is inside WoW */
-#define CTX_PENDING 2  /* pending native context when we don't know whether thread is inside WoW */
 
 /* flags for registers that always need to be set from the server side */
 static const unsigned int system_flags = SERVER_CTX_DEBUG_REGISTERS;
-/* flags for registers that are set from the native context even in WoW mode */
-static const unsigned int always_native_flags = SERVER_CTX_DEBUG_REGISTERS | SERVER_CTX_FLOATING_POINT | SERVER_CTX_YMM_REGISTERS;
 
 static void dump_context( struct object *obj, int verbose );
 static int context_signaled( struct object *obj, struct wait_queue_entry *entry );
@@ -235,15 +229,19 @@ static const struct fd_ops thread_fd_ops =
 };
 
 static struct list thread_list = LIST_INIT(thread_list);
+#ifdef __linux__
 static int nice_limit;
+#endif
 
 void init_threading(void)
 {
+#ifdef __linux__
 #ifdef RLIMIT_NICE
     struct rlimit rlimit;
 #endif
 #ifdef HAVE_SETPRIORITY
-    if (setpriority( PRIO_PROCESS, getpid(), -20 ) == 0) nice_limit = -19;
+    /* if wineserver has cap_sys_nice we are unlimited, but leave -20 to the user */
+    if (!setpriority( PRIO_PROCESS, getpid(), -20 )) nice_limit = -19;
     setpriority( PRIO_PROCESS, getpid(), 0 );
 #endif
 #ifdef RLIMIT_NICE
@@ -253,10 +251,11 @@ void init_threading(void)
         setrlimit( RLIMIT_NICE, &rlimit );
         if (rlimit.rlim_max <= 40) nice_limit = 20 - rlimit.rlim_max;
         else if (rlimit.rlim_max == -1) nice_limit = -20;
-        if (nice_limit >= 0) fprintf(stderr, "wine: RLIMIT_NICE is <= 20, unable to use setpriority safely\n");
+        if (nice_limit >= 0 && debug_level) fprintf(stderr, "wine: RLIMIT_NICE is <= 20, unable to use setpriority safely\n");
     }
 #endif
-    if (nice_limit < 0) fprintf(stderr, "wine: Using setpriority to control niceness in the [%d,%d] range\n", nice_limit, -nice_limit );
+    if (nice_limit < 0 && debug_level) fprintf(stderr, "wine: Using setpriority to control niceness in the [%d,%d] range\n", nice_limit, -nice_limit );
+#endif
 }
 
 /* initialize the structure for a newly allocated thread */
@@ -286,7 +285,6 @@ static inline void init_thread_structure( struct thread *thread )
     thread->state           = RUNNING;
     thread->exit_code       = 0;
     thread->priority        = 0;
-    thread->delay_priority  = NULL;
     thread->suspend         = 0;
     thread->dbg_hidden      = 0;
     thread->desktop_users   = 0;
@@ -343,7 +341,6 @@ static struct context *create_thread_context( struct thread *thread )
     context->status = STATUS_PENDING;
     memset( &context->regs, 0, sizeof(context->regs) );
     context->regs[CTX_NATIVE].machine = native_machine;
-    context->regs[CTX_PENDING].machine = native_machine;
     return context;
 }
 
@@ -361,7 +358,7 @@ static volatile void *init_queue_mapping( struct thread *thread )
     nameW = ascii_to_unicode_str( nameA, &name );
 
     thread->queue_shared_mapping = create_shared_mapping( dir, &name, sizeof(struct queue_shared_memory),
-                                                          NULL, (void **)&thread->queue_shared );
+                                                          OBJ_OPENIF, NULL, (void **)&thread->queue_shared );
     release_object( dir );
     if (thread->queue_shared_mapping)
     {
@@ -387,7 +384,7 @@ static volatile void *init_input_mapping( struct thread *thread )
     nameW = ascii_to_unicode_str( nameA, &name );
 
     thread->input_shared_mapping = create_shared_mapping( dir, &name, sizeof(struct input_shared_memory),
-                                                          NULL, (void **)&thread->input_shared );
+                                                          OBJ_OPENIF, NULL, (void **)&thread->input_shared );
     release_object( dir );
     if (thread->input_shared_mapping)
     {
@@ -531,9 +528,6 @@ static void cleanup_thread( struct thread *thread )
 {
     int i;
 
-    if (thread->delay_priority) remove_timeout_user( thread->delay_priority );
-    thread->delay_priority = NULL;
-
     if (thread->context)
     {
         thread->context->status = STATUS_ACCESS_DENIED;
@@ -671,7 +665,8 @@ static struct thread_apc *create_apc( struct object *owner, const apc_call_t *ca
 
     if ((apc = alloc_object( &thread_apc_ops )))
     {
-        apc->call        = *call_data;
+        if (call_data) apc->call = *call_data;
+        else apc->call.type = APC_NONE;
         apc->caller      = NULL;
         apc->owner       = owner;
         apc->executed    = 0;
@@ -788,52 +783,38 @@ affinity_t get_thread_affinity( struct thread *thread )
 
 static int get_base_priority( int priority_class, int priority )
 {
+    /* offsets taken from https://learn.microsoft.com/en-us/windows/win32/procthread/scheduling-priorities */
     static const int class_offsets[] = { 4, 8, 13, 24, 6, 10 };
-    assert(priority_class <= ARRAY_SIZE(class_offsets));
     if (priority == THREAD_PRIORITY_IDLE) return (priority_class == PROCESS_PRIOCLASS_REALTIME ? 16 : 1);
-    else if (priority == THREAD_PRIORITY_TIME_CRITICAL) return (priority_class == PROCESS_PRIOCLASS_REALTIME ? 31 : 15);
-    else return class_offsets[priority_class - 1] + priority;
+    if (priority == THREAD_PRIORITY_TIME_CRITICAL) return (priority_class == PROCESS_PRIOCLASS_REALTIME ? 31 : 15);
+    if (priority_class >= ARRAY_SIZE(class_offsets)) return 8;
+    return class_offsets[priority_class - 1] + priority;
 }
 
-static int get_unix_niceness( int base_priority, int limit )
+#ifdef __linux__
+/* maps an NT application band [1,15] base priority to [-nice_limit, nice_limit] */
+static int get_unix_niceness( int base_priority )
 {
-    int min = -limit, max = limit, range = max - min;
+    int min = -nice_limit, max = nice_limit, range = max - min;
     return min + (base_priority - 1) * range / 14;
 }
+#endif
 
 #define THREAD_PRIORITY_REALTIME_HIGHEST 6
 #define THREAD_PRIORITY_REALTIME_LOWEST -7
 
-static void apply_thread_priority( struct thread *thread, int priority_class, int priority, int delayed );
-
-static void delayed_set_thread_priority( void *private )
+static void apply_thread_priority( struct thread *thread, int priority_class, int priority )
 {
-    struct thread *thread = private;
-    int priority_class = thread->process->priority, priority = thread->priority;
-    apply_thread_priority( thread, priority_class, priority, TRUE );
-}
-
-static void apply_thread_priority( struct thread *thread, int priority_class, int priority, int delayed )
-{
-    int niceness, limit = min( nice_limit, thread->process->nice_limit );
-
-    if (!delayed && thread->delay_priority) remove_timeout_user( thread->delay_priority );
-    thread->delay_priority = NULL;
-
-    if (thread->unix_tid == -1)
-    {
-        thread->delay_priority = add_timeout_user( -TICKS_PER_SEC, delayed_set_thread_priority, thread );
-        return;
-    }
-
-    /* FIXME: handle REALTIME class using SCHED_RR if possible, for now map it to HIGH */
-    if (priority_class == PROCESS_PRIOCLASS_REALTIME) priority_class = PROCESS_PRIOCLASS_HIGH;
-
+    int base_priority = get_base_priority( priority_class, priority );
 #ifdef __linux__
+    int niceness;
+
+    /* FIXME: handle REALTIME class using SCHED_RR if possible, for now map it to highest non-realtime band */
+    if (priority_class == PROCESS_PRIOCLASS_REALTIME) base_priority = 15;
 #ifdef HAVE_SETPRIORITY
-    if (limit < 0)
+    if (nice_limit < 0)
     {
-        niceness = get_unix_niceness( get_base_priority( priority_class, priority ), limit );
+        niceness = get_unix_niceness( base_priority );
         if (setpriority( PRIO_PROCESS, thread->unix_tid, niceness ) != 0)
             fprintf( stderr, "wine: setpriority %d for pid %d failed: %d\n", niceness, thread->unix_tid, errno );
         return;
@@ -864,7 +845,7 @@ int set_thread_priority( struct thread *thread, int priority_class, int priority
         return 0;
     thread->priority = priority;
 
-    apply_thread_priority( thread, priority_class, priority, FALSE );
+    apply_thread_priority( thread, priority_class, priority );
     return 0;
 }
 
@@ -1583,6 +1564,7 @@ static void copy_context( context_t *to, const context_t *from, unsigned int fla
     if (flags & SERVER_CTX_DEBUG_REGISTERS) to->debug = from->debug;
     if (flags & SERVER_CTX_EXTENDED_REGISTERS) to->ext = from->ext;
     if (flags & SERVER_CTX_YMM_REGISTERS) to->ymm = from->ymm;
+    if (flags & SERVER_CTX_EXEC_SPACE) to->exec_space = from->exec_space;
 }
 
 /* gets the current impersonation token */
@@ -1689,7 +1671,6 @@ DECL_HANDLER(init_first_thread)
 
     current->unix_pid = process->unix_pid = req->unix_pid;
     current->unix_tid = req->unix_tid;
-    process->nice_limit = req->nice_limit;
 
     if (!process->parent_id)
         process->affinity = current->affinity = get_thread_affinity( current );
@@ -1781,8 +1762,12 @@ DECL_HANDLER(get_thread_info)
         reply->affinity       = thread->affinity;
         reply->last           = thread->process->running_threads == 1;
         reply->suspend_count  = thread->suspend;
-        reply->dbg_hidden     = thread->dbg_hidden;
         reply->desc_len       = thread->desc_len;
+        reply->flags          = 0;
+        if (thread->dbg_hidden)
+            reply->flags |= GET_THREAD_INFO_FLAG_DBG_HIDDEN;
+        if (thread->state == TERMINATED)
+            reply->flags |= GET_THREAD_INFO_FLAG_TERMINATED;
 
         if (thread->desc && get_reply_max_size())
         {
@@ -1831,12 +1816,32 @@ DECL_HANDLER(suspend_thread)
 {
     struct thread *thread;
 
-    if ((thread = get_thread_from_handle( req->handle, THREAD_SUSPEND_RESUME )))
+    if (req->waited_handle)
     {
-        if (thread->state == TERMINATED) set_error( STATUS_ACCESS_DENIED );
-        else reply->count = suspend_thread( thread );
-        release_object( thread );
+        struct context *context;
+
+        if (!(context = (struct context *)get_handle_obj( current->process, req->waited_handle,
+                                                          0, &context_ops )))
+            return;
+        close_handle( current->process, req->waited_handle ); /* avoid extra server call */
+        set_error( context->status );
+        release_object( context );
+        return;
     }
+
+    if (!(thread = get_thread_from_handle( req->handle, THREAD_SUSPEND_RESUME ))) return;
+
+    if (thread->state != RUNNING) set_error( STATUS_ACCESS_DENIED );
+    else
+    {
+        reply->count = suspend_thread( thread );
+        if (!get_error() && thread != current && thread->context && thread->context->status == STATUS_PENDING)
+        {
+            set_error( STATUS_PENDING );
+            reply->wait_handle = alloc_handle( current->process, thread->context, SYNCHRONIZE, 0 );
+        }
+    }
+    release_object( thread );
 }
 
 /* resume a thread */
@@ -1874,8 +1879,6 @@ DECL_HANDLER(select)
         const context_t *native_context = (const context_t *)((const char *)(result + 1) + req->size);
         const context_t *wow_context = (ctx_count > 1) ? native_context + 1 : NULL;
 
-        if (current->context && current->context->status != STATUS_PENDING) goto invalid_param;
-
         if (native_context->machine == native_machine)
         {
             if (wow_context && wow_context->machine != current->process->machine) goto invalid_param;
@@ -1888,7 +1891,14 @@ DECL_HANDLER(select)
         }
         else goto invalid_param;
 
-        if (!current->context && !(current->context = create_thread_context( current ))) return;
+        if ((ctx = current->context))
+        {
+            if (ctx->status != STATUS_PENDING) goto invalid_param;
+            /* if context was modified in pending state, discard irrelevant changes */
+            if (wow_context) ctx->regs[CTX_NATIVE].flags &= ~ctx->regs[CTX_WOW].flags;
+            else ctx->regs[CTX_WOW].flags = ctx->regs[CTX_WOW].machine = 0;
+        }
+        else if (!(current->context = create_thread_context( current ))) return;
 
         ctx = current->context;
         if (native_context)
@@ -1901,13 +1911,6 @@ DECL_HANDLER(select)
             ctx->regs[CTX_WOW].machine = current->process->machine;
             copy_context( &ctx->regs[CTX_WOW], wow_context, wow_context->flags & ~ctx->regs[CTX_WOW].flags );
         }
-        else if (ctx->regs[CTX_PENDING].flags)
-        {
-            unsigned int flags = ctx->regs[CTX_PENDING].flags & ~ctx->regs[CTX_NATIVE].flags;
-            copy_context( &ctx->regs[CTX_NATIVE], &ctx->regs[CTX_PENDING], flags );
-            ctx->regs[CTX_NATIVE].flags |= flags;
-        }
-        ctx->regs[CTX_PENDING].flags = 0;
         ctx->status = STATUS_SUCCESS;
         current->suspend_cookie = req->cookie;
         wake_up( &ctx->obj, 0 );
@@ -1941,17 +1944,19 @@ DECL_HANDLER(select)
 
     reply->signaled = select_on( &select_op, op_size, req->cookie, req->flags, req->timeout );
 
-    if (get_error() == STATUS_USER_APC)
+    if (get_error() == STATUS_USER_APC && get_reply_max_size() >= sizeof(apc_call_t))
     {
         apc = thread_dequeue_apc( current, 0 );
-        reply->call = apc->call;
+        set_reply_data( &apc->call, sizeof(apc->call) );
         release_object( apc );
     }
-    else if (get_error() == STATUS_KERNEL_APC)
+    else if (get_error() == STATUS_KERNEL_APC && get_reply_max_size() >= sizeof(apc_call_t))
     {
         apc = thread_dequeue_apc( current, 1 );
         if ((reply->apc_handle = alloc_handle( current->process, apc, SYNCHRONIZE, 0 )))
-            reply->call = apc->call;
+        {
+            set_reply_data( &apc->call, sizeof(apc->call) );
+        }
         else
         {
             apc->executed = 1;
@@ -1959,14 +1964,21 @@ DECL_HANDLER(select)
         }
         release_object( apc );
     }
-    else if (reply->signaled && get_reply_max_size() >= sizeof(context_t) &&
+    else if (reply->signaled && get_reply_max_size() >= sizeof(apc_call_t) + sizeof(context_t) &&
              current->context && current->suspend_cookie == req->cookie)
     {
         ctx = current->context;
         if (ctx->regs[CTX_NATIVE].flags || ctx->regs[CTX_WOW].flags)
         {
-            data_size_t size = (ctx->regs[CTX_WOW].flags ? 2 : 1) * sizeof(context_t);
-            set_reply_data( ctx->regs, min( size, get_reply_max_size() ));
+            apc_call_t *data;
+            data_size_t size = sizeof(*data) + (ctx->regs[CTX_WOW].flags ? 2 : 1) * sizeof(context_t);
+
+            size = min( size, get_reply_max_size() );
+            if ((data = set_reply_data_size( size )))
+            {
+                memset( data, 0, sizeof(*data) );
+                memcpy( data + 1, ctx->regs, size - sizeof(*data) );
+            }
         }
         release_object( ctx );
         current->context = NULL;
@@ -1983,8 +1995,11 @@ DECL_HANDLER(queue_apc)
     struct thread *thread = NULL;
     struct process *process = NULL;
     struct thread_apc *apc;
+    const apc_call_t *call = get_req_data();
 
-    if (!(apc = create_apc( NULL, &req->call ))) return;
+    if (get_req_data_size() < sizeof(*call)) call = NULL;
+
+    if (!(apc = create_apc( NULL, call ))) return;
 
     switch (apc->call.type)
     {
@@ -2006,6 +2021,7 @@ DECL_HANDLER(queue_apc)
         process = get_process_from_handle( req->handle, PROCESS_QUERY_INFORMATION );
         break;
     case APC_MAP_VIEW:
+    case APC_MAP_VIEW_EX:
         process = get_process_from_handle( req->handle, PROCESS_VM_OPERATION );
         if (process && process != current->process)
         {
@@ -2146,8 +2162,8 @@ DECL_HANDLER(get_thread_context)
 
         if (req->machine == thread_context->regs[CTX_WOW].machine)
         {
-            native_flags = req->flags & always_native_flags;
-            wow_flags = req->flags & ~always_native_flags;
+            native_flags = req->native_flags;
+            wow_flags = req->flags & ~native_flags;
         }
         if ((context = set_reply_data_size( (!!native_flags + !!wow_flags) * sizeof(context_t) )))
         {
@@ -2199,36 +2215,37 @@ DECL_HANDLER(set_thread_context)
         set_error( STATUS_INVALID_PARAMETER );
     else if (thread->state != TERMINATED)
     {
-        unsigned int ctx = CTX_NATIVE;
-        const context_t *context = &contexts[CTX_NATIVE];
-        unsigned int flags = system_flags & context->flags;
-        unsigned int native_flags = always_native_flags & context->flags;
+        unsigned int flags = system_flags & contexts[CTX_NATIVE].flags;
 
         if (thread != current) stop_thread( thread );
-        if (system_flags) set_thread_context( thread, context, system_flags );
+        if (flags) set_thread_context( thread, &contexts[CTX_NATIVE], flags );
+
         if (thread->context && !get_error())
         {
-            if (ctx_count == 2)
+            /* If context is in a pending state, we don't know if we will use WoW or native
+             * context, so store both and discard irrevelant one in select request. */
+            const int is_pending = thread->context->status == STATUS_PENDING;
+            unsigned int native_flags = contexts[CTX_NATIVE].flags & ~SERVER_CTX_EXEC_SPACE;
+
+            if (ctx_count == 2 && (is_pending || thread->context->regs[CTX_WOW].machine))
             {
-                /* If the target thread doesn't have a WoW context, set native instead.
-                 * If we don't know yet whether we have a WoW context, store native context
-                 * in CTX_PENDING and update when the target thread sends its context(s). */
-                if (thread->context->status != STATUS_PENDING)
-                {
-                    ctx = thread->context->regs[CTX_WOW].machine ? CTX_WOW : CTX_NATIVE;
-                    context = &contexts[ctx];
-                }
-                else ctx = CTX_PENDING;
+                context_t *ctx = &thread->context->regs[CTX_WOW];
+
+                /* some regs are always set from the native context */
+                flags = contexts[CTX_WOW].flags & ~(req->native_flags | SERVER_CTX_EXEC_SPACE);
+                if (is_pending) ctx->machine = contexts[CTX_WOW].machine;
+                else native_flags &= req->native_flags;
+
+                copy_context( ctx, &contexts[CTX_WOW], flags );
+                ctx->flags |= flags;
             }
-            flags = context->flags;
-            if (native_flags && ctx != CTX_NATIVE) /* some regs are always set from the native context */
+
+            if (native_flags)
             {
-                copy_context( &thread->context->regs[CTX_NATIVE], &contexts[CTX_NATIVE], native_flags );
-                thread->context->regs[CTX_NATIVE].flags |= native_flags;
-                flags &= ~native_flags;
+                context_t *ctx = &thread->context->regs[CTX_NATIVE];
+                copy_context( ctx, &contexts[CTX_NATIVE], native_flags );
+                ctx->flags |= native_flags;
             }
-            copy_context( &thread->context->regs[ctx], context, flags );
-            thread->context->regs[ctx].flags |= flags;
         }
     }
     else set_error( STATUS_UNSUCCESSFUL );

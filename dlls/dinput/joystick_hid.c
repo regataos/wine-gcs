@@ -1165,7 +1165,6 @@ static BOOL check_device_state_button( struct dinput_device *device, UINT index,
 
     value = params->buttons[instance->wUsage - 1];
     old_value = params->old_state[instance->dwOfs];
-
     if (params->reset_state) value = 0;
 
     device->device_state[instance->dwOfs] = value;

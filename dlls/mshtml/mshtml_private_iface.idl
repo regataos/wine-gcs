@@ -21,6 +21,7 @@
 #include <mshtmdid.h>
 
 import "ocidl.idl";
+import "mshtml.idl";
 
 [
     version(1.0),
@@ -74,6 +75,23 @@ interface IWineMSHTMLConsole : IDispatch
     HRESULT trace([in, optional] VARIANT *varargStart);
     [id(16)]
     HRESULT warn([in, optional] VARIANT *varargStart);
+}
+
+[
+    odl,
+    oleautomation,
+    dual,
+    hidden,
+    uuid(6ac5491e-1758-4b82-98a2-83e31a7c8871)
+]
+interface IWineMSHTMLMutationObserver : IDispatch
+{
+    [id(1)]
+    HRESULT disconnect();
+    [id(2)]
+    HRESULT observe([in] IHTMLDOMNode *target, [in] IDispatch *options);
+    [id(3)]
+    HRESULT takeRecords([retval, out] IDispatch **records);
 }
 
 [

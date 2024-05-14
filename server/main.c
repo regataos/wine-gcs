@@ -244,6 +244,7 @@ int main( int argc, char *argv[] )
     if (debug_level) fprintf( stderr, "wineserver: starting (pid=%ld)\n", (long) getpid() );
     set_current_time();
     init_signals();
+    init_memory();
     init_user_sid();
     init_directories( load_intl_file() );
     init_threading();

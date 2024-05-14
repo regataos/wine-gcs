@@ -24,6 +24,7 @@
 #pragma makedep unix
 #endif
 
+#include <stdlib.h>
 #include "ntgdi_private.h"
 #include "ntuser_private.h"
 #include "wine/server.h"
@@ -798,6 +799,17 @@ static void sys_command_size_move( HWND hwnd, WPARAM wparam )
         {
             NtUserTranslateMessage( &msg, 0 );
             NtUserDispatchMessage( &msg );
+
+            /* It's possible that the window proc that handled the dispatch consumed a
+             * WM_LBUTTONUP. Detect that and terminate the loop as if we'd gotten it. */
+            if (!(NtUserGetKeyState( VK_LBUTTON ) & 0x8000))
+            {
+                DWORD last_pos = NtUserGetThreadInfo()->message_pos;
+                pt.x = ((int)(short)LOWORD( last_pos ));
+                pt.y = ((int)(short)HIWORD( last_pos ));
+                break;
+            }
+
             continue;  /* We are not interested in other messages */
         }
 
@@ -1854,8 +1866,15 @@ static void handle_nc_calc_size( HWND hwnd, WPARAM wparam, RECT *win_rect )
 
     if (!win_rect) return;
 
-    if (__wine_get_window_manager() == WINE_WM_X11_STEAMCOMPMGR && !((style & WS_POPUP) && (ex_style & WS_EX_TOOLWINDOW)))
-        return;
+    if (__wine_get_window_manager() == WINE_WM_X11_STEAMCOMPMGR)
+    {
+        /* Disable gamescope undecorated windows hack for following games. They don't expect client
+         * rect equals to window rect when in windowed mode. */
+        const char *sgi = getenv( "SteamGameId" );
+        if (!((style & WS_POPUP) && (ex_style & WS_EX_TOOLWINDOW)) && /* Bug 20038: game splash screens */
+            !(sgi && !strcmp( sgi, "2563800" )))                      /* Bug 23342: The Last Game */
+            return;
+    }
 
     if (!(style & WS_MINIMIZE))
     {
@@ -2583,8 +2602,9 @@ LRESULT default_window_proc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam, 
         break;
 
     case WM_MOUSEWHEEL:
+    case WM_MOUSEHWHEEL:
         if (get_window_long( hwnd, GWL_STYLE ) & WS_CHILD)
-            result = send_message( get_parent( hwnd ), WM_MOUSEWHEEL, wparam, lparam );
+            result = send_message( get_parent( hwnd ), msg, wparam, lparam );
         break;
 
     case WM_ERASEBKGND:

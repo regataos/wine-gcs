@@ -312,7 +312,8 @@ void test_overlapped_format( DWORD version )
 
 
     hr = IDirectInputDevice_Acquire( keyboard );
-    ok( hr == DI_OK, "Acquire returned %#lx\n", hr );
+    ok( hr == DI_OK, "Acquire returned %#lx, skipping test_overlapped_format\n", hr );
+    if (hr != DI_OK) goto cleanup;
 
     keybd_event( 0, DIK_F, KEYEVENTF_SCANCODE, 0 );
     res = WaitForSingleObject( event, 100 );
@@ -373,7 +374,8 @@ void test_overlapped_format( DWORD version )
 
 
     hr = IDirectInputDevice_Acquire( keyboard );
-    ok( hr == DI_OK, "Acquire returned %#lx\n", hr );
+    ok( hr == DI_OK, "Acquire returned %#lx, skipping test_overlapped_format\n", hr );
+    if (hr != DI_OK) goto cleanup;
 
     keybd_event( 0, DIK_F, KEYEVENTF_SCANCODE, 0 );
     res = WaitForSingleObject( event, 100 );
@@ -429,6 +431,7 @@ void test_overlapped_format( DWORD version )
     ok( count == 1, "got count %lu\n", count );
 
 
+cleanup:
     IUnknown_Release( keyboard );
     IDirectInput_Release( dinput );
 
@@ -1481,7 +1484,8 @@ static void test_sys_mouse( DWORD version )
     hr = IDirectInputDevice8_Unacquire( device );
     ok( hr == DI_NOEFFECT, "Unacquire returned %#lx\n", hr );
     hr = IDirectInputDevice8_Acquire( device );
-    ok( hr == DI_OK, "Acquire returned %#lx\n", hr );
+    ok( hr == DI_OK, "Acquire returned %#lx, skipping test_sys_mouse\n", hr );
+    if (hr != DI_OK) goto cleanup;
     hr = IDirectInputDevice8_Acquire( device );
     ok( hr == DI_NOEFFECT, "Acquire returned %#lx\n", hr );
 
@@ -1511,7 +1515,8 @@ static void test_sys_mouse( DWORD version )
     ok( count == 1, "got count %lu\n", count );
 
     hr = IDirectInputDevice8_Acquire( device );
-    ok( hr == DI_OK, "Acquire returned %#lx\n", hr );
+    ok( hr == DI_OK, "Acquire returned %#lx, skipping test_sys_mouse\n", hr );
+    if (hr != DI_OK) goto cleanup;
 
     mouse_event( MOUSEEVENTF_MOVE, 10, 10, 0, 0 );
     res = WaitForSingleObject( event, 100 );
@@ -1526,7 +1531,9 @@ static void test_sys_mouse( DWORD version )
     ok( hr == DI_OK, "Unacquire returned %#lx\n", hr );
 
     hr = IDirectInputDevice8_Acquire( device );
-    ok( hr == DI_OK, "Acquire returned %#lx\n", hr );
+    ok( hr == DI_OK, "Acquire returned %#lx, skipping test_sys_mouse\n", hr );
+    if (hr != DI_OK) goto cleanup;
+
     count = 1;
     hr = IDirectInputDevice8_GetDeviceData( device, sizeof(objdata), &objdata, &count, 0 );
     ok( hr == (version < 0x800 ? DI_OK : DI_BUFFEROVERFLOW), "GetDeviceData returned %#lx\n", hr );
@@ -1577,6 +1584,7 @@ static void test_sys_mouse( DWORD version )
     DestroyWindow( tmp_hwnd );
 
 
+cleanup:
     CloseHandle( event );
     DestroyWindow( hwnd );
 
@@ -1699,7 +1707,6 @@ static void test_dik_codes( IDirectInputDevice8W *device, HANDLE event, HWND hwn
 
     skip_key_tests:
         ActivateKeyboardLayout( old_hkl, 0 );
-        UnloadKeyboardLayout( hkl );
 
         winetest_pop_context();
     }
@@ -2245,7 +2252,6 @@ static void test_sys_keyboard( DWORD version )
 
 skip_key_tests:
     ActivateKeyboardLayout( old_hkl, 0 );
-    UnloadKeyboardLayout( hkl );
 
     test_dik_codes( device, event, hwnd, version );
 

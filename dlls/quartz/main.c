@@ -23,8 +23,8 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(quartz);
 
-extern HRESULT WINAPI QUARTZ_DllGetClassObject(REFCLSID, REFIID, LPVOID *) DECLSPEC_HIDDEN;
-extern BOOL WINAPI QUARTZ_DllMain(HINSTANCE, DWORD, LPVOID) DECLSPEC_HIDDEN;
+extern HRESULT WINAPI QUARTZ_DllGetClassObject(REFCLSID, REFIID, LPVOID *);
+extern BOOL WINAPI QUARTZ_DllMain(HINSTANCE, DWORD, LPVOID);
 
 BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, void *reserved)
 {
@@ -59,6 +59,7 @@ struct object_creation_info
 static const struct object_creation_info object_creation[] =
 {
     { &CLSID_ACMWrapper, acm_wrapper_create },
+    { &CLSID_AllocPresenter, vmr7_presenter_create },
     { &CLSID_AsyncReader, async_reader_create },
     { &CLSID_AudioRender, dsound_render_create },
     { &CLSID_AVIDec, avi_dec_create },

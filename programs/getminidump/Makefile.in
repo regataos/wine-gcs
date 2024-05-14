@@ -3,5 +3,5 @@ IMPORTS = shcore dbghelp
 
 EXTRADLLFLAGS = -mwindows -municode
 
-C_SRCS = \
+SOURCES = \
 	main.c

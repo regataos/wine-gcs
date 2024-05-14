@@ -73,7 +73,9 @@ BOOL is_dualshock4_gamepad(WORD vid, WORD pid)
 
 BOOL is_dualsense_gamepad(WORD vid, WORD pid)
 {
-    if (vid == 0x054c && pid == 0x0ce6) return TRUE;
+    if (vid != 0x054c) return FALSE;
+    if (pid == 0x0ce6) return TRUE; /* DualSense */
+    if (pid == 0x0df2) return TRUE; /* DualSense Edge */
     return FALSE;
 }
 
@@ -113,6 +115,8 @@ static BOOL is_vkb_controller(WORD vid, WORD pid, INT buttons)
     if (buttons == 128) return TRUE;
 
     /* if customized, less than 128 buttons may be shown, decide by PID */
+    if (pid == 0x0126) return TRUE; /* VKB-Sim Space Gunfighter */
+    if (pid == 0x0127) return TRUE; /* VKB-Sim Space Gunfighter L */
     if (pid == 0x0200) return TRUE; /* VKBsim Gladiator EVO Right Grip */
     if (pid == 0x0201) return TRUE; /* VKBsim Gladiator EVO Left Grip */
     return FALSE;
@@ -422,6 +426,8 @@ const unixlib_entry_t __wine_unix_call_funcs[] =
     unix_device_get_feature_report,
     unix_device_set_feature_report,
 };
+
+C_ASSERT(ARRAYSIZE(__wine_unix_call_funcs) == unix_funcs_count);
 
 void bus_event_cleanup(struct bus_event *event)
 {

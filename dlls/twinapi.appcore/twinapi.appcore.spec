@@ -1,16 +1,3 @@
-1 stdcall -private DllCanUnloadNow()
-2 stdcall -private DllGetActivationFactory(ptr ptr)
-3 stdcall -private DllGetClassObject(ptr ptr ptr)
-4 stub @
-5 stub @
-6 stub @
-7 stub @
-8 stub @
-9 stub @
-10 stub @
-11 stub @
-12 stub @
-13 stub @
 @ stub ValidateSystemShutdown
 @ stub BiActivateWorkItemForUser
 @ stub BiChangeApplicationStateForPackageName
@@ -73,6 +60,9 @@
 @ stub BiTerminateApplicationHostForUser
 @ stub BiUpdateBackgroundAccessApplicationsForUser
 @ stub BiUpdateLockScreenApplications
+@ stdcall -private DllCanUnloadNow()
+@ stdcall -private DllGetActivationFactory(ptr ptr)
+@ stdcall -private DllGetClassObject(ptr ptr ptr)
 @ stub PsmApplyTaskCompletion
 @ stub PsmBlockAppStateChangeCompletion
 @ stub PsmDisconnect
@@ -131,11 +121,7 @@
 @ stub PsmUnblockAppStateChangeCompletion
 @ stub PsmUnregisterAppStateChangeNotification
 @ stub PsmWaitForAppResume
-@ stub RegisterAppConstrainedChangeNotification
+@ stdcall RegisterAppConstrainedChangeNotification(ptr ptr ptr)
 @ stdcall RegisterAppStateChangeNotification(ptr ptr ptr)
-@ stub TryGetTitleBarIslandId
-@ stub TryGetTitleBarIslandSelectedHost
-@ stub UnregisterAppConstrainedChangeNotification
+@ stdcall UnregisterAppConstrainedChangeNotification(ptr)
 @ stdcall UnregisterAppStateChangeNotification(ptr)
-500 stub @
-505 stub @

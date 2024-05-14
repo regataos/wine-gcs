@@ -689,7 +689,8 @@ static HRESULT prop_get(jsdisp_t *This, IDispatch *jsthis, dispex_prop_t *prop, 
         break;
     case PROP_ACCESSOR:
         if(prop->u.accessor.getter) {
-            hres = jsdisp_call_value(prop->u.accessor.getter, jsval_disp(jsthis), DISPATCH_METHOD, 0, NULL, r, caller);
+            hres = jsdisp_call_value(prop->u.accessor.getter, jsval_disp(jsthis),
+                                     DISPATCH_METHOD, 0, NULL, r, caller);
         }else {
             *r = jsval_undefined();
             hres = S_OK;
@@ -1064,7 +1065,7 @@ static jsdisp_t *gc_stack_pop(struct gc_ctx *gc_ctx)
     return obj;
 }
 
-HRESULT gc_run(script_ctx_t *ctx, BOOL force_cc)
+HRESULT gc_run(script_ctx_t *ctx)
 {
     /* Save original refcounts in a linked list of chunks */
     struct chunk
@@ -1072,6 +1073,7 @@ HRESULT gc_run(script_ctx_t *ctx, BOOL force_cc)
         struct chunk *next;
         LONG ref[1020];
     } *head, *chunk;
+    struct thread_data *thread_data = ctx->thread_data;
     jsdisp_t *obj, *obj2, *link, *link2;
     dispex_prop_t *prop, *props_end;
     struct gc_ctx gc_ctx = { 0 };
@@ -1080,14 +1082,12 @@ HRESULT gc_run(script_ctx_t *ctx, BOOL force_cc)
     struct list *iter;
 
     /* Prevent recursive calls from side-effects during unlinking (e.g. CollectGarbage from host object's Release) */
-    if(ctx->gc_is_unlinking)
+    if(thread_data->gc_is_unlinking)
         return S_OK;
 
-    if(ctx->html_mode && ctx->site) {
-        ctx->gc_is_unlinking = TRUE;
-        cc_api.collect(ctx->site, force_cc);
-        ctx->gc_is_unlinking = FALSE;
-    }
+    thread_data->gc_is_unlinking = TRUE;
+    cc_api.collect();
+    thread_data->gc_is_unlinking = FALSE;
 
     if(!(head = malloc(sizeof(*head))))
         return E_OUTOFMEMORY;
@@ -1095,7 +1095,7 @@ HRESULT gc_run(script_ctx_t *ctx, BOOL force_cc)
     chunk = head;
 
     /* 1. Save actual refcounts and decrease them speculatively as-if we unlinked the objects */
-    LIST_FOR_EACH_ENTRY(obj, &ctx->objects, jsdisp_t, entry) {
+    LIST_FOR_EACH_ENTRY(obj, &thread_data->objects, jsdisp_t, entry) {
         if(chunk_idx == ARRAY_SIZE(chunk->ref)) {
             if(!(chunk->next = malloc(sizeof(*chunk)))) {
                 do {
@@ -1105,22 +1105,22 @@ HRESULT gc_run(script_ctx_t *ctx, BOOL force_cc)
                 } while(head);
                 return E_OUTOFMEMORY;
             }
-            chunk = chunk->next, chunk_idx = 0;
+            chunk = chunk->next; chunk_idx = 0;
             chunk->next = NULL;
         }
         chunk->ref[chunk_idx++] = obj->ref;
     }
-    LIST_FOR_EACH_ENTRY(obj, &ctx->objects, jsdisp_t, entry) {
+    LIST_FOR_EACH_ENTRY(obj, &thread_data->objects, jsdisp_t, entry) {
         for(prop = obj->props, props_end = prop + obj->prop_cnt; prop < props_end; prop++) {
             switch(prop->type) {
             case PROP_JSVAL:
-                if(is_object_instance(prop->u.val) && (link = to_jsdisp(get_object(prop->u.val))) && link->ctx == ctx)
+                if(is_object_instance(prop->u.val) && (link = to_jsdisp(get_object(prop->u.val))))
                     link->ref--;
                 break;
             case PROP_ACCESSOR:
-                if(prop->u.accessor.getter && prop->u.accessor.getter->ctx == ctx)
+                if(prop->u.accessor.getter)
                     prop->u.accessor.getter->ref--;
-                if(prop->u.accessor.setter && prop->u.accessor.setter->ctx == ctx)
+                if(prop->u.accessor.setter)
                     prop->u.accessor.setter->ref--;
                 break;
             default:
@@ -1128,7 +1128,7 @@ HRESULT gc_run(script_ctx_t *ctx, BOOL force_cc)
             }
         }
 
-        if(obj->prototype && obj->prototype->ctx == ctx)
+        if(obj->prototype)
             obj->prototype->ref--;
         if(obj->builtin_info->gc_traverse)
             obj->builtin_info->gc_traverse(&gc_ctx, GC_TRAVERSE_SPECULATIVELY, obj);
@@ -1136,7 +1136,7 @@ HRESULT gc_run(script_ctx_t *ctx, BOOL force_cc)
     }
 
     /* 2. Clear mark on objects with non-zero "external refcount" and all objects accessible from them */
-    LIST_FOR_EACH_ENTRY(obj, &ctx->objects, jsdisp_t, entry) {
+    LIST_FOR_EACH_ENTRY(obj, &thread_data->objects, jsdisp_t, entry) {
         if(!obj->gc_marked || (!obj->ref && !obj->proxy))
             continue;
 
@@ -1164,12 +1164,12 @@ HRESULT gc_run(script_ctx_t *ctx, BOOL force_cc)
                 default:
                     continue;
                 }
-                if(link && link->gc_marked && link->ctx == ctx) {
+                if(link && link->gc_marked) {
                     hres = gc_stack_push(&gc_ctx, link);
                     if(FAILED(hres))
                         break;
                 }
-                if(link2 && link2->gc_marked && link2->ctx == ctx) {
+                if(link2 && link2->gc_marked) {
                     hres = gc_stack_push(&gc_ctx, link2);
                     if(FAILED(hres))
                         break;
@@ -1179,7 +1179,7 @@ HRESULT gc_run(script_ctx_t *ctx, BOOL force_cc)
             if(FAILED(hres))
                 break;
 
-            if(obj2->prototype && obj2->prototype->gc_marked && obj2->prototype->ctx == ctx) {
+            if(obj2->prototype && obj2->prototype->gc_marked) {
                 hres = gc_stack_push(&gc_ctx, obj2->prototype);
                 if(FAILED(hres))
                     break;
@@ -1194,7 +1194,7 @@ HRESULT gc_run(script_ctx_t *ctx, BOOL force_cc)
             /* For weak refs, traverse paths accessible from it via the WeakMaps, if the WeakMaps are alive at this point.
                We need both the key and the WeakMap for the entry to actually be accessible (and thus traversed). */
             if(obj2->has_weak_refs) {
-                struct list *list = &RB_ENTRY_VALUE(rb_get(&ctx->weak_refs, obj2), struct weak_refs_entry, entry)->list;
+                struct list *list = &RB_ENTRY_VALUE(rb_get(&thread_data->weak_refs, obj2), struct weak_refs_entry, entry)->list;
                 struct weakmap_entry *entry;
 
                 LIST_FOR_EACH_ENTRY(entry, list, struct weakmap_entry, weak_refs_entry) {
@@ -1220,13 +1220,13 @@ HRESULT gc_run(script_ctx_t *ctx, BOOL force_cc)
     free(gc_ctx.next);
 
     /* Restore */
-    chunk = head, chunk_idx = 0;
-    LIST_FOR_EACH_ENTRY(obj, &ctx->objects, jsdisp_t, entry) {
+    chunk = head; chunk_idx = 0;
+    LIST_FOR_EACH_ENTRY(obj, &thread_data->objects, jsdisp_t, entry) {
         obj->ref = chunk->ref[chunk_idx++];
         if(chunk_idx == ARRAY_SIZE(chunk->ref)) {
             struct chunk *next = chunk->next;
             free(chunk);
-            chunk = next, chunk_idx = 0;
+            chunk = next; chunk_idx = 0;
         }
     }
     free(chunk);
@@ -1235,13 +1235,13 @@ HRESULT gc_run(script_ctx_t *ctx, BOOL force_cc)
         return hres;
 
     /* 3. Remove all the links from the marked objects, since they are dangling */
-    ctx->gc_is_unlinking = TRUE;
+    thread_data->gc_is_unlinking = TRUE;
 
-    iter = list_head(&ctx->objects);
+    iter = list_head(&thread_data->objects);
     while(iter) {
         obj = LIST_ENTRY(iter, jsdisp_t, entry);
         if(!obj->gc_marked) {
-            iter = list_next(&ctx->objects, iter);
+            iter = list_next(&thread_data->objects, iter);
             continue;
         }
 
@@ -1251,12 +1251,12 @@ HRESULT gc_run(script_ctx_t *ctx, BOOL force_cc)
 
         /* Releasing unlinked object should not delete any other object,
            so we can safely obtain the next pointer now */
-        iter = list_next(&ctx->objects, iter);
+        iter = list_next(&thread_data->objects, iter);
         jsdisp_release(obj);
     }
 
-    ctx->gc_is_unlinking = FALSE;
-    ctx->gc_last_tick = GetTickCount();
+    thread_data->gc_is_unlinking = FALSE;
+    thread_data->gc_last_tick = GetTickCount();
     return S_OK;
 }
 
@@ -1268,8 +1268,6 @@ HRESULT gc_process_linked_obj(struct gc_ctx *gc_ctx, enum gc_traverse_op op, jsd
         return S_OK;
     }
 
-    if(link->ctx != obj->ctx)
-        return S_OK;
     if(op == GC_TRAVERSE_SPECULATIVELY)
         link->ref--;
     else if(link->gc_marked)
@@ -1288,7 +1286,7 @@ HRESULT gc_process_linked_val(struct gc_ctx *gc_ctx, enum gc_traverse_op op, jsd
         return S_OK;
     }
 
-    if(!is_object_instance(*link) || !(jsdisp = to_jsdisp(get_object(*link))) || jsdisp->ctx != obj->ctx)
+    if(!is_object_instance(*link) || !(jsdisp = to_jsdisp(get_object(*link))))
         return S_OK;
     if(op == GC_TRAVERSE_SPECULATIVELY)
         jsdisp->ref--;
@@ -2668,7 +2666,7 @@ static HRESULT WINAPI WineDispatchProxyCbPrivate_HostUpdated(IWineDispatchProxyC
 
         if(This->ref) {
             list_remove(&This->entry);
-            list_add_tail(&ctx->objects, &This->entry);
+            list_add_tail(&get_thread_data()->objects, &This->entry);
         }
         script_release(This->ctx);
         script_addref(ctx);
@@ -2844,8 +2842,8 @@ HRESULT init_dispex(jsdisp_t *dispex, script_ctx_t *ctx, const builtin_info_t *b
     unsigned i;
 
     /* FIXME: Use better heuristics to decide when to run the GC */
-    if(GetTickCount() - ctx->gc_last_tick > 30000)
-        gc_run(ctx, FALSE);
+    if(GetTickCount() - ctx->thread_data->gc_last_tick > 30000)
+        gc_run(ctx);
 
     TRACE("%p (%p)\n", dispex, prototype);
 
@@ -2871,7 +2869,7 @@ HRESULT init_dispex(jsdisp_t *dispex, script_ctx_t *ctx, const builtin_info_t *b
     script_addref(ctx);
     dispex->ctx = ctx;
 
-    list_add_tail(&ctx->objects, &dispex->entry);
+    list_add_tail(&ctx->thread_data->objects, &dispex->entry);
     return S_OK;
 }
 
@@ -2888,7 +2886,6 @@ HRESULT create_dispex(script_ctx_t *ctx, const builtin_info_t *builtin_info, jsd
     jsdisp_t *ret;
     HRESULT hres;
 
-    *dispex = NULL;
     ret = calloc(1, sizeof(jsdisp_t));
     if(!ret)
         return E_OUTOFMEMORY;
@@ -2945,6 +2942,7 @@ HRESULT convert_to_proxy(script_ctx_t *ctx, jsval_t *val)
         /* It's possible for get_proxy_default_prototype to have initialized the proxy ref,
            e.g. locking the document mode while obtaining the dispex info, so re-check it. */
         if(!*proxy_ref) {
+            jsdisp = NULL;
             hres = create_dispex(ctx, &proxy_dispex_info, prot, &jsdisp);
             jsdisp_release(prot);
             if(FAILED(hres))
@@ -2977,7 +2975,7 @@ HRESULT convert_to_proxy(script_ctx_t *ctx, jsval_t *val)
     assert(jsdisp->proxy == proxy);
 
     if(!jsdisp->ref++)
-        list_add_tail(&jsdisp->ctx->objects, &jsdisp->entry);
+        list_add_tail(&get_thread_data()->objects, &jsdisp->entry);
     else
         IDispatchEx_Release((IDispatchEx*)proxy);  /* already held by jsdisp */
 
@@ -3008,7 +3006,7 @@ void jsdisp_free(jsdisp_t *obj)
     TRACE("(%p)\n", obj);
 
     if(obj->has_weak_refs) {
-        struct list *list = &RB_ENTRY_VALUE(rb_get(&obj->ctx->weak_refs, obj), struct weak_refs_entry, entry)->list;
+        struct list *list = &RB_ENTRY_VALUE(rb_get(&obj->ctx->thread_data->weak_refs, obj), struct weak_refs_entry, entry)->list;
         do {
             remove_weakmap_entry(LIST_ENTRY(list->next, struct weakmap_entry, weak_refs_entry));
         } while(obj->has_weak_refs);
@@ -3043,7 +3041,7 @@ void jsdisp_free(jsdisp_t *obj)
 
 void jsdisp_reacquire(jsdisp_t *jsdisp)
 {
-    list_add_tail(&jsdisp->ctx->objects, &jsdisp->entry);
+    list_add_tail(&get_thread_data()->objects, &jsdisp->entry);
     if(jsdisp->proxy)
         IDispatchEx_AddRef((IDispatchEx*)jsdisp->proxy);
 }
@@ -3154,12 +3152,25 @@ static HRESULT WINAPI jsdisp_cc_unlink(void *p)
 {
     jsdisp_t *This = impl_from_IDispatchEx(p);
 
+    if(This->proxy) {
+        IWineDispatchProxyPrivate *proxy = This->proxy;
+
+        This->proxy = NULL;
+        *proxy->lpVtbl->GetProxyFieldRef(proxy) = NULL;
+
+        if(!This->ref) {
+            jsdisp_free(This);
+            return S_OK;
+        }
+        IDispatchEx_Release((IDispatchEx*)proxy);
+    }
+
     unlink_jsdisp(This);
     return S_OK;
 }
 
 static BOOL __cdecl cc_api_stub_is_full_cc(void) { return FALSE; }
-static void __cdecl cc_api_stub_collect(IActiveScriptSite *site, BOOL force) { }
+static void __cdecl cc_api_stub_collect(void) { }
 
 struct proxy_cc_api cc_api = {
     .is_full_cc    = cc_api_stub_is_full_cc,

@@ -66,6 +66,7 @@ XVisualInfo argb_visual = { 0 };
 Colormap default_colormap = None;
 XPixmapFormatValues **pixmap_formats;
 Atom systray_atom = 0;
+HWND systray_hwnd = 0;
 unsigned int screen_bpp;
 Window root_window;
 BOOL usexvidmode = FALSE;
@@ -75,8 +76,9 @@ BOOL use_xfixes = FALSE;
 BOOL use_take_focus = FALSE;
 BOOL use_primary_selection = FALSE;
 BOOL use_system_cursors = TRUE;
-BOOL show_systray = TRUE;
 BOOL grab_fullscreen = FALSE;
+int keyboard_layout = -1;
+BOOL keyboard_scancode_detect = FALSE;
 BOOL managed_mode = TRUE;
 BOOL decorated_mode = TRUE;
 BOOL private_color_map = FALSE;
@@ -91,12 +93,11 @@ int xrender_error_base = 0;
 int xfixes_event_base = 0;
 char *process_name = NULL;
 WNDPROC client_foreign_window_proc = NULL;
+BOOL vulkan_disable_child_window_rendering_hack = FALSE;
+BOOL vulkan_gdi_blit_source_hack = FALSE;
 HANDLE steam_overlay_event;
 HANDLE steam_keyboard_event;
 BOOL layered_window_client_hack = FALSE;
-BOOL vulkan_gdi_blit_source_hack = FALSE;
-BOOL vulkan_disable_child_window_rendering_hack = FALSE;
-BOOL input_thread_hack = FALSE;
 
 static x11drv_error_callback err_callback;   /* current callback for error */
 static Display *err_callback_display;        /* display callback is set for */
@@ -106,7 +107,6 @@ static unsigned long err_serial;             /* serial number of first request *
 static int (*old_error_handler)( Display *, XErrorEvent * );
 static BOOL use_xim = TRUE;
 static WCHAR input_style[20];
-static int xcomp_opcode;
 
 static pthread_mutex_t d3dkmt_mutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_mutex_t error_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -236,6 +236,7 @@ static const char * const atom_names[NB_XATOMS - FIRST_XATOM] =
     "text/uri-list",
     "GAMESCOPE_FOCUSED_APP",
     "GAMESCOPE_DISPLAY_EDID_PATH",
+    "GAMESCOPE_XALIA_OVERLAY",
 };
 
 /***********************************************************************
@@ -247,6 +248,7 @@ static inline BOOL ignore_error( Display *display, XErrorEvent *event )
 {
     if ((event->request_code == X_SetInputFocus ||
          event->request_code == X_ChangeWindowAttributes ||
+         event->request_code == X_ConfigureWindow ||
          event->request_code == X_SendEvent) &&
         (event->error_code == BadMatch ||
          event->error_code == BadWindow)) return TRUE;
@@ -266,11 +268,6 @@ static inline BOOL ignore_error( Display *display, XErrorEvent *event )
         {
             if (event->error_code == xrender_error_base + BadPicture) return TRUE;
         }
-#endif
-#ifdef SONAME_LIBXCOMPOSITE
-        if (xcomp_opcode && event->request_code == xcomp_opcode
-            && (event->minor_code == X_CompositeRedirectWindow || event->minor_code == X_CompositeUnredirectWindow))
-            return TRUE;
 #endif
     }
     return FALSE;
@@ -380,11 +377,61 @@ HKEY reg_open_key( HKEY root, const WCHAR *name, ULONG name_len )
     return NtOpenKeyEx( &ret, MAXIMUM_ALLOWED, &attr, 0 ) ? 0 : ret;
 }
 
+/* wrapper for NtCreateKey that creates the key recursively if necessary */
+static HKEY reg_create_key( HKEY root, const WCHAR *name, ULONG name_len,
+                            DWORD options, DWORD *disposition )
+{
+    UNICODE_STRING nameW = { name_len, name_len, (WCHAR *)name };
+    OBJECT_ATTRIBUTES attr;
+    NTSTATUS status;
+    HANDLE ret;
 
-HKEY open_hkcu_key( const char *name )
+    attr.Length = sizeof(attr);
+    attr.RootDirectory = root;
+    attr.ObjectName = &nameW;
+    attr.Attributes = 0;
+    attr.SecurityDescriptor = NULL;
+    attr.SecurityQualityOfService = NULL;
+
+    status = NtCreateKey( &ret, MAXIMUM_ALLOWED, &attr, 0, NULL, options, disposition );
+    if (status == STATUS_OBJECT_NAME_NOT_FOUND)
+    {
+        static const WCHAR registry_rootW[] = { '\\','R','e','g','i','s','t','r','y','\\' };
+        DWORD pos = 0, i = 0, len = name_len / sizeof(WCHAR);
+
+        /* don't try to create registry root */
+        if (!root && len > ARRAY_SIZE(registry_rootW) &&
+            !memcmp( name, registry_rootW, sizeof(registry_rootW) ))
+            i += ARRAY_SIZE(registry_rootW);
+
+        while (i < len && name[i] != '\\') i++;
+        if (i == len) return 0;
+        for (;;)
+        {
+            unsigned int subkey_options = options;
+            if (i < len) subkey_options &= ~(REG_OPTION_CREATE_LINK | REG_OPTION_OPEN_LINK);
+            nameW.Buffer = (WCHAR *)name + pos;
+            nameW.Length = (i - pos) * sizeof(WCHAR);
+            status = NtCreateKey( &ret, MAXIMUM_ALLOWED, &attr, 0, NULL, subkey_options, disposition );
+
+            if (attr.RootDirectory != root) NtClose( attr.RootDirectory );
+            if (!NT_SUCCESS(status)) return 0;
+            if (i == len) break;
+            attr.RootDirectory = ret;
+            while (i < len && name[i] == '\\') i++;
+            pos = i;
+            while (i < len && name[i] != '\\') i++;
+        }
+    }
+    return ret;
+}
+
+static HKEY reg_open_hkcu_key( const char *name, BOOL create )
 {
     WCHAR bufferW[256];
     static HKEY hkcu;
+    DWORD disp;
+    HKEY key;
 
     if (!hkcu)
     {
@@ -409,9 +456,33 @@ HKEY open_hkcu_key( const char *name )
         hkcu = reg_open_key( NULL, bufferW, len * sizeof(WCHAR) );
     }
 
-    return reg_open_key( hkcu, bufferW, asciiz_to_unicode( bufferW, name ) - sizeof(WCHAR) );
+    if ((key = reg_open_key( hkcu, bufferW, asciiz_to_unicode( bufferW, name ) - sizeof(WCHAR) )) || !create) return key;
+    return reg_create_key( hkcu, bufferW, asciiz_to_unicode( bufferW, name ) - sizeof(WCHAR), 0, &disp );
 }
 
+HKEY open_hkcu_key( const char *name )
+{
+    return reg_open_hkcu_key( name, FALSE );
+}
+
+static HKEY create_hkcu_key( const char *name )
+{
+    return reg_open_hkcu_key( name, TRUE );
+}
+
+static BOOL set_reg_value( HKEY hkey, const WCHAR *name, UINT type, const void *value, DWORD count )
+{
+    unsigned int name_size = name ? lstrlenW( name ) * sizeof(WCHAR) : 0;
+    UNICODE_STRING nameW = { name_size, name_size, (WCHAR *)name };
+    return !NtSetValueKey( hkey, &nameW, 0, type, value, count );
+}
+
+static void set_reg_string_value( HKEY hkey, const char *name, const WCHAR *value, DWORD count )
+{
+    WCHAR nameW[64];
+    asciiz_to_unicode( nameW, name );
+    set_reg_value( hkey, nameW, REG_MULTI_SZ, value, count );
+}
 
 ULONG query_reg_value( HKEY hkey, const WCHAR *name, KEY_VALUE_PARTIAL_INFORMATION *info, ULONG size )
 {
@@ -473,7 +544,7 @@ static void setup_options(void)
     DWORD len;
 
     /* @@ Wine registry key: HKCU\Software\Wine\X11 Driver */
-    hkey = open_hkcu_key( "Software\\Wine\\X11 Driver" );
+    hkey = create_hkcu_key( "Software\\Wine\\X11 Driver" );
 
     /* open the app-specific key */
 
@@ -521,11 +592,18 @@ static void setup_options(void)
     if (!get_config_key( hkey, appkey, "UseSystemCursors", buffer, sizeof(buffer) ))
         use_system_cursors = IS_OPTION_TRUE( buffer[0] );
 
-    if (!get_config_key( hkey, appkey, "ShowSystray", buffer, sizeof(buffer) ))
-        show_systray = IS_OPTION_TRUE( buffer[0] );
-
     if (!get_config_key( hkey, appkey, "GrabFullscreen", buffer, sizeof(buffer) ))
         grab_fullscreen = IS_OPTION_TRUE( buffer[0] );
+
+    if (!get_config_key( hkey, appkey, "KeyboardLayout", buffer, sizeof(buffer) ))
+        keyboard_layout = x11drv_find_keyboard_layout( buffer );
+
+    p = x11drv_get_keyboard_layout_list( &len );
+    if (p) set_reg_string_value( hkey, "KeyboardLayoutList", p, len * sizeof(WCHAR) );
+    free( p );
+
+    if (!get_config_key( hkey, appkey, "KeyboardScancodeDetect", buffer, sizeof(buffer) ))
+        keyboard_scancode_detect = IS_OPTION_TRUE( buffer[0] );
 
     if (!get_config_key( hkey, appkey, "ScreenDepth", buffer, sizeof(buffer) ))
         default_visual.depth = wcstol( buffer, NULL, 0 );
@@ -611,11 +689,7 @@ static void X11DRV_XComposite_Init(void)
         usexcomposite = FALSE;
         return;
     }
-    if (!XQueryExtension(gdi_display, "Composite", &xcomp_opcode, &xcomp_event_base, &xcomp_error_base))
-        ERR("XQueryExtension failed.\n");
-
-    TRACE("XComposite is up and running opcode = %d, error_base = %d, event_base %d\n",
-          xcomp_opcode, xcomp_error_base, xcomp_event_base);
+    TRACE("XComposite is up and running error_base = %d\n", xcomp_error_base);
     return;
 
 sym_not_found:
@@ -779,13 +853,6 @@ static NTSTATUS x11drv_init( void *arg )
     dlopen( SONAME_LIBXEXT, RTLD_NOW|RTLD_GLOBAL );
 #endif
 
-    {
-        const char *e = getenv("WINE_ALLOW_XIM");
-        if(e){
-            use_xim = IS_OPTION_TRUE(*e);
-        }
-    }
-
     setup_options();
 
     /* Open display */
@@ -824,7 +891,7 @@ static NTSTATUS x11drv_init( void *arg )
 #ifdef SONAME_LIBXCOMPOSITE
     X11DRV_XComposite_Init();
 #endif
-    X11DRV_XInput2_Load();
+    x11drv_xinput2_load();
 
     XkbUseExtension( gdi_display, NULL, NULL );
     X11DRV_InitKeyboard( gdi_display );
@@ -839,12 +906,6 @@ static NTSTATUS x11drv_init( void *arg )
     {
         const char *sgi = getenv("SteamGameId");
         const char *e = getenv("WINE_LAYERED_WINDOW_CLIENT_HACK");
-        layered_window_client_hack =
-            (sgi && (
-                strcmp(sgi, "435150") == 0 || /* Divinity: Original Sin 2 launcher */
-                strcmp(sgi, "227020") == 0 /* Rise of Venice launcher */
-            )) ||
-            (e && *e != '\0' && *e != '0');
 
         e = getenv("WINE_VK_GDI_BLIT_SOURCE_HACK");
         vulkan_gdi_blit_source_hack =
@@ -860,19 +921,21 @@ static NTSTATUS x11drv_init( void *arg )
                 !strcmp(sgi, "1009290")   /* Bug 21949 : SWORD ART ONLINE Alicization Lycoris video tearing */
             )) ||
             (e && *e != '\0' && *e != '0');
+    }
 
-        e = getenv("WINE_INPUT_THREAD_HACK");
-        input_thread_hack =
+    {
+        const char *sgi = getenv("SteamGameId");
+        const char *e = getenv("WINE_LAYERED_WINDOW_CLIENT_HACK");
+        layered_window_client_hack =
             (sgi && (
-                !strcmp(sgi, "1938010")
+                strcmp(sgi, "435150") == 0 || /* Divinity: Original Sin 2 launcher */
+                strcmp(sgi, "227020") == 0 /* Rise of Venice launcher */
             )) ||
             (e && *e != '\0' && *e != '0');
     }
 
     init_user_driver();
     X11DRV_DisplayDevices_Init(FALSE);
-    *params->show_systray = show_systray;
-    params->input_thread_hack = input_thread_hack;
     return STATUS_SUCCESS;
 }
 
@@ -889,6 +952,7 @@ void X11DRV_ThreadDetach(void)
         vulkan_thread_detach();
         if (data->xim) XCloseIM( data->xim );
         if (data->font_set) XFreeFontSet( data->display, data->font_set );
+        XSync( gdi_display, False ); /* make sure XReparentWindow requests have completed before closing the thread display */
         XCloseDisplay( data->display );
         free( data );
         /* clear data in case we get re-entered from user32 before the thread is truly dead */
@@ -953,10 +1017,7 @@ struct x11drv_thread_data *x11drv_init_thread_data(void)
     NtUserGetThreadInfo()->driver_data = (UINT_PTR)data;
 
     if (use_xim) xim_thread_attach( data );
-
-    X11DRV_XInput2_Init();
-    if (NtUserGetWindowThread( NtUserGetDesktopWindow(), NULL ) == GetCurrentThreadId())
-        X11DRV_XInput2_Enable( data->display, None, PointerMotionMask|ButtonPressMask|ButtonReleaseMask );
+    x11drv_xinput2_init( data );
 
     return data;
 }
@@ -998,7 +1059,7 @@ BOOL X11DRV_SystemParametersInfo( UINT action, UINT int_param, void *ptr_param, 
     return FALSE;  /* let user32 handle it */
 }
 
-NTSTATUS CDECL X11DRV_D3DKMTCloseAdapter( const D3DKMT_CLOSEADAPTER *desc )
+NTSTATUS X11DRV_D3DKMTCloseAdapter( const D3DKMT_CLOSEADAPTER *desc )
 {
     const struct vulkan_funcs *vulkan_funcs = get_vulkan_driver(WINE_VULKAN_DRIVER_VERSION);
     struct x11_d3dkmt_adapter *adapter;
@@ -1029,7 +1090,7 @@ NTSTATUS CDECL X11DRV_D3DKMTCloseAdapter( const D3DKMT_CLOSEADAPTER *desc )
 /**********************************************************************
  *           X11DRV_D3DKMTSetVidPnSourceOwner
  */
-NTSTATUS CDECL X11DRV_D3DKMTSetVidPnSourceOwner( const D3DKMT_SETVIDPNSOURCEOWNER *desc )
+NTSTATUS X11DRV_D3DKMTSetVidPnSourceOwner( const D3DKMT_SETVIDPNSOURCEOWNER *desc )
 {
     struct d3dkmt_vidpn_source *source, *source2;
     NTSTATUS status = STATUS_SUCCESS;
@@ -1144,7 +1205,7 @@ done:
 /**********************************************************************
  *           X11DRV_D3DKMTCheckVidPnExclusiveOwnership
  */
-NTSTATUS CDECL X11DRV_D3DKMTCheckVidPnExclusiveOwnership( const D3DKMT_CHECKVIDPNEXCLUSIVEOWNERSHIP *desc )
+NTSTATUS X11DRV_D3DKMTCheckVidPnExclusiveOwnership( const D3DKMT_CHECKVIDPNEXCLUSIVEOWNERSHIP *desc )
 {
     struct d3dkmt_vidpn_source *source;
 
@@ -1176,7 +1237,8 @@ static HANDLE get_display_device_init_mutex(void)
 
     snprintf( buffer, ARRAY_SIZE(buffer), "\\Sessions\\%u\\BaseNamedObjects\\display_device_init",
               (int)NtCurrentTeb()->Peb->SessionId );
-    name.Length = name.MaximumLength = asciiz_to_unicode( bufferW, buffer );
+    name.MaximumLength = asciiz_to_unicode( bufferW, buffer );
+    name.Length = name.MaximumLength - sizeof(WCHAR);
 
     InitializeObjectAttributes( &attr, &name, OBJ_OPENIF, NULL, NULL );
     if (NtCreateMutant( &mutex, MUTEX_ALL_ACCESS, &attr, FALSE ) < 0) return 0;
@@ -1295,7 +1357,7 @@ static BOOL get_vulkan_uuid_from_luid( const LUID *luid, GUID *uuid )
     return FALSE;
 }
 
-NTSTATUS CDECL X11DRV_D3DKMTOpenAdapterFromLuid( D3DKMT_OPENADAPTERFROMLUID *desc )
+NTSTATUS X11DRV_D3DKMTOpenAdapterFromLuid( D3DKMT_OPENADAPTERFROMLUID *desc )
 {
     static const char *extensions[] =
     {
@@ -1409,7 +1471,7 @@ done:
     return status;
 }
 
-NTSTATUS CDECL X11DRV_D3DKMTQueryVideoMemoryInfo( D3DKMT_QUERYVIDEOMEMORYINFO *desc )
+NTSTATUS X11DRV_D3DKMTQueryVideoMemoryInfo( D3DKMT_QUERYVIDEOMEMORYINFO *desc )
 {
     const struct vulkan_funcs *vulkan_funcs = get_vulkan_driver(WINE_VULKAN_DRIVER_VERSION);
     PFN_vkGetPhysicalDeviceMemoryProperties2KHR pvkGetPhysicalDeviceMemoryProperties2KHR;
@@ -1486,15 +1548,10 @@ NTSTATUS x11drv_client_call( enum client_callback func, UINT arg )
 const unixlib_entry_t __wine_unix_call_funcs[] =
 {
     x11drv_init,
-    x11drv_systray_clear,
-    x11drv_systray_dock,
-    x11drv_systray_hide,
-    x11drv_systray_init,
     x11drv_tablet_attach_queue,
     x11drv_tablet_get_packet,
     x11drv_tablet_info,
     x11drv_tablet_load_info,
-    x11drv_input_thread,
 };
 
 
@@ -1508,45 +1565,11 @@ static NTSTATUS x11drv_wow64_init( void *arg )
     struct
     {
         ULONG foreign_window_proc;
-        ULONG show_systray;
     } *params32 = arg;
     struct init_params params;
 
     params.foreign_window_proc = UlongToPtr( params32->foreign_window_proc );
-    params.show_systray = UlongToPtr( params32->show_systray );
     return x11drv_init( &params );
-}
-
-static NTSTATUS x11drv_wow64_systray_clear( void *arg )
-{
-    HWND hwnd = UlongToPtr( *(ULONG *)arg );
-    return x11drv_systray_clear( &hwnd );
-}
-
-static NTSTATUS x11drv_wow64_systray_dock( void *arg )
-{
-    struct
-    {
-        UINT64 event_handle;
-        ULONG icon;
-        int cx;
-        int cy;
-        ULONG layered;
-    } *params32 = arg;
-    struct systray_dock_params params;
-
-    params.event_handle = params32->event_handle;
-    params.icon = UlongToPtr( params32->icon );
-    params.cx = params32->cx;
-    params.cy = params32->cy;
-    params.layered = UlongToPtr( params32->layered );
-    return x11drv_systray_dock( &params );
-}
-
-static NTSTATUS x11drv_wow64_systray_hide( void *arg )
-{
-    HWND hwnd = UlongToPtr( *(ULONG *)arg );
-    return x11drv_systray_hide( &hwnd );
 }
 
 static NTSTATUS x11drv_wow64_tablet_get_packet( void *arg )
@@ -1574,15 +1597,10 @@ static NTSTATUS x11drv_wow64_tablet_info( void *arg )
 const unixlib_entry_t __wine_unix_call_wow64_funcs[] =
 {
     x11drv_wow64_init,
-    x11drv_wow64_systray_clear,
-    x11drv_wow64_systray_dock,
-    x11drv_wow64_systray_hide,
-    x11drv_systray_init,
     x11drv_tablet_attach_queue,
     x11drv_wow64_tablet_get_packet,
     x11drv_wow64_tablet_info,
     x11drv_tablet_load_info,
-    x11drv_input_thread,
 };
 
 C_ASSERT( ARRAYSIZE(__wine_unix_call_wow64_funcs) == unix_funcs_count );

@@ -30,7 +30,6 @@
 
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
-#define NONAMELESSUNION
 #include "windef.h"
 #include "winternl.h"
 #include "wine/debug.h"
@@ -304,7 +303,7 @@ NTSTATUS WINAPI RtlDeleteCriticalSection( RTL_CRITICAL_SECTION *crit )
  */
 NTSTATUS WINAPI RtlpWaitForCriticalSection( RTL_CRITICAL_SECTION *crit )
 {
-    LONGLONG timeout = NtCurrentTeb()->Peb->CriticalSectionTimeout.QuadPart / -10000000;
+    unsigned int timeout = 5;
 
     /* Don't allow blocking on a critical section during process termination */
     if (RtlDllShutdownInProgress())
@@ -316,42 +315,14 @@ NTSTATUS WINAPI RtlpWaitForCriticalSection( RTL_CRITICAL_SECTION *crit )
 
     for (;;)
     {
-        EXCEPTION_RECORD rec;
-        NTSTATUS status = wait_semaphore( crit, 5 );
-        timeout -= 5;
+        NTSTATUS status = wait_semaphore( crit, timeout );
 
-        if ( status == STATUS_TIMEOUT )
-        {
-            const char *name = crit_section_get_name( crit );
-
-            ERR( "section %p %s wait timed out in thread %04lx, blocked by %04lx, retrying (60 sec)\n",
-                 crit, debugstr_a(name), GetCurrentThreadId(), HandleToULong(crit->OwningThread) );
-            status = wait_semaphore( crit, 60 );
-            timeout -= 60;
-
-            if ( status == STATUS_TIMEOUT && TRACE_ON(relay) )
-            {
-                ERR( "section %p %s wait timed out in thread %04lx, blocked by %04lx, retrying (5 min)\n",
-                     crit, debugstr_a(name), GetCurrentThreadId(), HandleToULong(crit->OwningThread) );
-                status = wait_semaphore( crit, 300 );
-                timeout -= 300;
-            }
-        }
         if (status == STATUS_WAIT_0) break;
 
-        /* Throw exception only for Wine internal locks */
-        if (!crit_section_has_debuginfo( crit ) || !crit->DebugInfo->Spare[0]) continue;
+        timeout = (TRACE_ON(relay) ? 300 : 60);
 
-        /* only throw deadlock exception if configured timeout is reached */
-        if (timeout > 0) continue;
-
-        rec.ExceptionCode    = STATUS_POSSIBLE_DEADLOCK;
-        rec.ExceptionFlags   = 0;
-        rec.ExceptionRecord  = NULL;
-        rec.ExceptionAddress = RtlRaiseException;  /* sic */
-        rec.NumberParameters = 1;
-        rec.ExceptionInformation[0] = (ULONG_PTR)crit;
-        RtlRaiseException( &rec );
+        ERR( "section %p %s wait timed out in thread %04lx, blocked by %04lx, retrying (%u sec)\n",
+             crit, debugstr_a(crit_section_get_name(crit)), GetCurrentThreadId(), HandleToULong(crit->OwningThread), timeout );
     }
     if (crit_section_has_debuginfo( crit )) crit->DebugInfo->ContentionCount++;
     return STATUS_SUCCESS;
@@ -506,9 +477,10 @@ DWORD WINAPI RtlRunOnceExecuteOnce( RTL_RUN_ONCE *once, PRTL_RUN_ONCE_INIT_FN fu
 
 struct srw_lock
 {
+    /* bit 0 - if the lock is held exclusive. bit 1.. - number of exclusive waiters. */
     short exclusive_waiters;
 
-    /* Number of shared owners, or -1 if owned exclusive.
+    /* Number of owners.
      *
      * Sadly Windows has no equivalent to FUTEX_WAIT_BITSET, so in order to wake
      * up *only* exclusive or *only* shared waiters (and thus avoid spurious
@@ -519,7 +491,7 @@ struct srw_lock
      * the latter waits only on the "owners" member. Note then that "owners"
      * must not be the first element in the structure.
      */
-    short owners;
+    unsigned short owners;
 };
 C_ASSERT( sizeof(struct srw_lock) == 4 );
 
@@ -550,7 +522,7 @@ void WINAPI RtlAcquireSRWLockExclusive( RTL_SRWLOCK *lock )
 {
     union { RTL_SRWLOCK *rtl; struct srw_lock *s; LONG *l; } u = { lock };
 
-    InterlockedIncrement16( &u.s->exclusive_waiters );
+    InterlockedExchangeAdd16( &u.s->exclusive_waiters, 2 );
 
     for (;;)
     {
@@ -565,8 +537,9 @@ void WINAPI RtlAcquireSRWLockExclusive( RTL_SRWLOCK *lock )
             if (!old.s.owners)
             {
                 /* Not locked exclusive or shared. We can try to grab it. */
-                new.s.owners = -1;
-                --new.s.exclusive_waiters;
+                new.s.owners = 1;
+                new.s.exclusive_waiters -= 2;
+                new.s.exclusive_waiters |= 1;
                 wait = FALSE;
             }
             else
@@ -601,7 +574,7 @@ void WINAPI RtlAcquireSRWLockShared( RTL_SRWLOCK *lock )
             old.s = *u.s;
             new = old;
 
-            if (old.s.owners != -1 && !old.s.exclusive_waiters)
+            if (!old.s.exclusive_waiters)
             {
                 /* Not locked exclusive, and no exclusive waiters.
                  * We can try to grab it. */
@@ -632,9 +605,10 @@ void WINAPI RtlReleaseSRWLockExclusive( RTL_SRWLOCK *lock )
         old.s = *u.s;
         new = old;
 
-        if (old.s.owners != -1) ERR("Lock %p is not owned exclusive!\n", lock);
+        if (!(old.s.exclusive_waiters & 1)) ERR("Lock %p is not owned exclusive!\n", lock);
 
         new.s.owners = 0;
+        new.s.exclusive_waiters &= ~1;
     } while (InterlockedCompareExchange( u.l, new.l, old.l ) != old.l);
 
     if (new.s.exclusive_waiters)
@@ -656,7 +630,7 @@ void WINAPI RtlReleaseSRWLockShared( RTL_SRWLOCK *lock )
         old.s = *u.s;
         new = old;
 
-        if (old.s.owners == -1) ERR("Lock %p is owned exclusive!\n", lock);
+        if (old.s.exclusive_waiters & 1) ERR("Lock %p is owned exclusive!\n", lock);
         else if (!old.s.owners) ERR("Lock %p is not owned shared!\n", lock);
 
         --new.s.owners;
@@ -687,7 +661,8 @@ BOOLEAN WINAPI RtlTryAcquireSRWLockExclusive( RTL_SRWLOCK *lock )
         if (!old.s.owners)
         {
             /* Not locked exclusive or shared. We can try to grab it. */
-            new.s.owners = -1;
+            new.s.owners = 1;
+            new.s.exclusive_waiters |= 1;
             ret = TRUE;
         }
         else
@@ -713,7 +688,7 @@ BOOLEAN WINAPI RtlTryAcquireSRWLockShared( RTL_SRWLOCK *lock )
         old.s = *u.s;
         new.s = old.s;
 
-        if (old.s.owners != -1 && !old.s.exclusive_waiters)
+        if (!old.s.exclusive_waiters)
         {
             /* Not locked exclusive, and no exclusive waiters.
              * We can try to grab it. */

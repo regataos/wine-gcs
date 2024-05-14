@@ -183,9 +183,9 @@ BOOL map_wparam_AtoW( UINT message, WPARAM *wparam, enum wm_char_mapping mapping
  */
 static void map_wparam_WtoA( MSG *msg, BOOL remove )
 {
-    BYTE ch[4];
+    BYTE ch[4] = { 0 };
     WCHAR wch[2];
-    DWORD len;
+    DWORD i, len;
     DWORD cp;
 
     switch(msg->message)
@@ -195,7 +195,6 @@ static void map_wparam_WtoA( MSG *msg, BOOL remove )
         {
             cp = get_input_codepage();
             wch[0] = LOWORD(msg->wParam);
-            ch[0] = ch[1] = 0;
             len = WideCharToMultiByte( cp, 0, wch, 1, (LPSTR)ch, 2, NULL, NULL );
             if (len == 2)  /* DBCS char */
             {
@@ -224,14 +223,12 @@ static void map_wparam_WtoA( MSG *msg, BOOL remove )
         cp = get_input_codepage();
         wch[0] = LOWORD(msg->wParam);
         wch[1] = HIWORD(msg->wParam);
-        ch[0] = ch[1] = 0;
-        WideCharToMultiByte( cp, 0, wch, 2, (LPSTR)ch, 4, NULL, NULL );
-        msg->wParam = MAKEWPARAM( ch[0] | (ch[1] << 8), 0 );
+        len = WideCharToMultiByte( cp, 0, wch, 2, (LPSTR)ch, 4, NULL, NULL );
+        for (msg->wParam = i = 0; i < len; i++) msg->wParam |= ch[i] << (8 * i);
         break;
     case WM_IME_CHAR:
         cp = get_input_codepage();
         wch[0] = LOWORD(msg->wParam);
-        ch[0] = ch[1] = 0;
         len = WideCharToMultiByte( cp, 0, wch, 1, (LPSTR)ch, 2, NULL, NULL );
         if (len == 2)
             msg->wParam = MAKEWPARAM( (ch[0] << 8) | ch[1], HIWORD(msg->wParam) );
@@ -586,11 +583,10 @@ static LRESULT dispatch_send_message( struct win_proc_params *params, WPARAM wpa
 
     thread_info->recursion_count++;
 
-    params->result = &retval;
     thread_info->msg_source = msg_source_unavailable;
     SPY_EnterMessage( SPY_SENDMESSAGE, params->hwnd, params->msg, params->wparam, params->lparam );
 
-    dispatch_win_proc_params( params );
+    retval = dispatch_win_proc_params( params );
 
     SPY_ExitMessage( SPY_RESULT_OK, params->hwnd, params->msg, retval, params->wparam, params->lparam );
     thread_info->msg_source = prev_source;
@@ -808,6 +804,14 @@ BOOL WINAPI DECLSPEC_HOTPATCH GetMessageA( MSG *msg, HWND hwnd, UINT first, UINT
     return (msg->message != WM_QUIT);
 }
 
+static BOOL is_cjk(void)
+{
+    int lang_id = PRIMARYLANGID(GetUserDefaultLangID());
+
+    if (lang_id == LANG_CHINESE || lang_id == LANG_JAPANESE || lang_id == LANG_KOREAN)
+        return TRUE;
+    return FALSE;
+}
 
 /***********************************************************************
  *		IsDialogMessageA (USER32.@)
@@ -815,8 +819,12 @@ BOOL WINAPI DECLSPEC_HOTPATCH GetMessageA( MSG *msg, HWND hwnd, UINT first, UINT
  */
 BOOL WINAPI IsDialogMessageA( HWND hwndDlg, LPMSG pmsg )
 {
+    enum wm_char_mapping mapping;
     MSG msg = *pmsg;
-    map_wparam_AtoW( msg.message, &msg.wParam, WMCHAR_MAP_NOMAPPING );
+
+    mapping = is_cjk() ? WMCHAR_MAP_ISDIALOGMESSAGE : WMCHAR_MAP_NOMAPPING;
+    if (!map_wparam_AtoW( msg.message, &msg.wParam, mapping ))
+        return TRUE;
     return IsDialogMessageW( hwndDlg, &msg );
 }
 
@@ -850,10 +858,9 @@ static LRESULT dispatch_message( const MSG *msg, BOOL ansi )
 
     if (!NtUserMessageCall( msg->hwnd, msg->message, msg->wParam, msg->lParam,
                             &params, NtUserGetDispatchParams, ansi )) return 0;
-    params.result = &retval;
 
     SPY_EnterMessage( SPY_DISPATCHMESSAGE, msg->hwnd, msg->message, msg->wParam, msg->lParam );
-    dispatch_win_proc_params( &params );
+    retval = dispatch_win_proc_params( &params );
     SPY_ExitMessage( SPY_RESULT_OK, msg->hwnd, msg->message, retval, msg->wParam, msg->lParam );
     return retval;
 }
@@ -1192,7 +1199,7 @@ LONG WINAPI BroadcastSystemMessageW( DWORD flags, LPDWORD recipients, UINT msg, 
 LONG WINAPI BroadcastSystemMessageExA( DWORD flags, LPDWORD recipients, UINT msg, WPARAM wp, LPARAM lp, PBSMINFO pinfo )
 {
     map_wparam_AtoW( msg, &wp, WMCHAR_MAP_NOMAPPING );
-    return BroadcastSystemMessageExW( flags, recipients, msg, wp, lp, NULL );
+    return BroadcastSystemMessageExW( flags, recipients, msg, wp, lp, pinfo );
 }
 
 

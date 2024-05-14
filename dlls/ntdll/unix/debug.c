@@ -131,7 +131,7 @@ static void add_option( const char *name, unsigned char set, unsigned char clear
 }
 
 /* parse a set of debugging option specifications and add them to the option list */
-static void parse_options( const char *str )
+static void parse_options( const char *str, const char *app_name )
 {
     char *opt, *next, *options;
     unsigned int i;
@@ -139,10 +139,17 @@ static void parse_options( const char *str )
     if (!(options = strdup(str))) return;
     for (opt = options; opt; opt = next)
     {
-        const char *p;
+        char *p;
         unsigned char set = 0, clear = 0;
 
         if ((next = strchr( opt, ',' ))) *next++ = 0;
+
+        if ((p = strchr( opt, ':' )))
+        {
+            *p = 0;
+            if (strcasecmp( opt, app_name )) continue;
+            opt = p + 1;
+        }
 
         p = opt + strcspn( opt, "+-" );
         if (!p[0]) p = opt;  /* assume it's a debug channel name */
@@ -184,7 +191,7 @@ static void debug_usage(void)
 {
     static const char usage[] =
         "Syntax of the WINEDEBUG variable:\n"
-        "  WINEDEBUG=[class]+xxx,[class]-yyy,...\n\n"
+        "  WINEDEBUG=[[process:]class]+xxx,[[process:]class]-yyy,...\n\n"
         "Example: WINEDEBUG=+relay,warn-heap\n"
         "    turns on relay traces, disable heap warnings\n"
         "Available message classes: err, warn, fixme, trace\n";
@@ -196,6 +203,7 @@ static void debug_usage(void)
 static void init_options(void)
 {
     char *wine_debug = getenv("WINEDEBUG");
+    const char *app_name, *p;
     struct stat st1, st2;
 
     nb_debug_options = 0;
@@ -210,7 +218,11 @@ static void init_options(void)
     }
     if (!wine_debug) return;
     if (!strcmp( wine_debug, "help" )) debug_usage();
-    parse_options( wine_debug );
+
+    app_name = main_argv[1];
+    while ((p = strpbrk( app_name, "/\\" ))) app_name = p + 1;
+
+    parse_options( wine_debug, app_name );
 }
 
 /***********************************************************************
@@ -255,11 +267,13 @@ const char * __cdecl __wine_dbg_strdup( const char *str )
 }
 
 /***********************************************************************
- *		__wine_dbg_write  (NTDLL.@)
+ *		unixcall_wine_dbg_write
  */
-int WINAPI __wine_dbg_write( const char *str, unsigned int len )
+NTSTATUS unixcall_wine_dbg_write( void *args )
 {
-    return write( 2, str, len );
+    struct wine_dbg_write_params *params = args;
+
+    return write( 2, params->str, params->len );
 }
 
 unsigned int WINAPI __wine_dbg_ftrace( char *str, unsigned int str_size, unsigned int ctx )
@@ -276,12 +290,7 @@ unsigned int WINAPI __wine_dbg_ftrace( char *str, unsigned int str_size, unsigne
         const char *fn;
         int fd;
 
-        if (!(fn = getenv( "WINE_FTRACE_FILE" )))
-        {
-            MESSAGE( "wine: WINE_FTRACE_FILE is not set.\n" );
-            ftrace_fd = -2;
-            return 0;
-        }
+        if (!(fn = getenv( "WINE_FTRACE_FILE" ))) fn = "/sys/kernel/tracing/trace_marker";
         if ((fd = open( fn, O_WRONLY )) == -1)
         {
             MESSAGE( "wine: error opening ftrace file: %s.\n", strerror(errno) );
@@ -315,6 +324,22 @@ unsigned int WINAPI __wine_dbg_ftrace( char *str, unsigned int str_size, unsigne
     return ctx;
 }
 
+#ifdef _WIN64
+/***********************************************************************
+ *		wow64_wine_dbg_write
+ */
+NTSTATUS wow64_wine_dbg_write( void *args )
+{
+    struct
+    {
+        ULONG        str;
+        unsigned int len;
+    } const *params32 = args;
+
+    return write( 2, ULongToPtr(params32->str), params32->len );
+}
+#endif
+
 /***********************************************************************
  *		__wine_dbg_output  (NTDLL.@)
  */
@@ -327,7 +352,7 @@ int __cdecl __wine_dbg_output( const char *str )
     if (end)
     {
         ret += append_output( info, str, end + 1 - str );
-        __wine_dbg_write( info->output, info->out_pos );
+        write( 2, info->output, info->out_pos );
         info->out_pos = 0;
         str = end + 1;
     }
@@ -362,10 +387,10 @@ int __cdecl __wine_dbg_header( enum __wine_debug_class cls, struct __wine_debug_
         else if (TRACE_ON(timestamp))
         {
             UINT ticks = NtGetTickCount();
-            pos += sprintf( pos, "%3u.%03u:", ticks / 1000, ticks % 1000 );
+            pos += snprintf( pos, sizeof(info->output) - (pos - info->output), "%3u.%03u:", ticks / 1000, ticks % 1000 );
         }
-        if (TRACE_ON(pid)) pos += sprintf( pos, "%04x:", (UINT)GetCurrentProcessId() );
-        pos += sprintf( pos, "%04x:", (UINT)GetCurrentThreadId() );
+        if (TRACE_ON(pid)) pos += snprintf( pos, sizeof(info->output) - (pos - info->output), "%04x:", (UINT)GetCurrentProcessId() );
+        pos += snprintf( pos, sizeof(info->output) - (pos - info->output), "%04x:", (UINT)GetCurrentThreadId() );
     }
     if (function && cls < ARRAY_SIZE( classes ))
         pos += snprintf( pos, sizeof(info->output) - (pos - info->output), "%s:%s:%s ",

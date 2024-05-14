@@ -237,6 +237,29 @@ function test_sync_xhr() {
     }, 0);
 }
 
+function test_xdr() {
+    if(!window.XDomainRequest) { next_test(); return; }
+
+    var xdr = new XDomainRequest();
+    xdr.open("POST", "echo.php");
+    // send() on native aborts with custom pluggable protocol handler even with the right
+    // response headers (`XDomainRequestAllowed: 1` and `Access-Control-Allow-Origin: *`).
+
+    // Only http/https schemes are allowed, and it must match with the origin's scheme
+    xdr = new XDomainRequest();
+    xdr.open("GET", "http://www.winehq.org/");
+
+    xdr = new XDomainRequest();
+    try {
+        xdr.open("GET", "https://www.winehq.org/");
+        ok(false, "xdr scheme mismatch did not throw exception");
+    }catch(ex) {
+        var n = ex.number >>> 0;
+        ok(n === 0x80070005, "xdr scheme mismatch threw " + n);
+    }
+    next_test();
+}
+
 function test_content_types() {
     var xhr = new XMLHttpRequest(), types, i = 0, override = false;
     var v = document.documentMode;
@@ -303,29 +326,6 @@ function test_content_types() {
     xhr.open("POST", "echo.php?content-type=" + types[i], true);
     xhr.setRequestHeader("X-Test", "True");
     xhr.send(xml);
-}
-
-function test_xdr() {
-    if(!window.XDomainRequest) { next_test(); return; }
-
-    var xdr = new XDomainRequest();
-    xdr.open("POST", "echo.php");
-    // send on native aborts with custom pluggable protocol handler even with the right
-    // response headers (`XDomainRequestAllowed: 1` and `Access-Control-Allow-Origin: *`).
-
-    // Only http/https schemes are allowed, and it must match with the origin's scheme
-    xdr = new XDomainRequest();
-    xdr.open("GET", "http://www.winehq.org/");
-
-    xdr = new XDomainRequest();
-    try {
-        xdr.open("GET", "https://www.winehq.org/");
-        ok(false, "xdr scheme mismatch did not throw exception");
-    }catch(ex) {
-        var n = ex.number >>> 0;
-        ok(n === 0x80070005, "xdr scheme mismatch threw " + n);
-    }
-    next_test();
 }
 
 function test_abort() {

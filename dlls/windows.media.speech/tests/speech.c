@@ -90,15 +90,6 @@ static void check_interface_(unsigned int line, void *obj, const IID *iid, BOOL 
         IUnknown_Release(unk);
 }
 
-static const char *debugstr_hstring(HSTRING hstr)
-{
-    const WCHAR *str;
-    UINT32 len;
-    if (hstr && !((ULONG_PTR)hstr >> 16)) return "(invalid)";
-    str = WindowsGetStringRawBuffer(hstr, &len);
-    return wine_dbgstr_wn(str, len);
-}
-
 struct completed_event_handler
 {
     IHandler_RecognitionCompleted IHandler_RecognitionCompleted_iface;
@@ -1361,7 +1352,7 @@ static void test_SpeechRecognizer(void)
         completed_event_handler_create_static(&completed_handler);
         hr = ISpeechContinuousRecognitionSession_add_Completed(session, &completed_handler.IHandler_RecognitionCompleted_iface, &token);
         ok(hr == S_OK, "ISpeechContinuousRecognitionSession_add_ResultGenerated failed, hr %#lx.\n", hr);
-        ok(token.value != 0xdeadbeef, "Got unexpexted token: %#I64x.\n", token.value);
+        ok(token.value != 0xdeadbeef, "Got unexpected token: %#I64x.\n", token.value);
 
         hr = ISpeechContinuousRecognitionSession_remove_Completed(session, token);
         ok(hr == S_OK, "ISpeechContinuousRecognitionSession_remove_ResultGenerated failed, hr %#lx.\n", hr);
@@ -1373,7 +1364,7 @@ static void test_SpeechRecognizer(void)
         recognition_result_handler_create_static(&result_handler);
         hr = ISpeechContinuousRecognitionSession_add_ResultGenerated(session, &result_handler.IHandler_RecognitionResult_iface, &token);
         ok(hr == S_OK, "ISpeechContinuousRecognitionSession_add_ResultGenerated failed, hr %#lx.\n", hr);
-        ok(token.value != 0xdeadbeef, "Got unexpexted token: %#I64x.\n", token.value);
+        ok(token.value != 0xdeadbeef, "Got unexpected token: %#I64x.\n", token.value);
 
         hr = ISpeechContinuousRecognitionSession_remove_ResultGenerated(session, token);
         ok(hr == S_OK, "ISpeechContinuousRecognitionSession_remove_ResultGenerated failed, hr %#lx.\n", hr);
@@ -1620,17 +1611,6 @@ static void test_SpeechRecognitionListConstraint(void)
     hr = ISpeechRecognitionListConstraintFactory_CreateWithTag(listconstraint_factory, NULL, NULL, &listconstraint);
     ok(hr == E_POINTER, "ISpeechRecognitionListConstraintFactory_Create failed, hr %#lx.\n", hr);
 
-    /*
-     * The create functions break on Win10 <= 1709 x32 with the given iterator.
-     * Seems like a Windows bug, but if you see an issue in the test's code, please FIXME.
-     * Skipping these tests.
-     */
-    if (broken((is_win10_1507 || is_win10_1709) && (sizeof(void*) == 4)))
-    {
-        win_skip("SpeechRecognitionListConstraint object creation broken on Win10 <= 1709 x32!\n");
-        goto skip_create;
-    }
-
     iterator_hstring_create_static(&iterator_hstring, commands, ARRAY_SIZE(commands));
     iterable_hstring_create_static(&iterable_hstring, &iterator_hstring);
 
@@ -1701,7 +1681,6 @@ skip_tests:
     ref = ISpeechRecognitionListConstraint_Release(listconstraint);
     ok(ref == 0, "Got unexpected ref %lu.\n", ref);
 
-skip_create:
     ref = ISpeechRecognitionListConstraintFactory_Release(listconstraint_factory);
     ok(ref == 2, "Got unexpected ref %lu.\n", ref);
 
@@ -1776,17 +1755,6 @@ static void test_Recognition(void)
         ok(hr == S_OK, "WindowsCreateString failed, hr %#lx.\n", hr);
     }
 
-    /*
-     * The create functions break on Win10 <= 1709 x32 with the given iterator.
-     * Seems like a Windows bug, but if you see an issue in the test's code, please FIXME.
-     * Skipping these tests.
-     */
-    if (broken((is_win10_1507 || is_win10_1709) && (sizeof(void*) == 4)))
-    {
-        win_skip("SpeechRecognitionListConstraint object creation broken on Win10 <= 1709 x32!\n");
-        goto done;
-    }
-
     hr = WindowsCreateString(recognizer_name, wcslen(recognizer_name), &hstr);
     ok(hr == S_OK, "WindowsCreateString failed, hr %#lx.\n", hr);
 
@@ -1856,7 +1824,7 @@ static void test_Recognition(void)
     recognition_result_handler_create_static(&result_handler);
     hr = ISpeechContinuousRecognitionSession_add_ResultGenerated(session, &result_handler.IHandler_RecognitionResult_iface, &token);
     ok(hr == S_OK, "ISpeechContinuousRecognitionSession_add_ResultGenerated failed, hr %#lx.\n", hr);
-    ok(token.value != 0xdeadbeef, "Got unexpexted token: %#I64x.\n", token.value);
+    ok(token.value != 0xdeadbeef, "Got unexpected token: %#I64x.\n", token.value);
 
     recog_state = 0xdeadbeef;
     hr = ISpeechRecognizer2_get_State(recognizer2, &recog_state);
@@ -1911,7 +1879,7 @@ static void test_Recognition(void)
     recog_state = 0xdeadbeef;
     hr = ISpeechRecognizer2_get_State(recognizer2, &recog_state);
     ok(hr == S_OK, "ISpeechRecognizer2_get_State failed, hr %#lx.\n", hr);
-    ok(recog_state == SpeechRecognizerState_Capturing, "recog_state was %u.\n", recog_state);
+    ok(recog_state == SpeechRecognizerState_Capturing || broken(recog_state == SpeechRecognizerState_Idle), "recog_state was %u.\n", recog_state);
 
 
     Sleep(10000);

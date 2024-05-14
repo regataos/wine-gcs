@@ -41,10 +41,8 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(globalmem);
 
-BOOLEAN WINAPI RtlGetUserInfoHeap( HANDLE handle, ULONG flags, void *ptr, void **user_value, ULONG *user_flags );
-BOOLEAN WINAPI RtlSetUserValueHeap( HANDLE handle, ULONG flags, void *ptr, void *user_value );
 
-extern BOOL CDECL __wine_needs_override_large_address_aware(void);
+extern BOOL WINAPI __wine_needs_override_large_address_aware(void);
 
 /***********************************************************************
  *           HeapCreate   (KERNEL32.@)

@@ -18,7 +18,7 @@
 
 OPTION EXPLICIT  : : DIM W
 
-dim x, y, z, e
+dim x, y, z, e, hi
 Dim obj
 
 call ok(true, "true is not true?")
@@ -61,6 +61,11 @@ Call ok(&hffff& = 65535, "&hffff& <> -1")
 Call ok(&hfffe& = 65534, "&hfffe& <> -2")
 Call ok(&hffffffff& = -1, "&hffffffff& <> -1")
 Call ok((&h01or&h02)=3,"&h01or&h02 <> 3")
+
+' Test concat when no space and var begins with h
+hi = "y"
+x = "x" &hi
+Call ok(x = "xy", "x = " & x & " expected ""xy""")
 
 W = 5
 Call ok(W = 5, "W = " & W & " expected " & 5)
@@ -298,6 +303,15 @@ Else x = true
 End If
 Call ok(x, "else not called?")
 
+' Else with colon before statement following newline
+x = false
+If false Then
+   Call ok(false, "inside if false")
+Else
+: x = true
+End If
+Call ok(x, "else not called?")
+
 x = false
 If false Then
    Call ok(false, "inside if false")
@@ -325,6 +339,23 @@ If false Then
    Call ok(false, "inside if false")
 ElseIf not False Then
    x = true
+End If
+Call ok(x, "elseif not called?")
+
+' ElseIf with statement on same line
+x = false
+If false Then
+   Call ok(false, "inside if false")
+ElseIf not False Then x = true
+End If
+Call ok(x, "elseif not called?")
+
+' ElseIf with statement following statement separator
+x = false
+If false Then
+   Call ok(false, "inside if false")
+ElseIf not False Then
+: x = true
 End If
 Call ok(x, "elseif not called?")
 
@@ -388,6 +419,69 @@ else
    ok false, "if ""-1"" else executed"
 end if
 Call ok(x = 1, "if ""-1"" not executed")
+
+x = 0
+if 0.1 then
+   x = 1
+else
+   ok false, "if ""0.1"" else executed"
+end if
+Call ok(x = 1, "if ""0.1"" not executed")
+
+x = 0
+if "TRUE" then
+   x = 1
+else
+   ok false, "if ""TRUE"" else executed"
+end if
+Call ok(x = 1, "if ""TRUE"" not executed")
+
+x = 0
+if "#TRUE#" then
+   x = 1
+else
+   ok false, "if ""#TRUE#"" else executed"
+end if
+Call ok(x = 1, "if ""#TRUE#"" not executed")
+
+x = 0
+if (not "#FALSE#") then
+   x = 1
+else
+   ok false, "if ""not #FALSE#"" else executed"
+end if
+Call ok(x = 1, "if ""not #FALSE#"" not executed")
+
+Class ValClass
+    Public myval
+
+    Public default Property Get defprop
+        defprop = myval
+    End Property
+End Class
+
+Dim MyObject
+Set MyObject = New ValClass
+
+MyObject.myval = 1
+Call ok(CBool(MyObject) = True, "CBool(MyObject) = " & CBool(MyObject))
+x = 0
+if MyObject then
+   x = 1
+else
+   ok false, "if ""MyObject(1)"" else executed"
+end if
+Call ok(x = 1, "if ""MyObject(1)"" not executed")
+
+MyObject.myval = 0
+Call ok(CBool(MyObject) = False, "CBool(MyObject) = " & CBool(MyObject))
+x = 0
+if not MyObject then
+   x = 1
+else
+   ok false, "if ""MyObject(0)"" else executed"
+end if
+Call ok(x = 1, "if ""MyObject(0)"" not executed")
 
 x = 0
 WHILE x < 3 : x = x + 1 : Wend
@@ -584,6 +678,33 @@ for x = 5 to 8
     x = x+1
 next
 Call ok(y = "for8: 5 7", "y = " & y)
+
+function testfor( startvalue, endvalue, stepvalue, steps)
+    Dim s
+    s=0
+    for x=startvalue to endvalue step stepvalue
+        s = s + 1
+    Next
+    Call ok( s = steps, "counted " & s & " steps in for loop, expected " & steps)
+end function
+
+Call testfor (1, 2, 1, 2)
+Call testfor ("1", 2, 1, 2)
+Call testfor (1, "2", 1, 2)
+Call testfor (1, 2, "1", 2)
+Call testfor ("1", "2", "1", 2)
+if (isEnglishLang) then
+    Call testfor (1, 2, 0.5, 3)
+    Call testfor (1, 2.5, 0.5, 4)
+    Call testfor ("1", 2,  0.5, 3)
+    Call testfor ("1", 2.5, 0.5, 4)
+    Call testfor (1, "2",  0.5, 3)
+    Call testfor (1, "2.5", 0.5, 4)
+    Call testfor (1, 2, "0.5", 3)
+    Call testfor (1, 2.5, "0.5", 4)
+    Call testfor ("1", "2", "0.5", 3)
+    Call testfor ("1", "2.5", "0.5", 4)
+end if
 
 for x = 1.5 to 1
     Call ok(false, "for..to called when unexpected")
@@ -796,6 +917,14 @@ x = false
 Call testsub
 Call ok(x, "x is false, testsub not called?")
 
+if false then
+Sub testsub_one_line() x = true End Sub
+end if
+
+x = false
+Call testsub_one_line
+Call ok(x, "x is false, testsub_one_line not called?")
+
 Sub SubSetTrue(v)
     Call ok(not v, "v is not true")
     v = true
@@ -889,6 +1018,14 @@ x = false
 Call TestFunc
 Call ok(x, "x is false, testfunc not called?")
 
+if false then
+Function testfunc_one_line() x = true End Function
+end if
+
+x = false
+Call testfunc_one_line
+Call ok(x, "x is false, testfunc_one_line not called?")
+
 Function FuncSetTrue(v)
     Call ok(not v, "v is not true")
     v = true
@@ -919,6 +1056,19 @@ End Function
 x = false
 Call TestFuncArgVal(x)
 Call ok(not x, "x is true after TestFuncArgVal call?")
+
+const c10 = 10
+Sub TestParamvsConst(c10)
+    Call ok( c10 = 42, "precedence between const and parameter wrong!")
+End Sub
+Call TestParamvsConst(42)
+
+Sub TestDimVsConst
+    dim c10
+    c10 = 42
+    Call ok( c10 = 42, "precedence between const and dim is wrong")
+End Sub
+Call TestDimVsConst
 
 Function TestFuncMultiArgs(a,b,c,d,e)
     Call ok(a=1, "a = " & a)

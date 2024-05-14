@@ -21,8 +21,6 @@
 #ifndef __WOW64_STRUCT32_H
 #define __WOW64_STRUCT32_H
 
-#include "wine/server.h"
-
 typedef struct
 {
     ULONG Length;
@@ -77,6 +75,13 @@ typedef struct
 
 typedef struct
 {
+    CONTEXT_CHUNK All;
+    CONTEXT_CHUNK Legacy;
+    CONTEXT_CHUNK XState;
+} CONTEXT_EX32;
+
+typedef struct
+{
     UNICODE_STRING32 ObjectName;
     UNICODE_STRING32 ObjectTypeName;
 } DIRECTORY_BASIC_INFORMATION32;
@@ -96,7 +101,11 @@ typedef struct
 
 typedef struct
 {
-    BOOLEAN ReplaceIfExists;
+    union
+    {
+        BOOLEAN ReplaceIfExists;
+        ULONG Flags;
+    };
     ULONG   RootDirectory;
     ULONG   FileNameLength;
     WCHAR   FileName[1];
@@ -191,6 +200,23 @@ typedef struct
     ULONG                         VirtualAddress;
     MEMORY_WORKING_SET_EX_BLOCK32 VirtualAttributes;
 } MEMORY_WORKING_SET_EX_INFORMATION32;
+
+typedef struct
+{
+    ULONG ImageBase;
+    ULONG SizeOfImage;
+    union
+    {
+        ULONG ImageFlags;
+        struct
+        {
+            ULONG ImagePartialMap : 1;
+            ULONG ImageNotExecutable : 1;
+            ULONG ImageSigningLevel : 4;
+            ULONG Reserved : 26;
+        };
+    };
+} MEMORY_IMAGE_INFORMATION32;
 
 typedef struct
 {
@@ -359,6 +385,11 @@ typedef struct
 
 typedef struct
 {
+    ULONG PrimaryGroup;
+} TOKEN_PRIMARY_GROUP32;
+
+typedef struct
+{
     SID_AND_ATTRIBUTES32 User;
 } TOKEN_USER32;
 
@@ -492,6 +523,12 @@ typedef struct
     ULONG TransitionRePurposeCount;
     ULONG Flags;
 } SYSTEM_CACHE_INFORMATION32;
+
+typedef struct
+{
+    ULONG ProcessId;
+    UNICODE_STRING32 ImageName;
+} SYSTEM_PROCESS_ID_INFORMATION32;
 
 typedef struct
 {
@@ -667,29 +704,28 @@ typedef struct
     ULONG NumberOfBytes;
 } MEMORY_RANGE_ENTRY32;
 
-struct __server_iovec32
-{
-    ULONG        ptr;
-    data_size_t  size;
-};
-
-struct __server_request_info32
-{
-    union
-    {
-        union generic_request req;
-        union generic_reply   reply;
-    } u;
-    unsigned int            data_count;
-    ULONG                   reply_data;
-    struct __server_iovec32 data[__SERVER_MAX_DATA];
-};
-
 typedef struct
 {
-  ULONG LowestStartingAddress;
-  ULONG HighestEndingAddress;
-  ULONG Alignment;
+    ULONG LowestStartingAddress;
+    ULONG HighestEndingAddress;
+    ULONG Alignment;
 } MEM_ADDRESS_REQUIREMENTS32;
+
+typedef struct DECLSPEC_ALIGN(8)
+{
+    struct
+    {
+        DWORD64 Type : MEM_EXTENDED_PARAMETER_TYPE_BITS;
+        DWORD64 Reserved : 64 - MEM_EXTENDED_PARAMETER_TYPE_BITS;
+    };
+    union
+    {
+        DWORD64 ULong64;
+        ULONG   Pointer;
+        ULONG   Size;
+        ULONG   Handle;
+        ULONG   ULong;
+    };
+} MEM_EXTENDED_PARAMETER32;
 
 #endif /* __WOW64_STRUCT32_H */

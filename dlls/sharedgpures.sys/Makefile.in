@@ -1,6 +1,6 @@
 MODULE    = sharedgpures.sys
 IMPORTS   = ntoskrnl
-EXTRADLLFLAGS = -Wl,--subsystem,native -mno-cygwin
+EXTRADLLFLAGS = -Wl,--subsystem,native
 
-C_SRCS = \
+SOURCES = \
 	shared_resource.c

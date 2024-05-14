@@ -96,6 +96,8 @@ extern unsigned int get_fd_options( struct fd *fd );
 extern unsigned int get_fd_comp_flags( struct fd *fd );
 extern int is_fd_overlapped( struct fd *fd );
 extern int get_unix_fd( struct fd *fd );
+extern client_ptr_t get_fd_map_address( struct fd *fd );
+extern void set_fd_map_address( struct fd *fd, client_ptr_t addr, mem_size_t size );
 extern int is_same_file_fd( struct fd *fd1, struct fd *fd2 );
 extern int is_fd_removable( struct fd *fd );
 extern int check_fd_events( struct fd *fd, int events );
@@ -104,7 +106,7 @@ extern obj_handle_t lock_fd( struct fd *fd, file_pos_t offset, file_pos_t count,
 extern void unlock_fd( struct fd *fd, file_pos_t offset, file_pos_t count );
 extern void allow_fd_caching( struct fd *fd );
 extern void set_fd_signaled( struct fd *fd, int signaled );
-extern char *dup_fd_name( struct fd *root, const char *name );
+extern char *dup_fd_name( struct fd *root, const char *name ) __WINE_DEALLOC(free) __WINE_MALLOC;
 extern void get_nt_name( struct fd *fd, struct unicode_str *name );
 
 extern int default_fd_signaled( struct object *obj, struct wait_queue_entry *entry );
@@ -185,7 +187,9 @@ extern struct security_descriptor *get_file_sd( struct object *obj, struct fd *f
 
 struct memory_view;
 
+extern void init_memory(void);
 extern int grow_file( int unix_fd, file_pos_t new_size );
+extern void free_map_addr( client_ptr_t base, mem_size_t size );
 extern struct memory_view *find_mapped_view( struct process *process, client_ptr_t base );
 extern struct memory_view *get_exe_view( struct process *process );
 extern struct file *get_view_file( const struct memory_view *view, unsigned int access, unsigned int sharing );
@@ -195,10 +199,10 @@ extern void free_mapped_views( struct process *process );
 extern int get_page_size(void);
 extern struct mapping *create_fd_mapping( struct object *root, const struct unicode_str *name, struct fd *fd,
                                           unsigned int attr, const struct security_descriptor *sd );
+extern struct object *create_shared_mapping( struct object *root, const struct unicode_str *name, mem_size_t size,
+                                             unsigned int attr, const struct security_descriptor *sd, void **ptr );
 extern struct object *create_user_data_mapping( struct object *root, const struct unicode_str *name,
                                                 unsigned int attr, const struct security_descriptor *sd );
-extern struct object *create_shared_mapping( struct object *root, const struct unicode_str *name,
-                                             mem_size_t size, const struct security_descriptor *sd, void **ptr );
 
 /* device functions */
 
@@ -249,7 +253,7 @@ extern void set_async_pending( struct async *async );
 extern void async_set_initial_status( struct async *async, unsigned int status );
 extern void async_wake_obj( struct async *async );
 extern int async_waiting( struct async_queue *queue );
-extern int async_queue_has_waiting( struct async_queue *queue );
+extern int async_queue_has_waiting_asyncs( struct async_queue *queue );
 extern void async_terminate( struct async *async, unsigned int status );
 extern void async_request_complete( struct async *async, unsigned int status, data_size_t result,
                                     data_size_t out_size, void *out_data );

@@ -24,8 +24,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#define NONAMELESSUNION
-
 #include "mountmgr.h"
 #include "winreg.h"
 #include "winnls.h"
@@ -899,6 +897,14 @@ static BOOL get_volume_device_info( struct volume *volume )
     }
     else
     {
+        if(GetLastError() == ERROR_NOT_READY)
+        {
+            TRACE( "%s: removable drive with no inserted media\n", debugstr_a(unix_device) );
+            volume->fs_type = FS_UNKNOWN;
+            CloseHandle( handle );
+            return TRUE;
+        }
+
         volume->fs_type = VOLUME_ReadFATSuperblock( handle, superblock );
         if (volume->fs_type == FS_UNKNOWN) volume->fs_type = VOLUME_ReadCDSuperblock( handle, superblock );
     }
@@ -1741,7 +1747,7 @@ static NTSTATUS WINAPI harddisk_query_volume( DEVICE_OBJECT *device, IRP *irp )
     }
 
 done:
-    io->u.Status = status;
+    io->Status = status;
     LeaveCriticalSection( &device_section );
     IoCompleteRequest( irp, IO_NO_INCREMENT );
     return status;
@@ -1833,7 +1839,7 @@ static NTSTATUS WINAPI harddisk_ioctl( DEVICE_OBJECT *device, IRP *irp )
     }
     }
 
-    irp->IoStatus.u.Status = status;
+    irp->IoStatus.Status = status;
     LeaveCriticalSection( &device_section );
     IoCompleteRequest( irp, IO_NO_INCREMENT );
     return status;

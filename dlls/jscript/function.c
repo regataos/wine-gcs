@@ -1028,6 +1028,9 @@ HRESULT create_proxy_functions(jsdisp_t *jsdisp, const struct proxy_prop_info *i
     ProxyFunction *function;
     HRESULT hres;
 
+    if(jsdisp->ctx->state == SCRIPTSTATE_UNINITIALIZED || jsdisp->ctx->state == SCRIPTSTATE_CLOSED)
+        return E_UNEXPECTED;
+
     /* Method or Getter */
     hres = create_function(jsdisp->ctx, NULL, &ProxyFunctionVtbl, sizeof(ProxyFunction),
                            (info->flags & PROPF_METHOD) ? info->flags : PROPF_METHOD, FALSE,
@@ -1084,7 +1087,30 @@ static function_code_t *ProxyConstructor_get_code(FunctionInstance *func)
 static void ProxyConstructor_destructor(FunctionInstance *func)
 {
     ProxyConstructor *constructor = (ProxyConstructor*)func;
-    IDispatch_Release(constructor->disp);
+    if(constructor->disp)
+        IDispatch_Release(constructor->disp);
+}
+
+static HRESULT ProxyConstructor_gc_traverse(struct gc_ctx *gc_ctx, enum gc_traverse_op op, FunctionInstance *func)
+{
+    ProxyConstructor *constructor = (ProxyConstructor*)func;
+
+    if(op == GC_TRAVERSE_UNLINK) {
+        IDispatch *disp = constructor->disp;
+        if(disp) {
+            constructor->disp = NULL;
+            IDispatch_Release(disp);
+        }
+    }
+
+    return S_OK;
+}
+
+static void ProxyConstructor_cc_traverse(FunctionInstance *func, nsCycleCollectionTraversalCallback *cb)
+{
+    ProxyConstructor *constructor = (ProxyConstructor*)func;
+    if(constructor->disp)
+        cc_api.note_edge((nsISupports*)constructor->disp, "disp", cb);
 }
 
 static const function_vtbl_t ProxyConstructorVtbl = {
@@ -1092,8 +1118,8 @@ static const function_vtbl_t ProxyConstructorVtbl = {
     ProxyConstructor_toString,
     ProxyConstructor_get_code,
     ProxyConstructor_destructor,
-    no_gc_traverse,
-    no_cc_traverse
+    ProxyConstructor_gc_traverse,
+    ProxyConstructor_cc_traverse
 };
 
 static const builtin_prop_t ProxyConstructor_props[] = {
@@ -1106,7 +1132,12 @@ static const builtin_info_t ProxyConstructor_info = {
     ARRAY_SIZE(ProxyConstructor_props),
     ProxyConstructor_props,
     Function_destructor,
-    NULL
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    Function_gc_traverse,
+    Function_cc_traverse
 };
 
 static HRESULT ProxyConstructorCreate_call(script_ctx_t *ctx, FunctionInstance *func, jsval_t vthis, unsigned flags,
@@ -1192,30 +1223,21 @@ HRESULT create_proxy_constructor(IDispatch *disp, const char *name, jsdisp_t *pr
     constructor->name = name;
 
     hres = jsdisp_define_data_property(&constructor->function.dispex, L"prototype", 0, jsval_obj(prototype));
-    if(SUCCEEDED(hres)) {
-        BSTR bstr = SysAllocString(L"create");
+
+    /* XMLHttpRequest and XDomainRequest constructors have a "create" method */
+    if(SUCCEEDED(hres) && name[0] == 'X') {
         ProxyConstructorCreate *create;
-        DISPID dispid;
 
-        if(!bstr)
-            hres = E_OUTOFMEMORY;
-        else {
-            HRESULT prop_hres = IDispatch_GetIDsOfNames(disp, &IID_NULL, &bstr, 1, 0, &dispid);
-            SysFreeString(bstr);
+        hres = create_function(ctx, &ProxyConstructorCreate_info, &ProxyConstructorCreateVtbl, sizeof(ProxyConstructorCreate),
+                               PROPF_METHOD, FALSE, NULL, (void**)&create);
+        if(SUCCEEDED(hres)) {
+            create->ctor = constructor;
+            jsdisp_addref(&constructor->function.dispex);
 
-            if(prop_hres == S_OK) {
-                hres = create_function(ctx, &ProxyConstructorCreate_info, &ProxyConstructorCreateVtbl, sizeof(ProxyConstructorCreate),
-                                       PROPF_METHOD, FALSE, NULL, (void**)&create);
-                if(SUCCEEDED(hres)) {
-                    create->ctor = constructor;
-                    jsdisp_addref(&constructor->function.dispex);
-
-                    hres = jsdisp_define_data_property(&create->function.dispex, L"prototype", 0, jsval_null());
-                    if(SUCCEEDED(hres))
-                        hres = jsdisp_define_data_property(&constructor->function.dispex, L"create", 0, jsval_obj(&create->function.dispex));
-                    jsdisp_release(&create->function.dispex);
-                }
-            }
+            hres = jsdisp_define_data_property(&create->function.dispex, L"prototype", 0, jsval_null());
+            if(SUCCEEDED(hres))
+                hres = jsdisp_define_data_property(&constructor->function.dispex, L"create", 0, jsval_obj(&create->function.dispex));
+            jsdisp_release(&create->function.dispex);
         }
     }
     if(FAILED(hres)) {

@@ -32,331 +32,48 @@
 #include "ntuser_private.h"
 #include "ntuser.h"
 #include "wine/unixlib.h"
+#include "win32syscalls.h"
 
+ULONG_PTR zero_bits = 0;
 
-static void * const syscalls[] =
+static ULONG_PTR syscalls[] =
 {
-    NtGdiAddFontMemResourceEx,
-    NtGdiAddFontResourceW,
-    NtGdiCombineRgn,
-    NtGdiCreateBitmap,
-    NtGdiCreateClientObj,
-    NtGdiCreateDIBBrush,
-    NtGdiCreateDIBSection,
-    NtGdiCreateEllipticRgn,
-    NtGdiCreateHalftonePalette,
-    NtGdiCreateHatchBrushInternal,
-    NtGdiCreatePaletteInternal,
-    NtGdiCreatePatternBrushInternal,
-    NtGdiCreatePen,
-    NtGdiCreateRectRgn,
-    NtGdiCreateRoundRectRgn,
-    NtGdiCreateSolidBrush,
-    NtGdiDdDDICreateDevice,
-    NtGdiDdDDIOpenAdapterFromHdc,
-    NtGdiDdDDIQueryAdapterInfo,
-    NtGdiDdDDIQueryStatistics,
-    NtGdiDdDDISetQueuedLimit,
-    NtGdiDeleteClientObj,
-    NtGdiDescribePixelFormat,
-    NtGdiDrawStream,
-    NtGdiEqualRgn,
-    NtGdiExtCreatePen,
-    NtGdiExtCreateRegion,
-    NtGdiExtGetObjectW,
-    NtGdiFlattenPath,
-    NtGdiFlush,
-    NtGdiGetBitmapBits,
-    NtGdiGetBitmapDimension,
-    NtGdiGetColorAdjustment,
-    NtGdiGetDCDword,
-    NtGdiGetDCObject,
-    NtGdiGetDCPoint,
-    NtGdiGetFontFileData,
-    NtGdiGetFontFileInfo,
-    NtGdiGetNearestPaletteIndex,
-    NtGdiGetPath,
-    NtGdiGetRegionData,
-    NtGdiGetRgnBox,
-    NtGdiGetSpoolMessage,
-    NtGdiGetSystemPaletteUse,
-    NtGdiGetTransform,
-    NtGdiHfontCreate,
-    NtGdiInitSpool,
-    NtGdiOffsetRgn,
-    NtGdiPathToRegion,
-    NtGdiPtInRegion,
-    NtGdiRectInRegion,
-    NtGdiRemoveFontMemResourceEx,
-    NtGdiRemoveFontResourceW,
-    NtGdiSaveDC,
-    NtGdiSetBitmapBits,
-    NtGdiSetBitmapDimension,
-    NtGdiSetBrushOrg,
-    NtGdiSetColorAdjustment,
-    NtGdiSetMagicColors,
-    NtGdiSetMetaRgn,
-    NtGdiSetPixelFormat,
-    NtGdiSetRectRgn,
-    NtGdiSetTextJustification,
-    NtGdiSetVirtualResolution,
-    NtGdiSwapBuffers,
-    NtGdiTransformPoints,
-    NtUserActivateKeyboardLayout,
-    NtUserAddClipboardFormatListener,
-    NtUserAssociateInputContext,
-    NtUserAttachThreadInput,
-    NtUserBeginPaint,
-    NtUserBuildHimcList,
-    NtUserBuildHwndList,
-    NtUserCallHwnd,
-    NtUserCallHwndParam,
-    NtUserCallMsgFilter,
-    NtUserCallNextHookEx,
-    NtUserCallNoParam,
-    NtUserCallOneParam,
-    NtUserCallTwoParam,
-    NtUserChangeClipboardChain,
-    NtUserChangeDisplaySettings,
-    NtUserCheckMenuItem,
-    NtUserChildWindowFromPointEx,
-    NtUserClipCursor,
-    NtUserCloseClipboard,
-    NtUserCloseDesktop,
-    NtUserCloseWindowStation,
-    NtUserCopyAcceleratorTable,
-    NtUserCountClipboardFormats,
-    NtUserCreateAcceleratorTable,
-    NtUserCreateCaret,
-    NtUserCreateDesktopEx,
-    NtUserCreateInputContext,
-    NtUserCreateWindowEx,
-    NtUserCreateWindowStation,
-    NtUserDeferWindowPosAndBand,
-    NtUserDeleteMenu,
-    NtUserDestroyAcceleratorTable,
-    NtUserDestroyCursor,
-    NtUserDestroyInputContext,
-    NtUserDestroyMenu,
-    NtUserDestroyWindow,
-    NtUserDisableThreadIme,
-    NtUserDispatchMessage,
-    NtUserDisplayConfigGetDeviceInfo,
-    NtUserDragDetect,
-    NtUserDragObject,
-    NtUserDrawIconEx,
-    NtUserEmptyClipboard,
-    NtUserEnableMenuItem,
-    NtUserEnableMouseInPointer,
-    NtUserEnableScrollBar,
-    NtUserEndDeferWindowPosEx,
-    NtUserEndMenu,
-    NtUserEnumDisplayDevices,
-    NtUserEnumDisplayMonitors,
-    NtUserEnumDisplaySettings,
-    NtUserFindExistingCursorIcon,
-    NtUserFindWindowEx,
-    NtUserFlashWindowEx,
-    NtUserGetAncestor,
-    NtUserGetAsyncKeyState,
-    NtUserGetAtomName,
-    NtUserGetCaretBlinkTime,
-    NtUserGetCaretPos,
-    NtUserGetClassInfoEx,
-    NtUserGetClassName,
-    NtUserGetClipboardData,
-    NtUserGetClipboardFormatName,
-    NtUserGetClipboardOwner,
-    NtUserGetClipboardSequenceNumber,
-    NtUserGetClipboardViewer,
-    NtUserGetCursor,
-    NtUserGetCursorFrameInfo,
-    NtUserGetCursorInfo,
-    NtUserGetDC,
-    NtUserGetDCEx,
-    NtUserGetDisplayConfigBufferSizes,
-    NtUserGetDoubleClickTime,
-    NtUserGetDpiForMonitor,
-    NtUserGetForegroundWindow,
-    NtUserGetGUIThreadInfo,
-    NtUserGetIconInfo,
-    NtUserGetIconSize,
-    NtUserGetInternalWindowPos,
-    NtUserGetKeyNameText,
-    NtUserGetKeyState,
-    NtUserGetKeyboardLayout,
-    NtUserGetKeyboardLayoutList,
-    NtUserGetKeyboardLayoutName,
-    NtUserGetKeyboardState,
-    NtUserGetLayeredWindowAttributes,
-    NtUserGetMenuBarInfo,
-    NtUserGetMenuItemRect,
-    NtUserGetMessage,
-    NtUserGetMouseMovePointsEx,
-    NtUserGetObjectInformation,
-    NtUserGetOpenClipboardWindow,
-    NtUserGetPointerInfoList,
-    NtUserGetPriorityClipboardFormat,
-    NtUserGetProcessDpiAwarenessContext,
-    NtUserGetProcessWindowStation,
-    NtUserGetProp,
-    NtUserGetQueueStatus,
-    NtUserGetRawInputBuffer,
-    NtUserGetRawInputData,
-    NtUserGetRawInputDeviceInfo,
-    NtUserGetRawInputDeviceList,
-    NtUserGetRegisteredRawInputDevices,
-    NtUserGetScrollBarInfo,
-    NtUserGetSystemDpiForProcess,
-    NtUserGetSystemMenu,
-    NtUserGetThreadDesktop,
-    NtUserGetTitleBarInfo,
-    NtUserGetTouchInputInfo,
-    NtUserGetUpdateRect,
-    NtUserGetUpdateRgn,
-    NtUserGetUpdatedClipboardFormats,
-    NtUserGetWindowDC,
-    NtUserGetWindowPlacement,
-    NtUserGetWindowRgnEx,
-    NtUserHideCaret,
-    NtUserHiliteMenuItem,
-    NtUserInitializeClientPfnArrays,
-    NtUserInternalGetWindowIcon,
-    NtUserInternalGetWindowText,
-    NtUserInvalidateRect,
-    NtUserInvalidateRgn,
-    NtUserIsClipboardFormatAvailable,
-    NtUserIsMouseInPointerEnabled,
-    NtUserIsTouchWindow,
-    NtUserKillTimer,
-    NtUserLockWindowUpdate,
-    NtUserLogicalToPerMonitorDPIPhysicalPoint,
-    NtUserMapVirtualKeyEx,
-    NtUserMenuItemFromPoint,
-    NtUserMessageCall,
-    NtUserMoveWindow,
-    NtUserMsgWaitForMultipleObjectsEx,
-    NtUserNotifyIMEStatus,
-    NtUserNotifyWinEvent,
-    NtUserOpenClipboard,
-    NtUserOpenDesktop,
-    NtUserOpenInputDesktop,
-    NtUserOpenWindowStation,
-    NtUserPeekMessage,
-    NtUserPerMonitorDPIPhysicalToLogicalPoint,
-    NtUserPostMessage,
-    NtUserPostThreadMessage,
-    NtUserPrintWindow,
-    NtUserQueryInputContext,
-    NtUserRealChildWindowFromPoint,
-    NtUserRedrawWindow,
-    NtUserRegisterClassExWOW,
-    NtUserRegisterHotKey,
-    NtUserRegisterRawInputDevices,
-    NtUserRemoveClipboardFormatListener,
-    NtUserRemoveMenu,
-    NtUserRemoveProp,
-    NtUserScrollWindowEx,
-    NtUserSendInput,
-    NtUserSetActiveWindow,
-    NtUserSetCapture,
-    NtUserSetClassLong,
-    NtUserSetClassLongPtr,
-    NtUserSetClassWord,
-    NtUserSetClipboardData,
-    NtUserSetClipboardViewer,
-    NtUserSetCursor,
-    NtUserSetCursorIconData,
-    NtUserSetCursorPos,
-    NtUserSetFocus,
-    NtUserSetInternalWindowPos,
-    NtUserSetKeyboardState,
-    NtUserSetLayeredWindowAttributes,
-    NtUserSetMenu,
-    NtUserSetMenuContextHelpId,
-    NtUserSetMenuDefaultItem,
-    NtUserSetObjectInformation,
-    NtUserSetParent,
-    NtUserSetProcessDpiAwarenessContext,
-    NtUserSetProcessWindowStation,
-    NtUserSetProp,
-    NtUserSetScrollInfo,
-    NtUserSetShellWindowEx,
-    NtUserSetSysColors,
-    NtUserSetSystemMenu,
-    NtUserSetSystemTimer,
-    NtUserSetThreadDesktop,
-    NtUserSetTimer,
-    NtUserSetWinEventHook,
-    NtUserSetWindowLong,
-    NtUserSetWindowLongPtr,
-    NtUserSetWindowPlacement,
-    NtUserSetWindowPos,
-    NtUserSetWindowRgn,
-    NtUserSetWindowWord,
-    NtUserSetWindowsHookEx,
-    NtUserShowCaret,
-    NtUserShowCursor,
-    NtUserShowScrollBar,
-    NtUserShowWindow,
-    NtUserShowWindowAsync,
-    NtUserSystemParametersInfo,
-    NtUserSystemParametersInfoForDpi,
-    NtUserThunkedMenuInfo,
-    NtUserThunkedMenuItemInfo,
-    NtUserToUnicodeEx,
-    NtUserTrackMouseEvent,
-    NtUserTrackPopupMenuEx,
-    NtUserTranslateAccelerator,
-    NtUserTranslateMessage,
-    NtUserUnhookWinEvent,
-    NtUserUnhookWindowsHookEx,
-    NtUserUnregisterClass,
-    NtUserUnregisterHotKey,
-    NtUserUpdateInputContext,
-    NtUserValidateRect,
-    NtUserVkKeyScanEx,
-    NtUserWaitForInputIdle,
-    NtUserWaitMessage,
-    NtUserWindowFromDC,
-    NtUserWindowFromPoint,
-};
-
-static BYTE arguments[ARRAY_SIZE(syscalls)];
-
-static SYSTEM_SERVICE_TABLE syscall_table =
-{
-    (ULONG_PTR *)syscalls,
-    0,
-    ARRAY_SIZE(syscalls),
-    arguments
-};
-
-static NTSTATUS init( void *dispatcher )
-{
-    return ntdll_init_syscalls( 1, &syscall_table, dispatcher );
-}
-
-unixlib_entry_t __wine_unix_call_funcs[] =
-{
-    init,
-    callbacks_init,
-};
-
+#define SYSCALL_ENTRY(id,name,args) (ULONG_PTR)name,
 #ifdef _WIN64
-
-WINE_DEFAULT_DEBUG_CHANNEL(win32u);
-
-static NTSTATUS wow64_init( void *args )
-{
-    FIXME( "\n" );
-    return STATUS_NOT_SUPPORTED;
-}
-
-const unixlib_entry_t __wine_unix_call_wow64_funcs[] =
-{
-    init,
-    wow64_init,
+    ALL_SYSCALLS64
+#else
+    ALL_SYSCALLS32
+#endif
+#undef SYSCALL_ENTRY
 };
 
-#endif /* _WIN64 */
+static BYTE arguments[ARRAY_SIZE(syscalls)] =
+{
+#define SYSCALL_ENTRY(id,name,args) args,
+#ifdef _WIN64
+    ALL_SYSCALLS64
+#else
+    ALL_SYSCALLS32
+#endif
+#undef SYSCALL_ENTRY
+};
+
+static NTSTATUS init( void *args )
+{
+#ifdef _WIN64
+    if (NtCurrentTeb()->WowTebOffset)
+    {
+        SYSTEM_BASIC_INFORMATION info;
+
+        NtQuerySystemInformation(SystemEmulationBasicInformation, &info, sizeof(info), NULL);
+        zero_bits = (ULONG_PTR)info.HighestUserAddress | 0x7fffffff;
+    }
+#endif
+    KeAddSystemServiceTable( syscalls, NULL, ARRAY_SIZE(syscalls), arguments, 1 );
+    return STATUS_SUCCESS;
+}
+
+const unixlib_entry_t __wine_unix_call_funcs[] =
+{
+    init,
+};

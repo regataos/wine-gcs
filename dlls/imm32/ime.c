@@ -397,7 +397,6 @@ static LRESULT ime_ui_notify( HIMC himc, HWND hwnd, WPARAM wparam, LPARAM lparam
     case IMN_WINE_SET_COMP_STRING:
         return ime_set_comp_string( himc, lparam );
     default:
-        FIXME( "himc %p, hwnd %p, wparam %s, lparam %#Ix stub!\n", hwnd, himc, debugstr_imn(wparam), lparam );
         return 0;
     }
 }
@@ -504,8 +503,7 @@ BOOL WINAPI ImeSelect( HIMC himc, BOOL select )
 
 BOOL WINAPI ImeSetActiveContext( HIMC himc, BOOL flag )
 {
-    static int once;
-    if (!once++) FIXME( "himc %p, flag %#x stub!\n", himc, flag );
+    TRACE( "himc %p, flag %#x stub!\n", himc, flag );
     return TRUE;
 }
 
@@ -661,9 +659,6 @@ BOOL WINAPI NotifyIME( HIMC himc, DWORD action, DWORD index, DWORD value )
                 if ((msg = ime_set_composition_status( himc, FALSE ))) ime_send_message( himc, msg, 0, 0 );
             }
             NtUserNotifyIMEStatus( ctx->hWnd, ctx->fOpen );
-            break;
-        default:
-            FIXME( "himc %p, action %#lx, index %#lx, value %#lx stub!\n", himc, action, index, value );
             break;
         }
         break;

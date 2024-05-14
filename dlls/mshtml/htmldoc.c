@@ -494,55 +494,39 @@ static HRESULT WINAPI HTMLDocument_get_Script(IHTMLDocument2 *iface, IDispatch *
 static HRESULT WINAPI HTMLDocument_get_all(IHTMLDocument2 *iface, IHTMLElementCollection **p)
 {
     HTMLDocumentNode *This = impl_from_IHTMLDocument2(iface);
-    nsIDOMElement *nselem = NULL;
-    HTMLDOMNode *node;
-    nsresult nsres;
-    HRESULT hres;
 
     TRACE("(%p)->(%p)\n", This, p);
+    *p = create_all_collection(&This->node, FALSE);
 
-    if(!This->dom_document) {
-        WARN("NULL dom_document\n");
-        return E_UNEXPECTED;
-    }
-
-    nsres = nsIDOMDocument_GetDocumentElement(This->dom_document, &nselem);
-    if(NS_FAILED(nsres)) {
-        ERR("GetDocumentElement failed: %08lx\n", nsres);
-        return E_FAIL;
-    }
-
-    if(!nselem) {
-        *p = NULL;
-        return S_OK;
-    }
-
-    hres = get_node((nsIDOMNode*)nselem, TRUE, &node);
-    nsIDOMElement_Release(nselem);
-    if(FAILED(hres))
-        return hres;
-
-    *p = create_all_collection(node, TRUE);
-    node_release(node);
-    return hres;
+    return S_OK;
 }
 
 static HRESULT WINAPI HTMLDocument_get_body(IHTMLDocument2 *iface, IHTMLElement **p)
 {
     HTMLDocumentNode *This = impl_from_IHTMLDocument2(iface);
-    nsIDOMHTMLElement *nsbody = NULL;
+    nsIDOMElement *nsbody = NULL;
     HTMLElement *element;
+    nsresult nsres;
     HRESULT hres;
 
     TRACE("(%p)->(%p)\n", This, p);
 
     if(This->html_document) {
-        nsresult nsres;
-
-        nsres = nsIDOMHTMLDocument_GetBody(This->html_document, &nsbody);
+        nsres = nsIDOMHTMLDocument_GetBody(This->html_document, (nsIDOMHTMLElement **)&nsbody);
         if(NS_FAILED(nsres)) {
             TRACE("Could not get body: %08lx\n", nsres);
             return E_UNEXPECTED;
+        }
+    }else {
+        nsAString nsnode_name;
+        nsIDOMDocumentFragment *frag;
+
+        nsres = nsIDOMNode_QueryInterface(This->node.nsnode, &IID_nsIDOMDocumentFragment, (void**)&frag);
+        if(!NS_FAILED(nsres)) {
+            nsAString_InitDepend(&nsnode_name, L"BODY");
+            nsIDOMDocumentFragment_QuerySelector(frag, &nsnode_name, &nsbody);
+            nsAString_Finish(&nsnode_name);
+            nsIDOMDocumentFragment_Release(frag);
         }
     }
 
@@ -551,8 +535,8 @@ static HRESULT WINAPI HTMLDocument_get_body(IHTMLDocument2 *iface, IHTMLElement 
         return S_OK;
     }
 
-    hres = get_element((nsIDOMElement*)nsbody, &element);
-    nsIDOMHTMLElement_Release(nsbody);
+    hres = get_element(nsbody, &element);
+    nsIDOMElement_Release(nsbody);
     if(FAILED(hres))
         return hres;
 
@@ -941,7 +925,7 @@ static HRESULT WINAPI HTMLDocument_get_readyState(IHTMLDocument2 *iface, BSTR *p
     if(!p)
         return E_POINTER;
 
-    return get_readystate_string(This->outer_window ? This->outer_window->readystate : 0, p);
+    return get_readystate_string(This->window && This->window->base.outer_window ? This->window->base.outer_window->readystate : 0, p);
 }
 
 static HRESULT WINAPI HTMLDocument_get_frames(IHTMLDocument2 *iface, IHTMLFramesCollection2 **p)
@@ -950,11 +934,13 @@ static HRESULT WINAPI HTMLDocument_get_frames(IHTMLDocument2 *iface, IHTMLFrames
 
     TRACE("(%p)->(%p)\n", This, p);
 
-    if(!This->outer_window) {
+    if(!This->window) {
         /* Not implemented by IE */
         return E_NOTIMPL;
     }
-    return IHTMLWindow2_get_frames(&This->outer_window->base.IHTMLWindow2_iface, p);
+    if(!This->window->base.outer_window)
+        return E_FAIL;
+    return IHTMLWindow2_get_frames(&This->window->base.outer_window->base.IHTMLWindow2_iface, p);
 }
 
 static HRESULT WINAPI HTMLDocument_get_embeds(IHTMLDocument2 *iface, IHTMLElementCollection **p)
@@ -1130,12 +1116,13 @@ static HRESULT WINAPI HTMLDocument_put_URL(IHTMLDocument2 *iface, BSTR v)
 
     TRACE("(%p)->(%s)\n", This, debugstr_w(v));
 
-    if(!This->outer_window) {
+    if(!This->window || !This->window->base.outer_window) {
         FIXME("No window available\n");
         return E_FAIL;
     }
 
-    return navigate_url(This->outer_window, v, This->outer_window->uri, BINDING_NAVIGATED);
+    return navigate_url(This->window->base.outer_window, v,
+                        This->window->base.outer_window->uri, BINDING_NAVIGATED);
 }
 
 static HRESULT WINAPI HTMLDocument_get_URL(IHTMLDocument2 *iface, BSTR *p)
@@ -1144,7 +1131,15 @@ static HRESULT WINAPI HTMLDocument_get_URL(IHTMLDocument2 *iface, BSTR *p)
 
     TRACE("(%p)->(%p)\n", iface, p);
 
-    *p = SysAllocString(This->outer_window && This->outer_window->url ? This->outer_window->url : L"about:blank");
+    if(This->window && !This->window->base.outer_window) {
+        WARN("detached document\n");
+        return E_FAIL;
+    }
+
+    if(This->window && This->window->base.outer_window->url)
+        *p = SysAllocString(This->window->base.outer_window->url);
+    else
+        *p = SysAllocString(L"about:blank");
     return *p ? S_OK : E_OUTOFMEMORY;
 }
 
@@ -1185,12 +1180,12 @@ static HRESULT WINAPI HTMLDocument_get_domain(IHTMLDocument2 *iface, BSTR *p)
         return E_NOTIMPL;
     }
 
-    if(This->outer_window && !This->outer_window->uri)
+    if(This->window && (!This->window->base.outer_window || !This->window->base.outer_window->uri))
         return E_FAIL;
 
     nsAString_Init(&nsstr, NULL);
     nsres = nsIDOMHTMLDocument_GetDomain(This->html_document, &nsstr);
-    if(NS_SUCCEEDED(nsres) && This->outer_window && This->outer_window->uri) {
+    if(NS_SUCCEEDED(nsres) && This->window) {
         const PRUnichar *str;
         HRESULT hres;
 
@@ -1198,7 +1193,7 @@ static HRESULT WINAPI HTMLDocument_get_domain(IHTMLDocument2 *iface, BSTR *p)
         if(!*str) {
             TRACE("Gecko returned empty string, fallback to loaded URL.\n");
             nsAString_Finish(&nsstr);
-            hres = IUri_GetHost(This->outer_window->uri, p);
+            hres = IUri_GetHost(This->window->base.outer_window->uri, p);
             return FAILED(hres) ? hres : S_OK;
         }
     }
@@ -1213,10 +1208,12 @@ static HRESULT WINAPI HTMLDocument_put_cookie(IHTMLDocument2 *iface, BSTR v)
 
     TRACE("(%p)->(%s)\n", This, debugstr_w(v));
 
-    if(!This->outer_window)
+    if(!This->window)
         return S_OK;
+    if(!This->window->base.outer_window)
+        return E_FAIL;
 
-    bret = InternetSetCookieExW(This->outer_window->url, NULL, v, 0, 0);
+    bret = InternetSetCookieExW(This->window->base.outer_window->url, NULL, v, 0, 0);
     if(!bret) {
         FIXME("InternetSetCookieExW failed: %lu\n", GetLastError());
         return HRESULT_FROM_WIN32(GetLastError());
@@ -1233,13 +1230,15 @@ static HRESULT WINAPI HTMLDocument_get_cookie(IHTMLDocument2 *iface, BSTR *p)
 
     TRACE("(%p)->(%p)\n", This, p);
 
-    if(!This->outer_window) {
+    if(!This->window) {
         *p = NULL;
         return S_OK;
     }
+    if(!This->window->base.outer_window)
+        return E_FAIL;
 
     size = 0;
-    bret = InternetGetCookieExW(This->outer_window->url, NULL, NULL, &size, 0, NULL);
+    bret = InternetGetCookieExW(This->window->base.outer_window->url, NULL, NULL, &size, 0, NULL);
     if(!bret && GetLastError() != ERROR_INSUFFICIENT_BUFFER) {
         WARN("InternetGetCookieExW failed: %lu\n", GetLastError());
         *p = NULL;
@@ -1255,7 +1254,7 @@ static HRESULT WINAPI HTMLDocument_get_cookie(IHTMLDocument2 *iface, BSTR *p)
     if(!*p)
         return E_OUTOFMEMORY;
 
-    bret = InternetGetCookieExW(This->outer_window->url, NULL, *p, &size, 0, NULL);
+    bret = InternetGetCookieExW(This->window->base.outer_window->url, NULL, *p, &size, 0, NULL);
     if(!bret) {
         ERR("InternetGetCookieExW failed: %lu\n", GetLastError());
         return E_FAIL;
@@ -1326,7 +1325,7 @@ static HRESULT WINAPI HTMLDocument_get_mimeType(IHTMLDocument2 *iface, BSTR *p)
     if(!This->window)
         return get_mime_type_display_name(content_type_from_document_type[This->doc_type], p);
 
-    if(This->window->base.outer_window->readystate == READYSTATE_UNINITIALIZED)
+    if(!This->window->navigation_start_time)
         return (*p = SysAllocString(L"")) ? S_OK : E_FAIL;
 
     nsAString_InitDepend(&nsstr, NULL);
@@ -1487,7 +1486,7 @@ static HRESULT WINAPI HTMLDocument_open(IHTMLDocument2 *iface, BSTR url, VARIANT
 
     *pomWindowResult = NULL;
 
-    if(!This->outer_window)
+    if(!This->window || !This->window->base.outer_window)
         return E_FAIL;
 
     if(!This->dom_document) {
@@ -1514,8 +1513,8 @@ static HRESULT WINAPI HTMLDocument_open(IHTMLDocument2 *iface, BSTR url, VARIANT
     if(tmp)
         nsISupports_Release(tmp);
 
-    *pomWindowResult = (IDispatch*)&This->outer_window->base.IHTMLWindow2_iface;
-    IHTMLWindow2_AddRef(&This->outer_window->base.IHTMLWindow2_iface);
+    *pomWindowResult = (IDispatch*)&This->window->base.outer_window->base.IHTMLWindow2_iface;
+    IHTMLWindow2_AddRef(&This->window->base.outer_window->base.IHTMLWindow2_iface);
     return S_OK;
 }
 
@@ -2386,9 +2385,13 @@ static HRESULT WINAPI HTMLDocument3_get_documentElement(IHTMLDocument3 *iface, I
 
     TRACE("(%p)->(%p)\n", This, p);
 
-    if(This->outer_window && This->outer_window->readystate == READYSTATE_UNINITIALIZED) {
-        *p = NULL;
-        return S_OK;
+    if(This->window) {
+        if(!This->window->base.outer_window)
+            return E_FAIL;
+        if(This->window->base.outer_window->readystate == READYSTATE_UNINITIALIZED) {
+            *p = NULL;
+            return S_OK;
+        }
     }
 
     if(!This->dom_document) {
@@ -3679,7 +3682,7 @@ static HRESULT WINAPI HTMLDocument7_get_defaultView(IHTMLDocument7 *iface, IHTML
 
     TRACE("(%p)->(%p)\n", This, p);
 
-    if(This->window) {
+    if(This->window && This->window->base.outer_window) {
         *p = &This->window->base.outer_window->base.IHTMLWindow2_iface;
         IHTMLWindow2_AddRef(*p);
     }else {
@@ -4928,7 +4931,7 @@ static void HTMLDocumentNode_on_advise(IUnknown *iface, cp_static_data_t *cp)
 {
     HTMLDocumentNode *This = CONTAINING_RECORD((IHTMLDocument2*)iface, HTMLDocumentNode, IHTMLDocument2_iface);
 
-    if(This->outer_window)
+    if(This->window && This->window->base.outer_window)
         update_doc_cp_events(This, cp);
 }
 
@@ -5323,7 +5326,7 @@ static HRESULT WINAPI DocWineDispProxyPrivate_PropGetInfo(IWineDispatchProxyPriv
 
     hres = itf->lpVtbl->PropGetInfo(itf, name, case_insens, info);
     if(SUCCEEDED(hres)) {
-        if(This->outer_window && info->dispid == DISPID_IHTMLDOCUMENT2_LOCATION)
+        if(This->window && info->dispid == DISPID_IHTMLDOCUMENT2_LOCATION)
             info->flags = PROPF_WRITABLE | PROPF_ENUMERABLE;
         return hres;
     }
@@ -5943,12 +5946,6 @@ void detach_document_node(HTMLDocumentNode *doc)
 {
     unsigned i;
 
-    if(doc->window) {
-        HTMLInnerWindow *window = doc->window;
-        doc->window = NULL;
-        IHTMLWindow2_Release(&window->base.IHTMLWindow2_iface);
-    }
-
     while(!list_empty(&doc->plugin_hosts))
         detach_plugin_host(LIST_ENTRY(list_head(&doc->plugin_hosts), PluginHost, entry));
 
@@ -6120,14 +6117,20 @@ static void HTMLDocumentNode_traverse(DispatchEx *dispex, nsCycleCollectionTrave
 static void HTMLDocumentNode_unlink(DispatchEx *dispex)
 {
     HTMLDocumentNode *This = impl_from_DispatchEx(dispex);
+    HTMLInnerWindow *window = This->window;
     HTMLDOMNode_unlink(dispex);
+
+    if(window) {
+        This->window = NULL;
+        IHTMLWindow2_Release(&window->base.IHTMLWindow2_iface);
+    }
 
     if(This->dom_document) {
         release_document_mutation(This);
         detach_document_node(This);
         This->dom_document = NULL;
         This->html_document = NULL;
-    }else if(This->window) {
+    }else if(window) {
         detach_document_node(This);
     }
 }
@@ -6320,12 +6323,46 @@ static HRESULT HTMLDocumentNode_location_hook(DispatchEx *dispex, WORD flags, DI
 {
     HTMLDocumentNode *This = impl_from_DispatchEx(dispex);
 
-    if(!(flags & DISPATCH_PROPERTYPUT) || !This->outer_window)
+    if(!(flags & DISPATCH_PROPERTYPUT) || !This->window)
         return S_FALSE;
+    if(!This->window->base.outer_window)
+        return E_FAIL;
 
-    return dispex_invoke(&This->outer_window->base.inner_window->event_target.dispex,
-                         (IDispatch*)&This->outer_window->base.inner_window->base.IHTMLWindow2_iface,
+    return dispex_invoke(&This->window->base.outer_window->base.inner_window->event_target.dispex,
+                         (IDispatch*)&This->window->base.outer_window->base.inner_window->base.IHTMLWindow2_iface,
                          DISPID_IHTMLWINDOW2_LOCATION, 0, flags, dp, res, ei, caller);
+}
+
+static HRESULT HTMLDocumentNode_pre_handle_event(DispatchEx* dispex, DOMEvent *event)
+{
+    HTMLDocumentNode *doc = impl_from_DispatchEx(dispex);
+    switch(event->event_id) {
+    case EVENTID_DOMCONTENTLOADED: {
+        if(event->trusted && doc->window)
+            doc->window->dom_content_loaded_event_start_time = get_time_stamp();
+        break;
+    }
+    default:
+        break;
+    }
+
+    return S_OK;
+}
+
+static HRESULT HTMLDocumentNode_handle_event(DispatchEx* dispex, DOMEvent *event, BOOL *prevent_default)
+{
+    HTMLDocumentNode *doc = impl_from_DispatchEx(dispex);
+    switch(event->event_id) {
+    case EVENTID_DOMCONTENTLOADED: {
+        if(event->trusted && doc->window)
+            doc->window->dom_content_loaded_event_end_time = get_time_stamp();
+        break;
+    }
+    default:
+        break;
+    }
+
+    return S_OK;
 }
 
 static const event_target_vtbl_t HTMLDocumentNode_event_target_vtbl = {
@@ -6343,8 +6380,10 @@ static const event_target_vtbl_t HTMLDocumentNode_event_target_vtbl = {
     .get_gecko_target        = HTMLDocumentNode_get_gecko_target,
     .bind_event              = HTMLDocumentNode_bind_event,
     .get_parent_event_target = HTMLDocumentNode_get_parent_event_target,
+    .pre_handle_event        = HTMLDocumentNode_pre_handle_event,
+    .handle_event            = HTMLDocumentNode_handle_event,
     .get_cp_container        = HTMLDocumentNode_get_cp_container,
-    .set_current_event       = HTMLDocumentNode_set_current_event
+    .set_current_event       = HTMLDocumentNode_set_current_event,
 };
 
 static const NodeImplVtbl HTMLDocumentFragmentImplVtbl = {
@@ -6458,7 +6497,6 @@ static HTMLDocumentNode *alloc_doc_node(HTMLDocumentObj *doc_obj, HTMLInnerWindo
     doc->IDocumentRange_iface.lpVtbl = &DocumentRangeVtbl;
 
     doc->doc_obj = doc_obj;
-    doc->outer_window = window ? window->base.outer_window : NULL;
     doc->window = window;
 
     if(window)
@@ -6489,7 +6527,7 @@ HRESULT create_document_node(nsIDOMDocument *nsdoc, GeckoBrowser *browser, HTMLI
         return E_OUTOFMEMORY;
     doc->doc_type = doc_type;
 
-    if(!doc_obj->window || (window && is_main_content_window(window->base.outer_window)))
+    if(doc_obj && (!doc_obj->window || (window && is_main_content_window(window->base.outer_window))))
         doc->cp_container.forward_container = &doc_obj->cp_container;
 
     /* Share reference with HTMLDOMNode */
@@ -6501,20 +6539,21 @@ HRESULT create_document_node(nsIDOMDocument *nsdoc, GeckoBrowser *browser, HTMLI
         doc->html_document = NULL;
     }
 
-    doc->node.vtbl = &HTMLDocumentNodeImplVtbl;
     HTMLDOMNode_Init(doc, &doc->node, (nsIDOMNode*)doc->dom_document, dispex_from_document_type[doc_type]);
+
+    init_document_mutation(doc);
+    doc_init_events(doc);
+
+    doc->node.vtbl = &HTMLDocumentNodeImplVtbl;
+
+    list_add_head(&browser->document_nodes, &doc->browser_entry);
+    doc->browser = browser;
 
     if(parent_mode >= COMPAT_MODE_IE9) {
         TRACE("using parent mode %u\n", parent_mode);
         doc->document_mode = parent_mode;
         lock_document_mode(doc);
     }
-
-    init_document_mutation(doc);
-    doc_init_events(doc);
-
-    list_add_head(&browser->document_nodes, &doc->browser_entry);
-    doc->browser = browser;
 
     if(browser->usermode == EDITMODE && doc->html_document) {
         nsAString mode_str;
@@ -6539,8 +6578,8 @@ static HRESULT create_document_fragment(nsIDOMNode *nsnode, HTMLDocumentNode *do
     if(!doc_frag)
         return E_OUTOFMEMORY;
 
-    doc_frag->node.vtbl = &HTMLDocumentFragmentImplVtbl;
     HTMLDOMNode_Init(doc_node, &doc_frag->node, nsnode, dispex_from_document_type[doc_node->doc_type]);
+    doc_frag->node.vtbl = &HTMLDocumentFragmentImplVtbl;
     doc_frag->document_mode = lock_document_mode(doc_node);
 
     *ret = doc_frag;

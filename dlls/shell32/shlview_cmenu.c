@@ -22,8 +22,6 @@
 #include <string.h>
 
 #define COBJMACROS
-#define NONAMELESSUNION
-
 #include "winerror.h"
 
 #include "windef.h"
@@ -39,7 +37,6 @@
 #include "shresdef.h"
 #include "shlwapi.h"
 
-#include "wine/heap.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(shell);
@@ -139,7 +136,7 @@ static ULONG WINAPI ContextMenu_Release(IContextMenu3 *iface)
         SHFree(This->pidl);
         _ILFreeaPidl(This->apidl, This->cidl);
 
-        heap_free(This);
+        free(This);
     }
 
     return ref;
@@ -312,7 +309,7 @@ static void DoOpenExplore(ContextMenu *This, HWND hwnd, LPCSTR verb)
 	sei.nShow = SW_SHOWNORMAL;
 	sei.lpVerb = verb;
 	ShellExecuteExA(&sei);
-	SHFree(pidlFQ);
+	ILFree(pidlFQ);
 }
 
 /**************************************************************************
@@ -347,10 +344,10 @@ static void SetDropEffect(IDataObject *dataobject, DWORD value)
 
     medium.tymed = TYMED_HGLOBAL;
     medium.pUnkForRelease = NULL;
-    medium.u.hGlobal = GlobalAlloc(GHND|GMEM_SHARE, sizeof(DWORD));
-    if (!medium.u.hGlobal) return;
+    medium.hGlobal = GlobalAlloc(GHND|GMEM_SHARE, sizeof(DWORD));
+    if (!medium.hGlobal) return;
 
-    effect = GlobalLock(medium.u.hGlobal);
+    effect = GlobalLock(medium.hGlobal);
     if (!effect)
     {
         ReleaseStgMedium(&medium);
@@ -380,7 +377,7 @@ static void GetDropEffect(IDataObject *dataobject, DWORD *value)
 
     if (SUCCEEDED(IDataObject_GetData(dataobject, &formatetc, &medium)))
     {
-        effect = GlobalLock(medium.u.hGlobal);
+        effect = GlobalLock(medium.hGlobal);
         if (effect)
         {
             *value = *effect;
@@ -418,7 +415,7 @@ static void DoCopyOrCut(ContextMenu *This, HWND hwnd, BOOL cut)
 static BOOL CALLBACK Properties_AddPropSheetCallback(HPROPSHEETPAGE hpage, LPARAM lparam)
 {
 	LPPROPSHEETHEADERW psh = (LPPROPSHEETHEADERW) lparam;
-	psh->u3.phpage[psh->nPages++] = hpage;
+	psh->phpage[psh->nPages++] = hpage;
 
 	return TRUE;
 }
@@ -455,7 +452,7 @@ static BOOL get_program_description(WCHAR *path, WCHAR *buffer, DWORD size)
     versize = GetFileVersionInfoSizeW(path, NULL);
     if (!versize) return FALSE;
 
-    data = heap_alloc(versize);
+    data = malloc(versize);
     if (!data) return FALSE;
 
     if (!GetFileVersionInfoW(path, 0, versize, data))
@@ -479,7 +476,7 @@ static BOOL get_program_description(WCHAR *path, WCHAR *buffer, DWORD size)
     }
 
 out:
-    heap_free(data);
+    free(data);
     return ret;
 }
 
@@ -655,7 +652,7 @@ static UINT CALLBACK file_properties_callback(HWND hwnd, UINT uMsg, LPPROPSHEETP
     struct file_properties_info *props = (struct file_properties_info *)page->lParam;
     if (uMsg == PSPCB_RELEASE)
     {
-        heap_free(props);
+        free(props);
     }
     return 1;
 }
@@ -670,7 +667,7 @@ static void init_file_properties_pages(IDataObject *dataobject, LPFNADDPROPSHEET
     HRESULT hr;
     WCHAR *p;
 
-    props = heap_alloc(sizeof(*props));
+    props = malloc(sizeof(*props));
     if (!props) return;
 
     format.cfFormat = CF_HDROP;
@@ -682,7 +679,7 @@ static void init_file_properties_pages(IDataObject *dataobject, LPFNADDPROPSHEET
     hr = IDataObject_GetData(dataobject, &format, &stgm);
     if (FAILED(hr)) goto error;
 
-    if (!DragQueryFileW((HDROP)stgm.u.hGlobal, 0, props->path, ARRAY_SIZE(props->path)))
+    if (!DragQueryFileW((HDROP)stgm.hGlobal, 0, props->path, ARRAY_SIZE(props->path)))
     {
         ReleaseStgMedium(&stgm);
         goto error;
@@ -708,9 +705,9 @@ static void init_file_properties_pages(IDataObject *dataobject, LPFNADDPROPSHEET
     propsheet.dwFlags       = PSP_DEFAULT | PSP_USECALLBACK;
     propsheet.hInstance     = shell32_hInstance;
     if (props->attrib & FILE_ATTRIBUTE_DIRECTORY)
-        propsheet.u.pszTemplate = (LPWSTR)MAKEINTRESOURCE(IDD_FOLDER_PROPERTIES);
+        propsheet.pszTemplate = (LPWSTR)MAKEINTRESOURCE(IDD_FOLDER_PROPERTIES);
     else
-        propsheet.u.pszTemplate = (LPWSTR)MAKEINTRESOURCE(IDD_FILE_PROPERTIES);
+        propsheet.pszTemplate = (LPWSTR)MAKEINTRESOURCE(IDD_FILE_PROPERTIES);
     propsheet.pfnDlgProc    = file_properties_proc;
     propsheet.pfnCallback   = file_properties_callback;
     propsheet.lParam        = (LPARAM)props;
@@ -721,7 +718,7 @@ static void init_file_properties_pages(IDataObject *dataobject, LPFNADDPROPSHEET
     return;
 
 error:
-    heap_free(props);
+    free(props);
 }
 
 #define MAX_PROP_PAGES 99
@@ -745,8 +742,8 @@ static void DoOpenProperties(ContextMenu *This, HWND hwnd)
 	psh.hwndParent = hwnd;
 	psh.dwFlags = PSH_PROPTITLE;
 	psh.nPages = 0;
-	psh.u3.phpage = hpages;
-	psh.u2.nStartPage = 0;
+	psh.phpage = hpages;
+	psh.nStartPage = 0;
 
 	_ILSimpleGetTextW(This->apidl[0], (LPVOID)wszFilename, MAX_PATH);
 	psh.pszCaption = (LPCWSTR)wszFilename;
@@ -1116,7 +1113,7 @@ HRESULT ItemMenu_Constructor(IShellFolder *parent, LPCITEMIDLIST pidl, const LPC
     HRESULT hr;
     UINT i;
 
-    This = heap_alloc(sizeof(*This));
+    This = malloc(sizeof(*This));
     if (!This) return E_OUTOFMEMORY;
 
     This->IContextMenu3_iface.lpVtbl = &ItemContextMenuVtbl;
@@ -1254,7 +1251,7 @@ static HRESULT paste_pidls(ContextMenu *This, IDataObject *pda, ITEMIDLIST **pid
             if(psfhlpsrc) ISFHelper_Release(psfhlpsrc);
             IShellFolder_Release(psfFrom);
         }
-        SHFree(pidl_dir);
+        ILFree(pidl_dir);
     }
 
     IShellFolder_Release(psfDesktop);
@@ -1287,7 +1284,7 @@ static HRESULT DoPaste(ContextMenu *This)
 	    LPITEMIDLIST * apidl;
 	    LPITEMIDLIST pidl;
 
-	    LPIDA lpcida = GlobalLock(medium.u.hGlobal);
+	    LPIDA lpcida = GlobalLock(medium.hGlobal);
 	    TRACE("cida=%p\n", lpcida);
 	    if(lpcida)
 	    {
@@ -1300,7 +1297,7 @@ static HRESULT DoPaste(ContextMenu *This)
 	      }
 	      else
 	        hr = HRESULT_FROM_WIN32(GetLastError());
-	      GlobalUnlock(medium.u.hGlobal);
+	      GlobalUnlock(medium.hGlobal);
 	    }
 	    else
 	      hr = HRESULT_FROM_WIN32(GetLastError());
@@ -1317,14 +1314,14 @@ static HRESULT DoPaste(ContextMenu *This)
 	      UINT i, count;
 	      ITEMIDLIST **pidls;
 
-	      TRACE("CF_HDROP=%p\n", medium.u.hGlobal);
-	      count = DragQueryFileW(medium.u.hGlobal, -1, NULL, 0);
+	      TRACE("CF_HDROP=%p\n", medium.hGlobal);
+	      count = DragQueryFileW(medium.hGlobal, -1, NULL, 0);
 	      pidls = SHAlloc(count*sizeof(ITEMIDLIST*));
 	      if (pidls)
 	      {
 	        for (i = 0; i < count; i++)
 	        {
-	          DragQueryFileW(medium.u.hGlobal, i, path, ARRAY_SIZE(path));
+	          DragQueryFileW(medium.hGlobal, i, path, ARRAY_SIZE(path));
 	          if ((pidls[i] = ILCreateFromPathW(path)) == NULL)
 	          {
 	            hr = E_FAIL;
@@ -1541,7 +1538,7 @@ HRESULT BackgroundMenu_Constructor(IShellFolder *parent, BOOL desktop, REFIID ri
     ContextMenu *This;
     HRESULT hr;
 
-    This = heap_alloc(sizeof(*This));
+    This = malloc(sizeof(*This));
     if (!This) return E_OUTOFMEMORY;
 
     This->IContextMenu3_iface.lpVtbl = &BackgroundContextMenuVtbl;

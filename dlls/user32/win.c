@@ -113,7 +113,7 @@ static inline BOOL is_broadcast( HWND hwnd )
  */
 HWND WIN_IsCurrentProcess( HWND hwnd )
 {
-    return UlongToHandle( NtUserCallHwnd( hwnd, NtUserIsCurrehtProcessWindow ));
+    return UlongToHandle( NtUserCallHwnd( hwnd, NtUserIsCurrentProcessWindow ));
 }
 
 
@@ -124,7 +124,7 @@ HWND WIN_IsCurrentProcess( HWND hwnd )
  */
 HWND WIN_IsCurrentThread( HWND hwnd )
 {
-    return UlongToHandle( NtUserCallHwnd( hwnd, NtUserIsCurrehtThreadWindow ));
+    return UlongToHandle( NtUserCallHwnd( hwnd, NtUserIsCurrentThreadWindow ));
 }
 
 
@@ -613,6 +613,16 @@ BOOL WINAPI IsWindowUnicode( HWND hwnd )
 DPI_AWARENESS_CONTEXT WINAPI GetWindowDpiAwarenessContext( HWND hwnd )
 {
     return NtUserGetWindowDpiAwarenessContext( hwnd );
+}
+
+
+/***********************************************************************
+ *		GetWindowDpiHostingBehavior  (USER32.@)
+ */
+DPI_HOSTING_BEHAVIOR WINAPI GetWindowDpiHostingBehavior( HWND hwnd )
+{
+    FIXME("(%p): stub\n", hwnd);
+    return DPI_HOSTING_BEHAVIOR_DEFAULT;
 }
 
 

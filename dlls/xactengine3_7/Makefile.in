@@ -5,7 +5,6 @@ EXTRADEFS = -DXACT3_VER=0x0307
 
 EXTRADLLFLAGS = -Wb,--prefer-native
 
-C_SRCS = \
+SOURCES = \
+	xact_classes.idl \
 	xact_dll.c
-
-IDL_SRCS = xact_classes.idl

@@ -68,7 +68,7 @@ static ULONG WINAPI uia_object_wrapper_Release(IUnknown *iface)
     if (!refcount)
     {
         IUnknown_Release(wrapper->marshaler);
-        heap_free(wrapper);
+        free(wrapper);
     }
 
     return refcount;
@@ -92,7 +92,7 @@ static HRESULT create_uia_object_wrapper(IUnknown *reserved, void **ppv)
 
     TRACE("%p, %p\n", reserved, ppv);
 
-    wrapper = heap_alloc(sizeof(*wrapper));
+    wrapper = calloc(1, sizeof(*wrapper));
     if (!wrapper)
         return E_OUTOFMEMORY;
 
@@ -102,7 +102,7 @@ static HRESULT create_uia_object_wrapper(IUnknown *reserved, void **ppv)
 
     if (FAILED(hr = CoCreateFreeThreadedMarshaler(&wrapper->IUnknown_iface, &wrapper->marshaler)))
     {
-        heap_free(wrapper);
+        free(wrapper);
         return hr;
     }
 
@@ -193,7 +193,7 @@ ULONG WINAPI hwnd_host_provider_Release(IRawElementProviderSimple *iface)
     TRACE("%p, refcount %ld\n", iface, refcount);
 
     if (!refcount)
-        heap_free(host_prov);
+        free(host_prov);
 
     return refcount;
 }
@@ -264,7 +264,7 @@ static const IRawElementProviderSimpleVtbl hwnd_host_provider_vtbl = {
  */
 BOOL WINAPI UiaClientsAreListening(void)
 {
-    FIXME("()\n");
+    TRACE("()\n");
     return TRUE;
 }
 
@@ -311,7 +311,7 @@ HRESULT WINAPI UiaRaiseAutomationPropertyChangedEvent(IRawElementProviderSimple 
  *          UiaRaiseStructureChangedEvent (uiautomationcore.@)
  */
 HRESULT WINAPI UiaRaiseStructureChangedEvent(IRawElementProviderSimple *provider, enum StructureChangeType struct_change_type,
-                                             int *runtime_id, int runtime_id_len)
+        int *runtime_id, int runtime_id_len)
 {
     FIXME("(%p, %d, %p, %d): stub\n", provider, struct_change_type, runtime_id, runtime_id_len);
     return S_OK;
@@ -321,8 +321,7 @@ HRESULT WINAPI UiaRaiseStructureChangedEvent(IRawElementProviderSimple *provider
  *          UiaRaiseAsyncContentLoadedEvent (uiautomationcore.@)
  */
 HRESULT WINAPI UiaRaiseAsyncContentLoadedEvent(IRawElementProviderSimple *provider,
-                                                enum AsyncContentLoadedState async_content_loaded_state,
-                                                double percent_complete)
+        enum AsyncContentLoadedState async_content_loaded_state, double percent_complete)
 {
     FIXME("(%p, %d, %f): stub\n", provider, async_content_loaded_state, percent_complete);
     return S_OK;
@@ -341,9 +340,8 @@ HRESULT WINAPI UiaRaiseTextEditTextChangedEvent(IRawElementProviderSimple *provi
 /***********************************************************************
  *          UiaRaiseNotificationEvent (uiautomationcore.@)
  */
-HRESULT WINAPI UiaRaiseNotificationEvent(IRawElementProviderSimple *provider,
-        enum NotificationKind notification_kind, enum NotificationProcessing notification_processing,
-        BSTR display_str, BSTR activity_id)
+HRESULT WINAPI UiaRaiseNotificationEvent(IRawElementProviderSimple *provider, enum NotificationKind notification_kind,
+        enum NotificationProcessing notification_processing, BSTR display_str, BSTR activity_id)
 {
     FIXME("(%p, %d, %d, %s, %s): stub\n", provider, notification_kind, notification_processing,
             debugstr_w(display_str), debugstr_w(activity_id));
@@ -372,7 +370,7 @@ HRESULT WINAPI UiaHostProviderFromHwnd(HWND hwnd, IRawElementProviderSimple **pr
     if (!IsWindow(hwnd) || !provider)
         return E_INVALIDARG;
 
-    host_prov = heap_alloc(sizeof(*host_prov));
+    host_prov = calloc(1, sizeof(*host_prov));
     if (!host_prov)
         return E_OUTOFMEMORY;
 
@@ -448,7 +446,7 @@ static ULONG WINAPI uia_cf_Release(IClassFactory *iface)
     TRACE("%p, refcount %ld\n", cf, ref);
 
     if (!ref)
-        heap_free(cf);
+        free(cf);
 
     return ref;
 }
@@ -465,18 +463,14 @@ static HRESULT WINAPI uia_cf_CreateInstance(IClassFactory *iface, IUnknown *pout
     if (pouter)
         return CLASS_E_NOAGGREGATION;
 
-    if (IsEqualGUID(cf->clsid, &CLSID_CUIAutomation) && (IsEqualGUID(riid, &IID_IUnknown) ||
-                IsEqualGUID(riid, &IID_IUIAutomation)))
+    if (IsEqualGUID(cf->clsid, &CLSID_CUIAutomation))
         hr = create_uia_iface(&obj, FALSE);
-    else if (IsEqualGUID(cf->clsid, &CLSID_CUIAutomation8) && (IsEqualGUID(riid, &IID_IUnknown) ||
-                IsEqualGUID(riid, &IID_IUIAutomation)  || IsEqualGUID(riid, &IID_IUIAutomation2) ||
-                IsEqualGUID(riid, &IID_IUIAutomation3) || IsEqualGUID(riid, &IID_IUIAutomation4) ||
-                IsEqualGUID(riid, &IID_IUIAutomation5) || IsEqualGUID(riid, &IID_IUIAutomation6)))
+    else if (IsEqualGUID(cf->clsid, &CLSID_CUIAutomation8))
         hr = create_uia_iface(&obj, TRUE);
     else
         return E_NOINTERFACE;
 
-    if (SUCCEEDED(hr) && obj)
+    if (SUCCEEDED(hr))
     {
         hr = IUnknown_QueryInterface(obj, riid, ppv);
         IUnknown_Release(obj);
@@ -502,7 +496,7 @@ static const IClassFactoryVtbl uia_cf_Vtbl =
 
 static inline HRESULT create_uia_cf(REFCLSID clsid, REFIID riid, void **ppv)
 {
-    struct uia_cf *cf = heap_alloc_zero(sizeof(*cf));
+    struct uia_cf *cf = calloc(1, sizeof(*cf));
     HRESULT hr;
 
     *ppv = NULL;

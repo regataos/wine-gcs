@@ -25,6 +25,7 @@
 #include "ntuser.h"
 #include "ddrawgdi.h"
 #include "winnls.h"
+#include "winppi.h"
 
 #include "wine/list.h"
 #include "wine/debug.h"
@@ -42,7 +43,8 @@ static CRITICAL_SECTION_DEBUG critsect_debug =
 };
 static CRITICAL_SECTION driver_section = { &critsect_debug, -1, 0, 0, 0, 0 };
 
-typedef const void * (CDECL *driver_entry_point)( unsigned int version );
+typedef HDC (CDECL *driver_entry_point)( const WCHAR *device,
+        const DEVMODEW *devmode, const WCHAR *output );
 
 struct graphics_driver
 {
@@ -51,6 +53,62 @@ struct graphics_driver
     driver_entry_point  entry_point;
 };
 
+enum print_flags
+{
+    CALL_START_PAGE = 0x1,
+    CALL_END_PAGE   = 0x2,
+    WRITE_DEVMODE   = 0x4,
+    BANDING         = 0x8,
+};
+
+struct print
+{
+    HANDLE printer;
+    WCHAR *output;
+    enum print_flags flags;
+    DEVMODEW *devmode;
+};
+
+BOOL WINAPI SeekPrinter( HANDLE, LARGE_INTEGER, LARGE_INTEGER*, DWORD, BOOL );
+
+enum
+{
+    EMRI_METAFILE = 1,
+    EMRI_ENGINE_FONT,
+    EMRI_DEVMODE,
+    EMRI_TYPE1_FONT,
+    EMRI_PRESTARTPAGE,
+    EMRI_DESIGNVECTOR,
+    EMRI_SUBSET_FONT,
+    EMRI_DELTA_FONT,
+    EMRI_FORM_METAFILE,
+    EMRI_BW_METAFILE,
+    EMRI_BW_FORM_METAFILE,
+    EMRI_METAFILE_DATA,
+    EMRI_METAFILE_EXT,
+    EMRI_BW_METAFILE_EXT,
+    EMRI_ENGINE_FONT_EXT,
+    EMRI_TYPE1_FONT_EXT,
+    EMRI_DESIGNVECTOR_EXT,
+    EMRI_SUBSET_FONT_EXT,
+    EMRI_DELTA_FONT_EXT,
+    EMRI_PS_JOB_DATA,
+    EMRI_EMBED_FONT_EXT,
+    EMRI_HEADER = 65536
+};
+
+struct spool_handle
+{
+    HANDLE spool;
+
+    int devmodes_no;
+    int devmodes_size;
+    struct
+    {
+        int page;
+        DEVMODEW *devmode;
+    } *devmodes;
+};
 
 DC_ATTR *get_dc_attr( HDC hdc )
 {
@@ -123,7 +181,7 @@ static struct graphics_driver *create_driver( HMODULE module )
     driver->module = module;
 
     if (module)
-        driver->entry_point = (void *)GetProcAddress( module, "wine_get_gdi_driver" );
+        driver->entry_point = (void *)GetProcAddress( module, "wine_driver_open_dc" );
     else
         driver->entry_point = NULL;
 
@@ -190,16 +248,46 @@ done:
     return driver->entry_point;
 }
 
+static BOOL print_copy_devmode( struct print *print, const DEVMODEW *devmode )
+{
+    size_t size;
+
+    if (!print) return TRUE;
+    if (!print->devmode && !devmode) return TRUE;
+    HeapFree( GetProcessHeap(), 0, print->devmode );
+
+    if (!devmode)
+    {
+        print->devmode = NULL;
+        print->flags |= WRITE_DEVMODE;
+        return TRUE;
+    }
+
+    size = devmode->dmSize + devmode->dmDriverExtra;
+    print->devmode = HeapAlloc( GetProcessHeap(), 0, size );
+    if (!print->devmode) return FALSE;
+    memcpy(print->devmode, devmode, size);
+    print->flags |= WRITE_DEVMODE;
+    return TRUE;
+}
+
 /***********************************************************************
  *           CreateDCW    (GDI32.@)
  */
 HDC WINAPI CreateDCW( LPCWSTR driver, LPCWSTR device, LPCWSTR output,
                       const DEVMODEW *devmode )
 {
+    PRINTER_DEFAULTSW prn_defaults =
+    {
+        .pDatatype = NULL,
+        .pDevMode = (DEVMODEW *)devmode,
+        .DesiredAccess = PRINTER_ACCESS_USE
+    };
     UNICODE_STRING device_str, output_str;
     driver_entry_point entry_point = NULL;
     const WCHAR *display = NULL, *p;
     WCHAR buf[300], *port = NULL;
+    struct print *print = NULL;
     BOOL is_display = FALSE;
     HANDLE hspool = NULL;
     DC_ATTR *dc_attr;
@@ -240,13 +328,21 @@ HDC WINAPI CreateDCW( LPCWSTR driver, LPCWSTR device, LPCWSTR output,
         ERR( "no driver found for %s\n", debugstr_w(buf) );
         return 0;
     }
-    else if (!OpenPrinterW( (WCHAR *)device, &hspool, NULL ))
+    else if (!OpenPrinterW( (WCHAR *)device, &hspool, &prn_defaults ))
     {
         return 0;
     }
     else if (output && !(port = HeapAlloc( GetProcessHeap(), 0, output_str.Length + sizeof(WCHAR) )))
     {
         ClosePrinter( hspool );
+        return 0;
+    }
+    else if (!(print = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*print) )) ||
+            !print_copy_devmode( print, devmode ))
+    {
+        HeapFree( GetProcessHeap(), 0, print );
+        ClosePrinter( hspool );
+        HeapFree( GetProcessHeap(), 0, port );
         return 0;
     }
 
@@ -265,8 +361,12 @@ HDC WINAPI CreateDCW( LPCWSTR driver, LPCWSTR device, LPCWSTR output,
         device_str.Buffer = (WCHAR *)device;
     }
 
-    ret = NtGdiOpenDCW( device || display ? &device_str : NULL, devmode, output ? &output_str : NULL,
-                        0, is_display, entry_point, NULL, NULL );
+    if (entry_point)
+        ret = entry_point( device, devmode, output );
+    else
+        ret = NtGdiOpenDCW( device || display ? &device_str : NULL, devmode,
+                            output ? &output_str : NULL,
+                            0, is_display, entry_point, NULL, NULL );
 
     if (ret && hspool && (dc_attr = get_dc_attr( ret )))
     {
@@ -275,13 +375,16 @@ HDC WINAPI CreateDCW( LPCWSTR driver, LPCWSTR device, LPCWSTR output,
             memcpy( port, output, output_str.Length );
             port[output_str.Length / sizeof(WCHAR)] = 0;
         }
-        dc_attr->hspool = HandleToULong( hspool );
-        dc_attr->output = (ULONG_PTR)port;
+        print->printer = hspool;
+        print->output = port;
+        dc_attr->print = (UINT_PTR)print;
     }
     else if (hspool)
     {
         ClosePrinter( hspool );
         HeapFree( GetProcessHeap(), 0, port );
+        HeapFree( GetProcessHeap(), 0, print->devmode );
+        HeapFree( GetProcessHeap(), 0, print );
     }
 
     return ret;
@@ -392,6 +495,29 @@ DEVMODEW *WINAPI GdiConvertToDevmodeW( const DEVMODEA *dmA )
     return dmW;
 }
 
+static inline struct print *get_dc_print( DC_ATTR *dc_attr )
+{
+    return (struct print *)(UINT_PTR)dc_attr->print;
+}
+
+void print_call_start_page( DC_ATTR *dc_attr )
+{
+    struct print *print = get_dc_print( dc_attr );
+
+    if (print->flags & CALL_START_PAGE) StartPage( UlongToHandle(dc_attr->hdc) );
+}
+
+static void delete_print_dc( DC_ATTR *dc_attr )
+{
+    struct print *print = get_dc_print( dc_attr );
+
+    ClosePrinter( print->printer );
+    HeapFree( GetProcessHeap(), 0, print->output );
+    HeapFree( GetProcessHeap(), 0, print->devmode );
+    HeapFree( GetProcessHeap(), 0, print );
+    dc_attr->print = 0;
+}
+
 /***********************************************************************
  *           DeleteDC    (GDI32.@)
  */
@@ -401,10 +527,12 @@ BOOL WINAPI DeleteDC( HDC hdc )
 
     if (is_meta_dc( hdc )) return METADC_DeleteDC( hdc );
     if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
-    HeapFree( GetProcessHeap(), 0, (WCHAR *)(ULONG_PTR)dc_attr->output );
-    dc_attr->output = 0;
-    if (dc_attr->hspool) ClosePrinter( ULongToHandle(dc_attr->hspool) );
-    dc_attr->hspool = 0;
+    if (dc_attr->print)
+    {
+        if (dc_attr->emf)
+            AbortDoc( hdc );
+        delete_print_dc( dc_attr );
+    }
     if (dc_attr->emf) EMFDC_DeleteDC( dc_attr );
     return NtGdiDeleteObjectApp( hdc );
 }
@@ -431,7 +559,26 @@ HDC WINAPI ResetDCA( HDC hdc, const DEVMODEA *devmode )
  */
 HDC WINAPI ResetDCW( HDC hdc, const DEVMODEW *devmode )
 {
-    return NtGdiResetDC( hdc, devmode, NULL, NULL, NULL ) ? hdc : 0;
+    struct print *print;
+    DC_ATTR *dc_attr;
+
+    if (!(dc_attr = get_dc_attr( hdc ))) return 0;
+    print = get_dc_print( dc_attr );
+    if (print && print->flags & CALL_END_PAGE) return 0;
+    if (!NtGdiResetDC( hdc, devmode, NULL, NULL, NULL )) return 0;
+    if (print)
+    {
+        PRINTER_DEFAULTSW prn_defaults =
+        {
+            .pDatatype = NULL,
+            .pDevMode = (DEVMODEW *)devmode,
+            .DesiredAccess = PRINTER_ACCESS_USE
+        };
+
+        if (!print_copy_devmode( print, devmode )) return 0;
+        ResetPrinterW( print->printer, &prn_defaults );
+    }
+    return hdc;
 }
 
 /***********************************************************************
@@ -482,6 +629,24 @@ INT WINAPI Escape( HDC hdc, INT escape, INT in_count, const char *in_data, void 
     {
     case ABORTDOC:
         return AbortDoc( hdc );
+
+    case NEXTBAND:
+    {
+        RECT *rect = out_data;
+        struct print *print;
+        DC_ATTR *dc_attr;
+
+        if (!(dc_attr = get_dc_attr( hdc )) || !(print = get_dc_print( dc_attr ))) break;
+        if (print->flags & BANDING)
+        {
+            print->flags &= ~BANDING;
+            SetRectEmpty( rect );
+            return EndPage( hdc );
+        }
+        print->flags |= BANDING;
+        SetRect( rect, 0, 0, GetDeviceCaps(hdc, HORZRES), GetDeviceCaps(hdc, VERTRES) );
+        return 1;
+    }
 
     case ENDDOC:
         return EndDoc( hdc );
@@ -560,6 +725,12 @@ INT WINAPI Escape( HDC hdc, INT escape, INT in_count, const char *in_data, void 
             }
             break;
         }
+
+    case PASSTHROUGH:
+    case POSTSCRIPT_PASSTHROUGH:
+        in_count = *(const WORD *)in_data + sizeof(WORD);
+        out_data = NULL;
+        break;
     }
 
     /* if not handled internally, pass it to the driver */
@@ -572,8 +743,17 @@ INT WINAPI Escape( HDC hdc, INT escape, INT in_count, const char *in_data, void 
 INT WINAPI ExtEscape( HDC hdc, INT escape, INT input_size, const char *input,
                       INT output_size, char *output )
 {
+    struct print *print;
+    DC_ATTR *dc_attr;
+
     if (is_meta_dc( hdc ))
         return METADC_ExtEscape( hdc, escape, input_size, input, output_size, output );
+    if (!(dc_attr = get_dc_attr( hdc ))) return 0;
+    if ((print = get_dc_print( dc_attr )) && dc_attr->emf)
+    {
+        int ret = EMFDC_ExtEscape( dc_attr, escape, input_size, input, output_size, output );
+        if (ret) return ret;
+    }
     return NtGdiExtEscape( hdc, NULL, 0, escape, input_size, input, output_size, output );
 }
 
@@ -922,6 +1102,7 @@ BOOL WINAPI SetBrushOrgEx( HDC hdc, INT x, INT y, POINT *oldorg )
 {
     DC_ATTR *dc_attr;
     if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    if (dc_attr->emf && !EMFDC_SetBrushOrgEx( dc_attr, x, y )) return FALSE;
     if (oldorg) *oldorg = dc_attr->brush_org;
     dc_attr->brush_org.x = x;
     dc_attr->brush_org.y = y;
@@ -1244,7 +1425,8 @@ BOOL WINAPI SetMiterLimit( HDC hdc, FLOAT limit, FLOAT *old_limit )
 {
     DC_ATTR *dc_attr;
     if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
-    /* FIXME: record EMFs */
+    if (dc_attr->emf && !EMFDC_SetMiterLimit( dc_attr, limit )) return 0;
+    if (limit < 1.0f) return FALSE;
     if (old_limit) *old_limit = dc_attr->miter_limit;
     dc_attr->miter_limit = limit;
     return TRUE;
@@ -1259,6 +1441,7 @@ COLORREF WINAPI SetPixel( HDC hdc, INT x, INT y, COLORREF color )
 
     if (is_meta_dc( hdc )) return METADC_SetPixel( hdc, x, y, color );
     if (!(dc_attr = get_dc_attr( hdc ))) return CLR_INVALID;
+    if (dc_attr->print) print_call_start_page( dc_attr );
     if (dc_attr->emf && !EMFDC_SetPixel( dc_attr, x, y, color )) return CLR_INVALID;
     return NtGdiSetPixel( hdc, x, y, color );
 }
@@ -1282,6 +1465,7 @@ BOOL WINAPI LineTo( HDC hdc, INT x, INT y )
 
     if (is_meta_dc( hdc )) return METADC_LineTo( hdc, x, y );
     if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    if (dc_attr->print) print_call_start_page( dc_attr );
     if (dc_attr->emf && !EMFDC_LineTo( dc_attr, x, y )) return FALSE;
     return NtGdiLineTo( hdc, x, y );
 }
@@ -1317,6 +1501,7 @@ BOOL WINAPI Arc( HDC hdc, INT left, INT top, INT right, INT bottom,
                            xstart, ystart, xend, yend );
 
     if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    if (dc_attr->print) print_call_start_page( dc_attr );
     if (dc_attr->emf && !EMFDC_ArcChordPie( dc_attr, left, top, right, bottom,
                                             xstart, ystart, xend, yend, EMR_ARC ))
         return FALSE;
@@ -1337,6 +1522,7 @@ BOOL WINAPI ArcTo( HDC hdc, INT left, INT top, INT right, INT bottom,
            right, bottom, xstart, ystart, xend, yend );
 
     if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    if (dc_attr->print) print_call_start_page( dc_attr );
     if (dc_attr->emf && !EMFDC_ArcChordPie( dc_attr, left, top, right, bottom,
                                             xstart, ystart, xend, yend, EMR_ARCTO ))
         return FALSE;
@@ -1361,6 +1547,7 @@ BOOL WINAPI Chord( HDC hdc, INT left, INT top, INT right, INT bottom,
                              xstart, ystart, xend, yend );
 
     if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    if (dc_attr->print) print_call_start_page( dc_attr );
     if (dc_attr->emf && !EMFDC_ArcChordPie( dc_attr, left, top, right, bottom,
                                             xstart, ystart, xend, yend, EMR_CHORD ))
         return FALSE;
@@ -1385,6 +1572,7 @@ BOOL WINAPI Pie( HDC hdc, INT left, INT top, INT right, INT bottom,
                            xstart, ystart, xend, yend );
 
     if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    if (dc_attr->print) print_call_start_page( dc_attr );
     if (dc_attr->emf && !EMFDC_ArcChordPie( dc_attr, left, top, right, bottom,
                                             xstart, ystart, xend, yend, EMR_PIE ))
         return FALSE;
@@ -1403,9 +1591,10 @@ BOOL WINAPI AngleArc( HDC hdc, INT x, INT y, DWORD radius, FLOAT start_angle, FL
     TRACE( "%p, (%d, %d), %lu, %f, %f\n", hdc, x, y, radius, start_angle, sweep_angle );
 
     if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    if (dc_attr->print) print_call_start_page( dc_attr );
     if (dc_attr->emf && !EMFDC_AngleArc( dc_attr, x, y, radius, start_angle, sweep_angle ))
         return FALSE;
-    return NtGdiAngleArc( hdc, x, y, radius, start_angle, sweep_angle );
+    return NtGdiAngleArc( hdc, x, y, radius, *(DWORD *)&start_angle, *(DWORD *)&sweep_angle );
 }
 
 /***********************************************************************
@@ -1419,6 +1608,7 @@ BOOL WINAPI Ellipse( HDC hdc, INT left, INT top, INT right, INT bottom )
 
     if (is_meta_dc( hdc )) return METADC_Ellipse( hdc, left, top, right, bottom );
     if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    if (dc_attr->print) print_call_start_page( dc_attr );
     if (dc_attr->emf && !EMFDC_Ellipse( dc_attr, left, top, right, bottom )) return FALSE;
     return NtGdiEllipse( hdc, left, top, right, bottom );
 }
@@ -1434,6 +1624,7 @@ BOOL WINAPI Rectangle( HDC hdc, INT left, INT top, INT right, INT bottom )
 
     if (is_meta_dc( hdc )) return METADC_Rectangle( hdc, left, top, right, bottom );
     if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    if (dc_attr->print) print_call_start_page( dc_attr );
     if (dc_attr->emf && !EMFDC_Rectangle( dc_attr, left, top, right, bottom )) return FALSE;
     return NtGdiRectangle( hdc, left, top, right, bottom );
 }
@@ -1453,6 +1644,7 @@ BOOL WINAPI RoundRect( HDC hdc, INT left, INT top, INT right,
         return METADC_RoundRect( hdc, left, top, right, bottom, ell_width, ell_height );
 
     if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    if (dc_attr->print) print_call_start_page( dc_attr );
     if (dc_attr->emf && !EMFDC_RoundRect( dc_attr, left, top, right, bottom,
                                           ell_width, ell_height ))
         return FALSE;
@@ -1471,6 +1663,7 @@ BOOL WINAPI Polygon( HDC hdc, const POINT *points, INT count )
 
     if (is_meta_dc( hdc )) return METADC_Polygon( hdc, points, count );
     if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    if (dc_attr->print) print_call_start_page( dc_attr );
     if (dc_attr->emf && !EMFDC_Polygon( dc_attr, points, count )) return FALSE;
     return NtGdiPolyPolyDraw( hdc, points, (const ULONG *)&count, 1, NtGdiPolyPolygon );
 }
@@ -1486,6 +1679,7 @@ BOOL WINAPI PolyPolygon( HDC hdc, const POINT *points, const INT *counts, UINT p
 
     if (is_meta_dc( hdc )) return METADC_PolyPolygon( hdc, points, counts, polygons );
     if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    if (dc_attr->print) print_call_start_page( dc_attr );
     if (dc_attr->emf && !EMFDC_PolyPolygon( dc_attr, points, counts, polygons )) return FALSE;
     return NtGdiPolyPolyDraw( hdc, points, (const ULONG *)counts, polygons, NtGdiPolyPolygon );
 }
@@ -1501,6 +1695,7 @@ BOOL WINAPI Polyline( HDC hdc, const POINT *points, INT count )
 
     if (is_meta_dc( hdc )) return METADC_Polyline( hdc, points, count );
     if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    if (dc_attr->print) print_call_start_page( dc_attr );
     if (dc_attr->emf && !EMFDC_Polyline( dc_attr, points, count )) return FALSE;
     return NtGdiPolyPolyDraw( hdc, points, (const ULONG *)&count, 1, NtGdiPolyPolyline );
 }
@@ -1515,6 +1710,7 @@ BOOL WINAPI PolyPolyline( HDC hdc, const POINT *points, const DWORD *counts, DWO
     TRACE( "%p, %p, %p, %lu\n", hdc, points, counts, polylines );
 
     if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    if (dc_attr->print) print_call_start_page( dc_attr );
     if (dc_attr->emf && !EMFDC_PolyPolyline( dc_attr, points, counts, polylines )) return FALSE;
     return NtGdiPolyPolyDraw( hdc, points, counts, polylines, NtGdiPolyPolyline );
 }
@@ -1529,6 +1725,7 @@ BOOL WINAPI PolyBezier( HDC hdc, const POINT *points, DWORD count )
     TRACE( "%p, %p, %lu\n", hdc, points, count );
 
     if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    if (dc_attr->print) print_call_start_page( dc_attr );
     if (dc_attr->emf && !EMFDC_PolyBezier( dc_attr, points, count )) return FALSE;
     return NtGdiPolyPolyDraw( hdc, points, &count, 1, NtGdiPolyBezier );
 }
@@ -1543,6 +1740,7 @@ BOOL WINAPI PolyBezierTo( HDC hdc, const POINT *points, DWORD count )
     TRACE( "%p, %p, %lu\n", hdc, points, count );
 
     if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    if (dc_attr->print) print_call_start_page( dc_attr );
     if (dc_attr->emf && !EMFDC_PolyBezierTo( dc_attr, points, count )) return FALSE;
     return NtGdiPolyPolyDraw( hdc, points, &count, 1, NtGdiPolyBezierTo );
 }
@@ -1557,6 +1755,7 @@ BOOL WINAPI PolylineTo( HDC hdc, const POINT *points, DWORD count )
     TRACE( "%p, %p, %lu\n", hdc, points, count );
 
     if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    if (dc_attr->print) print_call_start_page( dc_attr );
     if (dc_attr->emf && !EMFDC_PolylineTo( dc_attr, points, count )) return FALSE;
     return NtGdiPolyPolyDraw( hdc, points, &count, 1, NtGdiPolylineTo );
 }
@@ -1571,6 +1770,7 @@ BOOL WINAPI PolyDraw( HDC hdc, const POINT *points, const BYTE *types, DWORD cou
     TRACE( "%p, %p, %p, %lu\n", hdc, points, types, count );
 
     if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    if (dc_attr->print) print_call_start_page( dc_attr );
     if (dc_attr->emf && !EMFDC_PolyDraw( dc_attr, points, types, count )) return FALSE;
     return NtGdiPolyDraw( hdc, points, types, count );
 }
@@ -1586,6 +1786,7 @@ BOOL WINAPI FillRgn( HDC hdc, HRGN hrgn, HBRUSH hbrush )
 
     if (is_meta_dc( hdc )) return METADC_FillRgn( hdc, hrgn, hbrush );
     if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    if (dc_attr->print) print_call_start_page( dc_attr );
     if (dc_attr->emf && !EMFDC_FillRgn( dc_attr, hrgn, hbrush )) return FALSE;
     return NtGdiFillRgn( hdc, hrgn, hbrush );
 }
@@ -1601,6 +1802,7 @@ BOOL WINAPI PaintRgn( HDC hdc, HRGN hrgn )
 
     if (is_meta_dc( hdc )) return METADC_PaintRgn( hdc, hrgn );
     if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    if (dc_attr->print) print_call_start_page( dc_attr );
     if (dc_attr->emf && !EMFDC_PaintRgn( dc_attr, hrgn )) return FALSE;
     return NtGdiFillRgn( hdc, hrgn, GetCurrentObject( hdc, OBJ_BRUSH ));
 }
@@ -1616,6 +1818,7 @@ BOOL WINAPI FrameRgn( HDC hdc, HRGN hrgn, HBRUSH hbrush, INT width, INT height )
 
     if (is_meta_dc( hdc )) return METADC_FrameRgn( hdc, hrgn, hbrush, width, height );
     if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    if (dc_attr->print) print_call_start_page( dc_attr );
     if (dc_attr->emf && !EMFDC_FrameRgn( dc_attr, hrgn, hbrush, width, height ))
         return FALSE;
     return NtGdiFrameRgn( hdc, hrgn, hbrush, width, height );
@@ -1632,6 +1835,7 @@ BOOL WINAPI InvertRgn( HDC hdc, HRGN hrgn )
 
     if (is_meta_dc( hdc )) return METADC_InvertRgn( hdc, hrgn );
     if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    if (dc_attr->print) print_call_start_page( dc_attr );
     if (dc_attr->emf && !EMFDC_InvertRgn( dc_attr, hrgn )) return FALSE;
     return NtGdiInvertRgn( hdc, hrgn );
 }
@@ -1647,6 +1851,7 @@ BOOL WINAPI ExtFloodFill( HDC hdc, INT x, INT y, COLORREF color, UINT fill_type 
 
     if (is_meta_dc( hdc )) return METADC_ExtFloodFill( hdc, x, y, color, fill_type );
     if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    if (dc_attr->print) print_call_start_page( dc_attr );
     if (dc_attr->emf && !EMFDC_ExtFloodFill( dc_attr, x, y, color, fill_type )) return FALSE;
     return NtGdiExtFloodFill( hdc, x, y, color, fill_type );
 }
@@ -1675,6 +1880,7 @@ BOOL WINAPI GdiGradientFill( HDC hdc, TRIVERTEX *vert_array, ULONG nvert,
         SetLastError( ERROR_INVALID_PARAMETER );
         return FALSE;
     }
+    if (dc_attr->print) print_call_start_page( dc_attr );
     if (dc_attr->emf &&
         !EMFDC_GradientFill( dc_attr, vert_array, nvert, grad_array, ngrad, mode ))
         return FALSE;
@@ -1704,6 +1910,7 @@ BOOL WINAPI PatBlt( HDC hdc, INT left, INT top, INT width, INT height, DWORD rop
 
     if (is_meta_dc( hdc )) return METADC_PatBlt( hdc, left, top, width, height, rop );
     if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    if (dc_attr->print) print_call_start_page( dc_attr );
     if (dc_attr->emf && !EMFDC_PatBlt( dc_attr, left, top, width, height, rop ))
         return FALSE;
     return NtGdiPatBlt( hdc, left, top, width, height, rop );
@@ -1720,6 +1927,7 @@ BOOL WINAPI DECLSPEC_HOTPATCH BitBlt( HDC hdc_dst, INT x_dst, INT y_dst, INT wid
     if (is_meta_dc( hdc_dst )) return METADC_BitBlt( hdc_dst, x_dst, y_dst, width, height,
                                                  hdc_src, x_src, y_src, rop );
     if (!(dc_attr = get_dc_attr( hdc_dst ))) return FALSE;
+    if (dc_attr->print) print_call_start_page( dc_attr );
     if (dc_attr->emf && !EMFDC_BitBlt( dc_attr, x_dst, y_dst, width, height,
                                        hdc_src, x_src, y_src, rop ))
         return FALSE;
@@ -1740,6 +1948,7 @@ BOOL WINAPI StretchBlt( HDC hdc, INT x_dst, INT y_dst, INT width_dst, INT height
                                                      hdc_src, x_src, y_src, width_src,
                                                      height_src, rop );
     if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    if (dc_attr->print) print_call_start_page( dc_attr );
     if (dc_attr->emf && !EMFDC_StretchBlt( dc_attr, x_dst, y_dst, width_dst, height_dst,
                                            hdc_src, x_src, y_src, width_src,
                                            height_src, rop ))
@@ -1759,6 +1968,7 @@ BOOL WINAPI MaskBlt( HDC hdc, INT x_dst, INT y_dst, INT width_dst, INT height_ds
     DC_ATTR *dc_attr;
 
     if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    if (dc_attr->print) print_call_start_page( dc_attr );
     if (dc_attr->emf && !EMFDC_MaskBlt( dc_attr, x_dst, y_dst, width_dst, height_dst,
                                         hdc_src, x_src, y_src, mask, x_mask, y_mask, rop ))
         return FALSE;
@@ -1775,6 +1985,7 @@ BOOL WINAPI PlgBlt( HDC hdc, const POINT *points, HDC hdc_src, INT x_src, INT y_
     DC_ATTR *dc_attr;
 
     if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    if (dc_attr->print) print_call_start_page( dc_attr );
     if (dc_attr->emf && !EMFDC_PlgBlt( dc_attr, points, hdc_src, x_src, y_src,
                                        width, height, mask, x_mask, y_mask ))
         return FALSE;
@@ -1792,6 +2003,7 @@ BOOL WINAPI GdiTransparentBlt( HDC hdc, int x_dst, int y_dst, int width_dst, int
     DC_ATTR *dc_attr;
 
     if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    if (dc_attr->print) print_call_start_page( dc_attr );
     if (dc_attr->emf && !EMFDC_TransparentBlt( dc_attr, x_dst, y_dst, width_dst, height_dst, hdc_src,
                                                x_src, y_src, width_src, height_src, color ))
         return FALSE;
@@ -1809,13 +2021,29 @@ BOOL WINAPI GdiAlphaBlend( HDC hdc_dst, int x_dst, int y_dst, int width_dst, int
     DC_ATTR *dc_attr;
 
     if (!(dc_attr = get_dc_attr( hdc_dst ))) return FALSE;
+    if (dc_attr->print) print_call_start_page( dc_attr );
     if (dc_attr->emf && !EMFDC_AlphaBlend( dc_attr, x_dst, y_dst, width_dst, height_dst,
                                            hdc_src, x_src, y_src, width_src,
                                            height_src, blend_function ))
         return FALSE;
     return NtGdiAlphaBlend( hdc_dst, x_dst, y_dst, width_dst, height_dst,
                             hdc_src, x_src, y_src, width_src, height_src,
-                            blend_function, 0 /* FIXME */ );
+                            *(DWORD *)&blend_function, 0 /* FIXME */ );
+}
+
+/******************************************************************************
+ *           SetDIBits    (GDI32.@)
+ *
+ * Sets pixels in a bitmap using colors from DIB.
+ */
+INT WINAPI SetDIBits( HDC hdc, HBITMAP hbitmap, UINT startscan,
+		      UINT lines, const void *bits, const BITMAPINFO *info,
+		      UINT coloruse )
+{
+    /* Wine-specific: pass hbitmap to NtGdiSetDIBitsToDeviceInternal */
+    return NtGdiSetDIBitsToDeviceInternal( hdc, 0, 0, 0, 0, 0, 0,
+                                           startscan, lines, bits, info, coloruse,
+                                           0, 0, FALSE, hbitmap );
 }
 
 /***********************************************************************
@@ -1832,6 +2060,7 @@ INT WINAPI SetDIBitsToDevice( HDC hdc, INT x_dst, INT y_dst, DWORD cx,
         return METADC_SetDIBitsToDevice( hdc, x_dst, y_dst, cx, cy, x_src, y_src, startscan,
                                          lines, bits, bmi, coloruse );
     if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    if (dc_attr->print) print_call_start_page( dc_attr );
     if (dc_attr->emf && !EMFDC_SetDIBitsToDevice( dc_attr, x_dst, y_dst, cx, cy, x_src, y_src,
                                                   startscan, lines, bits, bmi, coloruse ))
         return 0;
@@ -1854,6 +2083,7 @@ INT WINAPI DECLSPEC_HOTPATCH StretchDIBits( HDC hdc, INT x_dst, INT y_dst, INT w
         return METADC_StretchDIBits( hdc, x_dst, y_dst, width_dst, height_dst, x_src, y_src,
                                      width_src, height_src, bits, bmi, coloruse, rop );
     if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    if (dc_attr->print) print_call_start_page( dc_attr );
     if (dc_attr->emf && !EMFDC_StretchDIBits( dc_attr, x_dst, y_dst, width_dst, height_dst,
                                               x_src, y_src, width_src, height_src, bits,
                                               bmi, coloruse, rop ))
@@ -1919,6 +2149,7 @@ BOOL WINAPI FillPath( HDC hdc )
     DC_ATTR *dc_attr;
 
     if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    if (dc_attr->print) print_call_start_page( dc_attr );
     if (dc_attr->emf && !EMFDC_FillPath( dc_attr )) return FALSE;
     return NtGdiFillPath( hdc );
 }
@@ -1931,6 +2162,7 @@ BOOL WINAPI StrokeAndFillPath( HDC hdc )
     DC_ATTR *dc_attr;
 
     if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    if (dc_attr->print) print_call_start_page( dc_attr );
     if (dc_attr->emf && !EMFDC_StrokeAndFillPath( dc_attr )) return FALSE;
     return NtGdiStrokeAndFillPath( hdc );
 }
@@ -1943,6 +2175,7 @@ BOOL WINAPI StrokePath( HDC hdc )
     DC_ATTR *dc_attr;
 
     if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    if (dc_attr->print) print_call_start_page( dc_attr );
     if (dc_attr->emf && !EMFDC_StrokePath( dc_attr )) return FALSE;
     return NtGdiStrokePath( hdc );
 }
@@ -2074,7 +2307,7 @@ INT WINAPI SetMetaRgn( HDC hdc )
     DC_ATTR *dc_attr;
 
     if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
-    if (dc_attr->emf) FIXME( "EMFs are not yet supported\n" );
+    if (dc_attr->emf && !EMFDC_SetMetaRgn( dc_attr )) return FALSE;
     return NtGdiSetMetaRgn( hdc );
 }
 
@@ -2153,7 +2386,11 @@ HPALETTE WINAPI SelectPalette( HDC hdc, HPALETTE palette, BOOL force_background 
  */
 UINT WINAPI RealizePalette( HDC hdc )
 {
+    DC_ATTR *dc_attr;
+
     if (is_meta_dc( hdc )) return METADC_RealizePalette( hdc );
+    if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    if (dc_attr->emf && !EMFDC_RealizePalette( dc_attr )) return 0;
     return pfnRealizePalette( hdc );
 }
 
@@ -2187,7 +2424,9 @@ BOOL WINAPI CancelDC(HDC hdc)
  */
 INT WINAPI StartDocW( HDC hdc, const DOCINFOW *doc )
 {
+    DOC_INFO_1W spool_info;
     WCHAR *output = NULL;
+    struct print *print;
     DC_ATTR *dc_attr;
     ABORTPROC proc;
     DOCINFOW info;
@@ -2210,19 +2449,40 @@ INT WINAPI StartDocW( HDC hdc, const DOCINFOW *doc )
           debugstr_w(info.lpszDatatype), info.fwType);
 
     if (!(dc_attr = get_dc_attr( hdc ))) return SP_ERROR;
+    if (dc_attr->print && dc_attr->emf) return SP_ERROR;
 
     proc = (ABORTPROC)(UINT_PTR)dc_attr->abort_proc;
     if (proc && !proc( hdc, 0 )) return 0;
 
-    if (dc_attr->hspool)
+    print = get_dc_print( dc_attr );
+    if (print)
     {
-        if (!info.lpszOutput) info.lpszOutput = (const WCHAR *)(ULONG_PTR)dc_attr->output;
-        output = StartDocDlgW( ULongToHandle( dc_attr->hspool ), &info );
+        if (!info.lpszOutput) info.lpszOutput = print->output;
+        output = StartDocDlgW( print->printer, &info );
         if (output) info.lpszOutput = output;
+
+        if (!info.lpszDatatype || !wcsicmp(info.lpszDatatype, L"EMF"))
+        {
+            spool_info.pDocName = (WCHAR *)info.lpszDocName;
+            spool_info.pOutputFile = (WCHAR *)info.lpszOutput;
+            spool_info.pDatatype = (WCHAR *)L"NT EMF 1.003";
+            if ((ret = StartDocPrinterW( print->printer, 1, (BYTE *)&spool_info )))
+            {
+                if (!spool_start_doc( dc_attr, print->printer, &info ))
+                {
+                    AbortDoc( hdc );
+                    ret = 0;
+                }
+                HeapFree( GetProcessHeap(), 0, output );
+                print->flags |= CALL_START_PAGE;
+                return ret;
+            }
+        }
     }
 
     ret = NtGdiStartDoc( hdc, &info, NULL, 0 );
     HeapFree( GetProcessHeap(), 0, output );
+    if (ret && print) print->flags |= CALL_START_PAGE;
     return ret;
 }
 
@@ -2275,6 +2535,17 @@ INT WINAPI StartDocA( HDC hdc, const DOCINFOA *doc )
  */
 INT WINAPI StartPage( HDC hdc )
 {
+    struct print *print;
+    DC_ATTR *dc_attr;
+
+    if (!(dc_attr = get_dc_attr( hdc ))) return SP_ERROR;
+    print = get_dc_print( dc_attr );
+    if (print)
+    {
+        print->flags = (print->flags & ~CALL_START_PAGE) | CALL_END_PAGE;
+        if (dc_attr->emf)
+            return spool_start_page( dc_attr, print->printer );
+    }
     return NtGdiStartPage( hdc );
 }
 
@@ -2283,6 +2554,20 @@ INT WINAPI StartPage( HDC hdc )
  */
 INT WINAPI EndPage( HDC hdc )
 {
+    struct print *print;
+    DC_ATTR *dc_attr;
+
+    if (!(dc_attr = get_dc_attr( hdc ))) return SP_ERROR;
+    print = get_dc_print( dc_attr );
+    if (print)
+    {
+        BOOL write = print->flags & WRITE_DEVMODE;
+
+        if (!(print->flags & CALL_END_PAGE)) return SP_ERROR;
+        print->flags = (print->flags & ~(CALL_END_PAGE | WRITE_DEVMODE)) | CALL_START_PAGE;
+        if (dc_attr->emf)
+            return spool_end_page( dc_attr, print->printer, print->devmode, write );
+    }
     return NtGdiEndPage( hdc );
 }
 
@@ -2291,6 +2576,18 @@ INT WINAPI EndPage( HDC hdc )
  */
 INT WINAPI EndDoc( HDC hdc )
 {
+    struct print *print;
+    DC_ATTR *dc_attr;
+
+    if (!(dc_attr = get_dc_attr( hdc ))) return SP_ERROR;
+    print = get_dc_print( dc_attr );
+    if (print)
+    {
+        if (print->flags & CALL_END_PAGE) EndPage( hdc );
+        print->flags &= ~CALL_START_PAGE;
+        if (dc_attr->emf)
+            return spool_end_doc( dc_attr, print->printer );
+    }
     return NtGdiEndDoc( hdc );
 }
 
@@ -2299,6 +2596,17 @@ INT WINAPI EndDoc( HDC hdc )
  */
 INT WINAPI AbortDoc( HDC hdc )
 {
+    struct print *print;
+    DC_ATTR *dc_attr;
+
+    if (!(dc_attr = get_dc_attr( hdc ))) return SP_ERROR;
+    print = get_dc_print( dc_attr );
+    if (print)
+    {
+        print->flags &= ~(CALL_START_PAGE | CALL_END_PAGE);
+        if (dc_attr->emf)
+            return spool_abort_doc( dc_attr, print->printer );
+    }
     return NtGdiAbortDoc( hdc );
 }
 
@@ -2334,8 +2642,12 @@ INT WINAPI SetICMMode( HDC hdc, INT mode )
  */
 BOOL WINAPI GdiIsMetaPrintDC( HDC hdc )
 {
-    FIXME( "%p\n", hdc );
-    return FALSE;
+    DC_ATTR *dc_attr;
+
+    TRACE( "%p\n", hdc );
+
+    if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
+    return dc_attr->print && dc_attr->emf;
 }
 
 /***********************************************************************
@@ -2392,4 +2704,193 @@ ULONG WINAPI DdQueryDisplaySettingsUniqueness(void)
     static int warn_once;
     if (!warn_once++) FIXME( "stub\n" );
     return 0;
+}
+
+/*******************************************************************
+ *           GdiGetSpoolFileHandle    (GDI32.@)
+ */
+HANDLE WINAPI GdiGetSpoolFileHandle( WCHAR *printer_name,
+        DEVMODEW *devmode, WCHAR *doc_name )
+{
+    struct spool_handle *ret;
+    HANDLE spool;
+
+    TRACE( "%s %p %s\n", wine_dbgstr_w(printer_name), devmode, wine_dbgstr_w(doc_name) );
+
+    if (!devmode) return NULL;
+    if (!OpenPrinterW( doc_name, &spool, NULL )) return NULL;
+
+    ret = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*ret) );
+    if (!ret)
+    {
+        ClosePrinter( spool );
+        return NULL;
+    }
+    ret->spool = spool;
+
+    ret->devmodes = HeapAlloc( GetProcessHeap(), 0, sizeof(*ret->devmodes) * 8);
+    if (!ret->devmodes)
+    {
+        GdiDeleteSpoolFileHandle( ret );
+        return NULL;
+    }
+    ret->devmodes_size = 8;
+
+    ret->devmodes[0].devmode = HeapAlloc( GetProcessHeap(), 0,
+            devmode->dmSize + devmode->dmDriverExtra );
+    if (!ret->devmodes[0].devmode)
+    {
+        GdiDeleteSpoolFileHandle( ret );
+        return NULL;
+    }
+    memcpy( ret->devmodes[0].devmode, devmode, devmode->dmSize + devmode->dmDriverExtra );
+    ret->devmodes[0].page = 0;
+    ret->devmodes_no = 1;
+    return ret;
+}
+
+/*******************************************************************
+ *           GdiDeleteSpoolFileHandle    (GDI32.@)
+ */
+BOOL WINAPI GdiDeleteSpoolFileHandle( HANDLE h )
+{
+    struct spool_handle *sh = (struct spool_handle *)h;
+    int i;
+
+    TRACE( "%p\n", h );
+
+    if (!sh)
+        return FALSE;
+
+    ClosePrinter( sh->spool );
+    for (i = 0; i < sh->devmodes_no; i++)
+        HeapFree( GetProcessHeap(), 0, sh->devmodes[i].devmode );
+    HeapFree( GetProcessHeap(), 0, sh->devmodes );
+    HeapFree( GetProcessHeap(), 0, sh );
+    return TRUE;
+}
+
+static BOOL read_emfspool_record( struct spool_handle *sh )
+{
+    struct record_hdr
+    {
+        unsigned int ulID;
+        unsigned int cjSize;
+    } hdr;
+    LARGE_INTEGER pos;
+    BOOL ret;
+    DWORD r;
+
+    if (!sh->spool) return FALSE;
+
+    ret = ReadPrinter( sh->spool, &hdr, sizeof(hdr), &r );
+    if (!ret || r != sizeof(hdr))
+    {
+        ClosePrinter( sh->spool );
+        sh->spool = NULL;
+        return FALSE;
+    }
+    TRACE( "parsing record %u\n", hdr.ulID );
+
+    if (hdr.ulID == EMRI_HEADER)
+        hdr.cjSize -= sizeof(hdr);
+
+    switch (hdr.ulID)
+    {
+    case EMRI_DEVMODE:
+        /* remove unused devmode */
+        if (sh->devmodes_no - 2 >= 0 && sh->devmodes[sh->devmodes_no - 2].page ==
+                sh->devmodes[sh->devmodes_no - 1].page)
+        {
+            HeapFree( GetProcessHeap(), 0, sh->devmodes[sh->devmodes_no - 1].devmode );
+            sh->devmodes_no--;
+        }
+        else if (sh->devmodes_no == sh->devmodes_size)
+        {
+            void *alloc = HeapReAlloc( GetProcessHeap(), 0, sh->devmodes, sh->devmodes_size * 2 );
+
+            if (!alloc)
+            {
+                ClosePrinter( sh->spool );
+                sh->spool = NULL;
+                return FALSE;
+            }
+            sh->devmodes = alloc;
+            sh->devmodes_size *= 2;
+        }
+
+        sh->devmodes[sh->devmodes_no].devmode = HeapAlloc( GetProcessHeap(), 0, hdr.cjSize );
+        if (!sh->devmodes[sh->devmodes_no].devmode)
+        {
+            ClosePrinter( sh->spool );
+            sh->spool = NULL;
+            return FALSE;
+        }
+
+        ret = ReadPrinter( sh->spool, sh->devmodes[sh->devmodes_no].devmode, hdr.cjSize, &r );
+        if (!ret || r != hdr.cjSize)
+        {
+            ClosePrinter( sh->spool );
+            sh->spool = NULL;
+            return FALSE;
+        }
+        sh->devmodes[sh->devmodes_no].page = sh->devmodes[sh->devmodes_no - 1].page;
+        sh->devmodes_no++;
+        return TRUE;
+
+    case EMRI_METAFILE:
+    case EMRI_FORM_METAFILE:
+    case EMRI_BW_METAFILE:
+    case EMRI_BW_FORM_METAFILE:
+    case EMRI_METAFILE_EXT:
+    case EMRI_BW_METAFILE_EXT:
+        sh->devmodes[sh->devmodes_no - 1].page++;
+        /* fall through */
+    default:
+        pos.QuadPart = hdr.cjSize;
+        ret = SeekPrinter( sh->spool, pos, NULL, FILE_CURRENT, FALSE );
+        if (!ret)
+        {
+            ClosePrinter( sh->spool );
+            sh->spool = NULL;
+            return FALSE;
+        }
+        return TRUE;
+    }
+}
+
+/*******************************************************************
+ *           GdiGetDevmodeForPage    (GDI32.@)
+ */
+BOOL WINAPI GdiGetDevmodeForPage( HANDLE h, DWORD page, DEVMODEW **cur, DEVMODEW **prev )
+{
+    struct spool_handle *sh = (struct spool_handle *)h;
+    int i;
+
+    TRACE( "%p %ld %p %p\n", h, page, cur, prev );
+
+    if (!sh)
+        return FALSE;
+
+    i = 0;
+    while (1)
+    {
+        if (sh->devmodes[i].page >= page)
+        {
+            if (cur) *cur = sh->devmodes[i].devmode;
+            if (prev)
+            {
+                if (!i || sh->devmodes[i - 1].page != page - 1)
+                    *prev = sh->devmodes[i].devmode;
+                else
+                    *prev = sh->devmodes[i - 1].devmode;
+            }
+            return TRUE;
+        }
+
+        if (i + 1 < sh->devmodes_no)
+            i++;
+        else if (!read_emfspool_record( sh ))
+            return FALSE;
+    }
 }

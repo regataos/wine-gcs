@@ -27,20 +27,32 @@
 #include "objbase.h"
 
 #include "activation.h"
+#include "rometadataresolution.h"
 
 #define WIDL_using_Windows_Foundation_Metadata
 #include "windows.foundation.metadata.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(wintypes);
 
-static const char *debugstr_hstring(HSTRING hstr)
+static const struct
 {
-    const WCHAR *str;
-    UINT32 len;
-    if (hstr && !((ULONG_PTR)hstr >> 16))
-        return "(invalid)";
-    str = WindowsGetStringRawBuffer(hstr, &len);
-    return wine_dbgstr_wn(str, len);
+    const WCHAR *name;
+    unsigned int max_major;
+}
+present_contracts[] =
+{
+    { L"Windows.Foundation.UniversalApiContract", 10, },
+};
+
+static BOOLEAN is_api_contract_present( const HSTRING hname, unsigned int version )
+{
+    const WCHAR *name = WindowsGetStringRawBuffer( hname, NULL );
+    unsigned int i;
+
+    for (i = 0; i < ARRAY_SIZE(present_contracts); ++i)
+        if (!wcsicmp( name, present_contracts[i].name )) return version <= present_contracts[i].max_major;
+
+    return FALSE;
 }
 
 struct wintypes
@@ -289,13 +301,13 @@ static HRESULT STDMETHODCALLTYPE api_information_statics_IsEnumNamedValuePresent
 static HRESULT STDMETHODCALLTYPE api_information_statics_IsApiContractPresentByMajor(
         IApiInformationStatics *iface, HSTRING contract_name, UINT16 major_version, BOOLEAN *value)
 {
-    FIXME("iface %p, contract_name %s, major_version %u, value %p stub!\n", iface,
+    FIXME("iface %p, contract_name %s, major_version %u, value %p semi-stub.\n", iface,
             debugstr_hstring(contract_name), major_version, value);
 
     if (!contract_name)
         return E_INVALIDARG;
 
-    *value = FALSE;
+    *value = is_api_contract_present( contract_name, major_version );
     return S_OK;
 }
 
@@ -352,6 +364,13 @@ HRESULT WINAPI DllGetActivationFactory(HSTRING classid, IActivationFactory **fac
     TRACE("classid %s, factory %p.\n", debugstr_hstring(classid), factory);
     *factory = &wintypes.IActivationFactory_iface;
     IUnknown_AddRef(*factory);
+    return S_OK;
+}
+
+HRESULT WINAPI RoIsApiContractMajorVersionPresent(const WCHAR *name, UINT16 major, BOOL *result)
+{
+    FIXME("name %s, major %u, result %p\n", debugstr_w(name), major, result);
+    *result = FALSE;
     return S_OK;
 }
 

@@ -4,5 +4,5 @@ IMPORTS = dxgi
 
 EXTRADLLFLAGS = -mno-cygwin -Wb,--prefer-native
 
-C_SRCS = \
+SOURCES = \
 	atiadlxx_main.c

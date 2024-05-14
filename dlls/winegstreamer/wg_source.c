@@ -41,21 +41,99 @@
 
 #define WG_SOURCE_MAX_STREAMS 32
 
+struct source_stream
+{
+    GstPad *pad;
+    GstAtomicQueue *queue;
+    GstBuffer *buffer;
+    gboolean eos;
+};
+
 struct wg_source
 {
+    gchar *url;
     GstPad *src_pad;
     GstElement *container;
     GstSegment segment;
     bool valid_segment;
-
     guint64 max_duration;
-    GstPad *stream_pads[WG_SOURCE_MAX_STREAMS];
+
     guint stream_count;
+    struct source_stream streams[WG_SOURCE_MAX_STREAMS];
 };
+
+static struct wg_source *get_source(wg_source_t source)
+{
+    return (struct wg_source *)(ULONG_PTR)source;
+}
+
+static const char *media_type_from_caps(GstCaps *caps)
+{
+    GstStructure *structure;
+    if (!caps || !(structure = gst_caps_get_structure(caps, 0)))
+        return "";
+    return gst_structure_get_name(structure);
+}
+
+static GstCaps *detect_caps_from_data(const char *url, const void *data, guint size)
+{
+    const char *extension = url ? strrchr(url, '.') : NULL;
+    GstTypeFindProbability probability;
+    GstCaps *caps;
+    gchar *str;
+
+    if (!(caps = gst_type_find_helper_for_data_with_extension(NULL, data, size,
+            extension ? extension + 1 : NULL, &probability)))
+    {
+        GST_ERROR("Failed to detect caps for url %s, data %p, size %u", url, data, size);
+        return NULL;
+    }
+
+    str = gst_caps_to_string(caps);
+    if (probability > GST_TYPE_FIND_POSSIBLE)
+        GST_INFO("Detected caps %s with probability %u for url %s, data %p, size %u",
+                str, probability, url, data, size);
+    else
+        GST_FIXME("Detected caps %s with probability %u for url %s, data %p, size %u",
+                str, probability, url, data, size);
+    g_free(str);
+
+    return caps;
+}
+
+static GstPad *create_pad_with_caps(GstPadDirection direction, GstCaps *caps)
+{
+    GstCaps *pad_caps = caps ? gst_caps_ref(caps) : gst_caps_new_any();
+    const char *name = direction == GST_PAD_SRC ? "src" : "sink";
+    GstPadTemplate *template;
+    GstPad *pad;
+
+    if (!pad_caps || !(template = gst_pad_template_new(name, direction, GST_PAD_ALWAYS, pad_caps)))
+        return NULL;
+    pad = gst_pad_new_from_template(template, "src");
+    g_object_unref(template);
+    gst_caps_unref(pad_caps);
+    return pad;
+}
+
+static GstBuffer *create_buffer_from_bytes(const void *data, guint size)
+{
+    GstBuffer *buffer;
+
+    if (!(buffer = gst_buffer_new_and_alloc(size)))
+        GST_ERROR("Failed to allocate buffer for %#x bytes\n", size);
+    else
+    {
+        gst_buffer_fill(buffer, 0, data, size);
+        gst_buffer_set_size(buffer, size);
+    }
+
+    return buffer;
+}
 
 static GstStream *source_get_stream(struct wg_source *source, guint index)
 {
-    return index >= source->stream_count ? NULL : gst_pad_get_stream(source->stream_pads[index]);
+    return index >= source->stream_count ? NULL : gst_pad_get_stream(source->streams[index].pad);
 }
 
 static GstCaps *source_get_stream_caps(struct wg_source *source, guint index)
@@ -80,9 +158,44 @@ static GstTagList *source_get_stream_tags(struct wg_source *source, guint index)
     return tags;
 }
 
+static bool source_set_stream_flags(struct wg_source *source, guint index, GstStreamFlags flags)
+{
+    GstStream *stream;
+    if (!(stream = source_get_stream(source, index)))
+        return false;
+    gst_stream_set_stream_flags(stream, flags);
+    gst_object_unref(stream);
+    return true;
+}
+
+static GstStreamFlags source_get_stream_flags(struct wg_source *source, guint index)
+{
+    GstStreamFlags flags;
+    GstStream *stream;
+    if (!(stream = source_get_stream(source, index)))
+        return 0;
+    flags = gst_stream_get_stream_flags(stream);
+    gst_object_unref(stream);
+    return flags;
+}
+
+static NTSTATUS source_get_stream_buffer(struct wg_source *source, guint index, GstBuffer **buffer)
+{
+    GstBuffer **stream_buffer;
+    if (index >= source->stream_count)
+        return STATUS_INVALID_PARAMETER;
+
+    stream_buffer = &source->streams[index].buffer;
+    if (!*stream_buffer && !(*stream_buffer = gst_atomic_queue_pop(source->streams[index].queue)))
+        return source->streams[index].eos ? STATUS_END_OF_FILE : STATUS_PENDING;
+
+    *buffer = gst_buffer_ref(*stream_buffer);
+    return STATUS_SUCCESS;
+}
+
 static gboolean src_event_seek(struct wg_source *source, GstEvent *event)
 {
-    guint32 seqnum = gst_event_get_seqnum(event);
+    guint32 i, seqnum = gst_event_get_seqnum(event);
     GstSeekType cur_type, stop_type;
     GstSeekFlags flags;
     GstFormat format;
@@ -111,6 +224,9 @@ static gboolean src_event_seek(struct wg_source *source, GstEvent *event)
     }
 
     source->segment.start = cur;
+
+    for (i = 0; i < ARRAY_SIZE(source->streams); i++)
+        source->streams[i].eos = false;
 
     if (flags & GST_SEEK_FLAG_FLUSH)
     {
@@ -175,6 +291,17 @@ static gboolean src_query_seeking(struct wg_source *source, GstQuery *query)
     return true;
 }
 
+static gboolean src_query_uri(struct wg_source *source, GstQuery *query)
+{
+    gchar *uri;
+
+    gst_query_parse_uri(query, &uri);
+    GST_TRACE("source %p, uri %s", source, uri);
+    gst_query_set_uri(query, source->url);
+
+    return true;
+}
+
 static gboolean src_query_cb(GstPad *pad, GstObject *parent, GstQuery *query)
 {
     struct wg_source *source = gst_pad_get_element_private(pad);
@@ -187,6 +314,10 @@ static gboolean src_query_cb(GstPad *pad, GstObject *parent, GstQuery *query)
         return src_query_scheduling(source, query);
     case GST_QUERY_SEEKING:
         return src_query_seeking(source, query);
+    case GST_QUERY_URI:
+        if (!source->url)
+            return false;
+        return src_query_uri(source, query);
     default:
         return gst_pad_query_default(pad, parent, query);
     }
@@ -194,10 +325,21 @@ static gboolean src_query_cb(GstPad *pad, GstObject *parent, GstQuery *query)
 
 static GstFlowReturn sink_chain_cb(GstPad *pad, GstObject *parent, GstBuffer *buffer)
 {
-    struct wg_soutce *source = gst_pad_get_element_private(pad);
+    struct wg_source *source = gst_pad_get_element_private(pad);
+    guint index;
+
     GST_TRACE("source %p, pad %p, buffer %p.", source, pad, buffer);
-    gst_buffer_unref(buffer);
-    return GST_FLOW_EOS;
+
+    for (index = 0; index < source->stream_count; index++)
+        if (source->streams[index].pad == pad)
+            break;
+
+    if (source_get_stream_flags(source, index) & GST_STREAM_FLAG_SELECT)
+        gst_atomic_queue_push(source->streams[index].queue, buffer);
+    else
+        gst_buffer_unref(buffer);
+
+    return GST_FLOW_OK;
 }
 
 static gboolean sink_event_caps(struct wg_source *source, GstPad *pad, GstEvent *event)
@@ -259,11 +401,29 @@ static gboolean sink_event_stream_start(struct wg_source *source, GstPad *pad, G
     gst_event_parse_stream_flags(event, &flags);
     if (!gst_event_parse_group_id(event, &group))
         group = -1;
+
     if (gst_pad_peer_query_duration(pad, GST_FORMAT_TIME, &duration) && GST_CLOCK_TIME_IS_VALID(duration))
         source->max_duration = max(source->max_duration, duration);
 
     GST_TRACE("source %p, pad %p, stream %p, id %s, flags %#x, group %d, duration %" GST_TIME_FORMAT,
             source, pad, stream, id, flags, group, GST_TIME_ARGS(duration));
+
+    gst_event_unref(event);
+    return true;
+}
+
+static gboolean sink_event_eos(struct wg_source *source, GstPad *pad, GstEvent *event)
+{
+    guint index;
+
+    GST_TRACE("source %p, pad %p, event %p", source, pad, event);
+
+    for (index = 0; index < source->stream_count; index++)
+        if (source->streams[index].pad == pad)
+            break;
+
+    if (index < source->stream_count)
+        source->streams[index].eos = true;
 
     gst_event_unref(event);
     return true;
@@ -281,6 +441,8 @@ static gboolean sink_event_cb(GstPad *pad, GstObject *parent, GstEvent *event)
         return sink_event_tag(source, pad, event);
     case GST_EVENT_STREAM_START:
         return sink_event_stream_start(source, pad, event);
+    case GST_EVENT_EOS:
+        return sink_event_eos(source, pad, event);
     default:
         return gst_pad_event_default(pad, parent, event);
     }
@@ -293,6 +455,7 @@ static GstEvent *create_stream_start_event(const char *stream_id)
 
     if (!(stream = gst_stream_new(stream_id, NULL, GST_STREAM_TYPE_UNKNOWN, 0)))
         return NULL;
+    gst_stream_set_stream_flags(stream, GST_STREAM_FLAG_SELECT);
     if ((event = gst_event_new_stream_start(stream_id)))
     {
         gst_event_set_stream(event, stream);
@@ -312,13 +475,13 @@ static void pad_added_cb(GstElement *element, GstPad *pad, gpointer user)
     guint index;
 
     GST_TRACE("source %p, element %p, pad %p.", source, element, pad);
-    if ((index = source->stream_count++) >= ARRAY_SIZE(source->stream_pads))
+    if ((index = source->stream_count++) >= ARRAY_SIZE(source->streams))
     {
         GST_FIXME("Not enough sink pads, need %u", source->stream_count);
         return;
     }
 
-    sink_pad = source->stream_pads[index];
+    sink_pad = source->streams[index].pad;
     if (gst_pad_link(pad, sink_pad) < 0 || !gst_pad_set_active(sink_pad, true))
         GST_ERROR("Failed to link new pad to sink pad %p", sink_pad);
 
@@ -353,6 +516,7 @@ NTSTATUS wg_source_create(void *args)
         gst_caps_unref(src_caps);
         return STATUS_UNSUCCESSFUL;
     }
+    source->url = params->url ? strdup(params->url) : NULL;
     gst_segment_init(&source->segment, GST_FORMAT_BYTES);
     source->segment.stop = params->file_size;
 
@@ -366,19 +530,23 @@ NTSTATUS wg_source_create(void *args)
 
     if (!(source->container = gst_bin_new("wg_source")))
         goto error;
+    GST_OBJECT_FLAG_SET(source->container, GST_BIN_FLAG_STREAMS_AWARE);
+
     if (!(source->src_pad = create_pad_with_caps(GST_PAD_SRC, src_caps)))
         goto error;
     gst_pad_set_element_private(source->src_pad, source);
     gst_pad_set_query_function(source->src_pad, src_query_cb);
     gst_pad_set_event_function(source->src_pad, src_event_cb);
 
-    for (i = 0; i < ARRAY_SIZE(source->stream_pads); i++)
+    for (i = 0; i < ARRAY_SIZE(source->streams); i++)
     {
-        if (!(source->stream_pads[i] = create_pad_with_caps(GST_PAD_SINK, NULL)))
+        if (!(source->streams[i].pad = create_pad_with_caps(GST_PAD_SINK, NULL)))
             goto error;
-        gst_pad_set_element_private(source->stream_pads[i], source);
-        gst_pad_set_chain_function(source->stream_pads[i], sink_chain_cb);
-        gst_pad_set_event_function(source->stream_pads[i], sink_event_cb);
+        if (!(source->streams[i].queue = gst_atomic_queue_new(1)))
+            goto error;
+        gst_pad_set_element_private(source->streams[i].pad, source);
+        gst_pad_set_chain_function(source->streams[i].pad, sink_chain_cb);
+        gst_pad_set_event_function(source->streams[i].pad, sink_event_cb);
     }
 
     if (!(any_caps = gst_caps_new_any()))
@@ -400,7 +568,7 @@ NTSTATUS wg_source_create(void *args)
     /* try to link the first output pad, some demuxers only have static pads */
     if ((peer = gst_element_get_static_pad(last, "src")))
     {
-        GstPad *sink_pad = source->stream_pads[0];
+        GstPad *sink_pad = source->streams[0].pad;
         if (gst_pad_link(peer, sink_pad) < 0 || !gst_pad_set_active(sink_pad, true))
             GST_ERROR("Failed to link static source pad %p", peer);
         else
@@ -413,11 +581,11 @@ NTSTATUS wg_source_create(void *args)
         goto error;
 
     if (!(event = create_stream_start_event("wg_source"))
-            || !gst_pad_push_event(source->src_pad, event))
+            || !push_event(source->src_pad, event))
         goto error;
     gst_caps_unref(src_caps);
 
-    params->source = source;
+    params->source = (wg_source_t)(ULONG_PTR)source;
     GST_INFO("Created winegstreamer source %p.", source);
     return STATUS_SUCCESS;
 
@@ -427,10 +595,18 @@ error:
         gst_element_set_state(source->container, GST_STATE_NULL);
         gst_object_unref(source->container);
     }
-    for (i = 0; i < ARRAY_SIZE(source->stream_pads) && source->stream_pads[i]; i++)
-        gst_object_unref(source->stream_pads[i]);
+    for (i = 0; i < ARRAY_SIZE(source->streams); i++)
+    {
+        if (source->streams[i].buffer)
+            gst_buffer_unref(source->streams[i].buffer);
+        if (source->streams[i].queue)
+            gst_atomic_queue_unref(source->streams[i].queue);
+        if (source->streams[i].pad)
+            gst_object_unref(source->streams[i].pad);
+    }
     if (source->src_pad)
         gst_object_unref(source->src_pad);
+    free(source->url);
     free(source);
 
     gst_caps_unref(src_caps);
@@ -441,25 +617,31 @@ error:
 
 NTSTATUS wg_source_destroy(void *args)
 {
-    struct wg_source *source = args;
+    struct wg_source *source = get_source(*(wg_source_t *)args);
     guint i;
 
     GST_TRACE("source %p", source);
 
     gst_element_set_state(source->container, GST_STATE_NULL);
     gst_object_unref(source->container);
-    for (i = 0; i < ARRAY_SIZE(source->stream_pads); i++)
-        gst_object_unref(source->stream_pads[i]);
+    for (i = 0; i < ARRAY_SIZE(source->streams); i++)
+    {
+        if (source->streams[i].buffer)
+            gst_buffer_unref(source->streams[i].buffer);
+        gst_atomic_queue_unref(source->streams[i].queue);
+        gst_object_unref(source->streams[i].pad);
+    }
     gst_object_unref(source->src_pad);
+    free(source->url);
     free(source);
 
     return STATUS_SUCCESS;
 }
 
-NTSTATUS wg_source_get_status(void *args)
+NTSTATUS wg_source_get_stream_count(void *args)
 {
-    struct wg_source_get_status_params *params = args;
-    struct wg_source *source = params->source;
+    struct wg_source_get_stream_count_params *params = args;
+    struct wg_source *source = get_source(params->source);
     UINT i, stream_count;
     GstCaps *caps;
 
@@ -473,15 +655,65 @@ NTSTATUS wg_source_get_status(void *args)
     }
 
     params->stream_count = stream_count;
+    return STATUS_SUCCESS;
+}
+
+NTSTATUS wg_source_get_duration(void *args)
+{
+    struct wg_source_get_duration_params *params = args;
+    struct wg_source *source = get_source(params->source);
+
+    GST_TRACE("source %p", source);
+
     params->duration = source->max_duration / 100;
+    return STATUS_SUCCESS;
+}
+
+NTSTATUS wg_source_get_position(void *args)
+{
+    struct wg_source_get_position_params *params = args;
+    struct wg_source *source = get_source(params->source);
+
+    GST_TRACE("source %p", source);
+
     params->read_offset = source->segment.start;
     return STATUS_SUCCESS;
+}
+
+NTSTATUS wg_source_set_position(void *args)
+{
+    struct wg_source_set_position_params *params = args;
+    struct wg_source *source = get_source(params->source);
+    guint64 time = params->time * 100;
+    GstEvent *event;
+    guint i;
+
+    GST_TRACE("source %p", source);
+
+    if (!(event = gst_event_new_seek(1.0, GST_FORMAT_TIME, GST_SEEK_FLAG_FLUSH,
+            GST_SEEK_TYPE_SET, time, GST_SEEK_TYPE_NONE, -1))
+            || !gst_pad_push_event(source->streams[0].pad, event))
+        GST_WARNING("Failed to seek source %p to %" G_GINT64_MODIFIER "x", source, time);
+
+    for (i = 0; i < source->stream_count; i++)
+    {
+        GstBuffer *buffer;
+
+        while (!source_get_stream_buffer(source, i, &buffer))
+        {
+            gst_buffer_unref(source->streams[i].buffer);
+            source->streams[i].buffer = NULL;
+            gst_buffer_unref(buffer);
+        }
+    }
+
+    return S_OK;
 }
 
 NTSTATUS wg_source_push_data(void *args)
 {
     struct wg_source_push_data_params *params = args;
-    struct wg_source *source = params->source;
+    struct wg_source *source = get_source(params->source);
     GstFlowReturn ret = GST_FLOW_OK;
     GstBuffer *buffer;
     GstEvent *event;
@@ -494,6 +726,13 @@ NTSTATUS wg_source_push_data(void *args)
                 || !gst_pad_push_event(source->src_pad, event))
             GST_ERROR("Failed to push new segment event");
         source->valid_segment = true;
+    }
+
+    if (!params->size)
+    {
+        if (source->segment.start != source->segment.stop)
+            goto eos;
+        return STATUS_SUCCESS;
     }
 
     if (!(buffer = create_buffer_from_bytes(params->data, params->size)))
@@ -513,52 +752,154 @@ NTSTATUS wg_source_push_data(void *args)
     if (source->segment.start != source->segment.stop)
         return STATUS_SUCCESS;
 
+eos:
     if (!(event = gst_event_new_eos())
-        || !gst_pad_push_event(source->src_pad, event))
+            || !gst_pad_push_event(source->src_pad, event))
         GST_WARNING("Failed to push EOS event");
+    source->segment.start = source->segment.stop;
 
     return STATUS_SUCCESS;
+}
+
+NTSTATUS wg_source_read_data(void *args)
+{
+    struct wg_source_read_data_params *params = args;
+    struct wg_source *source = get_source(params->source);
+    struct wg_sample *sample = params->sample;
+    NTSTATUS status = STATUS_SUCCESS;
+    guint index = params->index;
+    GstMapInfo info = {0};
+    GstBuffer *buffer;
+
+    GST_TRACE("source %p, index %#x, sample %p", source, index, sample);
+
+    if ((status = source_get_stream_buffer(source, index, &buffer)))
+        return status;
+
+    if (!gst_buffer_map(buffer, &info, GST_MAP_READ))
+        status = STATUS_UNSUCCESSFUL;
+    else
+    {
+        if (info.size > sample->max_size)
+            status = STATUS_BUFFER_TOO_SMALL;
+        else
+        {
+            memcpy(wg_sample_data(sample), info.data, info.size);
+            sample->size = info.size;
+
+            if (GST_BUFFER_PTS_IS_VALID(buffer))
+            {
+                sample->flags |= WG_SAMPLE_FLAG_HAS_PTS;
+                sample->pts = GST_BUFFER_PTS(buffer) / 100;
+            }
+            else if (GST_BUFFER_DTS_IS_VALID(buffer))
+            {
+                sample->flags |= WG_SAMPLE_FLAG_HAS_PTS;
+                sample->pts = GST_BUFFER_DTS(buffer) / 100;
+            }
+            if (GST_BUFFER_DURATION_IS_VALID(buffer))
+            {
+                GstClockTime duration = GST_BUFFER_DURATION(buffer) / 100;
+                sample->flags |= WG_SAMPLE_FLAG_HAS_DURATION;
+                sample->duration = duration;
+            }
+            if (!GST_BUFFER_FLAG_IS_SET(buffer, GST_BUFFER_FLAG_DELTA_UNIT))
+                sample->flags |= WG_SAMPLE_FLAG_SYNC_POINT;
+            if (GST_BUFFER_FLAG_IS_SET(buffer, GST_BUFFER_FLAG_DISCONT))
+                sample->flags |= WG_SAMPLE_FLAG_DISCONTINUITY;
+
+            gst_buffer_unref(source->streams[index].buffer);
+            source->streams[index].buffer = NULL;
+        }
+
+        sample->max_size = info.size;
+        gst_buffer_unmap(buffer, &info);
+    }
+
+    gst_buffer_unref(buffer);
+    return status;
 }
 
 NTSTATUS wg_source_get_stream_format(void *args)
 {
     struct wg_source_get_stream_format_params *params = args;
-    struct wg_source *source = params->source;
+    struct wg_source *source = get_source(params->source);
     guint index = params->index;
-    GstCaps *caps, *copy;
+    GstCaps *caps;
 
     GST_TRACE("source %p, index %u", source, index);
 
     if (!(caps = source_get_stream_caps(source, index)))
         return STATUS_UNSUCCESSFUL;
+    wg_format_from_caps(&params->format, caps);
 
-    if (!(copy = gst_caps_copy(caps)))
-        goto done;
-    switch (stream_type_from_caps(caps))
-    {
-    case GST_STREAM_TYPE_VIDEO:
-        gst_structure_set_name(gst_caps_get_structure(copy, 0), "video/x-raw");
-        gst_caps_set_simple(copy, "format", G_TYPE_STRING, "NV12", NULL);
-        break;
-    case GST_STREAM_TYPE_AUDIO:
-        gst_structure_set_name(gst_caps_get_structure(copy, 0), "audio/x-raw");
-        gst_caps_set_simple(copy, "format", G_TYPE_STRING, "S16LE", NULL);
-        gst_caps_set_simple(copy, "layout", G_TYPE_STRING, "interleaved", NULL);
-        break;
-    default: break;
-    }
-    wg_format_from_caps(&params->format, copy);
-    gst_caps_unref(copy);
-
-done:
     gst_caps_unref(caps);
     return STATUS_SUCCESS;
+}
+
+static gchar *stream_lang_from_tags(GstTagList *tags, bool is_quicktime)
+{
+    gchar *value;
+
+    if (!gst_tag_list_get_string(tags, GST_TAG_LANGUAGE_CODE, &value) || !value)
+        return NULL;
+
+    if (is_quicktime)
+    {
+        /* For QuickTime media, we convert the language tags to ISO 639-1. */
+        const gchar *lang_code_iso_639_1 = gst_tag_get_language_code_iso_639_1(value);
+        gchar *tmp = lang_code_iso_639_1 ? g_strdup(lang_code_iso_639_1) : NULL;
+        g_free(value);
+        value = tmp;
+    }
+
+    return value;
+}
+
+static gchar *stream_name_from_tags(GstTagList *tags)
+{
+    /* Extract stream name from Quick Time demuxer private tag where it puts unrecognized chunks. */
+    guint i, tag_count = gst_tag_list_get_tag_size(tags, "private-qt-tag");
+    gchar *value = NULL;
+
+    for (i = 0; !value && i < tag_count; ++i)
+    {
+        const gchar *name;
+        const GValue *val;
+        GstSample *sample;
+        GstBuffer *buf;
+        gsize size;
+
+        if (!(val = gst_tag_list_get_value_index(tags, "private-qt-tag", i)))
+            continue;
+        if (!GST_VALUE_HOLDS_SAMPLE(val) || !(sample = gst_value_get_sample(val)))
+            continue;
+        name = gst_structure_get_name(gst_sample_get_info(sample));
+        if (!name || strcmp(name, "application/x-gst-qt-name-tag"))
+            continue;
+        if (!(buf = gst_sample_get_buffer(sample)))
+            continue;
+        if ((size = gst_buffer_get_size(buf)) < 8)
+            continue;
+        size -= 8;
+        if (!(value = g_malloc(size + 1)))
+            return NULL;
+        if (gst_buffer_extract(buf, 8, value, size) != size)
+        {
+            g_free(value);
+            value = NULL;
+            continue;
+        }
+        value[size] = 0;
+    }
+
+    return value;
 }
 
 NTSTATUS wg_source_get_stream_tag(void *args)
 {
     struct wg_source_get_stream_tag_params *params = args;
-    struct wg_source *source = params->source;
+    struct wg_source *source = get_source(params->source);
     enum wg_parser_tag tag = params->tag;
     guint index = params->index;
     GstTagList *tags;
@@ -577,10 +918,16 @@ NTSTATUS wg_source_get_stream_tag(void *args)
     {
     case WG_PARSER_TAG_LANGUAGE:
     {
-        GstCaps *caps = gst_pad_get_current_caps(source->src_pad);
-        value = stream_lang_from_tags(tags, caps);
-        if (caps)
+        bool is_quicktime = false;
+        GstCaps *caps;
+
+        if ((caps = gst_pad_get_current_caps(source->src_pad)))
+        {
+            is_quicktime = !strcmp(media_type_from_caps(caps), "video/quicktime");
             gst_caps_unref(caps);
+        }
+
+        value = stream_lang_from_tags(tags, is_quicktime);
         break;
     }
     case WG_PARSER_TAG_NAME:
@@ -613,4 +960,33 @@ NTSTATUS wg_source_get_stream_tag(void *args)
 error:
     gst_tag_list_unref(tags);
     return STATUS_NOT_FOUND;
+}
+
+NTSTATUS wg_source_set_stream_flags(void *args)
+{
+    struct wg_source_set_stream_flags_params *params = args;
+    struct wg_source *source = get_source(params->source);
+    BOOL select = params->select;
+    guint index = params->index;
+    GstStreamFlags flags;
+
+    GST_TRACE("source %p, index %u, select %u", source, index, select);
+
+    flags = select ? GST_STREAM_FLAG_SELECT : GST_STREAM_FLAG_UNSELECT;
+    if (!source_set_stream_flags(source, index, flags))
+        return STATUS_UNSUCCESSFUL;
+
+    if (!select)
+    {
+        GstBuffer *buffer;
+
+        while (!source_get_stream_buffer(source, index, &buffer))
+        {
+            gst_buffer_unref(source->streams[index].buffer);
+            source->streams[index].buffer = NULL;
+            gst_buffer_unref(buffer);
+        }
+    }
+
+    return STATUS_SUCCESS;
 }

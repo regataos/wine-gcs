@@ -495,6 +495,8 @@ static void dsound_render_destroy(struct strmbase_filter *iface)
         IDirectSound8_Release(filter->dsound);
     filter->dsound = NULL;
 
+    IUnknown_Release(filter->system_clock);
+
     if (filter->sink.pin.peer)
         IPin_Disconnect(filter->sink.pin.peer);
     IPin_Disconnect(&filter->sink.pin.IPin_iface);
@@ -939,7 +941,7 @@ HRESULT dsound_render_create(IUnknown *outer, IUnknown **out)
         IUnknown_Release(object->system_clock);
         strmbase_filter_cleanup(&object->filter);
         free(object);
-        return hr;
+        return hr == DSERR_NODRIVER ? VFW_E_NO_AUDIO_HARDWARE : hr;
     }
 
     if (FAILED(hr = IDirectSound8_SetCooperativeLevel(object->dsound,

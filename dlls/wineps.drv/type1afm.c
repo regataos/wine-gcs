@@ -319,6 +319,32 @@ static BOOL ReadString(FILE *file, CHAR buffer[], INT bufsize, LPCSTR key,
     return TRUE;
 }
 
+static BOOL ReadStringW(FILE *file, CHAR *buffer, int size, const char *key, WCHAR **out)
+{
+    char *outA;
+    int len;
+
+    if (!ReadString(file, buffer, size, key, &outA))
+        return FALSE;
+    if (!outA)
+    {
+        *out = NULL;
+        return TRUE;
+    }
+
+    len = MultiByteToWideChar(CP_ACP, 0, outA, -1, NULL, 0);
+    if (len)
+        *out = HeapAlloc(PSDRV_Heap, 0, len * sizeof(WCHAR));
+    if (!len || !*out)
+    {
+        HeapFree(PSDRV_Heap, 0, outA);
+        return FALSE;
+    }
+    MultiByteToWideChar(CP_ACP, 0, outA, -1, *out, len);
+    HeapFree(PSDRV_Heap, 0, outA);
+    return TRUE;
+}
+
 /*******************************************************************************
  *  ReadBBox
  *
@@ -699,9 +725,17 @@ static BOOL ParseB(LPSTR sz, OLD_AFMMETRICS *metrics)
  *  Non-fatal error:	leave metrics-> set to NULL
  *
  */
+static int __cdecl ug_name_cmp(const void *a, const void *b)
+{
+    return strcmp(((const UNICODEGLYPH *)a)->name->sz,
+            ((const UNICODEGLYPH *)b)->name->sz);
+}
+
 static BOOL ParseN(LPSTR sz, OLD_AFMMETRICS *metrics)
 {
     CHAR    save, *cp, *end_ptr;
+    UNICODEGLYPH ug, *pug;
+    GLYPHNAME gn;
 
     cp = sz + 1;
 
@@ -722,9 +756,21 @@ static BOOL ParseN(LPSTR sz, OLD_AFMMETRICS *metrics)
     save = *end_ptr;
     *end_ptr = '\0';
 
-    metrics->N = PSDRV_GlyphName(cp);
-    if (metrics->N == NULL)
-    	return FALSE;
+    ug.name = &gn;
+    gn.sz = cp;
+    pug = bsearch(&ug, PSDRV_AGLbyName, PSDRV_AGLbyNameSize,
+            sizeof(ug), ug_name_cmp);
+    if (!pug)
+    {
+        FIXME("unsupported glyph name: %s\n", cp);
+        metrics->N = NULL;
+        metrics->UV = -1;
+    }
+    else
+    {
+        metrics->N = pug->name;
+        metrics->UV = pug->UV;
+    }
 
     *end_ptr = save;
     return TRUE;
@@ -841,68 +887,32 @@ static inline BOOL IsWinANSI(LONG uv)
  *  Also does some font metric calculations that require UVs to be known.
  *
  */
-static int __cdecl UnicodeGlyphByNameIndex(const void *a, const void *b)
-{
-    return ((const UNICODEGLYPH *)a)->name->index -
-    	    ((const UNICODEGLYPH *)b)->name->index;
-}
-
 static VOID Unicodify(AFM *afm, OLD_AFMMETRICS *metrics)
 {
     INT     i;
 
-    if (strcmp(afm->EncodingScheme, "FontSpecific") == 0)
+    if (wcscmp(afm->EncodingScheme, L"FontSpecific") == 0)
     {
-    	for (i = 0; i < afm->NumofMetrics; ++i)
-	{
-	    if (metrics[i].C >= 0x20 && metrics[i].C <= 0xff)
-	    {
-		metrics[i].UV = metrics[i].C | 0xf000L;
-	    }
-	    else
-	    {
-	    	TRACE("Unencoded glyph '%s'\n", metrics[i].N->sz);
-		metrics[i].UV = -1L;
-	    }
-	}
-
 	afm->WinMetrics.sAscender = (SHORT)Round(afm->FontBBox.ury);
 	afm->WinMetrics.sDescender = (SHORT)Round(afm->FontBBox.lly);
     }
     else    	    	    	    	    	/* non-FontSpecific encoding */
     {
-    	UNICODEGLYPH	ug, *p_ug;
-
-	PSDRV_IndexGlyphList();     	/* for fast searching of glyph names */
-
 	afm->WinMetrics.sAscender = afm->WinMetrics.sDescender = 0;
 
 	for (i = 0; i < afm->NumofMetrics; ++i)
 	{
-	    ug.name = metrics[i].N;
-	    p_ug = bsearch(&ug, PSDRV_AGLbyName, PSDRV_AGLbyNameSize,
-	    	    sizeof(ug), UnicodeGlyphByNameIndex);
-	    if (p_ug == NULL)
-	    {
-	    	TRACE("Glyph '%s' not in Adobe Glyph List\n", ug.name->sz);
-		metrics[i].UV = -1L;
-	    }
-	    else
-	    {
-	    	metrics[i].UV = p_ug->UV;
+            if (IsWinANSI(metrics[i].UV))
+            {
+                SHORT   ury = (SHORT)Round(metrics[i].B.ury);
+                SHORT   lly = (SHORT)Round(metrics[i].B.lly);
 
-		if (IsWinANSI(p_ug->UV))
-		{
-		    SHORT   ury = (SHORT)Round(metrics[i].B.ury);
-		    SHORT   lly = (SHORT)Round(metrics[i].B.lly);
-
-		    if (ury > afm->WinMetrics.sAscender)
-		    	afm->WinMetrics.sAscender = ury;
-		    if (lly < afm->WinMetrics.sDescender)
-		    	afm->WinMetrics.sDescender = lly;
-		}
-	    }
-	}
+                if (ury > afm->WinMetrics.sAscender)
+                    afm->WinMetrics.sAscender = ury;
+                if (lly < afm->WinMetrics.sDescender)
+                    afm->WinMetrics.sDescender = lly;
+            }
+        }
 
 	if (afm->WinMetrics.sAscender == 0)
 	    afm->WinMetrics.sAscender = (SHORT)Round(afm->FontBBox.ury);
@@ -1028,8 +1038,9 @@ static BOOL BuildAFM(FILE *file)
     CHAR    	buffer[258];    	/* allow for <cr>, <lf>, and <nul> */
     AFM     	*afm;
     AFMMETRICS	*metrics;
-    LPSTR   	font_name, full_name, family_name, encoding_scheme;
-    BOOL    	retval, added;
+    WCHAR *full_name, *family_name, *encoding_scheme;
+    char *font_name;
+    BOOL retval, added;
 
     retval = ReadFontMetrics(file, buffer, sizeof(buffer), &afm);
     if (retval == FALSE || afm == NULL)
@@ -1039,16 +1050,16 @@ static BOOL BuildAFM(FILE *file)
     if (retval == FALSE || font_name == NULL)
     	goto cleanup_afm;
 
-    retval = ReadString(file, buffer, sizeof(buffer), "FullName", &full_name);
+    retval = ReadStringW(file, buffer, sizeof(buffer), "FullName", &full_name);
     if (retval == FALSE || full_name == NULL)
     	goto cleanup_font_name;
 
-    retval = ReadString(file, buffer, sizeof(buffer), "FamilyName",
+    retval = ReadStringW(file, buffer, sizeof(buffer), "FamilyName",
     	    &family_name);
     if (retval == FALSE || family_name == NULL)
     	goto cleanup_full_name;
 
-    retval = ReadString(file, buffer, sizeof(buffer), "EncodingScheme",
+    retval = ReadStringW(file, buffer, sizeof(buffer), "EncodingScheme",
     	    &encoding_scheme);
     if (retval == FALSE || encoding_scheme == NULL)
     	goto cleanup_family_name;

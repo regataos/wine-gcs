@@ -87,7 +87,7 @@ struct fs_monitor
 {
     struct list entry;
     UINT_PTR gpu_id;
-    UINT_PTR adapter_id;
+    x11drv_settings_id settings_id;
 
     DEVMODEW user_mode;         /* Mode changed to by users */
     DEVMODEW real_mode;         /* Mode actually used by the host system */
@@ -154,11 +154,20 @@ static void update_gpu_monitor_list( struct gdi_gpu *gpu, struct list *monitors 
     while (count--)
     {
         struct gdi_adapter *adapter = adapters + count;
+        BOOL is_primary = adapter->state_flags & DISPLAY_DEVICE_PRIMARY_DEVICE;
+        x11drv_settings_id settings_id;
         DEVMODEW mode = {0};
+        WCHAR devname[32];
+        char buffer[32];
 
         TRACE( "adapter %p id %p\n", adapter, (void *)adapter->id );
 
-        if (!real_settings_handler.get_current_mode( adapter->id, &mode ))
+        /* Get the settings handler id for the adapter */
+        snprintf( buffer, sizeof(buffer), "\\\\.\\DISPLAY%d", count + 1 );
+        asciiz_to_unicode( devname, buffer );
+        if (!real_settings_handler.get_id( devname, is_primary, &settings_id )) break;
+
+        if (!real_settings_handler.get_current_mode( settings_id, &mode ))
         {
             WARN( "Failed to get current display mode\n" );
             continue;
@@ -186,7 +195,7 @@ static void update_gpu_monitor_list( struct gdi_gpu *gpu, struct list *monitors 
             TRACE( "Created monitor %p, mode %s\n", monitor, debugstr_devmode( &mode ) );
         }
 
-        monitor->adapter_id = adapter->id;
+        monitor->settings_id = settings_id;
         list_add_tail( &fs_monitors, &monitor->entry );
     }
 
@@ -222,7 +231,7 @@ static void update_monitor_list( struct gdi_gpu *gpus, int count )
     LIST_FOR_EACH_ENTRY_SAFE( monitor, next, &monitors, struct fs_monitor, entry )
     {
         TRACE( "Removing stale monitor %p with gpu id %p, adapter id %p\n",
-               monitor, (void *)monitor->gpu_id, (void *)monitor->adapter_id );
+               monitor, (void *)monitor->gpu_id, (void *)monitor->settings_id.id );
         free( monitor );
     }
 }
@@ -348,9 +357,14 @@ static void monitor_get_modes( struct fs_monitor *monitor, DEVMODEW **modes, UIN
     *mode_count = 0;
     *modes = NULL;
 
-    if (!real_settings_handler.get_current_mode( monitor->adapter_id, &mode_host )) return;
+    if (!real_settings_handler.get_current_mode( monitor->settings_id, &mode_host )) return;
     /* Fullscreen hack doesn't support changing display orientations */
-    if (!real_settings_handler.get_modes( monitor->adapter_id, 0, &real_modes, &real_mode_count )) return;
+    if (!real_settings_handler.get_modes( monitor->settings_id, 0, &real_modes, &real_mode_count )) return;
+
+    if ((env = getenv( "WINE_CENTER_DISPLAY_MODES" )))
+        center_modes = (env[0] != '0');
+    else if ((env = getenv( "SteamAppId" )))
+        center_modes = !strcmp( env, "359870" );
 
     if ((env = getenv( "WINE_CENTER_DISPLAY_MODES" )))
         center_modes = (env[0] != '0');
@@ -475,11 +489,6 @@ static void monitor_get_modes( struct fs_monitor *monitor, DEVMODEW **modes, UIN
     else if ((env = getenv( "SteamAppId" )))
         additional_modes = !strcmp( env, "979400" );
 
-    if ((env = getenv( "WINE_CENTER_DISPLAY_MODES" )))
-        center_modes = (env[0] != '0');
-    else if ((env = getenv( "SteamAppId" )))
-        center_modes = !strcmp( env, "359870" );
-
     /* Linux reports far fewer resolutions than Windows. Add modes that some games may expect. */
     for (i = 0; i < fs_monitor_sizes_count; ++i)
     {
@@ -552,41 +561,49 @@ static void monitor_get_modes( struct fs_monitor *monitor, DEVMODEW **modes, UIN
     real_settings_handler.free_modes( real_modes );
 }
 
-static struct fs_monitor *monitor_from_adapter_id( ULONG_PTR adapter_id )
+static struct fs_monitor *monitor_from_settings_id( x11drv_settings_id settings_id )
 {
     struct fs_monitor *monitor;
     struct gdi_gpu *gpus;
     int count;
 
-    LIST_FOR_EACH_ENTRY( monitor, &fs_monitors, struct fs_monitor, entry )
-        if (monitor->adapter_id == adapter_id) return monitor;
+    pthread_mutex_lock( &fs_lock );
 
-    if (real_device_handler.get_gpus( &gpus, &count ))
+    LIST_FOR_EACH_ENTRY( monitor, &fs_monitors, struct fs_monitor, entry )
+        if (!memcmp( &monitor->settings_id, &settings_id, sizeof(settings_id) )) return monitor;
+
+    if (real_device_handler.get_gpus( &gpus, &count, FALSE ))
     {
         update_monitor_list( gpus, count );
         real_device_handler.free_gpus( gpus );
 
         LIST_FOR_EACH_ENTRY( monitor, &fs_monitors, struct fs_monitor, entry )
-            if (monitor->adapter_id == adapter_id) return monitor;
+            if (!memcmp( &monitor->settings_id, &settings_id, sizeof(settings_id) )) return monitor;
     }
 
-    WARN( "Failed to find monitor for adapter id %p\n", (void *)adapter_id );
+    WARN( "Failed to find monitor for adapter id %p\n", (void *)settings_id.id );
+    pthread_mutex_unlock( &fs_lock );
     return NULL;
 }
 
-static BOOL fs_get_modes( ULONG_PTR adapter_id, DWORD flags, DEVMODEW **new_modes, UINT *mode_count )
+static void monitor_release( struct fs_monitor *monitor )
+{
+    pthread_mutex_unlock( &fs_lock );
+}
+
+static BOOL fs_get_modes( x11drv_settings_id id, DWORD flags, DEVMODEW **new_modes, UINT *mode_count )
 {
     struct fs_monitor *monitor;
 
-    TRACE( "adapter_id %#zx, flags %#x, modes %p, modes_count %p\n",
-           (size_t)adapter_id, (int)flags, new_modes, mode_count );
+    TRACE( "id %#zx, flags %#x, modes %p, modes_count %p\n",
+           (size_t)id.id, (int)flags, new_modes, mode_count );
 
-    pthread_mutex_lock( &fs_lock );
-
-    if ((monitor = monitor_from_adapter_id( adapter_id )))
+    if ((monitor = monitor_from_settings_id( id )))
+    {
         monitor_get_modes( monitor, new_modes, mode_count );
+        monitor_release( monitor );
+    }
 
-    pthread_mutex_unlock( &fs_lock );
     return monitor && *new_modes;
 }
 
@@ -595,52 +612,50 @@ static void fs_free_modes( DEVMODEW *modes )
     free( modes );
 }
 
-static BOOL fs_get_current_mode( ULONG_PTR adapter_id, DEVMODEW *mode )
+static BOOL fs_get_current_mode( x11drv_settings_id settings_id, DEVMODEW *mode )
 {
     struct fs_monitor *monitor;
 
-    TRACE( "adapter_id %p, mode %p\n", (void *)adapter_id, mode );
+    TRACE( "settings_id %p, mode %p\n", (void *)settings_id.id, mode );
 
-    pthread_mutex_lock( &fs_lock );
-    if ((monitor = monitor_from_adapter_id( adapter_id )))
+    if ((monitor = monitor_from_settings_id( settings_id )))
+    {
         *mode = monitor->user_mode;
-    pthread_mutex_unlock( &fs_lock );
+        monitor_release( monitor );
+    }
 
     return !!monitor;
 }
 
-static LONG fs_set_current_mode( ULONG_PTR adapter_id, const DEVMODEW *user_mode )
+static LONG fs_set_current_mode( x11drv_settings_id settings_id, const DEVMODEW *user_mode )
 {
+    static const WCHAR fshackW[] = {'f','s','h','a','c','k',0};
     struct fs_monitor *fs_monitor;
     DEVMODEW real_mode;
     double scale;
 
-    TRACE( "id %p, mode %s\n", (void *)adapter_id, debugstr_devmode( user_mode ) );
+    TRACE( "settings_id %p, mode %s\n", (void *)settings_id.id, debugstr_devmode( user_mode ) );
 
-    pthread_mutex_lock( &fs_lock );
-
-    if (!(fs_monitor = monitor_from_adapter_id( adapter_id )))
-    {
-        pthread_mutex_unlock( &fs_lock );
+    if (!(fs_monitor = monitor_from_settings_id( settings_id )))
         return DISP_CHANGE_FAILED;
-    }
 
     if (is_detached_mode( &fs_monitor->real_mode ) && !is_detached_mode( user_mode ))
     {
+        monitor_release( fs_monitor );
         FIXME( "Attaching adapters is unsupported with fullscreen hack.\n" );
         return DISP_CHANGE_SUCCESSFUL;
     }
 
     /* Real modes may be changed since initialization */
-    if (!real_settings_handler.get_current_mode( adapter_id, &real_mode ))
+    if (!real_settings_handler.get_current_mode( settings_id, &real_mode ))
     {
-        pthread_mutex_unlock( &fs_lock );
+        monitor_release( fs_monitor );
         return DISP_CHANGE_FAILED;
     }
 
     fs_monitor->user_mode = *user_mode;
     fs_monitor->real_mode = real_mode;
-    lstrcpyW( fs_monitor->user_mode.dmDeviceName, L"fshack" );
+    lstrcpyW( fs_monitor->user_mode.dmDeviceName, fshackW );
 
     if (is_detached_mode( user_mode ))
     {
@@ -686,19 +701,17 @@ static LONG fs_set_current_mode( ULONG_PTR adapter_id, const DEVMODEW *user_mode
     TRACE( "user_to_real_scale %lf\n", fs_monitor->user_to_real_scale );
     TRACE( "top left corner:%s\n", wine_dbgstr_point( &fs_monitor->top_left ) );
 
-    pthread_mutex_unlock( &fs_lock );
+    monitor_release( fs_monitor );
     return DISP_CHANGE_SUCCESSFUL;
 }
 
 /* Display device handler functions */
 
-static BOOL fs_get_gpus( struct gdi_gpu **gpus, int *count )
+static BOOL fs_get_gpus( struct gdi_gpu **gpus, int *count, BOOL get_properties )
 {
-    struct list monitors = LIST_INIT( monitors );
-
     TRACE( "gpus %p, count %p\n", gpus, count );
 
-    if (!real_device_handler.get_gpus( gpus, count )) return FALSE;
+    if (!real_device_handler.get_gpus( gpus, count, get_properties )) return FALSE;
 
     pthread_mutex_lock( &fs_lock );
     update_monitor_list( *gpus, *count );
@@ -755,7 +768,7 @@ static BOOL fs_get_monitors( ULONG_PTR adapter_id, struct gdi_monitor **new_moni
 static struct fs_monitor *monitor_from_handle( HMONITOR handle )
 {
     MONITORINFOEXW info = {.cbSize = sizeof(MONITORINFOEXW)};
-    ULONG_PTR adapter_id;
+    x11drv_settings_id settings_id;
     BOOL is_primary;
 
     TRACE( "handle %p\n", handle );
@@ -764,8 +777,8 @@ static struct fs_monitor *monitor_from_handle( HMONITOR handle )
 
     if (!NtUserGetMonitorInfo( handle, (MONITORINFO *)&info )) return NULL;
     is_primary = !!(info.dwFlags & MONITORINFOF_PRIMARY);
-    if (!real_settings_handler.get_id( info.szDevice, is_primary, &adapter_id )) return FALSE;
-    return monitor_from_adapter_id( adapter_id );
+    if (!real_settings_handler.get_id( info.szDevice, is_primary, &settings_id )) return NULL;
+    return monitor_from_settings_id( settings_id );
 }
 
 /* Return whether fullscreen hack is enabled on a specific monitor */
@@ -776,12 +789,14 @@ BOOL fs_hack_enabled( HMONITOR monitor )
 
     TRACE( "monitor %p\n", monitor );
 
-    pthread_mutex_lock( &fs_lock );
-    fs_monitor = monitor_from_handle( monitor );
-    if (fs_monitor && (fs_monitor->user_mode.dmPelsWidth != fs_monitor->real_mode.dmPelsWidth ||
-                       fs_monitor->user_mode.dmPelsHeight != fs_monitor->real_mode.dmPelsHeight))
-        enabled = TRUE;
-    pthread_mutex_unlock( &fs_lock );
+    if ((fs_monitor = monitor_from_handle( monitor )))
+    {
+        if (fs_monitor->user_mode.dmPelsWidth != fs_monitor->real_mode.dmPelsWidth ||
+            fs_monitor->user_mode.dmPelsHeight != fs_monitor->real_mode.dmPelsHeight)
+            enabled = TRUE;
+        monitor_release( fs_monitor );
+    }
+
     TRACE( "enabled: %s\n", enabled ? "TRUE" : "FALSE" );
     return enabled;
 }
@@ -867,19 +882,15 @@ RECT fs_hack_current_mode( HMONITOR monitor )
 
     TRACE( "monitor %p\n", monitor );
 
-    pthread_mutex_lock( &fs_lock );
-    fs_monitor = monitor_from_handle( monitor );
-    if (!fs_monitor)
+    if ((fs_monitor = monitor_from_handle( monitor )))
     {
-        pthread_mutex_unlock( &fs_lock );
-        return rect;
+        rect.left = fs_monitor->user_mode.dmPosition.x;
+        rect.top = fs_monitor->user_mode.dmPosition.y;
+        rect.right = rect.left + fs_monitor->user_mode.dmPelsWidth;
+        rect.bottom = rect.top + fs_monitor->user_mode.dmPelsHeight;
+        monitor_release( fs_monitor );
     }
 
-    rect.left = fs_monitor->user_mode.dmPosition.x;
-    rect.top = fs_monitor->user_mode.dmPosition.y;
-    rect.right = rect.left + fs_monitor->user_mode.dmPelsWidth;
-    rect.bottom = rect.top + fs_monitor->user_mode.dmPelsHeight;
-    pthread_mutex_unlock( &fs_lock );
     TRACE( "current mode rect: %s\n", wine_dbgstr_rect( &rect ) );
     return rect;
 }
@@ -892,38 +903,34 @@ RECT fs_hack_real_mode( HMONITOR monitor )
 
     TRACE( "monitor %p\n", monitor );
 
-    pthread_mutex_lock( &fs_lock );
-    fs_monitor = monitor_from_handle( monitor );
-    if (!fs_monitor)
+    if ((fs_monitor = monitor_from_handle( monitor )))
     {
-        pthread_mutex_unlock( &fs_lock );
-        return rect;
+        rect.left = fs_monitor->real_mode.dmPosition.x;
+        rect.top = fs_monitor->real_mode.dmPosition.y;
+        rect.right = rect.left + fs_monitor->real_mode.dmPelsWidth;
+        rect.bottom = rect.top + fs_monitor->real_mode.dmPelsHeight;
+        monitor_release( fs_monitor );
     }
 
-    rect.left = fs_monitor->real_mode.dmPosition.x;
-    rect.top = fs_monitor->real_mode.dmPosition.y;
-    rect.right = rect.left + fs_monitor->real_mode.dmPelsWidth;
-    rect.bottom = rect.top + fs_monitor->real_mode.dmPelsHeight;
-    pthread_mutex_unlock( &fs_lock );
     TRACE( "real mode rect: %s\n", wine_dbgstr_rect( &rect ) );
     return rect;
 }
 
-/* Return whether width and height are the same as the current mode used by a monitor */
-BOOL fs_hack_matches_current_mode( HMONITOR monitor, INT width, INT height )
+/* Return whether a window rectangle is fullscreen on a fshack monitor */
+BOOL fs_hack_is_window_rect_fullscreen( HMONITOR monitor, const RECT *rect )
 {
     MONITORINFO info = {.cbSize = sizeof(MONITORINFO)};
-    BOOL matched;
+    BOOL fullscreen;
 
     TRACE( "monitor %p\n", monitor );
 
     if (!NtUserGetMonitorInfo( monitor, &info )) return FALSE;
 
-    matched = (width == info.rcMonitor.right - info.rcMonitor.left) &&
-              (height == info.rcMonitor.bottom - info.rcMonitor.top);
-    TRACE( "matched: %s\n", matched ? "TRUE" : "FALSE" );
+    fullscreen = rect->left <= info.rcMonitor.left && rect->right >= info.rcMonitor.right &&
+                 rect->top <= info.rcMonitor.top && rect->bottom >= info.rcMonitor.bottom;
+    TRACE( "fullscreen: %s\n", fullscreen ? "TRUE" : "FALSE" );
 
-    return matched;
+    return fullscreen;
 }
 
 /* Transform a point in user virtual screen coordinates to real virtual screen coordinates */
@@ -1054,23 +1061,19 @@ void fs_hack_rect_user_to_real( RECT *rect )
 
     SetRect( &point, rect->left, rect->top, rect->left + 1, rect->top + 1 );
     monitor = NtUserMonitorFromRect( &point, MONITOR_DEFAULTTONEAREST );
-    pthread_mutex_lock( &fs_lock );
-    fs_monitor = monitor_from_handle( monitor );
-    if (!fs_monitor)
+
+    if ((fs_monitor = monitor_from_handle( monitor )))
     {
-        pthread_mutex_unlock( &fs_lock );
-        WARN( "%s not transformed.\n", wine_dbgstr_rect( rect ) );
-        return;
+        OffsetRect( rect, -fs_monitor->user_mode.dmPosition.x,
+                    -fs_monitor->user_mode.dmPosition.y );
+        rect->left = lround( rect->left * fs_monitor->user_to_real_scale );
+        rect->right = lround( rect->right * fs_monitor->user_to_real_scale );
+        rect->top = lround( rect->top * fs_monitor->user_to_real_scale );
+        rect->bottom = lround( rect->bottom * fs_monitor->user_to_real_scale );
+        OffsetRect( rect, fs_monitor->top_left.x, fs_monitor->top_left.y );
+        monitor_release( fs_monitor );
     }
 
-    OffsetRect( rect, -fs_monitor->user_mode.dmPosition.x,
-                -fs_monitor->user_mode.dmPosition.y );
-    rect->left = lround( rect->left * fs_monitor->user_to_real_scale );
-    rect->right = lround( rect->right * fs_monitor->user_to_real_scale );
-    rect->top = lround( rect->top * fs_monitor->user_to_real_scale );
-    rect->bottom = lround( rect->bottom * fs_monitor->user_to_real_scale );
-    OffsetRect( rect, fs_monitor->top_left.x, fs_monitor->top_left.y );
-    pthread_mutex_unlock( &fs_lock );
     TRACE( "to %s\n", wine_dbgstr_rect( rect ) );
 }
 
@@ -1084,16 +1087,12 @@ double fs_hack_get_user_to_real_scale( HMONITOR monitor )
 
     if (wm_is_steamcompmgr( NULL )) return scale;
 
-    pthread_mutex_lock( &fs_lock );
-    fs_monitor = monitor_from_handle( monitor );
-    if (!fs_monitor)
+    if ((fs_monitor = monitor_from_handle( monitor )))
     {
-        pthread_mutex_unlock( &fs_lock );
-        return scale;
+        scale = fs_monitor->user_to_real_scale;
+        monitor_release( fs_monitor );
     }
-    scale = fs_monitor->user_to_real_scale;
 
-    pthread_mutex_unlock( &fs_lock );
     TRACE( "scale %lf\n", scale );
     return scale;
 }
@@ -1106,26 +1105,21 @@ SIZE fs_hack_get_scaled_screen_size( HMONITOR monitor )
 
     TRACE( "monitor %p\n", monitor );
 
-    pthread_mutex_lock( &fs_lock );
-    fs_monitor = monitor_from_handle( monitor );
-    if (!fs_monitor)
+    if ((fs_monitor = monitor_from_handle( monitor )))
     {
-        pthread_mutex_unlock( &fs_lock );
-        return size;
+        if (wm_is_steamcompmgr( NULL ))
+        {
+            size.cx = fs_monitor->user_mode.dmPelsWidth;
+            size.cy = fs_monitor->user_mode.dmPelsHeight;
+        }
+        else
+        {
+            size.cx = lround( fs_monitor->user_mode.dmPelsWidth * fs_monitor->user_to_real_scale );
+            size.cy = lround( fs_monitor->user_mode.dmPelsHeight * fs_monitor->user_to_real_scale );
+        }
+        monitor_release( fs_monitor );
     }
 
-    if (wm_is_steamcompmgr( NULL ))
-    {
-        pthread_mutex_unlock( &fs_lock );
-        size.cx = fs_monitor->user_mode.dmPelsWidth;
-        size.cy = fs_monitor->user_mode.dmPelsHeight;
-        TRACE( "width %d height %d\n", (int)size.cx, (int)size.cy );
-        return size;
-    }
-
-    size.cx = lround( fs_monitor->user_mode.dmPelsWidth * fs_monitor->user_to_real_scale );
-    size.cy = lround( fs_monitor->user_mode.dmPelsHeight * fs_monitor->user_to_real_scale );
-    pthread_mutex_unlock( &fs_lock );
     TRACE( "width %d height %d\n", (int)size.cx, (int)size.cy );
     return size;
 }
@@ -1157,6 +1151,8 @@ void fs_hack_init(void)
 {
     struct x11drv_display_device_handler device_handler;
     struct x11drv_settings_handler settings_handler;
+    struct gdi_gpu *gpus;
+    int count;
     RECT rect;
 
     real_device_handler = X11DRV_DisplayDevices_GetHandler();
@@ -1184,6 +1180,17 @@ void fs_hack_init(void)
     device_handler.free_monitors = real_device_handler.free_monitors;
     device_handler.register_event_handlers = real_device_handler.register_event_handlers;
     X11DRV_DisplayDevices_SetHandler( &device_handler );
+
+    if (!real_device_handler.get_gpus( &gpus, &count, FALSE ))
+    {
+        ERR("Failed to initialize fshack monitor list.\n");
+        return;
+    }
+
+    pthread_mutex_lock( &fs_lock );
+    update_monitor_list( gpus, count );
+    pthread_mutex_unlock( &fs_lock );
+    real_device_handler.free_gpus( gpus );
 
     initialized = TRUE;
 }

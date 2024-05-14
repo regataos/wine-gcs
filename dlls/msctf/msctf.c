@@ -102,7 +102,7 @@ static inline ClassFactory *impl_from_IClassFactory(IClassFactory *iface)
 static void ClassFactory_Destructor(ClassFactory *This)
 {
     TRACE("Destroying class factory %p\n", This);
-    HeapFree(GetProcessHeap(),0,This);
+    free(This);
 }
 
 static HRESULT WINAPI ClassFactory_QueryInterface(IClassFactory *iface, REFIID riid, LPVOID *ppvOut)
@@ -171,7 +171,7 @@ static const IClassFactoryVtbl ClassFactoryVtbl = {
 
 static HRESULT ClassFactory_Constructor(LPFNCONSTRUCTOR ctor, LPVOID *ppvOut)
 {
-    ClassFactory *This = HeapAlloc(GetProcessHeap(),0,sizeof(ClassFactory));
+    ClassFactory *This = malloc(sizeof(ClassFactory));
     This->IClassFactory_iface.lpVtbl = &ClassFactoryVtbl;
     This->ref = 1;
     This->ctor = ctor;
@@ -195,7 +195,7 @@ DWORD generate_Cookie(DWORD magic, LPVOID data)
     {
         if (!array_size)
         {
-            cookies = HeapAlloc(GetProcessHeap(),HEAP_ZERO_MEMORY,sizeof(CookieInternal) * 10);
+            cookies = calloc(10, sizeof(CookieInternal));
             if (!cookies)
             {
                 ERR("Out of memory, Unable to alloc cookies array\n");
@@ -205,8 +205,7 @@ DWORD generate_Cookie(DWORD magic, LPVOID data)
         }
         else
         {
-            CookieInternal *new_cookies = HeapReAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, cookies,
-                                                      sizeof(CookieInternal) * (array_size * 2));
+            CookieInternal *new_cookies = _recalloc(cookies, array_size * 2, sizeof(CookieInternal));
             if (!new_cookies)
             {
                 ERR("Out of memory, Unable to realloc cookies array\n");
@@ -283,13 +282,13 @@ HRESULT advise_sink(struct list *sink_list, REFIID riid, DWORD cookie_magic, IUn
 {
     Sink *sink;
 
-    sink = HeapAlloc(GetProcessHeap(), 0, sizeof(*sink));
+    sink = malloc(sizeof(*sink));
     if (!sink)
         return E_OUTOFMEMORY;
 
     if (FAILED(IUnknown_QueryInterface(unk, riid, (void**)&sink->interfaces.pIUnknown)))
     {
-        HeapFree(GetProcessHeap(), 0, sink);
+        free(sink);
         return CONNECT_E_CANNOTCONNECT;
     }
 
@@ -303,7 +302,7 @@ static void free_sink(Sink *sink)
 {
     list_remove(&sink->entry);
     IUnknown_Release(sink->interfaces.pIUnknown);
-    HeapFree(GetProcessHeap(), 0, sink);
+    free(sink);
 }
 
 HRESULT unadvise_sink(DWORD cookie)
@@ -381,8 +380,8 @@ static void deactivate_remove_conflicting_ts(REFCLSID catid)
         {
             deactivate_given_ts(ats->ats);
             list_remove(&ats->entry);
-            HeapFree(GetProcessHeap(),0,ats->ats);
-            HeapFree(GetProcessHeap(),0,ats);
+            free(ats->ats);
+            free(ats);
             /* we are guaranteeing there is only 1 */
             break;
         }
@@ -399,7 +398,7 @@ HRESULT add_active_textservice(TF_LANGUAGEPROFILE *lp)
 
     if (FAILED(TF_GetThreadMgr(&tm))) return E_UNEXPECTED;
 
-    actsvr = HeapAlloc(GetProcessHeap(),0,sizeof(ActivatedTextService));
+    actsvr = malloc(sizeof(ActivatedTextService));
     if (!actsvr) goto fail;
 
     ITfThreadMgr_QueryInterface(tm, &IID_ITfClientId, (void **)&clientid);
@@ -435,7 +434,7 @@ HRESULT add_active_textservice(TF_LANGUAGEPROFILE *lp)
     if (activated > 0)
         activate_given_ts(actsvr, (ITfThreadMgrEx *)tm);
 
-    entry = HeapAlloc(GetProcessHeap(),0,sizeof(AtsEntry));
+    entry = malloc(sizeof(AtsEntry));
     if (!entry) goto fail;
 
     entry->ats = actsvr;
@@ -446,7 +445,7 @@ HRESULT add_active_textservice(TF_LANGUAGEPROFILE *lp)
 
 fail:
     ITfThreadMgr_Release(tm);
-    HeapFree(GetProcessHeap(), 0, actsvr);
+    free(actsvr);
     return E_OUTOFMEMORY;
 }
 

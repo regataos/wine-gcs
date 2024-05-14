@@ -50,7 +50,7 @@ static void test_CompareObjectHandles(void)
 
     if (!pCompareObjectHandles)
     {
-        skip("CompareObjectHandles is not available.\n");
+        win_skip("CompareObjectHandles is not available.\n");
         return;
     }
 
@@ -124,7 +124,7 @@ static void test_MapViewOfFile3(void)
     ok( mapping != 0, "CreateFileMapping error %lu\n", GetLastError() );
 
     SetLastError(0xdeadbeef);
-    ptr = pMapViewOfFile3( mapping, GetCurrentProcess(), NULL, 0, 4096, 0, PAGE_READONLY, NULL, 0);
+    ptr = pMapViewOfFile3( mapping, NULL, NULL, 0, 4096, 0, PAGE_READONLY, NULL, 0);
     ok( ptr != NULL, "MapViewOfFile FILE_MAP_READ error %lu\n", GetLastError() );
     UnmapViewOfFile( ptr );
 
@@ -177,7 +177,6 @@ static void test_VirtualAlloc2(void)
     /* Placeholder splitting functionality */
     placeholder1 = pVirtualAlloc2(NULL, NULL, 2 * size, MEM_RESERVE_PLACEHOLDER | MEM_RESERVE, PAGE_NOACCESS, NULL, 0);
     ok(!!placeholder1, "Failed to create a placeholder range.\n");
-    if (!placeholder1) return;
 
     memset(&info, 0, sizeof(info));
     VirtualQuery(placeholder1, &info, sizeof(info));
@@ -236,15 +235,17 @@ static void test_VirtualAlloc2(void)
     ok(info.Type == MEM_MAPPED, "Unexpected type %#lx.\n", info.Type);
     ok(info.RegionSize == size, "Unexpected size.\n");
 
-    CloseHandle(section);
     ret = pUnmapViewOfFile2(NULL, view1, MEM_PRESERVE_PLACEHOLDER);
     ok(!ret && GetLastError() == ERROR_INVALID_HANDLE, "Got error %lu.\n", GetLastError());
 
     ret = VirtualFree( placeholder1, size, MEM_RELEASE | MEM_PRESERVE_PLACEHOLDER );
     ok(!ret && GetLastError() == ERROR_INVALID_PARAMETER, "Got ret %d, error %lu.\n", ret, GetLastError());
 
+    ret = pUnmapViewOfFile2(GetCurrentProcess(), view1, MEM_RELEASE | MEM_PRESERVE_PLACEHOLDER);
+    ok(!ret && GetLastError() == ERROR_INVALID_PARAMETER, "Got ret %d, error %lu.\n", ret, GetLastError());
     ret = pUnmapViewOfFile2(GetCurrentProcess(), view1, MEM_PRESERVE_PLACEHOLDER);
     ok(ret, "Got error %lu.\n", GetLastError());
+
     memset(&info, 0, sizeof(info));
     VirtualQuery(placeholder1, &info, sizeof(info));
     ok(info.AllocationProtect == PAGE_NOACCESS, "Unexpected protection %#lx.\n", info.AllocationProtect);
@@ -257,6 +258,16 @@ static void test_VirtualAlloc2(void)
 
     ret = UnmapViewOfFile(view1);
     ok(!ret && GetLastError() == ERROR_INVALID_ADDRESS, "Got error %lu.\n", GetLastError());
+
+    view1 = pMapViewOfFile3(section, NULL, placeholder1, 0, size, MEM_REPLACE_PLACEHOLDER, PAGE_READWRITE, NULL, 0);
+    ok(view1 == placeholder1, "Address does not match.\n");
+    CloseHandle(section);
+
+    ret = VirtualFree( view1, size, MEM_RELEASE | MEM_PRESERVE_PLACEHOLDER );
+    ok(!ret && GetLastError() == ERROR_INVALID_PARAMETER, "Got ret %d, error %lu.\n", ret, GetLastError());
+
+    ret = pUnmapViewOfFile2(GetCurrentProcess(), view1, MEM_UNMAP_WITH_TRANSIENT_BOOST | MEM_PRESERVE_PLACEHOLDER);
+    ok(ret, "Got error %lu.\n", GetLastError());
 
     ret = VirtualFree( placeholder1, size, MEM_RELEASE | MEM_PRESERVE_PLACEHOLDER );
     ok(!ret && GetLastError() == ERROR_INVALID_ADDRESS, "Got ret %d, error %lu.\n", ret, GetLastError());
@@ -480,6 +491,21 @@ static void test_MapViewOfFileFromApp(void)
     ok(ret, "Failed to delete a test file.\n");
 }
 
+static void test_QueryProcessCycleTime(void)
+{
+    ULONG64 cycles1, cycles2;
+    BOOL ret;
+
+    ret = QueryProcessCycleTime( GetCurrentProcess(), &cycles1 );
+    ok( ret, "QueryProcessCycleTime failed, error %lu.\n", GetLastError() );
+
+    ret = QueryProcessCycleTime( GetCurrentProcess(), &cycles2 );
+    ok( ret, "QueryProcessCycleTime failed, error %lu.\n", GetLastError() );
+
+    todo_wine
+    ok( cycles2 > cycles1, "CPU cycles used by process should be increasing.\n" );
+}
+
 static void init_funcs(void)
 {
     HMODULE hmod = GetModuleHandleA("kernelbase.dll");
@@ -513,4 +539,5 @@ START_TEST(process)
     test_OpenFileMappingFromApp();
     test_CreateFileMappingFromApp();
     test_MapViewOfFileFromApp();
+    test_QueryProcessCycleTime();
 }

@@ -22,15 +22,10 @@
 enum x11drv_funcs
 {
     unix_init,
-    unix_systray_clear,
-    unix_systray_dock,
-    unix_systray_hide,
-    unix_systray_init,
     unix_tablet_attach_queue,
     unix_tablet_get_packet,
     unix_tablet_info,
     unix_tablet_load_info,
-    unix_input_thread,
     unix_funcs_count,
 };
 
@@ -40,17 +35,6 @@ enum x11drv_funcs
 struct init_params
 {
     WNDPROC foreign_window_proc;
-    BOOL *show_systray;
-    BOOL input_thread_hack;
-};
-
-struct systray_dock_params
-{
-    UINT64 event_handle;
-    void *icon;
-    int cx;
-    int cy;
-    BOOL *layered;
 };
 
 /* x11drv_tablet_info params */
@@ -75,7 +59,6 @@ enum x11drv_client_funcs
     client_func_dnd_enter_event,
     client_func_dnd_position_event,
     client_func_dnd_post_drop,
-    client_func_systray_change_owner,
     client_func_last
 };
 
@@ -110,9 +93,4 @@ struct dnd_position_event_params
     ULONG hwnd;
     POINT point;
     DWORD effect;
-};
-
-struct systray_change_owner_params
-{
-    UINT64 event_handle;
 };

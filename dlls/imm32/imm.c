@@ -2338,15 +2338,10 @@ BOOL WINAPI ImmRegisterWordW( HKL hkl, const WCHAR *readingW, DWORD style, const
 /***********************************************************************
  *		ImmReleaseContext (IMM32.@)
  */
-BOOL WINAPI ImmReleaseContext(HWND hWnd, HIMC hIMC)
+BOOL WINAPI ImmReleaseContext( HWND hwnd, HIMC himc )
 {
-  static BOOL shown = FALSE;
-
-  if (!shown) {
-     FIXME("(%p, %p): stub\n", hWnd, hIMC);
-     shown = TRUE;
-  }
-  return TRUE;
+    TRACE( "hwnd %p, himc %p\n", hwnd, himc );
+    return TRUE;
 }
 
 /***********************************************************************
@@ -2544,6 +2539,9 @@ BOOL WINAPI ImmSetCompositionStringA(
         return FALSE;
 
     if (!(ime = imc_select_ime( data ))) return FALSE;
+    if (!lpComp) dwCompLen = 0;
+    if (!lpRead) dwReadLen = 0;
+
     if (!ime_is_unicode( ime )) return ime->pImeSetCompositionString( hIMC, dwIndex, lpComp, dwCompLen, lpRead, dwReadLen );
 
     comp_len = MultiByteToWideChar(CP_ACP, 0, lpComp, dwCompLen, NULL, 0);
@@ -2601,6 +2599,9 @@ BOOL WINAPI ImmSetCompositionStringW(
         return FALSE;
 
     if (!(ime = imc_select_ime( data ))) return FALSE;
+    if (!lpComp) dwCompLen = 0;
+    if (!lpRead) dwReadLen = 0;
+
     if (ime_is_unicode( ime )) return ime->pImeSetCompositionString( hIMC, dwIndex, lpComp, dwCompLen, lpRead, dwReadLen );
 
     comp_len = WideCharToMultiByte(CP_ACP, 0, lpComp, dwCompLen, NULL, 0, NULL,

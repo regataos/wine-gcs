@@ -80,6 +80,7 @@ static const char *dbgstr_event(int type)
         "STATUS_ITEM_MOUSE_MOVE",
         "WINDOW_BROUGHT_FORWARD",
         "WINDOW_CLOSE_REQUESTED",
+        "WINDOW_DID_MINIMIZE",
         "WINDOW_DID_UNMINIMIZE",
         "WINDOW_DRAG_BEGIN",
         "WINDOW_DRAG_END",
@@ -91,6 +92,7 @@ static const char *dbgstr_event(int type)
         "WINDOW_RESIZE_ENDED",
         "WINDOW_RESTORE_REQUESTED",
     };
+    C_ASSERT(ARRAYSIZE(event_names) == NUM_EVENT_TYPES);
 
     if (0 <= type && type < NUM_EVENT_TYPES) return event_names[type];
     return wine_dbg_sprintf("Unknown event %d", type);
@@ -412,6 +414,7 @@ BOOL query_ime_char_rect(macdrv_query* query)
         NtUserMapWindowPoints(info.hwndCaret, 0, (POINT*)&info.rcCaret, 2);
         if (range->length && info.rcCaret.left == info.rcCaret.right) info.rcCaret.right++;
         query->ime_char_rect.rect = cgrect_from_rect(info.rcCaret);
+        ret = TRUE;
     }
 
     TRACE_(imm)(" -> %s range %ld-%ld rect %s\n", ret ? "TRUE" : "FALSE", range->location,

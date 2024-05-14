@@ -125,6 +125,14 @@ typedef union
     } unload_dll;
 } debug_event_t;
 
+
+enum context_exec_space
+{
+    EXEC_SPACE_USERMODE,
+    EXEC_SPACE_SYSCALL,
+    EXEC_SPACE_EXCEPTION,
+};
+
 /* context data */
 typedef struct
 {
@@ -172,6 +180,10 @@ typedef struct
     } ext;                       /* selected by SERVER_CTX_EXTENDED_REGISTERS */
     union
     {
+        struct { enum context_exec_space space; int __pad; } space;
+    } exec_space;                /* selected by SERVER_CTX_EXEC_SPACE */
+    union
+    {
         struct { struct { unsigned __int64 low, high; } ymm_high[16]; } regs;
     } ymm;                       /* selected by SERVER_CTX_YMM_REGISTERS */
 } context_t;
@@ -183,6 +195,7 @@ typedef struct
 #define SERVER_CTX_DEBUG_REGISTERS    0x10
 #define SERVER_CTX_EXTENDED_REGISTERS 0x20
 #define SERVER_CTX_YMM_REGISTERS      0x40
+#define SERVER_CTX_EXEC_SPACE         0x80
 
 /* structure used in sending an fd from client to server */
 struct send_fd
@@ -224,6 +237,7 @@ typedef struct
     unsigned int attribute;
     unsigned int flags;
     unsigned int show;
+    process_id_t process_group_id;
     data_size_t  curdir_len;
     data_size_t  dllpath_len;
     data_size_t  imagepath_len;
@@ -472,6 +486,7 @@ typedef union
     {
         enum select_op  op;      /* SELECT_WAIT or SELECT_WAIT_ALL */
         obj_handle_t    handles[MAXIMUM_WAIT_OBJECTS];
+        int             __pad;
     } wait;
     struct
     {
@@ -501,6 +516,7 @@ enum apc_type
     APC_VIRTUAL_LOCK,
     APC_VIRTUAL_UNLOCK,
     APC_MAP_VIEW,
+    APC_MAP_VIEW_EX,
     APC_UNMAP_VIEW,
     APC_CREATE_THREAD,
     APC_DUP_HANDLE
@@ -541,9 +557,11 @@ typedef union
         unsigned int     op_type;      /* type of operation */
         client_ptr_t     addr;         /* requested address */
         mem_size_t       size;         /* allocation size */
-        mem_size_t       limit;        /* allocation address limit */
+        mem_size_t       limit_low;    /* allocation address limits */
+        mem_size_t       limit_high;
         mem_size_t       align;        /* allocation alignment */
         unsigned int     prot;         /* memory protection flags */
+        unsigned int     attributes;   /* memory extended attributes */
     } virtual_alloc_ex;
     struct
     {
@@ -599,10 +617,23 @@ typedef union
     } map_view;
     struct
     {
+        enum apc_type    type;         /* APC_MAP_VIEW_EX */
+        obj_handle_t     handle;       /* mapping handle */
+        client_ptr_t     addr;         /* requested address */
+        mem_size_t       size;         /* allocation size */
+        file_pos_t       offset;       /* file offset */
+        mem_size_t       limit_low;    /* allocation address limits */
+        mem_size_t       limit_high;
+        unsigned int     alloc_type;   /* allocation type */
+        unsigned int     prot;         /* memory protection flags */
+        unsigned short   machine;      /* requested machine for image mappings */
+        unsigned short   __pad[3];
+    } map_view_ex;
+    struct
+    {
         enum apc_type    type;      /* APC_UNMAP_VIEW */
-        int              __pad;
-        client_ptr_t     addr;      /* view address */
         unsigned int     flags;     /* unmap flags */
+        client_ptr_t     addr;      /* view address */
     } unmap_view;
     struct
     {
@@ -643,7 +674,7 @@ typedef union
     } virtual_alloc;
     struct
     {
-        enum apc_type    type;      /* APC_VIRTUAL_ALLOC */
+        enum apc_type    type;      /* APC_VIRTUAL_ALLOC_EX */
         unsigned int     status;    /* status returned by call */
         client_ptr_t     addr;      /* resulting address */
         mem_size_t       size;      /* resulting size */
@@ -703,6 +734,13 @@ typedef union
         client_ptr_t     addr;      /* resulting address */
         mem_size_t       size;      /* resulting size */
     } map_view;
+    struct
+    {
+        enum apc_type    type;      /* APC_MAP_VIEW_EX */
+        unsigned int     status;    /* status returned by call */
+        client_ptr_t     addr;      /* resulting address */
+        mem_size_t       size;      /* resulting size */
+    } map_view_ex;
     struct
     {
         enum apc_type    type;      /* APC_UNMAP_VIEW */
@@ -818,6 +856,7 @@ typedef union
 typedef struct
 {
     client_ptr_t   base;
+    client_ptr_t   map_addr;
     mem_size_t     stack_size;
     mem_size_t     stack_commit;
     unsigned int   entry_point;
@@ -831,7 +870,10 @@ typedef struct
     unsigned short image_charact;
     unsigned short dll_charact;
     unsigned short machine;
-    unsigned char  contains_code;
+    unsigned char  contains_code : 1;
+    unsigned char  wine_builtin : 1;
+    unsigned char  wine_fakedll : 1;
+    unsigned char  padding : 5;
     unsigned char  image_flags;
     unsigned int   loader_flags;
     unsigned int   header_size;
@@ -846,8 +888,6 @@ typedef struct
 #define IMAGE_FLAGS_ImageMappedFlat           0x08
 #define IMAGE_FLAGS_BaseBelow4gb              0x10
 #define IMAGE_FLAGS_ComPlusPrefer32bit        0x20
-#define IMAGE_FLAGS_WineBuiltin               0x40
-#define IMAGE_FLAGS_WineFakeDll               0x80
 
 struct rawinput_device
 {
@@ -882,16 +922,18 @@ struct shared_cursor
 
 struct desktop_shared_memory
 {
-    unsigned int         seq;              /* sequence number - server updating if (seq_no & SEQUENCE_MASK) != 0 */
+    unsigned int         seq;              /* sequence number - server updating if (seq & 1) != 0 */
     struct shared_cursor cursor;           /* global cursor information */
     unsigned char        keystate[256];    /* asynchronous key state */
     thread_id_t          foreground_tid;   /* tid of the foreground thread */
     __int64              update_serial;
+    unsigned int         flags;
 };
+typedef volatile struct desktop_shared_memory desktop_shm_t;
 
 struct queue_shared_memory
 {
-    unsigned int         seq;              /* sequence number - server updating if (seq_no & SEQUENCE_MASK) != 0 */
+    unsigned int         seq;              /* sequence number - server updating if (seq & 1) != 0 */
     int                  created;          /* queue has been created */
     unsigned int         wake_bits;
     unsigned int         changed_bits;
@@ -899,10 +941,11 @@ struct queue_shared_memory
     unsigned int         changed_mask;
     thread_id_t          input_tid;
 };
+typedef volatile struct queue_shared_memory queue_shm_t;
 
 struct input_shared_memory
 {
-    unsigned int         seq;              /* sequence number - server updating if (seq_no & SEQUENCE_MASK) != 0 */
+    unsigned int         seq;              /* sequence number - server updating if (seq & 1) != 0 */
     int                  created;
     thread_id_t          tid;
     user_handle_t        focus;            /* handle to the focus window */
@@ -918,10 +961,7 @@ struct input_shared_memory
     int                  keystate_lock;    /* keystate is locked */
     __int64              sync_serial;
 };
-
-/* Bits that must be clear for client to read */
-#define SEQUENCE_MASK_BITS  4
-#define SEQUENCE_MASK ((1UL << SEQUENCE_MASK_BITS) - 1)
+typedef volatile struct input_shared_memory input_shm_t;
 
 /****************************************************************/
 /* Request declarations */
@@ -976,6 +1016,7 @@ struct input_shared_memory
 @REQ(get_startup_info)
 @REPLY
     data_size_t  info_size;    /* size of startup info */
+    unsigned short machine;    /* architecture for the new process */
     VARARG(info,startup_info,info_size); /* startup information */
     VARARG(env,unicode_str);   /* environment */
 @END
@@ -1000,7 +1041,6 @@ struct input_shared_memory
     int          debug_level;  /* new debug level */
     int          reply_fd;     /* fd for reply pipe */
     int          wait_fd;      /* fd for blocking calls pipe */
-    char         nice_limit;   /* RLIMIT_NICE of new thread */
 @REPLY
     process_id_t pid;          /* process id of the new thread's process */
     thread_id_t  tid;          /* thread id of the new thread */
@@ -1072,6 +1112,7 @@ struct input_shared_memory
 /* Fetch the name of the process image */
 @REQ(get_process_image_name)
     obj_handle_t handle;           /* process handle */
+    process_id_t pid;              /* process id */
     int          win32;            /* return a win32 filename? */
 @REPLY
     data_size_t  len;              /* len in bytes required to store filename */
@@ -1117,10 +1158,12 @@ struct input_shared_memory
     int          priority;      /* thread priority level */
     int          last;          /* last thread in process */
     int          suspend_count; /* thread suspend count */
-    int          dbg_hidden;    /* thread hidden from debugger */
+    unsigned int flags;         /* GET_THREAD_INFO_FLAG_ flags */
     data_size_t  desc_len;      /* description length in bytes */
     VARARG(desc,unicode_str);   /* description string */
 @END
+#define GET_THREAD_INFO_FLAG_DBG_HIDDEN 0x01
+#define GET_THREAD_INFO_FLAG_TERMINATED 0x02
 
 
 /* Retrieve information about thread times */
@@ -1154,9 +1197,11 @@ struct input_shared_memory
 
 /* Suspend a thread */
 @REQ(suspend_thread)
-    obj_handle_t handle;       /* thread handle */
+    obj_handle_t handle;        /* thread handle */
+    obj_handle_t waited_handle; /* handle waited on */
 @REPLY
-    int          count;        /* new suspend count */
+    int          count;         /* new suspend count */
+    obj_handle_t wait_handle;   /* handle to wait on */
 @END
 
 
@@ -1171,7 +1216,7 @@ struct input_shared_memory
 /* Queue an APC for a thread or process */
 @REQ(queue_apc)
     obj_handle_t handle;       /* thread or process handle */
-    apc_call_t   call;         /* call arguments */
+    VARARG(call,apc_call);     /* call arguments */
 @REPLY
     obj_handle_t handle;       /* APC handle */
     int          self;         /* run APC in caller itself? */
@@ -1259,9 +1304,9 @@ struct input_shared_memory
     VARARG(data,select_op,size); /* operation-specific data */
     VARARG(contexts,contexts);   /* suspend context(s) */
 @REPLY
-    apc_call_t   call;         /* APC call arguments */
     obj_handle_t apc_handle;   /* handle to next APC */
     int          signaled;     /* were the handles immediately signaled? */
+    VARARG(call,apc_call);     /* APC call arguments */
     VARARG(contexts,contexts); /* suspend context(s) */
 @END
 #define SELECT_ALERTABLE     1
@@ -1548,6 +1593,16 @@ enum server_fd_type
 @END
 
 
+/* Get socket event flags */
+@REQ(socket_get_events)
+    obj_handle_t handle;        /* socket handle */
+    obj_handle_t event;         /* event to reset */
+@REPLY
+    unsigned int flags;         /* event mask */
+    VARARG(status,uints);       /* array of status codes */
+@END
+
+
 /* Store ICMP id for ICMP over datagram fixup */
 @REQ(socket_send_icmp_id)
     obj_handle_t   handle;        /* socket handle */
@@ -1635,15 +1690,48 @@ enum server_fd_type
 @END
 
 
+/* Get the address to use to map an image mapping */
+@REQ(get_image_map_address)
+    obj_handle_t handle;        /* handle to the mapping */
+@REPLY
+    client_ptr_t addr;          /* map address */
+@END
+
+
 /* Add a memory view in the current process */
 @REQ(map_view)
-    obj_handle_t mapping;       /* file mapping handle, or 0 for .so builtin */
+    obj_handle_t mapping;       /* file mapping handle */
     unsigned int access;        /* wanted access rights */
     client_ptr_t base;          /* view base address (page-aligned) */
     mem_size_t   size;          /* view size */
     file_pos_t   start;         /* start offset in mapping */
-    VARARG(image,pe_image_info);/* image info for .so builtins */
-    VARARG(name,unicode_str);   /* image filename for .so builtins */
+@END
+
+
+/* Add a memory view for an image mapping in the current process */
+@REQ(map_image_view)
+    obj_handle_t mapping;       /* file mapping handle */
+    client_ptr_t base;          /* view base address (page-aligned) */
+    mem_size_t   size;          /* view size */
+    unsigned int entry;         /* entry point in mapped view */
+    unsigned short machine;     /* machine in the mapped view */
+@END
+
+
+/* Add a memory view for a builtin dll in the current process */
+@REQ(map_builtin_view)
+    VARARG(image,pe_image_info);/* image info */
+    VARARG(name,unicode_str);   /* image filename */
+@END
+
+
+/* Get information about a mapped image view */
+@REQ(get_image_view_info)
+    obj_handle_t process;       /* process handle */
+    client_ptr_t addr;          /* address inside mapped view (in process address space) */
+@REPLY
+    client_ptr_t base;          /* view base address */
+    mem_size_t   size;          /* view size */
 @END
 
 
@@ -2012,6 +2100,7 @@ enum prefix_type
     obj_handle_t handle;       /* thread handle */
     obj_handle_t context;      /* context handle */
     unsigned int flags;        /* context flags */
+    unsigned int native_flags; /* flags for native context if WoW present */
     unsigned short machine;    /* context architecture */
 @REPLY
     int          self;         /* was it a handle to the current thread? */
@@ -2023,6 +2112,7 @@ enum prefix_type
 /* Set the current context of a thread */
 @REQ(set_thread_context)
     obj_handle_t handle;       /* thread handle */
+    unsigned int native_flags; /* flags for native context if WoW present */
     VARARG(contexts,contexts); /* thread context(s) */
 @REPLY
     int          self;         /* was it a handle to the current thread? */
@@ -2350,6 +2440,7 @@ enum message_type
     unsigned int   access;
     unsigned int   options;
     unsigned int   sharing;
+    unsigned int   disposition;
     unsigned int   maxinstances;
     unsigned int   outsize;
     unsigned int   insize;
@@ -2358,6 +2449,7 @@ enum message_type
     VARARG(objattr,object_attributes); /* object attributes */
 @REPLY
     obj_handle_t   handle;       /* handle to the pipe */
+    int            created;
 @END
 
 /* flags in create_named_pipe and get_named_pipe_info */
@@ -3209,6 +3301,26 @@ enum caret_state
 @END
 
 
+/* Create a security token */
+@REQ(create_token)
+    struct luid    token_id;
+    unsigned int   access;         /* access rights to the new token */
+    int            primary;        /* is the new token to be a primary one? */
+    int            impersonation_level; /* impersonation level of the new token */
+    abstime_t      expire;         /* expiration time */
+    int            group_count;
+    int            primary_group;
+    int            priv_count;
+    /* VARARG(objattr,object_attributes);  */
+    /* VARARG(user,sid); */
+    /* VARARG(groups,sid); */
+    /* VARARG(privs,luid_attr); */
+    /* VARARG(dacl,acl); */
+@REPLY
+    obj_handle_t   token;    /* handle to the token */
+@END
+
+
 /* Open a security token */
 @REQ(open_token)
     obj_handle_t   handle;    /* handle to the thread or process */
@@ -3686,7 +3798,7 @@ struct handle_info
 /* set fd disposition information */
 @REQ(set_fd_disp_info)
     obj_handle_t handle;          /* handle to a file or directory */
-    int          unlink;          /* whether to unlink file on close */
+    unsigned int flags;           /* what actions should be taken when deleting a file */
 @END
 
 
@@ -3696,7 +3808,7 @@ struct handle_info
     obj_handle_t rootdir;         /* root directory */
     data_size_t  namelen;         /* length of NT name in bytes */
     int          link;            /* link instead of renaming */
-    int          replace;         /* replace an existing file? */
+    unsigned int flags;           /* FILE_RENAME_* flags */
     VARARG(name,unicode_str,namelen); /* NT name */
     VARARG(filename,string);      /* new file name */
 @END
@@ -3777,9 +3889,12 @@ struct handle_info
 @REQ(get_rawinput_buffer)
     data_size_t rawinput_size; /* size of RAWINPUT structure */
     data_size_t buffer_size;   /* size of output buffer */
+    int         clear_qs_rawinput;
+    int         __pad;
 @REPLY
     data_size_t next_size; /* minimum size to get next message data */
     unsigned int count;
+    unsigned int last_message_time;
     VARARG(data,bytes);
 @END
 

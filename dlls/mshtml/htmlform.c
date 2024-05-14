@@ -572,7 +572,7 @@ static HRESULT WINAPI HTMLFormElement_submit(IHTMLFormElement *iface)
 
     if(This->element.node.doc) {
         HTMLDocumentNode *doc = This->element.node.doc;
-        if(doc->window)
+        if(doc->window && doc->window->base.outer_window)
             this_window = doc->window->base.outer_window;
     }
     if(!this_window) {
@@ -918,7 +918,7 @@ static void HTMLFormElement_unlink(DispatchEx *dispex)
     unlink_ref(&This->nsform);
 }
 
-static HRESULT HTMLFormElement_get_dispid(DispatchEx *dispex, BSTR name, DWORD grfdex, DISPID *pid)
+static HRESULT HTMLFormElement_get_dispid(DispatchEx *dispex, BSTR name, DWORD grfdex, DISPID *dispid)
 {
     HTMLFormElement *This = impl_from_DispatchEx(dispex);
     nsIDOMHTMLCollection *elements;
@@ -927,7 +927,7 @@ static HRESULT HTMLFormElement_get_dispid(DispatchEx *dispex, BSTR name, DWORD g
     nsresult nsres;
     HRESULT hres = DISP_E_UNKNOWNNAME;
 
-    TRACE("(%p)->(%s %lx %p)\n", This, wine_dbgstr_w(name), grfdex, pid);
+    TRACE("(%p)->(%s %lx %p)\n", This, wine_dbgstr_w(name), grfdex, dispid);
 
     nsres = nsIDOMHTMLFormElement_GetElements(This->nsform, &elements);
     if(NS_FAILED(nsres)) {
@@ -951,7 +951,7 @@ static HRESULT HTMLFormElement_get_dispid(DispatchEx *dispex, BSTR name, DWORD g
 
         i = wcstoul(name, &end_ptr, 10);
         if(!*end_ptr && i < len) {
-            *pid = MSHTML_DISPID_CUSTOM_MIN + i;
+            *dispid = MSHTML_DISPID_CUSTOM_MIN + i;
             return S_OK;
         }
     }
@@ -989,7 +989,7 @@ static HRESULT HTMLFormElement_get_dispid(DispatchEx *dispex, BSTR name, DWORD g
         if(!wcsicmp(str, name)) {
             nsIDOMElement_Release(elem);
             /* FIXME: using index for dispid */
-            *pid = MSHTML_DISPID_CUSTOM_MIN + i;
+            *dispid = MSHTML_DISPID_CUSTOM_MIN + i;
             hres = S_OK;
             break;
         }
@@ -1001,7 +1001,7 @@ static HRESULT HTMLFormElement_get_dispid(DispatchEx *dispex, BSTR name, DWORD g
             if(!wcsicmp(str, name)) {
                 nsAString_Finish(&name_str);
                 /* FIXME: using index for dispid */
-                *pid = MSHTML_DISPID_CUSTOM_MIN + i;
+                *dispid = MSHTML_DISPID_CUSTOM_MIN + i;
                 hres = S_OK;
                 break;
             }
@@ -1061,16 +1061,16 @@ static HRESULT HTMLFormElement_invoke(DispatchEx *dispex, IDispatch *this_obj, D
     return S_OK;
 }
 
-static HRESULT HTMLFormElement_handle_event(DispatchEx *dispex, eventid_t eid, nsIDOMEvent *event, BOOL *prevent_default)
+static HRESULT HTMLFormElement_handle_event(DispatchEx *dispex, DOMEvent *event, BOOL *prevent_default)
 {
     HTMLFormElement *This = impl_from_DispatchEx(dispex);
 
-    if(eid == EVENTID_SUBMIT) {
+    if(event->event_id == EVENTID_SUBMIT) {
         *prevent_default = TRUE;
         return IHTMLFormElement_submit(&This->IHTMLFormElement_iface);
     }
 
-    return HTMLElement_handle_event(&This->element.node.event_target.dispex, eid, event, prevent_default);
+    return HTMLElement_handle_event(&This->element.node.event_target.dispex, event, prevent_default);
 }
 
 static const NodeImplVtbl HTMLFormElementImplVtbl = {

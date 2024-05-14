@@ -33,6 +33,7 @@
 #include "mmdeviceapi.h"
 #include "uuids.h"
 #include "wmcodecdsp.h"
+#include "nserror.h"
 
 #include "mf_test.h"
 
@@ -78,6 +79,7 @@ extern GUID DMOVideoFormat_RGB32;
 
 HRESULT (WINAPI *pMFCreateSampleCopierMFT)(IMFTransform **copier);
 HRESULT (WINAPI *pMFGetTopoNodeCurrentType)(IMFTopologyNode *node, DWORD stream, BOOL output, IMFMediaType **type);
+HRESULT (WINAPI *pMFCreateDXGIDeviceManager)(UINT *token, IMFDXGIDeviceManager **manager);
 BOOL has_video_processor;
 
 static BOOL is_vista(void)
@@ -1192,6 +1194,56 @@ static void test_topology(void)
     ref = IMFTopologyNode_Release(node);
     ok(ref == 0, "Release returned %ld\n", ref);
     ref = IMFTopologyNode_Release(node2);
+    ok(ref == 0, "Release returned %ld\n", ref);
+
+    /* Try cloning a topology without all outputs connected */
+    hr = MFCreateTopology(&topology);
+    ok(hr == S_OK, "Failed to create topology, hr %#lx.\n", hr);
+
+    hr = MFCreateTopology(&topology2);
+    ok(hr == S_OK, "Failed to create topology, hr %#lx.\n", hr);
+
+    hr = MFCreateTopologyNode(MF_TOPOLOGY_TRANSFORM_NODE, &node);
+    ok(hr == S_OK, "Failed to create topology node, hr %#lx.\n", hr);
+
+    hr = IMFTopology_AddNode(topology, node);
+    ok(hr == S_OK, "Failed to add a node, hr %#lx.\n", hr);
+    EXPECT_REF(node, 2);
+
+    hr = MFCreateTopologyNode(MF_TOPOLOGY_OUTPUT_NODE, &node2);
+    ok(hr == S_OK, "Failed to create topology node, hr %#lx.\n", hr);
+
+    hr = IMFTopology_AddNode(topology, node2);
+    ok(hr == S_OK, "Failed to add a node, hr %#lx.\n", hr);
+    EXPECT_REF(node, 2);
+
+    hr = IMFTopologyNode_ConnectOutput(node, 1, node2, 0);
+    ok(hr == S_OK, "Failed to connect output, hr %#lx.\n", hr);
+
+    hr = IMFTopology_CloneFrom(topology2, topology);
+    ok(hr == S_OK, "Failed to clone from topology, hr %#lx.\n", hr);
+
+    hr = IMFTopology_GetNodeCount(topology2, &node_count);
+    ok(hr == S_OK, "Failed to get node count, hr %#lx.\n", hr);
+    ok(node_count == 2, "Unexpected node count %u.\n", node_count);
+
+    hr = IMFTopology_GetNode(topology2, 0, &node3);
+    ok(hr == S_OK, "Failed to get node, hr %#lx.\n", hr);
+
+    hr = IMFTopologyNode_GetOutputCount(node3, &size);
+    ok(hr == S_OK, "Failed to get output count, hr %#lx.\n", hr);
+    ok(size == 2, "Unexpected output count %lu.\n", size);
+
+    IMFTopologyNode_Release(node3);
+
+    ref = IMFTopology_Release(topology2);
+    ok(ref == 0, "Release returned %ld\n", ref);
+    ref = IMFTopology_Release(topology);
+    ok(ref == 0, "Release returned %ld\n", ref);
+
+    ref = IMFTopologyNode_Release(node2);
+    ok(ref == 0, "Release returned %ld\n", ref);
+    ref = IMFTopologyNode_Release(node);
     ok(ref == 0, "Release returned %ld\n", ref);
 }
 
@@ -2888,7 +2940,7 @@ static HRESULT WINAPI test_grabber_callback_OnProcessSample(IMFSampleGrabberSink
 
     SetEvent(grabber->ready_event);
     res = WaitForSingleObject(grabber->done_event, 1000);
-    ok(!res, "WaitForSingleObject returned %#lx", res);
+    ok(!res, "WaitForSingleObject returned %#lx\n", res);
 
     return S_OK;
 }
@@ -2931,8 +2983,6 @@ static IMFSampleGrabberSinkCallback *create_test_grabber_callback(void)
 
 enum loader_test_flags
 {
-    LOADER_EXPECTED_DECODER = 0x1,
-    LOADER_EXPECTED_CONVERTER = 0x2,
     LOADER_TODO = 0x4,
     LOADER_NEEDS_VIDEO_PROCESSOR = 0x8,
     LOADER_SET_ENUMERATE_SOURCE_TYPES = 0x10,
@@ -3014,6 +3064,18 @@ static void test_topology_loader(void)
         ATTR_UINT32(MF_MT_AUDIO_BLOCK_ALIGNMENT, 1),
         ATTR_UINT32(MF_MT_AUDIO_BITS_PER_SAMPLE, 8),
     };
+    static const media_type_desc audio_float_44100_stereo =
+    {
+        ATTR_GUID(MF_MT_MAJOR_TYPE, MFMediaType_Audio),
+        ATTR_GUID(MF_MT_SUBTYPE, MFAudioFormat_Float),
+        ATTR_UINT32(MF_MT_AUDIO_NUM_CHANNELS, 2),
+        ATTR_UINT32(MF_MT_AUDIO_BLOCK_ALIGNMENT, 2 * 4),
+        ATTR_UINT32(MF_MT_AUDIO_SAMPLES_PER_SECOND, 44100),
+        ATTR_UINT32(MF_MT_AUDIO_AVG_BYTES_PER_SECOND, 2 * 4 * 44100),
+        ATTR_UINT32(MF_MT_AUDIO_BITS_PER_SAMPLE, 4 * 8),
+        ATTR_UINT32(MF_MT_AUDIO_CHANNEL_MASK, 3),
+        ATTR_UINT32(MF_MT_ALL_SAMPLES_INDEPENDENT, 1),
+    };
     static const media_type_desc video_i420_1280 =
     {
         ATTR_GUID(MF_MT_MAJOR_TYPE, MFMediaType_Video),
@@ -3037,6 +3099,25 @@ static void test_topology_loader(void)
         ATTR_GUID(MF_MT_MAJOR_TYPE, MFMediaType_Video),
         ATTR_GUID(MF_MT_SUBTYPE, MFVideoFormat_RGB32),
     };
+    static const media_type_desc video_h264_1280 =
+    {
+        ATTR_GUID(MF_MT_MAJOR_TYPE, MFMediaType_Video),
+        ATTR_GUID(MF_MT_SUBTYPE, MFVideoFormat_H264),
+        ATTR_RATIO(MF_MT_FRAME_SIZE, 1280, 720),
+    };
+    static const media_type_desc video_nv12_1280 =
+    {
+        ATTR_GUID(MF_MT_MAJOR_TYPE, MFMediaType_Video),
+        ATTR_GUID(MF_MT_SUBTYPE, MFVideoFormat_NV12),
+        ATTR_RATIO(MF_MT_FRAME_RATE, 30000, 1001),
+        ATTR_RATIO(MF_MT_FRAME_SIZE, 1280, 720),
+        ATTR_RATIO(MF_MT_PIXEL_ASPECT_RATIO, 1, 1),
+        ATTR_UINT32(MF_MT_SAMPLE_SIZE, 1280 * 720 * 3 / 2),
+        ATTR_UINT32(MF_MT_ALL_SAMPLES_INDEPENDENT, 1),
+        ATTR_UINT32(MF_MT_DEFAULT_STRIDE, 1280),
+        ATTR_UINT32(MF_MT_FIXED_SIZE_SAMPLES, 1),
+        ATTR_UINT32(MF_MT_INTERLACE_MODE, 7),
+    };
     static const media_type_desc video_dummy =
     {
         ATTR_GUID(MF_MT_MAJOR_TYPE, MFMediaType_Video),
@@ -3047,10 +3128,13 @@ static void test_topology_loader(void)
         const media_type_desc *input_type;
         const media_type_desc *output_type;
         const media_type_desc *current_input;
+        const media_type_desc *decoded_type;
         MF_CONNECT_METHOD source_method;
         MF_CONNECT_METHOD sink_method;
         HRESULT expected_result;
         unsigned int flags;
+        GUID decoder_class;
+        GUID converter_class;
     }
     loader_tests[] =
     {
@@ -3115,27 +3199,24 @@ static void test_topology_loader(void)
         {
             /* PCM -> PCM, different enumerated bps, no current type, sink allow converter */
             .input_type = &audio_pcm_44100, .output_type = &audio_pcm_48000, .sink_method = MF_CONNECT_ALLOW_CONVERTER, .source_method = MF_CONNECT_DIRECT,
-            .expected_result = S_OK,
-            .flags = LOADER_EXPECTED_CONVERTER,
+            .expected_result = S_OK, .converter_class = CLSID_CResamplerMediaObject,
         },
         {
             /* PCM -> PCM, different enumerated bps, same current type, sink allow converter, force enumerate */
             .input_type = &audio_pcm_44100, .output_type = &audio_pcm_48000, .sink_method = MF_CONNECT_ALLOW_CONVERTER, .source_method = -1,
             .current_input = &audio_pcm_48000,
-            .expected_result = S_OK,
-            .flags = LOADER_EXPECTED_CONVERTER | LOADER_SET_ENUMERATE_SOURCE_TYPES,
+            .expected_result = S_OK, .converter_class = CLSID_CResamplerMediaObject,
+            .flags = LOADER_SET_ENUMERATE_SOURCE_TYPES,
         },
         {
             /* PCM -> PCM, different enumerated bps, no current type, sink allow decoder */
             .input_type = &audio_pcm_44100, .output_type = &audio_pcm_48000, .sink_method = MF_CONNECT_ALLOW_DECODER, .source_method = MF_CONNECT_DIRECT,
-            .expected_result = S_OK,
-            .flags = LOADER_EXPECTED_CONVERTER,
+            .expected_result = S_OK, .converter_class = CLSID_CResamplerMediaObject,
         },
         {
             /* PCM -> PCM, different enumerated bps, no current type, default methods */
             .input_type = &audio_pcm_44100, .output_type = &audio_pcm_48000, .sink_method = -1, .source_method = -1,
-            .expected_result = S_OK,
-            .flags = LOADER_EXPECTED_CONVERTER,
+            .expected_result = S_OK, .converter_class = CLSID_CResamplerMediaObject,
         },
         {
             /* PCM -> PCM, different enumerated bps, no current type, source allow converter */
@@ -3146,14 +3227,14 @@ static void test_topology_loader(void)
         {
             /* Float -> PCM, refuse input type, add converter */
             .input_type = &audio_float_44100, .output_type = &audio_pcm_48000, .sink_method = MF_CONNECT_DIRECT, .source_method = -1,
-            .expected_result = MF_E_NO_MORE_TYPES,
-            .flags = LOADER_SET_INVALID_INPUT | LOADER_ADD_RESAMPLER_MFT | LOADER_EXPECTED_CONVERTER,
+            .expected_result = MF_E_NO_MORE_TYPES, .converter_class = CLSID_CResamplerMediaObject,
+            .flags = LOADER_SET_INVALID_INPUT | LOADER_ADD_RESAMPLER_MFT,
         },
         {
             /* Float -> PCM, refuse input type, add converter, allow resampler output type */
             .input_type = &audio_float_44100, .output_type = &audio_pcm_48000_resampler, .sink_method = MF_CONNECT_DIRECT, .source_method = -1,
-            .expected_result = S_OK,
-            .flags = LOADER_SET_INVALID_INPUT | LOADER_ADD_RESAMPLER_MFT | LOADER_EXPECTED_CONVERTER,
+            .expected_result = S_OK, .converter_class = CLSID_CResamplerMediaObject,
+            .flags = LOADER_SET_INVALID_INPUT | LOADER_ADD_RESAMPLER_MFT,
         },
 
         {
@@ -3180,34 +3261,38 @@ static void test_topology_loader(void)
             /* MP3 -> PCM */
             .input_type = &audio_mp3_44100, .output_type = &audio_pcm_44100, .sink_method = MF_CONNECT_ALLOW_DECODER, .source_method = -1,
             .current_input = &audio_mp3_44100,
-            .expected_result = S_OK,
-            .flags = LOADER_EXPECTED_DECODER | LOADER_TODO,
+            .expected_result = S_OK, .decoder_class = CLSID_CMP3DecMediaObject,
+            .flags = LOADER_TODO,
         },
         {
             /* MP3 -> PCM, need both decoder and converter */
             .input_type = &audio_mp3_44100, .output_type = &audio_float_48000, .sink_method = MF_CONNECT_ALLOW_DECODER, .source_method = -1,
-            .current_input = &audio_mp3_44100,
-            .expected_result = S_OK,
-            .flags = LOADER_EXPECTED_DECODER | LOADER_EXPECTED_CONVERTER | LOADER_TODO,
+            .current_input = &audio_mp3_44100, .decoded_type = &audio_float_44100_stereo,
+            .expected_result = S_OK, .decoder_class = CLSID_CMP3DecMediaObject, .converter_class = CLSID_CResamplerMediaObject,
+            .flags = LOADER_TODO,
         },
 
         {
             /* I420 -> RGB32, Color Convert media type */
             .input_type = &video_i420_1280, .output_type = &video_color_convert_1280_rgb32, .sink_method = -1, .source_method = -1,
-            .expected_result = MF_E_TOPO_CODEC_NOT_FOUND,
-            .flags = LOADER_NEEDS_VIDEO_PROCESSOR | LOADER_EXPECTED_CONVERTER,
+            .expected_result = MF_E_TOPO_CODEC_NOT_FOUND, .converter_class = CLSID_CColorConvertDMO,
+            .flags = LOADER_NEEDS_VIDEO_PROCESSOR,
         },
         {
             /* I420 -> RGB32, Video Processor media type */
             .input_type = &video_i420_1280, .output_type = &video_video_processor_1280_rgb32, .sink_method = -1, .source_method = -1,
-            .expected_result = S_OK,
-            .flags = LOADER_EXPECTED_CONVERTER,
+            .expected_result = S_OK, .converter_class = CLSID_CColorConvertDMO,
         },
         {
             /* I420 -> RGB32, Video Processor media type without frame size */
             .input_type = &video_i420_1280, .output_type = &video_video_processor_rgb32, .sink_method = -1, .source_method = -1,
-            .expected_result = S_OK,
-            .flags = LOADER_EXPECTED_CONVERTER,
+            .expected_result = S_OK, .converter_class = CLSID_CColorConvertDMO,
+        },
+        {
+            /* H264 -> RGB32, Video Processor media type */
+            .input_type = &video_h264_1280, .output_type = &video_video_processor_1280_rgb32, .sink_method = -1, .source_method = -1,
+            .decoded_type = &video_nv12_1280,
+            .expected_result = S_OK, .decoder_class = CLSID_CMSH264DecoderMFT, .converter_class = CLSID_CColorConvertDMO,
         },
         {
             /* RGB32 -> Any Video, no current output type */
@@ -3218,14 +3303,14 @@ static void test_topology_loader(void)
         {
             /* RGB32 -> Any Video, no current output type, refuse input type */
             .input_type = &video_i420_1280, .output_type = &video_dummy, .sink_method = -1, .source_method = -1,
-            .expected_result = S_OK,
-            .flags = LOADER_NO_CURRENT_OUTPUT | LOADER_SET_INVALID_INPUT | LOADER_EXPECTED_CONVERTER,
+            .expected_result = S_OK, .converter_class = CLSID_CColorConvertDMO,
+            .flags = LOADER_NO_CURRENT_OUTPUT | LOADER_SET_INVALID_INPUT,
         },
         {
             /* RGB32 -> Any Video, no current output type, refuse input type */
             .input_type = &video_i420_1280, .output_type = &video_video_processor_rgb32, .sink_method = -1, .source_method = -1,
-            .expected_result = S_OK,
-            .flags = LOADER_NO_CURRENT_OUTPUT | LOADER_SET_INVALID_INPUT | LOADER_SET_MEDIA_TYPES | LOADER_EXPECTED_CONVERTER,
+            .expected_result = S_OK, .converter_class = CLSID_CColorConvertDMO,
+            .flags = LOADER_NO_CURRENT_OUTPUT | LOADER_SET_INVALID_INPUT | LOADER_SET_MEDIA_TYPES,
         },
     };
 
@@ -3484,14 +3569,14 @@ todo_wine {
             ok(value == MF_TOPOLOGY_RESOLUTION_SUCCEEDED, "Unexpected value %#x.\n", value);
 }
             count = 2;
-            if (test->flags & LOADER_EXPECTED_DECODER)
+            if (!IsEqualGUID(&test->decoder_class, &GUID_NULL))
                 count++;
-            if (test->flags & LOADER_EXPECTED_CONVERTER)
+            if (!IsEqualGUID(&test->converter_class, &GUID_NULL))
                 count++;
 
             hr = IMFTopology_GetNodeCount(full_topology, &node_count);
             ok(hr == S_OK, "Failed to get node count, hr %#lx.\n", hr);
-            todo_wine_if(test->flags & LOADER_EXPECTED_DECODER)
+            todo_wine_if(IsEqualGUID(&test->decoder_class, &CLSID_CMP3DecMediaObject))
             ok(node_count == count, "Unexpected node count %u.\n", node_count);
 
             hr = IMFTopologyNode_GetTopoNodeID(src_node, &node_id);
@@ -3506,29 +3591,31 @@ todo_wine {
             hr = IMFTopology_GetNodeByID(full_topology, node_id, &sink_node2);
             ok(hr == S_OK, "Failed to get sink in resolved topology, hr %#lx.\n", hr);
 
-            if (test->flags & (LOADER_EXPECTED_DECODER | LOADER_EXPECTED_CONVERTER))
+            if (!IsEqualGUID(&test->decoder_class, &GUID_NULL))
             {
+                GUID class_id;
+
                 hr = IMFTopologyNode_GetOutput(src_node2, 0, &mft_node, &index);
-                ok(hr == S_OK, "Failed to get transform node in resolved topology, hr %#lx.\n", hr);
+                ok(hr == S_OK, "Failed to get decoder in resolved topology, hr %#lx.\n", hr);
                 ok(!index, "Unexpected stream index %lu.\n", index);
 
                 hr = IMFTopologyNode_GetNodeType(mft_node, &node_type);
                 ok(hr == S_OK, "Failed to get transform node type in resolved topology, hr %#lx.\n", hr);
                 ok(node_type == MF_TOPOLOGY_TRANSFORM_NODE, "Unexpected node type %u.\n", node_type);
 
+                value = 0;
+                hr = IMFTopologyNode_GetUINT32(mft_node, &MF_TOPONODE_DECODER, &value);
+                ok(hr == S_OK, "Failed to get attribute, hr %#lx.\n", hr);
+                ok(value == 1, "Unexpected value.\n");
+
+                class_id = GUID_NULL;
+                hr = IMFTopologyNode_GetGUID(mft_node, &MF_TOPONODE_TRANSFORM_OBJECTID, &class_id);
+                ok(hr == S_OK, "Failed to get attribute, hr %#lx.\n", hr);
+                ok(IsEqualGUID(&class_id, &test->decoder_class), "got MF_TOPONODE_TRANSFORM_OBJECTID %s.\n", debugstr_guid(&class_id));
+
                 hr = IMFTopologyNode_GetObject(mft_node, &node_object);
                 ok(hr == S_OK, "Failed to get object of transform node, hr %#lx.\n", hr);
-
-                if (test->flags & LOADER_EXPECTED_DECODER)
-                {
-                    value = 0;
-                    hr = IMFTopologyNode_GetUINT32(mft_node, &MF_TOPONODE_DECODER, &value);
-                    ok(hr == S_OK, "Failed to get attribute, hr %#lx.\n", hr);
-                    ok(value == 1, "Unexpected value.\n");
-                }
-
-                hr = IMFTopologyNode_GetItem(mft_node, &MF_TOPONODE_TRANSFORM_OBJECTID, NULL);
-                ok(hr == S_OK, "Failed to get attribute, hr %#lx.\n", hr);
+                IMFTopologyNode_Release(mft_node);
 
                 hr = IUnknown_QueryInterface(node_object, &IID_IMFTransform, (void **)&transform);
                 ok(hr == S_OK, "Failed to get IMFTransform from transform node's object, hr %#lx.\n", hr);
@@ -3536,51 +3623,75 @@ todo_wine {
 
                 hr = IMFTransform_GetInputCurrentType(transform, 0, &media_type);
                 ok(hr == S_OK, "Failed to get transform input type, hr %#lx.\n", hr);
-
                 hr = IMFMediaType_Compare(input_type, (IMFAttributes *)media_type, MF_ATTRIBUTES_MATCH_OUR_ITEMS, &ret);
                 ok(hr == S_OK, "Failed to compare media types, hr %#lx.\n", hr);
                 ok(ret, "Input type of first transform doesn't match source node type.\n");
-
-                IMFTopologyNode_Release(mft_node);
                 IMFMediaType_Release(media_type);
+
+                hr = IMFTransform_GetOutputCurrentType(transform, 0, &media_type);
+                ok(hr == S_OK, "Failed to get transform input type, hr %#lx.\n", hr);
+                if (IsEqualGUID(&test->converter_class, &GUID_NULL))
+                {
+                    hr = IMFMediaType_Compare(output_type, (IMFAttributes *)media_type, MF_ATTRIBUTES_MATCH_OUR_ITEMS, &ret);
+                    ok(hr == S_OK, "Failed to compare media types, hr %#lx.\n", hr);
+                    ok(ret, "Output type of first transform doesn't match sink node type.\n");
+                }
+                else if (test->decoded_type)
+                {
+                    check_media_type(media_type, *test->decoded_type, -1);
+                }
+                IMFMediaType_Release(media_type);
+
                 IMFTransform_Release(transform);
+            }
+
+            if (!IsEqualGUID(&test->converter_class, &GUID_NULL))
+            {
+                GUID class_id;
 
                 hr = IMFTopologyNode_GetInput(sink_node2, 0, &mft_node, &index);
-                ok(hr == S_OK, "Failed to get transform node in resolved topology, hr %#lx.\n", hr);
+                ok(hr == S_OK, "Failed to get decoder in resolved topology, hr %#lx.\n", hr);
                 ok(!index, "Unexpected stream index %lu.\n", index);
 
                 hr = IMFTopologyNode_GetNodeType(mft_node, &node_type);
                 ok(hr == S_OK, "Failed to get transform node type in resolved topology, hr %#lx.\n", hr);
                 ok(node_type == MF_TOPOLOGY_TRANSFORM_NODE, "Unexpected node type %u.\n", node_type);
 
-                hr = IMFTopologyNode_GetItem(mft_node, &MF_TOPONODE_TRANSFORM_OBJECTID, NULL);
+                class_id = GUID_NULL;
+                hr = IMFTopologyNode_GetGUID(mft_node, &MF_TOPONODE_TRANSFORM_OBJECTID, &class_id);
                 ok(hr == S_OK, "Failed to get attribute, hr %#lx.\n", hr);
+                todo_wine_if(IsEqualGUID(&test->converter_class, &CLSID_CColorConvertDMO))
+                ok(IsEqualGUID(&class_id, &test->converter_class), "got MF_TOPONODE_TRANSFORM_OBJECTID %s.\n", debugstr_guid(&class_id));
 
                 hr = IMFTopologyNode_GetObject(mft_node, &node_object);
                 ok(hr == S_OK, "Failed to get object of transform node, hr %#lx.\n", hr);
+                IMFTopologyNode_Release(mft_node);
 
-                hr = IUnknown_QueryInterface(node_object, &IID_IMFTransform, (void**) &transform);
+                hr = IUnknown_QueryInterface(node_object, &IID_IMFTransform, (void **)&transform);
                 ok(hr == S_OK, "Failed to get IMFTransform from transform node's object, hr %#lx.\n", hr);
                 IUnknown_Release(node_object);
 
+                hr = IMFTransform_GetInputCurrentType(transform, 0, &media_type);
+                ok(hr == S_OK, "Failed to get transform input type, hr %#lx.\n", hr);
+                if (IsEqualGUID(&test->decoder_class, &GUID_NULL))
+                {
+                    hr = IMFMediaType_Compare(input_type, (IMFAttributes *)media_type, MF_ATTRIBUTES_MATCH_OUR_ITEMS, &ret);
+                    ok(hr == S_OK, "Failed to compare media types, hr %#lx.\n", hr);
+                    ok(ret, "Input type of last transform doesn't match source node type.\n");
+                }
+                else if (test->decoded_type)
+                {
+                    check_media_type(media_type, *test->decoded_type, -1);
+                }
+                IMFMediaType_Release(media_type);
+
                 hr = IMFTransform_GetOutputCurrentType(transform, 0, &media_type);
-                ok(hr == S_OK, "Failed to get transform output type, hr %#lx.\n", hr);
+                ok(hr == S_OK, "Failed to get transform input type, hr %#lx.\n", hr);
                 hr = IMFMediaType_Compare(output_type, (IMFAttributes *)media_type, MF_ATTRIBUTES_MATCH_OUR_ITEMS, &ret);
                 ok(hr == S_OK, "Failed to compare media types, hr %#lx.\n", hr);
                 ok(ret, "Output type of last transform doesn't match sink node type.\n");
                 IMFMediaType_Release(media_type);
 
-                hr = IMFTransform_GetInputCurrentType(transform, 0, &media_type);
-                ok(hr == S_OK, "Failed to get transform input type, hr %#lx.\n", hr);
-                if ((test->flags & (LOADER_EXPECTED_CONVERTER | LOADER_EXPECTED_DECODER)) != (LOADER_EXPECTED_CONVERTER | LOADER_EXPECTED_DECODER))
-                {
-                    hr = IMFMediaType_Compare(input_type, (IMFAttributes *)media_type, MF_ATTRIBUTES_MATCH_OUR_ITEMS, &ret);
-                    ok(hr == S_OK, "Failed to compare media types, hr %#lx.\n", hr);
-                    ok(ret, "Input type of transform doesn't match source node type.\n");
-                }
-                IMFMediaType_Release(media_type);
-
-                IMFTopologyNode_Release(mft_node);
                 IMFTransform_Release(transform);
             }
 
@@ -3704,6 +3815,13 @@ static void test_topology_loader_evr(void)
     ok(hr == S_OK, "Failed to create activate object, hr %#lx.\n", hr);
 
     hr = IMFActivate_ActivateObject(activate, &IID_IMFMediaSink, (void **)&sink);
+    if (FAILED(hr))
+    {
+        skip("Failed to create an EVR sink, skipping tests.\n");
+        DestroyWindow(window);
+        IMFActivate_Release(activate);
+        return;
+    }
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
 
     hr = IMFMediaSink_GetStreamSinkById(sink, 0, &stream_sink);
@@ -4597,9 +4715,16 @@ static void test_sample_grabber(void)
     EXPECT_REF(clock, 3);
     hr = IMFMediaSink_Shutdown(sink);
     ok(hr == S_OK, "Failed to shut down, hr %#lx.\n", hr);
+    EXPECT_REF(clock, 1);
+
+    hr = IMFMediaSink_SetPresentationClock(sink, NULL);
+    ok(hr == MF_E_SHUTDOWN, "Unexpected hr %#lx.\n", hr);
+
+    hr = IMFMediaSink_SetPresentationClock(sink, clock);
+    ok(hr == MF_E_SHUTDOWN, "Unexpected hr %#lx.\n", hr);
 
     ref = IMFPresentationClock_Release(clock);
-    ok(ref == 0, "Release returned %ld\n", ref);
+    ok(!ref, "Unexpected refcount %ld.\n", ref);
 
     hr = IMFMediaEventGenerator_GetEvent(eg, MF_EVENT_FLAG_NO_WAIT, &event);
     ok(hr == MF_E_SHUTDOWN, "Unexpected hr %#lx.\n", hr);
@@ -4645,10 +4770,9 @@ static void test_sample_grabber(void)
     ok(hr == S_OK, "Failed to get type count, hr %#lx.\n", hr);
 
     ref = IMFMediaType_Release(media_type2);
-    todo_wine
-    ok(ref == 0, "Release returned %ld\n", ref);
+    ok(!ref, "Unexpected refcount %ld.\n", ref);
     ref = IMFMediaType_Release(media_type);
-    ok(ref == 0, "Release returned %ld\n", ref);
+    ok(!ref, "Unexpected refcount %ld.\n", ref);
 
     hr = IMFMediaTypeHandler_GetMediaTypeByIndex(handler, 0, &media_type);
     ok(hr == MF_E_NO_MORE_TYPES, "Unexpected hr %#lx.\n", hr);
@@ -4679,9 +4803,9 @@ static void test_sample_grabber(void)
     IMFStreamSink_Release(stream);
 
     ref = IMFActivate_Release(activate);
-    ok(ref == 0, "Release returned %ld\n", ref);
+    ok(!ref, "Unexpected refcount %ld.\n", ref);
     ref = IMFMediaSink_Release(sink);
-    ok(ref == 0, "Release returned %ld\n", ref);
+    ok(!ref, "Unexpected refcount %ld.\n", ref);
 
     /* Rateless mode with MF_SAMPLEGRABBERSINK_IGNORE_CLOCK. */
     hr = MFCreateMediaType(&media_type);
@@ -4900,7 +5024,7 @@ static void test_sample_grabber_orientation(GUID subtype)
     if (!(source = create_media_source(L"test.mp4", L"video/mp4")))
     {
         win_skip("MP4 media source is not supported, skipping tests.\n");
-        return;
+        goto done;
     }
 
     callback = create_test_callback(TRUE);
@@ -4910,9 +5034,6 @@ static void test_sample_grabber_orientation(GUID subtype)
     ok(!!grabber_callback->ready_event, "CreateEventW failed, error %lu\n", GetLastError());
     grabber_callback->done_event = CreateEventW(NULL, FALSE, FALSE, NULL);
     ok(!!grabber_callback->done_event, "CreateEventW failed, error %lu\n", GetLastError());
-
-    hr = MFStartup(MF_VERSION, MFSTARTUP_FULL);
-    ok(hr == S_OK, "Startup failure, hr %#lx.\n", hr);
 
     hr = MFCreateMediaSession(NULL, &session);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
@@ -5016,10 +5137,11 @@ static void test_sample_grabber_orientation(GUID subtype)
     IMFMediaSession_Release(session);
     IMFMediaSource_Release(source);
 
+    IMFSampleGrabberSinkCallback_Release(&grabber_callback->IMFSampleGrabberSinkCallback_iface);
+
+done:
     hr = MFShutdown();
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
-
-    IMFSampleGrabberSinkCallback_Release(&grabber_callback->IMFSampleGrabberSinkCallback_iface);
 }
 
 static void test_quality_manager(void)
@@ -6383,6 +6505,134 @@ static void test_MFGetSupportedSchemes(void)
     PropVariantClear(&value);
 }
 
+static void test_scheme_resolvers(void)
+{
+    static const DWORD expect_caps = MFBYTESTREAM_IS_READABLE | MFBYTESTREAM_IS_SEEKABLE;
+    static const WCHAR *urls[] =
+    {
+        L"http://test.winehq.org/tests/test.mp3",
+        L"https://test.winehq.org/tests/test.mp3",
+        L"httpd://test.winehq.org/tests/test.mp3",
+        L"httpsd://test.winehq.org/tests/test.mp3",
+        L"mms://test.winehq.org/tests/test.mp3",
+    };
+    static const WCHAR *expect_domain[] =
+    {
+        L"http://test.winehq.org",
+        L"https://test.winehq.org",
+        L"http://test.winehq.org",
+        L"https://test.winehq.org",
+        L"http://test.winehq.org",
+    };
+
+    IMFSourceResolver *resolver;
+    IMFByteStream *byte_stream;
+    IMFAttributes *attributes;
+    PROPVARIANT propvar;
+    MF_OBJECT_TYPE type;
+    IUnknown *object;
+    UINT64 length;
+    DWORD i, caps;
+    HRESULT hr;
+
+    hr = MFStartup(MF_VERSION, MFSTARTUP_FULL);
+    ok(hr == S_OK, "got hr %#lx\n", hr);
+
+    hr = MFCreateSourceResolver(&resolver);
+    ok(hr == S_OK, "got hr %#lx\n", hr);
+
+    for (i = 0; i < ARRAY_SIZE(urls); i++)
+    {
+        hr = IMFSourceResolver_CreateObjectFromURL(resolver, urls[i], MF_RESOLUTION_BYTESTREAM, NULL, &type, &object);
+        todo_wine_if(i >= 2)
+        ok(hr == S_OK, "got hr %#lx\n", hr);
+        if (hr != S_OK)
+            continue;
+
+        hr = IUnknown_QueryInterface(object, &IID_IMFAttributes, (void **)&attributes);
+        ok(hr == S_OK, "got hr %#lx\n", hr);
+        hr = IMFAttributes_GetItem(attributes, &MF_BYTESTREAM_ORIGIN_NAME, NULL);
+        ok(hr == MF_E_ATTRIBUTENOTFOUND, "got hr %#lx\n", hr);
+
+        PropVariantInit(&propvar);
+        hr = IMFAttributes_GetItem(attributes, &MF_BYTESTREAM_EFFECTIVE_URL, &propvar);
+        ok(hr == S_OK || broken(hr == MF_E_ATTRIBUTENOTFOUND) /* Win7 */, "got hr %#lx\n", hr);
+        if (hr == S_OK)
+        {
+            ok(!wcsncmp(expect_domain[i], propvar.pwszVal, wcslen(expect_domain[i])),
+                    "got url %s\n", debugstr_w(propvar.pwszVal));
+        }
+        hr = PropVariantClear(&propvar);
+        ok(hr == S_OK, "got hr %#lx\n", hr);
+
+        hr = IMFAttributes_GetItem(attributes, &MF_BYTESTREAM_CONTENT_TYPE, NULL);
+        ok(hr == S_OK, "got hr %#lx\n", hr);
+        hr = IMFAttributes_GetItem(attributes, &MF_BYTESTREAM_LAST_MODIFIED_TIME, NULL);
+        todo_wine
+        ok(hr == S_OK, "got hr %#lx\n", hr);
+        IMFAttributes_Release(attributes);
+
+        hr = IUnknown_QueryInterface(object, &IID_IMFByteStream, (void **)&byte_stream);
+        ok(hr == S_OK, "got hr %#lx\n", hr);
+        hr = IMFByteStream_GetCapabilities(byte_stream, &caps);
+        ok(hr == S_OK, "got hr %#lx\n", hr);
+        todo_wine
+        ok(caps == (expect_caps | MFBYTESTREAM_IS_PARTIALLY_DOWNLOADED)
+                || caps == (expect_caps | MFBYTESTREAM_DOES_NOT_USE_NETWORK),
+                "got caps %#lx\n", caps);
+        hr = IMFByteStream_GetLength(byte_stream, &length);
+        ok(hr == S_OK, "got hr %#lx\n", hr);
+        ok(length == 0x110d, "got length %#I64x\n", length);
+        IMFByteStream_Release(byte_stream);
+
+        IUnknown_Release(object);
+    }
+
+    hr = IMFSourceResolver_CreateObjectFromURL(resolver, L"httpt://test.winehq.org/tests/test.mp3", MF_RESOLUTION_BYTESTREAM, NULL, &type, &object);
+    todo_wine
+    ok(hr == MF_E_UNSUPPORTED_BYTESTREAM_TYPE, "got hr %#lx\n", hr);
+    hr = IMFSourceResolver_CreateObjectFromURL(resolver, L"httpu://test.winehq.org/tests/test.mp3", MF_RESOLUTION_BYTESTREAM, NULL, &type, &object);
+    todo_wine
+    ok(hr == MF_E_UNSUPPORTED_BYTESTREAM_TYPE, "got hr %#lx\n", hr);
+
+    hr = IMFSourceResolver_CreateObjectFromURL(resolver, L"http://test.winehq.bla/tests/test.mp3", MF_RESOLUTION_BYTESTREAM, NULL, &type, &object);
+    todo_wine
+    ok(hr == NS_E_SERVER_NOT_FOUND, "got hr %#lx\n", hr);
+    hr = IMFSourceResolver_CreateObjectFromURL(resolver, L"https://test.winehq.bla/tests/test.mp3", MF_RESOLUTION_BYTESTREAM, NULL, &type, &object);
+    todo_wine
+    ok(hr == WININET_E_NAME_NOT_RESOLVED, "got hr %#lx\n", hr);
+    hr = IMFSourceResolver_CreateObjectFromURL(resolver, L"httpd://test.winehq.bla/tests/test.mp3", MF_RESOLUTION_BYTESTREAM, NULL, &type, &object);
+    todo_wine
+    ok(hr == WININET_E_NAME_NOT_RESOLVED, "got hr %#lx\n", hr);
+    hr = IMFSourceResolver_CreateObjectFromURL(resolver, L"httpsd://test.winehq.bla/tests/test.mp3", MF_RESOLUTION_BYTESTREAM, NULL, &type, &object);
+    todo_wine
+    ok(hr == WININET_E_NAME_NOT_RESOLVED, "got hr %#lx\n", hr);
+    hr = IMFSourceResolver_CreateObjectFromURL(resolver, L"mms://test.winehq.bla/tests/test.mp3", MF_RESOLUTION_BYTESTREAM, NULL, &type, &object);
+    todo_wine
+    ok(hr == WININET_E_NAME_NOT_RESOLVED, "got hr %#lx\n", hr);
+
+    hr = IMFSourceResolver_CreateObjectFromURL(resolver, L"http://test.winehq.org/tests/invalid.mp3", MF_RESOLUTION_BYTESTREAM, NULL, &type, &object);
+    todo_wine
+    ok(hr == NS_E_FILE_NOT_FOUND, "got hr %#lx\n", hr);
+    hr = IMFSourceResolver_CreateObjectFromURL(resolver, L"https://test.winehq.org/tests/invalid.mp3", MF_RESOLUTION_BYTESTREAM, NULL, &type, &object);
+    todo_wine
+    ok(hr == NS_E_FILE_NOT_FOUND, "got hr %#lx\n", hr);
+    hr = IMFSourceResolver_CreateObjectFromURL(resolver, L"httpd://test.winehq.org/tests/invalid.mp3", MF_RESOLUTION_BYTESTREAM, NULL, &type, &object);
+    todo_wine
+    ok(hr == NS_E_FILE_NOT_FOUND, "got hr %#lx\n", hr);
+    hr = IMFSourceResolver_CreateObjectFromURL(resolver, L"httpsd://test.winehq.org/tests/invalid.mp3", MF_RESOLUTION_BYTESTREAM, NULL, &type, &object);
+    todo_wine
+    ok(hr == NS_E_FILE_NOT_FOUND, "got hr %#lx\n", hr);
+    hr = IMFSourceResolver_CreateObjectFromURL(resolver, L"mms://test.winehq.org/tests/invalid.mp3", MF_RESOLUTION_BYTESTREAM, NULL, &type, &object);
+    todo_wine
+    ok(hr == MF_E_UNSUPPORTED_BYTESTREAM_TYPE, "got hr %#lx\n", hr);
+
+    IMFSourceResolver_Release(resolver);
+
+    hr = MFShutdown();
+    ok(hr == S_OK, "got hr %#lx\n", hr);
+}
+
 static void test_MFGetTopoNodeCurrentType(void)
 {
     static const struct attribute_desc media_type_desc[] =
@@ -6642,6 +6892,9 @@ void init_functions(void)
 #define X(f) p##f = (void*)GetProcAddress(mod, #f)
     X(MFCreateSampleCopierMFT);
     X(MFGetTopoNodeCurrentType);
+
+    mod = GetModuleHandleA("mfplat.dll");
+    X(MFCreateDXGIDeviceManager);
 #undef X
 
     hr = CoInitialize(NULL);
@@ -6700,6 +6953,329 @@ static void test_MFRequireProtectedEnvironment(void)
     ok(ref == 0, "Release returned %ld\n", ref);
 }
 
+static void test_mpeg4_media_sink(void)
+{
+    IMFMediaSink *sink = NULL, *sink2 = NULL, *sink_audio = NULL, *sink_video = NULL, *sink_empty = NULL;
+    IMFByteStream *bytestream, *bytestream_audio, *bytestream_video, *bytestream_empty;
+    DWORD id, count, flags, width = 96, height = 96;
+    IMFMediaType *audio_type, *video_type, *media_type;
+    IMFMediaTypeHandler *type_handler = NULL;
+    IMFPresentationClock *clock;
+    IMFStreamSink *stream_sink;
+    HRESULT hr;
+    GUID guid;
+
+    /* Test sink creation. */
+    hr = MFCreateMediaType(&audio_type);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    hr = MFCreateMediaType(&video_type);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+
+    hr = IMFMediaType_SetGUID(audio_type, &MF_MT_MAJOR_TYPE, &MFMediaType_Audio);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    hr = IMFMediaType_SetGUID(audio_type, &MF_MT_SUBTYPE, &MFAudioFormat_AAC);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    hr = IMFMediaType_SetUINT32(audio_type, &MF_MT_AUDIO_NUM_CHANNELS, 1);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    hr = IMFMediaType_SetUINT32(audio_type, &MF_MT_AUDIO_BITS_PER_SAMPLE, 16);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    hr = IMFMediaType_SetUINT32(audio_type, &MF_MT_AUDIO_SAMPLES_PER_SECOND, 44100);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    hr = IMFMediaType_SetUINT32(audio_type, &MF_MT_AUDIO_AVG_BYTES_PER_SECOND, 12000);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    hr = IMFMediaType_SetUINT32(audio_type, &MF_MT_AAC_AUDIO_PROFILE_LEVEL_INDICATION, 41);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    hr = IMFMediaType_SetUINT32(audio_type, &MF_MT_AAC_PAYLOAD_TYPE, 0);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    hr = IMFMediaType_SetBlob(audio_type, &MF_MT_USER_DATA, test_aac_codec_data, sizeof(test_aac_codec_data));
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+
+    hr = IMFMediaType_SetGUID(video_type, &MF_MT_MAJOR_TYPE, &MFMediaType_Video);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    hr = IMFMediaType_SetGUID(video_type, &MF_MT_SUBTYPE, &MFVideoFormat_H264);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    hr = IMFMediaType_SetUINT64(video_type, &MF_MT_FRAME_SIZE, ((UINT64)width << 32) | height);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    hr = IMFMediaType_SetUINT64(video_type, &MF_MT_FRAME_RATE, ((UINT64)30000 << 32) | 1001);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    hr = IMFMediaType_SetBlob(video_type, &MF_MT_MPEG_SEQUENCE_HEADER,
+            test_h264_sequence_header, sizeof(test_h264_sequence_header));
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+
+    hr = MFCreateTempFile(MF_ACCESSMODE_WRITE, MF_OPENMODE_DELETE_IF_EXIST, 0, &bytestream_audio);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    hr = MFCreateTempFile(MF_ACCESSMODE_WRITE, MF_OPENMODE_DELETE_IF_EXIST, 0, &bytestream_video);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    hr = MFCreateTempFile(MF_ACCESSMODE_WRITE, MF_OPENMODE_DELETE_IF_EXIST, 0, &bytestream_empty);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    hr = MFCreateTempFile(MF_ACCESSMODE_WRITE, MF_OPENMODE_DELETE_IF_EXIST, 0, &bytestream);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+
+    hr = MFCreateMPEG4MediaSink(NULL, NULL, NULL, NULL);
+    ok(hr == E_POINTER, "Unexpected hr %#lx.\n", hr);
+
+    sink = (void *)0xdeadbeef;
+    hr = MFCreateMPEG4MediaSink(NULL, NULL, NULL, &sink);
+    ok(hr == E_POINTER, "Unexpected hr %#lx.\n", hr);
+    ok(sink == (void *)0xdeadbeef, "Unexpected pointer %p.\n", sink);
+    sink = NULL;
+
+    hr = MFCreateMPEG4MediaSink(bytestream_empty, NULL, NULL, &sink_empty);
+    ok(hr == S_OK || broken(hr == E_INVALIDARG), "Unexpected hr %#lx.\n", hr);
+
+    hr = MFCreateMPEG4MediaSink(bytestream_audio, NULL, audio_type, &sink_audio);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+
+    hr = MFCreateMPEG4MediaSink(bytestream_video, video_type, NULL, &sink_video);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+
+    hr = MFCreateMPEG4MediaSink(bytestream, video_type, audio_type, &sink);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+
+    /* Test sink. */
+    flags = 0xdeadbeef;
+    hr = IMFMediaSink_GetCharacteristics(sink, &flags);
+    todo_wine
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    todo_wine
+    ok(flags == MEDIASINK_RATELESS || broken(flags == (MEDIASINK_RATELESS | MEDIASINK_FIXED_STREAMS)),
+            "Unexpected flags %#lx.\n", flags);
+
+    check_interface(sink, &IID_IMFMediaEventGenerator, TRUE);
+    check_interface(sink, &IID_IMFFinalizableMediaSink, TRUE);
+    check_interface(sink, &IID_IMFClockStateSink, TRUE);
+    todo_wine
+    check_interface(sink, &IID_IMFGetService, TRUE);
+
+    /* Test sink stream count. */
+    hr = IMFMediaSink_GetStreamSinkCount(sink, NULL);
+    ok(hr == E_POINTER, "Unexpected hr %#lx.\n", hr);
+
+    hr = IMFMediaSink_GetStreamSinkCount(sink, &count);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    ok(count == 2, "Unexpected count %lu.\n", count);
+
+    hr = IMFMediaSink_GetStreamSinkCount(sink_audio, &count);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    ok(count == 1, "Unexpected count %lu.\n", count);
+
+    hr = IMFMediaSink_GetStreamSinkCount(sink_video, &count);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    ok(count == 1, "Unexpected count %lu.\n", count);
+
+    if (sink_empty)
+    {
+        hr = IMFMediaSink_GetStreamSinkCount(sink_empty, &count);
+        ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+        ok(count == 0, "Unexpected count %lu.\n", count);
+    }
+
+    /* Test GetStreamSinkByIndex. */
+    hr = IMFMediaSink_GetStreamSinkByIndex(sink_video, 0, &stream_sink);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    hr = IMFStreamSink_GetIdentifier(stream_sink, &id);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    ok(id == 1, "Unexpected id %lu.\n", id);
+    IMFStreamSink_Release(stream_sink);
+
+    hr = IMFMediaSink_GetStreamSinkByIndex(sink_audio, 0, &stream_sink);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    hr = IMFStreamSink_GetIdentifier(stream_sink, &id);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    ok(id == 2, "Unexpected id %lu.\n", id);
+    IMFStreamSink_Release(stream_sink);
+
+    stream_sink = (void *)0xdeadbeef;
+    hr = IMFMediaSink_GetStreamSinkByIndex(sink_audio, 1, &stream_sink);
+    ok(hr == MF_E_INVALIDINDEX, "Unexpected hr %#lx.\n", hr);
+    ok(stream_sink == (void *)0xdeadbeef, "Unexpected pointer %p.\n", stream_sink);
+
+    stream_sink = (void *)0xdeadbeef;
+    hr = IMFMediaSink_GetStreamSinkByIndex(sink_video, 1, &stream_sink);
+    ok(hr == MF_E_INVALIDINDEX, "Unexpected hr %#lx.\n", hr);
+    ok(stream_sink == (void *)0xdeadbeef, "Unexpected pointer %p.\n", stream_sink);
+
+    /* Test GetStreamSinkById. */
+    hr = IMFMediaSink_GetStreamSinkById(sink, 1, &stream_sink);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    IMFStreamSink_Release(stream_sink);
+    hr = IMFMediaSink_GetStreamSinkById(sink, 2, &stream_sink);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    IMFStreamSink_Release(stream_sink);
+    hr = IMFMediaSink_GetStreamSinkById(sink_video, 1, &stream_sink);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    IMFStreamSink_Release(stream_sink);
+    hr = IMFMediaSink_GetStreamSinkById(sink_audio, 2, &stream_sink);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    IMFStreamSink_Release(stream_sink);
+
+    stream_sink = (void *)0xdeadbeef;
+    hr = IMFMediaSink_GetStreamSinkById(sink_video, 2, &stream_sink);
+    ok(hr == MF_E_INVALIDSTREAMNUMBER, "Unexpected hr %#lx.\n", hr);
+    ok(stream_sink == (void *)0xdeadbeef, "Unexpected pointer %p.\n", stream_sink);
+
+    stream_sink = (void *)0xdeadbeef;
+    hr = IMFMediaSink_GetStreamSinkById(sink_audio, 1, &stream_sink);
+    ok(hr == MF_E_INVALIDSTREAMNUMBER, "Unexpected hr %#lx.\n", hr);
+    ok(stream_sink == (void *)0xdeadbeef, "Unexpected pointer %p.\n", stream_sink);
+
+    /* Test adding and removing stream sink. */
+    if (!(flags & MEDIASINK_FIXED_STREAMS))
+    {
+        hr = IMFMediaSink_AddStreamSink(sink, 123, video_type, &stream_sink);
+        ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+        IMFStreamSink_Release(stream_sink);
+        hr = IMFMediaSink_GetStreamSinkByIndex(sink, 2, &stream_sink);
+        ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+        hr = IMFStreamSink_GetIdentifier(stream_sink, &id);
+        ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+        ok(id == 123, "Unexpected id %lu.\n", id);
+        IMFStreamSink_Release(stream_sink);
+
+        stream_sink = (void *)0xdeadbeef;
+        hr = IMFMediaSink_AddStreamSink(sink, 1, audio_type, &stream_sink);
+        ok(hr == MF_E_STREAMSINK_EXISTS, "Unexpected hr %#lx.\n", hr);
+        ok(!stream_sink, "Unexpected pointer %p.\n", stream_sink);
+
+        hr = IMFMediaSink_RemoveStreamSink(sink, 1);
+        ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+        hr = IMFMediaSink_AddStreamSink(sink, 1, audio_type, &stream_sink);
+        ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+        IMFStreamSink_Release(stream_sink);
+        hr = IMFMediaSink_GetStreamSinkByIndex(sink, 2, &stream_sink);
+        ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+        hr = IMFStreamSink_GetIdentifier(stream_sink, &id);
+        ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+        ok(id == 1, "Unexpected id %lu.\n", id);
+        IMFStreamSink_Release(stream_sink);
+
+        hr = IMFMediaSink_RemoveStreamSink(sink, 123);
+        ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+        hr = IMFMediaSink_RemoveStreamSink(sink, 123);
+        ok(hr == MF_E_INVALIDSTREAMNUMBER, "Unexpected hr %#lx.\n", hr);
+    }
+
+    /* Test PresentationClock. */
+    hr = MFCreatePresentationClock(&clock);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    hr = IMFMediaSink_SetPresentationClock(sink, NULL);
+    todo_wine
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    todo_wine
+    hr = IMFMediaSink_SetPresentationClock(sink, clock);
+    todo_wine
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    IMFPresentationClock_Release(clock);
+
+    /* Test stream. */
+    hr = IMFMediaSink_GetStreamSinkByIndex(sink_audio, 0, &stream_sink);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+
+    hr = IMFStreamSink_GetMediaSink(stream_sink, &sink2);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    IMFMediaSink_Release(sink2);
+
+    check_interface(stream_sink, &IID_IMFMediaEventGenerator, TRUE);
+    check_interface(stream_sink, &IID_IMFMediaTypeHandler, TRUE);
+
+    hr = IMFStreamSink_GetMediaTypeHandler(stream_sink, &type_handler);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+
+    hr = IMFMediaTypeHandler_GetMajorType(type_handler, NULL);
+    todo_wine
+    ok(hr == E_POINTER, "Unexpected hr %#lx.\n", hr);
+    hr = IMFMediaTypeHandler_GetMajorType(type_handler, &guid);
+    todo_wine
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    todo_wine
+    ok(IsEqualGUID(&guid, &MFMediaType_Audio), "Unexpected major type.\n");
+
+    hr = IMFMediaTypeHandler_GetMediaTypeCount(type_handler, &count);
+    todo_wine
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    todo_wine
+    ok(count == 1, "Unexpected count %lu.\n", count);
+
+    hr = IMFMediaTypeHandler_GetCurrentMediaType(type_handler, &media_type);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+
+    hr = IMFMediaType_SetUINT32(media_type, &MF_MT_AUDIO_NUM_CHANNELS, 1);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+
+    hr = IMFMediaTypeHandler_SetCurrentMediaType(type_handler, NULL);
+    todo_wine
+    ok(hr == E_POINTER, "Unexpected hr %#lx.\n", hr);
+    hr = IMFMediaTypeHandler_SetCurrentMediaType(type_handler, media_type);
+    todo_wine
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+
+    IMFMediaType_Release(media_type);
+
+    /* Test shutdown state. */
+    hr = IMFMediaSink_Shutdown(sink);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    hr = IMFMediaSink_Shutdown(sink);
+    ok(hr == MF_E_SHUTDOWN, "Unexpected hr %#lx.\n", hr);
+
+    hr = IMFStreamSink_GetMediaSink(stream_sink, &sink2);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    IMFMediaSink_Release(sink2);
+
+    hr = IMFStreamSink_GetIdentifier(stream_sink, &id);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+
+    hr = IMFMediaTypeHandler_GetMajorType(type_handler, NULL);
+    todo_wine
+    ok(hr == E_POINTER, "Unexpected hr %#lx.\n", hr);
+    hr = IMFMediaTypeHandler_GetMajorType(type_handler, &guid);
+    todo_wine
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+
+    IMFStreamSink_Release(stream_sink);
+
+    hr = IMFMediaSink_AddStreamSink(sink, 0, audio_type, &stream_sink);
+    todo_wine
+    ok(hr == MF_E_SHUTDOWN, "Unexpected hr %#lx.\n", hr);
+    hr = IMFMediaSink_GetStreamSinkByIndex(sink, 0, &stream_sink);
+    todo_wine
+    ok(hr == MF_E_SHUTDOWN, "Unexpected hr %#lx.\n", hr);
+    hr = IMFMediaSink_GetStreamSinkById(sink, 0, &stream_sink);
+    todo_wine
+    ok(hr == MF_E_SHUTDOWN, "Unexpected hr %#lx.\n", hr);
+    hr = IMFMediaSink_GetCharacteristics(sink, &flags);
+    todo_wine
+    ok(hr == MF_E_SHUTDOWN, "Unexpected hr %#lx.\n", hr);
+
+    IMFMediaTypeHandler_Release(type_handler);
+    IMFMediaSink_Release(sink);
+    IMFMediaSink_Release(sink_video);
+    IMFMediaSink_Release(sink_audio);
+    if (sink_empty)
+        IMFMediaSink_Release(sink_empty);
+    IMFByteStream_Release(bytestream);
+    IMFByteStream_Release(bytestream_empty);
+    IMFByteStream_Release(bytestream_video);
+    IMFByteStream_Release(bytestream_audio);
+    IMFMediaType_Release(video_type);
+    IMFMediaType_Release(audio_type);
+}
+
+static void test_MFCreateSequencerSegmentOffset(void)
+{
+    PROPVARIANT propvar;
+    HRESULT hr;
+
+    hr = MFCreateSequencerSegmentOffset(0, 0, NULL);
+    ok(hr == E_POINTER, "Unexpected hr %#lx.\n", hr);
+
+    propvar.vt = VT_EMPTY;
+    hr = MFCreateSequencerSegmentOffset(0, 0, &propvar);
+    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    ok(propvar.vt == VT_UNKNOWN, "Unexpected type %d.\n", propvar.vt);
+    ok(!!propvar.punkVal, "Unexpected pointer.\n");
+    PropVariantClear(&propvar);
+}
+
 START_TEST(mf)
 {
     init_functions();
@@ -6731,6 +7307,9 @@ START_TEST(mf)
     test_MFCreateSimpleTypeHandler();
     test_MFGetSupportedMimeTypes();
     test_MFGetSupportedSchemes();
+    test_scheme_resolvers();
     test_MFGetTopoNodeCurrentType();
     test_MFRequireProtectedEnvironment();
+    test_mpeg4_media_sink();
+    test_MFCreateSequencerSegmentOffset();
 }

@@ -3,5 +3,5 @@ IMPORTS   =
 
 EXTRADLLFLAGS = -mwindows -mno-cygwin
 
-C_SRCS = \
+SOURCES = \
 	main.c

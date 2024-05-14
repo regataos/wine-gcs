@@ -237,6 +237,7 @@ typedef struct {
     WCHAR *port;
     WCHAR *print_proc;
     WCHAR *datatype;
+    DWORD attributes;
 
     CRITICAL_SECTION jobs_cs;
     struct list jobs;
@@ -276,6 +277,7 @@ typedef struct {
     handle_header_t header;
     printer_info_t *info;
     WCHAR *name;
+    WCHAR *print_proc;
     WCHAR *datatype;
     DEVMODEW *devmode;
     job_info_t *doc;
@@ -546,6 +548,17 @@ static WCHAR * reg_query_value(HKEY key, const WCHAR *name)
     return ret;
 }
 
+static DWORD reg_query_dword(HKEY hkey, const WCHAR *name)
+{
+    DWORD type, val, size = sizeof(size);
+
+    if (RegQueryValueExW(hkey, name, 0, &type, (BYTE*)&val, &size))
+        return 0;
+    if (type != REG_DWORD)
+        return 0;
+    return val;
+}
+
 static printer_info_t* get_printer_info(const WCHAR *name)
 {
     HKEY hkey, hprinter = NULL;
@@ -582,6 +595,7 @@ static printer_info_t* get_printer_info(const WCHAR *name)
     info->port = reg_query_value(hprinter, L"Port");
     info->print_proc = reg_query_value(hprinter, L"Print Processor");
     info->datatype = reg_query_value(hprinter, L"Datatype");
+    info->attributes = reg_query_dword(hprinter, L"Attributes");
     RegCloseKey(hprinter);
 
     if (!info->name || !info->port || !info->print_proc || !info->datatype)
@@ -1632,7 +1646,7 @@ static HANDLE xcv_alloc_handle(const WCHAR *name, PRINTER_DEFAULTSW *def, BOOL *
 {
     static const WCHAR xcv_monitor[] = L"XcvMonitor ";
     static const WCHAR xcv_port[] = L"XcvPort ";
-    BOOL mon, port;
+    BOOL mon;
     xcv_t *xcv;
 
     *stop_search = FALSE;
@@ -1650,11 +1664,9 @@ static HANDLE xcv_alloc_handle(const WCHAR *name, PRINTER_DEFAULTSW *def, BOOL *
     }
     else
     {
-        port = !wcsncmp(name, xcv_port, ARRAY_SIZE(xcv_port) - 1);
+        if (wcsncmp(name, xcv_port, ARRAY_SIZE(xcv_port) - 1)) return NULL;
         name += ARRAY_SIZE(xcv_port) - 1;
     }
-    if (!port && !mon)
-        return NULL;
 
     *stop_search = TRUE;
     xcv = calloc(1, sizeof(*xcv));
@@ -1820,6 +1832,8 @@ static HANDLE printer_alloc_handle(const WCHAR *name, const WCHAR *basename,
                                    PRINTER_DEFAULTSW *def)
 {
     printer_t *printer;
+    HKEY hroot, hkey;
+    LSTATUS status;
 
     printer = calloc(1, sizeof(*printer));
     if (!printer)
@@ -1846,6 +1860,20 @@ static HANDLE printer_alloc_handle(const WCHAR *name, const WCHAR *basename,
         printer->datatype = wcsdup(def->pDatatype);
     if (def && def->pDevMode)
         printer->devmode = dup_devmode(def->pDevMode);
+
+    hroot = open_driver_reg(env_arch.envname);
+    if (hroot)
+    {
+        status = RegOpenKeyW(hroot, name, &hkey);
+        RegCloseKey(hroot);
+        if (status == ERROR_SUCCESS)
+        {
+            printer->print_proc = reg_query_value(hkey, L"Print Processor");
+            RegCloseKey(hkey);
+        }
+    }
+    if (!printer->print_proc)
+        printer->print_proc = wcsdup(L"winprint");
 
     return (HANDLE)printer;
 }
@@ -2005,6 +2033,12 @@ static BOOL myAddPrinterDriverEx(DWORD level, LPBYTE pDriverInfo, DWORD dwFileCo
                        multi_sz_lenW(di.pszzPreviousNames));
     else
         RegSetValueExW(hdrv, L"Previous Names", 0, REG_MULTI_SZ, (const BYTE*)L"", sizeof(L""));
+
+    if (di.pszPrintProcessor)
+        RegSetValueExW(hdrv, L"Print Processor", 0, REG_SZ, (BYTE*)di.pszPrintProcessor,
+                       (wcslen(di.pszPrintProcessor) + 1) * sizeof(WCHAR));
+    else
+        RegSetValueExW(hdrv, L"Print Processor", 0, REG_SZ, (const BYTE*)L"winprint", sizeof(L"winprint"));
 
     if (level > 5) TRACE("level %lu for Driver %s is incomplete\n", level, debugstr_w(di.pName));
 
@@ -2436,6 +2470,36 @@ static BOOL WINAPI fpDeleteMonitor(LPWSTR pName, LPWSTR pEnvironment, LPWSTR pMo
     /* NT: ERROR_UNKNOWN_PRINT_MONITOR (3000), 9x: ERROR_INVALID_PARAMETER (87) */
     SetLastError(ERROR_UNKNOWN_PRINT_MONITOR);
     return FALSE;
+}
+
+static BOOL WINAPI fpResetPrinter(HANDLE hprinter, PRINTER_DEFAULTSW *def)
+{
+    printer_t *printer = (printer_t *)hprinter;
+
+    if (!printer || printer->header.type != HANDLE_PRINTER)
+    {
+        SetLastError(ERROR_INVALID_HANDLE);
+        return FALSE;
+    }
+
+    if (!def)
+    {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return FALSE;
+    }
+
+    free(printer->datatype);
+    if (def->pDatatype)
+        printer->datatype = wcsdup(def->pDatatype);
+    else
+        printer->datatype = NULL;
+
+    free(printer->devmode);
+    if (def->pDevMode)
+        printer->devmode = dup_devmode(def->pDevMode);
+    else
+        printer->devmode = NULL;
+    return TRUE;
 }
 
 /*****************************************************************************
@@ -3008,7 +3072,7 @@ static void fill_builtin_form_info( BYTE **base, WCHAR **strings, const struct b
                                     DWORD size, DWORD *used )
 {
     FORM_INFO_2W *info = *(FORM_INFO_2W**)base;
-    DWORD name_len = wcslen( form->name ) + 1, res_len, keyword_len, total_size;
+    DWORD name_len = wcslen( form->name ) + 1, res_len = 0, keyword_len, total_size;
     static const WCHAR dll_name[] = L"localspl.dll";
     const WCHAR *resource;
 
@@ -3277,10 +3341,124 @@ static BOOL WINAPI fpAddJob(HANDLE hprinter, DWORD level, BYTE *data, DWORD size
     return TRUE;
 }
 
+typedef struct {
+    HMODULE hmod;
+    WCHAR *name;
+    BOOL (WINAPI *enum_datatypes)(WCHAR *, WCHAR *, DWORD,
+            BYTE *, DWORD, DWORD *, DWORD *);
+    HANDLE (WINAPI *open)(WCHAR *, PRINTPROCESSOROPENDATA *);
+    BOOL (WINAPI *print)(HANDLE, WCHAR *);
+    BOOL (WINAPI *close)(HANDLE);
+} printproc_t;
+
+static printproc_t * print_proc_load(const WCHAR *name)
+{
+    WCHAR *reg_path, path[2 * MAX_PATH];
+    printproc_t *ret;
+    DWORD size, len;
+    LSTATUS status;
+    HKEY hkey;
+
+    size = sizeof(fmt_printprocessorsW) +
+        (wcslen(env_arch.envname) + wcslen(name)) * sizeof(WCHAR);
+    reg_path = malloc(size);
+    if (!reg_path)
+        return NULL;
+    swprintf(reg_path, size / sizeof(WCHAR), fmt_printprocessorsW, env_arch.envname);
+    wcscat(reg_path, name);
+
+    status = RegOpenKeyW(HKEY_LOCAL_MACHINE, reg_path, &hkey);
+    free(reg_path);
+    if (status != ERROR_SUCCESS)
+        return NULL;
+
+    if (!fpGetPrintProcessorDirectory(NULL, NULL, 1, (BYTE *)path, sizeof(path), &size))
+    {
+        RegCloseKey(hkey);
+        return NULL;
+    }
+    len = size / sizeof(WCHAR);
+    path[len - 1] = '\\';
+
+    size = sizeof(path) - len * sizeof(WCHAR);
+    status = RegQueryValueExW(hkey, L"Driver", NULL, NULL, (BYTE *)(path + len), &size);
+    RegCloseKey(hkey);
+    if (status != ERROR_SUCCESS)
+        return NULL;
+
+    ret = malloc(sizeof(*ret));
+    if (!ret)
+        return NULL;
+
+    TRACE("loading print processor: %s\n", debugstr_w(path));
+
+    ret->hmod = LoadLibraryW(path);
+    if (!ret->hmod)
+    {
+        free(ret);
+        return NULL;
+    }
+
+    ret->enum_datatypes = (void *)GetProcAddress(ret->hmod, "EnumPrintProcessorDatatypesW");
+    ret->open = (void *)GetProcAddress(ret->hmod, "OpenPrintProcessor");
+    ret->print = (void *)GetProcAddress(ret->hmod, "PrintDocumentOnPrintProcessor");
+    ret->close = (void *)GetProcAddress(ret->hmod, "ClosePrintProcessor");
+    if (!ret->enum_datatypes || !ret->open || !ret->print || !ret->close)
+    {
+        FreeLibrary(ret->hmod);
+        free(ret);
+        return NULL;
+    }
+
+    ret->name = wcsdup(name);
+    return ret;
+}
+
+static BOOL print_proc_check_datatype(printproc_t *pp, const WCHAR *datatype)
+{
+    DATATYPES_INFO_1W *types;
+    DWORD size, no, i;
+
+    if (!datatype)
+        return FALSE;
+
+    pp->enum_datatypes(NULL, pp->name, 1, NULL, 0, &size, &no);
+    if (GetLastError() != ERROR_INSUFFICIENT_BUFFER)
+        return FALSE;
+
+    types = malloc(size);
+    if (!types)
+        return FALSE;
+
+    if (!pp->enum_datatypes(NULL, pp->name, 1, (BYTE *)types, size, &size, &no))
+    {
+        free(types);
+        return FALSE;
+    }
+
+    for (i = 0; i < no; i++)
+    {
+        if (!wcscmp(types[i].pName, datatype))
+            break;
+    }
+    free(types);
+    return i < no;
+}
+
+static void print_proc_unload(printproc_t *pp)
+{
+    FreeLibrary(pp->hmod);
+    free(pp->name);
+    free(pp);
+}
+
 static DWORD WINAPI fpStartDocPrinter(HANDLE hprinter, DWORD level, BYTE *doc_info)
 {
     printer_t *printer = (printer_t *)hprinter;
     DOC_INFO_1W *info = (DOC_INFO_1W *)doc_info;
+    BOOL datatype_valid = FALSE;
+    WCHAR *datatype;
+    printproc_t *pp;
 
     TRACE("(%p %ld %p {pDocName = %s, pOutputFile = %s, pDatatype = %s})\n",
             hprinter, level, doc_info, debugstr_w(info->pDocName),
@@ -3315,6 +3493,50 @@ static DWORD WINAPI fpStartDocPrinter(HANDLE hprinter, DWORD level, BYTE *doc_in
     if (printer->doc)
     {
         SetLastError(ERROR_INVALID_PRINTER_STATE);
+        return 0;
+    }
+
+    if (info->pDatatype)
+        datatype = info->pDatatype;
+    else if (printer->datatype)
+        datatype = printer->datatype;
+    else
+        datatype = printer->info->datatype;
+
+    if (!datatype || ((printer->info->attributes & PRINTER_ATTRIBUTE_RAW_ONLY) &&
+                wcsicmp(datatype, L"RAW")))
+    {
+        TRACE("non RAW datatype specified on RAW-only printer (%s)\n", debugstr_w(datatype));
+        SetLastError(ERROR_INVALID_DATATYPE);
+        return 0;
+    }
+
+    pp = print_proc_load(printer->info->print_proc);
+    if (!pp)
+    {
+        WARN("failed to load %s print processor\n", debugstr_w(printer->info->print_proc));
+    }
+    else
+    {
+        datatype_valid = print_proc_check_datatype(pp, datatype);
+        print_proc_unload(pp);
+    }
+
+    if (!datatype_valid)
+    {
+        pp = print_proc_load(printer->print_proc);
+        if (!pp)
+            return 0;
+
+        datatype_valid = print_proc_check_datatype(pp, datatype);
+        print_proc_unload(pp);
+    }
+
+    if (!datatype_valid)
+    {
+        TRACE("%s datatype not supported by %s\n", debugstr_w(datatype),
+                debugstr_w(printer->info->print_proc));
+        SetLastError(ERROR_INVALID_DATATYPE);
         return 0;
     }
 
@@ -3557,126 +3779,15 @@ static BOOL WINAPI fpGetJob(HANDLE hprinter, DWORD job_id, DWORD level,
     return ret;
 }
 
-typedef struct {
-    HMODULE hmod;
-    WCHAR *name;
-    BOOL (WINAPI *enum_datatypes)(WCHAR *, WCHAR *, DWORD,
-            BYTE *, DWORD, DWORD *, DWORD *);
-    HANDLE (WINAPI *open)(WCHAR *, PRINTPROCESSOROPENDATA *);
-    BOOL (WINAPI *print)(HANDLE, WCHAR *);
-    BOOL (WINAPI *close)(HANDLE);
-} printproc_t;
-
-static printproc_t * print_proc_load(const WCHAR *name)
-{
-    WCHAR *reg_path, path[2 * MAX_PATH];
-    printproc_t *ret;
-    DWORD size, len;
-    LSTATUS status;
-    HKEY hkey;
-
-    size = sizeof(fmt_printprocessorsW) +
-        (wcslen(env_arch.envname) + wcslen(name)) * sizeof(WCHAR);
-    reg_path = malloc(size);
-    if (!reg_path)
-        return NULL;
-    swprintf(reg_path, size / sizeof(WCHAR), fmt_printprocessorsW, env_arch.envname);
-    wcscat(reg_path, name);
-
-    status = RegOpenKeyW(HKEY_LOCAL_MACHINE, reg_path, &hkey);
-    free(reg_path);
-    if (status != ERROR_SUCCESS)
-        return NULL;
-
-    if (!fpGetPrintProcessorDirectory(NULL, NULL, 1, (BYTE *)path, sizeof(path), &size))
-    {
-        RegCloseKey(hkey);
-        return NULL;
-    }
-    len = size / sizeof(WCHAR);
-    path[len - 1] = '\\';
-
-    size = sizeof(path) - len * sizeof(WCHAR);
-    status = RegQueryValueExW(hkey, L"Driver", NULL, NULL, (BYTE *)(path + len), &size);
-    RegCloseKey(hkey);
-    if (status != ERROR_SUCCESS)
-        return NULL;
-
-    ret = malloc(sizeof(*ret));
-    if (!ret)
-        return NULL;
-
-    TRACE("loading print processor: %s\n", debugstr_w(path));
-
-    ret->hmod = LoadLibraryW(path);
-    if (!ret->hmod)
-    {
-        free(ret);
-        return NULL;
-    }
-
-    ret->enum_datatypes = (void *)GetProcAddress(ret->hmod, "EnumPrintProcessorDatatypesW");
-    ret->open = (void *)GetProcAddress(ret->hmod, "OpenPrintProcessor");
-    ret->print = (void *)GetProcAddress(ret->hmod, "PrintDocumentOnPrintProcessor");
-    ret->close = (void *)GetProcAddress(ret->hmod, "ClosePrintProcessor");
-    if (!ret->enum_datatypes || !ret->open || !ret->print || !ret->close)
-    {
-        FreeLibrary(ret->hmod);
-        free(ret);
-        return NULL;
-    }
-
-    ret->name = wcsdup(name);
-    return ret;
-}
-
-static BOOL print_proc_check_datatype(printproc_t *pp, const WCHAR *datatype)
-{
-    DATATYPES_INFO_1W *types;
-    DWORD size, no, i;
-
-    if (!datatype)
-        return FALSE;
-
-    pp->enum_datatypes(NULL, pp->name, 1, NULL, 0, &size, &no);
-    if (GetLastError() != ERROR_INSUFFICIENT_BUFFER)
-        return FALSE;
-
-    types = malloc(size);
-    if (!types)
-        return FALSE;
-
-    if (!pp->enum_datatypes(NULL, pp->name, 1, (BYTE *)types, size, &size, &no))
-    {
-        free(types);
-        return FALSE;
-    }
-
-    for (i = 0; i < no; i++)
-    {
-        if (!wcscmp(types[i].pName, datatype))
-            break;
-    }
-    free(types);
-    return i < no;
-}
-
-static void print_proc_unload(printproc_t *pp)
-{
-    FreeLibrary(pp->hmod);
-    free(pp->name);
-    free(pp);
-}
-
 static BOOL WINAPI fpScheduleJob(HANDLE hprinter, DWORD job_id)
 {
     printer_t *printer = (printer_t *)hprinter;
     WCHAR output[1024], name[1024], *datatype;
+    BOOL datatype_valid = FALSE, ret = TRUE;
     PRINTPROCESSOROPENDATA pp_data;
     const WCHAR *port_name, *port;
     job_info_t *job;
     printproc_t *pp;
-    BOOL ret = TRUE;
     HANDLE hpp;
     HKEY hkey;
 
@@ -3697,7 +3808,7 @@ static BOOL WINAPI fpScheduleJob(HANDLE hprinter, DWORD job_id)
     }
 
     port = job->port;
-    if (!port)
+    if (!port || !*port)
         port = printer->info->port;
     TRACE("need to schedule job %ld filename %s to port %s\n", job->id,
             debugstr_w(job->filename), debugstr_w(port));
@@ -3719,15 +3830,6 @@ static BOOL WINAPI fpScheduleJob(HANDLE hprinter, DWORD job_id)
         RegCloseKey(hkey);
     }
 
-    pp = print_proc_load(printer->info->print_proc);
-    if (!pp)
-    {
-        WARN("failed to load %s print processor\n", debugstr_w(printer->info->print_proc));
-        pp = print_proc_load(L"winprint");
-    }
-    if (!pp)
-        return FALSE;
-
     if (job->datatype)
         datatype = job->datatype;
     else if (printer->datatype)
@@ -3735,7 +3837,28 @@ static BOOL WINAPI fpScheduleJob(HANDLE hprinter, DWORD job_id)
     else
         datatype = printer->info->datatype;
 
-    if (!print_proc_check_datatype(pp, datatype))
+    pp = print_proc_load(printer->info->print_proc);
+    if (!pp)
+    {
+        WARN("failed to load %s print processor\n", debugstr_w(printer->info->print_proc));
+    }
+    else
+    {
+        datatype_valid = print_proc_check_datatype(pp, datatype);
+        if (!datatype_valid)
+            print_proc_unload(pp);
+    }
+
+    if (!datatype_valid)
+    {
+        pp = print_proc_load(printer->print_proc);
+        if (!pp)
+            return FALSE;
+
+        datatype_valid = print_proc_check_datatype(pp, datatype);
+    }
+
+    if (!datatype_valid)
     {
         WARN("%s datatype not supported by %s\n", debugstr_w(datatype),
                 debugstr_w(printer->info->print_proc));
@@ -3766,10 +3889,48 @@ static BOOL WINAPI fpScheduleJob(HANDLE hprinter, DWORD job_id)
     pp->close(hpp);
     print_proc_unload(pp);
 
-    DeleteFileW(job->filename);
+    if (!(printer->info->attributes & PRINTER_ATTRIBUTE_KEEPPRINTEDJOBS))
+        DeleteFileW(job->filename);
     free_job(job);
     LeaveCriticalSection(&printer->info->jobs_cs);
     return ret;
+}
+
+static BOOL WINAPI fpAbortPrinter(HANDLE hprinter)
+{
+    printer_t *printer = (printer_t *)hprinter;
+    job_info_t *job;
+
+    TRACE("%p\n", hprinter);
+
+    if (!printer)
+    {
+        SetLastError(ERROR_INVALID_HANDLE);
+        return 0;
+    }
+
+    if (printer->header.type != HANDLE_PRINTER)
+    {
+        FIXME("%x handle not supported\n", printer->header.type);
+        return FALSE;
+    }
+
+    if (!printer->doc)
+    {
+        SetLastError(ERROR_SPL_NO_STARTDOC);
+        return FALSE;
+    }
+
+    CloseHandle(printer->doc->hf);
+    printer->doc->hf = NULL;
+
+    EnterCriticalSection(&printer->info->jobs_cs);
+    job = get_job(printer->info, printer->doc->id);
+    if (job) free_job(job);
+    LeaveCriticalSection(&printer->info->jobs_cs);
+
+    printer->doc = NULL;
+    return TRUE;
 }
 
 static BOOL WINAPI fpReadPrinter(HANDLE hprinter, void *buf, DWORD size, DWORD *bytes_read)
@@ -3887,6 +4048,7 @@ static BOOL WINAPI fpClosePrinter(HANDLE hprinter)
 
         release_printer_info(printer->info);
         free(printer->name);
+        free(printer->print_proc);
         free(printer->datatype);
         free(printer->devmode);
         free(printer);
@@ -3952,7 +4114,7 @@ static const PRINTPROVIDOR backend = {
         NULL,   /* fpStartPagePrinter */
         fpWritePrinter,
         NULL,   /* fpEndPagePrinter */
-        NULL,   /* fpAbortPrinter */
+        fpAbortPrinter,
         fpReadPrinter,
         fpEndDocPrinter,
         fpAddJob,
@@ -3979,7 +4141,7 @@ static const PRINTPROVIDOR backend = {
         NULL,   /* fpPrinterMessageBox */
         fpAddMonitor,
         fpDeleteMonitor,
-        NULL,   /* fpResetPrinter */
+        fpResetPrinter,
         NULL,   /* fpGetPrinterDriverEx */
         NULL,   /* fpFindFirstPrinterChangeNotification */
         NULL,   /* fpFindClosePrinterChangeNotification */

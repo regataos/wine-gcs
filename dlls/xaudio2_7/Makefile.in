@@ -5,12 +5,10 @@ EXTRAINCL = $(FAUDIO_PE_CFLAGS)
 
 EXTRADLLFLAGS = -Wb,--prefer-native
 
-C_SRCS = \
-	compat.c \
+SOURCES = \
 	x3daudio.c \
 	xapo.c \
 	xapofx.c \
 	xaudio_allocator.c \
+	xaudio_classes.idl \
 	xaudio_dll.c
-
-IDL_SRCS = xaudio_classes.idl

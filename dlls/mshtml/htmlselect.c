@@ -426,40 +426,40 @@ HRESULT HTMLOptionElement_Create(HTMLDocumentNode *doc, nsIDOMElement *nselem, H
     return S_OK;
 }
 
-static inline struct legacy_ctor *impl_from_IHTMLOptionElementFactory(IHTMLOptionElementFactory *iface)
+static inline struct global_ctor *impl_from_IHTMLOptionElementFactory(IHTMLOptionElementFactory *iface)
 {
-    return CONTAINING_RECORD(iface, struct legacy_ctor, IHTMLOptionElementFactory_iface);
+    return CONTAINING_RECORD(iface, struct global_ctor, IHTMLOptionElementFactory_iface);
 }
 
 static HRESULT WINAPI HTMLOptionElementFactory_QueryInterface(IHTMLOptionElementFactory *iface,
                                                               REFIID riid, void **ppv)
 {
-    struct legacy_ctor *This = impl_from_IHTMLOptionElementFactory(iface);
+    struct global_ctor *This = impl_from_IHTMLOptionElementFactory(iface);
     return IDispatchEx_QueryInterface(&This->dispex.IDispatchEx_iface, riid, ppv);
 }
 
 static ULONG WINAPI HTMLOptionElementFactory_AddRef(IHTMLOptionElementFactory *iface)
 {
-    struct legacy_ctor *This = impl_from_IHTMLOptionElementFactory(iface);
+    struct global_ctor *This = impl_from_IHTMLOptionElementFactory(iface);
     return IDispatchEx_AddRef(&This->dispex.IDispatchEx_iface);
 }
 
 static ULONG WINAPI HTMLOptionElementFactory_Release(IHTMLOptionElementFactory *iface)
 {
-    struct legacy_ctor *This = impl_from_IHTMLOptionElementFactory(iface);
+    struct global_ctor *This = impl_from_IHTMLOptionElementFactory(iface);
     return IDispatchEx_Release(&This->dispex.IDispatchEx_iface);
 }
 
 static HRESULT WINAPI HTMLOptionElementFactory_GetTypeInfoCount(IHTMLOptionElementFactory *iface, UINT *pctinfo)
 {
-    struct legacy_ctor *This = impl_from_IHTMLOptionElementFactory(iface);
+    struct global_ctor *This = impl_from_IHTMLOptionElementFactory(iface);
     return IDispatchEx_GetTypeInfoCount(&This->dispex.IDispatchEx_iface, pctinfo);
 }
 
 static HRESULT WINAPI HTMLOptionElementFactory_GetTypeInfo(IHTMLOptionElementFactory *iface, UINT iTInfo,
                                               LCID lcid, ITypeInfo **ppTInfo)
 {
-    struct legacy_ctor *This = impl_from_IHTMLOptionElementFactory(iface);
+    struct global_ctor *This = impl_from_IHTMLOptionElementFactory(iface);
     return IDispatchEx_GetTypeInfo(&This->dispex.IDispatchEx_iface, iTInfo, lcid, ppTInfo);
 }
 
@@ -467,7 +467,7 @@ static HRESULT WINAPI HTMLOptionElementFactory_GetIDsOfNames(IHTMLOptionElementF
                                                 LPOLESTR *rgszNames, UINT cNames,
                                                 LCID lcid, DISPID *rgDispId)
 {
-    struct legacy_ctor *This = impl_from_IHTMLOptionElementFactory(iface);
+    struct global_ctor *This = impl_from_IHTMLOptionElementFactory(iface);
     return IDispatchEx_GetIDsOfNames(&This->dispex.IDispatchEx_iface, riid, rgszNames, cNames, lcid, rgDispId);
 }
 
@@ -475,7 +475,7 @@ static HRESULT WINAPI HTMLOptionElementFactory_Invoke(IHTMLOptionElementFactory 
                             REFIID riid, LCID lcid, WORD wFlags, DISPPARAMS *pDispParams,
                             VARIANT *pVarResult, EXCEPINFO *pExcepInfo, UINT *puArgErr)
 {
-    struct legacy_ctor *This = impl_from_IHTMLOptionElementFactory(iface);
+    struct global_ctor *This = impl_from_IHTMLOptionElementFactory(iface);
     return IDispatchEx_Invoke(&This->dispex.IDispatchEx_iface, dispIdMember, riid, lcid, wFlags, pDispParams,
             pVarResult, pExcepInfo, puArgErr);
 }
@@ -484,7 +484,7 @@ static HRESULT WINAPI HTMLOptionElementFactory_create(IHTMLOptionElementFactory 
         VARIANT text, VARIANT value, VARIANT defaultselected, VARIANT selected,
         IHTMLOptionElement **optelem)
 {
-    struct legacy_ctor *This = impl_from_IHTMLOptionElementFactory(iface);
+    struct global_ctor *This = impl_from_IHTMLOptionElementFactory(iface);
     nsIDOMElement *nselem;
     HTMLDOMNode *node;
     HRESULT hres;
@@ -536,14 +536,14 @@ const IHTMLOptionElementFactoryVtbl HTMLOptionElementFactoryVtbl = {
     HTMLOptionElementFactory_create
 };
 
-static inline struct legacy_ctor *HTMLOptionElementFactory_from_DispatchEx(DispatchEx *iface)
+static inline struct global_ctor *HTMLOptionElementFactory_from_DispatchEx(DispatchEx *iface)
 {
-    return CONTAINING_RECORD(iface, struct legacy_ctor, dispex);
+    return CONTAINING_RECORD(iface, struct global_ctor, dispex);
 }
 
 static void *HTMLOptionElementFactory_query_interface(DispatchEx *dispex, REFIID riid)
 {
-    struct legacy_ctor *This = HTMLOptionElementFactory_from_DispatchEx(dispex);
+    struct global_ctor *This = HTMLOptionElementFactory_from_DispatchEx(dispex);
 
     if(IsEqualGUID(&IID_IHTMLOptionElementFactory, riid))
         return &This->IHTMLOptionElementFactory_iface;
@@ -555,7 +555,7 @@ static HRESULT HTMLOptionElementFactory_value(DispatchEx *dispex, LCID lcid,
         WORD flags, DISPPARAMS *params, VARIANT *res, EXCEPINFO *ei,
         IServiceProvider *caller)
 {
-    struct legacy_ctor *This = HTMLOptionElementFactory_from_DispatchEx(dispex);
+    struct global_ctor *This = HTMLOptionElementFactory_from_DispatchEx(dispex);
     unsigned int i, argc = params->cArgs - params->cNamedArgs;
     IHTMLOptionElement *opt;
     VARIANT empty, *arg[4];
@@ -583,9 +583,9 @@ static HRESULT HTMLOptionElementFactory_value(DispatchEx *dispex, LCID lcid,
 
 static const dispex_static_data_vtbl_t HTMLOptionElementFactory_dispex_vtbl = {
     .query_interface  = HTMLOptionElementFactory_query_interface,
-    .destructor       = legacy_ctor_destructor,
-    .traverse         = legacy_ctor_traverse,
-    .unlink           = legacy_ctor_unlink,
+    .destructor       = global_ctor_destructor,
+    .traverse         = global_ctor_traverse,
+    .unlink           = global_ctor_unlink,
     .value            = HTMLOptionElementFactory_value,
     .get_dispid       = legacy_ctor_get_dispid,
     .get_name         = legacy_ctor_get_name,
@@ -612,14 +612,14 @@ static HRESULT HTMLOptionCtor_value(DispatchEx *iface, LCID lcid, WORD flags, DI
     if(flags == DISPATCH_CONSTRUCT)
         return HTMLOptionElementFactory_value(iface, lcid, flags, params, res, ei, caller);
 
-    return legacy_ctor_value(iface, lcid, flags, params, res, ei, caller);
+    return global_ctor_value(iface, lcid, flags, params, res, ei, caller);
 }
 
 static const dispex_static_data_vtbl_t HTMLOptionCtor_dispex_vtbl = {
     .query_interface  = HTMLOptionElementFactory_query_interface,
-    .destructor       = legacy_ctor_destructor,
-    .traverse         = legacy_ctor_traverse,
-    .unlink           = legacy_ctor_unlink,
+    .destructor       = global_ctor_destructor,
+    .traverse         = global_ctor_traverse,
+    .unlink           = global_ctor_unlink,
     .value            = HTMLOptionCtor_value,
     .get_dispid       = legacy_ctor_get_dispid,
     .get_name         = legacy_ctor_get_name,

@@ -150,69 +150,6 @@ BOOL keyboard_grabbed = FALSE;
 
 int xinput2_opcode = 0;
 
-static pthread_mutex_t input_cs = PTHREAD_MUTEX_INITIALIZER;
-static pthread_cond_t input_cond = PTHREAD_COND_INITIALIZER;
-static Display *input_display;
-
-/* wait for the input thread to startup and return the input display */
-static Display *x11drv_input_display(void)
-{
-    if (input_thread_hack && !input_display)
-    {
-        pthread_mutex_lock( &input_cs );
-        while (!input_display) pthread_cond_wait( &input_cond, &input_cs );
-        pthread_mutex_unlock( &input_cs );
-    }
-
-    return input_display;
-}
-
-/* set the input display and notify waiters */
-static void x11drv_set_input_display( Display *display )
-{
-    if (input_display) return;
-
-    pthread_mutex_lock( &input_cs );
-    input_display = display;
-    pthread_mutex_unlock( &input_cs );
-    pthread_cond_broadcast( &input_cond );
-}
-
-/* add a window to the windows we get input for */
-void x11drv_input_add_window( HWND hwnd, Window window )
-{
-    long mask = KeyPressMask | KeyReleaseMask | KeymapStateMask;
-    Display *display = x11drv_input_display();
-
-    if (!input_thread_hack) return;
-
-    TRACE( "display %p, window %p/%lx\n", display, hwnd, window );
-
-    pthread_mutex_lock( &input_cs );
-    XSaveContext( display, window, winContext, (char *)hwnd );
-    pthread_mutex_unlock( &input_cs );
-
-    XSelectInput( display, window, mask );
-    XFlush( display );
-}
-
-/* remove a window from the windows we get input for */
-void x11drv_input_remove_window( Window window )
-{
-    Display *display = x11drv_input_display();
-
-    if (!input_thread_hack) return;
-
-    TRACE( "display %p, window %lx\n", display, window );
-
-    XSelectInput( display, window, 0 );
-    XFlush( display );
-
-    pthread_mutex_lock( &input_cs );
-    XDeleteContext( display, window, winContext );
-    pthread_mutex_unlock( &input_cs );
-}
-
 /* return the name of an X event */
 static const char *dbgstr_event( int type )
 {
@@ -296,28 +233,6 @@ static Bool filter_event( Display *display, XEvent *event, char *arg )
     case ButtonPress:
     case ButtonRelease:
         return (mask & QS_MOUSEBUTTON) != 0;
-#ifdef GenericEvent
-    case GenericEvent:
-#ifdef HAVE_X11_EXTENSIONS_XINPUT2_H
-        if (event->xcookie.extension == xinput2_opcode)
-        {
-            switch (event->xcookie.evtype)
-            {
-            case XI_RawButtonPress:
-            case XI_RawButtonRelease:
-                return (mask & QS_MOUSEBUTTON) != 0;
-            case XI_RawMotion:
-            case XI_RawTouchBegin:
-            case XI_RawTouchUpdate:
-            case XI_RawTouchEnd:
-                return (mask & QS_INPUT) != 0;
-            case XI_DeviceChanged:
-                return (mask & (QS_INPUT|QS_MOUSEBUTTON)) != 0;
-            }
-        }
-#endif
-        return (mask & QS_SENDMESSAGE) != 0;
-#endif
     case MotionNotify:
     case EnterNotify:
     case LeaveNotify:
@@ -332,6 +247,13 @@ static Bool filter_event( Display *display, XEvent *event, char *arg )
     case PropertyNotify:
     case ClientMessage:
         return (mask & QS_POSTMESSAGE) != 0;
+#ifdef GenericEvent
+    case GenericEvent:
+#ifdef HAVE_X11_EXTENSIONS_XINPUT2_H
+        if (event->xcookie.extension == xinput2_opcode) return (mask & QS_INPUT) != 0;
+#endif
+        /* fallthrough */
+#endif
     default:
         return (mask & QS_SENDMESSAGE) != 0;
     }
@@ -340,6 +262,9 @@ static Bool filter_event( Display *display, XEvent *event, char *arg )
 static void wait_grab_pointer( Display *display )
 {
     RECT rect;
+
+    /* unnecessary on gamescope, windows cannot be moved with the mouse */
+    if (wm_is_steamcompmgr( display )) return;
 
     /* release cursor grab held by any Wine process */
     NtUserGetClipCursor( &rect );
@@ -489,13 +414,11 @@ static inline BOOL call_event_handler( Display *display, XEvent *event )
         return FALSE;  /* no handler, ignore it */
     }
 
-    pthread_mutex_lock( &input_cs );
 #ifdef GenericEvent
     if (event->type == GenericEvent) hwnd = 0; else
 #endif
     if (XFindContext( display, event->xany.window, winContext, (char **)&hwnd ) != 0)
         hwnd = 0;  /* not for a registered window */
-    pthread_mutex_unlock( &input_cs );
     if (!hwnd && event->xany.window == root_window) hwnd = NtUserGetDesktopWindow();
 
     TRACE( "%lu %s for hwnd/window %p/%lx\n",
@@ -530,15 +453,6 @@ static BOOL process_events( Display *display, Bool (*filter)(Display*, XEvent*,X
     prev_event.type = 0;
     while (XCheckIfEvent( display, &event, filter, (char *)arg ))
     {
-        switch (event.type)
-        {
-        case KeyPress:
-        case KeyRelease:
-        case KeymapNotify:
-            if (input_thread_hack && display != x11drv_input_display()) continue;
-            break;
-        }
-
         count++;
         if (overlay_enabled && filter_event( display, &event, (char *)overlay_filter )) continue;
         if (steam_keyboard_opened && filter_event( display, &event, (char *)keyboard_filter )) continue;
@@ -737,12 +651,8 @@ static void handle_manager_message( HWND hwnd, XEvent *xev )
 
     if (systray_atom && event->data.l[1] == systray_atom)
     {
-        struct systray_change_owner_params params;
-
         TRACE( "new owner %lx\n", event->data.l[2] );
-
-        params.event_handle = (UINT_PTR)event;
-        x11drv_client_func( client_func_systray_change_owner, &params, sizeof(params) );
+        NtUserPostMessage( systray_hwnd, WM_USER + 1, 0, 0 );
     }
 }
 
@@ -910,8 +820,6 @@ static BOOL X11DRV_FocusIn( HWND hwnd, XEvent *xev )
     if (is_virtual_desktop() && hwnd == NtUserGetDesktopWindow()) retry_grab_clipping_window();
     if (hwnd == NtUserGetDesktopWindow()) return FALSE;
 
-    x11drv_thread_data()->keymapnotify_hwnd = hwnd;
-
     /* Focus was just restored but it can be right after super was
      * pressed and gnome-shell needs a bit of time to respond and
      * toggle the activity view. If we grab the cursor right away
@@ -922,6 +830,8 @@ static BOOL X11DRV_FocusIn( HWND hwnd, XEvent *xev )
         LARGE_INTEGER timeout = {.QuadPart = 100 * -10000};
         NtDelayExecution( FALSE, &timeout );
     }
+
+    x11drv_thread_data()->keymapnotify_hwnd = hwnd;
 
     /* when keyboard grab is released, re-apply the cursor clipping rect */
     was_grabbed = keyboard_grabbed;
@@ -1135,8 +1045,6 @@ static BOOL X11DRV_MapNotify( HWND hwnd, XEvent *event )
 {
     struct x11drv_win_data *data;
 
-    x11drv_input_add_window( hwnd, event->xany.window );
-
     if (event->xany.window == x11drv_thread_data()->clip_window) return TRUE;
 
     if (!(data = get_win_data( hwnd ))) return FALSE;
@@ -1157,7 +1065,6 @@ static BOOL X11DRV_MapNotify( HWND hwnd, XEvent *event )
  */
 static BOOL X11DRV_UnmapNotify( HWND hwnd, XEvent *event )
 {
-    x11drv_input_remove_window( event->xany.window );
     return TRUE;
 }
 
@@ -2180,20 +2087,4 @@ static BOOL X11DRV_ClientMessage( HWND hwnd, XEvent *xev )
     }
     TRACE( "no handler found for %ld\n", event->message_type );
     return FALSE;
-}
-
-NTSTATUS x11drv_input_thread( void *arg )
-{
-    struct x11drv_thread_data *data = x11drv_init_thread_data();
-
-    x11drv_set_input_display( data->display );
-
-    for (;;)
-    {
-        XEvent event;
-        XPeekEvent( data->display, &event );
-        process_events( data->display, filter_event, QS_ALLINPUT );
-    }
-
-    return 0;
 }

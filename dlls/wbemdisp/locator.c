@@ -1286,7 +1286,8 @@ static HRESULT WINAPI object_Invoke(
     if (!(name = get_member_name( object, member, &type )))
         return DISP_E_MEMBERNOTFOUND;
 
-    if (flags == (DISPATCH_METHOD|DISPATCH_PROPERTYGET))
+    if (flags == (DISPATCH_METHOD|DISPATCH_PROPERTYGET) ||
+        flags == DISPATCH_PROPERTYGET)
     {
         memset( params, 0, sizeof(*params) );
         return IWbemClassObject_Get( object->object, name, 0, result, NULL, NULL );
@@ -1740,7 +1741,7 @@ static struct object *unsafe_object_impl_from_IDispatch(IDispatch *iface)
         FIXME( "External implementations are not supported.\n" );
         return NULL;
     }
-    return CONTAINING_RECORD((ISWbemObject *)iface, struct object, ISWbemObject_iface);
+    return CONTAINING_RECORD(iface, struct object, ISWbemObject_iface);
 }
 
 static HRESULT SWbemObject_create( struct services *services, IWbemClassObject *wbem_object,
@@ -3575,7 +3576,7 @@ static struct namedvalueset *unsafe_valueset_impl_from_IDispatch(IDispatch *ifac
         FIXME( "External implementations are not supported.\n" );
         return NULL;
     }
-    return CONTAINING_RECORD((ISWbemNamedValueSet*)iface, struct namedvalueset, ISWbemNamedValueSet_iface);
+    return CONTAINING_RECORD(iface, struct namedvalueset, ISWbemNamedValueSet_iface);
 }
 
 HRESULT SWbemNamedValueSet_create( void **obj )

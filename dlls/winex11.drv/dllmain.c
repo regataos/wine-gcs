@@ -22,8 +22,6 @@
 #include "wine/debug.h"
 
 
-WINE_DEFAULT_DEBUG_CHANNEL(x11drv);
-
 HMODULE x11drv_module = 0;
 
 
@@ -49,48 +47,18 @@ static const kernel_callback kernel_callbacks[] =
     x11drv_dnd_enter_event,
     x11drv_dnd_position_event,
     x11drv_dnd_post_drop,
-    x11drv_systray_change_owner,
 };
 
 C_ASSERT( NtUserDriverCallbackFirst + ARRAYSIZE(kernel_callbacks) == client_func_last );
 
 
-static DWORD CALLBACK input_thread( void *arg )
-{
-    NTSTATUS status;
-
-    SetThreadDescription( GetCurrentThread(), L"wine_x11drv_input" );
-
-    TRACE("\n");
-
-    /* wait for explorer startup sequence to complete */
-    SendMessageW( GetDesktopWindow(), WM_NULL, 0, 0 );
-
-    for (;;)
-    {
-        status = X11DRV_CALL( input_thread, NULL );
-        WARN( "input_thread returned %#lx\n", status );
-    }
-
-    return 0;
-}
-
 BOOL WINAPI DllMain( HINSTANCE instance, DWORD reason, void *reserved )
 {
-    static HANDLE thread;
     void **callback_table;
     struct init_params params =
     {
         foreign_window_proc,
-        &show_systray,
     };
-
-    if (reason == DLL_PROCESS_DETACH && !reserved && thread)
-    {
-        TerminateThread( thread, -1 );
-        WaitForSingleObject( thread, INFINITE );
-        CloseHandle( thread );
-    }
 
     if (reason != DLL_PROCESS_ATTACH) return TRUE;
 
@@ -98,12 +66,6 @@ BOOL WINAPI DllMain( HINSTANCE instance, DWORD reason, void *reserved )
     x11drv_module = instance;
     if (__wine_init_unix_call()) return FALSE;
     if (X11DRV_CALL( init, &params )) return FALSE;
-
-    if (params.input_thread_hack)
-    {
-        thread = CreateThread( NULL, 0, input_thread, NULL, 0, NULL );
-        if (!thread) ERR( "Failed to create input monitor thread, error %lu\n", GetLastError() );
-    }
 
     callback_table = NtCurrentTeb()->Peb->KernelCallbackTable;
     memcpy( callback_table + NtUserDriverCallbackFirst, kernel_callbacks, sizeof(kernel_callbacks) );

@@ -398,7 +398,7 @@ static HRESULT WINAPI ActiveScriptSite_GetItemInfo(IActiveScriptSite *iface, LPC
     if(wcscmp(pstrName, L"window"))
         return DISP_E_MEMBERNOTFOUND;
 
-    if(!This->window)
+    if(!This->window || !This->window->base.outer_window)
         return E_FAIL;
 
     /* FIXME: Return proxy object */
@@ -542,7 +542,7 @@ static HRESULT WINAPI ActiveScriptSiteWindow_GetWindow(IActiveScriptSiteWindow *
 
     TRACE("(%p)->(%p)\n", This, phwnd);
 
-    if(!This->window)
+    if(!This->window || !This->window->base.outer_window)
         return E_UNEXPECTED;
 
     *phwnd = This->window->base.outer_window->browser->doc->hwnd;
@@ -789,7 +789,7 @@ static HRESULT WINAPI OleCommandTarget_Exec(IOleCommandTarget *iface, const GUID
     if(IsEqualGUID(&CGID_ScriptSite, pguidCmdGroup)) {
         switch(nCmdID) {
         case CMDID_SCRIPTSITE_SECURITY_WINDOW:
-            if(!This->window) {
+            if(!This->window || !This->window->base.outer_window) {
                 FIXME("No window\n");
                 return E_FAIL;
             }
@@ -1952,18 +1952,5 @@ void release_script_hosts(HTMLInnerWindow *window)
         list_remove(&iter->entry);
         iter->window = NULL;
         IActiveScriptSite_Release(&iter->IActiveScriptSite_iface);
-    }
-}
-
-void __cdecl cc_api_collect(IActiveScriptSite *site, BOOL force)
-{
-    ScriptHost *This = impl_from_IActiveScriptSite(site);
-    nsIDOMWindowUtils *window_utils = NULL;
-
-    get_nsinterface((nsISupports*)This->window->base.outer_window->browser->content_window->nswindow, &IID_nsIDOMWindowUtils, (void**)&window_utils);
-
-    if(window_utils) {
-        cycle_collect(window_utils, force);
-        nsIDOMWindowUtils_Release(window_utils);
     }
 }

@@ -46,6 +46,7 @@
 #define CompareString __carbon_CompareString
 #define GetCurrentThread __carbon_GetCurrentThread
 #define GetCurrentProcess __carbon_GetCurrentProcess
+#define GetProcessInformation __carbon_GetProcessInformation
 #define AnimatePalette __carbon_AnimatePalette
 #define DeleteMenu __carbon_DeleteMenu
 #define DrawMenu __carbon_DrawMenu
@@ -72,6 +73,7 @@
 #undef GetCurrentThread
 #undef _CDECL
 #undef GetCurrentProcess
+#undef GetProcessInformation
 #undef AnimatePalette
 #undef CheckMenuItem
 #undef DeleteMenu
@@ -553,8 +555,11 @@ static BOOL is_hinting_enabled(void)
 
     if (enabled == -1)
     {
+        const char *sgi;
+
+        if ((sgi = getenv("SteamGameId")) && !strcmp(sgi, "563560")) enabled = FALSE;
         /* Use the >= 2.2.0 function if available */
-        if (pFT_Get_TrueType_Engine_Type)
+        else if (pFT_Get_TrueType_Engine_Type)
         {
             FT_TrueTypeEngineType type = pFT_Get_TrueType_Engine_Type(library);
             enabled = (type == FT_TRUETYPE_ENGINE_TYPE_PATENTED);
@@ -2075,7 +2080,7 @@ static UINT freetype_get_font_data( struct gdi_font *font, UINT table, UINT offs
     err = pFT_Load_Sfnt_Table(ft_face, RtlUlongByteSwap(table), offset, buf, &len);
     if (err)
     {
-        TRACE("Can't find table %s\n", debugstr_an((char*)&table, 4));
+        TRACE("Can't find table %s\n", debugstr_fourcc(table));
 	return GDI_ERROR;
     }
     return len;
@@ -3452,12 +3457,18 @@ static FT_Int get_load_flags( UINT format, BOOL vertical_metrics, BOOL force_no_
     return load_flags;
 }
 
+static BOOL is_curve_format(UINT format)
+{
+    format &= ~(GGO_GLYPH_INDEX | GGO_UNHINTED);
+    return format == GGO_BEZIER || format == GGO_NATIVE;
+}
+
 /*************************************************************
  * freetype_get_glyph_outline
  */
 static UINT freetype_get_glyph_outline( struct gdi_font *font, UINT glyph, UINT format,
                                         GLYPHMETRICS *lpgm, ABC *abc, UINT buflen, void *buf,
-                                        const MAT2 *lpmat, BOOL tategaki )
+                                        const MAT2 *lpmat, BOOL tategaki, UINT aa_flags )
 {
     struct gdi_font *base_font = font->base_font ? font->base_font : font;
     FT_Face ft_face = get_ft_face( font );
@@ -3477,8 +3488,7 @@ static UINT freetype_get_glyph_outline( struct gdi_font *font, UINT glyph, UINT 
 
     matrices = get_transform_matrices( font, tategaki, lpmat, transform_matrices );
 
-    if ((format & ~GGO_GLYPH_INDEX) == GGO_METRICS)
-        effective_format = font->aa_flags | (format & GGO_GLYPH_INDEX);
+    if (aa_flags && !is_curve_format( format )) effective_format = aa_flags | (format & GGO_GLYPH_INDEX);
     vertical_metrics = (tategaki && FT_HAS_VERTICAL(ft_face));
     /* there is a freetype bug where vertical metrics are only
        properly scaled and correct in 2.4.0 or greater */
@@ -3486,12 +3496,12 @@ static UINT freetype_get_glyph_outline( struct gdi_font *font, UINT glyph, UINT 
         vertical_metrics = FALSE;
     load_flags = get_load_flags(effective_format, vertical_metrics, !!matrices);
 
-    err = pFT_Load_Glyph(ft_face, glyph, load_flags);
+    err = pFT_Load_Glyph(ft_face, glyph, load_flags & FT_LOAD_NO_HINTING ? load_flags : load_flags | FT_LOAD_PEDANTIC);
     if (err && format != effective_format)
     {
         WARN("Failed to load glyph %#x, retrying with GGO_METRICS. Error %#x.\n", glyph, err);
         load_flags = get_load_flags(effective_format, vertical_metrics, !!matrices);
-        err = pFT_Load_Glyph(ft_face, glyph, load_flags);
+        err = pFT_Load_Glyph(ft_face, glyph, load_flags & FT_LOAD_NO_HINTING ? load_flags : load_flags | FT_LOAD_PEDANTIC);
     }
     if (err && !(load_flags & FT_LOAD_NO_HINTING))
     {
@@ -4037,7 +4047,7 @@ static UINT freetype_get_unicode_ranges( struct gdi_font *font, GLYPHSET *gs )
     else
     {
         DWORD encoding = RtlUlongByteSwap(ft_face->charmap->encoding);
-        FIXME("encoding %s not supported\n", debugstr_an((char *)&encoding, 4));
+        FIXME("encoding %s not supported\n", debugstr_fourcc(encoding));
     }
 
     return num_ranges;
@@ -4202,7 +4212,7 @@ static UINT freetype_get_kerning_pairs( struct gdi_font *font, KERNINGPAIR **pai
         DWORD encoding = RtlUlongByteSwap(ft_face->charmap->encoding);
         ULONG n;
 
-        FIXME("encoding %s not supported\n", debugstr_an((char *)&encoding, 4));
+        FIXME("encoding %s not supported\n", debugstr_fourcc(encoding));
         for (n = 0; n <= 65535; n++)
             glyph_to_char[n] = (USHORT)n;
     }

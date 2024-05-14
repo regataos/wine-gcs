@@ -430,7 +430,7 @@ static void fixup_device_id(UINT *vendor_id, UINT *device_id)
         *vendor_id = 0x10de; /* NVIDIA */
         *device_id = 0x2487; /* RTX 3060 */
     }
-    else if (*vendor_id == 0x1002 && *device_id == 0x163f && (sgi = getenv("WINE_HIDE_VANGOGH_GPU")) && *sgi != '0')
+    else if (*vendor_id == 0x1002 && (*device_id == 0x163f || *device_id == 0x1435) && (sgi = getenv("WINE_HIDE_VANGOGH_GPU")) && *sgi != '0')
     {
         *device_id = 0x687f; /* Radeon RX Vega 56/64 */
     }
@@ -625,55 +625,19 @@ void WINAPI vkFreeCommandBuffers(VkDevice device, VkCommandPool cmd_pool, uint32
     }
 }
 
-VkResult WINAPI vkCreateSwapchainKHR(VkDevice device, const VkSwapchainCreateInfoKHR *pCreateInfo,
-                                     const VkAllocationCallbacks *pAllocator, VkSwapchainKHR *pSwapchain)
+static NTSTATUS WINAPI call_vulkan_debug_report_callback( void *args, ULONG size )
 {
-    struct vkCreateSwapchainKHR_params params;
-    struct vk_swapchain *swapchain;
-    NTSTATUS status;
-
-    if (!(swapchain = malloc(sizeof(*swapchain))))
-        return VK_ERROR_OUT_OF_HOST_MEMORY;
-    swapchain->unix_handle = 0;
-
-    params.device = device;
-    params.pCreateInfo = pCreateInfo;
-    params.pAllocator = pAllocator;
-    params.pSwapchain = pSwapchain;
-    params.client_ptr = swapchain;
-    status = UNIX_CALL(vkCreateSwapchainKHR, &params);
-    assert(!status);
-    if (!swapchain->unix_handle)
-        free(swapchain);
-    return params.result;
+    struct wine_vk_debug_report_params *params = args;
+    VkBool32 ret = params->user_callback(params->flags, params->object_type, params->object_handle, params->location,
+                                         params->code, params->layer_prefix, params->message, params->user_data);
+    return NtCallbackReturn( &ret, sizeof(ret), STATUS_SUCCESS );
 }
 
-void WINAPI vkDestroySwapchainKHR(VkDevice device, VkSwapchainKHR handle, const VkAllocationCallbacks *pAllocator)
+static NTSTATUS WINAPI call_vulkan_debug_utils_callback( void *args, ULONG size )
 {
-    struct vk_swapchain *swapchain = swapchain_from_handle(handle);
-    struct vkDestroySwapchainKHR_params params;
-    NTSTATUS status;
-
-    if (!swapchain)
-        return;
-
-    params.device = device;
-    params.swapchain = handle;
-    params.pAllocator = pAllocator;
-    status = UNIX_CALL(vkDestroySwapchainKHR, &params);
-    assert(!status);
-    free(swapchain);
-}
-
-static BOOL WINAPI call_vulkan_debug_report_callback( struct wine_vk_debug_report_params *params, ULONG size )
-{
-    return params->user_callback(params->flags, params->object_type, params->object_handle, params->location,
-                                 params->code, params->layer_prefix, params->message, params->user_data);
-}
-
-static BOOL WINAPI call_vulkan_debug_utils_callback( struct wine_vk_debug_utils_params *params, ULONG size )
-{
-    return params->user_callback(params->severity, params->message_types, &params->data, params->user_data);
+    struct wine_vk_debug_utils_params *params = args;
+    VkBool32 ret = params->user_callback(params->severity, params->message_types, &params->data, params->user_data);
+    return NtCallbackReturn( &ret, sizeof(ret), STATUS_SUCCESS );
 }
 
 BOOL WINAPI DllMain(HINSTANCE hinst, DWORD reason, void *reserved)

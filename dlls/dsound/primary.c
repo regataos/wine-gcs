@@ -27,8 +27,6 @@
 #include <math.h>
 
 #define COBJMACROS
-#define NONAMELESSUNION
-
 #include "windef.h"
 #include "winbase.h"
 #include "winuser.h"
@@ -231,7 +229,7 @@ static HRESULT DSOUND_WaveFormat(DirectSoundDevice *device, IAudioClient *client
         WAVEFORMATEXTENSIBLE *wfe;
 
         /* Convert to WAVEFORMATEXTENSIBLE */
-        w = HeapAlloc(GetProcessHeap(), 0, sizeof(WAVEFORMATEXTENSIBLE));
+        w = malloc(sizeof(WAVEFORMATEXTENSIBLE));
         wfe = (WAVEFORMATEXTENSIBLE*)w;
         if (!wfe)
             return DSERR_OUTOFMEMORY;
@@ -262,7 +260,7 @@ static HRESULT DSOUND_WaveFormat(DirectSoundDevice *device, IAudioClient *client
     }
     if (FAILED(hr)) {
         WARN("IsFormatSupported failed: %08lx\n", hr);
-        HeapFree(GetProcessHeap(), 0, w);
+        free(w);
         return hr;
     }
     *wfx = w;
@@ -314,10 +312,7 @@ static HRESULT DSOUND_PrimaryOpen(DirectSoundDevice *device, WAVEFORMATEX *wfx, 
         if (!forcewave)
             new_buflen = frames * wfx->nChannels * sizeof(float);
 
-        if (device->buffer)
-            newbuf = HeapReAlloc(GetProcessHeap(), 0, device->buffer, new_buflen);
-        else
-            newbuf = HeapAlloc(GetProcessHeap(), 0, new_buflen);
+        newbuf = realloc(device->buffer, new_buflen);
 
         if (!newbuf) {
             ERR("failed to allocate primary buffer\n");
@@ -325,13 +320,13 @@ static HRESULT DSOUND_PrimaryOpen(DirectSoundDevice *device, WAVEFORMATEX *wfx, 
         }
         FillMemory(newbuf, new_buflen, (wfx->wBitsPerSample == 8) ? 128 : 0);
     } else {
-        HeapFree(GetProcessHeap(), 0, device->buffer);
+        free(device->buffer);
         newbuf = NULL;
     }
 
     device->buffer = newbuf;
     device->buflen = new_buflen;
-    HeapFree(GetProcessHeap(), 0, device->pwfx);
+    free(device->pwfx);
     device->pwfx = wfx;
 
     device->writelead = (wfx->nSamplesPerSec / 100) * wfx->nBlockAlign;
@@ -457,7 +452,7 @@ err:
     if (render)
         IAudioRenderClient_Release(render);
     IAudioClient_Release(client);
-    HeapFree(GetProcessHeap(), 0, wfx);
+    free(wfx);
     return hres;
 }
 
@@ -471,11 +466,11 @@ HRESULT DSOUND_PrimaryDestroy(DirectSoundDevice *device)
 	if(device->primary && (device->primary->ref || device->primary->numIfaces))
 		WARN("Destroying primary buffer while references held (%lu %lu)\n", device->primary->ref, device->primary->numIfaces);
 
-	HeapFree(GetProcessHeap(), 0, device->primary);
+	free(device->primary);
 	device->primary = NULL;
 
-	HeapFree(GetProcessHeap(),0,device->primary_pwfx);
-	HeapFree(GetProcessHeap(),0,device->pwfx);
+	free(device->primary_pwfx);
+	free(device->pwfx);
 	device->pwfx=NULL;
 
 	LeaveCriticalSection(&(device->mixlock));
@@ -488,13 +483,13 @@ WAVEFORMATEX *DSOUND_CopyFormat(const WAVEFORMATEX *wfex)
 {
     WAVEFORMATEX *pwfx;
     if(wfex->wFormatTag == WAVE_FORMAT_PCM){
-        pwfx = HeapAlloc(GetProcessHeap(), 0, sizeof(WAVEFORMATEX));
+        pwfx = malloc(sizeof(WAVEFORMATEX));
         if (!pwfx)
             return NULL;
         CopyMemory(pwfx, wfex, sizeof(PCMWAVEFORMAT));
         pwfx->cbSize = 0;
     }else{
-        pwfx = HeapAlloc(GetProcessHeap(), 0, sizeof(WAVEFORMATEX) + wfex->cbSize);
+        pwfx = malloc(sizeof(WAVEFORMATEX) + wfex->cbSize);
         if (!pwfx)
             return NULL;
         CopyMemory(pwfx, wfex, sizeof(WAVEFORMATEX) + wfex->cbSize);
@@ -543,6 +538,9 @@ HRESULT primarybuffer_SetFormat(DirectSoundDevice *device, LPCWAVEFORMATEX passe
 			return DSERR_INVALIDPARAM;
 	}
 
+        if (passed_fmt->nChannels > 2 && passed_fmt->wFormatTag != WAVE_FORMAT_EXTENSIBLE)
+            return DSERR_ALLOCATED;
+
 	/* **** */
 	AcquireSRWLockExclusive(&device->buffer_list_lock);
 	EnterCriticalSection(&(device->mixlock));
@@ -565,14 +563,14 @@ HRESULT primarybuffer_SetFormat(DirectSoundDevice *device, LPCWAVEFORMATEX passe
 		err = DSOUND_ReopenDevice(device, TRUE);
 		if (FAILED(err)) {
 			ERR("No formats could be opened\n");
-			HeapFree(GetProcessHeap(), 0, device->primary_pwfx);
+			free(device->primary_pwfx);
 			device->primary_pwfx = old_fmt;
 		} else
-			HeapFree(GetProcessHeap(), 0, old_fmt);
+			free(old_fmt);
 	} else {
 		WAVEFORMATEX *wfx = DSOUND_CopyFormat(passed_fmt);
 		if (wfx) {
-			HeapFree(GetProcessHeap(), 0, device->primary_pwfx);
+			free(device->primary_pwfx);
 			device->primary_pwfx = wfx;
 		} else
 			err = DSERR_OUTOFMEMORY;
@@ -1238,7 +1236,7 @@ HRESULT primarybuffer_create(DirectSoundDevice *device, IDirectSoundBufferImpl *
 		return DSERR_INVALIDPARAM;
 	}
 
-	dsb = HeapAlloc(GetProcessHeap(),HEAP_ZERO_MEMORY,sizeof(*dsb));
+	dsb = calloc(1, sizeof(*dsb));
 
 	if (dsb == NULL) {
 		WARN("out of memory\n");

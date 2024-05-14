@@ -6,9 +6,9 @@ PARENTSRC = ../xaudio2_7
 
 EXTRADLLFLAGS = -Wb,--prefer-native
 
-C_SRCS = \
+SOURCES = \
+	version.rc \
 	xapo.c \
 	xapofx.c \
-	xaudio_allocator.c
-
-RC_SRCS = version.rc
+	xaudio_allocator.c \
+	xaudio_classes.idl

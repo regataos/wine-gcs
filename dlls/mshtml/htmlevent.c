@@ -117,7 +117,7 @@ typedef struct {
 /* Keep these sorted case sensitively */
 static const event_info_t event_info[] = {
     {L"DOMContentLoaded",  EVENT_TYPE_EVENT,     0,
-        EVENT_BUBBLES | EVENT_CANCELABLE},
+        EVENT_DEFAULTLISTENER | EVENT_HASDEFAULTHANDLERS | EVENT_BUBBLES | EVENT_CANCELABLE },
     {L"abort",             EVENT_TYPE_EVENT,     DISPID_EVMETH_ONABORT,
         EVENT_BIND_TO_TARGET},
     {L"afterprint",        EVENT_TYPE_EVENT,     DISPID_EVMETH_ONAFTERPRINT,
@@ -2066,12 +2066,8 @@ static const dispex_static_data_vtbl_t HTMLEventObj_dispex_vtbl = {
 };
 
 static const tid_t HTMLEventObj_iface_tids[] = {
-    IHTMLEventObj_tid,
-    IHTMLEventObj2_tid,
-    IHTMLEventObj3_tid,
-    IHTMLEventObj4_tid,
     IHTMLEventObj5_tid,
-    IHTMLEventObj6_tid,
+    IHTMLEventObj_tid,
     0
 };
 
@@ -5136,6 +5132,18 @@ static HRESULT dispatch_event_object(EventTarget *event_target, DOMEvent *event,
     IEventTarget_AddRef(&event_target->IEventTarget_iface);
 
     event->phase = DEP_CAPTURING_PHASE;
+
+    if(event_info[event->event_id].flags & EVENT_HASDEFAULTHANDLERS) {
+        for(i = 0; i < chain_cnt; i++) {
+            vtbl = dispex_get_vtbl(&target_chain[i]->dispex);
+            if(!vtbl->pre_handle_event)
+                continue;
+            hres = vtbl->pre_handle_event(&target_chain[i]->dispex, event);
+            if(FAILED(hres) || event->stop_propagation)
+                break;
+        }
+    }
+
     i = chain_cnt-1;
     while(!event->stop_propagation && i)
         call_event_handlers(target_chain[i--], event, dispatch_mode);
@@ -5169,7 +5177,7 @@ static HRESULT dispatch_event_object(EventTarget *event_target, DOMEvent *event,
             vtbl = dispex_get_vtbl(&target_chain[i]->dispex);
             if(!vtbl->handle_event)
                 continue;
-            hres = vtbl->handle_event(&target_chain[i]->dispex, event->event_id, event->nsevent, &prevent_default);
+            hres = vtbl->handle_event(&target_chain[i]->dispex, event, &prevent_default);
             if(FAILED(hres) || event->stop_propagation)
                 break;
             if(prevent_default)
@@ -5872,7 +5880,7 @@ void traverse_event_target(EventTarget *event_target, nsCycleCollectionTraversal
     listener_container_t *iter;
     event_listener_t *listener;
 
-    WINE_RB_FOR_EACH_ENTRY(iter, &event_target->handler_map, listener_container_t, entry)
+    RB_FOR_EACH_ENTRY(iter, &event_target->handler_map, listener_container_t, entry)
         LIST_FOR_EACH_ENTRY(listener, &iter->listeners, event_listener_t, entry)
             if(listener->function)
                 note_cc_edge((nsISupports*)listener->function, "EventTarget.listener", cb);
@@ -5892,5 +5900,5 @@ void release_event_target(EventTarget *event_target)
         }
         free(iter);
     }
-    wine_rb_destroy(&event_target->handler_map, NULL, NULL);
+    rb_destroy(&event_target->handler_map, NULL, NULL);
 }

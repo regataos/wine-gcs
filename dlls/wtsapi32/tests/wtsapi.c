@@ -68,8 +68,7 @@ static void check_wts_process_info(const WTS_PROCESS_INFOW *info, DWORD count)
 
     for (i = 0; i < count; i++)
     {
-        char sid_buffer[50];
-        SID_AND_ATTRIBUTES *sid = (SID_AND_ATTRIBUTES *)sid_buffer;
+        SID_AND_ATTRIBUTES *sid;
         const SYSTEM_PROCESS_INFORMATION *nt_process;
         HANDLE process, token;
         DWORD size;
@@ -88,11 +87,13 @@ static void check_wts_process_info(const WTS_PROCESS_INFOW *info, DWORD count)
 
         if ((process = OpenProcess(PROCESS_QUERY_INFORMATION, FALSE, info[i].ProcessId)))
         {
+            sid = malloc(50);
             ret = OpenProcessToken(process, TOKEN_QUERY, &token);
             ok(ret, "failed to open token, error %lu\n", GetLastError());
-            ret = GetTokenInformation(token, TokenUser, sid_buffer, sizeof(sid_buffer), &size);
+            ret = GetTokenInformation(token, TokenUser, sid, 50, &size);
             ok(ret, "failed to get token user, error %lu\n", GetLastError());
             ok(EqualSid(info[i].pUserSid, sid->Sid), "SID did not match\n");
+            free(sid);
             CloseHandle(token);
             CloseHandle(process);
         }
@@ -157,7 +158,7 @@ static void test_WTSEnumerateProcessesW(void)
 
     if (!pWTSEnumerateProcessesExW)
     {
-        skip("WTSEnumerateProcessesEx is not available\n");
+        win_skip("WTSEnumerateProcessesEx is not available\n");
         return;
     }
 
@@ -239,7 +240,7 @@ static void test_WTSQuerySessionInformation(void)
     GetUserNameW(usernameW, &tempsize);
     /* Windows Vista, 7 and 8 return uppercase username, while the rest return lowercase. */
     ok(!wcsicmp(buf1, usernameW), "expected %s, got %s\n", wine_dbgstr_w(usernameW), wine_dbgstr_w(buf1));
-    ok(count == tempsize * sizeof(WCHAR), "expected %Iu, got %lu\n", tempsize * sizeof(WCHAR), count);
+    ok(count == tempsize * sizeof(WCHAR), "got %lu\n", count);
     WTSFreeMemory(buf1);
 
     count = 0;
@@ -252,7 +253,7 @@ static void test_WTSQuerySessionInformation(void)
     GetComputerNameW(computernameW, &tempsize);
     /* Windows Vista, 7 and 8 return uppercase computername, while the rest return lowercase. */
     ok(!wcsicmp(buf1, computernameW), "expected %s, got %s\n", wine_dbgstr_w(computernameW), wine_dbgstr_w(buf1));
-    ok(count == (tempsize + 1) * sizeof(WCHAR), "expected %Iu, got %lu\n", (tempsize + 1) * sizeof(WCHAR), count);
+    ok(count == (tempsize + 1) * sizeof(WCHAR), "got %lu\n", count);
     WTSFreeMemory(buf1);
 
     SetLastError(0xdeadbeef);

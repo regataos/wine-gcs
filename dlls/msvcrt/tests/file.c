@@ -226,7 +226,50 @@ static void test_fileops( void )
     ok(fread(buffer, sizeof(buffer), 1, file) == 0, "fread test failed\n");
     /* feof should be set now */
     ok(feof(file), "feof after fread failed\n");
-    fclose (file);
+    clearerr(file);
+    ok(!feof(file), "feof after clearerr failed\n");
+    fclose(file);
+
+    file = fopen("fdopen.tst", "rb");
+    ok( file != NULL, "fopen failed\n");
+    /* sizeof(buffer) > content of file */
+    ok(fread(buffer, sizeof(buffer), 1, file) == 0, "fread test failed\n");
+    /* feof should be set now */
+    ok(feof(file), "feof after fread failed\n");
+    rewind(file);
+    ok(!feof(file), "feof after rewind failed\n");
+    fclose(file);
+
+    file = fopen("fdopen.tst", "rb");
+    ok( file != NULL, "fopen failed\n");
+    /* sizeof(buffer) > content of file */
+    ok(fread(buffer, sizeof(buffer), 1, file) == 0, "fread test failed\n");
+    /* feof should be set now */
+    ok(feof(file), "feof after fread failed\n");
+    fseek(file, 0, SEEK_SET);
+    ok(!feof(file), "feof after fseek failed\n");
+    fclose(file);
+
+    file = fopen("fdopen.tst", "rb");
+    ok( file != NULL, "fopen failed\n");
+    /* sizeof(buffer) > content of file */
+    ok(fread(buffer, sizeof(buffer), 1, file) == 0, "fread test failed\n");
+    /* feof should be set now */
+    ok(feof(file), "feof after fread failed\n");
+    fgetpos(file, &pos);
+    fsetpos(file, &pos);
+    ok(!feof(file), "feof after fsetpos failed\n");
+    fclose(file);
+
+    file = fopen("fdopen.tst", "rb");
+    ok( file != NULL, "fopen failed\n");
+    /* sizeof(buffer) > content of file */
+    ok(fread(buffer, sizeof(buffer), 1, file) == 0, "fread test failed\n");
+    /* feof should be set now */
+    ok(feof(file), "feof after fread failed\n");
+    fsetpos(file, &pos);
+    ok(!feof(file), "feof after fsetpos failed\n");
+    fclose(file);
 
     unlink ("fdopen.tst");
 }
@@ -1929,6 +1972,10 @@ static void test_invalid_stdin( const char* selfname )
     ret = RegOpenCurrentUser(KEY_READ, &key);
     ok(!ret, "RegOpenCurrentUser failed: %lx\n", ret);
 
+    ret = DuplicateHandle(GetCurrentProcess(), key, GetCurrentProcess(),
+            (HANDLE *)&key, GENERIC_READ, TRUE, DUPLICATE_CLOSE_SOURCE);
+    ok(ret, "DuplicateHandle failed: %lx\n", GetLastError());
+
     sa.nLength = sizeof(sa);
     sa.lpSecurityDescriptor = NULL;
     sa.bInheritHandle = TRUE;
@@ -3010,6 +3057,64 @@ static void test_ioinfo_flags(void)
     free(tempf);
 }
 
+static void test_std_stream_buffering(void)
+{
+    int dup_fd, ret, pos;
+    FILE *file;
+    char ch;
+
+    dup_fd = _dup(STDOUT_FILENO);
+    ok(dup_fd != -1, "_dup failed\n");
+
+    file = freopen("std_stream_test.tmp", "w", stdout);
+    ok(file != NULL, "freopen failed\n");
+
+    ret = fprintf(stdout, "test");
+    pos = _telli64(STDOUT_FILENO);
+
+    fflush(stdout);
+    _dup2(dup_fd, STDOUT_FILENO);
+    close(dup_fd);
+    setvbuf(stdout, NULL, _IONBF, 0);
+
+    ok(ret == 4, "fprintf(stdout) returned %d\n", ret);
+    ok(!pos, "expected stdout to be buffered\n");
+
+    dup_fd = _dup(STDERR_FILENO);
+    ok(dup_fd != -1, "_dup failed\n");
+
+    file = freopen("std_stream_test.tmp", "w", stderr);
+    ok(file != NULL, "freopen failed\n");
+
+    ret = fprintf(stderr, "test");
+    ok(ret == 4, "fprintf(stderr) returned %d\n", ret);
+    pos = _telli64(STDERR_FILENO);
+    ok(!pos, "expected stderr to be buffered\n");
+
+    fflush(stderr);
+    _dup2(dup_fd, STDERR_FILENO);
+    close(dup_fd);
+
+    dup_fd = _dup(STDIN_FILENO);
+    ok(dup_fd != -1, "_dup failed\n");
+
+    file = freopen("std_stream_test.tmp", "r", stdin);
+    ok(file != NULL, "freopen failed\n");
+
+    ch = 0;
+    ret = fscanf(stdin, "%c", &ch);
+    ok(ret == 1, "fscanf returned %d\n", ret);
+    ok(ch == 't', "ch = 0x%x\n", (unsigned char)ch);
+    pos = _telli64(STDIN_FILENO);
+    ok(pos == 4, "pos = %d\n", pos);
+
+    fflush(stdin);
+    _dup2(dup_fd, STDIN_FILENO);
+    close(dup_fd);
+
+    ok(DeleteFileA("std_stream_test.tmp"), "DeleteFile failed\n");
+}
+
 START_TEST(file)
 {
     int arg_c;
@@ -3086,6 +3191,7 @@ START_TEST(file)
     test_fopen_hints();
     test_open_hints();
     test_ioinfo_flags();
+    test_std_stream_buffering();
 
     /* Wait for the (_P_NOWAIT) spawned processes to finish to make sure the report
      * file contains lines in the correct order

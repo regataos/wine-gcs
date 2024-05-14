@@ -785,7 +785,7 @@ static void session_shutdown_current_topology(struct media_session *session)
                         WARN("Failed to shut down activation object for the sink, hr %#lx.\n", hr);
                     IMFActivate_Release(activate);
                 }
-                else if (SUCCEEDED(topology_node_get_object(node, &IID_IMFStreamSink, (void **)&stream_sink)))
+                if (SUCCEEDED(topology_node_get_object(node, &IID_IMFStreamSink, (void **)&stream_sink)))
                 {
                     if (SUCCEEDED(IMFStreamSink_GetMediaSink(stream_sink, &sink)))
                     {
@@ -2436,6 +2436,7 @@ static HRESULT session_get_renderer_node_service(struct media_session *session,
                             if (FAILED(hr = MFGetService((IUnknown *)sink, service, riid, obj)))
                                 WARN("Failed to get service from renderer node, %#lx.\n", hr);
                         }
+                        IMFMediaSink_Release(sink);
                     }
                     IMFStreamSink_Release(stream_sink);
                 }
@@ -2863,10 +2864,10 @@ static struct topo_node *session_get_node_object(struct media_session *session, 
     LIST_FOR_EACH_ENTRY(node, &session->presentation.nodes, struct topo_node, entry)
     {
         if (node->type == node_type && object == node->object.object)
-            break;
+            return node;
     }
 
-    return node;
+    return NULL;
 }
 
 static BOOL session_set_node_object_state(struct media_session *session, IUnknown *object,

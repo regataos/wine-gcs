@@ -22,7 +22,7 @@
 #include <stdlib.h>
 #include "hid.h"
 #include "winreg.h"
-#include "winuser.h"
+#include "ntuser.h"
 
 #include "ddk/hidsdi.h"
 #include "ddk/hidtypes.h"
@@ -410,6 +410,7 @@ static const struct device_strings device_strings[] =
     { .id = L"VID_054C&PID_09CC", .product = L"Wireless Controller" },
     { .id = L"VID_054C&PID_0BA0", .product = L"Wireless Controller" },
     { .id = L"VID_054C&PID_0CE6", .product = L"Wireless Controller" },
+    { .id = L"VID_054C&PID_0DF2", .product = L"Wireless Controller" },
 };
 
 static const WCHAR *find_device_string( const WCHAR *device_id, ULONG index )

@@ -30,15 +30,6 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(speech);
 
-static const char *debugstr_hstring(HSTRING hstr)
-{
-    const WCHAR *str;
-    UINT32 len;
-    if (hstr && !((ULONG_PTR)hstr >> 16)) return "(invalid)";
-    str = WindowsGetStringRawBuffer(hstr, &len);
-    return wine_dbgstr_wn(str, len);
-}
-
 struct map_view_hstring_vector_view_hstring
 {
     IMapView_HSTRING_IVectorView_HSTRING IMapView_HSTRING_IVectorView_HSTRING_iface;
@@ -808,7 +799,7 @@ static HRESULT session_find_constraint_by_string(struct session *session, WCHAR 
     ISpeechRecognitionConstraint *constraint;
     IIterable_HSTRING *commands_iterable;
     IIterator_HSTRING *commands_iterator;
-    boolean has_constraint, has_command;
+    BOOLEAN has_constraint, has_command;
     IVector_HSTRING *commands;
     const WCHAR *command_str;
     HSTRING command;
@@ -895,7 +886,7 @@ static DWORD CALLBACK session_worker_thread_cb( void *args )
     ISpeechRecognitionResult *result;
     BOOLEAN running = TRUE, paused = FALSE;
     UINT32 frame_count, tmp_buf_size;
-    BYTE *audio_buf, *tmp_buf;
+    BYTE *audio_buf, *tmp_buf = NULL;
     WCHAR *recognized_text;
     DWORD flags, status;
     NTSTATUS nt_status;
@@ -1053,6 +1044,7 @@ static DWORD CALLBACK session_worker_thread_cb( void *args )
 
 error:
     ERR("The recognition session worker encountered a serious error and needs to stop. hr: %lx.\n", hr);
+    free(tmp_buf);
     return 1;
 }
 
@@ -1539,7 +1531,7 @@ static HRESULT recognizer_compile_constraints_async( IInspectable *invoker, IIns
     ISpeechRecognitionConstraint *constraint;
     IIterable_HSTRING *commands_iterable;
     IIterator_HSTRING *commands_iterator;
-    boolean has_constraint, has_command;
+    BOOLEAN has_constraint, has_command;
     IVector_HSTRING *commands;
     const WCHAR *command_str;
     UINT32 grammar_size = 0, i = 0;

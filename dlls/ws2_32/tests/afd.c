@@ -1447,7 +1447,7 @@ static void test_recv(void)
     ret = listen(listener, 1);
     ok(!ret, "got error %u\n", WSAGetLastError());
     len = sizeof(addr);
-    ret = getsockname(listener, (struct sockaddr *)&addr, &len);
+    ret = getsockname(listener, &addr, &len);
     ok(!ret, "got error %u\n", WSAGetLastError());
 
     memset(&io, 0, sizeof(io));
@@ -1457,7 +1457,7 @@ static void test_recv(void)
     ok(!io.Information, "got information %#Ix\n", io.Information);
 
     client = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-    ret = connect(client, (struct sockaddr *)&addr, sizeof(addr));
+    ret = connect(client, &addr, sizeof(addr));
     ok(!ret, "got error %u\n", WSAGetLastError());
     server = accept(listener, NULL, NULL);
     ok(server != -1, "got error %u\n", WSAGetLastError());
@@ -1735,7 +1735,7 @@ static void test_recv(void)
     ret = bind(client, (const struct sockaddr *)&bind_addr, sizeof(bind_addr));
     ok(!ret, "got error %u\n", WSAGetLastError());
     len = sizeof(addr);
-    ret = getsockname(client, (struct sockaddr *)&addr, &len);
+    ret = getsockname(client, &addr, &len);
     ok(!ret, "got error %u\n", WSAGetLastError());
 
     memset(buffer, 0xcc, sizeof(buffer));
@@ -1743,7 +1743,7 @@ static void test_recv(void)
             IOCTL_AFD_RECV, &params, sizeof(params), NULL, 0);
     ok(ret == STATUS_PENDING, "got %#x\n", ret);
 
-    ret = sendto(server, "data", 5, 0, (struct sockaddr *)&addr, sizeof(addr));
+    ret = sendto(server, "data", 5, 0, &addr, sizeof(addr));
     ok(ret == 5, "got %d\n", ret);
 
     ret = WaitForSingleObject(event, 200);
@@ -1759,7 +1759,7 @@ static void test_recv(void)
             IOCTL_AFD_RECV, &params, sizeof(params), NULL, 0);
     ok(ret == STATUS_PENDING, "got %#x\n", ret);
 
-    ret = sendto(server, "moredata", 9, 0, (struct sockaddr *)&addr, sizeof(addr));
+    ret = sendto(server, "moredata", 9, 0, &addr, sizeof(addr));
     ok(ret == 9, "got %d\n", ret);
 
     ret = WaitForSingleObject(event, 200);
@@ -1768,7 +1768,7 @@ static void test_recv(void)
     ok(io.Information == 6, "got %#Ix\n", io.Information);
     ok(!memcmp(buffer, "mo\xccreda\xcc", 7), "got %s\n", debugstr_an(buffer, io.Information));
 
-    ret = sendto(server, "moredata", 9, 0, (struct sockaddr *)&addr, sizeof(addr));
+    ret = sendto(server, "moredata", 9, 0, &addr, sizeof(addr));
     ok(ret == 9, "got %d\n", ret);
 
     /* wait for the data to be available */
@@ -1969,6 +1969,20 @@ static void test_get_events(void)
     for (i = 0; i < ARRAY_SIZE(params.status); ++i)
         ok(!params.status[i], "got status[%u] %#x\n", i, params.status[i]);
 
+    SetEvent(event);
+
+    memset(&params, 0xcc, sizeof(params));
+    memset(&io, 0xcc, sizeof(io));
+    ret = NtDeviceIoControlFile((HANDLE)client, NULL, NULL, NULL, &io,
+            IOCTL_AFD_GET_EVENTS, event, 0, &params, sizeof(params));
+    ok(!ret, "got %#x\n", ret);
+    ok(!params.flags, "got flags %#x\n", params.flags);
+    for (i = 0; i < ARRAY_SIZE(params.status); ++i)
+        ok(!params.status[i], "got status[%u] %#x\n", i, params.status[i]);
+
+    ret = WaitForSingleObject(event, 0);
+    ok(ret == WAIT_TIMEOUT, "got %d\n", ret);
+
     closesocket(client);
     closesocket(server);
 
@@ -2044,17 +2058,20 @@ static void test_get_events_reset(void)
 
     tcp_socketpair(&client, &server);
 
-    ret = WSAEventSelect(client, event, FD_ACCEPT | FD_CONNECT | FD_CLOSE | FD_OOB | FD_READ | FD_WRITE);
+    ret = WSAEventSelect(client, event, FD_ACCEPT | FD_CLOSE | FD_OOB | FD_READ);
     ok(!ret, "got error %lu\n", GetLastError());
 
     close_with_rst(server);
+
+    ret = WaitForSingleObject(event, 1000);
+    ok(!ret, "got %d\n", ret);
 
     memset(&params, 0xcc, sizeof(params));
     memset(&io, 0xcc, sizeof(io));
     ret = NtDeviceIoControlFile((HANDLE)client, NULL, NULL, NULL, &io,
             IOCTL_AFD_GET_EVENTS, NULL, 0, &params, sizeof(params));
     ok(!ret, "got %#x\n", ret);
-    ok(params.flags == (AFD_POLL_RESET | AFD_POLL_CONNECT | AFD_POLL_WRITE), "got flags %#x\n", params.flags);
+    ok(params.flags == AFD_POLL_RESET, "got flags %#x\n", params.flags);
     for (i = 0; i < ARRAY_SIZE(params.status); ++i)
         ok(!params.status[i], "got status[%u] %#x\n", i, params.status[i]);
 
@@ -2062,17 +2079,21 @@ static void test_get_events_reset(void)
 
     tcp_socketpair(&client, &server);
 
-    ret = WSAEventSelect(server, event, FD_ACCEPT | FD_CONNECT | FD_CLOSE | FD_OOB | FD_READ | FD_WRITE);
+    ResetEvent(event);
+    ret = WSAEventSelect(server, event, FD_ACCEPT | FD_CLOSE | FD_OOB | FD_READ);
     ok(!ret, "got error %lu\n", GetLastError());
 
     close_with_rst(client);
+
+    ret = WaitForSingleObject(event, 1000);
+    ok(!ret, "got %d\n", ret);
 
     memset(&params, 0xcc, sizeof(params));
     memset(&io, 0xcc, sizeof(io));
     ret = NtDeviceIoControlFile((HANDLE)server, NULL, NULL, NULL, &io,
             IOCTL_AFD_GET_EVENTS, NULL, 0, &params, sizeof(params));
     ok(!ret, "got %#x\n", ret);
-    ok(params.flags == (AFD_POLL_RESET | AFD_POLL_WRITE), "got flags %#x\n", params.flags);
+    ok(params.flags == AFD_POLL_RESET, "got flags %#x\n", params.flags);
     for (i = 0; i < ARRAY_SIZE(params.status); ++i)
         ok(!params.status[i], "got status[%u] %#x\n", i, params.status[i]);
 
@@ -2299,6 +2320,12 @@ static void test_bind(void)
     todo_wine ok(ret == STATUS_PENDING, "got %#x\n", ret);
     ret = WaitForSingleObject(event, 0);
     ok(!ret, "got %#x\n", ret);
+    if (io.Status == STATUS_INVALID_ADDRESS_COMPONENT)
+    {
+        skip("IPv6 not supported\n");
+        closesocket(s);
+        goto cleanup;
+    }
     ok(!io.Status, "got %#lx\n", io.Status);
     ok(io.Information == sizeof(addr6), "got %#Ix\n", io.Information);
     ok(addr6.sin6_family == AF_INET6, "got family %u\n", addr6.sin6_family);
@@ -2333,6 +2360,7 @@ static void test_bind(void)
     closesocket(s2);
     closesocket(s);
 
+cleanup:
     CloseHandle(event);
     free(params);
 }
@@ -2363,7 +2391,7 @@ static void test_getsockname(void)
     ok(!io.Status, "got %#lx\n", io.Status);
     ok(io.Information == sizeof(addr), "got %#Ix\n", io.Information);
     len = sizeof(addr2);
-    ret = getsockname(client, (struct sockaddr *)&addr2, &len);
+    ret = getsockname(client, &addr2, &len);
     ok(!ret, "got error %u\n", WSAGetLastError());
     ok(!memcmp(&addr, &addr2, sizeof(struct sockaddr)), "addresses didn't match\n");
 
@@ -2375,7 +2403,7 @@ static void test_getsockname(void)
     ok(!io.Status, "got %#lx\n", io.Status);
     ok(io.Information == sizeof(addr), "got %#Ix\n", io.Information);
     len = sizeof(addr2);
-    ret = getsockname(server, (struct sockaddr *)&addr2, &len);
+    ret = getsockname(server, &addr2, &len);
     ok(!ret, "got error %u\n", WSAGetLastError());
     ok(!memcmp(&addr, &addr2, sizeof(struct sockaddr)), "addresses didn't match\n");
 
@@ -2403,7 +2431,7 @@ static void test_getsockname(void)
     ok(!io.Status, "got %#lx\n", io.Status);
     ok(io.Information == sizeof(addr), "got %#Ix\n", io.Information);
     len = sizeof(addr2);
-    ret = getsockname(client, (struct sockaddr *)&addr2, &len);
+    ret = getsockname(client, &addr2, &len);
     ok(!ret, "got error %u\n", WSAGetLastError());
     ok(!memcmp(&addr, &addr2, sizeof(struct sockaddr)), "addresses didn't match\n");
 

@@ -754,7 +754,7 @@ void execute_rop( X11DRV_PDEVICE *physdev, Pixmap src_pixmap, GC gc, const RECT 
 /***********************************************************************
  *           X11DRV_PatBlt
  */
-BOOL CDECL X11DRV_PatBlt( PHYSDEV dev, struct bitblt_coords *dst, DWORD rop )
+BOOL X11DRV_PatBlt( PHYSDEV dev, struct bitblt_coords *dst, DWORD rop )
 {
     X11DRV_PDEVICE *physDev = get_x11drv_dev( dev );
     BOOL usePat = (((rop >> 4) & 0x0f0000) != (rop & 0x0f0000));
@@ -806,8 +806,8 @@ BOOL CDECL X11DRV_PatBlt( PHYSDEV dev, struct bitblt_coords *dst, DWORD rop )
 /***********************************************************************
  *           X11DRV_StretchBlt
  */
-BOOL CDECL X11DRV_StretchBlt( PHYSDEV dst_dev, struct bitblt_coords *dst,
-                              PHYSDEV src_dev, struct bitblt_coords *src, DWORD rop )
+BOOL X11DRV_StretchBlt( PHYSDEV dst_dev, struct bitblt_coords *dst,
+                        PHYSDEV src_dev, struct bitblt_coords *src, DWORD rop )
 {
     X11DRV_PDEVICE *physDevDst = get_x11drv_dev( dst_dev );
     X11DRV_PDEVICE *physDevSrc = get_x11drv_dev( src_dev );
@@ -926,12 +926,12 @@ BOOL CDECL X11DRV_StretchBlt( PHYSDEV dst_dev, struct bitblt_coords *dst,
 }
 
 
-static void CDECL free_heap_bits( struct gdi_image_bits *bits )
+static void free_heap_bits( struct gdi_image_bits *bits )
 {
     free( bits->ptr );
 }
 
-static void CDECL free_ximage_bits( struct gdi_image_bits *bits )
+static void free_ximage_bits( struct gdi_image_bits *bits )
 {
     XFree( bits->ptr );
 }
@@ -1220,9 +1220,9 @@ DWORD copy_image_bits( BITMAPINFO *info, BOOL is_r8g8b8, XImage *image,
 /***********************************************************************
  *           X11DRV_PutImage
  */
-DWORD CDECL X11DRV_PutImage( PHYSDEV dev, HRGN clip, BITMAPINFO *info,
-                             const struct gdi_image_bits *bits, struct bitblt_coords *src,
-                             struct bitblt_coords *dst, DWORD rop )
+DWORD X11DRV_PutImage( PHYSDEV dev, HRGN clip, BITMAPINFO *info,
+                       const struct gdi_image_bits *bits, struct bitblt_coords *src,
+                       struct bitblt_coords *dst, DWORD rop )
 {
     X11DRV_PDEVICE *physdev = get_x11drv_dev( dev );
     DWORD ret;
@@ -1312,8 +1312,8 @@ update_format:
 /***********************************************************************
  *           X11DRV_GetImage
  */
-DWORD CDECL X11DRV_GetImage( PHYSDEV dev, BITMAPINFO *info,
-                             struct gdi_image_bits *bits, struct bitblt_coords *src )
+DWORD X11DRV_GetImage( PHYSDEV dev, BITMAPINFO *info,
+                       struct gdi_image_bits *bits, struct bitblt_coords *src )
 {
     X11DRV_PDEVICE *physdev = get_x11drv_dev( dev );
     DWORD ret = ERROR_SUCCESS;
@@ -1497,7 +1497,9 @@ Pixmap create_pixmap_from_image( HDC hdc, const XVisualInfo *vis, const BITMAPIN
         {
             if (src_info->bmiHeader.biBitCount == 1 && !src_info->bmiHeader.biClrUsed)
                 memcpy( src_info->bmiColors, default_colortable, sizeof(default_colortable) );
-            SetDIBits( hdc, dib, 0, abs(info->bmiHeader.biHeight), bits->ptr, src_info, coloruse );
+            NtGdiSetDIBitsToDeviceInternal( hdc, 0, 0, 0, 0, 0, 0, 0,
+                                            abs(info->bmiHeader.biHeight), bits->ptr, src_info, coloruse,
+                                            0, 0, FALSE, dib ); /* SetDIBits */
             dst_bits.free = NULL;
             dst_bits.is_copy = TRUE;
             err = put_pixmap_image( pixmap, vis, dst_info, &dst_bits );
@@ -1572,6 +1574,7 @@ DWORD get_pixmap_image( Pixmap pixmap, int width, int height, const XVisualInfo 
 struct x11drv_window_surface
 {
     struct window_surface header;
+    HWND                  hwnd;
     Window                window;
     GC                    gc;
     XImage               *image;
@@ -1639,6 +1642,8 @@ static void update_surface_region( struct x11drv_window_surface *surface )
     HRGN rgn;
 
     if (!shape_layered_windows) return;
+
+    if (wm_is_steamcompmgr(gdi_display)) return;
 
     if (!surface->is_argb && surface->color_key == CLR_INVALID)
     {
@@ -1958,12 +1963,17 @@ static void x11drv_surface_flush( struct window_surface *window_surface )
 
 #ifdef HAVE_LIBXXSHM
         if (surface->shminfo.shmid != -1)
-            XShmPutImage( gdi_display, surface->window, surface->gc, surface->image,
-                          coords.visrect.left, coords.visrect.top,
-                          surface->header.rect.left + coords.visrect.left,
-                          surface->header.rect.top + coords.visrect.top,
-                          coords.visrect.right - coords.visrect.left,
-                          coords.visrect.bottom - coords.visrect.top, False );
+        {
+            if (!fs_hack_put_image_scaled( surface->hwnd, surface->window, surface->gc, surface->image,
+                                           surface->header.rect.left, surface->header.rect.top,
+                                           coords.width, coords.height, surface->is_argb ))
+                XShmPutImage( gdi_display, surface->window, surface->gc, surface->image,
+                              coords.visrect.left, coords.visrect.top,
+                              surface->header.rect.left + coords.visrect.left,
+                              surface->header.rect.top + coords.visrect.top,
+                              coords.visrect.right - coords.visrect.left,
+                              coords.visrect.bottom - coords.visrect.top, False );
+        }
         else
 #endif
         XPutImage( gdi_display, surface->window, surface->gc, surface->image,
@@ -2020,7 +2030,7 @@ static const struct window_surface_funcs x11drv_surface_funcs =
 /***********************************************************************
  *           create_surface
  */
-struct window_surface *create_surface( Window window, const XVisualInfo *vis, const RECT *rect,
+struct window_surface *create_surface( HWND hwnd, Window window, const XVisualInfo *vis, const RECT *rect,
                                        COLORREF color_key, BOOL use_alpha )
 {
     const XPixmapFormatValues *format = pixmap_formats[vis->depth];
@@ -2043,6 +2053,7 @@ struct window_surface *create_surface( Window window, const XVisualInfo *vis, co
     surface->header.funcs = &x11drv_surface_funcs;
     surface->header.rect  = *rect;
     surface->header.ref   = 1;
+    surface->hwnd = hwnd;
     surface->window = window;
     surface->is_argb = (use_alpha && vis->depth == 32 && surface->info.bmiHeader.biCompression == BI_RGB);
     set_color_key( surface, color_key );

@@ -3360,7 +3360,7 @@ static const struct ID2D1GeometrySinkVtbl d2d_geometry_sink_vtbl =
 
 static inline struct d2d_geometry *impl_from_ID2D1PathGeometry1(ID2D1PathGeometry1 *iface)
 {
-    return CONTAINING_RECORD((ID2D1Geometry *)iface, struct d2d_geometry, ID2D1Geometry_iface);
+    return CONTAINING_RECORD(iface, struct d2d_geometry, ID2D1Geometry_iface);
 }
 
 static HRESULT STDMETHODCALLTYPE d2d_path_geometry_QueryInterface(ID2D1PathGeometry1 *iface, REFIID iid, void **out)
@@ -3961,7 +3961,7 @@ void d2d_path_geometry_init(struct d2d_geometry *geometry, ID2D1Factory *factory
 
 static inline struct d2d_geometry *impl_from_ID2D1EllipseGeometry(ID2D1EllipseGeometry *iface)
 {
-    return CONTAINING_RECORD((ID2D1Geometry*)iface, struct d2d_geometry, ID2D1Geometry_iface);
+    return CONTAINING_RECORD(iface, struct d2d_geometry, ID2D1Geometry_iface);
 }
 
 static HRESULT STDMETHODCALLTYPE d2d_ellipse_geometry_QueryInterface(ID2D1EllipseGeometry *iface,
@@ -4233,7 +4233,7 @@ fail:
 
 static inline struct d2d_geometry *impl_from_ID2D1RectangleGeometry(ID2D1RectangleGeometry *iface)
 {
-    return CONTAINING_RECORD((ID2D1Geometry *)iface, struct d2d_geometry, ID2D1Geometry_iface);
+    return CONTAINING_RECORD(iface, struct d2d_geometry, ID2D1Geometry_iface);
 }
 
 static HRESULT STDMETHODCALLTYPE d2d_rectangle_geometry_QueryInterface(ID2D1RectangleGeometry *iface,
@@ -4649,7 +4649,7 @@ fail:
 
 static inline struct d2d_geometry *impl_from_ID2D1RoundedRectangleGeometry(ID2D1RoundedRectangleGeometry *iface)
 {
-    return CONTAINING_RECORD((ID2D1Geometry*)iface, struct d2d_geometry, ID2D1Geometry_iface);
+    return CONTAINING_RECORD(iface, struct d2d_geometry, ID2D1Geometry_iface);
 }
 
 static HRESULT STDMETHODCALLTYPE d2d_rounded_rectangle_geometry_QueryInterface(ID2D1RoundedRectangleGeometry *iface,
@@ -4945,7 +4945,7 @@ fail:
 
 static inline struct d2d_geometry *impl_from_ID2D1TransformedGeometry(ID2D1TransformedGeometry *iface)
 {
-    return CONTAINING_RECORD((ID2D1Geometry *)iface, struct d2d_geometry, ID2D1Geometry_iface);
+    return CONTAINING_RECORD(iface, struct d2d_geometry, ID2D1Geometry_iface);
 }
 
 static HRESULT STDMETHODCALLTYPE d2d_transformed_geometry_QueryInterface(ID2D1TransformedGeometry *iface,
@@ -5229,7 +5229,7 @@ void d2d_transformed_geometry_init(struct d2d_geometry *geometry, ID2D1Factory *
 
 static inline struct d2d_geometry *impl_from_ID2D1GeometryGroup(ID2D1GeometryGroup *iface)
 {
-    return CONTAINING_RECORD( (ID2D1Geometry*)iface, struct d2d_geometry, ID2D1Geometry_iface);
+    return CONTAINING_RECORD(iface, struct d2d_geometry, ID2D1Geometry_iface);
 }
 
 static HRESULT STDMETHODCALLTYPE d2d_geometry_group_QueryInterface(ID2D1GeometryGroup *iface,

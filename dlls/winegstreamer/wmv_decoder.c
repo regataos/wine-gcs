@@ -19,38 +19,55 @@
 
 #include "mfapi.h"
 #include "mferror.h"
+#include "mediaerr.h"
 #include "mfobjects.h"
 #include "mftransform.h"
 #include "wmcodecdsp.h"
-#include "mediaerr.h"
-#include "dmort.h"
-
 #include "initguid.h"
 
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(mfplat);
 
-extern const GUID MFVideoFormat_VC1S;
+extern const GUID MEDIASUBTYPE_VC1S;
 
-DEFINE_GUID(MFVideoFormat_WMV_Unknown, 0x7ce12ca9,0xbfbf,0x43d9,0x9d,0x00,0x82,0xb8,0xed,0x54,0x31,0x6b);
+DEFINE_GUID(MEDIASUBTYPE_WMV_Unknown, 0x7ce12ca9,0xbfbf,0x43d9,0x9d,0x00,0x82,0xb8,0xed,0x54,0x31,0x6b);
+
+struct decoder_type
+{
+    const GUID *subtype;
+    WORD bpp;
+    DWORD compression;
+};
 
 static const GUID *const wmv_decoder_input_types[] =
 {
-    &MFVideoFormat_WMV1,
-    &MFVideoFormat_WMV2,
+    &MEDIASUBTYPE_WMV1,
+    &MEDIASUBTYPE_WMV2,
     &MEDIASUBTYPE_WMVA,
     &MEDIASUBTYPE_WMVP,
     &MEDIASUBTYPE_WVP2,
-    &MFVideoFormat_WMV_Unknown,
-    &MFVideoFormat_WVC1,
-    &MFVideoFormat_WMV3,
-    &MFVideoFormat_VC1S,
+    &MEDIASUBTYPE_WMV_Unknown,
+    &MEDIASUBTYPE_WVC1,
+    &MEDIASUBTYPE_WMV3,
+    &MEDIASUBTYPE_VC1S,
 };
 
-static enum wg_video_format const video_formats[] =
+static const struct decoder_type wmv_decoder_output_types[] =
 {
-    WG_VIDEO_FORMAT_BGRx,
+    { &MEDIASUBTYPE_NV12,   12, MAKEFOURCC('N', 'V', '1', '2') },
+    { &MEDIASUBTYPE_YV12,   12, MAKEFOURCC('Y', 'V', '1', '2') },
+    { &MEDIASUBTYPE_IYUV,   12, MAKEFOURCC('I', 'Y', 'U', 'V') },
+    { &MEDIASUBTYPE_I420,   12, MAKEFOURCC('I', '4', '2', '0') },
+    { &MEDIASUBTYPE_YUY2,   16, MAKEFOURCC('Y', 'U', 'Y', '2') },
+    { &MEDIASUBTYPE_UYVY,   16, MAKEFOURCC('U', 'Y', 'V', 'Y') },
+    { &MEDIASUBTYPE_YVYU,   16, MAKEFOURCC('Y', 'V', 'Y', 'U') },
+    { &MEDIASUBTYPE_NV11,   12, MAKEFOURCC('N', 'V', '1', '1') },
+    { &MEDIASUBTYPE_RGB32,  32, BI_RGB },
+    { &MEDIASUBTYPE_RGB24,  24, BI_RGB },
+    { &MEDIASUBTYPE_RGB565, 16, BI_BITFIELDS },
+    { &MEDIASUBTYPE_RGB555, 16, BI_RGB },
+    { &MEDIASUBTYPE_RGB8,   8,  BI_RGB },
 };
 
 struct wmv_decoder
@@ -65,8 +82,16 @@ struct wmv_decoder
 
     struct wg_format input_format;
     struct wg_format output_format;
-    DMO_OUTPUT_DATA_BUFFER output;
+    GUID output_subtype;
+
+    wg_transform_t wg_transform;
+    struct wg_sample_queue *wg_sample_queue;
 };
+
+static bool wg_format_is_set(struct wg_format *format)
+{
+    return format->major_type != WG_MAJOR_TYPE_UNKNOWN;
+}
 
 static inline struct wmv_decoder *impl_from_IUnknown(IUnknown *iface)
 {
@@ -118,7 +143,12 @@ static ULONG WINAPI unknown_Release(IUnknown *iface)
     TRACE("iface %p decreasing refcount to %lu.\n", iface, refcount);
 
     if (!refcount)
+    {
+        if (impl->wg_transform)
+            wg_transform_destroy(impl->wg_transform);
+        wg_sample_queue_destroy(impl->wg_sample_queue);
         free(impl);
+    }
 
     return refcount;
 }
@@ -349,8 +379,13 @@ static ULONG WINAPI media_object_Release(IMediaObject *iface)
 
 static HRESULT WINAPI media_object_GetStreamCount(IMediaObject *iface, DWORD *input, DWORD *output)
 {
-    FIXME("iface %p, input %p, output %p semi-stub!\n", iface, input, output);
+    TRACE("iface %p, input %p, output %p.\n", iface, input, output);
+
+    if (!input || !output)
+        return E_POINTER;
+
     *input = *output = 1;
+
     return S_OK;
 }
 
@@ -369,32 +404,21 @@ static HRESULT WINAPI media_object_GetOutputStreamInfo(IMediaObject *iface, DWOR
 static HRESULT WINAPI media_object_GetInputType(IMediaObject *iface, DWORD index, DWORD type_index,
         DMO_MEDIA_TYPE *type)
 {
-    struct wmv_decoder *impl = impl_from_IMediaObject(iface);
-    struct wg_format format = impl->input_format;
+    TRACE("iface %p, index %lu, type_index %lu, type %p.\n", iface, index, type_index, type);
 
-    FIXME("iface %p, index %lu, type_index %lu, type %p semi-stub!\n", iface, index, type_index, type);
+    if (index > 0)
+        return DMO_E_INVALIDSTREAMINDEX;
+    if (type_index >= ARRAY_SIZE(wmv_decoder_input_types))
+        return DMO_E_NO_MORE_ITEMS;
+    if (!type)
+        return S_OK;
 
-    if (type_index >= ARRAY_SIZE(video_formats))
-        return VFW_E_NO_TYPES;
-
-    format.major_type = WG_MAJOR_TYPE_VIDEO;
-    format.u.video.format = video_formats[index];
-    if (!format.u.video.width)
-        format.u.video.width = 1920;
-    if (!format.u.video.height)
-    {
-        if (wg_video_format_is_rgb(format.u.video.format))
-            format.u.video.height = -1080;
-        else
-            format.u.video.height = 1080;
-    }
-    if (!format.u.video.fps_d)
-        format.u.video.fps_d = 1;
-    if (!format.u.video.fps_n)
-        format.u.video.fps_n = 1;
-
-    if (!amt_from_wg_format((AM_MEDIA_TYPE *)type, &format, false))
-        return VFW_E_NO_TYPES;
+    memset(type, 0, sizeof(*type));
+    type->majortype = MFMediaType_Video;
+    type->subtype = *wmv_decoder_input_types[type_index];
+    type->bFixedSizeSamples = FALSE;
+    type->bTemporalCompression = TRUE;
+    type->lSampleSize = 0;
 
     return S_OK;
 }
@@ -402,31 +426,56 @@ static HRESULT WINAPI media_object_GetInputType(IMediaObject *iface, DWORD index
 static HRESULT WINAPI media_object_GetOutputType(IMediaObject *iface, DWORD index, DWORD type_index,
         DMO_MEDIA_TYPE *type)
 {
-    struct wmv_decoder *impl = impl_from_IMediaObject(iface);
-    struct wg_format format = impl->output_format;
+    struct wmv_decoder *decoder = impl_from_IMediaObject(iface);
+    VIDEOINFOHEADER *info;
+    const GUID *subtype;
+    LONG width, height;
+    UINT32 image_size;
+    HRESULT hr;
 
-    FIXME("iface %p, index %lu, type_index %lu, type %p semi-stub!\n", iface, index, type_index, type);
+    TRACE("iface %p, index %lu, type_index %lu, type %p.\n", iface, index, type_index, type);
 
-    if (type_index >= ARRAY_SIZE(video_formats))
-        return VFW_E_NO_TYPES;
+    if (index > 0)
+        return DMO_E_INVALIDSTREAMINDEX;
+    if (type_index >= ARRAY_SIZE(wmv_decoder_output_types))
+        return DMO_E_NO_MORE_ITEMS;
+    if (!type)
+        return S_OK;
+    if (!wg_format_is_set(&decoder->input_format))
+        return DMO_E_TYPE_NOT_SET;
 
-    format.major_type = WG_MAJOR_TYPE_VIDEO;
-    format.u.video.format = video_formats[index];
-    if (!format.u.video.width)
-        format.u.video.width = 1920;
-    if (!format.u.video.height)
+    width = decoder->input_format.u.video_wmv.width;
+    height = abs(decoder->input_format.u.video_wmv.height);
+    subtype = wmv_decoder_output_types[type_index].subtype;
+    if (FAILED(hr = MFCalculateImageSize(subtype, width, height, &image_size)))
     {
-        if (wg_video_format_is_rgb(format.u.video.format))
-            format.u.video.height = -1080;
-        else
-            format.u.video.height = 1080;
+        FIXME("Failed to get image size of subtype %s.\n", debugstr_guid(subtype));
+        return hr;
     }
-    if (!format.u.video.fps_d)
-        format.u.video.fps_d = 1;
-    if (!format.u.video.fps_n)
-        format.u.video.fps_n = 1;
-    if (!amt_from_wg_format((AM_MEDIA_TYPE *)type, &format, false))
-        return VFW_E_NO_TYPES;
+
+    memset(type, 0, sizeof(*type));
+    type->majortype = MFMediaType_Video;
+    type->subtype = *subtype;
+    type->bFixedSizeSamples = TRUE;
+    type->bTemporalCompression = FALSE;
+    type->lSampleSize = image_size;
+    type->formattype = FORMAT_VideoInfo;
+    type->cbFormat = sizeof(VIDEOINFOHEADER);
+    type->pbFormat = CoTaskMemAlloc(type->cbFormat);
+    memset(type->pbFormat, 0, type->cbFormat);
+
+    info = (VIDEOINFOHEADER *)type->pbFormat;
+    info->rcSource.right  = width;
+    info->rcSource.bottom = height;
+    info->rcTarget.right  = width;
+    info->rcTarget.bottom = height;
+    info->bmiHeader.biSize = sizeof(info->bmiHeader);
+    info->bmiHeader.biWidth  = width;
+    info->bmiHeader.biHeight = height;
+    info->bmiHeader.biPlanes = 1;
+    info->bmiHeader.biBitCount = wmv_decoder_output_types[type_index].bpp;
+    info->bmiHeader.biCompression = wmv_decoder_output_types[type_index].compression;
+    info->bmiHeader.biSizeImage = image_size;
 
     return S_OK;
 }
@@ -436,7 +485,6 @@ static HRESULT WINAPI media_object_SetInputType(IMediaObject *iface, DWORD index
 {
     struct wmv_decoder *decoder = impl_from_IMediaObject(iface);
     struct wg_format wg_format;
-    unsigned int i;
 
     TRACE("iface %p, index %lu, type %p, flags %#lx.\n", iface, index, type, flags);
 
@@ -448,6 +496,11 @@ static HRESULT WINAPI media_object_SetInputType(IMediaObject *iface, DWORD index
         if (flags & DMO_SET_TYPEF_CLEAR)
         {
             memset(&decoder->input_format, 0, sizeof(decoder->input_format));
+            if (decoder->wg_transform)
+            {
+                wg_transform_destroy(decoder->wg_transform);
+                decoder->wg_transform = 0;
+            }
             return S_OK;
         }
         return DMO_E_TYPE_NOT_ACCEPTED;
@@ -459,17 +512,15 @@ static HRESULT WINAPI media_object_SetInputType(IMediaObject *iface, DWORD index
     if (!amt_to_wg_format((const AM_MEDIA_TYPE *)type, &wg_format))
         return DMO_E_TYPE_NOT_ACCEPTED;
 
-    if (wg_format.major_type != WG_MAJOR_TYPE_VIDEO)
-    {
-        for (i = 0; i < ARRAY_SIZE(wmv_decoder_input_types); ++i)
-            if (IsEqualGUID(&type->subtype, wmv_decoder_input_types[i]))
-                break;
-        if (i == ARRAY_SIZE(wmv_decoder_input_types))
-            return DMO_E_TYPE_NOT_ACCEPTED;
-    }
+    if (flags & DMO_SET_TYPEF_TEST_ONLY)
+        return S_OK;
 
-    if (!(flags & DMO_SET_TYPEF_TEST_ONLY))
-        decoder->input_format = wg_format;
+    decoder->input_format = wg_format;
+    if (decoder->wg_transform)
+    {
+        wg_transform_destroy(decoder->wg_transform);
+        decoder->wg_transform = 0;
+    }
 
     return S_OK;
 }
@@ -477,31 +528,61 @@ static HRESULT WINAPI media_object_SetInputType(IMediaObject *iface, DWORD index
 static HRESULT WINAPI media_object_SetOutputType(IMediaObject *iface, DWORD index,
         const DMO_MEDIA_TYPE *type, DWORD flags)
 {
-    struct wmv_decoder *impl = impl_from_IMediaObject(iface);
+    struct wmv_decoder *decoder = impl_from_IMediaObject(iface);
+    struct wg_transform_attrs attrs = {0};
     struct wg_format wg_format;
-    DWORD i;
+    unsigned int i;
 
-    FIXME("iface %p, index %lu, type %p, flags %#lx semi-stub!\n", iface, index, type, flags);
+    TRACE("iface %p, index %lu, type %p, flags %#lx,\n", iface, index, type, flags);
 
-    if (flags & DMO_SET_TYPEF_CLEAR)
+    if (index > 0)
+        return DMO_E_INVALIDSTREAMINDEX;
+
+    if (!type)
     {
-        memset(&impl->output_format, 0, sizeof(impl->output_format));
-        return S_OK;
+        if (flags & DMO_SET_TYPEF_CLEAR)
+        {
+            memset(&decoder->output_format, 0, sizeof(decoder->output_format));
+            if (decoder->wg_transform)
+            {
+                wg_transform_destroy(decoder->wg_transform);
+                decoder->wg_transform = 0;
+            }
+            return S_OK;
+        }
+        return E_POINTER;
     }
 
-    if (!amt_to_wg_format((const AM_MEDIA_TYPE *)type, &wg_format))
-        return VFW_E_INVALIDMEDIATYPE;
+    if (!wg_format_is_set(&decoder->input_format))
+        return DMO_E_TYPE_NOT_SET;
 
-    if (wg_format.major_type != WG_MAJOR_TYPE_VIDEO)
-        return VFW_E_INVALIDMEDIATYPE;
-    for (i = 0; i < ARRAY_SIZE(video_formats); ++i)
-        if (wg_format.u.video.format == video_formats[i])
+    if (!IsEqualGUID(&type->majortype, &MEDIATYPE_Video))
+        return DMO_E_TYPE_NOT_ACCEPTED;
+
+    for (i = 0; i < ARRAY_SIZE(wmv_decoder_output_types); ++i)
+        if (IsEqualGUID(&type->subtype, wmv_decoder_output_types[i].subtype))
             break;
-    if (i == ARRAY_SIZE(video_formats))
-        return VFW_E_INVALIDMEDIATYPE;
+    if (i == ARRAY_SIZE(wmv_decoder_output_types))
+        return DMO_E_TYPE_NOT_ACCEPTED;
 
-    if (!(flags & DMO_SET_TYPEF_TEST_ONLY))
-        impl->output_format = wg_format;
+    if (!amt_to_wg_format((const AM_MEDIA_TYPE *)type, &wg_format))
+        return DMO_E_TYPE_NOT_ACCEPTED;
+    assert(wg_format.major_type == WG_MAJOR_TYPE_VIDEO);
+
+    if (flags & DMO_SET_TYPEF_TEST_ONLY)
+        return S_OK;
+
+    decoder->output_subtype = type->subtype;
+    decoder->output_format = wg_format;
+
+    /* Set up wg_transform. */
+    if (decoder->wg_transform)
+    {
+        wg_transform_destroy(decoder->wg_transform);
+        decoder->wg_transform = 0;
+    }
+    if (!(decoder->wg_transform = wg_transform_create(&decoder->input_format, &decoder->output_format, &attrs)))
+        return E_FAIL;
 
     return S_OK;
 }
@@ -528,24 +609,24 @@ static HRESULT WINAPI media_object_GetInputSizeInfo(IMediaObject *iface, DWORD i
 
 static HRESULT WINAPI media_object_GetOutputSizeInfo(IMediaObject *iface, DWORD index, DWORD *size, DWORD *alignment)
 {
-    struct wmv_decoder *impl = impl_from_IMediaObject(iface);
-    AM_MEDIA_TYPE mt;
+    struct wmv_decoder *decoder = impl_from_IMediaObject(iface);
+    HRESULT hr;
 
-    TRACE("iface %p, index %lu, size %p, alignment %p semi-stub!\n", iface, index, size, alignment);
+    TRACE("iface %p, index %lu, size %p, alignment %p.\n", iface, index, size, alignment);
 
-    if (!amt_from_wg_format(&mt, &impl->output_format, false))
-        return VFW_E_INVALIDMEDIATYPE;
+    if (index > 0)
+        return DMO_E_INVALIDSTREAMINDEX;
+    if (!wg_format_is_set(&decoder->output_format))
+        return DMO_E_TYPE_NOT_SET;
 
-    if (!IsEqualGUID(&mt.formattype, &FORMAT_VideoInfo))
-        *size = mt.lSampleSize;
-    else
+    if (FAILED(hr = MFCalculateImageSize(&decoder->output_subtype,
+            decoder->output_format.u.video.width, abs(decoder->output_format.u.video.height), (UINT32 *)size)))
     {
-        VIDEOINFOHEADER *format = (VIDEOINFOHEADER *)mt.pbFormat;
-        *size = format->bmiHeader.biSizeImage;
+        FIXME("Failed to get image size of subtype %s.\n", debugstr_guid(&decoder->output_subtype));
+        return hr;
     }
-    FreeMediaType(&mt);
-
     *alignment = 1;
+
     return S_OK;
 }
 
@@ -563,19 +644,26 @@ static HRESULT WINAPI media_object_SetInputMaxLatency(IMediaObject *iface, DWORD
 
 static HRESULT WINAPI media_object_Flush(IMediaObject *iface)
 {
-    struct wmv_decoder *impl = impl_from_IMediaObject(iface);
+    struct wmv_decoder *decoder = impl_from_IMediaObject(iface);
+    HRESULT hr;
 
     TRACE("iface %p.\n", iface);
 
-    if (impl->output.pBuffer) IMediaBuffer_Release(impl->output.pBuffer);
-    impl->output.pBuffer = NULL;
+    if (FAILED(hr = wg_transform_flush(decoder->wg_transform)))
+        return hr;
+
+    wg_sample_queue_flush(decoder->wg_sample_queue, TRUE);
 
     return S_OK;
 }
 
 static HRESULT WINAPI media_object_Discontinuity(IMediaObject *iface, DWORD index)
 {
-    FIXME("iface %p, index %lu semi-stub!\n", iface, index);
+    TRACE("iface %p, index %lu.\n", iface, index);
+
+    if (index > 0)
+        return DMO_E_INVALIDSTREAMINDEX;
+
     return S_OK;
 }
 
@@ -593,56 +681,50 @@ static HRESULT WINAPI media_object_FreeStreamingResources(IMediaObject *iface)
 
 static HRESULT WINAPI media_object_GetInputStatus(IMediaObject *iface, DWORD index, DWORD *flags)
 {
-    FIXME("iface %p, index %lu, flags %p stub!\n", iface, index, flags);
-    return E_NOTIMPL;
+    TRACE("iface %p, index %lu, flags %p.\n", iface, index, flags);
+
+    if (index > 0)
+        return DMO_E_INVALIDSTREAMINDEX;
+    if (!flags)
+        return E_POINTER;
+
+    *flags = DMO_INPUT_STATUSF_ACCEPT_DATA;
+
+    return S_OK;
 }
 
 static HRESULT WINAPI media_object_ProcessInput(IMediaObject *iface, DWORD index,
         IMediaBuffer *buffer, DWORD flags, REFERENCE_TIME timestamp, REFERENCE_TIME timelength)
 {
-    struct wmv_decoder *impl = impl_from_IMediaObject(iface);
+    struct wmv_decoder *decoder = impl_from_IMediaObject(iface);
 
     TRACE("iface %p, index %lu, buffer %p, flags %#lx, timestamp %s, timelength %s.\n", iface,
-            index, buffer, flags, wine_dbgstr_longlong(timestamp), wine_dbgstr_longlong(timelength));
+             index, buffer, flags, wine_dbgstr_longlong(timestamp), wine_dbgstr_longlong(timelength));
 
-    if (impl->output.pBuffer) return DMO_E_NOTACCEPTING;
+    if (!decoder->wg_transform)
+        return DMO_E_TYPE_NOT_SET;
 
-    IMediaBuffer_AddRef((impl->output.pBuffer = buffer));
-    impl->output.dwStatus = flags;
-    impl->output.rtTimestamp = timestamp;
-    impl->output.rtTimelength = timelength;
-
-    return S_OK;
+    return wg_transform_push_dmo(decoder->wg_transform, buffer, flags, timestamp, timelength, decoder->wg_sample_queue);
 }
 
 static HRESULT WINAPI media_object_ProcessOutput(IMediaObject *iface, DWORD flags, DWORD count,
         DMO_OUTPUT_DATA_BUFFER *buffers, DWORD *status)
 {
-    struct wmv_decoder *impl = impl_from_IMediaObject(iface);
-    BYTE *src_data, *dst_data;
-    DWORD src_len, dst_len;
-    static int once;
+    struct wmv_decoder *decoder = impl_from_IMediaObject(iface);
+    HRESULT hr;
 
     TRACE("iface %p, flags %#lx, count %lu, buffers %p, status %p.\n", iface, flags, count, buffers, status);
-    
-    if (!impl->output.pBuffer) return DMO_E_NO_MORE_ITEMS;
 
-    IMediaBuffer_GetBufferAndLength(impl->output.pBuffer, &src_data, &src_len);
-    IMediaBuffer_GetBufferAndLength(buffers[0].pBuffer, &dst_data, &dst_len);
-    IMediaBuffer_GetMaxLength(buffers[0].pBuffer, &dst_len);
-    if (dst_len != src_len && !once++) FIXME("video conversion not implemented!\n");
-    memcpy(dst_data, src_data, min(dst_len, src_len));
-    IMediaBuffer_SetLength(buffers[0].pBuffer, min(dst_len, src_len));
+    if (!decoder->wg_transform)
+        return DMO_E_TYPE_NOT_SET;
 
-    *status = 0;
-    buffers[0].dwStatus = impl->output.dwStatus;
-    buffers[0].rtTimestamp = impl->output.rtTimelength;
-    buffers[0].rtTimelength = impl->output.rtTimelength;
+    if ((hr = wg_transform_read_dmo(decoder->wg_transform, buffers)) == MF_E_TRANSFORM_STREAM_CHANGE)
+        hr = wg_transform_read_dmo(decoder->wg_transform, buffers);
 
-    IMediaBuffer_Release(impl->output.pBuffer);
-    impl->output.pBuffer = NULL;
+    if (SUCCEEDED(hr))
+        wg_sample_queue_flush(decoder->wg_sample_queue, false);
 
-    return S_OK;
+    return hr;
 }
 
 static HRESULT WINAPI media_object_Lock(IMediaObject *iface, LONG lock)
@@ -785,22 +867,28 @@ static const IPropertyStoreVtbl property_store_vtbl =
 
 HRESULT wmv_decoder_create(IUnknown *outer, IUnknown **out)
 {
-    struct wmv_decoder *impl;
+    struct wmv_decoder *decoder;
+    HRESULT hr;
 
     TRACE("outer %p, out %p.\n", outer, out);
 
-    if (!(impl = calloc(1, sizeof(*impl))))
+    if (!(decoder = calloc(1, sizeof(*decoder))))
         return E_OUTOFMEMORY;
+    if (FAILED(hr = wg_sample_queue_create(&decoder->wg_sample_queue)))
+    {
+        free(decoder);
+        return hr;
+    }
 
-    impl->IUnknown_inner.lpVtbl = &unknown_vtbl;
-    impl->IMFTransform_iface.lpVtbl = &transform_vtbl;
-    impl->IMediaObject_iface.lpVtbl = &media_object_vtbl;
-    impl->IPropertyBag_iface.lpVtbl = &property_bag_vtbl;
-    impl->IPropertyStore_iface.lpVtbl = &property_store_vtbl;
-    impl->refcount = 1;
-    impl->outer = outer ? outer : &impl->IUnknown_inner;
+    decoder->IUnknown_inner.lpVtbl = &unknown_vtbl;
+    decoder->IMFTransform_iface.lpVtbl = &transform_vtbl;
+    decoder->IMediaObject_iface.lpVtbl = &media_object_vtbl;
+    decoder->IPropertyBag_iface.lpVtbl = &property_bag_vtbl;
+    decoder->IPropertyStore_iface.lpVtbl = &property_store_vtbl;
+    decoder->refcount = 1;
+    decoder->outer = outer ? outer : &decoder->IUnknown_inner;
 
-    *out = &impl->IUnknown_inner;
+    *out = &decoder->IUnknown_inner;
     TRACE("Created %p\n", *out);
     return S_OK;
 }

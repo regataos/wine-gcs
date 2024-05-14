@@ -35,8 +35,6 @@
 #include <stdarg.h>
 
 #define COBJMACROS
-#define NONAMELESSUNION
-
 #include "windef.h"
 #include "winbase.h"
 #include "winuser.h"
@@ -54,7 +52,6 @@
 #include "unknwn.h"
 #include "oleidl.h"
 #include "shobjidl.h"
-#include "strmif.h"
 #include "propkey.h"
 
 #include "initguid.h"

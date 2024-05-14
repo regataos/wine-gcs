@@ -22,8 +22,6 @@
 #include <errno.h>
 
 #define COBJMACROS
-#define NONAMELESSUNION
-
 #include "windef.h"
 #include "winbase.h"
 #include "winuser.h"
@@ -58,10 +56,10 @@ WINE_DEFAULT_DEBUG_CHANNEL(appwizcpl);
 #define GECKO_SHA "???"
 #endif
 
-#define MONO_VERSION "9.0.0"
+#define MONO_VERSION "9.1.0"
 #if defined(__i386__) || defined(__x86_64__)
 #define MONO_ARCH "x86"
-#define MONO_SHA "79f6c43100675566c112f4199b9ea7b944d338164b34bd91fa11b0b0a414e1c4"
+#define MONO_SHA "8a0a1e6837b494df49927e5d759b1c6908e89b8a2f8e3ad025e1c2881882476e"
 #else
 #define MONO_ARCH ""
 #define MONO_SHA "???"
@@ -97,7 +95,7 @@ static const addon_info_t addons_info[] = {
         L"wine-mono-" MONO_VERSION "-" MONO_ARCH ".msi",
         L"mono",
         MONO_SHA,
-        "https://github.com/madewokherd/wine-mono/releases/download/wine-mono-" MONO_VERSION "/wine-mono-" MONO_VERSION "-" MONO_ARCH ".msi",
+        "http://source.winehq.org/winemono.php",
         "Dotnet", "MonoUrl", "MonoCabDir",
         MAKEINTRESOURCEW(ID_DWL_MONO_DIALOG)
     }
@@ -255,7 +253,7 @@ static HKEY open_config_key(void)
 
 static enum install_res install_from_registered_dir(void)
 {
-    char *package_dir;
+    char *package_dir, *new_package_dir;
     HKEY hkey;
     DWORD res, type, size = MAX_PATH;
     enum install_res ret;
@@ -267,8 +265,11 @@ static enum install_res install_from_registered_dir(void)
     package_dir = malloc(size);
     res = RegGetValueA(hkey, NULL, addon->dir_config_key, RRF_RT_ANY, &type, (PBYTE)package_dir, &size);
     if(res == ERROR_MORE_DATA) {
-        package_dir = realloc(package_dir, size);
-        res = RegGetValueA(hkey, NULL, addon->dir_config_key, RRF_RT_ANY, &type, (PBYTE)package_dir, &size);
+        new_package_dir = realloc(package_dir, size);
+        if(new_package_dir) {
+            package_dir = new_package_dir;
+            res = RegGetValueA(hkey, NULL, addon->dir_config_key, RRF_RT_ANY, &type, (PBYTE)package_dir, &size);
+        }
     }
     RegCloseKey(hkey);
     if(res == ERROR_FILE_NOT_FOUND) {
@@ -515,7 +516,7 @@ static HRESULT WINAPI InstallCallback_OnDataAvailable(IBindStatusCallback *iface
         DWORD dwSize, FORMATETC* pformatetc, STGMEDIUM* pstgmed)
 {
     if(!msi_file) {
-        msi_file = wcsdup(pstgmed->u.lpszFileName);
+        msi_file = wcsdup(pstgmed->lpszFileName);
         TRACE("got file name %s\n", debugstr_w(msi_file));
     }
 

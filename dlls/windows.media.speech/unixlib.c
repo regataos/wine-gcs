@@ -34,7 +34,10 @@
 #include <sys/stat.h>
 
 #ifdef SONAME_LIBVOSK
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wstrict-prototypes"
 #include <vosk_api.h>
+#pragma GCC diagnostic pop
 #endif
 
 #include "ntstatus.h"
@@ -461,7 +464,7 @@ MAKE_UNSUPPORTED_FUNC(speech_get_recognition_result)
 
 #endif /* SONAME_LIBVOSK */
 
-unixlib_entry_t __wine_unix_call_funcs[] =
+const unixlib_entry_t __wine_unix_call_funcs[] =
 {
     process_attach,
     process_detach,
@@ -471,7 +474,7 @@ unixlib_entry_t __wine_unix_call_funcs[] =
     speech_get_recognition_result,
 };
 
-unixlib_entry_t __wine_unix_call_wow64_funcs[] =
+const unixlib_entry_t __wine_unix_call_wow64_funcs[] =
 {
     process_attach,
     process_detach,

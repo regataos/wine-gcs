@@ -26,7 +26,7 @@ extern "C" {
 
 #ifndef WINGDIAPI
 #if defined(_GDI32_) || defined(WINE_UNIX_LIB)
-#define WINGDIAPI
+#define WINGDIAPI DECLSPEC_EXPORT
 #else
 #define WINGDIAPI DECLSPEC_IMPORT
 #endif
@@ -2341,6 +2341,14 @@ typedef struct {
     EXTLOGPEN elp;
 } EMREXTCREATEPEN, *PEMREXTCREATEPEN;
 
+typedef struct tagEMREXTESCAPE
+{
+    EMR  emr;
+    INT  iEscape;
+    INT  cbEscData;
+    BYTE EscData[1];
+} EMREXTESCAPE, *PEMREXTESCAPE, EMRDRAWESCAPE, *PEMRDRAWESCAPE;
+
 typedef struct {
     EMR      emr;
     POINTL   ptlStart;
@@ -2716,6 +2724,27 @@ typedef struct {
     LONG     cxSrc;
     LONG     cySrc;
 } EMRALPHABLEND, *PEMRALPHABLEND;
+
+typedef struct {
+    EMR      emr;
+    RECTL    rclBounds;
+    LONG     xDest;
+    LONG     yDest;
+    LONG     cxDest;
+    LONG     cyDest;
+    DWORD    dwRop;
+    LONG     xSrc;
+    LONG     ySrc;
+    XFORM    xformSrc;
+    COLORREF crBkColorSrc;
+    DWORD    iUsageSrc;
+    DWORD    offBmiSrc;
+    DWORD    cbBmiSrc;
+    DWORD    offBitsSrc;
+    DWORD    cbBitsSrc;
+    LONG     cxSrc;
+    LONG     cySrc;
+} EMRTRANSPARENTBLT, *PEMRTRANSPARENTBLT;
 
 typedef struct {
     EMR   emr;

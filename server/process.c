@@ -1336,6 +1336,7 @@ DECL_HANDLER(new_process)
                                     handles, req->handles_size / sizeof(*handles), token )))
         goto done;
 
+    process->machine = req->machine;
     process->startup_info = (struct startup_info *)grab_object( info );
 
     job = parent->job;
@@ -1397,7 +1398,10 @@ DECL_HANDLER(new_process)
         /* debug_children is set to 1 by default */
     }
 
-    if (!info->data->console_flags) process->group_id = parent->group_id;
+    if (info->data->process_group_id == parent->group_id)
+        process->group_id = parent->group_id;
+    else
+        info->data->process_group_id = process->group_id;
 
     info->process = (struct process *)grab_object( process );
     reply->info = alloc_handle( current->process, info, SYNCHRONIZE, 0 );
@@ -1436,6 +1440,7 @@ DECL_HANDLER(get_startup_info)
     if (!info) return;
 
     /* we return the data directly without making a copy so this can only be called once */
+    reply->machine = process->machine;
     reply->info_size = info->info_size;
     size = info->data_size;
     if (size > get_reply_max_size()) size = get_reply_max_size();
@@ -1581,7 +1586,10 @@ DECL_HANDLER(get_process_debug_info)
 /* fetch the name of the process image */
 DECL_HANDLER(get_process_image_name)
 {
-    struct process *process = get_process_from_handle( req->handle, PROCESS_QUERY_LIMITED_INFORMATION );
+    struct process *process;
+
+    if (req->pid) process = get_process_from_id( req->pid );
+    else          process = get_process_from_handle( req->handle, PROCESS_QUERY_LIMITED_INFORMATION );
 
     if (!process) return;
     if (process->image)
@@ -1668,22 +1676,6 @@ DECL_HANDLER(get_process_vm_counters)
     release_object( process );
 }
 
-static void set_process_priority( struct process *process, int priority )
-{
-    struct thread *thread;
-
-    if (!process->running_threads)
-    {
-        set_error( STATUS_PROCESS_IS_TERMINATING );
-        return;
-    }
-
-    LIST_FOR_EACH_ENTRY( thread, &process->thread_list, struct thread, proc_entry )
-        set_thread_priority( thread, priority, thread->priority );
-
-    process->priority = priority;
-}
-
 static void set_process_affinity( struct process *process, affinity_t affinity )
 {
     struct thread *thread;
@@ -1709,7 +1701,7 @@ DECL_HANDLER(set_process_info)
 
     if ((process = get_process_from_handle( req->handle, PROCESS_SET_INFORMATION )))
     {
-        if (req->mask & SET_PROCESS_INFO_PRIORITY) set_process_priority( process, req->priority );
+        if (req->mask & SET_PROCESS_INFO_PRIORITY) process->priority = req->priority;
         if (req->mask & SET_PROCESS_INFO_AFFINITY) set_process_affinity( process, req->affinity );
         release_object( process );
     }

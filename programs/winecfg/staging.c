@@ -34,7 +34,7 @@ static BOOL csmt_get(void)
 {
     WCHAR *buf = get_reg_key(config_key, L"Direct3D", L"csmt", NULL);
     BOOL ret = buf ? !!*buf : TRUE;
-    HeapFree(GetProcessHeap(), 0, buf);
+    free(buf);
     return ret;
 }
 static void csmt_set(BOOL status)
@@ -50,7 +50,7 @@ static BOOL vaapi_get(void)
     BOOL ret;
     WCHAR *value = get_reg_key(config_key, keypath(L"DXVA2"), L"backend", NULL);
     ret = (value && !wcscmp(value, L"va"));
-    HeapFree(GetProcessHeap(), 0, value);
+    free(value);
     return ret;
 }
 static void vaapi_set(BOOL status)
@@ -66,7 +66,7 @@ static BOOL eax_get(void)
     BOOL ret;
     WCHAR *value = get_reg_key(config_key, keypath(L"DirectSound"), L"EAXEnabled", L"N");
     ret = IS_OPTION_TRUE(*value);
-    HeapFree(GetProcessHeap(), 0, value);
+    free(value);
     return ret;
 }
 static void eax_set(BOOL status)
@@ -82,7 +82,7 @@ static BOOL hidewine_get(void)
     BOOL ret;
     WCHAR *value = get_reg_key(config_key, keypath(L""), L"HideWineExports", L"N");
     ret = IS_OPTION_TRUE(*value);
-    HeapFree(GetProcessHeap(), 0, value);
+    free(value);
     return ret;
 }
 static void hidewine_set(BOOL status)
@@ -98,7 +98,7 @@ static BOOL gtk3_get(void)
     BOOL ret;
     WCHAR *value = get_reg_key(config_key, keypath(L""), L"ThemeEngine", NULL);
     ret = (value && !wcsicmp(value, L"GTK"));
-    HeapFree(GetProcessHeap(), 0, value);
+    free(value);
     return ret;
 }
 static void gtk3_set(BOOL status)

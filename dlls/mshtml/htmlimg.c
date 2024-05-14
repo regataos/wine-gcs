@@ -763,41 +763,41 @@ HRESULT HTMLImgElement_Create(HTMLDocumentNode *doc, nsIDOMElement *nselem, HTML
     return S_OK;
 }
 
-static inline struct legacy_ctor *impl_from_IHTMLImageElementFactory(IHTMLImageElementFactory *iface)
+static inline struct global_ctor *impl_from_IHTMLImageElementFactory(IHTMLImageElementFactory *iface)
 {
-    return CONTAINING_RECORD(iface, struct legacy_ctor, IHTMLImageElementFactory_iface);
+    return CONTAINING_RECORD(iface, struct global_ctor, IHTMLImageElementFactory_iface);
 }
 
 static HRESULT WINAPI HTMLImageElementFactory_QueryInterface(IHTMLImageElementFactory *iface,
         REFIID riid, void **ppv)
 {
-    struct legacy_ctor *This = impl_from_IHTMLImageElementFactory(iface);
+    struct global_ctor *This = impl_from_IHTMLImageElementFactory(iface);
     return IDispatchEx_QueryInterface(&This->dispex.IDispatchEx_iface, riid, ppv);
 }
 
 static ULONG WINAPI HTMLImageElementFactory_AddRef(IHTMLImageElementFactory *iface)
 {
-    struct legacy_ctor *This = impl_from_IHTMLImageElementFactory(iface);
+    struct global_ctor *This = impl_from_IHTMLImageElementFactory(iface);
     return IDispatchEx_AddRef(&This->dispex.IDispatchEx_iface);
 }
 
 static ULONG WINAPI HTMLImageElementFactory_Release(IHTMLImageElementFactory *iface)
 {
-    struct legacy_ctor *This = impl_from_IHTMLImageElementFactory(iface);
+    struct global_ctor *This = impl_from_IHTMLImageElementFactory(iface);
     return IDispatchEx_Release(&This->dispex.IDispatchEx_iface);
 }
 
 static HRESULT WINAPI HTMLImageElementFactory_GetTypeInfoCount(IHTMLImageElementFactory *iface,
         UINT *pctinfo)
 {
-    struct legacy_ctor *This = impl_from_IHTMLImageElementFactory(iface);
+    struct global_ctor *This = impl_from_IHTMLImageElementFactory(iface);
     return IDispatchEx_GetTypeInfoCount(&This->dispex.IDispatchEx_iface, pctinfo);
 }
 
 static HRESULT WINAPI HTMLImageElementFactory_GetTypeInfo(IHTMLImageElementFactory *iface,
         UINT iTInfo, LCID lcid, ITypeInfo **ppTInfo)
 {
-    struct legacy_ctor *This = impl_from_IHTMLImageElementFactory(iface);
+    struct global_ctor *This = impl_from_IHTMLImageElementFactory(iface);
     return IDispatchEx_GetTypeInfo(&This->dispex.IDispatchEx_iface, iTInfo, lcid, ppTInfo);
 }
 
@@ -805,7 +805,7 @@ static HRESULT WINAPI HTMLImageElementFactory_GetIDsOfNames(IHTMLImageElementFac
         REFIID riid, LPOLESTR *rgszNames, UINT cNames, LCID lcid,
         DISPID *rgDispId)
 {
-    struct legacy_ctor *This = impl_from_IHTMLImageElementFactory(iface);
+    struct global_ctor *This = impl_from_IHTMLImageElementFactory(iface);
     return IDispatchEx_GetIDsOfNames(&This->dispex.IDispatchEx_iface, riid, rgszNames, cNames, lcid, rgDispId);
 }
 
@@ -814,7 +814,7 @@ static HRESULT WINAPI HTMLImageElementFactory_Invoke(IHTMLImageElementFactory *i
         DISPPARAMS *pDispParams, VARIANT *pVarResult, EXCEPINFO *pExcepInfo,
         UINT *puArgErr)
 {
-    struct legacy_ctor *This = impl_from_IHTMLImageElementFactory(iface);
+    struct global_ctor *This = impl_from_IHTMLImageElementFactory(iface);
     return IDispatchEx_Invoke(&This->dispex.IDispatchEx_iface, dispIdMember, riid, lcid, wFlags,
             pDispParams, pVarResult, pExcepInfo, puArgErr);
 }
@@ -846,7 +846,7 @@ static LONG var_to_size(const VARIANT *v)
 static HRESULT WINAPI HTMLImageElementFactory_create(IHTMLImageElementFactory *iface,
         VARIANT width, VARIANT height, IHTMLImgElement **img_elem)
 {
-    struct legacy_ctor *This = impl_from_IHTMLImageElementFactory(iface);
+    struct global_ctor *This = impl_from_IHTMLImageElementFactory(iface);
     HTMLDocumentNode *doc = This->window->doc;
     IHTMLImgElement *img;
     HTMLElement *elem;
@@ -900,14 +900,14 @@ const IHTMLImageElementFactoryVtbl HTMLImageElementFactoryVtbl = {
     HTMLImageElementFactory_create
 };
 
-static inline struct legacy_ctor *impl_from_DispatchEx(DispatchEx *iface)
+static inline struct global_ctor *impl_from_DispatchEx(DispatchEx *iface)
 {
-    return CONTAINING_RECORD(iface, struct legacy_ctor, dispex);
+    return CONTAINING_RECORD(iface, struct global_ctor, dispex);
 }
 
 static void *HTMLImageElementFactory_query_interface(DispatchEx *dispex, REFIID riid)
 {
-    struct legacy_ctor *This = impl_from_DispatchEx(dispex);
+    struct global_ctor *This = impl_from_DispatchEx(dispex);
 
     if(IsEqualGUID(&IID_IHTMLImageElementFactory, riid))
         return &This->IHTMLImageElementFactory_iface;
@@ -919,7 +919,7 @@ static HRESULT HTMLImageElementFactory_value(DispatchEx *dispex, LCID lcid,
         WORD flags, DISPPARAMS *params, VARIANT *res, EXCEPINFO *ei,
         IServiceProvider *caller)
 {
-    struct legacy_ctor *This = impl_from_DispatchEx(dispex);
+    struct global_ctor *This = impl_from_DispatchEx(dispex);
     IHTMLImgElement *img;
     VARIANT empty, *width, *height;
     HRESULT hres;
@@ -948,9 +948,9 @@ static HRESULT HTMLImageElementFactory_value(DispatchEx *dispex, LCID lcid,
 
 static const dispex_static_data_vtbl_t HTMLImageElementFactory_dispex_vtbl = {
     .query_interface  = HTMLImageElementFactory_query_interface,
-    .destructor       = legacy_ctor_destructor,
-    .traverse         = legacy_ctor_traverse,
-    .unlink           = legacy_ctor_unlink,
+    .destructor       = global_ctor_destructor,
+    .traverse         = global_ctor_traverse,
+    .unlink           = global_ctor_unlink,
     .value            = HTMLImageElementFactory_value,
     .get_dispid       = legacy_ctor_get_dispid,
     .get_name         = legacy_ctor_get_name,
@@ -977,14 +977,14 @@ static HRESULT HTMLImageCtor_value(DispatchEx *iface, LCID lcid, WORD flags, DIS
     if(flags == DISPATCH_CONSTRUCT)
         return HTMLImageElementFactory_value(iface, lcid, flags, params, res, ei, caller);
 
-    return legacy_ctor_value(iface, lcid, flags, params, res, ei, caller);
+    return global_ctor_value(iface, lcid, flags, params, res, ei, caller);
 }
 
 static const dispex_static_data_vtbl_t HTMLImageCtor_dispex_vtbl = {
     .query_interface  = HTMLImageElementFactory_query_interface,
-    .destructor       = legacy_ctor_destructor,
-    .traverse         = legacy_ctor_traverse,
-    .unlink           = legacy_ctor_unlink,
+    .destructor       = global_ctor_destructor,
+    .traverse         = global_ctor_traverse,
+    .unlink           = global_ctor_unlink,
     .value            = HTMLImageCtor_value,
     .get_dispid       = legacy_ctor_get_dispid,
     .get_name         = legacy_ctor_get_name,

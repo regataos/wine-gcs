@@ -22,8 +22,6 @@
 #include <limits.h>
 
 #define COBJMACROS
-#define NONAMELESSUNION
-
 #include "windef.h"
 #include "winbase.h"
 #include "winuser.h"
@@ -981,7 +979,7 @@ MFTIME WINAPI MFGetSystemTime(void)
         QueryPerformanceFrequency(&frequency);
     QueryPerformanceCounter(&counter);
 
-    return (counter.QuadPart * 1000) / frequency.QuadPart * 10000;
+    return counter.QuadPart * 10000000 / frequency.QuadPart;
 }
 
 static BOOL mft_is_type_info_match(struct mft_registration *mft, const GUID *category, UINT32 flags,
@@ -1587,18 +1585,6 @@ HRESULT WINAPI MFTGetInfo(CLSID clsid, WCHAR **name, MFT_REGISTER_TYPE_INFO **in
     return hr;
 }
 
-static BOOL CALLBACK register_winegstreamer_proc(INIT_ONCE *once, void *param, void **ctx)
-{
-    HMODULE mod = LoadLibraryW(L"winegstreamer.dll");
-    if (mod)
-    {
-        HRESULT (WINAPI *proc)(void) = (void *)GetProcAddress(mod, "DllRegisterServer");
-        proc();
-        FreeLibrary(mod);
-    }
-    return TRUE;
-}
-
 /***********************************************************************
  *      MFStartup (mfplat.@)
  */
@@ -1606,11 +1592,8 @@ HRESULT WINAPI MFStartup(ULONG version, DWORD flags)
 {
 #define MF_VERSION_XP   MAKELONG( MF_API_VERSION, 1 )
 #define MF_VERSION_WIN7 MAKELONG( MF_API_VERSION, 2 )
-    static INIT_ONCE once = INIT_ONCE_STATIC_INIT;
 
     TRACE("%#lx, %#lx.\n", version, flags);
-
-    InitOnceExecuteOnce(&once, register_winegstreamer_proc, NULL, NULL);
 
     if (version != MF_VERSION_XP && version != MF_VERSION_WIN7)
         return MF_E_BAD_STARTUP_VERSION;
@@ -6313,6 +6296,18 @@ static HRESULT resolver_get_bytestream_url_hint(IMFByteStream *stream, WCHAR con
 static HRESULT resolver_create_gstreamer_handler(IMFByteStreamHandler **handler)
 {
     static const GUID CLSID_GStreamerByteStreamHandler = {0x317df618, 0x5e5a, 0x468a, {0x9f, 0x15, 0xd8, 0x27, 0xa9, 0xa0, 0x81, 0x62}};
+    static const GUID CLSID_GStreamerByteStreamHandler2 = {0x317df619, 0x5e5a, 0x468a, {0x9f, 0x15, 0xd8, 0x27, 0xa9, 0xa0, 0x81, 0x62}};
+
+    const char *env = getenv("WINE_NEW_MEDIA_SOURCE"), *sgi = getenv("SteamGameId");
+    if (!env && sgi)
+    {
+        if (!strcmp(sgi, "399810") /* Call of Cthulhu */) env = "1";
+        if (!strcmp(sgi, "606880") /* Greedfall */) env = "1";
+        if (!strcmp(sgi, "692850") /* Bloodstained */) env = "1";
+        if (!strcmp(sgi, "782630") /* Twisted Sails */) env = "1";
+    }
+    if (env && atoi(env)) return CoCreateInstance(&CLSID_GStreamerByteStreamHandler2, NULL, CLSCTX_INPROC_SERVER, &IID_IMFByteStreamHandler, (void **)handler);
+
     return CoCreateInstance(&CLSID_GStreamerByteStreamHandler, NULL, CLSCTX_INPROC_SERVER, &IID_IMFByteStreamHandler, (void **)handler);
 }
 
@@ -9488,4 +9483,29 @@ LONGLONG WINAPI MFllMulDiv(LONGLONG val, LONGLONG num, LONGLONG denom, LONGLONG 
     if (ret >= I64_MAX) return LLOVERFLOW;
     return sign ? -(LONGLONG)ret : ret;
 #undef LLOVERFLOW
+}
+
+/***********************************************************************
+ *      MFCreatePathFromURL (mfplat.@)
+ */
+HRESULT WINAPI MFCreatePathFromURL(const WCHAR *url, WCHAR **ret_path)
+{
+    WCHAR path[MAX_PATH];
+    DWORD length;
+    HRESULT hr;
+
+    TRACE("%s, %p.\n", debugstr_w(url), ret_path);
+
+    if (!url || !ret_path)
+        return E_POINTER;
+
+    length = ARRAY_SIZE(path);
+    if (FAILED(hr = PathCreateFromUrlW(url, path, &length, 0)))
+        return hr;
+
+    if (!(*ret_path = CoTaskMemAlloc((length + 1) * sizeof(*path))))
+        return E_OUTOFMEMORY;
+
+    memcpy(*ret_path, path, (length + 1) * sizeof(*path));
+    return S_OK;
 }

@@ -1863,7 +1863,6 @@ static void CALLBACK test_recursion_callback( HINTERNET handle, DWORD_PTR contex
                                               DWORD status, void *buffer, DWORD buflen )
 {
     struct test_recursion_context *context = (struct test_recursion_context *)context_ptr;
-    static DWORD len;
     DWORD err;
     BOOL ret;
     BYTE b;
@@ -1905,6 +1904,9 @@ static void CALLBACK test_recursion_callback( HINTERNET handle, DWORD_PTR contex
             break;
 
         case WINHTTP_CALLBACK_STATUS_DATA_AVAILABLE:
+        {
+            DWORD len;
+
             if (!context->read_from_callback)
             {
                 SetEvent( context->wait );
@@ -1932,8 +1934,12 @@ static void CALLBACK test_recursion_callback( HINTERNET handle, DWORD_PTR contex
             if (err == ERROR_SUCCESS) context->have_sync_callback = TRUE;
             InterlockedDecrement( &context->recursion_count );
             break;
+        }
 
         case WINHTTP_CALLBACK_STATUS_READ_COMPLETE:
+        {
+            static DWORD len;
+
             if (!buflen)
             {
                 SetEvent( context->wait );
@@ -1955,6 +1961,8 @@ static void CALLBACK test_recursion_callback( HINTERNET handle, DWORD_PTR contex
             if (err == ERROR_SUCCESS) context->have_sync_callback = TRUE;
             InterlockedDecrement( &context->recursion_count );
             break;
+        }
+
         case WINHTTP_CALLBACK_STATUS_RECEIVING_RESPONSE:
             if (!context->headers_available
                 && context->call_receive_response_status == WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE)

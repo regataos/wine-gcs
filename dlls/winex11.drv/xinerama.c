@@ -184,11 +184,11 @@ BOOL xinerama_get_fullscreen_monitors( const RECT *rect, long *indices )
 done:
     pthread_mutex_unlock( &xinerama_mutex );
     if (ret)
-        TRACE( "fullsceen monitors: %ld,%ld,%ld,%ld.\n", indices[0], indices[1], indices[2], indices[3] );
+        TRACE( "fullscreen monitors: %ld,%ld,%ld,%ld.\n", indices[0], indices[1], indices[2], indices[3] );
     return ret;
 }
 
-static BOOL xinerama_get_gpus( struct gdi_gpu **new_gpus, int *count )
+static BOOL xinerama_get_gpus( struct gdi_gpu **new_gpus, int *count, BOOL get_properties )
 {
     static const WCHAR wine_adapterW[] = {'W','i','n','e',' ','A','d','a','p','t','e','r',0};
     struct gdi_gpu *gpus;

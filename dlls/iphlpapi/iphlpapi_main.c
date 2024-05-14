@@ -20,6 +20,7 @@
  */
 #include <stdarg.h>
 
+#define IPHLPAPI_DLL_LINKAGE
 #include "windef.h"
 #include "winbase.h"
 #include "winreg.h"
@@ -32,7 +33,6 @@
 #include "fltdefs.h"
 #include "ifdef.h"
 #include "netioapi.h"
-#include "tcpestats.h"
 #include "ip2string.h"
 #include "netiodef.h"
 #include "icmpapi.h"
@@ -993,6 +993,7 @@ static DWORD gateway_and_prefix_addresses_alloc( IP_ADAPTER_ADDRESSES *aa, ULONG
 {
     struct nsi_ipv4_forward_key *key4;
     struct nsi_ipv6_forward_key *key6;
+    struct nsi_ip_forward_rw *rw;
     IP_ADAPTER_GATEWAY_ADDRESS *gw, **gw_next;
     IP_ADAPTER_PREFIX *prefix, **prefix_next;
     DWORD err, count, i, prefix_len, key_size = (family == AF_INET) ? sizeof(*key4) : sizeof(*key6);
@@ -1002,11 +1003,14 @@ static DWORD gateway_and_prefix_addresses_alloc( IP_ADAPTER_ADDRESSES *aa, ULONG
     void *key;
 
     err = NsiAllocateAndGetTable( 1, ip_module_id( family ), NSI_IP_FORWARD_TABLE, &key, key_size,
-                                  NULL, 0, NULL, 0, NULL, 0, &count, 0 );
+                                  (void **)&rw, sizeof(*rw), NULL, 0, NULL, 0, &count, 0 );
     if (err) return err;
 
     while (aa)
     {
+        if (family == AF_INET) aa->Ipv4Metric = ~0u;
+        else                   aa->Ipv6Metric = ~0u;
+
         for (gw_next = &aa->FirstGatewayAddress; *gw_next; gw_next = &(*gw_next)->Next)
             ;
         for (prefix_next = &aa->FirstPrefix; *prefix_next; prefix_next = &(*prefix_next)->Next)
@@ -1019,7 +1023,13 @@ static DWORD gateway_and_prefix_addresses_alloc( IP_ADAPTER_ADDRESSES *aa, ULONG
             luid = (family == AF_INET) ? &key4->luid : &key6->luid;
             if (luid->Value != aa->Luid.Value) continue;
 
-            if (flags & GAA_FLAG_INCLUDE_ALL_GATEWAYS)
+            if (rw[i].metric)
+            {
+                if (family == AF_INET) aa->Ipv4Metric = min( aa->Ipv4Metric, rw[i].metric );
+                else                   aa->Ipv6Metric = min( aa->Ipv6Metric, rw[i].metric );
+            }
+
+            if (flags & GAA_FLAG_INCLUDE_GATEWAYS)
             {
                 memset( &sockaddr, 0, sizeof(sockaddr) );
                 if (family == AF_INET)
@@ -1103,7 +1113,7 @@ static DWORD gateway_and_prefix_addresses_alloc( IP_ADAPTER_ADDRESSES *aa, ULONG
     }
 
 err:
-    NsiFreeTable( key, NULL, NULL, NULL );
+    NsiFreeTable( key, rw, NULL, NULL );
     return err;
 }
 
@@ -1269,11 +1279,8 @@ static DWORD adapters_addresses_alloc( ULONG family, ULONG flags, IP_ADAPTER_ADD
         if (err) goto err;
     }
 
-    if (flags & (GAA_FLAG_INCLUDE_ALL_GATEWAYS | GAA_FLAG_INCLUDE_PREFIX))
-    {
-        err = call_families( gateway_and_prefix_addresses_alloc, aa, family, flags );
-        if (err) goto err;
-    }
+    err = call_families( gateway_and_prefix_addresses_alloc, aa, family, flags );
+    if (err) goto err;
 
     err = dns_info_alloc( aa, family, flags );
     if (err) goto err;
@@ -4028,6 +4035,19 @@ DWORD WINAPI SetTcpEntry(PMIB_TCPROW pTcpRow)
   return 0;
 }
 
+/***********************************************************************
+ *    GetPerTcpConnectionEStats (IPHLPAPI.@)
+ */
+ULONG WINAPI GetPerTcpConnectionEStats(MIB_TCPROW *row, TCP_ESTATS_TYPE stats, UCHAR *rw, ULONG rw_version,
+                                       ULONG rw_size, UCHAR *ro_static, ULONG ro_static_version,
+                                       ULONG ro_static_size, UCHAR *ro_dynamic, ULONG ro_dynamic_version,
+                                       ULONG ro_dynamic_size)
+{
+    FIXME( "(%p, %d, %p, %ld, %ld, %p, %ld, %ld, %p, %ld, %ld): stub\n", row, stats, rw, rw_version, rw_size,
+           ro_static, ro_static_version, ro_static_size, ro_dynamic, ro_dynamic_version, ro_dynamic_size );
+    return ERROR_CALL_NOT_IMPLEMENTED;
+}
+
 /******************************************************************
  *    SetPerTcpConnectionEStats (IPHLPAPI.@)
  */
@@ -4562,7 +4582,12 @@ struct icmp_handle_data
  */
 BOOL WINAPI IcmpCloseHandle( HANDLE handle )
 {
-    struct icmp_handle_data *data = (struct icmp_handle_data *)handle;
+    struct icmp_handle_data *data;
+
+    if (handle == NULL || handle == INVALID_HANDLE_VALUE)
+        return FALSE;
+
+    data = (struct icmp_handle_data *)handle;
 
     CloseHandle( data->nsi_device );
     heap_free( data );
@@ -4741,4 +4766,13 @@ DWORD WINAPI Icmp6SendEcho2( HANDLE handle, HANDLE event, PIO_APC_ROUTINE apc_ro
            apc_routine, apc_ctxt, src, dst, request, request_size, opts, reply, reply_size, timeout );
     SetLastError( ERROR_CALL_NOT_IMPLEMENTED );
     return 0;
+}
+
+/***********************************************************************
+ *    GetCurrentThreadCompartmentId (IPHLPAPI.@)
+ */
+NET_IF_COMPARTMENT_ID WINAPI GetCurrentThreadCompartmentId( void )
+{
+    FIXME( "stub\n" );
+    return NET_IF_COMPARTMENT_ID_PRIMARY;
 }

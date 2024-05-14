@@ -18,7 +18,7 @@
  */
 
 #include "initguid.h"
-#include "winewinrt_classes.h"
+#include "private.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(locale);
 
@@ -604,11 +604,23 @@ static HRESULT STDMETHODCALLTYPE windows_globalization_language_factory_QueryInt
     return E_NOINTERFACE;
 }
 
+static ULONG STDMETHODCALLTYPE windows_globalization_language_factory_AddRef(IActivationFactory *iface)
+{
+    struct language_factory *factory = impl_language_factory_from_IActivationFactory(iface);
+    return InterlockedIncrement(&factory->ref);
+}
+
+static ULONG STDMETHODCALLTYPE windows_globalization_language_factory_Release(IActivationFactory *iface)
+{
+    struct language_factory *factory = impl_language_factory_from_IActivationFactory(iface);
+    return InterlockedDecrement(&factory->ref);
+}
+
 static const struct IActivationFactoryVtbl activation_factory_language_vtbl =
 {
     windows_globalization_language_factory_QueryInterface,
-    windows_globalization_AddRef,
-    windows_globalization_Release,
+    windows_globalization_language_factory_AddRef,
+    windows_globalization_language_factory_Release,
     /* IInspectable methods */
     windows_globalization_GetIids,
     windows_globalization_GetRuntimeClassName,
@@ -729,17 +741,7 @@ HRESULT WINAPI DllGetActivationFactory(HSTRING classid, IActivationFactory **fac
     }
     else if (!wcscmp(name, RuntimeClass_Windows_Globalization_GeographicRegion))
     {
-        *factory = (IActivationFactory *)globalization_geographic_region_factory;
-        IUnknown_AddRef(*factory);
-    }
-    else if (!wcscmp(name, RuntimeClass_Windows_System_Profile_AnalyticsInfo))
-    {
-        *factory = (IActivationFactory *)system_profile_analytics_info_factory;
-        IUnknown_AddRef(*factory);
-    }
-    else if (!wcscmp(name, RuntimeClass_Windows_System_UserProfile_AdvertisingManager))
-    {
-        *factory = (IActivationFactory *)system_user_profile_advertising_manager_factory;
+        *factory = geographic_region_factory;
         IUnknown_AddRef(*factory);
     }
 

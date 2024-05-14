@@ -873,6 +873,7 @@ BOOL enable_window( HWND hwnd, BOOL enable )
             send_message( hwnd, WM_ENABLE, FALSE, 0 );
         }
     }
+    NtUserNotifyWinEvent( EVENT_OBJECT_STATECHANGE, hwnd, OBJID_CLIENT, 0 );
     return ret;
 }
 
@@ -1477,7 +1478,7 @@ LONG_PTR WINAPI NtUserSetWindowLongPtr( HWND hwnd, INT offset, LONG_PTR newval, 
     return set_window_long( hwnd, offset, sizeof(LONG_PTR), newval, ansi );
 }
 
-static BOOL set_window_pixel_format( HWND hwnd, int format )
+BOOL win32u_set_window_pixel_format( HWND hwnd, int format, BOOL internal )
 {
     WND *win = get_win_ptr( hwnd );
 
@@ -1486,11 +1487,31 @@ static BOOL set_window_pixel_format( HWND hwnd, int format )
         WARN( "setting format %d on win %p not supported\n", format, hwnd );
         return FALSE;
     }
-    win->pixel_format = format;
+    if (internal)
+        win->internal_pixel_format = format;
+    else
+        win->pixel_format = format;
     release_win_ptr( win );
 
     update_window_state( hwnd );
     return TRUE;
+}
+
+int win32u_get_window_pixel_format( HWND hwnd )
+{
+    WND *win = get_win_ptr( hwnd );
+    int ret;
+
+    if (!win || win == WND_DESKTOP || win == WND_OTHER_PROCESS)
+    {
+        WARN( "getting format on win %p not supported\n", hwnd );
+        return 0;
+    }
+
+    ret = win->pixel_format;
+    release_win_ptr( win );
+
+    return ret;
 }
 
 /***********************************************************************
@@ -1871,7 +1892,8 @@ static BOOL apply_window_pos( HWND hwnd, HWND insert_after, UINT swp_flags,
             wine_server_add_data( req, extra_rects, sizeof(extra_rects) );
         }
         if (new_surface) req->paint_flags |= SET_WINPOS_PAINT_SURFACE;
-        if (win->pixel_format) req->paint_flags |= SET_WINPOS_PIXEL_FORMAT;
+        if (win->pixel_format || win->internal_pixel_format)
+            req->paint_flags |= SET_WINPOS_PIXEL_FORMAT;
 
         if ((ret = !wine_server_call( req )))
         {
@@ -2245,8 +2267,10 @@ HWND window_from_point( HWND hwnd, POINT pt, INT *hittest )
     int i, res;
     HWND ret, *list;
     POINT win_pt;
+    int dpi;
 
     if (!hwnd) hwnd = get_desktop_window();
+    if (!(dpi = get_thread_dpi())) dpi = get_win_monitor_dpi( hwnd );
 
     *hittest = HTNOWHERE;
 
@@ -2270,7 +2294,7 @@ HWND window_from_point( HWND hwnd, POINT pt, INT *hittest )
             *hittest = HTCLIENT;
             break;
         }
-        win_pt = map_dpi_point( pt, get_thread_dpi(), get_dpi_for_window( list[i] ));
+        win_pt = map_dpi_point( pt, dpi, get_dpi_for_window( list[i] ));
         res = send_message( list[i], WM_NCHITTEST, 0, MAKELPARAM( win_pt.x, win_pt.y ));
         if (res != HTTRANSPARENT)
         {
@@ -3467,9 +3491,17 @@ BOOL set_window_pos( WINDOWPOS *winpos, int parent_x, int parent_y )
         goto done;
 
     if (winpos->flags & SWP_HIDEWINDOW)
+    {
+        NtUserNotifyWinEvent( EVENT_OBJECT_HIDE, winpos->hwnd, 0, 0 );
+
         NtUserHideCaret( winpos->hwnd );
+    }
     else if (winpos->flags & SWP_SHOWWINDOW)
+    {
+        NtUserNotifyWinEvent( EVENT_OBJECT_SHOW, winpos->hwnd, 0, 0 );
+
         NtUserShowCaret( winpos->hwnd );
+    }
 
     if (!(winpos->flags & (SWP_NOACTIVATE|SWP_HIDEWINDOW)))
     {
@@ -3516,6 +3548,10 @@ BOOL set_window_pos( WINDOWPOS *winpos, int parent_x, int parent_y )
         winpos->cy = new_window_rect.bottom - new_window_rect.top;
         send_message( winpos->hwnd, WM_WINDOWPOSCHANGED, 0, (LPARAM)winpos );
     }
+
+    if ((winpos->flags & (SWP_NOMOVE|SWP_NOSIZE)) != (SWP_NOMOVE|SWP_NOSIZE))
+        NtUserNotifyWinEvent( EVENT_OBJECT_LOCATIONCHANGE, winpos->hwnd, OBJID_WINDOW, 0 );
+
     ret = TRUE;
 done:
     SetThreadDpiAwarenessContext( context );
@@ -4551,7 +4587,7 @@ BOOL WINAPI NtUserFlashWindowEx( FLASHWINFO *info )
         if (!win || win == WND_OTHER_PROCESS || win == WND_DESKTOP) return FALSE;
         hwnd = win->obj.handle;  /* make it a full handle */
 
-       wparam = (win->flags & WIN_NCACTIVATED) != 0;
+        wparam = (win->flags & WIN_NCACTIVATED) != 0;
 
         release_win_ptr( win );
 
@@ -4659,6 +4695,7 @@ static void send_destroy_message( HWND hwnd )
     if (hwnd == NtUserGetClipboardOwner()) release_clipboard_owner( hwnd );
 
     send_message( hwnd, WM_DESTROY, 0, 0);
+    NtUserNotifyWinEvent( EVENT_OBJECT_DESTROY, hwnd, OBJID_WINDOW, 0 );
 
     /*
      * This WM_DESTROY message can trigger re-entrant calls to DestroyWindow
@@ -5494,10 +5531,10 @@ ULONG_PTR WINAPI NtUserCallHwnd( HWND hwnd, DWORD code )
     case NtUserGetFullWindowHandle:
         return HandleToUlong( get_full_window_handle( hwnd ));
 
-    case NtUserIsCurrehtProcessWindow:
+    case NtUserIsCurrentProcessWindow:
         return HandleToUlong( is_current_process_window( hwnd ));
 
-    case NtUserIsCurrehtThreadWindow:
+    case NtUserIsCurrentThreadWindow:
         return HandleToUlong( is_current_thread_window( hwnd ));
 
     default:
@@ -5604,9 +5641,6 @@ ULONG_PTR WINAPI NtUserCallHwndParam( HWND hwnd, DWORD_PTR param, DWORD code )
 
     case NtUserCallHwndParam_SetWindowContextHelpId:
         return set_window_context_help_id( hwnd, param );
-
-    case NtUserCallHwndParam_SetWindowPixelFormat:
-        return set_window_pixel_format( hwnd, param );
 
     case NtUserCallHwndParam_ShowOwnedPopups:
         return show_owned_popups( hwnd, param );

@@ -19,6 +19,7 @@
 #define COBJMACROS
 
 #include <stdarg.h>
+#include <math.h>
 #include <windef.h>
 #include <wine/test.h>
 #include <initguid.h>
@@ -57,6 +58,46 @@ static void check_interface_(unsigned int line, void *iface_ptr, REFIID iid, BOO
         ref = get_refcount(iface_ptr);
         if (check_refs) ok_(__FILE__, line)(ref == expect_ref, "got %ld\n", ref);
     }
+}
+
+static double scale_music_time(MUSIC_TIME time, double tempo)
+{
+    return (600000000.0 * time) / (tempo * DMUS_PPQ);
+}
+
+static MUSIC_TIME music_time_from_reference(REFERENCE_TIME time, double tempo)
+{
+    return (time * tempo * DMUS_PPQ) / 600000000;
+}
+
+#define check_dmus_note_pmsg(a, b, c, d, e, f, g) check_dmus_note_pmsg_(__LINE__, a, b, c, d, e, f, g)
+static void check_dmus_note_pmsg_(int line, DMUS_NOTE_PMSG *msg, MUSIC_TIME time, UINT chan,
+        UINT duration, UINT key, UINT vel, UINT flags)
+{
+    ok_(__FILE__, line)(msg->dwSize == sizeof(*msg), "got dwSize %lu\n", msg->dwSize);
+    ok_(__FILE__, line)(!!msg->rtTime, "got rtTime %I64u\n", msg->rtTime);
+    ok_(__FILE__, line)(abs(msg->mtTime - time) < 10, "got mtTime %lu\n", msg->mtTime);
+    ok_(__FILE__, line)(msg->dwPChannel == chan, "got dwPChannel %lu\n", msg->dwPChannel);
+    ok_(__FILE__, line)(!!msg->dwVirtualTrackID, "got dwVirtualTrackID %lu\n", msg->dwVirtualTrackID);
+    ok_(__FILE__, line)(msg->dwType == DMUS_PMSGT_NOTE, "got %#lx\n", msg->dwType);
+    ok_(__FILE__, line)(!msg->dwVoiceID, "got dwVoiceID %lu\n", msg->dwVoiceID);
+    ok_(__FILE__, line)(msg->dwGroupID == 1, "got dwGroupID %lu\n", msg->dwGroupID);
+    ok_(__FILE__, line)(!msg->punkUser, "got punkUser %p\n", msg->punkUser);
+    ok_(__FILE__, line)(msg->mtDuration == duration, "got mtDuration %lu\n", msg->mtDuration);
+    ok_(__FILE__, line)(msg->wMusicValue == key, "got wMusicValue %u\n", msg->wMusicValue);
+    ok_(__FILE__, line)(!msg->wMeasure, "got wMeasure %u\n", msg->wMeasure);
+    /* FIXME: ok_(__FILE__, line)(!msg->nOffset, "got nOffset %u\n", msg->nOffset); */
+    /* FIXME: ok_(__FILE__, line)(!msg->bBeat, "got bBeat %u\n", msg->bBeat); */
+    /* FIXME: ok_(__FILE__, line)(!msg->bGrid, "got bGrid %u\n", msg->bGrid); */
+    ok_(__FILE__, line)(msg->bVelocity == vel, "got bVelocity %u\n", msg->bVelocity);
+    ok_(__FILE__, line)(msg->bFlags == flags, "got bFlags %#x\n", msg->bFlags);
+    ok_(__FILE__, line)(!msg->bTimeRange, "got bTimeRange %u\n", msg->bTimeRange);
+    ok_(__FILE__, line)(!msg->bDurRange, "got bDurRange %u\n", msg->bDurRange);
+    ok_(__FILE__, line)(!msg->bVelRange, "got bVelRange %u\n", msg->bVelRange);
+    ok_(__FILE__, line)(!msg->bPlayModeFlags, "got bPlayModeFlags %#x\n", msg->bPlayModeFlags);
+    ok_(__FILE__, line)(!msg->bSubChordLevel, "got bSubChordLevel %u\n", msg->bSubChordLevel);
+    ok_(__FILE__, line)(msg->bMidiValue == key, "got bMidiValue %u\n", msg->bMidiValue);
+    ok_(__FILE__, line)(!msg->cTranspose, "got cTranspose %u\n", msg->cTranspose);
 }
 
 static void load_resource(const WCHAR *name, WCHAR *filename)
@@ -2511,10 +2552,25 @@ static void test_performance_pchannel(void)
 
 static void test_performance_tool(void)
 {
+    DMUS_NOTE_PMSG note60 =
+    {
+        .dwSize = sizeof(DMUS_NOTE_PMSG),
+        .dwFlags = DMUS_PMSGF_REFTIME | DMUS_PMSGF_MUSICTIME | DMUS_PMSGF_TOOL_QUEUE,
+        .dwVirtualTrackID = 1,
+        .dwType = DMUS_PMSGT_NOTE,
+        .dwGroupID = 1,
+        .mtDuration = 1000,
+        .wMusicValue = 60,
+        .bVelocity = 127,
+        .bFlags = DMUS_NOTEF_NOTEON,
+        .bPlayModeFlags = DMUS_PLAYMODE_FIXED,
+        .bMidiValue = 60,
+    };
     IDirectMusicPerformance *performance;
     IDirectMusicGraph *graph;
     IDirectMusicTool *tool;
     DWORD value, types[1];
+    DMUS_NOTE_PMSG *note;
     DMUS_PMSG msg = {0};
     HRESULT hr;
 
@@ -2546,6 +2602,96 @@ static void test_performance_tool(void)
     hr = IDirectMusicTool_Flush(tool, performance, &msg, 0);
     todo_wine ok(hr == S_OK, "got %#lx\n", hr);
 
+    hr = IDirectMusicPerformance_Init(performance, NULL, NULL, NULL);
+    ok(hr == S_OK, "got %#lx\n", hr);
+
+    hr = IDirectMusicPerformance_AddPort(performance, NULL);
+    ok(hr == S_OK, "got %#lx\n", hr);
+
+    hr = IDirectMusicPerformance_AllocPMsg(performance, sizeof(DMUS_NOTE_PMSG), (DMUS_PMSG **)&note);
+    ok(hr == S_OK, "got %#lx\n", hr);
+
+    hr = IDirectMusicPerformance_GetTime(performance, NULL, &note60.mtTime);
+    ok(hr == S_OK, "got %#lx\n", hr);
+    hr = IDirectMusicPerformance_MusicToReferenceTime(performance, note60.mtTime, &note60.rtTime);
+    ok(hr == S_OK, "got %#lx\n", hr);
+
+    *note = note60;
+    note->bFlags = 0;
+    hr = IDirectMusicTool_ProcessPMsg(tool, performance, (DMUS_PMSG *)note);
+    ok(hr == DMUS_S_FREE, "got %#lx\n", hr);
+
+    hr = IDirectMusicPerformance_GetTime(performance, NULL, &note60.mtTime);
+    ok(hr == S_OK, "got %#lx\n", hr);
+    hr = IDirectMusicPerformance_MusicToReferenceTime(performance, note60.mtTime, &note60.rtTime);
+    ok(hr == S_OK, "got %#lx\n", hr);
+
+    *note = note60;
+    note->mtDuration = 0;
+    hr = IDirectMusicTool_ProcessPMsg(tool, performance, (DMUS_PMSG *)note);
+    ok(hr == DMUS_S_FREE, "got %#lx\n", hr);
+
+    hr = IDirectMusicPerformance_GetTime(performance, NULL, &note60.mtTime);
+    ok(hr == S_OK, "got %#lx\n", hr);
+    hr = IDirectMusicPerformance_MusicToReferenceTime(performance, note60.mtTime, &note60.rtTime);
+    ok(hr == S_OK, "got %#lx\n", hr);
+
+    *note = note60;
+    hr = IDirectMusicTool_ProcessPMsg(tool, performance, (DMUS_PMSG *)note);
+    ok(hr == DMUS_S_REQUEUE, "got %#lx\n", hr);
+    ok(fabs(note->rtTime - note60.rtTime - scale_music_time(999, 120.0)) < 10.0,
+            "got %I64d\n", note->rtTime - note60.rtTime);
+    ok(note->mtTime - note60.mtTime == 999, "got %ld\n", note->mtTime - note60.mtTime);
+    check_dmus_note_pmsg(note, note60.mtTime + 999, 0, 1000, 60, 127, 0);
+
+    hr = IDirectMusicPerformance_GetTime(performance, NULL, &note60.mtTime);
+    ok(hr == S_OK, "got %#lx\n", hr);
+    hr = IDirectMusicPerformance_MusicToReferenceTime(performance, note60.mtTime, &note60.rtTime);
+    ok(hr == S_OK, "got %#lx\n", hr);
+
+    *note = note60;
+    note->nOffset = 1000;
+    hr = IDirectMusicTool_ProcessPMsg(tool, performance, (DMUS_PMSG *)note);
+    ok(hr == DMUS_S_REQUEUE, "got %#lx\n", hr);
+    ok(fabs(note->rtTime - note60.rtTime - scale_music_time(999, 120.0)) < 10.0,
+            "got %I64d\n", note->rtTime - note60.rtTime);
+    ok(note->mtTime - note60.mtTime == 999, "got %ld\n", note->mtTime - note60.mtTime);
+    check_dmus_note_pmsg(note, note60.mtTime + 999, 0, 1000, 60, 127, 0);
+
+    hr = IDirectMusicPerformance_GetTime(performance, NULL, &note60.mtTime);
+    ok(hr == S_OK, "got %#lx\n", hr);
+    hr = IDirectMusicPerformance_MusicToReferenceTime(performance, note60.mtTime, &note60.rtTime);
+    ok(hr == S_OK, "got %#lx\n", hr);
+
+    *note = note60;
+    note->mtDuration = 2;
+    hr = IDirectMusicTool_ProcessPMsg(tool, performance, (DMUS_PMSG *)note);
+    ok(hr == DMUS_S_REQUEUE, "got %#lx\n", hr);
+    ok(fabs(note->rtTime - note60.rtTime - scale_music_time(1, 120.0)) < 10.0,
+            "got %I64d\n", note->rtTime - note60.rtTime);
+    ok(note->mtTime - note60.mtTime == 1, "got %ld\n", note->mtTime - note60.mtTime);
+    check_dmus_note_pmsg(note, note60.mtTime + 1, 0, 2, 60, 127, 0);
+
+    hr = IDirectMusicPerformance_GetTime(performance, NULL, &note60.mtTime);
+    ok(hr == S_OK, "got %#lx\n", hr);
+    hr = IDirectMusicPerformance_MusicToReferenceTime(performance, note60.mtTime, &note60.rtTime);
+    ok(hr == S_OK, "got %#lx\n", hr);
+
+    *note = note60;
+    note->mtDuration = 1;
+    hr = IDirectMusicTool_ProcessPMsg(tool, performance, (DMUS_PMSG *)note);
+    ok(hr == DMUS_S_REQUEUE, "got %#lx\n", hr);
+    ok(fabs(note->rtTime - note60.rtTime - scale_music_time(1, 120.0)) < 10.0,
+            "got %I64d\n", note->rtTime - note60.rtTime);
+    ok(note->mtTime - note60.mtTime == 1, "got %ld\n", note->mtTime - note60.mtTime);
+    check_dmus_note_pmsg(note, note60.mtTime + 1, 0, 1, 60, 127, 0);
+
+    hr = IDirectMusicPerformance_FreePMsg(performance, (DMUS_PMSG *)note);
+    ok(hr == S_OK, "got %#lx\n", hr);
+
+    hr = IDirectMusicPerformance_CloseDown(performance);
+    ok(hr == S_OK, "got %#lx\n", hr);
+
     IDirectMusicGraph_Release(graph);
     IDirectMusicTool_Release(tool);
 
@@ -2571,7 +2717,7 @@ static void test_performance_graph(void)
     /* performance exposes a graph interface but it's not an actual toolgraph */
     hr = IDirectMusicPerformance_QueryInterface(performance, &IID_IDirectMusicGraph, (void **)&graph);
     ok(hr == S_OK, "got %#lx\n", hr);
-    hr = IDirectMusicGraph_InsertTool(graph, (IDirectMusicTool *)tool, NULL, 0, -1);
+    hr = IDirectMusicGraph_InsertTool(graph, tool, NULL, 0, -1);
     ok(hr == E_NOTIMPL, "got %#lx\n", hr);
     hr = IDirectMusicGraph_GetTool(graph, 0, &tmp_tool);
     ok(hr == E_NOTIMPL, "got %#lx\n", hr);
@@ -2628,7 +2774,7 @@ static void test_performance_graph(void)
     ok(tmp_graph == graph, "got %p\n", graph);
     IDirectMusicGraph_Release(tmp_graph);
 
-    hr = IDirectMusicGraph_InsertTool(graph, (IDirectMusicTool *)tool, NULL, 0, -1);
+    hr = IDirectMusicGraph_InsertTool(graph, tool, NULL, 0, -1);
     ok(hr == S_OK, "got %#lx\n", hr);
 
     IDirectMusicGraph_Release(graph);
@@ -2671,15 +2817,11 @@ static void test_performance_graph(void)
     IDirectMusicTool_Release(tool);
 }
 
-static double scale_music_time(MUSIC_TIME time, double tempo)
+#define check_reference_time(a, b) check_reference_time_(__LINE__, a, b)
+static void check_reference_time_(int line, REFERENCE_TIME time, double expect)
 {
-    return (600000000.0 * time) / (tempo * 768.0);
-}
-
-#define check_music_time(a, b) check_music_time_(__LINE__, a, b)
-static void check_music_time_(int line, MUSIC_TIME time, MUSIC_TIME expect)
-{
-    ok_(__FILE__, line)(abs(time - expect) <= 1, "got %ld, expected %ld\n", time, expect);
+    ok_(__FILE__, line)(llabs(time - (REFERENCE_TIME)expect) <= scale_music_time(1, 120) / 2.0,
+                        "got %I64u, expected %f\n", time, expect);
 }
 
 static void test_performance_time(void)
@@ -2731,15 +2873,15 @@ static void test_performance_time(void)
     time = 0xdeadbeef;
     hr = IDirectMusicPerformance_MusicToReferenceTime(performance, 1, &time);
     ok(hr == S_OK, "got %#lx\n", hr);
-    check_music_time(time - init_time, scale_music_time(1, 120));
+    check_reference_time(time - init_time, scale_music_time(1, 120));
     time = 0xdeadbeef;
     hr = IDirectMusicPerformance_MusicToReferenceTime(performance, 1000, &time);
     ok(hr == S_OK, "got %#lx\n", hr);
-    check_music_time(time - init_time, scale_music_time(1000, 120));
+    check_reference_time(time - init_time, scale_music_time(1000, 120));
     time = 0xdeadbeef;
     hr = IDirectMusicPerformance_MusicToReferenceTime(performance, 2000, &time);
     ok(hr == S_OK, "got %#lx\n", hr);
-    check_music_time(time - init_time, scale_music_time(2000, 120));
+    check_reference_time(time - init_time, scale_music_time(2000, 120));
 
     music_time = 0xdeadbeef;
     hr = IDirectMusicPerformance_ReferenceToMusicTime(performance, init_time, &music_time);
@@ -2759,7 +2901,7 @@ static void test_performance_time(void)
     hr = IDirectMusicPerformance_GetTime(performance, &time, &music_time);
     ok(hr == S_OK, "got %#lx\n", hr);
     ok(time - init_time <= 200 * 10000, "got %I64d\n", time - init_time);
-    ok(music_time == (time - init_time) / 6510, "got %ld\n", music_time);
+    ok(abs(music_time - music_time_from_reference(time - init_time, 120)) <= 1, "got %ld\n", music_time);
 
 
     hr = IDirectMusicPerformance_CloseDown(performance);
@@ -2830,7 +2972,7 @@ static void test_performance_pmsg(void)
     ok(hr == S_OK, "got %#lx\n", hr);
     hr = IDirectMusicPerformance_SetGraph(performance, graph);
     ok(hr == S_OK, "got %#lx\n", hr);
-    hr = IDirectMusicGraph_InsertTool(graph, (IDirectMusicTool *)tool, NULL, 0, -1);
+    hr = IDirectMusicGraph_InsertTool(graph, tool, NULL, 0, -1);
     ok(hr == S_OK, "got %#lx\n", hr);
     IDirectMusicGraph_Release(graph);
 
@@ -3111,7 +3253,7 @@ static void test_notification_pmsg(void)
     ok(hr == S_OK, "got %#lx\n", hr);
     hr = IDirectMusicPerformance_SetGraph(performance, graph);
     ok(hr == S_OK, "got %#lx\n", hr);
-    hr = IDirectMusicGraph_InsertTool(graph, (IDirectMusicTool *)tool, NULL, 0, -1);
+    hr = IDirectMusicGraph_InsertTool(graph, tool, NULL, 0, -1);
     ok(hr == S_OK, "got %#lx\n", hr);
     IDirectMusicGraph_Release(graph);
 
@@ -3154,8 +3296,6 @@ static void test_notification_pmsg(void)
     hr = IDirectMusicPerformance_FreePMsg(performance, msg);
     ok(hr == S_OK, "got %#lx\n", hr);
 
-    ret = test_tool_wait_message(tool, 50, &msg);
-    ok(ret == WAIT_TIMEOUT, "got %#lx\n", ret);
     ret = test_tool_wait_message(tool, 500, &msg);
     ok(!ret, "got %#lx\n", ret);
     check_dmus_dirty_pmsg(msg, music_time + length);
@@ -3323,6 +3463,29 @@ static void test_notification_pmsg(void)
 
     ret = test_tool_wait_message(tool, 50, (DMUS_PMSG **)&notif);
     ok(!ret, "got %#lx\n", ret);
+    if (notif->dwNotificationOption == DMUS_NOTIFICATION_SEGALMOSTEND)
+    {
+        check_dmus_notification_pmsg(notif, music_time + length - 1450, DMUS_PMSGF_TOOL_IMMEDIATE,
+                &GUID_NOTIFICATION_SEGMENT, DMUS_NOTIFICATION_SEGALMOSTEND, state);
+        hr = IDirectMusicPerformance_FreePMsg(performance, (DMUS_PMSG *)notif);
+        ok(hr == S_OK, "got %#lx\n", hr);
+
+        ret = test_tool_wait_message(tool, 50, (DMUS_PMSG **)&notif);
+        ok(!ret, "got %#lx\n", ret);
+        check_dmus_notification_pmsg(notif, music_time + length, DMUS_PMSGF_TOOL_IMMEDIATE,
+                &GUID_NOTIFICATION_SEGMENT, DMUS_NOTIFICATION_SEGEND, state);
+        hr = IDirectMusicPerformance_FreePMsg(performance, (DMUS_PMSG *)notif);
+        ok(hr == S_OK, "got %#lx\n", hr);
+
+        ret = test_tool_wait_message(tool, 50, &msg);
+        ok(!ret, "got %#lx\n", ret);
+        check_dmus_dirty_pmsg(msg, music_time + length);
+        hr = IDirectMusicPerformance_FreePMsg(performance, msg);
+        ok(hr == S_OK, "got %#lx\n", hr);
+
+        ret = test_tool_wait_message(tool, 50, (DMUS_PMSG **)&notif);
+        ok(!ret, "got %#lx\n", ret);
+    }
     check_dmus_notification_pmsg(notif, music_time, DMUS_PMSGF_TOOL_IMMEDIATE, &GUID_NOTIFICATION_SEGMENT,
             DMUS_NOTIFICATION_SEGABORT, state);
     hr = IDirectMusicPerformance_FreePMsg(performance, (DMUS_PMSG *)notif);
@@ -3369,9 +3532,6 @@ static void test_notification_pmsg(void)
     hr = IDirectMusicPerformance_FreePMsg(performance, msg);
     ok(hr == S_OK, "got %#lx\n", hr);
 
-    ret = test_tool_wait_message(tool, 500, &msg);
-    ok(ret == WAIT_TIMEOUT, "got %#lx\n", ret);
-
     IDirectMusicSegmentState_Release(state);
     IDirectMusicSegment_Release(segment);
 
@@ -3411,7 +3571,7 @@ static void test_wave_pmsg(void)
     ok(hr == S_OK, "got %#lx\n", hr);
     hr = IDirectMusicPerformance_SetGraph(performance, graph);
     ok(hr == S_OK, "got %#lx\n", hr);
-    hr = IDirectMusicGraph_InsertTool(graph, (IDirectMusicTool *)tool, NULL, 0, -1);
+    hr = IDirectMusicGraph_InsertTool(graph, tool, NULL, 0, -1);
     ok(hr == S_OK, "got %#lx\n", hr);
     IDirectMusicGraph_Release(graph);
 
@@ -3508,36 +3668,6 @@ static void test_wave_pmsg(void)
 
     IDirectMusicPerformance_Release(performance);
     IDirectMusicTool_Release(tool);
-}
-
-#define check_dmus_note_pmsg(a, b, c, d, e, f) check_dmus_note_pmsg_(__LINE__, a, b, c, d, e, f)
-static void check_dmus_note_pmsg_(int line, DMUS_NOTE_PMSG *msg, MUSIC_TIME time, UINT chan,
-        UINT duration, UINT key, UINT vel)
-{
-    ok_(__FILE__, line)(msg->dwSize == sizeof(*msg), "got dwSize %lu\n", msg->dwSize);
-    ok_(__FILE__, line)(!!msg->rtTime, "got rtTime %I64u\n", msg->rtTime);
-    ok_(__FILE__, line)(abs(msg->mtTime - time) < 10, "got mtTime %lu\n", msg->mtTime);
-    ok_(__FILE__, line)(msg->dwPChannel == chan, "got dwPChannel %lu\n", msg->dwPChannel);
-    ok_(__FILE__, line)(!!msg->dwVirtualTrackID, "got dwVirtualTrackID %lu\n", msg->dwVirtualTrackID);
-    ok_(__FILE__, line)(msg->dwType == DMUS_PMSGT_NOTE, "got %#lx\n", msg->dwType);
-    ok_(__FILE__, line)(!msg->dwVoiceID, "got dwVoiceID %lu\n", msg->dwVoiceID);
-    ok_(__FILE__, line)(msg->dwGroupID == 1, "got dwGroupID %lu\n", msg->dwGroupID);
-    ok_(__FILE__, line)(!msg->punkUser, "got punkUser %p\n", msg->punkUser);
-    ok_(__FILE__, line)(msg->mtDuration == duration, "got mtDuration %lu\n", msg->mtDuration);
-    ok_(__FILE__, line)(msg->wMusicValue == key, "got wMusicValue %u\n", msg->wMusicValue);
-    ok_(__FILE__, line)(!msg->wMeasure, "got wMeasure %u\n", msg->wMeasure);
-    /* FIXME: ok_(__FILE__, line)(!msg->nOffset, "got nOffset %u\n", msg->nOffset); */
-    /* FIXME: ok_(__FILE__, line)(!msg->bBeat, "got bBeat %u\n", msg->bBeat); */
-    /* FIXME: ok_(__FILE__, line)(!msg->bGrid, "got bGrid %u\n", msg->bGrid); */
-    ok_(__FILE__, line)(msg->bVelocity == vel, "got bVelocity %u\n", msg->bVelocity);
-    ok_(__FILE__, line)(msg->bFlags == 1, "got bFlags %#x\n", msg->bFlags);
-    ok_(__FILE__, line)(!msg->bTimeRange, "got bTimeRange %u\n", msg->bTimeRange);
-    ok_(__FILE__, line)(!msg->bDurRange, "got bDurRange %u\n", msg->bDurRange);
-    ok_(__FILE__, line)(!msg->bVelRange, "got bVelRange %u\n", msg->bVelRange);
-    ok_(__FILE__, line)(!msg->bPlayModeFlags, "got bPlayModeFlags %#x\n", msg->bPlayModeFlags);
-    ok_(__FILE__, line)(!msg->bSubChordLevel, "got bSubChordLevel %u\n", msg->bSubChordLevel);
-    ok_(__FILE__, line)(msg->bMidiValue == key, "got bMidiValue %u\n", msg->bMidiValue);
-    ok_(__FILE__, line)(!msg->cTranspose, "got cTranspose %u\n", msg->cTranspose);
 }
 
 static void test_sequence_track(void)
@@ -3657,13 +3787,13 @@ static void test_sequence_track(void)
 
     ret = test_tool_wait_message(tool, 500, (DMUS_PMSG **)&note);
     ok(!ret, "got %#lx\n", ret);
-    check_dmus_note_pmsg(note, 0, 0, 500, 60, 120);
+    check_dmus_note_pmsg(note, 0, 0, 500, 60, 120, DMUS_NOTEF_NOTEON);
     hr = IDirectMusicPerformance_FreePMsg(performance, (DMUS_PMSG *)note);
     ok(hr == S_OK, "got %#lx\n", hr);
 
     ret = test_tool_wait_message(tool, 500, (DMUS_PMSG **)&note);
     ok(!ret, "got %#lx\n", ret);
-    check_dmus_note_pmsg(note, 1000, 1, 200, 50, 100);
+    check_dmus_note_pmsg(note, 1000, 1, 200, 50, 100, DMUS_NOTEF_NOTEON);
     hr = IDirectMusicPerformance_FreePMsg(performance, (DMUS_PMSG *)note);
     ok(hr == S_OK, "got %#lx\n", hr);
 
@@ -4144,23 +4274,23 @@ static void test_tempo_track_play(void)
     time = 0xdeadbeef;
     hr = IDirectMusicPerformance_MusicToReferenceTime(performance, 1, &time);
     ok(hr == S_OK, "got %#lx\n", hr);
-    check_music_time(time - init_time, scale_music_time(1, 120));
+    check_reference_time(time - init_time, scale_music_time(1, 120));
     time = 0xdeadbeef;
     hr = IDirectMusicPerformance_MusicToReferenceTime(performance, 100, &time);
     ok(hr == S_OK, "got %#lx\n", hr);
-    check_music_time(time - init_time, scale_music_time(100, 120));
+    check_reference_time(time - init_time, scale_music_time(100, 120));
     time = 0xdeadbeef;
     hr = IDirectMusicPerformance_MusicToReferenceTime(performance, 150, &time);
     ok(hr == S_OK, "got %#lx\n", hr);
-    check_music_time(time - init_time, scale_music_time(100, 120) + scale_music_time(50, 80));
+    check_reference_time(time - init_time, scale_music_time(100, 120) + scale_music_time(50, 80));
     time = 0xdeadbeef;
     hr = IDirectMusicPerformance_MusicToReferenceTime(performance, 200, &time);
     ok(hr == S_OK, "got %#lx\n", hr);
-    check_music_time(time - init_time, scale_music_time(100, 120) + scale_music_time(100, 80));
+    check_reference_time(time - init_time, scale_music_time(100, 120) + scale_music_time(100, 80));
     time = 0xdeadbeef;
     hr = IDirectMusicPerformance_MusicToReferenceTime(performance, 400, &time);
     ok(hr == S_OK, "got %#lx\n", hr);
-    check_music_time(time - init_time, scale_music_time(100, 120) + scale_music_time(200, 80) + scale_music_time(100, 20));
+    check_reference_time(time - init_time, scale_music_time(100, 120) + scale_music_time(200, 80) + scale_music_time(100, 20));
 
     music_time = 0xdeadbeef;
     hr = IDirectMusicPerformance_ReferenceToMusicTime(performance, init_time, &music_time);
@@ -4286,7 +4416,7 @@ static void test_segment_state(void)
     ok(hr == S_OK, "got %#lx\n", hr);
     hr = IDirectMusicPerformance_SetGraph(performance, graph);
     ok(hr == S_OK, "got %#lx\n", hr);
-    hr = IDirectMusicGraph_InsertTool(graph, (IDirectMusicTool *)tool, NULL, 0, -1);
+    hr = IDirectMusicGraph_InsertTool(graph, tool, NULL, 0, -1);
     ok(hr == S_OK, "got %#lx\n", hr);
     IDirectMusicGraph_Release(graph);
 
@@ -4391,17 +4521,20 @@ static void test_segment_state(void)
 
     tmp_state = (void *)0xdeadbeef;
     hr = IDirectMusicPerformance_GetSegmentState(performance, &tmp_state, 0);
-    ok(hr == S_OK, "got %#lx\n", hr);
-    ok(state == tmp_state, "got %p\n", state);
-    IDirectMusicSegmentState_Release(tmp_state);
+    ok(hr == S_OK || broken(hr == DMUS_E_NOT_FOUND) /* sometimes on Windows */, "got %#lx\n", hr);
+    if (hr == S_OK)
+    {
+        ok(state == tmp_state, "got %p\n", tmp_state);
+        IDirectMusicSegmentState_Release(tmp_state);
+    }
 
     tmp_state = (void *)0xdeadbeef;
     hr = IDirectMusicPerformance_GetSegmentState(performance, &tmp_state, 69);
     ok(hr == S_OK, "got %#lx\n", hr);
-    ok(state == tmp_state, "got %p\n", state);
+    ok(state == tmp_state, "got %p\n", tmp_state);
     IDirectMusicSegmentState_Release(tmp_state);
 
-    hr = IDirectMusicPerformance_GetSegmentState(performance, &tmp_state, 70);
+    hr = IDirectMusicPerformance_GetSegmentState(performance, &tmp_state, 71);
     todo_wine ok(hr == DMUS_E_NOT_FOUND, "got %#lx\n", hr);
 
 

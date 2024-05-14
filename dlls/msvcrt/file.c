@@ -42,7 +42,7 @@
 #include "winnls.h"
 #include "msvcrt.h"
 #include "mtdll.h"
-
+#include "wine/asm.h"
 #include "wine/debug.h"
 #include "wine/asm.h"
 
@@ -110,9 +110,9 @@ typedef struct {
     unsigned char       wxflag;
     char                textmode;
     char                lookahead[3];
-    char unicode          : 1;
-    char utf8translations : 1;
-    char dbcsBufferUsed   : 1;
+    unsigned int unicode          : 1;
+    unsigned int utf8translations : 1;
+    unsigned int dbcsBufferUsed   : 1;
     char dbcsBuffer[MB_LEN_MAX];
 } ioinfo;
 
@@ -845,9 +845,15 @@ int CDECL _isatty(int fd)
 /* INTERNAL: Allocate stdio file buffer */
 static BOOL msvcrt_alloc_buffer(FILE* file)
 {
+#if _MSVCR_VER >= 140
+    if((file->_file==STDOUT_FILENO && _isatty(file->_file))
+        || file->_file == STDERR_FILENO)
+        return FALSE;
+#else
     if((file->_file==STDOUT_FILENO || file->_file==STDERR_FILENO)
             && _isatty(file->_file))
         return FALSE;
+#endif
 
     file->_base = calloc(1, MSVCRT_INTERNAL_BUFSIZ);
     if(file->_base) {
@@ -1674,6 +1680,19 @@ int CDECL clearerr_s(FILE* file)
   _unlock_file(file);
   return 0;
 }
+
+#if defined(__i386__)
+/* Stack preserving thunk for rewind
+ * needed for the UIO mod for Fallout: New Vegas
+ */
+__ASM_GLOBAL_FUNC(rewind_preserve_stack,
+                  "pushl 4(%esp)\n\t"
+                  __ASM_CFI(".cfi_adjust_cfa_offset 4\n\t")
+                  "call "__ASM_NAME("rewind") "\n\t"
+                  "addl $4,%esp\n\t"
+                  __ASM_CFI(".cfi_adjust_cfa_offset -4\n\t")
+                  "ret")
+#endif
 
 /*********************************************************************
  *		rewind (MSVCRT.@)
@@ -4686,19 +4705,7 @@ errno_t CDECL freopen_s(FILE** pFile,
  */
 int CDECL fsetpos(FILE* file, fpos_t *pos)
 {
-  int ret;
-
-  _lock_file(file);
-  msvcrt_flush_buffer(file);
-
-  /* Reset direction of i/o */
-  if(file->_flag & _IORW) {
-        file->_flag &= ~(_IOREAD|_IOWRT);
-  }
-
-  ret = (_lseeki64(file->_file,*pos,SEEK_SET) == -1) ? -1 : 0;
-  _unlock_file(file);
-  return ret;
+    return _fseeki64(file,*pos,SEEK_SET);
 }
 
 /*********************************************************************
