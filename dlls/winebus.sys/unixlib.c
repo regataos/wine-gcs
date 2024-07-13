@@ -124,13 +124,26 @@ static BOOL is_vkb_controller(WORD vid, WORD pid, INT buttons)
 
 static BOOL is_virpil_controller(WORD vid, WORD pid, INT buttons)
 {
-    if (vid != 0x3344) return FALSE;
+    switch (vid)
+    {
+    case 0x03eb:
+        /* users may have configured button limits, usually 32/50/64 */
+        if ((buttons == 32) || (buttons == 50) || (buttons == 64)) return TRUE;
 
-    /* comes with 31 buttons in the default configuration, or 128 max */
-    if ((buttons == 31) || (buttons == 128)) return TRUE;
+        if (pid == 0x2055) return TRUE; /* ATMEL/VIRPIL/200325 VPC Throttle MT-50 CM2 */
+        break;
+    case 0x3344:
+        /* comes with 31 buttons in the default configuration, or 128 max */
+        if ((buttons == 31) || (buttons == 128)) return TRUE;
 
-    /* if customized, arbitrary amount of buttons may be shown, decide by PID */
-    if (pid == 0x412f) return TRUE; /* Virpil Constellation ALPHA-R */
+        /* users may have configured button limits, usually 32/50/64 */
+        if ((buttons == 32) || (buttons == 50) || (buttons == 64)) return TRUE;
+
+        /* if customized, arbitrary amount of buttons may be shown, decide by PID */
+        if (pid == 0x412f) return TRUE; /* Virpil Constellation ALPHA-R */
+        if (pid == 0x812c) return TRUE; /* Virpil Constellation ALPHA-L */
+        break;
+    }
     return FALSE;
 }
 

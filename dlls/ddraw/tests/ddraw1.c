@@ -15459,15 +15459,25 @@ static void test_enum_devices(void)
 
 static void test_multiple_devices(void)
 {
+    static D3DMATRIX test_matrix =
+    {
+        1.0f, 0.0f, 0.0f, 0.0f,
+        0.0f, 2.0f, 0.0f, 0.0f,
+        0.0f, 0.0f, 3.0f, 0.0f,
+        0.0f, 0.0f, 0.0f, 4.0f,
+    };
+
     D3DTEXTUREHANDLE texture_handle, texture_handle2;
     D3DMATERIALHANDLE mat_handle, mat_handle2;
     IDirect3DViewport *viewport, *viewport2;
     IDirect3DDevice *device, *device2;
     IDirectDrawSurface *texture_surf;
+    D3DMATRIXHANDLE matrix_handle;
+    IDirectDraw *ddraw, *ddraw2;
     IDirect3DMaterial *material;
     DDSURFACEDESC surface_desc;
     IDirect3DTexture *texture;
-    IDirectDraw *ddraw;
+    D3DMATRIX matrix;
     ULONG refcount;
     HWND window;
     HRESULT hr;
@@ -15483,7 +15493,10 @@ static void test_multiple_devices(void)
         return;
     }
 
-    device2 = create_device_ex(ddraw, window, DDSCL_NORMAL, &IID_IDirect3DHALDevice);
+    ddraw2 = create_ddraw();
+    ok(!!ddraw2, "Failed to create a ddraw object.\n");
+
+    device2 = create_device_ex(ddraw2, window, DDSCL_NORMAL, &IID_IDirect3DHALDevice);
     ok(!!device2, "got NULL.\n");
 
     viewport = create_viewport(device, 0, 0, 640, 480);
@@ -15521,6 +15534,16 @@ static void test_multiple_devices(void)
     ok(hr == D3D_OK, "got %#lx.\n", hr);
     ok(texture_handle != texture_handle2, "got same handles.\n");
 
+    hr = IDirect3DDevice_CreateMatrix(device, &matrix_handle);
+    ok(hr == D3D_OK, "got %#lx.\n", hr);
+    hr = IDirect3DDevice_SetMatrix(device, matrix_handle, &test_matrix);
+    ok(hr == D3D_OK, "got %#lx.\n", hr);
+
+    memset(&matrix, 0xcc, sizeof(matrix));
+    hr = IDirect3DDevice_GetMatrix(device2, matrix_handle, &matrix);
+    ok(hr == D3D_OK, "got %#lx.\n", hr);
+    ok(!memcmp(&matrix, &test_matrix, sizeof(matrix)), "matrix does not match.\n");
+
     IDirect3DTexture_Release(texture);
     IDirectDrawSurface_Release(texture_surf);
     IDirect3DMaterial_Release(material);
@@ -15533,6 +15556,7 @@ static void test_multiple_devices(void)
     ok(!refcount, "Device has %lu references left.\n", refcount);
 
     IDirectDraw_Release(ddraw);
+    IDirectDraw_Release(ddraw2);
     DestroyWindow(window);
 }
 

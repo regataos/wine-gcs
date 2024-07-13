@@ -2656,20 +2656,20 @@ static BOOL WINAPI init_xdg_dirs( INIT_ONCE *once, void *param, void **context )
         fmt = L"%s/.config/user-dirs.dirs";
     }
     len = lstrlenW(var) + lstrlenW(fmt);
-    name = heap_alloc( len * sizeof(WCHAR) );
+    name = malloc( len * sizeof(WCHAR) );
     swprintf( name, len, fmt, var );
     name[1] = '\\';  /* change \??\ to \\?\ */
     for (ptr = name; *ptr; ptr++) if (*ptr == '/') *ptr = '\\';
 
     file = CreateFileW( name, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, 0 );
-    heap_free( name );
+    free( name );
     if (file != INVALID_HANDLE_VALUE)
     {
         len = GetFileSize( file, NULL );
-        if (!(xdg_config = heap_alloc( len + 1 ))) return TRUE;
+        if (!(xdg_config = malloc( len + 1 ))) return TRUE;
         if (!ReadFile( file, xdg_config, len, &xdg_config_len, NULL ))
         {
-            heap_free( xdg_config );
+            free( xdg_config );
             xdg_config = NULL;
         }
         else
@@ -2704,7 +2704,7 @@ static char *get_xdg_path( const char *var )
         p++;
         if (*p != '/' && strncmp( p, "$HOME/", 6 )) continue;
 
-        if (!(ret = heap_alloc( strlen(p) + 1 ))) break;
+        if (!(ret = malloc( strlen(p) + 1 ))) break;
         for (i = 0; *p && *p != '"'; i++, p++)
         {
             if (*p == '\\' && p[1]) p++;
@@ -2713,7 +2713,7 @@ static char *get_xdg_path( const char *var )
         ret[i] = 0;
         if (*p != '"')
         {
-            heap_free( ret );
+            free( ret );
             ret = NULL;
         }
         break;
@@ -2727,7 +2727,7 @@ static BOOL link_folder( HANDLE mgr, const UNICODE_STRING *path, const char *lin
     DWORD len = sizeof(*ioctl) + path->Length + strlen(link) + 1;
     BOOL ret;
 
-    if (!(ioctl = heap_alloc( len ))) return FALSE;
+    if (!(ioctl = malloc( len ))) return FALSE;
     ioctl->create_backup = FALSE;
     ioctl->folder_offset = sizeof(*ioctl);
     ioctl->folder_size = path->Length;
@@ -2736,7 +2736,7 @@ static BOOL link_folder( HANDLE mgr, const UNICODE_STRING *path, const char *lin
     strcpy( (char *)ioctl + ioctl->symlink_offset, link );
 
     ret = DeviceIoControl( mgr, IOCTL_MOUNTMGR_DEFINE_SHELL_FOLDER, ioctl, len, NULL, 0, NULL, NULL );
-    heap_free( ioctl );
+    free( ioctl );
     return ret;
 }
 
@@ -2767,14 +2767,11 @@ static void create_link( const WCHAR *path, const char *xdg_name, const char *de
     {
         if (link_folder( mgr, &nt_name, target )) goto done;
     }
-    if (link_folder( mgr, &nt_name, default_name )) goto done;
-
-    /* fall back to HOME */
-    link_folder( mgr, &nt_name, "$HOME" );
+    link_folder( mgr, &nt_name, default_name );
 
 done:
     RtlFreeUnicodeString( &nt_name );
-    heap_free( target );
+    free( target );
     CloseHandle( mgr );
 }
 

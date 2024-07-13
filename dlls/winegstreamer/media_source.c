@@ -357,19 +357,6 @@ static HRESULT stream_descriptor_get_media_type(IMFStreamDescriptor *descriptor,
     return hr;
 }
 
-static HRESULT wg_format_from_stream_descriptor(IMFStreamDescriptor *descriptor, struct wg_format *format)
-{
-    IMFMediaType *media_type;
-    HRESULT hr;
-
-    if (FAILED(hr = stream_descriptor_get_media_type(descriptor, &media_type)))
-        return hr;
-    mf_media_type_to_wg_format(media_type, format);
-    IMFMediaType_Release(media_type);
-
-    return hr;
-}
-
 static HRESULT stream_descriptor_set_tag(IMFStreamDescriptor *descriptor, wg_parser_stream_t stream,
     const GUID *attr, enum wg_parser_tag tag)
 {
@@ -396,151 +383,31 @@ static HRESULT stream_descriptor_set_tag(IMFStreamDescriptor *descriptor, wg_par
     return hr;
 }
 
-static HRESULT init_video_media_types(struct wg_format *format, IMFMediaType *types[9], DWORD *types_count)
-{
-    /* Try to prefer YUV formats over RGB ones. Most decoders output in the
-     * YUV color space, and it's generally much less expensive for
-     * videoconvert to do YUV -> YUV transformations. */
-    static const enum wg_video_format video_formats[] =
-    {
-        WG_VIDEO_FORMAT_NV12,
-        WG_VIDEO_FORMAT_YV12,
-        WG_VIDEO_FORMAT_YUY2,
-        WG_VIDEO_FORMAT_I420,
-        WG_VIDEO_FORMAT_BGRA,
-        WG_VIDEO_FORMAT_BGRx,
-        WG_VIDEO_FORMAT_RGBA,
-    };
-    UINT count = *types_count, i;
-    GUID base_subtype;
-    HRESULT hr;
-
-    if (FAILED(hr = IMFMediaType_GetGUID(types[0], &MF_MT_SUBTYPE, &base_subtype)))
-        return hr;
-
-    for (i = 0; i < ARRAY_SIZE(video_formats); ++i)
-    {
-        struct wg_format new_format = *format;
-        IMFMediaType *new_type;
-
-        new_format.u.video.format = video_formats[i];
-
-        if (!(new_type = mf_media_type_from_wg_format(&new_format)))
-        {
-            hr = E_OUTOFMEMORY;
-            goto done;
-        }
-        types[count++] = new_type;
-
-        if (video_formats[i] == WG_VIDEO_FORMAT_I420)
-        {
-            IMFMediaType *iyuv_type;
-
-            if (FAILED(hr = MFCreateMediaType(&iyuv_type)))
-                goto done;
-            if (FAILED(hr = IMFMediaType_CopyAllItems(new_type, (IMFAttributes *)iyuv_type)))
-                goto done;
-            if (FAILED(hr = IMFMediaType_SetGUID(iyuv_type, &MF_MT_SUBTYPE, &MFVideoFormat_IYUV)))
-                goto done;
-            types[count++] = iyuv_type;
-        }
-    }
-
-    for (i = 0; i < count; i++)
-    {
-        IMFMediaType_SetUINT32(types[i], &MF_MT_VIDEO_NOMINAL_RANGE,
-                MFNominalRange_Normal);
-
-        {
-            /* HACK: Remove MF_MT_DEFAULT_STRIDE for games that incorrectly assume it doesn't change,
-             * workaround to fix 4e2d1f1d2ed6e57de9103c0fd43bce88e3ad4792 until media source stops decoding
-             * CW-Bug-Id: #23248
-             */
-            char const *sgi = getenv("SteamGameId");
-            if (sgi && (!strcmp(sgi, "399810") || !strcmp(sgi, "851890") || !strcmp(sgi, "544750")))
-                IMFMediaType_DeleteItem(types[i], &MF_MT_DEFAULT_STRIDE);
-        }
-    }
-
-done:
-    *types_count = count;
-    return hr;
-}
-
-static HRESULT init_audio_media_types(struct wg_format *format, IMFMediaType *types[9], DWORD *types_count)
-{
-    /* Expose at least one PCM and one floating point type for the
-       consumer to pick from. Moreover, ensure that we expose S16LE first,
-       as games such as MGSV expect the native media type to be 16 bps. */
-    static const enum wg_audio_format audio_types[] =
-    {
-        WG_AUDIO_FORMAT_S16LE,
-        WG_AUDIO_FORMAT_F32LE,
-    };
-    UINT count = *types_count, i;
-
-    BOOL has_native_format = FALSE;
-
-    for (i = 0; i < ARRAY_SIZE(audio_types); i++)
-    {
-        struct wg_format new_format;
-
-        new_format = *format;
-        new_format.u.audio.format = audio_types[i];
-        if ((types[count] = mf_media_type_from_wg_format(&new_format)))
-        {
-            if (format->u.audio.format == audio_types[i])
-                has_native_format = TRUE;
-            count++;
-        }
-    }
-
-    if (!has_native_format && (types[count] = mf_media_type_from_wg_format(format)))
-        count++;
-
-    *types_count = count;
-    return S_OK;
-}
-
-static HRESULT stream_descriptor_create(UINT32 id, struct wg_format *format, IMFStreamDescriptor **out)
+static HRESULT stream_descriptor_create(UINT32 id, wg_parser_stream_t wg_stream, IMFStreamDescriptor **out)
 {
     IMFStreamDescriptor *descriptor;
     IMFMediaTypeHandler *handler;
-    IMFMediaType *types[9];
-    DWORD count = 0;
+    IMFMediaType *media_type;
     HRESULT hr;
 
-    if ((types[0] = mf_media_type_from_wg_format(format)))
-        count = 1;
-
-    if (format->major_type == WG_MAJOR_TYPE_VIDEO)
+    if (FAILED(hr = wg_parser_stream_get_current_type_mf(wg_stream, &media_type)))
+        return MF_E_INVALIDMEDIATYPE;
+    if (FAILED(hr = MFCreateStreamDescriptor(id, 1, &media_type, &descriptor)))
     {
-        if (FAILED(hr = init_video_media_types(format, types, &count)))
-            goto done;
+        IMFMediaType_Release(media_type);
+        return hr;
     }
-    else if (format->major_type == WG_MAJOR_TYPE_AUDIO)
-    {
-        if (FAILED(hr = init_audio_media_types(format, types, &count)))
-            goto done;
-    }
-
-    assert(count <= ARRAY_SIZE(types));
-
-    if (FAILED(hr = MFCreateStreamDescriptor(id, count, types, &descriptor)))
-        goto done;
 
     if (FAILED(hr = IMFStreamDescriptor_GetMediaTypeHandler(descriptor, &handler)))
         IMFStreamDescriptor_Release(descriptor);
     else
     {
-        hr = IMFMediaTypeHandler_SetCurrentMediaType(handler, types[0]);
+        hr = IMFMediaTypeHandler_SetCurrentMediaType(handler, media_type);
         IMFMediaTypeHandler_Release(handler);
     }
 
-done:
-    while (count--)
-        IMFMediaType_Release(types[count]);
-    *out = SUCCEEDED(hr) ? descriptor : NULL;
+    IMFMediaType_Release(media_type);
+    *out = descriptor;
     return hr;
 }
 
@@ -599,14 +466,18 @@ static void flush_token_queue(struct media_stream *stream, BOOL send)
 static HRESULT media_stream_start(struct media_stream *stream, BOOL active, BOOL seeking, const PROPVARIANT *position)
 {
     struct media_source *source = impl_from_IMFMediaSource(stream->media_source);
-    struct wg_format format;
+    IMFMediaType *media_type;
     HRESULT hr;
 
     TRACE("source %p, stream %p\n", source, stream);
 
-    if (FAILED(hr = wg_format_from_stream_descriptor(stream->descriptor, &format)))
-        WARN("Failed to get wg_format from stream descriptor, hr %#lx\n", hr);
-    wg_parser_stream_enable(stream->wg_stream, &format, 0);
+    if (SUCCEEDED(hr = stream_descriptor_get_media_type(stream->descriptor, &media_type)))
+    {
+        hr = wg_parser_stream_enable_mf(stream->wg_stream, media_type);
+        IMFMediaType_Release(media_type);
+    }
+    if (FAILED(hr))
+        WARN("Failed to start media source stream, hr %#lx\n", hr);
 
     if (FAILED(hr = IMFMediaEventQueue_QueueEventParamUnk(source->event_queue, active ? MEUpdatedStream : MENewStream,
             &GUID_NULL, S_OK, (IUnknown *)&stream->IMFMediaStream_iface)))
@@ -1491,17 +1362,22 @@ static HRESULT WINAPI media_source_CreatePresentationDescriptor(IMFMediaSource *
 
         for (i = 0; i < source->stream_count; ++i)
         {
-            struct wg_format format;
+            IMFMediaType *media_type;
+            GUID major = GUID_NULL;
 
-            wg_format_from_stream_descriptor(source->descriptors[i], &format);
+            if (SUCCEEDED(hr = stream_descriptor_get_media_type(source->descriptors[i], &media_type)))
+            {
+                hr = IMFMediaType_GetGUID(media_type, &MF_MT_MAJOR_TYPE, &major);
+                IMFMediaType_Release(media_type);
+            }
 
-            if (format.major_type >= WG_MAJOR_TYPE_VIDEO)
+            if (IsEqualGUID(&major, &MFMediaType_Video))
             {
                 if (!video_selected && FAILED(hr = IMFPresentationDescriptor_SelectStream(*descriptor, i)))
                     WARN("Failed to select stream %u, hr %#lx\n", i, hr);
                 video_selected = TRUE;
             }
-            else if (format.major_type >= WG_MAJOR_TYPE_AUDIO)
+            else if (IsEqualGUID(&major, &MFMediaType_Audio))
             {
                 if (!audio_selected && FAILED(hr = IMFPresentationDescriptor_SelectStream(*descriptor, i)))
                     WARN("Failed to select stream %u, hr %#lx\n", i, hr);
@@ -1742,10 +1618,8 @@ static HRESULT media_source_create(struct object_context *context, IMFMediaSourc
         wg_parser_stream_t wg_stream = wg_parser_get_stream(object->wg_parser, i);
         IMFStreamDescriptor *descriptor;
         struct media_stream *stream;
-        struct wg_format format;
 
-        wg_parser_stream_get_preferred_format(wg_stream, &format);
-        if (FAILED(hr = stream_descriptor_create(i, &format, &descriptor)))
+        if (FAILED(hr = stream_descriptor_create(i, wg_stream, &descriptor)))
             goto fail;
         if (FAILED(hr = media_stream_create(&object->IMFMediaSource_iface, descriptor, wg_stream, &stream)))
         {

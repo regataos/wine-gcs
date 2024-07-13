@@ -25,6 +25,7 @@
 
 #include <stdbool.h>
 #include <gst/gst.h>
+#include <gst/audio/audio.h>
 
 #include <stdio.h>
 #include <unistd.h>
@@ -50,12 +51,14 @@ extern bool link_src_to_sink(GstPad *src_pad, GstPad *sink_pad);
 extern bool link_src_to_element(GstPad *src_pad, GstElement *element);
 extern bool link_element_to_sink(GstElement *element, GstPad *sink_pad);
 extern bool push_event(GstPad *pad, GstEvent *event);
+extern void set_max_threads(GstElement *element);
 
 /* wg_format.c */
 
 extern void wg_format_from_caps(struct wg_format *format, const GstCaps *caps);
 extern bool wg_format_compare(const struct wg_format *a, const struct wg_format *b);
 extern GstCaps *wg_format_to_caps(const struct wg_format *format);
+extern uint32_t wg_channel_mask_from_gst(const GstAudioInfo *info);
 
 /* wg_source.c */
 
@@ -67,7 +70,7 @@ extern NTSTATUS wg_source_get_position(void *args);
 extern NTSTATUS wg_source_set_position(void *args);
 extern NTSTATUS wg_source_push_data(void *args);
 extern NTSTATUS wg_source_read_data(void *args);
-extern NTSTATUS wg_source_get_stream_format(void *args);
+extern NTSTATUS wg_source_get_stream_type(void *args);
 extern NTSTATUS wg_source_get_stream_tag(void *args);
 extern NTSTATUS wg_source_set_stream_flags(void *args);
 
@@ -75,13 +78,20 @@ extern NTSTATUS wg_source_set_stream_flags(void *args);
 
 extern NTSTATUS wg_transform_create(void *args);
 extern NTSTATUS wg_transform_destroy(void *args);
-extern NTSTATUS wg_transform_set_output_format(void *args);
+extern NTSTATUS wg_transform_get_output_type(void *args);
+extern NTSTATUS wg_transform_set_output_type(void *args);
 extern NTSTATUS wg_transform_push_data(void *args);
 extern NTSTATUS wg_transform_read_data(void *args);
 extern NTSTATUS wg_transform_get_status(void *args);
 extern NTSTATUS wg_transform_drain(void *args);
 extern NTSTATUS wg_transform_flush(void *args);
 extern NTSTATUS wg_transform_notify_qos(void *args);
+
+/* wg_media_type.c */
+
+extern GstCaps *caps_from_media_type(const struct wg_media_type *media_type);
+extern NTSTATUS caps_to_media_type(GstCaps *caps, struct wg_media_type *media_type,
+        UINT32 video_plane_align);
 
 /* wg_muxer.c */
 
@@ -111,6 +121,10 @@ extern void wg_allocator_destroy(GstAllocator *allocator);
 extern void wg_allocator_provide_sample(GstAllocator *allocator, struct wg_sample *sample);
 extern void wg_allocator_release_sample(GstAllocator *allocator, struct wg_sample *sample,
         bool discard_data);
+
+/* media-converter */
+extern bool media_converter_init(void);
+extern bool get_untranscoded_stream_format(GstElement *container, uint32_t stream_index, GstCaps *caps);
 
 static inline void touch_h264_used_tag(void)
 {

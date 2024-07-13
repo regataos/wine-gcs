@@ -82,10 +82,11 @@ void wg_parser_push_data(wg_parser_t parser, const void *data, uint32_t size);
 uint32_t wg_parser_get_stream_count(wg_parser_t parser);
 wg_parser_stream_t wg_parser_get_stream(wg_parser_t parser, uint32_t index);
 
-void wg_parser_stream_get_preferred_format(wg_parser_stream_t stream, struct wg_format *format);
+void wg_parser_stream_get_current_format(wg_parser_stream_t stream, struct wg_format *format);
+HRESULT wg_parser_stream_get_current_type_mf(wg_parser_stream_t stream, IMFMediaType **media_type);
 void wg_parser_stream_get_codec_format(wg_parser_stream_t stream, struct wg_format *format);
-void wg_parser_stream_enable(wg_parser_stream_t stream, const struct wg_format *format,
-        uint32_t flags);
+HRESULT wg_parser_stream_enable_mf(wg_parser_stream_t stream, IMFMediaType *media_type);
+void wg_parser_stream_enable(wg_parser_stream_t stream, const struct wg_format *format);
 void wg_parser_stream_disable(wg_parser_stream_t stream);
 
 bool wg_parser_stream_get_buffer(wg_parser_t parser, wg_parser_stream_t stream,
@@ -111,23 +112,28 @@ HRESULT wg_source_get_stream_count(wg_source_t source, uint32_t *stream_count);
 HRESULT wg_source_get_duration(wg_source_t source, uint64_t *duration);
 HRESULT wg_source_set_position(wg_source_t source, uint64_t time);
 HRESULT wg_source_get_position(wg_source_t source, uint64_t *read_offset);
-HRESULT wg_source_push_data(wg_source_t source, const void *data, uint32_t size);
+HRESULT wg_source_push_data(wg_source_t source, UINT64 offset, const void *data, uint32_t size);
 HRESULT wg_source_read_data(wg_source_t source, UINT32 index, IMFSample **out);
-bool wg_source_get_stream_format(wg_source_t source, UINT32 index,
-        struct wg_format *format);
+HRESULT wg_source_get_stream_type(wg_source_t source, UINT32 index, IMFMediaType **media_type);
 char *wg_source_get_stream_tag(wg_source_t source, UINT32 index,
         wg_parser_tag tag);
 void wg_source_set_stream_flags(wg_source_t source, UINT32 index, BOOL select);
 
-wg_transform_t wg_transform_create(const struct wg_format *input_format,
-        const struct wg_format *output_format, const struct wg_transform_attrs *attrs);
+HRESULT wg_transform_create_mf(IMFMediaType *input_type, IMFMediaType *output_type,
+        const struct wg_transform_attrs *attrs, wg_transform_t *transform);
+HRESULT wg_transform_create_quartz(const AM_MEDIA_TYPE *input_format, const AM_MEDIA_TYPE *output_format,
+        const struct wg_transform_attrs *attrs, wg_transform_t *transform);
 void wg_transform_destroy(wg_transform_t transform);
-bool wg_transform_set_output_format(wg_transform_t transform, struct wg_format *format);
+HRESULT wg_transform_get_output_type(wg_transform_t transform, IMFMediaType **media_type);
+HRESULT wg_transform_set_output_type(wg_transform_t transform, IMFMediaType *media_type);
 bool wg_transform_get_status(wg_transform_t transform, bool *accepts_input);
 HRESULT wg_transform_drain(wg_transform_t transform);
 HRESULT wg_transform_flush(wg_transform_t transform);
 void wg_transform_notify_qos(wg_transform_t transform,
         bool underflow, double proportion, int64_t diff, uint64_t timestamp);
+
+HRESULT check_audio_transform_support(const WAVEFORMATEX *input, const WAVEFORMATEX *output);
+HRESULT check_video_transform_support(const MFVIDEOFORMAT *input, const MFVIDEOFORMAT *output);
 
 HRESULT wg_muxer_create(const char *format, wg_muxer_t *muxer);
 void wg_muxer_destroy(wg_muxer_t muxer);
@@ -177,9 +183,15 @@ HRESULT wg_transform_push_quartz(wg_transform_t transform, struct wg_sample *sam
 HRESULT wg_transform_push_dmo(wg_transform_t transform, IMediaBuffer *media_buffer,
         DWORD flags, REFERENCE_TIME time_stamp, REFERENCE_TIME time_length, struct wg_sample_queue *queue);
 HRESULT wg_transform_read_mf(wg_transform_t transform, IMFSample *sample,
-        DWORD sample_size, struct wg_format *format, DWORD *flags);
+        DWORD sample_size, DWORD *flags);
 HRESULT wg_transform_read_quartz(wg_transform_t transform, struct wg_sample *sample);
 HRESULT wg_transform_read_dmo(wg_transform_t transform, DMO_OUTPUT_DATA_BUFFER *buffer);
+
+/* These unixlib entry points should not be used directly, they assume samples
+ * to be queued and zero-copy support, use the helpers below instead.
+ */
+HRESULT wg_transform_push_data(wg_transform_t transform, struct wg_sample *sample);
+HRESULT wg_transform_read_data(wg_transform_t transform, struct wg_sample *sample);
 
 HRESULT gstreamer_byte_stream_handler_create(REFIID riid, void **obj);
 HRESULT gstreamer_byte_stream_handler_2_create(REFIID riid, void **obj);

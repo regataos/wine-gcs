@@ -541,7 +541,7 @@ static const char *get_device_syspath(struct udev_device *dev)
     if ((parent = udev_device_get_parent_with_subsystem_devtype(dev, "usb", "usb_device")))
         return udev_device_get_syspath(parent);
 
-    return "";
+    return udev_device_get_syspath(dev);
 }
 
 static struct base_device *find_device_from_syspath(const char *path)
@@ -919,6 +919,24 @@ static const USAGE_AND_PAGE *what_am_I(struct udev_device *dev, int fd)
 
 static INT count_buttons(int device_fd, BYTE *map)
 {
+    static const UINT gamepad_buttons[] =
+    {
+        BTN_A,
+        BTN_B,
+        BTN_X,
+        BTN_Y,
+        BTN_TL,
+        BTN_TR,
+        BTN_SELECT,
+        BTN_START,
+        BTN_THUMBL,
+        BTN_THUMBR,
+        BTN_MODE,
+        BTN_C,
+        BTN_Z,
+        BTN_TL2,
+        BTN_TR2,
+    };
     int i;
     int button_count = 0;
     BYTE keybits[(KEY_MAX+7)/8];
@@ -929,7 +947,16 @@ static INT count_buttons(int device_fd, BYTE *map)
         return FALSE;
     }
 
-    for (i = BTN_MISC; i < KEY_MAX; i++)
+    for (i = 0; i < ARRAY_SIZE(gamepad_buttons); i++)
+    {
+        if (test_bit(keybits, gamepad_buttons[i]))
+        {
+            if (map) map[gamepad_buttons[i]] = button_count;
+            button_count++;
+        }
+    }
+
+    for (i = BTN_DIGI; i < KEY_MAX; i++)
     {
         if (test_bit(keybits, i))
         {
@@ -963,7 +990,6 @@ static NTSTATUS build_report_descriptor(struct unix_device *iface, struct udev_d
     BYTE absbits[(ABS_MAX+7)/8];
     BYTE relbits[(REL_MAX+7)/8];
     BYTE ffbits[(FF_MAX+7)/8];
-    struct ff_effect effect;
     USAGE_AND_PAGE usage;
     USHORT count = 0;
     USAGE usages[16];
@@ -1042,21 +1068,8 @@ static NTSTATUS build_report_descriptor(struct unix_device *iface, struct udev_d
     impl->haptic_effect_id = -1;
     for (i = 0; i < ARRAY_SIZE(impl->effect_ids); ++i) impl->effect_ids[i] = -1;
 
-    if (test_bit(ffbits, FF_RUMBLE))
-    {
-        effect.id = -1;
-        effect.type = FF_RUMBLE;
-        effect.replay.length = 0;
-        effect.u.rumble.strong_magnitude = 0;
-        effect.u.rumble.weak_magnitude = 0;
-
-        if (ioctl(impl->base.device_fd, EVIOCSFF, &effect) == -1)
-            WARN("couldn't allocate rumble effect for haptics: %d %s\n", errno, strerror(errno));
-        else if (!hid_device_add_haptics(iface))
-            return FALSE;
-        else
-            impl->haptic_effect_id = effect.id;
-    }
+    if (test_bit(ffbits, FF_RUMBLE) && !hid_device_add_haptics(iface))
+        return STATUS_NO_MEMORY;
 
     for (i = 0; i < FF_MAX; ++i) if (test_bit(ffbits, i)) break;
     if (i != FF_MAX)
@@ -1210,7 +1223,7 @@ static NTSTATUS lnxev_device_haptics_start(struct unix_device *iface, UINT durat
     effect.u.rumble.strong_magnitude = rumble_intensity;
     effect.u.rumble.weak_magnitude = buzz_intensity;
 
-    if (ioctl(impl->base.device_fd, EVIOCSFF, &effect) == -1)
+    if (effect.id == -1 || ioctl(impl->base.device_fd, EVIOCSFF, &effect) == -1)
     {
         effect.id = -1;
         if (ioctl(impl->base.device_fd, EVIOCSFF, &effect) == 1)
@@ -1614,6 +1627,9 @@ static void hidraw_set_quirks(struct hidraw_device *impl, DWORD bus_type, WORD v
 
 static void udev_add_device(struct udev_device *dev, int fd)
 {
+    const char *env = getenv("PROTON_EXPOSE_STEAM_CONTROLLER");
+    BOOL expose_steam_controller = !env || atoi(env) == 1;
+
     struct device_desc desc =
     {
         .input = -1,
@@ -1688,7 +1704,17 @@ static void udev_add_device(struct udev_device *dev, int fd)
         if (!desc.manufacturer[0]) memcpy(desc.manufacturer, evdev, sizeof(evdev));
 
         if (!desc.product[0] && ioctl(fd, EVIOCGNAME(sizeof(buffer) - 1), buffer) > 0)
+        {
+            /* CW-Bug-Id: #20528 Check steam virtual controller indexes to keep them ordered */
+            /* CW-Bug-Id: #23185 Emulate Steam Input native hooks for native SDL */
+            if (sscanf(buffer, "Microsoft X-Box 360 pad %u", &desc.input) == 1)
+            {
+                if (!expose_steam_controller) desc.input++;
+                desc.version = 0; /* keep version fixed as 0 so we can hardcode it in ntdll rawinput pipe redirection */
+            }
+
             ntdll_umbstowcs(buffer, strlen(buffer) + 1, desc.product, ARRAY_SIZE(desc.product));
+        }
 
         if (!desc.serialnumber[0] && ioctl(fd, EVIOCGUNIQ(sizeof(buffer)), buffer) >= 0)
             ntdll_umbstowcs(buffer, strlen(buffer) + 1, desc.serialnumber, ARRAY_SIZE(desc.serialnumber));
@@ -1701,13 +1727,32 @@ static void udev_add_device(struct udev_device *dev, int fd)
         memcpy(desc.serialnumber, zeros, sizeof(zeros));
     }
 
-    if (!is_hidraw_enabled(desc.vid, desc.pid, axes, buttons))
+    if (desc.vid == 0x28de && desc.pid == 0x11ff)
+    {
+        if (!strcmp(subsystem, "hidraw"))
+        {
+            TRACE("hidraw %s: deferring %s to a different backend\n", debugstr_a(devnode), debugstr_device_desc(&desc));
+            close(fd);
+            return;
+        }
+
+        TRACE("evdev %s: detected steam input virtual controller\n", debugstr_a(devnode));
+        desc.is_gamepad = TRUE;
+
+        if (!expose_steam_controller)
+        {
+            TRACE("pretending it's an Xbox 360 controller\n");
+            desc.vid = 0x045e;
+            desc.pid = 0x028e;
+        }
+    }
+    else if (!is_hidraw_enabled(desc.vid, desc.pid, axes, buttons))
     {
         TRACE("hidraw %s: deferring %s to a different backend\n", debugstr_a(devnode), debugstr_device_desc(&desc));
         close(fd);
         return;
     }
-    if (is_sdl_blacklisted(desc.vid, desc.pid))
+    else if (is_sdl_blacklisted(desc.vid, desc.pid))
     {
         /* this device is blacklisted */
         TRACE("hidraw %s: ignoring %s, in SDL blacklist\n", debugstr_a(devnode), debugstr_device_desc(&desc));

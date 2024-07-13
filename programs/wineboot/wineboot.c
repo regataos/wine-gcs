@@ -1582,17 +1582,16 @@ static INT_PTR CALLBACK wait_dlgproc( HWND hwnd, UINT msg, WPARAM wp, LPARAM lp 
             SendDlgItemMessageW( hwnd, IDC_WAITICON, STM_SETICON, (WPARAM)icon, 0 );
             SendDlgItemMessageW( hwnd, IDC_WAITTEXT, WM_GETTEXT, 1024, (LPARAM)text );
             len = lstrlenW(text) + lstrlenW(name) + 1;
-            buffer = HeapAlloc( GetProcessHeap(), 0, len * sizeof(WCHAR) );
+            buffer = malloc( len * sizeof(WCHAR) );
             swprintf( buffer, len, text, name );
             SendDlgItemMessageW( hwnd, IDC_WAITTEXT, WM_SETTEXT, 0, (LPARAM)buffer );
-            HeapFree( GetProcessHeap(), 0, buffer );
+            free( buffer );
         }
         break;
     }
     return 0;
 }
 
-/*
 static HWND show_wait_window(void)
 {
     HWND hwnd = CreateDialogParamW( GetModuleHandleW(0), MAKEINTRESOURCEW(IDD_WAITDLG), 0,
@@ -1600,7 +1599,6 @@ static HWND show_wait_window(void)
     ShowWindow( hwnd, SW_SHOWNORMAL );
     return hwnd;
 }
-*/
 
 static HANDLE start_rundll32( const WCHAR *inf_path, const WCHAR *install, WORD machine )
 {
@@ -1801,7 +1799,7 @@ static void update_wineprefix( BOOL force )
 
         if ((process = start_rundll32( inf_path, L"PreInstall", IMAGE_FILE_MACHINE_TARGET_HOST )))
         {
-            /* HWND hwnd = show_wait_window(); */
+            HWND hwnd = show_wait_window();
             for (;;)
             {
                 if (process)
@@ -1822,7 +1820,7 @@ static void update_wineprefix( BOOL force )
                     process = start_rundll32( inf_path, L"Wow64Install", machines[count].Machine );
                 count++;
             }
-            /* DestroyWindow( hwnd ); */
+            DestroyWindow( hwnd );
         }
         install_root_pnp_devices();
         update_user_profile();

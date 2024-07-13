@@ -47,7 +47,7 @@ struct fs_monitor_size
     SIZE size;
     BOOL additional;
 };
-static struct fs_monitor_size fs_monitor_sizes_base[] =
+static const struct fs_monitor_size fs_monitor_sizes_base[] =
 {
     {{640, 480}},   /*  4:3 */
     {{800, 600}},   /*  4:3 */
@@ -75,7 +75,7 @@ static struct fs_monitor_size fs_monitor_sizes_base[] =
 };
 
 /* The order should be in sync with the values in 'fs_hack_is_fsr_single_mode'*/
-static float fsr_ratios[] = {
+static const float fsr_ratios[] = {
     2.0f, /* FSR Performance */
     1.7f, /* FSR Balanced */
     1.5f, /* FSR Quality */
@@ -345,6 +345,7 @@ static void monitor_get_modes( struct fs_monitor *monitor, DEVMODEW **modes, UIN
     DEVMODEW *real_modes, *real_mode, mode_host = {0};
     BOOL additional_modes = FALSE, center_modes = FALSE, landscape;
     const char *env;
+    DEVMODEW mode;
 
     /* Default resolutions + FSR resolutions + Custom resolution */
     struct fs_monitor_size fs_monitor_sizes[ARRAY_SIZE(fs_monitor_sizes_base) + ARRAY_SIZE(fsr_ratios) + 1] = {0};
@@ -467,7 +468,7 @@ static void monitor_get_modes( struct fs_monitor *monitor, DEVMODEW **modes, UIN
     memcpy(fs_monitor_sizes+fs_monitor_sizes_count, fs_monitor_sizes_base, sizeof(fs_monitor_sizes_base));
     fs_monitor_sizes_count += ARRAY_SIZE(fs_monitor_sizes_base);
 
-    max_count = ARRAY_SIZE(fs_monitor_sizes) * DEPTH_COUNT + real_mode_count;
+    max_count = ARRAY_SIZE(fs_monitor_sizes) * DEPTH_COUNT + real_mode_count + 1;
     if (center_modes) max_count += ARRAY_SIZE(fs_monitor_sizes) + real_mode_count;
 
     if (!(*modes = calloc( max_count, sizeof(DEVMODEW) )))
@@ -483,6 +484,9 @@ static void monitor_get_modes( struct fs_monitor *monitor, DEVMODEW **modes, UIN
 
     /* Add the current mode early, in case we have to limit */
     modes_append( *modes, mode_count, &resolutions, &mode_host );
+    mode = mode_host;
+    mode.dmDisplayFrequency = 60;
+    modes_append( *modes, mode_count, &resolutions, &mode );
 
     if ((env = getenv( "WINE_ADDITIONAL_DISPLAY_MODES" )))
         additional_modes = (env[0] != '0');
@@ -492,9 +496,9 @@ static void monitor_get_modes( struct fs_monitor *monitor, DEVMODEW **modes, UIN
     /* Linux reports far fewer resolutions than Windows. Add modes that some games may expect. */
     for (i = 0; i < fs_monitor_sizes_count; ++i)
     {
-        DEVMODEW mode = mode_host;
-
         if (!additional_modes && fs_monitor_sizes[i].additional) continue;
+
+        mode = mode_host;
 
         if (landscape)
         {
@@ -534,7 +538,7 @@ static void monitor_get_modes( struct fs_monitor *monitor, DEVMODEW **modes, UIN
 
     for (i = 0, real_mode = real_modes; i < real_mode_count; ++i)
     {
-        DEVMODEW mode = *real_mode;
+        mode = *real_mode;
 
         /* Don't report modes that are larger than the requested fsr mode or the custom mode */
         if(is_fsr && (is_fsr_custom_mode || is_fsr_single_mode)) {

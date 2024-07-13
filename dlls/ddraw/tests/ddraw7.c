@@ -20016,6 +20016,8 @@ static void test_multiple_devices(void)
     IDirectDraw7 *ddraw;
     IDirect3D7 *d3d;
     ULONG refcount;
+    DWORD stateblock;
+    DWORD value;
     HWND window;
     HRESULT hr;
 
@@ -20034,6 +20036,30 @@ static void test_multiple_devices(void)
 
     hr = IDirect3D7_CreateDevice(d3d, &IID_IDirect3DHALDevice, surface, &device2);
     ok(hr == D3D_OK, "got %#lx.\n", hr);
+
+    hr = IDirect3DDevice7_CreateStateBlock(device, D3DSBT_ALL, &stateblock);
+    ok(hr == D3D_OK, "got %#lx.\n", hr);
+    hr = IDirect3DDevice7_CaptureStateBlock(device2, stateblock);
+    ok(hr == D3DERR_INVALIDSTATEBLOCK, "got %#lx.\n", hr);
+    hr = IDirect3DDevice7_CaptureStateBlock(device, stateblock);
+    ok(hr == D3D_OK, "got %#lx.\n", hr);
+    hr = IDirect3DDevice7_DeleteStateBlock(device, stateblock);
+    ok(hr == D3D_OK, "got %#lx.\n", hr);
+
+    hr = IDirect3DDevice3_SetRenderState(device, D3DRENDERSTATE_ALPHABLENDENABLE, FALSE);
+    ok(hr == DD_OK, "Got unexpected hr %#lx.\n", hr);
+    hr = IDirect3DDevice3_SetRenderState(device2, D3DRENDERSTATE_ALPHABLENDENABLE, FALSE);
+    ok(hr == DD_OK, "Got unexpected hr %#lx.\n", hr);
+
+    hr = IDirect3DDevice3_SetRenderState(device, D3DRENDERSTATE_ALPHABLENDENABLE, TRUE);
+    ok(hr == DD_OK, "Got unexpected hr %#lx.\n", hr);
+    value = 0xdeadbeef;
+    hr = IDirect3DDevice3_GetRenderState(device, D3DRENDERSTATE_ALPHABLENDENABLE, &value);
+    ok(hr == DD_OK, "Got unexpected hr %#lx.\n", hr);
+    ok(value == TRUE, "got %#lx.\n", value);
+    hr = IDirect3DDevice3_GetRenderState(device2, D3DRENDERSTATE_ALPHABLENDENABLE, &value);
+    ok(hr == DD_OK, "Got unexpected hr %#lx.\n", hr);
+    ok(!value, "got %#lx.\n", value);
 
     refcount = IDirect3DDevice3_Release(device);
     ok(!refcount, "Device has %lu references left.\n", refcount);

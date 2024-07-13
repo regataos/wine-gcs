@@ -16476,16 +16476,17 @@ static void run_for_each_device_type(void (*test_func)(const GUID *))
 static void test_multiple_devices(void)
 {
     D3DTEXTUREHANDLE texture_handle, texture_handle2;
+    IDirect3DDevice2 *device, *device2, *device3;
     IDirectDrawSurface *surface, *texture_surf;
     D3DMATERIALHANDLE mat_handle, mat_handle2;
     IDirect3DViewport2 *viewport, *viewport2;
-    IDirect3DDevice2 *device, *device2;
+    IDirectDraw2 *ddraw, *ddraw2;
     IDirect3DMaterial2 *material;
     DDSURFACEDESC surface_desc;
     IDirect3DTexture2 *texture;
-    IDirectDraw2 *ddraw;
     IDirect3D2 *d3d;
     ULONG refcount;
+    DWORD value;
     HWND window;
     HRESULT hr;
 
@@ -16502,9 +16503,13 @@ static void test_multiple_devices(void)
 
     hr = IDirect3DDevice2_GetDirect3D(device, &d3d);
     ok(hr == D3D_OK, "got %#lx.\n", hr);
-
     hr = IDirect3D2_CreateDevice(d3d, &IID_IDirect3DHALDevice, surface, &device2);
     ok(hr == D3D_OK, "got %#lx.\n", hr);
+
+    ddraw2 = create_ddraw();
+    ok(!!ddraw2, "Failed to create a ddraw object.\n");
+    device3 = create_device(ddraw2, window, DDSCL_NORMAL);
+    ok(!!device3, "got NULL.\n");
 
     viewport = create_viewport(device, 0, 0, 640, 480);
     viewport2 = create_viewport(device2, 0, 0, 640, 480);
@@ -16530,6 +16535,8 @@ static void test_multiple_devices(void)
     ok(hr == D3D_OK, "Got unexpected hr %#lx.\n", hr);
     hr = IDirect3DDevice2_SetLightState(device2, D3DLIGHTSTATE_MATERIAL, mat_handle);
     ok(hr == D3D_OK, "Got unexpected hr %#lx.\n", hr);
+    hr = IDirect3DDevice2_SetLightState(device3, D3DLIGHTSTATE_MATERIAL, mat_handle);
+    ok(hr == D3D_OK, "Got unexpected hr %#lx.\n", hr);
     hr = IDirect3DDevice2_SetLightState(device, D3DLIGHTSTATE_MATERIAL, mat_handle2);
     ok(hr == D3D_OK, "Got unexpected hr %#lx.\n", hr);
 
@@ -16537,6 +16544,26 @@ static void test_multiple_devices(void)
     ok(hr == D3D_OK, "got %#lx.\n", hr);
     hr = IDirect3DViewport2_SetBackground(viewport2, mat_handle);
     ok(hr == D3D_OK, "got %#lx.\n", hr);
+
+    hr = IDirect3DDevice2_SetRenderState(device, D3DRENDERSTATE_ALPHABLENDENABLE, FALSE);
+    ok(hr == DD_OK, "Got unexpected hr %#lx.\n", hr);
+    hr = IDirect3DDevice2_SetRenderState(device2, D3DRENDERSTATE_ALPHABLENDENABLE, FALSE);
+    ok(hr == DD_OK, "Got unexpected hr %#lx.\n", hr);
+    hr = IDirect3DDevice2_SetRenderState(device3, D3DRENDERSTATE_ALPHABLENDENABLE, FALSE);
+    ok(hr == DD_OK, "Got unexpected hr %#lx.\n", hr);
+
+    hr = IDirect3DDevice2_SetRenderState(device, D3DRENDERSTATE_ALPHABLENDENABLE, TRUE);
+    ok(hr == DD_OK, "Got unexpected hr %#lx.\n", hr);
+    value = 0xdeadbeef;
+    hr = IDirect3DDevice2_GetRenderState(device, D3DRENDERSTATE_ALPHABLENDENABLE, &value);
+    ok(hr == DD_OK, "Got unexpected hr %#lx.\n", hr);
+    ok(value == TRUE, "got %#lx.\n", value);
+    hr = IDirect3DDevice2_GetRenderState(device2, D3DRENDERSTATE_ALPHABLENDENABLE, &value);
+    ok(hr == DD_OK, "Got unexpected hr %#lx.\n", hr);
+    ok(!value, "got %#lx.\n", value);
+    hr = IDirect3DDevice2_GetRenderState(device3, D3DRENDERSTATE_ALPHABLENDENABLE, &value);
+    ok(hr == DD_OK, "Got unexpected hr %#lx.\n", hr);
+    ok(!value, "got %#lx.\n", value);
 
     memset(&surface_desc, 0, sizeof(surface_desc));
     surface_desc.dwSize = sizeof(surface_desc);
@@ -16553,6 +16580,15 @@ static void test_multiple_devices(void)
     hr = IDirect3DTexture2_GetHandle(texture, device2, &texture_handle2);
     ok(hr == D3D_OK, "got %#lx.\n", hr);
     ok(texture_handle == texture_handle2, "got different handles.\n");
+    hr = IDirect3DTexture2_GetHandle(texture, device3, &texture_handle2);
+    ok(hr == D3D_OK, "got %#lx.\n", hr);
+    ok(texture_handle == texture_handle2, "got different handles.\n");
+    hr = IDirect3DDevice2_SetRenderState(device, D3DRENDERSTATE_TEXTUREHANDLE, texture_handle);
+    ok(hr == D3D_OK, "got %#lx.\n", hr);
+    hr = IDirect3DDevice2_SetRenderState(device2, D3DRENDERSTATE_TEXTUREHANDLE, texture_handle);
+    ok(hr == D3D_OK, "got %#lx.\n", hr);
+    hr = IDirect3DDevice2_SetRenderState(device3, D3DRENDERSTATE_TEXTUREHANDLE, texture_handle);
+    ok(hr == D3D_OK, "got %#lx.\n", hr);
 
     IDirect3DTexture2_Release(texture);
     IDirectDrawSurface_Release(texture_surf);
@@ -16564,10 +16600,13 @@ static void test_multiple_devices(void)
     ok(!refcount, "Device has %lu references left.\n", refcount);
     refcount = IDirect3DDevice2_Release(device2);
     ok(!refcount, "Device has %lu references left.\n", refcount);
+    refcount = IDirect3DDevice2_Release(device3);
+    ok(!refcount, "Device has %lu references left.\n", refcount);
     refcount = IDirectDrawSurface_Release(surface);
     ok(!refcount, "Surface has %lu references left.\n", refcount);
 
     IDirectDraw2_Release(ddraw);
+    IDirectDraw_Release(ddraw2);
     IDirect3D2_Release(d3d);
     DestroyWindow(window);
 }

@@ -70,7 +70,8 @@
 #define VIDEO_CONV_FOZ_TAG_OGVDATA   1
 #define VIDEO_CONV_FOZ_TAG_STREAM    2
 #define VIDEO_CONV_FOZ_TAG_MKVDATA   3
-#define VIDEO_CONV_FOZ_NUM_TAGS      4
+#define VIDEO_CONV_FOZ_TAG_CODEC     4
+#define VIDEO_CONV_FOZ_NUM_TAGS      5
 
 #define DURATION_NONE (UINT64_MAX)
 
@@ -348,10 +349,16 @@ static int video_conv_state_create(struct video_conv_state **out)
     uint64_t blank_file_size;
     int ret, fd;
 
-    if (!(read_fozdb_path = getenv("MEDIACONV_VIDEO_TRANSCODED_FILE")))
+    if ((read_fozdb_path = getenv("MEDIACONV_VIDEO_TRANSCODED_FILE")))
     {
-        GST_ERROR("MEDIACONV_VIDEO_TRANSCODED_FILE is not set.");
-        return CONV_ERROR_ENV_NOT_SET;
+        if ((ret = fozdb_create(read_fozdb_path, O_RDONLY, true /* Read-only? */,
+                VIDEO_CONV_FOZ_NUM_TAGS, &fozdb)) < 0)
+            GST_ERROR("Failed to create read fozdb from %s, ret %d.", read_fozdb_path, ret);
+    }
+    else
+    {
+        GST_ERROR("Env MEDIACONV_VIDEO_TRANSCODED_FILE is not set.");
+        ret = CONV_ERROR_ENV_NOT_SET;
     }
     if (!(blank_video = getenv("MEDIACONV_BLANK_VIDEO_FILE")))
     {
@@ -367,9 +374,6 @@ static int video_conv_state_create(struct video_conv_state **out)
         return CONV_ERROR_OPEN_FAILED;
     }
 
-    if ((ret = fozdb_create(read_fozdb_path, O_RDONLY, true /* Read-only? */, VIDEO_CONV_FOZ_NUM_TAGS, &fozdb)) < 0)
-        GST_ERROR("Failed to create read fozdb from %s, ret %d.", read_fozdb_path, ret);
-
     state = calloc(1, sizeof(*state));
     state->read_fozdb = fozdb;
     state->blank_file = fd;
@@ -378,7 +382,7 @@ static int video_conv_state_create(struct video_conv_state **out)
     state->transcoded_tag = VIDEO_CONV_FOZ_TAG_MKVDATA;
 
     *out = state;
-    return CONV_OK;
+    return ret;
 }
 
 static void video_conv_state_release(struct video_conv_state *state)
@@ -474,7 +478,7 @@ static struct video_conv_state *video_conv_lock_state(VideoConv *conv)
 static GstStateChangeReturn video_conv_change_state(GstElement *element, GstStateChange transition)
 {
     VideoConv *conv = VIDEO_CONV(element);
-    struct video_conv_state *state;
+    struct video_conv_state *state = NULL;
     int ret;
 
     GST_INFO_OBJECT(element, "State transition: %s.", gst_state_change_get_name(transition));
@@ -484,10 +488,7 @@ static GstStateChangeReturn video_conv_change_state(GstElement *element, GstStat
     case GST_STATE_CHANGE_NULL_TO_READY:
         /* Do runtime setup. */
         if ((ret = video_conv_state_create(&state)) < 0)
-        {
             GST_ERROR("Failed to create video conv state, ret %d.", ret);
-            return GST_STATE_CHANGE_FAILURE;
-        }
         pthread_mutex_lock(&conv->state_mutex);
         assert(!conv->state);
         conv->state = state;
@@ -726,7 +727,9 @@ static gboolean video_conv_push_stream_start(VideoConv *conv, struct payload_has
 {
     struct video_conv_state *state;
 
-    push_event(conv->src_pad, gst_event_new_stream_start(format_hash(hash)));
+    /* we don't send a stream-start in pull mode, as it can cause a deadlock */
+    if (conv->active_mode == GST_PAD_MODE_PUSH)
+        push_event(conv->src_pad, gst_event_new_stream_start(format_hash(hash)));
 
     if (!(state = video_conv_lock_state(conv)))
     {
@@ -754,6 +757,23 @@ static gboolean video_conv_push_caps(VideoConv *conv, uint32_t transcode_tag)
     ret = push_event(conv->src_pad, gst_event_new_caps(caps));
     gst_caps_unref(caps);
     return ret;
+}
+
+static gboolean video_conv_push_segment(VideoConv *conv)
+{
+    struct video_conv_state *state;
+    GstSegment segment;
+
+    gst_segment_init(&segment, GST_FORMAT_BYTES);
+    if (!(state = video_conv_lock_state(conv)))
+    {
+        GST_ERROR("VideoConv not yet in READY state?");
+        return false;
+    }
+    segment.stop = state->our_duration;
+    pthread_mutex_unlock(&conv->state_mutex);
+
+    return push_event(conv->src_pad, gst_event_new_segment(&segment));
 }
 
 static gboolean video_conv_sink_event_caps(VideoConv *conv, GstEvent *event)
@@ -839,6 +859,8 @@ static gboolean video_conv_sink_event_eos(VideoConv *conv, GstEvent *event)
         if (!video_conv_push_stream_start(conv, &hash))
             return false;
         if (!video_conv_push_caps(conv, transcode_tag))
+            return false;
+        if (!video_conv_push_segment(conv))
             return false;
 
         /* return false to cancel upstream pads EOS event handling and avoid setting EOS flag */
@@ -1147,6 +1169,19 @@ static gboolean video_conv_src_query(GstPad *pad, GstObject *parent, GstQuery *q
         gst_query_set_duration(query, GST_FORMAT_BYTES, duration);
         return true;
 
+    case GST_QUERY_URI:
+        if (!gst_pad_query_default(pad, parent, query))
+        {
+            if (!(state = video_conv_lock_state(conv)))
+                return false;
+            /* if we don't already have a uri, we will use the hash. This is to ensure
+             * downstream will use a consistent stream-id */
+            gst_query_set_uri(query, format_hash(&state->transcode_hash));
+            pthread_mutex_unlock(&conv->state_mutex);
+            GST_LOG_OBJECT(pad, "Responding with %" GST_PTR_FORMAT, query);
+        }
+        return true;
+
     default:
         return gst_pad_query_default(pad, parent, query);
     }
@@ -1190,7 +1225,6 @@ static gboolean video_conv_src_active_mode(GstPad *pad, GstObject *parent, GstPa
         return video_conv_push_stream_start(conv, &hash);
     return true;
 }
-
 
 static void video_conv_finalize(GObject *object)
 {
@@ -1242,4 +1276,165 @@ static void video_conv_init(VideoConv *conv)
     conv->state = NULL;
     conv->adapter = gst_adapter_new();
     conv->active_mode = GST_PAD_MODE_NONE;
+}
+
+static bool codec_info_to_wg_format(char *codec_info, GstCaps *caps)
+{
+    char *codec_name = codec_info;
+
+    /* Get codec name. */
+    while (*codec_info && *codec_info != ' ')
+        ++codec_info;
+    *(codec_info++) = 0;
+
+    /* FIXME: Get width, height, fps etc. from codec info string. */
+    if (strcmp(codec_name, "cinepak") == 0)
+    {
+        gst_structure_set_name(gst_caps_get_structure(caps, 0), "video/x-cinepak");
+    }
+    else if (strcmp(codec_name, "h264") == 0)
+    {
+        gst_structure_set_name(gst_caps_get_structure(caps, 0), "video/x-h264");
+    }
+    else if (strcmp(codec_name, "wmv1") == 0)
+    {
+        gst_structure_set_name(gst_caps_get_structure(caps, 0), "video/x-wmv");
+        gst_caps_set_simple(caps, "wmvversion", G_TYPE_INT, 1, NULL);
+        gst_caps_set_simple(caps, "format", G_TYPE_STRING, "WMV1", NULL);
+    }
+    else if (strcmp(codec_name, "wmv2") == 0)
+    {
+        gst_structure_set_name(gst_caps_get_structure(caps, 0), "video/x-wmv");
+        gst_caps_set_simple(caps, "wmvversion", G_TYPE_INT, 2, NULL);
+        gst_caps_set_simple(caps, "format", G_TYPE_STRING, "WMV2", NULL);
+    }
+    else if (strcmp(codec_name, "wmv3") == 0)
+    {
+        gst_structure_set_name(gst_caps_get_structure(caps, 0), "video/x-wmv");
+        gst_caps_set_simple(caps, "wmvversion", G_TYPE_INT, 3, NULL);
+        gst_caps_set_simple(caps, "format", G_TYPE_STRING, "WMV3", NULL);
+    }
+    else if  (strcmp(codec_name, "vc1") == 0)
+    {
+        gst_structure_set_name(gst_caps_get_structure(caps, 0), "video/x-wmv");
+        gst_caps_set_simple(caps, "wmvversion", G_TYPE_INT, 3, NULL);
+        gst_caps_set_simple(caps, "format", G_TYPE_STRING, "WVC1", NULL);
+    }
+    else if  (strcmp(codec_name, "wmav1") == 0)
+    {
+        gst_structure_set_name(gst_caps_get_structure(caps, 0), "audio/x-wma");
+        gst_caps_set_simple(caps, "wmaversion", G_TYPE_INT, 1, NULL);
+    }
+    else if  (strcmp(codec_name, "wmav2") == 0)
+    {
+        gst_structure_set_name(gst_caps_get_structure(caps, 0), "audio/x-wma");
+        gst_caps_set_simple(caps, "wmaversion", G_TYPE_INT, 2, NULL);
+    }
+    else if  (strcmp(codec_name, "wmapro") == 0)
+    {
+        gst_structure_set_name(gst_caps_get_structure(caps, 0), "audio/x-wma");
+        gst_caps_set_simple(caps, "wmaversion", G_TYPE_INT, 3, NULL);
+    }
+    else if  (strcmp(codec_name, "wmalossless") == 0)
+    {
+        gst_structure_set_name(gst_caps_get_structure(caps, 0), "audio/x-wma");
+        gst_caps_set_simple(caps, "wmaversion", G_TYPE_INT, 4, NULL);
+    }
+    else if  (strcmp(codec_name, "xma1") == 0)
+    {
+        gst_structure_set_name(gst_caps_get_structure(caps, 0), "audio/x-xma");
+        gst_caps_set_simple(caps, "xmaversion", G_TYPE_INT, 1, NULL);
+    }
+    else if  (strcmp(codec_name, "xma2") == 0)
+    {
+        gst_structure_set_name(gst_caps_get_structure(caps, 0), "audio/x-xma");
+        gst_caps_set_simple(caps, "xmaversion", G_TYPE_INT, 2, NULL);
+    }
+    else
+    {
+        GST_FIXME("Unsupported codec name: %s.\n", codec_name);
+        return false;
+    }
+
+    GST_INFO("Got caps %" GST_PTR_FORMAT, caps);
+    return true;
+}
+
+gint compare_type(const GValue *value_element, GType type)
+{
+    GstElement *element = g_value_get_object(value_element);
+    return !G_TYPE_CHECK_INSTANCE_TYPE(element, type);
+}
+
+static GstElement *gst_bin_get_by_type(GstBin * bin, GType type)
+{
+    GstElement *element = NULL;
+    GstIterator *children;
+    GValue result = {0};
+    gboolean found;
+
+    children = gst_bin_iterate_recurse(bin);
+    found = gst_iterator_find_custom(children, (GCompareFunc)compare_type,
+            &result, (gpointer)type);
+    gst_iterator_free(children);
+
+    if (found)
+    {
+        element = g_value_dup_object(&result);
+        g_value_unset (&result);
+    }
+
+    return element;
+}
+
+bool get_untranscoded_stream_format(GstElement *container, uint32_t stream_index, GstCaps *caps)
+{
+    struct video_conv_state *state;
+    uint8_t *buffer = NULL;
+    uint32_t entry_size, i;
+    char *codec_info;
+    size_t read_size;
+    bool ret = false;
+    VideoConv *conv;
+    int conv_ret;
+
+    if (!(conv = VIDEO_CONV(gst_bin_get_by_type(GST_BIN(container), VIDEO_CONV_TYPE))))
+    {
+        GST_WARNING("Failed to find video converter from %"GST_PTR_FORMAT".", container);
+        return false;
+    }
+
+    if (!(state = video_conv_lock_state(conv)))
+        return false;
+    if (!(state->state_flags & VIDEO_CONV_HAS_TRANSCODED))
+        goto done;
+
+    if (fozdb_entry_size(state->read_fozdb, VIDEO_CONV_FOZ_TAG_CODEC, &state->transcode_hash, &entry_size) < 0)
+    {
+        GST_WARNING("Failed to find codec info entry for stream %s.", format_hash(&state->transcode_hash));
+        goto done;
+    }
+
+    buffer = calloc(1, entry_size + 1);
+    if ((conv_ret = fozdb_read_entry_data(state->read_fozdb, VIDEO_CONV_FOZ_TAG_CODEC, &state->transcode_hash, 0,
+            buffer, entry_size, &read_size, false)) < 0)
+    {
+        GST_ERROR("Failed to read codec info, ret %d.", ret);
+        goto done;
+    }
+
+    /* Get stream codec info line by line. */
+    codec_info = strtok((char *)buffer, "\n");
+    for (i = 0; codec_info && i < stream_index; ++i)
+        codec_info = strtok(NULL, "\n");
+
+    GST_INFO("Got codec info \"%s\" for stream %d.\n", codec_info, stream_index);
+
+    ret = codec_info_to_wg_format(codec_info, caps);
+
+done:
+    if (buffer)
+        free(buffer);
+    pthread_mutex_unlock(&conv->state_mutex);
+    return ret;
 }

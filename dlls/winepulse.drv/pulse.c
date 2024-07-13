@@ -206,6 +206,16 @@ static char *wstr_to_str(const WCHAR *wstr)
     return str;
 }
 
+static void wait_pa_operation_complete(pa_operation *o)
+{
+    if (!o)
+        return;
+
+    while (pa_operation_get_state(o) == PA_OPERATION_RUNNING)
+        pulse_cond_wait();
+    pa_operation_unref(o);
+}
+
 /* Following pulseaudio design here, mainloop has the lock taken whenever
  * it is handling something for pulse, and the lock is required whenever
  * doing any pa_* call that can affect the state in any way
@@ -1567,7 +1577,6 @@ static NTSTATUS pulse_timer_loop(void *args)
     pa_usec_t last_time;
     UINT32 adv_bytes;
     int success;
-    pa_operation *o;
 
     pulse_lock();
     delay.QuadPart = -stream->mmdev_period_usec * 10;
@@ -1585,13 +1594,7 @@ static NTSTATUS pulse_timer_loop(void *args)
 
         delay.QuadPart = -stream->mmdev_period_usec * 10;
 
-        o = pa_stream_update_timing_info(stream->stream, pulse_op_cb, &success);
-        if (o)
-        {
-            while (pa_operation_get_state(o) == PA_OPERATION_RUNNING)
-                pulse_cond_wait();
-            pa_operation_unref(o);
-        }
+        wait_pa_operation_complete(pa_stream_update_timing_info(stream->stream, pulse_op_cb, &success));
         err = pa_stream_get_time(stream->stream, &now);
         if (err == 0)
         {
@@ -1703,11 +1706,7 @@ static NTSTATUS pulse_start(void *args)
     {
         o = pa_stream_cork(stream->stream, 0, pulse_op_cb, &success);
         if (o)
-        {
-            while(pa_operation_get_state(o) == PA_OPERATION_RUNNING)
-                pulse_cond_wait();
-            pa_operation_unref(o);
-        }
+            wait_pa_operation_complete(o);
         else
             success = 0;
         if (!success)
@@ -1751,9 +1750,7 @@ static NTSTATUS pulse_stop(void *args)
         o = pa_stream_cork(stream->stream, 1, pulse_op_cb, &success);
         if (o)
         {
-            while(pa_operation_get_state(o) == PA_OPERATION_RUNNING)
-                pulse_cond_wait();
-            pa_operation_unref(o);
+            wait_pa_operation_complete(o);
         }
         else
             success = 0;
@@ -1798,15 +1795,8 @@ static NTSTATUS pulse_reset(void *args)
         /* If there is still data in the render buffer it needs to be removed from the server */
         int success = 0;
         if (stream->held_bytes)
-        {
-            pa_operation *o = pa_stream_flush(stream->stream, pulse_op_cb, &success);
-            if (o)
-            {
-                while (pa_operation_get_state(o) == PA_OPERATION_RUNNING)
-                    pulse_cond_wait();
-                pa_operation_unref(o);
-            }
-        }
+            wait_pa_operation_complete(pa_stream_flush(stream->stream, pulse_op_cb, &success));
+
         if (success || !stream->held_bytes)
         {
             stream->clock_lastpos = stream->clock_written = 0;
@@ -2237,6 +2227,89 @@ static NTSTATUS pulse_is_format_supported(void *args)
     return STATUS_SUCCESS;
 }
 
+static void sink_name_info_cb(pa_context *c, const pa_sink_info *i, int eol, void *userdata)
+{
+    uint32_t *current_device_index = userdata;
+    pulse_broadcast();
+
+    if (!i || !i->name || !i->name[0])
+        return;
+    *current_device_index = i->index;
+}
+
+struct find_monitor_of_sink_cb_param
+{
+    struct get_loopback_capture_device_params *params;
+    uint32_t current_device_index;
+};
+
+static void find_monitor_of_sink_cb(pa_context *c, const pa_source_info *i, int eol, void *userdata)
+{
+    struct find_monitor_of_sink_cb_param *p = userdata;
+    unsigned int len;
+
+    pulse_broadcast();
+
+    if (!i || !i->name || !i->name[0])
+        return;
+    if (i->monitor_of_sink != p->current_device_index)
+        return;
+
+    len = strlen(i->name) + 1;
+    if (len <= p->params->ret_device_len)
+    {
+        memcpy(p->params->ret_device, i->name, len);
+        p->params->result = STATUS_SUCCESS;
+        return;
+    }
+    p->params->ret_device_len = len;
+    p->params->result = STATUS_BUFFER_TOO_SMALL;
+}
+
+static NTSTATUS pulse_get_loopback_capture_device(void *args)
+{
+    struct get_loopback_capture_device_params *params = args;
+    uint32_t current_device_index = PA_INVALID_INDEX;
+    struct find_monitor_of_sink_cb_param p;
+    const char *device_name;
+    char *name;
+
+    pulse_lock();
+
+    if (!pulse_ml)
+    {
+        pulse_unlock();
+        ERR("Called without main loop running.\n");
+        params->result = E_INVALIDARG;
+        return STATUS_SUCCESS;
+    }
+
+    name = wstr_to_str(params->name);
+    params->result = pulse_connect(name);
+    free(name);
+
+    if (FAILED(params->result))
+    {
+        pulse_unlock();
+        return STATUS_SUCCESS;
+    }
+
+    device_name = params->device;
+    if (device_name && !device_name[0]) device_name = NULL;
+
+    params->result = E_FAIL;
+    wait_pa_operation_complete(pa_context_get_sink_info_by_name(pulse_ctx, device_name, &sink_name_info_cb, &current_device_index));
+    if (current_device_index != PA_INVALID_INDEX)
+    {
+        p.current_device_index = current_device_index;
+        p.params = params;
+        wait_pa_operation_complete(pa_context_get_source_info_list(pulse_ctx, &find_monitor_of_sink_cb, &p));
+    }
+
+    pulse_unlock();
+    return STATUS_SUCCESS;
+}
+
 static NTSTATUS pulse_get_mix_format(void *args)
 {
     struct get_mix_format_params *params = args;
@@ -2590,6 +2663,7 @@ const unixlib_entry_t __wine_unix_call_funcs[] =
     pulse_get_capture_buffer,
     pulse_release_capture_buffer,
     pulse_is_format_supported,
+    pulse_get_loopback_capture_device,
     pulse_get_mix_format,
     pulse_get_device_period,
     pulse_get_buffer_size,
@@ -2779,6 +2853,31 @@ static NTSTATUS pulse_wow64_is_format_supported(void *args)
     };
     pulse_is_format_supported(&params);
     params32->result = params.result;
+    return STATUS_SUCCESS;
+}
+
+static NTSTATUS pulse_wow64_get_loopback_capture_device(void *args)
+{
+    struct
+    {
+        PTR32 name;
+        PTR32 device;
+        PTR32 ret_device;
+        UINT32 ret_device_len;
+        HRESULT result;
+    } *params32 = args;
+
+    struct get_loopback_capture_device_params params =
+    {
+        .name = ULongToPtr(params32->name),
+        .device = ULongToPtr(params32->device),
+        .ret_device = ULongToPtr(params32->device),
+        .ret_device_len = params32->ret_device_len,
+    };
+
+    pulse_get_loopback_capture_device(&params);
+    params32->result = params.result;
+    params32->ret_device_len = params.ret_device_len;
     return STATUS_SUCCESS;
 }
 
@@ -3062,6 +3161,7 @@ const unixlib_entry_t __wine_unix_call_wow64_funcs[] =
     pulse_wow64_get_capture_buffer,
     pulse_release_capture_buffer,
     pulse_wow64_is_format_supported,
+    pulse_wow64_get_loopback_capture_device,
     pulse_wow64_get_mix_format,
     pulse_wow64_get_device_period,
     pulse_wow64_get_buffer_size,

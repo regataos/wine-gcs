@@ -964,8 +964,7 @@ static void sdl_add_device(unsigned int index)
     SDL_JoystickID id;
     SDL_JoystickType joystick_type;
     SDL_GameController *controller = NULL;
-    const char *product, *sdl_serial, *str, *env;
-    BOOL expose_steam_controller = (env = getenv("PROTON_EXPOSE_STEAM_CONTROLLER")) && atoi(env) == 1;
+    const char *product, *sdl_serial;
     char guid_str[33], buffer[ARRAY_SIZE(desc.product)];
     int axis_count, axis_offset;
 
@@ -1004,29 +1003,20 @@ static void sdl_add_device(unsigned int index)
     {
         /* this device is blacklisted */
         TRACE("ignoring %s, in SDL blacklist\n", debugstr_device_desc(&desc));
-        return;
+        goto done;
     }
 
     if (is_wine_blacklisted(desc.vid, desc.pid))
     {
         /* this device is blacklisted */
         TRACE("ignoring %s, in Wine blacklist\n", debugstr_device_desc(&desc));
-        return;
+        goto done;
     }
 
-    if (desc.vid == 0x28de && desc.pid == 0x11ff && !expose_steam_controller)
+    if (desc.vid == 0x28de && desc.pid == 0x11ff)
     {
-        TRACE("Steam virtual controller, pretending it's an Xbox 360 controller\n");
-        desc.vid = 0x045e;
-        desc.pid = 0x028e;
-    }
-
-    /* CW-Bug-Id: #20528 Check steam virtual controller indexes to keep them ordered */
-    /* CW-Bug-Id: #23185 Emulate Steam Input native hooks for native SDL */
-    if ((str = pSDL_JoystickName(joystick)) && sscanf(str, "Microsoft X-Box 360 pad %u", &desc.input) == 1)
-    {
-        if (!expose_steam_controller) desc.input++;
-        desc.version = 0; /* keep version fixed as 0 so we can hardcode it in ntdll rawinput pipe redirection */
+        TRACE("deffering steam input virtual controller to a different backend\n");
+        goto done;
     }
 
     if (pSDL_JoystickGetSerial && (sdl_serial = pSDL_JoystickGetSerial(joystick)))
@@ -1078,7 +1068,14 @@ static void sdl_add_device(unsigned int index)
         impl->axis_offset = axis_offset;
 
         bus_event_queue_device_created(&event_queue, &impl->unix_device, &desc);
+
+        if (controller) controller = pSDL_GameControllerOpen(index);
+        joystick = pSDL_JoystickOpen(index);
     }
+
+done:
+    if (controller) pSDL_GameControllerClose(controller);
+    pSDL_JoystickClose(joystick);
 }
 
 static void process_device_event(SDL_Event *event)

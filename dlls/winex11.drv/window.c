@@ -1760,8 +1760,6 @@ static void sync_client_position( struct x11drv_win_data *data,
     int mask = 0;
     XWindowChanges changes;
 
-    if (!data->client_window) return;
-
     changes.x      = data->client_rect.left - data->whole_rect.left;
     changes.y      = data->client_rect.top - data->whole_rect.top;
     changes.width  = min( max( 1, data->client_rect.right - data->client_rect.left ), 65535 );
@@ -1789,9 +1787,12 @@ static void sync_client_position( struct x11drv_win_data *data,
 
     if (mask)
     {
-        TRACE( "setting client win %lx pos %d,%d,%dx%d changes=%x\n",
-               data->client_window, changes.x, changes.y, changes.width, changes.height, mask );
-        XConfigureWindow( gdi_display, data->client_window, mask, &changes );
+        if (data->client_window)
+        {
+            TRACE( "setting client win %lx pos %d,%d,%dx%d changes=%x\n",
+                   data->client_window, changes.x, changes.y, changes.width, changes.height, mask );
+            XConfigureWindow( gdi_display, data->client_window, mask, &changes );
+        }
         resize_vk_surfaces( data->hwnd, data->client_window, mask, &changes );
     }
 }
@@ -3340,7 +3341,8 @@ void X11DRV_WindowPosChanged( HWND hwnd, HWND insert_after, UINT swp_flags,
     /* don't change position if we are about to minimize or maximize a managed window */
     if (!event_type || event_type == PropertyNotify)
     {
-        if (!(data->managed && (swp_flags & SWP_STATECHANGED) && (new_style & (WS_MINIMIZE|WS_MAXIMIZE))))
+        if (!(data->managed && (swp_flags & SWP_STATECHANGED) && (new_style & (WS_MINIMIZE|WS_MAXIMIZE)))
+             || (!(new_style & WS_MINIMIZE) && wm_is_steamcompmgr( data->display )))
             prev_window = sync_window_position( data, swp_flags, &old_window_rect, &old_whole_rect, &old_client_rect );
         else if (option_increament_configure_serial())
             data->configure_serial = NextRequest( data->display );

@@ -40,6 +40,7 @@ struct object_context
     WCHAR *url;
 
     BYTE *buffer;
+    UINT64 read_offset;
     wg_source_t wg_source;
     WCHAR mime_type[256];
     UINT32 stream_count;
@@ -150,93 +151,6 @@ static HRESULT object_context_create(DWORD flags, IMFByteStream *stream, const W
     *out = &context->IUnknown_iface;
     *out_buf = context->buffer;
     return S_OK;
-}
-
-struct media_source_fallback_callback
-{
-    IMFAsyncCallback IMFAsyncCallback_iface;
-    IMFAsyncResult *result;
-    HANDLE event;
-};
-
-static HRESULT WINAPI media_source_fallback_callback_QueryInterface(IMFAsyncCallback *iface, REFIID riid, void **obj)
-{
-    if (IsEqualIID(riid, &IID_IMFAsyncCallback) ||
-            IsEqualIID(riid, &IID_IUnknown))
-    {
-        *obj = iface;
-        IMFAsyncCallback_AddRef(iface);
-        return S_OK;
-    }
-
-    WARN("Unsupported %s.\n", debugstr_guid(riid));
-    *obj = NULL;
-    return E_NOINTERFACE;
-}
-
-static ULONG WINAPI media_source_fallback_callback_AddRef(IMFAsyncCallback *iface)
-{
-    return 2;
-}
-
-static ULONG WINAPI media_source_fallback_callback_Release(IMFAsyncCallback *iface)
-{
-    return 1;
-}
-
-static HRESULT WINAPI media_source_fallback_callback_GetParameters(IMFAsyncCallback *iface, DWORD *flags, DWORD *queue)
-{
-    return E_NOTIMPL;
-}
-
-static HRESULT WINAPI media_source_fallback_callback_Invoke(IMFAsyncCallback *iface, IMFAsyncResult *result)
-{
-    struct media_source_fallback_callback *impl = CONTAINING_RECORD(iface, struct media_source_fallback_callback, IMFAsyncCallback_iface);
-
-    IMFAsyncResult_AddRef((impl->result = result));
-    SetEvent(impl->event);
-
-    return S_OK;
-}
-
-static const IMFAsyncCallbackVtbl media_source_fallback_callback_vtbl =
-{
-    media_source_fallback_callback_QueryInterface,
-    media_source_fallback_callback_AddRef,
-    media_source_fallback_callback_Release,
-    media_source_fallback_callback_GetParameters,
-    media_source_fallback_callback_Invoke,
-};
-
-static HRESULT create_media_source_fallback(struct object_context *context, IUnknown **object)
-{
-    static const GUID CLSID_GStreamerByteStreamHandler = {0x317df618, 0x5e5a, 0x468a, {0x9f, 0x15, 0xd8, 0x27, 0xa9, 0xa0, 0x81, 0x62}};
-    struct media_source_fallback_callback callback = {{&media_source_fallback_callback_vtbl}};
-    IMFByteStreamHandler *handler;
-    MF_OBJECT_TYPE type;
-    HRESULT hr;
-
-    if (!(callback.event = CreateEventW(NULL, FALSE, FALSE, NULL)))
-        return HRESULT_FROM_WIN32(GetLastError());
-
-    if (FAILED(hr = CoCreateInstance(&CLSID_GStreamerByteStreamHandler, NULL, CLSCTX_INPROC_SERVER,
-            &IID_IMFByteStreamHandler, (void **)&handler)))
-    {
-        CloseHandle(callback.event);
-        return hr;
-    }
-
-    if (SUCCEEDED(hr = IMFByteStreamHandler_BeginCreateObject(handler, context->stream, NULL, MF_RESOLUTION_MEDIASOURCE,
-            NULL, NULL, &callback.IMFAsyncCallback_iface, NULL)))
-    {
-        WaitForSingleObject(callback.event, INFINITE);
-        hr = IMFByteStreamHandler_EndCreateObject(handler, callback.result, &type, object);
-        IMFAsyncResult_Release(callback.result);
-    }
-
-    IMFByteStreamHandler_Release(handler);
-    CloseHandle(callback.event);
-    return hr;
 }
 
 struct media_stream
@@ -456,19 +370,6 @@ static ULONG WINAPI source_async_commands_callback_Release(IMFAsyncCallback *ifa
     return IMFMediaSource_Release(&source->IMFMediaSource_iface);
 }
 
-static HRESULT stream_descriptor_get_media_type(IMFStreamDescriptor *descriptor, IMFMediaType **media_type)
-{
-    IMFMediaTypeHandler *handler;
-    HRESULT hr;
-
-    if (FAILED(hr = IMFStreamDescriptor_GetMediaTypeHandler(descriptor, &handler)))
-        return hr;
-    hr = IMFMediaTypeHandler_GetCurrentMediaType(handler, media_type);
-    IMFMediaTypeHandler_Release(handler);
-
-    return hr;
-}
-
 static HRESULT stream_descriptor_get_major_type(IMFStreamDescriptor *descriptor, GUID *major)
 {
     IMFMediaTypeHandler *handler;
@@ -478,19 +379,6 @@ static HRESULT stream_descriptor_get_major_type(IMFStreamDescriptor *descriptor,
         return hr;
     hr = IMFMediaTypeHandler_GetMajorType(handler, major);
     IMFMediaTypeHandler_Release(handler);
-
-    return hr;
-}
-
-static HRESULT wg_format_from_stream_descriptor(IMFStreamDescriptor *descriptor, struct wg_format *format)
-{
-    IMFMediaType *media_type;
-    HRESULT hr;
-
-    if (FAILED(hr = stream_descriptor_get_media_type(descriptor, &media_type)))
-        return hr;
-    mf_media_type_to_wg_format(media_type, format);
-    IMFMediaType_Release(media_type);
 
     return hr;
 }
@@ -521,29 +409,25 @@ static HRESULT stream_descriptor_set_tag(IMFStreamDescriptor *descriptor,
     return hr;
 }
 
-static HRESULT stream_descriptor_create(UINT32 id, struct wg_format *format, IMFStreamDescriptor **out)
+static HRESULT stream_descriptor_create(UINT32 id, IMFMediaType *media_type, IMFStreamDescriptor **out)
 {
     IMFStreamDescriptor *descriptor;
     IMFMediaTypeHandler *handler;
-    IMFMediaType *type;
     HRESULT hr;
 
-    if (!(type = mf_media_type_from_wg_format(format)))
-        return MF_E_INVALIDMEDIATYPE;
-    if (FAILED(hr = MFCreateStreamDescriptor(id, 1, &type, &descriptor)))
-        goto done;
+    *out = NULL;
+    if (FAILED(hr = MFCreateStreamDescriptor(id, 1, &media_type, &descriptor)))
+        return hr;
 
     if (FAILED(hr = IMFStreamDescriptor_GetMediaTypeHandler(descriptor, &handler)))
         IMFStreamDescriptor_Release(descriptor);
     else
     {
-        hr = IMFMediaTypeHandler_SetCurrentMediaType(handler, type);
+        if (SUCCEEDED(hr = IMFMediaTypeHandler_SetCurrentMediaType(handler, media_type)))
+            *out = descriptor;
         IMFMediaTypeHandler_Release(handler);
     }
 
-done:
-    IMFMediaType_Release(type);
-    *out = SUCCEEDED(hr) ? descriptor : NULL;
     return hr;
 }
 
@@ -602,13 +486,9 @@ static void flush_token_queue(struct media_stream *stream, BOOL send)
 static HRESULT media_stream_start(struct media_stream *stream, BOOL active, BOOL seeking, const PROPVARIANT *position)
 {
     struct media_source *source = impl_from_IMFMediaSource(stream->media_source);
-    struct wg_format format;
     HRESULT hr;
 
     TRACE("source %p, stream %p\n", source, stream);
-
-    if (FAILED(hr = wg_format_from_stream_descriptor(stream->descriptor, &format)))
-        WARN("Failed to get wg_format from stream descriptor, hr %#lx\n", hr);
 
     if (FAILED(hr = IMFMediaEventQueue_QueueEventParamUnk(source->event_queue, active ? MEUpdatedStream : MENewStream,
             &GUID_NULL, S_OK, (IUnknown *)&stream->IMFMediaStream_iface)))
@@ -774,8 +654,8 @@ static HRESULT media_stream_send_eos(struct media_source *source, struct media_s
 static HRESULT wait_on_sample(struct media_stream *stream, IUnknown *token)
 {
     struct media_source *source = impl_from_IMFMediaSource(stream->media_source);
+    UINT64 read_offset, position;
     DWORD id, read_size;
-    UINT64 read_offset;
     IMFSample *sample;
     HRESULT hr;
 
@@ -789,11 +669,21 @@ static HRESULT wait_on_sample(struct media_stream *stream, IUnknown *token)
     {
         if (FAILED(hr = wg_source_get_position(source->wg_source, &read_offset)))
             break;
-        if (FAILED(hr = IMFByteStream_SetCurrentPosition(source->byte_stream, read_offset)))
-            WARN("Failed to seek stream to %#I64x, hr %#lx\n", read_offset, hr);
+        if (read_offset >= source->file_size)
+        {
+            if (FAILED(hr = wg_source_push_data(source->wg_source, read_offset, NULL, 0)))
+                WARN("Failed to push %#lx bytes to source, hr %#lx\n", read_size, hr);
+            continue;
+        }
+
+        if (FAILED(hr = IMFByteStream_GetCurrentPosition(source->byte_stream, &position)))
+            WARN("Failed to get current byte stream position, hr %#lx\n", hr);
+        else if (position != (read_offset = min(read_offset, source->file_size))
+                && FAILED(hr = IMFByteStream_SetCurrentPosition(source->byte_stream, read_offset)))
+            WARN("Failed to set current byte stream position, hr %#lx\n", hr);
         else if (FAILED(hr = IMFByteStream_Read(source->byte_stream, source->read_buffer, SOURCE_BUFFER_SIZE, &read_size)))
             WARN("Failed to read %#lx bytes from stream, hr %#lx\n", read_size, hr);
-        else if (FAILED(hr = wg_source_push_data(source->wg_source, source->read_buffer, read_size)))
+        else if (FAILED(hr = wg_source_push_data(source->wg_source, read_offset, source->read_buffer, read_size)))
             WARN("Failed to push %#lx bytes to source, hr %#lx\n", read_size, hr);
     }
 
@@ -1549,8 +1439,9 @@ static const IMFMediaSourceVtbl IMFMediaSource_vtbl =
 
 static void media_source_init_stream_map(struct media_source *source, UINT stream_count)
 {
-    struct wg_format format;
+    IMFMediaType *media_type;
     int i, n = 0;
+    GUID major;
 
     if (wcscmp(source->mime_type, L"video/mp4"))
     {
@@ -1564,26 +1455,40 @@ static void media_source_init_stream_map(struct media_source *source, UINT strea
 
     for (i = stream_count - 1; i >= 0; i--)
     {
-        wg_source_get_stream_format(source->wg_source, i, &format);
-        if (format.major_type == WG_MAJOR_TYPE_UNKNOWN) continue;
-        if (format.major_type >= WG_MAJOR_TYPE_VIDEO) continue;
-        TRACE("mapping stream %u to wg_source stream %u\n", n, i);
-        source->stream_map[n++] = i;
+        if (SUCCEEDED(wg_source_get_stream_type(source->wg_source, i, &media_type)))
+        {
+            if (SUCCEEDED(IMFMediaType_GetMajorType(media_type, &major))
+                    && IsEqualGUID(&major, &MFMediaType_Video))
+            {
+                TRACE("mapping stream %u to wg_source stream %u\n", n, i);
+                source->stream_map[n++] = i;
+            }
+        }
     }
     for (i = stream_count - 1; i >= 0; i--)
     {
-        wg_source_get_stream_format(source->wg_source, i, &format);
-        if (format.major_type == WG_MAJOR_TYPE_UNKNOWN) continue;
-        if (format.major_type < WG_MAJOR_TYPE_VIDEO) continue;
-        TRACE("mapping stream %u to wg_source stream %u\n", n, i);
-        source->stream_map[n++] = i;
+        if (SUCCEEDED(wg_source_get_stream_type(source->wg_source, i, &media_type)))
+        {
+            if (SUCCEEDED(IMFMediaType_GetMajorType(media_type, &major))
+                    && IsEqualGUID(&major, &MFMediaType_Audio))
+            {
+                TRACE("mapping stream %u to wg_source stream %u\n", n, i);
+                source->stream_map[n++] = i;
+            }
+        }
     }
     for (i = stream_count - 1; i >= 0; i--)
     {
-        wg_source_get_stream_format(source->wg_source, i, &format);
-        if (format.major_type != WG_MAJOR_TYPE_UNKNOWN) continue;
-        TRACE("mapping stream %u to wg_source stream %u\n", n, i);
-        source->stream_map[n++] = i;
+        if (SUCCEEDED(wg_source_get_stream_type(source->wg_source, i, &media_type)))
+        {
+            if (FAILED(IMFMediaType_GetMajorType(media_type, &major))
+                    || (!IsEqualGUID(&major, &MFMediaType_Audio)
+                    && !IsEqualGUID(&major, &MFMediaType_Audio)))
+            {
+                TRACE("mapping stream %u to wg_source stream %u\n", n, i);
+                source->stream_map[n++] = i;
+            }
+        }
     }
 }
 
@@ -1699,12 +1604,16 @@ static HRESULT media_source_create(struct object_context *context, IMFMediaSourc
     {
         IMFStreamDescriptor *descriptor;
         struct media_stream *stream;
-        struct wg_format format;
+        IMFMediaType *media_type;
 
-        if (FAILED(hr = wg_source_get_stream_format(object->wg_source, object->stream_map[i], &format)))
+        if (FAILED(hr = wg_source_get_stream_type(object->wg_source, object->stream_map[i], &media_type)))
             goto fail;
-        if (FAILED(hr = stream_descriptor_create(i + 1, &format, &descriptor)))
+        if (FAILED(hr = stream_descriptor_create(i + 1, media_type, &descriptor)))
+        {
+            IMFMediaType_Release(media_type);
             goto fail;
+        }
+        IMFMediaType_Release(media_type);
         if (FAILED(hr = media_stream_create(&object->IMFMediaSource_iface, descriptor, &stream)))
         {
             IMFStreamDescriptor_Release(descriptor);
@@ -2021,7 +1930,6 @@ static HRESULT WINAPI stream_handler_callback_Invoke(IMFAsyncCallback *iface, IM
     IUnknown *object, *state = IMFAsyncResult_GetStateNoAddRef(result);
     struct object_context *context;
     struct result_entry *entry;
-    UINT64 read_offset;
     DWORD size = 0;
     HRESULT hr;
 
@@ -2033,36 +1941,33 @@ static HRESULT WINAPI stream_handler_callback_Invoke(IMFAsyncCallback *iface, IM
     else if (!context->wg_source && FAILED(hr = wg_source_create(context->url, context->file_size,
             context->buffer, size, context->mime_type, &context->wg_source)))
         WARN("Failed to create wg_source, hr %#lx\n", hr);
-    else if (FAILED(hr = wg_source_push_data(context->wg_source, context->buffer, size)))
+    else if (FAILED(hr = wg_source_push_data(context->wg_source, context->read_offset, context->buffer, size)))
         WARN("Failed to push wg_source data, hr %#lx\n", hr);
-    else if (FAILED(hr = wg_source_get_stream_count(context->wg_source, &context->stream_count)))
-        WARN("Failed to get wg_source status, hr %#lx\n", hr);
-    else if (!context->stream_count)
+    else while (SUCCEEDED(hr))
     {
-        QWORD position, offset;
-        if (FAILED(hr = wg_source_get_position(context->wg_source, &read_offset)))
+        UINT32 read_size;
+        QWORD position;
+
+        if (FAILED(hr = wg_source_get_stream_count(context->wg_source, &context->stream_count)))
+            WARN("Failed to get source stream count, hr %#lx\n", hr);
+        else if (context->stream_count)
+            break;
+        else if (FAILED(hr = wg_source_get_position(context->wg_source, &context->read_offset)))
             WARN("Failed to get wg_source position, hr %#lx\n", hr);
         else if (FAILED(hr = IMFByteStream_GetCurrentPosition(context->stream, &position)))
             WARN("Failed to get current byte stream position, hr %#lx\n", hr);
-        else if (position != (offset = min(read_offset, context->file_size))
-                && FAILED(hr = IMFByteStream_SetCurrentPosition(context->stream, offset)))
+        else if (position != (context->read_offset = min(context->read_offset, context->file_size))
+                && FAILED(hr = IMFByteStream_SetCurrentPosition(context->stream, context->read_offset)))
             WARN("Failed to set current byte stream position, hr %#lx\n", hr);
-        else
-        {
-            UINT32 read_size = min(SOURCE_BUFFER_SIZE, context->file_size - offset);
+        else if ((read_size = min(SOURCE_BUFFER_SIZE, context->file_size - context->read_offset)))
             return IMFByteStream_BeginRead(context->stream, context->buffer, read_size,
                     &handler->IMFAsyncCallback_iface, state);
-        }
+        else if (FAILED(hr = wg_source_push_data(context->wg_source, context->read_offset, NULL, 0)))
+            WARN("Failed to push wg_source data, hr %#lx\n", hr);
     }
-    else if (FAILED(hr = media_source_create(context, (IMFMediaSource **)&object)))
+
+    if (SUCCEEDED(hr) && FAILED(hr = media_source_create(context, (IMFMediaSource **)&object)))
         WARN("Failed to create media source, hr %#lx\n", hr);
-
-    if (FAILED(hr))
-    {
-        FIXME("Falling back to old media source, hr %#lx\n", hr);
-        hr = create_media_source_fallback(context, (IUnknown **)&object);
-    }
-
     if (SUCCEEDED(hr))
     {
         if (FAILED(hr = result_entry_create(context->result, MF_OBJECT_MEDIASOURCE, object, &entry)))

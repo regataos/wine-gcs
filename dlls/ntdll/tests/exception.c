@@ -18,13 +18,20 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "ntdll_test.h"
-
+#include <stdarg.h>
 #include <stdio.h>
 
+#include "ntstatus.h"
+#define WIN32_NO_STATUS
+#include "windef.h"
+#include "winbase.h"
+#include "winnt.h"
+#include "winreg.h"
 #include "winuser.h"
+#include "winternl.h"
 #include "ddk/wdm.h"
 #include "excpt.h"
+#include "wine/test.h"
 #include "intrin.h"
 
 static void *code_mem;
@@ -215,6 +222,7 @@ enum debugger_stages
 static int      my_argc;
 static char**   my_argv;
 static BOOL     is_wow64;
+static BOOL old_wow64;  /* Wine old-style wow64 */
 static BOOL have_vectored_api;
 static enum debugger_stages test_stage;
 
@@ -12415,9 +12423,57 @@ static LONG CALLBACK test_context_exception_request_handler( EXCEPTION_POINTERS 
     return EXCEPTION_CONTINUE_EXECUTION;
 }
 
+#ifdef __i386__
+static const BYTE call_func64_code[] =
+{
+    0x58,                               /* pop %eax */
+    0x0e,                               /* push %cs */
+    0x50,                               /* push %eax */
+    0x6a, 0x33,                         /* push $0x33 */
+    0xe8, 0x00, 0x00, 0x00, 0x00,       /* call 1f */
+    0x83, 0x04, 0x24, 0x05,             /* 1: addl $0x5,(%esp) */
+    0xcb,                               /* lret */
+    /* in 64-bit mode: */
+    0x4c, 0x87, 0xf4,                   /* xchg %r14,%rsp */
+    0x55,                               /* push %rbp */
+    0x48, 0x89, 0xe5,                   /* mov %rsp,%rbp */
+    0x56,                               /* push %rsi */
+    0x57,                               /* push %rdi */
+    0x41, 0x8b, 0x4e, 0x10,             /* mov 0x10(%r14),%ecx */
+    0x41, 0x8b, 0x76, 0x14,             /* mov 0x14(%r14),%esi */
+    0x67, 0x8d, 0x04, 0xcd, 0, 0, 0, 0, /* lea 0x0(,%ecx,8),%eax */
+    0x83, 0xf8, 0x20,                   /* cmp $0x20,%eax */
+    0x7d, 0x05,                         /* jge 1f */
+    0xb8, 0x20, 0x00, 0x00, 0x00,       /* mov $0x20,%eax */
+    0x48, 0x29, 0xc4,                   /* 1: sub %rax,%rsp */
+    0x48, 0x83, 0xe4, 0xf0,             /* and $~15,%rsp */
+    0x48, 0x89, 0xe7,                   /* mov %rsp,%rdi */
+    0xf3, 0x48, 0xa5,                   /* rep movsq */
+    0x48, 0x8b, 0x0c, 0x24,             /* mov (%rsp),%rcx */
+    0x48, 0x8b, 0x54, 0x24, 0x08,       /* mov 0x8(%rsp),%rdx */
+    0x4c, 0x8b, 0x44, 0x24, 0x10,       /* mov 0x10(%rsp),%r8 */
+    0x4c, 0x8b, 0x4c, 0x24, 0x18,       /* mov 0x18(%rsp),%r9 */
+    0x41, 0xff, 0x56, 0x08,             /* callq *0x8(%r14) */
+    0x48, 0x8d, 0x65, 0xf0,             /* lea -0x10(%rbp),%rsp */
+    0x5f,                               /* pop %rdi */
+    0x5e,                               /* pop %rsi */
+    0x5d,                               /* pop %rbp */
+    0x4c, 0x87, 0xf4,                   /* xchg %r14,%rsp */
+    0xcb,                               /* lret */
+};
+
+static NTSTATUS call_func64( ULONG64 func64, int nb_args, ULONG64 *args, void *code_mem )
+{
+    NTSTATUS (WINAPI *func)( ULONG64 func64, int nb_args, ULONG64 *args ) = code_mem;
+
+    memcpy( code_mem, call_func64_code, sizeof(call_func64_code) );
+    return func( func64, nb_args, args );
+}
+#endif
+
 static DWORD WINAPI test_context_exception_request_thread( void *arg )
 {
-#ifndef _WIN64
+#ifdef __i386__
     static BYTE wait_sync_x64_code[] =
     {
         0x89, 0x11,       /* mov %edx,(%rcx) */
@@ -12443,7 +12499,7 @@ static DWORD WINAPI test_context_exception_request_thread( void *arg )
 
     WaitForSingleObject( p->event, INFINITE );
 
-#ifndef _WIN64
+#ifdef __i386__
     memcpy( (char *)code_mem + 1024, wait_sync_x64_code, sizeof(wait_sync_x64_code) );
     args[0] = (ULONG_PTR)&p->sync;
     args[1] = 3;
@@ -12458,7 +12514,7 @@ static DWORD WINAPI test_context_exception_request_thread( void *arg )
     VirtualFree( (void *)p_context_exception_request_value, 0, MEM_RELEASE );
     pRtlRemoveVectoredExceptionHandler( vectored_handler );
 
-#ifndef _WIN64
+#ifdef __i386__
     args[1] = 7;
     if (is_wow64 && !old_wow64) call_func64( (ULONG64)(ULONG_PTR)code_mem + 1024, ARRAY_SIZE(args), args, code_mem );
 #endif
@@ -12700,6 +12756,16 @@ START_TEST(exception)
 #define X(f) p##f = (void*)GetProcAddress(hkernel32, #f)
     X(IsWow64Process);
     if (!pIsWow64Process || !pIsWow64Process( GetCurrentProcess(), &is_wow64 )) is_wow64 = FALSE;
+    if (is_wow64)
+    {
+        TEB64 *teb64 = ULongToPtr( NtCurrentTeb()->GdiBatchCount );
+
+        if (teb64)
+        {
+            PEB64 *peb64 = ULongToPtr(teb64->Peb);
+            old_wow64 = !peb64->LdrData;
+        }
+    }
 
     X(InitializeContext);
     X(InitializeContext2);

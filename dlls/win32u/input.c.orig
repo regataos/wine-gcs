@@ -1803,13 +1803,10 @@ HWND WINAPI NtUserSetCapture( HWND hwnd )
  */
 BOOL release_capture(void)
 {
-    HWND previous = NULL;
-    BOOL ret;
-
-    ret = set_capture_window( 0, 0, &previous );
+    BOOL ret = set_capture_window( 0, 0, NULL );
 
     /* Somebody may have missed some mouse movements */
-    if (ret && previous)
+    if (ret)
     {
         INPUT input = { .type = INPUT_MOUSE };
         input.mi.dwFlags = MOUSEEVENTF_MOVE;
@@ -1865,8 +1862,7 @@ static HWND set_focus_window( HWND hwnd, BOOL from_active, BOOL force )
             send_message( ime_hwnd, WM_IME_INTERNAL, IME_INTERNAL_ACTIVATE,
                           HandleToUlong(hwnd) );
 
-        if (previous)
-            NtUserNotifyWinEvent( EVENT_OBJECT_FOCUS, hwnd, OBJID_CLIENT, 0 );
+        NtUserNotifyWinEvent( EVENT_OBJECT_FOCUS, hwnd, OBJID_CLIENT, 0 );
 
         send_message( hwnd, WM_SETFOCUS, (WPARAM)previous, 0 );
     }
@@ -1918,6 +1914,8 @@ static BOOL set_active_window( HWND hwnd, HWND *prev, BOOL mouse, BOOL focus )
 
     if (hwnd)
     {
+        NtUserNotifyWinEvent( EVENT_SYSTEM_FOREGROUND, hwnd, 0, 0 );
+
         /* send palette messages */
         if (send_message( hwnd, WM_QUERYNEWPALETTE, 0, 0 ))
             send_message_timeout( HWND_BROADCAST, WM_PALETTEISCHANGING, (WPARAM)hwnd, 0,
@@ -2106,7 +2104,10 @@ BOOL set_foreground_window( HWND hwnd, BOOL mouse )
 
         /* already active, set_active_window will do no nothing */
         if (!send_msg_new && hwnd == get_active_window())
+        {
             send_message( hwnd, WM_NCACTIVATE, TRUE, (LPARAM)hwnd );
+            NtUserNotifyWinEvent( EVENT_SYSTEM_FOREGROUND, hwnd, 0, 0 );
+        }
 
         if (send_msg_new)  /* new window belongs to other thread */
             NtUserPostMessage( hwnd, WM_WINE_SETACTIVEWINDOW, (WPARAM)hwnd, 0 );

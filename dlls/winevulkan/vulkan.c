@@ -924,6 +924,24 @@ static void wine_vk_instance_free(struct wine_instance *instance)
     free(instance);
 }
 
+VkResult wine_vkSetLatencySleepModeNV(VkDevice device, VkSwapchainKHR swapchain, const VkLatencySleepModeInfoNV *pSleepModeInfo)
+{
+    VkLatencySleepModeInfoNV sleep_mode_info_host;
+
+    struct wine_device* wine_device = wine_device_from_handle(device);
+    struct wine_swapchain* wine_swapchain = wine_swapchain_from_handle(swapchain);
+
+    wine_device->low_latency_enabled = pSleepModeInfo->lowLatencyMode;
+
+    sleep_mode_info_host.sType = VK_STRUCTURE_TYPE_LATENCY_SLEEP_MODE_INFO_NV;
+    sleep_mode_info_host.pNext = NULL;
+    sleep_mode_info_host.lowLatencyMode = pSleepModeInfo->lowLatencyMode;
+    sleep_mode_info_host.lowLatencyBoost = pSleepModeInfo->lowLatencyBoost;
+    sleep_mode_info_host.minimumIntervalUs = pSleepModeInfo->minimumIntervalUs;
+
+    return wine_device->funcs.p_vkSetLatencySleepModeNV(wine_device->host_device, wine_swapchain->host_swapchain, &sleep_mode_info_host);
+}
+
 VkResult wine_vkAllocateCommandBuffers(VkDevice handle, const VkCommandBufferAllocateInfo *allocate_info,
                                        VkCommandBuffer *buffers )
 {
@@ -2594,6 +2612,8 @@ static VkResult init_fs_hack_images(struct wine_device *device, struct wine_swap
 
         if (createinfo->flags & VK_SWAPCHAIN_CREATE_MUTABLE_FORMAT_BIT_KHR)
             imageInfo.flags |= VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT | VK_IMAGE_CREATE_EXTENDED_USAGE_BIT;
+        else if (createinfo->imageFormat != VK_FORMAT_B8G8R8A8_SRGB)
+            imageInfo.flags |= VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT;
 
         res = device->funcs.p_vkCreateImage(device->host_device, &imageInfo, NULL, &hack->user_image);
         if (res != VK_SUCCESS)
@@ -4047,7 +4067,7 @@ static VkResult record_compute_cmd(struct wine_device *device, struct wine_swapc
     /* vec2: blit dst extents in real coords */
     constants[2] = swapchain->blit_dst.extent.width;
     constants[3] = swapchain->blit_dst.extent.height;
-    
+
     bind_pipeline(device, hack->cmd, &swapchain->blit_pipeline, hack->descriptor_set, constants);
 
     /* local sizes in shader are 8 */
@@ -4298,6 +4318,8 @@ VkResult fshack_vk_queue_present(VkQueue queue_handle, const VkPresentInfoKHR *p
     if (n_hacks > 0)
     {
         VkPipelineStageFlags waitStage, *waitStages, *waitStages_arr = NULL;
+        VkLatencySubmissionPresentIdNV latencySubmitInfo;
+        VkPresentIdKHR *present_id;
 
         if (pPresentInfo->waitSemaphoreCount > 1)
         {
@@ -4320,6 +4342,15 @@ VkResult fshack_vk_queue_present(VkQueue queue_handle, const VkPresentInfoKHR *p
         submitInfo.pCommandBuffers = blit_cmds;
         submitInfo.signalSemaphoreCount = 1;
         submitInfo.pSignalSemaphores = &blit_sema;
+
+        if ((queue->device->low_latency_enabled) &&
+            (present_id = wine_vk_find_struct(&our_presentInfo, PRESENT_ID_KHR)))
+        {
+            latencySubmitInfo.sType = VK_STRUCTURE_TYPE_LATENCY_SUBMISSION_PRESENT_ID_NV;
+            latencySubmitInfo.pNext = NULL;
+            latencySubmitInfo.presentID = *present_id->pPresentIds;
+            submitInfo.pNext = &latencySubmitInfo;
+        }
 
         res = queue->device->funcs.p_vkQueueSubmit(queue->host_queue, 1, &submitInfo, VK_NULL_HANDLE);
         if (res != VK_SUCCESS)

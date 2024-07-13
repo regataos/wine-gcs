@@ -80,6 +80,7 @@ extern GUID DMOVideoFormat_RGB32;
 HRESULT (WINAPI *pMFCreateSampleCopierMFT)(IMFTransform **copier);
 HRESULT (WINAPI *pMFGetTopoNodeCurrentType)(IMFTopologyNode *node, DWORD stream, BOOL output, IMFMediaType **type);
 HRESULT (WINAPI *pMFCreateDXGIDeviceManager)(UINT *token, IMFDXGIDeviceManager **manager);
+HRESULT (WINAPI *pMFCreateVideoSampleAllocatorEx)(REFIID riid, void **obj);
 BOOL has_video_processor;
 
 static BOOL is_vista(void)
@@ -5095,7 +5096,9 @@ static void test_sample_grabber_orientation(GUID subtype)
     {
         const struct buffer_desc buffer_desc_rgb32 =
         {
-            .length = 64 * 64 * 4, .compare = compare_rgb32, .dump = dump_rgb32, .rect = {.right = 64, .bottom = 64},
+            .length = 64 * 64 * 4,
+            .compare = compare_rgb32, .compare_rect = {.right = 64, .bottom = 64},
+            .dump = dump_rgb32, .size = {.cx = 64, .cy = 64},
         };
         const struct sample_desc sample_desc_rgb32 =
         {
@@ -5107,7 +5110,9 @@ static void test_sample_grabber_orientation(GUID subtype)
     {
         const struct buffer_desc buffer_desc_nv12 =
         {
-            .length = 64 * 64 * 3 / 2, .compare = compare_nv12, .dump = dump_nv12, .rect = {.right = 64, .bottom = 64},
+            .length = 64 * 64 * 3 / 2,
+            .compare = compare_nv12, .compare_rect = {.right = 64, .bottom = 64},
+            .dump = dump_nv12, .size = {.cx = 64, .cy = 64},
         };
         const struct sample_desc sample_desc_nv12 =
         {
@@ -6895,6 +6900,7 @@ void init_functions(void)
 
     mod = GetModuleHandleA("mfplat.dll");
     X(MFCreateDXGIDeviceManager);
+    X(MFCreateVideoSampleAllocatorEx);
 #undef X
 
     hr = CoInitialize(NULL);
