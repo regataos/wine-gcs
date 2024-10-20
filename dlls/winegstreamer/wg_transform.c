@@ -62,6 +62,8 @@ struct wg_transform
     GstCaps *desired_caps;
     GstCaps *output_caps;
     GstCaps *input_caps;
+
+    bool draining;
 };
 
 static struct wg_transform *get_transform(wg_transform_t trans)
@@ -83,7 +85,7 @@ static void align_video_info_planes(MFVideoInfo *video_info, gsize plane_align,
 
     align->padding_right = ((plane_align + 1) - (info->width & plane_align)) & plane_align;
     align->padding_bottom = ((plane_align + 1) - (info->height & plane_align)) & plane_align;
-    if (!is_mf_video_area_empty(aperture))
+    if (!is_mf_video_area_empty(aperture) && !plane_align)
     {
         align->padding_right = max(align->padding_right, video_info->dwWidth - aperture->OffsetX.value - aperture->Area.cx);
         align->padding_bottom = max(align->padding_bottom, video_info->dwHeight - aperture->OffsetY.value - aperture->Area.cy);
@@ -553,18 +555,16 @@ NTSTATUS wg_transform_create(void *args)
     GST_INFO("transform %p input caps %"GST_PTR_FORMAT, transform, transform->input_caps);
     input_mime = gst_structure_get_name(gst_caps_get_structure(transform->input_caps, 0));
 
+    if (!strcmp(input_mime, "video/x-h264"))
+        touch_h264_used_tag();
+
     if (!(transform->output_caps = caps_from_media_type(&params->output_type)))
         goto out;
     GST_INFO("transform %p output caps %"GST_PTR_FORMAT, transform, transform->output_caps);
     output_mime = gst_structure_get_name(gst_caps_get_structure(transform->output_caps, 0));
 
     if (IsEqualGUID(&params->input_type.major, &MFMediaType_Video))
-    {
-        /* to detect h264_decoder_create() */
-        if (IsEqualGUID(&params->input_type.u.video->guidFormat, &MFVideoFormat_H264))
-            touch_h264_used_tag();
         transform->input_info = params->input_type.u.video->videoInfo;
-    }
     if (IsEqualGUID(&params->output_type.major, &MFMediaType_Video))
         transform->output_info = params->output_type.u.video->videoInfo;
 
@@ -859,6 +859,13 @@ NTSTATUS wg_transform_push_data(void *args)
     GstBuffer *buffer;
     guint length;
 
+    if (transform->draining)
+    {
+        GST_INFO("Refusing %u bytes, transform is draining", sample->size);
+        params->result = MF_E_NOTACCEPTING;
+        return STATUS_SUCCESS;
+    }
+
     length = gst_atomic_queue_length(transform->input_queue);
     if (length >= transform->attrs.input_queue_length + 1)
     {
@@ -1012,12 +1019,38 @@ static bool sample_needs_buffer_copy(struct wg_sample *sample, GstBuffer *buffer
     return needs_copy;
 }
 
+static void fill_frame_padded_bits(GstBuffer *buffer, const GstVideoAlignment *align, const GstVideoInfo *info)
+{
+    guint i, plane, padded_height, height, stride, padding = align->padding_bottom;
+    GstVideoFrame frame;
+
+    if (!padding || !gst_video_frame_map(&frame, info, buffer, GST_MAP_WRITE)) return;
+
+    /* Windows uses the data in the last scanline for its bottom padding */
+    for (plane = 0; plane < GST_VIDEO_FRAME_N_PLANES(&frame); plane++)
+    {
+        guint8 *data = GST_VIDEO_FRAME_PLANE_DATA(&frame, plane);
+        gint comp[GST_VIDEO_MAX_COMPONENTS];
+
+        gst_video_format_info_component(frame.info.finfo, plane, comp);
+        padded_height = GST_VIDEO_FORMAT_INFO_SCALE_HEIGHT(frame.info.finfo, comp[0], info->height + padding);
+        height = GST_VIDEO_FRAME_COMP_HEIGHT(&frame, comp[0]);
+        stride = GST_VIDEO_FRAME_PLANE_STRIDE(&frame, plane);
+        data += height * stride;
+
+        for (i = 0; i < padded_height - height; i++) memcpy(data + i * stride, data - stride, stride);
+    }
+
+    gst_video_frame_unmap(&frame);
+}
+
 static NTSTATUS read_transform_output_video(struct wg_sample *sample, GstBuffer *buffer,
-        const GstVideoInfo *src_video_info, const GstVideoInfo *dst_video_info)
+        const GstVideoInfo *src_video_info, const GstVideoInfo *dst_video_info, const GstVideoAlignment *align)
 {
     gsize total_size;
     NTSTATUS status;
     bool needs_copy;
+    const char *sgi;
 
     if (!(needs_copy = sample_needs_buffer_copy(sample, buffer, &total_size)))
         status = STATUS_SUCCESS;
@@ -1030,6 +1063,9 @@ static NTSTATUS read_transform_output_video(struct wg_sample *sample, GstBuffer 
         sample->size = 0;
         return status;
     }
+
+    if ((sgi = getenv("SteamGameId")) && !strcmp(sgi, "1449280"))
+        fill_frame_padded_bits(buffer, align, dst_video_info);
 
     set_sample_flags_from_buffer(sample, buffer, total_size);
 
@@ -1073,6 +1109,33 @@ static NTSTATUS read_transform_output(struct wg_sample *sample, GstBuffer *buffe
     return STATUS_SUCCESS;
 }
 
+static NTSTATUS complete_drain(struct wg_transform *transform)
+{
+    if (transform->draining && gst_atomic_queue_length(transform->input_queue) == 0)
+    {
+        GstEvent *event;
+        transform->draining = false;
+        if (!(event = gst_event_new_segment_done(GST_FORMAT_TIME, -1))
+                || !push_event(transform->my_src, event))
+            goto error;
+        if (!(event = gst_event_new_eos())
+                || !push_event(transform->my_src, event))
+            goto error;
+        if (!(event = gst_event_new_stream_start("stream"))
+                || !push_event(transform->my_src, event))
+            goto error;
+        if (!(event = gst_event_new_segment(&transform->segment))
+                || !push_event(transform->my_src, event))
+            goto error;
+    }
+
+    return STATUS_SUCCESS;
+
+error:
+    GST_ERROR("Failed to drain transform %p.", transform);
+    return STATUS_UNSUCCESSFUL;
+}
+
 static bool get_transform_output(struct wg_transform *transform, struct wg_sample *sample)
 {
     GstBuffer *input_buffer;
@@ -1085,6 +1148,8 @@ static bool get_transform_output(struct wg_transform *transform, struct wg_sampl
     {
         if ((ret = gst_pad_push(transform->my_src, input_buffer)))
             GST_WARNING("Failed to push transform input, error %d", ret);
+
+        complete_drain(transform);
     }
 
     /* Remove the sample so the allocator cannot use it */
@@ -1150,7 +1215,7 @@ NTSTATUS wg_transform_read_data(void *args)
 
     if (!strcmp(output_mime, "video/x-raw"))
         status = read_transform_output_video(sample, output_buffer,
-                &src_video_info, &dst_video_info);
+                &src_video_info, &dst_video_info, &align);
     else
         status = read_transform_output(sample, output_buffer);
 
@@ -1200,36 +1265,12 @@ NTSTATUS wg_transform_get_status(void *args)
 NTSTATUS wg_transform_drain(void *args)
 {
     struct wg_transform *transform = get_transform(*(wg_transform_t *)args);
-    GstBuffer *input_buffer;
-    GstFlowReturn ret;
-    GstEvent *event;
 
-    GST_LOG("transform %p", transform);
+    GST_LOG("transform %p, draining %d buffers", transform, gst_atomic_queue_length(transform->input_queue));
 
-    while ((input_buffer = gst_atomic_queue_pop(transform->input_queue)))
-    {
-        if ((ret = gst_pad_push(transform->my_src, input_buffer)))
-            GST_WARNING("Failed to push transform input, error %d", ret);
-    }
+    transform->draining = true;
 
-    if (!(event = gst_event_new_segment_done(GST_FORMAT_TIME, -1))
-            || !push_event(transform->my_src, event))
-        goto error;
-    if (!(event = gst_event_new_eos())
-            || !push_event(transform->my_src, event))
-        goto error;
-    if (!(event = gst_event_new_stream_start("stream"))
-            || !push_event(transform->my_src, event))
-        goto error;
-    if (!(event = gst_event_new_segment(&transform->segment))
-            || !push_event(transform->my_src, event))
-        goto error;
-
-    return STATUS_SUCCESS;
-
-error:
-    GST_ERROR("Failed to drain transform %p.", transform);
-    return STATUS_UNSUCCESSFUL;
+    return complete_drain(transform);
 }
 
 NTSTATUS wg_transform_flush(void *args)

@@ -38,6 +38,8 @@ extern obj_handle_t alloc_handle( struct process *process, void *obj,
                                   unsigned int access, unsigned int attr );
 extern obj_handle_t alloc_handle_no_access_check( struct process *process, void *ptr,
                                                   unsigned int access, unsigned int attr );
+extern obj_handle_t alloc_handle_user_open( struct process *process, void *obj,
+                                            unsigned int access, unsigned int attr );
 extern unsigned int close_handle( struct process *process, obj_handle_t handle );
 extern struct object *get_handle_obj( struct process *process, obj_handle_t handle,
                                       unsigned int access, const struct object_ops *ops );
@@ -55,5 +57,7 @@ extern struct handle_table *copy_handle_table( struct process *process, struct p
                                                const obj_handle_t *handles, unsigned int handle_count,
                                                const obj_handle_t *std_handles );
 extern unsigned int get_handle_table_count( struct process *process);
+void enum_handles_of_type( const struct object_ops *ops,
+                           int (*cb)(struct process*, struct object*, void*), void *user );
 
 #endif  /* __WINE_SERVER_HANDLE_H */

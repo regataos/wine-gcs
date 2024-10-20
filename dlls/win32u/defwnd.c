@@ -1874,6 +1874,7 @@ static void handle_nc_calc_size( HWND hwnd, WPARAM wparam, RECT *win_rect )
         if (!((style & WS_POPUP) && (ex_style & WS_EX_TOOLWINDOW))  /* Bug 20038: game splash screens */
             && !(sgi && !strcmp( sgi, "2563800" ))                  /* Bug 23342: The Last Game */
             && !(sgi && !strcmp( sgi, "1240440" ))                  /* Bug 23802: Halo Infinite */
+            && !(sgi && !strcmp( sgi, "2883280" ))                  /* Bug 24151: Dog Brew */
            )
             return;
     }
@@ -2639,6 +2640,8 @@ LRESULT default_window_proc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam, 
 
     case WM_SETTEXT:
         result = set_window_text( hwnd, (void *)lparam, ansi );
+        if (result)
+            NtUserNotifyWinEvent( EVENT_OBJECT_NAMECHANGE, hwnd, OBJID_WINDOW, 0 );
         if (result && (get_window_long( hwnd, GWL_STYLE ) & WS_CAPTION) == WS_CAPTION)
             handle_nc_paint( hwnd , (HRGN)1 );  /* repaint caption */
         break;

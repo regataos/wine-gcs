@@ -946,6 +946,8 @@
 @ stdcall RtlRaiseStatus(long)
 @ stdcall RtlRandom(ptr)
 @ stdcall RtlRandomEx(ptr)
+@ stdcall RtlRbInsertNodeEx(ptr ptr long ptr)
+@ stdcall RtlRbRemoveNode(ptr ptr)
 @ stdcall RtlReAllocateHeap(long long ptr long)
 @ stub RtlReadMemoryStream
 @ stub RtlReadOutOfProcessMemoryStream

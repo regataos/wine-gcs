@@ -69,6 +69,7 @@ struct pulse_stream
     float vol[PA_CHANNELS_MAX];
 
     REFERENCE_TIME def_period;
+    REFERENCE_TIME duration;
 
     INT32 locked;
     BOOL started;
@@ -737,7 +738,7 @@ static void pulse_probe_settings(pa_mainloop *ml, pa_context *ctx, int render, c
         ret = -1;
     else if (render)
         ret = pa_stream_connect_playback(stream, pulse_name, &attr,
-        PA_STREAM_START_CORKED|PA_STREAM_FIX_RATE|PA_STREAM_FIX_CHANNELS|PA_STREAM_EARLY_REQUESTS|PA_STREAM_VARIABLE_RATE, NULL, NULL);
+        PA_STREAM_START_CORKED|PA_STREAM_FIX_RATE|PA_STREAM_FIX_CHANNELS|PA_STREAM_EARLY_REQUESTS, NULL, NULL);
     else
         ret = pa_stream_connect_record(stream, pulse_name, &attr, PA_STREAM_START_CORKED|PA_STREAM_FIX_RATE|PA_STREAM_FIX_CHANNELS|PA_STREAM_EARLY_REQUESTS);
     if (ret >= 0) {
@@ -1081,10 +1082,8 @@ static HRESULT pulse_stream_connect(struct pulse_stream *stream, const char *pul
     else
         pulse_name = NULL;  /* use default */
 
-    if (stream->dataflow == eRender) flags |= PA_STREAM_VARIABLE_RATE;
-
     if (stream->dataflow == eRender)
-        ret = pa_stream_connect_playback(stream->stream, pulse_name, &attr, flags, NULL, NULL);
+        ret = pa_stream_connect_playback(stream->stream, pulse_name, &attr, flags|PA_STREAM_VARIABLE_RATE, NULL, NULL);
     else
         ret = pa_stream_connect_record(stream->stream, pulse_name, &attr, flags);
     if (ret < 0) {
@@ -1178,6 +1177,7 @@ static NTSTATUS pulse_create_stream(void *args)
         duration = 3 * period;
 
     stream->def_period = period;
+    stream->duration = params->duration;
 
     stream->period_bytes = pa_frame_size(&stream->ss) * muldiv(period, stream->ss.rate, 10000000);
 
@@ -2519,30 +2519,64 @@ static NTSTATUS pulse_set_sample_rate(void *args)
     struct set_sample_rate_params *params = args;
     struct pulse_stream *stream = handle_get_stream(params->stream);
     HRESULT hr = S_OK;
-    pa_operation *o;
     int success;
+    SIZE_T size, new_bufsize_frames;
+    BYTE *new_buffer = NULL;
+    pa_sample_spec new_ss;
+    pa_operation *o;
 
     pulse_lock();
-    if (!pulse_stream_valid(stream))
+    if (!pulse_stream_valid(stream)) {
         hr = AUDCLNT_E_DEVICE_INVALIDATED;
-    else
-    {
-        if (!(o = pa_stream_update_sample_rate(stream->stream, params->new_rate, pulse_op_cb, &success)))
-            success = 0;
-        else
-        {
-            while (pa_operation_get_state(o) == PA_OPERATION_RUNNING)
-                pthread_cond_wait(&pulse_cond, &pulse_mutex);
-            pa_operation_unref(o);
-        }
-
-        if (!success) hr = E_FAIL;
-        else
-        {
-            stream->ss.rate = params->new_rate;
-            stream->period_bytes = pa_frame_size(&stream->ss) * muldiv(stream->mmdev_period_usec, stream->ss.rate, 1000000);
-        }
+        goto exit;
     }
+    if (stream->dataflow != eRender) {
+        hr = E_NOTIMPL;
+        goto exit;
+    }
+
+    new_ss = stream->ss;
+    new_ss.rate = params->rate;
+    new_bufsize_frames = ceil((stream->duration / 10000000.) * new_ss.rate);
+    size = new_bufsize_frames * 2 * pa_frame_size(&stream->ss);
+
+    if (NtAllocateVirtualMemory(GetCurrentProcess(), (void **)&new_buffer,
+                                zero_bits, &size, MEM_COMMIT, PAGE_READWRITE)) {
+        hr = E_OUTOFMEMORY;
+        goto exit;
+    }
+
+    o = pa_stream_update_sample_rate(stream->stream, params->rate, pulse_op_cb, &success);
+    if (o)
+        wait_pa_operation_complete(o);
+    else
+        success = 0;
+
+    if (!success) {
+        hr = E_OUTOFMEMORY;
+        size = 0;
+        NtFreeVirtualMemory(GetCurrentProcess(), (void **)&new_buffer, &size, MEM_RELEASE);
+        goto exit;
+    }
+
+    if (stream->held_bytes)
+        wait_pa_operation_complete(pa_stream_flush(stream->stream, pulse_op_cb, &success));
+
+    stream->clock_lastpos = stream->clock_written = 0;
+    stream->pa_offs_bytes = stream->lcl_offs_bytes = 0;
+    stream->held_bytes = stream->pa_held_bytes = 0;
+    stream->period_bytes = pa_frame_size(&new_ss) * muldiv(stream->mmdev_period_usec, new_ss.rate, 1000000);
+    stream->real_bufsize_bytes = size;
+    stream->bufsize_frames = new_bufsize_frames;
+    stream->ss = new_ss;
+
+    size = 0;
+    NtFreeVirtualMemory(GetCurrentProcess(), (void **)&stream->local_buffer, &size, MEM_RELEASE);
+
+    silence_buffer(new_ss.format, new_buffer, size);
+    stream->local_buffer = new_buffer;
+
+exit:
     pulse_unlock();
 
     params->result = hr;
@@ -3172,7 +3206,7 @@ const unixlib_entry_t __wine_unix_call_wow64_funcs[] =
     pulse_wow64_get_position,
     pulse_wow64_set_volumes,
     pulse_wow64_set_event_handle,
-    pulse_not_implemented,
+    pulse_set_sample_rate,
     pulse_wow64_test_connect,
     pulse_is_started,
     pulse_wow64_get_prop_value,

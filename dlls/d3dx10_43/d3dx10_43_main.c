@@ -148,13 +148,6 @@ HRESULT WINAPI D3DX10CreateDeviceAndSwapChain(IDXGIAdapter *adapter, D3D10_DRIVE
             D3D10_1_SDK_VERSION, desc, swapchain, (ID3D10Device1 **)device);
 }
 
-HRESULT WINAPI D3DX10FilterTexture(ID3D10Resource *texture, UINT src_level, UINT filter)
-{
-    FIXME("texture %p, src_level %u, filter %#x stub!\n", texture, src_level, filter);
-
-    return E_NOTIMPL;
-}
-
 HRESULT WINAPI D3DX10GetFeatureLevel1(ID3D10Device *device, ID3D10Device1 **device1)
 {
     TRACE("device %p, device1 %p.\n", device, device1);
@@ -167,12 +160,4 @@ D3DX_CPU_OPTIMIZATION WINAPI D3DXCpuOptimizations(BOOL enable)
     FIXME("enable %#x stub.\n", enable);
 
     return D3DX_NOT_OPTIMIZED;
-}
-
-HRESULT WINAPI D3DX10LoadTextureFromTexture(ID3D10Resource *src_texture, D3DX10_TEXTURE_LOAD_INFO *load_info,
-        ID3D10Resource *dst_texture)
-{
-    FIXME("src_texture %p, load_info %p, dst_texture %p stub!\n", src_texture, load_info, dst_texture);
-
-    return E_NOTIMPL;
 }

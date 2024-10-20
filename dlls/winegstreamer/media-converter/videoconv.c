@@ -326,7 +326,7 @@ int pad_reader_read(void *data_src, uint8_t *buffer, size_t size, size_t *read_s
         }
         else
         {
-            GST_WARNING("Failed to pull data from %"GST_PTR_FORMAT", reason %s.",
+            GST_ERROR("Failed to pull data from %"GST_PTR_FORMAT", reason %s.",
                     reader->pad, gst_flow_get_name(gst_ret));
             return CONV_ERROR;
         }
@@ -387,6 +387,8 @@ static int video_conv_state_create(struct video_conv_state **out)
 
 static void video_conv_state_release(struct video_conv_state *state)
 {
+    if ((state->state_flags & VIDEO_CONV_IS_DUMPING))
+        pthread_mutex_unlock(&dump_fozdb.mutex);
     if (state->read_fozdb)
         fozdb_release(state->read_fozdb);
     close(state->blank_file);
@@ -700,7 +702,7 @@ static void video_conv_init_transcode(VideoConv *conv)
     }
     else
     {
-        GST_WARNING("Failed to hash upstream data.");
+        GST_ERROR("Failed to hash upstream data.");
     }
 
     if (!(state->state_flags & VIDEO_CONV_IS_DUMPING))

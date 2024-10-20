@@ -350,11 +350,14 @@ DECL_HANDLER(set_token_default_dacl);
 DECL_HANDLER(set_security_object);
 DECL_HANDLER(get_security_object);
 DECL_HANDLER(get_system_handles);
+DECL_HANDLER(get_tcp_connections);
+DECL_HANDLER(get_udp_endpoints);
 DECL_HANDLER(create_mailslot);
 DECL_HANDLER(set_mailslot_info);
 DECL_HANDLER(create_directory);
 DECL_HANDLER(open_directory);
 DECL_HANDLER(get_directory_entry);
+DECL_HANDLER(query_directory_file);
 DECL_HANDLER(create_symlink);
 DECL_HANDLER(open_symlink);
 DECL_HANDLER(query_symlink);
@@ -653,11 +656,14 @@ static const req_handler req_handlers[REQ_NB_REQUESTS] =
     (req_handler)req_set_security_object,
     (req_handler)req_get_security_object,
     (req_handler)req_get_system_handles,
+    (req_handler)req_get_tcp_connections,
+    (req_handler)req_get_udp_endpoints,
     (req_handler)req_create_mailslot,
     (req_handler)req_set_mailslot_info,
     (req_handler)req_create_directory,
     (req_handler)req_open_directory,
     (req_handler)req_get_directory_entry,
+    (req_handler)req_query_directory_file,
     (req_handler)req_create_symlink,
     (req_handler)req_open_symlink,
     (req_handler)req_query_symlink,
@@ -761,8 +767,10 @@ C_ASSERT( sizeof(struct object_type_info) == 44 );
 C_ASSERT( sizeof(struct process_info) == 40 );
 C_ASSERT( sizeof(struct rawinput_device) == 12 );
 C_ASSERT( sizeof(struct thread_info) == 40 );
+C_ASSERT( sizeof(tcp_connection) == 60 );
 C_ASSERT( sizeof(thread_id_t) == 4 );
 C_ASSERT( sizeof(timeout_t) == 8 );
+C_ASSERT( sizeof(udp_endpoint) == 32 );
 C_ASSERT( sizeof(unsigned char) == 1 );
 C_ASSERT( sizeof(unsigned int) == 4 );
 C_ASSERT( sizeof(unsigned short) == 2 );
@@ -1113,9 +1121,9 @@ C_ASSERT( FIELD_OFFSET(struct recv_socket_reply, wait) == 8 );
 C_ASSERT( FIELD_OFFSET(struct recv_socket_reply, options) == 12 );
 C_ASSERT( FIELD_OFFSET(struct recv_socket_reply, nonblocking) == 16 );
 C_ASSERT( sizeof(struct recv_socket_reply) == 24 );
+C_ASSERT( FIELD_OFFSET(struct send_socket_request, flags) == 12 );
 C_ASSERT( FIELD_OFFSET(struct send_socket_request, async) == 16 );
-C_ASSERT( FIELD_OFFSET(struct send_socket_request, force_async) == 56 );
-C_ASSERT( sizeof(struct send_socket_request) == 64 );
+C_ASSERT( sizeof(struct send_socket_request) == 56 );
 C_ASSERT( FIELD_OFFSET(struct send_socket_reply, wait) == 8 );
 C_ASSERT( FIELD_OFFSET(struct send_socket_reply, options) == 12 );
 C_ASSERT( FIELD_OFFSET(struct send_socket_reply, nonblocking) == 16 );
@@ -1852,6 +1860,7 @@ C_ASSERT( FIELD_OFFSET(struct set_active_window_request, handle) == 12 );
 C_ASSERT( FIELD_OFFSET(struct set_active_window_request, internal_msg) == 16 );
 C_ASSERT( sizeof(struct set_active_window_request) == 24 );
 C_ASSERT( FIELD_OFFSET(struct set_active_window_reply, previous) == 8 );
+C_ASSERT( FIELD_OFFSET(struct set_active_window_reply, foreground_tid) == 12 );
 C_ASSERT( sizeof(struct set_active_window_reply) == 16 );
 C_ASSERT( FIELD_OFFSET(struct set_capture_window_request, handle) == 12 );
 C_ASSERT( FIELD_OFFSET(struct set_capture_window_request, flags) == 16 );
@@ -2110,6 +2119,13 @@ C_ASSERT( sizeof(struct get_security_object_reply) == 16 );
 C_ASSERT( sizeof(struct get_system_handles_request) == 16 );
 C_ASSERT( FIELD_OFFSET(struct get_system_handles_reply, count) == 8 );
 C_ASSERT( sizeof(struct get_system_handles_reply) == 16 );
+C_ASSERT( FIELD_OFFSET(struct get_tcp_connections_request, state_filter) == 12 );
+C_ASSERT( sizeof(struct get_tcp_connections_request) == 16 );
+C_ASSERT( FIELD_OFFSET(struct get_tcp_connections_reply, count) == 8 );
+C_ASSERT( sizeof(struct get_tcp_connections_reply) == 16 );
+C_ASSERT( sizeof(struct get_udp_endpoints_request) == 16 );
+C_ASSERT( FIELD_OFFSET(struct get_udp_endpoints_reply, count) == 8 );
+C_ASSERT( sizeof(struct get_udp_endpoints_reply) == 16 );
 C_ASSERT( FIELD_OFFSET(struct create_mailslot_request, access) == 12 );
 C_ASSERT( FIELD_OFFSET(struct create_mailslot_request, read_timeout) == 16 );
 C_ASSERT( FIELD_OFFSET(struct create_mailslot_request, max_msgsize) == 24 );
@@ -2139,6 +2155,11 @@ C_ASSERT( sizeof(struct get_directory_entry_request) == 24 );
 C_ASSERT( FIELD_OFFSET(struct get_directory_entry_reply, total_len) == 8 );
 C_ASSERT( FIELD_OFFSET(struct get_directory_entry_reply, name_len) == 12 );
 C_ASSERT( sizeof(struct get_directory_entry_reply) == 16 );
+C_ASSERT( FIELD_OFFSET(struct query_directory_file_request, handle) == 12 );
+C_ASSERT( FIELD_OFFSET(struct query_directory_file_request, restart_scan) == 16 );
+C_ASSERT( sizeof(struct query_directory_file_request) == 24 );
+C_ASSERT( FIELD_OFFSET(struct query_directory_file_reply, total_len) == 8 );
+C_ASSERT( sizeof(struct query_directory_file_reply) == 16 );
 C_ASSERT( FIELD_OFFSET(struct create_symlink_request, access) == 12 );
 C_ASSERT( sizeof(struct create_symlink_request) == 16 );
 C_ASSERT( FIELD_OFFSET(struct create_symlink_reply, handle) == 8 );

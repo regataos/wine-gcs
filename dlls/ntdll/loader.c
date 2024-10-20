@@ -43,7 +43,6 @@ WINE_DECLARE_DEBUG_CHANNEL(relay);
 WINE_DECLARE_DEBUG_CHANNEL(snoop);
 WINE_DECLARE_DEBUG_CHANNEL(loaddll);
 WINE_DECLARE_DEBUG_CHANNEL(imports);
-WINE_DECLARE_DEBUG_CHANNEL(winediag);
 
 #ifdef _WIN64
 #define DEFAULT_SECURITY_COOKIE_64  (((ULONGLONG)0x00002b99 << 32) | 0x2ddfa232)
@@ -151,9 +150,9 @@ typedef struct _wine_modref
     BOOL                  system;
 } WINE_MODREF;
 
-static UINT tls_module_count;      /* number of modules with TLS directory */
+static UINT tls_module_count = 32;     /* number of modules with TLS directory */
 static IMAGE_TLS_DIRECTORY *tls_dirs;  /* array of TLS directories */
-LIST_ENTRY tls_links = { &tls_links, &tls_links };
+static ULONG tls_thread_count;         /* number of threads for which ThreadLocalStoragePointer is allocated in TEB. */
 
 static RTL_CRITICAL_SECTION loader_section;
 static RTL_CRITICAL_SECTION_DEBUG critsect_debug =
@@ -189,6 +188,8 @@ static PEB_LDR_DATA ldr =
     { &ldr.InMemoryOrderModuleList, &ldr.InMemoryOrderModuleList },
     { &ldr.InInitializationOrderModuleList, &ldr.InInitializationOrderModuleList }
 };
+
+static RTL_RB_TREE base_address_index_tree;
 
 static RTL_BITMAP tls_bitmap;
 static RTL_BITMAP tls_expansion_bitmap;
@@ -272,6 +273,38 @@ static void module_push_unload_trace( const WINE_MODREF *wm )
 
     unload_trace_seq = (unload_trace_seq + 1) % ARRAY_SIZE(unload_traces);
     unload_trace_ptr = unload_traces;
+}
+
+static int rtl_rb_tree_put( RTL_RB_TREE *tree, const void *key, RTL_BALANCED_NODE *entry,
+                            int (*compare_func)( const void *key, const RTL_BALANCED_NODE *entry ))
+{
+    RTL_BALANCED_NODE *parent = tree->root;
+    BOOLEAN right = 0;
+    int c;
+
+    while (parent)
+    {
+        if (!(c = compare_func( key, parent ))) return -1;
+        right = c > 0;
+        if (!parent->Children[right]) break;
+        parent = parent->Children[right];
+    }
+    RtlRbInsertNodeEx( tree, parent, right, entry );
+    return 0;
+}
+
+static RTL_BALANCED_NODE *rtl_rb_tree_get( RTL_RB_TREE *tree, const void *key,
+                                           int (*compare_func)( const void *key, const RTL_BALANCED_NODE *entry ))
+{
+    RTL_BALANCED_NODE *parent = tree->root;
+    int c;
+
+    while (parent)
+    {
+        if (!(c = compare_func( key, parent ))) return parent;
+        parent = parent->Children[c > 0];
+    }
+    return NULL;
 }
 
 #ifdef __arm64ec__
@@ -561,6 +594,8 @@ static void call_ldr_notifications( ULONG reason, LDR_DATA_TABLE_ENTRY *module )
     struct ldr_notification *notify, *notify_next;
     LDR_DLL_NOTIFICATION_DATA data;
 
+    if (process_detaching && reason == LDR_DLL_NOTIFICATION_REASON_UNLOADED) return;
+
     data.Loaded.Flags       = 0;
     data.Loaded.FullDllName = &module->FullDllName;
     data.Loaded.BaseDllName = &module->BaseDllName;
@@ -577,6 +612,17 @@ static void call_ldr_notifications( ULONG reason, LDR_DATA_TABLE_ENTRY *module )
         TRACE_(relay)("\1Ret  LDR notification callback (proc=%p,reason=%lu,data=%p,context=%p)\n",
                 notify->callback, reason, &data, notify->context );
     }
+}
+
+/* compare base address */
+static int base_address_compare( const void *key, const RTL_BALANCED_NODE *entry )
+{
+    const LDR_DATA_TABLE_ENTRY *mod = CONTAINING_RECORD(entry, LDR_DATA_TABLE_ENTRY, BaseAddressIndexNode);
+    const char *base = key;
+
+    if (base < (char *)mod->DllBase) return -1;
+    if (base > (char *)mod->DllBase) return 1;
+    return 0;
 }
 
 /*************************************************************************
@@ -614,19 +660,14 @@ static ULONG hash_basename(const WCHAR *basename)
  */
 static WINE_MODREF *get_modref( HMODULE hmod )
 {
-    PLIST_ENTRY mark, entry;
     PLDR_DATA_TABLE_ENTRY mod;
+    RTL_BALANCED_NODE *node;
 
     if (cached_modref && cached_modref->ldr.DllBase == hmod) return cached_modref;
 
-    mark = &NtCurrentTeb()->Peb->LdrData->InMemoryOrderModuleList;
-    for (entry = mark->Flink; entry != mark; entry = entry->Flink)
-    {
-        mod = CONTAINING_RECORD(entry, LDR_DATA_TABLE_ENTRY, InMemoryOrderLinks);
-        if (mod->DllBase == hmod)
-            return cached_modref = CONTAINING_RECORD(mod, WINE_MODREF, ldr);
-    }
-    return NULL;
+    if (!(node = rtl_rb_tree_get( &base_address_index_tree, hmod, base_address_compare ))) return NULL;
+    mod = CONTAINING_RECORD(node, LDR_DATA_TABLE_ENTRY, BaseAddressIndexNode);
+    return cached_modref = CONTAINING_RECORD(mod, WINE_MODREF, ldr);
 }
 
 
@@ -1331,6 +1372,36 @@ static BOOL is_dll_native_subsystem( LDR_DATA_TABLE_ENTRY *mod, const IMAGE_NT_H
     return TRUE;
 }
 
+
+/*************************************************************************
+ *		alloc_tls_memory
+ *
+ * Allocate memory for TLS vector or index with an extra data.
+ */
+static void *alloc_tls_memory( BOOL vector, ULONG_PTR size )
+{
+    ULONG_PTR *ptr;
+
+    if (!(ptr = RtlAllocateHeap( GetProcessHeap(), vector ? HEAP_ZERO_MEMORY : 0, size + sizeof(void *) * 2 ))) return NULL;
+    ptr += 2;
+    if (vector) ptr[-2] = size / sizeof(void *);
+    else        ptr[-2] = ptr[-1] = 0;
+    return ptr;
+}
+
+
+/*************************************************************************
+ *		free_tls_memory
+ *
+ * Free TLS vector or index memory.
+ */
+static void free_tls_memory( void *ptr )
+{
+    if (!ptr) return;
+    RtlFreeHeap( GetProcessHeap(), 0, (void **)ptr - 2 );
+}
+
+
 /*************************************************************************
  *		alloc_tls_slot
  *
@@ -1340,9 +1411,10 @@ static BOOL is_dll_native_subsystem( LDR_DATA_TABLE_ENTRY *mod, const IMAGE_NT_H
 static BOOL alloc_tls_slot( LDR_DATA_TABLE_ENTRY *mod )
 {
     const IMAGE_TLS_DIRECTORY *dir;
-    ULONG i, size;
+    ULONG i, j, size;
     void *new_ptr;
-    LIST_ENTRY *entry;
+    UINT old_module_count = tls_module_count;
+    PROCESS_TLS_INFORMATION *t;
 
     if (!(dir = RtlImageDirectoryEntryToData( mod->DllBase, TRUE, IMAGE_DIRECTORY_ENTRY_TLS, &size )))
         return FALSE;
@@ -1363,54 +1435,74 @@ static BOOL alloc_tls_slot( LDR_DATA_TABLE_ENTRY *mod )
 
     if (i == tls_module_count)
     {
-        UINT new_count = max( 32, tls_module_count * 2 );
+        UINT new_count = tls_module_count * 2;
 
-        if (!tls_dirs)
-            new_ptr = RtlAllocateHeap( GetProcessHeap(), HEAP_ZERO_MEMORY, new_count * sizeof(*tls_dirs) );
-        else
-            new_ptr = RtlReAllocateHeap( GetProcessHeap(), HEAP_ZERO_MEMORY, tls_dirs,
-                                         new_count * sizeof(*tls_dirs) );
+        new_ptr = RtlReAllocateHeap( GetProcessHeap(), HEAP_ZERO_MEMORY, tls_dirs,
+                                     new_count * sizeof(*tls_dirs) );
         if (!new_ptr) return FALSE;
-
-        /* resize the pointer block in all running threads */
-        for (entry = tls_links.Flink; entry != &tls_links; entry = entry->Flink)
-        {
-            TEB *teb = CONTAINING_RECORD( entry, TEB, TlsLinks );
-            void **old = teb->ThreadLocalStoragePointer;
-            void **new = RtlAllocateHeap( GetProcessHeap(), HEAP_ZERO_MEMORY, new_count * sizeof(*new));
-
-            if (!new) return FALSE;
-            if (old) memcpy( new, old, tls_module_count * sizeof(*new) );
-            teb->ThreadLocalStoragePointer = new;
-#ifdef __x86_64__  /* macOS-specific hack */
-            if (teb->Instrumentation[0]) ((TEB *)teb->Instrumentation[0])->ThreadLocalStoragePointer = new;
-#endif
-            TRACE( "thread %04lx tls block %p -> %p\n", HandleToULong(teb->ClientId.UniqueThread), old, new );
-            /* FIXME: can't free old block here, should be freed at thread exit */
-        }
-
         tls_dirs = new_ptr;
         tls_module_count = new_count;
     }
+    *(DWORD *)dir->AddressOfIndex = i;
+    tls_dirs[i] = *dir;
 
-    /* allocate the data block in all running threads */
-    for (entry = tls_links.Flink; entry != &tls_links; entry = entry->Flink)
+    if (!tls_thread_count) return TRUE;
+    t = RtlAllocateHeap( GetProcessHeap(), 0, offsetof( PROCESS_TLS_INFORMATION, ThreadData[tls_thread_count] ));
+    if (!t) return FALSE;
+
+    t->Flags = 0;
+    t->ThreadDataCount = tls_thread_count;
+    if (old_module_count < tls_module_count)
     {
-        TEB *teb = CONTAINING_RECORD( entry, TEB, TlsLinks );
+        t->OperationType = ProcessTlsReplaceVector;
+        t->TlsVectorLength = old_module_count;
+    }
+    else
+    {
+        t->OperationType = ProcessTlsReplaceIndex;
+        t->TlsIndex = i;
+    }
+    for (j = 0; j < tls_thread_count; ++j)
+    {
+        void **vector;
 
-        if (!(new_ptr = RtlAllocateHeap( GetProcessHeap(), 0, size + dir->SizeOfZeroFill ))) return -1;
+        t->ThreadData[j].Flags = 0;
+
+        if (!(new_ptr = alloc_tls_memory( FALSE, size + dir->SizeOfZeroFill ))) return FALSE;
         memcpy( new_ptr, (void *)dir->StartAddressOfRawData, size );
         memset( (char *)new_ptr + size, 0, dir->SizeOfZeroFill );
 
-        TRACE( "thread %04lx slot %lu: %lu/%lu bytes at %p\n",
-               HandleToULong(teb->ClientId.UniqueThread), i, size, dir->SizeOfZeroFill, new_ptr );
-
-        RtlFreeHeap( GetProcessHeap(), 0,
-                     InterlockedExchangePointer( (void **)teb->ThreadLocalStoragePointer + i, new_ptr ));
+        if (t->OperationType == ProcessTlsReplaceVector)
+        {
+            vector = alloc_tls_memory( TRUE, tls_module_count * sizeof(*vector) );
+            if (!vector) return FALSE;
+            t->ThreadData[j].TlsVector = vector;
+            vector[i] = new_ptr;
+        }
+        else t->ThreadData[j].TlsModulePointer = new_ptr;
+    }
+    if (NtSetInformationProcess( GetCurrentProcess(), ProcessTlsInformation, t,
+                                 offsetof(PROCESS_TLS_INFORMATION, ThreadData[t->ThreadDataCount])))
+    {
+        ERR( "ProcessTlsInformation failed.\n" );
+        return FALSE;
     }
 
-    *(DWORD *)dir->AddressOfIndex = i;
-    tls_dirs[i] = *dir;
+    for (j = 0; j < tls_thread_count; ++j)
+    {
+        if (!(t->ThreadData[j].Flags & THREAD_TLS_INFORMATION_ASSIGNED) && t->OperationType == ProcessTlsReplaceVector)
+        {
+            /* There could be fewer active threads than we counted here due to force terminated threads, first
+             * free extra TLS directory data set in the new TLS vector. */
+            free_tls_memory( ((void **)t->ThreadData[j].TlsVector)[i] );
+        }
+        if (!(t->ThreadData[j].Flags & THREAD_TLS_INFORMATION_ASSIGNED) || t->OperationType == ProcessTlsReplaceIndex)
+        {
+            /* FIXME: can't free old Tls vector here, should be freed at thread exit. */
+            free_tls_memory( t->ThreadData[j].TlsVector );
+        }
+    }
+    RtlFreeHeap( GetProcessHeap(), 0, t );
     return TRUE;
 }
 
@@ -1588,6 +1680,9 @@ static WINE_MODREF *alloc_module( HMODULE hModule, const UNICODE_STRING *nt_name
                    &wm->ldr.InMemoryOrderLinks);
     InsertTailList(&hash_table[hash_basename(wm->ldr.BaseDllName.Buffer)],
                    &wm->ldr.HashLinks);
+    if (rtl_rb_tree_put( &base_address_index_tree, wm->ldr.DllBase, &wm->ldr.BaseAddressIndexNode, base_address_compare ))
+        ERR( "rtl_rb_tree_put failed.\n" );
+    register_module_exception_directory( hModule );
 
     /* wait until init is called for inserting into InInitializationOrderModuleList */
     wm->ldr.InInitializationOrderLinks.Flink = NULL;
@@ -1613,10 +1708,7 @@ static NTSTATUS alloc_thread_tls(void)
     void **pointers;
     UINT i, size;
 
-    if (!tls_module_count) return STATUS_SUCCESS;
-
-    if (!(pointers = RtlAllocateHeap( GetProcessHeap(), HEAP_ZERO_MEMORY,
-                                      tls_module_count * sizeof(*pointers) )))
+    if (!(pointers = alloc_tls_memory( TRUE, tls_module_count * sizeof(*pointers) )))
         return STATUS_NO_MEMORY;
 
     for (i = 0; i < tls_module_count; i++)
@@ -1627,10 +1719,10 @@ static NTSTATUS alloc_thread_tls(void)
         size = dir->EndAddressOfRawData - dir->StartAddressOfRawData;
         if (!size && !dir->SizeOfZeroFill) continue;
 
-        if (!(pointers[i] = RtlAllocateHeap( GetProcessHeap(), 0, size + dir->SizeOfZeroFill )))
+        if (!(pointers[i] = alloc_tls_memory( FALSE, size + dir->SizeOfZeroFill )))
         {
-            while (i) RtlFreeHeap( GetProcessHeap(), 0, pointers[--i] );
-            RtlFreeHeap( GetProcessHeap(), 0, pointers );
+            while (i) free_tls_memory( pointers[--i] );
+            free_tls_memory( pointers );
             return STATUS_NO_MEMORY;
         }
         memcpy( pointers[i], (void *)dir->StartAddressOfRawData, size );
@@ -1638,6 +1730,7 @@ static NTSTATUS alloc_thread_tls(void)
 
         TRACE( "slot %u: %u/%lu bytes at %p\n", i, size, dir->SizeOfZeroFill, pointers[i] );
     }
+    ++tls_thread_count;
     NtCurrentTeb()->ThreadLocalStoragePointer = pointers;
 #ifdef __x86_64__  /* macOS-specific hack */
     if (NtCurrentTeb()->Instrumentation[0])
@@ -1914,6 +2007,17 @@ NTSTATUS WINAPI LdrDisableThreadCalloutsForDll(HMODULE hModule)
     return ret;
 }
 
+/* compare base address */
+static int module_address_search_compare( const void *key, const RTL_BALANCED_NODE *entry )
+{
+    const LDR_DATA_TABLE_ENTRY *mod = CONTAINING_RECORD(entry, LDR_DATA_TABLE_ENTRY, BaseAddressIndexNode);
+    const char *addr = key;
+
+    if (addr < (char *)mod->DllBase) return -1;
+    if (addr >= (char *)mod->DllBase + mod->SizeOfImage) return 1;
+    return 0;
+}
+
 /******************************************************************
  *              LdrFindEntryForAddress (NTDLL.@)
  *
@@ -1921,21 +2025,12 @@ NTSTATUS WINAPI LdrDisableThreadCalloutsForDll(HMODULE hModule)
  */
 NTSTATUS WINAPI LdrFindEntryForAddress( const void *addr, PLDR_DATA_TABLE_ENTRY *pmod )
 {
-    PLIST_ENTRY mark, entry;
-    PLDR_DATA_TABLE_ENTRY mod;
+    RTL_BALANCED_NODE *node;
 
-    mark = &NtCurrentTeb()->Peb->LdrData->InLoadOrderModuleList;
-    for (entry = mark->Blink; entry != mark; entry = entry->Blink)
-    {
-        mod = CONTAINING_RECORD(entry, LDR_DATA_TABLE_ENTRY, InLoadOrderLinks);
-        if (mod->DllBase <= addr &&
-            (const char *)addr < (char*)mod->DllBase + mod->SizeOfImage)
-        {
-            *pmod = mod;
-            return STATUS_SUCCESS;
-        }
-    }
-    return STATUS_NO_MORE_ENTRIES;
+    if (!(node = rtl_rb_tree_get( &base_address_index_tree, addr, module_address_search_compare )))
+        return STATUS_NO_MORE_ENTRIES;
+    *pmod = CONTAINING_RECORD(node, LDR_DATA_TABLE_ENTRY, BaseAddressIndexNode);
+    return STATUS_SUCCESS;
 }
 
 /******************************************************************
@@ -2379,6 +2474,8 @@ static NTSTATUS build_module( LPCWSTR load_path, const UNICODE_STRING *nt_name, 
             RemoveEntryList(&wm->ldr.InLoadOrderLinks);
             RemoveEntryList(&wm->ldr.InMemoryOrderLinks);
             RemoveEntryList(&wm->ldr.HashLinks);
+            RtlRbRemoveNode( &base_address_index_tree, &wm->ldr.BaseAddressIndexNode );
+            unregister_module_exception_directory( wm->ldr.DllBase );
 
             /* FIXME: there are several more dangling references
              * left. Including dlls loaded by this dll before the
@@ -4059,7 +4156,6 @@ void WINAPI LdrShutdownProcess(void)
     process_detach();
 }
 
-extern const char * CDECL wine_get_version(void);
 
 /******************************************************************
  *		RtlExitUserProcess (NTDLL.@)
@@ -4112,11 +4208,16 @@ void WINAPI LdrShutdownThread(void)
     if (wm->ldr.TlsIndex == -1) call_tls_callbacks( wm->ldr.DllBase, DLL_THREAD_DETACH );
 
     RtlAcquirePebLock();
-    if (NtCurrentTeb()->TlsLinks.Flink) RemoveEntryList( &NtCurrentTeb()->TlsLinks );
     if ((pointers = NtCurrentTeb()->ThreadLocalStoragePointer))
     {
-        for (i = 0; i < tls_module_count; i++) RtlFreeHeap( GetProcessHeap(), 0, pointers[i] );
-        RtlFreeHeap( GetProcessHeap(), 0, pointers );
+        NtCurrentTeb()->ThreadLocalStoragePointer = NULL;
+        --tls_thread_count;
+#ifdef __x86_64__  /* macOS-specific hack */
+        if (NtCurrentTeb()->Instrumentation[0])
+            ((TEB *)NtCurrentTeb()->Instrumentation[0])->ThreadLocalStoragePointer = NULL;
+#endif
+        for (i = 0; i < tls_module_count; i++) free_tls_memory( pointers[i] );
+        free_tls_memory( pointers );
     }
     RtlProcessFlsData( NtCurrentTeb()->FlsSlots, 2 );
     NtCurrentTeb()->FlsSlots = NULL;
@@ -4145,8 +4246,10 @@ static void free_modref( WINE_MODREF *wm )
     RemoveEntryList(&wm->ldr.InLoadOrderLinks);
     RemoveEntryList(&wm->ldr.InMemoryOrderLinks);
     RemoveEntryList(&wm->ldr.HashLinks);
+    RtlRbRemoveNode( &base_address_index_tree, &wm->ldr.BaseAddressIndexNode );
     if (wm->ldr.InInitializationOrderLinks.Flink)
         RemoveEntryList(&wm->ldr.InInitializationOrderLinks);
+    unregister_module_exception_directory( wm->ldr.DllBase );
 
     while ((entry = wm->ldr.DdagNode->Dependencies.Tail))
     {
@@ -4452,10 +4555,6 @@ static void init_wow64( CONTEXT *context )
         imports_fixup_done = TRUE;
     }
 
-    RtlAcquirePebLock();
-    InsertHeadList( &tls_links, &NtCurrentTeb()->TlsLinks );
-    RtlReleasePebLock();
-
     RtlLeaveCriticalSection( &loader_section );
     pWow64LdrpInitialize( context );
 }
@@ -4540,9 +4639,6 @@ static void release_address_space(void)
  */
 void loader_init( CONTEXT *context, void **entry )
 {
-    OBJECT_ATTRIBUTES staging_event_attr;
-    UNICODE_STRING staging_event_string;
-    HANDLE staging_event;
     static int attach_done;
     NTSTATUS status;
     ULONG_PTR cookie;
@@ -4594,6 +4690,9 @@ void loader_init( CONTEXT *context, void **entry )
         RtlSetBits( peb->TlsBitmap, 0, NtCurrentTeb()->WowTebOffset ? WOW64_TLS_MAX_NUMBER : 1 );
         RtlSetBits( peb->TlsBitmap, NTDLL_TLS_ERRNO, 1 );
 
+        if (!(tls_dirs = RtlAllocateHeap( GetProcessHeap(), HEAP_ZERO_MEMORY, tls_module_count * sizeof(*tls_dirs) )))
+            NtTerminateProcess( GetCurrentProcess(), STATUS_NO_MEMORY );
+
         /* initialize hash table */
         for (i = 0; i < HASH_MAP_SIZE; i++)
             InitializeListHead( &hash_table[i] );
@@ -4637,20 +4736,6 @@ void loader_init( CONTEXT *context, void **entry )
 #ifdef _WIN64
     if (NtCurrentTeb()->WowTebOffset) init_wow64( context );
 #endif
-
-    RtlInitUnicodeString( &staging_event_string, L"\\__wine_staging_warn_event" );
-    InitializeObjectAttributes( &staging_event_attr, &staging_event_string, OBJ_OPENIF, NULL, NULL );
-    if (NtCreateEvent( &staging_event, EVENT_ALL_ACCESS, &staging_event_attr, NotificationEvent, FALSE ) == STATUS_SUCCESS)
-    {
-        FIXME_(winediag)("wine-staging %s is a testing version containing experimental patches.\n", wine_get_version());
-        FIXME_(winediag)("Please mention your exact version when filing bug reports on winehq.org.\n");
-    }
-    else
-        WARN_(winediag)("wine-staging %s is a testing version containing experimental patches.\n", wine_get_version());
-
-    RtlAcquirePebLock();
-    InsertHeadList( &tls_links, &NtCurrentTeb()->TlsLinks );
-    RtlReleasePebLock();
 
     NtCurrentTeb()->FlsSlots = fls_alloc_data();
 

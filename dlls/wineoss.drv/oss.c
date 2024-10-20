@@ -1732,7 +1732,7 @@ const unixlib_entry_t __wine_unix_call_funcs[] =
     oss_get_position,
     oss_set_volumes,
     oss_set_event_handle,
-    NULL,
+    oss_not_implemented,
     oss_test_connect,
     oss_is_started,
     oss_get_prop_value,

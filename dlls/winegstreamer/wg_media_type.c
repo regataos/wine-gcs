@@ -66,16 +66,21 @@ DEFINE_MEDIATYPE_GUID(MFVideoFormat_IV50,MAKEFOURCC('I','V','5','0'));
 DEFINE_MEDIATYPE_GUID(MFVideoFormat_VC1S,MAKEFOURCC('V','C','1','S'));
 DEFINE_MEDIATYPE_GUID(MFVideoFormat_ABGR32,D3DFMT_A8B8G8R8);
 
-static void init_caps_codec_data(GstCaps *caps, const void *codec_data, int codec_data_size)
+static void init_caps_codec_data_name(GstCaps *caps, const void *codec_data, int codec_data_size, const char *name)
 {
     GstBuffer *buffer;
 
     if (codec_data_size > 0 && (buffer = gst_buffer_new_and_alloc(codec_data_size)))
     {
         gst_buffer_fill(buffer, 0, codec_data, codec_data_size);
-        gst_caps_set_simple(caps, "codec_data", GST_TYPE_BUFFER, buffer, NULL);
+        gst_caps_set_simple(caps, name, GST_TYPE_BUFFER, buffer, NULL);
         gst_buffer_unref(buffer);
     }
+}
+
+static void init_caps_codec_data(GstCaps *caps, const void *codec_data, int codec_data_size)
+{
+    init_caps_codec_data_name(caps, codec_data, codec_data_size, "codec_data");
 }
 
 static void init_caps_from_wave_format_mpeg1(GstCaps *caps, const MPEG1WAVEFORMAT *format, UINT32 format_size)
@@ -210,10 +215,13 @@ static GstAudioFormat wave_format_tag_to_gst_audio_format(UINT tag, UINT depth)
 static GstCaps *caps_from_wave_format_ex(const WAVEFORMATEX *format, UINT32 format_size, const GUID *subtype, UINT64 channel_mask)
 {
     GstAudioFormat audio_format = wave_format_tag_to_gst_audio_format(subtype->Data1, format->wBitsPerSample);
+    const void *codec_data = format + 1;
     GstCaps *caps;
 
     if (IsEqualGUID(subtype, &MFAudioFormat_GStreamer))
-        return gst_caps_from_string((char *)(format + 1));
+        return gst_caps_from_string(codec_data);
+    if (format_size > sizeof(*format) + 8 && !strncmp(codec_data, "audio/x-", 8))
+        return gst_caps_from_string(codec_data);
 
     if (!(caps = gst_caps_new_simple("audio/x-raw", "format", G_TYPE_STRING, gst_audio_format_to_string(audio_format),
             "layout", G_TYPE_STRING, "interleaved", "rate", G_TYPE_INT, format->nSamplesPerSec,
@@ -295,12 +303,18 @@ static void init_caps_from_video_cinepak(GstCaps *caps, const MFVIDEOFORMAT *for
 
 static void init_caps_from_video_h264(GstCaps *caps, const MFVIDEOFORMAT *format, UINT format_size)
 {
-    init_caps_codec_data(caps, format + 1, format_size - sizeof(*format));
-
     gst_structure_remove_field(gst_caps_get_structure(caps, 0), "format");
     gst_structure_set_name(gst_caps_get_structure(caps, 0), "video/x-h264");
-    gst_caps_set_simple(caps, "stream-format", G_TYPE_STRING, "byte-stream", NULL);
-    gst_caps_set_simple(caps, "alignment", G_TYPE_STRING, "au", NULL);
+    if (format_size - sizeof(*format) >= sizeof(UINT32) && *(UINT32 *)(format + 1) == 0x01000000)
+    {
+        init_caps_codec_data_name(caps, format + 1, format_size - sizeof(*format), "streamheader");
+        gst_caps_set_simple(caps, "stream-format", G_TYPE_STRING, "byte-stream", NULL);
+    }
+    else
+    {
+        init_caps_codec_data_name(caps, format + 1, format_size - sizeof(*format), "codec_data");
+        gst_caps_set_simple(caps, "stream-format", G_TYPE_STRING, format_size - sizeof(*format) ? "avc" : "byte-stream", NULL);
+    }
 }
 
 static void init_caps_from_video_wmv(GstCaps *caps, const MFVIDEOFORMAT *format, UINT format_size,
@@ -375,6 +389,7 @@ static GstVideoFormat subtype_to_gst_video_format(const GUID *subtype)
         case D3DFMT_R5G6B5:   return GST_VIDEO_FORMAT_RGB16;
         case MAKEFOURCC('A','Y','U','V'): return GST_VIDEO_FORMAT_AYUV;
         case MAKEFOURCC('I','4','2','0'): return GST_VIDEO_FORMAT_I420;
+        case MAKEFOURCC('I','Y','U','V'): return GST_VIDEO_FORMAT_I420;
         case MAKEFOURCC('N','V','1','2'): return GST_VIDEO_FORMAT_NV12;
         case MAKEFOURCC('U','Y','V','Y'): return GST_VIDEO_FORMAT_UYVY;
         case MAKEFOURCC('Y','U','Y','2'): return GST_VIDEO_FORMAT_YUY2;
@@ -394,6 +409,7 @@ static BOOL is_mf_video_area_empty(const MFVideoArea *area)
 static GstCaps *caps_from_video_format(const MFVIDEOFORMAT *format, UINT32 format_size)
 {
     GstVideoFormat video_format = subtype_to_gst_video_format(&format->guidFormat);
+    const void *codec_data = format + 1;
     GstCaps *caps;
 
     GST_TRACE("subtype " WG_GUID_FORMAT " %ux%u, FPS " WG_RATIO_FORMAT ", aperture " WG_APERTURE_FORMAT ", "
@@ -404,7 +420,9 @@ static GstCaps *caps_from_video_format(const MFVIDEOFORMAT *format, UINT32 forma
     if (format->dwSize > sizeof(*format)) GST_MEMDUMP("extra bytes:", (guint8 *)(format + 1), format->dwSize - sizeof(*format));
 
     if (IsEqualGUID(&format->guidFormat, &MFVideoFormat_GStreamer))
-        return gst_caps_from_string((char *)(format + 1));
+        return gst_caps_from_string(codec_data);
+    if (format_size > sizeof(*format) + 8 && !strncmp(codec_data, "video/x-", 8))
+        return gst_caps_from_string(codec_data);
 
     if (!(caps = gst_caps_new_simple("video/x-raw", "format", G_TYPE_STRING, gst_video_format_to_string(video_format), NULL)))
         return NULL;
@@ -866,6 +884,8 @@ NTSTATUS caps_to_media_type(GstCaps *caps, struct wg_media_type *media_type, UIN
             return video_format_from_gst_caps(caps, NULL, media_type->u.video, &media_type->format_size, video_plane_align);
         if (!strcmp(name, "video/x-cinepak"))
             return video_format_from_gst_caps(caps, &MFVideoFormat_CVID, media_type->u.video, &media_type->format_size, video_plane_align);
+        if (!strcmp(name, "video/x-h264"))
+            return video_format_from_gst_caps(caps, &MFVideoFormat_H264, media_type->u.video, &media_type->format_size, video_plane_align);
         if (!strcmp(name, "video/x-wmv"))
             return wmv_video_format_from_gst_caps(caps, media_type->u.video, &media_type->format_size, video_plane_align);
         if (!strcmp(name, "video/mpeg") && gst_structure_get_boolean(structure, "parsed", &parsed) && parsed)

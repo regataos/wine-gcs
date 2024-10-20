@@ -532,6 +532,7 @@ enum x11drv_atoms
     XATOM__GTK_WORKAREAS_D0,
     XATOM__XEMBED,
     XATOM__XEMBED_INFO,
+    XATOM__WINE_ALLOW_FLIP,
     XATOM__WINE_HWND_STYLE,
     XATOM__WINE_HWND_EXSTYLE,
     XATOM_XdndAware,
@@ -724,6 +725,7 @@ extern double fs_hack_get_user_to_real_scale( HMONITOR );
 extern SIZE fs_hack_get_scaled_screen_size( HMONITOR monitor );
 extern RECT fs_hack_get_real_virtual_screen(void);
 extern void fs_hack_init(void);
+extern void fs_hack_disable(void);
 extern const float *fs_hack_get_gamma_ramp( LONG *serial );
 extern void fs_hack_set_gamma_ramp( const WORD *ramp );
 extern BOOL fs_hack_put_image_scaled( HWND hwnd, Window window, GC gc, XImage *image, unsigned int x_dst, unsigned int y_dst,
@@ -761,6 +763,7 @@ extern void X11DRV_X_to_window_rect( struct x11drv_win_data *data, RECT *rect, i
 extern POINT virtual_screen_to_root( INT x, INT y );
 extern POINT root_to_virtual_screen( INT x, INT y );
 extern RECT get_host_primary_monitor_rect(void);
+extern BOOL get_host_monitor_rects( RECT **ret_rects, int *ret_count );
 extern RECT get_work_area( const RECT *monitor_rect );
 extern BOOL xinerama_get_fullscreen_monitors( const RECT *rect, long *indices );
 extern void xinerama_init( unsigned int width, unsigned int height );
@@ -828,7 +831,7 @@ struct x11drv_settings_handler
 extern struct x11drv_settings_handler X11DRV_Settings_GetHandler(void);
 extern void X11DRV_Settings_SetHandler(const struct x11drv_settings_handler *handler);
 
-extern void X11DRV_init_desktop( Window win, unsigned int width, unsigned int height );
+extern void X11DRV_init_desktop( Window win );
 extern void X11DRV_resize_desktop(void);
 extern BOOL is_virtual_desktop(void);
 extern BOOL is_desktop_fullscreen(void);

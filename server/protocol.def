@@ -912,6 +912,12 @@ struct cpu_topology_override
     unsigned char host_cpu_id[64];
 };
 
+struct directory_file_entry
+{
+    data_size_t name_len;
+    /* VARARG(name,unicode_str,name_len); */
+};
+
 struct shared_cursor
 {
     int                  x;                /* cursor position */
@@ -926,8 +932,8 @@ struct desktop_shared_memory
     struct shared_cursor cursor;           /* global cursor information */
     unsigned char        keystate[256];    /* asynchronous key state */
     thread_id_t          foreground_tid;   /* tid of the foreground thread */
-    __int64              update_serial;
     unsigned int         flags;
+    __int64              update_serial;
 };
 typedef volatile struct desktop_shared_memory desktop_shm_t;
 
@@ -1584,14 +1590,16 @@ enum server_fd_type
 
 /* Perform a send on a socket */
 @REQ(send_socket)
+    unsigned int flags;         /* SERVER_SOCKET_IO_* flags */
     async_data_t async;         /* async I/O parameters */
-    int          force_async;   /* Force asynchronous mode? */
 @REPLY
     obj_handle_t wait;          /* handle to wait on for blocking send */
     unsigned int options;       /* device open options */
     int          nonblocking;   /* is socket non-blocking? */
 @END
 
+#define SERVER_SOCKET_IO_FORCE_ASYNC 0x01
+#define SERVER_SOCKET_IO_SYSTEM      0x02
 
 /* Get socket event flags */
 @REQ(socket_get_events)
@@ -3014,6 +3022,7 @@ enum coords_relative
     unsigned int   internal_msg;  /* set active window internal message */
 @REPLY
     user_handle_t  previous;      /* handle to the previous active window */
+    thread_id_t    foreground_tid;  /* thread id of the new active window */
 @END
 
 /* Set the current thread capture window */
@@ -3476,6 +3485,79 @@ struct handle_info
 @END
 
 
+typedef union
+{
+    struct
+    {
+        unsigned int family;
+        process_id_t owner;
+        unsigned int state;
+    } common;
+    struct
+    {
+        unsigned int family;
+        process_id_t owner;
+        unsigned int state;
+        unsigned int local_addr;
+        unsigned int local_port;
+        unsigned int remote_addr;
+        unsigned int remote_port;
+    } ipv4;
+    struct
+    {
+        unsigned int family;
+        process_id_t owner;
+        unsigned int state;
+        unsigned char local_addr[16];
+        unsigned int local_scope_id;
+        unsigned int local_port;
+        unsigned char remote_addr[16];
+        unsigned int remote_scope_id;
+        unsigned int remote_port;
+    } ipv6;
+} tcp_connection;
+
+/* Retrieve a list of all processes' TCP connections. */
+@REQ(get_tcp_connections)
+    unsigned int    state_filter; /* MIB_TCP_STATE_* or 0 for no filter */
+@REPLY
+    unsigned int    count;
+    VARARG(connections,tcp_connections);
+@END
+
+
+typedef union
+{
+    struct
+    {
+        unsigned int family;
+        process_id_t owner;
+    } common;
+    struct
+    {
+        unsigned int family;
+        process_id_t owner;
+        unsigned int addr;
+        unsigned int port;
+    } ipv4;
+    struct
+    {
+        unsigned int family;
+        process_id_t owner;
+        unsigned char addr[16];
+        unsigned int scope_id;
+        unsigned int port;
+    } ipv6;
+} udp_endpoint;
+
+/* Retrieve a list of all processes' UDP endpoints. */
+@REQ(get_udp_endpoints)
+@REPLY
+    unsigned int    count;
+    VARARG(endpoints,udp_endpoints);
+@END
+
+
 /* Create a mailslot */
 @REQ(create_mailslot)
     unsigned int   access;        /* wanted access rights */
@@ -3530,6 +3612,13 @@ struct handle_info
     VARARG(type,unicode_str);          /* entry type */
 @END
 
+@REQ(query_directory_file)
+    obj_handle_t   handle;
+    unsigned int   restart_scan;
+@REPLY
+    data_size_t    total_len;          /* total length needed for strings */
+    VARARG(entries,directory_file_entries);
+@END
 
 /* Create a symbolic link object */
 @REQ(create_symlink)

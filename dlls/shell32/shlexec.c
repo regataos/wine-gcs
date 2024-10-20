@@ -48,6 +48,8 @@ WINE_DEFAULT_DEBUG_CHANNEL(exec);
 
 typedef UINT_PTR (*SHELL_ExecuteW32)(const WCHAR *lpCmd, WCHAR *env, BOOL shWait,
 			    const SHELLEXECUTEINFOW *sei, LPSHELLEXECUTEINFOW sei_out);
+extern BOOL WINAPI PathResolveAW(void *path, const void **paths, DWORD flags);
+extern BOOL WINAPI PathFileExistsDefExtW(LPWSTR lpszPath,DWORD dwWhich);
 
 static inline BOOL isSpace(WCHAR c)
 {
@@ -443,7 +445,10 @@ static BOOL SHELL_TryAppPathW( LPCWSTR szName, LPWSTR lpResult, WCHAR **env)
     wcscat(buffer, szName);
     res = RegOpenKeyExW(HKEY_LOCAL_MACHINE, buffer, 0, KEY_READ, &hkApp);
     if (res)
-        res = RegOpenKeyExW(HKEY_LOCAL_MACHINE, lstrcatW(buffer, L".exe"), 0, KEY_READ, &hkApp);
+    {
+        wcscat(buffer, L".exe");
+        res = RegOpenKeyExW(HKEY_LOCAL_MACHINE, buffer, 0, KEY_READ, &hkApp);
+    }
     if (res)
         goto end;
 
@@ -553,6 +558,7 @@ static UINT SHELL_FindExecutableByVerb(LPCWSTR lpVerb, LPWSTR key, LPWSTR classn
  *
  * Utility for code sharing between FindExecutable and ShellExecute
  * in:
+ *      lpPath the path to search for the file
  *      lpFile the name of a file
  *      lpVerb the operation on it (open)
  * out:
@@ -572,8 +578,10 @@ static UINT SHELL_FindExecutable(LPCWSTR lpPath, LPCWSTR lpFile, LPCWSTR lpVerb,
     WCHAR wBuffer[256];      /* Used to GetProfileString */
     UINT  retval = SE_ERR_NOASSOC;
     WCHAR *tok;              /* token pointer */
-    WCHAR xlpFile[256];      /* result of SearchPath */
+    WCHAR xlpFile[MAX_PATH]; /* result of SearchPath */
     DWORD attribs;           /* file attributes */
+    WCHAR curdir[MAX_PATH];
+    const WCHAR *search_paths[3] = {0};
 
     TRACE("%s\n", debugstr_w(lpFile));
 
@@ -598,17 +606,56 @@ static UINT SHELL_FindExecutable(LPCWSTR lpPath, LPCWSTR lpFile, LPCWSTR lpVerb,
         return 33;
     }
 
-    if (SearchPathW(lpPath, lpFile, L".exe", ARRAY_SIZE(xlpFile), xlpFile, NULL))
+    GetCurrentDirectoryW(ARRAY_SIZE(curdir), curdir);
+    if (!PathIsFileSpecW(lpFile))
     {
-        TRACE("SearchPathW returned non-zero\n");
-        lpFile = xlpFile;
-        /* The file was found in the application-supplied default directory (or the system search path) */
+        BOOL found = FALSE;
+        if (lpPath && *lpPath)
+        {
+            TRACE("ASDF %s\n", debugstr_w(lpPath));
+            PathCombineW(xlpFile, lpPath, lpFile);
+            if (PathFileExistsDefExtW(xlpFile, 0xbf))
+            {
+                GetFullPathNameW(xlpFile, ARRAY_SIZE(xlpFile), xlpFile, NULL);
+                found = TRUE;
+            }
+        }
+        if (!found)
+        {
+            lstrcpyW(xlpFile, lpFile);
+            if (PathFileExistsDefExtW(xlpFile, 0xbf))
+            {
+                GetFullPathNameW(xlpFile, ARRAY_SIZE(xlpFile), xlpFile, NULL);
+                found = TRUE;
+            }
+        }
+        if (found)
+        {
+            lpFile = xlpFile;
+            lstrcpyW(lpResult, xlpFile);
+        }
+        else
+            xlpFile[0] = '\0';
     }
-    else if (lpPath && SearchPathW(NULL, lpFile, L".exe", ARRAY_SIZE(xlpFile), xlpFile, NULL))
+    else
     {
-        TRACE("SearchPathW returned non-zero\n");
-        lpFile = xlpFile;
-        /* The file was found in one of the directories in the system-wide search path */
+        if (lpPath && *lpPath)
+        {
+            search_paths[0] = lpPath;
+            search_paths[1] = curdir;
+        }
+        else
+            search_paths[0] = curdir;
+        lstrcpyW(xlpFile, lpFile);
+        if (PathResolveAW(xlpFile, (const void **)search_paths, PRF_TRYPROGRAMEXTENSIONS | PRF_VERIFYEXISTS))
+        {
+            TRACE("PathResolveAW returned non-zero\n");
+            lpFile = xlpFile;
+            lstrcpyW(lpResult, xlpFile);
+            /* The file was found in lpPath or one of the directories in the system-wide search path */
+        }
+        else
+            xlpFile[0] = '\0';
     }
 
     attribs = GetFileAttributesW(lpFile);
@@ -663,7 +710,6 @@ static UINT SHELL_FindExecutable(LPCWSTR lpPath, LPCWSTR lpFile, LPCWSTR lpVerb,
 
                 if (wcsicmp(tok, &extension[1]) == 0) /* have to skip the leading "." */
                 {
-                    lstrcpyW(lpResult, xlpFile);
                     /* Need to perhaps check that the file has a path
                      * attached */
                     TRACE("found %s\n", debugstr_w(lpResult));
@@ -748,7 +794,7 @@ static UINT SHELL_FindExecutable(LPCWSTR lpPath, LPCWSTR lpFile, LPCWSTR lpVerb,
         }
     }
 
-    TRACE("returning %s\n", debugstr_w(lpResult));
+    TRACE("returning path %s, retval %d\n", debugstr_w(lpResult), retval);
     return retval;
 }
 
@@ -1764,13 +1810,25 @@ static BOOL SHELL_execute( LPSHELLEXECUTEINFOW sei, SHELL_ExecuteW32 execfunc )
 
     if (*sei_tmp.lpDirectory)
     {
+        LPWSTR buf;
         len = ExpandEnvironmentStringsW(sei_tmp.lpDirectory, NULL, 0);
         if (len > 0)
         {
-            LPWSTR buf;
             len++;
             buf = malloc(len * sizeof(WCHAR));
             ExpandEnvironmentStringsW(sei_tmp.lpDirectory, buf, len);
+            if (wszDir != dirBuffer)
+                free(wszDir);
+            wszDir = buf;
+            sei_tmp.lpDirectory = wszDir;
+        }
+
+        len = GetFullPathNameW(sei_tmp.lpDirectory, 0, NULL, NULL);
+        if (len > 0)
+        {
+            len++;
+            buf = malloc(len * sizeof(WCHAR));
+            GetFullPathNameW(sei_tmp.lpDirectory, len, buf, NULL);
             if (wszDir != dirBuffer)
                 free(wszDir);
             wszDir = buf;
@@ -1790,30 +1848,8 @@ static BOOL SHELL_execute( LPSHELLEXECUTEINFOW sei, SHELL_ExecuteW32 execfunc )
         wcmd = malloc(len * sizeof(WCHAR));
         wcmdLen = len;
     }
-    lstrcpyW(wcmd, wszApplicationName);
-    if (sei_tmp.lpDirectory)
-    {
-        LPCWSTR searchPath[] = {
-            sei_tmp.lpDirectory,
-            NULL
-        };
-        PathFindOnPathW(wcmd, searchPath);
-    }
-    retval = SHELL_quote_and_execute( wcmd, wszParameters, L"",
-                                      wszApplicationName, NULL, &sei_tmp,
-                                      sei, execfunc );
-    if (retval > 32) {
-        free(wszApplicationName);
-        if (wszParameters != parametersBuffer)
-            free(wszParameters);
-        if (wszDir != dirBuffer)
-            free(wszDir);
-        if (wcmd != wcmdBuffer)
-            free(wcmd);
-        return TRUE;
-    }
 
-    /* Else, try to find the executable */
+    /* try to find the executable */
     wcmd[0] = '\0';
     retval = SHELL_FindExecutable(sei_tmp.lpDirectory, lpFile, sei_tmp.lpVerb, wcmd, wcmdLen, wszKeyname, &env, sei_tmp.lpIDList, sei_tmp.lpParameters);
     if (retval > 32)  /* Found */
@@ -1861,6 +1897,22 @@ static BOOL SHELL_execute( LPSHELLEXECUTEINFOW sei, SHELL_ExecuteW32 execfunc )
         lstrcpyW(lpstrTmpFile, L"http://");
         lstrcatW(lpstrTmpFile, lpFile);
         retval = (UINT_PTR)ShellExecuteW(sei_tmp.hwnd, sei_tmp.lpVerb, lpstrTmpFile, NULL, NULL, 0);
+    }
+    else if (retval == SE_ERR_NOASSOC && SHGetFileInfoW(wcmd, 0, NULL, 0, SHGFI_EXETYPE) == 0)
+    {
+        /* File found, but no association. And no other cases fit, this could be a
+           unix programs, try running it. We have to do this in a "catch-all" fashion because
+           unix program can have any extensions. However, things get more complicated because
+           the file we find could be a Windows executable without the proper extensions, it could
+           be seen as unexpected if we start it, so we special case it here. */
+        UINT exec_retval;
+        TRACE("No association found, trying as Unix binary %s\n", debugstr_w(wcmd));
+        exec_retval = SHELL_quote_and_execute( wcmd, wszParameters, wszKeyname,
+                                               wszApplicationName, env, &sei_tmp,
+                                               sei, execfunc );
+        TRACE("Unix binary returned %u\n", exec_retval);
+        if (exec_retval > 32)
+            retval = exec_retval;
     }
 
 end:

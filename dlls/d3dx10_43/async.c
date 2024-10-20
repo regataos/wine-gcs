@@ -90,32 +90,10 @@ static const ID3DX10DataLoaderVtbl memorydataloadervtbl =
 
 HRESULT load_file(const WCHAR *path, void **data, DWORD *size)
 {
-    DWORD read_len;
-    HANDLE file;
-    BOOL ret;
+    HRESULT hr;
 
-    file = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
-            NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
-    if (file == INVALID_HANDLE_VALUE)
-        return D3D10_ERROR_FILE_NOT_FOUND;
-
-    *size = GetFileSize(file, NULL);
-    *data = malloc(*size);
-    if (!*data)
-    {
-        CloseHandle(file);
-        return E_OUTOFMEMORY;
-    }
-
-    ret = ReadFile(file, *data, *size, &read_len, NULL);
-    CloseHandle(file);
-    if (!ret || read_len != *size)
-    {
-        WARN("Failed to read file contents.\n");
-        free(*data);
-        return E_FAIL;
-    }
-    return S_OK;
+    hr = d3dx_load_file(path, data, size);
+    return (hr == D3DX_HELPER_ERR_FILE_NOT_FOUND) ? D3D10_ERROR_FILE_NOT_FOUND : hr;
 }
 
 static HRESULT WINAPI filedataloader_Load(ID3DX10DataLoader *iface)
@@ -175,39 +153,20 @@ static const ID3DX10DataLoaderVtbl filedataloadervtbl =
 
 static HRESULT load_resource_initA(HMODULE module, const char *resource, HRSRC *rsrc)
 {
-    if (!(*rsrc = FindResourceA(module, resource, (const char *)RT_RCDATA)))
-        *rsrc = FindResourceA(module, resource, (const char *)RT_BITMAP);
-    if (!*rsrc)
-    {
-        WARN("Failed to find resource.\n");
-        return D3DX10_ERR_INVALID_DATA;
-    }
-    return S_OK;
+    HRESULT hr = d3dx_load_resource_initA(module, resource, rsrc);
+    return (hr == D3DX_HELPER_ERR_INVALID_DATA) ? D3DX10_ERR_INVALID_DATA : hr;
 }
 
 static HRESULT load_resource_initW(HMODULE module, const WCHAR *resource, HRSRC *rsrc)
 {
-    if (!(*rsrc = FindResourceW(module, resource, (const WCHAR *)RT_RCDATA)))
-        *rsrc = FindResourceW(module, resource, (const WCHAR *)RT_BITMAP);
-    if (!*rsrc)
-    {
-        WARN("Failed to find resource.\n");
-        return D3DX10_ERR_INVALID_DATA;
-    }
-    return S_OK;
+    HRESULT hr = d3dx_load_resource_initW(module, resource, rsrc);
+    return (hr == D3DX_HELPER_ERR_INVALID_DATA) ? D3DX10_ERR_INVALID_DATA : hr;
 }
 
 static HRESULT load_resource(HMODULE module, HRSRC rsrc, void **data, DWORD *size)
 {
-    HGLOBAL hglobal;
-
-    if (!(*size = SizeofResource(module, rsrc)))
-        return D3DX10_ERR_INVALID_DATA;
-    if (!(hglobal = LoadResource(module, rsrc)))
-        return D3DX10_ERR_INVALID_DATA;
-    if (!(*data = LockResource(hglobal)))
-        return D3DX10_ERR_INVALID_DATA;
-    return S_OK;
+    HRESULT hr = d3dx_load_resource(module, rsrc, data, size);
+    return (hr == D3DX_HELPER_ERR_INVALID_DATA) ? D3DX10_ERR_INVALID_DATA : hr;
 }
 
 HRESULT load_resourceA(HMODULE module, const char *resource, void **data, DWORD *size)
@@ -322,6 +281,7 @@ struct texture_processor
 {
     ID3DX10DataProcessor ID3DX10DataProcessor_iface;
     ID3D10Device *device;
+    D3DX10_IMAGE_INFO img_info;
     D3DX10_IMAGE_LOAD_INFO load_info;
     D3D10_SUBRESOURCE_DATA *resource_data;
 };
@@ -376,6 +336,63 @@ static ID3DX10DataProcessorVtbl texture_processor_vtbl =
     texture_processor_Process,
     texture_processor_CreateDeviceObject,
     texture_processor_Destroy
+};
+
+struct srv_processor
+{
+    ID3DX10DataProcessor ID3DX10DataProcessor_iface;
+    ID3DX10DataProcessor *texture_processor;
+};
+
+static inline struct srv_processor *srv_processor_from_ID3DX10DataProcessor(ID3DX10DataProcessor *iface)
+{
+    return CONTAINING_RECORD(iface, struct srv_processor, ID3DX10DataProcessor_iface);
+}
+
+static HRESULT WINAPI srv_processor_Process(ID3DX10DataProcessor *iface, void *data, SIZE_T size)
+{
+    struct srv_processor *processor = srv_processor_from_ID3DX10DataProcessor(iface);
+
+    TRACE("iface %p, data %p, size %Iu.\n", iface, data, size);
+
+    return ID3DX10DataProcessor_Process(processor->texture_processor, data, size);
+}
+
+static HRESULT WINAPI srv_processor_CreateDeviceObject(ID3DX10DataProcessor *iface, void **object)
+{
+    struct srv_processor *processor = srv_processor_from_ID3DX10DataProcessor(iface);
+    struct texture_processor *tex_processor = texture_processor_from_ID3DX10DataProcessor(processor->texture_processor);
+    ID3D10Resource *texture_resource;
+    HRESULT hr;
+
+    TRACE("iface %p, object %p.\n", iface, object);
+
+    hr = ID3DX10DataProcessor_CreateDeviceObject(processor->texture_processor, (void **)&texture_resource);
+    if (FAILED(hr))
+        return hr;
+
+    hr = ID3D10Device_CreateShaderResourceView(tex_processor->device, texture_resource, NULL,
+            (ID3D10ShaderResourceView **)object);
+    ID3D10Resource_Release(texture_resource);
+    return hr;
+}
+
+static HRESULT WINAPI srv_processor_Destroy(ID3DX10DataProcessor *iface)
+{
+    struct srv_processor *processor = srv_processor_from_ID3DX10DataProcessor(iface);
+
+    TRACE("iface %p.\n", iface);
+
+    ID3DX10DataProcessor_Destroy(processor->texture_processor);
+    free(processor);
+    return S_OK;
+}
+
+static ID3DX10DataProcessorVtbl srv_processor_vtbl =
+{
+    srv_processor_Process,
+    srv_processor_CreateDeviceObject,
+    srv_processor_Destroy
 };
 
 HRESULT WINAPI D3DX10CompileFromMemory(const char *data, SIZE_T data_size, const char *filename,
@@ -595,7 +612,35 @@ HRESULT WINAPI D3DX10CreateAsyncTextureProcessor(ID3D10Device *device,
     object->device = device;
     ID3D10Device_AddRef(device);
     init_load_info(load_info, &object->load_info);
+    if (!object->load_info.pSrcInfo)
+        object->load_info.pSrcInfo = &object->img_info;
 
+    *processor = &object->ID3DX10DataProcessor_iface;
+    return S_OK;
+}
+
+HRESULT WINAPI D3DX10CreateAsyncShaderResourceViewProcessor(ID3D10Device *device,
+        D3DX10_IMAGE_LOAD_INFO *load_info, ID3DX10DataProcessor **processor)
+{
+    struct srv_processor *object;
+    HRESULT hr;
+
+    TRACE("device %p, load_info %p, processor %p.\n", device, load_info, processor);
+
+    if (!device || !processor)
+        return E_INVALIDARG;
+
+    object = calloc(1, sizeof(*object));
+    if (!object)
+        return E_OUTOFMEMORY;
+
+    hr = D3DX10CreateAsyncTextureProcessor(device, load_info, &object->texture_processor);
+    if (FAILED(hr))
+    {
+        free(object);
+        return hr;
+    }
+    object->ID3DX10DataProcessor_iface.lpVtbl = &srv_processor_vtbl;
     *processor = &object->ID3DX10DataProcessor_iface;
     return S_OK;
 }

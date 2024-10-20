@@ -896,6 +896,12 @@ struct cpu_topology_override
     unsigned char host_cpu_id[64];
 };
 
+struct directory_file_entry
+{
+    data_size_t name_len;
+
+};
+
 struct shared_cursor
 {
     int                  x;
@@ -910,8 +916,8 @@ struct desktop_shared_memory
     struct shared_cursor cursor;
     unsigned char        keystate[256];
     thread_id_t          foreground_tid;
-    __int64              update_serial;
     unsigned int         flags;
+    __int64              update_serial;
 };
 typedef volatile struct desktop_shared_memory desktop_shm_t;
 
@@ -1903,10 +1909,8 @@ struct recv_socket_reply
 struct send_socket_request
 {
     struct request_header __header;
-    char __pad_12[4];
+    unsigned int flags;
     async_data_t async;
-    int          force_async;
-    char __pad_60[4];
 };
 struct send_socket_reply
 {
@@ -1917,6 +1921,8 @@ struct send_socket_reply
     char __pad_20[4];
 };
 
+#define SERVER_SOCKET_IO_FORCE_ASYNC 0x01
+#define SERVER_SOCKET_IO_SYSTEM      0x02
 
 
 struct socket_get_events_request
@@ -4178,7 +4184,7 @@ struct set_active_window_reply
 {
     struct reply_header __header;
     user_handle_t  previous;
-    char __pad_12[4];
+    thread_id_t    foreground_tid;
 };
 
 
@@ -4893,6 +4899,92 @@ struct get_system_handles_reply
 };
 
 
+typedef union
+{
+    struct
+    {
+        unsigned int family;
+        process_id_t owner;
+        unsigned int state;
+    } common;
+    struct
+    {
+        unsigned int family;
+        process_id_t owner;
+        unsigned int state;
+        unsigned int local_addr;
+        unsigned int local_port;
+        unsigned int remote_addr;
+        unsigned int remote_port;
+    } ipv4;
+    struct
+    {
+        unsigned int family;
+        process_id_t owner;
+        unsigned int state;
+        unsigned char local_addr[16];
+        unsigned int local_scope_id;
+        unsigned int local_port;
+        unsigned char remote_addr[16];
+        unsigned int remote_scope_id;
+        unsigned int remote_port;
+    } ipv6;
+} tcp_connection;
+
+
+struct get_tcp_connections_request
+{
+    struct request_header __header;
+    unsigned int    state_filter;
+};
+struct get_tcp_connections_reply
+{
+    struct reply_header __header;
+    unsigned int    count;
+    /* VARARG(connections,tcp_connections); */
+    char __pad_12[4];
+};
+
+
+typedef union
+{
+    struct
+    {
+        unsigned int family;
+        process_id_t owner;
+    } common;
+    struct
+    {
+        unsigned int family;
+        process_id_t owner;
+        unsigned int addr;
+        unsigned int port;
+    } ipv4;
+    struct
+    {
+        unsigned int family;
+        process_id_t owner;
+        unsigned char addr[16];
+        unsigned int scope_id;
+        unsigned int port;
+    } ipv6;
+} udp_endpoint;
+
+
+struct get_udp_endpoints_request
+{
+    struct request_header __header;
+    char __pad_12[4];
+};
+struct get_udp_endpoints_reply
+{
+    struct reply_header __header;
+    unsigned int    count;
+    /* VARARG(endpoints,udp_endpoints); */
+    char __pad_12[4];
+};
+
+
 
 struct create_mailslot_request
 {
@@ -4979,6 +5071,20 @@ struct get_directory_entry_reply
     /* VARARG(type,unicode_str); */
 };
 
+struct query_directory_file_request
+{
+    struct request_header __header;
+    obj_handle_t   handle;
+    unsigned int   restart_scan;
+    char __pad_20[4];
+};
+struct query_directory_file_reply
+{
+    struct reply_header __header;
+    data_size_t    total_len;
+    /* VARARG(entries,directory_file_entries); */
+    char __pad_12[4];
+};
 
 
 struct create_symlink_request
@@ -6177,11 +6283,14 @@ enum request
     REQ_set_security_object,
     REQ_get_security_object,
     REQ_get_system_handles,
+    REQ_get_tcp_connections,
+    REQ_get_udp_endpoints,
     REQ_create_mailslot,
     REQ_set_mailslot_info,
     REQ_create_directory,
     REQ_open_directory,
     REQ_get_directory_entry,
+    REQ_query_directory_file,
     REQ_create_symlink,
     REQ_open_symlink,
     REQ_query_symlink,
@@ -6481,11 +6590,14 @@ union generic_request
     struct set_security_object_request set_security_object_request;
     struct get_security_object_request get_security_object_request;
     struct get_system_handles_request get_system_handles_request;
+    struct get_tcp_connections_request get_tcp_connections_request;
+    struct get_udp_endpoints_request get_udp_endpoints_request;
     struct create_mailslot_request create_mailslot_request;
     struct set_mailslot_info_request set_mailslot_info_request;
     struct create_directory_request create_directory_request;
     struct open_directory_request open_directory_request;
     struct get_directory_entry_request get_directory_entry_request;
+    struct query_directory_file_request query_directory_file_request;
     struct create_symlink_request create_symlink_request;
     struct open_symlink_request open_symlink_request;
     struct query_symlink_request query_symlink_request;
@@ -6783,11 +6895,14 @@ union generic_reply
     struct set_security_object_reply set_security_object_reply;
     struct get_security_object_reply get_security_object_reply;
     struct get_system_handles_reply get_system_handles_reply;
+    struct get_tcp_connections_reply get_tcp_connections_reply;
+    struct get_udp_endpoints_reply get_udp_endpoints_reply;
     struct create_mailslot_reply create_mailslot_reply;
     struct set_mailslot_info_reply set_mailslot_info_reply;
     struct create_directory_reply create_directory_reply;
     struct open_directory_reply open_directory_reply;
     struct get_directory_entry_reply get_directory_entry_reply;
+    struct query_directory_file_reply query_directory_file_reply;
     struct create_symlink_reply create_symlink_reply;
     struct open_symlink_reply open_symlink_reply;
     struct query_symlink_reply query_symlink_reply;

@@ -3356,16 +3356,6 @@ static NTSTATUS map_image_into_view( struct file_view *view, const WCHAR *filena
         else
             ((IMAGE_NT_HEADERS32 *)nt)->OptionalHeader.ImageBase = image_info->map_addr;
 
-#ifdef __i386__
-        {
-            const WCHAR *p;
-
-            if (nt->OptionalHeader.Magic == IMAGE_NT_OPTIONAL_HDR32_MAGIC && filename
-                && (p = wcsrchr(filename, '\\')) && !wcsicmp(p, u"\\steamclient.dll"))
-                ((IMAGE_NT_HEADERS32 *)nt)->OptionalHeader.ImageBase = image_info->base;
-        }
-#endif
-
         if ((dir = get_data_dir( nt, total_size, IMAGE_DIRECTORY_ENTRY_BASERELOC )))
         {
             IMAGE_BASE_RELOCATION *rel = (IMAGE_BASE_RELOCATION *)(ptr + dir->VirtualAddress);
@@ -4315,6 +4305,98 @@ NTSTATUS virtual_clear_tls_index( ULONG index )
         server_leave_uninterrupted_section( &virtual_mutex, &sigset );
     }
     return STATUS_SUCCESS;
+}
+
+
+/***********************************************************************
+ *           virtual_set_tls_information_teb
+ */
+static NTSTATUS virtual_set_tls_information_teb( PROCESS_TLS_INFORMATION *t, unsigned int *idx, TEB *teb )
+{
+    __TRY
+    {
+#ifdef _WIN64
+        if (t->Flags & PROCESS_TLS_INFORMATION_WOW64)
+        {
+            WOW_TEB *wow_teb = get_wow_teb( teb );
+            ULONG *ptr;
+
+            if (wow_teb && wow_teb->ThreadLocalStoragePointer)
+            {
+                if (t->OperationType == ProcessTlsReplaceVector)
+                {
+                    ptr = t->ThreadData[*idx].TlsVector;
+                    memcpy( ptr, ULongToPtr( wow_teb->ThreadLocalStoragePointer ), sizeof(*ptr) * t->TlsVectorLength );
+                    t->ThreadData[*idx].TlsVector = ULongToPtr( InterlockedExchange( (LONG *)&wow_teb->ThreadLocalStoragePointer, PtrToLong( ptr )));
+                    t->ThreadData[*idx].ThreadId = wow_teb->ClientId.UniqueThread;
+                }
+                else
+                {
+                    ptr = ULongToPtr( wow_teb->ThreadLocalStoragePointer );
+                    t->ThreadData[*idx].TlsModulePointer =
+                            ULongToPtr( InterlockedExchange( (LONG *)&ptr[t->TlsIndex],
+                                        PtrToLong( t->ThreadData[*idx].TlsModulePointer )));
+                }
+                t->ThreadData[*idx].Flags = THREAD_TLS_INFORMATION_ASSIGNED;
+                ++*idx;
+            }
+        }
+        else
+#endif
+        if (teb->ThreadLocalStoragePointer)
+        {
+            void **ptr;
+
+            if (t->OperationType == ProcessTlsReplaceVector)
+            {
+                ptr = t->ThreadData[*idx].TlsVector;
+                memcpy( ptr, teb->ThreadLocalStoragePointer, sizeof(*ptr) * t->TlsVectorLength );
+                t->ThreadData[*idx].TlsVector = InterlockedExchangePointer( &teb->ThreadLocalStoragePointer, ptr );
+                t->ThreadData[*idx].ThreadId = HandleToULong( teb->ClientId.UniqueThread );
+#ifdef __x86_64__  /* macOS-specific hack */
+                if (teb->Instrumentation[0]) ((TEB *)teb->Instrumentation[0])->ThreadLocalStoragePointer = ptr;
+#endif
+            }
+            else
+            {
+                ptr = teb->ThreadLocalStoragePointer;
+                t->ThreadData[*idx].TlsModulePointer = InterlockedExchangePointer( &ptr[t->TlsIndex],
+                                                                                   t->ThreadData[*idx].TlsModulePointer );
+            }
+            t->ThreadData[*idx].Flags = THREAD_TLS_INFORMATION_ASSIGNED;
+            ++*idx;
+        }
+    }
+    __EXCEPT
+    {
+        return STATUS_ACCESS_VIOLATION;
+    }
+    __ENDTRY
+
+    return STATUS_SUCCESS;
+}
+
+
+/***********************************************************************
+ *           virtual_set_tls_information
+ */
+NTSTATUS virtual_set_tls_information( PROCESS_TLS_INFORMATION *t )
+{
+    struct ntdll_thread_data *thread_data;
+    NTSTATUS ret = STATUS_SUCCESS;
+    unsigned int idx = 0;
+    sigset_t sigset;
+
+    server_enter_uninterrupted_section( &virtual_mutex, &sigset );
+    LIST_FOR_EACH_ENTRY_REV( thread_data, &teb_list, struct ntdll_thread_data, entry )
+    {
+        TEB *teb = CONTAINING_RECORD( thread_data, TEB, GdiTebBatch );
+
+        if (idx == t->ThreadDataCount) break;
+        if ((ret = virtual_set_tls_information_teb( t, &idx, teb ))) break;
+    }
+    server_leave_uninterrupted_section( &virtual_mutex, &sigset );
+    return ret;
 }
 
 

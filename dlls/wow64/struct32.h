@@ -230,13 +230,6 @@ typedef struct
 
 typedef struct
 {
-    ULONG Version;
-    ULONG Reserved;
-    ULONG Callback;
-} PROCESS_INSTRUMENTATION_CALLBACK_INFORMATION32;
-
-typedef struct
-{
     ULONG ReserveSize;
     ULONG ZeroBits;
     ULONG StackBase;
@@ -332,6 +325,30 @@ typedef struct
     ULONG                            TimeDateStamp;
     ULONG                            DefaultBase;
 } RTL_PROCESS_MODULE_INFORMATION_EX32;
+
+typedef struct
+{
+    ULONG Flags;
+    union
+    {
+        ULONG TlsVector;
+        ULONG TlsModulePointer;
+    };
+    ULONG ThreadId;
+} THREAD_TLS_INFORMATION32;
+
+typedef struct
+{
+    ULONG Flags;
+    ULONG OperationType;
+    ULONG ThreadDataCount;
+    union
+    {
+        ULONG TlsIndex;
+        ULONG TlsVectorLength;
+    };
+    THREAD_TLS_INFORMATION32 ThreadData[1];
+} PROCESS_TLS_INFORMATION32;
 
 typedef struct
 {

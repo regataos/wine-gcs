@@ -98,8 +98,9 @@ struct key
 #define KEY_DELETED  0x0002  /* key has been deleted */
 #define KEY_DIRTY    0x0004  /* key has been modified */
 #define KEY_SYMLINK  0x0008  /* key is a symbolic link */
-#define KEY_WOWSHARE 0x0010  /* key is a Wow64 shared key (used for Software\Classes) */
+#define KEY_WOWREFLECT 0x0010  /* key is a Wow64 shared and reflected key (used for Software\Classes) */
 #define KEY_PREDEF   0x0020  /* key is marked as predefined */
+#define KEY_WOWSHARE 0x0040  /* key is Wow64 shared */
 
 #define OBJ_KEY_WOW64 0x100000 /* magic flag added to attributes for WoW64 redirection */
 
@@ -520,7 +521,7 @@ static struct object *key_lookup_name( struct object *obj, struct unicode_str *n
         }
 
         key = (struct key *)obj;
-        if (key && (key->flags & KEY_WOWSHARE) && (attr & OBJ_KEY_WOW64) && !name->str)
+        if (key && (key->flags & KEY_WOWREFLECT) && (attr & OBJ_KEY_WOW64) && !name->str)
         {
             key = get_parent( key );
             release_object( obj );
@@ -547,7 +548,7 @@ static struct object *key_lookup_name( struct object *obj, struct unicode_str *n
 
     if (!(found = find_subkey( key, &tmp, &index )))
     {
-        if ((key->flags & KEY_WOWSHARE) && (attr & OBJ_KEY_WOW64))
+        if ((key->flags & KEY_WOWREFLECT) && (attr & OBJ_KEY_WOW64))
         {
             /* try in the 64-bit parent */
             key = get_parent( key );
@@ -606,7 +607,7 @@ static int key_link_name( struct object *obj, struct object_name *name, struct o
     for (i = ++parent_key->last_subkey; i > index; i--)
         parent_key->subkeys[i] = parent_key->subkeys[i - 1];
     parent_key->subkeys[index] = (struct key *)grab_object( key );
-    if (is_wow6432node( name->name, name->len ) &&
+    if (!(parent_key->flags & KEY_WOWSHARE) && is_wow6432node( name->name, name->len ) &&
         !is_wow6432node( parent_key->obj.name->name, parent_key->obj.name->len ))
         parent_key->wow6432node = key;
     name->parent = parent;
@@ -782,7 +783,7 @@ static struct key *grab_wow6432node( struct key *key )
     struct key *ret = key->wow6432node;
 
     if (!ret) return key;
-    if (ret->flags & KEY_WOWSHARE) return key;
+    if (ret->flags & KEY_WOWREFLECT) return key;
     grab_object( ret );
     release_object( key );
     return ret;
@@ -828,7 +829,7 @@ static struct key *open_key( struct key *parent, const struct unicode_str *name,
     if (parent && !(access & KEY_WOW64_64KEY) && !is_wow6432node( name->str, name->len ))
     {
         key = get_wow6432node( parent );
-        if (key && ((access & KEY_WOW64_32KEY) || (key->flags & KEY_WOWSHARE)))
+        if (key && ((access & KEY_WOW64_32KEY) || (key->flags & KEY_WOWREFLECT)))
             parent = key;
     }
 
@@ -854,7 +855,7 @@ static struct key *create_key( struct key *parent, const struct unicode_str *nam
     if (parent && !(access & KEY_WOW64_64KEY) && !is_wow6432node( name->str, name->len ))
     {
         key = get_wow6432node( parent );
-        if (key && ((access & KEY_WOW64_32KEY) || (key->flags & KEY_WOWSHARE)))
+        if (key && ((access & KEY_WOW64_32KEY) || (key->flags & KEY_WOWREFLECT)))
             parent = key;
     }
 
@@ -1897,13 +1898,14 @@ void init_registry(void)
                                     'C','u','r','r','e','n','t','V','e','r','s','i','o','n','\\',
                                     'P','e','r','f','l','i','b','\\',
                                     '0','0','9'};
+    static const WCHAR software[] = {'S','o','f','t','w','a','r','e',};
     static const struct unicode_str root_name = { REGISTRY, sizeof(REGISTRY) };
     static const struct unicode_str HKLM_name = { HKLM, sizeof(HKLM) };
     static const struct unicode_str HKU_name = { HKU_default, sizeof(HKU_default) };
     static const struct unicode_str perflib_name = { perflib, sizeof(perflib) };
 
     WCHAR *current_user_path;
-    struct unicode_str current_user_str;
+    struct unicode_str current_user_str, name;
     struct key *key, *hklm, *hkcu;
     unsigned int i;
     char *p;
@@ -1955,8 +1957,6 @@ void init_registry(void)
     /* set the shared flag on Software\Classes\Wow6432Node for all platforms */
     for (i = 1; i < supported_machines_count; i++)
     {
-        struct unicode_str name;
-
         switch (supported_machines[i])
         {
         case IMAGE_FILE_MACHINE_I386:  name.str = classes_i386;  name.len = sizeof(classes_i386);  break;
@@ -1966,10 +1966,18 @@ void init_registry(void)
         }
         if ((key = create_key_recursive( hklm, &name, current_time )))
         {
-            key->flags |= KEY_WOWSHARE;
+            key->flags |= KEY_WOWREFLECT;
             release_object( key );
         }
-        /* FIXME: handle HKCU too */
+    }
+
+    name.str = software;
+    name.len = sizeof(software);
+    if ((key = create_key_recursive( hkcu, &name, current_time )))
+    {
+        key->flags |= KEY_WOWSHARE;
+        key->wow6432node = NULL;
+        release_object( key );
     }
 
     if ((key = create_key_recursive( hklm, &perflib_name, current_time )))

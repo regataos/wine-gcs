@@ -36,6 +36,7 @@ HRESULT avi_compressor_create(IUnknown *outer, IUnknown **out);
 HRESULT avi_mux_create(IUnknown *outer, IUnknown **out);
 HRESULT capture_graph_create(IUnknown *outer, IUnknown **out);
 HRESULT file_writer_create(IUnknown *outer, IUnknown **out);
+HRESULT inf_tee_create(IUnknown *outer, IUnknown **out);
 HRESULT smart_tee_create(IUnknown *outer, IUnknown **out);
 HRESULT vfw_capture_create(IUnknown *outer, IUnknown **out);
 
@@ -45,6 +46,11 @@ struct create_params
 {
     unsigned int                  index;
     video_capture_device_t       *device;
+};
+
+struct start_params
+{
+    video_capture_device_t       device;
 };
 
 struct destroy_params
@@ -130,6 +136,7 @@ struct read_frame_params
 enum unix_funcs
 {
     unix_create,
+    unix_start,
     unix_destroy,
     unix_check_format,
     unix_set_format,

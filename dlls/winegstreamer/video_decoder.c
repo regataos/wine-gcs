@@ -77,6 +77,14 @@ static const GUID *const video_decoder_output_types[] =
     &MFVideoFormat_IYUV,
     &MFVideoFormat_I420,
     &MFVideoFormat_YUY2,
+    &MFVideoFormat_UYVY,
+    &MFVideoFormat_YVYU,
+    &MFVideoFormat_NV11,
+    &MFVideoFormat_RGB32,
+    &MFVideoFormat_RGB24,
+    &MFVideoFormat_RGB565,
+    &MFVideoFormat_RGB555,
+    &MFVideoFormat_RGB8,
 };
 
 struct video_decoder
@@ -943,17 +951,35 @@ static HRESULT WINAPI transform_ProcessOutput(IMFTransform *iface, DWORD flags, 
     if (SUCCEEDED(hr = wg_transform_read_mf(decoder->wg_transform, sample,
             sample_size, &samples->dwStatus)))
     {
+        BOOL frame_rate_given = FALSE;
+        LONGLONG time;
         wg_sample_queue_flush(decoder->wg_sample_queue, false);
 
         if (FAILED(IMFMediaType_GetUINT64(decoder->input_type, &MF_MT_FRAME_RATE, &frame_rate)))
             frame_rate = (UINT64)30000 << 32 | 1001;
+        else
+            frame_rate_given = TRUE;
 
-        duration = (UINT64)10000000 * (UINT32)frame_rate / (frame_rate >> 32);
-        if (FAILED(IMFSample_SetSampleTime(sample, decoder->sample_time)))
-            WARN("Failed to set sample time\n");
-        if (FAILED(IMFSample_SetSampleDuration(sample, duration)))
-            WARN("Failed to set sample duration\n");
-        decoder->sample_time += duration;
+        if (frame_rate_given || FAILED(IMFSample_GetSampleDuration(sample, &duration)))
+        {
+            if (!frame_rate_given)
+                WARN("Failed to get sample duration\n");
+            duration = (UINT64)10000000 * (UINT32)frame_rate / (frame_rate >> 32);
+            if (FAILED(IMFSample_SetSampleDuration(sample, duration)))
+                WARN("Failed to set sample duration\n");
+        }
+        if (frame_rate_given || FAILED(IMFSample_GetSampleTime(sample, &time)))
+        {
+            if (!frame_rate_given)
+                WARN("Failed to get sample time\n");
+            if(FAILED(IMFSample_SetSampleTime(sample, decoder->sample_time)))
+                WARN("Failed to set sample time\n");
+            decoder->sample_time += duration;
+        }
+        else
+        {
+            decoder->sample_time = time + duration;
+        }
     }
 
     if (hr == MF_E_TRANSFORM_STREAM_CHANGE)
@@ -1639,7 +1665,6 @@ HRESULT video_decoder_create(REFIID riid, void **out)
             | MFT_OUTPUT_STREAM_FIXED_SAMPLE_SIZE;
     decoder->output_info.cbSize = 1920 * 1088 * 2;
 
-    decoder->wg_transform_attrs.output_plane_align = 15;
     decoder->wg_transform_attrs.allow_format_change = TRUE;
 
     TRACE("Created video decoder transform %p.\n", &decoder->IMFTransform_iface);

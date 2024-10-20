@@ -724,7 +724,7 @@ static const struct message WmDestroyOverlappedSeq[] = {
     { WM_KILLFOCUS, sent|optional|wparam, 0 },
     { WM_IME_SETCONTEXT, sent|wparam|optional, 0 },
     { WM_IME_NOTIFY, sent|wparam|optional|defwinproc, 1 },
-    { EVENT_OBJECT_DESTROY, winevent_hook|wparam|lparam|winevent_hook_todo, 0, 0 },
+    { EVENT_OBJECT_DESTROY, winevent_hook|wparam|lparam, 0, 0 },
     { WM_DESTROY, sent },
     { WM_NCDESTROY, sent },
     { 0 }
@@ -1626,7 +1626,7 @@ static const struct message WmDestroyChildSeq[] = {
     { WM_IME_SETCONTEXT, sent|wparam|parent|optional, 1 },
     { EVENT_OBJECT_FOCUS, winevent_hook|wparam|lparam, OBJID_CLIENT, 0 },
     { WM_SETFOCUS, sent|parent },
-    { EVENT_OBJECT_DESTROY, winevent_hook|wparam|lparam|winevent_hook_todo, 0, 0 },
+    { EVENT_OBJECT_DESTROY, winevent_hook|wparam|lparam, 0, 0 },
     { WM_DESTROY, sent },
     { WM_DESTROY, sent|optional }, /* some other (IME?) window */
     { WM_NCDESTROY, sent|optional }, /* some other (IME?) window */
@@ -1646,7 +1646,7 @@ static const struct message WmDestroyInvisibleChildSeq[] = {
     { 0x0090, sent|optional },
     { WM_PARENTNOTIFY, sent|parent|wparam, WM_DESTROY },
     { WM_SHOWWINDOW, sent|wparam, 0 },
-    { EVENT_OBJECT_DESTROY, winevent_hook|wparam|lparam|winevent_hook_todo, 0, 0 },
+    { EVENT_OBJECT_DESTROY, winevent_hook|wparam|lparam, 0, 0 },
     { WM_DESTROY, sent },
     { WM_NCDESTROY, sent },
     { 0 }
@@ -1991,7 +1991,7 @@ static const struct message WmSetRedrawTrueSeq[] =
 static const struct message WmEnableWindowSeq_1[] =
 {
     { WM_CANCELMODE, sent|wparam|lparam, 0, 0 },
-    { EVENT_OBJECT_STATECHANGE, winevent_hook|wparam|lparam|winevent_hook_todo, 0, 0 },
+    { EVENT_OBJECT_STATECHANGE, winevent_hook|wparam|lparam, 0, 0 },
     { HCBT_SETFOCUS, hook|optional },
     { WM_KILLFOCUS, sent|optional },
     { WM_ENABLE, sent|wparam|lparam, FALSE, 0 },
@@ -2007,7 +2007,7 @@ static const struct message WmEnableWindowSeq_2[] =
 
 static const struct message WmEnableWindowSeq_3[] =
 {
-    { EVENT_OBJECT_STATECHANGE, winevent_hook|wparam|lparam|winevent_hook_todo, 0, 0 },
+    { EVENT_OBJECT_STATECHANGE, winevent_hook|wparam|lparam, 0, 0 },
     { WM_ENABLE, sent|wparam|lparam, TRUE, 0 },
     { 0 }
 };
@@ -2039,12 +2039,12 @@ static const struct message WmSetScrollRangeSeq[] =
 /* SetScrollRange for a window without a non-client area */
 static const struct message WmSetScrollRangeHSeq_empty[] =
 {
-    { EVENT_OBJECT_VALUECHANGE, winevent_hook|wparam|lparam|winevent_hook_todo, OBJID_HSCROLL, 0 },
+    { EVENT_OBJECT_VALUECHANGE, winevent_hook|wparam|lparam, OBJID_HSCROLL, 0 },
     { 0 }
 };
 static const struct message WmSetScrollRangeVSeq_empty[] =
 {
-    { EVENT_OBJECT_VALUECHANGE, winevent_hook|wparam|lparam|winevent_hook_todo, OBJID_VSCROLL, 0 },
+    { EVENT_OBJECT_VALUECHANGE, winevent_hook|wparam|lparam, OBJID_VSCROLL, 0 },
     { 0 }
 };
 static const struct message WmSetScrollRangeHVSeq[] =
@@ -2991,7 +2991,7 @@ static const struct message WmDestroyMDIframeSeq[] = {
     { WM_ACTIVATE, sent|wparam|optional, 0 }, /* Win9x */
     { WM_ACTIVATEAPP, sent|wparam|optional, 0 }, /* Win9x */
     { EVENT_OBJECT_HIDE, winevent_hook|wparam|lparam|winevent_hook_todo, OBJID_CARET, 0 },
-    { EVENT_OBJECT_DESTROY, winevent_hook|wparam|lparam|winevent_hook_todo, 0, 0 },
+    { EVENT_OBJECT_DESTROY, winevent_hook|wparam|lparam, 0, 0 },
     { WM_DESTROY, sent },
     { WM_NCDESTROY, sent },
     { 0 }
@@ -3040,7 +3040,7 @@ static const struct message WmDestroyMDIclientSeq[] = {
     { WM_WINDOWPOSCHANGING, sent|wparam|optional, SWP_HIDEWINDOW|SWP_NOACTIVATE|SWP_NOSIZE|SWP_NOMOVE },
     { EVENT_OBJECT_HIDE, winevent_hook|wparam|lparam, 0, 0 },
     { WM_WINDOWPOSCHANGED, sent|wparam|optional, SWP_HIDEWINDOW|SWP_NOACTIVATE|SWP_NOSIZE|SWP_NOMOVE|SWP_NOCLIENTSIZE|SWP_NOCLIENTMOVE },
-    { EVENT_OBJECT_DESTROY, winevent_hook|wparam|lparam|winevent_hook_todo, 0, 0 },
+    { EVENT_OBJECT_DESTROY, winevent_hook|wparam|lparam, 0, 0 },
     { WM_DESTROY, sent },
     { WM_NCDESTROY, sent },
     { 0 }
@@ -3242,7 +3242,7 @@ static const struct message WmDestroyMDIchildInvisibleSeq[] = {
      */
     { 0x0090, sent|optional },
     { WM_PARENTNOTIFY, sent /*|wparam, WM_DESTROY*/ }, /* in MDI client */
-    { EVENT_OBJECT_DESTROY, winevent_hook|wparam|lparam|winevent_hook_todo, 0, 0 },
+    { EVENT_OBJECT_DESTROY, winevent_hook|wparam|lparam, 0, 0 },
     { WM_DESTROY, sent },
     { WM_NCDESTROY, sent },
     /* FIXME: Wine destroys an icon/title window while Windows doesn't */
@@ -12571,7 +12571,7 @@ static const struct message destroy_window_with_children[] = {
     { WM_DESTROY, sent|wparam|lparam, 0, WND_POPUP_ID }, /* popup */
     { WM_CAPTURECHANGED, sent|wparam|lparam, 0, WND_POPUP_ID }, /* popup */
     { WM_NCDESTROY, sent|wparam|lparam, 0, WND_POPUP_ID }, /* popup */
-    { EVENT_OBJECT_DESTROY, winevent_hook|wparam|lparam|winevent_hook_todo, 0, 0 }, /* parent */
+    { EVENT_OBJECT_DESTROY, winevent_hook|wparam|lparam, 0, 0 }, /* parent */
     { WM_DESTROY, sent|wparam|lparam, 0, WND_PARENT_ID }, /* parent */
     { WM_DESTROY, sent|wparam|lparam, 0, WND_CHILD_ID + 2 }, /* child2 */
     { WM_DESTROY, sent|wparam|lparam, 0, WND_CHILD_ID + 1 }, /* child1 */
@@ -14253,7 +14253,7 @@ static const struct message WmQuitDialogSeq[] = {
     { EVENT_SYSTEM_DIALOGEND, winevent_hook|wparam|lparam|winevent_hook_todo, 0, 0 },
     { HCBT_DESTROYWND, hook },
     { 0x0090, sent|optional }, /* Vista */
-    { EVENT_OBJECT_DESTROY, winevent_hook|wparam|lparam|winevent_hook_todo, 0, 0 },
+    { EVENT_OBJECT_DESTROY, winevent_hook|wparam|lparam, 0, 0 },
     { WM_DESTROY, sent },
     { WM_NCDESTROY, sent },
     { 0 }
@@ -15733,7 +15733,7 @@ static void test_dialog_messages(void)
 static void test_enddialog_seq(HWND dialog, HWND owner)
 {
     const struct message seq[] = {
-        { EVENT_OBJECT_STATECHANGE, winevent_hook|wparam|lparam|winevent_hook_todo, 0, 0 },
+        { EVENT_OBJECT_STATECHANGE, winevent_hook|wparam|lparam, 0, 0 },
         { WM_ENABLE, sent },
         { WM_WINDOWPOSCHANGING, sent|wparam, SWP_HIDEWINDOW|SWP_NOACTIVATE|SWP_NOSIZE|SWP_NOMOVE },
         { HCBT_ACTIVATE, hook|wparam, (WPARAM)owner },
@@ -15761,7 +15761,7 @@ static void test_enddialog_seq(HWND dialog, HWND owner)
 static void test_enddialog_seq2(HWND dialog, HWND owner)
 {
     const struct message seq[] = {
-        { EVENT_OBJECT_STATECHANGE, winevent_hook|wparam|lparam|winevent_hook_todo, 0, 0 },
+        { EVENT_OBJECT_STATECHANGE, winevent_hook|wparam|lparam, 0, 0 },
         { WM_ENABLE, parent|sent },
         { WM_WINDOWPOSCHANGING, sent|wparam, SWP_HIDEWINDOW|SWP_NOACTIVATE|SWP_NOSIZE|SWP_NOMOVE },
         { HCBT_ACTIVATE, hook|wparam, (WPARAM)owner },
@@ -16987,7 +16987,7 @@ static const struct message wm_popup_menu_1[] =
     { EVENT_SYSTEM_MENUPOPUPEND, winevent_hook|wparam|lparam|winevent_hook_todo, OBJID_CLIENT, 0 },
     { HCBT_DESTROYWND, hook|optional }, /* Win9x doesn't create a window */
     { EVENT_OBJECT_HIDE, winevent_hook|wparam|lparam, 0, 0 },
-    { EVENT_OBJECT_DESTROY, winevent_hook|wparam|lparam|winevent_hook_todo, 0, 0 },
+    { EVENT_OBJECT_DESTROY, winevent_hook|wparam|lparam, 0, 0 },
     { WM_UNINITMENUPOPUP, sent|lparam, 0, 0 },
     { WM_MENUSELECT, sent|wparam|lparam, MAKEWPARAM(0,0xffff), 0 },
     { WM_EXITMENULOOP, sent|wparam|lparam, 0, 0 },
@@ -17037,12 +17037,12 @@ static const struct message wm_popup_menu_2[] =
     { EVENT_SYSTEM_MENUPOPUPEND, winevent_hook|wparam|lparam|winevent_hook_todo, OBJID_CLIENT, 0 },
     { HCBT_DESTROYWND, hook },
     { EVENT_OBJECT_HIDE, winevent_hook|wparam|lparam, 0, 0 },
-    { EVENT_OBJECT_DESTROY, winevent_hook|wparam|lparam|winevent_hook_todo, 0, 0 },
+    { EVENT_OBJECT_DESTROY, winevent_hook|wparam|lparam, 0, 0 },
     { WM_UNINITMENUPOPUP, sent|lparam, 0, 0 },
     { EVENT_SYSTEM_MENUPOPUPEND, winevent_hook|wparam|lparam|winevent_hook_todo, OBJID_CLIENT, 0 },
     { HCBT_DESTROYWND, hook|optional }, /* Win9x doesn't send it */
     { EVENT_OBJECT_HIDE, winevent_hook|wparam|lparam, 0, 0 },
-    { EVENT_OBJECT_DESTROY, winevent_hook|wparam|lparam|winevent_hook_todo, 0, 0 },
+    { EVENT_OBJECT_DESTROY, winevent_hook|wparam|lparam, 0, 0 },
     { WM_UNINITMENUPOPUP, sent|lparam, 0, 0 },
     { WM_MENUSELECT, sent|wparam|lparam, MAKEWPARAM(0,0xffff), 0 },
     { WM_EXITMENULOOP, sent|wparam|lparam, 0, 0 },
@@ -17092,12 +17092,12 @@ static const struct message wm_popup_menu_3[] =
     { EVENT_SYSTEM_MENUPOPUPEND, winevent_hook|wparam|lparam|winevent_hook_todo, OBJID_CLIENT, 0 },
     { HCBT_DESTROYWND, hook },
     { EVENT_OBJECT_HIDE, winevent_hook|wparam|lparam, 0, 0 },
-    { EVENT_OBJECT_DESTROY, winevent_hook|wparam|lparam|winevent_hook_todo, 0, 0 },
+    { EVENT_OBJECT_DESTROY, winevent_hook|wparam|lparam, 0, 0 },
     { WM_UNINITMENUPOPUP, sent|lparam, 0, 0 },
     { EVENT_SYSTEM_MENUPOPUPEND, winevent_hook|wparam|lparam|winevent_hook_todo, OBJID_CLIENT, 0 },
     { HCBT_DESTROYWND, hook|optional }, /* Win9x doesn't send it */
     { EVENT_OBJECT_HIDE, winevent_hook|wparam|lparam, 0, 0 },
-    { EVENT_OBJECT_DESTROY, winevent_hook|wparam|lparam|winevent_hook_todo, 0, 0 },
+    { EVENT_OBJECT_DESTROY, winevent_hook|wparam|lparam, 0, 0 },
     { WM_UNINITMENUPOPUP, sent|lparam, 0, 0 },
     { WM_MENUSELECT, sent|wparam|lparam, MAKEWPARAM(0,0xffff), 0 },
     { WM_EXITMENULOOP, sent|wparam|lparam, 0, 0 },

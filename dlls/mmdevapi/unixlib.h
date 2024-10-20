@@ -228,7 +228,7 @@ struct set_event_handle_params
 struct set_sample_rate_params
 {
     stream_handle stream;
-    float new_rate;
+    float rate;
     HRESULT result;
 };
 

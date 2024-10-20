@@ -30,6 +30,8 @@
 #pragma makedep unix
 #endif
 
+#include <sys/prctl.h>
+#include <string.h>
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
 #include "win32u_private.h"
@@ -596,6 +598,38 @@ HWND get_focus(void)
 BOOL WINAPI NtUserAttachThreadInput( DWORD from, DWORD to, BOOL attach )
 {
     BOOL ret;
+    static int visited = 0;
+    static DWORD fromThreadForHack = 0;
+    static DWORD toThreadForHack = 0;
+    static char processNameForHack[16];
+    static const char* DAIprocessName = "DragonAgeInquis";
+    static const char* DAIGameLoopName = "GameLoop";
+    const char *sgi;
+
+    prctl(PR_GET_NAME, processNameForHack);
+
+    TRACE("Process Name: %s\n", processNameForHack); 
+    
+    if ((sgi = getenv("SteamGameId")) && !strcmp(sgi, "1222690"))
+    {
+        if (strncmp(DAIprocessName, processNameForHack, 15) == 0 || strncmp(DAIGameLoopName, processNameForHack, 8) == 0)
+        {
+            if (!visited)
+            {
+                TRACE("First Visit Process Name: %s\n", processNameForHack);
+                fromThreadForHack = from;
+                toThreadForHack = to;
+                visited = 1;
+            }
+
+            if (from == 0 && to == 0 && visited)
+            {
+                TRACE("00 Process Name: %s\n", processNameForHack);
+                from = fromThreadForHack;
+                to = toThreadForHack;
+            }
+        }
+    }
 
     SERVER_START_REQ( attach_thread_input )
     {
@@ -1845,7 +1879,7 @@ static BOOL set_active_window( HWND hwnd, HWND *prev, BOOL mouse, BOOL focus )
 {
     HWND previous = get_active_window();
     BOOL ret = FALSE;
-    DWORD old_thread, new_thread;
+    DWORD old_thread, new_thread, foreground_tid;
     CBTACTIVATESTRUCT cbt;
 
     if (previous == hwnd)
@@ -1874,7 +1908,10 @@ static BOOL set_active_window( HWND hwnd, HWND *prev, BOOL mouse, BOOL focus )
         req->handle = wine_server_user_handle( hwnd );
         req->internal_msg = WM_WINE_SETACTIVEWINDOW;
         if ((ret = !wine_server_call_err( req )))
+        {
             previous = wine_server_ptr_handle( reply->previous );
+            foreground_tid = reply->foreground_tid;
+        }
     }
     SERVER_END_REQ;
     if (!ret) goto done;
@@ -1906,7 +1943,7 @@ static BOOL set_active_window( HWND hwnd, HWND *prev, BOOL mouse, BOOL focus )
                 for (phwnd = list; *phwnd; phwnd++)
                 {
                     if (get_window_thread( *phwnd, NULL ) == old_thread)
-                        send_message( *phwnd, WM_ACTIVATEAPP, 0, new_thread );
+                        send_message( *phwnd, WM_ACTIVATEAPP, 0, foreground_tid );
                 }
             }
             if (new_thread)

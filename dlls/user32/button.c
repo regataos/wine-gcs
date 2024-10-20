@@ -119,6 +119,7 @@ static inline LONG get_button_state( HWND hwnd )
 static inline void set_button_state( HWND hwnd, LONG state )
 {
     SetWindowLongW( hwnd, STATE_GWL_OFFSET, state );
+    NtUserNotifyWinEvent( EVENT_OBJECT_STATECHANGE, hwnd, OBJID_CLIENT, 0 );
 }
 
 static inline HFONT get_button_font( HWND hwnd )
@@ -374,6 +375,11 @@ LRESULT ButtonWndProc_common(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam,
 
     case WM_GETFONT:
         return (LRESULT)get_button_font( hWnd );
+
+    case WM_GETOBJECT:
+      if ((LONG)lParam == OBJID_QUERYCLASSNAMEIDX)
+        return 0x10002;
+      break;
 
     case WM_SETFOCUS:
         TRACE("WM_SETFOCUS %p\n",hWnd);

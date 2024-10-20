@@ -433,7 +433,6 @@ BOOL WINAPI BlockInput(BOOL fBlockIt)
     return FALSE;
 }
 
-
 /***********************************************************************
  *		LoadKeyboardLayoutW (USER32.@)
  */
