@@ -59,7 +59,6 @@ void X11DRV_init_desktop( Window win )
         ERR("Failed to get host monitor rectangle.\n");
     root_window = win;
     managed_mode = FALSE;  /* no managed windows in desktop mode */
-    fs_hack_disable();
 }
 
 /***********************************************************************
@@ -77,7 +76,8 @@ BOOL X11DRV_CreateDesktop( const WCHAR *name, UINT width, UINT height )
 
     /* Create window */
     win_attr.event_mask = ExposureMask | KeyPressMask | KeyReleaseMask | EnterWindowMask |
-                          PointerMotionMask | ButtonPressMask | ButtonReleaseMask | FocusChangeMask;
+                          PointerMotionMask | ButtonPressMask | ButtonReleaseMask | FocusChangeMask |
+                          StructureNotifyMask | PropertyChangeMask;
     win_attr.cursor = XCreateFontCursor( display, XC_top_left_arrow );
 
     if (default_visual.visual != DefaultVisual( display, DefaultScreen(display) ))
@@ -90,7 +90,8 @@ BOOL X11DRV_CreateDesktop( const WCHAR *name, UINT width, UINT height )
                          0, 0, width, height, 0, default_visual.depth, InputOutput,
                          default_visual.visual, CWEventMask | CWCursor | CWColormap, &win_attr );
     if (!win) return FALSE;
-    X11DRV_XInput2_Enable( display, win, win_attr.event_mask );
+
+    x11drv_xinput2_enable( display, win );
     XFlush( display );
 
     X11DRV_init_desktop( win );
@@ -112,26 +113,4 @@ BOOL is_desktop_fullscreen(void)
         if (EqualRect( &host_monitor_rects[i], &rect) ) return TRUE;
 
     return FALSE;
-}
-
-/***********************************************************************
- *		X11DRV_resize_desktop
- */
-void X11DRV_resize_desktop(void)
-{
-    static RECT old_virtual_rect;
-
-    RECT virtual_rect = NtUserGetVirtualScreenRect();
-    HWND hwnd = NtUserGetDesktopWindow();
-    INT width = virtual_rect.right - virtual_rect.left, height = virtual_rect.bottom - virtual_rect.top;
-
-    TRACE( "desktop %p change to (%dx%d)\n", hwnd, width, height );
-    NtUserSetWindowPos( hwnd, 0, virtual_rect.left, virtual_rect.top, width, height,
-                        SWP_NOZORDER | SWP_NOACTIVATE | SWP_DEFERERASE );
-
-    /* HACK: always send the desktop resize notification, to eventually update fshack on windows */
-    send_message_timeout( HWND_BROADCAST, WM_X11DRV_DESKTOP_RESIZED, old_virtual_rect.left,
-                          old_virtual_rect.top, SMTO_ABORTIFHUNG, 2000, FALSE );
-
-    old_virtual_rect = virtual_rect;
 }

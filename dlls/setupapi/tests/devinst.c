@@ -20,20 +20,28 @@
 
 #include <stdarg.h>
 #include <stdio.h>
+#include <time.h>
 
 #include "windef.h"
 #include "winbase.h"
 #include "wingdi.h"
+#include "winnls.h"
 #include "winuser.h"
 #include "winreg.h"
+#include "ntsecapi.h"
+#include "wincrypt.h"
+#include "mscat.h"
 #include "devguid.h"
+#include "ntddvdeo.h"
 #include "initguid.h"
 #include "devpkey.h"
 #include "setupapi.h"
 #include "cfgmgr32.h"
 #include "cguid.h"
+#include "fci.h"
 
 #include "wine/test.h"
+#include "wine/mssign.h"
 
 /* This is a unique guid for testing purposes */
 static GUID guid = {0x6a55b5a4, 0x3f65, 0x11db, {0xb7,0x04,0x00,0x11,0x95,0x5c,0x2b,0xdb}};
@@ -41,10 +49,25 @@ static GUID guid2 = {0x6a55b5a5, 0x3f65, 0x11db, {0xb7,0x04,0x00,0x11,0x95,0x5c,
 static GUID iface_guid = {0xdeadbeef, 0x3f65, 0x11db, {0xb7,0x04,0x00,0x11,0x95,0x5c,0x2b,0xdb}};
 static GUID iface_guid2 = {0xdeadf00d, 0x3f65, 0x11db, {0xb7,0x04,0x00,0x11,0x95,0x5c,0x2b,0xdb}};
 
-BOOL (WINAPI *pSetupDiSetDevicePropertyW)(HDEVINFO, PSP_DEVINFO_DATA, const DEVPROPKEY *, DEVPROPTYPE, const BYTE *, DWORD, DWORD);
-BOOL (WINAPI *pSetupDiGetDevicePropertyW)(HDEVINFO, PSP_DEVINFO_DATA, const DEVPROPKEY *, DEVPROPTYPE *, BYTE *, DWORD, DWORD *, DWORD);
+static const WCHAR guid_strw[] = L"{6a55b5a4-3f65-11db-b704-0011955c2bdb}";
+
+static HRESULT (WINAPI *pDriverStoreAddDriverPackageA)(const char *inf_path, void *unk1,
+        void *unk2, WORD architecture, char *ret_path, DWORD *ret_len);
+static HRESULT (WINAPI *pDriverStoreDeleteDriverPackageA)(const char *path, void *unk1, void *unk2);
+static HRESULT (WINAPI *pDriverStoreFindDriverPackageA)(const char *inf_path, void *unk1,
+        void *unk2, WORD architecture, void *unk4, char *ret_path, DWORD *ret_len);
+static BOOL (WINAPI *pSetupDiSetDevicePropertyW)(HDEVINFO, SP_DEVINFO_DATA *, const DEVPROPKEY *, DEVPROPTYPE, const BYTE *, DWORD, DWORD);
+static BOOL (WINAPI *pSetupDiGetDevicePropertyW)(HDEVINFO, SP_DEVINFO_DATA *, const DEVPROPKEY *, DEVPROPTYPE *, BYTE *, DWORD, DWORD *, DWORD);
+static BOOL (WINAPI *pSetupQueryInfOriginalFileInformationA)(SP_INF_INFORMATION *, UINT, SP_ALTPLATFORM_INFO *, SP_ORIGINAL_FILE_INFO_A *);
+static BOOL (WINAPI *pSetupDiGetDevicePropertyKeys)(HDEVINFO, PSP_DEVINFO_DATA, DEVPROPKEY *,DWORD, DWORD *, DWORD);
 
 static BOOL wow64;
+
+static void create_directory(const char *name)
+{
+    BOOL ret = CreateDirectoryA(name, NULL);
+    ok(ret, "Failed to create %s, error %lu.\n", name, GetLastError());
+}
 
 static void create_file(const char *name, const char *data)
 {
@@ -57,6 +80,18 @@ static void create_file(const char *name, const char *data)
     ret = WriteFile(file, data, strlen(data), &size, NULL);
     ok(ret && size == strlen(data), "Failed to write %s, error %lu.\n", name, GetLastError());
     CloseHandle(file);
+}
+
+static void delete_directory(const char *name)
+{
+    BOOL ret = RemoveDirectoryA(name);
+    ok(ret, "Failed to delete %s, error %lu.\n", name, GetLastError());
+}
+
+static void delete_file(const char *name)
+{
+    BOOL ret = DeleteFileA(name);
+    ok(ret, "Failed to delete %s, error %lu.\n", name, GetLastError());
 }
 
 static void load_resource(const char *name, const char *filename)
@@ -75,6 +110,241 @@ static void load_resource(const char *name, const char *filename)
     WriteFile( file, ptr, SizeofResource( GetModuleHandleA(NULL), res ), &written, NULL );
     ok( written == SizeofResource( GetModuleHandleA(NULL), res ), "couldn't write resource\n" );
     CloseHandle( file );
+}
+
+struct testsign_context
+{
+    HCRYPTPROV provider;
+    const CERT_CONTEXT *cert, *root_cert, *publisher_cert;
+    HCERTSTORE root_store, publisher_store;
+};
+
+static BOOL testsign_create_cert(struct testsign_context *ctx)
+{
+    BYTE encoded_name[100], encoded_key_id[200], public_key_info_buffer[1000];
+    WCHAR container_name[26];
+    BYTE hash_buffer[16], cert_buffer[1000], provider_nameA[100], serial[16];
+    CERT_PUBLIC_KEY_INFO *public_key_info = (CERT_PUBLIC_KEY_INFO *)public_key_info_buffer;
+    CRYPT_KEY_PROV_INFO provider_info = {0};
+    CRYPT_ALGORITHM_IDENTIFIER algid = {0};
+    CERT_AUTHORITY_KEY_ID_INFO key_info;
+    CERT_INFO cert_info = {0};
+    WCHAR provider_nameW[100];
+    CERT_EXTENSION extension;
+    HCRYPTKEY key;
+    DWORD size;
+    BOOL ret;
+
+    memset(ctx, 0, sizeof(*ctx));
+
+    srand(time(NULL));
+    swprintf(container_name, ARRAY_SIZE(container_name), L"wine_testsign%u", rand());
+
+    ret = CryptAcquireContextW(&ctx->provider, container_name, NULL, PROV_RSA_FULL, CRYPT_NEWKEYSET);
+    ok(ret, "Failed to create container, error %#lx\n", GetLastError());
+
+    ret = CryptGenKey(ctx->provider, AT_SIGNATURE, CRYPT_EXPORTABLE, &key);
+    ok(ret, "Failed to create key, error %#lx\n", GetLastError());
+    ret = CryptDestroyKey(key);
+    ok(ret, "Failed to destroy key, error %#lx\n", GetLastError());
+    ret = CryptGetUserKey(ctx->provider, AT_SIGNATURE, &key);
+    ok(ret, "Failed to get user key, error %#lx\n", GetLastError());
+    ret = CryptDestroyKey(key);
+    ok(ret, "Failed to destroy key, error %#lx\n", GetLastError());
+
+    size = sizeof(encoded_name);
+    ret = CertStrToNameA(X509_ASN_ENCODING, "CN=winetest_cert", CERT_X500_NAME_STR, NULL, encoded_name, &size, NULL);
+    ok(ret, "Failed to convert name, error %#lx\n", GetLastError());
+    key_info.CertIssuer.cbData = size;
+    key_info.CertIssuer.pbData = encoded_name;
+
+    size = sizeof(public_key_info_buffer);
+    ret = CryptExportPublicKeyInfo(ctx->provider, AT_SIGNATURE, X509_ASN_ENCODING, public_key_info, &size);
+    ok(ret, "Failed to export public key, error %#lx\n", GetLastError());
+    cert_info.SubjectPublicKeyInfo = *public_key_info;
+
+    size = sizeof(hash_buffer);
+    ret = CryptHashPublicKeyInfo(ctx->provider, CALG_MD5, 0, X509_ASN_ENCODING, public_key_info, hash_buffer, &size);
+    ok(ret, "Failed to hash public key, error %#lx\n", GetLastError());
+
+    key_info.KeyId.cbData = size;
+    key_info.KeyId.pbData = hash_buffer;
+
+    RtlGenRandom(serial, sizeof(serial));
+    key_info.CertSerialNumber.cbData = sizeof(serial);
+    key_info.CertSerialNumber.pbData = serial;
+
+    size = sizeof(encoded_key_id);
+    ret = CryptEncodeObject(X509_ASN_ENCODING, X509_AUTHORITY_KEY_ID, &key_info, encoded_key_id, &size);
+    ok(ret, "Failed to convert name, error %#lx\n", GetLastError());
+
+    extension.pszObjId = (char *)szOID_AUTHORITY_KEY_IDENTIFIER;
+    extension.fCritical = TRUE;
+    extension.Value.cbData = size;
+    extension.Value.pbData = encoded_key_id;
+
+    cert_info.dwVersion = CERT_V3;
+    cert_info.SerialNumber = key_info.CertSerialNumber;
+    cert_info.SignatureAlgorithm.pszObjId = (char *)szOID_RSA_SHA1RSA;
+    cert_info.Issuer = key_info.CertIssuer;
+    GetSystemTimeAsFileTime(&cert_info.NotBefore);
+    GetSystemTimeAsFileTime(&cert_info.NotAfter);
+    cert_info.NotAfter.dwHighDateTime += 1;
+    cert_info.Subject = key_info.CertIssuer;
+    cert_info.cExtension = 1;
+    cert_info.rgExtension = &extension;
+    algid.pszObjId = (char *)szOID_RSA_SHA1RSA;
+    size = sizeof(cert_buffer);
+    ret = CryptSignAndEncodeCertificate(ctx->provider, AT_SIGNATURE, X509_ASN_ENCODING,
+            X509_CERT_TO_BE_SIGNED, &cert_info, &algid, NULL, cert_buffer, &size);
+    ok(ret, "Failed to create certificate, error %#lx\n", GetLastError());
+
+    ctx->cert = CertCreateCertificateContext(X509_ASN_ENCODING, cert_buffer, size);
+    ok(!!ctx->cert, "Failed to create context, error %#lx\n", GetLastError());
+
+    size = sizeof(provider_nameA);
+    ret = CryptGetProvParam(ctx->provider, PP_NAME, provider_nameA, &size, 0);
+    ok(ret, "Failed to get prov param, error %#lx\n", GetLastError());
+    MultiByteToWideChar(CP_ACP, 0, (char *)provider_nameA, -1, provider_nameW, ARRAY_SIZE(provider_nameW));
+
+    provider_info.pwszContainerName = (WCHAR *)container_name;
+    provider_info.pwszProvName = provider_nameW;
+    provider_info.dwProvType = PROV_RSA_FULL;
+    provider_info.dwKeySpec = AT_SIGNATURE;
+    ret = CertSetCertificateContextProperty(ctx->cert, CERT_KEY_PROV_INFO_PROP_ID, 0, &provider_info);
+    ok(ret, "Failed to set provider info, error %#lx\n", GetLastError());
+
+    ctx->root_store = CertOpenStore(CERT_STORE_PROV_SYSTEM_REGISTRY_A, 0, 0, CERT_SYSTEM_STORE_LOCAL_MACHINE, "root");
+    if (!ctx->root_store && GetLastError() == ERROR_ACCESS_DENIED)
+    {
+        skip("Failed to open root store.\n");
+
+        ret = CertFreeCertificateContext(ctx->cert);
+        ok(ret, "Failed to free certificate, error %lu\n", GetLastError());
+        ret = CryptReleaseContext(ctx->provider, 0);
+        ok(ret, "failed to release context, error %lu\n", GetLastError());
+
+        return FALSE;
+    }
+    ok(!!ctx->root_store, "Failed to open store, error %lu\n", GetLastError());
+    ret = CertAddCertificateContextToStore(ctx->root_store, ctx->cert, CERT_STORE_ADD_ALWAYS, &ctx->root_cert);
+    if (!ret && GetLastError() == ERROR_ACCESS_DENIED)
+    {
+        skip("Failed to add self-signed certificate to store.\n");
+
+        ret = CertFreeCertificateContext(ctx->cert);
+        ok(ret, "Failed to free certificate, error %lu\n", GetLastError());
+        ret = CertCloseStore(ctx->root_store, CERT_CLOSE_STORE_CHECK_FLAG);
+        ok(ret, "Failed to close store, error %lu\n", GetLastError());
+        ret = CryptReleaseContext(ctx->provider, 0);
+        ok(ret, "failed to release context, error %lu\n", GetLastError());
+
+        return FALSE;
+    }
+    ok(ret, "Failed to add certificate, error %lu\n", GetLastError());
+
+    ctx->publisher_store = CertOpenStore(CERT_STORE_PROV_SYSTEM_REGISTRY_A, 0, 0,
+            CERT_SYSTEM_STORE_LOCAL_MACHINE, "trustedpublisher");
+    ok(!!ctx->publisher_store, "Failed to open store, error %lu\n", GetLastError());
+    ret = CertAddCertificateContextToStore(ctx->publisher_store, ctx->cert,
+            CERT_STORE_ADD_ALWAYS, &ctx->publisher_cert);
+    ok(ret, "Failed to add certificate, error %lu\n", GetLastError());
+
+    return TRUE;
+}
+
+static void testsign_cleanup(struct testsign_context *ctx)
+{
+    BOOL ret;
+
+    ret = CertFreeCertificateContext(ctx->cert);
+    ok(ret, "Failed to free certificate, error %lu\n", GetLastError());
+
+    ret = CertFreeCertificateContext(ctx->root_cert);
+    ok(ret, "Failed to free certificate context, error %lu\n", GetLastError());
+    ret = CertCloseStore(ctx->root_store, CERT_CLOSE_STORE_CHECK_FLAG);
+    ok(ret, "Failed to close store, error %lu\n", GetLastError());
+
+    ret = CertFreeCertificateContext(ctx->publisher_cert);
+    ok(ret, "Failed to free certificate context, error %lu\n", GetLastError());
+    ret = CertCloseStore(ctx->publisher_store, CERT_CLOSE_STORE_CHECK_FLAG);
+    ok(ret, "Failed to close store, error %lu\n", GetLastError());
+
+    ret = CryptReleaseContext(ctx->provider, 0);
+    ok(ret, "failed to release context, error %lu\n", GetLastError());
+}
+
+static void testsign_sign(struct testsign_context *ctx, const WCHAR *filename)
+{
+    static HRESULT (WINAPI *pSignerSign)(SIGNER_SUBJECT_INFO *subject, SIGNER_CERT *cert,
+            SIGNER_SIGNATURE_INFO *signature, SIGNER_PROVIDER_INFO *provider,
+            const WCHAR *timestamp, CRYPT_ATTRIBUTES *attr, void *sip_data);
+
+    SIGNER_ATTR_AUTHCODE authcode = {sizeof(authcode)};
+    SIGNER_SIGNATURE_INFO signature = {sizeof(signature)};
+    SIGNER_SUBJECT_INFO subject = {sizeof(subject)};
+    SIGNER_CERT_STORE_INFO store = {sizeof(store)};
+    SIGNER_CERT cert_info = {sizeof(cert_info)};
+    SIGNER_FILE_INFO file = {sizeof(file)};
+    DWORD index = 0;
+    HRESULT hr;
+
+    if (!pSignerSign)
+        pSignerSign = (void *)GetProcAddress(LoadLibraryA("mssign32"), "SignerSign");
+
+    subject.dwSubjectChoice = 1;
+    subject.pdwIndex = &index;
+    subject.pSignerFileInfo = &file;
+    file.pwszFileName = (WCHAR *)filename;
+    cert_info.dwCertChoice = 2;
+    cert_info.pCertStoreInfo = &store;
+    store.pSigningCert = ctx->cert;
+    store.dwCertPolicy = 0;
+    signature.algidHash = CALG_SHA_256;
+    signature.dwAttrChoice = SIGNER_AUTHCODE_ATTR;
+    signature.pAttrAuthcode = &authcode;
+    authcode.pwszName = L"";
+    authcode.pwszInfo = L"";
+    hr = pSignerSign(&subject, &cert_info, &signature, NULL, NULL, NULL, NULL);
+    todo_wine ok(hr == S_OK || broken(hr == NTE_BAD_ALGID) /* < 7 */, "Failed to sign, hr %#lx\n", hr);
+}
+
+static void add_file_to_catalog(HANDLE catalog, const WCHAR *file)
+{
+    SIP_SUBJECTINFO subject_info = {sizeof(SIP_SUBJECTINFO)};
+    SIP_INDIRECT_DATA *indirect_data;
+    CRYPTCATMEMBER *member;
+    WCHAR hash_buffer[100];
+    GUID subject_guid;
+    unsigned int i;
+    DWORD size;
+    BOOL ret;
+
+    ret = CryptSIPRetrieveSubjectGuidForCatalogFile(file, NULL, &subject_guid);
+    todo_wine ok(ret, "Failed to get subject guid, error %lu\n", GetLastError());
+
+    size = 0;
+    subject_info.pgSubjectType = &subject_guid;
+    subject_info.pwsFileName = file;
+    subject_info.DigestAlgorithm.pszObjId = (char *)szOID_OIWSEC_sha1;
+    ret = CryptSIPCreateIndirectData(&subject_info, &size, NULL);
+    todo_wine ok(ret, "Failed to get indirect data size, error %lu\n", GetLastError());
+
+    indirect_data = malloc(size);
+    ret = CryptSIPCreateIndirectData(&subject_info, &size, indirect_data);
+    todo_wine ok(ret, "Failed to get indirect data, error %lu\n", GetLastError());
+    if (ret)
+    {
+        memset(hash_buffer, 0, sizeof(hash_buffer));
+        for (i = 0; i < indirect_data->Digest.cbData; ++i)
+            swprintf(&hash_buffer[i * 2], 2, L"%02X", indirect_data->Digest.pbData[i]);
+
+        member = CryptCATPutMemberInfo(catalog, (WCHAR *)file,
+                hash_buffer, &subject_guid, 0, size, (BYTE *)indirect_data);
+        ok(!!member, "Failed to write member, error %lu\n", GetLastError());
+    }
+
+    free(indirect_data);
 }
 
 static void test_create_device_list_ex(void)
@@ -153,6 +423,193 @@ static void get_temp_filename(LPSTR path)
     lstrcpyA(path, ptr + 1);
 }
 
+static void * CDECL mem_alloc(ULONG cb)
+{
+    return HeapAlloc(GetProcessHeap(), 0, cb);
+}
+
+static void CDECL mem_free(void *memory)
+{
+    HeapFree(GetProcessHeap(), 0, memory);
+}
+
+static BOOL CDECL get_next_cabinet(PCCAB pccab, ULONG  cbPrevCab, void *ctx)
+{
+    sprintf(pccab->szCab, ctx, pccab->iCab);
+    return TRUE;
+}
+
+static LONG CDECL progress(UINT typeStatus, ULONG cb1, ULONG cb2, void *ctx)
+{
+    return 0;
+}
+
+static int CDECL file_placed(PCCAB pccab, char *pszFile, LONG cbFile,
+                             BOOL fContinuation, void *ctx)
+{
+    return 0;
+}
+
+static INT_PTR CDECL fci_open(char *pszFile, int oflag, int pmode, int *err, void *ctx)
+{
+    HANDLE handle;
+    DWORD dwAccess = 0;
+    DWORD dwShareMode = 0;
+    DWORD dwCreateDisposition = OPEN_EXISTING;
+
+    dwAccess = GENERIC_READ | GENERIC_WRITE;
+    dwShareMode = FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE;
+
+    if (GetFileAttributesA(pszFile) != INVALID_FILE_ATTRIBUTES)
+        dwCreateDisposition = OPEN_EXISTING;
+    else
+        dwCreateDisposition = CREATE_NEW;
+
+    handle = CreateFileA(pszFile, dwAccess, dwShareMode, NULL,
+                         dwCreateDisposition, 0, NULL);
+
+    ok(handle != INVALID_HANDLE_VALUE, "Failed to CreateFile %s\n", pszFile);
+
+    return (INT_PTR)handle;
+}
+
+static UINT CDECL fci_read(INT_PTR hf, void *memory, UINT cb, int *err, void *ctx)
+{
+    HANDLE handle = (HANDLE)hf;
+    DWORD dwRead;
+    BOOL res;
+
+    res = ReadFile(handle, memory, cb, &dwRead, NULL);
+    ok(res, "Failed to ReadFile\n");
+
+    return dwRead;
+}
+
+static UINT CDECL fci_write(INT_PTR hf, void *memory, UINT cb, int *err, void *ctx)
+{
+    HANDLE handle = (HANDLE)hf;
+    DWORD dwWritten;
+    BOOL res;
+
+    res = WriteFile(handle, memory, cb, &dwWritten, NULL);
+    ok(res, "Failed to WriteFile\n");
+
+    return dwWritten;
+}
+
+static int CDECL fci_close(INT_PTR hf, int *err, void *ctx)
+{
+    HANDLE handle = (HANDLE)hf;
+    ok(CloseHandle(handle), "Failed to CloseHandle\n");
+
+    return 0;
+}
+
+static LONG CDECL fci_seek(INT_PTR hf, LONG dist, int seektype, int *err, void *ctx)
+{
+    HANDLE handle = (HANDLE)hf;
+    DWORD ret;
+
+    ret = SetFilePointer(handle, dist, NULL, seektype);
+    ok(ret != INVALID_SET_FILE_POINTER, "Failed to SetFilePointer\n");
+
+    return ret;
+}
+
+static int CDECL fci_delete(char *pszFile, int *err, void *ctx)
+{
+    BOOL ret = DeleteFileA(pszFile);
+    ok(ret, "Failed to DeleteFile %s\n", pszFile);
+
+    return 0;
+}
+
+static BOOL CDECL get_temp_file(char *pszTempName, int cbTempName, void *ctx)
+{
+    LPSTR tempname;
+
+    tempname = malloc(MAX_PATH);
+    GetTempFileNameA(".", "xx", 0, tempname);
+
+    if (tempname && (strlen(tempname) < (unsigned)cbTempName))
+    {
+        lstrcpyA(pszTempName, tempname);
+        free(tempname);
+        return TRUE;
+    }
+
+    free(tempname);
+
+    return FALSE;
+}
+
+static INT_PTR CDECL get_open_info(char *name, USHORT *date, USHORT *time, USHORT *attribs, int *err, void *ctx)
+{
+    BY_HANDLE_FILE_INFORMATION finfo;
+    FILETIME filetime;
+    HANDLE handle;
+    DWORD attrs;
+    BOOL res;
+
+    handle = CreateFileA(name, GENERIC_READ, FILE_SHARE_READ, NULL,
+            OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN, NULL);
+
+    ok(handle != INVALID_HANDLE_VALUE, "Failed to create %s, error %lu.\n", debugstr_a(name), GetLastError());
+
+    res = GetFileInformationByHandle(handle, &finfo);
+    ok(res, "Expected GetFileInformationByHandle to succeed\n");
+
+    FileTimeToLocalFileTime(&finfo.ftLastWriteTime, &filetime);
+    FileTimeToDosDateTime(&filetime, date, time);
+
+    attrs = GetFileAttributesA(name);
+    ok(attrs != INVALID_FILE_ATTRIBUTES, "Failed to GetFileAttributes\n");
+
+    return (INT_PTR)handle;
+}
+
+static BOOL add_file(HFCI hfci, const char *file, TCOMP compress)
+{
+    char path[MAX_PATH], filename[MAX_PATH];
+
+    GetCurrentDirectoryA(sizeof(path), path);
+    strcat(path, "\\");
+    strcat(path, file);
+
+    strcpy(filename, file);
+
+    return FCIAddFile(hfci, path, filename, FALSE, get_next_cabinet, progress, get_open_info, compress);
+}
+
+static void create_cab_file(const char *name, const char *source)
+{
+    CCAB cab_params = {0};
+    HFCI hfci;
+    ERF erf;
+    BOOL res;
+
+    cab_params.cb = INT_MAX;
+    cab_params.cbFolderThresh = 900000;
+    cab_params.setID = 0xbeef;
+    cab_params.iCab = 1;
+    GetCurrentDirectoryA(sizeof(cab_params.szCabPath), cab_params.szCabPath);
+    strcat(cab_params.szCabPath, "\\");
+    strcpy(cab_params.szCab, name);
+
+    hfci = FCICreate(&erf, file_placed, mem_alloc, mem_free, fci_open, fci_read,
+            fci_write, fci_close, fci_seek, fci_delete, get_temp_file, &cab_params, NULL);
+
+    ok(hfci != NULL, "Failed to create an FCI context\n");
+
+    res = add_file(hfci, source, tcompTYPE_MSZIP);
+    ok(res, "Failed to add %s\n", source);
+
+    res = FCIFlushCabinet(hfci, FALSE, get_next_cabinet, progress);
+    ok(res, "Failed to flush the cabinet\n");
+    res = FCIDestroy(hfci);
+    ok(res, "Failed to destroy the cabinet\n");
+}
+
 static void test_install_class(void)
 {
     static const WCHAR classKey[] = {'S','y','s','t','e','m','\\',
@@ -162,6 +619,8 @@ static void test_install_class(void)
      '1','1','d','b','-','b','7','0','4','-',
      '0','0','1','1','9','5','5','c','2','b','d','b','}',0};
     char tmpfile[MAX_PATH];
+    char buf[32];
+    DWORD size;
     BOOL ret;
 
     static const char inf_data[] =
@@ -195,11 +654,27 @@ static void test_install_class(void)
     ok(!ret, "Expected failure.\n");
     ok(GetLastError() == ERROR_FILE_NOT_FOUND, "Got unexpected error %#lx.\n", GetLastError());
 
+    size = 123;
+    SetLastError(0xdeadbeef);
+    ret = SetupDiGetClassDescriptionA(&guid, buf, sizeof(buf), &size);
+    ok(!ret, "Expected failure.\n");
+    ok(size == 123, "Expected 123, got %ld.\n", size);
+    todo_wine
+    ok(GetLastError() == ERROR_NOT_FOUND /* win7 */ || GetLastError() == ERROR_INVALID_CLASS /* win10 */,
+       "Got unexpected error %#lx.\n", GetLastError());
+
     /* The next call will succeed. Information is put into the registry but the
      * location(s) is/are depending on the Windows version.
      */
     ret = SetupDiInstallClassA(NULL, tmpfile, 0, NULL);
     ok(ret, "Failed to install class, error %#lx.\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    ret = SetupDiGetClassDescriptionA(&guid, buf, sizeof(buf), &size);
+    ok(ret == TRUE, "Failed to get class description.\n");
+    ok(size == sizeof("Wine test devices"), "Expected %Iu, got %lu.\n", sizeof("Wine test devices"), size);
+    ok(!strcmp(buf, "Wine test devices"), "Got unexpected class description %s.\n", debugstr_a(buf));
+    todo_wine ok(!GetLastError(), "Got unexpected error %#lx.\n", GetLastError());
 
     ret = RegDeleteKeyW(HKEY_LOCAL_MACHINE, classKey);
     ok(!ret, "Failed to delete class key, error %lu.\n", GetLastError());
@@ -399,21 +874,79 @@ static void test_device_info(void)
     SetupDiDestroyDeviceInfoList(set);
 }
 
+struct reg_property
+{
+    DWORD reg_prop;
+    DWORD reg_type;
+    BYTE *reg_value;
+    DWORD reg_size;
+    DEVPROPTYPE devprop_type;
+    BYTE *devprop_value;
+    DWORD devprop_size;
+
+    /* Error returned by SetupDiSetDevicePropertyW. */
+    DWORD error;
+};
+
+static const LONG dword = 0xdeadbeef;
+static const WCHAR strw[] = L"dummy";
+static const WCHAR multi_strw[] = L"dummy1\0dummy2\0";
+
+/* SPDRP_* properties that can be set and have an associated DEVPROPKEY.
+ * The property key is {{a45c254e-df1c-4efd-8020-67d146a850e0}, reg_prop + 2} */
+static const struct reg_property reg_props[] = {
+    { SPDRP_DEVICEDESC, REG_SZ, (BYTE *)strw, sizeof(strw), DEVPROP_TYPE_STRING, (BYTE *)strw, sizeof(strw) },
+    { SPDRP_SERVICE, REG_SZ, (BYTE *)strw, sizeof(strw), DEVPROP_TYPE_STRING, (BYTE *)strw, sizeof(strw) },
+    { SPDRP_DRIVER, REG_SZ, (BYTE *)strw, sizeof(strw), DEVPROP_TYPE_STRING, (BYTE *)strw, sizeof(strw) },
+    { SPDRP_MFG, REG_SZ, (BYTE *)strw, sizeof(strw), DEVPROP_TYPE_STRING, (BYTE *)strw, sizeof(strw) },
+    { SPDRP_LOCATION_INFORMATION, REG_SZ, (BYTE *)strw, sizeof(strw), DEVPROP_TYPE_STRING, (BYTE *)strw, sizeof(strw) },
+    { SPDRP_CONFIGFLAGS, REG_DWORD, (BYTE *)&dword, sizeof(dword), DEVPROP_TYPE_UINT32, (BYTE *)&dword, sizeof(dword) },
+    { SPDRP_UPPERFILTERS, REG_MULTI_SZ, (BYTE *)multi_strw, sizeof(multi_strw), DEVPROP_TYPE_STRING_LIST, (BYTE *)multi_strw, sizeof(multi_strw) },
+    { SPDRP_HARDWAREID, REG_MULTI_SZ, (BYTE *)multi_strw, sizeof(multi_strw), DEVPROP_TYPE_STRING_LIST,  (BYTE *)multi_strw, sizeof(multi_strw) },
+    { SPDRP_COMPATIBLEIDS, REG_MULTI_SZ, (BYTE *)multi_strw, sizeof(multi_strw), DEVPROP_TYPE_STRING_LIST, (BYTE *)multi_strw, sizeof(multi_strw) },
+    { SPDRP_CLASSGUID, REG_SZ, (BYTE *)guid_strw, sizeof(guid_strw), DEVPROP_TYPE_GUID, (BYTE *)&guid, sizeof(guid) },
+};
+
+/* These properties cannot be set through SetupDiSetDevice(Registry)Property. */
+static const struct reg_property invalid_reg_props[] = {
+    { SPDRP_CAPABILITIES, REG_DWORD, (BYTE *)&dword, sizeof(dword), DEVPROP_TYPE_INT32, (BYTE *)&dword, sizeof(dword), ERROR_ACCESS_DENIED },
+    { SPDRP_UI_NUMBER, REG_DWORD, (BYTE *)&dword, sizeof(dword), DEVPROP_TYPE_INT32, (BYTE *)&dword, sizeof(dword), ERROR_ACCESS_DENIED },
+    { SPDRP_PHYSICAL_DEVICE_OBJECT_NAME, REG_SZ, (BYTE *)strw, sizeof(strw), DEVPROP_TYPE_STRING, (BYTE *)strw, sizeof(strw), ERROR_ACCESS_DENIED },
+    { SPDRP_BASE_CONTAINERID, REG_SZ, (BYTE *)guid_strw, sizeof(guid_strw), DEVPROP_TYPE_GUID, (BYTE *)&guid, sizeof(guid), ERROR_INVALID_REG_PROPERTY },
+};
+
 static void test_device_property(void)
 {
+    static const struct property {
+        const DEVPROPKEY *key;
+        DEVPROPTYPE type;
+        BYTE *value;
+        DWORD size;
+        BOOL exists;
+    } inbuilt_props[] = {
+        { &DEVPKEY_Device_InstanceId, DEVPROP_TYPE_STRING, (BYTE *)strw, sizeof(strw), TRUE },
+        { &DEVPKEY_Device_Parent, DEVPROP_TYPE_STRING, (BYTE *)strw, sizeof(strw), TRUE },
+        { &DEVPKEY_Device_Siblings, DEVPROP_TYPE_STRING_LIST, (BYTE *)multi_strw, sizeof(multi_strw), TRUE },
+        { &DEVPKEY_Device_BusReportedDeviceDesc, DEVPROP_TYPE_STRING, (BYTE *)strw, sizeof(strw), FALSE },
+        { &DEVPKEY_Device_Children, DEVPROP_TYPE_STRING_LIST, (BYTE *)multi_strw, sizeof(multi_strw), FALSE },
+        { &DEVPKEY_Device_ContainerId, DEVPROP_TYPE_GUID, (BYTE *)&guid, sizeof(guid), FALSE },
+    };
     static const WCHAR valueW[] = {'d', 'e', 'a', 'd', 'b', 'e', 'e', 'f', 0};
+    static const WCHAR instance_id[] = L"Root\\LEGACY_BOGUS\\0000";
     SP_DEVINFO_DATA device_data = {sizeof(device_data)};
     HMODULE hmod;
     HDEVINFO set;
     DEVPROPTYPE type;
-    DWORD size;
+    DWORD size, i;
     BYTE buffer[256];
     DWORD err;
     BOOL ret;
+    GUID guid_val = {0};
 
     hmod = LoadLibraryA("setupapi.dll");
     pSetupDiSetDevicePropertyW = (void *)GetProcAddress(hmod, "SetupDiSetDevicePropertyW");
     pSetupDiGetDevicePropertyW = (void *)GetProcAddress(hmod, "SetupDiGetDevicePropertyW");
+    pSetupDiGetDevicePropertyKeys = (void *)GetProcAddress(hmod, "SetupDiGetDevicePropertyKeys");
 
     if (!pSetupDiSetDevicePropertyW || !pSetupDiGetDevicePropertyW)
     {
@@ -425,7 +958,7 @@ static void test_device_property(void)
     set = SetupDiCreateDeviceInfoList(&guid, NULL);
     ok(set != INVALID_HANDLE_VALUE, "Failed to create device list, error %#lx.\n", GetLastError());
 
-    ret = SetupDiCreateDeviceInfoA(set, "Root\\LEGACY_BOGUS\\0000", &guid, NULL, NULL, 0, &device_data);
+    ret = SetupDiCreateDeviceInfoW(set, instance_id, &guid, NULL, NULL, 0, &device_data);
     ok(ret, "Failed to create device, error %#lx.\n", GetLastError());
 
     /* SetupDiSetDevicePropertyW */
@@ -719,10 +1252,224 @@ static void test_device_property(void)
     ok(size == sizeof(valueW), "Got size %ld\n", size);
     ok(!lstrcmpW((WCHAR *)buffer, valueW), "Expect buffer %s, got %s\n", wine_dbgstr_w(valueW), wine_dbgstr_w((WCHAR *)buffer));
 
+    /* #15 Innate properties */
+    type = DEVPROP_TYPE_EMPTY;
+    size = 0;
+    memset(buffer, 0, sizeof(buffer));
+    SetLastError(0xdeadbeef);
+    ret = pSetupDiGetDevicePropertyW(set, &device_data, &DEVPKEY_Device_InstanceId, &type, buffer, sizeof(buffer), &size, 0);
+    err = GetLastError();
+    ok(ret, "Expect success\n");
+    ok(err == NO_ERROR, "Expect last error %#x, got %#lx\n", NO_ERROR, err);
+    ok(type == DEVPROP_TYPE_STRING, "Expect type %#x, got %#lx\n", DEVPROP_TYPE_STRING, type);
+    ok(size == sizeof(instance_id), "Got size %lu\n", size);
+    ok(!wcsicmp(instance_id, (WCHAR *)buffer), "Expect buffer %s, got %s\n", debugstr_w(instance_id), debugstr_w((WCHAR*)buffer));
+
+    type = DEVPROP_TYPE_EMPTY;
+    size = 0;
+    ret = pSetupDiGetDevicePropertyW(set, &device_data, &DEVPKEY_Device_ClassGuid, &type, (BYTE *)&guid_val, sizeof(guid_val), &size, 0);
+    err = GetLastError();
+    ok(ret, "Expect success\n");
+    ok(err == NO_ERROR, "Expect last error %#x, got %#lx\n", NO_ERROR, err);
+    ok(type == DEVPROP_TYPE_GUID, "Expect type %#x, got %#lx\n", DEVPROP_TYPE_GUID, type);
+    ok(size == sizeof(guid_val), "Got size %lu\n", size);
+    ok(IsEqualGUID(&guid_val, &guid), "Expect buffer %s, got %s\n", debugstr_guid(&guid), debugstr_guid(&guid_val));
+
+    for (i = 0; i < ARRAY_SIZE(inbuilt_props); i++)
+    {
+        const DEVPROPKEY *key = inbuilt_props[i].key;
+        DEVPROPTYPE type = inbuilt_props[i].type;
+        const BYTE *val = inbuilt_props[i].value;
+        DWORD size = inbuilt_props[i].size;
+        BYTE *buf;
+
+        winetest_push_context("inbuilt_props[%lu]", i);
+        SetLastError(0xdeadbeef);
+        ret = pSetupDiSetDevicePropertyW(set, &device_data, key, type, val, size, 0);
+        err = GetLastError();
+        todo_wine ok(!ret, "Expected failure.\n");
+        todo_wine ok(err == ERROR_ACCESS_DENIED, "Expect last error %#x, got %#lx.\n", ERROR_ACCESS_DENIED, err);
+        if (ret)
+        {
+            winetest_pop_context();
+            continue;
+        }
+        /* However, setting this property to its existing value (if it has one) succeeds. */
+        size = 0;
+        SetLastError(0xdeadbeef);
+        ret = pSetupDiGetDevicePropertyW(set, &device_data, key, &type, NULL, 0, &size, 0);
+        err = GetLastError();
+        ok(!ret, "Expect failure.\n");
+        if (inbuilt_props[i].exists)
+            todo_wine ok(err == ERROR_INSUFFICIENT_BUFFER, "Expect last error %#x, got %#lx\n", ERROR_INSUFFICIENT_BUFFER, err);
+        else
+        {
+            todo_wine_if(inbuilt_props[i].exists) ok(err == ERROR_NOT_FOUND, "Expect last error %#x, got %#lx\n",
+                                                     ERROR_NOT_FOUND, err);
+            winetest_pop_context();
+            continue;
+        }
+
+        buf = calloc(1, size);
+        SetLastError(0xdeadbeef);
+        ret = pSetupDiGetDevicePropertyW(set, &device_data, key, &type, buf, size, &size, 0);
+        err = GetLastError();
+        ok(ret, "Expect success.\n");
+        ok(err == NO_ERROR, "Expect last error %#x, got %#lx\n", NO_ERROR, err);
+
+        SetLastError(0xdeadbeef);
+        ret = pSetupDiSetDevicePropertyW(set, &device_data, key, type, buf, size, 0);
+        err = GetLastError();
+        ok(ret, "Expect success.\n");
+        ok(err == NO_ERROR, "Expect last error %#x, got %#lx\n", NO_ERROR, err);
+        free(buf);
+        winetest_pop_context();
+    }
+
+    if (pSetupDiGetDevicePropertyKeys)
+    {
+        DEVPROPKEY expected_keys[] = { DEVPKEY_Device_ClassGuid, DEVPKEY_Device_InstanceId, DEVPKEY_Device_FriendlyName };
+        DWORD keys_len = 0, n, required_len;
+        DEVPROPKEY *keys;
+
+        ret = pSetupDiGetDevicePropertyKeys(NULL, NULL, NULL, 0, NULL, 0);
+        ok(!ret, "Expect failure\n");
+        err = GetLastError();
+        ok(err == ERROR_INVALID_HANDLE, "Expect last error %#x, got %#lx\n",
+           ERROR_INVALID_HANDLE, err);
+
+        SetLastError(0xdeadbeef);
+        ret = pSetupDiGetDevicePropertyKeys(set, NULL, NULL, 0, NULL, 0);
+        ok(!ret, "Expect failure\n");
+        err = GetLastError();
+        ok(err == ERROR_INVALID_PARAMETER, "Expect last error %#x, got %#lx\n",
+           ERROR_INVALID_PARAMETER, err);
+
+        SetLastError(0xdeadbeef);
+        ret = pSetupDiGetDevicePropertyKeys(set, &device_data, NULL, 10, NULL, 0);
+        ok(!ret, "Expect failure\n");
+        err = GetLastError();
+        ok(err == ERROR_INVALID_USER_BUFFER, "Expect last error %#x, got %#lx\n",
+           ERROR_INVALID_USER_BUFFER, err);
+
+        SetLastError(0xdeadbeef);
+        ret = pSetupDiGetDevicePropertyKeys(set, &device_data, NULL, 0, NULL, 0);
+        ok(!ret, "Expect failure\n");
+        err = GetLastError();
+        ok(err == ERROR_INSUFFICIENT_BUFFER, "Expect last error %#x, got %#lx\n",
+           ERROR_INSUFFICIENT_BUFFER, err);
+
+        SetLastError(0xdeadbeef);
+        ret = pSetupDiGetDevicePropertyKeys(set, &device_data, NULL, 0, &keys_len, 0xdeadbeef);
+        ok(!ret, "Expect failure\n");
+        err = GetLastError();
+        ok(err == ERROR_INVALID_FLAGS, "Expect last error %#x, got %#lx\n",
+           ERROR_INVALID_FLAGS, err);
+
+        SetLastError(0xdeadbeef);
+        ret = pSetupDiGetDevicePropertyKeys(set, &device_data, NULL, 0, &keys_len, 0);
+        ok(!ret, "Expect failure\n");
+        err = GetLastError();
+        ok(err == ERROR_INSUFFICIENT_BUFFER, "Expect last error %#x, got %#lx\n",
+           ERROR_INSUFFICIENT_BUFFER, err);
+
+        keys = calloc(keys_len, sizeof(*keys));
+        ok(keys_len && !!keys, "Failed to allocate buffer\n");
+        SetLastError(0xdeadbeef);
+
+        ret = pSetupDiGetDevicePropertyKeys(set, &device_data, keys, keys_len, &keys_len, 0xdeadbeef);
+        ok(!ret, "Expect failure\n");
+        err = GetLastError();
+        ok(err == ERROR_INVALID_FLAGS, "Expect last error %#x, got %#lx\n",
+           ERROR_INVALID_FLAGS, err);
+
+        required_len = 0xdeadbeef;
+        ret = SetupDiGetDevicePropertyKeys(set, &device_data, keys, keys_len, &required_len, 0);
+        ok(ret, "Expect success\n");
+        err = GetLastError();
+        ok(!err, "Expect last error %#x, got %#lx\n", ERROR_SUCCESS, err);
+        ok(keys_len == required_len, "%lu != %lu\n", keys_len, required_len);
+        ok(keys_len >= ARRAY_SIZE(expected_keys), "Expected %lu >= %Iu\n", keys_len, ARRAY_SIZE(expected_keys));
+
+        keys_len = 0;
+        if (keys)
+        {
+            for (n = 0; n < required_len; n++)
+            {
+                DWORD i;
+
+                for (i = 0; i < ARRAY_SIZE(expected_keys); i++)
+                {
+                    if (!memcmp(&keys[n], &expected_keys[i], sizeof(keys[n])))
+                    {
+                        keys_len++;
+                        break;
+                    }
+                }
+            }
+
+        }
+        todo_wine ok(keys_len == ARRAY_SIZE(expected_keys), "%lu != %Iu\n", keys_len, ARRAY_SIZE(expected_keys));
+        free(keys);
+    }
+    else
+        win_skip("SetupDiGetDevicePropertyKeys not available\n");
+
     ret = SetupDiRemoveDevice(set, &device_data);
     ok(ret, "Got unexpected error %#lx.\n", GetLastError());
 
     SetupDiDestroyDeviceInfoList(set);
+
+    set = SetupDiCreateDeviceInfoList(NULL, NULL);
+    ok(set != INVALID_HANDLE_VALUE, "Failed to create device list, error %#lx.\n", GetLastError());
+
+    ret = SetupDiCreateDeviceInfoW(set, L"display", &GUID_DEVCLASS_DISPLAY, NULL, NULL, DICD_GENERATE_ID, &device_data);
+    ok(ret, "Failed to create device, error %#lx.\n", GetLastError());
+
+    for (i = 0; i < ARRAY_SIZE(reg_props); i++)
+    {
+        const struct reg_property *prop = &reg_props[i];
+        BOOL todo = prop->reg_prop != SPDRP_CLASSGUID;
+        DWORD size = 0, type = 0;
+        DEVPROPKEY key = { DEVPKEY_Device_DeviceDesc.fmtid, prop->reg_prop + 2 };
+        BYTE buf[80] = { 0 };
+
+        winetest_push_context("reg_props[%lu] (%#lx)", i, prop->reg_prop);
+        SetLastError(0xdeadbeef);
+        ret = pSetupDiSetDevicePropertyW(set, &device_data, &key, prop->devprop_type, prop->devprop_value,
+                                         prop->devprop_size, 0);
+        err = GetLastError();
+        ok(ret, "Expect success.\n");
+        ok(!err, "Expect last error %#x, got %#lx\n", ERROR_SUCCESS, err);
+
+        ret = SetupDiGetDeviceRegistryPropertyW(set, &device_data, prop->reg_prop, &type, buf, sizeof(buf), &size);
+        todo_wine_if(todo) ok(ret, "Failed to get property, error %#lx.\n", GetLastError());
+        todo_wine_if(todo) ok(type == prop->reg_type, "Got unexpected type %#lx.\n", type);
+        todo_wine_if(todo) ok(size == prop->reg_size, "Got unexpected size %lu.\n", size);
+        if (size == prop->reg_size)
+            todo_wine ok(!memcmp(buf, prop->reg_value, size), "Got unexpected property value.\n");
+        winetest_pop_context();
+    }
+
+    for (i = 0; i < ARRAY_SIZE(invalid_reg_props); i++)
+    {
+        const struct reg_property *prop = &invalid_reg_props[i];
+        DEVPROPKEY key = { DEVPKEY_Device_DeviceDesc.fmtid, prop->reg_prop + 2 };
+
+        winetest_push_context("invalid_reg_props[%lu] (%#lx)", i, prop->reg_prop);
+        SetLastError(0xdeadbeef);
+        ret = pSetupDiSetDevicePropertyW(set, &device_data, &key, prop->devprop_type, prop->devprop_value,
+                                         prop->devprop_size, 0);
+        todo_wine ok(!ret, "Expect failure.\n");
+        todo_wine ok(GetLastError() == prop->error, "Got unexpected error %#lx.\n", GetLastError());
+        winetest_pop_context();
+    }
+
+    ret = SetupDiRemoveDevice(set, &device_data);
+    ok(ret, "Got unexpected error %#lx.\n", GetLastError());
+
+    SetupDiDestroyDeviceInfoList(set);
+
     FreeLibrary(hmod);
 }
 
@@ -1716,7 +2463,7 @@ static void test_registry_property_w(void)
     WCHAR friendly_name[] = {'B','o','g','u','s',0};
     SP_DEVINFO_DATA device = {sizeof(device)};
     WCHAR buf[64] = {0};
-    DWORD size, type;
+    DWORD size, type, i;
     HDEVINFO set;
     BOOL ret;
     LONG res;
@@ -1869,6 +2616,57 @@ todo_wine {
     ok(!lstrcmpW(buf, L"Display"), "Got unexpected value %s.\n", wine_dbgstr_w(buf));
 
     SetupDiDestroyDeviceInfoList(set);
+
+    set = SetupDiCreateDeviceInfoList(NULL, NULL);
+    ok(set != INVALID_HANDLE_VALUE, "Failed to create device list, error %#lx.\n", GetLastError());
+
+    ret = SetupDiCreateDeviceInfoW(set, L"display", &GUID_DEVCLASS_DISPLAY, NULL, NULL, DICD_GENERATE_ID, &device);
+    ok(ret, "Failed to create device, error %#lx.\n", GetLastError());
+
+    for (i = 0; i < ARRAY_SIZE(reg_props); i++)
+    {
+        const struct reg_property *prop = &reg_props[i];
+        DEVPROPKEY key = { DEVPKEY_Device_DeviceDesc.fmtid, prop->reg_prop + 2 };
+        DEVPROPTYPE type = DEVPROP_TYPE_EMPTY;
+        BYTE buf[80] = {0};
+        DWORD size = 0, err;
+
+        winetest_push_context("reg_props[%lu] (%#lx)", i, prop->reg_prop);
+        SetLastError(0xdeadbeef);
+        ret = SetupDiSetDeviceRegistryPropertyW(set, &device, prop->reg_prop, prop->reg_value, prop->reg_size);
+        ok(ret, "Failed to set property, error %#lx.\n", GetLastError());
+        SetLastError(0xdeadbeef);
+        ret = SetupDiGetDevicePropertyW(set, &device, &key, &type, buf, sizeof(buf), &size, 0);
+        err = GetLastError();
+        ok(ret, "Expect success.\n");
+        ok(!err, "Got unexpected error %#lx.\n", err);
+        ok(type == prop->devprop_type, "Got unexpected type %#lx.\n", type);
+        ok(size == prop->devprop_size, "Got unexpected size %lu.\n", size);
+        if (size == prop->devprop_size)
+            ok(!memcmp(buf, prop->devprop_value, size), "Got unexpected property value.\n");
+        winetest_pop_context();
+    }
+    SetupDiDestroyDeviceInfoList(set);
+
+    set = SetupDiCreateDeviceInfoList(NULL, NULL);
+    ok(set != INVALID_HANDLE_VALUE, "Failed to create device list, error %#lx.\n", GetLastError());
+
+    ret = SetupDiCreateDeviceInfoW(set, L"display", &GUID_DEVCLASS_DISPLAY, NULL, NULL, DICD_GENERATE_ID, &device);
+    ok(ret, "Failed to create device, error %#lx.\n", GetLastError());
+
+    for (i = 0; i < ARRAY_SIZE(invalid_reg_props); i++)
+    {
+        const struct reg_property *prop = &invalid_reg_props[i];
+
+        /* SetupDiSetDeviceRegistryPropertyW seems to only return ERROR_INVALID_REG_PROPERTY. */
+        winetest_push_context("invalid_reg_props[%lu] (%#lx)", i, prop->reg_prop);
+        SetLastError(0xdeadbeef);
+        ret = SetupDiSetDeviceRegistryPropertyW(set, &device, prop->reg_prop, prop->reg_value, prop->reg_size);
+        todo_wine_if(prop->reg_prop != SPDRP_PHYSICAL_DEVICE_OBJECT_NAME) ok(!ret, "Expected failure.\n");
+        todo_wine ok(GetLastError() == ERROR_INVALID_REG_PROPERTY, "Got unexpected error %#lx.\n", GetLastError());
+        winetest_pop_context();
+    }
+    SetupDiDestroyDeviceInfoList(set);
 }
 
 static void test_get_inf_class(void)
@@ -1876,6 +2674,8 @@ static void test_get_inf_class(void)
     static const char inffile[] = "winetest.inf";
     static const char content[] = "[Version]\r\n\r\n";
     static const char* signatures[] = {"\"$CHICAGO$\"", "\"$Windows NT$\""};
+    static const GUID deadbeef_class_guid = {0xdeadbeef,0xdead,0xbeef,{0xde,0xad,0xbe,0xef,0xde,0xad,0xbe,0xef}};
+    static const char deadbeef_class_name[] = "DeadBeef";
 
     char cn[MAX_PATH];
     char filename[MAX_PATH];
@@ -2014,6 +2814,26 @@ static void test_get_inf_class(void)
         todo_wine
         ok(count == 4, "expected count==4, got %lu(%s)\n", count, cn);
 
+        /* Test Strings substitution */
+        WritePrivateProfileStringA("Version", "Class", "%ClassName%", filename);
+        WritePrivateProfileStringA("Version", "ClassGUID", "%ClassGuid%", filename);
+
+        /* Without Strings section the ClassGUID is invalid (has non-substituted strkey token) */
+        retval = SetupDiGetINFClassA(filename, &guid, cn, MAX_PATH, NULL);
+        ok(!retval, "expected SetupDiGetINFClassA to fail\n");
+        ok(GetLastError() == ERROR_INVALID_PARAMETER,
+           "expected error ERROR_INVALID_PARAMETER, got %lu\n", GetLastError());
+
+        /* With Strings section the ClassGUID and Class should be substituted */
+        WritePrivateProfileStringA("Strings", "ClassName", deadbeef_class_name, filename);
+        WritePrivateProfileStringA("Strings", "ClassGuid", "{deadbeef-dead-beef-dead-beefdeadbeef}", filename);
+        count = 0xdeadbeef;
+        retval = SetupDiGetINFClassA(filename, &guid, cn, MAX_PATH, &count);
+        ok(retval, "expected SetupDiGetINFClassA to succeed! error %lu\n", GetLastError());
+        ok(count == lstrlenA(deadbeef_class_name) + 1, "expected count=%d, got %lu\n", lstrlenA(deadbeef_class_name) + 1, count);
+        ok(!lstrcmpA(deadbeef_class_name, cn), "expected class_name='%s', got '%s'\n", deadbeef_class_name, cn);
+        ok(IsEqualGUID(&deadbeef_class_guid, &guid), "expected ClassGUID to be deadbeef-dead-beef-dead-beefdeadbeef\n");
+
         DeleteFileA(filename);
     }
 }
@@ -2066,7 +2886,7 @@ static void test_device_interface_key(void)
     ok(ret == ERROR_FILE_NOT_FOUND, "key shouldn't exist\n");
 
     dikey = SetupDiCreateDeviceInterfaceRegKeyA(set, &iface, 0, KEY_ALL_ACCESS, NULL, NULL);
-    ok(dikey != INVALID_HANDLE_VALUE, "got error %lu\n", GetLastError());
+    ok(dikey != INVALID_HANDLE_VALUE, "Got error %#lx\n", GetLastError());
 
     ret = RegOpenKeyA(parent, "#\\Device Parameters", &key);
     ok(!ret, "key should exist: %lu\n", ret);
@@ -2082,7 +2902,7 @@ static void test_device_interface_key(void)
     RegCloseKey(key);
 
     ret = SetupDiDeleteDeviceInterfaceRegKey(set, &iface, 0);
-    ok(ret, "got error %lu\n", GetLastError());
+    ok(ret, "Got error %#lx\n", GetLastError());
 
     ret = RegOpenKeyA(parent, "#\\Device Parameters", &key);
     ok(ret == ERROR_FILE_NOT_FOUND, "key shouldn't exist\n");
@@ -2145,6 +2965,273 @@ static void test_open_device_interface_key(void)
     key = SetupDiOpenDeviceInterfaceRegKey(set, &iface, 0, KEY_ALL_ACCESS);
     ok(key == INVALID_HANDLE_VALUE, "Expect open interface registry key failure\n");
 
+    ret = SetupDiRemoveDevice(set, &device);
+    ok(ret, "Failed to remove device, error %#lx.\n", GetLastError());
+    ret = SetupDiDestroyDeviceInfoList(set);
+    ok(ret, "Failed to destroy device list, error %#lx.\n", GetLastError());
+}
+
+static void test_device_interface_properties(void)
+{
+    struct {
+        DEVPROPKEY key;
+        DEVPROPTYPE type;
+    } default_keys[] = {
+        { DEVPKEY_DeviceInterface_Enabled, DEVPROP_TYPE_BOOLEAN },
+        { DEVPKEY_DeviceInterface_ClassGuid, DEVPROP_TYPE_GUID },
+        { DEVPKEY_Device_InstanceId, DEVPROP_TYPE_STRING }
+    };
+    const WCHAR str[] = L"Wine is not an emulator.";
+    const WCHAR instance_id[] = L"ROOT\\LEGACY_BOGUS\\0000";
+    DEVPROPTYPE type = DEVPROP_TYPE_EMPTY;
+    DEVPROP_BOOLEAN boolean = DEVPROP_TRUE;
+    SP_DEVICE_INTERFACE_DATA iface;
+    SP_DEVINFO_DATA device;
+    DEVPROPKEY *keys;
+    DWORD err, req, size, i, rem = ARRAY_SIZE(default_keys);
+    WCHAR buf[50];
+    HDEVINFO set;
+    BOOL ret;
+    GUID guid_val = {0};
+
+    set = SetupDiCreateDeviceInfoList(&guid, NULL);
+    ok(set != INVALID_HANDLE_VALUE, "Failed to create device list, error %#lx\n", GetLastError());
+
+    device.cbSize = sizeof(device);
+    ret = SetupDiCreateDeviceInfoW(set, instance_id, &guid, NULL, NULL, 0, &device);
+    ok(ret, "Failed to create device, error %#lx.\n", GetLastError());
+
+    iface.cbSize = sizeof(iface);
+    ret = SetupDiCreateDeviceInterfaceA(set, &device, &guid, NULL, 0, &iface);
+    ok(ret, "Failed to create interface, error %#lx.\n", GetLastError());
+
+    ret = SetupDiSetDeviceInterfacePropertyW(NULL, NULL, NULL, DEVPROP_TYPE_STRING, NULL, 0, 0);
+    err = GetLastError();
+    ok(!ret && err == ERROR_INVALID_HANDLE, "%lu != %d\n", err, ERROR_INVALID_HANDLE);
+
+    ret = SetupDiSetDeviceInterfacePropertyW(set, NULL, NULL, DEVPROP_TYPE_STRING, NULL, 0, 0);
+    err = GetLastError();
+    ok(!ret && err == ERROR_INVALID_PARAMETER, "%lu != %d\n", err, ERROR_INVALID_PARAMETER);
+
+    ret = SetupDiSetDeviceInterfacePropertyW(set, &iface, NULL, DEVPROP_TYPE_STRING, NULL, 0, 0);
+    err = GetLastError();
+    ok(!ret && err == ERROR_INVALID_DATA, "%lu != %d\n", err, ERROR_INVALID_DATA);
+
+    ret = SetupDiSetDeviceInterfacePropertyW(set, &iface, &DEVPKEY_DeviceInterface_FriendlyName, DEVPROP_TYPE_STRING,
+                                             NULL, 0, 0);
+    err = GetLastError();
+    ok(!ret && err == ERROR_INVALID_DATA, "%lu != %d\n", err, ERROR_INVALID_DATA);
+
+    ret = SetupDiSetDeviceInterfacePropertyW(set, &iface, &DEVPKEY_DeviceInterface_FriendlyName, DEVPROP_TYPE_STRING,
+                                             (BYTE *)str, 0, 0);
+    err = GetLastError();
+    ok(!ret && err == ERROR_INVALID_DATA, "%lu != %d\n", err, ERROR_INVALID_DATA);
+
+    ret = SetupDiSetDeviceInterfacePropertyW(set, &iface, &DEVPKEY_DeviceInterface_FriendlyName, DEVPROP_TYPE_STRING,
+                                             NULL, 1, 0);
+    err = GetLastError();
+    ok(!ret && err == ERROR_INVALID_USER_BUFFER, "%lu != %d\n", err, ERROR_INVALID_USER_BUFFER);
+
+    ret = SetupDiSetDeviceInterfacePropertyW(set, &iface, &DEVPKEY_DeviceInterface_FriendlyName, DEVPROP_TYPE_STRING,
+                                             (BYTE *)str, sizeof(str), 1);
+    err = GetLastError();
+    ok(!ret && err == ERROR_INVALID_FLAGS, "%lu != %d\n", err, ERROR_INVALID_FLAGS);
+
+    ret = SetupDiGetDeviceInterfacePropertyW(NULL, NULL, NULL, NULL, NULL, 0, NULL, 0);
+    err = GetLastError();
+    ok(!ret && err == ERROR_INVALID_HANDLE, "%lu != %d\n", err, ERROR_INVALID_HANDLE);
+
+    ret = SetupDiGetDeviceInterfacePropertyW(set, NULL, NULL, NULL, NULL, 0, NULL, 0);
+    err = GetLastError();
+    ok(!ret && err == ERROR_INVALID_PARAMETER, "%lu != %d\n", err, ERROR_INVALID_PARAMETER);
+
+    ret = SetupDiGetDeviceInterfacePropertyW(set, &iface, NULL, NULL, NULL, 0, NULL, 0);
+    err = GetLastError();
+    ok(!ret && err == ERROR_INVALID_USER_BUFFER, "%lu != %d\n", err, ERROR_INVALID_USER_BUFFER);
+
+    ret = SetupDiGetDeviceInterfacePropertyW(set, &iface, &DEVPKEY_DeviceInterface_FriendlyName, NULL, NULL, 0, NULL, 0);
+    err = GetLastError();
+    ok(!ret && err == ERROR_INVALID_USER_BUFFER, "%lu != %d\n", err, ERROR_INVALID_USER_BUFFER);
+
+    ret = SetupDiGetDeviceInterfacePropertyW(set, &iface, &DEVPKEY_DeviceInterface_FriendlyName, &type, NULL, sizeof(buf), &req, 0);
+    err = GetLastError();
+    ok(!ret && err == ERROR_INVALID_USER_BUFFER, "%lu != %d\n", err, ERROR_INVALID_USER_BUFFER);
+
+    ret = SetupDiGetDeviceInterfacePropertyW(set, &iface, &DEVPKEY_DeviceInterface_FriendlyName, &type, (BYTE *)buf, sizeof(buf), NULL, 1);
+    err = GetLastError();
+    ok(!ret && err == ERROR_INVALID_FLAGS, "%lu != %d\n", err, ERROR_INVALID_FLAGS);
+
+    ret = SetupDiGetDeviceInterfacePropertyW(set, &iface, &DEVPKEY_DeviceInterface_FriendlyName, &type, (BYTE *)buf, sizeof(buf), NULL, 0);
+    err = GetLastError();
+    ok(!ret && err == ERROR_NOT_FOUND, "%lu != %d\n", err, ERROR_NOT_FOUND);
+
+    ret = SetupDiGetDeviceInterfacePropertyW(set, &iface, &DEVPKEY_DeviceInterface_FriendlyName, &type, (BYTE *)buf, sizeof(buf), &req, 0);
+    err = GetLastError();
+    ok(!ret && err == ERROR_NOT_FOUND, "%lu != %d\n", err, ERROR_NOT_FOUND);
+
+    /* Should return built-in property keys even when the "Properties" subkey for the interface hasn't been created */
+    req = 0;
+    ret = SetupDiGetDeviceInterfacePropertyKeys(set, &iface, NULL, 0, &req, 0);
+    err = GetLastError();
+    ok(!ret && err == ERROR_INSUFFICIENT_BUFFER, "%lu != %d\n", err, ERROR_INSUFFICIENT_BUFFER);
+    ok(req >= ARRAY_SIZE(default_keys), "got req %lu, should be >= %lu\n", req, (DWORD)ARRAY_SIZE(default_keys));
+
+    ret = SetupDiSetDeviceInterfacePropertyW(set, &iface, &DEVPKEY_DeviceInterface_FriendlyName, DEVPROP_TYPE_STRING,
+                                             (const BYTE *)str, sizeof(str), 0);
+    err = GetLastError();
+    ok(ret, "SetupDiSetDeviceInterfacePropertyW failed: %lu\n", err);
+
+    ret = SetupDiGetDeviceInterfacePropertyW(set, &iface, &DEVPKEY_DeviceInterface_FriendlyName, &type, NULL, 0, &req, 0);
+    err = GetLastError();
+    ok(!ret && err == ERROR_INSUFFICIENT_BUFFER, "%lu != %d\n", err, ERROR_INSUFFICIENT_BUFFER);
+    ok(type == DEVPROP_TYPE_STRING, "%#lx != %#x\n", type, DEVPROP_TYPE_STRING);
+    ok(req == sizeof(str), "%lu != %lu\n", req, (DWORD)sizeof(str));
+
+    buf[0] = '\0';
+    ret = SetupDiGetDeviceInterfacePropertyW(set, &iface, &DEVPKEY_DeviceInterface_FriendlyName, &type, (BYTE *)buf,
+                                             sizeof(buf), &req, 0);
+    err = GetLastError();
+    ok(ret, "SetupDiGetDeviceInterfacePropertyW failed: %lu\n", err);
+    ok(!wcscmp(buf, str), "%s != %s\n", debugstr_w(buf), debugstr_w(str));
+
+    ret = SetupDiSetDeviceInterfacePropertyW(set, &iface, &DEVPKEY_DeviceInterface_FriendlyName, DEVPROP_TYPE_EMPTY,
+                                             NULL, 0, 0);
+    err = GetLastError();
+    ok(ret, "SetupDiSetDeviceInterfacePropertyW failed: %lu\n", err);
+
+    /* DEVPKEY_DeviceInterface_Enabled is a "special" key, as it does not seem to be actually stored in the registry. */
+    ret = SetupDiGetDeviceInterfacePropertyW(set, &iface, &DEVPKEY_DeviceInterface_Enabled, &type, (BYTE *)&boolean,
+                                             sizeof(boolean), &req, 0);
+    err = GetLastError();
+    ok(ret, "SetupDiGetDeviceInterfacePropertyW failed: %lu\n", err);
+    ok(req == sizeof(boolean), "%lu != %lu\n", req, (DWORD)sizeof(boolean));
+    ok(boolean == DEVPROP_FALSE, "%d != %d\n", boolean, DEVPROP_FALSE);
+
+    boolean = DEVPROP_TRUE;
+    /*  DEVPKEY_DeviceInterface_Enabled cannot be toggled for interfaces. */
+    ret = SetupDiSetDeviceInterfacePropertyW(set, &iface, &DEVPKEY_DeviceInterface_Enabled, DEVPROP_TYPE_BOOLEAN,
+                                             (const BYTE *)&boolean, sizeof(boolean), 0);
+    err = GetLastError();
+    ok(!ret && err == ERROR_ACCESS_DENIED, "%lu != %d\n", err, ERROR_ACCESS_DENIED);
+
+    /* Nor can it be set to anything that's not a DEVPROP_TYPE_BOOLEAN. */
+    ret = SetupDiSetDeviceInterfacePropertyW(set, &iface, &DEVPKEY_DeviceInterface_Enabled, DEVPROP_TYPE_STRING,
+                                             (const BYTE *)str, sizeof(str), 0);
+    err = GetLastError();
+    ok(!ret && err == ERROR_INVALID_DATA, "%lu != %d\n", err, ERROR_INVALID_DATA);
+
+    /* It can however, be "set" to to its current value, i.e whether the interface is enabled. This seems to be a no-op. */
+    boolean = DEVPROP_FALSE;
+    ret = SetupDiSetDeviceInterfacePropertyW(set, &iface, &DEVPKEY_DeviceInterface_Enabled, DEVPROP_TYPE_BOOLEAN,
+                                             (const BYTE *)&boolean, sizeof(boolean), 0);
+    err = GetLastError();
+    /* Windows 7 returns ERROR_ACCESS_DENIED. */
+    ok(ret || broken(err == ERROR_ACCESS_DENIED), "SetupDiGetDeviceInterfacePropertyW failed: %lu\n", err);
+
+    boolean = 0xde;
+    ret = SetupDiSetDeviceInterfacePropertyW(set, &iface, &DEVPKEY_DeviceInterface_Enabled, DEVPROP_TYPE_BOOLEAN,
+                                             (const BYTE *)&boolean, sizeof(boolean), 0);
+    err = GetLastError();
+    ok(!ret && err == ERROR_INVALID_DATA, "%lu != %d\n", err, ERROR_INVALID_DATA);
+
+    ret = SetupDiGetDeviceInterfacePropertyKeys(NULL, NULL, NULL, 0, NULL, 0);
+    err = GetLastError();
+    ok(!ret && err == ERROR_INVALID_HANDLE, "%lu != %d\n", err, ERROR_INVALID_HANDLE);
+
+    ret = SetupDiGetDeviceInterfacePropertyKeys(set, NULL, NULL, 0, NULL, 0);
+    err = GetLastError();
+    ok(!ret && err == ERROR_INVALID_PARAMETER, "%lu != %d\n", err, ERROR_INVALID_PARAMETER);
+
+    ret = SetupDiGetDeviceInterfacePropertyKeys(set, &iface, NULL, 0, NULL, 0);
+    err = GetLastError();
+    ok(!ret && err == ERROR_INSUFFICIENT_BUFFER, "%lu != %d\n", err, ERROR_INSUFFICIENT_BUFFER);
+
+    ret = SetupDiGetDeviceInterfacePropertyKeys(set, &iface, NULL, 0, &req, 1);
+    err = GetLastError();
+    ok(!ret && err == ERROR_INVALID_FLAGS, "%lu != %d\n", err, ERROR_INVALID_FLAGS);
+
+    ret = SetupDiGetDeviceInterfacePropertyKeys(set, &iface, NULL, 1, &req, 0);
+    err = GetLastError();
+    ok(!ret && err == ERROR_INVALID_USER_BUFFER, "%lu != %d\n", err, ERROR_INVALID_USER_BUFFER);
+
+    ret = SetupDiSetDeviceInterfacePropertyW(set, &iface, &DEVPKEY_DeviceInterface_FriendlyName, DEVPROP_TYPE_STRING,
+                                             (const BYTE *)str, sizeof(str), 0);
+    err = GetLastError();
+    ok(ret, "SetupDiSetDeviceInterfacePropertyW failed: %lu\n", err);
+    if (ret) rem += 1;
+
+    req = 0;
+    ret = SetupDiGetDeviceInterfacePropertyKeys(set, &iface, NULL, 0, &req, 0);
+    err = GetLastError();
+    ok(!ret && err == ERROR_INSUFFICIENT_BUFFER, "%lu != %d\n", err, ERROR_INSUFFICIENT_BUFFER);
+
+    size = req;
+    keys = calloc(size, sizeof(*keys));
+    ret = SetupDiGetDeviceInterfacePropertyKeys(set, &iface, keys, size, &req, 0);
+    ok(ret, "SetupDiGetDeviceInterfacePropertyKeys failed: %lu\n", GetLastError());
+    ok(size == req, "%lu != %lu\n", size, req);
+    ok(size >= ARRAY_SIZE(default_keys), "got size %lu, should be >= %lu\n", size, (DWORD)ARRAY_SIZE(default_keys));
+
+    for (i = 0; i < size && rem; i++)
+    {
+        DWORD j;
+        for (j = 0; j < ARRAY_SIZE(default_keys); j++)
+        {
+            DEVPROPKEY key = default_keys[j].key;
+            DEVPROPTYPE exp_type = default_keys[j].type;
+
+            if (IsEqualDevPropKey(key, keys[i]))
+            {
+                BYTE *buf;
+                DWORD size, req = 0;
+
+                winetest_push_context("default_keys[%lu]", j);
+
+                type = DEVPROP_TYPE_EMPTY;
+                ret = SetupDiGetDeviceInterfacePropertyW(set, &iface, &key, &type, NULL, 0, &req, 0);
+                err = GetLastError();
+                ok(!ret && err == ERROR_INSUFFICIENT_BUFFER, "%lu != %d\n", err, ERROR_INSUFFICIENT_BUFFER);
+                ok(type == exp_type, "%#lx != %#lx\n", type, exp_type);
+
+                size = req;
+                buf = calloc( 1, size );
+                ret = SetupDiGetDeviceInterfacePropertyW(set, &iface, &key, &type, buf, size, &req, 0);
+                err = GetLastError();
+                ok(ret, "SetupDiGetDeviceInterfacePropertyW failed: %lu\n", err);
+                free(buf);
+
+                winetest_pop_context();
+
+                rem--;
+                break;
+            }
+        }
+        if (IsEqualDevPropKey(keys[i], DEVPKEY_DeviceInterface_FriendlyName) && rem) rem--;
+    }
+    free(keys);
+    ok(!rem, "got rem %lu, should be 0\n", rem);
+
+    type = DEVPROP_TYPE_EMPTY;
+    req = 0;
+    ret = SetupDiGetDeviceInterfacePropertyW(set, &iface, &DEVPKEY_DeviceInterface_ClassGuid, &type, (BYTE *)&guid_val,
+                                             sizeof(guid_val), &req, 0);
+    ok(ret, "SetupDiGetDeviceInterfacePropertyW failed: %lu\n", GetLastError());
+    ok(type == DEVPROP_TYPE_GUID, "%#lx != %#x\n", type, DEVPROP_TYPE_GUID);
+    ok(req == sizeof(guid), "%lu != %lu\n", req, (DWORD)sizeof(guid));
+    ok(IsEqualGUID(&guid_val, &guid), "%s != %s", debugstr_guid( &guid_val ), debugstr_guid( &guid ));
+
+    type = DEVPROP_TYPE_EMPTY;
+    req = 0;
+    buf[0] = '\0';
+    ret = SetupDiGetDeviceInterfacePropertyW(set, &iface, &DEVPKEY_Device_InstanceId, &type, (BYTE *)buf,
+                                             sizeof(instance_id), &req, 0);
+    ok(ret, "SetupDiGetDeviceInterfacePropertyW failed: %lu\n", GetLastError());
+    ok(type == DEVPROP_TYPE_STRING, "%#lx != %#x", type, DEVPROP_TYPE_STRING);
+    ok(req == sizeof(instance_id), "%lu != %lu\n", req, (DWORD)sizeof(instance_id));
+    ok(!wcscmp(buf, instance_id), "%s != %s\n", debugstr_w(buf), debugstr_w(instance_id));
+
+    ret = SetupDiRemoveDeviceInterface(set, &iface);
+    ok(ret, "Failed to remove device interface, error %#lx.\n", GetLastError());
     ret = SetupDiRemoveDevice(set, &device);
     ok(ret, "Failed to remove device, error %#lx.\n", GetLastError());
     ret = SetupDiDestroyDeviceInfoList(set);
@@ -3367,10 +4454,879 @@ todo_wine {
     SetupDiDestroyDeviceInfoList(set);
 }
 
+static void test_SetupDiOpenDeviceInterface(void)
+{
+    BYTE iface_detail_buffer[sizeof(SP_DEVICE_INTERFACE_DETAIL_DATA_W) + 256 * sizeof(WCHAR)];
+    SP_DEVICE_INTERFACE_DATA iface = { sizeof(iface) };
+    SP_DEVICE_INTERFACE_DETAIL_DATA_W *iface_data;
+    SP_DEVINFO_DATA device = { sizeof(device) };
+    WCHAR device_path[256];
+    char device_patha[256];
+    HDEVINFO set;
+    BOOL ret;
+
+    set = SetupDiGetClassDevsW(&GUID_DEVINTERFACE_DISPLAY_ADAPTER, NULL, NULL, DIGCF_DEVICEINTERFACE);
+    ok(set != INVALID_HANDLE_VALUE, "got %p.\n", set);
+    ret = SetupDiEnumDeviceInterfaces(set, NULL, &GUID_DEVINTERFACE_DISPLAY_ADAPTER, 0, &iface);
+    if (!ret && GetLastError() == ERROR_NO_MORE_ITEMS)
+    {
+        skip("No display adapters, skipping test.\n");
+        SetupDiDestroyDeviceInfoList(set);
+        return;
+    }
+    ok(ret, "got error %lu.\n", GetLastError());
+    iface_data = (SP_DEVICE_INTERFACE_DETAIL_DATA_W *)iface_detail_buffer;
+    iface_data->cbSize = sizeof(*iface_data);
+    ret = SetupDiGetDeviceInterfaceDetailW(set, &iface, iface_data, sizeof(iface_detail_buffer), NULL, &device);
+    ok(ret, "got error %lu.\n", GetLastError());
+    wcscpy(device_path, iface_data->DevicePath);
+    SetupDiDestroyDeviceInfoList(set);
+
+    set = SetupDiCreateDeviceInfoListExW(NULL, NULL, NULL, NULL);
+    ok(set != INVALID_HANDLE_VALUE, "got %p.\n", set);
+    memset(&iface, 0xcc, sizeof(iface));
+    iface.cbSize = sizeof(iface);
+
+    ret = SetupDiOpenDeviceInterfaceW(set, NULL, 0, &iface);
+    ok(!ret && GetLastError() == ERROR_INVALID_PARAMETER, "got ret %d, error %#lx.\n", ret, GetLastError());
+
+    ret = SetupDiOpenDeviceInfoW(set, L"qqq", NULL, 0, &device);
+    todo_wine_if(!ret && GetLastError() == ERROR_NO_SUCH_DEVINST)
+    ok(!ret && GetLastError() == ERROR_INVALID_DEVINST_NAME, "got ret %d, error %#lx.\n", ret, GetLastError());
+    ret = SetupDiOpenDeviceInterfaceW(set, L"\\\\?\\", 0, &iface);
+    ok((!ret && GetLastError() == ERROR_NO_SUCH_DEVICE_INTERFACE) ||
+       broken(!ret && GetLastError() == ERROR_BAD_PATHNAME), /* Win7 */
+       "got ret %d, error %#lx.\n", ret, GetLastError());
+    ret = SetupDiOpenDeviceInterfaceW(set, device_path, 0, NULL);
+    ok(ret, "got error %#lx.\n", GetLastError());
+    SetupDiDestroyDeviceInfoList(set);
+
+    set = SetupDiCreateDeviceInfoListExW(NULL, NULL, NULL, NULL);
+    ok(set != INVALID_HANDLE_VALUE, "got %p.\n", set);
+    memset(&iface, 0xcc, sizeof(iface));
+    iface.cbSize = sizeof(iface);
+
+    ret = SetupDiOpenDeviceInterfaceW(set, device_path, 0, &iface);
+    ok(ret, "got error %lu.\n", GetLastError());
+    ok(IsEqualGUID(&iface.InterfaceClassGuid, &GUID_DEVINTERFACE_DISPLAY_ADAPTER), "got %s.\n",
+            debugstr_guid(&iface.InterfaceClassGuid));
+    memset(&iface, 0xcc, sizeof(iface));
+    iface.cbSize = sizeof(iface);
+    ret = SetupDiEnumDeviceInterfaces(set, NULL, &GUID_DEVINTERFACE_DISPLAY_ADAPTER, 0, &iface);
+    ok(ret, "got error %lu.\n", GetLastError());
+    SetupDiDestroyDeviceInfoList(set);
+
+    set = SetupDiCreateDeviceInfoListExW(NULL, NULL, NULL, NULL);
+    ok(set != INVALID_HANDLE_VALUE, "got %p.\n", set);
+    WideCharToMultiByte(CP_ACP, 0, device_path, -1, device_patha, sizeof(device_patha), NULL, NULL);
+    memset(&iface, 0xcc, sizeof(iface));
+    iface.cbSize = sizeof(iface);
+    ret = SetupDiOpenDeviceInterfaceA(set, device_patha, 0, &iface);
+    ok(ret, "got error %lu.\n", GetLastError());
+    ok(IsEqualGUID(&iface.InterfaceClassGuid, &GUID_DEVINTERFACE_DISPLAY_ADAPTER), "got %s.\n",
+            debugstr_guid(&iface.InterfaceClassGuid));
+    memset(&iface, 0xcc, sizeof(iface));
+    iface.cbSize = sizeof(iface);
+    ret = SetupDiEnumDeviceInterfaces(set, NULL, &GUID_DEVINTERFACE_DISPLAY_ADAPTER, 0, &iface);
+    ok(ret, "got error %lu.\n", GetLastError());
+    SetupDiDestroyDeviceInfoList(set);
+}
+
+static BOOL file_exists(const char *path)
+{
+    return GetFileAttributesA(path) != INVALID_FILE_ATTRIBUTES;
+}
+
+static BOOL is_in_inf_dir(const char *path)
+{
+    char expect[MAX_PATH];
+
+    GetWindowsDirectoryA(expect, sizeof(expect));
+    strcat(expect, "\\inf\\");
+    return !strncasecmp(path, expect, strrchr(path, '\\') - path);
+}
+
+static void check_original_file_name(const char *dest_inf, const char *src_inf, const char *src_catalog)
+{
+    SP_ORIGINAL_FILE_INFO_A orig_info;
+    SP_INF_INFORMATION *inf_info;
+    DWORD size;
+    HINF hinf;
+    BOOL res;
+
+    if (!pSetupQueryInfOriginalFileInformationA)
+    {
+        win_skip("SetupQueryInfOriginalFileInformationA is not available\n");
+        return;
+    }
+
+    hinf = SetupOpenInfFileA(dest_inf, NULL, INF_STYLE_WIN4, NULL);
+    ok(hinf != NULL, "Failed to open INF file, error %lu.\n", GetLastError());
+
+    res = SetupGetInfInformationA(hinf, INFINFO_INF_SPEC_IS_HINF, NULL, 0, &size);
+    ok(res, "Failed to get INF information, error %lu.\n", GetLastError());
+
+    inf_info = malloc(size);
+
+    res = SetupGetInfInformationA(hinf, INFINFO_INF_SPEC_IS_HINF, inf_info, size, NULL);
+    ok(res, "Failed to get INF information, error %lu.\n", GetLastError());
+
+    orig_info.cbSize = 0;
+    SetLastError(0xdeadbeef);
+    res = pSetupQueryInfOriginalFileInformationA(inf_info, 0, NULL, &orig_info);
+    ok(!res, "Got %d.\n", res);
+    ok(GetLastError() == ERROR_INVALID_USER_BUFFER, "Got error %#lx.\n", GetLastError());
+
+    orig_info.cbSize = sizeof(orig_info);
+    SetLastError(0xdeadbeef);
+    res = pSetupQueryInfOriginalFileInformationA(inf_info, 0, NULL, &orig_info);
+    ok(res == TRUE, "Got %d.\n", res);
+    ok(!GetLastError(), "Got error %#lx.\n", GetLastError());
+    ok(!strcmp(orig_info.OriginalCatalogName, src_catalog), "Expected original catalog name %s, got %s.\n",
+            debugstr_a(src_catalog), debugstr_a(orig_info.OriginalCatalogName));
+    ok(!strcmp(orig_info.OriginalInfName, src_inf), "Expected orignal inf name %s, got %s.\n",
+            debugstr_a(src_inf), debugstr_a(orig_info.OriginalInfName));
+
+    free(inf_info);
+
+    SetupCloseInfFile(hinf);
+}
+
+static void test_copy_oem_inf(struct testsign_context *ctx)
+{
+    char path[MAX_PATH * 2], dest[MAX_PATH], orig_dest[MAX_PATH], orig_store[MAX_PATH];
+    char orig_cwd[MAX_PATH], *cwd, *filepart, pnf[MAX_PATH];
+    SYSTEM_INFO system_info;
+    HANDLE catalog;
+    DWORD size;
+    BOOL ret;
+
+    static const char inf_data1[] =
+        "[Version]\n"
+        "Signature=\"$Chicago$\"\n"
+        "CatalogFile=winetest.cat\n"
+        /* Windows 10 needs a non-empty Manufacturer section, otherwise
+         * SetupUninstallOEMInf() fails with ERROR_INVALID_PARAMETER. */
+        "[Manufacturer]\n"
+        "mfg1=mfg_section,NT" MYEXT "\n"
+        "; This is a WINE test INF file\n";
+
+    static const char inf_data2[] =
+        "[Version]\n"
+        "Signature=\"$Chicago$\"\n"
+        "CatalogFile=winetest2.cat\n"
+        "[Manufacturer]\n"
+        "mfg1=mfg_section,NT" MYEXT "\n"
+        "; This is another WINE test INF file\n";
+
+    if (wow64)
+        return;
+
+    GetSystemInfo(&system_info);
+
+    GetCurrentDirectoryA(sizeof(orig_cwd), orig_cwd);
+    cwd = tempnam(NULL, "wine");
+    ret = CreateDirectoryA(cwd, NULL);
+    ok(ret, "Failed to create %s, error %#lx.\n", debugstr_a(cwd), GetLastError());
+    ret = SetCurrentDirectoryA(cwd);
+    ok(ret, "Failed to cd to %s, error %#lx.\n", debugstr_a(cwd), GetLastError());
+
+    /* try NULL SourceInfFileName */
+    SetLastError(0xdeadbeef);
+    ret = SetupCopyOEMInfA(NULL, NULL, 0, SP_COPY_NOOVERWRITE, NULL, 0, NULL, NULL);
+    ok(!ret, "Got %d.\n", ret);
+    ok(GetLastError() == ERROR_INVALID_PARAMETER, "Got error %#lx.\n", GetLastError());
+
+    /* try empty SourceInfFileName */
+    SetLastError(0xdeadbeef);
+    ret = SetupCopyOEMInfA("", NULL, 0, SP_COPY_NOOVERWRITE, NULL, 0, NULL, NULL);
+    ok(!ret, "Got %d.\n", ret);
+    ok(GetLastError() == ERROR_FILE_NOT_FOUND
+            || GetLastError() == ERROR_INVALID_PARAMETER /* vista, 2k8 */, "Got error %#lx.\n", GetLastError());
+
+    /* try a relative nonexistent SourceInfFileName */
+    SetLastError(0xdeadbeef);
+    ret = SetupCopyOEMInfA("nonexistent", NULL, 0, SP_COPY_NOOVERWRITE, NULL, 0, NULL, NULL);
+    ok(!ret, "Got %d.\n", ret);
+    ok(GetLastError() == ERROR_FILE_NOT_FOUND, "Got error %#lx.\n", GetLastError());
+
+    /* try an absolute nonexistent SourceInfFileName */
+    GetCurrentDirectoryA(sizeof(path), path);
+    strcat(path, "\\nonexistent");
+    SetLastError(0xdeadbeef);
+    ret = SetupCopyOEMInfA(path, NULL, 0, SP_COPY_NOOVERWRITE, NULL, 0, NULL, NULL);
+    ok(!ret, "Got %d.\n", ret);
+    ok(GetLastError() == ERROR_FILE_NOT_FOUND, "Got error %#lx.\n", GetLastError());
+
+    create_file("winetest.inf", inf_data1);
+
+    catalog = CryptCATOpen((WCHAR *)L"winetest.cat", CRYPTCAT_OPEN_CREATENEW, 0, CRYPTCAT_VERSION_1, 0);
+    ok(catalog != INVALID_HANDLE_VALUE, "Failed to create catalog, error %#lx\n", GetLastError());
+
+    add_file_to_catalog(catalog, L"winetest.inf");
+
+    ret = CryptCATPersistStore(catalog);
+    todo_wine ok(ret, "Failed to write catalog, error %#lx\n", GetLastError());
+
+    ret = CryptCATClose(catalog);
+    ok(ret, "Failed to close catalog, error %#lx\n", GetLastError());
+
+    testsign_sign(ctx, L"winetest.cat");
+
+    size = ARRAY_SIZE(dest);
+    memset(dest, 0xcc, sizeof(dest));
+    ret = pDriverStoreFindDriverPackageA("winetest.inf", 0, 0, system_info.wProcessorArchitecture, 0, dest, &size);
+    ok(ret == HRESULT_FROM_WIN32(ERROR_NOT_FOUND), "Got %#x.\n", ret);
+    ok(!dest[0], "Got %s.\n", debugstr_a(dest));
+    todo_wine ok(!size, "Got size %lu.\n", size);
+
+    /* Test with a relative path. */
+    SetLastError(0xdeadbeef);
+    memset(dest, 0xcc, sizeof(dest));
+    ret = SetupCopyOEMInfA("winetest.inf", NULL, 0, SP_COPY_NOOVERWRITE, dest, sizeof(dest), NULL, &filepart);
+    ok(ret == TRUE, "Got %d.\n", ret);
+    ok(!GetLastError(), "Got error %#lx.\n", GetLastError());
+    ok(file_exists("winetest.inf"), "Expected source inf to exist.\n");
+    ok(file_exists(dest), "Expected dest file to exist.\n");
+    ok(is_in_inf_dir(dest), "Got unexpected path '%s'.\n", dest);
+    ok(filepart == strrchr(dest, '\\') + 1, "Got unexpected file part %s.\n", filepart);
+
+    ret = SetupUninstallOEMInfA("bogus.inf", 0, NULL);
+    ok(!ret, "Got %d.\n", ret);
+    ok(GetLastError() == ERROR_FILE_NOT_FOUND, "Got error %#lx.\n", GetLastError());
+
+    strcpy(pnf, dest);
+    *(strrchr(pnf, '.') + 1) = 'p';
+    SetLastError(0xdeadbeef);
+    ret = SetupUninstallOEMInfA(filepart, 0, NULL);
+    ok(ret == TRUE, "Got %d.\n", ret);
+    ok(!GetLastError(), "Got error %#lx.\n", GetLastError());
+    ok(!file_exists(dest), "Expected inf '%s' not to exist.\n", dest);
+    DeleteFileA(dest);
+    ok(!file_exists(pnf), "Expected pnf '%s' not to exist.\n", pnf);
+
+    /* try SP_COPY_REPLACEONLY, dest does not exist */
+    SetLastError(0xdeadbeef);
+    ret = SetupCopyOEMInfA(path, NULL, SPOST_NONE, SP_COPY_REPLACEONLY, NULL, 0, NULL, NULL);
+    ok(!ret, "Got %d.\n", ret);
+    ok(GetLastError() == ERROR_FILE_NOT_FOUND, "Got error %#lx.\n", GetLastError());
+    ok(file_exists("winetest.inf"), "Expected source inf to exist.\n");
+
+    /* Test a successful call. */
+    GetCurrentDirectoryA(sizeof(path), path);
+    strcat(path, "\\winetest.inf");
+
+    size = ARRAY_SIZE(dest);
+    memset(dest, 0xcc, sizeof(dest));
+    ret = pDriverStoreFindDriverPackageA(path, 0, 0, system_info.wProcessorArchitecture, 0, dest, &size);
+    ok(ret == HRESULT_FROM_WIN32(ERROR_NOT_FOUND), "Got %#x.\n", ret);
+    ok(!dest[0], "Got %s.\n", debugstr_a(dest));
+    todo_wine ok(!size, "Got size %lu.\n", size);
+
+    SetLastError(0xdeadbeef);
+    ret = SetupCopyOEMInfA(path, NULL, SPOST_NONE, 0, dest, sizeof(dest), NULL, NULL);
+    ok(ret == TRUE, "Got %d.\n", ret);
+    ok(!GetLastError(), "Got error %#lx.\n", GetLastError());
+    ok(file_exists(path), "Expected source inf to exist.\n");
+    ok(file_exists(dest), "Expected dest file to exist.\n");
+    ok(is_in_inf_dir(dest), "Got unexpected path '%s'.\n", dest);
+    strcpy(orig_dest, dest);
+
+    check_original_file_name(dest, "winetest.inf", "winetest.cat");
+
+    size = ARRAY_SIZE(dest);
+    memset(dest, 0xcc, sizeof(dest));
+    ret = pDriverStoreFindDriverPackageA(path, 0, 0, system_info.wProcessorArchitecture, 0, dest, &size);
+    ok(!ret, "Got %#x.\n", ret);
+    strcpy(orig_store, dest);
+
+    SetLastError(0xdeadbeef);
+    ret = SetupCopyOEMInfA(path, NULL, SPOST_NONE, 0, dest, sizeof(dest), NULL, NULL);
+    ok(ret == TRUE, "Got %d.\n", ret);
+    ok(!GetLastError(), "Got error %#lx.\n", GetLastError());
+    ok(file_exists(path), "Expected source inf to exist.\n");
+    ok(file_exists(dest), "Expected dest file to exist.\n");
+    ok(!strcmp(orig_dest, dest), "Expected '%s', got '%s'.\n", orig_dest, dest);
+
+    /* On Windows 7 and earlier, trying to install the same file with a
+     * different base name does nothing and returns the existing driver store
+     * location and INF directory file.
+     * On Windows 8 and later, it's installed to a new location. */
+
+    /* try SP_COPY_REPLACEONLY, dest exists */
+    GetCurrentDirectoryA(sizeof(path), path);
+    strcat(path, "\\winetest.inf");
+    SetLastError(0xdeadbeef);
+    ret = SetupCopyOEMInfA(path, NULL, SPOST_NONE, SP_COPY_REPLACEONLY, dest, sizeof(dest), NULL, NULL);
+    ok(ret == TRUE, "Got %d.\n", ret);
+    ok(!GetLastError(), "Got error %#lx.\n", GetLastError());
+    ok(file_exists(path), "Expected source inf to exist.\n");
+    ok(file_exists(dest), "Expected dest file to exist.\n");
+    ok(!strcmp(orig_dest, dest), "Expected '%s', got '%s'.\n", orig_dest, dest);
+
+    strcpy(dest, "aaa");
+    SetLastError(0xdeadbeef);
+    ret = SetupCopyOEMInfA(path, NULL, SPOST_NONE, SP_COPY_NOOVERWRITE, dest, sizeof(dest), NULL, NULL);
+    ok(!ret, "Got %d.\n", ret);
+    ok(GetLastError() == ERROR_FILE_EXISTS, "Got error %#lx.\n", GetLastError());
+    ok(!strcmp(orig_dest, dest), "Expected '%s', got '%s'.\n", orig_dest, dest);
+
+    SetLastError(0xdeadbeef);
+    ret = SetupCopyOEMInfA(path, NULL, SPOST_NONE, 0, NULL, 0, NULL, NULL);
+    ok(ret == TRUE, "Got %d.\n", ret);
+    ok(!GetLastError(), "Got error %#lx.\n", GetLastError());
+    ok(file_exists(path), "Expected source inf to exist.\n");
+    ok(file_exists(orig_dest), "Expected dest file to exist.\n");
+
+    strcpy(dest, "aaa");
+    size = 0;
+    SetLastError(0xdeadbeef);
+    ret = SetupCopyOEMInfA(path, NULL, SPOST_NONE, 0, dest, 5, &size, NULL);
+    ok(!ret, "Got %d.\n", ret);
+    ok(GetLastError() == ERROR_INSUFFICIENT_BUFFER, "Got error %#lx.\n", GetLastError());
+    ok(file_exists(path), "Expected source inf to exist.\n");
+    ok(file_exists(orig_dest), "Expected dest inf to exist.\n");
+    ok(!strcmp(dest, "aaa"), "Expected dest to be unchanged\n");
+    ok(size == strlen(orig_dest) + 1, "Got %ld.\n", size);
+
+    SetLastError(0xdeadbeef);
+    ret = SetupCopyOEMInfA(path, NULL, SPOST_NONE, 0, dest, sizeof(dest), &size, NULL);
+    ok(ret == TRUE, "Got %d.\n", ret);
+    ok(!GetLastError(), "Got error %#lx.\n", GetLastError());
+    ok(!strcmp(orig_dest, dest), "Expected '%s', got '%s'.\n", orig_dest, dest);
+    ok(size == strlen(dest) + 1, "Got %ld.\n", size);
+
+    SetLastError(0xdeadbeef);
+    ret = SetupCopyOEMInfA(path, NULL, SPOST_NONE, 0, dest, sizeof(dest), NULL, &filepart);
+    ok(ret == TRUE, "Got %d.\n", ret);
+    ok(!GetLastError(), "Got error %#lx.\n", GetLastError());
+    ok(!strcmp(orig_dest, dest), "Expected '%s', got '%s'.\n", orig_dest, dest);
+    ok(filepart == strrchr(dest, '\\') + 1, "Got unexpected file part %s.\n", filepart);
+
+    SetLastError(0xdeadbeef);
+    ret = SetupCopyOEMInfA(path, NULL, SPOST_NONE, SP_COPY_DELETESOURCE, NULL, 0, NULL, NULL);
+    ok(ret == TRUE, "Got %d.\n", ret);
+    ok(!GetLastError(), "Got error %#lx.\n", GetLastError());
+    ok(!file_exists(path), "Expected source inf not to exist.\n");
+
+    strcpy(pnf, dest);
+    *(strrchr(pnf, '.') + 1) = 'p';
+
+    ret = SetupUninstallOEMInfA(strrchr(dest, '\\') + 1, 0, NULL);
+    ok(ret, "Failed to uninstall '%s', error %#lx.\n", dest, GetLastError());
+    ok(!file_exists(dest), "Expected inf '%s' not to exist.\n", dest);
+    DeleteFileA(dest);
+    ok(!file_exists(pnf), "Expected pnf '%s' not to exist.\n", pnf);
+
+    size = ARRAY_SIZE(dest);
+    memset(dest, 0xcc, sizeof(dest));
+    ret = pDriverStoreFindDriverPackageA(path, 0, 0, system_info.wProcessorArchitecture, 0, dest, &size);
+    ok(ret == HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND), "Got %#x.\n", ret);
+    ok(!dest[0], "Got %s.\n", debugstr_a(dest));
+    todo_wine ok(!size, "Got size %lu.\n", size);
+
+    create_file("winetest.inf", inf_data1);
+    SetLastError(0xdeadbeef);
+    ret = SetupCopyOEMInfA(path, NULL, SPOST_NONE, 0, dest, sizeof(dest), NULL, NULL);
+    ok(ret == TRUE, "Got %d.\n", ret);
+    ok(!GetLastError(), "Got error %#lx.\n", GetLastError());
+    ok(is_in_inf_dir(dest), "Got unexpected path '%s'.\n", dest);
+    strcpy(orig_dest, dest);
+
+    create_file("winetest2.inf", inf_data2);
+
+    catalog = CryptCATOpen((WCHAR *)L"winetest2.cat", CRYPTCAT_OPEN_CREATENEW, 0, CRYPTCAT_VERSION_1, 0);
+    ok(catalog != INVALID_HANDLE_VALUE, "Failed to create catalog, error %#lx\n", GetLastError());
+
+    add_file_to_catalog(catalog, L"winetest2.inf");
+
+    ret = CryptCATPersistStore(catalog);
+    todo_wine ok(ret, "Failed to write catalog, error %#lx\n", GetLastError());
+
+    ret = CryptCATClose(catalog);
+    ok(ret, "Failed to close catalog, error %#lx\n", GetLastError());
+
+    testsign_sign(ctx, L"winetest2.cat");
+
+    SetLastError(0xdeadbeef);
+    GetCurrentDirectoryA(sizeof(path), path);
+    strcat(path, "\\winetest2.inf");
+    ret = SetupCopyOEMInfA(path, NULL, SPOST_NONE, 0, dest, sizeof(dest), NULL, NULL);
+    ok(ret == TRUE, "Got %d.\n", ret);
+    ok(!GetLastError(), "Got error %#lx.\n", GetLastError());
+    ok(is_in_inf_dir(dest), "Got unexpected path '%s'.\n", dest);
+    ok(strcmp(dest, orig_dest), "Expected INF files to be copied to different paths.\n");
+
+    ret = SetupUninstallOEMInfA(strrchr(dest, '\\') + 1, 0, NULL);
+    ok(ret, "Failed to uninstall '%s', error %#lx.\n", dest, GetLastError());
+    ok(!file_exists(dest), "Expected inf '%s' not to exist.\n", dest);
+    DeleteFileA(dest);
+    strcpy(pnf, dest);
+    *(strrchr(pnf, '.') + 1) = 'p';
+    ok(!file_exists(pnf), "Expected pnf '%s' not to exist.\n", pnf);
+
+    ret = SetupUninstallOEMInfA(strrchr(orig_dest, '\\') + 1, 0, NULL);
+    ok(ret, "Failed to uninstall '%s', error %#lx.\n", orig_dest, GetLastError());
+    ok(!file_exists(orig_dest), "Expected inf '%s' not to exist.\n", dest);
+    DeleteFileA(orig_dest);
+    strcpy(pnf, dest);
+    *(strrchr(pnf, '.') + 1) = 'p';
+    ok(!file_exists(pnf), "Expected pnf '%s' not to exist.\n", pnf);
+
+    ret = DeleteFileA("winetest2.cat");
+    ok(ret, "Failed to delete file, error %#lx.\n", GetLastError());
+
+    ret = DeleteFileA("winetest2.inf");
+    ok(ret, "Failed to delete file, error %#lx.\n", GetLastError());
+
+    ret = DeleteFileA("winetest.cat");
+    ok(ret, "Failed to delete file, error %#lx.\n", GetLastError());
+
+    ret = DeleteFileA("winetest.inf");
+    ok(ret, "Failed to delete file, error %#lx.\n", GetLastError());
+
+    SetCurrentDirectoryA(orig_cwd);
+    ret = RemoveDirectoryA(cwd);
+    ok(ret, "Failed to delete %s, error %#lx.\n", cwd, GetLastError());
+
+}
+
+static void check_driver_store_file_exists(const char *driver_store, const char *file, BOOL exists)
+{
+    char path[MAX_PATH];
+
+    sprintf(path, "%s\\%s", driver_store, file);
+    ok(file_exists(path) == exists, "Expected %s to %s.\n", debugstr_a(path), exists ? "exist" : "not exist");
+}
+
+static const char driver_store_hardware_id[] = "winetest_store_hardware_id\0";
+
+static void create_driver_store_test_device(HDEVINFO set, const char *name, SP_DEVINFO_DATA *device)
+{
+    static const GUID guid = {0x77777777};
+    BOOL ret;
+
+    if (SetupDiOpenDeviceInfoA(set, name, NULL, 0, device))
+    {
+        ret = SetupDiCallClassInstaller(DIF_REMOVE, set, device);
+        ok(ret, "Failed to remove device, error %#lx.\n", GetLastError());
+    }
+
+    ret = SetupDiCreateDeviceInfoA(set, name, &guid, NULL, NULL, 0, device);
+    ok(ret, "Failed to create device, error %#lx.\n", GetLastError());
+    ret = SetupDiSetDeviceRegistryPropertyA(set, device, SPDRP_HARDWAREID,
+            (const BYTE *)driver_store_hardware_id, sizeof(driver_store_hardware_id));
+    ok(ret, "Failed to set hardware ID, error %#lx.\n", GetLastError());
+    ret = SetupDiCallClassInstaller(DIF_REGISTERDEVICE, set, device);
+    ok(ret, "Failed to call class installer, error %#lx.\n", GetLastError());
+}
+
+static void test_driver_store(struct testsign_context *ctx)
+{
+    static const char repository_dir[] = "C:\\windows\\system32\\DriverStore\\FileRepository\\";
+    SP_DEVINFO_DATA device = {sizeof(device)}, device2 = {sizeof(device2)};
+    char dest[MAX_PATH], orig_dest[MAX_PATH], inf_path[MAX_PATH];
+    SP_DRVINFO_DATA_A driver = {sizeof(driver)};
+    char orig_cwd[MAX_PATH], *cwd;
+    char driver_path[MAX_PATH];
+    SYSTEM_INFO system_info;
+    HANDLE catalog;
+    HDEVINFO set;
+    DWORD size;
+    BOOL ret;
+
+    static const char inf_data1[] =
+        "[Version]\n"
+        "Signature=\"$Chicago$\"\n"
+        "CatalogFile=winetest.cat\n"
+        "Class=Bogus\n"
+        "ClassGUID={6a55b5a4-3f65-11db-b704-0011955c2bdb}\n"
+
+        "[Manufacturer]\n"
+        "mfg1=mfg_section,NT" MYEXT "\n"
+        "mfg2=mfg_section_wrongarch,NT" WRONGEXT "\n"
+
+        "[mfg_section.nt" MYEXT "]\n"
+        "desc1=device_section,winetest_store_hardware_id\n"
+
+        "[mfg_section_wrongarch.nt" WRONGEXT "]\n"
+        "desc1=device_section2,winetest_store_hardware_id\n"
+
+        "[device_section.nt" MYEXT "]\n"
+        "CopyFiles=file_section\n"
+
+        "[device_section_wrongarch.nt" WRONGEXT "]\n"
+        "CopyFiles=file_section_wrongarch\n"
+
+        "[device_section.nt" MYEXT ".CoInstallers]\n"
+        "CopyFiles=coinst_file_section\n"
+
+        "[file_section]\n"
+        "winetest_dst.txt,winetest_src.txt\n"
+        "winetest_child.txt\n"
+        "winetest_niece.txt\n"
+        "winetest_cab.txt\n"
+
+        "[file_section_wrongarch]\n"
+        "winetest_wrongarch.txt\n"
+
+        "[coinst_file_section]\n"
+        "winetest_coinst.txt\n"
+
+        "[SourceDisksFiles]\n"
+        "winetest_src.txt=1\n"
+        "winetest_child.txt=1,subdir\n"
+        "winetest_niece.txt=2\n"
+        "winetest_ignored.txt=1\n"
+        "winetest_ignored2.txt=1\n"
+        "winetest_wrongarch.txt=1\n"
+        "winetest_cab.txt=3\n"
+        "winetest_coinst.txt=1\n"
+
+        "[SourceDisksNames]\n"
+        "1=,winetest_src.txt\n"
+        "2=,winetest_niece.txt,,sister\n"
+        "3=,winetest_cab.cab\n"
+
+        "[DestinationDirs]\n"
+        "DefaultDestDir=11\n"
+        ;
+
+    if (wow64)
+        return;
+
+    GetSystemInfo(&system_info);
+
+    set = SetupDiCreateDeviceInfoList(NULL, NULL);
+    ok(set != INVALID_HANDLE_VALUE, "Failed to create device list, error %#lx.\n", GetLastError());
+
+    create_driver_store_test_device(set, "Root\\winetest_store\\1", &device);
+
+    GetCurrentDirectoryA(sizeof(orig_cwd), orig_cwd);
+    cwd = tempnam(NULL, "wine");
+    ret = CreateDirectoryA(cwd, NULL);
+    ok(ret, "Failed to create %s, error %lu.\n", debugstr_a(cwd), GetLastError());
+    ret = SetCurrentDirectoryA(cwd);
+    ok(ret, "Failed to cd to %s, error %lu.\n", debugstr_a(cwd), GetLastError());
+
+    create_file("winetest.inf", inf_data1);
+    create_file("winetest_src.txt", "data1");
+    create_file("winetest_unused.txt", "unused");
+    create_file("winetest_ignored2.txt", "ignored2");
+    create_directory("subdir");
+    create_directory("sister");
+    create_file("subdir\\winetest_child.txt", "child");
+    create_file("sister\\winetest_niece.txt", "niece");
+    create_file("winetest_cab.txt", "cab");
+    create_cab_file("winetest_cab.cab", "winetest_cab.txt");
+    create_file("winetest_coinst.txt", "coinst");
+
+    /* If the catalog doesn't exist, or any files are missing from it,
+     * validation fails and we get a UI dialog. */
+
+    catalog = CryptCATOpen((WCHAR *)L"winetest.cat", CRYPTCAT_OPEN_CREATENEW, 0, CRYPTCAT_VERSION_1, 0);
+    ok(catalog != INVALID_HANDLE_VALUE, "Failed to create catalog, error %#lx\n", GetLastError());
+
+    add_file_to_catalog(catalog, L"winetest.inf");
+    add_file_to_catalog(catalog, L"winetest_src.txt");
+    add_file_to_catalog(catalog, L"subdir\\winetest_child.txt");
+    add_file_to_catalog(catalog, L"sister\\winetest_niece.txt");
+    add_file_to_catalog(catalog, L"winetest_cab.txt");
+    add_file_to_catalog(catalog, L"winetest_coinst.txt");
+    add_file_to_catalog(catalog, L"winetest_unused.txt");
+    add_file_to_catalog(catalog, L"winetest_ignored2.txt");
+
+    ret = CryptCATPersistStore(catalog);
+    todo_wine ok(ret, "Failed to write catalog, error %lu\n", GetLastError());
+
+    ret = CryptCATClose(catalog);
+    ok(ret, "Failed to close catalog, error %lu\n", GetLastError());
+
+    testsign_sign(ctx, L"winetest.cat");
+
+    /* Delete one of the files referenced in the catalog, to show that files
+     * present in the catalog and not used in the INF don't need to be present. */
+    delete_file("winetest_unused.txt");
+    /* Also delete the cab source file. */
+    delete_file("winetest_cab.txt");
+
+    size = ARRAY_SIZE(dest);
+    memset(dest, 0xcc, sizeof(dest));
+    ret = pDriverStoreFindDriverPackageA("winetest.inf", 0, 0, system_info.wProcessorArchitecture, 0, dest, &size);
+    ok(ret == HRESULT_FROM_WIN32(ERROR_NOT_FOUND), "Got %#x.\n", ret);
+    ok(!dest[0], "Got %s.\n", debugstr_a(dest));
+    todo_wine ok(!size, "Got size %lu.\n", size);
+
+    /* Windows 7 allows relative paths. Windows 8+ do not.
+     * However, all versions seem to accept relative paths in
+     * DriverStoreFindDriverPackage(). */
+
+    sprintf(inf_path, "%s\\winetest.inf", cwd);
+
+    size = ARRAY_SIZE(dest);
+    memset(dest, 0xcc, sizeof(dest));
+    ret = pDriverStoreAddDriverPackageA(inf_path, 0, 0, system_info.wProcessorArchitecture, dest, &size);
+    ok(!ret, "Got %#x.\n", ret);
+    ok(size > ARRAY_SIZE(repository_dir), "Got size %lu.\n", size);
+    ok(size == strlen(dest) + 1, "Expected size %Iu, got %lu.\n", strlen(dest) + 1, size);
+    ok(!memicmp(dest, repository_dir, strlen(repository_dir)), "Got path %s.\n", debugstr_a(dest));
+    ok(!strcmp(dest + strlen(dest) - 13, "\\winetest.inf"), "Got path %s.\n", debugstr_a(dest));
+
+    strcpy(orig_dest, dest);
+
+    /* Add again. */
+    size = ARRAY_SIZE(dest);
+    memset(dest, 0xcc, sizeof(dest));
+    ret = pDriverStoreAddDriverPackageA(inf_path, 0, 0, system_info.wProcessorArchitecture, dest, &size);
+    ok(!ret, "Got %#x.\n", ret);
+    ok(!strcmp(dest, orig_dest), "Expected %s, got %s.\n", debugstr_a(orig_dest), debugstr_a(dest));
+    ok(size == strlen(dest) + 1, "Expected size %Iu, got %lu.\n", strlen(dest) + 1, size);
+
+    size = ARRAY_SIZE(dest);
+    memset(dest, 0xcc, sizeof(dest));
+    ret = pDriverStoreFindDriverPackageA("winetest.inf", 0, 0, system_info.wProcessorArchitecture, 0, dest, &size);
+    ok(!ret, "Got %#x.\n", ret);
+    ok(!strcmp(dest, orig_dest), "Expected %s, got %s.\n", debugstr_a(orig_dest), debugstr_a(dest));
+    ok(size == strlen(dest) + 1, "Expected size %Iu, got %lu.\n", strlen(dest) + 1, size);
+
+    /* Test the length parameter.
+     * Anything less than MAX_PATH returns E_INVALIDARG.
+     * It's not clear what happens if the returned path is longer than MAX_PATH. */
+
+    size = MAX_PATH - 1;
+    memset(dest, 0xcc, sizeof(dest));
+    ret = pDriverStoreFindDriverPackageA("winetest.inf", 0, 0, system_info.wProcessorArchitecture, 0, dest, &size);
+    ok(ret == E_INVALIDARG, "Got %#x.\n", ret);
+    ok(dest[0] == (char)0xcc, "Got %s.\n", debugstr_a(dest));
+    ok(size == MAX_PATH - 1, "Expected size %Iu, got %lu.\n", strlen(orig_dest) + 1, size);
+
+    size = 0;
+    ret = pDriverStoreFindDriverPackageA("winetest.inf", 0, 0, system_info.wProcessorArchitecture, 0, dest, &size);
+    ok(ret == E_INVALIDARG, "Got %#x.\n", ret);
+    ok(!size, "Got size %lu.\n", size);
+
+    /* Adding to the store also copies to the C:\windows\inf dir. */
+    ret = SetupCopyOEMInfA(orig_dest, NULL, 0, SP_COPY_REPLACEONLY, NULL, 0, NULL, NULL);
+    ok(ret == TRUE, "Got %#x.\n", ret);
+
+    /* The catalog, and files referenced through a CopyFiles section,
+     * are also present. */
+    strcpy(dest, orig_dest);
+    *strrchr(dest, '\\') = 0;
+    check_driver_store_file_exists(dest, "winetest.cat", TRUE);
+    check_driver_store_file_exists(dest, "winetest_src.txt", TRUE);
+    check_driver_store_file_exists(dest, "subdir/winetest_child.txt", TRUE);
+    check_driver_store_file_exists(dest, "sister/winetest_niece.txt", TRUE);
+    check_driver_store_file_exists(dest, "winetest_cab.txt", TRUE);
+    check_driver_store_file_exists(dest, "winetest_coinst.txt", TRUE);
+    check_driver_store_file_exists(dest, "winetest_dst.txt", FALSE);
+    check_driver_store_file_exists(dest, "winetest_ignored2.txt", FALSE);
+    check_driver_store_file_exists(dest, "winetest_cab.cab", FALSE);
+
+    /* The inf is installed to C:\windows\inf, but the driver isn't installed
+     * for existing devices that match, and hence files aren't installed to
+     * their final destination. */
+
+    ret = SetupDiBuildDriverInfoList(set, &device, SPDIT_COMPATDRIVER);
+    ok(ret, "Got error %#lx.\n", GetLastError());
+
+    ret = SetupDiSelectBestCompatDrv(set, &device);
+    ok(ret, "Got error %#lx.\n", GetLastError());
+
+    ret = SetupDiGetSelectedDriverA(set, &device, &driver);
+    ok(driver.DriverType == SPDIT_COMPATDRIVER, "Got wrong type %#lx.\n", driver.DriverType);
+    ok(!strcmp(driver.Description, "desc1"), "Got wrong description '%s'.\n", driver.Description);
+    ok(!strcmp(driver.MfgName, "mfg1"), "Got wrong manufacturer '%s'.\n", driver.MfgName);
+    ok(!strcmp(driver.ProviderName, ""), "Got wrong provider '%s'.\n", driver.ProviderName);
+
+    ret = SetupDiGetDeviceRegistryPropertyA(set, &device, SPDRP_DRIVER, NULL,
+            (BYTE *)driver_path, sizeof(driver_path), NULL);
+    ok(!ret, "Expected failure.\n");
+    ok(GetLastError() == ERROR_INVALID_DATA, "Got unexpected error %#lx.\n", GetLastError());
+
+    ok(!file_exists("C:\\windows\\system32\\winetest_dst.txt"), "Expected dst to not exist.\n");
+
+    /* The apparent point of the driver store is to provide a source directory
+     * for INF files that doesn't require the original install medium.
+     * Hence, test that we can move the original files out of place and then
+     * trigger device installation.
+     *
+     * (Of course, it would have been easier just to install the driver files
+     * directly, even if the corresponding device doesn't exist yet, but that's
+     * not the model that Microsoft chose, for some reason. */
+
+    ret = MoveFileExA("winetest.cat", "not_winetest.cat", 0);
+    ok(ret, "Got error %#lx.\n", GetLastError());
+    ret = MoveFileExA("winetest_src.txt", "not_winetest_src.txt", 0);
+    ok(ret, "Got error %#lx.\n", GetLastError());
+    ret = MoveFileExA("winetest_cab.cab", "not_winetest_cab.cab", 0);
+    ok(ret, "Got error %#lx.\n", GetLastError());
+    ret = MoveFileExA("sister", "not_sister", 0);
+    ok(ret, "Got error %#lx.\n", GetLastError());
+
+    /* Also call DriverStoreFindDriverPackageA() again here, to prove that it
+     * only needs to compare the inf, not any of the other files. */
+    size = ARRAY_SIZE(dest);
+    memset(dest, 0xcc, sizeof(dest));
+    ret = pDriverStoreFindDriverPackageA("winetest.inf", 0, 0, system_info.wProcessorArchitecture, 0, dest, &size);
+    ok(!ret || ret == HRESULT_FROM_WIN32(ERROR_NOT_FOUND) /* Win < 8 */, "Got %#x.\n", ret);
+    if (!ret)
+    {
+        ok(!strcmp(dest, orig_dest), "Expected %s, got %s.\n", debugstr_a(orig_dest), debugstr_a(dest));
+        ok(size == strlen(dest) + 1, "Expected size %Iu, got %lu.\n", strlen(dest) + 1, size);
+    }
+
+    ret = MoveFileExA("winetest.inf", "not_winetest.inf", 0);
+    ok(ret, "Got error %#lx.\n", GetLastError());
+
+    /* However, the inf name does need to match. */
+    size = ARRAY_SIZE(dest);
+    memset(dest, 0xcc, sizeof(dest));
+    ret = pDriverStoreFindDriverPackageA("not_winetest.inf", 0, 0, system_info.wProcessorArchitecture, 0, dest, &size);
+    ok(ret == HRESULT_FROM_WIN32(ERROR_NOT_FOUND), "Got %#x.\n", ret);
+    ok(!dest[0], "Got %s.\n", debugstr_a(dest));
+    todo_wine ok(!size, "Got size %lu.\n", size);
+
+    ret = SetupDiCallClassInstaller(DIF_INSTALLDEVICEFILES, set, &device);
+    ok(ret, "Got error %#lx.\n", GetLastError());
+
+    delete_file("C:\\windows\\system32\\winetest_dst.txt");
+    delete_file("C:\\windows\\system32\\winetest_child.txt");
+    delete_file("C:\\windows\\system32\\winetest_niece.txt");
+    delete_file("C:\\windows\\system32\\winetest_cab.txt");
+    todo_wine delete_file("C:\\windows\\system32\\winetest_coinst.txt");
+
+    ret = MoveFileExA("not_winetest.inf", "winetest.inf", 0);
+    ok(ret, "Got error %#lx.\n", GetLastError());
+    ret = MoveFileExA("not_winetest.cat", "winetest.cat", 0);
+    ok(ret, "Got error %#lx.\n", GetLastError());
+    ret = MoveFileExA("not_winetest_src.txt", "winetest_src.txt", 0);
+    ok(ret, "Got error %#lx.\n", GetLastError());
+    ret = MoveFileExA("not_winetest_cab.cab", "winetest_cab.cab", 0);
+    ok(ret, "Got error %#lx.\n", GetLastError());
+    ret = MoveFileExA("not_sister", "sister", 0);
+    ok(ret, "Got error %#lx.\n", GetLastError());
+
+    ret = SetupDiCallClassInstaller(DIF_REMOVE, set, &device);
+    ok(ret, "Got error %#lx.\n", GetLastError());
+
+    ret = pDriverStoreDeleteDriverPackageA(orig_dest, 0, 0);
+    ok(!ret, "Got %#x.\n", ret);
+
+    ret = SetupCopyOEMInfA(orig_dest, NULL, 0, SP_COPY_REPLACEONLY, NULL, 0, NULL, NULL);
+    ok(!ret, "Got %#x.\n", ret);
+    todo_wine ok(GetLastError() == ERROR_FILE_NOT_FOUND, "Got error %lu.\n", GetLastError());
+
+    /* All files reachable through CopyFiles have to be present. If any are
+     * missing, DriverStoreAddDriverPackage() fails with
+     * HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND).
+     *
+     * On Windows 8, this also seems to result in an internal leak: attempting
+     * to delete the source directory afterward ("cwd") fails with
+     * ERROR_SHARING_VIOLATION, even though FindFirstFile() confirms that it's
+     * empty. */
+
+    delete_file("subdir\\winetest_child.txt");
+    delete_file("sister\\winetest_niece.txt");
+    delete_file("winetest_cab.cab");
+    delete_file("winetest_coinst.txt");
+    delete_file("winetest_ignored2.txt");
+    delete_file("winetest_src.txt");
+    delete_file("winetest.cat");
+    delete_file("winetest.inf");
+    delete_directory("subdir");
+    delete_directory("sister");
+
+    SetCurrentDirectoryA(orig_cwd);
+    ret = RemoveDirectoryA(cwd);
+    ok(ret, "Failed to delete %s, error %lu.\n", cwd, GetLastError());
+
+    ret = SetupDiDestroyDeviceInfoList(set);
+    ok(ret, "Failed to destroy device list.\n");
+}
+
+static void test_device_enum(void)
+{
+    SP_DEVINFO_DATA devinfodata;
+    LARGE_INTEGER filetime;
+    DEVPROPTYPE proptype;
+    HDEVINFO set;
+    WCHAR buf[2048];
+    BOOL next, ret;
+    DWORD i, len;
+
+    set = SetupDiGetClassDevsExW(&GUID_DEVCLASS_DISPLAY, NULL, 0, DIGCF_PRESENT, 0, NULL, 0);
+    ok(set != INVALID_HANDLE_VALUE, "SetupDiGetClassDevsExW failed with %lu.\n", GetLastError());
+
+    ZeroMemory(&devinfodata, sizeof(SP_DEVINFO_DATA));
+    devinfodata.cbSize = sizeof(SP_DEVINFO_DATA);
+
+    i = 0;
+    next = SetupDiEnumDeviceInfo(set, i, &devinfodata);
+    ok(next, "Failed getting at least one element from SetupDiEnumDeviceInfo with error %lu.\n", GetLastError());
+
+    while (next)
+    {
+        ZeroMemory(buf, sizeof(buf));
+        len = 0;
+        proptype = DEVPROP_TYPE_EMPTY;
+        ret = SetupDiGetDevicePropertyW(set, &devinfodata, &DEVPKEY_Device_DriverDate,  &proptype, (BYTE *)&filetime, sizeof(LARGE_INTEGER), &len, 0);
+        todo_wine ok(ret, "getting DEVPKEY_Device_DriverDate failed with error %lu.\n", GetLastError());
+        todo_wine ok(proptype == DEVPROP_TYPE_FILETIME, "got unexpected proptype %#lx.\n", proptype);
+        todo_wine ok(len == sizeof(LARGE_INTEGER), "got unexpected length.\n");
+        todo_wine ok((filetime.QuadPart % 864000000000) == 0, "returned value should not contain a time.\n");
+
+        ZeroMemory(buf, sizeof(buf));
+        len = 0;
+        proptype = DEVPROP_TYPE_EMPTY;
+        ret = SetupDiGetDevicePropertyW(set, &devinfodata, &DEVPKEY_Device_DriverVersion,  &proptype, (BYTE *)buf, sizeof(buf), &len, 0);
+        todo_wine ok(ret, "getting DEVPKEY_Device_DriverVersion failed with error %lu.\n", GetLastError());
+        todo_wine ok(proptype == DEVPROP_TYPE_STRING, "got unexpected proptype %#lx.\n", proptype);
+        todo_wine ok(len > 0, "got unexpected length.\n");
+
+        ZeroMemory(buf, sizeof(buf));
+        len = 0;
+        proptype = DEVPROP_TYPE_EMPTY;
+        ret = SetupDiGetDevicePropertyW(set, &devinfodata, &DEVPKEY_Device_DriverDesc,  &proptype, (BYTE *)buf, sizeof(buf), &len, 0);
+        todo_wine ok(ret, "getting DEVPKEY_Device_DriverDesc failed with error %lu.\n", GetLastError());
+        todo_wine ok(proptype == DEVPROP_TYPE_STRING, "got unexpected proptype %#lx.\n", proptype);
+        todo_wine ok(len > 0, "got unexpected length.\n");
+
+        ZeroMemory(buf, sizeof(buf));
+        len = 0;
+        proptype = DEVPROP_TYPE_EMPTY;
+        ret = SetupDiGetDevicePropertyW(set, &devinfodata, &DEVPKEY_Device_DriverProvider,  &proptype, (BYTE *)buf, sizeof(buf), &len, 0);
+        todo_wine ok(ret, "getting DEVPKEY_Device_DriverProvider failed with error %lu.\n", GetLastError());
+        todo_wine ok(proptype == DEVPROP_TYPE_STRING, "got unexpected proptype %#lx.\n", proptype);
+        todo_wine ok(len > 0, "got unexpected length.\n");
+
+        ZeroMemory(buf, sizeof(buf));
+        len = 0;
+        proptype = DEVPROP_TYPE_EMPTY;
+        ret = SetupDiGetDevicePropertyW(set, &devinfodata, &DEVPKEY_Device_DriverCoInstallers,  &proptype, (BYTE *)buf, sizeof(buf), &len, 0);
+        ok(!ret, "getting DEVPKEY_Device_DriverCoInstallers failed with error %lu.\n", GetLastError());
+        ok(proptype == DEVPROP_TYPE_EMPTY, "got unexpected proptype %#lx.\n", proptype);
+        ok(len == 0, "got unexpected length.\n");
+
+        i++;
+        next = SetupDiEnumDeviceInfo(set, i, &devinfodata);
+    }
+
+    if (set)
+        SetupDiDestroyDeviceInfoList(set);
+}
+
 START_TEST(devinst)
 {
     static BOOL (WINAPI *pIsWow64Process)(HANDLE, BOOL *);
+    HMODULE module = GetModuleHandleA("setupapi.dll");
+    struct testsign_context ctx;
     HKEY hkey;
+
+    pDriverStoreAddDriverPackageA = (void *)GetProcAddress(module, "DriverStoreAddDriverPackageA");
+    pDriverStoreFindDriverPackageA = (void *)GetProcAddress(module, "DriverStoreFindDriverPackageA");
+    pDriverStoreDeleteDriverPackageA = (void *)GetProcAddress(module, "DriverStoreDeleteDriverPackageA");
+    pSetupQueryInfOriginalFileInformationA = (void *)GetProcAddress(module, "SetupQueryInfOriginalFileInformationA");
 
     test_get_actual_section();
 
@@ -3402,8 +5358,19 @@ START_TEST(devinst)
     test_devnode();
     test_device_interface_key();
     test_open_device_interface_key();
+    test_device_interface_properties();
     test_device_install_params();
     test_driver_list();
     test_call_class_installer();
     test_get_class_devs();
+    test_SetupDiOpenDeviceInterface();
+    test_device_enum();
+
+    if (!testsign_create_cert(&ctx))
+        return;
+
+    test_copy_oem_inf(&ctx);
+    test_driver_store(&ctx);
+
+    testsign_cleanup(&ctx);
 }

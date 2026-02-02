@@ -58,9 +58,9 @@ typedef struct tagDC
     DC_ATTR     *attr;             /* DC attributes accessible by client */
     struct tagDC *saved_dc;
     struct dce  *dce;              /* associated dce, if any */
-    BOOL         bounds_enabled:1; /* bounds tracking is enabled */
-    BOOL         path_open:1;      /* path is currently open (only for saved DCs) */
-    BOOL         is_display:1;     /* DC is for display device */
+    UINT         bounds_enabled:1; /* bounds tracking is enabled */
+    UINT         path_open:1;      /* path is currently open (only for saved DCs) */
+    UINT         is_display:1;     /* DC is for display device */
 
     RECT         device_rect;      /* rectangle for the whole device */
     int          pixel_format;     /* pixel format (for memory DCs) */
@@ -89,6 +89,8 @@ typedef struct tagDC
     XFORM         xformVport2World;  /* Inverse of the above transformation */
     BOOL          vport2WorldValid;  /* Is xformVport2World valid? */
     RECT          bounds;            /* Current bounding rect */
+    UINT          dpi_from;
+    UINT          dpi_to;
 } DC;
 
 /* dce flags */
@@ -162,8 +164,8 @@ extern void free_brush_pattern( struct brush_pattern *pattern );
 /* clipping.c */
 extern BOOL clip_device_rect( DC *dc, RECT *dst, const RECT *src );
 extern BOOL clip_visrect( DC *dc, RECT *dst, const RECT *src );
-extern void set_visible_region( HDC hdc, HRGN hrgn, const RECT *vis_rect,
-                                const RECT *device_rect, struct window_surface *surface );
+extern void set_visible_region( HDC hdc, HRGN hrgn, const RECT *vis_rect, const RECT *device_rect,
+                                struct window_surface *surface, UINT dpi_from, UINT dpi_to );
 extern void update_dc_clipping( DC * dc );
 
 /* Return the total DC region (if any) */
@@ -227,6 +229,7 @@ extern const struct gdi_dc_funcs dib_driver;
 extern const struct gdi_dc_funcs path_driver;
 extern const struct gdi_dc_funcs font_driver;
 extern const struct gdi_dc_funcs *get_display_driver(void);
+extern void init_display_driver(void);
 
 /* font.c */
 
@@ -280,11 +283,11 @@ struct gdi_font
     UINT                   ntmAvgWidth;
     UINT                   aa_flags;
     ULONG                  ttc_item_offset;    /* 0 if font is not a part of TrueType collection */
-    BOOL                   can_use_bitmap : 1;
-    BOOL                   fake_italic : 1;
-    BOOL                   fake_bold : 1;
-    BOOL                   scalable : 1;
-    BOOL                   use_logfont_name : 1;
+    UINT                   can_use_bitmap : 1;
+    UINT                   fake_italic : 1;
+    UINT                   fake_bold : 1;
+    UINT                   scalable : 1;
+    UINT                   use_logfont_name : 1;
     struct gdi_font       *base_font;
     void                  *gsub_table;
     void                  *vert_feature;

@@ -37,7 +37,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include <stdarg.h>
 #include "windef.h"
 #include "winbase.h"
 #include "winternl.h"
@@ -49,17 +48,19 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(dbghelp_msc);
 
+static const GUID null_guid;
+
 struct pdb_stream_name
 {
     const char* name;
     unsigned    index;
 };
 
+enum pdb_kind {PDB_JG, PDB_DS};
+
 struct pdb_file_info
 {
     enum pdb_kind               kind;
-    DWORD                       age;
-    HANDLE                      hMap;
     const char*                 image;
     struct pdb_stream_name*     stream_dict;
     unsigned                    fpoext_stream;
@@ -67,12 +68,10 @@ struct pdb_file_info
     {
         struct
         {
-            DWORD               timestamp;
             struct PDB_JG_TOC*  toc;
         } jg;
         struct
         {
-            GUID                guid;
             struct PDB_DS_TOC*  toc;
         } ds;
     } u;
@@ -80,7 +79,7 @@ struct pdb_file_info
 
 /* FIXME: don't make it static */
 #define CV_MAX_MODULES          32
-struct pdb_module_info
+struct old_pdb_module_info
 {
     unsigned                    used_subfiles;
     struct pdb_file_info        pdb_files[CV_MAX_MODULES];
@@ -136,7 +135,7 @@ struct cv_defined_module
     BOOL                allowed;
     unsigned int        first_type_index;
     unsigned int        last_type_index;
-    struct symt**       defined_types;
+    struct symt**       defined_types; /* when old reader */
 };
 /* FIXME: don't make it static */
 #define CV_MAX_MODULES          32
@@ -179,6 +178,9 @@ static void codeview_init_basic_types(struct module* module)
     cv_basic_types[T_UINT4]  = &symt_get_basic(btUInt,   4)->symt; /* UINT4 */
     cv_basic_types[T_INT8]   = &symt_get_basic(btInt,    8)->symt; /* INT8 */
     cv_basic_types[T_UINT8]  = &symt_get_basic(btUInt,   8)->symt; /* UINT8 */
+    cv_basic_types[T_OCT]    = &symt_get_basic(btInt,    8)->symt; /* INT8 */
+    cv_basic_types[T_UOCT]   = &symt_get_basic(btUInt,   8)->symt; /* UINT8 */
+
     cv_basic_types[T_HRESULT]= &symt_get_basic(btUInt,   4)->symt; /* HRESULT */
 
     cv_basic_types[T_32PVOID]   = &symt_new_pointer(module, cv_basic_types[T_VOID], 4)->symt;
@@ -186,10 +188,12 @@ static void codeview_init_basic_types(struct module* module)
     cv_basic_types[T_32PSHORT]  = &symt_new_pointer(module, cv_basic_types[T_SHORT], 4)->symt;
     cv_basic_types[T_32PLONG]   = &symt_new_pointer(module, cv_basic_types[T_LONG], 4)->symt;
     cv_basic_types[T_32PQUAD]   = &symt_new_pointer(module, cv_basic_types[T_QUAD], 4)->symt;
+    cv_basic_types[T_32POCT]    = &symt_new_pointer(module, cv_basic_types[T_OCT], 4)->symt;
     cv_basic_types[T_32PUCHAR]  = &symt_new_pointer(module, cv_basic_types[T_UCHAR], 4)->symt;
     cv_basic_types[T_32PUSHORT] = &symt_new_pointer(module, cv_basic_types[T_USHORT], 4)->symt;
     cv_basic_types[T_32PULONG]  = &symt_new_pointer(module, cv_basic_types[T_ULONG], 4)->symt;
     cv_basic_types[T_32PUQUAD]  = &symt_new_pointer(module, cv_basic_types[T_UQUAD], 4)->symt;
+    cv_basic_types[T_32PUOCT]   = &symt_new_pointer(module, cv_basic_types[T_UOCT], 4)->symt;
     cv_basic_types[T_32PBOOL08] = &symt_new_pointer(module, cv_basic_types[T_BOOL08], 4)->symt;
     cv_basic_types[T_32PBOOL16] = &symt_new_pointer(module, cv_basic_types[T_BOOL16], 4)->symt;
     cv_basic_types[T_32PBOOL32] = &symt_new_pointer(module, cv_basic_types[T_BOOL32], 4)->symt;
@@ -215,10 +219,12 @@ static void codeview_init_basic_types(struct module* module)
     cv_basic_types[T_64PSHORT]  = &symt_new_pointer(module, cv_basic_types[T_SHORT], 8)->symt;
     cv_basic_types[T_64PLONG]   = &symt_new_pointer(module, cv_basic_types[T_LONG], 8)->symt;
     cv_basic_types[T_64PQUAD]   = &symt_new_pointer(module, cv_basic_types[T_QUAD], 8)->symt;
+    cv_basic_types[T_64POCT]    = &symt_new_pointer(module, cv_basic_types[T_OCT], 8)->symt;
     cv_basic_types[T_64PUCHAR]  = &symt_new_pointer(module, cv_basic_types[T_UCHAR], 8)->symt;
     cv_basic_types[T_64PUSHORT] = &symt_new_pointer(module, cv_basic_types[T_USHORT], 8)->symt;
     cv_basic_types[T_64PULONG]  = &symt_new_pointer(module, cv_basic_types[T_ULONG], 8)->symt;
     cv_basic_types[T_64PUQUAD]  = &symt_new_pointer(module, cv_basic_types[T_UQUAD], 8)->symt;
+    cv_basic_types[T_64PUOCT]   = &symt_new_pointer(module, cv_basic_types[T_UOCT], 8)->symt;
     cv_basic_types[T_64PBOOL08] = &symt_new_pointer(module, cv_basic_types[T_BOOL08], 8)->symt;
     cv_basic_types[T_64PBOOL16] = &symt_new_pointer(module, cv_basic_types[T_BOOL16], 8)->symt;
     cv_basic_types[T_64PBOOL32] = &symt_new_pointer(module, cv_basic_types[T_BOOL32], 8)->symt;
@@ -244,10 +250,12 @@ static void codeview_init_basic_types(struct module* module)
     cv_basic_types[T_PSHORT]  = &symt_new_pointer(module, cv_basic_types[T_SHORT],  ptrsz)->symt;
     cv_basic_types[T_PLONG]   = &symt_new_pointer(module, cv_basic_types[T_LONG],   ptrsz)->symt;
     cv_basic_types[T_PQUAD]   = &symt_new_pointer(module, cv_basic_types[T_QUAD],   ptrsz)->symt;
+    cv_basic_types[T_POCT]    = &symt_new_pointer(module, cv_basic_types[T_OCT],  ptrsz)->symt;
     cv_basic_types[T_PUCHAR]  = &symt_new_pointer(module, cv_basic_types[T_UCHAR],  ptrsz)->symt;
     cv_basic_types[T_PUSHORT] = &symt_new_pointer(module, cv_basic_types[T_USHORT], ptrsz)->symt;
     cv_basic_types[T_PULONG]  = &symt_new_pointer(module, cv_basic_types[T_ULONG],  ptrsz)->symt;
     cv_basic_types[T_PUQUAD]  = &symt_new_pointer(module, cv_basic_types[T_UQUAD],  ptrsz)->symt;
+    cv_basic_types[T_PUOCT]   = &symt_new_pointer(module, cv_basic_types[T_UOCT],  ptrsz)->symt;
     cv_basic_types[T_PBOOL08] = &symt_new_pointer(module, cv_basic_types[T_BOOL08], ptrsz)->symt;
     cv_basic_types[T_PBOOL16] = &symt_new_pointer(module, cv_basic_types[T_BOOL16], ptrsz)->symt;
     cv_basic_types[T_PBOOL32] = &symt_new_pointer(module, cv_basic_types[T_BOOL32], ptrsz)->symt;
@@ -268,18 +276,19 @@ static void codeview_init_basic_types(struct module* module)
     cv_basic_types[T_PUINT8]  = &symt_new_pointer(module, cv_basic_types[T_UINT8],  ptrsz)->symt;
 }
 
-static int leaf_as_variant(VARIANT* v, const unsigned short int* leaf)
+static int leaf_as_variant(VARIANT *v, const unsigned char *leaf)
 {
-    unsigned short int type = *leaf++;
+    unsigned short int type = *(const unsigned short *)leaf;
     int length = 2;
 
     if (type < LF_NUMERIC)
     {
-        V_VT(v) = VT_UINT;
-        V_UINT(v) = type;
+        V_VT(v) = VT_I2;
+        V_I2(v) = type;
     }
     else
     {
+        leaf += length;
         switch (type)
         {
         case LF_CHAR:
@@ -297,7 +306,7 @@ static int leaf_as_variant(VARIANT* v, const unsigned short int* leaf)
         case LF_USHORT:
             length += 2;
             V_VT(v) = VT_UI2;
-            V_UI2(v) = *leaf;
+            V_UI2(v) = *(const unsigned short*)leaf;
             break;
 
         case LF_LONG:
@@ -393,10 +402,12 @@ static int leaf_as_variant(VARIANT* v, const unsigned short int* leaf)
     return length;
 }
 
-static int numeric_leaf(int* value, const unsigned short int* leaf)
+#define numeric_leaf(v,l) _numeric_leaf(__LINE__,v,l)
+static int _numeric_leaf(unsigned line, int *value, const unsigned char *leaf)
 {
-    unsigned short int type = *leaf++;
+    unsigned short int type = *(const unsigned short int *)leaf;
     int length = 2;
+    leaf += length;
 
     if (type < LF_NUMERIC)
     {
@@ -418,7 +429,7 @@ static int numeric_leaf(int* value, const unsigned short int* leaf)
 
         case LF_USHORT:
             length += 2;
-            *value = *leaf;
+            *value = *(const unsigned short*)leaf;
             break;
 
         case LF_LONG:
@@ -433,7 +444,7 @@ static int numeric_leaf(int* value, const unsigned short int* leaf)
 
         case LF_QUADWORD:
         case LF_UQUADWORD:
-	    FIXME("Unsupported numeric leaf type %04x\n", type);
+	    FIXME("Unsupported numeric leaf type %04x from %u (%I64x)\n", type, line, *(ULONG64*)leaf);
             length += 8;
             *value = 0;    /* FIXME */
             break;
@@ -575,9 +586,10 @@ static inline const void* codeview_jump_to_type(const struct codeview_type_parse
         ctp->table + ctp->offset[idx - ctp->header.first_index] : NULL;
 }
 
-static int codeview_add_type(unsigned int typeno, struct symt* dt)
+static int codeview_add_type(unsigned int typeno, struct symt* dt, unsigned offset)
 {
     unsigned idx;
+
     if (!cv_current_module)
     {
         FIXME("Adding %x to non allowed module\n", typeno);
@@ -593,6 +605,7 @@ static int codeview_add_type(unsigned int typeno, struct symt* dt)
         return FALSE;
     }
     idx = typeno - cv_current_module->first_type_index;
+
     if (cv_current_module->defined_types[idx])
     {
         if (cv_current_module->defined_types[idx] != dt)
@@ -635,6 +648,16 @@ static struct symt* codeview_fetch_type(struct codeview_type_parse* ctp,
         symt = codeview_parse_one_type(ctp, typeno, p);
     if (!symt) FIXME("Couldn't load type %x\n", typeno);
     return symt;
+}
+
+static symref_t codeview_fetch_symref(struct codeview_type_parse* ctp, unsigned typeno)
+{
+    return symt_ptr_to_symref(codeview_fetch_type(ctp, typeno));
+}
+
+static symref_t codeview_get_symref(struct module *module, unsigned typeno)
+{
+    return symt_ptr_to_symref(codeview_get_type(typeno, TRUE));
 }
 
 static UINT32 codeview_compute_hash(const char* ptr, unsigned len)
@@ -721,31 +744,31 @@ static BOOL codeview_type_extract_name(const union codeview_type* cvtype,
     {
     case LF_STRUCTURE_V1:
     case LF_CLASS_V1:
-        leaf_len = numeric_leaf(&value, &cvtype->struct_v1.structlen);
-        p_name = (const struct p_string*)((const unsigned char*)&cvtype->struct_v1.structlen + leaf_len);
+        leaf_len = numeric_leaf(&value, cvtype->struct_v1.data);
+        p_name = (const struct p_string*)&cvtype->struct_v1.data[leaf_len];
         break;
     case LF_STRUCTURE_V2:
     case LF_CLASS_V2:
-        leaf_len = numeric_leaf(&value, &cvtype->struct_v2.structlen);
-        p_name = (const struct p_string*)((const unsigned char*)&cvtype->struct_v2.structlen + leaf_len);
+        leaf_len = numeric_leaf(&value, cvtype->struct_v2.data);
+        p_name = (const struct p_string*)&cvtype->struct_v2.data[leaf_len];
         break;
     case LF_STRUCTURE_V3:
     case LF_CLASS_V3:
-        leaf_len = numeric_leaf(&value, &cvtype->struct_v3.structlen);
-        c_name = (const char*)&cvtype->struct_v3.structlen + leaf_len;
+        leaf_len = numeric_leaf(&value, cvtype->struct_v3.data);
+        c_name = (const char*)&cvtype->struct_v3.data[leaf_len];
         decorated = cvtype->struct_v3.property.has_decorated_name;
         break;
     case LF_UNION_V1:
-        leaf_len = numeric_leaf(&value, &cvtype->union_v1.un_len);
-        p_name = (const struct p_string*)((const unsigned char*)&cvtype->union_v1.un_len + leaf_len);
+        leaf_len = numeric_leaf(&value, cvtype->union_v1.data);
+        p_name = (const struct p_string*)&cvtype->union_v1.data[leaf_len];
         break;
     case LF_UNION_V2:
-        leaf_len = numeric_leaf(&value, &cvtype->union_v2.un_len);
-        p_name = (const struct p_string*)((const unsigned char*)&cvtype->union_v2.un_len + leaf_len);
+        leaf_len = numeric_leaf(&value, cvtype->union_v2.data);
+        p_name = (const struct p_string*)&cvtype->union_v2.data[leaf_len];
         break;
     case LF_UNION_V3:
-        leaf_len = numeric_leaf(&value, &cvtype->union_v3.un_len);
-        c_name = (const char*)&cvtype->union_v3.un_len + leaf_len;
+        leaf_len = numeric_leaf(&value, cvtype->union_v3.data);
+        c_name = (const char*)&cvtype->union_v3.data[leaf_len];
         decorated = cvtype->union_v3.property.has_decorated_name;
         break;
     case LF_ENUM_V1:
@@ -756,7 +779,7 @@ static BOOL codeview_type_extract_name(const union codeview_type* cvtype,
         break;
     case LF_ENUM_V3:
         c_name = cvtype->enumeration_v3.name;
-        decorated = cvtype->union_v3.property.has_decorated_name;
+        decorated = cvtype->enumeration_v3.property.has_decorated_name;
         break;
     default:
         return FALSE;
@@ -820,12 +843,13 @@ static BOOL codeview_resolve_forward_type(struct codeview_type_parse* ctp, const
                 ((decoratedref && decorateddecl && !strcmp(decoratedref, decorateddecl)) ||
                  (!decoratedref && !decorateddecl && lenref == lendecl && !memcmp(nameref, namedecl, lenref))))
             {
-                TRACE("mapping forward type %.*s (%s) %x into %x\n", lenref, nameref, debugstr_a(decoratedref), reftype, hl->id);
+                TRACE("mapping forward type %s (%s) %x into %x\n", debugstr_an(nameref, lenref), debugstr_a(decoratedref), reftype, hl->id);
                 *impl_type = hl->id;
                 return TRUE;
             }
         }
     }
+    WARN("Couldn't resolve forward declaration for %s\n", debugstr_an(nameref, lenref));
     return FALSE;
 }
 
@@ -887,19 +911,21 @@ static BOOL codeview_add_type_enum_field_list(struct codeview_type_parse* ctp,
         {
         case LF_ENUMERATE_V1:
         {
-            int value, vlen = numeric_leaf(&value, &type->enumerate_v1.value);
-            const struct p_string* p_name = (const struct p_string*)((const unsigned char*)&type->enumerate_v1.value + vlen);
+            VARIANT v;
+            int vlen = leaf_as_variant(&v, type->enumerate_v1.data);
+            const struct p_string* p_name = (const struct p_string*)&type->enumerate_v1.data[vlen];
 
-            symt_add_enum_element(ctp->module, symt, terminate_string(p_name), value);
+            symt_add_enum_element(ctp->module, symt, terminate_string(p_name), &v);
             ptr += 2 + 2 + vlen + (1 + p_name->namelen);
             break;
         }
         case LF_ENUMERATE_V3:
         {
-            int value, vlen = numeric_leaf(&value, &type->enumerate_v3.value);
-            const char* name = (const char*)&type->enumerate_v3.value + vlen;
+            VARIANT v;
+            int vlen = leaf_as_variant(&v, type->enumerate_v3.data);
+            const char* name = (const char*)&type->enumerate_v3.data[vlen];
 
-            symt_add_enum_element(ctp->module, symt, name, value);
+            symt_add_enum_element(ctp->module, symt, name, &v);
             ptr += 2 + 2 + vlen + (1 + strlen(name));
             break;
         }
@@ -937,13 +963,13 @@ static void codeview_add_udt_element(struct codeview_type_parse* ctp,
         {
         case LF_BITFIELD_V1:
             symt_add_udt_element(ctp->module, symt, name,
-                                 codeview_fetch_type(ctp, cv_type->bitfield_v1.type),
+                                 codeview_fetch_symref(ctp,cv_type->bitfield_v1.type),
                                  value, cv_type->bitfield_v1.bitoff,
                                  cv_type->bitfield_v1.nbits);
             return;
         case LF_BITFIELD_V2:
             symt_add_udt_element(ctp->module, symt, name,
-                                 codeview_fetch_type(ctp, cv_type->bitfield_v2.type),
+                                 codeview_fetch_symref(ctp, cv_type->bitfield_v2.type),
                                  value, cv_type->bitfield_v2.bitoff,
                                  cv_type->bitfield_v2.nbits);
             return;
@@ -955,7 +981,8 @@ static void codeview_add_udt_element(struct codeview_type_parse* ctp,
     {
         DWORD64 elem_size = 0;
         symt_get_info(ctp->module, subtype, TI_GET_LENGTH, &elem_size);
-        symt_add_udt_element(ctp->module, symt, name, subtype, value, 0, 0);
+        symt_add_udt_element(ctp->module, symt, name, codeview_get_symref(ctp->module, type),
+                             value, 0, 0);
     }
 }
 
@@ -989,7 +1016,7 @@ static int codeview_add_type_struct_field_list(struct codeview_type_parse* ctp,
         switch (type->generic.id)
         {
         case LF_BCLASS_V1:
-            leaf_len = numeric_leaf(&value, &type->bclass_v1.offset);
+            leaf_len = numeric_leaf(&value, type->bclass_v1.data);
 
             /* FIXME: ignored for now */
 
@@ -997,7 +1024,7 @@ static int codeview_add_type_struct_field_list(struct codeview_type_parse* ctp,
             break;
 
         case LF_BCLASS_V2:
-            leaf_len = numeric_leaf(&value, &type->bclass_v2.offset);
+            leaf_len = numeric_leaf(&value, type->bclass_v2.data);
 
             /* FIXME: ignored for now */
 
@@ -1007,10 +1034,10 @@ static int codeview_add_type_struct_field_list(struct codeview_type_parse* ctp,
         case LF_VBCLASS_V1:
         case LF_IVBCLASS_V1:
             {
-                const unsigned short int* p_vboff;
+                const unsigned char* p_vboff;
                 int vpoff, vplen;
-                leaf_len = numeric_leaf(&value, &type->vbclass_v1.vbpoff);
-                p_vboff = (const unsigned short int*)((const char*)&type->vbclass_v1.vbpoff + leaf_len);
+                leaf_len = numeric_leaf(&value, type->vbclass_v1.data);
+                p_vboff = &type->vbclass_v1.data[leaf_len];
                 vplen = numeric_leaf(&vpoff, p_vboff);
 
                 /* FIXME: ignored for now */
@@ -1022,10 +1049,10 @@ static int codeview_add_type_struct_field_list(struct codeview_type_parse* ctp,
         case LF_VBCLASS_V2:
         case LF_IVBCLASS_V2:
             {
-                const unsigned short int* p_vboff;
+                const unsigned char* p_vboff;
                 int vpoff, vplen;
-                leaf_len = numeric_leaf(&value, &type->vbclass_v2.vbpoff);
-                p_vboff = (const unsigned short int*)((const char*)&type->vbclass_v2.vbpoff + leaf_len);
+                leaf_len = numeric_leaf(&value, type->vbclass_v2.data);
+                p_vboff = &type->vbclass_v2.data[leaf_len];
                 vplen = numeric_leaf(&vpoff, p_vboff);
 
                 /* FIXME: ignored for now */
@@ -1035,28 +1062,28 @@ static int codeview_add_type_struct_field_list(struct codeview_type_parse* ctp,
             break;
 
         case LF_MEMBER_V1:
-            leaf_len = numeric_leaf(&value, &type->member_v1.offset);
-            p_name = (const struct p_string*)((const char*)&type->member_v1.offset + leaf_len);
+            leaf_len = numeric_leaf(&value, type->member_v1.data);
+            p_name = (const struct p_string*)&type->member_v1.data[leaf_len];
 
-            codeview_add_udt_element(ctp, symt, terminate_string(p_name), value, 
+            codeview_add_udt_element(ctp, symt, terminate_string(p_name), value,
                                      type->member_v1.type);
 
             ptr += 2 + 2 + 2 + leaf_len + (1 + p_name->namelen);
             break;
 
         case LF_MEMBER_V2:
-            leaf_len = numeric_leaf(&value, &type->member_v2.offset);
-            p_name = (const struct p_string*)((const unsigned char*)&type->member_v2.offset + leaf_len);
+            leaf_len = numeric_leaf(&value, type->member_v2.data);
+            p_name = (const struct p_string*)&type->member_v2.data[leaf_len];
 
-            codeview_add_udt_element(ctp, symt, terminate_string(p_name), value, 
+            codeview_add_udt_element(ctp, symt, terminate_string(p_name), value,
                                      type->member_v2.type);
 
             ptr += 2 + 2 + 4 + leaf_len + (1 + p_name->namelen);
             break;
 
         case LF_MEMBER_V3:
-            leaf_len = numeric_leaf(&value, &type->member_v3.offset);
-            c_name = (const char*)&type->member_v3.offset + leaf_len;
+            leaf_len = numeric_leaf(&value, type->member_v3.data);
+            c_name = (const char*)&type->member_v3.data[leaf_len];
 
             codeview_add_udt_element(ctp, symt, c_name, value, type->member_v3.type);
 
@@ -1261,23 +1288,23 @@ static struct symt* codeview_parse_one_type(struct codeview_type_parse* ctp,
         break;
 
     case LF_ARRAY_V1:
-        leaf_len = numeric_leaf(&value, &type->array_v1.arrlen);
-        p_name = (const struct p_string*)((const unsigned char*)&type->array_v1.arrlen + leaf_len);
+        leaf_len = numeric_leaf(&value, type->array_v1.data);
+        p_name = (const struct p_string*)&type->array_v1.data[leaf_len];
         symt = codeview_add_type_array(ctp, terminate_string(p_name),
                                        type->array_v1.elemtype,
                                        type->array_v1.idxtype, value);
         break;
     case LF_ARRAY_V2:
-        leaf_len = numeric_leaf(&value, &type->array_v2.arrlen);
-        p_name = (const struct p_string*)((const unsigned char*)&type->array_v2.arrlen + leaf_len);
+        leaf_len = numeric_leaf(&value, type->array_v2.data);
+        p_name = (const struct p_string*)&type->array_v2.data[leaf_len];
 
         symt = codeview_add_type_array(ctp, terminate_string(p_name),
                                        type->array_v2.elemtype,
                                        type->array_v2.idxtype, value);
         break;
     case LF_ARRAY_V3:
-        leaf_len = numeric_leaf(&value, &type->array_v3.arrlen);
-        c_name = (const char*)&type->array_v3.arrlen + leaf_len;
+        leaf_len = numeric_leaf(&value, type->array_v3.data);
+        c_name = (const char*)&type->array_v3.data[leaf_len];
 
         symt = codeview_add_type_array(ctp, c_name,
                                        type->array_v3.elemtype,
@@ -1391,12 +1418,17 @@ static struct symt* codeview_parse_one_type(struct codeview_type_parse* ctp,
             symt = &symt_new_udt(ctp->module, buf, 0, UdtStruct)->symt;
         }
         break;
+    /* types we can simply silence for now */
+    case LF_LABEL_V1:
+    case LF_VFTABLE_V3:
+        break;
     default:
         FIXME("Unsupported type-id leaf %x\n", type->generic.id);
         dump(type, 2 + type->generic.len);
         return NULL;
     }
-    return symt && codeview_add_type(curr_type, symt) ? symt : NULL;
+    return symt && codeview_add_type(curr_type, symt,
+                                     (const BYTE*)type - ctp->table + ctp->header.type_offset) ? symt : NULL;
 }
 
 static struct symt* codeview_load_forwardable_type(struct codeview_type_parse* ctp,
@@ -1411,43 +1443,43 @@ static struct symt* codeview_load_forwardable_type(struct codeview_type_parse* c
     {
     case LF_STRUCTURE_V1:
     case LF_CLASS_V1:
-        leaf_len = numeric_leaf(&value, &type->struct_v1.structlen);
-        p_name = (const struct p_string*)((const unsigned char*)&type->struct_v1.structlen + leaf_len);
+        leaf_len = numeric_leaf(&value, type->struct_v1.data);
+        p_name = (const struct p_string*)&type->struct_v1.data[leaf_len];
         symt = &symt_new_udt(ctp->module, terminate_string(p_name), value,
                              type->generic.id == LF_CLASS_V1 ? UdtClass : UdtStruct)->symt;
         break;
 
     case LF_STRUCTURE_V2:
     case LF_CLASS_V2:
-        leaf_len = numeric_leaf(&value, &type->struct_v2.structlen);
-        p_name = (const struct p_string*)((const unsigned char*)&type->struct_v2.structlen + leaf_len);
+        leaf_len = numeric_leaf(&value, type->struct_v2.data);
+        p_name = (const struct p_string*)&type->struct_v2.data[leaf_len];
         symt = &symt_new_udt(ctp->module, terminate_string(p_name), value,
                              type->generic.id == LF_CLASS_V2 ? UdtClass : UdtStruct)->symt;
         break;
 
     case LF_STRUCTURE_V3:
     case LF_CLASS_V3:
-        leaf_len = numeric_leaf(&value, &type->struct_v3.structlen);
-        c_name = (const char*)&type->struct_v3.structlen + leaf_len;
+        leaf_len = numeric_leaf(&value, type->struct_v3.data);
+        c_name = (const char*)&type->struct_v3.data[leaf_len];
         symt = &symt_new_udt(ctp->module, c_name, value,
                              type->generic.id == LF_CLASS_V3 ? UdtClass : UdtStruct)->symt;
         break;
 
     case LF_UNION_V1:
-        leaf_len = numeric_leaf(&value, &type->union_v1.un_len);
-        p_name = (const struct p_string*)((const unsigned char*)&type->union_v1.un_len + leaf_len);
+        leaf_len = numeric_leaf(&value, type->union_v1.data);
+        p_name = (const struct p_string*)&type->union_v1.data[leaf_len];
         symt = &symt_new_udt(ctp->module, terminate_string(p_name), value, UdtUnion)->symt;
         break;
 
     case LF_UNION_V2:
-        leaf_len = numeric_leaf(&value, &type->union_v2.un_len);
-        p_name = (const struct p_string*)((const unsigned char*)&type->union_v2.un_len + leaf_len);
+        leaf_len = numeric_leaf(&value, type->union_v2.data);
+        p_name = (const struct p_string*)&type->union_v2.data[leaf_len];
         symt = &symt_new_udt(ctp->module, terminate_string(p_name), value, UdtUnion)->symt;
         break;
 
     case LF_UNION_V3:
-        leaf_len = numeric_leaf(&value, &type->union_v3.un_len);
-        c_name = (const char*)&type->union_v3.un_len + leaf_len;
+        leaf_len = numeric_leaf(&value, type->union_v3.data);
+        c_name = (const char*)&type->union_v3.data[leaf_len];
         symt = &symt_new_udt(ctp->module, c_name, value, UdtUnion)->symt;
         break;
 
@@ -1526,7 +1558,8 @@ static BOOL codeview_parse_type_table(struct codeview_type_parse* ctp)
                     {
                         /* no load it */
                         if ((symt = codeview_load_forwardable_type(ctp, codeview_jump_to_type(ctp, impl_type))))
-                            codeview_add_type(impl_type, symt);
+                            codeview_add_type(impl_type, symt,
+                                              (const BYTE*)codeview_jump_to_type(ctp, impl_type) - ctp->table + ctp->header.type_offset);
                         else
                             FIXME("forward def of %x => %x, unable to load impl\n", hl->id, impl_type);
                     }
@@ -1541,7 +1574,7 @@ static BOOL codeview_parse_type_table(struct codeview_type_parse* ctp)
                 if (!(symt = codeview_get_type(hl->id, TRUE)))
                     symt = codeview_load_forwardable_type(ctp, type);
             }
-            codeview_add_type(hl->id, symt);
+            codeview_add_type(hl->id, symt, (const BYTE*)type - ctp->table + ctp->header.type_offset);
         }
     }
     /* pass II: + non forwardable types: load them, but since they can be indirectly
@@ -1565,7 +1598,7 @@ static BOOL codeview_parse_type_table(struct codeview_type_parse* ctp)
 static ULONG_PTR codeview_get_address(const struct msc_debug_info* msc_dbg,
                                           unsigned seg, unsigned offset);
 
-static void codeview_snarf_linetab(const struct msc_debug_info* msc_dbg, const BYTE* linetab,
+static BOOL codeview_snarf_linetab(const struct msc_debug_info* msc_dbg, const BYTE* linetab,
                                    int size, BOOL pascal_str)
 {
     const BYTE*                 ptr = linetab;
@@ -1574,6 +1607,7 @@ static void codeview_snarf_linetab(const struct msc_debug_info* msc_dbg, const B
     unsigned int                k;
     const unsigned int*         filetab;
     const unsigned int*         lt_ptr;
+    const unsigned int*         offsets;
     const unsigned short*       linenos;
     const struct startend*      start;
     unsigned                    source;
@@ -1582,6 +1616,7 @@ static void codeview_snarf_linetab(const struct msc_debug_info* msc_dbg, const B
     const struct codeview_linetab_block* ltb;
 
     nfile = *(const short*)linetab;
+    if (!nfile) return FALSE;
     filetab = (const unsigned int*)(linetab + 2 * sizeof(short));
 
     for (i = 0; i < nfile; i++)
@@ -1602,13 +1637,14 @@ static void codeview_snarf_linetab(const struct msc_debug_info* msc_dbg, const B
         for (j = 0; j < nseg; j++)
 	{
             ltb = (const struct codeview_linetab_block*)(linetab + *lt_ptr++);
-            linenos = (const unsigned short*)&ltb->offsets[ltb->num_lines];
+            offsets = (const unsigned int*)&ltb->data;
+            linenos = (const unsigned short*)&offsets[ltb->num_lines];
             func_addr0 = codeview_get_address(msc_dbg, ltb->seg, start[j].start);
             if (!func_addr0) continue;
             for (func = NULL, k = 0; k < ltb->num_lines; k++)
             {
                 /* now locate function (if any) */
-                addr = func_addr0 + ltb->offsets[k] - start[j].start;
+                addr = func_addr0 + offsets[k] - start[j].start;
                 /* unfortunately, we can have several functions in the same block, if there's no
                  * gap between them... find the new function if needed
                  */
@@ -1619,7 +1655,7 @@ static void codeview_snarf_linetab(const struct msc_debug_info* msc_dbg, const B
                     if (!symt_check_tag(&func->symt, SymTagFunction) && !symt_check_tag(&func->symt, SymTagInlineSite))
                     {
                         WARN("--not a func at %04x:%08x %Ix tag=%d\n",
-                             ltb->seg, ltb->offsets[k], addr, func ? func->symt.tag : -1);
+                             ltb->seg, offsets[k], addr, func ? func->symt.tag : -1);
                         func = NULL;
                         break;
                     }
@@ -1628,11 +1664,12 @@ static void codeview_snarf_linetab(const struct msc_debug_info* msc_dbg, const B
             }
 	}
     }
+    return TRUE;
 }
 
 static const char* pdb_get_string_table_entry(const PDB_STRING_TABLE* table, unsigned offset);
 
-static void codeview_snarf_linetab2(const struct msc_debug_info* msc_dbg, const struct cv_module_snarf* cvmod)
+static BOOL codeview_snarf_linetab2(const struct msc_debug_info* msc_dbg, const struct cv_module_snarf* cvmod)
 {
     unsigned    i;
     const void* hdr_last = (const char*)cvmod->dbgsubsect + cvmod->dbgsubsect_size;
@@ -1658,7 +1695,7 @@ static void codeview_snarf_linetab2(const struct msc_debug_info* msc_dbg, const 
     if (!hdr_files)
     {
         TRACE("No DEBUG_S_FILECHKSMS found\n");
-        return;
+        return FALSE;
     }
 
     for (hdr = cvmod->dbgsubsect; CV_IS_INSIDE(hdr, hdr_last); hdr = hdr_next)
@@ -1708,6 +1745,7 @@ static void codeview_snarf_linetab2(const struct msc_debug_info* msc_dbg, const 
         }
         hdr = hdr_next;
     }
+    return TRUE;
 }
 
 /*========================================================================
@@ -1748,8 +1786,9 @@ static BOOL func_has_local(struct symt_function* func, const char* name)
 
     for (i = 0; i < func->vchildren.num_elts; ++i)
     {
-        struct symt* p = *(struct symt**)vector_at(&func->vchildren, i);
-        if (symt_check_tag(p, SymTagData) && !strcmp(((struct symt_data*)p)->hash_elt.name, name))
+        struct symt *lsym = SYMT_SYMREF_TO_PTR(*(symref_t*)vector_at(&func->vchildren, i));
+
+        if (symt_check_tag(lsym, SymTagData) && !strcmp(((struct symt_data*)lsym)->hash_elt.name, name))
             return TRUE;
     }
     return FALSE;
@@ -1779,7 +1818,7 @@ static inline void codeview_add_variable(const struct msc_debug_info* msc_dbg,
         {
             if (!is_local || in_tls) WARN("Unsupported construct\n");
             symt_add_func_local(msc_dbg->module, func, DataIsStaticLocal, &loc, block,
-                                codeview_get_type(symtype, FALSE), name);
+                                codeview_get_symref(msc_dbg->module, symtype), name);
             return;
         }
         if (!dontcheck && !in_tls)
@@ -1799,7 +1838,7 @@ static inline void codeview_add_variable(const struct msc_debug_info* msc_dbg,
                     if (symdata->kind == (is_local ? DataIsFileStatic : DataIsGlobal) &&
                         symdata->u.var.kind == loc.kind &&
                         symdata->u.var.offset == loc.offset &&
-                        symdata->container == &compiland->symt)
+                        symdata->container == symt_ptr_to_symref(&compiland->symt))
                     {
                         /* We don't compare types yet... Unfortunately, they are not
                          * always the same typeid... it'd require full type equivalence
@@ -1812,7 +1851,7 @@ static inline void codeview_add_variable(const struct msc_debug_info* msc_dbg,
         }
         if (is_local ^ (compiland != NULL)) FIXME("Unsupported construct\n");
         symt_new_global_variable(msc_dbg->module, compiland, name, is_local, loc, 0,
-                                 codeview_get_type(symtype, FALSE));
+                                 codeview_get_symref(msc_dbg->module, symtype));
      }
 }
 
@@ -2122,6 +2161,7 @@ static struct symt_function* codeview_create_inline_site(const struct msc_debug_
                                                          struct symt_function* top_func,
                                                          struct symt* container,
                                                          cv_itemid_t inlinee,
+                                                         DWORD_PTR user,
                                                          const unsigned char* annot,
                                                          const unsigned char* last_annot)
 {
@@ -2147,15 +2187,15 @@ static struct symt_function* codeview_create_inline_site(const struct msc_debug_
     case LF_FUNC_ID:
         inlined = symt_new_inlinesite(msc_dbg->module, top_func, container,
                                       cvt->func_id_v3.name,
-                                      codeview_get_type(cvt->func_id_v3.type, FALSE),
-                                      num_ranges);
+                                      codeview_get_symref(msc_dbg->module, cvt->func_id_v3.type),
+                                      user, num_ranges);
         break;
     case LF_MFUNC_ID:
         /* FIXME we just declare a function, not a method */
         inlined = symt_new_inlinesite(msc_dbg->module, top_func, container,
                                       cvt->mfunc_id_v3.name,
-                                      codeview_get_type(cvt->mfunc_id_v3.type, FALSE),
-                                      num_ranges);
+                                      codeview_get_symref(msc_dbg->module, cvt->mfunc_id_v3.type),
+                                      user, num_ranges);
         break;
     default:
         FIXME("unsupported inlinee kind %x\n", cvt->generic.id);
@@ -2237,15 +2277,14 @@ static struct symt_function* codeview_create_inline_site(const struct msc_debug_
     {
         struct addr_range* range = &inlined->ranges[inlined->num_ranges - 1];
         if (range->low == range->high) WARN("pending empty range at end of %s inside %s\n",
-                                             inlined->hash_elt.name,
-                                             top_func->hash_elt.name);
+                                            debugstr_a(inlined->hash_elt.name),
+                                            debugstr_a(top_func->hash_elt.name));
     }
     return inlined;
 }
 
 static struct symt_compiland* codeview_new_compiland(const struct msc_debug_info* msc_dbg, const char* objname)
 {
-    unsigned int    src_idx = source_new(msc_dbg->module, NULL, objname);
     unsigned int    i;
 
     /* In some cases MSVC generates several compiland entries with same pathname in PDB file.
@@ -2254,11 +2293,11 @@ static struct symt_compiland* codeview_new_compiland(const struct msc_debug_info
      */
     for (i = 0; i < msc_dbg->module->top->vchildren.num_elts; i++)
     {
-        struct symt_compiland** p = vector_at(&msc_dbg->module->top->vchildren, i);
-        if (symt_check_tag(&(*p)->symt, SymTagCompiland) && (*p)->source == src_idx)
-            return *p;
+        struct symt_compiland* p = (struct symt_compiland*)SYMT_SYMREF_TO_PTR(*(symref_t*)vector_at(&msc_dbg->module->top->vchildren, i));
+        if (symt_check_tag(&p->symt, SymTagCompiland) && !strcmp(p->filename, objname))
+            return p;
     }
-    return symt_new_compiland(msc_dbg->module, src_idx);
+    return symt_new_compiland(msc_dbg->module, objname);
 }
 
 static BOOL codeview_snarf(const struct msc_debug_info* msc_dbg,
@@ -2270,9 +2309,9 @@ static BOOL codeview_snarf(const struct msc_debug_info* msc_dbg,
     struct symt_function*               curr_func = NULL;
     int                                 i, length;
     struct symt_block*                  block = NULL;
-    struct symt*                        symt;
     struct symt_compiland*              compiland = NULL;
     struct location                     loc;
+    unsigned                            top_frame_size = -1;
 
     /* overwrite compiland name from outer context (if any) */
     if (objname)
@@ -2367,47 +2406,53 @@ static BOOL codeview_snarf(const struct msc_debug_info* msc_dbg,
 	case S_GPROC32_16t:
 	case S_LPROC32_16t:
             if (top_func) FIXME("nested function\n");
-            top_func = symt_new_function(msc_dbg->module, compiland,
-                                         terminate_string(&sym->proc_v1.p_name),
-                                         codeview_get_address(msc_dbg, sym->proc_v1.segment, sym->proc_v1.offset),
-                                         sym->proc_v1.proc_len,
-                                         codeview_get_type(sym->proc_v1.proctype, FALSE));
-            curr_func = top_func;
-            loc.kind = loc_absolute;
-            loc.offset = sym->proc_v1.debug_start;
-            symt_add_function_point(msc_dbg->module, curr_func, SymTagFuncDebugStart, &loc, NULL);
-            loc.offset = sym->proc_v1.debug_end;
-            symt_add_function_point(msc_dbg->module, curr_func, SymTagFuncDebugEnd, &loc, NULL);
+            if ((top_func = symt_new_function(msc_dbg->module, compiland,
+                                              terminate_string(&sym->proc_v1.p_name),
+                                              codeview_get_address(msc_dbg, sym->proc_v1.segment, sym->proc_v1.offset),
+                                              sym->proc_v1.proc_len,
+                                              codeview_get_symref(msc_dbg->module, sym->proc_v1.proctype), i)))
+            {
+                curr_func = top_func;
+                loc.kind = loc_absolute;
+                loc.offset = sym->proc_v1.debug_start;
+                symt_add_function_point(msc_dbg->module, curr_func, SymTagFuncDebugStart, &loc, NULL);
+                loc.offset = sym->proc_v1.debug_end;
+                symt_add_function_point(msc_dbg->module, curr_func, SymTagFuncDebugEnd, &loc, NULL);
+            }
 	    break;
 	case S_GPROC32_ST:
 	case S_LPROC32_ST:
             if (top_func) FIXME("nested function\n");
-            top_func = symt_new_function(msc_dbg->module, compiland,
-                                         terminate_string(&sym->proc_v2.p_name),
-                                         codeview_get_address(msc_dbg, sym->proc_v2.segment, sym->proc_v2.offset),
-                                         sym->proc_v2.proc_len,
-                                         codeview_get_type(sym->proc_v2.proctype, FALSE));
-            curr_func = top_func;
-            loc.kind = loc_absolute;
-            loc.offset = sym->proc_v2.debug_start;
-            symt_add_function_point(msc_dbg->module, curr_func, SymTagFuncDebugStart, &loc, NULL);
-            loc.offset = sym->proc_v2.debug_end;
-            symt_add_function_point(msc_dbg->module, curr_func, SymTagFuncDebugEnd, &loc, NULL);
+            if ((top_func = symt_new_function(msc_dbg->module, compiland,
+                                              terminate_string(&sym->proc_v2.p_name),
+                                              codeview_get_address(msc_dbg, sym->proc_v2.segment, sym->proc_v2.offset),
+                                              sym->proc_v2.proc_len,
+                                              codeview_get_symref(msc_dbg->module, sym->proc_v2.proctype), i)))
+            {
+                curr_func = top_func;
+                loc.kind = loc_absolute;
+                loc.offset = sym->proc_v2.debug_start;
+                symt_add_function_point(msc_dbg->module, curr_func, SymTagFuncDebugStart, &loc, NULL);
+                loc.offset = sym->proc_v2.debug_end;
+                symt_add_function_point(msc_dbg->module, curr_func, SymTagFuncDebugEnd, &loc, NULL);
+            }
 	    break;
 	case S_GPROC32:
 	case S_LPROC32:
             if (top_func) FIXME("nested function\n");
-            top_func = symt_new_function(msc_dbg->module, compiland,
-                                         sym->proc_v3.name,
-                                         codeview_get_address(msc_dbg, sym->proc_v3.segment, sym->proc_v3.offset),
-                                         sym->proc_v3.proc_len,
-                                         codeview_get_type(sym->proc_v3.proctype, FALSE));
-            curr_func = top_func;
-            loc.kind = loc_absolute;
-            loc.offset = sym->proc_v3.debug_start;
-            symt_add_function_point(msc_dbg->module, curr_func, SymTagFuncDebugStart, &loc, NULL);
-            loc.offset = sym->proc_v3.debug_end;
-            symt_add_function_point(msc_dbg->module, curr_func, SymTagFuncDebugEnd, &loc, NULL);
+            if ((top_func = symt_new_function(msc_dbg->module, compiland,
+                                              sym->proc_v3.name,
+                                              codeview_get_address(msc_dbg, sym->proc_v3.segment, sym->proc_v3.offset),
+                                              sym->proc_v3.proc_len,
+                                              codeview_get_symref(msc_dbg->module, sym->proc_v3.proctype), i)))
+            {
+                curr_func = top_func;
+                loc.kind = loc_absolute;
+                loc.offset = sym->proc_v3.debug_start;
+                symt_add_function_point(msc_dbg->module, curr_func, SymTagFuncDebugStart, &loc, NULL);
+                loc.offset = sym->proc_v3.debug_end;
+                symt_add_function_point(msc_dbg->module, curr_func, SymTagFuncDebugEnd, &loc, NULL);
+            }
 	    break;
         /*
          * Function parameters and stack variables.
@@ -2420,7 +2465,7 @@ static BOOL codeview_snarf(const struct msc_debug_info* msc_dbg,
             symt_add_func_local(msc_dbg->module, curr_func,
                                 sym->stack_v1.offset > 0 ? DataIsParam : DataIsLocal,
                                 &loc, block,
-                                codeview_get_type(sym->stack_v1.symtype, FALSE),
+                                codeview_get_symref(msc_dbg->module, sym->stack_v1.symtype),
                                 terminate_string(&sym->stack_v1.p_name));
             break;
 	case S_BPREL32_ST:
@@ -2431,7 +2476,7 @@ static BOOL codeview_snarf(const struct msc_debug_info* msc_dbg,
             symt_add_func_local(msc_dbg->module, curr_func,
                                 sym->stack_v2.offset > 0 ? DataIsParam : DataIsLocal,
                                 &loc, block,
-                                codeview_get_type(sym->stack_v2.symtype, FALSE),
+                                codeview_get_symref(msc_dbg->module, sym->stack_v2.symtype),
                                 terminate_string(&sym->stack_v2.p_name));
             break;
 	case S_BPREL32:
@@ -2444,7 +2489,7 @@ static BOOL codeview_snarf(const struct msc_debug_info* msc_dbg,
             symt_add_func_local(msc_dbg->module, curr_func,
                                 sym->stack_v3.offset > 0 ? DataIsParam : DataIsLocal,
                                 &loc, block,
-                                codeview_get_type(sym->stack_v3.symtype, FALSE),
+                                codeview_get_symref(msc_dbg->module, sym->stack_v3.symtype),
                                 sym->stack_v3.name);
             break;
 	case S_REGREL32:
@@ -2453,11 +2498,11 @@ static BOOL codeview_snarf(const struct msc_debug_info* msc_dbg,
             loc.kind = loc_regrel;
             loc.reg = sym->regrel_v3.reg;
             loc.offset = sym->regrel_v3.offset;
+            if (top_frame_size == -1) FIXME("S_REGREL32 without frameproc\n");
             symt_add_func_local(msc_dbg->module, curr_func,
-                                /* FIXME this is wrong !!! */
-                                sym->regrel_v3.offset > 0 ? DataIsParam : DataIsLocal,
+                                sym->regrel_v3.offset >= top_frame_size ? DataIsParam : DataIsLocal,
                                 &loc, block,
-                                codeview_get_type(sym->regrel_v3.symtype, FALSE),
+                                codeview_get_symref(msc_dbg->module, sym->regrel_v3.symtype),
                                 sym->regrel_v3.name);
             break;
 
@@ -2466,8 +2511,8 @@ static BOOL codeview_snarf(const struct msc_debug_info* msc_dbg,
             loc.reg = sym->register_v1.reg;
             loc.offset = 0;
             symt_add_func_local(msc_dbg->module, curr_func,
-                                DataIsLocal, &loc,
-                                block, codeview_get_type(sym->register_v1.type, FALSE),
+                                DataIsLocal, &loc, block,
+                                codeview_get_symref(msc_dbg->module, sym->register_v1.type),
                                 terminate_string(&sym->register_v1.p_name));
             break;
         case S_REGISTER_ST:
@@ -2475,8 +2520,8 @@ static BOOL codeview_snarf(const struct msc_debug_info* msc_dbg,
             loc.reg = sym->register_v2.reg;
             loc.offset = 0;
             symt_add_func_local(msc_dbg->module, curr_func,
-                                DataIsLocal, &loc,
-                                block, codeview_get_type(sym->register_v2.type, FALSE),
+                                DataIsLocal, &loc, block,
+                                codeview_get_symref(msc_dbg->module, sym->register_v2.type),
                                 terminate_string(&sym->register_v2.p_name));
             break;
         case S_REGISTER:
@@ -2486,8 +2531,8 @@ static BOOL codeview_snarf(const struct msc_debug_info* msc_dbg,
             loc.reg = sym->register_v3.reg;
             loc.offset = 0;
             symt_add_func_local(msc_dbg->module, curr_func,
-                                DataIsLocal, &loc,
-                                block, codeview_get_type(sym->register_v3.type, FALSE),
+                                DataIsLocal, &loc, block,
+                                codeview_get_symref(msc_dbg->module, sym->register_v3.type),
                                 sym->register_v3.name);
             break;
 
@@ -2511,6 +2556,7 @@ static BOOL codeview_snarf(const struct msc_debug_info* msc_dbg,
             {
                 if (curr_func != top_func) FIXME("shouldn't close a top function with an opened inlined function\n");
                 top_func = curr_func = NULL;
+                top_frame_size = -1;
             }
             break;
 
@@ -2525,18 +2571,20 @@ static BOOL codeview_snarf(const struct msc_debug_info* msc_dbg,
             break;
 
         case S_COMPILE2:
-            TRACE("S-Compile-V3 machine:%x language:%x %s\n", sym->compile2_v3.machine, sym->compile2_v3.flags.iLanguage, sym->compile2_v3.name);
+            TRACE("S-Compile-V3 machine:%x language:%x %s\n",
+                  sym->compile2_v3.machine, sym->compile2_v3.flags.iLanguage, debugstr_a(sym->compile2_v3.name));
             break;
 
         case S_COMPILE3:
-            TRACE("S-Compile3-V3 machine:%x language:%x %s\n", sym->compile3_v3.machine, sym->compile3_v3.flags.iLanguage, sym->compile3_v3.name);
+            TRACE("S-Compile3-V3 machine:%x language:%x %s\n",
+                  sym->compile3_v3.machine, sym->compile3_v3.flags.iLanguage, debugstr_a(sym->compile3_v3.name));
             break;
 
         case S_ENVBLOCK:
             break;
 
         case S_OBJNAME:
-            TRACE("S-ObjName-V3 %s\n", sym->objname_v3.name);
+            TRACE("S-ObjName-V3 %s\n", debugstr_a(sym->objname_v3.name));
             if (!compiland)
                 compiland = codeview_new_compiland(msc_dbg, sym->objname_v3.name);
             break;
@@ -2575,81 +2623,65 @@ static BOOL codeview_snarf(const struct msc_debug_info* msc_dbg,
             {
                 int                     vlen;
                 const struct p_string*  name;
-                struct symt*            se;
                 VARIANT                 v;
 
-                vlen = leaf_as_variant(&v, &sym->constant_v1.cvalue);
-                name = (const struct p_string*)((const char*)&sym->constant_v1.cvalue + vlen);
-                se = codeview_get_type(sym->constant_v1.type, FALSE);
+                vlen = leaf_as_variant(&v, sym->constant_v1.data);
+                name = (const struct p_string*)&sym->constant_v1.data[vlen];
 
                 TRACE("S-Constant-V1 %u %s %x\n", V_INT(&v), terminate_string(name), sym->constant_v1.type);
                 symt_new_constant(msc_dbg->module, compiland, terminate_string(name),
-                                  se, &v);
+                                  codeview_get_symref(msc_dbg->module, sym->constant_v1.type), &v);
             }
             break;
         case S_CONSTANT_ST:
             {
                 int                     vlen;
                 const struct p_string*  name;
-                struct symt*            se;
                 VARIANT                 v;
 
-                vlen = leaf_as_variant(&v, &sym->constant_v2.cvalue);
-                name = (const struct p_string*)((const char*)&sym->constant_v2.cvalue + vlen);
-                se = codeview_get_type(sym->constant_v2.type, FALSE);
+                vlen = leaf_as_variant(&v, sym->constant_v2.data);
+                name = (const struct p_string*)&sym->constant_v2.data[vlen];
 
                 TRACE("S-Constant-V2 %u %s %x\n", V_INT(&v), terminate_string(name), sym->constant_v2.type);
                 symt_new_constant(msc_dbg->module, compiland, terminate_string(name),
-                                  se, &v);
+                                  codeview_get_symref(msc_dbg->module, sym->constant_v2.type), &v);
             }
             break;
         case S_CONSTANT:
             {
                 int                     vlen;
                 const char*             name;
-                struct symt*            se;
                 VARIANT                 v;
 
-                vlen = leaf_as_variant(&v, &sym->constant_v3.cvalue);
-                name = (const char*)&sym->constant_v3.cvalue + vlen;
-                se = codeview_get_type(sym->constant_v3.type, FALSE);
+                vlen = leaf_as_variant(&v, sym->constant_v3.data);
+                name = (const char*)&sym->constant_v3.data[vlen];
 
-                TRACE("S-Constant-V3 %u %s %x\n", V_INT(&v), name, sym->constant_v3.type);
+                TRACE("S-Constant-V3 %u %s %x\n", V_INT(&v), debugstr_a(name), sym->constant_v3.type);
                 /* FIXME: we should add this as a constant value */
-                symt_new_constant(msc_dbg->module, compiland, name, se, &v);
+                symt_new_constant(msc_dbg->module, compiland, name,
+                                  codeview_get_symref(msc_dbg->module, sym->constant_v3.type), &v);
             }
             break;
 
         case S_UDT_16t:
             if (sym->udt_v1.type)
             {
-                if ((symt = codeview_get_type(sym->udt_v1.type, FALSE)))
-                    symt_new_typedef(msc_dbg->module, symt,
-                                     terminate_string(&sym->udt_v1.p_name));
-                else
-                    FIXME("S-Udt %s: couldn't find type 0x%x\n",
-                          terminate_string(&sym->udt_v1.p_name), sym->udt_v1.type);
+                symt_new_typedef(msc_dbg->module, codeview_get_symref(msc_dbg->module, sym->udt_v1.type),
+                                 terminate_string(&sym->udt_v1.p_name));
             }
             break;
         case S_UDT_ST:
             if (sym->udt_v2.type)
             {
-                if ((symt = codeview_get_type(sym->udt_v2.type, FALSE)))
-                    symt_new_typedef(msc_dbg->module, symt,
+                symt_new_typedef(msc_dbg->module, codeview_get_symref(msc_dbg->module, sym->udt_v2.type),
                                      terminate_string(&sym->udt_v2.p_name));
-                else
-                    FIXME("S-Udt %s: couldn't find type 0x%x\n",
-                          terminate_string(&sym->udt_v2.p_name), sym->udt_v2.type);
             }
             break;
         case S_UDT:
             if (sym->udt_v3.type)
             {
-                if ((symt = codeview_get_type(sym->udt_v3.type, FALSE)))
-                    symt_new_typedef(msc_dbg->module, symt, sym->udt_v3.name);
-                else
-                    FIXME("S-Udt %s: couldn't find type 0x%x\n",
-                          sym->udt_v3.name, sym->udt_v3.type);
+                symt_new_typedef(msc_dbg->module, codeview_get_symref(msc_dbg->module, sym->udt_v3.type),
+                                 sym->udt_v3.name);
             }
             break;
         case S_LOCAL:
@@ -2663,7 +2695,7 @@ static BOOL codeview_snarf(const struct msc_debug_info* msc_dbg,
                 symt_add_func_local(msc_dbg->module, curr_func,
                                     sym->local_v3.varflags.is_param ? DataIsParam : DataIsLocal,
                                     &loc, block,
-                                    codeview_get_type(sym->local_v3.symtype, FALSE),
+                                    codeview_get_symref(msc_dbg->module, sym->local_v3.symtype),
                                     sym->local_v3.name);
             }
             else
@@ -2674,6 +2706,7 @@ static BOOL codeview_snarf(const struct msc_debug_info* msc_dbg,
                 struct symt_function* inlined = codeview_create_inline_site(msc_dbg, cvmod, top_func,
                                                                             block ? &block->symt : &curr_func->symt,
                                                                             sym->inline_site_v3.inlinee,
+                                                                            i,
                                                                             sym->inline_site_v3.binaryAnnotations,
                                                                             (const unsigned char*)sym + length);
                 if (inlined)
@@ -2695,6 +2728,7 @@ static BOOL codeview_snarf(const struct msc_debug_info* msc_dbg,
                 struct symt_function* inlined = codeview_create_inline_site(msc_dbg, cvmod, top_func,
                                                                             block ? &block->symt : &curr_func->symt,
                                                                             sym->inline_site2_v3.inlinee,
+                                                                            i,
                                                                             sym->inline_site2_v3.binaryAnnotations,
                                                                             (const unsigned char*)sym + length);
                 if (inlined)
@@ -2707,14 +2741,14 @@ static BOOL codeview_snarf(const struct msc_debug_info* msc_dbg,
                     /* skip all records until paired S_INLINESITE_END */
                     sym = (const union codeview_symbol*)(root + sym->inline_site2_v3.pEnd);
                     if (sym->generic.id != S_INLINESITE_END) FIXME("complete wreckage\n");
-                    length = sym->inline_site_v3.pEnd - i + sym->generic.len;
+                    length = sym->inline_site2_v3.pEnd - i + sym->generic.len;
                 }
             }
             break;
 
         case S_INLINESITE_END:
-            block = symt_check_tag(curr_func->container, SymTagBlock) ?
-                (struct symt_block*)curr_func->container : NULL;
+            block = symt_check_tag(SYMT_SYMREF_TO_PTR(curr_func->container), SymTagBlock) ?
+                (struct symt_block *)((struct symt_block*)curr_func->container) : NULL;
             curr_func = (struct symt_function*)symt_get_upper_inlined(curr_func);
             break;
 
@@ -2758,7 +2792,7 @@ static BOOL codeview_snarf(const struct msc_debug_info* msc_dbg,
                     struct symt_function* pfunc = (struct symt_function*)parent;
                     top_func = symt_new_function(msc_dbg->module, compiland, pfunc->hash_elt.name,
                                                  codeview_get_address(msc_dbg, sym->sepcode_v3.sect, sym->sepcode_v3.off),
-                                                 sym->sepcode_v3.length, pfunc->type);
+                                                 sym->sepcode_v3.length, pfunc->type, i);
                     curr_func = top_func;
                 }
                 else
@@ -2766,17 +2800,42 @@ static BOOL codeview_snarf(const struct msc_debug_info* msc_dbg,
                          sym->sepcode_v3.sectParent, sym->sepcode_v3.offParent);
             }
             else
-                FIXME("S_SEPCODE inside top-level function %s\n", top_func->hash_elt.name);
+                FIXME("S_SEPCODE inside top-level function %s\n", debugstr_a(top_func->hash_elt.name));
+            break;
+
+        case S_FRAMEPROC:
+            /* expecting only S_FRAMEPROC once for top level functions */
+            if (top_frame_size == -1 && curr_func && curr_func == top_func)
+                top_frame_size = sym->frame_info_v2.sz_frame;
+            else
+                FIXME("Unexpected S_FRAMEPROC %d (%p %p) %x\n", top_frame_size, top_func, curr_func, i);
+            break;
+
+        case S_GMANPROC:
+        case S_LMANPROC:
+            /* skip whole record and sub-records */
+            i = sym->managed_proc_v3.pend;
+            sym = (const union codeview_symbol*)(root + i);
+            if (i + sizeof(sym->generic) > size || sym->generic.id != S_END)
+            {
+                FIXME("Wrong relocation after managed proc, aborting\n");
+                return FALSE;
+            }
+            length = 2 + sym->generic.len;
             break;
 
         /* the symbols we can safely ignore for now */
+        case S_SKIP:
         case S_TRAMPOLINE:
-        case S_FRAMEPROC:
         case S_FRAMECOOKIE:
         case S_SECTION:
         case S_COFFGROUP:
         case S_EXPORT:
         case S_CALLSITEINFO:
+        case S_ARMSWITCHTABLE:
+        case S_TOKENREF:
+        case S_OEM:
+        case S_MANSLOT:
             /* even if S_LOCAL groks all the S_DEFRANGE* records following itself,
              * those kinds of records can also be present after a S_FILESTATIC record
              * so silence them until (at least) S_FILESTATIC is supported
@@ -2802,7 +2861,6 @@ static BOOL codeview_snarf(const struct msc_debug_info* msc_dbg,
             break;
         }
     }
-    if (cvmod) codeview_snarf_linetab2(msc_dbg, cvmod);
     return TRUE;
 }
 
@@ -2818,8 +2876,7 @@ static BOOL codeview_is_inside(const struct cv_local_info* locinfo, const struct
     return TRUE;
 }
 
-static void pdb_location_compute(struct process* pcs,
-                                 const struct module_format* modfmt,
+static void pdb_location_compute(const struct module_format* modfmt,
                                  const struct symt_function* func,
                                  struct location* loc)
 {
@@ -2832,7 +2889,7 @@ static void pdb_location_compute(struct process* pcs,
              locinfo->kind != 0;
              locinfo = (const struct cv_local_info*)((const char*)(locinfo + 1) + locinfo->ngaps * sizeof(locinfo->gaps[0])))
         {
-            if (!codeview_is_inside(locinfo, func, pcs->localscope_pc)) continue;
+            if (!codeview_is_inside(locinfo, func, modfmt->module->process->localscope_pc)) continue;
             switch (locinfo->kind)
             {
             case S_DEFRANGE:
@@ -2883,11 +2940,13 @@ static BOOL codeview_snarf_sym_hashtable(const struct msc_debug_info* msc_dbg, c
     if (hashsize < sizeof(DBI_HASH_HEADER) ||
         hash_hdr->signature != 0xFFFFFFFF ||
         hash_hdr->version != 0xeffe0000 + 19990810 ||
+        !hash_hdr->hash_records_size ||
         (hash_hdr->hash_records_size % sizeof(DBI_HASH_RECORD)) != 0 ||
         sizeof(DBI_HASH_HEADER) + hash_hdr->hash_records_size + DBI_BITMAP_HASH_SIZE > hashsize ||
         (hashsize - (sizeof(DBI_HASH_HEADER) + hash_hdr->hash_records_size + DBI_BITMAP_HASH_SIZE)) % sizeof(unsigned))
     {
-        FIXME("Incorrect hash structure\n");
+        if (hash_hdr->hash_records_size)
+            FIXME("Incorrect hash structure\n");
         return FALSE;
     }
 
@@ -2911,39 +2970,27 @@ static BOOL codeview_snarf_sym_hashtable(const struct msc_debug_info* msc_dbg, c
 
 static BOOL pdb_global_feed_types(const struct msc_debug_info* msc_dbg, const union codeview_symbol* sym)
 {
-    struct symt* symt;
     switch (sym->generic.id)
     {
     case S_UDT_16t:
         if (sym->udt_v1.type)
         {
-            if ((symt = codeview_get_type(sym->udt_v1.type, FALSE)))
-                symt_new_typedef(msc_dbg->module, symt,
+            symt_new_typedef(msc_dbg->module, codeview_get_symref(msc_dbg->module, sym->udt_v1.type),
                                  terminate_string(&sym->udt_v1.p_name));
-            else
-                FIXME("S-Udt %s: couldn't find type 0x%x\n",
-                      terminate_string(&sym->udt_v1.p_name), sym->udt_v1.type);
         }
         break;
     case S_UDT_ST:
         if (sym->udt_v2.type)
         {
-            if ((symt = codeview_get_type(sym->udt_v2.type, FALSE)))
-                symt_new_typedef(msc_dbg->module, symt,
-                                 terminate_string(&sym->udt_v2.p_name));
-            else
-                FIXME("S-Udt %s: couldn't find type 0x%x\n",
-                      terminate_string(&sym->udt_v2.p_name), sym->udt_v2.type);
+            symt_new_typedef(msc_dbg->module, codeview_get_symref(msc_dbg->module, sym->udt_v2.type),
+                             terminate_string(&sym->udt_v2.p_name));
         }
         break;
     case S_UDT:
         if (sym->udt_v3.type)
         {
-            if ((symt = codeview_get_type(sym->udt_v3.type, FALSE)))
-                symt_new_typedef(msc_dbg->module, symt, sym->udt_v3.name);
-            else
-                FIXME("S-Udt %s: couldn't find type 0x%x\n",
-                      sym->udt_v3.name, sym->udt_v3.type);
+            symt_new_typedef(msc_dbg->module, codeview_get_symref(msc_dbg->module, sym->udt_v3.type),
+                             sym->udt_v3.name);
         }
         break;
     default: return FALSE;
@@ -3036,6 +3083,7 @@ static void* pdb_jg_read(const struct PDB_JG_HEADER* pdb, const WORD* block_list
 
     num_blocks = (size + pdb->block_size - 1) / pdb->block_size;
     buffer = HeapAlloc(GetProcessHeap(), 0, num_blocks * pdb->block_size);
+    if (!buffer) return NULL;
 
     for (i = 0; i < num_blocks; i++)
         memcpy(buffer + i * pdb->block_size,
@@ -3053,11 +3101,12 @@ static void* pdb_ds_read(const struct PDB_DS_HEADER* pdb, const UINT *block_list
     if (!size) return NULL;
 
     num_blocks = (size + pdb->block_size - 1) / pdb->block_size;
-    buffer = HeapAlloc(GetProcessHeap(), 0, num_blocks * pdb->block_size);
+    buffer = HeapAlloc(GetProcessHeap(), 0, (SIZE_T)num_blocks * pdb->block_size);
+    if (!buffer) return NULL;
 
     for (i = 0; i < num_blocks; i++)
         memcpy(buffer + i * pdb->block_size,
-               (const char*)pdb + block_list[i] * pdb->block_size, pdb->block_size);
+               (const char*)pdb + (DWORD_PTR)block_list[i] * pdb->block_size, pdb->block_size);
 
     return buffer;
 }
@@ -3137,23 +3186,27 @@ static void pdb_free_file(struct pdb_file_info* pdb_file)
         break;
     }
     HeapFree(GetProcessHeap(), 0, pdb_file->stream_dict);
+    pdb_file->stream_dict = NULL;
+    UnmapViewOfFile(pdb_file->image);
+    pdb_file->image = NULL;
 }
 
-static BOOL pdb_load_stream_name_table(struct pdb_file_info* pdb_file, const char* str, unsigned cb)
+static struct pdb_stream_name* pdb_load_stream_name_table(const char* str, unsigned cb)
 {
-    DWORD*      pdw;
-    DWORD*      ok_bits;
-    DWORD       count, numok;
-    unsigned    i, j;
-    char*       cpstr;
+    struct pdb_stream_name*     stream_dict;
+    DWORD*                      pdw;
+    DWORD*                      ok_bits;
+    DWORD                       count, numok;
+    unsigned                    i, j;
+    char*                       cpstr;
 
     pdw = (DWORD*)(str + cb);
     numok = *pdw++;
     count = *pdw++;
 
-    pdb_file->stream_dict = HeapAlloc(GetProcessHeap(), 0, (numok + 1) * sizeof(struct pdb_stream_name) + cb);
-    if (!pdb_file->stream_dict) return FALSE;
-    cpstr = (char*)(pdb_file->stream_dict + numok + 1);
+    stream_dict = HeapAlloc(GetProcessHeap(), 0, (numok + 1) * sizeof(struct pdb_stream_name) + cb);
+    if (!stream_dict) return NULL;
+    cpstr = (char*)(stream_dict + numok + 1);
     memcpy(cpstr, str, cb);
 
     /* bitfield: first dword is len (in dword), then data */
@@ -3166,15 +3219,14 @@ static BOOL pdb_load_stream_name_table(struct pdb_file_info* pdb_file, const cha
         if (ok_bits[i / 32] & (1 << (i % 32)))
         {
             if (j >= numok) break;
-            pdb_file->stream_dict[j].name = &cpstr[*pdw++];
-            pdb_file->stream_dict[j].index = *pdw++;
+            stream_dict[j].name = &cpstr[*pdw++];
+            stream_dict[j].index = *pdw++;
             j++;
         }
     }
     /* add sentinel */
-    pdb_file->stream_dict[numok].name = NULL;
-    pdb_file->fpoext_stream = -1;
-    return TRUE;
+    stream_dict[numok].name = NULL;
+    return stream_dict;
 }
 
 static unsigned pdb_get_stream_by_name(const struct pdb_file_info* pdb_file, const char* name)
@@ -3210,17 +3262,15 @@ static const char* pdb_get_string_table_entry(const PDB_STRING_TABLE* table, uns
     return (!table || offset >= table->length) ? NULL : (const char*)(table + 1) + offset;
 }
 
-static void pdb_module_remove(struct process* pcsn, struct module_format* modfmt)
+static void pdb_module_remove(struct module_format* modfmt)
 {
     unsigned    i;
 
-    for (i = 0; i < modfmt->u.pdb_info->used_subfiles; i++)
+    for (i = 0; i < modfmt->u.old_pdb_info->used_subfiles; i++)
     {
-        pdb_free_file(&modfmt->u.pdb_info->pdb_files[i]);
-        if (modfmt->u.pdb_info->pdb_files[i].image)
-            UnmapViewOfFile(modfmt->u.pdb_info->pdb_files[i].image);
-        if (modfmt->u.pdb_info->pdb_files[i].hMap)
-            CloseHandle(modfmt->u.pdb_info->pdb_files[i].hMap);
+        pdb_free_file(&modfmt->u.old_pdb_info->pdb_files[i]);
+        if (modfmt->u.old_pdb_info->pdb_files[i].image)
+            UnmapViewOfFile(modfmt->u.old_pdb_info->pdb_files[i].image);
     }
     HeapFree(GetProcessHeap(), 0, modfmt);
 }
@@ -3293,46 +3343,13 @@ static void pdb_convert_symbol_file(const PDB_SYMBOLS* symbols,
         sfile->symbol_size  = sym_file->symbol_size;
         sfile->lineno_size  = sym_file->lineno_size;
         sfile->lineno2_size = sym_file->lineno2_size;
-        *size = sizeof(PDB_SYMBOL_FILE) - 1;
+        *size = sizeof(PDB_SYMBOL_FILE);
     }
     else
     {
         memcpy(sfile, image, sizeof(PDB_SYMBOL_FILE_EX));
-        *size = sizeof(PDB_SYMBOL_FILE_EX) - 1;
+        *size = sizeof(PDB_SYMBOL_FILE_EX);
     }
-}
-
-static HANDLE map_pdb_file(const struct process* pcs,
-                           const struct pdb_lookup* lookup,
-                           struct module* module)
-{
-    HANDLE      hFile, hMap = NULL;
-    WCHAR       dbg_file_path[MAX_PATH];
-    BOOL        ret = FALSE;
-
-    switch (lookup->kind)
-    {
-    case PDB_JG:
-        ret = path_find_symbol_file(pcs, module, lookup->filename, TRUE, NULL, lookup->timestamp,
-                                    lookup->age, dbg_file_path, &module->module.PdbUnmatched);
-        break;
-    case PDB_DS:
-        ret = path_find_symbol_file(pcs, module, lookup->filename, TRUE, &lookup->guid, 0,
-                                    lookup->age, dbg_file_path, &module->module.PdbUnmatched);
-        break;
-    }
-    if (!ret)
-    {
-        WARN("\tCouldn't find %s\n", lookup->filename);
-        return NULL;
-    }
-    if ((hFile = CreateFileW(dbg_file_path, GENERIC_READ, FILE_SHARE_READ, NULL,
-                             OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL)) != INVALID_HANDLE_VALUE)
-    {
-        hMap = CreateFileMappingW(hFile, NULL, PAGE_READONLY, 0, 0, NULL);
-        CloseHandle(hFile);
-    }
-    return hMap;
 }
 
 static void pdb_dispose_type_parse(struct codeview_type_parse* ctp)
@@ -3383,12 +3400,14 @@ static BOOL pdb_init_type_parse(const struct msc_debug_info* msc_dbg,
         ERR("-Unsupported hash of size %u\n", ctp->header.hash_value_size);
         return FALSE;
     }
-    ctp->hash_stream = pdb_read_stream(pdb_file, ctp->header.hash_stream);
-    /* FIXME always present? if not reconstruct ?*/
-    if (!ctp->hash_stream)
+    if (!(ctp->hash_stream = pdb_read_stream(pdb_file, ctp->header.hash_stream)))
     {
-        ERR("-Missing hash table in PDB file\n");
-        return FALSE;
+        if (ctp->header.last_index > ctp->header.first_index)
+        {
+            /* may be reconstruct hash table ? */
+            FIXME("-No hash table, while types exist\n");
+            return FALSE;
+        }
     }
 
     ctp->module = msc_dbg->module;
@@ -3420,7 +3439,7 @@ static BOOL pdb_init_type_parse(const struct msc_debug_info* msc_dbg,
     /* parse the remap table
      * => move listed type_id at first position of their hash buckets so that we force remap to them
      */
-    if (ctp->header.type_remap_size)
+    if (ctp->hash_stream && ctp->header.type_remap_size)
     {
         const unsigned* remap = (const unsigned*)((const BYTE*)ctp->hash_stream + ctp->header.type_remap_offset);
         unsigned i, capa, count_present;
@@ -3484,30 +3503,29 @@ static const char       PDB_DS_IDENT[] = "Microsoft C/C++ MSF 7.00\r\n\032DS\0";
  *		pdb_init
  *
  * Tries to load a pdb file
- * 'matched' is filled with the number of correct matches for this file:
- *      - age counts for one
- *      - timestamp or guid depending on kind counts for one
- * a wrong kind of file returns FALSE (FIXME ?)
  */
-static BOOL pdb_init(const struct pdb_lookup* pdb_lookup, struct pdb_file_info* pdb_file,
-                     const char* image, unsigned* matched)
+static BOOL pdb_init(struct pdb_file_info* pdb_file, const char* image)
 {
-    BOOL        ret = TRUE;
-
     /* check the file header, and if ok, load the TOC */
-    TRACE("PDB(%s): %.40s\n", pdb_lookup->filename, debugstr_an(image, 40));
+    TRACE("PDB: %.40s\n", debugstr_an(image, 40));
 
-    *matched = 0;
     if (!memcmp(image, PDB_JG_IDENT, sizeof(PDB_JG_IDENT)))
     {
         const struct PDB_JG_HEADER* pdb = (const struct PDB_JG_HEADER*)image;
         struct PDB_JG_ROOT*         root;
+        struct PDB_JG_TOC*          jg_toc;
 
-        pdb_file->u.jg.toc = pdb_jg_read(pdb, pdb->toc_block, pdb->toc.size);
-        root = pdb_read_jg_stream(pdb, pdb_file->u.jg.toc, 1);
+        jg_toc = pdb_jg_read(pdb, (unsigned short *)(pdb + 1), pdb->toc.size);
+        if (!jg_toc)
+        {
+            ERR("-Unable to get TOC from .PDB\n");
+            return FALSE;
+        }
+        root = pdb_read_jg_stream(pdb, jg_toc, 1);
         if (!root)
         {
-            ERR("-Unable to get root from .PDB in %s\n", pdb_lookup->filename);
+            ERR("-Unable to get root from .PDB\n");
+            pdb_free(jg_toc);
             return FALSE;
         }
         switch (root->Version)
@@ -3520,38 +3538,32 @@ static BOOL pdb_init(const struct pdb_lookup* pdb_lookup, struct pdb_file_info* 
         default:
             ERR("-Unknown root block version %d\n", root->Version);
         }
-        if (pdb_lookup->kind != PDB_JG)
-        {
-            WARN("Found %s, but wrong PDB kind\n", pdb_lookup->filename);
-            pdb_free(root);
-            return FALSE;
-        }
         pdb_file->kind = PDB_JG;
-        pdb_file->u.jg.timestamp = root->TimeDateStamp;
-        pdb_file->age = root->Age;
-        if (root->TimeDateStamp == pdb_lookup->timestamp) (*matched)++;
-        else WARN("Found %s, but wrong signature: %08x %08x\n",
-                  pdb_lookup->filename, root->TimeDateStamp, pdb_lookup->timestamp);
-        if (root->Age == pdb_lookup->age) (*matched)++;
-        else WARN("Found %s, but wrong age: %08x %08x\n",
-                  pdb_lookup->filename, root->Age, pdb_lookup->age);
-        TRACE("found JG for %s: age=%x timestamp=%x\n",
-              pdb_lookup->filename, root->Age, root->TimeDateStamp);
-        ret = pdb_load_stream_name_table(pdb_file, &root->names[0], root->cbNames);
+        pdb_file->u.jg.toc = jg_toc;
+        TRACE("found JG: age=%x timestamp=%x\n", root->Age, root->TimeDateStamp);
+        pdb_file->stream_dict = pdb_load_stream_name_table(&root->names[0], root->cbNames);
+        pdb_file->fpoext_stream = -1;
+
         pdb_free(root);
     }
     else if (!memcmp(image, PDB_DS_IDENT, sizeof(PDB_DS_IDENT)))
     {
         const struct PDB_DS_HEADER* pdb = (const struct PDB_DS_HEADER*)image;
         struct PDB_DS_ROOT*         root;
+        struct PDB_DS_TOC*          ds_toc;
 
-        pdb_file->u.ds.toc =
-            pdb_ds_read(pdb, (const UINT*)((const char*)pdb + pdb->toc_block * pdb->block_size),
-                        pdb->toc_size);
-        root = pdb_read_ds_stream(pdb, pdb_file->u.ds.toc, 1);
+        ds_toc = pdb_ds_read(pdb, (const UINT*)((const char*)pdb + (DWORD_PTR)pdb->toc_block * pdb->block_size),
+                             pdb->toc_size);
+        if (!ds_toc)
+        {
+            ERR("-Unable to get TOC from .PDB\n");
+            return FALSE;
+        }
+        root = pdb_read_ds_stream(pdb, ds_toc, 1);
         if (!root)
         {
-            ERR("-Unable to get root from .PDB in %s\n", pdb_lookup->filename);
+            ERR("-Unable to get root from .PDB\n");
+            pdb_free(ds_toc);
             return FALSE;
         }
         switch (root->Version)
@@ -3562,18 +3574,10 @@ static BOOL pdb_init(const struct pdb_lookup* pdb_lookup, struct pdb_file_info* 
             ERR("-Unknown root block version %u\n", root->Version);
         }
         pdb_file->kind = PDB_DS;
-        pdb_file->u.ds.guid = root->guid;
-        pdb_file->age = root->Age;
-        if (!memcmp(&root->guid, &pdb_lookup->guid, sizeof(GUID))) (*matched)++;
-        else WARN("Found %s, but wrong GUID: %s %s\n",
-                  pdb_lookup->filename, debugstr_guid(&root->guid),
-                     debugstr_guid(&pdb_lookup->guid));
-        if (root->Age == pdb_lookup->age) (*matched)++;
-        else WARN("Found %s, but wrong age: %08x %08x\n",
-                  pdb_lookup->filename, root->Age, pdb_lookup->age);
-        TRACE("found DS for %s: age=%x guid=%s\n",
-              pdb_lookup->filename, root->Age, debugstr_guid(&root->guid));
-        ret = pdb_load_stream_name_table(pdb_file, &root->names[0], root->cbNames);
+        pdb_file->u.ds.toc = ds_toc;
+        TRACE("found DS for: age=%x guid=%s\n", root->Age, debugstr_guid(&root->guid));
+        pdb_file->stream_dict = pdb_load_stream_name_table(&root->names[0], root->cbNames);
+        pdb_file->fpoext_stream = -1;
 
         pdb_free(root);
     }
@@ -3597,14 +3601,15 @@ static BOOL pdb_init(const struct pdb_lookup* pdb_lookup, struct pdb_file_info* 
             pdb_free(x);
         }
     }
-    return ret;
+    return pdb_file->stream_dict != NULL;
 }
 
-static BOOL pdb_process_internal(const struct process* pcs, 
-                                 const struct msc_debug_info* msc_dbg,
-                                 const struct pdb_lookup* pdb_lookup,
-                                 struct pdb_module_info* pdb_module_info,
-                                 unsigned module_index);
+static BOOL pdb_process_internal(const struct process *pcs,
+                                 const struct msc_debug_info *msc_dbg,
+                                 const WCHAR *filename,
+                                 struct old_pdb_module_info *pdb_module_info,
+                                 unsigned module_index,
+                                 BOOL *has_linenumber_info);
 
 DWORD pdb_get_file_indexinfo(void* image, DWORD size, SYMSRV_INDEX_INFOW* info)
 {
@@ -3613,8 +3618,47 @@ DWORD pdb_get_file_indexinfo(void* image, DWORD size, SYMSRV_INDEX_INFOW* info)
 
     if (!memcmp(image, PDB_JG_IDENT, sizeof(PDB_JG_IDENT)))
     {
-        FIXME("Unsupported for PDB files in JG format\n");
-        return ERROR_FILE_CORRUPT;
+        const struct PDB_JG_HEADER* pdb = (const struct PDB_JG_HEADER*)image;
+        struct PDB_JG_TOC*          jg_toc;
+        struct PDB_JG_ROOT*         root;
+        DWORD                       ec = ERROR_SUCCESS;
+
+        jg_toc = pdb_jg_read(pdb, (unsigned short*)(pdb + 1), pdb->toc.size);
+        root = pdb_read_jg_stream(pdb, jg_toc, 1);
+        if (!root)
+        {
+            ERR("-Unable to get root from .PDB\n");
+            pdb_free(jg_toc);
+            return ERROR_FILE_CORRUPT;
+        }
+        switch (root->Version)
+        {
+        case 19950623:      /* VC 4.0 */
+        case 19950814:
+        case 19960307:      /* VC 5.0 */
+        case 19970604:      /* VC 6.0 */
+            break;
+        default:
+            ERR("-Unknown root block version %d\n", root->Version);
+            ec = ERROR_FILE_CORRUPT;
+        }
+        if (ec == ERROR_SUCCESS)
+        {
+            info->dbgfile[0] = '\0';
+            memset(&info->guid, 0, sizeof(GUID));
+            info->guid.Data1 = root->TimeDateStamp;
+            info->pdbfile[0] = '\0';
+            info->age = root->Age;
+            info->sig = root->TimeDateStamp;
+            info->size = 0;
+            info->stripped = FALSE;
+            info->timestamp = 0;
+        }
+
+        pdb_free(jg_toc);
+        pdb_free(root);
+
+        return ec;
     }
     if (!memcmp(image, PDB_DS_IDENT, sizeof(PDB_DS_IDENT)))
     {
@@ -3623,7 +3667,7 @@ DWORD pdb_get_file_indexinfo(void* image, DWORD size, SYMSRV_INDEX_INFOW* info)
         struct PDB_DS_ROOT*         root;
         DWORD                       ec = ERROR_SUCCESS;
 
-        ds_toc = pdb_ds_read(pdb, (const UINT*)((const char*)pdb + pdb->toc_block * pdb->block_size),
+        ds_toc = pdb_ds_read(pdb, (const UINT*)((const char*)pdb + (DWORD_PTR)pdb->toc_block * pdb->block_size),
                              pdb->toc_size);
         root = pdb_read_ds_stream(pdb, ds_toc, 1);
         if (!root)
@@ -3676,13 +3720,12 @@ DWORD pdb_get_file_indexinfo(void* image, DWORD size, SYMSRV_INDEX_INFOW* info)
     return ERROR_BAD_FORMAT;
 }
 
-static void pdb_process_symbol_imports(const struct process* pcs, 
-                                       const struct msc_debug_info* msc_dbg,
-                                       const PDB_SYMBOLS* symbols,
-                                       const void* symbols_image,
-                                       const char* image,
-                                       const struct pdb_lookup* pdb_lookup,
-                                       struct pdb_module_info* pdb_module_info,
+static void pdb_process_symbol_imports(const struct process *pcs,
+                                       const struct msc_debug_info *msc_dbg,
+                                       const PDB_SYMBOLS *symbols,
+                                       const void *symbols_image,
+                                       const char *image,
+                                       struct old_pdb_module_info *pdb_module_info,
                                        unsigned module_index)
 {
     if (module_index == -1 && symbols && symbols->pdbimport_size)
@@ -3692,7 +3735,6 @@ static void pdb_process_symbol_imports(const struct process* pcs,
         const void*             last;
         const char*             ptr;
         int                     i = 0;
-        struct pdb_file_info    sf0 = pdb_module_info->pdb_files[0];
 
         imp = (const PDB_SYMBOL_IMPORT*)((const char*)symbols_image + sizeof(PDB_SYMBOLS) +
                                          symbols->module_size + symbols->sectcontrib_size +
@@ -3701,29 +3743,16 @@ static void pdb_process_symbol_imports(const struct process* pcs,
         last = (const char*)imp + symbols->pdbimport_size;
         while (imp < (const PDB_SYMBOL_IMPORT*)last)
         {
+            SYMSRV_INDEX_INFOW info;
+            BOOL line_info;
+
             ptr = (const char*)imp + sizeof(*imp) + strlen(imp->filename);
             if (i >= CV_MAX_MODULES) FIXME("Out of bounds!!!\n");
-            if (!stricmp(pdb_lookup->filename, imp->filename))
-            {
-                if (module_index != -1) FIXME("Twice the entry\n");
-                else module_index = i;
-                pdb_module_info->pdb_files[i] = sf0;
-            }
-            else
-            {
-                struct pdb_lookup       imp_pdb_lookup;
-
-                /* FIXME: this is an import of a JG PDB file
-                 * how's a DS PDB handled ?
-                 */
-                imp_pdb_lookup.filename = imp->filename;
-                imp_pdb_lookup.kind = PDB_JG;
-                imp_pdb_lookup.timestamp = imp->TimeDateStamp;
-                imp_pdb_lookup.age = imp->Age;
-                TRACE("got for %s: age=%u ts=%x\n",
-                      imp->filename, imp->Age, imp->TimeDateStamp);
-                pdb_process_internal(pcs, msc_dbg, &imp_pdb_lookup, pdb_module_info, i);
-            }
+            TRACE("got for %s: age=%u ts=%x\n",
+                  debugstr_a(imp->filename), imp->Age, imp->TimeDateStamp);
+            if (path_find_symbol_file(pcs, msc_dbg->module, imp->filename, TRUE, NULL, imp->TimeDateStamp, imp->Age, &info,
+                                      &msc_dbg->module->module.PdbUnmatched))
+                pdb_process_internal(pcs, msc_dbg, info.pdbfile, pdb_module_info, i, &line_info);
             i++;
             imp = (const PDB_SYMBOL_IMPORT*)((const char*)first + ((ptr - (const char*)first + strlen(ptr) + 1 + 3) & ~3));
         }
@@ -3739,38 +3768,44 @@ static void pdb_process_symbol_imports(const struct process* pcs,
     cv_current_module->allowed = TRUE;
 }
 
-static BOOL pdb_process_internal(const struct process* pcs, 
-                                 const struct msc_debug_info* msc_dbg,
-                                 const struct pdb_lookup* pdb_lookup,
-                                 struct pdb_module_info* pdb_module_info,
-                                 unsigned module_index)
+static BOOL pdb_process_internal(const struct process *pcs,
+                                 const struct msc_debug_info *msc_dbg,
+                                 const WCHAR *filename,
+                                 struct old_pdb_module_info *pdb_module_info,
+                                 unsigned module_index,
+                                 BOOL *has_linenumber_info)
 {
-    HANDLE                      hMap = NULL;
+    HANDLE                      hFile = NULL, hMap = NULL;
     char*                       image = NULL;
     BYTE*                       symbols_image = NULL;
     PDB_STRING_TABLE*           files_image = NULL;
-    unsigned                    matched;
     struct pdb_file_info*       pdb_file;
 
-    TRACE("Processing PDB file %s\n", pdb_lookup->filename);
+    TRACE("Processing PDB file %ls\n", filename);
 
+    *has_linenumber_info = FALSE;
     pdb_file = &pdb_module_info->pdb_files[module_index == -1 ? 0 : module_index];
     /* Open and map() .PDB file */
-    if ((hMap = map_pdb_file(pcs, pdb_lookup, msc_dbg->module)) == NULL ||
-        ((image = MapViewOfFile(hMap, FILE_MAP_READ, 0, 0, 0)) == NULL))
+    if ((hFile = CreateFileW(filename, GENERIC_READ, FILE_SHARE_READ, NULL,
+                             OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL)) == INVALID_HANDLE_VALUE ||
+        (hMap = CreateFileMappingW(hFile, NULL, PAGE_READONLY, 0, 0, NULL)) == NULL ||
+        (image = MapViewOfFile(hMap, FILE_MAP_READ, 0, 0, 0)) == NULL)
     {
-        WARN("Unable to open .PDB file: %s\n", pdb_lookup->filename);
+        WARN("Unable to open .PDB file: %ls\n", filename);
         CloseHandle(hMap);
+        CloseHandle(hFile);
         return FALSE;
     }
-    if (!pdb_init(pdb_lookup, pdb_file, image, &matched) || matched != 2)
+
+    CloseHandle(hFile);
+    CloseHandle(hMap);
+    /* old pdb reader */
+    if (!pdb_init(pdb_file, image))
     {
-        CloseHandle(hMap);
         UnmapViewOfFile(image);
         return FALSE;
     }
 
-    pdb_file->hMap = hMap;
     pdb_file->image = image;
     symbols_image = pdb_read_stream(pdb_file, 3);
     if (symbols_image)
@@ -3782,7 +3817,8 @@ static BOOL pdb_process_internal(const struct process* pcs,
         struct codeview_type_parse ipi_ctp;
         BYTE*       file;
         int         header_size = 0;
-        PDB_STREAM_INDEXES* psi;
+        unsigned    num_sub_streams;
+        const unsigned short* sub_streams;
         BOOL        ipi_ok;
 
         pdb_convert_symbols_header(&symbols, &header_size, symbols_image);
@@ -3798,29 +3834,18 @@ static BOOL pdb_process_internal(const struct process* pcs,
                 symbols.version, symbols.version);
         }
 
-        switch (symbols.stream_index_size)
-        {
-        case 0:
-        case sizeof(PDB_STREAM_INDEXES_OLD):
-            /* no fpo ext stream in this case */
-            break;
-        case sizeof(PDB_STREAM_INDEXES):
-        case sizeof(PDB_STREAM_INDEXES) + 2:
-            psi = (PDB_STREAM_INDEXES*)((const char*)symbols_image + sizeof(PDB_SYMBOLS) +
-                                        symbols.module_size + symbols.sectcontrib_size +
-                                        symbols.segmap_size + symbols.srcmodule_size +
-                                        symbols.pdbimport_size + symbols.unknown2_size);
-            pdb_file->fpoext_stream = psi->FPO_EXT;
-            break;
-        default:
-            FIXME("Unknown PDB_STREAM_INDEXES size (%u)\n", symbols.stream_index_size);
-            pdb_free(symbols_image);
-            return FALSE;
-        }
+        num_sub_streams = symbols.stream_index_size / sizeof(sub_streams[0]);
+        sub_streams = (const unsigned short*)((const char*)symbols_image + sizeof(PDB_SYMBOLS) +
+                                              symbols.module_size + symbols.sectcontrib_size +
+                                              symbols.segmap_size + symbols.srcmodule_size +
+                                              symbols.pdbimport_size + symbols.unknown2_size);
+        if (PDB_SIDX_FPOEXT < num_sub_streams)
+            pdb_file->fpoext_stream = sub_streams[PDB_SIDX_FPOEXT];
+
         files_image = pdb_read_strings(pdb_file);
 
         pdb_process_symbol_imports(pcs, msc_dbg, &symbols, symbols_image, image,
-                                   pdb_lookup, pdb_module_info, module_index);
+                                   pdb_module_info, module_index);
         pdb_process_types(msc_dbg, pdb_file);
 
         ipi_image = pdb_read_stream(pdb_file, 4);
@@ -3838,9 +3863,10 @@ static BOOL pdb_process_internal(const struct process* pcs,
             data = pdb_read_stream(pdb_file, symbols.global_hash_stream);
             if (data)
             {
-                codeview_snarf_sym_hashtable(msc_dbg, globalimage, global_size,
-                                             data, pdb_get_stream_size(pdb_file, symbols.global_hash_stream),
-                                             pdb_global_feed_types);
+                if (codeview_snarf_sym_hashtable(msc_dbg, globalimage, global_size,
+                                                 data, pdb_get_stream_size(pdb_file, symbols.global_hash_stream),
+                                                 pdb_global_feed_types))
+                    *has_linenumber_info = TRUE;
                 pdb_free((void*)data);
             }
         }
@@ -3862,16 +3888,25 @@ static BOOL pdb_process_internal(const struct process* pcs,
             {
                 struct cv_module_snarf cvmod = {ipi_ok ? &ipi_ctp : NULL, (const void*)(modimage + sfile.symbol_size), sfile.lineno2_size,
                     files_image};
-                codeview_snarf(msc_dbg, modimage, sizeof(DWORD), sfile.symbol_size, &cvmod, file_name);
+                codeview_snarf(msc_dbg, modimage, sizeof(DWORD), sfile.symbol_size,
+                               &cvmod, file_name);
 
                 if (sfile.lineno_size && sfile.lineno2_size)
-                    FIXME("Both line info present... only supporting second\n");
+                    FIXME("Both line info present... preferring second\n");
+                if (sfile.lineno2_size)
+                {
+                    if (((SymGetOptions() & SYMOPT_LOAD_LINES) && codeview_snarf_linetab2(msc_dbg, &cvmod)))
+                        *has_linenumber_info = TRUE;
+                }
                 else if (sfile.lineno_size)
-                    codeview_snarf_linetab(msc_dbg,
-                                           modimage + sfile.symbol_size,
-                                           sfile.lineno_size,
-                                           pdb_file->kind == PDB_JG);
-
+                {
+                    if ((SymGetOptions() & SYMOPT_LOAD_LINES) &&
+                             codeview_snarf_linetab(msc_dbg,
+                                                    modimage + sfile.symbol_size,
+                                                    sfile.lineno_size,
+                                                    pdb_file->kind == PDB_JG))
+                        *has_linenumber_info = TRUE;
+                }
                 pdb_free(modimage);
             }
             file_name += strlen(file_name) + 1;
@@ -3887,9 +3922,11 @@ static BOOL pdb_process_internal(const struct process* pcs,
             data = pdb_read_stream(pdb_file, symbols.global_hash_stream);
             if (data)
             {
-                codeview_snarf_sym_hashtable(msc_dbg, globalimage, global_size,
-                                             data, pdb_get_stream_size(pdb_file, symbols.global_hash_stream),
-                                             pdb_global_feed_variables);
+                if (codeview_snarf_sym_hashtable(msc_dbg, globalimage, global_size,
+                                                 data, pdb_get_stream_size(pdb_file,
+                                                                           symbols.global_hash_stream),
+                                                 pdb_global_feed_variables))
+                    *has_linenumber_info = TRUE;
                 pdb_free((void*)data);
             }
             if (!(dbghelp_options & SYMOPT_NO_PUBLICS) && (data = pdb_read_stream(pdb_file, symbols.public_stream)))
@@ -3906,397 +3943,101 @@ static BOOL pdb_process_internal(const struct process* pcs,
     }
     else
         pdb_process_symbol_imports(pcs, msc_dbg, NULL, NULL, image,
-                                   pdb_lookup, pdb_module_info, module_index);
+                                   pdb_module_info, module_index);
 
     pdb_free(symbols_image);
     pdb_free(files_image);
 
+    pdb_free_file(pdb_file);
+
     return TRUE;
 }
 
-static BOOL pdb_process_file(const struct process* pcs, 
-                             const struct msc_debug_info* msc_dbg,
-                             struct pdb_lookup* pdb_lookup)
+static const struct module_format_vtable old_pdb_module_format_vtable =
 {
-    BOOL                        ret;
-    struct module_format*       modfmt;
-    struct pdb_module_info*     pdb_module_info;
+    pdb_module_remove,
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    pdb_location_compute,
+};
 
-    modfmt = HeapAlloc(GetProcessHeap(), 0,
-                       sizeof(struct module_format) + sizeof(struct pdb_module_info));
-    if (!modfmt) return FALSE;
+static BOOL old_pdb_process_file(const struct process *pcs,
+                                 const struct msc_debug_info *msc_dbg,
+                                 const WCHAR *filename, BOOL *has_linenumber_info)
+{
+    struct module_format*       modfmt;
+    struct old_pdb_module_info* pdb_module_info;
+    BOOL                        ret;
+
+    if (!(modfmt = HeapAlloc(GetProcessHeap(), 0,
+                             sizeof(struct module_format) + sizeof(struct old_pdb_module_info))))
+        return FALSE;
 
     pdb_module_info = (void*)(modfmt + 1);
-    msc_dbg->module->format_info[DFI_PDB] = modfmt;
-    modfmt->module      = msc_dbg->module;
-    modfmt->remove      = pdb_module_remove;
-    modfmt->loc_compute = pdb_location_compute;
-    modfmt->u.pdb_info  = pdb_module_info;
+    msc_dbg->module->format_info[DFI_OLD_PDB] = modfmt;
+    modfmt->module         = msc_dbg->module;
+    modfmt->vtable         = &old_pdb_module_format_vtable;
+    modfmt->u.old_pdb_info = pdb_module_info;
 
     memset(cv_zmodules, 0, sizeof(cv_zmodules));
     codeview_init_basic_types(msc_dbg->module);
-    ret = pdb_process_internal(pcs, msc_dbg, pdb_lookup,
-                               msc_dbg->module->format_info[DFI_PDB]->u.pdb_info, -1);
+    ret = pdb_process_internal(pcs, msc_dbg, filename,
+                               msc_dbg->module->format_info[DFI_OLD_PDB]->u.old_pdb_info, -1, has_linenumber_info);
     codeview_clear_type_table();
-    if (ret)
+    if (!ret)
     {
-        struct pdb_module_info*     pdb_info = msc_dbg->module->format_info[DFI_PDB]->u.pdb_info;
-        msc_dbg->module->module.SymType = SymPdb;
-        if (pdb_info->pdb_files[0].kind == PDB_JG)
-            msc_dbg->module->module.PdbSig = pdb_info->pdb_files[0].u.jg.timestamp;
-        else
-            msc_dbg->module->module.PdbSig70 = pdb_info->pdb_files[0].u.ds.guid;
-        msc_dbg->module->module.PdbAge = pdb_info->pdb_files[0].age;
-        MultiByteToWideChar(CP_ACP, 0, pdb_lookup->filename, -1,
-                            msc_dbg->module->module.LoadedPdbName,
-                            ARRAY_SIZE(msc_dbg->module->module.LoadedPdbName));
-        /* FIXME: we could have a finer grain here */
-        msc_dbg->module->module.LineNumbers = TRUE;
-        msc_dbg->module->module.GlobalSymbols = TRUE;
-        msc_dbg->module->module.TypeInfo = TRUE;
-        msc_dbg->module->module.SourceIndexed = TRUE;
-        msc_dbg->module->module.Publics = TRUE;
-    }
-    else
-    {
-        msc_dbg->module->format_info[DFI_PDB] = NULL;
+        msc_dbg->module->format_info[DFI_OLD_PDB] = NULL;
         HeapFree(GetProcessHeap(), 0, modfmt);
     }
     return ret;
 }
 
-BOOL pdb_fetch_file_info(const struct pdb_lookup* pdb_lookup, unsigned* matched)
+static BOOL pdb_process_file(const struct process *pcs,
+                             const struct msc_debug_info *msc_dbg,
+                             const char *filename, const GUID *guid, DWORD timestamp, DWORD age)
 {
-    HANDLE              hFile, hMap = NULL;
-    char*               image = NULL;
-    BOOL                ret;
-    struct pdb_file_info pdb_file;
+    SYMSRV_INDEX_INFOW          info;
+    BOOL                        unmatched, has_linenumber_info, ret;
 
-    if ((hFile = CreateFileA(pdb_lookup->filename, GENERIC_READ, FILE_SHARE_READ, NULL,
-                             OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL)) == INVALID_HANDLE_VALUE ||
-        ((hMap = CreateFileMappingW(hFile, NULL, PAGE_READONLY, 0, 0, NULL)) == NULL) ||
-        ((image = MapViewOfFile(hMap, FILE_MAP_READ, 0, 0, 0)) == NULL))
+    if (!msc_dbg->module->dont_load_symbols &&
+        path_find_symbol_file(pcs, msc_dbg->module, filename, TRUE, guid, timestamp, age, &info, &unmatched))
     {
-        WARN("Unable to open .PDB file: %s\n", pdb_lookup->filename);
-        ret = FALSE;
-    }
-    else
-    {
-        ret = pdb_init(pdb_lookup, &pdb_file, image, matched);
-        pdb_free_file(&pdb_file);
-    }
-
-    if (image) UnmapViewOfFile(image);
-    if (hMap) CloseHandle(hMap);
-    if (hFile != INVALID_HANDLE_VALUE) CloseHandle(hFile);
-
-    return ret;
-}
-
-/*========================================================================
- * FPO unwinding code
- */
-
-/* Stack unwinding is based on postfixed operations.
- * Let's define our Postfix EValuator
- */
-#define PEV_MAX_LEN      32
-struct pevaluator
-{
-    struct cpu_stack_walk*  csw;
-    struct pool             pool;
-    struct vector           stack;
-    unsigned                stk_index;
-    struct hash_table       values;
-    char                    error[64];
-};
-
-struct zvalue
-{
-    DWORD_PTR                   value;
-    struct hash_table_elt       elt;
-};
-
-#define PEV_ERROR(pev, msg)       snprintf((pev)->error, sizeof((pev)->error), "%s", (msg))
-#define PEV_ERROR1(pev, msg, pmt) snprintf((pev)->error, sizeof((pev)->error), (msg), (pmt))
-
-#if 0
-static void pev_dump_stack(struct pevaluator* pev)
-{
-    unsigned i;
-    FIXME("stack #%d\n", pev->stk_index);
-    for (i = 0; i < pev->stk_index; i++)
-    {
-        FIXME("\t%d) %s\n", i, *(char**)vector_at(&pev->stack, i));
-    }
-}
-#endif
-
-/* get the value out of an operand (variable or literal) */
-static BOOL  pev_get_val(struct pevaluator* pev, const char* str, DWORD_PTR* val)
-{
-    char*                       n;
-    struct hash_table_iter      hti;
-    void*                       ptr;
-
-    switch (str[0])
-    {
-    case '$':
-    case '.':
-        hash_table_iter_init(&pev->values, &hti, str);
-        while ((ptr = hash_table_iter_up(&hti)))
-        {
-            if (!strcmp(CONTAINING_RECORD(ptr, struct zvalue, elt)->elt.name, str))
-            {
-                *val = CONTAINING_RECORD(ptr, struct zvalue, elt)->value;
-                return TRUE;
-            }
-        }
-        return PEV_ERROR1(pev, "get_zvalue: no value found (%s)", str);
-    default:
-        *val = strtol(str, &n, 10);
-        if (n == str || *n != '\0')
-            return PEV_ERROR1(pev, "get_val: not a literal (%s)", str);
-        return TRUE;
-    }
-}
-
-/* push an operand onto the stack */
-static BOOL  pev_push(struct pevaluator* pev, const char* elt)
-{
-    char**      at;
-    if (pev->stk_index < vector_length(&pev->stack))
-        at = vector_at(&pev->stack, pev->stk_index);
-    else
-        at = vector_add(&pev->stack, &pev->pool);
-    if (!at) return PEV_ERROR(pev, "push: out of memory");
-    *at = pool_strdup(&pev->pool, elt);
-    pev->stk_index++;
-    return TRUE;
-}
-
-/* pop an operand from the stack */
-static BOOL  pev_pop(struct pevaluator* pev, char* elt)
-{
-    char**      at = vector_at(&pev->stack, --pev->stk_index);
-    if (!at) return PEV_ERROR(pev, "pop: stack empty");
-    strcpy(elt, *at);
-    return TRUE;
-}
-
-/* pop an operand from the stack, and gets its value */
-static BOOL  pev_pop_val(struct pevaluator* pev, DWORD_PTR* val)
-{
-    char        p[PEV_MAX_LEN];
-
-    return pev_pop(pev, p) && pev_get_val(pev, p, val);
-}
-
-/* set var 'name' a new value (creates the var if it doesn't exist) */
-static BOOL  pev_set_value(struct pevaluator* pev, const char* name, DWORD_PTR val)
-{
-    struct hash_table_iter      hti;
-    void*                       ptr;
-
-    hash_table_iter_init(&pev->values, &hti, name);
-    while ((ptr = hash_table_iter_up(&hti)))
-    {
-        if (!strcmp(CONTAINING_RECORD(ptr, struct zvalue, elt)->elt.name, name))
-        {
-            CONTAINING_RECORD(ptr, struct zvalue, elt)->value = val;
-            break;
-        }
-    }
-    if (!ptr)
-    {
-        struct zvalue* zv = pool_alloc(&pev->pool, sizeof(*zv));
-        if (!zv) return PEV_ERROR(pev, "set_value: out of memory");
-        zv->value = val;
-
-        zv->elt.name = pool_strdup(&pev->pool, name);
-        hash_table_add(&pev->values, &zv->elt);
-    }
-    return TRUE;
-}
-
-/* execute a binary operand from the two top most values on the stack.
- * puts result on top of the stack */
-static BOOL  pev_binop(struct pevaluator* pev, char op)
-{
-    char        res[PEV_MAX_LEN];
-    DWORD_PTR   v1, v2, c;
-
-    if (!pev_pop_val(pev, &v1) || !pev_pop_val(pev, &v2)) return FALSE;
-    switch (op)
-    {
-    case '+': c = v1 + v2; break;
-    case '-': c = v1 - v2; break;
-    case '*': c = v1 * v2; break;
-    case '/': c = v1 / v2; break;
-    case '%': c = v1 % v2; break;
-    default: return PEV_ERROR1(pev, "binop: unknown op (%c)", op);
-    }
-    snprintf(res, sizeof(res), "%Id", c);
-    pev_push(pev, res);
-    return TRUE;
-}
-
-/* pops top most operand, dereference it, on pushes the result on top of the stack */
-static BOOL  pev_deref(struct pevaluator* pev)
-{
-    char        res[PEV_MAX_LEN];
-    DWORD_PTR   v1, v2 = 0;
-
-    if (!pev_pop_val(pev, &v1)) return FALSE;
-    if (!sw_read_mem(pev->csw, v1, &v2, pev->csw->cpu->word_size))
-        return PEV_ERROR1(pev, "deref: cannot read mem at %Ix\n", v1);
-    snprintf(res, sizeof(res), "%Id", v2);
-    pev_push(pev, res);
-    return TRUE;
-}
-
-/* assign value to variable (from two top most operands) */
-static BOOL  pev_assign(struct pevaluator* pev)
-{
-    char                p2[PEV_MAX_LEN];
-    DWORD_PTR           v1;
-
-    if (!pev_pop_val(pev, &v1) || !pev_pop(pev, p2)) return FALSE;
-    if (p2[0] != '$') return PEV_ERROR1(pev, "assign: %s isn't a variable", p2);
-    pev_set_value(pev, p2, v1);
-
-    return TRUE;
-}
-
-/* initializes the postfix evaluator */
-static void  pev_init(struct pevaluator* pev, struct cpu_stack_walk* csw,
-                      PDB_FPO_DATA* fpoext, struct pdb_cmd_pair* cpair)
-{
-    pev->csw = csw;
-    pool_init(&pev->pool, 512);
-    vector_init(&pev->stack, sizeof(char*), 8);
-    pev->stk_index = 0;
-    hash_table_init(&pev->pool, &pev->values, 8);
-    pev->error[0] = '\0';
-    for (; cpair->name; cpair++)
-        pev_set_value(pev, cpair->name, *cpair->pvalue);
-    pev_set_value(pev, ".raSearchStart", fpoext->start);
-    pev_set_value(pev, ".cbLocals",      fpoext->locals_size);
-    pev_set_value(pev, ".cbParams",      fpoext->params_size);
-    pev_set_value(pev, ".cbSavedRegs",   fpoext->savedregs_size);
-}
-
-static BOOL  pev_free(struct pevaluator* pev, struct pdb_cmd_pair* cpair)
-{
-    DWORD_PTR   val;
-
-    if (cpair) for (; cpair->name; cpair++)
-    {
-        if (pev_get_val(pev, cpair->name, &val))
-            *cpair->pvalue = val;
-    }
-    pool_destroy(&pev->pool);
-    return TRUE;
-}
-
-static BOOL  pdb_parse_cmd_string(struct cpu_stack_walk* csw, PDB_FPO_DATA* fpoext,
-                                  const char* cmd, struct pdb_cmd_pair* cpair)
-{
-    char                token[PEV_MAX_LEN];
-    char*               ptok = token;
-    const char*         ptr;
-    BOOL                over = FALSE;
-    struct pevaluator   pev;
-
-    if (!cmd) return FALSE;
-    pev_init(&pev, csw, fpoext, cpair);
-    for (ptr = cmd; !over; ptr++)
-    {
-        if (*ptr == ' ' || (over = *ptr == '\0'))
-        {
-            *ptok = '\0';
-
-            if (!strcmp(token, "+") || !strcmp(token, "-") || !strcmp(token, "*") ||
-                !strcmp(token, "/") || !strcmp(token, "%"))
-            {
-                if (!pev_binop(&pev, token[0])) goto done;
-            }
-            else if (!strcmp(token, "^"))
-            {
-                if (!pev_deref(&pev)) goto done;
-            }
-            else if (!strcmp(token, "="))
-            {
-                if (!pev_assign(&pev)) goto done;
-            }
-            else
-            {
-                if (!pev_push(&pev, token)) goto done;
-            }
-            ptok = token;
-        }
+        if (getenv("WINE_DBGHELP_OLD_PDB")) /* keep using old pdb reader */
+            ret = old_pdb_process_file(pcs, msc_dbg, info.pdbfile, &has_linenumber_info);
         else
+            ret = pdb_init_modfmt(pcs, msc_dbg, info.pdbfile, &has_linenumber_info);
+
+        if (ret)
         {
-            if (ptok - token >= PEV_MAX_LEN - 1)
-            {
-                PEV_ERROR1(&pev, "parse: token too long (%s)", ptr - (ptok - token));
-                goto done;
-            }
-            *ptok++ = *ptr;
+            msc_dbg->module->module.SymType = SymPdb;
+            msc_dbg->module->module.PdbSig = info.sig;
+            msc_dbg->module->module.PdbAge = info.age;
+            msc_dbg->module->module.PdbSig70 = info.guid;
+            msc_dbg->module->module.PdbUnmatched = unmatched;
+            wcscpy(msc_dbg->module->module.LoadedPdbName, info.pdbfile);
+
+            /* FIXME: we could have a finer grain here */
+            msc_dbg->module->module.LineNumbers = has_linenumber_info;
+            msc_dbg->module->module.GlobalSymbols = TRUE;
+            msc_dbg->module->module.TypeInfo = TRUE;
+            msc_dbg->module->module.SourceIndexed = TRUE;
+            msc_dbg->module->module.Publics = TRUE;
+
+            return TRUE;
         }
     }
-    pev_free(&pev, cpair);
-    return TRUE;
-done:
-    FIXME("Couldn't evaluate %s => %s\n", wine_dbgstr_a(cmd), pev.error);
-    pev_free(&pev, NULL);
+    msc_dbg->module->module.SymType = SymNone;
+    if (guid)
+        msc_dbg->module->module.PdbSig70 = *guid;
+    else
+        memset(&msc_dbg->module->module.PdbSig70, 0, sizeof(GUID));
+    msc_dbg->module->module.PdbSig = 0;
+    msc_dbg->module->module.PdbAge = age;
     return FALSE;
-}
-
-BOOL pdb_virtual_unwind(struct cpu_stack_walk *csw, DWORD_PTR ip,
-    union ctx *context, struct pdb_cmd_pair *cpair)
-{
-    struct module_pair          pair;
-    struct pdb_module_info*     pdb_info;
-    PDB_FPO_DATA*               fpoext;
-    unsigned                    i, size;
-    PDB_STRING_TABLE*           strbase;
-    BOOL                        ret = TRUE;
-
-    if (!module_init_pair(&pair, csw->hProcess, ip)) return FALSE;
-    if (!pair.effective->format_info[DFI_PDB]) return FALSE;
-    pdb_info = pair.effective->format_info[DFI_PDB]->u.pdb_info;
-    TRACE("searching %Ix => %Ix\n", ip, ip - (DWORD_PTR)pair.effective->module.BaseOfImage);
-    ip -= (DWORD_PTR)pair.effective->module.BaseOfImage;
-
-    strbase = pdb_read_strings(&pdb_info->pdb_files[0]);
-    if (!strbase) return FALSE;
-    fpoext = pdb_read_stream(&pdb_info->pdb_files[0], pdb_info->pdb_files[0].fpoext_stream);
-    size = pdb_get_stream_size(&pdb_info->pdb_files[0], pdb_info->pdb_files[0].fpoext_stream);
-    if (fpoext && (size % sizeof(*fpoext)) == 0)
-    {
-        size /= sizeof(*fpoext);
-        for (i = 0; i < size; i++)
-        {
-            if (fpoext[i].start <= ip && ip < fpoext[i].start + fpoext[i].func_size)
-            {
-                TRACE("\t%08x %08x %8x %8x %4x %4x %4x %08x %s\n",
-                      fpoext[i].start, fpoext[i].func_size, fpoext[i].locals_size,
-                      fpoext[i].params_size, fpoext[i].maxstack_size, fpoext[i].prolog_size,
-                      fpoext[i].savedregs_size, fpoext[i].flags,
-                      wine_dbgstr_a(pdb_get_string_table_entry(strbase, fpoext[i].str_offset)));
-                ret = pdb_parse_cmd_string(csw, &fpoext[i],
-                                           pdb_get_string_table_entry(strbase, fpoext[i].str_offset),
-                                           cpair);
-                break;
-            }
-        }
-    }
-    else ret = FALSE;
-    pdb_free(fpoext);
-    pdb_free(strbase);
-
-    return ret;
 }
 
 /*========================================================================
@@ -4309,12 +4050,11 @@ BOOL pdb_virtual_unwind(struct cpu_stack_walk *csw, DWORD_PTR ip,
 #define CODEVIEW_NB11_SIG       MAKESIG('N','B','1','1')
 #define CODEVIEW_RSDS_SIG       MAKESIG('R','S','D','S')
 
-static BOOL codeview_process_info(const struct process* pcs, 
-                                  const struct msc_debug_info* msc_dbg)
+static BOOL codeview_process_info(const struct process *pcs,
+                                  const struct msc_debug_info *msc_dbg)
 {
     const DWORD*                signature = (const DWORD*)msc_dbg->root;
     BOOL                        ret = FALSE;
-    struct pdb_lookup           pdb_lookup;
 
     TRACE("Processing signature %.4s\n", (const char*)signature);
 
@@ -4328,7 +4068,8 @@ static BOOL codeview_process_info(const struct process* pcs,
         const OMFDirEntry*      ent;
         const OMFDirEntry*      prev;
         const OMFDirEntry*      next;
-        unsigned int                    i;
+        unsigned int            i;
+        BOOL                    has_linenumber_info = FALSE;
 
         codeview_init_basic_types(msc_dbg->module);
 
@@ -4369,27 +4110,31 @@ static BOOL codeview_process_info(const struct process* pcs,
             {
                 codeview_snarf(msc_dbg, msc_dbg->root + ent->lfo, sizeof(DWORD), ent->cb, NULL, NULL);
 
-                /*
-                 * Check the next and previous entry.  If either is a
-                 * sstSrcModule, it contains the line number info for
-                 * this file.
-                 *
-                 * FIXME: This is not a general solution!
-                 */
-                if (next && next->iMod == ent->iMod && next->SubSection == sstSrcModule)
-                    codeview_snarf_linetab(msc_dbg, msc_dbg->root + next->lfo,
-                                           next->cb, TRUE);
+                if (SymGetOptions() & SYMOPT_LOAD_LINES)
+                {
+                    /*
+                     * Check the next and previous entry.  If either is a
+                     * sstSrcModule, it contains the line number info for
+                     * this file.
+                     *
+                     * FIXME: This is not a general solution!
+                     */
+                    if (next && next->iMod == ent->iMod && next->SubSection == sstSrcModule)
+                        if (codeview_snarf_linetab(msc_dbg, msc_dbg->root + next->lfo,
+                                                   next->cb, TRUE))
+                            has_linenumber_info = TRUE;
 
-                if (prev && prev->iMod == ent->iMod && prev->SubSection == sstSrcModule)
-                    codeview_snarf_linetab(msc_dbg, msc_dbg->root + prev->lfo,
-                                           prev->cb, TRUE);
-
+                    if (prev && prev->iMod == ent->iMod && prev->SubSection == sstSrcModule)
+                        if (codeview_snarf_linetab(msc_dbg, msc_dbg->root + prev->lfo,
+                                                   prev->cb, TRUE))
+                            has_linenumber_info = TRUE;
+                }
             }
         }
 
         msc_dbg->module->module.SymType = SymCv;
+        msc_dbg->module->module.LineNumbers = has_linenumber_info;
         /* FIXME: we could have a finer grain here */
-        msc_dbg->module->module.LineNumbers = TRUE;
         msc_dbg->module->module.GlobalSymbols = TRUE;
         msc_dbg->module->module.TypeInfo = TRUE;
         msc_dbg->module->module.SourceIndexed = TRUE;
@@ -4402,11 +4147,7 @@ static BOOL codeview_process_info(const struct process* pcs,
     case CODEVIEW_NB10_SIG:
     {
         const CODEVIEW_PDB_DATA* pdb = (const CODEVIEW_PDB_DATA*)msc_dbg->root;
-        pdb_lookup.filename = pdb->name;
-        pdb_lookup.kind = PDB_JG;
-        pdb_lookup.timestamp = pdb->timestamp;
-        pdb_lookup.age = pdb->age;
-        ret = pdb_process_file(pcs, msc_dbg, &pdb_lookup);
+        ret = pdb_process_file(pcs, msc_dbg, pdb->name, NULL, pdb->timestamp, pdb->age);
         break;
     }
     case CODEVIEW_RSDS_SIG:
@@ -4414,12 +4155,14 @@ static BOOL codeview_process_info(const struct process* pcs,
         const OMFSignatureRSDS* rsds = (const OMFSignatureRSDS*)msc_dbg->root;
 
         TRACE("Got RSDS type of PDB file: guid=%s age=%08x name=%s\n",
-              wine_dbgstr_guid(&rsds->guid), rsds->age, rsds->name);
-        pdb_lookup.filename = rsds->name;
-        pdb_lookup.kind = PDB_DS;
-        pdb_lookup.guid = rsds->guid;
-        pdb_lookup.age = rsds->age;
-        ret = pdb_process_file(pcs, msc_dbg, &pdb_lookup);
+              wine_dbgstr_guid(&rsds->guid), rsds->age, debugstr_a(rsds->name));
+        /* gcc/mingw and clang can emit build-id information, but with an empty PDB filename.
+         * Don't search for the .pdb file in that case.
+         */
+        if (rsds->name[0])
+            ret = pdb_process_file(pcs, msc_dbg, rsds->name, &rsds->guid, 0, rsds->age);
+        else
+            ret = TRUE;
         break;
     }
     default:
@@ -4430,8 +4173,9 @@ static BOOL codeview_process_info(const struct process* pcs,
     if (ret)
     {
         msc_dbg->module->module.CVSig = *signature;
-        memcpy(msc_dbg->module->module.CVData, msc_dbg->root,
-               sizeof(msc_dbg->module->module.CVData));
+        if (*signature == CODEVIEW_RSDS_SIG)
+            memcpy(msc_dbg->module->module.CVData, msc_dbg->root,
+                   sizeof(msc_dbg->module->module.CVData));
     }
     return ret;
 }
@@ -4525,6 +4269,26 @@ typedef struct _FPO_DATA
         ret = FALSE;
     }
     __ENDTRY
+
+    /* we haven't found yet any debug information, fallback to unmatched pdb */
+    if (!ret && module->module.SymType == SymDeferred)
+    {
+        SYMSRV_INDEX_INFOW info = {.sizeofstruct = sizeof(info)};
+        char buffer[MAX_PATH];
+        char *ext;
+        DWORD options;
+
+        WideCharToMultiByte(CP_ACP, 0, module->module.LoadedImageName, -1, buffer, ARRAY_SIZE(buffer), 0, NULL);
+        ext = strrchr(buffer, '.');
+        if (ext) strcpy(ext + 1, "pdb"); else strcat(buffer, ".pdb");
+        options = SymGetOptions();
+        SymSetOptions(options | SYMOPT_LOAD_ANYTHING);
+        ret = pdb_process_file(pcs, &msc_dbg, buffer, &null_guid, 0, 0);
+        SymSetOptions(options);
+        if (!ret && module->dont_load_symbols)
+            module->module.TimeDateStamp = 0;
+    }
+
     return ret;
 }
 
@@ -4569,5 +4333,80 @@ DWORD msc_get_file_indexinfo(void* image, const IMAGE_DEBUG_DIRECTORY* debug_dir
             num_misc_records++;
         }
     }
-    return info->stripped && !num_misc_records ? ERROR_BAD_EXE_FORMAT : ERROR_SUCCESS;
+    return (!num_dir || (info->stripped && !num_misc_records)) ? ERROR_BAD_EXE_FORMAT : ERROR_SUCCESS;
+}
+
+DWORD dbg_get_file_indexinfo(void* image, DWORD size, SYMSRV_INDEX_INFOW* info)
+{
+    const IMAGE_SEPARATE_DEBUG_HEADER *header;
+    IMAGE_DEBUG_DIRECTORY *dbg;
+    DWORD num_directories;
+
+    if (size < sizeof(*header)) return ERROR_BAD_FORMAT;
+    header = image;
+    if (header->Signature != 0x4944 /* DI */ ||
+        size < sizeof(*header) + header->NumberOfSections * sizeof(IMAGE_SECTION_HEADER) + header->ExportedNamesSize + header->DebugDirectorySize)
+        return ERROR_BAD_FORMAT;
+
+    info->size = header->SizeOfImage;
+    /* seems to use header's timestamp, not debug_directory one */
+    info->timestamp = header->TimeDateStamp;
+    info->stripped = FALSE; /* FIXME */
+
+    /* header is followed by:
+     * - header->NumberOfSections of IMAGE_SECTION_HEADER
+     * - header->ExportedNameSize
+     * - then num_directories of IMAGE_DEBUG_DIRECTORY
+     */
+    dbg = (IMAGE_DEBUG_DIRECTORY*)((char*)(header + 1) +
+                                   header->NumberOfSections * sizeof(IMAGE_SECTION_HEADER) +
+                                   header->ExportedNamesSize);
+    num_directories = header->DebugDirectorySize / sizeof(IMAGE_DEBUG_DIRECTORY);
+
+    return msc_get_file_indexinfo(image, dbg, num_directories, info);
+}
+
+BOOL old_pdb_virtual_unwind(struct cpu_stack_walk *csw, DWORD_PTR ip, union ctx *context)
+{
+    struct module_pair          pair;
+    struct old_pdb_module_info* pdb_info;
+    PDB_FPO_DATA*               fpoext;
+    unsigned                    i, size;
+    PDB_STRING_TABLE*           strbase;
+    BOOL                        ret = TRUE;
+
+    if (!module_init_pair(&pair, csw->hProcess, ip)) return FALSE;
+    if (!pair.effective->format_info[DFI_OLD_PDB]) return FALSE;
+    pdb_info = pair.effective->format_info[DFI_OLD_PDB]->u.old_pdb_info;
+    TRACE("searching %Ix => %Ix\n", ip, ip - (DWORD_PTR)pair.effective->module.BaseOfImage);
+    ip -= (DWORD_PTR)pair.effective->module.BaseOfImage;
+
+    strbase = pdb_read_strings(&pdb_info->pdb_files[0]);
+    if (!strbase) return FALSE;
+    fpoext = pdb_read_stream(&pdb_info->pdb_files[0], pdb_info->pdb_files[0].fpoext_stream);
+    size = pdb_get_stream_size(&pdb_info->pdb_files[0], pdb_info->pdb_files[0].fpoext_stream);
+    if (fpoext && (size % sizeof(*fpoext)) == 0)
+    {
+        size /= sizeof(*fpoext);
+        for (i = 0; i < size; i++)
+        {
+            if (fpoext[i].start <= ip && ip < fpoext[i].start + fpoext[i].func_size)
+            {
+                TRACE("\t%08x %08x %8x %8x %4x %4x %4x %08x %s\n",
+                      fpoext[i].start, fpoext[i].func_size, fpoext[i].locals_size,
+                      fpoext[i].params_size, fpoext[i].maxstack_size, fpoext[i].prolog_size,
+                      fpoext[i].savedregs_size, fpoext[i].flags,
+                      debugstr_a(pdb_get_string_table_entry(strbase, fpoext[i].str_offset)));
+                ret = pdb_fpo_unwind_parse_cmd_string(csw, &fpoext[i],
+                                                      pdb_get_string_table_entry(strbase, fpoext[i].str_offset),
+                                                      &context->x86);
+                break;
+            }
+        }
+    }
+    else ret = FALSE;
+    pdb_free(fpoext);
+    pdb_free(strbase);
+
+    return ret;
 }

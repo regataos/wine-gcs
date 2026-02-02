@@ -21,12 +21,9 @@
 
 #include <stdarg.h>
 
-#include "ntstatus.h"
-#define WIN32_NO_STATUS
 #define COBJMACROS
 #include "windef.h"
 #include "winbase.h"
-#include "winternl.h"
 #include "winuser.h"
 #include "winnls.h"
 #include "winreg.h"
@@ -265,6 +262,20 @@ void CDECL mono_print_handler_fn(const char *string, INT is_stdout)
     }
 }
 
+void CDECL mono_log_handler_fn(const char *log_domain, const char *log_level, const char *message, INT fatal, void *user_data)
+{
+    SIZE_T len = (log_domain ? strlen(log_domain) + 2 : 0) + strlen(message) + strlen("\n") + 1;
+    char *msg = calloc(len, sizeof(char));
+
+    if (msg)
+    {
+        sprintf(msg, "%s%s%s\n", log_domain ? log_domain : "", log_domain ? ": " : "", message);
+        mono_print_handler_fn(msg, 0);
+    }
+
+    free(msg);
+}
+
 BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
 {
     TRACE("(%p, %ld, %p)\n", hinstDLL, fdwReason, lpvReserved);
@@ -318,76 +329,8 @@ VOID WINAPI _CorImageUnloading(PVOID imageBase)
 
 HRESULT WINAPI _CorValidateImage(PVOID* imageBase, LPCWSTR imageName)
 {
-    IMAGE_COR20_HEADER *cliheader;
-    IMAGE_NT_HEADERS *nt;
-    ULONG size;
-
-    TRACE("(%p, %s)\n", imageBase, debugstr_w(imageName));
-
-    if (!imageBase)
-        return E_INVALIDARG;
-
-    nt = RtlImageNtHeader(*imageBase);
-    if (!nt)
-        return STATUS_INVALID_IMAGE_FORMAT;
-
-    cliheader = RtlImageDirectoryEntryToData(*imageBase, TRUE, IMAGE_DIRECTORY_ENTRY_COM_DESCRIPTOR, &size);
-    if (!cliheader || size < sizeof(*cliheader))
-        return STATUS_INVALID_IMAGE_FORMAT;
-
-#ifdef _WIN64
-    if (cliheader->Flags & COMIMAGE_FLAGS_32BITREQUIRED)
-        return STATUS_INVALID_IMAGE_FORMAT;
-
-    if (nt->OptionalHeader.Magic == IMAGE_NT_OPTIONAL_HDR64_MAGIC)
-    {
-        if (cliheader->Flags & COMIMAGE_FLAGS_ILONLY)
-        {
-            DWORD *entry = &nt->OptionalHeader.AddressOfEntryPoint;
-            DWORD old_protect;
-
-            if (!VirtualProtect(entry, sizeof(*entry), PAGE_READWRITE, &old_protect))
-                return E_UNEXPECTED;
-            *entry = 0;
-            if (!VirtualProtect(entry, sizeof(*entry), old_protect, &old_protect))
-                return E_UNEXPECTED;
-        }
-
-        return STATUS_SUCCESS;
-    }
-
-    if (nt->OptionalHeader.Magic == IMAGE_NT_OPTIONAL_HDR32_MAGIC)
-    {
-        if (!(cliheader->Flags & COMIMAGE_FLAGS_ILONLY))
-            return STATUS_INVALID_IMAGE_FORMAT;
-
-        FIXME("conversion of IMAGE_NT_HEADERS32 -> IMAGE_NT_HEADERS64 not implemented\n");
-        return STATUS_NOT_IMPLEMENTED;
-    }
-
-#else
-    if (nt->OptionalHeader.Magic == IMAGE_NT_OPTIONAL_HDR32_MAGIC)
-    {
-        if (cliheader->Flags & COMIMAGE_FLAGS_ILONLY)
-        {
-            DWORD *entry = &nt->OptionalHeader.AddressOfEntryPoint;
-            DWORD old_protect;
-
-            if (!VirtualProtect(entry, sizeof(*entry), PAGE_READWRITE, &old_protect))
-                return E_UNEXPECTED;
-            *entry = (nt->FileHeader.Characteristics & IMAGE_FILE_DLL) ?
-                ((DWORD_PTR)&_CorDllMain - (DWORD_PTR)*imageBase) :
-                ((DWORD_PTR)&_CorExeMain - (DWORD_PTR)*imageBase);
-            if (!VirtualProtect(entry, sizeof(*entry), old_protect, &old_protect))
-                return E_UNEXPECTED;
-        }
-
-        return STATUS_SUCCESS;
-    }
-
-#endif
-
-    return STATUS_INVALID_IMAGE_FORMAT;
+    TRACE("(%p, %s): stub\n", imageBase, debugstr_w(imageName));
+    return E_FAIL;
 }
 
 HRESULT WINAPI GetCORSystemDirectory(LPWSTR pbuffer, DWORD cchBuffer, DWORD *dwLength)
@@ -857,7 +800,7 @@ static BOOL invoke_appwiz(void)
     return ret;
 }
 
-static BOOL get_support_msi(LPCWSTR mono_path, LPWSTR msi_path)
+static BOOL get_support_msi(LPCWSTR mono_path, LPWSTR msi_path, BOOL ignore_version)
 {
     static const WCHAR support_msi_relative[] = {'\\','s','u','p','p','o','r','t','\\','w','i','n','e','m','o','n','o','-','s','u','p','p','o','r','t','.','m','s','i',0};
     UINT (WINAPI *pMsiOpenPackageW)(LPCWSTR,ULONG*);
@@ -895,7 +838,7 @@ static BOOL get_support_msi(LPCWSTR mono_path, LPWSTR msi_path)
     if (res == ERROR_SUCCESS) {
         TRACE("found support msi version %s at %s\n", versionstringbuf, debugstr_w(msi_path));
 
-        if (compare_versions(WINE_MONO_VERSION, versionstringbuf) <= 0)
+        if (ignore_version || compare_versions(WINE_MONO_VERSION, versionstringbuf) <= 0)
         {
             ret = TRUE;
         }
@@ -979,12 +922,12 @@ static BOOL install_wine_mono(void)
 
     initresult = CoInitialize(NULL);
 
-    ret = get_support_msi(mono_path, support_msi_path);
+    ret = get_support_msi(mono_path, support_msi_path, FALSE);
     if (!ret)
     {
         /* Try looking outside c:\windows\mono */
         ret = (get_mono_path(mono_path, TRUE) &&
-            get_support_msi(mono_path, support_msi_path));
+            get_support_msi(mono_path, support_msi_path, TRUE));
     }
 
     if (ret)

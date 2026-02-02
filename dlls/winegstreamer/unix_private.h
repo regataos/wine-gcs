@@ -46,6 +46,12 @@ extern GList *find_element_factories(GstElementFactoryListType type, GstRank min
         GstCaps *element_sink_caps, GstCaps *element_src_caps);
 extern GstElement *find_element(GstElementFactoryListType type,
         GstCaps *element_sink_caps, GstCaps *element_src_caps);
+/*
+ * Append `element` to `container`, updates the pointer to the first and last elements in the
+ * pipeline. Returns whether the operation succeeded.
+ *
+ * This takes the ownership of `element` whether it succeeded or not.
+ */
 extern bool append_element(GstElement *container, GstElement *element, GstElement **first, GstElement **last);
 extern bool link_src_to_sink(GstPad *src_pad, GstPad *sink_pad);
 extern bool link_src_to_element(GstPad *src_pad, GstElement *element);
@@ -59,20 +65,6 @@ extern void wg_format_from_caps(struct wg_format *format, const GstCaps *caps);
 extern bool wg_format_compare(const struct wg_format *a, const struct wg_format *b);
 extern GstCaps *wg_format_to_caps(const struct wg_format *format);
 extern uint32_t wg_channel_mask_from_gst(const GstAudioInfo *info);
-
-/* wg_source.c */
-
-extern NTSTATUS wg_source_create(void *args);
-extern NTSTATUS wg_source_destroy(void *args);
-extern NTSTATUS wg_source_get_stream_count(void *args);
-extern NTSTATUS wg_source_get_duration(void *args);
-extern NTSTATUS wg_source_get_position(void *args);
-extern NTSTATUS wg_source_set_position(void *args);
-extern NTSTATUS wg_source_push_data(void *args);
-extern NTSTATUS wg_source_read_data(void *args);
-extern NTSTATUS wg_source_get_stream_type(void *args);
-extern NTSTATUS wg_source_get_stream_tag(void *args);
-extern NTSTATUS wg_source_set_stream_flags(void *args);
 
 /* wg_transform.c */
 
@@ -88,6 +80,11 @@ extern NTSTATUS wg_transform_flush(void *args);
 extern NTSTATUS wg_transform_notify_qos(void *args);
 
 /* wg_media_type.c */
+
+static inline BOOL is_mf_video_area_empty(const MFVideoArea *area)
+{
+    return !area->OffsetX.value && !area->OffsetY.value && !area->Area.cx && !area->Area.cy;
+}
 
 extern GstCaps *caps_from_media_type(const struct wg_media_type *media_type);
 extern NTSTATUS caps_to_media_type(GstCaps *caps, struct wg_media_type *media_type,
@@ -124,7 +121,8 @@ extern void wg_allocator_release_sample(GstAllocator *allocator, struct wg_sampl
 
 /* media-converter */
 extern bool media_converter_init(void);
-extern bool get_untranscoded_stream_format(GstElement *container, uint32_t stream_index, GstCaps *caps);
+extern bool get_untranscoded_stream_format(GstElement *container, uint32_t stream_index,
+        struct wg_format *codec_format);
 
 static inline void touch_h264_used_tag(void)
 {
@@ -155,5 +153,7 @@ static inline void touch_h264_used_tag(void)
         GST_WARNING("STEAM_COMPAT_TRANSCODED_MEDIA_PATH not set, cannot create h264-used file");
     }
 }
+
+GST_ELEMENT_REGISTER_DECLARE(winegstreamerstepper);
 
 #endif /* __WINE_WINEGSTREAMER_UNIX_PRIVATE_H */

@@ -27,27 +27,6 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(quartz);
 
-static inline const char *debugstr_time(REFERENCE_TIME time)
-{
-    ULONGLONG abstime = time >= 0 ? time : -time;
-    unsigned int i = 0, j = 0;
-    char buffer[23], rev[23];
-
-    while (abstime || i <= 8)
-    {
-        buffer[i++] = '0' + (abstime % 10);
-        abstime /= 10;
-        if (i == 7) buffer[i++] = '.';
-    }
-    if (time < 0) buffer[i++] = '-';
-
-    while (i--) rev[j++] = buffer[i];
-    while (rev[j-1] == '0' && rev[j-2] != '.') --j;
-    rev[j] = 0;
-
-    return wine_dbg_sprintf("%s", rev);
-}
-
 struct buffer
 {
     INSSBuffer INSSBuffer_iface;
@@ -300,6 +279,44 @@ static HRESULT asf_stream_query_interface(struct strmbase_pin *iface, REFIID iid
     return S_OK;
 }
 
+static HRESULT asf_reader_start_stream(struct asf_reader *filter, LONGLONG start, LONGLONG duration, float rate)
+{
+    HRESULT hr;
+
+    EnterCriticalSection(&filter->status_cs);
+
+    if (SUCCEEDED(hr = IWMReader_Start(filter->reader, start, duration, rate, NULL)))
+    {
+        filter->status = -1;
+        while (filter->status != WMT_STARTED)
+            SleepConditionVariableCS(&filter->status_cv, &filter->status_cs, INFINITE);
+        hr = filter->result;
+    }
+
+    LeaveCriticalSection(&filter->status_cs);
+
+    return hr;
+}
+
+static HRESULT asf_reader_stop_stream(struct asf_reader *filter)
+{
+    HRESULT hr;
+
+    EnterCriticalSection(&filter->status_cs);
+
+    if (SUCCEEDED(hr = IWMReader_Stop(filter->reader)))
+    {
+        filter->status = -1;
+        while (filter->status != WMT_STOPPED)
+            SleepConditionVariableCS(&filter->status_cv, &filter->status_cs, INFINITE);
+        hr = filter->result;
+    }
+
+    LeaveCriticalSection(&filter->status_cs);
+
+    return hr;
+}
+
 static inline struct asf_stream *impl_from_IMediaSeeking(IMediaSeeking *iface)
 {
     return CONTAINING_RECORD(iface, struct asf_stream, seek.IMediaSeeking_iface);
@@ -307,8 +324,36 @@ static inline struct asf_stream *impl_from_IMediaSeeking(IMediaSeeking *iface)
 
 static HRESULT WINAPI media_seeking_ChangeCurrent(IMediaSeeking *iface)
 {
-    FIXME("iface %p stub!\n", iface);
-    return S_OK;
+    struct asf_stream *stream = impl_from_IMediaSeeking(iface);
+    struct asf_reader *filter = asf_reader_from_asf_stream(stream);
+    struct SourceSeeking *seek = &stream->seek;
+    HRESULT hr;
+    UINT i;
+
+    TRACE("iface %p.\n", iface);
+
+    /* Send begin flush commands downstream. */
+    for (i = 0; i < filter->stream_count; ++i)
+    {
+        if (FAILED(IPin_BeginFlush(stream->source.pin.peer)))
+            WARN("Failed to BeginFlush for stream %u.\n", i);
+    }
+
+    /* Stop the reader. */
+    hr = asf_reader_stop_stream(filter);
+
+    /* Send end flush commands downstream. */
+    for (i = 0; i < filter->stream_count; ++i)
+    {
+        if (FAILED(IPin_EndFlush(stream->source.pin.peer)))
+            WARN("Failed to EndFlush for stream %u.\n", i);
+    }
+
+    /* Start the reader. */
+    if (hr == S_OK)
+        hr = asf_reader_start_stream(filter, seek->llCurrent, seek->llDuration, seek->dRate);
+
+    return hr;
 }
 
 static HRESULT WINAPI media_seeking_ChangeStop(IMediaSeeking *iface)
@@ -459,6 +504,14 @@ static HRESULT asf_reader_init_stream(struct strmbase_filter *iface)
         if (!stream->source.pin.peer)
             continue;
 
+        value = IMemInputPin_ReceiveCanBlock(stream->source.pMemInputPin) == S_OK;
+        if (FAILED(hr = IWMReaderAdvanced2_SetOutputSetting(reader_advanced, i, L"DedicatedDeliveryThread",
+                WMT_TYPE_BOOL, (BYTE *)&value, sizeof(value))))
+        {
+            WARN("Failed to set DedicatedDeliveryThread for stream %u, hr %#lx\n", i, hr);
+            break;
+        }
+
         if (FAILED(hr = IMemAllocator_Commit(stream->source.pAllocator)))
         {
             WARN("Failed to commit stream %u allocator, hr %#lx\n", i, hr);
@@ -493,14 +546,6 @@ static HRESULT asf_reader_init_stream(struct strmbase_filter *iface)
             break;
         }
 
-        value = IMemInputPin_ReceiveCanBlock(stream->source.pMemInputPin) == S_OK;
-        if (FAILED(hr = IWMReaderAdvanced2_SetOutputSetting(reader_advanced, i, L"DedicatedDeliveryThread",
-                WMT_TYPE_BOOL, (BYTE *)&value, sizeof(value))))
-        {
-            WARN("Failed to set DedicatedDeliveryThread for stream %u, hr %#lx\n", i, hr);
-            break;
-        }
-
         selections[i] = WMT_ON;
     }
 
@@ -521,17 +566,7 @@ static HRESULT asf_reader_init_stream(struct strmbase_filter *iface)
     if (FAILED(hr))
         return hr;
 
-    EnterCriticalSection(&filter->status_cs);
-    if (SUCCEEDED(hr = IWMReader_Start(filter->reader, 0, 0, 1, NULL)))
-    {
-        filter->status = -1;
-        while (filter->status != WMT_STARTED)
-            SleepConditionVariableCS(&filter->status_cv, &filter->status_cs, INFINITE);
-        hr = filter->result;
-    }
-    LeaveCriticalSection(&filter->status_cs);
-
-    if (FAILED(hr))
+    if (FAILED(hr = asf_reader_start_stream(filter, 0, 0, 1.0)))
         WARN("Failed to start WMReader %p, hr %#lx\n", filter->reader, hr);
 
     return hr;
@@ -545,17 +580,7 @@ static HRESULT asf_reader_cleanup_stream(struct strmbase_filter *iface)
 
     TRACE("iface %p\n", iface);
 
-    EnterCriticalSection(&filter->status_cs);
-    if (SUCCEEDED(hr = IWMReader_Stop(filter->reader)))
-    {
-        filter->status = -1;
-        while (filter->status != WMT_STOPPED)
-            SleepConditionVariableCS(&filter->status_cv, &filter->status_cs, INFINITE);
-        hr = filter->result;
-    }
-    LeaveCriticalSection(&filter->status_cs);
-
-    if (FAILED(hr))
+    if (FAILED(hr = asf_reader_stop_stream(filter)))
         WARN("Failed to stop WMReader %p, hr %#lx\n", filter->reader, hr);
 
     for (i = 0; i < filter->stream_count; ++i)
@@ -840,7 +865,7 @@ static HRESULT WINAPI reader_callback_OnStatus(IWMReaderCallback *iface, WMT_STA
                     /* King of Fighters XIII requests the WMV decoder filter pins by name
                      * to connect them to a Sample Grabber filter.
                      */
-                    if (sgi && !strcmp(sgi, "222940"))
+                    if (sgi && (!strcmp(sgi, "222940") || !strcmp(sgi, "3050220")))
                         swprintf(name, ARRAY_SIZE(name), L"out0");
                     else
                         swprintf(name, ARRAY_SIZE(name), L"Raw Video %u", stream->index);
@@ -1089,7 +1114,7 @@ HRESULT asf_reader_create(IUnknown *outer, IUnknown **out)
     strmbase_filter_init(&object->filter, outer, &CLSID_WMAsfReader, &filter_ops);
     object->IFileSourceFilter_iface.lpVtbl = &file_source_vtbl;
 
-    InitializeCriticalSection(&object->status_cs);
+    InitializeCriticalSectionEx(&object->status_cs, 0, RTL_CRITICAL_SECTION_FLAG_FORCE_DEBUG_INFO);
     object->status_cs.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": status_cs");
 
     TRACE("Created WM ASF reader %p.\n", object);

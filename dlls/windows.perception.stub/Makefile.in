@@ -3,6 +3,7 @@ IMPORTS = combase user32
 
 SOURCES = \
 	classes.idl \
-	holographicspace.c \
+	anchor.c \
+	holographic_space.c \
 	main.c \
 	observer.c

@@ -28,6 +28,7 @@ SOURCES = \
 	asysta.idl \
 	atlbase.h \
 	atlcom.h \
+	atldef.h \
 	atliface.idl \
 	atlthunk.h \
 	atlwin.h \
@@ -57,6 +58,8 @@ SOURCES = \
 	bits5_0.idl \
 	bitsmsg.h \
 	bluetoothapis.h \
+	bthdef.h \
+	bthioctl.h \
 	bthsdpdef.h \
 	cderr.h \
 	cdosys.idl \
@@ -238,6 +241,7 @@ SOURCES = \
 	dinput.h \
 	dinputd.h \
 	directmanipulation.idl \
+	dispatcherqueue.idl \
 	dispdib.h \
 	dispex.idl \
 	dlgs.h \
@@ -267,6 +271,7 @@ SOURCES = \
 	dplobby.h \
 	dplobby8.h \
 	dpnathlp.h \
+	dragdropinterop.idl \
 	driverspecs.h \
 	drmexternals.idl \
 	dsclient.h \
@@ -301,6 +306,7 @@ SOURCES = \
 	dxgitype.idl \
 	dxva.h \
 	dxva2api.idl \
+	dxvahd.idl \
 	dyngraph.idl \
 	endpointvolume.idl \
 	errorrep.h \
@@ -324,6 +330,7 @@ SOURCES = \
 	fltdefs.h \
 	fontsub.h \
 	fusion.idl \
+	gameinput.idl \
 	gameux.idl \
 	gamingtcui.h \
 	gdiplus.h \
@@ -376,6 +383,7 @@ SOURCES = \
 	inaddr.h \
 	indexsrv.idl \
 	initguid.h \
+	inputpaneinterop.idl \
 	inputscope.idl \
 	inseng.idl \
 	inspectable.idl \
@@ -407,6 +415,7 @@ SOURCES = \
 	lmerr.h \
 	lmjoin.h \
 	lmmsg.h \
+	lmremutl.h \
 	lmserver.h \
 	lmshare.h \
 	lmstats.h \
@@ -441,6 +450,7 @@ SOURCES = \
 	mfplay.idl \
 	mfreadwrite.idl \
 	mftransform.idl \
+	mgmtapi.h \
 	midles.h \
 	mimeinfo.idl \
 	mimeole.idl \
@@ -469,6 +479,7 @@ SOURCES = \
 	msdaguid.h \
 	msdasc.idl \
 	msdasql.h \
+	msdelta.h \
 	mshtmcid.h \
 	mshtmdid.h \
 	mshtmhst.idl \
@@ -655,7 +666,9 @@ SOURCES = \
 	rmxfguid.h \
 	rmxftmpl.x \
 	roapi.h \
+	robuffer.idl \
 	roerrorapi.h \
+	rometadata.h \
 	rometadataresolution.h \
 	roparameterizediid.idl \
 	row.idl \
@@ -672,10 +685,15 @@ SOURCES = \
 	rpcsal.h \
 	rstbas.idl \
 	rstchg.idl \
+	rstfnd.idl \
+	rstidn.idl \
 	rstinf.idl \
 	rstloc.idl \
 	rstnot.idl \
+	rstscr.idl \
 	rstupd.idl \
+	rstxsc.idl \
+	rtlsupportapi.h \
 	rtutils.h \
 	rtworkq.idl \
 	sal.h \
@@ -746,6 +764,7 @@ SOURCES = \
 	tchar.h \
 	tcpestats.h \
 	tcpmib.h \
+	tdh.h \
 	textserv.h \
 	textstor.idl \
 	threadpoolapiset.h \
@@ -801,6 +820,8 @@ SOURCES = \
 	wdbgexts.h \
 	weakreference.idl \
 	webservices.h \
+	webview2.idl \
+	websocket.h \
 	werapi.h \
 	wfext.h \
 	wia.h \
@@ -820,12 +841,20 @@ SOURCES = \
 	windef.h \
 	windns.h \
 	windot11.h \
+	windows.applicationmodel.activation.idl \
+	windows.applicationmodel.background.idl \
 	windows.applicationmodel.core.idl \
+	windows.applicationmodel.datatransfer.dragdrop.core.idl \
+	windows.applicationmodel.datatransfer.dragdrop.idl \
+	windows.applicationmodel.datatransfer.idl \
 	windows.applicationmodel.idl \
+	windows.data.json.idl \
+	windows.data.xml.dom.idl \
 	windows.devices.bluetooth.idl \
 	windows.devices.enumeration.idl \
 	windows.devices.geolocation.idl \
 	windows.devices.haptics.idl \
+	windows.devices.input.idl \
 	windows.devices.power.idl \
 	windows.devices.radios.idl \
 	windows.devices.usb.idl \
@@ -844,23 +873,30 @@ SOURCES = \
 	windows.graphics.directx.idl \
 	windows.graphics.effects.idl \
 	windows.graphics.holographic.idl \
+	windows.graphics.idl \
+	windows.graphics.imaging.idl \
 	windows.h \
 	windows.management.deployment.idl \
 	windows.media.capture.idl \
 	windows.media.closedcaptioning.idl \
 	windows.media.devices.idl \
 	windows.media.effects.idl \
+	windows.media.faceanalysis.idl \
 	windows.media.idl \
 	windows.media.render.idl \
 	windows.media.speechrecognition.idl \
 	windows.media.speechsynthesis.idl \
 	windows.networking.connectivity.idl \
 	windows.networking.idl \
+	windows.perception.idl \
 	windows.perception.spatial.idl \
 	windows.perception.spatial.surfaces.idl \
+	windows.security.authentication.onlineid.idl \
+	windows.security.authorization.appcapabilityaccess.idl \
 	windows.security.credentials.idl \
 	windows.security.credentials.ui.idl \
 	windows.security.cryptography.idl \
+	windows.security.enterprisedata.idl \
 	windows.security.exchangeactivesyncprovisioning.idl \
 	windows.security.isolation.idl \
 	windows.storage.fileproperties.idl \
@@ -877,8 +913,12 @@ SOURCES = \
 	windows.ui.composition.interop.idl \
 	windows.ui.core.idl \
 	windows.ui.idl \
+	windows.ui.input.idl \
+	windows.ui.notifications.idl \
 	windows.ui.viewmanagement.idl \
 	windows.ui.xaml.hosting.desktopwindowxamlsource.idl \
+	windows.ui.xaml.idl \
+	windows.ui.xaml.interop.idl \
 	windowscontracts.idl \
 	windowsx.h \
 	wine/afd.h \
@@ -906,6 +946,7 @@ SOURCES = \
 	wine/mscvpdb.h \
 	wine/mssign.h \
 	wine/nsi.h \
+	wine/ntsync.h \
 	wine/orpc.idl \
 	wine/plugplay.idl \
 	wine/rbtree.h \
@@ -924,6 +965,7 @@ SOURCES = \
 	wine/windef16.h \
 	wine/wine_common_ver.rc \
 	wine/wined3d.h \
+	wine/winedmo.h \
 	wine/winedxgi.idl \
 	wine/wingdi16.h \
 	wine/winnet16.h \

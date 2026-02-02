@@ -47,6 +47,7 @@ typedef struct {
     IActiveScriptProperty        IActiveScriptProperty_iface;
     IObjectSafety                IObjectSafety_iface;
     IVariantChangeType           IVariantChangeType_iface;
+    IWineJScript                 IWineJScript_iface;
 
     LONG ref;
 
@@ -122,14 +123,7 @@ static inline BOOL is_started(script_ctx_t *ctx)
 
 HRESULT create_named_item_script_obj(script_ctx_t *ctx, named_item_t *item)
 {
-    static const builtin_info_t disp_info = {
-        JSCLASS_GLOBAL,
-        NULL,
-        0, NULL,
-        NULL,
-        NULL
-    };
-
+    static const builtin_info_t disp_info = { .class = JSCLASS_GLOBAL };
     return create_dispex(ctx, &disp_info, NULL, &item->script_obj);
 }
 
@@ -141,11 +135,9 @@ static void release_named_item_script_obj(named_item_t *item)
     item->script_obj = NULL;
 }
 
-static HRESULT retrieve_named_item_disp(script_ctx_t *ctx, IActiveScriptSite *site, named_item_t *item)
+static HRESULT retrieve_named_item_disp(IActiveScriptSite *site, named_item_t *item)
 {
-    IDispatch *disp;
     IUnknown *unk;
-    jsval_t val;
     HRESULT hr;
 
     if(!site)
@@ -157,18 +149,12 @@ static HRESULT retrieve_named_item_disp(script_ctx_t *ctx, IActiveScriptSite *si
         return hr;
     }
 
-    hr = IUnknown_QueryInterface(unk, &IID_IDispatch, (void**)&disp);
+    hr = IUnknown_QueryInterface(unk, &IID_IDispatch, (void**)&item->disp);
     IUnknown_Release(unk);
     if(FAILED(hr)) {
         WARN("object does not implement IDispatch\n");
         return hr;
     }
-
-    val = jsval_disp(disp);
-    hr = convert_to_proxy(ctx, &val);
-    if(FAILED(hr))
-        return hr;
-    item->disp = get_object(val);
 
     return S_OK;
 }
@@ -186,7 +172,7 @@ named_item_t *lookup_named_item(script_ctx_t *ctx, const WCHAR *item_name, unsig
             }
 
             if(!item->disp && (flags || !(item->flags & SCRIPTITEM_CODEONLY))) {
-                hr = retrieve_named_item_disp(ctx, ctx->site, item);
+                hr = retrieve_named_item_disp(ctx->site, item);
                 if(FAILED(hr)) continue;
             }
 
@@ -684,6 +670,9 @@ static HRESULT WINAPI JScript_QueryInterface(IActiveScript *iface, REFIID riid, 
     }else if(IsEqualGUID(riid, &IID_IVariantChangeType)) {
         TRACE("(%p)->(IID_IVariantChangeType %p)\n", This, ppv);
         *ppv = &This->IVariantChangeType_iface;
+    }else if(IsEqualGUID(riid, &IID_IWineJScript)) {
+        TRACE("(%p)->(IID_IWineJScript %p)\n", This, ppv);
+        *ppv = &This->IWineJScript_iface;
     }
 
     if(*ppv) {
@@ -786,7 +775,7 @@ static HRESULT WINAPI JScript_SetScriptSite(IActiveScript *iface,
     {
         if(!item->disp)
         {
-            hres = retrieve_named_item_disp(This->ctx, pass, item);
+            hres = retrieve_named_item_disp(pass, item);
             if(FAILED(hres)) return hres;
         }
 
@@ -909,9 +898,7 @@ static HRESULT WINAPI JScript_AddNamedItem(IActiveScript *iface,
         return E_UNEXPECTED;
 
     if(dwFlags & SCRIPTITEM_GLOBALMEMBERS) {
-        jsdisp_t *jsdisp;
         IUnknown *unk;
-        jsval_t val;
 
         hres = IActiveScriptSite_GetItemInfo(This->site, pstrName, SCRIPTINFO_IUNKNOWN, &unk, NULL);
         if(FAILED(hres)) {
@@ -926,18 +913,15 @@ static HRESULT WINAPI JScript_AddNamedItem(IActiveScript *iface,
             return hres;
         }
 
-        if(This->ctx->html_mode)
-            init_cc_api(disp);
+        if(!cc_api.note_edge && This->ctx->html_mode) {
+            IWineJSDispatchHost *host;
 
-        val = jsval_disp(disp);
-        hres = convert_to_proxy(This->ctx, &val);
-        if(FAILED(hres))
-            return hres;
-        disp = get_object(val);
-
-        if((jsdisp = to_jsdisp(disp)) && jsdisp->proxy) {
-            jsdisp_release(This->ctx->global);
-            This->ctx->global = jsdisp_addref(jsdisp);
+            /* Init CC API to get rid of cycles in IE8 and below as well */
+            hres = IDispatch_QueryInterface(disp, &IID_IWineJSDispatchHost, (void**)&host);
+            if(SUCCEEDED(hres) && host) {
+                init_cc_api(host);
+                IWineJSDispatchHost_Release(host);
+            }
         }
     }
 
@@ -995,7 +979,7 @@ static HRESULT WINAPI JScript_GetScriptDispatch(IActiveScript *iface, LPCOLESTR 
         if(item->script_obj) script_obj = item->script_obj;
     }
 
-    *ppdisp = script_obj->proxy ? (IDispatch*)script_obj->proxy : to_disp(script_obj);
+    *ppdisp = to_disp(script_obj);
     IDispatch_AddRef(*ppdisp);
     return S_OK;
 }
@@ -1455,6 +1439,78 @@ static const IVariantChangeTypeVtbl VariantChangeTypeVtbl = {
     VariantChangeType_ChangeType
 };
 
+static inline JScript *impl_from_IWineJScript(IWineJScript *iface)
+{
+    return CONTAINING_RECORD(iface, JScript, IWineJScript_iface);
+}
+
+static HRESULT WINAPI WineJScript_QueryInterface(IWineJScript *iface, REFIID riid, void **ppv)
+{
+    JScript *This = impl_from_IWineJScript(iface);
+    return IActiveScript_QueryInterface(&This->IActiveScript_iface, riid, ppv);
+}
+
+static ULONG WINAPI WineJScript_AddRef(IWineJScript *iface)
+{
+    JScript *This = impl_from_IWineJScript(iface);
+    return IActiveScript_AddRef(&This->IActiveScript_iface);
+}
+
+static ULONG WINAPI WineJScript_Release(IWineJScript *iface)
+{
+    JScript *This = impl_from_IWineJScript(iface);
+    return IActiveScript_Release(&This->IActiveScript_iface);
+}
+
+static HRESULT WINAPI WineJScript_InitHostObject(IWineJScript *iface, IWineJSDispatchHost *host_obj,
+                                                 IWineJSDispatch *prototype, UINT32 flags, IWineJSDispatch **ret)
+{
+    JScript *This = impl_from_IWineJScript(iface);
+    return init_host_object(This->ctx, host_obj, prototype, flags, ret);
+}
+
+static HRESULT WINAPI WineJScript_InitHostConstructor(IWineJScript *iface, IWineJSDispatchHost *constr,
+                                                      IWineJSDispatch *prototype, IWineJSDispatch **ret)
+{
+    JScript *This = impl_from_IWineJScript(iface);
+    return init_host_constructor(This->ctx, constr, prototype, ret);
+}
+
+static HRESULT WINAPI WineJScript_CreateObject(IWineJScript *iface, IWineJSDispatch **ret)
+{
+    JScript *This = impl_from_IWineJScript(iface);
+    jsdisp_t *jsdisp;
+    HRESULT hres;
+
+    hres = create_object(This->ctx, NULL, &jsdisp);
+    if(SUCCEEDED(hres))
+        *ret = &jsdisp->IWineJSDispatch_iface;
+    return hres;
+}
+
+static HRESULT WINAPI WineJScript_CreateArrayBuffer(IWineJScript *iface, DWORD size, IWineJSDispatch **arraybuf, void **data)
+{
+    JScript *This = impl_from_IWineJScript(iface);
+    return create_arraybuffer(This->ctx, size, arraybuf, data);
+}
+
+static HRESULT WINAPI WineJScript_FillGlobals(IWineJScript *iface, IWineJSDispatchHost *script_global)
+{
+    JScript *This = impl_from_IWineJScript(iface);
+    return fill_globals(This->ctx, script_global);
+}
+
+static const IWineJScriptVtbl WineJScriptVtbl = {
+    WineJScript_QueryInterface,
+    WineJScript_AddRef,
+    WineJScript_Release,
+    WineJScript_InitHostObject,
+    WineJScript_InitHostConstructor,
+    WineJScript_CreateObject,
+    WineJScript_CreateArrayBuffer,
+    WineJScript_FillGlobals,
+};
+
 HRESULT create_jscript_object(BOOL is_encode, REFIID riid, void **ppv)
 {
     JScript *ret;
@@ -1472,6 +1528,7 @@ HRESULT create_jscript_object(BOOL is_encode, REFIID riid, void **ppv)
     ret->IActiveScriptProperty_iface.lpVtbl = &JScriptPropertyVtbl;
     ret->IObjectSafety_iface.lpVtbl = &JScriptSafetyVtbl;
     ret->IVariantChangeType_iface.lpVtbl = &VariantChangeTypeVtbl;
+    ret->IWineJScript_iface.lpVtbl = &WineJScriptVtbl;
     ret->ref = 1;
     ret->safeopt = INTERFACE_USES_DISPEX;
     ret->is_encode = is_encode;
@@ -1481,9 +1538,4 @@ HRESULT create_jscript_object(BOOL is_encode, REFIID riid, void **ppv)
     hres = IActiveScript_QueryInterface(&ret->IActiveScript_iface, riid, ppv);
     IActiveScript_Release(&ret->IActiveScript_iface);
     return hres;
-}
-
-script_ctx_t *get_script_ctx(IActiveScript *script)
-{
-    return (script->lpVtbl == &JScriptVtbl) ? impl_from_IActiveScript(script)->ctx : NULL;
 }

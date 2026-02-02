@@ -24,13 +24,31 @@
 #include <string.h>
 #include <utime.h>
 #include <stdarg.h>
+#include <stdbool.h>
 #include <inttypes.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <sys/stat.h>
 
 #include "unix_private.h"
+#include "wine/rbtree.h"
+
+#ifdef _WINEDMO
+
+#define GST_ERROR(fmt, ...) ERR(fmt "\n", ## __VA_ARGS__)
+#define GST_WARNING(fmt, ...) WARN(fmt "\n", ## __VA_ARGS__)
+#define GST_INFO(fmt, ...) TRACE(fmt "\n", ## __VA_ARGS__)
+#define GST_DEBUG(fmt, ...) TRACE(fmt "\n", ## __VA_ARGS__)
+typedef struct gst_buffer GstBuffer; /* not used */
+extern size_t gst_buffer_extract(GstBuffer*,size_t,void*,size_t); /* not used */
+
+#else /* _WINEDMO */
 
 GST_DEBUG_CATEGORY_EXTERN(media_converter_debug);
 #undef GST_CAT_DEFAULT
 #define GST_CAT_DEFAULT media_converter_debug
+
+#endif /* _WINEDMO */
 
 typedef int (*data_read_callback)(void *data_reader, uint8_t *buffer, size_t size, size_t *read_size);
 
@@ -87,16 +105,47 @@ struct gst_buffer_reader
     size_t offset;
 };
 
-struct payload_hash
+struct fozdb_hash
 {
     uint32_t hash[4];
 };
 
-struct entry_name
+#define debugstr_fozdb_hash( hash ) debugstr_fozdb_hash_( (char[35]){0}, hash )
+static inline const char *debugstr_fozdb_hash_( char *buffer, const struct fozdb_hash *hash )
+{
+    sprintf( buffer, "0x%08x%08x%08x%08x", hash->hash[3], hash->hash[2], hash->hash[1], hash->hash[0] );
+    return buffer;
+}
+
+struct fozdb_key
 {
     uint32_t tag;
-    struct payload_hash hash;
+    struct fozdb_hash hash;
 };
+
+struct fozdb_entry
+{
+    struct rb_entry entry;
+    struct fozdb_key key;
+
+    uint32_t size;
+    uint32_t compression;
+    uint32_t crc;
+    uint32_t full_size;
+
+    uint64_t offset;
+};
+
+extern int fozdb_entry_compare( const void *key, const struct rb_entry *ptr );
+extern void fozdb_entry_destroy( struct rb_entry *entry, void *context );
+extern struct fozdb_entry *fozdb_entry_put( struct rb_tree *tree, uint32_t tag, const struct fozdb_hash *hash );
+extern struct fozdb_entry *fozdb_entry_get( struct rb_tree *tree, uint32_t tag, const struct fozdb_hash *hash );
+
+extern struct rb_entry *fozdb_tag_head( struct rb_tree *tree, uint32_t tag );
+#define FOZDB_FOR_EACH_TAG_ENTRY( e, t, d )                                                       \
+    for ((e) = RB_ENTRY_VALUE( fozdb_tag_head( (&(d)->entries), t ), struct fozdb_entry, entry ); \
+         (e) != RB_ENTRY_VALUE( 0, struct fozdb_entry, entry ) && (e)->key.tag == (t);            \
+         (e) = RB_ENTRY_VALUE( rb_next( &e->entry ), struct fozdb_entry, entry ))
 
 struct dump_fozdb
 {
@@ -108,10 +157,10 @@ struct dump_fozdb
 struct fozdb
 {
     const char *file_name;
+    struct rb_tree entries;
     int file;
     bool read_only;
     uint64_t write_pos;
-    GHashTable **seen_blobs;
     uint32_t num_tags;
 };
 
@@ -136,7 +185,7 @@ extern void murmur3_x86_128_state_reset(struct murmur3_x86_128_state *state);
 extern bool murmur3_x86_128_full(void *data_src, data_read_callback read_callback,
         struct murmur3_x86_128_state* state, void *out);
 extern bool murmur3_x86_128(void *data_src, data_read_callback read_callback, uint32_t seed, void *out);
-#ifdef __x86_64__
+#if defined(__x86_64__) || defined(__aarch64__)
 #define murmur3_128_state       murmur3_x64_128_state
 #define murmur3_128_state_init  murmur3_x64_128_state_init
 #define murmur3_128_state_reset murmur3_x64_128_state_reset
@@ -154,14 +203,13 @@ extern bool murmur3_x86_128(void *data_src, data_read_callback read_callback, ui
 extern int fozdb_create(const char *file_name, int open_flags, bool read_only, uint32_t num_tags, struct fozdb **out);
 extern void fozdb_release(struct fozdb *db);
 extern int fozdb_prepare(struct fozdb *db);
-extern bool fozdb_has_entry(struct fozdb *db, uint32_t tag, struct payload_hash *hash);
-extern int fozdb_entry_size(struct fozdb *db, uint32_t tag, struct payload_hash *hash, uint32_t *size);
-extern void fozdb_iter_tag(struct fozdb *db, uint32_t tag, GHashTableIter *iter);
-extern int fozdb_read_entry_data(struct fozdb *db, uint32_t tag, struct payload_hash *hash,
+extern bool fozdb_has_entry(struct fozdb *db, uint32_t tag, struct fozdb_hash *hash);
+extern int fozdb_entry_size(struct fozdb *db, uint32_t tag, struct fozdb_hash *hash, uint32_t *size);
+extern int fozdb_read_entry_data(struct fozdb *db, uint32_t tag, struct fozdb_hash *hash,
         uint64_t offset, uint8_t *buffer, size_t size, size_t *read_size, bool with_crc);
-extern int fozdb_write_entry(struct fozdb *db, uint32_t tag, struct payload_hash *hash,
+extern int fozdb_write_entry(struct fozdb *db, uint32_t tag, struct fozdb_hash *hash,
         void *data_src, data_read_callback read_callback, bool with_crc);
-extern int fozdb_discard_entries(struct fozdb *db, GList *to_discard_entries);
+extern int fozdb_discard_entries(struct fozdb *db, struct rb_tree *to_discard);
 
 static inline bool option_enabled(const char *env)
 {
@@ -178,7 +226,7 @@ static inline bool discarding_disabled(void)
     return option_enabled("MEDIACONV_DONT_DISCARD");
 }
 
-static inline const char *format_hash(struct payload_hash *hash)
+static inline const char *format_hash(struct fozdb_hash *hash)
 {
     int hash_str_size = 2 + sizeof(*hash) * 2 + 1;
     static char buffer[1024] = {};
@@ -255,19 +303,6 @@ static inline bool file_exists(const char *file_path)
     return access(file_path, F_OK) == 0;
 }
 
-static inline struct entry_name *entry_name_create(uint32_t tag, struct payload_hash *hash)
-{
-    struct entry_name *entry = calloc(1, sizeof(*entry));
-    entry->tag = tag;
-    entry->hash = *hash;
-    return entry;
-}
-
-static inline gint entry_name_compare(const void *a, const void *b)
-{
-    return memcmp(a, b, sizeof(struct entry_name));
-}
-
 static inline uint32_t bytes_to_uint32(const uint8_t *bytes)
 {
     return ((uint32_t)bytes[0] << 0)
@@ -276,7 +311,7 @@ static inline uint32_t bytes_to_uint32(const uint8_t *bytes)
             | ((uint32_t)bytes[3] << 24);
 }
 
-static inline void payload_hash_from_bytes(struct payload_hash *hash, uint8_t *bytes)
+static inline void fozdb_hash_from_bytes(struct fozdb_hash *hash, uint8_t *bytes)
 {
     hash->hash[0] = bytes_to_uint32(bytes + 0);
     hash->hash[1] = bytes_to_uint32(bytes + 4);

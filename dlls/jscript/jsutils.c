@@ -279,15 +279,28 @@ HRESULT variant_to_jsval(script_ctx_t *ctx, VARIANT *var, jsval_t *r)
         *r = jsval_string(str);
         return S_OK;
     }
-    case VT_DISPATCH: {
+    case VT_DISPATCH:
         if(!V_DISPATCH(var)) {
             *r = ctx->html_mode ? jsval_null() : jsval_null_disp();
             return S_OK;
         }
+        if(ctx->version >= SCRIPTLANGUAGEVERSION_ES5) {
+            IWineJSDispatchHost *disp_host;
+            HRESULT hres;
+            hres = IDispatch_QueryInterface(V_DISPATCH(var), &IID_IWineJSDispatchHost, (void **)&disp_host);
+            if(SUCCEEDED(hres)) {
+                IWineJSDispatch *jsdisp_iface;
+                hres = IWineJSDispatchHost_GetJSDispatch(disp_host, &jsdisp_iface);
+                IWineJSDispatchHost_Release(disp_host);
+                if(SUCCEEDED(hres)) {
+                    *r = jsval_obj(as_jsdisp((IDispatch *)jsdisp_iface));
+                    return S_OK;
+                }
+            }
+        }
         IDispatch_AddRef(V_DISPATCH(var));
         *r = jsval_disp(V_DISPATCH(var));
-        return convert_to_proxy(ctx, r);
-    }
+        return S_OK;
     case VT_I1:
         *r = jsval_number(V_I1(var));
         return S_OK;
@@ -330,7 +343,7 @@ HRESULT variant_to_jsval(script_ctx_t *ctx, VARIANT *var, jsval_t *r)
             hres = IUnknown_QueryInterface(V_UNKNOWN(var), &IID_IDispatch, (void**)&disp);
             if(SUCCEEDED(hres)) {
                 *r = jsval_disp(disp);
-                return convert_to_proxy(ctx, r);
+                return S_OK;
             }
         }else {
             *r = ctx->html_mode ? jsval_null() : jsval_null_disp();
@@ -344,9 +357,6 @@ HRESULT variant_to_jsval(script_ctx_t *ctx, VARIANT *var, jsval_t *r)
 
 HRESULT jsval_to_variant(jsval_t val, VARIANT *retv)
 {
-    jsdisp_t *jsdisp;
-    IDispatch *disp;
-
     switch(jsval_type(val)) {
     case JSV_UNDEFINED:
         V_VT(retv) = VT_EMPTY;
@@ -359,16 +369,18 @@ HRESULT jsval_to_variant(jsval_t val, VARIANT *retv)
         }
         V_VT(retv) = VT_NULL;
         return S_OK;
-    case JSV_OBJECT:
-        disp = get_object(val);
-        jsdisp = to_jsdisp(disp);
-        if(jsdisp && jsdisp->proxy)
-            disp = (IDispatch*)jsdisp->proxy;
-
-        IDispatch_AddRef(disp);
+    case JSV_OBJECT: {
+        IWineJSDispatchHost *host_disp = get_host_dispatch(get_object(val));
         V_VT(retv) = VT_DISPATCH;
-        V_DISPATCH(retv) = disp;
+        if(host_disp) {
+            V_DISPATCH(retv) = (IDispatch *)host_disp;
+            return S_OK;
+        }
+
+        V_DISPATCH(retv) = get_object(val);
+        IDispatch_AddRef(get_object(val));
         return S_OK;
+    }
     case JSV_STRING:
         V_VT(retv) = VT_BSTR;
         return jsstr_to_bstr(get_string(val), &V_BSTR(retv));
@@ -398,24 +410,6 @@ HRESULT jsval_to_variant(jsval_t val, VARIANT *retv)
     return E_FAIL;
 }
 
-static HRESULT proxy_tostring(jsdisp_t *jsdisp, jsval_t *ret)
-{
-    jsstr_t *str;
-    HRESULT hres;
-    BSTR bstr;
-
-    /* Proxy prototype with custom toString fails when called on itself */
-    hres = jsdisp->proxy->lpVtbl->ToString(jsdisp->proxy, &bstr);
-    if(FAILED(hres))
-        return hres;
-    str = jsstr_alloc(bstr);
-    SysFreeString(bstr);
-    if(!str)
-        return E_OUTOFMEMORY;
-    *ret = jsval_string(str);
-    return S_OK;
-}
-
 /* ECMA-262 3rd Edition    9.1 */
 HRESULT to_primitive(script_ctx_t *ctx, jsval_t val, jsval_t *ret, hint_t hint)
 {
@@ -438,11 +432,8 @@ HRESULT to_primitive(script_ctx_t *ctx, jsval_t val, jsval_t *ret, hint_t hint)
         if(SUCCEEDED(hres)) {
             hres = jsdisp_call(jsdisp, id, DISPATCH_METHOD, 0, NULL, &prim);
             if(FAILED(hres)) {
-                if(hres == E_UNEXPECTED && jsdisp->proxy)
-                    hres = proxy_tostring(jsdisp, ret);
+                WARN("call error - forwarding exception\n");
                 jsdisp_release(jsdisp);
-                if(FAILED(hres))
-                    WARN("call error - forwarding exception\n");
                 return hres;
             }else if(!is_object_instance(prim)) {
                 jsdisp_release(jsdisp);
@@ -460,11 +451,8 @@ HRESULT to_primitive(script_ctx_t *ctx, jsval_t val, jsval_t *ret, hint_t hint)
         if(SUCCEEDED(hres)) {
             hres = jsdisp_call(jsdisp, id, DISPATCH_METHOD, 0, NULL, &prim);
             if(FAILED(hres)) {
-                if(hres == E_UNEXPECTED && jsdisp->proxy)
-                    hres = proxy_tostring(jsdisp, ret);
+                WARN("call error - forwarding exception\n");
                 jsdisp_release(jsdisp);
-                if(FAILED(hres))
-                    WARN("call error - forwarding exception\n");
                 return hres;
             }else if(!is_object_instance(prim)) {
                 jsdisp_release(jsdisp);

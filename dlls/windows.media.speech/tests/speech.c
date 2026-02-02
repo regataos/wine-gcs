@@ -29,6 +29,7 @@
 
 #define WIDL_using_Windows_Foundation
 #define WIDL_using_Windows_Foundation_Collections
+#define WIDL_using_Windows_Storage_Streams
 #include "windows.foundation.h"
 #define WIDL_using_Windows_Globalization
 #include "windows.globalization.h"
@@ -36,7 +37,6 @@
 #include "windows.media.speechrecognition.h"
 #define WIDL_using_Windows_Media_SpeechSynthesis
 #include "windows.media.speechsynthesis.h"
-
 #include "wine/test.h"
 
 #define AsyncStatus_Closed 4
@@ -857,12 +857,18 @@ static void test_SpeechSynthesizer(void)
     static const WCHAR *speech_synthesizer_name = L"Windows.Media.SpeechSynthesis.SpeechSynthesizer";
     static const WCHAR *speech_synthesizer_name2 = L"windows.media.speechsynthesis.speechsynthesizer";
     static const WCHAR *unknown_class_name = L"Unknown.Class";
+    static const WCHAR *buffer_class_name = L"Windows.Storage.Streams.Buffer";
     IActivationFactory *factory = NULL, *factory2 = NULL;
+    IBufferFactory *buffer_factory = NULL;
     IAsyncOperation_SpeechSynthesisStream *operation_ss_stream = NULL;
+    IAsyncOperationWithProgress_IBuffer_UINT32 *operation_read_async = NULL;
     IVectorView_IMediaMarker *media_markers = NULL;
     IVectorView_VoiceInformation *voices = NULL;
     IInstalledVoicesStatic *voices_static = NULL;
     ISpeechSynthesisStream *ss_stream = NULL;
+    IRandomAccessStream *ra_stream;
+    IInputStream *inp_stream;
+    IBuffer *buffer = NULL, *buffer2 = NULL;
     IVoiceInformation *voice;
     IInspectable *inspectable = NULL, *tmp_inspectable = NULL;
     IAgileObject *agile_object = NULL, *tmp_agile_object = NULL;
@@ -872,6 +878,7 @@ static void test_SpeechSynthesizer(void)
     struct async_inspectable_handler async_inspectable_handler;
     HMODULE hdll;
     HSTRING str, str2, default_voice_id;
+    UINT64 value;
     HRESULT hr;
     UINT32 size, idx;
     BOOLEAN found;
@@ -1043,6 +1050,41 @@ static void test_SpeechSynthesizer(void)
 
     hr = IAsyncOperation_SpeechSynthesisStream_GetResults(operation_ss_stream, &ss_stream);
     ok(hr == S_OK, "IAsyncOperation_SpeechSynthesisStream_GetResults failed, hr %#lx\n", hr);
+
+    hr = ISpeechSynthesisStream_QueryInterface(ss_stream, &IID_IRandomAccessStream, (void **)&ra_stream);
+    ok(hr == S_OK, "QueryInteface(&IID_IRandomAccessStream) failed, hr %#lx\n", hr);
+    hr = IRandomAccessStream_get_Size(ra_stream, &value);
+    ok(hr == S_OK, "_get_Size failed, hr %#lx\n", hr);
+    todo_wine ok(value, "got 0.\n");
+    IRandomAccessStream_Release(ra_stream);
+
+    hr = WindowsCreateString(buffer_class_name, wcslen(buffer_class_name), &str2);
+    ok(hr == S_OK, "WindowsCreateString failed, hr %#lx.\n", hr);
+    hr = RoGetActivationFactory(str2, &IID_IActivationFactory, (void **)&factory2);
+    ok(hr == S_OK, "RoGetActivationFactory failed, hr %#lx.\n", hr);
+    WindowsDeleteString(str2);
+
+    hr = IActivationFactory_QueryInterface(factory2, &IID_IBufferFactory, (void **)&buffer_factory);
+    ok(hr == S_OK, "QueryInterface IID_IBufferFactory failed, hr %#lx.\n", hr);
+    IActivationFactory_Release(factory2);
+    hr = IBufferFactory_Create(buffer_factory, value, &buffer);
+    ok(hr == S_OK, "IBufferFactory_Create failed, hr %#lx.\n", hr);
+    IBufferFactory_Release(buffer_factory);
+
+    hr = ISpeechSynthesisStream_QueryInterface(ss_stream, &IID_IInputStream, (void **)&inp_stream);
+    ok(hr == S_OK, "QueryInteface(&IID_IRandomAccessStream) failed, hr %#lx\n", hr);
+    hr = IInputStream_ReadAsync(inp_stream, buffer, value, InputStreamOptions_ReadAhead, &operation_read_async);
+    ok(hr == S_OK, "_ReadAsync failed, hr %#lx\n", hr);
+    IInputStream_Release(inp_stream);
+    check_async_info((IInspectable *)operation_read_async, 1, Completed, S_OK);
+    IAsyncOperationWithProgress_IBuffer_UINT32_GetResults(operation_read_async, &buffer2);
+    ok(hr == S_OK, "_GetResults failed, hr %#lx\n", hr);
+    ok(buffer2 == buffer, "got %p, %p.\n", buffer, buffer2);
+    IBuffer_Release(buffer);
+    ref = IAsyncOperationWithProgress_IBuffer_UINT32_Release(operation_read_async);
+    ok(!ref, "got refcount %ld.\n", ref);
+    ref = IBuffer_Release(buffer2);
+    ok(!ref, "got refcount %ld.\n", ref);
 
     hr = ISpeechSynthesisStream_get_Markers(ss_stream, &media_markers);
     ok(hr == S_OK, "ISpeechSynthesisStream_get_Markers failed, hr %#lx\n", hr);

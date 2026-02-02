@@ -89,7 +89,7 @@ static HRESULT stringobj_to_string(jsval_t vthis, jsval_t *r)
 
     if(!(string = string_this(vthis))) {
         WARN("this is not a string object\n");
-        return JS_E_STRING_EXPECTED;
+        return E_FAIL;
     }
 
     if(r)
@@ -699,7 +699,7 @@ static HRESULT rep_call(script_ctx_t *ctx, jsdisp_t *func,
     }
 
     if(SUCCEEDED(hres))
-        hres = jsdisp_call_value(func, jsval_undefined(), DISPATCH_METHOD, argc, argv, &val, &ctx->jscaller->IServiceProvider_iface);
+        hres = jsdisp_call_value(func, jsval_undefined(), DISPATCH_METHOD, argc, argv, &val);
 
     for(i=0; i <= match->paren_count; i++)
         jsstr_release(get_string(argv[i]));
@@ -1499,35 +1499,58 @@ static void String_destructor(jsdisp_t *dispex)
     StringInstance *This = string_from_jsdisp(dispex);
 
     jsstr_release(This->str);
-    free(This);
 }
 
-static unsigned String_idx_length(jsdisp_t *jsdisp)
+static unsigned String_indexed_len(jsdisp_t *jsdisp)
 {
     StringInstance *string = string_from_jsdisp(jsdisp);
 
     /*
      * NOTE: For invoke version < 2, indexed array is not implemented at all.
      * Newer jscript.dll versions implement it on string type, not class,
-     * which is not how it should work according to spec. IE9 implements it
-     * properly, but it uses its own JavaScript engine inside MSHTML. We
-     * implement it here, but in the way IE9 and spec work.
+     * which is not how it should work according to spec. IE9+ implements it
+     * properly.
      */
-    return string->dispex.ctx->version < 2 ? 0 : jsstr_length(string->str);
+    if(string->dispex.ctx->version < 2)
+        return 0;
+
+    return jsstr_length(string->str);
 }
 
-static HRESULT String_idx_get(jsdisp_t *jsdisp, unsigned idx, jsval_t *r)
+static HRESULT String_prop_get(jsdisp_t *jsdisp, DISPID id, jsval_t *r)
 {
     StringInstance *string = string_from_jsdisp(jsdisp);
     jsstr_t *ret;
 
-    ret = jsstr_substr(string->str, idx, 1);
+    if(!is_indexed_prop_id(id))
+        return S_FALSE;
+
+    ret = jsstr_substr(string->str, indexed_prop_id_to_idx(id), 1);
     if(!ret)
         return E_OUTOFMEMORY;
 
-    TRACE("%p[%u] = %s\n", string, idx, debugstr_jsstr(ret));
+    TRACE("%p[%u] = %s\n", string, indexed_prop_id_to_idx(id), debugstr_jsstr(ret));
 
     *r = jsval_string(ret);
+    return S_OK;
+}
+
+static HRESULT String_prop_put(jsdisp_t *jsdisp, DISPID id, jsval_t val)
+{
+    return is_indexed_prop_id(id) ? S_OK : S_FALSE;
+}
+
+static HRESULT String_prop_get_desc(jsdisp_t *jsdisp, DISPID id, BOOL flags_only, property_desc_t *desc)
+{
+    if(!flags_only) {
+        HRESULT hres = String_prop_get(jsdisp, id, &desc->value);
+        if(hres != S_OK)
+            return hres;
+    }else if(!is_indexed_prop_id(id)) {
+        return S_FALSE;
+    }
+
+    desc->flags = PROPF_ENUMERABLE;
     return S_OK;
 }
 
@@ -1569,12 +1592,10 @@ static const builtin_prop_t String_props[] = {
 };
 
 static const builtin_info_t String_info = {
-    JSCLASS_STRING,
-    NULL,
-    ARRAY_SIZE(String_props),
-    String_props,
-    String_destructor,
-    NULL
+    .class      = JSCLASS_STRING,
+    .props_cnt  = ARRAY_SIZE(String_props),
+    .props      = String_props,
+    .destructor = String_destructor,
 };
 
 static const builtin_prop_t StringInst_props[] = {
@@ -1582,14 +1603,14 @@ static const builtin_prop_t StringInst_props[] = {
 };
 
 static const builtin_info_t StringInst_info = {
-    JSCLASS_STRING,
-    NULL,
-    ARRAY_SIZE(StringInst_props),
-    StringInst_props,
-    String_destructor,
-    NULL,
-    String_idx_length,
-    String_idx_get
+    .class         = JSCLASS_STRING,
+    .props_cnt     = ARRAY_SIZE(StringInst_props),
+    .props         = StringInst_props,
+    .destructor    = String_destructor,
+    .indexed_len   = String_indexed_len,
+    .prop_get      = String_prop_get,
+    .prop_put      = String_prop_put,
+    .prop_get_desc = String_prop_get_desc,
 };
 
 /* ECMA-262 3rd Edition    15.5.3.2 */
@@ -1703,12 +1724,10 @@ static const builtin_prop_t StringConstr_props[] = {
 };
 
 static const builtin_info_t StringConstr_info = {
-    JSCLASS_FUNCTION,
-    Function_value,
-    ARRAY_SIZE(StringConstr_props),
-    StringConstr_props,
-    NULL,
-    NULL
+    .class     = JSCLASS_FUNCTION,
+    .call      = Function_value,
+    .props_cnt = ARRAY_SIZE(StringConstr_props),
+    .props     = StringConstr_props,
 };
 
 HRESULT create_string_constr(script_ctx_t *ctx, jsdisp_t *object_prototype, jsdisp_t **ret)

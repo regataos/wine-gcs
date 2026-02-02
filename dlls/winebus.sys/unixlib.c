@@ -38,133 +38,6 @@
 
 #include "unix_private.h"
 
-BOOL is_wine_blacklisted(WORD vid, WORD pid)
-{
-    if (vid == 0x056a) return TRUE; /* all Wacom devices */
-    return FALSE;
-}
-
-/* logic from SDL2's SDL_ShouldIgnoreGameController */
-BOOL is_sdl_blacklisted(WORD vid, WORD pid)
-{
-    const char *allow_virtual = getenv("SDL_GAMECONTROLLER_ALLOW_STEAM_VIRTUAL_GAMEPAD");
-    const char *whitelist = getenv("SDL_GAMECONTROLLER_IGNORE_DEVICES_EXCEPT");
-    const char *blacklist = getenv("SDL_GAMECONTROLLER_IGNORE_DEVICES");
-    char needle[16];
-
-    if (vid == 0x28de && pid == 0x11ff && allow_virtual && *allow_virtual &&
-        *allow_virtual != '0' && strcasecmp(allow_virtual, "false"))
-        return FALSE;
-
-    sprintf(needle, "0x%04x/0x%04x", vid, pid);
-    if (whitelist) return strcasestr(whitelist, needle) == NULL;
-    if (blacklist) return strcasestr(blacklist, needle) != NULL;
-    return FALSE;
-}
-
-BOOL is_dualshock4_gamepad(WORD vid, WORD pid)
-{
-    if (vid != 0x054c) return FALSE;
-    if (pid == 0x05c4) return TRUE; /* DualShock 4 [CUH-ZCT1x] */
-    if (pid == 0x09cc) return TRUE; /* DualShock 4 [CUH-ZCT2x] */
-    if (pid == 0x0ba0) return TRUE; /* Dualshock 4 Wireless Adaptor */
-    return FALSE;
-}
-
-BOOL is_dualsense_gamepad(WORD vid, WORD pid)
-{
-    if (vid != 0x054c) return FALSE;
-    if (pid == 0x0ce6) return TRUE; /* DualSense */
-    if (pid == 0x0df2) return TRUE; /* DualSense Edge */
-    return FALSE;
-}
-
-BOOL is_logitech_g920(WORD vid, WORD pid)
-{
-    return vid == 0x046D && pid == 0xC262;
-}
-
-static BOOL is_thrustmaster_hotas(WORD vid, WORD pid)
-{
-    return vid == 0x044F && (pid == 0xB679 || pid == 0xB687 || pid == 0xB10A);
-}
-
-static BOOL is_simucube_wheel(WORD vid, WORD pid)
-{
-    if (vid != 0x16D0) return FALSE;
-    if (pid == 0x0D61) return TRUE; /* Simucube 2 Sport */
-    if (pid == 0x0D60) return TRUE; /* Simucube 2 Pro */
-    if (pid == 0x0D5F) return TRUE; /* Simucube 2 Ultimate */
-    if (pid == 0x0D5A) return TRUE; /* Simucube 1 */
-    return FALSE;
-}
-
-static BOOL is_fanatec_pedals(WORD vid, WORD pid)
-{
-    if (vid != 0x0EB7) return FALSE;
-    if (pid == 0x183B) return TRUE; /* Fanatec ClubSport Pedals v3 */
-    if (pid == 0x1839) return TRUE; /* Fanatec ClubSport Pedals v1/v2 */
-    return FALSE;
-}
-
-static BOOL is_vkb_controller(WORD vid, WORD pid, INT buttons)
-{
-    if (vid != 0x231D) return FALSE;
-
-    /* comes with 128 buttons in the default configuration */
-    if (buttons == 128) return TRUE;
-
-    /* if customized, less than 128 buttons may be shown, decide by PID */
-    if (pid == 0x0126) return TRUE; /* VKB-Sim Space Gunfighter */
-    if (pid == 0x0127) return TRUE; /* VKB-Sim Space Gunfighter L */
-    if (pid == 0x0200) return TRUE; /* VKBsim Gladiator EVO Right Grip */
-    if (pid == 0x0201) return TRUE; /* VKBsim Gladiator EVO Left Grip */
-    return FALSE;
-}
-
-static BOOL is_virpil_controller(WORD vid, WORD pid, INT buttons)
-{
-    switch (vid)
-    {
-    case 0x03eb:
-        /* users may have configured button limits, usually 32/50/64 */
-        if ((buttons == 32) || (buttons == 50) || (buttons == 64)) return TRUE;
-
-        if (pid == 0x2055) return TRUE; /* ATMEL/VIRPIL/200325 VPC Throttle MT-50 CM2 */
-        break;
-    case 0x3344:
-        /* comes with 31 buttons in the default configuration, or 128 max */
-        if ((buttons == 31) || (buttons == 128)) return TRUE;
-
-        /* users may have configured button limits, usually 32/50/64 */
-        if ((buttons == 32) || (buttons == 50) || (buttons == 64)) return TRUE;
-
-        /* if customized, arbitrary amount of buttons may be shown, decide by PID */
-        if (pid == 0x412f) return TRUE; /* Virpil Constellation ALPHA-R */
-        if (pid == 0x812c) return TRUE; /* Virpil Constellation ALPHA-L */
-        break;
-    }
-    return FALSE;
-}
-
-BOOL is_hidraw_enabled(WORD vid, WORD pid, INT axes, INT buttons)
-{
-    const char *enabled = getenv("PROTON_ENABLE_HIDRAW");
-    char needle[16];
-
-    if (is_dualshock4_gamepad(vid, pid)) return TRUE;
-    if (is_dualsense_gamepad(vid, pid)) return TRUE;
-    if (is_thrustmaster_hotas(vid, pid)) return TRUE;
-    if (is_simucube_wheel(vid, pid)) return TRUE;
-    if (is_fanatec_pedals(vid, pid)) return TRUE;
-    if (is_vkb_controller(vid, pid, buttons)) return TRUE;
-    if (is_virpil_controller(vid, pid, buttons)) return TRUE;
-
-    sprintf(needle, "0x%04x/0x%04x", vid, pid);
-    if (enabled) return strcasestr(enabled, needle) != NULL;
-    return FALSE;
-}
-
 struct mouse_device
 {
     struct unix_device unix_device;
@@ -176,14 +49,6 @@ static void mouse_destroy(struct unix_device *iface)
 
 static NTSTATUS mouse_start(struct unix_device *iface)
 {
-    const USAGE_AND_PAGE device_usage = {.UsagePage = HID_USAGE_PAGE_GENERIC, .Usage = HID_USAGE_GENERIC_MOUSE};
-    if (!hid_device_begin_report_descriptor(iface, &device_usage))
-        return STATUS_NO_MEMORY;
-    if (!hid_device_add_buttons(iface, HID_USAGE_PAGE_BUTTON, 1, 3))
-        return STATUS_NO_MEMORY;
-    if (!hid_device_end_report_descriptor(iface))
-        return STATUS_NO_MEMORY;
-
     return STATUS_SUCCESS;
 }
 
@@ -250,9 +115,21 @@ static const struct device_desc mouse_device_desc =
 
 static NTSTATUS mouse_device_create(void *args)
 {
+    const USAGE_AND_PAGE device_usage = {.UsagePage = HID_USAGE_PAGE_GENERIC, .Usage = HID_USAGE_GENERIC_MOUSE};
     struct device_create_params *params = args;
+    struct unix_device *iface;
+
+    if (!(iface = hid_device_create(&mouse_vtbl, sizeof(struct mouse_device))))
+        return STATUS_NO_MEMORY;
+    if (!hid_device_begin_report_descriptor(iface, &device_usage))
+        return STATUS_NO_MEMORY;
+    if (!hid_device_add_buttons(iface, HID_USAGE_PAGE_BUTTON, 1, 3))
+        return STATUS_NO_MEMORY;
+    if (!hid_device_end_report_descriptor(iface))
+        return STATUS_NO_MEMORY;
+
     params->desc = mouse_device_desc;
-    params->device = (UINT_PTR)hid_device_create(&mouse_vtbl, sizeof(struct mouse_device));
+    params->device = (UINT_PTR)iface;
     return STATUS_SUCCESS;
 }
 
@@ -267,14 +144,6 @@ static void keyboard_destroy(struct unix_device *iface)
 
 static NTSTATUS keyboard_start(struct unix_device *iface)
 {
-    const USAGE_AND_PAGE device_usage = {.UsagePage = HID_USAGE_PAGE_GENERIC, .Usage = HID_USAGE_GENERIC_KEYBOARD};
-    if (!hid_device_begin_report_descriptor(iface, &device_usage))
-        return STATUS_NO_MEMORY;
-    if (!hid_device_add_buttons(iface, HID_USAGE_PAGE_KEYBOARD, 0, 101))
-        return STATUS_NO_MEMORY;
-    if (!hid_device_end_report_descriptor(iface))
-        return STATUS_NO_MEMORY;
-
     return STATUS_SUCCESS;
 }
 
@@ -341,9 +210,21 @@ static const struct device_desc keyboard_device_desc =
 
 static NTSTATUS keyboard_device_create(void *args)
 {
+    const USAGE_AND_PAGE device_usage = {.UsagePage = HID_USAGE_PAGE_GENERIC, .Usage = HID_USAGE_GENERIC_KEYBOARD};
     struct device_create_params *params = args;
+    struct unix_device *iface;
+
+    if (!(iface = hid_device_create(&keyboard_vtbl, sizeof(struct keyboard_device))))
+        return STATUS_NO_MEMORY;
+    if (!hid_device_begin_report_descriptor(iface, &device_usage))
+        return STATUS_NO_MEMORY;
+    if (!hid_device_add_buttons(iface, HID_USAGE_PAGE_KEYBOARD, 0, 101))
+        return STATUS_NO_MEMORY;
+    if (!hid_device_end_report_descriptor(iface))
+        return STATUS_NO_MEMORY;
+
     params->desc = keyboard_device_desc;
-    params->device = (UINT_PTR)hid_device_create(&keyboard_vtbl, sizeof(struct keyboard_device));
+    params->device = (UINT_PTR)iface;
     return STATUS_SUCCESS;
 }
 

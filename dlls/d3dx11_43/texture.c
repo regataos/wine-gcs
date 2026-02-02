@@ -16,43 +16,64 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "wine/debug.h"
-
 #define COBJMACROS
 
 #include "initguid.h"
 #include "d3d11.h"
 #include "d3dx11.h"
 #include "d3dcompiler.h"
+
 #include "dxhelpers.h"
+#include "wine/debug.h"
+#include "assert.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(d3dx);
 
 HRESULT WINAPI D3DX11SaveTextureToFileW(ID3D11DeviceContext *context, ID3D11Resource *texture,
         D3DX11_IMAGE_FILE_FORMAT format, const WCHAR *filename)
 {
-    FIXME("context %p, texture %p, format %u, filename %s stub!\n",
-            context, texture, format, debugstr_w(filename));
+    ID3D10Blob *buffer;
+    HRESULT hr;
 
-    return E_NOTIMPL;
+    TRACE("context %p, texture %p, format %u, filename %s.\n", context, texture, format, debugstr_w(filename));
+
+    if (!filename)
+        return E_FAIL;
+
+    hr = D3DX11SaveTextureToMemory(context, texture, format, &buffer, 0);
+    if (SUCCEEDED(hr))
+    {
+        hr = write_buffer_to_file(filename, buffer);
+        ID3D10Blob_Release(buffer);
+    }
+
+    return hr;
 }
 
 HRESULT WINAPI D3DX11SaveTextureToFileA(ID3D11DeviceContext *context, ID3D11Resource *texture,
         D3DX11_IMAGE_FILE_FORMAT format, const char *filename)
 {
-    FIXME("context %p, texture %p, format %u, filename %s stub!\n",
-            context, texture, format, debugstr_a(filename));
+    WCHAR *buffer;
+    int str_len;
+    HRESULT hr;
 
-    return E_NOTIMPL;
-}
+    TRACE("context %p, texture %p, format %u, filename %s.\n", context, texture, format, debugstr_a(filename));
 
-HRESULT WINAPI D3DX11SaveTextureToMemory(ID3D11DeviceContext *context, ID3D11Resource *texture,
-        D3DX11_IMAGE_FILE_FORMAT format, ID3D10Blob **buffer, UINT flags)
-{
-    FIXME("context %p, texture %p, format %u, buffer %p, flags %#x stub!\n",
-            context, texture, format, buffer, flags);
+    if (!filename)
+        return E_FAIL;
 
-    return E_NOTIMPL;
+    str_len = MultiByteToWideChar(CP_ACP, 0, filename, -1, NULL, 0);
+    if (!str_len)
+        return HRESULT_FROM_WIN32(GetLastError());
+
+    buffer = malloc(str_len * sizeof(*buffer));
+    if (!buffer)
+        return E_OUTOFMEMORY;
+
+    MultiByteToWideChar(CP_ACP, 0, filename, -1, buffer, str_len);
+    hr = D3DX11SaveTextureToFileW(context, texture, format, buffer);
+    free(buffer);
+    return hr;
 }
 
 HRESULT WINAPI D3DX11GetImageInfoFromFileA(const char *src_file, ID3DX11ThreadPump *pump, D3DX11_IMAGE_INFO *info,
@@ -208,12 +229,19 @@ static HRESULT d3dx11_image_info_from_d3dx_image(D3DX11_IMAGE_INFO *info, struct
     HRESULT hr = S_OK;
 
     memset(info, 0, sizeof(*info));
-    if (image->image_file_format == D3DX_IMAGE_FILE_FORMAT_DDS)
-        format = dxgi_format_from_dds_d3dx_pixel_format_id(image->format);
-    else if (image->image_file_format == D3DX_IMAGE_FILE_FORMAT_DDS_DXT10)
-        format = dxgi_format_from_d3dx_pixel_format_id(image->format);
+    if (image->image_file_format == D3DX_IMAGE_FILE_FORMAT_DDS_DXT10)
+    {
+        format = dxgi_format_from_dxt10_dds_d3dx_pixel_format_id(image->format);
+        info->ImageFileFormat = D3DX11_IFF_DDS;
+    }
     else
-        format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    {
+        if (image->image_file_format == D3DX_IMAGE_FILE_FORMAT_DDS)
+            format = dxgi_format_from_legacy_dds_d3dx_pixel_format_id(image->format);
+        else
+            format = DXGI_FORMAT_R8G8B8A8_UNORM;
+        info->ImageFileFormat = (D3DX11_IMAGE_FILE_FORMAT)image->image_file_format;
+    }
 
     if (format == DXGI_FORMAT_UNKNOWN)
     {
@@ -221,10 +249,6 @@ static HRESULT d3dx11_image_info_from_d3dx_image(D3DX11_IMAGE_INFO *info, struct
         return E_FAIL;
     }
 
-    if (image->image_file_format == D3DX_IMAGE_FILE_FORMAT_DDS_DXT10)
-        info->ImageFileFormat = D3DX11_IFF_DDS;
-    else
-        info->ImageFileFormat = (D3DX11_IMAGE_FILE_FORMAT)image->image_file_format;
     if (info->ImageFileFormat == D3DX11_IFF_FORCE_DWORD)
     {
         ERR("Unsupported d3dx image file.\n");
@@ -346,23 +370,6 @@ void init_load_info(const D3DX11_IMAGE_LOAD_INFO *load_info, D3DX11_IMAGE_LOAD_I
     out->pSrcInfo = NULL;
 }
 
-#define D3DX_FILTER_INVALID_BITS 0xff80fff8
-static inline HRESULT d3dx_validate_filter(uint32_t filter)
-{
-    if ((filter & D3DX_FILTER_INVALID_BITS) || !(filter & 0x7) || ((filter & 0x7) > D3DX11_FILTER_BOX))
-        return D3DERR_INVALIDCALL;
-
-    return S_OK;
-}
-
-static HRESULT d3dx_handle_filter(uint32_t *filter)
-{
-    if (*filter == D3DX11_DEFAULT || !(*filter))
-        *filter = D3DX11_FILTER_TRIANGLE | D3DX11_FILTER_DITHER;
-
-    return d3dx_validate_filter(*filter);
-}
-
 static HRESULT d3dx_create_subresource_data_for_texture(uint32_t width, uint32_t height, uint32_t depth,
         uint32_t mip_levels, uint32_t layer_count, const struct pixel_format_desc *fmt_desc,
         D3D11_SUBRESOURCE_DATA **out_sub_rsrc_data, uint8_t **pixel_data)
@@ -430,7 +437,7 @@ HRESULT load_texture_data(const void *data, SIZE_T size, D3DX11_IMAGE_LOAD_INFO 
 
     if (FAILED(hr = d3dx_handle_filter(&load_info->Filter)))
     {
-        FIXME("Invalid filter argument.\n");
+        ERR("Invalid filter argument %#x.\n", load_info->Filter);
         return hr;
     }
 
@@ -523,7 +530,7 @@ HRESULT load_texture_data(const void *data, SIZE_T size, D3DX11_IMAGE_LOAD_INFO 
 
         if (FAILED(hr = d3dx_handle_filter(&load_info->MipFilter)))
         {
-            FIXME("Invalid mip filter argument.\n");
+            ERR("Invalid mip filter argument %#x.\n", load_info->MipFilter);
             goto end;
         }
 
@@ -1095,6 +1102,7 @@ struct d3d11_texture {
     const struct pixel_format_desc *fmt_desc;
     D3D11_MAP map_flags;
     D3D11_BOX texture_box;
+    BOOL is_cubemap;
 
     uint32_t first_layer;
     uint32_t first_mip_level;
@@ -1173,6 +1181,7 @@ static HRESULT d3dx_d3d11_texture_init(ID3D11DeviceContext *context, ID3D11Resou
 
         texture->first_mip_level = min((desc.MipLevels - 1), first_mip_level);
         texture->first_layer = first_layer >= desc.ArraySize ? 0 : first_layer;
+        texture->is_cubemap = !!(desc.MiscFlags & D3D11_RESOURCE_MISC_TEXTURECUBE);
 
         staging_tex_rsrc->texture_dimension = src_tex_rsrc->texture_dimension;
         staging_tex_rsrc->size = src_tex_rsrc->size;
@@ -1488,4 +1497,209 @@ HRESULT WINAPI D3DX11FilterTexture(ID3D11DeviceContext *context, ID3D11Resource 
         return S_OK;
 
     return D3DX11LoadTextureFromTexture(context, texture, &load_info, texture);
+}
+
+static HRESULT d3dx11_get_save_format_for_file_format(D3DX11_IMAGE_FILE_FORMAT iff, enum d3dx_pixel_format_id src_fmt,
+        enum d3dx_pixel_format_id *save_fmt)
+{
+    *save_fmt = D3DX_PIXEL_FORMAT_COUNT;
+    switch (iff)
+    {
+        case D3DX11_IFF_JPG:
+            switch (src_fmt)
+            {
+                case D3DX_PIXEL_FORMAT_R8G8B8A8_UNORM:
+                case D3DX_PIXEL_FORMAT_R8G8B8A8_UNORM_SRGB:
+                case D3DX_PIXEL_FORMAT_R16G16B16A16_FLOAT:
+                case D3DX_PIXEL_FORMAT_R32G32B32A32_FLOAT:
+                    *save_fmt = D3DX_PIXEL_FORMAT_B8G8R8_UNORM;
+                    break;
+
+                case D3DX_PIXEL_FORMAT_R16_UNORM:
+                    *save_fmt = D3DX_PIXEL_FORMAT_L8_UNORM;
+                    break;
+
+                default:
+                    return E_FAIL;
+            }
+            break;
+
+        case D3DX11_IFF_PNG:
+        case D3DX11_IFF_TIFF:
+            switch (src_fmt)
+            {
+                case D3DX_PIXEL_FORMAT_R8G8B8A8_UNORM:
+                case D3DX_PIXEL_FORMAT_R8G8B8A8_UNORM_SRGB:
+                    *save_fmt = D3DX_PIXEL_FORMAT_B8G8R8A8_UNORM;
+                    break;
+
+                case D3DX_PIXEL_FORMAT_R16G16B16A16_FLOAT:
+                case D3DX_PIXEL_FORMAT_R32G32B32A32_FLOAT:
+                    *save_fmt = D3DX_PIXEL_FORMAT_R16G16B16A16_UNORM;
+                    break;
+
+                case D3DX_PIXEL_FORMAT_R16_UNORM:
+                    *save_fmt = D3DX_PIXEL_FORMAT_L16_UNORM;
+                    break;
+
+                default:
+                    return E_FAIL;
+            }
+            break;
+
+        case D3DX11_IFF_BMP:
+            switch (src_fmt)
+            {
+                case D3DX_PIXEL_FORMAT_R8G8B8A8_UNORM:
+                case D3DX_PIXEL_FORMAT_R8G8B8A8_UNORM_SRGB:
+                    *save_fmt = D3DX_PIXEL_FORMAT_B8G8R8X8_UNORM;
+                    break;
+
+                case D3DX_PIXEL_FORMAT_R16G16B16A16_FLOAT:
+                case D3DX_PIXEL_FORMAT_R32G32B32A32_FLOAT:
+                case D3DX_PIXEL_FORMAT_R16_UNORM:
+                    FIXME("Encoding of BMP files to WICPixelFormat64bppRGBAFixedPoint unimplemented, using default instead.\n");
+                    *save_fmt = D3DX_PIXEL_FORMAT_B8G8R8X8_UNORM;
+                    break;
+
+                default:
+                    return E_FAIL;
+            }
+            break;
+
+        case D3DX11_IFF_WMP:
+            FIXME("Saving to WMP is currently unimplemented.\n");
+            return E_NOTIMPL;
+
+        default:
+            assert(0);
+            break;
+    }
+
+    return S_OK;
+}
+
+HRESULT WINAPI D3DX11SaveTextureToMemory(ID3D11DeviceContext *context, ID3D11Resource *texture,
+        D3DX11_IMAGE_FILE_FORMAT format, ID3D10Blob **buffer, UINT flags)
+{
+    const struct pixel_format_desc *fmt_desc = NULL;
+    struct d3d11_texture src_tex = { 0 };
+    enum d3dx_resource_type d3dx_rtype;
+    D3D11_RESOURCE_DIMENSION rsrc_dim;
+    struct d3dx_image image = { 0 };
+    ID3D10Blob *out_buffer;
+    unsigned int i, j;
+    HRESULT hr;
+
+    TRACE("texture %p, format %u, buffer %p, flags %#x.\n", texture, format, buffer, flags);
+
+    if (!texture || !buffer || format == D3DX11_IFF_GIF)
+        return E_INVALIDARG;
+
+    if (!context)
+        return D3DERR_INVALIDCALL;
+
+    out_buffer = *buffer = NULL;
+    if (format == D3DX11_IFF_WMP)
+    {
+        FIXME("Saving to file format %u is currently unimplemented.\n", format);
+        return E_NOTIMPL;
+    }
+
+    ID3D11Resource_GetType(texture, &rsrc_dim);
+    switch (rsrc_dim)
+    {
+        case D3D11_RESOURCE_DIMENSION_TEXTURE2D:
+            d3dx_rtype = D3DX_RESOURCE_TYPE_TEXTURE_2D;
+            break;
+
+        case D3D11_RESOURCE_DIMENSION_TEXTURE3D:
+            d3dx_rtype = D3DX_RESOURCE_TYPE_TEXTURE_3D;
+            break;
+
+        default:
+            FIXME("Currently only 2D and 3D texture saving is supported.\n");
+            return E_NOTIMPL;
+    }
+
+    if (format != D3DX11_IFF_DDS && rsrc_dim != D3D11_RESOURCE_DIMENSION_TEXTURE2D)
+        return E_INVALIDARG;
+
+    hr = d3dx_d3d11_texture_init(context, texture, 0, 0, D3D11_MAP_READ, NULL, &src_tex);
+    if (FAILED(hr))
+        return hr;
+
+    if (format != D3DX11_IFF_DDS)
+    {
+        enum d3dx_pixel_format_id dst_format;
+        struct d3dx_pixels src_pixels;
+
+        hr = d3dx11_get_save_format_for_file_format(format, src_tex.fmt_desc->format, &dst_format);
+        if (FAILED(hr))
+            goto exit;
+
+        hr = d3dx_d3d11_texture_map(&src_tex, 0, 0, &src_pixels);
+        if (FAILED(hr))
+            goto exit;
+
+        hr = d3dx_save_pixels_to_memory(&src_pixels, src_tex.fmt_desc, (enum d3dx_image_file_format)format, dst_format,
+                &out_buffer);
+        d3dx_d3d11_texture_unmap(&src_tex, 0, 0);
+        if (SUCCEEDED(hr))
+            *buffer = out_buffer;
+        else
+            WARN("Failed with hr %#lx.\n", hr);
+
+        goto exit;
+    }
+
+    if (src_tex.is_cubemap)
+        d3dx_rtype = D3DX_RESOURCE_TYPE_CUBE_TEXTURE;
+
+    hr = d3dx_create_dds_file_blob(src_tex.fmt_desc->format, NULL, d3dx_rtype, &src_tex.texture.size,
+            src_tex.texture.mip_levels, src_tex.texture.layer_count, TRUE, &out_buffer);
+    if (FAILED(hr))
+    {
+        FIXME("Failed to create dds file with hr %#lx.\n", hr);
+        goto exit;
+    }
+
+    hr = d3dx_image_init(ID3D10Blob_GetBufferPointer(out_buffer), ID3D10Blob_GetBufferSize(out_buffer), &image, 0,
+            D3DX_IMAGE_SUPPORT_DXT10);
+    if (FAILED(hr))
+        goto exit;
+
+    fmt_desc = get_d3dx_pixel_format_info(image.format);
+    for (i = 0; i < image.layer_count; ++i)
+    {
+        for (j = 0; j < image.mip_levels; ++j)
+        {
+            struct d3dx_pixels src_pixels, dst_pixels;
+
+            hr = d3dx_image_get_pixels(&image, i, j, &dst_pixels);
+            if (FAILED(hr))
+                goto exit;
+
+            hr = d3dx_d3d11_texture_map(&src_tex, i, j, &src_pixels);
+            if (FAILED(hr))
+                goto exit;
+
+            hr = d3dx_load_pixels_from_pixels(&dst_pixels, fmt_desc, &src_pixels, src_tex.fmt_desc, D3DX_FILTER_NONE, 0);
+            d3dx_d3d11_texture_unmap(&src_tex, i, j);
+            if (FAILED(hr))
+            {
+                WARN("Failed with hr %#lx.\n", hr);
+                goto exit;
+            }
+        }
+    }
+
+    if (SUCCEEDED(hr))
+        *buffer = out_buffer;
+
+exit:
+    if (out_buffer && *buffer != out_buffer)
+        ID3D10Blob_Release(out_buffer);
+    d3dx_d3d11_texture_release(&src_tex);
+    return SUCCEEDED(hr) ? S_OK : hr;
 }

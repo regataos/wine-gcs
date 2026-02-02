@@ -1,10 +1,8 @@
 MODULE    = inseng.dll
-IMPORTS   = uuid ole32 advapi32 urlmon shlwapi
+IMPORTS   = uuid ole32 advapi32
 
 EXTRADLLFLAGS = -Wb,--prefer-native
 
 SOURCES = \
-	icif.c \
-	inf.c \
 	inseng_classes.idl \
 	inseng_main.c

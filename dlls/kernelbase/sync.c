@@ -272,6 +272,38 @@ BOOL WINAPI QueryIdleProcessorCycleTimeEx( USHORT group_id, ULONG *size, ULONG64
 
 
 /***********************************************************************
+ *           ConvertAuxiliaryCounterToPerformanceCounter  (kernelbase.@)
+ */
+HRESULT WINAPI ConvertAuxiliaryCounterToPerformanceCounter( ULONGLONG from, ULONGLONG *to, ULONGLONG *error )
+{
+    NTSTATUS status;
+
+    TRACE( "%#I64x, %p, %p.\n", from, to, error );
+
+    if ((status = NtConvertBetweenAuxiliaryCounterAndPerformanceCounter( 0, &from, to, error )) == STATUS_NOT_SUPPORTED)
+        return E_NOTIMPL;
+
+    return HRESULT_FROM_NT(status);
+}
+
+
+/***********************************************************************
+ *           ConvertAuxiliaryCounterToPerformanceCounter  (kernelbase.@)
+ */
+HRESULT WINAPI ConvertPerformanceCounterToAuxiliaryCounter( ULONGLONG from, ULONGLONG *to, ULONGLONG *error )
+{
+    NTSTATUS status;
+
+    TRACE( "%#I64x, %p, %p.\n", from, to, error );
+
+    if ((status = NtConvertBetweenAuxiliaryCounterAndPerformanceCounter( 1, &from, to, error )) == STATUS_NOT_SUPPORTED)
+        return E_NOTIMPL;
+
+    return HRESULT_FROM_NT(status);
+}
+
+
+/***********************************************************************
  * Waits
  ***********************************************************************/
 
@@ -727,7 +759,7 @@ HANDLE WINAPI DECLSPEC_HOTPATCH OpenMutexW( DWORD access, BOOL inherit, LPCWSTR 
 {
     HANDLE ret;
     UNICODE_STRING nameW;
-    OBJECT_ATTRIBUTES attr;
+    DECLSPEC_ALIGN(32) OBJECT_ATTRIBUTES attr;
 
     if (!is_version_nt()) access = MUTEX_ALL_ACCESS;
 
@@ -1201,8 +1233,8 @@ BOOL WINAPI DECLSPEC_HOTPATCH GetQueuedCompletionStatus( HANDLE port, LPDWORD co
         return FALSE;
     }
 
-    if (status == STATUS_TIMEOUT) SetLastError( WAIT_TIMEOUT );
-    else if (status == ERROR_WAIT_NO_CHILDREN) SetLastError( ERROR_ABANDONED_WAIT_0 );
+    if (status == STATUS_TIMEOUT)        SetLastError( WAIT_TIMEOUT );
+    else if (status == STATUS_ABANDONED) SetLastError( ERROR_ABANDONED_WAIT_0 );
     else SetLastError( RtlNtStatusToDosError(status) );
     return FALSE;
 }
@@ -1222,9 +1254,9 @@ BOOL WINAPI DECLSPEC_HOTPATCH GetQueuedCompletionStatusEx( HANDLE port, OVERLAPP
     ret = NtRemoveIoCompletionEx( port, (FILE_IO_COMPLETION_INFORMATION *)entries, count,
                                   written, get_nt_timeout( &time, timeout ), alertable );
     if (ret == STATUS_SUCCESS) return TRUE;
-    else if (ret == STATUS_TIMEOUT) SetLastError( WAIT_TIMEOUT );
-    else if (ret == STATUS_USER_APC) SetLastError( WAIT_IO_COMPLETION );
-    else if (ret == ERROR_WAIT_NO_CHILDREN) SetLastError( ERROR_ABANDONED_WAIT_0 );
+    else if (ret == STATUS_TIMEOUT)   SetLastError( WAIT_TIMEOUT );
+    else if (ret == STATUS_USER_APC)  SetLastError( WAIT_IO_COMPLETION );
+    else if (ret == STATUS_ABANDONED) SetLastError( ERROR_ABANDONED_WAIT_0 );
     else SetLastError( RtlNtStatusToDosError(ret) );
     return FALSE;
 }
@@ -1767,3 +1799,50 @@ __ASM_STDCALL_FUNC(InterlockedDecrement, 4,
                   "ret $4")
 
 #endif  /* __i386__ */
+
+
+/***********************************************************************
+ * Synchronization barrier functions
+ ***********************************************************************/
+
+
+/***********************************************************************
+ *           InitializeSynchronizationBarrier  (kernelbase.@)
+ */
+BOOL WINAPI InitializeSynchronizationBarrier( SYNCHRONIZATION_BARRIER *barrier, LONG thread_count, LONG spin_count )
+{
+    if (thread_count <= 0 || spin_count < -1)
+    {
+        SetLastError( ERROR_INVALID_PARAMETER );
+        return FALSE;
+    }
+    return set_ntstatus( RtlInitBarrier( barrier, thread_count, spin_count ));
+}
+
+
+/***********************************************************************
+ *           DeleteSynchronizationBarrier  (kernelbase.@)
+ */
+BOOL WINAPI DeleteSynchronizationBarrier( SYNCHRONIZATION_BARRIER *barrier )
+{
+    RtlDeleteBarrier( barrier );
+    return TRUE;
+}
+
+
+/***********************************************************************
+ *           EnterSynchronizationBarrier  (kernelbase.@)
+ */
+BOOL WINAPI EnterSynchronizationBarrier( SYNCHRONIZATION_BARRIER *barrier, DWORD flags )
+{
+    static const DWORD valid_flags = SYNCHRONIZATION_BARRIER_FLAGS_SPIN_ONLY | SYNCHRONIZATION_BARRIER_FLAGS_BLOCK_ONLY
+                                     | SYNCHRONIZATION_BARRIER_FLAGS_NO_DELETE;
+    static unsigned int once;
+
+    if (flags & ~valid_flags) RtlRaiseStatus( STATUS_INVALID_PARAMETER );
+
+    if (flags & ~SYNCHRONIZATION_BARRIER_FLAGS_NO_DELETE && !once++)
+        FIXME( "flags %#lx are not implemented.\n", flags );
+
+    return RtlBarrier( barrier, flags & SYNCHRONIZATION_BARRIER_FLAGS_NO_DELETE ? 0 : 0x10000 );
+}

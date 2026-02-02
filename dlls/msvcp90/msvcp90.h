@@ -17,6 +17,7 @@
  */
 
 #include "stdbool.h"
+#include <stdio.h>
 #include "stdlib.h"
 #include "windef.h"
 #include "winbase.h"
@@ -247,6 +248,8 @@ typedef enum convert_mode
 /* class codecvt<char16> */
 typedef struct {
     codecvt_base base;
+    unsigned int max_code;
+    codecvt_convert_mode convert_mode;
 } codecvt_char16;
 
 /* class codecvt<char32> */
@@ -586,9 +589,9 @@ istreambuf_iterator_char *__thiscall num_get_char_get_ldouble(const num_get*, is
 istreambuf_iterator_char *__thiscall num_get_char_get_void(const num_get*, istreambuf_iterator_char*,
         istreambuf_iterator_char, istreambuf_iterator_char, ios_base*, int*, void**);
 istreambuf_iterator_char *__thiscall num_get_char_get_int64(const num_get*, istreambuf_iterator_char*,
-        istreambuf_iterator_char, istreambuf_iterator_char, ios_base*, int*, LONGLONG*);
+        istreambuf_iterator_char, istreambuf_iterator_char, ios_base*, int*, __int64*);
 istreambuf_iterator_char *__thiscall num_get_char_get_uint64(const num_get*, istreambuf_iterator_char*,
-        istreambuf_iterator_char, istreambuf_iterator_char, ios_base*, int*, ULONGLONG*);
+        istreambuf_iterator_char, istreambuf_iterator_char, ios_base*, int*, unsigned __int64*);
 istreambuf_iterator_char *__thiscall num_get_char_get_bool(const num_get*, istreambuf_iterator_char*,
         istreambuf_iterator_char, istreambuf_iterator_char, ios_base*, int*, bool*);
 
@@ -611,9 +614,9 @@ istreambuf_iterator_wchar *__thiscall num_get_wchar_get_ldouble(const num_get*, 
 istreambuf_iterator_wchar *__thiscall num_get_wchar_get_void(const num_get*, istreambuf_iterator_wchar*,
         istreambuf_iterator_wchar, istreambuf_iterator_wchar, ios_base*, int*, void**);
 istreambuf_iterator_wchar *__thiscall num_get_wchar_get_int64(const num_get*, istreambuf_iterator_wchar*,
-        istreambuf_iterator_wchar, istreambuf_iterator_wchar, ios_base*, int*, LONGLONG*);
+        istreambuf_iterator_wchar, istreambuf_iterator_wchar, ios_base*, int*, __int64*);
 istreambuf_iterator_wchar *__thiscall num_get_wchar_get_uint64(const num_get*, istreambuf_iterator_wchar*,
-        istreambuf_iterator_wchar, istreambuf_iterator_wchar, ios_base*, int*, ULONGLONG*);
+        istreambuf_iterator_wchar, istreambuf_iterator_wchar, ios_base*, int*, unsigned __int64*);
 istreambuf_iterator_wchar *__thiscall num_get_wchar_get_bool(const num_get*, istreambuf_iterator_wchar*,
         istreambuf_iterator_wchar, istreambuf_iterator_wchar, ios_base*, int*, bool*);
 
@@ -694,12 +697,15 @@ typedef struct {
 
 const error_category* __cdecl std_iostream_category(void);
 const error_category* __cdecl std_generic_category(void);
+const error_category* __cdecl std_system_category(void);
 
 typedef struct
 {
     int code;
     const error_category *category;
 } error_code;
+
+const char *_Winerror_map_str(int err);
 #endif
 
 #if _MSVCP_VER < 80
@@ -733,3 +739,7 @@ void __cdecl DECLSPEC_NORETURN _Xruntime_error(const char*);
 void DECLSPEC_NORETURN throw_exception(const char*);
 void DECLSPEC_NORETURN throw_failure(const char*);
 void DECLSPEC_NORETURN throw_range_error(const char*);
+
+#if _MSVCP_VER >= 140
+int CDECL _get_stream_buffer_pointers(FILE*,char***,char***,int**);
+#endif

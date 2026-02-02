@@ -21,7 +21,16 @@
 #pragma makedep unix
 #endif
 
+#include "config.h"
 #include "media-converter.h"
+
+#ifdef _WINEDMO
+
+#include <errno.h>
+#include "wine/debug.h"
+WINE_DEFAULT_DEBUG_CHANNEL(dmo);
+
+#else /*  _WINEDMO */
 
 GST_ELEMENT_REGISTER_DECLARE(protonvideoconverter);
 GST_ELEMENT_REGISTER_DECLARE(protonaudioconverter);
@@ -29,6 +38,8 @@ GST_ELEMENT_REGISTER_DECLARE(protonaudioconverterbin);
 GST_ELEMENT_REGISTER_DECLARE(protondemuxer);
 
 GST_DEBUG_CATEGORY(media_converter_debug);
+
+#endif /* _WINEDMO */
 
 static void get_dirname(const char *path, char *result)
 {
@@ -260,6 +271,8 @@ int create_placeholder_file(const char *file_name)
     char path[1024];
     int ret;
 
+    GST_ERROR("Creating tag file %s.", file_name);
+
     if ((shader_path = getenv("STEAM_COMPAT_TRANSCODED_MEDIA_PATH")))
     {
         path_concat(path, shader_path, file_name);
@@ -303,15 +316,22 @@ void dump_fozdb_close(struct dump_fozdb *db)
     }
 }
 
+#ifndef _WINEDMO
+
 bool media_converter_init(void)
 {
+    /* Declarations must come first in C90 */
+    const char *proton_video_convert = NULL;
+    const char *proton_audio_convert = NULL;
+    const char *proton_audio_convert_bin = NULL;
+    const char *proton_demuxer = NULL;
+
+    /* Now the first statement is allowed */
     GST_DEBUG_CATEGORY_INIT(media_converter_debug,
                             "protonmediaconverter", GST_DEBUG_FG_YELLOW, "Proton media converter");
 
-    // Check if the PROTON_VIDEO_CONVERT environment variable is set to 0
-    // Only try to register if the envvar isn't set
-    const char *proton_video_convert = getenv("PROTON_VIDEO_CONVERT");
-    if (!proton_video_convert || strcmp(proton_video_convert, "0") != 0)
+    proton_video_convert = getenv("PROTON_VIDEO_CONVERT");
+    if (proton_video_convert == NULL || strcmp(proton_video_convert, "0") != 0)
     {
         if (!GST_ELEMENT_REGISTER(protonvideoconverter, NULL))
         {
@@ -320,10 +340,8 @@ bool media_converter_init(void)
         }
     }
 
-    // Check if the PROTON_AUDIO_CONVERT environment variable is set to 0
-    // Only try to register if the envvar isn't set
-    const char *proton_audio_convert = getenv("PROTON_AUDIO_CONVERT");
-    if (!proton_audio_convert || strcmp(proton_audio_convert, "0") != 0)
+    proton_audio_convert = getenv("PROTON_AUDIO_CONVERT");
+    if (proton_audio_convert == NULL || strcmp(proton_audio_convert, "0") != 0)
     {
         if (!GST_ELEMENT_REGISTER(protonaudioconverter, NULL))
         {
@@ -332,10 +350,8 @@ bool media_converter_init(void)
         }
     }
 
-    // Check if the PROTON_AUDIO_CONVERT_BIN environment variable is set to 0
-    // Only try to register if the envvar isn't set
-    const char *proton_audio_convert_bin = getenv("PROTON_AUDIO_CONVERT_BIN");
-    if (!proton_audio_convert_bin || strcmp(proton_audio_convert_bin, "0") != 0)
+    proton_audio_convert_bin = getenv("PROTON_AUDIO_CONVERT_BIN");
+    if (proton_audio_convert_bin == NULL || strcmp(proton_audio_convert_bin, "0") != 0)
     {
         if (!GST_ELEMENT_REGISTER(protonaudioconverterbin, NULL))
         {
@@ -344,10 +360,8 @@ bool media_converter_init(void)
         }
     }
 
-    // Check if the PROTON_DEMUX environment variable is set to 0
-    // Only try to register if the envvar isn't set
-    const char *proton_demuxer = getenv("PROTON_DEMUX");
-    if (!proton_demuxer || strcmp(proton_demuxer, "0") != 0)
+    proton_demuxer = getenv("PROTON_DEMUX");
+    if (proton_demuxer == NULL || strcmp(proton_demuxer, "0") != 0)
     {
         if (!GST_ELEMENT_REGISTER(protondemuxer, NULL))
         {
@@ -358,3 +372,5 @@ bool media_converter_init(void)
 
     return true;
 }
+
+#endif /* _WINEDMO */

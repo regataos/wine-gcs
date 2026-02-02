@@ -103,7 +103,7 @@ int __cdecl memcmp( const void *ptr1, const void *ptr2, size_t n )
  */
 void * __cdecl memcpy( void *dst, const void *src, size_t n )
 {
-    volatile unsigned char *d = dst;  /* avoid gcc optimizations */
+    unsigned char *d = dst;
     const unsigned char *s = src;
 
     if ((size_t)dst - (size_t)src >= n)
@@ -125,7 +125,7 @@ void * __cdecl memcpy( void *dst, const void *src, size_t n )
  */
 void * __cdecl memmove( void *dst, const void *src, size_t n )
 {
-    volatile unsigned char *d = dst;  /* avoid gcc optimizations */
+    unsigned char *d = dst;
     const unsigned char *s = src;
 
     if ((size_t)dst - (size_t)src >= n)
@@ -245,6 +245,79 @@ void *__cdecl memset( void *dst, int c, size_t n )
         return dst;
     }
     return dst;
+}
+
+
+/******************************************************************************
+ *                  RtlCopyMemory   (NTDLL.@)
+ */
+#undef RtlCopyMemory
+void WINAPI RtlCopyMemory( void *dest, const void *src, SIZE_T len )
+{
+    memcpy( dest, src, len );
+}
+
+
+/******************************************************************************
+ *                  RtlMoveMemory   (NTDLL.@)
+ */
+#undef RtlMoveMemory
+void WINAPI RtlMoveMemory( void *dest, const void *src, SIZE_T len )
+{
+    memmove( dest, src, len );
+}
+
+
+/******************************************************************************
+ *                  RtlFillMemory   (NTDLL.@)
+ */
+#undef RtlFillMemory
+void WINAPI RtlFillMemory( VOID *dest, SIZE_T len, BYTE fill )
+{
+    memset( dest, fill, len );
+}
+
+
+/******************************************************************************
+ *                  RtlZeroMemory   (NTDLL.@)
+ */
+#undef RtlZeroMemory
+void WINAPI RtlZeroMemory( VOID *dest, SIZE_T len )
+{
+    memset( dest, 0, len );
+}
+
+
+/******************************************************************************
+ *                  RtlCompareMemory   (NTDLL.@)
+ */
+SIZE_T WINAPI RtlCompareMemory( const void *src1, const void *src2, SIZE_T len )
+{
+    SIZE_T i = 0;
+    while (i < len && ((const BYTE *)src1)[i] == ((const BYTE *)src2)[i]) i++;
+    return i;
+}
+
+
+/******************************************************************************
+ *                  RtlCompareMemoryUlong   (NTDLL.@)
+ */
+SIZE_T WINAPI RtlCompareMemoryUlong( void *src, SIZE_T len, ULONG val )
+{
+    SIZE_T i = 0;
+    len /= sizeof(ULONG);
+    while (i < len && ((ULONG *)src)[i] == val) i++;
+    return i * sizeof(ULONG);
+}
+
+
+/*************************************************************************
+ *                  RtlFillMemoryUlong   (NTDLL.@)
+ */
+void WINAPI RtlFillMemoryUlong( ULONG *dest, ULONG len, ULONG val )
+{
+    len /= sizeof(ULONG);
+    while (len--) *dest++ = val;
 }
 
 

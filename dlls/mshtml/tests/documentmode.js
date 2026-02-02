@@ -19,6 +19,8 @@
 var compat_version;
 var tests = [];
 
+var svg_ns = "http://www.w3.org/2000/svg";
+
 ok(performance.timing.navigationStart > 0, "navigationStart <= 0");
 ok(performance.timing.fetchStart == performance.timing.navigationStart, "fetchStart != navigationStart");
 ok(performance.timing.domainLookupStart >= performance.timing.fetchStart, "domainLookupStart < fetchStart");
@@ -81,6 +83,115 @@ if(window.addEventListener) {
     document.attachEvent("onunload", function() { ok(false, "unload fired on document"); });
 }
 
+sync_test("window own props", function() {
+    if(!Object.getOwnPropertyNames)
+        return;
+
+    test_own_props(window, "window", [
+        ["ANGLE_instanced_arrays",11], "ActiveXObject", ["AesGcmEncryptResult",11], ["AnimationEvent",10], ["ApplicationCache",10], "Array", ["ArrayBuffer",10], "Attr",
+        "Audio", ["AudioTrack",10], ["AudioTrackList",10], "BeforeUnloadEvent", ["Blob",10], "BookmarkCollection", "Boolean", "CDATASection", "CSSFontFaceRule", "CSSImportRule",
+        ["CSSKeyframeRule",10], ["CSSKeyframesRule",10], "CSSMediaRule", "CSSNamespaceRule", "CSSPageRule", "CSSRule", "CSSRuleList", "CSSStyleDeclaration", "CSSStyleRule",
+        "CSSStyleSheet", "CanvasGradient", "CanvasPattern", "CanvasPixelArray", "CanvasRenderingContext2D", "CharacterData", "ClientRect", "ClientRectList", ["CloseEvent",10],
+        "CollectGarbage", "Comment", "CompositionEvent", ["Console",10], "ControlRangeCollection", "Coordinates", ["Crypto",11], ["CryptoOperation",11], "CustomEvent",
+        ["DOMError",10], "DOMException", "DOMImplementation", "DOMParser", ["DOMSettableTokenList",10], ["DOMStringList",10], ["DOMStringMap",11], ["DOMTokenList",10],
+        "DataTransfer", ["DataView",10], "Date", "Debug", ["DeviceAcceleration",11], ["DeviceMotionEvent",11], ["DeviceOrientationEvent",11], ["DeviceRotationRate",11],
+        "Document", "DocumentFragment", "DocumentType", "DragEvent", ["EXT_texture_filter_anisotropic",11], "Element", "Enumerator", "Error", ["ErrorEvent",10], "EvalError",
+        "Event", "EventException", ["File",10], ["FileList",10], ["FileReader",10], ["Float32Array",10], ["Float64Array",10], "FocusEvent", ["FormData",10], "Function",
+        "Geolocation", ["HTMLAllCollection",11], "HTMLAnchorElement", "HTMLAppletElement", "HTMLAreaElement", "HTMLAreasCollection", "HTMLAudioElement", "HTMLBGSoundElement",
+        "HTMLBRElement", "HTMLBaseElement", "HTMLBaseFontElement", "HTMLBlockElement", "HTMLBodyElement", "HTMLButtonElement", "HTMLCanvasElement", "HTMLCollection",
+        "HTMLDDElement", "HTMLDListElement", "HTMLDTElement", ["HTMLDataListElement",10], "HTMLDirectoryElement", "HTMLDivElement", ["HTMLDocument",11], "HTMLElement",
+        "HTMLEmbedElement", "HTMLFieldSetElement", "HTMLFontElement", "HTMLFormElement", "HTMLFrameElement", "HTMLFrameSetElement", "HTMLHRElement", "HTMLHeadElement",
+        "HTMLHeadingElement", "HTMLHtmlElement", "HTMLIFrameElement", "HTMLImageElement", "HTMLInputElement", "HTMLIsIndexElement", "HTMLLIElement", "HTMLLabelElement",
+        "HTMLLegendElement", "HTMLLinkElement", "HTMLMapElement", "HTMLMarqueeElement", "HTMLMediaElement", "HTMLMenuElement", "HTMLMetaElement", "HTMLModElement",
+        "HTMLNextIdElement", "HTMLOListElement", "HTMLObjectElement", "HTMLOptGroupElement", "HTMLOptionElement", "HTMLParagraphElement", "HTMLParamElement", "HTMLPhraseElement",
+        "HTMLPreElement", ["HTMLProgressElement",10], "HTMLQuoteElement", "HTMLScriptElement", "HTMLSelectElement", "HTMLSourceElement", "HTMLSpanElement", "HTMLStyleElement",
+        "HTMLTableCaptionElement", "HTMLTableCellElement", "HTMLTableColElement", "HTMLTableDataCellElement", "HTMLTableElement", "HTMLTableHeaderCellElement",
+        "HTMLTableRowElement", "HTMLTableSectionElement", "HTMLTextAreaElement", "HTMLTitleElement", ["HTMLTrackElement",10], "HTMLUListElement", "HTMLUnknownElement",
+        "HTMLVideoElement", "History", ["IDBCursor",10], ["IDBCursorWithValue",10], ["IDBDatabase",10], ["IDBFactory",10], ["IDBIndex",10], ["IDBKeyRange",10],
+        ["IDBObjectStore",10], ["IDBOpenDBRequest",10], ["IDBRequest",10], ["IDBTransaction",10], ["IDBVersionChangeEvent",10], "Image", "ImageData", "Infinity",
+        ["Int16Array",10], ["Int32Array",10], ["Int8Array",10], ["Intl",11], "JSON", ["Key",11], ["KeyOperation",11], ["KeyPair",11], "KeyboardEvent", "Location",
+        "MSBehaviorUrnsCollection", ["MSBlobBuilder",10], ["MSCSSMatrix",10], "MSCSSProperties", "MSCSSRuleList", "MSCompatibleInfo", "MSCompatibleInfoCollection",
+        "MSCurrentStyleCSSProperties", "MSEventObj", ["MSGesture",10], ["MSGestureEvent",10], ["MSGraphicsTrust",11], ["MSInputMethodContext",11], ["MSManipulationEvent",10],
+        ["MSMediaKeyError",11], ["MSMediaKeyMessageEvent",11], ["MSMediaKeyNeededEvent",11], ["MSMediaKeySession",11], ["MSMediaKeys",11], "MSMimeTypesCollection",
+        ["MSNamespaceInfo",0,9], ["MSNamespaceInfoCollection",0,9], "MSPluginsCollection", ["MSPointerEvent",10], ["MSPopupWindow",0,10], ["MSRangeCollection",10],
+        ["MSSelection",0,10], "MSSiteModeEvent", ["MSStream",10], ["MSStreamReader",10], "MSStyleCSSProperties", ["Map",11], "Math", "MediaError", "MediaList",
+        ["MediaQueryList",10], ["MediaSource",11], ["MessageChannel",10], "MessageEvent", ["MessagePort",10], ["MimeType",11], ["MimeTypeArray",11], "MouseEvent",
+        "MouseWheelEvent", "MutationEvent", ["MutationObserver",11], ["MutationRecord",11], "NaN", "NamedNodeMap", "Navigator", "Node", "NodeFilter", "NodeIterator", "NodeList",
+        "Number", ["OES_element_index_uint",11], ["OES_standard_derivatives",11], ["OES_texture_float",11], ["OES_texture_float_linear",11], "Object", "Option",
+        ["PageTransitionEvent",11], "Performance", "PerformanceEntry", "PerformanceMark", "PerformanceMeasure", "PerformanceNavigation", ["PerformanceNavigationTiming",11],
+        "PerformanceResourceTiming", "PerformanceTiming", ["Plugin",11], ["PluginArray",11], ["PointerEvent",11], ["PopStateEvent",10], "Position", "PositionError",
+        "ProcessingInstruction", ["ProgressEvent",10], "Range", "RangeError", "RangeException", "ReferenceError", "RegExp", "SVGAElement", "SVGAngle", "SVGAnimatedAngle",
+        "SVGAnimatedBoolean", "SVGAnimatedEnumeration", "SVGAnimatedInteger", "SVGAnimatedLength", "SVGAnimatedLengthList", "SVGAnimatedNumber", "SVGAnimatedNumberList",
+        "SVGAnimatedPreserveAspectRatio", "SVGAnimatedRect", "SVGAnimatedString", "SVGAnimatedTransformList", "SVGCircleElement", "SVGClipPathElement",
+        ["SVGComponentTransferFunctionElement",10], "SVGDefsElement", "SVGDescElement", "SVGElement", "SVGElementInstance", "SVGElementInstanceList", "SVGEllipseElement",
+        "SVGException", ["SVGFEBlendElement",10], ["SVGFEColorMatrixElement",10], ["SVGFEComponentTransferElement",10], ["SVGFECompositeElement",10],
+        ["SVGFEConvolveMatrixElement",10], ["SVGFEDiffuseLightingElement",10], ["SVGFEDisplacementMapElement",10], ["SVGFEDistantLightElement",10], ["SVGFEFloodElement",10],
+        ["SVGFEFuncAElement",10], ["SVGFEFuncBElement",10], ["SVGFEFuncGElement",10], ["SVGFEFuncRElement",10], ["SVGFEGaussianBlurElement",10], ["SVGFEImageElement",10],
+        ["SVGFEMergeElement",10], ["SVGFEMergeNodeElement",10], ["SVGFEMorphologyElement",10], ["SVGFEOffsetElement",10], ["SVGFEPointLightElement",10],
+        ["SVGFESpecularLightingElement",10], ["SVGFESpotLightElement",10], ["SVGFETileElement",10], ["SVGFETurbulenceElement",10], ["SVGFilterElement",10], "SVGGElement",
+        "SVGGradientElement", "SVGImageElement", "SVGLength", "SVGLengthList", "SVGLineElement", "SVGLinearGradientElement", "SVGMarkerElement", "SVGMaskElement", "SVGMatrix",
+        "SVGMetadataElement", "SVGNumber", "SVGNumberList", "SVGPathElement", "SVGPathSeg", "SVGPathSegArcAbs", "SVGPathSegArcRel", "SVGPathSegClosePath", "SVGPathSegCurvetoCubicAbs",
+        "SVGPathSegCurvetoCubicRel", "SVGPathSegCurvetoCubicSmoothAbs", "SVGPathSegCurvetoCubicSmoothRel", "SVGPathSegCurvetoQuadraticAbs", "SVGPathSegCurvetoQuadraticRel",
+        "SVGPathSegCurvetoQuadraticSmoothAbs", "SVGPathSegCurvetoQuadraticSmoothRel", "SVGPathSegLinetoAbs", "SVGPathSegLinetoHorizontalAbs", "SVGPathSegLinetoHorizontalRel",
+        "SVGPathSegLinetoRel", "SVGPathSegLinetoVerticalAbs", "SVGPathSegLinetoVerticalRel", "SVGPathSegList", "SVGPathSegMovetoAbs", "SVGPathSegMovetoRel", "SVGPatternElement",
+        "SVGPoint", "SVGPointList", "SVGPolygonElement", "SVGPolylineElement", "SVGPreserveAspectRatio", "SVGRadialGradientElement", "SVGRect", "SVGRectElement", "SVGSVGElement",
+        "SVGScriptElement", "SVGStopElement", "SVGStringList", "SVGStyleElement", "SVGSwitchElement", "SVGSymbolElement", "SVGTSpanElement", "SVGTextContentElement", "SVGTextElement",
+        "SVGTextPathElement", "SVGTextPositioningElement", "SVGTitleElement", "SVGTransform", "SVGTransformList", "SVGUnitTypes", "SVGUseElement", "SVGViewElement", "SVGZoomAndPan",
+        "SVGZoomEvent", "Screen", "ScriptEngine", "ScriptEngineBuildVersion", "ScriptEngineMajorVersion", "ScriptEngineMinorVersion", "Selection", ["Set",11], ["SourceBuffer",11],
+        ["SourceBufferList",11], "Storage", "StorageEvent", "String", "StyleMedia", "StyleSheet", "StyleSheetList", "StyleSheetPageList", ["SubtleCrypto",11], "SyntaxError", "Text",
+        "TextEvent", "TextMetrics", "TextRange", "TextRangeCollection", ["TextTrack",10], ["TextTrackCue",10], ["TextTrackCueList",10], ["TextTrackList",10], "TimeRanges",
+        ["TrackEvent",10], ["TransitionEvent",10], "TreeWalker", "TypeError", "UIEvent", "URIError", ["URL",10], ["Uint16Array",10], ["Uint32Array",10], ["Uint8Array",10],
+        ["Uint8ClampedArray",11], "VBArray", ["ValidityState",10], ["VideoPlaybackQuality",11], ["WEBGL_compressed_texture_s3tc",11], ["WEBGL_debug_renderer_info",11], ["WeakMap",11],
+        ["WebGLActiveInfo",11], ["WebGLBuffer",11], ["WebGLContextEvent",11], ["WebGLFramebuffer",11], ["WebGLObject",11], ["WebGLProgram",11], ["WebGLRenderbuffer",11],
+        ["WebGLRenderingContext",11], ["WebGLShader",11], ["WebGLShaderPrecisionFormat",11], ["WebGLTexture",11], ["WebGLUniformLocation",11], ["WebSocket",10], "WheelEvent", "Window",
+        ["Worker",10], ["XDomainRequest",0,10], ["XMLDocument",11], "XMLHttpRequest", ["XMLHttpRequestEventTarget",10], "XMLSerializer", "async_test", "broken",
+        "compat_version", "decodeURI", "decodeURIComponent", "encodeURI", "encodeURIComponent", "escape", "eval", "file_prefix", "format_message", "func_scope_val", "func_scope_val2",
+        "guard", "isFinite", "isNaN", "next_test", "ok", "pagehide_fired", "pageshow_fired", "parseFloat", "parseInt", "ready_states", "reportSuccess", "run_tests", "svg_ns",
+        "sync_test", "test_name", "test_own_props", "tests", "todo_wine", "todo_wine_if", "trace", "undefined", "unescape", "win_skip"
+    ], [
+        ["AesGcmEncryptResult",11], ["ANGLE_instanced_arrays",11], ["AnimationEvent",10], ["ApplicationCache",10], ["ArrayBuffer",9,9], "Audio", ["AudioTrack",10], ["AudioTrackList",10],
+        "BeforeUnloadEvent", ["Blob",10], "BookmarkCollection", "CanvasGradient", "CanvasPattern", "CanvasPixelArray", "CanvasRenderingContext2D", "CDATASection", ["CloseEvent",10],
+        "CompositionEvent", "ControlRangeCollection", "Coordinates", ["CryptoOperation",11], "CSSFontFaceRule", "CSSImportRule", ["CSSKeyframeRule",10], ["CSSKeyframesRule",10], "CSSMediaRule",
+        "CSSNamespaceRule", "CSSPageRule", "CSSRuleList", "DataTransfer", ["DataView",9,9], "Debug", ["DeviceAcceleration",11], ["DeviceMotionEvent",11], ["DeviceOrientationEvent",11],
+        ["DeviceRotationRate",11], ["DOMError",10], "DOMException", ["DOMSettableTokenList",10], ["DOMStringList",10], ["DOMStringMap",11], "DragEvent", ["ErrorEvent",10], "EventException",
+        ["EXT_texture_filter_anisotropic",11], ["File",10], ["FileList",10], ["FileReader",10], ["Float32Array",9,9], ["Float64Array",9,9], "FocusEvent", ["FormData",10], "Geolocation", "GetObject",
+        ["HTMLAllCollection",11], "HTMLAppletElement", "HTMLAreasCollection", "HTMLAudioElement", "HTMLBaseElement", "HTMLBaseFontElement", "HTMLBGSoundElement", "HTMLBlockElement", "HTMLBRElement",
+        "HTMLCanvasElement", ["HTMLDataListElement",10], "HTMLDDElement", "HTMLDirectoryElement", "HTMLDivElement", "HTMLDListElement", "HTMLDTElement", "HTMLFieldSetElement", "HTMLFontElement",
+        "HTMLFrameSetElement", "HTMLHeadingElement", "HTMLHRElement", "HTMLIsIndexElement", "HTMLLegendElement", "HTMLLIElement", "HTMLMapElement", "HTMLMarqueeElement", "HTMLMediaElement",
+        "HTMLMenuElement", "HTMLModElement", "HTMLNextIdElement", "HTMLOListElement", "HTMLOptGroupElement", "HTMLParagraphElement", "HTMLParamElement", "HTMLPhraseElement", "HTMLPreElement",
+        ["HTMLProgressElement",10], "HTMLQuoteElement", "HTMLSourceElement", "HTMLSpanElement", "HTMLTableCaptionElement", "HTMLTableColElement", "HTMLTableHeaderCellElement",
+        "HTMLTableSectionElement", ["HTMLTrackElement",10], "HTMLUListElement", "HTMLVideoElement", ["IDBCursor",10], ["IDBCursorWithValue",10], ["IDBDatabase",10], ["IDBFactory",10], ["IDBIndex",10],
+        ["IDBKeyRange",10], ["IDBObjectStore",10], ["IDBOpenDBRequest",10], ["IDBRequest",10], ["IDBTransaction",10], ["IDBVersionChangeEvent",10], "ImageData", ["Int16Array",9,9], ["Int32Array",9,9],
+        ["Int8Array",9,9], ["Intl",11], ["Key",11], ["KeyOperation",11], ["KeyPair",11], "Location", "MediaError", "MediaList", ["MediaSource",11], ["MessageChannel",10], ["MessagePort",10],
+        ["MimeType",11], ["MimeTypeArray",9,10], "MouseWheelEvent", "MSBehaviorUrnsCollection", ["MSBlobBuilder",10], "MSCompatibleInfo", "MSCompatibleInfoCollection", ["MSCSSMatrix",10],
+        ["MSGesture",10], ["MSGestureEvent",10], ["MSGraphicsTrust",11], ["MSInputMethodContext",11], ["MSManipulationEvent",10], ["MSMediaKeyError",11], ["MSMediaKeyMessageEvent",11],
+        ["MSMediaKeyNeededEvent",11], ["MSMediaKeys",11], ["MSMediaKeySession",11], "MSMimeTypesCollection", ["MSNamespaceInfo",0,9], "MSPluginsCollection", ["MSPointerEvent",10],
+        ["MSPopupWindow",0,10], ["MSRangeCollection",10], "MSSiteModeEvent", ["MSStream",10], ["MSStreamReader",10], "MutationEvent", ["MutationRecord",11], "NodeFilter", "NodeIterator",
+        ["OES_element_index_uint",11], ["OES_standard_derivatives",11], ["OES_texture_float",11], ["OES_texture_float_linear",11], "PerformanceEntry", "PerformanceMark", "PerformanceMeasure",
+        ["PerformanceNavigationTiming",11], "PerformanceResourceTiming", ["Plugin",11], ["PluginArray",9,10], ["PointerEvent",11], ["PopStateEvent",10], "Position", "PositionError",
+        "ProcessingInstruction", "RangeException", "RegExpError", "Selection", ["SourceBuffer",11], ["SourceBufferList",11], "StyleMedia", "StyleSheetPageList", "SVGAElement", "SVGAngle",
+        "SVGAnimatedAngle", "SVGAnimatedBoolean", "SVGAnimatedEnumeration", "SVGAnimatedInteger", "SVGAnimatedLength", "SVGAnimatedLengthList", "SVGAnimatedNumber", "SVGAnimatedNumberList",
+        "SVGAnimatedPreserveAspectRatio", "SVGAnimatedRect", "SVGAnimatedString", "SVGAnimatedTransformList", "SVGClipPathElement", ["SVGComponentTransferFunctionElement",10], "SVGDefsElement",
+        "SVGDescElement", "SVGElementInstance", "SVGElementInstanceList", "SVGEllipseElement", "SVGException", ["SVGFEBlendElement",10], ["SVGFEColorMatrixElement",10],
+        ["SVGFEComponentTransferElement",10], ["SVGFECompositeElement",10], ["SVGFEConvolveMatrixElement",10], ["SVGFEDiffuseLightingElement",10], ["SVGFEDisplacementMapElement",10],
+        ["SVGFEDistantLightElement",10], ["SVGFEFloodElement",10], ["SVGFEFuncAElement",10], ["SVGFEFuncBElement",10], ["SVGFEFuncGElement",10], ["SVGFEFuncRElement",10],
+        ["SVGFEGaussianBlurElement",10], ["SVGFEImageElement",10], ["SVGFEMergeElement",10], ["SVGFEMergeNodeElement",10], ["SVGFEMorphologyElement",10], ["SVGFEOffsetElement",10],
+        ["SVGFEPointLightElement",10], ["SVGFESpecularLightingElement",10], ["SVGFESpotLightElement",10], ["SVGFETileElement",10], ["SVGFETurbulenceElement",10], ["SVGFilterElement",10], "SVGGElement",
+        "SVGGradientElement", "SVGImageElement", "SVGLength", "SVGLengthList", "SVGLinearGradientElement", "SVGLineElement", "SVGMarkerElement", "SVGMaskElement", "SVGMatrix", "SVGMetadataElement",
+        "SVGNumber", "SVGNumberList", "SVGPathElement", "SVGPathSeg", "SVGPathSegArcAbs", "SVGPathSegArcRel", "SVGPathSegClosePath", "SVGPathSegCurvetoCubicAbs", "SVGPathSegCurvetoCubicRel",
+        "SVGPathSegCurvetoCubicSmoothAbs", "SVGPathSegCurvetoCubicSmoothRel", "SVGPathSegCurvetoQuadraticAbs", "SVGPathSegCurvetoQuadraticRel", "SVGPathSegCurvetoQuadraticSmoothAbs",
+        "SVGPathSegCurvetoQuadraticSmoothRel", "SVGPathSegLinetoAbs", "SVGPathSegLinetoHorizontalAbs", "SVGPathSegLinetoHorizontalRel", "SVGPathSegLinetoRel", "SVGPathSegLinetoVerticalAbs",
+        "SVGPathSegLinetoVerticalRel", "SVGPathSegList", "SVGPathSegMovetoAbs", "SVGPathSegMovetoRel", "SVGPatternElement", "SVGPoint", "SVGPointList", "SVGPolygonElement", "SVGPolylineElement",
+        "SVGPreserveAspectRatio", "SVGRadialGradientElement", "SVGRect", "SVGRectElement", "SVGScriptElement", "SVGStopElement", "SVGStringList", "SVGStyleElement", "SVGSwitchElement",
+        "SVGSymbolElement", "SVGTextElement", "SVGTextPathElement", "SVGTitleElement", "SVGTransform", "SVGTransformList", "SVGUnitTypes", "SVGUseElement", "SVGViewElement", "SVGZoomAndPan",
+        "SVGZoomEvent", "TextEvent", "TextMetrics", "TextRangeCollection", ["TextTrack",10], ["TextTrackCue",10], ["TextTrackCueList",10], ["TextTrackList",10], "TimeRanges", ["TrackEvent",10],
+        ["TransitionEvent",10], "TreeWalker", ["Uint16Array",9,9], ["Uint32Array",9,9], ["Uint8Array",9,9], ["Uint8ClampedArray",9,10], ["URL",10], ["ValidityState",10], ["VideoPlaybackQuality",11],
+        ["WebGLActiveInfo",11], ["WebGLBuffer",11], ["WebGLContextEvent",11], ["WebGLFramebuffer",11], ["WebGLObject",11], ["WebGLProgram",11], ["WebGLRenderbuffer",11], ["WebGLRenderingContext",11],
+        ["WebGLShader",11], ["WebGLShaderPrecisionFormat",11], ["WebGLTexture",11], ["WebGLUniformLocation",11], ["WEBGL_compressed_texture_s3tc",11], ["WEBGL_debug_renderer_info",11], ["WebSocket",10],
+        "WheelEvent", ["Worker",10], ["XMLHttpRequestEventTarget",10], "XMLSerializer"
+    ]);
+});
+
 sync_test("performance timing", function() {
     ok(performance.timing.domInteractive >= performance.timing.domLoading, "domInteractive < domLoading");
     ok(performance.timing.domContentLoadedEventStart >= performance.timing.domInteractive, "domContentLoadedEventStart < domInteractive");
@@ -107,74 +218,74 @@ sync_test("page transition events", function() {
 
 sync_test("builtin_toString", function() {
     var tags = [
-        [ "abbr",            "Phrase" ],
-        [ "acronym",         "Phrase" ],
-        [ "address",         "Block" ],
+        [ "abbr",            "Phrase", -1 ],
+        [ "acronym",         "Phrase", -1 ],
+        [ "address",         "Block", -1 ],
      // [ "applet",          "Applet" ],  // makes Windows pop up a dialog box
         [ "article",         "" ],
         [ "aside",           "" ],
-        [ "audio",           "Audio" ],
-        [ "b",               "Phrase" ],
-        [ "base",            "Base" ],
-        [ "basefont",        "BaseFont" ],
+        [ "audio",           "Audio", -1 ],
+        [ "b",               "Phrase", -1 ],
+        [ "base",            "Base", -1 ],
+        [ "basefont",        "BaseFont", -1 ],
         [ "bdi",             "Unknown" ],
-        [ "bdo",             "Phrase" ],
-        [ "big",             "Phrase" ],
-        [ "blockquote",      "Block" ],
+        [ "bdo",             "Phrase", -1 ],
+        [ "big",             "Phrase", -1 ],
+        [ "blockquote",      "Block", -1 ],
         [ "body",            "Body" ],
-        [ "br",              "BR" ],
+        [ "br",              "BR", -1 ],
         [ "button",          "Button" ],
-        [ "canvas",          "Canvas" ],
-        [ "caption",         "TableCaption" ],
-        [ "center",          "Block" ],
-        [ "cite",            "Phrase" ],
-        [ "code",            "Phrase" ],
-        [ "col",             "TableCol" ],
-        [ "colgroup",        "TableCol" ],
+        [ "canvas",          "Canvas", -1 ],
+        [ "caption",         "TableCaption", -1 ],
+        [ "center",          "Block", -1 ],
+        [ "cite",            "Phrase", -1 ],
+        [ "code",            "Phrase", -1 ],
+        [ "col",             "TableCol", -1 ],
+        [ "colgroup",        "TableCol", -1 ],
         [ "data",            "Unknown" ],
         [ "datalist",        "DataList", 10 ],
-        [ "dd",              "DD" ],
-        [ "del",             "Mod" ],
+        [ "dd",              "DD", -1 ],
+        [ "del",             "Mod", -1 ],
         [ "details",         "Unknown" ],
-        [ "dfn",             "Phrase" ],
+        [ "dfn",             "Phrase", -1 ],
         [ "dialog",          "Unknown" ],
-        [ "dir",             "Directory" ],
-        [ "div",             "Div" ],
-        [ "dl",              "DList" ],
-        [ "dt",              "DT" ],
-        [ "em",              "Phrase" ],
+        [ "dir",             "Directory", -1 ],
+        [ "div",             "Div", -1 ],
+        [ "dl",              "DList", -1 ],
+        [ "dt",              "DT", -1 ],
+        [ "em",              "Phrase", -1 ],
         [ "embed",           "Embed" ],
-        [ "fieldset",        "FieldSet" ],
+        [ "fieldset",        "FieldSet", -1 ],
         [ "figcaption",      "" ],
         [ "figure",          "" ],
-        [ "font",            "Font" ],
+        [ "font",            "Font", -1 ],
         [ "footer",          "" ],
         [ "form",            "Form" ],
         [ "frame",           "Frame" ],
-        [ "frameset",        "FrameSet" ],
-        [ "h1",              "Heading" ],
-        [ "h2",              "Heading" ],
-        [ "h3",              "Heading" ],
-        [ "h4",              "Heading" ],
-        [ "h5",              "Heading" ],
-        [ "h6",              "Heading" ],
+        [ "frameset",        "FrameSet", -1 ],
+        [ "h1",              "Heading", -1 ],
+        [ "h2",              "Heading", -1 ],
+        [ "h3",              "Heading", -1 ],
+        [ "h4",              "Heading", -1 ],
+        [ "h5",              "Heading", -1 ],
+        [ "h6",              "Heading", -1 ],
         [ "h7",              "Unknown" ],
         [ "head",            "Head" ],
         [ "header",          "" ],
-        [ "hr",              "HR" ],
+        [ "hr",              "HR", -1 ],
         [ "html",            "Html" ],
-        [ "i",               "Phrase" ],
+        [ "i",               "Phrase", -1 ],
         [ "iframe",          "IFrame" ],
         [ "img",             "Image" ],
         [ "input",           "Input" ],
-        [ "ins",             "Mod" ],
-        [ "kbd",             "Phrase" ],
+        [ "ins",             "Mod", -1 ],
+        [ "kbd",             "Phrase", -1 ],
         [ "label",           "Label" ],
-        [ "legend",          "Legend" ],
-        [ "li",              "LI" ],
+        [ "legend",          "Legend", -1 ],
+        [ "li",              "LI", -1 ],
         [ "link",            "Link" ],
         [ "main",            "Unknown" ],
-        [ "map",             "Map" ],
+        [ "map",             "Map", -1 ],
         [ "mark",            "" ],
         [ "meta",            "Meta" ],
         [ "meter",           "Unknown" ],
@@ -182,57 +293,57 @@ sync_test("builtin_toString", function() {
         [ "noframes",        "" ],
         [ "noscript",        "" ],
         [ "object",          "Object" ],
-        [ "ol",              "OList" ],
-        [ "optgroup",        "OptGroup" ],
+        [ "ol",              "OList", -1 ],
+        [ "optgroup",        "OptGroup", -1 ],
         [ "option",          "Option" ],
         [ "output",          "Unknown" ],
-        [ "p",               "Paragraph" ],
-        [ "param",           "Param" ],
+        [ "p",               "Paragraph", -1 ],
+        [ "param",           "Param", -1 ],
         [ "picture",         "Unknown" ],
-        [ "pre",             "Pre" ],
+        [ "pre",             "Pre", -1 ],
         [ "progress",        "Progress", 10 ],
-        [ "q",               "Quote" ],
-        [ "rp",              "Phrase" ],
-        [ "rt",              "Phrase" ],
-        [ "ruby",            "Phrase" ],
-        [ "s",               "Phrase" ],
-        [ "samp",            "Phrase" ],
+        [ "q",               "Quote", -1 ],
+        [ "rp",              "Phrase", -1 ],
+        [ "rt",              "Phrase", -1 ],
+        [ "ruby",            "Phrase", -1 ],
+        [ "s",               "Phrase", -1 ],
+        [ "samp",            "Phrase", -1 ],
         [ "script",          "Script" ],
         [ "section",         "" ],
         [ "select",          "Select" ],
-        [ "small",           "Phrase" ],
-        [ "source",          "Source" ],
-        [ "span",            "Span" ],
-        [ "strike",          "Phrase" ],
-        [ "strong",          "Phrase" ],
+        [ "small",           "Phrase", -1 ],
+        [ "source",          "Source", -1 ],
+        [ "span",            "Span", -1 ],
+        [ "strike",          "Phrase", -1 ],
+        [ "strong",          "Phrase", -1 ],
         [ "style",           "Style" ],
-        [ "sub",             "Phrase" ],
+        [ "sub",             "Phrase", -1 ],
         [ "summary",         "Unknown" ],
-        [ "sup",             "Phrase" ],
+        [ "sup",             "Phrase", -1 ],
         [ "svg",             "Unknown" ],
         [ "table",           "Table" ],
-        [ "tbody",           "TableSection" ],
+        [ "tbody",           "TableSection", -1 ],
         [ "td",              "TableDataCell" ],
         [ "template",        "Unknown" ],
         [ "textarea",        "TextArea" ],
-        [ "tfoot",           "TableSection" ],
-        [ "th",              "TableHeaderCell" ],
-        [ "thead",           "TableSection" ],
+        [ "tfoot",           "TableSection", -1 ],
+        [ "th",              "TableHeaderCell", -1 ],
+        [ "thead",           "TableSection", -1 ],
         [ "time",            "Unknown" ],
         [ "title",           "Title" ],
         [ "tr",              "TableRow" ],
         [ "track",           "Track", 10 ],
-        [ "tt",              "Phrase" ],
-        [ "u",               "Phrase" ],
-        [ "ul",              "UList" ],
-        [ "var",             "Phrase" ],
-        [ "video",           "Video" ],
+        [ "tt",              "Phrase", -1 ],
+        [ "u",               "Phrase", -1 ],
+        [ "ul",              "UList", -1 ],
+        [ "var",             "Phrase", -1 ],
+        [ "video",           "Video", -1 ],
         [ "wbr",             "" ],
         [ "winetest",        "Unknown" ]
     ];
     var v = document.documentMode, e;
 
-    function test(msg, obj, name, tostr, ctor_name) {
+    function test(msg, obj, name, tostr, is_todo) {
         var s;
         if(obj.toString) {
             s = obj.toString();
@@ -240,47 +351,23 @@ sync_test("builtin_toString", function() {
             ok(s === (tostr ? tostr : (v < 9 ? "[object]" : "[object " + name + "]")), msg + " toString returned " + s);
         }
         s = Object.prototype.toString.call(obj);
-        todo_wine_if(name !== "HTMLElement" && s === "[object HTMLElement]").
+        todo_wine_if(v >= 9 && is_todo).
         ok(s === (v < 9 ? "[object Object]" : "[object " + name + "]"), msg + " Object.toString returned " + s);
-
-        if(v >= 9) {
-            eval("var c = window." + name + ";");
-            todo_wine_if(name !== "HTMLElement" && s === "[object HTMLElement]").
-            ok(c !== undefined, name + " is undefined");
-            if(!ctor_name) ctor_name = name;
-            if(c === undefined) return;  /* todo_wine */
-
-            s = Object.getPrototypeOf(obj);
-            if(name === "Object") {
-                ok(s === null, msg + "'s proto is not null: " + s);
-
-                s = Object.prototype.toString.call(c);
-                ok(s === "[object Function]", msg + " Object.toString on constructor returned " + s);
-            }else {
-                ok(s === c.prototype, msg + "'s proto is not its constructor's prototype");
-
-                s = Object.prototype.toString.call(c);
-                todo_wine_if(name !== "HTMLElement" && s === "[object HTMLElement]").
-                ok(s === "[object " + ctor_name + "]", msg + " Object.toString on constructor returned " + s);
-
-                s = Object.prototype.toString.call(c.prototype);
-                todo_wine_if(name !== "HTMLElement" && s === "[object HTMLElementPrototype]").
-                ok(s === "[object " + name + "Prototype]", msg + " Object.toString on constructor.prototype returned " + s);
-            }
-        }
     }
 
     for(var i = 0; i < tags.length; i++)
         if(tags[i].length < 3 || v >= tags[i][2])
-            test("tag '" + tags[i][0] + "'", document.createElement(tags[i][0]), "HTML" + tags[i][1] + "Element");
+            test("tag '" + tags[i][0] + "'", document.createElement(tags[i][0]), "HTML" + tags[i][1] + "Element", null, tags[i].length > 2);
 
     e = document.createElement("a");
     ok(e.toString() === "", "tag 'a' (without href) toString returned " + e.toString());
+    ok(e + "" === "", "tag 'a' (without href) value = " + e);
     e.href = "https://www.winehq.org/";
     test("tag 'a'", e, "HTMLAnchorElement", "https://www.winehq.org/");
 
     e = document.createElement("area");
     ok(e.toString() === "", "tag 'area' (without href) toString returned " + e.toString());
+    ok(e + "" === "", "tag 'area' (without href) value = " + e);
     e.href = "https://www.winehq.org/";
     test("tag 'area'", e, "HTMLAreaElement", "https://www.winehq.org/");
 
@@ -317,7 +404,7 @@ sync_test("builtin_toString", function() {
     if(!localStorage) win_skip("localStorage is buggy and not available, skipping");
 
     test("attribute", document.createAttribute("class"), "Attr");
-    test("attributes", e.attributes, "NamedNodeMap");
+    if(false /* todo_wine */) test("attributes", e.attributes, "NamedNodeMap");
     test("childNodes", document.body.childNodes, "NodeList");
     if(clientRects) test("clientRect", clientRects[0], "ClientRect");
     if(clientRects) test("clientRects", clientRects, "ClientRectList");
@@ -327,7 +414,7 @@ sync_test("builtin_toString", function() {
     test("history", window.history, "History");
     test("implementation", document.implementation, "DOMImplementation");
     if(localStorage) test("localStorage", localStorage, "Storage");
-    test("location", window.location, "Object", window.location.href);
+    test("location", window.location, "Object", window.location.href, null, true);
     if(v >= 11 /* todo_wine */) test("mimeTypes", window.navigator.mimeTypes, v < 11 ? "MSMimeTypesCollection" : "MimeTypeArray");
     test("navigator", window.navigator, "Navigator");
     test("performance", window.performance, "Performance");
@@ -344,24 +431,22 @@ sync_test("builtin_toString", function() {
     test("textNode", document.createTextNode("testNode"), "Text", v < 9 ? "testNode" : null);
     test("textRange", txtRange, "TextRange");
     test("window", window, "Window", "[object Window]");
-    test("xmlHttpRequest", new XMLHttpRequest(), "XMLHttpRequest", null, "Function");
+    test("xmlHttpRequest", new XMLHttpRequest(), "XMLHttpRequest");
     if(v < 10) {
         test("namespaces", document.namespaces, "MSNamespaceInfoCollection");
     }
     if(v < 11) {
         test("eventObject", document.createEventObject(), "MSEventObj");
         test("selection", document.selection, "MSSelection");
-        test("XDomainRequest", new XDomainRequest(), "XDomainRequest", null, "Function");
+        test("XDomainRequest", new XDomainRequest(), "XDomainRequest");
     }
     if(v >= 9) {
-        var xml = new DOMParser().parseFromString("<tag>foobar</tag>", "text/xml");
         test("computedStyle", window.getComputedStyle(e), "CSSStyleDeclaration");
         test("doctype", document.doctype, "DocumentType");
-        test("domParser", new DOMParser(), "DOMParser", null, "Function");
+        test("domParser", new DOMParser(), "DOMParser");
         test("svgDocument", new DOMParser().parseFromString("<tag>foobar</tag>", "image/svg+xml"), v < 11 ? "Document" : "XMLDocument");
         test("xhtmlDocument", new DOMParser().parseFromString("<tag>foobar</tag>", "application/xhtml+xml"), v < 11 ? "Document" : "XMLDocument");
-        test("xmlDocument", xml, v < 11 ? "Document" : "XMLDocument");
-        test("xmlElement", xml.getElementsByTagName("tag")[0], "Element");
+        test("xmlDocument", new DOMParser().parseFromString("<tag>foobar</tag>", "text/xml"), v < 11 ? "Document" : "XMLDocument");
 
         test("Event", document.createEvent("Event"), "Event");
         test("CustomEvent", document.createEvent("CustomEvent"), "CustomEvent");
@@ -377,11 +462,21 @@ sync_test("builtin_toString", function() {
     if(v >= 11) {
         test("crypto", window.msCrypto, "Crypto");
         test("crypto.subtle", window.msCrypto.subtle, "SubtleCrypto");
-        test("MutationObserver", new window.MutationObserver(function() {}), "MutationObserver", null, "Function");
+        test("MutationObserver", new window.MutationObserver(function() {}), "MutationObserver");
     }
     if(v >= 9) {
         document.body.innerHTML = "<!--...-->";
         test("comment", document.body.firstChild, "Comment");
+
+        test("SVGSVGElement", document.createElementNS(svg_ns, "svg"), "SVGSVGElement");
+        test("SVGCircleElement", document.createElementNS(svg_ns, "circle"), "SVGCircleElement");
+        test("SVGCircleElement", document.createElementNS(svg_ns, "tspan"), "SVGTSpanElement");
+
+        /* Non-function constructors */
+        var props = Object.getOwnPropertyNames(window);
+        for(i = 0; i < props.length; i++)
+            if(typeof(window[props[i]]) === "object" && window[props[i]].hasOwnProperty("prototype"))
+                test(props[i] + " constructor", window[props[i]], props[i]);
     }
 });
 
@@ -408,21 +503,20 @@ sync_test("builtin_obj", function() {
             window.toString.call(null);
             ok(false, "expected exception calling window.toString with null context");
         }catch(ex) {}
+
+        ok(!Object.hasOwnProperty.call(f, "arguments"), "arguments is a prop of createElement");
+        ok(!Object.hasOwnProperty.call(f, "caller"), "caller is a prop of createElement");
+        ok(!Object.hasOwnProperty.call(f, "length"), "length is a prop of createElement");
     }else {
-        ok(window instanceof Object, "window not instance of Object");
-        ok(document instanceof Object, "document not instance of Object");
-        ok(Object.isExtensible(window), "window is not extensible");
-        ok(Object.isExtensible(document), "document is not extensible");
-
-        ok(f.toString() === "\nfunction createElement() {\n    [native code]\n}\n", "f.toString() = " + f.toString());
         ok(Object.getPrototypeOf(f) === Function.prototype, "unexpected document.createElement prototype");
-        ok(Object.getPrototypeOf(f.apply) === Function.prototype, "unexpected f.apply prototype");
-        ok(Object.getPrototypeOf(f.call) === Function.prototype, "unexpected f.call prototype");
-
         e = window.toString.call(null);
         ok(e === "[object Window]", "window.toString with null context = " + e);
         e = window.toString.call(external.nullDisp);
         ok(e === "[object Window]", "window.toString with nullDisp context = " + e);
+
+        ok(f.hasOwnProperty("arguments"), "arguments not a prop of createElement");
+        ok(f.hasOwnProperty("caller"), "caller not a prop of createElement");
+        ok(!f.hasOwnProperty("length"), "length is a prop of createElement");
     }
 
     e = 0;
@@ -441,12 +535,30 @@ sync_test("builtin_obj", function() {
     }
     ok(e === (v < 9 ? 0xa0005 : 0x0ffff) - 0x80000000, "[f.call(null, 'div')] e = " + e);
 
-    var elem = f.call(document, "div");
-    elem.setAttribute("class", "cls");
-    elem.setAttribute("className", "cls");
-    ok(elem.className === "cls", "elem.className = " + elem.className);
+    var elem1 = f.call(document, "div");
+    var elem2 = f.call(document, "br");
+    document.body.appendChild(elem1);
+    document.body.appendChild(elem2);
+    elem1.onclick = function() { ok(false, "unexpected elem1.onclick"); };
+    var clicked = false;
+    elem2.onclick = function() { clicked = true; };
+    elem1.click.call(elem2);
+    ok(clicked === true, "elem2.onclick not called");
 
-    document.body.click.call(elem);
+    elem1 = f.apply(document, ["div"]);
+    elem2 = f.apply(document, ["br"]);
+    document.body.appendChild(elem1);
+    document.body.appendChild(elem2);
+    elem1.onclick = function() { ok(false, "unexpected elem1.onclick"); };
+    clicked = false;
+    elem2.onclick = function() { clicked = true; };
+    elem1.click.apply(elem2);
+    ok(clicked === true, "elem2.onclick not called");
+
+    try {
+        elem1.click.apply(elem2, { length: -1 });
+        ok(false, "exception expected");
+    }catch(ex) {}
 
     e = 0;
     try {
@@ -465,31 +577,6 @@ sync_test("builtin_obj", function() {
         ok(f.apply+"" === "\nfunction apply() {\n    [native code]\n}\n", "f.apply = " + f.apply);
         ok(external.getVT(f.call) === "VT_DISPATCH", "f.call not VT_DISPATCH");
         ok(external.getVT(f.apply) === "VT_DISPATCH", "f.apply not VT_DISPATCH");
-
-        elem = f.apply(document, ["style"]);
-        document.body.appendChild(elem);
-
-        var enumerator = new Enumerator(document.getElementsByTagName("style"));
-        enumerator.moveNext();
-        var enum_elem = enumerator.item();
-        enumerator.moveNext();
-        ok(enum_elem === elem, "enum_elem = " + enum_elem);
-        ok(enumerator.atEnd(), "enumerator not at end");
-
-        e = 0;
-        try {
-            f.apply = 0;
-        }catch(ex) {
-            e = ex.number;
-        }
-        ok(e === 0xa01b6 - 0x80000000, "[f.apply = 0] e = " + e);
-        e = 0;
-        try {
-            f.call = function() { };
-        }catch(ex) {
-            e = ex.number;
-        }
-        ok(e === 0xa01b6 - 0x80000000, "[f.call = function() { }] e = " + e);
 
         ok(f.apply !== f.apply, "f.apply == f.apply");
         f = f.apply;
@@ -511,6 +598,13 @@ sync_test("builtin_obj", function() {
             e = ex.number;
         }
         ok(e === 0xa01b6 - 0x80000000, "[f.apply() indirect] e = " + e);
+
+        var enumerator = new Enumerator(document.getElementsByTagName("br"));
+        enumerator.moveNext();
+        var enum_elem = enumerator.item();
+        ok(enum_elem === elem2, "enum_elem = " + enum_elem);
+        enumerator.moveNext();
+        ok(enumerator.atEnd(), "enumerator not at end");
     }else {
         elem = f.call.call(f, document, "div");
         f = f.bind(document);
@@ -528,1038 +622,6 @@ sync_test("builtin_obj", function() {
         f.call = function() { };
         ok(f.apply === 0, "changed f.apply = ", f.apply);
         ok(f.call instanceof Function, "changed f.call not instance of Function");
-
-        e = Array.isArray(document.body.childNodes);
-        ok(e === false, "isArray(childNodes) returned " + e);
-        e = Array.prototype.toString.call(Number);
-        ok(e === "[object Function]", "Array.toString(Number) = " + e);
-    }
-
-    function test_toString(msg, constr, err) {
-        var e = 0;
-        if(typeof err == "string") {
-            e = constr.prototype.toString.call(document.body);
-            ok(e === err, msg + ".toString(body) = " + e);
-            return;
-        }
-        try {
-            constr.prototype.toString.call(document.body);
-        }catch(ex) {
-            e = ex.number;
-        }
-        ok(e === err - 0x80000000, "[" + msg + ".toString(body)] e = " + e);
-    }
-
-    test_toString("Array", Array, v < 9 ? 0xa13a7 : "[object HTMLBodyElement]");
-    test_toString("Boolean", Boolean, 0xa1392);
-    test_toString("Date", Date, 0xa138e);
-    test_toString("RegExp", RegExp, 0xa1398);
-    test_toString("Number", Number, 0xa1389);
-    test_toString("String", String, 0xa138d);
-
-    if(v >= 9) {
-        var obj = { length: 2 };
-        obj[0] = "foo";
-        obj[1] = "bar";
-        e = Array.prototype.toString.call(obj);
-        ok(e === "[object Object]", "Array.toString(array-like object) = " + e);
-
-        obj = Object.create(null);
-        obj.length = 2;
-        obj[0] = "foo";
-        obj[1] = "bar";
-        e = Array.prototype.toString.call(obj);
-        ok(e === "[object Object]", "Array.toString(array-like object with no prototype) = " + e);
-
-        e = 0;
-        try {
-            Array.prototype.toString.call(null);
-        }catch(ex) {
-            e = ex.number;
-        }
-        ok(e === 0xa138f - 0x80000000, "Array.toString(null) e = " + e);
-    }
-
-    (function(a, b, c) {
-        ok(a === document.body.childNodes[0], "a = " + a);
-        ok(b === document.body.childNodes[1], "b = " + b);
-        ok(c === document.body.childNodes[2], "c = " + c);
-    }).apply(null, document.body.childNodes);
-
-    elem[0] = "a";
-    elem[1] = "b";
-    if(v < 9) {
-        try {
-            (function(a, b) {}).apply(null, elem);
-        }catch(ex) {
-            e = ex.number;
-        }
-        ok(e === 0xa13a4 - 0x80000000, "[function.apply with elem without length] e = " + e);
-    }else {
-        (function(a, b) {
-            ok(a === undefined, "a = " + a);
-            ok(b === undefined, "b = " + b);
-        }).apply(null, elem);
-    }
-
-    elem.length = 2;
-    (function(a, b) {
-        ok(a === "a", "a = " + a);
-        ok(b === "b", "b = " + b);
-    }).apply(null, elem);
-
-    elem = new Object;
-    elem[0] = "c";
-    elem[1] = "d";
-    if(v < 9) {
-        try {
-            (function(c, d) {}).apply(null, elem);
-        }catch(ex) {
-            e = ex.number;
-        }
-        ok(e === 0xa13a4 - 0x80000000, "[function.apply with Object without length] e = " + e);
-    }else {
-        (function(c, d) {
-            ok(c === undefined, "c = " + c);
-            ok(d === undefined, "d = " + d);
-        }).apply(null, elem);
-    }
-
-    elem.length = 2;
-    if(v < 9) {
-        try {
-            (function(c, d) {}).apply(null, elem);
-        }catch(ex) {
-            e = ex.number;
-        }
-        ok(e === 0xa13a4 - 0x80000000, "[function.apply with Object with length] e = " + e);
-    }else {
-        (function(c, d) {
-            ok(c === "c", "c = " + c);
-            ok(d === "d", "d = " + d);
-        }).apply(null, elem);
-    }
-});
-
-sync_test("builtin_prototypes", function() {
-    var v = document.documentMode, r, obj, name, proto;
-
-    function set_obj(n, o) {
-        name = n;
-        proto = null;
-        if(o) {
-            proto = window[n]["prototype"];
-            if(typeof o !== "boolean") {
-                obj = o;
-                return;
-            }
-        }
-        try {
-            obj = new window[n]();
-            ok(o, "expected exception when creating " + name + ".");
-        }catch(ex) {
-            obj = null;
-            ok(!o, "did not expect exception when creating " + name + ".");
-            ok(ex.number == 0xa01bd - 0x80000000, "unexpected exception number when creating " + name + ": " + ex.number);
-        }
-    }
-    function test_prop(prop, own) {
-        if(own === undefined ? v < 9 : own)
-            ok(Object.prototype.hasOwnProperty.call(obj, prop), prop + " not a property of " + name + ".");
-        else
-            ok(!Object.prototype.hasOwnProperty.call(obj, prop), prop + " is a property of " + name + ".");
-        ok(Object.prototype.hasOwnProperty.call(proto, prop), prop + " not a property of " + name + ".prototype.");
-    }
-    function test_legacy_ctor(methods, props, non_props, set_prop, set_prop_val) {
-        if(v >= 9)
-            return;
-        ok(""+proto === "[Interface prototype object]", name + ".prototype = " + proto);
-        if(v < 8)
-            ok(proto.constructor === undefined, name + ".prototype.constructor = " + proto.constructor);
-        for(var i = 0; i < methods.length; i++) {
-            ok(methods[i] in proto, methods[i] + " not in " + name + ".prototype");
-            var r = 0;
-            try {
-                eval("proto." + methods[i] + "();");
-            }catch(ex) {
-                r = ex.number;
-            }
-            ok(r === 0xa01b6 - 0x80000000, name + ".prototype." + methods[i] + "() exception code = " + r);
-            eval("r = \"\"+proto." + methods[i] + ";");
-            ok(r === "\nfunction " + methods[i] + "() {\n    [native code]\n}\n", name + ".prototype." + methods[i] + " = " + r);
-            try {
-                eval("r = (delete proto." + methods[i] + ");");
-                ok(v >= 8, "expected exception deleting " + name + ".prototype." + methods[i]);
-                ok(r === true, "delete " + name + ".prototype." + methods[i] + " returned " + r);
-            }catch(ex) {
-                ok(v < 8, "did not expect exception deleting " + name + ".prototype." + methods[i]);
-            }
-            eval("r = \"\"+proto." + methods[i] + ";");
-            ok(r === "\nfunction " + methods[i] + "() {\n    [native code]\n}\n", name + ".prototype." + methods[i] + " after delete = " + r);
-            ok(methods[i] in proto, methods[i] + " not in " + name + ".prototype after delete");
-
-            var func = function() { return "foobar"; }
-            eval("proto." + methods[i] + " = func;");
-            eval("r = proto." + methods[i] + ";");
-            ok(r === func, name + ".prototype." + methods[i] + " after set = " + r);
-            try {
-                eval("r = (delete proto." + methods[i] + ");");
-                ok(v >= 8, "expected exception deleting " + name + ".prototype." + methods[i] + " after set");
-                ok(r === true, "delete " + name + ".prototype." + methods[i] + " after set returned " + r);
-                eval("r = \"\"+proto." + methods[i] + ";");
-                ok(r === "\nfunction " + methods[i] + "() {\n    [native code]\n}\n", name + ".prototype." + methods[i] + " after second delete = " + r);
-            }catch(ex) {
-                ok(v < 8, "did not expect exception deleting " + name + ".prototype." + methods[i] + " after set");
-                eval("r = proto." + methods[i] + ";");
-                ok(r === func, name + ".prototype." + methods[i] + " after second delete = " + r);
-            }
-            eval("proto." + methods[i] + " = func;");
-            eval("r = proto." + methods[i] + ";");
-            ok(r === func, name + ".prototype." + methods[i] + " after second set = " + r);
-        }
-        for(var i = 0; i < props.length; i++) {
-            ok(props[i] in proto, props[i] + " not in " + name + ".prototype");
-            eval("var r = proto." + props[i] + ";");
-            ok(r === undefined, name + ".prototype." + props[i] + " = " + r);
-            try {
-                eval("r = (delete proto." + props[i] + ");");
-                ok(v >= 8, "expected exception deleting " + name + ".prototype." + props[i]);
-                ok(r === true, "delete " + name + ".prototype." + props[i] + " returned " + r);
-            }catch(ex) {
-                ok(v < 8, "did not expect exception deleting " + name + ".prototype." + props[i]);
-            }
-            eval("r = proto." + props[i] + ";");
-            ok(r === undefined, name + ".prototype." + props[i] + " after delete = " + r);
-            ok(props[i] in proto, props[i] + " not in " + name + ".prototype after delete");
-        }
-        for(var i = 0; i < non_props.length; i++)
-            ok(!(non_props[i] in proto), non_props[i] + " in " + name + ".prototype");
-
-        eval("r = proto." + set_prop + ";");
-        ok(r === undefined, name + ".prototype." + set_prop + " = " + r);
-        eval("proto." + set_prop + " = set_prop_val; r = proto." + set_prop + ";");
-        ok(r === undefined, name + ".prototype." + set_prop + " after set = " + r);
-
-        r = proto.winetestprop;
-        ok(r === undefined, name + ".prototype.winetestprop = " + r);
-        proto.winetestprop = "test";
-        r = proto.winetestprop;
-        ok(r === "test", name + ".prototype.winetestprop after set = " + r);
-    }
-
-    set_obj("XMLHttpRequest", true);
-    test_prop("open");
-    test_prop("status");
-    test_prop("onreadystatechange");
-    test_legacy_ctor(["abort", "send"], ["readyState", "status"], ["selected", "src", "getAttribute"], "onreadystatechange", function(){});
-    if(v < 9) {
-        r = obj.abort();
-        ok(r === "foobar", "(new XMLHttpRequest).abort() returned " + r);
-        r = obj.winetestprop;
-        ok(r === "test", "(new XMLHttpRequest).winetestprop = " + r);
-        obj.winetestprop = "prop";
-        r = obj.winetestprop;
-        ok(r === "prop", "(new XMLHttpRequest).winetestprop after set = " + r);
-        r = XMLHttpRequest.prototype.winetestprop;
-        ok(r === "test", "XMLHttpRequest.prototype.winetestprop after obj = " + r);
-    }else
-        ok(proto.constructor === window.XMLHttpRequest, "XMLHttpRequest.prototype.constructor = " + proto.constructor);
-
-    if(v < 11) {
-        set_obj("XDomainRequest", true);
-        test_prop("open");
-        test_prop("send");
-        test_prop("timeout");
-        test_legacy_ctor(["abort"], ["contentType", "responseText"], ["status", "onreadystatechange"], "onerror", function(){});
-        if(v < 9) {
-            r = obj.abort();
-            ok(r === "foobar", "(new XDomainRequest).abort() returned " + r);
-            r = obj.winetestprop;
-            ok(r === "test", "(new XDomainRequest).winetestprop = " + r);
-            obj.winetestprop = "prop";
-            r = obj.winetestprop;
-            ok(r === "prop", "(new XDomainRequest).winetestprop after set = " + r);
-            r = XDomainRequest.prototype.winetestprop;
-            ok(r === "test", "XDomainRequest.prototype.winetestprop after obj = " + r);
-        }else
-            ok(proto.constructor === window.XDomainRequest, "XDomainRequest.prototype.constructor = " + proto.constructor);
-    }
-
-    set_obj("Image", true);
-    test_prop("src");
-    test_prop("border");
-    test_legacy_ctor(["getAttribute", "toString"], ["isMap", "alt"], ["selected", "send"], "src", "about:blank");
-    if(v < 9) {
-        r = obj.toString();
-        ok(r === "foobar", "(new Image).toString() returned " + r);
-        r = obj.winetestprop;
-        ok(r === "test", "(new Image).winetestprop = " + r);
-        obj.winetestprop = "prop";
-        r = obj.winetestprop;
-        ok(r === "prop", "(new Image).winetestprop after set = " + r);
-        r = window.Image.prototype.winetestprop;
-        ok(r === "test", "Image.prototype.winetestprop after obj = " + r);
-        try {
-            r = (delete obj.winetestprop);
-            ok(v >= 8, "expected exception deleting (new Image).winetestprop");
-            ok(r === true, "delete (new Image).winetestprop returned " + r);
-        }catch(ex) {
-            ok(v < 8, "did not expect exception deleting (new Image).winetestprop");
-        }
-        r = obj.winetestprop;
-        ok(r === (v < 8 ? "prop" : "test"), "(new Image).winetestprop after delete = " + r);
-        obj = new window.Image();
-        r = obj.winetestprop;
-        ok(r === "test", "(new Image).winetestprop second time = " + r);
-        window.Image.prototype.winetestprop = "string";
-        r = obj.winetestprop;
-        ok(r === "string", "(new Image).winetestprop after change in prototype = " + r);
-    }else
-        ok(proto.constructor === window.HTMLImageElement, "Image.prototype.constructor = " + proto.constructor);
-
-    set_obj("Option", true);
-    test_prop("text");
-    test_prop("selected");
-    test_legacy_ctor(["setAttribute", "contains"], ["index", "value"], ["src", "send"], "text", "foo");
-    if(v < 9) {
-        r = obj.setAttribute("a", "b");
-        ok(r === "foobar", "(new Option).setAttribute() returned " + r);
-        r = obj.winetestprop;
-        ok(r === "test", "(new Option).winetestprop = " + r);
-        obj.winetestprop = "prop";
-        r = obj.winetestprop;
-        ok(r === "prop", "(new Option).winetestprop after set = " + r);
-        r = window.Option.prototype.winetestprop;
-        ok(r === "test", "Option.prototype.winetestprop after obj = " + r);
-        try {
-            r = (delete obj.winetestprop);
-            ok(v >= 8, "expected exception deleting (new Option).winetestprop");
-            ok(r === true, "delete (new Option).winetestprop returned " + r);
-        }catch(ex) {
-            ok(v < 8, "did not expect exception deleting (new Option).winetestprop");
-        }
-        r = obj.winetestprop;
-        ok(r === (v < 8 ? "prop" : "test"), "(new Option).winetestprop after delete = " + r);
-        obj = new window.Option();
-        r = obj.winetestprop;
-        ok(r === "test", "(new Option).winetestprop second time = " + r);
-        window.Option.prototype.winetestprop = "string";
-        r = obj.winetestprop;
-        ok(r === "string", "(new Option).winetestprop after change in prototype = " + r);
-    }else
-        ok(proto.constructor === window.HTMLOptionElement, "Option.prototype.constructor = " + proto.constructor);
-
-    if(v >= 9) {
-        set_obj("DOMParser", true);
-        test_prop("parseFromString");
-        ok(proto.constructor === window.DOMParser, "DOMParser.prototype.constructor = " + proto.constructor);
-    }
-
-    // other constructors don't support construction
-    set_obj("ClientRect");
-    set_obj("ClientRectList");
-    set_obj("Console");
-    set_obj("CustomEvent");
-    set_obj("DOMTokenList");
-    set_obj("KeyboardEvent");
-    set_obj("MessageEvent");
-    set_obj("MouseEvent");
-    set_obj("MSCSSRuleList");
-    set_obj("MSCurrentStyleCSSProperties");
-    set_obj("MSEventObj");
-    set_obj("MSNamespaceInfoCollection");
-    set_obj("MSSelection");
-    set_obj("MSStyleCSSProperties");
-    set_obj("Performance");
-    set_obj("PerformanceNavigation");
-    set_obj("PerformanceTiming");
-    set_obj("UIEvent");
-    if(v >= 9) {
-        set_obj("Attr");
-        set_obj("CSSStyleDeclaration");
-        set_obj("CSSStyleRule");
-        set_obj("CSSStyleSheet");
-        set_obj("DOMImplementation");
-        set_obj("Event");
-        set_obj("History");
-        set_obj("HTMLCollection");
-        set_obj("NamedNodeMap");
-        set_obj("Navigator");
-        set_obj("NodeList");
-        set_obj("Screen");
-        set_obj("Storage");
-        set_obj("StyleSheetList");
-        set_obj("Text");
-        set_obj("TextRange");
-        set_obj("Window");
-    }
-    if(v >= 11) {
-        set_obj("Crypto");
-        set_obj("SubtleCrypto");
-    }
-
-    if(v >= 8 && v < 11) {
-        set_obj(v < 9 ? "Event" : "MSEventObj", document.createEventObject());
-        test_prop("x");
-        test_prop("y");
-        test_prop("srcElement");
-        test_prop("returnValue");
-
-        if(Object.create) {
-            obj = Object.create(proto);
-            test_prop("reason");
-            test_prop("srcFilter");
-            r = Object.prototype.toString.call(obj);
-            ok(r === "[object Object]", "Object.toString on obj created from MSEventObj.prototype returned " + r);
-        }
-
-        var ctor = function() {};
-        ctor.prototype = proto;
-        ctor.prototype.testWineProp = function() { return 42; };
-        obj = new ctor();
-        test_prop("shiftKey", false);
-        test_prop("testWineProp", false);
-        r = Object.prototype.toString.call(obj);
-        ok(r === "[object Object]", "Object.toString on custom obj returned " + r);
-
-        r = (delete proto.shiftKey);
-        ok(r === true, "delete shiftKey returned " + r);
-        if(v < 9)
-            ok(Object.prototype.hasOwnProperty.call(proto, "shiftKey"), "shiftKey not a property anymore of Event.prototype.");
-        else {
-            ok(!Object.prototype.hasOwnProperty.call(proto, "shiftKey"), "shiftKey still a property of MSEventObj.prototype.");
-            proto.shiftKey = ctor;
-            ok(proto.shiftKey === ctor, "shiftKey = " + proto.shiftKey);
-        }
-
-        r = (delete proto.testWineProp);
-        ok(r === true, "delete testWineProp returned " + r);
-        ok(!Object.prototype.hasOwnProperty.call(proto, "testWineProp"), "testWineProp still a property of " + name + ".prototype.");
-    }
-
-    if(v >= 9) {
-        set_obj("Event", document.createEvent("Event"));
-        test_prop("initEvent");
-        test_prop("currentTarget");
-
-        obj = Object.create(proto);
-        test_prop("eventPhase");
-        test_prop("preventDefault");
-        r = Object.prototype.toString.call(obj);
-        ok(r === "[object Object]", "Object.toString on obj created from Event.prototype returned " + r);
-
-        var ctor = function() {};
-        ctor.prototype = proto;
-        ctor.prototype.testWineProp = function() { return 42; };
-        obj = new ctor();
-        test_prop("timeStamp");
-        test_prop("testWineProp");
-        r = Object.prototype.toString.call(obj);
-        ok(r === "[object Object]", "Object.toString on custom obj returned " + r);
-
-        r = (delete proto.timeStamp);
-        ok(r === true, "delete timeStamp returned " + r);
-        ok(!Object.prototype.hasOwnProperty.call(proto, "timeStamp"), "timeStamp still a property of Event.prototype.");
-
-        r = (delete proto.testWineProp);
-        ok(r === true, "delete testWineProp returned " + r);
-        ok(!Object.prototype.hasOwnProperty.call(proto, "testWineProp"), "testWineProp still a property of Event.prototype.");
-
-        proto.timeStamp = ctor;
-        ok(proto.timeStamp === ctor, "timeStamp = " + proto.timeStamp);
-
-        set_obj("HTMLImageElement", document.createElement("img"));
-        document.body.setAttribute.call(obj, "width", "100");
-        obj = Object.create(proto);
-        r = 0;
-        try {
-            document.body.setAttribute.call(obj, "width", "100");
-        }catch(ex) {
-            r = ex.number;
-        }
-        ok(r === 0xffff - 0x80000000, "document.body.setAttribute.call(obj ...) exception code = " + r);
-    }
-
-    if(v >= 8) {
-        obj = window.HTMLMetaElement;
-        ok(!("charset" in obj), "charset in HTMLMetaElement constructor.");
-        ok(!("setAttribute" in obj), "setAttribute in HTMLMetaElement constructor.");
-        ok(!Object.prototype.hasOwnProperty.call(obj, "charset"), "charset is a property of HTMLMetaElement constructor.");
-        if(Object.getPrototypeOf)
-            ok(Object.getPrototypeOf(obj) === Object.prototype, "getPrototypeOf(HTMLMetaElement constructor) = " + Object.getPrototypeOf(obj));
-        r = 0;
-        try {
-            document.body.setAttribute.call(obj, "charset", "UTF-8");
-        }catch(ex) {
-            r = ex.number;
-        }
-        ok(r === (v < 9 ? 0xa0005 : 0xffff) - 0x80000000, "setAttribute on HTMLMetaElement constructor error code = " + r);
-
-        proto = window.HTMLMetaElement.prototype;
-        try {
-            window.HTMLMetaElement.prototype = Object.prototype;
-            ok(v >= 9, "expected exception setting HTMLMetaElement.prototype");
-        }catch(ex) {
-            ok(v < 9, "did not expect exception setting HTMLMetaElement.prototype");
-            ok(ex.number === 0xa01b6 - 0x80000000, "exception code setting HTMLMetaElement.prototype = " + ex.number);
-        }
-        ok(window.HTMLMetaElement.prototype === proto, "HTMLMetaElement.prototype = " + window.HTMLMetaElement.prototype);
-        ok(proto !== Object.prototype, "old prototype is Object.prototype");
-
-        obj = document.createElement("meta");
-        ok("tagName" in obj, "tagName not in HTMLMetaElement");
-        if(Object.getPrototypeOf)
-            ok(Object.getPrototypeOf(obj) === proto, "getPrototypeOf(meta element) = " + Object.getPrototypeOf(obj));
-
-        try {
-            r = (delete window.HTMLMetaElement.prototype);
-            ok(r === false, "delete HTMLMetaElement.prototype returned " + r);
-            ok(v >= 9, "expected exception deleting HTMLMetaElement.prototype");
-        }catch(ex) {
-            ok(v < 9, "did not expect exception deleting HTMLMetaElement.prototype");
-            ok(ex.number === 0xa01b6 - 0x80000000, "exception code deleting HTMLMetaElement.prototype = " + ex.number);
-        }
-        ok(Object.prototype.hasOwnProperty.call(window.HTMLMetaElement, "prototype"), "prototype not a property anymore of HTMLMetaElement.");
-
-        try {
-            r = (delete window.HTMLMetaElement);
-            ok(r === true, "delete HTMLMetaElement returned " + r);
-            ok(v >= 9, "expected exception deleting HTMLMetaElement");
-            ok(!Object.prototype.hasOwnProperty.call(window, "HTMLMetaElement"), "HTMLMetaElement still a property of window.");
-        }catch(ex) {
-            ok(v < 9, "did not expect exception deleting HTMLMetaElement");
-            ok(ex.number === 0xa01bd - 0x80000000, "exception code deleting HTMLMetaElement = " + ex.number);
-            ok(Object.prototype.hasOwnProperty.call(window, "HTMLMetaElement"), "HTMLMetaElement not a property anymore of window.");
-        }
-
-        obj = document.createElement("meta");
-        ok("tagName" in obj, "tagName not in HTMLMetaElement");
-        if(Object.getPrototypeOf) {
-            ok(Object.getPrototypeOf(obj) === proto, "getPrototypeOf(meta element) = " + Object.getPrototypeOf(obj));
-            ok(window.HTMLMetaElement === undefined, "HTMLMetaElement = " + window.HTMLMetaElement);
-        }
-
-        ok("setAttribute" in proto, "setAttribute not in proto.");
-        r = 0;
-        try {
-            obj.setAttribute.call(proto, "charset", "UTF-8");
-        }catch(ex) {
-            r = ex.number;
-        }
-        ok(r === (v < 9 ? 0xa01b6 : 0xffff) - 0x80000000, "setAttribute on proto error code = " + r);
-        r = 0;
-        try {
-            proto.setAttribute("charset", "UTF-8");
-        }catch(ex) {
-            r = ex.number;
-        }
-        ok(r === (v < 9 ? 0xa01b6 : 0xffff) - 0x80000000, "proto.setAttribute error code = " + r);
-
-        ok(Object.prototype.hasOwnProperty.call(proto, "charset"), "charset not a property of proto.");
-        if(v < 9) {
-            proto.charset = "UTF-8";
-            ok(proto.charset === undefined, "proto.charset = " + proto.charset);
-        }else {
-            r = Object.getOwnPropertyDescriptor(proto, "charset");
-            ok(r.get.toString() === "\nfunction charset() {\n    [native code]\n}\n", "charset.get = " + r.get.toString());
-            ok(r.set.toString() === "\nfunction charset() {\n    [native code]\n}\n", "charset.set = " + r.set.toString());
-            ok(Object.getPrototypeOf(r.get) === Function.prototype, "unexpected charset.get prototype");
-            ok(Object.getPrototypeOf(r.set) === Function.prototype, "unexpected charset.set prototype");
-
-            r = 0;
-            try {
-                proto.charset;
-            }catch(ex) {
-                r = ex.number;
-            }
-            ok(r === 0xffff - 0x80000000, "proto.charset error code = " + r);
-            r = 0;
-            try {
-                proto.charset = "UTF-8";
-            }catch(ex) {
-                r = ex.number;
-            }
-            ok(r === 0xffff - 0x80000000, "set proto.charset error code = " + r);
-        }
-    }
-
-    if(v >= 9) {
-        var protos = [
-            [ "Attr",                           "Node" ],
-            [ "CharacterData",                  "Node" ],
-            [ "ClientRect",                     "Object" ],
-            [ "ClientRectList",                 "Object" ],
-            [ "Comment",                        "CharacterData" ],
-            [ "Console",                        "Object" ],
-            [ "Crypto",                         "Object" ],
-            [ "CSSRule",                        "Object" ],
-            [ "CSSStyleDeclaration",            "Object" ],
-            [ "CSSStyleRule",                   "CSSRule" ],
-            [ "CSSStyleSheet",                  "StyleSheet" ],
-            [ "CustomEvent",                    "Event" ],
-            [ "Document",                       "Node" ],
-            [ "DocumentType",                   "Node" ],
-            [ "DOMImplementation",              "Object" ],
-            [ "DOMParser",                      "Object" ],
-            [ "DOMTokenList",                   "Object" ],
-            [ "Element",                        "Node" ],
-            [ "Event",                          "Object" ],
-            [ "History",                        "Object" ],
-            [ "HTMLAnchorElement",              "HTMLElement" ],
-            [ "HTMLAreaElement",                "HTMLElement" ],
-            [ "HTMLBodyElement",                "HTMLElement" ],
-            [ "HTMLButtonElement",              "HTMLElement" ],
-            [ "HTMLCollection",                 "Object" ],
-            [ "HTMLDocument",                   "Document" ],
-            [ "HTMLElement",                    "Element" ],
-            [ "HTMLEmbedElement",               "HTMLElement" ],
-            [ "HTMLFormElement",                "HTMLElement" ],
-            [ "HTMLFrameElement",               "HTMLElement" ],
-            [ "HTMLHeadElement",                "HTMLElement" ],
-            [ "HTMLHtmlElement",                "HTMLElement" ],
-            [ "HTMLIFrameElement",              "HTMLElement" ],
-            [ "HTMLImgElement",                 "HTMLElement" ],
-            [ "HTMLInputElement",               "HTMLElement" ],
-            [ "HTMLLabelElement",               "HTMLElement" ],
-            [ "HTMLLinkElement",                "HTMLElement" ],
-            [ "HTMLMetaElement",                "HTMLElement" ],
-            [ "HTMLObjectElement",              "HTMLElement" ],
-            [ "HTMLOptionElement",              "HTMLElement" ],
-            [ "HTMLScriptElement",              "HTMLElement" ],
-            [ "HTMLSelectElement",              "HTMLElement" ],
-            [ "HTMLStyleElement",               "HTMLElement" ],
-            [ "HTMLTableCellElement",           "HTMLElement" ],
-            [ "HTMLTableDataCellElement",       "HTMLTableCellElement" ],
-            [ "HTMLTableElement",               "HTMLElement" ],
-            [ "HTMLTableRowElement",            "HTMLElement" ],
-            [ "HTMLTextAreaElement",            "HTMLElement" ],
-            [ "HTMLTitleElement",               "HTMLElement" ],
-            [ "HTMLUnknownElement",             "HTMLElement" ],
-            [ "Image",                          "HTMLElement" ],
-            [ "KeyboardEvent",                  "UIEvent" ],
-            [ "MediaQueryList",                 "Object" ],
-            [ "MessageEvent",                   "Event" ],
-            [ "MimeTypeArray",                  "Object" ],
-            [ "MouseEvent",                     "UIEvent" ],
-            [ "MSCSSProperties",                "CSSStyleDeclaration" ],
-            [ "MSCSSRuleList",                  "Object" ],
-            [ "MSCurrentStyleCSSProperties",    "MSCSSProperties" ],
-            [ "MSEventObj",                     "Object" ],
-            [ "MSMimeTypesCollection",          "Object" ],
-            [ "MSNamespaceInfoCollection",      "Object" ],
-            [ "MSPluginsCollection",            "Object" ],
-            [ "MSSelection",                    "Object" ],
-            [ "MSStyleCSSProperties",           "MSCSSProperties" ],
-            [ "MutationObserver",               "Object" ],
-            [ "NamedNodeMap",                   "Object" ],
-            [ "Navigator",                      "Object" ],
-            [ "Node",                           "Object" ],
-            [ "NodeList",                       "Object" ],
-            [ "Option",                         "HTMLElement" ],
-            [ "PageTransitionEvent",            "Event" ],
-            [ "Performance",                    "Object" ],
-            [ "PerformanceNavigation",          "Object" ],
-            [ "PerformanceTiming",              "Object" ],
-            [ "PluginArray",                    "Object" ],
-            [ "ProgressEvent",                  "Event" ],
-            [ "Screen",                         "Object" ],
-            [ "Storage",                        "Object" ],
-            [ "StorageEvent",                   "Event" ],
-            [ "StyleSheet",                     "Object" ],
-            [ "StyleSheetList",                 "Object" ],
-            [ "SubtleCrypto",                   "Object" ],
-            [ "Text",                           "CharacterData" ],
-            [ "TextRange",                      "Object" ],
-            [ "UIEvent",                        "Event" ],
-            [ "Window",                         "Object" ],
-            [ "XDomainRequest",                 "Object" ],
-            [ "XMLDocument",                    "Document" ],
-            [ "XMLHttpRequest",                 "Object" ]
-        ];
-
-        for(var i = 0; i < protos.length; i++) {
-            if(!(protos[i][0] in window))
-                continue;
-            var a, b;
-            eval("a = Object.getPrototypeOf(" + protos[i][0] + ".prototype); b = " + protos[i][1] + ".prototype;");
-            ok(a === b, "getPrototypeOf(" + protos[i][0] + ".prototype) = " + a);
-        }
-
-        var CSS_props = [ "accelerator","backgroundPositionX","backgroundPositionY","getAttribute","imeMode","layoutFlow","layoutGrid","layoutGridChar",
-                          "layoutGridLine","layoutGridMode","layoutGridType","lineBreak","msBlockProgression","msInterpolationMode","removeAttribute",
-                          "scrollbar3dLightColor","scrollbarArrowColor","scrollbarBaseColor","scrollbarDarkShadowColor","scrollbarFaceColor",
-                          "scrollbarHighlightColor","scrollbarShadowColor","scrollbarTrackColor","setAttribute","styleFloat","textAutospace",
-                          "textJustifyTrim","textKashida","textKashidaSpace","writingMode","zoom" ];
-        var Elem_props = [ "clientHeight","clientLeft","clientTop","clientWidth","firstElementChild","getAttribute","getAttributeNode","getAttributeNodeNS",
-                           "getAttributeNS","getBoundingClientRect","getClientRects","getElementsByTagName","getElementsByTagNameNS","hasAttribute",
-                           "hasAttributeNS","lastElementChild","msMatchesSelector","nextElementSibling","previousElementSibling","querySelector",
-                           "removeAttribute","removeAttributeNode","removeAttributeNS","scrollHeight","scrollLeft","scrollTop","scrollWidth","setAttribute",
-                           "setAttributeNode","setAttributeNodeNS","setAttributeNS","tagName" ];
-        var Event_props = [ "bubbles","cancelable","cancelBubble","currentTarget","defaultPrevented","eventPhase","initEvent","isTrusted",
-                            "preventDefault","srcElement","stopImmediatePropagation","stopPropagation","target","timeStamp","type" ];
-        var HtmlElem_props = [ "accessKey","applyElement","blur","canHaveHTML","children","className","clearAttributes","click","componentFromPoint",
-                               "contains","contentEditable","createControlRange","currentStyle","dir","disabled","dragDrop","focus","getAdjacentText",
-                               "getElementsByClassName","hideFocus","id","innerHTML","innerText","insertAdjacentElement","insertAdjacentHTML",
-                               "insertAdjacentText","isContentEditable","isDisabled","isMultiLine","isTextEdit","lang","language","mergeAttributes",
-                               "offsetHeight","offsetLeft","offsetParent","offsetTop","offsetWidth","onabort","onactivate","onbeforeactivate","onbeforecopy",
-                               "onbeforecut","onbeforedeactivate","onbeforepaste","onblur","oncanplay","oncanplaythrough","onchange","onclick",
-                               "oncontextmenu","oncopy","oncut","ondblclick","ondeactivate","ondrag","ondragend","ondragenter","ondragleave","ondragover",
-                               "ondragstart","ondrop","ondurationchange","onemptied","onended","onerror","onfocus","onfocusin","onfocusout","onhelp",
-                               "oninput","onkeydown","onkeypress","onkeyup","onload","onloadeddata","onloadedmetadata","onloadstart","onmousedown",
-                               "onmouseleave","onmousemove","onmouseout","onmouseover","onmouseup","onmousewheel","onpaste","onpause","onplay","onplaying",
-                               "onprogress","onratechange","onreset","onscroll","onseeked","onseeking","onselect","onselectstart","onstalled","onsubmit",
-                               "onsuspend","ontimeupdate","onvolumechange","onwaiting","outerHTML","outerText","parentElement","parentTextEdit",
-                               "recordNumber","releaseCapture","replaceAdjacentText","runtimeStyle","scrollIntoView","setActive","setCapture","sourceIndex",
-                               "style","tabIndex","title","uniqueID","uniqueNumber" ];
-        var Node_props = [ "addEventListener","appendChild","attributes","childNodes","cloneNode","compareDocumentPosition","dispatchEvent","firstChild",
-                           "hasChildNodes","insertBefore","isDefaultNamespace","isEqualNode","isSameNode","isSupported","lastChild","localName",
-                           "lookupNamespaceURI","lookupPrefix","namespaceURI","nextSibling","nodeName","nodeType","nodeValue","ownerDocument",
-                           "parentNode","prefix","previousSibling","removeChild","removeEventListener","replaceChild","textContent" ];
-        var TableCell_props = [ "align","background","bgColor","borderColor","borderColorDark","borderColorLight","cellIndex","colSpan","height","noWrap",
-                                "rowSpan","vAlign","width" ];
-
-        protos = [
-            [ "Attr", ["expando","name","specified","value"], Node_props ],
-            [ "CharacterData", ["data","length","appendData"], Node_props ],
-            [ "Comment", ["text"], ["insertData","replaceData","substringData"] ],
-            [ "CSSStyleRule", ["readOnly","selectorText","style"], ["cssText","parentRule","parentStyleSheet","type" ] ],
-            [ "CSSStyleSheet", ["addRule","cssRules","ownerRule","rules"], ["disabled","media","ownerNode","parentStyleSheet","title","type"] ],
-            [ "CustomEvent", ["detail","initCustomEvent"], Event_props ],
-            [ "Document", ["body","doctype","documentMode","onactivate","parentWindow","styleSheets","title"], Node_props ],
-            [ "DocumentType", ["entities","internalSubset","name","notations","publicId","systemId"], Node_props ],
-            [ "Element", Elem_props, Node_props ],
-            [ "HTMLElement", HtmlElem_props, Elem_props ],
-            [ "HTMLTableCellElement", TableCell_props, HtmlElem_props ],
-            [ "HTMLTableDataCellElement", [], TableCell_props ],
-            [ "HTMLUnknownElement", ["recordset","namedRecordset"], HtmlElem_props ],
-            [ "KeyboardEvent", ["altKey","ctrlKey","getModifierState","initKeyboardEvent","key","metaKey"], ["detail","initUIEvent","view"] ],
-            [ "MessageEvent", ["data","initMessageEvent","origin","source"], Event_props ],
-            [ "MouseEvent", ["button","clientX","initMouseEvent","offsetY","pageX","shiftKey","x","y"], ["detail","initUIEvent","view"] ],
-            [ "MSCSSProperties", CSS_props, ["background","border","clip","fontWeight","listStyle","quotes","setProperty","zIndex"] ],
-            [ "MSCurrentStyleCSSProperties", ["blockDirection","clipBottom","clipLeft","clipRight","clipTop","hasLayout"], CSS_props ],
-            [ "MSStyleCSSProperties", ["pixelTop","pixelWidth","posHeight","posLeft","textDecorationBlink","textDecorationNone"], CSS_props ],
-            [ "ProgressEvent", ["initProgressEvent","lengthComputable","loaded","total"], Event_props ],
-            [ "StorageEvent", ["initStorageEvent","key","newValue","oldValue","storageArea"], Event_props ],
-            [ "Text", ["splitText"], ["data","length","appendData","deleteData","insertData","replaceData","substringData"] ],
-            [ "UIEvent", ["detail","initUIEvent","view"], Event_props ]
-        ];
-
-        for(var i = 0; i < protos.length; i++) {
-            if(!(protos[i][0] in window))
-                continue;
-            eval("r = " + protos[i][0] + ".prototype");
-            for(var j = 0; j < protos[i][1].length; j++)
-                ok(Object.prototype.hasOwnProperty.call(r, protos[i][1][j]), protos[i][1][j] + " not a property of " + protos[i][0] + ".prototype");
-            for(var j = 0; j < protos[i][2].length; j++) {
-                ok(!Object.prototype.hasOwnProperty.call(r, protos[i][2][j]), protos[i][2][j] + " is a property of " + protos[i][0] + ".prototype");
-                ok(protos[i][2][j] in r, protos[i][2][j] + " not in " + protos[i][0] + ".prototype");
-            }
-        }
-    }
-});
-
-sync_test("builtin_constructors", function() {
-    var v = document.documentMode;
-
-    var special_ctors = [
-        [ "DOMParser",          [ "prototype", "arguments" ], [ "create", "length" ], 9 ],
-        [ "Image",              [ "prototype", "arguments" ], [ "create", "length" ] ],
-        [ "MutationObserver",   [ "prototype", "arguments" ], [ "create", "length" ], 11 ],
-        [ "Option",             [ "prototype", "arguments" ], [ "create", "length" ] ],
-        [ "XDomainRequest",     [ "prototype", "arguments", "create" ], [ "length" ], 0, 10 ],
-        [ "XMLHttpRequest",     [ "prototype", "arguments", "create" ], [ "length" ] ]
-    ];
-    for(var i = 0; i < special_ctors.length; i++) {
-        if((special_ctors[i].length > 3 && v < special_ctors[i][3]) ||
-           (special_ctors[i].length > 4 && v > special_ctors[i][4]))
-            continue;
-        var name = special_ctors[i][0];
-        ok(Object.prototype.hasOwnProperty.call(window, name), name + " not a property of window.");
-        var obj = window[name];
-        if(v < 9) {
-            ok(!Object.prototype.hasOwnProperty.call(obj, "arguments"), "arguments is a property of " + name + " constructor.");
-            ok(Object.prototype.hasOwnProperty.call(obj, "create"), "create not a property of " + name + " constructor.");
-            ok(!Object.prototype.hasOwnProperty.call(obj, "length"), "length is a property of " + name + " constructor.");
-            ok(Object.prototype.hasOwnProperty.call(obj, "prototype"), "prototype not a property of " + name + " constructor.");
-            ok(!("length" in obj), "length in " + name + " constructor.");
-            if(window.Window)
-                ok(!Object.prototype.hasOwnProperty.call(window.Window.prototype, name), name + " is a property of window's prototype.");
-        }else {
-            for(var j = 0; j < special_ctors[i][1].length; j++)
-                ok(Object.prototype.hasOwnProperty.call(obj, special_ctors[i][1][j]), special_ctors[i][1][j] + " not a property of " + name + " constructor.");
-
-            for(var j = 0; j < special_ctors[i][2].length; j++)
-                ok(!Object.prototype.hasOwnProperty.call(obj, special_ctors[i][2][j]), special_ctors[i][2][j] + " is a property of " + name + " constructor.");
-
-            ok(Object.getPrototypeOf(obj) === Function.prototype, "getPrototypeOf(" + name + " constructor) = " + Object.getPrototypeOf(obj));
-            ok(!Object.prototype.hasOwnProperty.call(Object.getPrototypeOf(window), name), name + " is a property of window's prototype.");
-
-            if(obj.create) {
-                var proto = obj.prototype, func = obj.create, s = Object.prototype.toString.call(func);
-                ok(s === "[object Function]", "obj.create toString = " + s);
-                ok(Object.getPrototypeOf(func) === Function.prototype, "getPrototypeOf(" + name + ".create) = " + Object.getPrototypeOf(func));
-                ok(Object.prototype.hasOwnProperty.call(func, "arguments"), "arguments not a property of " + name + ".create");
-                ok(!Object.prototype.hasOwnProperty.call(func, "length"), "length is a property of " + name + ".create");
-                ok(Object.prototype.hasOwnProperty.call(func, "prototype"), "prototype not a property of " + name + ".create");
-
-                obj = func();
-                ok(Object.getPrototypeOf(obj) === proto, "getPrototypeOf(obj.create()) = " + Object.getPrototypeOf(obj));
-                obj = func.call(Object);
-                ok(Object.getPrototypeOf(obj) === proto, "getPrototypeOf(obj.create() on Object) = " + Object.getPrototypeOf(obj));
-            }
-        }
-    }
-
-    if(v < 9) {
-        // IHTMLDOMConstructorCollection props
-        var ctors = [
-            [ "Attr" ],
-            [ "BehaviorUrnsCollection" ],
-            [ "BookmarkCollection" ],
-            [ "CSSCurrentStyleDeclaration" ],
-            [ "CSSRuleList" ],
-            [ "CSSRuleStyleDeclaration" ],
-            [ "CSSStyleDeclaration" ],
-            [ "CSSStyleRule" ],
-            [ "CSSStyleSheet" ],
-            [ "CompatibleInfo" ],
-            [ "CompatibleInfoCollection" ],
-            [ "ControlRangeCollection" ],
-            [ "DOMImplementation" ],
-            [ "DataTransfer" ],
-            [ "Element" ],
-            [ "Event" ],
-            [ "HTCElementBehaviorDefaults" ],
-            [ "HTMLAnchorElement" ],
-            [ "HTMLAreaElement" ],
-            [ "HTMLAreasCollection" ],
-            [ "HTMLBGSoundElement" ],
-            [ "HTMLBRElement" ],
-            [ "HTMLBaseElement" ],
-            [ "HTMLBaseFontElement" ],
-            [ "HTMLBlockElement" ],
-            [ "HTMLBodyElement" ],
-            [ "HTMLButtonElement" ],
-            [ "HTMLCollection" ],
-            [ "HTMLCommentElement" ],
-            [ "HTMLDDElement" ],
-            [ "HTMLDListElement" ],
-            [ "HTMLDTElement" ],
-            [ "HTMLDivElement" ],
-            [ "HTMLDocument" ],
-            [ "HTMLEmbedElement" ],
-            [ "HTMLFieldSetElement" ],
-            [ "HTMLFontElement" ],
-            [ "HTMLFormElement" ],
-            [ "HTMLFrameElement" ],
-            [ "HTMLFrameSetElement" ],
-            [ "HTMLGenericElement" ],
-            [ "HTMLHRElement" ],
-            [ "HTMLHeadElement" ],
-            [ "HTMLHeadingElement" ],
-            [ "HTMLHtmlElement" ],
-            [ "HTMLIFrameElement" ],
-            [ "HTMLImageElement" ],
-            [ "HTMLInputElement" ],
-            [ "HTMLIsIndexElement" ],
-            [ "HTMLLIElement" ],
-            [ "HTMLLabelElement" ],
-            [ "HTMLLegendElement" ],
-            [ "HTMLLinkElement" ],
-            [ "HTMLMapElement" ],
-            [ "HTMLMarqueeElement" ],
-            [ "HTMLMetaElement" ],
-            [ "HTMLModelessDialog" ],
-            [ "HTMLNamespaceInfo" ],
-            [ "HTMLNamespaceInfoCollection" ],
-            [ "HTMLNextIdElement" ],
-            [ "HTMLNoShowElement" ],
-            [ "HTMLOListElement" ],
-            [ "HTMLObjectElement" ],
-            [ "HTMLOptionElement" ],
-            [ "HTMLParagraphElement" ],
-            [ "HTMLParamElement" ],
-            [ "HTMLPhraseElement" ],
-            [ "HTMLPluginsCollection" ],
-            [ "HTMLPopup" ],
-            [ "HTMLScriptElement" ],
-            [ "HTMLSelectElement" ],
-            [ "HTMLSpanElement" ],
-            [ "HTMLStyleElement" ],
-            [ "HTMLTableCaptionElement" ],
-            [ "HTMLTableCellElement" ],
-            [ "HTMLTableColElement" ],
-            [ "HTMLTableElement" ],
-            [ "HTMLTableRowElement" ],
-            [ "HTMLTableSectionElement" ],
-            [ "HTMLTextAreaElement" ],
-            [ "HTMLTextElement" ],
-            [ "HTMLTitleElement" ],
-            [ "HTMLUListElement" ],
-            [ "HTMLUnknownElement" ],
-            [ "History" ],
-            [ "Image", 0, "HTMLImageElement" ],
-            [ "Location" ],
-            [ "NamedNodeMap" ],
-            [ "Navigator" ],
-            [ "NodeList" ],
-            [ "Option", 0, "HTMLOptionElement" ],
-            [ "Screen" ],
-            [ "Selection" ],
-            [ "StaticNodeList" ],
-            [ "Storage" ],
-            [ "StyleSheetList" ],
-            [ "StyleSheetPage" ],
-            [ "StyleSheetPageList" ],
-            [ "Text" ],
-            [ "TextRange" ],
-            [ "TextRangeCollection" ],
-            [ "TextRectangle" ],
-            [ "TextRectangleList" ],
-            [ "Window" ],
-            [ "XDomainRequest", 0 ],
-            [ "XMLHttpRequest", 0 ]
-        ];
-        for(var i = 0; i < ctors.length; i++) {
-            if(!(ctors[i][0] in window) && v >= 8) {
-                todo_wine.ok(false, ctors[i][0] + " not implemented");
-                continue;
-            }
-            var a, b, r = 0;
-            try {
-                eval("a = " + ctors[i][0] + "; b = window." + ctors[i][0] + ";");
-            }catch(ex) {
-                r = ex.number;
-            }
-            if(v < 8 && (ctors[i].length < 2 || v < ctors[i][1]))
-                ok(r === 0xa1391 - 0x80000000, ctors[i][0] + " not undefined: " + r);
-            else {
-                ok(r === 0, ctors[i][0] + " exception code: " + r);
-                ok(a === b, ctors[i][0] + ": " + a + " != " + b);
-                ok(ctors[i][0] in window, ctors[i][0] + " in window");
-                if(v >= 8)
-                    ok(!(ctors[i][0] in window.Window.prototype), ctors[i][0] + " in Window.prototype");
-                r = "" + a;
-                ok(r === "[object " + ctors[i][ctors[i].length < 3 ? 0 : 2] + "]", ctors[i][0] + " returned " + r);
-                r = "" + a.prototype;
-                ok(r === "[Interface prototype object]", ctors[i][0] + ".prototype returned " + r);
-
-                var props = [ "LookupGetter", "LookupSetter", "DefineGetter", "DefineSetter" ];
-                for(var j = 0; j < props.length; j++) {
-                    ok(!(props[j] in a.prototype), props[j] + " in " + ctors[i][0] + ".prototype");
-                    ok(!(props[j] in a), props[j] + " in " + ctors[i][0]);
-                }
-                ok(!("constructor" in a), "constructor in " + ctors[i][0]);
-
-                if(v < 8 || ctors[i][0] === "HTMLModelessDialog") {
-                    ok(!("constructor" in a.prototype), "constructor in " + ctors[i][0] + ".prototype");
-                }else {
-                    ok("constructor" in a.prototype, "constructor not in " + ctors[i][0] + ".prototype");
-                    b = a.prototype.constructor;
-                    r = ctors[i][(ctors[i].length > 2) ? 2 : 0];
-                    var ctor = (r.length > 7 && r.slice(-7) === "Element") ? window.Element : null;
-                    ok(b === ctor, ctors[i][0] + ".prototype.constructor = " + b);
-                    a.prototype.constructor = "foobar";
-                    b = a.prototype.constructor;
-                    ok(b === ctor, ctors[i][0] + ".prototype.constructor after set = " + b);
-                    r = (delete a.prototype.constructor);
-                    ok(r === true, "delete " + ctors[i][0] + ".prototype.constructor returned " + r);
-                    b = a.prototype.constructor;
-                    ok(b === ctor, ctors[i][0] + ".prototype.constructor after delete = " + b);
-                }
-            }
-        }
-    }else {
-        var ctors = [
-            [ "Attr" ],
-            [ "CharacterData" ],
-            [ "ClientRect" ],
-            [ "ClientRectList" ],
-            [ "Comment" ],
-            [ "Console", 10 ],
-            [ "Crypto", 11 ],
-            [ "CSSRule" ],
-            [ "CSSStyleDeclaration" ],
-            [ "CSSStyleRule" ],
-            [ "CSSStyleSheet" ],
-            [ "CustomEvent" ],
-            [ "Document" ],
-            [ "DocumentType" ],
-            [ "DOMImplementation" ],
-            [ "DOMTokenList", 10 ],
-            [ "Element" ],
-            [ "Event" ],
-            [ "History" ],
-            [ "HTMLAnchorElement" ],
-            [ "HTMLAreaElement" ],
-            [ "HTMLBodyElement" ],
-            [ "HTMLButtonElement" ],
-            [ "HTMLCollection" ],
-            [ "HTMLDocument", 11 ],
-            [ "HTMLElement" ],
-            [ "HTMLEmbedElement" ],
-            [ "HTMLFormElement" ],
-            [ "HTMLFrameElement" ],
-            [ "HTMLHeadElement" ],
-            [ "HTMLHtmlElement" ],
-            [ "HTMLIFrameElement" ],
-            [ "HTMLImageElement" ],
-            [ "HTMLInputElement" ],
-            [ "HTMLLabelElement" ],
-            [ "HTMLLinkElement" ],
-            [ "HTMLObjectElement" ],
-            [ "HTMLOptionElement" ],
-            [ "HTMLScriptElement" ],
-            [ "HTMLSelectElement" ],
-            [ "HTMLStyleElement" ],
-            [ "HTMLTableCellElement" ],
-            [ "HTMLTableDataCellElement" ],
-            [ "HTMLTableElement" ],
-            [ "HTMLTableRowElement" ],
-            [ "HTMLTextAreaElement" ],
-            [ "HTMLTitleElement" ],
-            [ "HTMLUnknownElement" ],
-            [ "KeyboardEvent" ],
-            [ "MediaQueryList", 10 ],
-            [ "MessageEvent" ],
-            [ "MimeTypeArray", 11 ],
-            [ "MouseEvent" ],
-            [ "MSCSSProperties" ],
-            [ "MSCSSRuleList" ],
-            [ "MSCurrentStyleCSSProperties" ],
-            [ "MSEventObj" ],
-            [ "MSNamespaceInfoCollection", 0, 9 ],
-            [ "MSSelection", 0, 10 ],
-            [ "MSStyleCSSProperties" ],
-            [ "MutationObserver", 11 ],
-            [ "NamedNodeMap" ],
-            [ "Navigator" ],
-            [ "Node" ],
-            [ "NodeList" ],
-            [ "PageTransitionEvent", 11 ],
-            [ "Performance" ],
-            [ "PerformanceNavigation" ],
-            [ "PerformanceTiming" ],
-            [ "PluginArray", 11 ],
-            [ "ProgressEvent", 10 ],
-            [ "Range" ],
-            [ "Screen" ],
-            [ "Storage" ],
-            [ "StorageEvent" ],
-            [ "StyleSheet" ],
-            [ "StyleSheetList" ],
-            [ "Text" ],
-            [ "TextRange" ],
-            [ "UIEvent" ],
-            [ "Window" ],
-            [ "XMLHttpRequest" ]
-        ];
-        for(var i = 0; i < ctors.length; i++) {
-            if((ctors[i].length > 1 && v < ctors[i][1]) || (ctors[i].length > 2 && v > ctors[i][2]))
-                ok(!(ctors[i][0] in window), ctors[i][0] + " in window.");
-            else
-                ok(Object.prototype.hasOwnProperty.call(window, ctors[i][0]), ctors[i][0] + " not a property of window.");
-        }
     }
 });
 
@@ -1581,7 +643,11 @@ sync_test("elem_props", function() {
     test_exposed("doScroll", v < 11);
     test_exposed("readyState", v < 11);
     test_exposed("clientTop", true);
+    test_exposed("ownerDocument", true);
     test_exposed("title", true);
+    test_exposed("removeNode", true);
+    test_exposed("replaceNode", true);
+    test_exposed("swapNode", true);
     test_exposed("querySelectorAll", v >= 8);
     test_exposed("textContent", v >= 9);
     test_exposed("prefix", v >= 9);
@@ -1596,6 +662,25 @@ sync_test("elem_props", function() {
     test_exposed("msSetPointerCapture", v >= 10);
     if (v >= 9) test_exposed("spellcheck", v >= 10);
 
+    elem = document.createComment("");
+    test_exposed("atomic", v < 9);
+    test_exposed("data", true);
+    test_exposed("length", true);
+    test_exposed("text", true);
+    test_exposed("appendData", true);
+    test_exposed("deleteData", true);
+    test_exposed("insertData", true);
+    test_exposed("replaceData", true);
+    test_exposed("substringData", true);
+    test_exposed("attachEvent", v < 9);
+    test_exposed("doScroll", v < 9);
+    test_exposed("readyState", v < 9);
+    test_exposed("clientTop", v < 9);
+    test_exposed("title", v < 9);
+    test_exposed("removeNode", v < 9);
+    test_exposed("querySelectorAll", v === 8);
+    test_exposed("hasAttribute", v === 8, v === 8);
+
     elem = document.createElement("style");
     test_exposed("media", true);
     test_exposed("type", true);
@@ -1608,83 +693,6 @@ sync_test("elem_props", function() {
 
     elem = document.createElement("img");
     test_exposed("fileSize", v < 11);
-});
-
-sync_test("attr_props", function() {
-    var elem = document.createElement("style"), attr;
-    var v = document.documentMode;
-    elem.setAttribute("id", "test");
-    elem.setAttribute("test", "wine");
-    elem.setAttribute("z-index", "foobar");
-    elem.setAttribute("removeAttribute", "funcattr");
-
-    function test_exposed(prop, expect) {
-        if(expect)
-            ok(prop in attr, prop + " not found in attribute.");
-        else
-            ok(!(prop in attr), prop + " found in attribute.");
-    }
-
-    function test_attr(expando, specified) {
-        var r = attr.expando;
-        ok(r === expando, attr.name + " attr.expando = " + r);
-        r = attr.specified;
-        ok(r === specified, attr.name + " attr.specified = " + r);
-    }
-
-    attr = elem.getAttributeNode("id");
-    test_exposed("appendChild", true);
-    test_exposed("attributes", true);
-    test_exposed("childNodes", true);
-    test_exposed("cloneNode", true);
-    test_exposed("compareDocumentPosition", v >= 9);
-    test_exposed("expando", true);
-    test_exposed("firstChild", true);
-    test_exposed("hasChildNodes", true);
-    test_exposed("insertBefore", true);
-    test_exposed("isDefaultNamespace", v >= 9);
-    test_exposed("isEqualNode", v >= 9);
-    test_exposed("isSameNode", v >= 9);
-    test_exposed("isSupported", v >= 9);
-    test_exposed("lastChild", true);
-    test_exposed("localName", v >= 9);
-    test_exposed("lookupNamespaceURI", v >= 9);
-    test_exposed("lookupPrefix", v >= 9);
-    test_exposed("name", true);
-    test_exposed("namespaceURI", v >= 9);
-    test_exposed("nextSibling", true);
-    test_exposed("nodeName", true);
-    test_exposed("nodeType", true);
-    test_exposed("nodeValue", true);
-    test_exposed("ownerDocument", true);
-    test_exposed("parentNode", true);
-    test_exposed("prefix", v >= 9);
-    test_exposed("previousSibling", true);
-    test_exposed("removeChild", true);
-    test_exposed("replaceChild", true);
-    test_exposed("specified", true);
-    test_exposed("textContent", v >= 9);
-    test_exposed("value", true);
-    test_attr(false, true);
-
-    attr = elem.getAttributeNode("test");
-    test_attr(true, true);
-
-    attr = elem.getAttributeNode("z-index");
-    test_attr(true, true);
-
-    attr = elem.getAttributeNode("removeAttribute");
-    test_attr(true, true);
-
-    attr = elem.getAttributeNode("tabIndex");
-    if(v < 8)
-        test_attr(false, false);
-    else
-        todo_wine_if(v === 8).
-        ok(attr === null, "tabIndex attr not null.");
-
-    attr = document.createAttribute("winetest");
-    test_attr(false, v >= 9);
 });
 
 sync_test("doc_props", function() {
@@ -1723,14 +731,58 @@ sync_test("docfrag_props", function() {
 
     function test_exposed(prop, expect) {
         if(expect)
-            ok(prop in docfrag, prop + " not found in document fragent.");
+            ok(prop in docfrag, prop + " not found in document fragment.");
         else
-            ok(!(prop in docfrag), prop + " found in document fragent.");
+            ok(!(prop in docfrag), prop + " found in document fragment.");
     }
 
     var v = document.documentMode;
 
+    test_exposed("attachEvent", v < 11);
+    test_exposed("detachEvent", v < 11);
+    test_exposed("createStyleSheet", v < 9);
+    test_exposed("fileSize", v < 9);
+    test_exposed("selection", v < 9);
+    test_exposed("doctype", v < 9);
+    test_exposed("onstorage", v < 9);
+    test_exposed("textContent", v >= 9);
+    test_exposed("prefix", v >= 9);
+    test_exposed("ownerDocument", true);
+    test_exposed("removeNode", true);
+    test_exposed("replaceNode", true);
+    test_exposed("swapNode", true);
+    test_exposed("defaultView", false);
+    test_exposed("head", false);
+    test_exposed("addEventListener", v >= 9);
+    test_exposed("removeEventListener", v >= 9);
+    test_exposed("dispatchEvent", v >= 9);
+    test_exposed("createEvent", false);
     test_exposed("compareDocumentPosition", v >= 9);
+});
+
+sync_test("textnode_props", function() {
+    var node = document.createTextNode("testNode");
+
+    function test_exposed(prop, expect) {
+        if(expect)
+            ok(prop in node, prop + " not found in text node.");
+        else
+            ok(!(prop in node), prop + " found in text node.");
+    }
+
+    var v = document.documentMode;
+
+    test_exposed("childNodes", true);
+    test_exposed("nodeName", true);
+    test_exposed("nodeValue", true);
+    test_exposed("ownerDocument", true);
+    test_exposed("removeNode", true);
+    test_exposed("replaceNode", true);
+    test_exposed("swapNode", true);
+    test_exposed("toString", true);
+    test_exposed("compareDocumentPosition", v >= 9);
+    test_exposed("isEqualNode", v >= 9);
+    test_exposed("prefix", v >= 9);
 });
 
 sync_test("window_props", function() {
@@ -1765,11 +817,16 @@ sync_test("window_props", function() {
     test_exposed("WeakSet", false);
     test_exposed("performance", true);
     test_exposed("console", v >= 10);
-    test_exposed("DOMParser", v >= 9);
     test_exposed("matchMedia", v >= 10);
     test_exposed("msCrypto", v >= 11);
-    test_exposed("MutationObserver", v >= 11);
+    test_exposed("Document", v >= 9);
+    test_exposed("HTMLDocument", v === 8 || v >= 11, v === 8);
+    test_exposed("XMLDocument", v >= 11);
+    test_exposed("DOMParser", v >= 9);
     test_exposed("XDomainRequest", v < 11);
+    test_exposed("MutationObserver", v >= 11);
+    test_exposed("PageTransitionEvent", v >= 11);
+    test_exposed("ProgressEvent", v >= 10);
 });
 
 sync_test("domimpl_props", function() {
@@ -1936,151 +993,111 @@ sync_test("xhr open", function() {
 });
 
 sync_test("style_props", function() {
-    var style = document.body.style;
+    var r, style = document.body.style, currentStyle = document.body.currentStyle, computedStyle = window.getComputedStyle ? window.getComputedStyle(document.body) : undefined;
 
-    function test_exposed(prop, expect) {
-        if(expect)
-            ok(prop in style, prop + " not found in style object.");
-        else
-            ok(!(prop in style), prop + " found in style object.");
+    function test_exposed(prop, expect_style, expect_currentStyle, expect_computedStyle, own_prop) {
+        if(own_prop === undefined)
+            own_prop = (v < 9);
+        function test(prop, obj, expect, name) {
+            if(!expect)
+                ok(!(prop in obj), prop + " found in " + name + " object.");
+            else {
+                ok(prop in obj, prop + " not found in " + name + " object.");
+                if(own_prop) {
+                    ok(Object.prototype.hasOwnProperty.call(obj, prop), prop + " not prop of " + name + " object.");
+                    if(Object.getOwnPropertyDescriptor) {
+                        var desc = Object.getOwnPropertyDescriptor(obj, prop);
+                        if(name === "computedStyle" && prop.indexOf("-") === -1) {
+                            todo_wine.
+                            ok(desc === undefined, prop + " of " + name + " object is not undefined.");
+                            return;
+                        }
+                        ok(desc.value === obj[prop], prop + " of " + name + " object value = ." + desc.value + ", expected " + obj[prop]);
+                        ok(!("get" in desc), prop + " of " + name + " object has a getter.");
+                        ok(!("set" in desc), prop + " of " + name + " object has a setter.");
+                        ok(desc.writable === true, prop + " of " + name + " object not writable.");
+                        ok(desc.enumerable === true, prop + " of " + name + " object not enumerable.");
+                        ok(desc.configurable === true, prop + " of " + name + " object not configurable.");
+                    }
+                }
+            }
+        }
+
+        test(prop, style, expect_style, "style");
+        test(prop, currentStyle, expect_currentStyle, "currentStyle");
+        if(computedStyle)
+            test(prop, computedStyle, expect_computedStyle, "computedStyle");
     }
 
     var v = document.documentMode;
 
-    test_exposed("removeAttribute", true);
-    test_exposed("zIndex", true);
-    test_exposed("z-index", true);
-    test_exposed("filter", true);
-    test_exposed("pixelTop", true);
-    test_exposed("float", true);
-    test_exposed("css-float", false);
-    test_exposed("style-float", false);
-    test_exposed("setProperty", v >= 9);
-    test_exposed("removeProperty", v >= 9);
-    test_exposed("background-clip", v >= 9);
-    test_exposed("msTransform", v >= 9);
-    test_exposed("transform", v >= 10);
+    test_exposed("removeAttribute", true, v >= 9, false);
+    test_exposed("setExpression", v < 9, false, false);
+    test_exposed("zIndex", true, true, true);
+    test_exposed("z-index", true, true, true, true);
+    test_exposed("filter", true, true, v >= 10);
+    test_exposed("pixelTop", true, false, false);
+    test_exposed("float", true, true, true, true);
+    test_exposed("css-float", false, false, false);
+    test_exposed("style-float", false, false, false);
+    test_exposed("setProperty", v >= 9, v >= 9, v >= 9);
+    test_exposed("removeProperty", v >= 9, v >= 9, v >= 9);
+    test_exposed("background-clip", v >= 9, v >= 9, v >= 9, true);
+    test_exposed("msTransform", v >= 9, v >= 9, v >= 9);
+    test_exposed("msTransition", v >= 10, v >= 10, v >= 10);
+    test_exposed("transform", v >= 10, v >= 10, v >= 10);
+    test_exposed("transition", v >= 10, v >= 10, v >= 10);
 
-    style = document.body.currentStyle;
+    if(Object.getOwnPropertyNames) {
+        r = Object.getOwnPropertyNames(style);
+        ok(!r.length, "style has own props: " + r);
+        r = Object.getOwnPropertyNames(currentStyle);
+        ok(!r.length, "currentStyle has own props: " + r);
+        r = Object.getOwnPropertyNames(computedStyle);
+        ok(!r.length, "computedStyle has own props: " + r);
 
-    test_exposed("zIndex", true);
-    test_exposed("z-index", true);
-    test_exposed("filter", true);
-    test_exposed("pixelTop", false);
-    test_exposed("float", true);
-    test_exposed("css-float", false);
-    test_exposed("style-float", false);
-    test_exposed("styleFloat", true);
-    test_exposed("setProperty", v >= 9);
-    test_exposed("removeProperty", v >= 9);
-    test_exposed("background-clip", v >= 9);
-    test_exposed("transform", v >= 10);
-    test_exposed("zoom", true);
+        r = Object.getOwnPropertyDescriptor(style, "z-index");
+        ok(r.value === "", "style z-index value = " + r.value);
+        style.zIndex = 1;
+        r = Object.getOwnPropertyDescriptor(style, "z-index");
+        ok(r.value === 1, "style z-index value after set = " + r.value);
 
-    try {
-        style.styleFloat = "left";
-        ok(false, "expected exception setting styleFloat");
-    }catch(ex) {}
-    try {
-        style.zoom = "1.0";
-        ok(false, "expected exception setting zoom");
-    }catch(ex) {}
+        Object.defineProperty(style, "z-index", { get: function() { return "42"; }, configurable: true });
+        todo_wine.
+        ok(style.zIndex === 1, "style zIndex after defineProperty = " + style.zIndex);
+        todo_wine.
+        ok(style["z-index"] === "42", "style z-index after defineProperty = " + style["z-index"]);
 
-    if(window.getComputedStyle) {
-        style = window.getComputedStyle(document.body);
+        r = Object.getOwnPropertyDescriptor(style, "z-index");
+        todo_wine.
+        ok(!("value" in r), "style z-index after defineProperty still has value");
+        todo_wine.
+        ok(typeof(r.get) === "function", "style z-index after defineProperty not a getter");
 
-        test_exposed("removeAttribute", false);
-        test_exposed("zIndex", true);
-        test_exposed("z-index", true);
-        test_exposed("pixelTop", false);
-        test_exposed("float", true);
-        test_exposed("css-float", false);
-        test_exposed("style-float", false);
-        test_exposed("setProperty", v >= 9);
-        test_exposed("removeProperty", v >= 9);
-        test_exposed("background-clip", v >= 9);
-        test_exposed("transform", v >= 10);
+        r = delete style["z-index"];
+        ok(r === true, "delete style z-index returned " + r);
+        ok(style["z-index"] === 1, "style z-index after delete = " + style["z-index"]);
+
+        r = Object.getOwnPropertyNames(style);
+        todo_wine.
+        ok(!r.length, "style has own props after delete: " + r);
     }
 });
 
-sync_test("input_validation_props", function() {
-    var obj, v = document.documentMode;
-    if(v < 9) return;
-
-    function test_exposed(prop, expect) {
+sync_test("constructor props", function() {
+    function test_exposed(constructor, prop, expect) {
         if(expect)
-            ok(Object.prototype.hasOwnProperty.call(obj, prop), prop + " not a property of " + obj);
+            ok(prop in window[constructor], prop + " not found in " + constructor + " constructor.");
         else
-            ok(!Object.prototype.hasOwnProperty.call(obj, prop), prop + " is a property of " + obj);
+            ok(!(prop in window[constructor]), prop + " found in " + constructor + " constructor.");
     }
+    var v = document.documentMode;
 
-    obj = window.HTMLFormElement.prototype;
-    test_exposed("action", true);
-    test_exposed("autofocus", false);
-    test_exposed("checkValidity", v >= 10);
-    test_exposed("enctype", true);
-    test_exposed("formAction", false);
-    test_exposed("formEnctype", false);
-    test_exposed("formMethod", false);
-    test_exposed("formNoValidate", false);
-    test_exposed("formTarget", false);
-    test_exposed("method", true);
-    test_exposed("noValidate", v >= 10);
-    test_exposed("setCustomValidity", false);
-    test_exposed("target", true);
-    test_exposed("validationMessage", false);
-    test_exposed("validity", false);
-    test_exposed("willValidate", false);
-
-    obj = window.HTMLInputElement.prototype;
-    test_exposed("autofocus", v >= 10);
-    test_exposed("checkValidity", v >= 10);
-    test_exposed("formAction", v >= 10);
-    test_exposed("formEnctype", v >= 10);
-    test_exposed("formMethod", v >= 10);
-    test_exposed("formNoValidate", v >= 10);
-    test_exposed("formTarget", v >= 10);
-    test_exposed("setCustomValidity", v >= 10);
-    test_exposed("validationMessage", v >= 10);
-    test_exposed("validity", v >= 10);
-    test_exposed("willValidate", v >= 10);
-
-    obj = window.HTMLButtonElement.prototype;
-    test_exposed("autofocus", v >= 10);
-    test_exposed("checkValidity", v >= 10);
-    test_exposed("formAction", v >= 10);
-    test_exposed("formEnctype", v >= 10);
-    test_exposed("formMethod", v >= 10);
-    test_exposed("formNoValidate", v >= 10);
-    test_exposed("formTarget", v >= 10);
-    test_exposed("setCustomValidity", v >= 10);
-    test_exposed("validationMessage", v >= 10);
-    test_exposed("validity", v >= 10);
-    test_exposed("willValidate", v >= 10);
-
-    obj = window.HTMLObjectElement.prototype;
-    test_exposed("autofocus", false);
-    test_exposed("checkValidity", v >= 10);
-    test_exposed("setCustomValidity", v >= 10);
-    test_exposed("validationMessage", v >= 10);
-    test_exposed("validity", v >= 10);
-    test_exposed("willValidate", v >= 10);
-
-    obj = window.HTMLSelectElement.prototype;
-    test_exposed("autofocus", v >= 10);
-    test_exposed("checkValidity", v >= 10);
-    test_exposed("setCustomValidity", v >= 10);
-    test_exposed("validationMessage", v >= 10);
-    test_exposed("validity", v >= 10);
-    test_exposed("willValidate", v >= 10);
-
-    obj = window.HTMLTextAreaElement.prototype;
-    test_exposed("autofocus", v >= 10);
-    test_exposed("checkValidity", v >= 10);
-    test_exposed("setCustomValidity", v >= 10);
-    test_exposed("validationMessage", v >= 10);
-    test_exposed("validity", v >= 10);
-    test_exposed("willValidate", v >= 10);
+    test_exposed("Image", "create", v < 9);
+    test_exposed("Option", "create", v < 9);
+    test_exposed("XMLHttpRequest", "create", true);
+    if(v >= 9)  test_exposed("DOMParser", "create", false);
+    if(v >= 11) test_exposed("MutationObserver", "create", false);
 });
 
 sync_test("createElement_inline_attr", function() {
@@ -2243,6 +1260,16 @@ sync_test("eval", function() {
     context = {};
     (function(eval) { eval(code); })(function() { context.barfoo = 4321; });
     ok(context.barfoo === 4321, "context.barfoo = " + context.barfoo);
+
+    (0,eval)("var foobar = 'wine';");
+    if(v < 9) {
+        ok(!("foobar" in window), "foobar in window");
+        ok(foobar === "wine", "foobar = " + foobar);
+    }else {
+        ok("foobar" in window, "foobar not in window");
+        ok(window.foobar === "wine", "foobar = " + window.foobar);
+    }
+    delete foobar;
 });
 
 sync_test("for..in", function() {
@@ -2279,18 +1306,33 @@ sync_test("for..in", function() {
 });
 
 sync_test("function caller", function() {
+    var v = document.documentMode;
+
     ok(Function.prototype.hasOwnProperty("caller"), "caller not prop of Function.prototype");
+    if(v < 9)
+        ok(arguments.hasOwnProperty("caller"), "caller not prop of arguments");
+    else
+        ok(!("caller" in arguments), "caller in arguments");
 
     function test_caller(expected_caller, stop) {
         ok(test_caller.caller === expected_caller, "caller = " + test_caller.caller);
+        if(v < 9)
+            ok(arguments.caller === expected_caller.arguments, "arguments.caller = " + arguments.caller);
+
         if(stop) return;
         function nested() {
             ok(nested.caller === test_caller, "nested caller = " + nested.caller);
+            if(v < 9)
+                ok(arguments.caller === test_caller.arguments, "nested arguments.caller = " + arguments.caller);
             test_caller(nested, true);
             ok(test_caller.caller === expected_caller, "caller within nested = " + test_caller.caller);
+            if(v < 9)
+                ok(test_caller.arguments.caller === expected_caller.arguments, "arguments.caller within nested = " + test_caller.arguments.caller);
         }
         nested();
         ok(test_caller.caller === expected_caller, "caller after nested = " + test_caller.caller);
+        if(v < 9)
+            ok(arguments.caller === expected_caller.arguments, "arguments.caller after nested = " + arguments.caller);
     }
     ok(test_caller.hasOwnProperty("caller"), "caller not prop of test_caller");
     ok(test_caller.caller === null, "test_caller.caller = " + test_caller.caller);
@@ -2353,6 +1395,7 @@ sync_test("elem_by_id", function() {
         name_elem = document.testname;
         ok(name_elem === "foo", "document.testname after set = " + name_elem);
     }catch(e) {
+        todo_wine_if(v >= 9).
         ok(v < 9 && e.number === 0xa01b6 - 0x80000000, "Setting document.testname threw = " + e.number);
     }
 
@@ -2377,8 +1420,32 @@ sync_test("elem_by_id", function() {
         delete document.testid;
         delete document.testname;
     }catch(e) {
+        todo_wine_if(v >= 9).
         ok(v < 9 && e.number === 0xa01b6 - 0x80000000, "Setting document.testid threw = " + e.number);
     }
+
+    window.testid2 = 1;
+    document.testid2 = 2;
+    document.body.innerHTML = '<form id="testid2" name="testname"></form>';
+    ok(window.testid2 == 1, "window.testid2 = " + window.testid2);
+    id_elem = document.body.firstChild;
+    ok(document.testid2 == (v < 9 ? id_elem : 2), "document.testid2 = " + document.testid2);
+    document.body.innerHTML = '';
+    ok(window.testid2 == 1, "window.testid2 = " + window.testid2);
+    ok(document.testid2 == 2, "document.testid2 = " + document.testid2 + " expected 2");
+
+    ok(document.title === "", "document.title = " + document.title);
+    document.body.innerHTML = '<form id="title" name="testname"></form>';
+    id_elem = document.body.firstChild;
+    todo_wine_if(v < 9).
+    ok(document.title === (v < 9 ? id_elem : ""), "document.title = " + document.title);
+    document.body.innerHTML = '';
+    ok(document.title === "", "document.title = " + document.title);
+
+    ok(window.closed === false, "window.closed = " + window.closed);
+    document.body.innerHTML = '<form id="closed" name="testname"></form>';
+    id_elem = document.body.firstChild;
+    ok(window.closed === false, "window.closed = " + window.closed);
 
     // these tags expose name as props, and id only if they have a name
     var tags = [ "embed", "form", "iframe", "img" ];
@@ -2439,6 +1506,9 @@ sync_test("doctype", function() {
     }
 
     ok(doctype.name === "html", "doctype.name = " + doctype.name);
+    ok(!("removeNode" in doctype), "removeNode found in doctype.");
+    ok(!("replaceNode" in doctype), "replaceNode found in doctype.");
+    ok(!("swapNode" in doctype), "swapNode found in doctype.");
 });
 
 async_test("iframe_doc_mode", function() {
@@ -2525,7 +1595,10 @@ async_test("script_load", function() {
 });
 
 sync_test("location", function() {
+    var v = document.documentMode;
     document.body.innerHTML = '<a name="testanchor">test</a>';
+
+    ok(location.host === "winetest.example.org" + (v < 10 ? ":80" : ""), "location.host = " + location.host);
 
     ok(location.hash === "", "initial location.hash = " + location.hash);
     location.hash = "TestAnchor";
@@ -2616,7 +1689,6 @@ sync_test("delete_prop", function() {
     }
     if(v < 9) {
         ok(r, "did not get an expected exception");
-        return;
     }else {
         ok(!r, "got an unexpected exception");
         ok(!("prop1" in obj), "prop1 is still in obj");
@@ -2637,12 +1709,27 @@ sync_test("delete_prop", function() {
     /* test window object and its global scope handling */
     obj = window;
 
+    ok("encodeURIComponent" in obj, "encodeURIComponent not in obj");
+    try {
+        prop = window.encodeURIComponent;
+        r = (delete window.encodeURIComponent);
+        ok(v >= 9, "did not get an expect exception deleting encodeURIComponent");
+        ok(r, "delete returned " + r);
+        ok(!("encodeURIComponent" in obj), "encodeURIComponent is still in obj");
+        window.encodeURIComponent = prop;
+    }catch(ex) {
+        ok(v < 9, "expected exception deleting encodeURIComponent");
+        ok(ex.number === 0xa01bd - 0x80000000, "deleting encodeURIComponent threw " + ex.number);
+        ok("encodeURIComponent" in obj, "encodeURIComponent is not in obj");
+    }
+
     obj.globalprop1 = true;
     ok(globalprop1, "globalprop1 = " + globalprop1);
     r = false;
     try {
         delete obj.globalprop1;
     }catch(ex) {
+        ok(ex.number === 0xa01bd - 0x80000000, "deleting globalprop1 threw " + ex.number);
         r = true;
     }
     if(v < 9) {
@@ -2658,6 +1745,7 @@ sync_test("delete_prop", function() {
     try {
         delete obj.globalprop2;
     }catch(ex) {
+        ok(ex.number === 0xa01bd - 0x80000000, "deleting globalprop2 threw " + ex.number);
         r = true;
     }
     if(v < 9) {
@@ -2673,6 +1761,7 @@ sync_test("delete_prop", function() {
     try {
         delete globalprop3;
     }catch(ex) {
+        ok(ex.number === 0xa01bd - 0x80000000, "deleting globalprop3 threw " + ex.number);
         r = true;
     }
     if(v < 9) {
@@ -2688,6 +1777,87 @@ sync_test("delete_prop", function() {
     r = (delete globalprop4);
     ok(r, "delete returned " + r);
     ok(!("globalprop4" in obj), "globalprop4 is still in obj");
+
+    globalprop5 = true;
+    ok(obj.globalprop5, "globalprop5 = " + globalprop5);
+    try {
+        r = (delete window.globalprop5);
+        ok(v >= 9, "did not get an expected exception deleting globalprop5");
+        ok(r, "delete returned " + r);
+        ok(!("globalprop5" in obj), "globalprop5 is still in obj");
+    }catch(ex) {
+        ok(v < 9, "expected exception deleting globalprop5");
+        ok(ex.number === 0xa01bd - 0x80000000, "deleting globalprop5 threw " + ex.number);
+        ok("globalprop5" in obj, "globalprop5 is not in obj");
+    }
+
+    document.body.innerHTML = '<div id="winetest"/>';
+    ok("winetest" in obj, "winetest not in obj");
+    try {
+        r = (delete window.winetest);
+        ok(v >= 9, "did not get an expected exception deleting winetest");
+        ok(r, "delete returned " + r);
+    }catch(ex) {
+        ok(v < 9, "expected exception deleting winetest");
+        ok(ex.number === 0xa01bd - 0x80000000, "deleting winetest threw " + ex.number);
+    }
+    ok("winetest" in obj, "winetest is not in obj");
+    document.body.innerHTML = "";
+    ok(!("winetest" in obj), "winetest is still in obj");
+
+    document.body.innerHTML = '<div id="foobar"/>';
+    ok("foobar" in obj, "foobar not in obj");
+    window.foobar = "1234";
+    ok(obj.foobar === "1234", "foobar = " + obj.foobar);
+    document.body.innerHTML = "";
+    ok("foobar" in obj, "foobar is not in obj");
+    ok(obj.foobar === "1234", "foobar = " + obj.foobar);
+    try {
+        r = (delete window.foobar);
+        ok(v >= 9, "did not get an expected exception deleting foobar");
+        ok(r, "delete returned " + r);
+        ok(!("foobar" in obj), "foobar is still in obj");
+    }catch(ex) {
+        ok(v < 9, "expected exception deleting foobar");
+        ok(ex.number === 0xa01bd - 0x80000000, "deleting foobar threw " + ex.number);
+        ok("foobar" in obj, "foobar is not in obj");
+    }
+
+    document.body.innerHTML = '<div id="barfoo"/>';
+    ok("barfoo" in obj, "barfoo not in obj");
+    window.barfoo = "5678";
+    ok(obj.barfoo === "5678", "barfoo = " + obj.barfoo);
+    try {
+        r = (delete window.barfoo);
+        ok(v >= 9, "did not get an expected exception deleting barfoo");
+        ok(r, "delete returned " + r);
+        ok(obj.barfoo !== "5678", "barfoo is still 5678");
+    }catch(ex) {
+        ok(v < 9, "expected exception deleting barfoo");
+        ok(ex.number === 0xa01bd - 0x80000000, "deleting barfoo threw " + ex.number);
+        ok(obj.barfoo === "5678", "barfoo = " + obj.barfoo);
+    }
+    ok("barfoo" in obj, "barfoo is not in obj");
+    document.body.innerHTML = "";
+    if(v < 9)
+        ok("barfoo" in obj, "barfoo is not in obj");
+    else
+        ok(!("barfoo" in obj), "barfoo is still in obj");
+
+    document.body.innerHTML = '<iframe id="testwine"/>';
+    ok("testwine" in obj, "testwine not in obj");
+    try {
+        r = (delete window.testwine);
+        ok(v >= 9, "did not get an expected exception deleting testwine");
+        ok(r, "delete returned " + r);
+    }catch(ex) {
+        ok(v < 9, "expected exception deleting testwine");
+        ok(ex.number === 0xa01bd - 0x80000000, "deleting testwine threw " + ex.number);
+    }
+    ok("testwine" in obj, "testwine is not in obj");
+
+    document.body.innerHTML = "";
+    ok(!("testwine" in obj), "testwine is still in obj");
 });
 
 sync_test("detached arguments", function() {
@@ -3599,7 +2769,6 @@ sync_test("elem_attrNS", function() {
     if(v < 9) return;  /* not available */
 
     var specialspace_ns = "http://www.mozilla.org/ns/specialspace";
-    var svg_ns = "http://www.w3.org/2000/svg";
 
     var elem = document.createElement("div"), r;
 
@@ -3875,6 +3044,36 @@ sync_test("builtins_diffs", function() {
         ok(false, "\"a\".length(): expected exception");
     }catch(e) {
         ok(e.number === 0xa138a - 0x80000000, "\"a\".length(): exception = " + e.number);
+    }
+});
+
+sync_test("style attribute", function() {
+    var r, v = document.documentMode, s = document.createElement("div").style;
+
+    s.setAttribute("background-color", "black");
+    s.foobar = "white";
+
+    r = s.getAttribute("background-color");
+    ok(r === "black", "background-color = " + r);
+    r = s.foobar;
+    ok(r === "white", "foobar prop = " + r);
+
+    r = s.removeAttribute("background-color");
+    ok(r === true, "removeAttribute(background-color) returned " + r);
+    r = s.removeAttribute("border");
+    ok(r === false, "removeAttribute(border) returned " + r);
+    r = s.removeAttribute("foobar");
+    ok(r === (v < 9 ? true : false), "removeAttribute(foobar) returned " + r);
+    r = s.removeAttribute("barfoo");
+    ok(r === false, "removeAttribute(barfoo) returned " + r);
+
+    r = s.getAttribute("background-color");
+    ok(r === "", "background-color after remove = " + r);
+    if(v < 9)
+        ok(!("foobar" in s), "foobar in style after remove");
+    else {
+        r = s.foobar;
+        ok(r === "white", "foobar prop after remove = " + r);
     }
 });
 
@@ -4322,10 +3521,6 @@ sync_test("Crypto", function() {
     var crypto = window.msCrypto, arr, r;
     if(!crypto) return;
 
-    ok(Object.prototype.hasOwnProperty.call(Object.getPrototypeOf(window), "msCrypto"), "msCrypto not a property of window's prototype.");
-    r = Object.getPrototypeOf(crypto);
-    ok(r === window.Crypto.prototype, "getPrototypeOf(crypto) = " + r);
-
     ok("subtle" in crypto, "subtle not in crypto");
     ok("getRandomValues" in crypto, "getRandomValues not in crypto");
     ok(!("randomUUID" in crypto), "randomUUID is in crypto");
@@ -4561,4 +3756,701 @@ async_test("postMessage", function() {
     window.postMessage(10, (v < 10 ? "*" : { toString: function() { return "*"; } }));
     ok(onmessage_called == (v < 9 ? true : false), "onmessage not called");
     if(v < 9) next_test();
+});
+
+sync_test("form", function() {
+    var v = document.documentMode;
+    document.body.innerHTML = "";
+    var form = document.createElement("form");
+    document.body.appendChild(form);
+
+    form[0] = "test";
+    form.innerHTML = "<input type=\"text\" id = \"i1\" /><input type=\"text\" id = \"i2\" />";
+    ok(form.length === 2, "form.length = " + form.length);
+    ok(typeof(form[0]) === "object", "form[0] = " + form[0]);
+    ok(typeof(form[1]) === "object", "form[1] = " + form[1]);
+    form.innerHTML = "";
+    ok(form[0] === "test", "form[0] = " + form[0]);
+
+    if(v >= 9) {
+        var setval;
+        function getter() { return 42; }
+        function setter(v) { setval = v + 1; }
+
+        Object.defineProperty(form, "0", { get: getter, set: setter, configurable: true, enumerable: false });
+        var desc = Object.getOwnPropertyDescriptor(form, "0");
+        ok(desc.value === undefined, "value = " + desc.value);
+        ok(desc.get === getter, "get = " + desc.get);
+        ok(desc.set === setter, "set = " + desc.set);
+        ok(desc.writable === undefined, "writable = " + desc.writable);
+        ok(desc.enumerable === false, "enumerable = " + desc.enumerable);
+        ok(desc.configurable === true, "configurable = " + desc.configurable);
+        ok(form[0] === 42, "form[0] = " + form[0]);
+        form[0] = 1336;
+        ok(setval === 1337, "setval = " + setval);
+
+        form.innerHTML = "<input type=\"text\" id = \"i1\" /><input type=\"text\" id = \"i2\" />";
+        ok(form.length === 2, "form.length = " + form.length);
+        ok(typeof(form[0]) === "object", "form[0] = " + form[0]);
+        form[0] = 32;
+        ok(setval === 33, "setval = " + setval);
+
+        desc = Object.getOwnPropertyDescriptor(form, "0");
+        ok(desc.value === undefined, "[0] value = " + desc.value);
+        ok(desc.get === getter, "[0] get = " + desc.get);
+        ok(desc.set === setter, "[0] set = " + desc.set);
+        ok(desc.writable === undefined, "[0] writable = " + desc.writable);
+        ok(desc.enumerable === false, "[0] enumerable = " + desc.enumerable);
+        ok(desc.configurable === true, "[0] configurable = " + desc.configurable);
+
+        desc = Object.getOwnPropertyDescriptor(form, "1");
+        ok(typeof(desc.value) === "object", "[1] value = " + desc.value);
+        ok(desc.get === undefined, "[1] get = " + desc.get);
+        ok(desc.set === undefined, "[1] set = " + desc.set);
+        ok(desc.writable === true, "[1] writable = " + desc.writable);
+        todo_wine.
+        ok(desc.enumerable === true, "[1] enumerable = " + desc.enumerable);
+        ok(desc.configurable === true, "[1] configurable = " + desc.configurable);
+
+        form.innerHTML = "";
+        desc = Object.getOwnPropertyDescriptor(form, "0");
+        ok(desc.value === undefined, "value = " + desc.value);
+        ok(desc.get === getter, "get = " + desc.get);
+        ok(desc.set === setter, "set = " + desc.set);
+        ok(desc.writable === undefined, "writable = " + desc.writable);
+        ok(desc.enumerable === false, "enumerable = " + desc.enumerable);
+        ok(desc.configurable === true, "configurable = " + desc.configurable);
+        ok(form[0] === 42, "form[0] = " + form[0]);
+        form[0] = 100;
+        ok(setval === 101, "setval = " + setval);
+    }
+});
+
+sync_test("indexed hostobj props", function() {
+    var v = document.documentMode;
+    if(v < 9)
+        return;
+    function getter() { return 42; }
+
+    function check(obj, value, overridden) {
+        var name = Object.prototype.toString.call(obj).slice(8, -1);
+        if(value === null)
+            ok(typeof(obj[0]) === "object", name + "[0] = " + obj[0]);
+        else
+            ok(obj[0] === value, name + "[0] post-del = " + obj[0]);
+
+        Object.defineProperty(obj, "0", { get: getter, set: undefined, configurable: true, enumerable: false });
+        var desc = Object.getOwnPropertyDescriptor(obj, "0");
+        ok(desc.value === undefined, name + "[0] value = " + desc.value);
+        ok(desc.get === getter, name + "[0] get = " + desc.get);
+        ok(desc.set === undefined, name + "[0] set = " + desc.set);
+        ok(desc.writable === undefined, name + "[0] writable = " + desc.writable);
+        ok(desc.enumerable === false, name + "[0] enumerable = " + desc.enumerable);
+        ok(desc.configurable === true, name + "[0] configurable = " + desc.configurable);
+
+        if(!overridden)
+            ok(obj[0] === 42, name + "[0] = " + obj[0]);
+        else if(value === null)
+            ok(typeof(obj[0]) === "object", name + "[0] = " + obj[0]);
+        else
+            ok(obj[0] === value, name + "[0] = " + obj[0]);
+
+        delete obj["0"];
+        desc = Object.getOwnPropertyDescriptor(obj, "0");
+        if(value === null)
+            ok(typeof(desc.value) === "object", name + "[0] value post-del = " + desc.value);
+        else
+            ok(desc.value === value, name + "[0] value post-del = " + desc.value);
+        ok(desc.get === undefined, name + "[0] get post-del = " + desc.get);
+        ok(desc.set === undefined, name + "[0] set post-del = " + desc.set);
+        ok(desc.writable === true, name + "[0] writable post-del = " + desc.writable);
+        todo_wine.
+        ok(desc.enumerable === true, name + "[0] enumerable post-del = " + desc.enumerable);
+        ok(desc.configurable === true, name + "[0] configurable post-del = " + desc.configurable);
+        if(value === null)
+            ok(typeof(obj[0]) === "object", name + "[0] post-del = " + obj[0]);
+        else
+            ok(obj[0] === value, name + "[0] post-del = " + obj[0]);
+        ok(obj.hasOwnProperty("0"), "0 not a prop of " + name);
+    }
+
+    document.body.innerHTML = "<style>div { margin-left: 1px; }</style>";
+    var e = document.createElement("select");
+    e.innerHTML = '<option value="wine"/>'
+    e.setAttribute("class", "wine");
+
+    check(document.all, null);
+    check(document.childNodes, null);
+    check(document.styleSheets, null);
+    check(document.styleSheets[0].rules, null);
+    check(document.body.getClientRects(), null);
+    check(e, null);
+    check(e.attributes, null);
+    if(v > 9)
+        check(e.classList, "wine");
+});
+
+function test_own_props(obj, name, props, todos, flaky) {
+    var v = document.documentMode, prop, expected = {}, enumerated = Object.getOwnPropertyNames(obj).sort();
+
+    if(flaky)
+        enumerated = enumerated.filter(function(p) { return flaky.indexOf(p) === -1; });
+    if(props) {
+        for(i = 0; i < props.length; i++) {
+            prop = props[i];
+            if(Array.isArray(prop)) {
+                if(v < prop[1] || (prop.length > 2 && v > prop[2]))
+                    continue;
+                prop = prop[0];
+            }
+            expected[prop] |= 1;
+        }
+    }
+    if(todos) {
+        for(i = 0; i < todos.length; i++) {
+            prop = todos[i];
+            if(Array.isArray(prop)) {
+                if(v < prop[1] || (prop.length > 2 && v > prop[2]))
+                    continue;
+                prop = prop[0];
+            }
+            expected[prop] |= 2;  /* 2 marks todo */
+        }
+    }
+    for(i = 0; i < enumerated.length; i++) {
+        prop = enumerated[i];
+        if(!expected.hasOwnProperty(prop))
+            ok(false, prop + " is a prop of " + name);
+        else {
+            if(expected[prop] & 1) {
+                todo_wine_if(expected[prop] & 2).
+                ok(true, prop + " not a prop of " + name);
+            }else {
+                todo_wine_if(expected[prop] & 2).
+                ok(false, prop + " is a prop of " + name);
+            }
+            delete expected[prop];
+        }
+    }
+    for(prop in expected) {
+        todo_wine_if(expected[prop] & 2).
+        ok(!(expected[prop] & 1), prop + " not a prop of " + name);
+    }
+}
+
+sync_test("prototypes", function() {
+    var v = document.documentMode;
+    if(v < 9)
+        return;
+
+    function check(obj, proto, name) {
+        var p = Object.getPrototypeOf(obj);
+        ok(p === proto, "unexpected " + name + " prototype object " + Object.prototype.toString.call(p));
+    }
+
+    check(document.implementation, DOMImplementation.prototype, "implementation");
+    check(DOMImplementation.prototype, Object.prototype, "implementation prototype");
+    check(window.navigator, Navigator.prototype, "navigator");
+    check(Navigator.prototype, Object.prototype, "navigator prototype");
+    check(document.body, HTMLBodyElement.prototype, "body element");
+    check(new DOMParser().parseFromString("<tag>foobar</tag>", "text/xml").getElementsByTagName("tag")[0], Element.prototype, "xml element");
+    check(HTMLBodyElement.prototype, HTMLElement.prototype, "body prototype");
+    check(HTMLElement.prototype, Element.prototype, "html element prototype");
+    check(Element.prototype, Node.prototype, "element prototype");
+    check(Node.prototype, Object.prototype, "node prototype");
+    check(sessionStorage, Storage.prototype, "storage");
+    check(Storage.prototype, Object.prototype, "storage prototype");
+    if(v < 11)
+        check(document, Document.prototype, "html document");
+    else {
+        check(document, HTMLDocument.prototype, "html document");
+        check(HTMLDocument.prototype, Document.prototype, "html document prototype");
+        check(XMLDocument.prototype, Document.prototype, "xml document prototype");
+    }
+    check(Document.prototype, Node.prototype, "document prototype");
+    check(window, Window.prototype, "window");
+    check(Window.prototype, Object.prototype, "window prototype");
+    check(new XMLHttpRequest(), XMLHttpRequest.prototype, "xhr");
+    check(XMLHttpRequest.prototype, Object.prototype, "xhr prototype");
+    check(XMLHttpRequest, Function.prototype, "xhr constructor");
+    if(v < 11) {
+        check(new XDomainRequest(), XDomainRequest.prototype, "xdr");
+        check(XDomainRequest.prototype, Object.prototype, "xdr prototype");
+        check(XDomainRequest, Function.prototype, "xdr constructor");
+    }
+    check(document.createElement("img"), HTMLImageElement.prototype, "img elem");
+    check(HTMLImageElement.prototype, HTMLElement.prototype, "img elem prototype");
+    check(Image, Function.prototype, "Image constructor");
+    check(document.createElement("option"), HTMLOptionElement.prototype, "option elem");
+    check(HTMLOptionElement.prototype, HTMLElement.prototype, "option elem prototype");
+    check(Option, Function.prototype, "Option constructor");
+    check(new DOMParser(), DOMParser.prototype, "dom parser");
+    check(DOMParser.prototype, Object.prototype, "dom parser prototype");
+    check(DOMParser, Function.prototype, "dom parser constructor");
+    if(v >= 11) {
+        check(new MutationObserver(function() {}), MutationObserver.prototype, "mutation observer");
+        check(MutationObserver.prototype, Object.prototype, "mutation observer prototype");
+        check(MutationObserver, Function.prototype, "mutation observer constructor");
+    }
+    check(document.createElement("a"), HTMLAnchorElement.prototype, "anchor element");
+    check(HTMLAnchorElement.prototype, HTMLElement.prototype, "anchor element prototype");
+    check(document.createElement("area"), HTMLAreaElement.prototype, "area element");
+    check(HTMLAreaElement.prototype, HTMLElement.prototype, "area element prototype");
+    check(document.createElement("form"), HTMLFormElement.prototype, "form element");
+    check(HTMLFormElement.prototype, HTMLElement.prototype, "form element prototype");
+    check(document.createElement("frame"), HTMLFrameElement.prototype, "frame element");
+    check(HTMLFrameElement.prototype, HTMLElement.prototype, "frame element prototype");
+    check(document.createElement("iframe"), HTMLIFrameElement.prototype, "iframe element");
+    check(HTMLIFrameElement.prototype, HTMLElement.prototype, "iframe element prototype");
+    check(document.createElement("title"), HTMLTitleElement.prototype, "title element");
+    check(HTMLTitleElement.prototype, HTMLElement.prototype, "title element prototype");
+    check(document.documentElement, HTMLHtmlElement.prototype, "html element");
+    check(HTMLHtmlElement.prototype, HTMLElement.prototype, "html element prototype");
+    check(document.head, HTMLHeadElement.prototype, "head element");
+    check(HTMLHeadElement.prototype, HTMLElement.prototype, "head element prototype");
+    check(document.createElement("meta"), HTMLMetaElement.prototype, "meta element");
+    check(HTMLMetaElement.prototype, HTMLElement.prototype, "meta element prototype");
+    check(document.createElement("input"), HTMLInputElement.prototype, "input element");
+    check(HTMLInputElement.prototype, HTMLElement.prototype, "input element prototype");
+    check(document.createElement("label"), HTMLLabelElement.prototype, "label element");
+    check(HTMLLabelElement.prototype, HTMLElement.prototype, "label element prototype");
+    check(document.createElement("button"), HTMLButtonElement.prototype, "button element");
+    check(HTMLButtonElement.prototype, HTMLElement.prototype, "button element prototype");
+    check(document.createElement("link"), HTMLLinkElement.prototype, "link element");
+    check(HTMLLinkElement.prototype, HTMLElement.prototype, "link element prototype");
+    check(document.createElement("object"), HTMLObjectElement.prototype, "object element");
+    check(HTMLObjectElement.prototype, HTMLElement.prototype, "object element prototype");
+    check(document.createElement("embed"), HTMLEmbedElement.prototype, "embed element");
+    check(HTMLEmbedElement.prototype, HTMLElement.prototype, "embed element prototype");
+    check(document.createElement("script"), HTMLScriptElement.prototype, "script element");
+    check(HTMLScriptElement.prototype, HTMLElement.prototype, "script element prototype");
+    check(document.createElement("select"), HTMLSelectElement.prototype, "select element");
+    check(HTMLSelectElement.prototype, HTMLElement.prototype, "select element prototype");
+    check(document.createElement("style"), HTMLStyleElement.prototype, "style element");
+    check(HTMLStyleElement.prototype, HTMLElement.prototype, "style element prototype");
+    check(document.createElement("table"), HTMLTableElement.prototype, "table element");
+    check(HTMLTableElement.prototype, HTMLElement.prototype, "table element prototype");
+    check(document.createElement("tr"), HTMLTableRowElement.prototype, "tr element");
+    check(HTMLTableRowElement.prototype, HTMLElement.prototype, "tr element prototype");
+    check(document.createElement("td"), HTMLTableDataCellElement.prototype, "td element");
+    check(HTMLTableDataCellElement.prototype, HTMLTableCellElement.prototype, "td element prototype");
+    check(HTMLTableCellElement.prototype, HTMLElement.prototype, "table cell prototype");
+    check(document.createElement("textarea"), HTMLTextAreaElement.prototype, "textarea element");
+    check(HTMLTextAreaElement.prototype, HTMLElement.prototype, "textarea element prototype");
+    check(document.createElement("test"), HTMLUnknownElement.prototype, "unknown element");
+    check(HTMLUnknownElement.prototype, HTMLElement.prototype, "unknown element prototype");
+    check(document.createElementNS(svg_ns, "svg"), SVGSVGElement.prototype, "svg:svg element");
+    check(SVGSVGElement.prototype, SVGElement.prototype, "svg:svg element prototype");
+    check(SVGElement.prototype, Element.prototype, "svg element prototype");
+    check(document.createElementNS(svg_ns, "circle"), SVGCircleElement.prototype, "svg:circle element");
+    check(SVGCircleElement.prototype, SVGElement.prototype, "svg:circle element prototype");
+    check(document.createElementNS(svg_ns, "tspan"), SVGTSpanElement.prototype, "svg:tspan element");
+    check(SVGTSpanElement.prototype, SVGTextPositioningElement.prototype, "svg:tspan element prototype");
+    check(SVGTextPositioningElement.prototype, SVGTextContentElement.prototype, "SVGTextPositioningElement prototype");
+    check(SVGTextContentElement.prototype, SVGElement.prototype, "SVGTextPositioningElement prototype");
+    check(document.doctype, DocumentType.prototype, "doctype");
+    check(DocumentType.prototype, Node.prototype, "doctype prototype");
+    check(document.createTextNode(""), Text.prototype, "text");
+    check(Text.prototype, CharacterData.prototype, "text prototype");
+    check(CharacterData.prototype, Node.prototype, "character data prototype");
+    check(window.getComputedStyle(document.body), CSSStyleDeclaration.prototype, "computed style");
+    check(CSSStyleDeclaration.prototype, Object.prototype, "CSSStyleDeclaration");
+    check(document.body.style, MSStyleCSSProperties.prototype, "style");
+    check(MSStyleCSSProperties.prototype, MSCSSProperties.prototype, "MSStyleCSSProperties");
+    check(MSCSSProperties.prototype, CSSStyleDeclaration.prototype, "MSCSSProperties");
+    check(CSSStyleDeclaration.prototype, Object.prototype, "CSSStyleDeclaration");
+    check(document.body.currentStyle, MSCurrentStyleCSSProperties.prototype, "current style");
+    check(MSCurrentStyleCSSProperties.prototype, MSCSSProperties.prototype, "MSCurrentStyleCSSProperties");
+    var e = document.createElement("style");
+    document.body.appendChild(e);
+    check(e.sheet, CSSStyleSheet.prototype, "stylesheet");
+    check(CSSStyleSheet.prototype, StyleSheet.prototype, "css stylesheet prototype");
+    check(StyleSheet.prototype, Object.prototype, "stylesheet prototype");
+    check(document.styleSheets, StyleSheetList.prototype, "stylesheets list");
+    check(StyleSheetList.prototype, Object.prototype, "stylesheets list prototype");
+    check(e.sheet.rules, MSCSSRuleList.prototype, "css rule list");
+    check(MSCSSRuleList.prototype, Object.prototype, "css rule list prototype");
+    e.sheet.insertRule("div { border: none }", 0);
+    check(e.sheet.rules[0], CSSStyleRule.prototype, "css rule");
+    check(CSSStyleRule.prototype, CSSRule.prototype, "css rule prototype");
+    check(CSSRule.prototype, Object.prototype, "css rule prototype");
+    check(document.body.getBoundingClientRect(), ClientRect.prototype, "rect");
+    check(ClientRect.prototype, Object.prototype, "rect prototype");
+    check(document.body.getClientRects(), ClientRectList.prototype, "rect list");
+    check(ClientRectList.prototype, Object.prototype, "rect list prototype");
+    if(v < 11) {
+        check(document.createEventObject(), MSEventObj.prototype, "event obj");
+        check(MSEventObj.prototype, Object.prototype, "event obj prototype");
+    }
+    check(document.createEvent("Event"), Event.prototype, "event");
+    check(Event.prototype, Object.prototype, "event prototype");
+    check(document.createEvent("UIEvent"), UIEvent.prototype, "UI event");
+    check(UIEvent.prototype, Event.prototype, "UI event prototype");
+    check(document.createEvent("MouseEvent"), MouseEvent.prototype, "mouse event");
+    check(MouseEvent.prototype, UIEvent.prototype, "mouse event prototype");
+    check(document.createEvent("KeyboardEvent"), KeyboardEvent.prototype, "keyboard event");
+    check(KeyboardEvent.prototype, UIEvent.prototype, "keyboard event prototype");
+    if(v >= 11) {
+        check(document.createEvent("PageTransitionEvent"), PageTransitionEvent.prototype, "page transition event");
+        check(PageTransitionEvent.prototype, Event.prototype, "page transition event prototype");
+    }
+    check(document.createEvent("CustomEvent"), CustomEvent.prototype, "custom event");
+    check(CustomEvent.prototype, Event.prototype, "custom event prototype");
+    check(document.createEvent("MessageEvent"), MessageEvent.prototype, "message event");
+    check(MessageEvent.prototype, Event.prototype, "message event prototype");
+    if(v >= 10) {
+        check(document.createEvent("ProgressEvent"), ProgressEvent.prototype, "progress event");
+        check(ProgressEvent.prototype, Event.prototype, "progress event prototype");
+    }
+    check(document.createEvent("StorageEvent"), StorageEvent.prototype, "storage event");
+    check(StorageEvent.prototype, Event.prototype, "storage event prototype");
+    check(screen, Screen.prototype, "screen");
+    check(Screen.prototype, Object.prototype, "screen prototype");
+    check(history, History.prototype, "history");
+    check(History.prototype, Object.prototype, "history prototype");
+    if(v >= 11 /* todo_wine */) {
+        check(navigator.plugins, PluginArray.prototype, "plugins");
+        check(PluginArray.prototype, Object.prototype, "plugins prototype");
+        check(navigator.mimeTypes, MimeTypeArray.prototype, "mimeTypes");
+        check(MimeTypeArray.prototype, Object.prototype, "mimeTypes prototype");
+    }
+    check(performance.timing, PerformanceTiming.prototype, "timing");
+    check(PerformanceTiming.prototype, Object.prototype, "timing prototype");
+    check(performance.navigation, PerformanceNavigation.prototype, "navigation");
+    check(PerformanceNavigation.prototype, Object.prototype, "navigation prototype");
+    check(performance, Performance.prototype, "performance");
+    check(Performance.prototype, Object.prototype, "performance prototype");
+    if(v < 10) {
+        check(document.namespaces, MSNamespaceInfoCollection.prototype, "namespaces");
+        check(MSNamespaceInfoCollection.prototype, Object.prototype, "namespaces prototype");
+    }else {
+        ok(!("MSNamespaceInfoCollection" in window), "MSNamespaceInfoCollection found in window");
+    }
+    if(v >= 10) {
+        check(console, Console.prototype, "console");
+        check(Console.prototype, Object.prototype, "console prototype");
+    }else {
+        ok(!("Console" in window), "Console found in window");
+    }
+    if(v >= 10) {
+        check(window.matchMedia("(hover:hover)"), MediaQueryList.prototype, "media query");
+        check(MediaQueryList.prototype, Object.prototype, "media query prototype");
+    }else {
+        ok(!("MediaQueryList" in window), "MediaQueryList found in window");
+    }
+    if(v >= 10) {
+        check(document.body.classList, DOMTokenList.prototype, "token list");
+        check(DOMTokenList.prototype, Object.prototype, "token list prototype");
+    }else {
+        ok(!("DOMTokenList" in window), "DOMTokenList found in window");
+    }
+    check(document.body.attributes, NamedNodeMap.prototype, "node map");
+    check(NamedNodeMap.prototype, Object.prototype, "node map prototype");
+    check(document.getElementsByTagName("body"), HTMLCollection.prototype, "elem collection");
+    check(HTMLCollection.prototype, Object.prototype, "elem collection prototype");
+    check(document.body.childNodes, NodeList.prototype, "node list");
+    check(NodeList.prototype, Object.prototype, "node list prototype");
+    check(document.body.createTextRange(), TextRange.prototype, "text range");
+    check(TextRange.prototype, Object.prototype, "text range prototype");
+    check(Range.prototype, Object.prototype, "range prototype");
+    if(v < 11) {
+        check(document.selection, MSSelection.prototype, "selection");
+        check(MSSelection.prototype, Object.prototype, "selection prototype");
+    }else {
+        ok(!("MSSelection" in window), "MSSelection found in window");
+    }
+    check(document.createComment(""), Comment.prototype, "comment");
+    check(Comment.prototype, CharacterData.prototype, "comment prototype");
+    check(document.createAttribute("test"), Attr.prototype, "attr");
+    check(Attr.prototype, Node.prototype, "attr prototype");
+    check(document.createDocumentFragment(), DocumentFragment.prototype, "fragment");
+    check(DocumentFragment.prototype, Node.prototype, "fragment prototype");
+
+    try {
+        HTMLAreaElement.prototype.toString.call(document.createElement("a"));
+        ok(false, "Area element's toString on Anchor element didn't fail");
+    } catch(e) {
+        ok(e.number == 0xffff - 0x80000000, "Area element's toString on Anchor element threw exception " + e.number);
+    }
+});
+
+sync_test("prototype props", function() {
+    var v = document.documentMode;
+    if(v < 9)
+        return;
+
+    function check(constr, props, todos, flaky) {
+        var name = Object.prototype.toString.call(constr).slice(8, -1) + ".prototype";
+        ok(constr.prototype.constructor === constr, name + "'s constructor not original constructor");
+
+        props.push("constructor");
+        test_own_props(constr.prototype, name, props, todos, flaky);
+    }
+
+    check(CharacterData, [ "appendData", "data", "deleteData", "insertData", "length", "replaceData", "substringData" ]);
+    check(Comment, [ "text" ]);
+    check(CSSStyleDeclaration, [
+        ["alignContent",11], ["alignItems",11], ["alignSelf",11], "alignmentBaseline", ["animation",10], ["animationDelay",10],
+        ["animationDirection",10], ["animationDuration",10], ["animationFillMode",10], ["animationIterationCount",10], ["animationName",10],
+        ["animationPlayState",10], ["animationTimingFunction",10], ["backfaceVisibility",10], "background", "backgroundAttachment",
+        "backgroundClip", "backgroundColor", "backgroundImage", "backgroundOrigin", "backgroundPosition", "backgroundRepeat", "backgroundSize",
+        "baselineShift", "border", "borderBottom", "borderBottomColor", "borderBottomLeftRadius", "borderBottomRightRadius", "borderBottomStyle",
+        "borderBottomWidth", "borderCollapse", "borderColor", ["borderImage",11], ["borderImageOutset",11], ["borderImageRepeat",11],
+        ["borderImageSlice",11], ["borderImageSource",11], ["borderImageWidth",11], "borderLeft", "borderLeftColor", "borderLeftStyle",
+        "borderLeftWidth", "borderRadius", "borderRight", "borderRightColor", "borderRightStyle", "borderRightWidth", "borderSpacing",
+        "borderStyle", "borderTop", "borderTopColor", "borderTopLeftRadius", "borderTopRightRadius", "borderTopStyle", "borderTopWidth",
+        "borderWidth", "bottom", "boxShadow", "boxSizing", ["breakAfter",10], ["breakBefore",10], ["breakInside",10], "captionSide", "clear",
+        "clip", "clipPath", "clipRule", "color", ["colorInterpolationFilters",10], ["columnCount",10], ["columnFill",10], ["columnGap",10],
+        ["columnRule",10], ["columnRuleColor",10], ["columnRuleStyle",10], ["columnRuleWidth",10], ["columnSpan",10], ["columnWidth",10],
+        ["columns",10], "content", "counterIncrement", "counterReset", "cssFloat", "cssText", "cursor", "direction", "display", "dominantBaseline",
+        "emptyCells", ["enableBackground",10], "fill", "fillOpacity", "fillRule", ["filter",10], ["flex",11], ["flexBasis",11], ["flexDirection",11],
+        ["flexFlow",11], ["flexGrow",11], ["flexShrink",11], ["flexWrap",11], ["floodColor",10], ["floodOpacity",10], "font", "fontFamily",
+        ["fontFeatureSettings",10], "fontSize", "fontSizeAdjust", "fontStretch", "fontStyle", "fontVariant", "fontWeight", "getPropertyPriority",
+        "getPropertyValue", "glyphOrientationHorizontal", "glyphOrientationVertical", "height", "item", ["justifyContent",11], "kerning", "left",
+        "length", "letterSpacing", ["lightingColor",10], "lineHeight", "listStyle", "listStyleImage", "listStylePosition", "listStyleType", "margin",
+        "marginBottom", "marginLeft", "marginRight", "marginTop", "marker", "markerEnd", "markerMid", "markerStart", "mask", "maxHeight", "maxWidth",
+        "minHeight", "minWidth", ["msAnimation",10], ["msAnimationDelay",10], ["msAnimationDirection",10], ["msAnimationDuration",10],
+        ["msAnimationFillMode",10], ["msAnimationIterationCount",10], ["msAnimationName",10], ["msAnimationPlayState",10], ["msAnimationTimingFunction",10],
+        ["msBackfaceVisibility",10], ["msContentZoomChaining",10], ["msContentZoomLimit",10], ["msContentZoomLimitMax",10], ["msContentZoomLimitMin",10],
+        ["msContentZoomSnap",10], ["msContentZoomSnapPoints",10], ["msContentZoomSnapType",10], ["msContentZooming",10], ["msFlex",10], ["msFlexAlign",10],
+        ["msFlexDirection",10], ["msFlexFlow",10], ["msFlexItemAlign",10], ["msFlexLinePack",10], ["msFlexNegative",10], ["msFlexOrder",10],
+        ["msFlexPack",10], ["msFlexPositive",10], ["msFlexPreferredSize",10], ["msFlexWrap",10], ["msFlowFrom",10], ["msFlowInto",10],
+        ["msFontFeatureSettings",10], ["msGridColumn",10], ["msGridColumnAlign",10], ["msGridColumnSpan",10], ["msGridColumns",10], ["msGridRow",10],
+        ["msGridRowAlign",10], ["msGridRowSpan",10], ["msGridRows",10], ["msHighContrastAdjust",10], ["msHyphenateLimitChars",10],
+        ["msHyphenateLimitLines",10], ["msHyphenateLimitZone",10], ["msHyphens",10], ["msImeAlign",11], ["msOverflowStyle",10], ["msPerspective",10],
+        ["msPerspectiveOrigin",10], ["msScrollChaining",10], ["msScrollLimit",10], ["msScrollLimitXMax",10], ["msScrollLimitXMin",10],
+        ["msScrollLimitYMax",10], ["msScrollLimitYMin",10], ["msScrollRails",10], ["msScrollSnapPointsX",10], ["msScrollSnapPointsY",10],
+        ["msScrollSnapType",10], ["msScrollSnapX",10], ["msScrollSnapY",10], ["msScrollTranslation",10], ["msTextCombineHorizontal",11],
+        ["msTextSizeAdjust",11], ["msTouchAction",10], ["msTouchSelect",10], "msTransform", "msTransformOrigin", ["msTransformStyle",10], ["msTransition",10],
+        ["msTransitionDelay",10], ["msTransitionDuration",10], ["msTransitionProperty",10], ["msTransitionTimingFunction",10], ["msUserSelect",10],
+        ["msWrapFlow",10], ["msWrapMargin",10], ["msWrapThrough",10], "opacity", ["order",11], "orphans", "outline", "outlineColor", "outlineStyle",
+        "outlineWidth", "overflow", "overflowX", "overflowY", "padding", "paddingBottom", "paddingLeft", "paddingRight", "paddingTop", "pageBreakAfter",
+        "pageBreakBefore", "pageBreakInside", "parentRule", ["perspective",10], ["perspectiveOrigin",10], "pointerEvents", "position", "quotes",
+        "removeProperty", "right", "rubyAlign", "rubyOverhang", "rubyPosition", "setProperty", "stopColor", "stopOpacity", "stroke", "strokeDasharray",
+        "strokeDashoffset", "strokeLinecap", "strokeLinejoin", "strokeMiterlimit", "strokeOpacity", "strokeWidth", "tableLayout", "textAlign", "textAlignLast",
+        "textAnchor", "textDecoration", "textIndent", "textJustify", "textOverflow", ["textShadow",10], "textTransform", "textUnderlinePosition", "top",
+        ["touchAction",11], ["transform",10], ["transformOrigin",10], ["transformStyle",10], ["transition",10], ["transitionDelay",10], ["transitionDuration",10],
+        ["transitionProperty",10], ["transitionTimingFunction",10], "unicodeBidi", "verticalAlign", "visibility", "whiteSpace", "widows", "width", "wordBreak",
+        "wordSpacing", "wordWrap", "zIndex"
+    ], [
+        ["alignContent",11], ["alignItems",11], ["alignSelf",11], ["borderImage",11], ["borderImageOutset",11], ["borderImageRepeat",11], ["borderImageSlice",11],
+        ["borderImageSource",11], ["borderImageWidth",11], ["flex",11], ["flexBasis",11], ["flexDirection",11], ["flexFlow",11], ["flexGrow",11], ["flexShrink",11],
+        ["flexWrap",11], ["justifyContent",11], ["msImeAlign",11], ["msTextCombineHorizontal",11], ["msTextSizeAdjust",11], ["order",11], ["touchAction",11]
+    ]);
+    check(CSSStyleSheet, [
+        "addImport", "addPageRule", "addRule", "cssRules", "cssText", "deleteRule", "href", "id", "imports", "insertRule",
+        "isAlternate", "isPrefAlternate", "ownerRule", "owningElement", "pages", "readOnly", "removeImport", "removeRule", "rules"
+    ], [ "addPageRule", "href", "isAlternate", "isPrefAlternate", "pages" ]);
+    check(CSSStyleRule, [ "readOnly", "selectorText", "style" ]);
+    check(CustomEvent, [ "detail", "initCustomEvent" ]);
+    check(Document, [
+        "Script", "URL", "URLUnencoded", "activeElement", "adoptNode", "alinkColor", "all", "anchors", "applets", ["attachEvent",9,10],
+        "bgColor", "body", ["captureEvents",11], "characterSet", "charset", ["clear",10], "close", "compatMode", "compatible", "cookie",
+        "createAttribute", "createAttributeNS", "createCDATASection", "createComment", "createDocumentFragment", "createElement",
+        "createElementNS", "createEvent", ["createEventObject",9,10], "createNodeIterator", "createProcessingInstruction", "createRange",
+        ["createStyleSheet",9,10], "createTextNode", "createTreeWalker", "defaultCharset", "defaultView", "designMode",
+        ["detachEvent",9,10], "dir", "doctype", "documentElement", "documentMode", "domain", "elementFromPoint", "embeds", "execCommand",
+        "execCommandShowHelp", "fgColor", "fileCreatedDate", "fileModifiedDate", ["fileSize",9,10], "fileUpdatedDate", ["fireEvent",9,10],
+        "focus", "forms", "frames", "getElementById", "getElementsByClassName", "getElementsByName", "getElementsByTagName",
+        "getElementsByTagNameNS", "getSelection", "hasFocus", "head", ["hidden",10], "images", "implementation", "importNode",
+        "inputEncoding", "lastModified", "linkColor", "links", "location", "media", "mimeType", ["msCSSOMElementFloatMetrics",10],
+        "msCapsLockWarningOff", ["msElementsFromPoint",10], ["msElementsFromRect",10], ["msExitFullscreen",11], ["msFullscreenElement",11],
+        ["msFullscreenEnabled",11], ["msHidden",10], ["msVisibilityState",10], "nameProp", ["namespaces",9,9], "onabort", "onactivate",
+        ["onafterupdate",9,10], "onbeforeactivate", "onbeforedeactivate", ["onbeforeeditfocus",9,10], ["onbeforeupdate",9,10], "onblur",
+        "oncanplay", "oncanplaythrough", ["oncellchange",9,10], "onchange", "onclick", "oncontextmenu", ["oncontrolselect",9,10],
+        ["ondataavailable",9,10], ["ondatasetchanged",9,10], ["ondatasetcomplete",9,10], "ondblclick", "ondeactivate", "ondrag", "ondragend",
+        "ondragenter", "ondragleave", "ondragover", "ondragstart", "ondrop", "ondurationchange", "onemptied", "onended", "onerror",
+        ["onerrorupdate",9,10], "onfocus", "onfocusin", "onfocusout", "onhelp", "oninput", "onkeydown", "onkeypress", "onkeyup", "onload",
+        "onloadeddata", "onloadedmetadata", "onloadstart", "onmousedown", "onmousemove", "onmouseout", "onmouseover", "onmouseup",
+        "onmousewheel", ["onmscontentzoom",10], ["onmsfullscreenchange",11], ["onmsfullscreenerror",11], ["onmsgesturechange",10],
+        ["onmsgesturedoubletap",10], ["onmsgestureend",10], ["onmsgesturehold",10], ["onmsgesturestart",10], ["onmsgesturetap",10],
+        ["onmsinertiastart",10], ["onmsmanipulationstatechanged",10], ["onmspointercancel",10], ["onmspointerdown",10],
+        ["onmspointerenter",11], ["onmspointerhover",10,10,v == 10], ["onmspointerleave",11], ["onmspointermove",10], ["onmspointerout",10],
+        ["onmspointerover",10], ["onmspointerup",10], "onmssitemodejumplistitemremoved", "onmsthumbnailclick", "onpause", "onplay",
+        "onplaying", ["onpointercancel",11], ["onpointerdown",11], ["onpointerenter",11], ["onpointerleave",11], ["onpointermove",11],
+        ["onpointerout",11], ["onpointerover",11], ["onpointerup",11], "onprogress", ["onpropertychange",9,10], "onratechange",
+        "onreadystatechange", "onreset", ["onrowenter",9,10], ["onrowexit",9,10], ["onrowsdelete",9,10], ["onrowsinserted",9,10], "onscroll",
+        "onseeked", "onseeking", "onselect", "onselectionchange", "onselectstart", "onstalled", "onstop", "onstoragecommit", "onsubmit",
+        "onsuspend", "ontimeupdate", "onvolumechange", "onwaiting", "open", "parentWindow", "plugins", "protocol", "queryCommandEnabled",
+        "queryCommandIndeterm", "queryCommandState", "queryCommandSupported", "queryCommandText", "queryCommandValue", "querySelector",
+        "querySelectorAll", "readyState", "referrer", "releaseCapture", ["releaseEvents",11], "removeNode", "replaceNode", "rootElement",
+        "scripts", "security", ["selection",9,10], "styleSheets", "swapNode", "title", "uniqueID", "updateSettings", ["visibilityState",10],
+        "vlinkColor", "write", "writeln", "xmlEncoding", "xmlStandalone", "xmlVersion"
+    ], [
+        ["captureEvents",11], "createNodeIterator", "createRange", "createTreeWalker", ["hidden",10], "msCapsLockWarningOff",
+        ["msCSSOMElementFloatMetrics",10], ["msElementsFromPoint",10], ["msElementsFromRect",10], ["msExitFullscreen",11],
+        ["msFullscreenElement",11], ["msFullscreenEnabled",11], ["msHidden",10], ["msVisibilityState",10], ["onmscontentzoom",10],
+        ["onmsfullscreenchange",11], ["onmsfullscreenerror",11], ["onmsgesturechange",10], ["onmsgesturedoubletap",10], ["onmsgestureend",10],
+        ["onmsgesturehold",10], ["onmsgesturestart",10], ["onmsgesturetap",10], ["onmsinertiastart",10], ["onmsmanipulationstatechanged",10],
+        ["onmspointercancel",10], ["onmspointerdown",10], ["onmspointerenter",11], ["onmspointerhover",10,10], ["onmspointerleave",11],
+        ["onmspointermove",10], ["onmspointerout",10], ["onmspointerover",10], ["onmspointerup",10], ["onpointercancel",11], ["onpointerdown",11],
+        ["onpointerenter",11], ["onpointerleave",11], ["onpointermove",11], ["onpointerout",11], ["onpointerover",11], ["onpointerup",11],
+        ["releaseEvents",11], "rootElement", ["visibilityState",10]
+    ]);
+    check(DocumentFragment, [ ["attachEvent",9,10], ["detachEvent",9,10], "querySelector", "querySelectorAll", "removeNode", "replaceNode", "swapNode" ]);
+    check(DocumentType, [ "entities", "internalSubset", "name", "notations", "publicId", "systemId" ]);
+    check(DOMParser, [ "parseFromString" ]);
+    check(Element, [
+        "childElementCount", "clientHeight", "clientLeft", "clientTop", "clientWidth", ["fireEvent",9,10], "firstElementChild",
+        "getAttribute", "getAttributeNS", "getAttributeNode", "getAttributeNodeNS", "getBoundingClientRect", "getClientRects",
+        "getElementsByTagName", "getElementsByTagNameNS", "hasAttribute", "hasAttributeNS", "lastElementChild",
+        ["msContentZoomFactor",10], ["msGetRegionContent",10], ["msGetUntransformedBounds",11], "msMatchesSelector",
+        ["msRegionOverflow",10], ["msReleasePointerCapture",10], ["msRequestFullscreen",11], ["msSetPointerCapture",10],
+        ["msZoomTo",11], "nextElementSibling", ["ongotpointercapture",11], ["onlostpointercapture",11], ["onmsgesturechange",10],
+        ["onmsgesturedoubletap",10], ["onmsgestureend",10], ["onmsgesturehold",10], ["onmsgesturestart",10], ["onmsgesturetap",10],
+        ["onmsgotpointercapture",10], ["onmsinertiastart",10], ["onmslostpointercapture",10], ["onmspointercancel",10],
+        ["onmspointerdown",10], ["onmspointerenter",11], ["onmspointerhover",10,10], ["onmspointerleave",11], ["onmspointermove",10],
+        ["onmspointerout",10], ["onmspointerover",10], ["onmspointerup",10], ["onpointercancel",11], ["onpointerdown",11],
+        ["onpointerenter",11], ["onpointerleave",11], ["onpointermove",11], ["onpointerout",11], ["onpointerover",11],
+        ["onpointerup",11], "previousElementSibling", "querySelector", "querySelectorAll", ["releasePointerCapture",11],
+        "removeAttribute", "removeAttributeNS", "removeAttributeNode", "scrollHeight", "scrollLeft", "scrollTop", "scrollWidth",
+        "setAttribute", "setAttributeNS", "setAttributeNode", "setAttributeNodeNS", ["setPointerCapture",11], "tagName"
+    ], [
+        ["msContentZoomFactor",10], ["msGetRegionContent",10], ["msGetUntransformedBounds",11], ["msRegionOverflow",10],
+        ["msRequestFullscreen",11], ["msZoomTo",11], ["ongotpointercapture",11], ["onlostpointercapture",11],
+        ["onmspointerenter",11], ["onmspointerleave",11], ["onpointercancel",11], ["onpointerdown",11], ["onpointerenter",11],
+        ["onpointerleave",11], ["onpointermove",11], ["onpointerout",11], ["onpointerover",11], ["onpointerup",11],
+        ["releasePointerCapture",11], ["setPointerCapture",11]
+    ]);
+    check(Event, [
+        "AT_TARGET", "BUBBLING_PHASE", "CAPTURING_PHASE", "bubbles", "cancelBubble", "cancelable", "currentTarget",
+        "defaultPrevented", "eventPhase", "initEvent", "isTrusted", "preventDefault", "srcElement",
+        "stopImmediatePropagation", "stopPropagation", "target", "timeStamp", "type"
+    ], [ "AT_TARGET", "BUBBLING_PHASE", "CAPTURING_PHASE" ]);
+    if(v >= 11)
+        check(HTMLDocument, []);
+    check(HTMLElement, [
+        "accessKey", ["addBehavior",9,10], ["addFilter",9,9], ["all",9,10], "applyElement", ["attachEvent",9,10], ["behaviorUrns",9,10], "blur",
+        "canHaveChildren", "canHaveHTML", "children", ["classList",10], "className", "clearAttributes", "click", "componentFromPoint", "contains",
+        "contentEditable", "createControlRange", "currentStyle", ["dataset",11], ["detachEvent",9,10], "dir", "disabled", ["doScroll",9,10],
+        ["document",9,9], "dragDrop", ["draggable",10], ["filters",9,9], "focus", "getAdjacentText", "getElementsByClassName", ["hidden",11],
+        "hideFocus", "id", "innerHTML", "innerText", "insertAdjacentElement", "insertAdjacentHTML", "insertAdjacentText", "isContentEditable",
+        "isDisabled", "isMultiLine", "isTextEdit", "lang", "language", "mergeAttributes", ["msGetInputContext",11], "offsetHeight", "offsetLeft",
+        "offsetParent", "offsetTop", "offsetWidth", "onabort", "onactivate", ["onafterupdate",9,10], "onbeforeactivate", "onbeforecopy",
+        "onbeforecut", "onbeforedeactivate", ["onbeforeeditfocus",9,10], "onbeforepaste", ["onbeforeupdate",9,10], "onblur", "oncanplay",
+        "oncanplaythrough", ["oncellchange",9,10], "onchange", "onclick", "oncontextmenu", ["oncontrolselect",9,10], "oncopy", ["oncuechange",10],
+        "oncut", ["ondataavailable",9,10], ["ondatasetchanged",9,10], ["ondatasetcomplete",9,10], "ondblclick", "ondeactivate", "ondrag",
+        "ondragend", "ondragenter", "ondragleave", "ondragover", "ondragstart", "ondrop", "ondurationchange", "onemptied", "onended", "onerror",
+        ["onerrorupdate",9,10], ["onfilterchange",9,10], "onfocus", "onfocusin", "onfocusout", "onhelp", "oninput", "onkeydown", "onkeypress",
+        "onkeyup", ["onlayoutcomplete",9,10], "onload", "onloadeddata", "onloadedmetadata", "onloadstart", ["onlosecapture",9,10],
+        "onmousedown", "onmouseenter", "onmouseleave", "onmousemove", "onmouseout", "onmouseover", "onmouseup", "onmousewheel", ["onmove",9,10],
+        ["onmoveend",9,10], ["onmovestart",9,10], ["onmscontentzoom",10], ["onmsmanipulationstatechanged",10], "onpaste", "onpause", "onplay",
+        "onplaying", "onprogress", ["onpropertychange",9,10], "onratechange", ["onreadystatechange",9,10], "onreset", ["onresize",9,10],
+        ["onresizeend",9,10], ["onresizestart",9,10], ["onrowenter",9,10], ["onrowexit",9,10], ["onrowsdelete",9,10], ["onrowsinserted",9,10],
+        "onscroll", "onseeked", "onseeking", "onselect", "onselectstart", "onstalled", "onsubmit", "onsuspend", "ontimeupdate", "onvolumechange",
+        "onwaiting", "outerHTML", "outerText", "parentElement", "parentTextEdit", ["readyState",9,10], "recordNumber", "releaseCapture",
+        ["removeBehavior",9,10], ["removeFilter",9,9], "removeNode", "replaceAdjacentText", "replaceNode", "runtimeStyle", ["scopeName",9,9],
+        "scrollIntoView", "setActive", "setCapture", "sourceIndex", ["spellcheck",10], "style", "swapNode", "tabIndex", ["tagUrn",9,9], "title",
+        "uniqueID", "uniqueNumber"
+    ], [ ["dataset",11], ["draggable",10], ["hidden",11], ["msGetInputContext",11], ["onmscontentzoom",10] ]);
+    check(HTMLTableCellElement, [
+        "abbr", "align", "axis", "background", "bgColor", "borderColor", "borderColorDark", "borderColorLight",
+        "cellIndex", "ch", "chOff", "colSpan", "headers", "height", "noWrap", "rowSpan", "scope", "vAlign", "width"
+    ], [ "abbr", "axis", "ch", "chOff", "headers", "scope" ]);
+    check(HTMLTableDataCellElement, []);
+    check(HTMLUnknownElement, [ "namedRecordset", "recordset" ]);
+    check(KeyboardEvent, [
+        "DOM_KEY_LOCATION_JOYSTICK", "DOM_KEY_LOCATION_LEFT", "DOM_KEY_LOCATION_MOBILE",
+        "DOM_KEY_LOCATION_NUMPAD", "DOM_KEY_LOCATION_RIGHT", "DOM_KEY_LOCATION_STANDARD",
+        "altKey", "char", "charCode", "ctrlKey", "getModifierState", "initKeyboardEvent",
+        "key", "keyCode", "locale", "location", "metaKey", "repeat", "shiftKey", "which"
+    ], [
+        "DOM_KEY_LOCATION_JOYSTICK", "DOM_KEY_LOCATION_LEFT", "DOM_KEY_LOCATION_MOBILE",
+        "DOM_KEY_LOCATION_NUMPAD", "DOM_KEY_LOCATION_RIGHT", "DOM_KEY_LOCATION_STANDARD"
+    ]);
+    check(MessageEvent, [ "data", "initMessageEvent", "origin", ["ports",10], "source" ], [ ["ports",10] ]);
+    check(MouseEvent, [
+        "altKey", "button", "buttons", "clientX", "clientY", "ctrlKey", "fromElement", "getModifierState",
+        "initMouseEvent", "layerX", "layerY", "metaKey", "offsetX", "offsetY", "pageX", "pageY", "relatedTarget",
+        "screenX", "screenY", "shiftKey", "toElement", "which", "x", "y"
+    ]);
+    check(MSCSSProperties, [
+        "accelerator", "backgroundPositionX", "backgroundPositionY", ["behavior",9,10], ["filter",9,9], "getAttribute",
+        "imeMode", "layoutFlow", "layoutGrid", "layoutGridChar", "layoutGridLine", "layoutGridMode", "layoutGridType",
+        "lineBreak", "msBlockProgression", "msInterpolationMode", "removeAttribute", "scrollbar3dLightColor",
+        "scrollbarArrowColor", "scrollbarBaseColor", "scrollbarDarkShadowColor", "scrollbarFaceColor",
+        "scrollbarHighlightColor", "scrollbarShadowColor", "scrollbarTrackColor", "setAttribute", "styleFloat",
+        "textAutospace", "textJustifyTrim", "textKashida", "textKashidaSpace", "writingMode", "zoom"
+    ]);
+    check(MSCurrentStyleCSSProperties, [ "blockDirection", "clipBottom", "clipLeft", "clipRight", "clipTop", "hasLayout" ]);
+    check(MSStyleCSSProperties, [
+        "pixelBottom", "pixelHeight", "pixelLeft", "pixelRight", "pixelTop", "pixelWidth", "posBottom",
+        "posHeight", "posLeft", "posRight", "posTop", "posWidth", "textDecorationBlink", "textDecorationLineThrough",
+        "textDecorationNone", "textDecorationOverline", "textDecorationUnderline"
+    ]);
+    check(Node, [
+        "ATTRIBUTE_NODE", "CDATA_SECTION_NODE", "COMMENT_NODE", "DOCUMENT_FRAGMENT_NODE",  "DOCUMENT_NODE",
+        "DOCUMENT_POSITION_CONTAINED_BY", "DOCUMENT_POSITION_CONTAINS", "DOCUMENT_POSITION_DISCONNECTED",
+        "DOCUMENT_POSITION_FOLLOWING", "DOCUMENT_POSITION_IMPLEMENTATION_SPECIFIC", "DOCUMENT_POSITION_PRECEDING",
+        "DOCUMENT_TYPE_NODE", "ELEMENT_NODE", "ENTITY_NODE", "ENTITY_REFERENCE_NODE", "NOTATION_NODE",
+        "PROCESSING_INSTRUCTION_NODE", "TEXT_NODE", "addEventListener", "appendChild", "attributes", "childNodes", "cloneNode",
+        "compareDocumentPosition", "dispatchEvent", "firstChild", "hasAttributes", "hasChildNodes", "insertBefore",
+        "isDefaultNamespace", "isEqualNode", "isSameNode", "isSupported", "lastChild", "localName", "lookupNamespaceURI",
+        "lookupPrefix", "namespaceURI", "nextSibling", "nodeName", "nodeType", "nodeValue", "normalize", "ownerDocument",
+        "parentNode", "prefix", "previousSibling", "removeChild", "removeEventListener", "replaceChild", "textContent"
+    ], [
+        "ATTRIBUTE_NODE", "CDATA_SECTION_NODE", "COMMENT_NODE", "DOCUMENT_FRAGMENT_NODE",  "DOCUMENT_NODE",
+        "DOCUMENT_POSITION_CONTAINED_BY", "DOCUMENT_POSITION_CONTAINS", "DOCUMENT_POSITION_DISCONNECTED",
+        "DOCUMENT_POSITION_FOLLOWING", "DOCUMENT_POSITION_IMPLEMENTATION_SPECIFIC", "DOCUMENT_POSITION_PRECEDING",
+        "DOCUMENT_TYPE_NODE", "ELEMENT_NODE", "ENTITY_NODE", "ENTITY_REFERENCE_NODE", "NOTATION_NODE",
+        "PROCESSING_INSTRUCTION_NODE", "TEXT_NODE"
+    ]);
+    if(v >= 11)
+        check(PageTransitionEvent, [ "persisted" ]);
+    if(v >= 10)
+        check(ProgressEvent, [ "initProgressEvent", "lengthComputable", "loaded", "total" ]);
+    check(StorageEvent, [ "initStorageEvent", "key", "newValue", "oldValue", "storageArea", "url" ]);
+    check(StyleSheet, [ "disabled", "href", "media", "ownerNode", "parentStyleSheet", "title", "type" ]);
+    check(Text, [ "removeNode", "replaceNode", "replaceWholeText", "splitText", "swapNode", "wholeText" ], [ "replaceWholeText", "wholeText" ]);
+    check(UIEvent, [ "detail", "initUIEvent", "view" ], null, [ "deviceSessionId" ]);
+    if(v >= 11)
+        check(XMLDocument, []);
+});
+
+sync_test("constructors", function() {
+    var v = document.documentMode, i, r, old;
+    if(v < 9)
+        return;
+
+    var ctors = [ "DOMParser", "Image", "MutationObserver", "Option", "XDomainRequest", "XMLHttpRequest" ];
+    for(i = 0; i < ctors.length; i++) {
+        r = ctors[i];
+        if(!(r in window))
+            continue;
+        ok(window.hasOwnProperty(r), r + " not prop of window");
+        ok(!Object.getPrototypeOf(window).hasOwnProperty(r), r + " is a prop of window's prototype");
+
+        ok(window[r].hasOwnProperty("arguments"), "arguments not a prop of " + r);
+        ok(window[r].hasOwnProperty("caller"), "caller not a prop of " + r);
+        ok(window[r].hasOwnProperty("prototype"), "prototype not a prop of " + r);
+        ok(!window[r].hasOwnProperty("length"), "length is a prop of " + r);
+    }
+    ok(window.Image.prototype === window.HTMLImageElement.prototype, "Image.prototype != HTMLImageElement.prototype");
+    ok(window.Option.prototype === window.HTMLOptionElement.prototype, "Option.prototype != HTMLOptionElement.prototype");
+
+    ok(XMLHttpRequest.create.hasOwnProperty("arguments"), "arguments not a prop of XMLHttpRequest.create");
+    ok(XMLHttpRequest.create.hasOwnProperty("caller"), "caller not a prop of XMLHttpRequest.create");
+    ok(!XMLHttpRequest.create.hasOwnProperty("length"), "length is a prop of XMLHttpRequest.create");
+
+    r = Object.getOwnPropertyDescriptor(HTMLMetaElement, "prototype");
+    ok(r.value === HTMLMetaElement.prototype, "HTMLMetaElement.prototype value = " + r.value);
+    ok(!("get" in r), "HTMLMetaElement.prototype has getter");
+    ok(!("set" in r), "HTMLMetaElement.prototype has setter");
+    ok(r.writable === false, "HTMLMetaElement.prototype writable = " + r.writable);
+    ok(r.enumerable === false, "HTMLMetaElement.prototype enumerable = " + r.enumerable);
+    ok(r.configurable === false, "HTMLMetaElement.prototype configurable = " + r.configurable);
+
+    old = HTMLMetaElement.prototype;
+    HTMLMetaElement.prototype = Object.prototype;
+    ok(HTMLMetaElement.prototype === old, "HTMLMetaElement.prototype = " + HTMLMetaElement.prototype);
+
+    r = (delete HTMLMetaElement.prototype);
+    ok(r === false, "delete HTMLMetaElement.prototype returned " + r);
+    ok(HTMLMetaElement.hasOwnProperty("prototype"), "prototype not a prop anymore of HTMLMetaElement");
+
+    old = window.HTMLMetaElement;
+    r = (delete window.HTMLMetaElement);
+    ok(r === true, "delete HTMLMetaElement returned " + r);
+    ok(!window.hasOwnProperty("HTMLMetaElement"), "HTMLMetaElement still a property of window");
+    window.HTMLMetaElement = old;
 });

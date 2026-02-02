@@ -573,12 +573,28 @@ UINT CDECL __wine_msi_call_dll_function(DWORD client_pid, const GUID *guid)
     return r;
 }
 
+static HANDLE get_admin_token(void)
+{
+    TOKEN_ELEVATION_TYPE type;
+    TOKEN_LINKED_TOKEN linked;
+    DWORD size;
+
+    if (!GetTokenInformation(GetCurrentThreadEffectiveToken(), TokenElevationType, &type, sizeof(type), &size)
+            || type == TokenElevationTypeFull)
+        return NULL;
+
+    if (!GetTokenInformation(GetCurrentThreadEffectiveToken(), TokenLinkedToken, &linked, sizeof(linked), &size))
+        return NULL;
+    return linked.LinkedToken;
+}
+
 static DWORD custom_start_server(MSIPACKAGE *package, DWORD arch)
 {
     WCHAR path[MAX_PATH], cmdline[MAX_PATH + 23];
     PROCESS_INFORMATION pi = {0};
     STARTUPINFOW si = {0};
     WCHAR buffer[24];
+    HANDLE token;
     void *cookie;
     HANDLE pipe;
 
@@ -596,18 +612,22 @@ static DWORD custom_start_server(MSIPACKAGE *package, DWORD arch)
     if ((sizeof(void *) == 8 || is_wow64) && arch == SCS_32BIT_BINARY)
         GetSystemWow64DirectoryW(path, MAX_PATH - ARRAY_SIZE(L"\\msiexec.exe"));
     else
-        GetSystemDirectoryW(path, MAX_PATH - ARRAY_SIZE(L"\\msiexec.exe"));
+        wcscpy(path, sysdir);
     lstrcatW(path, L"\\msiexec.exe");
     swprintf(cmdline, ARRAY_SIZE(cmdline), L"%s -Embedding %d", path, GetCurrentProcessId());
+
+    token = get_admin_token();
 
     if (is_wow64 && arch == SCS_64BIT_BINARY)
     {
         Wow64DisableWow64FsRedirection(&cookie);
-        CreateProcessW(path, cmdline, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi);
+        CreateProcessAsUserW(token, path, cmdline, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi);
         Wow64RevertWow64FsRedirection(cookie);
     }
     else
-        CreateProcessW(path, cmdline, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi);
+        CreateProcessAsUserW(token, path, cmdline, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi);
+
+    if (token) CloseHandle(token);
 
     CloseHandle(pi.hThread);
 

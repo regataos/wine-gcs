@@ -37,10 +37,11 @@ static int indent;
 static const char *format_uuid( const struct uuid *uuid )
 {
     static char buffer[40];
-    sprintf( buffer, "{%08X-%04X-%04X-%02X%02X-%02X%02X%02X%02X%02X%02X}",
-             uuid->Data1, uuid->Data2, uuid->Data3,
-             uuid->Data4[0], uuid->Data4[1], uuid->Data4[2], uuid->Data4[3],
-             uuid->Data4[4], uuid->Data4[5], uuid->Data4[6], uuid->Data4[7] );
+    snprintf( buffer, sizeof(buffer),
+              "{%08X-%04X-%04X-%02X%02X-%02X%02X%02X%02X%02X%02X}",
+              uuid->Data1, uuid->Data2, uuid->Data3,
+              uuid->Data4[0], uuid->Data4[1], uuid->Data4[2], uuid->Data4[3],
+              uuid->Data4[4], uuid->Data4[5], uuid->Data4[6], uuid->Data4[7] );
     return buffer;
 }
 
@@ -188,7 +189,8 @@ static void write_runtimeclasses_registry( const statement_list_t *stmts )
 
     if (stmts) LIST_FOR_EACH_ENTRY( stmt, stmts, const statement_t, entry )
     {
-        if (stmt->type != STMT_TYPE) continue;
+        if (stmt->type != STMT_TYPE && stmt->type != STMT_TYPEREF) continue;
+        if (stmt->type == STMT_TYPEREF && strcmp( stmt->where.input_name, input_name )) continue; /* ignore #included statements */
         if (type_get_type((type = stmt->u.type)) != TYPE_RUNTIMECLASS) continue;
         if (!get_attrp(type->attrs, ATTR_ACTIVATABLE) && !get_attrp(type->attrs, ATTR_STATIC)) continue;
         put_str( indent, "ForceRemove %s\n", format_namespace( type->namespace, "", ".", type->name, NULL ) );
@@ -273,11 +275,14 @@ void write_regscript( const statement_list_t *stmts )
         put_str( indent, "HKCR\n" );
         put_str( indent++, "{\n" );
 
-        put_str( indent, "NoRemove Interface\n" );
-        put_str( indent++, "{\n" );
         ps_factory = find_ps_factory( stmts );
-        if (ps_factory) write_interfaces( stmts, ps_factory );
-        put_str( --indent, "}\n" );
+        if (ps_factory)
+        {
+            put_str( indent, "NoRemove Interface\n" );
+            put_str( indent++, "{\n" );
+            write_interfaces( stmts, ps_factory );
+            put_str( --indent, "}\n" );
+        }
 
         put_str( indent, "NoRemove CLSID\n" );
         put_str( indent++, "{\n" );
@@ -317,7 +322,7 @@ void write_typelib_regscript( const statement_list_t *stmts )
             error( "Cannot store multiple typelibs into %s\n", typelib_name );
         else
         {
-            if (do_old_typelib)
+            if (old_typelib)
                 create_sltg_typelib( stmt->u.lib );
             else
                 create_msft_typelib( stmt->u.lib );
@@ -355,7 +360,7 @@ void output_typelib_regscript( const typelib_t *typelib )
     expr = get_attrp( typelib->attrs, ATTR_ID );
     if (expr)
     {
-        sprintf(id_part, "\\%d", expr->cval);
+        snprintf(id_part, sizeof(id_part), "\\%d", expr->cval);
         resname = strmake("%s\\%d", typelib_name, expr->cval);
     }
     put_str( indent, "'%x' { %s = s '%%MODULE%%%s' }\n",

@@ -991,6 +991,39 @@ C_ASSERT( ARRAYSIZE(__wine_unix_call_funcs) == unix_funcs_count );
 
 typedef ULONG PTR32;
 
+struct server_info_101_32
+{
+    unsigned int sv101_platform_id;
+    PTR32        sv101_name;
+    unsigned int sv101_version_major;
+    unsigned int sv101_version_minor;
+    unsigned int sv101_type;
+    PTR32        sv101_comment;
+};
+
+static NTSTATUS create_server_info32( unsigned int level, void *buffer )
+{
+    switch (level)
+    {
+    case 101:
+    {
+        struct server_info_101_32 *si32 = (struct server_info_101_32 *)buffer;
+        struct server_info_101 *si = (struct server_info_101 *)buffer;
+
+        si32->sv101_platform_id = si->sv101_platform_id;
+        si32->sv101_name = PtrToUlong( si->sv101_name );
+        si32->sv101_version_major = si->sv101_version_major;
+        si32->sv101_version_minor = si->sv101_version_minor;
+        si32->sv101_type = si->sv101_type;
+        si32->sv101_comment = PtrToUlong( si->sv101_comment );
+        return STATUS_SUCCESS;
+    }
+    default:
+        FIXME( "level %u not supported\n", level );
+        return ERROR_NOT_SUPPORTED;
+    }
+}
+
 static NTSTATUS wow64_server_getinfo( void *args )
 {
     struct
@@ -1008,8 +1041,131 @@ static NTSTATUS wow64_server_getinfo( void *args )
         ULongToPtr(params32->buffer),
         ULongToPtr(params32->size)
     };
+    NTSTATUS status;
 
-    return server_getinfo( &params );
+    status = server_getinfo( &params );
+    if (!status) status = create_server_info32( params.level, params.buffer );
+    return status;
+}
+
+struct share_info_2_32
+{
+    PTR32        shi2_netname;
+    unsigned int shi2_type;
+    PTR32        shi2_remark;
+    unsigned int shi2_permissions;
+    unsigned int shi2_max_uses;
+    unsigned int shi2_current_uses;
+    PTR32        shi2_path;
+    PTR32        shi2_passwd;
+};
+
+struct share_info
+{
+    union
+    {
+        struct share_info_2 si2;
+        struct share_info_502 si502;
+    };
+    struct security_descriptor sd;
+    struct acl sacl;
+    struct acl dacl;
+};
+
+struct acl_32
+{
+    enum acl_revision revision;
+    unsigned short size;
+    unsigned int   num_aces;
+    PTR32          aces;
+};
+
+static void create_acl64( const struct acl_32 *acl32, struct acl *acl )
+{
+    acl->revision = acl32->revision;
+    acl->size = acl32->size;
+    acl->num_aces = acl32->num_aces;
+    acl->aces = ULongToPtr( acl32->aces );
+}
+
+struct security_descriptor_32
+{
+    enum security_descriptor_revision revision;
+    unsigned short type;
+    PTR32          owner_sid;
+    PTR32          group_sid;
+    PTR32          sacl;
+    PTR32          dacl;
+};
+
+static void create_security_descriptor64( const struct security_descriptor_32 *sd32,
+        struct share_info *si )
+{
+    struct security_descriptor *sd = &si->sd;
+
+    sd->revision = sd32->revision;
+    sd->type = sd32->type;
+    sd->owner_sid = ULongToPtr( sd32->owner_sid );
+    sd->group_sid = ULongToPtr( sd32->group_sid );
+    create_acl64( ULongToPtr(sd32->sacl), &si->sacl );
+    sd->sacl = &si->sacl;
+    create_acl64( ULongToPtr(sd32->dacl), &si->dacl );
+    sd->dacl = &si->dacl;
+}
+
+struct share_info_502_32
+{
+    PTR32        shi502_netname;
+    unsigned int shi502_type;
+    PTR32        shi502_remark;
+    unsigned int shi502_permissions;
+    unsigned int shi502_max_uses;
+    unsigned int shi502_current_uses;
+    PTR32        shi502_path;
+    PTR32        shi502_passwd;
+    unsigned int shi502_reserved;
+    PTR32        shi502_security_descriptor;
+};
+
+static NTSTATUS create_share_info64( unsigned int level, void *buffer, struct share_info *si )
+{
+    switch (level)
+    {
+    case 2:
+    {
+        struct share_info_2_32 *si32 = buffer;
+
+        si->si2.shi2_netname = ULongToPtr( si32->shi2_netname );
+        si->si2.shi2_type = si32->shi2_type;
+        si->si2.shi2_remark = ULongToPtr( si32->shi2_remark );
+        si->si2.shi2_permissions = si32->shi2_permissions;
+        si->si2.shi2_max_uses = si32->shi2_max_uses;
+        si->si2.shi2_current_uses = si32->shi2_current_uses;
+        si->si2.shi2_path = ULongToPtr( si32->shi2_path );
+        si->si2.shi2_passwd = ULongToPtr( si32->shi2_passwd );
+        return STATUS_SUCCESS;
+    }
+    case 502:
+    {
+        struct share_info_502_32 *si32 = buffer;
+
+        si->si502.shi502_netname = ULongToPtr( si32->shi502_netname );
+        si->si502.shi502_type = si32->shi502_type;
+        si->si502.shi502_remark = ULongToPtr( si32->shi502_remark );
+        si->si502.shi502_permissions = si32->shi502_permissions;
+        si->si502.shi502_max_uses = si32->shi502_max_uses;
+        si->si502.shi502_current_uses = si32->shi502_current_uses;
+        si->si502.shi502_path = ULongToPtr( si32->shi502_path );
+        si->si502.shi502_passwd = ULongToPtr( si32->shi502_passwd );
+        si->si502.shi502_reserved = si32->shi502_reserved;
+        create_security_descriptor64( ULongToPtr(si32->shi502_security_descriptor), si );
+        si->si502.shi502_security_descriptor = &si->sd;
+        return STATUS_SUCCESS;
+    }
+    default:
+        FIXME( "level %u not supported\n", level );
+        return ERROR_NOT_SUPPORTED;
+    }
 }
 
 static NTSTATUS wow64_share_add( void *args )
@@ -1022,15 +1178,19 @@ static NTSTATUS wow64_share_add( void *args )
         PTR32 err;
     } const *params32 = args;
 
+    struct share_info si;
     struct share_add_params params =
     {
         ULongToPtr(params32->server),
         params32->level,
-        ULongToPtr(params32->info),
+        (BYTE *)&si,
         ULongToPtr(params32->err)
     };
+    NTSTATUS status;
 
-    return share_add( &params );
+    status = create_share_info64( params.level, ULongToPtr(params32->info), &si );
+    if (!status) status = share_add( &params );
+    return status;
 }
 
 static NTSTATUS wow64_share_del( void *args )
@@ -1052,6 +1212,37 @@ static NTSTATUS wow64_share_del( void *args )
     return share_del( &params );
 }
 
+struct wksta_info_100_32
+{
+    unsigned int wki100_platform_id;
+    PTR32        wki100_computername;
+    PTR32        wki100_langroup;
+    unsigned int wki100_ver_major;
+    unsigned int wki100_ver_minor;
+};
+
+static NTSTATUS create_wksta_info32( DWORD level, void *buffer )
+{
+    switch (level)
+    {
+    case 100:
+    {
+        struct wksta_info_100_32 *wi32 = buffer;
+        struct wksta_info_100 *wi = buffer;
+
+        wi32->wki100_platform_id = wi->wki100_platform_id;
+        wi32->wki100_computername = PtrToUlong( wi->wki100_computername );
+        wi32->wki100_langroup = PtrToUlong( wi->wki100_langroup );
+        wi32->wki100_ver_major = wi->wki100_ver_major;
+        wi32->wki100_ver_minor = wi->wki100_ver_minor;
+        return ERROR_SUCCESS;
+    }
+    default:
+        FIXME( "level %u not supported\n", level );
+        return ERROR_NOT_SUPPORTED;
+    }
+}
+
 static NTSTATUS wow64_wksta_getinfo( void *args )
 {
     struct
@@ -1069,8 +1260,11 @@ static NTSTATUS wow64_wksta_getinfo( void *args )
         ULongToPtr(params32->buffer),
         ULongToPtr(params32->size)
     };
+    NTSTATUS status;
 
-    return wksta_getinfo( &params );
+    status = wksta_getinfo( &params );
+    if (!status) status = create_wksta_info32( params.level, params.buffer );
+    return status;
 }
 
 static NTSTATUS wow64_change_password( void *args )

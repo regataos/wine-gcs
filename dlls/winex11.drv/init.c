@@ -104,7 +104,7 @@ static BOOL X11DRV_CreateDC( PHYSDEV *pdev, LPCWSTR device, LPCWSTR output, cons
 
     physDev->depth         = default_visual.depth;
     physDev->color_shifts  = &X11DRV_PALETTE_default_shifts;
-    physDev->dc_rect       = NtUserGetVirtualScreenRect();
+    physDev->dc_rect       = NtUserGetVirtualScreenRect( MDT_DEFAULT );
     OffsetRect( &physDev->dc_rect, -physDev->dc_rect.left, -physDev->dc_rect.top );
     push_dc_driver( pdev, &physDev->dev, &x11drv_funcs.dc_funcs );
     if (xrender_funcs && !xrender_funcs->pCreateDC( pdev, device, output, initData )) return FALSE;
@@ -138,6 +138,7 @@ static BOOL X11DRV_DeleteDC( PHYSDEV dev )
     X11DRV_PDEVICE *physDev = get_x11drv_dev( dev );
 
     XFreeGC( gdi_display, physDev->gc );
+    if (physDev->region) NtGdiDeleteObjectApp( physDev->region );
     free( physDev );
     return TRUE;
 }
@@ -194,6 +195,106 @@ static HFONT X11DRV_SelectFont( PHYSDEV dev, HFONT hfont, UINT *aa_flags )
     return dev->funcs->pSelectFont( dev, hfont, aa_flags );
 }
 
+static BOOL needs_client_window_clipping( HWND hwnd )
+{
+    RECT rect, client;
+    UINT ret = 0;
+    HRGN region;
+    HDC hdc;
+
+    NtUserGetClientRect( hwnd, &client, NtUserGetDpiForWindow( hwnd ) );
+    OffsetRect( &client, -client.left, -client.top );
+
+    if (!(hdc = NtUserGetDCEx( hwnd, 0, DCX_CACHE | DCX_USESTYLE ))) return FALSE;
+    if ((region = NtGdiCreateRectRgn( 0, 0, 0, 0 )))
+    {
+        ret = NtGdiGetRandomRgn( hdc, region, SYSRGN );
+        if (ret > 0 && (ret = NtGdiGetRgnBox( region, &rect )) < NULLREGION) ret = 0;
+        if (ret == SIMPLEREGION && EqualRect( &rect, &client )) ret = 0;
+        NtGdiDeleteObjectApp( region );
+    }
+    NtUserReleaseDC( hwnd, hdc );
+
+    return ret > 0;
+}
+
+BOOL needs_offscreen_rendering( HWND hwnd, BOOL known_child, BOOL check_gamma )
+{
+    static int no_child_clipping_cached = -1;
+    struct window_surface *surface;
+    DWORD layered_flags;
+
+    UINT style = NtUserGetWindowLongW( hwnd, GWL_STYLE );
+    struct x11drv_win_data *data;
+    BOOL needs_offscreen;
+
+    if (no_child_clipping_cached == -1)
+    {
+        const char *sgi = getenv( "SteamGameId" );
+
+        no_child_clipping_cached = sgi && (!strcmp( sgi, "2229850" ) || !strcmp( sgi, "2229880" ));
+        if (no_child_clipping_cached) FIXME( "HACK: disabling child GL window clipping.\n" );
+    }
+
+    if (!(data = get_win_data( hwnd ))) needs_offscreen = TRUE; /* window is in a different process */
+    else
+    {
+        needs_offscreen = (style & WS_VISIBLE) && !(style & WS_MINIMIZE) && !is_window_rect_mapped( &data->rects.visible );
+        release_win_data( data );
+    }
+
+    if (!needs_offscreen && style & WS_EX_LAYERED && NtUserGetLayeredWindowAttributes( hwnd, NULL, NULL, &layered_flags )
+        && layered_flags & LWA_COLORKEY)
+        needs_offscreen = TRUE;
+
+    if (!needs_offscreen && (surface = window_surface_get( hwnd )))
+    {
+        TRACE("hwnd %p, surface %p, surface->alpha_mask %#x.\n", hwnd, surface, surface->alpha_mask);
+        /* 3d drawing to ULW window never gets onscreen directly, only though UpdateLayeredWindow(). */
+        needs_offscreen = !!surface->alpha_mask;
+        window_surface_release( surface );
+    }
+    if (needs_offscreen) return needs_offscreen;
+
+    if (NtUserGetDpiForWindow( hwnd ) != NtUserGetWinMonitorDpi( hwnd, MDT_RAW_DPI )
+        && !enable_fullscreen_hack( hwnd, check_gamma ))
+        return TRUE; /* needs DPI scaling */
+    if (NtUserGetAncestor( hwnd, GA_PARENT ) != NtUserGetDesktopWindow()) return TRUE; /* child window, needs compositing */
+    if (no_child_clipping_cached) return FALSE;
+    if (NtUserGetWindowRelative( hwnd, GW_CHILD ) || known_child) return needs_client_window_clipping( hwnd ); /* window has children, needs compositing */
+    return FALSE;
+}
+
+void set_dc_drawable( HDC hdc, Drawable drawable, const RECT *rect, int mode )
+{
+    struct x11drv_escape_set_drawable escape =
+    {
+        .code = X11DRV_SET_DRAWABLE,
+        .drawable = drawable,
+        .dc_rect = *rect,
+        .mode = mode,
+    };
+    NtGdiExtEscape( hdc, NULL, 0, X11DRV_ESCAPE, sizeof(escape), (LPSTR)&escape, 0, NULL );
+}
+
+Drawable get_dc_drawable( HDC hdc, RECT *rect )
+{
+    struct x11drv_escape_get_drawable escape = {.code = X11DRV_GET_DRAWABLE};
+    NtGdiExtEscape( hdc, NULL, 0, X11DRV_ESCAPE, sizeof(escape), (LPSTR)&escape, sizeof(escape), (LPSTR)&escape );
+    *rect = escape.dc_rect;
+    return escape.drawable;
+}
+
+HRGN get_dc_monitor_region( HWND hwnd, HDC hdc )
+{
+    HRGN region;
+
+    if (!(region = NtGdiCreateRectRgn( 0, 0, 0, 0 ))) return 0;
+    if (NtGdiGetRandomRgn( hdc, region, SYSRGN | NTGDI_RGN_MONITOR_DPI ) > 0) return region;
+    NtGdiDeleteObjectApp( region );
+    return 0;
+}
+
 /**********************************************************************
  *           ExtEscape  (X11DRV.@)
  */
@@ -240,24 +341,7 @@ static INT X11DRV_ExtEscape( PHYSDEV dev, INT escape, INT in_count, LPCVOID in_d
                 {
                     struct x11drv_escape_get_drawable *data = out_data;
                     data->drawable = physDev->drawable;
-                    return TRUE;
-                }
-                break;
-            case X11DRV_PRESENT_DRAWABLE:
-                if (in_count >= sizeof(struct x11drv_escape_present_drawable))
-                {
-                    const struct x11drv_escape_present_drawable *data = in_data;
-                    RECT rect = physDev->dc_rect;
-                    RECT real_rect = physDev->dc_rect;
-
-                    fs_hack_rect_user_to_real( &real_rect );
-                    OffsetRect( &rect, -physDev->dc_rect.left, -physDev->dc_rect.top );
-                    if (data->flush) XFlush( gdi_display );
-                    XSetFunction( gdi_display, physDev->gc, GXcopy );
-                    XCopyArea( gdi_display, data->drawable, physDev->drawable, physDev->gc,
-                               0, 0, real_rect.right - real_rect.left, real_rect.bottom - real_rect.top,
-                               real_rect.left, real_rect.top );
-                    add_device_bounds( physDev, &rect );
+                    data->dc_rect = physDev->dc_rect;
                     return TRUE;
                 }
                 break;
@@ -335,14 +419,6 @@ static struct opengl_funcs *X11DRV_wine_get_wgl_driver( UINT version )
     return get_glx_driver( version );
 }
 
-/**********************************************************************
- *           X11DRV_wine_get_vulkan_driver
- */
-static const struct vulkan_funcs *X11DRV_wine_get_vulkan_driver( UINT version )
-{
-    return get_vulkan_driver( version );
-}
-
 
 static const struct user_driver_funcs x11drv_funcs =
 {
@@ -356,7 +432,7 @@ static const struct user_driver_funcs x11drv_funcs =
     .dc_funcs.pExtFloodFill = X11DRV_ExtFloodFill,
     .dc_funcs.pFillPath = X11DRV_FillPath,
     .dc_funcs.pGetDeviceCaps = X11DRV_GetDeviceCaps,
-    .dc_funcs.pGetDeviceGammaRamp = X11DRV_GetDeviceGammaRamp,
+    .dc_funcs.pGetDeviceGammaRamp = fs_hack_get_gamma_ramp,
     .dc_funcs.pGetICMProfile = X11DRV_GetICMProfile,
     .dc_funcs.pGetImage = X11DRV_GetImage,
     .dc_funcs.pGetNearestColor = X11DRV_GetNearestColor,
@@ -380,17 +456,12 @@ static const struct user_driver_funcs x11drv_funcs =
     .dc_funcs.pSetDCBrushColor = X11DRV_SetDCBrushColor,
     .dc_funcs.pSetDCPenColor = X11DRV_SetDCPenColor,
     .dc_funcs.pSetDeviceClipping = X11DRV_SetDeviceClipping,
-    .dc_funcs.pSetDeviceGammaRamp = X11DRV_SetDeviceGammaRamp,
+    .dc_funcs.pSetDeviceGammaRamp = fs_hack_set_gamma_ramp,
     .dc_funcs.pSetPixel = X11DRV_SetPixel,
     .dc_funcs.pStretchBlt = X11DRV_StretchBlt,
     .dc_funcs.pStrokeAndFillPath = X11DRV_StrokeAndFillPath,
     .dc_funcs.pStrokePath = X11DRV_StrokePath,
     .dc_funcs.pUnrealizePalette = X11DRV_UnrealizePalette,
-    .dc_funcs.pD3DKMTCheckVidPnExclusiveOwnership = X11DRV_D3DKMTCheckVidPnExclusiveOwnership,
-    .dc_funcs.pD3DKMTCloseAdapter = X11DRV_D3DKMTCloseAdapter,
-    .dc_funcs.pD3DKMTOpenAdapterFromLuid = X11DRV_D3DKMTOpenAdapterFromLuid,
-    .dc_funcs.pD3DKMTQueryVideoMemoryInfo = X11DRV_D3DKMTQueryVideoMemoryInfo,
-    .dc_funcs.pD3DKMTSetVidPnSourceOwner = X11DRV_D3DKMTSetVidPnSourceOwner,
     .dc_funcs.priority = GDI_PRIORITY_GRAPHICS_DRV,
 
     .pActivateKeyboardLayout = X11DRV_ActivateKeyboardLayout,
@@ -399,8 +470,8 @@ static const struct user_driver_funcs x11drv_funcs =
     .pMapVirtualKeyEx = X11DRV_MapVirtualKeyEx,
     .pToUnicodeEx = X11DRV_ToUnicodeEx,
     .pVkKeyScanEx = X11DRV_VkKeyScanEx,
-    .pImeToAsciiEx = X11DRV_ImeToAsciiEx,
     .pNotifyIMEStatus = X11DRV_NotifyIMEStatus,
+    .pSetIMECompositionRect = X11DRV_SetIMECompositionRect,
     .pDestroyCursorIcon = X11DRV_DestroyCursorIcon,
     .pSetCursor = X11DRV_SetCursor,
     .pSetCursorPos = X11DRV_SetCursorPos,
@@ -410,21 +481,20 @@ static const struct user_driver_funcs x11drv_funcs =
     .pSystrayDockClear = X11DRV_SystrayDockClear,
     .pSystrayDockRemove = X11DRV_SystrayDockRemove,
     .pChangeDisplaySettings = X11DRV_ChangeDisplaySettings,
-    .pGetCurrentDisplaySettings = X11DRV_GetCurrentDisplaySettings,
-    .pGetDisplayDepth = X11DRV_GetDisplayDepth,
     .pUpdateDisplayDevices = X11DRV_UpdateDisplayDevices,
     .pCreateDesktop = X11DRV_CreateDesktop,
     .pCreateWindow = X11DRV_CreateWindow,
     .pDesktopWindowProc = X11DRV_DesktopWindowProc,
     .pDestroyWindow = X11DRV_DestroyWindow,
     .pFlashWindowEx = X11DRV_FlashWindowEx,
+    .pHasWindowManager = X11DRV_HasWindowManager,
     .pGetDC = X11DRV_GetDC,
     .pProcessEvents = X11DRV_ProcessEvents,
     .pReleaseDC = X11DRV_ReleaseDC,
     .pScrollDC = X11DRV_ScrollDC,
     .pSetCapture = X11DRV_SetCapture,
     .pSetDesktopWindow = X11DRV_SetDesktopWindow,
-    .pSetFocus = X11DRV_SetFocus,
+    .pActivateWindow = X11DRV_ActivateWindow,
     .pSetLayeredWindowAttributes = X11DRV_SetLayeredWindowAttributes,
     .pSetParent = X11DRV_SetParent,
     .pSetWindowIcon = X11DRV_SetWindowIcon,
@@ -438,9 +508,13 @@ static const struct user_driver_funcs x11drv_funcs =
     .pUpdateLayeredWindow = X11DRV_UpdateLayeredWindow,
     .pWindowMessage = X11DRV_WindowMessage,
     .pWindowPosChanging = X11DRV_WindowPosChanging,
+    .pGetWindowStyleMasks = X11DRV_GetWindowStyleMasks,
+    .pGetWindowStateUpdates = X11DRV_GetWindowStateUpdates,
+    .pCreateWindowSurface = X11DRV_CreateWindowSurface,
+    .pMoveWindowBits = X11DRV_MoveWindowBits,
     .pWindowPosChanged = X11DRV_WindowPosChanged,
     .pSystemParametersInfo = X11DRV_SystemParametersInfo,
-    .pwine_get_vulkan_driver = X11DRV_wine_get_vulkan_driver,
+    .pVulkanInit = X11DRV_VulkanInit,
     .pwine_get_wgl_driver = X11DRV_wine_get_wgl_driver,
     .pThreadDetach = X11DRV_ThreadDetach,
 };

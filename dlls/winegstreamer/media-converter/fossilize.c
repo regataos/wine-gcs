@@ -32,7 +32,17 @@
 #pragma makedep unix
 #endif
 
+#include "config.h"
+
 #include "media-converter.h"
+
+#ifdef _WINEDMO
+
+#include <errno.h>
+#include "wine/debug.h"
+WINE_DEFAULT_DEBUG_CHANNEL(dmo);
+
+#endif /* _WINEDMO */
 
 /* Fossilize StreamArchive database format version 6:
  *
@@ -94,26 +104,57 @@ struct payload_header
     uint32_t full_size;
 } __attribute__((packed));
 
-struct payload_entry
+int fozdb_entry_compare( const void *key, const struct rb_entry *ptr )
 {
-    struct payload_hash hash;
-    struct payload_header header;
-    uint64_t offset;
-};
-
-static guint hash_func(gconstpointer key)
-{
-    const struct payload_hash *payload_hash = key;
-
-    return payload_hash->hash[0]
-            ^ payload_hash->hash[1]
-            ^ payload_hash->hash[2]
-            ^ payload_hash->hash[3];
+    const struct fozdb_entry *entry = RB_ENTRY_VALUE( ptr, const struct fozdb_entry, entry );
+    return memcmp( key, &entry->key, sizeof(entry->key) );
 }
 
-static gboolean hash_equal(gconstpointer a, gconstpointer b)
+void fozdb_entry_destroy( struct rb_entry *entry, void *context )
 {
-    return memcmp(a, b, sizeof(struct payload_hash)) == 0;
+    struct fozdb_entry *chunk = RB_ENTRY_VALUE( entry, struct fozdb_entry, entry );
+    free( chunk );
+}
+
+struct fozdb_entry *fozdb_entry_put( struct rb_tree *tree, uint32_t tag, const struct fozdb_hash *hash )
+{
+    struct fozdb_key key = {.tag = tag, .hash = *hash};
+    struct fozdb_entry *entry;
+
+    if (!(entry = malloc( sizeof(*entry) )) ||
+        rb_put( tree, &key, &entry->entry ))
+    {
+        free( entry );
+        return NULL;
+    }
+
+    entry->key = key;
+    return entry;
+}
+
+struct fozdb_entry *fozdb_entry_get( struct rb_tree *tree, uint32_t tag, const struct fozdb_hash *hash )
+{
+    struct fozdb_key key = {.tag = tag, .hash = *hash};
+    struct rb_entry *ptr;
+
+    if (!(ptr = rb_get( tree, &key ))) return NULL;
+    return RB_ENTRY_VALUE( ptr, struct fozdb_entry, entry );
+}
+
+struct rb_entry *fozdb_tag_head( struct rb_tree *tree, uint32_t tag )
+{
+    struct rb_entry *entry = tree->root, *head = entry;
+    struct fozdb_key key = {.tag = tag};
+
+    while (entry)
+    {
+        int c = tree->compare( &key, entry );
+        if (!c) return entry;
+        if (c < 0) head = entry;
+        entry = c < 0 ? entry->left : entry->right;
+    }
+
+    return head;
 }
 
 static bool tag_from_ascii_bytes(uint32_t *tag, const uint8_t *ascii_bytes)
@@ -132,7 +173,7 @@ static bool tag_from_ascii_bytes(uint32_t *tag, const uint8_t *ascii_bytes)
     return true;
 }
 
-static bool hash_from_ascii_bytes(struct payload_hash *hash, const uint8_t *ascii_bytes)
+static bool hash_from_ascii_bytes(struct fozdb_hash *hash, const uint8_t *ascii_bytes)
 {
     unsigned int i;
 
@@ -162,7 +203,7 @@ static void tag_to_ascii_bytes(uint32_t tag, uint8_t *ascii_bytes)
     memcpy(ascii_bytes, buffer, sizeof(tag) * 2);
 }
 
-static void hash_to_ascii_bytes(const struct payload_hash *hash, uint8_t *ascii_bytes)
+static void hash_to_ascii_bytes(const struct fozdb_hash *hash, uint8_t *ascii_bytes)
 {
     char buffer[sizeof(*hash) * 2 + 1];
     sprintf(buffer, "%08x%08x%08x%08x", hash->hash[3], hash->hash[2], hash->hash[1], hash->hash[0]);
@@ -201,10 +242,10 @@ static int fozdb_read_file_header(struct fozdb *db)
 }
 
 static int fozdb_read_entry_tag_hash_header(struct fozdb *db,
-        uint32_t *out_tag, struct payload_hash *out_hash, struct payload_header *out_header)
+        uint32_t *out_tag, struct fozdb_hash *out_hash, struct payload_header *out_header)
 {
     uint8_t entry_name_and_header[ENTRY_NAME_SIZE + sizeof(struct payload_header)];
-    struct payload_hash hash;
+    struct fozdb_hash hash;
     uint32_t tag;
 
     if (!complete_read(db->file, entry_name_and_header, sizeof(entry_name_and_header)))
@@ -254,7 +295,7 @@ static bool fozdb_seek_to_next_entry(struct fozdb *db, struct payload_header *he
     return true;
 }
 
-static bool fozdb_write_entry_name(struct fozdb *db, uint32_t tag, struct payload_hash *hash)
+static bool fozdb_write_entry_name(struct fozdb *db, uint32_t tag, struct fozdb_hash *hash)
 {
     uint8_t entry_name[ENTRY_NAME_SIZE];
 
@@ -272,7 +313,7 @@ static bool fozdb_write_entry_name(struct fozdb *db, uint32_t tag, struct payloa
 
 /* Copy an entry to write_pos. */
 static int fozdb_copy_entry(struct fozdb *db,
-        struct entry_name *name, struct payload_header *header, uint64_t entry_data_offset)
+        struct fozdb_key *key, struct payload_header *header, uint64_t entry_data_offset)
 {
     uint64_t read_offset, entry_end = entry_data_offset + header->size;
     ssize_t read_size;
@@ -285,7 +326,7 @@ static int fozdb_copy_entry(struct fozdb *db,
     }
 
     /* Write entry name. */
-    if (!fozdb_write_entry_name(db, name->tag, &name->hash))
+    if (!fozdb_write_entry_name(db, key->tag, &key->hash))
         return CONV_ERROR_WRITE_FAILED;
     db->write_pos += ENTRY_NAME_SIZE;
 
@@ -348,7 +389,6 @@ static int fozdb_copy_entry(struct fozdb *db,
 int fozdb_create(const char *file_name, int open_flags, bool read_only, uint32_t num_tags, struct fozdb **out)
 {
     struct fozdb *db;
-    size_t i;
     int ret;
 
     GST_DEBUG("file_name %s, open_flags %d, read_only %d, num_tags %u, out %p.",
@@ -367,9 +407,7 @@ int fozdb_create(const char *file_name, int open_flags, bool read_only, uint32_t
     db->read_only = read_only;
 
     /* Create entry hash tables. */
-    db->seen_blobs = calloc(num_tags, sizeof(*db->seen_blobs));
-    for (i = 0; i < num_tags; ++i)
-        db->seen_blobs[i] = g_hash_table_new_full(hash_func, hash_equal, NULL, free);
+    rb_init(&db->entries, fozdb_entry_compare);
 
     /* Load entries. */
     if ((ret = fozdb_prepare(db)) < 0)
@@ -387,13 +425,9 @@ int fozdb_create(const char *file_name, int open_flags, bool read_only, uint32_t
 
 void fozdb_release(struct fozdb *db)
 {
-    int i;
-
     GST_DEBUG("db %p.", db);
 
-    for (i = 0; i < db->num_tags; ++i)
-        g_hash_table_destroy(db->seen_blobs[i]);
-    free(db->seen_blobs);
+    rb_destroy(&db->entries, fozdb_entry_destroy, NULL);
     close(db->file);
     free(db);
 }
@@ -436,23 +470,26 @@ int fozdb_prepare(struct fozdb *db)
         return ret;
     db->write_pos = lseek(db->file, 0, SEEK_CUR);
 
-    /* Read entries to seen_blobs. */
+    /* Read entries to chunks. */
     while (db->write_pos < file_size)
     {
-        struct payload_entry entry, *table_entry;
+        struct payload_header header;
+        struct fozdb_entry *entry;
+        struct fozdb_hash hash;
+        uint64_t offset;
         uint32_t tag;
 
         /* Read an entry. */
-        if ((ret = fozdb_read_entry_tag_hash_header(db, &tag, &entry.hash, &entry.header) < 0))
+        if ((ret = fozdb_read_entry_tag_hash_header(db, &tag, &hash, &header) < 0))
             return ret;
-        entry.offset = lseek(db->file, 0, SEEK_CUR);
+        offset = lseek(db->file, 0, SEEK_CUR);
 
-        if (!fozdb_seek_to_next_entry(db, &entry.header, NULL))
+        if (!fozdb_seek_to_next_entry(db, &header, NULL))
             return CONV_ERROR_SEEK_FAILED;
         db->write_pos = lseek(db->file, 0, SEEK_CUR);
 
         GST_INFO("Got entry: tag %u, hash %s, offset %#"PRIx64", size %#x, crc %#x.",
-                tag, format_hash(&entry.hash), entry.offset, entry.header.size, entry.header.crc);
+                tag, format_hash(&hash), offset, header.size, header.crc);
 
         /* Insert entry to hash table. */
         if (tag >= db->num_tags)
@@ -465,69 +502,73 @@ int fozdb_prepare(struct fozdb *db)
             else
                 return CONV_ERROR_INVALID_TAG;
         }
-        table_entry = calloc(1, sizeof(*table_entry));
-        *table_entry = entry;
-        g_hash_table_insert(db->seen_blobs[tag], &table_entry->hash, table_entry);
+
+        if ((entry = fozdb_entry_put( &db->entries, tag, &hash )))
+        {
+            entry->size = header.size;
+            entry->compression = header.compression;
+            entry->crc = header.crc;
+            entry->full_size = header.full_size;
+            entry->offset = offset;
+        }
     }
 
     return CONV_OK;
 }
 
-bool fozdb_has_entry(struct fozdb *db, uint32_t tag, struct payload_hash *hash)
+bool fozdb_has_entry(struct fozdb *db, uint32_t tag, struct fozdb_hash *hash)
 {
+    struct fozdb_key key = {.tag = tag, .hash = *hash};
     if (tag >= db->num_tags)
         return false;
-    return g_hash_table_contains(db->seen_blobs[tag], hash);
+    return rb_get(&db->entries, &key);
 }
 
-int fozdb_entry_size(struct fozdb *db, uint32_t tag, struct payload_hash *hash, uint32_t *size)
+int fozdb_entry_size(struct fozdb *db, uint32_t tag, struct fozdb_hash *hash, uint32_t *size)
 {
-    struct payload_entry *entry;
+    struct fozdb_key key = {.tag = tag, .hash = *hash};
+    struct fozdb_entry *entry;
+    struct rb_entry *ptr;
 
     if (tag >= db->num_tags)
         return CONV_ERROR_INVALID_TAG;
-    if (!(entry = g_hash_table_lookup(db->seen_blobs[tag], hash)))
+    if (!(ptr = rb_get(&db->entries, &key)))
         return CONV_ERROR_ENTRY_NOT_FOUND;
 
-    *size = entry->header.full_size;
+    entry = RB_ENTRY_VALUE(ptr, struct fozdb_entry, entry);
+    *size = entry->full_size;
 
     return CONV_OK;
 }
 
-void fozdb_iter_tag(struct fozdb *db, uint32_t tag, GHashTableIter *iter)
-{
-    if (tag > db->num_tags)
-    {
-        GST_ERROR("Invalid tag %u.", tag);
-        return;
-    }
-    g_hash_table_iter_init(iter, db->seen_blobs[tag]);
-}
-
-int fozdb_read_entry_data(struct fozdb *db, uint32_t tag, struct payload_hash *hash,
+int fozdb_read_entry_data(struct fozdb *db, uint32_t tag, struct fozdb_hash *hash,
         uint64_t offset, uint8_t *buffer, size_t size, size_t *read_size, bool with_crc)
 {
-    struct payload_entry *entry;
+    struct fozdb_key key = {.tag = tag, .hash = *hash};
+    struct fozdb_entry *entry;
+    struct rb_entry *ptr;
     size_t to_copy;
 
     GST_DEBUG("db %p, file_name %s, tag %u, hash %s, offset %#"PRIx64", buffer %p, size %zu, read_size %p, with_crc %d.",
             db, db->file_name, tag, format_hash(hash), offset, buffer, size, read_size, with_crc);
 
+    *read_size = 0;
     if (tag >= db->num_tags)
         return CONV_ERROR_INVALID_TAG;
-    if (!(entry = g_hash_table_lookup(db->seen_blobs[tag], hash)))
+    if (!(ptr = rb_get(&db->entries, &key)))
         return CONV_ERROR_ENTRY_NOT_FOUND;
+    entry = RB_ENTRY_VALUE(ptr, struct fozdb_entry, entry);
 
-    if (entry->header.compression != FOZDB_COMPRESSION_NONE)
+    if (entry->compression != FOZDB_COMPRESSION_NONE)
         return CONV_ERROR_NOT_IMPLEMENTED;
 
-    if (offset >= entry->header.full_size)
+    if (offset >= entry->full_size)
         return CONV_OK;
 
     if (lseek(db->file, entry->offset + offset, SEEK_SET) < 0)
         return CONV_ERROR_SEEK_FAILED;
 
-    to_copy = min(entry->header.full_size - offset, size);
+    to_copy = min(entry->full_size - offset, size);
     if (!complete_read(db->file, buffer, to_copy))
     {
         GST_ERROR("Failed to read entry data.");
@@ -535,7 +576,7 @@ int fozdb_read_entry_data(struct fozdb *db, uint32_t tag, struct payload_hash *h
     }
     *read_size = to_copy;
 
-    if (entry->header.crc != 0 && with_crc && entry->header.crc != crc32(0, buffer, to_copy))
+    if (entry->crc != 0 && with_crc && entry->crc != crc32(0, buffer, to_copy))
     {
         GST_ERROR("Wrong check sum.");
         return CONV_ERROR_WRONG_CHECKSUM;
@@ -544,11 +585,11 @@ int fozdb_read_entry_data(struct fozdb *db, uint32_t tag, struct payload_hash *h
     return CONV_OK;
 }
 
-int fozdb_write_entry(struct fozdb *db, uint32_t tag, struct payload_hash *hash,
+int fozdb_write_entry(struct fozdb *db, uint32_t tag, struct fozdb_hash *hash,
         void *data_src, data_read_callback read_callback, bool with_crc)
 {
     struct payload_header header;
-    struct payload_entry *entry;
+    struct fozdb_entry *entry;
     off_t header_offset;
     uint32_t size = 0;
     size_t read_size;
@@ -635,26 +676,29 @@ int fozdb_write_entry(struct fozdb *db, uint32_t tag, struct payload_hash *hash,
     }
 
     /* Success. Record entry and exit. */
-    entry = calloc(1, sizeof(*entry));
-    entry->header = header;
-    entry->hash = *hash;
-    entry->offset = offset;
-    g_hash_table_insert(db->seen_blobs[tag], &entry->hash, entry);
+    if ((entry = fozdb_entry_put( &db->entries, tag, hash )))
+    {
+        entry->size = header.size;
+        entry->compression = header.compression;
+        entry->crc = header.crc;
+        entry->full_size = header.full_size;
+        entry->offset = offset;
+    }
 
     GST_INFO("Wrote entry: tag %u, hash %s, offset %#"PRIx64", size %#x, crc %#x.",
-            tag, format_hash(&entry->hash), entry->offset, entry->header.size, entry->header.crc);
+            tag, format_hash(hash), offset, header.size, header.crc);
 
     return CONV_OK;
 }
 
 /* Rewrites the database, discarding entries listed. */
-int fozdb_discard_entries(struct fozdb *db, GList *to_discard_names)
+int fozdb_discard_entries(struct fozdb *db, struct rb_tree *to_discard)
 {
     uint8_t entry_name_and_header[ENTRY_NAME_SIZE + sizeof(struct payload_header)];
     uint64_t file_size;
-    int i, ret;
+    int ret;
 
-    GST_DEBUG("db %p, file_name %s, to_discard_entries %p.", db, db->file_name, to_discard_names);
+    GST_DEBUG("db %p, file_name %s, to_discard %p.", db, db->file_name, to_discard);
 
     /* Rewind the file and clear the entry tables. */
     if (lseek(db->file, 0, SEEK_SET) < 0)
@@ -662,8 +706,7 @@ int fozdb_discard_entries(struct fozdb *db, GList *to_discard_names)
         GST_ERROR("Failed to seek to file start. %s.", strerror(errno));
         return CONV_ERROR_SEEK_FAILED;
     }
-    for (i = 0; i < db->num_tags; ++i)
-        g_hash_table_remove_all(db->seen_blobs[i]);
+    rb_destroy(&db->entries, fozdb_entry_destroy, NULL);
 
     /* Read file header. */
     if ((ret = fozdb_read_file_header(db)) < 0)
@@ -677,15 +720,15 @@ int fozdb_discard_entries(struct fozdb *db, GList *to_discard_names)
     {
         struct payload_header header;
         uint64_t entry_data_offset;
-        struct entry_name name;
+        struct fozdb_key key;
         bool truncated;
 
-        if ((ret = fozdb_read_entry_tag_hash_header(db, &name.tag, &name.hash, &header) < 0))
+        if ((ret = fozdb_read_entry_tag_hash_header(db, &key.tag, &key.hash, &header) < 0))
             return CONV_ERROR_READ_FAILED;
         entry_data_offset = lseek(db->file, 0, SEEK_CUR);
 
         /* Check if entry should be discarded. */
-        if (g_list_find_custom(to_discard_names, &name, entry_name_compare))
+        if (rb_get(to_discard, &key))
         {
             if (!fozdb_seek_to_next_entry(db, &header, &truncated))
                 return CONV_ERROR_SEEK_FAILED;
@@ -706,7 +749,7 @@ int fozdb_discard_entries(struct fozdb *db, GList *to_discard_names)
             else
             {
                 /* We're offset, so we have to rewrite. */
-                if ((ret = fozdb_copy_entry(db, &name, &header, entry_data_offset)) < 0)
+                if ((ret = fozdb_copy_entry(db, &key, &header, entry_data_offset)) < 0)
                     return ret;
             }
         }

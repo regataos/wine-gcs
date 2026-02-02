@@ -1013,7 +1013,7 @@ static void CBRollUp( LPHEADCOMBO lphc, BOOL ok, BOOL bButton )
 
            if(GetCapture() == lphc->hWndLBox)
            {
-               ReleaseCapture();
+               NtUserReleaseCapture();
            }
 
 	   if( CB_GETTYPE(lphc) == CBS_DROPDOWN )
@@ -1467,7 +1467,8 @@ static void COMBO_Size( HEADCOMBO *lphc )
 static void COMBO_Font( LPHEADCOMBO lphc, HFONT hFont, BOOL bRedraw )
 {
   lphc->hFont = hFont;
-  lphc->item_height = combo_get_text_height(lphc);
+  if (!CB_OWNERDRAWN(lphc))
+    lphc->item_height = combo_get_text_height(lphc);
 
   /*
    * Propagate to owned windows.
@@ -1574,7 +1575,7 @@ static void COMBO_LButtonDown( LPHEADCOMBO lphc, LPARAM lParam )
            if( lphc->wState & CBF_CAPTURE )
            {
                lphc->wState &= ~CBF_CAPTURE;
-               ReleaseCapture();
+               NtUserReleaseCapture();
            }
        }
        else
@@ -1610,7 +1611,7 @@ static void COMBO_LButtonUp( LPHEADCOMBO lphc )
 	       lphc->wState &= ~CBF_NOLBSELECT;
 	   }
        }
-       ReleaseCapture();
+       NtUserReleaseCapture();
        NtUserSetCapture(lphc->hWndLBox);
    }
 
@@ -1653,7 +1654,7 @@ static void COMBO_MouseMove( LPHEADCOMBO lphc, WPARAM wParam, LPARAM lParam )
    if( PtInRect(&lbRect, pt) )
    {
        lphc->wState &= ~CBF_CAPTURE;
-       ReleaseCapture();
+       NtUserReleaseCapture();
        if( CB_GETTYPE(lphc) == CBS_DROPDOWN ) CBUpdateLBox( lphc, TRUE );
 
        /* hand over pointer tracking */

@@ -406,7 +406,8 @@ C_ASSERT( sizeof(struct callback_stack_layout) == 0x58 );
 
 static unsigned int syscall_flags;
 
-#define RESTORE_FLAGS_INSTRUMENTATION CONTEXT_i386
+#define RESTORE_FLAGS_INSTRUMENTATION          0x00010000
+#define RESTORE_FLAGS_INCOMPLETE_FRAME_CONTEXT 0x00020000
 
 struct syscall_frame
 {
@@ -944,6 +945,28 @@ static void save_context( struct xcontext *xcontext, const ucontext_t *sigcontex
 
 
 /***********************************************************************
+ *           fixup_frame_fpu_state
+ *
+ * Set FP frame state not saved in __wine_unix_call_dispatcher from sigcontext.
+ */
+static void fixup_frame_fpu_state( struct syscall_frame *frame, const ucontext_t *sigcontext )
+{
+    XSAVE_FORMAT xsave;
+
+    memset( &frame->xstate, 0, sizeof(frame->xstate) );
+    if (xstate_compaction_enabled)
+        frame->xstate.CompactionMask = 0x8000000000000000 | xstate_supported_features_mask;
+
+    if (!FPU_sig(sigcontext)) return;
+    xsave = *FPU_sig(sigcontext);
+    memcpy( &xsave.XmmRegisters[6], &frame->xsave.XmmRegisters[6], 10 * sizeof(*xsave.XmmRegisters) );
+    xsave.MxCsr = frame->xsave.MxCsr;
+    frame->xsave = xsave;
+    frame->xstate.Mask = XSTATE_MASK_LEGACY;
+}
+
+
+/***********************************************************************
  *           restore_context
  *
  * Build a sigcontext from the register values.
@@ -1055,6 +1078,7 @@ NTSTATUS WINAPI NtSetContextThread( HANDLE handle, const CONTEXT *context )
         frame->rbx = context->Rbx;
         frame->rcx = context->Rcx;
         frame->rdx = context->Rdx;
+        frame->rbp = context->Rbp;
         frame->rsi = context->Rsi;
         frame->rdi = context->Rdi;
         frame->r8  = context->R8;
@@ -1069,7 +1093,6 @@ NTSTATUS WINAPI NtSetContextThread( HANDLE handle, const CONTEXT *context )
     if (flags & CONTEXT_CONTROL)
     {
         frame->rsp    = context->Rsp;
-        frame->rbp    = context->Rbp;
         frame->rip    = context->Rip;
         frame->eflags = context->EFlags;
     }
@@ -1126,6 +1149,7 @@ NTSTATUS WINAPI NtGetContextThread( HANDLE handle, CONTEXT *context )
         context->Rbx = frame->rbx;
         context->Rcx = frame->rcx;
         context->Rdx = frame->rdx;
+        context->Rbp = frame->rbp;
         context->Rsi = frame->rsi;
         context->Rdi = frame->rdi;
         context->R8  = frame->r8;
@@ -1141,7 +1165,6 @@ NTSTATUS WINAPI NtGetContextThread( HANDLE handle, CONTEXT *context )
     if (needed_flags & CONTEXT_CONTROL)
     {
         context->Rsp    = frame->rsp;
-        context->Rbp    = frame->rbp;
         context->Rip    = frame->rip;
         context->EFlags = frame->eflags;
         context->SegCs  = cs64_sel;
@@ -1329,9 +1352,11 @@ NTSTATUS set_thread_wow64_context( HANDLE handle, const void *ctx, ULONG size )
     {
         CONTEXT_EX *context_ex = (CONTEXT_EX *)(context + 1);
         XSAVE_AREA_HEADER *xs = (XSAVE_AREA_HEADER *)((char *)context_ex + context_ex->XState.Offset);
+        UINT64 mask = frame->xstate.Mask;
 
         if (xstate_compaction_enabled) frame->xstate.CompactionMask |= xstate_extended_features();
         copy_xstate( &frame->xstate, xs, xs->Mask );
+        if (xs->CompactionMask) frame->xstate.Mask |= mask & ~xs->CompactionMask;
         frame->restore_flags |= CONTEXT_XSTATE;
     }
     return STATUS_SUCCESS;
@@ -1649,6 +1674,8 @@ __ASM_GLOBAL_FUNC( call_user_mode_callback,
                    "andq $~63,%rsp\n\t"
                    "leaq 0x10(%rbp),%rax\n\t"
                    "movq %rax,0xa8(%rsp)\n\t"  /* frame->syscall_cfa */
+                   "movw %cs,0x78(%rsp)\n\t"   /* frame->cs */
+                   "movw %ss,0x90(%rsp)\n\t"   /* frame->ss */
                    "movq 0x328(%r8),%r10\n\t"  /* amd64_thread_data()->syscall_frame */
                    "movq (%r8),%rax\n\t"       /* NtCurrentTeb()->Tib.ExceptionList */
                    "movq %rax,0x300(%rsp,%rsi)\n\t"
@@ -1873,11 +1900,15 @@ static void sigsys_handler( int signal, siginfo_t *siginfo, void *sigcontext )
     if (instrumentation_callback) frame->restore_flags |= RESTORE_FLAGS_INSTRUMENTATION;
     ctx->uc_mcontext.gregs[REG_RCX] = (ULONG_PTR)frame;
     ctx->uc_mcontext.gregs[REG_R11] = frame->eflags;
-    ctx->uc_mcontext.gregs[REG_EFL] &= ~0x100;  /* clear single-step flag */
+    if (ctx->uc_mcontext.gregs[REG_EFL] & 0x100)
+    {
+        ctx->uc_mcontext.gregs[REG_EFL] &= ~0x100;  /* clear single-step flag */
+        frame->restore_flags |= CONTEXT_CONTROL;
+    }
     ctx->uc_mcontext.gregs[REG_RIP] = (ULONG64)__wine_syscall_dispatcher_prolog_end_ptr;
 }
 
-/* syscall numbers are for Windows 10 2009 (build 19043) */
+/* syscall numbers are for Windows 10 2009 (build 19045) */
 static struct
 {
     unsigned int win_syscall_nr;
@@ -1886,14 +1917,24 @@ static struct
 }
 syscall_nr_translation[] =
 {
+    {0x10, ~0u, NtQueryObject},
     {0x19, ~0u, NtQueryInformationProcess},
+    {0x1c, ~0u, NtSetInformationProcess},
+    {0x25, ~0u, NtQueryInformationThread},
+    {0x0d, ~0u, NtSetInformationThread},
     {0x36, ~0u, NtQuerySystemInformation},
-    {0xf2, ~0u, NtGetContextThread},
+    {0xf3, ~0u, NtGetContextThread},
+    {0x33, ~0u, NtOpenFile},
     {0x55, ~0u, NtCreateFile},
+    {0x4a, ~0u, NtCreateSection},
+    {0x28, ~0u, NtMapViewOfSection},
+    {0x2a, ~0u, NtUnmapViewOfSection},
     {0x08, ~0u, NtWriteFile},
     {0x06, ~0u, NtReadFile},
     {0x0f, ~0u, NtClose},
     {0x23, ~0u, NtQueryVirtualMemory},
+    {0x50, ~0u, NtProtectVirtualMemory},
+    {0xa6, ~0u, NtCreateDebugObject},
 };
 
 static void sigsys_handler_rdr2( int signal, siginfo_t *siginfo, void *sigcontext )
@@ -2012,7 +2053,8 @@ static void install_bpf(struct sigaction *sig_act)
 
     {
         const char *sgi = getenv("SteamGameId");
-        if (sgi && (!strcmp(sgi, "1174180") || !strcmp(sgi, "1404210") || !strcmp(sgi, "1418100")))
+        if (sgi && (!strcmp(sgi, "1174180") || !strcmp(sgi, "1404210") || !strcmp(sgi, "1418100") || !strcmp(sgi, "2767030")
+                    || !strcmp(sgi, "2853730") || !strcmp( sgi, "298110" )))
         {
             /* Use specific signal handler. */
             sig_act->sa_sigaction = sigsys_handler_rdr2;
@@ -2107,7 +2149,7 @@ static inline BOOL handle_interrupt( ucontext_t *sigcontext, EXCEPTION_RECORD *r
     case 0x29:
         /* __fastfail: process state is corrupted */
         rec->ExceptionCode = STATUS_STACK_BUFFER_OVERRUN;
-        rec->ExceptionFlags = EH_NONCONTINUABLE;
+        rec->ExceptionFlags = EXCEPTION_NONCONTINUABLE;
         rec->NumberParameters = 1;
         rec->ExceptionInformation[0] = context->Rcx;
         NtRaiseException( rec, context, FALSE );
@@ -2225,7 +2267,7 @@ static BOOL handle_syscall_fault( ucontext_t *sigcontext, EXCEPTION_RECORD *rec,
         TRACE_(seh)( "returning to handler\n" );
         RDI_sig(sigcontext) = (ULONG_PTR)ntdll_get_thread_data()->jmp_buf;
         RSI_sig(sigcontext) = 1;
-        RIP_sig(sigcontext) = (ULONG_PTR)__wine_longjmp;
+        RIP_sig(sigcontext) = (ULONG_PTR)longjmp;
         ntdll_get_thread_data()->jmp_buf = NULL;
     }
     else
@@ -2282,6 +2324,7 @@ static BOOL handle_syscall_trap( ucontext_t *sigcontext, siginfo_t *siginfo )
 
         RIP_sig( sigcontext ) = (ULONG64)__wine_unix_call_dispatcher_prolog_end_ptr;
         R10_sig( sigcontext ) = RCX_sig( sigcontext );
+        fixup_frame_fpu_state( frame, sigcontext );
     }
     else if (siginfo->si_code == 4 /* TRAP_HWBKPT */ && is_inside_syscall( sigcontext ))
     {
@@ -2349,9 +2392,7 @@ static void segv_handler( int signal, siginfo_t *siginfo, void *sigcontext )
         rec.NumberParameters = 2;
         rec.ExceptionInformation[0] = (ERROR_sig(ucontext) >> 1) & 0x09;
         rec.ExceptionInformation[1] = (ULONG_PTR)siginfo->si_addr;
-        rec.ExceptionCode = virtual_handle_fault( siginfo->si_addr, rec.ExceptionInformation[0],
-                                                  (void *)RSP_sig(ucontext) );
-        if (!rec.ExceptionCode)
+        if (!virtual_handle_fault( &rec, (void *)RSP_sig(ucontext) ))
         {
             leave_handler( ucontext );
             return;
@@ -2507,7 +2548,7 @@ static void int_handler( int signal, siginfo_t *siginfo, void *sigcontext )
 static void abrt_handler( int signal, siginfo_t *siginfo, void *sigcontext )
 {
     ucontext_t *ucontext = init_handler( sigcontext );
-    EXCEPTION_RECORD rec = { EXCEPTION_WINE_ASSERTION, EH_NONCONTINUABLE };
+    EXCEPTION_RECORD rec = { EXCEPTION_WINE_ASSERTION, EXCEPTION_NONCONTINUABLE };
 
     setup_exception( ucontext, &rec );
 }
@@ -2540,6 +2581,7 @@ static void usr1_handler( int signal, siginfo_t *siginfo, void *sigcontext )
     {
         struct syscall_frame *frame = amd64_thread_data()->syscall_frame;
         ULONG64 saved_compaction = 0;
+        I386_CONTEXT *wow_context;
         struct xcontext *context;
 
         context = (struct xcontext *)(((ULONG_PTR)RSP_sig(ucontext) - 128 /* red zone */ - sizeof(*context)) & ~15);
@@ -2549,6 +2591,12 @@ static void usr1_handler( int signal, siginfo_t *siginfo, void *sigcontext )
             return;
         }
         context->c.ContextFlags = CONTEXT_FULL | CONTEXT_SEGMENTS | CONTEXT_EXCEPTION_REQUEST;
+        if (frame->restore_flags & RESTORE_FLAGS_INCOMPLETE_FRAME_CONTEXT)
+        {
+            frame->restore_flags &= ~RESTORE_FLAGS_INCOMPLETE_FRAME_CONTEXT;
+            frame->eflags = 0x200;
+            fixup_frame_fpu_state( frame, ucontext );
+        }
         NtGetContextThread( GetCurrentThread(), &context->c );
         if (xstate_extended_features())
         {
@@ -2564,6 +2612,13 @@ static void usr1_handler( int signal, siginfo_t *siginfo, void *sigcontext )
             context->c.ContextFlags &= ~0x40;
             frame->restore_flags |= 0x40;
         }
+        if ((wow_context = get_cpu_area( IMAGE_FILE_MACHINE_I386 ))
+             && (wow_context->ContextFlags & CONTEXT_I386_CONTROL) == CONTEXT_I386_CONTROL)
+        {
+            WOW64_CPURESERVED *cpu = NtCurrentTeb()->TlsSlots[WOW64_TLS_CPURESERVED];
+
+            cpu->Flags |= WOW64_CPURESERVED_FLAG_RESET_STATE;
+        }
         NtSetContextThread( GetCurrentThread(), &context->c );
     }
     else
@@ -2577,6 +2632,34 @@ static void usr1_handler( int signal, siginfo_t *siginfo, void *sigcontext )
         restore_context( &context, ucontext );
     }
 }
+
+
+#ifdef __APPLE__
+/**********************************************************************
+ *		sigsys_handler
+ *
+ * Handler for SIGSYS, signals that a non-existent system call was invoked.
+ * Only called on macOS 14 Sonoma and later.
+ */
+static void sigsys_handler( int signal, siginfo_t *siginfo, void *sigcontext )
+{
+    extern const void *__wine_syscall_dispatcher_prolog_end_ptr;
+    ucontext_t *ucontext = init_handler( sigcontext );
+    struct syscall_frame *frame = amd64_thread_data()->syscall_frame;
+
+    TRACE_(seh)("SIGSYS, rax %#llx, rip %#llx.\n", RAX_sig(ucontext), RIP_sig(ucontext));
+
+    frame->rip = RIP_sig(ucontext) + 0xb;
+    frame->rcx = RIP_sig(ucontext);
+    frame->eflags = EFL_sig(ucontext);
+    frame->restore_flags = 0;
+    if (instrumentation_callback) frame->restore_flags |= RESTORE_FLAGS_INSTRUMENTATION;
+    RCX_sig(ucontext) = (ULONG_PTR)frame;
+    R11_sig(ucontext) = frame->eflags;
+    EFL_sig(ucontext) &= ~0x100;  /* clear single-step flag */
+    RIP_sig(ucontext) = (ULONG64)__wine_syscall_dispatcher_prolog_end_ptr;
+}
+#endif
 
 
 /***********************************************************************
@@ -2872,6 +2955,10 @@ void signal_init_process(void)
     if (sigaction( SIGSEGV, &sig_act, NULL ) == -1) goto error;
     if (sigaction( SIGILL, &sig_act, NULL ) == -1) goto error;
     if (sigaction( SIGBUS, &sig_act, NULL ) == -1) goto error;
+#ifdef __APPLE__
+    sig_act.sa_sigaction = sigsys_handler;
+    if (sigaction( SIGSYS, &sig_act, NULL ) == -1) goto error;
+#endif
     install_bpf(&sig_act);
     return;
 
@@ -2910,8 +2997,8 @@ void call_init_thunk( LPTHREAD_START_ROUTINE entry, void *arg, BOOL suspend, TEB
 #elif defined(__NetBSD__)
     sysarch( X86_64_SET_GSBASE, &teb );
 #elif defined (__APPLE__)
-    __asm__ volatile (".byte 0x65\n\tmovq %0,%c1" :: "r" (teb->Tib.Self), "n" (FIELD_OFFSET(TEB, Tib.Self)));
-    __asm__ volatile (".byte 0x65\n\tmovq %0,%c1" :: "r" (teb->ThreadLocalStoragePointer), "n" (FIELD_OFFSET(TEB, ThreadLocalStoragePointer)));
+    __asm__ volatile ("movq %0,%%gs:%c1" :: "r" (teb->Tib.Self), "n" (FIELD_OFFSET(TEB, Tib.Self)));
+    __asm__ volatile ("movq %0,%%gs:%c1" :: "r" (teb->ThreadLocalStoragePointer), "n" (FIELD_OFFSET(TEB, ThreadLocalStoragePointer)));
     thread_data->pthread_teb = mac_thread_gsbase();
     /* alloc_tls_slot() needs to poke a value to an address relative to each
        thread's gsbase.  Have each thread record its gsbase pointer into its
@@ -3265,6 +3352,10 @@ __ASM_GLOBAL_FUNC( __wine_syscall_dispatcher,
                    "jnz 1f\n\t"
                    /* CONTEXT_CONTROL */
                    "movq (%rsp),%rcx\n\t"          /* frame->rip */
+                   "pushq %r11\n\t"
+                   /* make sure that if trap flag is set the trap happens on the first instruction after iret */
+                   "andq $~0x4000,(%rsp)\n\t" /* make sure NT flag is not set, or iretq will fault */
+                   "popfq\n\t"
                    "iretq\n"
                    /* CONTEXT_INTEGER */
                    "1:\tmovq 0x00(%rcx),%rax\n\t"
@@ -3288,15 +3379,19 @@ __ASM_GLOBAL_FUNC( __wine_syscall_dispatcher,
                    "testl $0x2,%edx\n\t"          /* CONTEXT_INTEGER */
                    "jnz 1b\n\t"
                    "xchgq %r10,(%rsp)\n\t"
+                   "pushq %r11\n\t"
+                   /* make sure that if trap flag is set the trap happens on the first instruction after iret */
+                   "andq $~0x4000,(%rsp)\n\t" /* make sure NT flag is not set, or iretq will fault */
+                   "popfq\n\t"
                    "iretq\n\t"
 
                    /* pop rbp-based kernel stack cfi */
                    __ASM_CFI("\t.cfi_restore_state\n")
                    "5:\tmovl $0xc000000d,%eax\n\t" /* STATUS_INVALID_PARAMETER */
                    "movq %rsp,%rcx\n\t"
-                   "jmp " __ASM_LOCAL_LABEL("__wine_syscall_dispatcher_return") "\n\t"
-                   ".globl " __ASM_NAME("__wine_syscall_dispatcher_return") "\n"
-                   __ASM_NAME("__wine_syscall_dispatcher_return") ":\n\t"
+                   "jmp " __ASM_LOCAL_LABEL("__wine_syscall_dispatcher_return") )
+
+__ASM_GLOBAL_FUNC( __wine_syscall_dispatcher_return,
                    "movq %rdi,%rcx\n\t"
                    "movl 0xb0(%rcx),%r14d\n\t"     /* frame->syscall_flags */
                    "movq %rsi,%rax\n\t"
@@ -3335,7 +3430,7 @@ __ASM_GLOBAL_FUNC( __wine_unix_call_dispatcher,
                    "popq 0x70(%rcx)\n\t"           /* frame->rip */
                    __ASM_CFI(".cfi_adjust_cfa_offset -8\n\t")
                    __ASM_CFI_REG_IS_AT2(rip, rcx, 0xf0,0x00)
-                   "movl $0,0xb4(%rcx)\n\t"        /* frame->restore_flags */
+                   "movl $0x20000,0xb4(%rcx)\n\t"  /* frame->restore_flags <- RESTORE_FLAGS_INCOMPLETE_FRAME_CONTEXT */
                    __ASM_LOCAL_LABEL("__wine_unix_call_dispatcher_prolog_end") ":\n\t"
                    "movq %rbx,0x08(%rcx)\n\t"
                    __ASM_CFI_REG_IS_AT1(rbx, rcx, 0x08)
@@ -3431,44 +3526,5 @@ asm( ".data\n\t"
      __ASM_NAME("__wine_unix_call_dispatcher_prolog_end_ptr") ":\n\t"
      ".quad " __ASM_LOCAL_LABEL("__wine_unix_call_dispatcher_prolog_end") "\n\t"
      ".text\n\t" );
-
-/***********************************************************************
- *           __wine_setjmpex
- */
-__ASM_GLOBAL_FUNC( __wine_setjmpex,
-                   "movq %rsi,(%rdi)\n\t"          /* jmp_buf->Frame */
-                   "movq %rbx,0x8(%rdi)\n\t"       /* jmp_buf->Rbx */
-                   "leaq 0x8(%rsp),%rax\n\t"
-                   "movq %rax,0x10(%rdi)\n\t"      /* jmp_buf->Rsp */
-                   "movq %rbp,0x18(%rdi)\n\t"      /* jmp_buf->Rbp */
-                   "movq %r12,0x30(%rdi)\n\t"      /* jmp_buf->R12 */
-                   "movq %r13,0x38(%rdi)\n\t"      /* jmp_buf->R13 */
-                   "movq %r14,0x40(%rdi)\n\t"      /* jmp_buf->R14 */
-                   "movq %r15,0x48(%rdi)\n\t"      /* jmp_buf->R15 */
-                   "movq (%rsp),%rax\n\t"
-                   "movq %rax,0x50(%rdi)\n\t"      /* jmp_buf->Rip */
-                   "stmxcsr 0x58(%rdi)\n\t"        /* jmp_buf->MxCsr */
-                   "fnstcw 0x5c(%rdi)\n\t"         /* jmp_buf->FpCsr */
-                   "xorq %rax,%rax\n\t"
-                   "retq" )
-
-
-/***********************************************************************
- *           __wine_longjmp
- */
-__ASM_GLOBAL_FUNC( __wine_longjmp,
-                   "movq %rsi,%rax\n\t"            /* retval */
-                   "movq 0x8(%rdi),%rbx\n\t"       /* jmp_buf->Rbx */
-                   "movq 0x18(%rdi),%rbp\n\t"      /* jmp_buf->Rbp */
-                   "movq 0x30(%rdi),%r12\n\t"      /* jmp_buf->R12 */
-                   "movq 0x38(%rdi),%r13\n\t"      /* jmp_buf->R13 */
-                   "movq 0x40(%rdi),%r14\n\t"      /* jmp_buf->R14 */
-                   "movq 0x48(%rdi),%r15\n\t"      /* jmp_buf->R15 */
-                   "ldmxcsr 0x58(%rdi)\n\t"        /* jmp_buf->MxCsr */
-                   "fnclex\n\t"
-                   "fldcw 0x5c(%rdi)\n\t"          /* jmp_buf->FpCsr */
-                   "movq 0x50(%rdi),%rdx\n\t"      /* jmp_buf->Rip */
-                   "movq 0x10(%rdi),%rsp\n\t"      /* jmp_buf->Rsp */
-                   "jmp *%rdx" )
 
 #endif  /* __x86_64__ */

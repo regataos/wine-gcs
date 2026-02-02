@@ -344,13 +344,7 @@ HANDLE WINAPI DECLSPEC_HOTPATCH OpenThread( DWORD access, BOOL inherit, DWORD id
     OBJECT_ATTRIBUTES attr;
     CLIENT_ID cid;
 
-    attr.Length = sizeof(attr);
-    attr.RootDirectory = 0;
-    attr.Attributes = inherit ? OBJ_INHERIT : 0;
-    attr.ObjectName = NULL;
-    attr.SecurityDescriptor = NULL;
-    attr.SecurityQualityOfService = NULL;
-
+    InitializeObjectAttributes( &attr, NULL, inherit ? OBJ_INHERIT : 0, 0, NULL );
     cid.UniqueProcess = 0;
     cid.UniqueThread = ULongToHandle( id );
 
@@ -521,25 +515,12 @@ DWORD WINAPI DECLSPEC_HOTPATCH SetThreadIdealProcessor( HANDLE thread, DWORD pro
 /***********************************************************************
  *           SetThreadIdealProcessorEx   (kernelbase.@)
  */
-BOOL WINAPI DECLSPEC_HOTPATCH SetThreadIdealProcessorEx( HANDLE thread, PROCESSOR_NUMBER *processor,
+BOOL WINAPI DECLSPEC_HOTPATCH SetThreadIdealProcessorEx( HANDLE thread, PROCESSOR_NUMBER *ideal,
                                                          PROCESSOR_NUMBER *previous )
 {
-    FIXME("(%p, %p, %p): stub\n", thread, processor, previous);
-
-    if (!processor || processor->Group > 0 || processor->Number > MAXIMUM_PROCESSORS)
-    {
-        SetLastError(ERROR_INVALID_PARAMETER);
-        return FALSE;
-    }
-
-    if (previous)
-    {
-        previous->Group = 0;
-        previous->Number = 0;
-        previous->Reserved = 0;
-    }
-
-    return TRUE;
+    FIXME( "(%p %p %p): stub\n", thread, ideal, previous );
+    SetLastError( ERROR_CALL_NOT_IMPLEMENTED );
+    return FALSE;
 }
 
 
@@ -772,6 +753,36 @@ BOOL WINAPI DECLSPEC_HOTPATCH TlsSetValue( DWORD index, LPVOID value )
         NtCurrentTeb()->TlsExpansionSlots[index] = value;
     }
     return TRUE;
+}
+
+
+/***********************************************************************
+ *           Wow64GetThreadContext   (kernelbase.@)
+ */
+BOOL WINAPI Wow64GetThreadContext( HANDLE handle, WOW64_CONTEXT *context)
+{
+#ifdef __i386__
+    return set_ntstatus( NtGetContextThread( handle, (CONTEXT *)context ));
+#elif defined(__x86_64__)
+    return set_ntstatus( RtlWow64GetThreadContext( handle, context ));
+#else
+    return set_ntstatus( STATUS_NOT_IMPLEMENTED );
+#endif
+}
+
+
+/***********************************************************************
+ *           Wow64SetThreadContext   (kernelbase.@)
+ */
+BOOL WINAPI Wow64SetThreadContext( HANDLE handle, const WOW64_CONTEXT *context)
+{
+#ifdef __i386__
+    return set_ntstatus( NtSetContextThread( handle, (const CONTEXT *)context ));
+#elif defined(__x86_64__)
+    return set_ntstatus( RtlWow64SetThreadContext( handle, context ));
+#else
+    return set_ntstatus( STATUS_NOT_IMPLEMENTED );
+#endif
 }
 
 

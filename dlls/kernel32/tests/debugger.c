@@ -416,16 +416,34 @@ static void wait_for_breakpoint_(unsigned line, struct debugger_context *ctx)
                        ctx->ev.u.Exception.ExceptionRecord.ExceptionCode);
 }
 
+#define check_thread_running(h)   ok(_check_thread_suspend_count(h) == 0, "Expecting running thread\n")
+#define check_thread_suspended(h) ok(_check_thread_suspend_count(h) >  0, "Expecting suspended thread\n")
+
+static LONG _check_thread_suspend_count(HANDLE h)
+{
+    DWORD suspend_count;
+
+    suspend_count = SuspendThread(h);
+    if (suspend_count != (DWORD)-1 && ResumeThread(h) == (DWORD)-1)
+        return (DWORD)-2;
+    return suspend_count;
+}
+
 static void process_attach_events(struct debugger_context *ctx, BOOL pass_exception)
 {
     DEBUG_EVENT ev;
     BOOL ret;
+    HANDLE prev_thread;
 
     ctx->ev.dwDebugEventCode = -1;
     next_event(ctx, 0);
     ok(ctx->ev.dwDebugEventCode == CREATE_PROCESS_DEBUG_EVENT, "dwDebugEventCode = %ld\n", ctx->ev.dwDebugEventCode);
 
+    todo_wine
+    check_thread_suspended(ctx->ev.u.CreateProcessInfo.hThread);
+    prev_thread = ctx->ev.u.CreateProcessInfo.hThread;
     next_event(ctx, 0);
+
     if (ctx->ev.dwDebugEventCode == LOAD_DLL_DEBUG_EVENT) /* Vista+ reports ntdll.dll before reporting threads */
     {
         ok(ctx->ev.dwDebugEventCode == LOAD_DLL_DEBUG_EVENT, "dwDebugEventCode = %ld\n", ctx->ev.dwDebugEventCode);
@@ -434,7 +452,13 @@ static void process_attach_events(struct debugger_context *ctx, BOOL pass_except
     }
 
     while (ctx->ev.dwDebugEventCode == CREATE_THREAD_DEBUG_EVENT)
+    {
+        todo_wine
+        check_thread_suspended(ctx->ev.u.CreateThread.hThread);
+        check_thread_running(prev_thread);
+        prev_thread = ctx->ev.u.CreateThread.hThread;
         next_event(ctx, 0);
+    }
 
     do
     {
@@ -455,9 +479,12 @@ static void process_attach_events(struct debugger_context *ctx, BOOL pass_except
         DWORD last_threads[5];
         unsigned thd_idx = 0, i;
 
+        check_thread_running(prev_thread);
+
         /* sometimes (at least Win10) several thread creations are reported here */
         do
         {
+            check_thread_running(ctx->ev.u.CreateThread.hThread);
             if (thd_idx < ARRAY_SIZE(last_threads))
                 last_threads[thd_idx++] = ctx->ev.dwThreadId;
             next_event(ctx, WAIT_EVENT_TIMEOUT);
@@ -1151,7 +1178,7 @@ static void test_debug_loop_wow64(void)
             if (!pGetMappedFileNameW( pi.hProcess, ev.u.LoadDll.lpBaseOfDll, buffer, ARRAY_SIZE(buffer) )) buffer[0] = L'\0';
             if ((p = wcsrchr( buffer, '\\' ))) p++;
             else p = buffer;
-            if (!memcmp( p, L"wow64", 5 * sizeof(WCHAR) ))
+            if (!wcsnicmp( p, L"wow64", 5 ) || !wcsicmp( p, L"xtajit.dll" ))
             {
                 /* on Win10, wow64cpu's load dll event is received after first exception */
                 ok(bpwx_order == 0, "loaddll for wow64 DLLs should appear before exception\n");
@@ -1381,16 +1408,7 @@ static void test_debug_children(const char *name, DWORD flag, BOOL debug_child, 
 
         /* Except for wxppro and w2008, the initial breakpoint is now somewhere else, possibly within LdrInitShimEngineDynamic,
          * It's also catching exceptions and ContinueDebugEvent(DBG_EXCEPTION_NOT_HANDLED) should not crash the child now */
-        if (broken(ctx.ev.u.Exception.ExceptionRecord.ExceptionAddress == pDbgBreakPoint))
-        {
-            win_skip("Ignoring initial breakpoint address check\n");
-            pass_exception = FALSE;
-        }
-        else
-        {
-            todo_wine
-            ok(ctx.ev.u.Exception.ExceptionRecord.ExceptionAddress != pDbgBreakPoint, "ExceptionAddress == pDbgBreakPoint\n");
-        }
+        ok(ctx.ev.u.Exception.ExceptionRecord.ExceptionAddress != pDbgBreakPoint, "ExceptionAddress == pDbgBreakPoint\n");
 
         if (pass_exception)
         {
@@ -1709,7 +1727,7 @@ static void test_debugger(const char *argv0)
 
         expect_event(&ctx, EXIT_THREAD_DEBUG_EVENT);
     }
-    else win_skip("loop_code not supported on this architecture\n");
+    else todo_wine win_skip("loop_code not supported on this architecture\n");
 
     if (sizeof(call_debug_service_code) > 1)
     {
@@ -1735,7 +1753,7 @@ static void test_debugger(const char *argv0)
         if (sizeof(void *) == 4 && ctx.ev.dwDebugEventCode == EXCEPTION_DEBUG_EVENT) next_event(&ctx, WAIT_EVENT_TIMEOUT);
         ok(ctx.ev.dwDebugEventCode == EXIT_THREAD_DEBUG_EVENT, "unexpected debug event %lu\n", ctx.ev.dwDebugEventCode);
     }
-    else win_skip("call_debug_service_code not supported on this architecture\n");
+    else todo_wine win_skip("call_debug_service_code not supported on this architecture\n");
 
     if (skip_reply_later)
         win_skip("Skipping unsupported DBG_REPLY_LATER tests\n");
@@ -2172,8 +2190,10 @@ static void test_debugger(const char *argv0)
     {
         next_event(&ctx, WAIT_EVENT_TIMEOUT);
         ok (ctx.ev.dwDebugEventCode != EXCEPTION_DEBUG_EVENT, "got exception\n");
+        if (ctx.ev.dwDebugEventCode == EXCEPTION_DEBUG_EVENT) break;
     }
     while (ctx.ev.dwDebugEventCode != EXIT_PROCESS_DEBUG_EVENT);
+    if (ctx.ev.dwDebugEventCode != EXIT_PROCESS_DEBUG_EVENT) TerminateProcess(pi.hProcess, 0);
 
     ret = CloseHandle(event);
     ok(ret, "CloseHandle failed, last error %ld.\n", GetLastError());
@@ -2400,6 +2420,73 @@ static void test_kill_on_exit(const char *argv0)
     heap_free(cmd);
 }
 
+static void test_OutputDebugString(void)
+{
+    static void (WINAPI *pOutputDebugStringA)(const char *);
+
+    pOutputDebugStringA = (void *)GetProcAddress(GetModuleHandleW(L"kernel32.dll"), "OutputDebugStringA");
+    ok(!!pOutputDebugStringA, "got NULL");
+    SetLastError(0xdeadbeef);
+    pOutputDebugStringA("test");
+    ok(GetLastError() == 0xdeadbeef, "got %ld.\n", GetLastError());
+
+    pOutputDebugStringA = (void *)GetProcAddress(GetModuleHandleW(L"kernelbase.dll"), "OutputDebugStringA");
+    ok(!!pOutputDebugStringA, "got NULL");
+    SetLastError(0xdeadbeef);
+    pOutputDebugStringA("test");
+    ok(GetLastError() == 0xdeadbeef, "got %ld.\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    OutputDebugStringW(L"test");
+    ok(GetLastError() == 0xdeadbeef, "got %ld.\n", GetLastError());
+}
+
+static LONG WINAPI test_unhandled_exception_filter_topfilter( EXCEPTION_POINTERS *ep )
+{
+    static int depth;
+    EXCEPTION_RECORD *rec = ep->ExceptionRecord;
+    LONG ret;
+
+    ++depth;
+    if (depth > 1) return EXCEPTION_CONTINUE_SEARCH;
+
+    ret = UnhandledExceptionFilter( ep );
+    ok( depth == 2, "got %d.\n", depth );
+    --depth;
+    ok( ret == EXCEPTION_EXECUTE_HANDLER, "got %#lx.\n", ret );
+    rec->ExceptionFlags = EXCEPTION_NESTED_CALL;
+    ret = UnhandledExceptionFilter( ep );
+    ok( depth == 1, "got %d.\n", depth );
+    depth = 1;
+    ok( ret == EXCEPTION_CONTINUE_SEARCH, "got %#lx.\n", ret );
+    --depth;
+    rec->ExceptionFlags = 0;
+    return EXCEPTION_CONTINUE_SEARCH;
+}
+
+static void test_unhandled_exception_filter(void)
+{
+    EXCEPTION_RECORD rec = { .ExceptionCode = 0xbeef };
+    EXCEPTION_POINTERS ep = { .ExceptionRecord = &rec };
+    LPTOP_LEVEL_EXCEPTION_FILTER old;
+    LONG ret;
+
+    old = SetUnhandledExceptionFilter( test_unhandled_exception_filter_topfilter );
+    ret = UnhandledExceptionFilter( &ep );
+    ok( ret == EXCEPTION_EXECUTE_HANDLER, "got %ld.\n", ret );
+
+    SetUnhandledExceptionFilter( NULL );
+
+    rec.ExceptionFlags = EXCEPTION_NESTED_CALL;
+    ret = UnhandledExceptionFilter( &ep );
+    ok( ret == EXCEPTION_CONTINUE_SEARCH, "got %#lx.\n", ret );
+    rec.ExceptionFlags &= ~EXCEPTION_NESTED_CALL;
+    ret = UnhandledExceptionFilter( &ep );
+    ok( ret == EXCEPTION_EXECUTE_HANDLER, "got %#lx.\n", ret );
+
+    SetUnhandledExceptionFilter( old );
+}
+
 START_TEST(debugger)
 {
     HMODULE hdll;
@@ -2419,6 +2506,11 @@ START_TEST(debugger)
     pDbgUiConnectToDbg = (void*)GetProcAddress(ntdll, "DbgUiConnectToDbg");
     pDbgUiGetThreadDebugObject = (void*)GetProcAddress(ntdll, "DbgUiGetThreadDebugObject");
     pDbgUiSetThreadDebugObject = (void*)GetProcAddress(ntdll, "DbgUiSetThreadDebugObject");
+
+#ifdef __arm__
+    /* mask thumb bit for address comparisons */
+    pDbgBreakPoint = (void *)((ULONG_PTR)pDbgBreakPoint & ~1);
+#endif
 
     if (pIsWow64Process) pIsWow64Process( GetCurrentProcess(), &is_wow64 );
 
@@ -2460,5 +2552,7 @@ START_TEST(debugger)
         test_debug_children(myARGV[0], DEBUG_ONLY_THIS_PROCESS, FALSE, TRUE);
         test_debugger(myARGV[0]);
         test_kill_on_exit(myARGV[0]);
+        test_OutputDebugString();
+        test_unhandled_exception_filter();
     }
 }

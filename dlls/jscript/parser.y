@@ -251,7 +251,8 @@ static expression_t *new_prop_and_value_expression(parser_ctx_t*,property_list_t
 
 /* ECMA-262 10th Edition    15.1 */
 Script
-       : ScriptBody HtmlComment { ctx->source = $1 ? $1->head : NULL; }
+       : ScriptBody HtmlComment { ctx->source = $1 ? $1->head : NULL;
+                                  (void)parser_nerrs; /* avoid unused variable warning */ }
 
 /* ECMA-262 10th Edition    15.1 */
 ScriptBody
@@ -280,7 +281,7 @@ FunctionBody
 
 /* ECMA-262 3rd Edition    13 */
 FormalParameterList
-        : Identifier           { $$ = new_parameter_list(ctx, $1); }
+        : Identifier            { $$ = new_parameter_list(ctx, $1); }
         | FormalParameterList ',' Identifier
                                 { $$ = parameter_list_add(ctx, $1, $3); }
 
@@ -480,12 +481,14 @@ WithStatement
 LabelledStatement
         : tIdentifier ':' Statement
                                 { $$ = new_labelled_statement(ctx, @$, $1, $3); }
-        | kGET ':' Statement
-                                { $$ = new_labelled_statement(ctx, @$, $1, $3); }
-        | kSET ':' Statement
-                                { $$ = new_labelled_statement(ctx, @$, $1, $3); }
-        | kLET ':' Statement
-                                { $$ = new_labelled_statement(ctx, @$, $1, $3); }
+
+        /* We have to lay out the keywords explicitly instead of using Identifier, as otherwise bison's parser
+         * wouldn't be able to figure out whether to reduce the Identifier or shift the colon (following the
+         * label and thus treating it as a label). This happens because the parser has only one lookahead token
+         * that can be used to decide a shift/reduce and would introduce a conflict in this case... */
+        | kGET ':' Statement    { $$ = new_labelled_statement(ctx, @$, $1, $3); }
+        | kSET ':' Statement    { $$ = new_labelled_statement(ctx, @$, $1, $3); }
+        | kLET ':' Statement    { $$ = new_labelled_statement(ctx, @$, $1, $3); }
 
 /* ECMA-262 3rd Edition    12.11 */
 SwitchStatement
@@ -793,7 +796,11 @@ ArgumentList
 /* ECMA-262 3rd Edition    11.1 */
 PrimaryExpression
         : kTHIS                 { $$ = new_expression(ctx, EXPR_THIS, 0); }
-        | Identifier            { $$ = new_identifier_expression(ctx, $1); }
+        /* We have to lay out the keywords explicitly instead of using Identifier, see LabelledStatement. */
+        | tIdentifier           { $$ = new_identifier_expression(ctx, $1); }
+        | kGET                  { $$ = new_identifier_expression(ctx, $1); }
+        | kSET                  { $$ = new_identifier_expression(ctx, $1); }
+        | kLET                  { $$ = new_identifier_expression(ctx, $1); }
         | Literal               { $$ = new_literal_expression(ctx, $1); }
         | ArrayLiteral          { $$ = $1; }
         | ObjectLiteral         { $$ = $1; }

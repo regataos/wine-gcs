@@ -19,6 +19,7 @@
 #include <stdarg.h>
 #include <math.h>
 #include <limits.h>
+#include <assert.h>
 
 #include "windef.h"
 #include "winbase.h"
@@ -45,6 +46,40 @@ WINE_DEFAULT_DEBUG_CHANNEL(gdiplus);
 /* looks-right constants */
 #define ANCHOR_WIDTH (2.0)
 #define MAX_ITERS (50)
+
+GpStatus gdi_dc_acquire(GpGraphics *graphics, HDC *hdc)
+{
+    if (graphics->hdc != NULL)
+    {
+        *hdc = graphics->hdc;
+        graphics->hdc_refs++;
+        return Ok;
+    }
+    else if (graphics->owndc)
+    {
+        *hdc = graphics->hdc = GetDC(graphics->hwnd);
+        if (!graphics->hdc)
+            return OutOfMemory;
+        graphics->hdc_refs++;
+        return Ok;
+    }
+
+    *hdc = NULL;
+    return InvalidParameter;
+}
+
+void gdi_dc_release(GpGraphics *graphics, HDC hdc)
+{
+    assert(graphics->hdc_refs > 0);
+    graphics->hdc_refs--;
+
+    if (graphics->owndc && !graphics->hdc_refs)
+    {
+        assert(graphics->hdc == hdc);
+        graphics->hdc = NULL;
+        ReleaseDC(graphics->hwnd, hdc);
+    }
+}
 
 static GpStatus draw_driver_string(GpGraphics *graphics, GDIPCONST UINT16 *text, INT length,
                                    GDIPCONST GpFont *font, GDIPCONST GpStringFormat *format,
@@ -252,7 +287,7 @@ static HBRUSH create_gdi_brush(const GpBrush *brush, INT origin_x, INT origin_y)
     return gdibrush;
 }
 
-static INT prepare_dc(GpGraphics *graphics, GpPen *pen)
+static INT prepare_dc(GpGraphics *graphics, HDC hdc, GpPen *pen)
 {
     LOGBRUSH lb;
     HPEN gdipen;
@@ -261,9 +296,9 @@ static INT prepare_dc(GpGraphics *graphics, GpPen *pen)
     GpPointF pt[2];
     DWORD dash_array[MAX_DASHLEN];
 
-    save_state = SaveDC(graphics->hdc);
+    save_state = SaveDC(hdc);
 
-    EndPath(graphics->hdc);
+    EndPath(hdc);
 
     if(pen->unit == UnitPixel){
         width = pen->width;
@@ -311,15 +346,15 @@ static INT prepare_dc(GpGraphics *graphics, GpPen *pen)
         free_gdi_logbrush(&lb);
     }
 
-    SelectObject(graphics->hdc, gdipen);
+    SelectObject(hdc, gdipen);
 
     return save_state;
 }
 
-static void restore_dc(GpGraphics *graphics, INT state)
+static void restore_dc(GpGraphics *graphics, HDC hdc, INT state)
 {
-    DeleteObject(SelectObject(graphics->hdc, GetStockObject(NULL_PEN)));
-    RestoreDC(graphics->hdc, state);
+    DeleteObject(SelectObject(hdc, GetStockObject(NULL_PEN)));
+    RestoreDC(hdc, state);
 }
 
 static void round_points(POINT *pti, GpPointF *ptf, INT count)
@@ -342,9 +377,14 @@ static void round_points(POINT *pti, GpPointF *ptf, INT count)
 static void gdi_alpha_blend(GpGraphics *graphics, INT dst_x, INT dst_y, INT dst_width, INT dst_height,
                             HDC hdc, INT src_x, INT src_y, INT src_width, INT src_height)
 {
+    HDC dst_hdc;
     CompositingMode comp_mode;
-    INT technology = GetDeviceCaps(graphics->hdc, TECHNOLOGY);
-    INT shadeblendcaps  = GetDeviceCaps(graphics->hdc, SHADEBLENDCAPS);
+    INT technology, shadeblendcaps;
+
+    gdi_dc_acquire(graphics, &dst_hdc);
+
+    technology = GetDeviceCaps(dst_hdc, TECHNOLOGY);
+    shadeblendcaps  = GetDeviceCaps(dst_hdc, SHADEBLENDCAPS);
 
     GdipGetCompositingMode(graphics, &comp_mode);
 
@@ -353,7 +393,7 @@ static void gdi_alpha_blend(GpGraphics *graphics, INT dst_x, INT dst_y, INT dst_
     {
         TRACE("alpha blending not supported by device, fallback to StretchBlt\n");
 
-        StretchBlt(graphics->hdc, dst_x, dst_y, dst_width, dst_height,
+        StretchBlt(dst_hdc, dst_x, dst_y, dst_width, dst_height,
                    hdc, src_x, src_y, src_width, src_height, SRCCOPY);
     }
     else
@@ -365,9 +405,11 @@ static void gdi_alpha_blend(GpGraphics *graphics, INT dst_x, INT dst_y, INT dst_
         bf.SourceConstantAlpha = 255;
         bf.AlphaFormat = AC_SRC_ALPHA;
 
-        GdiAlphaBlend(graphics->hdc, dst_x, dst_y, dst_width, dst_height,
+        GdiAlphaBlend(dst_hdc, dst_x, dst_y, dst_width, dst_height,
                       hdc, src_x, src_y, src_width, src_height, bf);
     }
+
+    gdi_dc_release(graphics, dst_hdc);
 }
 
 static GpStatus get_clip_hrgn(GpGraphics *graphics, HRGN *hrgn)
@@ -477,7 +519,8 @@ static GpStatus alpha_blend_hdc_pixels(GpGraphics *graphics, INT dst_x, INT dst_
     if(!hbitmap || !temp_bits)
         goto done;
 
-    if ((GetDeviceCaps(graphics->hdc, TECHNOLOGY) == DT_RASPRINTER &&
+    if ((graphics->hdc &&
+         GetDeviceCaps(graphics->hdc, TECHNOLOGY) == DT_RASPRINTER &&
          GetDeviceCaps(graphics->hdc, SHADEBLENDCAPS) == SB_NONE) ||
             fmt & PixelFormatPAlpha)
         memcpy(temp_bits, src, src_width * src_height * 4);
@@ -564,27 +607,38 @@ static GpStatus alpha_blend_pixels_hrgn(GpGraphics *graphics, INT dst_x, INT dst
     }
     else
     {
+        HDC hdc;
         HRGN hrgn;
         int save;
 
-        stat = get_clip_hrgn(graphics, &hrgn);
+        stat = gdi_dc_acquire(graphics, &hdc);
 
         if (stat != Ok)
             return stat;
 
-        save = SaveDC(graphics->hdc);
+        stat = get_clip_hrgn(graphics, &hrgn);
 
-        ExtSelectClipRgn(graphics->hdc, hrgn, RGN_COPY);
+        if (stat != Ok)
+        {
+            gdi_dc_release(graphics, hdc);
+            return stat;
+        }
+
+        save = SaveDC(hdc);
+
+        ExtSelectClipRgn(hdc, hrgn, RGN_COPY);
 
         if (hregion)
-            ExtSelectClipRgn(graphics->hdc, hregion, RGN_AND);
+            ExtSelectClipRgn(hdc, hregion, RGN_AND);
 
         stat = alpha_blend_hdc_pixels(graphics, dst_x, dst_y, src, src_width,
             src_height, src_stride, fmt);
 
-        RestoreDC(graphics->hdc, save);
+        RestoreDC(hdc, save);
 
         DeleteObject(hrgn);
+
+        gdi_dc_release(graphics, hdc);
 
         return stat;
     }
@@ -1197,7 +1251,13 @@ static BOOL brush_can_fill_path(GpBrush *brush, BOOL is_fill)
 
 static GpStatus brush_fill_path(GpGraphics *graphics, GpBrush *brush)
 {
-    GpStatus status = Ok;
+    HDC hdc;
+    GpStatus status;
+
+    status = gdi_dc_acquire(graphics, &hdc);
+    if (status != Ok)
+        return status;
+
     switch (brush->bt)
     {
     case BrushTypeSolidColor:
@@ -1210,27 +1270,27 @@ static GpStatus brush_fill_path(GpGraphics *graphics, GpBrush *brush)
             RECT rc;
             /* partially transparent fill */
 
-            if (!SelectClipPath(graphics->hdc, RGN_AND))
+            if (!SelectClipPath(hdc, RGN_AND))
             {
                 status = GenericError;
                 DeleteObject(bmp);
                 break;
             }
-            if (GetClipBox(graphics->hdc, &rc) != NULLREGION)
+            if (GetClipBox(hdc, &rc) != NULLREGION)
             {
-                HDC hdc = CreateCompatibleDC(NULL);
+                HDC src_hdc = CreateCompatibleDC(NULL);
 
-                if (!hdc)
+                if (!src_hdc)
                 {
                     status = OutOfMemory;
                     DeleteObject(bmp);
                     break;
                 }
 
-                SelectObject(hdc, bmp);
+                SelectObject(src_hdc, bmp);
                 gdi_alpha_blend(graphics, rc.left, rc.top, rc.right - rc.left, rc.bottom - rc.top,
-                                hdc, 0, 0, 1, 1);
-                DeleteDC(hdc);
+                                src_hdc, 0, 0, 1, 1);
+                DeleteDC(src_hdc);
             }
 
             DeleteObject(bmp);
@@ -1249,13 +1309,15 @@ static GpStatus brush_fill_path(GpGraphics *graphics, GpBrush *brush)
             break;
         }
 
-        old_brush = SelectObject(graphics->hdc, gdibrush);
-        FillPath(graphics->hdc);
-        SelectObject(graphics->hdc, old_brush);
+        old_brush = SelectObject(hdc, gdibrush);
+        FillPath(hdc);
+        SelectObject(hdc, old_brush);
         DeleteObject(gdibrush);
         break;
     }
     }
+
+    gdi_dc_release(graphics, hdc);
 
     return status;
 }
@@ -1706,6 +1768,7 @@ static GpStatus brush_fill_pixels(GpGraphics *graphics, GpBrush *brush,
 static void draw_cap(GpGraphics *graphics, COLORREF color, GpLineCap cap, REAL size,
     const GpCustomLineCap *custom, REAL x1, REAL y1, REAL x2, REAL y2)
 {
+    HDC hdc;
     HGDIOBJ oldbrush = NULL, oldpen = NULL;
     GpMatrix matrix;
     HBRUSH brush = NULL;
@@ -1721,6 +1784,8 @@ static void draw_cap(GpGraphics *graphics, COLORREF color, GpLineCap cap, REAL s
     if((x1 == x2) && (y1 == y2))
         return;
 
+    gdi_dc_acquire(graphics, &hdc);
+
     theta = gdiplus_atan2(y2 - y1, x2 - x1);
 
     customstroke = (cap == LineCapCustom) && custom && (!custom->fill);
@@ -1732,8 +1797,8 @@ static void draw_cap(GpGraphics *graphics, COLORREF color, GpLineCap cap, REAL s
         pen = ExtCreatePen(PS_GEOMETRIC | PS_SOLID | PS_ENDCAP_FLAT |
                            PS_JOIN_MITER, 1, &lb, 0,
                            NULL);
-        oldbrush = SelectObject(graphics->hdc, brush);
-        oldpen = SelectObject(graphics->hdc, pen);
+        oldbrush = SelectObject(hdc, brush);
+        oldpen = SelectObject(hdc, pen);
     }
 
     switch(cap){
@@ -1768,7 +1833,7 @@ static void draw_cap(GpGraphics *graphics, COLORREF color, GpLineCap cap, REAL s
 
             round_points(pt, ptf, 4);
 
-            Polygon(graphics->hdc, pt, 4);
+            Polygon(hdc, pt, 4);
 
             break;
         case LineCapArrowAnchor:
@@ -1793,7 +1858,7 @@ static void draw_cap(GpGraphics *graphics, COLORREF color, GpLineCap cap, REAL s
 
             round_points(pt, ptf, 3);
 
-            Polygon(graphics->hdc, pt, 3);
+            Polygon(hdc, pt, 3);
 
             break;
         case LineCapRoundAnchor:
@@ -1808,7 +1873,7 @@ static void draw_cap(GpGraphics *graphics, COLORREF color, GpLineCap cap, REAL s
 
             round_points(pt, ptf, 2);
 
-            Ellipse(graphics->hdc, pt[0].x, pt[0].y, pt[1].x, pt[1].y);
+            Ellipse(hdc, pt[0].x, pt[0].y, pt[1].x, pt[1].y);
 
             break;
         case LineCapTriangle:
@@ -1831,7 +1896,7 @@ static void draw_cap(GpGraphics *graphics, COLORREF color, GpLineCap cap, REAL s
 
             round_points(pt, ptf, 3);
 
-            Polygon(graphics->hdc, pt, 3);
+            Polygon(hdc, pt, 3);
 
             break;
         case LineCapRound:
@@ -1854,7 +1919,7 @@ static void draw_cap(GpGraphics *graphics, COLORREF color, GpLineCap cap, REAL s
 
             round_points(pt, ptf, 4);
 
-            Pie(graphics->hdc, pt[0].x, pt[0].y, pt[1].x, pt[1].y, pt[2].x,
+            Pie(hdc, pt[0].x, pt[0].y, pt[1].x, pt[1].y, pt[2].x,
                 pt[2].y, pt[3].x, pt[3].y);
 
             break;
@@ -1894,13 +1959,13 @@ static void draw_cap(GpGraphics *graphics, COLORREF color, GpLineCap cap, REAL s
                 tp[i] = convert_path_point_type(custom->pathdata.Types[i]);
 
             if(custom->fill){
-                BeginPath(graphics->hdc);
-                PolyDraw(graphics->hdc, custpt, tp, count);
-                EndPath(graphics->hdc);
-                StrokeAndFillPath(graphics->hdc);
+                BeginPath(hdc);
+                PolyDraw(hdc, custpt, tp, count);
+                EndPath(hdc);
+                StrokeAndFillPath(hdc);
             }
             else
-                PolyDraw(graphics->hdc, custpt, tp, count);
+                PolyDraw(hdc, custpt, tp, count);
 
 custend:
             free(custptf);
@@ -1912,11 +1977,13 @@ custend:
     }
 
     if(!customstroke){
-        SelectObject(graphics->hdc, oldbrush);
-        SelectObject(graphics->hdc, oldpen);
+        SelectObject(hdc, oldbrush);
+        SelectObject(hdc, oldpen);
         DeleteObject(brush);
         DeleteObject(pen);
     }
+
+    gdi_dc_release(graphics, hdc);
 }
 
 /* Shortens the line by the given percent by changing x2, y2.
@@ -2007,6 +2074,7 @@ static void shorten_bezier_amt(GpPointF * pt, REAL amt, BOOL rev)
 static GpStatus draw_poly(GpGraphics *graphics, GpPen *pen, GDIPCONST GpPointF * pt,
     GDIPCONST BYTE * types, INT count, BOOL caps)
 {
+    HDC hdc;
     POINT *pti = malloc(count * sizeof(POINT));
     BYTE *tp = malloc(count);
     GpPointF *ptcopy = malloc(count * sizeof(GpPointF));
@@ -2119,7 +2187,13 @@ static GpStatus draw_poly(GpGraphics *graphics, GpPen *pen, GDIPCONST GpPointF *
         tp[i] = convert_path_point_type(types[i]);
     }
 
-    PolyDraw(graphics->hdc, pti, tp, count);
+    status = gdi_dc_acquire(graphics, &hdc);
+    if (status != Ok)
+        goto end;
+
+    PolyDraw(hdc, pti, tp, count);
+
+    gdi_dc_release(graphics, hdc);
 
     status = Ok;
 
@@ -2133,12 +2207,20 @@ end:
 
 GpStatus trace_path(GpGraphics *graphics, GpPath *path)
 {
+    HDC hdc;
     GpStatus result;
 
-    BeginPath(graphics->hdc);
+    result = gdi_dc_acquire(graphics, &hdc);
+    if (result != Ok)
+        return result;
+
+    BeginPath(hdc);
     result = draw_poly(graphics, NULL, path->pathdata.Points,
                        path->pathdata.Types, path->pathdata.Count, FALSE);
-    EndPath(graphics->hdc);
+    EndPath(hdc);
+
+    gdi_dc_release(graphics, hdc);
+
     return result;
 }
 
@@ -2287,7 +2369,7 @@ static GpStatus get_graphics_bounds(GpGraphics* graphics, GpRectF* rect)
 {
     GpStatus stat = get_graphics_device_bounds(graphics, rect);
 
-    if (stat == Ok && graphics->hdc)
+    if (stat == Ok && has_gdi_dc(graphics))
     {
         GpPointF points[4], min_point, max_point;
         int i;
@@ -2437,17 +2519,17 @@ GpStatus WINGDIPAPI GdipCreateFromHDC(HDC hdc, GpGraphics **graphics)
     return GdipCreateFromHDC2(hdc, NULL, graphics);
 }
 
-static void get_gdi_transform(GpGraphics *graphics, GpMatrix *matrix)
+static void get_gdi_transform(HDC hdc, GpMatrix *matrix)
 {
     XFORM xform;
 
-    if (graphics->hdc == NULL)
+    if (hdc == NULL)
     {
         GdipSetMatrixElements(matrix, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0);
         return;
     }
 
-    GetTransform(graphics->hdc, 0x204, &xform);
+    GetTransform(hdc, 0x204, &xform);
     GdipSetMatrixElements(matrix, xform.eM11, xform.eM12, xform.eM21, xform.eM22, xform.eDx, xform.eDy);
 }
 
@@ -2502,7 +2584,7 @@ GpStatus WINGDIPAPI GdipCreateFromHDC2(HDC hdc, HANDLE hDevice, GpGraphics **gra
     list_init(&(*graphics)->containers);
     (*graphics)->contid = 0;
     (*graphics)->printer_display = (GetDeviceCaps(hdc, TECHNOLOGY) == DT_RASPRINTER);
-    get_gdi_transform(*graphics, &(*graphics)->gdi_transform);
+    get_gdi_transform(hdc, &(*graphics)->gdi_transform);
 
     (*graphics)->gdi_clip = CreateRectRgn(0,0,0,0);
     if (!GetClipRgn(hdc, (*graphics)->gdi_clip))
@@ -2575,6 +2657,9 @@ GpStatus WINGDIPAPI GdipCreateFromHWND(HWND hwnd, GpGraphics **graphics)
     (*graphics)->hwnd = hwnd;
     (*graphics)->owndc = TRUE;
 
+    ReleaseDC(hwnd, hdc);
+    (*graphics)->hdc = NULL;
+
     return Ok;
 }
 
@@ -2618,6 +2703,8 @@ GpStatus WINGDIPAPI GdipDeleteGraphics(GpGraphics *graphics)
     if(!graphics) return InvalidParameter;
     if(graphics->busy) return ObjectBusy;
 
+    assert(graphics->hdc_refs == 0);
+
     if (is_metafile_graphics(graphics))
     {
         stat = METAFILE_GraphicsDeleted((GpMetafile*)graphics->image);
@@ -2627,12 +2714,12 @@ GpStatus WINGDIPAPI GdipDeleteGraphics(GpGraphics *graphics)
 
     if (graphics->temp_hdc)
     {
-        DeleteDC(graphics->temp_hdc);
+        if (graphics->owndc)
+            ReleaseDC(graphics->hwnd, graphics->temp_hdc);
+        else
+            DeleteDC(graphics->temp_hdc);
         graphics->temp_hdc = NULL;
     }
-
-    if(graphics->owndc)
-        ReleaseDC(graphics->hwnd, graphics->hdc);
 
     LIST_FOR_EACH_ENTRY_SAFE(cont, next, &graphics->containers, GraphicsContainerItem, entry){
         list_remove(&cont->entry);
@@ -3033,13 +3120,49 @@ GpStatus WINGDIPAPI GdipDrawImage(GpGraphics *graphics, GpImage *image, REAL x, 
                                   0.0, 0.0, (REAL)width, (REAL)height, UnitPixel);
 }
 
-GpStatus WINGDIPAPI GdipDrawImageFX(GpGraphics *graphics, GpImage *image, GpRectF *src,
+GpStatus WINGDIPAPI GdipDrawImageFX(GpGraphics *graphics, GpImage *image, GpRectF *src_rect,
     GpMatrix *transform, CGpEffect *effect, GpImageAttributes *imageattr,
-    GpUnit srcUnit)
+    GpUnit src_unit)
 {
-    FIXME("(%p, %p, %p, %p, %p, %p, %d): stub\n", graphics, image, src, transform, effect, imageattr, srcUnit);
+    GpRectF src_rect_buf;
+    GpPointF points[3];
+    GpStatus status;
 
-    return NotImplemented;
+    TRACE("(%p, %p, %p, %p, %p, %p, %d)\n", graphics, image, src_rect, transform, effect, imageattr, src_unit);
+
+    if (!graphics || !image)
+        return InvalidParameter;
+
+    if (effect)
+        FIXME("effect not implemented\n");
+
+    if (!src_rect)
+    {
+        if ((status = GdipGetImageBounds(image, &src_rect_buf, &src_unit)) != Ok)
+            return status;
+
+        /* Metafiles may have different left-top coordinates */
+        if (src_rect_buf.X != 0.0 || src_rect_buf.Y != 0.0)
+        {
+            FIXME("image bounds %s left-top not at origin", debugstr_rectf(&src_rect_buf));
+            /* TODO: only use width and height (force origin)? */
+        }
+
+        src_rect = &src_rect_buf;
+    }
+
+    points[0].X = points[2].X = src_rect->X;
+    points[0].Y = points[1].Y = src_rect->Y;
+    points[1].X = src_rect->X + src_rect->Width;
+    points[2].Y = src_rect->Y + src_rect->Height;
+
+    if (transform)
+        GdipTransformMatrixPoints(transform, points, 3);
+
+    return GdipDrawImagePointsRect(graphics, image, points, 3,
+                                   src_rect->X, src_rect->Y,
+                                   src_rect->Width, src_rect->Height,
+                                   src_unit, imageattr, NULL, NULL);
 }
 
 GpStatus WINGDIPAPI GdipDrawImageI(GpGraphics *graphics, GpImage *image, INT x,
@@ -3390,78 +3513,58 @@ GpStatus WINGDIPAPI GdipDrawImagePointsRect(GpGraphics *graphics, GpImage *image
         }
         else
         {
-            HDC hdc;
-            BOOL temp_hdc = FALSE, temp_bitmap = FALSE;
+            HDC src_hdc, dst_hdc;
             HBITMAP hbitmap, old_hbm=NULL;
             HRGN hrgn;
             INT save_state;
+            BITMAPINFOHEADER bih;
+            BYTE *temp_bits;
+            PixelFormat dst_format;
+            INT dib_stride;
 
-            if (!(bitmap->format == PixelFormat16bppRGB555 ||
-                  bitmap->format == PixelFormat24bppRGB ||
-                  bitmap->format == PixelFormat32bppRGB ||
-                  bitmap->format == PixelFormat32bppPARGB))
-            {
-                BITMAPINFOHEADER bih;
-                BYTE *temp_bits;
-                PixelFormat dst_format;
+            src_hdc = CreateCompatibleDC(0);
 
-                /* we can't draw a bitmap of this format directly */
-                hdc = CreateCompatibleDC(0);
-                temp_hdc = TRUE;
-                temp_bitmap = TRUE;
-
-                bih.biSize = sizeof(BITMAPINFOHEADER);
-                bih.biWidth = bitmap->width;
-                bih.biHeight = -bitmap->height;
-                bih.biPlanes = 1;
-                bih.biBitCount = 32;
-                bih.biCompression = BI_RGB;
-                bih.biSizeImage = 0;
-                bih.biXPelsPerMeter = 0;
-                bih.biYPelsPerMeter = 0;
-                bih.biClrUsed = 0;
-                bih.biClrImportant = 0;
-
-                hbitmap = CreateDIBSection(hdc, (BITMAPINFO*)&bih, DIB_RGB_COLORS,
-                    (void**)&temp_bits, NULL, 0);
-
-                if (bitmap->format & (PixelFormatAlpha|PixelFormatPAlpha))
-                    dst_format = PixelFormat32bppPARGB;
-                else
-                    dst_format = PixelFormat32bppRGB;
-
-                convert_pixels(bitmap->width, bitmap->height,
-                    bitmap->width*4, temp_bits, dst_format, bitmap->image.palette,
-                    bitmap->stride, bitmap->bits, bitmap->format,
-                    bitmap->image.palette);
-            }
+            if (bitmap->format == PixelFormat16bppRGB555 ||
+                bitmap->format == PixelFormat24bppRGB)
+                dst_format = bitmap->format;
+            else if (bitmap->format & (PixelFormatAlpha|PixelFormatPAlpha))
+                dst_format = PixelFormat32bppPARGB;
             else
-            {
-                if (bitmap->hbitmap)
-                    hbitmap = bitmap->hbitmap;
-                else
-                {
-                    GdipCreateHBITMAPFromBitmap(bitmap, &hbitmap, 0);
-                    temp_bitmap = TRUE;
-                }
+                dst_format = PixelFormat32bppRGB;
 
-                hdc = bitmap->hdc;
-                temp_hdc = (hdc == 0);
-            }
+            bih.biSize = sizeof(BITMAPINFOHEADER);
+            bih.biWidth = bitmap->width;
+            bih.biHeight = -bitmap->height;
+            bih.biPlanes = 1;
+            bih.biBitCount = PIXELFORMATBPP(dst_format);
+            bih.biCompression = BI_RGB;
+            bih.biSizeImage = 0;
+            bih.biXPelsPerMeter = 0;
+            bih.biYPelsPerMeter = 0;
+            bih.biClrUsed = 0;
+            bih.biClrImportant = 0;
 
-            if (temp_hdc)
-            {
-                if (!hdc) hdc = CreateCompatibleDC(0);
-                old_hbm = SelectObject(hdc, hbitmap);
-            }
+            hbitmap = CreateDIBSection(src_hdc, (BITMAPINFO*)&bih, DIB_RGB_COLORS,
+                (void**)&temp_bits, NULL, 0);
 
-            save_state = SaveDC(graphics->hdc);
+            dib_stride = ((bitmap->width * PIXELFORMATBPP(dst_format) + 31) / 8) & ~3;
+
+            convert_pixels(bitmap->width, bitmap->height,
+                dib_stride, temp_bits, dst_format, bitmap->image.palette,
+                bitmap->stride, bitmap->bits, bitmap->format,
+                bitmap->image.palette);
+
+            old_hbm = SelectObject(src_hdc, hbitmap);
+
+            gdi_dc_acquire(graphics, &dst_hdc);
+
+            save_state = SaveDC(dst_hdc);
 
             stat = get_clip_hrgn(graphics, &hrgn);
 
             if (stat == Ok)
             {
-                ExtSelectClipRgn(graphics->hdc, hrgn, RGN_COPY);
+                ExtSelectClipRgn(dst_hdc, hrgn, RGN_COPY);
                 DeleteObject(hrgn);
             }
 
@@ -3470,26 +3573,23 @@ GpStatus WINGDIPAPI GdipDrawImagePointsRect(GpGraphics *graphics, GpImage *image
             if (bitmap->format & (PixelFormatAlpha|PixelFormatPAlpha))
             {
                 gdi_alpha_blend(graphics, pti[0].x, pti[0].y, pti[1].x - pti[0].x, pti[2].y - pti[0].y,
-                                hdc, srcx, srcy, srcwidth, srcheight);
+                                src_hdc, srcx, srcy, srcwidth, srcheight);
             }
             else
             {
-                StretchBlt(graphics->hdc, pti[0].x, pti[0].y, pti[1].x-pti[0].x, pti[2].y-pti[0].y,
-                    hdc, srcx, srcy, srcwidth, srcheight, SRCCOPY);
+                StretchBlt(dst_hdc, pti[0].x, pti[0].y, pti[1].x-pti[0].x, pti[2].y-pti[0].y,
+                    src_hdc, srcx, srcy, srcwidth, srcheight, SRCCOPY);
             }
 
             gdi_transform_release(graphics);
 
-            RestoreDC(graphics->hdc, save_state);
+            RestoreDC(dst_hdc, save_state);
 
-            if (temp_hdc)
-            {
-                SelectObject(hdc, old_hbm);
-                DeleteDC(hdc);
-            }
+            gdi_dc_release(graphics, dst_hdc);
 
-            if (temp_bitmap)
-                DeleteObject(hbitmap);
+            SelectObject(src_hdc, old_hbm);
+            DeleteDC(src_hdc);
+            DeleteObject(hbitmap);
         }
     }
     else if (image->type == ImageTypeMetafile && ((GpMetafile*)image)->hemf)
@@ -3690,11 +3790,16 @@ GpStatus WINGDIPAPI GdipDrawLinesI(GpGraphics *graphics, GpPen *pen, GDIPCONST
 
 static GpStatus GDI32_GdipDrawPath(GpGraphics *graphics, GpPen *pen, GpPath *path)
 {
+    HDC hdc;
     INT save_state;
     GpStatus retval;
     HRGN hrgn=NULL;
 
-    save_state = prepare_dc(graphics, pen);
+    retval = gdi_dc_acquire(graphics, &hdc);
+    if (retval != Ok)
+        return retval;
+
+    save_state = prepare_dc(graphics, hdc, pen);
 
     retval = get_clip_hrgn(graphics, &hrgn);
 
@@ -3711,8 +3816,9 @@ static GpStatus GDI32_GdipDrawPath(GpGraphics *graphics, GpPen *pen, GpPath *pat
     gdi_transform_release(graphics);
 
 end:
-    restore_dc(graphics, save_state);
+    restore_dc(graphics, hdc, save_state);
     DeleteObject(hrgn);
+    gdi_dc_release(graphics, hdc);
 
     return retval;
 }
@@ -3720,7 +3826,8 @@ end:
 static GpStatus SOFTWARE_GdipDrawThinPath(GpGraphics *graphics, GpPen *pen, GpPath *path)
 {
     GpStatus stat;
-    GpPath* flat_path;
+    GpPath *flat_path, *anchor_path;
+    GpRegion *anchor_region;
     GpMatrix* transform;
     GpRectF gp_bound_rect;
     GpRect gp_output_area;
@@ -3748,6 +3855,9 @@ static GpStatus SOFTWARE_GdipDrawThinPath(GpGraphics *graphics, GpPen *pen, GpPa
         if (stat == Ok)
             stat = GdipFlattenPath(flat_path, transform, 1.0);
 
+        if (stat == Ok)
+            stat = widen_flat_path_anchors(flat_path, pen, 1.0, &anchor_path);
+
         GdipDeleteMatrix(transform);
     }
 
@@ -3771,6 +3881,18 @@ static GpStatus SOFTWARE_GdipDrawThinPath(GpGraphics *graphics, GpPen *pen, GpPa
             if (ceilf(y) > output_area.bottom) output_area.bottom = ceilf(y);
         }
 
+        for (i=0; i<anchor_path->pathdata.Count; i++)
+        {
+            REAL x, y;
+            x = anchor_path->pathdata.Points[i].X;
+            y = anchor_path->pathdata.Points[i].Y;
+
+            if (floorf(x) < output_area.left) output_area.left = floorf(x);
+            if (floorf(y) < output_area.top) output_area.top = floorf(y);
+            if (ceilf(x) > output_area.right) output_area.right = ceilf(x);
+            if (ceilf(y) > output_area.bottom) output_area.bottom = ceilf(y);
+        }
+
         stat = get_graphics_device_bounds(graphics, &gp_bound_rect);
     }
 
@@ -3787,6 +3909,7 @@ static GpStatus SOFTWARE_GdipDrawThinPath(GpGraphics *graphics, GpPen *pen, GpPa
         if (output_width <= 0 || output_height <= 0)
         {
             GdipDeletePath(flat_path);
+            GdipDeletePath(anchor_path);
             return Ok;
         }
 
@@ -3998,6 +4121,66 @@ static GpStatus SOFTWARE_GdipDrawThinPath(GpGraphics *graphics, GpPen *pen, GpPa
                     }
                 }
             }
+
+            /* draw anchors */
+            stat = GdipCreateRegionPath(anchor_path, &anchor_region);
+            if (stat == Ok)
+            {
+                HRGN hrgn;
+                DWORD rgn_data_size;
+                RGNDATA *rgn_data;
+                RECT *rects;
+                INT x, y;
+
+                stat = GdipCombineRegionRectI(anchor_region, &gp_output_area, CombineModeIntersect);
+
+                if (stat == Ok)
+                    stat = GdipGetRegionHRgn(anchor_region, NULL, &hrgn);
+
+                if (stat == Ok)
+                {
+                    rgn_data_size = GetRegionData(hrgn, 0, NULL);
+
+                    if (rgn_data_size)
+                    {
+                        rgn_data = malloc(rgn_data_size);
+
+                        if (rgn_data)
+                        {
+                            GetRegionData(hrgn, rgn_data_size, rgn_data);
+
+                            rects = (RECT*)&rgn_data->Buffer;
+
+                            for (i=0; i < rgn_data->rdh.nCount; i++)
+                            {
+                                RECT rc;
+                                rc = rects[i];
+
+                                OffsetRect(&rc, -output_area.left, -output_area.top);
+
+                                for (y = rc.top; y < rc.bottom; y++)
+                                {
+                                    for (x = rc.left; x < rc.right; x++)
+                                    {
+                                        if (brush_bits)
+                                            output_bits[x + y*output_width] = brush_bits[x + y*output_width];
+                                        else
+                                            output_bits[x + y*output_width] = ((GpSolidFill*)pen->brush)->color;
+                                    }
+                                }
+                            }
+
+                            free(rgn_data);
+                        }
+                        else
+                            stat = OutOfMemory;
+                    }
+
+                    DeleteObject(hrgn);
+                }
+
+                GdipDeleteRegion(anchor_region);
+            }
         }
 
         /* draw output image */
@@ -4018,6 +4201,7 @@ static GpStatus SOFTWARE_GdipDrawThinPath(GpGraphics *graphics, GpPen *pen, GpPa
     }
 
     GdipDeletePath(flat_path);
+    GdipDeletePath(anchor_path);
 
     return stat;
 }
@@ -4126,7 +4310,7 @@ GpStatus WINGDIPAPI GdipDrawPath(GpGraphics *graphics, GpPen *pen, GpPath *path)
 
     if (is_metafile_graphics(graphics))
         retval = METAFILE_DrawPath((GpMetafile*)graphics->image, pen, path);
-    else if (!graphics->hdc || graphics->alpha_hdc || !brush_can_fill_path(pen->brush, FALSE))
+    else if (!has_gdi_dc(graphics) || graphics->alpha_hdc || !brush_can_fill_path(pen->brush, FALSE))
         retval = SOFTWARE_GdipDrawPath(graphics, pen, path);
     else
         retval = GDI32_GdipDrawPath(graphics, pen, path);
@@ -4364,42 +4548,47 @@ GpStatus WINGDIPAPI GdipFillEllipseI(GpGraphics *graphics, GpBrush *brush, INT x
 
 static GpStatus GDI32_GdipFillPath(GpGraphics *graphics, GpBrush *brush, GpPath *path)
 {
+    HDC hdc;
     INT save_state;
     GpStatus retval;
     HRGN hrgn=NULL;
 
-    if(!graphics->hdc || !brush_can_fill_path(brush, TRUE))
+    if(!brush_can_fill_path(brush, TRUE))
         return NotImplemented;
 
-    save_state = SaveDC(graphics->hdc);
-    EndPath(graphics->hdc);
-    SetPolyFillMode(graphics->hdc, (path->fill == FillModeAlternate ? ALTERNATE
-                                                                    : WINDING));
+    retval = gdi_dc_acquire(graphics, &hdc);
+    if (retval != Ok)
+        return retval;
+
+    save_state = SaveDC(hdc);
+    EndPath(hdc);
+    SetPolyFillMode(hdc, (path->fill == FillModeAlternate ? ALTERNATE : WINDING));
 
     retval = get_clip_hrgn(graphics, &hrgn);
 
     if (retval != Ok)
         goto end;
 
-    ExtSelectClipRgn(graphics->hdc, hrgn, RGN_COPY);
+    ExtSelectClipRgn(hdc, hrgn, RGN_COPY);
 
     gdi_transform_acquire(graphics);
 
-    BeginPath(graphics->hdc);
+    BeginPath(hdc);
     retval = draw_poly(graphics, NULL, path->pathdata.Points,
                        path->pathdata.Types, path->pathdata.Count, FALSE);
 
     if(retval == Ok)
     {
-        EndPath(graphics->hdc);
+        EndPath(hdc);
         retval = brush_fill_path(graphics, brush);
     }
 
     gdi_transform_release(graphics);
 
 end:
-    RestoreDC(graphics->hdc, save_state);
+    RestoreDC(hdc, save_state);
     DeleteObject(hrgn);
+    gdi_dc_release(graphics, hdc);
 
     return retval;
 }
@@ -4660,47 +4849,47 @@ static GpStatus GDI32_GdipFillRegion(GpGraphics* graphics, GpBrush* brush,
 {
     INT save_state;
     GpStatus status;
+    HDC hdc;
     HRGN hrgn;
     RECT rc;
 
-    if(!graphics->hdc || !brush_can_fill_path(brush, TRUE))
+    if(!brush_can_fill_path(brush, TRUE))
         return NotImplemented;
 
-    save_state = SaveDC(graphics->hdc);
-    EndPath(graphics->hdc);
+    status = gdi_dc_acquire(graphics, &hdc);
+    if (status != Ok)
+        return status;
+
+    save_state = SaveDC(hdc);
+    EndPath(hdc);
 
     hrgn = NULL;
     status = get_clip_hrgn(graphics, &hrgn);
     if (status != Ok)
-    {
-        RestoreDC(graphics->hdc, save_state);
-        return status;
-    }
+        goto end;
 
-    ExtSelectClipRgn(graphics->hdc, hrgn, RGN_COPY);
+    ExtSelectClipRgn(hdc, hrgn, RGN_COPY);
     DeleteObject(hrgn);
 
     status = GdipGetRegionHRgn(region, graphics, &hrgn);
     if (status != Ok)
-    {
-        RestoreDC(graphics->hdc, save_state);
-        return status;
-    }
+        goto end;
 
-    ExtSelectClipRgn(graphics->hdc, hrgn, RGN_AND);
+    ExtSelectClipRgn(hdc, hrgn, RGN_AND);
     DeleteObject(hrgn);
 
-    if (GetClipBox(graphics->hdc, &rc) != NULLREGION)
+    if (GetClipBox(hdc, &rc) != NULLREGION)
     {
-        BeginPath(graphics->hdc);
-        Rectangle(graphics->hdc, rc.left, rc.top, rc.right, rc.bottom);
-        EndPath(graphics->hdc);
+        BeginPath(hdc);
+        Rectangle(hdc, rc.left, rc.top, rc.right, rc.bottom);
+        EndPath(hdc);
 
         status = brush_fill_path(graphics, brush);
     }
 
-    RestoreDC(graphics->hdc, save_state);
-
+end:
+    RestoreDC(hdc, save_state);
+    gdi_dc_release(graphics, hdc);
 
     return status;
 }
@@ -4833,7 +5022,7 @@ GpStatus WINGDIPAPI GdipFlush(GpGraphics *graphics, GpFlushIntention intention)
 
     /* We have no internal operation queue, so there's no need to clear it. */
 
-    if (graphics->hdc)
+    if (has_gdi_dc(graphics))
         GdiFlush();
 
     return Ok;
@@ -5258,43 +5447,59 @@ GpStatus WINGDIPAPI GdipIsVisibleRectI(GpGraphics *graphics, INT x, INT y, INT w
 /* Populates gdip_font_link_info struct based on the base_font and input string */
 static void generate_font_link_info(struct gdip_format_string_info *info, DWORD length, GDIPCONST GpFont *base_font)
 {
-    IUnknown *unk;
     IMLangFontLink *iMLFL;
     GpFont *gpfont;
     HFONT map_hfont, hfont, old_font;
     LONG processed, progress = 0;
     struct gdip_font_link_section *section;
-    DWORD font_codepages, string_codepages;
+    DWORD string_codepages;
+    WORD *glyph_indices;
+    HRESULT hr;
 
     list_init(&info->font_link_info.sections);
     info->font_link_info.base_font = base_font;
 
-    GetGlobalFontLinkObject((void**)&unk);
-    IUnknown_QueryInterface(unk, &IID_IMLangFontLink, (void**)&iMLFL);
-    IUnknown_Release(unk);
+    glyph_indices = calloc(length, sizeof(*glyph_indices));
+    GetGlyphIndicesW(info->hdc, info->string, length, glyph_indices, GGI_MARK_NONEXISTING_GLYPHS);
+
+    /* Newlines won't have a glyph but don't need a fallback */
+    for (progress = 0; progress < length; progress++)
+        if (info->string[progress] == '\r' || info->string[progress] == '\n')
+            glyph_indices[progress] = 0;
+
+    GetGlobalFontLinkObject(&iMLFL);
 
     get_font_hfont(info->graphics, base_font, NULL, &hfont, NULL, NULL);
-    IMLangFontLink_GetFontCodePages(iMLFL, info->hdc, hfont, &font_codepages);
 
+    progress = 0;
     while (progress < length)
     {
         section = calloc(1, sizeof(*section));
         section->start = progress;
-        IMLangFontLink_GetStrCodePages(iMLFL, &info->string[progress], length - progress,
-                                        font_codepages, &string_codepages, &processed);
 
-        if (font_codepages & string_codepages)
+        if (glyph_indices[progress] != 0xffff)
         {
             section->font = (GpFont *)base_font;
+
+            processed = 0;
+            while (progress + processed < length && glyph_indices[progress + processed] != 0xffff)
+                processed++;
         }
         else
         {
-            IMLangFontLink_MapFont(iMLFL, info->hdc, string_codepages, hfont, &map_hfont);
-            old_font = SelectObject(info->hdc, map_hfont);
-            GdipCreateFontFromDC(info->hdc, &gpfont);
-            SelectObject(info->hdc, old_font);
-            IMLangFontLink_ReleaseFont(iMLFL, map_hfont);
-            section->font = gpfont;
+            IMLangFontLink_GetStrCodePages(iMLFL, &info->string[progress], length - progress,
+                                            0, &string_codepages, &processed);
+            hr = IMLangFontLink_MapFont(iMLFL, info->hdc, string_codepages, hfont, &map_hfont);
+            if (SUCCEEDED(hr))
+            {
+                old_font = SelectObject(info->hdc, map_hfont);
+                GdipCreateFontFromDC(info->hdc, &gpfont);
+                SelectObject(info->hdc, old_font);
+                IMLangFontLink_ReleaseFont(iMLFL, map_hfont);
+                section->font = gpfont;
+            }
+            else
+                section->font = (GpFont *)base_font;
         }
 
         section->end = section->start + processed;
@@ -5304,6 +5509,7 @@ static void generate_font_link_info(struct gdip_format_string_info *info, DWORD 
 
     DeleteObject(hfont);
     IMLangFontLink_Release(iMLFL);
+    free(glyph_indices);
 }
 
 static void font_link_get_text_extent_point(struct gdip_format_string_info *info,
@@ -5509,7 +5715,7 @@ GpStatus gdip_format_string(GpGraphics *graphics, HDC hdc,
         {
             if (format->attr & StringFormatFlagsLineLimit)
                 break;
-            bounds.Height = nheight - (height + size.cy);
+            bounds.Height = nheight - height;
         }
         else
             bounds.Height = size.cy;
@@ -5660,13 +5866,17 @@ GpStatus WINGDIPAPI GdipMeasureCharacterRanges(GpGraphics* graphics,
     if (regionCount < stringFormat->range_count)
         return InvalidParameter;
 
-    if(!graphics->hdc)
+    if(!has_gdi_dc(graphics))
     {
         hdc = temp_hdc = CreateCompatibleDC(0);
         if (!temp_hdc) return OutOfMemory;
     }
     else
-        hdc = graphics->hdc;
+    {
+        stat = gdi_dc_acquire(graphics, &hdc);
+        if (stat != Ok)
+            return stat;
+    }
 
     if (stringFormat->attr)
         TRACE("may be ignoring some format flags: attr %x\n", stringFormat->attr);
@@ -5713,6 +5923,8 @@ GpStatus WINGDIPAPI GdipMeasureCharacterRanges(GpGraphics* graphics,
 
     if (temp_hdc)
         DeleteDC(temp_hdc);
+    else
+        gdi_dc_release(graphics, hdc);
 
     return stat;
 }
@@ -5769,6 +5981,7 @@ GpStatus WINGDIPAPI GdipMeasureString(GpGraphics *graphics,
     GDIPCONST RectF *rect, GDIPCONST GpStringFormat *format, RectF *bounds,
     INT *codepointsfitted, INT *linesfilled)
 {
+    GpStatus status;
     HFONT oldfont, gdifont;
     struct measure_string_args args;
     HDC temp_hdc=NULL, hdc;
@@ -5792,13 +6005,17 @@ GpStatus WINGDIPAPI GdipMeasureString(GpGraphics *graphics,
             string = L" ";
     }
 
-    if(!graphics->hdc)
+    if(!has_gdi_dc(graphics))
     {
         hdc = temp_hdc = CreateCompatibleDC(0);
         if (!temp_hdc) return OutOfMemory;
     }
     else
-        hdc = graphics->hdc;
+    {
+        status = gdi_dc_acquire(graphics, &hdc);
+        if (status != Ok)
+            return status;
+    }
 
     if(linesfilled) *linesfilled = 0;
     if(codepointsfitted) *codepointsfitted = 0;
@@ -5817,7 +6034,8 @@ GpStatus WINGDIPAPI GdipMeasureString(GpGraphics *graphics,
     if (scaled_rect.Width >= 0.5)
     {
         scaled_rect.Width -= margin_x * 2.0 * args.rel_width;
-        if (scaled_rect.Width < 0.5) return Ok; /* doesn't fit */
+        if (scaled_rect.Width < 0.5) /* doesn't fit */
+            goto end;
     }
 
     if (scaled_rect.Width >= 1 << 23) scaled_rect.Width = 1 << 23;
@@ -5848,9 +6066,11 @@ GpStatus WINGDIPAPI GdipMeasureString(GpGraphics *graphics,
 
     SelectObject(hdc, oldfont);
     DeleteObject(gdifont);
-
+end:
     if (temp_hdc)
         DeleteDC(temp_hdc);
+    else
+        gdi_dc_release(graphics, hdc);
 
     return Ok;
 }
@@ -5922,6 +6142,7 @@ GpStatus WINGDIPAPI GdipDrawString(GpGraphics *graphics, GDIPCONST WCHAR *string
     INT length, GDIPCONST GpFont *font, GDIPCONST RectF *rect,
     GDIPCONST GpStringFormat *format, GDIPCONST GpBrush *brush)
 {
+    GpStatus status;
     HRGN rgn = NULL;
     HFONT gdifont;
     GpPointF rectcpy[4];
@@ -5940,9 +6161,14 @@ GpStatus WINGDIPAPI GdipDrawString(GpGraphics *graphics, GDIPCONST WCHAR *string
     if(!graphics || !string || !font || !brush || !rect)
         return InvalidParameter;
 
-    if(graphics->hdc)
+    if(graphics->busy)
+        return ObjectBusy;
+
+    if(has_gdi_dc(graphics))
     {
-        hdc = graphics->hdc;
+        status = gdi_dc_acquire(graphics, &hdc);
+        if (status != Ok)
+            return status;
     }
     else
     {
@@ -5991,7 +6217,8 @@ GpStatus WINGDIPAPI GdipDrawString(GpGraphics *graphics, GDIPCONST WCHAR *string
     if (scaled_rect.Width >= 0.5)
     {
         scaled_rect.Width -= margin_x * 2.0 * rel_width;
-        if (scaled_rect.Width < 0.5) return Ok; /* doesn't fit */
+        if (scaled_rect.Width < 0.5) /* doesn't fit */
+            goto end;
     }
 
     if (scaled_rect.Width >= 1 << 23) scaled_rect.Width = 1 << 23;
@@ -6029,10 +6256,13 @@ GpStatus WINGDIPAPI GdipDrawString(GpGraphics *graphics, GDIPCONST WCHAR *string
 
     DeleteObject(rgn);
     DeleteObject(gdifont);
-
+end:
     RestoreDC(hdc, save_state);
 
-    DeleteDC(temp_hdc);
+    if (temp_hdc)
+        DeleteDC(temp_hdc);
+    else
+        gdi_dc_release(graphics, hdc);
 
     return Ok;
 }
@@ -6913,7 +7143,7 @@ GpStatus WINGDIPAPI GdipMultiplyWorldTransform(GpGraphics *graphics, GDIPCONST G
 }
 
 /* Color used to fill bitmaps so we can tell which parts have been drawn over by gdi32. */
-static const COLORREF DC_BACKGROUND_KEY = 0x0c0b0d;
+static const COLORREF DC_BACKGROUND_KEY = 0x0d0b0c;
 
 GpStatus WINGDIPAPI GdipGetDC(GpGraphics *graphics, HDC *hdc)
 {
@@ -6931,8 +7161,15 @@ GpStatus WINGDIPAPI GdipGetDC(GpGraphics *graphics, HDC *hdc)
     {
         stat = METAFILE_GetDC((GpMetafile*)graphics->image, hdc);
     }
+    else if (graphics->owndc)
+    {
+        graphics->temp_hdc = GetDC(graphics->hwnd);
+        if (!graphics->temp_hdc)
+            return OutOfMemory;
+        *hdc = graphics->temp_hdc;
+    }
     else if (!graphics->hdc ||
-        (graphics->image && graphics->image->type == ImageTypeBitmap && ((GpBitmap*)graphics->image)->format & PixelFormatAlpha))
+        (graphics->image && graphics->image->type == ImageTypeBitmap))
     {
         /* Create a fake HDC and fill it with a constant color. */
         HDC temp_hdc;
@@ -7012,6 +7249,11 @@ GpStatus WINGDIPAPI GdipReleaseDC(GpGraphics *graphics, HDC hdc)
     {
         stat = METAFILE_ReleaseDC((GpMetafile*)graphics->image, hdc);
     }
+    else if (graphics->owndc)
+    {
+        ReleaseDC(graphics->hwnd, graphics->temp_hdc);
+        graphics->temp_hdc = NULL;
+    }
     else if (graphics->temp_hdc == hdc)
     {
         DWORD* pos;
@@ -7083,14 +7325,21 @@ GpStatus WINGDIPAPI GdipGetClip(GpGraphics *graphics, GpRegion *region)
 
 GpStatus gdi_transform_acquire(GpGraphics *graphics)
 {
-    if (graphics->gdi_transform_acquire_count == 0 && graphics->hdc)
+    if (graphics->gdi_transform_acquire_count == 0 && has_gdi_dc(graphics))
     {
-        graphics->gdi_transform_save = SaveDC(graphics->hdc);
-        ModifyWorldTransform(graphics->hdc, NULL, MWT_IDENTITY);
-        SetGraphicsMode(graphics->hdc, GM_COMPATIBLE);
-        SetMapMode(graphics->hdc, MM_TEXT);
-        SetWindowOrgEx(graphics->hdc, 0, 0, NULL);
-        SetViewportOrgEx(graphics->hdc, 0, 0, NULL);
+        HDC hdc;
+        GpStatus stat;
+
+        stat = gdi_dc_acquire(graphics, &hdc);
+        if (stat != Ok)
+            return stat;
+
+        graphics->gdi_transform_save = SaveDC(hdc);
+        ModifyWorldTransform(hdc, NULL, MWT_IDENTITY);
+        SetGraphicsMode(hdc, GM_COMPATIBLE);
+        SetMapMode(hdc, MM_TEXT);
+        SetWindowOrgEx(hdc, 0, 0, NULL);
+        SetViewportOrgEx(hdc, 0, 0, NULL);
     }
     graphics->gdi_transform_acquire_count++;
     return Ok;
@@ -7106,6 +7355,7 @@ GpStatus gdi_transform_release(GpGraphics *graphics)
     if (graphics->gdi_transform_acquire_count == 1 && graphics->hdc)
     {
         RestoreDC(graphics->hdc, graphics->gdi_transform_save);
+        gdi_dc_release(graphics, graphics->hdc);
     }
     graphics->gdi_transform_acquire_count--;
     return Ok;
@@ -7204,9 +7454,8 @@ GpStatus gdip_transform_points(GpGraphics *graphics, GpCoordinateSpace dst_space
 GpStatus WINGDIPAPI GdipTransformPoints(GpGraphics *graphics, GpCoordinateSpace dst_space,
                                         GpCoordinateSpace src_space, GpPointF *points, INT count)
 {
-    if(!graphics || !points || count <= 0 ||
-       dst_space < 0 || dst_space > CoordinateSpaceDevice ||
-       src_space < 0 || src_space > CoordinateSpaceDevice)
+    if(!graphics || !points || count <= 0 || (UINT)dst_space > CoordinateSpaceDevice ||
+       (UINT)src_space > CoordinateSpaceDevice)
         return InvalidParameter;
 
     if(graphics->busy)
@@ -7421,6 +7670,7 @@ static GpStatus GDI32_GdipDrawDriverString(GpGraphics *graphics, GDIPCONST UINT1
     LOGFONTW lfw;
     UINT eto_flags=0;
     GpStatus status;
+    HDC hdc;
     HRGN hrgn;
 
     if (!(flags & DriverStringOptionsCmapLookup))
@@ -7438,15 +7688,23 @@ static GpStatus GDI32_GdipDrawDriverString(GpGraphics *graphics, GDIPCONST UINT1
         }
     }
 
-    save_state = SaveDC(graphics->hdc);
-    SetBkMode(graphics->hdc, TRANSPARENT);
-    SetTextColor(graphics->hdc, get_gdi_brush_color(brush));
+    status = gdi_dc_acquire(graphics, &hdc);
+    if (status != Ok)
+    {
+        free(real_positions);
+        free(eto_positions);
+        return status;
+    }
+
+    save_state = SaveDC(hdc);
+    SetBkMode(hdc, TRANSPARENT);
+    SetTextColor(hdc, get_gdi_brush_color(brush));
 
     status = get_clip_hrgn(graphics, &hrgn);
 
     if (status == Ok)
     {
-        ExtSelectClipRgn(graphics->hdc, hrgn, RGN_COPY);
+        ExtSelectClipRgn(hdc, hrgn, RGN_COPY);
         DeleteObject(hrgn);
     }
 
@@ -7477,22 +7735,24 @@ static GpStatus GDI32_GdipDrawDriverString(GpGraphics *graphics, GDIPCONST UINT1
         }
     }
 
-    SelectObject(graphics->hdc, hfont);
+    SelectObject(hdc, hfont);
 
-    SetTextAlign(graphics->hdc, TA_BASELINE|TA_LEFT);
+    SetTextAlign(hdc, TA_BASELINE|TA_LEFT);
 
     gdi_transform_acquire(graphics);
 
-    ExtTextOutW(graphics->hdc, gdip_round(pt.X), gdip_round(pt.Y), eto_flags, NULL, text, length, eto_positions);
+    ExtTextOutW(hdc, gdip_round(pt.X), gdip_round(pt.Y), eto_flags, NULL, text, length, eto_positions);
 
     gdi_transform_release(graphics);
 
-    RestoreDC(graphics->hdc, save_state);
+    RestoreDC(hdc, save_state);
 
     DeleteObject(hfont);
 
     free(real_positions);
     free(eto_positions);
+
+    gdi_dc_release(graphics, hdc);
 
     return Ok;
 }
@@ -7724,7 +7984,7 @@ static GpStatus draw_driver_string(GpGraphics *graphics, GDIPCONST UINT16 *text,
         return METAFILE_DrawDriverString((GpMetafile*)graphics->image, text, length, font,
             format, brush, positions, flags, matrix);
 
-    if (graphics->hdc && !graphics->alpha_hdc &&
+    if (has_gdi_dc(graphics) && !graphics->alpha_hdc &&
         brush->bt == BrushTypeSolidColor &&
         (((GpSolidFill*)brush)->color & 0xff000000) == 0xff000000)
         stat = GDI32_GdipDrawDriverString(graphics, text, length, font, format,

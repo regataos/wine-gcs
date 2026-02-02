@@ -25,6 +25,7 @@
 #include "windef.h"
 #include "winnt.h"
 #include "winternl.h"
+#include "rtlsupportapi.h"
 #include "wine/asm.h"
 #include "wine/debug.h"
 
@@ -42,14 +43,7 @@ struct thunk_32to64
 struct thunk_opcodes
 {
     struct thunk_32to64 syscall_thunk;
-    struct
-    {
-        BYTE pushl;  /* pushl $dispatcher_high */
-        DWORD dispatcher_high;
-        BYTE pushl2;  /* pushl $dispatcher_low */
-        DWORD dispatcher_low;
-        struct thunk_32to64 t;
-    } unix_thunk;
+    struct thunk_32to64 unix_thunk;
 };
 #include "poppack.h"
 
@@ -58,6 +52,8 @@ static BYTE DECLSPEC_ALIGN(4096) code_buffer[0x1000];
 static USHORT cs64_sel;
 static USHORT ds64_sel;
 static USHORT fs32_sel;
+
+void **__wine_unix_call_dispatcher = NULL;
 
 BOOL WINAPI DllMain( HINSTANCE inst, DWORD reason, void *reserved )
 {
@@ -174,9 +170,12 @@ static void copy_context_64to32( I386_CONTEXT *ctx32, DWORD flags, AMD64_CONTEXT
 extern void WINAPI syscall_32to64(void);
 __ASM_GLOBAL_FUNC( syscall_32to64,
                    /* cf. BTCpuSimulate prolog */
-                   __ASM_SEH(".seh_stackalloc 0x28\n\t")
-                   __ASM_SEH(".seh_endprologue\n\t")
-                   __ASM_CFI(".cfi_adjust_cfa_offset 0x28\n\t")
+                   ".seh_pushreg %rbp\n\t"
+                   ".seh_pushreg %rbx\n\t"
+                   ".seh_pushreg %rsi\n\t"
+                   ".seh_pushreg %rdi\n\t"
+                   ".seh_stackalloc 0x28\n\t"
+                   ".seh_endprologue\n\t"
                    "xchgq %r14,%rsp\n\t"
                    "movl %edi,0x9c(%r13)\n\t"   /* context->Edi */
                    "movl %esi,0xa0(%r13)\n\t"   /* context->Esi */
@@ -237,22 +236,25 @@ __ASM_GLOBAL_FUNC( syscall_32to64,
 extern void WINAPI unix_call_32to64(void);
 __ASM_GLOBAL_FUNC( unix_call_32to64,
                    /* cf. BTCpuSimulate prolog */
-                   __ASM_SEH(".seh_stackalloc 0x28\n\t")
-                   __ASM_SEH(".seh_endprologue\n\t")
-                   __ASM_CFI(".cfi_adjust_cfa_offset 0x28\n\t")
+                   ".seh_pushreg %rbp\n\t"
+                   ".seh_pushreg %rbx\n\t"
+                   ".seh_pushreg %rsi\n\t"
+                   ".seh_pushreg %rdi\n\t"
+                   ".seh_stackalloc 0x28\n\t"
+                   ".seh_endprologue\n\t"
                    "xchgq %r14,%rsp\n\t"
                    "movl %edi,0x9c(%r13)\n\t"   /* context->Edi */
                    "movl %esi,0xa0(%r13)\n\t"   /* context->Esi */
                    "movl %ebx,0xa4(%r13)\n\t"   /* context->Ebx */
                    "movl %ebp,0xb4(%r13)\n\t"   /* context->Ebp */
-                   "movl 8(%r14),%edx\n\t"
+                   "movl (%r14),%edx\n\t"
                    "movl %edx,0xb8(%r13)\n\t"   /* context->Eip */
-                   "leaq 28(%r14),%rdx\n\t"
+                   "leaq 20(%r14),%rdx\n\t"
                    "movl %edx,0xc4(%r13)\n\t"   /* context->Esp */
-                   "movq 12(%r14),%rcx\n\t"     /* handle */
-                   "movl 20(%r14),%edx\n\t"     /* code */
-                   "movl 24(%r14),%r8d\n\t"     /* args */
-                   "callq *(%r14)\n\t"
+                   "movq 4(%r14),%rcx\n\t"      /* handle */
+                   "movl 12(%r14),%edx\n\t"     /* code */
+                   "movl 16(%r14),%r8d\n\t"     /* args */
+                   "callq *__wine_unix_call_dispatcher(%rip)\n\t"
                    "btrl $0,-4(%r13)\n\t"       /* cpu->Flags & WOW64_CPURESERVED_FLAG_RESET_STATE */
                    "jc .Lsyscall_32to64_return\n\t"
                    "movl 0xb8(%r13),%edx\n\t"   /* context->Eip */
@@ -268,14 +270,21 @@ __ASM_GLOBAL_FUNC( unix_call_32to64,
  *           BTCpuSimulate  (wow64cpu.@)
  */
 __ASM_GLOBAL_FUNC( BTCpuSimulate,
-                    "subq $0x28,%rsp\n"
-                   __ASM_SEH(".seh_stackalloc 0x28\n\t")
-                   __ASM_SEH(".seh_endprologue\n\t")
-                   __ASM_CFI(".cfi_adjust_cfa_offset 0x28\n\t")
-                    "movq %gs:0x30,%r12\n\t"
-                    "movq 0x1488(%r12),%rcx\n\t" /* NtCurrentTeb()->TlsSlots[WOW64_TLS_CPURESERVED] */
-                    "leaq 4(%rcx),%r13\n"        /* cpu->Context */
-                    "jmp syscall_32to64_return\n" )
+                   "pushq %rbp\n\t"
+                   ".seh_pushreg %rbp\n\t"
+                   "pushq %rbx\n\t"
+                   ".seh_pushreg %rbx\n\t"
+                   "pushq %rsi\n\t"
+                   ".seh_pushreg %rsi\n\t"
+                   "pushq %rdi\n\t"
+                   ".seh_pushreg %rdi\n\t"
+                   "subq $0x28,%rsp\n"
+                   ".seh_stackalloc 0x28\n\t"
+                   ".seh_endprologue\n\t"
+                   "movq %gs:0x30,%r12\n\t"
+                   "movq 0x1488(%r12),%rcx\n\t" /* NtCurrentTeb()->TlsSlots[WOW64_TLS_CPURESERVED] */
+                   "leaq 4(%rcx),%r13\n"        /* cpu->Context */
+                   "jmp syscall_32to64_return\n" )
 
 
 /**********************************************************************
@@ -302,6 +311,7 @@ NTSTATUS WINAPI BTCpuProcessInit(void)
 
     LdrGetDllHandle( NULL, 0, &str, &module );
     p__wine_unix_call_dispatcher = RtlFindExportedRoutineByName( module, "__wine_unix_call_dispatcher" );
+    __wine_unix_call_dispatcher = *p__wine_unix_call_dispatcher;
 
     RtlCaptureContext( &context );
     cs64_sel = context.SegCs;
@@ -314,15 +324,11 @@ NTSTATUS WINAPI BTCpuProcessInit(void)
     thunk->syscall_thunk.addr  = PtrToUlong( syscall_32to64 );
     thunk->syscall_thunk.cs    = cs64_sel;
 
-    thunk->unix_thunk.pushl   = 0x68;
-    thunk->unix_thunk.dispatcher_high = (ULONG_PTR)*p__wine_unix_call_dispatcher >> 32;
-    thunk->unix_thunk.pushl2  = 0x68;
-    thunk->unix_thunk.dispatcher_low = (ULONG_PTR)*p__wine_unix_call_dispatcher;
-    thunk->unix_thunk.t.ljmp  = 0xff;
-    thunk->unix_thunk.t.modrm = 0x2d;
-    thunk->unix_thunk.t.op    = PtrToUlong( &thunk->unix_thunk.t.addr );
-    thunk->unix_thunk.t.addr  = PtrToUlong( unix_call_32to64 );
-    thunk->unix_thunk.t.cs    = cs64_sel;
+    thunk->unix_thunk.ljmp  = 0xff;
+    thunk->unix_thunk.modrm = 0x2d;
+    thunk->unix_thunk.op    = PtrToUlong( &thunk->unix_thunk.addr );
+    thunk->unix_thunk.addr  = PtrToUlong( unix_call_32to64 );
+    thunk->unix_thunk.cs    = cs64_sel;
 
     NtProtectVirtualMemory( GetCurrentProcess(), (void **)&thunk, &size, PAGE_EXECUTE_READ, &old_prot );
     return STATUS_SUCCESS;

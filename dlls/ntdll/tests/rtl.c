@@ -58,6 +58,8 @@ typedef struct _RTL_HANDLE_TABLE
 
 #endif
 
+static BOOL is_win64 = (sizeof(void *) > sizeof(int));
+
 /* avoid #include <winsock2.h> */
 #undef htons
 #ifdef WORDS_BIGENDIAN
@@ -107,9 +109,17 @@ static void *    (WINAPI *pRtlFindExportedRoutineByName)(HMODULE,const char *);
 static NTSTATUS  (WINAPI *pLdrEnumerateLoadedModules)(void *, void *, void *);
 static NTSTATUS  (WINAPI *pLdrRegisterDllNotification)(ULONG, PLDR_DLL_NOTIFICATION_FUNCTION, void *, void **);
 static NTSTATUS  (WINAPI *pLdrUnregisterDllNotification)(void *);
+static VOID      (WINAPI *pRtlGetDeviceFamilyInfoEnum)(ULONGLONG *,DWORD *,DWORD *);
 static void      (WINAPI *pRtlRbInsertNodeEx)(RTL_RB_TREE *, RTL_BALANCED_NODE *, BOOLEAN, RTL_BALANCED_NODE *);
 static void      (WINAPI *pRtlRbRemoveNode)(RTL_RB_TREE *, RTL_BALANCED_NODE *);
-
+static DWORD     (WINAPI *pRtlConvertDeviceFamilyInfoToString)(DWORD *, DWORD *, WCHAR *, WCHAR *);
+static NTSTATUS  (WINAPI *pRtlInitializeNtUserPfn)( const UINT64 *client_procsA, ULONG procsA_size,
+                                                    const UINT64 *client_procsW, ULONG procsW_size,
+                                                    const void *client_workers, ULONG workers_size );
+static NTSTATUS  (WINAPI *pRtlRetrieveNtUserPfn)( const UINT64 **client_procsA,
+                                                  const UINT64 **client_procsW,
+                                                  const UINT64 **client_workers );
+static NTSTATUS  (WINAPI *pRtlResetNtUserPfn)(void);
 
 static HMODULE hkernel32 = 0;
 static BOOL      (WINAPI *pIsWow64Process)(HANDLE, PBOOL);
@@ -153,8 +163,13 @@ static void InitFunctionPtrs(void)
         pLdrEnumerateLoadedModules = (void *)GetProcAddress(hntdll, "LdrEnumerateLoadedModules");
         pLdrRegisterDllNotification = (void *)GetProcAddress(hntdll, "LdrRegisterDllNotification");
         pLdrUnregisterDllNotification = (void *)GetProcAddress(hntdll, "LdrUnregisterDllNotification");
+        pRtlGetDeviceFamilyInfoEnum = (void *)GetProcAddress(hntdll, "RtlGetDeviceFamilyInfoEnum");
         pRtlRbInsertNodeEx = (void *)GetProcAddress(hntdll, "RtlRbInsertNodeEx");
         pRtlRbRemoveNode = (void *)GetProcAddress(hntdll, "RtlRbRemoveNode");
+        pRtlConvertDeviceFamilyInfoToString = (void *)GetProcAddress(hntdll, "RtlConvertDeviceFamilyInfoToString");
+        pRtlInitializeNtUserPfn = (void *)GetProcAddress(hntdll, "RtlInitializeNtUserPfn");
+        pRtlRetrieveNtUserPfn = (void *)GetProcAddress(hntdll, "RtlRetrieveNtUserPfn");
+        pRtlResetNtUserPfn = (void *)GetProcAddress(hntdll, "RtlResetNtUserPfn");
     }
     hkernel32 = LoadLibraryA("kernel32.dll");
     ok(hkernel32 != 0, "LoadLibrary failed\n");
@@ -170,6 +185,7 @@ static void test_RtlQueryProcessDebugInformation(void)
     DEBUG_BUFFER *buffer;
     NTSTATUS status;
 
+    /* PDI_HEAPS | PDI_HEAP_BLOCKS */
     buffer = RtlCreateQueryDebugBuffer( 0, 0 );
     ok( buffer != NULL, "RtlCreateQueryDebugBuffer returned NULL" );
 
@@ -178,6 +194,20 @@ static void test_RtlQueryProcessDebugInformation(void)
 
     status = RtlQueryProcessDebugInformation( GetCurrentProcessId(), PDI_HEAPS | PDI_HEAP_BLOCKS, buffer );
     ok( !status, "RtlQueryProcessDebugInformation returned %lx\n", status );
+    ok( buffer->InfoClassMask == (PDI_HEAPS | PDI_HEAP_BLOCKS), "unexpected InfoClassMask %ld\n", buffer->InfoClassMask);
+    ok( buffer->HeapInformation != NULL, "unexpected HeapInformation %p\n", buffer->HeapInformation);
+
+    status = RtlDestroyQueryDebugBuffer( buffer );
+    ok( !status, "RtlDestroyQueryDebugBuffer returned %lx\n", status );
+
+    /* PDI_MODULES */
+    buffer = RtlCreateQueryDebugBuffer( 0, 0 );
+    ok( buffer != NULL, "RtlCreateQueryDebugBuffer returned NULL" );
+
+    status = RtlQueryProcessDebugInformation( GetCurrentProcessId(), PDI_MODULES, buffer );
+    ok( !status, "RtlQueryProcessDebugInformation returned %lx\n", status );
+    ok( buffer->InfoClassMask == PDI_MODULES, "unexpected InfoClassMask %ld\n", buffer->InfoClassMask);
+    ok( buffer->ModuleInformation != NULL, "unexpected ModuleInformation %p\n", buffer->ModuleInformation);
 
     status = RtlDestroyQueryDebugBuffer( buffer );
     ok( !status, "RtlDestroyQueryDebugBuffer returned %lx\n", status );
@@ -2969,7 +2999,7 @@ static void test_RtlInitializeCriticalSectionEx(void)
 
     memset(&cs, 0x11, sizeof(cs));
     pRtlInitializeCriticalSectionEx(&cs, 0, 0);
-    ok((cs.DebugInfo != NULL && cs.DebugInfo != no_debug) || broken(cs.DebugInfo == no_debug) /* >= Win 8 */,
+    ok(cs.DebugInfo == no_debug || broken(cs.DebugInfo != NULL && cs.DebugInfo != no_debug) /* < Win8 */,
        "expected DebugInfo != NULL and DebugInfo != ~0, got %p\n", cs.DebugInfo);
     ok(cs.LockCount == -1, "expected LockCount == -1, got %ld\n", cs.LockCount);
     ok(cs.RecursionCount == 0, "expected RecursionCount == 0, got %ld\n", cs.RecursionCount);
@@ -3578,6 +3608,77 @@ static void test_RtlDestroyHeap(void)
     RtlRemoveVectoredExceptionHandler( handler );
 }
 
+struct commit_routine_context
+{
+    void *base;
+    SIZE_T size;
+};
+
+static struct commit_routine_context commit_context;
+
+static NTSTATUS NTAPI test_commit_routine(void *base, void **address, SIZE_T *size)
+{
+    commit_context.base = base;
+    commit_context.size = *size;
+
+    return VirtualAlloc(*address, *size, MEM_COMMIT, PAGE_READWRITE) ? 0 : STATUS_ASSERTION_FAILURE;
+}
+
+static void test_RtlCreateHeap(void)
+{
+    void *ptr, *base, *reserve;
+    RTL_HEAP_PARAMETERS params;
+    HANDLE heap;
+    BOOL ret;
+
+    heap = RtlCreateHeap(0, NULL, 0, 0, NULL, NULL);
+    ok(!!heap, "Failed to create a heap.\n");
+    RtlDestroyHeap(heap);
+
+    memset(&params, 0, sizeof(params));
+    heap = RtlCreateHeap(0, NULL, 0, 0, NULL, &params);
+    ok(!!heap, "Failed to create a heap.\n");
+    RtlDestroyHeap(heap);
+
+    params.Length = 1;
+    heap = RtlCreateHeap(0, NULL, 0, 0, NULL, &params);
+    ok(!!heap, "Failed to create a heap.\n");
+    RtlDestroyHeap(heap);
+
+    params.Length = sizeof(params);
+    params.CommitRoutine = test_commit_routine;
+    params.InitialCommit = 0x1000;
+    params.InitialReserve = 0x10000;
+
+    heap = RtlCreateHeap(0, NULL, 0, 0, NULL, &params);
+    todo_wine
+    ok(!heap, "Unexpected heap.\n");
+    if (heap)
+        RtlDestroyHeap(heap);
+
+    reserve = VirtualAlloc(NULL, 0x10000, MEM_RESERVE, PAGE_READWRITE);
+    base = VirtualAlloc(reserve, 0x1000, MEM_COMMIT, PAGE_READWRITE);
+    ok(!!base, "Unexpected pointer.\n");
+
+    heap = RtlCreateHeap(0, base, 0, 0, NULL, &params);
+    ok(!!heap, "Unexpected heap.\n");
+
+    /* Using block size above initially committed size to trigger
+       new allocation via user callback. */
+    ptr = RtlAllocateHeap(heap, 0, 0x4000);
+    ok(!!ptr, "Failed to allocate a block.\n");
+    todo_wine
+    ok(commit_context.base == base, "Unexpected base %p.\n", commit_context.base);
+    todo_wine
+    ok(!!commit_context.size, "Unexpected allocation size.\n");
+    RtlFreeHeap(heap, 0, ptr);
+    RtlDestroyHeap(heap);
+
+    ret = VirtualFree(reserve, 0, MEM_RELEASE);
+    todo_wine
+    ok(ret, "Unexpected return value.\n");
+}
+
 static void test_RtlFirstFreeAce(void)
 {
     PACL acl;
@@ -3679,6 +3780,27 @@ static void test_RtlFindExportedRoutineByName(void)
     ok( proc != NULL, "Expected non NULL address\n" );
     proc = pRtlFindExportedRoutineByName( GetModuleHandleW( L"kernel32" ), "CtrlRoutine" );
     ok( proc == NULL, "Shouldn't find forwarded function\n" );
+}
+
+static void test_RtlGetDeviceFamilyInfoEnum(void)
+{
+    ULONGLONG version;
+    DWORD family, form;
+
+    if (!pRtlGetDeviceFamilyInfoEnum)
+    {
+        win_skip( "RtlGetDeviceFamilyInfoEnum is not present\n" );
+        return;
+    }
+
+    version = 0x1234567;
+    family = 1234567;
+    form = 1234567;
+    pRtlGetDeviceFamilyInfoEnum(&version, &family, &form);
+    ok( version != 0x1234567, "got unexpected unchanged value 0x1234567\n" );
+    ok( family <= DEVICEFAMILYINFOENUM_MAX, "got unexpected %lu\n", family );
+    ok( form <= DEVICEFAMILYDEVICEFORM_MAX, "got unexpected %lu\n", form );
+    trace( "UAP version is %#I64x, device family is %lu, form factor is %lu\n", version, family, form );
 }
 
 struct test_rb_tree_entry
@@ -3822,6 +3944,192 @@ static void test_rb_tree(void)
     free(nodes);
 }
 
+static void test_RtlConvertDeviceFamilyInfoToString(void)
+{
+    DWORD device_family_size, device_form_size, ret;
+    WCHAR device_family[16], device_form[16];
+
+    if (!pRtlConvertDeviceFamilyInfoToString)
+    {
+        win_skip("RtlConvertDeviceFamilyInfoToString is unavailable.\n" );
+        return;
+    }
+
+    if (0) /* Crash on Windows */
+    {
+    ret = pRtlConvertDeviceFamilyInfoToString(NULL, NULL, NULL, NULL);
+    ok(ret == STATUS_INVALID_PARAMETER, "Got unexpected status %#lx.\n", ret);
+
+    device_family_size = 0;
+    ret = pRtlConvertDeviceFamilyInfoToString(&device_family_size, NULL, NULL, NULL);
+    ok(ret == STATUS_BUFFER_TOO_SMALL, "Got unexpected status %#lx.\n", ret);
+    ok(device_family_size == (wcslen(L"Windows.Desktop") + 1) * sizeof(WCHAR),
+       "Got unexpected %#lx.\n", device_family_size);
+
+    device_form_size = 0;
+    ret = pRtlConvertDeviceFamilyInfoToString(NULL, &device_form_size, NULL, NULL);
+    ok(ret == STATUS_BUFFER_TOO_SMALL, "Got unexpected status %#lx.\n", ret);
+    ok(device_form_size == (wcslen(L"Unknown") + 1) * sizeof(WCHAR), "Got unexpected %#lx.\n",
+       device_form_size);
+
+    ret = pRtlConvertDeviceFamilyInfoToString(&device_family_size, NULL, device_family, NULL);
+    ok(ret == STATUS_SUCCESS, "Got unexpected status %#lx.\n", ret);
+    ok(device_family_size == (wcslen(L"Windows.Desktop") + 1) * sizeof(WCHAR),
+       "Got unexpected %#lx.\n", device_family_size);
+    ok(!wcscmp(device_family, L"Windows.Desktop"), "Got unexpected %s.\n", wine_dbgstr_w(device_family));
+
+    ret = pRtlConvertDeviceFamilyInfoToString(NULL, &device_form_size, NULL, device_form);
+    ok(ret == STATUS_SUCCESS, "Got unexpected status %#lx.\n", ret);
+    ok(device_form_size == (wcslen(L"Unknown") + 1) * sizeof(WCHAR), "Got unexpected %#lx.\n",
+       device_form_size);
+    ok(!wcscmp(device_form, L"Unknown"), "Got unexpected %s.\n", wine_dbgstr_w(device_form));
+
+    ret = pRtlConvertDeviceFamilyInfoToString(&device_family_size, &device_form_size, NULL, NULL);
+    ok(ret == STATUS_INVALID_PARAMETER, "Got unexpected status %#lx.\n", ret);
+    }
+
+    device_family_size = wcslen(L"Windows.Desktop") * sizeof(WCHAR);
+    device_form_size = wcslen(L"Unknown") * sizeof(WCHAR);
+    ret = pRtlConvertDeviceFamilyInfoToString(&device_family_size, &device_form_size, NULL, NULL);
+    ok(ret == STATUS_BUFFER_TOO_SMALL, "Got unexpected status %#lx.\n", ret);
+    ok(device_family_size == (wcslen(L"Windows.Desktop") + 1) * sizeof(WCHAR),
+       "Got unexpected %#lx.\n", device_family_size);
+    ok(device_form_size == (wcslen(L"Unknown") + 1) * sizeof(WCHAR), "Got unexpected %#lx.\n",
+       device_form_size);
+
+    ret = pRtlConvertDeviceFamilyInfoToString(&device_family_size, &device_form_size, device_family, device_form);
+    ok(ret == STATUS_SUCCESS, "Got unexpected status %#lx.\n", ret);
+    ok(!wcscmp(device_family, L"Windows.Desktop"), "Got unexpected %s.\n", wine_dbgstr_w(device_family));
+    ok(!wcscmp(device_form, L"Unknown"), "Got unexpected %s.\n", wine_dbgstr_w(device_form));
+}
+
+static void test_user_procs(void)
+{
+    UINT64 ptrs[32], dummy[32] = { 0 };
+    NTSTATUS status;
+    const UINT64 *ptr_A, *ptr_W, *ptr_workers;
+    ULONG size_A, size_W, size_workers;
+
+    if (!pRtlRetrieveNtUserPfn || !pRtlInitializeNtUserPfn)
+    {
+        win_skip( "user procs not supported\n" );
+        return;
+    }
+
+    status = pRtlRetrieveNtUserPfn( &ptr_A, &ptr_W, &ptr_workers );
+    ok( !status || broken(!is_win64 && status == STATUS_INVALID_PARAMETER), /* <= win8 32-bit */
+        "RtlRetrieveNtUserPfn failed %lx\n", status );
+    if (status) return;
+
+    /* assume that the tables are consecutive */
+    size_A = (ptr_W - ptr_A) * sizeof(UINT64);
+    size_W = (ptr_workers - ptr_W) * sizeof(UINT64);
+    ok( size_A > 0x80 && size_A < 0x100, "unexpected size for %p %p %p\n", ptr_A, ptr_W, ptr_workers );
+    ok( size_W == size_A, "unexpected size for %p %p %p\n", ptr_A, ptr_W, ptr_workers );
+    memcpy( ptrs, ptr_A, size_A );
+
+    status = pRtlInitializeNtUserPfn( dummy, size_A, dummy + 1, size_W, dummy + 2, 0 );
+    ok( status == STATUS_INVALID_PARAMETER, "RtlInitializeNtUserPfn failed %lx\n", status );
+
+    if (!pRtlResetNtUserPfn)
+    {
+        win_skip( "RtlResetNtUserPfn not supported\n" );
+        return;
+    }
+
+    status = pRtlResetNtUserPfn();
+    ok( !status, "RtlResetNtUserPfn failed %lx\n", status );
+    ok( !memcmp( ptrs, ptr_A, size_A ), "pointers changed by reset\n" );
+
+    /* can't do anything after reset except set them again */
+    status = pRtlResetNtUserPfn();
+    ok( status == STATUS_INVALID_PARAMETER, "RtlResetNtUserPfn failed %lx\n", status );
+    status = pRtlRetrieveNtUserPfn( &ptr_A, &ptr_W, &ptr_workers );
+    ok( status == STATUS_INVALID_PARAMETER, "RtlRetrieveNtUserPfn failed %lx\n", status );
+
+    for (size_workers = 0x100; size_workers > 0; size_workers--)
+    {
+        status = pRtlInitializeNtUserPfn( dummy, size_A, dummy + 1, size_W, dummy + 2, size_workers );
+        if (!status) break;
+        ok( status == STATUS_INVALID_PARAMETER, "RtlInitializeNtUserPfn failed %lx\n", status );
+    }
+    trace( "got sizes %lx %lx %lx\n", size_A, size_W, size_workers );
+    if (!size_workers) return;  /* something went wrong */
+    ok( !memcmp( ptrs, ptr_A, size_A ), "pointers changed by init\n" );
+
+    /* can't set twice without a reset */
+    status = pRtlInitializeNtUserPfn( dummy, size_A, dummy + 1, size_W, dummy + 2, size_workers );
+    ok( status == STATUS_INVALID_PARAMETER, "RtlInitializeNtUserPfn failed %lx\n", status );
+    status = pRtlResetNtUserPfn();
+    ok( !status, "RtlResetNtUserPfn failed %lx\n", status );
+    status = pRtlInitializeNtUserPfn( dummy, size_A, dummy + 1, size_W, dummy + 2, size_workers );
+    ok( !status, "RtlInitializeNtUserPfn failed %lx\n", status );
+    ok( !memcmp( ptrs, ptr_A, size_A ), "pointers changed by init\n" );
+}
+
+static ULONG_PTR rotate_bits_right(ULONG_PTR v, ULONG count)
+{
+    static const unsigned int bits = sizeof (v) * 8;
+
+    count %= bits;
+    return (v >> count) | (v << (bits - count));
+}
+
+static ULONG_PTR rotate_bits_left(ULONG_PTR v, ULONG count)
+{
+    static const unsigned int bits = sizeof (v) * 8;
+
+    count %= bits;
+    return (v << count) | (v >> (bits - count));
+}
+
+static ULONG process_cookie;
+
+static void *encode_pointer( void *ptr )
+{
+    DWORD_PTR ptrval = (DWORD_PTR) ptr;
+    return (void *)rotate_bits_right( ptrval ^ process_cookie, process_cookie );
+}
+
+static void *decode_pointer( void *ptr )
+{
+    DWORD_PTR ptrval = (DWORD_PTR) ptr;
+    return (void *)(rotate_bits_left( ptrval, process_cookie ) ^ process_cookie );
+}
+
+static void test_pointer_encoding(void)
+{
+    void *v, *expected;
+
+    if (NtQueryInformationProcess( GetCurrentProcess(), ProcessCookie, &process_cookie, sizeof(process_cookie), NULL ))
+    {
+        win_skip( "Could not get process cookie, skipping tests.\n" );
+        return;
+    }
+    ok( process_cookie, "got 0.\n" );
+
+    v = RtlEncodePointer( NULL );
+    expected = encode_pointer( NULL );
+    ok( v == expected, "got %p, expected %p.\n", v, expected );
+    v = RtlDecodePointer( v );
+    expected = decode_pointer( expected );
+    ok( v == expected, "got %p, expected %p.\n", v, expected );
+
+    v = RtlEncodePointer( (void *)(ULONG_PTR)1 );
+    expected = encode_pointer( (void *)(ULONG_PTR)1 );
+    ok( v == expected, "got %p, expected %p.\n", v, expected );
+    v = RtlDecodePointer( v );
+    expected = decode_pointer( expected );
+    ok( v == expected, "got %p, expected %p.\n", v, expected );
+
+    v = RtlEncodePointer( (void *)(ULONG_PTR)0xdeadbeeffeedcafe );
+    expected = encode_pointer( (void *)(ULONG_PTR)0xdeadbeeffeedcafe );
+    ok( v == expected, "got %p, expected %p.\n", v, expected );
+    v = RtlDecodePointer( v );
+    expected = decode_pointer( expected );
+    ok( v == expected, "got %p, expected %p.\n", v, expected );
+}
+
 START_TEST(rtl)
 {
     InitFunctionPtrs();
@@ -3865,9 +4173,14 @@ START_TEST(rtl)
     test_LdrRegisterDllNotification();
     test_DbgPrint();
     test_RtlDestroyHeap();
+    test_RtlCreateHeap();
     test_RtlFirstFreeAce();
     test_RtlInitializeSid();
     test_RtlValidSecurityDescriptor();
     test_RtlFindExportedRoutineByName();
+    test_RtlGetDeviceFamilyInfoEnum();
+    test_RtlConvertDeviceFamilyInfoToString();
     test_rb_tree();
+    test_user_procs();
+    test_pointer_encoding();
 }

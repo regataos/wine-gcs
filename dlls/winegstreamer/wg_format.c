@@ -151,8 +151,12 @@ static enum wg_video_format wg_video_format_from_gst(GstVideoFormat format)
             return WG_VIDEO_FORMAT_AYUV;
         case GST_VIDEO_FORMAT_I420:
             return WG_VIDEO_FORMAT_I420;
+        case GST_VIDEO_FORMAT_I420_10LE:
+            return WG_VIDEO_FORMAT_P010_10LE;
         case GST_VIDEO_FORMAT_NV12:
             return WG_VIDEO_FORMAT_NV12;
+        case GST_VIDEO_FORMAT_P010_10LE:
+            return WG_VIDEO_FORMAT_P010_10LE;
         case GST_VIDEO_FORMAT_UYVY:
             return WG_VIDEO_FORMAT_UYVY;
         case GST_VIDEO_FORMAT_YUY2:
@@ -201,6 +205,67 @@ static void wg_format_from_caps_audio_mpeg1(struct wg_format *format, const GstC
     format->u.audio.layer = layer;
     format->u.audio.channels = channels;
     format->u.audio.rate = rate;
+}
+
+static void wg_format_from_caps_audio_mpeg4(struct wg_format *format, const GstCaps *caps)
+{
+    static const size_t waveinfo_size = sizeof(HEAACWAVEINFO) - sizeof(WAVEFORMATEX);
+    const GstStructure *structure = gst_caps_get_structure(caps, 0);
+    const GValue *codec_data_value;
+    const gchar *stream_format;
+    GstBuffer *codec_data;
+    gint channels, rate;
+    GstMapInfo map;
+
+    if (!gst_structure_get_int(structure, "channels", &channels))
+    {
+        GST_WARNING("Missing \"channels\" value in %" GST_PTR_FORMAT ".", caps);
+        return;
+    }
+    if (!gst_structure_get_int(structure, "rate", &rate))
+    {
+        GST_WARNING("Missing \"rate\" value in %" GST_PTR_FORMAT ".", caps);
+        return;
+    }
+    if (!(codec_data_value = gst_structure_get_value(structure, "codec_data"))
+            || !(codec_data = gst_value_get_buffer(codec_data_value)))
+    {
+        GST_WARNING("Missing \"codec_data\" value in %" GST_PTR_FORMAT ".", caps);
+        return;
+    }
+    if (!(stream_format = gst_structure_get_string(structure, "stream-format")))
+    {
+        GST_WARNING("Missing \"stream-format\" value in %" GST_PTR_FORMAT ".", caps);
+        return;
+    }
+
+    format->major_type = WG_MAJOR_TYPE_AUDIO_MPEG4;
+    format->u.audio.channels = channels;
+    format->u.audio.rate = rate;
+    if (!strcmp(stream_format, "raw"))
+        format->u.audio.payload_type = 0;
+    else if (!strcmp(stream_format, "adts"))
+        format->u.audio.payload_type = 1;
+    else if (!strcmp(stream_format, "adif"))
+        format->u.audio.payload_type = 2;
+    else if (!strcmp(stream_format, "loas"))
+        format->u.audio.payload_type = 3;
+
+    gst_buffer_map(codec_data, &map, GST_MAP_READ);
+    if ((map.size + waveinfo_size) <= sizeof(format->u.audio.codec_data))
+    {
+        HEAACWAVEINFO wave_info = {0};
+
+        wave_info.wPayloadType = format->u.audio.payload_type;
+        /* Native apparently sets wAudioProfileLevelIndication to zero. */
+
+        format->u.audio.codec_data_len = map.size + waveinfo_size;
+        memcpy(format->u.audio.codec_data, &wave_info.wPayloadType, waveinfo_size);
+        memcpy(format->u.audio.codec_data + waveinfo_size, map.data, map.size);
+    }
+    else
+        GST_WARNING("Too big codec_data value (%u) in %" GST_PTR_FORMAT ".", (UINT)map.size, caps);
+    gst_buffer_unmap(codec_data, &map);
 }
 
 static void wg_format_from_caps_audio_wma(struct wg_format *format, const GstCaps *caps)
@@ -392,11 +457,129 @@ static void wg_format_from_caps_video_mpeg1(struct wg_format *format, const GstC
     format->u.video.fps_d = fps_d;
 }
 
+static const struct
+{
+    enum eAVEncH264VLevel level;
+    const char *string;
+}
+h264_levels[] =
+{
+    {eAVEncH264VLevel1,   "1"},
+    {eAVEncH264VLevel1_1, "1.1"},
+    {eAVEncH264VLevel1_2, "1.2"},
+    {eAVEncH264VLevel1_3, "1.3"},
+    {eAVEncH264VLevel2,   "2"},
+    {eAVEncH264VLevel2_1, "2.1"},
+    {eAVEncH264VLevel2_2, "2.2"},
+    {eAVEncH264VLevel3,   "3"},
+    {eAVEncH264VLevel3_1, "3.1"},
+    {eAVEncH264VLevel3_2, "3.2"},
+    {eAVEncH264VLevel4,   "4"},
+    {eAVEncH264VLevel4_1, "4.1"},
+    {eAVEncH264VLevel4_2, "4.2"},
+    {eAVEncH264VLevel5,   "5"},
+    {eAVEncH264VLevel5_1, "5.1"},
+    {eAVEncH264VLevel5_2, "5.2"},
+};
+
+static enum eAVEncH264VLevel level_from_string(const char *string)
+{
+    for (unsigned int i = 0; i < ARRAY_SIZE(h264_levels); ++i)
+    {
+        if (!strcmp(h264_levels[i].string, string))
+            return h264_levels[i].level;
+    }
+
+    GST_FIXME("Unrecognized level %s.\n", string);
+    return eAVEncH264VLevel1;
+}
+
+static void wg_format_from_caps_video_h264(struct wg_format *format, const GstCaps *caps)
+{
+    const GstStructure *structure = gst_caps_get_structure(caps, 0);
+    const gchar *stream_format, *profile, *level;
+    gint width, height, fps_n, fps_d;
+    const GValue *codec_data_value;
+    GstBuffer *codec_data;
+    GstMapInfo map;
+
+    if (!(stream_format = gst_structure_get_string(structure, "stream-format")))
+    {
+        GST_WARNING("Missing \"stream-format\" value in %" GST_PTR_FORMAT ".", caps);
+        return;
+    }
+
+    /* Windows requires byte-stream format. */
+    if (strcmp(stream_format, "byte-stream"))
+    {
+        GST_DEBUG("Rejecting stream format %s.\n", stream_format);
+        return;
+    }
+
+    if (!gst_structure_get_int(structure, "width", &width))
+    {
+        GST_WARNING("Missing \"width\" value in %" GST_PTR_FORMAT ".", caps);
+        return;
+    }
+    if (!gst_structure_get_int(structure, "height", &height))
+    {
+        GST_WARNING("Missing \"height\" value in %" GST_PTR_FORMAT ".", caps);
+        return;
+    }
+    if (!gst_structure_get_fraction(structure, "framerate", &fps_n, &fps_d))
+    {
+        fps_n = 0;
+        fps_d = 1;
+    }
+    if (!(profile = gst_structure_get_string(structure, "profile")))
+    {
+        GST_WARNING("Missing \"profile\" value in %" GST_PTR_FORMAT ".", caps);
+        return;
+    }
+    if (!(level = gst_structure_get_string(structure, "level")))
+    {
+        GST_WARNING("Missing \"level\" value in %" GST_PTR_FORMAT ".", caps);
+        return;
+    }
+
+    format->major_type = WG_MAJOR_TYPE_VIDEO_H264;
+    format->u.video.width = width;
+    format->u.video.height = height;
+    format->u.video.fps_n = fps_n;
+    format->u.video.fps_d = fps_d;
+
+    if (!strcmp(profile, "high"))
+        format->u.video.profile = eAVEncH264VProfile_High;
+    else if (!strcmp(profile, "high-4:4:4"))
+        format->u.video.profile = eAVEncH264VProfile_444;
+    else if (!strcmp(profile, "main"))
+        format->u.video.profile = eAVEncH264VProfile_Main;
+    else
+        GST_FIXME("Unhandled profile %s.\n", profile);
+
+    format->u.video.level = level_from_string(level);
+
+    if ((codec_data_value = gst_structure_get_value(structure, "streamheader"))
+            && (codec_data = gst_value_get_buffer(codec_data_value)))
+    {
+        gst_buffer_map(codec_data, &map, GST_MAP_READ);
+        if (map.size <= sizeof(format->u.video.codec_data))
+        {
+            format->u.video.codec_data_len = map.size;
+            memcpy(format->u.video.codec_data, map.data, map.size);
+        }
+        else
+            GST_WARNING("Too big codec_data value (%u) in %" GST_PTR_FORMAT ".", (UINT)map.size, caps);
+        gst_buffer_unmap(codec_data, &map);
+    }
+}
+
 void wg_format_from_caps(struct wg_format *format, const GstCaps *caps)
 {
     const GstStructure *structure = gst_caps_get_structure(caps, 0);
     const char *name = gst_structure_get_name(structure);
     gboolean parsed;
+    gint version;
 
     memset(format, 0, sizeof(*format));
 
@@ -404,19 +587,29 @@ void wg_format_from_caps(struct wg_format *format, const GstCaps *caps)
     {
         GstAudioInfo info;
 
-        if (gst_audio_info_from_caps(&info, caps))
+        if (gst_caps_is_fixed(caps) && gst_audio_info_from_caps(&info, caps))
             wg_format_from_audio_info(format, &info);
+        else
+            GST_WARNING("Unable to get audio info from caps");
     }
     else if (!strcmp(name, "video/x-raw"))
     {
         GstVideoInfo info;
 
-        if (gst_video_info_from_caps(&info, caps))
+        if (gst_caps_is_fixed(caps) && gst_video_info_from_caps(&info, caps))
             wg_format_from_video_info(format, &info);
+        else
+            GST_WARNING("Unable to get video info from caps");
     }
     else if (!strcmp(name, "audio/mpeg") && gst_structure_get_boolean(structure, "parsed", &parsed) && parsed)
     {
         wg_format_from_caps_audio_mpeg1(format, caps);
+    }
+    else if (!strcmp(name, "audio/mpeg")
+            && gst_structure_get_int(structure, "mpegversion", &version) && version == 4
+            && gst_structure_get_boolean(structure, "framed", &parsed) && parsed)
+    {
+        wg_format_from_caps_audio_mpeg4(format, caps);
     }
     else if (!strcmp(name, "audio/x-wma"))
     {
@@ -430,9 +623,15 @@ void wg_format_from_caps(struct wg_format *format, const GstCaps *caps)
     {
         wg_format_from_caps_video_wmv(format, caps);
     }
-    else if (!strcmp(name, "video/mpeg") && gst_structure_get_boolean(structure, "parsed", &parsed) && parsed)
+    else if (!strcmp(name, "video/mpeg")
+            && gst_structure_get_int(structure, "mpegversion", &version) && (version == 1 || version == 2)
+            && gst_structure_get_boolean(structure, "parsed", &parsed) && parsed)
     {
         wg_format_from_caps_video_mpeg1(format, caps);
+    }
+    else if (!strcmp(name, "video/x-h264"))
+    {
+        wg_format_from_caps_video_h264(format, caps);
     }
     else
     {
@@ -496,8 +695,6 @@ static void wg_channel_mask_to_gst(GstAudioChannelPosition *positions, uint32_t 
         else
         {
             GST_WARNING("Incomplete channel mask %#x.", orig_mask);
-            if (!orig_mask)
-                positions[i] = position_map[bit];
         }
     }
 }
@@ -520,6 +717,7 @@ static GstCaps *wg_format_to_caps_audio_mpeg1(const struct wg_format *format)
 
 static GstCaps *wg_format_to_caps_audio_mpeg4(const struct wg_format *format)
 {
+    static const size_t waveinfo_size = sizeof(HEAACWAVEINFO) - sizeof(WAVEFORMATEX);
     GstBuffer *buffer;
     GstCaps *caps;
 
@@ -538,10 +736,11 @@ static GstCaps *wg_format_to_caps_audio_mpeg4(const struct wg_format *format)
 
     /* FIXME: Use gst_codec_utils_aac_caps_set_level_and_profile from GStreamer pbutils library */
 
-    if (format->u.audio.codec_data_len)
+    if (format->u.audio.codec_data_len > waveinfo_size)
     {
-        buffer = gst_buffer_new_and_alloc(format->u.audio.codec_data_len);
-        gst_buffer_fill(buffer, 0, format->u.audio.codec_data, format->u.audio.codec_data_len);
+        buffer = gst_buffer_new_and_alloc(format->u.audio.codec_data_len - waveinfo_size);
+        gst_buffer_fill(buffer, 0, format->u.audio.codec_data + waveinfo_size,
+                format->u.audio.codec_data_len - waveinfo_size);
         gst_caps_set_simple(caps, "codec_data", GST_TYPE_BUFFER, buffer, NULL);
         gst_buffer_unref(buffer);
     }
@@ -580,6 +779,7 @@ static GstVideoFormat wg_video_format_to_gst(enum wg_video_format format)
         case WG_VIDEO_FORMAT_YUY2:  return GST_VIDEO_FORMAT_YUY2;
         case WG_VIDEO_FORMAT_YV12:  return GST_VIDEO_FORMAT_YV12;
         case WG_VIDEO_FORMAT_YVYU:  return GST_VIDEO_FORMAT_YVYU;
+        case WG_VIDEO_FORMAT_P010_10LE: return GST_VIDEO_FORMAT_P010_10LE;
         default: return GST_VIDEO_FORMAT_UNKNOWN;
     }
 }
@@ -615,7 +815,6 @@ static GstCaps *wg_format_to_caps_video(const struct wg_format *format)
 
             /* Remove fields which we don't specify but might have some default value */
             gst_structure_remove_fields(structure, "colorimetry", "chroma-site", NULL);
-            gst_structure_remove_fields(structure, "pixel-aspect-ratio", NULL);
         }
     }
     return caps;

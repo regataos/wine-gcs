@@ -44,6 +44,10 @@
 #ifdef __APPLE__
 # include <CoreFoundation/CFLocale.h>
 # include <CoreFoundation/CFString.h>
+# include <crt_externs.h>
+# define environ (*_NSGetEnviron())
+#else
+  extern char **environ;
 #endif
 
 #include "ntstatus.h"
@@ -71,7 +75,6 @@ static const WCHAR bootstrapW[] = {'W','I','N','E','B','O','O','T','S','T','R','
 
 int main_argc = 0;
 char **main_argv = NULL;
-char **main_envp = NULL;
 WCHAR **main_wargv = NULL;
 
 static LCID user_lcid, system_lcid;
@@ -145,11 +148,12 @@ static void *read_nls_file( const char *name )
 
 static NTSTATUS open_nls_data_file( const char *path, const WCHAR *sysdir, HANDLE *file )
 {
-    NTSTATUS status = STATUS_OBJECT_NAME_NOT_FOUND;
+    NTSTATUS status;
+    IO_STATUS_BLOCK io;
     OBJECT_ATTRIBUTES attr;
     UNICODE_STRING valueW;
     WCHAR buffer[64];
-    char *p, *ntpath;
+    char *p;
 
     wcscpy( buffer, system_dir );
     p = strrchr( path, '/' ) + 1;
@@ -161,11 +165,7 @@ static NTSTATUS open_nls_data_file( const char *path, const WCHAR *sysdir, HANDL
                              FILE_OPEN, FILE_SYNCHRONOUS_IO_ALERT, NULL, 0 );
     if (status != STATUS_NO_SUCH_FILE) return status;
 
-    if ((status = nt_to_unix_file_name( &attr, &ntpath, FILE_OPEN ))) return status;
-    status = open_unix_file( file, ntpath, GENERIC_READ, &attr, 0, FILE_SHARE_READ,
-                             FILE_OPEN, FILE_SYNCHRONOUS_IO_ALERT, NULL, 0 );
-    free( ntpath );
-    return status;
+    return NtOpenFile( file, GENERIC_READ, &attr, &io, FILE_SHARE_READ, FILE_SYNCHRONOUS_IO_ALERT );
 }
 
 static NTSTATUS get_nls_section_name( UINT type, UINT id, WCHAR name[32] )
@@ -345,6 +345,7 @@ static BOOL is_special_env_var( const char *var )
             STARTS_WITH( var, "QT_" ) ||
             STARTS_WITH( var, "SDL_AUDIODRIVER=" ) ||
             STARTS_WITH( var, "VK_" ) ||
+            STARTS_WITH( var, "XR_" ) ||
             STARTS_WITH( var, "XDG_SESSION_TYPE=" ));
 }
 
@@ -400,7 +401,7 @@ DWORD ntdll_umbstowcs( const char *src, DWORD srclen, WCHAR *dst, DWORD dstlen )
  */
 int ntdll_wcstoumbs( const WCHAR *src, DWORD srclen, char *dst, DWORD dstlen, BOOL strict )
 {
-    unsigned int i, reslen = 0;
+    unsigned int i, reslen;
 
     if (unix_cp.CodePage != CP_UTF8)
     {
@@ -815,6 +816,13 @@ static void init_locale(void)
 
     if (!unix_to_win_locale( ctype, system_locale )) system_locale[0] = 0;
     TRACE_(nls)( "Unix LC_CTYPE is %s, setting system locale to %s\n", debugstr_a(ctype), debugstr_a(user_locale) );
+
+    if (main_argc > 1 && strstr(main_argv[1], "start_protected_game.exe"))
+    {
+        FIXME( "HACK setting EN locale.\n" );
+        messages = "en-US";
+    }
+
     if (!unix_to_win_locale( messages, user_locale )) user_locale[0] = 0;
     TRACE_(nls)( "Unix LC_MESSAGES is %s, user system locale to %s\n", debugstr_a(messages), debugstr_a(user_locale) );
 
@@ -943,12 +951,12 @@ static WCHAR *get_initial_environment( SIZE_T *pos, SIZE_T *size )
 
     /* estimate needed size */
     *size = 1;
-    for (e = main_envp; *e; e++) *size += strlen(*e) + 1;
+    for (e = environ; *e; e++) *size += strlen(*e) + 1;
 
     env = malloc( *size * sizeof(WCHAR) );
     ptr = env;
     end = env + *size - 1;
-    for (e = main_envp; *e && ptr < end; e++)
+    for (e = environ; *e && ptr < end; e++)
     {
         char *str = *e;
 
@@ -1094,6 +1102,7 @@ static void add_dynamic_environment( WCHAR **env, SIZE_T *pos, SIZE_T *size )
 {
     const char *overrides = getenv( "WINEDLLOVERRIDES" );
     const char *wineloader = getenv( "WINELOADER" );
+    const char *var;
     unsigned int i;
     char str[22];
 
@@ -1121,6 +1130,9 @@ static void add_dynamic_environment( WCHAR **env, SIZE_T *pos, SIZE_T *size )
     append_envA( env, pos, size, "WINEUSERLOCALE", user_locale );
     append_envA( env, pos, size, "SystemDrive", "C:" );
     append_envA( env, pos, size, "SystemRoot", "C:\\windows" );
+
+    if ((var = getenv( "VR_CONFIG_PATH" ))) add_path_var( env, pos, size, "VR_CONFIG_PATH", var );
+    if ((var = getenv( "VR_LOG_PATH" ))) add_path_var( env, pos, size, "VR_LOG_PATH", var );
 }
 
 
@@ -1849,7 +1861,7 @@ static void *build_wow64_parameters( const RTL_USER_PROCESS_PARAMETERS *params )
                    + ((params->RuntimeInfo.MaximumLength + 1) & ~1)
                    + params->EnvironmentSize);
 
-    status = NtAllocateVirtualMemory( NtCurrentProcess(), (void **)&wow64_params, 0, &size,
+    status = NtAllocateVirtualMemory( NtCurrentProcess(), (void **)&wow64_params, limit_2g - 1, &size,
                                       MEM_COMMIT, PAGE_READWRITE );
     assert( !status );
 
@@ -1899,7 +1911,7 @@ static void init_peb( RTL_USER_PROCESS_PARAMETERS *params, void *module )
     peb->ProcessParameters          = params;
     peb->OSMajorVersion             = 10;
     peb->OSMinorVersion             = 0;
-    peb->OSBuildNumber              = 19043;
+    peb->OSBuildNumber              = 19045;
     peb->OSPlatformId               = VER_PLATFORM_WIN32_NT;
     peb->ImageSubSystem             = main_image_info.SubSystemType;
     peb->ImageSubSystemMajorVersion = main_image_info.MajorSubsystemVersion;
@@ -2066,7 +2078,7 @@ void init_startup_info(void)
     unsigned int status;
     SIZE_T size, info_size, env_size, env_pos;
     RTL_USER_PROCESS_PARAMETERS *params = NULL;
-    startup_info_t *info;
+    struct startup_info_data *info;
     USHORT machine;
 
     if (!startup_info_size)
@@ -2191,9 +2203,9 @@ static BOOL is_console_handle( HANDLE handle )
  */
 void *create_startup_info( const UNICODE_STRING *nt_image, ULONG process_flags,
                            const RTL_USER_PROCESS_PARAMETERS *params,
-                           const pe_image_info_t *pe_info, DWORD *info_size )
+                           const struct pe_image_info *pe_info, DWORD *info_size )
 {
-    startup_info_t *info;
+    struct startup_info_data *info;
     UNICODE_STRING dos_image = *nt_image;
     DWORD size;
     void *ptr;
@@ -2500,14 +2512,4 @@ void WINAPI RtlSetLastWin32Error( DWORD err )
     if (wow_teb) wow_teb->LastErrorValue = err;
 #endif
     teb->LastErrorValue = err;
-}
-
-
-/**********************************************************************
- *      __wine_set_unix_env  (ntdll.so)
- */
-NTSTATUS WINAPI __wine_set_unix_env( const char *var, const char *val )
-{
-    setenv(var, val, 1);
-    return 0;
 }

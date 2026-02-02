@@ -42,10 +42,10 @@ const GUID IID_D3DDEVICE_WineD3D = {
 
 static inline void set_fpu_control_word(WORD fpucw)
 {
-#if defined(__i386__) && defined(__GNUC__)
-    __asm__ volatile ("fldcw %0" : : "m" (fpucw));
-#elif defined(__i386__) && defined(_MSC_VER)
+#if defined(__i386__) && defined(_MSC_VER)
     __asm fldcw fpucw;
+#elif defined(__i386__) || (defined(__x86_64__) && !defined(__arm64ec__) && (defined(__GNUC__) || defined(__clang__)))
+    __asm__ volatile ("fldcw %0" : : "m" (fpucw));
 #endif
 }
 
@@ -53,10 +53,10 @@ static inline WORD d3d_fpu_setup(void)
 {
     WORD oldcw;
 
-#if defined(__i386__) && defined(__GNUC__)
-    __asm__ volatile ("fnstcw %0" : "=m" (oldcw));
-#elif defined(__i386__) && defined(_MSC_VER)
+#if defined(__i386__) && defined(_MSC_VER)
     __asm fnstcw oldcw;
+#elif defined(__i386__) || (defined(__x86_64__) && !defined(__arm64ec__) && (defined(__GNUC__) || defined(__clang__)))
+    __asm__ volatile ("fnstcw %0" : "=m" (oldcw));
 #else
     static BOOL warned = FALSE;
     if(!warned)
@@ -329,12 +329,11 @@ static ULONG WINAPI d3d_device_inner_Release(IUnknown *iface)
          * the device from it before so it doesn't try to save / restore state on the teared down device. */
         if (This->ddraw)
         {
+            if (This->ddraw->device_last_applied_state == This)
+                This->ddraw->device_last_applied_state = NULL;
             list_remove(&This->ddraw_entry);
             This->ddraw = NULL;
         }
-
-        if (This->pick_record_size > 0)
-            free(This->pick_records);
 
         TRACE("Releasing render target %p.\n", This->rt_iface);
         rt_iface = This->rt_iface;
@@ -565,24 +564,33 @@ static HRESULT WINAPI d3d_device1_GetCaps(IDirect3DDevice *iface,
 static HRESULT WINAPI d3d_device2_SwapTextureHandles(IDirect3DDevice2 *iface,
         IDirect3DTexture2 *tex1, IDirect3DTexture2 *tex2)
 {
-    struct d3d_device *device = impl_from_IDirect3DDevice2(iface);
     struct ddraw_surface *surf1 = unsafe_impl_from_IDirect3DTexture2(tex1);
     struct ddraw_surface *surf2 = unsafe_impl_from_IDirect3DTexture2(tex2);
-    DWORD h1, h2;
+    DWORD h1, h2, h;
+    HRESULT hr;
 
     TRACE("iface %p, tex1 %p, tex2 %p.\n", iface, tex1, tex2);
+
+    if (!surf1->Handle || !surf2->Handle)
+        return E_INVALIDARG;
+
+    if (FAILED(hr = IDirect3DDevice2_GetRenderState(iface, D3DRENDERSTATE_TEXTUREHANDLE, &h)))
+        return hr;
 
     wined3d_mutex_lock();
 
     h1 = surf1->Handle - 1;
     h2 = surf2->Handle - 1;
-    device->handle_table.entries[h1].object = surf2;
-    device->handle_table.entries[h2].object = surf1;
+    global_handle_table.entries[h1].object = surf2;
+    global_handle_table.entries[h2].object = surf1;
     surf2->Handle = h1 + 1;
     surf1->Handle = h2 + 1;
 
     wined3d_mutex_unlock();
 
+    if ((h == surf1->Handle || h == surf2->Handle)
+            && FAILED(hr = IDirect3DDevice2_SetRenderState(iface, D3DRENDERSTATE_TEXTUREHANDLE, h)))
+        return hr;
     return D3D_OK;
 }
 
@@ -742,7 +750,7 @@ static HRESULT WINAPI d3d_device1_Execute(IDirect3DDevice *iface,
 
     /* Execute... */
     wined3d_mutex_lock();
-    hr = d3d_execute_buffer_execute(buffer, device, NULL);
+    hr = d3d_execute_buffer_execute(buffer, device);
     wined3d_mutex_unlock();
 
     return hr;
@@ -1009,44 +1017,16 @@ static HRESULT WINAPI d3d_device1_NextViewport(IDirect3DDevice *iface,
  *        x2 and y2 are ignored.
  *
  * Returns:
- *  D3D_OK on success
- *  DDERR_INVALIDPARAMS if any of the parameters == NULL
+ *  D3D_OK because it's a stub
  *
  *****************************************************************************/
 static HRESULT WINAPI d3d_device1_Pick(IDirect3DDevice *iface, IDirect3DExecuteBuffer *buffer,
         IDirect3DViewport *viewport, DWORD flags, D3DRECT *rect)
 {
-    struct d3d_device *device = impl_from_IDirect3DDevice(iface);
-    struct d3d_execute_buffer *buffer_impl = unsafe_impl_from_IDirect3DExecuteBuffer(buffer);
-    struct d3d_viewport *viewport_impl = unsafe_impl_from_IDirect3DViewport(viewport);
-    HRESULT hr;
+    FIXME("iface %p, buffer %p, viewport %p, flags %#lx, rect %s stub!\n",
+            iface, buffer, viewport, flags, wine_dbgstr_rect((RECT *)rect));
 
-    TRACE("iface %p, buffer %p, viewport %p, flags %#lx, rect %s.\n",
-             iface, buffer, viewport, flags, wine_dbgstr_rect((RECT *)rect));
-
-    /* Sanity checks */
-    if (!buffer)
-    {
-        WARN("NULL buffer, returning DDERR_INVALIDPARAMS\n");
-        return DDERR_INVALIDPARAMS;
-    }
-
-    if (!viewport)
-    {
-        WARN("NULL viewport, returning DDERR_INVALIDPARAMS\n");
-        return DDERR_INVALIDPARAMS;
-    }
-
-    if (FAILED(hr = IDirect3DDevice3_SetCurrentViewport
-            (&device->IDirect3DDevice3_iface, &viewport_impl->IDirect3DViewport3_iface)))
-        return hr;
-
-    /* Execute the pick */
-    wined3d_mutex_lock();
-    hr = d3d_execute_buffer_execute(buffer_impl, device, rect);
-    wined3d_mutex_unlock();
-
-    return hr;
+    return D3D_OK;
 }
 
 /*****************************************************************************
@@ -1062,35 +1042,13 @@ static HRESULT WINAPI d3d_device1_Pick(IDirect3DDevice *iface, IDirect3DExecuteB
  *  D3DPickRec: Address to store the resulting D3DPICKRECORD array.
  *
  * Returns:
- *  D3D_OK always
+ *  D3D_OK, because it's a stub
  *
  *****************************************************************************/
 static HRESULT WINAPI d3d_device1_GetPickRecords(IDirect3DDevice *iface,
         DWORD *count, D3DPICKRECORD *records)
 {
-    struct d3d_device *device;
-
-    TRACE("iface %p, count %p, records %p.\n", iface, count, records);
-
-    /* Windows doesn't check if count is non-NULL */
-
-    wined3d_mutex_lock();
-
-    device = impl_from_IDirect3DDevice(iface);
-
-    /* Set count to the number of pick records we have */
-    *count = device->pick_record_count;
-
-    /* It is correct usage according to documentation to call this function with records == NULL
-       to retrieve _just_ the record count, which the caller can then use to allocate an
-       appropriately sized array, then call this function again to fill that array with data. */
-    if (records && count)
-    {
-        /* If we have a destination array and records to copy, copy them now */
-        memcpy(records, device->pick_records, sizeof(*device->pick_records) * device->pick_record_count);
-    }
-
-    wined3d_mutex_unlock();
+    FIXME("iface %p, count %p, records %p stub!\n", iface, count, records);
 
     return D3D_OK;
 }
@@ -3454,6 +3412,7 @@ static void d3d_device_sync_rendertarget(struct d3d_device *device)
     dsv = device->target_ds ? ddraw_surface_get_rendertarget_view(device->target_ds) : NULL;
     if (FAILED(wined3d_device_context_set_depth_stencil_view(device->immediate_context, dsv)))
         ERR("wined3d_device_context_set_depth_stencil_view failed.\n");
+    wined3d_stateblock_depth_buffer_changed(device->state);
 
     if (device->hardware_device)
         return;
@@ -3492,6 +3451,20 @@ void d3d_device_sync_surfaces(struct d3d_device *device)
     }
 }
 
+void d3d_device_apply_state(struct d3d_device *device, BOOL clear_state)
+{
+    if (device->ddraw && device->ddraw->device_last_applied_state != device)
+    {
+        wined3d_stateblock_primary_dirtify_all_states(device->wined3d_device, device->state);
+        device->ddraw->device_last_applied_state = device;
+    }
+    if (clear_state)
+        wined3d_stateblock_apply_clear_state(device->state, device->wined3d_device);
+    else
+        wined3d_device_apply_stateblock(device->wined3d_device, device->state);
+    d3d_device_sync_surfaces(device);
+}
+
 static HRESULT d3d_device7_DrawPrimitive(IDirect3DDevice7 *iface,
         D3DPRIMITIVETYPE primitive_type, DWORD fvf, void *vertices,
         DWORD vertex_count, DWORD flags)
@@ -3526,8 +3499,7 @@ static HRESULT d3d_device7_DrawPrimitive(IDirect3DDevice7 *iface,
     wined3d_stateblock_set_vertex_declaration(device->state, ddraw_find_decl(device->ddraw, fvf));
     wined3d_device_context_set_primitive_type(device->immediate_context,
             wined3d_primitive_type_from_ddraw(primitive_type), 0);
-    wined3d_device_apply_stateblock(device->wined3d_device, device->state);
-    d3d_device_sync_surfaces(device);
+    d3d_device_apply_state(device, FALSE);
     wined3d_device_context_draw(device->immediate_context, vb_pos / stride, vertex_count, 0, 0);
 
 done:
@@ -3635,9 +3607,11 @@ static HRESULT d3d_device7_DrawIndexedPrimitive(IDirect3DDevice7 *iface,
         WORD *indices, DWORD index_count, DWORD flags)
 {
     struct d3d_device *device = impl_from_IDirect3DDevice7(iface);
+    unsigned int idx_size = index_count * sizeof(*indices);
+    unsigned short min_index = USHRT_MAX, max_index = 0;
+    unsigned int i;
     HRESULT hr;
     UINT stride = get_flexible_vertex_size(fvf);
-    UINT vtx_size = stride * vertex_count, idx_size = index_count * sizeof(*indices);
     UINT vb_pos, ib_pos;
 
     TRACE("iface %p, primitive_type %#x, fvf %#lx, vertices %p, vertex_count %lu, "
@@ -3650,11 +3624,19 @@ static HRESULT d3d_device7_DrawIndexedPrimitive(IDirect3DDevice7 *iface,
         return D3D_OK;
     }
 
+    /* Prince of Persia 3D creates large vertex buffers but only actually uses
+     * a few vertices from them. This improves performance dramatically. */
+    for (i = 0; i < index_count; ++i)
+    {
+        min_index = min(min_index, indices[i]);
+        max_index = max(max_index, indices[i]);
+    }
+
     /* Set the D3DDevice's FVF */
     wined3d_mutex_lock();
 
-    if (FAILED(hr = wined3d_streaming_buffer_upload(device->wined3d_device,
-            &device->vertex_buffer, vertices, vtx_size, stride, &vb_pos)))
+    if (FAILED(hr = wined3d_streaming_buffer_upload(device->wined3d_device, &device->vertex_buffer,
+            (char *)vertices + (min_index * stride), (max_index + 1 - min_index) * stride, stride, &vb_pos)))
         goto done;
 
     if (FAILED(hr = wined3d_streaming_buffer_upload(device->wined3d_device,
@@ -3669,9 +3651,8 @@ static HRESULT d3d_device7_DrawIndexedPrimitive(IDirect3DDevice7 *iface,
     wined3d_stateblock_set_vertex_declaration(device->state, ddraw_find_decl(device->ddraw, fvf));
     wined3d_device_context_set_primitive_type(device->immediate_context,
             wined3d_primitive_type_from_ddraw(primitive_type), 0);
-    wined3d_device_apply_stateblock(device->wined3d_device, device->state);
-    d3d_device_sync_surfaces(device);
-    wined3d_device_context_draw_indexed(device->immediate_context, vb_pos / stride,
+    d3d_device_apply_state(device, FALSE);
+    wined3d_device_context_draw_indexed(device->immediate_context, (int)(vb_pos / stride) - min_index,
             ib_pos / sizeof(*indices), index_count, 0, 0);
 
 done:
@@ -3981,8 +3962,7 @@ static HRESULT d3d_device7_DrawPrimitiveStrided(IDirect3DDevice7 *iface, D3DPRIM
 
     wined3d_device_context_set_primitive_type(device->immediate_context,
             wined3d_primitive_type_from_ddraw(primitive_type), 0);
-    wined3d_device_apply_stateblock(device->wined3d_device, device->state);
-    d3d_device_sync_surfaces(device);
+    d3d_device_apply_state(device, FALSE);
     wined3d_device_context_draw(device->immediate_context, vb_pos / dst_stride, vertex_count, 0, 0);
 
 done:
@@ -4087,8 +4067,7 @@ static HRESULT d3d_device7_DrawIndexedPrimitiveStrided(IDirect3DDevice7 *iface,
     wined3d_stateblock_set_vertex_declaration(device->state, ddraw_find_decl(device->ddraw, fvf));
     wined3d_device_context_set_primitive_type(device->immediate_context,
             wined3d_primitive_type_from_ddraw(primitive_type), 0);
-    wined3d_device_apply_stateblock(device->wined3d_device, device->state);
-    d3d_device_sync_surfaces(device);
+    d3d_device_apply_state(device, FALSE);
     wined3d_device_context_draw_indexed(device->immediate_context,
             vb_pos / vtx_dst_stride, ib_pos / sizeof(WORD), index_count, 0, 0);
 
@@ -4181,7 +4160,7 @@ static HRESULT d3d_device7_DrawPrimitiveVB(IDirect3DDevice7 *iface, D3DPRIMITIVE
 
     stride = get_flexible_vertex_size(vb_impl->fvf);
 
-    if (vb_impl->Caps & D3DVBCAPS_SYSTEMMEMORY)
+    if (vb_impl->sysmem)
     {
         TRACE("Drawing from D3DVBCAPS_SYSTEMMEMORY vertex buffer, forwarding to DrawPrimitive().\n");
         wined3d_mutex_lock();
@@ -4214,8 +4193,7 @@ static HRESULT d3d_device7_DrawPrimitiveVB(IDirect3DDevice7 *iface, D3DPRIMITIVE
     /* Now draw the primitives */
     wined3d_device_context_set_primitive_type(device->immediate_context,
             wined3d_primitive_type_from_ddraw(primitive_type), 0);
-    wined3d_device_apply_stateblock(device->wined3d_device, device->state);
-    d3d_device_sync_surfaces(device);
+    d3d_device_apply_state(device, FALSE);
     wined3d_device_context_draw(device->immediate_context, start_vertex, vertex_count, 0, 0);
 
     wined3d_mutex_unlock();
@@ -4299,7 +4277,7 @@ static HRESULT d3d_device7_DrawIndexedPrimitiveVB(IDirect3DDevice7 *iface,
 
     vb_impl->discarded = false;
 
-    if (vb_impl->Caps & D3DVBCAPS_SYSTEMMEMORY)
+    if (vb_impl->sysmem)
     {
         TRACE("Drawing from D3DVBCAPS_SYSTEMMEMORY vertex buffer, forwarding to DrawIndexedPrimitive().\n");
         wined3d_mutex_lock();
@@ -4351,8 +4329,7 @@ static HRESULT d3d_device7_DrawIndexedPrimitiveVB(IDirect3DDevice7 *iface,
 
     wined3d_device_context_set_primitive_type(device->immediate_context,
             wined3d_primitive_type_from_ddraw(primitive_type), 0);
-    wined3d_device_apply_stateblock(device->wined3d_device, device->state);
-    d3d_device_sync_surfaces(device);
+    d3d_device_apply_state(device, FALSE);
     wined3d_device_context_draw_indexed(device->immediate_context, start_vertex,
             ib_pos / sizeof(WORD), index_count, 0, 0);
 
@@ -5216,8 +5193,7 @@ static HRESULT d3d_device7_Clear(IDirect3DDevice7 *iface, DWORD count,
     }
 
     wined3d_mutex_lock();
-    wined3d_device_apply_stateblock(device->wined3d_device, device->state);
-    d3d_device_sync_rendertarget(device);
+    d3d_device_apply_state(device, TRUE);
     hr = wined3d_device_clear(device->wined3d_device, count, (RECT *)rects, flags, &c, z, stencil);
     wined3d_mutex_unlock();
 
@@ -6854,6 +6830,7 @@ enum wined3d_depth_buffer_type d3d_device_update_depth_stencil(struct d3d_device
     {
         TRACE("Setting wined3d depth stencil to NULL\n");
         wined3d_device_context_set_depth_stencil_view(device->immediate_context, NULL);
+        wined3d_stateblock_depth_buffer_changed(device->state);
         device->target_ds = NULL;
         return WINED3D_ZB_FALSE;
     }
@@ -6861,6 +6838,7 @@ enum wined3d_depth_buffer_type d3d_device_update_depth_stencil(struct d3d_device
     device->target_ds = impl_from_IDirectDrawSurface7(depthStencil);
     wined3d_device_context_set_depth_stencil_view(device->immediate_context,
             ddraw_surface_get_rendertarget_view(device->target_ds));
+    wined3d_stateblock_depth_buffer_changed(device->state);
 
     IDirectDrawSurface7_Release(depthStencil);
     return WINED3D_ZB_TRUE;

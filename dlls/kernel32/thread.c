@@ -55,6 +55,15 @@ __ASM_FASTCALL_FUNC( BaseThreadInitThunk, 12,
                     "call *%edx\n\t"
                     "movl %eax,(%esp)\n\t"
                     "call " __ASM_STDCALL( "RtlExitUserThread", 4 ))
+#elif defined(__x86_64__) && defined(__WINE_PE_BUILD) && !defined(__arm64ec__)
+__ASM_GLOBAL_FUNC( BaseThreadInitThunk,
+                    "subq $0x28,%rsp\n\t"
+                   ".seh_stackalloc 0x28\n\t"
+                   ".seh_endprologue\n\t"
+                    "movq %r8,%rcx\n\t"
+                    "call *%rdx\n\t"
+                    "movl %eax,%ecx\n\t"
+                    "call " __ASM_NAME( "RtlExitUserThread" ))
 #else
 void __fastcall BaseThreadInitThunk( DWORD unknown, LPTHREAD_START_ROUTINE entry, void *arg )
 {
@@ -69,35 +78,6 @@ void WINAPI FreeLibraryAndExitThread(HINSTANCE hLibModule, DWORD dwExitCode)
 {
     FreeLibrary(hLibModule);
     ExitThread(dwExitCode);
-}
-
-
-/***********************************************************************
- * Wow64SetThreadContext [KERNEL32.@]
- */
-BOOL WINAPI Wow64SetThreadContext( HANDLE handle, const WOW64_CONTEXT *context)
-{
-#ifdef __i386__
-    return set_ntstatus( NtSetContextThread( handle, (const CONTEXT *)context ));
-#elif defined(__x86_64__)
-    return set_ntstatus( RtlWow64SetThreadContext( handle, context ));
-#else
-    return set_ntstatus( STATUS_NOT_IMPLEMENTED );
-#endif
-}
-
-/***********************************************************************
- * Wow64GetThreadContext [KERNEL32.@]
- */
-BOOL WINAPI Wow64GetThreadContext( HANDLE handle, WOW64_CONTEXT *context)
-{
-#ifdef __i386__
-    return set_ntstatus( NtGetContextThread( handle, (CONTEXT *)context ));
-#elif defined(__x86_64__)
-    return set_ntstatus( RtlWow64GetThreadContext( handle, context ));
-#else
-    return set_ntstatus( STATUS_NOT_IMPLEMENTED );
-#endif
 }
 
 

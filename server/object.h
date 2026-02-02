@@ -42,6 +42,7 @@ struct async;
 struct async_queue;
 struct winstation;
 struct object_type;
+struct inproc_sync;
 
 
 struct unicode_str
@@ -55,7 +56,7 @@ struct type_descr
 {
     struct unicode_str name;          /* type name */
     unsigned int       valid_access;  /* mask for valid access bits */
-    generic_map_t      mapping;       /* generic access mapping */
+    struct generic_map mapping;       /* generic access mapping */
     unsigned int       index;         /* index in global array of types */
     unsigned int       obj_count;     /* count of objects of this type */
     unsigned int       handle_count;  /* count of handles of this type */
@@ -107,6 +108,8 @@ struct object_ops
                                 unsigned int options);
     /* return list of kernel objects */
     struct list *(*get_kernel_obj_list)(struct object *);
+    /* get a client-waitable in-process synchronization fd for this object */
+    int (*get_inproc_sync)(struct object *, enum inproc_sync_type *type);
     /* close a handle to this object */
     int (*close_handle)(struct object *,struct process *,obj_handle_t);
     /* destroy on refcount == 0 */
@@ -143,6 +146,8 @@ struct wait_queue_entry
     struct thread_wait *wait;
 };
 
+extern void mark_block_noaccess( void *ptr, size_t size );
+extern void mark_block_uninitialized( void *ptr, size_t size );
 extern void *mem_alloc( size_t size ) __WINE_ALLOC_SIZE(1) __WINE_DEALLOC(free) __WINE_MALLOC;
 extern void *memdup( const void *data, size_t len ) __WINE_ALLOC_SIZE(2) __WINE_DEALLOC(free);
 extern void *alloc_object( const struct object_ops *ops );
@@ -198,13 +203,20 @@ extern void close_objects(void);
 static inline void make_object_permanent( struct object *obj ) { obj->is_permanent = 1; }
 static inline void make_object_temporary( struct object *obj ) { obj->is_permanent = 0; }
 
-static inline unsigned int map_access( unsigned int access, const generic_map_t *mapping )
+static inline unsigned int map_access( unsigned int access, const struct generic_map *mapping )
 {
     if (access & GENERIC_READ)    access |= mapping->read;
     if (access & GENERIC_WRITE)   access |= mapping->write;
     if (access & GENERIC_EXECUTE) access |= mapping->exec;
     if (access & GENERIC_ALL)     access |= mapping->all;
     return access & ~(GENERIC_READ | GENERIC_WRITE | GENERIC_EXECUTE | GENERIC_ALL);
+}
+
+static inline void *mem_append( void *ptr, const void *src, data_size_t len )
+{
+    if (!len) return ptr;
+    memcpy( ptr, src, len );
+    return (char *)ptr + len;
 }
 
 /* event functions */
@@ -225,6 +237,17 @@ extern void reset_event( struct event *event );
 /* mutex functions */
 
 extern void abandon_mutexes( struct thread *thread );
+
+/* in-process synchronization functions */
+
+extern int use_inproc_sync(void);
+extern int create_inproc_event( int manual_reset, int signaled );
+extern int create_inproc_semaphore( unsigned int count, unsigned int max );
+extern int create_inproc_mutex( thread_id_t owner, unsigned int count );
+extern int no_get_inproc_sync( struct object *obj, enum inproc_sync_type *type );
+extern void set_inproc_event( int event );
+extern void reset_inproc_event( int event );
+extern void abandon_inproc_mutex( thread_id_t tid, int mutex );
 
 /* serial functions */
 
@@ -260,6 +283,7 @@ static inline int is_machine_supported( unsigned short machine )
 {
     unsigned int i;
     for (i = 0; i < supported_machines_count; i++) if (supported_machines[i] == machine) return 1;
+    if (native_machine == IMAGE_FILE_MACHINE_ARM64) return machine == IMAGE_FILE_MACHINE_AMD64;
     return 0;
 }
 
@@ -332,6 +356,8 @@ extern struct type_descr completion_type;
 extern struct type_descr file_type;
 extern struct type_descr mapping_type;
 extern struct type_descr key_type;
+extern struct type_descr apc_reserve_type;
+extern struct type_descr completion_reserve_type;
 
 #define KEYEDEVENT_WAIT       0x0001
 #define KEYEDEVENT_WAKE       0x0002

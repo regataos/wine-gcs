@@ -27,106 +27,17 @@
 #include "wine/rbtree.h"
 #include "d3dx_helpers.h"
 
-#define COBJMACROS
-#include "d3dx9.h"
-
 #define ULONG64_MAX (~(ULONG64)0)
 
 #define FOURCC_TX_1 0x54580100
-
-#define D3DX9_FILTER_INVALID_BITS 0xff80fff8
-static inline HRESULT d3dx9_validate_filter(uint32_t filter)
-{
-    if ((filter & D3DX9_FILTER_INVALID_BITS) || !(filter & 0x7) || ((filter & 0x7) > D3DX_FILTER_BOX))
-        return D3DERR_INVALIDCALL;
-
-    return D3D_OK;
-}
 
 static inline HRESULT d3dx9_handle_load_filter(DWORD *filter)
 {
     if (*filter == D3DX_DEFAULT)
         *filter = D3DX_FILTER_TRIANGLE | D3DX_FILTER_DITHER;
 
-    return d3dx9_validate_filter(*filter);
+    return d3dx_validate_filter(*filter);
 }
-
-/* dds_header.flags */
-#define DDS_CAPS 0x1
-#define DDS_HEIGHT 0x2
-#define DDS_WIDTH 0x4
-#define DDS_PITCH 0x8
-#define DDS_PIXELFORMAT 0x1000
-#define DDS_MIPMAPCOUNT 0x20000
-#define DDS_LINEARSIZE 0x80000
-#define DDS_DEPTH 0x800000
-
-/* dds_header.caps */
-#define DDS_CAPS_COMPLEX 0x8
-#define DDS_CAPS_TEXTURE 0x1000
-#define DDS_CAPS_MIPMAP 0x400000
-
-/* dds_header.caps2 */
-#define DDS_CAPS2_CUBEMAP 0x200
-#define DDS_CAPS2_CUBEMAP_POSITIVEX 0x400
-#define DDS_CAPS2_CUBEMAP_NEGATIVEX 0x800
-#define DDS_CAPS2_CUBEMAP_POSITIVEY 0x1000
-#define DDS_CAPS2_CUBEMAP_NEGATIVEY 0x2000
-#define DDS_CAPS2_CUBEMAP_POSITIVEZ 0x4000
-#define DDS_CAPS2_CUBEMAP_NEGATIVEZ 0x8000
-#define DDS_CAPS2_CUBEMAP_ALL_FACES ( DDS_CAPS2_CUBEMAP_POSITIVEX | DDS_CAPS2_CUBEMAP_NEGATIVEX \
-                                    | DDS_CAPS2_CUBEMAP_POSITIVEY | DDS_CAPS2_CUBEMAP_NEGATIVEY \
-                                    | DDS_CAPS2_CUBEMAP_POSITIVEZ | DDS_CAPS2_CUBEMAP_NEGATIVEZ )
-#define DDS_CAPS2_VOLUME 0x200000
-
-/* dds_pixel_format.flags */
-#define DDS_PF_ALPHA 0x1
-#define DDS_PF_ALPHA_ONLY 0x2
-#define DDS_PF_FOURCC 0x4
-#define DDS_PF_INDEXED 0x20
-#define DDS_PF_RGB 0x40
-#define DDS_PF_YUV 0x200
-#define DDS_PF_LUMINANCE 0x20000
-#define DDS_PF_BUMPLUMINANCE 0x40000
-#define DDS_PF_BUMPDUDV 0x80000
-
-struct dds_pixel_format
-{
-    DWORD size;
-    DWORD flags;
-    DWORD fourcc;
-    DWORD bpp;
-    DWORD rmask;
-    DWORD gmask;
-    DWORD bmask;
-    DWORD amask;
-};
-
-struct dds_header
-{
-    DWORD signature;
-    DWORD size;
-    DWORD flags;
-    DWORD height;
-    DWORD width;
-    DWORD pitch_or_linear_size;
-    DWORD depth;
-    DWORD miplevels;
-    DWORD reserved[11];
-    struct dds_pixel_format pixel_format;
-    DWORD caps;
-    DWORD caps2;
-    DWORD caps3;
-    DWORD caps4;
-    DWORD reserved2;
-};
-
-struct vec4
-{
-    float x, y, z, w;
-};
-
-void d3dximage_info_from_d3dx_image(D3DXIMAGE_INFO *info, struct d3dx_image *image);
 
 struct d3dx_include_from_file
 {
@@ -136,101 +47,22 @@ struct d3dx_include_from_file
 extern CRITICAL_SECTION from_file_mutex;
 extern const struct ID3DXIncludeVtbl d3dx_include_from_file_vtbl;
 
-static inline BOOL is_unknown_format(const struct pixel_format_desc *format)
-{
-    return (format->format == D3DX_PIXEL_FORMAT_COUNT);
-}
-
-static inline BOOL is_index_format(const struct pixel_format_desc *format)
-{
-    return (format->fmt_type_desc.a_type == CTYPE_INDEX || format->fmt_type_desc.rgb_type == CTYPE_INDEX);
-}
-
-static inline BOOL is_compressed_format(const struct pixel_format_desc *format)
-{
-    return !!(format->fmt_type_desc.fmt_flags & FMT_FLAG_DXT);
-}
-
-static inline BOOL is_packed_format(const struct pixel_format_desc *format)
-{
-    return !!(format->fmt_type_desc.fmt_flags & FMT_FLAG_PACKED);
-}
-
-static inline BOOL format_types_match(const struct pixel_format_desc *src, const struct pixel_format_desc *dst)
-{
-    const struct pixel_format_type_desc *src_type = &src->fmt_type_desc;
-    const struct pixel_format_type_desc *dst_type = &dst->fmt_type_desc;
-
-    if ((src_type->a_type != dst_type->a_type) && (src_type->a_type != CTYPE_EMPTY) &&
-            (dst_type->a_type != CTYPE_EMPTY))
-        return FALSE;
-
-    if ((src_type->rgb_type != dst_type->rgb_type) && (src_type->rgb_type != CTYPE_EMPTY) &&
-            (dst_type->rgb_type != CTYPE_EMPTY))
-        return FALSE;
-
-    if (src_type->fmt_flags != dst_type->fmt_flags)
-        return FALSE;
-
-    return (src_type->rgb_type == dst_type->rgb_type || src_type->a_type == dst_type->a_type);
-}
-
-static inline BOOL filter_flags_match(uint32_t filter_flags)
-{
-    if (!!(filter_flags & D3DX_FILTER_PMA_IN) != !!((filter_flags & D3DX_FILTER_PMA_OUT)))
-        return FALSE;
-    if (!!(filter_flags & D3DX_FILTER_SRGB_IN) != !!((filter_flags & D3DX_FILTER_SRGB_OUT)))
-        return FALSE;
-
-    return TRUE;
-}
-
-static inline BOOL is_conversion_from_supported(const struct pixel_format_desc *format)
-{
-    return !is_packed_format(format) && !is_unknown_format(format);
-}
-
-static inline BOOL is_conversion_to_supported(const struct pixel_format_desc *format)
-{
-    return !is_index_format(format) && !is_packed_format(format) && !is_unknown_format(format);
-}
-
 HRESULT map_view_of_file(const WCHAR *filename, void **buffer, DWORD *length);
 HRESULT load_resource_into_memory(HMODULE module, HRSRC resinfo, void **buffer, DWORD *length);
 
-HRESULT write_buffer_to_file(const WCHAR *filename, ID3DXBuffer *buffer);
-
-enum d3dx_pixel_format_id wic_guid_to_d3dx_pixel_format_id(const GUID *guid);
-const GUID *d3dx_pixel_format_id_to_wic_guid(enum d3dx_pixel_format_id format);
-HRESULT d3dx_pixel_format_to_dds_pixel_format(struct dds_pixel_format *pixel_format,
-        enum d3dx_pixel_format_id format);
-
 D3DFORMAT d3dformat_from_d3dx_pixel_format_id(enum d3dx_pixel_format_id format);
 enum d3dx_pixel_format_id d3dx_pixel_format_id_from_d3dformat(D3DFORMAT format);
+enum d3dx_resource_type d3dx_resource_type_from_d3dresourcetype(D3DRESOURCETYPE type);
 const struct pixel_format_desc *get_format_info(D3DFORMAT format);
 const struct pixel_format_desc *get_format_info_idx(int idx);
-
-void format_to_vec4(const struct pixel_format_desc *format, const BYTE *src, const PALETTEENTRY *palette,
-        struct vec4 *dst);
-void format_from_vec4(const struct pixel_format_desc *format, const struct vec4 *src,
-        const struct pixel_format_type_desc *src_type, BYTE *dst);
 
 HRESULT lock_surface(IDirect3DSurface9 *surface, const RECT *surface_rect, D3DLOCKED_RECT *lock,
         IDirect3DSurface9 **temp_surface, BOOL write);
 HRESULT unlock_surface(IDirect3DSurface9 *surface, const RECT *surface_rect,
         IDirect3DSurface9 *temp_surface, BOOL update);
-void copy_pixels(const BYTE *src, UINT src_row_pitch, UINT src_slice_pitch,
-        BYTE *dst, UINT dst_row_pitch, UINT dst_slice_pitch, const struct volume *size,
-        const struct pixel_format_desc *format);
-void convert_argb_pixels(const BYTE *src, UINT src_row_pitch, UINT src_slice_pitch, const struct volume *src_size,
-        const struct pixel_format_desc *src_format, BYTE *dst, UINT dst_row_pitch, UINT dst_slice_pitch,
-        const struct volume *dst_size, const struct pixel_format_desc *dst_format, D3DCOLOR color_key,
-        const PALETTEENTRY *palette, uint32_t filter_flags);
-void get_aligned_rect(uint32_t left, uint32_t top, uint32_t right, uint32_t bottom, uint32_t width, uint32_t height,
-        const struct pixel_format_desc *fmt_desc, RECT *aligned_rect);
-
-unsigned short float_32_to_16(const float in);
-float float_16_to_32(const unsigned short in);
+HRESULT d3dx_get_save_pixel_format_from_image_file_format(const struct pixel_format_desc *src_fmt_desc,
+        D3DXIMAGE_FILEFORMAT file_format, enum d3dx_pixel_format_id *save_fmt);
+void d3dximage_info_from_d3dx_image(D3DXIMAGE_INFO *info, struct d3dx_image *image);
 
 /* debug helpers */
 const char *debug_d3dxparameter_class(D3DXPARAMETER_CLASS c);

@@ -214,17 +214,15 @@ void destroy_view( struct view * );
 HRESULT execute_view( struct view * );
 struct table *get_view_table( const struct view *, UINT );
 void init_table_list( void );
+void free_dynamic_tables( void );
 enum wbm_namespace get_namespace_from_string( const WCHAR *namespace );
-struct table *grab_table( enum wbm_namespace, const WCHAR * );
-struct table *addref_table( struct table * );
+struct table *alloc_table( void );
+struct table *create_table( enum wbm_namespace, const WCHAR * );
+struct table *grab_table( struct table * );
 void release_table( struct table * );
-struct table *create_table( const WCHAR *, UINT, const struct column *, UINT, UINT, BYTE *,
-                            enum fill_status (*)(struct table *, const struct expr *) );
 BOOL add_table( enum wbm_namespace, struct table * );
 void free_columns( struct column *, UINT );
 void free_row_values( const struct table *, UINT );
-void clear_table( struct table * );
-void free_table( struct table * );
 UINT get_type_size( CIMTYPE );
 HRESULT eval_cond( const struct table *, UINT, const struct expr *, LONGLONG *, UINT * );
 HRESULT get_column_index( const struct table *, const WCHAR *, UINT * );
@@ -241,8 +239,9 @@ VARTYPE to_vartype( CIMTYPE );
 void destroy_array( struct array *, CIMTYPE );
 BOOL is_result_prop( const struct view *, const WCHAR * );
 HRESULT get_properties( const struct view *, UINT, LONG, SAFEARRAY ** );
-HRESULT get_object( enum wbm_namespace ns, const WCHAR *, IWbemClassObject ** );
-BSTR get_method_name( enum wbm_namespace ns, const WCHAR *, UINT );
+HRESULT get_object( enum wbm_namespace, const WCHAR *, IWbemClassObject ** );
+BSTR get_method_name( enum wbm_namespace, const WCHAR *, UINT );
+WCHAR *get_first_key_property( enum wbm_namespace, const WCHAR * );
 void set_variant( VARTYPE, LONGLONG, void *, VARIANT * );
 HRESULT create_signature( enum wbm_namespace ns, const WCHAR *, const WCHAR *, enum param_direction,
                           IWbemClassObject ** );
@@ -291,3 +290,6 @@ static inline BOOL is_digit(WCHAR c)
 {
     return '0' <= c && c <= '9';
 }
+
+extern const WCHAR * const system_props[];
+extern unsigned int system_prop_count;

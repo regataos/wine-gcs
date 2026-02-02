@@ -61,7 +61,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(hid);
 #ifdef SONAME_LIBSDL2
 
 static pthread_mutex_t sdl_cs = PTHREAD_MUTEX_INITIALIZER;
-static struct sdl_bus_options options;
+static const struct bus_options *options;
 
 static void *sdl_handle = NULL;
 static UINT quit_event = -1;
@@ -96,6 +96,7 @@ MAKE_FUNCPTR(SDL_HapticClose);
 MAKE_FUNCPTR(SDL_HapticDestroyEffect);
 MAKE_FUNCPTR(SDL_HapticGetEffectStatus);
 MAKE_FUNCPTR(SDL_HapticNewEffect);
+MAKE_FUNCPTR(SDL_HapticNumAxes);
 MAKE_FUNCPTR(SDL_HapticOpenFromJoystick);
 MAKE_FUNCPTR(SDL_HapticPause);
 MAKE_FUNCPTR(SDL_HapticQuery);
@@ -105,6 +106,7 @@ MAKE_FUNCPTR(SDL_HapticRumbleStop);
 MAKE_FUNCPTR(SDL_HapticRumbleSupported);
 MAKE_FUNCPTR(SDL_HapticRunEffect);
 MAKE_FUNCPTR(SDL_HapticSetGain);
+MAKE_FUNCPTR(SDL_HapticSetAutocenter);
 MAKE_FUNCPTR(SDL_HapticStopAll);
 MAKE_FUNCPTR(SDL_HapticStopEffect);
 MAKE_FUNCPTR(SDL_HapticUnpause);
@@ -227,6 +229,8 @@ static BOOL descriptor_add_haptic(struct sdl_device *impl, BOOL force)
 
     if ((impl->effect_support & EFFECT_SUPPORT_PHYSICAL))
     {
+        int axes_count;
+
         /* SDL_HAPTIC_SQUARE doesn't exist */
         if (force || (impl->effect_support & SDL_HAPTIC_SINE)) usages[count++] = PID_USAGE_ET_SINE;
         if (force || (impl->effect_support & SDL_HAPTIC_TRIANGLE)) usages[count++] = PID_USAGE_ET_TRIANGLE;
@@ -239,7 +243,8 @@ static BOOL descriptor_add_haptic(struct sdl_device *impl, BOOL force)
         if (force || (impl->effect_support & SDL_HAPTIC_CONSTANT)) usages[count++] = PID_USAGE_ET_CONSTANT_FORCE;
         if (force || (impl->effect_support & SDL_HAPTIC_RAMP)) usages[count++] = PID_USAGE_ET_RAMP;
 
-        if (!hid_device_add_physical(&impl->unix_device, usages, count))
+        if ((axes_count = pSDL_HapticNumAxes(impl->sdl_haptic)) < 0) axes_count = 2;
+        if (!hid_device_add_physical(&impl->unix_device, usages, count, axes_count))
             return FALSE;
     }
 
@@ -279,9 +284,9 @@ static const USAGE_AND_PAGE relative_axis_usages[] =
     {.UsagePage = HID_USAGE_PAGE_GENERIC, .Usage = HID_USAGE_GENERIC_WHEEL},
 };
 
-static int get_absolute_usages(struct sdl_device *impl, const USAGE_AND_PAGE **absolute_usages)
+static int get_absolute_usages(const struct device_desc *desc, const USAGE_AND_PAGE **absolute_usages)
 {
-    if (is_logitech_g920(pSDL_JoystickGetVendor(impl->sdl_joystick), pSDL_JoystickGetProduct(impl->sdl_joystick)))
+    if (desc->vid == 0x046d && desc->pid == 0xc262)
     {
         *absolute_usages = g920_absolute_usages;
         return ARRAY_SIZE(g920_absolute_usages);
@@ -291,7 +296,7 @@ static int get_absolute_usages(struct sdl_device *impl, const USAGE_AND_PAGE **a
     return ARRAY_SIZE(absolute_axis_usages);
 }
 
-static NTSTATUS build_joystick_report_descriptor(struct unix_device *iface)
+static NTSTATUS build_joystick_report_descriptor(struct unix_device *iface, const struct device_desc *desc)
 {
     const USAGE_AND_PAGE device_usage = {.UsagePage = HID_USAGE_PAGE_GENERIC, .Usage = HID_USAGE_GENERIC_JOYSTICK};
     struct sdl_device *impl = impl_from_unix_device(iface);
@@ -299,10 +304,10 @@ static NTSTATUS build_joystick_report_descriptor(struct unix_device *iface)
     USAGE_AND_PAGE physical_usage;
 
     const USAGE_AND_PAGE *absolute_usages = NULL;
-    size_t absolute_usages_count = get_absolute_usages(impl, &absolute_usages);
+    size_t absolute_usages_count = get_absolute_usages(desc, &absolute_usages);
 
     axis_count = pSDL_JoystickNumAxes(impl->sdl_joystick);
-    if (options.split_controllers) axis_count = min(6, axis_count - impl->axis_offset);
+    if (options->split_controllers) axis_count = min(6, axis_count - impl->axis_offset);
     if (axis_count > absolute_usages_count)
     {
         FIXME("More than %zu absolute axes found, ignoring.\n", absolute_usages_count);
@@ -401,51 +406,23 @@ static NTSTATUS build_joystick_report_descriptor(struct unix_device *iface)
 static NTSTATUS build_controller_report_descriptor(struct unix_device *iface)
 {
     const USAGE_AND_PAGE device_usage = {.UsagePage = HID_USAGE_PAGE_GENERIC, .Usage = HID_USAGE_GENERIC_GAMEPAD};
-    static const USAGE left_axis_usages[] = {HID_USAGE_GENERIC_X, HID_USAGE_GENERIC_Y};
-    static const USAGE right_axis_usages[] = {HID_USAGE_GENERIC_RX, HID_USAGE_GENERIC_RY};
-    static const USAGE trigger_axis_usages[] = {HID_USAGE_GENERIC_Z, HID_USAGE_GENERIC_RZ};
     struct sdl_device *impl = impl_from_unix_device(iface);
-    ULONG i, button_count = SDL_CONTROLLER_BUTTON_MAX - 1;
     BOOL state;
 
     C_ASSERT(SDL_CONTROLLER_AXIS_MAX == 6);
 
-    if (!hid_device_begin_report_descriptor(iface, &device_usage))
-        return STATUS_NO_MEMORY;
+    if (!hid_device_begin_report_descriptor(iface, &device_usage)) return STATUS_NO_MEMORY;
+    if (!hid_device_add_gamepad(iface)) return STATUS_NO_MEMORY;
+    if (!descriptor_add_haptic(impl, FALSE)) return STATUS_NO_MEMORY;
+    if (!hid_device_end_report_descriptor(iface)) return STATUS_NO_MEMORY;
 
-    if (!hid_device_begin_input_report(iface, &device_usage))
-        return STATUS_NO_MEMORY;
-
-    if (!hid_device_add_axes(iface, 2, HID_USAGE_PAGE_GENERIC, left_axis_usages,
-                             FALSE, -32768, 32767))
-        return STATUS_NO_MEMORY;
-
-    if (!hid_device_add_axes(iface, 2, HID_USAGE_PAGE_GENERIC, right_axis_usages,
-                             FALSE, -32768, 32767))
-        return STATUS_NO_MEMORY;
-
-    if (!hid_device_add_axes(iface, 2, HID_USAGE_PAGE_GENERIC, trigger_axis_usages,
-                             FALSE, 0, 32767))
-        return STATUS_NO_MEMORY;
-
-    if (!hid_device_add_hatswitch(iface, 1))
-        return STATUS_NO_MEMORY;
-
-    if (!hid_device_add_buttons(iface, HID_USAGE_PAGE_BUTTON, 1, button_count))
-        return STATUS_NO_MEMORY;
-
-    if (!hid_device_end_input_report(iface))
-        return STATUS_NO_MEMORY;
-
-    if (!descriptor_add_haptic(impl, FALSE))
-        return STATUS_NO_MEMORY;
-
-    if (!hid_device_end_report_descriptor(iface))
-        return STATUS_NO_MEMORY;
-
-    /* Initialize axis in the report */
-    for (i = SDL_CONTROLLER_AXIS_LEFTX; i < SDL_CONTROLLER_AXIS_MAX; i++)
-        hid_device_set_abs_axis(iface, i, pSDL_GameControllerGetAxis(impl->sdl_controller, i));
+    for (int i = SDL_CONTROLLER_AXIS_LEFTX; i < SDL_CONTROLLER_AXIS_MAX; i++)
+    {
+        int value = pSDL_GameControllerGetAxis(impl->sdl_controller, i);
+        if (i == SDL_CONTROLLER_AXIS_LEFTY || i == SDL_CONTROLLER_AXIS_RIGHTY)
+            value = -value - 1; /* match XUSB / GIP protocol */
+        hid_device_set_abs_axis(iface, i, value);
+    }
 
     state = pSDL_GameControllerGetButton(impl->sdl_controller, SDL_CONTROLLER_BUTTON_DPAD_UP);
     hid_device_move_hatswitch(iface, 0, 0, state ? -1 : +1);
@@ -466,17 +443,12 @@ static void sdl_device_destroy(struct unix_device *iface)
 static NTSTATUS sdl_device_start(struct unix_device *iface)
 {
     struct sdl_device *impl = impl_from_unix_device(iface);
-    NTSTATUS status;
 
     pthread_mutex_lock(&sdl_cs);
-
-    if (impl->sdl_controller) status = build_controller_report_descriptor(iface);
-    else status = build_joystick_report_descriptor(iface);
-    impl->started = !status;
-
+    impl->started = TRUE;
     pthread_mutex_unlock(&sdl_cs);
 
-    return status;
+    return STATUS_SUCCESS;
 }
 
 static void sdl_device_stop(struct unix_device *iface)
@@ -682,7 +654,7 @@ static NTSTATUS sdl_device_physical_effect_update(struct unix_device *iface, BYT
     struct sdl_device *impl = impl_from_unix_device(iface);
     int id = impl->effect_ids[index];
     SDL_HapticEffect effect = {0};
-    UINT16 direction;
+    INT16 direction;
     NTSTATUS status;
 
     TRACE("iface %p, index %u, params %p.\n", iface, index, params);
@@ -693,6 +665,7 @@ static NTSTATUS sdl_device_physical_effect_update(struct unix_device *iface, BYT
     /* The first direction we get from PID is in polar coordinate space, so we need to
      * remove 90° to make it match SDL spherical coordinates. */
     direction = (params->direction[0] - 9000) % 36000;
+    if (direction < 0) direction += 36000;
 
     switch (params->effect_type)
     {
@@ -907,29 +880,31 @@ static BOOL set_report_from_controller_event(struct sdl_device *impl, SDL_Event 
             SDL_ControllerButtonEvent *ie = &event->cbutton;
             int button;
 
-            switch ((button = ie->button))
+            switch (ie->button)
             {
-            case SDL_CONTROLLER_BUTTON_DPAD_UP:
-                hid_device_move_hatswitch(iface, 0, 0, ie->state ? -1 : +1);
-                break;
-            case SDL_CONTROLLER_BUTTON_DPAD_DOWN:
-                hid_device_move_hatswitch(iface, 0, 0, ie->state ? +1 : -1);
-                break;
-            case SDL_CONTROLLER_BUTTON_DPAD_LEFT:
-                hid_device_move_hatswitch(iface, 0, ie->state ? -1 : +1, 0);
-                break;
-            case SDL_CONTROLLER_BUTTON_DPAD_RIGHT:
-                hid_device_move_hatswitch(iface, 0, ie->state ? +1 : -1, 0);
-                break;
+            case SDL_CONTROLLER_BUTTON_A: button = 0; break;
+            case SDL_CONTROLLER_BUTTON_B: button = 1; break;
+            case SDL_CONTROLLER_BUTTON_X: button = 2; break;
+            case SDL_CONTROLLER_BUTTON_Y: button = 3; break;
             case SDL_CONTROLLER_BUTTON_LEFTSHOULDER: button = 4; break;
             case SDL_CONTROLLER_BUTTON_RIGHTSHOULDER: button = 5; break;
             case SDL_CONTROLLER_BUTTON_BACK: button = 6; break;
             case SDL_CONTROLLER_BUTTON_START: button = 7; break;
             case SDL_CONTROLLER_BUTTON_LEFTSTICK: button = 8; break;
             case SDL_CONTROLLER_BUTTON_RIGHTSTICK: button = 9; break;
-            case SDL_CONTROLLER_BUTTON_GUIDE: button = 10; break;
+            case SDL_CONTROLLER_BUTTON_DPAD_UP: button = 10; break;
+            case SDL_CONTROLLER_BUTTON_DPAD_DOWN: button = 12; break;
+            case SDL_CONTROLLER_BUTTON_DPAD_LEFT: button = 13; break;
+            case SDL_CONTROLLER_BUTTON_DPAD_RIGHT: button = 11; break;
+            case SDL_CONTROLLER_BUTTON_GUIDE: button = 16; break;
+            default: button = -1; break;
             }
 
+            if (button == -1) break;
+            if (button == 10) hid_device_move_hatswitch(iface, 0, 0, ie->state ? -1 : +1);
+            if (button == 12) hid_device_move_hatswitch(iface, 0, 0, ie->state ? +1 : -1);
+            if (button == 13) hid_device_move_hatswitch(iface, 0, ie->state ? -1 : +1, 0);
+            if (button == 11) hid_device_move_hatswitch(iface, 0, ie->state ? +1 : -1, 0);
             hid_device_set_button(iface, button, ie->state);
             bus_event_queue_input_report(&event_queue, iface, state->report_buf, state->report_len);
             break;
@@ -937,6 +912,9 @@ static BOOL set_report_from_controller_event(struct sdl_device *impl, SDL_Event 
         case SDL_CONTROLLERAXISMOTION:
         {
             SDL_ControllerAxisEvent *ie = &event->caxis;
+
+            if (ie->axis == SDL_CONTROLLER_AXIS_LEFTY || ie->axis == SDL_CONTROLLER_AXIS_RIGHTY)
+                ie->value = -ie->value - 1; /* match XUSB / GIP protocol */
 
             hid_device_set_abs_axis(iface, ie->axis, ie->value);
             bus_event_queue_input_report(&event_queue, iface, state->report_buf, state->report_len);
@@ -947,6 +925,22 @@ static BOOL set_report_from_controller_event(struct sdl_device *impl, SDL_Event 
     }
 
     check_device_effects_state(impl);
+    return FALSE;
+}
+
+/* logic from SDL2's SDL_ShouldIgnoreGameController */
+BOOL is_sdl_ignored_device(WORD vid, WORD pid)
+{
+    const char *whitelist = getenv("SDL_GAMECONTROLLER_IGNORE_DEVICES_EXCEPT");
+    const char *blacklist = getenv("SDL_GAMECONTROLLER_IGNORE_DEVICES");
+    char needle[16];
+
+    if (vid == 0x056a) return TRUE; /* all Wacom devices */
+    if (vid == 0x28de && pid == 0x11ff) return TRUE; /* Steam Input virtual controller, handled with evdev */
+
+    sprintf(needle, "0x%04x/0x%04x", vid, pid);
+    if (whitelist) return strcasestr(whitelist, needle) == NULL;
+    if (blacklist) return strcasestr(blacklist, needle) != NULL;
     return FALSE;
 }
 
@@ -965,7 +959,7 @@ static void sdl_add_device(unsigned int index)
     SDL_JoystickType joystick_type;
     SDL_GameController *controller = NULL;
     const char *product, *sdl_serial;
-    char guid_str[33], buffer[ARRAY_SIZE(desc.product)];
+    char buffer[ARRAY_SIZE(desc.product)];
     int axis_count, axis_offset;
 
     if ((joystick = pSDL_JoystickOpen(index)) == NULL)
@@ -975,7 +969,7 @@ static void sdl_add_device(unsigned int index)
     }
 
     joystick_type = pSDL_JoystickGetType(joystick);
-    if (options.map_controllers && pSDL_IsGameController(index)
+    if (options->map_controllers && pSDL_IsGameController(index)
             && joystick_type != SDL_JOYSTICK_TYPE_WHEEL
             && joystick_type != SDL_JOYSTICK_TYPE_FLIGHT_STICK)
         controller = pSDL_GameControllerOpen(index);
@@ -986,8 +980,7 @@ static void sdl_add_device(unsigned int index)
 
     id = pSDL_JoystickInstanceID(joystick);
 
-    if (pSDL_JoystickGetProductVersion != NULL)
-    {
+    if (pSDL_JoystickGetProductVersion != NULL) {
         desc.vid = pSDL_JoystickGetVendor(joystick);
         desc.pid = pSDL_JoystickGetProduct(joystick);
         desc.version = pSDL_JoystickGetProductVersion(joystick);
@@ -999,46 +992,16 @@ static void sdl_add_device(unsigned int index)
         desc.version = 0;
     }
 
-    if (is_sdl_blacklisted(desc.vid, desc.pid))
+    if (is_sdl_ignored_device(desc.vid, desc.pid))
     {
-        /* this device is blacklisted */
-        TRACE("ignoring %s, in SDL blacklist\n", debugstr_device_desc(&desc));
-        goto done;
-    }
-
-    if (is_wine_blacklisted(desc.vid, desc.pid))
-    {
-        /* this device is blacklisted */
-        TRACE("ignoring %s, in Wine blacklist\n", debugstr_device_desc(&desc));
-        goto done;
-    }
-
-    if (desc.vid == 0x28de && desc.pid == 0x11ff)
-    {
-        TRACE("deffering steam input virtual controller to a different backend\n");
-        goto done;
+        TRACE("ignoring %s\n", debugstr_device_desc(&desc));
+        if (controller) pSDL_GameControllerClose(controller);
+        pSDL_JoystickClose(joystick);
+        return;
     }
 
     if (pSDL_JoystickGetSerial && (sdl_serial = pSDL_JoystickGetSerial(joystick)))
-    {
         ntdll_umbstowcs(sdl_serial, strlen(sdl_serial) + 1, desc.serialnumber, ARRAY_SIZE(desc.serialnumber));
-    }
-    else
-    {
-        /* Overcooked! All You Can Eat only adds controllers with unique serial numbers
-         * Prefer keeping serial numbers unique over keeping them consistent across runs */
-        pSDL_JoystickGetGUIDString(pSDL_JoystickGetGUID(joystick), guid_str, sizeof(guid_str));
-
-        /* CW-Bug-Id: #23185 Emulate Steam Input native hooks for native SDL */
-        if (desc.input != -1) snprintf(buffer, sizeof(buffer), "%s", guid_str);
-        else
-        {
-            snprintf(buffer, sizeof(buffer), "%s.%d", guid_str, index);
-            TRACE("Making up serial number for %s: %s\n", product, buffer);
-        }
-
-        ntdll_umbstowcs(buffer, strlen(buffer) + 1, desc.serialnumber, ARRAY_SIZE(desc.serialnumber));
-    }
 
     if (controller)
     {
@@ -1052,8 +1015,11 @@ static void sdl_add_device(unsigned int index)
         desc.is_gamepad = (axis_count == 6  && button_count >= 14);
     }
 
-    for (axis_offset = 0; axis_offset < axis_count; axis_offset += (options.split_controllers ? 6 : axis_count))
+    axis_offset = 0;
+    do
     {
+        NTSTATUS status;
+
         if (!axis_offset) strcpy(buffer, product);
         else snprintf(buffer, ARRAY_SIZE(buffer), "%s %d", product, axis_offset / 6);
         ntdll_umbstowcs(buffer, strlen(buffer) + 1, desc.product, ARRAY_SIZE(desc.product));
@@ -1067,15 +1033,19 @@ static void sdl_add_device(unsigned int index)
         impl->id = id;
         impl->axis_offset = axis_offset;
 
+        if (impl->sdl_controller) status = build_controller_report_descriptor(&impl->unix_device);
+        else status = build_joystick_report_descriptor(&impl->unix_device, &desc);
+        if (status)
+        {
+            list_remove(&impl->unix_device.entry);
+            impl->unix_device.vtbl->destroy(&impl->unix_device);
+            return;
+        }
+
         bus_event_queue_device_created(&event_queue, &impl->unix_device, &desc);
-
-        if (controller) controller = pSDL_GameControllerOpen(index);
-        joystick = pSDL_JoystickOpen(index);
+        axis_offset += (options->split_controllers ? 6 : axis_count);
     }
-
-done:
-    if (controller) pSDL_GameControllerClose(controller);
-    pSDL_JoystickClose(joystick);
+    while (axis_offset < axis_count);
 }
 
 static void process_device_event(SDL_Event *event)
@@ -1096,7 +1066,7 @@ static void process_device_event(SDL_Event *event)
         if (impl) bus_event_queue_device_removed(&event_queue, &impl->unix_device);
         else WARN("Failed to find device with id %d\n", id);
     }
-    else if (event->type == SDL_JOYAXISMOTION && options.split_controllers)
+    else if (event->type == SDL_JOYAXISMOTION && options->split_controllers)
     {
         id = event->jaxis.which;
         impl = find_device_from_id_and_axis(id, event->jaxis.axis);
@@ -1135,7 +1105,7 @@ NTSTATUS sdl_bus_init(void *args)
 
     TRACE("args %p\n", args);
 
-    options = *(struct sdl_bus_options *)args;
+    options = (struct bus_options *)args;
 
     if (!(sdl_handle = dlopen(SONAME_LIBSDL2, RTLD_NOW)))
     {
@@ -1175,6 +1145,7 @@ NTSTATUS sdl_bus_init(void *args)
     LOAD_FUNCPTR(SDL_HapticDestroyEffect);
     LOAD_FUNCPTR(SDL_HapticGetEffectStatus);
     LOAD_FUNCPTR(SDL_HapticNewEffect);
+    LOAD_FUNCPTR(SDL_HapticNumAxes);
     LOAD_FUNCPTR(SDL_HapticOpenFromJoystick);
     LOAD_FUNCPTR(SDL_HapticPause);
     LOAD_FUNCPTR(SDL_HapticQuery);
@@ -1184,6 +1155,7 @@ NTSTATUS sdl_bus_init(void *args)
     LOAD_FUNCPTR(SDL_HapticRumbleSupported);
     LOAD_FUNCPTR(SDL_HapticRunEffect);
     LOAD_FUNCPTR(SDL_HapticSetGain);
+    LOAD_FUNCPTR(SDL_HapticSetAutocenter);
     LOAD_FUNCPTR(SDL_HapticStopAll);
     LOAD_FUNCPTR(SDL_HapticStopEffect);
     LOAD_FUNCPTR(SDL_HapticUnpause);
@@ -1237,10 +1209,10 @@ NTSTATUS sdl_bus_init(void *args)
             if (pSDL_GameControllerAddMapping(mapping) < 0)
                 WARN("Failed to add environment mapping %s\n", pSDL_GetError());
         }
-        else for (i = 0; i < options.mappings_count; ++i)
+        else for (i = 0; i < options->mappings_count; ++i)
         {
-            TRACE("Setting registry mapping %s\n", debugstr_a(options.mappings[i]));
-            if (pSDL_GameControllerAddMapping(options.mappings[i]) < 0)
+            TRACE("Setting registry mapping %s\n", debugstr_a(options->mappings[i]));
+            if (pSDL_GameControllerAddMapping(options->mappings[i]) < 0)
                 WARN("Failed to add registry mapping %s\n", pSDL_GetError());
         }
     }

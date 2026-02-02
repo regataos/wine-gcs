@@ -139,21 +139,15 @@ static const builtin_prop_t Error_props[] = {
 };
 
 static const builtin_info_t Error_info = {
-    JSCLASS_ERROR,
-    Error_value,
-    ARRAY_SIZE(Error_props),
-    Error_props,
-    NULL,
-    NULL
+    .class     = JSCLASS_ERROR,
+    .call      = Error_value,
+    .props_cnt = ARRAY_SIZE(Error_props),
+    .props     = Error_props,
 };
 
 static const builtin_info_t ErrorInst_info = {
-    JSCLASS_ERROR,
-    Error_value,
-    0,
-    NULL,
-    NULL,
-    NULL
+    .class = JSCLASS_ERROR,
+    .call  = Error_value,
 };
 
 static HRESULT alloc_error(script_ctx_t *ctx, jsdisp_t *prototype,
@@ -408,6 +402,23 @@ HRESULT throw_error(script_ctx_t *ctx, HRESULT error, const WCHAR *str)
     return DISP_E_EXCEPTION;
 }
 
+void handle_dispatch_exception(script_ctx_t *ctx, EXCEPINFO *ei)
+{
+    TRACE("%08lx %s %s\n", ei->scode, debugstr_w(ei->bstrSource), debugstr_w(ei->bstrDescription));
+
+    reset_ei(ctx->ei);
+    if(ei->pfnDeferredFillIn)
+        ei->pfnDeferredFillIn(ei);
+    ctx->ei->error = (SUCCEEDED(ei->scode) || ei->scode == DISP_E_EXCEPTION) ? E_FAIL : ei->scode;
+    if(ei->bstrSource)
+        ctx->ei->source = jsstr_alloc_len(ei->bstrSource, SysStringLen(ei->bstrSource));
+    if(ei->bstrDescription)
+        ctx->ei->message = jsstr_alloc_len(ei->bstrDescription, SysStringLen(ei->bstrDescription));
+    SysFreeString(ei->bstrSource);
+    SysFreeString(ei->bstrDescription);
+    SysFreeString(ei->bstrHelpFile);
+}
+
 void set_error_location(jsexcept_t *ei, bytecode_t *code, unsigned loc, unsigned source_id, jsstr_t *line)
 {
     if(is_jscript_error(ei->error)) {
@@ -468,7 +479,6 @@ jsdisp_t *create_builtin_error(script_ctx_t *ctx)
         case JS_E_MISSING_ARG:
         case JS_E_OBJECT_NOT_COLLECTION:
         case JS_E_FUNCTION_EXPECTED:
-        case JS_E_STRING_EXPECTED:
         case JS_E_DATE_EXPECTED:
         case JS_E_NUMBER_EXPECTED:
         case JS_E_OBJECT_EXPECTED:
@@ -479,7 +489,6 @@ jsdisp_t *create_builtin_error(script_ctx_t *ctx)
         case JS_E_JSCRIPT_EXPECTED:
         case JS_E_ENUMERATOR_EXPECTED:
         case JS_E_REGEXP_EXPECTED:
-        case JS_E_ARRAY_OR_ARGS_EXPECTED:
         case JS_E_ARRAY_EXPECTED:
         case JS_E_CYCLIC_PROTO_VALUE:
         case JS_E_CANNOT_CREATE_FOR_NONEXTENSIBLE:

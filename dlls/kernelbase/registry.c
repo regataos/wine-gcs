@@ -197,12 +197,7 @@ static HANDLE open_wow6432node( HANDLE key )
     OBJECT_ATTRIBUTES attr;
     HANDLE ret;
 
-    attr.Length = sizeof(attr);
-    attr.RootDirectory = key;
-    attr.ObjectName = &nameW;
-    attr.Attributes = 0;
-    attr.SecurityDescriptor = NULL;
-    attr.SecurityQualityOfService = NULL;
+    InitializeObjectAttributes( &attr, &nameW, 0, key, NULL );
     if (NtOpenKeyEx( &ret, MAXIMUM_ALLOWED | KEY_WOW64_64KEY, &attr, 0 )) return key;
     if (is_wow6432_shared( key ))
     {
@@ -219,12 +214,7 @@ static HANDLE open_classes_root( void )
     UNICODE_STRING nameW;
     HANDLE ret = 0;
 
-    attr.Length = sizeof(attr);
-    attr.RootDirectory = 0;
-    attr.ObjectName = &nameW;
-    attr.Attributes = 0;
-    attr.SecurityDescriptor = NULL;
-    attr.SecurityQualityOfService = NULL;
+    InitializeObjectAttributes( &attr, &nameW, 0, 0, NULL );
     RtlInitUnicodeString( &nameW, root_key_names[0] );
     NtOpenKeyEx( &ret, MAXIMUM_ALLOWED, &attr, 0 );
     return ret;
@@ -366,13 +356,7 @@ static NTSTATUS open_key( HKEY *retkey, HKEY root, UNICODE_STRING *name, DWORD o
     {
         OBJECT_ATTRIBUTES attr;
 
-        attr.Length = sizeof(attr);
-        attr.RootDirectory = root;
-        attr.ObjectName = name;
-        attr.Attributes = 0;
-        attr.SecurityDescriptor = NULL;
-        attr.SecurityQualityOfService = NULL;
-
+        InitializeObjectAttributes( &attr, name, 0, root, NULL );
         if (options & REG_OPTION_OPEN_LINK) attr.Attributes |= OBJ_OPENLINK;
         status = NtOpenKeyEx( (HANDLE *)retkey, access, &attr, options );
         if (status == STATUS_PREDEFINED_HANDLE)
@@ -464,12 +448,7 @@ static NTSTATUS create_key( HKEY *retkey, HKEY root, UNICODE_STRING name, ULONG 
     {
         OBJECT_ATTRIBUTES attr;
 
-        attr.Length = sizeof(attr);
-        attr.RootDirectory = root;
-        attr.ObjectName = &name;
-        attr.Attributes = 0;
-        attr.SecurityDescriptor = NULL;
-        attr.SecurityQualityOfService = NULL;
+        InitializeObjectAttributes( &attr, &name, 0, root, NULL );
         if (options & REG_OPTION_OPEN_LINK) attr.Attributes |= OBJ_OPENLINK;
 
         status = NtCreateKey( (HANDLE *)retkey, access, &attr, 0, class, options, dispos );
@@ -1998,16 +1977,18 @@ LSTATUS WINAPI RegGetValueW( HKEY hKey, LPCWSTR pszSubKey, LPCWSTR pszValue,
 
     ret = RegQueryValueExW(hKey, pszValue, NULL, &dwType, pvData, &cbData);
 
-    /* If we are going to expand we need to read in the whole the value even
-     * if the passed buffer was too small as the expanded string might be
-     * smaller than the unexpanded one and could fit into cbData bytes. */
-    if ((ret == ERROR_SUCCESS || ret == ERROR_MORE_DATA) &&
-        dwType == REG_EXPAND_SZ && !(dwFlags & RRF_NOEXPAND))
+    /* If the value is a string, we need to read in the whole value to be able
+     * to know exactly how many bytes are needed after expanding the string and
+     * ensuring that it is null-terminated. */
+    if (is_string(dwType) &&
+        (ret == ERROR_MORE_DATA ||
+         (ret == ERROR_SUCCESS && dwType == REG_EXPAND_SZ && !(dwFlags & RRF_NOEXPAND)) ||
+         (ret == ERROR_SUCCESS && (cbData < sizeof(WCHAR) || (pvData && *((WCHAR *)pvData + cbData / sizeof(WCHAR) - 1))))))
     {
         do {
             heap_free(pvBuf);
 
-            pvBuf = heap_alloc(cbData);
+            pvBuf = heap_alloc(cbData + sizeof(WCHAR));
             if (!pvBuf)
             {
                 ret = ERROR_NOT_ENOUGH_MEMORY;
@@ -2024,25 +2005,33 @@ LSTATUS WINAPI RegGetValueW( HKEY hKey, LPCWSTR pszSubKey, LPCWSTR pszValue,
                  * overlapping buffers. */
                 CopyMemory(pvBuf, pvData, cbData);
             }
-
-            /* Both the type or the value itself could have been modified in
-             * between so we have to keep retrying until the buffer is large
-             * enough or we no longer have to expand the value. */
-        } while (dwType == REG_EXPAND_SZ && ret == ERROR_MORE_DATA);
+        } while (ret == ERROR_MORE_DATA);
 
         if (ret == ERROR_SUCCESS)
         {
+            /* Ensure null termination */
+            if (cbData < sizeof(WCHAR) || *((WCHAR *)pvBuf + cbData / sizeof(WCHAR) - 1))
+            {
+                *((WCHAR *)pvBuf + cbData / sizeof(WCHAR)) = 0;
+                cbData += sizeof(WCHAR);
+            }
+
             /* Recheck dwType in case it changed since the first call */
-            if (dwType == REG_EXPAND_SZ)
+            if (dwType == REG_EXPAND_SZ && !(dwFlags & RRF_NOEXPAND))
             {
                 cbData = ExpandEnvironmentStringsW(pvBuf, pvData,
                                                    pcbData ? *pcbData : 0) * sizeof(WCHAR);
                 dwType = REG_SZ;
-                if(pvData && pcbData && cbData > *pcbData)
+                if (pvData && cbData > *pcbData)
                     ret = ERROR_MORE_DATA;
             }
             else if (pvData)
-                CopyMemory(pvData, pvBuf, *pcbData);
+            {
+                if (cbData > *pcbData)
+                    ret = ERROR_MORE_DATA;
+                else
+                    CopyMemory(pvData, pvBuf, cbData);
+            }
         }
 
         heap_free(pvBuf);
@@ -2103,16 +2092,18 @@ LSTATUS WINAPI RegGetValueA( HKEY hKey, LPCSTR pszSubKey, LPCSTR pszValue,
 
     ret = RegQueryValueExA(hKey, pszValue, NULL, &dwType, pvData, &cbData);
 
-    /* If we are going to expand we need to read in the whole the value even
-     * if the passed buffer was too small as the expanded string might be
-     * smaller than the unexpanded one and could fit into cbData bytes. */
-    if ((ret == ERROR_SUCCESS || ret == ERROR_MORE_DATA) &&
-        dwType == REG_EXPAND_SZ && !(dwFlags & RRF_NOEXPAND))
+    /* If the value is a string, we need to read in the whole value to be able
+     * to know exactly how many bytes are needed after expanding the string and
+     * ensuring that it is null-terminated. */
+    if (is_string(dwType) &&
+        (ret == ERROR_MORE_DATA ||
+         (ret == ERROR_SUCCESS && dwType == REG_EXPAND_SZ && !(dwFlags & RRF_NOEXPAND)) ||
+         (ret == ERROR_SUCCESS && (!cbData || (pvData && *((char *)pvData + cbData - 1))))))
     {
         do {
             heap_free(pvBuf);
 
-            pvBuf = heap_alloc(cbData);
+            pvBuf = heap_alloc(cbData + 1);
             if (!pvBuf)
             {
                 ret = ERROR_NOT_ENOUGH_MEMORY;
@@ -2129,25 +2120,33 @@ LSTATUS WINAPI RegGetValueA( HKEY hKey, LPCSTR pszSubKey, LPCSTR pszValue,
                  * overlapping buffers. */
                 CopyMemory(pvBuf, pvData, cbData);
             }
-
-            /* Both the type or the value itself could have been modified in
-             * between so we have to keep retrying until the buffer is large
-             * enough or we no longer have to expand the value. */
-        } while (dwType == REG_EXPAND_SZ && ret == ERROR_MORE_DATA);
+        } while (ret == ERROR_MORE_DATA);
 
         if (ret == ERROR_SUCCESS)
         {
+            /* Ensure null termination */
+            if (!cbData || *((char *)pvBuf + cbData - 1))
+            {
+                *((char *)pvBuf + cbData) = 0;
+                cbData++;
+            }
+
             /* Recheck dwType in case it changed since the first call */
-            if (dwType == REG_EXPAND_SZ)
+            if (dwType == REG_EXPAND_SZ && !(dwFlags & RRF_NOEXPAND))
             {
                 cbData = ExpandEnvironmentStringsA(pvBuf, pvData,
                                                    pcbData ? *pcbData : 0);
                 dwType = REG_SZ;
-                if(pvData && pcbData && cbData > *pcbData)
+                if (pvData && cbData > *pcbData)
                     ret = ERROR_MORE_DATA;
             }
             else if (pvData)
-                CopyMemory(pvData, pvBuf, *pcbData);
+            {
+                if (cbData > *pcbData)
+                    ret = ERROR_MORE_DATA;
+                else
+                    CopyMemory(pvData, pvBuf, cbData);
+            }
         }
 
         heap_free(pvBuf);
@@ -2465,21 +2464,12 @@ LSTATUS WINAPI RegLoadKeyW( HKEY hkey, LPCWSTR subkey, LPCWSTR filename )
 
     if (!(hkey = get_special_root_hkey( hkey ))) return ERROR_INVALID_HANDLE;
 
-    destkey.Length = sizeof(destkey);
-    destkey.RootDirectory = hkey;               /* root key: HKLM or HKU */
-    destkey.ObjectName = &subkeyW;              /* name of the key */
-    destkey.Attributes = 0;
-    destkey.SecurityDescriptor = NULL;
-    destkey.SecurityQualityOfService = NULL;
+    InitializeObjectAttributes( &destkey, &subkeyW, 0, hkey, NULL );
     RtlInitUnicodeString(&subkeyW, subkey);
 
-    file.Length = sizeof(file);
-    file.RootDirectory = NULL;
-    file.ObjectName = &filenameW;               /* file containing the hive */
-    file.Attributes = OBJ_CASE_INSENSITIVE;
-    file.SecurityDescriptor = NULL;
-    file.SecurityQualityOfService = NULL;
-    RtlDosPathNameToNtPathName_U(filename, &filenameW, NULL, NULL);
+    InitializeObjectAttributes( &file, &filenameW, OBJ_CASE_INSENSITIVE, 0, NULL );
+    if (!RtlDosPathNameToNtPathName_U(filename, &filenameW, NULL, NULL))
+        return ERROR_INVALID_PARAMETER;
 
     status = NtLoadKey(&destkey, &file);
     RtlFreeUnicodeString(&filenameW);

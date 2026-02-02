@@ -33,6 +33,7 @@
 
 #include "wine/list.h"
 #include "wine/rbtree.h"
+#include "jsdisp.h"
 
 /*
  * This is Wine jscript extension for ES5 compatible mode. Native IE9+ implements
@@ -46,104 +47,6 @@
  */
 #define SCRIPTLANGUAGEVERSION_ES5  0x102
 #define SCRIPTLANGUAGEVERSION_ES6  0x103
-
-/*
- * These are Wine jscript extensions, used for mshtml objects so they act like JS objects.
- * Both extend IDispatchEx. IWineDispatchProxyCbPrivate is always available on jscript side.
- *
- * NOTE: Keep in sync with mshtml_private.h in mshtml.dll
- */
-DEFINE_GUID(IID_IWineDispatchProxyPrivate, 0xd359f2fe,0x5531,0x741b,0xa4,0x1a,0x5c,0xf9,0x2e,0xdc,0x97,0x1b);
-typedef struct _IWineDispatchProxyPrivate IWineDispatchProxyPrivate;
-typedef struct _IWineDispatchProxyCbPrivate IWineDispatchProxyCbPrivate;
-
-typedef IUnknown nsISupports;
-DEFINE_GUID(IID_nsCycleCollectionISupports, 0xc61eac14,0x5f7a,0x4481,0x96,0x5e,0x7e,0xaa,0x6e,0xff,0xa8,0x5f);
-
-typedef struct {
-    void *vtbl;
-    int ref_flags;
-    void *callbacks;
-} ExternalCycleCollectionParticipant;
-
-typedef struct nsCycleCollectionTraversalCallback nsCycleCollectionTraversalCallback;
-
-typedef struct {
-    HRESULT (WINAPI *traverse)(void*,void*,nsCycleCollectionTraversalCallback*);
-    HRESULT (WINAPI *unlink)(void*);
-    void (WINAPI *delete_cycle_collectable)(void*);
-} CCObjCallback;
-
-DEFINE_GUID(IID_nsXPCOMCycleCollectionParticipant, 0x9674489b,0x1f6f,0x4550,0xa7,0x30, 0xcc,0xae,0xdd,0x10,0x4c,0xf9);
-
-struct proxy_func_invoker
-{
-    HRESULT (STDMETHODCALLTYPE *invoke)(IDispatch*,void*,DISPPARAMS*,VARIANT*,EXCEPINFO*,IServiceProvider*);
-    void *context;
-};
-
-struct proxy_prop_info
-{
-    struct proxy_func_invoker func[2];
-    const WCHAR *name;
-    DISPID dispid;
-    unsigned flags;
-};
-
-typedef void (__cdecl *note_edge_t)(nsISupports*,const char*,nsCycleCollectionTraversalCallback*);
-
-struct proxy_cc_api
-{
-    ExternalCycleCollectionParticipant participant;
-    BOOL (__cdecl *is_full_cc)(void);
-    void (__cdecl *collect)(void);
-    void (__cdecl *describe_node)(ULONG ref, const char *obj_name, nsCycleCollectionTraversalCallback *cb);
-    note_edge_t note_edge;
-};
-
-typedef struct {
-    IDispatchExVtbl dispex;
-    IWineDispatchProxyCbPrivate** (STDMETHODCALLTYPE *GetProxyFieldRef)(IWineDispatchProxyPrivate *This);
-    IDispatch* (STDMETHODCALLTYPE *GetDefaultPrototype)(IWineDispatchProxyPrivate *This, IWineDispatchProxyPrivate *window);
-    HRESULT (STDMETHODCALLTYPE *GetDefaultConstructor)(IWineDispatchProxyPrivate *This, IWineDispatchProxyPrivate *window, IDispatch **ret);
-    BOOL    (STDMETHODCALLTYPE *IsConstructor)(IWineDispatchProxyPrivate *This);
-    HRESULT (STDMETHODCALLTYPE *PropFixOverride)(IWineDispatchProxyPrivate *This, struct proxy_prop_info *info);
-    HRESULT (STDMETHODCALLTYPE *PropOverride)(IWineDispatchProxyPrivate *This, const WCHAR *name, VARIANT *value);
-    HRESULT (STDMETHODCALLTYPE *PropDefineOverride)(IWineDispatchProxyPrivate *This, struct proxy_prop_info *info);
-    HRESULT (STDMETHODCALLTYPE *PropGetInfo)(IWineDispatchProxyPrivate *This, const WCHAR *name, BOOL case_insens, struct proxy_prop_info *info);
-    HRESULT (STDMETHODCALLTYPE *PropInvoke)(IWineDispatchProxyPrivate *This, IDispatch *this_obj, DISPID id, LCID lcid,
-                                            DWORD flags, DISPPARAMS *dp, VARIANT *ret, EXCEPINFO *ei, IServiceProvider *caller);
-    HRESULT (STDMETHODCALLTYPE *PropDelete)(IWineDispatchProxyPrivate *This, DISPID id);
-    HRESULT (STDMETHODCALLTYPE *PropEnum)(IWineDispatchProxyPrivate *This);
-    HRESULT (STDMETHODCALLTYPE *ToString)(IWineDispatchProxyPrivate *This, BSTR *string);
-    void    (STDMETHODCALLTYPE *InitCC)(struct proxy_cc_api *cc_api, const CCObjCallback *callback);
-} IWineDispatchProxyPrivateVtbl;
-
-typedef struct {
-    IDispatchExVtbl dispex;
-    HRESULT (STDMETHODCALLTYPE *InitProxy)(IWineDispatchProxyCbPrivate *This, IDispatch *obj);
-    void    (STDMETHODCALLTYPE *Unlinked)(IWineDispatchProxyCbPrivate *This, BOOL persist);
-    HRESULT (STDMETHODCALLTYPE *HostUpdated)(IWineDispatchProxyCbPrivate *This, IActiveScript *script);
-    IDispatch* (STDMETHODCALLTYPE *CreateConstructor)(IWineDispatchProxyCbPrivate *This, IDispatch *disp, const char *name);
-    HRESULT (STDMETHODCALLTYPE *DefineConstructor)(IWineDispatchProxyCbPrivate *This, const char *name, IDispatch *prot, IDispatch *ctor);
-    HRESULT (STDMETHODCALLTYPE *CreateObject)(IWineDispatchProxyCbPrivate *This, IDispatchEx **obj);
-    HRESULT (STDMETHODCALLTYPE *CreateArrayBuffer)(IWineDispatchProxyCbPrivate *This, DWORD size, IDispatch **arraybuf, void **data);
-    HRESULT (STDMETHODCALLTYPE *GetRandomValues)(IDispatch *typedarr);
-    HRESULT (STDMETHODCALLTYPE *PropEnum)(IWineDispatchProxyCbPrivate *This, const WCHAR *name);
-} IWineDispatchProxyCbPrivateVtbl;
-
-struct _IWineDispatchProxyPrivate {
-    const IWineDispatchProxyPrivateVtbl *lpVtbl;
-};
-
-struct _IWineDispatchProxyCbPrivate {
-    const IWineDispatchProxyCbPrivateVtbl *lpVtbl;
-};
-
-#define WINE_DISP_PROXY_NULL_PROTOTYPE ((IDispatch*)IntToPtr(-2))
-#define WINE_DISP_PROXY_OBJECT_PROTOTYPE ((IDispatch*)IntToPtr(-1))
-
-
 
 typedef struct _jsval_t jsval_t;
 typedef struct _jsstr_t jsstr_t;
@@ -170,20 +73,13 @@ heap_pool_t *heap_pool_mark(heap_pool_t*);
 
 typedef struct jsdisp_t jsdisp_t;
 
-extern struct proxy_cc_api cc_api;
+extern struct jshost_cc_api cc_api;
 extern HINSTANCE jscript_hinstance ;
 HRESULT get_dispatch_typeinfo(ITypeInfo**);
 
-/* NOTE: Keep in sync with mshtml_private.h in mshtml.dll */
-#define PROPF_ARGMASK       0x00ff
-#define PROPF_METHOD        0x0100
-#define PROPF_CONSTR        0x0200
-
-#define PROPF_ENUMERABLE    0x0400
-#define PROPF_WRITABLE      0x0800
-#define PROPF_CONFIGURABLE  0x1000
 #define PROPF_ALL           (PROPF_ENUMERABLE | PROPF_WRITABLE | PROPF_CONFIGURABLE)
 
+#define PROPF_ARGMASK       0x000000ff
 #define PROPF_VERSION_MASK  0x01ff0000
 #define PROPF_VERSION_SHIFT 16
 #define PROPF_HTML          (SCRIPTLANGUAGEVERSION_HTML << PROPF_VERSION_SHIFT)
@@ -230,6 +126,7 @@ typedef enum {
     JSCLASS_MAP,
     JSCLASS_SET,
     JSCLASS_WEAKMAP,
+    JSCLASS_HOST,
 
     FIRST_TYPEDARRAY_JSCLASS = JSCLASS_INT8ARRAY,
     LAST_TYPEDARRAY_JSCLASS  = JSCLASS_FLOAT64ARRAY,
@@ -300,22 +197,33 @@ typedef struct {
     DWORD props_cnt;
     const builtin_prop_t *props;
     void (*destructor)(jsdisp_t*);
+    IWineJSDispatchHost *(*get_host_disp)(jsdisp_t*);
     void (*on_put)(jsdisp_t*,const WCHAR*);
-    unsigned (*idx_length)(jsdisp_t*);
-    HRESULT (*idx_get)(jsdisp_t*,unsigned,jsval_t*);
-    HRESULT (*idx_put)(jsdisp_t*,unsigned,jsval_t);
+    unsigned (*indexed_len)(jsdisp_t*);
+    HRESULT (*lookup_prop)(jsdisp_t*,const WCHAR*,unsigned,struct property_info*);
+    HRESULT (*prop_get)(jsdisp_t*,DISPID,jsval_t*);
+    HRESULT (*prop_put)(jsdisp_t*,DISPID,jsval_t);
+    HRESULT (*prop_delete)(jsdisp_t*,DISPID);
+    HRESULT (*prop_get_desc)(jsdisp_t*,DISPID,BOOL,property_desc_t*);
+    HRESULT (*prop_define)(jsdisp_t*,DISPID,const property_desc_t*);
+    HRESULT (*prop_config)(jsdisp_t*,unsigned,unsigned);
+    HRESULT (*fill_props)(jsdisp_t*);
+    HRESULT (*to_string)(jsdisp_t*,jsstr_t**);
     HRESULT (*gc_traverse)(struct gc_ctx*,enum gc_traverse_op,jsdisp_t*);
     void (*cc_traverse)(jsdisp_t*,nsCycleCollectionTraversalCallback*);
 } builtin_info_t;
 
 struct jsdisp_t {
-    IDispatchEx IDispatchEx_iface;
+    IWineJSDispatch IWineJSDispatch_iface;
 
     LONG ref;
 
-    BOOLEAN has_weak_refs;
-    BOOLEAN extensible;
-    BOOLEAN gc_marked;
+    BOOLEAN has_volatile_props : 1;
+    BOOLEAN is_constructor : 1;
+    BOOLEAN has_weak_refs : 1;
+    BOOLEAN props_filled : 1;
+    BOOLEAN extensible : 1;
+    BOOLEAN gc_marked : 1;
 
     DWORD buf_size;
     DWORD prop_cnt;
@@ -323,7 +231,6 @@ struct jsdisp_t {
     script_ctx_t *ctx;
 
     jsdisp_t *prototype;
-    IWineDispatchProxyPrivate *proxy;
 
     const builtin_info_t *builtin_info;
     struct list entry;
@@ -331,41 +238,40 @@ struct jsdisp_t {
 
 static inline IDispatch *to_disp(jsdisp_t *jsdisp)
 {
-    return (IDispatch*)&jsdisp->IDispatchEx_iface;
+    return (IDispatch *)&jsdisp->IWineJSDispatch_iface;
+}
+
+static inline IDispatchEx *to_dispex(jsdisp_t *jsdisp)
+{
+    return (IDispatchEx *)&jsdisp->IWineJSDispatch_iface;
+}
+
+static inline BOOL is_dispex_prop_id(DISPID id)
+{
+    return id > 0;
+}
+
+static inline BOOL is_indexed_prop_id(DISPID id)
+{
+    return id < 0;
+}
+
+static inline unsigned indexed_prop_id_to_idx(DISPID id)
+{
+    return (unsigned)id - 0x80000000u;
+}
+
+static inline DISPID indexed_prop_idx_to_id(unsigned idx)
+{
+    return idx + 0x80000000u;
 }
 
 jsdisp_t *as_jsdisp(IDispatch*);
 jsdisp_t *to_jsdisp(IDispatch*);
-void jsdisp_reacquire(jsdisp_t*);
-void jsdisp_free(jsdisp_t*);
-
-#ifndef TRACE_REFCNT
-
-/*
- * We do a lot of refcount calls during script execution, so having an inline
- * version is a nice perf win. Define TRACE_REFCNT macro when debugging
- * refcount bugs to have traces. Also, since jsdisp_t is not thread safe anyways,
- * there is no point in using atomic operations.
- */
-static inline jsdisp_t *jsdisp_addref(jsdisp_t *jsdisp)
-{
-    if(!jsdisp->ref++)
-        jsdisp_reacquire(jsdisp);
-    return jsdisp;
-}
-
-static inline void jsdisp_release(jsdisp_t *jsdisp)
-{
-    if(!--jsdisp->ref)
-        jsdisp_free(jsdisp);
-}
-
-#else
+IWineJSDispatchHost *get_host_dispatch(IDispatch*);
 
 jsdisp_t *jsdisp_addref(jsdisp_t*);
-void jsdisp_release(jsdisp_t*);
-
-#endif
+ULONG jsdisp_release(jsdisp_t*);
 
 enum jsdisp_enum_type {
     JSDISP_ENUM_ALL,
@@ -376,14 +282,15 @@ enum jsdisp_enum_type {
 HRESULT create_dispex(script_ctx_t*,const builtin_info_t*,jsdisp_t*,jsdisp_t**);
 HRESULT init_dispex(jsdisp_t*,script_ctx_t*,const builtin_info_t*,jsdisp_t*);
 HRESULT init_dispex_from_constr(jsdisp_t*,script_ctx_t*,const builtin_info_t*,jsdisp_t*);
-HRESULT convert_to_proxy(script_ctx_t*,jsval_t*);
-void init_cc_api(IDispatch*);
+HRESULT init_host_object(script_ctx_t*,IWineJSDispatchHost*,IWineJSDispatch*,UINT32,IWineJSDispatch**);
+HRESULT init_host_constructor(script_ctx_t*,IWineJSDispatchHost*,IWineJSDispatch*,IWineJSDispatch**);
+HRESULT fill_globals(script_ctx_t*,IWineJSDispatchHost*);
+void init_cc_api(IWineJSDispatchHost*);
 
-void disp_fill_exception(script_ctx_t*,EXCEPINFO*);
 HRESULT disp_call(script_ctx_t*,IDispatch*,DISPID,WORD,unsigned,jsval_t*,jsval_t*);
 HRESULT disp_call_name(script_ctx_t*,IDispatch*,const WCHAR*,WORD,unsigned,jsval_t*,jsval_t*);
 HRESULT disp_call_value_with_caller(script_ctx_t*,IDispatch*,jsval_t,WORD,unsigned,jsval_t*,jsval_t*,IServiceProvider*);
-HRESULT jsdisp_call_value(jsdisp_t*,jsval_t,WORD,unsigned,jsval_t*,jsval_t*,IServiceProvider*);
+HRESULT jsdisp_call_value(jsdisp_t*,jsval_t,WORD,unsigned,jsval_t*,jsval_t*);
 HRESULT jsdisp_call(jsdisp_t*,DISPID,WORD,unsigned,jsval_t*,jsval_t*);
 HRESULT jsdisp_call_name(jsdisp_t*,const WCHAR*,WORD,unsigned,jsval_t*,jsval_t*);
 HRESULT disp_propget(script_ctx_t*,IDispatch*,DISPID,jsval_t*);
@@ -413,9 +320,8 @@ HRESULT create_builtin_function(script_ctx_t*,builtin_invoke_t,const WCHAR*,cons
         jsdisp_t*,jsdisp_t**);
 HRESULT create_builtin_constructor(script_ctx_t*,builtin_invoke_t,const WCHAR*,const builtin_info_t*,DWORD,
         jsdisp_t*,jsdisp_t**);
-HRESULT create_proxy_functions(jsdisp_t*,const struct proxy_prop_info*,jsdisp_t**);
-HRESULT create_proxy_constructor(IDispatch*,const char*,jsdisp_t*,jsdisp_t**);
-HRESULT Function_invoke(jsdisp_t*,jsval_t,WORD,unsigned,jsval_t*,jsval_t*,IServiceProvider*);
+HRESULT create_host_function(script_ctx_t*,const struct property_info*,DWORD,jsdisp_t**);
+HRESULT Function_invoke(jsdisp_t*,jsval_t,WORD,unsigned,jsval_t*,jsval_t*);
 
 HRESULT Function_value(script_ctx_t*,jsval_t,WORD,unsigned,jsval_t*,jsval_t*);
 HRESULT Function_get_value(script_ctx_t*,jsdisp_t*,jsval_t*);
@@ -423,10 +329,12 @@ struct _function_code_t *Function_get_code(jsdisp_t*);
 
 HRESULT throw_error(script_ctx_t*,HRESULT,const WCHAR*);
 jsdisp_t *create_builtin_error(script_ctx_t *ctx);
+void handle_dispatch_exception(script_ctx_t *ctx, EXCEPINFO *ei);
 
 HRESULT create_object(script_ctx_t*,jsdisp_t*,jsdisp_t**);
 HRESULT create_math(script_ctx_t*,jsdisp_t**);
 HRESULT create_array(script_ctx_t*,DWORD,jsdisp_t**);
+HRESULT create_arraybuffer(script_ctx_t*,DWORD,IWineJSDispatch**,void**);
 HRESULT create_regexp(script_ctx_t*,jsstr_t*,DWORD,jsdisp_t**);
 HRESULT create_regexp_var(script_ctx_t*,jsval_t,jsval_t*,jsdisp_t**);
 HRESULT create_string(script_ctx_t*,jsstr_t*,jsdisp_t**);
@@ -543,7 +451,6 @@ struct _script_ctx_t {
     union {
         struct {
             jsdisp_t *global;
-            jsdisp_t *js_global;
             jsdisp_t *function_constr;
             jsdisp_t *array_constr;
             jsdisp_t *bool_constr;
@@ -565,12 +472,12 @@ struct _script_ctx_t {
             jsdisp_t *vbarray_constr;
             jsdisp_t *arraybuf_constr;
             jsdisp_t *dataview_constr;
-            jsdisp_t *typedarr_constr[NUM_TYPEDARRAY_TYPES];
+            jsdisp_t *typedarr_constr[LAST_TYPEDARRAY_JSCLASS - FIRST_TYPEDARRAY_JSCLASS + 1];
             jsdisp_t *map_prototype;
             jsdisp_t *set_prototype;
             jsdisp_t *weakmap_prototype;
         };
-        jsdisp_t *global_objects[26 + NUM_TYPEDARRAY_TYPES];
+        jsdisp_t *global_objects[25 + LAST_TYPEDARRAY_JSCLASS - FIRST_TYPEDARRAY_JSCLASS + 1];
     };
 };
 C_ASSERT(RTL_SIZEOF_THROUGH_FIELD(script_ctx_t, weakmap_prototype) == RTL_SIZEOF_THROUGH_FIELD(script_ctx_t, global_objects));
@@ -624,12 +531,12 @@ HRESULT regexp_string_match(script_ctx_t*,jsdisp_t*,jsstr_t*,jsval_t*);
 
 BOOL bool_obj_value(jsdisp_t*);
 unsigned array_get_length(jsdisp_t*);
+HRESULT typed_array_get_random_values(IDispatch*);
 HRESULT localize_number(script_ctx_t*,DOUBLE,BOOL,jsstr_t**);
 
 BOOL is_builtin_eval_func(jsdisp_t*);
 HRESULT builtin_eval(script_ctx_t*,struct _call_frame_t*,WORD,unsigned,jsval_t*,jsval_t*);
 HRESULT JSGlobal_eval(script_ctx_t*,jsval_t,WORD,unsigned,jsval_t*,jsval_t*);
-HRESULT Object_toString(script_ctx_t*,jsval_t,WORD,unsigned,jsval_t*,jsval_t*);
 HRESULT Object_get_proto_(script_ctx_t*,jsval_t,WORD,unsigned,jsval_t*,jsval_t*);
 HRESULT Object_set_proto_(script_ctx_t*,jsval_t,WORD,unsigned,jsval_t*,jsval_t*);
 
@@ -654,9 +561,22 @@ static inline HRESULT disp_call_value(script_ctx_t *ctx, IDispatch *disp, jsval_
     return disp_call_value_with_caller(ctx, disp, vthis, flags, argc, argv, r, &ctx->jscaller->IServiceProvider_iface);
 }
 
-#define FACILITY_JSCRIPT 10
+static inline IUnknown *jsdisp_get_edge_obj(jsdisp_t *jsdisp)
+{
+    if(jsdisp->builtin_info->get_host_disp)
+        return (IUnknown*)jsdisp->builtin_info->get_host_disp(jsdisp);
+    return (IUnknown*)&jsdisp->IWineJSDispatch_iface;
+}
 
-#define MAKE_JSERROR(code) MAKE_HRESULT(SEVERITY_ERROR, FACILITY_JSCRIPT, code)
+static inline IUnknown *get_edge_obj(IDispatch *disp)
+{
+    jsdisp_t *jsdisp = to_jsdisp(disp);
+    if(jsdisp)
+        return jsdisp_get_edge_obj(jsdisp);
+    return (IUnknown*)disp;
+}
+
+#define MAKE_JSERROR(code) MAKE_HRESULT(SEVERITY_ERROR, FACILITY_CONTROL, code)
 
 #define JS_E_TO_PRIMITIVE            MAKE_JSERROR(IDS_TO_PRIMITIVE)
 #define JS_E_INVALIDARG              MAKE_JSERROR(IDS_INVALID_CALL_ARG)
@@ -685,7 +605,6 @@ static inline HRESULT disp_call_value(script_ctx_t *ctx, IDispatch *disp, jsval_
 #define JS_E_DISABLED_CC             MAKE_JSERROR(IDS_DISABLED_CC)
 #define JS_E_EXPECTED_AT             MAKE_JSERROR(IDS_EXPECTED_AT)
 #define JS_E_FUNCTION_EXPECTED       MAKE_JSERROR(IDS_NOT_FUNC)
-#define JS_E_STRING_EXPECTED         MAKE_JSERROR(IDS_NOT_STRING)
 #define JS_E_DATE_EXPECTED           MAKE_JSERROR(IDS_NOT_DATE)
 #define JS_E_NUMBER_EXPECTED         MAKE_JSERROR(IDS_NOT_NUM)
 #define JS_E_OBJECT_EXPECTED         MAKE_JSERROR(IDS_OBJECT_EXPECTED)
@@ -704,7 +623,6 @@ static inline HRESULT disp_call_value(script_ctx_t *ctx, IDispatch *disp, jsval_
 #define JS_E_INVALID_URI_CHAR        MAKE_JSERROR(IDS_URI_INVALID_CHAR)
 #define JS_E_FRACTION_DIGITS_OUT_OF_RANGE MAKE_JSERROR(IDS_FRACTION_DIGITS_OUT_OF_RANGE)
 #define JS_E_PRECISION_OUT_OF_RANGE  MAKE_JSERROR(IDS_PRECISION_OUT_OF_RANGE)
-#define JS_E_ARRAY_OR_ARGS_EXPECTED  MAKE_JSERROR(IDS_ARRAY_OR_ARGS_EXPECTED)
 #define JS_E_INVALID_LENGTH          MAKE_JSERROR(IDS_INVALID_LENGTH)
 #define JS_E_ARRAY_EXPECTED          MAKE_JSERROR(IDS_ARRAY_EXPECTED)
 #define JS_E_CYCLIC_PROTO_VALUE      MAKE_JSERROR(IDS_CYCLIC_PROTO_VALUE)
@@ -729,13 +647,12 @@ static inline HRESULT disp_call_value(script_ctx_t *ctx, IDispatch *disp, jsval_
 
 static inline BOOL is_jscript_error(HRESULT hres)
 {
-    return HRESULT_FACILITY(hres) == FACILITY_JSCRIPT;
+    return HRESULT_FACILITY(hres) == FACILITY_CONTROL;
 }
 
 const char *debugstr_jsval(const jsval_t);
 
 HRESULT create_jscript_object(BOOL,REFIID,void**);
-script_ctx_t *get_script_ctx(IActiveScript*);
 
 extern LONG module_ref ;
 
@@ -748,6 +665,3 @@ static inline void unlock_module(void)
 {
     InterlockedDecrement(&module_ref);
 }
-
-HRESULT WINAPI WineDispatchProxyCbPrivate_CreateArrayBuffer(IWineDispatchProxyCbPrivate*,DWORD,IDispatch**,void**);
-HRESULT WINAPI WineDispatchProxyCbPrivate_GetRandomValues(IDispatch*);

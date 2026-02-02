@@ -19,6 +19,7 @@
 #include <stdarg.h>
 #include <limits.h>
 #include <errno.h>
+#include <process.h>
 
 #include "msvcp90.h"
 
@@ -28,6 +29,9 @@ WINE_DEFAULT_DEBUG_CHANNEL(msvcp);
 
 #if _MSVCP_VER >= 110
 /* error strings generated with glibc strerror */
+#if _MSVCP_VER >= 140
+static const char str_SUCC[]            = "success";
+#endif
 static const char str_EPERM[]           = "operation not permitted";
 static const char str_ENOENT[]          = "no such file or directory";
 static const char str_ESRCH[]           = "no such process";
@@ -112,6 +116,9 @@ static const struct {
     const char *str;
 } syserror_map[] =
 {
+#if _MSVCP_VER >= 140
+    {0, str_SUCC},
+#endif
     {EPERM, str_EPERM},
     {ENOENT, str_ENOENT},
     {ESRCH, str_ESRCH},
@@ -258,7 +265,7 @@ DEFINE_THISCALL_WRAPPER(mutex_ctor, 4)
 mutex* __thiscall mutex_ctor(mutex *this)
 {
     CRITICAL_SECTION *cs = operator_new(sizeof(*cs));
-    InitializeCriticalSection(cs);
+    InitializeCriticalSectionEx(cs, 0, RTL_CRITICAL_SECTION_FLAG_FORCE_DEBUG_INFO);
     cs->DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": _Mutex critical section");
     this->mutex = cs;
     return this;
@@ -341,7 +348,7 @@ void __cdecl _Init_locks__Init_locks_ctor(_Init_locks *this)
     {
         for(i=0; i<_MAX_LOCK; i++)
         {
-            InitializeCriticalSection(&lockit_cs[i]);
+            InitializeCriticalSectionEx(&lockit_cs[i], 0, RTL_CRITICAL_SECTION_FLAG_FORCE_DEBUG_INFO);
             lockit_cs[i].DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": _Lockit critical section");
         }
     }
@@ -709,6 +716,9 @@ unsigned int __cdecl _Random_device(void)
 typedef struct
 {
     DWORD flags;
+#if _MSVCP_VER >= 140
+    ULONG_PTR unknown;
+#endif
     cs cs;
     DWORD thread_id;
     DWORD count;
@@ -730,6 +740,9 @@ void __cdecl _Mtx_init_in_situ(_Mtx_t mtx, int flags)
         FIXME("unknown flags ignored: %x\n", flags);
 
     mtx->flags = flags;
+#if _MSVCP_VER >= 140
+    mtx->unknown = 0;
+#endif
     cs_init(&mtx->cs);
     mtx->thread_id = -1;
     mtx->count = 0;
@@ -820,6 +833,9 @@ void __cdecl _Mtx_reset_owner(_Mtx_arg_t mtx)
 
 typedef struct
 {
+#if _MSVCP_VER >= 140
+    ULONG_PTR unknown;
+#endif
     cv cv;
 } *_Cnd_t;
 
@@ -835,6 +851,9 @@ typedef _Cnd_t *_Cnd_arg_t;
 
 void __cdecl _Cnd_init_in_situ(_Cnd_t cnd)
 {
+#if _MSVCP_VER >= 140
+    cnd->unknown = 0;
+#endif
     cv_init(&cnd->cv);
 }
 
@@ -1063,6 +1082,13 @@ bool __thiscall custom_category_equivalent_code(custom_category *this,
     return FALSE;
 }
 
+DEFINE_THISCALL_WRAPPER(custom_category_message, 12)
+basic_string_char* __thiscall custom_category_message(const custom_category *this,
+        basic_string_char *ret, int err)
+{
+    return MSVCP_basic_string_char_ctor_cstr(ret, strerror(err));
+}
+
 DEFINE_THISCALL_WRAPPER(iostream_category_name, 4)
 const char* __thiscall iostream_category_name(const custom_category *this)
 {
@@ -1090,7 +1116,7 @@ const error_category* __cdecl std_iostream_category(void)
 }
 #endif
 
-#if _MSVCP_VER == 100
+#if _MSVCP_VER == 100 || _MSVCP_VER >= 140
 static custom_category system_category;
 DEFINE_RTTI_DATA1(system_category, 0, &error_category_rtti_base_descriptor, ".?AV_System_error_category@std@@")
 
@@ -1099,13 +1125,32 @@ extern const vtable_ptr system_category_vtable;
 static void system_category_ctor(custom_category *this)
 {
     this->base.vtable = &system_category_vtable;
+#if _MSVCP_VER == 100
     this->type = "system";
+#endif
 }
 
-DEFINE_THISCALL_WRAPPER(custom_category_name, 4)
-const char* __thiscall custom_category_name(const custom_category *this)
+DEFINE_THISCALL_WRAPPER(system_category_name, 4)
+const char* __thiscall system_category_name(const custom_category *this)
 {
+#if _MSVCP_VER == 100
     return this->type;
+#else
+    return "system";
+#endif
+}
+
+DEFINE_THISCALL_WRAPPER(system_category_message, 12)
+basic_string_char* __thiscall system_category_message(const custom_category *this,
+        basic_string_char *ret, int err)
+{
+#if _MSVCP_VER > 100
+    const char *msg = _Winerror_map_str(err);
+    if (!msg) return MSVCP_basic_string_char_ctor_cstr(ret, "unknown error");
+    return MSVCP_basic_string_char_ctor_cstr(ret, msg);
+#else
+    return custom_category_message(this, ret, err);
+#endif
 }
 
 /* ?system_category@std@@YAABVerror_category@1@XZ */
@@ -1138,13 +1183,6 @@ const char* __thiscall generic_category_name(const custom_category *this)
 #else
     return "generic";
 #endif
-}
-
-DEFINE_THISCALL_WRAPPER(custom_category_message, 12)
-basic_string_char* __thiscall custom_category_message(const custom_category *this,
-        basic_string_char *ret, int err)
-{
-    return MSVCP_basic_string_char_ctor_cstr(ret, strerror(err));
 }
 
 /* ?generic_category@std@@YAABVerror_category@1@XZ */
@@ -1200,7 +1238,7 @@ void __cdecl _Do_call(void *this)
 typedef struct
 {
     HANDLE hnd;
-    DWORD  id;
+    unsigned int id;
 } _Thrd_t;
 
 typedef int (__cdecl *_Thrd_start_t)(void*);
@@ -1209,13 +1247,13 @@ typedef int (__cdecl *_Thrd_start_t)(void*);
 
 int __cdecl _Thrd_equal(_Thrd_t a, _Thrd_t b)
 {
-    TRACE("(%p %lu %p %lu)\n", a.hnd, a.id, b.hnd, b.id);
+    TRACE("(%p %u %p %u)\n", a.hnd, a.id, b.hnd, b.id);
     return a.id == b.id;
 }
 
 int __cdecl _Thrd_lt(_Thrd_t a, _Thrd_t b)
 {
-    TRACE("(%p %lu %p %lu)\n", a.hnd, a.id, b.hnd, b.id);
+    TRACE("(%p %u %p %u)\n", a.hnd, a.id, b.hnd, b.id);
     return a.id < b.id;
 }
 
@@ -1243,7 +1281,7 @@ static _Thrd_t thread_current(void)
     }
     ret.id  = GetCurrentThreadId();
 
-    TRACE("(%p %lu)\n", ret.hnd, ret.id);
+    TRACE("(%p %u)\n", ret.hnd, ret.id);
     return ret;
 }
 
@@ -1269,7 +1307,7 @@ ULONGLONG __cdecl _Thrd_current(void)
 
 int __cdecl _Thrd_join(_Thrd_t thr, int *code)
 {
-    TRACE("(%p %lu %p)\n", thr.hnd, thr.id, code);
+    TRACE("(%p %u %p)\n", thr.hnd, thr.id, code);
     if (WaitForSingleObject(thr.hnd, INFINITE))
         return _THRD_ERROR;
 
@@ -1280,10 +1318,11 @@ int __cdecl _Thrd_join(_Thrd_t thr, int *code)
     return 0;
 }
 
-int __cdecl _Thrd_start(_Thrd_t *thr, LPTHREAD_START_ROUTINE proc, void *arg)
+int __cdecl _Thrd_start(_Thrd_t *thr, _beginthreadex_start_routine_t proc, void *arg)
 {
     TRACE("(%p %p %p)\n", thr, proc, arg);
-    thr->hnd = CreateThread(NULL, 0, proc, arg, 0, &thr->id);
+
+    thr->hnd = (HANDLE)_beginthreadex(NULL, 0, proc, arg, 0, &thr->id);
     return thr->hnd ? 0 : _THRD_ERROR;
 }
 
@@ -1293,7 +1332,7 @@ typedef struct
     void *arg;
 } thread_proc_arg;
 
-static DWORD WINAPI thread_proc_wrapper(void *arg)
+static unsigned int WINAPI thread_proc_wrapper(void *arg)
 {
     thread_proc_arg wrapped_arg = *((thread_proc_arg*)arg);
     free(arg);
@@ -1417,7 +1456,7 @@ unsigned int __thiscall _Pad__Go(_Pad *this)
     return 0;
 }
 
-static DWORD WINAPI launch_thread_proc(void *arg)
+static unsigned int WINAPI launch_thread_proc(void *arg)
 {
     _Pad *this = arg;
     return call__Pad__Go(this);
@@ -1729,11 +1768,11 @@ __ASM_BLOCK_BEGIN(misc_vtables)
             VTABLE_ADD_FUNC(custom_category_default_error_condition)
             VTABLE_ADD_FUNC(custom_category_equivalent)
             VTABLE_ADD_FUNC(custom_category_equivalent_code));
-#if _MSVCP_VER == 100
+#if _MSVCP_VER == 100 || _MSVCP_VER >= 140
     __ASM_VTABLE(system_category,
             VTABLE_ADD_FUNC(custom_category_vector_dtor)
-            VTABLE_ADD_FUNC(custom_category_name)
-            VTABLE_ADD_FUNC(custom_category_message)
+            VTABLE_ADD_FUNC(system_category_name)
+            VTABLE_ADD_FUNC(system_category_message)
             VTABLE_ADD_FUNC(custom_category_default_error_condition)
             VTABLE_ADD_FUNC(custom_category_equivalent)
             VTABLE_ADD_FUNC(custom_category_equivalent_code));
@@ -1753,13 +1792,13 @@ __ASM_BLOCK_END
 
 void init_misc(void *base)
 {
-#ifdef __x86_64__
+#ifdef RTTI_USE_RVA
 #if _MSVCP_VER >= 100
     init_error_category_rtti(base);
     init_generic_category_rtti(base);
     init_iostream_category_rtti(base);
 #endif
-#if _MSVCP_VER == 100
+#if _MSVCP_VER == 100 || _MSVCP_VER >= 140
     init_system_category_rtti(base);
 #endif
 #if _MSVCP_VER >= 110
@@ -1772,7 +1811,7 @@ void init_misc(void *base)
     generic_category_ctor(&generic_category);
 #endif
 
-#if _MSVCP_VER == 100
+#if _MSVCP_VER == 100 || _MSVCP_VER >= 140
     system_category_ctor(&system_category);
 #endif
 }

@@ -230,12 +230,10 @@ static inline int facename_compare( const WCHAR *str1, const WCHAR *str2, SIZE_T
  */
 static inline INT INTERNAL_XDSTOWS(DC *dc, INT width)
 {
-    double floatWidth;
+    float scale_x;
 
-    /* Perform operation with floating point */
-    floatWidth = (double)width * dc->xformVport2World.eM11;
-    /* Round to integers */
-    return GDI_ROUND(floatWidth);
+    scale_x = hypotf(dc->xformWorld2Vport.eM11, dc->xformWorld2Vport.eM12);
+    return GDI_ROUND( (float)width / scale_x );
 }
 
 /* Performs a device to world transformation on the specified size (which
@@ -243,34 +241,26 @@ static inline INT INTERNAL_XDSTOWS(DC *dc, INT width)
  */
 static inline INT INTERNAL_YDSTOWS(DC *dc, INT height)
 {
-    double floatHeight;
+    float scale_y;
 
-    /* Perform operation with floating point */
-    floatHeight = (double)height * dc->xformVport2World.eM22;
-    /* Round to integers */
-    return GDI_ROUND(floatHeight);
+    scale_y = hypotf(dc->xformWorld2Vport.eM21, dc->xformWorld2Vport.eM22);
+    return GDI_ROUND( (float)height / scale_y );
 }
 
-/* scale width and height but don't mirror them */
-
-static inline INT width_to_LP( DC *dc, INT width )
+static inline INT INTERNAL_XWSTODS(DC *dc, INT width)
 {
-    return GDI_ROUND( (double)width * fabs( dc->xformVport2World.eM11 ));
-}
+    float scale_x;
 
-static inline INT height_to_LP( DC *dc, INT height )
-{
-    return GDI_ROUND( (double)height * fabs( dc->xformVport2World.eM22 ));
+    scale_x = hypotf(dc->xformWorld2Vport.eM11, dc->xformWorld2Vport.eM12);
+    return GDI_ROUND( (float)width / scale_x );
 }
 
 static inline INT INTERNAL_YWSTODS(DC *dc, INT height)
 {
-    POINT pt[2];
-    pt[0].x = pt[0].y = 0;
-    pt[1].x = 0;
-    pt[1].y = height;
-    lp_to_dp(dc, pt, 2);
-    return pt[1].y - pt[0].y;
+    float scale_y;
+
+    scale_y = hypotf(dc->xformWorld2Vport.eM21, dc->xformWorld2Vport.eM22);
+    return GDI_ROUND( (float)height / scale_y );
 }
 
 static INT FONT_GetObjectW( HGDIOBJ handle, INT count, LPVOID buffer );
@@ -464,10 +454,6 @@ static const struct nls_update_font_list
 
 static pthread_mutex_t font_lock = PTHREAD_MUTEX_INITIALIZER;
 
-#ifndef WINE_FONT_DIR
-#define WINE_FONT_DIR "fonts"
-#endif
-
 #ifdef WORDS_BIGENDIAN
 #define GET_BE_WORD(x) (x)
 #define GET_BE_DWORD(x) (x)
@@ -478,20 +464,12 @@ static pthread_mutex_t font_lock = PTHREAD_MUTEX_INITIALIZER;
 
 static void get_fonts_data_dir_path( const WCHAR *file, WCHAR *path )
 {
-    const char *dir;
+    const char *dir = ntdll_get_build_dir();
     ULONG len = MAX_PATH;
 
-    if ((dir = ntdll_get_data_dir()))
-    {
-        wine_unix_to_nt_file_name( dir, path, &len );
-        asciiz_to_unicode( path + len - 1, "\\" WINE_FONT_DIR "\\" );
-    }
-    else if ((dir = ntdll_get_build_dir()))
-    {
-        wine_unix_to_nt_file_name( dir, path, &len );
-        asciiz_to_unicode( path + len - 1, "\\fonts\\" );
-    }
-
+    if (!dir) dir = ntdll_get_data_dir();
+    wine_unix_to_nt_file_name( dir, path, &len );
+    asciiz_to_unicode( path + len - 1, "\\fonts\\" );
     if (file) lstrcatW( path, file );
 }
 
@@ -516,6 +494,12 @@ HKEY reg_open_key( HKEY root, const WCHAR *name, ULONG name_len )
 
     if (NtOpenKeyEx( &ret, MAXIMUM_ALLOWED, &attr, 0 )) return 0;
     return ret;
+}
+
+HKEY reg_open_ascii_key( HKEY root, const char *name )
+{
+    WCHAR nameW[MAX_PATH];
+    return reg_open_key( root, nameW, asciiz_to_unicode( nameW, name ) - sizeof(WCHAR) );
 }
 
 /* wrapper for NtCreateKey that creates the key recursively if necessary */
@@ -567,10 +551,17 @@ HKEY reg_create_key( HKEY root, const WCHAR *name, ULONG name_len,
     return ret;
 }
 
+HKEY reg_create_ascii_key( HKEY root, const char *name, DWORD options,
+                           DWORD *disposition )
+{
+    WCHAR nameW[MAX_PATH];
+    return reg_create_key( root, nameW, asciiz_to_unicode( nameW, name ) - sizeof(WCHAR),
+                           options, disposition );
+}
+
 HKEY reg_open_hkcu_key( const char *name )
 {
-    WCHAR nameW[128];
-    return reg_open_key( hkcu_key, nameW, asciiz_to_unicode( nameW, name ) - sizeof(WCHAR) );
+    return reg_open_ascii_key( hkcu_key, name );
 }
 
 BOOL set_reg_value( HKEY hkey, const WCHAR *name, UINT type, const void *value, DWORD count )
@@ -1002,9 +993,9 @@ static BOOL enum_fallbacks( DWORD pitch_and_family, int index, WCHAR buffer[LF_F
     {
         const char * const *defaults;
 
-        if ((pitch_and_family & FIXED_PITCH) || (pitch_and_family & 0xf0) == FF_MODERN)
+        if ((pitch_and_family & FIXED_PITCH) || (pitch_and_family & FF_MODERN) == FF_MODERN)
             defaults = default_fixed_list;
-        else if ((pitch_and_family & 0xf0) == FF_ROMAN)
+        else if ((pitch_and_family & FF_ROMAN) == FF_ROMAN)
             defaults = default_serif_list;
         else
             defaults = default_sans_list;
@@ -1364,7 +1355,7 @@ static void add_face_to_cache( struct gdi_font_face *face )
         WCHAR nameW[10];
         char name[10];
 
-        sprintf( name, "%d", face->size.y_ppem );
+        snprintf( name, sizeof(name), "%d", face->size.y_ppem );
         hkey_face = reg_create_key( hkey_family, nameW,
                                     asciiz_to_unicode( nameW, name ) - sizeof(WCHAR),
                                     REG_OPTION_VOLATILE, NULL );
@@ -1403,7 +1394,7 @@ static void remove_face_from_cache( struct gdi_font_face *face )
     {
         WCHAR nameW[10];
         char name[10];
-        sprintf( name, "%d", face->size.y_ppem );
+        snprintf( name, sizeof(name), "%d", face->size.y_ppem );
         if ((hkey = reg_open_key( hkey_family, nameW,
                                   asciiz_to_unicode( nameW, name ) - sizeof(WCHAR) )))
         {
@@ -3150,7 +3141,7 @@ static void update_codepage( UINT screen_dpi )
         RtlInitCodePageTable( NtCurrentTeb()->Peb->OemCodePageData, &oem_cp );
     else
         oem_cp = utf8_cp;
-    sprintf( cpbuf, "%u,%u", ansi_cp.CodePage, oem_cp.CodePage );
+    snprintf( cpbuf, sizeof(cpbuf), "%u,%u", ansi_cp.CodePage, oem_cp.CodePage );
     asciiz_to_unicode( cpbufW, cpbuf );
 
     if (query_reg_ascii_value( wine_fonts_key, "Codepages", info, sizeof(value_buffer) ))
@@ -4215,8 +4206,8 @@ static void scale_outline_font_metrics( const struct gdi_font *font, OUTLINETEXT
     else
         scale_x = font->scale_y;
 
-    scale_x *= fabs(font->matrix.eM11);
-    scale_y = font->scale_y * fabs(font->matrix.eM22);
+    scale_x *= hypotf(font->matrix.eM11, font->matrix.eM12);
+    scale_y = font->scale_y * hypotf(font->matrix.eM21, font->matrix.eM22);
 
 /* Windows scales these values as signed integers even if they are unsigned */
 #define SCALE_X(x) (x) = GDI_ROUND((int)(x) * (scale_x))
@@ -4430,8 +4421,8 @@ static void scale_font_metrics( struct gdi_font *font, TEXTMETRICW *tm )
     else
         scale_x = font->scale_y;
 
-    scale_x *= fabs(font->matrix.eM11);
-    scale_y = font->scale_y * fabs(font->matrix.eM22);
+    scale_x *= hypotf(font->matrix.eM11, font->matrix.eM12);
+    scale_y = font->scale_y * hypotf(font->matrix.eM21, font->matrix.eM22);
 
 #define SCALE_X(x) (x) = GDI_ROUND((x) * scale_x)
 #define SCALE_Y(y) (y) = GDI_ROUND((y) * scale_y)
@@ -4793,11 +4784,6 @@ const struct gdi_dc_funcs font_driver =
     NULL,                           /* pStrokeAndFillPath */
     NULL,                           /* pStrokePath */
     NULL,                           /* pUnrealizePalette */
-    NULL,                           /* pD3DKMTCheckVidPnExclusiveOwnership */
-    NULL,                           /* pD3DKMTCloseAdapter */
-    NULL,                           /* pD3DKMTOpenAdapterFromLuid */
-    NULL,                           /* pD3DKMTQueryVideoMemoryInfo */
-    NULL,                           /* pD3DKMTSetVidPnSourceOwner */
     GDI_PRIORITY_FONT_DRV           /* priority */
 };
 
@@ -5406,14 +5392,14 @@ BOOL WINAPI NtGdiGetTextMetricsW( HDC hdc, TEXTMETRICW *metrics, ULONG flags )
 
         metrics->tmDigitizedAspectX = NtGdiGetDeviceCaps(hdc, LOGPIXELSX);
         metrics->tmDigitizedAspectY = NtGdiGetDeviceCaps(hdc, LOGPIXELSY);
-        metrics->tmHeight           = height_to_LP( dc, metrics->tmHeight );
-        metrics->tmAscent           = height_to_LP( dc, metrics->tmAscent );
-        metrics->tmDescent          = height_to_LP( dc, metrics->tmDescent );
-        metrics->tmInternalLeading  = height_to_LP( dc, metrics->tmInternalLeading );
-        metrics->tmExternalLeading  = height_to_LP( dc, metrics->tmExternalLeading );
-        metrics->tmAveCharWidth     = width_to_LP( dc, metrics->tmAveCharWidth );
-        metrics->tmMaxCharWidth     = width_to_LP( dc, metrics->tmMaxCharWidth );
-        metrics->tmOverhang         = width_to_LP( dc, metrics->tmOverhang );
+        metrics->tmHeight           = INTERNAL_YDSTOWS( dc, metrics->tmHeight );
+        metrics->tmAscent           = INTERNAL_YDSTOWS( dc, metrics->tmAscent );
+        metrics->tmDescent          = INTERNAL_YDSTOWS( dc, metrics->tmDescent );
+        metrics->tmInternalLeading  = INTERNAL_YDSTOWS( dc, metrics->tmInternalLeading );
+        metrics->tmExternalLeading  = INTERNAL_YDSTOWS( dc, metrics->tmExternalLeading );
+        metrics->tmAveCharWidth     = INTERNAL_XDSTOWS( dc, metrics->tmAveCharWidth );
+        metrics->tmMaxCharWidth     = INTERNAL_XDSTOWS( dc, metrics->tmMaxCharWidth );
+        metrics->tmOverhang         = INTERNAL_XDSTOWS( dc, metrics->tmOverhang );
         ret = TRUE;
 
         TRACE("text metrics:\n"
@@ -5469,38 +5455,38 @@ UINT WINAPI NtGdiGetOutlineTextMetricsInternalW( HDC hdc, UINT cbData,
     {
         output->otmTextMetrics.tmDigitizedAspectX = NtGdiGetDeviceCaps(hdc, LOGPIXELSX);
         output->otmTextMetrics.tmDigitizedAspectY = NtGdiGetDeviceCaps(hdc, LOGPIXELSY);
-        output->otmTextMetrics.tmHeight           = height_to_LP( dc, output->otmTextMetrics.tmHeight );
-        output->otmTextMetrics.tmAscent           = height_to_LP( dc, output->otmTextMetrics.tmAscent );
-        output->otmTextMetrics.tmDescent          = height_to_LP( dc, output->otmTextMetrics.tmDescent );
-        output->otmTextMetrics.tmInternalLeading  = height_to_LP( dc, output->otmTextMetrics.tmInternalLeading );
-        output->otmTextMetrics.tmExternalLeading  = height_to_LP( dc, output->otmTextMetrics.tmExternalLeading );
-        output->otmTextMetrics.tmAveCharWidth     = width_to_LP( dc, output->otmTextMetrics.tmAveCharWidth );
-        output->otmTextMetrics.tmMaxCharWidth     = width_to_LP( dc, output->otmTextMetrics.tmMaxCharWidth );
-        output->otmTextMetrics.tmOverhang         = width_to_LP( dc, output->otmTextMetrics.tmOverhang );
-        output->otmAscent                = height_to_LP( dc, output->otmAscent);
-        output->otmDescent               = height_to_LP( dc, output->otmDescent);
+        output->otmTextMetrics.tmHeight           = INTERNAL_YDSTOWS( dc, output->otmTextMetrics.tmHeight );
+        output->otmTextMetrics.tmAscent           = INTERNAL_YDSTOWS( dc, output->otmTextMetrics.tmAscent );
+        output->otmTextMetrics.tmDescent          = INTERNAL_YDSTOWS( dc, output->otmTextMetrics.tmDescent );
+        output->otmTextMetrics.tmInternalLeading  = INTERNAL_YDSTOWS( dc, output->otmTextMetrics.tmInternalLeading );
+        output->otmTextMetrics.tmExternalLeading  = INTERNAL_YDSTOWS( dc, output->otmTextMetrics.tmExternalLeading );
+        output->otmTextMetrics.tmAveCharWidth     = INTERNAL_XDSTOWS( dc, output->otmTextMetrics.tmAveCharWidth );
+        output->otmTextMetrics.tmMaxCharWidth     = INTERNAL_XDSTOWS( dc, output->otmTextMetrics.tmMaxCharWidth );
+        output->otmTextMetrics.tmOverhang         = INTERNAL_XDSTOWS( dc, output->otmTextMetrics.tmOverhang );
+        output->otmAscent                = INTERNAL_YDSTOWS( dc, output->otmAscent);
+        output->otmDescent               = INTERNAL_YDSTOWS( dc, output->otmDescent);
         output->otmLineGap               = INTERNAL_YDSTOWS(dc, output->otmLineGap);
         output->otmsCapEmHeight          = INTERNAL_YDSTOWS(dc, output->otmsCapEmHeight);
         output->otmsXHeight              = INTERNAL_YDSTOWS(dc, output->otmsXHeight);
-        output->otmrcFontBox.top         = height_to_LP( dc, output->otmrcFontBox.top);
-        output->otmrcFontBox.bottom      = height_to_LP( dc, output->otmrcFontBox.bottom);
-        output->otmrcFontBox.left        = width_to_LP( dc, output->otmrcFontBox.left);
-        output->otmrcFontBox.right       = width_to_LP( dc, output->otmrcFontBox.right);
-        output->otmMacAscent             = height_to_LP( dc, output->otmMacAscent);
-        output->otmMacDescent            = height_to_LP( dc, output->otmMacDescent);
+        output->otmrcFontBox.top         = INTERNAL_YDSTOWS( dc, output->otmrcFontBox.top);
+        output->otmrcFontBox.bottom      = INTERNAL_YDSTOWS( dc, output->otmrcFontBox.bottom);
+        output->otmrcFontBox.left        = INTERNAL_XDSTOWS( dc, output->otmrcFontBox.left);
+        output->otmrcFontBox.right       = INTERNAL_XDSTOWS( dc, output->otmrcFontBox.right);
+        output->otmMacAscent             = INTERNAL_YDSTOWS( dc, output->otmMacAscent);
+        output->otmMacDescent            = INTERNAL_YDSTOWS( dc, output->otmMacDescent);
         output->otmMacLineGap            = INTERNAL_YDSTOWS(dc, output->otmMacLineGap);
-        output->otmptSubscriptSize.x     = width_to_LP( dc, output->otmptSubscriptSize.x);
-        output->otmptSubscriptSize.y     = height_to_LP( dc, output->otmptSubscriptSize.y);
-        output->otmptSubscriptOffset.x   = width_to_LP( dc, output->otmptSubscriptOffset.x);
-        output->otmptSubscriptOffset.y   = height_to_LP( dc, output->otmptSubscriptOffset.y);
-        output->otmptSuperscriptSize.x   = width_to_LP( dc, output->otmptSuperscriptSize.x);
-        output->otmptSuperscriptSize.y   = height_to_LP( dc, output->otmptSuperscriptSize.y);
-        output->otmptSuperscriptOffset.x = width_to_LP( dc, output->otmptSuperscriptOffset.x);
-        output->otmptSuperscriptOffset.y = height_to_LP( dc, output->otmptSuperscriptOffset.y);
+        output->otmptSubscriptSize.x     = INTERNAL_XDSTOWS( dc, output->otmptSubscriptSize.x);
+        output->otmptSubscriptSize.y     = INTERNAL_YDSTOWS( dc, output->otmptSubscriptSize.y);
+        output->otmptSubscriptOffset.x   = INTERNAL_XDSTOWS( dc, output->otmptSubscriptOffset.x);
+        output->otmptSubscriptOffset.y   = INTERNAL_YDSTOWS( dc, output->otmptSubscriptOffset.y);
+        output->otmptSuperscriptSize.x   = INTERNAL_XDSTOWS( dc, output->otmptSuperscriptSize.x);
+        output->otmptSuperscriptSize.y   = INTERNAL_YDSTOWS( dc, output->otmptSuperscriptSize.y);
+        output->otmptSuperscriptOffset.x = INTERNAL_XDSTOWS( dc, output->otmptSuperscriptOffset.x);
+        output->otmptSuperscriptOffset.y = INTERNAL_YDSTOWS( dc, output->otmptSuperscriptOffset.y);
         output->otmsStrikeoutSize        = INTERNAL_YDSTOWS(dc, output->otmsStrikeoutSize);
-        output->otmsStrikeoutPosition    = height_to_LP( dc, output->otmsStrikeoutPosition);
-        output->otmsUnderscoreSize       = height_to_LP( dc, output->otmsUnderscoreSize);
-        output->otmsUnderscorePosition   = height_to_LP( dc, output->otmsUnderscorePosition);
+        output->otmsStrikeoutPosition    = INTERNAL_YDSTOWS( dc, output->otmsStrikeoutPosition);
+        output->otmsUnderscoreSize       = INTERNAL_YDSTOWS( dc, output->otmsUnderscoreSize);
+        output->otmsUnderscorePosition   = INTERNAL_YDSTOWS( dc, output->otmsUnderscorePosition);
 
         if(output != lpOTM)
         {
@@ -5560,7 +5546,7 @@ BOOL WINAPI NtGdiGetCharWidthW( HDC hdc, UINT first, UINT last, WCHAR *chars,
             INT *buffer = buf;
             /* convert device units to logical */
             for (i = 0; i < count; i++)
-                buffer[i] = width_to_LP( dc, buffer[i] );
+                buffer[i] = INTERNAL_XDSTOWS( dc, buffer[i] );
         }
         else
         {
@@ -5859,7 +5845,7 @@ BOOL nulldrv_ExtTextOut( PHYSDEV dev, INT x, INT y, UINT flags, const RECT *rect
  */
 static inline int get_line_width( DC *dc, int metric_size )
 {
-    int width = abs( INTERNAL_YWSTODS( dc, metric_size ));
+    int width = abs( INTERNAL_XWSTODS( dc, metric_size ));
     if (width == 0) width = 1;
     if (metric_size < 0) width = -width;
     return width;
@@ -5989,12 +5975,6 @@ BOOL WINAPI NtGdiExtTextOutW( HDC hdc, INT x, INT y, UINT flags, const RECT *lpr
         goto done;
     }
 
-    pt.x = x;
-    pt.y = y;
-    lp_to_dp(dc, &pt, 1);
-    x = pt.x;
-    y = pt.y;
-
     char_extra = dc->attr->char_extra;
     if (char_extra && lpDx && NtGdiGetDeviceCaps( hdc, TECHNOLOGY ) == DT_RASPRINTER)
         char_extra = 0; /* Printer drivers don't add char_extra if lpDx is supplied */
@@ -6119,8 +6099,6 @@ BOOL WINAPI NtGdiExtTextOutW( HDC hdc, INT x, INT y, UINT flags, const RECT *lpr
         width = desired[1];
     }
 
-    tm.tmAscent = abs(INTERNAL_YWSTODS(dc, tm.tmAscent));
-    tm.tmDescent = abs(INTERNAL_YWSTODS(dc, tm.tmDescent));
     switch( align & (TA_LEFT | TA_RIGHT | TA_CENTER) )
     {
     case TA_LEFT:
@@ -6182,11 +6160,18 @@ BOOL WINAPI NtGdiExtTextOutW( HDC hdc, INT x, INT y, UINT flags, const RECT *lpr
                 text_box.bottom = y + tm.tmDescent;
 
                 if (flags & ETO_CLIPPED) intersect_rect( &text_box, &text_box, &rc );
+                lp_to_dp(dc, (POINT *)&text_box, 2);
                 if (!IsRectEmpty( &text_box ))
                     physdev->funcs->pExtTextOut( physdev, 0, 0, ETO_OPAQUE, &text_box, NULL, 0, NULL );
             }
         }
     }
+
+    pt.x = x;
+    pt.y = y;
+    lp_to_dp(dc, &pt, 1);
+    x = pt.x;
+    y = pt.y;
 
     ret = physdev->funcs->pExtTextOut( physdev, x, y, (flags & ~ETO_OPAQUE), &rc,
                                        str, count, (INT*)deltas );
@@ -6322,9 +6307,9 @@ BOOL WINAPI NtGdiGetCharABCWidthsW( HDC hdc, UINT first, UINT last, WCHAR *chars
             /* convert device units to logical */
             for (i = 0; i < count; i++)
             {
-                abc[i].abcA = width_to_LP( dc, abc[i].abcA );
-                abc[i].abcB = width_to_LP( dc, abc[i].abcB );
-                abc[i].abcC = width_to_LP( dc, abc[i].abcC );
+                abc[i].abcA = INTERNAL_XDSTOWS( dc, abc[i].abcA );
+                abc[i].abcB = INTERNAL_XDSTOWS( dc, abc[i].abcB );
+                abc[i].abcC = INTERNAL_XDSTOWS( dc, abc[i].abcC );
             }
         }
         else
@@ -6706,6 +6691,14 @@ static void update_external_font_keys(void)
         list_add_tail( &external_keys, &key->entry );
     }
 
+    LIST_FOR_EACH_ENTRY_SAFE( key, next, &external_keys, struct external_key, entry )
+    {
+        reg_delete_value( win9x_key, key->value );
+        reg_delete_value( winnt_key, key->value );
+        reg_delete_value( hkey, key->value );
+        list_remove( &key->entry );
+        free( key );
+    }
     WINE_RB_FOR_EACH_ENTRY( family, &family_name_tree, struct gdi_font_family, name_entry )
     {
         LIST_FOR_EACH_ENTRY( face, &family->faces, struct gdi_font_face, entry )
@@ -6731,14 +6724,6 @@ static void update_external_font_keys(void)
             set_reg_value( win9x_key, value, REG_SZ, file, len );
             set_reg_value( hkey, value, REG_SZ, file, len );
         }
-    }
-    LIST_FOR_EACH_ENTRY_SAFE( key, next, &external_keys, struct external_key, entry )
-    {
-        reg_delete_value( win9x_key, key->value );
-        reg_delete_value( winnt_key, key->value );
-        reg_delete_value( hkey, key->value );
-        list_remove( &key->entry );
-        free( key );
     }
     NtClose( win9x_key );
     NtClose( winnt_key );
@@ -6809,11 +6794,11 @@ static HKEY open_hkcu(void)
         return 0;
 
     sid = ((TOKEN_USER *)sid_data)->User.Sid;
-    len = sprintf( buffer, "\\Registry\\User\\S-%u-%u", (int)sid->Revision,
+    len = snprintf( buffer, sizeof(buffer), "\\Registry\\User\\S-%u-%u", (int)sid->Revision,
             (int)MAKELONG( MAKEWORD( sid->IdentifierAuthority.Value[5], sid->IdentifierAuthority.Value[4] ),
                            MAKEWORD( sid->IdentifierAuthority.Value[3], sid->IdentifierAuthority.Value[2] )));
     for (i = 0; i < sid->SubAuthorityCount; i++)
-        len += sprintf( buffer + len, "-%u", (int)sid->SubAuthority[i] );
+        len += snprintf( buffer + len, sizeof(buffer) - len, "-%u", (int)sid->SubAuthority[i] );
     ascii_to_unicode( bufferW, buffer, len + 1 );
 
     return reg_open_key( NULL, bufferW, len * sizeof(WCHAR) );
@@ -7113,8 +7098,8 @@ BOOL WINAPI NtGdiGetCharWidthInfo( HDC hdc, struct char_width_info *info )
 
     if (ret)
     {
-        info->lsb = width_to_LP( dc, info->lsb );
-        info->rsb = width_to_LP( dc, info->rsb );
+        info->lsb = INTERNAL_XDSTOWS( dc, info->lsb );
+        info->rsb = INTERNAL_XDSTOWS( dc, info->rsb );
     }
     release_dc_ptr(dc);
     return ret;
@@ -7126,9 +7111,10 @@ BOOL WINAPI NtGdiGetCharWidthInfo( HDC hdc, struct char_width_info *info )
 INT WINAPI DrawTextW( HDC hdc, const WCHAR *str, INT count, RECT *rect, UINT flags )
 {
     struct draw_text_params *params;
+    struct draw_text_result *result;
     ULONG ret_len, size;
-    void *ret_ptr;
-    int ret;
+    NTSTATUS status;
+    int ret = 0;
 
     if (count == -1) count = wcslen( str );
     size = FIELD_OFFSET( struct draw_text_params, str[count] );
@@ -7137,8 +7123,13 @@ INT WINAPI DrawTextW( HDC hdc, const WCHAR *str, INT count, RECT *rect, UINT fla
     params->rect = *rect;
     params->flags = flags;
     if (count) memcpy( params->str, str, count * sizeof(WCHAR) );
-    ret = KeUserModeCallback( NtUserDrawText, params, size, &ret_ptr, &ret_len );
-    if (ret_len == sizeof(*rect)) *rect = *(const RECT *)ret_ptr;
+
+    status = KeUserModeCallback( NtUserDrawText, params, size, (void **)&result, &ret_len );
+    if (!status && ret_len == sizeof(*result))
+    {
+        ret = result->height;
+        *rect = result->rect;
+    }
     free( params );
     return ret;
 }

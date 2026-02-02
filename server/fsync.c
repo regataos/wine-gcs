@@ -59,7 +59,7 @@ int do_fsync(void)
     if (do_fsync_cached == -1)
     {
         syscall( __NR_futex_waitv, 0, 0, 0, 0, 0);
-        do_fsync_cached = getenv("WINEFSYNC") && atoi(getenv("WINEFSYNC")) && errno != ENOSYS;
+        do_fsync_cached = getenv("WINEFSYNC") && atoi(getenv("WINEFSYNC")) && errno != ENOSYS && errno != EPERM && !use_inproc_sync();
     }
 
     return do_fsync_cached;
@@ -164,6 +164,7 @@ const struct object_ops fsync_ops =
     default_unlink_name,       /* unlink_name */
     no_open_file,              /* open_file */
     no_kernel_obj_list,        /* get_kernel_obj_list */
+    no_get_inproc_sync,        /* get_inproc_sync */
     no_close_handle,           /* close_handle */
     fsync_destroy              /* destroy */
 };

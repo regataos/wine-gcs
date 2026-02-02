@@ -583,7 +583,7 @@ static NTSTATUS v4l_device_start( void *args )
     if (xioctl(device->fd, VIDIOC_S_FMT, &device->device_format) == -1)
     {
         ERR("Failed to set pixel format: %s.\n", strerror(errno));
-        return E_FAIL;
+        return errno == EBUSY ? HRESULT_FROM_WIN32(ERROR_NO_SYSTEM_RESOURCES) : VFW_E_TYPE_NOT_ACCEPTED;
     }
     device->started = TRUE;
     return S_OK;

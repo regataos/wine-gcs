@@ -16,24 +16,24 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#ifndef __WINE_SHERRORS_H
-#define __WINE_SHERRORS_H
+#ifndef _SHERROR_
+#define _SHERROR_
 
 #include <winerror.h>
 
-#define COPYENGINE_S_YES                   _HRESULT_TYPEDEF_(0x270001)
-#define COPYENGINE_S_NOT_HANDLED           _HRESULT_TYPEDEF_(0x270003)
-#define COPYENGINE_S_USER_RETRY            _HRESULT_TYPEDEF_(0x270004)
-#define COPYENGINE_S_USER_IGNORED          _HRESULT_TYPEDEF_(0x270005)
-#define COPYENGINE_S_MERGE                 _HRESULT_TYPEDEF_(0x270006)
-#define COPYENGINE_S_DONT_PROCESS_CHILDREN _HRESULT_TYPEDEF_(0x270008)
-#define COPYENGINE_S_ALREADY_DONE          _HRESULT_TYPEDEF_(0x27000a)
-#define COPYENGINE_S_PENDING               _HRESULT_TYPEDEF_(0x27000b)
-#define COPYENGINE_S_KEEP_BOTH             _HRESULT_TYPEDEF_(0x27000c)
-#define COPYENGINE_S_CLOSE_PROGRAM         _HRESULT_TYPEDEF_(0x27000d)
-#define COPYENGINE_S_COLLISIONRESOLVED     _HRESULT_TYPEDEF_(0x27000e)
-#define COPYENGINE_S_PROGRESS_PAUSE        _HRESULT_TYPEDEF_(0x27000f)
-#define COPYENGINE_S_PENDING_DELETE        _HRESULT_TYPEDEF_(0x270010)
+#define COPYENGINE_S_YES                                          _HRESULT_TYPEDEF_(0x270001)
+#define COPYENGINE_S_NOT_HANDLED                                  _HRESULT_TYPEDEF_(0x270003)
+#define COPYENGINE_S_USER_RETRY                                   _HRESULT_TYPEDEF_(0x270004)
+#define COPYENGINE_S_USER_IGNORED                                 _HRESULT_TYPEDEF_(0x270005)
+#define COPYENGINE_S_MERGE                                        _HRESULT_TYPEDEF_(0x270006)
+#define COPYENGINE_S_DONT_PROCESS_CHILDREN                        _HRESULT_TYPEDEF_(0x270008)
+#define COPYENGINE_S_ALREADY_DONE                                 _HRESULT_TYPEDEF_(0x27000a)
+#define COPYENGINE_S_PENDING                                      _HRESULT_TYPEDEF_(0x27000b)
+#define COPYENGINE_S_KEEP_BOTH                                    _HRESULT_TYPEDEF_(0x27000c)
+#define COPYENGINE_S_CLOSE_PROGRAM                                _HRESULT_TYPEDEF_(0x27000d)
+#define COPYENGINE_S_COLLISIONRESOLVED                            _HRESULT_TYPEDEF_(0x27000e)
+#define COPYENGINE_S_PROGRESS_PAUSE                               _HRESULT_TYPEDEF_(0x27000f)
+#define COPYENGINE_S_PENDING_DELETE                               _HRESULT_TYPEDEF_(0x270010)
 
 #define COPYENGINE_E_USER_CANCELLED                               _HRESULT_TYPEDEF_(0x80270000)
 #define COPYENGINE_E_CANCELLED                                    _HRESULT_TYPEDEF_(0x80270001)

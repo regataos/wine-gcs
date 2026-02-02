@@ -637,6 +637,10 @@ static HRESULT build_systeminfo_tree(IDxDiagContainerImpl_Container *node)
     if (FAILED(hr))
         return hr;
 
+    hr = add_bool_property(node, L"bIsD3DDebugRuntime", FALSE);
+    if (FAILED(hr))
+        return hr;
+
     hr = add_bool_property(node, L"bNECPC98", FALSE);
     if (FAILED(hr))
         return hr;
@@ -1000,6 +1004,18 @@ static HRESULT fill_display_information_d3d(IDxDiagContainerImpl_Container *node
         if (FAILED(hr))
             goto cleanup;
 
+        hr = add_bool_property(display_adapter, L"bAGPEnabled", hardware_accel);
+        if (FAILED(hr))
+            goto cleanup;
+
+        hr = add_bool_property(display_adapter, L"bAGPExistenceValid", hardware_accel);
+        if (FAILED(hr))
+            goto cleanup;
+
+        hr = add_bool_property(display_adapter, L"bAGPExists", hardware_accel);
+        if (FAILED(hr))
+            goto cleanup;
+
         hr = add_bool_property(display_adapter, L"bDDAccelerationEnabled", hardware_accel);
         if (FAILED(hr))
             goto cleanup;
@@ -1299,7 +1315,7 @@ BOOL CALLBACK dsound_enum(LPGUID guid, LPCWSTR desc, LPCWSTR module, LPVOID cont
         {
             mmdev = NULL;
             ps = NULL;
-            hr = IMMDeviceCollection_Item(enum_ctx->devices, i, &mmdev);;
+            hr = IMMDeviceCollection_Item(enum_ctx->devices, i, &mmdev);
             if (SUCCEEDED(hr))
                 hr = IMMDevice_OpenPropertyStore(mmdev, STGM_READ, &ps);
             PropVariantInit(&pv);

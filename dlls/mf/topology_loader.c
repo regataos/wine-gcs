@@ -335,11 +335,13 @@ static HRESULT topology_branch_connect_indirect(IMFTopology *topology, MF_CONNEC
             IMFTopologyNode_SetGUID(node, &MF_TOPONODE_TRANSFORM_OBJECTID, &guid);
 
         hr = topology_branch_connect_down(topology, MF_CONNECT_DIRECT, &up_branch, up_type);
-        if (down_type)
+        if (down_type && SUCCEEDED(MFCreateMediaType(&media_type)))
         {
-            if (SUCCEEDED(update_media_type_from_upstream(down_type, up_type))
-                    && SUCCEEDED(IMFTransform_SetOutputType(transform, 0, down_type, 0)))
+            if (SUCCEEDED(IMFMediaType_CopyAllItems(down_type, (IMFAttributes *)media_type))
+                    && SUCCEEDED(update_media_type_from_upstream(media_type, up_type))
+                    && SUCCEEDED(IMFTransform_SetOutputType(transform, 0, media_type, 0)))
                 method = MF_CONNECT_DIRECT;
+            IMFMediaType_Release(media_type);
         }
         IMFTransform_Release(transform);
 
@@ -806,6 +808,7 @@ static HRESULT WINAPI topology_loader_Load(IMFTopoLoader *iface, IMFTopology *in
     unsigned short i = 0;
     IMFStreamSink *sink;
     IUnknown *object;
+    TOPOID topoid;
     HRESULT hr = E_FAIL;
 
     FIXME("iface %p, input_topology %p, ret_topology %p, current_topology %p stub!\n",
@@ -848,7 +851,8 @@ static HRESULT WINAPI topology_loader_Load(IMFTopoLoader *iface, IMFTopology *in
             return hr;
     }
 
-    if (FAILED(hr = MFCreateTopology(&output_topology)))
+    IMFTopology_GetTopologyID(input_topology, &topoid);
+    if (FAILED(hr = create_topology(topoid, &output_topology)))
         return hr;
 
     IMFTopology_CopyAllItems(input_topology, (IMFAttributes *)output_topology);

@@ -48,7 +48,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(exec);
 
 typedef UINT_PTR (*SHELL_ExecuteW32)(const WCHAR *lpCmd, WCHAR *env, BOOL shWait,
 			    const SHELLEXECUTEINFOW *sei, LPSHELLEXECUTEINFOW sei_out);
-extern BOOL WINAPI PathResolveAW(void *path, const void **paths, DWORD flags);
+extern BOOL WINAPI PathResolveW(void *path, const WCHAR **paths, DWORD flags);
 extern BOOL WINAPI PathFileExistsDefExtW(LPWSTR lpszPath,DWORD dwWhich);
 
 static inline BOOL isSpace(WCHAR c)
@@ -295,6 +295,21 @@ static HRESULT SHELL_GetPathFromIDListForExecuteW(LPCITEMIDLIST pidl, LPWSTR psz
     return hr;
 }
 
+static HANDLE get_admin_token(void)
+{
+    TOKEN_ELEVATION_TYPE type;
+    TOKEN_LINKED_TOKEN linked;
+    DWORD size;
+
+    if (!GetTokenInformation(GetCurrentThreadEffectiveToken(), TokenElevationType, &type, sizeof(type), &size)
+            || type == TokenElevationTypeFull)
+        return NULL;
+
+    if (!GetTokenInformation(GetCurrentThreadEffectiveToken(), TokenLinkedToken, &linked, sizeof(linked), &size))
+        return NULL;
+    return linked.LinkedToken;
+}
+
 /*************************************************************************
  *	SHELL_ExecuteW [Internal]
  *
@@ -308,6 +323,7 @@ static UINT_PTR SHELL_ExecuteW(const WCHAR *lpCmd, WCHAR *env, BOOL shWait,
     UINT gcdret = 0;
     WCHAR curdir[MAX_PATH];
     DWORD dwCreationFlags;
+    HANDLE token = NULL;
 
     TRACE("Execute %s from directory %s\n", debugstr_w(lpCmd), debugstr_w(psei->lpDirectory));
 
@@ -329,8 +345,12 @@ static UINT_PTR SHELL_ExecuteW(const WCHAR *lpCmd, WCHAR *env, BOOL shWait,
     dwCreationFlags = CREATE_UNICODE_ENVIRONMENT;
     if (!(psei->fMask & SEE_MASK_NO_CONSOLE))
         dwCreationFlags |= CREATE_NEW_CONSOLE;
-    if (CreateProcessW(NULL, (LPWSTR)lpCmd, NULL, NULL, FALSE, dwCreationFlags, env,
-                       NULL, &startup, &info))
+
+    if (psei->lpVerb && !wcsicmp(psei->lpVerb, L"runas"))
+        token = get_admin_token();
+
+    if (CreateProcessAsUserW(token, NULL, (LPWSTR)lpCmd, NULL, NULL, FALSE,
+            dwCreationFlags, env, NULL, &startup, &info))
     {
         /* Give 30 seconds to the app to come up, if desired. Probably only needed
            when starting app immediately before making a DDE connection. */
@@ -349,6 +369,8 @@ static UINT_PTR SHELL_ExecuteW(const WCHAR *lpCmd, WCHAR *env, BOOL shWait,
         TRACE("CreateProcess returned error %Id\n", retval);
         retval = ERROR_BAD_FORMAT;
     }
+
+    CloseHandle(token);
 
     TRACE("returning %Iu\n", retval);
 
@@ -614,7 +636,7 @@ static UINT SHELL_FindExecutable(LPCWSTR lpPath, LPCWSTR lpFile, LPCWSTR lpVerb,
         {
             TRACE("ASDF %s\n", debugstr_w(lpPath));
             PathCombineW(xlpFile, lpPath, lpFile);
-            if (PathFileExistsDefExtW(xlpFile, 0xbf))
+            if (PathFileExistsDefExtW(xlpFile, 0xbf) || PathFileExistsW(xlpFile))
             {
                 GetFullPathNameW(xlpFile, ARRAY_SIZE(xlpFile), xlpFile, NULL);
                 found = TRUE;
@@ -622,8 +644,10 @@ static UINT SHELL_FindExecutable(LPCWSTR lpPath, LPCWSTR lpFile, LPCWSTR lpVerb,
         }
         if (!found)
         {
-            lstrcpyW(xlpFile, lpFile);
-            if (PathFileExistsDefExtW(xlpFile, 0xbf))
+            if (wcsncpy_s(xlpFile, ARRAY_SIZE(xlpFile), lpFile, _TRUNCATE))
+                return ERROR_FILE_NOT_FOUND;
+
+            if (PathFileExistsDefExtW(xlpFile, 0xbf) || PathFileExistsW(xlpFile))
             {
                 GetFullPathNameW(xlpFile, ARRAY_SIZE(xlpFile), xlpFile, NULL);
                 found = TRUE;
@@ -632,7 +656,8 @@ static UINT SHELL_FindExecutable(LPCWSTR lpPath, LPCWSTR lpFile, LPCWSTR lpVerb,
         if (found)
         {
             lpFile = xlpFile;
-            lstrcpyW(lpResult, xlpFile);
+            if (wcsncpy_s(lpResult, resultLen, xlpFile, _TRUNCATE))
+                return ERROR_FILE_NOT_FOUND;
         }
         else
             xlpFile[0] = '\0';
@@ -646,12 +671,17 @@ static UINT SHELL_FindExecutable(LPCWSTR lpPath, LPCWSTR lpFile, LPCWSTR lpVerb,
         }
         else
             search_paths[0] = curdir;
-        lstrcpyW(xlpFile, lpFile);
-        if (PathResolveAW(xlpFile, (const void **)search_paths, PRF_TRYPROGRAMEXTENSIONS | PRF_VERIFYEXISTS))
+
+        if (wcsncpy_s(xlpFile, ARRAY_SIZE(xlpFile), lpFile, _TRUNCATE))
+            return ERROR_FILE_NOT_FOUND;
+
+        if (PathResolveW(xlpFile, search_paths, PRF_TRYPROGRAMEXTENSIONS | PRF_VERIFYEXISTS) ||
+            PathFindOnPathW(xlpFile, search_paths))
         {
             TRACE("PathResolveAW returned non-zero\n");
             lpFile = xlpFile;
-            lstrcpyW(lpResult, xlpFile);
+            if (wcsncpy_s(lpResult, resultLen, xlpFile, _TRUNCATE))
+                return ERROR_FILE_NOT_FOUND;
             /* The file was found in lpPath or one of the directories in the system-wide search path */
         }
         else
@@ -777,16 +807,20 @@ static UINT SHELL_FindExecutable(LPCWSTR lpPath, LPCWSTR lpFile, LPCWSTR lpVerb,
         {
             if (*command)
             {
-                lstrcpyW(lpResult, command);
+                if (wcsncpy_s(lpResult, resultLen, command, _TRUNCATE))
+                    return ERROR_FILE_NOT_FOUND;
                 tok = wcschr(lpResult, '^'); /* should be ^.extension? */
                 if (tok != NULL)
                 {
                     tok[0] = '\0';
-                    lstrcatW(lpResult, xlpFile); /* what if no dir in xlpFile? */
+                    /* what if no dir in xlpFile? */
+                    if (wcscat_s(lpResult, resultLen, xlpFile))
+                        return ERROR_FILE_NOT_FOUND;
                     tok = wcschr(command, '^'); /* see above */
                     if ((tok != NULL) && (lstrlenW(tok)>5))
                     {
-                        lstrcatW(lpResult, &tok[5]);
+                        if (wcscat_s(lpResult, resultLen, &tok[5]))
+                            return ERROR_FILE_NOT_FOUND;
                     }
                 }
                 retval = 33; /* FIXME - see above */
@@ -1523,7 +1557,7 @@ static UINT_PTR SHELL_quote_and_execute( LPCWSTR wcmd, LPCWSTR wszParameters, LP
         lstrcatW(wszQuotedCmd, L" ");
         lstrcatW(wszQuotedCmd, wszParameters);
     }
-    TRACE("%s/%s => %s/%s\n", debugstr_w(wszApplicationName), debugstr_w(psei->lpVerb), debugstr_w(wszQuotedCmd), debugstr_w(wszKeyname));
+    TRACE("app %s verb %s => cmd %s key %s\n", debugstr_w(wszApplicationName), debugstr_w(psei->lpVerb), debugstr_w(wszQuotedCmd), debugstr_w(wszKeyname));
     if (*wszKeyname)
         retval = execute_from_key(wszKeyname, wszApplicationName, env, psei->lpParameters, wcmd, execfunc, psei, psei_out);
     else
@@ -1648,10 +1682,13 @@ static BOOL SHELL_execute( LPSHELLEXECUTEINFOW sei, SHELL_ExecuteW32 execfunc )
             wszApplicationName[len-2] = '\0';
         TRACE("wszApplicationName=%s\n",debugstr_w(wszApplicationName));
     } else {
-        DWORD l = lstrlenW(sei_tmp.lpFile)+1;
-        if(l > dwApplicationNameLen) dwApplicationNameLen = l+1;
-        wszApplicationName = malloc(dwApplicationNameLen * sizeof(WCHAR));
-        memcpy(wszApplicationName, sei_tmp.lpFile, l*sizeof(WCHAR));
+        /* remove trailing spaces */
+        WCHAR *buf = wcsdup(sei->lpFile), *end = buf + wcslen( buf ) - 1;
+        while (end >= buf && *end == ' ') *end-- = 0;
+
+        len = lstrlenW(buf)+1;
+        if(len > dwApplicationNameLen) dwApplicationNameLen = len+1;
+        wszApplicationName = buf;
     }
 
     wszParameters = parametersBuffer;

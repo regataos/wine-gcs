@@ -50,8 +50,8 @@ static HDC (WINAPI *pGetBufferedPaintTargetDC)(HPAINTBUFFER);
 static HRESULT (WINAPI *pGetBufferedPaintTargetRect)(HPAINTBUFFER, RECT *);
 static HRESULT (WINAPI *pGetThemeIntList)(HTHEME, int, int, int, INTLIST *);
 static HRESULT (WINAPI *pGetThemeTransitionDuration)(HTHEME, int, int, int, int, DWORD *);
-static BOOL (WINAPI *pShouldSystemUseDarkMode)(void);
-static BOOL (WINAPI *pShouldAppsUseDarkMode)(void);
+static BOOLEAN (WINAPI *pShouldSystemUseDarkMode)(void);
+static BOOLEAN (WINAPI *pShouldAppsUseDarkMode)(void);
 
 static LONG (WINAPI *pDisplayConfigGetDeviceInfo)(DISPLAYCONFIG_DEVICE_INFO_HEADER *);
 static LONG (WINAPI *pDisplayConfigSetDeviceInfo)(DISPLAYCONFIG_DEVICE_INFO_HEADER *);
@@ -2710,7 +2710,7 @@ static void test_theme(BOOL v6)
 static void test_ShouldSystemUseDarkMode(void)
 {
     DWORD light_theme, light_theme_size = sizeof(light_theme), last_error;
-    BOOL result;
+    BOOLEAN result;
     LSTATUS ls;
 
     if (!pShouldSystemUseDarkMode)
@@ -2739,7 +2739,7 @@ static void test_ShouldSystemUseDarkMode(void)
 static void test_ShouldAppsUseDarkMode(void)
 {
     DWORD light_theme, light_theme_size = sizeof(light_theme), last_error;
-    BOOL result;
+    BOOLEAN result;
     LSTATUS ls;
 
     if (!pShouldAppsUseDarkMode)
@@ -2763,6 +2763,38 @@ static void test_ShouldAppsUseDarkMode(void)
     last_error = GetLastError();
     ok(last_error == 0xdeadbeef, "ShouldAppsUseDarkMode set last error: %ld.\n", last_error);
     ok(result == !light_theme, "Expected value %d, got %d\n", !light_theme, result);
+}
+
+static void test_DrawThemeEdge(void)
+{
+    HTHEME htheme;
+    HRESULT hr;
+    HWND hwnd;
+    RECT rect;
+    HDC hdc;
+
+    hwnd = CreateWindowA(WC_STATICA, "", WS_POPUP, 0, 0, 1, 1, 0, 0, 0, NULL);
+    ok(hwnd != NULL, "CreateWindowA failed, error %#lx.\n", GetLastError());
+    htheme = OpenThemeData(hwnd, L"Button");
+    if (!htheme)
+    {
+        skip("Theming is inactive.\n");
+        DestroyWindow(hwnd);
+        return;
+    }
+
+    hdc = GetDC(hwnd);
+
+    /* Test BF_ADJUST with NULL content rect pointer */
+    hr = DrawThemeEdge(htheme, hdc, BP_PUSHBUTTON, PBS_NORMAL, &rect, BF_ADJUST, BF_RIGHT, NULL);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+    hr = DrawThemeEdge(htheme, hdc, BP_PUSHBUTTON, PBS_NORMAL, &rect, BF_DIAGONAL | BF_ADJUST, BF_RIGHT, NULL);
+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+
+    ReleaseDC(hwnd, hdc);
+    CloseThemeData(htheme);
+    DestroyWindow(hwnd);
 }
 
 START_TEST(system)
@@ -2793,6 +2825,7 @@ START_TEST(system)
     test_theme(FALSE);
     test_ShouldSystemUseDarkMode();
     test_ShouldAppsUseDarkMode();
+    test_DrawThemeEdge();
 
     if (load_v6_module(&ctx_cookie, &ctx))
     {

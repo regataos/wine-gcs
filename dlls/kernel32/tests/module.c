@@ -44,9 +44,13 @@ static NTSTATUS (WINAPI *pLdrSetDllDirectory)(UNICODE_STRING*);
 static NTSTATUS (WINAPI *pLdrGetDllHandle)( LPCWSTR load_path, ULONG flags, const UNICODE_STRING *name, HMODULE *base );
 static NTSTATUS (WINAPI *pLdrGetDllHandleEx)( ULONG flags, LPCWSTR load_path, ULONG *dll_characteristics,
                                               const UNICODE_STRING *name, HMODULE *base );
+static NTSTATUS (WINAPI *pLdrGetDllPath)(LPCWSTR,ULONG,LPWSTR*,LPWSTR*);
+static NTSTATUS (WINAPI *pLdrLoadDll)(LPCWSTR,DWORD *,const UNICODE_STRING *,HMODULE*);
 static NTSTATUS (WINAPI *pLdrGetDllFullName)( HMODULE module, UNICODE_STRING *name );
 
 static BOOL (WINAPI *pIsApiSetImplemented)(LPCSTR);
+
+static NTSTATUS (WINAPI *pRtlHashUnicodeString)( const UNICODE_STRING *, BOOLEAN, ULONG, ULONG * );
 
 static BOOL is_unicode_enabled = TRUE;
 
@@ -517,9 +521,13 @@ static void test_LoadLibraryEx_search_flags(void)
         { { 1, 1, 2 }, 0, 2 },
     };
     char *p, path[MAX_PATH], buf[MAX_PATH], curdir[MAX_PATH];
-    WCHAR bufW[MAX_PATH];
+    WCHAR bufW[MAX_PATH], pathW[MAX_PATH];
     DLL_DIRECTORY_COOKIE cookies[4];
+    WCHAR *load_path, *dummy;
     unsigned int i, j, k;
+    UNICODE_STRING name;
+    DWORD load_flags;
+    NTSTATUS status;
     BOOL ret;
     HMODULE mod;
 
@@ -548,6 +556,12 @@ static void test_LoadLibraryEx_search_flags(void)
     ok( mod != NULL, "LoadLibrary failed err %lu\n", GetLastError() );
     FreeLibrary( mod );
 
+    RtlInitUnicodeString( &name, L"1\\winetestdll.dll" );
+    status = pLdrLoadDll( NULL, NULL, &name, &mod );
+    ok( !status, "got %#lx.\n", status );
+    ok( !!mod, "got NULL.\n" );
+    FreeLibrary( mod );
+
     SetLastError( 0xdeadbeef );
     sprintf( path, "%c:1\\winetestdll.dll", buf[0] );
     mod = LoadLibraryA( path );
@@ -561,9 +575,45 @@ static void test_LoadLibraryEx_search_flags(void)
         ok( !mod, "LoadLibrary succeeded\n" );
         ok( GetLastError() == ERROR_MOD_NOT_FOUND, "wrong error %lu\n", GetLastError() );
 
+        RtlInitUnicodeString( &name, L"1\\winetestdll.dll" );
+        mod = (void *)0xdeadbeef;
+        status = pLdrLoadDll( (void *)(ULONG_PTR)(LOAD_LIBRARY_SEARCH_SYSTEM32 | 1), NULL, &name, &mod );
+        ok( status == STATUS_DLL_NOT_FOUND, "got %#lx.\n", status );
+        ok( mod == (HMODULE)0xdeadbeef, "got %p.\n", mod );
+
+        load_flags = LOAD_LIBRARY_SEARCH_SYSTEM32;
+        mod = (void *)0xdeadbeef;
+        if (0)
+        {
+            /* crashes on Windows. */
+            pLdrLoadDll( NULL, (void *)(ULONG_PTR)load_flags, &name, &mod );
+        }
+        status = pLdrLoadDll( NULL, &load_flags, &name, &mod );
+        ok( !status, "got %#lx.\n", status );
+        FreeLibrary( mod );
+
+        status = pLdrGetDllPath( name.Buffer, LOAD_LIBRARY_SEARCH_SYSTEM32, &load_path, &dummy );
+        ok( !status, "got %#lx.\n", status );
+        mod = (void *)0xdeadbeef;
+        status = pLdrLoadDll( load_path, NULL, &name, &mod );
+        ok( status == STATUS_DLL_NOT_FOUND, "got %#lx.\n", status );
+        ok( mod == (HMODULE)0xdeadbeef, "got %p.\n", mod );
+        RtlReleasePath( load_path );
+
+        mod = (void *)0xdeadbeef;
+        status = pLdrLoadDll( L".", NULL, &name, &mod );
+        ok( !status, "got %#lx.\n", status );
+        FreeLibrary( mod );
+
         SetLastError( 0xdeadbeef );
         mod = LoadLibraryExA( path, 0, LOAD_LIBRARY_SEARCH_SYSTEM32 );
         ok( mod != NULL, "LoadLibrary failed err %lu\n", GetLastError() );
+        FreeLibrary( mod );
+
+        MultiByteToWideChar( CP_ACP, 0, path, -1, pathW, ARRAY_SIZE(pathW) );
+        RtlInitUnicodeString( &name, pathW );
+        status = pLdrLoadDll( (void *)(LOAD_LIBRARY_SEARCH_SYSTEM32 | 1), NULL, &name, &mod );
+        ok( !status, "got %#lx.\n", status );
         FreeLibrary( mod );
     }
 
@@ -611,6 +661,12 @@ static void test_LoadLibraryEx_search_flags(void)
         mod = LoadLibraryExA( "winetestdll.dll", 0, LOAD_LIBRARY_SEARCH_APPLICATION_DIR | LOAD_WITH_ALTERED_SEARCH_PATH );
         ok( !mod, "LoadLibrary succeeded\n" );
         ok( GetLastError() == ERROR_INVALID_PARAMETER, "wrong error %lu\n", GetLastError() );
+
+        RtlInitUnicodeString( &name, L"winetestdll.dll" );
+        mod = (void *)0xdeadbeef;
+        status = pLdrLoadDll( (void *)(LOAD_LIBRARY_SEARCH_SYSTEM32 | LOAD_WITH_ALTERED_SEARCH_PATH | 1), NULL, &name, &mod );
+        ok( status == STATUS_INVALID_PARAMETER, "got %#lx.\n", status );
+        ok( mod == (HMODULE)0xdeadbeef, "got %p.\n", mod );
 
         SetLastError( 0xdeadbeef );
         mod = LoadLibraryExA( "winetestdll.dll", 0, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_WITH_ALTERED_SEARCH_PATH );
@@ -671,6 +727,12 @@ static void test_LoadLibraryEx_search_flags(void)
     ok( !mod, "LoadLibrary succeeded\n" );
     ok( GetLastError() == ERROR_INVALID_PARAMETER, "wrong error %lu\n", GetLastError() );
 
+    RtlInitUnicodeString( &name, L"foo\\winetestdll.dll" );
+    mod = (void *)0xdeadbeef;
+    status = pLdrLoadDll( (void *)(LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | 1), NULL, &name, &mod );
+    ok( status == STATUS_INVALID_PARAMETER, "got %#lx.\n", status );
+    ok( mod == (HMODULE)0xdeadbeef, "got %p.\n", mod );
+
     SetLastError( 0xdeadbeef );
     mod = LoadLibraryExA( "\\windows\\winetestdll.dll", 0, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR );
     ok( !mod, "LoadLibrary succeeded\n" );
@@ -711,6 +773,37 @@ static void test_LoadLibraryEx_search_flags(void)
             ok( !mod, "%u: LoadLibrary succeeded\n", j );
             ok( GetLastError() == ERROR_MOD_NOT_FOUND || broken(GetLastError() == ERROR_NOT_ENOUGH_MEMORY),
                 "%u: wrong error %lu\n", j, GetLastError() );
+        }
+        FreeLibrary( mod );
+
+        mod = LoadLibraryExA( "winetestdll.dll", 0, LOAD_LIBRARY_SEARCH_USER_DIRS );
+        if (tests[j].expect)
+        {
+            ok( mod != NULL, "%u: LoadLibrary failed err %lu\n", j, GetLastError() );
+            GetModuleFileNameA( mod, path, MAX_PATH );
+            sprintf( p, "\\%u\\winetestdll.dll", tests[j].expect );
+            ok( !lstrcmpiA( path, buf ), "%u: wrong module %s expected %s\n", j, path, buf );
+        }
+        else
+        {
+            ok( !mod, "%u: LoadLibrary succeeded\n", j );
+            ok( GetLastError() == ERROR_MOD_NOT_FOUND || broken(GetLastError() == ERROR_NOT_ENOUGH_MEMORY),
+                "%u: wrong error %lu\n", j, GetLastError() );
+        }
+        FreeLibrary( mod );
+
+        mod = NULL;
+        RtlInitUnicodeString( &name, L"winetestdll.dll" );
+        status = pLdrLoadDll( (void *)(ULONG_PTR)(LOAD_LIBRARY_SEARCH_USER_DIRS | 1), NULL, &name, &mod );
+        if (tests[j].expect)
+        {
+            ok( !status, "got %#lx.\n", status );
+            ok( !!mod, "got NULL.\n" );
+        }
+        else
+        {
+            ok( status == STATUS_DLL_NOT_FOUND, "got %#lx.\n", status );
+            ok( !mod, "got %p.\n", mod );
         }
         FreeLibrary( mod );
 
@@ -966,7 +1059,10 @@ static void init_pointers(void)
     MAKEFUNC(LdrSetDllDirectory);
     MAKEFUNC(LdrGetDllHandle);
     MAKEFUNC(LdrGetDllHandleEx);
+    MAKEFUNC(LdrGetDllPath);
+    MAKEFUNC(LdrLoadDll);
     MAKEFUNC(LdrGetDllFullName);
+    MAKEFUNC(RtlHashUnicodeString);
     mod = GetModuleHandleA( "kernelbase.dll" );
     MAKEFUNC(IsApiSetImplemented);
 #undef MAKEFUNC
@@ -1345,8 +1441,10 @@ static void test_LdrGetDllHandleEx(void)
 {
     HMODULE mod, loaded_mod;
     UNICODE_STRING name;
+    WCHAR path[MAX_PATH];
     NTSTATUS status;
     unsigned int i;
+    BOOL bret;
 
     if (!pLdrGetDllHandleEx)
     {
@@ -1420,6 +1518,40 @@ static void test_LdrGetDllHandleEx(void)
     winetest_push_context( "LDR_GET_DLL_HANDLE_EX_FLAG_PIN" );
     check_refcount( loaded_mod, ~0u );
     winetest_pop_context();
+
+    GetCurrentDirectoryW( ARRAY_SIZE(path), path );
+    if (pAddDllDirectory) pAddDllDirectory( path );
+    create_test_dll( "d01.dll" );
+    mod = LoadLibraryA( "d01.dll" );
+    ok( !!mod, "got error %lu.\n", GetLastError() );
+    RtlInitUnicodeString( &name, L"d01.dll" );
+    status = pLdrGetDllHandleEx( LDR_GET_DLL_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, NULL, NULL, &name, &loaded_mod );
+    ok( !status, "got %#lx.\n", status );
+
+    RtlInitUnicodeString( &name, L"d02.dll" );
+    status = pLdrGetDllHandleEx( LDR_GET_DLL_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, NULL, NULL, &name, &loaded_mod );
+    ok( status == STATUS_DLL_NOT_FOUND, "got %#lx.\n", status );
+
+    /* Same (moved) file, different name: not found in loaded modules with short name but found with path. */
+    DeleteFileA( "d02.dll" );
+    bret = MoveFileA( "d01.dll", "d02.dll" );
+    ok( bret, "got error %lu.\n", GetLastError() );
+    status = pLdrGetDllHandleEx( LDR_GET_DLL_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, NULL, NULL, &name, &loaded_mod );
+    ok( status == STATUS_DLL_NOT_FOUND, "got %#lx.\n", status );
+    CreateDirectoryA( "testdir", NULL );
+    DeleteFileA( "testdir\\d02.dll" );
+    bret = MoveFileA( "d02.dll", "testdir\\d02.dll" );
+    ok( bret, "got error %lu.\n", GetLastError() );
+    RtlInitUnicodeString( &name, L"testdir\\d02.dll" );
+    status = pLdrGetDllHandleEx( LDR_GET_DLL_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, NULL, NULL, &name, &loaded_mod );
+    ok( !status, "got %#lx.\n", status );
+    ok( loaded_mod == mod, "got %p, %p.\n", loaded_mod, mod );
+    FreeLibrary( mod );
+    status = pLdrGetDllHandleEx( LDR_GET_DLL_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, NULL, NULL, &name, &loaded_mod );
+    ok( status == STATUS_DLL_NOT_FOUND, "got %#lx.\n", status );
+
+    DeleteFileA( "testdir\\d02.dll" );
+    RemoveDirectoryA( "testdir" );
 }
 
 static void test_LdrGetDllFullName(void)
@@ -1669,145 +1801,6 @@ static void test_tls_links(void)
     TEB *teb = NtCurrentTeb(), *thread_teb;
     THREAD_BASIC_INFORMATION tbi;
     NTSTATUS status;
-    HANDLE thread;
-
-    ok(!!teb->ThreadLocalStoragePointer, "got NULL.\n");
-
-    test_tls_links_started = CreateEventW(NULL, FALSE, FALSE, NULL);
-    test_tls_links_done = CreateEventW(NULL, FALSE, FALSE, NULL);
-
-    thread = CreateThread(NULL, 0, test_tls_links_thread, NULL, CREATE_SUSPENDED, NULL);
-    do
-    {
-        /* workaround currently present Wine bug when thread teb may be not available immediately
-         * after creating a thread before it is initialized on the Unix side. */
-        Sleep(1);
-        status = NtQueryInformationThread(thread, ThreadBasicInformation, &tbi, sizeof(tbi), NULL);
-        ok(!status, "got %#lx.\n", status );
-    } while (!(thread_teb = tbi.TebBaseAddress));
-    ok(!thread_teb->ThreadLocalStoragePointer, "got %p.\n", thread_teb->ThreadLocalStoragePointer);
-    ResumeThread(thread);
-    WaitForSingleObject(test_tls_links_started, INFINITE);
-
-    ok(!!thread_teb->ThreadLocalStoragePointer, "got NULL.\n");
-    ok(!teb->TlsLinks.Flink, "got %p.\n", teb->TlsLinks.Flink);
-    ok(!teb->TlsLinks.Blink, "got %p.\n", teb->TlsLinks.Blink);
-    ok(!thread_teb->TlsLinks.Flink, "got %p.\n", thread_teb->TlsLinks.Flink);
-    ok(!thread_teb->TlsLinks.Blink, "got %p.\n", thread_teb->TlsLinks.Blink);
-    SetEvent(test_tls_links_done);
-    WaitForSingleObject(thread, INFINITE);
-
-    CloseHandle(thread);
-    CloseHandle(test_tls_links_started);
-    CloseHandle(test_tls_links_done);
-}
-
-#define check_dll_path(a, b) check_dll_path_( __LINE__, a, b )
-static void check_dll_path_( unsigned int line, HMODULE h, const char *expected )
-{
-    char path[MAX_PATH];
-    DWORD ret;
-
-    *path = 0;
-    ret = GetModuleFileNameA( h, path, MAX_PATH);
-    ok_(__FILE__, line)( ret && ret < MAX_PATH, "Got %lu.\n", ret );
-    ok_(__FILE__, line)( !stricmp( path, expected ), "Got %s.\n", debugstr_a(path) );
-}
-
-static void test_known_dlls_load(void)
-{
-    static const char apiset_dll[] = "ext-ms-win-base-psapi-l1-1-0.dll";
-    char system_path[MAX_PATH], local_path[MAX_PATH];
-    static const char dll[] = "psapi.dll";
-    HMODULE hlocal, hsystem, hapiset, h;
-    BOOL ret;
-
-    if (GetModuleHandleA( dll ) || GetModuleHandleA( apiset_dll ))
-    {
-        skip( "%s is already loaded, skipping test.\n", dll );
-        return;
-    }
-
-    hapiset = LoadLibraryA( apiset_dll );
-    if (!hapiset)
-    {
-        win_skip( "%s is not available.\n", apiset_dll );
-        return;
-    }
-    FreeLibrary( hapiset );
-
-    GetSystemDirectoryA( system_path, sizeof(system_path) );
-    strcat( system_path, "\\" );
-    strcat( system_path, dll );
-
-    GetCurrentDirectoryA( sizeof(local_path), local_path );
-    strcat( local_path, "\\" );
-    strcat( local_path, dll );
-
-    /* Known dll is always found in system dir, regardless of its presence in the application dir. */
-    ret = pSetDefaultDllDirectories( LOAD_LIBRARY_SEARCH_USER_DIRS );
-    ok( ret, "SetDefaultDllDirectories failed err %lu\n", GetLastError() );
-    h = LoadLibraryA( dll );
-    ret = pSetDefaultDllDirectories( LOAD_LIBRARY_SEARCH_DEFAULT_DIRS );
-    ok( ret, "SetDefaultDllDirectories failed err %lu\n", GetLastError() );
-    ok( !!h, "Got NULL.\n" );
-    check_dll_path( h, system_path );
-    hapiset = GetModuleHandleA( apiset_dll );
-    ok( hapiset == h, "Got %p, %p.\n", hapiset, h );
-    FreeLibrary( h );
-
-    h = LoadLibraryExA( dll, 0, LOAD_LIBRARY_SEARCH_APPLICATION_DIR );
-    ok( !!h, "Got NULL.\n" );
-    check_dll_path( h, system_path );
-    hapiset = GetModuleHandleA( apiset_dll );
-    ok( hapiset == h, "Got %p, %p.\n", hapiset, h );
-    FreeLibrary( h );
-
-    /* Put dll to the current directory. */
-    create_test_dll( dll );
-
-    h = LoadLibraryExA( dll, 0, LOAD_LIBRARY_SEARCH_APPLICATION_DIR );
-    ok( !!h, "Got NULL.\n" );
-    check_dll_path( h, system_path );
-    hapiset = GetModuleHandleA( apiset_dll );
-    ok( hapiset == h, "Got %p, %p.\n", hapiset, h );
-    FreeLibrary( h );
-
-    /* Local version can still be loaded if dll name contains path. */
-    hlocal = LoadLibraryA( local_path );
-    ok( !!hlocal, "Got NULL.\n" );
-    check_dll_path( hlocal, local_path );
-
-    /* dll without path will match the loaded one. */
-    hsystem = LoadLibraryA( dll );
-    ok( hsystem == hlocal, "Got %p, %p.\n", hsystem, hlocal );
-    h = GetModuleHandleA( dll );
-    ok( h == hlocal, "Got %p, %p.\n", h, hlocal );
-
-    /* apiset dll won't match the one loaded not from system dir. */
-    hapiset = GetModuleHandleA( apiset_dll );
-    ok( !hapiset, "Got %p.\n", hapiset );
-
-    FreeLibrary( hsystem );
-    FreeLibrary( hlocal );
-
-    DeleteFileA( dll );
-}
-
-static HANDLE test_tls_links_started, test_tls_links_done;
-
-static DWORD WINAPI test_tls_links_thread(void* tlsidx_v)
-{
-    SetEvent(test_tls_links_started);
-    WaitForSingleObject(test_tls_links_done, INFINITE);
-    return 0;
-}
-
-static void test_tls_links(void)
-{
-    TEB *teb = NtCurrentTeb(), *thread_teb;
-    THREAD_BASIC_INFORMATION tbi;
-    NTSTATUS status;
     ULONG i, count;
     HANDLE thread;
     SIZE_T size;
@@ -1936,6 +1929,137 @@ static void test_base_address_index_tree(void)
     ok( tree_count == list_count, "count mismatch %u, %u.\n", tree_count, list_count );
 }
 
+static ULONG hash_basename( const UNICODE_STRING *basename )
+{
+    NTSTATUS status;
+    ULONG hash;
+
+    status = pRtlHashUnicodeString( basename, TRUE, HASH_STRING_ALGORITHM_DEFAULT, &hash );
+    ok( !status, "got %#lx.\n", status );
+    return hash & 31;
+}
+
+static void test_hash_links(void)
+{
+    LIST_ENTRY *hash_map, *entry, *entry2, *mark, *root;
+    LDR_DATA_TABLE_ENTRY *module;
+    const WCHAR *modname;
+    BOOL found;
+
+    /* Hash links structure is the same on older Windows loader but hashing algorithm is different. */
+    if (is_old_loader_struct()) return;
+
+    root = &NtCurrentTeb()->Peb->LdrData->InLoadOrderModuleList;
+    module = CONTAINING_RECORD(root->Flink, LDR_DATA_TABLE_ENTRY, InLoadOrderLinks);
+    hash_map = module->HashLinks.Blink - hash_basename( &module->BaseDllName );
+
+    for (entry = root->Flink; entry != root; entry = entry->Flink)
+    {
+        module = CONTAINING_RECORD(entry, LDR_DATA_TABLE_ENTRY, InLoadOrderLinks);
+        modname = module->BaseDllName.Buffer;
+        mark = &hash_map[hash_basename( &module->BaseDllName )];
+        found = FALSE;
+        for (entry2 = mark->Flink; entry2 != mark; entry2 = entry2->Flink)
+        {
+            module = CONTAINING_RECORD(entry2, LDR_DATA_TABLE_ENTRY, HashLinks);
+            if ((found = !lstrcmpiW( module->BaseDllName.Buffer, modname ))) break;
+        }
+        ok( found, "Could not find %s.\n", debugstr_w(modname) );
+    }
+}
+
+#define check_dll_path(a, b) check_dll_path_( __LINE__, a, b )
+static void check_dll_path_( unsigned int line, HMODULE h, const char *expected )
+{
+    char path[MAX_PATH];
+    DWORD ret;
+
+    *path = 0;
+    ret = GetModuleFileNameA( h, path, MAX_PATH);
+    ok_(__FILE__, line)( ret && ret < MAX_PATH, "Got %lu.\n", ret );
+    ok_(__FILE__, line)( !stricmp( path, expected ), "Got %s.\n", debugstr_a(path) );
+}
+
+static void test_known_dlls_load(void)
+{
+    static const char apiset_dll[] = "ext-ms-win-base-psapi-l1-1-0.dll";
+    char system_path[MAX_PATH], local_path[MAX_PATH];
+    static const char dll[] = "psapi.dll";
+    HMODULE hlocal, hsystem, hapiset, h;
+    BOOL ret;
+
+    if (GetModuleHandleA( dll ) || GetModuleHandleA( apiset_dll ))
+    {
+        skip( "%s is already loaded, skipping test.\n", dll );
+        return;
+    }
+
+    hapiset = LoadLibraryA( apiset_dll );
+    if (!hapiset)
+    {
+        win_skip( "%s is not available.\n", apiset_dll );
+        return;
+    }
+    FreeLibrary( hapiset );
+
+    GetSystemDirectoryA( system_path, sizeof(system_path) );
+    strcat( system_path, "\\" );
+    strcat( system_path, dll );
+
+    GetCurrentDirectoryA( sizeof(local_path), local_path );
+    strcat( local_path, "\\" );
+    strcat( local_path, dll );
+
+    /* Known dll is always found in system dir, regardless of its presence in the application dir. */
+    ret = pSetDefaultDllDirectories( LOAD_LIBRARY_SEARCH_USER_DIRS );
+    ok( ret, "SetDefaultDllDirectories failed err %lu\n", GetLastError() );
+    h = LoadLibraryA( dll );
+    ret = pSetDefaultDllDirectories( LOAD_LIBRARY_SEARCH_DEFAULT_DIRS );
+    ok( ret, "SetDefaultDllDirectories failed err %lu\n", GetLastError() );
+    ok( !!h, "Got NULL.\n" );
+    check_dll_path( h, system_path );
+    hapiset = GetModuleHandleA( apiset_dll );
+    ok( hapiset == h, "Got %p, %p.\n", hapiset, h );
+    FreeLibrary( h );
+
+    h = LoadLibraryExA( dll, 0, LOAD_LIBRARY_SEARCH_APPLICATION_DIR );
+    ok( !!h, "Got NULL.\n" );
+    check_dll_path( h, system_path );
+    hapiset = GetModuleHandleA( apiset_dll );
+    ok( hapiset == h, "Got %p, %p.\n", hapiset, h );
+    FreeLibrary( h );
+
+    /* Put dll to the current directory. */
+    create_test_dll( dll );
+
+    h = LoadLibraryExA( dll, 0, LOAD_LIBRARY_SEARCH_APPLICATION_DIR );
+    ok( !!h, "Got NULL.\n" );
+    check_dll_path( h, system_path );
+    hapiset = GetModuleHandleA( apiset_dll );
+    ok( hapiset == h, "Got %p, %p.\n", hapiset, h );
+    FreeLibrary( h );
+
+    /* Local version can still be loaded if dll name contains path. */
+    hlocal = LoadLibraryA( local_path );
+    ok( !!hlocal, "Got NULL.\n" );
+    check_dll_path( hlocal, local_path );
+
+    /* dll without path will match the loaded one. */
+    hsystem = LoadLibraryA( dll );
+    ok( hsystem == hlocal, "Got %p, %p.\n", hsystem, hlocal );
+    h = GetModuleHandleA( dll );
+    ok( h == hlocal, "Got %p, %p.\n", h, hlocal );
+
+    /* apiset dll won't match the one loaded not from system dir. */
+    hapiset = GetModuleHandleA( apiset_dll );
+    ok( !hapiset, "Got %p.\n", hapiset );
+
+    FreeLibrary( hsystem );
+    FreeLibrary( hlocal );
+
+    DeleteFileA( dll );
+}
+
 START_TEST(module)
 {
     WCHAR filenameW[MAX_PATH];
@@ -1973,6 +2097,7 @@ START_TEST(module)
     test_apisets();
     test_ddag_node();
     test_tls_links();
-    test_known_dlls_load();
     test_base_address_index_tree();
+    test_hash_links();
+    test_known_dlls_load();
 }

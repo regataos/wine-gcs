@@ -142,12 +142,24 @@ static HRESULT stack_pop_object(script_ctx_t *ctx, IDispatch **r)
 
 static inline HRESULT stack_pop_int(script_ctx_t *ctx, INT *r)
 {
-    return to_int32(ctx, stack_pop(ctx), r);
+    jsval_t v;
+    HRESULT hres;
+
+    v = stack_pop(ctx);
+    hres = to_int32(ctx, v, r);
+    jsval_release(v);
+    return hres;
 }
 
 static inline HRESULT stack_pop_uint(script_ctx_t *ctx, UINT32 *r)
 {
-    return to_uint32(ctx, stack_pop(ctx), r);
+    jsval_t v;
+    HRESULT hres;
+
+    v = stack_pop(ctx);
+    hres = to_uint32(ctx, v, r);
+    jsval_release(v);
+    return hres;
 }
 
 static inline unsigned local_off(call_frame_t *frame, int ref)
@@ -476,36 +488,50 @@ static void scope_destructor(jsdisp_t *dispex)
 
     if(scope->obj)
         IDispatch_Release(scope->obj);
-    free(scope);
 }
 
-static unsigned scope_idx_length(jsdisp_t *dispex)
+static unsigned scope_indexed_len(jsdisp_t *dispex)
 {
-    scope_chain_t *scope = scope_from_dispex(dispex);
-
-    return scope->detached_vars->argc;
+    return scope_from_dispex(dispex)->detached_vars->argc;
 }
 
-static HRESULT scope_idx_get(jsdisp_t *dispex, unsigned idx, jsval_t *r)
+static HRESULT scope_prop_get(jsdisp_t *dispex, DISPID id, jsval_t *r)
 {
-    scope_chain_t *scope = scope_from_dispex(dispex);
-
-    return jsval_copy(scope->detached_vars->var[idx], r);
+    if(!is_indexed_prop_id(id))
+        return S_FALSE;
+    return jsval_copy(scope_from_dispex(dispex)->detached_vars->var[indexed_prop_id_to_idx(id)], r);
 }
 
-static HRESULT scope_idx_put(jsdisp_t *dispex, unsigned idx, jsval_t val)
+static HRESULT scope_prop_put(jsdisp_t *dispex, DISPID id, jsval_t val)
 {
     scope_chain_t *scope = scope_from_dispex(dispex);
     jsval_t copy, *ref;
     HRESULT hres;
 
+    if(!is_indexed_prop_id(id))
+        return S_FALSE;
+
     hres = jsval_copy(val, &copy);
     if(FAILED(hres))
         return hres;
 
-    ref = &scope->detached_vars->var[idx];
+    ref = &scope->detached_vars->var[indexed_prop_id_to_idx(id)];
     jsval_release(*ref);
     *ref = copy;
+    return S_OK;
+}
+
+static HRESULT scope_prop_get_desc(jsdisp_t *dispex, DISPID id, BOOL flags_only, property_desc_t *desc)
+{
+    if(!flags_only) {
+        HRESULT hres = scope_prop_get(dispex, id, &desc->value);
+        if(hres != S_OK)
+            return hres;
+    }else if(!is_indexed_prop_id(id)) {
+        return S_FALSE;
+    }
+
+    desc->flags = PROPF_ENUMERABLE | PROPF_WRITABLE;
     return S_OK;
 }
 
@@ -555,28 +581,25 @@ static void scope_cc_traverse(jsdisp_t *dispex, nsCycleCollectionTraversalCallba
 
         for(i = 0; i < cnt; i++)
             if(is_object_instance(vars->var[i]))
-                note_edge((nsISupports*)get_object(vars->var[i]), "var", cb);
+                note_edge(get_edge_obj(get_object(vars->var[i])), "var", cb);
     }
 
     if(scope->next)
-        note_edge((nsISupports*)&scope->next->dispex.IDispatchEx_iface, "next", cb);
+        note_edge((IUnknown*)&scope->next->dispex.IWineJSDispatch_iface, "next", cb);
 
     if(scope->obj)
-        note_edge((nsISupports*)scope->obj, "obj", cb);
+        note_edge(get_edge_obj(scope->obj), "obj", cb);
 }
 
 static const builtin_info_t scope_info = {
-    JSCLASS_NONE,
-    NULL,
-    0,
-    NULL,
-    scope_destructor,
-    NULL,
-    scope_idx_length,
-    scope_idx_get,
-    scope_idx_put,
-    scope_gc_traverse,
-    scope_cc_traverse
+    .class         = JSCLASS_NONE,
+    .destructor    = scope_destructor,
+    .indexed_len   = scope_indexed_len,
+    .prop_get      = scope_prop_get,
+    .prop_put      = scope_prop_put,
+    .prop_get_desc = scope_prop_get_desc,
+    .gc_traverse   = scope_gc_traverse,
+    .cc_traverse   = scope_cc_traverse
 };
 
 static HRESULT scope_push(script_ctx_t *ctx, scope_chain_t *scope, IDispatch *obj, scope_chain_t **ret)
@@ -652,35 +675,32 @@ static HRESULT disp_cmp(IDispatch *disp1, IDispatch *disp2, BOOL *ret)
 {
     IObjectIdentity *identity;
     IUnknown *unk1, *unk2;
-    jsdisp_t *jsdisp;
     HRESULT hres;
-
-    if(!disp1 || !disp2) {
-        *ret = (disp1 == disp2);
-        return S_OK;
-    }
-
-    jsdisp = to_jsdisp(disp1);
-    if(jsdisp && jsdisp->proxy)
-        disp1 = (IDispatch*)jsdisp->proxy;
-
-    jsdisp = to_jsdisp(disp2);
-    if(jsdisp && jsdisp->proxy)
-        disp2 = (IDispatch*)jsdisp->proxy;
 
     if(disp1 == disp2) {
         *ret = TRUE;
         return S_OK;
     }
 
-    hres = IDispatch_QueryInterface(disp1, &IID_IUnknown, (void**)&unk1);
-    if(FAILED(hres))
-        return hres;
+    if(!disp1 || !disp2) {
+        *ret = FALSE;
+        return S_OK;
+    }
 
-    hres = IDispatch_QueryInterface(disp2, &IID_IUnknown, (void**)&unk2);
-    if(FAILED(hres)) {
-        IUnknown_Release(unk1);
-        return hres;
+    unk1 = (IUnknown *)get_host_dispatch(disp1);
+    if(!unk1) {
+        hres = IDispatch_QueryInterface(disp1, &IID_IUnknown, (void**)&unk1);
+        if(FAILED(hres))
+            return hres;
+    }
+
+    unk2 = (IUnknown *)get_host_dispatch(disp2);
+    if(!unk2) {
+        hres = IDispatch_QueryInterface(disp2, &IID_IUnknown, (void**)&unk2);
+        if(FAILED(hres)) {
+            IUnknown_Release(unk1);
+            return hres;
+        }
     }
 
     if(unk1 == unk2) {
@@ -850,7 +870,7 @@ static BOOL lookup_global_members(script_ctx_t *ctx, BSTR identifier, exprval_t 
     HRESULT hres;
 
     LIST_FOR_EACH_ENTRY(item, &ctx->named_items, named_item_t, entry) {
-        if((item->flags & SCRIPTITEM_GLOBALMEMBERS) && item->disp != (IDispatch*)&ctx->global->IDispatchEx_iface) {
+        if(item->flags & SCRIPTITEM_GLOBALMEMBERS) {
             hres = disp_get_id(ctx, item->disp, identifier, identifier, 0, &id);
             if(SUCCEEDED(hres)) {
                 if(ret)
@@ -1870,7 +1890,7 @@ static HRESULT interp_carray_set(script_ctx_t *ctx)
     array = stack_top(ctx);
     assert(is_object_instance(array));
 
-    hres = jsdisp_propput_idx(to_jsdisp(get_object(array)), index, value);
+    hres = jsdisp_propput_idx(as_jsdisp(get_object(array)), index, value);
     jsval_release(value);
     return hres;
 }
@@ -1917,7 +1937,7 @@ static HRESULT interp_obj_prop(script_ctx_t *ctx)
         jsdisp_t *func;
 
         assert(is_object_instance(val));
-        func = to_jsdisp(get_object(val));
+        func = as_jsdisp(get_object(val));
 
         desc.mask = desc.flags;
         if(type == PROPERTY_DEFINITION_GETTER) {
@@ -2057,7 +2077,7 @@ static HRESULT interp_instanceof(script_ctx_t *ctx)
         return E_FAIL;
     }
 
-    if(is_class(obj, JSCLASS_FUNCTION) || (obj->proxy && obj->proxy->lpVtbl->IsConstructor(obj->proxy))) {
+    if(obj->is_constructor) {
         hres = jsdisp_propget_name(obj, L"prototype", &prot);
     }else {
         hres = JS_E_FUNCTION_EXPECTED;
@@ -3352,7 +3372,7 @@ static HRESULT bind_event_target(script_ctx_t *ctx, function_code_t *func, jsdis
     disp = get_object(v);
     hres = IDispatch_QueryInterface(disp, &IID_IBindEventHandler, (void**)&target);
     if(SUCCEEDED(hres)) {
-        hres = IBindEventHandler_BindHandler(target, func->name, (IDispatch*)&func_obj->IDispatchEx_iface);
+        hres = IBindEventHandler_BindHandler(target, func->name, to_disp(func_obj));
         IBindEventHandler_Release(target);
         if(FAILED(hres))
             WARN("BindEvent failed: %08lx\n", hres);
@@ -3491,7 +3511,7 @@ HRESULT exec_source(script_ctx_t *ctx, DWORD flags, bytecode_t *bytecode, functi
             return hres;
     }
 
-    if((flags & EXEC_EVAL) && ctx->call_ctx) {
+    if((flags & EXEC_EVAL) && scope) {
         variable_obj = jsdisp_addref(ctx->call_ctx->variable_obj);
     }else if(!(flags & (EXEC_GLOBAL | EXEC_EVAL))) {
         hres = create_dispex(ctx, NULL, NULL, &variable_obj);
@@ -3546,7 +3566,7 @@ HRESULT exec_source(script_ctx_t *ctx, DWORD flags, bytecode_t *bytecode, functi
             this_obj = NULL;
     }
 
-    if(ctx->call_ctx && (flags & EXEC_EVAL)) {
+    if(scope && (flags & EXEC_EVAL)) {
         hres = detach_variable_object(ctx, ctx->call_ctx, FALSE);
         if(FAILED(hres))
             goto fail;

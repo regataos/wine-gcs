@@ -365,7 +365,7 @@ static HRESULT WINAPI test_media_stream_RequestSample(IMFMediaStream *iface, IUn
 
     hr = IMFMediaEventQueue_QueueEventParamUnk(stream->event_queue, MEMediaSample, &GUID_NULL, S_OK,
             (IUnknown *)sample);
-    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+    ok(hr == S_OK || hr == MF_E_SHUTDOWN, "Unexpected hr %#lx.\n", hr);
     IMFSample_Release(sample);
 
     return S_OK;
@@ -993,7 +993,7 @@ static void test_source_reader(const char *filename, bool video)
         hr = IMFSourceReader_ReadSample(reader, MF_SOURCE_READER_FIRST_AUDIO_STREAM, 0, &actual_index, &stream_flags,
                 &timestamp, &sample);
         ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
-        ok(!actual_index, "Unexpected stream index %lu.\n", actual_index);
+        todo_wine_if (video) ok(!actual_index, "Unexpected stream index %lu.\n", actual_index);
         ok(!(stream_flags & ~MF_SOURCE_READERF_ENDOFSTREAM), "Unexpected stream flags %#lx.\n", stream_flags);
 
         if (stream_flags & MF_SOURCE_READERF_ENDOFSTREAM)
@@ -1014,7 +1014,7 @@ static void test_source_reader(const char *filename, bool video)
             hr = IMFSourceReader_ReadSample(reader, MF_SOURCE_READER_FIRST_VIDEO_STREAM,
                     0, &actual_index, &stream_flags, &timestamp, &sample);
             ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
-            ok(actual_index == 1, "Unexpected stream index %lu.\n", actual_index);
+            todo_wine ok(actual_index == 1, "Unexpected stream index %lu.\n", actual_index);
             ok(!(stream_flags & ~MF_SOURCE_READERF_ENDOFSTREAM), "Unexpected stream flags %#lx.\n", stream_flags);
 
             if (stream_flags & MF_SOURCE_READERF_ENDOFSTREAM)
@@ -1045,7 +1045,7 @@ static void test_source_reader(const char *filename, bool video)
     hr = IMFSourceReader_ReadSample(reader, MF_SOURCE_READER_FIRST_AUDIO_STREAM, MF_SOURCE_READER_CONTROLF_DRAIN,
             &actual_index, &stream_flags, &timestamp, &sample);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
-    ok(actual_index == 0, "Unexpected stream index %lu.\n", actual_index);
+    todo_wine_if (video) ok(actual_index == 0, "Unexpected stream index %lu.\n", actual_index);
     ok(stream_flags == MF_SOURCE_READERF_ENDOFSTREAM, "Unexpected stream flags %#lx.\n", stream_flags);
     ok(!sample, "Unexpected sample object.\n");
 
@@ -1066,7 +1066,7 @@ static void test_source_reader(const char *filename, bool video)
     hr = IMFSourceReader_ReadSample(reader, MF_SOURCE_READER_FIRST_AUDIO_STREAM, MF_SOURCE_READER_CONTROLF_DRAIN,
             &actual_index, &stream_flags, NULL, &sample);
     ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
-    ok(!actual_index, "Unexpected stream index %lu.\n", actual_index);
+    todo_wine_if (video) ok(!actual_index, "Unexpected stream index %lu.\n", actual_index);
     ok(stream_flags == MF_SOURCE_READERF_ENDOFSTREAM, "Unexpected stream flags %#lx.\n", stream_flags);
     ok(!sample, "Unexpected sample object.\n");
 
@@ -1807,6 +1807,8 @@ static void test_source_reader_transforms(BOOL enable_processing, BOOL enable_ad
         ATTR_UINT32(MF_MT_ALL_SAMPLES_INDEPENDENT, 1),
         ATTR_UINT32(MF_MT_COMPRESSED, 0, .todo = TRUE),
         ATTR_UINT32(MF_MT_INTERLACE_MODE, 2, .todo_value = TRUE),
+        ATTR_UINT32(MF_MT_DEFAULT_STRIDE, 96, .not_present = TRUE),
+        {0},
     };
     IMFStreamDescriptor *video_stream;
     IMFSourceReaderEx *reader_ex;

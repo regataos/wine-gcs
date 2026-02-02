@@ -81,12 +81,6 @@
 # include "hidusage.h"
 #endif
 
-#ifdef WORDS_BIGENDIAN
-#define LE_DWORD(x) RtlUlongByteSwap(x)
-#else
-#define LE_DWORD(x) (x)
-#endif
-
 #include "unix_private.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(hid);
@@ -100,12 +94,13 @@ static struct udev_monitor *udev_monitor;
 static int deviceloop_control[2];
 static struct list event_queue = LIST_INIT(event_queue);
 static struct list device_list = LIST_INIT(device_list);
-static struct udev_bus_options options;
+static const struct bus_options *options;
 
 struct base_device
 {
     struct unix_device unix_device;
     void (*read_report)(struct unix_device *iface);
+    BOOL started;
 
     struct udev_device *udev_device;
     char devnode[MAX_PATH];
@@ -117,13 +112,9 @@ static inline struct base_device *impl_from_unix_device(struct unix_device *ifac
     return CONTAINING_RECORD(iface, struct base_device, unix_device);
 }
 
-#define QUIRK_DS4_BT 0x1
-#define QUIRK_DUALSENSE_BT 0x2
-
 struct hidraw_device
 {
     struct base_device base;
-    DWORD quirks;
 };
 
 static inline struct hidraw_device *hidraw_impl_from_unix_device(struct unix_device *iface)
@@ -133,7 +124,7 @@ static inline struct hidraw_device *hidraw_impl_from_unix_device(struct unix_dev
 
 #ifdef HAS_PROPER_INPUT_HEADER
 
-static const USAGE_AND_PAGE absolute_usages[] =
+static const USAGE_AND_PAGE absolute_usages[ABS_CNT] =
 {
     {.UsagePage = HID_USAGE_PAGE_GENERIC,    .Usage = HID_USAGE_GENERIC_X},              /* ABS_X */
     {.UsagePage = HID_USAGE_PAGE_GENERIC,    .Usage = HID_USAGE_GENERIC_Y},              /* ABS_Y */
@@ -170,7 +161,7 @@ static const USAGE_AND_PAGE absolute_usages[] =
     {.UsagePage = HID_USAGE_PAGE_CONSUMER,   .Usage = HID_USAGE_CONSUMER_VOLUME},        /* ABS_VOLUME */
 };
 
-static const USAGE_AND_PAGE relative_usages[] =
+static const USAGE_AND_PAGE relative_usages[REL_CNT] =
 {
     {.UsagePage = HID_USAGE_PAGE_GENERIC, .Usage = HID_USAGE_GENERIC_X},     /* REL_X */
     {.UsagePage = HID_USAGE_PAGE_GENERIC, .Usage = HID_USAGE_GENERIC_Y},     /* REL_Y */
@@ -184,16 +175,35 @@ static const USAGE_AND_PAGE relative_usages[] =
     {0},                                                                     /* REL_MISC */
 };
 
+struct lnxev_info
+{
+    struct input_id id;
+    char name[MAX_PATH];
+    char uniq[MAX_PATH];
+    BYTE abs[(ABS_CNT + 7) / 8];
+    BYTE rel[(REL_CNT + 7) / 8];
+    BYTE key[(KEY_CNT + 7) / 8];
+    BYTE ff[(FF_CNT + 7) / 8];
+};
+
 struct lnxev_device
 {
     struct base_device base;
 
-    BYTE abs_map[ARRAY_SIZE(absolute_usages)];
-    BYTE rel_map[ARRAY_SIZE(relative_usages)];
+    LONG abs_min[ABS_CNT];
+    LONG abs_max[ABS_CNT];
+    BYTE abs_map[ABS_CNT];
+    BYTE rel_map[REL_CNT];
     BYTE hat_map[8];
-    BYTE button_map[KEY_MAX];
+    BYTE button_map[KEY_CNT];
+    int hat_count;
+    int button_count;
+    BOOL is_gamepad;
 
-    int haptic_effect_id;
+    pthread_cond_t haptics_cond;
+    pthread_t haptics_thread;
+    struct ff_effect haptics;
+
     int effect_ids[256];
     LONG effect_flags;
 };
@@ -217,6 +227,8 @@ static void stop_polling_device(struct unix_device *iface)
     int i;
 
     if (impl->device_fd == -1) return; /* already removed */
+    if (!impl->started) return; /* not started */
+    impl->started = FALSE;
 
     for (i = 2; i < poll_count; ++i)
         if (poll_fds[i].fd == impl->device_fd) break;
@@ -248,6 +260,7 @@ static void start_polling_device(struct unix_device *iface)
         poll_count++;
 
         write(deviceloop_control[1], "u", 1);
+        impl->started = TRUE;
     }
 }
 
@@ -340,77 +353,7 @@ static void hidraw_device_read_report(struct unix_device *iface)
     else if (size == 0)
         TRACE("Failed to read report\n");
     else
-    {
-        /* As described in the Linux kernel driver, when connected over bluetooth, DS4 controllers
-         * start sending input through report #17 as soon as they receive a feature report #2, which
-         * the kernel sends anyway for calibration.
-         *
-         * Input report #17 is the same as the default input report #1, with additional gyro data and
-         * two additional bytes in front, but is only described as vendor specific in the report descriptor,
-         * and applications aren't expecting it.
-         *
-         * We have to translate it to input report #1, like native driver does.
-         */
-        if ((impl->quirks & QUIRK_DS4_BT) && report_buffer[0] == 0x11 && size >= 12)
-        {
-            size = 10;
-            buff += 2;
-            buff[0] = 1;
-        }
-
-        /* The behavior of DualSense is very similar to DS4 described above with a few exceptions.
-         *
-         * The report number #41 is used for the extended bluetooth input report. The report comes
-         * with only one extra byte in front and the format is not exactly the same as the one used
-         * for the report #1 so we need to shuffle a few bytes around.
-         *
-         * Basic #1 report:
-         *   X  Y  Z  RZ  Buttons[3]  TriggerLeft  TriggerRight
-         *
-         * Extended #41 report:
-         *   Prefix X  Y  Z  Rz  TriggerLeft  TriggerRight  Counter  Buttons[3] ...
-         */
-        if ((impl->quirks & QUIRK_DUALSENSE_BT) && report_buffer[0] == 0x31 && size >= 11)
-        {
-            BYTE trigger[2];
-            size = 10;
-            buff += 1;
-
-            buff[0] = 1; /* fake report #1 */
-
-            trigger[0] = buff[5]; /* TriggerLeft*/
-            trigger[1] = buff[6]; /* TriggerRight */
-
-            buff[5] = buff[8];    /* Buttons[0] */
-            buff[6] = buff[9];    /* Buttons[1] */
-            buff[7] = buff[10];   /* Buttons[2] */
-            buff[8] = trigger[0]; /* TriggerLeft */
-            buff[9] = trigger[1]; /* TirggerRight */
-        }
-
         bus_event_queue_input_report(&event_queue, iface, buff, size);
-    }
-}
-
-static void hidraw_disable_sony_quirks(struct unix_device *iface)
-{
-    struct hidraw_device *impl = hidraw_impl_from_unix_device(iface);
-
-    /* FIXME: we may want to validate CRC at the end of the outbound HID reports,
-     * as controllers do not switch modes if it is incorrect.
-     */
-
-    if ((impl->quirks & QUIRK_DS4_BT))
-    {
-        TRACE("Disabling report quirk for Bluetooth DualShock4 controller iface %p\n", iface);
-        impl->quirks &= ~QUIRK_DS4_BT;
-    }
-
-    if ((impl->quirks & QUIRK_DUALSENSE_BT))
-    {
-        TRACE("Disabling report quirk for Bluetooth DualSense controller iface %p\n", iface);
-        impl->quirks &= ~QUIRK_DUALSENSE_BT;
-    }
 }
 
 static void hidraw_device_set_output_report(struct unix_device *iface, HID_XFER_PACKET *packet, IO_STATUS_BLOCK *io)
@@ -432,7 +375,6 @@ static void hidraw_device_set_output_report(struct unix_device *iface, HID_XFER_
 
     if (count > 0)
     {
-        hidraw_disable_sony_quirks(iface);
         io->Information = count;
         io->Status = STATUS_SUCCESS;
     }
@@ -465,7 +407,6 @@ static void hidraw_device_get_feature_report(struct unix_device *iface, HID_XFER
 
     if (count > 0)
     {
-        hidraw_disable_sony_quirks(iface);
         io->Information = count;
         io->Status = STATUS_SUCCESS;
     }
@@ -502,7 +443,6 @@ static void hidraw_device_set_feature_report(struct unix_device *iface, HID_XFER
 
     if (count > 0)
     {
-        hidraw_disable_sony_quirks(iface);
         io->Information = count;
         io->Status = STATUS_SUCCESS;
     }
@@ -530,29 +470,6 @@ static const struct raw_device_vtbl hidraw_device_vtbl =
 };
 
 #ifdef HAS_PROPER_INPUT_HEADER
-
-static const char *get_device_syspath(struct udev_device *dev)
-{
-    struct udev_device *parent;
-
-    if ((parent = udev_device_get_parent_with_subsystem_devtype(dev, "hid", NULL)))
-        return udev_device_get_syspath(parent);
-
-    if ((parent = udev_device_get_parent_with_subsystem_devtype(dev, "usb", "usb_device")))
-        return udev_device_get_syspath(parent);
-
-    return udev_device_get_syspath(dev);
-}
-
-static struct base_device *find_device_from_syspath(const char *path)
-{
-    struct base_device *impl;
-
-    LIST_FOR_EACH_ENTRY(impl, &device_list, struct base_device, unix_device.entry)
-        if (!strcmp(get_device_syspath(impl->udev_device), path)) return impl;
-
-    return NULL;
-}
 
 #define test_bit(arr,bit) (((BYTE*)(arr))[(bit)>>3]&(1<<((bit)&7)))
 
@@ -917,176 +834,117 @@ static const USAGE_AND_PAGE *what_am_I(struct udev_device *dev, int fd)
     return &Unknown;
 }
 
-static INT count_buttons(int device_fd, BYTE *map)
+static void set_abs_axis_value(struct unix_device *iface, int code, int value)
 {
-    static const UINT gamepad_buttons[] =
-    {
-        BTN_A,
-        BTN_B,
-        BTN_X,
-        BTN_Y,
-        BTN_TL,
-        BTN_TR,
-        BTN_SELECT,
-        BTN_START,
-        BTN_THUMBL,
-        BTN_THUMBR,
-        BTN_MODE,
-        BTN_C,
-        BTN_Z,
-        BTN_TL2,
-        BTN_TR2,
-    };
-    int i;
-    int button_count = 0;
-    BYTE keybits[(KEY_MAX+7)/8];
+    struct lnxev_device *impl = lnxev_impl_from_unix_device(iface);
 
-    if (ioctl(device_fd, EVIOCGBIT(EV_KEY, sizeof(keybits)), keybits) == -1)
+    if (code < ABS_HAT0X || code > ABS_HAT3Y)
     {
-        WARN("ioctl(EVIOCGBIT, EV_KEY) failed: %d %s\n", errno, strerror(errno));
-        return FALSE;
-    }
+        LONG min = impl->abs_min[code], range = impl->abs_max[code] - impl->abs_min[code];
+        if (!(code = impl->abs_map[code])) return;
 
-    for (i = 0; i < ARRAY_SIZE(gamepad_buttons); i++)
-    {
-        if (test_bit(keybits, gamepad_buttons[i]))
+        if (impl->is_gamepad)
         {
-            if (map) map[gamepad_buttons[i]] = button_count;
-            button_count++;
+            double scale = (code == 5 || code == 6 ? 32767.0 : 65535.0) / range;
+            value = (value - min) * scale - (code == 5 || code == 6 ? 0 : 32768);
+            if (code == 2 || code == 4) value = -value - 1; /* match XUSB / GIP protocol */
         }
-    }
 
-    for (i = BTN_DIGI; i < KEY_MAX; i++)
-    {
-        if (test_bit(keybits, i))
-        {
-            if (map) map[i] = button_count;
-            button_count++;
-        }
+        hid_device_set_abs_axis(iface, code - 1, value);
     }
-    return button_count;
+    else if ((code - ABS_HAT0X) % 2)
+    {
+        if (!(code = impl->hat_map[code - ABS_HAT0X])) return;
+        if (impl->is_gamepad)
+        {
+            hid_device_set_button(iface, 10, value < 0);
+            hid_device_set_button(iface, 12, value > 0);
+        }
+        hid_device_set_hatswitch_y(iface, code - 1, value);
+    }
+    else
+    {
+        if (!(code = impl->hat_map[code - ABS_HAT0X])) return;
+        if (impl->is_gamepad)
+        {
+            hid_device_set_button(iface, 13, value < 0);
+            hid_device_set_button(iface, 11, value > 0);
+        }
+        hid_device_set_hatswitch_x(iface, code - 1, value);
+    }
 }
 
-static INT count_abs_axis(int device_fd)
+static NTSTATUS build_report_descriptor(struct unix_device *iface, struct udev_device *dev, struct lnxev_info *info)
 {
-    BYTE absbits[(ABS_MAX+7)/8];
-    int abs_count = 0;
-    int i;
-
-    if (ioctl(device_fd, EVIOCGBIT(EV_ABS, sizeof(absbits)), absbits) == -1)
-    {
-        WARN("ioctl(EVIOCGBIT, EV_ABS) failed: %d %s\n", errno, strerror(errno));
-        return 0;
-    }
-
-    for (i = 0; i < ARRAY_SIZE(absolute_usages); i++)
-        if (test_bit(absbits, i)) abs_count++;
-    return abs_count;
-}
-
-static NTSTATUS build_report_descriptor(struct unix_device *iface, struct udev_device *dev)
-{
-    struct input_absinfo abs_info[ARRAY_SIZE(absolute_usages)];
-    BYTE absbits[(ABS_MAX+7)/8];
-    BYTE relbits[(REL_MAX+7)/8];
-    BYTE ffbits[(FF_MAX+7)/8];
-    USAGE_AND_PAGE usage;
+    struct input_absinfo abs_info[ABS_CNT];
     USHORT count = 0;
     USAGE usages[16];
-    INT i, button_count, abs_count, rel_count, hat_count;
+    int i;
     struct lnxev_device *impl = lnxev_impl_from_unix_device(iface);
     const USAGE_AND_PAGE device_usage = *what_am_I(dev, impl->base.device_fd);
-
-    if (ioctl(impl->base.device_fd, EVIOCGBIT(EV_REL, sizeof(relbits)), relbits) == -1)
-    {
-        WARN("ioctl(EVIOCGBIT, EV_REL) failed: %d %s\n", errno, strerror(errno));
-        memset(relbits, 0, sizeof(relbits));
-    }
-    if (ioctl(impl->base.device_fd, EVIOCGBIT(EV_ABS, sizeof(absbits)), absbits) == -1)
-    {
-        WARN("ioctl(EVIOCGBIT, EV_ABS) failed: %d %s\n", errno, strerror(errno));
-        memset(absbits, 0, sizeof(absbits));
-    }
-    if (ioctl(impl->base.device_fd, EVIOCGBIT(EV_FF, sizeof(ffbits)), ffbits) == -1)
-    {
-        WARN("ioctl(EVIOCGBIT, EV_FF) failed: %d %s\n", errno, strerror(errno));
-        memset(ffbits, 0, sizeof(ffbits));
-    }
 
     if (!hid_device_begin_report_descriptor(iface, &device_usage))
         return STATUS_NO_MEMORY;
 
-    if (!hid_device_begin_input_report(iface, &device_usage))
-        return STATUS_NO_MEMORY;
-
-    abs_count = 0;
-    for (i = 0; i < ARRAY_SIZE(absolute_usages); i++)
+    if (impl->is_gamepad)
     {
-        usage = absolute_usages[i];
-        if (!test_bit(absbits, i)) continue;
-        ioctl(impl->base.device_fd, EVIOCGABS(i), abs_info + i);
-        if (!usage.UsagePage || !usage.Usage) continue;
-        if (!hid_device_add_axes(iface, 1, usage.UsagePage, &usage.Usage, FALSE,
-                                 LE_DWORD(abs_info[i].minimum), LE_DWORD(abs_info[i].maximum)))
+        if (!hid_device_add_gamepad(iface))
+            return STATUS_NO_MEMORY;
+    }
+    else
+    {
+        if (!hid_device_begin_input_report(iface, &device_usage))
             return STATUS_NO_MEMORY;
 
-        impl->abs_map[i] = abs_count++;
-    }
+        for (i = 0; i < ABS_CNT; i++)
+        {
+            LONG min = impl->abs_min[i], max = impl->abs_max[i];
+            USAGE_AND_PAGE usage = absolute_usages[i];
+            if (!impl->abs_map[i]) continue;
+            ioctl(impl->base.device_fd, EVIOCGABS(i), abs_info + i);
+            if (!hid_device_add_axes(iface, 1, usage.UsagePage, &usage.Usage, FALSE,
+                                     min, max))
+                return STATUS_NO_MEMORY;
+        }
 
-    rel_count = 0;
-    for (i = 0; i < ARRAY_SIZE(relative_usages); i++)
-    {
-        usage = relative_usages[i];
-        if (!test_bit(relbits, i)) continue;
-        if (!usage.UsagePage || !usage.Usage) continue;
-        if (!hid_device_add_axes(iface, 1, usage.UsagePage, &usage.Usage, TRUE,
-                                 INT32_MIN, INT32_MAX))
+        for (i = 0; i < REL_CNT; i++)
+        {
+            USAGE_AND_PAGE usage = relative_usages[i];
+            if (!impl->rel_map[i]) continue;
+            if (!hid_device_add_axes(iface, 1, usage.UsagePage, &usage.Usage, TRUE,
+                                     INT32_MIN, INT32_MAX))
+                return STATUS_NO_MEMORY;
+        }
+
+        if (impl->hat_count && !hid_device_add_hatswitch(iface, impl->hat_count)) return STATUS_NO_MEMORY;
+        if (impl->button_count && !hid_device_add_buttons(iface, HID_USAGE_PAGE_BUTTON, 1, impl->button_count)) return STATUS_NO_MEMORY;
+
+        if (!hid_device_end_input_report(iface))
             return STATUS_NO_MEMORY;
-
-        impl->rel_map[i] = rel_count++;
     }
 
-    hat_count = 0;
-    for (i = ABS_HAT0X; i <= ABS_HAT3X; i += 2)
-    {
-        if (!test_bit(absbits, i)) continue;
-        impl->hat_map[i - ABS_HAT0X] = hat_count;
-        impl->hat_map[i - ABS_HAT0X + 1] = hat_count++;
-    }
-
-    if (hat_count && !hid_device_add_hatswitch(iface, hat_count))
-        return STATUS_NO_MEMORY;
-
-    /* For now lump all buttons just into incremental usages, Ignore Keys */
-    button_count = count_buttons(impl->base.device_fd, impl->button_map);
-    if (button_count && !hid_device_add_buttons(iface, HID_USAGE_PAGE_BUTTON, 1, button_count))
-        return STATUS_NO_MEMORY;
-
-    if (!hid_device_end_input_report(iface))
-        return STATUS_NO_MEMORY;
-
-    impl->haptic_effect_id = -1;
+    impl->haptics.id = -1;
     for (i = 0; i < ARRAY_SIZE(impl->effect_ids); ++i) impl->effect_ids[i] = -1;
 
-    if (test_bit(ffbits, FF_RUMBLE) && !hid_device_add_haptics(iface))
+    if (test_bit(info->ff, FF_RUMBLE) && !hid_device_add_haptics(iface))
         return STATUS_NO_MEMORY;
 
-    for (i = 0; i < FF_MAX; ++i) if (test_bit(ffbits, i)) break;
+    for (i = 0; i < FF_MAX; ++i) if (test_bit(info->ff, i)) break;
     if (i != FF_MAX)
     {
-        if (test_bit(ffbits, FF_SINE)) usages[count++] = PID_USAGE_ET_SINE;
-        if (test_bit(ffbits, FF_SQUARE)) usages[count++] = PID_USAGE_ET_SQUARE;
-        if (test_bit(ffbits, FF_TRIANGLE)) usages[count++] = PID_USAGE_ET_TRIANGLE;
-        if (test_bit(ffbits, FF_SAW_UP)) usages[count++] = PID_USAGE_ET_SAWTOOTH_UP;
-        if (test_bit(ffbits, FF_SAW_DOWN)) usages[count++] = PID_USAGE_ET_SAWTOOTH_DOWN;
-        if (test_bit(ffbits, FF_SPRING)) usages[count++] = PID_USAGE_ET_SPRING;
-        if (test_bit(ffbits, FF_DAMPER)) usages[count++] = PID_USAGE_ET_DAMPER;
-        if (test_bit(ffbits, FF_INERTIA)) usages[count++] = PID_USAGE_ET_INERTIA;
-        if (test_bit(ffbits, FF_FRICTION)) usages[count++] = PID_USAGE_ET_FRICTION;
-        if (test_bit(ffbits, FF_CONSTANT)) usages[count++] = PID_USAGE_ET_CONSTANT_FORCE;
-        if (test_bit(ffbits, FF_RAMP)) usages[count++] = PID_USAGE_ET_RAMP;
+        if (test_bit(info->ff, FF_SINE)) usages[count++] = PID_USAGE_ET_SINE;
+        if (test_bit(info->ff, FF_SQUARE)) usages[count++] = PID_USAGE_ET_SQUARE;
+        if (test_bit(info->ff, FF_TRIANGLE)) usages[count++] = PID_USAGE_ET_TRIANGLE;
+        if (test_bit(info->ff, FF_SAW_UP)) usages[count++] = PID_USAGE_ET_SAWTOOTH_UP;
+        if (test_bit(info->ff, FF_SAW_DOWN)) usages[count++] = PID_USAGE_ET_SAWTOOTH_DOWN;
+        if (test_bit(info->ff, FF_SPRING)) usages[count++] = PID_USAGE_ET_SPRING;
+        if (test_bit(info->ff, FF_DAMPER)) usages[count++] = PID_USAGE_ET_DAMPER;
+        if (test_bit(info->ff, FF_INERTIA)) usages[count++] = PID_USAGE_ET_INERTIA;
+        if (test_bit(info->ff, FF_FRICTION)) usages[count++] = PID_USAGE_ET_FRICTION;
+        if (test_bit(info->ff, FF_CONSTANT)) usages[count++] = PID_USAGE_ET_CONSTANT_FORCE;
+        if (test_bit(info->ff, FF_RAMP)) usages[count++] = PID_USAGE_ET_RAMP;
 
-        if (!hid_device_add_physical(iface, usages, count))
+        if (!hid_device_add_physical(iface, usages, count, 2))
             return STATUS_NO_MEMORY;
     }
 
@@ -1094,15 +952,12 @@ static NTSTATUS build_report_descriptor(struct unix_device *iface, struct udev_d
         return STATUS_NO_MEMORY;
 
     /* Initialize axis in the report */
-    for (i = 0; i < ARRAY_SIZE(absolute_usages); i++)
+    for (i = 0; i < ABS_CNT; i++)
     {
-        if (!test_bit(absbits, i)) continue;
-        if (i < ABS_HAT0X || i > ABS_HAT3Y)
-            hid_device_set_abs_axis(iface, impl->abs_map[i], abs_info[i].value);
-        else if ((i - ABS_HAT0X) % 2)
-            hid_device_set_hatswitch_y(iface, impl->hat_map[i - ABS_HAT0X], abs_info[i].value);
-        else
-            hid_device_set_hatswitch_x(iface, impl->hat_map[i - ABS_HAT0X], abs_info[i].value);
+        USAGE_AND_PAGE usage = absolute_usages[i];
+        if (!usage.UsagePage || !usage.Usage) continue;
+        if (!test_bit(info->abs, i)) continue;
+        set_abs_axis_value(iface, i, abs_info[i].value);
     }
 
     return STATUS_SUCCESS;
@@ -1113,7 +968,7 @@ static BOOL set_report_from_event(struct unix_device *iface, struct input_event 
     struct hid_effect_state *effect_state = &iface->hid_physical.effect_state;
     struct lnxev_device *impl = lnxev_impl_from_unix_device(iface);
     ULONG effect_flags = InterlockedOr(&impl->effect_flags, 0);
-    unsigned int i;
+    unsigned int i, button;
 
     switch (ie->type)
     {
@@ -1131,15 +986,18 @@ static BOOL set_report_from_event(struct unix_device *iface, struct input_event 
         return FALSE;
 #endif
     case EV_KEY:
-        hid_device_set_button(iface, impl->button_map[ie->code], ie->value);
+        if (!(button = impl->button_map[ie->code])) return FALSE;
+        if (impl->is_gamepad && !impl->hat_count)
+        {
+            if (button == 11) hid_device_set_hatswitch_y(iface, 0, -1);
+            if (button == 13) hid_device_set_hatswitch_y(iface, 0, +1);
+            if (button == 14) hid_device_set_hatswitch_x(iface, 0, -1);
+            if (button == 12) hid_device_set_hatswitch_x(iface, 0, +1);
+        }
+        hid_device_set_button(iface, button - 1, ie->value);
         return FALSE;
     case EV_ABS:
-        if (ie->code < ABS_HAT0X || ie->code > ABS_HAT3Y)
-            hid_device_set_abs_axis(iface, impl->abs_map[ie->code], ie->value);
-        else if ((ie->code - ABS_HAT0X) % 2)
-            hid_device_set_hatswitch_y(iface, impl->hat_map[ie->code - ABS_HAT0X], ie->value);
-        else
-            hid_device_set_hatswitch_x(iface, impl->hat_map[ie->code - ABS_HAT0X], ie->value);
+        set_abs_axis_value(iface, ie->code, ie->value);
         return FALSE;
     case EV_REL:
         hid_device_set_rel_axis(iface, impl->rel_map[ie->code], ie->value);
@@ -1164,17 +1022,53 @@ static void lnxev_device_destroy(struct unix_device *iface)
     udev_device_unref(impl->base.udev_device);
 }
 
+static void *lnxev_device_haptics_thread(void *args)
+{
+    struct lnxev_device *impl = lnxev_impl_from_unix_device(args);
+    struct ff_effect effect = {0};
+
+    pthread_mutex_lock(&udev_cs);
+
+    for (;;)
+    {
+        while (!memcmp(&effect, &impl->haptics, sizeof(effect)))
+            pthread_cond_wait(&impl->haptics_cond, &udev_cs);
+        if (impl->haptics.type == (uint16_t)-1) break;
+
+        effect = impl->haptics;
+        pthread_mutex_unlock(&udev_cs);
+
+        if (effect.type && (effect.id == -1 || ioctl(impl->base.device_fd, EVIOCSFF, &effect) == -1))
+        {
+            effect.id = -1;
+            ioctl(impl->base.device_fd, EVIOCSFF, &effect);
+        }
+
+        if (effect.id != -1)
+        {
+            struct input_event event = {.type = EV_FF, .code = effect.id, .value = !!effect.type};
+            write(impl->base.device_fd, &event, sizeof(event));
+        }
+
+        pthread_mutex_lock(&udev_cs);
+        impl->haptics.id = effect.id;
+    }
+
+    pthread_mutex_unlock(&udev_cs);
+    return NULL;
+}
+
 static NTSTATUS lnxev_device_start(struct unix_device *iface)
 {
     struct lnxev_device *impl = lnxev_impl_from_unix_device(iface);
-    NTSTATUS status;
-
-    if ((status = build_report_descriptor(iface, impl->base.udev_device)))
-        return status;
 
     pthread_mutex_lock(&udev_cs);
     start_polling_device(iface);
+    impl->haptics.type = 0;
     pthread_mutex_unlock(&udev_cs);
+
+    pthread_cond_init(&impl->haptics_cond, NULL);
+    pthread_create(&impl->haptics_thread, NULL, lnxev_device_haptics_thread, iface);
     return STATUS_SUCCESS;
 }
 
@@ -1185,7 +1079,12 @@ static void lnxev_device_stop(struct unix_device *iface)
     pthread_mutex_lock(&udev_cs);
     stop_polling_device(iface);
     list_remove(&impl->base.unix_device.entry);
+    impl->haptics.type = -1;
     pthread_mutex_unlock(&udev_cs);
+    pthread_cond_signal(&impl->haptics_cond);
+
+    pthread_join(impl->haptics_thread, NULL);
+    pthread_cond_destroy(&impl->haptics_cond);
 }
 
 static void lnxev_device_read_report(struct unix_device *iface)
@@ -1209,39 +1108,17 @@ static NTSTATUS lnxev_device_haptics_start(struct unix_device *iface, UINT durat
                                            USHORT left_intensity, USHORT right_intensity)
 {
     struct lnxev_device *impl = lnxev_impl_from_unix_device(iface);
-    struct ff_effect effect =
-    {
-        .id = impl->haptic_effect_id,
-        .type = FF_RUMBLE,
-    };
-    struct input_event event;
 
     TRACE("iface %p, duration_ms %u, rumble_intensity %u, buzz_intensity %u, left_intensity %u, right_intensity %u.\n",
           iface, duration_ms, rumble_intensity, buzz_intensity, left_intensity, right_intensity);
 
-    effect.replay.length = duration_ms;
-    effect.u.rumble.strong_magnitude = rumble_intensity;
-    effect.u.rumble.weak_magnitude = buzz_intensity;
-
-    if (effect.id == -1 || ioctl(impl->base.device_fd, EVIOCSFF, &effect) == -1)
-    {
-        effect.id = -1;
-        if (ioctl(impl->base.device_fd, EVIOCSFF, &effect) == 1)
-        {
-            WARN("couldn't re-allocate rumble effect for haptics: %d %s\n", errno, strerror(errno));
-            return STATUS_UNSUCCESSFUL;
-        }
-        impl->haptic_effect_id = effect.id;
-    }
-
-    event.type = EV_FF;
-    event.code = effect.id;
-    event.value = 1;
-    if (write(impl->base.device_fd, &event, sizeof(event)) == -1)
-    {
-        WARN("couldn't start haptics rumble effect: %d %s\n", errno, strerror(errno));
-        return STATUS_UNSUCCESSFUL;
-    }
+    pthread_mutex_lock(&udev_cs);
+    impl->haptics.type = FF_RUMBLE;
+    impl->haptics.replay.length = duration_ms;
+    impl->haptics.u.rumble.strong_magnitude = rumble_intensity;
+    impl->haptics.u.rumble.weak_magnitude = buzz_intensity;
+    pthread_mutex_unlock(&udev_cs);
+    pthread_cond_signal(&impl->haptics_cond);
 
     return STATUS_SUCCESS;
 }
@@ -1249,22 +1126,16 @@ static NTSTATUS lnxev_device_haptics_start(struct unix_device *iface, UINT durat
 static NTSTATUS lnxev_device_haptics_stop(struct unix_device *iface)
 {
     struct lnxev_device *impl = lnxev_impl_from_unix_device(iface);
-    struct ff_effect effect =
-    {
-        .id = impl->haptic_effect_id,
-        .type = FF_RUMBLE,
-    };
-    struct input_event event;
 
     TRACE("iface %p.\n", iface);
 
-    if (effect.id == -1) return STATUS_SUCCESS;
-
-    event.type = EV_FF;
-    event.code = effect.id;
-    event.value = 0;
-    if (write(impl->base.device_fd, &event, sizeof(event)) == -1)
-        WARN("couldn't stop haptics rumble effect: %d %s\n", errno, strerror(errno));
+    pthread_mutex_lock(&udev_cs);
+    impl->haptics.type = 0;
+    impl->haptics.replay.length = 0;
+    impl->haptics.u.rumble.strong_magnitude = 0;
+    impl->haptics.u.rumble.weak_magnitude = 0;
+    pthread_mutex_unlock(&udev_cs);
+    pthread_cond_signal(&impl->haptics_cond);
 
     return STATUS_SUCCESS;
 }
@@ -1556,14 +1427,14 @@ static const struct hid_device_vtbl lnxev_device_vtbl =
 };
 #endif /* HAS_PROPER_INPUT_HEADER */
 
-static void get_device_subsystem_info(struct udev_device *dev, char const *subsystem, struct device_desc *desc,
-                                      int *bus)
+static void get_device_subsystem_info(struct udev_device *dev, const char *subsystem, const char *devtype,
+                                      struct device_desc *desc, int *bus)
 {
     struct udev_device *parent = NULL;
     const char *ptr, *next, *tmp;
     char buffer[MAX_PATH];
 
-    if (!(parent = udev_device_get_parent_with_subsystem_devtype(dev, subsystem, NULL))) return;
+    if (!(parent = udev_device_get_parent_with_subsystem_devtype(dev, subsystem, devtype))) return;
 
     if ((next = udev_device_get_sysattr_value(parent, "uevent")))
     {
@@ -1595,50 +1466,248 @@ static void get_device_subsystem_info(struct udev_device *dev, char const *subsy
                 if (*bus || desc->vid || desc->pid) continue;
                 sscanf(ptr, "HID_ID=%x:%x:%x\n", bus, &desc->vid, &desc->pid);
             }
-            if (!strncmp(ptr, "PRODUCT=", 8) && *bus != BUS_BLUETOOTH)
+
+            if (!strcmp(subsystem, "input"))
             {
-                if (desc->version) continue;
-                if (!strcmp(subsystem, "usb"))
-                    sscanf(ptr, "PRODUCT=%x/%x/%x\n", &desc->vid, &desc->pid, &desc->version);
-                else
+                if (!strncmp(ptr, "PRODUCT=", 8))
                     sscanf(ptr, "PRODUCT=%x/%x/%x/%x\n", bus, &desc->vid, &desc->pid, &desc->version);
+            }
+
+            if (!strcmp(subsystem, "usb") && *bus != BUS_BLUETOOTH)
+            {
+                if (!strncmp(ptr, "PRODUCT=", 8))
+                    sscanf(ptr, "PRODUCT=%x/%x/%x\n", &desc->vid, &desc->pid, &desc->version);
             }
         }
     }
 
-    if (!desc->manufacturer[0] && (tmp = udev_device_get_sysattr_value(dev, "manufacturer")))
-        ntdll_umbstowcs(tmp, strlen(tmp) + 1, desc->manufacturer, ARRAY_SIZE(desc->manufacturer));
+    if (!strcmp(subsystem, "usb") && *bus != BUS_BLUETOOTH)
+    {
+        if ((tmp = udev_device_get_sysattr_value(parent, "manufacturer")))
+            ntdll_umbstowcs(tmp, strlen(tmp) + 1, desc->manufacturer, ARRAY_SIZE(desc->manufacturer));
 
-    if (!desc->product[0] && (tmp = udev_device_get_sysattr_value(dev, "product")))
-        ntdll_umbstowcs(tmp, strlen(tmp) + 1, desc->product, ARRAY_SIZE(desc->product));
+        if ((tmp = udev_device_get_sysattr_value(parent, "product")))
+            ntdll_umbstowcs(tmp, strlen(tmp) + 1, desc->product, ARRAY_SIZE(desc->product));
 
-    if (!desc->serialnumber[0] && (tmp = udev_device_get_sysattr_value(dev, "serial")))
-        ntdll_umbstowcs(tmp, strlen(tmp) + 1, desc->serialnumber, ARRAY_SIZE(desc->serialnumber));
+        if ((tmp = udev_device_get_sysattr_value(parent, "serial")))
+            ntdll_umbstowcs(tmp, strlen(tmp) + 1, desc->serialnumber, ARRAY_SIZE(desc->serialnumber));
+    }
 }
 
-static void hidraw_set_quirks(struct hidraw_device *impl, DWORD bus_type, WORD vid, WORD pid)
+static NTSTATUS hidraw_device_create(struct udev_device *dev, int fd, const char *devnode, struct device_desc desc)
 {
-    if (bus_type == BUS_BLUETOOTH && is_dualshock4_gamepad(vid, pid))
-        impl->quirks |= QUIRK_DS4_BT;
+#ifdef HAVE_LINUX_HIDRAW_H
+    static const WCHAR hidraw[] = {'h','i','d','r','a','w',0};
+    static const WCHAR zeros[] = {'0','0','0','0',0};
+    struct base_device *impl;
+    char buffer[MAX_PATH];
 
-    if (bus_type == BUS_BLUETOOTH && is_dualsense_gamepad(vid, pid))
-        impl->quirks |= QUIRK_DUALSENSE_BT;
+    desc.is_hidraw = TRUE;
+    if (!desc.product[0] && ioctl(fd, HIDIOCGRAWNAME(sizeof(buffer) - 1), buffer) >= 0)
+        ntdll_umbstowcs(buffer, strlen(buffer) + 1, desc.product, ARRAY_SIZE(desc.product));
+
+    if (!desc.manufacturer[0]) memcpy(desc.manufacturer, hidraw, sizeof(hidraw));
+    if (!desc.serialnumber[0]) memcpy(desc.serialnumber, zeros, sizeof(zeros));
+
+    if (!(impl = raw_device_create(&hidraw_device_vtbl, sizeof(struct hidraw_device))))
+        return STATUS_NO_MEMORY;
+    list_add_tail(&device_list, &impl->unix_device.entry);
+    impl->read_report = hidraw_device_read_report;
+    impl->udev_device = udev_device_ref(dev);
+    strcpy(impl->devnode, devnode);
+    impl->device_fd = fd;
+
+    TRACE("dev %p, node %s, desc %s.\n", dev, debugstr_a(devnode), debugstr_device_desc(&desc));
+    bus_event_queue_device_created(&event_queue, &impl->unix_device, &desc);
+    return STATUS_SUCCESS;
+#else
+    return STATUS_NOT_SUPPORTED;
+#endif
+}
+
+static NTSTATUS lnxev_device_create(struct udev_device *dev, int fd, const char *devnode, struct device_desc desc)
+{
+#ifdef HAS_PROPER_INPUT_HEADER
+    static const WCHAR evdev[] = {'e','v','d','e','v',0};
+    static const WCHAR zeros[] = {'0','0','0','0',0};
+    int axis_count = 0, button_count = 0;
+    struct lnxev_info info = {0};
+    struct lnxev_device *impl;
+
+    if (ioctl(fd, EVIOCGID, &info.id) == -1) memset(&info.id, 0, sizeof(info.id));
+    if (ioctl(fd, EVIOCGNAME(sizeof(info.name) - 1), info.name) == -1) memset(info.name, 0, sizeof(info.name));
+    if (ioctl(fd, EVIOCGUNIQ(sizeof(info.uniq) - 1), info.uniq) == -1) memset(info.uniq, 0, sizeof(info.uniq));
+    if (ioctl(fd, EVIOCGBIT(EV_ABS, sizeof(info.abs)), info.abs) == -1) memset(info.abs, 0, sizeof(info.abs));
+    if (ioctl(fd, EVIOCGBIT(EV_REL, sizeof(info.rel)), info.rel) == -1) memset(info.rel, 0, sizeof(info.rel));
+    if (ioctl(fd, EVIOCGBIT(EV_KEY, sizeof(info.key)), info.key) == -1) memset(info.key, 0, sizeof(info.key));
+    if (ioctl(fd, EVIOCGBIT(EV_FF, sizeof(info.ff)), info.ff) == -1) memset(info.ff, 0, sizeof(info.ff));
+
+    if (!desc.vid) desc.vid = info.id.vendor;
+    if (!desc.pid) desc.pid = info.id.product;
+    if (!desc.version) desc.version = info.id.version;
+    if (!desc.manufacturer[0]) memcpy(desc.manufacturer, evdev, sizeof(evdev));
+    if (!desc.product[0]) ntdll_umbstowcs(info.name, strlen(info.name) + 1, desc.product, ARRAY_SIZE(desc.product));
+    if (!desc.serialnumber[0]) ntdll_umbstowcs(info.uniq, strlen(info.uniq) + 1, desc.serialnumber, ARRAY_SIZE(desc.serialnumber));
+    if (!desc.serialnumber[0]) memcpy(desc.serialnumber, zeros, sizeof(zeros));
+
+    if (!(impl = hid_device_create(&lnxev_device_vtbl, sizeof(struct lnxev_device))))
+        return STATUS_NO_MEMORY;
+    list_add_tail(&device_list, &impl->base.unix_device.entry);
+    impl->base.read_report = lnxev_device_read_report;
+    impl->base.udev_device = udev_device_ref(dev);
+    strcpy(impl->base.devnode, devnode);
+    impl->base.device_fd = fd;
+
+    for (int i = 0; i < ABS_CNT; i++)
+    {
+        USAGE_AND_PAGE usage = absolute_usages[i];
+        struct input_absinfo abs;
+        if (!usage.UsagePage || !usage.Usage) continue;
+        if (!test_bit(info.abs, i)) continue;
+        ioctl(fd, EVIOCGABS(i), &abs);
+        impl->abs_map[i] = ++axis_count;
+        impl->abs_min[i] = abs.minimum;
+        impl->abs_max[i] = abs.maximum;
+    }
+
+    for (int i = 0, count = 0; i < REL_CNT; i++)
+    {
+        USAGE_AND_PAGE usage = relative_usages[i];
+        if (!usage.UsagePage || !usage.Usage) continue;
+        if (!test_bit(info.rel, i)) continue;
+        impl->rel_map[i] = ++count;
+    }
+
+    for (int i = ABS_HAT0X; i <= ABS_HAT3X; i += 2)
+    {
+        if (!test_bit(info.abs, i)) continue;
+        impl->hat_map[i - ABS_HAT0X] = ++impl->hat_count;
+        impl->hat_map[i - ABS_HAT0X + 1] = impl->hat_count;
+    }
+
+    for (int i = BTN_MISC; i < KEY_MAX; i++)
+    {
+        if (!test_bit(info.key, i)) continue;
+        impl->button_map[i] = ++impl->button_count;
+    }
+
+    if (sscanf(info.name, "Microsoft X-Box 360 pad %u", &desc.input) != 1) desc.input = -1;
+    if (desc.vid == 0x28de && desc.pid == 0x11ff)
+    {
+        desc.is_gamepad = TRUE;
+        desc.version = 0; /* keep version fixed as 0 so we can hardcode it in ntdll rawinput pipe redirection */
+    }
+    else if (is_xbox_gamepad(desc.vid, desc.pid)) desc.is_gamepad = TRUE;
+    else if (axis_count == 6 && button_count >= (impl->hat_count ? 10 : 14)) desc.is_gamepad = TRUE;
+
+    if ((impl->is_gamepad = desc.is_gamepad))
+    {
+        static const int gamepad_axes[] = {1, 2, 5, 3, 4, 6};
+        static const UINT gamepad_buttons[] =
+        {
+            BTN_A,
+            BTN_B,
+            BTN_X,
+            BTN_Y,
+            BTN_TL,
+            BTN_TR,
+            BTN_SELECT,
+            BTN_START,
+            BTN_THUMBL,
+            BTN_THUMBR,
+            BTN_MODE,
+            BTN_C,
+            BTN_Z,
+            BTN_TL2,
+            BTN_TR2,
+        };
+
+        memset(impl->abs_map, 0, sizeof(impl->abs_map));
+        memset(impl->button_map, 0, sizeof(impl->button_map));
+        impl->button_count = 0;
+
+        for (int i = 0, count = 0; i < ABS_CNT; i++)
+        {
+            USAGE_AND_PAGE usage = absolute_usages[i];
+            if (!usage.UsagePage || !usage.Usage) continue;
+            if (!test_bit(info.abs, i)) continue;
+            impl->abs_map[i] = gamepad_axes[count++];
+        }
+
+        for (int i = 0; i < ARRAY_SIZE(gamepad_buttons); i++)
+        {
+            int button = gamepad_buttons[i];
+            if (!test_bit(info.key, button)) continue;
+            if (impl->button_count > (impl->hat_count ? 10 : 14)) break;
+            impl->button_map[button] = ++impl->button_count;
+            if (impl->hat_count && impl->button_count == 11) impl->button_map[button] = 17;
+        }
+
+        for (int i = BTN_MISC; i < KEY_MAX; i++)
+        {
+            if (i >= BTN_GAMEPAD && i < BTN_DIGI) continue;
+            if (impl->button_count > (impl->hat_count ? 10 : 14)) break;
+            if (!test_bit(info.key, i)) continue;
+            impl->button_map[i] = ++impl->button_count;
+            if (impl->hat_count && impl->button_count == 11) impl->button_map[i] = 17;
+        }
+    }
+
+    if (build_report_descriptor(&impl->base.unix_device, impl->base.udev_device, &info))
+    {
+        list_remove(&impl->base.unix_device.entry);
+        impl->base.unix_device.vtbl->destroy(&impl->base.unix_device);
+    }
+    else
+    {
+        TRACE("dev %p, node %s, desc %s.\n", dev, debugstr_a(devnode), debugstr_device_desc(&desc));
+        bus_event_queue_device_created(&event_queue, &impl->base.unix_device, &desc);
+    }
+
+    return STATUS_SUCCESS;
+#else
+    return STATUS_NOT_SUPPORTED;
+#endif
+}
+
+static void get_container_id_for_usb_udev_device(struct udev_device *dev, struct device_desc *desc)
+{
+    unsigned int vid, pid, version;
+    struct udev_device *parent;
+    uint8_t bus_num, dev_num;
+    uint64_t init_time;
+    const char *tmp;
+
+    init_time = 0;
+    bus_num = dev_num = 0;
+    vid = pid = version = 0;
+    if (!(parent = udev_device_get_parent_with_subsystem_devtype(dev, "usb", "usb_device")))
+    {
+        ERR("Failed to get parent device.\n");
+        return;
+    }
+
+    if ((tmp = udev_device_get_property_value(parent, "PRODUCT")))
+        sscanf(tmp, "%x/%x/%x", &vid, &pid, &version);
+    if ((tmp = udev_device_get_property_value(parent, "USEC_INITIALIZED")))
+        init_time = strtoull(tmp, NULL, 10);
+    if ((tmp = udev_device_get_property_value(parent, "BUSNUM")))
+        bus_num = strtol(tmp, NULL, 10);
+    if ((tmp = udev_device_get_property_value(parent, "DEVNUM")))
+        dev_num = strtol(tmp, NULL, 10);
+
+    desc->bus_container_id.Data1 = MAKELONG(vid, pid);
+    desc->bus_container_id.Data2 = bus_num;
+    desc->bus_container_id.Data3 = dev_num;
+    memcpy(desc->bus_container_id.Data4, &init_time, sizeof(desc->bus_container_id.Data4));
+    TRACE("Created container ID %s.\n", debugstr_guid(&desc->bus_container_id));
 }
 
 static void udev_add_device(struct udev_device *dev, int fd)
 {
-    const char *env = getenv("PROTON_EXPOSE_STEAM_CONTROLLER");
-    BOOL expose_steam_controller = !env || atoi(env) == 1;
-
-    struct device_desc desc =
-    {
-        .input = -1,
-    };
-    struct base_device *impl;
-    const char *subsystem;
-    const char *devnode;
+    struct device_desc desc = { .input = -1 };
+    const char *subsystem, *devnode;
     int bus = 0;
-    int axes = -1, buttons = -1;
 
     if (!(devnode = udev_device_get_devnode(dev)))
     {
@@ -1654,149 +1723,39 @@ static void udev_add_device(struct udev_device *dev, int fd)
 
     TRACE("udev %s syspath %s\n", debugstr_a(devnode), udev_device_get_syspath(dev));
 
-#ifdef HAS_PROPER_INPUT_HEADER
-    if ((impl = find_device_from_syspath(get_device_syspath(dev))))
+    get_device_subsystem_info(dev, "hid", NULL, &desc, &bus);
+    get_device_subsystem_info(dev, "input", NULL, &desc, &bus);
+    get_device_subsystem_info(dev, "usb", "usb_device", &desc, &bus);
+    if (bus == BUS_BLUETOOTH) desc.bus_type = BUS_TYPE_BLUETOOTH;
+    else if (bus == BUS_USB) desc.bus_type = BUS_TYPE_USB;
+
+    if (desc.bus_type == BUS_TYPE_USB) get_container_id_for_usb_udev_device(dev, &desc);
+
+    if (!(subsystem = udev_device_get_subsystem(dev)))
     {
-        TRACE("duplicate device found, not adding the new one\n");
+        WARN("udev_device_get_subsystem failed for %s.\n", debugstr_a(devnode));
         close(fd);
         return;
     }
 
-    axes = count_abs_axis(fd);
-    buttons = count_buttons(fd, NULL);
-#endif
-
-    get_device_subsystem_info(dev, "hid", &desc, &bus);
-    get_device_subsystem_info(dev, "input", &desc, &bus);
-    get_device_subsystem_info(dev, "usb", &desc, &bus);
-
-    subsystem = udev_device_get_subsystem(dev);
-    if (!strcmp(subsystem, "hidraw"))
-    {
-        static const WCHAR hidraw[] = {'h','i','d','r','a','w',0};
-#ifdef HAVE_LINUX_HIDRAW_H
-        char product[MAX_PATH];
-#endif
-
-        if (!desc.manufacturer[0]) memcpy(desc.manufacturer, hidraw, sizeof(hidraw));
-
-#ifdef HAVE_LINUX_HIDRAW_H
-        if (!desc.product[0] && ioctl(fd, HIDIOCGRAWNAME(sizeof(product) - 1), product) >= 0)
-            ntdll_umbstowcs(product, strlen(product) + 1, desc.product, ARRAY_SIZE(desc.product));
-#endif
-    }
-#ifdef HAS_PROPER_INPUT_HEADER
-    else if (!strcmp(subsystem, "input"))
-    {
-        static const WCHAR evdev[] = {'e','v','d','e','v',0};
-        struct input_id device_id = {0};
-        char buffer[MAX_PATH];
-
-        if (ioctl(fd, EVIOCGID, &device_id) < 0)
-            WARN("ioctl(EVIOCGID) failed: %d %s\n", errno, strerror(errno));
-        else
-        {
-            desc.vid = device_id.vendor;
-            desc.pid = device_id.product;
-            desc.version = device_id.version;
-        }
-
-        if (!desc.manufacturer[0]) memcpy(desc.manufacturer, evdev, sizeof(evdev));
-
-        if (!desc.product[0] && ioctl(fd, EVIOCGNAME(sizeof(buffer) - 1), buffer) > 0)
-        {
-            /* CW-Bug-Id: #20528 Check steam virtual controller indexes to keep them ordered */
-            /* CW-Bug-Id: #23185 Emulate Steam Input native hooks for native SDL */
-            if (sscanf(buffer, "Microsoft X-Box 360 pad %u", &desc.input) == 1)
-            {
-                if (!expose_steam_controller) desc.input++;
-                desc.version = 0; /* keep version fixed as 0 so we can hardcode it in ntdll rawinput pipe redirection */
-            }
-
-            ntdll_umbstowcs(buffer, strlen(buffer) + 1, desc.product, ARRAY_SIZE(desc.product));
-        }
-
-        if (!desc.serialnumber[0] && ioctl(fd, EVIOCGUNIQ(sizeof(buffer)), buffer) >= 0)
-            ntdll_umbstowcs(buffer, strlen(buffer) + 1, desc.serialnumber, ARRAY_SIZE(desc.serialnumber));
-    }
-#endif
-
-    if (!desc.serialnumber[0])
-    {
-        static const WCHAR zeros[] = {'0','0','0','0',0};
-        memcpy(desc.serialnumber, zeros, sizeof(zeros));
-    }
-
-    if (desc.vid == 0x28de && desc.pid == 0x11ff)
-    {
-        if (!strcmp(subsystem, "hidraw"))
-        {
-            TRACE("hidraw %s: deferring %s to a different backend\n", debugstr_a(devnode), debugstr_device_desc(&desc));
-            close(fd);
-            return;
-        }
-
+    if (desc.vid == 0x28de && desc.pid == 0x11ff && !strcmp(subsystem, "input"))
         TRACE("evdev %s: detected steam input virtual controller\n", debugstr_a(devnode));
-        desc.is_gamepad = TRUE;
-
-        if (!expose_steam_controller)
-        {
-            TRACE("pretending it's an Xbox 360 controller\n");
-            desc.vid = 0x045e;
-            desc.pid = 0x028e;
-        }
-    }
-    else if (!is_hidraw_enabled(desc.vid, desc.pid, axes, buttons))
+    else if (is_sdl_ignored_device(desc.vid, desc.pid))
     {
-        TRACE("hidraw %s: deferring %s to a different backend\n", debugstr_a(devnode), debugstr_device_desc(&desc));
+        TRACE("evdev %s: ignoring %s, in SDL ignore list\n", debugstr_a(devnode), debugstr_device_desc(&desc));
         close(fd);
         return;
     }
-    else if (is_sdl_blacklisted(desc.vid, desc.pid))
-    {
-        /* this device is blacklisted */
-        TRACE("hidraw %s: ignoring %s, in SDL blacklist\n", debugstr_a(devnode), debugstr_device_desc(&desc));
-        close(fd);
-        return;
-    }
-    else if (strcmp(subsystem, "hidraw"))
+    else if (!strcmp(subsystem, "input"))
     {
         TRACE("evdev %s: deferring %s to a different backend\n", debugstr_a(devnode), debugstr_device_desc(&desc));
         close(fd);
         return;
     }
-#ifdef HAS_PROPER_INPUT_HEADER
-    else
-        desc.is_gamepad = (axes == 6 && buttons >= 14);
-#endif
 
-    TRACE("dev %p, node %s, desc %s.\n", dev, debugstr_a(devnode), debugstr_device_desc(&desc));
-
-    if (strcmp(subsystem, "hidraw") == 0)
-    {
-        if (!(impl = raw_device_create(&hidraw_device_vtbl, sizeof(struct hidraw_device)))) return;
-        list_add_tail(&device_list, &impl->unix_device.entry);
-        impl->read_report = hidraw_device_read_report;
-        impl->udev_device = udev_device_ref(dev);
-        strcpy(impl->devnode, devnode);
-        impl->device_fd = fd;
-        hidraw_set_quirks((struct hidraw_device *)impl, bus, desc.vid, desc.pid);
-
-        bus_event_queue_device_created(&event_queue, &impl->unix_device, &desc);
-    }
-#ifdef HAS_PROPER_INPUT_HEADER
-    else if (strcmp(subsystem, "input") == 0)
-    {
-        if (!(impl = hid_device_create(&lnxev_device_vtbl, sizeof(struct lnxev_device)))) return;
-        list_add_tail(&device_list, &impl->unix_device.entry);
-        impl->read_report = lnxev_device_read_report;
-        impl->udev_device = udev_device_ref(dev);
-        strcpy(impl->devnode, devnode);
-        impl->device_fd = fd;
-
-        bus_event_queue_device_created(&event_queue, &impl->unix_device, &desc);
-    }
-#endif
+    if ((desc.is_hidraw = !strcmp(subsystem, "hidraw")) && !hidraw_device_create(dev, fd, devnode, desc)) return;
+    if (!strcmp(subsystem, "input") && !lnxev_device_create(dev, fd, devnode, desc)) return;
+    close(fd);
 }
 
 #ifdef HAVE_SYS_INOTIFY_H
@@ -1869,7 +1828,7 @@ static void build_initial_deviceset_direct(void)
     int n, len;
     DIR *dir;
 
-    if (!options.disable_hidraw)
+    if (!options->disable_hidraw)
     {
         TRACE("Initial enumeration of /dev/hidraw*\n");
         if (!(dir = opendir("/dev"))) WARN("Unable to open /dev: %s\n", strerror(errno));
@@ -1886,7 +1845,7 @@ static void build_initial_deviceset_direct(void)
         }
     }
 #ifdef HAS_PROPER_INPUT_HEADER
-    if (!options.disable_input)
+    if (!options->disable_input)
     {
         TRACE("Initial enumeration of /dev/input/event*\n");
         if (!(dir = opendir("/dev/input"))) WARN("Unable to open /dev/input: %s\n", strerror(errno));
@@ -1915,7 +1874,7 @@ static int create_inotify(void)
         return fd;
     }
 
-    if (!options.disable_hidraw)
+    if (!options->disable_hidraw)
     {
         /* We need to watch for attribute changes in addition to
          * creation, because when a device is first created, it has
@@ -1927,7 +1886,7 @@ static int create_inotify(void)
         else systems++;
     }
 #ifdef HAS_PROPER_INPUT_HEADER
-    if (!options.disable_input)
+    if (!options->disable_input)
     {
         devinput_watch = inotify_add_watch(fd, "/dev/input", flags);
         if (devinput_watch < 0) WARN("Unable to initialize inotify for /dev/input: %s\n", strerror(errno));
@@ -2023,11 +1982,11 @@ static void build_initial_deviceset_udevd(void)
         return;
     }
 
-    if (!options.disable_hidraw)
+    if (!options->disable_hidraw)
         if (udev_enumerate_add_match_subsystem(enumerate, "hidraw") < 0)
             WARN("Failed to add subsystem 'hidraw' to enumeration\n");
 #ifdef HAS_PROPER_INPUT_HEADER
-    if (!options.disable_input)
+    if (!options->disable_input)
     {
         if (udev_enumerate_add_match_subsystem(enumerate, "input") < 0)
             WARN("Failed to add subsystem 'input' to enumeration\n");
@@ -2066,7 +2025,7 @@ static struct udev_monitor *create_monitor(int *fd)
         return NULL;
     }
 
-    if (!options.disable_hidraw)
+    if (!options->disable_hidraw)
     {
         if (udev_monitor_filter_add_match_subsystem_devtype(monitor, "hidraw", NULL) < 0)
             WARN("Failed to add 'hidraw' subsystem to monitor\n");
@@ -2074,7 +2033,7 @@ static struct udev_monitor *create_monitor(int *fd)
             systems++;
     }
 #ifdef HAS_PROPER_INPUT_HEADER
-    if (!options.disable_input)
+    if (!options->disable_input)
     {
         if (udev_monitor_filter_add_match_subsystem_devtype(monitor, "input", NULL) < 0)
             WARN("Failed to add 'input' subsystem to monitor\n");
@@ -2104,26 +2063,38 @@ static void process_monitor_event(struct udev_monitor *monitor)
 {
     struct base_device *impl;
     struct udev_device *dev;
-    const char *action;
+    const char *action, *devnode, *syspath;
 
     dev = udev_monitor_receive_device(monitor);
     if (!dev)
     {
-        FIXME("Failed to get device that has changed\n");
+        ERR("Failed to get device that has changed\n");
         return;
     }
 
     action = udev_device_get_action(dev);
-    TRACE("Received action %s for udev device %s\n", debugstr_a(action),
-          debugstr_a(udev_device_get_devnode(dev)));
+    syspath = udev_device_get_syspath(dev);
+    devnode = udev_device_get_devnode(dev);
+    TRACE("Received action %s for udev device %s (%p) devnode %s\n",
+          debugstr_a(action), debugstr_a(syspath), dev, debugstr_a(devnode));
 
-    if (!action)
-        WARN("No action received\n");
+    if (!syspath)
+        ERR("udev device %p does not have syspath!\n", dev);
+    else if (!action)
+        ERR("event for udev device %s does not have any action!\n", syspath);
+    else if (!devnode)
+    {
+        /* Pretty normal case, not all devices have associated
+         * devnodes. For example root input devices do not, but
+         * related/child mouse and event devices do.
+         */
+        TRACE("udev device %s does not have devnode, ignoring\n", syspath);
+    }
     else if (strcmp(action, "remove"))
         udev_add_device(dev, -1);
     else
     {
-        impl = find_device_from_devnode(udev_device_get_devnode(dev));
+        impl = find_device_from_devnode(devnode);
         if (impl) bus_event_queue_device_removed(&event_queue, &impl->unix_device);
         else WARN("failed to find device for udev device %p\n", dev);
     }
@@ -2134,10 +2105,12 @@ static void process_monitor_event(struct udev_monitor *monitor)
 NTSTATUS udev_bus_init(void *args)
 {
     int monitor_fd = -1;
+    BOOL disable_udevd;
 
     TRACE("args %p\n", args);
 
-    options = *(struct udev_bus_options *)args;
+    options = (struct bus_options *)args;
+    disable_udevd = options->disable_udevd;
 
     if (pipe(deviceloop_control) != 0)
     {
@@ -2154,15 +2127,15 @@ NTSTATUS udev_bus_init(void *args)
     if (access("/run/pressure-vessel", R_OK) || access("/.flatpak-info", R_OK))
     {
         TRACE("Container detected, bypassing udevd by default\n");
-        options.disable_udevd = TRUE;
+        disable_udevd = TRUE;
     }
 
 #ifdef HAVE_SYS_INOTIFY_H
-    if (options.disable_udevd) monitor_fd = create_inotify();
-    if (monitor_fd < 0) options.disable_udevd = FALSE;
+    if (disable_udevd) monitor_fd = create_inotify();
+    if (monitor_fd < 0) disable_udevd = FALSE;
 #else
-    if (options.disable_udevd) ERR("inotify support not compiled in!\n");
-    options.disable_udevd = FALSE;
+    if (disable_udevd) ERR("inotify support not compiled in!\n");
+    disable_udevd = FALSE;
 #endif
 
     if (monitor_fd < 0 && !(udev_monitor = create_monitor(&monitor_fd)))
@@ -2181,7 +2154,7 @@ NTSTATUS udev_bus_init(void *args)
     poll_fds[1].revents = 0;
     poll_count = 2;
 
-    if (!options.disable_udevd) build_initial_deviceset_udevd();
+    if (!disable_udevd) build_initial_deviceset_udevd();
 #ifdef HAVE_SYS_INOTIFY_H
     else build_initial_deviceset_direct();
 #endif

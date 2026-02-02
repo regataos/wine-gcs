@@ -1,6 +1,7 @@
+EXTRADEFS = -DD3DX_D3D_VERSION=10
 MODULE    = d3dx10_43.dll
 IMPORTLIB = d3dx10
-IMPORTS   = d3d10_1 d3dcompiler dxguid uuid gdi32
+IMPORTS   = d3d10_1 d3dcompiler dxguid uuid gdi32 ole32
 PARENTSRC = ../d3dx9_36
 DELAYIMPORTS = windowscodecs
 

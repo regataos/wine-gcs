@@ -570,7 +570,7 @@ static HRESULT WINAPI transform_ProcessOutput(IMFTransform *iface, DWORD flags, 
         return hr;
 
     if (SUCCEEDED(hr = wg_transform_read_mf(decoder->wg_transform, samples->pSample,
-            info.cbSize, &samples->dwStatus)))
+            info.cbSize, &samples->dwStatus, NULL)))
         wg_sample_queue_flush(decoder->wg_sample_queue, false);
 
     return hr;
@@ -762,6 +762,22 @@ static HRESULT WINAPI media_object_SetInputType(IMediaObject *iface, DWORD index
         decoder->wg_transform = 0;
     }
 
+{
+    const char *sgi = getenv("SteamGameId");
+    if (sgi && (0
+        || !strcmp(sgi, "802870")
+        || !strcmp(sgi, "1230140")
+        || !strcmp(sgi, "2515070")
+        || !strcmp(sgi, "3625380")
+    ))
+    {
+        WAVEFORMATEX *wfx = (WAVEFORMATEX *)decoder->input_type.pbFormat;
+        decoder->input_type.subtype = MFAudioFormat_PCM;
+        wfx->wFormatTag = WAVE_FORMAT_PCM;
+        wfx->wBitsPerSample = 16;
+    }
+}
+
     return S_OK;
 }
 
@@ -903,6 +919,9 @@ static HRESULT WINAPI media_object_Flush(IMediaObject *iface)
 
     TRACE("iface %p.\n", iface);
 
+    if (!decoder->wg_transform)
+        return DMO_E_TYPE_NOT_SET;
+
     if (FAILED(hr = wg_transform_flush(decoder->wg_transform)))
         return hr;
 
@@ -973,6 +992,8 @@ static HRESULT WINAPI media_object_ProcessOutput(IMediaObject *iface, DWORD flag
         wg_sample_queue_flush(decoder->wg_sample_queue, false);
     }
 
+    if (hr == MF_E_TRANSFORM_NEED_MORE_INPUT)
+        return S_FALSE;
     return hr;
 }
 

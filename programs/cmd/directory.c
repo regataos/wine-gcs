@@ -22,6 +22,10 @@
 #define WIN32_LEAN_AND_MEAN
 
 #include "wcmd.h"
+#define WIN32_NO_STATUS
+#include <pathcch.h>
+#include <winioctl.h>
+#include <ddk/ntifs.h>
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(cmd);
@@ -210,6 +214,46 @@ static void WCMD_getfileowner(WCHAR *filename, WCHAR *owner, int ownerlen) {
     return;
 }
 
+static void output_reparse_target(const WCHAR *dir, const WCHAR *filename)
+{
+    char buffer[MAXIMUM_REPARSE_DATA_BUFFER_SIZE];
+    REPARSE_DATA_BUFFER *data = (void *)buffer;
+    HANDLE file;
+    WCHAR *path;
+    DWORD size;
+
+    PathAllocCombine(dir, filename, PATHCCH_ALLOW_LONG_PATHS, &path);
+    file = CreateFileW(path, GENERIC_READ, 0, NULL, OPEN_EXISTING,
+            FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, NULL);
+    if (file == INVALID_HANDLE_VALUE)
+    {
+        WARN("failed to open %s, error %lu\n", debugstr_w(path), GetLastError());
+        LocalFree(path);
+        return;
+    }
+
+    if (DeviceIoControl(file, FSCTL_GET_REPARSE_POINT, NULL, 0, buffer, sizeof(buffer), &size, NULL))
+    {
+        if (data->ReparseTag == IO_REPARSE_TAG_MOUNT_POINT)
+        {
+            size_t offset = data->MountPointReparseBuffer.PrintNameOffset / sizeof(WCHAR);
+            WCMD_output(L" [%1]", data->MountPointReparseBuffer.PathBuffer + offset);
+        }
+        else if (data->ReparseTag == IO_REPARSE_TAG_SYMLINK)
+        {
+            size_t offset = data->SymbolicLinkReparseBuffer.PrintNameOffset / sizeof(WCHAR);
+            WCMD_output(L" [%1]", data->SymbolicLinkReparseBuffer.PathBuffer + offset);
+        }
+    }
+    else
+    {
+        WARN("failed to get reparse point from %s, error %lu\n", debugstr_w(path), GetLastError());
+    }
+
+    LocalFree(path);
+    CloseHandle(file);
+}
+
 /*****************************************************************************
  * WCMD_list_directory
  *
@@ -271,13 +315,7 @@ static DIRECTORY_STACK *WCMD_list_directory (DIRECTORY_STACK *inputparms, int le
            if (tmpLen > widest) widest = tmpLen;
         }
 
-        fd = realloc(fd, (entry_count + 1) * sizeof(WIN32_FIND_DATAW));
-        if (fd == NULL) {
-          FindClose (hff);
-          WINE_ERR("Out of memory\n");
-          errorlevel = 1;
-          return parms->next;
-        }
+        fd = xrealloc(fd, (entry_count + 1) * sizeof(WIN32_FIND_DATAW));
       } while (FindNextFileW(hff, &fd[entry_count]) != 0);
       FindClose (hff);
     }
@@ -381,10 +419,19 @@ static DIRECTORY_STACK *WCMD_list_directory (DIRECTORY_STACK *inputparms, int le
         dir_count++;
 
         if (!bare) {
-           WCMD_output (L"%1  %2    <DIR>          ", datestring, timestring);
+           if ((fd[i].dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)
+                    && (fd[i].dwReserved0 == IO_REPARSE_TAG_MOUNT_POINT))
+                WCMD_output(L"%1  %2    <JUNCTION>     ", datestring, timestring);
+           else if ((fd[i].dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)
+                    && (fd[i].dwReserved0 == IO_REPARSE_TAG_SYMLINK))
+                WCMD_output(L"%1  %2    <SYMLINKD>     ", datestring, timestring);
+           else
+                WCMD_output(L"%1  %2    <DIR>          ", datestring, timestring);
            if (shortname) WCMD_output(L"%1!-13s!", fd[i].cAlternateFileName);
            if (usernames) WCMD_output(L"%1!-23s!", username);
            WCMD_output(L"%1",fd[i].cFileName);
+           if (fd[i].dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)
+                output_reparse_target(inputparms->dirName, fd[i].cFileName);
         } else {
            if (!((lstrcmpW(fd[i].cFileName, L".") == 0) ||
                  (lstrcmpW(fd[i].cFileName, L"..") == 0))) {
@@ -400,11 +447,17 @@ static DIRECTORY_STACK *WCMD_list_directory (DIRECTORY_STACK *inputparms, int le
         file_size.u.HighPart = fd[i].nFileSizeHigh;
         byte_count.QuadPart += file_size.QuadPart;
         if (!bare) {
-           WCMD_output (L"%1  %2    %3!14s! ", datestring, timestring,
-                        WCMD_filesize64(file_size.QuadPart));
+           if ((fd[i].dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)
+                    && (fd[i].dwReserved0 == IO_REPARSE_TAG_SYMLINK))
+                WCMD_output(L"%1  %2    <SYMLINK>      ", datestring, timestring);
+           else
+                WCMD_output(L"%1  %2    %3!14s! ", datestring, timestring,
+                            WCMD_filesize64(file_size.QuadPart));
            if (shortname) WCMD_output(L"%1!-13s!", fd[i].cAlternateFileName);
            if (usernames) WCMD_output(L"%1!-23s!", username);
            WCMD_output(L"%1",fd[i].cFileName);
+           if (fd[i].dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)
+                output_reparse_target(inputparms->dirName, fd[i].cFileName);
         } else {
            WCMD_output(L"%1%2", recurse ? inputparms->dirName : L"", fd[i].cFileName);
         }
@@ -500,7 +553,7 @@ static DIRECTORY_STACK *WCMD_list_directory (DIRECTORY_STACK *inputparms, int le
   if ((file_total + dir_total == 0) && (level == 0)) {
     SetLastError (ERROR_FILE_NOT_FOUND);
     WCMD_print_error ();
-    errorlevel = 1;
+    errorlevel = ERROR_INVALID_FUNCTION;
   }
 
   return parms;
@@ -519,7 +572,7 @@ static void WCMD_dir_trailer(const WCHAR *path) {
     WINE_TRACE("Writing trailer for '%s' gave %d(%ld)\n", wine_dbgstr_w(path),
                status, GetLastError());
 
-    if (errorlevel==0 && !bare) {
+    if (errorlevel == NO_ERROR && !bare) {
       if (recurse) {
         WCMD_output (L"\n     Total files listed:\n%1!8d! files%2!25s! bytes\n", file_total, WCMD_filesize64 (byte_total));
         WCMD_output (L"%1!8d! directories %2!18s! bytes free\n\n", dir_total, WCMD_filesize64 (freebytes.QuadPart));
@@ -637,7 +690,7 @@ static void init_time_format(void)
  *
  */
 
-void WCMD_directory (WCHAR *args)
+RETURN_CODE WCMD_directory(WCHAR *args)
 {
   WCHAR path[MAX_PATH], cwd[MAX_PATH];
   DWORD status;
@@ -655,8 +708,9 @@ void WCMD_directory (WCHAR *args)
   WCHAR dir[MAX_PATH];
   WCHAR fname[MAX_PATH];
   WCHAR ext[MAX_PATH];
+  unsigned num_empty = 0, num_with_data = 0;
 
-  errorlevel = 0;
+  errorlevel = NO_ERROR;
 
   /* Prefill quals with (uppercased) DIRCMD env var */
   if (GetEnvironmentVariableW(L"DIRCMD", string, ARRAY_SIZE(string))) {
@@ -742,8 +796,7 @@ void WCMD_directory (WCHAR *args)
               } else {
                 SetLastError(ERROR_INVALID_PARAMETER);
                 WCMD_print_error();
-                errorlevel = 1;
-                return;
+                return errorlevel = ERROR_INVALID_FUNCTION;
               }
               break;
     case 'O': p = p + 1;
@@ -762,8 +815,7 @@ void WCMD_directory (WCHAR *args)
                 default:
                     SetLastError(ERROR_INVALID_PARAMETER);
                     WCMD_print_error();
-                    errorlevel = 1;
-                    return;
+                    return errorlevel = ERROR_INVALID_FUNCTION;
                 }
                 p++;
               }
@@ -793,8 +845,7 @@ void WCMD_directory (WCHAR *args)
                 default:
                     SetLastError(ERROR_INVALID_PARAMETER);
                     WCMD_print_error();
-                    errorlevel = 1;
-                    return;
+                    return errorlevel = ERROR_INVALID_FUNCTION;
                 }
 
                 /* Keep running list of bits we care about */
@@ -812,8 +863,7 @@ void WCMD_directory (WCHAR *args)
     default:
               SetLastError(ERROR_INVALID_PARAMETER);
               WCMD_print_error();
-              errorlevel = 1;
-              return;
+              return errorlevel = ERROR_INVALID_FUNCTION;
     }
     p = p + 1;
   }
@@ -943,15 +993,15 @@ void WCMD_directory (WCHAR *args)
       lastDrive = towupper(thisEntry->dirName[0]);
 
       if (!bare) {
-         WCHAR drive[3];
-
+         WCHAR drive[4];
          WINE_TRACE("Writing volume for '%c:'\n", thisEntry->dirName[0]);
-         memcpy(drive, thisEntry->dirName, 2 * sizeof(WCHAR));
-         drive[2] = 0x00;
-         status = WCMD_volume (0, drive);
+         drive[0] = thisEntry->dirName[0];
+         drive[1] = thisEntry->dirName[1];
+         drive[2] = L'\\';
+         drive[3] = L'\0';
          trailerReqd = TRUE;
-         if (!status) {
-           errorlevel = 1;
+         if (!WCMD_print_volume_information(drive)) {
+           errorlevel = ERROR_INVALID_FUNCTION;
            goto exit;
          }
       }
@@ -960,9 +1010,13 @@ void WCMD_directory (WCHAR *args)
     }
 
     /* Clear any errors from previous invocations, and process it */
-    errorlevel = 0;
+    errorlevel = NO_ERROR;
     prevEntry = thisEntry;
     thisEntry = WCMD_list_directory (thisEntry, 0);
+    if (errorlevel)
+        num_empty++;
+    else
+        num_with_data++;
   }
 
   /* Trailer Information */
@@ -970,6 +1024,8 @@ void WCMD_directory (WCHAR *args)
     WCMD_dir_trailer(prevEntry->dirName);
   }
 
+  if (num_empty && !num_with_data)
+      errorlevel = ERROR_INVALID_FUNCTION;
 exit:
   if (paged_mode) WCMD_leave_paged_mode();
 
@@ -981,4 +1037,6 @@ exit:
     free(prevEntry->fileName);
     free(prevEntry);
   }
+
+  return errorlevel;
 }

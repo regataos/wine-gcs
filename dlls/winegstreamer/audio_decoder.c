@@ -32,6 +32,8 @@
 WINE_DEFAULT_DEBUG_CHANNEL(mfplat);
 WINE_DECLARE_DEBUG_CHANNEL(winediag);
 
+#define CBSIZE(x)       (sizeof(x) - sizeof(WAVEFORMATEX))
+
 #define NEXT_WAVEFORMATEXTENSIBLE(format) (WAVEFORMATEXTENSIBLE *)((BYTE *)(&(format)->Format + 1) + (format)->Format.cbSize)
 
 static WAVEFORMATEXTENSIBLE const audio_decoder_output_types[] =
@@ -324,6 +326,27 @@ static HRESULT WINAPI transform_SetInputType(IMFTransform *iface, DWORD id, IMFM
     if (id)
         return MF_E_INVALIDSTREAMNUMBER;
 
+    if (!type)
+    {
+        if (decoder->input_type)
+        {
+            IMFMediaType_Release(decoder->input_type);
+            decoder->input_type = NULL;
+        }
+        if (decoder->output_type)
+        {
+            IMFMediaType_Release(decoder->output_type);
+            decoder->output_type = NULL;
+        }
+        if (decoder->wg_transform)
+        {
+            wg_transform_destroy(decoder->wg_transform);
+            decoder->wg_transform = 0;
+        }
+
+        return S_OK;
+    }
+
     if (FAILED(hr = MFCreateWaveFormatExFromMFMediaType(type, (WAVEFORMATEX **)&format, &size,
             MFWaveFormatExConvertFlag_ForceExtensible)))
         return hr;
@@ -335,7 +358,9 @@ static HRESULT WINAPI transform_SetInputType(IMFTransform *iface, DWORD id, IMFM
     if (!count)
         return MF_E_INVALIDMEDIATYPE;
 
-    if (wfx.Format.nChannels >= ARRAY_SIZE(default_channel_mask) || !wfx.Format.nSamplesPerSec || !wfx.Format.cbSize)
+    if (wfx.Format.nChannels >= ARRAY_SIZE(default_channel_mask) || !wfx.Format.nSamplesPerSec
+            /* 2 is the minimum size of AudioSpecificConfig() */
+            || wfx.Format.cbSize < 2 + CBSIZE(WAVEFORMATEXTENSIBLE))
         return MF_E_INVALIDMEDIATYPE;
     if (flags & MFT_SET_TYPE_TEST_ONLY)
         return S_OK;
@@ -364,6 +389,23 @@ static HRESULT WINAPI transform_SetOutputType(IMFTransform *iface, DWORD id, IMF
 
     if (id)
         return MF_E_INVALIDSTREAMNUMBER;
+
+    if (!type)
+    {
+        if (decoder->output_type)
+        {
+            IMFMediaType_Release(decoder->output_type);
+            decoder->input_type = NULL;
+        }
+        if (decoder->wg_transform)
+        {
+            wg_transform_destroy(decoder->wg_transform);
+            decoder->wg_transform = 0;
+        }
+
+        return S_OK;
+    }
+
     if (!decoder->input_type)
         return MF_E_TRANSFORM_TYPE_NOT_SET;
 
@@ -384,10 +426,8 @@ static HRESULT WINAPI transform_SetOutputType(IMFTransform *iface, DWORD id, IMF
     if (flags & MFT_SET_TYPE_TEST_ONLY)
         return S_OK;
 
-    if (!wfx.Format.nBlockAlign)
-        wfx.Format.nBlockAlign = wfx.Format.wBitsPerSample * wfx.Format.nChannels / 8;
-    if (!wfx.Format.nAvgBytesPerSec)
-        wfx.Format.nAvgBytesPerSec = wfx.Format.nBlockAlign * wfx.Format.nSamplesPerSec;
+    wfx.Format.nBlockAlign = wfx.Format.wBitsPerSample * wfx.Format.nChannels / 8;
+    wfx.Format.nAvgBytesPerSec = wfx.Format.nBlockAlign * wfx.Format.nSamplesPerSec;
 
     if (decoder->output_type)
     {
@@ -542,7 +582,7 @@ static HRESULT WINAPI transform_ProcessOutput(IMFTransform *iface, DWORD flags, 
         return hr;
 
     if (SUCCEEDED(hr = wg_transform_read_mf(decoder->wg_transform, samples->pSample,
-            info.cbSize, &samples->dwStatus)))
+            info.cbSize, &samples->dwStatus, NULL)))
         wg_sample_queue_flush(decoder->wg_sample_queue, false);
     else
         samples->dwStatus = MFT_OUTPUT_DATA_BUFFER_NO_SAMPLE;
@@ -611,9 +651,6 @@ HRESULT aac_decoder_create(REFIID riid, void **ret)
 
     if (!(decoder = calloc(1, sizeof(*decoder))))
         return E_OUTOFMEMORY;
-    decoder->IMFTransform_iface.lpVtbl = &transform_vtbl;
-    decoder->refcount = 1;
-
     decoder->input_types = (WAVEFORMATEXTENSIBLE *)aac_decoder_input_types;
     decoder->input_type_count = ARRAY_SIZE(aac_decoder_input_types);
 
@@ -623,6 +660,9 @@ HRESULT aac_decoder_create(REFIID riid, void **ret)
         return hr;
     }
 
+    decoder->IMFTransform_iface.lpVtbl = &transform_vtbl;
+    decoder->refcount = 1;
+
     *ret = &decoder->IMFTransform_iface;
     TRACE("Created decoder %p\n", *ret);
     return S_OK;
@@ -630,14 +670,11 @@ HRESULT aac_decoder_create(REFIID riid, void **ret)
 
 static WAVEFORMATEXTENSIBLE audio_decoder_input_types[] =
 {
-#define MAKE_WAVEFORMATEXTENSIBLE(format) \
     {.Format = {.wFormatTag = WAVE_FORMAT_EXTENSIBLE, .nChannels = 6, .nSamplesPerSec = 48000, .nAvgBytesPerSec = 1152000, \
                 .nBlockAlign = 24, .wBitsPerSample = 32, .cbSize = sizeof(WAVEFORMATEXTENSIBLE) - sizeof(WAVEFORMATEX)}, \
-     .SubFormat = {format,0x0000,0x0010,{0x80,0x00,0x00,0xaa,0x00,0x38,0x9b,0x71}}}
-
-    MAKE_WAVEFORMATEXTENSIBLE(MAKEFOURCC('G','S','T','a')),
-
-#undef MAKE_WAVEFORMATEXTENSIBLE
+     .SubFormat = {0x8d2fd10b,0x5841,0x4a6b,{0x89,0x05,0x58,0x8f,0xec,0x1a,0xde,0xd9}}},
+    {.Format = {.wFormatTag = WAVE_FORMAT_OPUS, .nChannels = 6, .nSamplesPerSec = 48000, .nAvgBytesPerSec = 1152000,
+                .nBlockAlign = 24, .wBitsPerSample = 32, .cbSize = sizeof(WAVEFORMATEXTENSIBLE) - sizeof(WAVEFORMATEX)}},
 };
 
 HRESULT audio_decoder_create(REFIID riid, void **ret)
@@ -649,10 +686,7 @@ HRESULT audio_decoder_create(REFIID riid, void **ret)
 
     if (!(decoder = calloc(1, sizeof(*decoder))))
         return E_OUTOFMEMORY;
-    decoder->IMFTransform_iface.lpVtbl = &transform_vtbl;
-    decoder->refcount = 1;
-
-    decoder->input_types = audio_decoder_input_types;
+    decoder->input_types = (WAVEFORMATEXTENSIBLE *)audio_decoder_input_types;
     decoder->input_type_count = ARRAY_SIZE(audio_decoder_input_types);
 
     if (FAILED(hr = wg_sample_queue_create(&decoder->wg_sample_queue)))
@@ -660,6 +694,9 @@ HRESULT audio_decoder_create(REFIID riid, void **ret)
         free(decoder);
         return hr;
     }
+
+    decoder->IMFTransform_iface.lpVtbl = &transform_vtbl;
+    decoder->refcount = 1;
 
     *ret = &decoder->IMFTransform_iface;
     TRACE("Created decoder %p\n", *ret);

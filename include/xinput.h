@@ -114,7 +114,7 @@
 #define XINPUT_DEVSUBTYPE_GAMEPAD          0x01
 #define XINPUT_DEVSUBTYPE_WHEEL            0x02
 #define XINPUT_DEVSUBTYPE_ARCADE_STICK     0x03
-#define XINPUT_DEVSUBTYPE_FLIGHT_SICK      0x04
+#define XINPUT_DEVSUBTYPE_FLIGHT_STICK     0x04
 #define XINPUT_DEVSUBTYPE_DANCE_PAD        0x05
 #define XINPUT_DEVSUBTYPE_GUITAR           0x06
 #define XINPUT_DEVSUBTYPE_GUITAR_ALTERNATE 0x07
@@ -213,10 +213,10 @@ typedef struct _XINPUT_CAPABILITIES {
 typedef struct _XINPUT_CAPABILITIES_EX
 {
     XINPUT_CAPABILITIES Capabilities;
-    WORD VendorId;
-    WORD ProductId;
-    WORD VersionNumber;
-    WORD unk1;
+    WORD  VendorId;
+    WORD  ProductId;
+    WORD  VersionNumber;
+    WORD  unk1;
     DWORD unk2;
 } XINPUT_CAPABILITIES_EX, *PXINPUT_CAPABILITIES_EX;
 

@@ -32,9 +32,7 @@
 
 #include <stdarg.h>
 #include <math.h>
-#ifdef HAVE_FLOAT_H
-# include <float.h>
-#endif
+#include <float.h>
 #include <stdlib.h>
 #ifndef PI
 #define PI M_PI
@@ -256,9 +254,8 @@ static void update_x11_clipping( X11DRV_PDEVICE *physDev, HRGN rgn )
     }
     else if ((data = X11DRV_GetRegionData( rgn, 0 )))
     {
-        fs_hack_rgndata_user_to_real( data );
         XSetClipRectangles( gdi_display, physDev->gc, physDev->dc_rect.left, physDev->dc_rect.top,
-                            (XRectangle *)data->Buffer, data->rdh.nCount, Unsorted );
+                            (XRectangle *)data->Buffer, data->rdh.nCount, YXBanded );
         free( data );
     }
 }
@@ -299,12 +296,13 @@ void restore_clipping_region( X11DRV_PDEVICE *dev )
 /***********************************************************************
  *           X11DRV_SetDeviceClipping
  */
-void X11DRV_SetDeviceClipping( PHYSDEV dev, HRGN rgn )
+void X11DRV_SetDeviceClipping( PHYSDEV dev, HRGN rgn, HRGN monitor_rgn )
 {
     X11DRV_PDEVICE *physDev = get_x11drv_dev( dev );
 
-    physDev->region = rgn;
-    update_x11_clipping( physDev, rgn );
+    if (physDev->region) NtGdiDeleteObjectApp( physDev->region );
+    physDev->region = clone_gdi_region( monitor_rgn );
+    update_x11_clipping( physDev, physDev->region );
 }
 
 

@@ -72,8 +72,8 @@ struct pid_effect_update
     UINT axis_count;
     UINT direction_coll;
     UINT direction_count;
-    struct hid_value_caps *axis_caps[6];
-    struct hid_value_caps *direction_caps[6];
+    struct hid_value_caps *axis_caps[MAX_PID_AXES];
+    struct hid_value_caps *direction_caps[MAX_PID_AXES];
     struct hid_value_caps *duration_caps;
     struct hid_value_caps *gain_caps;
     struct hid_value_caps *sample_period_caps;
@@ -176,6 +176,7 @@ struct hid_joystick
 {
     struct dinput_device base;
     BOOL wgi_device;
+    BOOL is_gamepad;
 
     HANDLE device;
     OVERLAPPED read_ovl;
@@ -225,11 +226,11 @@ struct hid_joystick_effect
     struct list entry;
     struct hid_joystick *joystick;
 
-    DWORD axes[6];
-    LONG directions[6];
+    DWORD axes[MAX_PID_AXES];
+    LONG directions[MAX_PID_AXES];
     DICONSTANTFORCE constant_force;
     DIRAMPFORCE ramp_force;
-    DICONDITION condition[6];
+    DICONDITION condition[MAX_PID_AXES];
     DIENVELOPE envelope;
     DIPERIODIC periodic;
     DIEFFECT params;
@@ -242,6 +243,51 @@ struct hid_joystick_effect
     char *type_specific_buf;
     char *set_envelope_buf;
 };
+
+struct joystick_device
+{
+    WCHAR device_path[MAX_PATH];
+};
+
+static CRITICAL_SECTION joystick_devices_crit;
+static CRITICAL_SECTION_DEBUG joystick_devices_crit_debug =
+{
+    0, 0, &joystick_devices_crit,
+    { &joystick_devices_crit_debug.ProcessLocksList, &joystick_devices_crit_debug.ProcessLocksList },
+      0, 0, { (DWORD_PTR)(__FILE__ ": joystick_devices_crit") }
+};
+static CRITICAL_SECTION joystick_devices_crit = { &joystick_devices_crit_debug, -1, 0, 0, 0, 0 };
+
+static struct joystick_device *joystick_devices;
+static unsigned int joystick_device_count;
+
+static unsigned int get_joystick_index( const WCHAR *device_path )
+{
+    unsigned int i;
+
+    EnterCriticalSection( &joystick_devices_crit );
+    for (i = 0; i < joystick_device_count; ++i)
+        if (!wcsicmp( joystick_devices[i].device_path, device_path )) break;
+
+    if (i == joystick_device_count)
+    {
+        ++joystick_device_count;
+        joystick_devices = realloc( joystick_devices, sizeof(*joystick_devices) * joystick_device_count );
+        wcscpy( joystick_devices[i].device_path, device_path );
+    }
+    LeaveCriticalSection( &joystick_devices_crit );
+    return i;
+}
+
+static BOOL get_default_joystick_device_path( WCHAR *device_path )
+{
+    BOOL ret;
+
+    EnterCriticalSection( &joystick_devices_crit );
+    if ((ret = !!joystick_device_count)) wcscpy( device_path, joystick_devices[0].device_path );
+    LeaveCriticalSection( &joystick_devices_crit );
+    return ret;
+}
 
 static inline struct hid_joystick_effect *impl_from_IDirectInputEffect( IDirectInputEffect *iface )
 {
@@ -419,6 +465,9 @@ static const WCHAR *object_usage_to_string( DIDEVICEOBJECTINSTANCEW *instance )
     case MAKELONG(PID_USAGE_START_DELAY, HID_USAGE_PAGE_PID): return L"Start Delay";
     case MAKELONG(PID_USAGE_STATE_REPORT, HID_USAGE_PAGE_PID): return L"PID State Report";
     case MAKELONG(PID_USAGE_TRIGGER_BUTTON, HID_USAGE_PAGE_PID): return L"Trigger Button";
+
+    case MAKELONG(PID_USAGE_SET_CONSTANT_FORCE_REPORT, HID_USAGE_PAGE_PID): return L"Set Constant Force Report";
+    case MAKELONG(PID_USAGE_SET_RAMP_FORCE_REPORT, HID_USAGE_PAGE_PID): return L"Set Ramp Force Report";
 
     case MAKELONG(HID_USAGE_SIMULATION_RUDDER, HID_USAGE_PAGE_SIMULATION): return L"Rudder";
     case MAKELONG(HID_USAGE_SIMULATION_THROTTLE, HID_USAGE_PAGE_SIMULATION): return L"Throttle";
@@ -792,21 +841,9 @@ static void set_report_value( struct hid_joystick *impl, char *report_buf,
 {
     ULONG report_len = impl->caps.OutputReportByteLength;
     PHIDP_PREPARSED_DATA preparsed = impl->preparsed;
-    LONG log_min, log_max, phy_min, phy_max;
     NTSTATUS status;
 
     if (!caps) return;
-
-    log_min = caps->logical_min;
-    log_max = caps->logical_max;
-    phy_min = caps->physical_min;
-    phy_max = caps->physical_max;
-
-    if (phy_max || phy_min)
-    {
-        if (value > phy_max || value < phy_min) value = -1;
-        else value = log_min + (value - phy_min) * (log_max - log_min) / (phy_max - phy_min);
-    }
 
     status = HidP_SetUsageValue( HidP_Output, caps->usage_page, caps->link_collection,
                                  caps->usage_min, value, preparsed, report_buf, report_len );
@@ -857,7 +894,7 @@ static HRESULT hid_joystick_get_property( IDirectInputDevice8W *iface, DWORD pro
     case (DWORD_PTR)DIPROP_JOYSTICKID:
     {
         DIPROPDWORD *value = (DIPROPDWORD *)header;
-        value->dwData = impl->base.instance.guidInstance.Data3;
+        value->dwData = get_joystick_index( impl->device_path );
         return DI_OK;
     }
     case (DWORD_PTR)DIPROP_GUIDANDPATH:
@@ -890,6 +927,37 @@ static HRESULT hid_joystick_get_property( IDirectInputDevice8W *iface, DWORD pro
     return DIERR_UNSUPPORTED;
 }
 
+static LONG scale_to_logical_value( LONG value, struct hid_value_caps *caps )
+{
+    LONG log_min, log_max, phy_min, phy_max;
+
+    if (!caps) return value;
+
+    log_min = caps->logical_min;
+    log_max = caps->logical_max;
+    phy_min = caps->physical_min;
+    phy_max = caps->physical_max;
+
+    if (phy_max || phy_min)
+    {
+        if (value > phy_max || value < phy_min) value = -1;
+        else value = log_min + (value - phy_min) * (log_max - log_min) / (phy_max - phy_min);
+    }
+
+    return value;
+}
+
+static LONG clamp_to_physical_value( LONG value, struct hid_value_caps *caps )
+{
+    LONG phy_min, phy_max;
+
+    if (!caps) return value;
+
+    phy_min = caps->physical_min;
+    phy_max = caps->physical_max;
+    return max( min( value, phy_max ), phy_min );
+}
+
 static HRESULT hid_joystick_send_device_gain( IDirectInputDevice8W *iface, LONG device_gain )
 {
     struct hid_joystick *impl = impl_from_IDirectInputDevice8W( iface );
@@ -905,6 +973,8 @@ static HRESULT hid_joystick_send_device_gain( IDirectInputDevice8W *iface, LONG 
     status = HidP_InitializeReportForID( HidP_Output, report->id, impl->preparsed, report_buf, report_len );
     if (status != HIDP_STATUS_SUCCESS) return status;
 
+    device_gain = clamp_to_physical_value( device_gain, report->device_gain_caps );
+    device_gain = scale_to_logical_value( device_gain, report->device_gain_caps );
     set_report_value( impl, report_buf, report->device_gain_caps, device_gain );
 
     if (!WriteFile( impl->device, report_buf, report_len, NULL, NULL )) return DIERR_INPUTLOST;
@@ -1125,7 +1195,12 @@ static HRESULT hid_joystick_send_force_feedback_command( IDirectInputDevice8W *i
     if (status != HIDP_STATUS_SUCCESS) return status;
 
     if (!WriteFile( impl->device, report_buf, report_len, NULL, NULL )) return DIERR_INPUTLOST;
-    if (!unacquire && command == DISFFC_RESET) hid_joystick_send_device_gain( iface, impl->base.device_gain );
+    if (!unacquire && command == DISFFC_RESET)
+    {
+        if (impl->base.autocenter == DIPROPAUTOCENTER_OFF)
+            hid_joystick_send_force_feedback_command( iface, DISFFC_STOPALL, FALSE );
+        hid_joystick_send_device_gain( iface, impl->base.device_gain );
+    }
 
     return DI_OK;
 }
@@ -1257,7 +1332,14 @@ static BOOL read_device_state_value( struct dinput_device *device, UINT index, s
         if (instance->dwType & DIDFT_POV) value = -1;
         else if (instance->dwType & DIDFT_AXIS)
         {
-            if (!properties->range_min) value = properties->range_max / 2;
+            if (!properties->range_min)
+            {
+                if (impl->is_gamepad && instance->wUsagePage == HID_USAGE_PAGE_GENERIC &&
+                        (instance->wUsage == HID_USAGE_GENERIC_Z || instance->wUsage == HID_USAGE_GENERIC_RZ))
+                    value = properties->range_min;
+                else
+                    value = properties->range_max / 2;
+            }
             else value = round( (properties->range_min + properties->range_max) / 2.0 );
         }
     }
@@ -1291,8 +1373,7 @@ static HRESULT hid_joystick_read( IDirectInputDevice8W *iface )
 
     ret = GetOverlappedResult( impl->device, &impl->read_ovl, &count, FALSE );
 
-    if (WaitForSingleObject(steam_overlay_event, 0) == WAIT_OBJECT_0 || /* steam overlay is enabled */
-        WaitForSingleObject(steam_keyboard_event, 0) == WAIT_OBJECT_0) /* steam keyboard is enabled */
+    if (WaitForSingleObject(steam_overlay_event, 0) == WAIT_OBJECT_0) /* steam overlay is enabled */
         params.reset_state = TRUE;
     else
         params.reset_state = FALSE;
@@ -1331,7 +1412,7 @@ static HRESULT hid_joystick_read( IDirectInputDevice8W *iface )
             {
                 usages = impl->usages_buf + count;
                 if (usages->UsagePage != HID_USAGE_PAGE_BUTTON)
-                    FIXME( "unimplemented usage page %x.\n", usages->UsagePage );
+                    WARN( "unimplemented usage page %x.\n", usages->UsagePage );
                 else if (usages->Usage >= 128)
                     FIXME( "ignoring extraneous button %d.\n", usages->Usage );
                 else
@@ -1672,6 +1753,8 @@ static HRESULT hid_joystick_device_open( int index, const GUID *guid, DIDEVICEIN
                                                      attrs, caps, instance, version )))
                 continue;
         }
+        /* Assign joystick index if the device path is first seen. */
+        get_joystick_index( detail->DevicePath );
 
         /* enumerate device by GUID */
         if (IsEqualGUID( guid, &instance->guidProduct ) || IsEqualGUID( guid, &instance->guidInstance )) break;
@@ -1898,7 +1981,7 @@ static BOOL init_pid_caps( struct dinput_device *device, UINT index, struct hid_
     if (instance->wCollectionNumber == effect_update->axes_coll)
     {
         SET_REPORT_ID( effect_update );
-        if (effect_update->axis_count >= 6) FIXME( "more than 6 PID axes detected\n" );
+        if (effect_update->axis_count >= MAX_PID_AXES) FIXME( "more than %d PID axes detected\n", MAX_PID_AXES );
         else effect_update->axis_caps[effect_update->axis_count] = caps;
         effect_update->axis_count++;
     }
@@ -1907,7 +1990,7 @@ static BOOL init_pid_caps( struct dinput_device *device, UINT index, struct hid_
         SET_REPORT_ID( effect_update );
         caps->physical_min = 0;
         caps->physical_max = 35900;
-        if (effect_update->direction_count >= 6) FIXME( "more than 6 PID directions detected\n" );
+        if (effect_update->direction_count >= MAX_PID_AXES) FIXME( "more than %d PID directions detected\n", MAX_PID_AXES );
         else effect_update->direction_caps[effect_update->direction_count] = caps;
         effect_update->direction_count++;
     }
@@ -2053,6 +2136,16 @@ static BOOL init_pid_caps( struct dinput_device *device, UINT index, struct hid_
     return DIENUM_CONTINUE;
 }
 
+static BOOL hid_joystick_is_gamepad(DWORD type, DWORD version)
+{
+    const DWORD joystick_type = DIDEVTYPE_JOYSTICK | (DIDEVTYPEJOYSTICK_GAMEPAD << 8) | DIDEVTYPE_HID;
+
+    if (version >= 0x0800)
+        return (GET_DIDEVICE_TYPE(type) == DI8DEVTYPE_GAMEPAD);
+
+    return type == joystick_type;
+}
+
 HRESULT hid_joystick_create_device( struct dinput *dinput, const GUID *guid, IDirectInputDevice8W **out )
 {
     static const DIPROPHEADER filter =
@@ -2088,8 +2181,15 @@ HRESULT hid_joystick_create_device( struct dinput *dinput, const GUID *guid, IDi
     impl->base.read_event = CreateEventW( NULL, TRUE, FALSE, NULL );
 
     if (memcmp( device_path_guid.Data4, guid->Data4, sizeof(device_path_guid.Data4) ))
+    {
+        /* Let hid_joystick_device_open() populate joystick devices before checking for default joystick GUID. */
         hr = hid_joystick_device_open( -1, guid, &impl->base.instance, impl->device_path, &impl->device, &impl->preparsed,
                                        &attrs, &impl->caps, dinput->dwVersion );
+        if (hr == DIERR_DEVICENOTREG && IsEqualGUID( guid, &GUID_Joystick )
+            && get_default_joystick_device_path( impl->device_path ))
+            hr = hid_joystick_device_try_open( impl->device_path, &impl->device, &impl->preparsed, &attrs,
+                                               &impl->caps, &impl->base.instance, dinput->dwVersion );
+    }
     else
     {
         impl->wgi_device = TRUE;
@@ -2100,6 +2200,7 @@ HRESULT hid_joystick_create_device( struct dinput *dinput, const GUID *guid, IDi
     if (hr != DI_OK) goto failed;
 
     impl->base.caps.dwDevType = impl->base.instance.dwDevType;
+    impl->is_gamepad = hid_joystick_is_gamepad(impl->base.caps.dwDevType, dinput->dwVersion);
     impl->attrs = attrs;
     list_init( &impl->effect_list );
 
@@ -2421,7 +2522,7 @@ static void convert_directions_from_spherical( const DIEFFECT *in, DIEFFECT *out
 static void convert_directions( const DIEFFECT *in, DIEFFECT *out )
 {
     DWORD direction_flags = DIEFF_CARTESIAN | DIEFF_POLAR | DIEFF_SPHERICAL;
-    LONG directions[6] = {0};
+    LONG directions[MAX_PID_AXES] = {0};
     DIEFFECT spherical = {.rglDirection = directions};
 
     switch (in->dwFlags & direction_flags)
@@ -2881,7 +2982,15 @@ static HRESULT WINAPI hid_joystick_effect_GetEffectStatus( IDirectInputEffect *i
 static void set_parameter_value( struct hid_joystick_effect *impl, char *report_buf,
                                  struct hid_value_caps *caps, LONG value )
 {
+    value = scale_to_logical_value( value, caps );
     return set_report_value( impl->joystick, report_buf, caps, value );
+}
+
+static void set_parameter_value_clamp( struct hid_joystick_effect *impl, char *report_buf,
+                                       struct hid_value_caps *caps, LONG value )
+{
+    value = clamp_to_physical_value( value, caps );
+    return set_parameter_value( impl, report_buf, caps, value );
 }
 
 static void set_parameter_value_angle( struct hid_joystick_effect *impl, char *report_buf,
@@ -2893,19 +3002,23 @@ static void set_parameter_value_angle( struct hid_joystick_effect *impl, char *r
     if (caps->units != 0x14) WARN( "unknown angle unit caps %#lx\n", caps->units );
     else if (exp < -2) while (exp++ < -2) value *= 10;
     else if (exp > -2) while (exp-- > -2) value /= 10;
-    set_parameter_value( impl, report_buf, caps, value );
+    set_parameter_value_clamp( impl, report_buf, caps, value );
 }
 
 static void set_parameter_value_us( struct hid_joystick_effect *impl, char *report_buf,
                                     struct hid_value_caps *caps, LONG value )
 {
     LONG exp;
+
     if (!caps) return;
+    if (value == INFINITE) return set_report_value( impl->joystick, report_buf, caps, caps->physical_min - 1 );
+
     exp = caps->units_exp;
-    if (value == INFINITE) value = caps->physical_min - 1;
-    else if (caps->units != 0x1003) WARN( "unknown time unit caps %#lx\n", caps->units );
+    if (caps->units != 0x1003) WARN( "unknown time unit caps %#lx\n", caps->units );
     else if (exp < -6) while (exp++ < -6) value *= 10;
     else if (exp > -6) while (exp-- > -6) value /= 10;
+
+    /* testing shows that duration values are not clamped, any out-of-range values becomes -1 */
     set_parameter_value( impl, report_buf, caps, value );
 }
 
@@ -2929,7 +3042,7 @@ static HRESULT WINAPI hid_joystick_effect_Download( IDirectInputEffect *iface )
     ULONG report_len = impl->joystick->caps.OutputReportByteLength;
     HANDLE device = impl->joystick->device;
     struct hid_value_caps *caps;
-    LONG directions[4] = {0};
+    LONG directions[MAX_PID_AXES] = {0};
     DWORD i, tmp, count;
     DIEFFECT spherical;
     NTSTATUS status;
@@ -2975,14 +3088,14 @@ static HRESULT WINAPI hid_joystick_effect_Download( IDirectInputEffect *iface )
         case PID_USAGE_ET_SAWTOOTH_DOWN:
             if (!(impl->modified & DIEP_TYPESPECIFICPARAMS)) break;
 
-            set_parameter_value( impl, impl->type_specific_buf, set_periodic->magnitude_caps,
-                                 impl->periodic.dwMagnitude );
+            set_parameter_value_clamp( impl, impl->type_specific_buf, set_periodic->magnitude_caps,
+                                       impl->periodic.dwMagnitude );
             set_parameter_value_us( impl, impl->type_specific_buf, set_periodic->period_caps,
                                     impl->periodic.dwPeriod );
-            set_parameter_value( impl, impl->type_specific_buf, set_periodic->phase_caps,
-                                 impl->periodic.dwPhase );
-            set_parameter_value( impl, impl->type_specific_buf, set_periodic->offset_caps,
-                                 impl->periodic.lOffset );
+            set_parameter_value_clamp( impl, impl->type_specific_buf, set_periodic->phase_caps,
+                                       impl->periodic.dwPhase );
+            set_parameter_value_clamp( impl, impl->type_specific_buf, set_periodic->offset_caps,
+                                       impl->periodic.lOffset );
 
             if (!WriteFile( device, impl->type_specific_buf, report_len, NULL, NULL )) hr = DIERR_INPUTLOST;
             else impl->modified &= ~DIEP_TYPESPECIFICPARAMS;
@@ -2999,18 +3112,21 @@ static HRESULT WINAPI hid_joystick_effect_Download( IDirectInputEffect *iface )
                                              i, impl->joystick->preparsed, impl->type_specific_buf, report_len );
                 if (status != HIDP_STATUS_SUCCESS) WARN( "HidP_SetUsageValue %04x:%04x returned %#lx\n",
                                                          HID_USAGE_PAGE_PID, PID_USAGE_PARAMETER_BLOCK_OFFSET, status );
-                set_parameter_value( impl, impl->type_specific_buf, set_condition->center_point_offset_caps,
-                                     impl->condition[i].lOffset );
-                set_parameter_value( impl, impl->type_specific_buf, set_condition->positive_coefficient_caps,
-                                     impl->condition[i].lPositiveCoefficient );
-                set_parameter_value( impl, impl->type_specific_buf, set_condition->negative_coefficient_caps,
-                                     impl->condition[i].lNegativeCoefficient );
+                set_parameter_value_clamp( impl, impl->type_specific_buf, set_condition->center_point_offset_caps,
+                                           impl->condition[i].lOffset );
+                set_parameter_value_clamp( impl, impl->type_specific_buf, set_condition->positive_coefficient_caps,
+                                           impl->condition[i].lPositiveCoefficient );
+                set_parameter_value_clamp( impl, impl->type_specific_buf, set_condition->negative_coefficient_caps,
+                                           impl->condition[i].lNegativeCoefficient );
+
+                /* testing shows that saturation values are not clamped, any out-of-range values becomes -1 */
                 set_parameter_value( impl, impl->type_specific_buf, set_condition->positive_saturation_caps,
                                      impl->condition[i].dwPositiveSaturation );
                 set_parameter_value( impl, impl->type_specific_buf, set_condition->negative_saturation_caps,
                                      impl->condition[i].dwNegativeSaturation );
-                set_parameter_value( impl, impl->type_specific_buf, set_condition->dead_band_caps,
-                                     impl->condition[i].lDeadBand );
+
+                set_parameter_value_clamp( impl, impl->type_specific_buf, set_condition->dead_band_caps,
+                                           impl->condition[i].lDeadBand );
 
                 if (!WriteFile( device, impl->type_specific_buf, report_len, NULL, NULL )) hr = DIERR_INPUTLOST;
                 else impl->modified &= ~DIEP_TYPESPECIFICPARAMS;
@@ -3019,8 +3135,8 @@ static HRESULT WINAPI hid_joystick_effect_Download( IDirectInputEffect *iface )
         case PID_USAGE_ET_CONSTANT_FORCE:
             if (!(impl->modified & DIEP_TYPESPECIFICPARAMS)) break;
 
-            set_parameter_value( impl, impl->type_specific_buf, set_constant_force->magnitude_caps,
-                                 impl->constant_force.lMagnitude );
+            set_parameter_value_clamp( impl, impl->type_specific_buf, set_constant_force->magnitude_caps,
+                                       impl->constant_force.lMagnitude );
 
             if (!WriteFile( device, impl->type_specific_buf, report_len, NULL, NULL )) hr = DIERR_INPUTLOST;
             else impl->modified &= ~DIEP_TYPESPECIFICPARAMS;
@@ -3028,10 +3144,10 @@ static HRESULT WINAPI hid_joystick_effect_Download( IDirectInputEffect *iface )
         case PID_USAGE_ET_RAMP:
             if (!(impl->modified & DIEP_TYPESPECIFICPARAMS)) break;
 
-            set_parameter_value( impl, impl->type_specific_buf, set_ramp_force->start_caps,
-                                 impl->ramp_force.lStart );
-            set_parameter_value( impl, impl->type_specific_buf, set_ramp_force->end_caps,
-                                 impl->ramp_force.lEnd );
+            set_parameter_value_clamp( impl, impl->type_specific_buf, set_ramp_force->start_caps,
+                                       impl->ramp_force.lStart );
+            set_parameter_value_clamp( impl, impl->type_specific_buf, set_ramp_force->end_caps,
+                                       impl->ramp_force.lEnd );
 
             if (!WriteFile( device, impl->type_specific_buf, report_len, NULL, NULL )) hr = DIERR_INPUTLOST;
             else impl->modified &= ~DIEP_TYPESPECIFICPARAMS;
@@ -3053,12 +3169,12 @@ static HRESULT WINAPI hid_joystick_effect_Download( IDirectInputEffect *iface )
             if (!(impl->flags & DIEP_ENVELOPE)) break;
             if (!(impl->modified & DIEP_ENVELOPE)) break;
 
-            set_parameter_value( impl, impl->set_envelope_buf, set_envelope->attack_level_caps,
-                                 impl->envelope.dwAttackLevel );
+            set_parameter_value_clamp( impl, impl->set_envelope_buf, set_envelope->attack_level_caps,
+                                       impl->envelope.dwAttackLevel );
             set_parameter_value_us( impl, impl->set_envelope_buf, set_envelope->attack_time_caps,
                                     impl->envelope.dwAttackTime );
-            set_parameter_value( impl, impl->set_envelope_buf, set_envelope->fade_level_caps,
-                                 impl->envelope.dwFadeLevel );
+            set_parameter_value_clamp( impl, impl->set_envelope_buf, set_envelope->fade_level_caps,
+                                       impl->envelope.dwFadeLevel );
             set_parameter_value_us( impl, impl->set_envelope_buf, set_envelope->fade_time_caps,
                                     impl->envelope.dwFadeTime );
 
@@ -3072,8 +3188,8 @@ static HRESULT WINAPI hid_joystick_effect_Download( IDirectInputEffect *iface )
     {
         set_parameter_value_us( impl, impl->effect_update_buf, effect_update->duration_caps,
                                 impl->params.dwDuration );
-        set_parameter_value( impl, impl->effect_update_buf, effect_update->gain_caps,
-                             impl->params.dwGain );
+        set_parameter_value_clamp( impl, impl->effect_update_buf, effect_update->gain_caps,
+                                   impl->params.dwGain );
         set_parameter_value_us( impl, impl->effect_update_buf, effect_update->sample_period_caps,
                                 impl->params.dwSamplePeriod );
         set_parameter_value_us( impl, impl->effect_update_buf, effect_update->start_delay_caps,

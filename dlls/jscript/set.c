@@ -359,8 +359,6 @@ static void Map_destructor(jsdisp_t *dispex)
         assert(!entry->deleted);
         release_map_entry(entry);
     }
-
-    free(map);
 }
 
 static HRESULT Map_gc_traverse(struct gc_ctx *gc_ctx, enum gc_traverse_op op, jsdisp_t *dispex)
@@ -395,9 +393,9 @@ static void Map_cc_traverse(jsdisp_t *dispex, nsCycleCollectionTraversalCallback
 
     LIST_FOR_EACH_ENTRY(entry, &map->entries, struct jsval_map_entry, list_entry) {
         if(is_object_instance(entry->key))
-            note_edge((nsISupports*)get_object(entry->key), "key", cb);
+            note_edge(get_edge_obj(get_object(entry->key)), "key", cb);
         if(is_object_instance(entry->value))
-            note_edge((nsISupports*)get_object(entry->value), "value", cb);
+            note_edge(get_edge_obj(get_object(entry->value)), "value", cb);
     }
 }
 
@@ -415,26 +413,20 @@ static const builtin_prop_t Map_props[] = {
 };
 
 static const builtin_info_t Map_prototype_info = {
-    JSCLASS_OBJECT,
-    Map_value,
-    ARRAY_SIZE(Map_prototype_props),
-    Map_prototype_props,
-    NULL,
-    NULL
+    .class     = JSCLASS_OBJECT,
+    .call      = Map_value,
+    .props_cnt = ARRAY_SIZE(Map_prototype_props),
+    .props     = Map_prototype_props,
 };
 
 static const builtin_info_t Map_info = {
-    JSCLASS_MAP,
-    Map_value,
-    ARRAY_SIZE(Map_props),
-    Map_props,
-    Map_destructor,
-    NULL,
-    NULL,
-    NULL,
-    NULL,
-    Map_gc_traverse,
-    Map_cc_traverse
+    .class       = JSCLASS_MAP,
+    .call        = Map_value,
+    .props_cnt   = ARRAY_SIZE(Map_props),
+    .props       = Map_props,
+    .destructor  = Map_destructor,
+    .gc_traverse = Map_gc_traverse,
+    .cc_traverse = Map_cc_traverse
 };
 
 static HRESULT Map_constructor(script_ctx_t *ctx, jsval_t vthis, WORD flags, unsigned argc, jsval_t *argv,
@@ -575,26 +567,20 @@ static const builtin_prop_t Set_prototype_props[] = {
 };
 
 static const builtin_info_t Set_prototype_info = {
-    JSCLASS_OBJECT,
-    Set_value,
-    ARRAY_SIZE(Set_prototype_props),
-    Set_prototype_props,
-    NULL,
-    NULL
+    .class     = JSCLASS_OBJECT,
+    .call      = Set_value,
+    .props_cnt = ARRAY_SIZE(Set_prototype_props),
+    .props     = Set_prototype_props,
 };
 
 static const builtin_info_t Set_info = {
-    JSCLASS_SET,
-    Set_value,
-    ARRAY_SIZE(Map_props),
-    Map_props,
-    Map_destructor,
-    NULL,
-    NULL,
-    NULL,
-    NULL,
-    Map_gc_traverse,
-    Map_cc_traverse
+    .class       = JSCLASS_SET,
+    .call        = Set_value,
+    .props_cnt   = ARRAY_SIZE(Map_props),
+    .props       = Map_props,
+    .destructor  = Map_destructor,
+    .gc_traverse = Map_gc_traverse,
+    .cc_traverse = Map_cc_traverse
 };
 
 static HRESULT Set_constructor(script_ctx_t *ctx, jsval_t vthis, WORD flags, unsigned argc, jsval_t *argv,
@@ -834,8 +820,6 @@ static void WeakMap_destructor(jsdisp_t *dispex)
 
     while(weakmap->map.root)
         remove_weakmap_entry(RB_ENTRY_VALUE(weakmap->map.root, struct weakmap_entry, entry));
-
-    free(weakmap);
 }
 
 static HRESULT WeakMap_gc_traverse(struct gc_ctx *gc_ctx, enum gc_traverse_op op, jsdisp_t *dispex)
@@ -874,7 +858,7 @@ static void WeakMap_cc_traverse(jsdisp_t *dispex, nsCycleCollectionTraversalCall
        This will possibly leak objects that need the CC until the WeakMap has no more refs to it. */
     RB_FOR_EACH_ENTRY(entry, &weakmap->map, struct weakmap_entry, entry)
         if(is_object_instance(entry->value))
-            note_edge((nsISupports*)get_object(entry->value), "value", cb);
+            note_edge(get_edge_obj(get_object(entry->value)), "value", cb);
 }
 
 static const builtin_prop_t WeakMap_prototype_props[] = {
@@ -886,26 +870,18 @@ static const builtin_prop_t WeakMap_prototype_props[] = {
 };
 
 static const builtin_info_t WeakMap_prototype_info = {
-    JSCLASS_OBJECT,
-    WeakMap_value,
-    ARRAY_SIZE(WeakMap_prototype_props),
-    WeakMap_prototype_props,
-    NULL,
-    NULL
+    .class     = JSCLASS_OBJECT,
+    .call      = WeakMap_value,
+    .props_cnt = ARRAY_SIZE(WeakMap_prototype_props),
+    .props     = WeakMap_prototype_props,
 };
 
 static const builtin_info_t WeakMap_info = {
-    JSCLASS_WEAKMAP,
-    WeakMap_value,
-    0,
-    NULL,
-    WeakMap_destructor,
-    NULL,
-    NULL,
-    NULL,
-    NULL,
-    WeakMap_gc_traverse,
-    WeakMap_cc_traverse
+    .class       = JSCLASS_WEAKMAP,
+    .call        = WeakMap_value,
+    .destructor  = WeakMap_destructor,
+    .gc_traverse = WeakMap_gc_traverse,
+    .cc_traverse = WeakMap_cc_traverse
 };
 
 static HRESULT WeakMap_constructor(script_ctx_t *ctx, jsval_t vthis, WORD flags, unsigned argc, jsval_t *argv,

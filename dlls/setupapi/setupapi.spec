@@ -93,10 +93,10 @@
 @ stdcall CM_Get_Device_Interface_AliasW(wstr ptr ptr ptr long)
 @ stub CM_Get_Device_Interface_Alias_ExA
 @ stub CM_Get_Device_Interface_Alias_ExW
-@ stub CM_Get_Device_Interface_ListA
-@ stub CM_Get_Device_Interface_ListW
-@ stub CM_Get_Device_Interface_List_ExA
-@ stub CM_Get_Device_Interface_List_ExW
+@ stdcall CM_Get_Device_Interface_ListA(ptr ptr ptr long long)
+@ stdcall CM_Get_Device_Interface_ListW(ptr ptr ptr long long)
+@ stdcall CM_Get_Device_Interface_List_ExA(ptr ptr ptr long long ptr)
+@ stdcall CM_Get_Device_Interface_List_ExW(ptr ptr ptr long long ptr)
 @ stdcall CM_Get_Device_Interface_List_SizeA(ptr ptr str long)
 @ stdcall CM_Get_Device_Interface_List_SizeW(ptr ptr wstr long)
 @ stdcall CM_Get_Device_Interface_List_Size_ExA(ptr ptr str long ptr)
@@ -208,6 +208,13 @@
 @ stub DelimStringToMultiSz
 @ stub DestroyTextFileReadBuffer
 @ stdcall DoesUserHavePrivilege(wstr)
+@ stdcall DriverStoreAddDriverPackageA(ptr ptr ptr long ptr ptr)
+@ stdcall DriverStoreAddDriverPackageW(ptr ptr ptr long ptr ptr)
+@ stdcall DriverStoreDeleteDriverPackageA(ptr ptr ptr)
+@ stdcall DriverStoreDeleteDriverPackageW(ptr ptr ptr)
+@ stub DriverStoreEnumDriverPackageA
+@ stub DriverStoreEnumDriverPackageW
+@ stdcall DriverStoreFindDriverPackageA(ptr ptr ptr long ptr ptr ptr)
 @ stdcall DriverStoreFindDriverPackageW(ptr ptr ptr long ptr ptr ptr)
 @ stdcall DuplicateString(wstr)
 @ stdcall EnablePrivilege(wstr long)
@@ -246,9 +253,9 @@
 @ stub SearchForInfFile
 @ stub SetArrayToMultiSzValue
 @ stdcall SetupAddInstallSectionToDiskSpaceListA(long long long str ptr long)
-@ stdcall SetupAddInstallSectionToDiskSpaceListW(long long long wstr ptr long)
-@ stdcall SetupAddSectionToDiskSpaceListA(long long long str long ptr long)
-@ stdcall SetupAddSectionToDiskSpaceListW(long long long wstr long ptr long)
+@ stub SetupAddInstallSectionToDiskSpaceListW
+@ stub SetupAddSectionToDiskSpaceListA
+@ stub SetupAddSectionToDiskSpaceListW
 @ stdcall SetupAddToDiskSpaceListA(long str int64 long ptr long)
 @ stdcall SetupAddToDiskSpaceListW(long wstr int64 long ptr long)
 @ stdcall SetupAddToSourceListA(long str)
@@ -350,6 +357,9 @@
 @ stub SetupDiGetDeviceInterfaceAlias
 @ stdcall SetupDiGetDeviceInterfaceDetailA(long ptr ptr long ptr ptr)
 @ stdcall SetupDiGetDeviceInterfaceDetailW(long ptr ptr long ptr ptr)
+@ stdcall SetupDiGetDeviceInterfacePropertyKeys(ptr ptr ptr long ptr long)
+@ stdcall SetupDiGetDeviceInterfacePropertyW(ptr ptr ptr ptr ptr long ptr long)
+@ stdcall SetupDiGetDevicePropertyKeys(ptr ptr ptr long ptr long)
 @ stdcall SetupDiGetDevicePropertyW(ptr ptr ptr ptr ptr long ptr long)
 @ stdcall SetupDiGetDeviceRegistryPropertyA(long ptr long ptr ptr long ptr)
 @ stdcall SetupDiGetDeviceRegistryPropertyW(long ptr long ptr ptr long ptr)
@@ -399,6 +409,7 @@
 @ stdcall SetupDiSetClassInstallParamsW(ptr ptr ptr long)
 @ stdcall SetupDiSetDeviceInstallParamsA(ptr ptr ptr)
 @ stdcall SetupDiSetDeviceInstallParamsW(ptr ptr ptr)
+@ stdcall SetupDiSetDeviceInterfacePropertyW(ptr ptr ptr long ptr long long)
 @ stdcall SetupDiSetDevicePropertyW(ptr ptr ptr long ptr long long)
 @ stdcall SetupDiSetDeviceRegistryPropertyA(ptr ptr long ptr long)
 @ stdcall SetupDiSetDeviceRegistryPropertyW(ptr ptr long ptr long)

@@ -17,16 +17,6 @@
  */
 
 #include "../d3dx9_36/d3dx_helpers.h"
-#define D3DERR_INVALIDCALL 0x8876086c
-
-extern DXGI_FORMAT dxgi_format_from_dds_d3dx_pixel_format_id(enum d3dx_pixel_format_id format);
-extern DXGI_FORMAT dxgi_format_from_d3dx_pixel_format_id(enum d3dx_pixel_format_id format);
-
-HRESULT load_file(const WCHAR *path, void **data, DWORD *size);
-HRESULT load_resourceA(HMODULE module, const char *resource,
-        void **data, DWORD *size);
-HRESULT load_resourceW(HMODULE module, const WCHAR *resource,
-        void **data, DWORD *size);
 
 HRESULT get_image_info(const void *data, SIZE_T size, D3DX11_IMAGE_INFO *img_info);
 

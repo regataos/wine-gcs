@@ -633,7 +633,7 @@ static HRESULT sort_cmp(script_ctx_t *ctx, jsdisp_t *cmp_func, jsval_t v1, jsval
         jsval_t res;
         double n;
 
-        hres = jsdisp_call_value(cmp_func, jsval_undefined(), DISPATCH_METHOD, 2, args, &res, &ctx->jscaller->IServiceProvider_iface);
+        hres = jsdisp_call_value(cmp_func, jsval_undefined(), DISPATCH_METHOD, 2, args, &res);
         if(FAILED(hres))
             return hres;
 
@@ -948,14 +948,8 @@ static HRESULT Array_toString(script_ctx_t *ctx, jsval_t vthis, WORD flags, unsi
     TRACE("\n");
 
     array = array_this(vthis);
-    if(!array) {
-        if(ctx->version >= SCRIPTLANGUAGEVERSION_ES5) {
-            if(is_undefined(vthis) || is_null(vthis))
-                return JS_E_OBJECT_EXPECTED;
-            return Object_toString(ctx, vthis, flags, argc, argv, r);
-        }
+    if(!array)
         return JS_E_ARRAY_EXPECTED;
-    }
 
     return array_join(ctx, &array->dispex, array->length, L",", 1, to_string, r);
 }
@@ -1566,7 +1560,7 @@ static HRESULT Array_unshift(script_ctx_t *ctx, jsval_t vthis, WORD flags, unsig
                 hres = jsdisp_propput_idx(jsthis, i+argc, val);
                 jsval_release(val);
             }else if(hres == DISP_E_UNKNOWNNAME) {
-                hres = IDispatchEx_DeleteMemberByDispID(&jsthis->IDispatchEx_iface, id);
+                hres = IDispatchEx_DeleteMemberByDispID(to_dispex(jsthis), id);
             }
         }
 
@@ -1593,11 +1587,6 @@ static HRESULT Array_unshift(script_ctx_t *ctx, jsval_t vthis, WORD flags, unsig
 done:
     jsdisp_release(jsthis);
     return hres;
-}
-
-static void Array_destructor(jsdisp_t *dispex)
-{
-    free(dispex);
 }
 
 static void Array_on_put(jsdisp_t *dispex, const WCHAR *name)
@@ -1646,12 +1635,10 @@ static const builtin_prop_t Array_props[] = {
 };
 
 static const builtin_info_t Array_info = {
-    JSCLASS_ARRAY,
-    NULL,
-    ARRAY_SIZE(Array_props),
-    Array_props,
-    Array_destructor,
-    Array_on_put
+    .class      = JSCLASS_ARRAY,
+    .props_cnt  = ARRAY_SIZE(Array_props),
+    .props      = Array_props,
+    .on_put     = Array_on_put,
 };
 
 static const builtin_prop_t ArrayInst_props[] = {
@@ -1659,12 +1646,10 @@ static const builtin_prop_t ArrayInst_props[] = {
 };
 
 static const builtin_info_t ArrayInst_info = {
-    JSCLASS_ARRAY,
-    NULL,
-    ARRAY_SIZE(ArrayInst_props),
-    ArrayInst_props,
-    Array_destructor,
-    Array_on_put
+    .class      = JSCLASS_ARRAY,
+    .props_cnt  = ARRAY_SIZE(ArrayInst_props),
+    .props      = ArrayInst_props,
+    .on_put     = Array_on_put,
 };
 
 /* ECMA-262 5.1 Edition    15.4.3.2 */
@@ -1767,12 +1752,10 @@ static const builtin_prop_t ArrayConstr_props[] = {
 };
 
 static const builtin_info_t ArrayConstr_info = {
-    JSCLASS_FUNCTION,
-    Function_value,
-    ARRAY_SIZE(ArrayConstr_props),
-    ArrayConstr_props,
-    NULL,
-    NULL
+    .class     = JSCLASS_FUNCTION,
+    .call      = Function_value,
+    .props_cnt = ARRAY_SIZE(ArrayConstr_props),
+    .props     = ArrayConstr_props,
 };
 
 HRESULT create_array_constr(script_ctx_t *ctx, jsdisp_t *object_prototype, jsdisp_t **ret)

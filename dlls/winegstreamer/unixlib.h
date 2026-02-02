@@ -104,6 +104,7 @@ enum wg_video_format
     WG_VIDEO_FORMAT_AYUV,
     WG_VIDEO_FORMAT_I420,
     WG_VIDEO_FORMAT_NV12,
+    WG_VIDEO_FORMAT_P010_10LE,
     WG_VIDEO_FORMAT_UYVY,
     WG_VIDEO_FORMAT_YUY2,
     WG_VIDEO_FORMAT_YV12,
@@ -180,12 +181,13 @@ enum wg_sample_flag
     WG_SAMPLE_FLAG_HAS_DURATION = 4,
     WG_SAMPLE_FLAG_SYNC_POINT = 8,
     WG_SAMPLE_FLAG_DISCONTINUITY = 0x10,
+    WG_SAMPLE_FLAG_PRESERVE_TIMESTAMPS = 0x20,
 };
 
 struct wg_sample
 {
     /* timestamp and duration are in 100-nanosecond units. */
-    UINT64 pts;
+    INT64 pts;
     UINT64 duration;
     LONG refcount; /* unix refcount */
     UINT32 flags;
@@ -204,18 +206,8 @@ struct wg_parser_buffer
 };
 C_ASSERT(sizeof(struct wg_parser_buffer) == 32);
 
-typedef UINT32 wg_parser_type;
-enum wg_parser_type
-{
-    WG_PARSER_DECODEBIN,
-    WG_PARSER_AVIDEMUX,
-    WG_PARSER_WAVPARSE,
-    WG_PARSER_URIDECODEBIN,
-};
-
 typedef UINT64 wg_parser_t;
 typedef UINT64 wg_parser_stream_t;
-typedef UINT64 wg_source_t;
 typedef UINT64 wg_transform_t;
 typedef UINT64 wg_muxer_t;
 
@@ -229,7 +221,6 @@ struct wg_init_gstreamer_params
 struct wg_parser_create_params
 {
     wg_parser_t parser;
-    wg_parser_type type;
     UINT8 output_compressed;
     UINT8 use_opengl;
     UINT8 err_on;
@@ -270,12 +261,6 @@ struct wg_parser_get_stream_params
     wg_parser_stream_t stream;
 };
 
-struct wg_parser_stream_get_current_type_params
-{
-    wg_parser_stream_t stream;
-    struct wg_media_type media_type;
-};
-
 struct wg_parser_stream_get_current_format_params
 {
     wg_parser_stream_t stream;
@@ -292,12 +277,6 @@ struct wg_parser_stream_enable_params
 {
     wg_parser_stream_t stream;
     const struct wg_format *format;
-};
-
-struct wg_parser_stream_enable_type_params
-{
-    wg_parser_stream_t stream;
-    struct wg_media_type media_type;
 };
 
 struct wg_parser_stream_get_buffer_params
@@ -354,84 +333,13 @@ struct wg_parser_stream_seek_params
     DWORD start_flags, stop_flags;
 };
 
-struct wg_source_create_params
-{
-    const char *url;
-    UINT64 file_size;
-    const void *data;
-    UINT32 size;
-    char mime_type[256];
-    wg_source_t source;
-};
-
-struct wg_source_get_stream_count_params
-{
-    wg_source_t source;
-    UINT32 stream_count;
-};
-
-struct wg_source_get_duration_params
-{
-    wg_source_t source;
-    UINT64 duration;
-};
-
-struct wg_source_get_position_params
-{
-    wg_source_t source;
-    UINT64 read_offset;
-};
-
-struct wg_source_set_position_params
-{
-    wg_source_t source;
-    UINT64 time;
-};
-
-struct wg_source_push_data_params
-{
-    wg_source_t source;
-    UINT64 offset;
-    const void *data;
-    UINT32 size;
-};
-
-struct wg_source_read_data_params
-{
-    wg_source_t source;
-    UINT32 index;
-    struct wg_sample *sample;
-};
-
-struct wg_source_get_stream_type_params
-{
-    wg_source_t source;
-    UINT32 index;
-    struct wg_media_type media_type;
-};
-
-struct wg_source_get_stream_tag_params
-{
-    wg_source_t source;
-    UINT32 index;
-    wg_parser_tag tag;
-    UINT32 size;
-    char *buffer;
-};
-
-struct wg_source_set_stream_flags_params
-{
-    wg_source_t source;
-    UINT32 index;
-    UINT32 select;
-};
-
 struct wg_transform_attrs
 {
     UINT32 output_plane_align;
     UINT32 input_queue_length;
     BOOL allow_format_change;
     BOOL low_latency;
+    BOOL preserve_timestamps;
 };
 
 struct wg_transform_create_params
@@ -527,11 +435,9 @@ enum unix_funcs
     unix_wg_parser_get_stream_count,
     unix_wg_parser_get_stream,
 
-    unix_wg_parser_stream_get_current_type,
     unix_wg_parser_stream_get_current_format,
     unix_wg_parser_stream_get_codec_format,
     unix_wg_parser_stream_enable,
-    unix_wg_parser_stream_enable_type,
     unix_wg_parser_stream_disable,
 
     unix_wg_parser_stream_get_buffer,
@@ -542,18 +448,6 @@ enum unix_funcs
     unix_wg_parser_stream_get_duration,
     unix_wg_parser_stream_get_tag,
     unix_wg_parser_stream_seek,
-
-    unix_wg_source_create,
-    unix_wg_source_destroy,
-    unix_wg_source_get_stream_count,
-    unix_wg_source_get_duration,
-    unix_wg_source_get_position,
-    unix_wg_source_set_position,
-    unix_wg_source_push_data,
-    unix_wg_source_read_data,
-    unix_wg_source_get_stream_type,
-    unix_wg_source_get_stream_tag,
-    unix_wg_source_set_stream_flags,
 
     unix_wg_transform_create,
     unix_wg_transform_destroy,

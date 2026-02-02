@@ -482,7 +482,11 @@ int CDECL _toupper_l(int c, _locale_t locale)
         locinfo = locale->locinfo;
 
     if((unsigned)c < 256)
-        return locinfo->pcumap[c];
+    {
+        if(locinfo->pctype[c] & _LOWER)
+            return locinfo->pcumap[c];
+        return c;
+    }
 
     if(locinfo->pctype[(c>>8)&255] & _LEADBYTE)
         *p++ = (c>>8) & 255;
@@ -536,7 +540,11 @@ int CDECL _tolower_l(int c, _locale_t locale)
         locinfo = locale->locinfo;
 
     if((unsigned)c < 256)
-        return locinfo->pclmap[c];
+    {
+        if(locinfo->pctype[c] & _UPPER)
+            return locinfo->pclmap[c];
+        return c;
+    }
 
     if(locinfo->pctype[(c>>8)&255] & _LEADBYTE)
         *p++ = (c>>8) & 255;

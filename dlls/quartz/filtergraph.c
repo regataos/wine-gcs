@@ -135,7 +135,6 @@ struct filter_graph
     int HandleEcComplete;
     int HandleEcRepaint;
     int HandleEcClockChanged;
-    unsigned int got_ec_complete : 1;
     unsigned int media_events_disabled : 1;
 
     CRITICAL_SECTION cs;
@@ -1048,6 +1047,8 @@ static DWORD WINAPI message_thread_run(void *ctx)
 {
     MSG msg;
 
+    SetThreadDescription(GetCurrentThread(), L"wine_qz_graph_worker");
+
     /* Make sure we have a message queue. */
     PeekMessageW(&msg, NULL, 0, 0, PM_NOREMOVE);
     SetEvent(message_thread_ret);
@@ -1529,6 +1530,9 @@ static HRESULT WINAPI FilterGraph2_AddSourceFilter(IFilterGraph2 *iface,
     TRACE("graph %p, filename %s, filter_name %s, ret_filter %p.\n",
             graph, debugstr_w(filename), debugstr_w(filter_name), ret_filter);
 
+    if (!*filename)
+        return VFW_E_NOT_FOUND;
+
     if (!get_media_type(filename, NULL, NULL, &clsid))
         clsid = CLSID_AsyncReader;
     TRACE("Using source filter %s.\n", debugstr_guid(&clsid));
@@ -1552,6 +1556,7 @@ static HRESULT WINAPI FilterGraph2_AddSourceFilter(IFilterGraph2 *iface,
     if (FAILED(hr))
     {
         WARN("Failed to load file, hr %#lx.\n", hr);
+        IBaseFilter_Release(filter);
         return hr;
     }
 
@@ -1952,7 +1957,7 @@ static HRESULT WINAPI MediaControl_Run(IMediaControl *iface)
         }
         else
         {
-            graph_start(graph, 0);
+            hr = graph_start(graph, 0);
         }
     }
 
@@ -2387,16 +2392,16 @@ static HRESULT WINAPI MediaSeeking_GetCurrentPosition(IMediaSeeking *iface, LONG
 
     EnterCriticalSection(&graph->cs);
 
-    if (graph->got_ec_complete)
-    {
-        ret = graph->stream_stop;
-    }
-    else if (graph->state == State_Running && !graph->needs_async_run && graph->refClock)
+    if (graph->state == State_Running && !graph->needs_async_run && graph->refClock)
     {
         REFERENCE_TIME time;
         IReferenceClock_GetTime(graph->refClock, &time);
         if (time)
+        {
             ret += time - graph->stream_start;
+            if (ret > graph->stream_stop)
+                ret = graph->stream_stop;
+        }
     }
 
     LeaveCriticalSection(&graph->cs);
@@ -4513,6 +4518,11 @@ static HRESULT WINAPI VideoWindow_get_FullScreenMode(IVideoWindow *iface, LONG *
 
     if (hr == S_OK)
         hr = IVideoWindow_get_FullScreenMode(pVideoWindow, FullScreenMode);
+    if (hr == E_NOTIMPL)
+    {
+        *FullScreenMode = OAFALSE;
+        hr = S_OK;
+    }
 
     LeaveCriticalSection(&This->cs);
 
@@ -4533,6 +4543,8 @@ static HRESULT WINAPI VideoWindow_put_FullScreenMode(IVideoWindow *iface, LONG F
 
     if (hr == S_OK)
         hr = IVideoWindow_put_FullScreenMode(pVideoWindow, FullScreenMode);
+    if (hr == E_NOTIMPL && FullScreenMode == OAFALSE)
+        hr = S_FALSE;
 
     LeaveCriticalSection(&This->cs);
 
@@ -5102,7 +5114,6 @@ static HRESULT WINAPI MediaFilter_Stop(IMediaFilter *iface)
     graph->state = State_Stopped;
     graph->needs_async_run = 0;
     work = graph->async_run_work;
-    graph->got_ec_complete = 0;
 
     /* Update the current position, probably to synchronize multiple streams. */
     IMediaSeeking_SetPositions(&graph->IMediaSeeking_iface, &graph->current_pos,
@@ -5401,7 +5412,7 @@ static HRESULT WINAPI MediaEventSink_Notify(IMediaEventSink *iface, LONG code,
             else
                 queue_media_event(graph, EC_COMPLETE, S_OK, 0);
             graph->CompletionStatus = EC_COMPLETE;
-            graph->got_ec_complete = 1;
+            graph->current_pos = graph->stream_stop;
             SetEvent(graph->hEventCompletion);
         }
     }
@@ -5717,9 +5728,9 @@ static HRESULT filter_graph_common_create(IUnknown *outer, IUnknown **out, BOOL 
         return hr;
     }
 
-    InitializeCriticalSection(&object->cs);
+    InitializeCriticalSectionEx(&object->cs, 0, RTL_CRITICAL_SECTION_FLAG_FORCE_DEBUG_INFO);
     object->cs.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": filter_graph.cs");
-    InitializeCriticalSection(&object->event_cs);
+    InitializeCriticalSectionEx(&object->event_cs, 0, RTL_CRITICAL_SECTION_FLAG_FORCE_DEBUG_INFO);
     object->event_cs.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": filter_graph.event_cs");
 
     object->defaultclock = TRUE;

@@ -293,7 +293,7 @@ NTSTATUS WINAPI NtQueryInformationToken( HANDLE token, TOKEN_INFORMATION_CLASS c
         0,    /* TokenVirtualizationAllowed */
         sizeof(DWORD), /* TokenVirtualizationEnabled */
         sizeof(TOKEN_MANDATORY_LABEL) + sizeof(SID), /* TokenIntegrityLevel [sizeof(SID) includes one SubAuthority] */
-        0,    /* TokenUIAccess */
+        sizeof(DWORD), /* TokenUIAccess */
         0,    /* TokenMandatoryPolicy */
         0,    /* TokenLogonSid */
         sizeof(DWORD), /* TokenIsAppContainer */
@@ -541,8 +541,6 @@ NTSTATUS WINAPI NtQueryInformationToken( HANDLE token, TOKEN_INFORMATION_CLASS c
             if (!status) *type = reply->elevation;
         }
         SERVER_END_REQ;
-        if (!status && no_priv_elevation)
-            *(TOKEN_ELEVATION_TYPE *)info = TokenElevationTypeLimited;
         break;
 
     case TokenElevation:
@@ -553,7 +551,6 @@ NTSTATUS WINAPI NtQueryInformationToken( HANDLE token, TOKEN_INFORMATION_CLASS c
             req->handle = wine_server_obj_handle( token );
             status = wine_server_call( req );
             if (!status) elevation->TokenIsElevated = (reply->elevation == TokenElevationTypeFull);
-            if (!status && no_priv_elevation) elevation->TokenIsElevated = 0;
         }
         SERVER_END_REQ;
         break;
@@ -588,6 +585,11 @@ NTSTATUS WINAPI NtQueryInformationToken( HANDLE token, TOKEN_INFORMATION_CLASS c
             tml->Label.Attributes = SE_GROUP_INTEGRITY | SE_GROUP_INTEGRITY_ENABLED;
             memcpy( psid, &high_level, sizeof(SID) );
         }
+        break;
+
+    case TokenUIAccess:
+        *(DWORD *)info = 1;
+        FIXME("TokenUIAccess stub!\n");
         break;
 
     case TokenAppContainerSid:

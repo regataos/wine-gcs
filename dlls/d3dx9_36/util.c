@@ -24,59 +24,60 @@ WINE_DEFAULT_DEBUG_CHANNEL(d3dx);
 
 D3DFORMAT d3dformat_from_d3dx_pixel_format_id(enum d3dx_pixel_format_id format)
 {
-    const struct pixel_format_desc *fmt_desc = get_d3dx_pixel_format_info(format);
-
     switch (format)
     {
-    case D3DX_PIXEL_FORMAT_B8G8R8_UNORM:             return D3DFMT_R8G8B8;
-    case D3DX_PIXEL_FORMAT_B8G8R8A8_UNORM:           return D3DFMT_A8R8G8B8;
-    case D3DX_PIXEL_FORMAT_B8G8R8X8_UNORM:           return D3DFMT_X8R8G8B8;
-    case D3DX_PIXEL_FORMAT_R8G8B8A8_UNORM:           return D3DFMT_A8B8G8R8;
-    case D3DX_PIXEL_FORMAT_R8G8B8X8_UNORM:           return D3DFMT_X8B8G8R8;
-    case D3DX_PIXEL_FORMAT_B5G6R5_UNORM:             return D3DFMT_R5G6B5;
-    case D3DX_PIXEL_FORMAT_B5G5R5X1_UNORM:           return D3DFMT_X1R5G5B5;
-    case D3DX_PIXEL_FORMAT_B5G5R5A1_UNORM:           return D3DFMT_A1R5G5B5;
-    case D3DX_PIXEL_FORMAT_B2G3R3_UNORM:             return D3DFMT_R3G3B2;
-    case D3DX_PIXEL_FORMAT_B2G3R3A8_UNORM:           return D3DFMT_A8R3G3B2;
-    case D3DX_PIXEL_FORMAT_B4G4R4A4_UNORM:           return D3DFMT_A4R4G4B4;
-    case D3DX_PIXEL_FORMAT_B4G4R4X4_UNORM:           return D3DFMT_X4R4G4B4;
-    case D3DX_PIXEL_FORMAT_B10G10R10A2_UNORM:        return D3DFMT_A2R10G10B10;
-    case D3DX_PIXEL_FORMAT_R10G10B10A2_UNORM:        return D3DFMT_A2B10G10R10;
-    case D3DX_PIXEL_FORMAT_R16G16B16A16_UNORM:       return D3DFMT_A16B16G16R16;
-    case D3DX_PIXEL_FORMAT_R16G16_UNORM:             return D3DFMT_G16R16;
-    case D3DX_PIXEL_FORMAT_A8_UNORM:                 return D3DFMT_A8;
-    case D3DX_PIXEL_FORMAT_L8A8_UNORM:               return D3DFMT_A8L8;
-    case D3DX_PIXEL_FORMAT_L4A4_UNORM:               return D3DFMT_A4L4;
-    case D3DX_PIXEL_FORMAT_L8_UNORM:                 return D3DFMT_L8;
-    case D3DX_PIXEL_FORMAT_L16_UNORM:                return D3DFMT_L16;
-    case D3DX_PIXEL_FORMAT_DXT1_UNORM:               return D3DFMT_DXT1;
-    case D3DX_PIXEL_FORMAT_DXT2_UNORM:               return D3DFMT_DXT2;
-    case D3DX_PIXEL_FORMAT_DXT3_UNORM:               return D3DFMT_DXT3;
-    case D3DX_PIXEL_FORMAT_DXT4_UNORM:               return D3DFMT_DXT4;
-    case D3DX_PIXEL_FORMAT_DXT5_UNORM:               return D3DFMT_DXT5;
-    case D3DX_PIXEL_FORMAT_R16_FLOAT:                return D3DFMT_R16F;
-    case D3DX_PIXEL_FORMAT_R16G16_FLOAT:             return D3DFMT_G16R16F;
-    case D3DX_PIXEL_FORMAT_R16G16B16A16_FLOAT:       return D3DFMT_A16B16G16R16F;
-    case D3DX_PIXEL_FORMAT_R32_FLOAT:                return D3DFMT_R32F;
-    case D3DX_PIXEL_FORMAT_R32G32_FLOAT:             return D3DFMT_G32R32F;
-    case D3DX_PIXEL_FORMAT_R32G32B32A32_FLOAT:       return D3DFMT_A32B32G32R32F;
-    case D3DX_PIXEL_FORMAT_P8_UINT:                  return D3DFMT_P8;
-    case D3DX_PIXEL_FORMAT_P8_UINT_A8_UNORM:         return D3DFMT_A8P8;
-    case D3DX_PIXEL_FORMAT_U8V8W8Q8_SNORM:           return D3DFMT_Q8W8V8U8;
-    case D3DX_PIXEL_FORMAT_U8V8_SNORM:               return D3DFMT_V8U8;
-    case D3DX_PIXEL_FORMAT_U16V16_SNORM:             return D3DFMT_V16U16;
-    case D3DX_PIXEL_FORMAT_U8V8_SNORM_L8X8_UNORM:    return D3DFMT_X8L8V8U8;
-    case D3DX_PIXEL_FORMAT_U10V10W10_SNORM_A2_UNORM: return D3DFMT_A2W10V10U10;
-    case D3DX_PIXEL_FORMAT_U16V16W16Q16_SNORM:       return D3DFMT_Q16W16V16U16;
-    case D3DX_PIXEL_FORMAT_G8R8_G8B8_UNORM:          return D3DFMT_G8R8_G8B8;
-    case D3DX_PIXEL_FORMAT_R8G8_B8G8_UNORM:          return D3DFMT_R8G8_B8G8;
-    case D3DX_PIXEL_FORMAT_UYVY:                     return D3DFMT_UYVY;
-    case D3DX_PIXEL_FORMAT_YUY2:                     return D3DFMT_YUY2;
-    default:
-        /* Don't print the FIXME for formats that are DXGI only. */
-        if (!(fmt_desc->fmt_type_desc.fmt_flags & FMT_FLAG_DXGI))
-            FIXME("Unknown d3dx_pixel_format_id %#x.\n", format);
-        return D3DFMT_UNKNOWN;
+        case D3DX_PIXEL_FORMAT_B8G8R8_UNORM:             return D3DFMT_R8G8B8;
+        case D3DX_PIXEL_FORMAT_B8G8R8A8_UNORM:           return D3DFMT_A8R8G8B8;
+        case D3DX_PIXEL_FORMAT_B8G8R8X8_UNORM:           return D3DFMT_X8R8G8B8;
+        case D3DX_PIXEL_FORMAT_R8G8B8A8_UNORM:           return D3DFMT_A8B8G8R8;
+        case D3DX_PIXEL_FORMAT_R8G8B8X8_UNORM:           return D3DFMT_X8B8G8R8;
+        case D3DX_PIXEL_FORMAT_B5G6R5_UNORM:             return D3DFMT_R5G6B5;
+        case D3DX_PIXEL_FORMAT_B5G5R5X1_UNORM:           return D3DFMT_X1R5G5B5;
+        case D3DX_PIXEL_FORMAT_B5G5R5A1_UNORM:           return D3DFMT_A1R5G5B5;
+        case D3DX_PIXEL_FORMAT_B2G3R3_UNORM:             return D3DFMT_R3G3B2;
+        case D3DX_PIXEL_FORMAT_B2G3R3A8_UNORM:           return D3DFMT_A8R3G3B2;
+        case D3DX_PIXEL_FORMAT_B4G4R4A4_UNORM:           return D3DFMT_A4R4G4B4;
+        case D3DX_PIXEL_FORMAT_B4G4R4X4_UNORM:           return D3DFMT_X4R4G4B4;
+        case D3DX_PIXEL_FORMAT_B10G10R10A2_UNORM:        return D3DFMT_A2R10G10B10;
+        case D3DX_PIXEL_FORMAT_R10G10B10A2_UNORM:        return D3DFMT_A2B10G10R10;
+        case D3DX_PIXEL_FORMAT_R16G16B16A16_UNORM:       return D3DFMT_A16B16G16R16;
+        case D3DX_PIXEL_FORMAT_R16G16_UNORM:             return D3DFMT_G16R16;
+        case D3DX_PIXEL_FORMAT_A8_UNORM:                 return D3DFMT_A8;
+        case D3DX_PIXEL_FORMAT_L8A8_UNORM:               return D3DFMT_A8L8;
+        case D3DX_PIXEL_FORMAT_L4A4_UNORM:               return D3DFMT_A4L4;
+        case D3DX_PIXEL_FORMAT_L8_UNORM:                 return D3DFMT_L8;
+        case D3DX_PIXEL_FORMAT_L16_UNORM:                return D3DFMT_L16;
+        case D3DX_PIXEL_FORMAT_DXT1_UNORM:               return D3DFMT_DXT1;
+        case D3DX_PIXEL_FORMAT_DXT2_UNORM:               return D3DFMT_DXT2;
+        case D3DX_PIXEL_FORMAT_DXT3_UNORM:               return D3DFMT_DXT3;
+        case D3DX_PIXEL_FORMAT_DXT4_UNORM:               return D3DFMT_DXT4;
+        case D3DX_PIXEL_FORMAT_DXT5_UNORM:               return D3DFMT_DXT5;
+        case D3DX_PIXEL_FORMAT_R16_FLOAT:                return D3DFMT_R16F;
+        case D3DX_PIXEL_FORMAT_R16G16_FLOAT:             return D3DFMT_G16R16F;
+        case D3DX_PIXEL_FORMAT_R16G16B16A16_FLOAT:       return D3DFMT_A16B16G16R16F;
+        case D3DX_PIXEL_FORMAT_R32_FLOAT:                return D3DFMT_R32F;
+        case D3DX_PIXEL_FORMAT_R32G32_FLOAT:             return D3DFMT_G32R32F;
+        case D3DX_PIXEL_FORMAT_R32G32B32A32_FLOAT:       return D3DFMT_A32B32G32R32F;
+        case D3DX_PIXEL_FORMAT_P8_UINT:                  return D3DFMT_P8;
+        case D3DX_PIXEL_FORMAT_P8_UINT_A8_UNORM:         return D3DFMT_A8P8;
+        case D3DX_PIXEL_FORMAT_U8V8W8Q8_SNORM:           return D3DFMT_Q8W8V8U8;
+        case D3DX_PIXEL_FORMAT_U8V8_SNORM:               return D3DFMT_V8U8;
+        case D3DX_PIXEL_FORMAT_U16V16_SNORM:             return D3DFMT_V16U16;
+        case D3DX_PIXEL_FORMAT_U8V8_SNORM_L8X8_UNORM:    return D3DFMT_X8L8V8U8;
+        case D3DX_PIXEL_FORMAT_U10V10W10_SNORM_A2_UNORM: return D3DFMT_A2W10V10U10;
+        case D3DX_PIXEL_FORMAT_U16V16W16Q16_SNORM:       return D3DFMT_Q16W16V16U16;
+        case D3DX_PIXEL_FORMAT_G8R8_G8B8_UNORM:          return D3DFMT_G8R8_G8B8;
+        case D3DX_PIXEL_FORMAT_R8G8_B8G8_UNORM:          return D3DFMT_R8G8_B8G8;
+        case D3DX_PIXEL_FORMAT_UYVY:                     return D3DFMT_UYVY;
+        case D3DX_PIXEL_FORMAT_YUY2:                     return D3DFMT_YUY2;
+        default:
+        {
+            const struct pixel_format_desc *fmt_desc = get_d3dx_pixel_format_info(format);
+
+            if (!is_internal_format(fmt_desc) && !is_dxgi_format(fmt_desc))
+                FIXME("Unknown d3dx_pixel_format_id %u.\n", format);
+            return D3DFMT_UNKNOWN;
+        }
     }
 }
 
@@ -84,53 +85,66 @@ enum d3dx_pixel_format_id d3dx_pixel_format_id_from_d3dformat(D3DFORMAT format)
 {
     switch (format)
     {
-    case D3DFMT_R8G8B8:        return D3DX_PIXEL_FORMAT_B8G8R8_UNORM;
-    case D3DFMT_A8R8G8B8:      return D3DX_PIXEL_FORMAT_B8G8R8A8_UNORM;
-    case D3DFMT_X8R8G8B8:      return D3DX_PIXEL_FORMAT_B8G8R8X8_UNORM;
-    case D3DFMT_A8B8G8R8:      return D3DX_PIXEL_FORMAT_R8G8B8A8_UNORM;
-    case D3DFMT_X8B8G8R8:      return D3DX_PIXEL_FORMAT_R8G8B8X8_UNORM;
-    case D3DFMT_R5G6B5:        return D3DX_PIXEL_FORMAT_B5G6R5_UNORM;
-    case D3DFMT_X1R5G5B5:      return D3DX_PIXEL_FORMAT_B5G5R5X1_UNORM;
-    case D3DFMT_A1R5G5B5:      return D3DX_PIXEL_FORMAT_B5G5R5A1_UNORM;
-    case D3DFMT_R3G3B2:        return D3DX_PIXEL_FORMAT_B2G3R3_UNORM;
-    case D3DFMT_A8R3G3B2:      return D3DX_PIXEL_FORMAT_B2G3R3A8_UNORM;
-    case D3DFMT_A4R4G4B4:      return D3DX_PIXEL_FORMAT_B4G4R4A4_UNORM;
-    case D3DFMT_X4R4G4B4:      return D3DX_PIXEL_FORMAT_B4G4R4X4_UNORM;
-    case D3DFMT_A2R10G10B10:   return D3DX_PIXEL_FORMAT_B10G10R10A2_UNORM;
-    case D3DFMT_A2B10G10R10:   return D3DX_PIXEL_FORMAT_R10G10B10A2_UNORM;
-    case D3DFMT_A16B16G16R16:  return D3DX_PIXEL_FORMAT_R16G16B16A16_UNORM;
-    case D3DFMT_G16R16:        return D3DX_PIXEL_FORMAT_R16G16_UNORM;
-    case D3DFMT_A8:            return D3DX_PIXEL_FORMAT_A8_UNORM;
-    case D3DFMT_A8L8:          return D3DX_PIXEL_FORMAT_L8A8_UNORM;
-    case D3DFMT_A4L4:          return D3DX_PIXEL_FORMAT_L4A4_UNORM;
-    case D3DFMT_L8:            return D3DX_PIXEL_FORMAT_L8_UNORM;
-    case D3DFMT_L16:           return D3DX_PIXEL_FORMAT_L16_UNORM;
-    case D3DFMT_DXT1:          return D3DX_PIXEL_FORMAT_DXT1_UNORM;
-    case D3DFMT_DXT2:          return D3DX_PIXEL_FORMAT_DXT2_UNORM;
-    case D3DFMT_DXT3:          return D3DX_PIXEL_FORMAT_DXT3_UNORM;
-    case D3DFMT_DXT4:          return D3DX_PIXEL_FORMAT_DXT4_UNORM;
-    case D3DFMT_DXT5:          return D3DX_PIXEL_FORMAT_DXT5_UNORM;
-    case D3DFMT_R16F:          return D3DX_PIXEL_FORMAT_R16_FLOAT;
-    case D3DFMT_G16R16F:       return D3DX_PIXEL_FORMAT_R16G16_FLOAT;
-    case D3DFMT_A16B16G16R16F: return D3DX_PIXEL_FORMAT_R16G16B16A16_FLOAT;
-    case D3DFMT_R32F:          return D3DX_PIXEL_FORMAT_R32_FLOAT;
-    case D3DFMT_G32R32F:       return D3DX_PIXEL_FORMAT_R32G32_FLOAT;
-    case D3DFMT_A32B32G32R32F: return D3DX_PIXEL_FORMAT_R32G32B32A32_FLOAT;
-    case D3DFMT_P8:            return D3DX_PIXEL_FORMAT_P8_UINT;
-    case D3DFMT_A8P8:          return D3DX_PIXEL_FORMAT_P8_UINT_A8_UNORM;
-    case D3DFMT_Q8W8V8U8:      return D3DX_PIXEL_FORMAT_U8V8W8Q8_SNORM;
-    case D3DFMT_V8U8:          return D3DX_PIXEL_FORMAT_U8V8_SNORM;
-    case D3DFMT_V16U16:        return D3DX_PIXEL_FORMAT_U16V16_SNORM;
-    case D3DFMT_X8L8V8U8:      return D3DX_PIXEL_FORMAT_U8V8_SNORM_L8X8_UNORM;
-    case D3DFMT_A2W10V10U10:   return D3DX_PIXEL_FORMAT_U10V10W10_SNORM_A2_UNORM;
-    case D3DFMT_Q16W16V16U16:  return D3DX_PIXEL_FORMAT_U16V16W16Q16_SNORM;
-    case D3DFMT_R8G8_B8G8:     return D3DX_PIXEL_FORMAT_R8G8_B8G8_UNORM;
-    case D3DFMT_G8R8_G8B8:     return D3DX_PIXEL_FORMAT_G8R8_G8B8_UNORM;
-    case D3DFMT_UYVY:          return D3DX_PIXEL_FORMAT_UYVY;
-    case D3DFMT_YUY2:          return D3DX_PIXEL_FORMAT_YUY2;
-    default:
-        FIXME("No d3dx_pixel_format_id for D3DFORMAT %#x.\n", format);
-        return D3DX_PIXEL_FORMAT_COUNT;
+        case D3DFMT_R8G8B8:        return D3DX_PIXEL_FORMAT_B8G8R8_UNORM;
+        case D3DFMT_A8R8G8B8:      return D3DX_PIXEL_FORMAT_B8G8R8A8_UNORM;
+        case D3DFMT_X8R8G8B8:      return D3DX_PIXEL_FORMAT_B8G8R8X8_UNORM;
+        case D3DFMT_A8B8G8R8:      return D3DX_PIXEL_FORMAT_R8G8B8A8_UNORM;
+        case D3DFMT_X8B8G8R8:      return D3DX_PIXEL_FORMAT_R8G8B8X8_UNORM;
+        case D3DFMT_R5G6B5:        return D3DX_PIXEL_FORMAT_B5G6R5_UNORM;
+        case D3DFMT_X1R5G5B5:      return D3DX_PIXEL_FORMAT_B5G5R5X1_UNORM;
+        case D3DFMT_A1R5G5B5:      return D3DX_PIXEL_FORMAT_B5G5R5A1_UNORM;
+        case D3DFMT_R3G3B2:        return D3DX_PIXEL_FORMAT_B2G3R3_UNORM;
+        case D3DFMT_A8R3G3B2:      return D3DX_PIXEL_FORMAT_B2G3R3A8_UNORM;
+        case D3DFMT_A4R4G4B4:      return D3DX_PIXEL_FORMAT_B4G4R4A4_UNORM;
+        case D3DFMT_X4R4G4B4:      return D3DX_PIXEL_FORMAT_B4G4R4X4_UNORM;
+        case D3DFMT_A2R10G10B10:   return D3DX_PIXEL_FORMAT_B10G10R10A2_UNORM;
+        case D3DFMT_A2B10G10R10:   return D3DX_PIXEL_FORMAT_R10G10B10A2_UNORM;
+        case D3DFMT_A16B16G16R16:  return D3DX_PIXEL_FORMAT_R16G16B16A16_UNORM;
+        case D3DFMT_G16R16:        return D3DX_PIXEL_FORMAT_R16G16_UNORM;
+        case D3DFMT_A8:            return D3DX_PIXEL_FORMAT_A8_UNORM;
+        case D3DFMT_A8L8:          return D3DX_PIXEL_FORMAT_L8A8_UNORM;
+        case D3DFMT_A4L4:          return D3DX_PIXEL_FORMAT_L4A4_UNORM;
+        case D3DFMT_L8:            return D3DX_PIXEL_FORMAT_L8_UNORM;
+        case D3DFMT_L16:           return D3DX_PIXEL_FORMAT_L16_UNORM;
+        case D3DFMT_DXT1:          return D3DX_PIXEL_FORMAT_DXT1_UNORM;
+        case D3DFMT_DXT2:          return D3DX_PIXEL_FORMAT_DXT2_UNORM;
+        case D3DFMT_DXT3:          return D3DX_PIXEL_FORMAT_DXT3_UNORM;
+        case D3DFMT_DXT4:          return D3DX_PIXEL_FORMAT_DXT4_UNORM;
+        case D3DFMT_DXT5:          return D3DX_PIXEL_FORMAT_DXT5_UNORM;
+        case D3DFMT_R16F:          return D3DX_PIXEL_FORMAT_R16_FLOAT;
+        case D3DFMT_G16R16F:       return D3DX_PIXEL_FORMAT_R16G16_FLOAT;
+        case D3DFMT_A16B16G16R16F: return D3DX_PIXEL_FORMAT_R16G16B16A16_FLOAT;
+        case D3DFMT_R32F:          return D3DX_PIXEL_FORMAT_R32_FLOAT;
+        case D3DFMT_G32R32F:       return D3DX_PIXEL_FORMAT_R32G32_FLOAT;
+        case D3DFMT_A32B32G32R32F: return D3DX_PIXEL_FORMAT_R32G32B32A32_FLOAT;
+        case D3DFMT_P8:            return D3DX_PIXEL_FORMAT_P8_UINT;
+        case D3DFMT_A8P8:          return D3DX_PIXEL_FORMAT_P8_UINT_A8_UNORM;
+        case D3DFMT_Q8W8V8U8:      return D3DX_PIXEL_FORMAT_U8V8W8Q8_SNORM;
+        case D3DFMT_V8U8:          return D3DX_PIXEL_FORMAT_U8V8_SNORM;
+        case D3DFMT_V16U16:        return D3DX_PIXEL_FORMAT_U16V16_SNORM;
+        case D3DFMT_X8L8V8U8:      return D3DX_PIXEL_FORMAT_U8V8_SNORM_L8X8_UNORM;
+        case D3DFMT_A2W10V10U10:   return D3DX_PIXEL_FORMAT_U10V10W10_SNORM_A2_UNORM;
+        case D3DFMT_Q16W16V16U16:  return D3DX_PIXEL_FORMAT_U16V16W16Q16_SNORM;
+        case D3DFMT_R8G8_B8G8:     return D3DX_PIXEL_FORMAT_R8G8_B8G8_UNORM;
+        case D3DFMT_G8R8_G8B8:     return D3DX_PIXEL_FORMAT_G8R8_G8B8_UNORM;
+        case D3DFMT_UYVY:          return D3DX_PIXEL_FORMAT_UYVY;
+        case D3DFMT_YUY2:          return D3DX_PIXEL_FORMAT_YUY2;
+        default:
+            FIXME("No d3dx_pixel_format_id for D3DFORMAT %s.\n", debugstr_fourcc(format));
+            return D3DX_PIXEL_FORMAT_COUNT;
+    }
+}
+
+enum d3dx_resource_type d3dx_resource_type_from_d3dresourcetype(D3DRESOURCETYPE type)
+{
+    switch (type)
+    {
+        case D3DRTYPE_TEXTURE:       return D3DX_RESOURCE_TYPE_TEXTURE_2D;
+        case D3DRTYPE_VOLUMETEXTURE: return D3DX_RESOURCE_TYPE_TEXTURE_3D;
+        case D3DRTYPE_CUBETEXTURE:   return D3DX_RESOURCE_TYPE_CUBE_TEXTURE;
+        default:
+            FIXME("No d3dx_resource_type for D3DRESOURCETYPE %d.\n", type);
+            return D3DX_RESOURCE_TYPE_COUNT;
     }
 }
 
@@ -217,26 +231,6 @@ HRESULT load_resource_into_memory(HMODULE module, HRSRC resinfo, void **buffer, 
     if(*buffer == NULL) return HRESULT_FROM_WIN32(GetLastError());
 
     return S_OK;
-}
-
-HRESULT write_buffer_to_file(const WCHAR *dst_filename, ID3DXBuffer *buffer)
-{
-    HRESULT hr = S_OK;
-    void *buffer_pointer;
-    DWORD buffer_size;
-    DWORD bytes_written;
-    HANDLE file = CreateFileW(dst_filename, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
-    if (file == INVALID_HANDLE_VALUE)
-        return HRESULT_FROM_WIN32(GetLastError());
-
-    buffer_pointer = ID3DXBuffer_GetBufferPointer(buffer);
-    buffer_size = ID3DXBuffer_GetBufferSize(buffer);
-
-    if (!WriteFile(file, buffer_pointer, buffer_size, &bytes_written, NULL))
-        hr = HRESULT_FROM_WIN32(GetLastError());
-
-    CloseHandle(file);
-    return hr;
 }
 
 /************************************************************

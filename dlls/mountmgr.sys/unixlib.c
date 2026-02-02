@@ -36,7 +36,6 @@
 #ifdef HAVE_SYS_STATVFS_H
 # include <sys/statvfs.h>
 #endif
-#include <termios.h>
 #include <unistd.h>
 
 #include "unixlib.h"
@@ -90,22 +89,14 @@ static NTSTATUS errno_to_status( int err )
 
 static char *get_dosdevices_path( const char *dev )
 {
-    const char *home = getenv( "HOME" );
     const char *prefix = getenv( "WINEPREFIX" );
-    size_t len = (prefix ? strlen(prefix) : strlen(home) + strlen("/.wine")) + sizeof("/dosdevices/") + strlen(dev);
-    char *path = malloc( len );
+    char *path = NULL;
 
-    if (path)
-    {
-        if (prefix) strcpy( path, prefix );
-        else
-        {
-            strcpy( path, home );
-            strcat( path, "/.wine" );
-        }
-        strcat( path, "/dosdevices/" );
-        strcat( path, dev );
-    }
+    if (prefix)
+        asprintf( &path, "%s/dosdevices/%s", prefix, dev );
+    else
+        asprintf( &path, "%s/.wine/dosdevices/%s", getenv( "HOME" ), dev );
+
     return path;
 }
 
@@ -128,7 +119,7 @@ static void detect_devices( const char **paths, char *names, ULONG size )
 
         for (;;)
         {
-            int len = sprintf( unix_path, *paths, i++ );
+            int len = snprintf( unix_path, sizeof(unix_path), *paths, i++ );
             if (len + 2 > size) break;
             if (access( unix_path, F_OK ) != 0) break;
             strcpy( names, unix_path );
@@ -142,7 +133,7 @@ static void detect_devices( const char **paths, char *names, ULONG size )
 
 void queue_device_op( enum device_op op, const char *udi, const char *device,
                       const char *mount_point, enum device_type type, const GUID *guid,
-                      const char *serial, const struct scsi_info *scsi_info )
+                      const char *serial, const char *label, const struct scsi_info *scsi_info )
 {
     struct device_info *info;
     char *str, *end;
@@ -161,6 +152,7 @@ void queue_device_op( enum device_op op, const char *udi, const char *device,
     ADD_STR(device);
     ADD_STR(mount_point);
     ADD_STR(serial);
+    ADD_STR(label);
 #undef ADD_STR
     if (guid)
     {
@@ -197,6 +189,7 @@ static NTSTATUS dequeue_device_op( void *args )
     if (dst->device) dst->device = (char *)dst + (src->device - (char *)src);
     if (dst->mount_point) dst->mount_point = (char *)dst + (src->mount_point - (char *)src);
     if (dst->serial) dst->serial = (char *)dst + (src->serial - (char *)src);
+    if (dst->label) dst->label = (char *)dst + (src->label - (char *)src);
     if (dst->guid) dst->guid = &dst->guid_buffer;
     if (dst->scsi_info) dst->scsi_info = &dst->scsi_buffer;
 
@@ -304,27 +297,6 @@ static NTSTATUS set_dosdev_symlink( void *args )
     const struct set_dosdev_symlink_params *params = args;
     char *path;
     NTSTATUS status = STATUS_SUCCESS;
-
-#ifdef linux
-    /* Serial port device files almost always exist on Linux even if the corresponding serial
-     * ports don't exist. Do a basic functionality check before advertising a serial port. */
-    if (params->serial)
-    {
-        struct termios tios;
-        int fd;
-
-        if ((fd = open( params->dest, O_RDONLY )) == -1)
-            return FALSE;
-
-        if (tcgetattr( fd, &tios ) == -1)
-        {
-            close( fd );
-            return FALSE;
-        }
-
-        close( fd );
-    }
-#endif
 
     if (!(path = get_dosdevices_path( params->dev ))) return STATUS_NO_MEMORY;
 
@@ -442,9 +414,9 @@ static NTSTATUS read_volume_file( void *args )
 {
     const struct read_volume_file_params *params = args;
     int ret, fd = -1;
-    char *name = malloc( strlen(params->volume) + strlen(params->file) + 2 );
+    char *name = NULL;
 
-    sprintf( name, "%s/%s", params->volume, params->file );
+    asprintf( &name, "%s/%s", params->volume, params->file );
 
     if (name[0] != '/')
     {
@@ -530,9 +502,7 @@ static NTSTATUS set_shell_folder( void *args )
     if (link && (!strcmp( link, "$HOME" ) || !strncmp( link, "$HOME/", 6 )) && (home = getenv( "HOME" )))
     {
         link += 5;
-        homelink = malloc( strlen(home) + strlen(link) + 1 );
-        strcpy( homelink, home );
-        strcat( homelink, link );
+        asprintf( &homelink, "%s%s", home, link );
         link = homelink;
     }
 

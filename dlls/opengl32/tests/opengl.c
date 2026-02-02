@@ -53,7 +53,28 @@ static void (WINAPI *pglDebugMessageCallbackARB)(void *, void *);
 static void (WINAPI *pglDebugMessageControlARB)(GLenum, GLenum, GLenum, GLsizei, const GLuint *, GLboolean);
 static void (WINAPI *pglDebugMessageInsertARB)(GLenum, GLenum, GLuint, GLenum, GLsizei, const char *);
 
+/* GL_ARB_framebuffer_object */
+static void (WINAPI *pglBindFramebuffer)(GLenum target, GLuint framebuffer);
+static GLenum (WINAPI *pglCheckFramebufferStatus)(GLenum target);
+
 static const char* wgl_extensions = NULL;
+
+static void flush_events(void)
+{
+    MSG msg;
+    int diff = 200;
+    int min_timeout = 100;
+    DWORD time = GetTickCount() + diff;
+
+    while (diff > 0)
+    {
+        if (MsgWaitForMultipleObjects(0, NULL, FALSE, min_timeout, QS_ALLINPUT) == WAIT_TIMEOUT)
+            break;
+        while (PeekMessageA(&msg, 0, 0, 0, PM_REMOVE))
+            DispatchMessageA(&msg);
+        diff = time - GetTickCount();
+    }
+}
 
 static void init_functions(void)
 {
@@ -89,6 +110,10 @@ static void init_functions(void)
     GET_PROC(glDebugMessageCallbackARB)
     GET_PROC(glDebugMessageControlARB)
     GET_PROC(glDebugMessageInsertARB)
+
+    /* GL_ARB_framebuffer_object */
+    GET_PROC(glBindFramebuffer)
+    GET_PROC(glCheckFramebufferStatus)
 
 #undef GET_PROC
 }
@@ -1342,6 +1367,71 @@ static void test_minimized(void)
     DestroyWindow(window);
 }
 
+static void test_framebuffer(void)
+{
+    static const PIXELFORMATDESCRIPTOR pf_desc =
+    {
+        sizeof(PIXELFORMATDESCRIPTOR),
+        1,                     /* version */
+        PFD_DRAW_TO_WINDOW | PFD_SUPPORT_OPENGL | PFD_DOUBLEBUFFER,
+        PFD_TYPE_RGBA,
+        24,                    /* 24-bit color depth */
+        0, 0, 0, 0, 0, 0,      /* color bits */
+        0,                     /* alpha buffer */
+        0,                     /* shift bit */
+        0,                     /* accumulation buffer */
+        0, 0, 0, 0,            /* accum bits */
+        32,                    /* z-buffer */
+        0,                     /* stencil buffer */
+        0,                     /* auxiliary buffer */
+        PFD_MAIN_PLANE,        /* main layer */
+        0,                     /* reserved */
+        0, 0, 0                /* layer masks */
+    };
+    int pixel_format;
+    GLenum status;
+    HWND window;
+    HGLRC ctx;
+    BOOL ret;
+    HDC dc;
+
+    /* Test the default framebuffer status for a window that becomes visible after wglMakeCurrent() */
+    window = CreateWindowA("static", "opengl32_test", WS_POPUP, 0, 0, 640, 480, 0, 0, 0, 0);
+    ok(!!window, "Failed to create window, last error %#lx.\n", GetLastError());
+    dc = GetDC(window);
+    ok(!!dc, "Failed to get DC.\n");
+    pixel_format = ChoosePixelFormat(dc, &pf_desc);
+    if (!pixel_format)
+    {
+        win_skip("Failed to find pixel format.\n");
+        ReleaseDC(window, dc);
+        DestroyWindow(window);
+        return;
+    }
+
+    ret = SetPixelFormat(dc, pixel_format, &pf_desc);
+    ok(ret, "Failed to set pixel format, last error %#lx.\n", GetLastError());
+    ctx = wglCreateContext(dc);
+    ok(!!ctx, "Failed to create GL context, last error %#lx.\n", GetLastError());
+    ret = wglMakeCurrent(dc, ctx);
+    ok(ret, "Failed to make context current, last error %#lx.\n", GetLastError());
+
+    ShowWindow(window, SW_SHOW);
+    flush_events();
+
+    pglBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+    status = pglCheckFramebufferStatus(GL_FRAMEBUFFER);
+    ok(status == GL_FRAMEBUFFER_COMPLETE, "Expected %#x, got %#x.\n", GL_FRAMEBUFFER_COMPLETE, status);
+
+    ret = wglMakeCurrent(NULL, NULL);
+    ok(ret, "Failed to clear current context, last error %#lx.\n", GetLastError());
+    ret = wglDeleteContext(ctx);
+    ok(ret, "Failed to delete GL context, last error %#lx.\n", GetLastError());
+    ReleaseDC(window, dc);
+    DestroyWindow(window);
+}
+
 static void test_window_dc(void)
 {
     PIXELFORMATDESCRIPTOR pf_desc =
@@ -1915,12 +2005,26 @@ static void test_wglChoosePixelFormatARB(HDC hdc)
         0
     };
 
+    static int attrib_list_swap[] =
+    {
+        WGL_SWAP_METHOD_ARB, 0,
+        WGL_SUPPORT_OPENGL_ARB, 1,
+        WGL_DRAW_TO_WINDOW_ARB, 1,
+        0
+    };
+    static int swap_methods[] =
+    {
+        WGL_SWAP_COPY_ARB,
+        WGL_SWAP_EXCHANGE_ARB,
+        WGL_SWAP_UNDEFINED_ARB,
+    };
+
     PIXELFORMATDESCRIPTOR fmt, last_fmt;
     BYTE depth, last_depth;
     UINT format_count;
     int formats[1024];
-    unsigned int i;
-    int res;
+    unsigned int test, i;
+    int res, swap_method;
 
     if (!pwglChoosePixelFormatARB)
     {
@@ -1979,6 +2083,34 @@ static void test_wglChoosePixelFormatARB(HDC hdc)
         ok(format.dwFlags & PFD_SUPPORT_OPENGL, "got dwFlags %#lx\n", format.dwFlags);
         ok(format.dwFlags & PFD_SUPPORT_GDI, "got dwFlags %#lx\n", format.dwFlags);
 
+        winetest_pop_context();
+    }
+
+    for (test = 0; test < ARRAY_SIZE(swap_methods); ++test)
+    {
+        PIXELFORMATDESCRIPTOR format = {0};
+
+        winetest_push_context("swap method %#x", swap_methods[test]);
+        format_count = 0;
+        attrib_list_swap[1] = swap_methods[test];
+        res = pwglChoosePixelFormatARB(hdc, attrib_list_swap, NULL, ARRAY_SIZE(formats), formats, &format_count);
+        ok(res, "got %d.\n", res);
+        if (swap_methods[test] != WGL_SWAP_COPY_ARB)
+            ok(format_count, "got no formats.\n");
+        trace("count %d.\n", format_count);
+        for (i = 0; i < format_count; ++i)
+        {
+            res = pwglGetPixelFormatAttribivARB(hdc, formats[i], 0, 1, attrib_list_swap, &swap_method);
+            ok(res, "got %d.\n", res);
+            ok(swap_method == swap_methods[test]
+               /* AMD */
+               || (swap_methods[test] == WGL_SWAP_EXCHANGE_ARB && swap_method == WGL_SWAP_UNDEFINED_ARB)
+               || (swap_methods[test] == WGL_SWAP_UNDEFINED_ARB && swap_method == WGL_SWAP_EXCHANGE_ARB),
+               "got %#x.\n", swap_method);
+
+            res = DescribePixelFormat(hdc, formats[i], sizeof(format), &format);
+            ok(res, "DescribePixelFormat failed, error %lu\n", GetLastError());
+        }
         winetest_pop_context();
     }
 }
@@ -2144,6 +2276,7 @@ START_TEST(opengl)
          * any WGL call :( On Wine this would work but not on real Windows because there can be different implementations (software, ICD, MCD).
          */
         init_functions();
+
         test_getprocaddress(hdc);
         test_deletecontext(hwnd, hdc);
         test_makecurrent(hdc);
@@ -2169,6 +2302,7 @@ START_TEST(opengl)
         test_colorbits(hdc);
         test_gdi_dbuf(hdc);
         test_acceleration(hdc);
+        test_framebuffer();
 
         wgl_extensions = pwglGetExtensionsStringARB(hdc);
         if(wgl_extensions == NULL) skip("Skipping opengl32 tests because this OpenGL implementation doesn't support WGL extensions!\n");

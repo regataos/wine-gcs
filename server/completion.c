@@ -19,18 +19,14 @@
  *
  */
 
-/* FIXMEs:
- *  - built-in wait queues used which means:
- *    + threads are awaken FIFO and not LIFO as native does
- *    + "max concurrent active threads" parameter not used
- *    + completion handle is waitable, while native isn't
- */
+/* FIXME: "max concurrent active threads" parameter is not used */
 
 #include "config.h"
 
 #include <stdarg.h>
 #include <stdio.h>
 #include <unistd.h>
+
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
 #include "windef.h"
@@ -42,6 +38,7 @@
 #include "request.h"
 #include "esync.h"
 #include "fsync.h"
+
 
 static const WCHAR completion_name[] = {'I','o','C','o','m','p','l','e','t','i','o','n'};
 
@@ -57,29 +54,40 @@ struct type_descr completion_type =
     },
 };
 
-struct completion;
+struct comp_msg
+{
+    struct   list queue_entry;
+    apc_param_t   ckey;
+    apc_param_t   cvalue;
+    apc_param_t   information;
+    unsigned int  status;
+};
 
 struct completion_wait
 {
     struct object      obj;
+    obj_handle_t       handle;
     struct completion *completion;
-    struct list        queue;
-    unsigned int       depth;
-    int                esync_fd;
-    unsigned int       fsync_idx;
+    struct thread     *thread;
+    struct comp_msg   *msg;
+    struct list        wait_queue_entry;
 };
 
 struct completion
 {
-    struct object           obj;
-    struct completion_wait *wait;
+    struct object  obj;
+    struct list    queue;
+    struct list    wait_queue;
+    unsigned int   depth;
+    int            closed;
+    int            inproc_sync;
+    int            esync_fd;
+    unsigned int   fsync_idx;
 };
 
 static void completion_wait_dump( struct object*, int );
 static int completion_wait_signaled( struct object *obj, struct wait_queue_entry *entry );
 static void completion_wait_satisfied( struct object *obj, struct wait_queue_entry *entry );
-static int completion_wait_get_esync_fd( struct object *obj, enum esync_type *type );
-static unsigned int completion_wait_get_fsync_idx( struct object *obj, enum fsync_type *type );
 static void completion_wait_destroy( struct object * );
 
 static const struct object_ops completion_wait_ops =
@@ -90,8 +98,8 @@ static const struct object_ops completion_wait_ops =
     add_queue,                      /* add_queue */
     remove_queue,                   /* remove_queue */
     completion_wait_signaled,       /* signaled */
-    completion_wait_get_esync_fd,   /* get_esync_fd */
-    completion_wait_get_fsync_idx,  /* get_fsync_idx */
+    NULL,                           /* get_esync_fd */
+    NULL,                           /* get_fsync_idx */
     completion_wait_satisfied,      /* satisfied */
     no_signal,                      /* signal */
     no_get_fd,                      /* get_fd */
@@ -104,15 +112,67 @@ static const struct object_ops completion_wait_ops =
     NULL,                           /* unlink_name */
     no_open_file,                   /* open_file */
     no_kernel_obj_list,             /* get_kernel_obj_list */
+    no_get_inproc_sync,             /* get_inproc_sync */
     no_close_handle,                /* close_handle */
     completion_wait_destroy         /* destroy */
 };
 
+static void completion_wait_destroy( struct object *obj )
+{
+    struct completion_wait *wait = (struct completion_wait *)obj;
+
+    free( wait->msg );
+}
+
+static void completion_wait_dump( struct object *obj, int verbose )
+{
+    struct completion_wait *wait = (struct completion_wait *)obj;
+
+    assert( obj->ops == &completion_wait_ops );
+    fprintf( stderr, "Completion wait completion=%p\n", wait->completion );
+}
+
+static int completion_wait_signaled( struct object *obj, struct wait_queue_entry *entry )
+{
+    struct completion_wait *wait = (struct completion_wait *)obj;
+
+    assert( obj->ops == &completion_wait_ops );
+    if (!wait->completion) return 1;
+    return wait->completion->depth;
+}
+
+static void completion_wait_satisfied( struct object *obj, struct wait_queue_entry *entry )
+{
+    struct completion_wait *wait = (struct completion_wait *)obj;
+    struct list *msg_entry;
+    struct comp_msg *msg;
+
+    assert( obj->ops == &completion_wait_ops );
+    if (!wait->completion)
+    {
+        make_wait_abandoned( entry );
+        return;
+    }
+    msg_entry = list_head( &wait->completion->queue );
+    assert( msg_entry );
+    msg = LIST_ENTRY( msg_entry, struct comp_msg, queue_entry );
+    --wait->completion->depth;
+    list_remove( &msg->queue_entry );
+    if (list_empty( &wait->completion->queue ))
+    {
+        if (do_esync()) esync_clear( wait->completion->esync_fd );
+        if (do_fsync()) fsync_clear( &wait->completion->obj );
+    }
+    if (wait->msg) free( wait->msg );
+    wait->msg = msg;
+}
+
 static void completion_dump( struct object*, int );
-static int completion_add_queue( struct object *obj, struct wait_queue_entry *entry );
-static void completion_remove_queue( struct object *obj, struct wait_queue_entry *entry );
+static int completion_signaled( struct object *obj, struct wait_queue_entry *entry );
 static int completion_get_esync_fd( struct object *obj, enum esync_type *type );
 static unsigned int completion_get_fsync_idx( struct object *obj, enum fsync_type *type );
+static int completion_close_handle( struct object *obj, struct process *process, obj_handle_t handle );
+static int completion_get_inproc_sync( struct object *obj, enum inproc_sync_type *type );
 static void completion_destroy( struct object * );
 
 static const struct object_ops completion_ops =
@@ -120,9 +180,9 @@ static const struct object_ops completion_ops =
     sizeof(struct completion), /* size */
     &completion_type,          /* type */
     completion_dump,           /* dump */
-    completion_add_queue,      /* add_queue */
-    completion_remove_queue,   /* remove_queue */
-    NULL,                      /* signaled */
+    add_queue,                 /* add_queue */
+    remove_queue,              /* remove_queue */
+    completion_signaled,       /* signaled */
     completion_get_esync_fd,   /* get_esync_fd */
     completion_get_fsync_idx,  /* get_fsync_idx */
     no_satisfied,              /* satisfied */
@@ -137,113 +197,47 @@ static const struct object_ops completion_ops =
     default_unlink_name,       /* unlink_name */
     no_open_file,              /* open_file */
     no_kernel_obj_list,        /* get_kernel_obj_list */
-    no_close_handle,           /* close_handle */
+    completion_get_inproc_sync,/* get_inproc_sync */
+    completion_close_handle,   /* close_handle */
     completion_destroy         /* destroy */
 };
 
-struct comp_msg
+static void completion_destroy( struct object *obj)
 {
-    struct   list queue_entry;
-    apc_param_t   ckey;
-    apc_param_t   cvalue;
-    apc_param_t   information;
-    unsigned int  status;
-};
-
-static void completion_wait_destroy( struct object *obj)
-{
-    struct completion_wait *wait = (struct completion_wait *)obj;
+    struct completion *completion = (struct completion *) obj;
     struct comp_msg *tmp, *next;
 
-    LIST_FOR_EACH_ENTRY_SAFE( tmp, next, &wait->queue, struct comp_msg, queue_entry )
+    if (do_esync()) close( completion->esync_fd );
+    if (completion->fsync_idx) fsync_free_shm_idx( completion->fsync_idx );
+
+    LIST_FOR_EACH_ENTRY_SAFE( tmp, next, &completion->queue, struct comp_msg, queue_entry )
     {
         free( tmp );
     }
-
-    if (do_esync())
-        close( wait->esync_fd );
-
-    if (wait->fsync_idx) fsync_free_shm_idx( wait->fsync_idx );
-}
-
-static void completion_wait_dump( struct object *obj, int verbose )
-{
-    struct completion_wait *wait = (struct completion_wait *)obj;
-
-    assert( obj->ops == &completion_wait_ops );
-    fprintf( stderr, "Completion depth=%u\n", wait->depth );
-}
-
-static int completion_wait_signaled( struct object *obj, struct wait_queue_entry *entry )
-{
-    struct completion_wait *wait = (struct completion_wait *)obj;
-
-    assert( obj->ops == &completion_wait_ops );
-    return !wait->completion || !list_empty( &wait->queue );
-}
-
-static int completion_wait_get_esync_fd( struct object *obj, enum esync_type *type )
-{
-    struct completion_wait *wait = (struct completion_wait *)obj;
-
-    *type = ESYNC_MANUAL_SERVER;
-    return wait->esync_fd;
-}
-
-static unsigned int completion_wait_get_fsync_idx( struct object *obj, enum fsync_type *type )
-{
-    struct completion_wait *wait = (struct completion_wait *)obj;
-
-    assert( obj->ops == &completion_wait_ops );
-    *type = FSYNC_MANUAL_SERVER;
-    return wait->fsync_idx;
-}
-
-static void completion_wait_satisfied( struct object *obj, struct wait_queue_entry *entry )
-{
-    struct completion_wait *wait = (struct completion_wait *)obj;
-    struct thread *thread;
-
-    assert( obj->ops == &completion_wait_ops );
-    if (wait->completion)
-    {
-        thread = get_wait_queue_thread( entry );
-        if (thread->locked_completion) release_object( thread->locked_completion );
-        thread->locked_completion = grab_object( obj );
-    }
-    else make_wait_abandoned( entry );
+    if (use_inproc_sync()) close( completion->inproc_sync );
 }
 
 static void completion_dump( struct object *obj, int verbose )
 {
-    struct completion *completion = (struct completion *)obj;
+    struct completion *completion = (struct completion *) obj;
 
     assert( obj->ops == &completion_ops );
-    completion->wait->obj.ops->dump( &completion->wait->obj, verbose );
+    fprintf( stderr, "Completion depth=%u\n", completion->depth );
 }
 
-static int completion_add_queue( struct object *obj, struct wait_queue_entry *entry )
+static int completion_signaled( struct object *obj, struct wait_queue_entry *entry )
 {
     struct completion *completion = (struct completion *)obj;
 
-    assert( obj->ops == &completion_ops );
-    return completion->wait->obj.ops->add_queue( &completion->wait->obj, entry );
-}
-
-static void completion_remove_queue( struct object *obj, struct wait_queue_entry *entry )
-{
-    struct completion *completion = (struct completion *)obj;
-
-    assert( obj->ops == &completion_ops );
-    completion->wait->obj.ops->remove_queue( &completion->wait->obj, entry );
+    return !list_empty( &completion->queue ) || completion->closed;
 }
 
 static int completion_get_esync_fd( struct object *obj, enum esync_type *type )
 {
     struct completion *completion = (struct completion *)obj;
 
-    assert( obj->ops == &completion_ops );
-    return completion->wait->obj.ops->get_esync_fd( &completion->wait->obj, type );
+    *type = ESYNC_MANUAL_SERVER;
+    return completion->esync_fd;
 }
 
 static unsigned int completion_get_fsync_idx( struct object *obj, enum fsync_type *type )
@@ -251,17 +245,70 @@ static unsigned int completion_get_fsync_idx( struct object *obj, enum fsync_typ
     struct completion *completion = (struct completion *)obj;
 
     assert( obj->ops == &completion_ops );
-    return completion->wait->obj.ops->get_fsync_idx( &completion->wait->obj, type );
+    *type = FSYNC_MANUAL_SERVER;
+    return completion->fsync_idx;
 }
 
-static void completion_destroy( struct object *obj )
+static int completion_close_handle( struct object *obj, struct process *process, obj_handle_t handle )
+{
+    struct completion *completion = (struct completion *)obj;
+    struct completion_wait *wait, *wait_next;
+
+    if (completion->obj.handle_count != 1) return 1;
+
+    LIST_FOR_EACH_ENTRY_SAFE( wait, wait_next, &completion->wait_queue, struct completion_wait, wait_queue_entry )
+    {
+        assert( wait->completion );
+        wait->completion = NULL;
+        list_remove( &wait->wait_queue_entry );
+        if (!wait->msg)
+        {
+            wake_up( &wait->obj, 0 );
+            cleanup_thread_completion( wait->thread );
+        }
+    }
+    completion->closed = 1;
+    wake_up( obj, 0 );
+    set_inproc_event( completion->inproc_sync );
+    return 1;
+}
+
+void cleanup_thread_completion( struct thread *thread )
+{
+    if (!thread->completion_wait) return;
+
+    if (thread->completion_wait->handle)
+    {
+        close_handle( thread->process, thread->completion_wait->handle );
+        thread->completion_wait->handle = 0;
+    }
+    if (thread->completion_wait->completion) list_remove( &thread->completion_wait->wait_queue_entry );
+    release_object( &thread->completion_wait->obj );
+    thread->completion_wait = NULL;
+}
+
+static struct completion_wait *create_completion_wait( struct thread *thread )
+{
+    struct completion_wait *wait;
+
+    if (!(wait = alloc_object( &completion_wait_ops ))) return NULL;
+    wait->completion = NULL;
+    wait->thread = thread;
+    wait->msg = NULL;
+    if (!(wait->handle = alloc_handle( current->process, wait, SYNCHRONIZE, 0 )))
+    {
+        release_object( &wait->obj );
+        return NULL;
+    }
+    return wait;
+}
+
+static int completion_get_inproc_sync( struct object *obj, enum inproc_sync_type *type )
 {
     struct completion *completion = (struct completion *)obj;
 
-    assert( obj->ops == &completion_ops );
-    completion->wait->completion = NULL;
-    wake_up( &completion->wait->obj, 0 );
-    release_object( &completion->wait->obj );
+    *type = INPROC_SYNC_MANUAL_SERVER;
+    return completion->inproc_sync;
 }
 
 static struct completion *create_completion( struct object *root, const struct unicode_str *name,
@@ -270,26 +317,20 @@ static struct completion *create_completion( struct object *root, const struct u
 {
     struct completion *completion;
 
-    if (!(completion = create_named_object( root, &completion_ops, name, attr, sd ))) return NULL;
-    if (get_error() == STATUS_OBJECT_NAME_EXISTS) return completion;
-    if (!(completion->wait = alloc_object( &completion_wait_ops )))
+    if ((completion = create_named_object( root, &completion_ops, name, attr, sd )))
     {
-        release_object( completion );
-        set_error( STATUS_NO_MEMORY );
-        return NULL;
+        if (get_error() != STATUS_OBJECT_NAME_EXISTS)
+        {
+            list_init( &completion->queue );
+            list_init( &completion->wait_queue );
+            completion->depth = 0;
+            completion->closed = 0;
+            completion->inproc_sync = create_inproc_event( TRUE, FALSE );
+        }
     }
-
-    completion->wait->completion = completion;
-    list_init( &completion->wait->queue );
-    completion->wait->depth = 0;
-    completion->wait->fsync_idx = 0;
-
-    if (do_fsync())
-        completion->wait->fsync_idx = fsync_alloc_shm( 0, 0 );
-
-    if (do_esync())
-        completion->wait->esync_fd = esync_create_fd( 0, 0 );
-
+    if (do_esync()) completion->esync_fd = esync_create_fd( 0, 0 );
+    completion->fsync_idx = 0;
+    if (do_fsync()) completion->fsync_idx = fsync_alloc_shm( 0, 0 );
     return completion;
 }
 
@@ -302,6 +343,7 @@ void add_completion( struct completion *completion, apc_param_t ckey, apc_param_
                      unsigned int status, apc_param_t information )
 {
     struct comp_msg *msg = mem_alloc( sizeof( *msg ) );
+    struct completion_wait *wait;
 
     if (!msg)
         return;
@@ -311,10 +353,18 @@ void add_completion( struct completion *completion, apc_param_t ckey, apc_param_
     msg->status = status;
     msg->information = information;
 
-    list_add_tail( &completion->wait->queue, &msg->queue_entry );
-    completion->wait->depth++;
-
-    wake_up( &completion->wait->obj, 1 );
+    list_add_tail( &completion->queue, &msg->queue_entry );
+    completion->depth++;
+    LIST_FOR_EACH_ENTRY( wait, &completion->wait_queue, struct completion_wait, wait_queue_entry )
+    {
+        wake_up( &wait->obj, 1 );
+        if (list_empty( &completion->queue )) return;
+    }
+    if (!list_empty( &completion->queue ))
+    {
+        wake_up( &completion->obj, 0 );
+        set_inproc_event( completion->inproc_sync );
+    }
 }
 
 /* create a completion */
@@ -330,7 +380,11 @@ DECL_HANDLER(create_completion)
 
     if ((completion = create_completion( root, &name, objattr->attributes, req->concurrent, sd )))
     {
-        reply->handle = alloc_handle( current->process, completion, req->access, objattr->attributes );
+        if (get_error() == STATUS_OBJECT_NAME_EXISTS)
+            reply->handle = alloc_handle( current->process, completion, req->access, objattr->attributes );
+        else
+            reply->handle = alloc_handle_no_access_check( current->process, completion,
+                                                          req->access, objattr->attributes );
         release_object( completion );
     }
 
@@ -351,76 +405,95 @@ DECL_HANDLER(open_completion)
 DECL_HANDLER(add_completion)
 {
     struct completion* completion = get_completion_obj( current->process, req->handle, IO_COMPLETION_MODIFY_STATE );
+    struct reserve *reserve = NULL;
 
     if (!completion) return;
 
+    if (req->reserve_handle && !(reserve = get_completion_reserve_obj( current->process, req->reserve_handle, 0 )))
+    {
+        release_object( completion );
+        return;
+    }
+
     add_completion( completion, req->ckey, req->cvalue, req->status, req->information );
 
+    if (reserve) release_object( reserve );
     release_object( completion );
 }
 
 /* get completion from completion port */
 DECL_HANDLER(remove_completion)
 {
-    struct completion* completion;
-    struct completion_wait *wait;
+    struct completion* completion = get_completion_obj( current->process, req->handle, IO_COMPLETION_MODIFY_STATE );
     struct list *entry;
     struct comp_msg *msg;
 
-    if (req->waited && (wait = (struct completion_wait *)current->locked_completion))
-        current->locked_completion = NULL;
-    else
+    if (!completion) return;
+
+    entry = list_head( &completion->queue );
+    if (req->alertable && !list_empty( &current->user_apc )
+        && !(entry && current->completion_wait && current->completion_wait->completion == completion))
     {
-        if (current->locked_completion)
-        {
-            release_object( current->locked_completion );
-            current->locked_completion = NULL;
-        }
-        completion = get_completion_obj( current->process, req->handle, IO_COMPLETION_MODIFY_STATE );
-        if (!completion) return;
-
-        wait = (struct completion_wait *)grab_object( completion->wait );
+        set_error( STATUS_USER_APC );
         release_object( completion );
+        return;
     }
-
-    assert( wait->obj.ops == &completion_wait_ops );
-
-    entry = list_head( &wait->queue );
+    if (current->completion_wait)
+    {
+        list_remove( &current->completion_wait->wait_queue_entry );
+    }
+    else if (!(current->completion_wait = create_completion_wait( current )))
+    {
+        release_object( completion );
+        return;
+    }
+    current->completion_wait->completion = completion;
+    list_add_head( &completion->wait_queue, &current->completion_wait->wait_queue_entry );
     if (!entry)
     {
-        if (wait->completion)
-        {
-            if (do_fsync() || do_esync())
-            {
-                /* completion_wait_satisfied is not called, so lock completion here. */
-                current->locked_completion = grab_object( wait );
-            }
-            set_error( STATUS_PENDING );
-        }
-        else set_error( STATUS_ABANDONED_WAIT_0 );
+        reply->wait_handle = current->completion_wait->handle;
+        set_error( STATUS_PENDING );
     }
     else
     {
         list_remove( entry );
-        wait->depth--;
+        completion->depth--;
         msg = LIST_ENTRY( entry, struct comp_msg, queue_entry );
         reply->ckey = msg->ckey;
         reply->cvalue = msg->cvalue;
         reply->status = msg->status;
         reply->information = msg->information;
         free( msg );
-
-        if (!completion_wait_signaled( &wait->obj, NULL ))
+        reply->wait_handle = 0;
+        if (list_empty( &completion->queue ))
         {
-            if (do_fsync())
-                fsync_clear( &wait->obj );
-
-            if (do_esync())
-                esync_clear( wait->esync_fd );
+            reset_inproc_event( completion->inproc_sync );
+            if (do_esync()) esync_clear( completion->esync_fd );
+            if (do_fsync()) fsync_clear( &completion->obj );
         }
     }
 
-    release_object( wait );
+    release_object( completion );
+}
+
+/* get completion after successful waiting for it */
+DECL_HANDLER(get_thread_completion)
+{
+    struct comp_msg *msg;
+
+    if (!current->completion_wait || !(msg = current->completion_wait->msg))
+    {
+        set_error( STATUS_INVALID_HANDLE );
+        return;
+    }
+
+    reply->ckey = msg->ckey;
+    reply->cvalue = msg->cvalue;
+    reply->status = msg->status;
+    reply->information = msg->information;
+    free( msg );
+    current->completion_wait->msg = NULL;
+    if (!current->completion_wait->completion) cleanup_thread_completion( current );
 }
 
 /* get queue depth for completion port */
@@ -430,7 +503,7 @@ DECL_HANDLER(query_completion)
 
     if (!completion) return;
 
-    reply->depth = completion->wait->depth;
+    reply->depth = completion->depth;
 
     release_object( completion );
 }

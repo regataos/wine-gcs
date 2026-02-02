@@ -48,8 +48,8 @@
 #define _STRTOD_NAME_(func) console_ ## func
 #define _GETC_(file) (consumed++, _getch())
 #define _UNGETC_(nch, file) do { _ungetch(nch); consumed--; } while(0)
-#define _LOCK_FILE_(file) _lock_file(MSVCRT_stdin)
-#define _UNLOCK_FILE_(file) _unlock_file(MSVCRT_stdin)
+#define _LOCK_FILE_(file) _lock_file(stdin)
+#define _UNLOCK_FILE_(file) _unlock_file(stdin)
 #ifdef WIDE_SCANF
 #ifdef SECURE
 #define _FUNCTION_ static int vcwscanf_s_l(const wchar_t *format, _locale_t locale, va_list ap)
@@ -272,6 +272,9 @@ _FUNCTION_ {
                     }
                     l_prefix = 1;
                     break;
+		case 'j':
+		    I64_prefix = 1;
+		    break;
 		case 'w': w_prefix = 1; break;
 		case 'L': L_prefix = 1; break;
 		case 'I':

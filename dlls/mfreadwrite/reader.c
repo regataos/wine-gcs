@@ -175,6 +175,9 @@ struct source_reader
     CONDITION_VARIABLE sample_event;
     CONDITION_VARIABLE state_event;
     CONDITION_VARIABLE stop_event;
+
+    BOOL flag_eos_for_all_streams;
+    DWORD next_stream_eos_index;
 };
 
 static inline struct source_reader *impl_from_IMFSourceReaderEx(IMFSourceReaderEx *iface)
@@ -685,14 +688,13 @@ static void media_type_try_copy_attr(IMFMediaType *dst, IMFMediaType *src, const
 
 /* update a media type with additional attributes reported by upstream element */
 /* also present in mf/topology_loader.c pipeline */
-static HRESULT update_media_type_from_upstream(IMFMediaType *media_type, IMFMediaType *upstream_type)
+static HRESULT update_media_type_from_upstream(IMFMediaType *media_type, IMFMediaType *upstream_type, BOOL advanced)
 {
     HRESULT hr = S_OK;
 
     /* propagate common video attributes */
     media_type_try_copy_attr(media_type, upstream_type, &MF_MT_FRAME_SIZE, &hr);
     media_type_try_copy_attr(media_type, upstream_type, &MF_MT_FRAME_RATE, &hr);
-    media_type_try_copy_attr(media_type, upstream_type, &MF_MT_DEFAULT_STRIDE, &hr);
     media_type_try_copy_attr(media_type, upstream_type, &MF_MT_VIDEO_ROTATION, &hr);
     media_type_try_copy_attr(media_type, upstream_type, &MF_MT_FIXED_SIZE_SAMPLES, &hr);
     media_type_try_copy_attr(media_type, upstream_type, &MF_MT_PIXEL_ASPECT_RATIO, &hr);
@@ -706,6 +708,9 @@ static HRESULT update_media_type_from_upstream(IMFMediaType *media_type, IMFMedi
     media_type_try_copy_attr(media_type, upstream_type, &MF_MT_YUV_MATRIX, &hr);
     media_type_try_copy_attr(media_type, upstream_type, &MF_MT_VIDEO_LIGHTING, &hr);
     media_type_try_copy_attr(media_type, upstream_type, &MF_MT_VIDEO_NOMINAL_RANGE, &hr);
+
+    if (!advanced)
+        media_type_try_copy_attr(media_type, upstream_type, &MF_MT_DEFAULT_STRIDE, &hr);
 
     /* propagate common audio attributes */
     media_type_try_copy_attr(media_type, upstream_type, &MF_MT_AUDIO_NUM_CHANNELS, &hr);
@@ -740,8 +745,8 @@ static HRESULT source_reader_push_transform_samples(struct source_reader *reader
     return hr;
 }
 
-/* update the transform output type while keeping subtype which matches the old output type */
-static HRESULT transform_entry_update_output_type(struct transform_entry *entry, IMFMediaType *old_output_type)
+/* update the transform output type while keeping subtype which matches the desired type */
+static HRESULT set_matching_transform_output_type(IMFTransform *transform, IMFMediaType *old_output_type)
 {
     IMFMediaType *new_output_type;
     GUID subtype, desired;
@@ -751,17 +756,27 @@ static HRESULT transform_entry_update_output_type(struct transform_entry *entry,
     IMFMediaType_GetGUID(old_output_type, &MF_MT_SUBTYPE, &desired);
 
     /* find an available output type matching the desired subtype */
-    while (SUCCEEDED(hr = IMFTransform_GetOutputAvailableType(entry->transform, 0, i++, &new_output_type)))
+    while (SUCCEEDED(hr = IMFTransform_GetOutputAvailableType(transform, 0, i++, &new_output_type)))
     {
         IMFMediaType_GetGUID(new_output_type, &MF_MT_SUBTYPE, &subtype);
-        if (IsEqualGUID(&subtype, &desired) && SUCCEEDED(hr = IMFTransform_SetOutputType(entry->transform, 0, new_output_type, 0)))
+        if (IsEqualGUID(&subtype, &desired) && SUCCEEDED(hr = IMFTransform_SetOutputType(transform, 0, new_output_type, 0)))
         {
-            entry->pending_flags |= MF_SOURCE_READERF_CURRENTMEDIATYPECHANGED;
             IMFMediaType_Release(new_output_type);
             return S_OK;
         }
         IMFMediaType_Release(new_output_type);
     }
+
+    return hr;
+}
+
+/* update the transform output type while keeping subtype which matches the old output type */
+static HRESULT transform_entry_update_output_type(struct transform_entry *entry, IMFMediaType *old_output_type)
+{
+    HRESULT hr;
+
+    if (SUCCEEDED(hr = set_matching_transform_output_type(entry->transform, old_output_type)))
+        entry->pending_flags |= MF_SOURCE_READERF_CURRENTMEDIATYPECHANGED;
 
     return hr;
 }
@@ -1061,7 +1076,7 @@ static HRESULT source_reader_media_stream_state_handler(struct source_reader *re
                     {
                         struct transform_entry *entry = LIST_ENTRY(ptr, struct transform_entry, entry);
                         if (FAILED(hr = source_reader_notify_transform(reader, stream, entry, MFT_MESSAGE_NOTIFY_START_OF_STREAM)))
-                            WARN("Failed to drain pending samples, hr %#lx.\n", hr);
+                            WARN("Failed to notify transforms of stream start, hr %#lx.\n", hr);
                     }
                     break;
                 case MEStreamStopped:
@@ -1334,9 +1349,11 @@ static HRESULT source_reader_get_next_selected_stream(struct source_reader *read
     }
 
     /* If all selected streams reached EOS, use first selected. */
-    if (first_selected != ~0u)
+    if (first_selected != ~0u && min_ts == MAXLONGLONG)
     {
-        if (min_ts == MAXLONGLONG)
+        if (reader->flag_eos_for_all_streams)
+            *stream_index = reader->next_stream_eos_index++ % reader->stream_count;
+        else
             *stream_index = first_selected;
     }
 
@@ -1508,7 +1525,8 @@ static HRESULT WINAPI source_reader_async_commands_callback_Invoke(IMFAsyncCallb
         case SOURCE_READER_ASYNC_SAMPLE_READY:
 
             EnterCriticalSection(&reader->cs);
-            response = media_stream_pop_response(reader, NULL);
+            stream = &reader->streams[command->u.sample.stream_index];
+            response = media_stream_pop_response(reader, stream);
             LeaveCriticalSection(&reader->cs);
 
             if (response)
@@ -1617,7 +1635,6 @@ static ULONG WINAPI src_reader_Release(IMFSourceReaderEx *iface)
             LeaveCriticalSection(&reader->cs);
         }
 
-        MFUnlockWorkQueue(reader->queue);
         source_reader_release(reader);
     }
 
@@ -1884,6 +1901,52 @@ static BOOL source_reader_allow_video_processor(struct source_reader *reader, BO
     return *advanced;
 }
 
+static void mediatype_set_uint32(IMFMediaType *mediatype, const GUID *attr, unsigned int value, HRESULT *hr)
+{
+    if (SUCCEEDED(*hr))
+        *hr = IMFMediaType_SetUINT32(mediatype, attr, value);
+}
+
+static void mediatype_get_stride_and_sample_size(IMFMediaType *mediatype, LONG *stride, DWORD *sample_size, HRESULT *hr)
+{
+    UINT64 frame_size;
+    GUID subtype;
+
+    if (SUCCEEDED(*hr))
+        *hr = IMFMediaType_GetGUID(mediatype, &MF_MT_SUBTYPE, &subtype);
+
+    if (SUCCEEDED(*hr))
+        *hr = IMFMediaType_GetUINT64(mediatype, &MF_MT_FRAME_SIZE, &frame_size);
+
+    if (SUCCEEDED(*hr))
+        *hr = MFGetStrideForBitmapInfoHeader(subtype.Data1, frame_size >> 32, stride);
+
+    if (SUCCEEDED(*hr))
+        *hr = MFGetPlaneSize(subtype.Data1, frame_size >> 32, frame_size & 0xffffffff, sample_size);
+}
+
+static HRESULT set_default_video_attributes(struct source_reader *reader, IMFMediaType *output_type)
+{
+    DWORD sample_size;
+    BOOL compressed;
+    LONG stride;
+    HRESULT hr;
+
+    if (FAILED(hr = IMFMediaType_IsCompressedFormat(output_type, &compressed)))
+        return hr;
+
+    if (!compressed)
+    {
+        mediatype_get_stride_and_sample_size(output_type, &stride, &sample_size, &hr);
+
+        mediatype_set_uint32(output_type, &MF_MT_COMPRESSED, compressed, &hr);
+        mediatype_set_uint32(output_type, &MF_MT_DEFAULT_STRIDE, abs(stride), &hr);
+        mediatype_set_uint32(output_type, &MF_MT_SAMPLE_SIZE, sample_size, &hr);
+    }
+
+    return hr;
+}
+
 static HRESULT source_reader_create_transform(struct source_reader *reader, BOOL decoder, BOOL allow_processor,
         IMFMediaType *input_type, IMFMediaType *output_type, struct transform_entry **out)
 {
@@ -1942,6 +2005,15 @@ static HRESULT source_reader_create_transform(struct source_reader *reader, BOOL
         out_type.guidSubtype = MFVideoFormat_RGB32;
     }
 
+    if (IsEqualGUID(&out_type.guidMajorType, &MFMediaType_Video) && IsEqualGUID(&out_type.guidSubtype, &MFVideoFormat_IYUV)
+            && IsEqualGUID(&category, &MFT_CATEGORY_VIDEO_DECODER))
+    {
+        /* The WMV video decoder isn't registered for MFVideoFormat_IYUV, but selecting it as an output format still succeeds,
+         * the host decoders usually support IYUV as well, so fixup the subtype for MFTEnumEx.
+         */
+        WARN("Fixing up MFVideoFormat_IYUV subtype for the video processor\n");
+        out_type.guidSubtype = MFVideoFormat_NV12;
+    }
 
     count = 0;
     if (SUCCEEDED(hr = MFTEnumEx(category, 0, &in_type, allow_processor ? NULL : &out_type, &activates, &count)))
@@ -1977,7 +2049,6 @@ static HRESULT source_reader_create_transform(struct source_reader *reader, BOOL
                         IMFTransform_ProcessMessage(transform, MFT_MESSAGE_SET_D3D_MANAGER, (ULONG_PTR)reader->device_manager);
                 }
 
-                IMFAttributes_SetUINT32(attributes, &MF_LOW_LATENCY, 1);
                 entry->attributes_initialized = !d3d_aware;
                 IMFAttributes_Release(attributes);
             }
@@ -1985,14 +2056,20 @@ static HRESULT source_reader_create_transform(struct source_reader *reader, BOOL
             if (SUCCEEDED(hr = IMFTransform_SetInputType(transform, 0, input_type, 0))
                     && SUCCEEDED(hr = IMFTransform_GetInputCurrentType(transform, 0, &media_type)))
             {
-                if (SUCCEEDED(hr = update_media_type_from_upstream(output_type, media_type))
-                        && FAILED(hr = IMFTransform_SetOutputType(transform, 0, output_type, 0)) && allow_processor
+                BOOL enable_advanced;
+
+                source_reader_allow_video_processor(reader, &enable_advanced);
+
+                if ((SUCCEEDED(hr = update_media_type_from_upstream(output_type, media_type, enable_advanced)))
+                        && FAILED(hr = IMFTransform_SetOutputType(transform, 0, output_type, 0))
+                        && FAILED(hr = set_matching_transform_output_type(transform, output_type)) && allow_processor
                         && SUCCEEDED(hr = IMFTransform_GetOutputAvailableType(transform, 0, 0, &media_type)))
                 {
                     struct transform_entry *converter;
 
                     if (SUCCEEDED(hr = IMFTransform_SetOutputType(transform, 0, media_type, 0))
-                            && SUCCEEDED(hr = update_media_type_from_upstream(output_type, media_type))
+                            && SUCCEEDED(hr = update_media_type_from_upstream(output_type, media_type, enable_advanced))
+                            && (enable_advanced || SUCCEEDED(hr = set_default_video_attributes(reader, output_type)))
                             && SUCCEEDED(hr = source_reader_create_transform(reader, FALSE, FALSE, media_type, output_type, &converter)))
                         list_add_tail(&entry->entry, &converter->entry);
 
@@ -2635,6 +2712,8 @@ static HRESULT create_source_reader_from_source(IMFMediaSource *source, IMFAttri
     unsigned int i;
     HRESULT hr;
 
+    const char *sgi;
+
     object = calloc(1, sizeof(*object));
     if (!object)
         return E_OUTOFMEMORY;
@@ -2754,6 +2833,16 @@ static HRESULT create_source_reader_from_source(IMFMediaSource *source, IMFAttri
             if (unk)
                 IUnknown_Release(unk);
         }
+    }
+
+    if (object->stream_count > 1 && (sgi = getenv("SteamGameId")) && strcmp(sgi, "462780") == 0)
+    {
+        /* Darksiders Warmastered Edition ends media sampling only when MF_SOURCE_READERF_ENDOFSTREAM
+         * is returned for all streams. If audio and video end simultaneously then ENDOFSTREAM is
+         * flagged only for stream 0, therefore the game depends on a slight time difference which
+         * usually does not occur for the fourth splash video. */
+        WARN("HACK: enabled flagging ENDOFSTREAM for all streams.\n");
+        object->flag_eos_for_all_streams = TRUE;
     }
 
     if (FAILED(hr = MFLockSharedWorkQueue(L"", 0, NULL, &object->queue)))

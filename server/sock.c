@@ -485,6 +485,7 @@ static const struct object_ops sock_ops =
     NULL,                         /* unlink_name */
     no_open_file,                 /* open_file */
     no_kernel_obj_list,           /* get_kernel_obj_list */
+    default_fd_get_inproc_sync,   /* get_inproc_sync */
     sock_close_handle,            /* close_handle */
     sock_destroy                  /* destroy */
 };
@@ -1821,6 +1822,7 @@ static int get_unix_protocol( int protocol )
     switch (protocol)
     {
         case WS_IPPROTO_ICMP: return IPPROTO_ICMP;
+        case WS_IPPROTO_ICMPV6: return IPPROTO_ICMPV6;
         case WS_IPPROTO_IGMP: return IPPROTO_IGMP;
         case WS_IPPROTO_IP: return IPPROTO_IP;
         case WS_IPPROTO_IPV4: return IPPROTO_IPIP;
@@ -1890,19 +1892,28 @@ static int init_socket( struct sock *sock, int family, int type, int protocol )
     }
 
     sockfd = socket( unix_family, unix_type, unix_protocol );
-
 #ifdef linux
-    if (sockfd == -1 && errno == EPERM && unix_family == AF_INET
-        && unix_type == SOCK_RAW && unix_protocol == IPPROTO_ICMP)
+    if (sockfd == -1 && errno == EPERM && unix_type == SOCK_RAW
+        && ((unix_family == AF_INET && unix_protocol == IPPROTO_ICMP)
+            || (unix_family == AF_INET6 && unix_protocol == IPPROTO_ICMPV6)))
     {
         sockfd = socket( unix_family, SOCK_DGRAM, unix_protocol );
         if (sockfd != -1)
         {
             const int val = 1;
 
-            setsockopt( sockfd, IPPROTO_IP, IP_RECVTTL, (const char *)&val, sizeof(val) );
-            setsockopt( sockfd, IPPROTO_IP, IP_RECVTOS, (const char *)&val, sizeof(val) );
-            setsockopt( sockfd, IPPROTO_IP, IP_PKTINFO, (const char *)&val, sizeof(val) );
+            if (unix_family == AF_INET6)
+            {
+#ifdef IPV6_RECVPKTINFO
+                setsockopt( sockfd, IPPROTO_IPV6, IPV6_RECVPKTINFO, (const char *)&val, sizeof(val) );
+#endif
+            }
+            else
+            {
+                setsockopt( sockfd, IPPROTO_IP, IP_RECVTTL, (const char *)&val, sizeof(val) );
+                setsockopt( sockfd, IPPROTO_IP, IP_RECVTOS, (const char *)&val, sizeof(val) );
+                setsockopt( sockfd, IPPROTO_IP, IP_PKTINFO, (const char *)&val, sizeof(val) );
+            }
         }
     }
 #endif
@@ -2065,6 +2076,7 @@ static struct sock *accept_socket( struct sock *sock )
             release_object( acceptsock );
             return NULL;
         }
+        allow_fd_caching( acceptsock->fd );
         unix_len = sizeof(unix_addr);
         if (!getsockname( acceptfd, &unix_addr.addr, &unix_len ))
         {
@@ -2113,6 +2125,7 @@ static int accept_into_socket( struct sock *sock, struct sock *acceptsock )
                                             get_fd_options( acceptsock->fd ) )))
             return FALSE;
     }
+    allow_fd_caching( newfd );
 
     acceptsock->state = SOCK_CONNECTED;
     acceptsock->bound = 1;
@@ -2257,7 +2270,7 @@ static int bind_to_interface( struct sock *sock, const struct sockaddr_in *addr 
     in_addr_t bind_addr = addr->sin_addr.s_addr;
     struct ifaddrs *ifaddrs, *ifaddr;
     int fd = get_unix_fd( sock->fd );
-    int err = 0;
+    int err = -1;
 
     if (bind_addr == htonl( INADDR_ANY ) || bind_addr == htonl( INADDR_LOOPBACK ))
         return 0;
@@ -2686,8 +2699,7 @@ static void sock_ioctl( struct fd *fd, ioctl_code_t code, struct async *async )
             ret = connect( unix_fd, &unix_addr.addr, unix_len );
         }
 
-        if (ret < 0 && errno == EACCES && sock->state == SOCK_CONNECTIONLESS && unix_addr.addr.sa_family == AF_INET
-            && unix_addr.in.sin_addr.s_addr == htonl( INADDR_BROADCAST ))
+        if (ret < 0 && errno == EACCES && sock->state == SOCK_CONNECTIONLESS && unix_addr.addr.sa_family == AF_INET)
         {
             int broadcast, saved_errno;
             socklen_t len = sizeof(broadcast);
@@ -3618,6 +3630,7 @@ static const struct object_ops ifchange_ops =
     NULL,                    /* unlink_name */
     no_open_file,            /* open_file */
     no_kernel_obj_list,      /* get_kernel_obj_list */
+    no_get_inproc_sync,      /* get_inproc_sync */
     no_close_handle,         /* close_handle */
     ifchange_destroy         /* destroy */
 };
@@ -3841,6 +3854,7 @@ static const struct object_ops socket_device_ops =
     default_unlink_name,        /* unlink_name */
     socket_device_open_file,    /* open_file */
     no_kernel_obj_list,         /* get_kernel_obj_list */
+    no_get_inproc_sync,         /* get_inproc_sync */
     no_close_handle,            /* close_handle */
     no_destroy                  /* destroy */
 };
@@ -4199,7 +4213,7 @@ struct enum_tcp_connection_info
 {
     MIB_TCP_STATE state_filter;
     unsigned int count;
-    tcp_connection *conn;
+    union tcp_connection *conn;
 };
 
 static int enum_tcp_connections( struct process *process, struct object *obj, void *user )
@@ -4207,7 +4221,7 @@ static int enum_tcp_connections( struct process *process, struct object *obj, vo
     struct sock *sock = (struct sock *)obj;
     struct enum_tcp_connection_info *info = user;
     MIB_TCP_STATE socket_state;
-    tcp_connection *conn;
+    union tcp_connection *conn;
 
     assert( obj->ops == &sock_ops );
 
@@ -4263,7 +4277,7 @@ static int enum_tcp_connections( struct process *process, struct object *obj, vo
 DECL_HANDLER(get_tcp_connections)
 {
     struct enum_tcp_connection_info info;
-    tcp_connection *conn;
+    union tcp_connection *conn;
     data_size_t max_conns = get_reply_max_size() / sizeof(*conn);
 
     info.state_filter = req->state_filter;
@@ -4284,14 +4298,14 @@ DECL_HANDLER(get_tcp_connections)
 struct enum_udp_endpoint_info
 {
     unsigned int count;
-    udp_endpoint *endpt;
+    union udp_endpoint *endpt;
 };
 
 static int enum_udp_endpoints( struct process *process, struct object *obj, void *user )
 {
     struct sock *sock = (struct sock *)obj;
     struct enum_udp_endpoint_info *info = user;
-    udp_endpoint *endpt;
+    union udp_endpoint *endpt;
 
     assert( obj->ops == &sock_ops );
 
@@ -4331,7 +4345,7 @@ static int enum_udp_endpoints( struct process *process, struct object *obj, void
 DECL_HANDLER(get_udp_endpoints)
 {
     struct enum_udp_endpoint_info info;
-    udp_endpoint *endpt;
+    union udp_endpoint *endpt;
     data_size_t max_endpts = get_reply_max_size() / sizeof(*endpt);
 
     info.endpt = NULL;

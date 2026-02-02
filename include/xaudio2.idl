@@ -459,7 +459,7 @@ interface IXAudio2SubmixVoice : IXAudio2Voice
 interface IXAudio2MasteringVoice : IXAudio2Voice
 {
 #if XAUDIO2_VER >= 8
-    void GetChannelMask([out] DWORD *pChannelMask);
+    HRESULT GetChannelMask([out] DWORD *pChannelMask);
 #endif
 }
 
@@ -628,4 +628,5 @@ cpp_quote("#include <poppack.h>")
 
 #if XAUDIO2_VER >= 8
 cpp_quote("HRESULT WINAPI XAudio2Create(IXAudio2** pxaudio2, UINT32 flags, XAUDIO2_PROCESSOR processor);")
+cpp_quote("HRESULT WINAPI XAudio2CreateWithVersionInfo(IXAudio2** pxaudio2, UINT32 flags, XAUDIO2_PROCESSOR processor, DWORD version);")
 #endif

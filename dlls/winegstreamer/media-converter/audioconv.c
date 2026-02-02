@@ -162,7 +162,7 @@ typedef enum
 
 struct buffer_entry
 {
-    struct payload_hash hash;
+    struct fozdb_hash hash;
     GstBuffer *buffer;
 };
 
@@ -182,7 +182,7 @@ struct need_transcode_head
 struct stream_state
 {
     struct murmur3_128_state hash_state;
-    struct payload_hash current_hash;
+    struct fozdb_hash current_hash;
     GList *buffers;      /* Entry type: struct buffer_entry. */
     GList *loop_buffers; /* Entry type: struct buffer_entry. */
     struct need_transcode_head *codec_info;
@@ -235,7 +235,7 @@ static GstStaticPadTemplate audio_conv_src_template = GST_STATIC_PAD_TEMPLATE("s
 
 static struct dump_fozdb dump_fozdb = {PTHREAD_MUTEX_INITIALIZER, NULL, false};
 
-static struct buffer_entry *buffer_entry_create(struct payload_hash *hash, GstBuffer *buffer)
+static struct buffer_entry *buffer_entry_create(struct fozdb_hash *hash, GstBuffer *buffer)
 {
     struct buffer_entry *entry = calloc(1, sizeof(*entry));
     entry->hash = *hash;
@@ -255,7 +255,7 @@ static bool dumping_disabled(void)
     return option_enabled("MEDIACONV_AUDIO_DONT_DUMP");
 }
 
-static bool hash_data(const uint8_t *data, size_t size, struct murmur3_128_state *hash_state, struct payload_hash *hash)
+static bool hash_data(const uint8_t *data, size_t size, struct murmur3_128_state *hash_state, struct fozdb_hash *hash)
 {
     struct bytes_reader reader;
     bytes_reader_init(&reader, data, size);
@@ -269,11 +269,13 @@ static int dump_fozdb_open_audio(bool create)
 
 static void dump_fozdb_discard_transcoded(void)
 {
-    GList *chunks_to_discard = NULL, *chunks_to_keep = NULL, *chunks = NULL, *list_iter;
-    struct payload_hash chunk_id, *stream_id;
+    struct rb_tree chunks_to_discard = {fozdb_entry_compare};
+    struct rb_tree chunks_to_keep = {fozdb_entry_compare};
+    struct rb_tree chunks = {fozdb_entry_compare};
+    struct fozdb_entry *entry, *chunk;
+    struct fozdb_hash chunk_id;
     struct fozdb *read_fozdb;
     char *read_fozdb_path;
-    GHashTableIter iter;
     int ret;
 
     if (dump_fozdb.already_cleaned)
@@ -300,78 +302,69 @@ static void dump_fozdb_discard_transcoded(void)
         return;
     }
 
-    fozdb_iter_tag(dump_fozdb.fozdb, AUDIO_CONV_FOZ_TAG_STREAM, &iter);
-    while (g_hash_table_iter_next(&iter, (void *)&stream_id, NULL))
+    FOZDB_FOR_EACH_TAG_ENTRY(entry, AUDIO_CONV_FOZ_TAG_STREAM, dump_fozdb.fozdb)
     {
-        uint32_t chunks_size, i;
+        uint32_t i;
         size_t read_size;
 
-        if (fozdb_entry_size(dump_fozdb.fozdb, AUDIO_CONV_FOZ_TAG_STREAM, stream_id, &chunks_size) == CONV_OK)
+        if (entry->full_size)
         {
-            uint8_t *buffer = calloc(1, chunks_size);
-            if (fozdb_read_entry_data(dump_fozdb.fozdb, AUDIO_CONV_FOZ_TAG_STREAM, stream_id,
-                    0, buffer, chunks_size, &read_size, true) == CONV_OK)
+            uint8_t *buffer = calloc(1, entry->full_size);
+            if (fozdb_read_entry_data(dump_fozdb.fozdb, AUDIO_CONV_FOZ_TAG_STREAM, &entry->key.hash,
+                    0, buffer, entry->full_size, &read_size, true) == CONV_OK)
             {
-                GList *stream_chunks = NULL;
+                struct rb_tree stream_chunks = {fozdb_entry_compare};
                 bool has_all = true;
 
                 for (i = 0; i < read_size / sizeof(chunk_id); ++i)
                 {
-                    payload_hash_from_bytes(&chunk_id, buffer + i * sizeof(chunk_id));
+                    fozdb_hash_from_bytes(&chunk_id, buffer + i * sizeof(chunk_id));
                     if (!fozdb_has_entry(read_fozdb, AUDIO_CONV_FOZ_TAG_PTNADATA, &chunk_id))
                     {
                         has_all = false;
                         break;
                     }
-                    stream_chunks = g_list_append(stream_chunks,
-                            entry_name_create(AUDIO_CONV_FOZ_TAG_AUDIODATA, &chunk_id));
+                    fozdb_entry_put(&stream_chunks, AUDIO_CONV_FOZ_TAG_AUDIODATA, &chunk_id);
                 }
 
-                for (list_iter = stream_chunks; list_iter; list_iter = list_iter->next)
+                RB_FOR_EACH_ENTRY(chunk, &stream_chunks, struct fozdb_entry, entry)
                 {
-                    struct entry_name *entry = list_iter->data;
                     if (has_all)
                     {
-                        chunks_to_discard = g_list_append(chunks_to_discard,
-                                entry_name_create(entry->tag, &entry->hash));
-                        chunks_to_discard = g_list_append(chunks_to_discard,
-                                entry_name_create(AUDIO_CONV_FOZ_TAG_CODECINFO, &entry->hash));
+                        fozdb_entry_put(&chunks_to_discard, chunk->key.tag, &chunk->key.hash);
+                        fozdb_entry_put(&chunks_to_discard, AUDIO_CONV_FOZ_TAG_CODECINFO, &chunk->key.hash);
                     }
                     else
                     {
-                        chunks_to_keep = g_list_append(chunks_to_keep,
-                                entry_name_create(entry->tag, &entry->hash));
-                        chunks_to_keep = g_list_append(chunks_to_keep,
-                                entry_name_create(AUDIO_CONV_FOZ_TAG_CODECINFO, &entry->hash));
+                        fozdb_entry_put(&chunks_to_keep, chunk->key.tag, &chunk->key.hash);
+                        fozdb_entry_put(&chunks_to_keep, AUDIO_CONV_FOZ_TAG_CODECINFO, &chunk->key.hash);
                     }
                 }
 
                 if (has_all)
-                    chunks_to_discard = g_list_append(chunks_to_discard,
-                            entry_name_create(AUDIO_CONV_FOZ_TAG_STREAM, stream_id));
+                    fozdb_entry_put(&chunks_to_discard, AUDIO_CONV_FOZ_TAG_STREAM, &entry->key.hash);
 
-                g_list_free_full(stream_chunks, free);
+                rb_destroy(&stream_chunks, fozdb_entry_destroy, NULL);
             }
             free(buffer);
         }
     }
 
-    for (list_iter = chunks_to_discard; list_iter; list_iter = list_iter->next)
+    RB_FOR_EACH_ENTRY(chunk, &chunks_to_discard, struct fozdb_entry, entry)
     {
-        struct entry_name *entry = list_iter->data;
-        if (!g_list_find_custom(chunks_to_keep, entry, entry_name_compare))
-            chunks = g_list_append(chunks, entry_name_create(entry->tag, &entry->hash));
+        if (!rb_get(&chunks_to_keep, chunk))
+            fozdb_entry_put(&chunks, chunk->key.tag, &chunk->key.hash);
     }
 
-    if ((ret = fozdb_discard_entries(dump_fozdb.fozdb, chunks)) < 0)
+    if ((ret = fozdb_discard_entries(dump_fozdb.fozdb, &chunks)) < 0)
     {
         GST_ERROR("Failed to discard entries, ret %d.", ret);
         dump_fozdb_close(&dump_fozdb);
     }
 
-    g_list_free_full(chunks, free);
-    g_list_free_full(chunks_to_keep, free);
-    g_list_free_full(chunks_to_discard, free);
+    rb_destroy(&chunks, fozdb_entry_destroy, NULL);
+    rb_destroy(&chunks_to_keep, fozdb_entry_destroy, NULL);
+    rb_destroy(&chunks_to_discard, fozdb_entry_destroy, NULL);
 }
 
 static bool need_transcode_head_create_from_caps(GstCaps *caps, struct need_transcode_head **out)
@@ -517,8 +510,8 @@ static void stream_state_reset(struct stream_state *state)
     state->needs_dump = false;
 }
 
-static loop_state stream_state_record_buffer(struct stream_state *state, struct payload_hash *buffer_hash,
-        struct payload_hash *loop_hash, GstBuffer *buffer, struct need_transcode_head *codec_info)
+static loop_state stream_state_record_buffer(struct stream_state *state, struct fozdb_hash *buffer_hash,
+        struct fozdb_hash *loop_hash, GstBuffer *buffer, struct need_transcode_head *codec_info)
 {
     if (!state->codec_info && codec_info)
         state->codec_info = need_transcode_head_dup(codec_info);
@@ -553,7 +546,7 @@ static loop_state stream_state_record_buffer(struct stream_state *state, struct 
     return NO_LOOP;
 }
 
-static bool stream_state_is_stream_subset(struct stream_state *state, struct fozdb *db, struct payload_hash *stream_id)
+static bool stream_state_is_stream_subset(struct stream_state *state, struct fozdb *db, struct fozdb_hash *stream_id)
 {
     uint64_t offset = 0;
     GList *list_iter;
@@ -561,7 +554,7 @@ static bool stream_state_is_stream_subset(struct stream_state *state, struct foz
     for (list_iter = state->buffers; list_iter; list_iter = list_iter->next)
     {
         struct buffer_entry *entry = list_iter->data;
-        struct payload_hash buffer_id;
+        struct fozdb_hash buffer_id;
         size_t read_size;
 
         if ((fozdb_read_entry_data(db, AUDIO_CONV_FOZ_TAG_STREAM, stream_id,
@@ -610,13 +603,12 @@ static int stream_state_write_to_foz(struct stream_state *state)
     if (!found)
     {
         /* Are there any recorded streams of which this stream is a subset? */
-        struct payload_hash *stream_id;
-        GHashTableIter stream_ids;
+        struct fozdb_entry *entry;
 
-        fozdb_iter_tag(dump_fozdb.fozdb, AUDIO_CONV_FOZ_TAG_STREAM, &stream_ids);
-        while (g_hash_table_iter_next(&stream_ids, (void **)&stream_id, NULL))
+        RB_FOR_EACH_ENTRY(entry, &dump_fozdb.fozdb->entries, struct fozdb_entry, entry)
         {
-            if (stream_state_is_stream_subset(state, dump_fozdb.fozdb, stream_id))
+            if (entry->key.tag != AUDIO_CONV_FOZ_TAG_STREAM) continue;
+            if (stream_state_is_stream_subset(state, dump_fozdb.fozdb, &entry->key.hash))
             {
                 found = true;
                 break;
@@ -727,7 +719,7 @@ static void audio_conv_state_reset(struct audio_conv_state *state)
 static int audio_conv_state_open_transcode_file(struct audio_conv_state *state, GstBuffer *buffer,
         uint8_t **out_data, size_t *out_size)
 {
-    struct payload_hash hash, loop_hash;
+    struct fozdb_hash hash, loop_hash;
     uint32_t transcoded_size;
     const char *blank_audio;
     bool try_loop, hash_ok;

@@ -44,6 +44,14 @@ WINE_DEFAULT_DEBUG_CHANNEL(mmdevapi);
 
 DEFINE_GUID(GUID_NULL,0,0,0,0,0,0,0,0,0,0,0);
 
+#define WINE_REG_PROP_MAGIC 0xbeef
+struct reg_prop_serialized {
+    VARTYPE vt;
+    WORD unk; /* Uninitialized memory on native, we store a magic value here. */
+    ULONG elems;
+    BYTE data[];
+};
+
 static HKEY key_render;
 static HKEY key_capture;
 
@@ -76,8 +84,8 @@ typedef struct MMDevColImpl
 {
     IMMDeviceCollection IMMDeviceCollection_iface;
     LONG ref;
-    EDataFlow flow;
-    DWORD state;
+    IMMDevice **devices;
+    UINT devices_count;
 } MMDevColImpl;
 
 typedef struct IPropertyBagImpl {
@@ -86,6 +94,16 @@ typedef struct IPropertyBagImpl {
 } IPropertyBagImpl;
 
 static const IPropertyBagVtbl PB_Vtbl;
+
+typedef struct IConnectorImpl {
+    IConnector IConnector_iface;
+    LONG ref;
+} IConnectorImpl;
+
+typedef struct IDeviceTopologyImpl {
+    IDeviceTopology IDeviceTopology_iface;
+    LONG ref;
+} IDeviceTopologyImpl;
 
 static HRESULT MMDevPropStore_Create(MMDevice *This, DWORD access, IPropertyStore **ppv);
 
@@ -109,6 +127,18 @@ static inline IPropertyBagImpl *impl_from_IPropertyBag(IPropertyBag *iface)
     return CONTAINING_RECORD(iface, IPropertyBagImpl, IPropertyBag_iface);
 }
 
+static HRESULT DeviceTopology_Create(IMMDevice *device, IDeviceTopology **ppv);
+
+static inline IConnectorImpl *impl_from_IConnector(IConnector *iface)
+{
+    return CONTAINING_RECORD(iface, IConnectorImpl, IConnector_iface);
+}
+
+static inline IDeviceTopologyImpl *impl_from_IDeviceTopology(IDeviceTopology *iface)
+{
+    return CONTAINING_RECORD(iface, IDeviceTopologyImpl, IDeviceTopology_iface);
+}
+
 static const WCHAR propkey_formatW[] = L"{%08X-%04X-%04X-%02X%02X-%02X%02X%02X%02X%02X%02X},%d";
 
 static HRESULT MMDevPropStore_OpenPropKey(const GUID *guid, DWORD flow, HKEY *propkey)
@@ -130,6 +160,143 @@ static HRESULT MMDevPropStore_OpenPropKey(const GUID *guid, DWORD flow, HKEY *pr
         return E_FAIL;
     }
     return S_OK;
+}
+
+static BOOL is_vector_vt(VARTYPE vt)
+{
+    return !!(vt & VT_VECTOR);
+}
+
+static unsigned int get_vt_elem_size(VARTYPE vt)
+{
+    switch (vt & VT_TYPEMASK)
+    {
+        case VT_BOOL:
+            return sizeof(VARIANT_BOOL);
+
+        case VT_CLSID:
+            return sizeof(GUID);
+
+        default:
+            return 0;
+    }
+}
+
+static BOOL is_valid_serialized_reg_prop(BYTE *data, DWORD data_size)
+{
+    struct reg_prop_serialized *reg_prop;
+    unsigned int elem_size;
+
+    if (data_size <= sizeof(*reg_prop))
+        return FALSE;
+
+    reg_prop = (struct reg_prop_serialized *)data;
+    if (reg_prop->unk != WINE_REG_PROP_MAGIC)
+        return FALSE;
+
+    if (((reg_prop->vt & VT_TYPEMASK) > VT_CLSID))
+        return FALSE;
+
+    if (!!(reg_prop->vt & ~VT_TYPEMASK) && !is_vector_vt(reg_prop->vt))
+        return FALSE;
+
+    if (!reg_prop->elems || ((reg_prop->elems > 1) && !is_vector_vt(reg_prop->vt)))
+        return FALSE;
+
+    elem_size = get_vt_elem_size(reg_prop->vt);
+    if (elem_size && (((elem_size * reg_prop->elems) + sizeof(*reg_prop)) > data_size))
+        return FALSE;
+
+    return TRUE;
+}
+
+static void deserialize_reg_prop(BYTE *data, DWORD data_size, PROPVARIANT *pv)
+{
+    struct reg_prop_serialized *reg_prop = (struct reg_prop_serialized *)data;
+    unsigned int elems_size;
+
+    switch (reg_prop->vt)
+    {
+        case VT_BOOL:
+            pv->vt = reg_prop->vt;
+            pv->boolVal = ((VARIANT_BOOL *)reg_prop->data)[0];
+            break;
+
+        case VT_BOOL | VT_VECTOR:
+            pv->vt = reg_prop->vt;
+            pv->cabool.cElems = reg_prop->elems;
+            elems_size = sizeof(*pv->cabool.pElems) * reg_prop->elems;
+            pv->cabool.pElems = CoTaskMemAlloc(elems_size);
+            memcpy(pv->cabool.pElems, reg_prop->data, elems_size);
+            break;
+
+        case VT_CLSID:
+            pv->vt = reg_prop->vt;
+            pv->puuid = CoTaskMemAlloc(sizeof(*pv->puuid));
+            *pv->puuid = ((GUID *)reg_prop->data)[0];
+            break;
+
+        case VT_CLSID | VT_VECTOR:
+            pv->vt = reg_prop->vt;
+            pv->cauuid.cElems = reg_prop->elems;
+            elems_size = sizeof(*pv->cauuid.pElems) * reg_prop->elems;
+            pv->cauuid.pElems = CoTaskMemAlloc(elems_size);
+            memcpy(pv->cauuid.pElems, reg_prop->data, elems_size);
+            break;
+
+        default:
+            break;
+    }
+}
+
+static HRESULT serialize_reg_prop(HKEY reg_key, const WCHAR *prop_id, PROPVARIANT *pv)
+{
+    const struct reg_prop_serialized reg_prop_init = { pv->vt, WINE_REG_PROP_MAGIC };
+    struct reg_prop_serialized *reg_prop = NULL;
+    unsigned int size = sizeof(reg_prop_init);
+    unsigned int elems_size = 0, elem_count = 1;
+    void *elems_val = NULL;
+    LONG ret;
+
+    switch (pv->vt)
+    {
+        case VT_BOOL:
+            elems_size = get_vt_elem_size(pv->vt);
+            elems_val = &pv->boolVal;
+            break;
+
+        case VT_BOOL | VT_VECTOR:
+            elem_count = pv->cabool.cElems;
+            elems_size = elem_count * get_vt_elem_size(pv->vt);
+            elems_val = pv->cabool.pElems;
+            break;
+
+        case VT_CLSID:
+            elems_size = get_vt_elem_size(pv->vt);
+            elems_val = pv->puuid;
+            break;
+
+        case VT_CLSID | VT_VECTOR:
+            elem_count = pv->cauuid.cElems;
+            elems_size = elem_count * get_vt_elem_size(pv->vt);
+            elems_val = pv->cauuid.pElems;
+            break;
+
+        default:
+            assert(0);
+            break;
+    }
+
+    size += elems_size;
+    if (!(reg_prop = malloc(size)))
+        return E_OUTOFMEMORY;
+
+    *reg_prop = reg_prop_init;
+    reg_prop->elems = elem_count;
+    memcpy(reg_prop->data, elems_val, elems_size);
+    ret = RegSetValueExW(reg_key, prop_id, 0, REG_BINARY, (BYTE *)reg_prop, size);
+    free(reg_prop);
+    return !ret ? S_OK : E_FAIL;
 }
 
 static HRESULT MMDevice_GetPropValue(const GUID *devguid, DWORD flow, REFPROPERTYKEY key, PROPVARIANT *pv)
@@ -176,13 +343,27 @@ static HRESULT MMDevice_GetPropValue(const GUID *devguid, DWORD flow, REFPROPERT
         }
         case REG_BINARY:
         {
-            pv->vt = VT_BLOB;
-            pv->blob.cbSize = size;
-            pv->blob.pBlobData = CoTaskMemAlloc(size);
-            if (!pv->blob.pBlobData)
+            BYTE *data = CoTaskMemAlloc(size);
+
+            if (!data)
+            {
                 hr = E_OUTOFMEMORY;
+                break;
+            }
+
+            RegGetValueW(regkey, NULL, buffer, RRF_RT_REG_BINARY, NULL, data, &size);
+            if (is_valid_serialized_reg_prop(data, size))
+            {
+                TRACE("do_deserialize().\n");
+                deserialize_reg_prop(data, size, pv);
+                CoTaskMemFree(data);
+            }
             else
-                RegGetValueW(regkey, NULL, buffer, RRF_RT_REG_BINARY, NULL, (BYTE*)pv->blob.pBlobData, &size);
+            {
+                pv->vt = VT_BLOB;
+                pv->blob.cbSize = size;
+                pv->blob.pBlobData = data;
+            }
             break;
         }
         default:
@@ -215,6 +396,17 @@ static HRESULT MMDevice_SetPropValue(const GUID *devguid, DWORD flow, REFPROPERT
             ret = RegSetValueExW(regkey, buffer, 0, REG_DWORD, (const BYTE*)&pv->ulVal, sizeof(DWORD));
             break;
         }
+
+        case VT_BOOL:
+        case VT_BOOL | VT_VECTOR:
+        case VT_CLSID:
+        case VT_CLSID | VT_VECTOR:
+        {
+            hr = serialize_reg_prop(regkey, buffer, (PROPVARIANT *)pv);
+            ret = 0;
+            break;
+        }
+
         case VT_BLOB:
         {
             ret = RegSetValueExW(regkey, buffer, 0, REG_BINARY, pv->blob.pBlobData, pv->blob.cbSize);
@@ -344,9 +536,6 @@ static MMDevice *MMDevice_Create(const WCHAR *name, GUID *id, EDataFlow flow, DW
         cur->IMMDevice_iface.lpVtbl = &MMDeviceVtbl;
         cur->IMMEndpoint_iface.lpVtbl = &MMEndpointVtbl;
 
-        InitializeCriticalSection(&cur->crst);
-        cur->crst.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": MMDevice.crst");
-
         list_add_tail(&device_list, &cur->entry);
     }else if(cur->ref > 0)
         WARN("Modifying an MMDevice with postitive reference count!\n");
@@ -367,7 +556,9 @@ static MMDevice *MMDevice_Create(const WCHAR *name, GUID *id, EDataFlow flow, DW
 
     if (RegCreateKeyExW(root, guidstr, 0, NULL, 0, KEY_WRITE|KEY_READ|KEY_WOW64_64KEY, NULL, &key, NULL) == ERROR_SUCCESS)
     {
+        const char *sgi = getenv("SteamGameId");
         HKEY keyprop;
+
         RegSetValueExW(key, L"DeviceState", 0, REG_DWORD, (const BYTE*)&state, sizeof(DWORD));
         if (!RegCreateKeyExW(key, L"Properties", 0, NULL, 0, KEY_WRITE|KEY_READ|KEY_WOW64_64KEY, NULL, &keyprop, NULL))
         {
@@ -390,12 +581,39 @@ static MMDevice *MMDevice_Create(const WCHAR *name, GUID *id, EDataFlow flow, DW
                 PropVariantClear(&pv2);
             }
 
-            MMDevice_SetPropValue(id, flow, (const PROPERTYKEY*)&DEVPKEY_Device_FriendlyName, &pv);
-            MMDevice_SetPropValue(id, flow, (const PROPERTYKEY*)&DEVPKEY_DeviceInterface_FriendlyName, &pv);
-            MMDevice_SetPropValue(id, flow, (const PROPERTYKEY*)&DEVPKEY_Device_DeviceDesc, &pv);
+            if (sgi && !strcmp(sgi, "739630"))
+            {
+                const WCHAR *type = L"Other Device";
+                DWORD len;
+
+                MMDevice_SetPropValue(id, flow, (const PROPERTYKEY*)&DEVPKEY_DeviceInterface_FriendlyName, &pv);
+
+                if (flow == eCapture)
+                    type = L"Microphone";
+                else if (flow == eRender)
+                    type = L"Speakers";
+
+                pv.pwszVal = (LPWSTR)type;
+                MMDevice_SetPropValue(id, flow, (const PROPERTYKEY*)&DEVPKEY_Device_DeviceDesc, &pv);
+
+                len = (wcslen(type) + wcslen(cur->drv_id) + wcslen(L" ()") + 1) * sizeof(WCHAR);
+                pv.vt = VT_LPWSTR;
+                pv.pwszVal = CoTaskMemAlloc(len);
+                swprintf(pv.pwszVal, len, L"%ls (%ls)", type, cur->drv_id);
+                MMDevice_SetPropValue(id, flow, (const PROPERTYKEY*)&DEVPKEY_Device_FriendlyName, &pv);
+                CoTaskMemFree(pv.pwszVal);
+            }
+            else
+            {
+                MMDevice_SetPropValue(id, flow, (const PROPERTYKEY*)&DEVPKEY_Device_FriendlyName, &pv);
+                MMDevice_SetPropValue(id, flow, (const PROPERTYKEY*)&DEVPKEY_DeviceInterface_FriendlyName, &pv);
+                MMDevice_SetPropValue(id, flow, (const PROPERTYKEY*)&DEVPKEY_Device_DeviceDesc, &pv);
+            }
 
             pv.pwszVal = guidstr;
             MMDevice_SetPropValue(id, flow, &deviceinterface_key, &pv);
+
+            set_driver_prop_value(id, flow, (const PROPERTYKEY*)&DEVPKEY_Device_ContainerId);
 
             if (FAILED(set_driver_prop_value(id, flow, &PKEY_AudioEndpoint_FormFactor)))
             {
@@ -581,8 +799,6 @@ static void MMDevice_Destroy(MMDevice *This)
 {
     TRACE("Freeing %s\n", debugstr_w(This->drv_id));
     list_remove(&This->entry);
-    This->crst.DebugInfo->Spare[0] = 0;
-    DeleteCriticalSection(&This->crst);
     free(This->drv_id);
     free(This);
 }
@@ -686,7 +902,7 @@ static HRESULT WINAPI MMDevice_Activate(IMMDevice *iface, REFIID riid, DWORD cls
     }
     else if (IsEqualIID(riid, &IID_IDeviceTopology))
     {
-        FIXME("IID_IDeviceTopology unsupported\n");
+        hr = DeviceTopology_Create(iface, (IDeviceTopology**)ppv);
     }
     else if (IsEqualIID(riid, &IID_IDirectSound)
              || IsEqualIID(riid, &IID_IDirectSound8))
@@ -824,6 +1040,8 @@ static const IMMEndpointVtbl MMEndpointVtbl =
 static HRESULT MMDevCol_Create(IMMDeviceCollection **ppv, EDataFlow flow, DWORD state)
 {
     MMDevColImpl *This;
+    MMDevice *cur;
+    UINT i = 0;
 
     This = malloc(sizeof(*This));
     *ppv = NULL;
@@ -831,14 +1049,43 @@ static HRESULT MMDevCol_Create(IMMDeviceCollection **ppv, EDataFlow flow, DWORD 
         return E_OUTOFMEMORY;
     This->IMMDeviceCollection_iface.lpVtbl = &MMDevColVtbl;
     This->ref = 1;
-    This->flow = flow;
-    This->state = state;
+    This->devices = NULL;
+    This->devices_count = 0;
     *ppv = &This->IMMDeviceCollection_iface;
+
+    LIST_FOR_EACH_ENTRY(cur, &device_list, MMDevice, entry)
+    {
+        if ((cur->flow == flow || flow == eAll) && (cur->state & state))
+            This->devices_count++;
+    }
+
+    if (This->devices_count)
+    {
+        This->devices = malloc(This->devices_count * sizeof(IMMDevice *));
+        if (!This->devices_count)
+            return E_OUTOFMEMORY;
+
+        LIST_FOR_EACH_ENTRY(cur, &device_list, MMDevice, entry)
+        {
+            if ((cur->flow == flow || flow == eAll) && (cur->state & state))
+            {
+                This->devices[i] = &cur->IMMDevice_iface;
+                IMMDevice_AddRef(This->devices[i]);
+                i++;
+            }
+        }
+    }
+
     return S_OK;
 }
 
 static void MMDevCol_Destroy(MMDevColImpl *This)
 {
+    UINT i;
+    for (i = 0; i < This->devices_count; i++)
+        IMMDevice_Release(This->devices[i]);
+
+    free(This->devices);
     free(This);
 }
 
@@ -881,46 +1128,33 @@ static ULONG WINAPI MMDevCol_Release(IMMDeviceCollection *iface)
 static HRESULT WINAPI MMDevCol_GetCount(IMMDeviceCollection *iface, UINT *numdevs)
 {
     MMDevColImpl *This = impl_from_IMMDeviceCollection(iface);
-    MMDevice *cur;
 
     TRACE("(%p)->(%p)\n", This, numdevs);
     if (!numdevs)
         return E_POINTER;
 
-    *numdevs = 0;
-    LIST_FOR_EACH_ENTRY(cur, &device_list, MMDevice, entry)
-    {
-        if ((cur->flow == This->flow || This->flow == eAll)
-            && (cur->state & This->state))
-            ++(*numdevs);
-    }
+    *numdevs = This->devices_count;
     return S_OK;
 }
 
 static HRESULT WINAPI MMDevCol_Item(IMMDeviceCollection *iface, UINT n, IMMDevice **dev)
 {
     MMDevColImpl *This = impl_from_IMMDeviceCollection(iface);
-    MMDevice *cur;
-    DWORD i = 0;
 
     TRACE("(%p)->(%u, %p)\n", This, n, dev);
     if (!dev)
         return E_POINTER;
 
-    LIST_FOR_EACH_ENTRY(cur, &device_list, MMDevice, entry)
+    if (n >= This->devices_count)
     {
-        if ((cur->flow == This->flow || This->flow == eAll)
-            && (cur->state & This->state)
-            && i++ == n)
-        {
-            *dev = &cur->IMMDevice_iface;
-            IMMDevice_AddRef(*dev);
-            return S_OK;
-        }
+        WARN("Could not obtain item %u\n", n);
+        *dev = NULL;
+        return E_INVALIDARG;
     }
-    WARN("Could not obtain item %u\n", n);
-    *dev = NULL;
-    return E_INVALIDARG;
+
+    *dev = This->devices[n];
+    IMMDevice_AddRef(*dev);
+    return S_OK;
 }
 
 static const IMMDeviceCollectionVtbl MMDevColVtbl =
@@ -1679,3 +1913,277 @@ static const IMMDeviceVtbl info_device_Vtbl =
 static IMMDevice info_device = {
     &info_device_Vtbl
 };
+
+static HRESULT WINAPI Connector_QueryInterface(IConnector *iface, REFIID riid, void **ppv)
+{
+    IConnectorImpl *This = impl_from_IConnector(iface);
+    TRACE("(%p)->(%s, %p)\n", This, debugstr_guid(riid), ppv);
+
+    if (!ppv)
+        return E_POINTER;
+
+    if (IsEqualIID(riid, &IID_IUnknown) ||
+        IsEqualIID(riid, &IID_IConnector))
+        *ppv = &This->IConnector_iface;
+    else {
+        *ppv = NULL;
+        return E_NOINTERFACE;
+    }
+
+    IUnknown_AddRef((IUnknown *)*ppv);
+
+    return S_OK;
+}
+
+static ULONG WINAPI Connector_AddRef(IConnector *iface)
+{
+    IConnectorImpl *This = impl_from_IConnector(iface);
+    ULONG ref = InterlockedIncrement(&This->ref);
+    TRACE("(%p) new ref %lu\n", This, ref);
+    return ref;
+}
+
+static ULONG WINAPI Connector_Release(IConnector *iface)
+{
+    IConnectorImpl *This = impl_from_IConnector(iface);
+    ULONG ref = InterlockedDecrement(&This->ref);
+    TRACE("(%p) new ref %lu\n", This, ref);
+
+    if (!ref)
+        HeapFree(GetProcessHeap(), 0, This);
+
+    return ref;
+}
+
+static HRESULT WINAPI Connector_GetType(
+    IConnector *This,
+    ConnectorType *pType)
+{
+    FIXME("(%p) - partial stub\n", This);
+    *pType = Physical_Internal;
+    return S_OK;
+}
+
+static HRESULT WINAPI Connector_GetDataFlow(
+    IConnector *This,
+    DataFlow *pFlow)
+{
+    FIXME("(%p) - stub\n", This);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI Connector_ConnectTo(
+    IConnector *This,
+    IConnector *pConnectTo)
+{
+    FIXME("(%p) - stub\n", This);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI Connector_Disconnect(
+    IConnector *This)
+{
+    FIXME("(%p) - stub\n", This);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI Connector_IsConnected(
+    IConnector *This,
+    BOOL *pbConnected)
+{
+    FIXME("(%p) - stub\n", This);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI Connector_GetConnectedTo(
+    IConnector *This,
+    IConnector **ppConTo)
+{
+    FIXME("(%p) - stub\n", This);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI Connector_GetConnectorIdConnectedTo(
+    IConnector *This,
+    LPWSTR *ppwstrConnectorId)
+{
+    FIXME("(%p) - stub\n", This);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI Connector_GetDeviceIdConnectedTo(
+    IConnector *This,
+    LPWSTR *ppwstrDeviceId)
+{
+    FIXME("(%p) - stub\n", This);
+    return E_NOTIMPL;
+}
+
+static const IConnectorVtbl Connector_Vtbl =
+{
+    Connector_QueryInterface,
+    Connector_AddRef,
+    Connector_Release,
+    Connector_GetType,
+    Connector_GetDataFlow,
+    Connector_ConnectTo,
+    Connector_Disconnect,
+    Connector_IsConnected,
+    Connector_GetConnectedTo,
+    Connector_GetConnectorIdConnectedTo,
+    Connector_GetDeviceIdConnectedTo,
+};
+
+HRESULT Connector_Create(IConnector **ppv)
+{
+    IConnectorImpl *This;
+
+    This = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*This));
+    if (!This)
+        return E_OUTOFMEMORY;
+
+    This->IConnector_iface.lpVtbl = &Connector_Vtbl;
+    This->ref = 1;
+
+    *ppv = &This->IConnector_iface;
+
+    return S_OK;
+}
+
+static HRESULT WINAPI DT_QueryInterface(IDeviceTopology *iface, REFIID riid, void **ppv)
+{
+    IDeviceTopologyImpl *This = impl_from_IDeviceTopology(iface);
+    TRACE("(%p)->(%s, %p)\n", This, debugstr_guid(riid), ppv);
+
+    if (!ppv)
+        return E_POINTER;
+
+    if (IsEqualIID(riid, &IID_IUnknown) ||
+        IsEqualIID(riid, &IID_IDeviceTopology))
+        *ppv = &This->IDeviceTopology_iface;
+    else {
+        *ppv = NULL;
+        return E_NOINTERFACE;
+    }
+
+    IUnknown_AddRef((IUnknown *)*ppv);
+
+    return S_OK;
+}
+
+static ULONG WINAPI DT_AddRef(IDeviceTopology *iface)
+{
+    IDeviceTopologyImpl *This = impl_from_IDeviceTopology(iface);
+    ULONG ref = InterlockedIncrement(&This->ref);
+    TRACE("(%p) new ref %lu\n", This, ref);
+    return ref;
+}
+
+static ULONG WINAPI DT_Release(IDeviceTopology *iface)
+{
+    IDeviceTopologyImpl *This = impl_from_IDeviceTopology(iface);
+    ULONG ref = InterlockedDecrement(&This->ref);
+    TRACE("(%p) new ref %lu\n", This, ref);
+
+    if (!ref)
+        HeapFree(GetProcessHeap(), 0, This);
+
+    return ref;
+}
+
+static HRESULT WINAPI DT_GetConnectorCount(IDeviceTopology *This,
+                                           UINT *pCount)
+{
+    FIXME("(%p)->(%p) - partial stub\n", This, pCount);
+
+    if (!pCount)
+        return E_POINTER;
+
+    *pCount = 1;
+    return S_OK;
+}
+
+static HRESULT WINAPI DT_GetConnector(IDeviceTopology *This,
+                                      UINT nIndex,
+                                      IConnector **ppConnector)
+{
+    FIXME("(%p)->(%u, %p) - partial stub\n", This, nIndex, ppConnector);
+
+    if (nIndex == 0)
+    {
+        return Connector_Create(ppConnector);
+    }
+
+    return E_INVALIDARG;
+}
+
+static HRESULT WINAPI DT_GetSubunitCount(IDeviceTopology *This,
+                                         UINT *pCount)
+{
+    FIXME("(%p)->(%p) - stub\n", This, pCount);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI DT_GetSubunit(IDeviceTopology *This,
+                                    UINT nIndex,
+                                    ISubUnit **ppConnector)
+{
+    FIXME("(%p)->(%u, %p) - stub\n", This, nIndex, ppConnector);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI DT_GetPartById(IDeviceTopology *This,
+                                     UINT nId,
+                                     IPart **ppPart)
+{
+    FIXME("(%p)->(%u, %p) - stub\n", This, nId, ppPart);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI DT_GetDeviceId(IDeviceTopology *This,
+                                     LPWSTR *ppwstrDeviceId)
+{
+    FIXME("(%p)->(%p) - stub\n", This, ppwstrDeviceId);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI DT_GetSignalPath(IDeviceTopology *This,
+                                       IPart *pIPartFrom,
+                                       IPart *pIPartTo,
+                                       BOOL bRejectMixedPaths,
+                                       IPartsList **ppParts)
+{
+    FIXME("(%p)->(%p, %p, %s, %p) - stub\n",
+          This, pIPartFrom, pIPartTo, bRejectMixedPaths ? "TRUE" : "FALSE", ppParts);
+    return E_NOTIMPL;
+}
+
+static const IDeviceTopologyVtbl DeviceTopology_Vtbl =
+{
+    DT_QueryInterface,
+    DT_AddRef,
+    DT_Release,
+    DT_GetConnectorCount,
+    DT_GetConnector,
+    DT_GetSubunitCount,
+    DT_GetSubunit,
+    DT_GetPartById,
+    DT_GetDeviceId,
+    DT_GetSignalPath,
+};
+
+static HRESULT DeviceTopology_Create(IMMDevice *device, IDeviceTopology **ppv)
+{
+    IDeviceTopologyImpl *This;
+
+    This = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*This));
+    if (!This)
+        return E_OUTOFMEMORY;
+
+    This->IDeviceTopology_iface.lpVtbl = &DeviceTopology_Vtbl;
+    This->ref = 1;
+
+    *ppv = &This->IDeviceTopology_iface;
+
+    return S_OK;
+}

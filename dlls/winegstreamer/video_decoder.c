@@ -36,6 +36,8 @@
 WINE_DEFAULT_DEBUG_CHANNEL(mfplat);
 WINE_DECLARE_DEBUG_CHANNEL(winediag);
 
+extern const GUID MFVideoFormat_theora;
+
 struct subtype_info
 {
     const GUID *subtype;
@@ -53,6 +55,7 @@ static const struct subtype_info subtype_info_list[] =
     { &MFVideoFormat_UYVY,   16, MAKEFOURCC('U', 'Y', 'V', 'Y') },
     { &MFVideoFormat_YVYU,   16, MAKEFOURCC('Y', 'V', 'Y', 'U') },
     { &MFVideoFormat_NV11,   12, MAKEFOURCC('N', 'V', '1', '1') },
+    { &MFVideoFormat_P010,   24, MAKEFOURCC('P', '0', '1', '0') },
     { &MFVideoFormat_RGB8,   8,  BI_RGB },
     { &MFVideoFormat_RGB555, 16, BI_RGB },
     { &MFVideoFormat_RGB565, 16, BI_BITFIELDS },
@@ -65,11 +68,6 @@ static const struct subtype_info subtype_info_list[] =
     { &MEDIASUBTYPE_RGB32,   32, BI_RGB },
 };
 
-extern GUID MFVideoFormat_GStreamer;
-static const GUID *const video_decoder_input_types[] =
-{
-    &MFVideoFormat_GStreamer,
-};
 static const GUID *const video_decoder_output_types[] =
 {
     &MFVideoFormat_NV12,
@@ -77,14 +75,6 @@ static const GUID *const video_decoder_output_types[] =
     &MFVideoFormat_IYUV,
     &MFVideoFormat_I420,
     &MFVideoFormat_YUY2,
-    &MFVideoFormat_UYVY,
-    &MFVideoFormat_YVYU,
-    &MFVideoFormat_NV11,
-    &MFVideoFormat_RGB32,
-    &MFVideoFormat_RGB24,
-    &MFVideoFormat_RGB565,
-    &MFVideoFormat_RGB555,
-    &MFVideoFormat_RGB8,
 };
 
 struct video_decoder
@@ -123,6 +113,8 @@ struct video_decoder
 
     DMO_MEDIA_TYPE dmo_input_type;
     DMO_MEDIA_TYPE dmo_output_type;
+
+    INT32 previous_stride;
 };
 
 static inline struct video_decoder *impl_from_IUnknown(IUnknown *iface)
@@ -251,8 +243,41 @@ static struct video_decoder *impl_from_IMFTransform(IMFTransform *iface)
     return CONTAINING_RECORD(iface, struct video_decoder, IMFTransform_iface);
 }
 
-static HRESULT normalize_stride(IMFMediaType *media_type, IMFMediaType **ret)
+static HRESULT set_previous_stride(struct video_decoder *decoder)
 {
+    INT32 requested_stride;
+    LONG default_stride;
+    UINT64 ratio;
+    UINT32 width;
+    GUID subtype;
+    HRESULT hr;
+
+    if (FAILED(hr = IMFMediaType_GetGUID(decoder->output_type, &MF_MT_SUBTYPE, &subtype)))
+        return hr;
+
+    if (FAILED(IMFMediaType_GetUINT64(decoder->output_type, &MF_MT_FRAME_SIZE, &ratio)))
+        ratio = (UINT64)1920 << 32 | 1080;
+
+    width = ratio >> 32;
+
+    if (FAILED(hr = MFGetStrideForBitmapInfoHeader(subtype.Data1, width, &default_stride)))
+        return hr;
+
+    if (FAILED(IMFMediaType_GetUINT32(decoder->output_type, &MF_MT_DEFAULT_STRIDE, (UINT32*)&requested_stride)))
+        requested_stride = 0;
+
+    if (default_stride > 0 || requested_stride < 0)
+        decoder->previous_stride = -abs(default_stride);
+    else
+        decoder->previous_stride = abs(default_stride);
+
+    return S_OK;
+}
+
+static HRESULT normalize_stride(struct video_decoder *decoder, IMFMediaType **ret)
+{
+    IMFMediaType *media_type = decoder->output_type;
+    INT32 default_stride, requested_stride;
     DMO_MEDIA_TYPE amt;
     HRESULT hr;
 
@@ -262,6 +287,27 @@ static HRESULT normalize_stride(IMFMediaType *media_type, IMFMediaType **ret)
         vih->bmiHeader.biHeight = abs(vih->bmiHeader.biHeight);
         hr = MFCreateMediaTypeFromRepresentation(AM_MEDIA_TYPE_REPRESENTATION, &amt, ret);
         FreeMediaType(&amt);
+
+        /* Stride must always be positive for YUV formats. Otherwise:
+         * 1. if this is the first time an output type has been specified, it must either:
+         *  a. match the sign of the requested MF_MT_DEFAULT_STRIDE value; or
+         *  b. default to positive; or
+         * 2. If an output type was previously specified and input sent it must:
+         *  a. be negative if it was previously a YUV format; or
+         *  b. match the sign of the previously requested MF_MT_DEFAULT_STRIDE attribute
+         *     (defaulting to positive if it had not been provided)
+         */
+
+        if (SUCCEEDED(hr = IMFMediaType_GetUINT32(*ret, &MF_MT_DEFAULT_STRIDE, (UINT32*)&default_stride)))
+        {
+            if (FAILED(IMFMediaType_GetUINT32(media_type, &MF_MT_DEFAULT_STRIDE, (UINT32*)&requested_stride)))
+                requested_stride = 0;
+
+            /* default stride less than 0 means an RGB format */
+            if (default_stride < 0 && (decoder->previous_stride > 0
+                    || (!decoder->previous_stride && requested_stride >= 0)))
+                hr = IMFMediaType_SetUINT32(*ret, &MF_MT_DEFAULT_STRIDE, abs(default_stride));
+        }
     }
 
     return hr;
@@ -705,7 +751,7 @@ static HRESULT WINAPI transform_SetOutputType(IMFTransform *iface, DWORD id, IMF
         output_type = decoder->output_type;
         IMFMediaType_AddRef(output_type);
     }
-    else if (FAILED(hr = normalize_stride(decoder->output_type, &output_type)))
+    else if (FAILED(hr = normalize_stride(decoder, &output_type)))
     {
         IMFMediaType_Release(decoder->output_type);
         decoder->output_type = NULL;
@@ -810,10 +856,10 @@ static HRESULT WINAPI transform_ProcessMessage(IMFTransform *iface, MFT_MESSAGE_
         return S_OK;
 
     case MFT_MESSAGE_COMMAND_DRAIN:
-        return wg_transform_drain(decoder->wg_transform);
+        return decoder->wg_transform ? wg_transform_drain(decoder->wg_transform) : MF_E_TRANSFORM_TYPE_NOT_SET;
 
     case MFT_MESSAGE_COMMAND_FLUSH:
-        return wg_transform_flush(decoder->wg_transform);
+        return decoder->wg_transform ? wg_transform_flush(decoder->wg_transform) : MF_E_TRANSFORM_TYPE_NOT_SET;
 
     case MFT_MESSAGE_NOTIFY_START_OF_STREAM:
         decoder->sample_time = -1;
@@ -836,6 +882,9 @@ static HRESULT WINAPI transform_ProcessInput(IMFTransform *iface, DWORD id, IMFS
 
     if (decoder->sample_time == -1 && FAILED(IMFSample_GetSampleTime(sample, (LONGLONG *)&decoder->sample_time)))
         decoder->sample_time = 0;
+
+    if (!decoder->previous_stride)
+        set_previous_stride(decoder);
 
     return wg_transform_push_mf(decoder->wg_transform, sample, decoder->wg_sample_queue);
 }
@@ -901,9 +950,10 @@ static HRESULT WINAPI transform_ProcessOutput(IMFTransform *iface, DWORD flags, 
 {
     struct video_decoder *decoder = impl_from_IMFTransform(iface);
     UINT32 sample_size;
-    LONGLONG duration;
+    LONGLONG duration, sample_duration;
     IMFSample *sample;
     UINT64 frame_size, frame_rate;
+    bool preserve_timestamps;
     GUID subtype;
     DWORD size;
     HRESULT hr;
@@ -949,36 +999,34 @@ static HRESULT WINAPI transform_ProcessOutput(IMFTransform *iface, DWORD flags, 
     }
 
     if (SUCCEEDED(hr = wg_transform_read_mf(decoder->wg_transform, sample,
-            sample_size, &samples->dwStatus)))
+            sample_size, &samples->dwStatus, &preserve_timestamps)))
     {
-        BOOL frame_rate_given = FALSE;
-        LONGLONG time;
         wg_sample_queue_flush(decoder->wg_sample_queue, false);
 
-        if (FAILED(IMFMediaType_GetUINT64(decoder->input_type, &MF_MT_FRAME_RATE, &frame_rate)))
-            frame_rate = (UINT64)30000 << 32 | 1001;
+        if (decoder->IMediaObject_iface.lpVtbl)
+            duration = 0; /* WMV decoder doesn't output any timestamp or duration */
         else
-            frame_rate_given = TRUE;
-
-        if (frame_rate_given || FAILED(IMFSample_GetSampleDuration(sample, &duration)))
         {
-            if (!frame_rate_given)
-                WARN("Failed to get sample duration\n");
-            duration = (UINT64)10000000 * (UINT32)frame_rate / (frame_rate >> 32);
+            if (FAILED(IMFMediaType_GetUINT64(decoder->input_type, &MF_MT_FRAME_RATE, &frame_rate)))
+                frame_rate = (UINT64)30000 << 32 | 1001;
+            duration = MulDiv(10000000, (UINT32)frame_rate, frame_rate >> 32);
+        }
+
+        if (FAILED(hr = IMFMediaType_GetGUID(decoder->input_type, &MF_MT_SUBTYPE, &subtype)))
+            return hr;
+
+        if (!preserve_timestamps && !IsEqualGUID(&subtype, &MFVideoFormat_theora))
+        {
+            if (FAILED(IMFSample_SetSampleTime(sample, decoder->sample_time)))
+                WARN("Failed to set sample time\n");
             if (FAILED(IMFSample_SetSampleDuration(sample, duration)))
                 WARN("Failed to set sample duration\n");
-        }
-        if (frame_rate_given || FAILED(IMFSample_GetSampleTime(sample, &time)))
-        {
-            if (!frame_rate_given)
-                WARN("Failed to get sample time\n");
-            if(FAILED(IMFSample_SetSampleTime(sample, decoder->sample_time)))
-                WARN("Failed to set sample time\n");
             decoder->sample_time += duration;
         }
-        else
+        else if (FAILED(IMFSample_GetSampleDuration(sample, &sample_duration)) || !sample_duration)
         {
-            decoder->sample_time = time + duration;
+            if (FAILED(IMFSample_SetSampleDuration(sample, duration)))
+                WARN("Failed to set sample duration\n");
         }
     }
 
@@ -1215,6 +1263,23 @@ static HRESULT WINAPI media_object_SetInputType(IMediaObject *iface, DWORD index
         decoder->wg_transform = 0;
     }
 
+{
+    const char *sgi = getenv("SteamGameId");
+    if (sgi && (0
+        || !strcmp(sgi, "802870")
+        || !strcmp(sgi, "1083650")
+        || !strcmp(sgi, "1097880")
+        || !strcmp(sgi, "1230140")
+        || !strcmp(sgi, "2515070")
+        || !strcmp(sgi, "3625380")
+    ))
+    {
+        VIDEOINFOHEADER *vih = (VIDEOINFOHEADER *)decoder->dmo_input_type.pbFormat;
+        decoder->dmo_input_type.subtype = MFVideoFormat_RGB24;
+        vih->bmiHeader.biCompression = BI_RGB;
+    }
+}
+
     return S_OK;
 }
 
@@ -1278,27 +1343,7 @@ static HRESULT WINAPI media_object_SetOutputType(IMediaObject *iface, DWORD inde
     }
     if (FAILED(hr = wg_transform_create_quartz(&decoder->dmo_input_type, type,
             &decoder->wg_transform_attrs, &decoder->wg_transform)))
-    {
-        /* HACK: Try I420 if failed to create gstreamer transform. The reason for
-         * the failure may be gstreamer decoder plugins are missing in proton.
-         * In that case, the video is likely to be transcoded already. Transcoded
-         * video streams are in theora format, and gstreamer theora decoder will
-         * finally output I420, so we try use I420 input here. */
-        DMO_MEDIA_TYPE input_type;
-
-        input_type = decoder->dmo_input_type;
-        input_type.subtype = MEDIASUBTYPE_I420;
-        input_type.formattype = FORMAT_VideoInfo;
-        input_type.cbFormat = sizeof(VIDEOINFOHEADER);
-        input_type.pbFormat = CoTaskMemAlloc(input_type.cbFormat);
-        memcpy(input_type.pbFormat, decoder->dmo_input_type.pbFormat, sizeof(VIDEOINFOHEADER));
-
-        hr = wg_transform_create_quartz(&input_type, type,
-                &decoder->wg_transform_attrs, &decoder->wg_transform);
-        FreeMediaType(&input_type);
-
         return hr;
-    }
 
     return S_OK;
 }
@@ -1364,6 +1409,9 @@ static HRESULT WINAPI media_object_Flush(IMediaObject *iface)
     HRESULT hr;
 
     TRACE("iface %p.\n", iface);
+
+    if (!decoder->wg_transform)
+        return DMO_E_TYPE_NOT_SET;
 
     if (FAILED(hr = wg_transform_flush(decoder->wg_transform)))
         return hr;
@@ -1440,6 +1488,8 @@ static HRESULT WINAPI media_object_ProcessOutput(IMediaObject *iface, DWORD flag
     if (SUCCEEDED(hr))
         wg_sample_queue_flush(decoder->wg_sample_queue, false);
 
+    if (hr == MF_E_TRANSFORM_NEED_MORE_INPUT)
+        return S_FALSE;
     return hr;
 }
 
@@ -1627,6 +1677,7 @@ static HRESULT video_decoder_create_with_types(const GUID *const *input_types, U
         goto failed;
 
     decoder->wg_transform_attrs.input_queue_length = 15;
+    decoder->wg_transform_attrs.preserve_timestamps = TRUE;
 
     *out = decoder;
     TRACE("Created decoder %p\n", decoder);
@@ -1644,33 +1695,6 @@ failed:
     if (decoder->stream_type)
         IMFMediaType_Release(decoder->stream_type);
     free(decoder);
-    return hr;
-}
-
-HRESULT video_decoder_create(REFIID riid, void **out)
-{
-    struct video_decoder *decoder;
-    HRESULT hr;
-
-    TRACE("riid %s, out %p.\n", debugstr_guid(riid), out);
-
-    if (FAILED(hr = video_decoder_create_with_types(video_decoder_input_types, ARRAY_SIZE(video_decoder_input_types),
-            video_decoder_output_types, ARRAY_SIZE(video_decoder_output_types), NULL, &decoder)))
-        return hr;
-
-    decoder->input_info.dwFlags = MFT_INPUT_STREAM_WHOLE_SAMPLES | MFT_INPUT_STREAM_SINGLE_SAMPLE_PER_BUFFER
-            | MFT_INPUT_STREAM_FIXED_SAMPLE_SIZE;
-    decoder->input_info.cbSize = 0x1000;
-    decoder->output_info.dwFlags = MFT_OUTPUT_STREAM_WHOLE_SAMPLES | MFT_OUTPUT_STREAM_SINGLE_SAMPLE_PER_BUFFER
-            | MFT_OUTPUT_STREAM_FIXED_SAMPLE_SIZE;
-    decoder->output_info.cbSize = 1920 * 1088 * 2;
-
-    decoder->wg_transform_attrs.allow_format_change = TRUE;
-
-    TRACE("Created video decoder transform %p.\n", &decoder->IMFTransform_iface);
-
-    hr = IMFTransform_QueryInterface(&decoder->IMFTransform_iface, riid, out);
-    IMFTransform_Release(&decoder->IMFTransform_iface);
     return hr;
 }
 
@@ -1708,7 +1732,7 @@ HRESULT h264_decoder_create(REFIID riid, void **out)
             video_decoder_output_types, ARRAY_SIZE(video_decoder_output_types), NULL, &decoder)))
         return hr;
 
-    if (FAILED(hr = IMFAttributes_SetUINT32(decoder->attributes, &AVDecVideoAcceleration_H264, TRUE)))
+    if (FAILED(hr = IMFAttributes_SetUINT32(decoder->attributes, &CODECAPI_AVDecVideoAcceleration_H264, TRUE)))
     {
         IMFTransform_Release(&decoder->IMFTransform_iface);
         return hr;
@@ -1782,6 +1806,9 @@ static const GUID *const wmv_decoder_input_types[] =
     &MEDIASUBTYPE_WVC1,
     &MEDIASUBTYPE_WMV3,
     &MEDIASUBTYPE_VC1S,
+    &MFVideoFormat_theora,
+    &MFVideoFormat_AV1,
+    &MFVideoFormat_VP90,
 };
 static const GUID *const wmv_decoder_output_types[] =
 {

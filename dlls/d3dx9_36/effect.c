@@ -441,19 +441,6 @@ static inline uint32_t read_u32(const char **ptr)
     return u;
 }
 
-static void skip_u32_unknown(const char **ptr, unsigned int count)
-{
-    unsigned int i;
-    uint32_t u;
-
-    WARN("Skipping %u unknown DWORDs:\n", count);
-    for (i = 0; i < count; ++i)
-    {
-        u = read_u32(ptr);
-        WARN("\t0x%08x\n", u);
-    }
-}
-
 static inline D3DXHANDLE get_parameter_handle(struct d3dx_parameter *parameter)
 {
     return (D3DXHANDLE)parameter;
@@ -1956,6 +1943,7 @@ static void d3dx_pool_release_shared_parameter(struct d3dx_top_level_parameter *
     else
     {
         free(param->shared_data->parameters);
+        param->shared_data->parameters = NULL;
         /* Zeroing table size is required as the entry in pool parameters table can be reused. */
         param->shared_data->size = 0;
         param->shared_data = NULL;
@@ -2020,7 +2008,7 @@ static HRESULT WINAPI d3dx_effect_GetDesc(ID3DXEffect *iface, D3DXEFFECT_DESC *d
 {
     struct d3dx_effect *effect = impl_from_ID3DXEffect(iface);
 
-    FIXME("iface %p, desc %p partial stub.\n", iface, desc);
+    TRACE("iface %p, desc %p.\n", iface, desc);
 
     if (!desc)
     {
@@ -2028,8 +2016,7 @@ static HRESULT WINAPI d3dx_effect_GetDesc(ID3DXEffect *iface, D3DXEFFECT_DESC *d
         return D3DERR_INVALIDCALL;
     }
 
-    /* TODO: add creator and function count. */
-    desc->Creator = NULL;
+    desc->Creator = "D3DX Effect Compiler";
     desc->Functions = 0;
     desc->Parameters = effect->params.count;
     desc->Techniques = effect->technique_count;
@@ -4445,10 +4432,160 @@ static HRESULT WINAPI d3dx_effect_CloneEffect(ID3DXEffect *iface, IDirect3DDevic
 static HRESULT WINAPI d3dx_effect_SetRawValue(ID3DXEffect *iface, D3DXHANDLE parameter, const void *data,
         UINT byte_offset, UINT bytes)
 {
-    FIXME("iface %p, parameter %p, data %p, byte_offset %u, bytes %u stub!\n",
+    struct d3dx_effect *effect = impl_from_ID3DXEffect(iface);
+    struct d3dx_parameter *param = (parameter == INVALID_HANDLE_VALUE) ? NULL : get_valid_parameter(effect, parameter);
+    const unsigned int single_size = sizeof(DWORD);
+    unsigned int x, index_offset, remaining_byte_offset, remaining_bytes;
+    void *raw;
+
+    TRACE("iface %p, parameter %p, data %p, byte_offset %u, bytes %u.\n",
             iface, parameter, data, byte_offset, bytes);
 
-    return E_NOTIMPL;
+    /* pendentic */
+    index_offset = 0;
+    remaining_byte_offset = 0;
+
+    /* BOOLs and Matries with a single value copy require sanitization of the
+        byte_offset.
+
+        Specificly, matries with a single value copy only allow byte shifts that
+        are not multiples of the value (DWORD) size. For multiples, we increment
+        the index of the promoted data type, then add any remainder as a byte
+        offset.
+
+        For BOOLs, due to their value sanitization, we only care about the
+        index of their promoted data type. Unless it's a non value size matrix.
+        In that case we do care about the byte offset.
+    */
+    if (byte_offset > 0 && (param->type == D3DXPT_BOOL ||
+            (param->class == D3DXPC_MATRIX_COLUMNS ||
+            param->class == D3DXPC_MATRIX_ROWS)))
+    {
+        remaining_byte_offset = byte_offset % single_size;
+        if (remaining_byte_offset != 0)
+            index_offset = byte_offset / single_size;
+        else
+            index_offset = byte_offset;
+        if (param->type != D3DXPT_BOOL || (bytes != single_size &&
+                (param->class == D3DXPC_MATRIX_COLUMNS ||
+                param->class == D3DXPC_MATRIX_ROWS)))
+        {
+            index_offset = index_offset * single_size;
+            if (param->type != D3DXPT_BOOL)
+                index_offset = index_offset * single_size;
+        }
+    }
+
+    /* If parameter is bad, we are expected to throw C0000005. */
+    switch (param->class)
+    {
+        case D3DXPC_STRUCT:
+            break;
+        case D3DXPC_OBJECT:
+            raw = param_get_data_and_dirtify(effect, param, param->bytes, TRUE);
+            if (data && bytes)
+            {
+                if (((char*)raw)[0] != '\0')
+                {
+                    memset(raw, '\0', param->bytes);
+                    return S_OK; /* This returns a false success. */
+                }
+                else
+                {
+                    return D3DERR_INVALIDCALL;
+                }
+            }
+            break;
+        case D3DXPC_SCALAR:
+            raw = param_get_data_and_dirtify(effect, param, param->bytes, TRUE);
+            if (param->type == D3DXPT_BOOL)
+                *(BOOL*)raw = *(BOOL*)data ? TRUE : FALSE;
+            else
+                memcpy((unsigned char*)raw + byte_offset, data, bytes);
+            return S_OK;
+            break;
+        case D3DXPC_VECTOR:
+            raw = (unsigned char*)param_get_data_and_dirtify(effect, param, param->bytes, TRUE);
+            if (param->type == D3DXPT_BOOL)
+            {
+                raw = (unsigned char*)raw + index_offset;
+                *(DWORD*)raw = *(DWORD*)data ? TRUE : FALSE;
+                memset((unsigned char*)raw + single_size, \
+                        '\0', param->bytes - index_offset - single_size);
+            }
+            else
+            {
+                raw = (unsigned char*)raw + byte_offset;
+                for (x = 0; (x * single_size) + byte_offset < param->bytes && (x * single_size) < bytes; x++)
+                {
+                    memcpy((unsigned char*)raw + (x * single_size), \
+                            (unsigned char*)data + (x * single_size), \
+                            single_size);
+                }
+            }
+            return S_OK;
+            break;
+        case D3DXPC_MATRIX_COLUMNS:
+        case D3DXPC_MATRIX_ROWS:
+            raw = (unsigned char*)param_get_data_and_dirtify(effect, param, param->bytes, TRUE);
+            if (param->type == D3DXPT_BOOL)
+            {
+                if (bytes == single_size)
+                {
+                    raw = (unsigned char*)raw + index_offset;
+                    for (x = 0; (x * single_size) < param->bytes - index_offset; x++)
+                    {
+                        remaining_bytes = param->bytes - index_offset - \
+                                (x * single_size) - single_size;
+                        *(DWORD*)raw = *(DWORD*)data ? TRUE : FALSE;
+                        memset((unsigned char*)raw + single_size, \
+                                '\0', (remaining_bytes > (single_size * 4) ? \
+                                single_size * 4 : remaining_bytes));
+                        raw = (unsigned char*)raw + (remaining_bytes > (single_size * 4) ? \
+                                single_size * 4 : remaining_bytes);
+                    }
+                }
+                else
+                {
+                    raw = (unsigned char*)raw + index_offset;
+                    for (x = 0; (x * single_size) < param->bytes - index_offset; x++)
+                    {
+                        ((DWORD*)raw)[x] = ((DWORD*)data)[x] ? TRUE : FALSE;
+                    }
+                }
+            }
+            else
+            {
+                if (bytes == single_size)
+                {
+                    raw = (unsigned char*)raw + index_offset + remaining_byte_offset;
+                    for (x = 0; (x * single_size) + byte_offset < param->bytes && (x * single_size) < bytes; x++)
+                    {
+                        memcpy((unsigned char*)raw + (x * single_size), \
+                                (unsigned char*)data + (x * single_size), \
+                                single_size);
+                    }
+                }
+                else
+                {
+                    raw = (unsigned char*)raw + byte_offset;
+                    for (x = 0; byte_offset + (x * single_size) < param->bytes &&
+                            (x * single_size) < bytes; x++)
+                    {
+                        memcpy((unsigned char*)raw + (x * single_size), \
+                                (unsigned char*)data + (x * single_size), \
+                                single_size);
+                    }
+                }
+            }
+            return S_OK;
+            break;
+        default:
+            FIXME("Unhandled param class %s.\n", debug_d3dxparameter_class(param->class));
+            break;
+    };
+
+    return D3DERR_INVALIDCALL;
 }
 #endif
 
@@ -6292,7 +6429,7 @@ static BOOL param_set_top_level_param(void *top_level_param, struct d3dx_paramet
 static HRESULT d3dx_parse_effect(struct d3dx_effect *effect, const char *data, UINT data_size,
         uint32_t start, const char **skip_constants, unsigned int skip_constants_count)
 {
-    unsigned int string_count, resource_count, params_count;
+    unsigned int string_count, resource_count, params_count, shader_count;
     const char *ptr = data + start;
     unsigned int i;
     HRESULT hr;
@@ -6303,7 +6440,10 @@ static HRESULT d3dx_parse_effect(struct d3dx_effect *effect, const char *data, U
     effect->technique_count = read_u32(&ptr);
     TRACE("Technique count: %u.\n", effect->technique_count);
 
-    skip_u32_unknown(&ptr, 1);
+    /* This value appears to be equal to a number of shader variables, with each pass contributing
+       one additional slot. */
+    shader_count = read_u32(&ptr);
+    TRACE("Shader count: %u.\n", shader_count);
 
     effect->object_count = read_u32(&ptr);
     TRACE("Object count: %u.\n", effect->object_count);

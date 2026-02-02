@@ -949,7 +949,7 @@ static void set_dos_devices_disk_serial( struct disk_device *device )
 /* change the information for an existing volume */
 static NTSTATUS set_volume_info( struct volume *volume, struct dos_drive *drive, const char *device,
                                  const char *mount_point, enum device_type type, const GUID *guid,
-                                 const char *disk_serial )
+                                 const char *label, const char *disk_serial )
 {
     void *id = NULL;
     unsigned int id_len = 0;
@@ -995,6 +995,8 @@ static NTSTATUS set_volume_info( struct volume *volume, struct dos_drive *drive,
         get_filesystem_label( volume );
         get_filesystem_serial( volume );
     }
+    if (label && label[0] && !volume->label[0])
+        RtlMultiByteToUnicodeN(volume->label, ARRAY_SIZE(volume->label), NULL, label, strlen(label)+1);
 
     TRACE("fs_type %#x, label %s, serial %08lx\n", volume->fs_type, debugstr_w(volume->label), volume->serial);
 
@@ -1098,7 +1100,7 @@ static void create_drive_devices(void)
         {
             /* don't reset uuid if we used an existing volume */
             const GUID *guid = volume ? NULL : get_default_uuid(i);
-            set_volume_info( drive->volume, drive, device, link, drive_type, guid, NULL );
+            set_volume_info( drive->volume, drive, device, link, drive_type, guid, NULL, NULL );
         }
         if (volume) release_volume( volume );
     }
@@ -1198,7 +1200,7 @@ static void create_scsi_entry( struct volume *volume, const struct scsi_info *in
 /* create a new disk volume */
 NTSTATUS add_volume( const char *udi, const char *device, const char *mount_point,
                      enum device_type type, const GUID *guid, const char *disk_serial,
-                     const struct scsi_info *scsi_info )
+                     const char *label, const struct scsi_info *scsi_info )
 {
     struct volume *volume;
     NTSTATUS status = STATUS_SUCCESS;
@@ -1219,7 +1221,7 @@ NTSTATUS add_volume( const char *udi, const char *device, const char *mount_poin
     else status = create_volume( udi, type, &volume );
 
 found:
-    if (!status) status = set_volume_info( volume, NULL, device, mount_point, type, guid, disk_serial );
+    if (!status) status = set_volume_info( volume, NULL, device, mount_point, type, guid, label, disk_serial );
     if (!status && scsi_info) create_scsi_entry( volume, scsi_info );
     if (volume) release_volume( volume );
     LeaveCriticalSection( &device_section );
@@ -1248,7 +1250,7 @@ NTSTATUS remove_volume( const char *udi )
 /* create a new dos drive */
 NTSTATUS add_dos_device( int letter, const char *udi, const char *device,
                          const char *mount_point, enum device_type type, const GUID *guid,
-                         const struct scsi_info *scsi_info )
+                         const char *label, const struct scsi_info *scsi_info )
 {
     HKEY hkey;
     NTSTATUS status = STATUS_SUCCESS;
@@ -1305,7 +1307,7 @@ found:
         struct set_dosdev_symlink_params params = { dosdev, mount_point };
         MOUNTMGR_CALL( set_dosdev_symlink, &params );
     }
-    set_volume_info( volume, drive, device, mount_point, type, guid, NULL );
+    set_volume_info( volume, drive, device, mount_point, type, guid, label, NULL );
 
     TRACE( "added device %c: udi %s for %s on %s type %u\n",
            'a' + drive->drive, wine_dbgstr_a(udi), wine_dbgstr_a(device),
@@ -1592,6 +1594,34 @@ static NTSTATUS query_property( struct disk_device *device, IRP *irp )
 
         break;
     }
+    case StorageDeviceSeekPenaltyProperty:
+    {
+        DEVICE_SEEK_PENALTY_DESCRIPTOR *d = irp->AssociatedIrp.SystemBuffer;
+
+        if (irpsp->Parameters.DeviceIoControl.OutputBufferLength < sizeof(STORAGE_DESCRIPTOR_HEADER))
+        {
+            status = STATUS_INVALID_PARAMETER;
+        }
+        else
+        {
+            if (irpsp->Parameters.DeviceIoControl.OutputBufferLength < sizeof(*d))
+            {
+                d->Version = d->Size = sizeof(*d);
+                irp->IoStatus.Information = sizeof(STORAGE_DESCRIPTOR_HEADER);
+            }
+            else
+            {
+                FIXME( "Faking StorageDeviceSeekPenaltyProperty data.\n" );
+
+                memset( d, 0, sizeof(*d) );
+                d->Version = d->Size = sizeof(*d);
+                irp->IoStatus.Information = sizeof(*d);
+            }
+            status = STATUS_SUCCESS;
+        }
+        break;
+    }
+
     default:
         FIXME( "Unsupported property %#x\n", query->PropertyId );
         status = STATUS_NOT_SUPPORTED;
@@ -1704,7 +1734,7 @@ static NTSTATUS WINAPI harddisk_query_volume( DEVICE_OBJECT *device, IRP *irp )
             break;
         default:
             fsname = L"NTFS";
-            info->FileSystemAttributes = FILE_CASE_PRESERVED_NAMES | FILE_PERSISTENT_ACLS;
+            info->FileSystemAttributes = FILE_CASE_PRESERVED_NAMES | FILE_PERSISTENT_ACLS | FILE_SUPPORTS_REPARSE_POINTS;
             info->MaximumComponentNameLength = 255;
             break;
         }
@@ -1818,11 +1848,30 @@ static NTSTATUS WINAPI harddisk_ioctl( DEVICE_OBJECT *device, IRP *irp )
         break;
     case IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS:
     {
-        DWORD len = min( 32, irpsp->Parameters.DeviceIoControl.OutputBufferLength );
+        struct size_info size_info = { 0, 0, 0, 0, 0 };
+        struct get_volume_size_info_params params = { dev->unix_mount, &size_info };
+        VOLUME_DISK_EXTENTS info = { 0 };
 
-        FIXME( "returning zero-filled buffer for IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS\n" );
-        memset( irp->AssociatedIrp.SystemBuffer, 0, len );
-        irp->IoStatus.Information = len;
+        if (irpsp->Parameters.DeviceIoControl.OutputBufferLength < sizeof(info))
+        {
+            TRACE( "len %lu is too small.\n", irpsp->Parameters.DeviceIoControl.OutputBufferLength );
+            status = STATUS_INVALID_PARAMETER;
+            break;
+        }
+        FIXME( "IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS semi-stub.\n" );
+
+        info.NumberOfDiskExtents = 1;
+        info.Extents[0].DiskNumber = dev->devnum.DeviceNumber;
+        info.Extents[0].StartingOffset.QuadPart = 0;
+
+        if ((status = MOUNTMGR_CALL( get_volume_size_info, &params )) == STATUS_SUCCESS)
+        {
+            info.Extents[0].ExtentLength.QuadPart = size_info.total_allocation_units
+                                                    * size_info.sectors_per_allocation_unit
+                                                    * size_info.bytes_per_sector;
+        }
+        memcpy( irp->AssociatedIrp.SystemBuffer, &info, sizeof(info) );
+        irp->IoStatus.Information = sizeof(info);
         status = STATUS_SUCCESS;
         break;
     }
@@ -1872,7 +1921,7 @@ static BOOL create_port_device( DRIVER_OBJECT *driver, int n, const char *unix_p
     UNICODE_STRING nt_name, symlink_name, default_name;
     DEVICE_OBJECT *dev_obj;
     NTSTATUS status;
-    struct set_dosdev_symlink_params params = { dosdevices_path, unix_path, driver == serial_driver };
+    struct set_dosdev_symlink_params params = { dosdevices_path, unix_path };
 
     /* create DOS device */
     if (MOUNTMGR_CALL( set_dosdev_symlink, &params )) return FALSE;

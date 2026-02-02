@@ -20,6 +20,19 @@
 
 #include "vkd3d_shader_private.h"
 
+#define DXBC_CHECKSUM_SKIP_BYTE_COUNT 20
+
+static void compute_dxbc_checksum(const void *dxbc, size_t size, uint32_t checksum[4])
+{
+    const uint8_t *ptr = dxbc;
+
+    VKD3D_ASSERT(size > DXBC_CHECKSUM_SKIP_BYTE_COUNT);
+    ptr += DXBC_CHECKSUM_SKIP_BYTE_COUNT;
+    size -= DXBC_CHECKSUM_SKIP_BYTE_COUNT;
+
+    vkd3d_compute_md5(ptr, size, checksum, VKD3D_MD5_DXBC);
+}
+
 void dxbc_writer_init(struct dxbc_writer *dxbc)
 {
     memset(dxbc, 0, sizeof(*dxbc));
@@ -29,7 +42,7 @@ void dxbc_writer_add_section(struct dxbc_writer *dxbc, uint32_t tag, const void 
 {
     struct vkd3d_shader_dxbc_section_desc *section;
 
-    assert(dxbc->section_count < ARRAY_SIZE(dxbc->sections));
+    VKD3D_ASSERT(dxbc->section_count < ARRAY_SIZE(dxbc->sections));
 
     section = &dxbc->sections[dxbc->section_count++];
     section->tag = tag;
@@ -72,7 +85,7 @@ int vkd3d_shader_serialize_dxbc(size_t section_count, const struct vkd3d_shader_
     }
     set_u32(&buffer, size_position, bytecode_get_size(&buffer));
 
-    vkd3d_compute_dxbc_checksum(buffer.data, buffer.size, checksum);
+    compute_dxbc_checksum(buffer.data, buffer.size, checksum);
     for (i = 0; i < 4; ++i)
         set_u32(&buffer, checksum_position + i * sizeof(uint32_t), checksum[i]);
 
@@ -97,6 +110,14 @@ static bool require_space(size_t offset, size_t count, size_t size, size_t data_
 static uint32_t read_u32(const char **ptr)
 {
     unsigned int ret;
+    memcpy(&ret, *ptr, sizeof(ret));
+    *ptr += sizeof(ret);
+    return ret;
+}
+
+static uint64_t read_u64(const char **ptr)
+{
+    uint64_t ret;
     memcpy(&ret, *ptr, sizeof(ret));
     *ptr += sizeof(ret);
     return ret;
@@ -150,7 +171,7 @@ static const char *shader_get_string(const char *data, size_t data_size, size_t 
 }
 
 static int parse_dxbc(const struct vkd3d_shader_code *dxbc, struct vkd3d_shader_message_context *message_context,
-        const char *source_name, struct vkd3d_shader_dxbc_desc *desc)
+        const char *source_name, uint32_t flags, struct vkd3d_shader_dxbc_desc *desc)
 {
     const struct vkd3d_shader_location location = {.source_name = source_name};
     struct vkd3d_shader_dxbc_section_desc *sections, *section;
@@ -186,17 +207,20 @@ static int parse_dxbc(const struct vkd3d_shader_code *dxbc, struct vkd3d_shader_
     checksum[1] = read_u32(&ptr);
     checksum[2] = read_u32(&ptr);
     checksum[3] = read_u32(&ptr);
-    vkd3d_compute_dxbc_checksum(data, data_size, calculated_checksum);
-    if (memcmp(checksum, calculated_checksum, sizeof(checksum)))
+    if (!(flags & VKD3D_SHADER_PARSE_DXBC_IGNORE_CHECKSUM))
     {
-        WARN("Checksum {0x%08x, 0x%08x, 0x%08x, 0x%08x} does not match "
-                "calculated checksum {0x%08x, 0x%08x, 0x%08x, 0x%08x}.\n",
-                checksum[0], checksum[1], checksum[2], checksum[3],
-                calculated_checksum[0], calculated_checksum[1],
-                calculated_checksum[2], calculated_checksum[3]);
-        vkd3d_shader_error(message_context, &location, VKD3D_SHADER_ERROR_DXBC_INVALID_CHECKSUM,
-                "Invalid DXBC checksum.");
-        return VKD3D_ERROR_INVALID_ARGUMENT;
+        compute_dxbc_checksum(data, data_size, calculated_checksum);
+        if (memcmp(checksum, calculated_checksum, sizeof(checksum)))
+        {
+            WARN("Checksum {0x%08x, 0x%08x, 0x%08x, 0x%08x} does not match "
+                    "calculated checksum {0x%08x, 0x%08x, 0x%08x, 0x%08x}.\n",
+                    checksum[0], checksum[1], checksum[2], checksum[3],
+                    calculated_checksum[0], calculated_checksum[1],
+                    calculated_checksum[2], calculated_checksum[3]);
+            vkd3d_shader_error(message_context, &location, VKD3D_SHADER_ERROR_DXBC_INVALID_CHECKSUM,
+                    "Invalid DXBC checksum.");
+            return VKD3D_ERROR_INVALID_ARGUMENT;
+        }
     }
 
     version = read_u32(&ptr);
@@ -287,7 +311,7 @@ static int for_each_dxbc_section(const struct vkd3d_shader_code *dxbc,
     unsigned int i;
     int ret;
 
-    if ((ret = parse_dxbc(dxbc, message_context, source_name, &desc)) < 0)
+    if ((ret = parse_dxbc(dxbc, message_context, source_name, 0, &desc)) < 0)
         return ret;
 
     for (i = 0; i < desc.section_count; ++i)
@@ -313,7 +337,7 @@ int vkd3d_shader_parse_dxbc(const struct vkd3d_shader_code *dxbc,
         *messages = NULL;
     vkd3d_shader_message_context_init(&message_context, VKD3D_SHADER_LOG_INFO);
 
-    ret = parse_dxbc(dxbc, &message_context, NULL, desc);
+    ret = parse_dxbc(dxbc, &message_context, NULL, flags, desc);
 
     vkd3d_shader_message_context_trace_messages(&message_context);
     if (!vkd3d_shader_message_context_copy_messages(&message_context, messages) && ret >= 0)
@@ -357,6 +381,7 @@ static int shader_parse_signature(const struct vkd3d_shader_dxbc_section_desc *s
     uint32_t count, header_size;
     struct signature_element *e;
     const char *ptr = data;
+    bool fail = false;
     unsigned int i;
 
     if (!require_space(0, 2, sizeof(uint32_t), section->data.size))
@@ -400,9 +425,8 @@ static int shader_parse_signature(const struct vkd3d_shader_dxbc_section_desc *s
     for (i = 0; i < count; ++i)
     {
         size_t name_offset;
+        const char *name;
         uint32_t mask;
-
-        e[i].sort_index = i;
 
         if (has_stream_index)
             e[i].stream_index = read_u32(&ptr);
@@ -410,15 +434,22 @@ static int shader_parse_signature(const struct vkd3d_shader_dxbc_section_desc *s
             e[i].stream_index = 0;
 
         name_offset = read_u32(&ptr);
-        if (!(e[i].semantic_name = shader_get_string(data, section->data.size, name_offset)))
+        if (!(name = shader_get_string(data, section->data.size, name_offset))
+                || !(e[i].semantic_name = vkd3d_strdup(name)))
         {
-            WARN("Invalid name offset %#zx (data size %#zx).\n", name_offset, section->data.size);
-            vkd3d_free(e);
-            return VKD3D_ERROR_INVALID_ARGUMENT;
+            vkd3d_shader_error(message_context, NULL, VKD3D_SHADER_ERROR_DXBC_INVALID_STRING_REFERENCE,
+                    "Element %u has invalid semantic name reference %#zx (data size %#zx).\n",
+                    i, name_offset, section->data.size);
+            fail = true;
         }
         e[i].semantic_index = read_u32(&ptr);
         e[i].sysval_semantic = read_u32(&ptr);
-        e[i].component_type = read_u32(&ptr);
+        if ((e[i].component_type = read_u32(&ptr)) > VKD3D_SHADER_COMPONENT_FLOAT)
+        {
+            vkd3d_shader_error(message_context, NULL, VKD3D_SHADER_ERROR_DXBC_INVALID_COMPONENT_TYPE,
+                    "Element %u has invalid component type %#x.\n", i, e[i].component_type);
+            fail = true;
+        }
         e[i].register_index = read_u32(&ptr);
         e[i].target_location = e[i].register_index;
         e[i].register_count = 1;
@@ -449,7 +480,14 @@ static int shader_parse_signature(const struct vkd3d_shader_dxbc_section_desc *s
     }
 
     s->elements = e;
+    s->elements_capacity = count;
     s->element_count = count;
+
+    if (fail)
+    {
+        shader_signature_cleanup(s);
+        return VKD3D_ERROR_INVALID_ARGUMENT;
+    }
 
     return VKD3D_OK;
 }
@@ -482,16 +520,40 @@ int shader_parse_input_signature(const struct vkd3d_shader_code *dxbc,
     return ret;
 }
 
+static int shdr_parse_features(const struct vkd3d_shader_dxbc_section_desc *section,
+        struct vkd3d_shader_message_context *message_context, struct vsir_features *f)
+{
+    const char *data = section->data.code;
+    const char *ptr = data;
+    uint64_t flags;
+
+    if (!require_space(0, 1, sizeof(uint64_t), section->data.size))
+    {
+        WARN("Invalid data size %#zx.\n", section->data.size);
+        vkd3d_shader_error(message_context, NULL, VKD3D_SHADER_ERROR_DXBC_INVALID_CHUNK_SIZE,
+                "SFI0 section size %zu is too small to contain flags.\n", section->data.size);
+        return VKD3D_ERROR_INVALID_ARGUMENT;
+    }
+    flags = read_u64(&ptr);
+
+    if (flags & DXBC_SFI0_REQUIRES_ROVS)
+        f->rovs = true;
+
+    return VKD3D_OK;
+}
+
 static int shdr_handler(const struct vkd3d_shader_dxbc_section_desc *section,
         struct vkd3d_shader_message_context *message_context, void *context)
 {
-    struct vkd3d_shader_desc *desc = context;
+    struct dxbc_shader_desc *desc = context;
     int ret;
 
     switch (section->tag)
     {
         case TAG_ISGN:
         case TAG_ISG1:
+            if (desc->is_dxil)
+                break;
             if (desc->input_signature.elements)
             {
                 FIXME("Multiple input signatures.\n");
@@ -504,6 +566,8 @@ static int shdr_handler(const struct vkd3d_shader_dxbc_section_desc *section,
         case TAG_OSGN:
         case TAG_OSG5:
         case TAG_OSG1:
+            if (desc->is_dxil)
+                break;
             if (desc->output_signature.elements)
             {
                 FIXME("Multiple output signatures.\n");
@@ -515,6 +579,8 @@ static int shdr_handler(const struct vkd3d_shader_dxbc_section_desc *section,
 
         case TAG_PCSG:
         case TAG_PSG1:
+            if (desc->is_dxil)
+                break;
             if (desc->patch_constant_signature.elements)
             {
                 FIXME("Multiple patch constant signatures.\n");
@@ -538,6 +604,11 @@ static int shdr_handler(const struct vkd3d_shader_dxbc_section_desc *section,
             desc->byte_code_size = section->data.size;
             break;
 
+        case TAG_SFI0:
+            if ((ret = shdr_parse_features(section, message_context, &desc->features)) < 0)
+                return ret;
+            break;
+
         case TAG_AON9:
             TRACE("Skipping AON9 shader code chunk.\n");
             break;
@@ -550,7 +621,7 @@ static int shdr_handler(const struct vkd3d_shader_dxbc_section_desc *section,
     return VKD3D_OK;
 }
 
-void free_shader_desc(struct vkd3d_shader_desc *desc)
+void free_dxbc_shader_desc(struct dxbc_shader_desc *desc)
 {
     shader_signature_cleanup(&desc->input_signature);
     shader_signature_cleanup(&desc->output_signature);
@@ -558,7 +629,7 @@ void free_shader_desc(struct vkd3d_shader_desc *desc)
 }
 
 int shader_extract_from_dxbc(const struct vkd3d_shader_code *dxbc,
-        struct vkd3d_shader_message_context *message_context, const char *source_name, struct vkd3d_shader_desc *desc)
+        struct vkd3d_shader_message_context *message_context, const char *source_name, struct dxbc_shader_desc *desc)
 {
     int ret;
 
@@ -569,7 +640,7 @@ int shader_extract_from_dxbc(const struct vkd3d_shader_code *dxbc,
     if (ret < 0)
     {
         WARN("Failed to parse shader, vkd3d result %d.\n", ret);
-        free_shader_desc(desc);
+        free_dxbc_shader_desc(desc);
     }
 
     return ret;
@@ -974,7 +1045,7 @@ static int shader_parse_root_signature(const struct vkd3d_shader_code *data,
     {
         struct vkd3d_shader_root_signature_desc1 *v_1_1 = &desc->u.v_1_1;
 
-        assert(version == VKD3D_SHADER_ROOT_SIGNATURE_VERSION_1_1);
+        VKD3D_ASSERT(version == VKD3D_SHADER_ROOT_SIGNATURE_VERSION_1_1);
 
         v_1_1->parameter_count = count;
         if (v_1_1->parameter_count)
@@ -1479,7 +1550,7 @@ int vkd3d_shader_serialize_root_signature(const struct vkd3d_shader_versioned_ro
     dxbc->code = context.buffer.data;
     dxbc->size = total_size;
 
-    vkd3d_compute_dxbc_checksum(dxbc->code, dxbc->size, checksum);
+    compute_dxbc_checksum(dxbc->code, dxbc->size, checksum);
     for (i = 0; i < 4; ++i)
         set_u32(&context.buffer, (i + 1) * sizeof(uint32_t), checksum[i]);
 
@@ -1768,7 +1839,7 @@ int vkd3d_shader_convert_root_signature(struct vkd3d_shader_versioned_root_signa
     }
     else
     {
-        assert(version == VKD3D_SHADER_ROOT_SIGNATURE_VERSION_1_1);
+        VKD3D_ASSERT(version == VKD3D_SHADER_ROOT_SIGNATURE_VERSION_1_1);
         ret = convert_root_signature_to_v1_1(dst, src);
     }
 

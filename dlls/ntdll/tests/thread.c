@@ -31,6 +31,9 @@
 static NTSTATUS (WINAPI *pNtCreateThreadEx)( HANDLE *, ACCESS_MASK, OBJECT_ATTRIBUTES *,
                                              HANDLE, PRTL_THREAD_START_ROUTINE, void *,
                                              ULONG, ULONG_PTR, SIZE_T, SIZE_T, PS_ATTRIBUTE_LIST * );
+static NTSTATUS  (WINAPI *pNtSuspendProcess)(HANDLE process);
+static NTSTATUS  (WINAPI *pNtResumeProcess)(HANDLE process);
+
 static int * (CDECL *p_errno)(void);
 
 static void init_function_pointers(void)
@@ -38,6 +41,8 @@ static void init_function_pointers(void)
     HMODULE hntdll = GetModuleHandleA( "ntdll.dll" );
 #define GET_FUNC(name) p##name = (void *)GetProcAddress( hntdll, #name );
     GET_FUNC( NtCreateThreadEx );
+    GET_FUNC( NtSuspendProcess );
+    GET_FUNC( NtResumeProcess );
     GET_FUNC( _errno );
 #undef GET_FUNC
 }
@@ -204,6 +209,70 @@ static void test_errno(void)
     ok( val == 0xbeef, "wrong value %x\n", val );
 }
 
+static void test_NtCreateUserProcess(void)
+{
+    RTL_USER_PROCESS_PARAMETERS *params;
+    PS_CREATE_INFO create_info;
+    PS_ATTRIBUTE_LIST ps_attr;
+    WCHAR path[MAX_PATH + 4];
+    HANDLE process, thread;
+    UNICODE_STRING imageW;
+    NTSTATUS status;
+
+    lstrcpyW( path, L"\\??\\" );
+    GetModuleFileNameW( NULL, path + 4, MAX_PATH );
+
+    RtlInitUnicodeString( &imageW, path );
+
+    memset( &ps_attr, 0, sizeof(ps_attr) );
+    ps_attr.Attributes[0].Attribute = PS_ATTRIBUTE_IMAGE_NAME;
+    ps_attr.Attributes[0].Size = lstrlenW(path) * sizeof(WCHAR);
+    ps_attr.Attributes[0].ValuePtr = path;
+    ps_attr.TotalLength = sizeof(ps_attr);
+
+    status = RtlCreateProcessParametersEx( &params, &imageW, NULL, NULL,
+                                           NULL, NULL, NULL, NULL,
+                                           NULL, NULL, PROCESS_PARAMS_FLAG_NORMALIZED );
+    ok( status == STATUS_SUCCESS, "Got unexpected status %#lx.\n", status );
+
+    memset( &create_info, 0, sizeof(create_info) );
+    create_info.Size = sizeof(create_info);
+    status = NtCreateUserProcess( &process, &thread, PROCESS_TERMINATE, SYNCHRONIZE,
+                                  NULL, NULL, 0, THREAD_CREATE_FLAGS_CREATE_SUSPENDED, params,
+                                  &create_info, &ps_attr );
+    ok( status == STATUS_SUCCESS, "Got unexpected status %#lx.\n", status );
+    status = NtTerminateProcess( process, 0 );
+    ok( status == STATUS_SUCCESS, "Got unexpected status %#lx.\n", status );
+    CloseHandle( process );
+    CloseHandle( thread );
+}
+
+static void CALLBACK test_thread_bypass_process_freeze_proc(void *param)
+{
+    pNtSuspendProcess(NtCurrentProcess());
+    /* The current process will be suspended forever here if THREAD_CREATE_FLAGS_BYPASS_PROCESS_FREEZE is nonfunctional. */
+    pNtResumeProcess(NtCurrentProcess());
+}
+
+static void test_thread_bypass_process_freeze(void)
+{
+    HANDLE thread;
+    NTSTATUS status;
+
+    if (!pNtCreateThreadEx || !pNtSuspendProcess || !pNtResumeProcess)
+    {
+        win_skip( "NtCreateThreadEx/NtSuspendProcess/NtResumeProcess are not available.\n" );
+        return;
+    }
+
+    status = pNtCreateThreadEx( &thread, THREAD_ALL_ACCESS, NULL, GetCurrentProcess(), test_thread_bypass_process_freeze_proc,
+                                NULL, THREAD_CREATE_FLAGS_BYPASS_PROCESS_FREEZE, 0, 0, 0, NULL );
+    todo_wine ok( status == STATUS_SUCCESS, "Got unexpected status %#lx.\n", status );
+
+    WaitForSingleObject( thread, INFINITE );
+    CloseHandle( thread );
+}
+
 START_TEST(thread)
 {
     init_function_pointers();
@@ -211,4 +280,6 @@ START_TEST(thread)
     test_dbg_hidden_thread_creation();
     test_unique_teb();
     test_errno();
+    test_NtCreateUserProcess();
+    test_thread_bypass_process_freeze();
 }

@@ -83,8 +83,10 @@ struct process
     unsigned int         rawinput_device_count;   /* number of registered rawinput devices */
     const struct rawinput_device *rawinput_mouse; /* rawinput mouse device, if any */
     const struct rawinput_device *rawinput_kbd;   /* rawinput keyboard device, if any */
+    struct list          rawinput_entry;  /* entry in the rawinput process list */
     struct list          kernel_object;   /* list of kernel object pointers */
-    pe_image_info_t      image_info;      /* main exe image info */
+    struct pe_image_info image_info;      /* main exe image info */
+    int                  inproc_sync;     /* in-process synchronization object */
     int                  esync_fd;        /* esync file descriptor (signaled on exit) */
     unsigned int         fsync_idx;
     struct cpu_topology_override cpu_override; /* Overridden CPUs to host CPUs mapping. */
@@ -96,7 +98,8 @@ struct process
 extern unsigned int alloc_ptid( void *ptr );
 extern void free_ptid( unsigned int id );
 extern void *get_ptid_entry( unsigned int id );
-extern struct process *create_process( int fd, struct process *parent, unsigned int flags, const startup_info_t *info,
+extern struct process *create_process( int fd, struct process *parent, unsigned int flags,
+                                       const struct startup_info_data *info,
                                        const struct security_descriptor *sd, const obj_handle_t *handles,
                                        unsigned int handle_count, struct token *token );
 extern data_size_t get_process_startup_info_size( struct process *process );
@@ -135,7 +138,8 @@ extern void init_tracing_mechanism(void);
 extern void init_process_tracing( struct process *process );
 extern void finish_process_tracing( struct process *process );
 extern int read_process_memory( struct process *process, client_ptr_t ptr, data_size_t size, char *dest );
-extern int write_process_memory( struct process *process, client_ptr_t ptr, data_size_t size, const char *src );
+extern int write_process_memory( struct process *process, client_ptr_t ptr, data_size_t size, const char *src,
+                                 data_size_t *written );
 
 static inline process_id_t get_process_id( struct process *process ) { return process->id; }
 

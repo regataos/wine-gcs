@@ -54,11 +54,12 @@ HRESULT create_view( enum view_type type, enum wbm_namespace ns, const WCHAR *pa
 
     case VIEW_TYPE_SELECT:
     {
-        struct table *table = grab_table( ns, class );
+        struct table *table = create_table( ns, class );
         HRESULT hr;
 
         if (table && (hr = append_table( view, table )) != S_OK)
         {
+            release_table( table );
             free( view );
             return hr;
         }
@@ -631,7 +632,7 @@ static HRESULT get_antecedent_table( enum wbm_namespace ns, const WCHAR *assoccl
     }
 
     if ((hr = do_query( ns, str, &query )) != S_OK) goto done;
-    if (query->view->table_count) *table = addref_table( query->view->table[0] );
+    if (query->view->table_count) *table = grab_table( query->view->table[0] );
     else *table = NULL;
 
 done:
@@ -701,12 +702,9 @@ static HRESULT exec_select_view( struct view *view )
     if (!view->table_count) return S_OK;
 
     table = view->table[0];
-    if (table->fill)
-    {
-        clear_table( table );
-        status = table->fill( table, view->cond );
-    }
+    if (table->fill) status = table->fill( table, view->cond );
     if (status == FILL_STATUS_FAILED) return WBEM_E_FAILED;
+
     if (!table->num_rows) return S_OK;
 
     len = min( table->num_rows, 16 );
@@ -816,6 +814,12 @@ static BOOL is_system_prop( const WCHAR *name )
 {
     return (name[0] == '_' && name[1] == '_');
 }
+
+const WCHAR * const system_props[] =
+    { L"__GENUS", L"__CLASS", L"__RELPATH", L"__PROPERTY_COUNT", L"__DERIVATION", L"__SERVER", L"__NAMESPACE",
+      L"__PATH" };
+
+unsigned int system_prop_count = ARRAY_SIZE(system_props);
 
 static BSTR build_proplist( const struct table *table, UINT row, UINT count, UINT *len )
 {
@@ -1086,10 +1090,20 @@ SAFEARRAY *to_safearray( const struct array *array, CIMTYPE basetype )
             }
             SysFreeString( str );
         }
-        else if (SafeArrayPutElement( ret, &i, ptr ) != S_OK)
+        else
         {
-            SafeArrayDestroy( ret );
-            return NULL;
+            UINT32 v;
+
+            if (vartype == VT_I4 && basetype == CIM_UINT16)
+            {
+                v = *(UINT16 *)ptr;
+                ptr = &v;
+            }
+            if (SafeArrayPutElement( ret, &i, ptr ) != S_OK)
+            {
+                SafeArrayDestroy( ret );
+                return NULL;
+            }
         }
     }
     return ret;
@@ -1408,9 +1422,6 @@ HRESULT put_propval( const struct view *view, UINT index, const WCHAR *name, VAR
 
 HRESULT get_properties( const struct view *view, UINT index, LONG flags, SAFEARRAY **props )
 {
-    static const WCHAR * const system_props[] =
-        { L"__GENUS", L"__CLASS", L"__RELPATH", L"__PROPERTY_COUNT", L"__DERIVATION", L"__SERVER", L"__NAMESPACE",
-          L"__PATH" };
     SAFEARRAY *sa;
     BSTR str;
     UINT i, table_index, result_index, count = 0;
@@ -1421,7 +1432,7 @@ HRESULT get_properties( const struct view *view, UINT index, LONG flags, SAFEARR
     if ((hr = map_view_index( view, index, &table_index, &result_index )) != S_OK) return hr;
     table = view->table[table_index];
 
-    if (!(flags & WBEM_FLAG_NONSYSTEM_ONLY)) count += ARRAY_SIZE(system_props);
+    if (!(flags & WBEM_FLAG_NONSYSTEM_ONLY)) count += system_prop_count;
     if (!(flags & WBEM_FLAG_SYSTEM_ONLY))
     {
         for (i = 0; i < table->num_cols; i++)
@@ -1434,7 +1445,7 @@ HRESULT get_properties( const struct view *view, UINT index, LONG flags, SAFEARR
 
     if (!(flags & WBEM_FLAG_NONSYSTEM_ONLY))
     {
-        for (j = 0; j < ARRAY_SIZE(system_props); j++)
+        for (j = 0; j < system_prop_count; j++)
         {
             str = SysAllocString( system_props[j] );
             if (!str || SafeArrayPutElement( sa, &j, str ) != S_OK)

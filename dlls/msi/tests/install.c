@@ -29,28 +29,12 @@
 #include <msi.h>
 #include <fci.h>
 #include <objidl.h>
-#include <srrestoreptapi.h>
 #include <shlobj.h>
 #include <winsvc.h>
 #include <shellapi.h>
 
 #include "wine/test.h"
 #include "utils.h"
-
-static UINT (WINAPI *pMsiQueryComponentStateA)
-    (LPCSTR, LPCSTR, MSIINSTALLCONTEXT, LPCSTR, INSTALLSTATE*);
-static UINT (WINAPI *pMsiSourceListEnumSourcesA)
-    (LPCSTR, LPCSTR, MSIINSTALLCONTEXT, DWORD, DWORD, LPSTR, LPDWORD);
-static INSTALLSTATE (WINAPI *pMsiGetComponentPathExA)
-    (LPCSTR, LPCSTR, LPCSTR, MSIINSTALLCONTEXT, LPSTR, LPDWORD);
-
-static LONG (WINAPI *pRegDeleteKeyExA)(HKEY, LPCSTR, REGSAM, DWORD);
-static BOOL (WINAPI *pIsWow64Process)(HANDLE, PBOOL);
-static BOOL (WINAPI *pWow64DisableWow64FsRedirection)(void **);
-static BOOL (WINAPI *pWow64RevertWow64FsRedirection)(void *);
-
-static BOOL (WINAPI *pSRRemoveRestorePoint)(DWORD);
-static BOOL (WINAPI *pSRSetRestorePointA)(RESTOREPOINTINFOA*, STATEMGRSTATUS*);
 
 static BOOL is_wow64;
 static const BOOL is_64bit = sizeof(void *) > sizeof(int);
@@ -68,6 +52,8 @@ char PROG_FILES_DIR_NATIVE[MAX_PATH];
 char COMMON_FILES_DIR[MAX_PATH];
 char APP_DATA_DIR[MAX_PATH];
 char WINDOWS_DIR[MAX_PATH];
+static char system_dir[MAX_PATH];
+static char syswow_dir[MAX_PATH];
 
 static const char *customdll;
 
@@ -118,7 +104,7 @@ static const CHAR feature_comp_dat[] = "Feature_\tComponent_\n"
 static const CHAR file_dat[] = "File\tComponent_\tFileName\tFileSize\tVersion\tLanguage\tAttributes\tSequence\n"
                                "s72\ts72\tl255\ti4\tS72\tS20\tI2\ti2\n"
                                "File\tFile\n"
-                               "five.txt\tFive\tfive.txt\t1000\t\t\t16384\t5\n"
+                               "five.txt\tFive\tfive.txt\t1000\t0.0.0.0\t\t16384\t5\n"
                                "four.txt\tFour\tfour.txt\t1000\t\t\t16384\t4\n"
                                "one.txt\tOne\tone.txt\t1000\t\t\t0\t1\n"
                                "three.txt\tThree\tthree.txt\t1000\t\t\t0\t3\n"
@@ -1364,9 +1350,9 @@ static const CHAR x64_directory_dat[] =
     "CABOUTDIR\tMSITESTDIR\tcabout\n"
     "CHANGEDDIR\tMSITESTDIR\tchanged:second\n"
     "FIRSTDIR\tMSITESTDIR\tfirst\n"
-    "MSITESTDIR\tProgramFiles64Folder\tmsitest\n"
+    "MSITESTDIR\tSystem64Folder\tmsitest\n"
     "NEWDIR\tCABOUTDIR\tnew\n"
-    "ProgramFiles64Folder\tTARGETDIR\t.\n"
+    "System64Folder\tTARGETDIR\t.\n"
     "TARGETDIR\t\tSourceDir";
 
 static const CHAR sr_install_exec_seq_dat[] =
@@ -2224,67 +2210,17 @@ static int CDECL fci_delete(char *pszFile, int *err, void *pv)
     return 0;
 }
 
-static void init_functionpointers(void)
+BOOL is_process_elevated(void)
 {
-    HMODULE hmsi = GetModuleHandleA("msi.dll");
-    HMODULE hadvapi32 = GetModuleHandleA("advapi32.dll");
-    HMODULE hkernel32 = GetModuleHandleA("kernel32.dll");
-    HMODULE hsrclient = LoadLibraryA("srclient.dll");
-
-#define GET_PROC(mod, func) \
-    p ## func = (void*)GetProcAddress(mod, #func); \
-    if(!p ## func) \
-      trace("GetProcAddress(%s) failed\n", #func);
-
-    GET_PROC(hmsi, MsiQueryComponentStateA);
-    GET_PROC(hmsi, MsiSourceListEnumSourcesA);
-    GET_PROC(hmsi, MsiGetComponentPathExA);
-
-    GET_PROC(hadvapi32, RegDeleteKeyExA)
-    GET_PROC(hkernel32, IsWow64Process)
-    GET_PROC(hkernel32, Wow64DisableWow64FsRedirection);
-    GET_PROC(hkernel32, Wow64RevertWow64FsRedirection);
-
-    GET_PROC(hsrclient, SRRemoveRestorePoint);
-    GET_PROC(hsrclient, SRSetRestorePointA);
-
-#undef GET_PROC
-}
-
-BOOL is_process_limited(void)
-{
-    SID_IDENTIFIER_AUTHORITY NtAuthority = {SECURITY_NT_AUTHORITY};
-    PSID Group = NULL;
-    BOOL IsInGroup;
     HANDLE token;
+    TOKEN_ELEVATION_TYPE type = TokenElevationTypeDefault;
+    DWORD size;
+    BOOL ret;
 
-    if (!AllocateAndInitializeSid(&NtAuthority, 2, SECURITY_BUILTIN_DOMAIN_RID,
-                                  DOMAIN_ALIAS_RID_ADMINS, 0, 0, 0, 0, 0, 0, &Group) ||
-        !CheckTokenMembership(NULL, Group, &IsInGroup))
-    {
-        trace("Could not check if the current user is an administrator\n");
-        FreeSid(Group);
-        return FALSE;
-    }
-    FreeSid(Group);
-
-    if (!IsInGroup)
-    {
-        /* Only administrators have enough privileges for these tests */
-        return TRUE;
-    }
-
-    if (OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token))
-    {
-        BOOL ret;
-        TOKEN_ELEVATION_TYPE type = TokenElevationTypeDefault;
-        DWORD size;
-
-        ret = GetTokenInformation(token, TokenElevationType, &type, sizeof(type), &size);
-        CloseHandle(token);
-        return (ret && type == TokenElevationTypeLimited);
-    }
-    return FALSE;
+    if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token)) return FALSE;
+    ret = GetTokenInformation(token, TokenElevationType, &type, sizeof(type), &size);
+    CloseHandle(token);
+    return (ret && type == TokenElevationTypeFull);
 }
 
 static BOOL check_record(MSIHANDLE rec, UINT field, LPCSTR val)
@@ -2454,6 +2390,16 @@ BOOL get_system_dirs(void)
     if(!GetWindowsDirectoryA(WINDOWS_DIR, MAX_PATH))
         return FALSE;
 
+    size = GetSystemDirectoryA(system_dir, ARRAY_SIZE(system_dir));
+    if (!size || size >= ARRAY_SIZE(system_dir))
+        return FALSE;
+    if (is_wow64)
+    {
+        size = GetSystemWow64DirectoryA(syswow_dir, ARRAY_SIZE(syswow_dir));
+        if (!size || size >= ARRAY_SIZE(syswow_dir))
+            return FALSE;
+    }
+
     return TRUE;
 }
 
@@ -2496,13 +2442,11 @@ static void create_test_files(void)
     DeleteFileA("five.txt");
 }
 
-BOOL delete_pf(const CHAR *rel_path, BOOL is_file)
+static BOOL delete_pf_dir(const char *rel_path, BOOL is_file, const char *basedir)
 {
-    CHAR path[MAX_PATH];
+    char path[MAX_PATH];
 
-    lstrcpyA(path, PROG_FILES_DIR);
-    lstrcatA(path, "\\");
-    lstrcatA(path, rel_path);
+    sprintf(path, "%s\\%s", basedir, rel_path);
 
     if (is_file)
         return DeleteFileA(path);
@@ -2510,18 +2454,9 @@ BOOL delete_pf(const CHAR *rel_path, BOOL is_file)
         return RemoveDirectoryA(path);
 }
 
-static BOOL delete_pf_native(const CHAR *rel_path, BOOL is_file)
+BOOL delete_pf(const CHAR *rel_path, BOOL is_file)
 {
-    CHAR path[MAX_PATH];
-
-    lstrcpyA(path, PROG_FILES_DIR_NATIVE);
-    lstrcatA(path, "\\");
-    lstrcatA(path, rel_path);
-
-    if (is_file)
-        return DeleteFileA(path);
-    else
-        return RemoveDirectoryA(path);
+    return delete_pf_dir(rel_path, is_file, PROG_FILES_DIR);
 }
 
 static BOOL delete_cf(const CHAR *rel_path, BOOL is_file)
@@ -2734,34 +2669,6 @@ void create_database_wordcount(const CHAR *name, const msi_table *tables, int nu
     free( nameW );
 }
 
-static BOOL notify_system_change(DWORD event_type, STATEMGRSTATUS *status)
-{
-    RESTOREPOINTINFOA spec;
-
-    spec.dwEventType = event_type;
-    spec.dwRestorePtType = APPLICATION_INSTALL;
-    spec.llSequenceNumber = status->llSequenceNumber;
-    lstrcpyA(spec.szDescription, "msitest restore point");
-
-    return pSRSetRestorePointA(&spec, status);
-}
-
-static void remove_restore_point(DWORD seq_number)
-{
-    DWORD res;
-
-    res = pSRRemoveRestorePoint(seq_number);
-    if (res != ERROR_SUCCESS)
-        trace("Failed to remove the restore point: %#lx\n", res);
-}
-
-static LONG delete_key( HKEY key, LPCSTR subkey, REGSAM access )
-{
-    if (pRegDeleteKeyExA)
-        return pRegDeleteKeyExA( key, subkey, access, 0 );
-    return RegDeleteKeyA( key, subkey );
-}
-
 static void test_MsiInstallProduct(void)
 {
     UINT r;
@@ -2771,7 +2678,7 @@ static void test_MsiInstallProduct(void)
     DWORD num, size, type;
     REGSAM access = KEY_ALL_ACCESS;
 
-    if (is_process_limited())
+    if (!is_process_elevated())
     {
         skip("process is limited\n");
         return;
@@ -2836,7 +2743,7 @@ static void test_MsiInstallProduct(void)
     ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %ld\n", res);
     ok(!lstrcmpA(path, "OrderTestValue"), "Expected OrderTestValue, got %s\n", path);
 
-    delete_key(HKEY_CURRENT_USER, "SOFTWARE\\Wine\\msitest", access);
+    RegDeleteKeyExA(HKEY_CURRENT_USER, "SOFTWARE\\Wine\\msitest", access, 0);
 
     /* not published, reinstall */
     r = MsiInstallProductA(msifile, NULL);
@@ -3116,7 +3023,7 @@ static void test_continuouscabs(void)
 {
     UINT r;
 
-    if (is_process_limited())
+    if (!is_process_elevated())
     {
         skip("process is limited\n");
         return;
@@ -3309,7 +3216,7 @@ static void test_mixedmedia(void)
 {
     UINT r;
 
-    if (is_process_limited())
+    if (!is_process_elevated())
     {
         skip("process is limited\n");
         return;
@@ -3429,7 +3336,7 @@ static void test_readonlyfile(void)
     HANDLE file;
     CHAR path[MAX_PATH];
 
-    if (is_process_limited())
+    if (!is_process_elevated())
     {
         skip("process is limited\n");
         return;
@@ -3478,7 +3385,7 @@ static void test_readonlyfile_cab(void)
     CHAR path[MAX_PATH];
     CHAR buf[16];
 
-    if (is_process_limited())
+    if (!is_process_elevated())
     {
         skip("process is limited\n");
         return;
@@ -3535,7 +3442,7 @@ static void test_setdirproperty(void)
 {
     UINT r;
 
-    if (is_process_limited())
+    if (!is_process_elevated())
     {
         skip("process is limited\n");
         return;
@@ -3568,7 +3475,7 @@ static void test_cabisextracted(void)
 {
     UINT r;
 
-    if (is_process_limited())
+    if (!is_process_elevated())
     {
         skip("process is limited\n");
         return;
@@ -3809,7 +3716,7 @@ static void test_transformprop(void)
 {
     UINT r;
 
-    if (is_process_limited())
+    if (!is_process_elevated())
     {
         skip("process is limited\n");
         return;
@@ -3857,7 +3764,7 @@ static void test_currentworkingdir(void)
     CHAR drive[MAX_PATH], path[MAX_PATH + 12];
     LPSTR ptr;
 
-    if (is_process_limited())
+    if (!is_process_elevated())
     {
         skip("process is limited\n");
         return;
@@ -3968,15 +3875,11 @@ static void test_admin(void)
     ok(!RemoveDirectoryA("c:\\msitest"), "File installed\n");
 
     r = MsiInstallProductA(msifile, "ACTION=ADMIN");
-    todo_wine
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r);
     ok(!delete_pf("msitest\\augustus", TRUE), "File installed\n");
     ok(!delete_pf("msitest", FALSE), "Directory created\n");
-    todo_wine
-    {
-        ok(DeleteFileA("c:\\msitest\\augustus"), "File not installed\n");
-        ok(RemoveDirectoryA("c:\\msitest"), "File not installed\n");
-    }
+    ok(DeleteFileA("c:\\msitest\\augustus"), "File not installed\n");
+    ok(RemoveDirectoryA("c:\\msitest"), "File not installed\n");
 
 error:
     DeleteFileA(msifile);
@@ -4015,7 +3918,7 @@ static void test_adminprops(void)
 {
     UINT r;
 
-    if (is_process_limited())
+    if (!is_process_elevated())
     {
         skip("process is limited\n");
         return;
@@ -4066,7 +3969,7 @@ static void test_missingcab(void)
 {
     UINT r;
 
-    if (is_process_limited())
+    if (!is_process_elevated())
     {
         skip("process is limited\n");
         return;
@@ -4136,7 +4039,7 @@ static void test_sourcefolder(void)
 {
     UINT r;
 
-    if (is_process_limited())
+    if (!is_process_elevated())
     {
         skip("process is limited\n");
         return;
@@ -4239,7 +4142,7 @@ static void test_customaction51(void)
 {
     UINT r;
 
-    if (is_process_limited())
+    if (!is_process_elevated())
     {
         skip("process is limited\n");
         return;
@@ -4272,7 +4175,7 @@ static void test_installstate(void)
 {
     UINT r;
 
-    if (is_process_limited())
+    if (!is_process_elevated())
     {
         skip("process is limited\n");
         return;
@@ -4758,7 +4661,7 @@ static void test_missingcomponent(void)
 {
     UINT r;
 
-    if (is_process_limited())
+    if (!is_process_elevated())
     {
         skip("process is limited\n");
         return;
@@ -4814,7 +4717,7 @@ static void test_sourcedirprop(void)
     UINT r;
     CHAR props[MAX_PATH + 18];
 
-    if (is_process_limited())
+    if (!is_process_elevated())
     {
         skip("process is limited\n");
         return;
@@ -4865,7 +4768,7 @@ static void test_adminimage(void)
 {
     UINT r;
 
-    if (is_process_limited())
+    if (!is_process_elevated())
     {
         skip("process is limited\n");
         return;
@@ -4936,7 +4839,7 @@ static void test_propcase(void)
 {
     UINT r;
 
-    if (is_process_limited())
+    if (!is_process_elevated())
     {
         skip("process is limited\n");
         return;
@@ -5042,7 +4945,7 @@ static void test_shortcut(void)
     UINT r;
     HRESULT hr;
 
-    if (is_process_limited())
+    if (!is_process_elevated())
     {
         skip("process is limited\n");
         return;
@@ -5089,7 +4992,7 @@ static void test_preselected(void)
 {
     UINT r;
 
-    if (is_process_limited())
+    if (!is_process_elevated())
     {
         skip("process is limited\n");
         return;
@@ -5145,7 +5048,7 @@ static void test_installed_prop(void)
     static const char prodcode[] = "{7df88a48-996f-4ec8-a022-bf956f9b2cbb}";
     UINT r;
 
-    if (is_process_limited())
+    if (!is_process_elevated())
     {
         skip("process is limited\n");
         return;
@@ -5184,7 +5087,7 @@ static void test_allusers_prop(void)
 {
     UINT r;
 
-    if (is_process_limited())
+    if (!is_process_elevated())
     {
         skip("process is limited\n");
         return;
@@ -5305,7 +5208,7 @@ static void process_pending_renames(HKEY hkey)
         else
         {
             fileret = DeleteFileA(src);
-            ok(fileret || broken(!fileret) /* win2k3 */, "Failed to delete file %s (%lu)\n", src, GetLastError());
+            ok(fileret, "Failed to delete file %s (%lu)\n", src, GetLastError());
         }
     }
 
@@ -5345,7 +5248,7 @@ static void test_file_in_use(void)
     HKEY hkey;
     char path[MAX_PATH];
 
-    if (is_process_limited())
+    if (!is_process_elevated())
     {
         skip("process is limited\n");
         return;
@@ -5404,7 +5307,7 @@ static void test_file_in_use_cab(void)
     HKEY hkey;
     char path[MAX_PATH];
 
-    if (is_process_limited())
+    if (!is_process_elevated())
     {
         skip("process is limited\n");
         return;
@@ -5465,7 +5368,7 @@ static void test_feature_override(void)
     UINT r;
     REGSAM access = KEY_ALL_ACCESS;
 
-    if (is_process_limited())
+    if (!is_process_elevated())
     {
         skip("process is limited\n");
         return;
@@ -5527,7 +5430,7 @@ static void test_feature_override(void)
     ok(!delete_pf("msitest\\preselected.txt", TRUE), "file not removed\n");
     ok(!delete_pf("msitest", FALSE), "directory not removed\n");
 
-    delete_key(HKEY_LOCAL_MACHINE, "Software\\Wine\\msitest", access);
+    RegDeleteKeyExA(HKEY_LOCAL_MACHINE, "Software\\Wine\\msitest", access, 0);
 
 error:
     DeleteFileA("msitest\\override.txt");
@@ -5545,7 +5448,7 @@ static void test_icon_table(void)
     CHAR path[MAX_PATH];
     static const char prodcode[] = "{7DF88A49-996F-4EC8-A022-BF956F9B2CBB}";
 
-    if (is_process_limited())
+    if (!is_process_elevated())
     {
         skip("process is limited\n");
         return;
@@ -5623,7 +5526,7 @@ static void test_package_validation(void)
 {
     UINT r;
 
-    if (is_process_limited())
+    if (!is_process_elevated())
     {
         skip("process is limited\n");
         return;
@@ -5644,6 +5547,66 @@ static void test_package_validation(void)
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r);
     ok(delete_pf("msitest\\maximus", TRUE), "file does not exist\n");
     ok(delete_pf("msitest", FALSE), "directory does not exist\n");
+
+    DeleteFileA(msifile);
+    create_database_template(msifile, pv_tables, ARRAY_SIZE(pv_tables), 100, "");
+
+    r = MsiInstallProductA(msifile, NULL);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r);
+    ok(delete_pf("msitest\\maximus", TRUE), "file does not exist\n");
+    ok(delete_pf("msitest", FALSE), "directory does not exist\n");
+
+    DeleteFileA(msifile);
+    create_database_template(msifile, pv_tables, ARRAY_SIZE(pv_tables), 100, ";");
+
+    r = MsiInstallProductA(msifile, NULL);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r);
+    ok(delete_pf("msitest\\maximus", TRUE), "file does not exist\n");
+    ok(delete_pf("msitest", FALSE), "directory does not exist\n");
+
+    DeleteFileA(msifile);
+    create_database_template(msifile, pv_tables, ARRAY_SIZE(pv_tables), 100, "Intel");
+
+    r = MsiInstallProductA(msifile, NULL);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r);
+    ok(delete_pf("msitest\\maximus", TRUE), "file does not exist\n");
+    ok(delete_pf("msitest", FALSE), "directory does not exist\n");
+
+    DeleteFileA(msifile);
+    create_database_template(msifile, pv_tables, ARRAY_SIZE(pv_tables), 100, "Intel;");
+
+    r = MsiInstallProductA(msifile, NULL);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r);
+    ok(delete_pf("msitest\\maximus", TRUE), "file does not exist\n");
+    ok(delete_pf("msitest", FALSE), "directory does not exist\n");
+
+    DeleteFileA(msifile);
+    create_database_template(msifile, pv_tables, ARRAY_SIZE(pv_tables), 100, "Alpha,,Intel;");
+
+    r = MsiInstallProductA(msifile, NULL);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r);
+    ok(delete_pf("msitest\\maximus", TRUE), "file does not exist\n");
+    ok(delete_pf("msitest", FALSE), "directory does not exist\n");
+
+    DeleteFileA(msifile);
+    create_database_template(msifile, pv_tables, ARRAY_SIZE(pv_tables), 200, ",;");
+
+    r = MsiInstallProductA(msifile, NULL);
+    todo_wine
+    ok(r == ERROR_INSTALL_PLATFORM_UNSUPPORTED, "Expected ERROR_INSTALL_PLATFORM_UNSUPPORTED, got %u\n", r);
+
+    DeleteFileA(msifile);
+    create_database_template(msifile, pv_tables, ARRAY_SIZE(pv_tables), 200, "Alpha,,Beta;");
+
+    r = MsiInstallProductA(msifile, NULL);
+    todo_wine
+    ok(r == ERROR_INSTALL_PLATFORM_UNSUPPORTED, "Expected ERROR_INSTALL_PLATFORM_UNSUPPORTED, got %u\n", r);
+
+    DeleteFileA(msifile);
+    create_database_template(msifile, pv_tables, ARRAY_SIZE(pv_tables), 200, "0");
+
+    r = MsiInstallProductA(msifile, NULL);
+    ok(r == ERROR_INSTALL_PLATFORM_UNSUPPORTED, "Expected ERROR_INSTALL_PLATFORM_UNSUPPORTED, got %u\n", r);
 
     DeleteFileA(msifile);
     create_database_template(msifile, pv_tables, ARRAY_SIZE(pv_tables), 200, "Intel,9999;9999");
@@ -5741,6 +5704,22 @@ static void test_package_validation(void)
         ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r);
         ok(delete_pf("msitest\\maximus", TRUE), "file does not exist\n");
         ok(delete_pf("msitest", FALSE), "directory does not exist\n");
+
+        DeleteFileA(msifile);
+        create_database_template(msifile, pv_tables, ARRAY_SIZE(pv_tables), 200, "x64;");
+
+        r = MsiInstallProductA(msifile, NULL);
+        ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r);
+        ok(delete_pf("msitest\\maximus", TRUE), "file does not exist\n");
+        ok(delete_pf("msitest", FALSE), "directory does not exist\n");
+
+        DeleteFileA(msifile);
+        create_database_template(msifile, pv_tables, ARRAY_SIZE(pv_tables), 200, "x64");
+
+        r = MsiInstallProductA(msifile, NULL);
+        ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r);
+        ok(delete_pf("msitest\\maximus", TRUE), "file does not exist\n");
+        ok(delete_pf("msitest", FALSE), "directory does not exist\n");
     }
     else if (is_wow64)
     {
@@ -5767,6 +5746,22 @@ static void test_package_validation(void)
         ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r);
         ok(delete_pf("msitest\\maximus", TRUE), "file exists\n");
         ok(delete_pf("msitest", FALSE), "directory exists\n");
+
+        DeleteFileA(msifile);
+        create_database_template(msifile, pv_tables, ARRAY_SIZE(pv_tables), 200, "x64;");
+
+        r = MsiInstallProductA(msifile, NULL);
+        ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r);
+        ok(delete_pf("msitest\\maximus", TRUE), "file exists\n");
+        ok(delete_pf("msitest", FALSE), "directory exists\n");
+
+        DeleteFileA(msifile);
+        create_database_template(msifile, pv_tables, ARRAY_SIZE(pv_tables), 200, "x64");
+
+        r = MsiInstallProductA(msifile, NULL);
+        ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r);
+        ok(delete_pf("msitest\\maximus", TRUE), "file does not exist\n");
+        ok(delete_pf("msitest", FALSE), "directory does not exist\n");
     }
     else
     {
@@ -5778,8 +5773,25 @@ static void test_package_validation(void)
         ok(delete_pf("msitest\\maximus", TRUE), "file does not exist\n");
         ok(delete_pf("msitest", FALSE), "directory does not exist\n");
 
+
         DeleteFileA(msifile);
         create_database_template(msifile, pv_tables, ARRAY_SIZE(pv_tables), 100, "Alpha,Beta,Intel;0");
+
+        r = MsiInstallProductA(msifile, NULL);
+        ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r);
+        ok(delete_pf("msitest\\maximus", TRUE), "file does not exist\n");
+        ok(delete_pf("msitest", FALSE), "directory does not exist\n");
+
+        DeleteFileA(msifile);
+        create_database_template(msifile, pv_tables, ARRAY_SIZE(pv_tables), 100, "Alpha,Beta,Intel;");
+
+        r = MsiInstallProductA(msifile, NULL);
+        ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r);
+        ok(delete_pf("msitest\\maximus", TRUE), "file does not exist\n");
+        ok(delete_pf("msitest", FALSE), "directory does not exist\n");
+
+        DeleteFileA(msifile);
+        create_database_template(msifile, pv_tables, ARRAY_SIZE(pv_tables), 100, "Alpha,Beta,Intel");
 
         r = MsiInstallProductA(msifile, NULL);
         ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r);
@@ -5801,6 +5813,22 @@ static void test_package_validation(void)
         ok(r == ERROR_INSTALL_PLATFORM_UNSUPPORTED, "Expected ERROR_INSTALL_PLATFORM_UNSUPPORTED, got %u\n", r);
         ok(!delete_pf("msitest\\maximus", TRUE), "file exists\n");
         ok(!delete_pf("msitest", FALSE), "directory exists\n");
+
+        DeleteFileA(msifile);
+        create_database_template(msifile, pv_tables, ARRAY_SIZE(pv_tables), 200, "x64;");
+
+        r = MsiInstallProductA(msifile, NULL);
+        ok(r == ERROR_INSTALL_PLATFORM_UNSUPPORTED, "Expected ERROR_INSTALL_PLATFORM_UNSUPPORTED, got %u\n", r);
+        ok(!delete_pf("msitest\\maximus", TRUE), "file exists\n");
+        ok(!delete_pf("msitest", FALSE), "directory exists\n");
+
+        DeleteFileA(msifile);
+        create_database_template(msifile, pv_tables, ARRAY_SIZE(pv_tables), 200, "x64");
+
+        r = MsiInstallProductA(msifile, NULL);
+        ok(r == ERROR_INSTALL_PLATFORM_UNSUPPORTED, "Expected ERROR_INSTALL_PLATFORM_UNSUPPORTED, got %u\n", r);
+        ok(!delete_pf("msitest\\maximus", TRUE), "file exists\n");
+        ok(!delete_pf("msitest", FALSE), "directory exists\n");
     }
 
 error:
@@ -5814,7 +5842,7 @@ static void test_upgrade_code(void)
 {
     UINT r;
 
-    if (is_process_limited())
+    if (!is_process_elevated())
     {
         skip("process is limited\n");
         return;
@@ -5850,7 +5878,7 @@ static void test_mixed_package(void)
     char value[MAX_PATH];
     DWORD size;
 
-    if (is_process_limited())
+    if (!is_process_elevated())
     {
         skip("process is limited\n");
         return;
@@ -5913,7 +5941,7 @@ static void test_mixed_package(void)
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r);
 
     res = RegOpenKeyExA(HKEY_LOCAL_MACHINE, "Software\\Wine\\msitest", 0, KEY_ALL_ACCESS|KEY_WOW64_32KEY, &hkey);
-    ok(res == ERROR_FILE_NOT_FOUND || broken(!res), "32-bit component key not removed\n");
+    ok(res == ERROR_FILE_NOT_FOUND, "32-bit component key not removed\n");
 
     res = RegOpenKeyExA(HKEY_LOCAL_MACHINE, "Software\\Wine\\msitest", 0, KEY_ALL_ACCESS|KEY_WOW64_64KEY, &hkey);
     ok(res == ERROR_FILE_NOT_FOUND, "64-bit component key not removed\n");
@@ -5976,7 +6004,7 @@ static void test_mixed_package(void)
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r);
 
     res = RegOpenKeyExA(HKEY_LOCAL_MACHINE, "Software\\Wine\\msitest", 0, KEY_ALL_ACCESS|KEY_WOW64_32KEY, &hkey);
-    ok(res == ERROR_FILE_NOT_FOUND || broken(!res), "32-bit component key not removed\n");
+    ok(res == ERROR_FILE_NOT_FOUND, "32-bit component key not removed\n");
 
     res = RegOpenKeyExA(HKEY_LOCAL_MACHINE, "Software\\Wine\\msitest", 0, KEY_ALL_ACCESS|KEY_WOW64_64KEY, &hkey);
     ok(res == ERROR_FILE_NOT_FOUND, "64-bit component key not removed\n");
@@ -5999,7 +6027,7 @@ static void test_volume_props(void)
 {
     UINT r;
 
-    if (is_process_limited())
+    if (!is_process_elevated())
     {
         skip("process is limited\n");
         return;
@@ -6025,7 +6053,7 @@ static void test_shared_component(void)
 {
     UINT r;
 
-    if (is_process_limited())
+    if (!is_process_elevated())
     {
         skip("process is limited\n");
         return;
@@ -6074,7 +6102,7 @@ static void test_remove_upgrade_code(void)
     DWORD type, size;
     char buf[1];
 
-    if (is_process_limited())
+    if (!is_process_elevated())
     {
         skip( "process is limited\n" );
         return;
@@ -6120,7 +6148,7 @@ static void test_feature_tree(void)
 {
     UINT r;
 
-    if (is_process_limited())
+    if (!is_process_elevated())
     {
         skip( "process is limited\n" );
         return;
@@ -6188,7 +6216,12 @@ error:
 
 static void test_wow64(void)
 {
+    WIN32_FILE_ATTRIBUTE_DATA attr;
+    char path[MAX_PATH];
+    HMODULE module;
+    DWORD dll_size;
     void *cookie;
+    BOOL ret;
     UINT r;
 
     if (!is_wow64)
@@ -6197,13 +6230,65 @@ static void test_wow64(void)
         return;
     }
 
-    if (is_process_limited())
+    if (!is_process_elevated())
     {
         skip("process is limited\n");
         return;
     }
 
-    create_test_files();
+    sprintf(path, "%s\\msitest", "C:\\windows\\syswow64");
+    ret = CreateDirectoryA(path, NULL);
+    ok(ret, "got error %lu.\n", GetLastError());
+    sprintf(path, "%s\\msitest\\cabout", "C:\\windows\\syswow64");
+    ret = CreateDirectoryA(path, NULL);
+    ok(ret, "got error %lu.\n", GetLastError());
+    sprintf(path, "%s\\msitest\\cabout\\new", "C:\\windows\\syswow64");
+    ret = CreateDirectoryA(path, NULL);
+    ok(ret, "got error %lu.\n", GetLastError());
+
+    sprintf(path, "%s\\msitest\\cabout\\new\\five.txt", "C:\\windows\\syswow64");
+    ret = CopyFileA("C:\\windows\\system32\\psapi.dll", path, FALSE);
+    ok(ret, "got error %lu.\n", GetLastError());
+
+    module = LoadLibraryA(path);
+    ok(!!module, "failed to load module.\n");
+
+    Wow64DisableWow64FsRedirection(&cookie);
+
+    sprintf(path, "%s\\msitest", "C:\\windows\\system32");
+    ret = CreateDirectoryA(path, NULL);
+    ok(ret, "%s, got error %lu.\n", path, GetLastError());
+    sprintf(path, "%s\\msitest\\cabout", "C:\\windows\\system32");
+    ret = CreateDirectoryA(path, NULL);
+    ok(ret, "got error %lu.\n", GetLastError());
+    sprintf(path, "%s\\msitest\\cabout\\new", "C:\\windows\\system32");
+    ret = CreateDirectoryA(path, NULL);
+    ok(ret, "got error %lu.\n", GetLastError());
+
+    sprintf(path, "%s\\msitest\\cabout\\new\\five.txt", "C:\\windows\\system32");
+    create_file(path, 100);
+
+    CreateDirectoryA("msitest", NULL);
+
+    create_file("msitest\\one.txt", 100);
+    CreateDirectoryA("msitest\\first", NULL);
+    create_file("msitest\\first\\two.txt", 100);
+    CreateDirectoryA("msitest\\second", NULL);
+    create_file("msitest\\second\\three.txt", 100);
+
+    create_file("four.txt", 100);
+    ret = GetFileAttributesExA("C:\\windows\\system32\\psapi.dll", GetFileExInfoStandard, &attr);
+    ok(ret, "got error %lu.\n", GetLastError());
+    dll_size = attr.nFileSizeLow;
+    ret = CopyFileA("C:\\windows\\system32\\psapi.dll", "five.txt", FALSE);
+    ok(ret, "got error %lu.\n", GetLastError());
+    create_cab_file("msitest.cab", MEDIA_SIZE, "four.txt\0five.txt\0");
+    create_file("msitest\\filename", 100);
+
+    DeleteFileA("four.txt");
+    DeleteFileA("five.txt");
+    Wow64RevertWow64FsRedirection(cookie);
+
     create_database_template(msifile, x64_tables, ARRAY_SIZE(x64_tables), 200, "x64;0");
     r = MsiInstallProductA(msifile, NULL);
     if (r == ERROR_INSTALL_PACKAGE_REJECTED)
@@ -6211,34 +6296,40 @@ static void test_wow64(void)
         skip("Not enough rights to perform tests\n");
         goto error;
     }
+    FreeLibrary(module);
 
-    pWow64DisableWow64FsRedirection(&cookie);
+    Wow64DisableWow64FsRedirection(&cookie);
 
-    ok(!delete_pf("msitest\\cabout\\new\\five.txt", TRUE), "File installed\n");
-    ok(!delete_pf("msitest\\cabout\\new", FALSE), "Directory created\n");
-    ok(!delete_pf("msitest\\cabout\\four.txt", TRUE), "File installed\n");
-    ok(!delete_pf("msitest\\cabout", FALSE), "Directory created\n");
-    ok(!delete_pf("msitest\\changed\\three.txt", TRUE), "File installed\n");
-    ok(!delete_pf("msitest\\changed", FALSE), "Directory created\n");
-    ok(!delete_pf("msitest\\first\\two.txt", TRUE), "File installed\n");
-    ok(!delete_pf("msitest\\first", FALSE), "Directory created\n");
-    ok(!delete_pf("msitest\\one.txt", TRUE), "File installed\n");
-    ok(!delete_pf("msitest\\filename", TRUE), "File installed\n");
-    ok(!delete_pf("msitest", FALSE), "Directory created\n");
+    ok(delete_pf_dir("msitest\\cabout\\new\\five.txt", TRUE, syswow_dir), "File installed\n");
+    ok(delete_pf_dir("msitest\\cabout\\new", FALSE, syswow_dir), "Directory created\n");
+    ok(!delete_pf_dir("msitest\\cabout\\four.txt", TRUE, syswow_dir), "File installed\n");
+    ok(delete_pf_dir("msitest\\cabout", FALSE, syswow_dir), "Directory created\n");
+    ok(!delete_pf_dir("msitest\\changed\\three.txt", TRUE, syswow_dir), "File installed\n");
+    ok(!delete_pf_dir("msitest\\changed", FALSE, syswow_dir), "Directory created\n");
+    ok(!delete_pf_dir("msitest\\first\\two.txt", TRUE, syswow_dir), "File installed\n");
+    ok(!delete_pf_dir("msitest\\first", FALSE, syswow_dir), "Directory created\n");
+    ok(!delete_pf_dir("msitest\\one.txt", TRUE, syswow_dir), "File installed\n");
+    ok(!delete_pf_dir("msitest\\filename", TRUE, syswow_dir), "File installed\n");
+    ok(delete_pf_dir("msitest", FALSE, syswow_dir), "Directory created\n");
 
-    ok(delete_pf_native("msitest\\cabout\\new\\five.txt", TRUE), "File not installed\n");
-    ok(delete_pf_native("msitest\\cabout\\new", FALSE), "Directory not created\n");
-    ok(delete_pf_native("msitest\\cabout\\four.txt", TRUE), "File not installed\n");
-    ok(delete_pf_native("msitest\\cabout", FALSE), "Directory not created\n");
-    ok(delete_pf_native("msitest\\changed\\three.txt", TRUE), "File not installed\n");
-    ok(delete_pf_native("msitest\\changed", FALSE), "Directory not created\n");
-    ok(delete_pf_native("msitest\\first\\two.txt", TRUE), "File not installed\n");
-    ok(delete_pf_native("msitest\\first", FALSE), "Directory not created\n");
-    ok(delete_pf_native("msitest\\one.txt", TRUE), "File not installed\n");
-    ok(delete_pf_native("msitest\\filename", TRUE), "File not installed\n");
-    ok(delete_pf_native("msitest", FALSE), "Directory not created\n");
+    sprintf(path, "%s\\msitest\\cabout\\new\\five.txt", system_dir);
+    ret = GetFileAttributesExA(path, GetFileExInfoStandard, &attr);
+    ok(ret, "got error %lu.\n", GetLastError());
+    ok(attr.nFileSizeLow == dll_size, "got %lu, expected %lu.\n", attr.nFileSizeLow, dll_size);
 
-    pWow64RevertWow64FsRedirection(cookie);
+    ok(delete_pf_dir("msitest\\cabout\\new\\five.txt", TRUE, system_dir), "File not installed\n");
+    ok(delete_pf_dir("msitest\\cabout\\new", FALSE, system_dir), "Directory not created\n");
+    ok(delete_pf_dir("msitest\\cabout\\four.txt", TRUE, system_dir), "File not installed\n");
+    ok(delete_pf_dir("msitest\\cabout", FALSE, system_dir), "Directory not created\n");
+    ok(delete_pf_dir("msitest\\changed\\three.txt", TRUE, system_dir), "File not installed\n");
+    ok(delete_pf_dir("msitest\\changed", FALSE, system_dir), "Directory not created\n");
+    ok(delete_pf_dir("msitest\\first\\two.txt", TRUE, system_dir), "File not installed\n");
+    ok(delete_pf_dir("msitest\\first", FALSE, system_dir), "Directory not created\n");
+    ok(delete_pf_dir("msitest\\one.txt", TRUE, system_dir), "File not installed\n");
+    ok(delete_pf_dir("msitest\\filename", TRUE, system_dir), "File not installed\n");
+    ok(delete_pf_dir("msitest", FALSE, system_dir), "Directory not created\n");
+
+    Wow64RevertWow64FsRedirection(cookie);
 
 error:
     delete_test_files();
@@ -6250,7 +6341,7 @@ static void test_source_resolution(void)
 {
     UINT r;
 
-    if (is_process_limited())
+    if (!is_process_elevated())
     {
         skip( "process is limited\n" );
         return;
@@ -6279,14 +6370,12 @@ START_TEST(install)
 {
     DWORD len;
     char temp_path[MAX_PATH], prev_path[MAX_PATH], log_file[MAX_PATH];
-    STATEMGRSTATUS status;
-    BOOL ret = FALSE;
 
-    init_functionpointers();
+    if (!is_process_elevated()) restart_as_admin_elevated();
+
     subtest("custom");
 
-    if (pIsWow64Process)
-        pIsWow64Process(GetCurrentProcess(), &is_wow64);
+    IsWow64Process(GetCurrentProcess(), &is_wow64);
 
     GetCurrentDirectoryA(MAX_PATH, prev_path);
     GetTempPathA(MAX_PATH, temp_path);
@@ -6301,18 +6390,6 @@ START_TEST(install)
     ok(get_system_dirs(), "failed to retrieve system dirs\n");
     ok(get_user_dirs(), "failed to retrieve user dirs\n");
 
-    /* Create a restore point ourselves so we circumvent the multitude of restore points
-     * that would have been created by all the installation and removal tests.
-     *
-     * This is not needed on version 5.0 where setting MSIFASTINSTALL prevents the
-     * creation of restore points.
-     */
-    if (pSRSetRestorePointA && !pMsiGetComponentPathExA)
-    {
-        memset(&status, 0, sizeof(status));
-        ret = notify_system_change(BEGIN_NESTED_SYSTEM_CHANGE, &status);
-    }
-
     /* Create only one log file and don't append. We have to pass something
      * for the log mode for this to work. The logfile needs to have an absolute
      * path otherwise we still end up with some extra logfiles as some tests
@@ -6322,8 +6399,7 @@ START_TEST(install)
     lstrcatA(log_file, "\\msitest.log");
     MsiEnableLogA(INSTALLLOGMODE_FATALEXIT, log_file, 0);
 
-    if (pSRSetRestorePointA) /* test has side-effects on win2k3 that cause failures in following tests */
-        test_MsiInstallProduct();
+    test_MsiInstallProduct();
     test_MsiSetComponentState();
     test_packagecoltypes();
     test_continuouscabs();
@@ -6370,15 +6446,6 @@ START_TEST(install)
     test_source_resolution();
 
     DeleteFileA(customdll);
-
     DeleteFileA(log_file);
-
-    if (pSRSetRestorePointA && !pMsiGetComponentPathExA && ret)
-    {
-        ret = notify_system_change(END_NESTED_SYSTEM_CHANGE, &status);
-        if (ret)
-            remove_restore_point(status.llSequenceNumber);
-    }
-
     SetCurrentDirectoryA(prev_path);
 }

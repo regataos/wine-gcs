@@ -26,8 +26,8 @@
 
 #include "user_private.h"
 #include "dbt.h"
-#include "wine/server.h"
 #include "wine/debug.h"
+#include "wine/plugplay.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(win);
 WINE_DECLARE_DEBUG_CHANNEL(keyboard);
@@ -39,7 +39,6 @@ WINE_DECLARE_DEBUG_CHANNEL(rawinput);
 static HKL get_locale_kbd_layout(void)
 {
     ULONG_PTR layout;
-    LANGID langid;
 
     /* FIXME:
      *
@@ -53,19 +52,7 @@ static HKL get_locale_kbd_layout(void)
      */
 
     layout = GetUserDefaultLCID();
-
-    /*
-     * Microsoft Office expects this value to be something specific
-     * for Japanese and Korean Windows with an IME the value is 0xe001
-     * We should probably check to see if an IME exists and if so then
-     * set this word properly.
-     */
-    langid = PRIMARYLANGID( LANGIDFROMLCID( layout ) );
-    if (langid == LANG_CHINESE || langid == LANG_JAPANESE || langid == LANG_KOREAN)
-        layout = MAKELONG( layout, 0xe001 ); /* IME */
-    else
-        layout = MAKELONG( layout, layout );
-
+    layout = MAKELONG( layout, layout );
     return (HKL)layout;
 }
 
@@ -117,31 +104,11 @@ BOOL WINAPI DECLSPEC_HOTPATCH GetCursorPos( POINT *pt )
 
 
 /**********************************************************************
- *		ReleaseCapture (USER32.@)
- */
-BOOL WINAPI DECLSPEC_HOTPATCH ReleaseCapture(void)
-{
-    return NtUserReleaseCapture();
-}
-
-
-/**********************************************************************
  *		GetCapture (USER32.@)
  */
 HWND WINAPI GetCapture(void)
 {
-    GUITHREADINFO info;
-    info.cbSize = sizeof(info);
-    return NtUserGetGUIThreadInfo( GetCurrentThreadId(), &info ) ? info.hwndCapture : 0;
-}
-
-
-/*****************************************************************
- *		DestroyCaret (USER32.@)
- */
-BOOL WINAPI DestroyCaret(void)
-{
-    return NtUserDestroyCaret();
+    return (HWND)NtUserGetThreadState( UserThreadStateCaptureWindow );
 }
 
 
@@ -168,7 +135,7 @@ BOOL WINAPI SetCaretBlinkTime( unsigned int time )
  */
 BOOL WINAPI GetInputState(void)
 {
-    return NtUserGetInputState();
+    return NtUserGetThreadState( UserThreadStateInputState );
 }
 
 
@@ -177,8 +144,6 @@ BOOL WINAPI GetInputState(void)
  */
 BOOL WINAPI GetLastInputInfo(PLASTINPUTINFO plii)
 {
-    BOOL ret;
-
     TRACE("%p\n", plii);
 
     if (plii->cbSize != sizeof (*plii) )
@@ -186,15 +151,8 @@ BOOL WINAPI GetLastInputInfo(PLASTINPUTINFO plii)
         SetLastError(ERROR_INVALID_PARAMETER);
         return FALSE;
     }
-
-    SERVER_START_REQ( get_last_input_time )
-    {
-        ret = !wine_server_call_err( req );
-        if (ret)
-            plii->dwTime = reply->time;
-    }
-    SERVER_END_REQ;
-    return ret;
+    plii->dwTime = NtUserGetLastInputTime();
+    return TRUE;
 }
 
 
@@ -433,6 +391,7 @@ BOOL WINAPI BlockInput(BOOL fBlockIt)
     return FALSE;
 }
 
+
 /***********************************************************************
  *		LoadKeyboardLayoutW (USER32.@)
  */
@@ -488,14 +447,16 @@ HKL WINAPI LoadKeyboardLayoutA(LPCSTR pwszKLID, UINT Flags)
     return ret;
 }
 
+
 /***********************************************************************
- *              LoadKeyboardLayoutEx (USER32.@)
+ *		LoadKeyboardLayoutEx (USER32.@)
  */
-HKL WINAPI LoadKeyboardLayoutEx(DWORD unknown, const WCHAR *locale, UINT flags)
+HKL WINAPI LoadKeyboardLayoutEx( HKL layout, const WCHAR *name, UINT flags )
 {
-    FIXME("(%ld, %s, %x) semi-stub!\n", unknown, debugstr_w(locale), flags);
-    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
-    return LoadKeyboardLayoutW(locale, flags);
+    FIXME_(keyboard)( "layout %p, name %s, flags %x, semi-stub!\n", layout, debugstr_w( name ), flags );
+
+    if (!layout) return NULL;
+    return LoadKeyboardLayoutW( name, flags );
 }
 
 /***********************************************************************
@@ -543,12 +504,30 @@ static DWORD CALLBACK devnotify_window_callbackA(HANDLE handle, DWORD flags, DEV
             return 0;
         }
 
-        default:
-            FIXME( "unimplemented W to A mapping for %#lx\n", header->dbch_devicetype );
-            /* fall through */
         case DBT_DEVTYP_HANDLE:
+        {
+            const DEV_BROADCAST_HANDLE *handleW = (const DEV_BROADCAST_HANDLE *)header;
+            UINT sizeW = handleW->dbch_size - offsetof(DEV_BROADCAST_HANDLE, dbch_data[0]), len, offset;
+            DEV_BROADCAST_HANDLE *handleA;
+
+            if (!(handleA = malloc( offsetof(DEV_BROADCAST_HANDLE, dbch_data[sizeW * 3 + 1]) ))) return 0;
+            memcpy( handleA, handleW, offsetof(DEV_BROADCAST_HANDLE, dbch_data[0]) );
+            offset = min( sizeW, handleW->dbch_nameoffset );
+
+            memcpy( handleA->dbch_data, handleW->dbch_data, offset );
+            len = WideCharToMultiByte( CP_ACP, 0, (WCHAR *)(handleW->dbch_data + offset), (sizeW - offset) / sizeof(WCHAR),
+                                       (char *)handleA->dbch_data + offset, sizeW * 3 + 1 - offset, NULL, NULL );
+            handleA->dbch_size = offsetof(DEV_BROADCAST_HANDLE, dbch_data[offset + len + 1]);
+
+            SendMessageTimeoutA( handle, WM_DEVICECHANGE, flags, (LPARAM)handleA, SMTO_ABORTIFHUNG, 2000, NULL );
+            free( handleA );
+            return 0;
+        }
+
         case DBT_DEVTYP_OEM:
             break;
+        default:
+            FIXME( "unimplemented W to A mapping for %#lx\n", header->dbch_devicetype );
         }
     }
 
@@ -556,26 +535,96 @@ static DWORD CALLBACK devnotify_window_callbackA(HANDLE handle, DWORD flags, DEV
     return 0;
 }
 
+static BOOL steam_input_get_vid_pid( UINT slot, UINT16 *vid, UINT16 *pid )
+{
+    const char *info = getenv( "SteamVirtualGamepadInfo" );
+    char buffer[256];
+    UINT current;
+    FILE *file;
+
+    TRACE( "reading SteamVirtualGamepadInfo %s\n", debugstr_a(info) );
+
+    if (!info || !(file = fopen( info, "r" ))) return FALSE;
+    while (fscanf( file, "%255[^\n]\n", buffer ) == 1)
+    {
+        if (sscanf( buffer, "[slot %d]", &current )) continue;
+        if (current < slot) continue;
+        if (current > slot) break;
+        if (sscanf( buffer, "VID=0x%hx", vid )) continue;
+        if (sscanf( buffer, "PID=0x%hx", pid )) continue;
+    }
+
+    fclose( file );
+
+    return TRUE;
+}
+
+/* CW-Bug-Id: #23185 Emulate Steam Input native hooks for native SDL */
+static BOOL steam_input_devnotify(HANDLE handle, DWORD flags, DEV_BROADCAST_HDR *header, BOOL ansi)
+{
+    char buffer[offsetof(DEV_BROADCAST_DEVICEINTERFACE_W, dbcc_name[MAX_PATH])];
+    DEV_BROADCAST_DEVICEINTERFACE_W *copyW = (DEV_BROADCAST_DEVICEINTERFACE_W *)buffer;
+
+    if (flags & 0x8000)
+    {
+        switch (header->dbch_devicetype)
+        {
+        case DBT_DEVTYP_DEVICEINTERFACE:
+        {
+            static const WCHAR steam_input_idW[] = L"\\\\?\\HID#VID_28DE&PID_11FF&IG_";
+            const DEV_BROADCAST_DEVICEINTERFACE_W *ifaceW = (const DEV_BROADCAST_DEVICEINTERFACE_W *)header;
+
+            if (!wcsnicmp( ifaceW->dbcc_name, steam_input_idW, 29 ))
+            {
+                UINT size, slot;
+                const WCHAR *tmpW;
+                UINT16 vid, pid;
+
+                copyW->dbcc_devicetype = ifaceW->dbcc_devicetype;
+                copyW->dbcc_reserved = ifaceW->dbcc_reserved;
+                copyW->dbcc_classguid = ifaceW->dbcc_classguid;
+
+                if (swscanf( ifaceW->dbcc_name + 29, L"%02u", &slot ) != 1) slot = 0;
+                if (!steam_input_get_vid_pid( slot, &vid, &pid ))
+                {
+                    vid = 0x045e;
+                    pid = 0x028e;
+                }
+
+                size = swprintf( copyW->dbcc_name, MAX_PATH, L"\\\\.\\pipe\\HID#VID_045E&PID_028E&IG_00#%04X&%04X", vid, pid );
+                if ((tmpW = wcschr( ifaceW->dbcc_name + 29, '&' )))
+                {
+                    do copyW->dbcc_name[size++] = *tmpW++;
+                    while (*tmpW != '&' && size < MAX_PATH);
+                }
+                size += swprintf( copyW->dbcc_name + size, MAX_PATH - size, L"#%d#%u", slot, (UINT)GetCurrentProcessId() );
+
+                copyW->dbcc_size = offsetof(DEV_BROADCAST_DEVICEINTERFACE_W, dbcc_name[size + 1]);
+                header = (DEV_BROADCAST_HDR *)copyW;
+            }
+        }
+        }
+    }
+
+    if (ansi) return devnotify_window_callbackA(handle, flags, header);
+    return devnotify_window_callbackW(handle, flags, header);
+}
+
+static DWORD CALLBACK steam_input_callbackW(HANDLE handle, DWORD flags, DEV_BROADCAST_HDR *header)
+{
+    return steam_input_devnotify(handle, flags, header, FALSE);
+}
+
+static DWORD CALLBACK steam_input_callbackA(HANDLE handle, DWORD flags, DEV_BROADCAST_HDR *header)
+{
+    return steam_input_devnotify(handle, flags, header, TRUE);
+}
+
 static DWORD CALLBACK devnotify_service_callback(HANDLE handle, DWORD flags, DEV_BROADCAST_HDR *header)
 {
     FIXME("Support for service handles is not yet implemented!\n");
     return 0;
 }
-
-struct device_notification_details
-{
-    DWORD (CALLBACK *cb)(HANDLE handle, DWORD flags, DEV_BROADCAST_HDR *header);
-    HANDLE handle;
-    union
-    {
-        DEV_BROADCAST_HDR header;
-        DEV_BROADCAST_DEVICEINTERFACE_W iface;
-    } filter;
-};
-
-extern HDEVNOTIFY WINAPI I_ScRegisterDeviceNotification( struct device_notification_details *details,
-        void *filter, DWORD flags );
-extern BOOL WINAPI I_ScUnregisterDeviceNotification( HDEVNOTIFY handle );
 
 /***********************************************************************
  *		RegisterDeviceNotificationA (USER32.@)
@@ -592,8 +641,8 @@ HDEVNOTIFY WINAPI RegisterDeviceNotificationA( HANDLE handle, void *filter, DWOR
  */
 HDEVNOTIFY WINAPI RegisterDeviceNotificationW( HANDLE handle, void *filter, DWORD flags )
 {
-    struct device_notification_details details;
     DEV_BROADCAST_HDR *header = filter;
+    device_notify_callback callback;
 
     TRACE_(rawinput)("handle %p, filter %p, flags %#lx\n", handle, filter, flags);
 
@@ -609,38 +658,38 @@ HDEVNOTIFY WINAPI RegisterDeviceNotificationW( HANDLE handle, void *filter, DWOR
         return NULL;
     }
 
-    if (!header) details.filter.header.dbch_devicetype = 0;
-    else if (header->dbch_devicetype == DBT_DEVTYP_DEVICEINTERFACE)
+    if (flags & DEVICE_NOTIFY_SERVICE_HANDLE)
+        callback = devnotify_service_callback;
+    else if (IsWindowUnicode( handle ))
+        callback = steam_input_callbackW;
+    else
+        callback = steam_input_callbackA;
+
+    if (!header)
     {
-        DEV_BROADCAST_DEVICEINTERFACE_W *iface = (DEV_BROADCAST_DEVICEINTERFACE_W *)header;
-        details.filter.iface = *iface;
+        DEV_BROADCAST_HDR dummy = {0};
+        return I_ScRegisterDeviceNotification( handle, &dummy, callback );
+    }
+    if (header->dbch_devicetype == DBT_DEVTYP_DEVICEINTERFACE)
+    {
+        DEV_BROADCAST_DEVICEINTERFACE_W iface = *(DEV_BROADCAST_DEVICEINTERFACE_W *)header;
 
         if (flags & DEVICE_NOTIFY_ALL_INTERFACE_CLASSES)
-            details.filter.iface.dbcc_size = offsetof( DEV_BROADCAST_DEVICEINTERFACE_W, dbcc_classguid );
+            iface.dbcc_size = offsetof( DEV_BROADCAST_DEVICEINTERFACE_W, dbcc_classguid );
         else
-            details.filter.iface.dbcc_size = offsetof( DEV_BROADCAST_DEVICEINTERFACE_W, dbcc_name );
+            iface.dbcc_size = offsetof( DEV_BROADCAST_DEVICEINTERFACE_W, dbcc_name );
+
+        return I_ScRegisterDeviceNotification( handle, (DEV_BROADCAST_HDR *)&iface, callback );
     }
-    else if (header->dbch_devicetype == DBT_DEVTYP_HANDLE)
+    if (header->dbch_devicetype == DBT_DEVTYP_HANDLE)
     {
-        FIXME( "DBT_DEVTYP_HANDLE filter type not implemented\n" );
-        details.filter.header.dbch_devicetype = 0;
-    }
-    else
-    {
-        SetLastError( ERROR_INVALID_DATA );
-        return NULL;
+        FIXME( "DBT_DEVTYP_HANDLE not implemented\n" );
+        return I_ScRegisterDeviceNotification( handle, header, callback );
     }
 
-    details.handle = handle;
-
-    if (flags & DEVICE_NOTIFY_SERVICE_HANDLE)
-        details.cb = devnotify_service_callback;
-    else if (IsWindowUnicode( handle ))
-        details.cb = devnotify_window_callbackW;
-    else
-        details.cb = devnotify_window_callbackA;
-
-    return I_ScRegisterDeviceNotification( &details, filter, 0 );
+    FIXME( "type %#lx not implemented\n", header->dbch_devicetype );
+    SetLastError( ERROR_INVALID_DATA );
+    return NULL;
 }
 
 /***********************************************************************
@@ -810,9 +859,7 @@ BOOL WINAPI SetForegroundWindow( HWND hwnd )
  */
 HWND WINAPI GetActiveWindow(void)
 {
-    GUITHREADINFO info;
-    info.cbSize = sizeof(info);
-    return NtUserGetGUIThreadInfo( GetCurrentThreadId(), &info ) ? info.hwndActive : 0;
+    return (HWND)NtUserGetThreadState( UserThreadStateActiveWindow );
 }
 
 
@@ -821,22 +868,7 @@ HWND WINAPI GetActiveWindow(void)
  */
 HWND WINAPI GetFocus(void)
 {
-    GUITHREADINFO info;
-    HWND retValueWindow;
-    static HWND prev = 0;
-    const char *sgi;
-    info.cbSize = sizeof(info);
-
-    retValueWindow = NtUserGetGUIThreadInfo( GetCurrentThreadId(), &info ) ? info.hwndFocus : 0;
-
-    if ((sgi = getenv("SteamGameId")) && !strcmp(sgi, "1222690")) {
-        if (retValueWindow == 0 && prev != 0)
-            NtUserAttachThreadInput(0, 0, 1);
-        else
-            prev = retValueWindow;
-    }
-
-    return retValueWindow;
+    return (HWND)NtUserGetThreadState( UserThreadStateFocusWindow );
 }
 
 
@@ -890,4 +922,11 @@ HWND WINAPI SetTaskmanWindow( HWND hwnd )
 HWND WINAPI GetTaskmanWindow(void)
 {
     return NtUserGetTaskmanWindow();
+}
+
+HSYNTHETICPOINTERDEVICE WINAPI CreateSyntheticPointerDevice(POINTER_INPUT_TYPE type, ULONG max_count, POINTER_FEEDBACK_MODE mode)
+{
+    FIXME( "type %ld, max_count %ld, mode %d stub!\n", type, max_count, mode);
+    SetLastError( ERROR_CALL_NOT_IMPLEMENTED );
+    return NULL;
 }

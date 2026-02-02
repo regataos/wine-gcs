@@ -66,6 +66,8 @@ IPHLPAPI_DLL_LINKAGE DWORD WINAPI GetIpStatistics(PMIB_IPSTATS pStats);
 IPHLPAPI_DLL_LINKAGE DWORD WINAPI GetIpStatisticsEx(PMIB_IPSTATS pStats, DWORD dwFamily);
 IPHLPAPI_DLL_LINKAGE DWORD WINAPI GetIcmpStatistics(PMIB_ICMP pStats);
 IPHLPAPI_DLL_LINKAGE DWORD WINAPI GetIcmpStatisticsEx(PMIB_ICMP_EX pStats, DWORD dwFamily);
+IPHLPAPI_DLL_LINKAGE DWORD WINAPI GetOwnerModuleFromTcp6Entry(PMIB_TCP6ROW_OWNER_MODULE entry, TCPIP_OWNER_MODULE_INFO_CLASS class, void *info, DWORD *size);
+IPHLPAPI_DLL_LINKAGE DWORD WINAPI GetOwnerModuleFromTcpEntry(PMIB_TCPROW_OWNER_MODULE entry, TCPIP_OWNER_MODULE_INFO_CLASS class, void *info, DWORD *size);
 IPHLPAPI_DLL_LINKAGE DWORD WINAPI GetTcpStatistics(PMIB_TCPSTATS pStats);
 IPHLPAPI_DLL_LINKAGE DWORD WINAPI GetTcpStatisticsEx(PMIB_TCPSTATS pStats, DWORD dwFamily);
 IPHLPAPI_DLL_LINKAGE ULONG WINAPI GetPerTcpConnectionEStats(MIB_TCPROW *row, TCP_ESTATS_TYPE stats, UCHAR *rw, ULONG rw_version,
@@ -95,11 +97,11 @@ IPHLPAPI_DLL_LINKAGE DWORD WINAPI GetBestInterface(IPAddr dwDestAddr, PDWORD pdw
 #ifdef __WINE_WINSOCKAPI_STDLIB_H
 IPHLPAPI_DLL_LINKAGE DWORD WINAPI GetBestInterfaceEx(
 #ifdef USE_WS_PREFIX
-    struct WS_sockaddr *pDestAddr,
+    struct WS_sockaddr *dst,
 #else
-    struct sockaddr *pDestAddr,
+    struct sockaddr *dst,
 #endif
-    PDWORD pdwBestIfIndex);
+    DWORD *best_index);
 #endif
 
 IPHLPAPI_DLL_LINKAGE DWORD WINAPI GetBestRoute(DWORD dwDestAddr, DWORD dwSourceAddr, PMIB_IPFORWARDROW pBestRoute);

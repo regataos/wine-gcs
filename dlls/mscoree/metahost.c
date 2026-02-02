@@ -129,6 +129,7 @@ MonoThread* (CDECL *mono_thread_attach)(MonoDomain *domain);
 void (CDECL *mono_thread_manage)(void);
 void (CDECL *mono_trace_set_print_handler)(MonoPrintCallback callback);
 void (CDECL *mono_trace_set_printerr_handler)(MonoPrintCallback callback);
+void (CDECL *mono_trace_set_log_handler)(MonoLogCallback callback, void *user_data);
 static MonoAssembly* (CDECL *wine_mono_assembly_load_from_gac)(MonoAssemblyName *aname, MonoImageOpenStatus *status, int refonly);
 static void (CDECL *wine_mono_install_assembly_preload_hook)(WineMonoAssemblyPreLoadFunc func, void *user_data);
 static void (CDECL *wine_mono_install_assembly_preload_hook_v2)(WineMonoAssemblyPreLoadFunc func, void *user_data);
@@ -152,6 +153,10 @@ static void CDECL set_crash_chaining_dummy(BOOL crash_chaining)
 }
 
 static void CDECL set_print_handler_dummy(MonoPrintCallback callback)
+{
+}
+
+static void CDECL set_log_handler_dummy (MonoLogCallback callback, void *user_data)
 {
 }
 
@@ -253,6 +258,7 @@ static HRESULT load_mono(LPCWSTR mono_path)
         LOAD_OPT_MONO_FUNCTION(mono_set_crash_chaining, set_crash_chaining_dummy);
         LOAD_OPT_MONO_FUNCTION(mono_trace_set_print_handler, set_print_handler_dummy);
         LOAD_OPT_MONO_FUNCTION(mono_trace_set_printerr_handler, set_print_handler_dummy);
+        LOAD_OPT_MONO_FUNCTION(mono_trace_set_log_handler, set_log_handler_dummy);
         LOAD_OPT_MONO_FUNCTION(wine_mono_assembly_load_from_gac, NULL);
         LOAD_OPT_MONO_FUNCTION(wine_mono_install_assembly_preload_hook, NULL);
         LOAD_OPT_MONO_FUNCTION(wine_mono_install_assembly_preload_hook_v2, NULL);
@@ -281,6 +287,7 @@ static HRESULT load_mono(LPCWSTR mono_path)
 
         mono_trace_set_print_handler(mono_print_handler_fn);
         mono_trace_set_printerr_handler(mono_print_handler_fn);
+        mono_trace_set_log_handler(mono_log_handler_fn, NULL);
 
         mono_set_dirs(mono_lib_path_a, mono_etc_path_a);
 
@@ -704,7 +711,7 @@ HRESULT ICLRRuntimeInfo_GetRuntimeHost(ICLRRuntimeInfo *iface, RuntimeHost **res
 
 #ifdef __i386__
 static const WCHAR libmono2_arch_dll[] = {'\\','b','i','n','\\','l','i','b','m','o','n','o','-','2','.','0','-','x','8','6','.','d','l','l',0};
-#elif defined(__x86_64__)
+#elif defined(__x86_64__) || defined(__aarch64__)
 static const WCHAR libmono2_arch_dll[] = {'\\','b','i','n','\\','l','i','b','m','o','n','o','-','2','.','0','-','x','8','6','_','6','4','.','d','l','l',0};
 #else
 static const WCHAR libmono2_arch_dll[] = {'\\','b','i','n','\\','l','i','b','m','o','n','o','-','2','.','0','.','d','l','l',0};
@@ -785,7 +792,8 @@ static BOOL get_mono_path_registry(LPWSTR path)
 static BOOL get_mono_path_dos(const WCHAR *dir, LPWSTR path)
 {
     static const WCHAR unix_prefix[] = {'\\','\\','?','\\','u','n','i','x','\\'};
-    static const WCHAR basedir[] = L"\\wine-mono-" WINE_MONO_VERSION;
+    static const WCHAR basedir[] = L"\\wine-mono";
+    static const WCHAR basedir2[] = L"\\wine-mono-" WINE_MONO_VERSION;
     LPWSTR dos_dir;
     WCHAR mono_dll_path[MAX_PATH];
     DWORD len;
@@ -804,6 +812,20 @@ static BOOL get_mono_path_dos(const WCHAR *dir, LPWSTR path)
         lstrcpyW(path, dos_dir);
 
     free(dos_dir);
+
+    if (!ret)
+    {
+        len = lstrlenW( dir ) + lstrlenW( basedir2 ) + 1;
+        if (!(dos_dir = malloc( len * sizeof(WCHAR) ))) return FALSE;
+        lstrcpyW( dos_dir, dir );
+        lstrcatW( dos_dir, basedir2 );
+
+        ret = find_mono_dll(dos_dir, mono_dll_path);
+        if (ret)
+            lstrcpyW(path, dos_dir);
+
+        free(dos_dir);
+    }
 
     return ret;
 }
@@ -835,7 +857,7 @@ static BOOL get_mono_path_datadir(LPWSTR path)
 {
     static const WCHAR winedatadirW[] = {'W','I','N','E','D','A','T','A','D','I','R',0};
     static const WCHAR winebuilddirW[] = {'W','I','N','E','B','U','I','L','D','D','I','R',0};
-    static const WCHAR unix_prefix[] = {'\\','?','?','\\','u','n','i','x','\\'};
+    static const WCHAR unix_prefix[] = {'\\','?','?','\\','u','n','i','x','\\',0};
     static const WCHAR monoW[] = {'\\','m','o','n','o',0};
     static const WCHAR dotdotmonoW[] = {'\\','.','.','\\','m','o','n','o',0};
     const WCHAR *data_dir, *suffix;
@@ -1632,7 +1654,7 @@ static DWORD get_assembly_search_flags(MonoAssemblyName *aname)
         return result;
     }
 
-    name_copy = malloc((strlen(name) + 3) * sizeof(WCHAR));
+    name_copy = malloc(strlen(name) + 3);
     if (!name_copy)
     {
         ERR("out of memory\n");

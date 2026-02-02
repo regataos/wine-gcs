@@ -1,10 +1,16 @@
-/* Automatically generated from Vulkan vk.xml; DO NOT EDIT!
+/* Automatically generated from Vulkan vk.xml and video.xml; DO NOT EDIT!
  *
  * This file is generated from Vulkan vk.xml file covered
  * by the following copyright and permission notice:
  *
- * Copyright 2015-2024 The Khronos Group Inc.
+ * Copyright 2015-2026 The Khronos Group Inc.
  *
+ * SPDX-License-Identifier: Apache-2.0 OR MIT
+ *
+ * and from Vulkan video.xml file covered
+ * by the following copyright and permission notice:
+ *
+ * Copyright 2021-2026 The Khronos Group Inc.
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  *
  */
@@ -158,6 +164,18 @@ VkResult WINAPI vkBindBufferMemory2KHR(VkDevice device, uint32_t bindInfoCount, 
     return params.result;
 }
 
+VkResult WINAPI vkBindDataGraphPipelineSessionMemoryARM(VkDevice device, uint32_t bindInfoCount, const VkBindDataGraphPipelineSessionMemoryInfoARM *pBindInfos)
+{
+    struct vkBindDataGraphPipelineSessionMemoryARM_params params;
+    NTSTATUS status;
+    params.device = device;
+    params.bindInfoCount = bindInfoCount;
+    params.pBindInfos = pBindInfos;
+    status = UNIX_CALL(vkBindDataGraphPipelineSessionMemoryARM, &params);
+    assert(!status && "vkBindDataGraphPipelineSessionMemoryARM");
+    return params.result;
+}
+
 VkResult WINAPI vkBindImageMemory(VkDevice device, VkImage image, VkDeviceMemory memory, VkDeviceSize memoryOffset)
 {
     struct vkBindImageMemory_params params;
@@ -209,6 +227,31 @@ VkResult WINAPI vkBindOpticalFlowSessionImageNV(VkDevice device, VkOpticalFlowSe
     return params.result;
 }
 
+VkResult WINAPI vkBindTensorMemoryARM(VkDevice device, uint32_t bindInfoCount, const VkBindTensorMemoryInfoARM *pBindInfos)
+{
+    struct vkBindTensorMemoryARM_params params;
+    NTSTATUS status;
+    params.device = device;
+    params.bindInfoCount = bindInfoCount;
+    params.pBindInfos = pBindInfos;
+    status = UNIX_CALL(vkBindTensorMemoryARM, &params);
+    assert(!status && "vkBindTensorMemoryARM");
+    return params.result;
+}
+
+VkResult WINAPI vkBindVideoSessionMemoryKHR(VkDevice device, VkVideoSessionKHR videoSession, uint32_t bindSessionMemoryInfoCount, const VkBindVideoSessionMemoryInfoKHR *pBindSessionMemoryInfos)
+{
+    struct vkBindVideoSessionMemoryKHR_params params;
+    NTSTATUS status;
+    params.device = device;
+    params.videoSession = videoSession;
+    params.bindSessionMemoryInfoCount = bindSessionMemoryInfoCount;
+    params.pBindSessionMemoryInfos = pBindSessionMemoryInfos;
+    status = UNIX_CALL(vkBindVideoSessionMemoryKHR, &params);
+    assert(!status && "vkBindVideoSessionMemoryKHR");
+    return params.result;
+}
+
 VkResult WINAPI vkBuildAccelerationStructuresKHR(VkDevice device, VkDeferredOperationKHR deferredOperation, uint32_t infoCount, const VkAccelerationStructureBuildGeometryInfoKHR *pInfos, const VkAccelerationStructureBuildRangeInfoKHR * const*ppBuildRangeInfos)
 {
     struct vkBuildAccelerationStructuresKHR_params params;
@@ -244,12 +287,28 @@ void WINAPI vkCmdBeginConditionalRenderingEXT(VkCommandBuffer commandBuffer, con
     UNIX_CALL(vkCmdBeginConditionalRenderingEXT, &params);
 }
 
+void WINAPI vkCmdBeginCustomResolveEXT(VkCommandBuffer commandBuffer, const VkBeginCustomResolveInfoEXT *pBeginCustomResolveInfo)
+{
+    struct vkCmdBeginCustomResolveEXT_params params;
+    params.commandBuffer = commandBuffer;
+    params.pBeginCustomResolveInfo = pBeginCustomResolveInfo;
+    UNIX_CALL(vkCmdBeginCustomResolveEXT, &params);
+}
+
 void WINAPI vkCmdBeginDebugUtilsLabelEXT(VkCommandBuffer commandBuffer, const VkDebugUtilsLabelEXT *pLabelInfo)
 {
     struct vkCmdBeginDebugUtilsLabelEXT_params params;
     params.commandBuffer = commandBuffer;
     params.pLabelInfo = pLabelInfo;
     UNIX_CALL(vkCmdBeginDebugUtilsLabelEXT, &params);
+}
+
+void WINAPI vkCmdBeginPerTileExecutionQCOM(VkCommandBuffer commandBuffer, const VkPerTileBeginInfoQCOM *pPerTileBeginInfo)
+{
+    struct vkCmdBeginPerTileExecutionQCOM_params params;
+    params.commandBuffer = commandBuffer;
+    params.pPerTileBeginInfo = pPerTileBeginInfo;
+    UNIX_CALL(vkCmdBeginPerTileExecutionQCOM, &params);
 }
 
 void WINAPI vkCmdBeginQuery(VkCommandBuffer commandBuffer, VkQueryPool queryPool, uint32_t query, VkQueryControlFlags flags)
@@ -327,6 +386,14 @@ void WINAPI vkCmdBeginTransformFeedbackEXT(VkCommandBuffer commandBuffer, uint32
     UNIX_CALL(vkCmdBeginTransformFeedbackEXT, &params);
 }
 
+void WINAPI vkCmdBeginVideoCodingKHR(VkCommandBuffer commandBuffer, const VkVideoBeginCodingInfoKHR *pBeginInfo)
+{
+    struct vkCmdBeginVideoCodingKHR_params params;
+    params.commandBuffer = commandBuffer;
+    params.pBeginInfo = pBeginInfo;
+    UNIX_CALL(vkCmdBeginVideoCodingKHR, &params);
+}
+
 void WINAPI vkCmdBindDescriptorBufferEmbeddedSamplers2EXT(VkCommandBuffer commandBuffer, const VkBindDescriptorBufferEmbeddedSamplersInfoEXT *pBindDescriptorBufferEmbeddedSamplersInfo)
 {
     struct vkCmdBindDescriptorBufferEmbeddedSamplers2EXT_params params;
@@ -368,7 +435,15 @@ void WINAPI vkCmdBindDescriptorSets(VkCommandBuffer commandBuffer, VkPipelineBin
     UNIX_CALL(vkCmdBindDescriptorSets, &params);
 }
 
-void WINAPI vkCmdBindDescriptorSets2KHR(VkCommandBuffer commandBuffer, const VkBindDescriptorSetsInfoKHR *pBindDescriptorSetsInfo)
+void WINAPI vkCmdBindDescriptorSets2(VkCommandBuffer commandBuffer, const VkBindDescriptorSetsInfo *pBindDescriptorSetsInfo)
+{
+    struct vkCmdBindDescriptorSets2_params params;
+    params.commandBuffer = commandBuffer;
+    params.pBindDescriptorSetsInfo = pBindDescriptorSetsInfo;
+    UNIX_CALL(vkCmdBindDescriptorSets2, &params);
+}
+
+void WINAPI vkCmdBindDescriptorSets2KHR(VkCommandBuffer commandBuffer, const VkBindDescriptorSetsInfo *pBindDescriptorSetsInfo)
 {
     struct vkCmdBindDescriptorSets2KHR_params params;
     params.commandBuffer = commandBuffer;
@@ -384,6 +459,17 @@ void WINAPI vkCmdBindIndexBuffer(VkCommandBuffer commandBuffer, VkBuffer buffer,
     params.offset = offset;
     params.indexType = indexType;
     UNIX_CALL(vkCmdBindIndexBuffer, &params);
+}
+
+void WINAPI vkCmdBindIndexBuffer2(VkCommandBuffer commandBuffer, VkBuffer buffer, VkDeviceSize offset, VkDeviceSize size, VkIndexType indexType)
+{
+    struct vkCmdBindIndexBuffer2_params params;
+    params.commandBuffer = commandBuffer;
+    params.buffer = buffer;
+    params.offset = offset;
+    params.size = size;
+    params.indexType = indexType;
+    UNIX_CALL(vkCmdBindIndexBuffer2, &params);
 }
 
 void WINAPI vkCmdBindIndexBuffer2KHR(VkCommandBuffer commandBuffer, VkBuffer buffer, VkDeviceSize offset, VkDeviceSize size, VkIndexType indexType)
@@ -425,6 +511,22 @@ void WINAPI vkCmdBindPipelineShaderGroupNV(VkCommandBuffer commandBuffer, VkPipe
     UNIX_CALL(vkCmdBindPipelineShaderGroupNV, &params);
 }
 
+void WINAPI vkCmdBindResourceHeapEXT(VkCommandBuffer commandBuffer, const VkBindHeapInfoEXT *pBindInfo)
+{
+    struct vkCmdBindResourceHeapEXT_params params;
+    params.commandBuffer = commandBuffer;
+    params.pBindInfo = pBindInfo;
+    UNIX_CALL(vkCmdBindResourceHeapEXT, &params);
+}
+
+void WINAPI vkCmdBindSamplerHeapEXT(VkCommandBuffer commandBuffer, const VkBindHeapInfoEXT *pBindInfo)
+{
+    struct vkCmdBindSamplerHeapEXT_params params;
+    params.commandBuffer = commandBuffer;
+    params.pBindInfo = pBindInfo;
+    UNIX_CALL(vkCmdBindSamplerHeapEXT, &params);
+}
+
 void WINAPI vkCmdBindShadersEXT(VkCommandBuffer commandBuffer, uint32_t stageCount, const VkShaderStageFlagBits *pStages, const VkShaderEXT *pShaders)
 {
     struct vkCmdBindShadersEXT_params params;
@@ -442,6 +544,14 @@ void WINAPI vkCmdBindShadingRateImageNV(VkCommandBuffer commandBuffer, VkImageVi
     params.imageView = imageView;
     params.imageLayout = imageLayout;
     UNIX_CALL(vkCmdBindShadingRateImageNV, &params);
+}
+
+void WINAPI vkCmdBindTileMemoryQCOM(VkCommandBuffer commandBuffer, const VkTileMemoryBindInfoQCOM *pTileMemoryBindInfo)
+{
+    struct vkCmdBindTileMemoryQCOM_params params;
+    params.commandBuffer = commandBuffer;
+    params.pTileMemoryBindInfo = pTileMemoryBindInfo;
+    UNIX_CALL(vkCmdBindTileMemoryQCOM, &params);
 }
 
 void WINAPI vkCmdBindTransformFeedbackBuffersEXT(VkCommandBuffer commandBuffer, uint32_t firstBinding, uint32_t bindingCount, const VkBuffer *pBuffers, const VkDeviceSize *pOffsets, const VkDeviceSize *pSizes)
@@ -560,6 +670,14 @@ void WINAPI vkCmdBuildAccelerationStructuresKHR(VkCommandBuffer commandBuffer, u
     UNIX_CALL(vkCmdBuildAccelerationStructuresKHR, &params);
 }
 
+void WINAPI vkCmdBuildClusterAccelerationStructureIndirectNV(VkCommandBuffer commandBuffer, const VkClusterAccelerationStructureCommandsInfoNV *pCommandInfos)
+{
+    struct vkCmdBuildClusterAccelerationStructureIndirectNV_params params;
+    params.commandBuffer = commandBuffer;
+    params.pCommandInfos = pCommandInfos;
+    UNIX_CALL(vkCmdBuildClusterAccelerationStructureIndirectNV, &params);
+}
+
 void WINAPI vkCmdBuildMicromapsEXT(VkCommandBuffer commandBuffer, uint32_t infoCount, const VkMicromapBuildInfoEXT *pInfos)
 {
     struct vkCmdBuildMicromapsEXT_params params;
@@ -567,6 +685,14 @@ void WINAPI vkCmdBuildMicromapsEXT(VkCommandBuffer commandBuffer, uint32_t infoC
     params.infoCount = infoCount;
     params.pInfos = pInfos;
     UNIX_CALL(vkCmdBuildMicromapsEXT, &params);
+}
+
+void WINAPI vkCmdBuildPartitionedAccelerationStructuresNV(VkCommandBuffer commandBuffer, const VkBuildPartitionedAccelerationStructureInfoNV *pBuildInfo)
+{
+    struct vkCmdBuildPartitionedAccelerationStructuresNV_params params;
+    params.commandBuffer = commandBuffer;
+    params.pBuildInfo = pBuildInfo;
+    UNIX_CALL(vkCmdBuildPartitionedAccelerationStructuresNV, &params);
 }
 
 void WINAPI vkCmdClearAttachments(VkCommandBuffer commandBuffer, uint32_t attachmentCount, const VkClearAttachment *pAttachments, uint32_t rectCount, const VkClearRect *pRects)
@@ -602,6 +728,23 @@ void WINAPI vkCmdClearDepthStencilImage(VkCommandBuffer commandBuffer, VkImage i
     params.rangeCount = rangeCount;
     params.pRanges = pRanges;
     UNIX_CALL(vkCmdClearDepthStencilImage, &params);
+}
+
+void WINAPI vkCmdControlVideoCodingKHR(VkCommandBuffer commandBuffer, const VkVideoCodingControlInfoKHR *pCodingControlInfo)
+{
+    struct vkCmdControlVideoCodingKHR_params params;
+    params.commandBuffer = commandBuffer;
+    params.pCodingControlInfo = pCodingControlInfo;
+    UNIX_CALL(vkCmdControlVideoCodingKHR, &params);
+}
+
+void WINAPI vkCmdConvertCooperativeVectorMatrixNV(VkCommandBuffer commandBuffer, uint32_t infoCount, const VkConvertCooperativeVectorMatrixInfoNV *pInfos)
+{
+    struct vkCmdConvertCooperativeVectorMatrixNV_params params;
+    params.commandBuffer = commandBuffer;
+    params.infoCount = infoCount;
+    params.pInfos = pInfos;
+    UNIX_CALL(vkCmdConvertCooperativeVectorMatrixNV, &params);
 }
 
 void WINAPI vkCmdCopyAccelerationStructureKHR(VkCommandBuffer commandBuffer, const VkCopyAccelerationStructureInfoKHR *pInfo)
@@ -742,6 +885,14 @@ void WINAPI vkCmdCopyImageToBuffer2KHR(VkCommandBuffer commandBuffer, const VkCo
     UNIX_CALL(vkCmdCopyImageToBuffer2KHR, &params);
 }
 
+void WINAPI vkCmdCopyMemoryIndirectKHR(VkCommandBuffer commandBuffer, const VkCopyMemoryIndirectInfoKHR *pCopyMemoryIndirectInfo)
+{
+    struct vkCmdCopyMemoryIndirectKHR_params params;
+    params.commandBuffer = commandBuffer;
+    params.pCopyMemoryIndirectInfo = pCopyMemoryIndirectInfo;
+    UNIX_CALL(vkCmdCopyMemoryIndirectKHR, &params);
+}
+
 void WINAPI vkCmdCopyMemoryIndirectNV(VkCommandBuffer commandBuffer, VkDeviceAddress copyBufferAddress, uint32_t copyCount, uint32_t stride)
 {
     struct vkCmdCopyMemoryIndirectNV_params params;
@@ -758,6 +909,14 @@ void WINAPI vkCmdCopyMemoryToAccelerationStructureKHR(VkCommandBuffer commandBuf
     params.commandBuffer = commandBuffer;
     params.pInfo = pInfo;
     UNIX_CALL(vkCmdCopyMemoryToAccelerationStructureKHR, &params);
+}
+
+void WINAPI vkCmdCopyMemoryToImageIndirectKHR(VkCommandBuffer commandBuffer, const VkCopyMemoryToImageIndirectInfoKHR *pCopyMemoryToImageIndirectInfo)
+{
+    struct vkCmdCopyMemoryToImageIndirectKHR_params params;
+    params.commandBuffer = commandBuffer;
+    params.pCopyMemoryToImageIndirectInfo = pCopyMemoryToImageIndirectInfo;
+    UNIX_CALL(vkCmdCopyMemoryToImageIndirectKHR, &params);
 }
 
 void WINAPI vkCmdCopyMemoryToImageIndirectNV(VkCommandBuffer commandBuffer, VkDeviceAddress copyBufferAddress, uint32_t copyCount, uint32_t stride, VkImage dstImage, VkImageLayout dstImageLayout, const VkImageSubresourceLayers *pImageSubresources)
@@ -811,20 +970,20 @@ void WINAPI vkCmdCopyQueryPoolResults(VkCommandBuffer commandBuffer, VkQueryPool
     UNIX_CALL(vkCmdCopyQueryPoolResults, &params);
 }
 
+void WINAPI vkCmdCopyTensorARM(VkCommandBuffer commandBuffer, const VkCopyTensorInfoARM *pCopyTensorInfo)
+{
+    struct vkCmdCopyTensorARM_params params;
+    params.commandBuffer = commandBuffer;
+    params.pCopyTensorInfo = pCopyTensorInfo;
+    UNIX_CALL(vkCmdCopyTensorARM, &params);
+}
+
 void WINAPI vkCmdCuLaunchKernelNVX(VkCommandBuffer commandBuffer, const VkCuLaunchInfoNVX *pLaunchInfo)
 {
     struct vkCmdCuLaunchKernelNVX_params params;
     params.commandBuffer = commandBuffer;
     params.pLaunchInfo = pLaunchInfo;
     UNIX_CALL(vkCmdCuLaunchKernelNVX, &params);
-}
-
-void WINAPI vkCmdCudaLaunchKernelNV(VkCommandBuffer commandBuffer, const VkCudaLaunchInfoNV *pLaunchInfo)
-{
-    struct vkCmdCudaLaunchKernelNV_params params;
-    params.commandBuffer = commandBuffer;
-    params.pLaunchInfo = pLaunchInfo;
-    UNIX_CALL(vkCmdCudaLaunchKernelNV, &params);
 }
 
 void WINAPI vkCmdDebugMarkerBeginEXT(VkCommandBuffer commandBuffer, const VkDebugMarkerMarkerInfoEXT *pMarkerInfo)
@@ -848,6 +1007,34 @@ void WINAPI vkCmdDebugMarkerInsertEXT(VkCommandBuffer commandBuffer, const VkDeb
     params.commandBuffer = commandBuffer;
     params.pMarkerInfo = pMarkerInfo;
     UNIX_CALL(vkCmdDebugMarkerInsertEXT, &params);
+}
+
+void WINAPI vkCmdDecodeVideoKHR(VkCommandBuffer commandBuffer, const VkVideoDecodeInfoKHR *pDecodeInfo)
+{
+    struct vkCmdDecodeVideoKHR_params params;
+    params.commandBuffer = commandBuffer;
+    params.pDecodeInfo = pDecodeInfo;
+    UNIX_CALL(vkCmdDecodeVideoKHR, &params);
+}
+
+void WINAPI vkCmdDecompressMemoryEXT(VkCommandBuffer commandBuffer, const VkDecompressMemoryInfoEXT *pDecompressMemoryInfoEXT)
+{
+    struct vkCmdDecompressMemoryEXT_params params;
+    params.commandBuffer = commandBuffer;
+    params.pDecompressMemoryInfoEXT = pDecompressMemoryInfoEXT;
+    UNIX_CALL(vkCmdDecompressMemoryEXT, &params);
+}
+
+void WINAPI vkCmdDecompressMemoryIndirectCountEXT(VkCommandBuffer commandBuffer, VkMemoryDecompressionMethodFlagsEXT decompressionMethod, VkDeviceAddress indirectCommandsAddress, VkDeviceAddress indirectCommandsCountAddress, uint32_t maxDecompressionCount, uint32_t stride)
+{
+    struct vkCmdDecompressMemoryIndirectCountEXT_params params;
+    params.commandBuffer = commandBuffer;
+    params.decompressionMethod = decompressionMethod;
+    params.indirectCommandsAddress = indirectCommandsAddress;
+    params.indirectCommandsCountAddress = indirectCommandsCountAddress;
+    params.maxDecompressionCount = maxDecompressionCount;
+    params.stride = stride;
+    UNIX_CALL(vkCmdDecompressMemoryIndirectCountEXT, &params);
 }
 
 void WINAPI vkCmdDecompressMemoryIndirectCountNV(VkCommandBuffer commandBuffer, VkDeviceAddress indirectCommandsAddress, VkDeviceAddress indirectCommandsCountAddress, uint32_t stride)
@@ -905,6 +1092,15 @@ void WINAPI vkCmdDispatchBaseKHR(VkCommandBuffer commandBuffer, uint32_t baseGro
     UNIX_CALL(vkCmdDispatchBaseKHR, &params);
 }
 
+void WINAPI vkCmdDispatchDataGraphARM(VkCommandBuffer commandBuffer, VkDataGraphPipelineSessionARM session, const VkDataGraphPipelineDispatchInfoARM *pInfo)
+{
+    struct vkCmdDispatchDataGraphARM_params params;
+    params.commandBuffer = commandBuffer;
+    params.session = session;
+    params.pInfo = pInfo;
+    UNIX_CALL(vkCmdDispatchDataGraphARM, &params);
+}
+
 void WINAPI vkCmdDispatchIndirect(VkCommandBuffer commandBuffer, VkBuffer buffer, VkDeviceSize offset)
 {
     struct vkCmdDispatchIndirect_params params;
@@ -912,6 +1108,14 @@ void WINAPI vkCmdDispatchIndirect(VkCommandBuffer commandBuffer, VkBuffer buffer
     params.buffer = buffer;
     params.offset = offset;
     UNIX_CALL(vkCmdDispatchIndirect, &params);
+}
+
+void WINAPI vkCmdDispatchTileQCOM(VkCommandBuffer commandBuffer, const VkDispatchTileInfoQCOM *pDispatchTileInfo)
+{
+    struct vkCmdDispatchTileQCOM_params params;
+    params.commandBuffer = commandBuffer;
+    params.pDispatchTileInfo = pDispatchTileInfo;
+    UNIX_CALL(vkCmdDispatchTileQCOM, &params);
 }
 
 void WINAPI vkCmdDraw(VkCommandBuffer commandBuffer, uint32_t vertexCount, uint32_t instanceCount, uint32_t firstVertex, uint32_t firstInstance)
@@ -1161,6 +1365,14 @@ void WINAPI vkCmdDrawMultiIndexedEXT(VkCommandBuffer commandBuffer, uint32_t dra
     UNIX_CALL(vkCmdDrawMultiIndexedEXT, &params);
 }
 
+void WINAPI vkCmdEncodeVideoKHR(VkCommandBuffer commandBuffer, const VkVideoEncodeInfoKHR *pEncodeInfo)
+{
+    struct vkCmdEncodeVideoKHR_params params;
+    params.commandBuffer = commandBuffer;
+    params.pEncodeInfo = pEncodeInfo;
+    UNIX_CALL(vkCmdEncodeVideoKHR, &params);
+}
+
 void WINAPI vkCmdEndConditionalRenderingEXT(VkCommandBuffer commandBuffer)
 {
     struct vkCmdEndConditionalRenderingEXT_params params;
@@ -1173,6 +1385,14 @@ void WINAPI vkCmdEndDebugUtilsLabelEXT(VkCommandBuffer commandBuffer)
     struct vkCmdEndDebugUtilsLabelEXT_params params;
     params.commandBuffer = commandBuffer;
     UNIX_CALL(vkCmdEndDebugUtilsLabelEXT, &params);
+}
+
+void WINAPI vkCmdEndPerTileExecutionQCOM(VkCommandBuffer commandBuffer, const VkPerTileEndInfoQCOM *pPerTileEndInfo)
+{
+    struct vkCmdEndPerTileExecutionQCOM_params params;
+    params.commandBuffer = commandBuffer;
+    params.pPerTileEndInfo = pPerTileEndInfo;
+    UNIX_CALL(vkCmdEndPerTileExecutionQCOM, &params);
 }
 
 void WINAPI vkCmdEndQuery(VkCommandBuffer commandBuffer, VkQueryPool queryPool, uint32_t query)
@@ -1224,6 +1444,22 @@ void WINAPI vkCmdEndRendering(VkCommandBuffer commandBuffer)
     UNIX_CALL(vkCmdEndRendering, &params);
 }
 
+void WINAPI vkCmdEndRendering2EXT(VkCommandBuffer commandBuffer, const VkRenderingEndInfoKHR *pRenderingEndInfo)
+{
+    struct vkCmdEndRendering2EXT_params params;
+    params.commandBuffer = commandBuffer;
+    params.pRenderingEndInfo = pRenderingEndInfo;
+    UNIX_CALL(vkCmdEndRendering2EXT, &params);
+}
+
+void WINAPI vkCmdEndRendering2KHR(VkCommandBuffer commandBuffer, const VkRenderingEndInfoKHR *pRenderingEndInfo)
+{
+    struct vkCmdEndRendering2KHR_params params;
+    params.commandBuffer = commandBuffer;
+    params.pRenderingEndInfo = pRenderingEndInfo;
+    UNIX_CALL(vkCmdEndRendering2KHR, &params);
+}
+
 void WINAPI vkCmdEndRenderingKHR(VkCommandBuffer commandBuffer)
 {
     struct vkCmdEndRenderingKHR_params params;
@@ -1240,6 +1476,14 @@ void WINAPI vkCmdEndTransformFeedbackEXT(VkCommandBuffer commandBuffer, uint32_t
     params.pCounterBuffers = pCounterBuffers;
     params.pCounterBufferOffsets = pCounterBufferOffsets;
     UNIX_CALL(vkCmdEndTransformFeedbackEXT, &params);
+}
+
+void WINAPI vkCmdEndVideoCodingKHR(VkCommandBuffer commandBuffer, const VkVideoEndCodingInfoKHR *pEndCodingInfo)
+{
+    struct vkCmdEndVideoCodingKHR_params params;
+    params.commandBuffer = commandBuffer;
+    params.pEndCodingInfo = pEndCodingInfo;
+    UNIX_CALL(vkCmdEndVideoCodingKHR, &params);
 }
 
 void WINAPI vkCmdExecuteCommands(VkCommandBuffer commandBuffer, uint32_t commandBufferCount, const VkCommandBuffer *pCommandBuffers)
@@ -1384,7 +1628,15 @@ void WINAPI vkCmdPushConstants(VkCommandBuffer commandBuffer, VkPipelineLayout l
     UNIX_CALL(vkCmdPushConstants, &params);
 }
 
-void WINAPI vkCmdPushConstants2KHR(VkCommandBuffer commandBuffer, const VkPushConstantsInfoKHR *pPushConstantsInfo)
+void WINAPI vkCmdPushConstants2(VkCommandBuffer commandBuffer, const VkPushConstantsInfo *pPushConstantsInfo)
+{
+    struct vkCmdPushConstants2_params params;
+    params.commandBuffer = commandBuffer;
+    params.pPushConstantsInfo = pPushConstantsInfo;
+    UNIX_CALL(vkCmdPushConstants2, &params);
+}
+
+void WINAPI vkCmdPushConstants2KHR(VkCommandBuffer commandBuffer, const VkPushConstantsInfo *pPushConstantsInfo)
 {
     struct vkCmdPushConstants2KHR_params params;
     params.commandBuffer = commandBuffer;
@@ -1392,7 +1644,35 @@ void WINAPI vkCmdPushConstants2KHR(VkCommandBuffer commandBuffer, const VkPushCo
     UNIX_CALL(vkCmdPushConstants2KHR, &params);
 }
 
-void WINAPI vkCmdPushDescriptorSet2KHR(VkCommandBuffer commandBuffer, const VkPushDescriptorSetInfoKHR *pPushDescriptorSetInfo)
+void WINAPI vkCmdPushDataEXT(VkCommandBuffer commandBuffer, const VkPushDataInfoEXT *pPushDataInfo)
+{
+    struct vkCmdPushDataEXT_params params;
+    params.commandBuffer = commandBuffer;
+    params.pPushDataInfo = pPushDataInfo;
+    UNIX_CALL(vkCmdPushDataEXT, &params);
+}
+
+void WINAPI vkCmdPushDescriptorSet(VkCommandBuffer commandBuffer, VkPipelineBindPoint pipelineBindPoint, VkPipelineLayout layout, uint32_t set, uint32_t descriptorWriteCount, const VkWriteDescriptorSet *pDescriptorWrites)
+{
+    struct vkCmdPushDescriptorSet_params params;
+    params.commandBuffer = commandBuffer;
+    params.pipelineBindPoint = pipelineBindPoint;
+    params.layout = layout;
+    params.set = set;
+    params.descriptorWriteCount = descriptorWriteCount;
+    params.pDescriptorWrites = pDescriptorWrites;
+    UNIX_CALL(vkCmdPushDescriptorSet, &params);
+}
+
+void WINAPI vkCmdPushDescriptorSet2(VkCommandBuffer commandBuffer, const VkPushDescriptorSetInfo *pPushDescriptorSetInfo)
+{
+    struct vkCmdPushDescriptorSet2_params params;
+    params.commandBuffer = commandBuffer;
+    params.pPushDescriptorSetInfo = pPushDescriptorSetInfo;
+    UNIX_CALL(vkCmdPushDescriptorSet2, &params);
+}
+
+void WINAPI vkCmdPushDescriptorSet2KHR(VkCommandBuffer commandBuffer, const VkPushDescriptorSetInfo *pPushDescriptorSetInfo)
 {
     struct vkCmdPushDescriptorSet2KHR_params params;
     params.commandBuffer = commandBuffer;
@@ -1412,7 +1692,26 @@ void WINAPI vkCmdPushDescriptorSetKHR(VkCommandBuffer commandBuffer, VkPipelineB
     UNIX_CALL(vkCmdPushDescriptorSetKHR, &params);
 }
 
-void WINAPI vkCmdPushDescriptorSetWithTemplate2KHR(VkCommandBuffer commandBuffer, const VkPushDescriptorSetWithTemplateInfoKHR *pPushDescriptorSetWithTemplateInfo)
+void WINAPI vkCmdPushDescriptorSetWithTemplate(VkCommandBuffer commandBuffer, VkDescriptorUpdateTemplate descriptorUpdateTemplate, VkPipelineLayout layout, uint32_t set, const void *pData)
+{
+    struct vkCmdPushDescriptorSetWithTemplate_params params;
+    params.commandBuffer = commandBuffer;
+    params.descriptorUpdateTemplate = descriptorUpdateTemplate;
+    params.layout = layout;
+    params.set = set;
+    params.pData = pData;
+    UNIX_CALL(vkCmdPushDescriptorSetWithTemplate, &params);
+}
+
+void WINAPI vkCmdPushDescriptorSetWithTemplate2(VkCommandBuffer commandBuffer, const VkPushDescriptorSetWithTemplateInfo *pPushDescriptorSetWithTemplateInfo)
+{
+    struct vkCmdPushDescriptorSetWithTemplate2_params params;
+    params.commandBuffer = commandBuffer;
+    params.pPushDescriptorSetWithTemplateInfo = pPushDescriptorSetWithTemplateInfo;
+    UNIX_CALL(vkCmdPushDescriptorSetWithTemplate2, &params);
+}
+
+void WINAPI vkCmdPushDescriptorSetWithTemplate2KHR(VkCommandBuffer commandBuffer, const VkPushDescriptorSetWithTemplateInfo *pPushDescriptorSetWithTemplateInfo)
 {
     struct vkCmdPushDescriptorSetWithTemplate2KHR_params params;
     params.commandBuffer = commandBuffer;
@@ -1594,6 +1893,14 @@ void WINAPI vkCmdSetColorWriteMaskEXT(VkCommandBuffer commandBuffer, uint32_t fi
     params.attachmentCount = attachmentCount;
     params.pColorWriteMasks = pColorWriteMasks;
     UNIX_CALL(vkCmdSetColorWriteMaskEXT, &params);
+}
+
+void WINAPI vkCmdSetComputeOccupancyPriorityNV(VkCommandBuffer commandBuffer, const VkComputeOccupancyPriorityParametersNV *pParameters)
+{
+    struct vkCmdSetComputeOccupancyPriorityNV_params params;
+    params.commandBuffer = commandBuffer;
+    params.pParameters = pParameters;
+    UNIX_CALL(vkCmdSetComputeOccupancyPriorityNV, &params);
 }
 
 void WINAPI vkCmdSetConservativeRasterizationModeEXT(VkCommandBuffer commandBuffer, VkConservativeRasterizationModeEXT conservativeRasterizationMode)
@@ -1969,6 +2276,15 @@ void WINAPI vkCmdSetLineRasterizationModeEXT(VkCommandBuffer commandBuffer, VkLi
     UNIX_CALL(vkCmdSetLineRasterizationModeEXT, &params);
 }
 
+void WINAPI vkCmdSetLineStipple(VkCommandBuffer commandBuffer, uint32_t lineStippleFactor, uint16_t lineStipplePattern)
+{
+    struct vkCmdSetLineStipple_params params;
+    params.commandBuffer = commandBuffer;
+    params.lineStippleFactor = lineStippleFactor;
+    params.lineStipplePattern = lineStipplePattern;
+    UNIX_CALL(vkCmdSetLineStipple, &params);
+}
+
 void WINAPI vkCmdSetLineStippleEXT(VkCommandBuffer commandBuffer, uint32_t lineStippleFactor, uint16_t lineStipplePattern)
 {
     struct vkCmdSetLineStippleEXT_params params;
@@ -2148,7 +2464,15 @@ void WINAPI vkCmdSetRayTracingPipelineStackSizeKHR(VkCommandBuffer commandBuffer
     UNIX_CALL(vkCmdSetRayTracingPipelineStackSizeKHR, &params);
 }
 
-void WINAPI vkCmdSetRenderingAttachmentLocationsKHR(VkCommandBuffer commandBuffer, const VkRenderingAttachmentLocationInfoKHR *pLocationInfo)
+void WINAPI vkCmdSetRenderingAttachmentLocations(VkCommandBuffer commandBuffer, const VkRenderingAttachmentLocationInfo *pLocationInfo)
+{
+    struct vkCmdSetRenderingAttachmentLocations_params params;
+    params.commandBuffer = commandBuffer;
+    params.pLocationInfo = pLocationInfo;
+    UNIX_CALL(vkCmdSetRenderingAttachmentLocations, &params);
+}
+
+void WINAPI vkCmdSetRenderingAttachmentLocationsKHR(VkCommandBuffer commandBuffer, const VkRenderingAttachmentLocationInfo *pLocationInfo)
 {
     struct vkCmdSetRenderingAttachmentLocationsKHR_params params;
     params.commandBuffer = commandBuffer;
@@ -2156,7 +2480,15 @@ void WINAPI vkCmdSetRenderingAttachmentLocationsKHR(VkCommandBuffer commandBuffe
     UNIX_CALL(vkCmdSetRenderingAttachmentLocationsKHR, &params);
 }
 
-void WINAPI vkCmdSetRenderingInputAttachmentIndicesKHR(VkCommandBuffer commandBuffer, const VkRenderingInputAttachmentIndexInfoKHR *pInputAttachmentIndexInfo)
+void WINAPI vkCmdSetRenderingInputAttachmentIndices(VkCommandBuffer commandBuffer, const VkRenderingInputAttachmentIndexInfo *pInputAttachmentIndexInfo)
+{
+    struct vkCmdSetRenderingInputAttachmentIndices_params params;
+    params.commandBuffer = commandBuffer;
+    params.pInputAttachmentIndexInfo = pInputAttachmentIndexInfo;
+    UNIX_CALL(vkCmdSetRenderingInputAttachmentIndices, &params);
+}
+
+void WINAPI vkCmdSetRenderingInputAttachmentIndicesKHR(VkCommandBuffer commandBuffer, const VkRenderingInputAttachmentIndexInfo *pInputAttachmentIndexInfo)
 {
     struct vkCmdSetRenderingInputAttachmentIndicesKHR_params params;
     params.commandBuffer = commandBuffer;
@@ -2604,6 +2936,17 @@ VkResult WINAPI vkCompileDeferredNV(VkDevice device, VkPipeline pipeline, uint32
     return params.result;
 }
 
+VkResult WINAPI vkConvertCooperativeVectorMatrixNV(VkDevice device, const VkConvertCooperativeVectorMatrixInfoNV *pInfo)
+{
+    struct vkConvertCooperativeVectorMatrixNV_params params;
+    NTSTATUS status;
+    params.device = device;
+    params.pInfo = pInfo;
+    status = UNIX_CALL(vkConvertCooperativeVectorMatrixNV, &params);
+    assert(!status && "vkConvertCooperativeVectorMatrixNV");
+    return params.result;
+}
+
 VkResult WINAPI vkCopyAccelerationStructureKHR(VkDevice device, VkDeferredOperationKHR deferredOperation, const VkCopyAccelerationStructureInfoKHR *pInfo)
 {
     struct vkCopyAccelerationStructureKHR_params params;
@@ -2628,7 +2971,18 @@ VkResult WINAPI vkCopyAccelerationStructureToMemoryKHR(VkDevice device, VkDeferr
     return params.result;
 }
 
-VkResult WINAPI vkCopyImageToImageEXT(VkDevice device, const VkCopyImageToImageInfoEXT *pCopyImageToImageInfo)
+VkResult WINAPI vkCopyImageToImage(VkDevice device, const VkCopyImageToImageInfo *pCopyImageToImageInfo)
+{
+    struct vkCopyImageToImage_params params;
+    NTSTATUS status;
+    params.device = device;
+    params.pCopyImageToImageInfo = pCopyImageToImageInfo;
+    status = UNIX_CALL(vkCopyImageToImage, &params);
+    assert(!status && "vkCopyImageToImage");
+    return params.result;
+}
+
+VkResult WINAPI vkCopyImageToImageEXT(VkDevice device, const VkCopyImageToImageInfo *pCopyImageToImageInfo)
 {
     struct vkCopyImageToImageEXT_params params;
     NTSTATUS status;
@@ -2639,7 +2993,18 @@ VkResult WINAPI vkCopyImageToImageEXT(VkDevice device, const VkCopyImageToImageI
     return params.result;
 }
 
-VkResult WINAPI vkCopyImageToMemoryEXT(VkDevice device, const VkCopyImageToMemoryInfoEXT *pCopyImageToMemoryInfo)
+VkResult WINAPI vkCopyImageToMemory(VkDevice device, const VkCopyImageToMemoryInfo *pCopyImageToMemoryInfo)
+{
+    struct vkCopyImageToMemory_params params;
+    NTSTATUS status;
+    params.device = device;
+    params.pCopyImageToMemoryInfo = pCopyImageToMemoryInfo;
+    status = UNIX_CALL(vkCopyImageToMemory, &params);
+    assert(!status && "vkCopyImageToMemory");
+    return params.result;
+}
+
+VkResult WINAPI vkCopyImageToMemoryEXT(VkDevice device, const VkCopyImageToMemoryInfo *pCopyImageToMemoryInfo)
 {
     struct vkCopyImageToMemoryEXT_params params;
     NTSTATUS status;
@@ -2662,7 +3027,18 @@ VkResult WINAPI vkCopyMemoryToAccelerationStructureKHR(VkDevice device, VkDeferr
     return params.result;
 }
 
-VkResult WINAPI vkCopyMemoryToImageEXT(VkDevice device, const VkCopyMemoryToImageInfoEXT *pCopyMemoryToImageInfo)
+VkResult WINAPI vkCopyMemoryToImage(VkDevice device, const VkCopyMemoryToImageInfo *pCopyMemoryToImageInfo)
+{
+    struct vkCopyMemoryToImage_params params;
+    NTSTATUS status;
+    params.device = device;
+    params.pCopyMemoryToImageInfo = pCopyMemoryToImageInfo;
+    status = UNIX_CALL(vkCopyMemoryToImage, &params);
+    assert(!status && "vkCopyMemoryToImage");
+    return params.result;
+}
+
+VkResult WINAPI vkCopyMemoryToImageEXT(VkDevice device, const VkCopyMemoryToImageInfo *pCopyMemoryToImageInfo)
 {
     struct vkCopyMemoryToImageEXT_params params;
     NTSTATUS status;
@@ -2802,29 +3178,32 @@ VkResult WINAPI vkCreateCuModuleNVX(VkDevice device, const VkCuModuleCreateInfoN
     return params.result;
 }
 
-VkResult WINAPI vkCreateCudaFunctionNV(VkDevice device, const VkCudaFunctionCreateInfoNV *pCreateInfo, const VkAllocationCallbacks *pAllocator, VkCudaFunctionNV *pFunction)
+VkResult WINAPI vkCreateDataGraphPipelineSessionARM(VkDevice device, const VkDataGraphPipelineSessionCreateInfoARM *pCreateInfo, const VkAllocationCallbacks *pAllocator, VkDataGraphPipelineSessionARM *pSession)
 {
-    struct vkCreateCudaFunctionNV_params params;
+    struct vkCreateDataGraphPipelineSessionARM_params params;
     NTSTATUS status;
     params.device = device;
     params.pCreateInfo = pCreateInfo;
     params.pAllocator = pAllocator;
-    params.pFunction = pFunction;
-    status = UNIX_CALL(vkCreateCudaFunctionNV, &params);
-    assert(!status && "vkCreateCudaFunctionNV");
+    params.pSession = pSession;
+    status = UNIX_CALL(vkCreateDataGraphPipelineSessionARM, &params);
+    assert(!status && "vkCreateDataGraphPipelineSessionARM");
     return params.result;
 }
 
-VkResult WINAPI vkCreateCudaModuleNV(VkDevice device, const VkCudaModuleCreateInfoNV *pCreateInfo, const VkAllocationCallbacks *pAllocator, VkCudaModuleNV *pModule)
+VkResult WINAPI vkCreateDataGraphPipelinesARM(VkDevice device, VkDeferredOperationKHR deferredOperation, VkPipelineCache pipelineCache, uint32_t createInfoCount, const VkDataGraphPipelineCreateInfoARM *pCreateInfos, const VkAllocationCallbacks *pAllocator, VkPipeline *pPipelines)
 {
-    struct vkCreateCudaModuleNV_params params;
+    struct vkCreateDataGraphPipelinesARM_params params;
     NTSTATUS status;
     params.device = device;
-    params.pCreateInfo = pCreateInfo;
+    params.deferredOperation = deferredOperation;
+    params.pipelineCache = pipelineCache;
+    params.createInfoCount = createInfoCount;
+    params.pCreateInfos = pCreateInfos;
     params.pAllocator = pAllocator;
-    params.pModule = pModule;
-    status = UNIX_CALL(vkCreateCudaModuleNV, &params);
-    assert(!status && "vkCreateCudaModuleNV");
+    params.pPipelines = pPipelines;
+    status = UNIX_CALL(vkCreateDataGraphPipelinesARM, &params);
+    assert(!status && "vkCreateDataGraphPipelinesARM");
     return params.result;
 }
 
@@ -3303,6 +3682,32 @@ VkResult WINAPI vkCreateSwapchainKHR(VkDevice device, const VkSwapchainCreateInf
     return params.result;
 }
 
+VkResult WINAPI vkCreateTensorARM(VkDevice device, const VkTensorCreateInfoARM *pCreateInfo, const VkAllocationCallbacks *pAllocator, VkTensorARM *pTensor)
+{
+    struct vkCreateTensorARM_params params;
+    NTSTATUS status;
+    params.device = device;
+    params.pCreateInfo = pCreateInfo;
+    params.pAllocator = pAllocator;
+    params.pTensor = pTensor;
+    status = UNIX_CALL(vkCreateTensorARM, &params);
+    assert(!status && "vkCreateTensorARM");
+    return params.result;
+}
+
+VkResult WINAPI vkCreateTensorViewARM(VkDevice device, const VkTensorViewCreateInfoARM *pCreateInfo, const VkAllocationCallbacks *pAllocator, VkTensorViewARM *pView)
+{
+    struct vkCreateTensorViewARM_params params;
+    NTSTATUS status;
+    params.device = device;
+    params.pCreateInfo = pCreateInfo;
+    params.pAllocator = pAllocator;
+    params.pView = pView;
+    status = UNIX_CALL(vkCreateTensorViewARM, &params);
+    assert(!status && "vkCreateTensorViewARM");
+    return params.result;
+}
+
 VkResult WINAPI vkCreateValidationCacheEXT(VkDevice device, const VkValidationCacheCreateInfoEXT *pCreateInfo, const VkAllocationCallbacks *pAllocator, VkValidationCacheEXT *pValidationCache)
 {
     struct vkCreateValidationCacheEXT_params params;
@@ -3313,6 +3718,32 @@ VkResult WINAPI vkCreateValidationCacheEXT(VkDevice device, const VkValidationCa
     params.pValidationCache = pValidationCache;
     status = UNIX_CALL(vkCreateValidationCacheEXT, &params);
     assert(!status && "vkCreateValidationCacheEXT");
+    return params.result;
+}
+
+VkResult WINAPI vkCreateVideoSessionKHR(VkDevice device, const VkVideoSessionCreateInfoKHR *pCreateInfo, const VkAllocationCallbacks *pAllocator, VkVideoSessionKHR *pVideoSession)
+{
+    struct vkCreateVideoSessionKHR_params params;
+    NTSTATUS status;
+    params.device = device;
+    params.pCreateInfo = pCreateInfo;
+    params.pAllocator = pAllocator;
+    params.pVideoSession = pVideoSession;
+    status = UNIX_CALL(vkCreateVideoSessionKHR, &params);
+    assert(!status && "vkCreateVideoSessionKHR");
+    return params.result;
+}
+
+VkResult WINAPI vkCreateVideoSessionParametersKHR(VkDevice device, const VkVideoSessionParametersCreateInfoKHR *pCreateInfo, const VkAllocationCallbacks *pAllocator, VkVideoSessionParametersKHR *pVideoSessionParameters)
+{
+    struct vkCreateVideoSessionParametersKHR_params params;
+    NTSTATUS status;
+    params.device = device;
+    params.pCreateInfo = pCreateInfo;
+    params.pAllocator = pAllocator;
+    params.pVideoSessionParameters = pVideoSessionParameters;
+    status = UNIX_CALL(vkCreateVideoSessionParametersKHR, &params);
+    assert(!status && "vkCreateVideoSessionParametersKHR");
     return params.result;
 }
 
@@ -3444,26 +3875,15 @@ void WINAPI vkDestroyCuModuleNVX(VkDevice device, VkCuModuleNVX module, const Vk
     assert(!status && "vkDestroyCuModuleNVX");
 }
 
-void WINAPI vkDestroyCudaFunctionNV(VkDevice device, VkCudaFunctionNV function, const VkAllocationCallbacks *pAllocator)
+void WINAPI vkDestroyDataGraphPipelineSessionARM(VkDevice device, VkDataGraphPipelineSessionARM session, const VkAllocationCallbacks *pAllocator)
 {
-    struct vkDestroyCudaFunctionNV_params params;
+    struct vkDestroyDataGraphPipelineSessionARM_params params;
     NTSTATUS status;
     params.device = device;
-    params.function = function;
+    params.session = session;
     params.pAllocator = pAllocator;
-    status = UNIX_CALL(vkDestroyCudaFunctionNV, &params);
-    assert(!status && "vkDestroyCudaFunctionNV");
-}
-
-void WINAPI vkDestroyCudaModuleNV(VkDevice device, VkCudaModuleNV module, const VkAllocationCallbacks *pAllocator)
-{
-    struct vkDestroyCudaModuleNV_params params;
-    NTSTATUS status;
-    params.device = device;
-    params.module = module;
-    params.pAllocator = pAllocator;
-    status = UNIX_CALL(vkDestroyCudaModuleNV, &params);
-    assert(!status && "vkDestroyCudaModuleNV");
+    status = UNIX_CALL(vkDestroyDataGraphPipelineSessionARM, &params);
+    assert(!status && "vkDestroyDataGraphPipelineSessionARM");
 }
 
 void WINAPI vkDestroyDebugReportCallbackEXT(VkInstance instance, VkDebugReportCallbackEXT callback, const VkAllocationCallbacks *pAllocator)
@@ -3829,6 +4249,28 @@ void WINAPI vkDestroySwapchainKHR(VkDevice device, VkSwapchainKHR swapchain, con
     assert(!status && "vkDestroySwapchainKHR");
 }
 
+void WINAPI vkDestroyTensorARM(VkDevice device, VkTensorARM tensor, const VkAllocationCallbacks *pAllocator)
+{
+    struct vkDestroyTensorARM_params params;
+    NTSTATUS status;
+    params.device = device;
+    params.tensor = tensor;
+    params.pAllocator = pAllocator;
+    status = UNIX_CALL(vkDestroyTensorARM, &params);
+    assert(!status && "vkDestroyTensorARM");
+}
+
+void WINAPI vkDestroyTensorViewARM(VkDevice device, VkTensorViewARM tensorView, const VkAllocationCallbacks *pAllocator)
+{
+    struct vkDestroyTensorViewARM_params params;
+    NTSTATUS status;
+    params.device = device;
+    params.tensorView = tensorView;
+    params.pAllocator = pAllocator;
+    status = UNIX_CALL(vkDestroyTensorViewARM, &params);
+    assert(!status && "vkDestroyTensorViewARM");
+}
+
 void WINAPI vkDestroyValidationCacheEXT(VkDevice device, VkValidationCacheEXT validationCache, const VkAllocationCallbacks *pAllocator)
 {
     struct vkDestroyValidationCacheEXT_params params;
@@ -3838,6 +4280,28 @@ void WINAPI vkDestroyValidationCacheEXT(VkDevice device, VkValidationCacheEXT va
     params.pAllocator = pAllocator;
     status = UNIX_CALL(vkDestroyValidationCacheEXT, &params);
     assert(!status && "vkDestroyValidationCacheEXT");
+}
+
+void WINAPI vkDestroyVideoSessionKHR(VkDevice device, VkVideoSessionKHR videoSession, const VkAllocationCallbacks *pAllocator)
+{
+    struct vkDestroyVideoSessionKHR_params params;
+    NTSTATUS status;
+    params.device = device;
+    params.videoSession = videoSession;
+    params.pAllocator = pAllocator;
+    status = UNIX_CALL(vkDestroyVideoSessionKHR, &params);
+    assert(!status && "vkDestroyVideoSessionKHR");
+}
+
+void WINAPI vkDestroyVideoSessionParametersKHR(VkDevice device, VkVideoSessionParametersKHR videoSessionParameters, const VkAllocationCallbacks *pAllocator)
+{
+    struct vkDestroyVideoSessionParametersKHR_params params;
+    NTSTATUS status;
+    params.device = device;
+    params.videoSessionParameters = videoSessionParameters;
+    params.pAllocator = pAllocator;
+    status = UNIX_CALL(vkDestroyVideoSessionParametersKHR, &params);
+    assert(!status && "vkDestroyVideoSessionParametersKHR");
 }
 
 VkResult WINAPI vkDeviceWaitIdle(VkDevice device)
@@ -3906,6 +4370,20 @@ VkResult WINAPI vkEnumeratePhysicalDeviceGroupsKHR(VkInstance instance, uint32_t
     params.pPhysicalDeviceGroupProperties = pPhysicalDeviceGroupProperties;
     status = UNIX_CALL(vkEnumeratePhysicalDeviceGroupsKHR, &params);
     assert(!status && "vkEnumeratePhysicalDeviceGroupsKHR");
+    return params.result;
+}
+
+VkResult WINAPI vkEnumeratePhysicalDeviceQueueFamilyPerformanceCountersByRegionARM(VkPhysicalDevice physicalDevice, uint32_t queueFamilyIndex, uint32_t *pCounterCount, VkPerformanceCounterARM *pCounters, VkPerformanceCounterDescriptionARM *pCounterDescriptions)
+{
+    struct vkEnumeratePhysicalDeviceQueueFamilyPerformanceCountersByRegionARM_params params;
+    NTSTATUS status;
+    params.physicalDevice = physicalDevice;
+    params.queueFamilyIndex = queueFamilyIndex;
+    params.pCounterCount = pCounterCount;
+    params.pCounters = pCounters;
+    params.pCounterDescriptions = pCounterDescriptions;
+    status = UNIX_CALL(vkEnumeratePhysicalDeviceQueueFamilyPerformanceCountersByRegionARM, &params);
+    assert(!status && "vkEnumeratePhysicalDeviceQueueFamilyPerformanceCountersByRegionARM");
     return params.result;
 }
 
@@ -4159,17 +4637,65 @@ VkResult WINAPI vkGetCalibratedTimestampsKHR(VkDevice device, uint32_t timestamp
     return params.result;
 }
 
-VkResult WINAPI vkGetCudaModuleCacheNV(VkDevice device, VkCudaModuleNV module, size_t *pCacheSize, void *pCacheData)
+void WINAPI vkGetClusterAccelerationStructureBuildSizesNV(VkDevice device, const VkClusterAccelerationStructureInputInfoNV *pInfo, VkAccelerationStructureBuildSizesInfoKHR *pSizeInfo)
 {
-    struct vkGetCudaModuleCacheNV_params params;
+    struct vkGetClusterAccelerationStructureBuildSizesNV_params params;
     NTSTATUS status;
     params.device = device;
-    params.module = module;
-    params.pCacheSize = pCacheSize;
-    params.pCacheData = pCacheData;
-    status = UNIX_CALL(vkGetCudaModuleCacheNV, &params);
-    assert(!status && "vkGetCudaModuleCacheNV");
+    params.pInfo = pInfo;
+    params.pSizeInfo = pSizeInfo;
+    status = UNIX_CALL(vkGetClusterAccelerationStructureBuildSizesNV, &params);
+    assert(!status && "vkGetClusterAccelerationStructureBuildSizesNV");
+}
+
+VkResult WINAPI vkGetDataGraphPipelineAvailablePropertiesARM(VkDevice device, const VkDataGraphPipelineInfoARM *pPipelineInfo, uint32_t *pPropertiesCount, VkDataGraphPipelinePropertyARM *pProperties)
+{
+    struct vkGetDataGraphPipelineAvailablePropertiesARM_params params;
+    NTSTATUS status;
+    params.device = device;
+    params.pPipelineInfo = pPipelineInfo;
+    params.pPropertiesCount = pPropertiesCount;
+    params.pProperties = pProperties;
+    status = UNIX_CALL(vkGetDataGraphPipelineAvailablePropertiesARM, &params);
+    assert(!status && "vkGetDataGraphPipelineAvailablePropertiesARM");
     return params.result;
+}
+
+VkResult WINAPI vkGetDataGraphPipelinePropertiesARM(VkDevice device, const VkDataGraphPipelineInfoARM *pPipelineInfo, uint32_t propertiesCount, VkDataGraphPipelinePropertyQueryResultARM *pProperties)
+{
+    struct vkGetDataGraphPipelinePropertiesARM_params params;
+    NTSTATUS status;
+    params.device = device;
+    params.pPipelineInfo = pPipelineInfo;
+    params.propertiesCount = propertiesCount;
+    params.pProperties = pProperties;
+    status = UNIX_CALL(vkGetDataGraphPipelinePropertiesARM, &params);
+    assert(!status && "vkGetDataGraphPipelinePropertiesARM");
+    return params.result;
+}
+
+VkResult WINAPI vkGetDataGraphPipelineSessionBindPointRequirementsARM(VkDevice device, const VkDataGraphPipelineSessionBindPointRequirementsInfoARM *pInfo, uint32_t *pBindPointRequirementCount, VkDataGraphPipelineSessionBindPointRequirementARM *pBindPointRequirements)
+{
+    struct vkGetDataGraphPipelineSessionBindPointRequirementsARM_params params;
+    NTSTATUS status;
+    params.device = device;
+    params.pInfo = pInfo;
+    params.pBindPointRequirementCount = pBindPointRequirementCount;
+    params.pBindPointRequirements = pBindPointRequirements;
+    status = UNIX_CALL(vkGetDataGraphPipelineSessionBindPointRequirementsARM, &params);
+    assert(!status && "vkGetDataGraphPipelineSessionBindPointRequirementsARM");
+    return params.result;
+}
+
+void WINAPI vkGetDataGraphPipelineSessionMemoryRequirementsARM(VkDevice device, const VkDataGraphPipelineSessionMemoryRequirementsInfoARM *pInfo, VkMemoryRequirements2 *pMemoryRequirements)
+{
+    struct vkGetDataGraphPipelineSessionMemoryRequirementsARM_params params;
+    NTSTATUS status;
+    params.device = device;
+    params.pInfo = pInfo;
+    params.pMemoryRequirements = pMemoryRequirements;
+    status = UNIX_CALL(vkGetDataGraphPipelineSessionMemoryRequirementsARM, &params);
+    assert(!status && "vkGetDataGraphPipelineSessionMemoryRequirementsARM");
 }
 
 uint32_t WINAPI vkGetDeferredOperationMaxConcurrencyKHR(VkDevice device, VkDeferredOperationKHR operation)
@@ -4304,6 +4830,18 @@ void WINAPI vkGetDeviceBufferMemoryRequirementsKHR(VkDevice device, const VkDevi
     assert(!status && "vkGetDeviceBufferMemoryRequirementsKHR");
 }
 
+uint64_t WINAPI vkGetDeviceCombinedImageSamplerIndexNVX(VkDevice device, uint64_t imageViewIndex, uint64_t samplerIndex)
+{
+    struct vkGetDeviceCombinedImageSamplerIndexNVX_params params;
+    NTSTATUS status;
+    params.device = device;
+    params.imageViewIndex = imageViewIndex;
+    params.samplerIndex = samplerIndex;
+    status = UNIX_CALL(vkGetDeviceCombinedImageSamplerIndexNVX, &params);
+    assert(!status && "vkGetDeviceCombinedImageSamplerIndexNVX");
+    return params.result;
+}
+
 VkResult WINAPI vkGetDeviceFaultInfoEXT(VkDevice device, VkDeviceFaultCountsEXT *pFaultCounts, VkDeviceFaultInfoEXT *pFaultInfo)
 {
     struct vkGetDeviceFaultInfoEXT_params params;
@@ -4411,7 +4949,18 @@ void WINAPI vkGetDeviceImageSparseMemoryRequirementsKHR(VkDevice device, const V
     assert(!status && "vkGetDeviceImageSparseMemoryRequirementsKHR");
 }
 
-void WINAPI vkGetDeviceImageSubresourceLayoutKHR(VkDevice device, const VkDeviceImageSubresourceInfoKHR *pInfo, VkSubresourceLayout2KHR *pLayout)
+void WINAPI vkGetDeviceImageSubresourceLayout(VkDevice device, const VkDeviceImageSubresourceInfo *pInfo, VkSubresourceLayout2 *pLayout)
+{
+    struct vkGetDeviceImageSubresourceLayout_params params;
+    NTSTATUS status;
+    params.device = device;
+    params.pInfo = pInfo;
+    params.pLayout = pLayout;
+    status = UNIX_CALL(vkGetDeviceImageSubresourceLayout, &params);
+    assert(!status && "vkGetDeviceImageSubresourceLayout");
+}
+
+void WINAPI vkGetDeviceImageSubresourceLayoutKHR(VkDevice device, const VkDeviceImageSubresourceInfo *pInfo, VkSubresourceLayout2 *pLayout)
 {
     struct vkGetDeviceImageSubresourceLayoutKHR_params params;
     NTSTATUS status;
@@ -4501,6 +5050,17 @@ VkResult WINAPI vkGetDeviceSubpassShadingMaxWorkgroupSizeHUAWEI(VkDevice device,
     return params.result;
 }
 
+void WINAPI vkGetDeviceTensorMemoryRequirementsARM(VkDevice device, const VkDeviceTensorMemoryRequirementsARM *pInfo, VkMemoryRequirements2 *pMemoryRequirements)
+{
+    struct vkGetDeviceTensorMemoryRequirementsARM_params params;
+    NTSTATUS status;
+    params.device = device;
+    params.pInfo = pInfo;
+    params.pMemoryRequirements = pMemoryRequirements;
+    status = UNIX_CALL(vkGetDeviceTensorMemoryRequirementsARM, &params);
+    assert(!status && "vkGetDeviceTensorMemoryRequirementsARM");
+}
+
 VkResult WINAPI vkGetDynamicRenderingTilePropertiesQCOM(VkDevice device, const VkRenderingInfo *pRenderingInfo, VkTilePropertiesQCOM *pProperties)
 {
     struct vkGetDynamicRenderingTilePropertiesQCOM_params params;
@@ -4510,6 +5070,20 @@ VkResult WINAPI vkGetDynamicRenderingTilePropertiesQCOM(VkDevice device, const V
     params.pProperties = pProperties;
     status = UNIX_CALL(vkGetDynamicRenderingTilePropertiesQCOM, &params);
     assert(!status && "vkGetDynamicRenderingTilePropertiesQCOM");
+    return params.result;
+}
+
+VkResult WINAPI vkGetEncodedVideoSessionParametersKHR(VkDevice device, const VkVideoEncodeSessionParametersGetInfoKHR *pVideoSessionParametersInfo, VkVideoEncodeSessionParametersFeedbackInfoKHR *pFeedbackInfo, size_t *pDataSize, void *pData)
+{
+    struct vkGetEncodedVideoSessionParametersKHR_params params;
+    NTSTATUS status;
+    params.device = device;
+    params.pVideoSessionParametersInfo = pVideoSessionParametersInfo;
+    params.pFeedbackInfo = pFeedbackInfo;
+    params.pDataSize = pDataSize;
+    params.pData = pData;
+    status = UNIX_CALL(vkGetEncodedVideoSessionParametersKHR, &params);
+    assert(!status && "vkGetEncodedVideoSessionParametersKHR");
     return params.result;
 }
 
@@ -4603,6 +5177,19 @@ void WINAPI vkGetImageMemoryRequirements2KHR(VkDevice device, const VkImageMemor
     assert(!status && "vkGetImageMemoryRequirements2KHR");
 }
 
+VkResult WINAPI vkGetImageOpaqueCaptureDataEXT(VkDevice device, uint32_t imageCount, const VkImage *pImages, VkHostAddressRangeEXT *pDatas)
+{
+    struct vkGetImageOpaqueCaptureDataEXT_params params;
+    NTSTATUS status;
+    params.device = device;
+    params.imageCount = imageCount;
+    params.pImages = pImages;
+    params.pDatas = pDatas;
+    status = UNIX_CALL(vkGetImageOpaqueCaptureDataEXT, &params);
+    assert(!status && "vkGetImageOpaqueCaptureDataEXT");
+    return params.result;
+}
+
 VkResult WINAPI vkGetImageOpaqueCaptureDescriptorDataEXT(VkDevice device, const VkImageCaptureDescriptorDataInfoEXT *pInfo, void *pData)
 {
     struct vkGetImageOpaqueCaptureDescriptorDataEXT_params params;
@@ -4663,7 +5250,19 @@ void WINAPI vkGetImageSubresourceLayout(VkDevice device, VkImage image, const Vk
     assert(!status && "vkGetImageSubresourceLayout");
 }
 
-void WINAPI vkGetImageSubresourceLayout2EXT(VkDevice device, VkImage image, const VkImageSubresource2KHR *pSubresource, VkSubresourceLayout2KHR *pLayout)
+void WINAPI vkGetImageSubresourceLayout2(VkDevice device, VkImage image, const VkImageSubresource2 *pSubresource, VkSubresourceLayout2 *pLayout)
+{
+    struct vkGetImageSubresourceLayout2_params params;
+    NTSTATUS status;
+    params.device = device;
+    params.image = image;
+    params.pSubresource = pSubresource;
+    params.pLayout = pLayout;
+    status = UNIX_CALL(vkGetImageSubresourceLayout2, &params);
+    assert(!status && "vkGetImageSubresourceLayout2");
+}
+
+void WINAPI vkGetImageSubresourceLayout2EXT(VkDevice device, VkImage image, const VkImageSubresource2 *pSubresource, VkSubresourceLayout2 *pLayout)
 {
     struct vkGetImageSubresourceLayout2EXT_params params;
     NTSTATUS status;
@@ -4675,7 +5274,7 @@ void WINAPI vkGetImageSubresourceLayout2EXT(VkDevice device, VkImage image, cons
     assert(!status && "vkGetImageSubresourceLayout2EXT");
 }
 
-void WINAPI vkGetImageSubresourceLayout2KHR(VkDevice device, VkImage image, const VkImageSubresource2KHR *pSubresource, VkSubresourceLayout2KHR *pLayout)
+void WINAPI vkGetImageSubresourceLayout2KHR(VkDevice device, VkImage image, const VkImageSubresource2 *pSubresource, VkSubresourceLayout2 *pLayout)
 {
     struct vkGetImageSubresourceLayout2KHR_params params;
     NTSTATUS status;
@@ -4696,6 +5295,17 @@ VkResult WINAPI vkGetImageViewAddressNVX(VkDevice device, VkImageView imageView,
     params.pProperties = pProperties;
     status = UNIX_CALL(vkGetImageViewAddressNVX, &params);
     assert(!status && "vkGetImageViewAddressNVX");
+    return params.result;
+}
+
+uint64_t WINAPI vkGetImageViewHandle64NVX(VkDevice device, const VkImageViewHandleInfoNVX *pInfo)
+{
+    struct vkGetImageViewHandle64NVX_params params;
+    NTSTATUS status;
+    params.device = device;
+    params.pInfo = pInfo;
+    status = UNIX_CALL(vkGetImageViewHandle64NVX, &params);
+    assert(!status && "vkGetImageViewHandle64NVX");
     return params.result;
 }
 
@@ -4808,6 +5418,17 @@ void WINAPI vkGetMicromapBuildSizesEXT(VkDevice device, VkAccelerationStructureB
     assert(!status && "vkGetMicromapBuildSizesEXT");
 }
 
+void WINAPI vkGetPartitionedAccelerationStructuresBuildSizesNV(VkDevice device, const VkPartitionedAccelerationStructureInstancesInputNV *pInfo, VkAccelerationStructureBuildSizesInfoKHR *pSizeInfo)
+{
+    struct vkGetPartitionedAccelerationStructuresBuildSizesNV_params params;
+    NTSTATUS status;
+    params.device = device;
+    params.pInfo = pInfo;
+    params.pSizeInfo = pSizeInfo;
+    status = UNIX_CALL(vkGetPartitionedAccelerationStructuresBuildSizesNV, &params);
+    assert(!status && "vkGetPartitionedAccelerationStructuresBuildSizesNV");
+}
+
 VkResult WINAPI vkGetPerformanceParameterINTEL(VkDevice device, VkPerformanceParameterTypeINTEL parameter, VkPerformanceValueINTEL *pValue)
 {
     struct vkGetPerformanceParameterINTEL_params params;
@@ -4844,6 +5465,18 @@ VkResult WINAPI vkGetPhysicalDeviceCalibrateableTimeDomainsKHR(VkPhysicalDevice 
     return params.result;
 }
 
+VkResult WINAPI vkGetPhysicalDeviceCooperativeMatrixFlexibleDimensionsPropertiesNV(VkPhysicalDevice physicalDevice, uint32_t *pPropertyCount, VkCooperativeMatrixFlexibleDimensionsPropertiesNV *pProperties)
+{
+    struct vkGetPhysicalDeviceCooperativeMatrixFlexibleDimensionsPropertiesNV_params params;
+    NTSTATUS status;
+    params.physicalDevice = physicalDevice;
+    params.pPropertyCount = pPropertyCount;
+    params.pProperties = pProperties;
+    status = UNIX_CALL(vkGetPhysicalDeviceCooperativeMatrixFlexibleDimensionsPropertiesNV, &params);
+    assert(!status && "vkGetPhysicalDeviceCooperativeMatrixFlexibleDimensionsPropertiesNV");
+    return params.result;
+}
+
 VkResult WINAPI vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR(VkPhysicalDevice physicalDevice, uint32_t *pPropertyCount, VkCooperativeMatrixPropertiesKHR *pProperties)
 {
     struct vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR_params params;
@@ -4865,6 +5498,29 @@ VkResult WINAPI vkGetPhysicalDeviceCooperativeMatrixPropertiesNV(VkPhysicalDevic
     params.pProperties = pProperties;
     status = UNIX_CALL(vkGetPhysicalDeviceCooperativeMatrixPropertiesNV, &params);
     assert(!status && "vkGetPhysicalDeviceCooperativeMatrixPropertiesNV");
+    return params.result;
+}
+
+VkResult WINAPI vkGetPhysicalDeviceCooperativeVectorPropertiesNV(VkPhysicalDevice physicalDevice, uint32_t *pPropertyCount, VkCooperativeVectorPropertiesNV *pProperties)
+{
+    struct vkGetPhysicalDeviceCooperativeVectorPropertiesNV_params params;
+    NTSTATUS status;
+    params.physicalDevice = physicalDevice;
+    params.pPropertyCount = pPropertyCount;
+    params.pProperties = pProperties;
+    status = UNIX_CALL(vkGetPhysicalDeviceCooperativeVectorPropertiesNV, &params);
+    assert(!status && "vkGetPhysicalDeviceCooperativeVectorPropertiesNV");
+    return params.result;
+}
+
+VkDeviceSize WINAPI vkGetPhysicalDeviceDescriptorSizeEXT(VkPhysicalDevice physicalDevice, VkDescriptorType descriptorType)
+{
+    struct vkGetPhysicalDeviceDescriptorSizeEXT_params params;
+    NTSTATUS status;
+    params.physicalDevice = physicalDevice;
+    params.descriptorType = descriptorType;
+    status = UNIX_CALL(vkGetPhysicalDeviceDescriptorSizeEXT, &params);
+    assert(!status && "vkGetPhysicalDeviceDescriptorSizeEXT");
     return params.result;
 }
 
@@ -4932,6 +5588,17 @@ void WINAPI vkGetPhysicalDeviceExternalSemaphorePropertiesKHR(VkPhysicalDevice p
     params.pExternalSemaphoreProperties = pExternalSemaphoreProperties;
     status = UNIX_CALL(vkGetPhysicalDeviceExternalSemaphorePropertiesKHR, &params);
     assert(!status && "vkGetPhysicalDeviceExternalSemaphorePropertiesKHR");
+}
+
+void WINAPI vkGetPhysicalDeviceExternalTensorPropertiesARM(VkPhysicalDevice physicalDevice, const VkPhysicalDeviceExternalTensorInfoARM *pExternalTensorInfo, VkExternalTensorPropertiesARM *pExternalTensorProperties)
+{
+    struct vkGetPhysicalDeviceExternalTensorPropertiesARM_params params;
+    NTSTATUS status;
+    params.physicalDevice = physicalDevice;
+    params.pExternalTensorInfo = pExternalTensorInfo;
+    params.pExternalTensorProperties = pExternalTensorProperties;
+    status = UNIX_CALL(vkGetPhysicalDeviceExternalTensorPropertiesARM, &params);
+    assert(!status && "vkGetPhysicalDeviceExternalTensorPropertiesARM");
 }
 
 void WINAPI vkGetPhysicalDeviceFeatures(VkPhysicalDevice physicalDevice, VkPhysicalDeviceFeatures *pFeatures)
@@ -5113,6 +5780,40 @@ VkResult WINAPI vkGetPhysicalDevicePresentRectanglesKHR(VkPhysicalDevice physica
     params.pRects = pRects;
     status = UNIX_CALL(vkGetPhysicalDevicePresentRectanglesKHR, &params);
     assert(!status && "vkGetPhysicalDevicePresentRectanglesKHR");
+    return params.result;
+}
+
+void WINAPI vkGetPhysicalDeviceProperties(VkPhysicalDevice physicalDevice, VkPhysicalDeviceProperties *pProperties)
+{
+    struct vkGetPhysicalDeviceProperties_params params;
+    NTSTATUS status;
+    params.physicalDevice = physicalDevice;
+    params.pProperties = pProperties;
+    status = UNIX_CALL(vkGetPhysicalDeviceProperties, &params);
+    assert(!status && "vkGetPhysicalDeviceProperties");
+}
+
+void WINAPI vkGetPhysicalDeviceQueueFamilyDataGraphProcessingEnginePropertiesARM(VkPhysicalDevice physicalDevice, const VkPhysicalDeviceQueueFamilyDataGraphProcessingEngineInfoARM *pQueueFamilyDataGraphProcessingEngineInfo, VkQueueFamilyDataGraphProcessingEnginePropertiesARM *pQueueFamilyDataGraphProcessingEngineProperties)
+{
+    struct vkGetPhysicalDeviceQueueFamilyDataGraphProcessingEnginePropertiesARM_params params;
+    NTSTATUS status;
+    params.physicalDevice = physicalDevice;
+    params.pQueueFamilyDataGraphProcessingEngineInfo = pQueueFamilyDataGraphProcessingEngineInfo;
+    params.pQueueFamilyDataGraphProcessingEngineProperties = pQueueFamilyDataGraphProcessingEngineProperties;
+    status = UNIX_CALL(vkGetPhysicalDeviceQueueFamilyDataGraphProcessingEnginePropertiesARM, &params);
+    assert(!status && "vkGetPhysicalDeviceQueueFamilyDataGraphProcessingEnginePropertiesARM");
+}
+
+VkResult WINAPI vkGetPhysicalDeviceQueueFamilyDataGraphPropertiesARM(VkPhysicalDevice physicalDevice, uint32_t queueFamilyIndex, uint32_t *pQueueFamilyDataGraphPropertyCount, VkQueueFamilyDataGraphPropertiesARM *pQueueFamilyDataGraphProperties)
+{
+    struct vkGetPhysicalDeviceQueueFamilyDataGraphPropertiesARM_params params;
+    NTSTATUS status;
+    params.physicalDevice = physicalDevice;
+    params.queueFamilyIndex = queueFamilyIndex;
+    params.pQueueFamilyDataGraphPropertyCount = pQueueFamilyDataGraphPropertyCount;
+    params.pQueueFamilyDataGraphProperties = pQueueFamilyDataGraphProperties;
+    status = UNIX_CALL(vkGetPhysicalDeviceQueueFamilyDataGraphPropertiesARM, &params);
+    assert(!status && "vkGetPhysicalDeviceQueueFamilyDataGraphPropertiesARM");
     return params.result;
 }
 
@@ -5309,6 +6010,43 @@ VkResult WINAPI vkGetPhysicalDeviceToolPropertiesEXT(VkPhysicalDevice physicalDe
     params.pToolProperties = pToolProperties;
     status = UNIX_CALL(vkGetPhysicalDeviceToolPropertiesEXT, &params);
     assert(!status && "vkGetPhysicalDeviceToolPropertiesEXT");
+    return params.result;
+}
+
+VkResult WINAPI vkGetPhysicalDeviceVideoCapabilitiesKHR(VkPhysicalDevice physicalDevice, const VkVideoProfileInfoKHR *pVideoProfile, VkVideoCapabilitiesKHR *pCapabilities)
+{
+    struct vkGetPhysicalDeviceVideoCapabilitiesKHR_params params;
+    NTSTATUS status;
+    params.physicalDevice = physicalDevice;
+    params.pVideoProfile = pVideoProfile;
+    params.pCapabilities = pCapabilities;
+    status = UNIX_CALL(vkGetPhysicalDeviceVideoCapabilitiesKHR, &params);
+    assert(!status && "vkGetPhysicalDeviceVideoCapabilitiesKHR");
+    return params.result;
+}
+
+VkResult WINAPI vkGetPhysicalDeviceVideoEncodeQualityLevelPropertiesKHR(VkPhysicalDevice physicalDevice, const VkPhysicalDeviceVideoEncodeQualityLevelInfoKHR *pQualityLevelInfo, VkVideoEncodeQualityLevelPropertiesKHR *pQualityLevelProperties)
+{
+    struct vkGetPhysicalDeviceVideoEncodeQualityLevelPropertiesKHR_params params;
+    NTSTATUS status;
+    params.physicalDevice = physicalDevice;
+    params.pQualityLevelInfo = pQualityLevelInfo;
+    params.pQualityLevelProperties = pQualityLevelProperties;
+    status = UNIX_CALL(vkGetPhysicalDeviceVideoEncodeQualityLevelPropertiesKHR, &params);
+    assert(!status && "vkGetPhysicalDeviceVideoEncodeQualityLevelPropertiesKHR");
+    return params.result;
+}
+
+VkResult WINAPI vkGetPhysicalDeviceVideoFormatPropertiesKHR(VkPhysicalDevice physicalDevice, const VkPhysicalDeviceVideoFormatInfoKHR *pVideoFormatInfo, uint32_t *pVideoFormatPropertyCount, VkVideoFormatPropertiesKHR *pVideoFormatProperties)
+{
+    struct vkGetPhysicalDeviceVideoFormatPropertiesKHR_params params;
+    NTSTATUS status;
+    params.physicalDevice = physicalDevice;
+    params.pVideoFormatInfo = pVideoFormatInfo;
+    params.pVideoFormatPropertyCount = pVideoFormatPropertyCount;
+    params.pVideoFormatProperties = pVideoFormatProperties;
+    status = UNIX_CALL(vkGetPhysicalDeviceVideoFormatPropertiesKHR, &params);
+    assert(!status && "vkGetPhysicalDeviceVideoFormatPropertiesKHR");
     return params.result;
 }
 
@@ -5569,7 +6307,18 @@ void WINAPI vkGetRenderAreaGranularity(VkDevice device, VkRenderPass renderPass,
     assert(!status && "vkGetRenderAreaGranularity");
 }
 
-void WINAPI vkGetRenderingAreaGranularityKHR(VkDevice device, const VkRenderingAreaInfoKHR *pRenderingAreaInfo, VkExtent2D *pGranularity)
+void WINAPI vkGetRenderingAreaGranularity(VkDevice device, const VkRenderingAreaInfo *pRenderingAreaInfo, VkExtent2D *pGranularity)
+{
+    struct vkGetRenderingAreaGranularity_params params;
+    NTSTATUS status;
+    params.device = device;
+    params.pRenderingAreaInfo = pRenderingAreaInfo;
+    params.pGranularity = pGranularity;
+    status = UNIX_CALL(vkGetRenderingAreaGranularity, &params);
+    assert(!status && "vkGetRenderingAreaGranularity");
+}
+
+void WINAPI vkGetRenderingAreaGranularityKHR(VkDevice device, const VkRenderingAreaInfo *pRenderingAreaInfo, VkExtent2D *pGranularity)
 {
     struct vkGetRenderingAreaGranularityKHR_params params;
     NTSTATUS status;
@@ -5703,6 +6452,54 @@ VkResult WINAPI vkGetSwapchainImagesKHR(VkDevice device, VkSwapchainKHR swapchai
     return params.result;
 }
 
+void WINAPI vkGetTensorMemoryRequirementsARM(VkDevice device, const VkTensorMemoryRequirementsInfoARM *pInfo, VkMemoryRequirements2 *pMemoryRequirements)
+{
+    struct vkGetTensorMemoryRequirementsARM_params params;
+    NTSTATUS status;
+    params.device = device;
+    params.pInfo = pInfo;
+    params.pMemoryRequirements = pMemoryRequirements;
+    status = UNIX_CALL(vkGetTensorMemoryRequirementsARM, &params);
+    assert(!status && "vkGetTensorMemoryRequirementsARM");
+}
+
+VkResult WINAPI vkGetTensorOpaqueCaptureDataARM(VkDevice device, uint32_t tensorCount, const VkTensorARM *pTensors, VkHostAddressRangeEXT *pDatas)
+{
+    struct vkGetTensorOpaqueCaptureDataARM_params params;
+    NTSTATUS status;
+    params.device = device;
+    params.tensorCount = tensorCount;
+    params.pTensors = pTensors;
+    params.pDatas = pDatas;
+    status = UNIX_CALL(vkGetTensorOpaqueCaptureDataARM, &params);
+    assert(!status && "vkGetTensorOpaqueCaptureDataARM");
+    return params.result;
+}
+
+VkResult WINAPI vkGetTensorOpaqueCaptureDescriptorDataARM(VkDevice device, const VkTensorCaptureDescriptorDataInfoARM *pInfo, void *pData)
+{
+    struct vkGetTensorOpaqueCaptureDescriptorDataARM_params params;
+    NTSTATUS status;
+    params.device = device;
+    params.pInfo = pInfo;
+    params.pData = pData;
+    status = UNIX_CALL(vkGetTensorOpaqueCaptureDescriptorDataARM, &params);
+    assert(!status && "vkGetTensorOpaqueCaptureDescriptorDataARM");
+    return params.result;
+}
+
+VkResult WINAPI vkGetTensorViewOpaqueCaptureDescriptorDataARM(VkDevice device, const VkTensorViewCaptureDescriptorDataInfoARM *pInfo, void *pData)
+{
+    struct vkGetTensorViewOpaqueCaptureDescriptorDataARM_params params;
+    NTSTATUS status;
+    params.device = device;
+    params.pInfo = pInfo;
+    params.pData = pData;
+    status = UNIX_CALL(vkGetTensorViewOpaqueCaptureDescriptorDataARM, &params);
+    assert(!status && "vkGetTensorViewOpaqueCaptureDescriptorDataARM");
+    return params.result;
+}
+
 VkResult WINAPI vkGetValidationCacheDataEXT(VkDevice device, VkValidationCacheEXT validationCache, size_t *pDataSize, void *pData)
 {
     struct vkGetValidationCacheDataEXT_params params;
@@ -5713,6 +6510,19 @@ VkResult WINAPI vkGetValidationCacheDataEXT(VkDevice device, VkValidationCacheEX
     params.pData = pData;
     status = UNIX_CALL(vkGetValidationCacheDataEXT, &params);
     assert(!status && "vkGetValidationCacheDataEXT");
+    return params.result;
+}
+
+VkResult WINAPI vkGetVideoSessionMemoryRequirementsKHR(VkDevice device, VkVideoSessionKHR videoSession, uint32_t *pMemoryRequirementsCount, VkVideoSessionMemoryRequirementsKHR *pMemoryRequirements)
+{
+    struct vkGetVideoSessionMemoryRequirementsKHR_params params;
+    NTSTATUS status;
+    params.device = device;
+    params.videoSession = videoSession;
+    params.pMemoryRequirementsCount = pMemoryRequirementsCount;
+    params.pMemoryRequirements = pMemoryRequirements;
+    status = UNIX_CALL(vkGetVideoSessionMemoryRequirementsKHR, &params);
+    assert(!status && "vkGetVideoSessionMemoryRequirementsKHR");
     return params.result;
 }
 
@@ -5788,7 +6598,19 @@ VkResult WINAPI vkMapMemory(VkDevice device, VkDeviceMemory memory, VkDeviceSize
     return params.result;
 }
 
-VkResult WINAPI vkMapMemory2KHR(VkDevice device, const VkMemoryMapInfoKHR *pMemoryMapInfo, void **ppData)
+VkResult WINAPI vkMapMemory2(VkDevice device, const VkMemoryMapInfo *pMemoryMapInfo, void **ppData)
+{
+    struct vkMapMemory2_params params;
+    NTSTATUS status;
+    params.device = device;
+    params.pMemoryMapInfo = pMemoryMapInfo;
+    params.ppData = ppData;
+    status = UNIX_CALL(vkMapMemory2, &params);
+    assert(!status && "vkMapMemory2");
+    return params.result;
+}
+
+VkResult WINAPI vkMapMemory2KHR(VkDevice device, const VkMemoryMapInfo *pMemoryMapInfo, void **ppData)
 {
     struct vkMapMemory2KHR_params params;
     NTSTATUS status;
@@ -5949,6 +6771,19 @@ VkResult WINAPI vkQueueWaitIdle(VkQueue queue)
     return params.result;
 }
 
+VkResult WINAPI vkRegisterCustomBorderColorEXT(VkDevice device, const VkSamplerCustomBorderColorCreateInfoEXT *pBorderColor, VkBool32 requestIndex, uint32_t *pIndex)
+{
+    struct vkRegisterCustomBorderColorEXT_params params;
+    NTSTATUS status;
+    params.device = device;
+    params.pBorderColor = pBorderColor;
+    params.requestIndex = requestIndex;
+    params.pIndex = pIndex;
+    status = UNIX_CALL(vkRegisterCustomBorderColorEXT, &params);
+    assert(!status && "vkRegisterCustomBorderColorEXT");
+    return params.result;
+}
+
 VkResult WINAPI vkReleaseCapturedPipelineDataKHR(VkDevice device, const VkReleaseCapturedPipelineDataInfoKHR *pInfo, const VkAllocationCallbacks *pAllocator)
 {
     struct vkReleaseCapturedPipelineDataKHR_params params;
@@ -5981,7 +6816,7 @@ void WINAPI vkReleaseProfilingLockKHR(VkDevice device)
     assert(!status && "vkReleaseProfilingLockKHR");
 }
 
-VkResult WINAPI vkReleaseSwapchainImagesEXT(VkDevice device, const VkReleaseSwapchainImagesInfoEXT *pReleaseInfo)
+VkResult WINAPI vkReleaseSwapchainImagesEXT(VkDevice device, const VkReleaseSwapchainImagesInfoKHR *pReleaseInfo)
 {
     struct vkReleaseSwapchainImagesEXT_params params;
     NTSTATUS status;
@@ -5989,6 +6824,17 @@ VkResult WINAPI vkReleaseSwapchainImagesEXT(VkDevice device, const VkReleaseSwap
     params.pReleaseInfo = pReleaseInfo;
     status = UNIX_CALL(vkReleaseSwapchainImagesEXT, &params);
     assert(!status && "vkReleaseSwapchainImagesEXT");
+    return params.result;
+}
+
+VkResult WINAPI vkReleaseSwapchainImagesKHR(VkDevice device, const VkReleaseSwapchainImagesInfoKHR *pReleaseInfo)
+{
+    struct vkReleaseSwapchainImagesKHR_params params;
+    NTSTATUS status;
+    params.device = device;
+    params.pReleaseInfo = pReleaseInfo;
+    status = UNIX_CALL(vkReleaseSwapchainImagesKHR, &params);
+    assert(!status && "vkReleaseSwapchainImagesKHR");
     return params.result;
 }
 
@@ -6215,7 +7061,19 @@ void WINAPI vkSubmitDebugUtilsMessageEXT(VkInstance instance, VkDebugUtilsMessag
     assert(!status && "vkSubmitDebugUtilsMessageEXT");
 }
 
-VkResult WINAPI vkTransitionImageLayoutEXT(VkDevice device, uint32_t transitionCount, const VkHostImageLayoutTransitionInfoEXT *pTransitions)
+VkResult WINAPI vkTransitionImageLayout(VkDevice device, uint32_t transitionCount, const VkHostImageLayoutTransitionInfo *pTransitions)
+{
+    struct vkTransitionImageLayout_params params;
+    NTSTATUS status;
+    params.device = device;
+    params.transitionCount = transitionCount;
+    params.pTransitions = pTransitions;
+    status = UNIX_CALL(vkTransitionImageLayout, &params);
+    assert(!status && "vkTransitionImageLayout");
+    return params.result;
+}
+
+VkResult WINAPI vkTransitionImageLayoutEXT(VkDevice device, uint32_t transitionCount, const VkHostImageLayoutTransitionInfo *pTransitions)
 {
     struct vkTransitionImageLayoutEXT_params params;
     NTSTATUS status;
@@ -6268,7 +7126,18 @@ void WINAPI vkUnmapMemory(VkDevice device, VkDeviceMemory memory)
     assert(!status && "vkUnmapMemory");
 }
 
-VkResult WINAPI vkUnmapMemory2KHR(VkDevice device, const VkMemoryUnmapInfoKHR *pMemoryUnmapInfo)
+VkResult WINAPI vkUnmapMemory2(VkDevice device, const VkMemoryUnmapInfo *pMemoryUnmapInfo)
+{
+    struct vkUnmapMemory2_params params;
+    NTSTATUS status;
+    params.device = device;
+    params.pMemoryUnmapInfo = pMemoryUnmapInfo;
+    status = UNIX_CALL(vkUnmapMemory2, &params);
+    assert(!status && "vkUnmapMemory2");
+    return params.result;
+}
+
+VkResult WINAPI vkUnmapMemory2KHR(VkDevice device, const VkMemoryUnmapInfo *pMemoryUnmapInfo)
 {
     struct vkUnmapMemory2KHR_params params;
     NTSTATUS status;
@@ -6277,6 +7146,16 @@ VkResult WINAPI vkUnmapMemory2KHR(VkDevice device, const VkMemoryUnmapInfoKHR *p
     status = UNIX_CALL(vkUnmapMemory2KHR, &params);
     assert(!status && "vkUnmapMemory2KHR");
     return params.result;
+}
+
+void WINAPI vkUnregisterCustomBorderColorEXT(VkDevice device, uint32_t index)
+{
+    struct vkUnregisterCustomBorderColorEXT_params params;
+    NTSTATUS status;
+    params.device = device;
+    params.index = index;
+    status = UNIX_CALL(vkUnregisterCustomBorderColorEXT, &params);
+    assert(!status && "vkUnregisterCustomBorderColorEXT");
 }
 
 void WINAPI vkUpdateDescriptorSetWithTemplate(VkDevice device, VkDescriptorSet descriptorSet, VkDescriptorUpdateTemplate descriptorUpdateTemplate, const void *pData)
@@ -6336,6 +7215,18 @@ void WINAPI vkUpdateIndirectExecutionSetShaderEXT(VkDevice device, VkIndirectExe
     assert(!status && "vkUpdateIndirectExecutionSetShaderEXT");
 }
 
+VkResult WINAPI vkUpdateVideoSessionParametersKHR(VkDevice device, VkVideoSessionParametersKHR videoSessionParameters, const VkVideoSessionParametersUpdateInfoKHR *pUpdateInfo)
+{
+    struct vkUpdateVideoSessionParametersKHR_params params;
+    NTSTATUS status;
+    params.device = device;
+    params.videoSessionParameters = videoSessionParameters;
+    params.pUpdateInfo = pUpdateInfo;
+    status = UNIX_CALL(vkUpdateVideoSessionParametersKHR, &params);
+    assert(!status && "vkUpdateVideoSessionParametersKHR");
+    return params.result;
+}
+
 VkResult WINAPI vkWaitForFences(VkDevice device, uint32_t fenceCount, const VkFence *pFences, VkBool32 waitAll, uint64_t timeout)
 {
     struct vkWaitForFences_params params;
@@ -6347,6 +7238,18 @@ VkResult WINAPI vkWaitForFences(VkDevice device, uint32_t fenceCount, const VkFe
     params.timeout = timeout;
     status = UNIX_CALL(vkWaitForFences, &params);
     assert(!status && "vkWaitForFences");
+    return params.result;
+}
+
+VkResult WINAPI vkWaitForPresent2KHR(VkDevice device, VkSwapchainKHR swapchain, const VkPresentWait2InfoKHR *pPresentWait2Info)
+{
+    struct vkWaitForPresent2KHR_params params;
+    NTSTATUS status;
+    params.device = device;
+    params.swapchain = swapchain;
+    params.pPresentWait2Info = pPresentWait2Info;
+    status = UNIX_CALL(vkWaitForPresent2KHR, &params);
+    assert(!status && "vkWaitForPresent2KHR");
     return params.result;
 }
 
@@ -6419,6 +7322,28 @@ VkResult WINAPI vkWriteMicromapsPropertiesEXT(VkDevice device, uint32_t micromap
     return params.result;
 }
 
+VkResult WINAPI vkWriteResourceDescriptorsEXT(VkDevice device, uint32_t resourceCount, const VkResourceDescriptorInfoEXT *pResources, const VkHostAddressRangeEXT *pDescriptors)
+{
+    struct vkWriteResourceDescriptorsEXT_params params;
+    params.device = device;
+    params.resourceCount = resourceCount;
+    params.pResources = pResources;
+    params.pDescriptors = pDescriptors;
+    UNIX_CALL(vkWriteResourceDescriptorsEXT, &params);
+    return params.result;
+}
+
+VkResult WINAPI vkWriteSamplerDescriptorsEXT(VkDevice device, uint32_t samplerCount, const VkSamplerCreateInfo *pSamplers, const VkHostAddressRangeEXT *pDescriptors)
+{
+    struct vkWriteSamplerDescriptorsEXT_params params;
+    params.device = device;
+    params.samplerCount = samplerCount;
+    params.pSamplers = pSamplers;
+    params.pDescriptors = pDescriptors;
+    UNIX_CALL(vkWriteSamplerDescriptorsEXT, &params);
+    return params.result;
+}
+
 VkResult WINAPI wine_vkAcquireKeyedMutex(VkDevice device, VkDeviceMemory memory, uint64_t key, uint32_t timeout_ms)
 {
     struct wine_vkAcquireKeyedMutex_params params;
@@ -6459,14 +7384,19 @@ static const struct vulkan_func vk_device_dispatch_table[] =
     {"vkBindBufferMemory", vkBindBufferMemory},
     {"vkBindBufferMemory2", vkBindBufferMemory2},
     {"vkBindBufferMemory2KHR", vkBindBufferMemory2KHR},
+    {"vkBindDataGraphPipelineSessionMemoryARM", vkBindDataGraphPipelineSessionMemoryARM},
     {"vkBindImageMemory", vkBindImageMemory},
     {"vkBindImageMemory2", vkBindImageMemory2},
     {"vkBindImageMemory2KHR", vkBindImageMemory2KHR},
     {"vkBindOpticalFlowSessionImageNV", vkBindOpticalFlowSessionImageNV},
+    {"vkBindTensorMemoryARM", vkBindTensorMemoryARM},
+    {"vkBindVideoSessionMemoryKHR", vkBindVideoSessionMemoryKHR},
     {"vkBuildAccelerationStructuresKHR", vkBuildAccelerationStructuresKHR},
     {"vkBuildMicromapsEXT", vkBuildMicromapsEXT},
     {"vkCmdBeginConditionalRenderingEXT", vkCmdBeginConditionalRenderingEXT},
+    {"vkCmdBeginCustomResolveEXT", vkCmdBeginCustomResolveEXT},
     {"vkCmdBeginDebugUtilsLabelEXT", vkCmdBeginDebugUtilsLabelEXT},
+    {"vkCmdBeginPerTileExecutionQCOM", vkCmdBeginPerTileExecutionQCOM},
     {"vkCmdBeginQuery", vkCmdBeginQuery},
     {"vkCmdBeginQueryIndexedEXT", vkCmdBeginQueryIndexedEXT},
     {"vkCmdBeginRenderPass", vkCmdBeginRenderPass},
@@ -6475,18 +7405,24 @@ static const struct vulkan_func vk_device_dispatch_table[] =
     {"vkCmdBeginRendering", vkCmdBeginRendering},
     {"vkCmdBeginRenderingKHR", vkCmdBeginRenderingKHR},
     {"vkCmdBeginTransformFeedbackEXT", vkCmdBeginTransformFeedbackEXT},
+    {"vkCmdBeginVideoCodingKHR", vkCmdBeginVideoCodingKHR},
     {"vkCmdBindDescriptorBufferEmbeddedSamplers2EXT", vkCmdBindDescriptorBufferEmbeddedSamplers2EXT},
     {"vkCmdBindDescriptorBufferEmbeddedSamplersEXT", vkCmdBindDescriptorBufferEmbeddedSamplersEXT},
     {"vkCmdBindDescriptorBuffersEXT", vkCmdBindDescriptorBuffersEXT},
     {"vkCmdBindDescriptorSets", vkCmdBindDescriptorSets},
+    {"vkCmdBindDescriptorSets2", vkCmdBindDescriptorSets2},
     {"vkCmdBindDescriptorSets2KHR", vkCmdBindDescriptorSets2KHR},
     {"vkCmdBindIndexBuffer", vkCmdBindIndexBuffer},
+    {"vkCmdBindIndexBuffer2", vkCmdBindIndexBuffer2},
     {"vkCmdBindIndexBuffer2KHR", vkCmdBindIndexBuffer2KHR},
     {"vkCmdBindInvocationMaskHUAWEI", vkCmdBindInvocationMaskHUAWEI},
     {"vkCmdBindPipeline", vkCmdBindPipeline},
     {"vkCmdBindPipelineShaderGroupNV", vkCmdBindPipelineShaderGroupNV},
+    {"vkCmdBindResourceHeapEXT", vkCmdBindResourceHeapEXT},
+    {"vkCmdBindSamplerHeapEXT", vkCmdBindSamplerHeapEXT},
     {"vkCmdBindShadersEXT", vkCmdBindShadersEXT},
     {"vkCmdBindShadingRateImageNV", vkCmdBindShadingRateImageNV},
+    {"vkCmdBindTileMemoryQCOM", vkCmdBindTileMemoryQCOM},
     {"vkCmdBindTransformFeedbackBuffersEXT", vkCmdBindTransformFeedbackBuffersEXT},
     {"vkCmdBindVertexBuffers", vkCmdBindVertexBuffers},
     {"vkCmdBindVertexBuffers2", vkCmdBindVertexBuffers2},
@@ -6497,10 +7433,14 @@ static const struct vulkan_func vk_device_dispatch_table[] =
     {"vkCmdBuildAccelerationStructureNV", vkCmdBuildAccelerationStructureNV},
     {"vkCmdBuildAccelerationStructuresIndirectKHR", vkCmdBuildAccelerationStructuresIndirectKHR},
     {"vkCmdBuildAccelerationStructuresKHR", vkCmdBuildAccelerationStructuresKHR},
+    {"vkCmdBuildClusterAccelerationStructureIndirectNV", vkCmdBuildClusterAccelerationStructureIndirectNV},
     {"vkCmdBuildMicromapsEXT", vkCmdBuildMicromapsEXT},
+    {"vkCmdBuildPartitionedAccelerationStructuresNV", vkCmdBuildPartitionedAccelerationStructuresNV},
     {"vkCmdClearAttachments", vkCmdClearAttachments},
     {"vkCmdClearColorImage", vkCmdClearColorImage},
     {"vkCmdClearDepthStencilImage", vkCmdClearDepthStencilImage},
+    {"vkCmdControlVideoCodingKHR", vkCmdControlVideoCodingKHR},
+    {"vkCmdConvertCooperativeVectorMatrixNV", vkCmdConvertCooperativeVectorMatrixNV},
     {"vkCmdCopyAccelerationStructureKHR", vkCmdCopyAccelerationStructureKHR},
     {"vkCmdCopyAccelerationStructureNV", vkCmdCopyAccelerationStructureNV},
     {"vkCmdCopyAccelerationStructureToMemoryKHR", vkCmdCopyAccelerationStructureToMemoryKHR},
@@ -6516,24 +7456,31 @@ static const struct vulkan_func vk_device_dispatch_table[] =
     {"vkCmdCopyImageToBuffer", vkCmdCopyImageToBuffer},
     {"vkCmdCopyImageToBuffer2", vkCmdCopyImageToBuffer2},
     {"vkCmdCopyImageToBuffer2KHR", vkCmdCopyImageToBuffer2KHR},
+    {"vkCmdCopyMemoryIndirectKHR", vkCmdCopyMemoryIndirectKHR},
     {"vkCmdCopyMemoryIndirectNV", vkCmdCopyMemoryIndirectNV},
     {"vkCmdCopyMemoryToAccelerationStructureKHR", vkCmdCopyMemoryToAccelerationStructureKHR},
+    {"vkCmdCopyMemoryToImageIndirectKHR", vkCmdCopyMemoryToImageIndirectKHR},
     {"vkCmdCopyMemoryToImageIndirectNV", vkCmdCopyMemoryToImageIndirectNV},
     {"vkCmdCopyMemoryToMicromapEXT", vkCmdCopyMemoryToMicromapEXT},
     {"vkCmdCopyMicromapEXT", vkCmdCopyMicromapEXT},
     {"vkCmdCopyMicromapToMemoryEXT", vkCmdCopyMicromapToMemoryEXT},
     {"vkCmdCopyQueryPoolResults", vkCmdCopyQueryPoolResults},
+    {"vkCmdCopyTensorARM", vkCmdCopyTensorARM},
     {"vkCmdCuLaunchKernelNVX", vkCmdCuLaunchKernelNVX},
-    {"vkCmdCudaLaunchKernelNV", vkCmdCudaLaunchKernelNV},
     {"vkCmdDebugMarkerBeginEXT", vkCmdDebugMarkerBeginEXT},
     {"vkCmdDebugMarkerEndEXT", vkCmdDebugMarkerEndEXT},
     {"vkCmdDebugMarkerInsertEXT", vkCmdDebugMarkerInsertEXT},
+    {"vkCmdDecodeVideoKHR", vkCmdDecodeVideoKHR},
+    {"vkCmdDecompressMemoryEXT", vkCmdDecompressMemoryEXT},
+    {"vkCmdDecompressMemoryIndirectCountEXT", vkCmdDecompressMemoryIndirectCountEXT},
     {"vkCmdDecompressMemoryIndirectCountNV", vkCmdDecompressMemoryIndirectCountNV},
     {"vkCmdDecompressMemoryNV", vkCmdDecompressMemoryNV},
     {"vkCmdDispatch", vkCmdDispatch},
     {"vkCmdDispatchBase", vkCmdDispatchBase},
     {"vkCmdDispatchBaseKHR", vkCmdDispatchBaseKHR},
+    {"vkCmdDispatchDataGraphARM", vkCmdDispatchDataGraphARM},
     {"vkCmdDispatchIndirect", vkCmdDispatchIndirect},
+    {"vkCmdDispatchTileQCOM", vkCmdDispatchTileQCOM},
     {"vkCmdDraw", vkCmdDraw},
     {"vkCmdDrawClusterHUAWEI", vkCmdDrawClusterHUAWEI},
     {"vkCmdDrawClusterIndirectHUAWEI", vkCmdDrawClusterIndirectHUAWEI},
@@ -6555,16 +7502,21 @@ static const struct vulkan_func vk_device_dispatch_table[] =
     {"vkCmdDrawMeshTasksNV", vkCmdDrawMeshTasksNV},
     {"vkCmdDrawMultiEXT", vkCmdDrawMultiEXT},
     {"vkCmdDrawMultiIndexedEXT", vkCmdDrawMultiIndexedEXT},
+    {"vkCmdEncodeVideoKHR", vkCmdEncodeVideoKHR},
     {"vkCmdEndConditionalRenderingEXT", vkCmdEndConditionalRenderingEXT},
     {"vkCmdEndDebugUtilsLabelEXT", vkCmdEndDebugUtilsLabelEXT},
+    {"vkCmdEndPerTileExecutionQCOM", vkCmdEndPerTileExecutionQCOM},
     {"vkCmdEndQuery", vkCmdEndQuery},
     {"vkCmdEndQueryIndexedEXT", vkCmdEndQueryIndexedEXT},
     {"vkCmdEndRenderPass", vkCmdEndRenderPass},
     {"vkCmdEndRenderPass2", vkCmdEndRenderPass2},
     {"vkCmdEndRenderPass2KHR", vkCmdEndRenderPass2KHR},
     {"vkCmdEndRendering", vkCmdEndRendering},
+    {"vkCmdEndRendering2EXT", vkCmdEndRendering2EXT},
+    {"vkCmdEndRendering2KHR", vkCmdEndRendering2KHR},
     {"vkCmdEndRenderingKHR", vkCmdEndRenderingKHR},
     {"vkCmdEndTransformFeedbackEXT", vkCmdEndTransformFeedbackEXT},
+    {"vkCmdEndVideoCodingKHR", vkCmdEndVideoCodingKHR},
     {"vkCmdExecuteCommands", vkCmdExecuteCommands},
     {"vkCmdExecuteGeneratedCommandsEXT", vkCmdExecuteGeneratedCommandsEXT},
     {"vkCmdExecuteGeneratedCommandsNV", vkCmdExecuteGeneratedCommandsNV},
@@ -6580,9 +7532,15 @@ static const struct vulkan_func vk_device_dispatch_table[] =
     {"vkCmdPreprocessGeneratedCommandsEXT", vkCmdPreprocessGeneratedCommandsEXT},
     {"vkCmdPreprocessGeneratedCommandsNV", vkCmdPreprocessGeneratedCommandsNV},
     {"vkCmdPushConstants", vkCmdPushConstants},
+    {"vkCmdPushConstants2", vkCmdPushConstants2},
     {"vkCmdPushConstants2KHR", vkCmdPushConstants2KHR},
+    {"vkCmdPushDataEXT", vkCmdPushDataEXT},
+    {"vkCmdPushDescriptorSet", vkCmdPushDescriptorSet},
+    {"vkCmdPushDescriptorSet2", vkCmdPushDescriptorSet2},
     {"vkCmdPushDescriptorSet2KHR", vkCmdPushDescriptorSet2KHR},
     {"vkCmdPushDescriptorSetKHR", vkCmdPushDescriptorSetKHR},
+    {"vkCmdPushDescriptorSetWithTemplate", vkCmdPushDescriptorSetWithTemplate},
+    {"vkCmdPushDescriptorSetWithTemplate2", vkCmdPushDescriptorSetWithTemplate2},
     {"vkCmdPushDescriptorSetWithTemplate2KHR", vkCmdPushDescriptorSetWithTemplate2KHR},
     {"vkCmdPushDescriptorSetWithTemplateKHR", vkCmdPushDescriptorSetWithTemplateKHR},
     {"vkCmdResetEvent", vkCmdResetEvent},
@@ -6603,6 +7561,7 @@ static const struct vulkan_func vk_device_dispatch_table[] =
     {"vkCmdSetColorBlendEquationEXT", vkCmdSetColorBlendEquationEXT},
     {"vkCmdSetColorWriteEnableEXT", vkCmdSetColorWriteEnableEXT},
     {"vkCmdSetColorWriteMaskEXT", vkCmdSetColorWriteMaskEXT},
+    {"vkCmdSetComputeOccupancyPriorityNV", vkCmdSetComputeOccupancyPriorityNV},
     {"vkCmdSetConservativeRasterizationModeEXT", vkCmdSetConservativeRasterizationModeEXT},
     {"vkCmdSetCoverageModulationModeNV", vkCmdSetCoverageModulationModeNV},
     {"vkCmdSetCoverageModulationTableEnableNV", vkCmdSetCoverageModulationTableEnableNV},
@@ -6647,6 +7606,7 @@ static const struct vulkan_func vk_device_dispatch_table[] =
     {"vkCmdSetFrontFace", vkCmdSetFrontFace},
     {"vkCmdSetFrontFaceEXT", vkCmdSetFrontFaceEXT},
     {"vkCmdSetLineRasterizationModeEXT", vkCmdSetLineRasterizationModeEXT},
+    {"vkCmdSetLineStipple", vkCmdSetLineStipple},
     {"vkCmdSetLineStippleEXT", vkCmdSetLineStippleEXT},
     {"vkCmdSetLineStippleEnableEXT", vkCmdSetLineStippleEnableEXT},
     {"vkCmdSetLineStippleKHR", vkCmdSetLineStippleKHR},
@@ -6668,7 +7628,9 @@ static const struct vulkan_func vk_device_dispatch_table[] =
     {"vkCmdSetRasterizerDiscardEnable", vkCmdSetRasterizerDiscardEnable},
     {"vkCmdSetRasterizerDiscardEnableEXT", vkCmdSetRasterizerDiscardEnableEXT},
     {"vkCmdSetRayTracingPipelineStackSizeKHR", vkCmdSetRayTracingPipelineStackSizeKHR},
+    {"vkCmdSetRenderingAttachmentLocations", vkCmdSetRenderingAttachmentLocations},
     {"vkCmdSetRenderingAttachmentLocationsKHR", vkCmdSetRenderingAttachmentLocationsKHR},
+    {"vkCmdSetRenderingInputAttachmentIndices", vkCmdSetRenderingInputAttachmentIndices},
     {"vkCmdSetRenderingInputAttachmentIndicesKHR", vkCmdSetRenderingInputAttachmentIndicesKHR},
     {"vkCmdSetRepresentativeFragmentTestEnableNV", vkCmdSetRepresentativeFragmentTestEnableNV},
     {"vkCmdSetSampleLocationsEXT", vkCmdSetSampleLocationsEXT},
@@ -6713,11 +7675,15 @@ static const struct vulkan_func vk_device_dispatch_table[] =
     {"vkCmdWriteTimestamp2", vkCmdWriteTimestamp2},
     {"vkCmdWriteTimestamp2KHR", vkCmdWriteTimestamp2KHR},
     {"vkCompileDeferredNV", vkCompileDeferredNV},
+    {"vkConvertCooperativeVectorMatrixNV", vkConvertCooperativeVectorMatrixNV},
     {"vkCopyAccelerationStructureKHR", vkCopyAccelerationStructureKHR},
     {"vkCopyAccelerationStructureToMemoryKHR", vkCopyAccelerationStructureToMemoryKHR},
+    {"vkCopyImageToImage", vkCopyImageToImage},
     {"vkCopyImageToImageEXT", vkCopyImageToImageEXT},
+    {"vkCopyImageToMemory", vkCopyImageToMemory},
     {"vkCopyImageToMemoryEXT", vkCopyImageToMemoryEXT},
     {"vkCopyMemoryToAccelerationStructureKHR", vkCopyMemoryToAccelerationStructureKHR},
+    {"vkCopyMemoryToImage", vkCopyMemoryToImage},
     {"vkCopyMemoryToImageEXT", vkCopyMemoryToImageEXT},
     {"vkCopyMemoryToMicromapEXT", vkCopyMemoryToMicromapEXT},
     {"vkCopyMicromapEXT", vkCopyMicromapEXT},
@@ -6730,8 +7696,8 @@ static const struct vulkan_func vk_device_dispatch_table[] =
     {"vkCreateComputePipelines", vkCreateComputePipelines},
     {"vkCreateCuFunctionNVX", vkCreateCuFunctionNVX},
     {"vkCreateCuModuleNVX", vkCreateCuModuleNVX},
-    {"vkCreateCudaFunctionNV", vkCreateCudaFunctionNV},
-    {"vkCreateCudaModuleNV", vkCreateCudaModuleNV},
+    {"vkCreateDataGraphPipelineSessionARM", vkCreateDataGraphPipelineSessionARM},
+    {"vkCreateDataGraphPipelinesARM", vkCreateDataGraphPipelinesARM},
     {"vkCreateDeferredOperationKHR", vkCreateDeferredOperationKHR},
     {"vkCreateDescriptorPool", vkCreateDescriptorPool},
     {"vkCreateDescriptorSetLayout", vkCreateDescriptorSetLayout},
@@ -6766,7 +7732,11 @@ static const struct vulkan_func vk_device_dispatch_table[] =
     {"vkCreateShaderModule", vkCreateShaderModule},
     {"vkCreateShadersEXT", vkCreateShadersEXT},
     {"vkCreateSwapchainKHR", vkCreateSwapchainKHR},
+    {"vkCreateTensorARM", vkCreateTensorARM},
+    {"vkCreateTensorViewARM", vkCreateTensorViewARM},
     {"vkCreateValidationCacheEXT", vkCreateValidationCacheEXT},
+    {"vkCreateVideoSessionKHR", vkCreateVideoSessionKHR},
+    {"vkCreateVideoSessionParametersKHR", vkCreateVideoSessionParametersKHR},
     {"vkDebugMarkerSetObjectNameEXT", vkDebugMarkerSetObjectNameEXT},
     {"vkDebugMarkerSetObjectTagEXT", vkDebugMarkerSetObjectTagEXT},
     {"vkDeferredOperationJoinKHR", vkDeferredOperationJoinKHR},
@@ -6777,8 +7747,7 @@ static const struct vulkan_func vk_device_dispatch_table[] =
     {"vkDestroyCommandPool", vkDestroyCommandPool},
     {"vkDestroyCuFunctionNVX", vkDestroyCuFunctionNVX},
     {"vkDestroyCuModuleNVX", vkDestroyCuModuleNVX},
-    {"vkDestroyCudaFunctionNV", vkDestroyCudaFunctionNV},
-    {"vkDestroyCudaModuleNV", vkDestroyCudaModuleNV},
+    {"vkDestroyDataGraphPipelineSessionARM", vkDestroyDataGraphPipelineSessionARM},
     {"vkDestroyDeferredOperationKHR", vkDestroyDeferredOperationKHR},
     {"vkDestroyDescriptorPool", vkDestroyDescriptorPool},
     {"vkDestroyDescriptorSetLayout", vkDestroyDescriptorSetLayout},
@@ -6810,7 +7779,11 @@ static const struct vulkan_func vk_device_dispatch_table[] =
     {"vkDestroyShaderEXT", vkDestroyShaderEXT},
     {"vkDestroyShaderModule", vkDestroyShaderModule},
     {"vkDestroySwapchainKHR", vkDestroySwapchainKHR},
+    {"vkDestroyTensorARM", vkDestroyTensorARM},
+    {"vkDestroyTensorViewARM", vkDestroyTensorViewARM},
     {"vkDestroyValidationCacheEXT", vkDestroyValidationCacheEXT},
+    {"vkDestroyVideoSessionKHR", vkDestroyVideoSessionKHR},
+    {"vkDestroyVideoSessionParametersKHR", vkDestroyVideoSessionParametersKHR},
     {"vkDeviceWaitIdle", vkDeviceWaitIdle},
     {"vkEndCommandBuffer", vkEndCommandBuffer},
     {"vkFlushMappedMemoryRanges", vkFlushMappedMemoryRanges},
@@ -6833,7 +7806,11 @@ static const struct vulkan_func vk_device_dispatch_table[] =
     {"vkGetBufferOpaqueCaptureDescriptorDataEXT", vkGetBufferOpaqueCaptureDescriptorDataEXT},
     {"vkGetCalibratedTimestampsEXT", vkGetCalibratedTimestampsEXT},
     {"vkGetCalibratedTimestampsKHR", vkGetCalibratedTimestampsKHR},
-    {"vkGetCudaModuleCacheNV", vkGetCudaModuleCacheNV},
+    {"vkGetClusterAccelerationStructureBuildSizesNV", vkGetClusterAccelerationStructureBuildSizesNV},
+    {"vkGetDataGraphPipelineAvailablePropertiesARM", vkGetDataGraphPipelineAvailablePropertiesARM},
+    {"vkGetDataGraphPipelinePropertiesARM", vkGetDataGraphPipelinePropertiesARM},
+    {"vkGetDataGraphPipelineSessionBindPointRequirementsARM", vkGetDataGraphPipelineSessionBindPointRequirementsARM},
+    {"vkGetDataGraphPipelineSessionMemoryRequirementsARM", vkGetDataGraphPipelineSessionMemoryRequirementsARM},
     {"vkGetDeferredOperationMaxConcurrencyKHR", vkGetDeferredOperationMaxConcurrencyKHR},
     {"vkGetDeferredOperationResultKHR", vkGetDeferredOperationResultKHR},
     {"vkGetDescriptorEXT", vkGetDescriptorEXT},
@@ -6846,6 +7823,7 @@ static const struct vulkan_func vk_device_dispatch_table[] =
     {"vkGetDeviceAccelerationStructureCompatibilityKHR", vkGetDeviceAccelerationStructureCompatibilityKHR},
     {"vkGetDeviceBufferMemoryRequirements", vkGetDeviceBufferMemoryRequirements},
     {"vkGetDeviceBufferMemoryRequirementsKHR", vkGetDeviceBufferMemoryRequirementsKHR},
+    {"vkGetDeviceCombinedImageSamplerIndexNVX", vkGetDeviceCombinedImageSamplerIndexNVX},
     {"vkGetDeviceFaultInfoEXT", vkGetDeviceFaultInfoEXT},
     {"vkGetDeviceGroupPeerMemoryFeatures", vkGetDeviceGroupPeerMemoryFeatures},
     {"vkGetDeviceGroupPeerMemoryFeaturesKHR", vkGetDeviceGroupPeerMemoryFeaturesKHR},
@@ -6855,6 +7833,7 @@ static const struct vulkan_func vk_device_dispatch_table[] =
     {"vkGetDeviceImageMemoryRequirementsKHR", vkGetDeviceImageMemoryRequirementsKHR},
     {"vkGetDeviceImageSparseMemoryRequirements", vkGetDeviceImageSparseMemoryRequirements},
     {"vkGetDeviceImageSparseMemoryRequirementsKHR", vkGetDeviceImageSparseMemoryRequirementsKHR},
+    {"vkGetDeviceImageSubresourceLayout", vkGetDeviceImageSubresourceLayout},
     {"vkGetDeviceImageSubresourceLayoutKHR", vkGetDeviceImageSubresourceLayoutKHR},
     {"vkGetDeviceMemoryCommitment", vkGetDeviceMemoryCommitment},
     {"vkGetDeviceMemoryOpaqueCaptureAddress", vkGetDeviceMemoryOpaqueCaptureAddress},
@@ -6864,7 +7843,9 @@ static const struct vulkan_func vk_device_dispatch_table[] =
     {"vkGetDeviceQueue", vkGetDeviceQueue},
     {"vkGetDeviceQueue2", vkGetDeviceQueue2},
     {"vkGetDeviceSubpassShadingMaxWorkgroupSizeHUAWEI", vkGetDeviceSubpassShadingMaxWorkgroupSizeHUAWEI},
+    {"vkGetDeviceTensorMemoryRequirementsARM", vkGetDeviceTensorMemoryRequirementsARM},
     {"vkGetDynamicRenderingTilePropertiesQCOM", vkGetDynamicRenderingTilePropertiesQCOM},
+    {"vkGetEncodedVideoSessionParametersKHR", vkGetEncodedVideoSessionParametersKHR},
     {"vkGetEventStatus", vkGetEventStatus},
     {"vkGetFenceStatus", vkGetFenceStatus},
     {"vkGetFramebufferTilePropertiesQCOM", vkGetFramebufferTilePropertiesQCOM},
@@ -6873,14 +7854,17 @@ static const struct vulkan_func vk_device_dispatch_table[] =
     {"vkGetImageMemoryRequirements", vkGetImageMemoryRequirements},
     {"vkGetImageMemoryRequirements2", vkGetImageMemoryRequirements2},
     {"vkGetImageMemoryRequirements2KHR", vkGetImageMemoryRequirements2KHR},
+    {"vkGetImageOpaqueCaptureDataEXT", vkGetImageOpaqueCaptureDataEXT},
     {"vkGetImageOpaqueCaptureDescriptorDataEXT", vkGetImageOpaqueCaptureDescriptorDataEXT},
     {"vkGetImageSparseMemoryRequirements", vkGetImageSparseMemoryRequirements},
     {"vkGetImageSparseMemoryRequirements2", vkGetImageSparseMemoryRequirements2},
     {"vkGetImageSparseMemoryRequirements2KHR", vkGetImageSparseMemoryRequirements2KHR},
     {"vkGetImageSubresourceLayout", vkGetImageSubresourceLayout},
+    {"vkGetImageSubresourceLayout2", vkGetImageSubresourceLayout2},
     {"vkGetImageSubresourceLayout2EXT", vkGetImageSubresourceLayout2EXT},
     {"vkGetImageSubresourceLayout2KHR", vkGetImageSubresourceLayout2KHR},
     {"vkGetImageViewAddressNVX", vkGetImageViewAddressNVX},
+    {"vkGetImageViewHandle64NVX", vkGetImageViewHandle64NVX},
     {"vkGetImageViewHandleNVX", vkGetImageViewHandleNVX},
     {"vkGetImageViewOpaqueCaptureDescriptorDataEXT", vkGetImageViewOpaqueCaptureDescriptorDataEXT},
     {"vkGetLatencyTimingsNV", vkGetLatencyTimingsNV},
@@ -6890,6 +7874,7 @@ static const struct vulkan_func vk_device_dispatch_table[] =
     {"vkGetMemoryWin32HandleKHR", vkGetMemoryWin32HandleKHR},
     {"vkGetMemoryWin32HandlePropertiesKHR", vkGetMemoryWin32HandlePropertiesKHR},
     {"vkGetMicromapBuildSizesEXT", vkGetMicromapBuildSizesEXT},
+    {"vkGetPartitionedAccelerationStructuresBuildSizesNV", vkGetPartitionedAccelerationStructuresBuildSizesNV},
     {"vkGetPerformanceParameterINTEL", vkGetPerformanceParameterINTEL},
     {"vkGetPipelineBinaryDataKHR", vkGetPipelineBinaryDataKHR},
     {"vkGetPipelineCacheData", vkGetPipelineCacheData},
@@ -6910,6 +7895,7 @@ static const struct vulkan_func vk_device_dispatch_table[] =
     {"vkGetRayTracingShaderGroupHandlesNV", vkGetRayTracingShaderGroupHandlesNV},
     {"vkGetRayTracingShaderGroupStackSizeKHR", vkGetRayTracingShaderGroupStackSizeKHR},
     {"vkGetRenderAreaGranularity", vkGetRenderAreaGranularity},
+    {"vkGetRenderingAreaGranularity", vkGetRenderingAreaGranularity},
     {"vkGetRenderingAreaGranularityKHR", vkGetRenderingAreaGranularityKHR},
     {"vkGetSamplerOpaqueCaptureDescriptorDataEXT", vkGetSamplerOpaqueCaptureDescriptorDataEXT},
     {"vkGetSemaphoreCounterValue", vkGetSemaphoreCounterValue},
@@ -6921,13 +7907,19 @@ static const struct vulkan_func vk_device_dispatch_table[] =
     {"vkGetShaderModuleCreateInfoIdentifierEXT", vkGetShaderModuleCreateInfoIdentifierEXT},
     {"vkGetShaderModuleIdentifierEXT", vkGetShaderModuleIdentifierEXT},
     {"vkGetSwapchainImagesKHR", vkGetSwapchainImagesKHR},
+    {"vkGetTensorMemoryRequirementsARM", vkGetTensorMemoryRequirementsARM},
+    {"vkGetTensorOpaqueCaptureDataARM", vkGetTensorOpaqueCaptureDataARM},
+    {"vkGetTensorOpaqueCaptureDescriptorDataARM", vkGetTensorOpaqueCaptureDescriptorDataARM},
+    {"vkGetTensorViewOpaqueCaptureDescriptorDataARM", vkGetTensorViewOpaqueCaptureDescriptorDataARM},
     {"vkGetValidationCacheDataEXT", vkGetValidationCacheDataEXT},
+    {"vkGetVideoSessionMemoryRequirementsKHR", vkGetVideoSessionMemoryRequirementsKHR},
     {"vkImportSemaphoreFdKHR", vkImportSemaphoreFdKHR},
     {"vkImportSemaphoreWin32HandleKHR", vkImportSemaphoreWin32HandleKHR},
     {"vkInitializePerformanceApiINTEL", vkInitializePerformanceApiINTEL},
     {"vkInvalidateMappedMemoryRanges", vkInvalidateMappedMemoryRanges},
     {"vkLatencySleepNV", vkLatencySleepNV},
     {"vkMapMemory", vkMapMemory},
+    {"vkMapMemory2", vkMapMemory2},
     {"vkMapMemory2KHR", vkMapMemory2KHR},
     {"vkMergePipelineCaches", vkMergePipelineCaches},
     {"vkMergeValidationCachesEXT", vkMergeValidationCachesEXT},
@@ -6942,10 +7934,12 @@ static const struct vulkan_func vk_device_dispatch_table[] =
     {"vkQueueSubmit2", vkQueueSubmit2},
     {"vkQueueSubmit2KHR", vkQueueSubmit2KHR},
     {"vkQueueWaitIdle", vkQueueWaitIdle},
+    {"vkRegisterCustomBorderColorEXT", vkRegisterCustomBorderColorEXT},
     {"vkReleaseCapturedPipelineDataKHR", vkReleaseCapturedPipelineDataKHR},
     {"vkReleasePerformanceConfigurationINTEL", vkReleasePerformanceConfigurationINTEL},
     {"vkReleaseProfilingLockKHR", vkReleaseProfilingLockKHR},
     {"vkReleaseSwapchainImagesEXT", vkReleaseSwapchainImagesEXT},
+    {"vkReleaseSwapchainImagesKHR", vkReleaseSwapchainImagesKHR},
     {"vkResetCommandBuffer", vkResetCommandBuffer},
     {"vkResetCommandPool", vkResetCommandPool},
     {"vkResetDescriptorPool", vkResetDescriptorPool},
@@ -6964,23 +7958,30 @@ static const struct vulkan_func vk_device_dispatch_table[] =
     {"vkSetPrivateDataEXT", vkSetPrivateDataEXT},
     {"vkSignalSemaphore", vkSignalSemaphore},
     {"vkSignalSemaphoreKHR", vkSignalSemaphoreKHR},
+    {"vkTransitionImageLayout", vkTransitionImageLayout},
     {"vkTransitionImageLayoutEXT", vkTransitionImageLayoutEXT},
     {"vkTrimCommandPool", vkTrimCommandPool},
     {"vkTrimCommandPoolKHR", vkTrimCommandPoolKHR},
     {"vkUninitializePerformanceApiINTEL", vkUninitializePerformanceApiINTEL},
     {"vkUnmapMemory", vkUnmapMemory},
+    {"vkUnmapMemory2", vkUnmapMemory2},
     {"vkUnmapMemory2KHR", vkUnmapMemory2KHR},
+    {"vkUnregisterCustomBorderColorEXT", vkUnregisterCustomBorderColorEXT},
     {"vkUpdateDescriptorSetWithTemplate", vkUpdateDescriptorSetWithTemplate},
     {"vkUpdateDescriptorSetWithTemplateKHR", vkUpdateDescriptorSetWithTemplateKHR},
     {"vkUpdateDescriptorSets", vkUpdateDescriptorSets},
     {"vkUpdateIndirectExecutionSetPipelineEXT", vkUpdateIndirectExecutionSetPipelineEXT},
     {"vkUpdateIndirectExecutionSetShaderEXT", vkUpdateIndirectExecutionSetShaderEXT},
+    {"vkUpdateVideoSessionParametersKHR", vkUpdateVideoSessionParametersKHR},
     {"vkWaitForFences", vkWaitForFences},
+    {"vkWaitForPresent2KHR", vkWaitForPresent2KHR},
     {"vkWaitForPresentKHR", vkWaitForPresentKHR},
     {"vkWaitSemaphores", vkWaitSemaphores},
     {"vkWaitSemaphoresKHR", vkWaitSemaphoresKHR},
     {"vkWriteAccelerationStructuresPropertiesKHR", vkWriteAccelerationStructuresPropertiesKHR},
     {"vkWriteMicromapsPropertiesEXT", vkWriteMicromapsPropertiesEXT},
+    {"vkWriteResourceDescriptorsEXT", vkWriteResourceDescriptorsEXT},
+    {"vkWriteSamplerDescriptorsEXT", vkWriteSamplerDescriptorsEXT},
     {"wine_vkAcquireKeyedMutex", wine_vkAcquireKeyedMutex},
     {"wine_vkReleaseKeyedMutex", wine_vkReleaseKeyedMutex},
 };
@@ -6990,17 +7991,22 @@ static const struct vulkan_func vk_phys_dev_dispatch_table[] =
     {"vkCreateDevice", vkCreateDevice},
     {"vkEnumerateDeviceExtensionProperties", vkEnumerateDeviceExtensionProperties},
     {"vkEnumerateDeviceLayerProperties", vkEnumerateDeviceLayerProperties},
+    {"vkEnumeratePhysicalDeviceQueueFamilyPerformanceCountersByRegionARM", vkEnumeratePhysicalDeviceQueueFamilyPerformanceCountersByRegionARM},
     {"vkEnumeratePhysicalDeviceQueueFamilyPerformanceQueryCountersKHR", vkEnumeratePhysicalDeviceQueueFamilyPerformanceQueryCountersKHR},
     {"vkGetPhysicalDeviceCalibrateableTimeDomainsEXT", vkGetPhysicalDeviceCalibrateableTimeDomainsEXT},
     {"vkGetPhysicalDeviceCalibrateableTimeDomainsKHR", vkGetPhysicalDeviceCalibrateableTimeDomainsKHR},
+    {"vkGetPhysicalDeviceCooperativeMatrixFlexibleDimensionsPropertiesNV", vkGetPhysicalDeviceCooperativeMatrixFlexibleDimensionsPropertiesNV},
     {"vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR", vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR},
     {"vkGetPhysicalDeviceCooperativeMatrixPropertiesNV", vkGetPhysicalDeviceCooperativeMatrixPropertiesNV},
+    {"vkGetPhysicalDeviceCooperativeVectorPropertiesNV", vkGetPhysicalDeviceCooperativeVectorPropertiesNV},
+    {"vkGetPhysicalDeviceDescriptorSizeEXT", vkGetPhysicalDeviceDescriptorSizeEXT},
     {"vkGetPhysicalDeviceExternalBufferProperties", vkGetPhysicalDeviceExternalBufferProperties},
     {"vkGetPhysicalDeviceExternalBufferPropertiesKHR", vkGetPhysicalDeviceExternalBufferPropertiesKHR},
     {"vkGetPhysicalDeviceExternalFenceProperties", vkGetPhysicalDeviceExternalFenceProperties},
     {"vkGetPhysicalDeviceExternalFencePropertiesKHR", vkGetPhysicalDeviceExternalFencePropertiesKHR},
     {"vkGetPhysicalDeviceExternalSemaphoreProperties", vkGetPhysicalDeviceExternalSemaphoreProperties},
     {"vkGetPhysicalDeviceExternalSemaphorePropertiesKHR", vkGetPhysicalDeviceExternalSemaphorePropertiesKHR},
+    {"vkGetPhysicalDeviceExternalTensorPropertiesARM", vkGetPhysicalDeviceExternalTensorPropertiesARM},
     {"vkGetPhysicalDeviceFeatures", vkGetPhysicalDeviceFeatures},
     {"vkGetPhysicalDeviceFeatures2", vkGetPhysicalDeviceFeatures2},
     {"vkGetPhysicalDeviceFeatures2KHR", vkGetPhysicalDeviceFeatures2KHR},
@@ -7020,6 +8026,8 @@ static const struct vulkan_func vk_phys_dev_dispatch_table[] =
     {"vkGetPhysicalDeviceProperties", vkGetPhysicalDeviceProperties},
     {"vkGetPhysicalDeviceProperties2", vkGetPhysicalDeviceProperties2},
     {"vkGetPhysicalDeviceProperties2KHR", vkGetPhysicalDeviceProperties2KHR},
+    {"vkGetPhysicalDeviceQueueFamilyDataGraphProcessingEnginePropertiesARM", vkGetPhysicalDeviceQueueFamilyDataGraphProcessingEnginePropertiesARM},
+    {"vkGetPhysicalDeviceQueueFamilyDataGraphPropertiesARM", vkGetPhysicalDeviceQueueFamilyDataGraphPropertiesARM},
     {"vkGetPhysicalDeviceQueueFamilyPerformanceQueryPassesKHR", vkGetPhysicalDeviceQueueFamilyPerformanceQueryPassesKHR},
     {"vkGetPhysicalDeviceQueueFamilyProperties", vkGetPhysicalDeviceQueueFamilyProperties},
     {"vkGetPhysicalDeviceQueueFamilyProperties2", vkGetPhysicalDeviceQueueFamilyProperties2},
@@ -7036,6 +8044,9 @@ static const struct vulkan_func vk_phys_dev_dispatch_table[] =
     {"vkGetPhysicalDeviceSurfaceSupportKHR", vkGetPhysicalDeviceSurfaceSupportKHR},
     {"vkGetPhysicalDeviceToolProperties", vkGetPhysicalDeviceToolProperties},
     {"vkGetPhysicalDeviceToolPropertiesEXT", vkGetPhysicalDeviceToolPropertiesEXT},
+    {"vkGetPhysicalDeviceVideoCapabilitiesKHR", vkGetPhysicalDeviceVideoCapabilitiesKHR},
+    {"vkGetPhysicalDeviceVideoEncodeQualityLevelPropertiesKHR", vkGetPhysicalDeviceVideoEncodeQualityLevelPropertiesKHR},
+    {"vkGetPhysicalDeviceVideoFormatPropertiesKHR", vkGetPhysicalDeviceVideoFormatPropertiesKHR},
     {"vkGetPhysicalDeviceWin32PresentationSupportKHR", vkGetPhysicalDeviceWin32PresentationSupportKHR},
 };
 

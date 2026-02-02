@@ -60,8 +60,7 @@
 #include "thread.h"
 #include "security.h"
 #include "handle.h"
-#define WANT_REQUEST_HANDLERS
-#include "request.h"
+#include "request_handlers.h"
 
 /* Some versions of glibc don't define this */
 #ifndef SCM_RIGHTS
@@ -104,6 +103,7 @@ static const struct object_ops master_socket_ops =
     NULL,                          /* unlink_name */
     no_open_file,                  /* open_file */
     no_kernel_obj_list,            /* get_kernel_obj_list */
+    no_get_inproc_sync,            /* get_inproc_sync */
     no_close_handle,               /* close_handle */
     master_socket_destroy          /* destroy */
 };
@@ -381,28 +381,22 @@ int receive_fd( struct process *process )
     struct iovec vec;
     struct send_fd data;
     struct msghdr msghdr;
-    int fd = -1, ret;
-
-#ifdef HAVE_STRUCT_MSGHDR_MSG_ACCRIGHTS
-    msghdr.msg_accrightslen = sizeof(int);
-    msghdr.msg_accrights = (void *)&fd;
-#else  /* HAVE_STRUCT_MSGHDR_MSG_ACCRIGHTS */
     char cmsg_buffer[256];
-    msghdr.msg_control    = cmsg_buffer;
-    msghdr.msg_controllen = sizeof(cmsg_buffer);
-    msghdr.msg_flags      = 0;
-#endif  /* HAVE_STRUCT_MSGHDR_MSG_ACCRIGHTS */
+    int fd = -1, ret;
 
     msghdr.msg_name    = NULL;
     msghdr.msg_namelen = 0;
     msghdr.msg_iov     = &vec;
     msghdr.msg_iovlen  = 1;
+    msghdr.msg_control = cmsg_buffer;
+    msghdr.msg_controllen = sizeof(cmsg_buffer);
+    msghdr.msg_flags   = 0;
+
     vec.iov_base = (void *)&data;
     vec.iov_len  = sizeof(data);
 
     ret = recvmsg( get_unix_fd( process->msg_fd ), &msghdr, 0 );
 
-#ifndef HAVE_STRUCT_MSGHDR_MSG_ACCRIGHTS
     if (ret > 0)
     {
         struct cmsghdr *cmsg;
@@ -412,7 +406,6 @@ int receive_fd( struct process *process )
             if (cmsg->cmsg_type == SCM_RIGHTS) fd = *(int *)CMSG_DATA(cmsg);
         }
     }
-#endif  /* HAVE_STRUCT_MSGHDR_MSG_ACCRIGHTS */
 
     if (ret == sizeof(data))
     {
@@ -467,32 +460,27 @@ int send_client_fd( struct process *process, int fd, obj_handle_t handle )
 {
     struct iovec vec;
     struct msghdr msghdr;
-    int ret;
-
-#ifdef HAVE_STRUCT_MSGHDR_MSG_ACCRIGHTS
-    msghdr.msg_accrightslen = sizeof(fd);
-    msghdr.msg_accrights = (void *)&fd;
-#else  /* HAVE_STRUCT_MSGHDR_MSG_ACCRIGHTS */
     char cmsg_buffer[256];
     struct cmsghdr *cmsg;
-    msghdr.msg_control    = cmsg_buffer;
+    int ret;
+
+    msghdr.msg_name    = NULL;
+    msghdr.msg_namelen = 0;
+    msghdr.msg_iov     = &vec;
+    msghdr.msg_iovlen  = 1;
+    msghdr.msg_control = cmsg_buffer;
     msghdr.msg_controllen = sizeof(cmsg_buffer);
-    msghdr.msg_flags      = 0;
+    msghdr.msg_flags   = 0;
+
+    vec.iov_base = (void *)&handle;
+    vec.iov_len  = sizeof(handle);
+
     cmsg = CMSG_FIRSTHDR( &msghdr );
     cmsg->cmsg_len   = CMSG_LEN( sizeof(fd) );
     cmsg->cmsg_level = SOL_SOCKET;
     cmsg->cmsg_type  = SCM_RIGHTS;
     *(int *)CMSG_DATA(cmsg) = fd;
     msghdr.msg_controllen = cmsg->cmsg_len;
-#endif  /* HAVE_STRUCT_MSGHDR_MSG_ACCRIGHTS */
-
-    msghdr.msg_name    = NULL;
-    msghdr.msg_namelen = 0;
-    msghdr.msg_iov     = &vec;
-    msghdr.msg_iovlen  = 1;
-
-    vec.iov_base = (void *)&handle;
-    vec.iov_len  = sizeof(handle);
 
     if (debug_level)
         fprintf( stderr, "%04x: *fd* %04x -> %d\n", current ? current->id : process->id, handle, fd );
@@ -526,11 +514,7 @@ timeout_t monotonic_counter(void)
     static mach_timebase_info_data_t timebase;
 
     if (!timebase.denom) mach_timebase_info( &timebase );
-#ifdef HAVE_MACH_CONTINUOUS_TIME
-    if (&mach_continuous_time != NULL)
-        return mach_continuous_time() * timebase.numer / timebase.denom / 100;
-#endif
-    return mach_absolute_time() * timebase.numer / timebase.denom / 100;
+    return mach_continuous_time() * timebase.numer / timebase.denom / 100;
 #elif defined(HAVE_CLOCK_GETTIME)
     struct timespec ts;
 #ifdef CLOCK_MONOTONIC_RAW
@@ -576,10 +560,37 @@ static void master_socket_poll_event( struct fd *fd, int event )
         struct process *process;
         struct sockaddr_un dummy;
         socklen_t len = sizeof(dummy);
+        struct thread *thread = NULL;
+
         int client = accept( get_unix_fd( master_socket->fd ), (struct sockaddr *) &dummy, &len );
         if (client == -1) return;
         fcntl( client, F_SETFL, O_NONBLOCK );
-        if ((process = create_process( client, NULL, 0, NULL, NULL, NULL, 0, NULL )))
+#ifdef SO_PEERCRED
+        {
+            struct ucred ucred;
+
+            len = sizeof(ucred);
+            if (!getsockopt( client, SOL_SOCKET, SO_PEERCRED, &ucred, &len ))
+            {
+                pid_t ppid;
+                char s[256];
+                FILE *f;
+
+                sprintf( s, "/proc/%d/status", ucred.pid );
+                if ((f = fopen( s, "r" )))
+                {
+                    while (fgets( s, sizeof(s), f ))
+                    {
+                        if (sscanf( s, "PPid:%d", &ppid ) != 1) continue;
+                        thread = get_thread_from_pid( ppid );
+                        break;
+                    }
+                    fclose( f );
+                }
+            }
+        }
+#endif
+        if ((process = create_process( client, thread ? thread->process : NULL, 0, NULL, NULL, NULL, 0, NULL )))
         {
             create_thread( -1, process, NULL );
             release_object( process );
@@ -615,9 +626,8 @@ static void create_dir( const char *name, struct stat *st )
 static char *create_server_dir( int force )
 {
     const char *prefix = getenv( "WINEPREFIX" );
-    char *p, *config_dir;
+    char *p, *config_dir, *base_dir;
     struct stat st, st2;
-    size_t len = sizeof("/server-") + 2 * sizeof(st.st_dev) + 2 * sizeof(st.st_ino) + 2;
 
     /* open the configuration directory */
 
@@ -660,33 +670,19 @@ static char *create_server_dir( int force )
     /* create the base directory if needed */
 
 #ifdef __ANDROID__  /* there's no /tmp dir on Android */
-    len += strlen( config_dir ) + sizeof("/.wineserver");
-    if (!(server_dir = malloc( len ))) fatal_error( "out of memory\n" );
-    strcpy( server_dir, config_dir );
-    strcat( server_dir, "/.wineserver" );
+    if (asprintf( &base_dir, "%s/.wineserver", config_dir ) == -1)
+        fatal_error( "out of memory\n" );
 #else
-    len += sizeof("/tmp/.wine-") + 12;
-    if (!(server_dir = malloc( len ))) fatal_error( "out of memory\n" );
-    sprintf( server_dir, "/tmp/.wine-%u", getuid() );
+    if (asprintf( &base_dir, "/tmp/.wine-%u", getuid() ) == -1)
+        fatal_error( "out of memory\n" );
 #endif
-    create_dir( server_dir, &st2 );
+    create_dir( base_dir, &st2 );
 
     /* now create the server directory */
 
-    strcat( server_dir, "/server-" );
-    p = server_dir + strlen(server_dir);
-
-    if (st.st_dev != (unsigned long)st.st_dev)
-        p += sprintf( p, "%lx%08lx-", (unsigned long)((unsigned long long)st.st_dev >> 32),
-                      (unsigned long)st.st_dev );
-    else
-        p += sprintf( p, "%lx-", (unsigned long)st.st_dev );
-
-    if (st.st_ino != (unsigned long)st.st_ino)
-        sprintf( p, "%lx%08lx", (unsigned long)((unsigned long long)st.st_ino >> 32),
-                 (unsigned long)st.st_ino );
-    else
-        sprintf( p, "%lx", (unsigned long)st.st_ino );
+    if (asprintf( &server_dir, "%s/server-%llx-%llx", base_dir,
+                  (unsigned long long)st.st_dev, (unsigned long long)st.st_ino ) == -1)
+        fatal_error( "out of memory\n" );
 
     create_dir( server_dir, &st );
 
@@ -699,6 +695,7 @@ static char *create_server_dir( int force )
     if (st.st_dev != st2.st_dev || st.st_ino != st2.st_ino)
         fatal_error( "chdir did not end up in %s\n", server_dir );
 
+    free( base_dir );
     free( config_dir );
     return server_dir;
 }

@@ -654,13 +654,13 @@ static NTSTATUS acquire_credentials_handle( void *args )
         cred_usage = GSS_C_ACCEPT;
         break;
 
+    case SECPKG_CRED_BOTH:
     case SECPKG_CRED_OUTBOUND:
         if ((status = init_creds( params->username, params->password )) != STATUS_SUCCESS) return status;
-        cred_usage = GSS_C_INITIATE;
+        cred_usage = params->credential_use == SECPKG_CRED_OUTBOUND ? GSS_C_INITIATE : GSS_C_BOTH;
         break;
 
     default:
-        FIXME( "SECPKG_CRED_BOTH not supported\n" );
         return SEC_E_UNKNOWN_CREDENTIALS;
     }
 
@@ -1353,6 +1353,8 @@ static NTSTATUS wow64_unseal_message( void *args )
     struct
     {
         UINT64 context;
+        PTR32 stream;
+        ULONG stream_length;
         PTR32 data;
         ULONG data_length;
         PTR32 token;
@@ -1362,6 +1364,8 @@ static NTSTATUS wow64_unseal_message( void *args )
     struct unseal_message_params params =
     {
         params32->context,
+        ULongToPtr(params32->stream),
+        params32->stream_length,
         ULongToPtr(params32->data),
         params32->data_length,
         ULongToPtr(params32->token),

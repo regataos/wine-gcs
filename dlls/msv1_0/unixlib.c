@@ -40,7 +40,12 @@
 #include "wine/debug.h"
 #include "unixlib.h"
 
-extern char **environ;
+#ifdef __APPLE__
+# include <crt_externs.h>
+# define environ (*_NSGetEnviron())
+#else
+  extern char **environ;
+#endif
 
 WINE_DEFAULT_DEBUG_CHANNEL(ntlm);
 
@@ -216,6 +221,7 @@ static NTSTATUS ntlm_check_version( void *args )
     struct fork_params params = { &ctx, argv };
     int len;
 
+    ctx.mode = MODE_CLIENT;
     argv[0] = (char *)"ntlm_auth";
     argv[1] = (char *)"--version";
     argv[2] = NULL;

@@ -57,8 +57,6 @@ static void check_device( DEVICE_OBJECT *device )
 
     ok( device == impl->expect_hid_fdo, "got device %p\n", device );
     ok( device->DriverObject == expect_driver, "got DriverObject %p\n", device->DriverObject );
-    if (!device->NextDevice) ok( device == impl->expect_hid_fdo, "got device %p\n", device );
-    else ok( device->NextDevice == impl->expect_hid_fdo, "got NextDevice %p\n", device->NextDevice );
     ok( !device->AttachedDevice, "got AttachedDevice %p\n", device->AttachedDevice );
 
     ok( ext->MiniDeviceExtension == impl->expect_hid_ext, "got MiniDeviceExtension %p\n", ext->MiniDeviceExtension );
@@ -188,8 +186,29 @@ static NTSTATUS WINAPI driver_ioctl( DEVICE_OBJECT *device, IRP *irp )
     case IOCTL_WINETEST_HID_WAIT_EXPECT:
     case IOCTL_WINETEST_HID_SEND_INPUT:
     case IOCTL_WINETEST_HID_SET_CONTEXT:
+    case IOCTL_WINETEST_HID_WAIT_INPUT:
         IoSkipCurrentIrpStackLocation( irp );
         return IoCallDriver( ext->PhysicalDeviceObject, irp );
+
+    case IOCTL_WINETEST_DEVICE_CHANGE:
+    {
+        ULONG in_size = stack->Parameters.DeviceIoControl.InputBufferLength;
+        TARGET_DEVICE_CUSTOM_NOTIFICATION *notif = irp->AssociatedIrp.SystemBuffer;
+        NTSTATUS status;
+
+        if (in_size != notif->Size) status = STATUS_INVALID_PARAMETER;
+        else
+        {
+            void *data = ExAllocatePool( PagedPool, notif->Size );
+            memcpy( data, notif, notif->Size );
+            status = IoReportTargetDeviceChangeAsynchronous( device, data, ExFreePool, data );
+            if (status) ExFreePool( data );
+        }
+
+        irp->IoStatus.Status = status;
+        IoCompleteRequest( irp, IO_NO_INCREMENT );
+        return status;
+    }
 
     case IOCTL_WINETEST_REMOVE_DEVICE:
     case IOCTL_WINETEST_CREATE_DEVICE:

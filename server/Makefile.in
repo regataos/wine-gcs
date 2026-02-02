@@ -18,6 +18,7 @@ SOURCES = \
 	fsync.c \
 	handle.c \
 	hook.c \
+	inproc_sync.c \
 	mach.c \
 	mailslot.c \
 	main.c \
@@ -51,4 +52,4 @@ SOURCES = \
 
 UNIX_LIBS = $(LDEXECFLAGS) $(RT_LIBS) $(INOTIFY_LIBS) $(PROCSTAT_LIBS)
 
-unicode_EXTRADEFS = -DNLSDIR="\"${nlsdir}\"" -DBIN_TO_NLSDIR=\"`${MAKEDEP} -R ${bindir} ${nlsdir}`\"
+unicode_EXTRADEFS = -DBINDIR="\"${bindir}\"" -DDATADIR="\"${datadir}\""

@@ -66,6 +66,17 @@ static CRITICAL_SECTION_DEBUG queues_critsect_debug =
 };
 static CRITICAL_SECTION queues_section = { &queues_critsect_debug, -1, 0, 0, 0, 0 };
 
+static CRITICAL_SECTION async_result_cache_section;
+static CRITICAL_SECTION_DEBUG async_result_cache_critsect_debug =
+{
+    0, 0, &async_result_cache_section,
+    { &async_result_cache_critsect_debug.ProcessLocksList, &async_result_cache_critsect_debug.ProcessLocksList },
+      0, 0, { (DWORD_PTR)(__FILE__ ": async_result_cache_section") }
+};
+static CRITICAL_SECTION async_result_cache_section = { &async_result_cache_critsect_debug, -1, 0, 0, 0, 0 };
+struct list async_result_cache = LIST_INIT(async_result_cache);
+
+static LONG startup_count;
 static LONG platform_lock;
 static CO_MTA_USAGE_COOKIE mta_cookie;
 
@@ -296,8 +307,15 @@ static struct queue system_queues[SYS_QUEUE_COUNT];
 
 static struct queue *get_system_queue(DWORD queue_id)
 {
+    if (RTWQ_CALLBACK_QUEUE_PRIVATE_MASK & queue_id)
+        return NULL;
+
     switch (queue_id)
     {
+        default:
+            /* Use standard queue for undefined system queue id's. */
+            queue_id = RTWQ_CALLBACK_QUEUE_STANDARD;
+            /* fall through */
         case RTWQ_CALLBACK_QUEUE_STANDARD:
         case RTWQ_CALLBACK_QUEUE_RT:
         case RTWQ_CALLBACK_QUEUE_IO:
@@ -305,8 +323,6 @@ static struct queue *get_system_queue(DWORD queue_id)
         case RTWQ_CALLBACK_QUEUE_MULTITHREADED:
         case RTWQ_CALLBACK_QUEUE_LONG_FUNCTION:
             return &system_queues[queue_id - 1];
-        default:
-            return NULL;
     }
 }
 
@@ -354,7 +370,7 @@ static BOOL pool_queue_shutdown(struct queue *queue)
     if (!queue->pool)
         return FALSE;
 
-    CloseThreadpoolCleanupGroupMembers(queue->envs[0].CleanupGroup, TRUE, NULL);
+    CloseThreadpoolCleanupGroupMembers(queue->envs[0].CleanupGroup, FALSE, NULL);
     CloseThreadpool(queue->pool);
     queue->pool = NULL;
 
@@ -730,18 +746,23 @@ static HRESULT invoke_async_callback(IRtwqAsyncResult *result)
     return hr;
 }
 
-static void queue_release_pending_item(struct work_item *item)
+/* Return TRUE when the item is actually released by this function. The item could have been already
+ * removed from pending items when it got canceled. */
+static BOOL queue_release_pending_item(struct work_item *item)
 {
     struct queue *queue = item->queue;
+    BOOL ret = FALSE;
+
     EnterCriticalSection(&queue->cs);
     if (item->key)
     {
         list_remove(&item->entry);
+        ret = TRUE;
         item->key = 0;
         IUnknown_Release(&item->IUnknown_iface);
     }
     LeaveCriticalSection(&queue->cs);
-
+    return ret;
 }
 
 static void CALLBACK waiting_item_callback(TP_CALLBACK_INSTANCE *instance, void *context, TP_WAIT *wait,
@@ -763,9 +784,8 @@ static void CALLBACK waiting_item_cancelable_callback(TP_CALLBACK_INSTANCE *inst
 
     TRACE("result object %p.\n", item->result);
 
-    queue_release_pending_item(item);
-
-    invoke_async_callback(item->result);
+    if (queue_release_pending_item(item))
+        invoke_async_callback(item->result);
 
     IUnknown_Release(&item->IUnknown_iface);
 }
@@ -787,9 +807,8 @@ static void CALLBACK scheduled_item_cancelable_callback(TP_CALLBACK_INSTANCE *in
 
     TRACE("result object %p.\n", item->result);
 
-    queue_release_pending_item(item);
-
-    invoke_async_callback(item->result);
+    if (queue_release_pending_item(item))
+        invoke_async_callback(item->result);
 
     IUnknown_Release(&item->IUnknown_iface);
 }
@@ -878,90 +897,69 @@ static HRESULT queue_submit_timer(struct queue *queue, IRtwqAsyncResult *result,
     return S_OK;
 }
 
-static HRESULT queue_cancel_item(struct queue *queue, const RTWQWORKITEM_KEY key)
+static HRESULT queue_cancel_item(struct queue *queue, RTWQWORKITEM_KEY key)
 {
-    HRESULT hr = RTWQ_E_NOT_FOUND;
-    union { TP_WAIT *wait_object; TP_TIMER *timer_object; } work_object;
-    enum work_item_type work_object_type;
+    TP_WAIT *wait_object;
+    TP_TIMER *timer_object;
     struct work_item *item;
-    const UINT64 mask = key >> 32;
 
     EnterCriticalSection(&queue->cs);
     LIST_FOR_EACH_ENTRY(item, &queue->pending_items, struct work_item, entry)
     {
         if (item->key == key)
         {
-            hr = S_OK;
-            if ((mask & WAIT_ITEM_KEY_MASK) == WAIT_ITEM_KEY_MASK)
+            /* We can't immediately release the item here, because the callback could already be
+             * running somewhere else. And if we release it here, the callback will access freed memory.
+             * So instead we have to make sure the callback is really stopped, or has really finished
+             * running before we do that. And we can't do that in this critical section, which would be a
+             * deadlock. So we first keep an extra reference to it, then leave the critical section to
+             * wait for the thread-pool objects, finally we re-enter critical section to release it. */
+            key >>= 32;
+            IUnknown_AddRef(&item->IUnknown_iface);
+            if ((key & WAIT_ITEM_KEY_MASK) == WAIT_ITEM_KEY_MASK)
             {
-                if (item->type != WORK_ITEM_WAIT)
-                    WARN("Item %p is not a wait item, but its key has wait item mask.\n", item);
-
-                work_object_type = WORK_ITEM_WAIT;
-                work_object.wait_object = item->u.wait_object;
+                wait_object = item->u.wait_object;
                 item->u.wait_object = NULL;
-            }
-            else if ((mask & SCHEDULED_ITEM_KEY_MASK) == SCHEDULED_ITEM_KEY_MASK)
-            {
-                if (item->type != WORK_ITEM_TIMER)
-                    WARN("Item %p is not a timer item, but its key has timer item mask.\n", item);
+                LeaveCriticalSection(&queue->cs);
 
-                work_object_type = WORK_ITEM_TIMER;
-                work_object.timer_object = item->u.timer_object;
+                SetThreadpoolWait(wait_object, NULL, NULL);
+                WaitForThreadpoolWaitCallbacks(wait_object, TRUE);
+                CloseThreadpoolWait(wait_object);
+            }
+            else if ((key & SCHEDULED_ITEM_KEY_MASK) == SCHEDULED_ITEM_KEY_MASK)
+            {
+                timer_object = item->u.timer_object;
                 item->u.timer_object = NULL;
+                LeaveCriticalSection(&queue->cs);
+
+                SetThreadpoolTimer(timer_object, NULL, 0, 0);
+                WaitForThreadpoolTimerCallbacks(timer_object, TRUE);
+                CloseThreadpoolTimer(timer_object);
             }
             else
             {
-                WARN("Unknown item key mask %#I64x.\n", mask);
-                queue_release_pending_item(item);
-                goto out;
+                WARN("Unknown item key mask %#I64x.\n", key);
+                LeaveCriticalSection(&queue->cs);
             }
-            break;
-        }
-    }
 
-    if (FAILED(hr))
-        goto out;
-
-    LeaveCriticalSection(&queue->cs);
-
-    // Safely either stop the thread pool object, or if the callback is already running, wait for it to finish.
-    // This way, we can safely release the reference to the work item.
-    if (work_object_type == WORK_ITEM_WAIT)
-    {
-        SetThreadpoolWait(work_object.wait_object, NULL, NULL);
-        WaitForThreadpoolWaitCallbacks(work_object.wait_object, TRUE);
-        CloseThreadpoolWait(work_object.wait_object);
-    }
-    else if (work_object_type == WORK_ITEM_TIMER)
-    {
-        SetThreadpoolTimer(work_object.timer_object, NULL, 0, 0);
-        WaitForThreadpoolTimerCallbacks(work_object.timer_object, TRUE);
-        CloseThreadpoolTimer(work_object.timer_object);
-    }
-
-    // If the work item is still in pending items, its callback hasn't been invoked yet;
-    // we remove it. Otherwise its callback would have already released it.
-    EnterCriticalSection(&queue->cs);
-    LIST_FOR_EACH_ENTRY(item, &queue->pending_items, struct work_item, entry)
-    {
-        if (item->key == key)
-        {
-            if (work_object_type == WORK_ITEM_WAIT)
+            if (queue_release_pending_item(item))
             {
-                IRtwqAsyncResult_SetStatus(item->result, RTWQ_E_OPERATION_CANCELLED);
-                invoke_async_callback(item->result);
+                /* This means the callback wasn't run during our wait, so we can invoke the
+                 * callback with a canceled status, and release the work item. */
+                if ((key & WAIT_ITEM_KEY_MASK) == WAIT_ITEM_KEY_MASK)
+                {
+                    IRtwqAsyncResult_SetStatus(item->result, RTWQ_E_OPERATION_CANCELLED);
+                    invoke_async_callback(item->result);
+                }
+                IUnknown_Release(&item->IUnknown_iface);
             }
-            queue_release_pending_item(item);
             IUnknown_Release(&item->IUnknown_iface);
-            break;
+            return S_OK;
         }
     }
-
-out:
     LeaveCriticalSection(&queue->cs);
 
-    return hr;
+    return RTWQ_E_NOT_FOUND;
 }
 
 static HRESULT alloc_user_queue(const struct queue_desc *desc, DWORD *queue_id)
@@ -972,7 +970,7 @@ static HRESULT alloc_user_queue(const struct queue_desc *desc, DWORD *queue_id)
 
     *queue_id = RTWQ_CALLBACK_QUEUE_UNDEFINED;
 
-    if (platform_lock <= 0)
+    if (startup_count <= 0 || platform_lock <= 0)
         return RTWQ_E_SHUTDOWN;
 
     if (!(queue = calloc(1, sizeof(*queue))))
@@ -1013,11 +1011,74 @@ struct async_result
     LONG refcount;
     IUnknown *object;
     IUnknown *state;
+    struct list entry;
 };
 
 static struct async_result *impl_from_IRtwqAsyncResult(IRtwqAsyncResult *iface)
 {
     return CONTAINING_RECORD(iface, struct async_result, result.AsyncResult);
+}
+
+static void free_async_result(struct async_result *result)
+{
+    free(result);
+    RtwqUnlockPlatform();
+}
+
+/* Async result cache. The main reason for caching is to match the behaviour in Windows.
+ * The platform is locked for each async result created and not unlocked until shutdown.
+ * This is consistent with caching of async results, which is probably done to avoid
+ * frequent heap allocations. It's unclear how much is gained from that here, but there
+ * is probably some benefit. Robustness against use-after-free is not likely to be a
+ * major reason because Windows seems to pop the most recently released object for the
+ * next allocation, as is done here, instead of popping from the tail. */
+
+static BOOL async_result_cache_push(struct async_result *result)
+{
+    BOOL pushed;
+
+    EnterCriticalSection(&async_result_cache_section);
+    if ((pushed = startup_count > 0))
+        list_add_head(&async_result_cache, &result->entry);
+    LeaveCriticalSection(&async_result_cache_section);
+
+    return pushed;
+}
+
+static struct async_result *async_result_cache_pop(void)
+{
+    struct async_result *result;
+    struct list *head;
+
+    EnterCriticalSection(&async_result_cache_section);
+
+    if ((head = list_head(&async_result_cache)))
+        list_remove(head);
+
+    LeaveCriticalSection(&async_result_cache_section);
+
+    if (!head)
+        return NULL;
+
+    result = LIST_ENTRY(head, struct async_result, entry);
+    memset(&result->result, 0, sizeof(result->result));
+
+    return result;
+}
+
+static void async_result_cache_clear(void)
+{
+    struct async_result *cur, *cur2;
+
+    EnterCriticalSection(&async_result_cache_section);
+
+    LIST_FOR_EACH_ENTRY_SAFE(cur, cur2, &async_result_cache, struct async_result, entry)
+    {
+        list_remove(&cur->entry);
+        free_async_result(cur);
+    }
+
+    LeaveCriticalSection(&async_result_cache_section);
 }
 
 static HRESULT WINAPI async_result_QueryInterface(IRtwqAsyncResult *iface, REFIID riid, void **obj)
@@ -1064,9 +1125,9 @@ static ULONG WINAPI async_result_Release(IRtwqAsyncResult *iface)
             IUnknown_Release(result->state);
         if (result->result.hEvent)
             CloseHandle(result->result.hEvent);
-        free(result);
 
-        RtwqUnlockPlatform();
+        if (!async_result_cache_push(result))
+            free_async_result(result);
     }
 
     return refcount;
@@ -1150,10 +1211,12 @@ static HRESULT create_async_result(IUnknown *object, IRtwqAsyncCallback *callbac
     if (!out)
         return E_INVALIDARG;
 
-    if (!(result = calloc(1, sizeof(*result))))
-        return E_OUTOFMEMORY;
-
-    RtwqLockPlatform();
+    if (!(result = async_result_cache_pop()))
+    {
+        if (!(result = calloc(1, sizeof(*result))))
+            return E_OUTOFMEMORY;
+        RtwqLockPlatform();
+    }
 
     result->result.AsyncResult.lpVtbl = &async_result_vtbl;
     result->refcount = 1;
@@ -1224,8 +1287,9 @@ static void init_system_queues(void)
 
 HRESULT WINAPI RtwqStartup(void)
 {
-    if (InterlockedIncrement(&platform_lock) == 1)
+    if (InterlockedIncrement(&startup_count) == 1)
     {
+        RtwqLockPlatform();
         init_system_queues();
     }
 
@@ -1252,12 +1316,14 @@ static void shutdown_system_queues(void)
 
 HRESULT WINAPI RtwqShutdown(void)
 {
-    if (platform_lock <= 0)
+    if (startup_count <= 0)
         return S_OK;
 
-    if (InterlockedExchangeAdd(&platform_lock, -1) == 1)
+    if (InterlockedExchangeAdd(&startup_count, -1) == 1)
     {
         shutdown_system_queues();
+        async_result_cache_clear();
+        RtwqUnlockPlatform();
     }
 
     return S_OK;

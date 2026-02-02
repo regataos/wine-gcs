@@ -80,6 +80,7 @@ struct rtl_heap_entry
 
 /* header for heap blocks */
 
+#define INITIAL_COMMIT_ALIGN  (0x400 * sizeof(void *))
 #define REGION_ALIGN  0x10000
 #define BLOCK_ALIGN   (2 * sizeof(void *))
 
@@ -262,6 +263,9 @@ struct bin
 
     /* list of groups with free blocks */
     SLIST_HEADER groups;
+    LONG group_alloc;
+    LONG group_freed;
+    LONG group_max;
 
     /* array of affinity reserved groups, interleaved with other bins to keep
      * all pointers of the same affinity and different bin grouped together,
@@ -330,6 +334,7 @@ C_ASSERT( HEAP_MIN_LARGE_BLOCK_SIZE <= HEAP_INITIAL_GROW_SIZE );
 
 BOOL delay_heap_free = FALSE;
 BOOL heap_zero_hack = FALSE;
+BOOL heap_top_down_hack = FALSE;
 
 static struct heap *process_heap;  /* main process heap */
 
@@ -506,14 +511,16 @@ static inline void mark_block_tail( struct block *block, DWORD flags )
 static inline void initialize_block( struct block *block, SIZE_T old_size, SIZE_T size, DWORD flags )
 {
     char *data = (char *)(block + 1);
-    SIZE_T i;
+    SIZE_T i, aligned_size;
 
     if (size <= old_size) return;
 
     if (flags & HEAP_ZERO_MEMORY)
     {
-        valgrind_make_writable( data + old_size, size - old_size );
-        memset( data + old_size, 0, size - old_size );
+        aligned_size = ROUND_SIZE( size, sizeof(void *) - 1 );
+        valgrind_make_writable( data + old_size, aligned_size - old_size );
+        memset( data + old_size, 0, aligned_size - old_size );
+        valgrind_make_noaccess( data + size, aligned_size - size );
     }
     else if (flags & HEAP_FREE_CHECKING_ENABLED)
     {
@@ -971,6 +978,8 @@ static struct block *split_block( struct heap *heap, ULONG flags, struct block *
 
 static void *allocate_region( struct heap *heap, ULONG flags, SIZE_T *region_size, SIZE_T *commit_size )
 {
+    const SIZE_T align = 0x400 * sizeof(void*);  /* minimum alignment for virtual allocations */
+    ULONG reserve_flags = MEM_RESERVE;
     void *addr = NULL;
     NTSTATUS status;
 
@@ -980,8 +989,13 @@ static void *allocate_region( struct heap *heap, ULONG flags, SIZE_T *region_siz
         return NULL;
     }
 
+    *region_size = ROUND_SIZE( *region_size, align - 1 );
+    *commit_size = ROUND_SIZE( *commit_size, align - 1 );
+
+    if (heap_top_down_hack) reserve_flags |= MEM_TOP_DOWN;
+
     /* allocate the memory block */
-    if ((status = NtAllocateVirtualMemory( NtCurrentProcess(), &addr, 0, region_size, MEM_RESERVE,
+    if ((status = NtAllocateVirtualMemory( NtCurrentProcess(), &addr, 0, region_size, reserve_flags,
                                            get_protection_type( flags ) )))
     {
         WARN( "Could not allocate %#Ix bytes, status %#lx\n", *region_size, status );
@@ -1149,10 +1163,9 @@ static struct block *find_free_block( struct heap *heap, ULONG flags, SIZE_T blo
 
 static BOOL is_valid_free_block( const struct heap *heap, const struct block *block )
 {
-    const SUBHEAP *subheap;
     unsigned int i;
 
-    if ((subheap = find_subheap( heap, block, FALSE ))) return TRUE;
+    if (find_subheap( heap, block, FALSE )) return TRUE;
     for (i = 0; i < FREE_LIST_COUNT; i++) if (block == &heap->free_lists[i].block) return TRUE;
     return FALSE;
 }
@@ -1493,23 +1506,9 @@ static void heap_set_debug_flags( HANDLE handle )
 
 /***********************************************************************
  *           RtlCreateHeap   (NTDLL.@)
- *
- * Create a new Heap.
- *
- * PARAMS
- *  flags      [I] HEAP_ flags from "winnt.h"
- *  addr       [I] Desired base address
- *  totalSize  [I] Total size of the heap, or 0 for a growable heap
- *  commitSize [I] Amount of heap space to commit
- *  unknown    [I] Not yet understood
- *  definition [I] Heap definition
- *
- * RETURNS
- *  Success: A HANDLE to the newly created heap.
- *  Failure: a NULL HANDLE.
  */
 HANDLE WINAPI RtlCreateHeap( ULONG flags, void *addr, SIZE_T total_size, SIZE_T commit_size,
-                             void *unknown, RTL_HEAP_DEFINITION *definition )
+                             void *lock, RTL_HEAP_PARAMETERS *params )
 {
     struct entry *entry;
     struct heap *heap;
@@ -1517,8 +1516,8 @@ HANDLE WINAPI RtlCreateHeap( ULONG flags, void *addr, SIZE_T total_size, SIZE_T 
     SUBHEAP *subheap;
     unsigned int i;
 
-    TRACE( "flags %#lx, addr %p, total_size %#Ix, commit_size %#Ix, unknown %p, definition %p\n",
-           flags, addr, total_size, commit_size, unknown, definition );
+    TRACE( "flags %#lx, addr %p, total_size %#Ix, commit_size %#Ix, lock %p, params %p\n",
+           flags, addr, total_size, commit_size, lock, params );
 
     if (heap_zero_hack)
         flags |= HEAP_ZERO_MEMORY;
@@ -1526,7 +1525,8 @@ HANDLE WINAPI RtlCreateHeap( ULONG flags, void *addr, SIZE_T total_size, SIZE_T 
     flags &= ~(HEAP_TAIL_CHECKING_ENABLED|HEAP_FREE_CHECKING_ENABLED);
     if (process_heap) flags |= HEAP_PRIVATE;
     if (!process_heap || !total_size || (flags & HEAP_SHARED)) flags |= HEAP_GROWABLE;
-    if (!total_size) total_size = commit_size + HEAP_INITIAL_SIZE;
+    commit_size = ROUND_SIZE( commit_size, INITIAL_COMMIT_ALIGN - 1 );
+    if (!total_size) total_size = ROUND_SIZE( commit_size + 1 /* + 1 is intentional */, REGION_ALIGN - 1 );
 
     if (!(heap = addr))
     {
@@ -1568,7 +1568,7 @@ HANDLE WINAPI RtlCreateHeap( ULONG flags, void *addr, SIZE_T total_size, SIZE_T 
     }
     else
     {
-        RtlInitializeCriticalSection( &heap->cs );
+        RtlInitializeCriticalSectionEx( &heap->cs, 0, RTL_CRITICAL_SECTION_FLAG_FORCE_DEBUG_INFO );
         heap->cs.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": heap.cs");
     }
 
@@ -1873,7 +1873,7 @@ static inline ULONG heap_current_thread_affinity(void)
 /* acquire a group from the bin, thread takes ownership of a shared group or allocates a new one */
 static struct group *heap_acquire_bin_group( struct heap *heap, ULONG flags, SIZE_T block_size, struct bin *bin )
 {
-    ULONG affinity = NtCurrentTeb()->HeapVirtualAffinity;
+    ULONG affinity = NtCurrentTeb()->HeapVirtualAffinity, count;
     struct group *group;
     SLIST_ENTRY *entry;
 
@@ -1883,6 +1883,8 @@ static struct group *heap_acquire_bin_group( struct heap *heap, ULONG flags, SIZ
     if ((entry = RtlInterlockedPopEntrySList( &bin->groups )))
         return CONTAINING_RECORD( entry, struct group, entry );
 
+    count = InterlockedIncrement( &bin->group_alloc ) - ReadNoFence( &bin->group_freed );
+    if (count > ReadAcquire( &bin->group_max )) WriteRelease( &bin->group_max, count );
     return group_allocate( heap, flags, block_size );
 }
 
@@ -1898,12 +1900,13 @@ static NTSTATUS heap_release_bin_group( struct heap *heap, ULONG flags, struct b
         return STATUS_SUCCESS;
 
     /* try re-using the block group instead of releasing it */
-    if (RtlQueryDepthSList( &bin->groups ) <= ARRAY_SIZE(affinity_mapping))
+    if (RtlQueryDepthSList( &bin->groups ) <= ReadAcquire( &bin->group_max ))
     {
         RtlInterlockedPushEntrySList( &bin->groups, &group->entry );
         return STATUS_SUCCESS;
     }
 
+    InterlockedIncrement( &bin->group_freed );
     return group_release( heap, flags, bin, group );
 }
 

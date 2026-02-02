@@ -93,24 +93,30 @@ static int append_output( struct debug_info *info, const char *str, size_t len )
 unsigned char __cdecl __wine_dbg_get_channel_flags( struct __wine_debug_channel *channel )
 {
     int min, max, pos, res;
-    unsigned char default_flags;
+    unsigned char flags;
+
+    if (!(channel->flags & (1 << __WINE_DBCL_INIT))) return channel->flags;
 
     if (!debug_options) init_options();
 
+    flags = debug_options[nb_debug_options].flags;
     min = 0;
     max = nb_debug_options - 1;
     while (min <= max)
     {
         pos = (min + max) / 2;
         res = strcmp( channel->name, debug_options[pos].name );
-        if (!res) return debug_options[pos].flags;
+        if (!res)
+        {
+            flags = debug_options[pos].flags;
+            break;
+        }
         if (res < 0) max = pos - 1;
         else min = pos + 1;
     }
-    /* no option for this channel */
-    default_flags = debug_options[nb_debug_options].flags;
-    if (channel->flags & (1 << __WINE_DBCL_INIT)) channel->flags = default_flags;
-    return default_flags;
+
+    if (!(flags & (1 << __WINE_DBCL_INIT))) channel->flags = flags; /* not dynamically changeable */
+    return flags;
 }
 
 /***********************************************************************
@@ -192,6 +198,17 @@ int __cdecl __wine_dbg_output( const char *str )
     }
     if (*str) ret += append_output( info, str, strlen( str ));
     return ret;
+}
+
+
+/***********************************************************************
+ *		__wine_dbg_ftrace
+ */
+unsigned int WINAPI __wine_dbg_ftrace( char *str, unsigned int len, unsigned int ctx )
+{
+    struct wine_dbg_ftrace_params params = { str, len, ctx };
+
+    return WINE_UNIX_CALL( unix_wine_dbg_ftrace, &params );
 }
 
 
@@ -342,10 +359,9 @@ NTSTATUS WINAPI RtlCreateUserStack( SIZE_T commit, SIZE_T reserve, ULONG zero_bi
                                       &alloc, sizeof(alloc) );
     if (!status)
     {
-        void *addr = alloc.StackBase;
+        void *addr;
         SIZE_T size = page_size;
 
-        NtAllocateVirtualMemory( GetCurrentProcess(), &addr, 0, &size, MEM_COMMIT, PAGE_NOACCESS );
         addr = (char *)alloc.StackBase + page_size;
         NtAllocateVirtualMemory( GetCurrentProcess(), &addr, 0, &size, MEM_COMMIT, PAGE_READWRITE | PAGE_GUARD );
         addr = (char *)alloc.StackBase + 2 * page_size;
@@ -419,6 +435,31 @@ TEB_ACTIVE_FRAME * WINAPI RtlGetFrame(void)
 BOOLEAN WINAPI RtlIsCurrentThread( HANDLE handle )
 {
     return handle == NtCurrentThread() || !NtCompareObjects( handle, NtCurrentThread() );
+}
+
+
+/***********************************************************************
+ *              RtlSetThreadErrorMode  (NTDLL.@)
+ */
+NTSTATUS WINAPI RtlSetThreadErrorMode( DWORD mode, LPDWORD oldmode )
+{
+    if (mode & ~0x70)
+        return STATUS_INVALID_PARAMETER_1;
+
+    if (oldmode)
+        *oldmode = NtCurrentTeb()->HardErrorMode;
+
+    NtCurrentTeb()->HardErrorMode = mode;
+    return STATUS_SUCCESS;
+}
+
+
+/***********************************************************************
+ *              RtlGetThreadErrorMode  (NTDLL.@)
+ */
+DWORD WINAPI RtlGetThreadErrorMode( void )
+{
+    return NtCurrentTeb()->HardErrorMode;
 }
 
 
@@ -502,10 +543,8 @@ NTSTATUS WINAPI DECLSPEC_HOTPATCH RtlFlsAlloc( PFLS_CALLBACK_FUNCTION callback, 
 {
     unsigned int chunk_index, index, i;
     FLS_INFO_CHUNK *chunk;
-    TEB_FLS_DATA *fls;
 
-    if (!(fls = NtCurrentTeb()->FlsSlots)
-            && !(NtCurrentTeb()->FlsSlots = fls = fls_alloc_data()))
+    if (!NtCurrentTeb()->FlsSlots && !(NtCurrentTeb()->FlsSlots = fls_alloc_data()))
         return STATUS_NO_MEMORY;
 
     lock_fls_data();

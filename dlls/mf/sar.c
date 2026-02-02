@@ -636,7 +636,7 @@ static HRESULT WINAPI audio_renderer_clock_sink_OnClockStart(IMFClockStateSink *
     EnterCriticalSection(&renderer->cs);
     if (renderer->audio_client)
     {
-        if (renderer->state == STREAM_STATE_STOPPED)
+        if (renderer->state != STREAM_STATE_RUNNING)
         {
             if (FAILED(hr = IAudioClient_Start(renderer->audio_client)))
                 WARN("Failed to start audio client, hr %#lx.\n", hr);
@@ -1477,6 +1477,8 @@ static HRESULT WINAPI audio_renderer_stream_Flush(IMFStreamSink *iface)
         }
     }
     renderer->queued_frames = 0;
+    if (FAILED(hr = IAudioClient_Reset(renderer->audio_client)))
+        WARN("Failed to reset audio client, hr %#lx.\n", hr);
     LeaveCriticalSection(&renderer->cs);
 
     return hr;
@@ -1522,6 +1524,7 @@ static HRESULT check_media_type(IMFMediaType *type, IMFMediaType *current)
 {
     static const GUID *required_attrs[] =
     {
+        &MF_MT_SUBTYPE,
         &MF_MT_AUDIO_SAMPLES_PER_SECOND,
         &MF_MT_AUDIO_NUM_CHANNELS,
         &MF_MT_AUDIO_BITS_PER_SAMPLE,

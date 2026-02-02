@@ -364,11 +364,19 @@ static enum loadorder get_load_order_value( HANDLE std_key, HANDLE app_key, WCHA
 void set_load_order_app_name( const WCHAR *app_name )
 {
     static const WCHAR eac_launcherW[] = {'P','R','O','T','O','N','_','E','A','C','_','L','A','U','N','C','H','E','R','_','P','R','O','C','E','S','S',0};
+    static const WCHAR crossoutW[] = {'C','r','o','s','s','o','u','t','.','e','x','e',0};
     const WCHAR *p;
 
     if ((p = wcsrchr( app_name, '\\' ))) app_name = p + 1;
     app_key = open_app_key( app_name );
     main_exe_loaded = TRUE;
+
+    if (!wcscmp( app_name, crossoutW ))
+    {
+        ERR( "Disabling EAC bridge.\n" );
+        eac_launcher_process = TRUE;
+        return;
+    }
 
     p = NtCurrentTeb()->Peb->ProcessParameters->Environment;
     while(*p)
@@ -411,6 +419,7 @@ enum loadorder get_load_order( const UNICODE_STRING *nt_name )
     TRACE("looking for %s\n", debugstr_w(path));
 
     /* HACK: special logic for easyanticheat bridge: only load the bridge (builtin) if there exists a native version of the library next to the windows version */
+
     basename = get_basename((WCHAR *)path);
     if (!wcsicmp(basename, easyanticheat_x86W) || !wcsicmp(basename, easyanticheat_x64W) || !wcsicmp(basename, easyanticheatW))
     {
@@ -437,7 +446,7 @@ enum loadorder get_load_order( const UNICODE_STRING *nt_name )
         eac_unix_name.Length = eac_unix_name.MaximumLength = wcslen(eac_unix_name.Buffer) * sizeof(WCHAR);
         InitializeObjectAttributes(&attr, &eac_unix_name, 0, NULL, NULL);
 
-        if (!(status = nt_to_unix_file_name(&attr, &unix_path, FILE_OPEN)))
+        if (!(status = get_nt_and_unix_names(&attr, &eac_unix_name, &unix_path, FILE_OPEN, FALSE)))
         {
             free(unix_path);
             free(eac_unix_name.Buffer);

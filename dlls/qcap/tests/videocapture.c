@@ -20,7 +20,6 @@
 
 #define COBJMACROS
 #include "dshow.h"
-#include "mferror.h"
 #include "wine/test.h"
 #include "wine/strmbase.h"
 
@@ -407,7 +406,7 @@ static HRESULT WINAPI testsink_Receive(struct strmbase_sink *iface, IMediaSample
     if (winetest_debug > 1) trace("Receive()\n");
 
     hr = IMediaSample_GetTime(sample, &start, &end);
-    todo_wine ok(hr == S_OK, "Got hr %#lx.\n", hr);
+    ok(hr == S_OK || hr == VFW_E_SAMPLE_TIME_NOT_SET, "Got hr %#lx.\n", hr);
 
     SetEvent(filter->got_sample);
 
@@ -661,7 +660,6 @@ static void test_multiple_objects(IMoniker *moniker)
     OAFilterState state;
     IPin *pin, *pin2;
     HRESULT hr;
-    DWORD ret;
     ULONG ref;
 
     hr = IMoniker_BindToObject(moniker, NULL, NULL, &IID_IBaseFilter, (void **)&filter);
@@ -727,58 +725,14 @@ static void test_multiple_objects(IMoniker *moniker)
     ok(hr == S_OK, "Got hr %#lx.\n", hr);
     ok(state == State_Running, "Got state %lu.\n", state);
 
-    hr = IBaseFilter_Pause(filter2);
-    todo_wine ok(hr == S_OK, "Got hr %#lx.\n", hr);
-    if (FAILED(hr))
-        goto cleanup;
-
     hr = IMediaControl_Run(control2);
-    ok(hr == S_OK, "Got hr %#lx.\n", hr);
-    hr = IMediaControl_GetState(control2, 0, &state);
-    ok(hr == S_OK, "Got hr %#lx.\n", hr);
-    ok(state == State_Running, "Got state %lu.\n", state);
+    /* Depending on device driver Windows has different behaviour on attempt to concurrently use capture
+     * device in the same process. So far observed variants are:
+     *  - running both graphs succeeds but only the graph started second receives samples, attempt to change
+     *    state of the first returns MF_E_VIDEO_RECORDING_DEVICE_PREEMPTED;
+     *  - attempt to change second filter or graph state fails with HRESULT_FROM_WIN32(ERROR_NO_SYSTEM_RESOURCES). */
+    ok(hr == S_OK || hr == HRESULT_FROM_WIN32(ERROR_NO_SYSTEM_RESOURCES), "Got hr %#lx.\n", hr);
 
-    ret = WaitForSingleObject(testsink2.got_sample, 5000);
-    ok(!ret, "Got %lu.\n", ret);
-
-    if (0)
-    {
-        /* times out on Windows unless a sample was received before IMediaControl_Run(control2) which is unlikely. */
-        ret = WaitForSingleObject(testsink.got_sample, 5000);
-        ok(ret == WAIT_TIMEOUT, "Got %lu.\n", ret);
-    }
-
-    hr = IMediaControl_GetState(control, 0, &state);
-    ok(hr == S_OK, "Got hr %#lx.\n", hr);
-    ok(state == State_Running, "Got state %lu.\n", state);
-    hr = IMediaControl_GetState(control2, 0, &state);
-    ok(hr == S_OK, "Got hr %#lx.\n", hr);
-    ok(state == State_Running, "Got state %lu.\n", state);
-
-    hr = IMediaControl_Pause(control);
-    ok(hr == MF_E_VIDEO_RECORDING_DEVICE_PREEMPTED, "Got hr %#lx.\n", hr);
-    hr = IMediaControl_GetState(control, 0, &state);
-    ok(hr == S_OK, "Got hr %#lx.\n", hr);
-    ok(state == State_Stopped, "Got state %lu.\n", state);
-
-    hr = IMediaControl_Stop(control);
-    ok(hr == S_OK, "Got hr %#lx.\n", hr);
-    hr = IMediaControl_GetState(control, 0, &state);
-    ok(hr == S_OK, "Got hr %#lx.\n", hr);
-    ok(state == State_Stopped, "Got state %lu.\n", state);
-
-    hr = IMediaControl_Pause(control2);
-    ok(hr == S_OK, "Got hr %#lx.\n", hr);
-    hr = IMediaControl_GetState(control2, 0, &state);
-    ok(hr == VFW_S_CANT_CUE, "Got hr %#lx.\n", hr);
-    ok(state == State_Paused, "Got state %lu.\n", state);
-    hr = IMediaControl_Stop(control2);
-    ok(hr == S_OK, "Got hr %#lx.\n", hr);
-    hr = IMediaControl_GetState(control2, 0, &state);
-    ok(hr == S_OK, "Got hr %#lx.\n", hr);
-    ok(state == State_Stopped, "Got state %lu.\n", state);
-
-cleanup:
     IAMStreamConfig_Release(config);
     IMediaControl_Release(control);
     ref = IFilterGraph2_Release(graph);
@@ -841,7 +795,6 @@ START_TEST(videocapture)
         test_pins(filter);
         test_misc_flags(filter);
         test_unconnected_filter_state(filter);
-
         ref = IBaseFilter_Release(filter);
         ok(!ref, "Got outstanding refcount %ld.\n", ref);
 

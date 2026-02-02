@@ -22,6 +22,7 @@
 #include "initguid.h"
 #include "audioclient.h"
 #include "mmdeviceapi.h"
+#include "devpkey.h"
 
 #include "wine/debug.h"
 
@@ -1492,18 +1493,33 @@ static HRESULT WINAPI recognizer_get_UIOptions( ISpeechRecognizer *iface, ISpeec
 static HRESULT recognizer_create_unix_instance( struct session *session, const char **grammar, UINT32 grammar_size )
 {
     struct speech_create_recognizer_params create_params = { 0 };
+    DWORD locale_len = LOCALE_NAME_MAX_LENGTH;
     WCHAR locale[LOCALE_NAME_MAX_LENGTH];
+    char *appid = getenv("SteamAppId");
     NTSTATUS status;
     INT len;
 
-    if (!(len = GetUserDefaultLocaleName(locale, LOCALE_NAME_MAX_LENGTH)))
-        return E_FAIL;
+    memset(locale, 0, locale_len);
+
+    if ((locale_len = GetEnvironmentVariableW(L"WINE_FORCE_SR_LOCALE", locale, locale_len)) && locale_len <= LOCALE_NAME_MAX_LENGTH)
+        len = locale_len;
+    else
+    {
+        locale_len = LOCALE_NAME_MAX_LENGTH;
+
+        if (!strcmp(appid, "739630") && !RegGetValueW(HKEY_CURRENT_USER, L"Software\\Valve\\Steam", L"language", RRF_RT_REG_SZ, NULL, locale, &locale_len))
+            len = locale_len;
+        else if (!(len = GetUserDefaultLocaleName(locale, LOCALE_NAME_MAX_LENGTH)))
+            return E_FAIL;
+    }
 
     if (CharLowerBuffW(locale, len) != len)
         return E_FAIL;
 
     if (!WideCharToMultiByte(CP_ACP, 0, locale, len, create_params.locale, ARRAY_SIZE(create_params.locale), NULL, NULL))
         return HRESULT_FROM_WIN32(GetLastError());
+
+    TRACE("creating recognizer with language %s\n", debugstr_a(create_params.locale));
 
     create_params.sample_rate = (FLOAT)session->capture_wfx.nSamplesPerSec;
     create_params.grammar = grammar;
@@ -1937,10 +1953,12 @@ static HRESULT recognizer_factory_create_audio_capture(struct session *session)
 {
     const REFERENCE_TIME buffer_duration = 5000000; /* 0.5 second */
     IMMDeviceEnumerator *mm_enum = NULL;
+    IPropertyStore *mm_propstore = NULL;
     IMMDevice *mm_device = NULL;
     WAVEFORMATEX wfx = { 0 };
     WCHAR *str = NULL;
     HRESULT hr = S_OK;
+    PROPVARIANT pv;
 
     if (!(session->audio_buf_event = CreateEventW(NULL, FALSE, FALSE, NULL)))
         return HRESULT_FROM_WIN32(GetLastError());
@@ -1951,11 +1969,16 @@ static HRESULT recognizer_factory_create_audio_capture(struct session *session)
     if (FAILED(hr = IMMDeviceEnumerator_GetDefaultAudioEndpoint(mm_enum, eCapture, eMultimedia, &mm_device)))
         goto cleanup;
 
+    if (FAILED(hr = IMMDevice_OpenPropertyStore(mm_device, STGM_READ, &mm_propstore)))
+        goto cleanup;
+
     if (FAILED(hr = IMMDevice_Activate(mm_device, &IID_IAudioClient, CLSCTX_INPROC_SERVER, NULL, (void **)&session->audio_client)))
         goto cleanup;
 
-    hr = IMMDevice_GetId(mm_device, &str);
-    TRACE("selected capture device ID: %s, hr %#lx\n", debugstr_w(str), hr);
+    PropVariantInit(&pv);
+    IPropertyStore_GetValue(mm_propstore, (const PROPERTYKEY*)&DEVPKEY_Device_FriendlyName, &pv);
+    IMMDevice_GetId(mm_device, &str);
+    TRACE("selected capture device ID: %s, name %s.\n", debugstr_w(str), debugstr_w(pv.pwszVal));
 
     wfx.wFormatTag = WAVE_FORMAT_PCM;
     wfx.nSamplesPerSec = 16000;
@@ -1976,8 +1999,10 @@ static HRESULT recognizer_factory_create_audio_capture(struct session *session)
     session->capture_wfx = wfx;
 
 cleanup:
+    if (mm_propstore) IPropertyStore_Release(mm_propstore);
     if (mm_device) IMMDevice_Release(mm_device);
     if (mm_enum) IMMDeviceEnumerator_Release(mm_enum);
+    PropVariantClear(&pv);
     CoTaskMemFree(str);
     return hr;
 }
@@ -2028,7 +2053,7 @@ static HRESULT WINAPI recognizer_factory_Create( ISpeechRecognizerFactory *iface
     if (FAILED(hr = recognizer_factory_create_audio_capture(session)))
         goto error;
 
-    InitializeCriticalSection(&session->cs);
+    InitializeCriticalSectionEx(&session->cs, 0, RTL_CRITICAL_SECTION_FLAG_FORCE_DEBUG_INFO);
     session->cs.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": recognition_session.cs");
 
     /* Init ISpeechRecognizer */

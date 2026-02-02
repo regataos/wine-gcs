@@ -90,7 +90,7 @@ struct __wine_debug_channel
 #define __WINE_DBG_LOG(...) \
    wine_dbg_log( __dbcl, __dbch, __func__, __VA_ARGS__); } } while(0)
 
-#if defined(__MINGW32__) || (!defined(__WINE_USE_MSVCRT) && (defined(__GNUC__) || defined(__clang__)))
+#if (defined(__GNUC__) || defined(__clang__)) && (defined(__MINGW32__) || defined (_MSC_VER) || !defined(__WINE_USE_MSVCRT))
 #define __WINE_PRINTF_ATTR(fmt,args) __attribute__((format (printf,fmt,args)))
 #else
 #define __WINE_PRINTF_ATTR(fmt,args)
@@ -114,7 +114,7 @@ extern DECLSPEC_EXPORT const char * __cdecl __wine_dbg_strdup( const char *str )
 extern DECLSPEC_EXPORT int __cdecl __wine_dbg_output( const char *str );
 extern DECLSPEC_EXPORT int __cdecl __wine_dbg_header( enum __wine_debug_class cls, struct __wine_debug_channel *channel,
                                                       const char *function );
-extern unsigned int WINAPI __wine_dbg_ftrace( char *str, unsigned int str_size, unsigned int ctx );
+extern DECLSPEC_EXPORT unsigned int WINAPI __wine_dbg_ftrace( char *str, unsigned int str_size, unsigned int ctx );
 
 /*
  * Exported definitions and macros
@@ -124,7 +124,7 @@ extern unsigned int WINAPI __wine_dbg_ftrace( char *str, unsigned int str_size, 
    quotes.  The string will be valid for some time, but not indefinitely
    as strings are re-used.  */
 
-#if (defined(__x86_64__) || (defined(__aarch64__) && __has_attribute(ms_abi))) && defined(__GNUC__) && defined(__WINE_USE_MSVCRT)
+#if defined(__x86_64__) && defined(__GNUC__) && defined(__WINE_USE_MSVCRT)
 # define __wine_dbg_cdecl __cdecl
 #else
 # define __wine_dbg_cdecl

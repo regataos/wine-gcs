@@ -1,0 +1,7 @@
+MODULE  = embeddedbrowserwebview.dll
+
+EXTRADLLFLAGS = -Wb,--prefer-native
+
+SOURCES = \
+        embeddedbrowserwebview.rc \
+        main.c \

@@ -33,6 +33,8 @@ WINE_DECLARE_DEBUG_CHANNEL(winediag);
 
 extern GUID MFVideoFormat_ABGR32;
 
+static const GUID MF_XVP_PLAYBACK_MODE = { 0x3c5d293f, 0xad67, 0x4e29, { 0xaf, 0x12, 0xcf, 0x3e, 0x23, 0x8a, 0xcc, 0xe9 } };
+
 static const GUID *const input_types[] =
 {
     &MFVideoFormat_IYUV,
@@ -93,36 +95,73 @@ struct video_processor
 
     IUnknown *device_manager;
     IMFVideoSampleAllocatorEx *allocator;
+
+    IMFVideoProcessorControl IMFVideoProcessorControl_iface;
 };
 
-static HRESULT normalize_stride(IMFMediaType *media_type, BOOL bottom_up, IMFMediaType **ret)
+static void update_video_aperture(MFVideoInfo *input_info, MFVideoInfo *output_info)
 {
-    MFVIDEOFORMAT *format;
-    LONG stride;
+    RECT input_rect, output_rect;
+
+    get_mf_video_content_rect(input_info, &input_rect);
+    get_mf_video_content_rect(output_info, &output_rect);
+
+    if (!EqualRect(&input_rect, &output_rect))
+    {
+        FIXME("Mismatched content size %s vs %s\n", wine_dbgstr_rect(&input_rect),
+                wine_dbgstr_rect(&output_rect));
+    }
+
+    input_info->MinimumDisplayAperture.OffsetX.value = input_rect.left;
+    input_info->MinimumDisplayAperture.OffsetY.value = input_rect.top;
+    input_info->MinimumDisplayAperture.Area.cx = input_rect.right - input_rect.left;
+    input_info->MinimumDisplayAperture.Area.cy = input_rect.bottom - input_rect.top;
+    output_info->MinimumDisplayAperture = input_info->MinimumDisplayAperture;
+}
+
+static HRESULT normalize_media_types(BOOL bottom_up, IMFMediaType **input_type, IMFMediaType **output_type)
+{
+    MFVIDEOFORMAT *input_format, *output_format;
+    BOOL normalize_input, normalize_output;
     UINT32 size;
     HRESULT hr;
 
-    if (SUCCEEDED(hr = IMFMediaType_GetUINT32(media_type, &MF_MT_DEFAULT_STRIDE, (UINT32 *)&stride)))
+    normalize_input = FAILED(IMFMediaType_GetItem(*input_type, &MF_MT_DEFAULT_STRIDE, NULL));
+    normalize_output = FAILED(IMFMediaType_GetItem(*output_type, &MF_MT_DEFAULT_STRIDE, NULL));
+
+    if (FAILED(hr = MFCreateMFVideoFormatFromMFMediaType(*input_type, &input_format, &size)))
+        return hr;
+    if (FAILED(hr = MFCreateMFVideoFormatFromMFMediaType(*output_type, &output_format, &size)))
     {
-        *ret = media_type;
-        IMFMediaType_AddRef(media_type);
+        CoTaskMemFree(input_format);
         return hr;
     }
 
-    if (SUCCEEDED(hr = MFCreateMFVideoFormatFromMFMediaType(media_type, &format, &size)))
+    if (bottom_up && normalize_input)
+        input_format->videoInfo.VideoFlags |= MFVideoFlag_BottomUpLinearRep;
+    if (bottom_up && normalize_output)
+        output_format->videoInfo.VideoFlags |= MFVideoFlag_BottomUpLinearRep;
+
+    update_video_aperture(&input_format->videoInfo, &output_format->videoInfo);
+
+    if (FAILED(hr = MFCreateVideoMediaType(input_format, (IMFVideoMediaType **)input_type)))
+        goto done;
+    if (FAILED(hr = MFCreateVideoMediaType(output_format, (IMFVideoMediaType **)output_type)))
     {
-        if (bottom_up) format->videoInfo.VideoFlags |= MFVideoFlag_BottomUpLinearRep;
-        hr = MFCreateVideoMediaType(format, (IMFVideoMediaType **)ret);
-        CoTaskMemFree(format);
+        IMFMediaType_Release(*input_type);
+        *input_type = NULL;
     }
 
+done:
+    CoTaskMemFree(input_format);
+    CoTaskMemFree(output_format);
     return hr;
 }
 
 static HRESULT try_create_wg_transform(struct video_processor *impl)
 {
     BOOL bottom_up = !impl->device_manager; /* when not D3D-enabled, the transform outputs bottom up RGB buffers */
-    IMFMediaType *input_type, *output_type;
+    IMFMediaType *input_type = impl->input_type, *output_type = impl->output_type;
     struct wg_transform_attrs attrs = {0};
     HRESULT hr;
 
@@ -132,13 +171,8 @@ static HRESULT try_create_wg_transform(struct video_processor *impl)
         impl->wg_transform = 0;
     }
 
-    if (FAILED(hr = normalize_stride(impl->input_type, bottom_up, &input_type)))
+    if (FAILED(hr = normalize_media_types(bottom_up, &input_type, &output_type)))
         return hr;
-    if (FAILED(hr = normalize_stride(impl->output_type, bottom_up, &output_type)))
-    {
-        IMFMediaType_Release(input_type);
-        return hr;
-    }
     hr = wg_transform_create_mf(input_type, output_type, &attrs, &impl->wg_transform);
     IMFMediaType_Release(output_type);
     IMFMediaType_Release(input_type);
@@ -444,6 +478,8 @@ static HRESULT WINAPI video_processor_QueryInterface(IMFTransform *iface, REFIID
 
     if (IsEqualGUID(iid, &IID_IMFTransform))
         *out = &impl->IMFTransform_iface;
+    else if (IsEqualGUID(iid, &IID_IMFVideoProcessorControl))
+        *out = &impl->IMFVideoProcessorControl_iface;
     else
     {
         *out = NULL;
@@ -850,7 +886,8 @@ static HRESULT WINAPI video_processor_GetOutputStatus(IMFTransform *iface, DWORD
     if (!impl->output_type)
         return MF_E_TRANSFORM_TYPE_NOT_SET;
 
-    return E_NOTIMPL;
+    *flags = MFT_OUTPUT_STATUS_SAMPLE_READY;
+    return S_OK;
 }
 
 static HRESULT WINAPI video_processor_SetOutputBounds(IMFTransform *iface, LONGLONG lower, LONGLONG upper)
@@ -919,6 +956,7 @@ static HRESULT WINAPI video_processor_ProcessOutput(IMFTransform *iface, DWORD f
     MFT_OUTPUT_STREAM_INFO info;
     IMFSample *input_sample, *output_sample;
     HRESULT hr;
+    BOOL playback_mode, provide_samples;
 
     TRACE("iface %p, flags %#lx, count %lu, samples %p, status %p.\n", iface, flags, count, samples, status);
 
@@ -936,7 +974,12 @@ static HRESULT WINAPI video_processor_ProcessOutput(IMFTransform *iface, DWORD f
         return MF_E_TRANSFORM_NEED_MORE_INPUT;
     impl->input_sample = NULL;
 
-    if (impl->output_info.dwFlags & MFT_OUTPUT_STREAM_PROVIDES_SAMPLES)
+    if (FAILED(IMFAttributes_GetUINT32(impl->attributes, &MF_XVP_PLAYBACK_MODE, (UINT32 *) &playback_mode)))
+        playback_mode = FALSE;
+
+    provide_samples = (impl->output_info.dwFlags & MFT_OUTPUT_STREAM_PROVIDES_SAMPLES) && !playback_mode;
+
+    if (provide_samples)
     {
         if (FAILED(hr = video_processor_init_allocator(impl))
                 || FAILED(hr = IMFVideoSampleAllocatorEx_AllocateSample(impl->allocator, &output_sample)))
@@ -959,12 +1002,12 @@ static HRESULT WINAPI video_processor_ProcessOutput(IMFTransform *iface, DWORD f
     {
         if (FAILED(hr = wg_transform_push_mf(impl->wg_transform, input_sample, impl->wg_sample_queue)))
             goto done;
-        if (FAILED(hr = wg_transform_read_mf(impl->wg_transform, output_sample, info.cbSize, &samples->dwStatus)))
+        if (FAILED(hr = wg_transform_read_mf(impl->wg_transform, output_sample, info.cbSize, &samples->dwStatus, NULL)))
             goto done;
         wg_sample_queue_flush(impl->wg_sample_queue, false);
     }
 
-    if (impl->output_info.dwFlags & MFT_OUTPUT_STREAM_PROVIDES_SAMPLES)
+    if (provide_samples)
     {
         samples->pSample = output_sample;
         IMFSample_AddRef(output_sample);
@@ -1004,6 +1047,81 @@ static const IMFTransformVtbl video_processor_vtbl =
     video_processor_ProcessMessage,
     video_processor_ProcessInput,
     video_processor_ProcessOutput,
+};
+
+static struct video_processor *impl_from_IMFVideoProcessorControl(IMFVideoProcessorControl *iface)
+{
+    return CONTAINING_RECORD(iface, struct video_processor, IMFVideoProcessorControl_iface);
+}
+
+static HRESULT WINAPI video_processor_control_QueryInterface(IMFVideoProcessorControl *iface, REFIID iid, void **out)
+{
+    return video_processor_QueryInterface(&impl_from_IMFVideoProcessorControl(iface)->IMFTransform_iface, iid, out);
+}
+
+static ULONG WINAPI video_processor_control_AddRef(IMFVideoProcessorControl *iface)
+{
+    return video_processor_AddRef(&impl_from_IMFVideoProcessorControl(iface)->IMFTransform_iface);
+}
+
+static ULONG WINAPI video_processor_control_Release(IMFVideoProcessorControl *iface)
+{
+    return video_processor_Release(&impl_from_IMFVideoProcessorControl(iface)->IMFTransform_iface);
+}
+
+static HRESULT WINAPI video_processor_control_SetBorderColor(IMFVideoProcessorControl *iface, MFARGB *color)
+{
+    FIXME("iface %p, color %p: stub.\n", iface, color);
+    //return E_NOTIMPL;
+    return S_OK;
+}
+
+static HRESULT WINAPI video_processor_control_SetSourceRectangle(IMFVideoProcessorControl *iface, RECT *rect)
+{
+    FIXME("iface %p, rect %p: stub.\n", iface, rect);
+    //return E_NOTIMPL;
+    return S_OK;
+}
+
+static HRESULT WINAPI video_processor_control_SetDestinationRectangle(IMFVideoProcessorControl *iface, RECT *rect)
+{
+    FIXME("iface %p, rect %p: stub.\n", iface, rect);
+    //return E_NOTIMPL;
+    return S_OK;
+}
+
+static HRESULT WINAPI video_processor_control_SetMirror(IMFVideoProcessorControl *iface, MF_VIDEO_PROCESSOR_MIRROR mirror)
+{
+    FIXME("iface %p, mirror %d: stub.\n", iface, mirror);
+    //return E_NOTIMPL;
+    return S_OK;
+}
+
+static HRESULT WINAPI video_processor_control_SetRotation(IMFVideoProcessorControl *iface, MF_VIDEO_PROCESSOR_ROTATION rotation)
+{
+    FIXME("iface %p, rotation %d: stub.\n", iface, rotation);
+    //return E_NOTIMPL;
+    return S_OK;
+}
+
+static HRESULT WINAPI video_processor_control_SetConstrictionSize(IMFVideoProcessorControl *iface, SIZE *size)
+{
+    FIXME("iface %p, size %p: stub.\n", iface, size);
+    //return E_NOTIMPL;
+    return S_OK;
+}
+
+static const IMFVideoProcessorControlVtbl video_processor_control_vtbl =
+{
+    video_processor_control_QueryInterface,
+    video_processor_control_AddRef,
+    video_processor_control_Release,
+    video_processor_control_SetBorderColor,
+    video_processor_control_SetSourceRectangle,
+    video_processor_control_SetDestinationRectangle,
+    video_processor_control_SetMirror,
+    video_processor_control_SetRotation,
+    video_processor_control_SetConstrictionSize,
 };
 
 HRESULT video_processor_create(REFIID riid, void **ret)
@@ -1047,6 +1165,7 @@ HRESULT video_processor_create(REFIID riid, void **ret)
         goto failed;
 
     impl->IMFTransform_iface.lpVtbl = &video_processor_vtbl;
+    impl->IMFVideoProcessorControl_iface.lpVtbl = &video_processor_control_vtbl;
     impl->refcount = 1;
 
     *ret = &impl->IMFTransform_iface;

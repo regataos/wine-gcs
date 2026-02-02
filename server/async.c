@@ -45,7 +45,7 @@ struct async
     struct timeout_user *timeout;
     unsigned int         timeout_status;  /* status to report upon timeout */
     struct event        *event;
-    async_data_t         data;            /* data for async I/O call */
+    struct async_data    data;            /* data for async I/O call */
     struct iosb         *iosb;            /* I/O status block */
     obj_handle_t         wait_handle;     /* pre-allocated wait handle */
     unsigned int         initial_status;  /* status returned from initial request */
@@ -92,6 +92,7 @@ static const struct object_ops async_ops =
     NULL,                      /* unlink_name */
     no_open_file,              /* open_file */
     no_kernel_obj_list,        /* get_kernel_obj_list */
+    no_get_inproc_sync,        /* get_inproc_sync */
     no_close_handle,           /* close_handle */
     async_destroy              /* destroy */
 };
@@ -182,7 +183,7 @@ void async_terminate( struct async *async, unsigned int status )
 
     if (!async->direct_result)
     {
-        apc_call_t data;
+        union apc_call data;
 
         memset( &data, 0, sizeof(data) );
         data.type            = APC_ASYNC_IO;
@@ -250,7 +251,7 @@ void queue_async( struct async_queue *queue, struct async *async )
 }
 
 /* create an async on a given queue of a fd */
-struct async *create_async( struct fd *fd, struct thread *thread, const async_data_t *data, struct iosb *iosb )
+struct async *create_async( struct fd *fd, struct thread *thread, const struct async_data *data, struct iosb *iosb )
 {
     struct event *event = NULL;
     struct async *async;
@@ -372,16 +373,6 @@ obj_handle_t async_handoff( struct async *async, data_size_t *result, int force_
 
     async->initial_status = get_error();
 
-    if (!async->pending && NT_ERROR( get_error() ))
-    {
-        async->iosb->status = get_error();
-        async_call_completion_callback( async );
-
-        close_handle( async->thread->process, async->wait_handle );
-        async->wait_handle = 0;
-        return 0;
-    }
-
     if (get_error() != STATUS_PENDING)
     {
         /* status and data are already set and returned */
@@ -395,6 +386,16 @@ obj_handle_t async_handoff( struct async *async, data_size_t *result, int force_
             set_reply_data_ptr( async->iosb->out_data, async->iosb->out_size );
             async->iosb->out_data = NULL;
         }
+    }
+
+    if (!async->pending && NT_ERROR( async->iosb->status ))
+    {
+        async_call_completion_callback( async );
+
+        close_handle( async->thread->process, async->wait_handle );
+        async->wait_handle = 0;
+        set_error( async->iosb->status );
+        return 0;
     }
 
     if (async->iosb->status != STATUS_PENDING)
@@ -517,7 +518,7 @@ void async_set_result( struct object *obj, unsigned int status, apc_param_t tota
         {
             if (async->data.apc)
             {
-                apc_call_t data;
+                union apc_call data;
                 memset( &data, 0, sizeof(data) );
                 data.type         = APC_USER;
                 data.user.func    = async->data.apc;
@@ -714,6 +715,7 @@ static const struct object_ops iosb_ops =
     NULL,                     /* unlink_name */
     no_open_file,             /* open_file */
     no_kernel_obj_list,       /* get_kernel_obj_list */
+    no_get_inproc_sync,        /* get_inproc_sync */
     no_close_handle,          /* close_handle */
     iosb_destroy              /* destroy */
 };
@@ -757,7 +759,7 @@ static struct iosb *create_iosb( const void *in_data, data_size_t in_size, data_
 
 /* create an async associated with iosb for async-based requests
  * returned async must be passed to async_handoff */
-struct async *create_request_async( struct fd *fd, unsigned int comp_flags, const async_data_t *data, int is_system )
+struct async *create_request_async( struct fd *fd, unsigned int comp_flags, const struct async_data *data, int is_system )
 {
     struct async *async;
     struct iosb *iosb;

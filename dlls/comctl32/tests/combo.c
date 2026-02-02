@@ -57,6 +57,22 @@ static char *textBuffer = NULL;
 
 static BOOL received_end_edit = FALSE;
 
+/* try to make sure pending X events have been processed before continuing */
+static void flush_events(void)
+{
+    MSG msg;
+    int diff = 200;
+    int min_timeout = 100;
+    DWORD time = GetTickCount() + diff;
+
+    while (diff > 0)
+    {
+        if (MsgWaitForMultipleObjects( 0, NULL, FALSE, min_timeout, QS_ALLINPUT ) == WAIT_TIMEOUT) break;
+        while (PeekMessageA( &msg, 0, 0, 0, PM_REMOVE )) DispatchMessageA( &msg );
+        diff = time - GetTickCount();
+    }
+}
+
 static void get_combobox_info(HWND hwnd, COMBOBOXINFO *info)
 {
     BOOL ret;
@@ -727,17 +743,20 @@ static void test_combo_setitemheight(DWORD style)
 
 static void test_combo_setfont(DWORD style)
 {
+    unsigned int expected_height, initial_height;
     HFONT hFont1, hFont2;
     HWND hCombo;
     RECT r;
     int i;
 
+    winetest_push_context("style %#lx", style);
     hCombo = create_combobox(style);
     hFont1 = CreateFontA(10, 0, 0, 0, FW_DONTCARE, FALSE, FALSE, FALSE, SYMBOL_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY, DEFAULT_PITCH|FF_DONTCARE, "Marlett");
     hFont2 = CreateFontA(8, 0, 0, 0, FW_DONTCARE, FALSE, FALSE, FALSE, SYMBOL_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY, DEFAULT_PITCH|FF_DONTCARE, "Marlett");
 
     GetClientRect(hCombo, &r);
-    expect_rect(r, 0, 0, 100, get_font_height(GetStockObject(SYSTEM_FONT)) + 8);
+    initial_height = get_font_height(GetStockObject(SYSTEM_FONT)) + 8;
+    expect_rect(r, 0, 0, 100, initial_height);
     SendMessageA(hCombo, CB_GETDROPPEDCONTROLRECT, 0, (LPARAM)&r);
     MapWindowPoints(HWND_DESKTOP, hMainWnd, (LPPOINT)&r, 2);
     todo_wine expect_rect(r, 5, 5, 105, 105);
@@ -750,24 +769,50 @@ static void test_combo_setfont(DWORD style)
     {
         SendMessageA(hCombo, WM_SETFONT, (WPARAM)hFont1, FALSE);
         GetClientRect(hCombo, &r);
-        expect_rect(r, 0, 0, 100, 18);
+        expected_height = style & CBS_OWNERDRAWFIXED ? initial_height : 18;
+        expect_rect(r, 0, 0, 100, expected_height);
         SendMessageA(hCombo, CB_GETDROPPEDCONTROLRECT, 0, (LPARAM)&r);
         MapWindowPoints(HWND_DESKTOP, hMainWnd, (LPPOINT)&r, 2);
-        todo_wine expect_rect(r, 5, 5, 105, 105 - (get_font_height(GetStockObject(SYSTEM_FONT)) - get_font_height(hFont1)));
+
+        if (style & CBS_OWNERDRAWFIXED)
+        {
+            todo_wine expect_rect(r, 5, 5, 105, 105);
+        }
+        else
+        {
+            todo_wine expect_rect(r, 5, 5, 105, 105 - (get_font_height(GetStockObject(SYSTEM_FONT)) - get_font_height(hFont1)));
+        }
 
         SendMessageA(hCombo, WM_SETFONT, (WPARAM)hFont2, FALSE);
         GetClientRect(hCombo, &r);
-        expect_rect(r, 0, 0, 100, 16);
+        expected_height = style & CBS_OWNERDRAWFIXED ? initial_height : 16;
+        expect_rect(r, 0, 0, 100, expected_height);
         SendMessageA(hCombo, CB_GETDROPPEDCONTROLRECT, 0, (LPARAM)&r);
         MapWindowPoints(HWND_DESKTOP, hMainWnd, (LPPOINT)&r, 2);
-        todo_wine expect_rect(r, 5, 5, 105, 105 - (get_font_height(GetStockObject(SYSTEM_FONT)) - get_font_height(hFont2)));
+
+        if (style & CBS_OWNERDRAWFIXED)
+        {
+            todo_wine expect_rect(r, 5, 5, 105, 105);
+        }
+        else
+        {
+            todo_wine expect_rect(r, 5, 5, 105, 105 - (get_font_height(GetStockObject(SYSTEM_FONT)) - get_font_height(hFont2)));
+        }
 
         SendMessageA(hCombo, WM_SETFONT, (WPARAM)hFont1, FALSE);
         GetClientRect(hCombo, &r);
-        expect_rect(r, 0, 0, 100, 18);
+        expected_height = style & CBS_OWNERDRAWFIXED ? initial_height : 18;
+        expect_rect(r, 0, 0, 100, expected_height);
         SendMessageA(hCombo, CB_GETDROPPEDCONTROLRECT, 0, (LPARAM)&r);
         MapWindowPoints(HWND_DESKTOP, hMainWnd, (LPPOINT)&r, 2);
-        todo_wine expect_rect(r, 5, 5, 105, 105 - (get_font_height(GetStockObject(SYSTEM_FONT)) - get_font_height(hFont1)));
+        if (style & CBS_OWNERDRAWFIXED)
+        {
+            todo_wine expect_rect(r, 5, 5, 105, 105);
+        }
+        else
+        {
+            todo_wine expect_rect(r, 5, 5, 105, 105 - (get_font_height(GetStockObject(SYSTEM_FONT)) - get_font_height(hFont1)));
+        }
     }
     else
     {
@@ -782,7 +827,12 @@ static void test_combo_setfont(DWORD style)
 
         SendMessageA(hCombo, WM_SETFONT, (WPARAM)hFont, FALSE);
         GetClientRect(hCombo, &r);
-        ok((r.bottom - r.top) == (height + 8), "Unexpected client rect height.\n");
+        if (style & CBS_OWNERDRAWFIXED)
+            expected_height = initial_height;
+        else
+            expected_height = (height + 8);
+        ok((r.bottom - r.top) == expected_height, "Unexpected client rect height %ld, expected %d.\n", r.bottom - r.top,
+                expected_height);
         SendMessageA(hCombo, WM_SETFONT, 0, FALSE);
         DeleteObject(hFont);
     }
@@ -790,6 +840,7 @@ static void test_combo_setfont(DWORD style)
     DestroyWindow(hCombo);
     DeleteObject(hFont1);
     DeleteObject(hFont2);
+    winetest_pop_context();
 }
 
 static LRESULT (CALLBACK *old_parent_proc)(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam);
@@ -1261,6 +1312,8 @@ static void test_combo_dropdown_size(DWORD style)
         {33, 50, -1},
         {35, 100, 40},
         {15, 50, 3},
+        {1, 650, 40},
+        {7, 650, 3},
     };
 
     for (test = 0; test < ARRAY_SIZE(info_height); test++)
@@ -1514,6 +1567,128 @@ static void test_comboex_CBEN_GETDISPINFO(void)
     DestroyWindow(combo);
 }
 
+#define ok_selected_value(list, selected) \
+        _ok_selected_value(list, selected, __LINE__)
+static void _ok_selected_value(HWND combo, const char *selected, int line)
+{
+    char buffer[20] = {0};
+    int index = SendMessageA(combo, CB_GETCURSEL, 0, 0);
+    SendMessageA(combo, CB_GETLBTEXT, index, (LPARAM)buffer);
+    ok_(__FILE__, line)(!strcmp(buffer, selected), "Got %s\n", buffer);
+}
+
+static void test_combo_keypresses(void)
+{
+    HWND combo;
+    BOOL dropped;
+    int i;
+    const char *strings_to_add[] = {
+        "b_eta", "a_lpha", "be_ta", "al_pha", "beta", "alpha", "gamma", "epsilon", "le"
+    };
+
+    /* Test with an unsorted combo box */
+
+    combo = create_combobox(CBS_DROPDOWNLIST);
+
+    for (i = 0; i < ARRAY_SIZE(strings_to_add); i++)
+    {
+        SendMessageA(combo, CB_ADDSTRING, 0, (LPARAM)strings_to_add[i]);
+    }
+
+    SendMessageA(combo, WM_CHAR, (WPARAM)'a', 0);
+    ok_selected_value(combo, "a_lpha");
+
+    SendMessageA(combo, WM_CHAR, (WPARAM)'l', 0);
+    ok_selected_value(combo, "le");
+
+    SendMessageA(combo, WM_CHAR, (WPARAM)'p', 0);
+    ok_selected_value(combo, "le");
+
+    SendMessageA(combo, CB_SHOWDROPDOWN, TRUE, 0);
+    dropped = SendMessageA(combo, CB_GETDROPPEDSTATE, 0, 0);
+    ok(dropped, "Expected combo box to be dropped\n");
+
+    SendMessageA(combo, WM_CHAR, (WPARAM)'b', 0);
+    ok_selected_value(combo, "b_eta");
+    dropped = SendMessageA(combo, CB_GETDROPPEDSTATE, 0, 0);
+    todo_wine
+    ok(dropped, "Expected combo box to be dropped\n");
+
+    SendMessageA(combo, WM_CHAR, (WPARAM)'e', 0);
+    ok_selected_value(combo, "epsilon");
+    dropped = SendMessageA(combo, CB_GETDROPPEDSTATE, 0, 0);
+    todo_wine
+    ok(dropped, "Expected combo box to be dropped\n");
+
+    SendMessageA(combo, WM_CHAR, (WPARAM)'t', 0);
+    ok_selected_value(combo, "epsilon");
+    dropped = SendMessageA(combo, CB_GETDROPPEDSTATE, 0, 0);
+    todo_wine
+    ok(dropped, "Expected combo box to be dropped\n");
+
+    DestroyWindow(combo);
+
+    /* Test with a sorted combo box */
+
+    combo = create_combobox(CBS_DROPDOWNLIST | CBS_SORT);
+
+    for (i = 0; i < ARRAY_SIZE(strings_to_add); i++)
+    {
+        SendMessageA(combo, CB_ADDSTRING, 0, (LPARAM)strings_to_add[i]);
+    }
+
+    SendMessageA(combo, WM_CHAR, (WPARAM)'a', 0);
+    todo_wine
+    ok_selected_value(combo, "a_lpha");
+
+    SendMessageA(combo, WM_CHAR, (WPARAM)'l', 0);
+    todo_wine
+    ok_selected_value(combo, "al_pha");
+
+    SendMessageA(combo, WM_CHAR, (WPARAM)'p', 0);
+    todo_wine
+    ok_selected_value(combo, "alpha");
+
+    SendMessageA(combo, CB_SHOWDROPDOWN, TRUE, 0);
+    dropped = SendMessageA(combo, CB_GETDROPPEDSTATE, 0, 0);
+    ok(dropped, "Expected combo box to be dropped\n");
+
+    SendMessageA(combo, WM_CHAR, (WPARAM)'b', 0);
+    ok_selected_value(combo, "b_eta");
+    dropped = SendMessageA(combo, CB_GETDROPPEDSTATE, 0, 0);
+    todo_wine
+    ok(dropped, "Expected combo box to be dropped\n");
+
+    SendMessageA(combo, WM_CHAR, (WPARAM)'e', 0);
+    todo_wine
+    ok_selected_value(combo, "be_ta");
+    dropped = SendMessageA(combo, CB_GETDROPPEDSTATE, 0, 0);
+    todo_wine
+    ok(dropped, "Expected combo box to be dropped\n");
+
+    SendMessageA(combo, WM_CHAR, (WPARAM)'t', 0);
+    todo_wine
+    ok_selected_value(combo, "beta");
+    dropped = SendMessageA(combo, CB_GETDROPPEDSTATE, 0, 0);
+    todo_wine
+    ok(dropped, "Expected combo box to be dropped\n");
+
+    /* Windows needs a certain time to pass until it starts a new search */
+
+    SendMessageA(combo, WM_CHAR, (WPARAM)'a', 0);
+    todo_wine
+    ok_selected_value(combo, "beta");
+
+    Sleep(2100);
+    flush_events();
+
+    SendMessageA(combo, WM_CHAR, (WPARAM)'a', 0);
+    todo_wine
+    ok_selected_value(combo, "a_lpha");
+
+    DestroyWindow(combo);
+}
+
 START_TEST(combo)
 {
     ULONG_PTR ctx_cookie;
@@ -1551,6 +1726,7 @@ START_TEST(combo)
     test_combo_WS_VSCROLL();
     test_combo_setfont(CBS_DROPDOWN);
     test_combo_setfont(CBS_DROPDOWNLIST);
+    test_combo_setfont(CBS_DROPDOWNLIST | CBS_OWNERDRAWFIXED);
     test_combo_setitemheight(CBS_DROPDOWN);
     test_combo_setitemheight(CBS_DROPDOWNLIST);
     test_combo_CBN_SELCHANGE();
@@ -1565,6 +1741,7 @@ START_TEST(combo)
     test_combo_dropdown_size(0);
     test_combo_dropdown_size(CBS_NOINTEGRALHEIGHT);
     test_combo_ctlcolor();
+    test_combo_keypresses();
 
     cleanup();
     unload_v6_module(ctx_cookie, hCtx);

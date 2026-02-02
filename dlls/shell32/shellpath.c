@@ -719,7 +719,7 @@ static BOOL PathResolveA(char *path, const char **dirs, DWORD flags)
     return TRUE;
 }
 
-static BOOL PathResolveW(WCHAR *path, const WCHAR **dirs, DWORD flags)
+BOOL WINAPI PathResolveW(WCHAR *path, const WCHAR **dirs, DWORD flags)
 {
     BOOL is_file_spec = PathIsFileSpecW(path);
     DWORD dwWhich = flags & PRF_DONTFINDLNK ? 0xf : 0xbf;
@@ -2079,7 +2079,26 @@ static const CSIDL_DATA CSIDL_Data[] =
         .name       = L"VideosLibrary",
         .path       = L"Videos.library-ms",
         .parsing    = L"::{031E4825-7B94-4dc3-B131-E946B44C8DD5}\\{491E922F-5643-4af4-A7EB-4E7A138D8174}",
-    }
+    },
+    { /* 0x73 */
+        .id         = &FOLDERID_AccountPictures,
+        .type       = CSIDL_Type_User,
+        .category   = KF_CATEGORY_PERUSER,
+        .name       = L"AccountPictures",
+        .parent     = &FOLDERID_RoamingAppData,
+        .path       = L"Microsoft\\Windows\\AccountPictures",
+        .attributes = FILE_ATTRIBUTE_READONLY,
+        .flags      = KFDF_PRECREATE | KFDF_ROAMABLE,
+    },
+    { /* 0x74 */
+        .id         = &FOLDERID_Screenshots,
+        .type       = CSIDL_Type_User,
+        .category   = KF_CATEGORY_PERUSER,
+        .name       = L"Screenshots",
+        .parent     = &FOLDERID_Pictures,
+        .path       = L"Screenshots",
+        .flags      = KFDF_PRECREATE | KFDF_ROAMABLE,
+    },
 };
 
 static int csidl_from_id( const KNOWNFOLDERID *id )
@@ -3285,6 +3304,16 @@ static HRESULT create_extra_folders(void)
     {
         hr = SHGetFolderPathAndSubDirW(0, CSIDL_APPDATA | CSIDL_FLAG_CREATE, NULL,
                                        SHGFP_TYPE_DEFAULT, L"Microsoft\\Windows\\Themes", path);
+    }
+    if (SUCCEEDED(hr))
+    {
+        hr = SHGetFolderPathAndSubDirW(0, CSIDL_APPDATA | CSIDL_FLAG_CREATE, NULL,
+                                       SHGFP_TYPE_DEFAULT, L"Microsoft\\Windows\\AccountPictures", path);
+    }
+    if (SUCCEEDED(hr))
+    {
+        hr = SHGetFolderPathAndSubDirW(0, CSIDL_MYPICTURES | CSIDL_FLAG_CREATE, NULL,
+                                       SHGFP_TYPE_DEFAULT, L"Screenshots", path);
     }
     return hr;
 }

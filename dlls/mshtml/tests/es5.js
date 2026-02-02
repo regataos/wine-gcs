@@ -47,6 +47,15 @@ var JS_E_ARRAYBUFFER_EXPECTED = 0x800a15e4;
 
 var tests = [];
 
+function check_enum(o, name) {
+    var ret = 0;
+    for(var iter in o) {
+        if(iter == name) ret++;
+    }
+    ok(ret < 2, name + " enumerated " + ret + " times");
+    return ret != 0;
+}
+
 sync_test("script vars", function() {
     function foo() { }
     foo.prototype.foo = 13;
@@ -471,13 +480,17 @@ sync_test("array_sort", function() {
 
 sync_test("identifier_keywords", function() {
     function get(let, set) { { get instanceof (Object); } return let + set; }
+    { get /* asdf */: 10 }
+    let /* block label */ : {
+        break let;
+        ok(false, "did not break out of 'let' labelled block statement");
+    }
     set: var let = get(1, 2);
-    { get: 10 }
-    var set = 0;
+    var set = 1234;
     var o = {
         get: get,
         set: set,
-        let: let,
+        let /* comment */  :  let,
         if: 1,
         default: 2,
         function: 3,
@@ -512,10 +525,12 @@ sync_test("identifier_keywords", function() {
     ok(o.if === 1, "o.if = " + o.if);
     ok(ro().default === 2, "ro().default = " + ro().default);
     ok(o.false === true, "o.false = " + o.false);
-    ok(o.get === get, "o.let = " + o.get);
-    ok(o.set === set, "o.let = " + o.set);
+    ok(o.get === get, "o.get = " + o.get);
+    ok(o.set === set, "o.set = " + o.set);
     ok(o.let === let, "o.let = " + o.let);
     ok(o.instanceof === 3, "o.instanceof = " + o.instanceof);
+    ok(let === 3, "let = " + let);
+    ok(set === 1234, "set = " + set);
 
     var tmp = false;
     try {
@@ -855,6 +870,16 @@ sync_test("defineProperty", function() {
     test_accessor_prop_desc(child.prototype, "funcprop_prot", desc);
     ok(obj.funcprop_prot(100) === 10, "obj.funcprop_prot() = " + obj.funcprop_prot(100));
 
+    (function() {
+        ok(arguments.length === 3, "arguments.length = " + arguments.length);
+        ok(arguments[0] === 1, "arguments[0] = " + arguments[0]);
+        ok(arguments[1] === 2, "arguments[1] = " + arguments[1]);
+        ok(arguments[2] === 3, "arguments[2] = " + arguments[2]);
+        Object.defineProperty(arguments, "1", {value: "foobar", writable: false, enumerable: true, configurable: false});
+        test_own_data_prop_desc(arguments, "1", false, true, false);
+        ok(arguments[1] === "foobar", "arguments[1] after defineProperty = " + arguments[1]);
+    })(1, 2, 3);
+
     expect_exception(function() {
         Object.defineProperty(null, "funcprop", desc);
     }, JS_E_OBJECT_EXPECTED);
@@ -864,6 +889,11 @@ sync_test("defineProperty", function() {
     expect_exception(function() {
         Object.defineProperty(obj, "funcprop", nullDisp);
     }, JS_E_OBJECT_EXPECTED);
+    expect_exception(function() {
+        var o = {};
+        Object.defineProperty(o, "f", { get: function() { return 0; } });
+        o.f();
+    }, JS_E_FUNCTION_EXPECTED);
 });
 
 sync_test("defineProperties", function() {
@@ -1341,7 +1371,6 @@ sync_test("getOwnPropertyNames", function() {
     ok(names === "defined,test", "names = " + names);
 
     names = Object.getOwnPropertyNames([]).sort().join();
-    todo_wine.
     ok(names === "length", "names = " + names);
 
     ok(Object.getOwnPropertyNames.length === 1, "Object.getOwnPropertyNames.length = " + Object.getOwnPropertyNames.length);
@@ -1685,6 +1714,26 @@ sync_test("isFrozen", function() {
     }catch(ex) {
         var n = ex.number >>> 0;
         ok(n === JS_E_OBJECT_EXPECTED, "isExtensible(nullDisp) threw " + n);
+    }
+});
+
+sync_test("JSON.parse escapes", function() {
+    var i, valid = [ "b", "t", "n", "f", "r", "u1111", '"', "/" ];
+
+    for(i = 0; i < valid.length; i++) {
+        var a = JSON.parse('"\\' + valid[i] + '"'), b = eval('"\\' + valid[i] + '"');
+        ok(a === b, "JSON.parse with \\" + valid[i] + " returned " + a);
+    }
+
+    var invalid = [ "0", "00", "05", "x20", "i", "'" ];
+
+    for(i = 0; i < invalid.length; i++) {
+        try {
+            JSON.parse('"\\' + invalid[i] + '"');
+            ok(false, "expected exception calling JSON.parse with \\" + invalid[i]);
+        } catch(e) {
+            ok(e.number === 0xa03f6 - 0x80000000, "calling JSON.parse with \\" + invalid[i] + " threw " + e.number);
+        }
     }
 });
 
@@ -2576,7 +2625,22 @@ sync_test("builtin_context", function() {
     ok(obj.length === 1, "obj.length = " + obj.length);
 });
 
-sync_test("builtin override", function() {
+sync_test("globals override", function() {
+    wineprop = 1337;  /* global */
+    ok(window.hasOwnProperty("wineprop"), "wineprop not a prop of window");
+    ok(window.wineprop === 1337, "window.wineprop = " + window.wineprop);
+    ok(wineprop === 1337, "wineprop = " + wineprop);
+
+    var i, desc, r = Object.defineProperty(window, "wineprop", { value: 42, configurable: true });
+    ok(r === window, "defineProperty(window.wineprop) returned " + r);
+    ok(window.hasOwnProperty("wineprop"), "wineprop not a prop of window after override");
+    ok(window.wineprop === 42, "window.wineprop after override = " + window.wineprop);
+    ok(wineprop === 42, "wineprop after override = " + wineprop);
+
+    r = (delete window.wineprop);
+    ok(r === true, "delete window.wineprop returned " + r);
+    ok(!("wineprop" in window), "wineprop in window after delete");
+
     /* configurable */
     var builtins = [
         "ActiveXObject",
@@ -2620,6 +2684,7 @@ sync_test("builtin override", function() {
         "SyntaxError",
         "TypeError",
         "Uint8Array",
+        "Uint8ClampedArray",
         "Uint16Array",
         "Uint32Array",
         "unescape",
@@ -2627,20 +2692,14 @@ sync_test("builtin override", function() {
         "VBArray",
         "WeakMap"
     ];
-
-    var override = {
-        value: 12,
-        configurable: true,
-        writable: true
-    };
-    for(var i = 0; i < builtins.length; i++) {
-        var desc = Object.getOwnPropertyDescriptor(window, builtins[i]), r;
+    for(i = 0; i < builtins.length; i++) {
+        desc = Object.getOwnPropertyDescriptor(window, builtins[i]);
         ok(desc !== undefined, "getOwnPropertyDescriptor('" + builtins[i] + "' returned undefined");
         ok(desc.configurable === true, builtins[i] + " not configurable");
         ok(desc.enumerable === false, builtins[i] + " is enumerable");
         ok(desc.writable === true, builtins[i] + " not writable");
 
-        r = Object.defineProperty(window, builtins[i], override);
+        r = Object.defineProperty(window, builtins[i], { value: 12, configurable: true, writable: true });
         ok(r === window, "defineProperty('" + builtins[i] + "' returned " + r);
         r = Object.getOwnPropertyDescriptor(window, builtins[i]);
         ok(r !== undefined, "getOwnPropertyDescriptor('" + builtins[i] + "' after override returned undefined");
@@ -2655,8 +2714,8 @@ sync_test("builtin override", function() {
             eval(builtins[i]);
             ok(false, "expected exception retrieving global " + builtins[i] + " after delete.");
         }catch(ex) {
-            var n = ex.number >>> 0;
-            ok(n === JS_E_UNDEFINED_VARIABLE, "retrieving global " + builtins[i] + " after delete threw " + n);
+            r = ex.number >>> 0;
+            ok(r === JS_E_UNDEFINED_VARIABLE, "retrieving global " + builtins[i] + " after delete threw " + r);
         }
 
         r = Object.defineProperty(window, builtins[i], desc);
@@ -2669,9 +2728,8 @@ sync_test("builtin override", function() {
         "Infinity",
         "NaN"
     ];
-
-    for(var i = 0; i < builtins.length; i++) {
-        var desc = Object.getOwnPropertyDescriptor(window, builtins[i]), r;
+    for(i = 0; i < builtins.length; i++) {
+        desc = Object.getOwnPropertyDescriptor(window, builtins[i]);
         ok(desc !== undefined, "getOwnPropertyDescriptor('" + builtins[i] + "' returned undefined");
         ok(desc.configurable === false, builtins[i] + " is configurable");
         ok(desc.enumerable === false, builtins[i] + " is enumerable");
@@ -3017,47 +3075,6 @@ sync_test("functions scope", function() {
     })();
 });
 
-sync_test("input validation", function() {
-    var fired, elem = document.createElement("input");
-    elem.type = "number";
-    elem.setAttribute("min", "1");
-    elem.setAttribute("max", "4");
-    elem.addEventListener("invalid", function(e) {
-        ok(e.target === elem, "unexpected target " + e.target);
-        fired = true;
-    });
-    fired = false;
-    elem.value = 1;
-    ok(elem.checkValidity() === true, "input number (1-4) with value 1: invalid");
-    ok(fired === false, "input number (1-4) with value 1 fired invalid event");
-    fired = false;
-    elem.value = 0;
-    ok(elem.checkValidity() === false, "input number (1-4) with value 0: valid");
-    ok(fired === true, "input number (1-4) with value 0 did not fire invalid event");
-    fired = false;
-    elem.value = 5;
-    ok(elem.checkValidity() === false, "input number (1-4) with value 5: valid");
-    ok(fired === true, "input number (1-4) with value 5 did not fire invalid event");
-});
-
-sync_test("instanceof", function() {
-    var r;
-
-    try {
-        ({} instanceof { prototype: {} });
-        ok(false, "expected exception using it on non-function object");
-    }catch(e) {
-        ok(e.number === 0xa138a - 0x80000000, "using it on non-function object threw " + e.number);
-    }
-
-    r = (document.createElement("iframe") instanceof HTMLIFrameElement);
-    ok(r === true, "iframe element not instance of HTMLIFrameElement");
-    r = (document.createElement("div") instanceof HTMLIFrameElement);
-    ok(r === false, "div element instance of HTMLIFrameElement");
-    r = (document instanceof Node);
-    ok(r === true, "document not instance of Node");
-});
-
 sync_test("perf toJSON", function() {
     var tests = [
         [ "performance", "navigation", "timing" ],
@@ -3268,6 +3285,57 @@ sync_test("initProgressEvent", function() {
     ok(e.total === 50, "total after re-init = " + e.total);
 });
 
+sync_test("screen", function() {
+    var o = screen;
+
+    ok(typeof(o) == "object", "typeof(o) = " + typeof(o));
+    ok(o instanceof Object, "o is not an instance of Object");
+
+    o.prop = 1;
+    ok(o.prop === 1, "o.prop = " + o.prop);
+    ok(o.hasOwnProperty("prop"), 'o.hasOwnProperty("prop") = ' + o.hasOwnProperty("prop"));
+    test_own_data_prop_desc(o, "prop", true, true, true);
+
+    Object.defineProperty(o, "defprop", {writable: false, enumerable: false, configurable: true, value: 2});
+    ok(o.defprop === 2, "o.prop = " + o.prop);
+    test_own_data_prop_desc(o, "defprop", false, false, true);
+
+    ok(typeof(Object.keys(o)) === "object", "Object.keys(o) = " + Object.keys(o));
+    ok(Object.isExtensible(o) === true, "Object.isExtensible(o) = " + Object.isExtensible(o));
+    ok(Object.isFrozen(o) === false, "Object.isFrozen(o) = " + Object.isFrozen(o));
+    ok(Object.isSealed(o) === false, "Object.isSealed(o) = " + Object.isSealed(o));
+
+    Object.seal(o);
+    test_own_data_prop_desc(o, "prop", true, true, false);
+    test_own_data_prop_desc(o, "defprop", false, false, false);
+    ok(Object.isExtensible(o) === false, "Object.isExtensible(o) = " + Object.isExtensible(o));
+    ok(Object.isFrozen(o) === false, "Object.isFrozen(o) = " + Object.isFrozen(o));
+    ok(Object.isSealed(o) === true, "Object.isSealed(o) = " + Object.isSealed(o));
+
+    ok(!o.hasOwnProperty("width"), 'o.hasOwnProperty("width") = ' + o.hasOwnProperty("width"));
+    ok(Screen.prototype.hasOwnProperty("width"),
+       'Screen.prototype.hasOwnProperty("width") = ' + Screen.prototype.hasOwnProperty("width"));
+
+    var desc = Object.getOwnPropertyDescriptor(Screen.prototype, "width");
+    ok(!("value" in desc), "width prop: value is in desc");
+    ok(!("writable" in desc), "width prop: writable is in desc");
+    ok(desc.enumerable === true, "width prop: enumerable = " + desc.enumerable);
+    ok(desc.configurable === true, "width prop: configurable = " + desc.configurable);
+    ok(Object.getPrototypeOf(desc.get) === Function.prototype, "width prop: get not a function: " + desc.get);
+    ok("set" in desc, "width prop: set is not in desc");
+    ok(desc.set === undefined, "width prop: set not undefined: " + desc.set);
+    ok(desc.get.call(o) === o.width, "width prop: get.call() not same as o.width: " + desc.get.call(o) + ", expected " + o.width);
+
+    o.prop2 = 3;
+    ok(!("prop2" in o), "o.prop2 = " + o.prop2);
+
+    ok(check_enum(o, "width"), "width not enumerated");
+    ok(check_enum(o, "height"), "height not enumerated");
+    ok(check_enum(o, "prop"), "prop not enumerated");
+    ok(!check_enum(o, "defprop"), "defprop enumerated");
+    ok(!check_enum(o, "prop2"), "prop2 enumerated");
+});
+
 sync_test("DOMParser", function() {
     var p, r = DOMParser.length, mimeType;
     ok(r === 0, "length = " + r);
@@ -3291,8 +3359,8 @@ sync_test("DOMParser", function() {
         r = html.childNodes;
         ok(r.length === 1 || r.length === 2, "childNodes.length of HTML document with mime type " + m + " = " + r.length);
         var html_elem = r[r.length - 1];
-        ok(html_elem.nodeName === "HTML", "child nodeName of HTML document with mime type " + m + " = " + r.nodeName);
-        ok(html_elem.nodeValue === null, "child nodeValue of HTML document with mime type " + m + " = " + r.nodeValue);
+        ok(html_elem.nodeName === "HTML", "child nodeName of HTML document with mime type " + m + " = " + html_elem.nodeName);
+        ok(html_elem.nodeValue === null, "child nodeValue of HTML document with mime type " + m + " = " + html_elem.nodeValue);
         r = html.anchors;
         ok(r.length === 1, "anchors.length of HTML document with mime type " + m + " = " + r.length);
         r = r[0];
@@ -3381,4 +3449,225 @@ sync_test("DOMParser", function() {
         ok(ex.name === "SyntaxError", "parseFromString with invalid xml threw " + ex.name);
     }
     p.parseFromString("<parsererror></parsererror>", "text/xml");
+});
+
+sync_test("builtin_func", function() {
+    var o = document.implementation, r;
+    var f = o.hasFeature;
+
+    ok(f instanceof Function, "f is not an instance of Function");
+    ok(Object.getPrototypeOf(f) === Function.prototype, "Object.getPrototypeOf(f) = " + Object.getPrototypeOf(f));
+    ok(!f.hasOwnProperty("length"), "f has own length property");
+    ok(f.length === 0, "f.length = " + f.length);
+    ok(f.call(o, "test", 1) === false, 'f.call(o, "test", 1) = ' + f.call(o, "test", 1));
+    ok("" + f === "\nfunction hasFeature() {\n    [native code]\n}\n", "f = " + f);
+
+    o = document.body;
+    var desc = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(Object.getPrototypeOf(o)), "innerHTML");
+    ok(!("value" in desc), "innerHTML prop: value is in desc");
+    ok(!("writable" in desc), "innerHTML prop: writable is in desc");
+    ok(desc.enumerable === true, "innerHTML prop: enumerable = " + desc.enumerable);
+    ok(desc.configurable === true, "innerHTML prop: configurable = " + desc.configurable);
+    ok(Object.getPrototypeOf(desc.get) === Function.prototype, "innerHTML prop: get not a function: " + desc.get);
+    ok(Object.getPrototypeOf(desc.set) === Function.prototype, "innerHTML prop: set not a function: " + desc.set);
+    r = desc.set.call(o, '<div id="winetest"></div>');
+    ok(r === undefined, "innerHTML prop: setter returned " + r);
+    r = desc.get.call(o);
+    ok(r === '<div id="winetest"></div>', "innerHTML prop: getter returned " + r);
+    ok(r === o.innerHTML, "innerHTML prop: getter not same as o.innerHTML: " + r + ", expected " + o.innerHTML);
+});
+
+async_test("script_global", function() {
+    // Created documents share script global, so their objects are instances of Object from
+    // the current script context.
+    var doc = document.implementation.createHTMLDocument("test");
+    ok(doc instanceof Object, "created doc is not an instance of Object");
+    ok(doc.implementation instanceof Object, "created doc.implementation is not an instance of Object");
+    ok(doc.implementation instanceof DOMImplementation, "created doc.implementation is not an instance of DOMImplementation");
+
+    document.body.innerHTML = "";
+    var iframe = document.createElement("iframe");
+
+    // Documents created in iframe use iframe's script global, so their objects are not instances of
+    // current script context Object.
+    iframe.onload = guard(function() {
+        var doc = iframe.contentWindow.document;
+        ok(!(doc instanceof Object), "doc is an instance of Object");
+        ok(!(doc.implementation instanceof Object), "doc.implementation is an instance of Object");
+        ok(!(doc.implementation instanceof DOMImplementation), "doc.implementation is an instance of DOMImplementation");
+        ok(doc.implementation instanceof iframe.contentWindow.DOMImplementation, "doc.implementation is not an instance of iframe's DOMImplementation");
+
+        doc = doc.implementation.createHTMLDocument("test");
+        ok(!(doc instanceof Object), "created iframe doc is an instance of Object");
+        ok(!(doc.implementation instanceof Object), "created iframe doc.implementation is an instance of Object");
+        ok(!(doc.implementation instanceof DOMImplementation), "created iframe doc.implementation is an instance of DOMImplementation");
+        ok(doc.implementation instanceof iframe.contentWindow.DOMImplementation, "created iframe doc.implementation is not an instance of iframe's DOMImplementation");
+
+        var r = Object.prototype.toString.call(iframe.contentWindow);
+        ok(r === "[object Window]", "iframe's Window toString = " + r);
+        r = Object.prototype.toString.call(iframe.contentWindow.DOMImplementation);
+        ok(r === "[object DOMImplementation]", "iframe's DOMImplementation toString = " + r);
+
+        next_test();
+    });
+
+    iframe.src = "about:blank";
+    document.body.appendChild(iframe);
+});
+
+sync_test("form_as_prop", function() {
+    document.body.innerHTML = '<form id="testid" name="testname"></form>';
+    var form = document.body.firstChild;
+    var o = Object.create(document);
+
+    ok(document.testid === form, "document.testid = " + document.testid);
+    ok(o.testid === form, "o.testid = " + o.testid);
+    ok(document.hasOwnProperty("testid"), 'document.hasOwnProperty("testid") = ' + document.hasOwnProperty("testid"));
+    ok(!o.hasOwnProperty("testid"), 'o.hasOwnProperty("testid") = ' + o.hasOwnProperty("testid"));
+    test_own_data_prop_desc(document, "testid", true, true, true);
+
+    ok(document.testname === form, "document.testname = " + document.testname);
+    ok(o.testname === form, "o.testname = " + o.testname);
+    ok(document.hasOwnProperty("testname"), 'document.hasOwnProperty("testname") = ' + document.hasOwnProperty("testname"));
+    ok(!o.hasOwnProperty("testname"), 'o.hasOwnProperty("testname") = ' + o.hasOwnProperty("testname"));
+    test_own_data_prop_desc(document, "testname", true, true, true);
+    todo_wine.
+    ok(!check_enum(document, "testid"), "testid enumerated in document");
+    ok(check_enum(document, "testname"), "testid not enumerated in document");
+    todo_wine.
+    ok(!check_enum(o, "testid"), "testid enumerated in o");
+    ok(check_enum(o, "testname"), "testid not enumerated in o");
+
+    document.body.innerHTML = '';
+    ok(!("testid" in o), "testid is in o");
+    ok(!("testname" in o), "testname is in o");
+    ok(!("testid" in document), "testid is in document");
+    ok(!("testname" in document), "testname is in document");
+    ok(!document.hasOwnProperty("testid"), 'document.hasOwnProperty("testid") = ' + document.hasOwnProperty("testid"));
+    ok(!document.hasOwnProperty("testname"), 'document.hasOwnProperty("testname") = ' + document.hasOwnProperty("testname"));
+});
+
+sync_test("prototypes", function() {
+    var constr = DOMImplementation;
+    test_own_data_prop_desc(window, "DOMImplementation", true, false, true);
+    ok(Object.getPrototypeOf(DOMImplementation) === Object.prototype,
+       "Object.getPrototypeOf(DOMImplementation) = " + Object.getPrototypeOf(DOMImplementation));
+    ok(DOMImplementation == "[object DOMImplementation]", "DOMImplementation = " + DOMImplementation);
+
+    var proto = constr.prototype;
+    ok(proto == "[object DOMImplementationPrototype]", "DOMImplementation.prototype = " + proto);
+    ok(Object.getPrototypeOf(document.implementation) === proto,
+       "Object.getPrototypeOf(document.implementation) = " + Object.getPrototypeOf(document.implementation));
+    ok(Object.getPrototypeOf(proto) === Object.prototype, "Object.getPrototypeOf(proto) = " + Object.getPrototypeOf(proto));
+
+    test_own_data_prop_desc(constr, "prototype", false, false, false);
+    test_own_data_prop_desc(proto, "constructor", true, false, true);
+    ok(proto.hasOwnProperty("createHTMLDocument"), "prototype has no own createHTMLDocument property");
+    ok(!document.implementation.hasOwnProperty("createHTMLDocument"),
+       "prototype has own createHTMLDocument property");
+
+    ok(proto.constructor === constr, "proto.constructor = " + proto.constructor);
+    proto.constructor = 1;
+    ok(proto.constructor === 1, "proto.constructor = " + proto.constructor + " expected 1");
+    proto.constructor = constr;
+
+    DOMImplementation = 1;
+    ok(DOMImplementation === 1, "DOMImplementation = " + DOMImplementation + " expected 1");
+    DOMImplementation = constr;
+
+    ok(!HTMLBodyElement.prototype.hasOwnProperty("click"), "HTMLBodyElement prototype has own click property");
+    ok(HTMLElement.prototype.hasOwnProperty("click"), "HTMLElement prototype does not have own click property");
+
+    ok(!HTMLBodyElement.prototype.hasOwnProperty("removeChild"), "HTMLBodyElement prototype has own removeChild property");
+    ok(!HTMLElement.prototype.hasOwnProperty("removeChild"), "HTMLElement prototype has own removeChild property");
+    ok(!Element.prototype.hasOwnProperty("removeChild"), "Element prototype has own removeChild property");
+    ok(Node.prototype.hasOwnProperty("removeChild"), "Node prototype does not have own removeChild property");
+
+    test_own_data_prop_desc(window, "XMLHttpRequest", true, false, true);
+    ok(typeof(XMLHttpRequest) === "function", "typeof(XMLHttpRequest) = " + typeof(XMLHttpRequest));
+    ok(XMLHttpRequest.hasOwnProperty("create"), "XMLHttpRequest does not have create property");
+    ok(Object.getPrototypeOf(XMLHttpRequest) === Function.prototype,
+       "Object.getPrototypeOf(XMLHttpRequest) = " + Object.getPrototypeOf(XMLHttpRequest));
+    ok(XMLHttpRequest.prototype.constructor === XMLHttpRequest,
+       "XMLHttpRequest.prototype.constructor !== XMLHttpRequest");
+    var xhr = new XMLHttpRequest();
+    ok(Object.getPrototypeOf(xhr) === XMLHttpRequest.prototype,
+       "Object.getPrototypeOf(xhr) = " + Object.getPrototypeOf(xhr));
+    constr = XMLHttpRequest;
+    XMLHttpRequest = 1;
+    ok(XMLHttpRequest === 1, "XMLHttpRequest = " + XMLHttpRequest);
+    XMLHttpRequest = constr;
+
+    ok(Image != HTMLImageElement, "Image == HTMLImageElement");
+    ok(typeof(HTMLImageElement) === "object", "typeof(HTMLImageElement) = " + typeof(HTMLImageElement));
+    ok(typeof(Image) === "function", "typeof(Image) = " + typeof(Image));
+    ok(Image.prototype === HTMLImageElement.prototype, "Image.prototype != HTMLImageElement.prototype");
+
+    ok(Option != HTMLOptionElement, "Option == HTMLOptionElement");
+    ok(typeof(HTMLOptionElement) === "object", "typeof(HTMLOptionElement) = " + typeof(HTMLOptionElement));
+    ok(typeof(Option) === "function", "typeof(Option) = " + typeof(Option));
+    ok(Option.prototype === HTMLOptionElement.prototype, "Option.prototype != HTMLOptionElement.prototype");
+
+    ok(document.implementation instanceof DOMImplementation, "document.implementation is not an instance of DOMImplementation");
+    ok(navigator instanceof Navigator, "navigator is not an instance of Navigator");
+    ok(!(navigator instanceof DOMImplementation), "navigator is an instance of DOMImplementation");
+    ok(document.body instanceof HTMLBodyElement, "body is not an instance of HTMLBodyElement");
+    ok(document.body instanceof HTMLElement, "body is not an instance of HTMLElement");
+    ok(document.body instanceof Element, "body is not an instance of Element");
+    ok(document.body instanceof Node, "body is not an instance of Node");
+});
+
+sync_test("prototypes_delete", function() {
+    function check_prop(name) {
+        var orig = Object.getOwnPropertyDescriptor(Element.prototype, name);
+        ok(orig != undefined, "Could not get " + name + " descriptor");
+        var is_func = "value" in orig;
+
+        function check(obj, has_own, has_prop, has_enum, todo_enum) {
+            var r = obj.hasOwnProperty(name);
+            ok(r === has_own, obj + ".hasOwnProperty(" + name + ") returned " + r);
+            r = name in obj;
+            ok(r === has_prop, name + " in " + obj + " returned " + r);
+            r = check_enum(obj, name);
+            todo_wine_if(todo_enum).
+            ok(r === has_enum, "enumerating " + name + " in " + obj + "returned " + r);
+        }
+
+        check(document.body, false, true, true, is_func);
+        check(Element.prototype, true, true, true, is_func);
+        check(Node.prototype, false, false, false);
+
+        delete Element.prototype[name];
+        check(document.body, false, false, false);
+        check(Element.prototype, false, false, false);
+        check(Node.prototype, false, false, false);
+
+        Element.prototype[name] = -2;
+        Node.prototype[name] = -3;
+        ok(document.body[name] === -2, "document.body[" + name + "] = " + Element.prototype[name]);
+
+        check(document.body, false, true, true);
+        check(Element.prototype, true, true, true);
+        check(Node.prototype, true, true, true);
+
+        delete Element.prototype[name];
+        ok(document.body[name] === -3, "document.body[" + name + "] = " + Element.prototype[name]);
+        check(document.body, false, true, true);
+        check(Element.prototype, false, true, true);
+        check(Node.prototype, true, true, true);
+
+        delete Node.prototype[name];
+        check(document.body, false, false, false);
+        check(Element.prototype, false, false, false);
+        check(Node.prototype, false, false, false);
+
+        /* Restore the prop */
+        Object.defineProperty(Element.prototype, name, orig);
+        check(document.body, false, true, true, is_func);
+        check(Element.prototype, true, true, true, is_func);
+        check(Node.prototype, false, false, false);
+    }
+
+    check_prop("scrollLeft"); /* accessor prop */
+    check_prop("getBoundingClientRect"); /* function prop */
 });

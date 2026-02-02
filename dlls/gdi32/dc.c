@@ -46,6 +46,14 @@ static CRITICAL_SECTION driver_section = { &critsect_debug, -1, 0, 0, 0, 0 };
 typedef HDC (CDECL *driver_entry_point)( const WCHAR *device,
         const DEVMODEW *devmode, const WCHAR *output );
 
+static const char *debugstr_xform( const XFORM *xform )
+{
+    if (!xform) return "(null)";
+    return wine_dbg_sprintf( "matrix {%.8e %.8e} {%.8e %.8e} offset {%.8e %.8e}",
+                             xform->eM11, xform->eM12, xform->eM21, xform->eM22,
+                             xform->eDx, xform->eDy );
+}
+
 struct graphics_driver
 {
     struct list         entry;
@@ -743,16 +751,31 @@ INT WINAPI Escape( HDC hdc, INT escape, INT in_count, const char *in_data, void 
 INT WINAPI ExtEscape( HDC hdc, INT escape, INT input_size, const char *input,
                       INT output_size, char *output )
 {
-    struct print *print;
     DC_ATTR *dc_attr;
 
     if (is_meta_dc( hdc ))
         return METADC_ExtEscape( hdc, escape, input_size, input, output_size, output );
     if (!(dc_attr = get_dc_attr( hdc ))) return 0;
-    if ((print = get_dc_print( dc_attr )) && dc_attr->emf)
+    if (dc_attr->print)
     {
-        int ret = EMFDC_ExtEscape( dc_attr, escape, input_size, input, output_size, output );
-        if (ret) return ret;
+        switch (escape)
+        {
+        case PASSTHROUGH:
+        case POSTSCRIPT_DATA:
+        case GETFACENAME:
+        case DOWNLOADFACE:
+        case BEGIN_PATH:
+        case CLIP_TO_PATH:
+        case END_PATH:
+        case DOWNLOADHEADER:
+            print_call_start_page( dc_attr );
+        }
+
+        if (dc_attr->emf)
+        {
+            int ret = EMFDC_ExtEscape( dc_attr, escape, input_size, input, output_size, output );
+            if (ret) return ret;
+        }
     }
     return NtGdiExtEscape( hdc, NULL, 0, escape, input_size, input, output_size, output );
 }
@@ -922,6 +945,9 @@ INT WINAPI GetGraphicsMode( HDC hdc )
 INT WINAPI SetGraphicsMode( HDC hdc, INT mode )
 {
     DWORD ret;
+
+    TRACE( "dc %p mode %#x\n", hdc, mode );
+
     return NtGdiGetAndSetDCDword( hdc, NtGdiSetGraphicsMode, mode, &ret ) ? ret : 0;
 }
 
@@ -941,6 +967,8 @@ INT WINAPI SetArcDirection( HDC hdc, INT dir )
 {
     DC_ATTR *dc_attr;
     INT ret;
+
+    TRACE( "dc %p dir %#x\n", hdc, dir );
 
     if (dir != AD_COUNTERCLOCKWISE && dir != AD_CLOCKWISE)
     {
@@ -1294,6 +1322,8 @@ BOOL WINAPI ModifyWorldTransform( HDC hdc, const XFORM *xform, DWORD mode )
 {
     DC_ATTR *dc_attr;
 
+    TRACE( "dc %p xform %s mode %#lx\n", hdc, debugstr_xform( xform ), mode );
+
     if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
     if (dc_attr->emf && !EMFDC_ModifyWorldTransform( dc_attr, xform, mode )) return FALSE;
     return NtGdiModifyWorldTransform( hdc, xform, mode );
@@ -1305,6 +1335,8 @@ BOOL WINAPI ModifyWorldTransform( HDC hdc, const XFORM *xform, DWORD mode )
 BOOL WINAPI SetWorldTransform( HDC hdc, const XFORM *xform )
 {
     DC_ATTR *dc_attr;
+
+    TRACE( "dc %p xform %s\n", hdc, debugstr_xform( xform ) );
 
     if (!(dc_attr = get_dc_attr( hdc ))) return FALSE;
     if (dc_attr->emf && !EMFDC_SetWorldTransform( dc_attr, xform )) return FALSE;
@@ -2444,8 +2476,8 @@ INT WINAPI StartDocW( HDC hdc, const DOCINFOW *doc )
         info.cbSize = sizeof(info);
     }
 
-    TRACE("DocName %s, Output %s, Datatype %s, fwType %#lx\n",
-          debugstr_w(info.lpszDocName), debugstr_w(info.lpszOutput),
+    TRACE("Size: %d, DocName %s, Output %s, Datatype %s, fwType %#lx\n",
+          info.cbSize, debugstr_w(info.lpszDocName), debugstr_w(info.lpszOutput),
           debugstr_w(info.lpszDatatype), info.fwType);
 
     if (!(dc_attr = get_dc_attr( hdc ))) return SP_ERROR;
@@ -2461,22 +2493,22 @@ INT WINAPI StartDocW( HDC hdc, const DOCINFOW *doc )
         output = StartDocDlgW( print->printer, &info );
         if (output) info.lpszOutput = output;
 
-        if (!info.lpszDatatype || !wcsicmp(info.lpszDatatype, L"EMF"))
+        if (info.lpszDatatype && wcsicmp(info.lpszDatatype, L"EMF"))
+            FIXME("Ignoring DataType %s and forcing EMF\n", debugstr_w(info.lpszDatatype));
+
+        spool_info.pDocName = (WCHAR *)info.lpszDocName;
+        spool_info.pOutputFile = (WCHAR *)info.lpszOutput;
+        spool_info.pDatatype = (WCHAR *)L"NT EMF 1.003";
+        if ((ret = StartDocPrinterW( print->printer, 1, (BYTE *)&spool_info )))
         {
-            spool_info.pDocName = (WCHAR *)info.lpszDocName;
-            spool_info.pOutputFile = (WCHAR *)info.lpszOutput;
-            spool_info.pDatatype = (WCHAR *)L"NT EMF 1.003";
-            if ((ret = StartDocPrinterW( print->printer, 1, (BYTE *)&spool_info )))
+            if (!spool_start_doc( dc_attr, print->printer, &info ))
             {
-                if (!spool_start_doc( dc_attr, print->printer, &info ))
-                {
-                    AbortDoc( hdc );
-                    ret = 0;
-                }
-                HeapFree( GetProcessHeap(), 0, output );
-                print->flags |= CALL_START_PAGE;
-                return ret;
+                AbortDoc( hdc );
+                ret = 0;
             }
+            HeapFree( GetProcessHeap(), 0, output );
+            print->flags |= CALL_START_PAGE;
+            return ret;
         }
     }
 

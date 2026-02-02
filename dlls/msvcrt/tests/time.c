@@ -221,6 +221,11 @@ static void test_gmtime64(void)
     t = -1;
     memset(&tm, 0xcc, sizeof(tm));
     ptm = p_gmtime64(&t);
+    if (!ptm)
+    {
+        skip("Old gmtime64 limits, skipping tests.\n");
+        return;
+    }
     ok(!!ptm, "got NULL.\n");
     ret = p_gmtime64_s(&tm, &t);
     ok(!ret, "got %d.\n", ret);
@@ -235,12 +240,27 @@ static void test_gmtime64(void)
     ok(!ret, "got %d.\n", ret);
     ok(tm.tm_year == 69 && tm.tm_hour == 12 && tm.tm_min == 0 && tm.tm_sec == 0, "got %d, %d, %d, %d.\n",
             tm.tm_year, tm.tm_hour, tm.tm_min, tm.tm_sec);
+    ptm = p_gmtime32((__time32_t *)&t);
+    ok(!!ptm, "got NULL.\n");
+    memset(&tm, 0xcc, sizeof(tm));
+    ret = p_gmtime32_s(&tm, (__time32_t *)&t);
+    ok(!ret, "got %d.\n", ret);
+    todo_wine_if(tm.tm_year == 69 && tm.tm_hour == 12)
+    ok(tm.tm_year == 70 && tm.tm_hour == -12 && tm.tm_min == 0 && tm.tm_sec == 0, "got %d, %d, %d, %d.\n",
+            tm.tm_year, tm.tm_hour, tm.tm_min, tm.tm_sec);
 
     t = -43201;
     ptm = p_gmtime64(&t);
     ok(!ptm, "got non-NULL.\n");
     memset(&tm, 0xcc, sizeof(tm));
     ret = p_gmtime64_s(&tm, &t);
+    ok(ret == EINVAL, "got %d.\n", ret);
+    ok(tm.tm_year == -1 && tm.tm_hour == -1 && tm.tm_min == -1 && tm.tm_sec == -1, "got %d, %d, %d, %d.\n",
+            tm.tm_year, tm.tm_hour, tm.tm_min, tm.tm_sec);
+    ptm = p_gmtime32((__time32_t *)&t);
+    ok(!ptm, "got NULL.\n");
+    memset(&tm, 0xcc, sizeof(tm));
+    ret = p_gmtime32_s(&tm, (__time32_t *)&t);
     ok(ret == EINVAL, "got %d.\n", ret);
     ok(tm.tm_year == -1 && tm.tm_hour == -1 && tm.tm_min == -1 && tm.tm_sec == -1, "got %d, %d, %d, %d.\n",
             tm.tm_year, tm.tm_hour, tm.tm_min, tm.tm_sec);

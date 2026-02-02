@@ -25,7 +25,6 @@
  *
  *  Messages
  *  - WM_CHAR: Checks a (manual or automatic) check box on '+' or '=', clears it on '-' key.
- *  - WM_SETFOCUS: For (manual or automatic) radio buttons, send the parent window BN_CLICKED
  *  - WM_NCCREATE: Turns any BS_OWNERDRAW button into a BS_PUSHBUTTON button.
  *  - WM_SYSKEYUP
  *  
@@ -119,7 +118,6 @@ static inline LONG get_button_state( HWND hwnd )
 static inline void set_button_state( HWND hwnd, LONG state )
 {
     SetWindowLongW( hwnd, STATE_GWL_OFFSET, state );
-    NtUserNotifyWinEvent( EVENT_OBJECT_STATECHANGE, hwnd, OBJID_CLIENT, 0 );
 }
 
 static inline HFONT get_button_font( HWND hwnd )
@@ -258,8 +256,8 @@ LRESULT ButtonWndProc_common(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam,
         /* fall through */
     case WM_LBUTTONDOWN:
         NtUserSetCapture( hWnd );
-        NtUserSetFocus( hWnd );
         set_button_state( hWnd, get_button_state( hWnd ) | BUTTON_BTNPRESSED );
+        NtUserSetFocus( hWnd );
         SendMessageW( hWnd, BM_SETSTATE, TRUE, 0 );
         break;
 
@@ -274,7 +272,7 @@ LRESULT ButtonWndProc_common(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam,
         set_button_state( hWnd, state );
         if (!(state & BST_PUSHED))
         {
-            ReleaseCapture();
+            NtUserReleaseCapture();
             break;
         }
         SendMessageW( hWnd, BM_SETSTATE, FALSE, 0 );
@@ -295,12 +293,12 @@ LRESULT ButtonWndProc_common(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam,
                                 (state & BST_INDETERMINATE) ? 0 : ((state & 3) + 1), 0 );
                 break;
             }
-            ReleaseCapture();
+            NtUserReleaseCapture();
             BUTTON_NOTIFY_PARENT(hWnd, BN_CLICKED);
         }
         else
         {
-            ReleaseCapture();
+            NtUserReleaseCapture();
         }
         break;
 
@@ -387,6 +385,12 @@ LRESULT ButtonWndProc_common(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam,
         paint_button( hWnd, btn_type, ODA_FOCUS );
         if (style & BS_NOTIFY)
             BUTTON_NOTIFY_PARENT(hWnd, BN_SETFOCUS);
+
+        if (((btn_type == BS_RADIOBUTTON) || (btn_type == BS_AUTORADIOBUTTON)) &&
+            !(get_button_state(hWnd) & (BST_CHECKED | BUTTON_BTNPRESSED)))
+        {
+            BUTTON_NOTIFY_PARENT(hWnd, BN_CLICKED);
+        }
         break;
 
     case WM_KILLFOCUS:
@@ -396,7 +400,7 @@ LRESULT ButtonWndProc_common(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam,
 	paint_button( hWnd, btn_type, ODA_FOCUS );
 
         if ((state & BUTTON_BTNPRESSED) && GetCapture() == hWnd)
-            ReleaseCapture();
+            NtUserReleaseCapture();
         if (style & BS_NOTIFY)
             BUTTON_NOTIFY_PARENT(hWnd, BN_KILLFOCUS);
 
@@ -411,6 +415,8 @@ LRESULT ButtonWndProc_common(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam,
         btn_type = wParam & BS_TYPEMASK;
         style = (style & ~BS_TYPEMASK) | btn_type;
         WIN_SetStyle( hWnd, style, BS_TYPEMASK & ~style );
+
+        NtUserNotifyWinEvent( EVENT_OBJECT_STATECHANGE, hWnd, OBJID_CLIENT, 0 );
 
         /* Only redraw if lParam flag is set.*/
         if (lParam)
@@ -458,6 +464,8 @@ LRESULT ButtonWndProc_common(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam,
         {
             set_button_state( hWnd, (state & ~3) | wParam );
             paint_button( hWnd, btn_type, ODA_SELECT );
+
+            NtUserNotifyWinEvent( EVENT_OBJECT_STATECHANGE, hWnd, OBJID_CLIENT, 0 );
         }
         break;
 
@@ -472,6 +480,8 @@ LRESULT ButtonWndProc_common(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam,
             set_button_state( hWnd, state & ~BST_PUSHED );
 
         paint_button( hWnd, btn_type, ODA_SELECT );
+
+        NtUserNotifyWinEvent( EVENT_OBJECT_STATECHANGE, hWnd, OBJID_CLIENT, 0 );
         break;
 
     case WM_NCHITTEST:

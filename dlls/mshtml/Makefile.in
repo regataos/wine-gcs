@@ -3,8 +3,6 @@ IMPORTLIB = mshtml
 IMPORTS   = strmiids uuid urlmon shlwapi shell32 ole32 oleaut32 user32 gdi32 advapi32
 DELAYIMPORTS = wininet inetcomm
 
-EXTRA_CFLAGS = $(MSHTML_CFLAGS)
-
 SOURCES = \
 	conpoint.c \
 	dispex.c \
@@ -13,7 +11,6 @@ SOURCES = \
 	htmlarea.c \
 	htmlattr.c \
 	htmlbody.c \
-	htmlcomment.c \
 	htmlcurstyle.c \
 	htmldoc.c \
 	htmlelem.c \

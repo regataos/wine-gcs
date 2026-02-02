@@ -47,10 +47,21 @@ static const char inf_data1[] =
     "[Version]\n"
     "Signature=\"$Chicago$\"\n"
     "AdvancedINF=2.5\n"
+    "[copy_section]\n"
+    "one.txt,,2\n"
+    "two.txt\n"
+    "four.txt,five.txt\n"
+    "six.txt,seven.txt\n"
     "[SourceDisksNames]\n"
     "2 = %SrcDiskName%, LANCOM\\LANtools\\lanconf.cab\n"
+    "4=,,,here\n"
+    "8=name\n"
     "[SourceDisksFiles]\n"
-    "lanconf.exe = 2\n"
+    "one.txt=2\n"
+    "two.txt=4,there\n"
+    "three.txt=6\n"
+    "five.txt=8\n"
+    "six.txt=10\n"
     "[DestinationDirs]\n"
     "DefaultDestDir = 24, %DefaultDest%\n"
     "[Strings]\n"
@@ -312,6 +323,7 @@ static void test_SetupGetSourceFileLocation(void)
     char buffer[MAX_PATH] = "not empty", inf_filename[MAX_PATH];
     UINT source_id;
     DWORD required, error;
+    INFCONTEXT ctx;
     HINF hinf;
     BOOL ret;
 
@@ -327,12 +339,66 @@ static void test_SetupGetSourceFileLocation(void)
     required = 0;
     source_id = 0;
 
-    ret = SetupGetSourceFileLocationA(hinf, NULL, "lanconf.exe", &source_id, buffer, sizeof(buffer), &required);
+    ret = SetupGetSourceFileLocationA(hinf, NULL, "one.txt", &source_id, buffer, sizeof(buffer), &required);
     ok(ret, "SetupGetSourceFileLocation failed\n");
 
     ok(required == 1, "unexpected required size: %ld\n", required);
     ok(source_id == 2, "unexpected source id: %d\n", source_id);
     ok(!lstrcmpA("", buffer), "unexpected result string: %s\n", buffer);
+
+    ret = SetupGetSourceFileLocationA(hinf, NULL, "two.txt", &source_id, buffer, sizeof(buffer), NULL);
+    ok(ret, "Got error %lu.\n", GetLastError());
+    ok(source_id == 4, "Got source id %u.\n", source_id);
+    ok(!strcmp(buffer, "there"), "Got relative path %s.\n", debugstr_a(buffer));
+
+    ret = SetupFindFirstLineA(hinf, "copy_section", NULL, &ctx);
+    ok(ret, "Got error %lu.\n", GetLastError());
+
+    ret = SetupGetSourceFileLocationA(hinf, &ctx, "two.txt", &source_id, buffer, sizeof(buffer), NULL);
+    ok(ret, "Got error %lu.\n", GetLastError());
+    ok(source_id == 2, "Got source id %u.\n", source_id);
+    ok(!strcmp(buffer, ""), "Got relative path %s.\n", debugstr_a(buffer));
+
+    /* ctx should not be changed. */
+    ret = SetupGetLineTextA(&ctx, NULL, NULL, NULL, buffer, sizeof(buffer), NULL);
+    ok(!strcmp(buffer, "one.txt,,2"), "Got line %s.\n", debugstr_a(buffer));
+
+    /* Test when the source name differs from the destination name.
+     * It seems SetupGetSourceFileLocation() is buggy and doesn't take that
+     * into account; it always uses the destination name. */
+
+    ret = SetupFindNextLine(&ctx, &ctx);
+    ok(ret, "Got error %lu.\n", GetLastError());
+    ret = SetupFindNextLine(&ctx, &ctx);
+    ok(ret, "Got error %lu.\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    ret = SetupGetSourceFileLocationA(hinf, &ctx, "two.txt", &source_id, buffer, sizeof(buffer), NULL);
+    ok(!ret, "Expected failure.\n");
+    ok(GetLastError() == ERROR_LINE_NOT_FOUND, "Got error %lu.\n", GetLastError());
+
+    ret = SetupFindNextLine(&ctx, &ctx);
+    ok(ret, "Got error %lu.\n", GetLastError());
+
+    ret = SetupGetSourceFileLocationA(hinf, &ctx, "two.txt", &source_id, buffer, sizeof(buffer), NULL);
+    ok(ret, "Got error %lu.\n", GetLastError());
+    ok(source_id == 10, "Got source id %u.\n", source_id);
+    ok(!strcmp(buffer, ""), "Got relative path %s.\n", debugstr_a(buffer));
+
+    ret = SetupGetSourceFileLocationA(hinf, NULL, "three.txt", &source_id, buffer, sizeof(buffer), NULL);
+    ok(ret, "Got error %lu.\n", GetLastError());
+    ok(source_id == 6, "Got source id %u.\n", source_id);
+    ok(!strcmp(buffer, ""), "Got relative path %s.\n", debugstr_a(buffer));
+
+    SetLastError(0xdeadbeef);
+    ret = SetupGetSourceFileLocationA(hinf, NULL, "four.txt", &source_id, buffer, sizeof(buffer), NULL);
+    ok(!ret, "Expected failure.\n");
+    ok(GetLastError() == ERROR_LINE_NOT_FOUND, "Got error %lu.\n", GetLastError());
+
+    ret = SetupGetSourceFileLocationA(hinf, NULL, "five.txt", &source_id, buffer, sizeof(buffer), NULL);
+    ok(ret, "Got error %lu.\n", GetLastError());
+    ok(source_id == 8, "Got source id %u.\n", source_id);
+    ok(!strcmp(buffer, ""), "Got relative path %s.\n", debugstr_a(buffer));
 
     SetupCloseInfFile(hinf);
     DeleteFileA(inf_filename);
@@ -348,8 +414,10 @@ static void test_SetupGetSourceFileLocation(void)
     hinf = SetupOpenInfFileA(inf_filename, NULL, INF_STYLE_OLDNT, NULL);
     ok(hinf != INVALID_HANDLE_VALUE, "could not open inf file\n");
 
+    SetLastError(0xdeadbeef);
     ret = SetupGetSourceFileLocationA(hinf, NULL, "", &source_id, buffer, sizeof(buffer), &required);
     ok(!ret, "SetupGetSourceFileLocation succeeded\n");
+    ok(GetLastError() == ERROR_LINE_NOT_FOUND, "Got error %lu.\n", GetLastError());
 
     SetupCloseInfFile(hinf);
     DeleteFileA(inf_filename);
@@ -513,72 +581,6 @@ static void test_SetupGetTargetPath(void)
     DeleteFileA(inf_filename);
 }
 
-static void test_DriverStoreFindDriverPackageW(void)
-{
-    HMODULE library;
-    HRESULT result;
-    WCHAR buffer[500];
-    DWORD len;
-    HRESULT (WINAPI *pDriverStoreFindDriverPackageW)(const WCHAR*, void*, void*, DWORD, void*, WCHAR*, DWORD*);
-
-    library = LoadLibraryA("setupapi.dll");
-    ok(library != NULL, "Failed to load setupapi.dll\n");
-    if (!library) return;
-
-    pDriverStoreFindDriverPackageW = (void *)GetProcAddress(library, "DriverStoreFindDriverPackageW");
-    if (!pDriverStoreFindDriverPackageW)
-    {
-        win_skip("Can't find DriverStoreFindDriverPackageW\n");
-        return;
-    }
-
-    len = ARRAY_SIZE(buffer);
-
-    /* No invalid parameters, with flags */
-    result = pDriverStoreFindDriverPackageW(L"c:\\nonexistent.inf", 0, 0, 9, 0, buffer, &len);
-    todo_wine
-    ok(result == HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND), "Got %lx\n", result);
-
-    /* No invalid parameters, no flags */
-    result = pDriverStoreFindDriverPackageW(L"c:\\nonexistent.inf", 0, 0, 0, 0, buffer, &len);
-    if (sizeof(void *) == 4)
-        todo_wine
-        ok(result == HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND), "Got %lx\n", result);
-    else
-        todo_wine
-        ok(result == E_INVALIDARG, "Got %lx\n", result); /* Win64 needs flags 0x9, or it gives invalid parameter */
-
-    /* Invalid parameter tests */
-
-    result = pDriverStoreFindDriverPackageW(L"c:\\nonexistent.inf", 0, 0, 9, 0, 0, &len);
-    ok(result == E_INVALIDARG, "Got %lx\n", result);
-
-    result = pDriverStoreFindDriverPackageW(0, 0, 0, 9, 0, buffer, &len);
-    ok(result == E_INVALIDARG, "Got %lx\n", result);
-
-    result = pDriverStoreFindDriverPackageW(L"", 0, 0, 9, 0, buffer, &len);
-    todo_wine
-    ok(result == HRESULT_FROM_WIN32(ERROR_INVALID_NAME) /* win7 */ || result == E_INVALIDARG /* win10 */, "Got %lx\n", result);
-
-    result = pDriverStoreFindDriverPackageW(L"c:\\nonexistent.inf", 0, 0, 9, 0, buffer, 0);
-    ok(result == E_INVALIDARG, "Got %lx\n", result);
-
-    /* Tests with different length parameter */
-
-    len = 0;
-    result = pDriverStoreFindDriverPackageW(L"c:\\nonexistent.inf", 0, 0, 9, 0, buffer, &len);
-    ok(result == E_INVALIDARG, "Got %lx\n", result);
-
-    len = 259;
-    result = pDriverStoreFindDriverPackageW(L"c:\\nonexistent.inf", 0, 0, 9, 0, buffer, &len);
-    ok(result == E_INVALIDARG, "Got %lx\n", result);
-
-    len = 260;
-    result = pDriverStoreFindDriverPackageW(L"c:\\nonexistent.inf", 0, 0, 9, 0, buffer, &len);
-    todo_wine
-    ok(result == HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND), "Got %lx\n", result);
-}
-
 START_TEST(query)
 {
     get_directories();
@@ -587,5 +589,4 @@ START_TEST(query)
     test_SetupGetSourceFileLocation();
     test_SetupGetSourceInfo();
     test_SetupGetTargetPath();
-    test_DriverStoreFindDriverPackageW();
 }

@@ -2291,29 +2291,36 @@ static void test_permanence(void)
     ok(!status, "got %#lx\n", status);
 
     attr.Attributes = 0;
-    status = ZwOpenDirectoryObject( &handle, GENERIC_ALL, &attr );
+    status = ZwOpenDirectoryObject( &handle, 0, &attr );
     ok(!status, "got %#lx\n", status);
     status = ZwMakeTemporaryObject( handle );
+    todo_wine
     ok(!status, "got %#lx\n", status);
     status = ZwMakeTemporaryObject( handle );
+    todo_wine
     ok(!status, "got %#lx\n", status);
     status = ZwClose( handle );
     ok(!status, "got %#lx\n", status);
     status = ZwOpenDirectoryObject( &handle, 0, &attr );
+    todo_wine
     ok(status == STATUS_OBJECT_NAME_NOT_FOUND, "got %#lx\n", status);
 
     status = ZwCreateDirectoryObject( &handle, GENERIC_ALL, &attr );
+    todo_wine
     ok(!status, "got %#lx\n", status);
     attr.Attributes = OBJ_PERMANENT;
-    status = ZwOpenDirectoryObject( &handle2, GENERIC_ALL, &attr );
+    status = ZwOpenDirectoryObject( &handle2, 0, &attr );
     ok(status == STATUS_SUCCESS, "got %#lx\n", status);
     status = ZwClose( handle2 );
     ok(!status, "got %#lx\n", status);
     status = ZwClose( handle );
+    todo_wine
     ok(!status, "got %#lx\n", status);
     attr.Attributes = 0;
     status = ZwOpenDirectoryObject( &handle, 0, &attr );
+    todo_wine
     ok(status == STATUS_OBJECT_NAME_NOT_FOUND, "got %#lx\n", status);
+    if (!status) ZwClose( handle );
 }
 
 static void test_driver_object_extension(void)
@@ -2346,52 +2353,6 @@ static void test_driver_object_extension(void)
 
     get_obj_ext = pIoGetDriverObjectExtension(driver_obj, (void *)0xdead);
     ok(get_obj_ext == NULL, "got %p\n", get_obj_ext);
-}
-
-static void test_default_modules(void)
-{
-    BOOL win32k = FALSE, dxgkrnl = FALSE, dxgmms1 = FALSE;
-    LIST_ENTRY *start, *entry;
-    ANSI_STRING name_a;
-    LDR_DATA_TABLE_ENTRY *mod;
-    NTSTATUS status;
-
-    /* Try to find start of the InLoadOrderModuleList list */
-    for (start = ldr_module->InLoadOrderLinks.Flink; ; start = start->Flink)
-    {
-        mod = CONTAINING_RECORD(start, LDR_DATA_TABLE_ENTRY, InLoadOrderLinks);
-
-        if (!MmIsAddressValid(&mod->DllBase) || !mod->DllBase) break;
-        if (!MmIsAddressValid(&mod->LoadCount) || !mod->LoadCount) break;
-        if (!MmIsAddressValid(&mod->SizeOfImage) || !mod->SizeOfImage) break;
-        if (!MmIsAddressValid(&mod->EntryPoint) || mod->EntryPoint < mod->DllBase ||
-            (DWORD_PTR)mod->EntryPoint > (DWORD_PTR)mod->DllBase + mod->SizeOfImage) break;
-    }
-
-    for (entry = start->Flink; entry != start; entry = entry->Flink)
-    {
-        mod = CONTAINING_RECORD(entry, LDR_DATA_TABLE_ENTRY, InLoadOrderLinks);
-
-        status = RtlUnicodeStringToAnsiString(&name_a, &mod->BaseDllName, TRUE);
-        ok(!status, "RtlUnicodeStringToAnsiString failed with %08lx\n", status);
-        if (status) continue;
-
-        if (entry == start->Flink)
-        {
-            ok(!strncmp(name_a.Buffer, "ntoskrnl.exe", name_a.Length),
-               "Expected ntoskrnl.exe, got %.*s\n", name_a.Length, name_a.Buffer);
-        }
-
-        if (!strncmp(name_a.Buffer, "win32k.sys", name_a.Length)) win32k = TRUE;
-        if (!strncmp(name_a.Buffer, "dxgkrnl.sys", name_a.Length)) dxgkrnl = TRUE;
-        if (!strncmp(name_a.Buffer, "dxgmms1.sys", name_a.Length)) dxgmms1 = TRUE;
-
-        RtlFreeAnsiString(&name_a);
-    }
-
-    ok(win32k, "Failed to find win32k.sys\n");
-    ok(dxgkrnl, "Failed to find dxgkrnl.sys\n");
-    ok(dxgmms1, "Failed to find dxgmms1.sys\n");
 }
 
 static void test_default_security(void)
@@ -2471,6 +2432,52 @@ static void test_default_security(void)
     ExFreePool(sid2);
 
     FltFreeSecurityDescriptor(sd);
+}
+
+static void test_default_modules(void)
+{
+    BOOL win32k = FALSE, dxgkrnl = FALSE, dxgmms1 = FALSE;
+    LIST_ENTRY *start, *entry;
+    ANSI_STRING name_a;
+    LDR_DATA_TABLE_ENTRY *mod;
+    NTSTATUS status;
+
+    /* Try to find start of the InLoadOrderModuleList list */
+    for (start = ldr_module->InLoadOrderLinks.Flink; ; start = start->Flink)
+    {
+        mod = CONTAINING_RECORD(start, LDR_DATA_TABLE_ENTRY, InLoadOrderLinks);
+
+        if (!MmIsAddressValid(&mod->DllBase) || !mod->DllBase) break;
+        if (!MmIsAddressValid(&mod->LoadCount) || !mod->LoadCount) break;
+        if (!MmIsAddressValid(&mod->SizeOfImage) || !mod->SizeOfImage) break;
+        if (!MmIsAddressValid(&mod->EntryPoint) || mod->EntryPoint < mod->DllBase ||
+            (DWORD_PTR)mod->EntryPoint > (DWORD_PTR)mod->DllBase + mod->SizeOfImage) break;
+    }
+
+    for (entry = start->Flink; entry != start; entry = entry->Flink)
+    {
+        mod = CONTAINING_RECORD(entry, LDR_DATA_TABLE_ENTRY, InLoadOrderLinks);
+
+        status = RtlUnicodeStringToAnsiString(&name_a, &mod->BaseDllName, TRUE);
+        ok(!status, "RtlUnicodeStringToAnsiString failed with %08lx\n", status);
+        if (status) continue;
+
+        if (entry == start->Flink)
+        {
+            ok(!strncmp(name_a.Buffer, "ntoskrnl.exe", name_a.Length),
+               "Expected ntoskrnl.exe, got %.*s\n", name_a.Length, name_a.Buffer);
+        }
+
+        if (!strncmp(name_a.Buffer, "win32k.sys", name_a.Length)) win32k = TRUE;
+        if (!strncmp(name_a.Buffer, "dxgkrnl.sys", name_a.Length)) dxgkrnl = TRUE;
+        if (!strncmp(name_a.Buffer, "dxgmms1.sys", name_a.Length)) dxgmms1 = TRUE;
+
+        RtlFreeAnsiString(&name_a);
+    }
+
+    ok(win32k, "Failed to find win32k.sys\n");
+    ok(dxgkrnl, "Failed to find dxgkrnl.sys\n");
+    ok(dxgmms1, "Failed to find dxgmms1.sys\n");
 }
 
 static NTSTATUS main_test(DEVICE_OBJECT *device, IRP *irp, IO_STACK_LOCATION *stack)

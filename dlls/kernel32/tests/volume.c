@@ -28,6 +28,7 @@
 #include "winternl.h"
 #include "ddk/ntddcdvd.h"
 #include "ddk/mountmgr.h"
+#include "ddk/ntifs.h"
 #include "wine/test.h"
 
 #include <pshpack1.h>
@@ -60,6 +61,7 @@ static BOOL (WINAPI *pGetVolumePathNamesForVolumeNameA)(LPCSTR, LPSTR, DWORD, LP
 static BOOL (WINAPI *pGetVolumePathNamesForVolumeNameW)(LPCWSTR, LPWSTR, DWORD, LPDWORD);
 static BOOL (WINAPI *pCreateSymbolicLinkA)(const char *, const char *, DWORD);
 static BOOL (WINAPI *pGetVolumeInformationByHandleW)(HANDLE, WCHAR *, DWORD, DWORD *, DWORD *, DWORD *, WCHAR *, DWORD);
+static HRESULT (WINAPI *pGetDiskSpaceInformationA)(LPCSTR, DISK_SPACE_INFORMATION *);
 
 /* ############################### */
 
@@ -594,6 +596,7 @@ static void test_disk_extents(void)
     DWORD size;
     HANDLE handle;
     static DWORD data[16];
+    VOLUME_DISK_EXTENTS *d;
 
     handle = CreateFileA( "\\\\.\\c:", GENERIC_READ, FILE_SHARE_READ|FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, 0 );
     if (handle == INVALID_HANDLE_VALUE)
@@ -610,8 +613,18 @@ static void test_disk_extents(void)
         CloseHandle( handle );
         return;
     }
+    size = 0xdeadbeef;
+    ret = DeviceIoControl( handle, IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS, data,
+                           sizeof(data), &data, sizeof(*d) - 4, &size, NULL );
+    ok(!ret && GetLastError() == ERROR_INVALID_PARAMETER, "got ret %d, error %lu.\n", ret, GetLastError());
+    ok(size == 0xdeadbeef, "expected 32, got %lu\n", size);
+    ret = DeviceIoControl( handle, IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS, data,
+                           sizeof(data), &data, sizeof(*d), &size, NULL );
     ok(ret, "DeviceIoControl failed %lu\n", GetLastError());
     ok(size == 32, "expected 32, got %lu\n", size);
+    d = (VOLUME_DISK_EXTENTS *)data;
+    ok(d->NumberOfDiskExtents == 1, "got %lu.\n", d->NumberOfDiskExtents);
+    ok(d->Extents[0].ExtentLength.QuadPart > 0, "got %lu.\n", d->NumberOfDiskExtents);
     CloseHandle( handle );
 }
 
@@ -620,6 +633,7 @@ static void test_disk_query_property(void)
     STORAGE_PROPERTY_QUERY query = {0};
     STORAGE_DESCRIPTOR_HEADER header = {0};
     STORAGE_DEVICE_DESCRIPTOR descriptor = {0};
+    DEVICE_SEEK_PENALTY_DESCRIPTOR seek_pen = {0};
     HANDLE handle;
     DWORD error;
     DWORD size;
@@ -655,6 +669,40 @@ static void test_disk_query_property(void)
     ok(size == sizeof(descriptor), "got size %ld\n", size);
     ok(descriptor.Version == sizeof(descriptor), "got descriptor.Version %ld\n", descriptor.Version);
     ok(descriptor.Size >= sizeof(descriptor), "got descriptor.Size %ld\n", descriptor.Size);
+
+
+    query.PropertyId = StorageDeviceSeekPenaltyProperty;
+    query.QueryType = PropertyStandardQuery;
+    SetLastError(0xdeadbeef);
+    ret = DeviceIoControl(handle, IOCTL_STORAGE_QUERY_PROPERTY, &query, sizeof(query), &header, sizeof(header), &size,
+                          NULL);
+    error = GetLastError();
+    if (!ret && error == ERROR_INVALID_FUNCTION)
+    {
+        win_skip( "StorageDeviceSeekPenaltyProperty is not supported.\n" ); /* Win7 */
+    }
+    else
+    {
+        ok(ret, "expect ret %#x, got %#x\n", TRUE, ret);
+        ok(error == 0xdeadbeef, "expect err %#x, got err %#lx\n", 0xdeadbeef, error);
+        ok(size == sizeof(header), "got size %ld\n", size);
+        ok(header.Version == sizeof(seek_pen), "got header.Version %ld\n", header.Version);
+        ok(header.Size == sizeof(seek_pen), "got header.Size %ld\n", header.Size);
+
+        memset(&seek_pen, 0xcc, sizeof(seek_pen));
+        ret = DeviceIoControl(handle, IOCTL_STORAGE_QUERY_PROPERTY, &query, sizeof(query), &seek_pen, sizeof(seek_pen),
+                              &size, NULL);
+        error = GetLastError();
+        ok(ret || (error == ERROR_INVALID_FUNCTION /* Win8 VMs */ || (error == ERROR_GEN_FAILURE /* VMs */)),
+          "got ret %d, error %#lx\n", ret, error);
+        if (ret)
+        {
+            ok(size == sizeof(seek_pen), "got size %ld\n", size);
+            ok(seek_pen.Version == sizeof(seek_pen), "got %ld\n", seek_pen.Version);
+            ok(seek_pen.Size == sizeof(seek_pen), "got %ld\n", seek_pen.Size);
+            ok(seek_pen.IncursSeekPenalty == TRUE || seek_pen.IncursSeekPenalty == FALSE, "got %d.\n", seek_pen.IncursSeekPenalty);
+        }
+    }
 
     CloseHandle(handle);
 }
@@ -1266,7 +1314,11 @@ static void test_mounted_folder(void)
 {
     char name_buffer[200], path[MAX_PATH], volume_name[100], *p;
     FILE_NAME_INFORMATION *name = (FILE_NAME_INFORMATION *)name_buffer;
+    char buffer[1024];
+    const REPARSE_DATA_BUFFER *data = (void *)buffer;
     FILE_ATTRIBUTE_TAG_INFO info;
+    WCHAR volume_nameW[100];
+    const WCHAR *ret_path;
     IO_STATUS_BLOCK io;
     BOOL ret, got_path;
     NTSTATUS status;
@@ -1310,6 +1362,8 @@ static void test_mounted_folder(void)
 
     ret = GetVolumeNameForVolumeMountPointA( "C:\\", volume_name, sizeof(volume_name) );
     ok(ret, "got error %lu\n", GetLastError());
+    ret = GetVolumeNameForVolumeMountPointW( L"C:\\", volume_nameW, sizeof(volume_nameW) );
+    ok(ret, "got error %lu\n", GetLastError());
 
     ret = SetVolumeMountPointA( "C:\\winetest_mnt\\", volume_name );
     if (!ret)
@@ -1318,7 +1372,33 @@ static void test_mounted_folder(void)
         RemoveDirectoryA( "C:\\winetest_mnt" );
         return;
     }
-    todo_wine ok(ret, "got error %lu\n", GetLastError());
+    ok(ret, "got error %lu\n", GetLastError());
+
+    file = CreateFileA( "C:\\winetest_mnt\\", FILE_READ_DATA, 0, NULL, OPEN_EXISTING,
+                        FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, NULL );
+    ok( file != INVALID_HANDLE_VALUE, "got error %lu\n", GetLastError() );
+
+    volume_nameW[1] = '?';
+    ret = NtFsControlFile( file, NULL, NULL, NULL, &io, FSCTL_GET_REPARSE_POINT, NULL, 0, buffer, sizeof(buffer) );
+    ok( !ret, "got %#x\n", ret );
+    ok( data->ReparseTag == IO_REPARSE_TAG_MOUNT_POINT, "got tag %#lx\n", data->ReparseTag );
+    ok( !data->Reserved, "got reserved %#x\n", data->Reserved );
+    ok( data->ReparseDataLength == io.Information - offsetof( REPARSE_DATA_BUFFER, MountPointReparseBuffer ),
+        "got information %Iu, length %u\n", io.Information, data->ReparseDataLength );
+    ret_path = data->MountPointReparseBuffer.PathBuffer + (data->MountPointReparseBuffer.SubstituteNameOffset / sizeof(WCHAR));
+    ok( data->MountPointReparseBuffer.SubstituteNameLength == wcslen( volume_nameW ) * sizeof(WCHAR),
+        "got length %u\n", data->MountPointReparseBuffer.SubstituteNameLength );
+    ok( !memcmp( ret_path, volume_nameW, data->MountPointReparseBuffer.SubstituteNameLength ),
+        "expected %s, got %s\n", debugstr_w( volume_nameW ),
+        debugstr_wn( ret_path, data->MountPointReparseBuffer.SubstituteNameLength / sizeof(WCHAR) ));
+    ret_path = data->MountPointReparseBuffer.PathBuffer + (data->MountPointReparseBuffer.PrintNameOffset / sizeof(WCHAR));
+    ok( data->MountPointReparseBuffer.PrintNameLength == wcslen( volume_nameW ) * sizeof(WCHAR),
+        "got length %u\n", data->MountPointReparseBuffer.PrintNameLength );
+    ok( !memcmp( ret_path, volume_nameW, data->MountPointReparseBuffer.PrintNameLength ),
+        "expected %s, got %s\n", debugstr_w( volume_nameW ),
+        debugstr_wn( ret_path, data->MountPointReparseBuffer.PrintNameLength / sizeof(WCHAR) ));
+
+    CloseHandle( file );
 
     file = CreateFileA( "C:\\winetest_mnt", 0, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL,
             OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, NULL );
@@ -1343,14 +1423,14 @@ static void test_mounted_folder(void)
     ok(file != INVALID_HANDLE_VALUE, "got error %lu\n", GetLastError());
 
     status = NtQueryInformationFile( file, &io, &info, sizeof(info), FileAttributeTagInformation );
-    ok(!status, "got status %#lx\n", status);
-    ok(!(info.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)
+    todo_wine ok(!status, "got status %#lx\n", status);
+    todo_wine ok(!(info.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)
             && (info.FileAttributes & FILE_ATTRIBUTE_DIRECTORY), "got attributes %#lx\n", info.FileAttributes);
-    ok(!info.ReparseTag, "got reparse tag %#lx\n", info.ReparseTag);
+    todo_wine ok(!info.ReparseTag, "got reparse tag %#lx\n", info.ReparseTag);
 
     status = NtQueryInformationFile( file, &io, name, sizeof(name_buffer), FileNameInformation );
-    ok(!status, "got status %#lx\n", status);
-    ok(name->FileNameLength == wcslen(L"\\") * sizeof(WCHAR), "got length %lu\n", name->FileNameLength);
+    todo_wine ok(!status, "got status %#lx\n", status);
+    todo_wine ok(name->FileNameLength == wcslen(L"\\") * sizeof(WCHAR), "got length %lu\n", name->FileNameLength);
     ok(!wcsnicmp(name->FileName, L"\\", wcslen(L"\\")), "got name %s\n",
             debugstr_wn(name->FileName, name->FileNameLength / sizeof(WCHAR)));
 
@@ -1362,19 +1442,19 @@ static void test_mounted_folder(void)
 
     file = CreateFileA( "C:\\winetest_mnt\\windows", 0, FILE_SHARE_READ | FILE_SHARE_WRITE,
             NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL );
-    ok(file != INVALID_HANDLE_VALUE, "got error %lu\n", GetLastError());
+    todo_wine ok(file != INVALID_HANDLE_VALUE, "got error %lu\n", GetLastError());
 
     status = NtQueryInformationFile( file, &io, name, sizeof(name_buffer), FileNameInformation );
-    ok(!status, "got status %#lx\n", status);
-    ok(name->FileNameLength == wcslen(L"\\windows") * sizeof(WCHAR), "got length %lu\n", name->FileNameLength);
-    ok(!wcsnicmp(name->FileName, L"\\windows", wcslen(L"\\windows")), "got name %s\n",
+    todo_wine ok(!status, "got status %#lx\n", status);
+    todo_wine ok(name->FileNameLength == wcslen(L"\\windows") * sizeof(WCHAR), "got length %lu\n", name->FileNameLength);
+    todo_wine ok(!wcsnicmp(name->FileName, L"\\windows", wcslen(L"\\windows")), "got name %s\n",
             debugstr_wn(name->FileName, name->FileNameLength / sizeof(WCHAR)));
 
     CloseHandle( file );
 
     ret = GetVolumePathNameA( "C:\\winetest_mnt", path, sizeof(path) );
     ok(ret, "got error %lu\n", GetLastError());
-    ok(!strcmp(path, "C:\\winetest_mnt\\"), "got %s\n", debugstr_a(path));
+    todo_wine ok(!strcmp(path, "C:\\winetest_mnt\\"), "got %s\n", debugstr_a(path));
     SetLastError(0xdeadbeef);
     ret = GetVolumeNameForVolumeMountPointA( "C:\\winetest_mnt", path, sizeof(path) );
     ok(!ret, "expected failure\n");
@@ -1385,10 +1465,10 @@ static void test_mounted_folder(void)
     ok(GetLastError() == ERROR_INVALID_NAME, "wrong error %lu\n", GetLastError());
 
     ret = GetVolumeNameForVolumeMountPointA( "C:\\winetest_mnt\\", path, sizeof(path) );
-    ok(ret, "got error %lu\n", GetLastError());
-    ok(!strcmp(path, volume_name), "expected %s, got %s\n", debugstr_a(volume_name), debugstr_a(path));
+    todo_wine ok(ret, "got error %lu\n", GetLastError());
+    todo_wine ok(!strcmp(path, volume_name), "expected %s, got %s\n", debugstr_a(volume_name), debugstr_a(path));
     ret = GetVolumeInformationA( "C:\\winetest_mnt\\", NULL, 0, NULL, NULL, NULL, NULL, 0 );
-    ok(ret, "got error %lu\n", GetLastError());
+    todo_wine ok(ret, "got error %lu\n", GetLastError());
 
     ret = GetVolumePathNameA( "C:\\winetest_mnt\\windows", path, sizeof(path) );
     ok(ret, "got error %lu\n", GetLastError());
@@ -1408,29 +1488,29 @@ static void test_mounted_folder(void)
     SetLastError(0xdeadbeef);
     ret = GetVolumeNameForVolumeMountPointA( "C:\\winetest_mnt\\nonexistent\\", path, sizeof(path) );
     ok(!ret, "expected failure\n");
-    ok(GetLastError() == ERROR_FILE_NOT_FOUND, "wrong error %lu\n", GetLastError());
+    todo_wine ok(GetLastError() == ERROR_FILE_NOT_FOUND, "wrong error %lu\n", GetLastError());
     SetLastError(0xdeadbeef);
     ret = GetVolumeInformationA( "C:\\winetest_mnt\\nonexistent\\", NULL, 0, NULL, NULL, NULL, NULL, 0 );
     ok(!ret, "expected failure\n");
-    ok(GetLastError() == ERROR_FILE_NOT_FOUND, "wrong error %lu\n", GetLastError());
+    todo_wine ok(GetLastError() == ERROR_FILE_NOT_FOUND, "wrong error %lu\n", GetLastError());
 
     ret = GetVolumePathNameA( "C:\\winetest_mnt\\winetest_mnt", path, sizeof(path) );
     ok(ret, "got error %lu\n", GetLastError());
-    ok(!strcmp(path, "C:\\winetest_mnt\\winetest_mnt\\"), "got %s\n", debugstr_a(path));
+    todo_wine ok(!strcmp(path, "C:\\winetest_mnt\\winetest_mnt\\"), "got %s\n", debugstr_a(path));
     ret = GetVolumeNameForVolumeMountPointA( "C:\\winetest_mnt\\winetest_mnt\\", path, sizeof(path) );
-    ok(ret, "got error %lu\n", GetLastError());
-    ok(!strcmp(path, volume_name), "expected %s, got %s\n", debugstr_a(volume_name), debugstr_a(path));
+    todo_wine ok(ret, "got error %lu\n", GetLastError());
+    todo_wine ok(!strcmp(path, volume_name), "expected %s, got %s\n", debugstr_a(volume_name), debugstr_a(path));
     ret = GetVolumeInformationA( "C:\\winetest_mnt\\winetest_mnt\\", NULL, 0, NULL, NULL, NULL, NULL, 0 );
-    ok(ret, "got error %lu\n", GetLastError());
+    todo_wine ok(ret, "got error %lu\n", GetLastError());
 
     ret = GetVolumePathNameA( "C:/winetest_mnt/../winetest_mnt/.", path, sizeof(path) );
     ok(ret, "got error %lu\n", GetLastError());
-    ok(!strcmp(path, "C:\\winetest_mnt\\"), "got %s\n", debugstr_a(path));
+    todo_wine ok(!strcmp(path, "C:\\winetest_mnt\\"), "got %s\n", debugstr_a(path));
     ret = GetVolumeNameForVolumeMountPointA( "C:/winetest_mnt/../winetest_mnt/.\\", path, sizeof(path) );
-    ok(ret, "got error %lu\n", GetLastError());
-    ok(!strcmp(path, volume_name), "expected %s, got %s\n", debugstr_a(volume_name), debugstr_a(path));
+    todo_wine ok(ret, "got error %lu\n", GetLastError());
+    todo_wine ok(!strcmp(path, volume_name), "expected %s, got %s\n", debugstr_a(volume_name), debugstr_a(path));
     ret = GetVolumeInformationA( "C:/winetest_mnt/../winetest_mnt/.\\", NULL, 0, NULL, NULL, NULL, NULL, 0 );
-    ok(ret, "got error %lu\n", GetLastError());
+    todo_wine ok(ret, "got error %lu\n", GetLastError());
 
     ret = GetVolumePathNamesForVolumeNameA( volume_name, path, sizeof(path), &size );
     ok(ret, "got error %lu\n", GetLastError());
@@ -1441,7 +1521,7 @@ static void test_mounted_folder(void)
             got_path = TRUE;
         ok(strcmp( p, "C:\\winetest_mnt\\winetest_mnt\\" ), "GetVolumePathNamesForVolumeName() should not recurse\n");
     }
-    ok(got_path, "mount point was not enumerated\n");
+    todo_wine ok(got_path, "mount point was not enumerated\n");
 
     /* test interaction with symbolic links */
 
@@ -1451,18 +1531,18 @@ static void test_mounted_folder(void)
         ok(ret, "got error %lu\n", GetLastError());
 
         ret = GetVolumePathNameA( "C:\\winetest_link\\", path, sizeof(path) );
-        ok(ret, "got error %lu\n", GetLastError());
+        todo_wine ok(ret, "got error %lu\n", GetLastError());
         ok(!strcmp(path, "C:\\"), "got %s\n", path);
         SetLastError(0xdeadbeef);
         ret = GetVolumeNameForVolumeMountPointA( "C:\\winetest_link\\", path, sizeof(path) );
         ok(!ret, "expected failure\n");
-        ok(GetLastError() == ERROR_INVALID_PARAMETER
+        todo_wine ok(GetLastError() == ERROR_INVALID_PARAMETER
                 || broken(GetLastError() == ERROR_SUCCESS) /* 2008 */, "wrong error %lu\n", GetLastError());
         ret = GetVolumeInformationA( "C:\\winetest_link\\", NULL, 0, NULL, NULL, NULL, NULL, 0 );
-        ok(ret, "got error %lu\n", GetLastError());
+        todo_wine ok(ret, "got error %lu\n", GetLastError());
 
         ret = GetVolumePathNameA( "C:\\winetest_link\\windows\\", path, sizeof(path) );
-        ok(ret, "got error %lu\n", GetLastError());
+        todo_wine ok(ret, "got error %lu\n", GetLastError());
         ok(!strcmp(path, "C:\\"), "got %s\n", path);
         SetLastError(0xdeadbeef);
         ret = GetVolumeNameForVolumeMountPointA( "C:\\winetest_link\\windows\\", path, sizeof(path) );
@@ -1474,30 +1554,30 @@ static void test_mounted_folder(void)
         ok(GetLastError() == ERROR_DIR_NOT_ROOT, "wrong error %lu\n", GetLastError());
 
         ret = GetVolumePathNameA( "C:\\winetest_link\\winetest_mnt", path, sizeof(path) );
-        ok(ret, "got error %lu\n", GetLastError());
-        ok(!strcmp(path, "C:\\winetest_link\\winetest_mnt\\"), "got %s\n", debugstr_a(path));
+        todo_wine ok(ret, "got error %lu\n", GetLastError());
+        todo_wine ok(!strcmp(path, "C:\\winetest_link\\winetest_mnt\\"), "got %s\n", debugstr_a(path));
         ret = GetVolumeNameForVolumeMountPointA( "C:\\winetest_link\\winetest_mnt\\", path, sizeof(path) );
-        ok(ret, "got error %lu\n", GetLastError());
-        ok(!strcmp(path, volume_name), "expected %s, got %s\n", debugstr_a(volume_name), debugstr_a(path));
+        todo_wine ok(ret, "got error %lu\n", GetLastError());
+        todo_wine ok(!strcmp(path, volume_name), "expected %s, got %s\n", debugstr_a(volume_name), debugstr_a(path));
         ret = GetVolumeInformationA( "C:\\winetest_link\\winetest_mnt\\", NULL, 0, NULL, NULL, NULL, NULL, 0 );
-        ok(ret, "got error %lu\n", GetLastError());
+        todo_wine ok(ret, "got error %lu\n", GetLastError());
 
         /* The following test makes it clear that when we encounter a symlink
          * while resolving, we resolve *every* junction in the path, i.e. both
          * mount points and symlinks. */
         ret = GetVolumePathNameA( "C:\\winetest_link\\winetest_mnt\\winetest_link\\windows\\", path, sizeof(path) );
-        ok(ret, "got error %lu\n", GetLastError());
+        todo_wine ok(ret, "got error %lu\n", GetLastError());
         ok(!strcmp(path, "C:\\") || !strcmp(path, "C:\\winetest_link\\winetest_mnt\\") /* 2008 */,
                 "got %s\n", debugstr_a(path));
 
         file = CreateFileA( "C:\\winetest_link\\winetest_mnt\\winetest_link\\windows\\", 0,
                 FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL );
-        ok(file != INVALID_HANDLE_VALUE, "got error %lu\n", GetLastError());
+        todo_wine ok(file != INVALID_HANDLE_VALUE, "got error %lu\n", GetLastError());
 
         status = NtQueryInformationFile( file, &io, name, sizeof(name_buffer), FileNameInformation );
-        ok(!status, "got status %#lx\n", status);
-        ok(name->FileNameLength == wcslen(L"\\windows") * sizeof(WCHAR), "got length %lu\n", name->FileNameLength);
-        ok(!wcsnicmp(name->FileName, L"\\windows", wcslen(L"\\windows")), "got name %s\n",
+        todo_wine ok(!status, "got status %#lx\n", status);
+        todo_wine ok(name->FileNameLength == wcslen(L"\\windows") * sizeof(WCHAR), "got length %lu\n", name->FileNameLength);
+        todo_wine ok(!wcsnicmp(name->FileName, L"\\windows", wcslen(L"\\windows")), "got name %s\n",
                 debugstr_wn(name->FileName, name->FileNameLength / sizeof(WCHAR)));
 
         CloseHandle( file );
@@ -1515,7 +1595,7 @@ static void test_mounted_folder(void)
     }
 
     ret = DeleteVolumeMountPointA( "C:\\winetest_mnt\\" );
-    ok(ret, "got error %lu\n", GetLastError());
+    todo_wine ok(ret, "got error %lu\n", GetLastError());
     ret = RemoveDirectoryA( "C:\\winetest_mnt" );
     ok(ret, "got error %lu\n", GetLastError());
 }
@@ -1701,6 +1781,96 @@ static void test_mountmgr_query_points(void)
     free(output);
 }
 
+#define check_disk_space_information(a) check_disk_space_information_(__LINE__, a)
+static void check_disk_space_information_(unsigned int line, const DISK_SPACE_INFORMATION *info)
+{
+    ULONGLONG expected;
+
+    expected = info->ActualAvailableAllocationUnits + info->ActualPoolUnavailableAllocationUnits
+            + info->UsedAllocationUnits + info->TotalReservedAllocationUnits;
+    ok_(__FILE__,line)(info->ActualTotalAllocationUnits == expected,
+        "ActualTotalAllocationUnits expected 0x%s, got 0x%s\n", wine_dbgstr_longlong(expected),
+        wine_dbgstr_longlong(info->ActualTotalAllocationUnits));
+    expected = info->ActualTotalAllocationUnits - info->UsedAllocationUnits - info->TotalReservedAllocationUnits;
+    ok_(__FILE__,line)(info->ActualAvailableAllocationUnits == expected,
+        "ActualAvailableAllocationUnits expected 0x%s, got 0x%s\n",
+        wine_dbgstr_longlong(expected), wine_dbgstr_longlong(info->ActualAvailableAllocationUnits));
+    ok_(__FILE__,line)(info->ActualPoolUnavailableAllocationUnits == 0,
+        "ActualPoolUnavailableAllocationUnits expected zero, got 0x%s\n",
+        wine_dbgstr_longlong(info->ActualPoolUnavailableAllocationUnits));
+    expected = info->CallerAvailableAllocationUnits + info->CallerPoolUnavailableAllocationUnits
+            + info->UsedAllocationUnits + info->TotalReservedAllocationUnits;
+    ok_(__FILE__,line)(info->CallerTotalAllocationUnits == expected,
+        "CallerTotalAllocationUnits expected 0x%s, got 0x%s\n", wine_dbgstr_longlong(expected),
+        wine_dbgstr_longlong(info->CallerTotalAllocationUnits));
+    ok_(__FILE__,line)((LONGLONG)info->CallerAvailableAllocationUnits > 0,
+        "CallerAvailableAllocationUnits expected positive, got 0x%s\n",
+        wine_dbgstr_longlong(info->CallerAvailableAllocationUnits));
+    ok_(__FILE__,line)(info->CallerPoolUnavailableAllocationUnits == 0,
+        "CallerPoolUnavailableAllocationUnits expected zero, got 0x%s\n",
+        wine_dbgstr_longlong(info->CallerPoolUnavailableAllocationUnits));
+    ok_(__FILE__,line)((LONGLONG)info->UsedAllocationUnits > 0, "UsedAllocationUnits expected positive, got 0x%s\n",
+        wine_dbgstr_longlong(info->UsedAllocationUnits));
+    ok_(__FILE__,line)((LONGLONG)info->TotalReservedAllocationUnits >= 0,
+        "TotalReservedAllocationUnits expected >= 0, got 0x%s\n",
+        wine_dbgstr_longlong(info->TotalReservedAllocationUnits));
+    ok_(__FILE__,line)(info->VolumeStorageReserveAllocationUnits <= info->TotalReservedAllocationUnits,
+        "VolumeStorageReserveAllocationUnits expected <= 0x%s, got 0x%s\n",
+        wine_dbgstr_longlong(info->TotalReservedAllocationUnits),
+        wine_dbgstr_longlong(info->VolumeStorageReserveAllocationUnits));
+    ok_(__FILE__,line)(info->AvailableCommittedAllocationUnits == 0
+            /* in win10 can be (0 - UsedAllocationUnits - TotalReservedAllocationUnits) */
+            || broken((LONGLONG)info->AvailableCommittedAllocationUnits < 0),
+        "AvailableCommittedAllocationUnits expected zero, got 0x%s\n",
+        wine_dbgstr_longlong(info->AvailableCommittedAllocationUnits));
+    ok_(__FILE__,line)(info->PoolAvailableAllocationUnits == 0,
+        "PoolAvailableAllocationUnits expected zero, got 0x%s\n",
+        wine_dbgstr_longlong(info->PoolAvailableAllocationUnits));
+
+    /* Assume file system is NTFS */
+    ok_(__FILE__,line)(info->BytesPerSector == 512, "BytesPerSector expected 512, got %ld\n",info->BytesPerSector);
+    ok_(__FILE__,line)(info->SectorsPerAllocationUnit == 8, "SectorsPerAllocationUnit expected 8, got %ld\n",info->SectorsPerAllocationUnit);
+}
+
+static void test_GetDiskSpaceInformationA(void)
+{
+    DISK_SPACE_INFORMATION info;
+    HRESULT hr;
+
+    /* GetDiskSpaceInformation() is supported on Windows 10 build 1809 and later */
+    if (!pGetDiskSpaceInformationA)
+    {
+        win_skip("GetDiskSpaceInformationA is not present.\n");
+        return;
+    }
+
+    memset(&info,0,sizeof(info));
+
+    hr = pGetDiskSpaceInformationA("Q:\\", &info);
+    todo_wine
+    ok(hr == HRESULT_FROM_NT(ERROR_BAD_NET_RESP | ERROR_SEVERITY_WARNING | ERROR_SEVERITY_INFORMATIONAL),
+        "unexpected 0x%08lx\n", hr);
+
+    hr = pGetDiskSpaceInformationA("", &info);
+    ok(hr == HRESULT_FROM_WIN32(ERROR_PATH_NOT_FOUND), "unexpected 0x%08lx\n", hr);
+
+    hr = pGetDiskSpaceInformationA(NULL, NULL);
+    ok(hr == HRESULT_FROM_NT(ERROR_INVALID_DATA | ERROR_SEVERITY_WARNING | ERROR_SEVERITY_INFORMATIONAL),
+        "unexpected 0x%08lx\n", hr);
+
+    hr = pGetDiskSpaceInformationA(NULL, &info);
+    ok(hr == S_OK, "failed 0x%08lx\n", hr);
+    check_disk_space_information(&info);
+
+    hr = pGetDiskSpaceInformationA("C:\\", &info);
+    ok(hr == S_OK, "failed 0x%08lx\n", hr);
+    check_disk_space_information(&info);
+
+    hr = pGetDiskSpaceInformationA("\\\\?\\C:\\", &info);
+    ok(hr == S_OK, "failed 0x%08lx\n", hr);
+    check_disk_space_information(&info);
+}
+
 START_TEST(volume)
 {
     hdll = GetModuleHandleA("kernel32.dll");
@@ -1713,6 +1883,7 @@ START_TEST(volume)
     pGetVolumePathNamesForVolumeNameW = (void *) GetProcAddress(hdll, "GetVolumePathNamesForVolumeNameW");
     pCreateSymbolicLinkA = (void *) GetProcAddress(hdll, "CreateSymbolicLinkA");
     pGetVolumeInformationByHandleW = (void *) GetProcAddress(hdll, "GetVolumeInformationByHandleW");
+    pGetDiskSpaceInformationA = (void *) GetProcAddress(hdll, "GetDiskSpaceInformationA");
 
     test_query_dos_deviceA();
     test_dos_devices();
@@ -1733,4 +1904,5 @@ START_TEST(volume)
     test_mounted_folder();
     test_GetVolumeInformationByHandle();
     test_mountmgr_query_points();
+    test_GetDiskSpaceInformationA();
 }

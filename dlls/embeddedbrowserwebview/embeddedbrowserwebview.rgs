@@ -1,0 +1,22 @@
+HKLM
+{
+    NoRemove Software
+    {
+        NoRemove Wow6432Node
+        {
+            NoRemove Microsoft
+            {
+                NoRemove EdgeUpdate
+                {
+                    NoRemove ClientState
+                    {
+                        NoRemove {F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}
+                        {
+                            val EBWebView = s 'C:\Program Files (x86)\Microsoft\EdgeWebView\Application\131.0.2903.86'
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

@@ -39,8 +39,6 @@ struct HTMLInputElement {
     IHTMLInputElement IHTMLInputElement_iface;
     IHTMLInputTextElement IHTMLInputTextElement_iface;
     IHTMLInputTextElement2 IHTMLInputTextElement2_iface;
-    IWineHTMLInputPrivate IWineHTMLInputPrivate_iface;
-    IWineHTMLParentFormPrivate IWineHTMLParentFormPrivate_iface;
 
     nsIDOMHTMLInputElement *nsinput;
 };
@@ -55,63 +53,8 @@ static inline HTMLInputElement *impl_from_IHTMLInputTextElement(IHTMLInputTextEl
     return CONTAINING_RECORD(iface, HTMLInputElement, IHTMLInputTextElement_iface);
 }
 
-static HRESULT WINAPI HTMLInputElement_QueryInterface(IHTMLInputElement *iface,
-                                                         REFIID riid, void **ppv)
-{
-    HTMLInputElement *This = impl_from_IHTMLInputElement(iface);
-
-    return IHTMLDOMNode_QueryInterface(&This->element.node.IHTMLDOMNode_iface, riid, ppv);
-}
-
-static ULONG WINAPI HTMLInputElement_AddRef(IHTMLInputElement *iface)
-{
-    HTMLInputElement *This = impl_from_IHTMLInputElement(iface);
-
-    return IHTMLDOMNode_AddRef(&This->element.node.IHTMLDOMNode_iface);
-}
-
-static ULONG WINAPI HTMLInputElement_Release(IHTMLInputElement *iface)
-{
-    HTMLInputElement *This = impl_from_IHTMLInputElement(iface);
-
-    return IHTMLDOMNode_Release(&This->element.node.IHTMLDOMNode_iface);
-}
-
-static HRESULT WINAPI HTMLInputElement_GetTypeInfoCount(IHTMLInputElement *iface, UINT *pctinfo)
-{
-    HTMLInputElement *This = impl_from_IHTMLInputElement(iface);
-
-    return IDispatchEx_GetTypeInfoCount(&This->element.node.event_target.dispex.IDispatchEx_iface, pctinfo);
-}
-
-static HRESULT WINAPI HTMLInputElement_GetTypeInfo(IHTMLInputElement *iface, UINT iTInfo,
-                                              LCID lcid, ITypeInfo **ppTInfo)
-{
-    HTMLInputElement *This = impl_from_IHTMLInputElement(iface);
-
-    return IDispatchEx_GetTypeInfo(&This->element.node.event_target.dispex.IDispatchEx_iface, iTInfo, lcid,
-            ppTInfo);
-}
-
-static HRESULT WINAPI HTMLInputElement_GetIDsOfNames(IHTMLInputElement *iface, REFIID riid,
-                                                LPOLESTR *rgszNames, UINT cNames,
-                                                LCID lcid, DISPID *rgDispId)
-{
-    HTMLInputElement *This = impl_from_IHTMLInputElement(iface);
-
-    return IDispatchEx_GetIDsOfNames(&This->element.node.event_target.dispex.IDispatchEx_iface, riid, rgszNames,
-            cNames, lcid, rgDispId);
-}
-
-static HRESULT WINAPI HTMLInputElement_Invoke(IHTMLInputElement *iface, DISPID dispIdMember,
-                            REFIID riid, LCID lcid, WORD wFlags, DISPPARAMS *pDispParams,
-                            VARIANT *pVarResult, EXCEPINFO *pExcepInfo, UINT *puArgErr)
-{
-    HTMLInputElement *This = impl_from_IHTMLInputElement(iface);
-
-    return IDispatchEx_Invoke(&This->element.node.event_target.dispex.IDispatchEx_iface, dispIdMember, riid,
-            lcid, wFlags, pDispParams, pVarResult, pExcepInfo, puArgErr);
-}
+DISPEX_IDISPATCH_IMPL(HTMLInputElement, IHTMLInputElement,
+                      impl_from_IHTMLInputElement(iface)->element.node.event_target.dispex)
 
 static HRESULT WINAPI HTMLInputElement_put_type(IHTMLInputElement *iface, BSTR v)
 {
@@ -890,58 +833,8 @@ static const IHTMLInputElementVtbl HTMLInputElementVtbl = {
     HTMLInputElement_get_start
 };
 
-static HRESULT WINAPI HTMLInputTextElement_QueryInterface(IHTMLInputTextElement *iface,
-        REFIID riid, void **ppv)
-{
-    HTMLInputElement *This = impl_from_IHTMLInputTextElement(iface);
-
-    return IHTMLDOMNode_QueryInterface(&This->element.node.IHTMLDOMNode_iface, riid, ppv);
-}
-
-static ULONG WINAPI HTMLInputTextElement_AddRef(IHTMLInputTextElement *iface)
-{
-    HTMLInputElement *This = impl_from_IHTMLInputTextElement(iface);
-
-    return IHTMLDOMNode_AddRef(&This->element.node.IHTMLDOMNode_iface);
-}
-
-static ULONG WINAPI HTMLInputTextElement_Release(IHTMLInputTextElement *iface)
-{
-    HTMLInputElement *This = impl_from_IHTMLInputTextElement(iface);
-
-    return IHTMLDOMNode_Release(&This->element.node.IHTMLDOMNode_iface);
-}
-
-static HRESULT WINAPI HTMLInputTextElement_GetTypeInfoCount(IHTMLInputTextElement *iface, UINT *pctinfo)
-{
-    HTMLInputElement *This = impl_from_IHTMLInputTextElement(iface);
-    return IDispatchEx_GetTypeInfoCount(&This->element.node.event_target.dispex.IDispatchEx_iface, pctinfo);
-}
-
-static HRESULT WINAPI HTMLInputTextElement_GetTypeInfo(IHTMLInputTextElement *iface, UINT iTInfo,
-        LCID lcid, ITypeInfo **ppTInfo)
-{
-    HTMLInputElement *This = impl_from_IHTMLInputTextElement(iface);
-    return IDispatchEx_GetTypeInfo(&This->element.node.event_target.dispex.IDispatchEx_iface, iTInfo, lcid,
-            ppTInfo);
-}
-
-static HRESULT WINAPI HTMLInputTextElement_GetIDsOfNames(IHTMLInputTextElement *iface, REFIID riid,
-        LPOLESTR *rgszNames, UINT cNames, LCID lcid, DISPID *rgDispId)
-{
-    HTMLInputElement *This = impl_from_IHTMLInputTextElement(iface);
-    return IDispatchEx_GetIDsOfNames(&This->element.node.event_target.dispex.IDispatchEx_iface, riid, rgszNames,
-            cNames, lcid, rgDispId);
-}
-
-static HRESULT WINAPI HTMLInputTextElement_Invoke(IHTMLInputTextElement *iface, DISPID dispIdMember,
-                            REFIID riid, LCID lcid, WORD wFlags, DISPPARAMS *pDispParams,
-                            VARIANT *pVarResult, EXCEPINFO *pExcepInfo, UINT *puArgErr)
-{
-    HTMLInputElement *This = impl_from_IHTMLInputTextElement(iface);
-    return IDispatchEx_Invoke(&This->element.node.event_target.dispex.IDispatchEx_iface, dispIdMember, riid,
-            lcid, wFlags, pDispParams, pVarResult, pExcepInfo, puArgErr);
-}
+DISPEX_IDISPATCH_IMPL(HTMLInputTextElement, IHTMLInputTextElement,
+                      impl_from_IHTMLInputTextElement(iface)->element.node.event_target.dispex)
 
 static HRESULT WINAPI HTMLInputTextElement_get_type(IHTMLInputTextElement *iface, BSTR *p)
 {
@@ -1194,53 +1087,8 @@ static inline HTMLInputElement *impl_from_IHTMLInputTextElement2(IHTMLInputTextE
     return CONTAINING_RECORD(iface, HTMLInputElement, IHTMLInputTextElement2_iface);
 }
 
-static HRESULT WINAPI HTMLInputTextElement2_QueryInterface(IHTMLInputTextElement2 *iface, REFIID riid, void **ppv)
-{
-    HTMLInputElement *This = impl_from_IHTMLInputTextElement2(iface);
-    return IHTMLDOMNode_QueryInterface(&This->element.node.IHTMLDOMNode_iface, riid, ppv);
-}
-
-static ULONG WINAPI HTMLInputTextElement2_AddRef(IHTMLInputTextElement2 *iface)
-{
-    HTMLInputElement *This = impl_from_IHTMLInputTextElement2(iface);
-    return IHTMLDOMNode_AddRef(&This->element.node.IHTMLDOMNode_iface);
-}
-
-static ULONG WINAPI HTMLInputTextElement2_Release(IHTMLInputTextElement2 *iface)
-{
-    HTMLInputElement *This = impl_from_IHTMLInputTextElement2(iface);
-    return IHTMLDOMNode_Release(&This->element.node.IHTMLDOMNode_iface);
-}
-
-static HRESULT WINAPI HTMLInputTextElement2_GetTypeInfoCount(IHTMLInputTextElement2 *iface, UINT *pctinfo)
-{
-    HTMLInputElement *This = impl_from_IHTMLInputTextElement2(iface);
-    return IDispatchEx_GetTypeInfoCount(&This->element.node.event_target.dispex.IDispatchEx_iface, pctinfo);
-}
-
-static HRESULT WINAPI HTMLInputTextElement2_GetTypeInfo(IHTMLInputTextElement2 *iface, UINT iTInfo,
-        LCID lcid, ITypeInfo **ppTInfo)
-{
-    HTMLInputElement *This = impl_from_IHTMLInputTextElement2(iface);
-    return IDispatchEx_GetTypeInfo(&This->element.node.event_target.dispex.IDispatchEx_iface, iTInfo, lcid, ppTInfo);
-}
-
-static HRESULT WINAPI HTMLInputTextElement2_GetIDsOfNames(IHTMLInputTextElement2 *iface, REFIID riid,
-        LPOLESTR *rgszNames, UINT cNames, LCID lcid, DISPID *rgDispId)
-{
-    HTMLInputElement *This = impl_from_IHTMLInputTextElement2(iface);
-    return IDispatchEx_GetIDsOfNames(&This->element.node.event_target.dispex.IDispatchEx_iface, riid, rgszNames,
-            cNames, lcid, rgDispId);
-}
-
-static HRESULT WINAPI HTMLInputTextElement2_Invoke(IHTMLInputTextElement2 *iface, DISPID dispIdMember,
-                            REFIID riid, LCID lcid, WORD wFlags, DISPPARAMS *pDispParams,
-                            VARIANT *pVarResult, EXCEPINFO *pExcepInfo, UINT *puArgErr)
-{
-    HTMLInputElement *This = impl_from_IHTMLInputTextElement2(iface);
-    return IDispatchEx_Invoke(&This->element.node.event_target.dispex.IDispatchEx_iface, dispIdMember, riid,
-            lcid, wFlags, pDispParams, pVarResult, pExcepInfo, puArgErr);
-}
+DISPEX_IDISPATCH_IMPL(HTMLInputTextElement2, IHTMLInputTextElement2,
+                      impl_from_IHTMLInputTextElement2(iface)->element.node.event_target.dispex)
 
 static HRESULT WINAPI HTMLInputTextElement2_put_selectionStart(IHTMLInputTextElement2 *iface, LONG v)
 {
@@ -1341,297 +1189,6 @@ static const IHTMLInputTextElement2Vtbl HTMLInputTextElement2Vtbl = {
     HTMLInputTextElement2_setSelectionRange
 };
 
-static inline HTMLInputElement *impl_from_IWineHTMLInputPrivateVtbl(IWineHTMLInputPrivate *iface)
-{
-    return CONTAINING_RECORD(iface, HTMLInputElement, IWineHTMLInputPrivate_iface);
-}
-
-static HRESULT WINAPI HTMLInputElement_private_QueryInterface(IWineHTMLInputPrivate *iface,
-        REFIID riid, void **ppv)
-{
-    HTMLInputElement *This = impl_from_IWineHTMLInputPrivateVtbl(iface);
-    return IHTMLDOMNode_QueryInterface(&This->element.node.IHTMLDOMNode_iface, riid, ppv);
-}
-
-static ULONG WINAPI HTMLInputElement_private_AddRef(IWineHTMLInputPrivate *iface)
-{
-    HTMLInputElement *This = impl_from_IWineHTMLInputPrivateVtbl(iface);
-    return IHTMLDOMNode_AddRef(&This->element.node.IHTMLDOMNode_iface);
-}
-
-static ULONG WINAPI HTMLInputElement_private_Release(IWineHTMLInputPrivate *iface)
-{
-    HTMLInputElement *This = impl_from_IWineHTMLInputPrivateVtbl(iface);
-    return IHTMLDOMNode_Release(&This->element.node.IHTMLDOMNode_iface);
-}
-
-static HRESULT WINAPI HTMLInputElement_private_GetTypeInfoCount(IWineHTMLInputPrivate *iface, UINT *pctinfo)
-{
-    HTMLInputElement *This = impl_from_IWineHTMLInputPrivateVtbl(iface);
-    return IDispatchEx_GetTypeInfoCount(&This->element.node.event_target.dispex.IDispatchEx_iface, pctinfo);
-}
-
-static HRESULT WINAPI HTMLInputElement_private_GetTypeInfo(IWineHTMLInputPrivate *iface, UINT iTInfo,
-                                              LCID lcid, ITypeInfo **ppTInfo)
-{
-    HTMLInputElement *This = impl_from_IWineHTMLInputPrivateVtbl(iface);
-    return IDispatchEx_GetTypeInfo(&This->element.node.event_target.dispex.IDispatchEx_iface, iTInfo, lcid,
-            ppTInfo);
-}
-
-static HRESULT WINAPI HTMLInputElement_private_GetIDsOfNames(IWineHTMLInputPrivate *iface, REFIID riid,
-                                                LPOLESTR *rgszNames, UINT cNames,
-                                                LCID lcid, DISPID *rgDispId)
-{
-    HTMLInputElement *This = impl_from_IWineHTMLInputPrivateVtbl(iface);
-    return IDispatchEx_GetIDsOfNames(&This->element.node.event_target.dispex.IDispatchEx_iface, riid, rgszNames,
-            cNames, lcid, rgDispId);
-}
-
-static HRESULT WINAPI HTMLInputElement_private_Invoke(IWineHTMLInputPrivate *iface, DISPID dispIdMember,
-                            REFIID riid, LCID lcid, WORD wFlags, DISPPARAMS *pDispParams,
-                            VARIANT *pVarResult, EXCEPINFO *pExcepInfo, UINT *puArgErr)
-{
-    HTMLInputElement *This = impl_from_IWineHTMLInputPrivateVtbl(iface);
-    return IDispatchEx_Invoke(&This->element.node.event_target.dispex.IDispatchEx_iface, dispIdMember, riid,
-            lcid, wFlags, pDispParams, pVarResult, pExcepInfo, puArgErr);
-}
-
-static HRESULT WINAPI HTMLInputElement_private_put_autofocus(IWineHTMLInputPrivate *iface, VARIANT_BOOL v)
-{
-    HTMLInputElement *This = impl_from_IWineHTMLInputPrivateVtbl(iface);
-    FIXME("(%p)->(%x)\n", This, v);
-    return E_NOTIMPL;
-}
-
-static HRESULT WINAPI HTMLInputElement_private_get_autofocus(IWineHTMLInputPrivate *iface, VARIANT_BOOL *ret)
-{
-    HTMLInputElement *This = impl_from_IWineHTMLInputPrivateVtbl(iface);
-    FIXME("(%p)->(%p)\n", This, ret);
-    return E_NOTIMPL;
-}
-
-static HRESULT WINAPI HTMLInputElement_private_get_validationMessage(IWineHTMLInputPrivate *iface, BSTR *ret)
-{
-    HTMLInputElement *This = impl_from_IWineHTMLInputPrivateVtbl(iface);
-    FIXME("(%p)->(%p)\n", This, ret);
-    return E_NOTIMPL;
-}
-
-static HRESULT WINAPI HTMLInputElement_private_get_validity(IWineHTMLInputPrivate *iface, IDispatch **ret)
-{
-    HTMLInputElement *This = impl_from_IWineHTMLInputPrivateVtbl(iface);
-    FIXME("(%p)->(%p)\n", This, ret);
-    return E_NOTIMPL;
-}
-
-static HRESULT WINAPI HTMLInputElement_private_get_willValidate(IWineHTMLInputPrivate *iface, VARIANT_BOOL *ret)
-{
-    HTMLInputElement *This = impl_from_IWineHTMLInputPrivateVtbl(iface);
-    FIXME("(%p)->(%p)\n", This, ret);
-    return E_NOTIMPL;
-}
-
-static HRESULT WINAPI HTMLInputElement_private_setCustomValidity(IWineHTMLInputPrivate *iface, VARIANT *message)
-{
-    HTMLInputElement *This = impl_from_IWineHTMLInputPrivateVtbl(iface);
-    FIXME("(%p)->(%s)\n", This, debugstr_variant(message));
-    return E_NOTIMPL;
-}
-
-static HRESULT WINAPI HTMLInputElement_private_checkValidity(IWineHTMLInputPrivate *iface, VARIANT_BOOL *ret)
-{
-    HTMLInputElement *This = impl_from_IWineHTMLInputPrivateVtbl(iface);
-    nsIDOMValidityState *nsvalidity;
-    DOMEvent *event;
-    nsresult nsres;
-    HRESULT hres;
-    cpp_bool b;
-
-    TRACE("(%p)->(%p)\n", This, ret);
-
-    nsres = nsIDOMHTMLInputElement_GetValidity(This->nsinput, &nsvalidity);
-    if(NS_FAILED(nsres))
-        return map_nsresult(nsres);
-    nsres = nsIDOMValidityState_GetValid(nsvalidity, &b);
-    nsIDOMValidityState_Release(nsvalidity);
-
-    if(!(*ret = variant_bool(NS_SUCCEEDED(nsres) && b))) {
-        hres = create_document_event(This->element.node.doc, EVENTID_INVALID, &event);
-        if(FAILED(hres))
-            return hres;
-        dispatch_event(&This->element.node.event_target, event);
-        IDOMEvent_Release(&event->IDOMEvent_iface);
-    }
-    return S_OK;
-}
-
-static const IWineHTMLInputPrivateVtbl WineHTMLInputPrivateVtbl = {
-    HTMLInputElement_private_QueryInterface,
-    HTMLInputElement_private_AddRef,
-    HTMLInputElement_private_Release,
-    HTMLInputElement_private_GetTypeInfoCount,
-    HTMLInputElement_private_GetTypeInfo,
-    HTMLInputElement_private_GetIDsOfNames,
-    HTMLInputElement_private_Invoke,
-    HTMLInputElement_private_put_autofocus,
-    HTMLInputElement_private_get_autofocus,
-    HTMLInputElement_private_get_validationMessage,
-    HTMLInputElement_private_get_validity,
-    HTMLInputElement_private_get_willValidate,
-    HTMLInputElement_private_setCustomValidity,
-    HTMLInputElement_private_checkValidity
-};
-
-static inline HTMLInputElement *impl_from_IWineHTMLParentFormPrivateVtbl(IWineHTMLParentFormPrivate *iface)
-{
-    return CONTAINING_RECORD(iface, HTMLInputElement, IWineHTMLParentFormPrivate_iface);
-}
-
-static HRESULT WINAPI HTMLInputElement_form_private_QueryInterface(IWineHTMLParentFormPrivate *iface,
-        REFIID riid, void **ppv)
-{
-    HTMLInputElement *This = impl_from_IWineHTMLParentFormPrivateVtbl(iface);
-
-    return IHTMLDOMNode_QueryInterface(&This->element.node.IHTMLDOMNode_iface, riid, ppv);
-}
-
-static ULONG WINAPI HTMLInputElement_form_private_AddRef(IWineHTMLParentFormPrivate *iface)
-{
-    HTMLInputElement *This = impl_from_IWineHTMLParentFormPrivateVtbl(iface);
-
-    return IHTMLDOMNode_AddRef(&This->element.node.IHTMLDOMNode_iface);
-}
-
-static ULONG WINAPI HTMLInputElement_form_private_Release(IWineHTMLParentFormPrivate *iface)
-{
-    HTMLInputElement *This = impl_from_IWineHTMLParentFormPrivateVtbl(iface);
-
-    return IHTMLDOMNode_Release(&This->element.node.IHTMLDOMNode_iface);
-}
-
-static HRESULT WINAPI HTMLInputElement_form_private_GetTypeInfoCount(IWineHTMLParentFormPrivate *iface, UINT *pctinfo)
-{
-    HTMLInputElement *This = impl_from_IWineHTMLParentFormPrivateVtbl(iface);
-    return IDispatchEx_GetTypeInfoCount(&This->element.node.event_target.dispex.IDispatchEx_iface, pctinfo);
-}
-
-static HRESULT WINAPI HTMLInputElement_form_private_GetTypeInfo(IWineHTMLParentFormPrivate *iface, UINT iTInfo,
-                                              LCID lcid, ITypeInfo **ppTInfo)
-{
-    HTMLInputElement *This = impl_from_IWineHTMLParentFormPrivateVtbl(iface);
-    return IDispatchEx_GetTypeInfo(&This->element.node.event_target.dispex.IDispatchEx_iface, iTInfo, lcid,
-            ppTInfo);
-}
-
-static HRESULT WINAPI HTMLInputElement_form_private_GetIDsOfNames(IWineHTMLParentFormPrivate *iface, REFIID riid,
-                                                LPOLESTR *rgszNames, UINT cNames,
-                                                LCID lcid, DISPID *rgDispId)
-{
-    HTMLInputElement *This = impl_from_IWineHTMLParentFormPrivateVtbl(iface);
-    return IDispatchEx_GetIDsOfNames(&This->element.node.event_target.dispex.IDispatchEx_iface, riid, rgszNames,
-            cNames, lcid, rgDispId);
-}
-
-static HRESULT WINAPI HTMLInputElement_form_private_Invoke(IWineHTMLParentFormPrivate *iface, DISPID dispIdMember,
-                            REFIID riid, LCID lcid, WORD wFlags, DISPPARAMS *pDispParams,
-                            VARIANT *pVarResult, EXCEPINFO *pExcepInfo, UINT *puArgErr)
-{
-    HTMLInputElement *This = impl_from_IWineHTMLParentFormPrivateVtbl(iface);
-    return IDispatchEx_Invoke(&This->element.node.event_target.dispex.IDispatchEx_iface, dispIdMember, riid,
-            lcid, wFlags, pDispParams, pVarResult, pExcepInfo, puArgErr);
-}
-
-static HRESULT WINAPI HTMLInputElement_form_private_put_formAction(IWineHTMLParentFormPrivate *iface, BSTR v)
-{
-    HTMLInputElement *This = impl_from_IWineHTMLParentFormPrivateVtbl(iface);
-    FIXME("(%p)->(%s)\n", This, debugstr_w(v));
-    return E_NOTIMPL;
-}
-
-static HRESULT WINAPI HTMLInputElement_form_private_get_formAction(IWineHTMLParentFormPrivate *iface, BSTR *ret)
-{
-    HTMLInputElement *This = impl_from_IWineHTMLParentFormPrivateVtbl(iface);
-    FIXME("(%p)->(%p)\n", This, ret);
-    return E_NOTIMPL;
-}
-
-static HRESULT WINAPI HTMLInputElement_form_private_put_formEnctype(IWineHTMLParentFormPrivate *iface, BSTR v)
-{
-    HTMLInputElement *This = impl_from_IWineHTMLParentFormPrivateVtbl(iface);
-    FIXME("(%p)->(%s)\n", This, debugstr_w(v));
-    return E_NOTIMPL;
-}
-
-static HRESULT WINAPI HTMLInputElement_form_private_get_formEnctype(IWineHTMLParentFormPrivate *iface, BSTR *ret)
-{
-    HTMLInputElement *This = impl_from_IWineHTMLParentFormPrivateVtbl(iface);
-    FIXME("(%p)->(%p)\n", This, ret);
-    return E_NOTIMPL;
-}
-
-static HRESULT WINAPI HTMLInputElement_form_private_put_formMethod(IWineHTMLParentFormPrivate *iface, BSTR v)
-{
-    HTMLInputElement *This = impl_from_IWineHTMLParentFormPrivateVtbl(iface);
-    FIXME("(%p)->(%s)\n", This, debugstr_w(v));
-    return E_NOTIMPL;
-}
-
-static HRESULT WINAPI HTMLInputElement_form_private_get_formMethod(IWineHTMLParentFormPrivate *iface, BSTR *ret)
-{
-    HTMLInputElement *This = impl_from_IWineHTMLParentFormPrivateVtbl(iface);
-    FIXME("(%p)->(%p)\n", This, ret);
-    return E_NOTIMPL;
-}
-
-static HRESULT WINAPI HTMLInputElement_form_private_put_formNoValidate(IWineHTMLParentFormPrivate *iface, VARIANT_BOOL v)
-{
-    HTMLInputElement *This = impl_from_IWineHTMLParentFormPrivateVtbl(iface);
-    FIXME("(%p)->(%x)\n", This, v);
-    return E_NOTIMPL;
-}
-
-static HRESULT WINAPI HTMLInputElement_form_private_get_formNoValidate(IWineHTMLParentFormPrivate *iface, VARIANT_BOOL *ret)
-{
-    HTMLInputElement *This = impl_from_IWineHTMLParentFormPrivateVtbl(iface);
-    FIXME("(%p)->(%p)\n", This, ret);
-    return E_NOTIMPL;
-}
-
-static HRESULT WINAPI HTMLInputElement_form_private_put_formTarget(IWineHTMLParentFormPrivate *iface, BSTR v)
-{
-    HTMLInputElement *This = impl_from_IWineHTMLParentFormPrivateVtbl(iface);
-    FIXME("(%p)->(%s)\n", This, debugstr_w(v));
-    return E_NOTIMPL;
-}
-
-static HRESULT WINAPI HTMLInputElement_form_private_get_formTarget(IWineHTMLParentFormPrivate *iface, BSTR *ret)
-{
-    HTMLInputElement *This = impl_from_IWineHTMLParentFormPrivateVtbl(iface);
-    FIXME("(%p)->(%p)\n", This, ret);
-    return E_NOTIMPL;
-}
-
-static const IWineHTMLParentFormPrivateVtbl WineHTMLParentFormPrivateVtbl = {
-    HTMLInputElement_form_private_QueryInterface,
-    HTMLInputElement_form_private_AddRef,
-    HTMLInputElement_form_private_Release,
-    HTMLInputElement_form_private_GetTypeInfoCount,
-    HTMLInputElement_form_private_GetTypeInfo,
-    HTMLInputElement_form_private_GetIDsOfNames,
-    HTMLInputElement_form_private_Invoke,
-    HTMLInputElement_form_private_put_formAction,
-    HTMLInputElement_form_private_get_formAction,
-    HTMLInputElement_form_private_put_formEnctype,
-    HTMLInputElement_form_private_get_formEnctype,
-    HTMLInputElement_form_private_put_formMethod,
-    HTMLInputElement_form_private_get_formMethod,
-    HTMLInputElement_form_private_put_formNoValidate,
-    HTMLInputElement_form_private_get_formNoValidate,
-    HTMLInputElement_form_private_put_formTarget,
-    HTMLInputElement_form_private_get_formTarget
-};
-
 static inline HTMLInputElement *impl_from_HTMLDOMNode(HTMLDOMNode *iface)
 {
     return CONTAINING_RECORD(iface, HTMLInputElement, element.node);
@@ -1683,10 +1240,6 @@ static void *HTMLInputElement_query_interface(DispatchEx *dispex, REFIID riid)
         return &This->IHTMLInputTextElement_iface;
     if(IsEqualGUID(&IID_IHTMLInputTextElement2, riid))
         return &This->IHTMLInputTextElement2_iface;
-    if(IsEqualGUID(&IID_IWineHTMLInputPrivate, riid))
-        return &This->IWineHTMLInputPrivate_iface;
-    if(IsEqualGUID(&IID_IWineHTMLParentFormPrivate, riid))
-        return &This->IWineHTMLParentFormPrivate_iface;
 
     return HTMLElement_query_interface(&This->element.node.event_target.dispex, riid);
 }
@@ -1730,29 +1283,17 @@ static const event_target_vtbl_t HTMLInputElement_event_target_vtbl = {
 };
 
 static const tid_t HTMLInputElement_iface_tids[] = {
-    HTMLELEMENT_TIDS,
     IHTMLInputElement_tid,
     IHTMLInputTextElement2_tid,
     0
 };
-
-static void HTMLInputElement_init_dispex_info(dispex_data_t *info, compat_mode_t mode)
-{
-    HTMLElement_init_dispex_info(info, mode);
-
-    if(mode >= COMPAT_MODE_IE10) {
-        dispex_info_add_interface(info, IWineHTMLInputPrivate_tid, NULL);
-        dispex_info_add_interface(info, IWineHTMLParentFormPrivate_tid, NULL);
-    }
-}
-
 dispex_static_data_t HTMLInputElement_dispex = {
-    "HTMLInputElement",
-    &HTMLInputElement_event_target_vtbl.dispex_vtbl,
-    PROTO_ID_HTMLInputElement,
-    DispHTMLInputElement_tid,
-    HTMLInputElement_iface_tids,
-    HTMLInputElement_init_dispex_info
+    .id           = PROT_HTMLInputElement,
+    .prototype_id = PROT_HTMLElement,
+    .vtbl         = &HTMLInputElement_event_target_vtbl.dispex_vtbl,
+    .disp_tid     = DispHTMLInputElement_tid,
+    .iface_tids   = HTMLInputElement_iface_tids,
+    .init_info    = HTMLElement_init_dispex_info,
 };
 
 HRESULT HTMLInputElement_Create(HTMLDocumentNode *doc, nsIDOMElement *nselem, HTMLElement **elem)
@@ -1767,8 +1308,6 @@ HRESULT HTMLInputElement_Create(HTMLDocumentNode *doc, nsIDOMElement *nselem, HT
     ret->IHTMLInputElement_iface.lpVtbl = &HTMLInputElementVtbl;
     ret->IHTMLInputTextElement_iface.lpVtbl = &HTMLInputTextElementVtbl;
     ret->IHTMLInputTextElement2_iface.lpVtbl = &HTMLInputTextElement2Vtbl;
-    ret->IWineHTMLInputPrivate_iface.lpVtbl = &WineHTMLInputPrivateVtbl;
-    ret->IWineHTMLParentFormPrivate_iface.lpVtbl = &WineHTMLParentFormPrivateVtbl;
     ret->element.node.vtbl = &HTMLInputElementImplVtbl;
 
     HTMLElement_Init(&ret->element, doc, nselem, &HTMLInputElement_dispex);
@@ -1791,61 +1330,8 @@ static inline HTMLLabelElement *impl_from_IHTMLLabelElement(IHTMLLabelElement *i
     return CONTAINING_RECORD(iface, HTMLLabelElement, IHTMLLabelElement_iface);
 }
 
-static HRESULT WINAPI HTMLLabelElement_QueryInterface(IHTMLLabelElement *iface,
-                                                         REFIID riid, void **ppv)
-{
-    HTMLLabelElement *This = impl_from_IHTMLLabelElement(iface);
-
-    return IHTMLDOMNode_QueryInterface(&This->element.node.IHTMLDOMNode_iface, riid, ppv);
-}
-
-static ULONG WINAPI HTMLLabelElement_AddRef(IHTMLLabelElement *iface)
-{
-    HTMLLabelElement *This = impl_from_IHTMLLabelElement(iface);
-
-    return IHTMLDOMNode_AddRef(&This->element.node.IHTMLDOMNode_iface);
-}
-
-static ULONG WINAPI HTMLLabelElement_Release(IHTMLLabelElement *iface)
-{
-    HTMLLabelElement *This = impl_from_IHTMLLabelElement(iface);
-
-    return IHTMLDOMNode_Release(&This->element.node.IHTMLDOMNode_iface);
-}
-
-static HRESULT WINAPI HTMLLabelElement_GetTypeInfoCount(IHTMLLabelElement *iface, UINT *pctinfo)
-{
-    HTMLLabelElement *This = impl_from_IHTMLLabelElement(iface);
-
-    return IDispatchEx_GetTypeInfoCount(&This->element.node.event_target.dispex.IDispatchEx_iface, pctinfo);
-}
-
-static HRESULT WINAPI HTMLLabelElement_GetTypeInfo(IHTMLLabelElement *iface, UINT iTInfo,
-        LCID lcid, ITypeInfo **ppTInfo)
-{
-    HTMLLabelElement *This = impl_from_IHTMLLabelElement(iface);
-
-    return IDispatchEx_GetTypeInfo(&This->element.node.event_target.dispex.IDispatchEx_iface, iTInfo, lcid, ppTInfo);
-}
-
-static HRESULT WINAPI HTMLLabelElement_GetIDsOfNames(IHTMLLabelElement *iface, REFIID riid,
-        LPOLESTR *rgszNames, UINT cNames, LCID lcid, DISPID *rgDispId)
-{
-    HTMLLabelElement *This = impl_from_IHTMLLabelElement(iface);
-
-    return IDispatchEx_GetIDsOfNames(&This->element.node.event_target.dispex.IDispatchEx_iface, riid, rgszNames,
-            cNames, lcid, rgDispId);
-}
-
-static HRESULT WINAPI HTMLLabelElement_Invoke(IHTMLLabelElement *iface, DISPID dispIdMember,
-                            REFIID riid, LCID lcid, WORD wFlags, DISPPARAMS *pDispParams,
-                            VARIANT *pVarResult, EXCEPINFO *pExcepInfo, UINT *puArgErr)
-{
-    HTMLLabelElement *This = impl_from_IHTMLLabelElement(iface);
-
-    return IDispatchEx_Invoke(&This->element.node.event_target.dispex.IDispatchEx_iface, dispIdMember, riid,
-            lcid, wFlags, pDispParams, pVarResult, pExcepInfo, puArgErr);
-}
+DISPEX_IDISPATCH_IMPL(HTMLLabelElement, IHTMLLabelElement,
+                      impl_from_IHTMLLabelElement(iface)->element.node.event_target.dispex)
 
 static HRESULT WINAPI HTMLLabelElement_put_htmlFor(IHTMLLabelElement *iface, BSTR v)
 {
@@ -1940,18 +1426,17 @@ static const event_target_vtbl_t HTMLLabelElement_event_target_vtbl = {
 };
 
 static const tid_t HTMLLabelElement_iface_tids[] = {
-    HTMLELEMENT_TIDS,
     IHTMLLabelElement_tid,
     0
 };
 
 dispex_static_data_t HTMLLabelElement_dispex = {
-    "HTMLLabelElement",
-    &HTMLLabelElement_event_target_vtbl.dispex_vtbl,
-    PROTO_ID_HTMLLabelElement,
-    DispHTMLLabelElement_tid,
-    HTMLLabelElement_iface_tids,
-    HTMLElement_init_dispex_info
+    .id           = PROT_HTMLLabelElement,
+    .prototype_id = PROT_HTMLElement,
+    .vtbl         = &HTMLLabelElement_event_target_vtbl.dispex_vtbl,
+    .disp_tid     = DispHTMLLabelElement_tid,
+    .iface_tids   = HTMLLabelElement_iface_tids,
+    .init_info    = HTMLElement_init_dispex_info,
 };
 
 HRESULT HTMLLabelElement_Create(HTMLDocumentNode *doc, nsIDOMElement *nselem, HTMLElement **elem)
@@ -1974,8 +1459,6 @@ struct HTMLButtonElement {
     HTMLElement element;
 
     IHTMLButtonElement IHTMLButtonElement_iface;
-    IWineHTMLInputPrivate IWineHTMLInputPrivate_iface;
-    IWineHTMLParentFormPrivate IWineHTMLParentFormPrivate_iface;
 
     nsIDOMHTMLButtonElement *nsbutton;
 };
@@ -1985,61 +1468,8 @@ static inline HTMLButtonElement *impl_from_IHTMLButtonElement(IHTMLButtonElement
     return CONTAINING_RECORD(iface, HTMLButtonElement, IHTMLButtonElement_iface);
 }
 
-static HRESULT WINAPI HTMLButtonElement_QueryInterface(IHTMLButtonElement *iface,
-                                                         REFIID riid, void **ppv)
-{
-    HTMLButtonElement *This = impl_from_IHTMLButtonElement(iface);
-
-    return IHTMLDOMNode_QueryInterface(&This->element.node.IHTMLDOMNode_iface, riid, ppv);
-}
-
-static ULONG WINAPI HTMLButtonElement_AddRef(IHTMLButtonElement *iface)
-{
-    HTMLButtonElement *This = impl_from_IHTMLButtonElement(iface);
-
-    return IHTMLDOMNode_AddRef(&This->element.node.IHTMLDOMNode_iface);
-}
-
-static ULONG WINAPI HTMLButtonElement_Release(IHTMLButtonElement *iface)
-{
-    HTMLButtonElement *This = impl_from_IHTMLButtonElement(iface);
-
-    return IHTMLDOMNode_Release(&This->element.node.IHTMLDOMNode_iface);
-}
-
-static HRESULT WINAPI HTMLButtonElement_GetTypeInfoCount(IHTMLButtonElement *iface, UINT *pctinfo)
-{
-    HTMLButtonElement *This = impl_from_IHTMLButtonElement(iface);
-
-    return IDispatchEx_GetTypeInfoCount(&This->element.node.event_target.dispex.IDispatchEx_iface, pctinfo);
-}
-
-static HRESULT WINAPI HTMLButtonElement_GetTypeInfo(IHTMLButtonElement *iface, UINT iTInfo,
-        LCID lcid, ITypeInfo **ppTInfo)
-{
-    HTMLButtonElement *This = impl_from_IHTMLButtonElement(iface);
-
-    return IDispatchEx_GetTypeInfo(&This->element.node.event_target.dispex.IDispatchEx_iface, iTInfo, lcid, ppTInfo);
-}
-
-static HRESULT WINAPI HTMLButtonElement_GetIDsOfNames(IHTMLButtonElement *iface, REFIID riid,
-        LPOLESTR *rgszNames, UINT cNames, LCID lcid, DISPID *rgDispId)
-{
-    HTMLButtonElement *This = impl_from_IHTMLButtonElement(iface);
-
-    return IDispatchEx_GetIDsOfNames(&This->element.node.event_target.dispex.IDispatchEx_iface, riid, rgszNames,
-            cNames, lcid, rgDispId);
-}
-
-static HRESULT WINAPI HTMLButtonElement_Invoke(IHTMLButtonElement *iface, DISPID dispIdMember,
-                            REFIID riid, LCID lcid, WORD wFlags, DISPPARAMS *pDispParams,
-                            VARIANT *pVarResult, EXCEPINFO *pExcepInfo, UINT *puArgErr)
-{
-    HTMLButtonElement *This = impl_from_IHTMLButtonElement(iface);
-
-    return IDispatchEx_Invoke(&This->element.node.event_target.dispex.IDispatchEx_iface, dispIdMember, riid,
-            lcid, wFlags, pDispParams, pVarResult, pExcepInfo, puArgErr);
-}
+DISPEX_IDISPATCH_IMPL(HTMLButtonElement, IHTMLButtonElement,
+                      impl_from_IHTMLButtonElement(iface)->element.node.event_target.dispex)
 
 static HRESULT WINAPI HTMLButtonElement_get_type(IHTMLButtonElement *iface, BSTR *p)
 {
@@ -2206,277 +1636,6 @@ static const IHTMLButtonElementVtbl HTMLButtonElementVtbl = {
     HTMLButtonElement_createTextRange
 };
 
-static inline HTMLButtonElement *button_from_IWineHTMLInputPrivateVtbl(IWineHTMLInputPrivate *iface)
-{
-    return CONTAINING_RECORD(iface, HTMLButtonElement, IWineHTMLInputPrivate_iface);
-}
-
-static HRESULT WINAPI HTMLButtonElement_private_QueryInterface(IWineHTMLInputPrivate *iface,
-        REFIID riid, void **ppv)
-{
-    HTMLButtonElement *This = button_from_IWineHTMLInputPrivateVtbl(iface);
-    return IHTMLDOMNode_QueryInterface(&This->element.node.IHTMLDOMNode_iface, riid, ppv);
-}
-
-static ULONG WINAPI HTMLButtonElement_private_AddRef(IWineHTMLInputPrivate *iface)
-{
-    HTMLButtonElement *This = button_from_IWineHTMLInputPrivateVtbl(iface);
-    return IHTMLDOMNode_AddRef(&This->element.node.IHTMLDOMNode_iface);
-}
-
-static ULONG WINAPI HTMLButtonElement_private_Release(IWineHTMLInputPrivate *iface)
-{
-    HTMLButtonElement *This = button_from_IWineHTMLInputPrivateVtbl(iface);
-    return IHTMLDOMNode_Release(&This->element.node.IHTMLDOMNode_iface);
-}
-
-static HRESULT WINAPI HTMLButtonElement_private_GetTypeInfoCount(IWineHTMLInputPrivate *iface, UINT *pctinfo)
-{
-    HTMLButtonElement *This = button_from_IWineHTMLInputPrivateVtbl(iface);
-    return IDispatchEx_GetTypeInfoCount(&This->element.node.event_target.dispex.IDispatchEx_iface, pctinfo);
-}
-
-static HRESULT WINAPI HTMLButtonElement_private_GetTypeInfo(IWineHTMLInputPrivate *iface, UINT iTInfo,
-                                              LCID lcid, ITypeInfo **ppTInfo)
-{
-    HTMLButtonElement *This = button_from_IWineHTMLInputPrivateVtbl(iface);
-    return IDispatchEx_GetTypeInfo(&This->element.node.event_target.dispex.IDispatchEx_iface, iTInfo, lcid,
-            ppTInfo);
-}
-
-static HRESULT WINAPI HTMLButtonElement_private_GetIDsOfNames(IWineHTMLInputPrivate *iface, REFIID riid,
-                                                LPOLESTR *rgszNames, UINT cNames,
-                                                LCID lcid, DISPID *rgDispId)
-{
-    HTMLButtonElement *This = button_from_IWineHTMLInputPrivateVtbl(iface);
-    return IDispatchEx_GetIDsOfNames(&This->element.node.event_target.dispex.IDispatchEx_iface, riid, rgszNames,
-            cNames, lcid, rgDispId);
-}
-
-static HRESULT WINAPI HTMLButtonElement_private_Invoke(IWineHTMLInputPrivate *iface, DISPID dispIdMember,
-                            REFIID riid, LCID lcid, WORD wFlags, DISPPARAMS *pDispParams,
-                            VARIANT *pVarResult, EXCEPINFO *pExcepInfo, UINT *puArgErr)
-{
-    HTMLButtonElement *This = button_from_IWineHTMLInputPrivateVtbl(iface);
-    return IDispatchEx_Invoke(&This->element.node.event_target.dispex.IDispatchEx_iface, dispIdMember, riid,
-            lcid, wFlags, pDispParams, pVarResult, pExcepInfo, puArgErr);
-}
-
-static HRESULT WINAPI HTMLButtonElement_private_put_autofocus(IWineHTMLInputPrivate *iface, VARIANT_BOOL v)
-{
-    HTMLButtonElement *This = button_from_IWineHTMLInputPrivateVtbl(iface);
-    FIXME("(%p)->(%x)\n", This, v);
-    return E_NOTIMPL;
-}
-
-static HRESULT WINAPI HTMLButtonElement_private_get_autofocus(IWineHTMLInputPrivate *iface, VARIANT_BOOL *ret)
-{
-    HTMLButtonElement *This = button_from_IWineHTMLInputPrivateVtbl(iface);
-    FIXME("(%p)->(%p)\n", This, ret);
-    return E_NOTIMPL;
-}
-
-static HRESULT WINAPI HTMLButtonElement_private_get_validationMessage(IWineHTMLInputPrivate *iface, BSTR *ret)
-{
-    HTMLButtonElement *This = button_from_IWineHTMLInputPrivateVtbl(iface);
-    FIXME("(%p)->(%p)\n", This, ret);
-    return E_NOTIMPL;
-}
-
-static HRESULT WINAPI HTMLButtonElement_private_get_validity(IWineHTMLInputPrivate *iface, IDispatch **ret)
-{
-    HTMLButtonElement *This = button_from_IWineHTMLInputPrivateVtbl(iface);
-    FIXME("(%p)->(%p)\n", This, ret);
-    return E_NOTIMPL;
-}
-
-static HRESULT WINAPI HTMLButtonElement_private_get_willValidate(IWineHTMLInputPrivate *iface, VARIANT_BOOL *ret)
-{
-    HTMLButtonElement *This = button_from_IWineHTMLInputPrivateVtbl(iface);
-    FIXME("(%p)->(%p)\n", This, ret);
-    return E_NOTIMPL;
-}
-
-static HRESULT WINAPI HTMLButtonElement_private_setCustomValidity(IWineHTMLInputPrivate *iface, VARIANT *message)
-{
-    HTMLButtonElement *This = button_from_IWineHTMLInputPrivateVtbl(iface);
-    FIXME("(%p)->(%s)\n", This, debugstr_variant(message));
-    return E_NOTIMPL;
-}
-
-static HRESULT WINAPI HTMLButtonElement_private_checkValidity(IWineHTMLInputPrivate *iface, VARIANT_BOOL *ret)
-{
-    HTMLButtonElement *This = button_from_IWineHTMLInputPrivateVtbl(iface);
-    FIXME("(%p)->(%p)\n", This, ret);
-    return E_NOTIMPL;
-}
-
-static const IWineHTMLInputPrivateVtbl WineHTMLButtonInputPrivateVtbl = {
-    HTMLButtonElement_private_QueryInterface,
-    HTMLButtonElement_private_AddRef,
-    HTMLButtonElement_private_Release,
-    HTMLButtonElement_private_GetTypeInfoCount,
-    HTMLButtonElement_private_GetTypeInfo,
-    HTMLButtonElement_private_GetIDsOfNames,
-    HTMLButtonElement_private_Invoke,
-    HTMLButtonElement_private_put_autofocus,
-    HTMLButtonElement_private_get_autofocus,
-    HTMLButtonElement_private_get_validationMessage,
-    HTMLButtonElement_private_get_validity,
-    HTMLButtonElement_private_get_willValidate,
-    HTMLButtonElement_private_setCustomValidity,
-    HTMLButtonElement_private_checkValidity
-};
-
-static inline HTMLButtonElement *button_from_IWineHTMLParentFormPrivateVtbl(IWineHTMLParentFormPrivate *iface)
-{
-    return CONTAINING_RECORD(iface, HTMLButtonElement, IWineHTMLParentFormPrivate_iface);
-}
-
-static HRESULT WINAPI HTMLButtonElement_form_private_QueryInterface(IWineHTMLParentFormPrivate *iface,
-        REFIID riid, void **ppv)
-{
-    HTMLButtonElement *This = button_from_IWineHTMLParentFormPrivateVtbl(iface);
-
-    return IHTMLDOMNode_QueryInterface(&This->element.node.IHTMLDOMNode_iface, riid, ppv);
-}
-
-static ULONG WINAPI HTMLButtonElement_form_private_AddRef(IWineHTMLParentFormPrivate *iface)
-{
-    HTMLButtonElement *This = button_from_IWineHTMLParentFormPrivateVtbl(iface);
-
-    return IHTMLDOMNode_AddRef(&This->element.node.IHTMLDOMNode_iface);
-}
-
-static ULONG WINAPI HTMLButtonElement_form_private_Release(IWineHTMLParentFormPrivate *iface)
-{
-    HTMLButtonElement *This = button_from_IWineHTMLParentFormPrivateVtbl(iface);
-
-    return IHTMLDOMNode_Release(&This->element.node.IHTMLDOMNode_iface);
-}
-
-static HRESULT WINAPI HTMLButtonElement_form_private_GetTypeInfoCount(IWineHTMLParentFormPrivate *iface, UINT *pctinfo)
-{
-    HTMLButtonElement *This = button_from_IWineHTMLParentFormPrivateVtbl(iface);
-    return IDispatchEx_GetTypeInfoCount(&This->element.node.event_target.dispex.IDispatchEx_iface, pctinfo);
-}
-
-static HRESULT WINAPI HTMLButtonElement_form_private_GetTypeInfo(IWineHTMLParentFormPrivate *iface, UINT iTInfo,
-                                              LCID lcid, ITypeInfo **ppTInfo)
-{
-    HTMLButtonElement *This = button_from_IWineHTMLParentFormPrivateVtbl(iface);
-    return IDispatchEx_GetTypeInfo(&This->element.node.event_target.dispex.IDispatchEx_iface, iTInfo, lcid,
-            ppTInfo);
-}
-
-static HRESULT WINAPI HTMLButtonElement_form_private_GetIDsOfNames(IWineHTMLParentFormPrivate *iface, REFIID riid,
-                                                LPOLESTR *rgszNames, UINT cNames,
-                                                LCID lcid, DISPID *rgDispId)
-{
-    HTMLButtonElement *This = button_from_IWineHTMLParentFormPrivateVtbl(iface);
-    return IDispatchEx_GetIDsOfNames(&This->element.node.event_target.dispex.IDispatchEx_iface, riid, rgszNames,
-            cNames, lcid, rgDispId);
-}
-
-static HRESULT WINAPI HTMLButtonElement_form_private_Invoke(IWineHTMLParentFormPrivate *iface, DISPID dispIdMember,
-                            REFIID riid, LCID lcid, WORD wFlags, DISPPARAMS *pDispParams,
-                            VARIANT *pVarResult, EXCEPINFO *pExcepInfo, UINT *puArgErr)
-{
-    HTMLButtonElement *This = button_from_IWineHTMLParentFormPrivateVtbl(iface);
-    return IDispatchEx_Invoke(&This->element.node.event_target.dispex.IDispatchEx_iface, dispIdMember, riid,
-            lcid, wFlags, pDispParams, pVarResult, pExcepInfo, puArgErr);
-}
-
-static HRESULT WINAPI HTMLButtonElement_form_private_put_formAction(IWineHTMLParentFormPrivate *iface, BSTR v)
-{
-    HTMLButtonElement *This = button_from_IWineHTMLParentFormPrivateVtbl(iface);
-    FIXME("(%p)->(%s)\n", This, debugstr_w(v));
-    return E_NOTIMPL;
-}
-
-static HRESULT WINAPI HTMLButtonElement_form_private_get_formAction(IWineHTMLParentFormPrivate *iface, BSTR *ret)
-{
-    HTMLButtonElement *This = button_from_IWineHTMLParentFormPrivateVtbl(iface);
-    FIXME("(%p)->(%p)\n", This, ret);
-    return E_NOTIMPL;
-}
-
-static HRESULT WINAPI HTMLButtonElement_form_private_put_formEnctype(IWineHTMLParentFormPrivate *iface, BSTR v)
-{
-    HTMLButtonElement *This = button_from_IWineHTMLParentFormPrivateVtbl(iface);
-    FIXME("(%p)->(%s)\n", This, debugstr_w(v));
-    return E_NOTIMPL;
-}
-
-static HRESULT WINAPI HTMLButtonElement_form_private_get_formEnctype(IWineHTMLParentFormPrivate *iface, BSTR *ret)
-{
-    HTMLButtonElement *This = button_from_IWineHTMLParentFormPrivateVtbl(iface);
-    FIXME("(%p)->(%p)\n", This, ret);
-    return E_NOTIMPL;
-}
-
-static HRESULT WINAPI HTMLButtonElement_form_private_put_formMethod(IWineHTMLParentFormPrivate *iface, BSTR v)
-{
-    HTMLButtonElement *This = button_from_IWineHTMLParentFormPrivateVtbl(iface);
-    FIXME("(%p)->(%s)\n", This, debugstr_w(v));
-    return E_NOTIMPL;
-}
-
-static HRESULT WINAPI HTMLButtonElement_form_private_get_formMethod(IWineHTMLParentFormPrivate *iface, BSTR *ret)
-{
-    HTMLButtonElement *This = button_from_IWineHTMLParentFormPrivateVtbl(iface);
-    FIXME("(%p)->(%p)\n", This, ret);
-    return E_NOTIMPL;
-}
-
-static HRESULT WINAPI HTMLButtonElement_form_private_put_formNoValidate(IWineHTMLParentFormPrivate *iface, VARIANT_BOOL v)
-{
-    HTMLButtonElement *This = button_from_IWineHTMLParentFormPrivateVtbl(iface);
-    FIXME("(%p)->(%x)\n", This, v);
-    return E_NOTIMPL;
-}
-
-static HRESULT WINAPI HTMLButtonElement_form_private_get_formNoValidate(IWineHTMLParentFormPrivate *iface, VARIANT_BOOL *ret)
-{
-    HTMLButtonElement *This = button_from_IWineHTMLParentFormPrivateVtbl(iface);
-    FIXME("(%p)->(%p)\n", This, ret);
-    return E_NOTIMPL;
-}
-
-static HRESULT WINAPI HTMLButtonElement_form_private_put_formTarget(IWineHTMLParentFormPrivate *iface, BSTR v)
-{
-    HTMLButtonElement *This = button_from_IWineHTMLParentFormPrivateVtbl(iface);
-    FIXME("(%p)->(%s)\n", This, debugstr_w(v));
-    return E_NOTIMPL;
-}
-
-static HRESULT WINAPI HTMLButtonElement_form_private_get_formTarget(IWineHTMLParentFormPrivate *iface, BSTR *ret)
-{
-    HTMLButtonElement *This = button_from_IWineHTMLParentFormPrivateVtbl(iface);
-    FIXME("(%p)->(%p)\n", This, ret);
-    return E_NOTIMPL;
-}
-
-static const IWineHTMLParentFormPrivateVtbl WineHTMLButtonParentFormPrivateVtbl = {
-    HTMLButtonElement_form_private_QueryInterface,
-    HTMLButtonElement_form_private_AddRef,
-    HTMLButtonElement_form_private_Release,
-    HTMLButtonElement_form_private_GetTypeInfoCount,
-    HTMLButtonElement_form_private_GetTypeInfo,
-    HTMLButtonElement_form_private_GetIDsOfNames,
-    HTMLButtonElement_form_private_Invoke,
-    HTMLButtonElement_form_private_put_formAction,
-    HTMLButtonElement_form_private_get_formAction,
-    HTMLButtonElement_form_private_put_formEnctype,
-    HTMLButtonElement_form_private_get_formEnctype,
-    HTMLButtonElement_form_private_put_formMethod,
-    HTMLButtonElement_form_private_get_formMethod,
-    HTMLButtonElement_form_private_put_formNoValidate,
-    HTMLButtonElement_form_private_get_formNoValidate,
-    HTMLButtonElement_form_private_put_formTarget,
-    HTMLButtonElement_form_private_get_formTarget
-};
-
 static inline HTMLButtonElement *button_from_HTMLDOMNode(HTMLDOMNode *iface)
 {
     return CONTAINING_RECORD(iface, HTMLButtonElement, element.node);
@@ -2510,10 +1669,6 @@ static void *HTMLButtonElement_query_interface(DispatchEx *dispex, REFIID riid)
 
     if(IsEqualGUID(&IID_IHTMLButtonElement, riid))
         return &This->IHTMLButtonElement_iface;
-    if(IsEqualGUID(&IID_IWineHTMLInputPrivate, riid))
-        return &This->IWineHTMLInputPrivate_iface;
-    if(IsEqualGUID(&IID_IWineHTMLParentFormPrivate, riid))
-        return &This->IWineHTMLParentFormPrivate_iface;
 
     return HTMLElement_query_interface(&This->element.node.event_target.dispex, riid);
 }
@@ -2557,28 +1712,17 @@ static const event_target_vtbl_t HTMLButtonElement_event_target_vtbl = {
 };
 
 static const tid_t HTMLButtonElement_iface_tids[] = {
-    HTMLELEMENT_TIDS,
     IHTMLButtonElement_tid,
     0
 };
 
-static void HTMLButtonElement_init_dispex_info(dispex_data_t *info, compat_mode_t mode)
-{
-    HTMLElement_init_dispex_info(info, mode);
-
-    if(mode >= COMPAT_MODE_IE10) {
-        dispex_info_add_interface(info, IWineHTMLInputPrivate_tid, NULL);
-        dispex_info_add_interface(info, IWineHTMLParentFormPrivate_tid, NULL);
-    }
-}
-
 dispex_static_data_t HTMLButtonElement_dispex = {
-    "HTMLButtonElement",
-    &HTMLButtonElement_event_target_vtbl.dispex_vtbl,
-    PROTO_ID_HTMLButtonElement,
-    DispHTMLButtonElement_tid,
-    HTMLButtonElement_iface_tids,
-    HTMLButtonElement_init_dispex_info
+    .id           = PROT_HTMLButtonElement,
+    .prototype_id = PROT_HTMLElement,
+    .vtbl         = &HTMLButtonElement_event_target_vtbl.dispex_vtbl,
+    .disp_tid     = DispHTMLButtonElement_tid,
+    .iface_tids   = HTMLButtonElement_iface_tids,
+    .init_info    = HTMLElement_init_dispex_info,
 };
 
 HRESULT HTMLButtonElement_Create(HTMLDocumentNode *doc, nsIDOMElement *nselem, HTMLElement **elem)
@@ -2591,8 +1735,6 @@ HRESULT HTMLButtonElement_Create(HTMLDocumentNode *doc, nsIDOMElement *nselem, H
         return E_OUTOFMEMORY;
 
     ret->IHTMLButtonElement_iface.lpVtbl = &HTMLButtonElementVtbl;
-    ret->IWineHTMLInputPrivate_iface.lpVtbl = &WineHTMLButtonInputPrivateVtbl;
-    ret->IWineHTMLParentFormPrivate_iface.lpVtbl = &WineHTMLButtonParentFormPrivateVtbl;
     ret->element.node.vtbl = &HTMLButtonElementImplVtbl;
 
     HTMLElement_Init(&ret->element, doc, nselem, &HTMLButtonElement_dispex);

@@ -171,7 +171,7 @@ int do_fsync(void)
     if (do_fsync_cached == -1)
     {
         syscall( __NR_futex_waitv, NULL, 0, 0, NULL, 0 );
-        do_fsync_cached = getenv("WINEFSYNC") && atoi(getenv("WINEFSYNC")) && errno != ENOSYS;
+        do_fsync_cached = getenv("WINEFSYNC") && atoi(getenv("WINEFSYNC")) && errno != ENOSYS && errno != EPERM && get_linux_sync_device() < 0;
     }
 
     return do_fsync_cached;
@@ -299,7 +299,7 @@ static void add_to_list( HANDLE handle, enum fsync_type type, unsigned int shm_i
 
     cache.type = type;
     cache.shm_idx = shm_idx;
-    __atomic_store_n( (uint64_t *)&fsync_list[entry][idx], *(uint64_t *)&cache, __ATOMIC_SEQ_CST );
+    __atomic_store_n( (UINT64 *)&fsync_list[entry][idx], *(UINT64 *)&cache, __ATOMIC_SEQ_CST );
 }
 
 static void grab_object( struct fsync *obj )
@@ -362,7 +362,7 @@ static BOOL get_cached_object( HANDLE handle, struct fsync *obj )
     if (entry >= FSYNC_LIST_ENTRIES || !fsync_list[entry]) return FALSE;
 
 again:
-    *(uint64_t *)&cache = __atomic_load_n( (uint64_t *)&fsync_list[entry][idx], __ATOMIC_SEQ_CST );
+    *(UINT64 *)&cache = __atomic_load_n( (UINT64 *)&fsync_list[entry][idx], __ATOMIC_SEQ_CST );
 
     if (!cache.type || !cache.shm_idx) return FALSE;
 
@@ -370,7 +370,7 @@ again:
     obj->shm = get_shm( cache.shm_idx );
     grab_object( obj );
     if (((int *)obj->shm)[2] < 2 ||
-        *(uint64_t *)&cache != __atomic_load_n( (uint64_t *)&fsync_list[entry][idx], __ATOMIC_SEQ_CST ))
+        *(UINT64 *)&cache != __atomic_load_n( (UINT64 *)&fsync_list[entry][idx], __ATOMIC_SEQ_CST ))
     {
         /* This check does not strictly guarantee that we avoid the potential race but is supposed to greatly
          * reduce the probability of that. */
@@ -469,8 +469,8 @@ NTSTATUS fsync_close( HANDLE handle )
 
         cache.type = 0;
         cache.shm_idx = 0;
-        *(uint64_t *)&cache = __atomic_exchange_n( (uint64_t *)&fsync_list[entry][idx],
-                                                   *(uint64_t *)&cache, __ATOMIC_SEQ_CST );
+        *(UINT64 *)&cache = __atomic_exchange_n( (UINT64 *)&fsync_list[entry][idx],
+                                                   *(UINT64 *)&cache, __ATOMIC_SEQ_CST );
         if (cache.type) return STATUS_SUCCESS;
     }
 
@@ -718,6 +718,13 @@ NTSTATUS fsync_reset_event( HANDLE handle, LONG *prev )
     {
         put_object( &obj );
         return STATUS_OBJECT_TYPE_MISMATCH;
+    }
+
+    if (fsync_help_simulated_pulse && event->signaled
+        && __atomic_load_n( &event->last_pid, __ATOMIC_SEQ_CST ) == current_pid)
+    {
+        TRACE( "event %p, helping simulated pulse.\n", handle );
+        usleep( 0 );
     }
 
     current = __atomic_exchange_n( &event->signaled, 0, __ATOMIC_SEQ_CST );
@@ -1083,6 +1090,11 @@ static NTSTATUS __fsync_wait_objects( DWORD count, const HANDLE *handles,
                             return STATUS_ABANDONED_WAIT_0 + i;
                         }
 
+                        if (fsync_yield_to_waiters && waited && !mutex->last_pid)
+                        {
+                            /* Someone else grabbed the mutex while we are waiting, re-register us as waiter. */
+                            __sync_val_compare_and_swap( &mutex->last_pid, 0, current_pid );
+                        }
                         futex_vector_set( &futexes[i], &mutex->tid, tid );
                         break;
                     }
